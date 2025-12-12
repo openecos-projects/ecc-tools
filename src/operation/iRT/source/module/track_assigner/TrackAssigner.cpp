@@ -496,17 +496,6 @@ void TrackAssigner::buildOrientNetMap(TAPanel& ta_panel)
 
 void TrackAssigner::routeTAPanel(TAPanel& ta_panel)
 {
-  int32_t enable_lsa = RTDM.getConfig().enable_lsa;
-
-  if (!enable_lsa) {
-    routeTAPanelBySelf(ta_panel);
-  } else {
-    routeTAPanelByInterface(ta_panel);
-  }
-}
-
-void TrackAssigner::routeTAPanelBySelf(TAPanel& ta_panel)
-{
   std::vector<TATask*> routing_task_list = initTaskSchedule(ta_panel);
   while (!routing_task_list.empty()) {
     for (TATask* routing_task : routing_task_list) {
@@ -629,7 +618,7 @@ bool TrackAssigner::searchEnded(TAPanel& ta_panel)
 
 void TrackAssigner::expandSearching(TAPanel& ta_panel)
 {
-  PriorityQueue<TANode*, std::vector<TANode*>, CmpTANodeCost>& open_queue = ta_panel.get_open_queue();
+  OpenQueue<TANode>& open_queue = ta_panel.get_open_queue();
   TANode* path_head_node = ta_panel.get_path_head_node();
 
   for (auto& [orientation, neighbor_node] : path_head_node->get_neighbor_node_map()) {
@@ -646,8 +635,7 @@ void TrackAssigner::expandSearching(TAPanel& ta_panel)
     if (neighbor_node->isOpen() && known_cost < neighbor_node->get_known_cost()) {
       neighbor_node->set_known_cost(known_cost);
       neighbor_node->set_parent_node(path_head_node);
-      // 对优先队列中的值修改了,需要重新建堆
-      std::make_heap(open_queue.begin(), open_queue.end(), CmpTANodeCost());
+      open_queue.push(neighbor_node);
     } else if (neighbor_node->isNone()) {
       neighbor_node->set_known_cost(known_cost);
       neighbor_node->set_parent_node(path_head_node);
@@ -728,9 +716,7 @@ void TrackAssigner::resetStartAndEnd(TAPanel& ta_panel)
 
 void TrackAssigner::resetSinglePath(TAPanel& ta_panel)
 {
-  PriorityQueue<TANode*, std::vector<TANode*>, CmpTANodeCost> empty_queue;
-  ta_panel.set_open_queue(empty_queue);
-
+  ta_panel.get_open_queue().clear();
   std::vector<TANode*>& single_path_visited_node_list = ta_panel.get_single_path_visited_node_list();
   for (TANode* visited_node : single_path_visited_node_list) {
     visited_node->set_state(TANodeState::kNone);
@@ -798,7 +784,7 @@ void TrackAssigner::resetSingleTask(TAPanel& ta_panel)
 
 void TrackAssigner::pushToOpenList(TAPanel& ta_panel, TANode* curr_node)
 {
-  PriorityQueue<TANode*, std::vector<TANode*>, CmpTANodeCost>& open_queue = ta_panel.get_open_queue();
+  OpenQueue<TANode>& open_queue = ta_panel.get_open_queue();
   std::vector<TANode*>& single_task_visited_node_list = ta_panel.get_single_task_visited_node_list();
   std::vector<TANode*>& single_path_visited_node_list = ta_panel.get_single_path_visited_node_list();
 
@@ -810,12 +796,8 @@ void TrackAssigner::pushToOpenList(TAPanel& ta_panel, TANode* curr_node)
 
 TANode* TrackAssigner::popFromOpenList(TAPanel& ta_panel)
 {
-  PriorityQueue<TANode*, std::vector<TANode*>, CmpTANodeCost>& open_queue = ta_panel.get_open_queue();
-
-  TANode* node = nullptr;
-  if (!open_queue.empty()) {
-    node = open_queue.top();
-    open_queue.pop();
+  TANode* node = ta_panel.get_open_queue().pop();
+  if (node != nullptr) {
     node->set_state(TANodeState::kClose);
   }
   return node;
@@ -943,9 +925,6 @@ void TrackAssigner::updateViolationList(TAPanel& ta_panel)
 
 std::vector<Violation> TrackAssigner::getViolationList(TAPanel& ta_panel)
 {
-  if (RTDM.getConfig().enable_fast_mode) {
-    return {};
-  }
   std::map<int32_t, std::vector<PlanarRect>> env_net_rect_map;
   std::map<int32_t, std::vector<PlanarRect>> result_net_rect_map;
   {
@@ -1109,12 +1088,6 @@ void TrackAssigner::updateTaskSchedule(TAPanel& ta_panel, std::vector<TATask*>& 
     new_ta_task_list.push_back(routing_task);
   }
   ta_panel.set_ta_task_list(new_ta_task_list);
-}
-
-void TrackAssigner::routeTAPanelByInterface(TAPanel& ta_panel)
-{
-  RTI.routeTAPanel(ta_panel);
-  updateViolationList(ta_panel);
 }
 
 void TrackAssigner::uploadNetResult(TAPanel& ta_panel)
@@ -1355,17 +1328,21 @@ std::map<TANode*, std::set<Orientation>> TrackAssigner::getRoutingNodeOrientatio
     enlarged_x_size -= 1;
     enlarged_y_size -= 1;
     PlanarRect planar_enlarged_rect = RTUTIL.getEnlargedRect(net_shape.get_rect(), enlarged_x_size, enlarged_y_size, enlarged_x_size, enlarged_y_size);
-    for (auto& [grid_coord, orientation_set] : RTUTIL.getTrackGridOrientationMap(planar_enlarged_rect, ta_panel.get_panel_track_axis())) {
-      TANode& node = ta_node_map[grid_coord.get_x()][grid_coord.get_y()];
-      for (const Orientation& orientation : orientation_set) {
-        if (orientation == Orientation::kAbove || orientation == Orientation::kBelow) {
-          continue;
+    for (auto& [grid, orientation_set] : RTUTIL.getTrackGridOrientationMap(planar_enlarged_rect, ta_panel.get_panel_track_axis())) {
+      for (int32_t x : *grid.first) {
+        for (int32_t y : *grid.second) {
+          TANode& node = ta_node_map[x][y];
+          for (const Orientation& orientation : orientation_set) {
+            if (orientation == Orientation::kAbove || orientation == Orientation::kBelow) {
+              continue;
+            }
+            if (!RTUTIL.exist(node.get_neighbor_node_map(), orientation)) {
+              continue;
+            }
+            node_orientation_map[&node].insert(orientation);
+            node_orientation_map[node.get_neighbor_node_map()[orientation]].insert(RTUTIL.getOppositeOrientation(orientation));
+          }
         }
-        if (!RTUTIL.exist(node.get_neighbor_node_map(), orientation)) {
-          continue;
-        }
-        node_orientation_map[&node].insert(orientation);
-        node_orientation_map[node.get_neighbor_node_map()[orientation]].insert(RTUTIL.getOppositeOrientation(orientation));
       }
     }
   }

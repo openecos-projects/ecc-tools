@@ -76,7 +76,7 @@ class RTInterface
 
 #if 1  // iRT
   void initRT(std::map<std::string, std::any> config_map);
-  void runEGR();
+  void runERT(std::map<std::string, std::any> config_map);
   void runRT();
   void destroyRT();
   void cleanDef();
@@ -153,10 +153,6 @@ class RTInterface
   void initFlute();
   void destroyFlute();
   std::vector<Segment<PlanarCoord>> getPlanarTopoList(std::vector<PlanarCoord> planar_coord_list);
-#endif
-
-#if 1  // lsa
-  void routeTAPanel(TAPanel& ta_panel);
 #endif
 
 #if 1  // ecos

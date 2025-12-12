@@ -97,7 +97,31 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
 
   auto idb_die = idb_layout->get_die();
   auto idb_core = idb_layout->get_core();
-  auto layer = idb_layout->get_layers()->find_layer(layer_name);
+  idb::IdbLayer* horizontal_layer = nullptr;
+  idb::IdbLayer* vertical_layer = nullptr;
+  {
+    auto curr_layer = idb_layout->get_layers()->find_layer(layer_name);
+    idb::IdbLayerRouting* curr_routing_layer = dynamic_cast<idb::IdbLayerRouting*>(curr_layer);
+
+    if (curr_routing_layer->get_direction() == idb::IdbLayerDirection::kHorizontal) {
+      horizontal_layer = curr_layer;
+    } else {
+      vertical_layer = curr_layer;
+    }
+
+    auto neighbour_layer = dynamic_cast<idb::IdbLayerRouting*>(idb_layout->get_layers()->find_routing_layer(curr_layer->get_id() + 1));
+    if (neighbour_layer == nullptr) {
+      neighbour_layer = dynamic_cast<idb::IdbLayerRouting*>(idb_layout->get_layers()->find_routing_layer(curr_layer->get_id() - 1));
+    }
+
+    if (neighbour_layer != nullptr) {
+      if (neighbour_layer->get_direction() == idb::IdbLayerDirection::kHorizontal) {
+        horizontal_layer = neighbour_layer;
+      } else {
+        vertical_layer = neighbour_layer;
+      }
+    }
+  }
   auto pin_list = idb_design->get_io_pin_list()->get_pin_list();
 
   /// calculate all the location
@@ -117,8 +141,8 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
         break;
       }
 
-      int x = idb_die->get_llx() + width / 2;
-      int y = idb_core->get_bounding_box()->get_low_y() + i * height_step;
+      int x = idb_die->get_llx() + height / 2;
+      int y = idb_core->get_bounding_box()->get_low_y() + i * width_step;
 
       auto pin = pin_list[pin_index++];
 
@@ -135,15 +159,15 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
       shape->set_type_rect();
 
       // Calculate shape coordinates with left-bottom corner aligned to manufacture_grid
-      int shape_llx = x - width / 2;
-      int shape_lly = y - height / 2;
+      int shape_llx = x - height / 2;
+      int shape_lly = y - width / 2;
       shape_llx = (shape_llx / manufacture_grid) * manufacture_grid;
       shape_lly = (shape_lly / manufacture_grid) * manufacture_grid;
-      int shape_urx = shape_llx + width;
-      int shape_ury = shape_lly + height;
+      int shape_urx = shape_llx + height;
+      int shape_ury = shape_lly + width;
 
       shape->add_rect(shape_llx - x, shape_lly - y, shape_urx - x, shape_ury - y);
-      shape->set_layer(layer);
+      shape->set_layer(horizontal_layer);
     }
   }
 
@@ -154,8 +178,8 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
         break;
       }
 
-      int x = idb_die->get_urx() - width / 2;
-      int y = idb_core->get_bounding_box()->get_low_y() + i * height_step;
+      int x = idb_die->get_urx() - height / 2;
+      int y = idb_core->get_bounding_box()->get_low_y() + i * width_step;
 
       auto pin = pin_list[pin_index++];
 
@@ -173,15 +197,15 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
       shape->set_type_rect();
 
       // Calculate shape coordinates with left-bottom corner aligned to manufacture_grid
-      int shape_llx = x - width / 2;
-      int shape_lly = y - height / 2;
+      int shape_llx = x - height / 2;
+      int shape_lly = y - width / 2;
       shape_llx = (shape_llx / manufacture_grid) * manufacture_grid;
       shape_lly = (shape_lly / manufacture_grid) * manufacture_grid;
-      int shape_urx = shape_llx + width;
-      int shape_ury = shape_lly + height;
+      int shape_urx = shape_llx + height;
+      int shape_ury = shape_lly + width;
 
       shape->add_rect(shape_llx - x, shape_lly - y, shape_urx - x, shape_ury - y);
-      shape->set_layer(layer);
+      shape->set_layer(horizontal_layer);
     }
   }
 
@@ -219,7 +243,7 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
       int shape_ury = shape_lly + height;
 
       shape->add_rect(shape_llx - x, shape_lly - y, shape_urx - x, shape_ury - y);
-      shape->set_layer(layer);
+      shape->set_layer(vertical_layer);
     }
   }
 
@@ -258,7 +282,7 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
       int shape_ury = shape_lly + height;
 
       shape->add_rect(shape_llx - x, shape_lly - y, shape_urx - x, shape_ury - y);
-      shape->set_layer(layer);
+      shape->set_layer(vertical_layer);
     }
   }
 

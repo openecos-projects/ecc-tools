@@ -51,9 +51,6 @@ void SpaceRouter::destroyInst()
 
 void SpaceRouter::route()
 {
-  if (RTDM.getConfig().enable_fast_mode) {
-    return;
-  }
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
   SRModel sr_model = initSRModel();
@@ -212,7 +209,7 @@ void SpaceRouter::routeSRModel(SRModel& sr_model)
     outputJson(sr_model);
     RTLOG.info(Loc::current(), "***** End Iteration ", iter, "/", sr_iter_param_list.size(), "(", RTUTIL.getPercentage(iter, sr_iter_param_list.size()), ")",
                iter_monitor.getStatsInfo(), "*****");
-    if (stopIteration(sr_model)) {
+    if (stopIteration(sr_model, sr_iter_param_list)) {
       break;
     }
   }
@@ -505,7 +502,7 @@ void SpaceRouter::initSRTaskList(SRModel& sr_model, SRBox& sr_box)
 
   EXTPlanarRect& box_rect = sr_box.get_box_rect();
   PlanarRect& box_grid_rect = box_rect.get_grid_rect();
-  std::map<int32_t, std::set<AccessPoint*>> net_access_point_map = RTDM.getNetAccessPointMap(box_rect);
+  std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> net_access_point_map = RTDM.getNetAccessPointMap(box_rect);
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_task_global_result_map = sr_box.get_net_task_global_result_map();
 
   std::map<int32_t, std::vector<SRGroup>> net_group_list_map;
@@ -571,6 +568,8 @@ void SpaceRouter::initSRTaskList(SRModel& sr_model, SRBox& sr_box)
     if (sr_group_list.size() < 2) {
       continue;
     }
+    std::sort(sr_group_list.begin(), sr_group_list.end(),
+              [](SRGroup& a, SRGroup& b) { return CmpLayerCoordByXASC()(a.get_coord_list().front(), b.get_coord_list().front()); });
     SRTask* sr_task = new SRTask();
     sr_task->set_net_idx(net_idx);
     sr_task->set_connect_type(sr_net_list[net_idx].get_connect_type());
@@ -896,7 +895,7 @@ bool SpaceRouter::searchEnded(SRBox& sr_box)
 
 void SpaceRouter::expandSearching(SRBox& sr_box)
 {
-  PriorityQueue<SRNode*, std::vector<SRNode*>, CmpSRNodeCost>& open_queue = sr_box.get_open_queue();
+  OpenQueue<SRNode>& open_queue = sr_box.get_open_queue();
   SRNode* path_head_node = sr_box.get_path_head_node();
 
   for (auto& [orientation, neighbor_node] : path_head_node->get_neighbor_node_map()) {
@@ -910,8 +909,7 @@ void SpaceRouter::expandSearching(SRBox& sr_box)
     if (neighbor_node->isOpen() && known_cost < neighbor_node->get_known_cost()) {
       neighbor_node->set_known_cost(known_cost);
       neighbor_node->set_parent_node(path_head_node);
-      // 对优先队列中的值修改了,需要重新建堆
-      std::make_heap(open_queue.begin(), open_queue.end(), CmpSRNodeCost());
+      open_queue.push(neighbor_node);
     } else if (neighbor_node->isNone()) {
       neighbor_node->set_known_cost(known_cost);
       neighbor_node->set_parent_node(path_head_node);
@@ -992,9 +990,7 @@ void SpaceRouter::resetStartAndEnd(SRBox& sr_box)
 
 void SpaceRouter::resetSinglePath(SRBox& sr_box)
 {
-  PriorityQueue<SRNode*, std::vector<SRNode*>, CmpSRNodeCost> empty_queue;
-  sr_box.set_open_queue(empty_queue);
-
+  sr_box.get_open_queue().clear();
   std::vector<SRNode*>& single_path_visited_node_list = sr_box.get_single_path_visited_node_list();
   for (SRNode* visited_node : single_path_visited_node_list) {
     visited_node->set_state(SRNodeState::kNone);
@@ -1058,7 +1054,7 @@ void SpaceRouter::resetSingleTask(SRBox& sr_box)
 
 void SpaceRouter::pushToOpenList(SRBox& sr_box, SRNode* curr_node)
 {
-  PriorityQueue<SRNode*, std::vector<SRNode*>, CmpSRNodeCost>& open_queue = sr_box.get_open_queue();
+  OpenQueue<SRNode>& open_queue = sr_box.get_open_queue();
   std::vector<SRNode*>& single_task_visited_node_list = sr_box.get_single_task_visited_node_list();
   std::vector<SRNode*>& single_path_visited_node_list = sr_box.get_single_path_visited_node_list();
 
@@ -1070,12 +1066,8 @@ void SpaceRouter::pushToOpenList(SRBox& sr_box, SRNode* curr_node)
 
 SRNode* SpaceRouter::popFromOpenList(SRBox& sr_box)
 {
-  PriorityQueue<SRNode*, std::vector<SRNode*>, CmpSRNodeCost>& open_queue = sr_box.get_open_queue();
-
-  SRNode* node = nullptr;
-  if (!open_queue.empty()) {
-    node = open_queue.top();
-    open_queue.pop();
+  SRNode* node = sr_box.get_open_queue().pop();
+  if (node != nullptr) {
     node->set_state(SRNodeState::kClose);
   }
   return node;
@@ -1362,9 +1354,9 @@ void SpaceRouter::updateBestResult(SRModel& sr_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-bool SpaceRouter::stopIteration(SRModel& sr_model)
+bool SpaceRouter::stopIteration(SRModel& sr_model, std::vector<SRIterParam>& sr_iter_param_list)
 {
-  if (getOverflow(sr_model) == 0) {
+  if (sr_model.get_iter() != static_cast<int32_t>(sr_iter_param_list.size()) && getOverflow(sr_model) == 0) {
     RTLOG.info(Loc::current(), "***** Iteration stopped early *****");
     return true;
   }

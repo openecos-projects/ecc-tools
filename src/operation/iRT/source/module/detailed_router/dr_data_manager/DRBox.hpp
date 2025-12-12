@@ -25,7 +25,7 @@
 #include "DRTask.hpp"
 #include "LayerCoord.hpp"
 #include "LayerRect.hpp"
-#include "PriorityQueue.hpp"
+#include "OpenQueue.hpp"
 #include "ScaleAxis.hpp"
 #include "Violation.hpp"
 
@@ -42,7 +42,7 @@ class DRBox
   DRIterParam* get_dr_iter_param() { return _dr_iter_param; }
   bool get_initial_routing() const { return _initial_routing; }
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& get_type_layer_net_fixed_rect_map() { return _type_layer_net_fixed_rect_map; }
-  std::map<int32_t, std::set<AccessPoint*>>& get_net_access_point_map() { return _net_access_point_map; }
+  std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& get_net_access_point_map() { return _net_access_point_map; }
   std::map<int32_t, std::set<Segment<LayerCoord>*>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_task_detailed_result_map() { return _net_task_detailed_result_map; }
   std::map<int32_t, std::set<EXTLayerRect*>>& get_net_detailed_patch_map() { return _net_detailed_patch_map; }
@@ -66,7 +66,10 @@ class DRBox
   {
     _type_layer_net_fixed_rect_map = type_layer_net_fixed_rect_map;
   }
-  void set_net_access_point_map(const std::map<int32_t, std::set<AccessPoint*>>& net_access_point_map) { _net_access_point_map = net_access_point_map; }
+  void set_net_access_point_map(const std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& net_access_point_map)
+  {
+    _net_access_point_map = net_access_point_map;
+  }
   void set_net_detailed_result_map(const std::map<int32_t, std::set<Segment<LayerCoord>*>>& net_detailed_result_map)
   {
     _net_detailed_result_map = net_detailed_result_map;
@@ -117,11 +120,11 @@ class DRBox
   }
   void set_routing_segment_list(const std::vector<Segment<LayerCoord>>& routing_segment_list) { _routing_segment_list = routing_segment_list; }
   // single path
-  PriorityQueue<DRNode*, std::vector<DRNode*>, CmpDRNodeCost>& get_open_queue() { return _open_queue; }
+  OpenQueue<DRNode>& get_open_queue() { return _open_queue; }
   std::vector<DRNode*>& get_single_path_visited_node_list() { return _single_path_visited_node_list; }
   DRNode* get_path_head_node() { return _path_head_node; }
   int32_t get_end_node_list_idx() const { return _end_node_list_idx; }
-  void set_open_queue(const PriorityQueue<DRNode*, std::vector<DRNode*>, CmpDRNodeCost>& open_queue) { _open_queue = open_queue; }
+  void set_open_queue(const OpenQueue<DRNode>& open_queue) { _open_queue = open_queue; }
   void set_single_path_visited_node_list(const std::vector<DRNode*>& single_path_visited_node_list)
   {
     _single_path_visited_node_list = single_path_visited_node_list;
@@ -150,7 +153,7 @@ class DRBox
   DRIterParam* _dr_iter_param = nullptr;
   bool _initial_routing = true;
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> _type_layer_net_fixed_rect_map;
-  std::map<int32_t, std::set<AccessPoint*>> _net_access_point_map;
+  std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> _net_access_point_map;
   std::map<int32_t, std::set<Segment<LayerCoord>*>> _net_detailed_result_map;
   std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_task_detailed_result_map;
   std::map<int32_t, std::set<EXTLayerRect*>> _net_detailed_patch_map;
@@ -173,7 +176,7 @@ class DRBox
   std::vector<DRNode*> _single_task_visited_node_list;
   std::vector<Segment<LayerCoord>> _routing_segment_list;
   // single path
-  PriorityQueue<DRNode*, std::vector<DRNode*>, CmpDRNodeCost> _open_queue;
+  OpenQueue<DRNode> _open_queue;
   std::vector<DRNode*> _single_path_visited_node_list;
   DRNode* _path_head_node = nullptr;
   int32_t _end_node_list_idx = -1;

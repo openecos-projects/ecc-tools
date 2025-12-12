@@ -16,21 +16,28 @@
 // ***************************************************************************************
 #pragma once
 
-#include <queue>
+#include "ERBoxId.hpp"
+#include "EXTPlanarRect.hpp"
 
 namespace irt {
 
-template <class T, class Container = std::vector<T>, class Compare = std::less<typename Container::value_type>>
-class PriorityQueue : public std::priority_queue<T, Container, Compare>
+class ERBox
 {
  public:
-  PriorityQueue() = default;
-  ~PriorityQueue() = default;
+  ERBox() = default;
+  ~ERBox() = default;
+  // getter
+  EXTPlanarRect& get_box_rect() { return _box_rect; }
+  ERBoxId& get_er_box_id() { return _er_box_id; }
+
+  // setter
+  void set_box_rect(const EXTPlanarRect& box_rect) { _box_rect = box_rect; }
+  void set_er_box_id(const ERBoxId& er_box_id) { _er_box_id = er_box_id; }
   // function
-  Container::iterator begin() { return this->c.begin(); }
-  Container::iterator end() { return this->c.end(); }
 
  private:
+  EXTPlanarRect _box_rect;
+  ERBoxId _er_box_id;
 };
 
 }  // namespace irt

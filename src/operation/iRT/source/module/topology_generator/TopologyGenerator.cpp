@@ -110,17 +110,15 @@ TGNet TopologyGenerator::convertToTGNet(Net& net)
 
 void TopologyGenerator::setTGComParam(TGModel& tg_model)
 {
-  int32_t topo_spilt_length = 10;
   int32_t expand_step_num = 5;
   int32_t expand_step_length = 2;
   double prefer_wire_unit = 1;
   double non_prefer_wire_unit = 2.5 * prefer_wire_unit;
   double overflow_unit = 4 * non_prefer_wire_unit;
   /**
-   * topo_spilt_length, expand_step_num, expand_step_length, overflow_unit
+   * expand_step_num, expand_step_length, overflow_unit
    */
-  TGComParam tg_com_param(topo_spilt_length, expand_step_num, expand_step_length, overflow_unit);
-  RTLOG.info(Loc::current(), "topo_spilt_length: ", tg_com_param.get_topo_spilt_length());
+  TGComParam tg_com_param(expand_step_num, expand_step_length, overflow_unit);
   RTLOG.info(Loc::current(), "expand_step_num: ", tg_com_param.get_expand_step_num());
   RTLOG.info(Loc::current(), "expand_step_length: ", tg_com_param.get_expand_step_length());
   RTLOG.info(Loc::current(), "overflow_unit: ", tg_com_param.get_overflow_unit());
@@ -260,21 +258,31 @@ std::vector<Segment<PlanarCoord>> TopologyGenerator::getRoutingSegmentList(TGMod
   std::vector<TGCandidate> tg_candidate_list;
   for (size_t i = 0; i < planar_topo_list.size(); i++) {
     for (std::vector<Segment<PlanarCoord>> routing_segment_list : getRoutingSegmentListList(tg_model, planar_topo_list[i])) {
-      tg_candidate_list.emplace_back(i, routing_segment_list, 0);
+      tg_candidate_list.emplace_back(i, routing_segment_list, 0, false, 0);
     }
   }
 #pragma omp parallel for
   for (TGCandidate& tg_candidate : tg_candidate_list) {
-    tg_candidate.set_cost(getNodeCost(tg_model, tg_candidate.get_routing_segment_list()));
+    updateTGCandidate(tg_model, tg_candidate);
   }
   std::map<int32_t, TGCandidate*> topo_candidate_map;
   for (TGCandidate& tg_candidate : tg_candidate_list) {
     int32_t topo_idx = tg_candidate.get_topo_idx();
     if (!RTUTIL.exist(topo_candidate_map, topo_idx)) {
       topo_candidate_map[topo_idx] = &tg_candidate;
+      continue;
     }
-    if (tg_candidate.get_cost() < topo_candidate_map[topo_idx]->get_cost()) {
+    TGCandidate* current_best = topo_candidate_map[topo_idx];
+    if (!tg_candidate.get_is_blocked() && current_best->get_is_blocked()) {
       topo_candidate_map[topo_idx] = &tg_candidate;
+    } else if (!tg_candidate.get_is_blocked() && !current_best->get_is_blocked()) {
+      if (tg_candidate.get_total_length() < current_best->get_total_length()) {
+        topo_candidate_map[topo_idx] = &tg_candidate;
+      }
+    } else if (tg_candidate.get_is_blocked() && current_best->get_is_blocked()) {
+      if (tg_candidate.get_total_cost() < current_best->get_total_cost()) {
+        topo_candidate_map[topo_idx] = &tg_candidate;
+      }
     }
   }
   std::vector<Segment<PlanarCoord>> routing_segment_list;
@@ -288,8 +296,6 @@ std::vector<Segment<PlanarCoord>> TopologyGenerator::getRoutingSegmentList(TGMod
 
 std::vector<Segment<PlanarCoord>> TopologyGenerator::getPlanarTopoList(TGModel& tg_model)
 {
-  int32_t topo_spilt_length = tg_model.get_tg_com_param().get_topo_spilt_length();
-
   std::vector<PlanarCoord> planar_coord_list;
   {
     for (TGPin& tg_pin : tg_model.get_curr_tg_task()->get_tg_pin_list()) {
@@ -300,39 +306,7 @@ std::vector<Segment<PlanarCoord>> TopologyGenerator::getPlanarTopoList(TGModel& 
   }
   std::vector<Segment<PlanarCoord>> planar_topo_list;
   for (Segment<PlanarCoord>& planar_topo : RTI.getPlanarTopoList(planar_coord_list)) {
-    PlanarCoord& first_coord = planar_topo.get_first();
-    PlanarCoord& second_coord = planar_topo.get_second();
-    int32_t span_x = std::abs(first_coord.get_x() - second_coord.get_x());
-    int32_t span_y = std::abs(first_coord.get_y() - second_coord.get_y());
-    if (span_x > 1 && span_y > 1 && (span_x > topo_spilt_length || span_y > topo_spilt_length)) {
-      int32_t stick_num_x;
-      if (span_x % topo_spilt_length == 0) {
-        stick_num_x = (span_x / topo_spilt_length - 1);
-      } else {
-        stick_num_x = (span_x < topo_spilt_length) ? (span_x - 1) : (span_x / topo_spilt_length);
-      }
-      int32_t stick_num_y;
-      if (span_y % topo_spilt_length == 0) {
-        stick_num_y = (span_y / topo_spilt_length - 1);
-      } else {
-        stick_num_y = (span_y < topo_spilt_length) ? (span_y - 1) : (span_y / topo_spilt_length);
-      }
-      int32_t stick_num = std::min(stick_num_x, stick_num_y);
-
-      std::vector<PlanarCoord> coord_list;
-      coord_list.push_back(first_coord);
-      double delta_x = static_cast<double>(second_coord.get_x() - first_coord.get_x()) / (stick_num + 1);
-      double delta_y = static_cast<double>(second_coord.get_y() - first_coord.get_y()) / (stick_num + 1);
-      for (int32_t i = 1; i <= stick_num; i++) {
-        coord_list.emplace_back(std::round(first_coord.get_x() + i * delta_x), std::round(first_coord.get_y() + i * delta_y));
-      }
-      coord_list.push_back(second_coord);
-      for (size_t i = 1; i < coord_list.size(); i++) {
-        planar_topo_list.emplace_back(coord_list[i - 1], coord_list[i]);
-      }
-    } else {
-      planar_topo_list.emplace_back(first_coord, second_coord);
-    }
+    planar_topo_list.emplace_back(planar_topo.get_first(), planar_topo.get_second());
   }
   return planar_topo_list;
 }
@@ -684,14 +658,19 @@ std::vector<std::vector<Segment<PlanarCoord>>> TopologyGenerator::getRoutingSegm
   return routing_segment_list_list;
 }
 
-double TopologyGenerator::getNodeCost(TGModel& tg_model, std::vector<Segment<PlanarCoord>>& routing_segment_list)
+void TopologyGenerator::updateTGCandidate(TGModel& tg_model, TGCandidate& tg_candidate)
 {
   double overflow_unit = tg_model.get_tg_com_param().get_overflow_unit();
   GridMap<TGNode>& tg_node_map = tg_model.get_tg_node_map();
   int32_t curr_net_idx = tg_model.get_curr_tg_task()->get_net_idx();
 
-  double node_cost = 0;
-  for (Segment<PlanarCoord>& coord_segment : routing_segment_list) {
+  int32_t total_length = 0;
+  for (Segment<PlanarCoord>& coord_segment : tg_candidate.get_routing_segment_list()) {
+    total_length += RTUTIL.getManhattanDistance(coord_segment.get_first(), coord_segment.get_second());
+  }
+  bool is_blocked = false;
+  double total_cost = 0;
+  for (Segment<PlanarCoord>& coord_segment : tg_candidate.get_routing_segment_list()) {
     PlanarCoord& first_coord = coord_segment.get_first();
     PlanarCoord& second_coord = coord_segment.get_second();
     if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
@@ -706,11 +685,17 @@ double TopologyGenerator::getNodeCost(TGModel& tg_model, std::vector<Segment<Pla
     Direction direction = RTUTIL.getDirection(first_coord, second_coord);
     for (int32_t x = first_x; x <= second_x; x++) {
       for (int32_t y = first_y; y <= second_y; y++) {
-        node_cost += tg_node_map[x][y].getOverflowCost(curr_net_idx, direction, overflow_unit);
+        double overflow_cost = tg_node_map[x][y].getOverflowCost(curr_net_idx, direction, overflow_unit);
+        if (overflow_cost > 1) {
+          is_blocked = true;
+        }
+        total_cost += overflow_cost;
       }
     }
   }
-  return node_cost;
+  tg_candidate.set_total_length(total_length);
+  tg_candidate.set_is_blocked(is_blocked);
+  tg_candidate.set_total_cost(total_cost);
 }
 
 MTree<PlanarCoord> TopologyGenerator::getCoordTree(TGModel& tg_model, std::vector<Segment<PlanarCoord>>& routing_segment_list)

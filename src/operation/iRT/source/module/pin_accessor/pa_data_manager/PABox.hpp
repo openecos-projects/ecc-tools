@@ -18,13 +18,13 @@
 
 #include "LayerCoord.hpp"
 #include "LayerRect.hpp"
+#include "OpenQueue.hpp"
 #include "PABoxId.hpp"
 #include "PAIterParam.hpp"
 #include "PANode.hpp"
 #include "PAPatch.hpp"
 #include "PAShadow.hpp"
 #include "PATask.hpp"
-#include "PriorityQueue.hpp"
 #include "ScaleAxis.hpp"
 #include "Violation.hpp"
 
@@ -41,7 +41,7 @@ class PABox
   PAIterParam* get_pa_iter_param() { return _pa_iter_param; }
   bool get_initial_routing() const { return _initial_routing; }
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& get_type_layer_net_fixed_rect_map() { return _type_layer_net_fixed_rect_map; }
-  std::map<int32_t, std::set<AccessPoint*>>& get_net_access_point_map() { return _net_access_point_map; }
+  std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& get_net_access_point_map() { return _net_access_point_map; }
   std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>>& get_net_pin_access_result_map() { return _net_pin_access_result_map; }
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_net_task_access_result_map() { return _net_task_access_result_map; }
   std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>& get_net_pin_access_patch_map() { return _net_pin_access_patch_map; }
@@ -66,7 +66,10 @@ class PABox
   {
     _type_layer_net_fixed_rect_map = type_layer_net_fixed_rect_map;
   }
-  void set_net_access_point_map(const std::map<int32_t, std::set<AccessPoint*>>& net_access_point_map) { _net_access_point_map = net_access_point_map; }
+  void set_net_access_point_map(const std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& net_access_point_map)
+  {
+    _net_access_point_map = net_access_point_map;
+  }
   void set_net_pin_access_result_map(const std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>>& net_pin_access_result_map)
   {
     _net_pin_access_result_map = net_pin_access_result_map;
@@ -119,11 +122,11 @@ class PABox
   }
   void set_routing_segment_list(const std::vector<Segment<LayerCoord>>& routing_segment_list) { _routing_segment_list = routing_segment_list; }
   // single path
-  PriorityQueue<PANode*, std::vector<PANode*>, CmpPANodeCost>& get_open_queue() { return _open_queue; }
+  OpenQueue<PANode>& get_open_queue() { return _open_queue; }
   std::vector<PANode*>& get_single_path_visited_node_list() { return _single_path_visited_node_list; }
   PANode* get_path_head_node() { return _path_head_node; }
   int32_t get_end_node_list_idx() const { return _end_node_list_idx; }
-  void set_open_queue(const PriorityQueue<PANode*, std::vector<PANode*>, CmpPANodeCost>& open_queue) { _open_queue = open_queue; }
+  void set_open_queue(const OpenQueue<PANode>& open_queue) { _open_queue = open_queue; }
   void set_single_path_visited_node_list(const std::vector<PANode*>& single_path_visited_node_list)
   {
     _single_path_visited_node_list = single_path_visited_node_list;
@@ -152,7 +155,7 @@ class PABox
   PAIterParam* _pa_iter_param = nullptr;
   bool _initial_routing = true;
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> _type_layer_net_fixed_rect_map;
-  std::map<int32_t, std::set<AccessPoint*>> _net_access_point_map;
+  std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> _net_access_point_map;
   std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>> _net_pin_access_result_map;
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_task_access_result_map;
   std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>> _net_pin_access_patch_map;
@@ -177,7 +180,7 @@ class PABox
   std::vector<PANode*> _single_task_visited_node_list;
   std::vector<Segment<LayerCoord>> _routing_segment_list;
   // single path
-  PriorityQueue<PANode*, std::vector<PANode*>, CmpPANodeCost> _open_queue;
+  OpenQueue<PANode> _open_queue;
   std::vector<PANode*> _single_path_visited_node_list;
   PANode* _path_head_node = nullptr;
   int32_t _end_node_list_idx = -1;
