@@ -104,6 +104,8 @@ struct PyPlaceDB
   pybind11::list unit_vertical_capacities;       /// number of vertical tracks of layers per unit distance
   pybind11::list initial_horizontal_demand_map;  ///< initial routing demand from fixed cells, indexed by (layer, grid x, grid y)
   pybind11::list initial_vertical_demand_map;    ///< initial routing demand from fixed cells, indexed by (layer, grid x, grid y)
+  pybind11::list min_wire_widths;                ///< min wire width for each routing layer
+  pybind11::list min_wire_spacings;              ///< min wire spacing for each routing layer
 
   pybind11::list net2driver_pin_map;
 

@@ -16,6 +16,9 @@
 // ***************************************************************************************
 #include "DataManager.hpp"
 
+#include <chrono>
+#include <ctime>
+
 #include "Monitor.hpp"
 #include "RTHeader.hpp"
 #include "RTInterface.hpp"
@@ -662,6 +665,13 @@ void DataManager::buildConfig()
   // **********        RT         ********** //
   _config.temp_directory_path = std::filesystem::absolute(_config.temp_directory_path);
   _config.temp_directory_path += "/";
+  // // 生成带时间戳的日志文件名
+  // auto now = std::chrono::system_clock::now();
+  // auto time_t_now = std::chrono::system_clock::to_time_t(now);
+  // std::tm* tm_now = std::localtime(&time_t_now);
+  // char timestamp[32];
+  // std::strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", tm_now);
+  // _config.log_file_path = _config.temp_directory_path + "rt_" + timestamp + ".log";
   _config.log_file_path = _config.temp_directory_path + "rt.log";
   if (_config.bottom_routing_layer.empty()) {
     _config.bottom_routing_layer = _database.get_routing_layer_list().front().get_layer_name();

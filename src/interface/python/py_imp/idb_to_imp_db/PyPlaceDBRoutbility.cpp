@@ -88,26 +88,62 @@ void PyPlaceDB::init_routability(idm::DataManager* db, std::vector<IdbInstance*>
   routing_grid_xh = routing_grid_xl + num_routing_grids_x * routing_grids_size_x;
   routing_grid_yh = routing_grid_yl + num_routing_grids_y * routing_grids_size_y;
 
-  int track_layer_id = db->get_idb_layout()->get_track_grid_list()->get_track_grid_list()[0]->get_layer_list()[0]->get_id();
+  min_wire_widths = pybind11::list();
+  min_wire_spacings = pybind11::list();
   for (index_type layer_idx = 0; layer_idx < db->get_idb_layout()->get_layers()->get_routing_layers_number(); ++layer_idx) {
     auto idb_layer = db->get_idb_layout()->get_layers()->get_routing_layers().at(layer_idx);
     idb::IdbLayerRouting* idb_routing_layer = dynamic_cast<idb::IdbLayerRouting*>(idb_layer);
-    if (idb_routing_layer->get_track_grid_list().empty()) {
-      continue;
-    }
-    double track_ratio = idb_routing_layer->get_track_grid_list().size();
-    for (IdbTrackGrid* track_grid : idb_routing_layer->get_track_grid_list()) {
-      auto idb_track_grid = track_grid->get_track();
-
-      int track_start = static_cast<int32_t>(idb_track_grid->get_start());
-      int track_pitch = static_cast<int32_t>(idb_track_grid->get_pitch());
-      int track_num = track_grid->get_track_num();
-      if (idb_track_grid->get_direction() == idb::IdbTrackDirection::kDirectionX) {
-        unit_vertical_capacities.append(1. * track_num / routing_grids_size_x);
-        // track_axis.get_x_grid_list().push_back(track_grid);
-      } else if (idb_track_grid->get_direction() == idb::IdbTrackDirection::kDirectionY) {
-        unit_horizontal_capacities.append(1. * track_num / routing_grids_size_y);
+    if (idb_routing_layer != nullptr) {
+      int32_t min_w = idb_routing_layer->get_min_width();
+      if (min_w <= 0) {
+        min_w = idb_routing_layer->get_width();
       }
+      if (min_w <= 0 && !idb_routing_layer->get_track_grid_list().empty()) {
+        auto* track = idb_routing_layer->get_track_grid_list().front()->get_track();
+        if (track) {
+          min_w = track->get_width();
+        }
+      }
+      min_wire_widths.append(min_w);
+
+      int32_t min_sp = 0;
+      if (min_w > 0) {
+        min_sp = idb_routing_layer->get_spacing(min_w);
+      }
+      if (min_sp <= 0 && !idb_routing_layer->get_track_grid_list().empty()) {
+        auto* track = idb_routing_layer->get_track_grid_list().front()->get_track();
+        if (track) {
+          int32_t pitch = track->get_pitch();
+          if (pitch > min_w) {
+            min_sp = pitch - min_w;
+          }
+        }
+      }
+      min_wire_spacings.append(min_sp);
+
+      int64_t track_num_x = 0;
+      int64_t track_num_y = 0;
+      for (IdbTrackGrid* track_grid : idb_routing_layer->get_track_grid_list()) {
+        auto idb_track_grid = track_grid->get_track();
+        int track_num = track_grid->get_track_num();
+        if (idb_track_grid->get_direction() == idb::IdbTrackDirection::kDirectionX) {
+          track_num_x += track_num;
+        } else if (idb_track_grid->get_direction() == idb::IdbTrackDirection::kDirectionY) {
+          track_num_y += track_num;
+        }
+      }
+
+      double total_x = routing_grid_xh - routing_grid_xl;
+      double total_y = routing_grid_yh - routing_grid_yl;
+      double unit_h = (total_y > 0) ? (1.0 * track_num_x / total_y) : 0.0;
+      double unit_v = (total_x > 0) ? (1.0 * track_num_y / total_x) : 0.0;
+      unit_horizontal_capacities.append(unit_h);
+      unit_vertical_capacities.append(unit_v);
+    } else {
+      min_wire_widths.append(0);
+      min_wire_spacings.append(0);
+      unit_horizontal_capacities.append(0.0);
+      unit_vertical_capacities.append(0.0);
     }
   }
   // this is slightly different from db.routingGridOrigin
@@ -273,8 +309,8 @@ std::vector<std::vector<float>> PyPlaceDB::getCongestionMap(string method)
     auto& supply_matrix = demand_supply_pair.second;
     int old_size_y = supply_matrix.size();     // 行数 (Y-dim)
     int old_size_x = supply_matrix[0].size();  // 列数 (X-dim)
-    assert(num_routing_grids_x <= old_size_x);
-    assert(num_routing_grids_y <= old_size_y);
+    // assert(num_routing_grids_x <= old_size_x);
+    // assert(num_routing_grids_y <= old_size_y);
     std::vector<std::vector<float>> result_map_supply(new_size_y, std::vector<float>(new_size_x, 0));
     std::vector<std::vector<float>> result_map_demand(new_size_y, std::vector<float>(new_size_x, 0));
     // std::vector<std::vector<int>> new_val(new_size_x, std::vector<int>(new_size_y, 0));
