@@ -225,7 +225,7 @@ struct PyPlaceDB
   void init_routability(idm::DataManager* db, std::vector<IdbInstance*> inst_resort_list);
   void init_timing(idm::DataManager* db, std::unordered_map<std::string, int>& mPin2ID, std::unordered_map<std::string, int>& mClkPin2ID,
                    std::map<std::string, index_type>& mNodeName2ID, std::vector<IdbInstance*>& inst_resort_list, int ext_blockage_num);
-  std::vector<std::vector<float>> getCongestionMap(string method = "max");
+  std::vector<std::vector<float>> getCongestionMap(string method = "max", string stage = "egr2D", string resolve_congestion = "low");
 
  private:
   // 统一的LUT表格初始化函数

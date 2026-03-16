@@ -35,7 +35,8 @@ void register_imp(pybind11::module& m)
   pybind11::class_<PyPlaceDB>(m, "PyPlaceDB")
       .def(pybind11::init<>())
       /*----------functions ---------*/
-      .def("getCongestionMap", &PyPlaceDB::getCongestionMap)
+      .def("getCongestionMap", &PyPlaceDB::getCongestionMap, py::arg("method") = "max", py::arg("stage") = "egr2D",
+           py::arg("resolve_congestion") = "low")
       /*----------end  functions ---------*/
       .def_readwrite("num_nodes", &PyPlaceDB::num_nodes)
       .def_readwrite("num_terminals", &PyPlaceDB::num_terminals)

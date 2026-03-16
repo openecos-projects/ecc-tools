@@ -44,7 +44,8 @@ class CongestionAPI
   UtilizationSummary rudyUtilization(std::string stage, std::string rudy_dir_path, bool use_lut = false);
 
   std::map<std::string, std::vector<std::vector<int>>> getEGRMap(bool is_run_egr = true);
-  std::tuple<std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>>, std::vector<GCellInfo>> getAllEGRMap(bool is_run_egr);
+  std::tuple<std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>>, std::vector<GCellInfo>> getAllEGRMap(
+      bool is_run_egr, std::string stage = "egr2D", std::string resolve_congestion = "low");
   std::map<int, double> patchRUDYCongestion(std::map<int, std::pair<std::pair<int, int>, std::pair<int, int>>> patch_coords);
   std::map<int, double> patchEGRCongestion(std::map<int, std::pair<std::pair<int, int>, std::pair<int, int>>> patch_coords);
   std::map<int, std::map<std::string, double>> patchLayerEGRCongestion(std::map<int, std::pair<std::pair<int, int>, std::pair<int, int>>> patch_coords);

@@ -291,9 +291,9 @@ void PyPlaceDB::init_routability(idm::DataManager* db, std::vector<IdbInstance*>
   }
 }
 
-std::vector<std::vector<float>> PyPlaceDB::getCongestionMap(string method)
+std::vector<std::vector<float>> PyPlaceDB::getCongestionMap(string method, string stage, string resolve_congestion)
 {
-  auto result_tuple = CONGESTION_API_INST->getAllEGRMap(true);
+  auto result_tuple = CONGESTION_API_INST->getAllEGRMap(true, stage, resolve_congestion);
   int new_size_x = num_routing_grids_x;
   int new_size_y = num_routing_grids_y;
   std::vector<std::vector<float>> result_map(new_size_y, std::vector<float>(new_size_x, 0));

@@ -308,9 +308,10 @@ std::map<std::string, std::vector<std::vector<int>>> CongestionAPI::getEGRMap(bo
   return EVAL_CONGESTION_INST->getDemandSupplyDiffMap(is_run_egr);
 }
 
-std::tuple<std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>>, std::vector<GCellInfo>> CongestionAPI::getAllEGRMap(bool is_run_egr)
+std::tuple<std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>>, std::vector<GCellInfo>> CongestionAPI::getAllEGRMap(
+    bool is_run_egr, std::string stage, std::string resolve_congestion)
 {
-  return EVAL_CONGESTION_INST->getDemandSupplyMap(is_run_egr);
+  return EVAL_CONGESTION_INST->getDemandSupplyMap(is_run_egr, stage, resolve_congestion);
 }
 
 std::map<int, double> CongestionAPI::patchRUDYCongestion(std::map<int, std::pair<std::pair<int, int>, std::pair<int, int>>> patch_coords)

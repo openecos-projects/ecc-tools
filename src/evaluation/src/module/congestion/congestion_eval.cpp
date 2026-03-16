@@ -855,8 +855,10 @@ float CongestionEval::evalAvgUtilization(string stage, string rudy_dir_path, str
   return avg_util;
 }
 
-void CongestionEval::initEGR()
+void CongestionEval::initEGR(std::string stage, std::string resolve_congestion)
 {
+  EVAL_INIT_EGR_INST->setStage(stage);
+  EVAL_INIT_EGR_INST->setResolveCongestion(resolve_congestion);
   EVAL_INIT_EGR_INST->runEGR();
 }
 
@@ -1688,14 +1690,15 @@ std::map<std::string, std::vector<std::vector<int>>> CongestionEval::getDemandSu
   return diff_map;
 }
 
-std::tuple<std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>>, std::vector<GCellInfo>> CongestionEval::getDemandSupplyMap(bool is_run_egr)
+std::tuple<std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>>, std::vector<GCellInfo>> CongestionEval::getDemandSupplyMap(
+    bool is_run_egr, std::string stage, std::string resolve_congestion)
 {
   // 如果未指定目录，使用默认路径
   std::string congestion_dir = dmInst->get_config().get_output_path() + "/rt/rt_temp_directory";
 
   if (is_run_egr == true) {
     setEGRDirPath(congestion_dir);
-    initEGR();
+    initEGR(stage, resolve_congestion);
     destroyEGR();
   }
 

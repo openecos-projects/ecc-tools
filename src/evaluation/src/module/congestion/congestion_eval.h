@@ -64,7 +64,7 @@ class CongestionEval
   float evalVertiAvgUtilization(string stage, string rudy_dir_path, bool use_lut = false);
   float evalUnionAvgUtilization(string stage, string rudy_dir_path, bool use_lut = false);
 
-  void initEGR();
+  void initEGR(std::string stage = "egr2D", std::string resolve_congestion = "low");
   void destroyEGR();
   void initIDB();
   void destroyIDB();
@@ -103,7 +103,8 @@ class CongestionEval
 
   std::map<std::string, std::vector<std::vector<int>>> getEGRMap(bool is_run_egr = true);
   std::map<std::string, std::vector<std::vector<int>>> getDemandSupplyDiffMap(bool is_run_egr = true);
-  std::tuple<std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>>, std::vector<GCellInfo>> getDemandSupplyMap(bool is_run_egr);
+  std::tuple<std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>>, std::vector<GCellInfo>> getDemandSupplyMap(
+      bool is_run_egr, std::string stage = "egr2D", std::string resolve_congestion = "low");
   std::map<int, double> patchRUDYCongestion(CongestionNets nets,
                                             std::map<int, std::pair<std::pair<int, int>, std::pair<int, int>>> patch_coords);
   std::map<int, double> patchEGRCongestion(std::map<int, std::pair<std::pair<int, int>, std::pair<int, int>>> patch_coords);
