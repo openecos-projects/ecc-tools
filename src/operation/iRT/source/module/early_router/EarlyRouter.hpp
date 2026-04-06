@@ -55,7 +55,7 @@ class EarlyRouter
   ERNet convertToERNet(Net& net);
   void setERComParam(ERModel& er_model, std::map<std::string, std::any> config_map);
   void initAccessPointList(ERModel& er_model);
-  std::vector<LayerCoord> getAccessCoordList(ERModel& er_model, std::vector<EXTLayerRect>& pin_shape_list);
+  std::vector<LayerCoord> getAccessCoordList(ERModel& er_model, std::vector<EXTLayerRect>& pin_shape_list, bool apply_die_shrink);
   void uniformSampleCoordList(ERModel& er_model, std::vector<LayerCoord>& layer_coord_list);
   void buildConflictList(ERModel& er_model);
   std::vector<std::pair<ERPin*, std::set<ERPin*>>> getPinConlictMap(ERModel& er_model);

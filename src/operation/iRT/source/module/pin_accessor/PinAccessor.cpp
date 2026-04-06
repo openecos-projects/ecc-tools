@@ -136,63 +136,93 @@ void PinAccessor::initAccessPointList(PAModel& pa_model)
       net_pin_pair_list.emplace_back(pa_net.get_net_idx(), &pa_pin);
     }
   }
+  auto build_access_point_list = [&](bool apply_die_shrink, int32_t& empty_pin_num, int32_t& first_failed_net_idx,
+                                     std::string& first_failed_pin_name) {
+    empty_pin_num = 0;
+    first_failed_net_idx = -1;
+    first_failed_pin_name.clear();
 #pragma omp parallel for
-  for (std::pair<int32_t, PAPin*>& net_pin_pair : net_pin_pair_list) {
-    PAPin* pa_pin = net_pin_pair.second;
-    std::vector<AccessPoint>& access_point_list = net_pin_pair.second->get_access_point_list();
-    std::vector<LayerRect> legal_shape_list = getLegalShapeList(pa_model, net_pin_pair.first, pa_pin);
-    for (AccessPoint& access_point : getAccessPointList(pa_model, pa_pin->get_pin_idx(), legal_shape_list)) {
-      access_point_list.push_back(access_point);
-    }
-    std::sort(access_point_list.begin(), access_point_list.end(),
-              [](AccessPoint& a, AccessPoint& b) { return CmpLayerCoordByXASC()(a.getRealLayerCoord(), b.getRealLayerCoord()); });
-    if (access_point_list.empty()) {
-      RTLOG.error(Loc::current(), "No access point was generated!");
-    }
-    for (AccessPoint& access_point : pa_pin->get_access_point_list()) {
-      pa_pin->get_pin_shape_coord_list().push_back(access_point.getRealLayerCoord());
-    }
-    std::set<LayerCoord, CmpLayerCoordByXASC> coord_set;
-    for (AccessPoint& access_point : pa_pin->get_access_point_list()) {
-      int32_t curr_layer_idx = access_point.get_layer_idx();
-      // 构建目标层
-      std::vector<int32_t> point_layer_idx_list;
-      if (pa_pin->get_is_core()) {
-        if (curr_layer_idx < bottom_routing_layer_idx) {
-          point_layer_idx_list.push_back(bottom_routing_layer_idx + 1);
-        } else if (top_routing_layer_idx < curr_layer_idx) {
-          point_layer_idx_list.push_back(top_routing_layer_idx - 1);
-        } else if (curr_layer_idx < top_routing_layer_idx) {
-          point_layer_idx_list.push_back(curr_layer_idx + 1);
-        } else {
-          point_layer_idx_list.push_back(curr_layer_idx - 1);
-        }
-      } else {
-        if (curr_layer_idx < bottom_routing_layer_idx) {
-          point_layer_idx_list.push_back(bottom_routing_layer_idx);
-        } else if (top_routing_layer_idx < curr_layer_idx) {
-          point_layer_idx_list.push_back(top_routing_layer_idx);
-        } else if (curr_layer_idx < top_routing_layer_idx) {
-          point_layer_idx_list.push_back(curr_layer_idx);
-        } else {
-          point_layer_idx_list.push_back(curr_layer_idx);
-        }
+    for (std::pair<int32_t, PAPin*>& net_pin_pair : net_pin_pair_list) {
+      PAPin* pa_pin = net_pin_pair.second;
+      std::vector<AccessPoint>& access_point_list = pa_pin->get_access_point_list();
+      access_point_list.clear();
+      pa_pin->get_grid_coord_set().clear();
+      pa_pin->get_pin_shape_coord_list().clear();
+      pa_pin->get_target_coord_list().clear();
+
+      std::vector<LayerRect> legal_shape_list = getLegalShapeList(pa_model, net_pin_pair.first, pa_pin);
+      for (AccessPoint& access_point : getAccessPointList(pa_model, pa_pin->get_pin_idx(), legal_shape_list, apply_die_shrink)) {
+        access_point_list.push_back(access_point);
       }
-      // 构建搜索形状
-      PlanarRect real_rect = RTUTIL.getEnlargedRect(access_point.get_real_coord(), detection_distance);
-      // 构建点
-      std::vector<ScaleGrid>& x_track_grid_list = routing_layer_list[curr_layer_idx].getXTrackGridList();
-      std::vector<ScaleGrid>& y_track_grid_list = routing_layer_list[curr_layer_idx].getYTrackGridList();
-      for (int32_t x : RTUTIL.getScaleList(real_rect.get_ll_x(), real_rect.get_ur_x(), x_track_grid_list)) {
-        for (int32_t y : RTUTIL.getScaleList(real_rect.get_ll_y(), real_rect.get_ur_y(), y_track_grid_list)) {
-          for (int32_t point_layer_idx : point_layer_idx_list) {
-            coord_set.insert(LayerCoord(x, y, point_layer_idx));
+      std::sort(access_point_list.begin(), access_point_list.end(),
+                [](AccessPoint& a, AccessPoint& b) { return CmpLayerCoordByXASC()(a.getRealLayerCoord(), b.getRealLayerCoord()); });
+      if (access_point_list.empty()) {
+#pragma omp critical
+        {
+          empty_pin_num++;
+          if (first_failed_pin_name.empty()) {
+            first_failed_net_idx = net_pin_pair.first;
+            first_failed_pin_name = pa_pin->get_pin_name();
+          }
+        }
+        continue;
+      }
+      for (AccessPoint& access_point : access_point_list) {
+        pa_pin->get_pin_shape_coord_list().push_back(access_point.getRealLayerCoord());
+      }
+      std::set<LayerCoord, CmpLayerCoordByXASC> coord_set;
+      for (AccessPoint& access_point : access_point_list) {
+        int32_t curr_layer_idx = access_point.get_layer_idx();
+        std::vector<int32_t> point_layer_idx_list;
+        if (pa_pin->get_is_core()) {
+          if (curr_layer_idx < bottom_routing_layer_idx) {
+            point_layer_idx_list.push_back(bottom_routing_layer_idx + 1);
+          } else if (top_routing_layer_idx < curr_layer_idx) {
+            point_layer_idx_list.push_back(top_routing_layer_idx - 1);
+          } else if (curr_layer_idx < top_routing_layer_idx) {
+            point_layer_idx_list.push_back(curr_layer_idx + 1);
+          } else {
+            point_layer_idx_list.push_back(curr_layer_idx - 1);
+          }
+        } else {
+          if (curr_layer_idx < bottom_routing_layer_idx) {
+            point_layer_idx_list.push_back(bottom_routing_layer_idx);
+          } else if (top_routing_layer_idx < curr_layer_idx) {
+            point_layer_idx_list.push_back(top_routing_layer_idx);
+          } else {
+            point_layer_idx_list.push_back(curr_layer_idx);
+          }
+        }
+        PlanarRect real_rect = RTUTIL.getEnlargedRect(access_point.get_real_coord(), detection_distance);
+        std::vector<ScaleGrid>& x_track_grid_list = routing_layer_list[curr_layer_idx].getXTrackGridList();
+        std::vector<ScaleGrid>& y_track_grid_list = routing_layer_list[curr_layer_idx].getYTrackGridList();
+        for (int32_t x : RTUTIL.getScaleList(real_rect.get_ll_x(), real_rect.get_ur_x(), x_track_grid_list)) {
+          for (int32_t y : RTUTIL.getScaleList(real_rect.get_ll_y(), real_rect.get_ur_y(), y_track_grid_list)) {
+            for (int32_t point_layer_idx : point_layer_idx_list) {
+              coord_set.insert(LayerCoord(x, y, point_layer_idx));
+            }
           }
         }
       }
+      for (const LayerCoord& coord : coord_set) {
+        pa_pin->get_target_coord_list().push_back(coord);
+      }
     }
-    for (const LayerCoord& coord : coord_set) {
-      pa_pin->get_target_coord_list().push_back(coord);
+  };
+
+  int32_t empty_pin_num = 0;
+  int32_t first_failed_net_idx = -1;
+  std::string first_failed_pin_name;
+  build_access_point_list(true, empty_pin_num, first_failed_net_idx, first_failed_pin_name);
+  if (empty_pin_num > 0) {
+    RTLOG.warn(Loc::current(), "Detected ", empty_pin_num,
+               " pin(s) with empty access point lists when using die shrink. Retrying the entire case without die shrink. First failure net_idx: ",
+               first_failed_net_idx, ", pin: ", first_failed_pin_name, ".");
+    build_access_point_list(false, empty_pin_num, first_failed_net_idx, first_failed_pin_name);
+    if (empty_pin_num > 0) {
+      RTLOG.error(Loc::current(), "Access point initialization still has ", empty_pin_num,
+                  " pin(s) with empty access point lists without die shrink. First failure net_idx: ", first_failed_net_idx,
+                  ", pin: ", first_failed_pin_name, ".");
     }
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -364,7 +394,8 @@ std::vector<PlanarRect> PinAccessor::getPlanarLegalRectList(PAModel& pa_model, i
   return legal_rect_list;
 }
 
-std::vector<AccessPoint> PinAccessor::getAccessPointList(PAModel& pa_model, int32_t pin_idx, std::vector<LayerRect>& legal_shape_list)
+std::vector<AccessPoint> PinAccessor::getAccessPointList(PAModel& pa_model, int32_t pin_idx, std::vector<LayerRect>& legal_shape_list,
+                                                         bool apply_die_shrink)
 {
   Die& die = RTDM.getDatabase().get_die();
   int32_t manufacture_grid = RTDM.getDatabase().get_manufacture_grid();
@@ -441,7 +472,7 @@ std::vector<AccessPoint> PinAccessor::getAccessPointList(PAModel& pa_model, int3
       }
     }
   }
-  {
+  if (apply_die_shrink) {
     PlanarRect die_valid_rect = die.get_real_rect();
     int32_t shrinked_size = RTDM.getOnlyPitch();
     if (RTUTIL.hasShrinkedRect(die_valid_rect, shrinked_size)) {
@@ -477,6 +508,9 @@ std::vector<AccessPoint> PinAccessor::getAccessPointList(PAModel& pa_model, int3
 
 void PinAccessor::uniformSampleCoordList(PAModel& pa_model, std::vector<LayerCoord>& layer_coord_list)
 {
+  if (layer_coord_list.empty()) {
+    return;
+  }
   int32_t max_candidate_point_num = pa_model.get_pa_com_param().get_max_candidate_point_num();
 
   PlanarRect bounding_box = RTUTIL.getBoundingBox(layer_coord_list);

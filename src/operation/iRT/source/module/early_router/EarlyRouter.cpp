@@ -208,36 +208,74 @@ void EarlyRouter::initAccessPointList(ERModel& er_model)
 
   std::vector<ERNet>& er_net_list = er_model.get_er_net_list();
 
-  for (ERNet& er_net : er_net_list) {
-    for (ERPin& er_pin : er_net.get_er_pin_list()) {
-      std::vector<std::pair<int32_t, std::vector<EXTLayerRect>>> routing_pin_shape_list;
-      {
-        std::map<int32_t, std::vector<EXTLayerRect>> routing_pin_shape_map;
-        for (EXTLayerRect& routing_shape : er_pin.get_routing_shape_list()) {
-          routing_pin_shape_map[routing_shape.get_layer_idx()].emplace_back(routing_shape);
+  auto build_access_point_list = [&](bool apply_die_shrink, int32_t& empty_pin_num, int32_t& first_failed_net_idx,
+                                     std::string& first_failed_pin_name) {
+    empty_pin_num = 0;
+    first_failed_net_idx = -1;
+    first_failed_pin_name.clear();
+    for (ERNet& er_net : er_net_list) {
+      for (ERPin& er_pin : er_net.get_er_pin_list()) {
+        er_pin.get_access_point_list().clear();
+
+        std::vector<std::pair<int32_t, std::vector<EXTLayerRect>>> routing_pin_shape_list;
+        {
+          std::map<int32_t, std::vector<EXTLayerRect>> routing_pin_shape_map;
+          for (EXTLayerRect& routing_shape : er_pin.get_routing_shape_list()) {
+            routing_pin_shape_map[routing_shape.get_layer_idx()].emplace_back(routing_shape);
+          }
+          for (auto& [routing_layer_idx, pin_shape_list] : routing_pin_shape_map) {
+            routing_pin_shape_list.emplace_back(routing_layer_idx, pin_shape_list);
+          }
+          if (er_pin.get_is_core()) {
+            std::sort(
+                routing_pin_shape_list.begin(), routing_pin_shape_list.end(),
+                [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a, const std::pair<int32_t, std::vector<EXTLayerRect>>& b) { return a.first > b.first; });
+          } else {
+            std::sort(routing_pin_shape_list.begin(), routing_pin_shape_list.end(),
+                      [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a, const std::pair<int32_t, std::vector<EXTLayerRect>>& b) {
+                        return (a.first % 2 != 0 && b.first % 2 == 0) || (a.first % 2 == b.first % 2 && a.first > b.first);
+                      });
+          }
         }
-        for (auto& [routing_layer_idx, pin_shape_list] : routing_pin_shape_map) {
-          routing_pin_shape_list.emplace_back(routing_layer_idx, pin_shape_list);
+        if (routing_pin_shape_list.empty()) {
+          empty_pin_num++;
+          if (first_failed_pin_name.empty()) {
+            first_failed_net_idx = er_net.get_net_idx();
+            first_failed_pin_name = er_pin.get_pin_name();
+          }
+          continue;
         }
-        if (er_pin.get_is_core()) {
-          std::sort(
-              routing_pin_shape_list.begin(), routing_pin_shape_list.end(),
-              [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a, const std::pair<int32_t, std::vector<EXTLayerRect>>& b) { return a.first > b.first; });
-        } else {
-          std::sort(routing_pin_shape_list.begin(), routing_pin_shape_list.end(),
-                    [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a, const std::pair<int32_t, std::vector<EXTLayerRect>>& b) {
-                      return (a.first % 2 != 0 && b.first % 2 == 0) || (a.first % 2 == b.first % 2 && a.first > b.first);
-                    });
+        for (LayerCoord access_coord : getAccessCoordList(er_model, routing_pin_shape_list.front().second, apply_die_shrink)) {
+          er_pin.get_access_point_list().emplace_back(er_pin.get_pin_idx(), access_coord);
         }
-      }
-      if (routing_pin_shape_list.empty()) {
-        RTLOG.error(Loc::current(), "The routing_pin_shape_list is empty!");
-      }
-      for (LayerCoord access_coord : getAccessCoordList(er_model, routing_pin_shape_list.front().second)) {
-        er_pin.get_access_point_list().emplace_back(er_pin.get_pin_idx(), access_coord);
+        if (er_pin.get_access_point_list().empty()) {
+          empty_pin_num++;
+          if (first_failed_pin_name.empty()) {
+            first_failed_net_idx = er_net.get_net_idx();
+            first_failed_pin_name = er_pin.get_pin_name();
+          }
+        }
       }
     }
+  };
 
+  int32_t empty_pin_num = 0;
+  int32_t first_failed_net_idx = -1;
+  std::string first_failed_pin_name;
+  build_access_point_list(true, empty_pin_num, first_failed_net_idx, first_failed_pin_name);
+  if (empty_pin_num > 0) {
+    RTLOG.warn(Loc::current(), "Detected ", empty_pin_num,
+               " pin(s) with empty early-router access point lists when using die shrink. Retrying the entire case without die shrink. First failure net_idx: ",
+               first_failed_net_idx, ", pin: ", first_failed_pin_name, ".");
+    build_access_point_list(false, empty_pin_num, first_failed_net_idx, first_failed_pin_name);
+    if (empty_pin_num > 0) {
+      RTLOG.error(Loc::current(), "Early-router access point initialization still has ", empty_pin_num,
+                  " pin(s) with empty access point lists without die shrink. First failure net_idx: ", first_failed_net_idx,
+                  ", pin: ", first_failed_pin_name, ".");
+    }
+  }
+
+  for (ERNet& er_net : er_net_list) {
     std::vector<PlanarCoord> coord_list;
     for (ERPin& er_pin : er_net.get_er_pin_list()) {
       for (AccessPoint& access_point : er_pin.get_access_point_list()) {
@@ -257,7 +295,7 @@ void EarlyRouter::initAccessPointList(ERModel& er_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-std::vector<LayerCoord> EarlyRouter::getAccessCoordList(ERModel& er_model, std::vector<EXTLayerRect>& pin_shape_list)
+std::vector<LayerCoord> EarlyRouter::getAccessCoordList(ERModel& er_model, std::vector<EXTLayerRect>& pin_shape_list, bool apply_die_shrink)
 {
   Die& die = RTDM.getDatabase().get_die();
   int32_t manufacture_grid = RTDM.getDatabase().get_manufacture_grid();
@@ -368,7 +406,7 @@ std::vector<LayerCoord> EarlyRouter::getAccessCoordList(ERModel& er_model, std::
       }
     }
   }
-  {
+  if (apply_die_shrink) {
     PlanarRect die_valid_rect = die.get_real_rect();
     int32_t shrinked_size = RTDM.getOnlyPitch();
     if (RTUTIL.hasShrinkedRect(die_valid_rect, shrinked_size)) {
@@ -395,14 +433,14 @@ std::vector<LayerCoord> EarlyRouter::getAccessCoordList(ERModel& er_model, std::
   std::sort(layer_coord_list.begin(), layer_coord_list.end(), CmpLayerCoordByXASC());
   layer_coord_list.erase(std::unique(layer_coord_list.begin(), layer_coord_list.end()), layer_coord_list.end());
   uniformSampleCoordList(er_model, layer_coord_list);
-  if (layer_coord_list.empty()) {
-    RTLOG.error(Loc::current(), "The layer_coord_list is empty!");
-  }
   return layer_coord_list;
 }
 
 void EarlyRouter::uniformSampleCoordList(ERModel& er_model, std::vector<LayerCoord>& layer_coord_list)
 {
+  if (layer_coord_list.empty()) {
+    return;
+  }
   int32_t max_candidate_point_num = er_model.get_er_com_param().get_max_candidate_point_num();
 
   PlanarRect bounding_box = RTUTIL.getBoundingBox(layer_coord_list);
