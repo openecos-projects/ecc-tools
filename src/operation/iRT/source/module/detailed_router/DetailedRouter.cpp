@@ -27,7 +27,88 @@
 #include "Monitor.hpp"
 #include "RTInterface.hpp"
 
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <sstream>
+#include <thread>
+
 namespace irt {
+
+#if 0  // Temporary DR trace helpers kept for quick re-enable.
+namespace {
+
+bool drTraceEnabled()
+{
+  static bool enabled = [] {
+    const char* raw = std::getenv("IRT_DR_STAGE_TRACE");
+    return raw != nullptr && raw[0] != '\0' && !(raw[0] == '0' && raw[1] == '\0');
+  }();
+  return enabled;
+}
+
+int64_t getDRTraceNowSec()
+{
+  return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+const char* getDRTracePhaseName(int32_t phase)
+{
+  switch (phase) {
+    case 1:
+      return "prepare";
+    case 2:
+      return "route";
+    case 3:
+      return "commit";
+    case 4:
+      return "cleanup";
+    default:
+      return "idle";
+  }
+}
+
+std::string buildDRActiveBoxSummary(const std::vector<std::atomic<int32_t>>& box_x_list, const std::vector<std::atomic<int32_t>>& box_y_list,
+                                    const std::vector<std::atomic<int32_t>>& phase_list, const std::vector<std::atomic<int64_t>>& phase_since_sec_list,
+                                    int64_t now_sec)
+{
+  std::ostringstream oss;
+  int32_t active_num = 0;
+  for (size_t tid = 0; tid < box_x_list.size(); tid++) {
+    int32_t box_x = box_x_list[tid].load();
+    int32_t box_y = box_y_list[tid].load();
+    if (box_x < 0 || box_y < 0) {
+      continue;
+    }
+    if (active_num > 0) {
+      oss << "; ";
+    }
+    int64_t phase_since_sec = phase_since_sec_list[tid].load();
+    oss << "tid=" << tid << " box=(" << box_x << "," << box_y << ") phase=" << getDRTracePhaseName(phase_list[tid].load()) << " age="
+        << std::max<int64_t>(0, now_sec - phase_since_sec) << "s";
+    active_num++;
+    if (active_num >= 8) {
+      break;
+    }
+  }
+  if (active_num == 0) {
+    oss << "idle";
+  }
+  return oss.str();
+}
+
+void updateDRTraceSlot(std::vector<std::atomic<int32_t>>& box_x_list, std::vector<std::atomic<int32_t>>& box_y_list,
+                       std::vector<std::atomic<int32_t>>& phase_list, std::vector<std::atomic<int64_t>>& phase_since_sec_list, int32_t tid,
+                       int32_t box_x, int32_t box_y, int32_t phase)
+{
+  box_x_list[tid].store(box_x);
+  box_y_list[tid].store(box_y);
+  phase_list[tid].store(phase);
+  phase_since_sec_list[tid].store(getDRTraceNowSec());
+}
+
+}  // namespace
+#endif
 
 // public
 
@@ -368,7 +449,8 @@ void DetailedRouter::routeDRBoxMap(DRModel& dr_model)
   size_t routed_box_num = 0;
   for (std::vector<DRBoxId>& dr_box_id_list : dr_model.get_dr_box_id_list_list()) {
     Monitor stage_monitor;
-#pragma omp parallel for
+    // These helpers move shared raw-pointer objects in the global GCell maps.
+    // Keep the ownership transfer outside the parallel box-routing phase.
     for (DRBoxId& dr_box_id : dr_box_id_list) {
       DRBox& dr_box = dr_box_map[dr_box_id.get_x()][dr_box_id.get_y()];
       buildFixedRect(dr_box);
@@ -377,7 +459,12 @@ void DetailedRouter::routeDRBoxMap(DRModel& dr_model)
       buildNetPatch(dr_box);
       initDRTaskList(dr_model, dr_box);
       buildRouteViolation(dr_box);
-      if (needRouting(dr_box)) {
+    }
+#pragma omp parallel for
+    for (DRBoxId& dr_box_id : dr_box_id_list) {
+      DRBox& dr_box = dr_box_map[dr_box_id.get_x()][dr_box_id.get_y()];
+      bool should_route = needRouting(dr_box);
+      if (should_route) {
         buildBoxTrackAxis(dr_box);
         buildLayerNodeMap(dr_box);
         buildLayerShadowMap(dr_box);
@@ -390,6 +477,10 @@ void DetailedRouter::routeDRBoxMap(DRModel& dr_model)
         routeDRBox(dr_box);
         // debugPlotDRBox(dr_box, "after");
       }
+    }
+    // Publish each box result after the parallel route phase so global map updates stay deterministic.
+    for (DRBoxId& dr_box_id : dr_box_id_list) {
+      DRBox& dr_box = dr_box_map[dr_box_id.get_x()][dr_box_id.get_y()];
       selectBestResult(dr_box);
       freeDRBox(dr_box);
     }
