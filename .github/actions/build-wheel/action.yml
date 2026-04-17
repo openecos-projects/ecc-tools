@@ -32,7 +32,7 @@ runs:
 
     - name: Install Python dev dependencies
       shell: bash
-      run: uv sync --frozen --all-groups --python 3.11
+      run: uv sync --all-groups --python 3.11
 
     - name: Restore CMake build cache
       uses: actions/cache@v4
