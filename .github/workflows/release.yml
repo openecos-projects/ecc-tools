@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag to release (e.g., v0.1.0-alpha.1)'
+        required: true
+        default: 'v0.1.0-alpha.1'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Wheel
+    runs-on: ubuntu-latest
+    container: quay.io/pypa/manylinux_2_34_x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build wheel
+        uses: ./.github/actions/build-wheel
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecc-tools-wheel
+          path: |
+            dist/wheel/repaired/ecc_tools-*.whl
+            dist/wheel/SHA256SUMS
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ecc-tools-wheel
+          path: dist/wheel
+
+      - name: Determine tag version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            FULL_TAG="${{ github.event.inputs.tag_name }}"
+            TAG_VERSION="${FULL_TAG#v}"
+          else
+            FULL_TAG="${GITHUB_REF_NAME}"
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "full_tag=$FULL_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [[ -n "$PREV_TAG" ]]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+          {
+            echo "## Changes"
+            echo ""
+            git log --oneline --no-merges "$RANGE" | sed 's/^/- /'
+            echo ""
+            echo "## Checksums"
+            echo ""
+            echo '```'
+            cat dist/wheel/SHA256SUMS
+            echo '```'
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.full_tag }}" \
+            --title "ecc-tools ${{ steps.version.outputs.full_tag }}" \
+            --notes-file release-notes.md \
+            dist/wheel/repaired/ecc_tools-*.whl \
+            dist/wheel/SHA256SUMS
