@@ -16,12 +16,14 @@ build-backend.source-exclude = [
   "build/**",
   "scripts/**",
   ".github/**",
+  ".gitee/**",
 ]
 build-backend.wheel-exclude = [
   "src/**",
   "build/**",
   "scripts/**",
   ".github/**",
+  ".gitee/**",
 ]
 
 [dependency-groups]
