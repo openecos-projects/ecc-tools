@@ -1,0 +1,49 @@
+name: Build ECC-Tools Wheel
+description: CMake build + auditwheel repair + smoke test. Requires manylinux_2_34_x86_64 container.
+
+runs:
+  using: composite
+  steps:
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        dnf install -y epel-release
+        dnf config-manager --set-enabled crb || true
+        dnf install -y \
+          cmake ninja-build pkgconfig patchelf \
+          boost-devel cairo-devel gflags-devel glog-devel \
+          flex flex-devel bison eigen3-devel gtest-devel \
+          tbb-devel hwloc-devel libcurl-devel libunwind-devel \
+          metis-devel gmp-devel tcl-devel \
+          unzip zip
+
+    - name: Setup Python 3.11
+      shell: bash
+      run: echo "/opt/python/cp311-cp311/bin" >> "$GITHUB_PATH"
+
+    - name: Setup sccache
+      uses: mozilla-actions/sccache-action@v0.0.9
+
+    - name: Setup uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        version: latest
+        enable-cache: true
+
+    - name: Install Python dev dependencies
+      shell: bash
+      run: uv sync --frozen --all-groups --python 3.11
+
+    - name: Restore CMake build cache
+      uses: actions/cache@v4
+      with:
+        path: build
+        key: cmake-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
+        restore-keys: |
+          cmake-${{ runner.os }}-
+
+    - name: Build repaired wheel
+      shell: bash
+      env:
+        SCCACHE_GHA_ENABLED: "true"
+      run: scripts/build-wheel.sh
