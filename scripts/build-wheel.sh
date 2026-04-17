@@ -62,10 +62,10 @@ cmake --build build --target ecc_py -j"$(nproc)"
 echo "[build-wheel] Collecting .so artifacts"
 ECC_PY_ABI="$("$PYTHON3" -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")"
 
-# Find the ecc_py shared object
-ecc_py_so="$(find build -name "ecc_py${ECC_PY_ABI}" -print -quit)"
+# Find the ecc_py shared object (CMake outputs to bin/ or build/ depending on config)
+ecc_py_so="$(find build bin -name "ecc_py${ECC_PY_ABI}" -print -quit 2>/dev/null)"
 if [[ -z "$ecc_py_so" ]]; then
-    echo "ERROR: ecc_py${ECC_PY_ABI} not found in build/" >&2
+    echo "ERROR: ecc_py${ECC_PY_ABI} not found in build/ or bin/" >&2
     exit 1
 fi
 echo "[build-wheel] Found: $ecc_py_so"
