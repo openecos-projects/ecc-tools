@@ -8,15 +8,21 @@ version = "0.1.0-alpha.1"
 requires-python = ">=3.11"
 dependencies = []
 
-[tool.uv.build-backend]
-module-name = ["ecc_tools_bin"]
-module-root = ""
-
-[tool.uv.build-backend.source-exclude]
-patterns = ["src/**", "build/**", "scripts/**", ".github/**"]
-
-[tool.uv.build-backend.wheel-exclude]
-patterns = ["src/**", "build/**", "scripts/**", ".github/**"]
+[tool.uv]
+build-backend.module-name = ["ecc_tools_bin"]
+build-backend.module-root = ""
+build-backend.source-exclude = [
+  "src/**",
+  "build/**",
+  "scripts/**",
+  ".github/**",
+]
+build-backend.wheel-exclude = [
+  "src/**",
+  "build/**",
+  "scripts/**",
+  ".github/**",
+]
 
 [dependency-groups]
 dev = ["auditwheel"]
