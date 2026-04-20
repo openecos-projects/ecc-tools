@@ -71,16 +71,13 @@ jobs:
         id: notes
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [[ -n "$PREV_TAG" ]]; then
-            RANGE="${PREV_TAG}..HEAD"
-          else
-            RANGE="HEAD"
-          fi
           {
-            echo "## Changes"
-            echo ""
-            git log --oneline --no-merges "$RANGE" | sed 's/^/- /'
-            echo ""
+            if [[ -n "$PREV_TAG" ]]; then
+              echo "## Changes"
+              echo ""
+              git log --oneline --no-merges "${PREV_TAG}..HEAD" | sed 's/^/- /'
+              echo ""
+            fi
             echo "## Checksums"
             echo ""
             echo '```'
