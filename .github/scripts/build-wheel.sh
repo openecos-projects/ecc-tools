@@ -105,7 +105,7 @@ print(f'ecc_py smoke test passed: {len(required)} bindings verified')
 "
 
 # Checksums
-sha256sum "$repair_out"/*.whl > dist/wheel/SHA256SUMS
+(cd "$repair_out" && sha256sum *.whl) > dist/wheel/SHA256SUMS
 
 echo "[build-wheel] done"
 echo "[build-wheel] raw wheels:      $raw_out"
