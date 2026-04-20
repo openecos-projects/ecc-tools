@@ -49,4 +49,4 @@ runs:
       shell: bash
       env:
         SCCACHE_GHA_ENABLED: "true"
-      run: scripts/build-wheel.sh
+      run: .github/scripts/build-wheel.sh
