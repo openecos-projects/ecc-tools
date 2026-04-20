@@ -2,6 +2,13 @@ name: CI
 
 on:
   pull_request:
+    paths:
+      - 'src/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'pyproject.toml'
+      - 'build.sh'
+      - '.github/**'
   push:
     branches: [main]
 
