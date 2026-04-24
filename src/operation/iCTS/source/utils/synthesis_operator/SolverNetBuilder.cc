@@ -33,6 +33,14 @@ namespace icts {
 Net* SolverNetBuilder::connectNet(SolverPipelineState& state, Pin* driver, const std::vector<Pin*>& loads, const std::string& stage_tag,
                                   bool allow_long_wire_buffering) const
 {
+  auto net_name = ComposeSolverName(state.net_name, "_", stage_tag, "_", _runtime.genId());
+  return connectNamedNet(state, net_name, driver, loads, stage_tag, allow_long_wire_buffering);
+}
+
+Net* SolverNetBuilder::connectNamedNet(SolverPipelineState& state, const std::string& net_name, Pin* driver,
+                                       const std::vector<Pin*>& loads, const std::string& stage_tag,
+                                       bool allow_long_wire_buffering) const
+{
   LOG_FATAL_IF(driver == nullptr) << "Net [" << state.net_name << "] " << stage_tag << " has null driver.";
   LOG_FATAL_IF(loads.empty()) << "Net [" << state.net_name << "] " << stage_tag << " has empty loads.";
 
@@ -41,16 +49,23 @@ Net* SolverNetBuilder::connectNet(SolverPipelineState& state, Pin* driver, const
     TreeBuilder::directConnectTree(driver, load);
   });
 
-  return createNetRecord(state, driver, loads, stage_tag, allow_long_wire_buffering);
+  return createNamedNetRecord(state, net_name, driver, loads, stage_tag, allow_long_wire_buffering);
 }
 
 Net* SolverNetBuilder::createNetRecord(SolverPipelineState& state, Pin* driver, const std::vector<Pin*>& loads,
                                        const std::string& stage_tag, bool allow_long_wire_buffering) const
 {
+  auto net_name = ComposeSolverName(state.net_name, "_", stage_tag, "_", _runtime.genId());
+  return createNamedNetRecord(state, net_name, driver, loads, stage_tag, allow_long_wire_buffering);
+}
+
+Net* SolverNetBuilder::createNamedNetRecord(SolverPipelineState& state, const std::string& net_name, Pin* driver,
+                                            const std::vector<Pin*>& loads, const std::string& stage_tag,
+                                            bool allow_long_wire_buffering) const
+{
   LOG_FATAL_IF(driver == nullptr) << "Net [" << state.net_name << "] " << stage_tag << " has null driver.";
   LOG_FATAL_IF(loads.empty()) << "Net [" << state.net_name << "] " << stage_tag << " has empty loads.";
 
-  auto net_name = ComposeSolverName(state.net_name, "_", stage_tag, "_", _runtime.genId());
   auto* net = TimingPropagator::genNet(net_name, driver, loads);
   TimingPropagator::update(net);
   state.net_records.push_back({net, -1, allow_long_wire_buffering});

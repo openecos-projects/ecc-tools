@@ -35,8 +35,12 @@ class SolverNetBuilder
 
   Net* connectNet(SolverPipelineState& state, Pin* driver, const std::vector<Pin*>& loads, const std::string& stage_tag,
                   bool allow_long_wire_buffering = true) const;
+  Net* connectNamedNet(SolverPipelineState& state, const std::string& net_name, Pin* driver, const std::vector<Pin*>& loads,
+                       const std::string& stage_tag, bool allow_long_wire_buffering = true) const;
   Net* createNetRecord(SolverPipelineState& state, Pin* driver, const std::vector<Pin*>& loads, const std::string& stage_tag,
                        bool allow_long_wire_buffering = true) const;
+  Net* createNamedNetRecord(SolverPipelineState& state, const std::string& net_name, Pin* driver, const std::vector<Pin*>& loads,
+                            const std::string& stage_tag, bool allow_long_wire_buffering = true) const;
   void registerBuffer(SolverPipelineState& state, Inst* buffer, int depth) const;
   void finalizeLeafDepth(SolverPipelineState& state, Pin* leaf_load, int depth) const;
   int childDepth(const SolverPipelineState& state, Pin* child) const;

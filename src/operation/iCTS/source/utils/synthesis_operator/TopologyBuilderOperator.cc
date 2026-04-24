@@ -51,10 +51,11 @@ void TopologyBuilderOperator::run(SolverPipelineState& state) const
   // Preserve a dedicated H-tree root buffer so the top-level source->root segment
   // stays explicit for downstream long-wire buffering and level-based sizing.
   auto root_name = ComposeSolverName(state.net_name, "_root_", _runtime.genId());
-  auto* root_buf = TreeBuilder::genBufInst(root_name, state.driver->get_location());
+  auto root_loc = BalanceClustering::calcCentroid(state.sink_pins);
+  auto* root_buf = TreeBuilder::genBufInst(root_name, root_loc);
   root_buf->set_cell_master(TimingPropagator::getMinSizeCell());
   _net_builder.registerBuffer(state, root_buf, 0);
-  _net_builder.connectNet(state, state.driver, {root_buf->get_load_pin()}, "root");
+  _net_builder.connectNamedNet(state, state.net_name, state.driver, {root_buf->get_load_pin()}, "root");
   buildSubTree(state, root_buf->get_driver_pin(), state.leaf_load_pins, 1);
 }
 
