@@ -196,3 +196,36 @@ Implemented and validated the iCTS skew post-optimization stage, then archived t
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Migrate Trellis to v0.5.0-beta.12
+
+**Date**: 2026-04-25
+**Task**: Migrate Trellis to v0.5.0-beta.12
+**Branch**: `cts_fix`
+
+### Summary
+
+Migrated Trellis/Codex project files to v0.5.0-beta.12, restored runtime scripts, verified hooks and task context, then archived the migration task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `36cd7231c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
