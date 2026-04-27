@@ -35,10 +35,3 @@ jobs:
           path: dist/wheel/repaired/ecc_tools-*.whl
           retention-days: 7
           if-no-files-found: error
-
-      - name: Upload checksums
-        uses: actions/upload-artifact@v4
-        with:
-          name: checksums
-          path: dist/wheel/SHA256SUMS
-          retention-days: 7

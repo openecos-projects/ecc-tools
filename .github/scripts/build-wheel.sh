@@ -21,7 +21,7 @@ require_cmd() {
 PYTHON3="${PYTHON3:-$(command -v python3 || true)}"
 [[ -x "${PYTHON3:-}" ]] || die "python3 not found"
 
-for cmd in cmake ninja auditwheel uv sha256sum; do
+for cmd in cmake ninja auditwheel uv; do
     require_cmd "$cmd"
 done
 
@@ -104,11 +104,7 @@ assert not missing, f'missing or non-callable bindings: {missing}'
 print(f'ecc_py smoke test passed: {len(required)} bindings verified')
 "
 
-# Checksums
-(cd "$repair_out" && sha256sum *.whl) > dist/wheel/SHA256SUMS
-
 echo "[build-wheel] done"
 echo "[build-wheel] raw wheels:      $raw_out"
 echo "[build-wheel] repaired wheels: $repair_out"
 echo "[build-wheel] report:          $show_report"
-echo "[build-wheel] checksums:       dist/wheel/SHA256SUMS"
