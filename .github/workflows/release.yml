@@ -35,6 +35,7 @@ jobs:
           name: ecc-tools-wheel
           path: |
             dist/wheel/repaired/ecc_tools-*.whl
+          if-no-files-found: error
 
   release:
     name: Create Release
@@ -51,7 +52,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ecc-tools-wheel
-          path: dist/wheel
+          path: dist/wheel/repaired
 
       - name: Determine tag version
         id: version
