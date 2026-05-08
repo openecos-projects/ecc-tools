@@ -8,17 +8,27 @@ version = "0.1.0-alpha.2"
 requires-python = ">=3.11"
 dependencies = []
 
-[tool.uv]
-build-backend.module-name = ["ecc_tools_bin"]
-build-backend.module-root = ""
-build-backend.source-exclude = [
+[tool.uv.build-backend]
+module-name = "ecc_tools_bin"
+module-root = ""
+source-include = [
+  "ecc_tools_bin/__init__.py",
+  "ecc_tools_bin/*.so",
+  "ecc_tools_bin/*.so.*",
+]
+source-exclude = [
   "src/**",
   "build/**",
   "scripts/**",
   ".github/**",
   ".gitee/**",
 ]
-build-backend.wheel-exclude = [
+wheel-include = [
+  "ecc_tools_bin/__init__.py",
+  "ecc_tools_bin/*.so",
+  "ecc_tools_bin/*.so.*",
+]
+wheel-exclude = [
   "src/**",
   "build/**",
   "scripts/**",
