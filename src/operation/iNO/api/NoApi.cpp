@@ -139,8 +139,7 @@ ieda_feature::NetOptSummary NoApi::outputSummary() {
     clock_timing.hold_wns = eval_data.hold_wns;
     clock_timing.suggest_freq = eval_data.freq;
 
-    ieda_feature::NOClockTimingCmp clock_cmp;
-    memset(&clock_cmp, 0, sizeof(ieda_feature::NOClockTimingCmp));
+    ieda_feature::NOClockTimingCmp clock_cmp{};
     clock_cmp.origin = clock_timing;
     summary_map[clock_name] = clock_cmp;
   }
