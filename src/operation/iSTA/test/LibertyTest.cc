@@ -84,22 +84,22 @@ class LibertyTest : public testing::Test {
   void TearDown() { Log::end(); }
 };
 
-TEST_F(LibertyTest, rust_reader) {
+TEST_F(LibertyTest, cpp_reader) {
   const char* lib_path =
       "/home/ieda/ssta-data/lib/lib/tcbn28hpcplusbwp30p140ulvtssg0p81v125c.lib";
   Lib lib;
-  lib.loadLibertyWithRustParser(lib_path);
+  lib.loadLibertyWithCppParser(lib_path);
 }
 
-TEST_F(LibertyTest, rust_expr_builder) {
-  RustLibertyExprBuilder expr_builder("(!((A1 A2)+(B1 B2)))");
+TEST_F(LibertyTest, cpp_expr_builder) {
+  LibertyExprBuilder expr_builder("(!((A1 A2)+(B1 B2)))");
   expr_builder.execute();
   auto* func_expr = expr_builder.get_result_expr();
   LOG_FATAL_IF(!func_expr) << "func_expr is nullptr";
 }
 
-TEST_F(LibertyTest, rust_expr_builder_backslack) {
-  RustLibertyExprBuilder expr_builder(R"((!CEN & ! \
+TEST_F(LibertyTest, cpp_expr_builder_backslack) {
+  LibertyExprBuilder expr_builder(R"((!CEN & ! \
                                    WEN & !( \
                                 (BWEN[0]) & \
                                 (BWEN[1]) & \
@@ -144,9 +144,9 @@ TEST_F(LibertyTest, print_liberty_library_json) {
   const char* lib_path =
       "/home/taosimin/nangate45/lib/NangateOpenCellLibrary_typical.lib";
   Lib lib;
-  auto lib_rust_reader = lib.loadLibertyWithRustParser(lib_path);
-  lib_rust_reader.linkLib();
-  auto lib_library = lib_rust_reader.get_library_builder()->takeLib();
+  auto liberty_reader = lib.loadLibertyWithCppParser(lib_path);
+  liberty_reader.linkLib();
+  auto lib_library = liberty_reader.get_library_builder()->takeLib();
   // lib_library->findCell()->get_cell_arcs();
   // const char* json_file_names_n45 =
   //     "/home/longshuaiying/lib_lef/"
@@ -154,15 +154,15 @@ TEST_F(LibertyTest, print_liberty_library_json) {
   // lib_library->printLibertyLibraryJson(json_file_names_n45);
 }
 
-TEST_F(LibertyTest, rust_reader_converts_ff_pin_cap_ranges_to_internal_pf) {
+TEST_F(LibertyTest, cpp_reader_converts_ff_pin_cap_ranges_to_internal_pf) {
   const char* lib_path =
       "/home/zhaoxueyan/code/write-lib_back/benchmark/iccad24-benchmark/ASAP7/"
       "lib/asap7sc7p5t_SEQ_RVT_FF_nldm_201020.lib";
 
   Lib lib;
-  auto lib_rust_reader = lib.loadLibertyWithRustParser(lib_path);
-  lib_rust_reader.linkLib();
-  auto lib_library = lib_rust_reader.get_library_builder()->takeLib();
+  auto liberty_reader = lib.loadLibertyWithCppParser(lib_path);
+  liberty_reader.linkLib();
+  auto lib_library = liberty_reader.get_library_builder()->takeLib();
 
   ASSERT_NE(lib_library, nullptr);
   EXPECT_EQ(lib_library->get_cap_unit(), CapacitiveUnit::kFF);
@@ -196,15 +196,15 @@ TEST_F(LibertyTest, rust_reader_converts_ff_pin_cap_ranges_to_internal_pf) {
 }
 
 TEST_F(LibertyTest,
-       rust_reader_same_sense_arc_sets_prefer_declared_default_arc) {
+       cpp_reader_same_sense_arc_sets_prefer_declared_default_arc) {
   const char* lib_path =
       "/home/zhaoxueyan/code/write-lib_back/benchmark/iccad24-benchmark/ASAP7/"
       "lib/asap7sc7p5t_AO_RVT_FF_nldm_201020.lib";
 
   Lib lib;
-  auto lib_rust_reader = lib.loadLibertyWithRustParser(lib_path);
-  lib_rust_reader.linkLib();
-  auto lib_library = lib_rust_reader.get_library_builder()->takeLib();
+  auto liberty_reader = lib.loadLibertyWithCppParser(lib_path);
+  liberty_reader.linkLib();
+  auto lib_library = liberty_reader.get_library_builder()->takeLib();
 
   ASSERT_NE(lib_library, nullptr);
   auto* lib_cell = lib_library->findCell("AOI22xp33_ASAP7_75t_R");

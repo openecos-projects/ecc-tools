@@ -54,7 +54,7 @@ double PwrCalcInternalPower::getToggleData(Pin* pin) {
  */
 double PwrCalcInternalPower::calcSPByWhen(const char* when, Instance* inst) {
   /*Parse conditional statements of the leakage power*/
-  RustLibertyExprBuilder expr_builder(when);
+  LibertyExprBuilder expr_builder(when);
   expr_builder.execute();
   auto* expr = expr_builder.get_result_expr();
 

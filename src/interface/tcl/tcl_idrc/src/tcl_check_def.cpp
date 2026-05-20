@@ -67,7 +67,7 @@ unsigned CmdDRCAutoRun::exec()
   TclOption* path_option = getOptionOrArg(TCL_PATH);
   auto data_path = path_option->getStringVal();
 
-  if (iplf::tmInst->autoRunDRC(data_config, data_path)) {
+  if (iplf::tmInst->autoRunDRC(data_config, data_path, true)) {
     std::cout << "iDRC run successfully." << std::endl;
   }
 

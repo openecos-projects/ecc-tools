@@ -55,13 +55,13 @@ class PwrCalcToggleSP : public PwrFunc {
 
  private:
   std::optional<PwrToggleSPCalcFunc> getCombineLogicProcessFunc(
-      RustLibertyExprOp op);
+      ::LibertyExprOp op);
 
   PwrToggleSPValue getToggleSPData(std::string_view port_name,
                                    ieda::Vector<PwrVertex*>& input_vertexes,
                                    PwrDataSource data_source);
 
-  PwrToggleSPValue calcToggleSP(RustLibertyExpr* expr,
+  PwrToggleSPValue calcToggleSP(::LibertyExpr* expr,
                                 ieda::Vector<PwrVertex*>& input_vertexes);
 
   unsigned calcToggleSP(LibCell* lib_cell,

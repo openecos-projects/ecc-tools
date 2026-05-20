@@ -70,37 +70,37 @@ double PwrCalcSPData::getSPData(std::string_view port_name, Instance* inst) {
  * @param inst
  * @return double
  */
-double PwrCalcSPData::calcSPData(RustLibertyExpr* expr, Instance* inst) {
+double PwrCalcSPData::calcSPData(::LibertyExpr* expr, Instance* inst) {
   double sp_data = 0.0;
   const char* port_name = expr->port_name;
-  auto* left_expr = rust_get_expr_left(expr);
-  auto* right_expr = rust_get_expr_right(expr);
+  auto* left_expr = liberty_get_expr_left(expr);
+  auto* right_expr = liberty_get_expr_right(expr);
 
   switch (expr->op) {
     /*Monocular calculation.*/
-    case RustLibertyExprOp::kBuffer: {
+    case LibertyExprOp::kBuffer: {
       sp_data = getSPData(port_name, inst);
       break;
     }
 
-    case RustLibertyExprOp::kOne: {
+    case LibertyExprOp::kOne: {
       sp_data = 1.0;
       break;
     }
 
-    case RustLibertyExprOp::kZero: {
+    case LibertyExprOp::kZero: {
       sp_data = 0.0;
       break;
     }
 
-    case RustLibertyExprOp::kNot: {
+    case LibertyExprOp::kNot: {
       auto left_port_sp_data = calcSPData(left_expr, inst);
       sp_data = 1 - left_port_sp_data;
       break;
     }
 
     /*Binocular calculation.*/
-    case RustLibertyExprOp::kOr: {
+    case LibertyExprOp::kOr: {
       auto left_port_sp_data = calcSPData(left_expr, inst);
       auto right_port_sp_data = calcSPData(right_expr, inst);
 
@@ -111,8 +111,8 @@ double PwrCalcSPData::calcSPData(RustLibertyExpr* expr, Instance* inst) {
       break;
     }
 
-    case RustLibertyExprOp::kMult:
-    case RustLibertyExprOp::kAnd: {
+    case LibertyExprOp::kMult:
+    case LibertyExprOp::kAnd: {
       auto left_port_sp_data = calcSPData(left_expr, inst);
       auto right_port_sp_data = calcSPData(right_expr, inst);
 
@@ -120,8 +120,8 @@ double PwrCalcSPData::calcSPData(RustLibertyExpr* expr, Instance* inst) {
       break;
     }
 
-    case RustLibertyExprOp::kPlus:
-    case RustLibertyExprOp::kXor: {
+    case LibertyExprOp::kPlus:
+    case LibertyExprOp::kXor: {
       auto left_port_sp_data = calcSPData(left_expr, inst);
       auto right_port_sp_data = calcSPData(right_expr, inst);
       double p0 = left_port_sp_data * (1.0 - right_port_sp_data);
@@ -133,11 +133,11 @@ double PwrCalcSPData::calcSPData(RustLibertyExpr* expr, Instance* inst) {
   }
 
   if (left_expr) {
-    rust_free_expr(left_expr);
+    liberty_free_expr(left_expr);
   }
 
   if (right_expr) {
-    rust_free_expr(right_expr);
+    liberty_free_expr(right_expr);
   }
 
   return sp_data;

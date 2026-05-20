@@ -1910,7 +1910,7 @@ void LibCell::bufferPorts(LibPort*& input, LibPort*& output)
 bool LibCell::hasBufferFunc(LibPort* input, LibPort* output)
 {
   auto* func_expr = output->get_func_expr();
-  return func_expr && func_expr->op == RustLibertyExprOp::kBuffer;
+  return func_expr && func_expr->op == LibertyExprOp::kBuffer;
 }
 
 /**
@@ -1924,7 +1924,7 @@ bool LibCell::hasBufferFunc(LibPort* input, LibPort* output)
 bool LibCell::hasInverterFunc(LibPort* input, LibPort* output)
 {
   auto* func_expr = output->get_func_expr();
-  return func_expr && func_expr->op == RustLibertyExprOp::kNot;
+  return func_expr && func_expr->op == LibertyExprOp::kNot;
 }
 
 /**
@@ -2124,16 +2124,16 @@ LibCurrentTemplate::LibCurrentTemplate(const char* template_name) : LibLutTableT
  * @param file_name
  * @return std::unique_ptr<LibLibrary>
  */
-RustLibertyReader Lib::loadLibertyWithRustParser(const char* file_name)
+LibertyReader Lib::loadLibertyWithCppParser(const char* file_name)
 {
   // LOG_INFO << "Load lib " << file_name << " start.";
 
-  RustLibertyReader lib_rust_reader(file_name);
-  unsigned is_success = lib_rust_reader.readLib();
+  LibertyReader liberty_reader(file_name);
+  unsigned is_success = liberty_reader.readLib();
   LOG_FATAL_IF(!is_success) << "read lib " << file_name << " failed.";
 
   // LOG_INFO << "Load lib " << file_name << " finish.";
-  return lib_rust_reader;
+  return liberty_reader;
 }
 
 }  // namespace ista

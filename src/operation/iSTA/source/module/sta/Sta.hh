@@ -240,7 +240,7 @@ class Sta {
   Netlist* get_netlist() { return &_netlist; }
   void resetNetlist() { _netlist.reset(); }
 
-  void addLibReaders(RustLibertyReader lib_reader) {
+  void addLibReaders(LibertyReader lib_reader) {
     std::unique_lock<std::mutex> lk(_mt);
     _lib_readers.emplace_back(std::move(lib_reader));
   }
@@ -665,7 +665,7 @@ class Sta {
       nullptr;       //!< The design top module of rust version.
   Netlist _netlist;  //!< The current top netlist for sta analysis.
 
-  std::vector<RustLibertyReader>
+  std::vector<LibertyReader>
       _lib_readers;  //!< The design lib parsed files.
   Vector<std::unique_ptr<LibLibrary>>
       _libs;  //!< The design libs of different corners.

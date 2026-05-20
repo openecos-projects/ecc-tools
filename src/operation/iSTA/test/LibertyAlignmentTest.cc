@@ -551,9 +551,9 @@ TEST_F(LibertyWriterUnitTest,
 })");
 
   ista::Lib lib;
-  auto lib_rust_reader = lib.loadLibertyWithRustParser(input_path.c_str());
-  ASSERT_EQ(lib_rust_reader.linkLib(), 1U);
-  auto lib_library = lib_rust_reader.get_library_builder()->takeLib();
+  auto liberty_reader = lib.loadLibertyWithCppParser(input_path.c_str());
+  ASSERT_EQ(liberty_reader.linkLib(), 1U);
+  auto lib_library = liberty_reader.get_library_builder()->takeLib();
   ASSERT_NE(lib_library, nullptr);
 
   const auto output_dir =
@@ -613,9 +613,9 @@ TEST_F(LibertyWriterUnitTest, writer_round_trips_parsed_clock_pin_flags) {
 })");
 
   ista::Lib lib;
-  auto lib_rust_reader = lib.loadLibertyWithRustParser(input_path.c_str());
-  ASSERT_EQ(lib_rust_reader.linkLib(), 1U);
-  auto lib_library = lib_rust_reader.get_library_builder()->takeLib();
+  auto liberty_reader = lib.loadLibertyWithCppParser(input_path.c_str());
+  ASSERT_EQ(liberty_reader.linkLib(), 1U);
+  auto lib_library = liberty_reader.get_library_builder()->takeLib();
   ASSERT_NE(lib_library, nullptr);
 
   const auto output_dir =
@@ -638,7 +638,7 @@ TEST_F(LibertyWriterUnitTest, writer_round_trips_parsed_clock_pin_flags) {
 }
 
 TEST_F(LibertyWriterUnitTest,
-       rust_parser_preserves_pin_function_expressions_in_memory) {
+       cpp_parser_preserves_pin_function_expressions_in_memory) {
   const auto input_path = writeTempLibertyFile(
       "writer_round_trip_pin_function.lib",
       R"(library (round_trip_function_lib) {
@@ -658,9 +658,9 @@ TEST_F(LibertyWriterUnitTest,
 })");
 
   ista::Lib lib;
-  auto lib_rust_reader = lib.loadLibertyWithRustParser(input_path.c_str());
-  ASSERT_EQ(lib_rust_reader.linkLib(), 1U);
-  auto lib_library = lib_rust_reader.get_library_builder()->takeLib();
+  auto liberty_reader = lib.loadLibertyWithCppParser(input_path.c_str());
+  ASSERT_EQ(liberty_reader.linkLib(), 1U);
+  auto lib_library = liberty_reader.get_library_builder()->takeLib();
   ASSERT_NE(lib_library, nullptr);
 
   ASSERT_EQ(lib_library->get_cells().size(), 1U);

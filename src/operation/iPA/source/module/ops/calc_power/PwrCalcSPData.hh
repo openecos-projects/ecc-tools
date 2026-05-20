@@ -35,6 +35,6 @@ namespace ipower {
 class PwrCalcSPData : public PwrFunc {
  public:
   double getSPData(std::string_view port_name, Instance* inst);
-  double calcSPData(RustLibertyExpr* expr, Instance* inst);
+  double calcSPData(::LibertyExpr* expr, Instance* inst);
 };
 }  // namespace ipower

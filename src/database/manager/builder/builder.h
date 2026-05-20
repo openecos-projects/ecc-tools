@@ -135,6 +135,7 @@ class IdbBuilder
   //   std::shared_ptr<IdbDataService> _data_service;
 
   void checkNetPins();
+  void updateDefUnit();
 };
 
 }  // namespace idb

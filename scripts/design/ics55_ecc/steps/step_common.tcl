@@ -194,6 +194,7 @@ proc step_save_design {step_name output_def output_verilog output_gds output_jso
 
   # if {[step_safe_eval [list init_sta -output $sta_dir]]} {
   #   step_safe_eval {report_timing -json}
+  #   step_safe_eval {release_sta}
   # }
 }
 

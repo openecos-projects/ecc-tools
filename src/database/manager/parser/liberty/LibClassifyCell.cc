@@ -72,30 +72,30 @@ std::size_t LibClassifyCell::hashCellPort(LibPort* port)
  * @param expr
  * @return std::size_t
  */
-std::size_t LibClassifyCell::hashCellPortFuncExpr(RustLibertyExpr* expr)
+std::size_t LibClassifyCell::hashCellPortFuncExpr(::LibertyExpr* expr)
 {
   if (!expr) {
     return 0;
   }
 
   switch (expr->op) {
-    case RustLibertyExprOp::kBuffer:
+    case LibertyExprOp::kBuffer:
       return Hash(std::string(expr->port_name));
-    case RustLibertyExprOp::kNot: {
-      auto* left_expr = rust_get_expr_left(expr);
+    case LibertyExprOp::kNot: {
+      auto* left_expr = liberty_get_expr_left(expr);
       auto result = hashCellPortFuncExpr(left_expr);
-      rust_free_expr(left_expr);
+      liberty_free_expr(left_expr);
       return result;
     }
 
     default: {
-      auto* left_expr = rust_get_expr_left(expr);
-      auto* right_expr = rust_get_expr_right(expr);
+      auto* left_expr = liberty_get_expr_left(expr);
+      auto* right_expr = liberty_get_expr_right(expr);
 
       auto result = (hashCellPortFuncExpr(left_expr) ^ hashCellPortFuncExpr(right_expr)) ^ Hash(static_cast<unsigned>(expr->op));
 
-      rust_free_expr(left_expr);
-      rust_free_expr(right_expr);
+      liberty_free_expr(left_expr);
+      liberty_free_expr(right_expr);
 
       return result;
     }
@@ -144,7 +144,7 @@ bool LibClassifyCell::comparePort(LibPort* port1, LibPort* port2)
  * @return true
  * @return false
  */
-bool LibClassifyCell::comparePortFunc(RustLibertyExpr* expr1, RustLibertyExpr* expr2)
+bool LibClassifyCell::comparePortFunc(::LibertyExpr* expr1, ::LibertyExpr* expr2)
 {
   if (expr1 == nullptr && expr2 == nullptr) {
     return true;
@@ -152,35 +152,35 @@ bool LibClassifyCell::comparePortFunc(RustLibertyExpr* expr1, RustLibertyExpr* e
 
   if (expr1 != nullptr && expr2 != nullptr && expr1->op == expr2->op) {
     switch (expr1->op) {
-      case RustLibertyExprOp::kBuffer:
+      case LibertyExprOp::kBuffer:
         return Str::equal(expr1->port_name, expr2->port_name);
-      case RustLibertyExprOp::kNot: {
-        auto* left_expr1 = rust_get_expr_left(expr1);
-        auto* left_expr2 = rust_get_expr_left(expr2);
+      case LibertyExprOp::kNot: {
+        auto* left_expr1 = liberty_get_expr_left(expr1);
+        auto* left_expr2 = liberty_get_expr_left(expr2);
         bool result = comparePortFunc(left_expr1, left_expr2);
-        rust_free_expr(left_expr1);
-        rust_free_expr(left_expr2);
+        liberty_free_expr(left_expr1);
+        liberty_free_expr(left_expr2);
         return result;
       }
 
       default: {
         {
-          auto* left_expr1 = rust_get_expr_left(expr1);
-          auto* left_expr2 = rust_get_expr_left(expr2);
+          auto* left_expr1 = liberty_get_expr_left(expr1);
+          auto* left_expr2 = liberty_get_expr_left(expr2);
           bool result = comparePortFunc(left_expr1, left_expr2);
-          rust_free_expr(left_expr1);
-          rust_free_expr(left_expr2);
+          liberty_free_expr(left_expr1);
+          liberty_free_expr(left_expr2);
           if (!result) {
             return result;
           }
         }
         {
-          auto* right_expr1 = rust_get_expr_right(expr1);
-          auto* right_expr2 = rust_get_expr_right(expr2);
+          auto* right_expr1 = liberty_get_expr_right(expr1);
+          auto* right_expr2 = liberty_get_expr_right(expr2);
 
           bool result = comparePortFunc(right_expr1, right_expr2);
-          rust_free_expr(right_expr1);
-          rust_free_expr(right_expr2);
+          liberty_free_expr(right_expr1);
+          liberty_free_expr(right_expr2);
 
           return result;
         }

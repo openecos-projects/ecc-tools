@@ -37,10 +37,10 @@ namespace ipower {
  * @return std::optional<PwrToggleSPCalcFunc>
  */
 std::optional<PwrToggleSPCalcFunc> PwrCalcToggleSP::getCombineLogicProcessFunc(
-    RustLibertyExprOp op) {
+    ::LibertyExprOp op) {
   // The map of calc Toggle.
-  std::map<RustLibertyExprOp, PwrToggleSPCalcFunc> op_to_toggle_sp_calc_funcs =
-      {{RustLibertyExprOp::kNot,
+  std::map<LibertyExprOp, PwrToggleSPCalcFunc> op_to_toggle_sp_calc_funcs =
+      {{LibertyExprOp::kNot,
         [](const std::vector<PwrToggleSPValue>& input_port_toggle_sp)
             -> PwrToggleSPValue {
           double output_port_toggle =
@@ -49,7 +49,7 @@ std::optional<PwrToggleSPCalcFunc> PwrCalcToggleSP::getCombineLogicProcessFunc(
           return {._toggle_rate_value = output_port_toggle,
                   ._sp_value = output_port_sp};
         }},
-       {RustLibertyExprOp::kOr,
+       {LibertyExprOp::kOr,
         [](const std::vector<PwrToggleSPValue>& input_port_toggle_sp)
             -> PwrToggleSPValue {
           double input_port_toggle0 =
@@ -75,7 +75,7 @@ std::optional<PwrToggleSPCalcFunc> PwrCalcToggleSP::getCombineLogicProcessFunc(
           return {._toggle_rate_value = output_port_toggle,
                   ._sp_value = output_port_sp};
         }},
-       {RustLibertyExprOp::kAnd,
+       {LibertyExprOp::kAnd,
         [](const std::vector<PwrToggleSPValue>& input_port_toggle_sp)
             -> PwrToggleSPValue {
           double input_port_toggle0 =
@@ -99,7 +99,7 @@ std::optional<PwrToggleSPCalcFunc> PwrCalcToggleSP::getCombineLogicProcessFunc(
           return {._toggle_rate_value = output_port_toggle,
                   ._sp_value = output_port_sp};
         }},
-       {RustLibertyExprOp::kXor,
+       {LibertyExprOp::kXor,
         [](const std::vector<PwrToggleSPValue>& input_port_toggle_sp)
             -> PwrToggleSPValue {
           double input_port_toggle0 =
@@ -118,7 +118,7 @@ std::optional<PwrToggleSPCalcFunc> PwrCalcToggleSP::getCombineLogicProcessFunc(
           return {._toggle_rate_value = output_port_toggle,
                   ._sp_value = output_port_sp};
         }},
-       {RustLibertyExprOp::kPlus,
+       {LibertyExprOp::kPlus,
         [](const std::vector<PwrToggleSPValue>& input_port_toggle_sp)
             -> PwrToggleSPValue {
           double input_port_toggle0 =
@@ -138,7 +138,7 @@ std::optional<PwrToggleSPCalcFunc> PwrCalcToggleSP::getCombineLogicProcessFunc(
           return {._toggle_rate_value = output_port_toggle,
                   ._sp_value = output_port_sp};
         }},
-       {RustLibertyExprOp::kMult,
+       {LibertyExprOp::kMult,
         [](const std::vector<PwrToggleSPValue>& input_port_toggle_sp)
             -> PwrToggleSPValue {
           double input_port_toggle0 =
@@ -233,32 +233,32 @@ PwrToggleSPValue PwrCalcToggleSP::getToggleSPData(
  * @return PwrToggleSPValue
  */
 PwrToggleSPValue PwrCalcToggleSP::calcToggleSP(
-    RustLibertyExpr* expr, ieda::Vector<PwrVertex*>& input_vertexes) {
+    ::LibertyExpr* expr, ieda::Vector<PwrVertex*>& input_vertexes) {
   const char* port_name = expr->port_name;
   PwrToggleSPValue output_port_toggle_sp_val;
 
-  auto* left_expr = rust_get_expr_left(expr);
-  auto* right_expr = rust_get_expr_right(expr);
+  auto* left_expr = liberty_get_expr_left(expr);
+  auto* right_expr = liberty_get_expr_right(expr);
   switch (expr->op) {
     /*Monocular calculation.*/
-    case RustLibertyExprOp::kBuffer: {
+    case LibertyExprOp::kBuffer: {
       PwrToggleSPValue toggle_sp_data = getToggleSPData(
           port_name, input_vertexes, PwrDataSource::kDataPropagation);
       output_port_toggle_sp_val = toggle_sp_data;
       break;
     }
 
-    case RustLibertyExprOp::kOne: {
+    case LibertyExprOp::kOne: {
       output_port_toggle_sp_val = {._toggle_rate_value = 0.0, ._sp_value = 1.0};
       break;
     }
 
-    case RustLibertyExprOp::kZero: {
+    case LibertyExprOp::kZero: {
       output_port_toggle_sp_val = {._toggle_rate_value = 0.0, ._sp_value = 0.0};
       break;
     }
 
-    case RustLibertyExprOp::kNot: {
+    case LibertyExprOp::kNot: {
       auto left_port_toggle_sp_value = calcToggleSP(left_expr, input_vertexes);
       auto process_func = getCombineLogicProcessFunc(expr->op);
       LOG_FATAL_IF(!process_func);
@@ -267,11 +267,11 @@ PwrToggleSPValue PwrCalcToggleSP::calcToggleSP(
     }
 
     /*Binocular calculation.*/
-    case RustLibertyExprOp::kOr:
-    case RustLibertyExprOp::kAnd:
-    case RustLibertyExprOp::kXor:
-    case RustLibertyExprOp::kPlus:
-    case RustLibertyExprOp::kMult: {
+    case LibertyExprOp::kOr:
+    case LibertyExprOp::kAnd:
+    case LibertyExprOp::kXor:
+    case LibertyExprOp::kPlus:
+    case LibertyExprOp::kMult: {
       auto left_port_toggle_sp_value = calcToggleSP(left_expr, input_vertexes);
       auto right_port_toggle_sp_value =
           calcToggleSP(right_expr, input_vertexes);
@@ -284,11 +284,11 @@ PwrToggleSPValue PwrCalcToggleSP::calcToggleSP(
   }
 
   if (left_expr) {
-    rust_free_expr(left_expr);
+    liberty_free_expr(left_expr);
   }
 
   if (right_expr) {
-    rust_free_expr(right_expr);
+    liberty_free_expr(right_expr);
   }
 
   return output_port_toggle_sp_val;

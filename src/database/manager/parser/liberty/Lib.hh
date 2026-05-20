@@ -36,7 +36,7 @@
 #include "BTreeMap.hh"
 #include "FlatMap.hh"
 #include "FlatSet.hh"
-#include "LibParserRustC.hh"
+#include "LibParserCpp.hh"
 #include "Vector.hh"
 #include "include/Config.hh"
 #include "include/Type.hh"
@@ -59,7 +59,6 @@ enum class LibValueScale
 };
 class LibLutTableTemplate;
 class LibVectorTable;
-class LibertyExpr;
 
 /**
  * @brief The base object of the library.
@@ -588,8 +587,8 @@ class LibPort : public LibObject
   void set_port_slew_limit(AnalysisMode mode, double slew_limit);
   std::optional<double> get_port_slew_limit(AnalysisMode mode);
 
-  void set_func_expr(RustLibertyExpr* lib_expr) { _func_expr = lib_expr; }
-  RustLibertyExpr* get_func_expr() { return _func_expr; }
+  void set_func_expr(::LibertyExpr* lib_expr) { _func_expr = lib_expr; }
+  ::LibertyExpr* get_func_expr() { return _func_expr; }
 
   void set_func_expr_str(const char* func_expr_str) { _func_expr_str = func_expr_str; }
   auto& get_func_expr_str() { return _func_expr_str; }
@@ -631,7 +630,7 @@ class LibPort : public LibObject
   bool _clock_gate_clock_pin = false;   //!< The flag of gate clock pin.
   bool _clock_gate_enable_pin = false;  //!< The flag of gate enable pin.
   bool _is_clock = false;               //!< The explicit clock flag for emitted pins.
-  RustLibertyExpr* _func_expr = nullptr;
+  ::LibertyExpr* _func_expr = nullptr;
   std::string _func_expr_str;                                        //!< store func expr string for debug.
   double _port_cap = 0.0;                                            //!< The input pin corresponding to the port has capacitance.
   std::array<std::optional<double>, MODE_TRANS_SPLIT> _port_caps{};  //!< May be port cap split max rise, max fall, min rise,
@@ -1850,7 +1849,7 @@ class Lib
   Lib() = default;
   ~Lib() = default;
 
-  RustLibertyReader loadLibertyWithRustParser(const char* file_name);
+  LibertyReader loadLibertyWithCppParser(const char* file_name);
 
  private:
   FORBIDDEN_COPY(Lib);

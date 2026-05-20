@@ -258,9 +258,45 @@ IdbDefService* IdbBuilder::rustBuildVerilog(string file, std::string top_module_
   else
     rust_verilog_read->createDb(file.c_str(), top_module_name);
 
+  // update def unit 
+  updateDefUnit();
+
   checkNetPins();
 
   return _def_service;
+}
+
+void IdbBuilder::updateDefUnit(){
+  IdbLayout* layout = _def_service->get_layout();
+  IdbDesign* design = _def_service->get_design();
+
+  auto def_unit = design->get_units();
+  auto lef_unit = layout->get_units();
+
+  if(def_unit->get_micron_dbu() == -1) { 
+    def_unit->set_microns_dbu(lef_unit->get_micron_dbu());
+  }
+
+  if(def_unit->get_nanoseconds() == -1) { 
+    def_unit->set_nanoseconds(lef_unit->get_nanoseconds());
+  }
+
+  if(def_unit->get_picofarads() == -1) { 
+    def_unit->set_picofarads(lef_unit->get_picofarads());
+  }
+
+  if(def_unit->get_ohms() == -1) { 
+    def_unit->set_ohms(lef_unit->get_ohms());
+  }
+
+  if(def_unit->get_milliwatts() == -1) { 
+    def_unit->set_milliwatts(lef_unit->get_milliwatts());
+  }
+
+  if(def_unit->get_volts() == -1) { 
+    def_unit->set_volts(lef_unit->get_volts());
+  }
+
 }
 
 IdbDefService* IdbBuilder::buildDefFloorplan(string file)

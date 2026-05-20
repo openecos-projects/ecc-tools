@@ -554,7 +554,7 @@ unsigned Sta::readLiberty(const char *lib_file) {
   }
 
   Lib lib;
-  auto load_lib = lib.loadLibertyWithRustParser(lib_file);
+  auto load_lib = lib.loadLibertyWithCppParser(lib_file);
   addLibReaders(std::move(load_lib));
 
   LOG_INFO << "read liberty " << lib_file << " end ";
@@ -605,30 +605,30 @@ unsigned Sta::linkLibertys() {
     return 1;
   }
 
-  auto link_lib = [this](auto &lib_rust_reader) {
+  auto link_lib = [this](auto &liberty_reader) {
     // master should load all lib cell.
-    lib_rust_reader.set_build_cells(get_link_cells());
-    lib_rust_reader.linkLib();
-    auto lib = lib_rust_reader.get_library_builder()->takeLib();
+    liberty_reader.set_build_cells(get_link_cells());
+    liberty_reader.linkLib();
+    auto lib = liberty_reader.get_library_builder()->takeLib();
 
-    auto *lib_builder = lib_rust_reader.get_library_builder();
+    auto *lib_builder = liberty_reader.get_library_builder();
     delete lib_builder;
 
     addLib(std::move(lib));
   };
 
 #if 0
-  for (auto &lib_rust_reader : _lib_readers) {
-    link_lib(lib_rust_reader);
+  for (auto &liberty_reader : _lib_readers) {
+    link_lib(liberty_reader);
   }
 
 #else
   {
     ThreadPool pool(get_num_threads());
 
-    for (auto &lib_rust_reader : _lib_readers) {
+    for (auto &liberty_reader : _lib_readers) {
       pool.enqueue(
-          [link_lib, &lib_rust_reader]() { link_lib(lib_rust_reader); });
+          [link_lib, &liberty_reader]() { link_lib(liberty_reader); });
     }
   }
 
@@ -3329,7 +3329,8 @@ unsigned Sta::reportTiming(std::set<std::string> &&exclude_cell_names /*= {}*/,
     LOG_ERROR << "The design work space is not set.";
     return 0;
   }
-
+  
+  is_copy = false; // disable copy func
   if (std::filesystem::exists(design_work_space) && is_copy) {
     std::filesystem::create_directories(copy_design_work_space);
   }

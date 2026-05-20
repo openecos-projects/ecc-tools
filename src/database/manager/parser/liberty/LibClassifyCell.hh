@@ -37,12 +37,12 @@ class LibClassifyCell
 
  private:
   std::size_t hashCellPort(LibPort* port);
-  std::size_t hashCellPortFuncExpr(RustLibertyExpr* expr);
+  std::size_t hashCellPortFuncExpr(::LibertyExpr* expr);
 
   std::size_t calculateCellHash(LibCell* the_cell);
 
   bool comparePort(LibPort* port1, LibPort* port2);
-  bool comparePortFunc(RustLibertyExpr* expr1, RustLibertyExpr* expr2);
+  bool comparePortFunc(::LibertyExpr* expr1, ::LibertyExpr* expr2);
   bool comparePorts(LibCell* cell1, LibCell* cell2);
 
   bool compareTimingArc(LibArcSet* set1, LibArcSet* set2);
