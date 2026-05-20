@@ -32,9 +32,9 @@ DEL_BUILD="OFF"
 INSTALL_DEP="OFF"
 NON_INTERACTIVE="OFF"
 BUILD_THREADS="$(nproc)"
+BUILD_TYPE="Release"
 
 CMAKE_OPTIONS=(
-  "-DCMAKE_BUILD_TYPE=Release"
   "-DCMD_BUILD=ON"
 )
   # "-DBUILD_GUI=${BUILD_GUI:-OFF}"
@@ -58,7 +58,7 @@ help_msg_exit()
 echo -e "build.sh: Build iEDA executable binary"
 echo -e "Usage:"
 echo -e "  ${bold}bash build.sh${clear} [-h] [-n] [-r] [-b] [-d] [-i] [-p] "
-echo -e "                [-g] [-s] [-P] [-G] [-C] [-D] [-y]"
+echo -e "                [-g] [-s] [-P] [-G] [-C] [-D] [-y] [-M]"
 echo -e "                [-b ${underline}binary path${clear}] [-j ${underline}num${clear}] [-i apt|docker]"
 echo -e "Options:"
 echo -e "  ${bold}-h${clear} display this help and exit"
@@ -74,6 +74,7 @@ echo -e "  ${bold}-s${clear} enable address sanitizer (default OFF)"
 echo -e "  ${bold}-P${clear} enable performance profiling (default OFF)"
 echo -e "  ${bold}-G${clear} enable GPU acceleration (default OFF)"
 echo -e "  ${bold}-C${clear} enable compatibility mode (disable optimizations, default OFF)"
+echo -e "  ${bold}-M${clear} set CMAKE_BUILD_TYPE to Debug (default Release)"
 echo -e "  ${bold}-D${clear} dry-run mode (show cmake build commands)"
 echo -e "  ${bold}-y${clear} auto confirm all actions, non-interactive mode (defaults: OFF)"
 exit "$1";
@@ -88,6 +89,7 @@ build_ieda()
     "-DCMAKE_CXX_COMPILER=$CPP_COMPILER_PATH"
     "-DCMAKE_C_COMPILER=$C_COMPILER_PATH"
     "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$BINARY_DIR"
+    "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}"
     "${CMAKE_OPTIONS[@]}"
     "$G_BUILD_GENERATOR"
   )
@@ -372,6 +374,11 @@ opt_non_interactive()
   NON_INTERACTIVE="ON"
 }
 
+opt_debug_build()
+{
+  BUILD_TYPE="Debug"
+}
+
 opt_build_ecos()
 {
   CMAKE_OPTIONS+=("-DBUILD_ECOS=ON")
@@ -383,7 +390,7 @@ if [[ $1 != "" ]] && [[ $1 != -* ]]; then
   help_msg_exit 1
 fi
 
-while getopts j:b:t:i:rndDyp opt; do
+while getopts j:b:t:i:rndDypgsPGChM opt; do
   case "${opt}" in
     j) opt_thread_num "$OPTARG"   ;;
     b) opt_binary_dir "$OPTARG"   ;;
@@ -400,6 +407,7 @@ while getopts j:b:t:i:rndDyp opt; do
     P) CMAKE_OPTIONS+=("-DUSE_PROFILER=ON") ;;
     G) CMAKE_OPTIONS+=("-DUSE_GPU=ON")      ;;
     C) CMAKE_OPTIONS+=("-DCOMPATIBILITY_MODE=ON") ;;
+    M) opt_debug_build            ;;
     h) help_msg_exit 0            ;;
     *) help_msg_exit 1            ;;
   esac
