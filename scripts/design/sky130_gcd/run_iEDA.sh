@@ -2,7 +2,7 @@ set -e
 
 export WORKSPACE=$(cd "$(dirname "$0")";pwd)
 
-# (fixed) iEDA setting
+# (fixed) ecc_bin setting
 export CONFIG_DIR=$WORKSPACE/iEDA_config
 export FOUNDRY_DIR=$WORKSPACE/../../foundry/sky130
 export RESULT_DIR=$WORKSPACE/result
@@ -22,7 +22,7 @@ export CORE_AREA="9.996 10.08 139.964  140.048"
 # system variables
 PATH=$WORKSPACE/../../../bin:$PATH
 
-./iEDA -script "${TCL_SCRIPT_DIR}/iFP_script/run_iFP.tcl"
+./ecc_bin -script "${TCL_SCRIPT_DIR}/iFP_script/run_iFP.tcl"
 sed -i 's/\( [^+ ]*\) + NET  +/\1 + NET\1 +/' ${RESULT_DIR}/iFP_result.def
 
 TCL_SCRIPTS="iNO_script/run_iNO_fix_fanout.tcl
@@ -40,6 +40,6 @@ iPL_script/run_iPL_filler.tcl
 DB_script/run_def_to_gds_text.tcl"
 
 for SCRIPT in $TCL_SCRIPTS; do
-    echo ">>> $ iEDA -script ${TCL_SCRIPT_DIR}/${SCRIPT}"
-    ./iEDA -script "${TCL_SCRIPT_DIR}/${SCRIPT}"
+    echo ">>> $ ecc_bin -script ${TCL_SCRIPT_DIR}/${SCRIPT}"
+    ./ecc_bin -script "${TCL_SCRIPT_DIR}/${SCRIPT}"
 done
