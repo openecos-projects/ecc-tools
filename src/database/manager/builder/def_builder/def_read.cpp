@@ -33,6 +33,7 @@
 
 #include "def_read.h"
 
+#include <cstdlib>
 #include <cstdio>
 #include <regex>
 
@@ -1330,7 +1331,9 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
     io_name = ieda::Str::trimEscape(io_name);
     IdbPin* pin = nullptr;
     if (io_name.compare("*") == 0) {
-      net->add_pin_string(def_net->pin(i));
+      std::string pin_name = def_net->pin(i);
+      pin_name = ieda::Str::trimEscape(pin_name);
+      net->add_pin_string(pin_name);
     } else if (io_name.compare("PIN") == 0) {
       std::string pin_name = def_net->pin(i);
       pin_name = ieda::Str::trimEscape(pin_name);
@@ -1357,9 +1360,8 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
     }
   }
 
-  vector<string> io_name_array = net->get_pin_string_list();
-  if (io_name_array.size() > 0) {
-    design->connectInstancePinsToSpecialNet(io_name_array, net);
+  if (net->has_wildcard_instance_pins() && std::getenv("IDB_MATERIALIZE_SPECIALNET_WILDCARD_PINS") != nullptr) {
+    design->materializeSpecialNetWildcardPins(net);
   }
 
   IdbSpecialWireList* wire_list = net->get_wire_list();

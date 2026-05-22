@@ -118,6 +118,7 @@ class IdbSpecialNet
   IdbInstanceList* get_instance_list() { return _instance_list; }
   IdbSpecialWireList* get_wire_list() { return _wire_list; }
   vector<string>& get_pin_string_list() { return _pin_string_list; }
+  const vector<string>& get_pin_string_list() const { return _pin_string_list; }
 
   // setter
   void set_net_name(string name) { _net_name = name; }
@@ -142,19 +143,14 @@ class IdbSpecialNet
   bool erase_pin_ref(IdbPin* pin);
   bool erase_instance_ref(IdbInstance* instance);
 
-  void add_pin_string(string pin_name) { _pin_string_list.emplace_back(pin_name); }
+  void add_pin_string(string pin_name) { add_wildcard_instance_pin(pin_name); }
+  void add_wildcard_instance_pin(const string& term_name);
+  bool has_wildcard_instance_pins() const { return !_pin_string_list.empty(); }
+  bool matches_wildcard_instance_pin(const string& term_name) const;
 
   // operator
   int32_t get_layer_width(string layer_name);
-  bool containPin(std::string pin_name)
-  {
-    for (auto name : _pin_string_list) {
-      if (name.compare(pin_name) == 0) {
-        return true;
-      }
-    }
-    return false;
-  }
+  bool containPin(std::string pin_name) { return matches_wildcard_instance_pin(pin_name); }
 
  private:
   string _net_name;
@@ -169,7 +165,7 @@ class IdbSpecialNet
   IdbInstanceList* _instance_list;
   IdbSpecialWireList* _wire_list;
 
-  vector<string> _pin_string_list;
+  vector<string> _pin_string_list;  // DEF "( * pinName )" wildcard instance-pin terms.
 };
 
 class IdbSpecialNetList

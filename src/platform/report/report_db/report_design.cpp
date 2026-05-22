@@ -101,8 +101,10 @@ std::shared_ptr<ieda::ReportTable> ReportDesign::createInstancePinTable(idb::Idb
     *tbl << pin->get_pin_name() << ieda::Str::printf("(%d, %d)", pin->get_average_coordinate()->get_x(), pin->get_average_coordinate()->get_y());
     if (pin->is_net_pin()) {
       *tbl << "net pin" << pin->get_net()->get_net_name();
-    } else if (pin->is_special_net_pin()) {
-      *tbl << " special net pin" << pin->get_special_net()->get_net_name();
+    } else if (auto* special_net = pin->get_special_net() != nullptr ? pin->get_special_net()
+                                                                      : dmInst->get_idb_design()->findSpecialNetForInstancePin(pin);
+               special_net != nullptr) {
+      *tbl << " special net pin" << special_net->get_net_name();
     } else if (pin->is_io_pin()) {
       *tbl << "IO pin" << TABLE_SKIP;
     }

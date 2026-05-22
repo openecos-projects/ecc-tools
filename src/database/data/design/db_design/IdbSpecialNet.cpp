@@ -104,6 +104,20 @@ void IdbSpecialNet::add_instance(IdbInstance* instance)
   _instance_list->add_instance_ref(instance);
 }
 
+void IdbSpecialNet::add_wildcard_instance_pin(const string& term_name)
+{
+  if (term_name.empty() || matches_wildcard_instance_pin(term_name)) {
+    return;
+  }
+
+  _pin_string_list.emplace_back(term_name);
+}
+
+bool IdbSpecialNet::matches_wildcard_instance_pin(const string& term_name) const
+{
+  return std::find(_pin_string_list.begin(), _pin_string_list.end(), term_name) != _pin_string_list.end();
+}
+
 bool IdbSpecialNet::has_io_pin(IdbPin* io_pin)
 {
   return _io_pin_list != nullptr && _io_pin_list->contains(io_pin);

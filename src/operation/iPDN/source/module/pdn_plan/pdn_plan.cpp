@@ -79,7 +79,6 @@ void PdnPlan::globalConnect(const std::string pdn_net_name, const std::string in
   idb::IdbConnectType type = is_power ? idb::IdbConnectType::kPower : idb::IdbConnectType::kGround;
   idb::IdbSpecialNet* special_net = idb_design->createOrFindSpecialNet(pdn_net_name, type);
   special_net->add_pin_string(instance_pdn_pin_name);
-  idb_design->connectInstancePinsToSpecialNet({instance_pdn_pin_name}, special_net);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

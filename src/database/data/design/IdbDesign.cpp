@@ -35,6 +35,7 @@
 #include <fstream>
 #include <set>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace idb {
@@ -730,12 +731,37 @@ bool IdbDesign::connectPinToSpecialNet(IdbPin* pin, IdbSpecialNet* net)
   return true;
 }
 
+IdbSpecialNet* IdbDesign::findSpecialNetForInstancePin(IdbPin* pin) const
+{
+  if (pin == nullptr || pin->is_io_pin()) {
+    return nullptr;
+  }
+
+  if (pin->get_special_net() != nullptr) {
+    return pin->get_special_net();
+  }
+
+  if (_special_net_list == nullptr || pin->get_term() == nullptr) {
+    return nullptr;
+  }
+
+  const std::string term_name = pin->get_term_name();
+  for (auto* net : _special_net_list->get_net_list()) {
+    if (net != nullptr && net->matches_wildcard_instance_pin(term_name)) {
+      return net;
+    }
+  }
+
+  return nullptr;
+}
+
 int32_t IdbDesign::connectInstancePinsToSpecialNet(const std::vector<std::string>& pin_name_list, IdbSpecialNet* net)
 {
   if (_instance_list == nullptr || net == nullptr || pin_name_list.empty()) {
     return 0;
   }
 
+  std::unordered_set<std::string> pin_names(pin_name_list.begin(), pin_name_list.end());
   int32_t number = 0;
   for (auto* instance : _instance_list->get_instance_list()) {
     if (instance == nullptr || instance->get_pin_list() == nullptr) {
@@ -747,10 +773,93 @@ int32_t IdbDesign::connectInstancePinsToSpecialNet(const std::vector<std::string
         continue;
       }
 
-      if (std::find(pin_name_list.begin(), pin_name_list.end(), pin->get_term_name()) != pin_name_list.end()
-          && connectPinToSpecialNet(pin, net)) {
+      if (pin->get_term() != nullptr && pin_names.find(pin->get_term_name()) != pin_names.end() && connectPinToSpecialNet(pin, net)) {
         ++number;
-        break;
+      }
+    }
+  }
+
+  return number;
+}
+
+int32_t IdbDesign::materializeSpecialNetWildcardPins(IdbSpecialNet* net)
+{
+  if (_instance_list == nullptr || net == nullptr || !net->has_wildcard_instance_pins()) {
+    return 0;
+  }
+
+  std::unordered_set<std::string> wildcard_terms(net->get_pin_string_list().begin(), net->get_pin_string_list().end());
+  std::unordered_map<std::string, std::vector<IdbPin*>> pins_by_term;
+
+  for (auto* instance : _instance_list->get_instance_list()) {
+    if (instance == nullptr || instance->get_pin_list() == nullptr) {
+      continue;
+    }
+    for (auto* pin : instance->get_pin_list()->get_pin_list()) {
+      if (pin == nullptr || pin->get_term() == nullptr) {
+        continue;
+      }
+      const std::string term_name = pin->get_term_name();
+      if (wildcard_terms.find(term_name) != wildcard_terms.end()) {
+        pins_by_term[term_name].emplace_back(pin);
+      }
+    }
+  }
+
+  int32_t number = 0;
+  for (const auto& term : wildcard_terms) {
+    auto iter = pins_by_term.find(term);
+    if (iter == pins_by_term.end()) {
+      continue;
+    }
+    for (auto* pin : iter->second) {
+      if (!net->has_instance_pin(pin) && connectPinToSpecialNet(pin, net)) {
+        ++number;
+      }
+    }
+  }
+
+  return number;
+}
+
+int32_t IdbDesign::materializeAllSpecialNetWildcardPins()
+{
+  if (_special_net_list == nullptr || _instance_list == nullptr) {
+    return 0;
+  }
+
+  std::unordered_map<std::string, std::vector<IdbSpecialNet*>> nets_by_term;
+  for (auto* net : _special_net_list->get_net_list()) {
+    if (net == nullptr || !net->has_wildcard_instance_pins()) {
+      continue;
+    }
+    for (const auto& term : net->get_pin_string_list()) {
+      nets_by_term[term].emplace_back(net);
+    }
+  }
+
+  if (nets_by_term.empty()) {
+    return 0;
+  }
+
+  int32_t number = 0;
+  for (auto* instance : _instance_list->get_instance_list()) {
+    if (instance == nullptr || instance->get_pin_list() == nullptr) {
+      continue;
+    }
+    for (auto* pin : instance->get_pin_list()->get_pin_list()) {
+      if (pin == nullptr || pin->get_term() == nullptr) {
+        continue;
+      }
+      auto iter = nets_by_term.find(pin->get_term_name());
+      if (iter == nets_by_term.end()) {
+        continue;
+      }
+      for (auto* net : iter->second) {
+        if (net != nullptr && !net->has_instance_pin(pin) && connectPinToSpecialNet(pin, net)) {
+          ++number;
+          break;
+        }
       }
     }
   }
@@ -1065,7 +1174,8 @@ IdbConnectivityCheckResult IdbDesign::validateConnectivity(bool check_floating) 
           result.duplicate_pin_ref_count++;
           pushLimitedMessage(result.messages, "special net " + net->get_net_name() + " has duplicate pin ref " + pinDisplayName(pin));
         }
-        if (pin->get_special_net() != net) {
+        IdbSpecialNet* pin_special_net = pin->is_io_pin() ? pin->get_special_net() : findSpecialNetForInstancePin(pin);
+        if (pin_special_net != net) {
           result.stale_special_pin_ref_count++;
           pushLimitedMessage(result.messages, "special pin reverse net mismatch: " + pinDisplayName(pin) + " in " + net->get_net_name());
         }
@@ -1079,7 +1189,7 @@ IdbConnectivityCheckResult IdbDesign::validateConnectivity(bool check_floating) 
         continue;
       }
       for (auto* pin : inst->get_pin_list()->get_pin_list()) {
-        if (pin != nullptr && pin->get_net() == nullptr && pin->get_special_net() == nullptr) {
+        if (pin != nullptr && pin->get_net() == nullptr && findSpecialNetForInstancePin(pin) == nullptr) {
           result.floating_pin_count++;
         }
       }
