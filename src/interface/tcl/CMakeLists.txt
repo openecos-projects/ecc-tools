@@ -11,9 +11,6 @@ add_subdirectory(tcl_ircx)
 add_subdirectory(tcl_ifp)
 add_subdirectory(tcl_ipdn)
 add_subdirectory(tcl_ipnp)
-if(BUILD_GUI)
-add_subdirectory(tcl_gui)
-endif()
 add_subdirectory(tcl_ipl)
 add_subdirectory(tcl_ito)
 add_subdirectory(tcl_ista)
@@ -78,15 +75,6 @@ target_include_directories(ieda_tcl
     ${HOME_PLATFORM}/tool_manager
     ${HOME_PLATFORM}/tool_manager/tool_api
 )
-
-if(BUILD_GUI)
-  target_link_libraries(ieda_tcl PUBLIC tcl_gui)
-
-  target_include_directories(ieda_tcl 
-    PUBLIC 
-    ${HOME_INTERFACE}/tcl/tcl_gui
-  )
-endif()
 
 if(CONTEST)
   target_link_libraries(ieda_tcl PUBLIC tcl_contest)

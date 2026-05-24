@@ -25,7 +25,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall -Werror=return-type")
 set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -g -Wall -Werror=return-type")
 # set(CMAKE_BUILD_TYPE "Release")
-set(BUILD_ECOS ON)
+set(BUILD_ECOS OFF)
 set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -g2 -ggdb -Werror=return-type")
 
 # if(NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
@@ -41,7 +41,6 @@ else()
 endif()
 option(USE_PROFILER "Enable performance profiling (default OFF)" OFF)
 option(SANITIZER "Enable address sanitizer (default OFF)" OFF)
-option(BUILD_GUI "Enable GUI components (default OFF)" OFF)
 option(USE_GPU "Enable GPU acceleration (default OFF)" OFF)
 option(COMPATIBILITY_MODE "Enable compatibility mode (disable aggressive optimizations)" OFF)
 
@@ -107,11 +106,6 @@ if(SANITIZER)
     link_libraries("-fsanitize=address")
     message("address sanitizer load")
 endif()
-
-if(BUILD_GUI)
-    add_definitions(-DBUILD_GUI)
-endif()
-
 
 if (USE_GPU)
     add_definitions(-DUSE_GPU)

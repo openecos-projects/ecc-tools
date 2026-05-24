@@ -140,9 +140,7 @@ class NesterovPlace
   void printAcrossLongNet(std::ofstream& file_stream, int32_t max_width, int32_t max_height);
   void printIterationCoordi(std::ofstream& file_stream, int32_t cur_iter);
   void saveNesterovPlaceData(int32_t cur_iter);
-  void plotInstImage(std::string file_name);
   void plotInstJson(std::string file_name, int32_t cur_iter, float overflow);
-  void plotBinForceLine(std::string file_name);
   void printIterInfoToCsv(std::ofstream& file_stream, int32_t iter_num);
   void printDensityMapToCsv(std::string file_name);
 

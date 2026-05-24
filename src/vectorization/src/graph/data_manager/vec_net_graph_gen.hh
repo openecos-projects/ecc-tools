@@ -326,8 +326,6 @@ class VecNetGraphGenerator
   void toPy(const TopoGraph& graph, const std::string& path) const;
   void toPy(const WireGraph& graph, const std::string& path) const;
   void toJs(const std::vector<TopoGraph>& graphs, const std::string& path) const;
-  void toQt(const TopoGraph& graph, const bool& component_mode = false) const;
-  void toQt(const WireGraph& graph) const;
 
   static int getX(const LayoutDefPoint& point) { return bg::get<0>(point); }
   static int getY(const LayoutDefPoint& point) { return bg::get<1>(point); }
