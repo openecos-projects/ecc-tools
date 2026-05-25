@@ -51,6 +51,7 @@ IdbNet::IdbNet()
 
   _fix_bump = false;
   _frequency = -1;
+  _average_coordinate = nullptr;
 
   _io_pin_list = new IdbPins();
   _instance_pin_list = new IdbPins();
@@ -81,6 +82,11 @@ IdbNet::~IdbNet()
     delete _wire_list;
     _wire_list = nullptr;
   }
+
+  if (_average_coordinate != nullptr) {
+    delete _average_coordinate;
+    _average_coordinate = nullptr;
+  }
 }
 
 void IdbNet::clear_wire_list()
@@ -96,6 +102,17 @@ void IdbNet::set_connect_type(string type)
 void IdbNet::set_source_type(string type)
 {
   _source_type = IdbEnum::GetInstance()->get_instance_property()->get_type(type);
+}
+
+void IdbNet::set_average_coordinate(IdbCoordinate<int32_t>* average_coordinate)
+{
+  if (_average_coordinate == average_coordinate) {
+    return;
+  }
+  if (_average_coordinate != nullptr) {
+    delete _average_coordinate;
+  }
+  _average_coordinate = average_coordinate;
 }
 
 // If pin's direction is OUTPUT, the pin is a driven pin

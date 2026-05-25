@@ -24,6 +24,7 @@ set output_dir [file join $step_dir output]
 
 set input_def [file join $workspace_root CTS_ecc output gcd_CTS.def.gz]
 set input_verilog [file join $workspace_root CTS_ecc output gcd_CTS.v]
+set input_db [file join $workspace_root CTS_ecc output gcd_CTS_db]
 
 set output_def [file join $output_dir gcd_legalization.def.gz]
 set output_verilog [file join $output_dir gcd_legalization.v]
@@ -46,7 +47,7 @@ step_print_path "place_config" $place_config
 
 if {$RTL2GDS == 0} {
   puts "RTL2GDS is disabled, loading data."
-  step_load_design $flow_config $db_config $output_dir $tech_lef $lef_files $input_def $input_verilog $top_module
+  step_restore_or_load_design $flow_config $db_config $output_dir $tech_lef $lef_files $input_def $input_verilog $top_module $input_db
 }
 
 step_safe_eval {destroy_pl}

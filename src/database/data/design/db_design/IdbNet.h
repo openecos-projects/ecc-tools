@@ -167,7 +167,7 @@ class IdbNet : public IdbObject
   void set_fix_bump(bool fix_bump) { _fix_bump = fix_bump; }
   void set_frequency(double frequency) { _frequency = frequency; }
 
-  void set_average_coordinate(IdbCoordinate<int32_t>* average_coordinate) { _average_coordinate = average_coordinate; }
+  void set_average_coordinate(IdbCoordinate<int32_t>* average_coordinate);
 
   bool has_io_pin(IdbPin* io_pin);
   bool has_instance_pin(IdbPin* inst_pin);

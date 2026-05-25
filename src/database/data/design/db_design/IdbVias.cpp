@@ -94,7 +94,9 @@ void IdbVia::set_instance(IdbViaMaster* instance)
     _master_instance = nullptr;
   }
   _master_instance = instance;
-  _name = instance->get_name();
+  if (_master_instance != nullptr && !_master_instance->get_name().empty()) {
+    _name = _master_instance->get_name();
+  }
 }
 
 void IdbVia::reset_instance(IdbViaMaster* instance)

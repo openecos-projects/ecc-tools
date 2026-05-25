@@ -1,6 +1,13 @@
 # Usage:
 #   ecc -script steps/place.tcl gcd
 
+################################################################
+# enable load data from db
+# set RTL2GDS 0
+# set RESTORE_DATA 1
+# set RTL2GDS_FLOW 1
+################################################################
+
 set step_name "place"
 set script_dir [file normalize [file dirname [info script]]]
 source [file normalize [file join $script_dir step_common.tcl]]
@@ -24,6 +31,7 @@ set output_dir [file join $step_dir output]
 
 set input_def [file join $workspace_root fixFanout_ecc output gcd_fixFanout.def.gz]
 set input_verilog [file join $workspace_root fixFanout_ecc output gcd_fixFanout.v]
+set input_db [file join $workspace_root fixFanout_ecc output gcd_fixFanout_db]
 
 set output_def [file join $output_dir gcd_place.def.gz]
 set output_verilog [file join $output_dir gcd_place.v]
@@ -48,7 +56,7 @@ step_print_path "feature_map" $feature_map
 
 if {$RTL2GDS == 0} {
   puts "RTL2GDS is disabled, loading data."
-  step_load_design $flow_config $db_config $output_dir $tech_lef $lef_files $input_def $input_verilog $top_module
+  step_restore_or_load_design $flow_config $db_config $output_dir $tech_lef $lef_files $input_def $input_verilog $top_module $input_db
 }
 
 step_safe_eval {destroy_pl}

@@ -43,6 +43,7 @@ void register_idb(py::module& m)
   m.def("gds_save", saveGDSII, py::arg("gds_name"), py::arg("is_harden") = false);
   m.def("json_save", saveJson, py::arg("path"));
   m.def("save_data", saveData, py::arg("path"));
+  m.def("reset_data", resetData);
   m.def("load_data", loadData, py::arg("path"));
   m.def("write_soc_json", writeSocJson, py::arg("path"), py::arg("harden_cores") = std::vector<std::string>{});
   m.def("write_abstract_lef", writeAbstractLef, py::arg("output_lef_path"));

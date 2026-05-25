@@ -84,6 +84,12 @@ bool saveData(const std::string& path)
   return dmInst->saveData(path);
 }
 
+bool resetData()
+{
+  dmInst->resetData();
+  return true;
+}
+
 bool loadData(const std::string& path)
 {
   return dmInst->loadData(path);

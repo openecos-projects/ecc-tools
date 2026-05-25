@@ -45,6 +45,7 @@ int registerCmdDB()
   registerTclCmd(CmdSaveNetlist, "netlist_save");
   registerTclCmd(CmdSaveJSON, "json_save");
   registerTclCmd(CmdSaveData, "save_data");
+  registerTclCmd(CmdResetData, "reset_data");
   registerTclCmd(CmdLoadData, "load_data");
   registerTclCmd(CmdValidateIdb, "idb_validate");
   registerTclCmd(CmdWriteSocJson, "write_soc_json");
