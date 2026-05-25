@@ -3,12 +3,6 @@ cmake_minimum_required(VERSION 3.11)
 set(CMAKE_CXX_STANDARD 20)
 # set(CMAKE_BUILD_TYPE "Debug")
 
-option(BUILD_QT "If ON, build QT." OFF)
-if(BUILD_QT)
-    add_definitions(-DBUILD_QT)
-    message("-- iPL: ENABLE QT FOR PLOT")
-endif()
-
 # set
 set(HOME_iPL ${HOME_OPERATION}/iPL)
 set(iPL_API ${HOME_iPL}/api)

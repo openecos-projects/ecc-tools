@@ -87,9 +87,33 @@ TemperatureCoefficients get_via_temperature_coefficients(
 
 }  // namespace
 
-void ResistanceCalc::calc()
+bool ResistanceCalc::calc()
 {
-  LOG_FATAL_IF(corner_net_etch_pools_ == nullptr) << "etch pools not set.";
+  if (layout_data_ == nullptr) {
+    LOG_ERROR << "calculate resistance failed: LayoutData not initialized.";
+    return false;
+  }
+  if (topo_pool_ == nullptr) {
+    LOG_ERROR << "calculate resistance failed: TopoPool not initialized.";
+    return false;
+  }
+  if (layer_table_ == nullptr) {
+    LOG_ERROR << "calculate resistance failed: LayerTable not initialized.";
+    return false;
+  }
+  if (corner_net_etch_pools_ == nullptr) {
+    LOG_ERROR << "calculate resistance failed: etch pools not set.";
+    return false;
+  }
+  if (rc_table_ == nullptr) {
+    LOG_ERROR << "calculate resistance failed: RC table not set.";
+    return false;
+  }
+  if (corners_.empty()) {
+    LOG_ERROR << "calculate resistance failed: process corners not set.";
+    return false;
+  }
+
   const Size regular_net_count = layout_data_->regular_net_count();
   const Size corner_count = corners_.size();
 
@@ -178,6 +202,8 @@ void ResistanceCalc::calc()
       // results already written into pre-allocated span
     }
   }
+
+  return true;
 }
 
 std::pair<Micron, Micron> ResistanceCalc::node_range(const TopoEdge& e) const

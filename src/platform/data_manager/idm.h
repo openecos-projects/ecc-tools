@@ -85,6 +85,7 @@ class DataManager
   /// iDB init
   bool init(string config_path);
   void reset();
+  void resetData();
   bool readLef(string config_path);
   bool readLef(vector<string> lef_paths, bool b_techlef = false);
   bool readDef(string path);

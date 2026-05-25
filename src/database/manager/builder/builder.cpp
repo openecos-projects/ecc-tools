@@ -452,7 +452,12 @@ bool IdbBuilder::loadDesign(string folder)
   _def_service = new IdbDefService(layout);
 
   DesignRead design_read(layout);
-  return design_read.readDesign(_def_service->get_design(), folder);
+  if (!design_read.readDesign(_def_service->get_design(), folder)) {
+    return false;
+  }
+
+  buildBus();
+  return true;
 }
 
 bool IdbBuilder::saveData(string folder)
@@ -466,9 +471,10 @@ bool IdbBuilder::saveData(string folder)
 
   LayoutWrite layout_write(layout);
   DesignWrite design_write(design);
-  auto layout_future = std::async(std::launch::async, [&]() { return layout_write.writeLayout(folder); });
-  auto design_future = std::async(std::launch::async, [&]() { return design_write.writeDesign(folder); });
-  return layout_future.get() && design_future.get();
+  if (!layout_write.writeLayout(folder, false)) {
+    return false;
+  }
+  return design_write.writeDesign(folder, false);
 }
 
 bool IdbBuilder::loadData(string folder)
@@ -478,7 +484,7 @@ bool IdbBuilder::loadData(string folder)
   }
 
   LayoutRead layout_read;
-  if (!layout_read.readLayout(_lef_service->get_layout(), folder)) {
+  if (!layout_read.readLayout(_lef_service->get_layout(), folder, false)) {
     std::cout << "Read binary layout failed: " << folder << endl;
     return false;
   }

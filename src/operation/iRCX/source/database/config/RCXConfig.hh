@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-#include "RCXDefaults.hh"
+#include "Types.hh"
 
 namespace ircx {
 
@@ -48,7 +48,7 @@ class RCXConfig
  private:
   std::string _config_path;
   unsigned _thread_num = 64U;
-  F64 _operating_temperature = kDefaultOperatingTemperature;
+  F64 _operating_temperature = 25.0;
   std::string _output_dir;
   std::string _mapping_file;
   std::vector<CornerConfig> _corners;

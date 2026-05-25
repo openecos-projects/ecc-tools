@@ -55,18 +55,19 @@ unsigned TclInitRCX::exec()
       "WELCOME TO iRCX TCL-shell interface. \e[0m";
   std::cout << hello_info << std::endl;
 
-  RCXAPIInst.init();
+  ircx::RCXInitOptions options;
 
   TclOption* thread_option = getOptionOrArg("-thread");
   if (thread_option && thread_option->is_set_val()) {
-    unsigned thread_count = thread_option->getIntVal();
-    RCXAPIInst.init(thread_count);
+    options.thread_number = thread_option->getIntVal();
   }
 
   TclOption* temperature_option = getOptionOrArg("-temperature");
   if (temperature_option && temperature_option->is_set_val()) {
-    RCXAPIInst.setOperatingTemperature(temperature_option->getDoubleVal());
+    options.operating_temperature = temperature_option->getDoubleVal();
   }
+
+  RCX_API_INST.init(options);
 
   return 1;
 }

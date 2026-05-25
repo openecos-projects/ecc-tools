@@ -14,49 +14,32 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-/**
- * @File Name: tcl_web.cpp
- * @Brief :
- * @Author : Yell (12112088@qq.com)
- * @Version : 1.0
- * @Creat Date : 2022-04-15
- *
- */
-#include "tcl_web.h"
+#pragma once
 
-#include "gui_io.h"
-#include "tool_manager.h"
+#include "DRCHeader.hpp"
 
-namespace tcl {
+namespace idrc {
 
-CmdCaptureDesign::CmdCaptureDesign(const char* cmd_name) : TclCmd(cmd_name)
+class CornerSpacingRule
 {
-  auto* type = new TclStringOption(TCL_PATH, 1, nullptr);
-  addOption(type);
-}
-
-unsigned CmdCaptureDesign::check()
-{
-  // TclOption *file_name_option = getOptionOrArg("-path");
-  // LOG_FATAL_IF(!file_name_option);
-  return 1;
-}
-
-unsigned CmdCaptureDesign::exec()
-{
-  if (!check()) {
-    return 0;
+ public:
+  CornerSpacingRule() = default;
+  ~CornerSpacingRule() = default;
+  int32_t get_width_spacing(int32_t width)
+  {
+    for (int32_t i = width_spacing_list.size() - 1; i >= 0; i--) {
+      if (width > width_spacing_list[i].first) {
+        return width_spacing_list[i].second;
+      }
+    }
+    return width_spacing_list[0].second;
   }
 
-  std::string path = "";
-  TclOption* opt = getOptionOrArg(TCL_PATH);
-  if (opt->getStringVal() != nullptr) {
-    path = opt->getStringVal();
-  }
+  bool has_convex_corner = false;
+  bool has_concave_corner = false;
+  bool has_except_eol = false;
+  int32_t except_eol = -1;
+  std::vector<std::pair<int32_t, int32_t>> width_spacing_list;
+};
 
-  iplf::tmInst->guiCaptrueDesign(path);
-
-  return 1;
-}
-
-}  // namespace tcl
+}  // namespace idrc

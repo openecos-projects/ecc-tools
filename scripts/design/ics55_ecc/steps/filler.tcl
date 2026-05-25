@@ -1,6 +1,13 @@
 # Usage:
 #   ecc -script steps/filler.tcl gcd
 
+################################################################
+# enable load data from db
+# set RTL2GDS 0
+# set RESTORE_DATA 1
+# set RTL2GDS_FLOW 1
+################################################################
+
 set step_name "filler"
 set script_dir [file normalize [file dirname [info script]]]
 source [file normalize [file join $script_dir step_common.tcl]]
@@ -24,6 +31,7 @@ set output_dir [file join $step_dir output]
 
 set input_def [file join $workspace_root drc_ecc output gcd_drc.def.gz]
 set input_verilog [file join $workspace_root drc_ecc output gcd_drc.v]
+set input_db [file join $workspace_root drc_ecc output gcd_drc_db]
 
 set output_def [file join $output_dir gcd_filler.def.gz]
 set output_verilog [file join $output_dir gcd_filler.v]
@@ -46,7 +54,7 @@ step_print_path "filler_config" $filler_config
 
 if {$RTL2GDS == 0} {
   puts "RTL2GDS is disabled, loading data."
-  step_load_design $flow_config $db_config $output_dir $tech_lef $lef_files $input_def $input_verilog $top_module
+  step_restore_or_load_design $flow_config $db_config $output_dir $tech_lef $lef_files $input_def $input_verilog $top_module $input_db
 }
 
 run_filler -config $filler_config

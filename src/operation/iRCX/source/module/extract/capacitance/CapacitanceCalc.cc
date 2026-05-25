@@ -258,20 +258,26 @@ void accumulateSegmentCap(
 
 }  // namespace
 
-void CapacitanceCalc::calc()
+bool CapacitanceCalc::calc()
 {
-  validateInputs();
+  if (!validateInputs()) {
+    return false;
+  }
 
   const Size corner_count = corners_.size();
   const Size net_count = layout_data_->regular_net_count();
 
-  LOG_FATAL_IF(cap_tables_.size() != corner_count)
-      << "cap table count does not match corner count.";
+  if (cap_tables_.size() != corner_count) {
+    LOG_ERROR << "cap table count does not match corner count.";
+    return false;
+  }
 
   for (Size corner_idx = 0; corner_idx < corner_count; ++corner_idx) {
     const parser::CapTable* cap_table = cap_tables_[corner_idx];
-    LOG_FATAL_IF(cap_table == nullptr)
-        << "cap table missing for corner " << corners_[corner_idx]->get_technology();
+    if (cap_table == nullptr) {
+      LOG_ERROR << "cap table missing for corner " << corners_[corner_idx]->get_technology();
+      return false;
+    }
 
     #pragma omp parallel for schedule(dynamic)
     for (Size net_idx = 0; net_idx < net_count; ++net_idx) {
@@ -286,18 +292,45 @@ void CapacitanceCalc::calc()
 
   // merge per-net coupling cap entries (sequential)
   rc_table_->merge_net_ccap_entries();
+  return true;
 }
 
-void CapacitanceCalc::validateInputs() const
+bool CapacitanceCalc::validateInputs() const
 {
-  LOG_FATAL_IF(layout_data_ == nullptr) << "layout data not set.";
-  LOG_FATAL_IF(net_env_pools_ == nullptr) << "environment pools not set.";
-  LOG_FATAL_IF(corner_net_etch_pools_ == nullptr) << "etch pools not set.";
-  LOG_FATAL_IF(layer_table_ == nullptr) << "layer table not set.";
-  LOG_FATAL_IF(topo_pool_ == nullptr) << "topology pool not set.";
-  LOG_FATAL_IF(rc_table_ == nullptr) << "RC table not set.";
-  LOG_FATAL_IF(corners_.empty()) << "process corners not set.";
-  LOG_FATAL_IF(cap_tables_.empty()) << "cap tables not set.";
+  if (layout_data_ == nullptr) {
+    LOG_ERROR << "calculate capacitance failed: layout data not set.";
+    return false;
+  }
+  if (net_env_pools_ == nullptr) {
+    LOG_ERROR << "calculate capacitance failed: environment pools not set.";
+    return false;
+  }
+  if (corner_net_etch_pools_ == nullptr) {
+    LOG_ERROR << "calculate capacitance failed: etch pools not set.";
+    return false;
+  }
+  if (layer_table_ == nullptr) {
+    LOG_ERROR << "calculate capacitance failed: layer table not set.";
+    return false;
+  }
+  if (topo_pool_ == nullptr) {
+    LOG_ERROR << "calculate capacitance failed: topology pool not set.";
+    return false;
+  }
+  if (rc_table_ == nullptr) {
+    LOG_ERROR << "calculate capacitance failed: RC table not set.";
+    return false;
+  }
+  if (corners_.empty()) {
+    LOG_ERROR << "calculate capacitance failed: process corners not set.";
+    return false;
+  }
+  if (cap_tables_.empty()) {
+    LOG_ERROR << "calculate capacitance failed: cap tables not set.";
+    return false;
+  }
+
+  return true;
 }
 
 void CapacitanceCalc::calcNet(

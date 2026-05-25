@@ -67,10 +67,10 @@ class CapacitanceCalc
   void set_corners(const std::vector<itf::ProcessCorner*>& v) { corners_ = v; }
   void set_rc_table(RCTable* v) { rc_table_ = v; }
 
-  void calc();
+  [[nodiscard]] bool calc();
 
  private:
-  void validateInputs() const;
+  [[nodiscard]] bool validateInputs() const;
   void calcNet(
       Size corner_idx,
       Size net_idx,

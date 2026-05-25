@@ -17,10 +17,14 @@
 
 #include "DRCInterface.hpp"
 
+#include "AdjacentCutSpacingRule.hpp"
 #include "DataManager.hpp"
 #include "GDSPlotter.hpp"
+#include "IdbEnum.h"
 #include "Monitor.hpp"
+#include "ParallelRunLengthSpacingRule.hpp"
 #include "RuleValidator.hpp"
+#include "SameLayerCutSpacingRule.hpp"
 #include "feature_manager.h"
 #include "idm.h"
 
@@ -87,7 +91,7 @@ void DRCInterface::checkDef()
   }
   printSummary(type_violation_map);
   outputViolationJson(type_violation_map);
-  // outputViolationFile(type_violation_map);
+  outputViolationFile(type_violation_map);
   outputTofeature(type_violation_map);
 }
 
@@ -451,6 +455,26 @@ void DRCInterface::wrapRoutingDesignRule(RoutingLayer& routing_layer, idb::IdbLa
       exist_rule_set.insert(ViolationType::kCornerFillSpacing);
     }
   }
+  // CornerSpacingRule
+  {
+    std::vector<CornerSpacingRule>& corner_spacing_rule_list = routing_layer.get_corner_spacing_rule_list();
+    if (!idb_layer->get_lef58_corner_spacing_list().empty()) {
+      for (const std::shared_ptr<idb::routinglayer::Lef58CornerSpacing>& idb_corner_spacing : idb_layer->get_lef58_corner_spacing_list()) {
+        CornerSpacingRule corner_spacing_rule;
+        corner_spacing_rule.has_convex_corner = idb_corner_spacing->get_corner_type() == idb::routinglayer::Lef58CornerSpacing::CornerType::kConvexCorner;
+        corner_spacing_rule.has_concave_corner = idb_corner_spacing->get_corner_type() == idb::routinglayer::Lef58CornerSpacing::CornerType::kConcaveCorner;
+        corner_spacing_rule.has_except_eol = idb_corner_spacing->get_except_eol().has_value();
+        if (idb_corner_spacing->get_except_eol().has_value()) {
+          corner_spacing_rule.except_eol = idb_corner_spacing->get_except_eol().value();
+        }
+        for (const auto& width_spacing : idb_corner_spacing->get_width_spacing_list()) {
+          corner_spacing_rule.width_spacing_list.emplace_back(width_spacing.get_width(), width_spacing.get_spacing());
+        }
+        corner_spacing_rule_list.push_back(std::move(corner_spacing_rule));
+      }
+      exist_rule_set.insert(ViolationType::kCornerSpacing);
+    }
+  }
   // EndOfLineSpacingRule
   {
     std::vector<EndOfLineSpacingRule>& end_of_line_spacing_rule_list = routing_layer.get_end_of_line_spacing_rule_list();
@@ -493,6 +517,23 @@ void DRCInterface::wrapRoutingDesignRule(RoutingLayer& routing_layer, idb::IdbLa
         end_of_line_spacing_rule_list.push_back(end_of_line_spacing_rule);
       }
       exist_rule_set.insert(ViolationType::kEndOfLineSpacing);
+    }
+
+    if (idb_layer->get_spacing_list() != nullptr) {
+      for (auto& spacing_rule : idb_layer->get_spacing_list()->get_spacing_list()) {
+        EndOfLineSpacingRule end_of_line_spacing_rule;
+        if (spacing_rule->get_spacing_type() == idb::IdbLayerSpacingType::kSpacingEndOfLine) {
+          end_of_line_spacing_rule.eol_spacing = spacing_rule->get_min_spacing();
+          end_of_line_spacing_rule.eol_width = spacing_rule->get_eol_width();
+          end_of_line_spacing_rule.eol_within = spacing_rule->get_eol_within();
+          end_of_line_spacing_rule.has_par = spacing_rule->get_has_parallel_edge();
+          end_of_line_spacing_rule.par_spacing = spacing_rule->get_par_space();
+          end_of_line_spacing_rule.par_within = spacing_rule->get_par_within();
+          end_of_line_spacing_rule.has_two_edges = spacing_rule->get_has_parallel_edge() && spacing_rule->get_has_two_edges();
+          end_of_line_spacing_rule_list.push_back(end_of_line_spacing_rule);
+          exist_rule_set.insert(ViolationType::kEndOfLineSpacing);
+        }
+      }
     }
   }
   // MaximumWidthRule
@@ -601,15 +642,8 @@ void DRCInterface::wrapRoutingDesignRule(RoutingLayer& routing_layer, idb::IdbLa
   {
     ParallelRunLengthSpacingRule& parallel_run_length_spacing_rule = routing_layer.get_parallel_run_length_spacing_rule();
     std::shared_ptr<idb::IdbParallelSpacingTable> idb_spacing_table;
-    bool exist_spacing_table = false;
     if (idb_layer->get_spacing_table().get()->get_parallel().get() != nullptr && idb_layer->get_spacing_table().get()->is_parallel()) {
       idb_spacing_table = idb_layer->get_spacing_table()->get_parallel();
-      exist_spacing_table = true;
-    } else if (idb_layer->get_spacing_list() != nullptr && !idb_layer->get_spacing_table().get()->is_parallel()) {
-      idb_spacing_table = idb_layer->get_spacing_table_from_spacing_list()->get_parallel();
-      exist_spacing_table = true;
-    }
-    if (exist_spacing_table) {
       std::vector<int32_t>& width_list = parallel_run_length_spacing_rule.width_list;
       std::vector<int32_t>& parallel_length_list = parallel_run_length_spacing_rule.parallel_length_list;
       GridMap<int32_t>& width_parallel_length_map = parallel_run_length_spacing_rule.width_parallel_length_map;
@@ -622,6 +656,28 @@ void DRCInterface::wrapRoutingDesignRule(RoutingLayer& routing_layer, idb::IdbLa
           width_parallel_length_map[x][y] = idb_spacing_table->get_spacing_table()[x][y];
         }
       }
+      parallel_run_length_spacing_rule.has_spacing_table = true;
+      exist_rule_set.insert(ViolationType::kParallelRunLengthSpacing);
+    }
+
+    if (idb_layer->get_spacing_list() != nullptr) {
+      auto& spacing_list = parallel_run_length_spacing_rule.spacing_list;
+      for (auto& spacing_rule : idb_layer->get_spacing_list()->get_spacing_list()) {
+        LayerSpacingType spacing_type;
+        if (spacing_rule->get_spacing_type() == idb::IdbLayerSpacingType::kSpacingDefault) {
+          spacing_type = LayerSpacingType::kSpacingDefault;
+        } else if (spacing_rule->get_spacing_type() == idb::IdbLayerSpacingType::kSpacingRange) {
+          spacing_type = LayerSpacingType::kSpacingRange;
+        } else if (spacing_rule->get_spacing_type() == idb::IdbLayerSpacingType::kSpacingEndOfLine) {
+          continue;
+        } else {
+          spacing_type = LayerSpacingType::kNone;
+        }
+        LayerSpacing spacing{spacing_type, spacing_rule->get_min_spacing(), spacing_rule->get_min_width(), spacing_rule->get_max_width()};
+        spacing_list.push_back(spacing);
+      }
+
+      parallel_run_length_spacing_rule.has_spacing_list = true;
       exist_rule_set.insert(ViolationType::kParallelRunLengthSpacing);
     }
   }
@@ -634,6 +690,22 @@ void DRCInterface::wrapCutDesignRule(CutLayer& cut_layer, idb::IdbLayerCut* idb_
   // default
   {
     exist_rule_set.insert(ViolationType::kCutShort);
+  }
+  // AdjacentCutSpacingRule
+  {
+    AdjacentCutSpacingRule& adj_cut_spacing_rule = cut_layer.get_adjacent_cut_rule();
+    if (!idb_layer->get_spacings().empty()) {
+      for (auto& cut_spacing : idb_layer->get_spacings()) {
+        if (cut_spacing->get_adjacent_cuts().has_value()) {
+          adj_cut_spacing_rule.cut_spacing = cut_spacing->get_spacing();
+          adj_cut_spacing_rule.adjacnet_cuts = cut_spacing->get_adjacent_cuts()->get_adjacent_cuts();
+          adj_cut_spacing_rule.cut_within = cut_spacing->get_adjacent_cuts()->get_cut_within();
+          exist_rule_set.insert(ViolationType::kAdjacentCutSpacing);
+          // only one ADJACENTCUTS statement per cut layer
+          continue;
+        }
+      }
+    }
   }
   // CutEOLSpacingRule
   {
@@ -734,9 +806,17 @@ void DRCInterface::wrapCutDesignRule(CutLayer& cut_layer, idb::IdbLayerCut* idb_
   {
     SameLayerCutSpacingRule& same_layer_cut_spacing_rule = cut_layer.get_same_layer_cut_spacing_rule();
     if (!idb_layer->get_spacings().empty()) {
-      same_layer_cut_spacing_rule.curr_spacing = idb_layer->get_spacings().front()->get_spacing();
-      same_layer_cut_spacing_rule.curr_prl = 0;
-      same_layer_cut_spacing_rule.curr_prl_spacing = idb_layer->get_spacings().front()->get_spacing();
+      for (auto& cut_spacing : idb_layer->get_spacings()) {
+        if (cut_spacing->get_adjacent_cuts().has_value()) {
+          continue;
+        }
+        SameLayerCutSpacing same_layer_cut_spacing;
+        same_layer_cut_spacing.curr_spacing = cut_spacing->get_spacing();
+        same_layer_cut_spacing.curr_prl = -1;
+        same_layer_cut_spacing.curr_prl_spacing = -1;
+        same_layer_cut_spacing.has_same_net = cut_spacing->get_has_same_net();
+        same_layer_cut_spacing_rule.spacings.push_back(same_layer_cut_spacing);
+      }
       exist_rule_set.insert(ViolationType::kSameLayerCutSpacing);
     } else if (!idb_layer->get_lef58_spacing_table().empty()) {
       idb::cutlayer::Lef58SpacingTable* spacing_table = nullptr;
@@ -747,14 +827,13 @@ void DRCInterface::wrapCutDesignRule(CutLayer& cut_layer, idb::IdbLayerCut* idb_
         spacing_table = spacing_table_ptr.get();
       }
       if (spacing_table != nullptr) {
+        // NEXT 是否需要支持全部的规则，而不是第一条？
         idb::cutlayer::Lef58SpacingTable::CutSpacing cut_spacing = spacing_table->get_cutclass().get_cut_spacing(0, 0);
 
         int32_t curr_spacing = cut_spacing.get_cut_spacing1().value();
         int32_t curr_prl = spacing_table->get_prl().value().get_prl();
         int32_t curr_prl_spacing = cut_spacing.get_cut_spacing2().value();
-        same_layer_cut_spacing_rule.curr_spacing = curr_spacing;
-        same_layer_cut_spacing_rule.curr_prl = curr_prl;
-        same_layer_cut_spacing_rule.curr_prl_spacing = curr_prl_spacing;
+        same_layer_cut_spacing_rule.spacings.push_back({curr_spacing, curr_prl, curr_prl_spacing, false});
         exist_rule_set.insert(ViolationType::kSameLayerCutSpacing);
       }
     }
@@ -812,8 +891,30 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
   DRCLOG.info(Loc::current(), "Starting...");
 
   std::vector<idb::IdbInstance*>& idb_instance_list = dmInst->get_idb_def_service()->get_design()->get_instance_list()->get_instance_list();
+  std::vector<idb::IdbNet*>& idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list();
   std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
   std::vector<idb::IdbPin*>& idb_io_pin_list = dmInst->get_idb_def_service()->get_design()->get_io_pin_list()->get_pin_list();
+  std::map<idb::IdbPin*, int32_t> special_pin_net_idx_map;
+  int32_t regular_net_num = static_cast<int32_t>(idb_net_list.size());
+  for (size_t i = 0; i < idb_special_net_list.size(); ++i) {
+    int32_t special_net_id = regular_net_num + static_cast<int32_t>(i);
+    for (idb::IdbPin* idb_pin : idb_special_net_list[i]->get_instance_pin_list()->get_pin_list()) {
+      special_pin_net_idx_map[idb_pin] = special_net_id;
+    }
+    for (idb::IdbPin* idb_pin : idb_special_net_list[i]->get_io_pins()->get_pin_list()) {
+      special_pin_net_idx_map[idb_pin] = special_net_id;
+    }
+  }
+  auto get_pin_net_idx = [&](idb::IdbPin* idb_pin) {
+    auto it = special_pin_net_idx_map.find(idb_pin);
+    if (it != special_pin_net_idx_map.end()) {
+      return it->second;
+    }
+    if (!isSkipping(idb_pin->get_net())) {
+      return static_cast<int32_t>(idb_pin->get_net()->get_id());
+    }
+    return -1;
+  };
 
   size_t total_env_shape_num = 0;
   {
@@ -834,20 +935,7 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
         }
       }
     }
-    // special net
-    for (idb::IdbSpecialNet* idb_net : idb_special_net_list) {
-      for (idb::IdbSpecialWire* idb_wire : idb_net->get_wire_list()->get_wire_list()) {
-        for (idb::IdbSpecialWireSegment* idb_segment : idb_wire->get_segment_list()) {
-          if (idb_segment->is_via()) {
-            total_env_shape_num += idb_segment->get_via()->get_top_layer_shape().get_rect_list().size();
-            total_env_shape_num += idb_segment->get_via()->get_bottom_layer_shape().get_rect_list().size();
-            total_env_shape_num += idb_segment->get_via()->get_cut_layer_shape().get_rect_list().size();
-          } else {
-            total_env_shape_num += 1;
-          }
-        }
-      }
-    }
+
     // io pin without net
     for (idb::IdbPin* idb_io_pin : idb_io_pin_list) {
       for (idb::IdbLayerShape* port_box : idb_io_pin->get_port_box_list()) {
@@ -862,6 +950,10 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
       // instance obs
       for (idb::IdbLayerShape* obs_box : idb_instance->get_obs_box_list()) {
         for (idb::IdbRect* rect : obs_box->get_rect_list()) {
+          if (obs_box->get_layer() == nullptr) {
+            // DRCLOG.warn(Loc::current(), "The obs box layer is empty for instance ", idb_instance->get_name());
+            continue;
+          }
           ids::Shape ids_shape;
           ids_shape.net_idx = -1;
           ids_shape.ll_x = rect->get_low_x();
@@ -875,10 +967,7 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
       }
       // instance pin without net
       for (idb::IdbPin* idb_pin : idb_instance->get_pin_list()->get_pin_list()) {
-        int32_t net_idx = -1;
-        if (!isSkipping(idb_pin->get_net())) {
-          net_idx = static_cast<int32_t>(idb_pin->get_net()->get_id());
-        }
+        int32_t net_idx = get_pin_net_idx(idb_pin);
         for (idb::IdbLayerShape* port_box : idb_pin->get_port_box_list()) {
           for (idb::IdbRect* rect : port_box->get_rect_list()) {
             ids::Shape ids_shape;
@@ -936,57 +1025,10 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
         }
       }
     }
-    // special net
-    for (idb::IdbSpecialNet* idb_net : idb_special_net_list) {
-      for (idb::IdbSpecialWire* idb_wire : idb_net->get_wire_list()->get_wire_list()) {
-        for (idb::IdbSpecialWireSegment* idb_segment : idb_wire->get_segment_list()) {
-          if (idb_segment->is_via()) {
-            for (idb::IdbLayerShape layer_shape : {idb_segment->get_via()->get_top_layer_shape(), idb_segment->get_via()->get_bottom_layer_shape()}) {
-              for (idb::IdbRect* rect : layer_shape.get_rect_list()) {
-                ids::Shape ids_shape;
-                ids_shape.net_idx = -1;
-                ids_shape.ll_x = rect->get_low_x();
-                ids_shape.ll_y = rect->get_low_y();
-                ids_shape.ur_x = rect->get_high_x();
-                ids_shape.ur_y = rect->get_high_y();
-                ids_shape.layer_idx = layer_shape.get_layer()->get_id();
-                ids_shape.is_routing = true;
-                env_shape_list.push_back(ids_shape);
-              }
-            }
-            idb::IdbLayerShape cut_layer_shape = idb_segment->get_via()->get_cut_layer_shape();
-            for (idb::IdbRect* rect : cut_layer_shape.get_rect_list()) {
-              ids::Shape ids_shape;
-              ids_shape.net_idx = -1;
-              ids_shape.ll_x = rect->get_low_x();
-              ids_shape.ll_y = rect->get_low_y();
-              ids_shape.ur_x = rect->get_high_x();
-              ids_shape.ur_y = rect->get_high_y();
-              ids_shape.layer_idx = cut_layer_shape.get_layer()->get_id();
-              ids_shape.is_routing = false;
-              env_shape_list.push_back(ids_shape);
-            }
-          } else {
-            idb::IdbRect* idb_rect = idb_segment->get_bounding_box();
-            ids::Shape ids_shape;
-            ids_shape.net_idx = -1;
-            ids_shape.ll_x = idb_rect->get_low_x();
-            ids_shape.ll_y = idb_rect->get_low_y();
-            ids_shape.ur_x = idb_rect->get_high_x();
-            ids_shape.ur_y = idb_rect->get_high_y();
-            ids_shape.layer_idx = idb_segment->get_layer()->get_id();
-            ids_shape.is_routing = true;
-            env_shape_list.push_back(ids_shape);
-          }
-        }
-      }
-    }
+
     // io pin without net
     for (idb::IdbPin* idb_io_pin : idb_io_pin_list) {
-      int32_t net_idx = -1;
-      if (!isSkipping(idb_io_pin->get_net())) {
-        net_idx = static_cast<int32_t>(idb_io_pin->get_net()->get_id());
-      }
+      int32_t net_idx = get_pin_net_idx(idb_io_pin);
       for (idb::IdbLayerShape* port_box : idb_io_pin->get_port_box_list()) {
         for (idb::IdbRect* rect : port_box->get_rect_list()) {
           ids::Shape ids_shape;
@@ -1050,9 +1092,11 @@ std::vector<ids::Shape> DRCInterface::buildResultShapeList()
   DRCLOG.info(Loc::current(), "Starting...");
 
   std::vector<idb::IdbNet*>& idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list();
+  std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
 
   size_t total_result_shape_num = 0;
   {
+    // regular net
     for (idb::IdbNet* idb_net : idb_net_list) {
       for (idb::IdbRegularWire* idb_wire : idb_net->get_wire_list()->get_wire_list()) {
         for (idb::IdbRegularWireSegment* idb_segment : idb_wire->get_segment_list()) {
@@ -1067,6 +1111,20 @@ std::vector<ids::Shape> DRCInterface::buildResultShapeList()
             }
           }
           if (idb_segment->is_rect()) {
+            total_result_shape_num += 1;
+          }
+        }
+      }
+    }
+    // special net
+    for (idb::IdbSpecialNet* idb_net : idb_special_net_list) {
+      for (idb::IdbSpecialWire* idb_wire : idb_net->get_wire_list()->get_wire_list()) {
+        for (idb::IdbSpecialWireSegment* idb_segment : idb_wire->get_segment_list()) {
+          if (idb_segment->is_via()) {
+            total_result_shape_num += idb_segment->get_via()->get_top_layer_shape().get_rect_list().size();
+            total_result_shape_num += idb_segment->get_via()->get_bottom_layer_shape().get_rect_list().size();
+            total_result_shape_num += idb_segment->get_via()->get_cut_layer_shape().get_rect_list().size();
+          } else {
             total_result_shape_num += 1;
           }
         }
@@ -1140,6 +1198,54 @@ std::vector<ids::Shape> DRCInterface::buildResultShapeList()
       }
     }
   }
+  // special net
+  int32_t regular_net_num = static_cast<int32_t>(idb_net_list.size());
+  for (size_t i = 0; i < idb_special_net_list.size(); ++i) {
+    idb::IdbSpecialNet* idb_net = idb_special_net_list[i];
+    int32_t special_net_id = regular_net_num + static_cast<int32_t>(i);
+    for (idb::IdbSpecialWire* idb_wire : idb_net->get_wire_list()->get_wire_list()) {
+      for (idb::IdbSpecialWireSegment* idb_segment : idb_wire->get_segment_list()) {
+        if (idb_segment->is_via()) {
+          for (idb::IdbLayerShape layer_shape : {idb_segment->get_via()->get_top_layer_shape(), idb_segment->get_via()->get_bottom_layer_shape()}) {
+            for (idb::IdbRect* rect : layer_shape.get_rect_list()) {
+              ids::Shape ids_shape;
+              ids_shape.net_idx = special_net_id;
+              ids_shape.ll_x = rect->get_low_x();
+              ids_shape.ll_y = rect->get_low_y();
+              ids_shape.ur_x = rect->get_high_x();
+              ids_shape.ur_y = rect->get_high_y();
+              ids_shape.layer_idx = layer_shape.get_layer()->get_id();
+              ids_shape.is_routing = true;
+              result_shape_list.push_back(ids_shape);
+            }
+          }
+          idb::IdbLayerShape cut_layer_shape = idb_segment->get_via()->get_cut_layer_shape();
+          for (idb::IdbRect* rect : cut_layer_shape.get_rect_list()) {
+            ids::Shape ids_shape;
+            ids_shape.net_idx = special_net_id;
+            ids_shape.ll_x = rect->get_low_x();
+            ids_shape.ll_y = rect->get_low_y();
+            ids_shape.ur_x = rect->get_high_x();
+            ids_shape.ur_y = rect->get_high_y();
+            ids_shape.layer_idx = cut_layer_shape.get_layer()->get_id();
+            ids_shape.is_routing = false;
+            result_shape_list.push_back(ids_shape);
+          }
+        } else {
+          idb::IdbRect* idb_rect = idb_segment->get_bounding_box();
+          ids::Shape ids_shape;
+          ids_shape.net_idx = special_net_id;
+          ids_shape.ll_x = idb_rect->get_low_x();
+          ids_shape.ll_y = idb_rect->get_low_y();
+          ids_shape.ur_x = idb_rect->get_high_x();
+          ids_shape.ur_y = idb_rect->get_high_y();
+          ids_shape.layer_idx = idb_segment->get_layer()->get_id();
+          ids_shape.is_routing = true;
+          result_shape_list.push_back(ids_shape);
+        }
+      }
+    }
+  }
   DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
   return result_shape_list;
 }
@@ -1170,6 +1276,18 @@ void DRCInterface::outputViolationJson(std::map<std::string, std::vector<ids::Vi
   std::string& temp_directory_path = DRCDM.getConfig().temp_directory_path;
 
   std::vector<idb::IdbNet*>& idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list();
+  std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
+  int32_t regular_net_num = static_cast<int32_t>(idb_net_list.size());
+  auto get_net_name = [&](int32_t net_idx, const std::string& obs_name) {
+    if (0 <= net_idx && net_idx < regular_net_num) {
+      return idb_net_list[net_idx]->get_net_name();
+    }
+    int32_t special_net_idx = net_idx - regular_net_num;
+    if (0 <= special_net_idx && special_net_idx < static_cast<int32_t>(idb_special_net_list.size())) {
+      return idb_special_net_list[special_net_idx]->get_net_name();
+    }
+    return obs_name;
+  };
   std::vector<nlohmann::json> violation_json_list;
   for (auto& [type, violation_list] : type_violation_map) {
     for (ids::Violation& violation : violation_list) {
@@ -1183,11 +1301,7 @@ void DRCInterface::outputViolationJson(std::map<std::string, std::vector<ids::Vi
       }
       violation_json["shape"] = {violation.ll_x, violation.ll_y, violation.ur_x, violation.ur_y, routing_layer_list[layer_idx].get_layer_name()};
       for (int32_t net_idx : violation.violation_net_set) {
-        if (net_idx != -1) {
-          violation_json["net"].push_back(idb_net_list[net_idx]->get_net_name());
-        } else {
-          violation_json["net"].push_back("obs");
-        }
+        violation_json["net"].push_back(get_net_name(net_idx, "obs"));
       }
       violation_json_list.push_back(violation_json);
     }
@@ -1208,6 +1322,18 @@ void DRCInterface::outputViolationFile(std::map<std::string, std::vector<ids::Vi
   std::string& temp_directory_path = DRCDM.getConfig().temp_directory_path;
 
   std::vector<idb::IdbNet*>& idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list();
+  std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
+  int32_t regular_net_num = static_cast<int32_t>(idb_net_list.size());
+  auto get_net_name = [&](int32_t net_idx, const std::string& obs_name) {
+    if (0 <= net_idx && net_idx < regular_net_num) {
+      return idb_net_list[net_idx]->get_net_name();
+    }
+    int32_t special_net_idx = net_idx - regular_net_num;
+    if (0 <= special_net_idx && special_net_idx < static_cast<int32_t>(idb_special_net_list.size())) {
+      return idb_special_net_list[special_net_idx]->get_net_name();
+    }
+    return obs_name;
+  };
   for (auto& [type, violation_list] : type_violation_map) {
     std::ofstream* violation_file = DRCUTIL.getOutputFileStream(DRCUTIL.getString(temp_directory_path, type, ".txt"));
     for (ids::Violation& violation : violation_list) {
@@ -1221,11 +1347,7 @@ void DRCInterface::outputViolationFile(std::map<std::string, std::vector<ids::Vi
 
       DRCUTIL.pushStream(violation_file, "{ ");
       for (int32_t net_idx : violation.violation_net_set) {
-        if (net_idx != -1) {
-          DRCUTIL.pushStream(violation_file, idb_net_list[net_idx]->get_net_name(), " ");
-        } else {
-          DRCUTIL.pushStream(violation_file, "-1", " ");
-        }
+        DRCUTIL.pushStream(violation_file, get_net_name(net_idx, "-1"), " ");
       }
       DRCUTIL.pushStream(violation_file, "}", " ");
 

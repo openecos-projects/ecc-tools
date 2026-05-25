@@ -21,42 +21,53 @@
 namespace ircx {
 
 #define RCX_API_INST (ircx::RCXAPI::getInst())
-#define RCXAPIInst RCX_API_INST
 
-class RCXAPI final {
+inline constexpr unsigned kDefaultThreadCount = 64U;
+inline constexpr double kDefaultOperatingTemperature = 25.0F;
+
+struct RCXInitOptions
+{
+  unsigned thread_number = kDefaultThreadCount;
+  double operating_temperature = kDefaultOperatingTemperature;
+};
+
+class RCXAPI
+{
  public:
-  static RCXAPI& getInst() {
+  static auto getInst() -> RCXAPI&
+  {
     static RCXAPI inst;
     return inst;
   }
 
-  void init();
-  void init(unsigned thread_number);
-  void init(unsigned thread_number, double temperature);
-  void setOperatingTemperature(double temperature);
-  void resetAPI();
+  static auto init(const RCXInitOptions& options = {}) -> void;
+  static auto init(const std::string& config_file) -> void;
+  static auto resetAPI() -> void;
 
-  [[nodiscard]] unsigned readCorner(const std::string& corner_name,
-                                    const char* itf_file,
-                                    const char* captab_file);
-  [[nodiscard]] unsigned readMapping(const char* mapping_file);
+  static auto readCorner(const std::string& corner_name,
+                         const char* itf_file,
+                         const char* captab_file) -> bool;
+  static auto readMapping(const char* mapping_file) -> bool;
 
-  [[nodiscard]] unsigned adaptDB();
+  static auto adaptDB() -> bool;
 
-  [[nodiscard]] unsigned checkShortOpen();
-  [[nodiscard]] unsigned buildTopology();
-  [[nodiscard]] unsigned buildEnvironment();
-  [[nodiscard]] unsigned buildProcessVariation();
-  [[nodiscard]] unsigned extractParasitics();
-  [[nodiscard]] unsigned run();
-  [[nodiscard]] unsigned runFromConfig(const std::string& config);
+  static auto checkShortOpen() -> bool;
+  static auto buildTopology() -> bool;
+  static auto buildEnvironment() -> bool;
+  static auto buildProcessVariation() -> bool;
+  static auto extractParasitics() -> bool;
+  static auto run() -> void;
+  static auto runRCX() -> void;
 
-  [[nodiscard]] unsigned reportSpef(const std::string& output_dir);
+  static auto report(const std::string& output_dir) -> void;
 
-  RCXAPI(const RCXAPI&) = delete;
-  RCXAPI& operator=(const RCXAPI&) = delete;
-  RCXAPI(RCXAPI&&) = delete;
-  RCXAPI& operator=(RCXAPI&&) = delete;
+  [[nodiscard]] static auto runSuccess() -> bool;
+  [[nodiscard]] static auto reportSuccess() -> bool;
+
+  RCXAPI(const RCXAPI& other) = delete;
+  RCXAPI(RCXAPI&& other) = delete;
+  auto operator=(const RCXAPI& other) -> RCXAPI& = delete;
+  auto operator=(RCXAPI&& other) -> RCXAPI& = delete;
 
  private:
   RCXAPI() = default;

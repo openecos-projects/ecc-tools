@@ -33,6 +33,7 @@ bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_
 bool saveGDSII(const std::string& gds_name, bool is_harden = false);
 bool saveJson(const std::string& path);
 bool saveData(const std::string& path);
+bool resetData();
 bool loadData(const std::string& path);
 bool writeSocJson(const std::string& path, const std::vector<std::string>& harden_cores = {});
 bool writeAbstractLef(const std::string& output_lef_path);

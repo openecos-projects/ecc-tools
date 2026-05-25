@@ -20,14 +20,17 @@
 
 namespace ircx {
 
-class Setup final {
+class Setup
+{
  public:
-  [[nodiscard]] static unsigned initialize(const std::string& config);
-  [[nodiscard]] static unsigned readCorner(const std::string& corner_name,
-                                           const char* itf_file,
-                                           const char* captab_file);
-  [[nodiscard]] static unsigned readMapping(const char* mapping_file);
-  [[nodiscard]] static unsigned readData();
+  Setup() = delete;
+
+  [[nodiscard]] static auto initialize(const std::string& config) -> bool;
+  [[nodiscard]] static auto readCorner(const std::string& corner_name,
+                                       const char* itf_file,
+                                       const char* captab_file) -> bool;
+  [[nodiscard]] static auto readMapping(const char* mapping_file) -> bool;
+  [[nodiscard]] static auto readData() -> bool;
 };
 
 }  // namespace ircx

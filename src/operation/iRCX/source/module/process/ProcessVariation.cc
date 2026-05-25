@@ -37,8 +37,29 @@ void ProcessVariation::reset()
   corner_net_etch_pools_.clear();
 }
 
-void ProcessVariation::buildEtchPools()
+bool ProcessVariation::buildEtchPools()
 {
+  if (!layout_data_) {
+    LOG_ERROR << "build process variation failed: LayoutData not initialized.";
+    return false;
+  }
+  if (!net_env_pools_) {
+    LOG_ERROR << "build process variation failed: environment pools not set.";
+    return false;
+  }
+  if (!layer_table_) {
+    LOG_ERROR << "build process variation failed: LayerTable not initialized.";
+    return false;
+  }
+  if (!topo_pool_) {
+    LOG_ERROR << "build process variation failed: TopoPool not initialized.";
+    return false;
+  }
+  if (corners_.empty()) {
+    LOG_ERROR << "build process variation failed: process corners not set.";
+    return false;
+  }
+
   initMetalDensity();
   initEtchIntervals();
 
@@ -73,6 +94,8 @@ void ProcessVariation::buildEtchPools()
           corner_net_etch_pools_[corner_net_pool_index(corner_idx, net_idx)]);
     }
   }
+
+  return true;
 }
 
 void ProcessVariation::initMetalDensity()
@@ -83,8 +106,6 @@ void ProcessVariation::initMetalDensity()
 
 void ProcessVariation::initEtchIntervals()
 {
-  LOG_FATAL_IF(net_env_pools_ == nullptr) << "environment pools not set.";
-
   net_num_ = layout_data_->regular_net_count();
   corner_num_ = corners_.size();
   corner_net_etch_pools_.clear();

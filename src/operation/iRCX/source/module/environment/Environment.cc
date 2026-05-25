@@ -22,6 +22,7 @@
 #include "LayoutData.hh"
 #include "TopoPool.hh"
 #include "IntervalEngine.hh"
+#include "log/Log.hh"
 namespace ircx {
 
 void Environment::reset()
@@ -35,9 +36,16 @@ void Environment::reset()
   net_env_pools_.clear();
 }
 
-void Environment::buildTracks()
+bool Environment::buildTracks()
 {
-  LOG_FATAL_IF(!layout_data_) << "LayoutData not initialized.";
+  if (!layout_data_) {
+    LOG_ERROR << "build environment tracks failed: LayoutData not initialized.";
+    return false;
+  }
+  if (!topo_pool_) {
+    LOG_ERROR << "build environment tracks failed: TopoPool not initialized.";
+    return false;
+  }
 
   const std::map<Size, RoutingLayer>& routing_layers = layout_data_->routing_layers;
 
@@ -87,7 +95,10 @@ void Environment::buildTracks()
     track.set_bucket_num(bucket_num);
     track.set_bucket_dlt(bucket_dlt);
 
-    track.initTrack();
+    if (!track.initTrack()) {
+      LOG_ERROR << "build environment tracks failed on layer " << lid;
+      return false;
+    }
     layer_to_track_[lid] = std::move(track);
   }
 
@@ -115,11 +126,20 @@ void Environment::buildTracks()
       layer_to_track_.at(lid).addEdge(edge);
     }
   }
+
+  return true;
 }
 
-void Environment::buildPixels()
+bool Environment::buildPixels()
 {
-  LOG_FATAL_IF(!layout_data_) << "LayoutData not initialized.";
+  if (!layout_data_) {
+    LOG_ERROR << "build environment pixels failed: LayoutData not initialized.";
+    return false;
+  }
+  if (!topo_pool_) {
+    LOG_ERROR << "build environment pixels failed: TopoPool not initialized.";
+    return false;
+  }
 
   const std::map<Size, RoutingLayer>& routing_layers = layout_data_->routing_layers;
 
@@ -169,7 +189,10 @@ void Environment::buildPixels()
     pixel.set_ny(ny);
     pixel.set_dy(dy);
 
-    pixel.initPixel();
+    if (!pixel.initPixel()) {
+      LOG_ERROR << "build environment pixels failed on layer " << lid;
+      return false;
+    }
     layer_to_pixel_prefer_dir_[lid] = pixel;
     layer_to_pixel_nonprefer_dir_[lid] = std::move(pixel);
   }
@@ -198,6 +221,8 @@ void Environment::buildPixels()
   for (const TopoEdge& edge : topo_pool_->special_edge_pool()) {
     add_pixel_edge(edge);
   }
+
+  return true;
 }
 
 void Environment::buildSearchTrackNumMap()
@@ -213,10 +238,20 @@ void Environment::buildSearchTrackNumMap()
   }
 }
 
-void Environment::buildNetEnvPools()
+bool Environment::buildNetEnvPools()
 {
-  buildTracks();
-  buildPixels();
+  if (!layout_data_) {
+    LOG_ERROR << "build environment failed: LayoutData not initialized.";
+    return false;
+  }
+  if (!topo_pool_) {
+    LOG_ERROR << "build environment failed: TopoPool not initialized.";
+    return false;
+  }
+
+  if (!buildTracks() || !buildPixels()) {
+    return false;
+  }
   buildSearchTrackNumMap();
 
   Size net_num = layout_data_->regular_net_count();
@@ -352,6 +387,8 @@ void Environment::buildNetEnvPools()
       net_env_pool.append_edge_env_interval_pool(std::move(out));
     }
   }
+
+  return true;
 }
 
 } // namespace ircx

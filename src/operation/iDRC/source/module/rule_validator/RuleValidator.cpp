@@ -19,7 +19,9 @@
 #include "DRCHeader.hpp"
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
+#include "PlanarRect.hpp"
 #include "RVCluster.hpp"
+#include "Utility.hpp"
 
 namespace idrc {
 
@@ -545,7 +547,15 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
             } else {
               std::vector<GTLRectInt> delta_overlap_list;
               delta_rect_rtree.query(bgi::intersects(gtl_rect), std::back_inserter(delta_overlap_list));
-              max_rect_data.isEnv = delta_overlap_list.empty();
+              max_rect_data.isEnv = true;
+              for (auto& delta_rect : delta_overlap_list) {
+                PlanarRect delta_planar_rect = DRCUTIL.convertToPlanarRect(delta_rect);
+                PlanarRect max_rect = DRCUTIL.convertToPlanarRect(max_rect_data.rect);
+                if (DRCUTIL.isOpenOverlap(delta_planar_rect, max_rect)) {
+                  max_rect_data.isEnv = false;
+                  break;
+                }
+              }
             }
           }
           is_polygon_env = is_polygon_env && max_rect_data.isEnv;

@@ -495,6 +495,7 @@ int LefRead::parse_layer_cut(lefiLayer* lef_layer, IdbLayerCut* layer_cut)
       double cut_within = lef_layer->spacingAdjacentWithin(i);
       spacing->set_adjacent_cuts(IdbLayerCutSpacing::AdjacentCuts(adj_cuts, transUnitDB(cut_within)));
     }
+    spacing->set_has_same_net(lef_layer->hasSpacingSamenet(i));
     layer_cut->add_spacing(spacing);
   }
 
@@ -670,6 +671,19 @@ int LefRead::parse_layer_routing(lefiLayer* lef_layer, IdbLayerRouting* layer_ro
         auto& spacing_notch = layer_routing->get_spacing_notchlength();
         spacing_notch.set_notch_length(transUnitDB(lef_layer->spacingNotchLength(i)));
         spacing_notch.set_min_spacing(transUnitDB(lef_layer->spacing(i)));
+        // 如果有notchLength关键字，不能再算作Spacing规则
+        continue;
+      }
+      if (lef_layer->hasSpacingEndOfLine(i)) {
+        layer_spacing->set_spacing_type(IdbLayerSpacingType::kSpacingEndOfLine);
+        layer_spacing->set_eol_width(transUnitDB(lef_layer->spacingEolWidth(i)));
+        layer_spacing->set_eol_within(transUnitDB(lef_layer->spacingEolWithin(i)));
+        layer_spacing->set_has_parallel_edge(lef_layer->hasSpacingParellelEdge(i));
+        if (layer_spacing->get_has_parallel_edge()) {
+          layer_spacing->set_par_space(transUnitDB(lef_layer->spacingParSpace(i)));
+          layer_spacing->set_par_within(transUnitDB(lef_layer->spacingParWithin(i)));
+          layer_spacing->set_has_two_edges(lef_layer->hasSpacingTwoEdges(i));
+        }
       }
       spacing_list->add_spacing(layer_spacing);
     }

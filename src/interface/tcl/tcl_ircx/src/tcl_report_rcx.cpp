@@ -22,6 +22,7 @@
  * @date 2025-12-09
  */
 #include "RCXAPI.hh"
+#include "log/Log.hh"
 #include "tcl_ircx.h"
 
 namespace tcl {
@@ -35,8 +36,10 @@ TclReportRCX::TclReportRCX(const char* cmd_name) : TclCmd(cmd_name)
 unsigned TclReportRCX::check()
 {
   TclOption* file_name_option = getOptionOrArg("file_name");
-  LOG_FATAL_IF(!file_name_option);
-  LOG_FATAL_IF(!file_name_option->is_set_val());
+  if (!file_name_option || !file_name_option->is_set_val()) {
+    LOG_ERROR << "report_rcx requires file_name.";
+    return 0;
+  }
   return 1;
 }
 
@@ -49,7 +52,8 @@ unsigned TclReportRCX::exec()
   TclOption* file_name_option = getOptionOrArg("file_name");
   const char* output_dir = file_name_option->getStringVal();
 
-  return RCXAPIInst.reportSpef(output_dir ? output_dir : ".");
+  RCX_API_INST.report(output_dir ? output_dir : ".");
+  return RCX_API_INST.reportSuccess() ? 1U : 0U;
 }
 
 }  // namespace tcl

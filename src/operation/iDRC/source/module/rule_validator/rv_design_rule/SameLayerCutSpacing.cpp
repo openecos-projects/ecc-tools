@@ -14,6 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "PlanarRect.hpp"
 #include "RuleValidator.hpp"
 
 namespace idrc {
@@ -36,9 +37,21 @@ void RuleValidator::verifySameLayerCutSpacing(RVCluster& rv_cluster)
     }
     CutLayer& cut_layer = cut_layer_list[cut_layer_idx];
     SameLayerCutSpacingRule& same_layer_cut_spacing_rule = cut_layer.get_same_layer_cut_spacing_rule();
-    int32_t curr_spacing = same_layer_cut_spacing_rule.curr_spacing;
-    int32_t curr_prl_spacing = same_layer_cut_spacing_rule.curr_prl_spacing;
-    int32_t curr_prl = -1 * same_layer_cut_spacing_rule.curr_prl;
+    bool has_same_net = false;
+    int32_t curr_same_net_spacing = -1;
+    int32_t curr_spacing = -1;
+    int32_t curr_prl_spacing = -1;
+    int32_t curr_prl = -1;
+    for (auto& spacing_rule : same_layer_cut_spacing_rule.spacings) {
+      if (spacing_rule.has_same_net) {
+        has_same_net = true;
+        curr_same_net_spacing = spacing_rule.curr_spacing;
+      } else {
+        curr_spacing = spacing_rule.curr_spacing;
+      }
+      curr_prl = -1 * spacing_rule.curr_prl;
+      curr_prl_spacing = spacing_rule.curr_prl_spacing;
+    }
 
     for (const CutData& cut_data : cut_layer_data.getCuts()) {
       GTLRectInt cut_gtl_rect = cut_data.rect;
@@ -56,14 +69,20 @@ void RuleValidator::verifySameLayerCutSpacing(RVCluster& rv_cluster)
       }
       for (const CutData& overlap_cut_data : overlap_cut_list) {
         int32_t env_net_idx = overlap_cut_data.net_idx;
+        int32_t net_spacing = curr_spacing;
         PlanarRect env_rect = DRCUTIL.convertToPlanarRect(overlap_cut_data.rect);
+        PlanarRect violation_rect = DRCUTIL.getSpacingRect(cut_rect, env_rect);
+        if ((env_net_idx == net_idx) && has_same_net) {
+          net_spacing = curr_same_net_spacing;
+        }
         //  ignore cutShort
         if (DRCUTIL.isClosedOverlap(cut_rect, env_rect)) {
           continue;
         }
         bool use_prl_spacing = false, use_spaing = false;
         use_prl_spacing = DRCUTIL.isOpenOverlap(checking_region_horizontal, env_rect) || DRCUTIL.isOpenOverlap(checking_region_vertical, env_rect);
-        use_spaing = DRCUTIL.getEuclideanDistance(cut_rect, env_rect) < curr_spacing;
+        use_prl_spacing &= (curr_prl_spacing != -1);
+        use_spaing = DRCUTIL.getEuclideanDistance(cut_rect, env_rect) < net_spacing;
         if (!use_prl_spacing && !use_spaing) {
           continue;
         }
@@ -72,8 +91,8 @@ void RuleValidator::verifySameLayerCutSpacing(RVCluster& rv_cluster)
         violation.set_is_routing(true);
         violation.set_violation_net_set({net_idx, env_net_idx});
         violation.set_layer_idx(routing_layer_idx);
-        violation.set_rect(DRCUTIL.getSpacingRect(cut_rect, env_rect));
-        violation.set_required_size(use_prl_spacing ? curr_prl_spacing : curr_spacing);
+        violation.set_rect(violation_rect);
+        violation.set_required_size(use_prl_spacing ? curr_prl_spacing : net_spacing);
         layer_violations.push_back(std::move(violation));
       }
     }

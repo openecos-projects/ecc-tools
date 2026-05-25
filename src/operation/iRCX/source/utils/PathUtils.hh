@@ -21,6 +21,7 @@
 
 #include "StringUtils.hh"
 #include "Types.hh"
+#include "log/Log.hh"
 
 namespace ircx {
 
@@ -37,6 +38,21 @@ inline Str resolvePath(const std::filesystem::path& base_dir, std::string_view r
   }
 
   return path.lexically_normal().string();
+}
+
+inline bool ensureFileExists(const std::filesystem::path& path, std::string_view field_name)
+{
+  const Str path_string = path.string();
+  if (!ensureNonEmpty(path_string, field_name)) {
+    return false;
+  }
+
+  if (std::filesystem::exists(path)) {
+    return true;
+  }
+
+  LOG_ERROR << "RCX file not found for " << field_name << ": " << path_string;
+  return false;
 }
 
 }  // namespace ircx

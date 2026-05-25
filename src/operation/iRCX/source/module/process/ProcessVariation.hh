@@ -67,7 +67,7 @@ class ProcessVariation final
 
   // entry points
   void reset();
-  void buildEtchPools();
+  [[nodiscard]] bool buildEtchPools();
 
  private:
   void initMetalDensity();

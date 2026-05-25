@@ -26,6 +26,7 @@
 #include "ProcessVariation.hh"
 #include "RCXData.hh"
 #include "ResistanceCalc.hh"
+#include "setup/Setup.hh"
 #include "SpefDumper.hh"
 #include "TopologyBuilder.hh"
 #include "log/Log.hh"
@@ -36,12 +37,41 @@ void Flow::reset()
   RCX_DATA_INST.reset();
   environment_.reset();
   process_variation_.reset();
-  num_threads_ = kDefaultThreadCount;
-  operating_temperature_ = kDefaultOperatingTemperature;
+  num_threads_ = 0;
+  operating_temperature_ = 0.0;
   output_dir_ = ".";
+  setup_ready_ = false;
+  run_success_ = false;
+  report_success_ = false;
 }
 
-unsigned Flow::checkShortOpen()
+auto Flow::runRCX() -> void
+{
+  run_success_ = false;
+  report_success_ = false;
+
+  LOG_INFO << "RCX flow begin...";
+
+  if (!setup_ready_) {
+    LOG_ERROR << "RCX flow failed: setup is not ready.";
+    LOG_INFO << "RCX flow end.";
+    return;
+  }
+
+  if (!readData()) {
+    LOG_INFO << "RCX flow end.";
+    return;
+  }
+
+  run();
+}
+
+auto Flow::readData() -> bool
+{
+  return Setup::readData();
+}
+
+auto Flow::checkShortOpen() -> bool
 {
   // if (!db_) {
   //   if (!adaptDB()) {
@@ -54,16 +84,20 @@ unsigned Flow::checkShortOpen()
 
 
   // LOG_INFO << "check short/open end";
-  return 1;
+  return true;
 }
 
-unsigned Flow::buildTopology()
+auto Flow::buildTopology() -> bool
 {
   LOG_INFO << "build topology start";
 
   RCXData& data = RCX_DATA_INST;
   TopoPool& topo_pool = data.topo_pool();
   const LayoutData& layout = data.layout();
+  if (layout.regular_net_count() == 0) {
+    LOG_ERROR << "build topology failed: layout data is empty, call adaptDB first.";
+    return false;
+  }
 
   topo_pool.clear();
   TopologyBuilder tb(topo_pool);
@@ -71,31 +105,45 @@ unsigned Flow::buildTopology()
   tb.build_special(layout);
 
   LOG_INFO << "build topology end";
-  return 1;
+  return true;
 }
 
-unsigned Flow::buildEnvironment() {
-
+auto Flow::buildEnvironment() -> bool
+{
   LOG_INFO << "build environment start";
 
   const RCXData& data = RCX_DATA_INST;
+  if (data.topo_pool().edge_pool().empty()) {
+    LOG_ERROR << "build environment failed: topology is empty, call buildTopology first.";
+    return false;
+  }
 
   Environment& env = environment_;
   env.set_layout_data(&data.layout());
   env.set_topo_pool(&data.topo_pool());
 
-  env.buildNetEnvPools();
+  if (!env.buildNetEnvPools()) {
+    return false;
+  }
 
   LOG_INFO << "build environment end";
-  return 1;
+  return true;
 }
 
-unsigned Flow::buildProcessVariation() {
-
+auto Flow::buildProcessVariation() -> bool
+{
   LOG_INFO << "build process variation start";
 
   RCXData& data = RCX_DATA_INST;
   const auto process_corners = data.corners();
+  if (process_corners.empty()) {
+    LOG_ERROR << "build process variation failed: process corners not loaded.";
+    return false;
+  }
+  if (environment_.net_env_pools().empty()) {
+    LOG_ERROR << "build process variation failed: environment is empty, call buildEnvironment first.";
+    return false;
+  }
 
   ProcessVariation& pv = process_variation_;
   pv.set_layout_data(&data.layout());
@@ -104,25 +152,43 @@ unsigned Flow::buildProcessVariation() {
   pv.set_layer_table(&data.layer_table());
   pv.set_corners(process_corners);
   
-  pv.buildEtchPools();
+  if (!pv.buildEtchPools()) {
+    return false;
+  }
 
   LOG_INFO << "build process variation end";
-  return 1;
+  return true;
 }
 
-unsigned Flow::extractParasitics()
+auto Flow::extractParasitics() -> bool
 {
   LOG_INFO << "extract parasitics start";
 
   RCXData& data = RCX_DATA_INST;
   const auto process_corners = data.corners();
   const auto cap_tables = data.corner_cap_tables();
-  LOG_FATAL_IF(process_corners.size() != cap_tables.size())
-      << "corner/captab size mismatch.";
+  if (process_corners.empty()) {
+    LOG_ERROR << "extract parasitics failed: process corners not loaded.";
+    return false;
+  }
+  if (process_corners.size() != cap_tables.size()) {
+    LOG_ERROR << "extract parasitics failed: corner/captab size mismatch.";
+    return false;
+  }
+  if (process_variation_.corner_net_etch_pools().empty()) {
+    LOG_ERROR << "extract parasitics failed: process variation data is empty.";
+    return false;
+  }
   for (Size corner_idx = 0; corner_idx < process_corners.size(); ++corner_idx) {
-    LOG_FATAL_IF(cap_tables[corner_idx] == nullptr)
-        << "captab not loaded for corner "
-        << process_corners[corner_idx]->get_technology();
+    if (process_corners[corner_idx] == nullptr) {
+      LOG_ERROR << "extract parasitics failed: null process corner.";
+      return false;
+    }
+    if (cap_tables[corner_idx] == nullptr) {
+      LOG_ERROR << "captab not loaded for corner "
+                << process_corners[corner_idx]->get_technology();
+      return false;
+    }
   }
 
   // Pre-allocate RCTable for parallel access
@@ -138,7 +204,9 @@ unsigned Flow::extractParasitics()
   res_calc.set_rc_table(&rc_table);
   res_calc.set_corners(process_corners);
   res_calc.set_operating_temperature(operating_temperature_);
-  res_calc.calc();
+  if (!res_calc.calc()) {
+    return false;
+  }
 
   // Capacitance
   CapacitanceCalc cap_calc;
@@ -150,15 +218,17 @@ unsigned Flow::extractParasitics()
   cap_calc.set_rc_table(&rc_table);
   cap_calc.set_cap_tables(cap_tables);
   cap_calc.set_corners(process_corners);
-  cap_calc.calc();
+  if (!cap_calc.calc()) {
+    return false;
+  }
 
   LOG_INFO << "extract parasitics end";
-  return 1;
+  return true;
 }
 
-unsigned Flow::run()
+auto Flow::run() -> void
 {
-  LOG_INFO << "RCX flow begin...";
+  run_success_ = false;
 
   omp_set_num_threads(num_threads_);
 
@@ -167,14 +237,19 @@ unsigned Flow::run()
       !buildProcessVariation() ||
       !extractParasitics()) {
     LOG_INFO << "RCX flow end.";
-    return 0;
+    return;
   }
 
+  run_success_ = true;
   LOG_INFO << "RCX flow end.";
-  return 1;
 }
 
-unsigned Flow::reportSpef(const Str& output_dir)
+auto Flow::report(const Str& output_dir) -> void
+{
+  report_success_ = dumpSpef(output_dir);
+}
+
+auto Flow::dumpSpef(const Str& output_dir) -> bool
 {
   LOG_INFO << "report spef start";
   const Str resolved_output_dir = output_dir.empty() ? "." : output_dir;
@@ -183,11 +258,15 @@ unsigned Flow::reportSpef(const Str& output_dir)
   if (ec) {
     LOG_ERROR << "Failed to create RCX output directory "
               << resolved_output_dir << ": " << ec.message();
-    return 0;
+    return false;
   }
 
   RCXData& data = RCX_DATA_INST;
   const auto process_corners = data.corners();
+  if (process_corners.empty()) {
+    LOG_ERROR << "report spef failed: process corners not loaded.";
+    return false;
+  }
 
   SpefDumper dumper;
 
@@ -203,7 +282,7 @@ unsigned Flow::reportSpef(const Str& output_dir)
   }
 
   LOG_INFO << "report spef end";
-  return 1;
+  return true;
 }
 
 Flow::Flow()

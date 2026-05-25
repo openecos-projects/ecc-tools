@@ -21,7 +21,6 @@
 
 #include "EtchPool.hh"
 #include "LayoutData.hh"
-#include "RCXDefaults.hh"
 #include "RCTable.hh"
 namespace ircx {
 
@@ -61,7 +60,7 @@ class ResistanceCalc
   void set_corners(const std::vector<itf::ProcessCorner*>& v) { corners_ = v; }
   void set_operating_temperature(F64 v) { operating_temperature_ = v; }
 
-  void calc();
+  [[nodiscard]] bool calc();
   std::pair<Micron, Micron> node_range(const TopoEdge& e) const;
 
  private:
@@ -75,7 +74,7 @@ class ResistanceCalc
                                                    F64 base_resistance) const;
 
   Micron dbu_to_micron_{1};
-  F64 operating_temperature_{kDefaultOperatingTemperature};
+  F64 operating_temperature_{};
 
   const LayoutData* layout_data_{nullptr};
   const LayerTable* layer_table_{nullptr};

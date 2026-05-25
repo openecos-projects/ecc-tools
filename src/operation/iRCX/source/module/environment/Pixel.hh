@@ -60,18 +60,23 @@ class Pixel
   Dbu idxToXCoord(Dbu idx) const { return x0_ + idx * dx_; }
   Dbu idxToYCoord(Dbu idx) const { return y0_ + idx * dy_; }
 
-  void initPixel()
+  [[nodiscard]] bool initPixel()
   {
-    LOG_FATAL_IF(nx_ <= 0 || ny_ <= 0 || dx_ <= 0 || dy_ <= 0)
-        << "Grid parameters are not initialized!";
+    if (nx_ <= 0 || ny_ <= 0 || dx_ <= 0 || dy_ <= 0) {
+      LOG_ERROR << "Grid parameters are not initialized!";
+      return false;
+    }
 
     pixel_.assign(nx_, std::vector<bool>(ny_, false));
+    return true;
   }
 
   void addEdge(const TopoEdge& edge)
   {
     if (pixel_.empty() || pixel_.front().empty()) {
-      initPixel();
+      if (!initPixel()) {
+        return;
+      }
     }
 
     const GtlRectI& rect = edge.shape();

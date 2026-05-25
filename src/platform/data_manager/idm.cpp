@@ -62,6 +62,12 @@ bool DataManager::init(string config_path)
 
 void DataManager::reset()
 {
+  resetData();
+  _config = DataConfig();
+}
+
+void DataManager::resetData()
+{
   delete _idb_builder;
   _idb_builder = nullptr;
 
@@ -69,7 +75,6 @@ void DataManager::reset()
   _idb_lef_service = nullptr;
   _design = nullptr;
   _layout = nullptr;
-  _config = DataConfig();
 }
 
 bool DataManager::readLef(string config_path)

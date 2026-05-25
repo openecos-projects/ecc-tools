@@ -69,7 +69,6 @@ else()
 endif()
 option(USE_PROFILER "Enable performance profiling (default OFF)" OFF)
 option(SANITIZER "Enable address sanitizer (default OFF)" OFF)
-option(BUILD_GUI "Enable GUI components (default OFF)" OFF)
 option(USE_GPU "Enable GPU acceleration (default OFF)" OFF)
 option(COMPATIBILITY_MODE "Enable compatibility mode (disable aggressive optimizations)" OFF)
 
@@ -135,11 +134,6 @@ if(SANITIZER)
     link_libraries("-fsanitize=address")
     message("address sanitizer load")
 endif()
-
-if(BUILD_GUI)
-    add_definitions(-DBUILD_GUI)
-endif()
-
 
 if (USE_GPU)
     add_definitions(-DUSE_GPU)

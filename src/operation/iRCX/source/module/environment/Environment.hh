@@ -44,7 +44,7 @@ class Environment final
   void set_topo_pool(const TopoPool* v) { topo_pool_ = v; }
 
   void reset();
-  void buildNetEnvPools();
+  [[nodiscard]] bool buildNetEnvPools();
 
   // getter
   const std::vector<EnvPool>& net_env_pools() const { return net_env_pools_; }
@@ -53,8 +53,8 @@ class Environment final
     return net_env_pools_[net_id];
   }
  private:
-  void buildTracks();
-  void buildPixels();
+  [[nodiscard]] bool buildTracks();
+  [[nodiscard]] bool buildPixels();
   void buildSearchTrackNumMap();
 
   const LayoutData* layout_data_{nullptr};

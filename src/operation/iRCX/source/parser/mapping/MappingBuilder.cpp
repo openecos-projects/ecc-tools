@@ -18,6 +18,7 @@
 #include <sstream>
 
 #include "MappingBuilder.hpp"
+#include "log/Log.hh"
 namespace ircx {
 namespace parser {
 
@@ -27,11 +28,16 @@ void MappingBuilder::clear()
   process_to_design_layer_names_.clear();
 }
 
-void MappingBuilder::read(const std::string& mappingPath)
+bool MappingBuilder::read(const std::string& mappingPath)
 {
   clear();
 
   std::ifstream mappingFile(mappingPath);
+  if (!mappingFile.is_open()) {
+    LOG_ERROR << "Failed to open RCX mapping file: " << mappingPath;
+    return false;
+  }
+
   std::string line;
   while (std::getline(mappingFile, line)) {
     std::string designLayerName;
@@ -41,6 +47,8 @@ void MappingBuilder::read(const std::string& mappingPath)
       process_to_design_layer_names_[processLayerName] = designLayerName;
     }
   }
+
+  return true;
 }
 
 }  // namespace parser

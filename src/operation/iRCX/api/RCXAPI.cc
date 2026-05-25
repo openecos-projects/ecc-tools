@@ -21,101 +21,91 @@
 
 namespace ircx {
 
-void RCXAPI::init()
+auto RCXAPI::init(const RCXInitOptions& options) -> void
 {
-  RCX_FLOW_INST.set_num_threads(kDefaultThreadCount);
-  RCX_FLOW_INST.set_operating_temperature(kDefaultOperatingTemperature);
+  resetAPI();
+  RCX_FLOW_INST.set_num_threads(options.thread_number);
+  RCX_FLOW_INST.set_operating_temperature(options.operating_temperature);
+  RCX_FLOW_INST.setSetupReady(true);
 }
 
-void RCXAPI::init(unsigned thread_number)
+auto RCXAPI::init(const std::string& config_file) -> void
 {
-  init();
-  RCX_FLOW_INST.set_num_threads(thread_number);
+  resetAPI();
+  const bool setup_ready = Setup::initialize(config_file);
+  RCX_FLOW_INST.setSetupReady(setup_ready);
 }
 
-void RCXAPI::init(unsigned thread_number, double temperature)
-{
-  init();
-  RCX_FLOW_INST.set_num_threads(thread_number);
-  RCX_FLOW_INST.set_operating_temperature(temperature);
-}
-
-void RCXAPI::setOperatingTemperature(double temperature)
-{
-  RCX_FLOW_INST.set_operating_temperature(temperature);
-}
-
-void RCXAPI::resetAPI()
+auto RCXAPI::resetAPI() -> void
 {
   RCX_FLOW_INST.reset();
 }
 
-unsigned RCXAPI::readCorner(const std::string& corner_name,
-                            const char* itf_file,
-                            const char* captab_file)
+auto RCXAPI::readCorner(const std::string& corner_name,
+                        const char* itf_file,
+                        const char* captab_file) -> bool
 {
   return Setup::readCorner(corner_name, itf_file, captab_file);
 }
 
-unsigned RCXAPI::readMapping(const char* mapping_file)
+auto RCXAPI::readMapping(const char* mapping_file) -> bool
 {
   return Setup::readMapping(mapping_file);
 }
 
-unsigned RCXAPI::adaptDB()
+auto RCXAPI::adaptDB() -> bool
 {
-  return Setup::readData();
+  return RCX_FLOW_INST.readData();
 }
 
-unsigned RCXAPI::checkShortOpen()
+auto RCXAPI::checkShortOpen() -> bool
 {
   return RCX_FLOW_INST.checkShortOpen();
 }
 
-unsigned RCXAPI::buildTopology()
+auto RCXAPI::buildTopology() -> bool
 {
   return RCX_FLOW_INST.buildTopology();
 }
 
-unsigned RCXAPI::buildEnvironment()
+auto RCXAPI::buildEnvironment() -> bool
 {
   return RCX_FLOW_INST.buildEnvironment();
 }
 
-unsigned RCXAPI::buildProcessVariation()
+auto RCXAPI::buildProcessVariation() -> bool
 {
   return RCX_FLOW_INST.buildProcessVariation();
 }
 
-unsigned RCXAPI::extractParasitics()
+auto RCXAPI::extractParasitics() -> bool
 {
   return RCX_FLOW_INST.extractParasitics();
 }
 
-unsigned RCXAPI::run()
+auto RCXAPI::run() -> void
 {
-  if (!adaptDB()) {
-    return 0;
-  }
-
-  return RCX_FLOW_INST.run();
+  RCX_FLOW_INST.run();
 }
 
-unsigned RCXAPI::runFromConfig(const std::string& config)
+auto RCXAPI::runRCX() -> void
 {
-  if (!Setup::initialize(config)) {
-    return 0;
-  }
-  if (!run()) {
-    return 0;
-  }
-
-  return reportSpef(RCX_FLOW_INST.output_dir());
+  RCX_FLOW_INST.runRCX();
 }
 
-unsigned RCXAPI::reportSpef(const std::string& output_dir)
+auto RCXAPI::report(const std::string& output_dir) -> void
 {
-  return RCX_FLOW_INST.reportSpef(output_dir.empty() ? "." : output_dir);
+  RCX_FLOW_INST.report(output_dir.empty() ? "." : output_dir);
+}
+
+auto RCXAPI::runSuccess() -> bool
+{
+  return RCX_FLOW_INST.run_success();
+}
+
+auto RCXAPI::reportSuccess() -> bool
+{
+  return RCX_FLOW_INST.report_success();
 }
 
 }  // namespace ircx

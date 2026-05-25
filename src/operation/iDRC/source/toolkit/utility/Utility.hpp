@@ -190,6 +190,34 @@ class Utility
     return orientation_list;
   }
 
+  // 获取 rect 某个角点向内部的两个方向
+  static bool getCornerOrientsInRect(const PlanarRect& rect, const PlanarCoord& corner_point, Orientation& orient1, Orientation& orient2)
+  {
+    int32_t x = corner_point.get_x();
+    int32_t y = corner_point.get_y();
+    if (x == rect.get_ll_x() && y == rect.get_ll_y()) {
+      orient1 = Orientation::kEast;
+      orient2 = Orientation::kNorth;
+      return true;
+    }
+    if (x == rect.get_ur_x() && y == rect.get_ur_y()) {
+      orient1 = Orientation::kWest;
+      orient2 = Orientation::kSouth;
+      return true;
+    }
+    if (x == rect.get_ll_x() && y == rect.get_ur_y()) {
+      orient1 = Orientation::kEast;
+      orient2 = Orientation::kSouth;
+      return true;
+    }
+    if (x == rect.get_ur_x() && y == rect.get_ll_y()) {
+      orient1 = Orientation::kWest;
+      orient2 = Orientation::kNorth;
+      return true;
+    }
+    return false;
+  }
+
   static Direction getOppositeDirection(Direction direction)
   {
     if (direction == Direction::kHorizontal) {
@@ -886,15 +914,17 @@ class Utility
   static PlanarRect getRect(Segment<PlanarCoord> segment) { return getRect(segment.get_first(), segment.get_second()); }
 
   // 三个点的叉乘
-  static int32_t crossProduct(Rotation rotation, PlanarCoord& first_coord, PlanarCoord& second_coord, PlanarCoord& third_coord)
+  static int64_t crossProduct(Rotation rotation, PlanarCoord& first_coord, PlanarCoord& second_coord, PlanarCoord& third_coord)
   {
-    int32_t cross_product = 0;
+    // Use 64-bit arithmetic here because large layout coordinates can make the
+    // area term exceed int32_t and flip the sign, which breaks convex/concave checks.
+    int64_t cross_product = 0;
     if (rotation == Rotation::kClockwise) {
-      cross_product = ((second_coord.get_x() - first_coord.get_x()) * (third_coord.get_y() - first_coord.get_y())
-                       - (second_coord.get_y() - first_coord.get_y()) * (third_coord.get_x() - first_coord.get_x()));
+      cross_product = (static_cast<int64_t>(second_coord.get_x()) - first_coord.get_x()) * (static_cast<int64_t>(third_coord.get_y()) - first_coord.get_y())
+                      - (static_cast<int64_t>(second_coord.get_y()) - first_coord.get_y()) * (static_cast<int64_t>(third_coord.get_x()) - first_coord.get_x());
     } else if (rotation == Rotation::kCounterclockwise) {
-      cross_product = ((second_coord.get_x() - third_coord.get_x()) * (first_coord.get_y() - third_coord.get_y())
-                       - (second_coord.get_y() - third_coord.get_y()) * (first_coord.get_x() - third_coord.get_x()));
+      cross_product = (static_cast<int64_t>(second_coord.get_x()) - third_coord.get_x()) * (static_cast<int64_t>(first_coord.get_y()) - third_coord.get_y())
+                      - (static_cast<int64_t>(second_coord.get_y()) - third_coord.get_y()) * (static_cast<int64_t>(first_coord.get_x()) - third_coord.get_x());
     } else {
       DRCLOG.error(Loc::current(), "The rotation is error!");
     }
@@ -1541,6 +1571,24 @@ class Utility
     std::string string = oss.str();
     oss.clear();
     return string;
+  }
+
+  static std::string getBooleanName(bool value) { return value ? "true" : "false"; }
+
+  template <typename T>
+  static std::string getStringList(const std::vector<T>& value_list, const std::string& delimiter = ", ", const std::string& prefix = "[",
+                                   const std::string& suffix = "]")
+  {
+    std::stringstream oss;
+    oss << prefix;
+    for (size_t i = 0; i < value_list.size(); ++i) {
+      if (i > 0) {
+        oss << delimiter;
+      }
+      oss << value_list[i];
+    }
+    oss << suffix;
+    return oss.str();
   }
 
   template <typename Stream, typename T, typename... Args>

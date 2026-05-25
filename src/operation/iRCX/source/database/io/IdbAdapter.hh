@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cassert>
+#include <optional>
 
 #include "Types.hh"
 #include "builder.h"
@@ -49,9 +50,9 @@ class IdbAdapter
 
   void adaptNet(::idb::IdbNetList* idb_netlist);
   Pin adaptPin(::idb::IdbPin* idb_pin, bool is_driving);
-  Segment adaptSegments(::idb::IdbRegularWireSegment* idb_seg);
-  Patch adaptPatch(::idb::IdbRegularWireSegment* idb_seg);
-  Via adaptVia(::idb::IdbVia* idb_via);
+  std::optional<Segment> adaptSegments(::idb::IdbRegularWireSegment* idb_seg);
+  std::optional<Patch> adaptPatch(::idb::IdbRegularWireSegment* idb_seg);
+  std::optional<Via> adaptVia(::idb::IdbVia* idb_via);
 
   void adaptSpecialNet(::idb::IdbSpecialNetList* idb_special_netlist);
 

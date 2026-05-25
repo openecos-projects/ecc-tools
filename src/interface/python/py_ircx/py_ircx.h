@@ -18,9 +18,11 @@
 
 #include <string>
 
+#include "RCXAPI.hh"
+
 namespace python_interface {
 
-bool init_rcx(unsigned thread_number, double temperature = 25.0);
+bool init_rcx(unsigned thread_number, double temperature);
 bool read_rcx_corner(const std::string& corner_name,
                      const std::string& itf_file,
                      const std::string& captab_file);
@@ -33,6 +35,6 @@ bool build_rcx_process_variation();
 bool extract_rcx_parasitics();
 
 bool run_rcx(const std::string& config);
-bool report_rcx(const std::string& output_dir);
+void report_rcx(const std::string& output_dir);
 
 }  // namespace python_interface

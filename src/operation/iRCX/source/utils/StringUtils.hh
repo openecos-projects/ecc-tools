@@ -19,6 +19,7 @@
 #include <string_view>
 
 #include "Types.hh"
+#include "log/Log.hh"
 
 namespace ircx {
 
@@ -31,6 +32,16 @@ inline Str trimCopy(std::string_view value)
 
   const auto last = value.find_last_not_of(" \t\n\r\f\v");
   return Str(value.substr(first, last - first + 1));
+}
+
+inline bool ensureNonEmpty(std::string_view value, std::string_view field_name)
+{
+  if (!value.empty()) {
+    return true;
+  }
+
+  LOG_ERROR << "RCX field is empty: " << field_name;
+  return false;
 }
 
 }  // namespace ircx

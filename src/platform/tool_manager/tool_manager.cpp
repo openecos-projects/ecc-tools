@@ -30,10 +30,6 @@
 #include "ista_io.h"
 #include "ito_io.h"
 
-#ifdef BUILD_GUI
-#include "gui_io.h"
-#endif
-
 namespace iplf {
 ToolManager* ToolManager::_instance = nullptr;
 
@@ -52,105 +48,6 @@ bool ToolManager::idbSave(std::string name)
 {
   return dmInst->save(name);
 }
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// GUI
-void ToolManager::guiInit()
-{
-#ifdef BUILD_GUI
-  guiInst->init();
-#endif
-}
-
-void ToolManager::guiStart(std::string type)
-{
-#ifdef BUILD_GUI
-  guiInst->startGUI(dmInst->get_idb_builder(), type);
-#endif
-}
-
-void ToolManager::guiShow()
-{
-#ifdef BUILD_GUI
-  guiInst->showWindow();
-#endif
-}
-
-void ToolManager::guiHide()
-{
-#ifdef BUILD_GUI
-  guiInst->hideWindow();
-#endif
-}
-
-int ToolManager::guiExec()
-{
-#ifdef BUILD_GUI
-  return guiInst->exec();
-#else
-  return 0;
-#endif
-}
-
-void ToolManager::guiTimerStart(int ms)
-{
-#ifdef BUILD_GUI
-  guiInst->timerStart(ms);
-#endif
-}
-
-void ToolManager::guiTimerStop()
-{
-#ifdef BUILD_GUI
-  guiInst->timerStop();
-#endif
-}
-
-void ToolManager::guiReadDb()
-{
-#ifdef BUILD_GUI
-  guiInst->readDB(dmInst->get_idb_builder());
-#endif
-}
-
-void ToolManager::guiShowDrc(std::string detail_drc_path, int max_num)
-{
-#ifdef BUILD_GUI
-  auto detail_drc_map = drcInst->getDetailCheckResult(detail_drc_path);
-  if (detail_drc_map.size() > 0) {
-    std::cout << "drc size = " << detail_drc_map.size() << std::endl;
-  }
-  guiInst->readDrcDb(detail_drc_map, max_num);
-#endif
-}
-
-void ToolManager::guiShowClockTree()
-{
-#ifdef BUILD_GUI
-  guiInst->readClockTreeDb(ctsInst->get_node_list());
-#endif
-}
-
-void ToolManager::guiShowGraph(std::map<int, ivec::VecNet> graph)
-{
-#ifdef BUILD_GUI
-  guiInst->readGraphDb(graph);
-#endif
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// web
-void ToolManager::guiCaptrueDesign(std::string path)
-{
-#ifdef BUILD_GUI
-  guiInst->captureDesign(path);
-#endif
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Eval
 // int64_t ToolManager::evalTotalWL(const std::vector<eval::WLNet*>& net_list, const std::string& wl_type)
 // {

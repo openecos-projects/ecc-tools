@@ -6,6 +6,12 @@ set ::ecc_pdk_root ""
 if {![info exists RTL2GDS]} {
   set RTL2GDS 0
 }
+if {![info exists RESTORE_DATA]} {
+  set RESTORE_DATA 0
+}
+if {![info exists RTL2GDS_FLOW]} {
+  set RTL2GDS_FLOW 0
+}
 
 proc set_workspace {path} {
   if {$path eq ""} {
@@ -155,6 +161,36 @@ proc step_load_design {flow_config db_config output_dir tech_lef lef_files input
   }
 }
 
+proc step_should_restore_data {} {
+  return [expr {$::RTL2GDS == 0 && $::RESTORE_DATA == 1}]
+}
+
+proc step_restore_data {flow_config db_config output_dir input_db} {
+  puts "==> restore data"
+  step_print_path "flow_config" $flow_config
+  step_print_path "db_config" $db_config
+  step_print_path "output_dir" $output_dir
+  step_print_path "input_db" $input_db
+
+  if {$input_db eq "" || ![file exists $input_db]} {
+    error "no valid input idb data: $input_db"
+  }
+
+  file mkdir $output_dir
+  flow_init -config $flow_config
+  db_init -config $db_config -output_dir_path $output_dir
+  reset_data
+  load_data -path $input_db
+}
+
+proc step_restore_or_load_design {flow_config db_config output_dir tech_lef lef_files input_def input_verilog top_module input_db} {
+  if {[step_should_restore_data]} {
+    step_restore_data $flow_config $db_config $output_dir $input_db
+  } else {
+    step_load_design $flow_config $db_config $output_dir $tech_lef $lef_files $input_def $input_verilog $top_module
+  }
+}
+
 proc step_save_design {step_name output_def output_verilog output_gds output_json output_db feature_db feature_step_path report_db_path sta_dir {feature_step_enable 1}} {
   puts "==> save data"
   step_print_path "output_def" $output_def
@@ -181,7 +217,7 @@ proc step_save_design {step_name output_def output_verilog output_gds output_jso
   netlist_save -path $output_verilog -exclude_cell_names {}
   step_safe_eval [list gds_save -path $output_gds]
   # json_save -path $output_json
-  # save_data -path $output_db
+  save_data -path $output_db
   set validate_path [file join [file dirname $report_db_path] "${step_name}.idb_validate.json"]
   if {[llength [info commands idb_validate]] > 0} {
     step_safe_eval [list idb_validate -path $validate_path]
@@ -199,6 +235,9 @@ proc step_save_design {step_name output_def output_verilog output_gds output_jso
 }
 
 proc step_maybe_flow_exit {} {
+  if {$::RTL2GDS_FLOW == 1} {
+    return
+  }
   if {[llength [info commands flow_exit]] > 0} {
     flow_exit
   }

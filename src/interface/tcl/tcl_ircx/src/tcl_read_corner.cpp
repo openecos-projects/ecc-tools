@@ -21,8 +21,6 @@
  * @version 0.1
  * @date 2025-12-08
  */
-#include <filesystem>
-
 #include "RCXAPI.hh"
 #include "log/Log.hh"
 #include "tcl_ircx.h"
@@ -41,12 +39,21 @@ TclReadCorner::TclReadCorner(const char* cmd_name) : TclCmd(cmd_name)
 
 unsigned TclReadCorner::check()
 {
-  LOG_FATAL_IF(!getOptionOrArg("-name"));
-  LOG_FATAL_IF(!getOptionOrArg("-itf"));
-  LOG_FATAL_IF(!getOptionOrArg("-captab"));
-  LOG_FATAL_IF(!getOptionOrArg("-name")->is_set_val());
-  LOG_FATAL_IF(!getOptionOrArg("-itf")->is_set_val());
-  LOG_FATAL_IF(!getOptionOrArg("-captab")->is_set_val());
+  TclOption* name_option = getOptionOrArg("-name");
+  TclOption* itf_option = getOptionOrArg("-itf");
+  TclOption* captab_option = getOptionOrArg("-captab");
+  if (!name_option || !name_option->is_set_val()) {
+    LOG_ERROR << "read_corner requires -name.";
+    return 0;
+  }
+  if (!itf_option || !itf_option->is_set_val()) {
+    LOG_ERROR << "read_corner requires -itf.";
+    return 0;
+  }
+  if (!captab_option || !captab_option->is_set_val()) {
+    LOG_ERROR << "read_corner requires -captab.";
+    return 0;
+  }
   return 1;
 }
 
@@ -64,18 +71,20 @@ unsigned TclReadCorner::exec()
   char* itf_file = itf_option->getStringVal();
   char* captab_file = captab_option->getStringVal();
 
-  LOG_FATAL_IF(corner_name == nullptr || corner_name[0] == '\0')
-      << "corner name is empty.";
-  LOG_FATAL_IF(itf_file == nullptr || itf_file[0] == '\0')
-      << "itf file is empty.";
-  LOG_FATAL_IF(captab_file == nullptr || captab_file[0] == '\0')
-      << "captab file is empty.";
-  LOG_FATAL_IF(!std::filesystem::exists(itf_file))
-      << "itf file not found: " << itf_file;
-  LOG_FATAL_IF(!std::filesystem::exists(captab_file))
-      << "captab file not found: " << captab_file;
+  if (corner_name == nullptr || corner_name[0] == '\0') {
+    LOG_ERROR << "corner name is empty.";
+    return 0;
+  }
+  if (itf_file == nullptr || itf_file[0] == '\0') {
+    LOG_ERROR << "itf file is empty.";
+    return 0;
+  }
+  if (captab_file == nullptr || captab_file[0] == '\0') {
+    LOG_ERROR << "captab file is empty.";
+    return 0;
+  }
 
-  return RCXAPIInst.readCorner(corner_name, itf_file, captab_file);
+  return RCX_API_INST.readCorner(corner_name, itf_file, captab_file) ? 1U : 0U;
 }
 
 }  // namespace tcl

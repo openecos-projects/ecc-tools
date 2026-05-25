@@ -21,8 +21,6 @@
  * @version 0.1
  * @date 2025-12-08
  */
-#include <filesystem>
-
 #include "RCXAPI.hh"
 #include "log/Log.hh"
 #include "tcl_ircx.h"
@@ -38,8 +36,10 @@ TclReadMapping::TclReadMapping(const char* cmd_name) : TclCmd(cmd_name)
 unsigned TclReadMapping::check()
 {
   TclOption* file_name_option = getOptionOrArg("file_name");
-  LOG_FATAL_IF(!file_name_option);
-  LOG_FATAL_IF(!file_name_option->is_set_val());
+  if (!file_name_option || !file_name_option->is_set_val()) {
+    LOG_ERROR << "read_mapping requires file_name.";
+    return 0;
+  }
   return 1;
 }
 
@@ -51,9 +51,12 @@ unsigned TclReadMapping::exec()
 
   TclOption* file_name_option = getOptionOrArg("file_name");
   char* mapping_file = file_name_option->getStringVal();
-  LOG_FATAL_IF(!std::filesystem::exists(mapping_file)) << "mapping file not found: " << mapping_file;
+  if (mapping_file == nullptr || mapping_file[0] == '\0') {
+    LOG_ERROR << "mapping file is empty.";
+    return 0;
+  }
 
-  return RCXAPIInst.readMapping(mapping_file);
+  return RCX_API_INST.readMapping(mapping_file) ? 1U : 0U;
 }
 
 }  // namespace tcl

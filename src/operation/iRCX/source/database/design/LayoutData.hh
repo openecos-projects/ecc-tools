@@ -80,9 +80,9 @@ struct Via {
 
   GtlPointI point;
   // Top/Cut/Bottom layer rect
-  std::pair<Size, GtlRectI> layer_rect_top;
-  std::pair<Size, GtlRectI> layer_rect_cut;
-  std::pair<Size, GtlRectI> layer_rect_btm;
+  std::pair<Size, GtlRectI> layer_rect_top{kMaxSize, {}};
+  std::pair<Size, GtlRectI> layer_rect_cut{kMaxSize, {}};
+  std::pair<Size, GtlRectI> layer_rect_btm{kMaxSize, {}};
 };
 
 // ============================================================

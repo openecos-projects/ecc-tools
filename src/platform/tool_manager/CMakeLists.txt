@@ -55,8 +55,3 @@ target_include_directories(tool_manager
     ${HOME_UTILITY}/json
     ${HOME_OPERATION}
 )
-
-if(BUILD_GUI)
-    target_link_libraries(tool_manager PUBLIC iGUI)
-    target_include_directories(tool_manager PUBLIC ${HOME_INTERFACE}/gui/interface)
-endif()

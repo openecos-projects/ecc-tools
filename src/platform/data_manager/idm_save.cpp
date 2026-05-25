@@ -130,9 +130,8 @@ bool DataManager::saveData(string data_path)
 
 bool DataManager::loadData(string data_path)
 {
-  if (_idb_builder == nullptr) {
-    _idb_builder = new IdbBuilder();
-  }
+  resetData();
+  _idb_builder = new IdbBuilder();
 
   if (!_idb_builder->loadData(data_path)) {
     return false;

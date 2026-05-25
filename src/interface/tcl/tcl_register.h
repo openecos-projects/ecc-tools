@@ -25,9 +25,6 @@
  */
 #include "ScriptEngine.hh"
 #include "UserShell.hh"
-#ifdef BUILD_GUI
-#include "tcl_register_gui.h"
-#endif
 
 #include "flow.h"
 #include "tcl_flow.h"
@@ -111,11 +108,6 @@ int registerCommands()
 
   /// Power
   registerCmdPower();
-
-#ifdef BUILD_GUI
-  /// gui
-  registerCmdGUI();
-#endif
 
   registerCmdReport();
 

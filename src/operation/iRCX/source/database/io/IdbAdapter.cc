@@ -245,13 +245,19 @@ void IdbAdapter::adaptNet(IdbNetList* idb_netlist)
 
         // convert segments
         if (idb_segment->is_wire()) { // wire
-          net.segments.push_back(adaptSegments(idb_segment));
+          if (auto segment = adaptSegments(idb_segment)) {
+            net.segments.push_back(std::move(segment.value()));
+          }
         }
         if (idb_segment->is_rect()) { // patch
-          net.patches.push_back(adaptPatch(idb_segment));
+          if (auto patch = adaptPatch(idb_segment)) {
+            net.patches.push_back(std::move(patch.value()));
+          }
         }
         for (auto* idb_via : idb_segment->get_via_list()) { // via
-          net.vias.push_back(adaptVia(idb_via));
+          if (auto via = adaptVia(idb_via)) {
+            net.vias.push_back(std::move(via.value()));
+          }
         }
       }
     }
@@ -306,16 +312,25 @@ Pin IdbAdapter::adaptPin(IdbPin* idb_pin, bool is_driving)
   return pin;
 }
 
-Segment IdbAdapter::adaptSegments(IdbRegularWireSegment* idb_seg)
+std::optional<Segment> IdbAdapter::adaptSegments(IdbRegularWireSegment* idb_seg)
 {
-  LOG_FATAL_IF(!idb_seg || !idb_seg->is_wire());
+  if (!idb_seg || !idb_seg->is_wire()) {
+    LOG_ERROR << "skip invalid idb wire segment.";
+    return std::nullopt;
+  }
 
   auto* p1 = idb_seg->get_point_start();
   auto* p2 = idb_seg->get_point_end();
-  LOG_FATAL_IF(!p1 || !p2);
+  if (!p1 || !p2) {
+    LOG_ERROR << "skip idb wire segment without endpoint.";
+    return std::nullopt;
+  }
 
   IdbLayer* idb_layer = idb_seg->get_layer();
-  LOG_FATAL_IF(!idb_layer);
+  if (!idb_layer) {
+    LOG_ERROR << "skip idb wire segment without layer.";
+    return std::nullopt;
+  }
 
   IdbRect segment_rect = idb_seg->get_segment_rect();
 
@@ -327,15 +342,21 @@ Segment IdbAdapter::adaptSegments(IdbRegularWireSegment* idb_seg)
   return segment;
 }
 
-Patch IdbAdapter::adaptPatch(IdbRegularWireSegment* idb_seg)
+std::optional<Patch> IdbAdapter::adaptPatch(IdbRegularWireSegment* idb_seg)
 {
-  LOG_FATAL_IF(!idb_seg || !idb_seg->is_rect());
+  if (!idb_seg || !idb_seg->is_rect()) {
+    LOG_ERROR << "skip invalid idb patch segment.";
+    return std::nullopt;
+  }
 
   auto* delta_rect = idb_seg->get_delta_rect();
   auto* anchor_point = idb_seg->get_point(0);
   auto* idb_layer = idb_seg->get_layer();
 
-  LOG_FATAL_IF(!delta_rect || !anchor_point || !idb_layer);
+  if (!delta_rect || !anchor_point || !idb_layer) {
+    LOG_ERROR << "skip idb patch segment with incomplete geometry.";
+    return std::nullopt;
+  }
 
   const int lower_x = anchor_point->get_x() + delta_rect->get_low_x();
   const int lower_y = anchor_point->get_y() + delta_rect->get_low_y();
@@ -348,12 +369,18 @@ Patch IdbAdapter::adaptPatch(IdbRegularWireSegment* idb_seg)
   return patch;
 }
 
-Via IdbAdapter::adaptVia(IdbVia* idb_via)
+std::optional<Via> IdbAdapter::adaptVia(IdbVia* idb_via)
 {
-  LOG_FATAL_IF(!idb_via);
+  if (!idb_via) {
+    LOG_ERROR << "skip null idb via.";
+    return std::nullopt;
+  }
 
   auto* center_point = idb_via->get_coordinate();
-  LOG_FATAL_IF(!center_point);
+  if (!center_point) {
+    LOG_ERROR << "skip idb via without coordinate.";
+    return std::nullopt;
+  }
 
   Via via;
   via.name = escapeSpefIdentifier(idb_via->get_name());
@@ -367,7 +394,10 @@ Via IdbAdapter::adaptVia(IdbVia* idb_via)
     if (!idb_layer) return std::nullopt;
 
     std::vector<IdbRect*>& layer_rects = layer_shape.get_rect_list();
-    LOG_FATAL_IF(layer_rects.size() != 1) << multi_rect_error;
+    if (layer_rects.size() != 1) {
+      LOG_ERROR << multi_rect_error;
+      return std::nullopt;
+    }
 
     const Size design_layer_id = layer_table_->design_id(idb_layer->get_name());
     return std::make_pair(design_layer_id, IdbRectToGtlRect(layer_rects[0]));
@@ -386,6 +416,13 @@ Via IdbAdapter::adaptVia(IdbVia* idb_via)
   if (auto cut_layer_rect =
           read_layer_rect(idb_via->get_cut_layer_shape(), "not support multirect for via cut")) {
     via.layer_rect_cut = *cut_layer_rect;
+  }
+
+  if (via.layer_rect_top.first == kMaxSize ||
+      via.layer_rect_btm.first == kMaxSize ||
+      via.layer_rect_cut.first == kMaxSize) {
+    LOG_ERROR << "skip idb via with incomplete layer rectangles: " << via.name;
+    return std::nullopt;
   }
 
   return via;

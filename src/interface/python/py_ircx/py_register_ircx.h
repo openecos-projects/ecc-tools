@@ -25,8 +25,8 @@ namespace py = pybind11;
 
 void register_ircx(py::module& m)
 {
-  m.def("init_rcx", init_rcx, py::arg("thread_number") = 64,
-        py::arg("temperature") = 25.0);
+  m.def("init_rcx", init_rcx, py::arg("thread_number") = ircx::kDefaultThreadCount,
+        py::arg("temperature") = ircx::kDefaultOperatingTemperature);
   m.def("read_rcx_corner", read_rcx_corner, py::arg("corner_name"),
         py::arg("itf_file"), py::arg("captab_file"));
   m.def("read_rcx_mapping", read_rcx_mapping, py::arg("mapping_file"));

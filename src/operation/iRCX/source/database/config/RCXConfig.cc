@@ -31,30 +31,6 @@ namespace fs = std::filesystem;
 
 namespace {
 
-bool ensure_non_empty(const std::string& value, std::string_view field_name)
-{
-  if (!value.empty()) {
-    return true;
-  }
-
-  LOG_ERROR << "RCX config field is empty: " << field_name;
-  return false;
-}
-
-bool ensure_file_exists(const std::string& path, std::string_view field_name)
-{
-  if (!ensure_non_empty(path, field_name)) {
-    return false;
-  }
-
-  if (fs::exists(path)) {
-    return true;
-  }
-
-  LOG_ERROR << "RCX config file not found for " << field_name << ": " << path;
-  return false;
-}
-
 bool parse_corner_config(const nlohmann::json& corner_json,
                          const fs::path& config_dir,
                          std::string_view field_name,
@@ -88,9 +64,9 @@ bool parse_corner_config(const nlohmann::json& corner_json,
   corner_config.captab_file = resolvePath(config_dir, corner_json["captab_file"].get<std::string>());
 
   bool valid = true;
-  valid &= ensure_non_empty(corner_config.name, name_field);
-  valid &= ensure_file_exists(corner_config.itf_file, itf_field);
-  valid &= ensure_file_exists(corner_config.captab_file, captab_field);
+  valid &= ensureNonEmpty(corner_config.name, name_field);
+  valid &= ensureFileExists(corner_config.itf_file, itf_field);
+  valid &= ensureFileExists(corner_config.captab_file, captab_field);
 
   return valid;
 }
@@ -106,7 +82,7 @@ bool RCXConfig::loadFromFile(const std::string& config_path)
 
   _config_path.clear();
   _thread_num = 64U;
-  _operating_temperature = kDefaultOperatingTemperature;
+  _operating_temperature = 25.0;
   _output_dir.clear();
   _mapping_file.clear();
   _corners.clear();
@@ -190,7 +166,7 @@ bool RCXConfig::loadFromFile(const std::string& config_path)
 
     _config_path = absolute_config_path.string();
 
-    valid &= ensure_file_exists(_mapping_file, "mapping_file");
+    valid &= ensureFileExists(_mapping_file, "mapping_file");
 
     return valid;
   } catch (const std::exception& e) {

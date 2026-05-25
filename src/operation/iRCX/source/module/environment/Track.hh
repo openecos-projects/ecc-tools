@@ -118,12 +118,19 @@ class Track
   Dbu coordToTrack(Dbu coord) const { return (coord - track_ori_) / track_dlt_; }
   Dbu coordToBucket(Dbu coord) const { return (coord - bucket_ori_) / bucket_dlt_; }
 
-  void initTrack()
+  [[nodiscard]] bool initTrack()
   {
-    LOG_FATAL_IF(track_num_ <= 0 || track_dlt_ <= 0) << "Track parameters are not initialized!";
-    LOG_FATAL_IF(bucket_num_ <= 0 || bucket_dlt_ <= 0) << "Bucket parameters are not initialized!";
+    if (track_num_ <= 0 || track_dlt_ <= 0) {
+      LOG_ERROR << "Track parameters are not initialized!";
+      return false;
+    }
+    if (bucket_num_ <= 0 || bucket_dlt_ <= 0) {
+      LOG_ERROR << "Bucket parameters are not initialized!";
+      return false;
+    }
 
     track_buckets_.assign(track_num_, std::vector<EdgeSet>(bucket_num_));
+    return true;
   }
 
   void addEdge(const TopoEdge& edge)
