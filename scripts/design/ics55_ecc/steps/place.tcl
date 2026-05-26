@@ -18,15 +18,16 @@ set default_pdk [file normalize [file join $flow_dir .. .. .. .. icsprout55-pdk]
 
 lassign [step_setup_workspace $default_workspace $default_pdk] workspace_root pdk_root
 set step_dir [file join $workspace_root place_ecc]
+set config_dir [file join $workspace_root config]
 
 set design_name "gcd"
 set top_module "gcd"
 
 source [file normalize [file join $script_dir pdk.tcl]]
 
-set flow_config [file join $step_dir config flow_config.json]
-set db_config [file join $step_dir config db_default_config.json]
-set place_config [file join $step_dir config pl_default_config.json]
+set flow_config [file join $config_dir flow_config.json]
+set db_config [file join $config_dir db_default_config.json]
+set place_config [file join $config_dir pl_default_config.json]
 set output_dir [file join $step_dir output]
 
 set input_def [file join $workspace_root fixFanout_ecc output gcd_fixFanout.def.gz]
@@ -44,6 +45,8 @@ set feature_map [file join $step_dir feature place.map.json]
 set report_db [file join $step_dir report place.db.rpt]
 set sta_dir [file join $step_dir data sta]
 
+step_update_flow_config $flow_config $config_dir
+step_update_db_config $db_config $input_def $input_verilog $output_dir
 step_prepare_configs [list $flow_config $db_config $place_config] $workspace_root $pdk_root
 
 puts "=============================="
@@ -61,6 +64,7 @@ if {$RTL2GDS == 0} {
 
 step_safe_eval {destroy_pl}
 run_placer -config $place_config
+step_ensure_parent_dir $feature_map
 step_safe_eval [list feature_eval_map -path $feature_map -bin_cnt_x 256 -bin_cnt_y 256]
 step_save_design $step_name $output_def $output_verilog $output_gds $output_json $output_db $feature_db $feature_step $report_db $sta_dir
 step_safe_eval {destroy_pl}

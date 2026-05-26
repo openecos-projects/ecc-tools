@@ -63,6 +63,22 @@
             "runtime": "",
             "peak memory (mb)": 0,
             "info": {}
+        },
+        {
+            "name": "RCX",
+            "tool": "ecc",
+            "state": "Unstart",
+            "runtime": "",
+            "peak memory (mb)": 0,
+            "info": {}
+        },
+        {
+            "name": "sta",
+            "tool": "ecc",
+            "state": "Unstart",
+            "runtime": "",
+            "peak memory (mb)": 0,
+            "info": {}
         }
     ]
 }

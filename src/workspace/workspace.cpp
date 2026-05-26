@@ -308,27 +308,28 @@ void WorkspaceManager::buildStep(WorkspaceStep& step,
 {
   step.directory = _workspace.directory / (step.name + "_" + step.tool);
 
+  const std::string workspace_dir = pathString(_workspace.directory);
   const std::string step_dir = pathString(step.directory);
   const std::string design = _workspace.design_name;
   const std::string top = _workspace.top_module;
 
   step.config = {
-      {"dir", step_dir + "/config"},
-      {"flow", step_dir + "/config/flow_config.json"},
-      {"db", step_dir + "/config/db_default_config.json"},
-      {kCts, step_dir + "/config/cts_default_config.json"},
-      {kDrc, step_dir + "/config/drc_default_config.json"},
-      {kFloorplan, step_dir + "/config/fp_default_config.json"},
-      {kFixFanout, step_dir + "/config/no_default_config_fixfanout.json"},
-      {kPlace, step_dir + "/config/pl_default_config.json"},
-      {kPnp, step_dir + "/config/pnp_default_config.json"},
-      {kRoute, step_dir + "/config/rt_default_config.json"},
-      {kOptDrv, step_dir + "/config/to_default_config_drv.json"},
-      {kOptHold, step_dir + "/config/to_default_config_hold.json"},
-      {kOptSetup, step_dir + "/config/to_default_config_setup.json"},
-      {kLegalization, step_dir + "/config/pl_default_config.json"},
-      {kFiller, step_dir + "/config/pl_default_config.json"},
-      {kRcx, step_dir + "/config/rcx.json"},
+      {"dir", workspace_dir + "/config"},
+      {"flow", workspace_dir + "/config/flow_config.json"},
+      {"db", workspace_dir + "/config/db_default_config.json"},
+      {kCts, workspace_dir + "/config/cts_default_config.json"},
+      {kDrc, workspace_dir + "/config/drc_default_config.json"},
+      {kFloorplan, workspace_dir + "/config/fp_default_config.json"},
+      {kFixFanout, workspace_dir + "/config/no_default_config_fixfanout.json"},
+      {kPlace, workspace_dir + "/config/pl_default_config.json"},
+      {kPnp, workspace_dir + "/config/pnp_default_config.json"},
+      {kRoute, workspace_dir + "/config/rt_default_config.json"},
+      {kOptDrv, workspace_dir + "/config/to_default_config_drv.json"},
+      {kOptHold, workspace_dir + "/config/to_default_config_hold.json"},
+      {kOptSetup, workspace_dir + "/config/to_default_config_setup.json"},
+      {kLegalization, workspace_dir + "/config/pl_default_config.json"},
+      {kFiller, workspace_dir + "/config/pl_default_config.json"},
+      {kRcx, workspace_dir + "/config/rcx.json"},
   };
 
   step.input = {{"def", input_def}, {"verilog", input_verilog}, {"db", input_db}};

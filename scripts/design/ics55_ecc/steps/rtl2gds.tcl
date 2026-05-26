@@ -16,6 +16,8 @@ source $script_dir/place.tcl
 source $script_dir/CTS.tcl
 source $script_dir/legalization.tcl
 source $script_dir/route.tcl
+source $script_dir/rcx.tcl
+source $script_dir/sta.tcl
 source $script_dir/drc.tcl
 source $script_dir/filler.tcl
 

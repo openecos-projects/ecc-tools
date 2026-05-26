@@ -56,12 +56,6 @@ proc step_setup_workspace {default_workspace default_pdk} {
   set_pdk $pdk_root
   puts "PDK: $::ecc_pdk_root"
 
-  set force_config 0
-  if {[info exists ::env(WORKSPACE_FORCE_CONFIG)]} {
-    set force_config $::env(WORKSPACE_FORCE_CONFIG)
-  }
-  workspace_prepare -force $force_config
-
   return [list $::ecc_workspace_root $::ecc_pdk_root]
 }
 
@@ -79,11 +73,27 @@ proc step_ensure_parent_dir {path} {
   }
 }
 
+proc step_require_file {label path} {
+  if {$path eq "" || ![file exists $path]} {
+    error "$label does not exist: $path"
+  }
+  return $path
+}
+
+proc step_require_files {label paths} {
+  if {[llength $paths] <= 0} {
+    error "no $label files specified"
+  }
+  foreach path $paths {
+    step_require_file $label $path
+  }
+}
+
 proc step_expand_config_text {text workspace_root pdk_root} {
   set replacements {}
   foreach prefix {
     CTS_ecc Floorplan_ecc fixFanout_ecc place_ecc legalization_ecc
-    route_ecc drc_ecc filler_ecc origin home
+    route_ecc drc_ecc filler_ecc RCX_ecc rcx_ecc sta_ecc config origin home
   } {
     lappend replacements "\"/$prefix\"" "\"$workspace_root/$prefix\""
     lappend replacements "\"/$prefix/" "\"$workspace_root/$prefix/"
@@ -124,6 +134,57 @@ proc step_prepare_configs {config_files workspace_root pdk_root} {
   }
 }
 
+proc step_read_text_file {path} {
+  set fp [open $path r]
+  set text [read $fp]
+  close $fp
+  return $text
+}
+
+proc step_write_text_file {path text} {
+  step_ensure_parent_dir $path
+  set fp [open $path w]
+  puts -nonewline $fp $text
+  close $fp
+}
+
+proc step_replace_json_string_key {text key value} {
+  set result {}
+  set pattern [format {^([[:space:]]*"%s"[[:space:]]*:[[:space:]]*")[^"]*(".*)$} $key]
+  foreach line [split $text "\n"] {
+    if {[regexp $pattern $line -> prefix suffix]} {
+      set line "${prefix}${value}${suffix}"
+    }
+    lappend result $line
+  }
+  return [join $result "\n"]
+}
+
+proc step_update_flow_config {flow_config config_dir} {
+  set text [step_read_text_file $flow_config]
+  foreach {key file_name} {
+    idb_path db_default_config.json
+    ifp_path fp_default_config.json
+    ipl_path pl_default_config.json
+    irt_path rt_default_config.json
+    idrc_path drc_default_config.json
+    icts_path cts_default_config.json
+    ito_path to_default_config_drv.json
+    ipnp_path pnp_default_config.json
+  } {
+    set text [step_replace_json_string_key $text $key [file join $config_dir $file_name]]
+  }
+  step_write_text_file $flow_config $text
+}
+
+proc step_update_db_config {db_config input_def input_verilog output_dir} {
+  set text [step_read_text_file $db_config]
+  set text [step_replace_json_string_key $text def_path $input_def]
+  set text [step_replace_json_string_key $text verilog_path $input_verilog]
+  set text [step_replace_json_string_key $text output_dir_path $output_dir]
+  step_write_text_file $db_config $text
+}
+
 proc step_print_path {label value} {
   puts [format "  %-18s %s" "${label}:" $value]
 }
@@ -133,6 +194,135 @@ proc step_print_list {label values} {
   foreach value $values {
     puts "    $value"
   }
+}
+
+proc step_dict_get_default {values key default} {
+  if {[dict exists $values $key]} {
+    return [dict get $values $key]
+  }
+  return $default
+}
+
+proc step_safe_dir_name {name} {
+  set result ""
+  foreach char [split [string trim $name] ""] {
+    if {[regexp {^[[:alnum:]_.-]$} $char]} {
+      append result $char
+    } else {
+      append result "_"
+    }
+  }
+  if {$result eq ""} {
+    return "spef"
+  }
+  return $result
+}
+
+proc step_spef_type_from_path {design_name spef_file} {
+  set stem [file rootname [file tail $spef_file]]
+  set design_prefix "${design_name}_"
+  if {[string first $design_prefix $stem] == 0} {
+    set stem [string range $stem [string length $design_prefix] end]
+  }
+  return $stem
+}
+
+proc step_parse_rcx_config {config_path} {
+  step_require_file "rcx config" $config_path
+
+  set fp [open $config_path r]
+  set text [read $fp]
+  close $fp
+
+  set thread_num 64
+  set output_dir ""
+  set mapping_file ""
+  set corners {}
+  set in_corners 0
+  set current_corner {}
+
+  foreach line [split $text "\n"] {
+    set line [string trim $line]
+    if {$line eq ""} {
+      continue
+    }
+
+    if {[regexp {^"corners"[[:space:]]*:[[:space:]]*\[} $line]} {
+      set in_corners 1
+      continue
+    }
+
+    if {!$in_corners} {
+      if {[regexp {^"thread_num"[[:space:]]*:[[:space:]]*([0-9]+)} $line -> value]} {
+        set thread_num $value
+      } elseif {[regexp {^"output"[[:space:]]*:[[:space:]]*"([^"]*)"} $line -> value]} {
+        set output_dir $value
+      } elseif {[regexp {^"mapping_file"[[:space:]]*:[[:space:]]*"([^"]*)"} $line -> value]} {
+        set mapping_file $value
+      }
+      continue
+    }
+
+    if {[regexp {^\]} $line]} {
+      set in_corners 0
+      continue
+    }
+
+    if {[regexp {^\{} $line]} {
+      set current_corner [dict create]
+      continue
+    }
+
+    if {[regexp {^\}} $line]} {
+      if {[dict size $current_corner] > 0} {
+        lappend corners $current_corner
+      }
+      set current_corner {}
+      continue
+    }
+
+    if {[regexp {^"([^"]+)"[[:space:]]*:[[:space:]]*"([^"]*)"} $line -> key value]} {
+      dict set current_corner $key $value
+    }
+  }
+
+  return [dict create \
+    thread_num $thread_num \
+    output $output_dir \
+    mapping_file $mapping_file \
+    corners $corners]
+}
+
+proc step_collect_rcx_corners {rcx_config design_name} {
+  set config [step_parse_rcx_config $rcx_config]
+  return [dict get $config corners]
+}
+
+proc step_collect_spef_items {rcx_config design_name explicit_spef_files} {
+  set spef_items {}
+
+  if {[llength $explicit_spef_files] > 0} {
+    foreach spef_file $explicit_spef_files {
+      set spef_type [step_safe_dir_name [step_spef_type_from_path $design_name $spef_file]]
+      lappend spef_items [list $spef_type $spef_file]
+    }
+    return $spef_items
+  }
+
+  set config [step_parse_rcx_config $rcx_config]
+  foreach corner [dict get $config corners] {
+    set spef_file [step_dict_get_default $corner spef_file ""]
+    if {$spef_file eq ""} {
+      continue
+    }
+    set spef_type [step_dict_get_default $corner name ""]
+    if {$spef_type eq ""} {
+      set spef_type [step_spef_type_from_path $design_name $spef_file]
+    }
+    lappend spef_items [list [step_safe_dir_name $spef_type] $spef_file]
+  }
+
+  return $spef_items
 }
 
 proc step_load_design {flow_config db_config output_dir tech_lef lef_files input_def input_verilog top_module} {

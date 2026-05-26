@@ -18,15 +18,16 @@ set default_pdk [file normalize [file join $flow_dir .. .. .. .. icsprout55-pdk]
 
 lassign [step_setup_workspace $default_workspace $default_pdk] workspace_root pdk_root
 set step_dir [file join $workspace_root filler_ecc]
+set config_dir [file join $workspace_root config]
 
 set design_name "gcd"
 set top_module "gcd"
 
 source [file normalize [file join $script_dir pdk.tcl]]
 
-set flow_config [file join $step_dir config flow_config.json]
-set db_config [file join $step_dir config db_default_config.json]
-set filler_config [file join $step_dir config pl_default_config.json]
+set flow_config [file join $config_dir flow_config.json]
+set db_config [file join $config_dir db_default_config.json]
+set filler_config [file join $config_dir pl_default_config.json]
 set output_dir [file join $step_dir output]
 
 set input_def [file join $workspace_root drc_ecc output gcd_drc.def.gz]
@@ -43,6 +44,8 @@ set feature_step [file join $step_dir feature filler.step.json]
 set report_db [file join $step_dir report filler.db.rpt]
 set sta_dir [file join $step_dir data sta]
 
+step_update_flow_config $flow_config $config_dir
+step_update_db_config $db_config $input_def $input_verilog $output_dir
 step_prepare_configs [list $flow_config $db_config $filler_config] $workspace_root $pdk_root
 
 puts "=============================="

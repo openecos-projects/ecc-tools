@@ -1,0 +1,33 @@
+{
+    "path": "/route_ecc/subflow.json",
+    "steps": [
+        {
+            "name": "load data",
+            "state": "Unstart",
+            "runtime": "",
+            "peak memory (mb)": 0,
+            "info": {}
+        },
+        {
+            "name": "run routing",
+            "state": "Unstart",
+            "runtime": "",
+            "peak memory (mb)": 0,
+            "info": {}
+        },
+        {
+            "name": "save data",
+            "state": "Unstart",
+            "runtime": "",
+            "peak memory (mb)": 0,
+            "info": {}
+        },
+        {
+            "name": "analysis",
+            "state": "Unstart",
+            "runtime": "",
+            "peak memory (mb)": 0,
+            "info": {}
+        }
+    ]
+}

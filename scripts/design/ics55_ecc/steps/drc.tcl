@@ -18,15 +18,16 @@ set default_pdk [file normalize [file join $flow_dir .. .. .. .. icsprout55-pdk]
 
 lassign [step_setup_workspace $default_workspace $default_pdk] workspace_root pdk_root
 set step_dir [file join $workspace_root drc_ecc]
+set config_dir [file join $workspace_root config]
 
 set design_name "gcd"
 set top_module "gcd"
 
 source [file normalize [file join $script_dir pdk.tcl]]
 
-set flow_config [file join $step_dir config flow_config.json]
-set db_config [file join $step_dir config db_default_config.json]
-set drc_config [file join $step_dir config drc_default_config.json]
+set flow_config [file join $config_dir flow_config.json]
+set db_config [file join $config_dir db_default_config.json]
+set drc_config [file join $config_dir drc_default_config.json]
 set drc_work_dir [file join $step_dir data drc]
 set output_dir [file join $step_dir output]
 
@@ -47,6 +48,8 @@ set sta_dir [file join $step_dir data sta]
 
 set drc_thread_number 128
 
+step_update_flow_config $flow_config $config_dir
+step_update_db_config $db_config $input_def $input_verilog $output_dir
 step_prepare_configs [list $flow_config $db_config $drc_config] $workspace_root $pdk_root
 
 puts "=============================="
@@ -65,6 +68,7 @@ if {$RTL2GDS == 0} {
 
 file mkdir $drc_work_dir
 init_drc -temp_directory_path $drc_work_dir -thread_number $drc_thread_number
+step_ensure_parent_dir $drc_report
 run_drc -config $drc_config -path $drc_report
 step_save_design $step_name $output_def $output_verilog $output_gds $output_json $output_db $feature_db $feature_step $report_db $sta_dir
 save_drc -path $feature_step

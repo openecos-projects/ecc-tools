@@ -18,15 +18,16 @@ set default_pdk [file normalize [file join $flow_dir .. .. .. .. icsprout55-pdk]
 
 lassign [step_setup_workspace $default_workspace $default_pdk] workspace_root pdk_root
 set step_dir [file join $workspace_root route_ecc]
+set config_dir [file join $workspace_root config]
 
 set design_name "gcd"
 set top_module "gcd"
 
 source [file normalize [file join $script_dir pdk.tcl]]
 
-set flow_config [file join $step_dir config flow_config.json]
-set db_config [file join $step_dir config db_default_config.json]
-set route_config [file join $step_dir config rt_default_config.json]
+set flow_config [file join $config_dir flow_config.json]
+set db_config [file join $config_dir db_default_config.json]
+set route_config [file join $config_dir rt_default_config.json]
 set route_work_dir [file join $step_dir data rt]
 set output_dir [file join $step_dir output]
 
@@ -48,6 +49,8 @@ set bottom_routing_layer "MET2"
 set top_routing_layer "MET5"
 set route_thread_number 50
 
+step_update_flow_config $flow_config $config_dir
+step_update_db_config $db_config $input_def $input_verilog $output_dir
 step_prepare_configs [list $flow_config $db_config $route_config] $workspace_root $pdk_root
 
 puts "=============================="
