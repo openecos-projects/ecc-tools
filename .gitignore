@@ -37,7 +37,7 @@ tmp/
 /scripts/design/ics55_ecc/*
 !/scripts/design/ics55_ecc/run_ecc.sh
 !/scripts/design/ics55_ecc/run_workspace.tcl
-!/scripts/design/ics55_ecc/gcd
+# !/scripts/design/ics55_ecc/gcd
 !/scripts/design/ics55_ecc/steps
 *.patch
 CMakePresets.json
