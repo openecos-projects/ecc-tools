@@ -77,6 +77,7 @@ itfiVia::itfiVia()
   _crt2(std::nullopt),
   _crt_vs_area(),
   _t0(0),
+  _has_t0(false),
   _rho(std::nullopt),
   _rpv(std::nullopt),
   _area(std::nullopt),
@@ -106,6 +107,7 @@ itfiVia& itfiVia::operator=(const itfiVia& rhs)
   _crt2 = rhs._crt2;
   _crt_vs_area = rhs._crt_vs_area;
   _t0 = rhs._t0;
+  _has_t0 = rhs._has_t0;
   _rho = rhs._rho;
   _rpv = rhs._rpv;
   _area = rhs._area;
@@ -130,6 +132,7 @@ itfiVia::operator==(const itfiVia& rhs) const
     && _crt2 == rhs._crt2
     && _crt_vs_area == rhs._crt_vs_area
     && _t0 == rhs._t0
+    && _has_t0 == rhs._has_t0
     && _rho == rhs._rho
     && _rpv == rhs._rpv
     && _area == rhs._area
@@ -154,6 +157,7 @@ itfiVia::clear() {
   _crt2.reset();
   _crt_vs_area.clear();
   _t0 = 0;
+  _has_t0 = false;
   _rho.reset();
   _rpv.reset();
   _area.reset();
@@ -224,6 +228,18 @@ itfiVia::get_crt_vs_area() const
   return _crt_vs_area;
 }
 
+float
+itfiVia::get_t0() const
+{
+  return _t0;
+}
+
+bool
+itfiVia::has_t0() const
+{
+  return _has_t0;
+}
+
 const char*
 itfiVia::get_from() const
 {
@@ -276,6 +292,7 @@ void
 itfiVia::set_t0(float t)
 {
   _t0 = t;
+  _has_t0 = true;
 }
 
 void

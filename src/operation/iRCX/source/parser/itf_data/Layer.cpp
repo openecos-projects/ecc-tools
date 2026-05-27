@@ -122,7 +122,12 @@ LayerConductor::query_crt_vs_si_width(
   crt2.reset();
 
   auto& list = get_crt_vs_si_width();
-  if (list.size() < 2) return; // lack of information to interpolate
+  if (list.empty()) return;
+  if (list.size() == 1) {
+    crt1 = list.front().crt_1;
+    crt2 = list.front().crt_2;
+    return;
+  }
 
   auto it = std::upper_bound(list.begin(), list.end(), width,
     [](double width, const itfiWidthCrt& e) {
@@ -262,7 +267,12 @@ LayerVia::query_crt_vs_area(
   crt2.reset();
 
   auto& list = get_crt_vs_area();
-  if (list.size() < 2) return; // lack of information to interpolate
+  if (list.empty()) return;
+  if (list.size() == 1) {
+    crt1 = list.front().crt1;
+    crt2 = list.front().crt2;
+    return;
+  }
 
   auto it = std::upper_bound(list.begin(), list.end(), area, 
     [](double area, const itfiAreaCrt& e){

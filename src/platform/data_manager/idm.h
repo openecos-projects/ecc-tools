@@ -222,7 +222,7 @@ class DataManager
   bool isOnDieBoundary(int32_t llx, int32_t lly, int32_t urx, int32_t ury, IdbOrient orient);
   bool isOnIOSite(int32_t llx, int32_t lly, int32_t urx, int32_t ury, IdbOrient orient);
   bool checkInstPlacer(int32_t llx, int32_t lly, int32_t urx, int32_t ury, IdbOrient orient);
-  void write_placement_back(float* x, float* y, int len);
+  void write_placement_back(const float* x, const float* y, int len);
   std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int> isAllNetConnected();
   bool isNetConnected(std::string net_name);
   bool isNetConnected(IdbNet* net);

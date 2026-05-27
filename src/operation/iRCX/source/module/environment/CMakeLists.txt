@@ -1,7 +1,8 @@
-add_library(ircx_environment Environment.cpp)
+add_library(ircx_environment Environment.cc)
 
 target_link_libraries(ircx_environment
   PUBLIC
+    ircx_database_design
     ircx_topology
     log
   PRIVATE

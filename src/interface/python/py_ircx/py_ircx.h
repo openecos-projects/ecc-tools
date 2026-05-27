@@ -18,21 +18,12 @@
 
 #include <string>
 
+#include "RCXAPI.hh"
+
 namespace python_interface {
 
-bool init_rcx(unsigned thread_number);
-bool read_rcx_corner(const std::string& corner_name,
-                     const std::string& itf_file,
-                     const std::string& captab_file);
-bool read_rcx_mapping(const std::string& mapping_file);
-
-bool adapt_rcx_db();
-bool build_rcx_topology();
-bool build_rcx_environment();
-bool build_rcx_process_variation();
-bool extract_rcx_parasitics();
-
-bool run_rcx(const std::string& config);
-bool report_rcx(const std::string& output_dir);
+bool init_rcx(const std::string& config);
+bool run_rcx();
+bool report_rcx();
 
 }  // namespace python_interface

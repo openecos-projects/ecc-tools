@@ -30,7 +30,6 @@
 #include "idm.h"
 
 #include <cassert>
-
 namespace idm {
 
 DataManager* DataManager::_instance = nullptr;
@@ -113,17 +112,17 @@ bool DataManager::readLef(vector<string> lef_paths, bool b_techlef)
   return true;
 }
 
-void DataManager::write_placement_back(float* x, float* y, int len)
+void DataManager::write_placement_back(const float* x, const float* y, int len)
 {
   // std::vector<ContestParser::Instance*> inst_list;
   int i = 0;
   printf("write_placement_back start!!! Db address is %p\n", this);
   printf("write_placement_back start!!! idb_design address is %p\n", this->get_idb_design());
-  std::set<std::pair<int, IdbRow*>> row_set;
-  for (auto row : this->get_idb_layout()->get_rows()->get_row_list()) {
-    int32_t row_y = row->get_original_coordinate()->get_y();
-    row_set.insert(std::make_pair(row_y, row));
+  if (x == nullptr || y == nullptr || len <= 0) {
+    std::cout << "WriteBack placement finished!!" << std::endl;
+    return;
   }
+  auto const& row_list = this->get_idb_layout()->get_rows()->get_row_list();
   for (auto name : this->get_idb_design()->m_instID2Name) {
     // std::string name;
     if (i >= len) {
@@ -131,6 +130,10 @@ void DataManager::write_placement_back(float* x, float* y, int len)
     }
 
     auto inst = this->get_idb_design()->get_instance_list()->find_instance(name);
+    if (inst == nullptr) {
+      i++;
+      continue;
+    }
     // int node_id = m_mNodeName2Index.find(name)->second;
     float xx = x[i];
     float yy = y[i];
@@ -141,13 +144,51 @@ void DataManager::write_placement_back(float* x, float* y, int len)
       continue;
     }
     if (!cell_master->is_block()) {
-      auto iter = row_set.lower_bound(std::make_pair(yy, nullptr));
-      assert(iter != row_set.end());
-      orient = iter->second->get_orient();
+      if (row_list.empty()) {
+        i++;
+        continue;
+      }
+      auto target_y = static_cast<int32_t>(yy);
+      IdbRow* matched_row = nullptr;
+      int32_t matched_y = 0;
+      IdbRow* last_row = nullptr;
+      int32_t last_y = 0;
+      for (auto* row : row_list) {
+        int32_t row_y = row->get_original_coordinate()->get_y();
+        if (last_row == nullptr || row_y > last_y) {
+          last_row = row;
+          last_y = row_y;
+        }
+        if (row_y >= target_y && (matched_row == nullptr || row_y < matched_y)) {
+          matched_row = row;
+          matched_y = row_y;
+        }
+      }
+      if (matched_row == nullptr) {
+        matched_row = last_row;
+      }
+      if (matched_row == nullptr) {
+        i++;
+        continue;
+      }
+      orient = matched_row->get_orient();
     } else {
       orient = inst->get_orient();
     }
-    this->get_idb_design()->placeInstance(name, static_cast<int32_t>(xx), static_cast<int32_t>(yy), orient, IdbPlacementStatus::kPlaced);
+    inst->set_orient(orient, false);
+    inst->set_coodinate(static_cast<int32_t>(xx), static_cast<int32_t>(yy), false);
+    inst->set_status(IdbPlacementStatus::kPlaced);
+    inst->set_bounding_box();
+    for (auto* pin : inst->get_pin_list()->get_pin_list()) {
+      auto* term = pin->get_term();
+      if (term == nullptr || term->get_port_number() <= 0) {
+        continue;
+      }
+      pin->set_average_coordinate(static_cast<int32_t>(xx) + term->get_average_position().get_x(),
+                                  static_cast<int32_t>(yy) + term->get_average_position().get_y());
+      pin->set_bounding_box();
+      pin->set_grid_coordinate();
+    }
     i++;
     // flag = true;
   }

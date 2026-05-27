@@ -53,12 +53,23 @@ bool CapTable::loadFromFile(const std::string& filePath)
 
 bool CapTable::loadFromString(const std::string& content)
 {
-  configs_.clear();
+  std::map<std::string, CapTableConfig> configs;
 
   std::istringstream iss(content);
   std::string line;
   std::string headerLine;
   std::vector<std::string> dataLines;
+
+  auto flushConfig = [&]() -> bool {
+    if (headerLine.empty()) {
+      return true;
+    }
+    if (!parseConfig(headerLine, dataLines, configs)) {
+      return false;
+    }
+    dataLines.clear();
+    return true;
+  };
 
   while (std::getline(iss, line)) {
     // Trim leading/trailing whitespace.
@@ -81,9 +92,9 @@ bool CapTable::loadFromString(const std::string& content)
     }
 
     if (isHeader) {
-      if (!headerLine.empty()) {
-        parseConfig(headerLine, dataLines);
-        dataLines.clear();
+      if (!flushConfig()) {
+        configs_.clear();
+        return false;
       }
       headerLine = line;
     } else {
@@ -93,16 +104,25 @@ bool CapTable::loadFromString(const std::string& content)
     }
   }
 
-  if (!headerLine.empty()) {
-    parseConfig(headerLine, dataLines);
+  if (!flushConfig()) {
+    configs_.clear();
+    return false;
   }
 
+  configs_ = std::move(configs);
   LOG_INFO << "Loaded " << configs_.size() << " cap table configs";
   return !configs_.empty();
 }
 
 bool CapTable::parseConfig(const std::string& headerLine,
                            const std::vector<std::string>& dataLines)
+{
+  return parseConfig(headerLine, dataLines, configs_);
+}
+
+bool CapTable::parseConfig(const std::string& headerLine,
+                           const std::vector<std::string>& dataLines,
+                           std::map<std::string, CapTableConfig>& configs)
 {
   if (headerLine.empty() || dataLines.empty()) {
     return false;
@@ -177,7 +197,7 @@ bool CapTable::parseConfig(const std::string& headerLine,
     return false;
   }
 
-  configs_[key] = config;
+  configs[key] = config;
   return true;
 }
 
@@ -206,7 +226,7 @@ std::vector<std::string> CapTable::get_all_keys() const
 
 std::string CapTable::makeKey(const std::string& layer_name,
                               const std::string& overLayer,
-                              const std::string& underLayer) const
+                              const std::string& underLayer)
 {
   std::ostringstream oss;
   if (underLayer.empty()) {

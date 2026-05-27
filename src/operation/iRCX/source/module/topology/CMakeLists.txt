@@ -1,12 +1,12 @@
 set(IRCX_TOPOLOGY_SRC
-  TopoPool.cpp
-  TopologyBuilder.cpp
+  TopologyBuilder.cc
 )
 
 add_library(ircx_topology ${IRCX_TOPOLOGY_SRC})
 
 target_link_libraries(ircx_topology
   PUBLIC
+    ircx_database_design
     ircx_headers
   PRIVATE
     log

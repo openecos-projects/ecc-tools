@@ -56,15 +56,19 @@ ItfRead::createDb(const std::string& fname)
   _process_corner = std::make_unique<ProcessCorner>();
 
   _fname = fname;
-  auto ret = itfrRead(file, fname.c_str(), this);
+  const int ret = itfrRead(file, fname.c_str(), this);
   fclose(file);
 
   itfrClear();
+  if (ret != 0) {
+    _process_corner.reset();
+    return false;
+  }
 
   _process_corner->update_layers_height();
   _itf_service->add_process_corner(std::move(_process_corner));
 
-  return ret;
+  return true;
 }
 int
 ItfRead::technologyCb(itfCallBackType c, const char* string, itfiUserData user_data)

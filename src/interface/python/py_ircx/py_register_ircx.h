@@ -25,19 +25,9 @@ namespace py = pybind11;
 
 void register_ircx(py::module& m)
 {
-  m.def("init_rcx", init_rcx, py::arg("thread_number") = 64);
-  m.def("read_rcx_corner", read_rcx_corner, py::arg("corner_name"),
-        py::arg("itf_file"), py::arg("captab_file"));
-  m.def("read_rcx_mapping", read_rcx_mapping, py::arg("mapping_file"));
-
-  m.def("adapt_rcx_db", adapt_rcx_db);
-  m.def("build_rcx_topology", build_rcx_topology);
-  m.def("build_rcx_environment", build_rcx_environment);
-  m.def("build_rcx_process_variation", build_rcx_process_variation);
-  m.def("extract_rcx_parasitics", extract_rcx_parasitics);
-
-  m.def("run_rcx", run_rcx, py::arg("config"));
-  m.def("report_rcx", report_rcx, py::arg("output_dir") = ".");
+  m.def("init_rcx", init_rcx, py::arg("config"));
+  m.def("run_rcx", run_rcx);
+  m.def("report_rcx", report_rcx);
 }
 
 }  // namespace python_interface

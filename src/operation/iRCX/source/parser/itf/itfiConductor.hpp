@@ -226,6 +226,7 @@ class itfiConductor {
   itfiBTSW& get_bottom_thickness_vs_si_width();
   const itfiBTSW& get_bottom_thickness_vs_si_width() const;
   float get_t0() const;
+  bool has_t0() const;
   std::optional<float> get_crt1() const;
   std::optional<float> get_crt2() const;
   const std::vector<itfiWidthCrt>& get_crt_vs_si_width() const;

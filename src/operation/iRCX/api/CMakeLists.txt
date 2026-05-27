@@ -1,22 +1,16 @@
-set(IRCX_ENGINE_SRC
-  ParasiticXEngine.cpp
-  ParasiticXIDBAdapter.cpp
+set(IRCX_API_SRC
+  RCXAPI.cc
 )
 
-add_library(ircx_engine ${IRCX_ENGINE_SRC})
+add_library(ircx_api ${IRCX_API_SRC})
 
-target_link_libraries(ircx_engine
-  PUBLIC
-    IdbBuilder
-    ircx_headers
+target_link_libraries(ircx_api
   PRIVATE
-    def_service
-    idb
-    lef_service
+    ircx_flow
     log
 )
 
-target_include_directories(ircx_engine
+target_include_directories(ircx_api
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
 )

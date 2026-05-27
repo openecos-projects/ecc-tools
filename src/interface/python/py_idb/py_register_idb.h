@@ -63,7 +63,7 @@ void register_idb_op(pybind11::module& m)
 
   pybind11::class_<idm::DataManager>(m, "DataManager").def(pybind11::init<>());
 
-  m.def("get_dmInst", &getDMInst, "A function which returns a DataManager instance");
+  m.def("get_dmInst", &getDMInst, "A function which returns a DataManager instance", pybind11::return_value_policy::reference);
   m.def(
       "write_placement_back",
       [](idm::DataManager* db, pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> const& x,

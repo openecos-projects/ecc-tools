@@ -35,7 +35,7 @@ class MappingBuilder
   }
 
   void clear();
-  void read(const std::string& mappingPath);
+  bool read(const std::string& mappingPath);
 
  private:
   std::unordered_map<std::string, std::string> design_to_process_layer_names_;

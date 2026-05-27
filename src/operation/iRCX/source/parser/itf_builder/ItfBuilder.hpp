@@ -33,7 +33,7 @@ class ItfBuilder {
   ItfService* get_itf_service() const;
 
   // function
-  void buildItf(const std::string&);
+  bool buildItf(const std::string&);
 
  private:
   // members

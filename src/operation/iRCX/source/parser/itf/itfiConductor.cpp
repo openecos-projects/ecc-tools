@@ -351,6 +351,12 @@ itfiConductor::get_t0() const
   return _t0;
 }
 
+bool
+itfiConductor::has_t0() const
+{
+  return _has_t0;
+}
+
 std::optional<float>
 itfiConductor::get_crt1() const
 {
@@ -695,6 +701,7 @@ void
 itfiConductor::set_t0(float t)
 {
   _t0 = t;
+  _has_t0 = 1;
 }
 
 void

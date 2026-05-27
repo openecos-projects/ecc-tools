@@ -280,12 +280,13 @@ void RTInterface::cleanDef()
 #endif
 }
 
-void RTInterface::fixFanout()
+void RTInterface::fixFanout(std::map<std::string, std::any> config_map)
 {
+  std::string buffer_name = RTUTIL.getConfigValue<std::string>(config_map, "-buffer_name", "buffer_name");
   auto* idb_design = dmInst->get_idb_def_service()->get_design();
   idb::IdbNetList* idb_net_list = idb_design->get_net_list();
 
-  size_t max_fanout = 16;
+  size_t max_fanout = 32;
   while (true) {
     std::set<idb::IdbNet*> origin_net_set;
     for (idb::IdbNet* idb_net : idb_net_list->get_net_list()) {
@@ -315,11 +316,11 @@ void RTInterface::fixFanout()
                                                            idb::IdbConnectType::kSignal, idb::IdbCreatePolicy::kErrorIfExists);
         // 生成buf
         idb::IdbInstance* new_buf = idb_design->createInstance(idb_design->makeUniqueInstanceName(RTUTIL.getString("rt_fanout_buf_", new_idx++)),
-                                                               RTUTIL.getString("BUFFD3BWP35P140LVT"), idb::IdbInstanceType::kTiming,
+                                                               buffer_name, idb::IdbInstanceType::kTiming,
                                                                idb::IdbPlacementStatus::kNone, idb::IdbOrient::kNone, 0, 0,
                                                                idb::IdbCreatePolicy::kErrorIfExists);
         if (new_net == nullptr || new_buf == nullptr) {
-          continue;
+          RTLOG.error(Loc::current(),"new_net == nullptr || new_buf == nullptr!");
         }
         // 连接buf
         for (idb::IdbPin* buf_pin : new_buf->get_pin_list()->get_pin_list()) {

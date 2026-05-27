@@ -80,7 +80,7 @@ class RTInterface
   void runRT();
   void destroyRT();
   void cleanDef();
-  void fixFanout();
+  void fixFanout(std::map<std::string, std::any> config_map);
 #endif
 
 #endif

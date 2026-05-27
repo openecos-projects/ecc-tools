@@ -523,7 +523,7 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
           if (boundary_idx >= 0) {
             const BoundaryData& env_boundary = merged_layer_data.getBoundary(boundary_idx);
             if (boundary_idx >= 0 && boundary_idx < static_cast<int32_t>(is_eol_boundary.size()) && is_eol_boundary[boundary_idx]) {
-              if (env_boundary.edge_length < eol_rule.eol_width) {
+              if (env_boundary.edge_length < eol_rule.eol_width && eol_rule.has_ete) {
                 is_ete = true;
               }
             }

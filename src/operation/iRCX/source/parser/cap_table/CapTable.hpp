@@ -153,7 +153,7 @@ class CapTable {
   /**
    * @brief Query the farthest lookup row and keep both ground/coupling terms.
    *
-   * Used by open-ended extraction formulas that need the asymptotic `cg + cc`
+   * Used by open-ended calculation formulas that need the asymptotic `cg + cc`
    * contribution instead of the isolated ground-only fallback.
    */
   CapacitanceResult queryTwoLayerFarthestCap(
@@ -173,10 +173,13 @@ class CapTable {
 
   bool parseConfig(const std::string& headerLine,
                    const std::vector<std::string>& dataLines);
+  static bool parseConfig(const std::string& headerLine,
+                          const std::vector<std::string>& dataLines,
+                          std::map<std::string, CapTableConfig>& configs);
 
-  std::string makeKey(const std::string& layer_name,
-                      const std::string& overLayer,
-                      const std::string& underLayer) const;
+  static std::string makeKey(const std::string& layer_name,
+                             const std::string& overLayer,
+                             const std::string& underLayer);
 
   const CapTableConfig* get_config(
       const std::string& layer_name,

@@ -10,7 +10,7 @@ runs:
         dnf install -y epel-release
         dnf config-manager --set-enabled crb || true
         dnf install -y \
-          cmake ninja-build pkgconfig patchelf \
+          cmake ninja-build pkgconfig patchelf mold \
           boost-devel cairo-devel gflags-devel glog-devel \
           flex flex-devel bison eigen3-devel gtest-devel \
           tbb-devel hwloc-devel libcurl-devel libunwind-devel \

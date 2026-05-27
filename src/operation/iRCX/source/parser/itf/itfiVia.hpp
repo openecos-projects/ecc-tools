@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include <optional>
 #include <tuple>
 #include <vector>
 
@@ -86,6 +87,8 @@ class itfiVia {
   std::optional<float> get_crt1() const;
   std::optional<float> get_crt2() const;
   const std::vector<itfiAreaCrt>& get_crt_vs_area() const;
+  float get_t0() const;
+  bool has_t0() const;
   const char* get_from() const;
   const char* get_to() const;
 
@@ -121,6 +124,7 @@ class itfiVia {
   std::optional<float> _crt2;
   std::vector<itfiAreaCrt> _crt_vs_area;
   float _t0;
+  bool _has_t0;
   std::optional<float> _rho; // resistivity. Units: ohms-micron
   std::optional<float> _rpv;
   std::optional<float> _area;  // Area of default via. Units: square microns

@@ -1281,7 +1281,7 @@ crt_property :
   }
 | crt2        { itfData->via.set_crt2(v_crt2); }
 | crt_vs_area
-| t0          { itfData->via.set_t0(v_crt2); }
+| t0          { itfData->via.set_t0(v_t0); }
 ;
 
 crt_vs_area :

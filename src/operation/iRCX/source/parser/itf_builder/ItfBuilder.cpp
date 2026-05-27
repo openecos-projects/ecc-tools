@@ -25,11 +25,11 @@ ItfBuilder::get_itf_service() const
   return _itf_service.get();
 }
 
-void
+bool
 ItfBuilder::buildItf(const std::string& fname)
 {
   ItfRead itf_read(_itf_service.get());
-  itf_read.createDb(fname);
+  return itf_read.createDb(fname);
 }
 
 } // namespace itf

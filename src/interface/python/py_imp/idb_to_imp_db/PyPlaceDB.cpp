@@ -50,6 +50,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   using namespace gtl::operators;
   typedef gtl::polygon_90_set_data<coordinate_type> PolygonSet;
   IdbDesign* db_deisgn = db->get_idb_design();
+  db_deisgn->m_instID2Name.clear();
   num_terminal_NIs = 0;  // IO pins
   // num_terminal_NIs = 0;  // IO pins
   dbu = db_deisgn->get_layout()->get_units()->get_micron_dbu();
@@ -149,6 +150,23 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   }
   // add a node to a bin
   auto addNode2Bin = [&](Box const& box) { fixed_boxes.emplace_back(box.xl, box.yl, box.xh, box.yh); };
+  auto buildInstanceBox = [](IdbInstance* node) {
+    auto* coord = node->get_coordinate();
+    auto* box = node->get_bounding_box();
+    if (node->get_cell_master() != nullptr && (box->get_width() <= 0 || box->get_height() <= 0)) {
+      node->set_bounding_box();
+      box = node->get_bounding_box();
+    }
+    int32_t lx = coord->get_x();
+    int32_t ly = coord->get_y();
+    if (box->get_width() > 0 && box->get_height() > 0) {
+      return Box(lx, ly, box->get_high_x(), box->get_high_y());
+    }
+    auto* cell_master = node->get_cell_master();
+    int32_t width = cell_master == nullptr ? 1 : static_cast<int32_t>(cell_master->get_width());
+    int32_t height = cell_master == nullptr ? 1 : static_cast<int32_t>(cell_master->get_height());
+    return Box(lx, ly, lx + width, ly + height);
+  };
   // general add a node
   auto addNode = [&](std::string orient_str, std::string const& name, Box const& box, bool isFixed) {
     // this id may be different from node id
@@ -210,8 +228,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
     // Macro const& macro = db.macro(db.macroId(node));
     if (node->get_status() != IdbPlacementStatus::kFixed) {  // || i >= db.nodes().size() - num_terminal_NIs
-      Box box_tmp(node->get_coordinate()->get_x(), node->get_coordinate()->get_y(), node->get_bounding_box()->get_high_x(),
-                  node->get_bounding_box()->get_high_y());
+      Box box_tmp = buildInstanceBox(node);
       if (node->get_halo()) {
         // Jiaqi: add halo for fixed cells
         // printf("PyPlaceDB detect fixed cell with halo: ");
@@ -231,8 +248,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       // Macro const& macro = db.macro(db.macroId(node));
       // printf("PyPlaceDB detect fixed cell: ");
 
-      Box box_tmp(node->get_coordinate()->get_x(), node->get_coordinate()->get_y(), node->get_bounding_box()->get_high_x(),
-                  node->get_bounding_box()->get_high_y());
+      Box box_tmp = buildInstanceBox(node);
       if (node->get_halo()) {
         // Jiaqi: add halo for fixed cells
         // printf("PyPlaceDB detect fixed cell with halo: ");
@@ -596,7 +612,9 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   site_width = db->get_idb_layout()->get_rows()->get_row_list().at(0)->get_site()->get_width();
 #if 1
 
-  init_routability(db, inst_resort_list);
+  if (with_routability) {
+    init_routability(db, inst_resort_list);
+  }
   if (with_sta) {
     init_timing(db, mPin2ID, mClkPin2ID, mNode2PyNondeID, inst_resort_list, ext_blockage_num);
   }
