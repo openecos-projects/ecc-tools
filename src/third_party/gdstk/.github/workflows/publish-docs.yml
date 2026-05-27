@@ -1,0 +1,38 @@
+name: Publish Docs
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  publish-docs:
+    runs-on: ubuntu-latest
+    name: Docs builder and publisher
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+          architecture: x64
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libqhull-dev
+      - name: Install python dependencies
+        run: |
+          pip install pip-tools
+          python -m piptools compile --resolver=backtracking --extra=docs -o requirements.txt pyproject.toml
+          pip install -r requirements.txt
+      - name: Install gdstk
+        run: pip install .
+      - name: Build docs
+        run: sphinx-build docs docs/_build
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/_build
+          publish_branch: gh-pages
+          keep_files: false
+          force_orphan: true
