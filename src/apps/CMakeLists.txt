@@ -2,7 +2,7 @@
 # SET(CMAKE_BUILD_TYPE "Debug")
 
 if(NOT DEFINED CMD_BUILD)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/design/ics55_ecc)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../bin)
 endif()
 
 # add GIT_VERSION to definitions
