@@ -215,33 +215,33 @@ void WorkspaceManager::buildPdk()
         pathString(stdcell_dir / "ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib"),
         pathString(stdcell_dir / "ics55_LLSC_H7CL/liberty/ics55_LLSC_H7CL_ss_rcworst_1p08_125_nldm.lib"),
     };
-    _workspace.pdk.mapping_file = pathString(root / "resource/ICsprout_55LLULP_1P6M_5lc_V1p1_cell.map");
+    _workspace.pdk.mapping_file = pathString(root / "corners/ICsprout_55LLULP_1P6M_5lc_V1p1_cell.map");
     _workspace.pdk.corners = json::array(
         {{{"name", "TYPICAL"},
-          {"ecc_tf", pathString(root / "resource/TYP.json")},
-          {"itf_file", pathString(root / "resource/TYP.itf")},
-          {"captab_file", pathString(root / "resource/TYP.captab")},
-          {"spef_file", pathString(root / "resource/TYP.spef")}},
+          {"ecc_tf", pathString(root / "corners/TYP.json")},
+          {"itf_file", pathString(root / "corners/TYP.itf")},
+          {"captab_file", pathString(root / "corners/TYP.captab")},
+          {"spef_file", pathString(root / "corners/TYP.spef")}},
          {{"name", "RCbest"},
-          {"ecc_tf", pathString(root / "resource/RCbest.json")},
-          {"itf_file", pathString(root / "resource/RCbest.itf")},
-          {"captab_file", pathString(root / "resource/RCbest.captab")},
-          {"spef_file", pathString(root / "resource/RCbest.spef")}},
+          {"ecc_tf", pathString(root / "corners/RCbest.json")},
+          {"itf_file", pathString(root / "corners/RCbest.itf")},
+          {"captab_file", pathString(root / "corners/RCbest.captab")},
+          {"spef_file", pathString(root / "corners/RCbest.spef")}},
          {{"name", "RCworst"},
-          {"ecc_tf", pathString(root / "resource/RCworst.json")},
-          {"itf_file", pathString(root / "resource/RCworst.itf")},
-          {"captab_file", pathString(root / "resource/RCworst.captab")},
-          {"spef_file", pathString(root / "resource/RCworst.spef")}},
+          {"ecc_tf", pathString(root / "corners/RCworst.json")},
+          {"itf_file", pathString(root / "corners/RCworst.itf")},
+          {"captab_file", pathString(root / "corners/RCworst.captab")},
+          {"spef_file", pathString(root / "corners/RCworst.spef")}},
          {{"name", "Cbest"},
-          {"ecc_tf", pathString(root / "resource/Cbest.json")},
-          {"itf_file", pathString(root / "resource/Cbest.itf")},
-          {"captab_file", pathString(root / "resource/Cbest.captab")},
-          {"spef_file", pathString(root / "resource/Cbest.spef")}},
+          {"ecc_tf", pathString(root / "corners/Cbest.json")},
+          {"itf_file", pathString(root / "corners/Cbest.itf")},
+          {"captab_file", pathString(root / "corners/Cbest.captab")},
+          {"spef_file", pathString(root / "corners/Cbest.spef")}},
          {{"name", "Cworst"},
-          {"ecc_tf", pathString(root / "resource/Cworst.json")},
-          {"itf_file", pathString(root / "resource/Cworst.itf")},
-          {"captab_file", pathString(root / "resource/Cworst.captab")},
-          {"spef_file", pathString(root / "resource/Cworst.spef")}}});
+          {"ecc_tf", pathString(root / "corners/Cworst.json")},
+          {"itf_file", pathString(root / "corners/Cworst.itf")},
+          {"captab_file", pathString(root / "corners/Cworst.captab")},
+          {"spef_file", pathString(root / "corners/Cworst.spef")}}});
     _workspace.pdk.site_core = "core7";
     _workspace.pdk.site_io = "core7";
     _workspace.pdk.site_corner = "core7";
@@ -308,27 +308,28 @@ void WorkspaceManager::buildStep(WorkspaceStep& step,
 {
   step.directory = _workspace.directory / (step.name + "_" + step.tool);
 
+  const std::string workspace_dir = pathString(_workspace.directory);
   const std::string step_dir = pathString(step.directory);
   const std::string design = _workspace.design_name;
   const std::string top = _workspace.top_module;
 
   step.config = {
-      {"dir", step_dir + "/config"},
-      {"flow", step_dir + "/config/flow_config.json"},
-      {"db", step_dir + "/config/db_default_config.json"},
-      {kCts, step_dir + "/config/cts_default_config.json"},
-      {kDrc, step_dir + "/config/drc_default_config.json"},
-      {kFloorplan, step_dir + "/config/fp_default_config.json"},
-      {kFixFanout, step_dir + "/config/no_default_config_fixfanout.json"},
-      {kPlace, step_dir + "/config/pl_default_config.json"},
-      {kPnp, step_dir + "/config/pnp_default_config.json"},
-      {kRoute, step_dir + "/config/rt_default_config.json"},
-      {kOptDrv, step_dir + "/config/to_default_config_drv.json"},
-      {kOptHold, step_dir + "/config/to_default_config_hold.json"},
-      {kOptSetup, step_dir + "/config/to_default_config_setup.json"},
-      {kLegalization, step_dir + "/config/pl_default_config.json"},
-      {kFiller, step_dir + "/config/pl_default_config.json"},
-      {kRcx, step_dir + "/config/rcx.json"},
+      {"dir", workspace_dir + "/config"},
+      {"flow", workspace_dir + "/config/flow_config.json"},
+      {"db", workspace_dir + "/config/db_default_config.json"},
+      {kCts, workspace_dir + "/config/cts_default_config.json"},
+      {kDrc, workspace_dir + "/config/drc_default_config.json"},
+      {kFloorplan, workspace_dir + "/config/fp_default_config.json"},
+      {kFixFanout, workspace_dir + "/config/no_default_config_fixfanout.json"},
+      {kPlace, workspace_dir + "/config/pl_default_config.json"},
+      {kPnp, workspace_dir + "/config/pnp_default_config.json"},
+      {kRoute, workspace_dir + "/config/rt_default_config.json"},
+      {kOptDrv, workspace_dir + "/config/to_default_config_drv.json"},
+      {kOptHold, workspace_dir + "/config/to_default_config_hold.json"},
+      {kOptSetup, workspace_dir + "/config/to_default_config_setup.json"},
+      {kLegalization, workspace_dir + "/config/pl_default_config.json"},
+      {kFiller, workspace_dir + "/config/pl_default_config.json"},
+      {kRcx, workspace_dir + "/config/rcx.json"},
   };
 
   step.input = {{"def", input_def}, {"verilog", input_verilog}, {"db", input_db}};

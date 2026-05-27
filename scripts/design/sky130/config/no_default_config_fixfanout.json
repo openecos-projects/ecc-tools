@@ -1,0 +1,14 @@
+{
+    "file_path": {
+        "design_work_space": "",
+        "sdc_file": "",
+        "lib_files": [],
+        "lef_files": [],
+        "def_file": "",
+        "output_def": "",
+        "report_file": "",
+        "gds_file": ""
+    },
+    "insert_buffer": "sky130_fd_sc_hs__buf_8",
+    "max_fanout": 30
+}

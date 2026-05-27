@@ -1,0 +1,12 @@
+{
+    "ConfigPath": {
+        "idb_path": "/Floorplan_ecc/config/db_default_config.json",
+        "ifp_path": "/Floorplan_ecc/config/fp_default_config.json",
+        "ipl_path": "/Floorplan_ecc/config/pl_default_config.json",
+        "irt_path": "/Floorplan_ecc/config/rt_default_config.json",
+        "idrc_path": "/Floorplan_ecc/config/drc_default_config.json",
+        "icts_path": "/Floorplan_ecc/config/cts_default_config.json",
+        "ito_path": "/Floorplan_ecc/config/to_default_config_drv.json",
+        "ipnp_path": "/Floorplan_ecc/config/pnp_default_config.json"
+    }
+}

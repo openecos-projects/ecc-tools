@@ -30,20 +30,14 @@ rpt*/
 target/
 *-stamp/
 tmp/
-/scripts/*
-!/scripts/design/
-/scripts/design/*
-!/scripts/design/ics55_ecc/
-/scripts/design/ics55_ecc/*
-!/scripts/design/ics55_ecc/run_ecc.sh
-!/scripts/design/ics55_ecc/run_workspace.tcl
-# !/scripts/design/ics55_ecc/gcd
-!/scripts/design/ics55_ecc/steps
+scripts/design/ics55/gcd/
+scripts/design/sky130/gcd/
+
+
 *.patch
 CMakePresets.json
 .venv/
 __pycache__
-mcp_iEDA.egg-info/
 .humanize/
 
 # Prevent accidental re-addition of removed submodules
