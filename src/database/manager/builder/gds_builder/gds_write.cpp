@@ -14,37 +14,23 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-/**
- * @project		iDB
- * @file		gds_write.cpp
- * @author		Yell
- * @date		25/05/2021
- * @version		0.1
-* @description
-
-
-        There is a def builder to write def file from data structure.
- *
- */
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "gds_write.h"
 
+#include <gdstk/gdstk.hpp>
+
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <iostream>
 
 #include "../../../data/design/IdbDesign.h"
 #include "boost_definition.h"
-#include "omp.h"
 
 namespace idb {
 
-Def2GdsWrite::Def2GdsWrite(IdbDefService* def_service)
+Def2GdsWrite::Def2GdsWrite(IdbDefService* def_service) : _def_service(def_service), _library(std::make_unique<gdstk::Library>())
 {
-  _def_service = def_service;
-  file_write = nullptr;
 }
 
 Def2GdsWrite::~Def2GdsWrite()
@@ -53,15 +39,41 @@ Def2GdsWrite::~Def2GdsWrite()
 
 bool Def2GdsWrite::writeDb(const char* file)
 {
-  _writer.init(file, &_gds);
+  if (set_units() != kDbSuccess) {
+    return false;
+  }
 
-  set_units();
+  if (!writeChip()) {
+    _library->free_all();
+    return false;
+  }
 
-  _writer.begin();
+  return finishWrite(file);
+}
 
-  writeChip();
+bool Def2GdsWrite::writeHardenedDb(const char* file)
+{
+  if (set_units() != kDbSuccess) {
+    return false;
+  }
 
-  return _writer.finish();
+  write_version();
+  write_design();
+  write_die();
+  write_harden_macro_pins();
+  write_harden_macro_obs();
+
+  return finishWrite(file);
+}
+
+bool Def2GdsWrite::finishWrite(const char* file)
+{
+  auto error = _library->write_gds(file, 8190, nullptr);
+  _library->free_all();
+  _top_cell = nullptr;
+  _cell_name_count.clear();
+  _used_cell_names.clear();
+  return error == gdstk::ErrorCode::NoError;
 }
 
 bool Def2GdsWrite::writeChip()
@@ -69,147 +81,138 @@ bool Def2GdsWrite::writeChip()
   write_version();
   write_design();
   write_die();
-  //   write_blockage();
   write_pin();
   write_component();
   write_fill();
   write_special_net();
   write_net();
-
-  /// no need to print
-  //   write_row();
-  //   write_track_grid();
-  //   write_gcell_grid();
-  //   write_via();
-  //   write_region();
-  //   write_slot();
-  //   write_group();
   return true;
-}
-
-void Def2GdsWrite::addStruct(GdsStruct* gds_struct)
-{
-  _gds.add_struct(gds_struct);
-
-  if (_gds.is_full()) {
-    _writer.writeStruct();
-  }
-}
-
-void Def2GdsWrite::writeStruct()
-{
-  _writer.writeStruct();
 }
 
 int32_t Def2GdsWrite::set_units()
 {
   IdbDesign* design = _def_service->get_design();
-  IdbUnits* def_units = design->get_units();
-  IdbUnits* lef_units = design->get_layout()->get_units();
+  IdbUnits* def_units = design == nullptr ? nullptr : design->get_units();
+  IdbUnits* lef_units = design == nullptr ? nullptr : design->get_layout()->get_units();
   if (def_units == nullptr && lef_units == nullptr) {
     std::cout << "Write UNITS failed..." << std::endl;
-
     return kDbFail;
   }
 
-  _unit_microns = def_units->get_micron_dbu() > 0 ? def_units->get_micron_dbu() : lef_units->get_micron_dbu();
+  _unit_microns = def_units != nullptr && def_units->get_micron_dbu() > 0 ? def_units->get_micron_dbu() : lef_units->get_micron_dbu();
   if (_unit_microns <= 0) {
     std::cout << "Write UNITS failed..." << std::endl;
-
     return kDbFail;
   }
 
-  _gds.set_unit(1.0 / _unit_microns, 1.0 * 1e-6 / _unit_microns);
-
+  _library->init("ecc", 1.0e-6, 1.0e-6 / _unit_microns);
   return kDbSuccess;
+}
+
+string Def2GdsWrite::sanitizeCellName(const string& name)
+{
+  string base;
+  base.reserve(name.size());
+  for (char c : name) {
+    unsigned char uc = static_cast<unsigned char>(c);
+    if (std::isalnum(uc) || c == '_' || c == '-' || c == '.' || c == '$') {
+      base.push_back(c);
+    } else {
+      base.push_back('_');
+    }
+  }
+
+  if (base.empty()) {
+    base = "cell";
+  }
+
+  string candidate = base;
+  auto [it, inserted] = _used_cell_names.insert(candidate);
+  if (inserted) {
+    _cell_name_count[base] = 0;
+    return candidate;
+  }
+
+  int& count = _cell_name_count[base];
+  do {
+    ++count;
+    candidate = base + "_" + std::to_string(count);
+  } while (!_used_cell_names.insert(candidate).second);
+
+  return candidate;
+}
+
+gdstk::Cell* Def2GdsWrite::createCell(const string& name)
+{
+  auto* cell = (gdstk::Cell*) gdstk::allocate_clear(sizeof(gdstk::Cell));
+  string safe_name = sanitizeCellName(name);
+  cell->init(safe_name.c_str());
+  _library->cell_array.append(cell);
+  return cell;
+}
+
+void Def2GdsWrite::addReferenceDefault(gdstk::Cell* child)
+{
+  if (_top_cell == nullptr || child == nullptr || child == _top_cell) {
+    return;
+  }
+
+  auto* ref = (gdstk::Reference*) gdstk::allocate_clear(sizeof(gdstk::Reference));
+  ref->init(child);
+  ref->origin = gdstk::Vec2{0, 0};
+  _top_cell->reference_array.append(ref);
+}
+
+void Def2GdsWrite::addLabel(gdstk::Cell* gds_cell, const string& text, int32_t x, int32_t y, int32_t layer, int32_t datatype)
+{
+  if (gds_cell == nullptr) {
+    return;
+  }
+
+  auto* label = (gdstk::Label*) gdstk::allocate_clear(sizeof(gdstk::Label));
+  label->init(text.c_str());
+  label->origin = gdstk::Vec2{transDB2Unit(x), transDB2Unit(y)};
+  label->anchor = gdstk::Anchor::O;
+  label->tag = gdstk::make_tag(layer, datatype);
+  gds_cell->label_array.append(label);
 }
 
 int32_t Def2GdsWrite::write_version()
 {
   IdbDesign* design = _def_service->get_design();
-  /// support version 5.8
-  string version = design->get_version().empty() ? "5.8" : design->get_version();
+  string version = design == nullptr || design->get_version().empty() ? "5.8" : design->get_version();
 
-  /// @brief gds format
-  GdsStruct* gds_struct = new GdsStruct("VERSION");
-
-  GdsText gds_text;
-
-  gds_text.str = version;
-  gds_text.width = 2;
-  gds_text.presentation = GdsPresentation::kCenter;
-  gds_text.add_coord(0, 0);
-
-  gds_struct->add_element(gds_text);
-
-  /// @brief add to gds
-  addStruct(gds_struct);
-
-  writeStruct();
-
+  auto* cell = createCell("VERSION");
+  addLabel(cell, version, 0, 0, 0, 0);
+  addReferenceDefault(cell);
   return kDbSuccess;
 }
 
 int32_t Def2GdsWrite::write_design()
 {
   IdbDesign* design = _def_service->get_design();
-  string design_name = design->get_design_name();
+  string design_name = design == nullptr ? "UNKNOWN" : design->get_design_name();
 
-  /// @brief gds format
-  GdsStruct* gds_struct = new GdsStruct("Design Name");
-
-  GdsText gds_text;
-
-  gds_text.str = design_name;
-  gds_text.width = 2;
-  gds_text.presentation = GdsPresentation::kCenter;
-  gds_text.add_coord(0, -5);
-
-  gds_struct->add_element(gds_text);
-
-  /// @brief add to gds
-  addStruct(gds_struct);
-  writeStruct();
-
+  auto* cell = createCell("Design Name");
+  addLabel(cell, design_name, 0, -5, 0, 0);
+  addReferenceDefault(cell);
   return kDbSuccess;
 }
-/**
- * @brief write die as the top struct
- *
- * @return int32_t
- */
+
 int32_t Def2GdsWrite::write_die()
 {
   IdbLayout* layout = _def_service->get_layout();
-  IdbDie* die = layout->get_die();
+  IdbDie* die = layout == nullptr ? nullptr : layout->get_die();
   if (die == nullptr) {
     std::cout << "Write DIE failed..." << std::endl;
-
     return kDbFail;
   }
 
-  //   /// @brief gds format
-  _top_struct = new GdsStruct("DIEAREA");
-
-  GdsPath* path = new GdsPath();
-  path->layer = 0;
-  path->data_type = 2;
-  path->path_type = GdsPathType::kRoundEnd;
-  path->width = 2;
-
-  path->add_coord(transDB2Unit(die->get_llx()), transDB2Unit(die->get_lly()));
-  path->add_coord(transDB2Unit(die->get_urx()), transDB2Unit(die->get_lly()));
-  path->add_coord(transDB2Unit(die->get_urx()), transDB2Unit(die->get_ury()));
-  path->add_coord(transDB2Unit(die->get_llx()), transDB2Unit(die->get_ury()));
-  path->add_coord(transDB2Unit(die->get_llx()), transDB2Unit(die->get_lly()));
-
-  _top_struct->add_element(path);
-
-  /// @brief set top struct
-  _gds.set_top_struct(_top_struct);
-
-  //   /// @brief write top struct
-  //   _writer.writeTopStruct();
+  _top_cell = createCell("DIEAREA");
+  auto* bbox = die->get_bounding_box();
+  if (bbox != nullptr) {
+    packRect(_top_cell, bbox->get_low_x(), bbox->get_low_y(), bbox->get_high_x(), bbox->get_high_y(), 0, 2);
+  }
 
   return kDbSuccess;
 }
@@ -217,20 +220,22 @@ int32_t Def2GdsWrite::write_die()
 int32_t Def2GdsWrite::write_track_grid()
 {
   IdbLayout* layout = _def_service->get_layout();
-  IdbTrackGridList* track_grid_list = layout->get_track_grid_list();
-  if (track_grid_list == nullptr) {
+  IdbTrackGridList* track_grid_list = layout == nullptr ? nullptr : layout->get_track_grid_list();
+  IdbDie* die = layout == nullptr ? nullptr : layout->get_die();
+  if (track_grid_list == nullptr || die == nullptr) {
     std::cout << "Write Track Grid failed..." << std::endl;
     return kDbFail;
   }
 
-  int32_t width = transDB2Unit(layout->get_die()->get_width());
-  int32_t height = transDB2Unit(layout->get_die()->get_height());
-
-  /// @brief gds format
-  GdsStruct* gds_struct = new GdsStruct("TRACKS");
+  auto* cell = createCell("TRACKS");
+  const int32_t width = die->get_width();
+  const int32_t height = die->get_height();
 
   for (IdbTrackGrid* track_grid : track_grid_list->get_track_grid_list()) {
     IdbTrack* track = track_grid->get_track();
+    if (track == nullptr) {
+      continue;
+    }
     int32_t start = track->get_start();
     int32_t pitch = track->get_pitch();
 
@@ -238,124 +243,120 @@ int32_t Def2GdsWrite::write_track_grid()
       if (track->is_track_direction_y()) {
         for (uint i = 0; i < track_grid->get_track_num(); ++i) {
           int32_t y = start + pitch * i;
-
-          GdsPath* path = new GdsPath();
-          path->layer = layer->get_order();
-          path->data_type = 2;
-          path->path_type = GdsPathType::kRoundEnd;
-          path->width = 1;
-          path->add_coord(0, transDB2Unit(y));
-          path->add_coord(width, transDB2Unit(y));
-
-          gds_struct->add_element(path);
+          packRect(cell, 0, y, width, y + 1, layer);
         }
       } else {
         for (uint i = 0; i < track_grid->get_track_num(); ++i) {
           int32_t x = start + pitch * i;
-
-          GdsPath* path = new GdsPath();
-          path->layer = layer->get_order();
-          path->data_type = 2;
-          path->path_type = GdsPathType::kRoundEnd;
-          path->width = 1;
-          path->add_coord(transDB2Unit(x), 0);
-          path->add_coord(transDB2Unit(x), height);
-
-          gds_struct->add_element(path);
+          packRect(cell, x, 0, x + 1, height, layer);
         }
       }
     }
-
-    /// @brief add to gds
-    addStruct(gds_struct);
   }
 
-  writeStruct();
-
+  addReferenceDefault(cell);
   return kDbSuccess;
 }
 
-void Def2GdsWrite::packLayerShape(GdsStruct* gds_struct, IdbLayerShape* layer_shape)
+void Def2GdsWrite::packLayerShape(gdstk::Cell* gds_cell, IdbLayerShape* layer_shape)
 {
+  if (gds_cell == nullptr || layer_shape == nullptr) {
+    return;
+  }
+
   for (auto rect : layer_shape->get_rect_list()) {
-    packRect(gds_struct, rect, layer_shape->get_layer());
+    packRect(gds_cell, rect, layer_shape->get_layer());
   }
 }
 
-void Def2GdsWrite::packRect(GdsStruct* gds_struct, IdbRect* rect, int32_t layer_id)
+void Def2GdsWrite::packRect(gdstk::Cell* gds_cell, IdbRect* rect, int32_t layer_id)
 {
-  GdsBox box;
-  box.add_coord(transDB2Unit(rect->get_low_x()), transDB2Unit(rect->get_low_y()));
-  box.add_coord(transDB2Unit(rect->get_high_x()), transDB2Unit(rect->get_low_y()));
-  box.add_coord(transDB2Unit(rect->get_high_x()), transDB2Unit(rect->get_high_y()));
-  box.add_coord(transDB2Unit(rect->get_low_x()), transDB2Unit(rect->get_high_y()));
-  box.add_coord(transDB2Unit(rect->get_low_x()), transDB2Unit(rect->get_low_y()));
-  box.layer = layer_id;
-  gds_struct->add_element(box);
+  if (rect == nullptr) {
+    return;
+  }
+
+  packRect(gds_cell, rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y(), layer_id, 0);
 }
 
-void Def2GdsWrite::packRect(GdsStruct* gds_struct, IdbRect* rect, IdbLayer* layer)
+void Def2GdsWrite::packRect(gdstk::Cell* gds_cell, IdbRect* rect, IdbLayer* layer)
+{
+  if (rect == nullptr) {
+    return;
+  }
+
+  IdbLayout* layout = _def_service->get_layout();
+  auto layer_list = layout == nullptr ? nullptr : layout->get_layers();
+  int32_t order = layer == nullptr && layer_list != nullptr ? layer_list->get_bottom_routing_layer()->get_order() : (layer == nullptr ? 0 : layer->get_order());
+  packRect(gds_cell, rect, order);
+}
+
+void Def2GdsWrite::packRect(gdstk::Cell* gds_cell, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, IdbLayer* layer)
 {
   IdbLayout* layout = _def_service->get_layout();
-  auto layer_list = layout->get_layers();
-  int32_t order = layer == nullptr ? layer_list->get_bottom_routing_layer()->get_order() : layer->get_order();
-
-  packRect(gds_struct, rect, order);
+  auto layer_list = layout == nullptr ? nullptr : layout->get_layers();
+  int32_t order = layer == nullptr && layer_list != nullptr ? layer_list->get_bottom_routing_layer()->get_order() : (layer == nullptr ? 0 : layer->get_order());
+  packRect(gds_cell, ll_x, ll_y, ur_x, ur_y, order, 0);
 }
 
-void Def2GdsWrite::packRect(GdsStruct* gds_struct, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, IdbLayer* layer)
+void Def2GdsWrite::packRect(gdstk::Cell* gds_cell, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, int32_t layer_id,
+                            int32_t datatype)
 {
-  IdbLayout* layout = _def_service->get_layout();
-  auto layer_list = layout->get_layers();
+  if (gds_cell == nullptr || ll_x == ur_x || ll_y == ur_y) {
+    return;
+  }
 
-  GdsBox box;
-  box.add_coord(transDB2Unit(ll_x), transDB2Unit(ll_y));
-  box.add_coord(transDB2Unit(ur_x), transDB2Unit(ll_y));
-  box.add_coord(transDB2Unit(ur_x), transDB2Unit(ur_y));
-  box.add_coord(transDB2Unit(ll_x), transDB2Unit(ur_y));
-  box.add_coord(transDB2Unit(ll_x), transDB2Unit(ll_y));
-  box.layer = (layer == nullptr ? layer_list->get_bottom_routing_layer()->get_order() : layer->get_order());
-  gds_struct->add_element(box);
+  int32_t x0 = std::min(ll_x, ur_x);
+  int32_t y0 = std::min(ll_y, ur_y);
+  int32_t x1 = std::max(ll_x, ur_x);
+  int32_t y1 = std::max(ll_y, ur_y);
+
+  auto* polygon = (gdstk::Polygon*) gdstk::allocate_clear(sizeof(gdstk::Polygon));
+  *polygon = gdstk::rectangle(gdstk::Vec2{transDB2Unit(x0), transDB2Unit(y0)}, gdstk::Vec2{transDB2Unit(x1), transDB2Unit(y1)},
+                              gdstk::make_tag(static_cast<uint32_t>(std::max(layer_id, 0)),
+                                               static_cast<uint32_t>(std::max(datatype, 0))));
+  gds_cell->polygon_array.append(polygon);
 }
 
-void Def2GdsWrite::packVia(GdsStruct* gds_struct, IdbVia* via)
+void Def2GdsWrite::packVia(gdstk::Cell* gds_cell, IdbVia* via)
 {
-  /// top
+  if (gds_cell == nullptr || via == nullptr) {
+    return;
+  }
+
   auto top_layer_shape = via->get_top_layer_shape();
-  packLayerShape(gds_struct, &top_layer_shape);
+  packLayerShape(gds_cell, &top_layer_shape);
 
-  /// cut
   auto cut_layer_shape = via->get_cut_layer_shape();
-  packLayerShape(gds_struct, &cut_layer_shape);
+  packLayerShape(gds_cell, &cut_layer_shape);
 
-  /// bottom
   auto bottom_layer_shape = via->get_bottom_layer_shape();
-  packLayerShape(gds_struct, &bottom_layer_shape);
+  packLayerShape(gds_cell, &bottom_layer_shape);
 }
 
-void Def2GdsWrite::packPin(GdsStruct* gds_struct, IdbPin* pin)
+void Def2GdsWrite::packPin(gdstk::Cell* gds_cell, IdbPin* pin)
 {
-  IdbTerm* term = pin->get_term();
-  if (term->is_port_exist()) {
-    /// there are "port" key word
+  if (gds_cell == nullptr || pin == nullptr || pin->get_term() == nullptr) {
+    return;
+  }
+
+  if (pin->get_term()->is_port_exist()) {
     for (auto layer_shape : pin->get_port_box_list()) {
-      packLayerShape(gds_struct, layer_shape);
+      packLayerShape(gds_cell, layer_shape);
     }
 
     for (auto via : pin->get_via_list()) {
-      packVia(gds_struct, via);
+      packVia(gds_cell, via);
     }
   }
 }
 
-/// @brief transfer segment of 2 points data to gdsii format
-/// @param gds_struct
-/// @param routing_layer
-/// @param point_1
-/// @param point_2
-void Def2GdsWrite::packSegment(GdsStruct* gds_struct, IdbLayerRouting* routing_layer, IdbCoordinate<int32_t>* point_1,
+void Def2GdsWrite::packSegment(gdstk::Cell* gds_cell, IdbLayerRouting* routing_layer, IdbCoordinate<int32_t>* point_1,
                                IdbCoordinate<int32_t>* point_2, int32_t width)
 {
+  if (gds_cell == nullptr || routing_layer == nullptr || point_1 == nullptr || point_2 == nullptr) {
+    return;
+  }
+
   int32_t routing_width = width > 0 ? width : routing_layer->get_width();
 
   int32_t ll_x = 0;
@@ -363,25 +364,21 @@ void Def2GdsWrite::packSegment(GdsStruct* gds_struct, IdbLayerRouting* routing_l
   int32_t ur_x = 0;
   int32_t ur_y = 0;
   if (point_1->get_y() == point_2->get_y()) {
-    // horizontal
     ll_x = std::min(point_1->get_x(), point_2->get_x()) - routing_width / 2;
     ll_y = std::min(point_1->get_y(), point_2->get_y()) - routing_width / 2;
     ur_x = std::max(point_1->get_x(), point_2->get_x()) + routing_width / 2;
     ur_y = ll_y + routing_width;
   } else if (point_1->get_x() == point_2->get_x()) {
-    // vertical
     ll_x = std::min(point_1->get_x(), point_2->get_x()) - routing_width / 2;
     ll_y = std::min(point_1->get_y(), point_2->get_y()) - routing_width / 2;
     ur_x = ll_x + routing_width;
     ur_y = std::max(point_1->get_y(), point_2->get_y()) + routing_width / 2;
   } else {
-    // only support horizontal & vertical direction
-    std::cout << "Error...Regular segment only support horizontal & "
-                 "vertical direction... "
-              << std::endl;
+    std::cout << "Error...Regular segment only support horizontal & vertical direction... " << std::endl;
+    return;
   }
 
-  packRect(gds_struct, ll_x, ll_y, ur_x, ur_y, routing_layer);
+  packRect(gds_cell, ll_x, ll_y, ur_x, ur_y, routing_layer);
 }
 
 int32_t Def2GdsWrite::write_via()
@@ -392,28 +389,25 @@ int32_t Def2GdsWrite::write_via()
 int32_t Def2GdsWrite::write_row()
 {
   IdbLayout* layout = _def_service->get_layout();
-  IdbRows* rows = layout->get_rows();
+  IdbRows* rows = layout == nullptr ? nullptr : layout->get_rows();
   if (rows == nullptr) {
     std::cout << "Write ROWS failed..." << std::endl;
     return kDbFail;
   }
 
-  addSRefDefault("Rows");
-  GdsStruct* gds_struct = new GdsStruct("Rows");
+  auto* cell = createCell("Rows");
   for (IdbRow* row : rows->get_row_list()) {
-    packRect(gds_struct, row->get_bounding_box(), 0);
+    packRect(cell, row->get_bounding_box(), 0);
   }
 
-  addStruct(gds_struct);
-  writeStruct();
-
+  addReferenceDefault(cell);
   return kDbSuccess;
 }
 
 int32_t Def2GdsWrite::write_component()
 {
-  IdbDesign* design = _def_service->get_design();  // Def
-  IdbInstanceList* instance_list = design->get_instance_list();
+  IdbDesign* design = _def_service->get_design();
+  IdbInstanceList* instance_list = design == nullptr ? nullptr : design->get_instance_list();
   if (instance_list == nullptr || instance_list->get_num() == 0) {
     std::cout << "Write COMPONENTS failed..." << std::endl;
     return kDbFail;
@@ -421,41 +415,25 @@ int32_t Def2GdsWrite::write_component()
 
   int x = 0;
   int max_num = instance_list->get_num();
-
-  omp_lock_t lck;
-  omp_init_lock(&lck);
-#pragma omp parallel for schedule(dynamic)
-
   for (IdbInstance* instance : instance_list->get_instance_list()) {
-    string name = "Instance_" + instance->get_name();
-
-    omp_set_lock(&lck);
-
-    addSRefDefault(name);
-
-    omp_unset_lock(&lck);
-
-    GdsStruct* gds_struct = new GdsStruct(name);
-
-    /// instance boundingbox
-    packRect(gds_struct, instance->get_bounding_box(), 0);
-
-    /// pins
-    for (auto pin : instance->get_pin_list()->get_pin_list()) {
-      packPin(gds_struct, pin);
+    if (instance == nullptr) {
+      continue;
     }
 
-    /// obs
+    auto* cell = createCell("Instance_" + instance->get_name());
+    addReferenceDefault(cell);
+
+    packRect(cell, instance->get_bounding_box(), 0);
+
+    if (instance->get_pin_list() != nullptr) {
+      for (auto pin : instance->get_pin_list()->get_pin_list()) {
+        packPin(cell, pin);
+      }
+    }
+
     for (auto obs_shape : instance->get_obs_box_list()) {
-      packLayerShape(gds_struct, obs_shape);
+      packLayerShape(cell, obs_shape);
     }
-
-    omp_set_lock(&lck);
-
-    /// @brief add to gds
-    addStruct(gds_struct);
-
-    omp_unset_lock(&lck);
 
     x++;
     if (x % 1000 == 0) {
@@ -463,73 +441,56 @@ int32_t Def2GdsWrite::write_component()
     }
   }
 
-  omp_destroy_lock(&lck);
-
-  writeStruct();
-
   std::cout << "Write COMPONENTS success. " << max_num << " / " << max_num << std::endl;
-
   return kDbSuccess;
 }
 
 int32_t Def2GdsWrite::write_pin()
 {
   IdbDesign* design = _def_service->get_design();
-  IdbPins* pin_list = design->get_io_pin_list();
+  IdbPins* pin_list = design == nullptr ? nullptr : design->get_io_pin_list();
   if (pin_list == nullptr) {
     std::cout << "Write PINS failed..." << std::endl;
     return kDbFail;
   }
 
-  /// @brief gds format
-  GdsStruct* gds_struct = new GdsStruct("PINS");
-
+  auto* cell = createCell("PINS");
   for (IdbPin* pin : pin_list->get_pin_list()) {
-    packPin(gds_struct, pin);
+    packPin(cell, pin);
   }
 
-  /// @brief add to gds
-  addStruct(gds_struct);
-
-  writeStruct();
-
+  addReferenceDefault(cell);
   return kDbSuccess;
 }
 
 int32_t Def2GdsWrite::write_blockage()
 {
   IdbDesign* design = _def_service->get_design();
-  IdbBlockageList* blockage_list = design->get_blockage_list();
+  IdbBlockageList* blockage_list = design == nullptr ? nullptr : design->get_blockage_list();
   if (blockage_list == nullptr || blockage_list->get_num() == 0) {
     std::cout << "Write blocakge failed..." << std::endl;
     return kDbFail;
   }
 
   for (IdbBlockage* blockage : blockage_list->get_blockage_list()) {
-    /// @brief gds format
-    string name = "Blockage_" + blockage->get_instance_name();
-    addSRefDefault(name);
-    GdsStruct* gds_struct = new GdsStruct(name);
+    auto* cell = createCell("Blockage_" + blockage->get_instance_name());
+    addReferenceDefault(cell);
 
     if (blockage->is_palcement_blockage()) {
       for (auto idb_rect : blockage->get_rect_list()) {
-        packRect(gds_struct, idb_rect, ((IdbPlacementBlockage*) blockage)->get_layer());
+        packRect(cell, idb_rect, ((IdbPlacementBlockage*) blockage)->get_layer());
       }
     } else {
       for (auto idb_rect : blockage->get_rect_list()) {
-        packRect(gds_struct, idb_rect, ((IdbRoutingBlockage*) blockage)->get_layer());
+        packRect(cell, idb_rect, ((IdbRoutingBlockage*) blockage)->get_layer());
       }
     }
-
-    addStruct(gds_struct);
   }
-
-  writeStruct();
 
   return kDbSuccess;
 }
 
-int32_t Def2GdsWrite::write_specialnet_wire_segment_points(GdsStruct* gds_struct, IdbSpecialWireSegment* segment)
+int32_t Def2GdsWrite::write_specialnet_wire_segment_points(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment)
 {
   if (segment->get_point_list().size() < _POINT_MAX_) {
     std::cout << "Specialnet wire points are less than 2..." << std::endl;
@@ -543,70 +504,65 @@ int32_t Def2GdsWrite::write_specialnet_wire_segment_points(GdsStruct* gds_struct
     IdbCoordinate<int32_t>* point_1 = segment->get_point_start();
     IdbCoordinate<int32_t>* point_2 = segment->get_point_second();
 
-    packSegment(gds_struct, routing_layer, point_1, point_2, routing_width);
+    packSegment(gds_cell, routing_layer, point_1, point_2, routing_width);
   }
 
   return kDbSuccess;
 }
 
-int32_t Def2GdsWrite::write_specialnet_wire_segment_via(GdsStruct* gds_struct, IdbSpecialWireSegment* segment)
+int32_t Def2GdsWrite::write_specialnet_wire_segment_via(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment)
 {
   if (segment->get_point_list().size() <= 0 || segment->get_layer() == nullptr || segment->get_via() == nullptr) {
     std::cout << "No net wire segment via..." << std::endl;
     return kDbFail;
   }
 
-  packVia(gds_struct, segment->get_via());
+  packVia(gds_cell, segment->get_via());
 
   if (segment->get_point_list().size() >= _POINT_MAX_) {
-    return write_specialnet_wire_segment_points(gds_struct, segment);
+    return write_specialnet_wire_segment_points(gds_cell, segment);
   }
 
   return kDbSuccess;
 }
 
-int32_t Def2GdsWrite::write_specialnet_wire_segment_rect(GdsStruct* gds_struct, IdbSpecialWireSegment* segment)
+int32_t Def2GdsWrite::write_specialnet_wire_segment_rect(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment)
 {
   if (segment->get_layer() == nullptr || segment->get_delta_rect() == nullptr) {
     std::cout << "No special wire segment rect..." << std::endl;
     return kDbFail;
   }
 
-  IdbRect* rect_delta = segment->get_delta_rect();
+  IdbRect* rect = new IdbRect(segment->get_delta_rect());
+  packRect(gds_cell, rect, segment->get_layer());
+  delete rect;
 
-  IdbLayer* layer = segment->get_layer();
-  if (layer == nullptr) {
-    std::cout << "Error...createNetRect : Layer not exist :  " << std::endl;
+  return kDbSuccess;
+}
+
+int32_t Def2GdsWrite::write_specialnet_wire_segment(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment)
+{
+  if (segment == nullptr) {
     return kDbFail;
   }
 
-  IdbRect* rect = new IdbRect(rect_delta);
-
-  packRect(gds_struct, rect, layer);
-
-  delete rect;
-  rect = nullptr;
-
-  return kDbSuccess;
+  if (segment->is_via()) {
+    return write_specialnet_wire_segment_via(gds_cell, segment);
+  }
+  if (segment->is_rect()) {
+    return write_specialnet_wire_segment_rect(gds_cell, segment);
+  }
+  return write_specialnet_wire_segment_points(gds_cell, segment);
 }
 
-int32_t Def2GdsWrite::write_specialnet_wire_segment(GdsStruct* gds_struct, IdbSpecialWireSegment* segment)
+int32_t Def2GdsWrite::write_specialnet_wire(gdstk::Cell* gds_cell, IdbSpecialWire* wire)
 {
-  if (segment->is_via()) {
-    return write_specialnet_wire_segment_via(gds_struct, segment);
-  } if (segment->is_rect()) {
-    return write_specialnet_wire_segment_rect(gds_struct, segment);
-  } else {
-    return write_specialnet_wire_segment_points(gds_struct, segment);
+  if (wire == nullptr) {
+    return kDbFail;
   }
 
-  return kDbSuccess;
-}
-
-int32_t Def2GdsWrite::write_specialnet_wire(GdsStruct* gds_struct, IdbSpecialWire* wire)
-{
   for (IdbSpecialWireSegment* segment : wire->get_segment_list()) {
-    write_specialnet_wire_segment(gds_struct, segment);
+    write_specialnet_wire_segment(gds_cell, segment);
   }
 
   return kDbSuccess;
@@ -620,41 +576,25 @@ int32_t Def2GdsWrite::write_special_net()
     return kDbFail;
   }
 
-  omp_lock_t lck;
-  omp_init_lock(&lck);
-
-#pragma omp parallel for schedule(dynamic)
-
   for (IdbSpecialNet* special_net : special_net_list->get_net_list()) {
-    omp_set_lock(&lck);
-    /// @brief gds format
-    addSRefDefault(special_net->get_net_name());
-    omp_unset_lock(&lck);
-
-    GdsStruct* gds_struct = new GdsStruct(special_net->get_net_name());
+    if (special_net == nullptr) {
+      continue;
+    }
+    auto* cell = createCell(special_net->get_net_name());
+    addReferenceDefault(cell);
 
     for (IdbSpecialWire* wire : special_net->get_wire_list()->get_wire_list()) {
-      write_specialnet_wire(gds_struct, wire);
+      write_specialnet_wire(cell, wire);
     }
-
-    omp_set_lock(&lck);
-
-    addStruct(gds_struct);
-
-    omp_unset_lock(&lck);
   }
-
-  omp_destroy_lock(&lck);
-
-  writeStruct();
 
   return kDbSuccess;
 }
 
 int32_t Def2GdsWrite::write_net()
 {
-  IdbDesign* design = _def_service->get_design();  // Def
-  IdbNetList* net_list = design->get_net_list();
+  IdbDesign* design = _def_service->get_design();
+  IdbNetList* net_list = design == nullptr ? nullptr : design->get_net_list();
   if (net_list == nullptr) {
     std::cout << "No NET To Write..." << std::endl;
     return kDbFail;
@@ -667,31 +607,18 @@ int32_t Def2GdsWrite::write_net()
 
   int x = 0;
   int max_num = net_list->get_num();
-
-  omp_lock_t lck;
-  omp_init_lock(&lck);
-
-#pragma omp parallel for schedule(dynamic)
-
   for (IdbNet* net : net_list->get_net_list()) {
-    omp_set_lock(&lck);
-    /// @brief gds format
-    addSRefDefault(net->get_net_name());
-    omp_unset_lock(&lck);
-
-    GdsStruct* gds_struct = new GdsStruct(net->get_net_name());
+    if (net == nullptr) {
+      continue;
+    }
+    auto* cell = createCell(net->get_net_name());
+    addReferenceDefault(cell);
 
     if (net->get_wire_list()->get_num() > 0) {
       for (IdbRegularWire* wire : net->get_wire_list()->get_wire_list()) {
-        write_net_wire(gds_struct, wire);
+        write_net_wire(cell, wire);
       }
     }
-
-    omp_set_lock(&lck);
-
-    addStruct(gds_struct);
-
-    omp_unset_lock(&lck);
 
     x++;
     if (x % 1000 == 0) {
@@ -699,73 +626,69 @@ int32_t Def2GdsWrite::write_net()
     }
   }
 
-  omp_destroy_lock(&lck);
-
-  writeStruct();
   std::cout << "Write NETS success. " << max_num << " / " << max_num << std::endl;
-
   return kDbSuccess;
 }
 
-int32_t Def2GdsWrite::write_net_wire(GdsStruct* gds_struct, IdbRegularWire* wire)
+int32_t Def2GdsWrite::write_net_wire(gdstk::Cell* gds_cell, IdbRegularWire* wire)
 {
+  if (wire == nullptr) {
+    return kDbFail;
+  }
+
   for (IdbRegularWireSegment* segment : wire->get_segment_list()) {
-    write_net_wire_segment(gds_struct, segment);
+    write_net_wire_segment(gds_cell, segment);
   }
 
   return kDbSuccess;
 }
 
-int32_t Def2GdsWrite::write_net_wire_segment(GdsStruct* gds_struct, IdbRegularWireSegment* segment)
+int32_t Def2GdsWrite::write_net_wire_segment(gdstk::Cell* gds_cell, IdbRegularWireSegment* segment)
 {
-  if (segment->is_rect()) {
-    return write_net_wire_segment_rect(gds_struct, segment);
-
-  } else if (segment->is_via()) {
-    return write_net_wire_segment_via(gds_struct, segment);
-
-  } else {
-    // two points
-    return write_net_wire_segment_points(gds_struct, segment);
+  if (segment == nullptr) {
+    return kDbFail;
   }
 
-  return kDbFail;
+  if (segment->is_rect()) {
+    return write_net_wire_segment_rect(gds_cell, segment);
+  }
+  if (segment->is_via()) {
+    return write_net_wire_segment_via(gds_cell, segment);
+  }
+  return write_net_wire_segment_points(gds_cell, segment);
 }
 
-int32_t Def2GdsWrite::write_net_wire_segment_points(GdsStruct* gds_struct, IdbRegularWireSegment* segment)
+int32_t Def2GdsWrite::write_net_wire_segment_points(gdstk::Cell* gds_cell, IdbRegularWireSegment* segment)
 {
   if (segment->get_point_list().size() < _POINT_MAX_ || segment->get_layer() == nullptr) {
-    // std::cout << "Error net wire point..." << std::endl;
     return kDbFail;
   }
 
   IdbLayerRouting* routing_layer = dynamic_cast<IdbLayerRouting*>(segment->get_layer());
-
   IdbCoordinate<int32_t>* point_1 = segment->get_point_start();
   IdbCoordinate<int32_t>* point_2 = segment->get_point_second();
 
-  packSegment(gds_struct, routing_layer, point_1, point_2);
-
+  packSegment(gds_cell, routing_layer, point_1, point_2);
   return kDbSuccess;
 }
 
-int32_t Def2GdsWrite::write_net_wire_segment_via(GdsStruct* gds_struct, IdbRegularWireSegment* segment)
+int32_t Def2GdsWrite::write_net_wire_segment_via(gdstk::Cell* gds_cell, IdbRegularWireSegment* segment)
 {
   if (segment->get_point_list().size() <= 0 || segment->get_layer() == nullptr || segment->get_via_list().size() <= 0) {
     std::cout << "No net wire segment via..." << std::endl;
     return kDbFail;
   }
 
-  packVia(gds_struct, segment->get_via_list().at(_POINT_START_));
+  packVia(gds_cell, segment->get_via_list().at(_POINT_START_));
 
   if (segment->get_point_number() >= _POINT_MAX_) {
-    return write_net_wire_segment_points(gds_struct, segment);
+    return write_net_wire_segment_points(gds_cell, segment);
   }
 
   return kDbSuccess;
 }
 
-int32_t Def2GdsWrite::write_net_wire_segment_rect(GdsStruct* gds_struct, IdbRegularWireSegment* segment)
+int32_t Def2GdsWrite::write_net_wire_segment_rect(gdstk::Cell* gds_cell, IdbRegularWireSegment* segment)
 {
   if (segment->get_point_list().size() <= 0 || segment->get_layer() == nullptr || segment->get_delta_rect() == nullptr) {
     std::cout << "No net wire segment rect..." << std::endl;
@@ -779,27 +702,13 @@ int32_t Def2GdsWrite::write_net_wire_segment_rect(GdsStruct* gds_struct, IdbRegu
     std::cout << "Error...Coordinate error...x = " << coordinate->get_x() << " y = " << coordinate->get_y() << std::endl;
   }
 
-  IdbLayer* layer = segment->get_layer();
-  if (layer == nullptr) {
-    std::cout << "Error...createNetRect : Layer not exist :  " << std::endl;
-    return kDbFail;
-  }
-
   IdbRect* rect = new IdbRect(rect_delta);
   rect->moveByStep(coordinate->get_x(), coordinate->get_y());
-
-  packRect(gds_struct, rect, layer);
-
+  packRect(gds_cell, rect, segment->get_layer());
   delete rect;
-  rect = nullptr;
 
   return kDbSuccess;
 }
-
-/**
- * @brief Write IO pins, create each IO Term in IdbPin
- *
- */
 
 int32_t Def2GdsWrite::write_gcell_grid()
 {
@@ -823,38 +732,37 @@ int32_t Def2GdsWrite::write_group()
 
 int32_t Def2GdsWrite::write_fill()
 {
-  IdbDesign* design = _def_service->get_design();  // def
-  IdbFillList* fill_list = design->get_fill_list();
+  IdbDesign* design = _def_service->get_design();
+  IdbFillList* fill_list = design == nullptr ? nullptr : design->get_fill_list();
   if (fill_list == nullptr || fill_list->get_num_fill() == 0) {
     std::cout << "No FILLS ..." << std::endl;
     return kDbFail;
   }
 
-  addSRefDefault("Fills");
-  GdsStruct* gds_struct = new GdsStruct("Fills");
+  auto* cell = createCell("Fills");
 
   for (IdbFill* fill : fill_list->get_fill_list()) {
-    for (IdbRect* rect : fill->get_layer()->get_rect_list()) {
-      packRect(gds_struct, rect, fill->get_layer()->get_layer());
+    if (fill == nullptr) {
+      continue;
     }
 
-    if (fill->get_via() != nullptr) {
+    if (fill->get_layer() != nullptr) {
+      for (IdbRect* rect : fill->get_layer()->get_rect_list()) {
+        packRect(cell, rect, fill->get_layer()->get_layer());
+      }
+    }
+
+    if (fill->get_via() != nullptr && fill->get_via()->get_via() != nullptr) {
       IdbVia* via = fill->get_via()->get_via()->clone();
       for (IdbCoordinate<int32_t>* point : fill->get_via()->get_coordinate_list()) {
         via->set_coordinate(point);
-
-        packVia(gds_struct, via);
+        packVia(cell, via);
       }
-
       delete via;
-      via = nullptr;
     }
   }
 
-  addStruct(gds_struct);
-
-  writeStruct();
-
+  addReferenceDefault(cell);
   return kDbSuccess;
 }
 
@@ -898,27 +806,6 @@ std::pair<int32_t, int32_t> Def2GdsWrite::get_pdn_layer_order_range()
   return has_routing_data ? std::make_pair(min_layer, max_layer) : std::make_pair(0, -1);
 }
 
-bool Def2GdsWrite::writeHardenedDb(const char* file)
-{
-  if (!_writer.init(file, &_gds)) {
-    return false;
-  }
-
-  if (set_units() != kDbSuccess) {
-    return false;
-  }
-
-  _writer.begin();
-
-  write_version();
-  write_design();
-  write_die();
-  write_harden_macro_pins();
-  write_harden_macro_obs();
-
-  return _writer.finish();
-}
-
 int32_t Def2GdsWrite::write_harden_macro_pins()
 {
   auto* design = _def_service->get_design();
@@ -932,12 +819,12 @@ int32_t Def2GdsWrite::write_harden_macro_pins()
   auto* layers = layout->get_layers();
   auto* pdn_list = design->get_special_net_list();
 
-  GdsStruct* gds_struct = new GdsStruct("HARDEN_MACRO_PINS");
+  auto* cell = createCell("HARDEN_MACRO_PINS");
 
   if (pin_list != nullptr) {
     for (auto* pin : pin_list->get_pin_list()) {
       if (pin != nullptr) {
-        packPin(gds_struct, pin);
+        packPin(cell, pin);
       }
     }
   }
@@ -1011,24 +898,20 @@ int32_t Def2GdsWrite::write_harden_macro_pins()
       auto top_vss = get_top_pdn_rect(top_layer, false);
 
       for (auto& rect : top_vdd) {
-        packRect(gds_struct, &rect, top_layer);
+        packRect(cell, &rect, top_layer);
       }
 
       for (auto& rect : top_vss) {
-        packRect(gds_struct, &rect, top_layer);
+        packRect(cell, &rect, top_layer);
       }
     }
   }
 
-  if (gds_struct->get_element_list().empty()) {
-    delete gds_struct;
+  if (cell->polygon_array.count == 0 && cell->label_array.count == 0) {
     return kDbSuccess;
   }
 
-  addSRefDefault(gds_struct->get_name());
-  addStruct(gds_struct);
-  writeStruct();
-
+  addReferenceDefault(cell);
   return kDbSuccess;
 }
 
@@ -1164,7 +1047,7 @@ int32_t Def2GdsWrite::write_harden_macro_obs()
     return kDbSuccess;
   }
 
-  GdsStruct* gds_struct = new GdsStruct("HARDEN_MACRO_OBS");
+  auto* cell = createCell("HARDEN_MACRO_OBS");
   for (auto layer_order = layer_pair.first; layer_order <= layer_pair.second; layer_order += 2) {
     auto* layer = layers->find_layer_by_order(layer_order);
     if (layer == nullptr) {
@@ -1173,19 +1056,15 @@ int32_t Def2GdsWrite::write_harden_macro_obs()
 
     auto obs_rects = get_obs_rect(layer, layer_order == layer_pair.second);
     for (auto& obs_rect : obs_rects) {
-      packRect(gds_struct, &obs_rect, layer);
+      packRect(cell, &obs_rect, layer);
     }
   }
 
-  if (gds_struct->get_element_list().empty()) {
-    delete gds_struct;
+  if (cell->polygon_array.count == 0) {
     return kDbSuccess;
   }
 
-  addSRefDefault(gds_struct->get_name());
-  addStruct(gds_struct);
-  writeStruct();
-
+  addReferenceDefault(cell);
   return kDbSuccess;
 }
 

@@ -10,8 +10,6 @@ target_include_directories(gds_builder
         ${HOME_DATABASE}/data/design/db_layout
         ${HOME_DATABASE}/manager/service/def_service
         ${HOME_DATABASE}/manager/service/lef_service
-        ${HOME_DATABASE}/manager/parser/gdsii
 )
 
-target_link_libraries(gds_builder PRIVATE gdsii-parser idb solver_geometry_boost)
-# SET(CMAKE_BUILD_TYPE "Debug")
+target_link_libraries(gds_builder PRIVATE idb solver_geometry_boost gdstk::gdstk)

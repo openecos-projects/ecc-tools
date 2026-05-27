@@ -15,30 +15,22 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
-/**
- * @project		iDB
- * @file		gds_write.h
- * @author		Yell
- * @date		25/05/2021
- * @version		0.1
- * @description
 
-
-        There is a def builder to write def file from data structure.
- *
- */
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
 
-#include <iostream>
+#include <map>
+#include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "../def_service/def_service.h"
-#include "GTWriter.hpp"
+
+namespace gdstk {
+struct Cell;
+struct Library;
+}  // namespace gdstk
 
 namespace idb {
 
@@ -53,13 +45,11 @@ using std::vector;
 class Def2GdsWrite
 {
  public:
-  Def2GdsWrite(IdbDefService* def_service);
+  explicit Def2GdsWrite(IdbDefService* def_service);
   ~Def2GdsWrite();
 
-  // getter
   IdbDefService* get_service() { return _def_service; }
 
-  // writer
   int32_t set_units();
 
   int32_t write_version();
@@ -69,17 +59,7 @@ class Def2GdsWrite
   int32_t write_row();
   int32_t write_component();
   int32_t write_net();
-  int32_t write_net_wire(GdsStruct* gds_struct, IdbRegularWire* wire);
-  int32_t write_net_wire_segment(GdsStruct* gds_struct, IdbRegularWireSegment* segment);
-  int32_t write_net_wire_segment_points(GdsStruct* gds_struct, IdbRegularWireSegment* segment);
-  int32_t write_net_wire_segment_via(GdsStruct* gds_struct, IdbRegularWireSegment* segment);
-  int32_t write_net_wire_segment_rect(GdsStruct* gds_struct, IdbRegularWireSegment* segment);
   int32_t write_special_net();
-  int32_t write_specialnet_wire(GdsStruct* gds_struct, IdbSpecialWire* wire);
-  int32_t write_specialnet_wire_segment(GdsStruct* gds_struct, IdbSpecialWireSegment* segment);
-  int32_t write_specialnet_wire_segment_points(GdsStruct* gds_struct, IdbSpecialWireSegment* segment);
-  int32_t write_specialnet_wire_segment_via(GdsStruct* gds_struct, IdbSpecialWireSegment* segment);
-  int32_t write_specialnet_wire_segment_rect(GdsStruct* gds_struct, IdbSpecialWireSegment* segment);
   int32_t write_pin();
   int32_t write_via();
   int32_t write_blockage();
@@ -93,7 +73,6 @@ class Def2GdsWrite
   void set_end_time(clock_t time) { _end_time = time; }
   float time_eclips() { return (float(_end_time - _start_time)) / CLOCKS_PER_MS; }
 
-  // operator
   bool writeDb(const char* file);
   bool writeHardenedDb(const char* file);
   int32_t write_harden_macro_pins();
@@ -101,43 +80,47 @@ class Def2GdsWrite
   bool writeChip();
 
  private:
-  IdbDefService* _def_service;
+  IdbDefService* _def_service = nullptr;
   int32_t _index = 0;
-  clock_t _start_time;
-  clock_t _end_time;
+  clock_t _start_time = 0;
+  clock_t _end_time = 0;
 
-  FILE* file_write;
+  std::unique_ptr<gdstk::Library> _library;
+  gdstk::Cell* _top_cell = nullptr;
+  std::map<std::string, int> _cell_name_count;
+  std::set<std::string> _used_cell_names;
 
-  GdsiiTextWriter _writer;
-  GdsData _gds;
-  GdsStruct* _top_struct;
-  void addSRefDefault(string name)
-  {
-    GdsSref sref;
-    sref.add_coord(0, 0);
-    sref.sname = name;
-    _top_struct->add_element(sref);
-  }
+  gdstk::Cell* createCell(const string& name);
+  void addReferenceDefault(gdstk::Cell* child);
+  void addLabel(gdstk::Cell* gds_cell, const string& text, int32_t x, int32_t y, int32_t layer = 0, int32_t datatype = 0);
+  string sanitizeCellName(const string& name);
+  bool finishWrite(const char* file);
 
-  void addStruct(GdsStruct* gds_struct);
-  void writeStruct();
   std::pair<int32_t, int32_t> get_pdn_layer_order_range();
 
   int32_t _unit_microns = -1;
-  int32_t transDB2Unit(int32_t value)
-  {
-    return value;
-    return value / _unit_microns;
-  }
+  double transDB2Unit(int32_t value) const { return _unit_microns > 0 ? static_cast<double>(value) / _unit_microns : value; }
 
-  ///
-  void packVia(GdsStruct* gds_struct, IdbVia* via);
-  void packPin(GdsStruct* gds_struct, IdbPin* pin);
-  void packLayerShape(GdsStruct* gds_struct, IdbLayerShape* layer_shape);
-  void packRect(GdsStruct* gds_struct, IdbRect* rect, IdbLayer* layer);
-  void packRect(GdsStruct* gds_struct, IdbRect* rect, int32_t layer_id);
-  void packRect(GdsStruct* gds_struct, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, IdbLayer* layer);
-  void packSegment(GdsStruct* gds_struct, IdbLayerRouting* routing_layer, IdbCoordinate<int32_t>* point_1, IdbCoordinate<int32_t>* point_2,
-                   int32_t width = -1);
+  int32_t write_net_wire(gdstk::Cell* gds_cell, IdbRegularWire* wire);
+  int32_t write_net_wire_segment(gdstk::Cell* gds_cell, IdbRegularWireSegment* segment);
+  int32_t write_net_wire_segment_points(gdstk::Cell* gds_cell, IdbRegularWireSegment* segment);
+  int32_t write_net_wire_segment_via(gdstk::Cell* gds_cell, IdbRegularWireSegment* segment);
+  int32_t write_net_wire_segment_rect(gdstk::Cell* gds_cell, IdbRegularWireSegment* segment);
+  int32_t write_specialnet_wire(gdstk::Cell* gds_cell, IdbSpecialWire* wire);
+  int32_t write_specialnet_wire_segment(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment);
+  int32_t write_specialnet_wire_segment_points(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment);
+  int32_t write_specialnet_wire_segment_via(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment);
+  int32_t write_specialnet_wire_segment_rect(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment);
+
+  void packVia(gdstk::Cell* gds_cell, IdbVia* via);
+  void packPin(gdstk::Cell* gds_cell, IdbPin* pin);
+  void packLayerShape(gdstk::Cell* gds_cell, IdbLayerShape* layer_shape);
+  void packRect(gdstk::Cell* gds_cell, IdbRect* rect, IdbLayer* layer);
+  void packRect(gdstk::Cell* gds_cell, IdbRect* rect, int32_t layer_id);
+  void packRect(gdstk::Cell* gds_cell, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, IdbLayer* layer);
+  void packRect(gdstk::Cell* gds_cell, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, int32_t layer_id,
+                int32_t datatype = 0);
+  void packSegment(gdstk::Cell* gds_cell, IdbLayerRouting* routing_layer, IdbCoordinate<int32_t>* point_1,
+                   IdbCoordinate<int32_t>* point_2, int32_t width = -1);
 };
 }  // namespace idb

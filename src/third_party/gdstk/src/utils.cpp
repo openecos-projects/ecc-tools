@@ -14,13 +14,17 @@ LICENSE file or <http://www.boost.org/LICENSE_1_0.txt>
 #include <string.h>
 #include <time.h>
 
+#include <algorithm>
+
 #include <gdstk/allocator.hpp>
 #include <gdstk/gdsii.hpp>
 #include <gdstk/utils.hpp>
 #include <gdstk/vec.hpp>
 
+#ifdef GDSTK_WITH_QHULL
 // Qhull
 #include <libqhull_r/qhull_ra.h>
+#endif
 
 namespace gdstk {
 
@@ -590,6 +594,7 @@ void convex_hull(const Array<Vec2> points, Array<Vec2>& result) {
     if (points.count < 4) {
         result.extend(points);
         return;
+#ifdef GDSTK_WITH_QHULL
     } else if (points.count > qh_POINTSmax) {
         Array<Vec2> partial;
         partial.count = qh_POINTSmax;
@@ -658,6 +663,63 @@ void convex_hull(const Array<Vec2> points, Array<Vec2>& result) {
                 totlong, curlong);
         }
     }
+#endif
+#else
+    }
+
+    Vec2* sorted = (Vec2*)allocate(sizeof(Vec2) * points.count);
+    memcpy(sorted, points.items, sizeof(Vec2) * points.count);
+    std::sort(sorted, sorted + points.count, [](const Vec2& a, const Vec2& b) {
+        return a.x == b.x ? a.y < b.y : a.x < b.x;
+    });
+
+    uint64_t unique_count = 0;
+    for (uint64_t i = 0; i < points.count; i++) {
+        if (unique_count == 0 || sorted[i].x != sorted[unique_count - 1].x ||
+            sorted[i].y != sorted[unique_count - 1].y) {
+            sorted[unique_count++] = sorted[i];
+        }
+    }
+
+    if (unique_count < 4) {
+        result.ensure_slots(unique_count);
+        memcpy(result.items + result.count, sorted, sizeof(Vec2) * unique_count);
+        result.count += unique_count;
+        free_allocation(sorted);
+        return;
+    }
+
+    Vec2* hull = (Vec2*)allocate(sizeof(Vec2) * unique_count * 2);
+    uint64_t count = 0;
+    auto cross = [](const Vec2& origin, const Vec2& a, const Vec2& b) {
+        return (a - origin).cross(b - origin);
+    };
+
+    for (uint64_t i = 0; i < unique_count; i++) {
+        while (count >= 2 && cross(hull[count - 2], hull[count - 1], sorted[i]) <= 0) {
+            count--;
+        }
+        hull[count++] = sorted[i];
+    }
+
+    uint64_t upper_start = count + 1;
+    for (uint64_t i = unique_count - 1; i > 0; i--) {
+        Vec2 point = sorted[i - 1];
+        while (count >= upper_start && cross(hull[count - 2], hull[count - 1], point) <= 0) {
+            count--;
+        }
+        hull[count++] = point;
+    }
+
+    if (count > 1) {
+        count--;
+    }
+
+    result.ensure_slots(count);
+    memcpy(result.items + result.count, hull, sizeof(Vec2) * count);
+    result.count += count;
+    free_allocation(hull);
+    free_allocation(sorted);
 #endif
 }
 
