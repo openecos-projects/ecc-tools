@@ -18,6 +18,7 @@
 // #include <gperftools/heap-profiler.h>
 
 #include "gtest/gtest.h"
+#include "api/iIR.hh"
 #include "iir-rust/IRRustC.hh"
 #include "log/Log.hh"
 #include "string/Str.hh"
@@ -50,7 +51,9 @@ TEST_F(BuildMatrixTest, build_matrix) {
   const char* spef_file_path =
       "/home/taosimin/T28/spef/asic_top.spef_vdd_vss_1212.rcworst.0c.spef";
 
-  auto* rc_data = read_spef(spef_file_path);
+  iIR ir_analysis;
+  ir_analysis.readSpef(spef_file_path);
+  auto* rc_data = ir_analysis.get_rc_data();
   auto one_net_matrix_data =
       build_one_net_conductance_matrix_data(rc_data, "VDD");
 

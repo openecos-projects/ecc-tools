@@ -67,8 +67,6 @@ bool hashmap_iterator_next(struct HashMapIterator *iterator, uintptr_t *out_key,
 
 void destroy_hashmap_iterator(struct HashMapIterator *iterator);
 
-const void *read_spef(const char *c_power_net_spef);
-
 /**
  * create power ground node.
  */
@@ -119,8 +117,4 @@ struct RustVec get_instance_node_ids(const void *c_rc_data, const char *c_net_na
 
 const char *get_instance_name(const void *c_rc_data, const char *c_net_name, uintptr_t node_id);
 
-/**
- * Build RC matrix and current vector data.
- */
-struct RustVec build_matrix_from_raw_data(const char *c_inst_power_path,
-                                          const char *c_power_net_spef);
+void build_matrices_from_rc_data(const char *c_inst_power_path, const void *c_rc_data);

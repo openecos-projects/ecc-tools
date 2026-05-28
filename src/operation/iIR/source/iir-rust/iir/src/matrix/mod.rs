@@ -25,6 +25,7 @@ pub struct RustMatrix {
 
 /// RC vector used for C interface.
 #[repr(C)]
+#[allow(dead_code)]
 pub struct RustVector {
     // val at position
     data: f64,
@@ -119,6 +120,7 @@ pub struct RustNetConductanceData {
 
 /// One net equation data.
 #[repr(C)]
+#[allow(dead_code)]
 pub struct RustNetEquationData {
     net_name: *const c_char,
     g_matrix_vec: RustVec,
@@ -196,13 +198,6 @@ pub extern "C" fn destroy_hashmap_iterator(iterator: *mut HashMapIterator) {
     let _ = unsafe { Box::from_raw(iterator) };
 }
 
-#[no_mangle]
-pub extern "C" fn read_spef(c_power_net_spef: *const c_char) -> *const c_void {
-    let power_net_spef = c_str_to_r_str(c_power_net_spef);
-    let rc_data = ir_rc::read_rc_data_from_spef(&power_net_spef);
-    let mv_rc_data = Box::new(rc_data);
-    Box::into_raw(mv_rc_data) as *const c_void
-}
 /// create power ground node.
 #[no_mangle]
 pub extern "C" fn create_pg_node(c_pg_netlist: *mut c_void, c_pg_node: *const RustIRPGNode) -> *const c_void {
@@ -458,53 +453,29 @@ pub extern "C" fn get_instance_name(
     (string_to_c_char(instance_name.unwrap())) as _
 }
 
-/// Build RC matrix and current vector data.
 #[no_mangle]
-pub extern "C" fn build_matrix_from_raw_data(
+pub extern "C" fn build_matrices_from_rc_data(
     c_inst_power_path: *const c_char,
-    c_power_net_spef: *const c_char,
-) -> RustVec {
-    // Firstly, read spef.
-    let power_net_spef = c_str_to_r_str(c_power_net_spef);
+    c_rc_data: *const c_void,
+) {
     let inst_power_path = c_str_to_r_str(c_inst_power_path);
+    let rc_data = unsafe { &*(c_rc_data as *const RCData) };
 
-    let rc_data = ir_rc::read_rc_data_from_spef(&power_net_spef);
     let instance_power_data =
         ir_inst_power::read_instance_pwr_csv(&inst_power_path).expect("error reading instance power csv file");
 
-    let mut net_matrix_data: Vec<RustNetEquationData> = Vec::new();
-    // Secondly, construct matrix data.
     for (net_name, one_net_data) in rc_data.get_nets_data() {
         log::info!("construct power net {} matrix start", net_name);
 
-        // Build rc matrix
         let conductance_matrix_triplet = ir_rc::build_conductance_matrix(one_net_data);
-        let rust_matrix = rust_convert_rc_matrix(&conductance_matrix_triplet);
+        let _rust_matrix = rust_convert_rc_matrix(&conductance_matrix_triplet);
 
-        // Read instance power data.
         let current_vector_result = ir_inst_power::build_instance_current_vector(&instance_power_data, one_net_data);
-        if let Ok(current_vector) = current_vector_result {
-            // Construct net matrix(rc matrix and current vector) data.
-            let mut current_vec: Vec<RustVector> = Vec::new();
-            for (index, val) in current_vector {
-                current_vec.push(RustVector { data: val, index });
-            }
-            let rust_matrix_vec = rust_vec_to_c_array(&rust_matrix);
-            let rust_current_vec = rust_vec_to_c_array(&current_vec);
-            net_matrix_data.push(RustNetEquationData {
-                net_name: string_to_c_char(net_name),
-                g_matrix_vec: rust_matrix_vec,
-                j_vec: rust_current_vec,
-            });
-        } else {
+        if current_vector_result.is_err() {
             panic!("current vector is none");
         }
         log::info!("construct power net {} matrix finish", net_name);
     }
-
-    // Finaly, return data to C.
-    
-    rust_vec_to_c_array(&net_matrix_data)
 }
 
 #[cfg(test)]
@@ -578,9 +549,21 @@ mod tests {
 
     #[test]
     fn test_build_matrix() {
-        let spef_file_path = "/home/taosimin/T28/spef/asic_top.spef_vdd_vss_1212.rcworst.0c.spef";
+        let nets = vec![ir_rc::SpefNetInput {
+            name: "VDD".to_string(),
+            conns: vec![
+                ir_rc::SpefConnInput { name: "VDD".to_string(), is_external: true },
+                ir_rc::SpefConnInput { name: "U1/VDD".to_string(), is_external: false },
+            ],
+            caps: vec![],
+            ress: vec![ir_rc::SpefResCapInput {
+                node1: "VDD".to_string(),
+                node2: "U1/VDD".to_string(),
+                value: 2.0,
+            }],
+        }];
 
-        let rc_data = ir_rc::read_rc_data_from_spef(spef_file_path);
+        let rc_data = ir_rc::create_rc_data_from_spef_nets(&nets);
 
         for (net_name, one_net_data) in rc_data.get_nets_data() {
             log::info!("construct power net {} matrix start", net_name);

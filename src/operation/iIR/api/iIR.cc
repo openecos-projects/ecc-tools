@@ -96,6 +96,24 @@ const void* CreateRcDataFromSpefExchange(const ista::spef::Exchange& exchange) {
   return create_rc_data_from_spef(MakeRustVec(rust_nets));
 }
 
+const void* ReadSpefRcData(std::string_view spef_file_path) {
+  ista::spef::SpefReader spef_parser;
+  const std::string spef_path(spef_file_path);
+  if (!spef_parser.read(spef_path)) {
+    LOG_ERROR << "read spef file " << spef_path << " failed";
+    return nullptr;
+  }
+
+  spef_parser.expandName();
+  auto* spef_file = spef_parser.getSpefFile();
+  if (spef_file == nullptr) {
+    LOG_ERROR << "read spef file " << spef_path << " produced no SPEF data";
+    return nullptr;
+  }
+
+  return CreateRcDataFromSpefExchange(*spef_file);
+}
+
 }  // namespace
 
 namespace iir {
@@ -118,23 +136,18 @@ unsigned iIR::init() {
  * @return
  */
 unsigned iIR::readSpef(std::string_view spef_file_path) {
-  ista::spef::SpefReader spef_parser;
-  const std::string spef_path(spef_file_path);
-  if (!spef_parser.read(spef_path)) {
-    LOG_ERROR << "read spef file " << spef_path << " failed";
-    return 0;
-  }
-
-  spef_parser.expandName();
-  auto* spef_file = spef_parser.getSpefFile();
-  if (spef_file == nullptr) {
-    LOG_ERROR << "read spef file " << spef_path << " produced no SPEF data";
-    return 0;
-  }
-
-  _rc_data = CreateRcDataFromSpefExchange(*spef_file);
+  _rc_data = ReadSpefRcData(spef_file_path);
   return _rc_data == nullptr ? 0 : 1;
 };
+
+void BuildMatrixFromRawData(const char* c_inst_power_path,
+                            const char* c_power_net_spef) {
+  auto* rc_data = ReadSpefRcData(c_power_net_spef);
+  if (rc_data == nullptr) {
+    return;
+  }
+  build_matrices_from_rc_data(c_inst_power_path, rc_data);
+}
 
 /**
  * @brief read instance power db file to build current vector.
