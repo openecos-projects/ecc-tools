@@ -50,12 +50,12 @@ bool Environment::buildTracks()
   const std::map<Size, RoutingLayer>& routing_layers = layout_data_->routing_layers;
 
   const GtlRectI& rect = layout_data_->die_shape;
-  Dbu die_x0 = geom::MinX(rect);
-  Dbu die_y0 = geom::MinY(rect);
-  Dbu die_x1 = geom::MaxX(rect);
-  Dbu die_y1 = geom::MaxY(rect);
-  Dbu die_dx = geom::DeltaX(rect);
-  Dbu die_dy = geom::DeltaY(rect);
+  Dbu die_x0 = geom::min_x(rect);
+  Dbu die_y0 = geom::min_y(rect);
+  Dbu die_x1 = geom::max_x(rect);
+  Dbu die_y1 = geom::max_y(rect);
+  Dbu die_dx = geom::delta_x(rect);
+  Dbu die_dy = geom::delta_y(rect);
 
   Dbu bucket_dlt = static_cast<Dbu>(bucket_size_um_ * layout_data_->micron_to_dbu);
 
@@ -144,10 +144,10 @@ bool Environment::buildPixels()
   const std::map<Size, RoutingLayer>& routing_layers = layout_data_->routing_layers;
 
   const GtlRectI& rect = layout_data_->die_shape;
-  Dbu die_x0 = geom::MinX(rect);
-  Dbu die_y0 = geom::MinY(rect);
-  Dbu die_x1 = geom::MaxX(rect);
-  Dbu die_y1 = geom::MaxY(rect);
+  Dbu die_x0 = geom::min_x(rect);
+  Dbu die_y0 = geom::min_y(rect);
+  Dbu die_x1 = geom::max_x(rect);
+  Dbu die_y1 = geom::max_y(rect);
 
   layer_to_pixel_prefer_dir_.clear();
   layer_to_pixel_nonprefer_dir_.clear();
@@ -238,7 +238,7 @@ void Environment::buildSearchTrackNumMap()
   }
 }
 
-bool Environment::buildNetEnvPools(std::vector<EnvPool>& net_env_pools)
+bool Environment::buildNetEnvironments(std::vector<NetEnvironment>& net_environments)
 {
   if (!layout_data_) {
     LOG_ERROR << "build environment failed: LayoutData not initialized.";
@@ -255,8 +255,8 @@ bool Environment::buildNetEnvPools(std::vector<EnvPool>& net_env_pools)
   buildSearchTrackNumMap();
 
   Size net_num = layout_data_->regular_net_count();
-  net_env_pools.clear();
-  net_env_pools.resize(net_num);
+  net_environments.clear();
+  net_environments.resize(net_num);
 
   const std::map<Size, RoutingLayer>& routing_layers = layout_data_->routing_layers;
   const Size min_lid = routing_layers.empty() ? 0 : routing_layers.begin()->first;
@@ -264,13 +264,13 @@ bool Environment::buildNetEnvPools(std::vector<EnvPool>& net_env_pools)
 
   auto widen_me = [](const LineSegmentI& seg, Dbu ext) {
     LineSegmentI out = seg;
-    out.a0 -= ext;
-    out.a1 += ext;
+    out.lo -= ext;
+    out.hi += ext;
     return out;
   };
 
   auto clip_cross_segs = [](const std::vector<CrossOverlapSub>& full, Dbu a0, Dbu a1) {
-    return clipIntervals(
+    return ircx::interval::clip(
         full,
         a0,
         a1,
@@ -333,12 +333,12 @@ bool Environment::buildNetEnvPools(std::vector<EnvPool>& net_env_pools)
 
   #pragma omp parallel for schedule(dynamic)
   for (Size nid = 0; nid < net_num; nid++) {
-    EnvPool& net_env_pool = net_env_pools[nid];
-    net_env_pool.clear();
+    NetEnvironment& environment = net_environments[nid];
+    environment.clear();
 
     for (const TopoEdge& edge : topo_pool_->net_edges(nid)) {
       if (edge.is_via()) {
-        net_env_pool.append_edge_env_interval_pool({});  // placeholder to keep index aligned with TopoPool
+        environment.appendEdgeIntervals({});  // placeholder to keep index aligned with TopoPool
         continue;
       }
 
@@ -350,20 +350,20 @@ bool Environment::buildNetEnvPools(std::vector<EnvPool>& net_env_pools)
       std::vector<TrackOverlap> track_ov_dn =
           layer_to_track_[lid].get_overlap(query_seg, -layer_to_search_track_num_[lid], nullptr);
 
-      std::vector<EnvInterval> out;
-      track_merger.compute(query_seg.a0, query_seg.a1, track_ov_dn, track_ov_up, out);
+      std::vector<EdgeEnvironmentInterval> out;
+      track_merger.compute(query_seg.lo, query_seg.hi, track_ov_dn, track_ov_up, out);
 
       const auto dn_inputs = collect_cross_side(query_seg, lid, /*search_up=*/false);
       const auto up_inputs = collect_cross_side(query_seg, lid, /*search_up=*/true);
 
       std::vector<CrossOverlapSub> cross_full;
-      pixel_merger.compute(query_seg.a0, query_seg.a1, dn_inputs, up_inputs, cross_full);
+      pixel_merger.compute(query_seg.lo, query_seg.hi, dn_inputs, up_inputs, cross_full);
 
-      for (EnvInterval& interval : out) {
+      for (EdgeEnvironmentInterval& interval : out) {
         interval.cross_segs = clip_cross_segs(cross_full, interval.a0, interval.a1);
       }
 
-      net_env_pool.append_edge_env_interval_pool(std::move(out));
+      environment.appendEdgeIntervals(std::move(out));
     }
   }
 

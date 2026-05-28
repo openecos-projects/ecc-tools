@@ -1,6 +1,10 @@
 set(IRCX_CALCULATE_SRC
   resistance/ResistanceCalc.cc
+  resistance/ViaResistanceModel.cc
+  resistance/WireResistanceModel.cc
   capacitance/CapacitanceCalc.cc
+  capacitance/CapTableQuery.cc
+  capacitance/EdgeCapAccumulator.cc
 )
 
 add_library(ircx_calculate ${IRCX_CALCULATE_SRC})

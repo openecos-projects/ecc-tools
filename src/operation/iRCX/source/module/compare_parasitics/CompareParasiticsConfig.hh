@@ -16,43 +16,42 @@
 // ***************************************************************************************
 #pragma once
 
-#include <span>
+#include <string>
+#include <utility>
 #include <vector>
-
-#include "SpanPool.hh"
-#include "Types.hh"
 
 namespace ircx {
 
-template <typename Interval>
-class IntervalPool
+struct CompareParasiticsConfig
 {
- public:
-  IntervalPool() = default;
-  ~IntervalPool() = default;
+  std::string test_file;
+  std::string reference_file;
+  std::string output_dir = ".";
 
-  void append_edge_intervals(std::vector<Interval> intervals)
-  {
-    intervals_.append_group(std::move(intervals));
-  }
+  int cores = 1;
+  double tcap_threshold = 3.0;
+  double ccap_abs_threshold = 0.3;
+  double ccap_rel_threshold = 0.1;
+  double res_threshold = 50.0;
 
-  std::span<const Interval> edge_intervals(Size edge_id) const
-  {
-    return intervals_.group_items(edge_id);
-  }
+  bool compare_capacitance = false;
+  bool compare_resistance = false;
+  bool compare_delay = false;
+  bool delay_pin_load = false;
 
-  std::span<Interval> edge_intervals(Size edge_id)
-  {
-    return intervals_.group_items(edge_id);
-  }
+  std::string corner;
+  std::string match_mode = "name";
+  std::string net_name;
+  std::string from_pin;
+  std::string to_pin;
+  std::string net_config_file;
+  int timeout_seconds = 5400;
+  double delay_threshold = 1.0;
 
-  void clear()
-  {
-    intervals_.clear();
-  }
-
- private:
-  SpanPool<Interval> intervals_;
+  std::vector<std::string> net_names;
+  std::vector<std::string> from_pins;
+  std::vector<std::string> to_pins;
+  std::vector<std::pair<std::string, std::string>> from_to_pins;
 };
 
 }  // namespace ircx

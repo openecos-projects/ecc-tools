@@ -14,17 +14,19 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "TopologyBuilder.hh"
+
 #include <omp.h>
 
-#include "TopologyBuilder.hh"
-#include "Hash.hh"
+#include "HashUtils.hh"
 #include "LayoutData.hh"
 namespace ircx {
 
 // ---------------------------------------------------------------------------
 // build_one_  (stateless – safe to call from multiple threads simultaneously)
 // ---------------------------------------------------------------------------
-TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const {
+TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
+{
   TopologyBuilder::NetTopo result;
 
   const Size net_id = net.id;
@@ -43,8 +45,9 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const {
   };
 
   // (layer, point) -> local node index
-  std::unordered_map<std::pair<Size, GtlPointI>, Size,
-                     Hash::LayerPointHash> local_node_index_by_key;
+  std::unordered_map<std::pair<Size, GtlPointI>,
+                     Size,
+                     hash::LayerPointHasher> local_node_index_by_key;
 
   // Track whether each pin has already been matched to a topology node.
   std::map<Str, bool> pin_consumed;
@@ -56,11 +59,13 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const {
   // Returns the matched pin name and marks it consumed; returns empty if none matches.
   auto match_pin_name = [&](Size layer_id, GtlPointI point) -> Str {
     for (const auto& pin : net.pins) {
-      if (pin_consumed[pin.name]) continue;
+      if (pin_consumed[pin.name])
+        continue;
 
       for (const auto& [pin_layer_id, pin_rect] : pin.layer_id_rects) {
-        if (layer_id != pin_layer_id) continue;
-        if (geom::RectContainsPoint(pin_rect, point)) {
+        if (layer_id != pin_layer_id)
+          continue;
+        if (geom::rect_contains_point(pin_rect, point)) {
           pin_consumed[pin.name] = true;
           return pin.name;
         }
@@ -74,12 +79,13 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const {
   // points-set collection followed by node construction).
   auto append_node_if_absent = [&](Size layer_id, GtlPointI point) {
     const auto node_key = std::make_pair(layer_id, point);
-    if (local_node_index_by_key.count(node_key)) return;
+    if (local_node_index_by_key.count(node_key))
+      return;
 
     TopoNode node(net_id);
     node.set_layer_id(layer_id);
     node.set_point(point);
-    node.set_shape(geom::BoxAround(point, 1));
+    node.set_shape(geom::box_around(point, 1));
 
     node.set_pin_name(match_pin_name(layer_id, point));
 
@@ -110,7 +116,7 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const {
 
     TopoEdge edge(net_id);
     edge.set_layer_id(layer_id);
-    if (geom::IsLeftBottom(start_point, end_point)) {
+    if (geom::is_lower_left(start_point, end_point)) {
       edge.set_u(start_node_idx);
       edge.set_v(end_node_idx);
     } else {
@@ -150,8 +156,10 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const {
 // ---------------------------------------------------------------------------
 // build_all  – two-phase parallel build
 // ---------------------------------------------------------------------------
-void TopologyBuilder::build_all(const LayoutData& ld) const {
-  if (!topo_pool_) return;
+void TopologyBuilder::build_all(const LayoutData& ld) const
+{
+  if (!topo_pool_)
+    return;
 
   const std::vector<Net>& regular_nets = ld.net_vec;
   const Size net_count = ld.regular_net_count();
@@ -159,10 +167,10 @@ void TopologyBuilder::build_all(const LayoutData& ld) const {
   // Pre-allocate to avoid any shared-container writes during the parallel phase.
   std::vector<TopologyBuilder::NetTopo> net_topologies(net_count);
 
-  // Phase 1: Build each net's topology into independent local storage.
-  //   - No shared mutable state → threads operate completely independently.
-  //   - dynamic scheduling handles variable net sizes efficiently.
-  #pragma omp parallel for schedule(dynamic)
+// Phase 1: Build each net's topology into independent local storage.
+//   - No shared mutable state → threads operate completely independently.
+//   - dynamic scheduling handles variable net sizes efficiently.
+#pragma omp parallel for schedule(dynamic)
   for (Size net_idx = 0; net_idx < net_count; ++net_idx) {
     net_topologies[net_idx] = std::move(build_one_(regular_nets[net_idx]));
   }
@@ -185,8 +193,8 @@ void TopologyBuilder::build_all(const LayoutData& ld) const {
     topo_pool_->addNet(std::move(net_topology.nodes), std::move(net_topology.edges));
   }
 
-  // Phase 3: in edge, local node id → global id
-  #pragma omp parallel for schedule(dynamic)
+// Phase 3: in edge, local node id → global id
+#pragma omp parallel for schedule(dynamic)
   for (Size net_idx = 0; net_idx < net_count; ++net_idx) {
     auto net_edges = topo_pool_->net_edges(net_idx);
     for (auto& net_edge : net_edges) {
@@ -201,8 +209,10 @@ void TopologyBuilder::build_all(const LayoutData& ld) const {
 // ---------------------------------------------------------------------------
 // build_special
 // ---------------------------------------------------------------------------
-void TopologyBuilder::build_special(const LayoutData& ld) const {
-  if (!topo_pool_) return;
+void TopologyBuilder::build_special(const LayoutData& ld) const
+{
+  if (!topo_pool_)
+    return;
 
   const Net& special_net = ld.special_net;
 
@@ -216,13 +226,13 @@ void TopologyBuilder::build_special(const LayoutData& ld) const {
     edges[edge_idx].set_shape(rect);
   };
 
-  #pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic)
   for (Size segment_idx = 0; segment_idx < segment_count; ++segment_idx) {
     const Segment& segment = special_net.segments[segment_idx];
     set_edge_shape(segment_idx, segment.layer_id, segment.rect);
   }
 
-  #pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic)
   for (Size patch_idx = 0; patch_idx < patch_count; ++patch_idx) {
     const Patch& patch = special_net.patches[patch_idx];
     set_edge_shape(patch_idx + segment_count, patch.layer_id, patch.rect);

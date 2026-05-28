@@ -25,13 +25,16 @@ namespace ircx {
 
 #define RCX_CONFIG_INST (ircx::RCXConfig::getInst())
 
+inline constexpr unsigned kDefaultThreadCount = 64U;
+inline constexpr F64 kDefaultOperatingTemperature = 25.0;
+
 class RCXConfig
 {
  public:
   struct CornerConfig
   {
     std::string name;
-    F64 temperature{25.0};
+    std::vector<F64> temperatures{kDefaultOperatingTemperature};
     std::string itf_file;
     std::string captab_file;
   };
@@ -69,7 +72,7 @@ class RCXConfig
   std::string _config_path;
 
   // settings
-  unsigned _thread_num = 64U;
+  unsigned _thread_num{kDefaultThreadCount};
 
   // read file
   std::string _mapping_file;

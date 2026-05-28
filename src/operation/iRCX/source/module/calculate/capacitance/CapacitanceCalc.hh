@@ -19,12 +19,13 @@
 #include <span>
 #include <vector>
 
-#include "EtchPool.hh"
-#include "EnvPool.hh"
+#include "CornerNetPool.hh"
+#include "NetEtchProfile.hh"
+#include "NetEnvironment.hh"
 #include "LayoutData.hh"
 #include "RCXData.hh"
 #include "RCTable.hh"
-#include "UnitUtils.hh"
+#include "Types.hh"
 namespace ircx {
 
 namespace parser {
@@ -51,10 +52,13 @@ class CapacitanceCalc
 
   void set_layout_data(const LayoutData* v) {
     layout_data_ = v;
-    dbu_to_micron_ = dbuToMicronScale(v->micron_to_dbu);
+    dbu_to_micron_ = dbu2micron(1, v->micron_to_dbu);
   }
-  void set_net_env_pools(const std::vector<EnvPool>* v) { net_env_pools_ = v; }
-  void set_corner_net_etch_pools(const std::vector<EtchPool>* v) { corner_net_etch_pools_ = v; }
+  void set_net_environments(const std::vector<NetEnvironment>* v) { net_environments_ = v; }
+  void set_corner_net_etch_pools(const CornerNetPool<NetEtchProfile>* v)
+  {
+    corner_net_etch_pools_ = v;
+  }
   void set_layer_table(const LayerTable* v) { layer_table_ = v; }
   void set_topo_pool(const TopoPool* v) { topo_pool_ = v; }
   void set_corner_data(const std::vector<RCXData::CornerData>* v) { corner_data_ = v; }
@@ -73,8 +77,8 @@ class CapacitanceCalc
       Size corner_idx,
       Size net_idx,
       const parser::CapTable& cap_table,
-      const EtchPool& corner_net_etch_pool,
-      const EnvPool& net_env_pool);
+      const NetEtchProfile& etch_profile,
+      const NetEnvironment& environment);
   void calcEdge(
       Size corner_idx,
       Size net_idx,
@@ -82,14 +86,14 @@ class CapacitanceCalc
       const TopoEdge& edge,
       const parser::CapTable& cap_table,
       std::span<F64> edge_ground_caps,
-      const EnvPool& net_env_pool,
-      const EtchPool& corner_net_etch_pool);
+      const NetEnvironment& environment,
+      const NetEtchProfile& etch_profile);
 
   Micron dbu_to_micron_{1};
 
   const LayoutData* layout_data_{nullptr};
-  const std::vector<EnvPool>* net_env_pools_{nullptr};
-  const std::vector<EtchPool>* corner_net_etch_pools_{nullptr};
+  const std::vector<NetEnvironment>* net_environments_{nullptr};
+  const CornerNetPool<NetEtchProfile>* corner_net_etch_pools_{nullptr};
   const LayerTable* layer_table_{nullptr};
   const TopoPool* topo_pool_{nullptr};
   const std::vector<RCXData::CornerData>* corner_data_{nullptr};

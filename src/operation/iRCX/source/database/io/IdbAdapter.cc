@@ -26,7 +26,7 @@
 #include "IdbAdapter.hh"
 #include "LayerTable.hh"
 #include "LayoutData.hh"
-#include "SpefUtils.hh"
+#include "StringUtils.hh"
 #include "SpefContext.hh"
 #include "log/Log.hh"
 
@@ -160,7 +160,7 @@ auto IdbAdapter::adaptSpefContext(IdbDesign* idb_design) -> void
     if (idb_net->is_pdn()) {
       continue;
     }
-    spef_context_->net_names.push_back(escapeSpefIdentifier(idb_net->get_net_name()));
+    spef_context_->net_names.push_back(string::spef_escape_identifier(idb_net->get_net_name()));
   }
 
   const std::vector<IdbPin*>& io_pins = idb_design->get_io_pin_list()->get_pin_list();
@@ -170,7 +170,7 @@ auto IdbAdapter::adaptSpefContext(IdbDesign* idb_design) -> void
     if (io_pin->is_special_net_pin() || !io_pin->get_net()) {
       continue;
     }
-    spef_context_->port_names.push_back(escapeSpefIdentifier(io_pin->get_pin_name()));
+    spef_context_->port_names.push_back(string::spef_escape_identifier(io_pin->get_pin_name()));
 
     if (io_pin->is_primary_input()) {
       spef_context_->port_io.emplace_back('I');
@@ -185,10 +185,10 @@ auto IdbAdapter::adaptSpefContext(IdbDesign* idb_design) -> void
       idb_design->get_instance_list()->get_instance_list();
   spef_context_->instance_names.reserve(instances.size());
   for (IdbInstance* instance : instances) {
-    const Str instance_name = escapeSpefIdentifier(instance->get_name());
+    const Str instance_name = string::spef_escape_identifier(instance->get_name());
     spef_context_->instance_names.push_back(instance_name);
     spef_context_->instance_to_cell[instance_name] =
-        escapeSpefIdentifier(instance->get_cell_master()->get_name());
+        string::spef_escape_identifier(instance->get_cell_master()->get_name());
   }
 }
 
@@ -208,7 +208,7 @@ auto IdbAdapter::adaptNet(IdbNetList* idb_netlist) -> void
 
     Net& net = regular_nets[net_idx];
     net.id = net_idx;
-    net.name = escapeSpefIdentifier(idb_net->get_net_name());
+    net.name = string::spef_escape_identifier(idb_net->get_net_name());
 
     auto* idb_wire_list = idb_net->get_wire_list();
     if (!idb_wire_list || idb_wire_list->get_num() == 0) {
@@ -268,11 +268,11 @@ auto IdbAdapter::adaptPin(IdbPin* idb_pin, bool is_driving) -> Pin
   Pin pin;
 
   if (idb_pin->is_io_pin()) {
-    pin.name = escapeSpefIdentifier(idb_pin->get_pin_name());
+    pin.name = string::spef_escape_identifier(idb_pin->get_pin_name());
   } else {
-    pin.name = escapeSpefIdentifier(idb_pin->get_instance()->get_name())
+    pin.name = string::spef_escape_identifier(idb_pin->get_instance()->get_name())
                + ':'
-               + escapeSpefIdentifier(idb_pin->get_pin_name());
+               + string::spef_escape_identifier(idb_pin->get_pin_name());
   }
 
   pin.is_driver = is_driving;
@@ -386,7 +386,7 @@ auto IdbAdapter::adaptVia(IdbVia* idb_via) -> std::optional<Via>
   }
 
   Via via;
-  via.name = escapeSpefIdentifier(idb_via->get_name());
+  via.name = string::spef_escape_identifier(idb_via->get_name());
   via.point = GtlPointI(center_point->get_x(), center_point->get_y());
 
   auto read_layer_rect =

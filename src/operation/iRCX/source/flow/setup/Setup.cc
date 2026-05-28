@@ -17,8 +17,10 @@
 #include "Setup.hh"
 
 #include <cmath>
+#include <iomanip>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <utility>
 
 #include "CapTable.hpp"
@@ -38,13 +40,34 @@ namespace ircx {
 
 namespace {
 
+auto temperatureName(F64 temperature) -> Str
+{
+  std::ostringstream oss;
+  oss << std::setprecision(12) << temperature;
+
+  Str name = oss.str();
+  for (char& ch : name) {
+    if (ch == '.') {
+      ch = 'p';
+    } else if (ch == '-') {
+      ch = 'm';
+    }
+  }
+  return name + "C";
+}
+
+auto makeTemperatureCornerName(const Str& corner_name, F64 temperature) -> Str
+{
+  return corner_name + "_" + temperatureName(temperature);
+}
+
 auto loadProcessCorner(const Str& corner_name,
                        const Str& itf_file) -> std::unique_ptr<::itf::ProcessCorner>
 {
-  if (!ensureNonEmpty(corner_name, "corner name")) {
+  if (!string::ensure_non_empty(corner_name, "corner name")) {
     return nullptr;
   }
-  if (!path::requireFile(itf_file, "itf_file")) {
+  if (!path::require_file(itf_file, "itf_file")) {
     return nullptr;
   }
 
@@ -95,10 +118,10 @@ auto loadProcessCorner(const Str& corner_name,
 auto loadCapTable(const Str& corner_name,
                   const Str& captab_file) -> std::optional<parser::CapTable>
 {
-  if (!ensureNonEmpty(corner_name, "corner name")) {
+  if (!string::ensure_non_empty(corner_name, "corner name")) {
     return std::nullopt;
   }
-  if (!path::requireFile(captab_file, "captab_file")) {
+  if (!path::require_file(captab_file, "captab_file")) {
     return std::nullopt;
   }
 
@@ -203,8 +226,16 @@ auto Setup::initialize(const std::string& config) -> bool
   }
 
   for (const auto& corner : rcx_config.get_corners()) {
-    if (!readCorner(corner.name, corner.temperature, corner.itf_file.c_str(), corner.captab_file.c_str())) {
+    if (corner.temperatures.empty()) {
+      LOG_ERROR << "corner temperature list is empty for " << corner.name << ".";
       return false;
+    }
+
+    for (F64 temperature : corner.temperatures) {
+      const Str runtime_corner_name = makeTemperatureCornerName(corner.name, temperature);
+      if (!readCorner(runtime_corner_name, temperature, corner.itf_file.c_str(), corner.captab_file.c_str())) {
+        return false;
+      }
     }
   }
   if (!readMapping(rcx_config.get_mapping_file().c_str())) {
@@ -219,7 +250,7 @@ auto Setup::readCorner(const std::string& corner_name,
                        const char* itf_file,
                        const char* captab_file) -> bool
 {
-  return readCorner(corner_name, 25.0, itf_file, captab_file);
+  return readCorner(corner_name, kDefaultOperatingTemperature, itf_file, captab_file);
 }
 
 auto Setup::readCorner(const std::string& corner_name,
@@ -227,7 +258,7 @@ auto Setup::readCorner(const std::string& corner_name,
                        const char* itf_file,
                        const char* captab_file) -> bool
 {
-  if (!ensureNonEmpty(corner_name, "corner name")) {
+  if (!string::ensure_non_empty(corner_name, "corner name")) {
     return false;
   }
   if (!std::isfinite(temperature)) {
@@ -282,7 +313,7 @@ auto Setup::readMapping(const char* mapping_file) -> bool
     LOG_ERROR << "mapping_file is null.";
     return false;
   }
-  if (!path::requireFile(mapping_file, "mapping_file")) {
+  if (!path::require_file(mapping_file, "mapping_file")) {
     return false;
   }
 

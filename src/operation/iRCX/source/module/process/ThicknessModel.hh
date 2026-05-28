@@ -24,7 +24,7 @@
 #include "LayerTable.hh"
 #include "LayoutData.hh"
 #include "TopoPool.hh"
-#include "EtchPool.hh"
+#include "NetEtchProfile.hh"
 #include "MetalDensity.hh"
 #include "ProcessCorner.hpp"
 #include "RCXData.hh"
@@ -41,7 +41,7 @@ class ThicknessModel {
   void set_corner_data(const std::vector<RCXData::CornerData>* v) { corner_data_ = v; }
   void set_metal_density(const MetalDensity* v) { metal_density_ = v; }
 
-  void apply_thickness_variation(Size corner_idx, Size net_idx, EtchPool& etch_pool) const {
+  void apply_thickness_variation(Size corner_idx, Size net_idx, NetEtchProfile& etch_profile) const {
     const auto& corner = *(*corner_data_)[corner_idx].process_corner;
     const auto net_edges = topo_pool_->net_edges(net_idx);
     const Size edge_count = net_edges.size();
@@ -54,7 +54,7 @@ class ThicknessModel {
       auto* conductor_layer = corner.get_layers()->find_conductor_layer(process_layer_id);
       if (!conductor_layer) continue;
 
-      std::span<EtchInterval> edge_etch_intervals = etch_pool.edge_etch_interval_pool(edge_idx);
+      std::span<EdgeEtchInterval> edge_etch_intervals = etch_profile.edgeIntervals(edge_idx);
       if (edge_etch_intervals.empty()) continue;
 
       const PBTVCache pbtv_cache = build_pbtv_cache_(corner, *conductor_layer);
@@ -65,7 +65,7 @@ class ThicknessModel {
         fill_polynomial_terms_(effective_density, *pbtv_cache.density_orders, scratch.density_terms);
       }
 
-      for (EtchInterval& etch_interval : edge_etch_intervals) {
+      for (EdgeEtchInterval& etch_interval : edge_etch_intervals) {
         // Height (no variation: read directly from layer)
         etch_interval.height = static_cast<Micron>(conductor_layer->get_height());
 
@@ -97,7 +97,7 @@ class ThicknessModel {
   // POLYNOMIAL_BASED_THICKNESS_VARIATION
   // Fills d.thickness using the PBTV polynomial model.
   void model_thickness_(
-      EtchInterval& etch,
+      EdgeEtchInterval& etch,
       const ::itf::LayerConductor& cdt,
       const PBTVCache& pbtv_cache,
       PBTVScratch& scratch) const
@@ -129,8 +129,8 @@ class ThicknessModel {
     GtlRectI density_box;
 
     const GtlPointI center_point = edge.center();
-    const Dbu center_x_dbu = geom::X(center_point);
-    const Dbu center_y_dbu = geom::Y(center_point);
+    const Dbu center_x_dbu = geom::x(center_point);
+    const Dbu center_y_dbu = geom::y(center_point);
 
 
     for (const auto& [box_size, weight] : cdt.get_density_box_weighting_factor()) {

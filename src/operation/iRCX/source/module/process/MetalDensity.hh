@@ -67,7 +67,7 @@ class MetalDensity
 
  private:
   const TopoPool* topo_pool_{nullptr};
-  std::map<Size, GtlPolysetI> polyset_map_;
+  std::map<Size, GtlPolySetI> polyset_map_;
 };
 
 } // namespace ircx

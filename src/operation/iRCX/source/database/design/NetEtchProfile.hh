@@ -20,45 +20,53 @@
 #include <utility>
 #include <vector>
 
-#include "IntervalPool.hh"
+#include "GroupPool.hh"
 #include "Types.hh"
+
 namespace ircx {
 
-struct EtchInterval {
-  Micron a0 = 0; // interval start
-  Micron a1 = 0; // interval end
-  // change with etch
-  Micron center;
-  Micron width;
+struct EdgeEtchInterval {
+  Micron a0{0};  // interval start along the edge
+  Micron a1{0};  // interval end along the edge
 
-  Micron lo_spacing;
-  Micron hi_spacing;
+  Micron center{0};
+  Micron width{0};
 
-  Micron thickness;
-  Micron height;
+  Micron lo_spacing{kMaxMicron};
+  Micron hi_spacing{kMaxMicron};
+
+  Micron thickness{0};
+  Micron height{0};
 };
 
-class EtchPool { // of each net
+class NetEtchProfile
+{
  public:
-  EtchPool() = default;
-  ~EtchPool() = default;
+  NetEtchProfile() = default;
+  ~NetEtchProfile() = default;
 
-  void append_edge_etch_interval_pool(std::vector<EtchInterval> v) {
-    intervals_.append_edge_intervals(std::move(v));
+  void appendEdgeIntervals(std::vector<EdgeEtchInterval> intervals)
+  {
+    edge_interval_groups_.append_group(std::move(intervals));
   }
 
-  void clear() {
-    intervals_.clear();
+  std::span<const EdgeEtchInterval> edgeIntervals(Size edge_id) const
+  {
+    return edge_interval_groups_.group_items(edge_id);
   }
 
-  std::span<const EtchInterval> edge_etch_interval_pool(Size edge_id) const {
-    return intervals_.edge_intervals(edge_id);
+  std::span<EdgeEtchInterval> edgeIntervals(Size edge_id)
+  {
+    return edge_interval_groups_.group_items(edge_id);
   }
-  std::span<EtchInterval> edge_etch_interval_pool(Size edge_id) {
-    return intervals_.edge_intervals(edge_id);
+
+  void clear()
+  {
+    edge_interval_groups_.clear();
   }
 
  private:
-  IntervalPool<EtchInterval> intervals_;
+  GroupPool<EdgeEtchInterval> edge_interval_groups_;
 };
-}
+
+}  // namespace ircx

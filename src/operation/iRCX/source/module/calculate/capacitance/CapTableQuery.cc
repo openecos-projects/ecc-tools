@@ -14,38 +14,32 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
+#include "CapTableQuery.hh"
 
-#include <string>
-
-#include "CompareParasiticsConfig.hh"
+#include <algorithm>
 
 namespace ircx {
 
-#define RCX_API_INST (ircx::RCXAPI::getInst())
-
-class RCXAPI
+auto CapTableQuery::nearCap(const Str& below_layer,
+                            const Str& above_layer,
+                            Micron spacing) const -> parser::CapacitanceResult
 {
- public:
-  static auto getInst() -> RCXAPI&
-  {
-    static RCXAPI inst;
-    return inst;
+  const Micron lookup_dist = std::max<Micron>(spacing, 0.0);
+  if (above_layer.empty()) {
+    return cap_table_.queryTwoLayerCap(layer_name_, below_layer, lookup_dist);
   }
+  return cap_table_.queryThreeLayerCap(
+      layer_name_, below_layer, above_layer, lookup_dist);
+}
 
-  static auto init(const std::string& config_file) -> bool;
-  static auto run() -> bool;
-  static auto report() -> bool;
-  static auto compareParasitics(CompareParasiticsConfig config) -> bool;
-
-  RCXAPI(const RCXAPI& other) = delete;
-  RCXAPI(RCXAPI&& other) = delete;
-  auto operator=(const RCXAPI& other) -> RCXAPI& = delete;
-  auto operator=(RCXAPI&& other) -> RCXAPI& = delete;
-
- private:
-  RCXAPI();
-  ~RCXAPI() = default;
-};
+auto CapTableQuery::farthestCap(const Str& below_layer,
+                                const Str& above_layer) const -> parser::CapacitanceResult
+{
+  if (above_layer.empty()) {
+    return cap_table_.queryTwoLayerFarthestCap(layer_name_, below_layer);
+  }
+  return cap_table_.queryThreeLayerFarthestCap(
+      layer_name_, below_layer, above_layer);
+}
 
 }  // namespace ircx

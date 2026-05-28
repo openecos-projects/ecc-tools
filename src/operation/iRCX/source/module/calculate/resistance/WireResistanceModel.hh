@@ -16,29 +16,26 @@
 // ***************************************************************************************
 #pragma once
 
+#include <span>
+
+#include "NetEtchProfile.hh"
 #include "Types.hh"
+
+namespace itf {
+class LayerConductor;
+class ProcessCorner;
+}  // namespace itf
 
 namespace ircx {
 
-inline Str escapeSpefIdentifier(Str name)
+class WireResistanceModel
 {
-  if (name.find('.') == Str::npos) {
-    return name;
-  }
-
-  Str escaped_name;
-  escaped_name.reserve(name.size());
-  for (Size idx = 0; idx < name.size(); ++idx) {
-    const char current_char = name[idx];
-    const bool needs_escape =
-        current_char == '.' || current_char == '[' || current_char == ']';
-    if (needs_escape && (idx == 0 || name[idx - 1] != '\\')) {
-      escaped_name.push_back('\\');
-    }
-    escaped_name.push_back(current_char);
-  }
-
-  return escaped_name;
-}
+ public:
+  static auto calc(LineSegment<Micron> segment,
+                   std::span<const EdgeEtchInterval> edge_etch_intervals,
+                   const itf::ProcessCorner& corner,
+                   const itf::LayerConductor& layer,
+                   F64 operating_temperature) -> F64;
+};
 
 }  // namespace ircx

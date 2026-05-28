@@ -16,36 +16,14 @@
 // ***************************************************************************************
 #pragma once
 
-#include <string>
-
 #include "CompareParasiticsConfig.hh"
 
 namespace ircx {
 
-#define RCX_API_INST (ircx::RCXAPI::getInst())
-
-class RCXAPI
+class CompareParasiticsFlow
 {
  public:
-  static auto getInst() -> RCXAPI&
-  {
-    static RCXAPI inst;
-    return inst;
-  }
-
-  static auto init(const std::string& config_file) -> bool;
-  static auto run() -> bool;
-  static auto report() -> bool;
-  static auto compareParasitics(CompareParasiticsConfig config) -> bool;
-
-  RCXAPI(const RCXAPI& other) = delete;
-  RCXAPI(RCXAPI&& other) = delete;
-  auto operator=(const RCXAPI& other) -> RCXAPI& = delete;
-  auto operator=(RCXAPI&& other) -> RCXAPI& = delete;
-
- private:
-  RCXAPI();
-  ~RCXAPI() = default;
+  static auto run(CompareParasiticsConfig config) -> bool;
 };
 
 }  // namespace ircx

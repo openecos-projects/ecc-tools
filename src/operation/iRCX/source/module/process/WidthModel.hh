@@ -21,7 +21,7 @@
 
 #include "LayerTable.hh"
 #include "TopoPool.hh"
-#include "EtchPool.hh"
+#include "NetEtchProfile.hh"
 #include "ProcessCorner.hpp"
 #include "RCXData.hh"
 namespace ircx {
@@ -35,7 +35,7 @@ class WidthModel {
   void set_layer_table(const LayerTable* v) { layer_table_ = v; }
   void set_corner_data(const std::vector<RCXData::CornerData>* v) { corner_data_ = v; }
 
-  void apply_width_variation(Size corner_idx, Size net_idx, EtchPool& etch_pool) const {
+  void apply_width_variation(Size corner_idx, Size net_idx, NetEtchProfile& etch_profile) const {
     const auto& corner = *(*corner_data_)[corner_idx].process_corner;
     const auto net_edges = topo_pool_->net_edges(net_idx);
     const Size edge_count = net_edges.size();
@@ -48,8 +48,8 @@ class WidthModel {
       auto* conductor_layer = corner.get_layers()->find_conductor_layer(process_layer_id);
       if (!conductor_layer) continue;
 
-      std::span<EtchInterval> edge_etch_intervals = etch_pool.edge_etch_interval_pool(edge_idx);
-      for (EtchInterval& etch_interval : edge_etch_intervals) {
+      std::span<EdgeEtchInterval> edge_etch_intervals = etch_profile.edgeIntervals(edge_idx);
+      for (EdgeEtchInterval& etch_interval : edge_etch_intervals) {
         for (const auto& etch_table : conductor_layer->get_etch_vws_list()) { // TODO: 还不完善，只考虑了vws这种情况，甚至没考虑是否CAPACITIVE_ONLY
           // Low-side etch interval: lo_spacing is edge-to-edge in microns.
           Micron low_side_etch = 0;

@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "Types.hh"
-#include "EnvPool.hh"
+#include "NetEnvironment.hh"
 #include "Pixel.hh"
 #include "Track.hh"
 namespace ircx {
@@ -38,7 +38,7 @@ class Environment final
   void set_topo_pool(const TopoPool* v) { topo_pool_ = v; }
 
   void reset();
-  bool buildNetEnvPools(std::vector<EnvPool>& net_env_pools);
+  bool buildNetEnvironments(std::vector<NetEnvironment>& net_environments);
 
   Environment(const Environment&) = delete;
   Environment(Environment&&) = delete;

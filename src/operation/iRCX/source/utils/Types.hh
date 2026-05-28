@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+
 namespace ircx {
 
 // -------------------------
@@ -46,6 +47,11 @@ using Size = std::size_t;
 
 using Dbu    = I32;   // database unit
 using Micron = F64;   // micron unit
+
+inline auto dbu2micron(Dbu value, Dbu micron_to_dbu) -> Micron
+{
+  return static_cast<Micron>(value) / static_cast<Micron>(micron_to_dbu);
+}
 
 template <typename T>
 inline constexpr int BitNum = std::numeric_limits<T>::digits;
@@ -73,15 +79,15 @@ inline constexpr Size kSpecialNetId = kMaxSize - 1;
 // -------------------------
 
 // A wire segment projected onto one axis.
-//   is_horz : true → horizontal wire (fixed coord is Y, range is X)
-//   fixed   : the constant coordinate (Y for horz, X for vert)
-//   a0, a1  : start / end along the wire direction
+//   is_horz : true -> horizontal wire (coord is Y, range is X)
+//   coord   : the constant coordinate (Y for horz, X for vert)
+//   lo, hi  : range along the wire direction
 template <typename T = Dbu>
 struct LineSegment {
   bool is_horz{false};
-  T fixed{};
-  T a0{};
-  T a1{};
+  T coord{};
+  T lo{};
+  T hi{};
 };
 
 using LineSegmentI = LineSegment<Dbu>;
@@ -96,22 +102,17 @@ namespace gtl = boost::polygon;
 // -------------------------
 // Geometry type aliases
 // -------------------------
-using Point   = bg::model::point<Dbu, 2, bg::cs::cartesian>;
-using Box     = bg::model::box<Point>;
-using Polygon = bg::model::polygon<Point>;
+using BgPointI   = bg::model::point<Dbu, 2, bg::cs::cartesian>;
+using BgBoxI     = bg::model::box<BgPointI>;
+using BgPolygonI = bg::model::polygon<BgPointI>;
 
 using GtlPointI   = gtl::point_data<Dbu>;
 using GtlRectI    = gtl::rectangle_data<Dbu>;
 using GtlPolyI    = gtl::polygon_90_data<Dbu>;
-using GtlPolysetI = gtl::polygon_90_set_data<Dbu>;
+using GtlPolySetI = gtl::polygon_90_set_data<Dbu>;
 
 using GtlPointF   = gtl::point_data<F64>;
 using GtlRectF    = gtl::rectangle_data<F64>;
 using GtlPolyF    = gtl::polygon_90_data<F64>;
-using GtlPolysetF = gtl::polygon_90_set_data<F64>;
-
-using Dir1d = gtl::direction_1d_enum;
-using Dir2d = gtl::direction_2d_enum;
-using Ori2d = gtl::orientation_2d_enum;
-
+using GtlPolySetF = gtl::polygon_90_set_data<F64>;
 }  // namespace ircx

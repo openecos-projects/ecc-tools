@@ -16,37 +16,57 @@
 // ***************************************************************************************
 #pragma once
 
+#include <vector>
+
 #include "Types.hh"
 
 namespace ircx {
 
-#define RCX_FLOW_INST (ircx::Flow::getInst())
+struct CornerNetId
+{
+  Size corner_idx{kMaxSize};
+  Size net_idx{kMaxSize};
+};
 
-class Flow
+template <typename T>
+class CornerNetPool
 {
  public:
-  static auto getInst() -> Flow&
+  CornerNetPool() = default;
+  ~CornerNetPool() = default;
+
+  void init(Size corner_num, Size net_num)
   {
-    static Flow inst;
-    return inst;
+    corner_num_ = corner_num;
+    net_num_ = net_num;
+    items_.clear();
+    items_.resize(corner_num_ * net_num_);
   }
 
-  auto run() -> bool;
+  void clear()
+  {
+    corner_num_ = 0;
+    net_num_ = 0;
+    items_.clear();
+  }
 
-  auto adaptDB() -> bool;
-  auto extract() -> bool;
-  auto report() -> bool;
+  bool empty() const { return items_.empty(); }
+  Size corner_num() const { return corner_num_; }
+  Size net_num() const { return net_num_; }
+  Size size() const { return items_.size(); }
 
-  void reset();
-
-  Flow(const Flow& other) = delete;
-  Flow(Flow&& other) = delete;
-  auto operator=(const Flow& other) -> Flow& = delete;
-  auto operator=(Flow&& other) -> Flow& = delete;
+  T& at(CornerNetId id) { return items_.at(index(id)); }
+  const T& at(CornerNetId id) const { return items_.at(index(id)); }
 
  private:
-  Flow();
-  ~Flow();
+  Size index(CornerNetId id) const
+  {
+    return id.corner_idx * net_num_ + id.net_idx;
+  }
+
+  Size corner_num_{0};
+  Size net_num_{0};
+  std::vector<T> items_;
 };
 
 }  // namespace ircx

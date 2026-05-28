@@ -78,7 +78,7 @@ auto Extraction::buildEnvironment() -> bool
     env.set_layout_data(&data.layout());
     env.set_topo_pool(&data.topo_pool());
 
-    if (!env.buildNetEnvPools(data.net_env_pools())) {
+    if (!env.buildNetEnvironments(data.net_env_pools())) {
       return false;
     }
 
@@ -108,13 +108,13 @@ auto Extraction::buildProcessVariation() -> bool
 
     ProcessVariation pv;
     pv.set_layout_data(&data.layout());
-    pv.set_net_env_pools(&data.net_env_pools());
+    pv.set_net_environments(&data.net_env_pools());
     pv.set_corner_net_etch_pools(&data.corner_net_etch_pools());
     pv.set_topo_pool(&data.topo_pool());
     pv.set_layer_table(&data.layer_table());
     pv.set_corner_data(&corner_data);
 
-    if (!pv.buildEtchPools()) {
+    if (!pv.buildEtchProfiles()) {
       return false;
     }
 
@@ -165,7 +165,7 @@ auto Extraction::calculateParasitics() -> bool
 
     CapacitanceCalc cap_calc;
     cap_calc.set_layout_data(&data.layout());
-    cap_calc.set_net_env_pools(&data.net_env_pools());
+    cap_calc.set_net_environments(&data.net_env_pools());
     cap_calc.set_corner_net_etch_pools(&data.corner_net_etch_pools());
     cap_calc.set_topo_pool(&data.topo_pool());
     cap_calc.set_layer_table(&data.layer_table());

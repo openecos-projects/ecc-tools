@@ -16,23 +16,28 @@
 // ***************************************************************************************
 #pragma once
 
+#include "CapTable.hpp"
 #include "Types.hh"
 
 namespace ircx {
 
-inline Micron dbuToMicronScale(Dbu micron_to_dbu)
+class CapTableQuery
 {
-  return Micron(1.0) / static_cast<Micron>(micron_to_dbu);
-}
+ public:
+  CapTableQuery(const parser::CapTable& cap_table, const Str& layer_name)
+      : cap_table_(cap_table), layer_name_(layer_name)
+  {
+  }
 
-inline Micron dbuToMicron(Dbu value, Dbu micron_to_dbu)
-{
-  return static_cast<Micron>(value) * dbuToMicronScale(micron_to_dbu);
-}
+  auto nearCap(const Str& below_layer,
+               const Str& above_layer,
+               Micron spacing) const -> parser::CapacitanceResult;
+  auto farthestCap(const Str& below_layer,
+                   const Str& above_layer) const -> parser::CapacitanceResult;
 
-inline Dbu micronToDbu(Micron value, Dbu micron_to_dbu)
-{
-  return static_cast<Dbu>(value * static_cast<Micron>(micron_to_dbu));
-}
+ private:
+  const parser::CapTable& cap_table_;
+  const Str& layer_name_;
+};
 
 }  // namespace ircx

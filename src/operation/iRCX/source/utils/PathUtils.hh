@@ -34,7 +34,7 @@ inline auto abs(const std::filesystem::path& path) -> std::filesystem::path
 
 inline auto resolve(const std::filesystem::path& base_dir, std::string_view raw_path) -> Str
 {
-  const Str trimmed_path = trimCopy(raw_path);
+  const Str trimmed_path = string::trim(raw_path);
   if (trimmed_path.empty()) {
     return "";
   }
@@ -47,10 +47,10 @@ inline auto resolve(const std::filesystem::path& base_dir, std::string_view raw_
   return path.lexically_normal().string();
 }
 
-inline auto requireFile(const std::filesystem::path& file, std::string_view field_name) -> bool
+inline auto require_file(const std::filesystem::path& file, std::string_view field_name) -> bool
 {
   const Str file_string = file.string();
-  if (!ensureNonEmpty(file_string, field_name)) {
+  if (!string::ensure_non_empty(file_string, field_name)) {
     return false;
   }
 
@@ -65,7 +65,7 @@ inline auto requireFile(const std::filesystem::path& file, std::string_view fiel
 inline auto mkdirs(const std::filesystem::path& dir, std::string_view field_name) -> bool
 {
   const Str dir_string = dir.string();
-  if (!ensureNonEmpty(dir_string, field_name)) {
+  if (!string::ensure_non_empty(dir_string, field_name)) {
     return false;
   }
 

@@ -1,5 +1,4 @@
 set(IRCX_FLOW_SRC
-  Flow.cc
   setup/Setup.cc
 )
 
@@ -12,12 +11,9 @@ target_link_libraries(ircx_flow
     ircx_database_design
     ircx_headers
     ircx_mapping
-    OpenMP::OpenMP_CXX
   PRIVATE
     idm
     ircx_database_io
-    ircx_flow_extraction
-    ircx_flow_report
     itf_builder
     log
 )

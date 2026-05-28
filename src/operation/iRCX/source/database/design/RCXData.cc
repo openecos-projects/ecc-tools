@@ -25,8 +25,8 @@ namespace ircx {
 
 RCXData::CornerData::CornerData() = default;
 RCXData::CornerData::~CornerData() = default;
-RCXData::CornerData::CornerData(CornerData&&) noexcept = default;
-RCXData::CornerData& RCXData::CornerData::operator=(CornerData&&) noexcept = default;
+RCXData::CornerData::CornerData(CornerData&&) = default;
+RCXData::CornerData& RCXData::CornerData::operator=(CornerData&&) = default;
 
 RCXData::~RCXData() = default;
 

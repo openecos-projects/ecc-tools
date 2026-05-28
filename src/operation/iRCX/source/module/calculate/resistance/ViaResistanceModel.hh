@@ -16,36 +16,25 @@
 // ***************************************************************************************
 #pragma once
 
-#include <string>
+#include "Types.hh"
 
-#include "CompareParasiticsConfig.hh"
+namespace itf {
+class LayerVia;
+class ProcessCorner;
+}  // namespace itf
 
 namespace ircx {
 
-#define RCX_API_INST (ircx::RCXAPI::getInst())
+class TopoEdge;
 
-class RCXAPI
+class ViaResistanceModel
 {
  public:
-  static auto getInst() -> RCXAPI&
-  {
-    static RCXAPI inst;
-    return inst;
-  }
-
-  static auto init(const std::string& config_file) -> bool;
-  static auto run() -> bool;
-  static auto report() -> bool;
-  static auto compareParasitics(CompareParasiticsConfig config) -> bool;
-
-  RCXAPI(const RCXAPI& other) = delete;
-  RCXAPI(RCXAPI&& other) = delete;
-  auto operator=(const RCXAPI& other) -> RCXAPI& = delete;
-  auto operator=(RCXAPI&& other) -> RCXAPI& = delete;
-
- private:
-  RCXAPI();
-  ~RCXAPI() = default;
+  static auto calc(const TopoEdge& edge,
+                   const itf::ProcessCorner& corner,
+                   const itf::LayerVia& layer,
+                   Micron dbu_to_micron,
+                   F64 operating_temperature) -> F64;
 };
 
 }  // namespace ircx

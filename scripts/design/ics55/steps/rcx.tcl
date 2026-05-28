@@ -49,7 +49,10 @@ step_update_flow_config $flow_config $config_dir
 step_update_db_config $db_config $input_def $input_verilog $output_dir
 step_prepare_configs [list $flow_config $db_config $rcx_config] $workspace_root $pdk_root
 set rcx_data [step_parse_rcx_config $rcx_config]
+set rcx_thread_num [dict get $rcx_data thread_num]
 set rcx_output_dir [dict get $rcx_data output]
+set rcx_mapping_file [dict get $rcx_data mapping_file]
+set rcx_corners [dict get $rcx_data corners]
 
 puts "=============================="
 puts "Running $step_name"
@@ -57,6 +60,7 @@ puts "Workspace: $workspace_root"
 puts "PDK: $pdk_root"
 step_print_path "rcx_config" $rcx_config
 step_print_path "rcx_output_dir" $rcx_output_dir
+step_print_path "mapping_file" $rcx_mapping_file
 step_print_list "lib_files" $lib_files
 
 if {$RTL2GDS == 0} {

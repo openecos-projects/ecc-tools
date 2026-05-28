@@ -50,9 +50,9 @@ class Track
   using OverlapWidenFunc = std::function<Dbu(const OverlapWidenContext&)>;
 
  private:
-  struct EnvInterval {
-    Dbu a0;
-    Dbu a1;
+  struct RemainingInterval {
+    Dbu a0{0};
+    Dbu a1{0};
   };
 
   struct SearchContext {
@@ -76,20 +76,20 @@ class Track
       if (lhs == nullptr || rhs == nullptr) {
         return lhs < rhs;
       }
-      if (lhs->fixed() != rhs->fixed()) {
-        return lhs->fixed() < rhs->fixed();
+      if (lhs->coord() != rhs->coord()) {
+        return lhs->coord() < rhs->coord();
       }
       return lhs < rhs;
     }
 
-    bool operator()(const TopoEdge* lhs, Dbu rhs_fixed) const
+    bool operator()(const TopoEdge* lhs, Dbu rhs_coord) const
     {
-      return lhs->fixed() < rhs_fixed;
+      return lhs->coord() < rhs_coord;
     }
 
-    bool operator()(Dbu lhs_fixed, const TopoEdge* rhs) const
+    bool operator()(Dbu lhs_coord, const TopoEdge* rhs) const
     {
-      return lhs_fixed < rhs->fixed();
+      return lhs_coord < rhs->coord();
     }
   };
 
@@ -136,11 +136,11 @@ class Track
 
   void addEdge(const TopoEdge& edge)
   {
-    Dbu a0 = edge.a0();
-    Dbu a1 = edge.a1();
-    ircx::normalizeInterval(a0, a1);
+    Dbu a0 = edge.lo();
+    Dbu a1 = edge.hi();
+    ircx::interval::normalize(a0, a1);
 
-    const Dbu track_idx = coordToTrack(edge.fixed());
+    const Dbu track_idx = coordToTrack(edge.coord());
     const Dbu bucket_idx0 = coordToBucket(a0);
     const Dbu bucket_idx1 = coordToBucket(a1 - 1);
 
@@ -156,11 +156,11 @@ class Track
 
   // search_track_num > 0:
   //   search upward for search_track_num tracks, including the track containing coord;
-  //   every returned non-null edge must satisfy edge->fixed() > coord
+  //   every returned non-null edge must satisfy edge->coord() > coord
   //
   // search_track_num < 0:
   //   search downward for |search_track_num| tracks, including the track containing coord;
-  //   every returned non-null edge must satisfy edge->fixed() < coord
+  //   every returned non-null edge must satisfy edge->coord() < coord
   //
   // interval semantics: open interval (a0, a1)
   //
@@ -199,14 +199,14 @@ class Track
       return result;
     }
 
-    Dbu a0 = line_seg.a0;
-    Dbu a1 = line_seg.a1;
-    ircx::normalizeInterval(a0, a1);
+    Dbu a0 = line_seg.lo;
+    Dbu a1 = line_seg.hi;
+    ircx::interval::normalize(a0, a1);
     if (!intervalValid({a0, a1})) {
       return result;
     }
 
-    const Dbu coord = line_seg.fixed;
+    const Dbu coord = line_seg.coord;
     const Dbu query_a0 = a0;
     const Dbu query_a1 = a1;
 
@@ -216,7 +216,7 @@ class Track
       return result;
     }
 
-    std::vector<EnvInterval> remaining;
+    std::vector<RemainingInterval> remaining;
     remaining.push_back({query_a0, query_a1});
 
     const int step = (search_track_num > 0) ? 1 : -1;
@@ -245,14 +245,14 @@ class Track
   }
 
  private:
-  static bool intervalValid(const EnvInterval& iv) { return iv.a0 < iv.a1; }
+  static bool intervalValid(const RemainingInterval& iv) { return iv.a0 < iv.a1; }
 
   static bool edgeIsInSearchDirection(const TopoEdge* edge, const SearchContext& ctx)
   {
     if (edge == nullptr) {
       return false;
     }
-    return (ctx.step > 0) ? (edge->fixed() > ctx.coord) : (edge->fixed() < ctx.coord);
+    return (ctx.step > 0) ? (edge->coord() > ctx.coord) : (edge->coord() < ctx.coord);
   }
 
   static TrackOverlap applyWidenAndClip(const TrackOverlap& ov,
@@ -285,7 +285,7 @@ class Track
   }
 
   EdgeSet collectCandidateEdgesOnTrack(Dbu track_idx,
-                                       const std::vector<EnvInterval>& remaining) const
+                                       const std::vector<RemainingInterval>& remaining) const
   {
     EdgeSet ordered;
     if (!trackValid(track_idx)) {
@@ -312,18 +312,18 @@ class Track
     return ordered;
   }
 
-  bool edgeHitsRemaining(const TopoEdge* edge, const std::vector<EnvInterval>& remaining) const
+  bool edgeHitsRemaining(const TopoEdge* edge, const std::vector<RemainingInterval>& remaining) const
   {
     if (edge == nullptr) {
       return false;
     }
 
-    Dbu edge_a0 = edge->a0();
-    Dbu edge_a1 = edge->a1();
-    ircx::normalizeInterval(edge_a0, edge_a1);
+    Dbu edge_a0 = edge->lo();
+    Dbu edge_a1 = edge->hi();
+    ircx::interval::normalize(edge_a0, edge_a1);
 
     for (const auto& iv : remaining) {
-      if (intervalOverlaps(edge_a0, edge_a1, iv.a0, iv.a1)) {
+      if (ircx::interval::overlaps(edge_a0, edge_a1, iv.a0, iv.a1)) {
         return true;
       }
     }
@@ -332,7 +332,7 @@ class Track
 
   std::vector<TrackOverlap> computeEdgeOverlaps(Dbu track_idx,
                                                 const TopoEdge* edge,
-                                                const std::vector<EnvInterval>& remaining,
+                                                const std::vector<RemainingInterval>& remaining,
                                                 const SearchContext& ctx) const
   {
     std::vector<TrackOverlap> overlaps;
@@ -340,19 +340,20 @@ class Track
       return overlaps;
     }
 
-    Dbu edge_a0 = edge->a0();
-    Dbu edge_a1 = edge->a1();
-    ircx::normalizeInterval(edge_a0, edge_a1);
+    Dbu edge_a0 = edge->lo();
+    Dbu edge_a1 = edge->hi();
+    ircx::interval::normalize(edge_a0, edge_a1);
 
     for (const auto& iv : remaining) {
-      if (!intervalOverlaps(edge_a0, edge_a1, iv.a0, iv.a1)) {
+      if (!ircx::interval::overlaps(edge_a0, edge_a1, iv.a0, iv.a1)) {
         continue;
       }
 
+      const auto overlap = ircx::interval::intersection(edge_a0, edge_a1, iv.a0, iv.a1);
       TrackOverlap ov;
-      ov.a0 = intervalOverlapBegin(edge_a0, edge_a1, iv.a0, iv.a1);
-      ov.a1 = intervalOverlapEnd(edge_a0, edge_a1, iv.a0, iv.a1);
-      ov.sp = std::abs(edge->fixed() - ctx.coord);
+      ov.a0 = overlap.a0;
+      ov.a1 = overlap.a1;
+      ov.sp = std::abs(edge->coord() - ctx.coord);
       ov.edge = edge;
 
       if (ov.a0 < ov.a1) {
@@ -375,7 +376,7 @@ class Track
   // The key invariant is that `remaining` only shrinks, so an edge that does not
   // belong to the initial candidate set can never become relevant later.
   void searchWithinTrack(Dbu track_idx,
-                        std::vector<EnvInterval> remaining,
+                        std::vector<RemainingInterval> remaining,
                         std::vector<TrackOverlap>& result,
                         const SearchContext& ctx) const
   {
@@ -402,7 +403,7 @@ class Track
 
       auto next_remaining = remaining;
       for (const auto& ov : overlaps) {
-        next_remaining = ircx::subtractInterval(next_remaining, ov.a0, ov.a1);
+        next_remaining = ircx::interval::subtract(next_remaining, ov.a0, ov.a1);
         if (next_remaining.empty()) {
           break;
         }
@@ -434,9 +435,9 @@ class Track
   //   3) subtract those committed overlap pieces from remaining;
   //   4) recurse to the next track;
   //   5) return whatever interval is still uncovered after all requested tracks are processed.
-  std::vector<EnvInterval> searchAcrossTracks(Dbu track_idx,
+  std::vector<RemainingInterval> searchAcrossTracks(Dbu track_idx,
                                               Dbu tracks_left,
-                                              std::vector<EnvInterval> remaining,
+                                              std::vector<RemainingInterval> remaining,
                                               std::vector<TrackOverlap>& result,
                                               const SearchContext& ctx) const
   {
@@ -458,7 +459,7 @@ class Track
       }
 
       result.push_back(ov);
-      remaining = ircx::subtractInterval(remaining, ov.a0, ov.a1);
+      remaining = ircx::interval::subtract(remaining, ov.a0, ov.a1);
       if (remaining.empty()) {
         return remaining;
       }

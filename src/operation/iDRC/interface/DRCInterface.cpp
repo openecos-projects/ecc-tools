@@ -894,10 +894,13 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
   std::vector<idb::IdbNet*>& idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list();
   std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
   std::vector<idb::IdbPin*>& idb_io_pin_list = dmInst->get_idb_def_service()->get_design()->get_io_pin_list()->get_pin_list();
+  idb::IdbDesign* idb_design = dmInst->get_idb_def_service()->get_design();
   std::map<idb::IdbPin*, int32_t> special_pin_net_idx_map;
+  std::map<idb::IdbSpecialNet*, int32_t> special_net_idx_map;
   int32_t regular_net_num = static_cast<int32_t>(idb_net_list.size());
   for (size_t i = 0; i < idb_special_net_list.size(); ++i) {
     int32_t special_net_id = regular_net_num + static_cast<int32_t>(i);
+    special_net_idx_map[idb_special_net_list[i]] = special_net_id;
     for (idb::IdbPin* idb_pin : idb_special_net_list[i]->get_instance_pin_list()->get_pin_list()) {
       special_pin_net_idx_map[idb_pin] = special_net_id;
     }
@@ -910,16 +913,29 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
     if (it != special_pin_net_idx_map.end()) {
       return it->second;
     }
+    if (!idb_pin->is_io_pin()) {
+      idb::IdbSpecialNet* special_net = idb_design->findSpecialNetForInstancePin(idb_pin);
+      auto special_it = special_net_idx_map.find(special_net);
+      if (special_it != special_net_idx_map.end()) {
+        return special_it->second;
+      }
+    }
     if (!isSkipping(idb_pin->get_net())) {
       return static_cast<int32_t>(idb_pin->get_net()->get_id());
     }
     return -1;
+  };
+  auto should_skip_instance_shape = [](idb::IdbInstance* idb_instance) {
+    return idb_instance->is_unplaced() || idb_instance->get_status() == idb::IdbPlacementStatus::kNone;
   };
 
   size_t total_env_shape_num = 0;
   {
     // instance
     for (idb::IdbInstance* idb_instance : idb_instance_list) {
+      if (should_skip_instance_shape(idb_instance)) {
+        continue;
+      }
       // instance obs
       for (idb::IdbLayerShape* obs_box : idb_instance->get_obs_box_list()) {
         total_env_shape_num += obs_box->get_rect_list().size();
@@ -947,6 +963,9 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
   {
     // instance
     for (idb::IdbInstance* idb_instance : idb_instance_list) {
+      if (should_skip_instance_shape(idb_instance)) {
+        continue;
+      }
       // instance obs
       for (idb::IdbLayerShape* obs_box : idb_instance->get_obs_box_list()) {
         for (idb::IdbRect* rect : obs_box->get_rect_list()) {

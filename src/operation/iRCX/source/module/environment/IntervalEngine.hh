@@ -22,7 +22,7 @@
 
 #include "Types.hh"
 #include "TopoPool.hh"
-#include "EnvPool.hh"
+#include "NetEnvironment.hh"
 #include "log/Log.hh"
 namespace ircx {
 
@@ -33,7 +33,7 @@ class TrackOverlapMerge
                Dbu query_a1,
                const std::vector<TrackOverlap>& dn_in,
                const std::vector<TrackOverlap>& up_in,
-               std::vector<EnvInterval>& out) const
+               std::vector<EdgeEnvironmentInterval>& out) const
   {
     if (query_a0 > query_a1) {
       std::swap(query_a0, query_a1);
@@ -140,7 +140,7 @@ class TrackOverlapMerge
     }
   }
 
-  static void emitOutput(std::vector<EnvInterval>& out,
+  static void emitOutput(std::vector<EdgeEnvironmentInterval>& out,
                          Dbu a0,
                          Dbu a1,
                          const TrackOverlap& dn,
@@ -165,7 +165,7 @@ class TrackOverlapMerge
       return;
     }
 
-    EnvInterval iv;
+    EdgeEnvironmentInterval iv;
     iv.a0 = a0;
     iv.a1 = a1;
     iv.lo_adjacent = l_edge;
@@ -177,7 +177,7 @@ class TrackOverlapMerge
 
   static void mergeTwoSides(const std::vector<TrackOverlap>& dn,
                             const std::vector<TrackOverlap>& up,
-                            std::vector<EnvInterval>& out)
+                            std::vector<EdgeEnvironmentInterval>& out)
   {
     out.clear();
     if (dn.empty() || up.empty()) {

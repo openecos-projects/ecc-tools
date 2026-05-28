@@ -22,8 +22,9 @@
 #include "log/Log.hh"
 
 namespace ircx {
+namespace string {
 
-inline Str trimCopy(std::string_view value)
+inline auto trim(std::string_view value) -> Str
 {
   const auto first = value.find_first_not_of(" \t\n\r\f\v");
   if (first == std::string_view::npos) {
@@ -34,7 +35,7 @@ inline Str trimCopy(std::string_view value)
   return Str(value.substr(first, last - first + 1));
 }
 
-inline bool ensureNonEmpty(std::string_view value, std::string_view field_name)
+inline auto ensure_non_empty(std::string_view value, std::string_view field_name) -> bool
 {
   if (!value.empty()) {
     return true;
@@ -44,4 +45,26 @@ inline bool ensureNonEmpty(std::string_view value, std::string_view field_name)
   return false;
 }
 
+inline auto spef_escape_identifier(Str name) -> Str
+{
+  if (name.find('.') == Str::npos) {
+    return name;
+  }
+
+  Str escaped_name;
+  escaped_name.reserve(name.size());
+  for (Size idx = 0; idx < name.size(); ++idx) {
+    const char current_char = name[idx];
+    const bool needs_escape =
+        current_char == '.' || current_char == '[' || current_char == ']';
+    if (needs_escape && (idx == 0 || name[idx - 1] != '\\')) {
+      escaped_name.push_back('\\');
+    }
+    escaped_name.push_back(current_char);
+  }
+
+  return escaped_name;
+}
+
+}  // namespace string
 }  // namespace ircx

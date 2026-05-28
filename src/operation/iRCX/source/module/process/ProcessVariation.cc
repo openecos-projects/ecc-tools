@@ -20,7 +20,7 @@
 #include "ProcessVariation.hh"
 #include "TopoPool.hh"
 #include "ThicknessModel.hh"
-#include "UnitUtils.hh"
+#include "Types.hh"
 #include "WidthModel.hh"
 #include "log/Log.hh"
 namespace ircx {
@@ -28,7 +28,7 @@ namespace ircx {
 void ProcessVariation::reset()
 {
   layout_data_ = nullptr;
-  net_env_pools_ = nullptr;
+  net_environments_ = nullptr;
   corner_net_etch_pools_ = nullptr;
   layer_table_ = nullptr;
   topo_pool_ = nullptr;
@@ -38,18 +38,18 @@ void ProcessVariation::reset()
   net_num_ = 0;
 }
 
-bool ProcessVariation::buildEtchPools()
+bool ProcessVariation::buildEtchProfiles()
 {
   if (!layout_data_) {
     LOG_ERROR << "build process variation failed: LayoutData not initialized.";
     return false;
   }
-  if (!net_env_pools_) {
-    LOG_ERROR << "build process variation failed: environment pools not set.";
+  if (!net_environments_) {
+    LOG_ERROR << "build process variation failed: net environments not set.";
     return false;
   }
   if (!corner_net_etch_pools_) {
-    LOG_ERROR << "build process variation failed: etch pools not set.";
+    LOG_ERROR << "build process variation failed: etch profiles not set.";
     return false;
   }
   if (!layer_table_) {
@@ -75,7 +75,6 @@ bool ProcessVariation::buildEtchPools()
   initMetalDensity();
   initEtchIntervals();
 
-
   WidthModel wm;
   wm.set_topo_pool(topo_pool_);
   wm.set_layer_table(layer_table_);
@@ -86,7 +85,7 @@ bool ProcessVariation::buildEtchPools()
       wm.apply_width_variation(
           corner_idx,
           net_idx,
-          (*corner_net_etch_pools_)[corner_net_pool_index(corner_idx, net_idx)]);
+          corner_net_etch_pools_->at({corner_idx, net_idx}));
     }
   }
 
@@ -103,7 +102,7 @@ bool ProcessVariation::buildEtchPools()
       tm.apply_thickness_variation(
           corner_idx,
           net_idx,
-          (*corner_net_etch_pools_)[corner_net_pool_index(corner_idx, net_idx)]);
+          corner_net_etch_pools_->at({corner_idx, net_idx}));
     }
   }
 
@@ -120,12 +119,11 @@ void ProcessVariation::initEtchIntervals()
 {
   net_num_ = layout_data_->regular_net_count();
   corner_num_ = corner_data_->size();
-  corner_net_etch_pools_->clear();
-  corner_net_etch_pools_->resize(net_num_ * corner_num_);
+  corner_net_etch_pools_->init(corner_num_, net_num_);
 
-  const std::vector<EnvPool>& net_env_pools = *net_env_pools_;
+  const std::vector<NetEnvironment>& net_environments = *net_environments_;
 
-  Micron dbu_to_micron = dbuToMicronScale(layout_data_->micron_to_dbu);
+  Micron dbu_to_micron = dbu2micron(1, layout_data_->micron_to_dbu);
 
   for (Size corner_idx = 0; corner_idx < corner_num_; ++corner_idx) {
     #pragma omp parallel for schedule(dynamic)
@@ -133,32 +131,32 @@ void ProcessVariation::initEtchIntervals()
       const auto net_edges = topo_pool_->net_edges(net_idx);
       const Size edge_count = net_edges.size();
 
-      EtchPool& etch_pool = (*corner_net_etch_pools_)[corner_net_pool_index(corner_idx, net_idx)];
-      const EnvPool& env_pool = net_env_pools[net_idx];
+      NetEtchProfile& etch_profile = corner_net_etch_pools_->at({corner_idx, net_idx});
+      const NetEnvironment& environment = net_environments[net_idx];
 
       for (Size edge_idx = 0; edge_idx < edge_count; ++edge_idx) {
         const TopoEdge& edge = net_edges[edge_idx];
 
         if (edge.is_via()) {
-          etch_pool.append_edge_etch_interval_pool({});  // placeholder to keep index aligned with TopoPool
+          etch_profile.appendEdgeIntervals({});  // placeholder to keep index aligned with TopoPool
           continue;
         }
 
-        const std::span<const EnvInterval> env_intervals =
-            env_pool.edge_env_interval_pool(edge_idx);
+        const std::span<const EdgeEnvironmentInterval> env_intervals =
+            environment.edgeIntervals(edge_idx);
         const Size interval_count = env_intervals.size();
-        std::vector<EtchInterval> etch_intervals(interval_count);
+        std::vector<EdgeEtchInterval> etch_intervals(interval_count);
 
         for (Size interval_idx = 0; interval_idx < interval_count; ++interval_idx) {
-          const EnvInterval& env_interval = env_intervals[interval_idx];
-          EtchInterval& etch_interval = etch_intervals[interval_idx];
+          const EdgeEnvironmentInterval& env_interval = env_intervals[interval_idx];
+          EdgeEtchInterval& etch_interval = etch_intervals[interval_idx];
 
           etch_interval.a0     = env_interval.a0 * dbu_to_micron;
           etch_interval.a1     = env_interval.a1 * dbu_to_micron;
-          etch_interval.center = edge.fixed() * dbu_to_micron;
+          etch_interval.center = edge.coord() * dbu_to_micron;
           etch_interval.width  = edge.width() * dbu_to_micron;
 
-          // convert center-to-center spacing (EnvInterval) to edge-to-edge gap (EtchInterval)
+          // convert center-to-center spacing (EdgeEnvironmentInterval) to edge-to-edge gap (EdgeEtchInterval)
           if (env_interval.lo_adjacent)
             etch_interval.lo_spacing =
                 (env_interval.lo_spacing - env_interval.lo_adjacent->half_width() - edge.half_width())
@@ -172,7 +170,7 @@ void ProcessVariation::initEtchIntervals()
           etch_interval.height    = 0;
         }
 
-        etch_pool.append_edge_etch_interval_pool(std::move(etch_intervals));
+        etch_profile.appendEdgeIntervals(std::move(etch_intervals));
       }
     }
   }

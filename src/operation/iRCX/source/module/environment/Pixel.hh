@@ -82,10 +82,10 @@ class Pixel
 
     const GtlRectI& rect = edge.shape();
 
-    Dbu x0 = geom::MinX(rect);
-    Dbu y0 = geom::MinY(rect);
-    Dbu x1 = geom::MaxX(rect);
-    Dbu y1 = geom::MaxY(rect);
+    Dbu x0 = geom::min_x(rect);
+    Dbu y0 = geom::min_y(rect);
+    Dbu x1 = geom::max_x(rect);
+    Dbu y1 = geom::max_y(rect);
 
     if (x0 >= x1 || y0 >= y1) {
       return;
@@ -116,11 +116,11 @@ class Pixel
     }
 
     bool is_horz = line_seg.is_horz;
-    Dbu fixed = line_seg.fixed;
-    Dbu a0 = line_seg.a0;
-    Dbu a1 = line_seg.a1;
+    Dbu fixed = line_seg.coord;
+    Dbu a0 = line_seg.lo;
+    Dbu a1 = line_seg.hi;
 
-    ircx::normalizeInterval(a0, a1);
+    ircx::interval::normalize(a0, a1);
 
     if (is_horz) {
       const Dbu fixed_y_idx = coordToYIdx(fixed);
@@ -193,8 +193,8 @@ class Pixel
 
       // Each occupied idx is a sample on the pixel lattice. The effective
       // overlap span is bounded by the midpoints of neighboring samples.
-      const Dbu lo = midpoint(idx_to_coord(start_idx), idx_to_coord(start_idx + 1));
-      const Dbu hi = midpoint(idx_to_coord(end_idx_exclusive - 1), idx_to_coord(end_idx_exclusive));
+      const Dbu lo = ircx::interval::midpoint(idx_to_coord(start_idx), idx_to_coord(start_idx + 1));
+      const Dbu hi = ircx::interval::midpoint(idx_to_coord(end_idx_exclusive - 1), idx_to_coord(end_idx_exclusive));
 
       PixelOverlap seq = clamp_sequence_bounds(lo, hi);
       if (!seq.empty()) {

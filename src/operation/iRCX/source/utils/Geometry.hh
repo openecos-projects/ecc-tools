@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "Types.hh"
+
 namespace ircx {
 namespace geom {
 
@@ -83,8 +84,8 @@ struct point_traits {
 template <class T>
 struct point_traits<gtl::point_data<T>> {
   using coord_t = T;
-  static coord_t x(const gtl::point_data<T>& p) { return p.x(); }
-  static coord_t y(const gtl::point_data<T>& p) { return p.y(); }
+  static auto x(const gtl::point_data<T>& p) -> coord_t { return p.x(); }
+  static auto y(const gtl::point_data<T>& p) -> coord_t { return p.y(); }
 };
 
 // bg::model::point<T, Dim, Cs>
@@ -92,8 +93,14 @@ template <class T, std::size_t Dim, class Cs>
 struct point_traits<bg::model::point<T, Dim, Cs>> {
   static_assert(Dim >= 2, "Boost.Geometry point dimension must be >= 2");
   using coord_t = T;
-  static coord_t x(const bg::model::point<T, Dim, Cs>& p) { return bg::get<0>(p); }
-  static coord_t y(const bg::model::point<T, Dim, Cs>& p) { return bg::get<1>(p); }
+  static auto x(const bg::model::point<T, Dim, Cs>& p) -> coord_t
+  {
+    return bg::get<0>(p);
+  }
+  static auto y(const bg::model::point<T, Dim, Cs>& p) -> coord_t
+  {
+    return bg::get<1>(p);
+  }
 };
 
 template <class P>
@@ -102,12 +109,12 @@ using PointCoordT = typename point_traits<remove_cvref_t<P>>::coord_t;
 // Unified point accessors
 
 template <class P>
-inline auto X(const P& p) -> PointCoordT<P> {
+inline auto x(const P& p) -> PointCoordT<P> {
   return point_traits<remove_cvref_t<P>>::x(p);
 }
 
 template <class P>
-inline auto Y(const P& p) -> PointCoordT<P> {
+inline auto y(const P& p) -> PointCoordT<P> {
   return point_traits<remove_cvref_t<P>>::y(p);
 }
 
@@ -125,7 +132,8 @@ struct point_make_traits {
 template <class T>
 struct point_make_traits<gtl::point_data<T>> {
   using coord_t = T;
-  static gtl::point_data<T> make(coord_t x, coord_t y) {
+  static auto make(coord_t x, coord_t y) -> gtl::point_data<T>
+  {
     return gtl::point_data<T>{x, y};
   }
 };
@@ -136,7 +144,8 @@ struct point_make_traits<bg::model::point<T, Dim, Cs>> {
   static_assert(Dim >= 2, "Boost.Geometry point dimension must be >= 2");
   using coord_t = T;
 
-  static bg::model::point<T, Dim, Cs> make(coord_t x, coord_t y) {
+  static auto make(coord_t x, coord_t y) -> bg::model::point<T, Dim, Cs>
+  {
     bg::model::point<T, Dim, Cs> p{};
     bg::set<0>(p, x);
     bg::set<1>(p, y);
@@ -145,7 +154,7 @@ struct point_make_traits<bg::model::point<T, Dim, Cs>> {
 };
 
 template <class P>
-inline auto MakePoint(PointCoordT<P> x, PointCoordT<P> y) -> remove_cvref_t<P> {
+inline auto make_point(PointCoordT<P> x, PointCoordT<P> y) -> remove_cvref_t<P> {
   using PP = remove_cvref_t<P>;
   return point_make_traits<PP>::make(x, y);
 }
@@ -164,20 +173,32 @@ struct rect_traits {
 template <class T>
 struct rect_traits<gtl::rectangle_data<T>> {
   using coord_t = T;
-  static coord_t min_x(const gtl::rectangle_data<T>& r) { return r.get(gtl::WEST); }
-  static coord_t min_y(const gtl::rectangle_data<T>& r) { return r.get(gtl::SOUTH); }
-  static coord_t max_x(const gtl::rectangle_data<T>& r) { return r.get(gtl::EAST); }
-  static coord_t max_y(const gtl::rectangle_data<T>& r) { return r.get(gtl::NORTH); }
+  static auto min_x(const gtl::rectangle_data<T>& r) -> coord_t { return r.get(gtl::WEST); }
+  static auto min_y(const gtl::rectangle_data<T>& r) -> coord_t { return r.get(gtl::SOUTH); }
+  static auto max_x(const gtl::rectangle_data<T>& r) -> coord_t { return r.get(gtl::EAST); }
+  static auto max_y(const gtl::rectangle_data<T>& r) -> coord_t { return r.get(gtl::NORTH); }
 };
 
 // bg::model::box<PointT>
 template <class PointT>
 struct rect_traits<bg::model::box<PointT>> {
   using coord_t = typename bg::coordinate_type<PointT>::type;
-  static coord_t min_x(const bg::model::box<PointT>& b) { return bg::get<bg::min_corner, 0>(b); }
-  static coord_t min_y(const bg::model::box<PointT>& b) { return bg::get<bg::min_corner, 1>(b); }
-  static coord_t max_x(const bg::model::box<PointT>& b) { return bg::get<bg::max_corner, 0>(b); }
-  static coord_t max_y(const bg::model::box<PointT>& b) { return bg::get<bg::max_corner, 1>(b); }
+  static auto min_x(const bg::model::box<PointT>& b) -> coord_t
+  {
+    return bg::get<bg::min_corner, 0>(b);
+  }
+  static auto min_y(const bg::model::box<PointT>& b) -> coord_t
+  {
+    return bg::get<bg::min_corner, 1>(b);
+  }
+  static auto max_x(const bg::model::box<PointT>& b) -> coord_t
+  {
+    return bg::get<bg::max_corner, 0>(b);
+  }
+  static auto max_y(const bg::model::box<PointT>& b) -> coord_t
+  {
+    return bg::get<bg::max_corner, 1>(b);
+  }
 };
 
 template <class R>
@@ -186,22 +207,22 @@ using RectCoordT = typename rect_traits<remove_cvref_t<R>>::coord_t;
 // Unified rect accessors
 
 template <class R>
-inline auto MinX(const R& r) -> RectCoordT<R> {
+inline auto min_x(const R& r) -> RectCoordT<R> {
   return rect_traits<remove_cvref_t<R>>::min_x(r);
 }
 
 template <class R>
-inline auto MinY(const R& r) -> RectCoordT<R> {
+inline auto min_y(const R& r) -> RectCoordT<R> {
   return rect_traits<remove_cvref_t<R>>::min_y(r);
 }
 
 template <class R>
-inline auto MaxX(const R& r) -> RectCoordT<R> {
+inline auto max_x(const R& r) -> RectCoordT<R> {
   return rect_traits<remove_cvref_t<R>>::max_x(r);
 }
 
 template <class R>
-inline auto MaxY(const R& r) -> RectCoordT<R> {
+inline auto max_y(const R& r) -> RectCoordT<R> {
   return rect_traits<remove_cvref_t<R>>::max_y(r);
 }
 
@@ -219,7 +240,8 @@ struct rect_make_traits {
 template <class T>
 struct rect_make_traits<gtl::rectangle_data<T>> {
   using coord_t = T;
-  static gtl::rectangle_data<T> make(coord_t lx, coord_t ly, coord_t hx, coord_t hy) {
+  static auto make(coord_t lx, coord_t ly, coord_t hx, coord_t hy) -> gtl::rectangle_data<T>
+  {
     return {lx, ly, hx, hy};
   }
 };
@@ -228,13 +250,14 @@ struct rect_make_traits<gtl::rectangle_data<T>> {
 template <class PointT>
 struct rect_make_traits<bg::model::box<PointT>> {
   using coord_t = typename bg::coordinate_type<PointT>::type;
-  static bg::model::box<PointT> make(coord_t lx, coord_t ly, coord_t hx, coord_t hy) {
+  static auto make(coord_t lx, coord_t ly, coord_t hx, coord_t hy) -> bg::model::box<PointT>
+  {
     return {PointT(lx, ly), PointT(hx, hy)};
   }
 };
 
 template <class R>
-inline auto MakeRect(RectCoordT<R> lx, RectCoordT<R> ly, RectCoordT<R> hx, RectCoordT<R> hy)
+inline auto make_rect(RectCoordT<R> lx, RectCoordT<R> ly, RectCoordT<R> hx, RectCoordT<R> hy)
     -> remove_cvref_t<R> {
   using RR = remove_cvref_t<R>;
   return rect_make_traits<RR>::make(lx, ly, hx, hy);
@@ -245,31 +268,35 @@ inline auto MakeRect(RectCoordT<R> lx, RectCoordT<R> ly, RectCoordT<R> hx, RectC
 // ============================================================
 
 template <class P>
-inline auto Manhattan(const P& a, const P& b)
-    -> decltype(std::abs(X(a) - X(b)) + std::abs(Y(a) - Y(b))) {
-  const auto dx = std::abs(X(a) - X(b));
-  const auto dy = std::abs(Y(a) - Y(b));
+inline auto manhattan_distance(const P& a, const P& b)
+    -> decltype(std::abs(geom::x(a) - geom::x(b)) + std::abs(geom::y(a) - geom::y(b))) {
+  const auto dx = std::abs(geom::x(a) - geom::x(b));
+  const auto dy = std::abs(geom::y(a) - geom::y(b));
   return dx + dy;
 }
 
 template <class P>
-inline bool IsHorDominant(const P& a, const P& b) {
-  return std::abs(X(a) - X(b)) >= std::abs(Y(a) - Y(b));
+inline auto is_hor_dominant(const P& a, const P& b) -> bool
+{
+  return std::abs(geom::x(a) - geom::x(b)) >= std::abs(geom::y(a) - geom::y(b));
 }
 
 template <class P>
-inline bool IsVerDominant(const P& a, const P& b) {
-  return !IsHorDominant(a, b);
+inline auto is_ver_dominant(const P& a, const P& b) -> bool
+{
+  return !is_hor_dominant(a, b);
 }
 
 template <class P>
-inline bool IsLeftBottom(const P& a, const P& b) {
-  return X(a) <= X(b) && Y(a) <= Y(b);
+inline auto is_lower_left(const P& a, const P& b) -> bool
+{
+  return geom::x(a) <= geom::x(b) && geom::y(a) <= geom::y(b);
 }
 
 template <class P>
-inline bool IsRightTop(const P& a, const P& b) {
-  return X(a) >= X(b) && Y(a) >= Y(b);
+inline auto is_upper_right(const P& a, const P& b) -> bool
+{
+  return geom::x(a) >= geom::x(b) && geom::y(a) >= geom::y(b);
 }
 
 // ============================================================
@@ -277,58 +304,62 @@ inline bool IsRightTop(const P& a, const P& b) {
 // ============================================================
 
 template <class R>
-inline auto DeltaX(const R& r) -> RectCoordT<R> {
-  return MaxX(r) - MinX(r);
+inline auto delta_x(const R& r) -> RectCoordT<R> {
+  return max_x(r) - min_x(r);
 }
 
 template <class R>
-inline auto DeltaY(const R& r) -> RectCoordT<R> {
-  return MaxY(r) - MinY(r);
+inline auto delta_y(const R& r) -> RectCoordT<R> {
+  return max_y(r) - min_y(r);
 }
 
 // Use Min + (Max - Min) / 2 to reduce overflow risk for integral coordinates.
 template <class R>
-inline auto CenterX(const R& r) -> RectCoordT<R> {
+inline auto center_x(const R& r) -> RectCoordT<R> {
   using T = RectCoordT<R>;
-  return MinX(r) + (MaxX(r) - MinX(r)) / T{2};
+  return min_x(r) + (max_x(r) - min_x(r)) / T{2};
 }
 
 template <class R>
-inline auto CenterY(const R& r) -> RectCoordT<R> {
+inline auto center_y(const R& r) -> RectCoordT<R> {
   using T = RectCoordT<R>;
-  return MinY(r) + (MaxY(r) - MinY(r)) / T{2};
+  return min_y(r) + (max_y(r) - min_y(r)) / T{2};
 }
 
-// Center always returns gtl::point_data<coord_t>.
+// center always returns gtl::point_data<coord_t>.
 // Float rect keeps float precision; integral rect keeps integral midpoint semantics.
 template <class R>
-inline auto Center(const R& r) -> gtl::point_data<RectCoordT<R>> {
+inline auto center(const R& r) -> gtl::point_data<RectCoordT<R>> {
   using T = RectCoordT<R>;
-  return gtl::point_data<T>{CenterX(r), CenterY(r)};
+  return gtl::point_data<T>{center_x(r), center_y(r)};
 }
 
 template <class R>
-inline bool IsHorDominant(const R& r) {
-  return DeltaX(r) >= DeltaY(r);
+inline auto is_hor_dominant(const R& r) -> bool
+{
+  return delta_x(r) >= delta_y(r);
 }
 
 template <class R>
-inline bool IsVerDominant(const R& r) {
-  return DeltaX(r) < DeltaY(r);
+inline auto is_ver_dominant(const R& r) -> bool
+{
+  return delta_x(r) < delta_y(r);
 }
 
 template <class R, class P>
-inline bool RectContainsPoint(const R& r, const P& p) {
-  return X(p) >= MinX(r) && X(p) <= MaxX(r) &&
-         Y(p) >= MinY(r) && Y(p) <= MaxY(r);
+inline auto rect_contains_point(const R& r, const P& p) -> bool
+{
+  return geom::x(p) >= min_x(r) && geom::x(p) <= max_x(r) &&
+         geom::y(p) >= min_y(r) && geom::y(p) <= max_y(r);
 }
 
 // ============================================================
-//  Area / Intersects
+//  area / intersects
 // ============================================================
 
 template <class Shape>
-inline double Area(const Shape& s) {
+inline auto area(const Shape& s) -> double
+{
   using S = remove_cvref_t<Shape>;
 
   if constexpr (is_bg_box<S>::value) {
@@ -337,7 +368,7 @@ inline double Area(const Shape& s) {
     return static_cast<double>(gtl::area(s));
   } else {
     static_assert(dependent_false<S>::value,
-                  "Area(Shape): unsupported Shape type "
+                  "area(Shape): unsupported Shape type "
                   "(expected bg::model::box<...>, gtl::rectangle_data<...>, "
                   "or gtl::polygon_90_set_data<...>)");
     return 0.0;
@@ -346,9 +377,10 @@ inline double Area(const Shape& s) {
 
 // Note:
 // - This function delegates to the underlying library semantics.
-// - If you need strict positive-area overlap, use HasAreaIntersection().
+// - If you need strict positive-area overlap, use has_area_overlap().
 template <class A, class B>
-inline bool Intersects(const A& a, const B& b) {
+inline auto intersects(const A& a, const B& b) -> bool
+{
   using AA = remove_cvref_t<A>;
   using BB = remove_cvref_t<B>;
 
@@ -358,7 +390,7 @@ inline bool Intersects(const A& a, const B& b) {
     return gtl::intersects(a, b);
   } else {
     static_assert(dependent_false2<AA, BB>::value,
-                  "Intersects(A,B): unsupported type combination "
+                  "intersects(A,B): unsupported type combination "
                   "(supported: bg::box vs bg::box, gtl::rect vs gtl::rect)");
     return false;
   }
@@ -366,15 +398,16 @@ inline bool Intersects(const A& a, const B& b) {
 
 // Strict positive-area overlap for any two rect-like objects.
 template <class A, class B>
-inline bool HasAreaIntersection(const A& a, const B& b) {
+inline auto has_area_overlap(const A& a, const B& b) -> bool
+{
   using TA = RectCoordT<A>;
   using TB = RectCoordT<B>;
   using CommonT = std::common_type_t<TA, TB>;
 
-  const CommonT lx = std::max<CommonT>(static_cast<CommonT>(MinX(a)), static_cast<CommonT>(MinX(b)));
-  const CommonT ly = std::max<CommonT>(static_cast<CommonT>(MinY(a)), static_cast<CommonT>(MinY(b)));
-  const CommonT hx = std::min<CommonT>(static_cast<CommonT>(MaxX(a)), static_cast<CommonT>(MaxX(b)));
-  const CommonT hy = std::min<CommonT>(static_cast<CommonT>(MaxY(a)), static_cast<CommonT>(MaxY(b)));
+  const CommonT lx = std::max<CommonT>(static_cast<CommonT>(min_x(a)), static_cast<CommonT>(min_x(b)));
+  const CommonT ly = std::max<CommonT>(static_cast<CommonT>(min_y(a)), static_cast<CommonT>(min_y(b)));
+  const CommonT hx = std::min<CommonT>(static_cast<CommonT>(max_x(a)), static_cast<CommonT>(max_x(b)));
+  const CommonT hy = std::min<CommonT>(static_cast<CommonT>(max_y(a)), static_cast<CommonT>(max_y(b)));
 
   return (lx < hx) && (ly < hy);
 }
@@ -385,17 +418,17 @@ inline bool HasAreaIntersection(const A& a, const B& b) {
 
 // Same-type intersection: returns std::nullopt for zero-area intersection.
 template <class R>
-inline auto Intersection(const R& a, const R& b) -> std::optional<remove_cvref_t<R>> {
+inline auto intersection(const R& a, const R& b) -> std::optional<remove_cvref_t<R>> {
   using RR = remove_cvref_t<R>;
   using T  = RectCoordT<RR>;
 
-  const T lx = std::max(MinX(a), MinX(b));
-  const T ly = std::max(MinY(a), MinY(b));
-  const T hx = std::min(MaxX(a), MaxX(b));
-  const T hy = std::min(MaxY(a), MaxY(b));
+  const T lx = std::max(min_x(a), min_x(b));
+  const T ly = std::max(min_y(a), min_y(b));
+  const T hx = std::min(max_x(a), max_x(b));
+  const T hy = std::min(max_y(a), max_y(b));
 
   if (lx < hx && ly < hy) {
-    return MakeRect<RR>(lx, ly, hx, hy);
+    return make_rect<RR>(lx, ly, hx, hy);
   }
   return std::nullopt;
 }
@@ -403,17 +436,17 @@ inline auto Intersection(const R& a, const R& b) -> std::optional<remove_cvref_t
 // Cross-type intersection with explicit output rect type.
 // Returns std::nullopt for zero-area intersection.
 template <class OutRect, class A, class B>
-inline auto IntersectionAs(const A& a, const B& b) -> std::optional<remove_cvref_t<OutRect>> {
+inline auto intersection_as(const A& a, const B& b) -> std::optional<remove_cvref_t<OutRect>> {
   using RR = remove_cvref_t<OutRect>;
   using T  = RectCoordT<RR>;
 
-  const auto lx_raw = std::max(MinX(a), MinX(b));
-  const auto ly_raw = std::max(MinY(a), MinY(b));
-  const auto hx_raw = std::min(MaxX(a), MaxX(b));
-  const auto hy_raw = std::min(MaxY(a), MaxY(b));
+  const auto lx_raw = std::max(min_x(a), min_x(b));
+  const auto ly_raw = std::max(min_y(a), min_y(b));
+  const auto hx_raw = std::min(max_x(a), max_x(b));
+  const auto hy_raw = std::min(max_y(a), max_y(b));
 
   if (lx_raw < hx_raw && ly_raw < hy_raw) {
-    return MakeRect<RR>(
+    return make_rect<RR>(
         static_cast<T>(lx_raw),
         static_cast<T>(ly_raw),
         static_cast<T>(hx_raw),
@@ -422,62 +455,63 @@ inline auto IntersectionAs(const A& a, const B& b) -> std::optional<remove_cvref
   return std::nullopt;
 }
 
-// Clip r by win, preserving r's output type.
+// clip r by win, preserving r's output type.
 template <class R, class W>
-inline auto Clip(const R& r, const W& win) -> std::optional<remove_cvref_t<R>> {
-  return IntersectionAs<remove_cvref_t<R>>(r, win);
+inline auto clip(const R& r, const W& win) -> std::optional<remove_cvref_t<R>> {
+  return intersection_as<remove_cvref_t<R>>(r, win);
 }
 
-// Clip r by win, with explicit output type.
+// clip r by win, with explicit output type.
 template <class OutRect, class R, class W>
-inline auto ClipAs(const R& r, const W& win) -> std::optional<remove_cvref_t<OutRect>> {
-  return IntersectionAs<remove_cvref_t<OutRect>>(r, win);
+inline auto clip_as(const R& r, const W& win) -> std::optional<remove_cvref_t<OutRect>> {
+  return intersection_as<remove_cvref_t<OutRect>>(r, win);
 }
 
 // ============================================================
 //  Convert
 // ============================================================
 
-// ToBox: any rect-like -> bg::box< bg::point<T,2,cartesian> >
+// to_box: any rect-like -> bg::box< bg::point<T,2,cartesian> >
 template <class R>
-inline auto ToBox(const R& r)
+inline auto to_box(const R& r)
     -> bg::model::box<bg::model::point<RectCoordT<R>, 2, bg::cs::cartesian>> {
   using T = RectCoordT<R>;
   using P = bg::model::point<T, 2, bg::cs::cartesian>;
   using B = bg::model::box<P>;
-  return B(P(MinX(r), MinY(r)), P(MaxX(r), MaxY(r)));
+  return B(P(min_x(r), min_y(r)), P(max_x(r), max_y(r)));
 }
 
-// ToRect: any rect-like -> gtl::rectangle_data<T>
+// to_rect: any rect-like -> gtl::rectangle_data<T>
 template <class R>
-inline auto ToRect(const R& r) -> gtl::rectangle_data<RectCoordT<R>> {
+inline auto to_rect(const R& r) -> gtl::rectangle_data<RectCoordT<R>> {
   using T = RectCoordT<R>;
-  return gtl::rectangle_data<T>(MinX(r), MinY(r), MaxX(r), MaxY(r));
+  return gtl::rectangle_data<T>(min_x(r), min_y(r), max_x(r), max_y(r));
 }
 
 // ------------------------------------------------------------
-// RectCastDivide: integral rect -> floating-point rect with scaling
+// divide_rect_as: integral rect -> floating-point rect with scaling
 // ------------------------------------------------------------
 
 template <class OutRect, class InRect, class Div>
-inline OutRect RectCastDivide(const InRect& r, Div divisor) {
+inline auto divide_rect_as(const InRect& r, Div divisor) -> OutRect
+{
   using InCoord  = RectCoordT<InRect>;
   using OutCoord = RectCoordT<OutRect>;
 
   static_assert(std::is_integral_v<InCoord>,
-                "RectCastDivide: InRect must use integral coordinates");
+                "divide_rect_as: InRect must use integral coordinates");
   static_assert(std::is_floating_point_v<OutCoord>,
-                "RectCastDivide: OutRect must use floating-point coordinates");
+                "divide_rect_as: OutRect must use floating-point coordinates");
 
-  assert(divisor != 0 && "RectCastDivide: divisor must not be zero");
+  assert(divisor != 0 && "divide_rect_as: divisor must not be zero");
 
   const OutCoord d = static_cast<OutCoord>(divisor);
 
-  return MakeRect<OutRect>(
-      static_cast<OutCoord>(MinX(r)) / d,
-      static_cast<OutCoord>(MinY(r)) / d,
-      static_cast<OutCoord>(MaxX(r)) / d,
-      static_cast<OutCoord>(MaxY(r)) / d);
+  return make_rect<OutRect>(
+      static_cast<OutCoord>(min_x(r)) / d,
+      static_cast<OutCoord>(min_y(r)) / d,
+      static_cast<OutCoord>(max_x(r)) / d,
+      static_cast<OutCoord>(max_y(r)) / d);
 }
 
 // ============================================================
@@ -485,22 +519,22 @@ inline OutRect RectCastDivide(const InRect& r, Div divisor) {
 // ============================================================
 
 template <class P>
-inline auto TranslatePoint(const P& p, PointCoordT<P> dx, PointCoordT<P> dy) -> remove_cvref_t<P> {
+inline auto translate_point(const P& p, PointCoordT<P> dx, PointCoordT<P> dy) -> remove_cvref_t<P> {
   using PP = remove_cvref_t<P>;
-  return MakePoint<PP>(X(p) + dx, Y(p) + dy);
+  return make_point<PP>(geom::x(p) + dx, geom::y(p) + dy);
 }
 
 // Returns a GTL rectangle centered at p with half-size d in both axes.
 template <class P>
-inline auto RectAround(const P& p, PointCoordT<P> d) -> gtl::rectangle_data<PointCoordT<P>> {
+inline auto rect_around(const P& p, PointCoordT<P> d) -> gtl::rectangle_data<PointCoordT<P>> {
   using T = PointCoordT<P>;
-  return gtl::rectangle_data<T>{X(p) - d, Y(p) - d, X(p) + d, Y(p) + d};
+  return gtl::rectangle_data<T>{geom::x(p) - d, geom::y(p) - d, geom::x(p) + d, geom::y(p) + d};
 }
 
 // Backward-compatible alias for old API name.
 template <class P>
-inline auto BoxAround(const P& p, PointCoordT<P> d) -> gtl::rectangle_data<PointCoordT<P>> {
-  return RectAround(p, d);
+inline auto box_around(const P& p, PointCoordT<P> d) -> gtl::rectangle_data<PointCoordT<P>> {
+  return rect_around(p, d);
 }
 
 // ============================================================
@@ -508,55 +542,59 @@ inline auto BoxAround(const P& p, PointCoordT<P> d) -> gtl::rectangle_data<Point
 // ============================================================
 
 template <class R>
-inline auto TranslateRect(const R& r, RectCoordT<R> dx, RectCoordT<R> dy) -> remove_cvref_t<R> {
+inline auto translate_rect(const R& r, RectCoordT<R> dx, RectCoordT<R> dy) -> remove_cvref_t<R> {
   using RR = remove_cvref_t<R>;
-  return MakeRect<RR>(MinX(r) + dx, MinY(r) + dy, MaxX(r) + dx, MaxY(r) + dy);
+  return make_rect<RR>(min_x(r) + dx, min_y(r) + dy, max_x(r) + dx, max_y(r) + dy);
 }
 
 template <class R>
-inline auto InflateX(const R& r, RectCoordT<R> dx) -> remove_cvref_t<R> {
+inline auto inflate_x(const R& r, RectCoordT<R> dx) -> remove_cvref_t<R> {
   using RR = remove_cvref_t<R>;
-  return MakeRect<RR>(MinX(r) - dx, MinY(r), MaxX(r) + dx, MaxY(r));
+  return make_rect<RR>(min_x(r) - dx, min_y(r), max_x(r) + dx, max_y(r));
 }
 
 template <class R>
-inline auto InflateY(const R& r, RectCoordT<R> dy) -> remove_cvref_t<R> {
+inline auto inflate_y(const R& r, RectCoordT<R> dy) -> remove_cvref_t<R> {
   using RR = remove_cvref_t<R>;
-  return MakeRect<RR>(MinX(r), MinY(r) - dy, MaxX(r), MaxY(r) + dy);
+  return make_rect<RR>(min_x(r), min_y(r) - dy, max_x(r), max_y(r) + dy);
 }
 
 template <class R>
-inline auto Inflate(const R& r, RectCoordT<R> d) -> remove_cvref_t<R> {
+inline auto inflate(const R& r, RectCoordT<R> d) -> remove_cvref_t<R> {
   using RR = remove_cvref_t<R>;
-  return MakeRect<RR>(MinX(r) - d, MinY(r) - d, MaxX(r) + d, MaxY(r) + d);
+  return make_rect<RR>(min_x(r) - d, min_y(r) - d, max_x(r) + d, max_y(r) + d);
 }
 
 // ============================================================
 //  Polyset conversion helpers
 // ============================================================
 
-inline std::vector<GtlRectI> PolysetToRects(const GtlPolysetI& ps) {
+inline auto polyset_to_rects(const GtlPolySetI& ps) -> std::vector<GtlRectI>
+{
   std::vector<GtlRectI> rects;
   ps.get_rectangles(rects);
   return rects;
 }
 
-inline std::vector<GtlRectF> PolysetToRects(const GtlPolysetF& ps) {
+inline auto polyset_to_rects(const GtlPolySetF& ps) -> std::vector<GtlRectF>
+{
   std::vector<GtlRectF> rects;
   ps.get_rectangles(rects);
   return rects;
 }
 
-inline GtlPolysetI RectsToPolyset(const std::vector<GtlRectI>& rects) {
-  GtlPolysetI ps;
+inline auto rects_to_polyset(const std::vector<GtlRectI>& rects) -> GtlPolySetI
+{
+  GtlPolySetI ps;
   for (const auto& r : rects) {
     ps += r;
   }
   return ps;
 }
 
-inline GtlPolysetF RectsToPolyset(const std::vector<GtlRectF>& rects) {
-  GtlPolysetF ps;
+inline auto rects_to_polyset(const std::vector<GtlRectF>& rects) -> GtlPolySetF
+{
+  GtlPolySetF ps;
   for (const auto& r : rects) {
     ps += r;
   }
@@ -565,26 +603,26 @@ inline GtlPolysetF RectsToPolyset(const std::vector<GtlRectF>& rects) {
 
 // Returns the bounding box of all rects, or std::nullopt when rects is empty.
 template <class Rect>
-inline auto RectsToBbox(const std::vector<Rect>& rects) -> std::optional<Rect> {
+inline auto rects_to_bbox(const std::vector<Rect>& rects) -> std::optional<Rect> {
   if (rects.empty()) {
     return std::nullopt;
   }
 
   using T = RectCoordT<Rect>;
 
-  T minx = MinX(rects[0]);
-  T maxx = MaxX(rects[0]);
-  T miny = MinY(rects[0]);
-  T maxy = MaxY(rects[0]);
+  T minx = min_x(rects[0]);
+  T maxx = max_x(rects[0]);
+  T miny = min_y(rects[0]);
+  T maxy = max_y(rects[0]);
 
   for (std::size_t i = 1; i < rects.size(); ++i) {
-    minx = std::min(minx, MinX(rects[i]));
-    maxx = std::max(maxx, MaxX(rects[i]));
-    miny = std::min(miny, MinY(rects[i]));
-    maxy = std::max(maxy, MaxY(rects[i]));
+    minx = std::min(minx, min_x(rects[i]));
+    maxx = std::max(maxx, max_x(rects[i]));
+    miny = std::min(miny, min_y(rects[i]));
+    maxy = std::max(maxy, max_y(rects[i]));
   }
 
-  return MakeRect<Rect>(minx, miny, maxx, maxy);
+  return make_rect<Rect>(minx, miny, maxx, maxy);
 }
 
 }  // namespace geom

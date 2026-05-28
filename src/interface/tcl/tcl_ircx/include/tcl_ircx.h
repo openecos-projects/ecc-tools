@@ -32,7 +32,6 @@ class TclInitRCX : public TclCmd
 
   unsigned check() override;
   unsigned exec() override;
-
 };
 
 /**
@@ -60,6 +59,20 @@ class TclReportRCX : public TclCmd
   ~TclReportRCX() override = default;
 
   unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+/**
+ * @brief Compare two parasitic netlists.
+ *
+ */
+class TclCompareParasitics : public TclCmd
+{
+ public:
+  explicit TclCompareParasitics(const char* cmd_name);
+  ~TclCompareParasitics() override = default;
+
+  unsigned check() override;
   unsigned exec() override;
 };
 

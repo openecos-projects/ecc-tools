@@ -22,8 +22,10 @@
 #include <vector>
 
 #include "CapTable.hpp"
-#include "EtchPool.hh"
-#include "EnvPool.hh"
+#include "CornerNetPool.hh"
+#include "RCXConfig.hh"
+#include "NetEtchProfile.hh"
+#include "NetEnvironment.hh"
 #include "LayerTable.hh"
 #include "LayoutData.hh"
 #include "MappingBuilder.hpp"
@@ -50,13 +52,13 @@ class RCXData final {
   struct CornerData {
     CornerData();
     ~CornerData();
-    CornerData(CornerData&&) noexcept;
-    CornerData& operator=(CornerData&&) noexcept;
+    CornerData(CornerData&&);
+    CornerData& operator=(CornerData&&);
     CornerData(const CornerData&) = delete;
     CornerData& operator=(const CornerData&) = delete;
 
     Str name;
-    F64 temperature{25.0};
+    F64 temperature{kDefaultOperatingTemperature};
     Str itf_file;
     Str captab_file;
     std::unique_ptr<::itf::ProcessCorner> process_corner;
@@ -85,10 +87,10 @@ class RCXData final {
   const TopoPool& topo_pool() const { return topo_pool_; }
   RCTable& rc_table() { return rc_table_; }
   const RCTable& rc_table() const { return rc_table_; }
-  std::vector<EnvPool>& net_env_pools() { return net_env_pools_; }
-  const std::vector<EnvPool>& net_env_pools() const { return net_env_pools_; }
-  std::vector<EtchPool>& corner_net_etch_pools() { return corner_net_etch_pools_; }
-  const std::vector<EtchPool>& corner_net_etch_pools() const { return corner_net_etch_pools_; }
+  std::vector<NetEnvironment>& net_env_pools() { return net_env_pools_; }
+  const std::vector<NetEnvironment>& net_env_pools() const { return net_env_pools_; }
+  CornerNetPool<NetEtchProfile>& corner_net_etch_pools() { return corner_net_etch_pools_; }
+  const CornerNetPool<NetEtchProfile>& corner_net_etch_pools() const { return corner_net_etch_pools_; }
   std::vector<CornerData>& corner_data() { return corners_; }
   const std::vector<CornerData>& corner_data() const { return corners_; }
 
@@ -105,15 +107,21 @@ class RCXData final {
   RCXData() = default;
   ~RCXData();
 
+  // Design data adapted from iDB.
   LayoutData layout_;
   SpefContext spef_context_;
   LayerTable layer_table_;
+
+  // Technology and mapping data loaded during setup.
   std::vector<CornerData> corners_;
   parser::MappingBuilder mapping_builder_;
+
+  // Extraction intermediate and result data.
   TopoPool topo_pool_;
   RCTable rc_table_;
-  std::vector<EnvPool> net_env_pools_;
-  std::vector<EtchPool> corner_net_etch_pools_;
+  std::vector<NetEnvironment> net_env_pools_;
+  CornerNetPool<NetEtchProfile> corner_net_etch_pools_;
+
   bool process_layers_registered_{false};
 };
 

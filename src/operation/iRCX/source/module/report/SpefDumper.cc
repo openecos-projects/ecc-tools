@@ -28,7 +28,7 @@
 #include "RCXConfig.hh"
 #include "SpefContext.hh"
 #include "TopoPool.hh"
-#include "UnitUtils.hh"
+#include "Types.hh"
 #include "log/Log.hh"
 #include "usage/usage.hh"
 
@@ -280,11 +280,11 @@ void SpefDumper::writeDNet(std::ostream& os, Size corner_idx, Size net_idx) cons
   if (node_num == 0)
     return;
 
-  const Micron dbu_to_micron = dbuToMicronScale(layout_data_->micron_to_dbu);
+  const Micron dbu_to_micron = dbu2micron(1, layout_data_->micron_to_dbu);
 
   // Aggregate ground cap to nodes
   // Ground cap per edge is split equally to its two endpoint nodes.
-  auto gcap_pool = rc_table_->corner_net_gcap_pool(corner_idx, net_idx);
+  auto gcap_pool = rc_table_->corner_net_gcap_pool({corner_idx, net_idx});
   std::vector<double> node_gnd(node_num, 0.0);
 
   for (Size edge_idx = 0; edge_idx < edges.size(); ++edge_idx) {
@@ -326,10 +326,10 @@ void SpefDumper::writeDNet(std::ostream& os, Size corner_idx, Size net_idx) cons
       Dbu dist;
     };
     const Cand cands[4] = {
-        {e_self.u(), e_other.u(), geom::Manhattan(pa_u, pb_u)},
-        {e_self.u(), e_other.v(), geom::Manhattan(pa_u, pb_v)},
-        {e_self.v(), e_other.u(), geom::Manhattan(pa_v, pb_u)},
-        {e_self.v(), e_other.v(), geom::Manhattan(pa_v, pb_v)},
+        {e_self.u(), e_other.u(), geom::manhattan_distance(pa_u, pb_u)},
+        {e_self.u(), e_other.v(), geom::manhattan_distance(pa_u, pb_v)},
+        {e_self.v(), e_other.u(), geom::manhattan_distance(pa_v, pb_u)},
+        {e_self.v(), e_other.v(), geom::manhattan_distance(pa_v, pb_v)},
     };
     const auto& best = *std::min_element(std::begin(cands), std::end(cands), [](const Cand& x, const Cand& y) { return x.dist < y.dist; });
 
@@ -360,8 +360,8 @@ void SpefDumper::writeDNet(std::ostream& os, Size corner_idx, Size net_idx) cons
       continue;
 
     if (node.pin_name().find(':') == Str::npos) {  // port pin node
-      Micron x = geom::X(node.point()) * dbu_to_micron;
-      Micron y = geom::Y(node.point()) * dbu_to_micron;
+      Micron x = geom::x(node.point()) * dbu_to_micron;
+      Micron y = geom::y(node.point()) * dbu_to_micron;
 
       os << "*" << "P" << " " << node_spef_name[topo_pool_->node_index(net_idx, node.id())] << " " << port_io.at(node.pin_name()) << " *C "
          << std::fixed << std::setprecision(3) << x << " " << y << "\n";
@@ -374,8 +374,8 @@ void SpefDumper::writeDNet(std::ostream& os, Size corner_idx, Size net_idx) cons
       continue;
 
     if (node.pin_name().find(':') != Str::npos) {  // instance pin node
-      Micron x = geom::X(node.point()) * dbu_to_micron;
-      Micron y = geom::Y(node.point()) * dbu_to_micron;
+      Micron x = geom::x(node.point()) * dbu_to_micron;
+      Micron y = geom::y(node.point()) * dbu_to_micron;
       const auto io_it = inst_pin_io.find(node.pin_name());
       const char pin_io = (io_it != inst_pin_io.end()) ? io_it->second : 'B';
 
@@ -389,8 +389,8 @@ void SpefDumper::writeDNet(std::ostream& os, Size corner_idx, Size net_idx) cons
     if (node.is_pin_node())
       continue;
 
-    Micron x = geom::X(node.point()) * dbu_to_micron;
-    Micron y = geom::Y(node.point()) * dbu_to_micron;
+    Micron x = geom::x(node.point()) * dbu_to_micron;
+    Micron y = geom::y(node.point()) * dbu_to_micron;
 
     os << "*" << "N" << " " << node_spef_name[topo_pool_->node_index(net_idx, node.id())] << " *C " << std::fixed << std::setprecision(3)
        << x << " " << y << "\n";
@@ -417,7 +417,7 @@ void SpefDumper::writeDNet(std::ostream& os, Size corner_idx, Size net_idx) cons
   // *RES section
   os << "\n*RES\n";
   int res_id = 1;
-  auto res_pool = rc_table_->corner_net_res_pool(corner_idx, net_idx);
+  auto res_pool = rc_table_->corner_net_res_pool({corner_idx, net_idx});
   for (Size edge_idx = 0; edge_idx < edges.size(); ++edge_idx) {
     const TopoEdge& edge = edges[edge_idx];
     if (edge.u() == kMaxSize || edge.v() == kMaxSize)

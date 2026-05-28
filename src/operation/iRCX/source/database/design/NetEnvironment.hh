@@ -21,12 +21,13 @@
 #include <utility>
 #include <vector>
 
-#include "IntervalPool.hh"
+#include "GroupPool.hh"
 #include "Types.hh"
+
 namespace ircx {
 
-inline constexpr F32 kDefaultWindowUm = 2;  // μm
-inline constexpr F32 kDefaultBucketUm = 5;  // μm
+inline constexpr F32 kDefaultWindowUm = 2;
+inline constexpr F32 kDefaultBucketUm = 5;
 
 class TopoEdge;
 
@@ -37,16 +38,15 @@ struct CrossOverlapSub {
   Size blw_layer{0};  // absolute layer; 0 = SUBSTRATE
 };
 
-
 struct DiagCoupSub {
-  Dbu       a0          = 0;
-  Dbu       a1          = 0;
-  TopoEdge* neighbor    = nullptr;
-  Dbu       dist        = 0;   // center-to-center, fixed direction, dbu
-  int16_t   layer_delta = 0;   // target layer = this_edge.layer + layer_delta
+  Dbu a0{0};
+  Dbu a1{0};
+  TopoEdge* neighbor{nullptr};
+  Dbu dist{0};         // center-to-center, fixed direction, dbu
+  int16_t layer_delta{0};  // target layer = this_edge.layer + layer_delta
 };
 
-struct EnvInterval {
+struct EdgeEnvironmentInterval {
   Dbu a0{0};
   Dbu a1{0};
 
@@ -60,25 +60,29 @@ struct EnvInterval {
   std::vector<DiagCoupSub> diag_segs;
 };
 
-class EnvPool { // of each net
+class NetEnvironment
+{
  public:
-  EnvPool() = default;
-  ~EnvPool() = default;
+  NetEnvironment() = default;
+  ~NetEnvironment() = default;
 
-  void append_edge_env_interval_pool(std::vector<EnvInterval> v) {
-    intervals_.append_edge_intervals(std::move(v));
+  void appendEdgeIntervals(std::vector<EdgeEnvironmentInterval> intervals)
+  {
+    edge_interval_groups_.append_group(std::move(intervals));
   }
 
-  std::span<const EnvInterval> edge_env_interval_pool(Size edge_id) const {
-    return intervals_.edge_intervals(edge_id);
+  std::span<const EdgeEnvironmentInterval> edgeIntervals(Size edge_id) const
+  {
+    return edge_interval_groups_.group_items(edge_id);
   }
 
-  void clear() {
-    intervals_.clear();
+  void clear()
+  {
+    edge_interval_groups_.clear();
   }
 
  private:
-  IntervalPool<EnvInterval> intervals_;
+  GroupPool<EdgeEnvironmentInterval> edge_interval_groups_;
 };
 
-} // namespace ircx
+}  // namespace ircx

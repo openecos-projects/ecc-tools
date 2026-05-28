@@ -108,9 +108,9 @@ class TopoEdge {
 
   const LineSegmentI& line_segment() const { return line_seg_; }
   bool is_horz() const { return line_seg_.is_horz; }
-  Dbu fixed() const { return line_seg_.fixed; }
-  Dbu a0() const { return line_seg_.a0; }
-  Dbu a1() const { return line_seg_.a1; }
+  Dbu coord() const { return line_seg_.coord; }
+  Dbu lo() const { return line_seg_.lo; }
+  Dbu hi() const { return line_seg_.hi; }
 
  private:
   friend class TopoPool;          // only pool can assign local ids

@@ -25,16 +25,16 @@ namespace ircx {
 void TopoEdge::set_shape(const GtlRectI& v) {
   shape_ = v;
 
-  line_seg_.is_horz = geom::IsHorDominant(shape_);
+  line_seg_.is_horz = geom::is_hor_dominant(shape_);
 
-  width_ = line_seg_.is_horz ? geom::DeltaY(shape_) : geom::DeltaX(shape_);
+  width_ = line_seg_.is_horz ? geom::delta_y(shape_) : geom::delta_x(shape_);
   half_width_ = width_ / 2;
-  length_ = line_seg_.is_horz ? geom::DeltaX(shape_) : geom::DeltaY(shape_);
-  center_ = geom::Center(shape_);
+  length_ = line_seg_.is_horz ? geom::delta_x(shape_) : geom::delta_y(shape_);
+  center_ = geom::center(shape_);
 
-  line_seg_.fixed = line_seg_.is_horz ? geom::CenterY(shape_) : geom::CenterX(shape_);
-  line_seg_.a0    = line_seg_.is_horz ? geom::MinX(shape_)    : geom::MinY(shape_);
-  line_seg_.a1    = line_seg_.is_horz ? geom::MaxX(shape_)    : geom::MaxY(shape_);
+  line_seg_.coord = line_seg_.is_horz ? geom::center_y(shape_) : geom::center_x(shape_);
+  line_seg_.lo    = line_seg_.is_horz ? geom::min_x(shape_)    : geom::min_y(shape_);
+  line_seg_.hi    = line_seg_.is_horz ? geom::max_x(shape_)    : geom::max_y(shape_);
 }
 
 // TopoPool

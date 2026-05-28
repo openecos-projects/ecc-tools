@@ -22,15 +22,18 @@
 #include <vector>
 
 namespace ircx {
+namespace interval {
 
+// Ranges use non-zero-length interval semantics: [a0, a1) is valid only when
+// a0 < a1, and two ranges that only touch at an endpoint do not overlap.
 template <typename T>
-struct IntervalRange {
+struct Range {
   T a0{};
   T a1{};
 };
 
 template <typename T>
-inline void normalizeInterval(T& a0, T& a1)
+inline auto normalize(T& a0, T& a1) -> void
 {
   if (a0 > a1) {
     std::swap(a0, a1);
@@ -38,72 +41,59 @@ inline void normalizeInterval(T& a0, T& a1)
 }
 
 template <typename T>
-inline bool isValidInterval(T a0, T a1)
+inline auto is_valid(T a0, T a1) -> bool
 {
   return a0 < a1;
 }
 
 template <typename T>
-inline bool intervalOverlaps(T a0, T a1, T b0, T b1)
+inline auto overlaps(T a0, T a1, T b0, T b1) -> bool
 {
-  normalizeInterval(a0, a1);
-  normalizeInterval(b0, b1);
+  normalize(a0, a1);
+  normalize(b0, b1);
   return std::max(a0, b0) < std::min(a1, b1);
 }
 
+// Returns the geometric intersection. The result may be invalid; callers that
+// have not already checked overlaps() should verify it with is_valid().
 template <typename T>
-inline T intervalOverlapBegin(T a0, T a1, T b0, T b1)
+inline auto intersection(T a0, T a1, T b0, T b1) -> Range<T>
 {
-  normalizeInterval(a0, a1);
-  normalizeInterval(b0, b1);
-  return std::max(a0, b0);
+  normalize(a0, a1);
+  normalize(b0, b1);
+  return {std::max(a0, b0), std::min(a1, b1)};
 }
 
 template <typename T>
-inline T intervalOverlapEnd(T a0, T a1, T b0, T b1)
-{
-  normalizeInterval(a0, a1);
-  normalizeInterval(b0, b1);
-  return std::min(a1, b1);
-}
-
-template <typename T>
-inline IntervalRange<T> intervalIntersection(T a0, T a1, T b0, T b1)
-{
-  return {intervalOverlapBegin(a0, a1, b0, b1),
-          intervalOverlapEnd(a0, a1, b0, b1)};
-}
-
-template <typename T>
-inline T midpoint(T coord0, T coord1)
+inline auto midpoint(T coord0, T coord1) -> T
 {
   return coord0 + (coord1 - coord0) / 2;
 }
 
-template <typename Interval>
-inline std::vector<Interval> subtractInterval(
-    const std::vector<Interval>& intervals,
-    std::remove_cvref_t<decltype(std::declval<Interval>().a0)> cut_a0,
-    std::remove_cvref_t<decltype(std::declval<Interval>().a1)> cut_a1)
+template <typename IntervalT>
+inline auto subtract(
+    const std::vector<IntervalT>& intervals,
+    std::remove_cvref_t<decltype(std::declval<IntervalT>().a0)> cut_a0,
+    std::remove_cvref_t<decltype(std::declval<IntervalT>().a1)> cut_a1) -> std::vector<IntervalT>
 {
-  using Coord = std::remove_cvref_t<decltype(std::declval<Interval>().a0)>;
+  using Coord = std::remove_cvref_t<decltype(std::declval<IntervalT>().a0)>;
 
-  std::vector<Interval> next;
-  normalizeInterval(cut_a0, cut_a1);
+  std::vector<IntervalT> next;
+  normalize(cut_a0, cut_a1);
 
   for (const auto& interval : intervals) {
-    if (!intervalOverlaps(interval.a0, interval.a1, cut_a0, cut_a1)) {
+    if (!overlaps(interval.a0, interval.a1, cut_a0, cut_a1)) {
       next.push_back(interval);
       continue;
     }
 
-    const Interval left{interval.a0, static_cast<Coord>(std::min(interval.a1, cut_a0))};
-    if (isValidInterval(left.a0, left.a1)) {
+    const IntervalT left{interval.a0, static_cast<Coord>(std::min(interval.a1, cut_a0))};
+    if (is_valid(left.a0, left.a1)) {
       next.push_back(left);
     }
 
-    const Interval right{static_cast<Coord>(std::max(interval.a0, cut_a1)), interval.a1};
-    if (isValidInterval(right.a0, right.a1)) {
+    const IntervalT right{static_cast<Coord>(std::max(interval.a0, cut_a1)), interval.a1};
+    if (is_valid(right.a0, right.a1)) {
       next.push_back(right);
     }
   }
@@ -111,22 +101,22 @@ inline std::vector<Interval> subtractInterval(
   return next;
 }
 
-template <typename Interval, typename Mergeable>
-inline std::vector<Interval> clipIntervals(
-    const std::vector<Interval>& intervals,
-    std::remove_cvref_t<decltype(std::declval<Interval>().a0)> clip_a0,
-    std::remove_cvref_t<decltype(std::declval<Interval>().a1)> clip_a1,
-    Mergeable mergeable)
+template <typename IntervalT, typename Mergeable>
+inline auto clip(
+    const std::vector<IntervalT>& intervals,
+    std::remove_cvref_t<decltype(std::declval<IntervalT>().a0)> clip_a0,
+    std::remove_cvref_t<decltype(std::declval<IntervalT>().a1)> clip_a1,
+    Mergeable mergeable) -> std::vector<IntervalT>
 {
-  std::vector<Interval> clipped;
-  if (!isValidInterval(clip_a0, clip_a1)) {
+  std::vector<IntervalT> clipped;
+  if (!is_valid(clip_a0, clip_a1)) {
     return clipped;
   }
 
   for (const auto& interval : intervals) {
     const auto a0 = std::max(clip_a0, interval.a0);
     const auto a1 = std::min(clip_a1, interval.a1);
-    if (!isValidInterval(a0, a1)) {
+    if (!is_valid(a0, a1)) {
       continue;
     }
 
@@ -137,7 +127,7 @@ inline std::vector<Interval> clipIntervals(
       continue;
     }
 
-    Interval out = interval;
+    IntervalT out = interval;
     out.a0 = a0;
     out.a1 = a1;
     clipped.push_back(std::move(out));
@@ -146,4 +136,5 @@ inline std::vector<Interval> clipIntervals(
   return clipped;
 }
 
+}  // namespace interval
 }  // namespace ircx
