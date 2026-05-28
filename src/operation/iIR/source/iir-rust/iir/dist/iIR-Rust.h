@@ -89,6 +89,8 @@ const void *create_pg_netlist(const char *c_power_net_name);
  */
 const void *create_rc_data(const void *c_pg_netlist_ptr, uintptr_t len);
 
+const void *create_rc_data_from_spef(struct RustVec c_spef_nets);
+
 double get_sum_resistance(const void *c_rc_data, const char *c_net_name);
 
 struct RustNetConductanceData build_one_net_conductance_matrix_data(const void *c_rc_data,
