@@ -234,6 +234,7 @@ pub fn create_rc_data_from_spef_nets(nets: &[SpefNetInput]) -> RCData {
         rc_data.add_one_net_data(one_net_data);
     }
 
+    log::info!("build net rc data finish");
     rc_data
 }
 
