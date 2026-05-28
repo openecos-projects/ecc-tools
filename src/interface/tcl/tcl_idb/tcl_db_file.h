@@ -262,4 +262,18 @@ class CmdWriteSocJson : public TclCmd
   // private data
 };
 
+class CmdWriteAbstractLef : public TclCmd
+{
+ public:
+  explicit CmdWriteAbstractLef(const char* cmd_name);
+  ~CmdWriteAbstractLef() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
 }  // namespace tcl

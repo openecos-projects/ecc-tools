@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 ECC_BINARY="${ECC_BINARY:-${REPO_ROOT}/bin/ecc_bin}"
 WORKSPACE="${WORKSPACE_HOME:-gcd}"
-STEPS=(Floorplan fixFanout place CTS legalization route drc filler RCX sta)
+STEPS=(Floorplan fixFanout place CTS legalization route drc filler RCX sta harden)
 
 usage() {
   cat <<EOF

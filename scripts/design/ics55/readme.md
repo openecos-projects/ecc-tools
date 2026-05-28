@@ -1,6 +1,6 @@
 # ICS55 ECC 脚本说明和用户手册
 
-本文档说明 `scripts/design/ics55` 目录下的 GCD 参考设计脚本、运行方式、输入输出目录和调试开关。该 flow 面向 ICS55 PDK，使用 `ecc_bin` 依次执行 floorplan、fanout 修复、place、CTS、legalization、route、DRC、filler、RCX 和 STA。
+本文档说明 `scripts/design/ics55` 目录下的 GCD 参考设计脚本、运行方式、输入输出目录和调试开关。该 flow 面向 ICS55 PDK，使用 `ecc_bin` 依次执行 floorplan、fanout 修复、place、CTS、legalization、route、DRC、filler、RCX、STA 和 harden。
 
 ## 目录结构
 
@@ -22,10 +22,11 @@ scripts/design/ics55/
 │   ├── CTS.tcl
 │   ├── legalization.tcl
 │   ├── route.tcl
+│   ├── drc.tcl
+│   ├── filler.tcl
 │   ├── rcx.tcl
 │   ├── sta.tcl
-│   ├── drc.tcl
-│   └── filler.tcl
+│   └── harden.tcl
 └── gcd/                    # 默认 workspace
     ├── home/               # workspace 元数据
     ├── origin/             # workspace 输入
@@ -36,7 +37,7 @@ scripts/design/ics55/
     └── <step>_ecc/data/    # 工具工作目录
 ```
 
-`<step>_ecc` 包括 `Floorplan_ecc`、`fixFanout_ecc`、`place_ecc`、`CTS_ecc`、`legalization_ecc`、`route_ecc`、`RCX_ecc`、`sta_ecc`、`drc_ecc` 和 `filler_ecc`。
+`<step>_ecc` 包括 `Floorplan_ecc`、`fixFanout_ecc`、`place_ecc`、`CTS_ecc`、`legalization_ecc`、`route_ecc`、`drc_ecc`、`filler_ecc`、`RCX_ecc`、`sta_ecc` 和 `harden_ecc`。
 
 ## 前置条件
 
@@ -154,8 +155,9 @@ set RTL2GDS_FLOW 0
 | 6 | route | `steps/route.tcl` | `legalization_ecc/output/gcd_legalization.def.gz` 或 `gcd_legalization_db` | `init_rt`、`run_rt` | `route_ecc/output/gcd_route.*`、`gcd_route_db` |
 | 7 | drc | `steps/drc.tcl` | `route_ecc/output/gcd_route.def.gz` 或 `gcd_route_db` | `init_drc`、`run_drc` | `drc_ecc/output/gcd_drc.*`、`gcd_drc_db`、`report/drc.rpt` |
 | 8 | filler | `steps/filler.tcl` | `drc_ecc/output/gcd_drc.def.gz` 或 `gcd_drc_db` | `run_filler` | `filler_ecc/output/gcd_filler.*`、`gcd_filler_db` |
-| 9 | RCX | `steps/rcx.tcl` | `filler_ecc/output/gcd_filler.def.gz` 或 `gcd_filler_db`、`config/rcx.json` | `init_rcx`、`read_mapping`、`read_corner`、`run_rcx`、`report_rcx` | `RCX_ecc/output/gcd_RCX.*`、`gcd_RCX_db`、`gcd_<corner>.spef` |
-| 10 | sta | `steps/sta.tcl` | `RCX_ecc/output/gcd_RCX.v`、`origin/gcd.sdc`、`config/rcx.json` 中的 SPEF | `read_netlist`、`read_liberty`、`read_sdc`、`read_spef`、`report_timing` | `sta_ecc/output/gcd_sta.*`、`output/sta/<corner>/` |
+| 9 | RCX | `steps/rcx.tcl` | `filler_ecc/output/gcd_filler.def.gz` 或 `gcd_filler_db`、`config/rcx.json` | `init_rcx -config`、`run_rcx`、`report_rcx` | `RCX_ecc/output/gcd_RCX.*`、`gcd_RCX_db`、`gcd_<corner>.spef` |
+| 10 | sta | `steps/sta.tcl` | `filler_ecc/output/gcd_filler.def.gz` 或 `gcd_filler_db`、`origin/gcd.sdc`、`config/rcx.json` 中的 SPEF | `read_netlist`、`read_liberty`、`read_sdc`、`read_spef`、`report_timing` | `sta_ecc/output/gcd_sta.*`、`output/sta/<corner>/` |
+| 11 | harden | `steps/harden.tcl` | `filler_ecc/output/gcd_filler.def.gz` 或 `gcd_filler_db` | `gds_save -harden`、`write_soc_json`、`write_abstract_lef`、`write_timing_model` | `harden_ecc/output/gcd_harden.gds`、`gcd_harden.json`、`gcd_harden.lef`、`gcd_harden.lib`、`gcd_harden_db` |
 
 每个 step 的 `output` 目录通常包含：
 
@@ -163,7 +165,7 @@ set RTL2GDS_FLOW 0
 - `*.v`：保存后的 Verilog netlist
 - `*.gds`：保存后的 GDS，失败时脚本只打印 warning 并继续
 - `*_db/`：`save_data` 保存的持久化 idb 数据
-- `*.json`：脚本中预留的 `json_save` 路径，当前 `step_common.tcl` 中 `json_save` 被注释，默认不会生成
+- `*.json`：脚本中预留的 `json_save` 路径，当前 `step_common.tcl` 中 `json_save` 被注释，普通 step 默认不会生成；`harden` step 会通过 `write_soc_json` 生成 SoC harden JSON
 
 每个 step 的 `report` 目录通常包含：
 
@@ -215,7 +217,7 @@ gcd/config/<tool>_default_config.json
 
 `step_common.tcl` 中的 `step_prepare_configs` 会把配置里的相对目录展开为绝对路径：
 
-- `Floorplan_ecc`、`fixFanout_ecc`、`place_ecc`、`CTS_ecc`、`legalization_ecc`、`route_ecc`、`RCX_ecc`、`sta_ecc`、`drc_ecc`、`filler_ecc`、`config`、`origin`、`home` 展开到 workspace 根目录。
+- `Floorplan_ecc`、`fixFanout_ecc`、`place_ecc`、`CTS_ecc`、`legalization_ecc`、`route_ecc`、`drc_ecc`、`filler_ecc`、`RCX_ecc`、`sta_ecc`、`harden_ecc`、`config`、`origin`、`home` 展开到 workspace 根目录。
 - `IP`、`prtech`、`corners` 展开到 PDK 根目录。
 
 因此运行脚本后，`gcd/config/*.json` 可能会被改写成绝对路径，这是预期行为。`steps/rtl2gds.tcl` 会先 source `create_workspace.tcl`，重新创建默认 `gcd` workspace 并复制 `config/`、`origin/` 模板；单步 `run_ecc.sh` 不会自动重建 workspace。
@@ -249,7 +251,7 @@ gcd/config/<tool>_default_config.json
 支持的 step：
 
 ```text
-Floorplan fixFanout place CTS legalization route drc filler RCX sta
+Floorplan fixFanout place CTS legalization route drc filler RCX sta harden
 ```
 
 ## 常见问题

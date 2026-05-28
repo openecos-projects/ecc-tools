@@ -99,7 +99,7 @@ proc cw_parameters_json {} {
 }
 
 proc cw_flow_json {} {
-  set step_names {Floorplan fixFanout place CTS legalization route drc filler RCX sta}
+  set step_names {Floorplan fixFanout place CTS legalization route drc filler RCX sta harden}
   set step_items {}
   foreach step_name $step_names {
     lappend step_items [format {        {
@@ -152,7 +152,7 @@ proc cw_subflow_json {step_name} {
 }
 
 proc cw_create_workspace {workspace_root source_config_dir workspace_config_dir source_origin_dir workspace_origin_dir} {
-  set step_names {Floorplan fixFanout place CTS legalization route drc filler RCX sta}
+  set step_names {Floorplan fixFanout place CTS legalization route drc filler RCX sta harden}
 
   file mkdir $workspace_root
   foreach dir {home origin config log} {

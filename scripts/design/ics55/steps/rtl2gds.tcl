@@ -19,8 +19,9 @@ source $script_dir/legalization.tcl
 source $script_dir/route.tcl
 source $script_dir/drc.tcl
 source $script_dir/filler.tcl
-# source $script_dir/rcx.tcl
-# source $script_dir/sta.tcl
+source $script_dir/rcx.tcl
+source $script_dir/sta.tcl
+source $script_dir/harden.tcl
 
 set RTL2GDS_FLOW 0
 step_maybe_flow_exit

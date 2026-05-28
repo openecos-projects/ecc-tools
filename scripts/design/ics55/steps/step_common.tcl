@@ -93,7 +93,7 @@ proc step_expand_config_text {text workspace_root pdk_root} {
   set replacements {}
   foreach prefix {
     CTS_ecc Floorplan_ecc fixFanout_ecc place_ecc legalization_ecc
-    route_ecc drc_ecc filler_ecc RCX_ecc rcx_ecc sta_ecc config origin home
+    route_ecc drc_ecc filler_ecc RCX_ecc rcx_ecc sta_ecc harden_ecc config origin home
   } {
     lappend replacements "\"/$prefix\"" "\"$workspace_root/$prefix\""
     lappend replacements "\"/$prefix/" "\"$workspace_root/$prefix/"

@@ -31,6 +31,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "file_soc.h"
 
+#include <algorithm>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -166,7 +167,31 @@ bool JsonSoc::saveJson()
   json core_list_json = json::array();
   auto* instance_list = idb_design == nullptr ? nullptr : idb_design->get_instance_list();
   int num_cores = 0;
-  for(auto inst : instance_list->get_instance_list()) {
+  std::vector<IdbInstance*> sorted_instances = instance_list == nullptr ? std::vector<IdbInstance*>() : instance_list->get_instance_list();
+  std::stable_sort(sorted_instances.begin(), sorted_instances.end(), [](IdbInstance* left, IdbInstance* right) {
+    if (left == nullptr) {
+      return false;
+    }
+    if (right == nullptr) {
+      return true;
+    }
+
+    auto* left_box = left->get_bounding_box();
+    auto* right_box = right->get_bounding_box();
+    if (left_box == nullptr) {
+      return false;
+    }
+    if (right_box == nullptr) {
+      return true;
+    }
+
+    if (left_box->get_high_y() != right_box->get_high_y()) {
+      return left_box->get_high_y() > right_box->get_high_y();
+    }
+    return left_box->get_low_x() < right_box->get_low_x();
+  });
+
+  for (auto inst : sorted_instances) {
     if(inst == nullptr || inst->get_cell_master() == nullptr || !is_exist_harden_core(inst->get_name())) {
       continue;
     }
