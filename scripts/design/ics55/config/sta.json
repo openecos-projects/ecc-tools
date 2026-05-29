@@ -1,6 +1,5 @@
 {
-    "liberty" :
-    [
+    "liberty" :[
         {
             "corner": "MAX",
             "temperature": 125,

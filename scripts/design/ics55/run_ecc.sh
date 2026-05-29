@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 ECC_BINARY="${ECC_BINARY:-${REPO_ROOT}/bin/ecc_bin}"
 WORKSPACE="${WORKSPACE_HOME:-gcd}"
-STEPS=(Floorplan fixFanout place CTS legalization route drc filler RCX sta harden)
+STEPS=(create_workspace Floorplan fixFanout place CTS legalization route drc filler RCX sta harden)
 
 usage() {
   cat <<EOF
@@ -69,6 +69,43 @@ run_step() {
   return "${status}"
 }
 
+run_flow() {
+  local runner
+  local status
+
+  runner="$(mktemp "${TMPDIR:-/tmp}/ecc-rtl2gds.XXXXXX.tcl")"
+  cat > "${runner}" <<EOF
+set RTL2GDS 1
+set RESTORE_DATA 1
+set RTL2GDS_FLOW 1
+
+source {${SCRIPT_DIR}/steps/create_workspace.tcl}
+source {${SCRIPT_DIR}/steps/Floorplan.tcl}
+source {${SCRIPT_DIR}/steps/fixFanout.tcl}
+source {${SCRIPT_DIR}/steps/place.tcl}
+source {${SCRIPT_DIR}/steps/CTS.tcl}
+source {${SCRIPT_DIR}/steps/legalization.tcl}
+source {${SCRIPT_DIR}/steps/route.tcl}
+source {${SCRIPT_DIR}/steps/drc.tcl}
+source {${SCRIPT_DIR}/steps/filler.tcl}
+source {${SCRIPT_DIR}/steps/rcx.tcl}
+source {${SCRIPT_DIR}/steps/sta.tcl}
+source {${SCRIPT_DIR}/steps/harden.tcl}
+
+set RTL2GDS_FLOW 0
+step_maybe_flow_exit
+EOF
+
+  if "${ECC_BINARY}" -script "${runner}" "${WORKSPACE}"; then
+    status=0
+  else
+    status=$?
+  fi
+
+  rm -f "${runner}"
+  return "${status}"
+}
+
 STEP="all"
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
@@ -111,9 +148,7 @@ cd "${SCRIPT_DIR}"
 
 case "${STEP}" in
   all)
-    for step in "${STEPS[@]}"; do
-      run_step "${step}"
-    done
+    run_flow
     ;;
   *)
     if is_supported_step "${STEP}"; then
