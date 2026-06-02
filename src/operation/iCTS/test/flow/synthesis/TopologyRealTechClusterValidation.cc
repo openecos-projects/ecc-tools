@@ -32,7 +32,7 @@
 #include "Inst.hh"
 #include "Pin.hh"
 #include "Point.hh"
-#include "TopologyRealTechSmokeSupport.hh"
+#include "TopologyRealTechScenario.hh"
 #include "database/design/Net.hh"
 #include "synthesis/topology/Topology.hh"
 
@@ -51,17 +51,17 @@ auto MakeClusterBufferPrefix(std::size_t cluster_buffer_index) -> std::string
 
 }  // namespace
 
-auto CountNonEmptyClusters(const icts::ClusterResult& cluster_result) -> std::size_t
+auto CountNonEmptyClusters(const icts::ClusterOutput& cluster_output) -> std::size_t
 {
-  return static_cast<std::size_t>(std::count_if(cluster_result.clusters.begin(), cluster_result.clusters.end(),
+  return static_cast<std::size_t>(std::count_if(cluster_output.clusters.begin(), cluster_output.clusters.end(),
                                                 [](const std::vector<icts::Pin*>& cluster) -> bool { return !cluster.empty(); }));
 }
 
-auto CollectClusterBufferInsts(const icts::Topology::BuildResult& result) -> std::unordered_set<icts::Inst*>
+auto CollectClusterBufferInsts(const icts::Topology::Build& result) -> std::unordered_set<icts::Inst*>
 {
   std::unordered_set<icts::Inst*> cluster_buffer_insts;
-  cluster_buffer_insts.reserve(result.cluster_buffers.size());
-  for (const auto& cluster_buffer : result.cluster_buffers) {
+  cluster_buffer_insts.reserve(result.output.cluster_buffers.size());
+  for (const auto& cluster_buffer : result.output.cluster_buffers) {
     if (cluster_buffer.inst != nullptr) {
       cluster_buffer_insts.insert(cluster_buffer.inst);
     }
@@ -112,33 +112,33 @@ auto ValidateClusteredSinkConnectivity(const std::vector<icts::Pin*>& sinks, con
   return validation;
 }
 
-auto ValidateClusterBufferMastersFollowLeafSemantics(const icts::Topology::BuildResult& result, const std::string& min_cluster_master)
+auto ValidateClusterBufferMastersFollowLeafSemantics(const icts::Topology::Build& result, const std::string& min_cluster_master)
     -> TopologyValidationResult
 {
   TopologyValidationResult validation;
-  if (!result.cluster_result.has_value()) {
+  if (!result.output.cluster_output.has_value()) {
     AddFailure(validation, "Expected clustered synthesis result to include cluster metadata.");
     return validation;
   }
 
-  const auto& cluster_result = *result.cluster_result;
-  const std::size_t non_empty_cluster_count = CountNonEmptyClusters(cluster_result);
-  if (result.cluster_buffers.size() != non_empty_cluster_count) {
+  const auto& cluster_output = *result.output.cluster_output;
+  const std::size_t non_empty_cluster_count = CountNonEmptyClusters(cluster_output);
+  if (result.output.cluster_buffers.size() != non_empty_cluster_count) {
     AddFailure(validation, "Cluster buffer count does not match non-empty cluster count.");
   }
-  if (result.cluster_buffers.empty()) {
+  if (result.output.cluster_buffers.empty()) {
     AddFailure(validation, "Expected at least one cluster buffer.");
   }
 
-  for (std::size_t cluster_buffer_index = 0; cluster_buffer_index < result.cluster_buffers.size(); ++cluster_buffer_index) {
-    const auto& cluster_buffer = result.cluster_buffers.at(cluster_buffer_index);
+  for (std::size_t cluster_buffer_index = 0; cluster_buffer_index < result.output.cluster_buffers.size(); ++cluster_buffer_index) {
+    const auto& cluster_buffer = result.output.cluster_buffers.at(cluster_buffer_index);
     const std::string prefix = MakeClusterBufferPrefix(cluster_buffer_index);
-    if (cluster_buffer.cluster_index >= cluster_result.clusters.size()) {
+    if (cluster_buffer.cluster_index >= cluster_output.clusters.size()) {
       AddFailure(validation, prefix + "cluster index is out of range");
       continue;
     }
 
-    const auto& cluster_sinks = cluster_result.clusters.at(cluster_buffer.cluster_index);
+    const auto& cluster_sinks = cluster_output.clusters.at(cluster_buffer.cluster_index);
     if (cluster_sinks.empty()) {
       AddFailure(validation, prefix + "cluster is empty");
     }

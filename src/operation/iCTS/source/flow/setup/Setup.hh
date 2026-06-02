@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -27,13 +27,41 @@
 
 namespace icts {
 
+class Config;
+class Design;
+class SchemaWriter;
+class Wrapper;
+
+struct SetupInput
+{
+  Config* config = nullptr;
+  Design* design = nullptr;
+  Wrapper* wrapper = nullptr;
+  SchemaWriter* reporter = nullptr;
+  std::string config_file;
+  std::string work_dir;
+};
+
+struct RuntimeSetupInput
+{
+  const Config* config = nullptr;
+  const Wrapper* wrapper = nullptr;
+  SchemaWriter* reporter = nullptr;
+};
+
+struct SetupSummary
+{
+  bool success = false;
+  std::string reason;
+};
+
 class Setup
 {
  public:
   Setup() = delete;
 
-  static auto initialize(const std::string& config_file, const std::string& work_dir) -> bool;
-  static auto emitRuntimeSetup() -> void;
+  static auto initializeRuntime(const SetupInput& input) -> SetupSummary;
+  static auto emitRuntimeSetup(const RuntimeSetupInput& input) -> void;
 };
 
 }  // namespace icts

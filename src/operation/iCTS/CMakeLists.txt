@@ -14,6 +14,7 @@ option(DEBUG_ICTS_SOURCE_UTILS_GEOMETRY "source utils geometry" OFF)
 option(DEBUG_ICTS_SOURCE_UTILS "source utils" OFF)
 
 # source/flow
+option(DEBUG_ICTS_SOURCE_FLOW_SYNTHESIS_REALIZATION "source flow synthesis realization" OFF)
 option(DEBUG_ICTS_SOURCE_FLOW "source flow" OFF)
 
 # source/module

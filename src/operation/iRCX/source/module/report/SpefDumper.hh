@@ -33,6 +33,7 @@ class RCTable;
 class TopoNode;
 class TopoEdge;
 class SpefContext;
+class LayerTable;
 
 class SpefDumper
 {
@@ -44,6 +45,7 @@ class SpefDumper
   void set_topo_pool(const TopoPool* v) { topo_pool_ = v; }
   void set_rc_table(const RCTable* v) { rc_table_ = v; }
   void set_corner_data(const std::vector<RCXData::CornerData>* v) { corner_data_ = v; }
+  void set_layer_table(const LayerTable* v) { layer_table_ = v; }
 
   auto dump(const Str& output_dir) const -> bool;
 
@@ -67,11 +69,20 @@ class SpefDumper
     double cap_ff{0.0};
   };
 
+  struct ReportLayer
+  {
+    Size report_id{kMaxSize};
+    Size design_id{kMaxSize};
+    Str design_name;
+    Str process_name;
+  };
+
   void buildNameMaps() const;
   void buildPortIo() const;
   void buildNodeSpefNames() const;
   void buildNetSpefNames() const;
   void buildCouplingRefs(Size corner_idx) const;
+  void buildReportLayerMap() const;
 
   // Return the SPEF node-name string for a given node.
   //   - Port pin node      : "*<port_spef_id>"
@@ -80,26 +91,32 @@ class SpefDumper
   Str nodeName(const TopoNode& node) const;
 
   // Write helpers
-  void writeHeader(std::ofstream& ofs) const;
+  void writeHeader(std::ofstream& ofs, Size corner_idx) const;
   void writeNameMap(std::ofstream& ofs) const;
   void writePorts(std::ofstream& ofs) const;
+  void writeLayerMap(std::ofstream& ofs) const;
 
   auto dumpCorner(const Str& output_dir, Size corner_idx) const -> bool;
 
   void writeDNet(std::ostream& os, Size corner_idx, Size net_idx) const;
-  void writeGeometry(std::ostream& os, Size net_idx) const;
+  void writeNodeGeometry(std::ostream& os, const TopoNode& node, Micron dbu_to_micron) const;
+  void writeResistanceGeometry(std::ostream& os, Size corner_idx, const TopoEdge& edge, Micron dbu_to_micron) const;
+  Size reportLayerLevel(Size design_layer_id) const;
 
   const SpefContext* spef_context_{nullptr};
   const LayoutData* layout_data_{nullptr};
   const TopoPool* topo_pool_{nullptr};
   const RCTable* rc_table_{nullptr};
   const std::vector<RCXData::CornerData>* corner_data_{nullptr};
+  const LayerTable* layer_table_{nullptr};
 
   mutable NameMaps name_maps_;
   mutable std::unordered_map<Str, char> port_io_;
   mutable std::vector<Str> node_spef_names_;
   mutable std::vector<Str> net_spef_names_;
   mutable std::vector<std::vector<CouplingRef>> net_coupling_refs_;
+  mutable std::vector<ReportLayer> report_layers_;
+  mutable std::unordered_map<Size, Size> design_to_report_layer_level_;
   mutable std::vector<Str> net_str_buffer_;
 };
 

@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -26,6 +26,8 @@
 #include <string>
 #include <vector>
 
+#include "Flow.hh"
+#include "common/CTSTestRuntime.hh"
 #include "database/design/Clock.hh"
 #include "database/design/ClockDAG.hh"
 #include "database/design/Design.hh"
@@ -44,13 +46,13 @@ class ScopedDesignReset
  public:
   ScopedDesignReset()
   {
-    WRAPPER_INST.reset();
-    DESIGN_INST.reset();
+    icts_test::runtime::CurrentRuntime().wrapper.reset();
+    icts_test::runtime::CurrentRuntime().design.reset();
   }
   ~ScopedDesignReset()
   {
-    WRAPPER_INST.reset();
-    DESIGN_INST.reset();
+    icts_test::runtime::CurrentRuntime().wrapper.reset();
+    icts_test::runtime::CurrentRuntime().design.reset();
   }
 };
 
@@ -70,7 +72,7 @@ struct ClockPins
 
 auto makeInst(const std::string& name, icts::InstType type, const icts::Point<int>& location) -> icts::Inst*
 {
-  auto* inst = DESIGN_INST.makeInst(name);
+  auto* inst = icts_test::runtime::CurrentRuntime().design.makeInst(name);
   inst->set_name(name);
   inst->set_cell_master(type == icts::InstType::kBuffer ? "BUF_X1" : "REG_X1");
   inst->set_type(type);
@@ -80,7 +82,7 @@ auto makeInst(const std::string& name, icts::InstType type, const icts::Point<in
 
 auto makePin(const std::string& name, icts::PinType type, icts::Inst* inst, const icts::Point<int>& location) -> icts::Pin*
 {
-  auto* pin = DESIGN_INST.makePin(name);
+  auto* pin = icts_test::runtime::CurrentRuntime().design.makePin(name);
   pin->set_name(name);
   pin->set_type(type);
   pin->set_inst(inst);
@@ -93,13 +95,13 @@ auto makePin(const std::string& name, icts::PinType type, icts::Inst* inst, cons
       inst->add_pin(pin);
     }
   }
-  (void) DESIGN_INST.indexPin(pin);
+  (void) icts_test::runtime::CurrentRuntime().design.indexPin(pin);
   return pin;
 }
 
 auto connectNet(const std::string& name, icts::Pin* driver, const std::vector<icts::Pin*>& loads) -> icts::Net*
 {
-  auto* net = DESIGN_INST.makeNet(name);
+  auto* net = icts_test::runtime::CurrentRuntime().design.makeNet(name);
   net->set_name(name);
   net->set_driver(driver);
   net->set_loads({});
@@ -115,9 +117,21 @@ auto connectNet(const std::string& name, icts::Pin* driver, const std::vector<ic
   return net;
 }
 
+auto makeEvaluationInput() -> icts::EvaluationInput
+{
+  auto& shared = icts_test::runtime::CurrentRuntime();
+  return icts::EvaluationInput{
+      .config = &shared.config,
+      .clock_layout = nullptr,
+      .design = &shared.design,
+      .wrapper = &shared.wrapper,
+      .reporter = &shared.reporter,
+  };
+}
+
 auto makeClock(const std::string& clock_name, const std::string& net_name) -> ClockPins
 {
-  auto* clock = DESIGN_INST.makeClock(clock_name, net_name);
+  auto* clock = icts_test::runtime::CurrentRuntime().design.makeClock(clock_name, net_name);
   clock->set_clock_name(clock_name);
   clock->set_clock_net_name(net_name);
   auto* source = makePin(clock_name + "_src", icts::PinType::kOut, nullptr, icts::Point<int>(0, 0));
@@ -168,8 +182,8 @@ TEST(ClockDAGTest, BranchPathsReportSourceToFlipFlopBufferDepths)
   clock_pins.clock->add_load(ff_one);
   clock_pins.clock->add_load(ff_two);
 
-  ASSERT_TRUE(DESIGN_INST.rebuildClockDAG());
-  const auto stats = DESIGN_INST.get_clock_dag().pathBufferStats(clock_pins.clock);
+  ASSERT_TRUE(icts_test::runtime::CurrentRuntime().design.rebuildClockDAG());
+  const auto stats = icts_test::runtime::CurrentRuntime().design.get_clock_dag().pathBufferStats(clock_pins.clock);
   EXPECT_TRUE(stats.available);
   EXPECT_EQ(stats.status, "available");
   EXPECT_EQ(stats.min_buffer_count, 1);
@@ -187,11 +201,52 @@ TEST(ClockDAGTest, DirectSourceToFlipFlopPathReportsZeroBuffers)
   clock_pins.clock->set_clock_source_net(clock_pins.source_net);
   clock_pins.clock->add_load(ff);
 
-  ASSERT_TRUE(DESIGN_INST.rebuildClockDAG());
-  const auto stats = DESIGN_INST.get_clock_dag().pathBufferStats(clock_pins.clock);
+  ASSERT_TRUE(icts_test::runtime::CurrentRuntime().design.rebuildClockDAG());
+  const auto stats = icts_test::runtime::CurrentRuntime().design.get_clock_dag().pathBufferStats(clock_pins.clock);
   EXPECT_TRUE(stats.available);
   EXPECT_EQ(stats.min_buffer_count, 0);
   EXPECT_EQ(stats.max_buffer_count, 0);
+}
+
+TEST(ClockDAGTest, BoundaryLoadDoesNotRequireBufferInputArc)
+{
+  const ScopedDesignReset scoped_design_reset;
+
+  auto clock_pins = makeClock("clk", "clk_net");
+  auto* boundary_load = makeSink("comb_boundary", icts::InstType::kBoundaryLoad, 10);
+  auto* latch_sink = makeSink("latch_sink", icts::InstType::kLatch, 20);
+  connectNet("clk_net", clock_pins.source, {boundary_load, latch_sink});
+  clock_pins.clock->set_clock_source_net(clock_pins.source_net);
+  clock_pins.clock->add_load(boundary_load);
+  clock_pins.clock->add_load(latch_sink);
+
+  ASSERT_TRUE(icts_test::runtime::CurrentRuntime().design.rebuildClockDAG());
+  const auto stats = icts_test::runtime::CurrentRuntime().design.get_clock_dag().pathBufferStats(clock_pins.clock);
+  EXPECT_TRUE(stats.available);
+  EXPECT_EQ(stats.status, "available");
+  EXPECT_EQ(stats.min_buffer_count, 0);
+  EXPECT_EQ(stats.max_buffer_count, 0);
+  EXPECT_EQ(stats.ff_sink_terminal_count, 1U);
+}
+
+TEST(ClockDAGTest, MalformedTrueBufferInvalidatesTopology)
+{
+  const ScopedDesignReset scoped_design_reset;
+
+  auto clock_pins = makeClock("clk", "clk_net");
+  auto* buffer_inst = makeInst("malformed_buffer", icts::InstType::kBuffer, icts::Point<int>(10, 0));
+  auto* buffer_output = makePin("Y", icts::PinType::kOut, buffer_inst, buffer_inst->get_location());
+  auto* latch_sink = makeSink("latch_sink", icts::InstType::kLatch, 20);
+  connectNet("clk_net", clock_pins.source, {buffer_output});
+  clock_pins.clock->set_clock_source_net(clock_pins.source_net);
+  auto* leaf_net = connectNet("leaf_net", buffer_output, {latch_sink});
+  clock_pins.clock->add_inst(buffer_inst);
+  clock_pins.clock->add_net(leaf_net);
+  clock_pins.clock->add_load(latch_sink);
+
+  EXPECT_FALSE(icts_test::runtime::CurrentRuntime().design.rebuildClockDAG());
+  EXPECT_NE(icts_test::runtime::CurrentRuntime().design.get_clock_dag().get_status().find("clock_cell_input_pin_is_null"),
+            std::string::npos);
 }
 
 TEST(ClockDAGTest, NoFlipFlopTerminalIsUnavailableAndDoesNotReuseTotalBufferCount)
@@ -209,8 +264,8 @@ TEST(ClockDAGTest, NoFlipFlopTerminalIsUnavailableAndDoesNotReuseTotalBufferCoun
   clock_pins.clock->add_net(leaf_net);
   clock_pins.clock->add_load(macro_sink);
 
-  ASSERT_TRUE(DESIGN_INST.rebuildClockDAG());
-  const auto stats = DESIGN_INST.get_clock_dag().pathBufferStats(clock_pins.clock);
+  ASSERT_TRUE(icts_test::runtime::CurrentRuntime().design.rebuildClockDAG());
+  const auto stats = icts_test::runtime::CurrentRuntime().design.get_clock_dag().pathBufferStats(clock_pins.clock);
   EXPECT_FALSE(stats.available);
   EXPECT_EQ(stats.status, "no_ff_sink_terminal");
   EXPECT_EQ(stats.min_buffer_count, 0);
@@ -229,9 +284,9 @@ TEST(ClockDAGTest, CycleInvalidatesTopologyAndPathStats)
   clock_pins.clock->add_inst(buffer.inst);
   clock_pins.clock->add_net(loop_net);
 
-  EXPECT_FALSE(DESIGN_INST.rebuildClockDAG());
-  EXPECT_TRUE(DESIGN_INST.get_clock_dag().hasCycle(clock_pins.clock));
-  const auto stats = DESIGN_INST.get_clock_dag().pathBufferStats(clock_pins.clock);
+  EXPECT_FALSE(icts_test::runtime::CurrentRuntime().design.rebuildClockDAG());
+  EXPECT_TRUE(icts_test::runtime::CurrentRuntime().design.get_clock_dag().hasCycle(clock_pins.clock));
+  const auto stats = icts_test::runtime::CurrentRuntime().design.get_clock_dag().pathBufferStats(clock_pins.clock);
   EXPECT_FALSE(stats.available);
   EXPECT_EQ(stats.status, "invalid_topology");
 }
@@ -260,13 +315,13 @@ TEST(ClockDAGTest, MultiClockQueriesRemainIsolated)
   clock_two.clock->add_net(leaf_net);
   clock_two.clock->add_load(ff_two);
 
-  ASSERT_TRUE(DESIGN_INST.rebuildClockDAG());
-  const auto zero_stats = DESIGN_INST.get_clock_dag().pathBufferStats(clock_zero.clock);
+  ASSERT_TRUE(icts_test::runtime::CurrentRuntime().design.rebuildClockDAG());
+  const auto zero_stats = icts_test::runtime::CurrentRuntime().design.get_clock_dag().pathBufferStats(clock_zero.clock);
   EXPECT_TRUE(zero_stats.available);
   EXPECT_EQ(zero_stats.min_buffer_count, 0);
   EXPECT_EQ(zero_stats.max_buffer_count, 0);
 
-  const auto two_stats = DESIGN_INST.get_clock_dag().pathBufferStats(clock_two.clock);
+  const auto two_stats = icts_test::runtime::CurrentRuntime().design.get_clock_dag().pathBufferStats(clock_two.clock);
   EXPECT_TRUE(two_stats.available);
   EXPECT_EQ(two_stats.min_buffer_count, 2);
   EXPECT_EQ(two_stats.max_buffer_count, 2);
@@ -299,7 +354,7 @@ TEST(ClockDAGTest, QorEvaluationPathDepthFieldsUseSourceToFlipFlopDAGStats)
   clock_pins.clock->add_load(ff_two);
 
   icts::EvaluationState state;
-  icts::QorEvaluation::evaluate(state);
+  icts::QorEvaluation::evaluate(state, makeEvaluationInput());
   const auto summary = icts::QorEvaluation::outputSummary(state);
 
   EXPECT_EQ(summary.final_clock_buffer_count, 3);
@@ -327,7 +382,7 @@ TEST(ClockDAGTest, QorEvaluationNoFlipFlopPathDepthIsUnavailableZeroNotTotalBuff
   clock_pins.clock->add_load(macro_sink);
 
   icts::EvaluationState state;
-  icts::QorEvaluation::evaluate(state);
+  icts::QorEvaluation::evaluate(state, makeEvaluationInput());
   const auto summary = icts::QorEvaluation::outputSummary(state);
 
   EXPECT_EQ(summary.final_clock_buffer_count, 1);

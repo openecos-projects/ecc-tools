@@ -3,11 +3,11 @@ add_library(icts_source_module_routing_flute ${ICTS_MODULE_ROUTING}/flute/FLUTER
 target_link_libraries(
   icts_source_module_routing_flute
   PUBLIC
-  icts_source_database
-  icts_source_utils
+  icts_source_database_routing
   PRIVATE
-  icts_source_module_routing_database
   icts_source_module_routing_helper
+  icts_source_utils_geometry
+  log
   flute
   salt
 )
@@ -16,8 +16,6 @@ target_include_directories(
   icts_source_module_routing_flute
   PUBLIC
   ${ICTS_MODULE_ROUTING}/flute
-  PRIVATE
-  ${ICTS_UTILS}
 )
 
 if(DEBUG_ICTS_SOURCE_MODULE_ROUTING_FLUTE)

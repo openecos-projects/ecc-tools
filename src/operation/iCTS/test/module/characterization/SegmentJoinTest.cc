@@ -29,18 +29,16 @@
 #include <utility>
 #include <vector>
 
+#include "characterization/Characterization.hh"
 #include "database/characterization/BufferingPattern.hh"
 #include "database/characterization/PatternId.hh"
 #include "database/characterization/SegmentChar.hh"
-#include "module/characterization/Frontier.hh"
-#include "module/characterization/PatternCombiner.hh"
-#include "module/characterization/SegmentCharTable.hh"
-#include "module/characterization/support/CharacterizationTestSupport.hh"
+#include "module/characterization/fixture/CharacterizationUnitCaseData.hh"
 
 namespace icts_test {
 namespace {
 
-namespace support = characterization;
+namespace char_cases = characterization;
 
 auto MakePatternCompositionState(unsigned source_strength_rank, unsigned sink_strength_rank,
                                  icts::TerminalSemantic terminal_semantic = icts::TerminalSemantic::kLeafUnbuffered)
@@ -93,30 +91,30 @@ TEST(SegmentJoinTest, BasicEqualJoin)
   icts::SegmentCharTable upstream;
   icts::SegmentCharTable downstream;
 
-  upstream.addChar(support::MakeSegmentChar(support::kSlew80, support::kSlew100, support::kCap40, support::kCap50, support::kDelay1p0,
-                                            support::kPower0p5,
-                                            support::SegmentShape{.pattern_id = support::kPattern1, .length_idx = support::kLength1000}));
+  upstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap50, char_cases::kDelay1p0, char_cases::kPower0p5,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern1, .length_idx = char_cases::kLength1000}));
 
-  downstream.addChar(support::MakeSegmentChar(support::kSlew100, support::kSlew120, support::kCap50, support::kCap60, support::kDelay2p0,
-                                              support::kPower0p3,
-                                              support::SegmentShape{.pattern_id = support::kPattern2, .length_idx = support::kLength2000}));
-  downstream.addChar(support::MakeSegmentChar(support::kSlew100, support::kSlew130, support::kCap55, support::kCap70, support::kDelay3p0,
-                                              support::kPower0p4,
-                                              support::SegmentShape{.pattern_id = support::kPattern3, .length_idx = support::kLength3000}));
+  downstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew100, char_cases::kSlew120, char_cases::kCap50, char_cases::kCap60, char_cases::kDelay2p0, char_cases::kPower0p3,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern2, .length_idx = char_cases::kLength2000}));
+  downstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew100, char_cases::kSlew130, char_cases::kCap55, char_cases::kCap70, char_cases::kDelay3p0, char_cases::kPower0p4,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern3, .length_idx = char_cases::kLength3000}));
 
-  const icts::SegmentPatternCombiner combiner(support::kBoundaryKey);
+  const icts::SegmentPatternCombiner combiner(char_cases::kBoundaryKey);
   auto result = upstream.concatWith(downstream, combiner);
 
   ASSERT_EQ(result.size(), 1U);
 
   const auto& merged = result.get_chars().front();
-  EXPECT_EQ(merged.get_input_slew_idx(), support::kSlew80);
-  EXPECT_EQ(merged.get_output_slew_idx(), support::kSlew120);
-  EXPECT_EQ(merged.get_driven_cap_idx(), support::kCap40);
-  EXPECT_EQ(merged.get_load_cap_idx(), support::kCap60);
-  EXPECT_DOUBLE_EQ(merged.get_delay(), support::kDelay3p0);
-  EXPECT_DOUBLE_EQ(merged.get_power(), support::kMergedPower0p8);
-  EXPECT_EQ(merged.get_length_idx(), support::kLengthSum3000);
+  EXPECT_EQ(merged.get_input_slew_idx(), char_cases::kSlew80);
+  EXPECT_EQ(merged.get_output_slew_idx(), char_cases::kSlew120);
+  EXPECT_EQ(merged.get_driven_cap_idx(), char_cases::kCap40);
+  EXPECT_EQ(merged.get_load_cap_idx(), char_cases::kCap60);
+  EXPECT_DOUBLE_EQ(merged.get_delay(), char_cases::kDelay3p0);
+  EXPECT_DOUBLE_EQ(merged.get_power(), char_cases::kMergedPower0p8);
+  EXPECT_EQ(merged.get_length_idx(), char_cases::kLengthSum3000);
   EXPECT_EQ(merged.get_pattern_id().domain, icts::PatternDomain::kSegmentPattern);
 }
 
@@ -125,18 +123,18 @@ TEST(SegmentJoinTest, MultipleMatches)
   icts::SegmentCharTable upstream;
   icts::SegmentCharTable downstream;
 
-  upstream.addChar(support::MakeSegmentChar(support::kSlew80, support::kSlew100, support::kCap40, support::kCap50, support::kDelay1p0,
-                                            support::kPower0p5,
-                                            support::SegmentShape{.pattern_id = support::kPattern1, .length_idx = support::kLength1000}));
-  upstream.addChar(support::MakeSegmentChar(support::kSlew90, support::kSlew100, support::kCap45, support::kCap50, support::kDelay1p5,
-                                            support::kPower0p6,
-                                            support::SegmentShape{.pattern_id = support::kPattern2, .length_idx = support::kLength1500}));
+  upstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap50, char_cases::kDelay1p0, char_cases::kPower0p5,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern1, .length_idx = char_cases::kLength1000}));
+  upstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew90, char_cases::kSlew100, char_cases::kCap45, char_cases::kCap50, char_cases::kDelay1p5, char_cases::kPower0p6,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern2, .length_idx = char_cases::kLength1500}));
 
-  downstream.addChar(support::MakeSegmentChar(support::kSlew100, support::kSlew120, support::kCap50, support::kCap60, support::kDelay2p0,
-                                              support::kPower0p3,
-                                              support::SegmentShape{.pattern_id = support::kPattern3, .length_idx = support::kLength2000}));
+  downstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew100, char_cases::kSlew120, char_cases::kCap50, char_cases::kCap60, char_cases::kDelay2p0, char_cases::kPower0p3,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern3, .length_idx = char_cases::kLength2000}));
 
-  const icts::SegmentPatternCombiner combiner(support::kBoundaryKey);
+  const icts::SegmentPatternCombiner combiner(char_cases::kBoundaryKey);
   auto result = upstream.concatWith(downstream, combiner);
 
   EXPECT_EQ(result.size(), 2U);
@@ -147,14 +145,14 @@ TEST(SegmentJoinTest, NoMatches)
   icts::SegmentCharTable upstream;
   icts::SegmentCharTable downstream;
 
-  upstream.addChar(support::MakeSegmentChar(support::kSlew80, support::kSlew100, support::kCap40, support::kCap50, support::kDelay1p0,
-                                            support::kPower0p5,
-                                            support::SegmentShape{.pattern_id = support::kPattern1, .length_idx = support::kLength1000}));
-  downstream.addChar(support::MakeSegmentChar(support::kSlew100, support::kSlew120, support::kCap51, support::kCap60, support::kDelay2p0,
-                                              support::kPower0p3,
-                                              support::SegmentShape{.pattern_id = support::kPattern2, .length_idx = support::kLength2000}));
+  upstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap50, char_cases::kDelay1p0, char_cases::kPower0p5,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern1, .length_idx = char_cases::kLength1000}));
+  downstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew100, char_cases::kSlew120, char_cases::kCap51, char_cases::kCap60, char_cases::kDelay2p0, char_cases::kPower0p3,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern2, .length_idx = char_cases::kLength2000}));
 
-  const icts::SegmentPatternCombiner combiner(support::kBoundaryKey);
+  const icts::SegmentPatternCombiner combiner(char_cases::kBoundaryKey);
   auto result = upstream.concatWith(downstream, combiner);
 
   EXPECT_EQ(result.size(), 0U);
@@ -165,42 +163,42 @@ TEST(SegmentJoinTest, ExactJoinRejectsNonMonotonicBoundaryStrengthIncrease)
   icts::SegmentCharTable upstream;
   icts::SegmentCharTable downstream;
 
-  upstream.addChar(support::MakeSegmentChar(support::kSlew80, support::kSlew100, support::kCap40, support::kCap50, support::kDelay1p0,
-                                            support::kPower0p5,
-                                            support::SegmentShape{.pattern_id = support::kPattern1, .length_idx = support::kLength1000}));
+  upstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap50, char_cases::kDelay1p0, char_cases::kPower0p5,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern1, .length_idx = char_cases::kLength1000}));
 
-  downstream.addChar(support::MakeSegmentChar(support::kSlew100, support::kSlew120, support::kCap50, support::kCap60, support::kDelay2p0,
-                                              support::kPower0p3,
-                                              support::SegmentShape{.pattern_id = support::kPattern2, .length_idx = support::kLength2000}));
-  downstream.addChar(support::MakeSegmentChar(support::kSlew100, support::kSlew110, support::kCap50, support::kCap60, support::kDelay1p5,
-                                              support::kPower0p2,
-                                              support::SegmentShape{.pattern_id = support::kPattern3, .length_idx = support::kLength2000}));
+  downstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew100, char_cases::kSlew120, char_cases::kCap50, char_cases::kCap60, char_cases::kDelay2p0, char_cases::kPower0p3,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern2, .length_idx = char_cases::kLength2000}));
+  downstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew100, char_cases::kSlew110, char_cases::kCap50, char_cases::kCap60, char_cases::kDelay1p5, char_cases::kPower0p2,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern3, .length_idx = char_cases::kLength2000}));
 
   MonotonicSegmentPatternCombiner combiner({
-      {icts::PatternId::segment(support::kPattern1), MakePatternCompositionState(3U, 1U)},
-      {icts::PatternId::segment(support::kPattern2), MakePatternCompositionState(2U, 2U)},
-      {icts::PatternId::segment(support::kPattern3), MakePatternCompositionState(1U, 1U)},
+      {icts::PatternId::segment(char_cases::kPattern1), MakePatternCompositionState(3U, 1U)},
+      {icts::PatternId::segment(char_cases::kPattern2), MakePatternCompositionState(2U, 2U)},
+      {icts::PatternId::segment(char_cases::kPattern3), MakePatternCompositionState(1U, 1U)},
   });
   const auto result = upstream.concatWith(downstream, combiner).get_chars();
 
   ASSERT_EQ(result.size(), 1U);
-  EXPECT_EQ(result.front().get_output_slew_idx(), support::kSlew110);
+  EXPECT_EQ(result.front().get_output_slew_idx(), char_cases::kSlew110);
   EXPECT_DOUBLE_EQ(result.front().get_delay(), 2.5);
   EXPECT_DOUBLE_EQ(result.front().get_power(), 0.7);
 }
 
 TEST(SegmentJoinTest, SegmentStateFrontierKeepsDistinctMonotonicBoundaryStates)
 {
-  const auto weaker_sink_boundary = support::MakeSegmentChar(
-      support::kSlew80, support::kSlew100, support::kCap40, support::kCap60, support::kDelay1p0, support::kPower0p5,
-      support::SegmentShape{.pattern_id = support::kPattern1, .length_idx = support::kLength1000});
-  const auto stronger_sink_boundary = support::MakeSegmentChar(
-      support::kSlew80, support::kSlew100, support::kCap40, support::kCap60, support::kDelay1p0, support::kPower0p2,
-      support::SegmentShape{.pattern_id = support::kPattern2, .length_idx = support::kLength1000});
+  const auto weaker_sink_boundary = char_cases::MakeSegmentChar(
+      char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap60, char_cases::kDelay1p0, char_cases::kPower0p5,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern1, .length_idx = char_cases::kLength1000});
+  const auto stronger_sink_boundary = char_cases::MakeSegmentChar(
+      char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap60, char_cases::kDelay1p0, char_cases::kPower0p2,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern2, .length_idx = char_cases::kLength1000});
 
   const auto frontier = icts::BuildSegmentStateFrontier(std::vector<icts::SegmentChar>{weaker_sink_boundary, stronger_sink_boundary},
                                                         [](const icts::SegmentChar& entry) -> icts::PatternCompositionState {
-                                                          if (entry.get_pattern_id().local_id == support::kPattern2) {
+                                                          if (entry.get_pattern_id().local_id == char_cases::kPattern2) {
                                                             return MakePatternCompositionState(3U, 2U);
                                                           }
                                                           return MakePatternCompositionState(3U, 1U);
@@ -213,7 +211,7 @@ TEST(SegmentJoinTest, SegmentStateFrontierKeepsDistinctMonotonicBoundaryStates)
     pattern_ids.push_back(entry.get_pattern_id().local_id);
   }
   std::ranges::sort(pattern_ids);
-  EXPECT_EQ(pattern_ids, (std::vector<unsigned>{support::kPattern1, support::kPattern2}));
+  EXPECT_EQ(pattern_ids, (std::vector<unsigned>{char_cases::kPattern1, char_cases::kPattern2}));
 }
 
 TEST(SegmentJoinTest, JoinSubtractsDownstreamSourceBoundarySwitchPower)
@@ -221,14 +219,14 @@ TEST(SegmentJoinTest, JoinSubtractsDownstreamSourceBoundarySwitchPower)
   icts::SegmentCharTable upstream;
   icts::SegmentCharTable downstream;
 
-  upstream.addChar(support::MakeSegmentChar(
-      support::kSlew80, support::kSlew100, support::kCap40, support::kCap50, support::kDelay1p0, support::kPower0p5,
-      support::SegmentShape{.pattern_id = support::kPattern1, .length_idx = support::kLength1000}, 0.05));
-  downstream.addChar(support::MakeSegmentChar(
-      support::kSlew100, support::kSlew120, support::kCap50, support::kCap60, support::kDelay2p0, support::kPower0p3,
-      support::SegmentShape{.pattern_id = support::kPattern2, .length_idx = support::kLength2000}, 0.10));
+  upstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap50, char_cases::kDelay1p0, char_cases::kPower0p5,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern1, .length_idx = char_cases::kLength1000}, 0.05));
+  downstream.addChar(char_cases::MakeSegmentChar(
+      char_cases::kSlew100, char_cases::kSlew120, char_cases::kCap50, char_cases::kCap60, char_cases::kDelay2p0, char_cases::kPower0p3,
+      char_cases::SegmentShape{.pattern_id = char_cases::kPattern2, .length_idx = char_cases::kLength2000}, 0.10));
 
-  const icts::SegmentPatternCombiner combiner(support::kBoundaryKey);
+  const icts::SegmentPatternCombiner combiner(char_cases::kBoundaryKey);
   auto result = upstream.concatWith(downstream, combiner);
 
   ASSERT_EQ(result.size(), 1U);

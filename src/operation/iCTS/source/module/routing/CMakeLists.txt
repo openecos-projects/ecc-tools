@@ -1,4 +1,3 @@
-add_subdirectory(${ICTS_MODULE_ROUTING}/database)
 add_subdirectory(${ICTS_MODULE_ROUTING}/helper)
 add_subdirectory(${ICTS_MODULE_ROUTING}/flute)
 add_subdirectory(${ICTS_MODULE_ROUTING}/salt)

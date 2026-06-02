@@ -33,12 +33,15 @@ class Pin;
 
 enum class InstType
 {
-  kBuffer,      // up level buffer
-  kFlipFlop,    // flip flop
-  kInverter,    // inverter (like buffer but different polarity)
-  kClockGate,   // clock gate (with enable pin)
-  kMux,         // with multiple input pins
-  kMacroBlock,  // hard macro / block-class cell
+  kBuffer,        // clock buffer
+  kFlipFlop,      // edge-triggered sequential sink
+  kLatch,         // level-sensitive sequential sink
+  kInverter,      // clock inverter
+  kClockGate,     // clock gate (with enable pin)
+  kMux,           // clock mux / multi-clock-input boundary
+  kClockLogic,    // clock-derived combinational logic boundary
+  kBoundaryLoad,  // non-propagating clock-net load
+  kMacroBlock,    // hard macro / block-class cell
   kUnknown
 };
 
@@ -94,10 +97,16 @@ class Inst
   // Boolean functions
   auto is_buffer() const -> bool { return _type == InstType::kBuffer; }
   auto is_flipflop() const -> bool { return _type == InstType::kFlipFlop; }
+  auto is_latch() const -> bool { return _type == InstType::kLatch; }
   auto is_inverter() const -> bool { return _type == InstType::kInverter; }
   auto is_clock_gate() const -> bool { return _type == InstType::kClockGate; }
   auto is_mux() const -> bool { return _type == InstType::kMux; }
+  auto is_clock_logic() const -> bool { return _type == InstType::kClockLogic; }
+  auto is_boundary_load() const -> bool { return _type == InstType::kBoundaryLoad; }
   auto is_macro_block() const -> bool { return _type == InstType::kMacroBlock; }
+  auto is_clock_propagation_cell() const -> bool { return is_buffer() || is_inverter(); }
+  auto is_sequential_sink() const -> bool { return is_flipflop() || is_latch(); }
+  auto is_clock_boundary() const -> bool { return is_clock_gate() || is_mux() || is_clock_logic() || is_boundary_load(); }
 
  private:
   std::string _name = "";

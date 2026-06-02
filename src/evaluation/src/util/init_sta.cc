@@ -24,10 +24,10 @@
 #include "init_sta.hh"
 
 #include <algorithm>
+#include <ranges>
 #include <thread>
 
 #include "RTInterface.hpp"
-#include "api/PowerEngine.hh"
 #include "api/TimingEngine.hh"
 #include "api/TimingIDBAdapter.hh"
 #include "idm.h"
@@ -44,13 +44,11 @@ using json = nlohmann::ordered_json;
 
 #define STA_INST (ista::TimingEngine::getOrCreateTimingEngine())
 #define RT_INST (irt::RTInterface::getInst())
-#define PW_INST (ipower::PowerEngine::getOrCreatePowerEngine())
 
 InitSTA* InitSTA::_init_sta = nullptr;
 
 InitSTA::~InitSTA()
 {
-  ipower::PowerEngine::destroyPowerEngine();
   ista::TimingEngine::destroyTimingEngine();
 }
 
@@ -149,11 +147,6 @@ void InitSTA::saveTimingPowerBenchmark()
     end_vertex_to_path_delay.emplace_back(end_vertex->getName(), path_delay);
   }
 
-  // leakage power、internal power、switch power
-  double leakage_power = PW_INST->get_power()->getSumLeakagePower();
-  double internal_power = PW_INST->get_power()->getSumInternalPower();
-  double switch_power = PW_INST->get_power()->getSumSwitchPower();
-
   // net density need in single file.
   // save to json.
 
@@ -169,9 +162,6 @@ void InitSTA::saveTimingPowerBenchmark()
   json json_data;
   json_data["clock_freq_map"] = clock_freq_map;
   json_data["end_vertex_to_path_delay"] = end_vertex_to_path_delay;
-  json_data["leakage_power"] = leakage_power;
-  json_data["internal_power"] = internal_power;
-  json_data["switch_power"] = switch_power;
 
   json_file << json_data.dump(4) << std::endl;
 
@@ -671,12 +661,6 @@ void InitSTA::buildSpefRCTree(std::string work_dir)
 
 void InitSTA::initPowerEngine()
 {
-  if (!PW_INST->isBuildGraph()) {
-    PW_INST->get_power()->initPowerGraphData();
-    PW_INST->get_power()->initToggleSPData();
-  }
-  PW_INST->get_power()->updatePower();
-  PW_INST->get_power()->reportPower(false);
 }
 
 void InitSTA::updateResult(const std::string& routing_type)
@@ -699,22 +683,10 @@ void InitSTA::updateResult(const std::string& routing_type)
   });
 
   // update power
-  initPowerEngine();
   _power[routing_type] = std::map<std::string, double>();
   _net_power[routing_type] = std::unordered_map<std::string, double>();
   double static_power = 0;
-  for (const auto& data : PW_INST->get_power()->get_leakage_powers()) {
-    static_power += data->get_leakage_power();
-  }
   double dynamic_power = 0;
-  for (const auto& data : PW_INST->get_power()->get_internal_powers()) {
-    dynamic_power += data->get_internal_power();
-  }
-  for (const auto& data : PW_INST->get_power()->get_switch_powers()) {
-    dynamic_power += data->get_switch_power();
-    auto* net = dynamic_cast<ista::Net*>(data->get_design_obj());
-    _net_power[routing_type][net->get_name()] = data->get_switch_power();
-  }
   _power[routing_type]["static_power"] = static_power;
   _power[routing_type]["dynamic_power"] = dynamic_power;
 
@@ -928,7 +900,8 @@ double InitSTA::getNetDelay(const std::string& net_name) const
 
 std::pair<double, double> InitSTA::getNetToggleAndVoltage(const std::string& net_name) const
 {
-  return PW_INST->get_power()->getNetToggleAndVoltageData(net_name.c_str());
+  (void) net_name;
+  return {0.0, 0.0};
 }
 
 double InitSTA::getNetPower(const std::string& net_name) const
@@ -1071,19 +1044,6 @@ TimingWireGraph InitSTA::getTimingWireGraph()
 
   ista->makeClassifiedCells(equiv_libs);
 
-  auto* ipower = PW_INST->get_power();
-
-  // build switch power map.
-  auto& switch_powers = ipower->get_switch_powers();
-  std::map<ipower::PwrVertex*, double> vertex_to_switch_power;
-  for (auto& switch_power : switch_powers) {
-    auto* the_net = switch_power->get_design_obj();
-    auto* the_driver = dynamic_cast<ista::Net*>(the_net)->getDriver();
-    auto* the_sta_vertex = ista->findVertex(the_driver);
-    auto* the_pwr_vertex = ipower->get_power_graph().staToPwrVertex(the_sta_vertex);
-    vertex_to_switch_power[the_pwr_vertex] = switch_power->get_switch_power();
-  }
-
   TimingWireGraph timing_wire_graph;
 
   /// create node in wire graph
@@ -1099,7 +1059,7 @@ TimingWireGraph InitSTA::getTimingWireGraph()
   };
 
   /// the node is StaNode
-  auto create_inst_node = [&timing_wire_graph, &create_node, &vertex_to_switch_power, ista, ipower](auto* the_node) -> unsigned {
+  auto create_inst_node = [&timing_wire_graph, &create_node, ista](auto* the_node) -> unsigned {
     std::string node_name = the_node->getName();
     auto index = timing_wire_graph.findNode(node_name);
     if (index) {
@@ -1183,24 +1143,11 @@ TimingWireGraph InitSTA::getTimingWireGraph()
     }
 
     // dump power feature.
-    PowerNodeFeature power_feature;
-    auto* pwr_vertex = ipower->get_power_graph().staToPwrVertex(the_node);
-    power_feature._toggle = pwr_vertex->getToggleData(std::nullopt);
-    power_feature._sp = pwr_vertex->getSPData(std::nullopt);
-
-    power_feature._node_internal_power = pwr_vertex->getInternalPower();
-
-    double switch_power = 0.0;
-    if (vertex_to_switch_power.contains(pwr_vertex)) {
-      switch_power = vertex_to_switch_power[pwr_vertex];
-    }
-    power_feature._node_net_power = switch_power;
-
     auto wire_node_index = create_node(node_name, is_pin, is_port);
     auto& wire_node = timing_wire_graph.getNode(wire_node_index);
 
     wire_node._node_feature = node_feature;
-    wire_node._power_feature = power_feature;
+    wire_node._power_feature = {};
 
     return wire_node_index;
   };
@@ -1257,7 +1204,7 @@ TimingWireGraph InitSTA::getTimingWireGraph()
         vertex_slew = the_arc->get_src()->getSlewNs(ista::AnalysisMode::kMin, TransType::kFall);
         auto min_fall_all_nodes_slew = rc_tree->getAllNodeSlew(vertex_slew.value_or(0.0), AnalysisMode::kMin, TransType::kFall);
 
-        for (auto* wire_edge : wire_topo | std::ranges::views::reverse) {
+        for (auto* wire_edge : wire_topo | std::views::reverse) {
           ieda::Stats stats2;
           auto& from_node = wire_edge->get_from();
           auto& to_node = wire_edge->get_to();
@@ -1310,16 +1257,8 @@ TimingWireGraph InitSTA::getTimingWireGraph()
 
       edge_feature._edge_delay = {max_rise_delay, max_fall_delay, min_rise_delay, min_fall_delay};
 
-      // dump power feature
-      PowerEdgeFeature edge_power_feature;
-
-      auto* the_pwr_arc = ipower->get_power_graph().staToPwrArc(the_arc);
-      if (the_pwr_arc) {
-        edge_power_feature._inst_arc_internal_power = dynamic_cast<ipower::PwrInstArc*>(the_pwr_arc)->getInternalPower();
-      }
-
       inst_arc_edge._edge_feature = edge_feature;
-      inst_arc_edge._power_feature = edge_power_feature;
+      inst_arc_edge._power_feature = {};
     }
   }
 
@@ -1350,7 +1289,6 @@ TimingInstanceGraph InitSTA::getTimingInstanceGraph()
 
   auto* ista = STA_INST->get_ista();
   LOG_ERROR_IF(!ista->isBuildGraph()) << "timing graph is not build";
-  auto* ipower = PW_INST->get_power();
 
   auto* the_timing_graph = &(ista->get_graph());
 
@@ -1358,16 +1296,13 @@ TimingInstanceGraph InitSTA::getTimingInstanceGraph()
   timing_instance_graph._nodes.reserve(the_timing_graph->get_vertexes().size() * 10);
 
   /// create node in instance graph
-  auto create_node = [&timing_instance_graph, ipower](std::string& node_name, ista::DesignObject* obj) -> unsigned {
+  auto create_node = [&timing_instance_graph](std::string& node_name, ista::DesignObject* obj) -> unsigned {
+    (void) obj;
     auto index = timing_instance_graph.findNode(node_name);
     if (!index) {
       TimingInstanceNode the_node;
       the_node._name = node_name;
-
-      auto* power_data = ipower->getObjData(obj);
-      double leakage_power = power_data->get_leakage_power();
-
-      the_node._node_feature._leakage_power = leakage_power;
+      the_node._node_feature._leakage_power = 0.0;
 
       index = timing_instance_graph.addNode(the_node);
     }
@@ -1817,53 +1752,9 @@ std::map<int, double> InitSTA::patchTimingMap(std::map<int, std::pair<std::pair<
 std::map<int, double> InitSTA::patchPowerMap(std::map<int, std::pair<std::pair<int, int>, std::pair<int, int>>>& patch)
 {
   std::map<int, double> patch_power_map;
-  auto inst_power_map = PW_INST->get_power()->displayInstancePowerMap();
-
-  if (inst_power_map.empty()) {
-    LOG_ERROR << "No instance power map found.";
-    return patch_power_map;
-  }
-
-  auto* idb_adapter = STA_INST->getIDBAdapter();
-  auto dbu = idb_adapter->get_dbu();
-
-  // preprocess: convert instance coordinates and sort by x coordinate to improve search performance
-  std::vector<std::tuple<int64_t, int64_t, double>> sorted_instances;
-  sorted_instances.reserve(inst_power_map.size());
-
-  for (const auto& [coord, power] : inst_power_map) {
-    int64_t inst_x = static_cast<int64_t>(coord.first * dbu);
-    int64_t inst_y = static_cast<int64_t>(coord.second * dbu);
-    sorted_instances.emplace_back(inst_x, inst_y, power);
-  }
-
-  // sort by x coordinate for binary search
-  std::sort(sorted_instances.begin(), sorted_instances.end());
-
   for (const auto& [patch_id, coord] : patch) {
-    auto [l_range, u_range] = coord;
-    const int64_t patch_lx = static_cast<int64_t>(l_range.first);
-    const int64_t patch_ly = static_cast<int64_t>(l_range.second);
-    const int64_t patch_ux = static_cast<int64_t>(u_range.first);
-    const int64_t patch_uy = static_cast<int64_t>(u_range.second);
-
-    double total_power = 0.0;
-
-    // use binary search to determine the x coordinate range, reducing the number of instances to check
-    auto lower_it = std::lower_bound(sorted_instances.begin(), sorted_instances.end(), std::make_tuple(patch_lx, INT64_MIN, 0.0));
-    auto upper_it = std::upper_bound(sorted_instances.begin(), sorted_instances.end(), std::make_tuple(patch_ux, INT64_MAX, 0.0));
-
-    // only check instances with x coordinates within the range
-    for (auto it = lower_it; it != upper_it; ++it) {
-      int64_t inst_y = std::get<1>(*it);
-      double power = std::get<2>(*it);
-
-      if (patch_ly <= inst_y && inst_y <= patch_uy) {
-        total_power += power;
-      }
-    }
-
-    patch_power_map[patch_id] = total_power;
+    (void) coord;
+    patch_power_map[patch_id] = 0.0;
   }
 
   return patch_power_map;
@@ -1878,69 +1769,10 @@ std::map<int, double> InitSTA::patchPowerMap(std::map<int, std::pair<std::pair<i
 std::map<int, double> InitSTA::patchIRDropMap(std::map<int, std::pair<std::pair<int, int>, std::pair<int, int>>>& patch)
 {
   std::map<int, double> patch_ir_drop_map;
-  for (const auto& [patch_id, _] : patch) {
+  for (const auto& [patch_id, coord] : patch) {
+    (void) coord;
     patch_ir_drop_map[patch_id] = 0.0;
   }
-
-  // hard code std cell power net is VDD
-  std::string power_net_name = "VDD";
-  PW_INST->runIRAnalysis(power_net_name);
-  auto instance_to_ir_drop = PW_INST->getInstanceIRDrop();
-
-  if (instance_to_ir_drop.empty()) {
-    LOG_ERROR << "No IR drop data available, returning zero values for all patches";
-    return patch_ir_drop_map;
-  }
-
-  auto* idb_adapter = STA_INST->getIDBAdapter();
-  auto dbu = idb_adapter->get_dbu();
-
-  // preprocess: convert instance coordinates and sort by x coordinate to improve search performance
-  std::vector<std::tuple<int64_t, int64_t, double>> sorted_instances;
-  sorted_instances.reserve(instance_to_ir_drop.size());
-
-  for (auto& [sta_inst, ir_drop] : instance_to_ir_drop) {
-    auto coord = sta_inst->get_coordinate().value();
-    int64_t inst_x = static_cast<int64_t>(coord.first * dbu);
-    int64_t inst_y = static_cast<int64_t>(coord.second * dbu);
-    sorted_instances.emplace_back(inst_x, inst_y, ir_drop);
-  }
-
-  // sort by x coordinate for binary search
-  std::sort(sorted_instances.begin(), sorted_instances.end());
-
-  for (const auto& [patch_id, coord] : patch) {
-    auto [l_range, u_range] = coord;
-    const int64_t patch_lx = static_cast<int64_t>(l_range.first);
-    const int64_t patch_ly = static_cast<int64_t>(l_range.second);
-    const int64_t patch_ux = static_cast<int64_t>(u_range.first);
-    const int64_t patch_uy = static_cast<int64_t>(u_range.second);
-
-    double max_ir_drop = 0.0;
-    bool found_instance = false;
-
-    // use binary search to determine the x coordinate range, reducing the number of instances to check
-    auto lower_it = std::lower_bound(sorted_instances.begin(), sorted_instances.end(), std::make_tuple(patch_lx, INT64_MIN, 0.0));
-    auto upper_it = std::upper_bound(sorted_instances.begin(), sorted_instances.end(), std::make_tuple(patch_ux, INT64_MAX, 0.0));
-
-    // only check instances with x coordinates within the range
-    for (auto it = lower_it; it != upper_it; ++it) {
-      int64_t inst_y = std::get<1>(*it);
-      double ir_drop = std::get<2>(*it);
-
-      if (patch_ly <= inst_y && inst_y <= patch_uy) {
-        max_ir_drop = std::max(max_ir_drop, ir_drop);
-        found_instance = true;
-      }
-    }
-
-    if (!found_instance) {
-      max_ir_drop = 0.0;
-    }
-
-    patch_ir_drop_map[patch_id] = max_ir_drop;
-  }
-
   return patch_ir_drop_map;
 }
 

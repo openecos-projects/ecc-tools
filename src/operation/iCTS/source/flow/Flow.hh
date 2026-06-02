@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -25,29 +25,47 @@
 
 #include <string>
 
+#include "database/adapter/fast_sta/FastSta.hh"
+#include "database/config/Config.hh"
+#include "database/design/Design.hh"
+#include "database/io/Wrapper.hh"
 #include "design/ClockLayout.hh"
+#include "evaluation/Evaluation.hh"
 #include "evaluation/qor/QorEvaluation.hh"
 #include "instantiation/Instantiation.hh"
+#include "optimization/Optimization.hh"
+#include "synthesis/htree/characterization/library/CharacterizationLibrary.hh"
 #include "synthesis/trace/SynthesisTrace.hh"
+#include "utils/logger/Schema.hh"
 
 namespace icts {
 
-#define FLOW_INST (icts::Flow::getInst())
+struct CTSRuntime
+{
+  Config config;
+  Design design;
+  Wrapper wrapper;
+  FastSTA fast_sta;
+  SchemaWriter reporter;
+
+  auto reset() -> void
+  {
+    config.reset();
+    design.reset();
+    wrapper.reset();
+    fast_sta.reset();
+    reporter.reset();
+  }
+};
 
 class Flow
 {
  public:
-  static auto getInst() -> Flow&
-  {
-    static Flow inst;
-    return inst;
-  }
+  explicit Flow(CTSRuntime& runtime) : _runtime(runtime) {}
+  ~Flow() = default;
 
   auto runCTS() -> void;
-  auto readData() -> bool;
-  auto run() -> void;
-  auto evaluate() -> void;
-  auto report(const std::string& save_dir) -> void;
+  auto emitReports(const std::string& save_dir) -> void;
   auto outputRuntimeSetup() -> void;
   auto outputSummary() const -> QorSummary;
   auto outputRunSummary() const -> SynthesisTraceSummary;
@@ -60,16 +78,25 @@ class Flow
   auto operator=(Flow&& other) -> Flow& = delete;
 
  private:
-  Flow() = default;
-  ~Flow() = default;
+  struct ClockDataReadSummary
+  {
+    std::string reason;
+    bool success = false;
+  };
 
-  auto instantiate() -> void;
+  auto readClockData() -> ClockDataReadSummary;
+  auto runSynthesis() -> SynthesisTraceSummary;
+  auto runOptimization() -> OptimizationSummary;
+  auto instantiateClockTree() -> InstantiationSummary;
+  auto evaluateClockTree() -> EvaluationBuild;
   auto emitKeyResults(double elapsed_time_s, double peak_vmem_delta_mb) const -> void;
 
+  CTSRuntime& _runtime;
   SynthesisTraceSummary _run_summary;
   ClockLayout _clock_layout;
   EvaluationState _evaluation_state;
-  InstantiationResult _instantiation_result;
+  InstantiationSummary _instantiation_summary;
+  CharacterizationLibrary _char_library;
   bool _runtime_setup_emitted = false;
   bool _setup_ready = false;
   bool _evaluation_ready = false;

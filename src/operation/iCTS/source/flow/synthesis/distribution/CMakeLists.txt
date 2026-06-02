@@ -8,10 +8,12 @@ target_link_libraries(
   PUBLIC
   icts_source_flow_synthesis_trace_layout
   PRIVATE
-  icts_source_database
-  icts_source_flow_instantiation_design_conversion
+  icts_source_database_io
+  icts_source_database_spatial
+  icts_source_flow_synthesis_realization
   icts_source_flow_synthesis_trace_domain_status
-  icts_source_utils
+  icts_source_utils_logger
+  log
 )
 
 target_include_directories(

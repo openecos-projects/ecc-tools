@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -28,12 +28,31 @@
 namespace icts {
 
 class ClockLayout;
+class Config;
+class Design;
+class SchemaWriter;
+class Wrapper;
 struct EvaluationState;
 
-struct ReportResult
+struct ReportInput
 {
-  bool report_success = false;
+  const Config* config = nullptr;
+  Design* design = nullptr;
+  Wrapper* wrapper = nullptr;
+  SchemaWriter* reporter = nullptr;
+  std::string save_dir;
   bool evaluation_ready = false;
+  const ClockLayout* clock_layout = nullptr;
+  EvaluationState* evaluation_state = nullptr;
+};
+
+struct ReportSummary
+{
+  bool success = false;
+  bool evaluation_ready = false;
+  bool statistics_success = false;
+  bool svg_success = false;
+  bool gds_success = false;
 };
 
 class Report
@@ -41,8 +60,7 @@ class Report
  public:
   Report() = delete;
 
-  static auto run(const std::string& save_dir, bool evaluation_ready, bool refresh_sta_timing, const ClockLayout& clock_layout,
-                  EvaluationState& evaluation_state) -> ReportResult;
+  static auto run(const ReportInput& input) -> ReportSummary;
 };
 
 }  // namespace icts

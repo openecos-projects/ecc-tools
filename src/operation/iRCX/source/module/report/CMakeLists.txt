@@ -1,5 +1,8 @@
 set(IRCX_REPORT_SRC
   SpefDumper.cc
+  SpefDumperDNet.cc
+  SpefDumperGeometry.cc
+  SpefDumperHeader.cc
 )
 
 add_library(ircx_report ${IRCX_REPORT_SRC})

@@ -27,13 +27,15 @@
 #include <unordered_map>
 #include <utility>
 
-#include "adapter/sta/STAAdapter.hh"
+#include "io/Wrapper.hh"
 
 namespace icts::htree {
 
 class BufferPortTable
 {
  public:
+  explicit BufferPortTable(Wrapper& wrapper) : _wrapper(&wrapper) {}
+
   auto get(const std::string& cell_master) -> const std::pair<std::string, std::string>*
   {
     auto it = _ports_by_master.find(cell_master);
@@ -41,7 +43,7 @@ class BufferPortTable
       return &it->second;
     }
 
-    auto [input_pin, output_pin] = STA_ADAPTER_INST.queryBufferPorts(cell_master);
+    auto [input_pin, output_pin] = _wrapper->queryBufferPorts(cell_master);
     if (input_pin.empty() || output_pin.empty()) {
       return nullptr;
     }
@@ -52,6 +54,7 @@ class BufferPortTable
   }
 
  private:
+  Wrapper* _wrapper = nullptr;
   std::unordered_map<std::string, std::pair<std::string, std::string>> _ports_by_master;
 };
 

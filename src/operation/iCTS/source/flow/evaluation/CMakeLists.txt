@@ -9,7 +9,8 @@ target_link_libraries(
   PUBLIC
   icts_source_flow_evaluation_qor
   PRIVATE
-  icts_source_utils
+  icts_source_utils_logger
+  log
 )
 
 target_include_directories(

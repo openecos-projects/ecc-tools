@@ -7,6 +7,10 @@ set(CMAKE_BUILD_TYPE "Debug")
 message(STATUS "iSTA Test")
 
 find_package(GTest REQUIRED)
+find_library(SYSTEM_FFI_LIBRARY
+             NAMES ffi
+             PATHS /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu
+             NO_DEFAULT_PATH)
 
 aux_source_directory(. SourceFiles)
 add_executable(iSTATest ${SourceFiles})
@@ -16,6 +20,7 @@ target_link_libraries(
   ista-engine
   idm
   eval_timing_api
+  py_idb
   py_ista
   pybind11::embed
   inference
@@ -55,6 +60,10 @@ target_link_libraries(
   -u_ZN3ipl8Nesterov20correctNextSLPCoordiEiNS_5PointIiEE
   -u_ZN3ipl20WAWirelengthGradientC1EPNS_15TopologyManagerE
   gtest)
+
+if(SYSTEM_FFI_LIBRARY)
+  target_link_libraries(iSTATest ${SYSTEM_FFI_LIBRARY})
+endif()
 
 if(USE_CUDA_MODE)
   target_link_libraries(iSTATest delay-gpu propagation-gpu)

@@ -35,6 +35,16 @@ inline auto trim(std::string_view value) -> Str
   return Str(value.substr(first, last - first + 1));
 }
 
+inline auto starts_with(std::string_view value, std::string_view prefix) -> bool
+{
+  return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
+}
+
+inline auto contains(std::string_view value, std::string_view pattern) -> bool
+{
+  return value.find(pattern) != std::string_view::npos;
+}
+
 inline auto ensure_non_empty(std::string_view value, std::string_view field_name) -> bool
 {
   if (!value.empty()) {

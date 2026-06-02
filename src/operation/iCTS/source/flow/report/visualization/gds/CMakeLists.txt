@@ -9,11 +9,13 @@ add_library(icts_source_flow_report_visualization_gds ${ICTS_FLOW_REPORT_VISUALI
 target_link_libraries(
   icts_source_flow_report_visualization_gds
   PRIVATE
+  icts_source_database_config
   icts_source_database_design
   icts_source_flow_report_visualization_drawing
   icts_source_flow_report_visualization_gds_layer
   icts_source_flow_report_visualization_gds_writer
-  icts_source_utils
+  icts_source_utils_logger
+  log
 )
 
 target_include_directories(

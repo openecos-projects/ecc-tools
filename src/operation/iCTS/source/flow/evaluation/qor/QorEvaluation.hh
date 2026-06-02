@@ -23,49 +23,25 @@
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <string>
-#include <vector>
 
 #include "qor/Qor.hh"
 
 namespace icts {
 
 class ClockLayout;
+class Config;
+class Design;
+class SchemaWriter;
+class Wrapper;
 
 struct QorSummary
 {
-  struct ClockTiming
-  {
-    std::string clock_name;
-    double setup_tns = 0.0;
-    double setup_wns = 0.0;
-    double hold_tns = 0.0;
-    double hold_wns = 0.0;
-    double suggest_freq = 0.0;
-  };
-  struct ClockLatencySkew
-  {
-    std::string clock_name;
-    std::string analysis_mode;
-    std::string launch_pin;
-    std::string capture_pin;
-    double launch_latency_ns = 0.0;
-    double capture_latency_ns = 0.0;
-    double worst_skew_ns = 0.0;
-    double average_worst_skew_ns = 0.0;
-    std::size_t path_count = 0U;
-    std::size_t average_sample_count = 0U;
-  };
-
   bool has_evaluation_result = false;
   std::string qor_metric_status = "unavailable";
-  std::string timing_metric_source = "unavailable";
   std::string physical_metric_source = "unavailable";
   std::string path_depth_metric_status = "unavailable";
-  bool sta_clocks_propagated = false;
-  std::size_t propagated_clock_count = 0U;
   int32_t final_clock_buffer_count = 0;
   double final_buffer_area_um2 = 0.0;
   int32_t clock_member_buffer_count = 0;
@@ -84,14 +60,15 @@ struct QorSummary
   int32_t feature_max_clock_network_level = 0;
   int32_t max_clock_wirelength = 0;
   double total_clock_wirelength = 0.0;
-  std::vector<ClockTiming> clocks_timing;
-  std::vector<ClockLatencySkew> clocks_latency_skew;
 };
 
-struct EvaluationOptions
+struct EvaluationInput
 {
-  bool refresh_sta_timing = false;
+  const Config* config = nullptr;
   const ClockLayout* clock_layout = nullptr;
+  Design* design = nullptr;
+  Wrapper* wrapper = nullptr;
+  SchemaWriter* reporter = nullptr;
 };
 
 struct EvaluationState
@@ -105,10 +82,9 @@ class QorEvaluation
  public:
   QorEvaluation() = delete;
 
-  static auto evaluate(EvaluationState& state) -> void;
-  static auto evaluate(EvaluationState& state, const EvaluationOptions& options) -> void;
+  static auto evaluate(EvaluationState& state, const EvaluationInput& input) -> void;
   static auto outputSummary(const EvaluationState& state) -> QorSummary;
-  static auto hasEvaluationResult(const EvaluationState& state) -> bool;
+  static auto isEvaluationReady(const EvaluationState& state) -> bool;
   static auto reset(EvaluationState& state) -> void;
 };
 

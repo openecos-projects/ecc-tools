@@ -1185,7 +1185,6 @@ void LayerAssigner::updateSummary(LAModel& la_model)
   std::map<int32_t, int32_t>& cut_via_num_map = summary.la_summary.cut_via_num_map;
   int32_t& total_via_num = summary.la_summary.total_via_num;
   std::map<std::string, std::map<std::string, double>>& clock_timing_map = summary.la_summary.clock_timing_map;
-  std::map<std::string, double>& type_power_map = summary.la_summary.type_power_map;
 
   std::vector<GridMap<LANode>>& layer_node_map = la_model.get_layer_node_map();
   std::vector<LANet>& la_net_list = la_model.get_la_net_list();
@@ -1199,7 +1198,6 @@ void LayerAssigner::updateSummary(LAModel& la_model)
   cut_via_num_map.clear();
   total_via_num = 0;
   clock_timing_map.clear();
-  type_power_map.clear();
 
   for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_node_map.size()); layer_idx++) {
     GridMap<LANode>& la_node_map = layer_node_map[layer_idx];
@@ -1258,7 +1256,7 @@ void LayerAssigner::updateSummary(LAModel& la_model)
         routing_segment_list_list[net_idx].emplace_back(first_real_coord, second_real_coord);
       }
     }
-    RTI.updateTimingAndPower(real_pin_coord_map_list, routing_segment_list_list, clock_timing_map, type_power_map);
+    RTI.updateTiming(real_pin_coord_map_list, routing_segment_list_list, clock_timing_map);
   }
 }
 
@@ -1278,7 +1276,6 @@ void LayerAssigner::printSummary(LAModel& la_model)
   std::map<int32_t, int32_t>& cut_via_num_map = summary.la_summary.cut_via_num_map;
   int32_t& total_via_num = summary.la_summary.total_via_num;
   std::map<std::string, std::map<std::string, double>>& clock_timing_map = summary.la_summary.clock_timing_map;
-  std::map<std::string, double>& type_power_map = summary.la_summary.type_power_map;
 
   fort::char_table routing_demand_map_table;
   {
@@ -1330,8 +1327,6 @@ void LayerAssigner::printSummary(LAModel& la_model)
   }
   fort::char_table timing_table;
   timing_table.set_cell_text_align(fort::text_align::right);
-  fort::char_table power_table;
-  power_table.set_cell_text_align(fort::text_align::right);
   if (enable_timing) {
     timing_table << fort::header << "clock_name"
                  << "tns"
@@ -1340,19 +1335,9 @@ void LayerAssigner::printSummary(LAModel& la_model)
     for (auto& [clock_name, timing_map] : clock_timing_map) {
       timing_table << clock_name << timing_map["TNS"] << timing_map["WNS"] << timing_map["Freq(MHz)"] << fort::endr;
     }
-    power_table << fort::header << "power_type";
-    for (auto& [type, power] : type_power_map) {
-      power_table << fort::header << type;
-    }
-    power_table << fort::endr;
-    power_table << "power_value";
-    for (auto& [type, power] : type_power_map) {
-      power_table << power;
-    }
-    power_table << fort::endr;
   }
   RTUTIL.printTableList({routing_demand_map_table, routing_overflow_map_table, routing_wire_length_map_table, cut_via_num_map_table});
-  RTUTIL.printTableList({timing_table, power_table});
+  RTUTIL.printTableList({timing_table});
 }
 
 void LayerAssigner::outputGuide(LAModel& la_model)
@@ -1581,7 +1566,6 @@ std::string LayerAssigner::outputSummaryJson(LAModel& la_model)
   std::map<int32_t, int32_t>& cut_via_num_map = summary.la_summary.cut_via_num_map;
   int32_t& total_via_num = summary.la_summary.total_via_num;
   std::map<std::string, std::map<std::string, double>>& clock_timing_map = summary.la_summary.clock_timing_map;
-  std::map<std::string, double>& type_power_map = summary.la_summary.type_power_map;
 
   nlohmann::json summary_json;
   for (auto& [routing_layer_idx, demand] : routing_demand_map) {
@@ -1603,10 +1587,6 @@ std::string LayerAssigner::outputSummaryJson(LAModel& la_model)
   for (auto& [clock_name, timing] : clock_timing_map) {
     summary_json["clock_timing_map"]["clock_name"] = clock_name;
     summary_json["clock_timing_map"]["timing"] = timing;
-  }
-  for (auto& [type, power] : type_power_map) {
-    summary_json["type_power_map"]["type"] = type;
-    summary_json["type_power_map"]["power"] = power;
   }
   std::string summary_json_file_path = RTUTIL.getString(la_temp_directory_path, "summary.json");
   std::ofstream* summary_json_file = RTUTIL.getOutputFileStream(summary_json_file_path);

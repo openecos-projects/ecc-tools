@@ -30,8 +30,8 @@
 #include <string>
 #include <vector>
 
-#include "TopologyRealTechSmokeSupport.hh"
-#include "flow/synthesis/TopologyVisualizationSupport.hh"
+#include "TopologyRealTechScenario.hh"
+#include "flow/synthesis/TopologyArtifactWriter.hh"
 #include "synthesis/topology/Topology.hh"
 
 namespace icts {
@@ -85,7 +85,7 @@ auto AssertTopologyPhysicalMetricUnits(const std::string& cts_log_content, bool 
 
 auto WriteAndAssertSynthesisArtifacts(const std::string& case_name, const std::string& scenario_name, const std::string& clock_name,
                                       const synthesis::TopologyArtifactPaths& artifact_paths, icts::Pin* source,
-                                      const std::vector<icts::Pin*>& sinks, const icts::Topology::BuildResult& result)
+                                      const std::vector<icts::Pin*>& sinks, const icts::Topology::Build& result)
     -> synthesis::TopologyArtifactPaths
 {
   if (artifact_paths.output_dir.empty()) {

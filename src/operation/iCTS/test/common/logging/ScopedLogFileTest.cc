@@ -18,7 +18,7 @@
  * @file ScopedLogFileTest.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-04-16
- * @brief Regression coverage for scoped schema log redirection in tests.
+ * @brief Regression coverage for scoped report log redirection in tests.
  */
 
 #include <gtest/gtest.h>
@@ -29,6 +29,8 @@
 #include <string>
 #include <utility>
 
+#include "Flow.hh"
+#include "common/CTSTestRuntime.hh"
 #include "common/io/TestArtifactIO.hh"
 #include "common/logging/LogText.hh"
 #include "common/logging/ScopedLogFile.hh"
@@ -58,18 +60,22 @@ TEST(ScopedLogFileTest, NestedScopedLogFilesRestoreOuterDestination)
   const auto inner_log = output_dir / "inner_cts.log";
   {
     const common::logging::ScopedLogFile outer_guard(outer_log, "Outer CTS Report");
-    icts::schema::EmitKeyValueTable("Outer Before", {
-                                                        {"phase", "before"},
-                                                    });
+    auto& reporter = icts_test::runtime::CurrentRuntime().reporter;
+    icts::EmitKeyValueTable(reporter, "Outer Before",
+                            {
+                                {"phase", "before"},
+                            });
     {
       const common::logging::ScopedLogFile inner_guard(inner_log, "Inner CTS Report");
-      icts::schema::EmitKeyValueTable("Inner Body", {
-                                                        {"phase", "inside"},
-                                                    });
+      icts::EmitKeyValueTable(reporter, "Inner Body",
+                              {
+                                  {"phase", "inside"},
+                              });
     }
-    icts::schema::EmitKeyValueTable("Outer After", {
-                                                       {"phase", "after"},
-                                                   });
+    icts::EmitKeyValueTable(reporter, "Outer After",
+                            {
+                                {"phase", "after"},
+                            });
   }
 
   const auto outer_content = ReadTextFile(outer_log);
@@ -91,18 +97,62 @@ TEST(ScopedLogFileTest, StageScopeSummaryOmitsElapsedTimeFromSchemaFile)
   const auto log_path = output_dir / "cts.log";
   {
     const common::logging::ScopedLogFile log_guard(log_path, "Scoped Stage CTS Report");
-    auto stage = SCHEMA_WRITER_INST.beginStage("UnitStage", "exercise schema finish");
+    auto stage = icts_test::runtime::CurrentRuntime().reporter.beginStage("UnitStage", "exercise report finish");
     stage.finished();
   }
 
   const auto log_content = ReadTextFile(log_path);
   ASSERT_FALSE(log_content.empty());
-  const auto stage_summary = common::logging::ExtractTextBlock(log_content, "UnitStage exercise schema finish Summary");
+  const auto stage_summary = common::logging::ExtractTextBlock(log_content, "UnitStage exercise report finish Summary");
   ASSERT_FALSE(stage_summary.empty());
   EXPECT_NE(stage_summary.find("status"), std::string::npos);
   EXPECT_NE(stage_summary.find("finished"), std::string::npos);
   EXPECT_EQ(stage_summary.find("outcome"), std::string::npos);
   EXPECT_EQ(stage_summary.find("elapsed_time"), std::string::npos);
+}
+
+TEST(ScopedLogFileTest, DetailReportReceivesDetailOnlyTablesAndSharedDiagnostics)
+{
+  const auto output_dir = common::io::PrepareCleanOutputDir(common::io::ResolveOutputDir() / "common" / "logging" / "detail_report");
+  ASSERT_FALSE(output_dir.empty());
+
+  const auto log_path = output_dir / "cts.log";
+  const auto detail_log_path = output_dir / "cts_detail.log";
+  {
+    const common::logging::ScopedLogFile log_guard(log_path, "Detail Routing CTS Report");
+    icts_test::runtime::CurrentRuntime().reporter.emitKeyValueTableTo("Default Only", {{"scope", "default"}}, icts::ReportSink::kDefault);
+    icts_test::runtime::CurrentRuntime().reporter.emitKeyValueTableTo("Detail Only", {{"scope", "detail"}}, icts::ReportSink::kDetail);
+    icts::EmitDiagnostic(icts_test::runtime::CurrentRuntime().reporter, icts::DiagnosticLevel::kWarning, "DetailRouting",
+                         "shared diagnostic", {{"case", "detail_report"}});
+
+    auto detail_stage = icts_test::runtime::CurrentRuntime().reporter.beginStage(
+        "DetailStage", "trace", {{"phase", "detail"}},
+        icts::StageReportOptions{.context_sink = icts::ReportSink::kDetail, .summary_sink = icts::ReportSink::kDetail});
+    detail_stage.finished({{"count", "1"}});
+
+    auto failed_detail_stage = icts_test::runtime::CurrentRuntime().reporter.beginStage(
+        "DetailStage", "failure trace", {{"phase", "detail"}},
+        icts::StageReportOptions{.context_sink = icts::ReportSink::kDetail, .summary_sink = icts::ReportSink::kDetail});
+    failed_detail_stage.failed({{"reason", "unit_failure"}});
+  }
+
+  const auto log_content = ReadTextFile(log_path);
+  const auto detail_log_content = ReadTextFile(detail_log_path);
+  ASSERT_FALSE(log_content.empty());
+  ASSERT_FALSE(detail_log_content.empty());
+  EXPECT_NE(log_content.find("Default Only"), std::string::npos);
+  EXPECT_EQ(log_content.find("Detail Only"), std::string::npos);
+  EXPECT_EQ(log_content.find("DetailStage trace"), std::string::npos);
+  EXPECT_EQ(log_content.find("DetailStage failure trace Context"), std::string::npos);
+  EXPECT_NE(log_content.find("DetailStage failure trace Summary"), std::string::npos);
+  EXPECT_NE(log_content.find("unit_failure"), std::string::npos);
+  EXPECT_NE(log_content.find("DetailRouting Diagnostic"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("Detail Only"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("DetailStage trace Context"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("DetailStage trace Summary"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("DetailStage failure trace Context"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("DetailStage failure trace Summary"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("DetailRouting Diagnostic"), std::string::npos);
 }
 
 }  // namespace

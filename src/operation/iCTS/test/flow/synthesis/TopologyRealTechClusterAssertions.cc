@@ -27,7 +27,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "TopologyRealTechSmokeSupport.hh"
+#include "TopologyRealTechScenario.hh"
 #include "synthesis/topology/Topology.hh"
 
 namespace icts {
@@ -53,7 +53,7 @@ auto AssertClusteredSinkConnectivity(const std::vector<icts::Pin*>& sinks, const
   EmitValidationFailures(ValidateClusteredSinkConnectivity(sinks, cluster_buffer_insts));
 }
 
-auto AssertClusterBufferMastersFollowLeafSemantics(const icts::Topology::BuildResult& result, const std::string& min_cluster_master) -> void
+auto AssertClusterBufferMastersFollowLeafSemantics(const icts::Topology::Build& result, const std::string& min_cluster_master) -> void
 {
   EmitValidationFailures(ValidateClusterBufferMastersFollowLeafSemantics(result, min_cluster_master));
 }

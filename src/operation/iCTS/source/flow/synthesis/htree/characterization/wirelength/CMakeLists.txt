@@ -6,14 +6,18 @@ add_library(
 target_link_libraries(
   icts_source_flow_synthesis_htree_characterization_wirelength
   PUBLIC
-  icts_source_module
+  icts_source_module_characterization
   PRIVATE
-  icts_source_database
-  icts_source_utils
+  icts_source_database_config
+  icts_source_database_spatial
+  icts_source_utils_geometry
+  icts_source_utils_logger
+  log
 )
 
 target_include_directories(
   icts_source_flow_synthesis_htree_characterization_wirelength
   PUBLIC
+  ${ICTS_SOURCE}
   ${ICTS_FLOW}
 )

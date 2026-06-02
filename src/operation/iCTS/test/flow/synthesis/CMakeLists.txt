@@ -2,27 +2,31 @@ add_subdirectory(htree)
 
 icts_add_test_executable(
   icts_test_flow_synthesis
+  PUBLIC_RUNTIME
   SOURCES
     ${ICTS_TEST}/flow/synthesis/TopologyTest.cc
 )
 
-icts_add_test_executable(
-  icts_test_flow_synthesis_realtech
-  REALTECH
-  SOURCES
-    ${ICTS_TEST}/flow/synthesis/TopologyVisualizationSupport.cc
-    ${ICTS_TEST}/flow/synthesis/TopologyNonClusteredRealTechSmokeTest.cc
-    ${ICTS_TEST}/flow/synthesis/TopologyRealTechMatrixSupport.cc
-    ${ICTS_TEST}/flow/synthesis/TopologyRealTechMatrixTest.cc
-    ${ICTS_TEST}/flow/synthesis/TopologyRealTechArtifactAssertions.cc
-    ${ICTS_TEST}/flow/synthesis/TopologyRealTechClusterAssertions.cc
-    ${ICTS_TEST}/flow/synthesis/TopologyRealTechClusterValidation.cc
-    ${ICTS_TEST}/flow/synthesis/TopologyRealTechHTreeAssertions.cc
-    ${ICTS_TEST}/flow/synthesis/TopologyRealTechSelectionSupport.cc
-    ${ICTS_TEST}/flow/synthesis/TopologyRealTechSmokeTest.cc
-  LIBS
-    icts_test_common_io
-    icts_test_common_logging_support
-    icts_test_common_realtech_support
-    icts_test_module_characterization_support
-)
+if(ICTS_BUILD_REALTECH_TESTS)
+  icts_add_test_executable(
+    icts_test_flow_synthesis_realtech
+    REALTECH
+    SOURCES
+      ${ICTS_TEST}/flow/synthesis/TopologyArtifactWriter.cc
+      ${ICTS_TEST}/flow/synthesis/TopologyVisualizationSvg.cc
+      ${ICTS_TEST}/flow/synthesis/TopologyNonClusteredRealTechSmokeTest.cc
+      ${ICTS_TEST}/flow/synthesis/TopologyRealTechMatrixRunner.cc
+      ${ICTS_TEST}/flow/synthesis/TopologyRealTechMatrixTest.cc
+      ${ICTS_TEST}/flow/synthesis/TopologyRealTechArtifactAssertions.cc
+      ${ICTS_TEST}/flow/synthesis/TopologyRealTechClusterAssertions.cc
+      ${ICTS_TEST}/flow/synthesis/TopologyRealTechClusterValidation.cc
+      ${ICTS_TEST}/flow/synthesis/TopologyRealTechHTreeAssertions.cc
+      ${ICTS_TEST}/flow/synthesis/TopologyRealTechExperimentReport.cc
+      ${ICTS_TEST}/flow/synthesis/TopologyRealTechSmokeTest.cc
+    LIBS
+      icts_test_common_io
+      icts_test_common_scoped_log_file
+      icts_test_common_realtech_setup
+      icts_test_module_characterization_fixture
+  )
+endif()

@@ -36,7 +36,6 @@
 #include <vector>
 
 #include "BufferingPattern.hh"
-#include "CharBuilder.hh"
 #include "Inst.hh"
 #include "Log.hh"
 #include "LogFormat.hh"
@@ -46,8 +45,8 @@
 #include "Point.hh"
 #include "SegmentChar.hh"
 #include "ValueLattice.hh"
+#include "characterization/Characterization.hh"
 #include "geometry/Geometry.hh"
-#include "io/Wrapper.hh"
 #include "logger/Schema.hh"
 #include "synthesis/htree/characterization/Characterization.hh"
 #include "synthesis/htree/characterization/library/CharacterizationLibrary.hh"
@@ -55,7 +54,8 @@
 #include "synthesis/htree/constraint/Constraint.hh"
 #include "synthesis/htree/embedding/BufferPortTable.hh"
 #include "synthesis/htree/embedding/Embedding.hh"
-#include "synthesis/htree/segment_pruning/SegmentLibrary.hh"
+#include "synthesis/htree/segment_pruning/SegmentFrontierCatalog.hh"
+#include "synthesis/htree/segment_pruning/SegmentPatternLibrary.hh"
 #include "synthesis/htree/segment_pruning/SegmentPruning.hh"
 
 namespace icts {
@@ -64,6 +64,11 @@ namespace {
 auto FormatLogValue(const std::string& value) -> std::string
 {
   return value.empty() ? "n/a" : value;
+}
+
+auto DetailStageReportOptions() -> StageReportOptions
+{
+  return StageReportOptions{.context_sink = ReportSink::kDetail, .summary_sink = ReportSink::kDetail};
 }
 
 auto MakeObjectName(const std::string& prefix, const std::string& suffix) -> std::string
@@ -116,7 +121,7 @@ auto ConnectOwnedNet(Net& net, Pin* driver, const std::vector<Pin*>& loads) -> v
   }
 }
 
-auto CreateBufferInstance(SourceTrunkSegment::BuildResult& result, const std::string& inst_name, const std::string& cell_master,
+auto CreateBufferInstance(SourceTrunkSegment::Build& result, const std::string& inst_name, const std::string& cell_master,
                           const Point<int>& location, const std::string& input_pin_name, const std::string& output_pin_name)
     -> std::pair<Pin*, Pin*>
 {
@@ -125,51 +130,51 @@ auto CreateBufferInstance(SourceTrunkSegment::BuildResult& result, const std::st
 
   auto input_pin = std::make_unique<Pin>(input_pin_name, PinType::kIn, location, inst_ptr, nullptr, false);
   auto* input_pin_ptr = input_pin.get();
-  result.inserted_pins.push_back(std::move(input_pin));
+  result.output.inserted_pins.push_back(std::move(input_pin));
 
   auto output_pin = std::make_unique<Pin>(output_pin_name, PinType::kOut, location, inst_ptr, nullptr, false);
   auto* output_pin_ptr = output_pin.get();
-  result.inserted_pins.push_back(std::move(output_pin));
+  result.output.inserted_pins.push_back(std::move(output_pin));
 
   inst_ptr->add_pin(input_pin_ptr);
   inst_ptr->insertDriverPin(output_pin_ptr);
-  result.inserted_insts.push_back(std::move(inst));
+  result.output.inserted_insts.push_back(std::move(inst));
 
   return {input_pin_ptr, output_pin_ptr};
 }
 
-auto RecordInsertedInstLevel(SourceTrunkSegment::BuildResult& result, Inst* inst, int topology_level, std::size_t index_in_level) -> void
+auto RecordInsertedInstLevel(SourceTrunkSegment::Build& result, Inst* inst, int topology_level, std::size_t index_in_level) -> void
 {
   if (inst == nullptr) {
     return;
   }
-  result.inserted_inst_levels.push_back(HTree::InsertedInstLevel{
+  result.output.inserted_inst_levels.push_back(HTree::InsertedInstLevel{
       .inst = inst,
       .topology_level = topology_level,
       .index_in_level = index_in_level,
   });
 }
 
-auto RecordInsertedNetLevel(SourceTrunkSegment::BuildResult& result, Net* net, int topology_level, std::size_t index_in_level) -> void
+auto RecordInsertedNetLevel(SourceTrunkSegment::Build& result, Net* net, int topology_level, std::size_t index_in_level) -> void
 {
   if (net == nullptr) {
     return;
   }
-  result.inserted_net_levels.push_back(HTree::InsertedNetLevel{
+  result.output.inserted_net_levels.push_back(HTree::InsertedNetLevel{
       .net = net,
       .topology_level = topology_level,
       .index_in_level = index_in_level,
   });
 }
 
-auto CreateNet(SourceTrunkSegment::BuildResult& result, const std::string& net_name, Pin* driver, const std::vector<Pin*>& loads,
+auto CreateNet(SourceTrunkSegment::Build& result, const std::string& net_name, Pin* driver, const std::vector<Pin*>& loads,
                int topology_level, std::size_t index_in_level) -> Net*
 {
   auto net = std::make_unique<Net>(net_name);
   auto* net_ptr = net.get();
   ConnectOwnedNet(*net_ptr, driver, loads);
   RecordInsertedNetLevel(result, net_ptr, topology_level, index_in_level);
-  result.inserted_nets.push_back(std::move(net));
+  result.output.inserted_nets.push_back(std::move(net));
   return net_ptr;
 }
 
@@ -260,8 +265,8 @@ auto FilterSegmentEntries(const std::vector<SegmentChar>& entries, unsigned requ
   return filtered_entries;
 }
 
-auto BuildSourceTrunkSegmentObjects(SourceTrunkSegment::BuildResult& result, Net& source_net, Pin* source, Pin* sink,
-                                    const BufferingPattern& pattern, const SourceTrunkSegment::BuildOptions& options) -> bool
+auto BuildSourceTrunkSegmentObjects(SourceTrunkSegment::Build& result, Net& source_net, Pin* source, Pin* sink,
+                                    const BufferingPattern& pattern, const SourceTrunkSegment::Input& input) -> bool
 {
   const auto& cell_masters = pattern.get_cell_masters();
   const auto& positions = pattern.get_buffer_positions();
@@ -271,20 +276,20 @@ auto BuildSourceTrunkSegmentObjects(SourceTrunkSegment::BuildResult& result, Net
     return true;
   }
 
-  htree::BufferPortTable port_table;
+  htree::BufferPortTable port_table(*input.wrapper);
   std::vector<std::pair<Pin*, Pin*>> segment_buffers;
   segment_buffers.reserve(buffer_count);
   for (std::size_t buffer_index = 0; buffer_index < buffer_count; ++buffer_index) {
     const auto* ports = port_table.get(cell_masters.at(buffer_index));
     if (ports == nullptr) {
       LOG_WARNING << "SourceTrunkSegment: unresolved ports for source-to-root buffer master " << cell_masters.at(buffer_index) << ".";
-      result.failure_reason = "unresolved_buffer_ports";
+      result.summary.failure_reason = "unresolved_buffer_ports";
       return false;
     }
 
     const auto location = htree::InterpolateManhattanPoint(source->get_location(), sink->get_location(), positions.at(buffer_index));
     auto created_buffer
-        = CreateBufferInstance(result, MakeObjectName(options.object_name_prefix, "top_segment_buf_" + std::to_string(buffer_index)),
+        = CreateBufferInstance(result, MakeObjectName(input.object_name_prefix, "top_segment_buf_" + std::to_string(buffer_index)),
                                cell_masters.at(buffer_index), location, ports->first, ports->second);
     RecordInsertedInstLevel(result, created_buffer.first == nullptr ? nullptr : created_buffer.first->get_inst(),
                             static_cast<int>(buffer_index), buffer_index);
@@ -293,110 +298,168 @@ auto BuildSourceTrunkSegmentObjects(SourceTrunkSegment::BuildResult& result, Net
 
   ConnectNet(source_net, source, {segment_buffers.front().first});
   for (std::size_t buffer_index = 0; buffer_index + 1U < segment_buffers.size(); ++buffer_index) {
-    CreateNet(result, MakeObjectName(options.object_name_prefix, "top_segment_net_" + std::to_string(buffer_index)),
+    CreateNet(result, MakeObjectName(input.object_name_prefix, "top_segment_net_" + std::to_string(buffer_index)),
               segment_buffers.at(buffer_index).second, {segment_buffers.at(buffer_index + 1U).first}, static_cast<int>(buffer_index),
               buffer_index);
   }
-  CreateNet(result, MakeObjectName(options.object_name_prefix, "top_segment_net_" + std::to_string(segment_buffers.size() - 1U)),
+  CreateNet(result, MakeObjectName(input.object_name_prefix, "top_segment_net_" + std::to_string(segment_buffers.size() - 1U)),
             segment_buffers.back().second, {sink}, static_cast<int>(segment_buffers.size() - 1U), segment_buffers.size() - 1U);
   return true;
 }
 
-auto EmitSegmentSummary(const SourceTrunkSegment::BuildResult& result, const SourceTrunkSegment::BuildOptions& options) -> void
+auto EmitSegmentSummary(const SourceTrunkSegment::Build& result, const SourceTrunkSegment::Input& input,
+                        const SourceTrunkSegment::Config& config) -> void
 {
-  schema::EmitKeyValueTable(
-      "SourceTrunkSegment Build Overview",
-      {
-          {"clock_name", FormatLogValue(options.log_context.clock_name)},
-          {"clock_net_name", FormatLogValue(options.log_context.clock_net_name)},
-          {"sink_domain", FormatLogValue(options.log_context.sink_domain)},
-          {"stage", FormatLogValue(options.log_context.stage)},
-          {"object_name_prefix", FormatLogValue(options.object_name_prefix)},
-          {"status", result.success ? "finished" : "failed"},
-          {"length", logformat::FormatWithUnit(result.length_um, "um")},
-          {"required_load_cap", logformat::FormatWithUnit(options.required_load_cap_pf, "pF")},
-          {"source_drive_cap", logformat::FormatWithUnit(options.source_drive_cap_pf, "pF")},
-          {"min_input_slew", options.min_input_slew_ns.has_value() ? logformat::FormatWithUnit(*options.min_input_slew_ns, "ns") : "none"},
-          {"length_idx", std::to_string(result.length_idx)},
-          {"required_load_cap_idx", std::to_string(result.required_load_cap_idx)},
-          {"source_drive_cap_idx", std::to_string(result.source_drive_cap_idx)},
-          {"min_input_slew_idx", result.min_input_slew_idx.has_value() ? std::to_string(*result.min_input_slew_idx) : "none"},
-          {"strict_candidate_count", std::to_string(result.strict_candidate_count)},
-          {"fallback_candidate_count", std::to_string(result.fallback_candidate_count)},
-          {"used_boundary_fallback", logformat::FormatBool(result.used_boundary_fallback)},
-          {"boundary_fallback_reason", result.boundary_fallback_reason.empty() ? "none" : result.boundary_fallback_reason},
-          {"inserted_insts", std::to_string(result.inserted_insts.size())},
-          {"inserted_nets", std::to_string(result.inserted_nets.size())},
-      });
+  LOG_FATAL_IF(input.reporter == nullptr) << "SourceTrunkSegment summary requires an explicit reporter.";
+  auto& reporter = *input.reporter;
+  std::vector<std::string> default_headers = {"Clock",
+                                              "Net",
+                                              "Stage",
+                                              "Status",
+                                              "Length",
+                                              "Required Load Cap",
+                                              "Source Drive",
+                                              "Strict Candidates",
+                                              "Relaxed Candidates",
+                                              "Inserted Insts",
+                                              "Inserted Nets"};
+  logformat::TableRows default_rows = {{
+      FormatLogValue(input.log_context.clock_name),
+      FormatLogValue(input.log_context.clock_net_name),
+      FormatLogValue(input.log_context.stage),
+      result.summary.success ? "finished" : "failed",
+      logformat::FormatWithUnit(result.summary.length_um, "um"),
+      logformat::FormatWithUnit(input.required_load_cap_pf, "pF"),
+      logformat::FormatWithUnit(input.source_drive_cap_pf, "pF"),
+      std::to_string(result.summary.strict_candidate_count),
+      std::to_string(result.summary.relaxed_candidate_count),
+      std::to_string(result.output.inserted_insts.size()),
+      std::to_string(result.output.inserted_nets.size()),
+  }};
+  if (result.summary.used_boundary_relaxation) {
+    default_headers.emplace_back("Relaxation Reason");
+    default_rows.front().emplace_back(result.summary.boundary_relaxation_reason.empty() ? "unknown"
+                                                                                        : result.summary.boundary_relaxation_reason);
+  }
+  if (!result.summary.success) {
+    default_headers.emplace_back("Failure");
+    default_rows.front().emplace_back(result.summary.failure_reason.empty() ? "source_trunk_segment_failed"
+                                                                            : result.summary.failure_reason);
+  }
+  reporter.emitTableTo("Source Trunk Summary", default_headers, default_rows, ReportSink::kDefault);
+
+  KeyValueFields detail_fields = {
+      {"clock_name", FormatLogValue(input.log_context.clock_name)},
+      {"clock_net_name", FormatLogValue(input.log_context.clock_net_name)},
+      {"sink_domain", FormatLogValue(input.log_context.sink_domain)},
+      {"stage", FormatLogValue(input.log_context.stage)},
+      {"object_name_prefix", FormatLogValue(input.object_name_prefix)},
+      {"status", result.summary.success ? "finished" : "failed"},
+      {"length", logformat::FormatWithUnit(result.summary.length_um, "um")},
+      {"required_load_cap", logformat::FormatWithUnit(input.required_load_cap_pf, "pF")},
+      {"source_drive_cap", logformat::FormatWithUnit(input.source_drive_cap_pf, "pF")},
+      {"min_input_slew", config.min_input_slew_ns.has_value() ? logformat::FormatWithUnit(*config.min_input_slew_ns, "ns") : "none"},
+      {"length_idx", std::to_string(result.summary.length_idx)},
+      {"required_load_cap_idx", std::to_string(result.summary.required_load_cap_idx)},
+      {"source_drive_cap_idx", std::to_string(result.summary.source_drive_cap_idx)},
+      {"min_input_slew_idx", result.summary.min_input_slew_idx.has_value() ? std::to_string(*result.summary.min_input_slew_idx) : "none"},
+      {"strict_candidate_count", std::to_string(result.summary.strict_candidate_count)},
+      {"relaxed_candidate_count", std::to_string(result.summary.relaxed_candidate_count)},
+      {"used_boundary_relaxation", logformat::FormatBool(result.summary.used_boundary_relaxation)},
+      {"boundary_relaxation_reason",
+       result.summary.boundary_relaxation_reason.empty() ? "none" : result.summary.boundary_relaxation_reason},
+      {"segment_inserted_insts", std::to_string(result.output.inserted_insts.size())},
+      {"segment_inserted_nets", std::to_string(result.output.inserted_nets.size())},
+  };
+  if (!result.summary.failure_reason.empty()) {
+    detail_fields.emplace_back("failure_reason", result.summary.failure_reason);
+  }
+  reporter.emitKeyValueTableTo("SourceTrunkSegment Build Detail", detail_fields, ReportSink::kDetail);
 }
 
-auto ConfigureCharOptions(const std::vector<double>& requested_lengths_um) -> CharBuilder::InitOptions
+auto ConfigureCharConfig(const CharBuilder::Config& base_config, const std::vector<double>& requested_lengths_um) -> CharBuilder::Config
 {
-  auto char_options = CharacterizationLibrary::buildRuntimeOptions();
-  const auto char_grid_plan = htree::ResolveCharacterizationGridPlan(requested_lengths_um);
+  auto char_config = base_config;
+  const auto char_grid_plan = htree::ResolveCharacterizationGridPlan(base_config, requested_lengths_um);
   if (!char_grid_plan.adapted) {
-    return char_options;
+    return char_config;
   }
 
-  char_options.wirelength_unit_um = char_grid_plan.wirelength_unit_um;
-  char_options.wirelength_iterations = char_grid_plan.wirelength_iterations;
+  char_config.wirelength_unit_um = char_grid_plan.wirelength_unit_um;
+  char_config.wirelength_iterations = char_grid_plan.wirelength_iterations;
   auto direct_indices = htree::ResolveDirectCharacterizationLengthIndices(requested_lengths_um, char_grid_plan);
   if (!direct_indices.empty()) {
-    char_options.wirelength_indices = std::move(direct_indices);
+    char_config.wirelength_indices = std::move(direct_indices);
   }
-  return char_options;
+  return char_config;
 }
 
 }  // namespace
 
-auto SourceTrunkSegment::build(Net& source_net, Pin* source, Pin* sink, const BuildOptions& options) -> BuildResult
+auto SourceTrunkSegment::build(const Input& input, const Config& config) -> Build
 {
-  BuildResult result;
+  LOG_FATAL_IF(input.source_net == nullptr) << "SourceTrunkSegment build requires an explicit source net.";
+  LOG_FATAL_IF(input.reporter == nullptr) << "SourceTrunkSegment build requires an explicit reporter.";
+  LOG_FATAL_IF(input.wrapper == nullptr) << "SourceTrunkSegment build requires an explicit Wrapper.";
+  auto& source_net = *input.source_net;
+  auto* source = input.source;
+  auto* sink = input.sink;
+  auto& reporter = *input.reporter;
+
+  Build result;
   if (source == nullptr || sink == nullptr) {
-    result.failure_reason = "null_source_or_sink_pin";
+    result.summary.failure_reason = "null_source_or_sink_pin";
     LOG_ERROR << "SourceTrunkSegment: source-to-root build failed because source or sink pin is null.";
-    EmitSegmentSummary(result, options);
+    EmitSegmentSummary(result, input, config);
     return result;
   }
 
   const int distance_dbu = geometry::Manhattan(source->get_location(), sink->get_location());
-  const int32_t dbu_per_um = std::max(WRAPPER_INST.queryDbUnit(), int32_t{1});
-  result.length_um = static_cast<double>(std::max(distance_dbu, 0)) / static_cast<double>(dbu_per_um);
-  if (result.length_um <= 0.0) {
+  if (distance_dbu <= 0) {
     ConnectNet(source_net, source, {sink});
-    result.success = true;
-    EmitSegmentSummary(result, options);
+    result.summary.success = true;
+    EmitSegmentSummary(result, input, config);
     return result;
   }
 
-  if (options.required_load_cap_pf <= 0.0) {
-    result.failure_reason = "unresolved_required_load_cap";
+  LOG_FATAL_IF(input.characterization_input.fast_sta == nullptr)
+      << "SourceTrunkSegment build requires explicit FastSTA characterization context.";
+  LOG_FATAL_IF(input.dbu_per_um <= 0) << "SourceTrunkSegment build requires explicit positive DBU-per-micron input.";
+  const int32_t dbu_per_um = input.dbu_per_um;
+  LOG_FATAL_IF(dbu_per_um <= 0) << "SourceTrunkSegment: source-to-root build failed because DBU-per-micron is unavailable.";
+  result.summary.length_um = static_cast<double>(distance_dbu) / static_cast<double>(dbu_per_um);
+
+  if (input.required_load_cap_pf <= 0.0) {
+    result.summary.failure_reason = "unresolved_required_load_cap";
     LOG_ERROR << "SourceTrunkSegment: source-to-root segment requires a positive root-input load cap.";
-    EmitSegmentSummary(result, options);
+    EmitSegmentSummary(result, input, config);
     return result;
   }
-  if (options.source_drive_cap_pf <= 0.0) {
-    result.failure_reason = "unresolved_source_drive_cap";
+  if (input.source_drive_cap_pf <= 0.0) {
+    result.summary.failure_reason = "unresolved_source_drive_cap";
     LOG_ERROR << "SourceTrunkSegment: source-to-root segment requires a positive source drive cap.";
-    EmitSegmentSummary(result, options);
+    EmitSegmentSummary(result, input, config);
     return result;
   }
 
   CharacterizationLibrary local_char_library;
-  auto* char_library = options.characterization_library == nullptr ? &local_char_library : options.characterization_library;
-  const std::vector<double> requested_lengths_um{result.length_um};
+  auto* char_library = input.characterization_library == nullptr ? &local_char_library : input.characterization_library;
+  const std::vector<double> requested_lengths_um{result.summary.length_um};
   {
-    auto char_stage = SCHEMA_WRITER_INST.beginStage("SourceTrunkSegment", "Ensure characterization",
-                                                    {
-                                                        {"length_um", std::to_string(result.length_um)},
-                                                        {"library_ready", char_library->isReady() ? "true" : "false"},
-                                                    });
+    auto char_stage = reporter.beginStage("SourceTrunkSegment", "Ensure characterization",
+                                          {
+                                              {"length_um", std::to_string(result.summary.length_um)},
+                                              {"library_ready", char_library->isReady() ? "true" : "false"},
+                                          },
+                                          DetailStageReportOptions());
     if (!char_library->isReady()) {
-      const auto ensure_result = char_library->ensure(ConfigureCharOptions(requested_lengths_um));
+      const auto ensure_result
+          = char_library->ensure(input.characterization_input, ConfigureCharConfig(input.characterization_config, requested_lengths_um));
       if (!ensure_result.success) {
-        result.failure_reason = ensure_result.failure_reason.empty() ? "characterization_library_failed" : ensure_result.failure_reason;
-        char_stage.failed({{"reason", result.failure_reason}});
-        EmitSegmentSummary(result, options);
+        result.summary.failure_reason
+            = ensure_result.failure_reason.empty() ? "characterization_library_failed" : ensure_result.failure_reason;
+        char_stage.failed({{"reason", result.summary.failure_reason}});
+        EmitSegmentSummary(result, input, config);
         return result;
       }
     }
@@ -404,52 +467,55 @@ auto SourceTrunkSegment::build(Net& source_net, Pin* source, Pin* sink, const Bu
   }
   const auto& char_builder = char_library->getCharBuilder();
   if (char_builder.get_segment_chars().empty() || char_builder.get_wirelength_unit_um() <= 0.0) {
-    result.failure_reason = "no_usable_segment_chars";
-    EmitSegmentSummary(result, options);
+    result.summary.failure_reason = "no_usable_segment_chars";
+    EmitSegmentSummary(result, input, config);
     return result;
   }
 
-  result.length_idx = char_builder.get_length_lattice().coveringIndex(result.length_um);
-  result.required_load_cap_idx = htree::CoveringBoundaryIndex(options.required_load_cap_pf, char_builder.get_cap_lattice()).value_or(0U);
-  result.source_drive_cap_idx = htree::CoveringBoundaryIndex(options.source_drive_cap_pf, char_builder.get_cap_lattice()).value_or(0U);
-  if (options.min_input_slew_ns.has_value()) {
-    result.min_input_slew_idx = htree::CoveringBoundaryIndex(*options.min_input_slew_ns, char_builder.get_slew_lattice());
+  result.summary.length_idx = char_builder.get_length_lattice().coveringIndex(result.summary.length_um);
+  result.summary.required_load_cap_idx
+      = htree::CoveringBoundaryIndex(input.required_load_cap_pf, char_builder.get_cap_lattice()).value_or(0U);
+  result.summary.source_drive_cap_idx
+      = htree::CoveringBoundaryIndex(input.source_drive_cap_pf, char_builder.get_cap_lattice()).value_or(0U);
+  if (config.min_input_slew_ns.has_value()) {
+    result.summary.min_input_slew_idx = htree::CoveringBoundaryIndex(*config.min_input_slew_ns, char_builder.get_slew_lattice());
   }
 
-  if (result.length_idx == 0U || result.required_load_cap_idx == 0U || result.source_drive_cap_idx == 0U) {
-    result.failure_reason = "unresolved_segment_boundary_indices";
-    EmitSegmentSummary(result, options);
+  if (result.summary.length_idx == 0U || result.summary.required_load_cap_idx == 0U || result.summary.source_drive_cap_idx == 0U) {
+    result.summary.failure_reason = "unresolved_segment_boundary_indices";
+    EmitSegmentSummary(result, input, config);
     return result;
   }
-  if (result.required_load_cap_idx > char_builder.get_cap_steps()) {
-    result.failure_reason = "segment_hard_boundary_out_of_range";
-    EmitSegmentSummary(result, options);
+  if (result.summary.required_load_cap_idx > char_builder.get_cap_steps()) {
+    result.summary.failure_reason = "segment_hard_boundary_out_of_range";
+    EmitSegmentSummary(result, input, config);
     return result;
   }
 
-  htree::BufferPatternLibrary pattern_library;
+  htree::BufferPatternLibrary pattern_library(*input.wrapper);
   htree::SegmentFrontierCatalog segment_frontier_catalog;
   const std::vector<SegmentChar>* all_frontier_entries = nullptr;
   {
-    auto frontier_stage = SCHEMA_WRITER_INST.beginStage("SourceTrunkSegment", "Synthesize segment frontier",
-                                                        {
-                                                            {"length_idx", std::to_string(result.length_idx)},
-                                                            {"segment_chars", std::to_string(char_builder.get_segment_chars().size())},
-                                                        });
+    auto frontier_stage = reporter.beginStage("SourceTrunkSegment", "Synthesize segment frontier",
+                                              {
+                                                  {"length_idx", std::to_string(result.summary.length_idx)},
+                                                  {"segment_chars", std::to_string(char_builder.get_segment_chars().size())},
+                                              },
+                                              DetailStageReportOptions());
     for (const auto& pattern : char_builder.get_buffering_patterns()) {
       pattern_library.add(pattern);
     }
-    const htree::SegmentFrontierRequest segment_frontier_request{
-        .required_length_indices = {result.length_idx},
+    const htree::RequiredSegmentFrontiers required_segment_frontiers{
+        .required_length_indices = {result.summary.length_idx},
         .required_kinds = htree::SegmentFrontierKindSet::allOnly(),
     };
     segment_frontier_catalog
-        = htree::SynthesizeSegmentFrontiers(char_builder.get_segment_chars(), pattern_library, segment_frontier_request);
-    all_frontier_entries = segment_frontier_catalog.find(result.length_idx, htree::SegmentFrontierKind::kAll);
+        = htree::SynthesizeSegmentFrontiers(char_builder.get_segment_chars(), pattern_library, required_segment_frontiers);
+    all_frontier_entries = segment_frontier_catalog.find(result.summary.length_idx, htree::SegmentFrontierKind::kAll);
     if (all_frontier_entries == nullptr || all_frontier_entries->empty()) {
-      result.failure_reason = "missing_required_segment_frontier";
-      frontier_stage.failed({{"reason", result.failure_reason}});
-      EmitSegmentSummary(result, options);
+      result.summary.failure_reason = "missing_required_segment_frontier";
+      frontier_stage.failed({{"reason", result.summary.failure_reason}});
+      EmitSegmentSummary(result, input, config);
       return result;
     }
     frontier_stage.finished({
@@ -459,67 +525,69 @@ auto SourceTrunkSegment::build(Net& source_net, Pin* source, Pin* sink, const Bu
   }
 
   {
-    auto selection_stage = SCHEMA_WRITER_INST.beginStage(
-        "SourceTrunkSegment", "Select segment candidate",
-        {
-            {"frontier_entries", std::to_string(all_frontier_entries == nullptr ? 0U : all_frontier_entries->size())},
-            {"required_load_cap_idx", std::to_string(result.required_load_cap_idx)},
-            {"source_drive_cap_idx", std::to_string(result.source_drive_cap_idx)},
-        });
-    auto strict_entries
-        = FilterSegmentEntries(*all_frontier_entries, result.required_load_cap_idx, result.source_drive_cap_idx, result.min_input_slew_idx);
-    result.strict_candidate_count = strict_entries.size();
-    result.best_char = SelectBestSegmentEntry(strict_entries);
-    if (!result.best_char.has_value() && result.min_input_slew_idx.has_value()) {
-      auto fallback_entries
-          = FilterSegmentEntries(*all_frontier_entries, result.required_load_cap_idx, result.source_drive_cap_idx, std::nullopt);
-      result.fallback_candidate_count = fallback_entries.size();
-      result.best_char = SelectBestSegmentEntry(fallback_entries);
-      if (result.best_char.has_value()) {
-        result.used_boundary_fallback = true;
-        result.boundary_fallback_reason = "dropped_soft_input_slew_boundary";
+    auto selection_stage
+        = reporter.beginStage("SourceTrunkSegment", "Select segment candidate",
+                              {
+                                  {"frontier_entries", std::to_string(all_frontier_entries == nullptr ? 0U : all_frontier_entries->size())},
+                                  {"required_load_cap_idx", std::to_string(result.summary.required_load_cap_idx)},
+                                  {"source_drive_cap_idx", std::to_string(result.summary.source_drive_cap_idx)},
+                              },
+                              DetailStageReportOptions());
+    auto strict_entries = FilterSegmentEntries(*all_frontier_entries, result.summary.required_load_cap_idx,
+                                               result.summary.source_drive_cap_idx, result.summary.min_input_slew_idx);
+    result.summary.strict_candidate_count = strict_entries.size();
+    result.output.best_char = SelectBestSegmentEntry(strict_entries);
+    if (!result.output.best_char.has_value() && result.summary.min_input_slew_idx.has_value()) {
+      auto relaxed_entries = FilterSegmentEntries(*all_frontier_entries, result.summary.required_load_cap_idx,
+                                                  result.summary.source_drive_cap_idx, std::nullopt);
+      result.summary.relaxed_candidate_count = relaxed_entries.size();
+      result.output.best_char = SelectBestSegmentEntry(relaxed_entries);
+      if (result.output.best_char.has_value()) {
+        result.summary.used_boundary_relaxation = true;
+        result.summary.boundary_relaxation_reason = "dropped_soft_input_slew_boundary";
       }
     }
-    if (result.best_char.has_value()) {
+    if (result.output.best_char.has_value()) {
       selection_stage.finished({
-          {"strict_candidates", std::to_string(result.strict_candidate_count)},
-          {"fallback_candidates", std::to_string(result.fallback_candidate_count)},
-          {"used_boundary_fallback", result.used_boundary_fallback ? "true" : "false"},
-          {"selected_pattern_id", std::to_string(result.best_char->get_pattern_id().pack())},
+          {"strict_candidates", std::to_string(result.summary.strict_candidate_count)},
+          {"relaxed_candidates", std::to_string(result.summary.relaxed_candidate_count)},
+          {"used_boundary_relaxation", result.summary.used_boundary_relaxation ? "true" : "false"},
+          {"selected_pattern_id", std::to_string(result.output.best_char->get_pattern_id().pack())},
       });
     } else {
       selection_stage.failed({{"reason", "no_hard_boundary_legal_segment_candidate"}});
     }
   }
-  if (!result.best_char.has_value()) {
-    result.failure_reason = "no_hard_boundary_legal_segment_candidate";
-    EmitSegmentSummary(result, options);
+  if (!result.output.best_char.has_value()) {
+    result.summary.failure_reason = "no_hard_boundary_legal_segment_candidate";
+    EmitSegmentSummary(result, input, config);
     return result;
   }
 
-  const auto* selected_pattern = pattern_library.find(result.best_char->get_pattern_id());
+  const auto* selected_pattern = pattern_library.find(result.output.best_char->get_pattern_id());
   if (selected_pattern == nullptr) {
-    result.failure_reason = "missing_selected_segment_pattern";
-    EmitSegmentSummary(result, options);
+    result.summary.failure_reason = "missing_selected_segment_pattern";
+    EmitSegmentSummary(result, input, config);
     return result;
   }
   {
-    auto object_stage
-        = SCHEMA_WRITER_INST.beginStage("SourceTrunkSegment", "Build segment objects",
-                                        {
-                                            {"selected_pattern_id", std::to_string(result.best_char->get_pattern_id().pack())},
-                                        });
-    result.success = BuildSourceTrunkSegmentObjects(result, source_net, source, sink, *selected_pattern, options);
-    if (result.success) {
+    auto object_stage = reporter.beginStage("SourceTrunkSegment", "Build segment objects",
+                                            {
+                                                {"selected_pattern_id", std::to_string(result.output.best_char->get_pattern_id().pack())},
+                                            },
+                                            DetailStageReportOptions());
+    result.summary.success = BuildSourceTrunkSegmentObjects(result, source_net, source, sink, *selected_pattern, input);
+    if (result.summary.success) {
       object_stage.finished({
-          {"inserted_insts", std::to_string(result.inserted_insts.size())},
-          {"inserted_nets", std::to_string(result.inserted_nets.size())},
+          {"inserted_insts", std::to_string(result.output.inserted_insts.size())},
+          {"inserted_nets", std::to_string(result.output.inserted_nets.size())},
       });
     } else {
-      object_stage.failed({{"reason", result.failure_reason.empty() ? "segment_object_build_failed" : result.failure_reason}});
+      object_stage.failed(
+          {{"reason", result.summary.failure_reason.empty() ? "segment_object_build_failed" : result.summary.failure_reason}});
     }
   }
-  EmitSegmentSummary(result, options);
+  EmitSegmentSummary(result, input, config);
   return result;
 }
 

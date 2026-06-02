@@ -23,18 +23,84 @@
 
 #pragma once
 
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
-#include "synthesis/topology/Topology.hh"
+#include "design/Inst.hh"
+#include "design/Net.hh"
+#include "design/Pin.hh"
+#include "synthesis/htree/HTree.hh"
+#include "synthesis/topology/SourceTrunkStage.hh"
 
 namespace icts {
-class Net;
-class Pin;
+
+class CharacterizationLibrary;
+class Config;
+class Design;
+class FastSTA;
+class SchemaWriter;
+class Wrapper;
+
+namespace topology {
+
+struct SourceTrunkInput
+{
+  const Config* config = nullptr;
+  Design* design = nullptr;
+  Wrapper* wrapper = nullptr;
+  FastSTA* fast_sta = nullptr;
+  SchemaWriter* reporter = nullptr;
+  Net* source_net = nullptr;
+  Pin* clock_source = nullptr;
+  std::vector<Pin*> root_inputs;
+  std::string object_name_prefix;
+  CharacterizationLibrary* characterization_library = nullptr;
+  double clock_period_ns = 0.0;
+  std::string clock_period_source;
+  HTree::LogContext log_context;
+};
+
+struct SourceTrunkOutput
+{
+  HTree::Output htree_output;
+
+  std::vector<std::unique_ptr<Inst>> inserted_insts;
+  std::vector<std::unique_ptr<Pin>> inserted_pins;
+  std::vector<std::unique_ptr<Net>> inserted_nets;
+  std::vector<HTree::InsertedInstLevel> inserted_inst_levels;
+  std::vector<HTree::InsertedNetLevel> inserted_net_levels;
+};
+
+struct SourceTrunkSummary
+{
+  bool success = false;
+  std::string failure_reason;
+  SourceTrunkStage stage = SourceTrunkStage::kUnknown;
+  std::optional<unsigned> selected_depth = std::nullopt;
+  std::size_t selected_level_count = 0U;
+  std::size_t inserted_buffer_count = 0U;
+  std::size_t inserted_net_count = 0U;
+  bool used_boundary_relaxation = false;
+};
+
+struct SourceTrunkBuild
+{
+  SourceTrunkBuild() = default;
+
+  SourceTrunkBuild(const SourceTrunkBuild&) = delete;
+  auto operator=(const SourceTrunkBuild&) -> SourceTrunkBuild& = delete;
+
+  SourceTrunkBuild(SourceTrunkBuild&& rhs) noexcept = default;
+  auto operator=(SourceTrunkBuild&& rhs) noexcept -> SourceTrunkBuild& = default;
+
+  SourceTrunkOutput output;
+  SourceTrunkSummary summary;
+};
+
+auto BuildSourceTrunkTree(const SourceTrunkInput& input) -> SourceTrunkBuild;
+
+}  // namespace topology
 }  // namespace icts
-
-namespace icts::topology {
-
-auto BuildSourceTrunkTree(Net& source_net, Pin* clock_source, const std::vector<Pin*>& root_inputs,
-                          const Topology::SourceTrunkBuildOptions& options) -> Topology::SourceTrunkBuildResult;
-
-}  // namespace icts::topology

@@ -33,20 +33,20 @@
 
 #include "Clustering.hh"
 #include "Net.hh"
-#include "TopologyRealTechSmokeSupport.hh"
+#include "TopologyRealTechScenario.hh"
 #include "common/logging/ScopedLogFile.hh"
-#include "common/realtech/support/RealTechSetupSupport.hh"
+#include "common/realtech/setup/RealTechDesignSetup.hh"
 #include "database/config/Config.hh"
-#include "flow/synthesis/TopologyVisualizationSupport.hh"
+#include "flow/synthesis/TopologyArtifactWriter.hh"
 #include "flow/synthesis/topology/Topology.hh"
-#include "module/characterization/support/CharacterizationRealTechTestSupport.hh"
+#include "module/characterization/fixture/CharacterizationRealTechFixture.hh"
 #include "utils/logger/Schema.hh"
 
 namespace icts_test {
 namespace {
 
 namespace common_realtech = common::realtech;
-namespace realtech_support = characterization::realtech;
+namespace realtech_fixture = characterization::realtech;
 namespace smoke = synthesis_realtech_smoke;
 
 TEST(TopologyRealTechSmokeTest, NonClusteredModeSkipsClusterBuffersAndUsesUnrestrictedHTreeFrontier)
@@ -64,57 +64,52 @@ TEST(TopologyRealTechSmokeTest, NonClusteredModeSkipsClusterBuffersAndUsesUnrest
   }
   const auto& selected_clock_data = selected_clock.value();
 
-  realtech_support::RealTechCharSession char_session;
-  if (const auto prepare_error = char_session.prepare("topology_non_clustered_smoke", std::nullopt, smoke::kSynthesisSmokeMaxSlewNs,
+  realtech_fixture::RealTechCharFixture char_fixture;
+  if (const auto prepare_error = char_fixture.prepare("topology_non_clustered_smoke", std::nullopt, smoke::kSynthesisSmokeMaxSlewNs,
                                                       smoke::kSynthesisSmokeMaxCapPf, true);
       prepare_error.has_value()) {
     GTEST_SKIP() << *prepare_error;
     return;
   }
 
-  CONFIG_INST.set_enable_sink_clustering(false);
-  CONFIG_INST.set_htree_topology_tolerance(0.1);
-  ASSERT_FALSE(CONFIG_INST.is_enable_sink_clustering());
-  ASSERT_DOUBLE_EQ(CONFIG_INST.get_htree_topology_tolerance(), 0.1);
+  icts_test::runtime::CurrentRuntime().config.set_enable_sink_clustering(false);
+  icts_test::runtime::CurrentRuntime().config.set_htree_topology_tolerance(0.1);
+  ASSERT_FALSE(icts_test::runtime::CurrentRuntime().config.is_enable_sink_clustering());
+  ASSERT_DOUBLE_EQ(icts_test::runtime::CurrentRuntime().config.get_htree_topology_tolerance(), 0.1);
 
   const auto artifact_paths = synthesis::PrepareTopologyArtifactPaths("non_clustered_mode_realtech_smoke");
   ASSERT_FALSE(artifact_paths.output_dir.empty());
   const common::logging::ScopedLogFile cts_log_guard(artifact_paths.cts_log, "Clock Synthesis Test Report");
-  SCHEMA_WRITER_INST.emitKeyValueTable("Clock Synthesis Smoke Scenario",
-                                       {
-                                           {"scenario", "non_clustered_mode"},
-                                           {"clock_name", selected_clock_data.clock_name},
-                                           {"clock_net", selected_clock_data.net_name},
-                                           {"load_count", std::to_string(selected_clock_data.sinks.size())},
-                                           {"enable_sink_clustering", "false"},
-                                           {"omit_wirelength_unit", "true"},
-                                       });
+  icts_test::runtime::CurrentRuntime().reporter.emitKeyValueTable("Clock Synthesis Smoke Scenario",
+                                                                  {
+                                                                      {"scenario", "non_clustered_mode"},
+                                                                      {"clock_name", selected_clock_data.clock_name},
+                                                                      {"clock_net", selected_clock_data.net_name},
+                                                                      {"load_count", std::to_string(selected_clock_data.sinks.size())},
+                                                                      {"enable_sink_clustering", "false"},
+                                                                      {"omit_wirelength_unit", "true"},
+                                                                  });
 
-  icts::Topology::BuildOptions options;
-  smoke::SetEnableSinkClustering(options, false);
+  icts::Topology::Config config;
+  smoke::SetEnableSinkClustering(config, false);
   icts::Net root_net(selected_clock_data.net_name + "_synthesis_root_non_clustered");
   smoke::ConnectRootNet(root_net, selected_clock_data.source, selected_clock_data.sinks);
-  const auto result = icts::Topology::build(root_net, options);
+  const auto result = smoke::BuildTopology(root_net, config);
 
-  ASSERT_TRUE(result.success);
-  EXPECT_FALSE(result.sink_clustering_enabled);
-  EXPECT_FALSE(result.cluster_result.has_value());
-  EXPECT_GT(result.htree_result.char_wirelength_unit_um, 0.0);
-  EXPECT_TRUE(result.htree_result.char_grid_adapted
-              || result.htree_result.char_wirelength_iterations == result.htree_result.char_unique_level_bins);
+  ASSERT_TRUE(result.summary.success);
+  EXPECT_FALSE(result.summary.sink_clustering_enabled);
+  EXPECT_FALSE(result.output.cluster_output.has_value());
 
-  ASSERT_EQ(result.htree_result.root_net, &root_net);
+  ASSERT_EQ(result.output.htree_output.root_net, &root_net);
   EXPECT_EQ(root_net.get_driver(), selected_clock_data.source);
   EXPECT_FALSE(root_net.get_loads().empty());
 
-  smoke::AssertUnrestrictedFrontierHTree(result.htree_result);
-  smoke::AssertNoSingleLoadExternalLeafBuffer(result.htree_result);
-  smoke::AssertDepthCandidateCoverage(result.htree_result);
-  smoke::AssertSelectedHTreeLoadDistribution(result.htree_result);
-  EXPECT_TRUE(result.htree_result.min_top_input_slew_ns.has_value());
-  EXPECT_DOUBLE_EQ(result.htree_result.min_top_input_slew_ns.value_or(0.0), CONFIG_INST.get_root_input_slew());
-  EXPECT_TRUE(result.cluster_buffers.empty());
-  EXPECT_EQ(smoke::CountTopologyLeafNodes(result.htree_result.topology), smoke::CalcFloorPowerOfTwo(selected_clock_data.sinks.size()));
+  smoke::AssertTopologyHTreePayload(result);
+  smoke::AssertNoSingleLoadExternalLeafBuffer(result.output.htree_output);
+  smoke::AssertSelectedTopologyDepth(result);
+  EXPECT_TRUE(result.output.cluster_buffers.empty());
+  EXPECT_EQ(smoke::CountTopologyLeafNodes(result.output.htree_output.topology),
+            smoke::CalcFloorPowerOfTwo(selected_clock_data.sinks.size()));
 
   smoke::WriteAndAssertSynthesisArtifacts("non_clustered_mode_realtech_smoke", "non_clustered_mode", selected_clock_data.clock_name,
                                           artifact_paths, selected_clock_data.source, selected_clock_data.sinks, result);

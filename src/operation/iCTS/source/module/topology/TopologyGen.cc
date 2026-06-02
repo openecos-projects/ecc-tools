@@ -43,7 +43,6 @@
 #include "Tree.hh"
 #include "clustering/Clustering.hh"
 #include "config/TopologyConfig.hh"
-#include "fast_clustering/FastClustering.hh"
 
 namespace icts {
 namespace {
@@ -96,7 +95,8 @@ auto FormatPoint(double x, double y) -> std::string
 
 auto NormalizeDbuPerUm(int32_t dbu_per_um) -> double
 {
-  return static_cast<double>(std::max(dbu_per_um, int32_t{1}));
+  LOG_FATAL_IF(dbu_per_um <= 0) << "TopologyGen: DBU-per-micron must be positive.";
+  return static_cast<double>(dbu_per_um);
 }
 
 auto ResolveMaxNodeLoadCount(std::size_t leaf_need, const BiPartitionConfig& config) -> std::size_t
@@ -134,113 +134,103 @@ auto ToLoadCountLabel(TopologyGen::LoadCountKind load_count_kind) -> const char*
   return "load_count (sink)";
 }
 
+auto DetailStageReportOptions() -> StageReportOptions
+{
+  return StageReportOptions{.context_sink = ReportSink::kDetail, .summary_sink = ReportSink::kDetail};
+}
+
 }  // namespace
 
-auto TopologyGen::build(const std::vector<Pin*>& loads) -> Tree
+auto TopologyGen::build(const std::vector<Pin*>& loads, const Input& input, const Config& config) -> Tree
 {
-  return build(loads, BuildOptions{});
+  return buildWithConfig(loads, input, config);
 }
 
-auto TopologyGen::build(const std::vector<Pin*>& loads, const BuildOptions& options) -> Tree
-{
-  return build(loads, options.partition_config, options.target_depth, options.fixed_root_location, options.load_count_kind,
-               options.dbu_per_um, options);
-}
-
-auto TopologyGen::buildFastClusteringElectricalConfig(std::size_t max_fanout, double max_cap) -> ClusterConfig
-{
-  return FastClustering::buildElectricalBaseConfig(max_fanout, max_cap);
-}
-
-auto TopologyGen::fastClustering(const std::vector<Pin*>& loads) -> ClusterResult
-{
-  return defaultFastClustering(loads, ClusterConfig{});
-}
-
-auto TopologyGen::defaultFastClustering(const std::vector<Pin*>& loads, const ClusterConfig& base_config) -> ClusterResult
-{
-  return Clustering::defaultFastClustering(loads, base_config);
-}
-
-auto TopologyGen::fastClustering(const std::vector<Pin*>& loads, const ClusterConfig& config) -> ClusterResult
-{
-  return Clustering::fastClustering(loads, config);
-}
-
-auto TopologyGen::build(const std::vector<Pin*>& loads, const BiPartitionConfig& config) -> Tree
-{
-  return build(loads, BuildOptions{
-                          .partition_config = config,
-                          .target_depth = std::nullopt,
-                          .fixed_root_location = std::nullopt,
-                          .dbu_per_um = 1,
-                          .load_count_kind = LoadCountKind::kSink,
-                          .clock_name = "",
-                          .clock_net_name = "",
-                          .sink_domain = "",
-                          .stage = "",
-                      });
-}
-
-auto TopologyGen::build(const std::vector<Pin*>& loads, const BiPartitionConfig& config, std::optional<unsigned> target_depth,
-                        std::optional<Point<int>> fixed_root_location, LoadCountKind load_count_kind, int32_t dbu_per_um,
-                        const BuildOptions& options) -> Tree
+auto TopologyGen::buildWithConfig(const std::vector<Pin*>& loads, const Input& input, const Config& config) -> Tree
 {
   Tree tree;
-  auto build_stage = SCHEMA_WRITER_INST.beginStage("TopologyGen", "Build H-tree topology for " + std::to_string(loads.size()) + " loads");
+  auto* reporter = input.reporter;
+  std::optional<SchemaWriter::StageScope> build_stage;
+  if (reporter != nullptr) {
+    build_stage.emplace(reporter->beginStage("TopologyGen", "Build H-tree topology for " + std::to_string(loads.size()) + " loads", {},
+                                             DetailStageReportOptions()));
+  }
   if (loads.empty()) {
     LOG_WARNING << "Topology generation skipped: no loads.";
-    build_stage.skip({{"load_count", "0"}});
+    if (build_stage.has_value()) {
+      build_stage->skip({{"load_count", "0"}});
+    }
     return tree;
   }
 
   std::size_t leaf_count = calcLeafCount(loads.size());
   const unsigned max_depth = calcMaxDepth(loads.size());
-  if (target_depth.has_value()) {
-    const unsigned resolved_depth = std::min(*target_depth, max_depth);
+  if (config.target_depth.has_value()) {
+    const unsigned resolved_depth = std::min(*config.target_depth, max_depth);
     leaf_count = resolved_depth == 0U ? 1U : (std::size_t{1} << resolved_depth);
   }
   if (leaf_count == 0) {
     LOG_WARNING << "Topology generation skipped: leaf count is zero.";
-    build_stage.skip({{"leaf_count", "0"}});
+    if (build_stage.has_value()) {
+      build_stage->skip({{"leaf_count", "0"}});
+    }
     return tree;
   }
 
-  SCHEMA_WRITER_INST.emitSection("### Topology Generation");
-  reportLoadDistribution(loads, load_count_kind, dbu_per_um);
+  if (reporter != nullptr) {
+    reporter->emitSection("### Topology Generation");
+  }
+  reportLoadDistribution(reporter, loads, input.load_count_kind, input.dbu_per_um);
   const auto bounds = CalcLoadBounds(loads);
 
   const auto root = tree.create_node();
   tree.set_root(root);
   tree.get_node(root)->get_position()
-      = fixed_root_location.value_or(geometry::CalcMedian(loads, [](Pin* pin) -> auto { return pin->get_location(); }));
+      = input.fixed_root_location.value_or(geometry::CalcMedian(loads, [](Pin* pin) -> auto { return pin->get_location(); }));
 
   int height = 0;
   for (std::size_t count = leaf_count; count > 1; count >>= 1) {
     ++height;
   }
 
-  build_stage.markRunning("Embed coordinates and balance topology");
+  if (build_stage.has_value()) {
+    build_stage->markRunning("Embed coordinates and balance topology");
+  }
   buildFullTree(tree, BuildCursor{.node_id = root, .depth = 0}, height);
-  embedPositions(tree, root, loads, leaf_count, config);
-  balanceTopology(tree, bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y, config.htree_topology_tolerance);
-  reportRootToLeafLengths(tree, dbu_per_um);
-  build_stage.finished({
-      {"nodes", std::to_string(tree.get_size())},
-      {"depth", std::to_string(height)},
-      {"leaf_count", std::to_string(leaf_count)},
-      {"clock_name", options.clock_name},
-      {"clock_net_name", options.clock_net_name},
-      {"sink_domain", options.sink_domain},
-      {"stage", options.stage},
-      {"root_policy", fixed_root_location.has_value() ? "fixed" : "median"},
-  });
+  embedPositions(tree, root, loads, leaf_count, config.partition_config);
+  balanceTopology(tree, bounds.min_x, bounds.min_y, bounds.max_x, bounds.max_y, config.partition_config.htree_topology_tolerance);
+  reportRootToLeafLengths(reporter, tree, input.dbu_per_um);
+  if (reporter != nullptr) {
+    EmitKeyValueTable(*reporter, "TopologyGen HTree Shape Summary",
+                      {
+                          {"nodes", std::to_string(tree.get_size())},
+                          {"depth", std::to_string(height)},
+                          {"leaf_count", std::to_string(leaf_count)},
+                          {"root_policy", input.fixed_root_location.has_value() ? "fixed" : "median"},
+                      });
+  }
+  if (build_stage.has_value()) {
+    build_stage->finished({
+        {"nodes", std::to_string(tree.get_size())},
+        {"depth", std::to_string(height)},
+        {"leaf_count", std::to_string(leaf_count)},
+        {"clock_name", input.clock_name},
+        {"clock_net_name", input.clock_net_name},
+        {"sink_domain", input.sink_domain},
+        {"stage", input.stage},
+        {"root_policy", input.fixed_root_location.has_value() ? "fixed" : "median"},
+    });
+  }
 
   return tree;
 }
 
-auto TopologyGen::reportLoadDistribution(const std::vector<Pin*>& loads, LoadCountKind load_count_kind, int32_t dbu_per_um) -> void
+auto TopologyGen::reportLoadDistribution(SchemaWriter* reporter, const std::vector<Pin*>& loads, LoadCountKind load_count_kind,
+                                         int32_t dbu_per_um) -> void
 {
+  if (reporter == nullptr) {
+    return;
+  }
   if (loads.empty()) {
     LOG_WARNING << "Load distribution: empty load list.";
     return;
@@ -273,22 +263,25 @@ auto TopologyGen::reportLoadDistribution(const std::vector<Pin*>& loads, LoadCou
   const auto center = geometry::CalcCenter(loads, [](Pin* pin) -> auto { return pin->get_location(); });
   const auto median = geometry::CalcMedian(loads, [](Pin* pin) -> auto { return pin->get_location(); });
 
-  schema::EmitKeyValueTable("TopologyGen Load Distribution Summary",
-                            {
-                                {load_count_label, std::to_string(loads.size())},
-                                {"bbox_min", FormatPoint(min_x, min_y)},
-                                {"bbox_max", FormatPoint(max_x, max_y)},
-                                {"span_width_height", FormatFixed(width_um, 3) + " x " + FormatFixed(height_um, 3) + " um"},
-                                {"area", FormatUm2(core_area_um2)},
-                                {"sqrt_area", FormatUm(DbuToUm(core_length, dbu_per_um))},
-                                {"half_perimeter", FormatUm(DbuToUm(half_perimeter, dbu_per_um))},
-                                {"center", FormatPoint(center.get_x(), center.get_y())},
-                                {"median", FormatPoint(median.get_x(), median.get_y())},
-                            });
+  EmitKeyValueTable(*reporter, "TopologyGen Load Distribution Summary",
+                    {
+                        {load_count_label, std::to_string(loads.size())},
+                        {"bbox_min", FormatPoint(min_x, min_y)},
+                        {"bbox_max", FormatPoint(max_x, max_y)},
+                        {"span_width_height", FormatFixed(width_um, 3) + " x " + FormatFixed(height_um, 3) + " um"},
+                        {"area", FormatUm2(core_area_um2)},
+                        {"sqrt_area", FormatUm(DbuToUm(core_length, dbu_per_um))},
+                        {"half_perimeter", FormatUm(DbuToUm(half_perimeter, dbu_per_um))},
+                        {"center", FormatPoint(center.get_x(), center.get_y())},
+                        {"median", FormatPoint(median.get_x(), median.get_y())},
+                    });
 }
 
-auto TopologyGen::reportRootToLeafLengths(const Tree& tree, int32_t dbu_per_um) -> void
+auto TopologyGen::reportRootToLeafLengths(SchemaWriter* reporter, const Tree& tree, int32_t dbu_per_um) -> void
 {
+  if (reporter == nullptr) {
+    return;
+  }
   if (tree.get_size() == 0 || tree.get_root() == std::numeric_limits<std::size_t>::max()) {
     LOG_WARNING << "Topology length report skipped: invalid tree.";
     return;
@@ -345,13 +338,14 @@ auto TopologyGen::reportRootToLeafLengths(const Tree& tree, int32_t dbu_per_um) 
   }
 
   const double avg_len = sum_len / static_cast<double>(leaf_count);
-  schema::EmitKeyValueTable("TopologyGen Root-To-Leaf Path Summary", {
-                                                                         {"min_path_length", FormatUm(DbuToUm(min_len, dbu_per_um))},
-                                                                         {"max_path_length", FormatUm(DbuToUm(max_len, dbu_per_um))},
-                                                                         {"avg_path_length", FormatUm(DbuToUm(avg_len, dbu_per_um))},
-                                                                         {"valid_leaf_paths", std::to_string(leaf_count)},
-                                                                         {"invalid_leaf_paths", std::to_string(invalid_count)},
-                                                                     });
+  EmitKeyValueTable(*reporter, "TopologyGen Root-To-Leaf Path Summary",
+                    {
+                        {"min_path_length", FormatUm(DbuToUm(min_len, dbu_per_um))},
+                        {"max_path_length", FormatUm(DbuToUm(max_len, dbu_per_um))},
+                        {"avg_path_length", FormatUm(DbuToUm(avg_len, dbu_per_um))},
+                        {"valid_leaf_paths", std::to_string(leaf_count)},
+                        {"invalid_leaf_paths", std::to_string(invalid_count)},
+                    });
 }
 
 auto TopologyGen::calcMaxDepth(std::size_t load_count) -> unsigned

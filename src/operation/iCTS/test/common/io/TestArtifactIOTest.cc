@@ -28,8 +28,8 @@
 #include <sstream>
 #include <string>
 
+#include "common/dataset/TestDataset.hh"
 #include "common/io/TestArtifactIO.hh"
-#include "common/types/TestDataTypes.hh"
 
 namespace icts_test {
 namespace {

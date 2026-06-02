@@ -29,7 +29,6 @@
 #include <limits>
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "Log.hh"
@@ -207,38 +206,6 @@ auto ApplyBufferTypesIfPresent(const nlohmann::json& json, Config& config) -> vo
   }
 }
 
-auto ParseNetList(const nlohmann::json& value) -> std::vector<std::pair<std::string, std::string>>
-{
-  std::vector<std::pair<std::string, std::string>> clock_net_list;
-  if (!value.is_array()) {
-    return clock_net_list;
-  }
-
-  for (const auto& item : value) {
-    if (!item.is_object()) {
-      continue;
-    }
-    if (!item.contains("clock_name") || !item.contains("net_name")) {
-      continue;
-    }
-
-    auto clock_name = parse_string(item.at("clock_name"), "");
-    auto net_name = parse_string(item.at("net_name"), "");
-    if (!clock_name.empty() && !net_name.empty()) {
-      clock_net_list.emplace_back(clock_name, net_name);
-    }
-  }
-
-  return clock_net_list;
-}
-
-auto ApplyNetListIfPresent(const nlohmann::json& json, Config& config) -> void
-{
-  if (json.contains("net_list") && json.at("net_list").is_array()) {
-    config.set_net_list(ParseNetList(json.at("net_list")));
-  }
-}
-
 }  // namespace
 
 auto Config::init(const std::string& config_file) -> bool
@@ -289,14 +256,14 @@ auto Config::parse(const std::string& json_file) -> bool
                          &Config::set_htree_depth_explore_window);
   ApplyDoubleIfPresent(json, "htree_topology_tolerance", *this, &Config::get_htree_topology_tolerance,
                        &Config::set_htree_topology_tolerance);
+  if (!ApplyBoolIfPresent(json, "enable_analytical_htree", is_enable_analytical_htree(), *this, &Config::set_enable_analytical_htree,
+                          json_file)) {
+    return false;
+  }
   if (!ApplyBoolIfPresent(json, "enable_sink_clustering", is_enable_sink_clustering(), *this, &Config::set_enable_sink_clustering,
                           json_file)) {
     return false;
   }
-  if (!ApplyBoolIfPresent(json, "use_netlist", false, *this, &Config::set_use_netlist, json_file)) {
-    return false;
-  }
-  ApplyNetListIfPresent(json, *this);
   return true;
 }
 
@@ -317,15 +284,16 @@ auto Config::buildRuntimeConfigRows() const -> logformat::TableRows
       {"max_cap", has_max_cap() ? logformat::FormatWithUnit(get_max_cap(), "pF") : "auto",
        has_max_cap() ? "explicit runtime config" : "resolve from liberty cap limit/table-axis during characterization"},
       {"max_length", logformat::FormatWithUnit(get_max_length(), "um"), "legacy compatibility knob; not the active step lattice"},
-      {"wirelength_unit", has_wirelength_unit ? logformat::FormatWithUnit(get_wirelength_unit_um(), "um") : "auto",
-       has_wirelength_unit ? "active characterization lattice unit" : "fallback/override resolves later in flow"},
+      {"wirelength_unit", has_wirelength_unit ? logformat::FormatWithUnit(get_wirelength_unit_um(), "um") : "unconfigured",
+       has_wirelength_unit ? "active characterization lattice unit" : "must be supplied by a caller-owned characterization plan"},
       {"wirelength_iterations", std::to_string(get_wirelength_iterations()), "characterization length bins"},
       {"slew_steps", std::to_string(get_slew_steps()), "characterization slew bins"},
       {"cap_steps", std::to_string(get_cap_steps()), "characterization load-cap bins"},
       {"wire_width", has_wire_width ? logformat::FormatWithUnit(get_wire_width(), "um") : "library_default",
        has_wire_width ? "explicit RC width override" : "use technology default width in RC query"},
-      {"routing_layers", routing_layers.empty() ? "default(1)" : std::to_string(routing_layers.front()),
-       routing_layers.empty() ? "effective routing layer falls back to 1" : "configured order: " + logformat::JoinUnsigned(routing_layers)},
+      {"routing_layers", routing_layers.empty() ? "unconfigured" : std::to_string(routing_layers.front()),
+       routing_layers.empty() ? "routing layer must be supplied before RC queries"
+                              : "configured order: " + logformat::JoinUnsigned(routing_layers)},
       {"max_fanout", std::to_string(get_max_fanout()), "fanout constraint"},
       {"buffer_types", std::to_string(buffer_types.size()),
        buffer_types.empty() ? "no configured buffers" : logformat::JoinStrings(buffer_types)},
@@ -337,16 +305,17 @@ auto Config::buildRuntimeConfigRows() const -> logformat::TableRows
        "flow-level H-tree explores up to this many descending depth candidates from the deepest topology"},
       {"htree_topology_tolerance", logformat::FormatPercent(get_htree_topology_tolerance()),
        "per-level H-tree topology segment length deviation allowed around the baseline"},
+      {"enable_analytical_htree", logformat::FormatBool(is_enable_analytical_htree()),
+       is_enable_analytical_htree() ? "experimental analytical H-tree candidate selection is enabled"
+                                    : "native discrete H-tree search is used"},
       {"enable_sink_clustering", logformat::FormatBool(is_enable_sink_clustering()),
        is_enable_sink_clustering() ? "run sink linear clustering before H-tree synthesis" : "build H-tree directly on original sinks"},
-      {"use_netlist", logformat::FormatBool(is_use_netlist()),
-       is_use_netlist() ? "configured net pairs: " + std::to_string(get_net_list().size()) : "clock net pairs resolved from SDC"},
   };
 }
 
-auto Config::emitRuntimeConfigReport(const std::string& title) const -> void
+auto Config::emitRuntimeConfigReport(SchemaWriter& reporter, const std::string& title) const -> void
 {
-  schema::EmitTable(title, {"Item", "Value", "Detail"}, buildRuntimeConfigRows());
+  reporter.emitTable(title, {"Item", "Value", "Detail"}, buildRuntimeConfigRows());
 }
 
 }  // namespace icts

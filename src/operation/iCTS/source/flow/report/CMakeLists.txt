@@ -16,13 +16,16 @@ add_library(
 target_link_libraries(
   icts_source_flow_report
   PRIVATE
-  icts_source_database
+  icts_source_database_config
+  icts_source_database_design
+  icts_source_database_io
   icts_source_flow_evaluation
   icts_source_flow_report_export
   icts_source_flow_report_overview
   icts_source_flow_report_qor
   icts_source_flow_report_visualization
-  icts_source_utils
+  icts_source_utils_logger
+  log
 )
 
 target_include_directories(

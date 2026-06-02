@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -24,15 +24,31 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
 
 namespace icts {
 
-struct IdbConversionResult
+class Design;
+class SchemaWriter;
+class Wrapper;
+
+struct IdbConversionInput
+{
+  Design* design = nullptr;
+  Wrapper* wrapper = nullptr;
+  SchemaWriter* reporter = nullptr;
+};
+
+struct IdbConversionSummary
 {
   bool attempted = false;
   bool design_ready = false;
-  bool idb_conversion_done = false;
+  bool success = false;
   std::size_t clock_count = 0U;
+  bool idb_clock_tree_restored = false;
+  std::string failed_clock;
+  std::string failed_net;
+  std::string failure_reason = "n/a";
 };
 
 class IdbConversion
@@ -40,7 +56,7 @@ class IdbConversion
  public:
   IdbConversion() = delete;
 
-  static auto run() -> IdbConversionResult;
+  static auto run(const IdbConversionInput& input) -> IdbConversionSummary;
 };
 
 }  // namespace icts

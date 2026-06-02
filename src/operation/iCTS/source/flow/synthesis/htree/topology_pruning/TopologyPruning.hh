@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -31,15 +31,19 @@
 #include "HTreeTopologyChar.hh"
 #include "synthesis/htree/HTree.hh"
 #include "synthesis/htree/constraint/Constraint.hh"
-#include "synthesis/htree/segment_pruning/SegmentLibrary.hh"
+#include "synthesis/htree/segment_pruning/TopologyPatternLibrary.hh"
 
 namespace icts {
+
+class SchemaWriter;
 class Tree;
 }  // namespace icts
 
 namespace icts::htree {
 
 class RootDriverCompensationPass;
+class SegmentFrontierCatalog;
+struct BufferPatternLibrary;
 struct SinkLoadRegionLegalityContext;
 
 struct CandidateBuildEvaluation
@@ -58,15 +62,16 @@ struct CandidateBuildEvaluation
   std::size_t feasible_solution_count = 0U;
   std::vector<HTreeTopologyChar> feasible_frontier_entries;
   std::optional<HTreeTopologyChar> best_char = std::nullopt;
-  bool used_boundary_fallback = false;
-  std::optional<double> boundary_fallback_score = std::nullopt;
-  std::string boundary_fallback_reason;
+  bool used_boundary_relaxation = false;
+  std::optional<double> boundary_relaxation_score = std::nullopt;
+  std::string boundary_relaxation_reason;
   TopologyPatternLibrary topology_pattern_library;
 };
 
-struct HTreeFanoutPruningOptions
+struct HTreeFanoutPruningConfig
 {
   std::size_t max_fanout = 0U;
+  bool allow_boundary_relaxation = false;
 };
 
 struct CandidateCharRef
@@ -75,24 +80,38 @@ struct CandidateCharRef
   const HTreeTopologyChar* entry = nullptr;
 };
 
-struct CandidateCharRefFilterResult
+struct CandidateCharRefFilterOutput
 {
   std::vector<CandidateCharRef> entries;
+};
+
+struct CandidateCharRefFilterSummary
+{
   std::string first_failure_reason;
+};
+
+struct CandidateCharRefFilterBuild
+{
+  CandidateCharRefFilterOutput output;
+  CandidateCharRefFilterSummary summary;
 };
 
 auto EvaluateCandidateBuild(const std::vector<HTree::LevelPlan>& levels, const SegmentFrontierCatalog& segment_frontier_catalog,
                             const BufferPatternLibrary& segment_pattern_library, const BoundaryConstraints& boundary_constraints,
                             const Tree& topology, SinkLoadRegionLegalityContext& sink_load_region_legality_context, std::size_t leaf_count,
-                            unsigned depth, unsigned char_slew_steps, RootDriverCompensationPass& compensation_pass,
-                            const HTreeFanoutPruningOptions& fanout_options) -> CandidateBuildEvaluation;
+                            unsigned depth, unsigned char_slew_steps, RootDriverCompensationPass& compensation_pass, SchemaWriter& reporter,
+                            const HTreeFanoutPruningConfig& fanout_config) -> CandidateBuildEvaluation;
 auto FilterGlobalEntriesBySinkLoadRegionCoverage(const std::vector<CandidateCharRef>& entries,
                                                  const std::vector<CandidateBuildEvaluation>& evaluations, const Tree& topology,
                                                  const BufferPatternLibrary& segment_pattern_library,
-                                                 SinkLoadRegionLegalityContext& legality_context) -> CandidateCharRefFilterResult;
+                                                 SinkLoadRegionLegalityContext& legality_context) -> CandidateCharRefFilterBuild;
+auto ReduceCandidateBuildEvaluationForGlobalSelection(CandidateBuildEvaluation& evaluation, const Tree& topology,
+                                                      const BufferPatternLibrary& segment_pattern_library,
+                                                      SinkLoadRegionLegalityContext& legality_context, bool retain_relaxed_candidates)
+    -> void;
 auto BuildPerDepthDelayPowerParetoRefs(const std::vector<CandidateCharRef>& entries) -> std::vector<CandidateCharRef>;
 auto SelectBestGlobalEntry(const std::vector<CandidateCharRef>& entries) -> std::optional<CandidateCharRef>;
-auto CalcBoundaryFallbackScore(const HTreeTopologyChar& entry, const BoundaryConstraints& boundary_constraints, unsigned slew_steps)
+auto CalcBoundaryRelaxationScore(const HTreeTopologyChar& entry, const BoundaryConstraints& boundary_constraints, unsigned slew_steps)
     -> double;
 
 }  // namespace icts::htree

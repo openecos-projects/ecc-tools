@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -30,6 +30,7 @@
 
 #include "ClockLayout.hh"
 #include "synthesis/htree/HTree.hh"
+#include "synthesis/topology/trunk/SourceTrunk.hh"
 
 namespace icts {
 
@@ -64,7 +65,7 @@ auto findInsertedNetLevel(const std::vector<HTree::InsertedNetLevel>& levels, co
   return iter->topology_level;
 }
 
-auto fallbackNetTopologyLevel(LayoutNetRole role, ClockLayoutPhase synthesis_phase, int selected_depth) -> int
+auto inferNetTopologyLevel(LayoutNetRole role, ClockLayoutPhase synthesis_phase, int selected_depth) -> int
 {
   if (role == LayoutNetRole::kSinkTree) {
     return selected_depth >= 0 ? selected_depth : 0;
@@ -82,74 +83,74 @@ auto resolveNetTopologyLevel(const std::vector<HTree::InsertedNetLevel>& levels,
   if (inserted_level.has_value()) {
     return *inserted_level;
   }
-  return fallbackNetTopologyLevel(role, synthesis_phase, selected_depth);
+  return inferNetTopologyLevel(role, synthesis_phase, selected_depth);
 }
 
 }  // namespace
 
-auto ClockLayoutAdapter::makeSinkDomainLayoutInput(const Topology::BuildResult& result) -> SinkDomainLayoutInput
+auto ClockLayoutAdapter::makeSinkDomainLayoutTopology(const Topology::Build& result) -> SinkDomainSynthesisTopology
 {
-  SinkDomainLayoutInput input{
-      .selected_depth = selectedDepthToInt(result.selected_htree_depth),
-      .topology_level_count = static_cast<int>(result.selected_htree_level_count),
+  SinkDomainSynthesisTopology layout_topology{
+      .selected_depth = selectedDepthToInt(result.summary.selected_htree_depth),
+      .topology_level_count = static_cast<int>(result.summary.selected_htree_level_count),
       .inserted_insts = {},
       .inserted_nets = {},
   };
-  input.inserted_insts.reserve(result.inserted_insts.size());
-  for (const auto& inst : result.inserted_insts) {
+  layout_topology.inserted_insts.reserve(result.output.inserted_insts.size());
+  for (const auto& inst : result.output.inserted_insts) {
     if (inst == nullptr) {
       continue;
     }
-    input.inserted_insts.push_back(ClockLayoutInstTopology{
+    layout_topology.inserted_insts.push_back(ClockLayoutInstTopology{
         .inst = inst.get(),
-        .topology_level = findInsertedInstLevel(result.inserted_inst_levels, inst.get()),
+        .topology_level = findInsertedInstLevel(result.output.inserted_inst_levels, inst.get()),
     });
   }
-  input.inserted_nets.reserve(result.inserted_nets.size());
-  for (const auto& net : result.inserted_nets) {
+  layout_topology.inserted_nets.reserve(result.output.inserted_nets.size());
+  for (const auto& net : result.output.inserted_nets) {
     if (net == nullptr) {
       continue;
     }
-    input.inserted_nets.push_back(ClockLayoutNetTopology{
+    layout_topology.inserted_nets.push_back(ClockLayoutNetTopology{
         .net = net.get(),
-        .topology_level = resolveNetTopologyLevel(result.inserted_net_levels, net.get(), LayoutNetRole::kSinkTree,
-                                                  ClockLayoutPhase::kDownstreamHTree, input.selected_depth),
+        .topology_level = resolveNetTopologyLevel(result.output.inserted_net_levels, net.get(), LayoutNetRole::kSinkTree,
+                                                  ClockLayoutPhase::kDownstreamHTree, layout_topology.selected_depth),
     });
   }
-  return input;
+  return layout_topology;
 }
 
-auto ClockLayoutAdapter::makeSourceTrunkLayoutInput(const Topology::SourceTrunkBuildResult& result, ClockLayoutPhase synthesis_phase)
-    -> SourceToRootLayoutInput
+auto ClockLayoutAdapter::makeSourceTrunkLayoutTopology(const topology::SourceTrunkBuild& result, ClockLayoutPhase synthesis_phase)
+    -> SourceToRootSynthesisTopology
 {
-  SourceToRootLayoutInput input{
-      .selected_depth = selectedDepthToInt(result.htree_result.selected_depth),
-      .topology_level_count = static_cast<int>(result.htree_result.levels.size()),
+  SourceToRootSynthesisTopology layout_topology{
+      .selected_depth = selectedDepthToInt(result.summary.selected_depth),
+      .topology_level_count = static_cast<int>(result.summary.selected_level_count),
       .inserted_insts = {},
       .inserted_nets = {},
   };
-  input.inserted_insts.reserve(result.inserted_insts.size());
-  for (const auto& inst : result.inserted_insts) {
+  layout_topology.inserted_insts.reserve(result.output.inserted_insts.size());
+  for (const auto& inst : result.output.inserted_insts) {
     if (inst == nullptr) {
       continue;
     }
-    input.inserted_insts.push_back(ClockLayoutInstTopology{
+    layout_topology.inserted_insts.push_back(ClockLayoutInstTopology{
         .inst = inst.get(),
-        .topology_level = findInsertedInstLevel(result.inserted_inst_levels, inst.get()),
+        .topology_level = findInsertedInstLevel(result.output.inserted_inst_levels, inst.get()),
     });
   }
-  input.inserted_nets.reserve(result.inserted_nets.size());
-  for (const auto& net : result.inserted_nets) {
+  layout_topology.inserted_nets.reserve(result.output.inserted_nets.size());
+  for (const auto& net : result.output.inserted_nets) {
     if (net == nullptr) {
       continue;
     }
-    input.inserted_nets.push_back(ClockLayoutNetTopology{
+    layout_topology.inserted_nets.push_back(ClockLayoutNetTopology{
         .net = net.get(),
-        .topology_level = resolveNetTopologyLevel(result.inserted_net_levels, net.get(), LayoutNetRole::kSourceToRoot, synthesis_phase,
-                                                  input.selected_depth),
+        .topology_level = resolveNetTopologyLevel(result.output.inserted_net_levels, net.get(), LayoutNetRole::kSourceToRoot,
+                                                  synthesis_phase, layout_topology.selected_depth),
     });
   }
-  return input;
+  return layout_topology;
 }
 
 }  // namespace icts

@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -27,15 +27,30 @@
 
 namespace icts {
 class ClockLayout;
-}
+class Config;
+class Design;
+class SchemaWriter;
+class Wrapper;
+
+}  // namespace icts
 
 namespace icts::visualization {
 
-struct GdsVisualizationResult
+struct GdsVisualizationInput
+{
+  const Config* config = nullptr;
+  Design* design = nullptr;
+  Wrapper* wrapper = nullptr;
+  SchemaWriter* reporter = nullptr;
+  std::filesystem::path visualization_dir;
+  const ClockLayout* clock_layout = nullptr;
+};
+
+struct GdsVisualizationSummary
 {
   bool success = false;
 };
 
-auto EmitGdsVisualizations(const std::filesystem::path& visualization_dir, const ClockLayout& clock_layout) -> GdsVisualizationResult;
+auto EmitGdsVisualizations(const GdsVisualizationInput& input) -> GdsVisualizationSummary;
 
 }  // namespace icts::visualization

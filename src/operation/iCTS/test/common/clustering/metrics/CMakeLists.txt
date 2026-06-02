@@ -1,7 +1,7 @@
 add_library(
   icts_test_common_clustering_metrics
   STATIC
-  ${ICTS_TEST}/common/clustering/metrics/ClusterGeometrySupport.cc
+  ${ICTS_TEST}/common/clustering/metrics/ClusterGeometryMetrics.cc
 )
 
 target_link_libraries(

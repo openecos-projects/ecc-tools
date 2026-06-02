@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -28,13 +28,20 @@
 #include "Point.hh"
 #include "synthesis/htree/HTree.hh"
 
+namespace icts {
+class Design;
+class Wrapper;
+}  // namespace icts
+
 namespace icts::htree {
 
 struct BufferPatternLibrary;
+struct DiagnosticBuild;
 
 auto InterpolateManhattanPoint(const Point<int>& source, const Point<int>& sink, double normalized_position) -> Point<int>;
-auto ValidateRootDriverSizing(const HTree::BuildResult& result, const std::string& cell_master) -> bool;
-auto ApplyRootDriverSizing(HTree::BuildResult& result, const std::string& cell_master) -> bool;
-auto BuildEmbedding(HTree::BuildResult& result, const BufferPatternLibrary& segment_pattern_library) -> void;
+auto ValidateRootDriverSizing(icts::Design& design, Wrapper& wrapper, const HTree::Build& result, const std::string& cell_master) -> bool;
+auto ApplyRootDriverSizing(icts::Design& design, Wrapper& wrapper, htree::DiagnosticBuild& result, const std::string& cell_master) -> bool;
+auto BuildEmbedding(icts::Design& design, Wrapper& wrapper, htree::DiagnosticBuild& result,
+                    const BufferPatternLibrary& segment_pattern_library) -> void;
 
 }  // namespace icts::htree

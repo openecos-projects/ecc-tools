@@ -28,12 +28,12 @@ namespace parser {
  * @brief One lookup row from a captab configuration.
  *
  * Each row is encoded as:
- *   distance coupling_cap ground_cap
+ *   spacing coupling_cap ground_cap
  */
 struct CapTableEntry {
-  double distance{0.0};     // same-layer spacing (um)
-  double ground_cap{0.0};   // ground capacitance (fF/um)
-  double coupling_cap{0.0}; // coupling capacitance (fF/um)
+  double distance{0.0};      // same-layer spacing (um)
+  double coupling_cap{0.0};  // coupling capacitance (fF/um)
+  double ground_cap{0.0};    // ground capacitance (fF/um)
 };
 
 /**

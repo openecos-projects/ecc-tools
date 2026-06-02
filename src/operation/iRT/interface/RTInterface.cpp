@@ -31,7 +31,6 @@
 #include "TopologyGenerator.hpp"
 #include "TrackAssigner.hpp"
 #include "ViolationReporter.hpp"
-#include "api/PowerEngine.hh"
 #include "api/TimingEngine.hh"
 #include "api/TimingIDBAdapter.hh"
 #include "feature_irt.h"
@@ -1262,7 +1261,6 @@ void RTInterface::outputSummary()
     top_rt_summary.tg_summary.total_overflow = rt_summary.tg_summary.total_overflow;
     top_rt_summary.tg_summary.total_wire_length = rt_summary.tg_summary.total_wire_length;
     top_rt_summary.tg_summary.clock_timing_map = rt_summary.tg_summary.clock_timing_map;
-    top_rt_summary.tg_summary.type_power_map = rt_summary.tg_summary.type_power_map;
   }
   // la_summary
   {
@@ -1275,7 +1273,6 @@ void RTInterface::outputSummary()
     top_rt_summary.la_summary.cut_via_num_map = rt_summary.la_summary.cut_via_num_map;
     top_rt_summary.la_summary.total_via_num = rt_summary.la_summary.total_via_num;
     top_rt_summary.la_summary.clock_timing_map = rt_summary.la_summary.clock_timing_map;
-    top_rt_summary.la_summary.type_power_map = rt_summary.la_summary.type_power_map;
   }
   // sr_summary
   {
@@ -1290,7 +1287,6 @@ void RTInterface::outputSummary()
       top_sr_summary.cut_via_num_map = sr_summary.cut_via_num_map;
       top_sr_summary.total_via_num = sr_summary.total_via_num;
       top_sr_summary.clock_timing_map = sr_summary.clock_timing_map;
-      top_sr_summary.type_power_map = sr_summary.type_power_map;
     }
   }
   // ta_summary
@@ -1313,7 +1309,6 @@ void RTInterface::outputSummary()
       top_dr_summary.routing_violation_num_map = dr_summary.routing_violation_num_map;
       top_dr_summary.total_violation_num = dr_summary.total_violation_num;
       top_dr_summary.clock_timing_map = dr_summary.clock_timing_map;
-      top_dr_summary.type_power_map = dr_summary.type_power_map;
     }
   }
   // vr_summary
@@ -1333,7 +1328,6 @@ void RTInterface::outputSummary()
     top_rt_summary.vr_summary.among_net_routing_violation_num_map = rt_summary.vr_summary.among_net_routing_violation_num_map;
     top_rt_summary.vr_summary.among_net_total_violation_num = rt_summary.vr_summary.among_net_total_violation_num;
     top_rt_summary.vr_summary.clock_timing_map = rt_summary.vr_summary.clock_timing_map;
-    top_rt_summary.vr_summary.type_power_map = rt_summary.vr_summary.type_power_map;
   }
 }
 
@@ -1524,9 +1518,9 @@ ids::Shape RTInterface::getIDSShape(int32_t net_idx, LayerRect layer_rect, bool 
 
 #if 1  // iSTA
 
-void RTInterface::updateTimingAndPower(std::vector<std::map<std::string, std::vector<LayerCoord>>>& real_pin_coord_map_list,
+void RTInterface::updateTiming(std::vector<std::map<std::string, std::vector<LayerCoord>>>& real_pin_coord_map_list,
                                        std::vector<std::vector<Segment<LayerCoord>>>& routing_segment_list_list,
-                                       std::map<std::string, std::map<std::string, double>>& clock_timing, std::map<std::string, double>& power)
+                                       std::map<std::string, std::map<std::string, double>>& clock_timing)
 {
 #if 1  // 数据结构定义
   struct RCPin
@@ -1568,15 +1562,6 @@ void RTInterface::updateTimingAndPower(std::vector<std::map<std::string, std::ve
     }
     timing_engine->initRcTree();
     return timing_engine;
-  };
-  auto initPowerEngine = [](std::string workspace) {
-    auto* power_engine = ipower::PowerEngine::getOrCreatePowerEngine();
-    if (!power_engine->isBuildGraph()) {
-      power_engine->get_power()->set_design_work_space(workspace.c_str());
-      power_engine->get_power()->initPowerGraphData();
-      power_engine->get_power()->initToggleSPData();
-    }
-    return power_engine;
   };
   auto getRCSegmentList
       = [](std::map<LayerCoord, std::vector<std::string>, CmpLayerCoordByXASC>& coord_real_pin_map, std::vector<Segment<LayerCoord>>& routing_segment_list) {
@@ -1741,23 +1726,6 @@ void RTInterface::updateTimingAndPower(std::vector<std::map<std::string, std::ve
     clock_timing[clk_name]["WNS"] = setup_wns;
     clock_timing[clk_name]["Freq(MHz)"] = suggest_freq;
   });
-  ipower::PowerEngine* power_engine = initPowerEngine(RTUTIL.getString(temp_directory_path, "other_tools/ipw/"));
-  power_engine->get_power()->updatePower();
-  power_engine->get_power()->reportPower();
-
-  double static_power = 0;
-  for (const auto& data : power_engine->get_power()->get_leakage_powers()) {
-    static_power += data->get_leakage_power();
-  }
-  double dynamic_power = 0;
-  for (const auto& data : power_engine->get_power()->get_internal_powers()) {
-    dynamic_power += data->get_internal_power();
-  }
-  for (const auto& data : power_engine->get_power()->get_switch_powers()) {
-    dynamic_power += data->get_switch_power();
-  }
-  power["static_power"] = static_power;
-  power["dynamic_power"] = dynamic_power;
 #endif
 }
 

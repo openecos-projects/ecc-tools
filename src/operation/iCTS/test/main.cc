@@ -28,6 +28,8 @@
 #include <string>
 #include <utility>
 
+#include "Flow.hh"
+#include "common/CTSTestRuntime.hh"
 #include "common/io/TestArtifactIO.hh"
 #include "utils/logger/Schema.hh"
 
@@ -41,23 +43,24 @@ class PerTestArtifactListener : public ::testing::EmptyTestEventListener
 
   void OnTestStart(const ::testing::TestInfo& test_info) override
   {
+    runtime::BeginCurrentRuntime();
     _current_output_dir = common::io::PrepareCleanOutputDir(
         common::io::ResolveOutputDir() / "gtest" / common::io::SanitizeOutputName(_executable_name)
         / common::io::SanitizeOutputName(test_info.test_suite_name()) / common::io::SanitizeOutputName(test_info.name()));
     _current_cts_log = _current_output_dir / "cts.log";
     _current_test_log = _current_output_dir / "test.log";
 
-    SCHEMA_WRITER_INST.open(_current_cts_log, "iCTS Test Report",
-                            {
-                                {"cts_log", _current_cts_log.string()},
-                            });
-    SCHEMA_WRITER_INST.emitKeyValueTable("GTest Case Context", {
-                                                                   {"executable", _executable_name},
-                                                                   {"test_suite", test_info.test_suite_name()},
-                                                                   {"test_name", test_info.name()},
-                                                                   {"output_dir", _current_output_dir.string()},
-                                                                   {"test_log", _current_test_log.string()},
-                                                               });
+    icts_test::runtime::CurrentRuntime().reporter.open(_current_cts_log, "iCTS Test Report",
+                                                       {
+                                                           {"cts_log", _current_cts_log.string()},
+                                                       });
+    icts_test::runtime::CurrentRuntime().reporter.emitKeyValueTable("GTest Case Context", {
+                                                                                              {"executable", _executable_name},
+                                                                                              {"test_suite", test_info.test_suite_name()},
+                                                                                              {"test_name", test_info.name()},
+                                                                                              {"output_dir", _current_output_dir.string()},
+                                                                                              {"test_log", _current_test_log.string()},
+                                                                                          });
 
     ::testing::internal::CaptureStdout();
     ::testing::internal::CaptureStderr();
@@ -69,13 +72,15 @@ class PerTestArtifactListener : public ::testing::EmptyTestEventListener
     const std::string captured_stderr = ::testing::internal::GetCapturedStderr();
 
     const auto* result = test_info.result();
-    SCHEMA_WRITER_INST.emitKeyValueTable("GTest Case Result", {
-                                                                  {"status", resolveTestStatus(*result)},
-                                                                  {"elapsed_ms", std::to_string(result->elapsed_time())},
-                                                                  {"total_part_count", std::to_string(result->total_part_count())},
-                                                                  {"test_log", _current_test_log.string()},
-                                                              });
-    SCHEMA_WRITER_INST.close();
+    icts_test::runtime::CurrentRuntime().reporter.emitKeyValueTable("GTest Case Result",
+                                                                    {
+                                                                        {"status", resolveTestStatus(*result)},
+                                                                        {"elapsed_ms", std::to_string(result->elapsed_time())},
+                                                                        {"total_part_count", std::to_string(result->total_part_count())},
+                                                                        {"test_log", _current_test_log.string()},
+                                                                    });
+    icts_test::runtime::CurrentRuntime().reporter.close();
+    runtime::EndCurrentRuntime();
 
     common::io::WriteRawTextLog(_current_test_log, buildTestLogContent(test_info, captured_stdout, captured_stderr));
     _current_output_dir.clear();

@@ -152,14 +152,14 @@ auto LocalLegalization::buildLegalRegion(const Problem& problem) -> LocalLegaliz
   return legal_region;
 }
 
-auto LocalLegalization::legalize(const Problem& problem) -> LocalLegalization::Result
+auto LocalLegalization::legalize(const Problem& problem) -> LocalLegalization::Output
 {
-  return legalize(problem, Options{});
+  return legalize(problem, Config{});
 }
 
-auto LocalLegalization::legalize(const Problem& problem, const Options& options) -> LocalLegalization::Result
+auto LocalLegalization::legalize(const Problem& problem, const Config& config) -> LocalLegalization::Output
 {
-  Result result;
+  Output result;
   result.legalized_points = problem.movable_points;
   if (problem.movable_points.empty()) {
     LOG_WARNING << "LocalLegalization skipped: movable point set is empty.";
@@ -168,9 +168,9 @@ auto LocalLegalization::legalize(const Problem& problem, const Options& options)
   }
 
   const auto legal_region = buildLegalRegion(problem);
-  for (int round = 0; round < std::max(1, options.max_expansion_rounds); ++round) {
-    const auto candidate_budget = std::max<std::size_t>(1, options.candidate_budget * static_cast<std::size_t>(round + 1));
-    const int local_search_radius = std::max(0, options.local_search_radius * (round + 1));
+  for (int round = 0; round < std::max(1, config.max_expansion_rounds); ++round) {
+    const auto candidate_budget = std::max<std::size_t>(1, config.candidate_budget * static_cast<std::size_t>(round + 1));
+    const int local_search_radius = std::max(0, config.local_search_radius * (round + 1));
 
     std::vector<std::vector<CandidateSite>> candidate_sets;
     candidate_sets.reserve(problem.movable_points.size());
@@ -199,7 +199,7 @@ auto LocalLegalization::legalize(const Problem& problem, const Options& options)
     }
   }
 
-  if (options.failure_policy == FailurePolicy::kKeepOriginal) {
+  if (config.failure_policy == FailurePolicy::kKeepOriginal) {
     LOG_WARNING << "LocalLegalization failed to find a legal assignment; keeping original point locations.";
     result.legalized_points = problem.movable_points;
     return result;
@@ -210,14 +210,14 @@ auto LocalLegalization::legalize(const Problem& problem, const Options& options)
 }
 
 auto LocalLegalization::legalize(std::vector<PointType>& movable_points, const std::vector<PointType>& fixed_points,
-                                 const RegionType& feasible_region, const RegionType& block_region) -> LocalLegalization::Result
+                                 const RegionType& feasible_region, const RegionType& block_region) -> LocalLegalization::Output
 {
-  return legalize(movable_points, fixed_points, feasible_region, block_region, Options{});
+  return legalize(movable_points, fixed_points, feasible_region, block_region, Config{});
 }
 
 auto LocalLegalization::legalize(std::vector<PointType>& movable_points, const std::vector<PointType>& fixed_points,
-                                 const RegionType& feasible_region, const RegionType& block_region, const Options& options)
-    -> LocalLegalization::Result
+                                 const RegionType& feasible_region, const RegionType& block_region, const Config& config)
+    -> LocalLegalization::Output
 {
   Problem problem;
   problem.movable_points = movable_points;
@@ -225,8 +225,8 @@ auto LocalLegalization::legalize(std::vector<PointType>& movable_points, const s
   problem.feasible_region = feasible_region;
   problem.block_region = block_region;
 
-  auto result = legalize(problem, options);
-  if (result.success || options.failure_policy == FailurePolicy::kKeepOriginal) {
+  auto result = legalize(problem, config);
+  if (result.success || config.failure_policy == FailurePolicy::kKeepOriginal) {
     movable_points = result.legalized_points;
   }
   return result;

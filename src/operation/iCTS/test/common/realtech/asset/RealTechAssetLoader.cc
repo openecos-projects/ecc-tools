@@ -18,14 +18,13 @@
  * @file RealTechAssetLoader.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-04-11
- * @brief Asset probing and environment bootstrap support for real-tech tests.
+ * @brief Asset probing and environment bootstrap for real-tech tests.
  */
 
 #include "common/realtech/asset/RealTechAssetLoader.hh"
 
 #include <glog/logging.h>
 
-#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -39,25 +38,16 @@
 #include <utility>
 #include <vector>
 
-#include "IdbCellMaster.h"
-#include "IdbDesign.h"
-#include "IdbEnum.h"
-#include "IdbInstance.h"
-#include "IdbNet.h"
-#include "IdbPins.h"
-#include "IdbTerm.h"
+#include "Flow.hh"
 #include "Log.hh"
+#include "common/CTSTestRuntime.hh"
 #include "common/io/TestArtifactIO.hh"
-#include "common/realtech/support/RealTechSetupSupport.hh"
-#include "database/adapter/sta/STAAdapter.hh"
+#include "common/realtech/setup/RealTechDesignSetup.hh"
 #include "database/config/Config.hh"
-#include "database/design/Inst.hh"
-#include "database/design/Pin.hh"
 #include "database/io/Wrapper.hh"
-#include "database/spatial/Point.hh"
 #include "dm_config.h"
 #include "idm.h"
-#include "instantiation/design_conversion/DesignConversion.hh"
+#include "setup/clock_data/ClockDataRead.hh"
 
 namespace icts_test::common::realtech::asset {
 namespace {
@@ -275,47 +265,6 @@ auto ResolvePdkRootPath(const std::filesystem::path& workspace_path) -> std::fil
   return {};
 }
 
-auto TryMakeRealPinCapProbe(idb::IdbPin* idb_pin, const std::string& net_name, bool is_clock_net) -> std::optional<RealPinCapProbe>
-{
-  if (idb_pin == nullptr) {
-    return std::nullopt;
-  }
-
-  auto* idb_term = idb_pin->get_term();
-  if (idb_term == nullptr) {
-    return std::nullopt;
-  }
-  const auto direction = idb_term->get_direction();
-  if (direction != idb::IdbConnectDirection::kInput && direction != idb::IdbConnectDirection::kInOut) {
-    return std::nullopt;
-  }
-
-  auto* idb_inst = idb_pin->get_instance();
-  if (idb_inst == nullptr) {
-    return std::nullopt;
-  }
-  auto* cell_master = idb_inst->get_cell_master();
-  if (cell_master == nullptr) {
-    return std::nullopt;
-  }
-
-  icts::Inst probe_inst(idb_inst->get_name(), cell_master->get_name(), icts::InstType::kUnknown, icts::Point<int>(-1, -1));
-  icts::Pin probe_pin(idb_pin->get_pin_name(), icts::PinType::kIn, icts::Point<int>(-1, -1), &probe_inst);
-  const double pin_cap_pf = std::max(0.0, STA_ADAPTER_INST.queryPinCapacitance(&probe_pin));
-  if (pin_cap_pf <= 0.0) {
-    return std::nullopt;
-  }
-
-  return RealPinCapProbe{
-      .net_name = net_name,
-      .inst_name = idb_inst->get_name(),
-      .cell_master = cell_master->get_name(),
-      .pin_name = idb_pin->get_pin_name(),
-      .is_clock_net = is_clock_net,
-      .pre_timing_cap_pf = pin_cap_pf,
-  };
-}
-
 auto BuildAssetsFromWorkspace(const std::filesystem::path& workspace_path) -> std::optional<RealTechAssets>
 {
   if (workspace_path.empty()) {
@@ -432,7 +381,7 @@ auto LoadRealTechAssets(const RealTechAssets& assets, std::string& error) -> boo
     error = "cts config is missing: " + assets.cts_config_path.string();
     return false;
   }
-  CONFIG_INST.init(assets.cts_config_path.string());
+  icts_test::runtime::CurrentRuntime().config.init(assets.cts_config_path.string());
 
   const std::vector<std::string> tech_lef_paths = {assets.tech_lef_path.string()};
   if (!dmInst->readLef(tech_lef_paths, true)) {
@@ -495,7 +444,7 @@ auto LoadRealTechAssets(const RealTechAssets& assets, std::string& error) -> boo
     error = "cannot create work dir: " + work_dir.string();
     return false;
   }
-  CONFIG_INST.set_work_dir(work_dir.string());
+  icts_test::runtime::CurrentRuntime().config.set_work_dir(work_dir.string());
   dm_config.set_output_path((io::ResolveClusteringOutputDir() / "real_tech_output").string());
 
   auto* idb_builder = dmInst->get_idb_builder();
@@ -504,13 +453,18 @@ auto LoadRealTechAssets(const RealTechAssets& assets, std::string& error) -> boo
     return false;
   }
 
-  WRAPPER_INST.reset();
-  WRAPPER_INST.init(idb_builder);
-  if (!icts::DesignConversion::readClockData()) {
+  icts_test::runtime::CurrentRuntime().wrapper.reset();
+  icts_test::runtime::CurrentRuntime().wrapper.init(idb_builder);
+  auto& runtime = icts_test::runtime::CurrentRuntime();
+  if (!icts::ClockDataRead::read(icts::ClockDataReadInput{
+          .config = &runtime.config,
+          .design = &runtime.design,
+          .wrapper = &runtime.wrapper,
+          .reporter = &runtime.reporter,
+      })) {
     error = "readClockData failed for SDC-declared clocks";
     return false;
   }
-  STA_ADAPTER_INST.init();
   return true;
 }
 
@@ -553,7 +507,7 @@ auto BuildRealTechSetupState() -> RealTechSetupState
   }
 
   std::ostringstream summary;
-  summary << "fallback to synthetic sweeps";
+  summary << "use synthetic stand-in sweeps";
   if (!probe_errors.empty()) {
     summary << " (";
     for (std::size_t index = 0; index < probe_errors.size(); ++index) {
@@ -566,43 +520,11 @@ auto BuildRealTechSetupState() -> RealTechSetupState
   } else {
     summary << " (no real-tech workspace candidates were found)";
   }
-  state.mode = RealTechMode::kSyntheticFallback;
-  state.source_label = "synthetic_fallback";
+  state.mode = RealTechMode::kSyntheticLoads;
+  state.source_label = "synthetic_standin";
   state.summary = summary.str();
   LOG_WARNING << "RealTechSetup: " << state.summary;
   return state;
-}
-
-auto TryFindRepresentativeRealPinCapProbe() -> std::optional<RealPinCapProbe>
-{
-  auto* idb_design = dmInst->get_idb_design();
-  auto* net_list = idb_design != nullptr ? idb_design->get_net_list() : nullptr;
-  if (net_list == nullptr) {
-    return std::nullopt;
-  }
-
-  const auto try_scan = [&net_list](bool clock_only) -> std::optional<RealPinCapProbe> {
-    for (auto* idb_net : net_list->get_net_list()) {
-      if (idb_net == nullptr) {
-        continue;
-      }
-      const bool is_clock_net = idb_net->is_clock() != 0U;
-      if (clock_only && !is_clock_net) {
-        continue;
-      }
-      for (auto* idb_pin : idb_net->get_load_pins()) {
-        if (auto probe = TryMakeRealPinCapProbe(idb_pin, idb_net->get_net_name(), is_clock_net); probe.has_value()) {
-          return probe;
-        }
-      }
-    }
-    return std::nullopt;
-  };
-
-  if (auto probe = try_scan(true); probe.has_value()) {
-    return probe;
-  }
-  return try_scan(false);
 }
 
 }  // namespace icts_test::common::realtech::asset

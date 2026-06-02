@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -82,6 +82,49 @@ auto appendArc(ClockDAG::ClockGraph& graph, Pin* from, Pin* to, Net* net, int32_
       .net = net,
       .path_buffer_weight = path_buffer_weight,
   });
+}
+
+auto instTypeName(const Inst& inst) -> std::string
+{
+  switch (inst.get_type()) {
+    case InstType::kBuffer:
+      return "buffer";
+    case InstType::kFlipFlop:
+      return "flipflop";
+    case InstType::kLatch:
+      return "latch";
+    case InstType::kInverter:
+      return "inverter";
+    case InstType::kClockGate:
+      return "clock_gate";
+    case InstType::kMux:
+      return "clock_mux";
+    case InstType::kClockLogic:
+      return "clock_logic";
+    case InstType::kBoundaryLoad:
+      return "boundary_load";
+    case InstType::kMacroBlock:
+      return "macro_block";
+    case InstType::kUnknown:
+      return "unknown";
+  }
+  return "unknown";
+}
+
+auto formatClockCellError(const std::string& reason, const Inst& inst) -> std::string
+{
+  std::string pins;
+  for (auto* pin : inst.get_pins()) {
+    if (pin == nullptr) {
+      continue;
+    }
+    if (!pins.empty()) {
+      pins += ",";
+    }
+    pins += pin->get_name();
+  }
+  return reason + "{inst=" + inst.get_name() + ",cell_master=" + inst.get_cell_master() + ",type=" + instTypeName(inst) + ",pins=" + pins
+         + "}";
 }
 
 auto collectClockNets(const Clock& clock) -> std::vector<Net*>
@@ -163,12 +206,12 @@ auto buildNetArcs(ClockDAG::ClockGraph& graph, const std::vector<Net*>& nets) ->
 auto buildBufferCellArcs(ClockDAG::ClockGraph& graph, const std::vector<Inst*>& insts) -> void
 {
   for (auto* inst : insts) {
-    if (inst == nullptr || !inst->is_buffer()) {
+    if (inst == nullptr || !inst->is_clock_propagation_cell()) {
       continue;
     }
     auto* output_pin = inst->findDriverPin();
     if (output_pin == nullptr) {
-      markInvalid(graph, "buffer_output_pin_is_null");
+      markInvalid(graph, formatClockCellError("clock_cell_output_pin_is_null", *inst));
       continue;
     }
     appendPin(graph, output_pin);
@@ -182,7 +225,7 @@ auto buildBufferCellArcs(ClockDAG::ClockGraph& graph, const std::vector<Inst*>& 
       appendArc(graph, input_pin, output_pin, nullptr, 1);
     }
     if (!has_input_pin) {
-      markInvalid(graph, "buffer_input_pin_is_null");
+      markInvalid(graph, formatClockCellError("clock_cell_input_pin_is_null", *inst));
     }
   }
 }
@@ -259,7 +302,7 @@ auto buildClockGraph(const Clock& clock) -> ClockDAG::ClockGraph
 
 auto isFlipFlopSinkTerminal(const Clock& clock, const Pin* pin) -> bool
 {
-  if (pin == nullptr || pin->get_inst() == nullptr || !pin->get_inst()->is_flipflop()) {
+  if (pin == nullptr || pin->get_inst() == nullptr || !pin->get_inst()->is_sequential_sink()) {
     return false;
   }
   const auto& loads = clock.get_loads();
@@ -413,6 +456,12 @@ auto ClockDAG::reachableNets(const Clock* clock) const -> std::vector<Net*>
     nets.push_back(net);
   }
   return nets;
+}
+
+auto ClockDAG::graphForClock(const Clock* clock) const -> const ClockGraph*
+{
+  const auto* graph = findGraph(clock);
+  return graph != nullptr && graph->valid ? graph : nullptr;
 }
 
 auto ClockDAG::pathBufferStats(const Clock* clock) const -> PathBufferStats

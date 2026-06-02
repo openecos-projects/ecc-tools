@@ -18,17 +18,32 @@
  * @file TopologyDistanceReport.hh
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-04-28
- * @brief Emits Topology-specific schema report sections.
+ * @brief Emits Topology-specific structured report sections.
  */
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
+#include <string>
 
 #include "synthesis/topology/Topology.hh"
 
+namespace icts {
+
+class SchemaWriter;
+}  // namespace icts
+
 namespace icts::topology {
 
-auto EmitClusterLeafDistanceTables(const Topology::BuildResult& result) -> std::optional<Topology::ClusterLeafDistanceSummary>;
+struct ClusterLeafDistanceReportInput
+{
+  std::string log_file;
+  std::int32_t dbu_per_um = 0;
+  SchemaWriter* reporter = nullptr;
+  const Topology::Build* build = nullptr;
+};
+
+auto EmitClusterLeafDistanceTables(const ClusterLeafDistanceReportInput& input) -> std::optional<Topology::ClusterLeafDistanceSummary>;
 
 }  // namespace icts::topology

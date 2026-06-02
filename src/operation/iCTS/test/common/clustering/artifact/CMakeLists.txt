@@ -1,7 +1,7 @@
 add_library(
   icts_test_common_clustering_artifact
   STATIC
-  ${ICTS_TEST}/common/clustering/artifact/ClusterArtifactSupport.cc
+  ${ICTS_TEST}/common/clustering/artifact/ClusterArtifactWriter.cc
 )
 
 target_link_libraries(

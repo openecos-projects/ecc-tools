@@ -38,20 +38,21 @@
 #include "Pin.hh"
 #include "common/logging/LogText.hh"
 #include "common/logging/ScopedLogFile.hh"
-#include "common/realtech/support/RealTechSetupSupport.hh"
+#include "common/realtech/setup/RealTechDesignSetup.hh"
 #include "database/config/Config.hh"
 #include "flow/synthesis/htree/HTree.hh"
+#include "flow/synthesis/htree/HTreeArtifactWriter.hh"
 #include "flow/synthesis/htree/HTreeBuildObservation.hh"
-#include "flow/synthesis/htree/HTreeRealTechSmokeSupport.hh"
-#include "flow/synthesis/htree/HTreeVisualizationSupport.hh"
-#include "module/characterization/support/CharacterizationRealTechTestSupport.hh"
+#include "flow/synthesis/htree/HTreeRealTechScenario.hh"
+#include "flow/synthesis/htree/diagnostic/HTreeDiagnostic.hh"
+#include "module/characterization/fixture/CharacterizationRealTechFixture.hh"
 #include "utils/logger/Schema.hh"
 
 namespace icts_test {
 namespace {
 
 namespace common_realtech = common::realtech;
-namespace realtech_support = characterization::realtech;
+namespace realtech_fixture = characterization::realtech;
 
 TEST(HTreeRealTechSmokeTest, SynthesizesMaterializedHTreeFromRealClockLoads)
 {
@@ -67,20 +68,20 @@ TEST(HTreeRealTechSmokeTest, SynthesizesMaterializedHTreeFromRealClockLoads)
     return;
   }
 
-  realtech_support::RealTechCharSession char_session;
-  if (const auto prepare_error = char_session.prepare("htree_smoke", std::nullopt, kHTreeSmokeMaxSlewNs, kHTreeSmokeMaxCapPf);
+  realtech_fixture::RealTechCharFixture char_fixture;
+  if (const auto prepare_error = char_fixture.prepare("htree_smoke", std::nullopt, kHTreeSmokeMaxSlewNs, kHTreeSmokeMaxCapPf);
       prepare_error.has_value()) {
     GTEST_SKIP() << *prepare_error;
     return;
   }
 
-  EXPECT_EQ(CONFIG_INST.get_wirelength_iterations(), realtech_support::kRealTechCharWirelengthIterations);
-  EXPECT_EQ(CONFIG_INST.get_slew_steps(), realtech_support::kRealTechCharSlewSteps);
-  EXPECT_EQ(CONFIG_INST.get_cap_steps(), realtech_support::kRealTechCharCapSteps);
-  EXPECT_TRUE(CONFIG_INST.has_max_buf_tran());
-  EXPECT_TRUE(CONFIG_INST.has_max_cap());
-  EXPECT_DOUBLE_EQ(CONFIG_INST.get_max_buf_tran(), kHTreeSmokeMaxSlewNs);
-  EXPECT_DOUBLE_EQ(CONFIG_INST.get_max_cap(), kHTreeSmokeMaxCapPf);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().config.get_wirelength_iterations(), realtech_fixture::kRealTechCharWirelengthIterations);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().config.get_slew_steps(), realtech_fixture::kRealTechCharSlewSteps);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().config.get_cap_steps(), realtech_fixture::kRealTechCharCapSteps);
+  EXPECT_TRUE(icts_test::runtime::CurrentRuntime().config.has_max_buf_tran());
+  EXPECT_TRUE(icts_test::runtime::CurrentRuntime().config.has_max_cap());
+  EXPECT_DOUBLE_EQ(icts_test::runtime::CurrentRuntime().config.get_max_buf_tran(), kHTreeSmokeMaxSlewNs);
+  EXPECT_DOUBLE_EQ(icts_test::runtime::CurrentRuntime().config.get_max_cap(), kHTreeSmokeMaxCapPf);
 
   const auto& real_loads = selected_clock->loads;
   ASSERT_GE(real_loads.size(), 2U);
@@ -91,22 +92,23 @@ TEST(HTreeRealTechSmokeTest, SynthesizesMaterializedHTreeFromRealClockLoads)
   const auto artifact_paths = htree::PrepareHTreeArtifactPaths("realtech_smoke");
   ASSERT_FALSE(artifact_paths.output_dir.empty());
   const common::logging::ScopedLogFile cts_log_guard(artifact_paths.cts_log, "HTree Flow Test Report");
-  SCHEMA_WRITER_INST.emitKeyValueTable("HTree Smoke Scenario", {
-                                                                   {"scenario", "realtech_smoke"},
-                                                                   {"clock_name", selected_clock->clock_name},
-                                                                   {"load_count", std::to_string(real_loads.size())},
-                                                               });
+  icts_test::runtime::CurrentRuntime().reporter.emitKeyValueTable("HTree Smoke Scenario",
+                                                                  {
+                                                                      {"scenario", "realtech_smoke"},
+                                                                      {"clock_name", selected_clock->clock_name},
+                                                                      {"load_count", std::to_string(real_loads.size())},
+                                                                  });
 
   icts::Pin root_driver("htree_smoke_root_out", icts::PinType::kOut);
   icts::Net root_net("htree_smoke_root_net");
   ConnectRootNetForHTreeTest(root_net, root_driver, real_loads);
 
-  auto result = icts::HTree::build(root_net);
+  auto result = icts::htree::BuildWithDiagnostics(MakeExplicitHTreeInput(root_net), MakeExplicitHTreeConfig());
 
-  ASSERT_TRUE(result.success);
-  EXPECT_TRUE(result.failure_reason.empty());
-  ASSERT_TRUE(result.best_char.has_value());
-  ASSERT_TRUE(result.best_pattern.has_value());
+  ASSERT_TRUE(result.summary.success);
+  EXPECT_TRUE(result.summary.failure_reason.empty());
+  ASSERT_TRUE(result.output.best_char.has_value());
+  ASSERT_TRUE(result.output.best_pattern.has_value());
   const auto observation = htree::ObserveHTreeBuild(result);
   ASSERT_GT(observation.selected_feasible_solution_count, 0U);
   ASSERT_GT(observation.selected_feasible_frontier_entry_count, 0U);
@@ -114,20 +116,20 @@ TEST(HTreeRealTechSmokeTest, SynthesizesMaterializedHTreeFromRealClockLoads)
   AssertSelectedHTreeLoadDistribution(result);
   EXPECT_LE(observation.selected_feasible_frontier_entry_count, observation.selected_feasible_solution_count);
   const icts::HTreeTopologyPattern* best_pattern = nullptr;
-  if (result.best_pattern.has_value()) {
-    best_pattern = &result.best_pattern.value();
+  if (result.output.best_pattern.has_value()) {
+    best_pattern = &result.output.best_pattern.value();
   }
   ASSERT_NE(best_pattern, nullptr);
-  ASSERT_EQ(best_pattern->get_levels(), result.levels.size());
-  ASSERT_EQ(best_pattern->get_level_segment_pattern_ids().size(), result.levels.size());
-  ASSERT_EQ(result.root_net, &root_net);
-  ASSERT_NE(result.root_output_pin, nullptr);
-  EXPECT_EQ(result.root_output_pin, &root_driver);
-  EXPECT_FALSE(result.inserted_pins.empty());
-  EXPECT_FALSE(result.inserted_nets.empty());
+  ASSERT_EQ(best_pattern->get_levels(), result.output.levels.size());
+  ASSERT_EQ(best_pattern->get_level_segment_pattern_ids().size(), result.output.levels.size());
+  ASSERT_EQ(result.output.root_net, &root_net);
+  ASSERT_NE(result.output.root_output_pin, nullptr);
+  EXPECT_EQ(result.output.root_output_pin, &root_driver);
+  EXPECT_FALSE(result.output.inserted_pins.empty());
+  EXPECT_FALSE(result.output.inserted_nets.empty());
   AssertNoSingleLoadExternalLeafBuffer(result);
 
-  const auto leaf_loads = CollectLeafLoads(result.topology);
+  const auto leaf_loads = CollectLeafLoads(result.output.topology);
   EXPECT_EQ(leaf_loads.size(), original_loads.size());
   for (auto* load : real_loads) {
     ASSERT_NE(load, nullptr);
@@ -139,8 +141,10 @@ TEST(HTreeRealTechSmokeTest, SynthesizesMaterializedHTreeFromRealClockLoads)
   WriteAndAssertHTreeArtifacts(artifact_paths, "htree_realtech_smoke", selected_clock->clock_name, real_loads, result);
 
   const auto cts_log_content = ReadTextFile(artifact_paths.cts_log);
+  const auto detail_log_content = ReadTextFile(artifact_paths.output_dir / "cts_detail.log");
   const auto report_log_content = ReadTextFile(artifact_paths.report_log);
   ASSERT_FALSE(cts_log_content.empty());
+  ASSERT_FALSE(detail_log_content.empty());
   ASSERT_FALSE(report_log_content.empty());
   const auto first_line_break = cts_log_content.find('\n');
   ASSERT_NE(first_line_break, std::string::npos);
@@ -153,12 +157,15 @@ TEST(HTreeRealTechSmokeTest, SynthesizesMaterializedHTreeFromRealClockLoads)
   EXPECT_FALSE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*max_slew\s*\|)")));
   EXPECT_FALSE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*max_cap\s*\|)")));
   EXPECT_FALSE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*wirelength_iterations\s*\|)")));
-  EXPECT_FALSE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*wirelength_points\s*\|)")));
-  EXPECT_FALSE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*slew_steps\s*\|)")));
-  EXPECT_FALSE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*cap_steps\s*\|)")));
-  EXPECT_TRUE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*routing_rc_source\s*\|\s*Runtime Routing / Wire RC\s*\|)")));
   const auto htree_grid_plan = common::logging::ExtractTextBlock(cts_log_content, "HTree Characterization Grid Plan");
   ASSERT_FALSE(htree_grid_plan.empty());
+  const bool grid_plan_reports_wirelength_unit
+      = std::regex_search(htree_grid_plan, std::regex(R"(\|\s*resolved_wirelength_unit\s*\|\s*[^|\n]*um\s*\|)"));
+  EXPECT_EQ(std::regex_search(char_builder_setup, std::regex(R"(\|\s*resolved_wirelength_unit\s*\|)")), !grid_plan_reports_wirelength_unit);
+  EXPECT_TRUE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*wirelength_points\s*\|)")));
+  EXPECT_FALSE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*slew_steps\s*\|)")));
+  EXPECT_FALSE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*cap_steps\s*\|)")));
+  EXPECT_TRUE(std::regex_search(char_builder_setup, std::regex(R"(\|\s*routing_rc\s*\|\s*Runtime Routing / Wire RC\s*\|)")));
   EXPECT_TRUE(std::regex_search(htree_grid_plan, std::regex(R"(\|\s*source\s*\|)")));
   EXPECT_TRUE(std::regex_search(htree_grid_plan, std::regex(R"(\|\s*requested_level_lengths\s*\|)")));
   EXPECT_TRUE(std::regex_search(htree_grid_plan, std::regex(R"(\|\s*required_covering_iterations\s*\|)")));
@@ -166,32 +173,49 @@ TEST(HTreeRealTechSmokeTest, SynthesizesMaterializedHTreeFromRealClockLoads)
   EXPECT_TRUE(std::regex_search(htree_grid_plan, std::regex(R"(\|\s*distinct_level_bins\s*\|)")));
   EXPECT_TRUE(std::regex_search(htree_grid_plan, std::regex(R"(\|\s*decision_flags\s*\|)")));
   EXPECT_EQ(cts_log_content.find("characterization grid was capped below direct topology coverage"), std::string::npos);
-  EXPECT_EQ(cts_log_content.find("wirelength unit is absent in runtime config; fallback to auto-derived topology grid unit"),
+  EXPECT_EQ(cts_log_content.find("wirelength unit is absent in CharBuilder Input/Config; explicit auto-derivation policy"),
             std::string::npos);
   EXPECT_EQ(cts_log_content.find("configured wirelength unit collapses level bins to <=1"), std::string::npos);
   EXPECT_EQ(cts_log_content.find("CharBuilder Runtime Configuration"), std::string::npos);
   EXPECT_EQ(cts_log_content.find("CharBuilder Routing / Wire RC"), std::string::npos);
+  EXPECT_EQ(cts_log_content.find("deduplicated"), std::string::npos);
   EXPECT_EQ(cts_log_content.find("Notes"), std::string::npos);
   EXPECT_EQ(cts_log_content.find("Characterization setup lists the resolved limits"), std::string::npos);
   EXPECT_EQ(cts_log_content.find("This section records the selected H-tree depth"), std::string::npos);
+  EXPECT_EQ(cts_log_content.find("HTreeDepth Build pattern frontier Context"), std::string::npos);
+  EXPECT_EQ(cts_log_content.find("HTreeDepth Apply root-driver compensation Summary"), std::string::npos);
+  EXPECT_EQ(cts_log_content.find("HTreeDepth Filter sink-load region Summary"), std::string::npos);
+  EXPECT_EQ(cts_log_content.find("HTree Search topology depth candidates Summary"), std::string::npos);
+  EXPECT_EQ(cts_log_content.find("HTree Build selected embedding Summary"), std::string::npos);
   EXPECT_NE(cts_log_content.find("HTree Synthesis Overview"), std::string::npos);
+  EXPECT_NE(cts_log_content.find("HTree Depth Candidate Summary"), std::string::npos);
   const auto htree_build_summary = common::logging::ExtractTextBlock(cts_log_content, "HTree Synthesis Overview");
   ASSERT_FALSE(htree_build_summary.empty());
   EXPECT_EQ(htree_build_summary.find("force_branch_buffer"), std::string::npos);
   EXPECT_NE(htree_build_summary.find("selected_terminal_branch_buffered_levels"), std::string::npos);
-  EXPECT_NE(cts_log_content.find("routing_rc_source"), std::string::npos);
-  EXPECT_NE(cts_log_content.find("leaf_load_cap_idx"), std::string::npos);
+  EXPECT_NE(cts_log_content.find("routing_rc"), std::string::npos);
+  EXPECT_EQ(cts_log_content.find("leaf_load_cap_idx"), std::string::npos);
   EXPECT_NE(cts_log_content.find("htree_load_group_count"), std::string::npos);
   EXPECT_NE(cts_log_content.find("htree_load_cap_min"), std::string::npos);
   EXPECT_NE(cts_log_content.find("htree_load_cap_max"), std::string::npos);
   EXPECT_NE(cts_log_content.find("htree_load_cap_mean"), std::string::npos);
   EXPECT_NE(cts_log_content.find("htree_load_cap_median"), std::string::npos);
   EXPECT_TRUE(std::regex_search(cts_log_content, std::regex(R"(\|\s*power\s*\|\s*[^|\n]*W\s*\|)")));
-  EXPECT_NE(cts_log_content.find("CharBuilder Sweep Progress"), std::string::npos);
+  EXPECT_EQ(cts_log_content.find("CharBuilder Sweep Progress"), std::string::npos);
   EXPECT_NE(cts_log_content.find("report.log Details"), std::string::npos);
   EXPECT_NE(cts_log_content.find("details omitted from cts.log"), std::string::npos);
   EXPECT_EQ(cts_log_content.find("CharBuilder build Running"), std::string::npos);
+  EXPECT_EQ(cts_log_content.find("CharBuilder build Summary"), std::string::npos);
+  EXPECT_EQ(cts_log_content.find("CharBuilder initialization Summary"), std::string::npos);
   EXPECT_EQ(cts_log_content.find("pareto_solution pattern_id="), std::string::npos);
+  EXPECT_NE(detail_log_content.find("HTreeDepth Build pattern frontier Context"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("HTreeDepth Apply root-driver compensation Summary"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("HTreeDepth Filter sink-load region Summary"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("HTree Synthesis Detail"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("CharBuilder Sweep Progress Detail"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("CharBuilder Build Detail"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("leaf_load_cap_idx"), std::string::npos);
+  EXPECT_NE(detail_log_content.find("HTree Build selected embedding Summary"), std::string::npos);
   EXPECT_NE(report_log_content.find("frontier_feasible_solution_count="), std::string::npos);
   EXPECT_NE(report_log_content.find("feasible_frontier_entry_count="), std::string::npos);
   EXPECT_NE(report_log_content.find("delay_power_selection_summary"), std::string::npos);

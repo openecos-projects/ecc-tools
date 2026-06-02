@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -25,14 +25,15 @@
 
 namespace icts {
 
-struct ResultExportPaths;
+class SchemaWriter;
+struct ReportExportPaths;
 
 class Overview
 {
  public:
   Overview() = delete;
 
-  static auto emitReportMode(bool reused_evaluation_state, const ResultExportPaths& paths) -> void;
+  static auto emitReportMode(SchemaWriter& reporter, bool reused_evaluation_state, const ReportExportPaths& paths) -> void;
 };
 
 }  // namespace icts

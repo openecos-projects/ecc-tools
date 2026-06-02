@@ -27,10 +27,11 @@
 
 #include "RoutingTerminal.hh"
 #include "SteinerTree.hh"
+#include "bound_skew_tree/config/BSTRoutingConfig.hh"  // IWYU pragma: export
 
 namespace icts {
 
-struct BSTParameters;
+struct BSTRoutingConfig;
 
 class BSTRouter
 {
@@ -41,9 +42,10 @@ class BSTRouter
   BSTRouter() = delete;
   ~BSTRouter() = default;
 
-  static auto buildTree(const std::vector<Terminal>& load_terminals, const BSTParameters& parameters) -> ClockSteinerTreeType;
+  static auto buildTree(const std::vector<Terminal>& load_terminals, const BSTRoutingConfig& parameters) -> ClockSteinerTreeType;
 
-  static auto buildTreeFromTopology(const ClockSteinerTreeType& input_topology, const BSTParameters& parameters) -> ClockSteinerTreeType;
+  static auto buildTreeFromTopology(const ClockSteinerTreeType& source_route_tree, const BSTRoutingConfig& parameters)
+      -> ClockSteinerTreeType;
 };
 
 }  // namespace icts

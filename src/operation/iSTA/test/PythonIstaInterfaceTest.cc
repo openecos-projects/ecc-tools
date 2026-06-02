@@ -16,6 +16,7 @@
 // ***************************************************************************************
 
 #include "CharacterTimingTestCommon.hh"
+#include "py_db.h"
 #include "py_ista.h"
 
 #include "gtest/gtest.h"

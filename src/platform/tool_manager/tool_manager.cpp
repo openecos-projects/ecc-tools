@@ -22,13 +22,8 @@
 #include "idrc_io.h"
 #include "ieval_io.h"
 #include "ifp_io.h"
-#include "ino_io.h"
-#include "ipl_io.h"
-#include "ipnp_io.h"
-#include "ipw_io.h"
 #include "irt_io.h"
 #include "ista_io.h"
-#include "ito_io.h"
 
 namespace iplf {
 ToolManager* ToolManager::_instance = nullptr;
@@ -80,43 +75,33 @@ bool ToolManager::idbSave(std::string name)
 /// iPL
 bool ToolManager::autoRunPlacer(std::string config, bool enableJsonOutput)
 {
-  //   plInst->initPlacer(config);
-  //   bool flag = plInst->runPlacement(config);
-  //   plInst->destroyPlacer();
-  return plInst->runPlacement(config, enableJsonOutput);
-  ;
+  return false;
 }
 bool ToolManager::runPlacerFiller(std::string config)
 {
-  return plInst->runFillerInsertion(config);
+  return false;
 }
 bool ToolManager::runPlacerIncrementalFlow(std::string config)
 {
-  return plInst->runIncrementalFlow(config);
+  return false;
 }
 bool ToolManager::runPlacerIncrementalLegalization()
 {
-  bool flag = plInst->runIncrementalLegalization();
-  //   plInst->destroyPlacer();
-  return flag;
+  return false;
 }
 
 bool ToolManager::checkLegality()
 {
-  bool flag = plInst->checkLegality();
-  plInst->destroyPlacer();
-  return flag;
+  return false;
 }
 bool ToolManager::reportPlacer()
 {
-  bool flag = plInst->reportPlacement();
-  plInst->destroyPlacer();
-  return flag;
+  return false;
 }
 
 bool ToolManager::runAiPlacer(std::string config, std::string onnx_path, std::string normalization_path)
 {
-  return plInst->runAiPlacement(config, onnx_path, normalization_path);
+  return false;
 }
 
 
@@ -126,11 +111,11 @@ bool ToolManager::runAiPlacer(std::string config, std::string onnx_path, std::st
 /// iNO
 bool ToolManager::RunNOFixFanout(std::string config)
 {
-  return iNOInst->runNOFixFanout(config);
+  return false;
 }
 bool ToolManager::RunNOFixIO(std::string config)
 {
-  return iNOInst->runNOFixIO(config);
+  return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -138,27 +123,27 @@ bool ToolManager::RunNOFixIO(std::string config)
 /// iTO
 bool ToolManager::autoRunTO(std::string config)
 {
-  return iTOInst->runTO(config);
+  return false;
 }
 bool ToolManager::RunTODrv(std::string config)
 {
-  return iTOInst->runTODrv(config);
+  return false;
 }
 bool ToolManager::RunTODrvSpecialNet(std::string config, std::string net_name)
 {
-  return iTOInst->runTODrvSpecialNet(config, net_name);
+  return false;
 }
 bool ToolManager::RunTOHold(std::string config)
 {
-  return iTOInst->runTOHold(config);
+  return false;
 }
 bool ToolManager::RunTOSetup(std::string config)
 {
-  return iTOInst->runTOSetup(config);
+  return false;
 }
 bool ToolManager::RunTOBuffering(std::string config, std::string net_name)
 {
-  return iTOInst->runTOBuffering(config, net_name);
+  return false;
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -246,13 +231,13 @@ bool ToolManager::saveClockTree(std::string data_path)
 /// iPW
 bool ToolManager::autoRunPower(std::string config)
 {
-  return powerInst->autoRunPower(config);
+  return false;
 }
 
 /// iPNP
 bool ToolManager::autoRunPNP(std::string config)
 {
-  return pnpInst->runPNP(config);
+  return false;
 }
 
 }  // namespace iplf

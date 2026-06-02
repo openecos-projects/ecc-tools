@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -34,10 +34,10 @@ class Clock;
 class Inst;
 class Net;
 class Pin;
-struct SinkDomainLayoutInput;
-struct SourceToRootLayoutInput;
+struct SinkDomainSynthesisTopology;
+struct SourceToRootSynthesisTopology;
 
-struct SinkDomainLayoutTopology
+struct SinkDomainLayoutAnchor
 {
   SinkDomainKind sink_domain = SinkDomainKind::kUnknown;
   const Inst* root_buffer = nullptr;
@@ -52,11 +52,11 @@ class ClockLayoutBuilder
   static auto appendSinkInsts(ClockLayout& clock_layout, const Clock& clock, std::size_t clock_index, const std::vector<Pin*>& sinks,
                               SinkDomainKind sink_domain) -> void;
   static auto appendDirectSinkDomain(ClockLayout& clock_layout, const Clock& clock, std::size_t clock_index,
-                                     const SinkDomainLayoutTopology& sink_domain_topology) -> void;
-  static auto makeSinkDomainLayout(const Clock& clock, std::size_t clock_index, const SinkDomainLayoutTopology& sink_domain_topology,
-                                   const SinkDomainLayoutInput& layout_input) -> ClockLayout;
+                                     const SinkDomainLayoutAnchor& sink_domain_anchor) -> void;
+  static auto makeSinkDomainLayout(const Clock& clock, std::size_t clock_index, const SinkDomainLayoutAnchor& sink_domain_anchor,
+                                   const SinkDomainSynthesisTopology& layout_topology) -> ClockLayout;
   static auto makeSourceToRootLayout(const Clock& clock, std::size_t clock_index, const Net& source_net,
-                                     const SourceToRootLayoutInput& layout_input, ClockLayoutPhase synthesis_phase) -> ClockLayout;
+                                     const SourceToRootSynthesisTopology& layout_topology, ClockLayoutPhase synthesis_phase) -> ClockLayout;
   static auto merge(ClockLayout& target, const ClockLayout& source) -> void;
 };
 

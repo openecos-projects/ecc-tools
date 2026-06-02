@@ -30,7 +30,7 @@
 
 #include "common/data/distribution/DistributionGenerators.hh"
 #include "common/data/pin_factory/PinFactory.hh"
-#include "common/types/TestDataTypes.hh"
+#include "common/dataset/TestDataset.hh"
 
 namespace icts_test::common::data {
 

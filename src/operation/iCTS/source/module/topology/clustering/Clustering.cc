@@ -27,11 +27,12 @@
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "ClusterConstraintEvaluation.hh"
 #include "ClusterConstraintEvaluator.hh"
-#include "ClusterConstraintTypes.hh"
 #include "FastClustering.hh"
 #include "Geometry.hh"
 #include "KMeans.hh"
@@ -110,7 +111,7 @@ auto ToClusterElectricalViolation(ConstraintViolation violation) -> ClusterElect
 
 }  // namespace
 
-auto Clustering::biPartition(const std::vector<Pin*>& loads, std::size_t min_cluster_size) -> ClusterResult
+auto Clustering::biPartition(const std::vector<Pin*>& loads, std::size_t min_cluster_size) -> ClusterOutput
 {
   BiPartitionConfig config;
   config.max_ratio = kDefaultMaxRatio;
@@ -120,9 +121,9 @@ auto Clustering::biPartition(const std::vector<Pin*>& loads, std::size_t min_clu
   return biPartition(loads, min_cluster_size, config);
 }
 
-auto Clustering::biPartition(const std::vector<Pin*>& loads, std::size_t min_cluster_size, const BiPartitionConfig& config) -> ClusterResult
+auto Clustering::biPartition(const std::vector<Pin*>& loads, std::size_t min_cluster_size, const BiPartitionConfig& config) -> ClusterOutput
 {
-  ClusterResult result;
+  ClusterOutput result;
   if (loads.empty()) {
     return result;
   }
@@ -149,8 +150,8 @@ auto Clustering::biPartition(const std::vector<Pin*>& loads, std::size_t min_clu
 
   auto centers = kmeans_result.centers;
   if (centers.size() < 2) {
-    auto fallback_clusters = SplitByPosition(loads, safe_min);
-    centers = CalcCenters(fallback_clusters);
+    auto position_split_clusters = SplitByPosition(loads, safe_min);
+    centers = CalcCenters(position_split_clusters);
   }
 
   std::vector<std::vector<Pin*>> clusters;
@@ -201,17 +202,17 @@ auto Clustering::biPartition(const std::vector<Pin*>& loads, std::size_t min_clu
   return result;
 }
 
-auto Clustering::fastClustering(const std::vector<Pin*>& loads) -> ClusterResult
+auto Clustering::fastClustering(const std::vector<Pin*>& loads) -> ClusterOutput
 {
   return defaultFastClustering(loads, ClusterConfig{});
 }
 
-auto Clustering::defaultFastClustering(const std::vector<Pin*>& loads, const ClusterConfig& base_config) -> ClusterResult
+auto Clustering::defaultFastClustering(const std::vector<Pin*>& loads, const ClusterConfig& base_config) -> ClusterOutput
 {
   return FastClustering::runDefault(loads, base_config);
 }
 
-auto Clustering::fastClustering(const std::vector<Pin*>& loads, const ClusterConfig& config) -> ClusterResult
+auto Clustering::fastClustering(const std::vector<Pin*>& loads, const ClusterConfig& config) -> ClusterOutput
 {
   return FastClustering::run(loads, config);
 }
@@ -226,8 +227,7 @@ auto Clustering::evaluateClusterElectrical(const std::vector<Pin*>& loads, const
 auto Clustering::evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config,
                                            bool need_exact_cap) -> ClusterElectricalEvaluation
 {
-  ClusterConstraintEvaluator evaluator;
-  const auto evaluation = evaluator.evaluateLoads(loads, anchor, config, need_exact_cap);
+  const auto evaluation = ClusterConstraintEvaluator::evaluateLoads(loads, anchor, config, need_exact_cap);
   const auto& metrics = evaluation.metrics;
   return ClusterElectricalEvaluation{
       .legal = evaluation.legal,

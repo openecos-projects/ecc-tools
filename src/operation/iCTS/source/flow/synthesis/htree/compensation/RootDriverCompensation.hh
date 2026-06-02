@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -24,14 +24,21 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ValueLattice.hh"
+#include "synthesis/htree/HTree.hh"
 
 namespace icts {
+
 class HTreeTopologyChar;
+class SchemaWriter;
+class Wrapper;
 struct PatternId;
 class Tree;
 }  // namespace icts
@@ -39,6 +46,8 @@ class Tree;
 namespace icts::htree {
 
 struct BufferPatternLibrary;
+struct DepthSearchBuild;
+struct DiagnosticBuild;
 struct TopologyPatternLibrary;
 
 struct RootDriverCompensationDetail
@@ -68,14 +77,19 @@ struct RootDriverCompensationDetail
   double cell_power_w = 0.0;
 };
 
-struct RootDriverCompensationOptions
+struct RootDriverCompensationInput
 {
   bool enabled = false;
+  Wrapper* wrapper = nullptr;
   double input_slew_ns = 0.0;
   double clock_period_ns = 0.0;
   UniformValueLattice cap_lattice;
   UniformValueLattice slew_lattice;
-  std::string fallback_cell_master;
+  std::string default_cell_master;
+  int routing_layer = 0;
+  std::optional<double> wire_width_um = std::nullopt;
+  std::int32_t dbu_per_um = 0;
+  SchemaWriter* reporter = nullptr;
   bool strict_boundary_closure = false;
   bool strict_slew_boundary_closure = true;
 };
@@ -100,7 +114,7 @@ struct RootDriverCompensationStats
   std::size_t load_resolution_cache_hit_count = 0U;
   std::size_t load_resolution_failure_count = 0U;
   std::size_t flute_route_estimate_count = 0U;
-  std::size_t fallback_route_estimate_count = 0U;
+  std::size_t hpwl_route_estimate_count = 0U;
   double load_resolution_runtime_ms = 0.0;
   double total_runtime_ms = 0.0;
 };
@@ -123,7 +137,7 @@ struct RootDriverBoundaryClosureCheck
   }
 };
 
-struct RootDriverCompensationApplyResult
+struct RootDriverCompensationApplySummary
 {
   std::size_t input_candidate_count = 0U;
   std::size_t closed_candidate_count = 0U;
@@ -135,7 +149,7 @@ struct RootDriverCompensationApplyResult
 class RootDriverCompensationPass
 {
  public:
-  explicit RootDriverCompensationPass(RootDriverCompensationOptions options);
+  explicit RootDriverCompensationPass(RootDriverCompensationInput input);
   ~RootDriverCompensationPass();
 
   RootDriverCompensationPass(const RootDriverCompensationPass&) = delete;
@@ -145,7 +159,7 @@ class RootDriverCompensationPass
 
   auto beginCandidateBuild() -> void;
   auto apply(std::vector<HTreeTopologyChar>& entries, const TopologyPatternLibrary& topology_library,
-             const BufferPatternLibrary& segment_pattern_library, const Tree& topology) -> RootDriverCompensationApplyResult;
+             const BufferPatternLibrary& segment_pattern_library, const Tree& topology) -> RootDriverCompensationApplySummary;
   auto evaluate(PatternId pattern_id, const TopologyPatternLibrary& topology_library, const BufferPatternLibrary& segment_pattern_library,
                 const Tree& topology) -> RootDriverCompensationDetail;
   auto get_stats() const -> const RootDriverCompensationStats&;
@@ -154,5 +168,16 @@ class RootDriverCompensationPass
   struct Impl;
   std::unique_ptr<Impl> _impl;
 };
+
+inline constexpr double kRootDriverCompensationClockPeriodNs = 10.0;
+
+auto ResolveRootDriverCompensationInputSlewNs(const HTree::Config& config, double max_slew_ns) -> double;
+auto ResolveRootDriverClockPeriod(const HTree::Input& input) -> std::pair<double, std::string>;
+auto ApplyRootDriverCompensationSummary(htree::DiagnosticBuild& build, const RootDriverCompensationStats& compensation_stats,
+                                        const RootDriverCompensationDetail& compensation_detail, const HTreeTopologyChar& selected_entry)
+    -> void;
+auto ApplyRootDriverCompensationSummary(htree::DiagnosticBuild& build, const DepthSearchBuild& exploration,
+                                        const RootDriverCompensationDetail& compensation_detail, const HTreeTopologyChar& selected_entry)
+    -> void;
 
 }  // namespace icts::htree

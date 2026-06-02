@@ -26,7 +26,7 @@
 #include <array>
 #include <cstddef>
 
-#include "common/types/TestDataTypes.hh"
+#include "common/dataset/TestDataset.hh"
 
 namespace icts_test::common::data::distribution {
 

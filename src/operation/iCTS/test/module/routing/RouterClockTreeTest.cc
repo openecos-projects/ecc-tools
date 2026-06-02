@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "ClockRouteSegmentRc.hh"
 #include "SteinerTree.hh"
 #include "database/spatial/Point.hh"
 #include "module/routing/router/Router.hh"
@@ -53,6 +54,9 @@ constexpr double kLoadPinCap2 = 0.17;
 constexpr double kLoadInsertionDelay0 = 0.51;
 constexpr double kLoadInsertionDelay1 = 0.63;
 constexpr double kLoadInsertionDelay2 = 0.74;
+constexpr int kTestDbuPerUm = 1000;
+constexpr double kTestResistancePerUmOhm = 0.002;
+constexpr double kTestCapacitancePerUmPf = 0.0004;
 constexpr int kFluteLoad0X = 100;
 constexpr int kFluteLoad0Y = 20;
 constexpr int kFluteLoad1X = 20;
@@ -65,6 +69,15 @@ constexpr int kSaltLoad1X = 40;
 constexpr int kSaltLoad1Y = 125;
 constexpr int kSaltLoad2X = 170;
 constexpr int kSaltLoad2Y = 90;
+
+auto MakeTestClockRouteSegmentRc() -> icts::ClockRouteSegmentRc
+{
+  return icts::ClockRouteSegmentRc{
+      .dbu_per_um = kTestDbuPerUm,
+      .resistance_per_um_ohm = kTestResistancePerUmOhm,
+      .capacitance_per_um_pf = kTestCapacitancePerUmPf,
+  };
+}
 
 auto ExpectTerminalNodeMetadata(const Router::ClockSteinerTreeType& clock_tree, const Router::ClockTerminal& terminal) -> void
 {
@@ -88,7 +101,7 @@ auto ExpectSteinerNodeDefaults(const Router::ClockSteinerTreeType& clock_tree) -
 
 auto ExpectRCTreeLumpedCapMatchesClockTree(const Router::ClockSteinerTreeType& clock_tree) -> void
 {
-  const auto rc_tree = Router::buildRCTree(clock_tree);
+  const auto rc_tree = Router::buildRCTree(clock_tree, MakeTestClockRouteSegmentRc());
   for (const auto& node : clock_tree.get_nodes()) {
     const auto* vertex = rc_tree.findVertex(node.name);
     ASSERT_NE(vertex, nullptr);
@@ -122,7 +135,7 @@ TEST(RouterClockTreeTest, BuildRCTreeUsesClockNodePinCap)
   clock_tree.setRoot(clock_root_id);
   ASSERT_NE(clock_tree.addEdge(clock_root_id, steiner_id, 10, 10), Router::ClockSteinerTreeType::kInvalidId);
 
-  auto clock_rc_tree = Router::buildRCTree(clock_tree);
+  auto clock_rc_tree = Router::buildRCTree(clock_tree, MakeTestClockRouteSegmentRc());
   const auto* clock_vertex = clock_rc_tree.findVertex("clock_root");
   const auto* steiner_vertex = clock_rc_tree.findVertex("steiner");
   ASSERT_NE(clock_vertex, nullptr);

@@ -26,13 +26,16 @@
 #include <glog/logging.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <ostream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "ClockRouteSegmentRc.hh"
 #include "Log.hh"
 #include "Pin.hh"
 #include "PinLocationHelper.hh"
@@ -41,53 +44,30 @@
 #include "SteinerTree.hh"
 #include "TimingEngine.hh"
 #include "TopologyConfig.hh"
-#include "adapter/sta/STAAdapter.hh"
-#include "bound_skew_tree/BSTTypes.hh"
-#include "io/Wrapper.hh"
+#include "bound_skew_tree/BSTRouter.hh"
 #include "local_legalization/LocalLegalization.hh"
 #include "router/Router.hh"
 
 namespace icts {
 namespace {
 
-constexpr double kMilliOhmPerOhm = 1000.0;
-
-auto BuildRcOptions(const ClusterConfig& config) -> Router::RCTreeBuildOptions
+auto BuildBstParameters(const ClusterConfig& config, const Point<int>& routing_root) -> BSTRoutingConfig
 {
-  Router::RCTreeBuildOptions options;
-  if (config.routing_layer > 0) {
-    options.routing_layer = config.routing_layer;
-  }
-
-  if (config.wire_width > 0.0) {
-    options.wire_width = config.wire_width;
-  }
-
-  return options;
-}
-
-auto BuildBstParameters(const ClusterConfig& config, const Point<int>& routing_root) -> BSTParameters
-{
-  BSTParameters parameters;
-  parameters.db_unit = std::max<int>(WRAPPER_INST.queryDbUnit(), 1);
+  BSTRoutingConfig parameters;
+  parameters.dbu_per_um = config.clock_route_segment_rc.dbu_per_um;
+  LOG_FATAL_IF(parameters.dbu_per_um <= 0) << "ClusterConstraintEvaluator: DBU-per-micron is unavailable.";
   parameters.skew_bound = 0.0;
-  parameters.pattern = RCPattern::kHV;
-  parameters.topo_type = TopoType::kGreedyDist;
+  parameters.rc_pattern = BSTRoutingRCPattern::kHV;
+  parameters.topology_mode = BSTRoutingTopologyMode::kGreedyDistance;
   parameters.root_guide = routing_root;
 
-  auto routing_layer = config.routing_layer;
-  if (routing_layer <= 0) {
-    routing_layer = 1;
-  }
-
-  std::optional<double> wire_width = std::nullopt;
-  if (config.wire_width > 0.0) {
-    wire_width = config.wire_width;
-  }
-
-  parameters.unit_h_cap = STA_ADAPTER_INST.queryWireCapacitance(routing_layer, 1.0, wire_width);
+  LOG_FATAL_IF(config.clock_route_segment_rc.capacitance_per_um_pf <= 0.0)
+      << "ClusterConstraintEvaluator: clock route segment capacitance is unavailable.";
+  LOG_FATAL_IF(config.clock_route_segment_rc.resistance_per_um_ohm <= 0.0)
+      << "ClusterConstraintEvaluator: clock route segment resistance is unavailable.";
+  parameters.unit_h_cap = config.clock_route_segment_rc.capacitance_per_um_pf;
   parameters.unit_v_cap = parameters.unit_h_cap;
-  parameters.unit_h_res = STA_ADAPTER_INST.queryWireResistance(routing_layer, 1.0, wire_width) / kMilliOhmPerOhm;
+  parameters.unit_h_res = config.clock_route_segment_rc.resistance_per_um_ohm;
   parameters.unit_v_res = parameters.unit_h_res;
   return parameters;
 }
@@ -106,11 +86,11 @@ auto LegalizeRoutingRoot(const Point<int>& raw_synthetic_root, const std::vector
   }
 
   std::vector<Point<int>> movable_points{raw_synthetic_root};
-  LocalLegalization::Options options;
-  options.failure_policy = LocalLegalization::FailurePolicy::kKeepOriginal;
+  LocalLegalization::Config legalization_config;
+  legalization_config.failure_policy = LocalLegalization::FailurePolicy::kKeepOriginal;
 
   const auto result = LocalLegalization::legalize(movable_points, load_locations, LocalLegalization::RegionType{},
-                                                  LocalLegalization::RegionType{}, options);
+                                                  LocalLegalization::RegionType{}, legalization_config);
 
   if (result.legalized_points.empty()) {
     LOG_WARNING << "Cluster constraint exact-cap root legalization failed: legalization returned empty points, synthetic root "
@@ -208,7 +188,7 @@ auto ClusterConstraintEvaluator::evaluatePinnedLoads(const std::vector<Pin*>& lo
   const auto need_exact_eval = need_exact_cap && (has_cap_limit || config.always_build_exact_cap);
 
   if (has_cap_limit || need_exact_eval) {
-    evaluation.metrics.cap_lower_bound = estimatePinCap(loads);
+    evaluation.metrics.cap_lower_bound = estimatePinCap(loads, config);
     evaluation.metrics.total_cap = evaluation.metrics.cap_lower_bound;
     evaluation.metrics.electrical.pin_cap = evaluation.metrics.cap_lower_bound;
     evaluation.metrics.electrical.total_cap = evaluation.metrics.cap_lower_bound;
@@ -254,14 +234,14 @@ auto ClusterConstraintEvaluator::evaluatePinnedLoads(const std::vector<Pin*>& lo
   return evaluation;
 }
 
-auto ClusterConstraintEvaluator::estimatePinCap(const std::vector<Pin*>& loads) -> double
+auto ClusterConstraintEvaluator::estimatePinCap(const std::vector<Pin*>& loads, const ClusterConfig& config) -> double
 {
   double total_pin_cap = 0.0;
   for (const auto* pin : loads) {
     if (pin == nullptr) {
       continue;
     }
-    total_pin_cap += queryPinCap(pin);
+    total_pin_cap += queryPinCap(pin, config);
   }
   return total_pin_cap;
 }
@@ -283,7 +263,7 @@ auto ClusterConstraintEvaluator::estimateExactCap(const std::vector<Pin*>& loads
     }
   }
 
-  estimate.pin_cap = estimatePinCap(active_loads);
+  estimate.pin_cap = estimatePinCap(active_loads, config);
   estimate.total_cap = estimate.pin_cap;
 
   if (active_loads.empty()) {
@@ -299,7 +279,6 @@ auto ClusterConstraintEvaluator::estimateExactCap(const std::vector<Pin*>& loads
   }
 
   estimate.routed_root = estimate.legalized_root;
-  const auto rc_options = BuildRcOptions(config);
   std::vector<Router::ClockTerminal> clock_terminals;
   clock_terminals.reserve(active_loads.size());
   for (std::size_t i = 0; i < active_loads.size(); ++i) {
@@ -310,7 +289,7 @@ auto ClusterConstraintEvaluator::estimateExactCap(const std::vector<Pin*>& loads
     Router::ClockTerminal terminal;
     terminal.name = std::string("sink_") + std::to_string(i);
     terminal.location = pin->get_location();
-    terminal.pin_cap = queryPinCap(pin);
+    terminal.pin_cap = queryPinCap(pin, config);
     terminal.insertion_delay = 0.0;
     clock_terminals.push_back(std::move(terminal));
   }
@@ -344,30 +323,30 @@ auto ClusterConstraintEvaluator::estimateExactCap(const std::vector<Pin*>& loads
     estimate.routed_root = routed_root->location;
   }
   estimate.wirelength = CalcTreeWirelength(clock_tree);
-  auto rc_tree = Router::buildRCTree(clock_tree, rc_options);
+  auto rc_tree = Router::buildRCTree(clock_tree, config.clock_route_segment_rc);
   UpdateEstimateFromRcTree(estimate, rc_tree);
   return estimate;
 }
 
-auto ClusterConstraintEvaluator::queryPinCap(const Pin* pin) -> double
+auto ClusterConstraintEvaluator::queryPinCap(const Pin* pin, const ClusterConfig& config) -> double
 {
   if (pin == nullptr) {
     return 0.0;
   }
 
-  auto iter = _pin_cap_cache.find(pin);
-  if (iter != _pin_cap_cache.end()) {
-    return iter->second;
+  const auto iter = config.sink_pin_cap_pf_by_pin.find(pin);
+  if (iter != config.sink_pin_cap_pf_by_pin.end()) {
+    LOG_FATAL_IF(!std::isfinite(iter->second)) << "ClusterConstraintEvaluator: load pin capacitance must be finite for " << pin->get_name()
+                                               << ".";
+    return std::max(0.0, iter->second);
   }
 
   if (pin->get_inst() == nullptr || pin->get_name().empty()) {
-    _pin_cap_cache[pin] = 0.0;
     return 0.0;
   }
 
-  const auto pin_cap = std::max(0.0, STA_ADAPTER_INST.queryPinCapacitance(pin));
-  _pin_cap_cache[pin] = pin_cap;
-  return pin_cap;
+  LOG_FATAL << "ClusterConstraintEvaluator: load pin capacitance is missing for " << pin->get_name() << ".";
+  return 0.0;
 }
 
 }  // namespace icts

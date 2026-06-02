@@ -28,6 +28,7 @@
 #include <string>
 
 #include "flow/synthesis/htree/HTree.hh"
+#include "flow/synthesis/htree/diagnostic/HTreeDiagnostic.hh"
 
 namespace icts_test::htree {
 
@@ -52,38 +53,38 @@ struct HTreeBuildObservation
   double htree_load_cap_max_pf = 0.0;
   double htree_load_cap_mean_pf = 0.0;
   double htree_load_cap_median_pf = 0.0;
-  bool used_boundary_fallback = false;
-  std::optional<double> boundary_fallback_score = std::nullopt;
-  std::string boundary_fallback_reason;
+  bool used_boundary_relaxation = false;
+  std::optional<double> boundary_relaxation_score = std::nullopt;
+  std::string boundary_relaxation_reason;
 };
 
-inline auto ObserveHTreeBuild(const icts::HTree::BuildResult& result) -> HTreeBuildObservation
+inline auto ObserveHTreeBuild(const icts::htree::DiagnosticBuild& result) -> HTreeBuildObservation
 {
   HTreeBuildObservation observation{
-      .success = result.success,
-      .has_best_char = result.best_char.has_value(),
-      .has_selected_depth = result.selected_depth.has_value(),
-      .selected_depth = result.selected_depth.value_or(0U),
-      .selected_level_count = result.levels.size(),
-      .depth_candidate_count = result.depth_candidate_count,
-      .selected_final_frontier_count = result.selected_final_frontier_count,
-      .selected_candidate_solution_count = result.selected_candidate_solution_count,
-      .selected_candidate_frontier_entry_count = result.selected_candidate_frontier_entry_count,
-      .selected_feasible_solution_count = result.selected_feasible_solution_count,
-      .selected_feasible_frontier_entry_count = result.selected_feasible_frontier_entry_count,
-      .htree_load_group_count = result.htree_load_group_count,
-      .htree_load_cap_min_pf = result.htree_load_cap_min_pf,
-      .htree_load_cap_max_pf = result.htree_load_cap_max_pf,
-      .htree_load_cap_mean_pf = result.htree_load_cap_mean_pf,
-      .htree_load_cap_median_pf = result.htree_load_cap_median_pf,
-      .used_boundary_fallback = result.used_boundary_fallback,
-      .boundary_fallback_score = result.boundary_fallback_score,
-      .boundary_fallback_reason = result.boundary_fallback_reason,
+      .success = result.summary.success,
+      .has_best_char = result.output.best_char.has_value(),
+      .has_selected_depth = result.summary.selected_depth.has_value(),
+      .selected_depth = result.summary.selected_depth.value_or(0U),
+      .selected_level_count = result.output.levels.size(),
+      .depth_candidate_count = result.diagnostics.depth_candidate_count,
+      .selected_final_frontier_count = result.diagnostics.selected_final_frontier_count,
+      .selected_candidate_solution_count = result.diagnostics.selected_candidate_solution_count,
+      .selected_candidate_frontier_entry_count = result.diagnostics.selected_candidate_frontier_entry_count,
+      .selected_feasible_solution_count = result.diagnostics.selected_feasible_solution_count,
+      .selected_feasible_frontier_entry_count = result.diagnostics.selected_feasible_frontier_entry_count,
+      .htree_load_group_count = result.diagnostics.htree_load_group_count,
+      .htree_load_cap_min_pf = result.diagnostics.htree_load_cap_min_pf,
+      .htree_load_cap_max_pf = result.diagnostics.htree_load_cap_max_pf,
+      .htree_load_cap_mean_pf = result.diagnostics.htree_load_cap_mean_pf,
+      .htree_load_cap_median_pf = result.diagnostics.htree_load_cap_median_pf,
+      .used_boundary_relaxation = result.summary.used_boundary_relaxation,
+      .boundary_relaxation_score = result.diagnostics.boundary_relaxation_score,
+      .boundary_relaxation_reason = result.diagnostics.boundary_relaxation_reason,
   };
-  if (result.best_char.has_value()) {
-    observation.best_pattern_id = result.best_char->get_pattern_id().local_id;
-    observation.best_delay_ns = result.best_char->get_delay();
-    observation.best_power_w = result.best_char->get_power();
+  if (result.output.best_char.has_value()) {
+    observation.best_pattern_id = result.output.best_char->get_pattern_id().local_id;
+    observation.best_delay_ns = result.output.best_char->get_delay();
+    observation.best_power_w = result.output.best_char->get_power();
   }
   return observation;
 }

@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -27,14 +27,31 @@
 
 namespace icts {
 
+class CharacterizationLibrary;
 class ClockLayout;
+class Config;
+class Design;
+class FastSTA;
+class SchemaWriter;
+class Wrapper;
+
+struct SynthesisInput
+{
+  const Config* config = nullptr;
+  Design* design = nullptr;
+  Wrapper* wrapper = nullptr;
+  FastSTA* fast_sta = nullptr;
+  SchemaWriter* reporter = nullptr;
+  ClockLayout* clock_layout = nullptr;
+  CharacterizationLibrary* characterization_library = nullptr;
+};
 
 class Synthesis
 {
  public:
   Synthesis() = delete;
 
-  static auto run(ClockLayout& clock_layout) -> SynthesisTraceSummary;
+  static auto run(const SynthesisInput& input) -> SynthesisTraceSummary;
 };
 
 }  // namespace icts

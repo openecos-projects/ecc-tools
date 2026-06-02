@@ -1,15 +1,16 @@
 add_library(
   icts_source_module_topology_fast_clustering
   ${ICTS_MODULE_TOPOLOGY}/fast_clustering/FastClustering.cc
-  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/FastClusteringBoundaryCandidates.cc
-  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/FastClusteringBoundaryPolish.cc
-  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/FastClusteringBoundarySearch.cc
-  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/FastClusteringFinalize.cc
-  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/FastClusteringGeometry.cc
-  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/FastClusteringMergePolish.cc
-  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/FastClusteringPartition.cc
-  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/FastClusteringPolish.cc
-  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/FastClusteringPolishShared.cc
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/boundary/FastClusteringBoundaryCandidates.cc
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/boundary/FastClusteringBoundaryPolish.cc
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/boundary/FastClusteringBoundarySearch.cc
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/cluster_draft/FastClusteringDraft.hh
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/finalize/FastClusteringFinalize.cc
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/geometry/FastClusteringGeometry.cc
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/partition/FastClusteringPartition.cc
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/polish/FastClusteringMergePolish.cc
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/polish/FastClusteringPolish.cc
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/polish/FastClusteringPolishShared.cc
 )
 
 target_link_libraries(
@@ -20,9 +21,8 @@ target_link_libraries(
   PRIVATE
   icts_source_database_design
   icts_source_module_topology_cluster_constraints
-  icts_source_utils
   icts_source_utils_geometry
-  icts_source_utils_logger
+  log
 )
 
 target_include_directories(
@@ -30,6 +30,12 @@ target_include_directories(
   PUBLIC
   ${ICTS_MODULE_TOPOLOGY}/fast_clustering
   PRIVATE
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/boundary
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/cluster_draft
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/finalize
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/geometry
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/partition
+  ${ICTS_MODULE_TOPOLOGY}/fast_clustering/polish
   ${ICTS_MODULE_TOPOLOGY}/clustering
 )
 

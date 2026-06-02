@@ -18,7 +18,7 @@
  * @file Schema.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-04-16
- * @brief Structured report schema writer for iCTS runtime reports and generated artifact references.
+ * @brief Structured report writer for iCTS runtime reports and generated artifact references.
  */
 
 #include "Schema.hh"
@@ -30,7 +30,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
-#include <memory>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -38,14 +37,9 @@
 #include <vector>
 
 #include "Log.hh"
-#include "usage.hh"
 
-namespace icts::schema {
+namespace icts {
 namespace {
-
-constexpr const char* kStatusFinished = "finished";
-constexpr const char* kStatusFailed = "failed";
-constexpr const char* kStatusSkipped = "skipped";
 
 auto BuildGeneratedOnString() -> std::string
 {
@@ -71,12 +65,24 @@ auto BuildRunHeader(const std::string& run_title) -> std::string
   return stream.str();
 }
 
+auto BuildDetailPath(const std::filesystem::path& path) -> std::filesystem::path
+{
+  if (path.empty()) {
+    return {};
+  }
+  const auto parent = path.parent_path();
+  const auto stem = path.stem().string();
+  const auto extension = path.extension().string();
+  const auto detail_filename = stem.empty() ? std::string{"cts_detail"} + extension : stem + "_detail" + extension;
+  return parent.empty() ? std::filesystem::path(detail_filename) : parent / detail_filename;
+}
+
 auto FilterRunMetadata(const KeyValueFields& metadata) -> KeyValueFields
 {
   KeyValueFields filtered_metadata;
   filtered_metadata.reserve(metadata.size());
   for (const auto& [key, value] : metadata) {
-    if (key == "generated_on") {
+    if (key == "generated_on" || key == "work_dir") {
       continue;
     }
     filtered_metadata.emplace_back(key, value);
@@ -128,8 +134,8 @@ auto BuildDiagnosticFields(DiagnosticLevel level, const std::string& owner, cons
     case DiagnosticLevel::kError:
       severity = "error";
       break;
-    case DiagnosticLevel::kFallback:
-      severity = "fallback";
+    case DiagnosticLevel::kDegraded:
+      severity = "degraded";
       break;
   }
 
@@ -138,30 +144,6 @@ auto BuildDiagnosticFields(DiagnosticLevel level, const std::string& owner, cons
   diagnostic_fields.emplace_back("summary", summary);
   diagnostic_fields.insert(diagnostic_fields.end(), fields.begin(), fields.end());
   return diagnostic_fields;
-}
-
-auto FormatSeconds(std::chrono::steady_clock::duration duration) -> std::string
-{
-  const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
-  const double seconds = static_cast<double>(milliseconds) / 1000.0;
-
-  std::ostringstream stream;
-  stream.setf(std::ios::fixed, std::ios::floatfield);
-  stream.precision(3);
-  stream << seconds;
-  return stream.str();
-}
-
-auto FlattenFields(const KeyValueFields& fields) -> std::string
-{
-  std::ostringstream stream;
-  for (std::size_t index = 0; index < fields.size(); ++index) {
-    if (index != 0U) {
-      stream << ", ";
-    }
-    stream << fields.at(index).first << "=" << fields.at(index).second;
-  }
-  return stream.str();
 }
 
 auto EnsureParentDir(const std::filesystem::path& path) -> bool
@@ -173,25 +155,6 @@ auto EnsureParentDir(const std::filesystem::path& path) -> bool
   }
   std::filesystem::create_directories(parent, error_code);
   return !error_code;
-}
-
-auto NormalizeStatus(const std::string& status) -> std::string
-{
-  if (status == "success") {
-    return kStatusFinished;
-  }
-  return status;
-}
-
-auto StageMarkerForStatus(const std::string& status) -> std::string
-{
-  if (status == kStatusFailed) {
-    return "FAILED";
-  }
-  if (status == kStatusSkipped) {
-    return "SKIPPED";
-  }
-  return "FINISHED";
 }
 
 auto AppendBlockToPath(const std::filesystem::path& path, const std::string& run_title, const std::string& block) -> void
@@ -240,26 +203,52 @@ auto SchemaWriter::open(const std::filesystem::path& path, const std::string& ru
     LOG_WARNING << "SchemaWriter: cannot open report file " << path.string();
     return;
   }
+  const auto next_detail_path = BuildDetailPath(path);
+  std::ofstream next_detail_stream;
+  if (!next_detail_path.empty()) {
+    next_detail_stream.open(next_detail_path, std::ios::out | std::ios::trunc);
+    if (!next_detail_stream.is_open()) {
+      LOG_WARNING << "SchemaWriter: cannot open detail report file " << next_detail_path.string();
+    }
+  }
 
   next_stream << BuildRunHeader(run_title);
+  if (next_detail_stream.is_open()) {
+    next_detail_stream << BuildRunHeader(run_title + " Detail");
+  }
   const KeyValueFields filtered_metadata = FilterRunMetadata(metadata);
   if (!filtered_metadata.empty()) {
     next_stream << '\n' << logformat::MakeKeyValueTable("Run Context", filtered_metadata) << '\n';
+    if (next_detail_stream.is_open()) {
+      next_detail_stream << '\n' << logformat::MakeKeyValueTable("Run Context", filtered_metadata) << '\n';
+    }
   }
   next_stream.flush();
+  if (next_detail_stream.is_open()) {
+    next_detail_stream.flush();
+  }
 
   if (_stream.is_open()) {
     _suspended_writers.push_back(SuspendedWriter{
         .path = _path,
         .has_content = _has_content,
+        .detail_path = _detail_path,
+        .detail_has_content = _detail_has_content,
     });
     _stream.flush();
     _stream.close();
+    if (_detail_stream.is_open()) {
+      _detail_stream.flush();
+      _detail_stream.close();
+    }
   }
 
   _stream = std::move(next_stream);
   _path = path;
   _has_content = true;
+  _detail_stream = std::move(next_detail_stream);
+  _detail_path = _detail_stream.is_open() ? next_detail_path : std::filesystem::path{};
+  _detail_has_content = _detail_stream.is_open();
 }
 
 auto SchemaWriter::close() -> void
@@ -268,6 +257,10 @@ auto SchemaWriter::close() -> void
   if (_stream.is_open()) {
     _stream.flush();
     _stream.close();
+  }
+  if (_detail_stream.is_open()) {
+    _detail_stream.flush();
+    _detail_stream.close();
   }
   restoreSuspendedWriterLocked();
 }
@@ -279,8 +272,14 @@ auto SchemaWriter::reset() -> void
     _stream.flush();
     _stream.close();
   }
+  if (_detail_stream.is_open()) {
+    _detail_stream.flush();
+    _detail_stream.close();
+  }
   _path.clear();
   _has_content = false;
+  _detail_path.clear();
+  _detail_has_content = false;
   _suspended_writers.clear();
   _runtime_metrics.clear();
 }
@@ -290,6 +289,8 @@ auto SchemaWriter::restoreSuspendedWriterLocked() -> void
   if (_suspended_writers.empty()) {
     _path.clear();
     _has_content = false;
+    _detail_path.clear();
+    _detail_has_content = false;
     return;
   }
 
@@ -307,6 +308,22 @@ auto SchemaWriter::restoreSuspendedWriterLocked() -> void
   _stream = std::move(restored_stream);
   _path = suspended_writer.path;
   _has_content = suspended_writer.has_content;
+
+  if (!suspended_writer.detail_path.empty()) {
+    std::ofstream restored_detail_stream(suspended_writer.detail_path, std::ios::out | std::ios::app);
+    if (!restored_detail_stream.is_open()) {
+      LOG_WARNING << "SchemaWriter: cannot restore suspended detail report file " << suspended_writer.detail_path.string();
+      _detail_path.clear();
+      _detail_has_content = false;
+      return;
+    }
+    _detail_stream = std::move(restored_detail_stream);
+    _detail_path = suspended_writer.detail_path;
+    _detail_has_content = suspended_writer.detail_has_content;
+  } else {
+    _detail_path.clear();
+    _detail_has_content = false;
+  }
 }
 
 auto SchemaWriter::isOpen() const -> bool
@@ -321,53 +338,99 @@ auto SchemaWriter::getActivePath() const -> std::filesystem::path
   return _path;
 }
 
-auto SchemaWriter::writeBlockLocked(const std::string& block) -> void
+auto SchemaWriter::getDetailPath() const -> std::filesystem::path
 {
-  if (!_stream.is_open() || block.empty()) {
+  const std::scoped_lock lock(_mutex);
+  return _detail_path;
+}
+
+auto SchemaWriter::writeBlockToStream(std::ofstream& stream, bool& has_content, const std::string& block) -> void
+{
+  if (!stream.is_open() || block.empty()) {
     return;
   }
-  if (_has_content) {
-    _stream << '\n';
+  if (has_content) {
+    stream << '\n';
   }
-  _stream << block;
+  stream << block;
   if (block.back() != '\n') {
-    _stream << '\n';
+    stream << '\n';
   }
-  _stream.flush();
-  _has_content = true;
+  stream.flush();
+  has_content = true;
+}
+
+auto SchemaWriter::writeBlockLocked(const std::string& block, ReportSink sink) -> void
+{
+  if (block.empty() || sink == ReportSink::kNone) {
+    return;
+  }
+  if (sink == ReportSink::kDefault || sink == ReportSink::kBoth) {
+    writeBlockToStream(_stream, _has_content, block);
+  }
+  if (sink == ReportSink::kDetail || sink == ReportSink::kBoth) {
+    writeBlockToStream(_detail_stream, _detail_has_content, block);
+  }
 }
 
 auto SchemaWriter::emitSection(const std::string& title) -> void
 {
+  emitSectionTo(title, ReportSink::kDefault);
+}
+
+auto SchemaWriter::emitSectionTo(const std::string& title, ReportSink sink) -> void
+{
   const std::scoped_lock lock(_mutex);
-  writeBlockLocked(BuildSectionBlock(title));
+  writeBlockLocked(BuildSectionBlock(title), sink);
 }
 
 auto SchemaWriter::emitTable(const std::string& title, const std::vector<std::string>& headers, const TableRows& rows) -> void
 {
+  emitTableTo(title, headers, rows, ReportSink::kDefault);
+}
+
+auto SchemaWriter::emitTableTo(const std::string& title, const std::vector<std::string>& headers, const TableRows& rows, ReportSink sink)
+    -> void
+{
   const std::scoped_lock lock(_mutex);
-  writeBlockLocked(logformat::MakeTitledTable(title, headers, rows));
+  writeBlockLocked(logformat::MakeTitledTable(title, headers, rows), sink);
 }
 
 auto SchemaWriter::emitKeyValueTable(const std::string& title, const KeyValueFields& fields) -> void
 {
+  emitKeyValueTableTo(title, fields, ReportSink::kDefault);
+}
+
+auto SchemaWriter::emitKeyValueTableTo(const std::string& title, const KeyValueFields& fields, ReportSink sink) -> void
+{
   const std::scoped_lock lock(_mutex);
-  writeBlockLocked(logformat::MakeKeyValueTable(title, fields));
+  writeBlockLocked(logformat::MakeKeyValueTable(title, fields), sink);
 }
 
 auto SchemaWriter::emitDetailBlock(const std::string& title, const std::vector<std::string>& lines) -> void
 {
+  emitDetailBlockTo(title, lines, ReportSink::kDefault);
+}
+
+auto SchemaWriter::emitDetailBlockTo(const std::string& title, const std::vector<std::string>& lines, ReportSink sink) -> void
+{
   const std::scoped_lock lock(_mutex);
-  writeBlockLocked(BuildDetailBlock(title, lines));
+  writeBlockLocked(BuildDetailBlock(title, lines), sink);
 }
 
 auto SchemaWriter::emitDiagnostic(DiagnosticLevel level, const std::string& owner, const std::string& summary, const KeyValueFields& fields)
     -> void
 {
-  emitKeyValueTable(owner + " Diagnostic", BuildDiagnosticFields(level, owner, summary, fields));
+  emitKeyValueTableTo(owner + " Diagnostic", BuildDiagnosticFields(level, owner, summary, fields), ReportSink::kBoth);
 }
 
 auto SchemaWriter::emitArtifact(const std::string& label, const std::filesystem::path& path, const std::string& detail) -> void
+{
+  emitArtifactTo(label, path, detail, ReportSink::kBoth);
+}
+
+auto SchemaWriter::emitArtifactTo(const std::string& label, const std::filesystem::path& path, const std::string& detail, ReportSink sink)
+    -> void
 {
   KeyValueFields fields = {
       {"label", label},
@@ -376,7 +439,7 @@ auto SchemaWriter::emitArtifact(const std::string& label, const std::filesystem:
   if (!detail.empty()) {
     fields.emplace_back("detail", detail);
   }
-  emitKeyValueTable("Generated Artifact", fields);
+  emitKeyValueTableTo("Generated Artifact", fields, sink);
 }
 
 auto SchemaWriter::appendStandaloneTable(const std::filesystem::path& path, const std::string& run_title, const std::string& title,
@@ -412,260 +475,47 @@ auto SchemaWriter::appendStandaloneArtifact(const std::filesystem::path& path, c
 
 auto SchemaWriter::appendStandaloneBlock(const std::filesystem::path& path, const std::string& run_title, const std::string& block) -> void
 {
-  auto& schema_writer = SCHEMA_WRITER_INST;
-  const std::scoped_lock lock(schema_writer._mutex);
+  static std::mutex append_mutex;
+  const std::scoped_lock lock(append_mutex);
   AppendBlockToPath(path, run_title, block);
 }
 
-SchemaWriter::RuntimeMetricScope::RuntimeMetricScope(SchemaWriter& writer, std::string stage)
-    : _writer(&writer), _stage(std::move(stage)), _stats(std::make_unique<ieda::Stats>())
-{
-}
-
-SchemaWriter::RuntimeMetricScope::RuntimeMetricScope(RuntimeMetricScope&& other) noexcept
-    : _writer(other._writer), _stage(std::move(other._stage)), _stats(std::move(other._stats)), _finished(other._finished)
-{
-  other._writer = nullptr;
-  other._finished = true;
-}
-
-auto SchemaWriter::RuntimeMetricScope::operator=(RuntimeMetricScope&& other) noexcept -> RuntimeMetricScope&
-{
-  if (this == &other) {
-    return *this;
-  }
-  _writer = other._writer;
-  _stage = std::move(other._stage);
-  _stats = std::move(other._stats);
-  _finished = other._finished;
-  other._writer = nullptr;
-  other._finished = true;
-  return *this;
-}
-
-SchemaWriter::RuntimeMetricScope::~RuntimeMetricScope() = default;
-
-auto SchemaWriter::RuntimeMetricScope::finish(const std::string& status) -> RuntimeMetricSnapshot
-{
-  const auto current_snapshot = snapshot();
-  if (!_finished && _writer != nullptr) {
-    _writer->recordRuntimeMetric(_stage, NormalizeStatus(status), current_snapshot);
-    _finished = true;
-  }
-  return current_snapshot;
-}
-
-auto SchemaWriter::RuntimeMetricScope::finished() -> RuntimeMetricSnapshot
-{
-  return finish(kStatusFinished);
-}
-
-auto SchemaWriter::RuntimeMetricScope::failed() -> RuntimeMetricSnapshot
-{
-  return finish(kStatusFailed);
-}
-
-auto SchemaWriter::RuntimeMetricScope::snapshot() const -> RuntimeMetricSnapshot
-{
-  if (_stats == nullptr) {
-    return {};
-  }
-  return RuntimeMetricSnapshot{
-      .elapsed_time_s = _stats->elapsedRunTime(),
-      .peak_vmem_delta_mb = _stats->memoryDelta(),
-  };
-}
-
-auto SchemaWriter::resetRuntimeMetrics() -> void
-{
-  const std::scoped_lock lock(_mutex);
-  _runtime_metrics.clear();
-}
-
-auto SchemaWriter::beginRuntimeMetric(std::string stage) -> RuntimeMetricScope
-{
-  return RuntimeMetricScope(*this, std::move(stage));
-}
-
-auto SchemaWriter::recordRuntimeMetric(std::string stage, std::string status, const RuntimeMetricSnapshot& snapshot) -> void
-{
-  const std::scoped_lock lock(_mutex);
-  _runtime_metrics.push_back(RuntimeMetric{
-      .stage = std::move(stage),
-      .status = std::move(status),
-      .elapsed_time_s = snapshot.elapsed_time_s,
-      .peak_vmem_delta_mb = snapshot.peak_vmem_delta_mb,
-  });
-}
-
-auto SchemaWriter::emitRuntimeSummary(const std::string& title) -> void
-{
-  TableRows rows;
-  {
-    const std::scoped_lock lock(_mutex);
-    rows.reserve(_runtime_metrics.size());
-    for (const auto& metric : _runtime_metrics) {
-      rows.push_back({
-          metric.stage,
-          metric.status,
-          logformat::FormatFixed(metric.elapsed_time_s, 3),
-          logformat::FormatFixed(metric.peak_vmem_delta_mb, 3),
-      });
-    }
-  }
-  if (!rows.empty()) {
-    EmitTable(title, {"Stage", "Status", "Elapsed Time (s)", "Peak VMem Delta (MB)"}, rows);
-  }
-}
-
-auto SchemaWriter::emitRuntimeMetricTable(const std::string& title, const std::string& stage, const std::string& status,
-                                          const RuntimeMetricSnapshot& snapshot) -> void
-{
-  const std::string normalized_status = NormalizeStatus(status);
-  const std::vector<std::string> headers = {"Stage", "Status", "Elapsed Time (s)", "Peak VMem Delta (MB)"};
-  const TableRows rows = {
-      {stage, normalized_status, logformat::FormatFixed(snapshot.elapsed_time_s, 3),
-       logformat::FormatFixed(snapshot.peak_vmem_delta_mb, 3)},
-  };
-
-  LOG_INFO << "";
-  LOG_INFO << logformat::MakeTitledTable(title, headers, rows);
-  emitTable(title, headers, rows);
-}
-
-auto SchemaWriter::beginStage(std::string module, std::string stage, const KeyValueFields& start_fields) -> StageScope
-{
-  return StageScope(*this, std::move(module), std::move(stage), start_fields);
-}
-
-SchemaWriter::StageScope::StageScope(SchemaWriter& writer, std::string module, std::string stage, const KeyValueFields& start_fields)
-    : _module(std::move(module)), _stage(std::move(stage)), _writer(&writer), _start_time(std::chrono::steady_clock::now())
-{
-  LOG_INFO << "";
-  LOG_INFO << logformat::MakeStageMarker(_module, _stage, "START");
-  if (!start_fields.empty()) {
-    _writer->emitKeyValueTable(_module + " " + _stage + " Context", start_fields);
-  }
-}
-
-SchemaWriter::StageScope::StageScope(StageScope&& other) noexcept
-    : _module(std::move(other._module)),
-      _stage(std::move(other._stage)),
-      _writer(other._writer),
-      _start_time(other._start_time),
-      _finished(other._finished)
-{
-  other._writer = nullptr;
-  other._finished = true;
-}
-
-auto SchemaWriter::StageScope::operator=(StageScope&& other) noexcept -> StageScope&
-{
-  if (this == &other) {
-    return *this;
-  }
-  if (!_finished) {
-    finished();
-  }
-  _module = std::move(other._module);
-  _stage = std::move(other._stage);
-  _writer = other._writer;
-  _start_time = other._start_time;
-  _finished = other._finished;
-  other._writer = nullptr;
-  other._finished = true;
-  return *this;
-}
-
-SchemaWriter::StageScope::~StageScope()
-{
-  if (!_finished) {
-    finished();
-  }
-}
-
-auto SchemaWriter::StageScope::markRunning(const std::string& summary, const KeyValueFields& fields) -> void
-{
-  if (!summary.empty()) {
-    LOG_INFO << logformat::MakeStageMarker(_module, summary, "RUNNING");
-  } else {
-    LOG_INFO << logformat::MakeStageMarker(_module, _stage, "RUNNING");
-  }
-  (void) fields;
-}
-
-auto SchemaWriter::StageScope::finished(const KeyValueFields& finish_fields) -> void
-{
-  closeWithStatus(kStatusFinished, finish_fields);
-}
-
-auto SchemaWriter::StageScope::failed(const KeyValueFields& finish_fields) -> void
-{
-  closeWithStatus(kStatusFailed, finish_fields);
-}
-
-auto SchemaWriter::StageScope::skip(const KeyValueFields& finish_fields) -> void
-{
-  closeWithStatus(kStatusSkipped, finish_fields);
-}
-
-auto SchemaWriter::StageScope::closeWithStatus(const std::string& status, const KeyValueFields& finish_fields) -> void
-{
-  if (_finished) {
-    return;
-  }
-  _finished = true;
-
-  KeyValueFields schema_fields;
-  schema_fields.reserve(finish_fields.size() + 1U);
-  schema_fields.emplace_back("status", status);
-  schema_fields.insert(schema_fields.end(), finish_fields.begin(), finish_fields.end());
-
-  KeyValueFields console_fields = schema_fields;
-  console_fields.emplace_back("elapsed_time", FormatSeconds(std::chrono::steady_clock::now() - _start_time) + " s");
-  const std::string console_summary = FlattenFields(console_fields);
-  LOG_INFO << logformat::MakeStageMarker(_module, _stage, StageMarkerForStatus(status))
-           << (console_summary.empty() ? std::string{} : ": " + console_summary);
-  if (_writer != nullptr) {
-    _writer->emitKeyValueTable(_module + " " + _stage + " Summary", schema_fields);
-  }
-}
-
-auto EmitTable(const std::string& title, const std::vector<std::string>& headers, const TableRows& rows) -> void
+auto EmitTable(SchemaWriter& writer, const std::string& title, const std::vector<std::string>& headers, const TableRows& rows) -> void
 {
   LOG_INFO << "";
   LOG_INFO << logformat::MakeTitledTable(title, headers, rows);
-  SCHEMA_WRITER_INST.emitTable(title, headers, rows);
+  writer.emitTable(title, headers, rows);
 }
 
-auto EmitKeyValueTable(const std::string& title, const KeyValueFields& fields) -> void
+auto EmitKeyValueTable(SchemaWriter& writer, const std::string& title, const KeyValueFields& fields) -> void
 {
   LOG_INFO << "";
   LOG_INFO << logformat::MakeKeyValueTable(title, fields);
-  SCHEMA_WRITER_INST.emitKeyValueTable(title, fields);
+  writer.emitKeyValueTable(title, fields);
 }
 
-auto EmitDiagnostic(DiagnosticLevel level, const std::string& owner, const std::string& summary, const KeyValueFields& fields) -> void
+auto EmitDiagnostic(SchemaWriter& writer, DiagnosticLevel level, const std::string& owner, const std::string& summary,
+                    const KeyValueFields& fields) -> void
 {
   switch (level) {
     case DiagnosticLevel::kInfo:
       LOG_INFO << owner << ": " << summary;
       break;
     case DiagnosticLevel::kWarning:
-    case DiagnosticLevel::kFallback:
+    case DiagnosticLevel::kDegraded:
       LOG_WARNING << owner << ": " << summary;
       break;
     case DiagnosticLevel::kError:
       LOG_ERROR << owner << ": " << summary;
       break;
   }
-  SCHEMA_WRITER_INST.emitDiagnostic(level, owner, summary, fields);
+  writer.emitDiagnostic(level, owner, summary, fields);
 }
 
-auto EmitArtifact(const std::string& label, const std::filesystem::path& path, const std::string& detail) -> void
+auto EmitArtifact(SchemaWriter& writer, const std::string& label, const std::filesystem::path& path, const std::string& detail) -> void
 {
   LOG_INFO << label << " saved: " << path.string();
-  SCHEMA_WRITER_INST.emitArtifact(label, path, detail);
+  writer.emitArtifact(label, path, detail);
 }
 
-}  // namespace icts::schema
+}  // namespace icts

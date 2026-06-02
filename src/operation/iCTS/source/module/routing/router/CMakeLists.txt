@@ -6,16 +6,18 @@ add_library(
 target_link_libraries(
   icts_source_module_routing
   PUBLIC
-  icts_source_database
-  icts_source_module_routing_database
+  icts_source_database_routing
+  icts_source_database_timing
   icts_source_module_routing_local_legalization
   PRIVATE
+  icts_source_database_design
   icts_source_module_routing_flute
   icts_source_module_routing_bst
   icts_source_module_routing_cbs
   icts_source_module_routing_salt
   icts_source_module_routing_helper
-  icts_source_utils
+  icts_source_utils_geometry
+  log
   lemon
 )
 
@@ -25,8 +27,6 @@ target_include_directories(
   ${ICTS_MODULE_ROUTING}
   ${ICTS_SOURCE}
   ${ICTS_DATABASE}
-  PRIVATE
-  ${ICTS_UTILS}
 )
 
 if(DEBUG_ICTS_SOURCE_MODULE_ROUTING)

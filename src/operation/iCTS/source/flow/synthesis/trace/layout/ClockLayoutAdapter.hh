@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -24,20 +24,23 @@
 #pragma once
 
 #include "synthesis/topology/Topology.hh"
-#include "synthesis/trace/layout/ClockLayoutSynthesisInput.hh"
+#include "synthesis/trace/layout/ClockLayoutSynthesisTopology.hh"
 
 namespace icts {
 
 enum class ClockLayoutPhase;
+namespace topology {
+struct SourceTrunkBuild;
+}  // namespace topology
 
 class ClockLayoutAdapter
 {
  public:
   ClockLayoutAdapter() = delete;
 
-  static auto makeSinkDomainLayoutInput(const Topology::BuildResult& result) -> SinkDomainLayoutInput;
-  static auto makeSourceTrunkLayoutInput(const Topology::SourceTrunkBuildResult& result, ClockLayoutPhase synthesis_phase)
-      -> SourceToRootLayoutInput;
+  static auto makeSinkDomainLayoutTopology(const Topology::Build& result) -> SinkDomainSynthesisTopology;
+  static auto makeSourceTrunkLayoutTopology(const topology::SourceTrunkBuild& result, ClockLayoutPhase synthesis_phase)
+      -> SourceToRootSynthesisTopology;
 };
 
 }  // namespace icts

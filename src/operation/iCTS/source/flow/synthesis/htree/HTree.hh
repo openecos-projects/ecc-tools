@@ -35,16 +35,26 @@
 #include "design/Inst.hh"
 #include "design/Net.hh"
 #include "design/Pin.hh"
+#include "module/characterization/Characterization.hh"
 #include "spatial/Point.hh"
 #include "spatial/Tree.hh"
 
 namespace icts {
 
 class CharacterizationLibrary;
+class Design;
+class SchemaWriter;
+class Wrapper;
 
 class HTree
 {
  public:
+  enum class LoadRole
+  {
+    kSink,
+    kLocalBuffer
+  };
+
   struct LogContext
   {
     std::string clock_name;
@@ -54,22 +64,39 @@ class HTree
     std::string object_name_prefix;
   };
 
-  struct BuildOptions
+  struct Input
   {
-    std::optional<bool> force_branch_buffer = std::nullopt;
-    std::optional<double> min_top_input_slew_ns = std::nullopt;
-    std::optional<unsigned> target_depth = std::nullopt;
-    std::optional<unsigned> depth_explore_window = std::nullopt;
-    std::optional<double> htree_topology_tolerance = std::nullopt;
-    std::optional<Point<int>> fixed_topology_root_location = std::nullopt;
+    Net* root_net = nullptr;
+    Design* design = nullptr;
+    Wrapper* wrapper = nullptr;
+    SchemaWriter* reporter = nullptr;
     CharacterizationLibrary* characterization_library = nullptr;
+    CharBuilder::Input characterization_input;
+    CharBuilder::Config characterization_config;
     std::vector<double> additional_characterization_lengths_um;
-    bool enable_root_driver_sizing = true;
-    bool topology_loads_are_local_buffers = false;
+    std::optional<Point<int>> fixed_topology_root_location = std::nullopt;
     double clock_period_ns = 0.0;
     std::string clock_period_source;
     LogContext log_context;
     std::string object_name_prefix;
+    LoadRole load_role = LoadRole::kSink;
+  };
+
+  struct Config
+  {
+    bool force_branch_buffer = false;
+    std::optional<double> min_top_input_slew_ns = std::nullopt;
+    std::optional<unsigned> target_depth = std::nullopt;
+    unsigned depth_explore_window = 1U;
+    double topology_tolerance = 0.0;
+    std::size_t max_fanout = 0U;
+    bool has_max_cap = false;
+    double max_cap_pf = 0.0;
+    bool enable_root_driver_sizing = true;
+    bool allow_boundary_relaxation = false;
+    bool enable_analytical_solver = false;
+    int routing_layer = 0;
+    std::optional<double> wire_width_um = std::nullopt;
   };
 
   struct LevelPlan
@@ -104,82 +131,12 @@ class HTree
     std::size_t index_in_level = 0U;
   };
 
-  struct RootDriverCompensationReport
+  struct Output
   {
-    bool enabled = false;
-    bool valid = false;
-    std::string method;
-    std::string cell_master;
-    std::string load_source;
-    std::string route_estimator;
-    double input_slew_ns = 0.0;
-    unsigned load_bucket_idx = 0U;
-    double load_cap_pf = 0.0;
-    unsigned source_boundary_bucket_idx = 0U;
-    double source_boundary_load_cap_pf = 0.0;
-    std::size_t source_boundary_branch_count = 0U;
-    double terminal_pin_cap_pf = 0.0;
-    double wire_cap_pf = 0.0;
-    double routed_wirelength_um = 0.0;
-    std::size_t terminal_count = 0U;
-    double clock_period_ns = 0.0;
-    std::string clock_period_source;
-    double output_slew_ns = 0.0;
-    unsigned output_slew_bucket_idx = 0U;
-    double cell_delay_ns = 0.0;
-    double internal_power_w = 0.0;
-    double leakage_power_w = 0.0;
-    double cell_power_w = 0.0;
-    double raw_delay_ns = 0.0;
-    double raw_power_w = 0.0;
-    double compensated_delay_ns = 0.0;
-    double compensated_power_w = 0.0;
-  };
-
-  struct BuildResult
-  {
-    bool success = false;
-    std::string failure_reason;
-    std::optional<unsigned> failure_level = std::nullopt;
-    std::optional<unsigned> failure_length_idx = std::nullopt;
     Tree topology;
     std::vector<LevelPlan> levels;
     std::optional<HTreeTopologyChar> best_char = std::nullopt;
     std::optional<HTreeTopologyPattern> best_pattern = std::nullopt;
-    double char_wirelength_unit_um = 0.0;
-    unsigned char_wirelength_iterations = 0U;
-    unsigned char_unique_level_bins = 0U;
-    bool char_grid_adapted = false;
-    double char_max_slew_ns = 0.0;
-    double char_max_cap_pf = 0.0;
-    unsigned char_slew_steps = 0U;
-    unsigned char_cap_steps = 0U;
-    bool force_branch_buffer = false;
-    bool root_driver_sizing_enabled = true;
-    std::optional<unsigned> target_depth = std::nullopt;
-    unsigned depth_explore_window = 0U;
-    std::optional<unsigned> selected_depth = std::nullopt;
-    std::size_t depth_candidate_count = 0U;
-    std::size_t selected_final_frontier_count = 0U;
-    std::size_t selected_candidate_solution_count = 0U;
-    std::size_t selected_candidate_frontier_entry_count = 0U;
-    std::size_t selected_feasible_solution_count = 0U;
-    std::size_t selected_feasible_frontier_entry_count = 0U;
-    std::optional<double> min_top_input_slew_ns = std::nullopt;
-    std::optional<unsigned> top_input_slew_covering_idx = std::nullopt;
-    std::size_t htree_load_group_count = 0U;
-    double htree_load_cap_min_pf = 0.0;
-    double htree_load_cap_max_pf = 0.0;
-    double htree_load_cap_mean_pf = 0.0;
-    double htree_load_cap_median_pf = 0.0;
-    std::string selected_root_driver_cell_master;
-    RootDriverCompensationReport root_driver_compensation;
-    bool used_boundary_fallback = false;
-    std::optional<double> boundary_fallback_score = std::nullopt;
-    std::string boundary_fallback_reason;
-    std::size_t pruned_leaf_single_load_buffers = 0U;
-    LogContext log_context;
-    std::string object_name_prefix;
 
     std::vector<std::unique_ptr<Inst>> inserted_insts;
     std::vector<std::unique_ptr<Pin>> inserted_pins;
@@ -193,10 +150,31 @@ class HTree
     Net* root_net = nullptr;
   };
 
+  struct Summary
+  {
+    bool success = false;
+    std::string failure_reason;
+    std::optional<unsigned> selected_depth = std::nullopt;
+    bool used_boundary_relaxation = false;
+  };
+
+  struct Build
+  {
+    Build() = default;
+
+    Build(const Build&) = delete;
+    auto operator=(const Build&) -> Build& = delete;
+
+    Build(Build&& rhs) noexcept = default;
+    auto operator=(Build&& rhs) noexcept -> Build& = default;
+
+    Output output;
+    Summary summary;
+  };
+
   HTree() = delete;
 
-  static auto build(Net& root_net) -> BuildResult;
-  static auto build(Net& root_net, const BuildOptions& options) -> BuildResult;
+  static auto build(const Input& input, const Config& config) -> Build;
 };
 
 }  // namespace icts

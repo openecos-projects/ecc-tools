@@ -22,6 +22,7 @@
  */
 #pragma once
 
+#include <memory>
 #include <string>
 
 namespace ieda_feature {
@@ -31,6 +32,9 @@ struct CTSSummary;
 namespace icts {
 
 #define CTS_API_INST (icts::CTSAPI::getInst())
+
+class Flow;
+struct CTSRuntime;
 
 class CTSAPI
 {
@@ -57,8 +61,14 @@ class CTSAPI
   auto operator=(CTSAPI&& other) -> CTSAPI& = delete;
 
  private:
-  CTSAPI() = default;
-  ~CTSAPI() = default;
+  CTSAPI();
+  ~CTSAPI();
+
+  auto runtime() -> CTSRuntime&;
+  auto flow() -> Flow&;
+
+  std::unique_ptr<CTSRuntime> _runtime;
+  std::unique_ptr<Flow> _flow;
 };
 
 }  // namespace icts

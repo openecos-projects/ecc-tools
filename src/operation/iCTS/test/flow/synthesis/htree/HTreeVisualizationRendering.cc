@@ -44,7 +44,7 @@
 #include "Pin.hh"
 #include "Point.hh"
 #include "Tree.hh"
-#include "flow/synthesis/htree/HTreeVisualizationInternal.hh"
+#include "flow/synthesis/htree/HTreeSvgRenderer.hh"
 #include "synthesis/htree/HTree.hh"
 #include "visualization/core/SvgCommon.hh"
 
@@ -138,20 +138,20 @@ auto FindRenderableLocation(const icts::Pin* pin) -> icts::Point<int>
   return {-1, -1};
 }
 
-auto CollectExtraPoints(const icts::HTree::BuildResult& result) -> std::vector<icts::Point<int>>
+auto CollectExtraPoints(const icts::htree::DiagnosticBuild& result) -> std::vector<icts::Point<int>>
 {
   std::vector<icts::Point<int>> extra_points;
-  extra_points.reserve(result.topology.get_size() + result.inserted_insts.size() + result.inserted_pins.size());
+  extra_points.reserve(result.output.topology.get_size() + result.output.inserted_insts.size() + result.output.inserted_pins.size());
 
-  for (std::size_t node_id = 0; node_id < result.topology.get_size(); ++node_id) {
-    const auto* node = result.topology.get_node(node_id);
+  for (std::size_t node_id = 0; node_id < result.output.topology.get_size(); ++node_id) {
+    const auto* node = result.output.topology.get_node(node_id);
     if (node == nullptr || !HasValidLocation(node->get_position())) {
       continue;
     }
     extra_points.push_back(node->get_position());
   }
 
-  for (const auto& inst_owner : result.inserted_insts) {
+  for (const auto& inst_owner : result.output.inserted_insts) {
     const auto* inst = inst_owner.get();
     if (inst == nullptr || !HasValidLocation(inst->get_location())) {
       continue;
@@ -159,7 +159,7 @@ auto CollectExtraPoints(const icts::HTree::BuildResult& result) -> std::vector<i
     extra_points.push_back(inst->get_location());
   }
 
-  for (const auto& pin_owner : result.inserted_pins) {
+  for (const auto& pin_owner : result.output.inserted_pins) {
     const auto* pin = pin_owner.get();
     const auto location = FindRenderableLocation(pin);
     if (!HasValidLocation(location)) {
@@ -193,7 +193,7 @@ auto ResolveNetStrokeColor(bool is_root_net, bool reaches_sink) -> std::string
   if (reaches_sink) {
     return icts::visualization::detail::kSvgColorRoutedSinkNet;
   }
-  return icts::visualization::detail::kSvgColorFallbackInternalNet;
+  return icts::visualization::detail::kSvgColorDegradedInternalNet;
 }
 
 auto ResolveNetStrokeWidth(bool is_root_net, bool reaches_sink) -> double
@@ -328,7 +328,7 @@ auto WriteLegend(std::ofstream& output_stream, const icts::visualization::detail
 
   output_stream << R"(<line x1=")" << FormatSvgNumber(legend_x) << R"(" y1=")" << FormatSvgNumber(row_4_y - 4.0) << R"(" x2=")"
                 << FormatSvgNumber(legend_x + 12.0) << R"(" y2=")" << FormatSvgNumber(row_4_y - 4.0) << R"(" stroke=")"
-                << icts::visualization::detail::kSvgColorFallbackInternalNet << R"(" stroke-width="1.6" />)";
+                << icts::visualization::detail::kSvgColorDegradedInternalNet << R"(" stroke-width="1.6" />)";
   output_stream << R"(<text x=")" << FormatSvgNumber(legend_x + 18.0) << R"(" y=")" << FormatSvgNumber(row_4_y)
                 << R"(">internal fanout net</text>)";
 
@@ -383,9 +383,9 @@ auto WriteTopologyOverlay(std::ofstream& output_stream, const icts::visualizatio
 }
 
 auto WriteMaterializedNets(std::ofstream& output_stream, const icts::visualization::detail::SvgTransform& transform,
-                           const std::unordered_set<const icts::Pin*>& original_loads, const icts::HTree::BuildResult& result) -> void
+                           const std::unordered_set<const icts::Pin*>& original_loads, const icts::htree::DiagnosticBuild& result) -> void
 {
-  for (const auto& net_owner : result.inserted_nets) {
+  for (const auto& net_owner : result.output.inserted_nets) {
     const auto* net = net_owner.get();
     if (net == nullptr || net->get_driver() == nullptr) {
       continue;
@@ -396,7 +396,7 @@ auto WriteMaterializedNets(std::ofstream& output_stream, const icts::visualizati
       continue;
     }
 
-    const bool is_root_net = net->get_driver() == result.root_output_pin;
+    const bool is_root_net = net->get_driver() == result.output.root_output_pin;
     const bool reaches_sink = std::ranges::any_of(
         net->get_loads(), [&original_loads](const icts::Pin* pin) -> bool { return IsOriginalLoadPin(pin, original_loads); });
 
@@ -489,9 +489,9 @@ auto WriteLoads(std::ofstream& output_stream, const icts::visualization::detail:
 }
 
 auto WriteRootMarker(std::ofstream& output_stream, const icts::visualization::detail::SvgTransform& transform,
-                     const icts::HTree::BuildResult& result) -> void
+                     const icts::htree::DiagnosticBuild& result) -> void
 {
-  const auto root_location = FindRenderableLocation(result.root_output_pin);
+  const auto root_location = FindRenderableLocation(result.output.root_output_pin);
   if (!HasValidLocation(root_location)) {
     return;
   }
@@ -507,13 +507,13 @@ auto WriteRootMarker(std::ofstream& output_stream, const icts::visualization::de
 
 }  // namespace
 
-auto WriteMaterializedSvg(const std::filesystem::path& path, const std::vector<icts::Pin*>& loads, const icts::HTree::BuildResult& result)
-    -> bool
+auto WriteMaterializedSvg(const std::filesystem::path& path, const std::vector<icts::Pin*>& loads,
+                          const icts::htree::DiagnosticBuild& result) -> bool
 {
   const auto extra_points = CollectExtraPoints(result);
   const auto bounds = ComputeBounds(loads, extra_points);
   const auto transform = MakeTransform(bounds);
-  const auto buffer_summaries = CollectBufferMasterSummaries(result.inserted_insts);
+  const auto buffer_summaries = CollectBufferMasterSummaries(result.output.inserted_insts);
   const auto buffer_styles = BuildBufferRenderStyles(buffer_summaries);
 
   std::ofstream output_stream(path);
@@ -528,10 +528,10 @@ auto WriteMaterializedSvg(const std::filesystem::path& path, const std::vector<i
   output_stream << icts::visualization::detail::kSvgBackgroundRect;
 
   const std::unordered_set<const icts::Pin*> original_loads(loads.begin(), loads.end());
-  WriteTopologyOverlay(output_stream, transform, result.topology);
+  WriteTopologyOverlay(output_stream, transform, result.output.topology);
   WriteMaterializedNets(output_stream, transform, original_loads, result);
-  WriteTopologyNodes(output_stream, transform, result.topology);
-  WriteBuffers(output_stream, transform, result.inserted_insts, buffer_styles);
+  WriteTopologyNodes(output_stream, transform, result.output.topology);
+  WriteBuffers(output_stream, transform, result.output.inserted_insts, buffer_styles);
   WriteLoads(output_stream, transform, loads);
   WriteRootMarker(output_stream, transform, result);
   WriteLegend(output_stream, transform, buffer_summaries, buffer_styles);

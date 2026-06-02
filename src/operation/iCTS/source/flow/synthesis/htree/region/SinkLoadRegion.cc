@@ -38,6 +38,9 @@
 #include <vector>
 
 #include "BufferingPattern.hh"
+#include "ClockRouteSegmentRc.hh"
+#include "Clustering.hh"
+#include "FastClustering.hh"
 #include "HTreeTopologyChar.hh"
 #include "HTreeTopologyPattern.hh"
 #include "Log.hh"
@@ -45,11 +48,10 @@
 #include "Point.hh"
 #include "TopologyConfig.hh"
 #include "Tree.hh"
-#include "clustering/Clustering.hh"
-#include "config/Config.hh"
+#include "io/Wrapper.hh"
 #include "synthesis/htree/constraint/Constraint.hh"
-#include "synthesis/htree/segment_pruning/SegmentLibrary.hh"
-#include "topology/TopologyGen.hh"
+#include "synthesis/htree/segment_pruning/SegmentPatternLibrary.hh"
+#include "synthesis/htree/segment_pruning/TopologyPatternLibrary.hh"
 
 namespace icts::htree {
 namespace {
@@ -88,13 +90,33 @@ auto BuildCapDistributionStats(const std::vector<double>& caps_pf) -> CapDistrib
   return stats;
 }
 
-auto BuildLeafElectricalConfig() -> ClusterConfig
+auto collectSinkPinCapPfByPin(Wrapper& wrapper, const std::vector<SinkLoadRegionBoundaryGroup>& groups)
+    -> std::unordered_map<const Pin*, double>
 {
-  const double max_cap = CONFIG_INST.has_max_cap() ? CONFIG_INST.get_max_cap() : std::numeric_limits<double>::infinity();
-  auto config = TopologyGen::buildFastClusteringElectricalConfig(CONFIG_INST.get_max_fanout(), max_cap);
-  const auto& routing_layers = CONFIG_INST.get_routing_layers();
-  config.routing_layer = routing_layers.empty() ? 1 : static_cast<int>(routing_layers.front());
-  config.wire_width = CONFIG_INST.get_wire_width();
+  std::unordered_map<const Pin*, double> sink_pin_cap_pf_by_pin;
+  for (const auto& group : groups) {
+    if (group.loads == nullptr) {
+      continue;
+    }
+    sink_pin_cap_pf_by_pin.reserve(sink_pin_cap_pf_by_pin.size() + group.loads->size());
+    for (const auto* pin : *group.loads) {
+      if (pin == nullptr) {
+        continue;
+      }
+      sink_pin_cap_pf_by_pin[pin] = std::max(0.0, wrapper.queryPinCapacitance(pin));
+    }
+  }
+  return sink_pin_cap_pf_by_pin;
+}
+
+auto BuildLeafElectricalConfig(const SinkLoadRegionLegalityInput& input, const std::vector<SinkLoadRegionBoundaryGroup>& groups)
+    -> ClusterConfig
+{
+  const double max_cap = input.has_max_cap ? input.max_cap_pf : std::numeric_limits<double>::infinity();
+  LOG_FATAL_IF(input.wrapper == nullptr) << "HTree: Wrapper is unavailable for sink-load-region legality.";
+  auto config = FastClustering::buildElectricalBaseConfig(input.max_fanout, max_cap);
+  config.clock_route_segment_rc = input.clock_route_segment_rc;
+  config.sink_pin_cap_pf_by_pin = collectSinkPinCapPfByPin(*input.wrapper, groups);
   config.enable_exact_cap = true;
   config.always_build_exact_cap = true;
   config.scoring_strategy = ClusterScoringStrategy::kTotalWirelength;
@@ -250,10 +272,10 @@ auto CollectSinkLoadRegionBoundaryGroups(const Tree& topology, const SinkLoadReg
 }
 
 auto EvaluateSinkLoadRegionLegality(const Tree& topology, const SinkLoadRegionLegalitySignature& signature,
-                                    const BufferPatternLibrary& segment_pattern_library, const UniformValueLattice& cap_lattice)
-    -> SinkLoadRegionLegalityResult
+                                    const BufferPatternLibrary& segment_pattern_library,
+                                    const SinkLoadRegionLegalityContext& legality_context) -> SinkLoadRegionLegalitySummary
 {
-  SinkLoadRegionLegalityResult result;
+  SinkLoadRegionLegalitySummary result;
   result.bottom_most_buffered_level = signature.bottom_most_buffered_level;
   result.segment_pattern_id = signature.segment_pattern_id;
 
@@ -264,8 +286,8 @@ auto EvaluateSinkLoadRegionLegality(const Tree& topology, const SinkLoadRegionLe
     return result;
   }
 
-  const auto electrical_config = BuildLeafElectricalConfig();
-  const std::size_t max_fanout = CONFIG_INST.get_max_fanout();
+  const auto electrical_config = BuildLeafElectricalConfig(legality_context.input, collection.groups);
+  const std::size_t max_fanout = legality_context.input.max_fanout;
   for (const auto& group : collection.groups) {
     const auto* loads = group.loads;
     if (loads == nullptr || loads->empty()) {
@@ -293,8 +315,8 @@ auto EvaluateSinkLoadRegionLegality(const Tree& topology, const SinkLoadRegionLe
       } else if (lower_bound.violation == ClusterElectricalViolation::kCapacitance) {
         std::ostringstream detail;
         detail << "pin_cap_lower_bound_violation total_cap_pf=" << lower_bound.summary.total_cap_pf;
-        if (CONFIG_INST.has_max_cap()) {
-          detail << ", max_cap_pf=" << CONFIG_INST.get_max_cap();
+        if (legality_context.input.has_max_cap) {
+          detail << ", max_cap_pf=" << legality_context.input.max_cap_pf;
         }
         result.violation = SinkLoadRegionViolation::kPinCapLowerBound;
         result.monotone_hard_fail = true;
@@ -321,8 +343,8 @@ auto EvaluateSinkLoadRegionLegality(const Tree& topology, const SinkLoadRegionLe
       } else if (exact.violation == ClusterElectricalViolation::kCapacitance) {
         std::ostringstream detail;
         detail << "cap_violation total_cap_pf=" << exact.summary.total_cap_pf;
-        if (CONFIG_INST.has_max_cap()) {
-          detail << ", max_cap_pf=" << CONFIG_INST.get_max_cap();
+        if (legality_context.input.has_max_cap) {
+          detail << ", max_cap_pf=" << legality_context.input.max_cap_pf;
         }
         result.violation = SinkLoadRegionViolation::kCapacitance;
         result.failure_reason = BuildSinkLoadRegionFeasibilityReason(group.node_id, group.anchor, detail.str());
@@ -344,7 +366,7 @@ auto EvaluateSinkLoadRegionLegality(const Tree& topology, const SinkLoadRegionLe
 
   result.cap_distribution = BuildCapDistributionStats(total_caps_pf);
   result.required_leaf_load_cap_pf = result.cap_distribution.cap_max_pf;
-  result.required_leaf_load_cap_covering_idx = CoveringBoundaryIndex(result.required_leaf_load_cap_pf, cap_lattice);
+  result.required_leaf_load_cap_covering_idx = CoveringBoundaryIndex(result.required_leaf_load_cap_pf, legality_context.cap_lattice);
   result.violation = SinkLoadRegionViolation::kNone;
   result.legal = true;
   return result;
@@ -354,12 +376,12 @@ auto EvaluateSinkLoadRegionLegality(const Tree& topology, const SinkLoadRegionLe
 
 auto ResolveSinkLoadRegionLegality(const Tree& topology, PatternId topology_pattern_id, const TopologyPatternLibrary& topology_library,
                                    const BufferPatternLibrary& segment_pattern_library, SinkLoadRegionLegalityContext& legality_context)
-    -> SinkLoadRegionLegalityResult
+    -> SinkLoadRegionLegalitySummary
 {
   const auto topology_pattern = topology_library.materialize(topology_pattern_id);
   const auto signature = ResolveSinkLoadRegionLegalitySignature(topology_pattern, segment_pattern_library);
   if (signature.bottom_most_buffered_level <= legality_context.max_monotone_failed_level) {
-    SinkLoadRegionLegalityResult result;
+    SinkLoadRegionLegalitySummary result;
     result.bottom_most_buffered_level = signature.bottom_most_buffered_level;
     result.segment_pattern_id = signature.segment_pattern_id;
     result.violation = SinkLoadRegionViolation::kFanout;
@@ -375,7 +397,7 @@ auto ResolveSinkLoadRegionLegality(const Tree& topology, PatternId topology_patt
     return cache_it->second;
   }
 
-  auto evaluated = EvaluateSinkLoadRegionLegality(topology, signature, segment_pattern_library, legality_context.cap_lattice);
+  auto evaluated = EvaluateSinkLoadRegionLegality(topology, signature, segment_pattern_library, legality_context);
   if (!evaluated.legal && evaluated.monotone_hard_fail) {
     legality_context.max_monotone_failed_level = std::max(legality_context.max_monotone_failed_level, signature.bottom_most_buffered_level);
   }
@@ -384,20 +406,20 @@ auto ResolveSinkLoadRegionLegality(const Tree& topology, PatternId topology_patt
 
 auto FilterSinkLoadRegionLegalEntries(const std::vector<HTreeTopologyChar>& entries, const Tree& topology,
                                       const TopologyPatternLibrary& topology_library, const BufferPatternLibrary& segment_pattern_library,
-                                      SinkLoadRegionLegalityContext& legality_context) -> SinkLoadRegionEntryFilterResult
+                                      SinkLoadRegionLegalityContext& legality_context) -> SinkLoadRegionEntryFilterBuild
 {
-  SinkLoadRegionEntryFilterResult result;
-  result.entries.reserve(entries.size());
+  SinkLoadRegionEntryFilterBuild result;
+  result.output.entries.reserve(entries.size());
   for (const auto& entry : entries) {
     const auto legality
         = ResolveSinkLoadRegionLegality(topology, entry.get_pattern_id(), topology_library, segment_pattern_library, legality_context);
     if (!legality.legal) {
-      if (result.first_failure_reason.empty()) {
-        result.first_failure_reason = legality.failure_reason;
+      if (result.summary.first_failure_reason.empty()) {
+        result.summary.first_failure_reason = legality.failure_reason;
       }
       continue;
     }
-    result.entries.push_back(entry);
+    result.output.entries.push_back(entry);
   }
   return result;
 }

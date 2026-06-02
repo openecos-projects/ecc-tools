@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -23,24 +23,20 @@
 
 #include "report/overview/Overview.hh"
 
-#include <filesystem>
 #include <string>
 #include <utility>
 
 #include "logger/Schema.hh"
-#include "report/export/ResultExport.hh"
 
 namespace icts {
 
-auto Overview::emitReportMode(bool reused_evaluation_state, const ResultExportPaths& paths) -> void
+auto Overview::emitReportMode(SchemaWriter& reporter, bool reused_evaluation_state, const ReportExportPaths& paths) -> void
 {
-  schema::EmitKeyValueTable("CTS Report Mode",
-                            {
-                                {"mode", reused_evaluation_state ? "reuse_evaluation_state" : "rebuild_evaluation_state"},
-                                {"save_dir", paths.report_root_dir.string()},
-                                {"visualization_dir", paths.visualization_dir.string()},
-                                {"statistics_dir", paths.statistics_dir.string()},
-                            });
+  (void) paths;
+  EmitKeyValueTable(reporter, "CTS Report Mode",
+                    {
+                        {"mode", reused_evaluation_state ? "reuse_evaluation_state" : "rebuild_evaluation_state"},
+                    });
 }
 
 }  // namespace icts

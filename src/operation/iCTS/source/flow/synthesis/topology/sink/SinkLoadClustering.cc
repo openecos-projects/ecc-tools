@@ -25,35 +25,37 @@
 
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <compare>
 #include <cstddef>
 #include <limits>
 #include <optional>
 #include <ostream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "ClockRouteSegmentRc.hh"
 #include "Clustering.hh"
 #include "Log.hh"
 #include "Pin.hh"
 #include "Point.hh"
 #include "TopologyConfig.hh"
-#include "adapter/sta/STAAdapter.hh"
-#include "config/Config.hh"
+#include "io/Wrapper.hh"
 #include "synthesis/topology/buffer/BufferInsertion.hh"
-#include "topology/TopologyGen.hh"
+#include "topology/fast_clustering/FastClustering.hh"
 
 namespace icts::topology {
 namespace {
 
-auto resolveBufferPinNames(const std::string& cell_master) -> std::optional<std::pair<std::string, std::string>>
+auto resolveBufferPinNames(Wrapper& wrapper, const std::string& cell_master) -> std::optional<std::pair<std::string, std::string>>
 {
   if (cell_master.empty()) {
     return std::nullopt;
   }
 
-  auto [input_pin, output_pin] = STA_ADAPTER_INST.queryBufferPorts(cell_master);
+  auto [input_pin, output_pin] = wrapper.queryBufferPorts(cell_master);
   if (input_pin.empty() || output_pin.empty()) {
     LOG_WARNING << "Topology: skip buffer master \"" << cell_master << "\" because buffer ports are unresolved.";
     return std::nullopt;
@@ -88,32 +90,34 @@ auto resolveClusterCenter(const std::vector<Point<int>>& centers, const std::vec
   return Point<int>(sum_x / count, sum_y / count);
 }
 
-auto resolveBufferDriveCap(const std::string& cell_master) -> double
+auto resolveBufferDriveCap(Wrapper& wrapper, const std::string& cell_master) -> double
 {
-  double drive_cap_pf = STA_ADAPTER_INST.queryCellOutPinCapLimit(cell_master);
+  double drive_cap_pf = wrapper.queryCellOutPinCapLimit(cell_master);
   if (drive_cap_pf <= 0.0) {
-    drive_cap_pf = STA_ADAPTER_INST.queryCellOutPinCapTableAxisMax(cell_master);
+    drive_cap_pf = wrapper.queryCellOutPinCapTableAxisMax(cell_master);
   }
   return drive_cap_pf;
 }
 
-auto resolveMinLegalClusterBufferCell(std::string& cell_master, std::string& input_pin_name, std::string& output_pin_name) -> bool
+auto resolveMinLegalClusterBufferCell(Wrapper& wrapper, const SinkTreeLoadPreparationPolicy& policy, std::string& cell_master,
+                                      std::string& input_pin_name, std::string& output_pin_name) -> bool
 {
+  LOG_FATAL_IF(policy.buffer_cell_masters == nullptr) << "Topology: cluster buffer master policy is not bound.";
   bool has_resolved_master = false;
   double best_drive_cap_pf = std::numeric_limits<double>::infinity();
-  for (const auto& candidate_cell_master : CONFIG_INST.get_buffer_types()) {
+  for (const auto& candidate_cell_master : *policy.buffer_cell_masters) {
     if (candidate_cell_master.empty()) {
       continue;
     }
 
-    const double drive_cap_pf = resolveBufferDriveCap(candidate_cell_master);
+    const double drive_cap_pf = resolveBufferDriveCap(wrapper, candidate_cell_master);
     if (drive_cap_pf <= 0.0) {
       LOG_WARNING << "Topology: skip clustered center buffer master \"" << candidate_cell_master
                   << "\" because output drive cap is unresolved.";
       continue;
     }
 
-    const auto buffer_pin_names = resolveBufferPinNames(candidate_cell_master);
+    const auto buffer_pin_names = resolveBufferPinNames(wrapper, candidate_cell_master);
     if (!buffer_pin_names.has_value()) {
       continue;
     }
@@ -131,23 +135,34 @@ auto resolveMinLegalClusterBufferCell(std::string& cell_master, std::string& inp
   return has_resolved_master;
 }
 
-auto buildClusteringConfigFromRuntimeConfig() -> ClusterConfig
+auto collectSinkPinCapPfByPin(Wrapper& wrapper, const std::vector<Pin*>& loads) -> std::unordered_map<const Pin*, double>
 {
-  const double max_cap = CONFIG_INST.has_max_cap() ? CONFIG_INST.get_max_cap() : std::numeric_limits<double>::infinity();
-  auto clustering_config = TopologyGen::buildFastClusteringElectricalConfig(CONFIG_INST.get_max_fanout(), max_cap);
-  const auto& routing_layers = CONFIG_INST.get_routing_layers();
-  clustering_config.routing_layer = routing_layers.empty() ? 1 : static_cast<int>(routing_layers.front());
-  clustering_config.wire_width = CONFIG_INST.get_wire_width();
+  std::unordered_map<const Pin*, double> sink_pin_cap_pf_by_pin;
+  sink_pin_cap_pf_by_pin.reserve(loads.size());
+  for (const auto* pin : loads) {
+    if (pin == nullptr) {
+      continue;
+    }
+    sink_pin_cap_pf_by_pin.emplace(pin, std::max(0.0, wrapper.queryPinCapacitance(pin)));
+  }
+  return sink_pin_cap_pf_by_pin;
+}
+
+auto buildClusteringConfigFromPolicy(Wrapper& wrapper, const SinkTreeLoadPreparationPolicy& policy, const std::vector<Pin*>& root_loads)
+    -> ClusterConfig
+{
+  auto clustering_config = FastClustering::buildElectricalBaseConfig(policy.max_fanout, policy.max_cap_pf);
+  clustering_config.clock_route_segment_rc = policy.clock_route_segment_rc;
+  clustering_config.sink_pin_cap_pf_by_pin = collectSinkPinCapPfByPin(wrapper, root_loads);
   return clustering_config;
 }
 
-auto buildClusterBufferObjects(Topology::BuildResult& result, const ClusterResult& cluster_result,
-                               const std::string& cluster_buffer_cell_master, const std::string& input_pin_name,
-                               const std::string& output_pin_name, const std::string& object_name_prefix, std::vector<Pin*>& htree_sinks)
-    -> bool
+auto buildClusterBufferObjects(Topology::Build& result, const ClusterOutput& cluster_output, const std::string& cluster_buffer_cell_master,
+                               const std::string& input_pin_name, const std::string& output_pin_name, const std::string& object_name_prefix,
+                               std::vector<Pin*>& htree_sinks) -> bool
 {
-  const auto& clusters = cluster_result.clusters;
-  result.cluster_buffers.reserve(clusters.size());
+  const auto& clusters = cluster_output.clusters;
+  result.output.cluster_buffers.reserve(clusters.size());
   htree_sinks.reserve(clusters.size());
   for (std::size_t cluster_index = 0; cluster_index < clusters.size(); ++cluster_index) {
     const auto& cluster = clusters.at(cluster_index);
@@ -156,13 +171,13 @@ auto buildClusterBufferObjects(Topology::BuildResult& result, const ClusterResul
       continue;
     }
 
-    const auto center = resolveClusterCenter(cluster_result.centers, cluster, cluster_index);
+    const auto center = resolveClusterCenter(cluster_output.centers, cluster, cluster_index);
     const auto cluster_inst_name = MakeObjectName(object_name_prefix, "cluster_buf_" + std::to_string(cluster_index));
     const auto buffer
         = CreateBufferInstance(result, cluster_inst_name, cluster_buffer_cell_master, input_pin_name, output_pin_name, center);
     const auto sink_net_name = MakeObjectName(object_name_prefix, "cluster_sink_net_" + std::to_string(cluster_index));
     auto* sink_net = CreateNet(result, sink_net_name, buffer.output_pin, cluster);
-    result.cluster_buffers.push_back(Topology::ClusterBufferMeta{
+    result.output.cluster_buffers.push_back(Topology::ClusterBufferMeta{
         .cluster_index = cluster_index,
         .location = center,
         .sink_count = cluster.size(),
@@ -179,39 +194,45 @@ auto buildClusterBufferObjects(Topology::BuildResult& result, const ClusterResul
   }
 
   LOG_ERROR << "Topology: sink clustering generated no valid centroid buffers.";
-  result.failure_reason = "no valid centroid buffers after clustering";
+  result.summary.failure_reason = "no valid centroid buffers after clustering";
   return false;
 }
 
 }  // namespace
 
-auto PrepareSinkTreeLoads(Topology::BuildResult& result, const std::vector<Pin*>& root_loads, const Topology::BuildOptions& options)
-    -> SinkTreeLoadPreparation
+auto PrepareSinkTreeLoads(const SinkTreeLoadPreparationInput& input) -> SinkTreeLoadPreparation
 {
-  const bool enable_sink_clustering = options.enable_sink_clustering.value_or(CONFIG_INST.is_enable_sink_clustering());
-  result.sink_clustering_enabled = enable_sink_clustering;
+  LOG_FATAL_IF(input.build == nullptr) << "Topology sink-load preparation requires a topology build.";
+  LOG_FATAL_IF(input.root_loads == nullptr) << "Topology sink-load preparation requires root loads.";
+  LOG_FATAL_IF(input.wrapper == nullptr) << "Topology sink-load preparation requires an Wrapper.";
+  auto& result = *input.build;
+  const auto& root_loads = *input.root_loads;
+  auto& wrapper = *input.wrapper;
+  result.summary.sink_clustering_enabled = input.policy.enable_sink_clustering;
 
   SinkTreeLoadPreparation preparation;
-  if (!enable_sink_clustering) {
+  if (!input.policy.enable_sink_clustering) {
     preparation.success = true;
     preparation.htree_sinks = root_loads;
     return preparation;
   }
 
-  auto clustering_config = buildClusteringConfigFromRuntimeConfig();
-  auto cluster_result = TopologyGen::defaultFastClustering(root_loads, clustering_config);
-  result.cluster_result = std::move(cluster_result);
+  auto clustering_config = buildClusteringConfigFromPolicy(wrapper, input.policy, root_loads);
+  auto cluster_output = Clustering::defaultFastClustering(root_loads, clustering_config);
+  result.output.cluster_output = std::move(cluster_output);
 
   std::string cluster_buffer_cell_master;
   std::string cluster_buffer_input_pin;
   std::string cluster_buffer_output_pin;
-  if (!resolveMinLegalClusterBufferCell(cluster_buffer_cell_master, cluster_buffer_input_pin, cluster_buffer_output_pin)) {
+  if (!resolveMinLegalClusterBufferCell(wrapper, input.policy, cluster_buffer_cell_master, cluster_buffer_input_pin,
+                                        cluster_buffer_output_pin)) {
     LOG_ERROR << "Topology: failed to resolve a legal clustered center buffer master from configured buffer_types.";
-    result.failure_reason = "failed to resolve clustered center buffer master";
+    result.summary.failure_reason = "failed to resolve clustered center buffer master";
     return preparation;
   }
-  preparation.success = buildClusterBufferObjects(result, *result.cluster_result, cluster_buffer_cell_master, cluster_buffer_input_pin,
-                                                  cluster_buffer_output_pin, options.object_name_prefix, preparation.htree_sinks);
+  preparation.success
+      = buildClusterBufferObjects(result, *result.output.cluster_output, cluster_buffer_cell_master, cluster_buffer_input_pin,
+                                  cluster_buffer_output_pin, input.object_name_prefix, preparation.htree_sinks);
   return preparation;
 }
 

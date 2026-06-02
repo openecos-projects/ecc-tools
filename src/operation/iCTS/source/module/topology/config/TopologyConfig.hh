@@ -25,8 +25,13 @@
 
 #include <cstddef>
 #include <limits>
+#include <unordered_map>
+
+#include "routing/ClockRouteSegmentRc.hh"
 
 namespace icts {
+
+class Pin;
 
 struct BiPartitionConfig
 {
@@ -74,8 +79,8 @@ struct ClusterConfig
 
   double wirelength_weight = 1.0;
 
-  int routing_layer = 0;
-  double wire_width = 0.0;
+  ClockRouteSegmentRc clock_route_segment_rc;
+  std::unordered_map<const Pin*, double> sink_pin_cap_pf_by_pin;
 };
 
 }  // namespace icts

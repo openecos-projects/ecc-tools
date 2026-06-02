@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -33,6 +33,9 @@
 
 namespace icts {
 
+class Design;
+class Wrapper;
+
 struct DrawingSegment
 {
   std::string clock_name;
@@ -47,7 +50,7 @@ struct DrawingSegment
   int topology_depth = -1;
   int topology_level = -1;
   bool routed = true;
-  bool fallback = false;
+  bool degraded = false;
 };
 
 struct DrawingInst
@@ -91,12 +94,19 @@ struct Drawing
   std::vector<DrawingPin> pins;
 };
 
+struct DrawingInput
+{
+  Design* design = nullptr;
+  Wrapper* wrapper = nullptr;
+  const ClockLayout* clock_layout = nullptr;
+};
+
 class DrawingBuilder
 {
  public:
   DrawingBuilder() = delete;
 
-  static auto build(const ClockLayout& clock_layout) -> Drawing;
+  static auto build(const DrawingInput& input) -> Drawing;
 };
 
 }  // namespace icts

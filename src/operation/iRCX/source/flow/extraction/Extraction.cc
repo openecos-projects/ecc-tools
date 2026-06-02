@@ -22,9 +22,9 @@
 #include "ProcessVariation.hh"
 #include "RCXData.hh"
 #include "ResistanceCalc.hh"
+#include "StageLog.hh"
 #include "TopologyBuilder.hh"
 #include "log/Log.hh"
-#include "usage/usage.hh"
 
 namespace ircx {
 
@@ -38,10 +38,7 @@ auto Extraction::run() -> bool
 
 auto Extraction::buildTopology() -> bool
 {
-  CPU_PROF_START(0);
-  const bool success = []() -> bool {
-    LOG_INFO << "build topology start";
-
+  return runStage("build topology", []() -> bool {
     RCXData& data = RCX_DATA_INST;
     TopoPool& topo_pool = data.topo_pool();
     const LayoutData& layout = data.layout();
@@ -55,19 +52,13 @@ auto Extraction::buildTopology() -> bool
     tb.build_all(layout);
     tb.build_special(layout);
 
-    LOG_INFO << "build topology end";
     return true;
-  }();
-  CPU_PROF_END(0, "build topology");
-  return success;
+  }, {.profile = true});
 }
 
 auto Extraction::buildEnvironment() -> bool
 {
-  CPU_PROF_START(0);
-  const bool success = []() -> bool {
-    LOG_INFO << "build environment start";
-
+  return runStage("build environment", []() -> bool {
     RCXData& data = RCX_DATA_INST;
     if (data.topo_pool().edge_pool().empty()) {
       LOG_ERROR << "build environment failed: topology is empty, call buildTopology first.";
@@ -82,19 +73,13 @@ auto Extraction::buildEnvironment() -> bool
       return false;
     }
 
-    LOG_INFO << "build environment end";
     return true;
-  }();
-  CPU_PROF_END(0, "build environment");
-  return success;
+  }, {.profile = true});
 }
 
 auto Extraction::buildProcessVariation() -> bool
 {
-  CPU_PROF_START(0);
-  const bool success = []() -> bool {
-    LOG_INFO << "build process variation start";
-
+  return runStage("build process variation", []() -> bool {
     RCXData& data = RCX_DATA_INST;
     const auto& corner_data = data.corner_data();
     if (corner_data.empty()) {
@@ -118,19 +103,13 @@ auto Extraction::buildProcessVariation() -> bool
       return false;
     }
 
-    LOG_INFO << "build process variation end";
     return true;
-  }();
-  CPU_PROF_END(0, "build process variation");
-  return success;
+  }, {.profile = true});
 }
 
 auto Extraction::calculateParasitics() -> bool
 {
-  CPU_PROF_START(0);
-  const bool success = []() -> bool {
-    LOG_INFO << "calculate parasitics start";
-
+  return runStage("calculate parasitics", []() -> bool {
     RCXData& data = RCX_DATA_INST;
     const auto& corner_data = data.corner_data();
     if (corner_data.empty()) {
@@ -175,11 +154,8 @@ auto Extraction::calculateParasitics() -> bool
       return false;
     }
 
-    LOG_INFO << "calculate parasitics end";
     return true;
-  }();
-  CPU_PROF_END(0, "calculate parasitics");
-  return success;
+  }, {.profile = true});
 }
 
 }  // namespace ircx

@@ -23,17 +23,17 @@
 
 #pragma once
 
-#include <optional>
 #include <vector>
 
-#include "local_legalization/LocalLegalization.hh"
+#include "module/routing/local_legalization/LocalLegalization.hh"
 #include "routing/RoutingTerminal.hh"
 #include "routing/SteinerTree.hh"
 #include "timing/RCTree.hh"
 
 namespace icts {
 
-struct BSTParameters;
+struct BSTRoutingConfig;
+struct ClockRouteSegmentRc;
 class Net;
 class Pin;
 
@@ -44,14 +44,8 @@ class Router
   using ClockSteinerTreeType = ClockSteinerTree<>;
   using RCTreeType = RCTree;
   using LegalizationRegion = LocalLegalization::RegionType;
-  using LegalizationOptions = LocalLegalization::Options;
-  using LegalizationResult = LocalLegalization::Result;
-
-  struct RCTreeBuildOptions
-  {
-    std::optional<int> routing_layer = std::nullopt;
-    std::optional<double> wire_width = std::nullopt;
-  };
+  using LegalizationConfig = LocalLegalization::Config;
+  using LegalizationOutput = LocalLegalization::Output;
 
   Router() = delete;
   ~Router() = default;
@@ -59,17 +53,16 @@ class Router
   static auto buildFluteTree(const ClockTerminal& driver_terminal, const std::vector<ClockTerminal>& load_terminals)
       -> ClockSteinerTreeType;
   static auto buildSaltTree(const ClockTerminal& driver_terminal, const std::vector<ClockTerminal>& load_terminals) -> ClockSteinerTreeType;
-  static auto buildBstTree(const std::vector<ClockTerminal>& load_terminals, const BSTParameters& parameters) -> ClockSteinerTreeType;
-  static auto buildCbsTree(const std::vector<ClockTerminal>& load_terminals, const BSTParameters& parameters) -> ClockSteinerTreeType;
+  static auto buildBstTree(const std::vector<ClockTerminal>& load_terminals, const BSTRoutingConfig& parameters) -> ClockSteinerTreeType;
+  static auto buildCbsTree(const std::vector<ClockTerminal>& load_terminals, const BSTRoutingConfig& parameters) -> ClockSteinerTreeType;
   static auto buildClockNetTree(const Net& net) -> ClockSteinerTreeType;
 
   static auto legalizePins(std::vector<Pin*>& movable_pins, const std::vector<Pin*>& fixed_pins, const LegalizationRegion& feasible_region,
-                           const LegalizationRegion& block_region) -> LegalizationResult;
+                           const LegalizationRegion& block_region) -> LegalizationOutput;
   static auto legalizePins(std::vector<Pin*>& movable_pins, const std::vector<Pin*>& fixed_pins, const LegalizationRegion& feasible_region,
-                           const LegalizationRegion& block_region, const LegalizationOptions& options) -> LegalizationResult;
+                           const LegalizationRegion& block_region, const LegalizationConfig& config) -> LegalizationOutput;
 
-  static auto buildRCTree(const ClockSteinerTreeType& clock_tree) -> RCTreeType;
-  static auto buildRCTree(const ClockSteinerTreeType& clock_tree, const RCTreeBuildOptions& options) -> RCTreeType;
+  static auto buildRCTree(const ClockSteinerTreeType& clock_tree, const ClockRouteSegmentRc& route_segment_rc) -> RCTreeType;
 };
 
 }  // namespace icts

@@ -18,7 +18,7 @@
  * @file BufferInsertion.hh
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-04-28
- * @brief Provides temporary CTS object creation and clock-net side-effect rollback helpers.
+ * @brief Provides temporary CTS object creation and clock-net side-effect restoration helpers.
  */
 
 #pragma once
@@ -33,8 +33,9 @@
 #include "synthesis/topology/Topology.hh"
 
 namespace icts {
+class Design;
 class Inst;
-}
+}  // namespace icts
 
 namespace icts::topology {
 
@@ -45,21 +46,28 @@ struct BufferCreation
   Pin* output_pin = nullptr;
 };
 
+struct TopologyNetConnectionInput
+{
+  Net* net = nullptr;
+  Pin* driver = nullptr;
+  std::vector<Pin*> sinks;
+};
+
 auto MakeObjectName(const std::string& prefix, const std::string& suffix) -> std::string;
 auto HasValidLocation(const Point<int>& location) -> bool;
 auto FindRenderableLocation(const Pin* pin) -> Point<int>;
 auto CollectValidLoads(const Net& net) -> std::vector<Pin*>;
-auto ConnectNet(Net& net, Pin* driver, const std::vector<Pin*>& sinks) -> void;
-auto ReconnectExistingNet(Net& net, Pin* driver, const std::vector<Pin*>& sinks) -> void;
-auto CreateBufferInstance(Topology::BuildResult& result, const std::string& inst_name, const std::string& cell_master,
+auto ConnectNet(const TopologyNetConnectionInput& input) -> void;
+auto ReconnectExistingNet(const TopologyNetConnectionInput& input) -> void;
+auto CreateBufferInstance(Topology::Build& result, const std::string& inst_name, const std::string& cell_master,
                           const std::string& input_pin_name, const std::string& output_pin_name, const Point<int>& location)
     -> BufferCreation;
-auto CreateNet(Topology::BuildResult& result, const std::string& net_name, Pin* driver, const std::vector<Pin*>& sinks) -> Net*;
+auto CreateNet(Topology::Build& result, const std::string& net_name, Pin* driver, const std::vector<Pin*>& sinks) -> Net*;
 
 class RootNetSideEffectGuard
 {
  public:
-  RootNetSideEffectGuard(Net& root_net, Pin* root_driver);
+  RootNetSideEffectGuard(Design& design, Net& root_net, Pin* root_driver);
   RootNetSideEffectGuard(const RootNetSideEffectGuard&) = delete;
   auto operator=(const RootNetSideEffectGuard&) -> RootNetSideEffectGuard& = delete;
 
@@ -68,6 +76,7 @@ class RootNetSideEffectGuard
  private:
   auto appendPinNet(Pin* pin) -> void;
 
+  Design& _design;
   Net& _root_net;
   Pin* _root_driver = nullptr;
   std::vector<Pin*> _original_root_loads;

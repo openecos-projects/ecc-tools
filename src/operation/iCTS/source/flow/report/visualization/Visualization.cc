@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -23,19 +23,45 @@
 
 #include "report/visualization/Visualization.hh"
 
+#include <glog/logging.h>
+
+#include <ostream>
+
+#include "Log.hh"
 #include "report/visualization/gds/GdsVisualization.hh"
 #include "report/visualization/svg/SvgVisualization.hh"
 
 namespace icts {
 
-auto Visualization::emit(const std::filesystem::path& visualization_dir, const ClockLayout& clock_layout) -> VisualizationResult
+auto Visualization::emit(const VisualizationInput& input, const VisualizationConfig& config) -> VisualizationSummary
 {
-  const auto svg_result = visualization::EmitSvgVisualizations(visualization_dir, clock_layout);
-  const auto gds_result = visualization::EmitGdsVisualizations(visualization_dir, clock_layout);
-  return VisualizationResult{
-      .svg_success = svg_result.success,
-      .gds_success = gds_result.success,
-      .success = svg_result.success && gds_result.success,
+  LOG_FATAL_IF(input.config == nullptr) << "Visualization requires config.";
+  LOG_FATAL_IF(input.design == nullptr) << "Visualization requires design.";
+  LOG_FATAL_IF(input.wrapper == nullptr) << "Visualization requires wrapper.";
+  LOG_FATAL_IF(input.reporter == nullptr) << "Visualization requires reporter.";
+  LOG_FATAL_IF(input.clock_layout == nullptr) << "Visualization requires clock layout.";
+  const auto svg_summary
+      = config.emit_svg
+            ? visualization::EmitSvgVisualizations(visualization::SvgVisualizationInput{.config = input.config,
+                                                                                        .design = input.design,
+                                                                                        .wrapper = input.wrapper,
+                                                                                        .reporter = input.reporter,
+                                                                                        .visualization_dir = input.visualization_dir,
+                                                                                        .clock_layout = input.clock_layout})
+            : visualization::SvgVisualizationSummary{.success = true};
+  const auto gds_summary
+      = config.emit_gds
+            ? visualization::EmitGdsVisualizations(visualization::GdsVisualizationInput{.config = input.config,
+                                                                                        .design = input.design,
+                                                                                        .wrapper = input.wrapper,
+                                                                                        .reporter = input.reporter,
+                                                                                        .visualization_dir = input.visualization_dir,
+                                                                                        .clock_layout = input.clock_layout})
+            : visualization::GdsVisualizationSummary{.success = true};
+  return VisualizationSummary{
+      .svg_success = svg_summary.success,
+      .gds_success = gds_summary.success,
+      .success = svg_summary.success && gds_summary.success,
   };
 }
 

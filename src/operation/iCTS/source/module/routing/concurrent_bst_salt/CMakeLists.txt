@@ -3,11 +3,11 @@ add_library(icts_source_module_routing_cbs ${ICTS_MODULE_ROUTING}/concurrent_bst
 target_link_libraries(
   icts_source_module_routing_cbs
   PUBLIC
-  icts_source_database
+  icts_source_database_routing
   PRIVATE
-  icts_source_module_routing_database
   icts_source_module_routing_bst
-  icts_source_utils
+  icts_source_utils_geometry
+  log
   salt
 )
 
@@ -15,8 +15,6 @@ target_include_directories(
   icts_source_module_routing_cbs
   PUBLIC
   ${ICTS_MODULE_ROUTING}/concurrent_bst_salt
-  PRIVATE
-  ${ICTS_UTILS}
 )
 
 if(DEBUG_ICTS_SOURCE_MODULE_ROUTING_CBS)

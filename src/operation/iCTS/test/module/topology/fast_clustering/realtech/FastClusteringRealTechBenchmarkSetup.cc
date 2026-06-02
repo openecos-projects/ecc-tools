@@ -30,20 +30,19 @@
 #include <utility>
 #include <vector>
 
-#include "FastClusteringRealTechBenchmarkInternal.hh"
+#include "FastClusteringRealTechBenchmarkFixture.hh"
 #include "IdbDesign.h"
 #include "IdbInstance.h"
 #include "IdbNet.h"
 #include "IdbPins.h"
 #include "common/io/TestArtifactIO.hh"
-#include "database/adapter/sta/STAAdapter.hh"
 #include "database/config/Config.hh"
 #include "database/design/Clock.hh"
 #include "database/design/Design.hh"
 #include "database/io/Wrapper.hh"
 #include "dm_config.h"
 #include "idm.h"
-#include "instantiation/design_conversion/DesignConversion.hh"
+#include "setup/clock_data/ClockDataRead.hh"
 
 namespace icts_test::fast_clustering::realtech {
 namespace {
@@ -165,9 +164,10 @@ auto SelectClockNetCandidate(idb::IdbDesign* idb_design) -> std::optional<ClockN
 auto LoadBenchmarkCase(const BenchmarkCase& benchmark_case, const TechAssets& assets, const std::filesystem::path& output_dir) -> LoadedCase
 {
   LoadedCase loaded;
-  CONFIG_INST.reset();
-  CONFIG_INST.init(assets.cts_config_path.string());
-  CONFIG_INST.set_work_dir((output_dir / "cts_workspace" / SanitizeOutputName(benchmark_case.case_name)).string());
+  icts_test::runtime::CurrentRuntime().config.reset();
+  icts_test::runtime::CurrentRuntime().config.init(assets.cts_config_path.string());
+  icts_test::runtime::CurrentRuntime().config.set_work_dir(
+      (output_dir / "cts_workspace" / SanitizeOutputName(benchmark_case.case_name)).string());
 
   std::string tech_error;
   if (!LoadTechnologyOnce(assets, tech_error)) {
@@ -191,9 +191,7 @@ auto LoadBenchmarkCase(const BenchmarkCase& benchmark_case, const TechAssets& as
     return loaded;
   }
 
-  STA_ADAPTER_INST.init();
-
-  DESIGN_INST.reset();
+  icts_test::runtime::CurrentRuntime().design.reset();
   auto* idb_design = dmInst->get_idb_design();
   if (idb_design == nullptr) {
     loaded.error = "iDB design is null after load";
@@ -204,17 +202,27 @@ auto LoadBenchmarkCase(const BenchmarkCase& benchmark_case, const TechAssets& as
     return loaded;
   }
 
-  WRAPPER_INST.reset();
-  WRAPPER_INST.init(idb_builder);
-  if (!icts::DesignConversion::readClockData()) {
+  icts_test::runtime::CurrentRuntime().wrapper.reset();
+  icts_test::runtime::CurrentRuntime().wrapper.init(idb_builder);
+  auto& runtime = icts_test::runtime::CurrentRuntime();
+  if (!icts::ClockDataRead::read(icts::ClockDataReadInput{
+          .config = &runtime.config,
+          .design = &runtime.design,
+          .wrapper = &runtime.wrapper,
+          .reporter = &runtime.reporter,
+      })) {
     loaded.error = "readClockData failed for SDC-declared clocks";
     return loaded;
   }
 
-  loaded.dbu_per_micron = std::max(1, WRAPPER_INST.queryDbUnit());
+  loaded.dbu_per_micron = icts_test::runtime::CurrentRuntime().wrapper.queryDbUnit();
+  if (loaded.dbu_per_micron <= 0) {
+    loaded.error = "DBU-per-micron unavailable after DEF load";
+    return loaded;
+  }
   loaded.inst_count = idb_design->get_instance_list() == nullptr ? 0U : idb_design->get_instance_list()->get_instance_list().size();
   loaded.net_count = idb_design->get_net_list() == nullptr ? 0U : idb_design->get_net_list()->get_net_list().size();
-  const auto clocks = DESIGN_INST.get_clocks();
+  const auto clocks = icts_test::runtime::CurrentRuntime().design.get_clocks();
   loaded.clock_count = clocks.size();
   for (auto* clock : clocks) {
     if (clock == nullptr || clock->get_loads().size() <= loaded.loads.size()) {

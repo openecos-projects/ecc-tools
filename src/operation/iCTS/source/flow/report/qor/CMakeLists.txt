@@ -7,9 +7,10 @@ add_library(
 target_link_libraries(
   icts_source_flow_report_qor
   PRIVATE
-  icts_source_database
+  icts_source_database_qor
   icts_source_flow_evaluation_qor
-  icts_source_utils
+  icts_source_utils_logger
+  log
 )
 
 target_include_directories(

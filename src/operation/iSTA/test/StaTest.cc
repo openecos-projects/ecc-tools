@@ -75,7 +75,7 @@ TEST_F(StaTest, simple_design) {
     ista->readVerilogWithRustParser(
         "/home/taosimin/i-eda/src/iSTA/example/simple/simple.v");
     std::set<std::string> exclude_cell_names = {};
-    ista->writeVerilog(verilog_file_name, exclude_cell_names, false);
+    ista->writeVerilog(verilog_file_name, exclude_cell_names);
 
     // ista->initScriptEngine();
     LOG_INFO << "read sdc start";

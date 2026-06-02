@@ -38,6 +38,7 @@ target_link_libraries(
 target_include_directories(
   icts_source_database
   INTERFACE
+  ${ICTS_DATABASE}
   ${ICTS_DATABASE_ADAPTER}
   ${ICTS_DATABASE_CONFIG}
   ${ICTS_DATABASE_DESIGN}

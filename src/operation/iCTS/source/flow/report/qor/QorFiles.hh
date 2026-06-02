@@ -27,6 +27,7 @@
 
 namespace icts {
 
+class SchemaWriter;
 struct Qor;
 
 class QorFiles
@@ -35,7 +36,7 @@ class QorFiles
   QorFiles() = delete;
 
   static auto writeReports(const std::filesystem::path& statistics_dir, const Qor& statistics) -> bool;
-  static auto emitLogTables(const Qor& statistics) -> void;
+  static auto emitLogTables(SchemaWriter& reporter, const Qor& statistics) -> void;
 };
 
 }  // namespace icts

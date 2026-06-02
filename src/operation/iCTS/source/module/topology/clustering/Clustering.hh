@@ -63,7 +63,7 @@ struct ClusterElectricalEvaluation
   ClusterElectricalSummary summary;
 };
 
-struct ClusterResult
+struct ClusterOutput
 {
   std::vector<std::vector<Pin*>> clusters;
   std::vector<Point<int>> centers;
@@ -76,11 +76,11 @@ class Clustering
   Clustering() = delete;
   ~Clustering() = default;
 
-  static auto biPartition(const std::vector<Pin*>& loads, std::size_t min_cluster_size) -> ClusterResult;
-  static auto biPartition(const std::vector<Pin*>& loads, std::size_t min_cluster_size, const BiPartitionConfig& config) -> ClusterResult;
-  static auto fastClustering(const std::vector<Pin*>& loads) -> ClusterResult;
-  static auto defaultFastClustering(const std::vector<Pin*>& loads, const ClusterConfig& base_config) -> ClusterResult;
-  static auto fastClustering(const std::vector<Pin*>& loads, const ClusterConfig& config) -> ClusterResult;
+  static auto biPartition(const std::vector<Pin*>& loads, std::size_t min_cluster_size) -> ClusterOutput;
+  static auto biPartition(const std::vector<Pin*>& loads, std::size_t min_cluster_size, const BiPartitionConfig& config) -> ClusterOutput;
+  static auto fastClustering(const std::vector<Pin*>& loads) -> ClusterOutput;
+  static auto defaultFastClustering(const std::vector<Pin*>& loads, const ClusterConfig& base_config) -> ClusterOutput;
+  static auto fastClustering(const std::vector<Pin*>& loads, const ClusterConfig& config) -> ClusterOutput;
   static auto evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config)
       -> ClusterElectricalEvaluation;
   static auto evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config,

@@ -23,17 +23,123 @@
  */
 
 #include "StaCheck.hh"
+
+#include <cstddef>
+#include <ostream>
+#include <queue>
+
 #include "log/Log.hh"
+#include "sta/StaArc.hh"
 #include "sta/StaVertex.hh"
 
 namespace ista {
+namespace {
+
+auto disableCombLoopArc(StaArc* arc, bool is_fwd) -> bool
+{
+  if (arc == nullptr || !arc->isDelayArc() || arc->is_loop_disable()) {
+    return false;
+  }
+
+  arc->set_is_loop_disable(true);
+  (void) is_fwd;
+  return true;
+}
+
+auto traverseDataPath(StaVertex* the_vertex, bool is_fwd, std::size_t& disabled_loop_count) -> unsigned
+{
+  if (the_vertex == nullptr) {
+    return 0;
+  }
+  if (is_fwd && the_vertex->is_end()) {
+    return 0;
+  }
+  if (!is_fwd && the_vertex->is_start()) {
+    return 0;
+  }
+  if (the_vertex->isBlack()) {
+    return 0;
+  }
+  if (the_vertex->isGray()) {
+    return 1;
+  }
+
+  the_vertex->setGray();
+  auto& next_arcs = is_fwd ? the_vertex->get_src_arcs() : the_vertex->get_snk_arcs();
+  for (auto* arc : next_arcs) {
+    if (arc == nullptr || !arc->isDelayArc() || arc->is_loop_disable()) {
+      continue;
+    }
+
+    auto* next_vertex = is_fwd ? arc->get_snk() : arc->get_src();
+    if (next_vertex == nullptr || next_vertex->isBlack()) {
+      continue;
+    }
+    if (next_vertex->isGray()) {
+      if (disableCombLoopArc(arc, is_fwd)) {
+        ++disabled_loop_count;
+      }
+      continue;
+    }
+    if (traverseDataPath(next_vertex, is_fwd, disabled_loop_count)) {
+      if (disableCombLoopArc(arc, is_fwd)) {
+        ++disabled_loop_count;
+      }
+      continue;
+    }
+  }
+
+  the_vertex->setBlack();
+  return 0;
+}
+
+auto breakCombLoopsFromStarts(StaGraph* the_graph) -> std::size_t
+{
+  std::size_t disabled_loop_count = 0U;
+  the_graph->resetVertexColor();
+
+  StaVertex* start_vertex;
+  FOREACH_START_VERTEX(the_graph, start_vertex) {
+    if (start_vertex == nullptr) {
+      continue;
+    }
+    for (auto* arc : start_vertex->get_src_arcs()) {
+      if (arc == nullptr || !arc->isDelayArc() || arc->is_loop_disable()) {
+        continue;
+      }
+      traverseDataPath(arc->get_snk(), true, disabled_loop_count);
+    }
+  }
+  return disabled_loop_count;
+}
+
+auto breakCombLoopsFromEnds(StaGraph* the_graph) -> std::size_t
+{
+  std::size_t disabled_loop_count = 0U;
+  the_graph->resetVertexColor();
+
+  StaVertex* end_vertex;
+  FOREACH_END_VERTEX(the_graph, end_vertex) {
+    if (end_vertex == nullptr) {
+      continue;
+    }
+    for (auto* arc : end_vertex->get_snk_arcs()) {
+      if (arc == nullptr || !arc->isDelayArc() || arc->is_loop_disable()) {
+        continue;
+      }
+      traverseDataPath(arc->get_src(), false, disabled_loop_count);
+    }
+  }
+  return disabled_loop_count;
+}
+
+}  // namespace
 
 /**
  * @brief print loop record.
  *
  */
 void StaCombLoopCheck::printAndBreakLoop(bool is_fwd) {
-  LOG_INFO << "found loop : ";
   const char* direction = is_fwd ? " <- " : " -> ";
   std::string loop_name;
   auto* loop_point = _loop_record.front();
@@ -75,102 +181,21 @@ void StaCombLoopCheck::printAndBreakLoop(bool is_fwd) {
  * @return unsigned return 1 if found loop, else return 0.
  */
 unsigned StaCombLoopCheck::operator()(StaGraph* the_graph) {
-  std::function<unsigned(StaVertex*, bool)> traverse_data_path =
-      [&traverse_data_path, this](StaVertex* the_vertex,
-                                  bool is_fwd) -> unsigned {
-    /*The traverse end at the end or start node.*/
-    if (is_fwd && the_vertex->is_end()) {
-      return 0;
-    }
-
-    if (!is_fwd && the_vertex->is_start()) {
-      return 0;
-    }
-
-    the_vertex->setGray();
-    auto& next_arcs =
-        is_fwd ? the_vertex->get_src_arcs() : the_vertex->get_snk_arcs();
-
-    for (auto* arc : next_arcs) {
-      if (!arc->isDelayArc()) {
-        continue;
-      }
-
-      auto* next_vertex = is_fwd ? arc->get_snk() : arc->get_src();
-
-      if (next_vertex->isBlack()) {
-        continue;
-      }
-      if (next_vertex->isWhite()) {
-        // continue traverse the data path.
-        if (traverse_data_path(next_vertex, is_fwd)) {
-          /* found loop */
-          _loop_record.push(next_vertex);
-          // for loop found, we do not propagate the vertex, set is black.
-          the_vertex->setBlack();
-          return 1;
-        }
-      } else {
-        LOG_FATAL_IF(!next_vertex->isGray()) << "the vertex should be gray.";
-        /* found loop */
-        _loop_record.push(next_vertex);
-        // for loop found, we do not propagate the vertex, set is black.
-        the_vertex->setBlack();
-        return 1;
-      }
-    }
-
-    // if all arcs is traversed, then set the vertex is black.
-    the_vertex->setBlack();
-
+  if (the_graph == nullptr) {
     return 0;
-  };
-
-  LOG_INFO << "found loop fwd start";
-  // reset the vertex color.
-  the_graph->resetVertexColor();
-
-  StaVertex* start_vertex;
-  FOREACH_START_VERTEX(the_graph, start_vertex) {
-    auto src_arcs = start_vertex->get_src_arcs();
-    for (auto* arc : src_arcs) {
-      // traverse from the data path start point.
-      if (arc->isDelayArc()) {
-        StaVertex* data_start_point = arc->get_snk();
-        if (traverse_data_path(data_start_point, true)) {
-          _loop_record.push(data_start_point);
-          printAndBreakLoop(true);
-        }
-      }
-    }
   }
 
+  LOG_INFO << "found loop fwd start";
+  const auto fwd_disabled_loop_count = breakCombLoopsFromStarts(the_graph);
   LOG_INFO << "found loop fwd end";
 
   LOG_INFO << "found loop bwd start";
-
-  // reset the vertex color.
+  const auto bwd_disabled_loop_count = breakCombLoopsFromEnds(the_graph);
   the_graph->resetVertexColor();
-
-  StaVertex* end_vertex;
-  FOREACH_END_VERTEX(the_graph, end_vertex) {
-    auto snk_arcs = end_vertex->get_snk_arcs();
-    for (auto* arc : snk_arcs) {
-      if (arc->isDelayArc()) {
-        StaVertex* data_end_point = arc->get_src();
-        // traverse from the data path end point.
-        if (traverse_data_path(data_end_point, false)) {
-          _loop_record.push(data_end_point);
-          printAndBreakLoop(false);
-        }
-      }
-    }
-  }
-
-  the_graph->resetVertexColor();
-
   LOG_INFO << "found loop bwd end";
 
+  LOG_INFO << "comb loop check disabled " << (fwd_disabled_loop_count + bwd_disabled_loop_count) << " delay arc(s), fwd="
+           << fwd_disabled_loop_count << ", bwd=" << bwd_disabled_loop_count;
   return 1;
 }
 

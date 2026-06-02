@@ -26,7 +26,7 @@
 #include <string>
 #include <vector>
 
-#include "common/types/TestDataTypes.hh"
+#include "common/dataset/TestDataset.hh"
 
 namespace icts {
 template <typename T>

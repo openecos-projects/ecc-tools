@@ -29,10 +29,10 @@
 #include <vector>
 
 #include "Clustering.hh"
-#include "FastClusteringRealTechBenchmarkInternal.hh"
+#include "FastClusteringRealTechBenchmarkFixture.hh"
+#include "common/dataset/TestDataset.hh"
 #include "common/io/TestArtifactIO.hh"
 #include "common/logging/ScopedLogFile.hh"
-#include "common/types/TestDataTypes.hh"
 #include "module/topology/fast_clustering/FastClustering.hh"
 #include "utils/logger/Schema.hh"
 
@@ -78,9 +78,9 @@ TEST(FastClusteringRealTechBenchmarkTest, BenchmarkTwentyPlacementCases)
     common::io::EmitInfoReport(
         InfoReport{.title = "CTS Clustering Case Statistics", .content = BuildLoadedCaseReport(benchmark_case, loaded)});
 
-    auto config = BuildBenchmarkConfig();
+    auto config = BuildBenchmarkConfig(loaded.loads);
     auto fast_run = RunAndMeasure("fast", loaded.loads, config,
-                                  [](const std::vector<icts::Pin*>& loads, const auto& run_config) -> icts::ClusterResult {
+                                  [](const std::vector<icts::Pin*>& loads, const auto& run_config) -> icts::ClusterOutput {
                                     return icts::FastClustering::runDefault(loads, run_config);
                                   });
 
@@ -93,7 +93,7 @@ TEST(FastClusteringRealTechBenchmarkTest, BenchmarkTwentyPlacementCases)
     std::string cluster_svg;
     if (!svg_path.empty()) {
       cluster_svg = (std::filesystem::path(std::string(kClusterSvgDirName)) / svg_path.filename()).string();
-      icts::schema::EmitArtifact("CTS clustering structure svg", svg_path);
+      icts::EmitArtifact(icts_test::runtime::CurrentRuntime().reporter, "CTS clustering structure svg", svg_path);
     }
 
     loaded.loads.clear();

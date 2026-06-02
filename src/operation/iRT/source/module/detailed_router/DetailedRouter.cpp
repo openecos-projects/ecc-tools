@@ -2920,7 +2920,6 @@ void DetailedRouter::updateSummary(DRModel& dr_model)
   std::map<int32_t, int32_t>& routing_violation_num_map = summary.iter_dr_summary_map[dr_model.get_iter()].routing_violation_num_map;
   int32_t& total_violation_num = summary.iter_dr_summary_map[dr_model.get_iter()].total_violation_num;
   std::map<std::string, std::map<std::string, double>>& clock_timing_map = summary.iter_dr_summary_map[dr_model.get_iter()].clock_timing_map;
-  std::map<std::string, double>& type_power_map = summary.iter_dr_summary_map[dr_model.get_iter()].type_power_map;
 
   std::vector<DRNet>& dr_net_list = dr_model.get_dr_net_list();
 
@@ -2933,7 +2932,6 @@ void DetailedRouter::updateSummary(DRModel& dr_model)
   routing_violation_num_map.clear();
   total_violation_num = 0;
   clock_timing_map.clear();
-  type_power_map.clear();
 
   for (auto& [net_idx, segment_set] : RTDM.getNetDetailedResultMap(die)) {
     for (Segment<LayerCoord>* segment : segment_set) {
@@ -2980,7 +2978,7 @@ void DetailedRouter::updateSummary(DRModel& dr_model)
         routing_segment_list_list[net_idx].emplace_back(segment->get_first(), segment->get_second());
       }
     }
-    RTI.updateTimingAndPower(real_pin_coord_map_list, routing_segment_list_list, clock_timing_map, type_power_map);
+    RTI.updateTiming(real_pin_coord_map_list, routing_segment_list_list, clock_timing_map);
   }
 }
 
@@ -3000,7 +2998,6 @@ void DetailedRouter::printSummary(DRModel& dr_model)
   std::map<int32_t, int32_t>& routing_violation_num_map = summary.iter_dr_summary_map[dr_model.get_iter()].routing_violation_num_map;
   int32_t& total_violation_num = summary.iter_dr_summary_map[dr_model.get_iter()].total_violation_num;
   std::map<std::string, std::map<std::string, double>>& clock_timing_map = summary.iter_dr_summary_map[dr_model.get_iter()].clock_timing_map;
-  std::map<std::string, double>& type_power_map = summary.iter_dr_summary_map[dr_model.get_iter()].type_power_map;
 
   fort::char_table routing_wire_length_map_table;
   {
@@ -3053,8 +3050,6 @@ void DetailedRouter::printSummary(DRModel& dr_model)
   }
   fort::char_table timing_table;
   timing_table.set_cell_text_align(fort::text_align::right);
-  fort::char_table power_table;
-  power_table.set_cell_text_align(fort::text_align::right);
   if (enable_timing) {
     timing_table << fort::header << "clock_name"
                  << "tns"
@@ -3063,20 +3058,10 @@ void DetailedRouter::printSummary(DRModel& dr_model)
     for (auto& [clock_name, timing_map] : clock_timing_map) {
       timing_table << clock_name << timing_map["TNS"] << timing_map["WNS"] << timing_map["Freq(MHz)"] << fort::endr;
     }
-    power_table << fort::header << "power_type";
-    for (auto& [type, power] : type_power_map) {
-      power_table << fort::header << type;
-    }
-    power_table << fort::endr;
-    power_table << "power_value";
-    for (auto& [type, power] : type_power_map) {
-      power_table << power;
-    }
-    power_table << fort::endr;
   }
   RTUTIL.printTableList({routing_wire_length_map_table, cut_via_num_map_table, routing_patch_num_map_table});
   RTUTIL.printTableList({routing_violation_num_map_table});
-  RTUTIL.printTableList({timing_table, power_table});
+  RTUTIL.printTableList({timing_table});
 }
 
 void DetailedRouter::outputNetCSV(DRModel& dr_model)
@@ -3278,7 +3263,6 @@ std::string DetailedRouter::outputSummaryJson(DRModel& dr_model)
   std::map<int32_t, int32_t>& routing_violation_num_map = summary.iter_dr_summary_map[dr_model.get_iter()].routing_violation_num_map;
   int32_t& total_violation_num = summary.iter_dr_summary_map[dr_model.get_iter()].total_violation_num;
   std::map<std::string, std::map<std::string, double>>& clock_timing_map = summary.iter_dr_summary_map[dr_model.get_iter()].clock_timing_map;
-  std::map<std::string, double>& type_power_map = summary.iter_dr_summary_map[dr_model.get_iter()].type_power_map;
 
   nlohmann::json summary_json;
   summary_json["iter"] = dr_model.get_iter();
@@ -3301,10 +3285,6 @@ std::string DetailedRouter::outputSummaryJson(DRModel& dr_model)
   for (auto& [clock_name, timing] : clock_timing_map) {
     summary_json["clock_timing_map"]["clock_name"] = clock_name;
     summary_json["clock_timing_map"]["timing"] = timing;
-  }
-  for (auto& [type, power] : type_power_map) {
-    summary_json["type_power_map"]["type"] = type;
-    summary_json["type_power_map"]["power"] = power;
   }
 
   std::string summary_json_file_path = RTUTIL.getString(dr_temp_directory_path, "summary_", dr_model.get_iter(), ".json");

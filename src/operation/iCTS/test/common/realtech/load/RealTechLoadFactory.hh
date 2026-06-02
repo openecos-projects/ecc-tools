@@ -18,7 +18,7 @@
  * @file RealTechLoadFactory.hh
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-04-11
- * @brief Load-construction helpers for real-tech and synthetic-fallback tests.
+ * @brief Load-construction helpers for real-tech and synthetic-stand-in tests.
  */
 
 #pragma once
@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-#include "common/types/TestDataTypes.hh"
+#include "common/dataset/TestDataset.hh"
 
 namespace icts {
 class Pin;
@@ -36,7 +36,7 @@ class Pin;
 namespace icts_test::common::realtech::load {
 
 auto MakeRealDesignLoads(std::size_t target_count, std::string& source_label, unsigned seed) -> GeneratedPins;
-auto MakeSyntheticFallbackLoads(std::size_t target_count, std::string& source_label, unsigned seed) -> GeneratedPins;
+auto MakeSyntheticLoads(std::size_t target_count, std::string& source_label, unsigned seed) -> GeneratedPins;
 auto CountPinsWithExactCapContext(const std::vector<icts::Pin*>& loads) -> std::size_t;
 
 }  // namespace icts_test::common::realtech::load

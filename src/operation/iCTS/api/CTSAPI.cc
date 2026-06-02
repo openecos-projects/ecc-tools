@@ -22,18 +22,13 @@
  */
 #include "CTSAPI.hh"
 
+#include <memory>
 #include <string>
-#include <vector>
 
-#include "database/config/Config.hh"
-#include "database/design/Design.hh"
-#include "database/io/Wrapper.hh"
 #include "evaluation/qor/QorEvaluation.hh"
 #include "feature_icts.h"
-#include "feature_ista.h"
 #include "flow/Flow.hh"
 #include "flow/setup/Setup.hh"
-#include "utils/logger/Schema.hh"
 
 namespace icts {
 namespace {
@@ -48,55 +43,68 @@ auto buildFeatureSummary(const QorSummary& flow_summary) -> ieda_feature::CTSSum
   summary.max_level_of_clock_tree = flow_summary.feature_max_clock_network_level;
   summary.max_clock_wirelength = flow_summary.max_clock_wirelength;
   summary.total_clock_wirelength = flow_summary.total_clock_wirelength;
-  summary.clocks_timing.reserve(flow_summary.clocks_timing.size());
-  for (const auto& clock_timing : flow_summary.clocks_timing) {
-    summary.clocks_timing.push_back(ieda_feature::ClockTiming{
-        .clock_name = clock_timing.clock_name,
-        .setup_tns = clock_timing.setup_tns,
-        .setup_wns = clock_timing.setup_wns,
-        .hold_tns = clock_timing.hold_tns,
-        .hold_wns = clock_timing.hold_wns,
-        .suggest_freq = clock_timing.suggest_freq,
-    });
-  }
   return summary;
 }
 
 }  // namespace
 
+CTSAPI::CTSAPI() : _runtime(std::make_unique<CTSRuntime>()), _flow(std::make_unique<Flow>(*_runtime))
+{
+}
+
+CTSAPI::~CTSAPI() = default;
+
+auto CTSAPI::runtime() -> CTSRuntime&
+{
+  return *_runtime;
+}
+
+auto CTSAPI::flow() -> Flow&
+{
+  return *_flow;
+}
+
 auto CTSAPI::runCTS() -> void
 {
-  FLOW_INST.runCTS();
+  getInst().flow().runCTS();
 }
 
 auto CTSAPI::report(const std::string& save_dir) -> void
 {
-  FLOW_INST.report(save_dir);
+  getInst().flow().emitReports(save_dir);
 }
 
 auto CTSAPI::resetAPI() -> void
 {
-  CONFIG_INST.reset();
-  DESIGN_INST.reset();
-  WRAPPER_INST.reset();
-  FLOW_INST.reset();
-  SCHEMA_WRITER_INST.reset();
+  auto& api = getInst();
+  api.runtime().reset();
+  api.flow().reset();
 }
 
 auto CTSAPI::init(const std::string& config_file, const std::string& work_dir) -> void
 {
   resetAPI();
-  const bool setup_ready = Setup::initialize(config_file, work_dir);
-  FLOW_INST.setSetupReady(setup_ready);
-  if (!setup_ready) {
+  auto& api = getInst();
+  auto& runtime = api.runtime();
+  const auto setup_result = Setup::initializeRuntime(SetupInput{
+      .config = &runtime.config,
+      .design = &runtime.design,
+      .wrapper = &runtime.wrapper,
+      .reporter = &runtime.reporter,
+      .config_file = config_file,
+      .work_dir = work_dir,
+  });
+  auto& flow = api.flow();
+  flow.setSetupReady(setup_result.success);
+  if (!setup_result.success) {
     return;
   }
-  FLOW_INST.outputRuntimeSetup();
+  flow.outputRuntimeSetup();
 }
 
 auto CTSAPI::outputSummary() -> ieda_feature::CTSSummary
 {
-  return buildFeatureSummary(FLOW_INST.outputSummary());
+  return buildFeatureSummary(getInst().flow().outputSummary());
 }
 
 }  // namespace icts

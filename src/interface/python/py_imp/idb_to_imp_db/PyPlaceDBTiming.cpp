@@ -18,8 +18,7 @@
 #include "IdbLayout.h"
 #include "IdbPins.h"
 #include "Lib.hh"
-#include "Pin.hh"
-#include "PowerEngine.hh"
+// #include "PowerEngine.hh"
 #include "TimingEngine.hh"
 #include "TimingIDBAdapter.hh"
 #include "Type.hh"
@@ -30,7 +29,6 @@
 #include "sdc/SdcSetInputTransition.hh"
 #include "sdc/SdcSetLoad.hh"
 // #include "ContestDriver.h"
-#include "PowerEngine.hh"
 #include "sta/StaArc.hh"
 // #include "Power.hh"
 #include <boost/polygon/polygon.hpp>

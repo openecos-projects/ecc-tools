@@ -23,21 +23,25 @@
 
 #include "synthesis/htree/plan/Plan.hh"
 
+#include <glog/logging.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "Log.hh"
 #include "PatternId.hh"
 #include "Tree.hh"
 #include "ValueLattice.hh"
-#include "config/Config.hh"
 #include "geometry/Geometry.hh"
+#include "synthesis/htree/HTree.hh"
 
 namespace icts::htree {
 namespace {
@@ -51,6 +55,7 @@ auto MakeCoveringLengthIndex(double length_um, double length_step_um) -> unsigne
 
 auto BuildLevelPlans(const Tree& topology, double length_step_um, int32_t dbu_per_um) -> std::vector<HTree::LevelPlan>
 {
+  LOG_FATAL_IF(dbu_per_um <= 0) << "HTree: DBU-per-micron must be positive when building level plans.";
   std::vector<HTree::LevelPlan> plans;
   const auto levels = topology.levels();
   if (levels.size() <= 1U || length_step_um <= 0.0) {
@@ -83,8 +88,7 @@ auto BuildLevelPlans(const Tree& topology, double length_step_um, int32_t dbu_pe
 
     const int requested_length_dbu
         = static_cast<int>(std::llround(static_cast<double>(distance_sum) / static_cast<double>(distance_count)));
-    const double requested_length_um
-        = static_cast<double>(std::max(requested_length_dbu, 0)) / static_cast<double>(std::max(dbu_per_um, int32_t{1}));
+    const double requested_length_um = static_cast<double>(std::max(requested_length_dbu, 0)) / static_cast<double>(dbu_per_um);
     const unsigned aligned_length_idx = MakeCoveringLengthIndex(requested_length_um, length_step_um);
     plans.push_back(HTree::LevelPlan{
         .requested_length_dbu = requested_length_dbu,
@@ -135,18 +139,18 @@ auto CountCandidateLeafNodes(const Tree& topology, unsigned depth) -> std::size_
   return topology_levels.at(depth).size();
 }
 
-auto ResolveDepthCandidates(unsigned max_depth, const HTree::BuildOptions& options) -> std::vector<unsigned>
+auto ResolveDepthCandidates(unsigned max_depth, const HTree::Config& config) -> std::vector<unsigned>
 {
   if (max_depth == 0U) {
     return {};
   }
 
-  if (options.target_depth.has_value()) {
-    const unsigned resolved_depth = std::clamp(*options.target_depth, 1U, max_depth);
+  if (config.target_depth.has_value()) {
+    const unsigned resolved_depth = std::clamp(*config.target_depth, 1U, max_depth);
     return {resolved_depth};
   }
 
-  const unsigned requested_window = options.depth_explore_window.value_or(CONFIG_INST.get_htree_depth_explore_window());
+  const unsigned requested_window = config.depth_explore_window;
   const unsigned resolved_window = std::max(1U, std::min(requested_window, max_depth));
 
   std::vector<unsigned> candidates;

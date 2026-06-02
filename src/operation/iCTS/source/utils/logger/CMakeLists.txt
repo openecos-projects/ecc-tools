@@ -1,8 +1,22 @@
-add_library(icts_source_utils_logger ${ICTS_LOGGER}/Schema.cc)
+add_library(
+  icts_source_utils_logger
+  ${ICTS_LOGGER}/Schema.cc
+  ${ICTS_LOGGER}/SchemaScope.cc
+)
 
-target_include_directories(icts_source_utils_logger PUBLIC ${ICTS_LOGGER})
+target_include_directories(
+  icts_source_utils_logger
+  PUBLIC
+  ${ICTS_UTILS}
+  ${ICTS_LOGGER}
+)
 
-target_link_libraries(icts_source_utils_logger PRIVATE log usage)
+target_link_libraries(
+  icts_source_utils_logger
+  PRIVATE
+  log
+  usage
+)
 
 if(DEBUG_ICTS_SOURCE_UTILS_LOGGER)
   if(MSVC)

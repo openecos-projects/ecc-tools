@@ -22,7 +22,6 @@ target_include_directories(
   ${ICTS_DATABASE}
   PRIVATE
   ${ICTS_SOURCE}
-  ${ICTS_UTILS}
 )
 
 if(DEBUG_ICTS_SOURCE_DATABASE_DESIGN)

@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-#include "module/topology/topology_gen/support/TopologyGenShared.hh"
+#include "module/topology/topology_gen/fixture/TopologyGenScenario.hh"
 
 namespace icts_test::topology_gen {
 namespace {

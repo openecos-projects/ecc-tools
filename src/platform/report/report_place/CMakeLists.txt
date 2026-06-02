@@ -10,9 +10,6 @@ target_link_libraries(ieda_report_place
         tool_manager 
         def_service
         log
-        ipl-api
-        ipl-source
-        ipl-api_external_libs
 )
 
 target_include_directories(ieda_report_place 

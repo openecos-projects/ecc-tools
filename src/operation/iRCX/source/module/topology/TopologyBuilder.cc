@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "TopologyBuilder.hh"
 
+#include <algorithm>
 #include <omp.h>
 
 #include "HashUtils.hh"
@@ -33,15 +34,42 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
 
   auto& nodes = result.nodes;
   auto& edges = result.edges;
+  std::vector<char> node_shape_valid;
 
   // Helpers that write only into this net's local vectors.
-  auto append_node = [&](TopoNode node) -> Size {
+  auto append_node = [&](TopoNode node, bool shape_valid) -> Size {
     nodes.push_back(std::move(node));
+    node_shape_valid.push_back(shape_valid);
     return nodes.size() - 1;
   };
   auto append_edge = [&](TopoEdge edge) -> Size {
     edges.push_back(std::move(edge));
     return edges.size() - 1;
+  };
+  auto merge_node_shape = [&](Size node_idx, const GtlRectI& rect) {
+    TopoNode& node = nodes[node_idx];
+    if (!node_shape_valid[node_idx]) {
+      node.set_shape(rect);
+      node_shape_valid[node_idx] = true;
+      return;
+    }
+
+    const GtlRectI& old_rect = node.shape();
+    node.set_shape(geom::make_rect<GtlRectI>(
+        std::min(geom::min_x(old_rect), geom::min_x(rect)),
+        std::min(geom::min_y(old_rect), geom::min_y(rect)),
+        std::max(geom::max_x(old_rect), geom::max_x(rect)),
+        std::max(geom::max_y(old_rect), geom::max_y(rect))));
+  };
+  auto endpoint_shape = [](const Segment& wire, const GtlPointI& point) -> GtlRectI {
+    if (geom::is_hor_dominant(wire.p0, wire.p1)) {
+      return geom::make_rect<GtlRectI>(
+          geom::x(point), geom::min_y(wire.rect),
+          geom::x(point), geom::max_y(wire.rect));
+    }
+    return geom::make_rect<GtlRectI>(
+        geom::min_x(wire.rect), geom::y(point),
+        geom::max_x(wire.rect), geom::y(point));
   };
 
   // (layer, point) -> local node index
@@ -55,9 +83,16 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
     pin_consumed[pin.name] = false;
   }
 
+  struct PinMatch
+  {
+    Str name;
+    GtlRectI rect;
+    bool matched{false};
+  };
+
   // Match a (layer_id, point) against the remaining pin entries.
   // Returns the matched pin name and marks it consumed; returns empty if none matches.
-  auto match_pin_name = [&](Size layer_id, GtlPointI point) -> Str {
+  auto match_pin = [&](Size layer_id, GtlPointI point) -> PinMatch {
     for (const auto& pin : net.pins) {
       if (pin_consumed[pin.name])
         continue;
@@ -67,7 +102,7 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
           continue;
         if (geom::rect_contains_point(pin_rect, point)) {
           pin_consumed[pin.name] = true;
-          return pin.name;
+          return {pin.name, pin_rect, true};
         }
       }
     }
@@ -85,11 +120,18 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
     TopoNode node(net_id);
     node.set_layer_id(layer_id);
     node.set_point(point);
-    node.set_shape(geom::box_around(point, 1));
 
-    node.set_pin_name(match_pin_name(layer_id, point));
+    const PinMatch pin_match = match_pin(layer_id, point);
+    bool shape_valid = false;
+    if (pin_match.matched) {
+      node.set_pin_name(pin_match.name);
+      node.set_shape(pin_match.rect);
+      shape_valid = true;
+    } else {
+      node.set_shape(geom::box_around(point, 1));
+    }
 
-    const Size node_idx = append_node(std::move(node));
+    const Size node_idx = append_node(std::move(node), shape_valid);
     local_node_index_by_key[node_key] = node_idx;
   };
 
@@ -113,6 +155,9 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
 
     const Size start_node_idx = local_node_index_by_key.at({layer_id, start_point});
     const Size end_node_idx = local_node_index_by_key.at({layer_id, end_point});
+
+    merge_node_shape(start_node_idx, endpoint_shape(wire, start_point));
+    merge_node_shape(end_node_idx, endpoint_shape(wire, end_point));
 
     TopoEdge edge(net_id);
     edge.set_layer_id(layer_id);
@@ -139,6 +184,9 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
 
     const Size top_node_idx = local_node_index_by_key.at({top_layer_id, via_point});
     const Size bottom_node_idx = local_node_index_by_key.at({bottom_layer_id, via_point});
+
+    merge_node_shape(top_node_idx, via.layer_rect_top.second);
+    merge_node_shape(bottom_node_idx, via.layer_rect_btm.second);
 
     TopoEdge edge(net_id);
     edge.set_layer_id(cut_layer_id);

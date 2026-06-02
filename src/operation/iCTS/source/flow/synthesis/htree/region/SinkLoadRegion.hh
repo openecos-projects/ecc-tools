@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "ClockRouteSegmentRc.hh"
 #include "HTreeTopologyChar.hh"
 #include "PatternId.hh"
 #include "Point.hh"
@@ -39,6 +40,7 @@
 namespace icts {
 
 class Pin;
+class Wrapper;
 class Tree;
 
 namespace htree {
@@ -95,7 +97,7 @@ enum class SinkLoadRegionViolation
   kCapacitance,
 };
 
-struct SinkLoadRegionLegalityResult
+struct SinkLoadRegionLegalitySummary
 {
   bool legal = false;
   bool monotone_hard_fail = false;
@@ -108,26 +110,46 @@ struct SinkLoadRegionLegalityResult
   PatternId segment_pattern_id = PatternId::segment(0);
 };
 
+struct SinkLoadRegionLegalityInput
+{
+  Wrapper* wrapper = nullptr;
+  std::size_t max_fanout = 0U;
+  bool has_max_cap = false;
+  double max_cap_pf = std::numeric_limits<double>::infinity();
+  ClockRouteSegmentRc clock_route_segment_rc;
+};
+
 struct SinkLoadRegionLegalityContext
 {
-  std::unordered_map<SinkLoadRegionLegalitySignature, SinkLoadRegionLegalityResult, SinkLoadRegionLegalitySignatureHash>
+  std::unordered_map<SinkLoadRegionLegalitySignature, SinkLoadRegionLegalitySummary, SinkLoadRegionLegalitySignatureHash>
       result_by_signature;
   int max_monotone_failed_level = std::numeric_limits<int>::min();
   UniformValueLattice cap_lattice;
+  SinkLoadRegionLegalityInput input;
 };
 
-struct SinkLoadRegionEntryFilterResult
+struct SinkLoadRegionEntryFilterOutput
 {
   std::vector<HTreeTopologyChar> entries;
+};
+
+struct SinkLoadRegionEntryFilterSummary
+{
   std::string first_failure_reason;
+};
+
+struct SinkLoadRegionEntryFilterBuild
+{
+  SinkLoadRegionEntryFilterOutput output;
+  SinkLoadRegionEntryFilterSummary summary;
 };
 
 auto ResolveSinkLoadRegionLegality(const Tree& topology, PatternId topology_pattern_id, const TopologyPatternLibrary& topology_library,
                                    const BufferPatternLibrary& segment_pattern_library, SinkLoadRegionLegalityContext& legality_context)
-    -> SinkLoadRegionLegalityResult;
+    -> SinkLoadRegionLegalitySummary;
 auto FilterSinkLoadRegionLegalEntries(const std::vector<HTreeTopologyChar>& entries, const Tree& topology,
                                       const TopologyPatternLibrary& topology_library, const BufferPatternLibrary& segment_pattern_library,
-                                      SinkLoadRegionLegalityContext& legality_context) -> SinkLoadRegionEntryFilterResult;
+                                      SinkLoadRegionLegalityContext& legality_context) -> SinkLoadRegionEntryFilterBuild;
 
 }  // namespace htree
 }  // namespace icts

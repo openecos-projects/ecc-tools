@@ -5,19 +5,12 @@ add_subdirectory(tool_api/ifp_io)
 add_subdirectory(tool_api/ieval_io)
 add_subdirectory(tool_api/ipdn_io)
 add_subdirectory(tool_api/ista_io)
-add_subdirectory(tool_api/ipw_io)
 add_subdirectory(tool_api/icts_io)
 add_subdirectory(tool_api/idrc_io)
-add_subdirectory(tool_api/ipl_io)
-add_subdirectory(tool_api/ito_io)
-add_subdirectory(tool_api/ino_io)
-add_subdirectory(tool_api/ipnp_io)
 
 add_library(tool_manager
     tool_manager.cpp
 )
-
-target_link_libraries(tool_manager PUBLIC icts_source)
 
 target_link_libraries(tool_manager PUBLIC)
 
@@ -28,21 +21,12 @@ target_link_libraries(tool_manager
         tool_api_ieval
         tool_api_ifp
         tool_api_ipdn
-        tool_api_ipl
         tool_api_irt
         tool_api_ista
-        tool_api_ipw
-        tool_api_ito
-        tool_api_ino
-        tool_api_ipnp
         ivec_db
 )
 
 target_link_libraries(tool_manager PUBLIC idm)
-
-target_link_libraries(tool_manager PUBLIC ito_source)
-
-target_link_libraries(tool_manager PUBLIC ino_source)
 
 target_include_directories(tool_manager
     PUBLIC

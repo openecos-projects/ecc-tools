@@ -34,9 +34,9 @@
 #include <utility>
 #include <vector>
 
-#include "BSTRouter.hh"
 #include "Log.hh"
 #include "Point.hh"
+#include "bound_skew_tree/BSTRouter.hh"
 #include "geometry/Geometry.hh"
 #include "salt/base/net.h"
 #include "salt/base/rsa.h"
@@ -299,7 +299,8 @@ auto CustomSaltBuilder::dfs(const std::shared_ptr<salt::TreeNode>& tree_node, co
   }
 }
 
-auto CBSRouter::buildTree(const std::vector<Terminal>& load_terminals, const BSTParameters& parameters) -> CBSRouter::ClockSteinerTreeType
+auto CBSRouter::buildTree(const std::vector<Terminal>& load_terminals, const BSTRoutingConfig& parameters)
+    -> CBSRouter::ClockSteinerTreeType
 {
   auto initial_tree = BSTRouter::buildTree(load_terminals, parameters);
   if (initial_tree.node_count() == 0) {

@@ -24,7 +24,6 @@ target_link_libraries(idm
     flow 
     file_manager_cts 
     # file_manager_drc 
-    file_manager_placement 
     tool_manager 
     tool_api_ista 
     )

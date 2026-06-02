@@ -18,7 +18,7 @@
  * @file RealTechLoadFactory.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-04-11
- * @brief Load-construction helpers for real-tech and synthetic-fallback tests.
+ * @brief Load-construction helpers for real-tech and synthetic-stand-in tests.
  */
 
 #include "common/realtech/load/RealTechLoadFactory.hh"
@@ -39,7 +39,7 @@
 #include "IdbNet.h"
 #include "IdbPins.h"
 #include "common/data/TestDataGenerator.hh"
-#include "common/types/TestDataTypes.hh"
+#include "common/dataset/TestDataset.hh"
 #include "database/design/Inst.hh"
 #include "database/design/Pin.hh"
 #include "database/spatial/Point.hh"
@@ -48,8 +48,8 @@
 namespace icts_test::common::realtech::load {
 namespace {
 
-constexpr int kSyntheticFallbackCanvasWidth = 180000;
-constexpr int kSyntheticFallbackCanvasHeight = 140000;
+constexpr int kSyntheticLoadCanvasWidth = 180000;
+constexpr int kSyntheticLoadCanvasHeight = 140000;
 
 auto PickBestNetName(std::string& net_name, bool& is_clock_net) -> bool
 {
@@ -181,10 +181,10 @@ auto MakeRealDesignLoads(std::size_t target_count, std::string& source_label, un
   return result;
 }
 
-auto MakeSyntheticFallbackLoads(std::size_t target_count, std::string& source_label, unsigned seed) -> GeneratedPins
+auto MakeSyntheticLoads(std::size_t target_count, std::string& source_label, unsigned seed) -> GeneratedPins
 {
-  source_label = "synthetic_fallback:gaussian_mixture";
-  return data::MakeGaussianMixture(target_count, {.width = kSyntheticFallbackCanvasWidth, .height = kSyntheticFallbackCanvasHeight}, seed);
+  source_label = "synthetic_standin:gaussian_mixture";
+  return data::MakeGaussianMixture(target_count, {.width = kSyntheticLoadCanvasWidth, .height = kSyntheticLoadCanvasHeight}, seed);
 }
 
 auto CountPinsWithExactCapContext(const std::vector<icts::Pin*>& loads) -> std::size_t

@@ -26,43 +26,45 @@
 #include <string>
 #include <vector>
 
+#include "characterization/Characterization.hh"
 #include "database/characterization/HTreeTopologyChar.hh"
 #include "database/characterization/PatternId.hh"
-#include "module/characterization/HTreeTopologyCharTable.hh"
-#include "module/characterization/PatternCombiner.hh"
-#include "module/characterization/support/CharacterizationTestSupport.hh"
+#include "module/characterization/fixture/CharacterizationUnitCaseData.hh"
 
 namespace icts_test {
 namespace {
 
-namespace support = characterization;
+namespace char_cases = characterization;
 
 TEST(HTreeJoinTest, HalfCapJoin)
 {
   icts::HTreeTopologyCharTable upstream;
   icts::HTreeTopologyCharTable downstream;
 
-  upstream.addChar(support::MakeHTreeChar(support::kSlew80, support::kSlew100, support::kCap40, support::kCap100, support::kDelay1p0,
-                                          support::kPower0p5, support::HTreeShape{.pattern_id = support::kPattern1, .levels = 1}));
+  upstream.addChar(char_cases::MakeHTreeChar(char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap100,
+                                             char_cases::kDelay1p0, char_cases::kPower0p5,
+                                             char_cases::HTreeShape{.pattern_id = char_cases::kPattern1, .levels = 1}));
 
-  downstream.addChar(support::MakeHTreeChar(support::kSlew100, support::kSlew120, support::kCap50, support::kCap60, support::kDelay2p0,
-                                            support::kPower0p3, support::HTreeShape{.pattern_id = support::kPattern2, .levels = 1}));
-  downstream.addChar(support::MakeHTreeChar(support::kSlew100, support::kSlew130, support::kCap51, support::kCap70, support::kDelay3p0,
-                                            support::kPower0p4, support::HTreeShape{.pattern_id = support::kPattern3, .levels = 1}));
+  downstream.addChar(char_cases::MakeHTreeChar(char_cases::kSlew100, char_cases::kSlew120, char_cases::kCap50, char_cases::kCap60,
+                                               char_cases::kDelay2p0, char_cases::kPower0p3,
+                                               char_cases::HTreeShape{.pattern_id = char_cases::kPattern2, .levels = 1}));
+  downstream.addChar(char_cases::MakeHTreeChar(char_cases::kSlew100, char_cases::kSlew130, char_cases::kCap51, char_cases::kCap70,
+                                               char_cases::kDelay3p0, char_cases::kPower0p4,
+                                               char_cases::HTreeShape{.pattern_id = char_cases::kPattern3, .levels = 1}));
 
-  const icts::TopologyPatternCombiner combiner(support::kBoundaryKey);
+  const icts::TopologyPatternCombiner combiner(char_cases::kBoundaryKey);
   auto result = upstream.concatWith(downstream, combiner);
 
   ASSERT_EQ(result.size(), 1U);
 
   const auto& merged = result.get_chars().front();
-  EXPECT_EQ(merged.get_input_slew_idx(), support::kSlew80);
-  EXPECT_EQ(merged.get_output_slew_idx(), support::kSlew120);
-  EXPECT_EQ(merged.get_driven_cap_idx(), support::kCap40);
-  EXPECT_EQ(merged.get_leaf_load_cap_idx(), support::kCap60);
-  EXPECT_EQ(merged.get_load_cap_idx(), support::kCap60);
-  EXPECT_DOUBLE_EQ(merged.get_delay(), support::kDelay3p0);
-  EXPECT_DOUBLE_EQ(merged.get_power(), support::kMergedPower1p1);
+  EXPECT_EQ(merged.get_input_slew_idx(), char_cases::kSlew80);
+  EXPECT_EQ(merged.get_output_slew_idx(), char_cases::kSlew120);
+  EXPECT_EQ(merged.get_driven_cap_idx(), char_cases::kCap40);
+  EXPECT_EQ(merged.get_leaf_load_cap_idx(), char_cases::kCap60);
+  EXPECT_EQ(merged.get_load_cap_idx(), char_cases::kCap60);
+  EXPECT_DOUBLE_EQ(merged.get_delay(), char_cases::kDelay3p0);
+  EXPECT_DOUBLE_EQ(merged.get_power(), char_cases::kMergedPower1p1);
   EXPECT_EQ(merged.get_levels(), 2U);
   EXPECT_EQ(merged.get_pattern_id().domain, icts::PatternDomain::kTopologyPattern);
 }
@@ -72,21 +74,24 @@ TEST(HTreeJoinTest, OddCapHalvingUsesCeilHalfBin)
   icts::HTreeTopologyCharTable upstream;
   icts::HTreeTopologyCharTable downstream;
 
-  upstream.addChar(support::MakeHTreeChar(support::kSlew80, support::kSlew100, support::kCap40, support::kCap101, support::kDelay1p0,
-                                          support::kPower0p5, support::HTreeShape{.pattern_id = support::kPattern1, .levels = 1}));
-  downstream.addChar(support::MakeHTreeChar(support::kSlew100, support::kSlew120, support::kCap50, support::kCap60, support::kDelay2p0,
-                                            support::kPower0p3, support::HTreeShape{.pattern_id = support::kPattern2, .levels = 1}));
-  downstream.addChar(support::MakeHTreeChar(support::kSlew100, support::kSlew130, support::kCap51, support::kCap70, support::kDelay3p0,
-                                            support::kPower0p4, support::HTreeShape{.pattern_id = support::kPattern3, .levels = 1}));
+  upstream.addChar(char_cases::MakeHTreeChar(char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap101,
+                                             char_cases::kDelay1p0, char_cases::kPower0p5,
+                                             char_cases::HTreeShape{.pattern_id = char_cases::kPattern1, .levels = 1}));
+  downstream.addChar(char_cases::MakeHTreeChar(char_cases::kSlew100, char_cases::kSlew120, char_cases::kCap50, char_cases::kCap60,
+                                               char_cases::kDelay2p0, char_cases::kPower0p3,
+                                               char_cases::HTreeShape{.pattern_id = char_cases::kPattern2, .levels = 1}));
+  downstream.addChar(char_cases::MakeHTreeChar(char_cases::kSlew100, char_cases::kSlew130, char_cases::kCap51, char_cases::kCap70,
+                                               char_cases::kDelay3p0, char_cases::kPower0p4,
+                                               char_cases::HTreeShape{.pattern_id = char_cases::kPattern3, .levels = 1}));
 
-  const icts::TopologyPatternCombiner combiner(support::kBoundaryKey);
+  const icts::TopologyPatternCombiner combiner(char_cases::kBoundaryKey);
   auto result = upstream.concatWith(downstream, combiner);
 
   EXPECT_EQ(result.size(), 1U);
-  EXPECT_EQ(result.get_chars().front().get_output_slew_idx(), support::kSlew130);
-  EXPECT_EQ(result.get_chars().front().get_driven_cap_idx(), support::kCap40);
-  EXPECT_EQ(result.get_chars().front().get_leaf_load_cap_idx(), support::kCap70);
-  EXPECT_EQ(result.get_chars().front().get_load_cap_idx(), support::kCap70);
+  EXPECT_EQ(result.get_chars().front().get_output_slew_idx(), char_cases::kSlew130);
+  EXPECT_EQ(result.get_chars().front().get_driven_cap_idx(), char_cases::kCap40);
+  EXPECT_EQ(result.get_chars().front().get_leaf_load_cap_idx(), char_cases::kCap70);
+  EXPECT_EQ(result.get_chars().front().get_load_cap_idx(), char_cases::kCap70);
 }
 
 TEST(HTreeJoinTest, PowerDoubling)
@@ -94,16 +99,18 @@ TEST(HTreeJoinTest, PowerDoubling)
   icts::HTreeTopologyCharTable upstream;
   icts::HTreeTopologyCharTable downstream;
 
-  upstream.addChar(support::MakeHTreeChar(support::kSlew80, support::kSlew100, support::kCap40, support::kCap100, support::kDelay1p0,
-                                          support::kPower10p0, support::HTreeShape{.pattern_id = support::kPattern1, .levels = 1}));
-  downstream.addChar(support::MakeHTreeChar(support::kSlew100, support::kSlew120, support::kCap50, support::kCap60, support::kDelay2p0,
-                                            support::kPower5p0, support::HTreeShape{.pattern_id = support::kPattern2, .levels = 1}));
+  upstream.addChar(char_cases::MakeHTreeChar(char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap100,
+                                             char_cases::kDelay1p0, char_cases::kPower10p0,
+                                             char_cases::HTreeShape{.pattern_id = char_cases::kPattern1, .levels = 1}));
+  downstream.addChar(char_cases::MakeHTreeChar(char_cases::kSlew100, char_cases::kSlew120, char_cases::kCap50, char_cases::kCap60,
+                                               char_cases::kDelay2p0, char_cases::kPower5p0,
+                                               char_cases::HTreeShape{.pattern_id = char_cases::kPattern2, .levels = 1}));
 
-  const icts::TopologyPatternCombiner combiner(support::kBoundaryKey);
+  const icts::TopologyPatternCombiner combiner(char_cases::kBoundaryKey);
   auto result = upstream.concatWith(downstream, combiner);
 
   ASSERT_EQ(result.size(), 1U);
-  EXPECT_DOUBLE_EQ(result.get_chars().front().get_power(), support::kMergedPower20p0);
+  EXPECT_DOUBLE_EQ(result.get_chars().front().get_power(), char_cases::kMergedPower20p0);
 }
 
 TEST(HTreeJoinTest, PowerDoublingSubtractsDownstreamSourceBoundarySwitchPower)
@@ -111,12 +118,14 @@ TEST(HTreeJoinTest, PowerDoublingSubtractsDownstreamSourceBoundarySwitchPower)
   icts::HTreeTopologyCharTable upstream;
   icts::HTreeTopologyCharTable downstream;
 
-  upstream.addChar(support::MakeHTreeChar(support::kSlew80, support::kSlew100, support::kCap40, support::kCap100, support::kDelay1p0,
-                                          support::kPower10p0, support::HTreeShape{.pattern_id = support::kPattern1, .levels = 1}, 0.20));
-  downstream.addChar(support::MakeHTreeChar(support::kSlew100, support::kSlew120, support::kCap50, support::kCap60, support::kDelay2p0,
-                                            support::kPower5p0, support::HTreeShape{.pattern_id = support::kPattern2, .levels = 1}, 1.50));
+  upstream.addChar(char_cases::MakeHTreeChar(char_cases::kSlew80, char_cases::kSlew100, char_cases::kCap40, char_cases::kCap100,
+                                             char_cases::kDelay1p0, char_cases::kPower10p0,
+                                             char_cases::HTreeShape{.pattern_id = char_cases::kPattern1, .levels = 1}, 0.20));
+  downstream.addChar(char_cases::MakeHTreeChar(char_cases::kSlew100, char_cases::kSlew120, char_cases::kCap50, char_cases::kCap60,
+                                               char_cases::kDelay2p0, char_cases::kPower5p0,
+                                               char_cases::HTreeShape{.pattern_id = char_cases::kPattern2, .levels = 1}, 1.50));
 
-  const icts::TopologyPatternCombiner combiner(support::kBoundaryKey);
+  const icts::TopologyPatternCombiner combiner(char_cases::kBoundaryKey);
   auto result = upstream.concatWith(downstream, combiner);
 
   ASSERT_EQ(result.size(), 1U);

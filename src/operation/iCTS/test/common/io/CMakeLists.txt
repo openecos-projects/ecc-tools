@@ -9,7 +9,7 @@ target_link_libraries(
   PRIVATE
   log
   icts_source_utils_logger
-  icts_test_common_types
+  icts_test_common_dataset
 )
 
 icts_add_test_executable(

@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -23,20 +23,33 @@
 
 #include "instantiation/Instantiation.hh"
 
+#include <glog/logging.h>
+
+#include <ostream>
+
+#include "Log.hh"
 #include "instantiation/idb_conversion/IdbConversion.hh"
 
 namespace icts {
 
-auto Instantiation::run() -> InstantiationResult
+auto Instantiation::run(const InstantiationInput& input) -> InstantiationSummary
 {
-  const auto idb_result = IdbConversion::run();
-  return InstantiationResult{
-      .attempted = idb_result.attempted,
-      .design_ready = idb_result.design_ready,
-      .design_conversion_done = idb_result.attempted,
-      .idb_conversion_done = idb_result.idb_conversion_done,
-      .instantiation_done = idb_result.idb_conversion_done,
-      .clock_count = idb_result.clock_count,
+  LOG_FATAL_IF(input.design == nullptr) << "Instantiation requires a design.";
+  LOG_FATAL_IF(input.wrapper == nullptr) << "Instantiation requires a wrapper.";
+  LOG_FATAL_IF(input.reporter == nullptr) << "Instantiation requires a reporter.";
+  const auto idb_summary = IdbConversion::run(IdbConversionInput{
+      .design = input.design,
+      .wrapper = input.wrapper,
+      .reporter = input.reporter,
+  });
+  return InstantiationSummary{
+      .attempted = idb_summary.attempted,
+      .design_ready = idb_summary.design_ready,
+      .success = idb_summary.success,
+      .design_conversion_done = idb_summary.attempted,
+      .idb_conversion_done = idb_summary.success,
+      .clock_count = idb_summary.clock_count,
+      .failure_reason = idb_summary.failure_reason,
   };
 }
 

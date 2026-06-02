@@ -32,7 +32,7 @@
 #include <system_error>
 #include <vector>
 
-#include "FastClusteringRealTechBenchmarkInternal.hh"
+#include "FastClusteringRealTechBenchmarkFixture.hh"
 
 namespace icts_test::fast_clustering::realtech {
 namespace {

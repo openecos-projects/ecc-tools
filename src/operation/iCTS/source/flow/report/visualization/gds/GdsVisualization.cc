@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -50,12 +50,12 @@ constexpr const char* kFlylineGdsLabel = "cts_flyline.gds";
 constexpr const char* kDesignLayerPropertiesLabel = "cts_design.lyp";
 constexpr const char* kFlylineLayerPropertiesLabel = "cts_flyline.lyp";
 
-auto resolveVisualizationDir(const std::filesystem::path& visualization_dir) -> std::filesystem::path
+auto resolveVisualizationDir(const Config& config, const std::filesystem::path& visualization_dir) -> std::filesystem::path
 {
   if (!visualization_dir.empty()) {
     return visualization_dir;
   }
-  return std::filesystem::path(CONFIG_INST.get_visualization_dir());
+  return std::filesystem::path(config.get_visualization_dir());
 }
 
 auto isValidLocation(const Point<int>& point) -> bool
@@ -83,10 +83,10 @@ auto makeBoundary(const GdsLayerKey& key, const Point<int>& origin, int32_t widt
   };
 }
 
-auto resolvePathWidthDbu(int32_t dbu_per_um) -> int32_t
+auto resolvePathWidthDbu(const Config& config, int32_t dbu_per_um) -> int32_t
 {
-  if (CONFIG_INST.get_wire_width() > 0.0) {
-    return std::max(static_cast<int32_t>(CONFIG_INST.get_wire_width() * static_cast<double>(std::max(dbu_per_um, int32_t{1}))), int32_t{1});
+  if (config.get_wire_width() > 0.0) {
+    return std::max(static_cast<int32_t>(config.get_wire_width() * static_cast<double>(std::max(dbu_per_um, int32_t{1}))), int32_t{1});
   }
   return std::max(std::max(dbu_per_um, int32_t{1}) / 20, int32_t{1});
 }
@@ -119,10 +119,11 @@ auto appendInstBoundaries(GdsLibrary& library, LayerPolicy& layer_policy, const 
   appendClockInstBoundaries(library, layer_policy, model);
 }
 
-auto appendSegments(GdsLibrary& library, LayerPolicy& layer_policy, const Drawing& model, ClockLayoutMode view) -> void
+auto appendSegments(const Config& config, GdsLibrary& library, LayerPolicy& layer_policy, const Drawing& model, ClockLayoutMode view)
+    -> void
 {
   const bool flyline = view == ClockLayoutMode::kFlyline;
-  const int32_t path_width = resolvePathWidthDbu(model.dbu_per_um);
+  const int32_t path_width = resolvePathWidthDbu(config, model.dbu_per_um);
   const auto& segments = flyline ? model.flyline_segments : model.design_segments;
   for (const auto& segment : segments) {
     if (!isValidLocation(segment.begin) || !isValidLocation(segment.end)) {
@@ -137,8 +138,8 @@ auto appendSegments(GdsLibrary& library, LayerPolicy& layer_policy, const Drawin
   }
 }
 
-auto buildLibrary(const std::string& library_name, const std::string& structure_name, const Drawing& model, ClockLayoutMode view,
-                  LayerPolicy& layer_policy) -> GdsLibrary
+auto buildLibrary(const Config& config, const std::string& library_name, const std::string& structure_name, const Drawing& model,
+                  ClockLayoutMode view, LayerPolicy& layer_policy) -> GdsLibrary
 {
   GdsLibrary library{
       .library_name = library_name,
@@ -149,52 +150,61 @@ auto buildLibrary(const std::string& library_name, const std::string& structure_
       .texts = {},
   };
   appendInstBoundaries(library, layer_policy, model);
-  appendSegments(library, layer_policy, model, view);
+  appendSegments(config, library, layer_policy, model, view);
   return library;
 }
 
-auto emitReportTable(const std::filesystem::path& design_gds_path, bool design_success, const std::filesystem::path& design_lyp_path,
-                     bool design_lyp_success, const std::filesystem::path& flyline_gds_path, bool flyline_success,
-                     const std::filesystem::path& flyline_lyp_path, bool flyline_lyp_success) -> void
+auto emitReportTable(SchemaWriter& reporter, const std::filesystem::path& design_gds_path, bool design_success,
+                     const std::filesystem::path& design_lyp_path, bool design_lyp_success, const std::filesystem::path& flyline_gds_path,
+                     bool flyline_success, const std::filesystem::path& flyline_lyp_path, bool flyline_lyp_success) -> void
 {
-  schema::TableRows rows = {
+  TableRows rows = {
       {kDesignGdsLabel, design_gds_path.string(), "gds/design", design_success ? "generated" : "failed"},
       {kDesignLayerPropertiesLabel, design_lyp_path.string(), "lyp/design", design_lyp_success ? "generated" : "failed"},
       {kFlylineGdsLabel, flyline_gds_path.string(), "gds/flyline", flyline_success ? "generated" : "failed"},
       {kFlylineLayerPropertiesLabel, flyline_lyp_path.string(), "lyp/flyline", flyline_lyp_success ? "generated" : "failed"},
   };
-  schema::EmitTable("CTS GDS Reports", {"Report", "Path", "View", "Status"}, rows);
+  EmitTable(reporter, "CTS GDS Reports", {"Report", "Path", "View", "Status"}, rows);
 }
 
 }  // namespace
 
-auto EmitGdsVisualizations(const std::filesystem::path& visualization_dir, const ClockLayout& clock_layout) -> GdsVisualizationResult
+auto EmitGdsVisualizations(const GdsVisualizationInput& input) -> GdsVisualizationSummary
 {
-  const auto output_dir = resolveVisualizationDir(visualization_dir) / "gds";
+  LOG_FATAL_IF(input.config == nullptr) << "GDS visualization requires config.";
+  LOG_FATAL_IF(input.design == nullptr) << "GDS visualization requires design.";
+  LOG_FATAL_IF(input.wrapper == nullptr) << "GDS visualization requires wrapper.";
+  LOG_FATAL_IF(input.reporter == nullptr) << "GDS visualization requires reporter.";
+  LOG_FATAL_IF(input.clock_layout == nullptr) << "GDS visualization requires clock layout.";
+  const auto output_dir = resolveVisualizationDir(*input.config, input.visualization_dir) / "gds";
   const auto design_gds_path = output_dir / kDesignGdsLabel;
   const auto flyline_gds_path = output_dir / kFlylineGdsLabel;
   const auto design_lyp_path = output_dir / kDesignLayerPropertiesLabel;
   const auto flyline_lyp_path = output_dir / kFlylineLayerPropertiesLabel;
 
-  const auto model = DrawingBuilder::build(clock_layout);
+  const auto model = DrawingBuilder::build(DrawingInput{
+      .design = input.design,
+      .wrapper = input.wrapper,
+      .clock_layout = input.clock_layout,
+  });
   if (!model.has_clocks || (model.design_segments.empty() && model.flyline_segments.empty())) {
     LOG_WARNING << "CTS GDS visualization skipped because no clock-tree view data is available.";
-    emitReportTable(design_gds_path, false, design_lyp_path, false, flyline_gds_path, false, flyline_lyp_path, false);
-    return GdsVisualizationResult{.success = false};
+    emitReportTable(*input.reporter, design_gds_path, false, design_lyp_path, false, flyline_gds_path, false, flyline_lyp_path, false);
+    return GdsVisualizationSummary{.success = false};
   }
 
   LayerPolicy design_layer_policy;
-  auto design_library = buildLibrary("CTS_DESIGN", "CTS_DESIGN", model, ClockLayoutMode::kDesign, design_layer_policy);
+  auto design_library = buildLibrary(*input.config, "CTS_DESIGN", "CTS_DESIGN", model, ClockLayoutMode::kDesign, design_layer_policy);
   LayerPolicy flyline_layer_policy;
-  auto flyline_library = buildLibrary("CTS_FLYLINE", "CTS_FLYLINE", model, ClockLayoutMode::kFlyline, flyline_layer_policy);
+  auto flyline_library = buildLibrary(*input.config, "CTS_FLYLINE", "CTS_FLYLINE", model, ClockLayoutMode::kFlyline, flyline_layer_policy);
 
   const bool design_success = GdsStream::writeBinary(design_gds_path, design_library);
   const bool flyline_success = GdsStream::writeBinary(flyline_gds_path, flyline_library);
   const bool design_lyp_success = GdsStream::writeLayerProperties(design_lyp_path, design_layer_policy.getLayerProperties());
   const bool flyline_lyp_success = GdsStream::writeLayerProperties(flyline_lyp_path, flyline_layer_policy.getLayerProperties());
-  emitReportTable(design_gds_path, design_success, design_lyp_path, design_lyp_success, flyline_gds_path, flyline_success, flyline_lyp_path,
-                  flyline_lyp_success);
-  return GdsVisualizationResult{.success = design_success && flyline_success && design_lyp_success && flyline_lyp_success};
+  emitReportTable(*input.reporter, design_gds_path, design_success, design_lyp_path, design_lyp_success, flyline_gds_path, flyline_success,
+                  flyline_lyp_path, flyline_lyp_success);
+  return GdsVisualizationSummary{.success = design_success && flyline_success && design_lyp_success && flyline_lyp_success};
 }
 
 }  // namespace icts::visualization

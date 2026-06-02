@@ -9,11 +9,11 @@
 
 #include "log/Log.hh"
 
-int spef_parse(ista::spef::ParserContext* context);
+int spef_parse(spef::ParserContext* context);
 void spef_restart(FILE* input_file);
 extern FILE* spef_in;
 
-namespace ista::spef {
+namespace spef {
 namespace {
 
 std::string joinHeaderValues(const std::vector<std::string>& values)
@@ -395,12 +395,12 @@ void SpefReader::expandName()
 
 std::string SpefReader::getSpefCapUnit() const
 {
-  return spef_file_ == nullptr ? std::string{} : ista::spef::getSpefCapUnit(*spef_file_);
+  return spef_file_ == nullptr ? std::string{} : spef::getSpefCapUnit(*spef_file_);
 }
 
 std::string SpefReader::getSpefResUnit() const
 {
-  return spef_file_ == nullptr ? std::string{} : ista::spef::getSpefResUnit(*spef_file_);
+  return spef_file_ == nullptr ? std::string{} : spef::getSpefResUnit(*spef_file_);
 }
 
-}  // namespace ista::spef
+}  // namespace spef

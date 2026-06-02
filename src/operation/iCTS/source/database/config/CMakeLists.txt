@@ -5,7 +5,7 @@ target_link_libraries(
   PUBLIC
   icts_source_utils_logger
   PRIVATE
-  icts_source_utils
+  log
 )
 
 target_include_directories(
@@ -13,10 +13,10 @@ target_include_directories(
   BEFORE
   PUBLIC
   ${ICTS_DATABASE_CONFIG}
+  ${ICTS_DATABASE}
   PRIVATE
   ${ICTS_SOURCE}
   ${HOME_THIRDPARTY}/json
-  ${ICTS_UTILS}
 )
 
 if(DEBUG_ICTS_SOURCE_DATABASE_CONFIG)

@@ -33,15 +33,19 @@
 #include <utility>
 #include <vector>
 
-#include "adapter/sta/STAAdapter.hh"
+#include "Flow.hh"
+#include "common/CTSTestRuntime.hh"
 #include "database/config/Config.hh"
 #include "database/design/Clock.hh"
 #include "database/design/Design.hh"
 #include "database/design/Inst.hh"
 #include "database/design/Net.hh"
 #include "database/design/Pin.hh"
+#include "database/io/Wrapper.hh"
 #include "database/spatial/Point.hh"
+#include "flow/synthesis/topology/SourceTrunkStage.hh"
 #include "flow/synthesis/topology/Topology.hh"
+#include "flow/synthesis/topology/trunk/SourceTrunk.hh"
 #include "utils/logger/Schema.hh"
 
 namespace icts_test {
@@ -52,13 +56,13 @@ class ScopedConfigReset
  public:
   ScopedConfigReset()
   {
-    CONFIG_INST.reset();
-    DESIGN_INST.reset();
+    icts_test::runtime::CurrentRuntime().config.reset();
+    icts_test::runtime::CurrentRuntime().design.reset();
   }
   ~ScopedConfigReset()
   {
-    CONFIG_INST.reset();
-    DESIGN_INST.reset();
+    icts_test::runtime::CurrentRuntime().config.reset();
+    icts_test::runtime::CurrentRuntime().design.reset();
   }
 };
 
@@ -78,7 +82,7 @@ auto MakeUniqueTempPath(const std::string& file_name) -> std::filesystem::path
 auto makeDesignInst(const std::string& name, const std::string& cell_master, icts::InstType type, const icts::Point<int>& location)
     -> icts::Inst*
 {
-  auto* inst = DESIGN_INST.makeInst(name);
+  auto* inst = icts_test::runtime::CurrentRuntime().design.makeInst(name);
   if (inst == nullptr) {
     return nullptr;
   }
@@ -91,7 +95,7 @@ auto makeDesignInst(const std::string& name, const std::string& cell_master, ict
 
 auto makeDesignPin(icts::Inst* inst, const std::string& name, icts::PinType type, const icts::Point<int>& location) -> icts::Pin*
 {
-  auto* pin = DESIGN_INST.makePin(name);
+  auto* pin = icts_test::runtime::CurrentRuntime().design.makePin(name);
   if (pin == nullptr) {
     return nullptr;
   }
@@ -104,13 +108,13 @@ auto makeDesignPin(icts::Inst* inst, const std::string& name, icts::PinType type
   if (inst != nullptr) {
     inst->add_pin(pin);
   }
-  (void) DESIGN_INST.indexPin(pin);
+  (void) icts_test::runtime::CurrentRuntime().design.indexPin(pin);
   return pin;
 }
 
 auto makeDesignNet(const std::string& name, icts::Pin* driver = nullptr, const std::vector<icts::Pin*>& loads = {}) -> icts::Net*
 {
-  auto* net = DESIGN_INST.makeNet(name);
+  auto* net = icts_test::runtime::CurrentRuntime().design.makeNet(name);
   if (net == nullptr) {
     return nullptr;
   }
@@ -130,6 +134,28 @@ auto makeDesignNet(const std::string& name, icts::Pin* driver = nullptr, const s
   return net;
 }
 
+auto BuildTopologyForRootNet(icts::Net& root_net) -> icts::Topology::Build
+{
+  auto& runtime = icts_test::runtime::CurrentRuntime();
+  return icts::Topology::build(
+      icts::Topology::Input{
+          .config = &runtime.config,
+          .design = &runtime.design,
+          .wrapper = &runtime.wrapper,
+          .fast_sta = &runtime.fast_sta,
+          .reporter = &runtime.reporter,
+          .root_net = &root_net,
+          .object_name_prefix = {},
+          .characterization_library = nullptr,
+          .additional_characterization_lengths_um = {},
+          .clock_period_ns = 0.0,
+          .clock_period_source = {},
+          .log_context = {},
+          .htree_loads_are_local_buffers = false,
+      },
+      icts::Topology::Config{});
+}
+
 TEST(TopologyTest, RootNetWithNullDriverFailsWithoutInsertedObjects)
 {
   icts::Pin sink("sink_0", icts::PinType::kClock);
@@ -137,13 +163,13 @@ TEST(TopologyTest, RootNetWithNullDriverFailsWithoutInsertedObjects)
   root_net.add_load(&sink);
   sink.set_net(&root_net);
 
-  const auto result = icts::Topology::build(root_net);
+  const auto result = BuildTopologyForRootNet(root_net);
 
-  EXPECT_FALSE(result.success);
-  EXPECT_EQ(result.inserted_insts.size(), 0U);
-  EXPECT_EQ(result.inserted_nets.size(), 0U);
-  EXPECT_TRUE(result.cluster_buffers.empty());
-  EXPECT_FALSE(result.failure_reason.empty());
+  EXPECT_FALSE(result.summary.success);
+  EXPECT_EQ(result.output.inserted_insts.size(), 0U);
+  EXPECT_EQ(result.output.inserted_nets.size(), 0U);
+  EXPECT_TRUE(result.output.cluster_buffers.empty());
+  EXPECT_FALSE(result.summary.failure_reason.empty());
 }
 
 TEST(TopologyTest, RootNetWithEmptyLoadListFailsWithoutInsertedObjects)
@@ -153,25 +179,25 @@ TEST(TopologyTest, RootNetWithEmptyLoadListFailsWithoutInsertedObjects)
   root_net.set_driver(&source);
   source.set_net(&root_net);
 
-  const auto result = icts::Topology::build(root_net);
+  const auto result = BuildTopologyForRootNet(root_net);
 
-  EXPECT_FALSE(result.success);
-  EXPECT_EQ(result.inserted_insts.size(), 0U);
-  EXPECT_EQ(result.inserted_nets.size(), 0U);
-  EXPECT_TRUE(result.cluster_buffers.empty());
-  EXPECT_FALSE(result.failure_reason.empty());
+  EXPECT_FALSE(result.summary.success);
+  EXPECT_EQ(result.output.inserted_insts.size(), 0U);
+  EXPECT_EQ(result.output.inserted_nets.size(), 0U);
+  EXPECT_TRUE(result.output.cluster_buffers.empty());
+  EXPECT_FALSE(result.summary.failure_reason.empty());
 }
 
 TEST(TopologyTest, RootNetWithMissingDriverAndLoadsFailsSafely)
 {
   icts::Net root_net("root_net");
-  const auto result = icts::Topology::build(root_net);
+  const auto result = BuildTopologyForRootNet(root_net);
 
-  EXPECT_FALSE(result.success);
-  EXPECT_EQ(result.inserted_insts.size(), 0U);
-  EXPECT_EQ(result.inserted_nets.size(), 0U);
-  EXPECT_TRUE(result.cluster_buffers.empty());
-  EXPECT_FALSE(result.failure_reason.empty());
+  EXPECT_FALSE(result.summary.success);
+  EXPECT_EQ(result.output.inserted_insts.size(), 0U);
+  EXPECT_EQ(result.output.inserted_nets.size(), 0U);
+  EXPECT_TRUE(result.output.cluster_buffers.empty());
+  EXPECT_FALSE(result.summary.failure_reason.empty());
 }
 
 TEST(TopologyTest, BuildFailurePreservesBorrowedMembership)
@@ -187,16 +213,16 @@ TEST(TopologyTest, BuildFailurePreservesBorrowedMembership)
   ASSERT_EQ(invalid_clock.get_insts().size(), 1U);
   ASSERT_EQ(invalid_clock.get_nets().size(), 1U);
 
-  const auto result = icts::Topology::build(invalid_root_net);
+  const auto result = BuildTopologyForRootNet(invalid_root_net);
 
-  EXPECT_FALSE(result.success);
-  EXPECT_FALSE(result.failure_reason.empty());
+  EXPECT_FALSE(result.summary.success);
+  EXPECT_FALSE(result.summary.failure_reason.empty());
   ASSERT_EQ(invalid_clock.get_insts().size(), 1U);
   ASSERT_EQ(invalid_clock.get_nets().size(), 1U);
   EXPECT_EQ(invalid_clock.get_insts().front(), stale_inst);
   EXPECT_EQ(invalid_clock.get_nets().front(), stale_net);
-  EXPECT_EQ(DESIGN_INST.findInst("cts_buf_0"), stale_inst);
-  EXPECT_EQ(DESIGN_INST.findNet("cts_net_0"), stale_net);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.findInst("cts_buf_0"), stale_inst);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.findNet("cts_net_0"), stale_net);
 }
 
 TEST(TopologyTest, DesignCommitRejectsFinalNameCollisions)
@@ -215,18 +241,18 @@ TEST(TopologyTest, DesignCommitRejectsFinalNameCollisions)
       = std::make_unique<icts::Pin>("CLK", icts::PinType::kClock, existing_inst->get_location(), existing_inst, nullptr, false);
   auto colliding_net = std::make_unique<icts::Net>("clk_net");
 
-  EXPECT_EQ(DESIGN_INST.commitInst(std::move(colliding_inst)), nullptr);
-  EXPECT_EQ(DESIGN_INST.commitPin(std::move(colliding_pin)), nullptr);
-  EXPECT_EQ(DESIGN_INST.commitNet(std::move(colliding_net)), nullptr);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.commitInst(std::move(colliding_inst)), nullptr);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.commitPin(std::move(colliding_pin)), nullptr);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.commitNet(std::move(colliding_net)), nullptr);
 
-  EXPECT_EQ(DESIGN_INST.findInst("u0"), existing_inst);
-  EXPECT_EQ(DESIGN_INST.findPin(icts::Design::getPinFullName(existing_pin)), existing_pin);
-  EXPECT_EQ(DESIGN_INST.findNet("clk_net"), existing_net);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.findInst("u0"), existing_inst);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.findPin(icts::Design::getPinFullName(existing_pin)), existing_pin);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.findNet("clk_net"), existing_net);
   EXPECT_EQ(existing_inst->get_cell_master(), "REG_X1");
   EXPECT_EQ(existing_inst->get_type(), icts::InstType::kFlipFlop);
-  EXPECT_EQ(DESIGN_INST.get_insts().size(), 1U);
-  EXPECT_EQ(DESIGN_INST.get_pins().size(), 1U);
-  EXPECT_EQ(DESIGN_INST.get_nets().size(), 1U);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.get_insts().size(), 1U);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.get_pins().size(), 1U);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.get_nets().size(), 1U);
 }
 
 TEST(TopologyTest, DesignOwnsFinalObjectsAndClockKeepsMembershipOnly)
@@ -251,22 +277,22 @@ TEST(TopologyTest, DesignOwnsFinalObjectsAndClockKeepsMembershipOnly)
   ASSERT_EQ(clock.get_nets().size(), 1U);
   EXPECT_EQ(clock.get_insts().front()->get_name(), "cts_buf_0");
   EXPECT_EQ(clock.get_nets().front()->get_name(), "cts_net_0");
-  EXPECT_EQ(DESIGN_INST.get_insts().size(), 1U);
-  EXPECT_EQ(DESIGN_INST.get_pins().size(), 2U);
-  EXPECT_EQ(DESIGN_INST.get_nets().size(), 1U);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.get_insts().size(), 1U);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.get_pins().size(), 2U);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().design.get_nets().size(), 1U);
   EXPECT_EQ(net->get_driver(), output_pin);
   EXPECT_EQ(output_pin->get_net(), net);
   ASSERT_EQ(net->get_loads().size(), 1U);
   EXPECT_EQ(net->get_loads().front(), input_pin);
   EXPECT_EQ(input_pin->get_net(), net);
 
-  DESIGN_INST.removeClockMembershipObjects(clock);
+  icts_test::runtime::CurrentRuntime().design.removeClockMembershipObjects(clock);
   clock.clearMembership();
   EXPECT_TRUE(clock.get_insts().empty());
   EXPECT_TRUE(clock.get_nets().empty());
-  EXPECT_TRUE(DESIGN_INST.get_insts().empty());
-  EXPECT_TRUE(DESIGN_INST.get_pins().empty());
-  EXPECT_TRUE(DESIGN_INST.get_nets().empty());
+  EXPECT_TRUE(icts_test::runtime::CurrentRuntime().design.get_insts().empty());
+  EXPECT_TRUE(icts_test::runtime::CurrentRuntime().design.get_pins().empty());
+  EXPECT_TRUE(icts_test::runtime::CurrentRuntime().design.get_nets().empty());
 }
 
 TEST(TopologyTest, InstInsertDriverPinHandlesEmptyPinList)
@@ -288,9 +314,9 @@ TEST(TopologyTest, InstInsertDriverPinHandlesEmptyPinList)
 TEST(TopologyTest, EnableSinkClusteringDefaultsTrueAndEmitsRuntimeConfigReport)
 {
   const ScopedConfigReset scoped_config_reset;
-  EXPECT_TRUE(CONFIG_INST.is_enable_sink_clustering());
-  EXPECT_DOUBLE_EQ(CONFIG_INST.get_htree_topology_tolerance(), 0.1);
-  EXPECT_DOUBLE_EQ(CONFIG_INST.get_root_input_slew(), 0.0);
+  EXPECT_TRUE(icts_test::runtime::CurrentRuntime().config.is_enable_sink_clustering());
+  EXPECT_DOUBLE_EQ(icts_test::runtime::CurrentRuntime().config.get_htree_topology_tolerance(), 0.1);
+  EXPECT_DOUBLE_EQ(icts_test::runtime::CurrentRuntime().config.get_root_input_slew(), 0.0);
 
   const auto json_path = MakeUniqueTempPath("config.json");
   const auto cts_log_path = MakeUniqueTempPath("cts.log");
@@ -302,16 +328,16 @@ TEST(TopologyTest, EnableSinkClusteringDefaultsTrueAndEmitsRuntimeConfigReport)
         << R"({"enable_sink_clustering": false, "htree_topology_tolerance": 0.25, "root_input_slew": 0.123, "routing_layer": [5, 6], "wire_width": 0.12, "wirelength_unit_um": 12.5, "wirelength_iterations": 7})";
   }
 
-  CONFIG_INST.parse(json_path.string());
-  EXPECT_FALSE(CONFIG_INST.is_enable_sink_clustering());
-  EXPECT_DOUBLE_EQ(CONFIG_INST.get_htree_topology_tolerance(), 0.25);
-  EXPECT_DOUBLE_EQ(CONFIG_INST.get_root_input_slew(), 0.123);
-  EXPECT_DOUBLE_EQ(CONFIG_INST.get_wirelength_unit_um(), 12.5);
-  EXPECT_EQ(CONFIG_INST.get_wirelength_iterations(), 7U);
+  icts_test::runtime::CurrentRuntime().config.parse(json_path.string());
+  EXPECT_FALSE(icts_test::runtime::CurrentRuntime().config.is_enable_sink_clustering());
+  EXPECT_DOUBLE_EQ(icts_test::runtime::CurrentRuntime().config.get_htree_topology_tolerance(), 0.25);
+  EXPECT_DOUBLE_EQ(icts_test::runtime::CurrentRuntime().config.get_root_input_slew(), 0.123);
+  EXPECT_DOUBLE_EQ(icts_test::runtime::CurrentRuntime().config.get_wirelength_unit_um(), 12.5);
+  EXPECT_EQ(icts_test::runtime::CurrentRuntime().config.get_wirelength_iterations(), 7U);
 
-  SCHEMA_WRITER_INST.open(cts_log_path, "Clock Synthesis Unit Test");
-  CONFIG_INST.emitRuntimeConfigReport("Topology Config");
-  SCHEMA_WRITER_INST.close();
+  icts_test::runtime::CurrentRuntime().reporter.open(cts_log_path, "Clock Synthesis Unit Test");
+  icts_test::runtime::CurrentRuntime().config.emitRuntimeConfigReport(icts_test::runtime::CurrentRuntime().reporter, "Topology Config");
+  icts_test::runtime::CurrentRuntime().reporter.close();
 
   const auto cts_log_content = ReadTextFile(cts_log_path);
   EXPECT_NE(cts_log_content.find("enable_sink_clustering"), std::string::npos);
@@ -342,10 +368,10 @@ TEST(TopologyTest, MissingConfigFileFailsWithPathDiagnostic)
   std::error_code error_code;
   std::filesystem::remove(missing_path, error_code);
 
-  EXPECT_FALSE(CONFIG_INST.init(missing_path.string()));
+  EXPECT_FALSE(icts_test::runtime::CurrentRuntime().config.init(missing_path.string()));
 
-  EXPECT_NE(CONFIG_INST.get_last_error().find("failed to open iCTS config file"), std::string::npos);
-  EXPECT_NE(CONFIG_INST.get_last_error().find(missing_path.string()), std::string::npos);
+  EXPECT_NE(icts_test::runtime::CurrentRuntime().config.get_last_error().find("failed to open iCTS config file"), std::string::npos);
+  EXPECT_NE(icts_test::runtime::CurrentRuntime().config.get_last_error().find(missing_path.string()), std::string::npos);
 }
 
 TEST(TopologyTest, ConfigBoolParsingAcceptsTypedNumericAndStringTokens)
@@ -357,17 +383,15 @@ TEST(TopologyTest, ConfigBoolParsingAcceptsTypedNumericAndStringTokens)
     ASSERT_TRUE(output_stream.is_open());
     output_stream << R"({
       "force_branch_buffer": true,
-      "enable_sink_clustering": 0,
-      "use_netlist": "yes"
+      "enable_sink_clustering": 0
     })";
   }
 
-  EXPECT_TRUE(CONFIG_INST.parse(json_path.string()));
+  EXPECT_TRUE(icts_test::runtime::CurrentRuntime().config.parse(json_path.string()));
 
-  EXPECT_TRUE(CONFIG_INST.is_force_branch_buffer());
-  EXPECT_FALSE(CONFIG_INST.is_enable_sink_clustering());
-  EXPECT_TRUE(CONFIG_INST.is_use_netlist());
-  EXPECT_TRUE(CONFIG_INST.get_last_error().empty());
+  EXPECT_TRUE(icts_test::runtime::CurrentRuntime().config.is_force_branch_buffer());
+  EXPECT_FALSE(icts_test::runtime::CurrentRuntime().config.is_enable_sink_clustering());
+  EXPECT_TRUE(icts_test::runtime::CurrentRuntime().config.get_last_error().empty());
 
   std::error_code error_code;
   std::filesystem::remove(json_path, error_code);
@@ -380,15 +404,14 @@ TEST(TopologyTest, InvalidStringBoolFailsWithoutSilentFalse)
   {
     std::ofstream output_stream(json_path);
     ASSERT_TRUE(output_stream.is_open());
-    output_stream << R"({"use_netlist": "maybe"})";
+    output_stream << R"({"force_branch_buffer": "maybe"})";
   }
 
-  EXPECT_FALSE(CONFIG_INST.parse(json_path.string()));
+  EXPECT_FALSE(icts_test::runtime::CurrentRuntime().config.parse(json_path.string()));
 
-  EXPECT_NE(CONFIG_INST.get_last_error().find("invalid boolean value"), std::string::npos);
-  EXPECT_NE(CONFIG_INST.get_last_error().find("use_netlist"), std::string::npos);
-  EXPECT_NE(CONFIG_INST.get_last_error().find("maybe"), std::string::npos);
-  EXPECT_FALSE(CONFIG_INST.is_use_netlist());
+  EXPECT_NE(icts_test::runtime::CurrentRuntime().config.get_last_error().find("invalid boolean value"), std::string::npos);
+  EXPECT_NE(icts_test::runtime::CurrentRuntime().config.get_last_error().find("force_branch_buffer"), std::string::npos);
+  EXPECT_NE(icts_test::runtime::CurrentRuntime().config.get_last_error().find("maybe"), std::string::npos);
 
   std::error_code error_code;
   std::filesystem::remove(json_path, error_code);
@@ -404,12 +427,25 @@ TEST(TopologyTest, SourceTrunkWithEmptyRootsFailsWithoutChangingSourceNet)
   source_net.add_load(&original_load);
   original_load.set_net(&source_net);
 
-  const auto result = icts::Topology::buildSourceTrunk(source_net, &source, {}, icts::Topology::SourceTrunkBuildOptions{});
+  auto& runtime = icts_test::runtime::CurrentRuntime();
+  const auto result = icts::topology::BuildSourceTrunkTree(icts::topology::SourceTrunkInput{.config = &runtime.config,
+                                                                                            .design = &runtime.design,
+                                                                                            .wrapper = &runtime.wrapper,
+                                                                                            .fast_sta = &runtime.fast_sta,
+                                                                                            .reporter = &runtime.reporter,
+                                                                                            .source_net = &source_net,
+                                                                                            .clock_source = &source,
+                                                                                            .root_inputs = {},
+                                                                                            .object_name_prefix = {},
+                                                                                            .characterization_library = nullptr,
+                                                                                            .clock_period_ns = 0.0,
+                                                                                            .clock_period_source = {},
+                                                                                            .log_context = {}});
 
-  EXPECT_FALSE(result.success);
-  EXPECT_FALSE(result.failure_reason.empty());
-  EXPECT_EQ(result.inserted_insts.size(), 0U);
-  EXPECT_EQ(result.inserted_nets.size(), 0U);
+  EXPECT_FALSE(result.summary.success);
+  EXPECT_FALSE(result.summary.failure_reason.empty());
+  EXPECT_EQ(result.output.inserted_insts.size(), 0U);
+  EXPECT_EQ(result.output.inserted_nets.size(), 0U);
   EXPECT_EQ(source_net.get_driver(), &source);
   ASSERT_EQ(source_net.get_loads().size(), 1U);
   EXPECT_EQ(source_net.get_loads().front(), &original_load);
@@ -424,12 +460,25 @@ TEST(TopologyTest, SourceTrunkSingleRootSameLocationDirectConnectsWithoutInserte
   source_net.set_driver(&source);
   source.set_net(&source_net);
 
-  const auto result = icts::Topology::buildSourceTrunk(source_net, &source, {&root_input}, icts::Topology::SourceTrunkBuildOptions{});
+  auto& runtime = icts_test::runtime::CurrentRuntime();
+  const auto result = icts::topology::BuildSourceTrunkTree(icts::topology::SourceTrunkInput{.config = &runtime.config,
+                                                                                            .design = &runtime.design,
+                                                                                            .wrapper = &runtime.wrapper,
+                                                                                            .fast_sta = &runtime.fast_sta,
+                                                                                            .reporter = &runtime.reporter,
+                                                                                            .source_net = &source_net,
+                                                                                            .clock_source = &source,
+                                                                                            .root_inputs = {&root_input},
+                                                                                            .object_name_prefix = {},
+                                                                                            .characterization_library = nullptr,
+                                                                                            .clock_period_ns = 0.0,
+                                                                                            .clock_period_source = {},
+                                                                                            .log_context = {}});
 
-  EXPECT_TRUE(result.success);
-  EXPECT_EQ(result.stage, icts::Topology::SourceTrunkStage::kSegment);
-  EXPECT_EQ(result.inserted_insts.size(), 0U);
-  EXPECT_EQ(result.inserted_nets.size(), 0U);
+  EXPECT_TRUE(result.summary.success);
+  EXPECT_EQ(result.summary.stage, icts::SourceTrunkStage::kSegment);
+  EXPECT_EQ(result.output.inserted_insts.size(), 0U);
+  EXPECT_EQ(result.output.inserted_nets.size(), 0U);
   EXPECT_EQ(source_net.get_driver(), &source);
   ASSERT_EQ(source_net.get_loads().size(), 1U);
   EXPECT_EQ(source_net.get_loads().front(), &root_input);
@@ -440,11 +489,13 @@ TEST(TopologyTest, SourceTrunkSingleRootSameLocationDirectConnectsWithoutInserte
 TEST(TopologyTest, ClockSourceDriveCapUsesRuntimeMaxCapForTopLevelIoPort)
 {
   const ScopedConfigReset scoped_config_reset;
-  CONFIG_INST.set_max_cap(0.23);
+  icts_test::runtime::CurrentRuntime().config.set_max_cap(0.23);
 
   icts::Pin source("clk_i", icts::PinType::kOut, icts::Point<int>(100, 200), nullptr, nullptr, true);
 
-  EXPECT_DOUBLE_EQ(STA_ADAPTER_INST.queryClockSourceDriveCapLimit(&source), 0.23);
+  EXPECT_DOUBLE_EQ(
+      icts_test::runtime::CurrentRuntime().wrapper.queryClockSourceDriveCapLimit(icts_test::runtime::CurrentRuntime().config, &source),
+      0.23);
 }
 
 }  // namespace

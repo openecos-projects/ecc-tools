@@ -19,7 +19,6 @@
 #include "Str.hh"
 #include "idm.h"
 #include "ipdn_api.h"
-#include "ipnp_api.hh"
 #include "tool_manager.h"
 
 namespace tcl {
@@ -742,6 +741,7 @@ unsigned TclRunPNP::exec()
   TclOption* tcl_config_file_name = getOptionOrArg("-config_file_name");
 
   auto config_file_name = tcl_config_file_name->getStringVal();
+  (void) config_file_name;
 
   // pnpApiInst->runiPNP(config_file_name);
 

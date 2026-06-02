@@ -63,6 +63,8 @@ class RCXData final {
     Str captab_file;
     std::unique_ptr<::itf::ProcessCorner> process_corner;
     parser::CapTable cap_table;
+
+    F64 halfNodeScaleFactor() const;
   };
 
   static RCXData& getInst() {
@@ -93,6 +95,7 @@ class RCXData final {
   const CornerNetPool<NetEtchProfile>& corner_net_etch_pools() const { return corner_net_etch_pools_; }
   std::vector<CornerData>& corner_data() { return corners_; }
   const std::vector<CornerData>& corner_data() const { return corners_; }
+  F64 halfNodeScaleFactor(Size corner_idx) const;
 
   bool hasCorner(const Str& corner_name) const;
   void setProcessLayersRegistered(bool value) { process_layers_registered_ = value; }

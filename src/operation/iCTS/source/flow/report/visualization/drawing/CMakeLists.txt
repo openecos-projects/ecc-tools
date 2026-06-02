@@ -6,9 +6,9 @@ target_link_libraries(
   icts_source_database_design
   icts_source_database_spatial
   PRIVATE
-  icts_source_database
+  icts_source_database_io
   icts_source_module_routing
-  icts_source_utils
+  log
 )
 
 target_include_directories(

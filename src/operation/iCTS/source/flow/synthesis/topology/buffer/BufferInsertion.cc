@@ -18,17 +18,21 @@
  * @file BufferInsertion.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-04-28
- * @brief Implements temporary CTS object creation and clock-net side-effect rollback helpers.
+ * @brief Implements temporary CTS object creation and clock-net side-effect restoration helpers.
  */
 
 #include "synthesis/topology/buffer/BufferInsertion.hh"
 
+#include <glog/logging.h>
+
 #include <algorithm>
 #include <memory>
+#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "Log.hh"
 #include "design/Design.hh"
 #include "design/Inst.hh"
 #include "design/Net.hh"
@@ -37,13 +41,13 @@
 namespace icts::topology {
 namespace {
 
-auto isDesignPin(const Pin* pin) -> bool
+auto isDesignPin(const Design& design, const Pin* pin) -> bool
 {
   if (pin == nullptr) {
     return false;
   }
 
-  const auto pins = DESIGN_INST.get_pins();
+  const auto pins = design.get_pins();
   return std::ranges::find_if(pins, [pin](const auto* candidate) -> bool { return candidate == pin; }) != pins.end();
 }
 
@@ -90,15 +94,17 @@ auto CollectValidLoads(const Net& net) -> std::vector<Pin*>
   return loads;
 }
 
-auto ConnectNet(Net& net, Pin* driver, const std::vector<Pin*>& sinks) -> void
+auto ConnectNet(const TopologyNetConnectionInput& input) -> void
 {
-  net.set_driver(driver);
-  if (driver != nullptr) {
-    driver->set_net(&net);
+  LOG_FATAL_IF(input.net == nullptr) << "Topology buffer insertion: net connection target is null.";
+  auto& net = *input.net;
+  net.set_driver(input.driver);
+  if (input.driver != nullptr) {
+    input.driver->set_net(&net);
   }
 
   net.set_loads({});
-  for (auto* sink : sinks) {
+  for (auto* sink : input.sinks) {
     if (sink == nullptr) {
       continue;
     }
@@ -107,10 +113,12 @@ auto ConnectNet(Net& net, Pin* driver, const std::vector<Pin*>& sinks) -> void
   }
 }
 
-auto ReconnectExistingNet(Net& net, Pin* driver, const std::vector<Pin*>& sinks) -> void
+auto ReconnectExistingNet(const TopologyNetConnectionInput& input) -> void
 {
+  LOG_FATAL_IF(input.net == nullptr) << "Topology buffer insertion: net reconnection target is null.";
+  auto& net = *input.net;
   auto* old_driver = net.get_driver();
-  if (old_driver != nullptr && old_driver != driver && old_driver->get_net() == &net) {
+  if (old_driver != nullptr && old_driver != input.driver && old_driver->get_net() == &net) {
     old_driver->set_net(nullptr);
   }
   for (auto* old_sink : net.get_loads()) {
@@ -118,10 +126,10 @@ auto ReconnectExistingNet(Net& net, Pin* driver, const std::vector<Pin*>& sinks)
       old_sink->set_net(nullptr);
     }
   }
-  ConnectNet(net, driver, sinks);
+  ConnectNet(input);
 }
 
-auto CreateBufferInstance(Topology::BuildResult& result, const std::string& inst_name, const std::string& cell_master,
+auto CreateBufferInstance(Topology::Build& result, const std::string& inst_name, const std::string& cell_master,
                           const std::string& input_pin_name, const std::string& output_pin_name, const Point<int>& location)
     -> BufferCreation
 {
@@ -130,16 +138,16 @@ auto CreateBufferInstance(Topology::BuildResult& result, const std::string& inst
 
   auto input_pin = std::make_unique<Pin>(input_pin_name, PinType::kIn, location, inst_ptr, nullptr, false);
   auto* input_pin_ptr = input_pin.get();
-  result.inserted_pins.push_back(std::move(input_pin));
+  result.output.inserted_pins.push_back(std::move(input_pin));
 
   auto output_pin = std::make_unique<Pin>(output_pin_name, PinType::kOut, location, inst_ptr, nullptr, false);
   auto* output_pin_ptr = output_pin.get();
-  result.inserted_pins.push_back(std::move(output_pin));
+  result.output.inserted_pins.push_back(std::move(output_pin));
 
   inst_ptr->add_pin(input_pin_ptr);
   inst_ptr->insertDriverPin(output_pin_ptr);
 
-  result.inserted_insts.push_back(std::move(inst));
+  result.output.inserted_insts.push_back(std::move(inst));
   return BufferCreation{
       .inst = inst_ptr,
       .input_pin = input_pin_ptr,
@@ -147,17 +155,21 @@ auto CreateBufferInstance(Topology::BuildResult& result, const std::string& inst
   };
 }
 
-auto CreateNet(Topology::BuildResult& result, const std::string& net_name, Pin* driver, const std::vector<Pin*>& sinks) -> Net*
+auto CreateNet(Topology::Build& result, const std::string& net_name, Pin* driver, const std::vector<Pin*>& sinks) -> Net*
 {
   auto net = std::make_unique<Net>(net_name);
   auto* net_ptr = net.get();
-  ConnectNet(*net_ptr, driver, sinks);
-  result.inserted_nets.push_back(std::move(net));
+  ConnectNet(TopologyNetConnectionInput{
+      .net = net_ptr,
+      .driver = driver,
+      .sinks = sinks,
+  });
+  result.output.inserted_nets.push_back(std::move(net));
   return net_ptr;
 }
 
-RootNetSideEffectGuard::RootNetSideEffectGuard(Net& root_net, Pin* root_driver)
-    : _root_net(root_net), _root_driver(root_driver), _original_root_loads(root_net.get_loads())
+RootNetSideEffectGuard::RootNetSideEffectGuard(Design& design, Net& root_net, Pin* root_driver)
+    : _design(design), _root_net(root_net), _root_driver(root_driver), _original_root_loads(root_net.get_loads())
 {
   appendPinNet(_root_driver);
   for (auto* sink : _original_root_loads) {
@@ -190,14 +202,18 @@ auto RootNetSideEffectGuard::restore() -> void
     if (pin == nullptr || pin->get_name() == name) {
       continue;
     }
-    if (isDesignPin(pin)) {
-      (void) DESIGN_INST.renamePin(pin, name);
+    if (isDesignPin(_design, pin)) {
+      (void) _design.renamePin(pin, name);
     } else {
       pin->set_name(name);
     }
   }
 
-  ConnectNet(_root_net, _root_driver, _original_root_loads);
+  ConnectNet(TopologyNetConnectionInput{
+      .net = &_root_net,
+      .driver = _root_driver,
+      .sinks = _original_root_loads,
+  });
   for (const auto& [pin, net] : _pin_nets) {
     if (pin != nullptr) {
       pin->set_net(net);
@@ -230,7 +246,11 @@ SourceNetSideEffectGuard::SourceNetSideEffectGuard(Net& source_net, Pin* clock_s
 
 auto SourceNetSideEffectGuard::restore() -> void
 {
-  ReconnectExistingNet(_source_net, _original_driver, _original_loads);
+  ReconnectExistingNet(TopologyNetConnectionInput{
+      .net = &_source_net,
+      .driver = _original_driver,
+      .sinks = _original_loads,
+  });
   for (const auto& [pin, net] : _pin_nets) {
     if (pin != nullptr) {
       pin->set_net(net);

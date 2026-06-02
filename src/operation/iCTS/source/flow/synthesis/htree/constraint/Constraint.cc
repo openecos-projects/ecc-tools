@@ -25,9 +25,8 @@
 
 #include <algorithm>
 
-#include "CharBuilder.hh"
 #include "ValueLattice.hh"
-#include "config/Config.hh"
+#include "characterization/Characterization.hh"
 
 namespace icts::htree {
 
@@ -42,15 +41,15 @@ auto CoveringBoundaryIndex(double value, const UniformValueLattice& lattice) -> 
   return std::clamp(lattice.coveringIndex(value), 1U, lattice.steps());
 }
 
-auto ResolveBoundaryConstraints(const HTree::BuildOptions& options, const CharBuilder& char_builder) -> BoundaryConstraints
+auto ResolveBoundaryConstraints(const HTree::Config& config, const CharBuilder& char_builder) -> BoundaryConstraints
 {
   BoundaryConstraints constraints;
-  constraints.force_branch_buffer = options.force_branch_buffer.value_or(CONFIG_INST.is_force_branch_buffer());
+  constraints.force_branch_buffer = config.force_branch_buffer;
 
-  if (options.min_top_input_slew_ns.has_value() && *options.min_top_input_slew_ns >= 0.0) {
-    constraints.min_top_input_slew_ns = options.min_top_input_slew_ns;
-    if (*options.min_top_input_slew_ns > 0.0) {
-      constraints.top_input_slew_covering_idx = CoveringBoundaryIndex(*options.min_top_input_slew_ns, char_builder.get_slew_lattice());
+  if (config.min_top_input_slew_ns.has_value() && *config.min_top_input_slew_ns >= 0.0) {
+    constraints.min_top_input_slew_ns = config.min_top_input_slew_ns;
+    if (*config.min_top_input_slew_ns > 0.0) {
+      constraints.top_input_slew_covering_idx = CoveringBoundaryIndex(*config.min_top_input_slew_ns, char_builder.get_slew_lattice());
     }
   }
 
@@ -60,6 +59,16 @@ auto ResolveBoundaryConstraints(const HTree::BuildOptions& options, const CharBu
 auto HasBoundaryConstraints(const BoundaryConstraints& constraints) -> bool
 {
   return constraints.top_input_slew_covering_idx.has_value();
+}
+
+auto ResolvePatternSearchBoundaryConstraints(const BoundaryConstraints& base_constraints, bool strict_root_boundary_closure)
+    -> BoundaryConstraints
+{
+  auto constraints = base_constraints;
+  if (strict_root_boundary_closure) {
+    constraints.top_input_slew_covering_idx = std::nullopt;
+  }
+  return constraints;
 }
 
 }  // namespace icts::htree

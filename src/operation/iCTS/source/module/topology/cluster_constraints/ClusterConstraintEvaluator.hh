@@ -24,10 +24,9 @@
 #pragma once
 
 #include <cstddef>
-#include <unordered_map>
 #include <vector>
 
-#include "ClusterConstraintTypes.hh"
+#include "ClusterConstraintEvaluation.hh"
 
 namespace icts {
 
@@ -42,18 +41,16 @@ class ClusterConstraintEvaluator
   ClusterConstraintEvaluator() = default;
   ~ClusterConstraintEvaluator() = default;
 
-  auto evaluateLoads(const std::vector<Pin*>& loads, const Point<int>& routing_root, const ClusterConfig& config, bool need_exact_cap)
-      -> ConstraintEvaluation;
-  auto evaluatePinnedLoads(const std::vector<Pin*>& loads, std::size_t fanout, int diameter, const Point<int>& routing_root,
-                           const ClusterConfig& config, bool need_exact_cap) -> ConstraintEvaluation;
+  static auto evaluateLoads(const std::vector<Pin*>& loads, const Point<int>& routing_root, const ClusterConfig& config,
+                            bool need_exact_cap) -> ConstraintEvaluation;
+  static auto evaluatePinnedLoads(const std::vector<Pin*>& loads, std::size_t fanout, int diameter, const Point<int>& routing_root,
+                                  const ClusterConfig& config, bool need_exact_cap) -> ConstraintEvaluation;
 
  private:
-  auto estimatePinCap(const std::vector<Pin*>& loads) -> double;
-  auto estimateExactCap(const std::vector<Pin*>& loads, const Point<int>& synthetic_root, const ClusterConfig& config)
+  static auto estimatePinCap(const std::vector<Pin*>& loads, const ClusterConfig& config) -> double;
+  static auto estimateExactCap(const std::vector<Pin*>& loads, const Point<int>& synthetic_root, const ClusterConfig& config)
       -> ElectricalEstimate;
-  auto queryPinCap(const Pin* pin) -> double;
-
-  std::unordered_map<const Pin*, double> _pin_cap_cache;
+  static auto queryPinCap(const Pin* pin, const ClusterConfig& config) -> double;
 };
 
 }  // namespace icts

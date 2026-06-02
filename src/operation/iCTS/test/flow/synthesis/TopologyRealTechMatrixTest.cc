@@ -26,7 +26,7 @@
 #include <string>
 #include <vector>
 
-#include "TopologyRealTechSmokeSupport.hh"
+#include "TopologyRealTechScenario.hh"
 
 namespace icts_test {
 namespace {

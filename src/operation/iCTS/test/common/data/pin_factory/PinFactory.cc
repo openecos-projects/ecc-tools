@@ -30,7 +30,7 @@
 #include <utility>
 #include <vector>
 
-#include "common/types/TestDataTypes.hh"
+#include "common/dataset/TestDataset.hh"
 #include "database/design/Pin.hh"
 #include "database/spatial/Point.hh"
 

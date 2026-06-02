@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -23,25 +23,28 @@
 
 #include "evaluation/Evaluation.hh"
 
-#include <string>
+#include <glog/logging.h>
 
+#include <ostream>
+#include <string>
+#include <utility>
+
+#include "Log.hh"
 #include "logger/Schema.hh"
 
 namespace icts {
 
-auto Evaluation::run(EvaluationState& evaluation_state, bool refresh_sta_timing) -> EvaluationResult
+auto Evaluation::run(EvaluationState evaluation_state, const EvaluationInput& input) -> EvaluationBuild
 {
-  return run(evaluation_state, EvaluationOptions{.refresh_sta_timing = refresh_sta_timing});
-}
-
-auto Evaluation::run(EvaluationState& evaluation_state, const EvaluationOptions& options) -> EvaluationResult
-{
-  auto runtime = SCHEMA_WRITER_INST.beginRuntimeMetric("evaluation");
-  auto evaluation_stage = SCHEMA_WRITER_INST.beginStage("Evaluation", "Evaluate CTS clock tree");
-  SCHEMA_WRITER_INST.emitSection("## Evaluation Overview");
-  SCHEMA_WRITER_INST.emitSection("### Final Evaluation");
-  evaluate(evaluation_state, options);
-  const bool evaluation_ready = hasEvaluationResult(evaluation_state);
+  LOG_FATAL_IF(input.reporter == nullptr) << "Evaluation requires reporter.";
+  auto& reporter = *input.reporter;
+  auto runtime = reporter.beginRuntimeMetric("evaluation");
+  auto evaluation_stage
+      = reporter.beginStage("Evaluation", "Evaluate CTS clock tree", {}, StageReportOptions{.emit_success_summary = false});
+  reporter.emitSection("## Evaluation Overview");
+  reporter.emitSection("### Final Evaluation");
+  evaluate(evaluation_state, input);
+  const bool evaluation_ready = isEvaluationReady(evaluation_state);
   if (evaluation_ready) {
     (void) runtime.finished();
     evaluation_stage.finished();
@@ -49,12 +52,15 @@ auto Evaluation::run(EvaluationState& evaluation_state, const EvaluationOptions&
     (void) runtime.failed();
     evaluation_stage.failed();
   }
-  return EvaluationResult{.evaluation_ready = evaluation_ready};
+  return EvaluationBuild{
+      .output = EvaluationOutput{.state = std::move(evaluation_state)},
+      .summary = EvaluationSummary{.evaluation_ready = evaluation_ready, .status = evaluation_ready ? "finished" : "failed"},
+  };
 }
 
-auto Evaluation::evaluate(EvaluationState& state, const EvaluationOptions& options) -> void
+auto Evaluation::evaluate(EvaluationState& state, const EvaluationInput& input) -> void
 {
-  QorEvaluation::evaluate(state, options);
+  QorEvaluation::evaluate(state, input);
 }
 
 auto Evaluation::outputSummary(const EvaluationState& state) -> QorSummary
@@ -62,9 +68,9 @@ auto Evaluation::outputSummary(const EvaluationState& state) -> QorSummary
   return QorEvaluation::outputSummary(state);
 }
 
-auto Evaluation::hasEvaluationResult(const EvaluationState& state) -> bool
+auto Evaluation::isEvaluationReady(const EvaluationState& state) -> bool
 {
-  return QorEvaluation::hasEvaluationResult(state);
+  return QorEvaluation::isEvaluationReady(state);
 }
 
 auto Evaluation::reset(EvaluationState& state) -> void

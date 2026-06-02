@@ -37,7 +37,7 @@ class TreeNode;
 
 namespace icts {
 
-struct BSTParameters;
+struct BSTRoutingConfig;
 
 class CustomSaltBuilder
 {
@@ -68,7 +68,7 @@ class CBSRouter
   CBSRouter() = delete;
   ~CBSRouter() = default;
 
-  static auto buildTree(const std::vector<Terminal>& load_terminals, const BSTParameters& parameters) -> ClockSteinerTreeType;
+  static auto buildTree(const std::vector<Terminal>& load_terminals, const BSTRoutingConfig& parameters) -> ClockSteinerTreeType;
 };
 
 }  // namespace icts

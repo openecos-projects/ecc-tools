@@ -36,8 +36,10 @@
 #include <utility>
 #include <vector>
 
+#include "Flow.hh"
 #include "Log.hh"
-#include "common/types/TestDataTypes.hh"
+#include "common/CTSTestRuntime.hh"
+#include "common/dataset/TestDataset.hh"
 #include "utils/logger/LogFormat.hh"
 #include "utils/logger/Schema.hh"
 
@@ -187,39 +189,38 @@ auto BuildConsoleDisplayReport(const ParsedInfoReport& report) -> ParsedInfoRepo
 auto EmitParsedInfoReport(const ParsedInfoReport& report) -> void
 {
   if (!report.key_value_lines.empty()) {
-    SCHEMA_WRITER_INST.emitKeyValueTable(report.title, report.key_value_lines);
+    icts_test::runtime::CurrentRuntime().reporter.emitKeyValueTable(report.title, report.key_value_lines);
   } else {
-    SCHEMA_WRITER_INST.emitSection(report.title);
+    icts_test::runtime::CurrentRuntime().reporter.emitSection(report.title);
   }
 
   if (!report.detail_lines.empty()) {
-    SCHEMA_WRITER_INST.emitDetailBlock(report.title + " Details", report.detail_lines);
+    icts_test::runtime::CurrentRuntime().reporter.emitDetailBlock(report.title + " Details", report.detail_lines);
   }
 }
 
 auto IsActiveReportPath(const std::filesystem::path& path) -> bool
 {
-  auto& schema_writer = SCHEMA_WRITER_INST;
+  auto& schema_writer = icts_test::runtime::CurrentRuntime().reporter;
   return schema_writer.isOpen() && schema_writer.getActivePath() == path;
 }
 
-auto EmitOrAppendTestKeyValueTable(const std::filesystem::path& path, const std::string& title, const icts::schema::KeyValueFields& fields)
-    -> void
+auto EmitOrAppendTestKeyValueTable(const std::filesystem::path& path, const std::string& title, const icts::KeyValueFields& fields) -> void
 {
   if (IsActiveReportPath(path)) {
-    SCHEMA_WRITER_INST.emitKeyValueTable(title, fields);
+    icts_test::runtime::CurrentRuntime().reporter.emitKeyValueTable(title, fields);
     return;
   }
-  icts::schema::SchemaWriter::appendStandaloneKeyValueTable(path, kDefaultTestReportTitle, title, fields);
+  icts::SchemaWriter::appendStandaloneKeyValueTable(path, kDefaultTestReportTitle, title, fields);
 }
 
 auto EmitOrAppendTestDetailBlock(const std::filesystem::path& path, const std::string& title, const std::vector<std::string>& lines) -> void
 {
   if (IsActiveReportPath(path)) {
-    SCHEMA_WRITER_INST.emitDetailBlock(title, lines);
+    icts_test::runtime::CurrentRuntime().reporter.emitDetailBlock(title, lines);
     return;
   }
-  icts::schema::SchemaWriter::appendStandaloneDetailBlock(path, kDefaultTestReportTitle, title, lines);
+  icts::SchemaWriter::appendStandaloneDetailBlock(path, kDefaultTestReportTitle, title, lines);
 }
 
 auto MirrorStandaloneTextLog(const std::filesystem::path& path, const std::string& content) -> void
@@ -285,15 +286,15 @@ auto EmitInfoReport(const InfoReport& report) -> void
 
 auto OpenTestReport(const std::filesystem::path& path, const std::string& run_title) -> void
 {
-  SCHEMA_WRITER_INST.open(path, run_title,
-                          {
-                              {"cts_log", path.string()},
-                          });
+  icts_test::runtime::CurrentRuntime().reporter.open(path, run_title,
+                                                     {
+                                                         {"cts_log", path.string()},
+                                                     });
 }
 
 auto CloseTestReport() -> void
 {
-  SCHEMA_WRITER_INST.close();
+  icts_test::runtime::CurrentRuntime().reporter.close();
 }
 
 auto SanitizeOutputName(const std::string& raw_name) -> std::string

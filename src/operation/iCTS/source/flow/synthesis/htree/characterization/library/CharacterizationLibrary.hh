@@ -23,18 +23,33 @@
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include "characterization/CharBuilder.hh"
+#include "ClockRouteSegmentRc.hh"
+#include "module/characterization/Characterization.hh"
 
 namespace icts {
+
+class Config;
+class FastSTA;
+class SchemaWriter;
+class Wrapper;
+
+struct CharacterizationRuntimeInput
+{
+  const Config* config = nullptr;
+  Wrapper* wrapper = nullptr;
+  FastSTA* fast_sta = nullptr;
+  SchemaWriter* reporter = nullptr;
+};
 
 class CharacterizationLibrary
 {
  public:
-  struct EnsureResult
+  struct EnsureSummary
   {
     bool success = false;
     bool reused = false;
@@ -43,15 +58,20 @@ class CharacterizationLibrary
 
   CharacterizationLibrary() = default;
   ~CharacterizationLibrary() = default;
+  CharacterizationLibrary(const CharacterizationLibrary&) = delete;
+  CharacterizationLibrary(CharacterizationLibrary&&) noexcept = default;
+  auto operator=(const CharacterizationLibrary&) -> CharacterizationLibrary& = delete;
+  auto operator=(CharacterizationLibrary&&) noexcept -> CharacterizationLibrary& = default;
 
-  auto ensure(const CharBuilder::InitOptions& options) -> EnsureResult;
+  auto ensure(const CharBuilder::Input& input, const CharBuilder::Config& config) -> EnsureSummary;
   auto getCharBuilder() const -> const CharBuilder& { return _char_builder; }
   auto isReady() const -> bool { return _ready; }
 
-  static auto buildRuntimeOptions() -> CharBuilder::InitOptions;
+  static auto buildRuntimeInput(const CharacterizationRuntimeInput& input) -> CharBuilder::Input;
+  static auto buildRuntimeConfig(const Config& config) -> CharBuilder::Config;
 
  private:
-  struct RequestKey
+  struct CharacterizationCacheKey
   {
     std::optional<double> wirelength_unit_um = std::nullopt;
     std::optional<unsigned> wirelength_iterations = std::nullopt;
@@ -59,19 +79,23 @@ class CharacterizationLibrary
     std::optional<double> max_slew_ns = std::nullopt;
     std::optional<double> max_cap_pf = std::nullopt;
     std::vector<std::string> buffer_types;
+    std::vector<CharacterizationBufferCell> characterization_buffer_cells;
     std::optional<double> char_buf_redundancy_pct = std::nullopt;
     std::optional<unsigned> slew_steps = std::nullopt;
     std::optional<unsigned> cap_steps = std::nullopt;
     std::optional<int> routing_layer = std::nullopt;
-    std::optional<double> wire_width = std::nullopt;
+    std::optional<double> wire_width_um = std::nullopt;
+    ClockRouteSegmentRc clock_route_segment_rc;
+    std::optional<std::int32_t> dbu_per_um = std::nullopt;
+    double root_input_slew_ns = 0.0;
 
-    auto operator==(const RequestKey& rhs) const -> bool = default;
+    auto operator==(const CharacterizationCacheKey& rhs) const -> bool = default;
   };
 
-  static auto makeRequestKey(const CharBuilder::InitOptions& options) -> RequestKey;
+  static auto makeCharacterizationCacheKey(const CharBuilder::Input& input, const CharBuilder::Config& config) -> CharacterizationCacheKey;
 
   CharBuilder _char_builder;
-  RequestKey _request_key;
+  CharacterizationCacheKey _characterization_cache_key;
   bool _ready = false;
 };
 

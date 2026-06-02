@@ -46,7 +46,7 @@ TEST_F(ClusterTimingTest, example1) {
   const char* design_work_space =
       "/home/longshuaiying/cluster_timing_model/example1/rpt";
   ista->set_design_work_space(design_work_space);
-  std::vector<const char*> nangate45_lib_files{
+  std::vector<std::string> nangate45_lib_files{
       "/home/taosimin/nangate45/lib/NangateOpenCellLibrary_typical.lib"};
   //  /home/longshuaiying/cluster_timing_model/example1/liberty/cluster1.lib \
   //  /home/longshuaiying/cluster_timing_model/example1/liberty/cluster2.lib"

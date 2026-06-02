@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-namespace ista::spef {
+namespace spef {
 
 enum class SectionType
 {
@@ -194,4 +194,4 @@ class SpefReader
   std::unique_ptr<Exchange> spef_file_;
 };
 
-}  // namespace ista::spef
+}  // namespace spef

@@ -18,7 +18,7 @@
 
 #include <string>
 
-#include "CompareParasiticsConfig.hh"
+#include "config/CompareSpefConfig.hh"
 
 namespace ircx {
 
@@ -36,7 +36,7 @@ class RCXAPI
   static auto init(const std::string& config_file) -> bool;
   static auto run() -> bool;
   static auto report() -> bool;
-  static auto compareParasitics(CompareParasiticsConfig config) -> bool;
+  static auto compare_spef(compare_spef::Config config) -> bool;
 
   RCXAPI(const RCXAPI& other) = delete;
   RCXAPI(RCXAPI&& other) = delete;

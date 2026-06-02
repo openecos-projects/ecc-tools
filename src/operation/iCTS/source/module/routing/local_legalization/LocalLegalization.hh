@@ -44,7 +44,7 @@ class LocalLegalization
     kKeepOriginal,
   };
 
-  struct Options
+  struct Config
   {
     std::size_t candidate_budget = 32;
     int local_search_radius = 6;
@@ -60,7 +60,7 @@ class LocalLegalization
     RegionType block_region;
   };
 
-  struct Result
+  struct Output
   {
     std::vector<PointType> legalized_points;
     long long total_displacement = 0;
@@ -70,12 +70,12 @@ class LocalLegalization
   LocalLegalization() = delete;
   ~LocalLegalization() = default;
 
-  static auto legalize(const Problem& problem) -> Result;
-  static auto legalize(const Problem& problem, const Options& options) -> Result;
+  static auto legalize(const Problem& problem) -> Output;
+  static auto legalize(const Problem& problem, const Config& config) -> Output;
   static auto legalize(std::vector<PointType>& movable_points, const std::vector<PointType>& fixed_points = {},
-                       const RegionType& feasible_region = RegionType{}, const RegionType& block_region = RegionType{}) -> Result;
+                       const RegionType& feasible_region = RegionType{}, const RegionType& block_region = RegionType{}) -> Output;
   static auto legalize(std::vector<PointType>& movable_points, const std::vector<PointType>& fixed_points,
-                       const RegionType& feasible_region, const RegionType& block_region, const Options& options) -> Result;
+                       const RegionType& feasible_region, const RegionType& block_region, const Config& config) -> Output;
 
  private:
   struct CandidateSite

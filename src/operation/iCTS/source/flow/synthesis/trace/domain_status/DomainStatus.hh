@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -43,7 +43,7 @@ enum class DomainStatus
 class DomainStatusTable
 {
  public:
-  explicit DomainStatusTable(schema::TableRows& rows) : _rows(&rows) {}
+  explicit DomainStatusTable(TableRows& rows) : _rows(&rows) {}
 
   auto append(const Clock& clock, DomainStatus status, SinkDomainKind sink_domain, std::size_t valid_sinks, std::size_t sink_domain_sinks,
               const std::string& detail) -> void;
@@ -52,7 +52,7 @@ class DomainStatusTable
   auto appendNullClock(DomainStatus status, const std::string& detail) -> void;
 
  private:
-  schema::TableRows* _rows = nullptr;
+  TableRows* _rows = nullptr;
 };
 
 auto ToString(DomainStatus status) -> const char*;

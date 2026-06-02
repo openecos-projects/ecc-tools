@@ -181,14 +181,10 @@ bool CapTable::parseConfig(const std::string& headerLine,
   for (const auto& dataLine : dataLines) {
     std::istringstream dataIss(dataLine);
     CapTableEntry entry;
-    double couplingCap = 0.0;
-    double groundCap = 0.0;
-    if (!(dataIss >> entry.distance >> couplingCap >> groundCap)) {
+    if (!(dataIss >> entry.distance >> entry.coupling_cap >> entry.ground_cap)) {
       LOG_ERROR << "Invalid cap table data line: " << dataLine;
       continue;
     }
-    entry.coupling_cap = couplingCap;
-    entry.ground_cap = groundCap;
     config.data.push_back(entry);
   }
 

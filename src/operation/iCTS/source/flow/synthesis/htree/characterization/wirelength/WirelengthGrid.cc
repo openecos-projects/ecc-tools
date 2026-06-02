@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -23,13 +23,18 @@
 
 #include "synthesis/htree/characterization/wirelength/WirelengthGrid.hh"
 
+#include <glog/logging.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <optional>
+#include <ostream>
 #include <ranges>
 #include <vector>
 
+#include "Log.hh"
 #include "Tree.hh"
 #include "ValueLattice.hh"
 #include "config/Config.hh"
@@ -95,6 +100,7 @@ auto CountUniqueAlignedLengthBins(const std::vector<double>& requested_lengths_u
 
 auto CollectRequestedLevelLengthsUm(const Tree& topology, int32_t dbu_per_um) -> std::vector<double>
 {
+  LOG_FATAL_IF(dbu_per_um <= 0) << "HTree: DBU-per-micron must be positive when collecting requested level lengths.";
   std::vector<double> requested_lengths_um;
   const auto levels = topology.levels();
   if (levels.size() <= 1U) {
@@ -126,8 +132,7 @@ auto CollectRequestedLevelLengthsUm(const Tree& topology, int32_t dbu_per_um) ->
 
     const int requested_length_dbu
         = static_cast<int>(std::llround(static_cast<double>(distance_sum) / static_cast<double>(distance_count)));
-    const double requested_length_um
-        = static_cast<double>(std::max(requested_length_dbu, 0)) / static_cast<double>(std::max(dbu_per_um, int32_t{1}));
+    const double requested_length_um = static_cast<double>(std::max(requested_length_dbu, 0)) / static_cast<double>(dbu_per_um);
     if (requested_length_um > 0.0) {
       requested_lengths_um.push_back(requested_length_um);
     }
@@ -136,7 +141,18 @@ auto CollectRequestedLevelLengthsUm(const Tree& topology, int32_t dbu_per_um) ->
   return requested_lengths_um;
 }
 
-auto ResolveCharacterizationGridPlan(const std::vector<double>& requested_lengths_um) -> CharacterizationGridPlan
+auto ResolveCharacterizationGridPlan(const Config& config, const std::vector<double>& requested_lengths_um) -> CharacterizationGridPlan
+{
+  CharBuilder::Config char_config;
+  if (config.get_wirelength_unit_um() > 0.0) {
+    char_config.wirelength_unit_um = config.get_wirelength_unit_um();
+  }
+  char_config.wirelength_iterations = config.get_wirelength_iterations();
+  return ResolveCharacterizationGridPlan(char_config, requested_lengths_um);
+}
+
+auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const std::vector<double>& requested_lengths_um)
+    -> CharacterizationGridPlan
 {
   CharacterizationGridPlan plan;
   if (requested_lengths_um.empty()) {
@@ -144,8 +160,8 @@ auto ResolveCharacterizationGridPlan(const std::vector<double>& requested_length
   }
   plan.requested_level_lengths = static_cast<unsigned>(requested_lengths_um.size());
 
-  const double configured_unit_um = CONFIG_INST.get_wirelength_unit_um();
-  plan.configured_wirelength_iterations = std::max(1U, CONFIG_INST.get_wirelength_iterations());
+  const double configured_unit_um = config.wirelength_unit_um.value_or(0.0);
+  plan.configured_wirelength_iterations = std::max(1U, config.wirelength_iterations.value_or(1U));
   plan.configured_wirelength_unit_um = configured_unit_um;
   plan.configured_wirelength_missing = configured_unit_um <= 0.0;
 
@@ -156,11 +172,11 @@ auto ResolveCharacterizationGridPlan(const std::vector<double>& requested_length
   }
 
   const double max_requested_length_um = *std::ranges::max_element(requested_lengths_um);
-  const double fallback_unit_um = max_requested_length_um / static_cast<double>(requested_lengths_um.size());
+  const double auto_derived_unit_um = max_requested_length_um / static_cast<double>(requested_lengths_um.size());
   const bool grid_collapsed = configured_unit_um > 0.0 && requested_lengths_um.size() > 1U && plan.unique_level_bins <= 1U;
   plan.configured_grid_collapsed = grid_collapsed;
   if (plan.configured_wirelength_missing || grid_collapsed) {
-    effective_unit_um = fallback_unit_um;
+    effective_unit_um = auto_derived_unit_um;
     plan.adapted = effective_unit_um > 0.0;
     plan.source = plan.adapted ? CharGridSource::kAutoDerived : CharGridSource::kNone;
     plan.auto_derived_wirelength_unit_um = effective_unit_um;
@@ -177,9 +193,9 @@ auto ResolveCharacterizationGridPlan(const std::vector<double>& requested_length
   return plan;
 }
 
-auto ResolveCharacterizationGridPlan(const Tree& topology, int32_t dbu_per_um) -> CharacterizationGridPlan
+auto ResolveCharacterizationGridPlan(const Config& config, const Tree& topology, int32_t dbu_per_um) -> CharacterizationGridPlan
 {
-  return ResolveCharacterizationGridPlan(CollectRequestedLevelLengthsUm(topology, dbu_per_um));
+  return ResolveCharacterizationGridPlan(config, CollectRequestedLevelLengthsUm(topology, dbu_per_um));
 }
 
 auto ResolveDirectCharacterizationLengthIndices(const Tree& topology, const CharacterizationGridPlan& char_grid_plan, int32_t dbu_per_um)

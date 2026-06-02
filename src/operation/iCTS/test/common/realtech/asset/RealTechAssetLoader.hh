@@ -18,14 +18,14 @@
  * @file RealTechAssetLoader.hh
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-04-11
- * @brief Asset probing and environment bootstrap support for real-tech tests.
+ * @brief Asset probing and environment bootstrap for real-tech tests.
  */
 
 #pragma once
 
 #include <optional>
 
-#include "common/realtech/support/RealTechSetupSupport.hh"
+#include "common/realtech/setup/RealTechDesignSetup.hh"
 
 namespace icts_test::common::realtech::asset {
 

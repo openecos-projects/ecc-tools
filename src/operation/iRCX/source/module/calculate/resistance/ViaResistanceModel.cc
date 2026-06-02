@@ -27,16 +27,9 @@ namespace ircx {
 
 namespace {
 
-struct TemperatureCoefficients
+auto get_via_temperature_coefficients(const itf::LayerVia& layer, F64 area) -> ResistanceTemperatureCoefficients
 {
-  F64 crt1 = 0.0;
-  F64 crt2 = 0.0;
-};
-
-auto get_via_temperature_coefficients(const itf::LayerVia& layer,
-                                      F64 area) -> TemperatureCoefficients
-{
-  TemperatureCoefficients coefficients;
+  ResistanceTemperatureCoefficients coefficients;
 
   std::optional<double> area_crt1;
   std::optional<double> area_crt2;
@@ -57,32 +50,9 @@ auto get_via_temperature_coefficients(const itf::LayerVia& layer,
   return coefficients;
 }
 
-auto apply_via_temperature_derating(F64 base_resistance,
-                                    F64 operating_temperature,
-                                    const itf::ProcessCorner& corner,
-                                    const itf::LayerVia& layer,
-                                    F64 area) -> F64
-{
-  const TemperatureCoefficients coefficients =
-      get_via_temperature_coefficients(layer, area);
-  if (coefficients.crt1 == 0.0 && coefficients.crt2 == 0.0) {
-    return base_resistance;
-  }
-
-  const F64 nominal_temperature = layer.has_t0()
-                                      ? static_cast<F64>(layer.get_t0())
-                                      : static_cast<F64>(corner.get_global_temperature());
-  return applyResistanceTemperatureDerating(base_resistance, operating_temperature,
-                                            nominal_temperature, coefficients.crt1,
-                                            coefficients.crt2);
-}
-
 }  // namespace
 
-auto ViaResistanceModel::calc(const TopoEdge& edge,
-                              const itf::ProcessCorner& corner,
-                              const itf::LayerVia& layer,
-                              Micron dbu_to_micron,
+auto ViaResistanceModel::calc(const TopoEdge& edge, const itf::ProcessCorner& corner, const itf::LayerVia& layer, Micron dbu_to_micron,
                               F64 operating_temperature) -> F64
 {
   const F64 via_area = geom::area(edge.shape()) * dbu_to_micron * dbu_to_micron;
@@ -94,8 +64,8 @@ auto ViaResistanceModel::calc(const TopoEdge& edge,
     via_resistance = layer.query_rpv_vs_area(via_area);
   }
 
-  return apply_via_temperature_derating(via_resistance, operating_temperature,
-                                        corner, layer, via_area);
+  return applyResistanceTemperatureDerating(via_resistance, operating_temperature, resistanceNominalTemperature(layer, corner),
+                                            get_via_temperature_coefficients(layer, via_area));
 }
 
 }  // namespace ircx

@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -22,3 +22,23 @@
  */
 
 #include "synthesis/htree/solution/Solution.hh"
+
+#include <glog/logging.h>
+
+#include <ostream>
+
+#include "Log.hh"
+#include "synthesis/htree/synthesis_state/SynthesisState.hh"
+
+namespace icts::htree {
+
+auto SelectHTreeSolution(HTreeSynthesisState& state) -> HTreeSelectionBuild
+{
+  LOG_FATAL_IF(state.config == nullptr) << "HTree solution selection requires synthesis config.";
+  if (state.config->enable_analytical_solver) {
+    return analytical_solution::SelectAnalyticalHTreeSolution(state);
+  }
+  return discrete_solution::SelectDiscreteHTreeSolution(state);
+}
+
+}  // namespace icts::htree

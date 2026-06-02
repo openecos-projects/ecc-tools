@@ -33,7 +33,7 @@ namespace icts::htree {
 
 struct EmbeddingState
 {
-  HTree::BuildResult* result = nullptr;
+  HTree::Build* result = nullptr;
   BufferPortTable* port_table = nullptr;
   std::size_t edge_buffer_counter = 0U;
   std::size_t net_counter = 0U;

@@ -5,15 +5,13 @@ target_link_libraries(
   PUBLIC
   icts_source_database_timing
   PRIVATE
-  icts_source_utils
+  log
 )
 
 target_include_directories(
   icts_source_module_timing
   PUBLIC
   ${ICTS_MODULE_TIMING}
-  PRIVATE
-  ${ICTS_UTILS}
 )
 
 if(DEBUG_ICTS_SOURCE_MODULE_TIMING)

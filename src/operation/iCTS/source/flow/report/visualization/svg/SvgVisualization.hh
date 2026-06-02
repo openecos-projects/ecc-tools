@@ -27,15 +27,30 @@
 
 namespace icts {
 class ClockLayout;
-}
+class Config;
+class Design;
+class SchemaWriter;
+class Wrapper;
+
+}  // namespace icts
 
 namespace icts::visualization {
 
-struct SvgVisualizationResult
+struct SvgVisualizationInput
+{
+  const Config* config = nullptr;
+  Design* design = nullptr;
+  Wrapper* wrapper = nullptr;
+  SchemaWriter* reporter = nullptr;
+  std::filesystem::path visualization_dir;
+  const ClockLayout* clock_layout = nullptr;
+};
+
+struct SvgVisualizationSummary
 {
   bool success = false;
 };
 
-auto EmitSvgVisualizations(const std::filesystem::path& visualization_dir, const ClockLayout& clock_layout) -> SvgVisualizationResult;
+auto EmitSvgVisualizations(const SvgVisualizationInput& input) -> SvgVisualizationSummary;
 
 }  // namespace icts::visualization

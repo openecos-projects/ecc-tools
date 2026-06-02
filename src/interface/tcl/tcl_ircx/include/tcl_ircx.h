@@ -63,14 +63,14 @@ class TclReportRCX : public TclCmd
 };
 
 /**
- * @brief Compare two parasitic netlists.
+ * @brief Compare two SPEF netlists.
  *
  */
-class TclCompareParasitics : public TclCmd
+class TclCompareSpef : public TclCmd
 {
  public:
-  explicit TclCompareParasitics(const char* cmd_name);
-  ~TclCompareParasitics() override = default;
+  explicit TclCompareSpef(const char* cmd_name);
+  ~TclCompareSpef() override = default;
 
   unsigned check() override;
   unsigned exec() override;

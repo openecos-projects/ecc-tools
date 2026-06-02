@@ -18,10 +18,12 @@
  * @file TopologyDistanceReport.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-04-28
- * @brief Implements Topology-specific schema report sections.
+ * @brief Implements Topology-specific structured report sections.
  */
 
 #include "synthesis/trace/distance/TopologyDistanceReport.hh"
+
+#include <glog/logging.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -32,11 +34,10 @@
 #include <utility>
 #include <vector>
 
+#include "Log.hh"
 #include "Net.hh"
 #include "Pin.hh"
 #include "Point.hh"
-#include "config/Config.hh"
-#include "io/Wrapper.hh"
 #include "logger/Schema.hh"
 #include "synthesis/topology/buffer/BufferInsertion.hh"
 
@@ -59,47 +60,63 @@ auto formatDecimal(double value) -> std::string
   return stream.str();
 }
 
-auto resolveDbuPerUm() -> double
+auto resolveDbuPerUm(std::int32_t dbu_per_um) -> std::optional<double>
 {
-  return static_cast<double>(std::max(WRAPPER_INST.queryDbUnit(), 1));
+  if (dbu_per_um <= 0) {
+    LOG_WARNING << "Topology distance report skipped: DBU-per-micron is unavailable.";
+    return std::nullopt;
+  }
+  return static_cast<double>(dbu_per_um);
 }
 
-auto dbuToUm(double value_dbu) -> double
+auto dbuToUm(double value_dbu, double dbu_per_um) -> double
 {
-  return value_dbu / resolveDbuPerUm();
+  return value_dbu / dbu_per_um;
 }
 
-auto resolveDistanceReportPath() -> std::filesystem::path
+auto resolveDistanceReportPath(const std::string& log_file, SchemaWriter& reporter) -> std::filesystem::path
 {
-  auto& schema_writer = SCHEMA_WRITER_INST;
-  if (schema_writer.isOpen()) {
-    return schema_writer.getActivePath();
+  if (reporter.isOpen()) {
+    return reporter.getActivePath();
   }
 
-  const auto& log_file = CONFIG_INST.get_log_file();
   return log_file.empty() ? std::filesystem::path{} : std::filesystem::path(log_file);
 }
 
 }  // namespace
 
-auto EmitClusterLeafDistanceTables(const Topology::BuildResult& result) -> std::optional<Topology::ClusterLeafDistanceSummary>
+auto EmitClusterLeafDistanceTables(const ClusterLeafDistanceReportInput& input) -> std::optional<Topology::ClusterLeafDistanceSummary>
 {
-  if (result.cluster_buffers.empty()) {
+  LOG_FATAL_IF(input.reporter == nullptr) << "Topology distance report requires reporter.";
+  LOG_FATAL_IF(input.build == nullptr) << "Topology distance report requires topology build.";
+  auto& reporter = *input.reporter;
+  const auto& build = *input.build;
+  if (build.output.cluster_buffers.empty()) {
     return std::nullopt;
   }
 
-  const auto report_path = resolveDistanceReportPath();
+  const auto report_path = resolveDistanceReportPath(input.log_file, reporter);
   if (report_path.empty()) {
     return std::nullopt;
   }
 
   constexpr const char* run_title = "iCTS Report";
   constexpr const char* summary_title = "Cluster Center vs H-Tree Leaf Distance Overview";
+  const auto dbu_per_um = resolveDbuPerUm(input.dbu_per_um);
+  if (!dbu_per_um.has_value()) {
+    const KeyValueFields summary_fields = {
+        {"count", "0"},
+        {"status", "dbu_per_micron_unavailable"},
+    };
+    SchemaWriter::appendStandaloneKeyValueTable(report_path, run_title, summary_title, summary_fields);
+    return std::nullopt;
+  }
+
   std::vector<double> distances;
-  distances.reserve(result.cluster_buffers.size());
+  distances.reserve(build.output.cluster_buffers.size());
 
   double total_distance = 0.0;
-  for (const auto& cluster_buffer : result.cluster_buffers) {
+  for (const auto& cluster_buffer : build.output.cluster_buffers) {
     if (!HasValidLocation(cluster_buffer.location) || cluster_buffer.input_pin == nullptr) {
       continue;
     }
@@ -114,23 +131,22 @@ auto EmitClusterLeafDistanceTables(const Topology::BuildResult& result) -> std::
     }
 
     const int distance_dbu = calcManhattanDistance(cluster_buffer.location, leaf_location);
-    const double distance_um = dbuToUm(distance_dbu);
+    const double distance_um = dbuToUm(distance_dbu, *dbu_per_um);
     distances.push_back(distance_um);
     total_distance += distance_um;
   }
 
-  auto& schema_writer = SCHEMA_WRITER_INST;
-  const bool emit_to_active_writer = schema_writer.isOpen() && schema_writer.getActivePath() == report_path;
+  const bool emit_to_active_writer = reporter.isOpen() && reporter.getActivePath() == report_path;
   if (distances.empty()) {
-    const schema::KeyValueFields summary_fields = {
+    const KeyValueFields summary_fields = {
         {"count", "0"},
         {"status", "no_renderable_htree_leaf_locations"},
     };
     if (emit_to_active_writer) {
-      schema_writer.emitSection("### Cluster Distance Overview");
-      schema_writer.emitKeyValueTable(summary_title, summary_fields);
+      reporter.emitSection("### Cluster Distance Overview");
+      reporter.emitKeyValueTable(summary_title, summary_fields);
     } else {
-      schema::SchemaWriter::appendStandaloneKeyValueTable(report_path, run_title, summary_title, summary_fields);
+      SchemaWriter::appendStandaloneKeyValueTable(report_path, run_title, summary_title, summary_fields);
     }
     return std::nullopt;
   }
@@ -148,7 +164,7 @@ auto EmitClusterLeafDistanceTables(const Topology::BuildResult& result) -> std::
       .mean_distance_um = total_distance / static_cast<double>(distances.size()),
       .median_distance_um = median_distance,
   };
-  const schema::KeyValueFields summary_fields = {
+  const KeyValueFields summary_fields = {
       {"count", std::to_string(summary.count)},
       {"min_distance", formatDecimal(summary.min_distance_um) + " um"},
       {"max_distance", formatDecimal(summary.max_distance_um) + " um"},
@@ -157,12 +173,12 @@ auto EmitClusterLeafDistanceTables(const Topology::BuildResult& result) -> std::
   };
 
   if (emit_to_active_writer) {
-    schema_writer.emitSection("### Cluster Distance Overview");
-    schema_writer.emitKeyValueTable(summary_title, summary_fields);
+    reporter.emitSection("### Cluster Distance Overview");
+    reporter.emitKeyValueTable(summary_title, summary_fields);
     return summary;
   }
 
-  schema::SchemaWriter::appendStandaloneKeyValueTable(report_path, run_title, summary_title, summary_fields);
+  SchemaWriter::appendStandaloneKeyValueTable(report_path, run_title, summary_title, summary_fields);
   return summary;
 }
 

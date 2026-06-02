@@ -17,20 +17,16 @@
 #include "SpefDumper.hh"
 
 #include <algorithm>
-#include <ctime>
-#include <iomanip>
 #include <sstream>
+#include <utility>
 
-#include "Geometry.hh"
+#include "LayerTable.hh"
 #include "LayoutData.hh"
 #include "ProcessCorner.hpp"
-#include "RCTable.hh"
 #include "RCXConfig.hh"
 #include "SpefContext.hh"
 #include "TopoPool.hh"
-#include "Types.hh"
 #include "log/Log.hh"
-#include "usage/usage.hh"
 
 namespace ircx {
 
@@ -143,6 +139,43 @@ void SpefDumper::buildCouplingRefs(Size corner_idx) const
   });
 }
 
+void SpefDumper::buildReportLayerMap() const
+{
+  report_layers_.clear();
+  design_to_report_layer_level_.clear();
+
+  if (!RCX_CONFIG_INST.get_report_geometry() || layer_table_ == nullptr) {
+    return;
+  }
+
+  auto layers = layer_table_->design_layers();
+  std::sort(layers.begin(), layers.end(), [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+
+  auto append_layer = [&](Size design_id, const Str& design_name, Str process_name) {
+    const Size report_id = report_layers_.size();
+    report_layers_.push_back({report_id, design_id, design_name, std::move(process_name)});
+    design_to_report_layer_level_[design_id] = report_id;
+  };
+
+  for (const auto& [design_id, design_name] : layers) {
+    if (design_id == 0) {
+      append_layer(design_id, design_name, {});
+      continue;
+    }
+
+    try {
+      const Size process_id = layer_table_->design_to_process_id(design_id);
+      const Str& process_name = layer_table_->process_name(process_id);
+      if (!process_name.empty()) {
+        append_layer(design_id, design_name, process_name);
+      }
+    } catch (...) {
+      // Unmapped layers such as CT/ACT are internal design layers and are not
+      // part of StarRC-style report_geometry layer levels.
+    }
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // nodeName
 // ─────────────────────────────────────────────────────────────────────────────
@@ -178,260 +211,6 @@ Str SpefDumper::nodeName(const TopoNode& node) const
   if (it != name_maps_.net_name_to_id.end())
     return "*" + std::to_string(it->second) + ":" + std::to_string(node.id() + 1);
   return "*" + net_name + ":" + std::to_string(node.id() + 1);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// writeHeader
-// ─────────────────────────────────────────────────────────────────────────────
-
-void SpefDumper::writeHeader(std::ofstream& ofs) const
-{
-  auto t = std::time(nullptr);
-  auto tm = *std::localtime(&t);
-  std::ostringstream date_ss;
-  date_ss << std::put_time(&tm, "%a %b %d %H:%M:%S %Y");
-
-  ofs << "*SPEF \"IEEE 1481-1998\"\n";
-  ofs << "*DESIGN \"" << layout_data_->design_name << "\"\n";
-  ofs << "*DATE \"" << date_ss.str() << "\"\n";
-  ofs << "*VENDOR \"ECOS\"\n";
-  ofs << "*PROGRAM \"iRCX\"\n";
-  ofs << "*VERSION \"1.0\"\n";
-  ofs << "*DESIGN_FLOW \"PIN_CAP NONE\"\n";
-  ofs << "*DIVIDER /\n";
-  ofs << "*DELIMITER :\n";
-  ofs << "*BUS_DELIMITER []\n";
-  ofs << "*T_UNIT 1.0 NS\n";
-  ofs << "*C_UNIT 1.0 FF\n";
-  ofs << "*R_UNIT 1.0 OHM\n";
-  ofs << "*L_UNIT 1.0 HENRY\n";
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// writeNameMap
-// ─────────────────────────────────────────────────────────────────────────────
-
-void SpefDumper::writeNameMap(std::ofstream& ofs) const
-{
-  ofs << "\n*NAME_MAP\n";
-  // 1. Ports (IO pins)
-  for (const auto& [id, name] : name_maps_.port_id_to_name) {
-    ofs << "*" << id << " " << name << "\n";
-  }
-  // 2. instance name
-  for (const auto& [id, name] : name_maps_.inst_id_to_name) {
-    ofs << "*" << id << " " << name << "\n";
-  }
-  // 3. net name
-  for (const auto& [id, name] : name_maps_.net_id_to_name) {
-    ofs << "*" << id << " " << name << "\n";
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// writePorts
-// ─────────────────────────────────────────────────────────────────────────────
-
-void SpefDumper::writePorts(std::ofstream& ofs) const
-{
-  ofs << "\n*PORTS\n\n";
-  for (Size port_idx = 0; port_idx < spef_context_->port_names.size(); ++port_idx) {
-    const Str& name = spef_context_->port_names[port_idx];
-    ofs << "*" << name_maps_.port_name_to_id[name] << " " << spef_context_->port_io[port_idx] << "\n";
-  }
-}
-
-void SpefDumper::writeGeometry(std::ostream& /*os*/, Size /*net_idx*/) const
-{
-  if (!RCX_CONFIG_INST.get_report_geometry()) {
-    return;
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// writeDNet
-// ─────────────────────────────────────────────────────────────────────────────
-
-void SpefDumper::writeDNet(std::ostream& os, Size corner_idx, Size net_idx) const
-{
-  const Net& net = layout_data_->net_vec[net_idx];
-  const Str& net_spef_name = net_spef_names_[net_idx];
-  const auto& node_spef_name = node_spef_names_;
-  const auto& port_io = port_io_;
-  const auto& coupling_refs = net_coupling_refs_[net_idx];
-  const auto& edge_pool = topo_pool_->edge_pool();
-
-  std::unordered_map<Str, char> inst_pin_io;
-  inst_pin_io.reserve(net.pins.size());
-  for (const Pin& p : net.pins) {
-    if (p.is_input && p.is_output)
-      inst_pin_io[p.name] = 'B';
-    else if (p.is_input)
-      inst_pin_io[p.name] = 'I';
-    else if (p.is_output)
-      inst_pin_io[p.name] = 'O';
-  }
-
-  const auto nodes = topo_pool_->net_nodes(net_idx);
-  const auto edges = topo_pool_->net_edges(net_idx);
-  const Size node_offset = topo_pool_->net_node_range(net_idx).first;
-
-  const Size node_num = nodes.size();
-  if (node_num == 0)
-    return;
-
-  const Micron dbu_to_micron = dbu2micron(1, layout_data_->micron_to_dbu);
-
-  // Aggregate ground cap to nodes
-  // Ground cap per edge is split equally to its two endpoint nodes.
-  auto gcap_pool = rc_table_->corner_net_gcap_pool({corner_idx, net_idx});
-  std::vector<double> node_gnd(node_num, 0.0);
-
-  for (Size edge_idx = 0; edge_idx < edges.size(); ++edge_idx) {
-    const TopoEdge& edge = edges[edge_idx];
-    if (edge.is_via())
-      continue;
-    const double ground_cap = gcap_pool[edge_idx];
-    if (ground_cap <= 0.0)
-      continue;
-    // u()/v() are GLOBAL node indices; subtract node_offset for LOCAL index.
-    node_gnd[edge.u() - node_offset] += ground_cap / 2.0;
-    node_gnd[edge.v() - node_offset] += ground_cap / 2.0;
-  }
-
-  // Aggregate coupling cap to closest node pairs
-  // key: (local_node_idx_self, other_node_name_string) → accumulated cap (fF)
-  std::map<std::pair<Size, Str>, double> node_cc_map;
-
-  for (const CouplingRef& coupling : coupling_refs) {
-    const TopoEdge& e_self = edge_pool[coupling.self_edge_id];
-    const TopoEdge& e_other = edge_pool[coupling.other_edge_id];
-
-    // Guard against edges without valid node assignments.
-    if (e_self.u() == kMaxSize || e_self.v() == kMaxSize)
-      continue;
-    if (e_other.u() == kMaxSize || e_other.v() == kMaxSize)
-      continue;
-
-    // Find the closest node pair between self and other edges.
-    const GtlPointI& pa_u = topo_pool_->node_at(e_self.u()).point();
-    const GtlPointI& pa_v = topo_pool_->node_at(e_self.v()).point();
-    const GtlPointI& pb_u = topo_pool_->node_at(e_other.u()).point();
-    const GtlPointI& pb_v = topo_pool_->node_at(e_other.v()).point();
-
-    struct Cand
-    {
-      Size self_global;
-      Size other_global;
-      Dbu dist;
-    };
-    const Cand cands[4] = {
-        {e_self.u(), e_other.u(), geom::manhattan_distance(pa_u, pb_u)},
-        {e_self.u(), e_other.v(), geom::manhattan_distance(pa_u, pb_v)},
-        {e_self.v(), e_other.u(), geom::manhattan_distance(pa_v, pb_u)},
-        {e_self.v(), e_other.v(), geom::manhattan_distance(pa_v, pb_v)},
-    };
-    const auto& best = *std::min_element(std::begin(cands), std::end(cands), [](const Cand& x, const Cand& y) { return x.dist < y.dist; });
-
-    // Convert GLOBAL ids to LOCAL for array indexing.
-    const Size self_local = best.self_global - node_offset;
-
-    // Get the SPEF name of the other net's node.
-    const Str& other_node = node_spef_name[best.other_global];
-
-    node_cc_map[{self_local, other_node}] += coupling.cap_ff;
-  }
-
-  // Total capacitance
-  double tcap = 0.0;
-  for (double ground_cap : node_gnd)
-    tcap += ground_cap;
-  for (const auto& [_, coupling_cap] : node_cc_map)
-    tcap += coupling_cap;
-
-  // Write *D_NET
-  os << "\n*D_NET " << net_spef_name << " " << std::fixed << std::setprecision(6) << tcap << "\n\n";
-
-  // *CONN section
-  os << "*CONN\n";
-  for (Size node_idx = 0; node_idx < node_num; ++node_idx) {  // *P
-    const TopoNode& node = nodes[node_idx];
-    if (!node.is_pin_node())
-      continue;
-
-    if (node.pin_name().find(':') == Str::npos) {  // port pin node
-      Micron x = geom::x(node.point()) * dbu_to_micron;
-      Micron y = geom::y(node.point()) * dbu_to_micron;
-
-      os << "*" << "P" << " " << node_spef_name[topo_pool_->node_index(net_idx, node.id())] << " " << port_io.at(node.pin_name()) << " *C "
-         << std::fixed << std::setprecision(3) << x << " " << y << "\n";
-    }
-  }
-
-  for (Size node_idx = 0; node_idx < node_num; ++node_idx) {  // *I
-    const TopoNode& node = nodes[node_idx];
-    if (!node.is_pin_node())
-      continue;
-
-    if (node.pin_name().find(':') != Str::npos) {  // instance pin node
-      Micron x = geom::x(node.point()) * dbu_to_micron;
-      Micron y = geom::y(node.point()) * dbu_to_micron;
-      const auto io_it = inst_pin_io.find(node.pin_name());
-      const char pin_io = (io_it != inst_pin_io.end()) ? io_it->second : 'B';
-
-      os << "*" << "I" << " " << node_spef_name[topo_pool_->node_index(net_idx, node.id())] << " " << pin_io << " *C " << std::fixed
-         << std::setprecision(3) << x << " " << y << "\n";
-    }
-  }
-
-  for (Size node_idx = 0; node_idx < node_num; ++node_idx) {  // *N
-    const TopoNode& node = nodes[node_idx];
-    if (node.is_pin_node())
-      continue;
-
-    Micron x = geom::x(node.point()) * dbu_to_micron;
-    Micron y = geom::y(node.point()) * dbu_to_micron;
-
-    os << "*" << "N" << " " << node_spef_name[topo_pool_->node_index(net_idx, node.id())] << " *C " << std::fixed << std::setprecision(3)
-       << x << " " << y << "\n";
-  }
-
-  // *CAP section
-  os << "\n*CAP\n";
-  int cap_id = 1;
-  // Coupling caps first.
-  for (const auto& [key, coupling_cap] : node_cc_map) {
-    if (coupling_cap <= 0.0)
-      continue;
-    os << cap_id++ << " " << node_spef_name[topo_pool_->node_index(net_idx, key.first)] << " " << key.second << " " << std::setprecision(6)
-       << coupling_cap << "\n";
-  }
-  // Ground caps.
-  for (Size node_idx = 0; node_idx < node_num; ++node_idx) {
-    if (node_gnd[node_idx] <= 0.0)
-      continue;
-    os << cap_id++ << " " << node_spef_name[topo_pool_->node_index(net_idx, node_idx)] << " " << std::setprecision(6) << node_gnd[node_idx]
-       << "\n";
-  }
-
-  // *RES section
-  os << "\n*RES\n";
-  int res_id = 1;
-  auto res_pool = rc_table_->corner_net_res_pool({corner_idx, net_idx});
-  for (Size edge_idx = 0; edge_idx < edges.size(); ++edge_idx) {
-    const TopoEdge& edge = edges[edge_idx];
-    if (edge.u() == kMaxSize || edge.v() == kMaxSize)
-      continue;
-
-    const double resistance = res_pool[edge_idx];
-
-    os << res_id++ << " " << node_spef_name[edge.u()] << " " << node_spef_name[edge.v()] << " " << std::setprecision(6) << resistance
-       << "\n";
-  }
-
-  writeGeometry(os, net_idx);
-
-  os << "*END\n";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -477,11 +256,13 @@ auto SpefDumper::dumpCorner(const Str& output_dir, Size corner_idx) const -> boo
   buildNodeSpefNames();
   buildNetSpefNames();
   buildCouplingRefs(corner_idx);
+  buildReportLayerMap();
   net_str_buffer_.assign(net_count, Str{});
 
-  writeHeader(ofs);
+  writeHeader(ofs, corner_idx);
   writeNameMap(ofs);
   writePorts(ofs);
+  writeLayerMap(ofs);
 
 #pragma omp parallel for schedule(dynamic)
   for (Size net_idx = 0; net_idx < net_count; ++net_idx) {

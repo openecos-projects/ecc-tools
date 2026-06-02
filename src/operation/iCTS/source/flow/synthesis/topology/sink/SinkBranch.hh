@@ -25,12 +25,8 @@
 
 #include "synthesis/topology/Topology.hh"
 
-namespace icts {
-class Net;
-}
-
 namespace icts::topology {
 
-auto BuildSinkTree(Net& root_net, const Topology::BuildOptions& options) -> Topology::BuildResult;
+auto BuildSinkTree(const Topology::Input& input, const Topology::Config& config) -> Topology::Build;
 
 }  // namespace icts::topology

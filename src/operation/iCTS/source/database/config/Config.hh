@@ -25,29 +25,24 @@
 
 #include <algorithm>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "LogFormat.hh"
 
 namespace icts {
 
-#define CONFIG_INST (icts::Config::getInst())
+class SchemaWriter;
 
 class Config
 {
  public:
-  static auto getInst() -> Config&
-  {
-    static Config inst;
-    return inst;
-  }
+  Config() = default;
+  ~Config() = default;
 
-  // Delete copy and move constructors
-  Config(const Config& rhs) = delete;
-  Config(Config&& rhs) = delete;
-  auto operator=(const Config& rhs) -> Config& = delete;
-  auto operator=(Config&& rhs) -> Config& = delete;
+  Config(const Config& rhs) = default;
+  Config(Config&& rhs) = default;
+  auto operator=(const Config& rhs) -> Config& = default;
+  auto operator=(Config&& rhs) -> Config& = default;
 
   // Initialize from config file
   auto init(const std::string& config_file) -> bool;
@@ -77,13 +72,12 @@ class Config
     _force_branch_buffer = false;
     _htree_depth_explore_window = 4;
     _htree_topology_tolerance = 0.1;
+    _enable_analytical_htree = false;
     _enable_sink_clustering = true;
     _work_dir = "./result/cts";
     _log_file = "./result/cts/cts.log";
     _visualization_dir = "./result/cts/visualization";
     _statistics_dir = "./result/cts/statistics";
-    _use_netlist = false;
-    _net_list.clear();
     _last_error.clear();
   }
 
@@ -108,6 +102,7 @@ class Config
   auto is_force_branch_buffer() const -> bool { return _force_branch_buffer; }
   auto get_htree_depth_explore_window() const -> unsigned { return _htree_depth_explore_window; }
   auto get_htree_topology_tolerance() const -> double { return _htree_topology_tolerance; }
+  auto is_enable_analytical_htree() const -> bool { return _enable_analytical_htree; }
   auto is_enable_sink_clustering() const -> bool { return _enable_sink_clustering; }
 
   // file
@@ -115,8 +110,6 @@ class Config
   auto get_log_file() const -> const std::string& { return _log_file; }
   auto get_visualization_dir() const -> const std::string& { return _visualization_dir; }
   auto get_statistics_dir() const -> const std::string& { return _statistics_dir; }
-  auto is_use_netlist() const -> bool { return _use_netlist; }
-  auto get_net_list() const -> const std::vector<std::pair<std::string, std::string>> { return _net_list; }
   auto get_last_error() const -> const std::string& { return _last_error; }
   auto set_last_error(const std::string& error) -> void { _last_error = error; }
 
@@ -147,6 +140,7 @@ class Config
   auto set_force_branch_buffer(bool force_branch_buffer) -> void { _force_branch_buffer = force_branch_buffer; }
   auto set_htree_depth_explore_window(unsigned window) -> void { _htree_depth_explore_window = std::max(1U, window); }
   auto set_htree_topology_tolerance(double tolerance) -> void { _htree_topology_tolerance = std::max(0.0, tolerance); }
+  auto set_enable_analytical_htree(bool enable_analytical_htree) -> void { _enable_analytical_htree = enable_analytical_htree; }
   auto set_enable_sink_clustering(bool enable_sink_clustering) -> void { _enable_sink_clustering = enable_sink_clustering; }
 
   // file
@@ -154,18 +148,14 @@ class Config
   auto set_log_file(const std::string& file) -> void { _log_file = file; }
   auto set_visualization_dir(const std::string& dir) -> void { _visualization_dir = dir; }
   auto set_statistics_dir(const std::string& dir) -> void { _statistics_dir = dir; }
-  auto set_use_netlist(bool use_netlist) -> void { _use_netlist = use_netlist; }
-  auto set_net_list(const std::vector<std::pair<std::string, std::string>>& net_list) -> void { _net_list = net_list; }
 
   // parse from json file
   auto parse(const std::string& json_file) -> bool;
-  auto emitRuntimeConfigReport(const std::string& title) const -> void;
+  auto emitRuntimeConfigReport(SchemaWriter& reporter, const std::string& title) const -> void;
 
- private:
-  Config() = default;
-  ~Config() = default;
   auto buildRuntimeConfigRows() const -> logformat::TableRows;
 
+ private:
   // algorithm
   double _skew_bound = 0.0;
   double _max_buf_tran = 0.0;
@@ -187,6 +177,7 @@ class Config
   bool _force_branch_buffer = false;
   unsigned _htree_depth_explore_window = 4;
   double _htree_topology_tolerance = 0.1;
+  bool _enable_analytical_htree = false;
   bool _enable_sink_clustering = true;
 
   // file
@@ -195,8 +186,6 @@ class Config
   std::string _visualization_dir = "./result/cts/visualization";
   std::string _statistics_dir = "./result/cts/statistics";
 
-  bool _use_netlist = false;
-  std::vector<std::pair<std::string, std::string>> _net_list;
   std::string _last_error;
 };
 

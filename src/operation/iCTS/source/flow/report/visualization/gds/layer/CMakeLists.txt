@@ -6,7 +6,7 @@ target_link_libraries(
   icts_source_flow_report_visualization_gds_writer
   PRIVATE
   icts_source_flow_report_visualization_drawing
-  icts_source_utils
+  log
 )
 
 target_include_directories(

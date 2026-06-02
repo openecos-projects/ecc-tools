@@ -27,13 +27,14 @@
 #include <string>
 #include <vector>
 
-#include "FastClusteringRealTechBenchmarkInternal.hh"
+#include "FastClusteringRealTechBenchmarkFixture.hh"
 #include "database/config/Config.hh"
 #include "database/design/Pin.hh"
+#include "database/io/Wrapper.hh"
 #include "database/spatial/Point.hh"
-#include "module/topology/TopologyGen.hh"
 #include "module/topology/clustering/Clustering.hh"
 #include "module/topology/config/TopologyConfig.hh"
+#include "module/topology/fast_clustering/FastClustering.hh"
 
 namespace icts_test::fast_clustering::realtech {
 
@@ -170,17 +171,25 @@ auto ScoreCluster(const std::vector<icts::Pin*>& cluster, const icts::ClusterEle
 
 }  // namespace
 
-auto BuildBenchmarkConfig() -> icts::ClusterConfig
+auto BuildBenchmarkConfig(const std::vector<icts::Pin*>& loads) -> icts::ClusterConfig
 {
-  auto config = icts::TopologyGen::buildFastClusteringElectricalConfig(CONFIG_INST.get_max_fanout(), CONFIG_INST.get_max_cap());
-  config.routing_layer = CONFIG_INST.get_routing_layers().empty() ? 0 : static_cast<int>(CONFIG_INST.get_routing_layers().back());
-  config.wire_width = CONFIG_INST.get_wire_width();
+  auto config = icts::FastClustering::buildElectricalBaseConfig(icts_test::runtime::CurrentRuntime().config.get_max_fanout(),
+                                                                icts_test::runtime::CurrentRuntime().config.get_max_cap());
+  config.clock_route_segment_rc
+      = icts_test::runtime::CurrentRuntime().wrapper.queryConfiguredClockRouteSegmentRc(icts_test::runtime::CurrentRuntime().config);
+  config.sink_pin_cap_pf_by_pin.reserve(loads.size());
+  for (const auto* pin : loads) {
+    if (pin == nullptr) {
+      continue;
+    }
+    config.sink_pin_cap_pf_by_pin.emplace(pin, std::max(0.0, icts_test::runtime::CurrentRuntime().wrapper.queryPinCapacitance(pin)));
+  }
   config.enable_exact_cap = false;
   config.always_build_exact_cap = false;
   return config;
 }
 
-auto EvaluateResult(const std::string& algorithm, const icts::ClusterResult& result, const icts::ClusterConfig& config,
+auto EvaluateResult(const std::string& algorithm, const icts::ClusterOutput& result, const icts::ClusterConfig& config,
                     std::size_t expected_load_count, double runtime_ms) -> ResultMetrics
 {
   ResultMetrics metrics;

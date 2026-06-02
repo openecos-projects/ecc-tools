@@ -20,6 +20,7 @@ target_link_libraries(
 target_include_directories(
   icts_source_module_topology_clustering
   PUBLIC
+  ${ICTS_SOURCE}
   ${ICTS_MODULE_TOPOLOGY}/clustering
 )
 

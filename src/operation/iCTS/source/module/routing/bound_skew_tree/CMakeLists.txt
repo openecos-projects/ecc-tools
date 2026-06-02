@@ -1,36 +1,36 @@
 add_library(
   icts_source_module_routing_bst
   ${ICTS_MODULE_ROUTING}/bound_skew_tree/BSTRouter.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/BoundSkewTree.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/BoundSkewTreeBalance.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/BoundSkewTreeEmbedding.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/BoundSkewTreeFlow.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/BoundSkewTreeJoining.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/BoundSkewTreeTopology.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/Components.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/GeomCalc.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/GeomCalcLine.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/GeomCalcPointRegion.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/GeomCalcTransformedRect.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BinaryTopology.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BottomUpMergeBalance.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BottomUpMergeInfeasibility.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BottomUpMergeJoining.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BoundSkewTree.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BoundSkewTreeImpl.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BstPipeline.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/TopDownEmbedding.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/clock_tree_conversion/BSTRouterBinaryTopology.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/clock_tree_conversion/BSTRouterExport.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/component/Components.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/geometry/GeomCalc.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/geometry/GeomCalcLine.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/geometry/GeomCalcPointRegion.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/geometry/GeomCalcTransformedRect.cc
 )
 
 target_link_libraries(
   icts_source_module_routing_bst
-  PUBLIC
-  icts_source_database
   PRIVATE
-  icts_source_module_routing_database
-  icts_source_utils
+  icts_source_database_routing
+  icts_source_database_spatial
+  icts_source_utils_geometry
   log
 )
 
 target_include_directories(
   icts_source_module_routing_bst
   PUBLIC
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree
-  PRIVATE
-  ${ICTS_DATABASE}
-  ${ICTS_UTILS}
+  ${ICTS_MODULE_ROUTING}
 )
 
 if(DEBUG_ICTS_SOURCE_MODULE_ROUTING_BST)

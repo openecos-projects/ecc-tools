@@ -36,9 +36,9 @@
 #include "PatternId.hh"
 #include "Pin.hh"
 #include "Tree.hh"
+#include "flow/synthesis/htree/HTreeArtifactWriter.hh"
 #include "flow/synthesis/htree/HTreeBuildObservation.hh"
-#include "flow/synthesis/htree/HTreeVisualizationInternal.hh"
-#include "flow/synthesis/htree/HTreeVisualizationSupport.hh"
+#include "flow/synthesis/htree/HTreeSvgRenderer.hh"
 #include "synthesis/htree/HTree.hh"
 #include "visualization/core/SvgCommon.hh"
 
@@ -55,17 +55,19 @@ auto NormalizeMetric(double value, double min_value, double max_value) -> double
 
 }  // namespace
 
-auto BuildDelayPowerPoints(const icts::HTree::BuildResult& result) -> std::vector<DelayPowerPoint>
+auto BuildDelayPowerPoints(const icts::htree::DiagnosticBuild& result) -> std::vector<DelayPowerPoint>
 {
-  if (!result.best_char.has_value()) {
+  if (!result.output.best_char.has_value()) {
     return {};
   }
 
   std::vector<DelayPowerPoint> points;
   points.push_back(DelayPowerPoint{
-      .entry = &(*result.best_char),
-      .normalized_delay = NormalizeMetric(result.best_char->get_delay(), result.best_char->get_delay(), result.best_char->get_delay()),
-      .normalized_power = NormalizeMetric(result.best_char->get_power(), result.best_char->get_power(), result.best_char->get_power()),
+      .entry = &(*result.output.best_char),
+      .normalized_delay
+      = NormalizeMetric(result.output.best_char->get_delay(), result.output.best_char->get_delay(), result.output.best_char->get_delay()),
+      .normalized_power
+      = NormalizeMetric(result.output.best_char->get_power(), result.output.best_char->get_power(), result.output.best_char->get_power()),
       .is_pareto = true,
       .is_selected = true,
   });
@@ -82,22 +84,22 @@ auto BuildDelayPowerPoints(const icts::HTree::BuildResult& result) -> std::vecto
   return points;
 }
 
-auto BuildDelayPowerChoiceSummary(const icts::HTree::BuildResult& result) -> std::optional<DelayPowerChoiceSummary>
+auto BuildDelayPowerChoiceSummary(const icts::htree::DiagnosticBuild& result) -> std::optional<DelayPowerChoiceSummary>
 {
-  if (!result.best_char.has_value()) {
+  if (!result.output.best_char.has_value()) {
     return std::nullopt;
   }
 
   const auto observation = ObserveHTreeBuild(result);
   const std::size_t frontier_pool_size
-      = observation.used_boundary_fallback ? observation.selected_candidate_solution_count : observation.selected_feasible_solution_count;
-  const std::size_t selection_pool_size = observation.used_boundary_fallback ? observation.selected_candidate_frontier_entry_count
-                                                                             : observation.selected_feasible_frontier_entry_count;
+      = observation.used_boundary_relaxation ? observation.selected_candidate_solution_count : observation.selected_feasible_solution_count;
+  const std::size_t selection_pool_size = observation.used_boundary_relaxation ? observation.selected_candidate_frontier_entry_count
+                                                                               : observation.selected_feasible_frontier_entry_count;
 
   DelayPowerChoiceSummary summary{
       .frontier_selection_pool_size = frontier_pool_size,
       .selection_pool_size = selection_pool_size,
-      .pareto_solution_count = result.best_char.has_value() ? 1U : 0U,
+      .pareto_solution_count = result.output.best_char.has_value() ? 1U : 0U,
       .median_uses_lower_index = false,
   };
   summary.pareto_power_median_index = 0U;
@@ -134,7 +136,7 @@ auto BuildDelayPowerTooltip(const DelayPowerPoint& point) -> std::string
 
 }  // namespace
 
-auto WriteDelayPowerParetoSvg(const std::filesystem::path& path, const icts::HTree::BuildResult& result) -> bool
+auto WriteDelayPowerParetoSvg(const std::filesystem::path& path, const icts::htree::DiagnosticBuild& result) -> bool
 {
   const auto points = BuildDelayPowerPoints(result);
   if (points.empty()) {
@@ -265,7 +267,7 @@ auto WriteDelayPowerParetoSvg(const std::filesystem::path& path, const icts::HTr
 }
 
 auto BuildReport(const std::string& scenario_name, const std::string& input_summary, const HTreeArtifactPaths& paths,
-                 const std::vector<icts::Pin*>& loads, const icts::HTree::BuildResult& result) -> std::string
+                 const std::vector<icts::Pin*>& loads, const icts::htree::DiagnosticBuild& result) -> std::string
 {
   const auto delay_power_points = BuildDelayPowerPoints(result);
   const auto observation = ObserveHTreeBuild(result);
@@ -276,14 +278,16 @@ auto BuildReport(const std::string& scenario_name, const std::string& input_summ
   report << "scenario=" << scenario_name << "\n";
   report << "input=" << input_summary << "\n";
   report << "load_count=" << loads.size() << "\n";
-  report << "topology_nodes=" << result.topology.get_size() << "\n";
-  report << "htree_levels=" << result.levels.size() << "\n";
-  report << "inserted_buffers=" << result.inserted_insts.size() << "\n";
-  report << "inserted_nets=" << result.inserted_nets.size() << "\n";
-  report << "char_grid_unit_um=" << result.char_wirelength_unit_um << ", iterations=" << result.char_wirelength_iterations
-         << ", distinct_level_bins=" << result.char_unique_level_bins << ", adapted=" << (result.char_grid_adapted ? "true" : "false")
+  report << "topology_nodes=" << result.output.topology.get_size() << "\n";
+  report << "htree_levels=" << result.output.levels.size() << "\n";
+  report << "inserted_buffers=" << result.output.inserted_insts.size() << "\n";
+  report << "inserted_nets=" << result.output.inserted_nets.size() << "\n";
+  report << "char_grid_unit_um=" << result.diagnostics.char_wirelength_unit_um
+         << ", iterations=" << result.diagnostics.char_wirelength_iterations
+         << ", distinct_level_bins=" << result.diagnostics.char_unique_level_bins
+         << ", adapted=" << (result.diagnostics.char_grid_adapted ? "true" : "false") << "\n";
+  report << "char_limits max_slew_ns=" << result.diagnostics.char_max_slew_ns << ", max_cap_pf=" << result.diagnostics.char_max_cap_pf
          << "\n";
-  report << "char_limits max_slew_ns=" << result.char_max_slew_ns << ", max_cap_pf=" << result.char_max_cap_pf << "\n";
   report << "frontier_candidate_solution_count=" << observation.selected_candidate_solution_count
          << ", candidate_frontier_entry_count=" << observation.selected_candidate_frontier_entry_count << "\n";
   report << "frontier_feasible_solution_count=" << observation.selected_feasible_solution_count
@@ -294,7 +298,7 @@ auto BuildReport(const std::string& scenario_name, const std::string& input_summ
   if (selection_summary.has_value()) {
     report << std::setprecision(9);
     report << "delay_power_selection_summary selection_policy="
-           << (observation.used_boundary_fallback ? "boundary_fallback" : "global_frontier_pareto_power_median")
+           << (observation.used_boundary_relaxation ? "boundary_relaxation" : "global_frontier_pareto_power_median")
            << ", frontier_selection_pool_size=" << selection_summary->frontier_selection_pool_size
            << ", selection_pool_size=" << selection_summary->selection_pool_size
            << ", pareto_solution_count=" << selection_summary->pareto_solution_count << ", pareto_power_median_index=";
@@ -311,21 +315,21 @@ auto BuildReport(const std::string& scenario_name, const std::string& input_summ
     }
     report << ", median_uses_lower_index=" << (selection_summary->median_uses_lower_index ? "true" : "false")
            << ", selected_on_pareto_front=" << (selection_summary->selected_on_pareto_front ? "true" : "false");
-    if (result.best_char.has_value()) {
-      report << ", selected_pattern_id=" << result.best_char->get_pattern_id().local_id
-             << ", selected_delay=" << result.best_char->get_delay() << ", selected_power=" << result.best_char->get_power();
+    if (result.output.best_char.has_value()) {
+      report << ", selected_pattern_id=" << result.output.best_char->get_pattern_id().local_id
+             << ", selected_delay=" << result.output.best_char->get_delay() << ", selected_power=" << result.output.best_char->get_power();
     }
     report << "\n";
     report << std::setprecision(3);
   }
-  for (const auto& summary : CollectBufferMasterSummaries(result.inserted_insts)) {
+  for (const auto& summary : CollectBufferMasterSummaries(result.output.inserted_insts)) {
     report << "buffer_master=" << summary.cell_master << ", count=" << summary.count;
     if (summary.drive_strength >= 0) {
       report << ", drive_strength=" << summary.drive_strength;
     }
     report << "\n";
   }
-  report << "root_output_pin=" << (result.root_output_pin != nullptr ? result.root_output_pin->get_name() : "<null>") << "\n";
+  report << "root_output_pin=" << (result.output.root_output_pin != nullptr ? result.output.root_output_pin->get_name() : "<null>") << "\n";
   for (const auto& point : delay_power_points) {
     if (!point.is_pareto && !point.is_selected) {
       continue;
@@ -336,8 +340,8 @@ auto BuildReport(const std::string& scenario_name, const std::string& input_summ
            << ", norm_power=" << point.normalized_power << ", driven_cap_idx=" << point.entry->get_driven_cap_idx()
            << ", output_slew_idx=" << point.entry->get_output_slew_idx() << ", load_cap_idx=" << point.entry->get_load_cap_idx() << "\n";
   }
-  for (std::size_t level_index = 0; level_index < result.levels.size(); ++level_index) {
-    const auto& level = result.levels.at(level_index);
+  for (std::size_t level_index = 0; level_index < result.output.levels.size(); ++level_index) {
+    const auto& level = result.output.levels.at(level_index);
     report << "level[" << level_index << "] requested_dbu=" << level.requested_length_dbu << ", requested_um=" << level.requested_length_um
            << ", aligned_idx=" << level.aligned_length_idx << ", aligned_um=" << level.aligned_length_um
            << ", segment_pattern_id=" << level.segment_pattern_id.local_id << "\n";

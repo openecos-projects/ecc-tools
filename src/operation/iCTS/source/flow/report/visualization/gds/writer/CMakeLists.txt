@@ -6,7 +6,6 @@ target_link_libraries(
   icts_source_database_spatial
   PRIVATE
   log
-  icts_source_utils
 )
 
 target_include_directories(

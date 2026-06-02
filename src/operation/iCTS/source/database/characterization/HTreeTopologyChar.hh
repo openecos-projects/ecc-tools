@@ -71,6 +71,15 @@ class HTreeTopologyChar
   // H-tree specific getter
   auto get_levels() const -> unsigned { return _levels; }
 
+  auto withPatternId(PatternId pattern_id) const -> HTreeTopologyChar
+  {
+    CharCore core(get_input_slew_idx(), get_output_slew_idx(), get_driven_cap_idx(), get_load_cap_idx(), get_raw_delay(), get_raw_power(),
+                  pattern_id, get_source_boundary_net_switch_power());
+    HTreeTopologyChar result(std::move(core), _levels);
+    result.set_root_driver_compensation(_root_driver_delay_ns, _root_driver_power_w);
+    return result;
+  }
+
   /**
    * @brief Compose two H-tree topology characterizations.
    *

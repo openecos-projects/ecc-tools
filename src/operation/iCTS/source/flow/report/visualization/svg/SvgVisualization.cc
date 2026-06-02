@@ -10,7 +10,7 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
@@ -56,7 +56,7 @@ enum class WireKind
   kRouted,
   kSourceToRoot,
   kFlyline,
-  kFallback
+  kDegraded
 };
 
 struct VisualizationReportStatus
@@ -68,12 +68,12 @@ struct VisualizationReportStatus
   std::string reason;
 };
 
-auto ResolveVisualizationDir(const std::filesystem::path& visualization_dir) -> std::filesystem::path
+auto ResolveVisualizationDir(const Config& config, const std::filesystem::path& visualization_dir) -> std::filesystem::path
 {
   if (!visualization_dir.empty()) {
     return visualization_dir;
   }
-  return std::filesystem::path(CONFIG_INST.get_visualization_dir());
+  return std::filesystem::path(config.get_visualization_dir());
 }
 
 auto HasValidLocation(const Point<int>& point) -> bool
@@ -192,7 +192,7 @@ auto EscapeXml(const std::string& text) -> std::string
   return escaped;
 }
 
-auto ResolveSegmentStyle(WireKind kind, bool fallback, bool flyline_view) -> std::tuple<const char*, double, double, std::string>
+auto ResolveSegmentStyle(WireKind kind, bool degraded, bool flyline_view) -> std::tuple<const char*, double, double, std::string>
 {
   const char* stroke_color = visualization::detail::kSvgColorRoutedSinkNet;
   double stroke_width = 1.8;
@@ -203,8 +203,8 @@ auto ResolveSegmentStyle(WireKind kind, bool fallback, bool flyline_view) -> std
     stroke_width = 1.2;
     stroke_opacity = 0.62;
     dash_array = "8,5";
-  } else if (fallback || kind == WireKind::kFallback) {
-    stroke_color = visualization::detail::kSvgColorFallbackInternalNet;
+  } else if (degraded || kind == WireKind::kDegraded) {
+    stroke_color = visualization::detail::kSvgColorDegradedInternalNet;
     stroke_width = 1.4;
     stroke_opacity = 0.74;
     dash_array = "5,3";
@@ -227,7 +227,7 @@ auto WriteSvgSegments(std::ofstream& output_stream, const visualization::detail:
     const auto end_x = FormatSvgNumber(visualization::detail::MapX(transform, segment.end.get_x()));
     const auto end_y = FormatSvgNumber(visualization::detail::MapY(transform, segment.end.get_y()));
     const auto wire_kind = wireKindFromRole(segment.net_role, flyline_view);
-    const auto [stroke_color, stroke_width, stroke_opacity, dash_array] = ResolveSegmentStyle(wire_kind, segment.fallback, flyline_view);
+    const auto [stroke_color, stroke_width, stroke_opacity, dash_array] = ResolveSegmentStyle(wire_kind, segment.degraded, flyline_view);
     output_stream << R"(<line x1=")" << begin_x << R"(" y1=")" << begin_y << R"(" x2=")" << end_x << R"(" y2=")" << end_y << R"(" stroke=")"
                   << stroke_color << R"(" stroke-width=")" << FormatSvgNumber(stroke_width) << R"(" stroke-opacity=")"
                   << FormatSvgNumber(stroke_opacity) << '"';
@@ -325,9 +325,9 @@ auto WriteSvgLegend(std::ofstream& output_stream, const visualization::detail::S
 
   output_stream << R"(<line x1=")" << FormatSvgNumber(legend_x) << R"(" y1=")" << FormatSvgNumber(row_y(3.0) - 4.0) << R"(" x2=")"
                 << FormatSvgNumber(legend_x + 14.0) << R"(" y2=")" << FormatSvgNumber(row_y(3.0) - 4.0) << R"(" stroke=")"
-                << visualization::detail::kSvgColorFallbackInternalNet << R"(" stroke-width="1.4" stroke-dasharray="5,3" />)";
+                << visualization::detail::kSvgColorDegradedInternalNet << R"(" stroke-width="1.4" stroke-dasharray="5,3" />)";
   output_stream << R"(<text x=")" << FormatSvgNumber(legend_x + 20.0) << R"(" y=")" << FormatSvgNumber(row_y(3.0))
-                << R"(">fallback segment</text>)";
+                << R"(">degraded segment</text>)";
 
   output_stream << R"(<circle cx=")" << FormatSvgNumber(legend_x + 7.0) << R"(" cy=")" << FormatSvgNumber(row_y(4.0) - 4.0) << R"(" r=")"
                 << FormatSvgNumber(visualization::detail::kReportDriverRadius) << R"(" fill=")"
@@ -402,9 +402,9 @@ auto BuildUnavailableStatuses(const std::filesystem::path& output_dir, const std
   };
 }
 
-auto EmitReportStatusTable(const std::vector<VisualizationReportStatus>& statuses) -> void
+auto EmitReportStatusTable(SchemaWriter& reporter, const std::vector<VisualizationReportStatus>& statuses) -> void
 {
-  schema::TableRows rows;
+  TableRows rows;
   rows.reserve(statuses.size());
   for (const auto& status : statuses) {
     rows.push_back({
@@ -415,39 +415,47 @@ auto EmitReportStatusTable(const std::vector<VisualizationReportStatus>& statuse
         status.reason,
     });
     if (!status.success) {
-      schema::EmitDiagnostic(
-          schema::DiagnosticLevel::kWarning, "CTS Report Visualization", "visualization report generation failed",
-          {{"report", status.label}, {"path", status.path.string()}, {"view", status.view_label}, {"reason", status.reason}});
+      EmitDiagnostic(reporter, DiagnosticLevel::kWarning, "CTS Report Visualization", "visualization report generation failed",
+                     {{"report", status.label}, {"path", status.path.string()}, {"view", status.view_label}, {"reason", status.reason}});
     }
   }
-  schema::EmitTable("CTS Visualization Reports", {"Report", "Path", "View", "Status", "Detail"}, rows);
+  EmitTable(reporter, "CTS Visualization Reports", {"Report", "Path", "View", "Status", "Detail"}, rows);
 }
 
 }  // namespace
 
-auto EmitSvgVisualizations(const std::filesystem::path& visualization_dir, const ClockLayout& clock_layout) -> SvgVisualizationResult
+auto EmitSvgVisualizations(const SvgVisualizationInput& input) -> SvgVisualizationSummary
 {
-  const auto output_dir = ResolveVisualizationDir(visualization_dir) / "svg";
-  const auto model = DrawingBuilder::build(clock_layout);
+  LOG_FATAL_IF(input.config == nullptr) << "SVG visualization requires config.";
+  LOG_FATAL_IF(input.design == nullptr) << "SVG visualization requires design.";
+  LOG_FATAL_IF(input.wrapper == nullptr) << "SVG visualization requires wrapper.";
+  LOG_FATAL_IF(input.reporter == nullptr) << "SVG visualization requires reporter.";
+  LOG_FATAL_IF(input.clock_layout == nullptr) << "SVG visualization requires clock layout.";
+  const auto output_dir = ResolveVisualizationDir(*input.config, input.visualization_dir) / "svg";
+  const auto model = DrawingBuilder::build(DrawingInput{
+      .design = input.design,
+      .wrapper = input.wrapper,
+      .clock_layout = input.clock_layout,
+  });
 
   std::vector<VisualizationReportStatus> statuses;
   if (!model.has_clocks) {
     statuses = BuildUnavailableStatuses(output_dir, "CTS design contains no clocks; run CTS or initialize clock data before report");
-    EmitReportStatusTable(statuses);
-    return SvgVisualizationResult{.success = false};
+    EmitReportStatusTable(*input.reporter, statuses);
+    return SvgVisualizationSummary{.success = false};
   }
   if (model.design_segments.empty() && model.flyline_segments.empty()) {
     statuses = BuildUnavailableStatuses(output_dir, "CTS design contains no clock nets to visualize");
-    EmitReportStatusTable(statuses);
-    return SvgVisualizationResult{.success = false};
+    EmitReportStatusTable(*input.reporter, statuses);
+    return SvgVisualizationSummary{.success = false};
   }
 
   statuses.push_back(WriteSvgFile(output_dir / kDesignSvgLabel, kDesignSvgLabel, "svg/design", model, model.design_segments, false));
   statuses.push_back(WriteSvgFile(output_dir / kFlylineSvgLabel, kFlylineSvgLabel, "svg/flyline", model, model.flyline_segments, true));
 
-  EmitReportStatusTable(statuses);
+  EmitReportStatusTable(*input.reporter, statuses);
   const bool success = std::ranges::all_of(statuses, [](const auto& status) -> bool { return status.success; });
-  return SvgVisualizationResult{.success = success};
+  return SvgVisualizationSummary{.success = success};
 }
 
 }  // namespace icts::visualization

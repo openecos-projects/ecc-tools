@@ -25,6 +25,7 @@
 
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -33,79 +34,175 @@
 #include <vector>
 
 #include "Log.hh"
+#include "Pin.hh"
 #include "Point.hh"
-#include "adapter/sta/STAAdapter.hh"
+#include "characterization/Characterization.hh"
 #include "config/Config.hh"
+#include "geometry/Geometry.hh"
+#include "io/Wrapper.hh"
 #include "logger/Schema.hh"
 #include "synthesis/htree/HTree.hh"
+#include "synthesis/htree/characterization/library/CharacterizationLibrary.hh"
 #include "synthesis/topology/buffer/BufferInsertion.hh"
 #include "synthesis/topology/trunk/SourceTrunkSegment.hh"
-#include "synthesis/trace/topology_result/TopologyResult.hh"
+#include "synthesis/trace/topology_build/TopologyBuildTrace.hh"
 
 namespace icts {
 class Net;
-class Pin;
 }  // namespace icts
 
 namespace icts::topology {
 
 namespace {
 
-auto ResolveSourceDriveCap(Pin* clock_source) -> double
+auto ResolveSourceDriveCap(const SourceTrunkInput& input, Pin* clock_source) -> double
 {
-  return STA_ADAPTER_INST.queryClockSourceDriveCapLimit(clock_source);
+  const auto& config = *input.config;
+  auto& wrapper = *input.wrapper;
+  return wrapper.queryClockSourceDriveCapLimit(config, clock_source);
 }
 
-auto ApplyMinTopInputSlew(HTree::BuildOptions& htree_options) -> void
+auto ResolveRoutingLayer(const Config& config) -> int
 {
-  htree_options.min_top_input_slew_ns = CONFIG_INST.get_root_input_slew();
+  const auto& routing_layers = config.get_routing_layers();
+  LOG_FATAL_IF(routing_layers.empty() || routing_layers.front() == 0U) << "Topology: routing layer must be configured for HTree.";
+  return static_cast<int>(routing_layers.front());
 }
 
-auto ApplyMinInputSlew(SourceTrunkSegment::BuildOptions& segment_options) -> void
+auto ResolveWireWidth(const Config& config) -> std::optional<double>
 {
-  segment_options.min_input_slew_ns = CONFIG_INST.get_root_input_slew();
+  const double wire_width_um = config.get_wire_width();
+  return wire_width_um > 0.0 ? std::optional<double>(wire_width_um) : std::nullopt;
 }
 
-auto BuildTopSegmentOptions(Pin* clock_source, Pin* root_input, const Topology::SourceTrunkBuildOptions& options)
-    -> SourceTrunkSegment::BuildOptions
+auto ApplyMinTopInputSlew(const Config& config, HTree::Config& htree_config) -> void
 {
-  HTree::LogContext log_context = options.log_context;
+  htree_config.min_top_input_slew_ns = config.get_root_input_slew();
+}
+
+auto BuildTopSegmentConfig(const Config& config) -> SourceTrunkSegment::Config
+{
+  return SourceTrunkSegment::Config{
+      .min_input_slew_ns = config.get_root_input_slew(),
+  };
+}
+
+auto BuildTopSegmentInput(const SourceTrunkInput& input, Pin* clock_source, Pin* root_input) -> SourceTrunkSegment::Input
+{
+  const auto& config = *input.config;
+  auto& wrapper = *input.wrapper;
+  auto& fast_sta = *input.fast_sta;
+  auto& reporter = *input.reporter;
+  HTree::LogContext log_context = input.log_context;
   log_context.stage = "top_segment";
-  SourceTrunkSegment::BuildOptions segment_options{
-      .characterization_library = options.characterization_library,
-      .required_load_cap_pf = STA_ADAPTER_INST.queryPinCapacitance(root_input),
-      .source_drive_cap_pf = ResolveSourceDriveCap(clock_source),
-      .object_name_prefix = options.object_name_prefix,
+  SourceTrunkSegment::Input segment_input{
+      .source_net = input.source_net,
+      .source = clock_source,
+      .sink = root_input,
+      .characterization_library = input.characterization_library,
+      .wrapper = &wrapper,
+      .characterization_input = {},
+      .characterization_config = {},
+      .reporter = &reporter,
+      .dbu_per_um = 0,
+      .required_load_cap_pf = 0.0,
+      .source_drive_cap_pf = 0.0,
+      .object_name_prefix = input.object_name_prefix,
       .log_context = log_context,
   };
-  ApplyMinInputSlew(segment_options);
-  return segment_options;
+  const int distance_dbu = geometry::Manhattan(clock_source->get_location(), root_input->get_location());
+  if (distance_dbu <= 0) {
+    return segment_input;
+  }
+
+  segment_input.characterization_input = CharacterizationLibrary::buildRuntimeInput(CharacterizationRuntimeInput{
+      .config = &config,
+      .wrapper = &wrapper,
+      .fast_sta = &fast_sta,
+      .reporter = &reporter,
+  });
+  segment_input.characterization_config = CharacterizationLibrary::buildRuntimeConfig(config);
+  segment_input.dbu_per_um = wrapper.queryDbUnit();
+  segment_input.required_load_cap_pf = wrapper.queryPinCapacitance(root_input);
+  segment_input.source_drive_cap_pf = ResolveSourceDriveCap(input, clock_source);
+  return segment_input;
 }
 
-auto BuildTopHtreeOptions(Pin* clock_source, const Topology::SourceTrunkBuildOptions& options) -> HTree::BuildOptions
+auto BuildTopHtreeInput(const SourceTrunkInput& input, Net& source_net, Pin* clock_source) -> HTree::Input
 {
-  HTree::LogContext log_context = options.log_context;
+  const auto& config = *input.config;
+  auto& design = *input.design;
+  auto& wrapper = *input.wrapper;
+  auto& fast_sta = *input.fast_sta;
+  auto& reporter = *input.reporter;
+  HTree::LogContext log_context = input.log_context;
   log_context.stage = "top_htree";
-  HTree::BuildOptions htree_options;
-  ApplyMinTopInputSlew(htree_options);
-  htree_options.fixed_topology_root_location = FindRenderableLocation(clock_source);
-  htree_options.characterization_library = options.characterization_library;
-  htree_options.enable_root_driver_sizing = false;
-  htree_options.clock_period_ns = options.clock_period_ns;
-  htree_options.clock_period_source = options.clock_period_source;
-  htree_options.object_name_prefix = options.object_name_prefix;
-  htree_options.log_context = log_context;
-  return htree_options;
+  return HTree::Input{
+      .root_net = &source_net,
+      .design = &design,
+      .wrapper = &wrapper,
+      .reporter = &reporter,
+      .characterization_library = input.characterization_library,
+      .characterization_input = CharacterizationLibrary::buildRuntimeInput(CharacterizationRuntimeInput{
+          .config = &config,
+          .wrapper = &wrapper,
+          .fast_sta = &fast_sta,
+          .reporter = &reporter,
+      }),
+      .characterization_config = CharacterizationLibrary::buildRuntimeConfig(config),
+      .additional_characterization_lengths_um = {},
+      .fixed_topology_root_location = FindRenderableLocation(clock_source),
+      .clock_period_ns = input.clock_period_ns,
+      .clock_period_source = input.clock_period_source,
+      .log_context = log_context,
+      .object_name_prefix = input.object_name_prefix,
+      .load_role = HTree::LoadRole::kSink,
+  };
+}
+
+auto BuildTopHtreeConfig(const Config& config) -> HTree::Config
+{
+  HTree::Config htree_config{
+      .force_branch_buffer = config.is_force_branch_buffer(),
+      .depth_explore_window = std::max(1U, config.get_htree_depth_explore_window()),
+      .topology_tolerance = config.get_htree_topology_tolerance(),
+      .max_fanout = config.get_max_fanout(),
+      .has_max_cap = config.has_max_cap(),
+      .max_cap_pf = config.has_max_cap() ? config.get_max_cap() : 0.0,
+      .enable_root_driver_sizing = false,
+      .allow_boundary_relaxation = false,
+      .enable_analytical_solver = config.is_enable_analytical_htree(),
+      .routing_layer = ResolveRoutingLayer(config),
+      .wire_width_um = ResolveWireWidth(config),
+  };
+  ApplyMinTopInputSlew(config, htree_config);
+  return htree_config;
+}
+
+auto DetailStageReportOptions() -> StageReportOptions
+{
+  return StageReportOptions{.context_sink = ReportSink::kDetail, .summary_sink = ReportSink::kDetail};
 }
 
 }  // namespace
 
-auto BuildSourceTrunkTree(Net& source_net, Pin* clock_source, const std::vector<Pin*>& root_inputs,
-                          const Topology::SourceTrunkBuildOptions& options) -> Topology::SourceTrunkBuildResult
+auto BuildSourceTrunkTree(const SourceTrunkInput& input) -> SourceTrunkBuild
 {
-  Topology::SourceTrunkBuildResult result;
+  LOG_FATAL_IF(input.config == nullptr) << "Topology source trunk build requires an explicit config.";
+  LOG_FATAL_IF(input.design == nullptr) << "Topology source trunk build requires an explicit design.";
+  LOG_FATAL_IF(input.wrapper == nullptr) << "Topology source trunk build requires an explicit wrapper.";
+  LOG_FATAL_IF(input.fast_sta == nullptr) << "Topology source trunk build requires an explicit FastSTA.";
+  LOG_FATAL_IF(input.reporter == nullptr) << "Topology source trunk build requires an explicit reporter.";
+  LOG_FATAL_IF(input.source_net == nullptr) << "Topology source trunk build requires an explicit source net.";
+  const auto& flow_config = *input.config;
+  auto& reporter = *input.reporter;
+  auto& source_net = *input.source_net;
+  auto* clock_source = input.clock_source;
+  const auto& root_inputs = input.root_inputs;
+
+  SourceTrunkBuild result;
   if (clock_source == nullptr) {
-    result.failure_reason = "clock_source_is_null";
+    result.summary.failure_reason = "clock_source_is_null";
     LOG_ERROR << "Topology: top-level source-to-root synthesis failed because clock source is null.";
     return result;
   }
@@ -118,56 +215,65 @@ auto BuildSourceTrunkTree(Net& source_net, Pin* clock_source, const std::vector<
     }
   }
   if (valid_root_inputs.empty()) {
-    result.failure_reason = "empty_root_inputs";
+    result.summary.failure_reason = "empty_root_inputs";
     LOG_ERROR << "Topology: top-level source-to-root synthesis failed because no root inputs are available.";
     return result;
   }
 
   SourceNetSideEffectGuard source_net_side_effects(source_net, clock_source, valid_root_inputs);
-  ReconnectExistingNet(source_net, clock_source, valid_root_inputs);
-  auto dispatch_stage = SCHEMA_WRITER_INST.beginStage("SourceTrunk", "Dispatch source trunk synthesis",
-                                                      {
-                                                          {"root_inputs", std::to_string(valid_root_inputs.size())},
-                                                          {"dispatch", valid_root_inputs.size() == 1U ? "top_segment" : "top_htree"},
-                                                      });
+  ReconnectExistingNet(TopologyNetConnectionInput{
+      .net = &source_net,
+      .driver = clock_source,
+      .sinks = valid_root_inputs,
+  });
+  auto dispatch_stage = reporter.beginStage("SourceTrunk", "Dispatch source trunk synthesis",
+                                            {
+                                                {"root_inputs", std::to_string(valid_root_inputs.size())},
+                                                {"dispatch", valid_root_inputs.size() == 1U ? "top_segment" : "top_htree"},
+                                            },
+                                            DetailStageReportOptions());
   if (valid_root_inputs.size() == 1U) {
-    result.stage = Topology::SourceTrunkStage::kSegment;
-    auto segment_options = BuildTopSegmentOptions(clock_source, valid_root_inputs.front(), options);
-    auto segment_result = SourceTrunkSegment::build(source_net, clock_source, valid_root_inputs.front(), segment_options);
-    if (!segment_result.success) {
-      result.failure_reason = segment_result.failure_reason.empty() ? "top_segment_failed" : segment_result.failure_reason;
-      result.used_boundary_fallback = segment_result.used_boundary_fallback;
+    result.summary.stage = SourceTrunkStage::kSegment;
+    auto segment_input = BuildTopSegmentInput(input, clock_source, valid_root_inputs.front());
+    auto segment_config = BuildTopSegmentConfig(flow_config);
+    auto segment_build = SourceTrunkSegment::build(segment_input, segment_config);
+    if (!segment_build.summary.success) {
+      result.summary.failure_reason
+          = segment_build.summary.failure_reason.empty() ? "top_segment_failed" : segment_build.summary.failure_reason;
+      result.summary.used_boundary_relaxation = segment_build.summary.used_boundary_relaxation;
       source_net_side_effects.restore();
-      dispatch_stage.failed({{"reason", result.failure_reason}});
+      dispatch_stage.failed({{"reason", result.summary.failure_reason}});
       return result;
     }
-    RecordTopSegmentResult(result, segment_result);
+    RecordTopSegmentBuild(result, segment_build);
     dispatch_stage.finished({
-        {"stage", ToString(result.stage)},
-        {"inserted_insts", std::to_string(result.inserted_insts.size())},
-        {"inserted_nets", std::to_string(result.inserted_nets.size())},
-        {"used_boundary_fallback", result.used_boundary_fallback ? "true" : "false"},
+        {"stage", ToString(result.summary.stage)},
+        {"inserted_insts", std::to_string(result.output.inserted_insts.size())},
+        {"inserted_nets", std::to_string(result.output.inserted_nets.size())},
+        {"used_boundary_relaxation", result.summary.used_boundary_relaxation ? "true" : "false"},
     });
     return result;
   }
 
-  result.stage = Topology::SourceTrunkStage::kHTree;
-  auto htree_options = BuildTopHtreeOptions(clock_source, options);
-  result.htree_result = HTree::build(source_net, htree_options);
-  if (!result.htree_result.success) {
-    result.failure_reason = result.htree_result.failure_reason.empty() ? "top_htree_failed" : result.htree_result.failure_reason;
+  result.summary.stage = SourceTrunkStage::kHTree;
+  auto htree_input = BuildTopHtreeInput(input, source_net, clock_source);
+  auto htree_config = BuildTopHtreeConfig(flow_config);
+  auto htree_build = HTree::build(htree_input, htree_config);
+  if (!htree_build.summary.success) {
+    result.summary.failure_reason = htree_build.summary.failure_reason.empty() ? "top_htree_failed" : htree_build.summary.failure_reason;
     source_net_side_effects.restore();
-    dispatch_stage.failed({{"reason", result.failure_reason}});
+    dispatch_stage.failed({{"reason", result.summary.failure_reason}});
     return result;
   }
 
-  RecordTopHtreeResult(result);
+  const auto selected_depth = htree_build.summary.selected_depth.value_or(0U);
+  RecordTopHtreeBuild(result, std::move(htree_build));
   dispatch_stage.finished({
-      {"stage", ToString(result.stage)},
-      {"selected_depth", std::to_string(result.htree_result.selected_depth.value_or(0U))},
-      {"inserted_insts", std::to_string(result.inserted_insts.size())},
-      {"inserted_nets", std::to_string(result.inserted_nets.size())},
-      {"used_boundary_fallback", result.used_boundary_fallback ? "true" : "false"},
+      {"stage", ToString(result.summary.stage)},
+      {"selected_depth", std::to_string(selected_depth)},
+      {"inserted_insts", std::to_string(result.output.inserted_insts.size())},
+      {"inserted_nets", std::to_string(result.output.inserted_nets.size())},
+      {"used_boundary_relaxation", result.summary.used_boundary_relaxation ? "true" : "false"},
   });
   return result;
 }

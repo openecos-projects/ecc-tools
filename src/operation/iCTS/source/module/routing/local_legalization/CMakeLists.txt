@@ -3,9 +3,10 @@ add_library(icts_source_module_routing_local_legalization ${ICTS_MODULE_ROUTING}
 target_link_libraries(
   icts_source_module_routing_local_legalization
   PUBLIC
-  icts_source_database
+  icts_source_database_spatial
+  icts_source_utils_geometry
   PRIVATE
-  icts_source_utils
+  log
 )
 
 target_include_directories(

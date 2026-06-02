@@ -6,7 +6,7 @@
 
 %code provides {
 int spef_lex(void);
-void spef_error(ista::spef::ParserContext* context, const char* message);
+void spef_error(spef::ParserContext* context, const char* message);
 }
 
 %union {
@@ -15,7 +15,7 @@ void spef_error(ista::spef::ParserContext* context, const char* message);
 }
 
 %define api.prefix {spef_}
-%parse-param { ista::spef::ParserContext* context }
+%parse-param { spef::ParserContext* context }
 
 %token EOL
 %token K_NAME_MAP K_PORTS K_CONN K_CAP K_RES K_END K_D_NET
@@ -52,18 +52,18 @@ line:
   ;
 
 section_line:
-    K_NAME_MAP { context->setSection(ista::spef::SectionType::kNameMap); }
-  | K_PORTS { context->setSection(ista::spef::SectionType::kPorts); }
-  | K_CONN { context->setSection(ista::spef::SectionType::kConn); }
-  | K_CAP { context->setSection(ista::spef::SectionType::kCap); }
-  | K_RES { context->setSection(ista::spef::SectionType::kRes); }
-  | K_END { context->setSection(ista::spef::SectionType::kEnd); }
+    K_NAME_MAP { context->setSection(spef::SectionType::kNameMap); }
+  | K_PORTS { context->setSection(spef::SectionType::kPorts); }
+  | K_CONN { context->setSection(spef::SectionType::kConn); }
+  | K_CAP { context->setSection(spef::SectionType::kCap); }
+  | K_RES { context->setSection(spef::SectionType::kRes); }
+  | K_END { context->setSection(spef::SectionType::kEnd); }
   ;
 
 header_line:
     HEADER_KEY
     {
-      context->startHeader(ista::spef::tokenToString($1));
+      context->startHeader(spef::tokenToString($1));
       std::free($1);
     }
     header_values
@@ -81,12 +81,12 @@ header_values:
 header_value:
     name_value_token
     {
-      context->addHeaderValue(ista::spef::stripQuotes(ista::spef::tokenToString($1)));
+      context->addHeaderValue(spef::stripQuotes(spef::tokenToString($1)));
       std::free($1);
     }
   | DIRECTION
     {
-      context->addHeaderValue(ista::spef::tokenToString($1));
+      context->addHeaderValue(spef::tokenToString($1));
       std::free($1);
     }
   ;
@@ -94,8 +94,8 @@ header_value:
 name_map_entry:
     NAME_REF name_value_token EOL
     {
-      if (context->section() == ista::spef::SectionType::kNameMap) {
-        context->addNameMap(ista::spef::tokenToString($1), ista::spef::stripQuotes(ista::spef::tokenToString($2)));
+      if (context->section() == spef::SectionType::kNameMap) {
+        context->addNameMap(spef::tokenToString($1), spef::stripQuotes(spef::tokenToString($2)));
       }
       std::free($1);
       std::free($2);
@@ -105,17 +105,17 @@ name_map_entry:
 port_entry:
     NAME_REF direction EOL
     {
-      if (context->section() == ista::spef::SectionType::kPorts) {
-        context->addPort(ista::spef::tokenToString($1), static_cast<ista::spef::ConnectionDirection>($2),
-                         ista::spef::Coord{});
+      if (context->section() == spef::SectionType::kPorts) {
+        context->addPort(spef::tokenToString($1), static_cast<spef::ConnectionDirection>($2),
+                         spef::Coord{});
       }
       std::free($1);
     }
   | NAME_REF direction K_COORD NUMBER NUMBER EOL
     {
-      if (context->section() == ista::spef::SectionType::kPorts) {
-        context->addPort(ista::spef::tokenToString($1), static_cast<ista::spef::ConnectionDirection>($2),
-                         ista::spef::Coord{ista::spef::toDouble($4), ista::spef::toDouble($5)});
+      if (context->section() == spef::SectionType::kPorts) {
+        context->addPort(spef::tokenToString($1), static_cast<spef::ConnectionDirection>($2),
+                         spef::Coord{spef::toDouble($4), spef::toDouble($5)});
       }
       std::free($1);
       std::free($4);
@@ -126,7 +126,7 @@ port_entry:
 dnet_entry:
     K_D_NET name_token NUMBER EOL
     {
-      context->startNet(ista::spef::tokenToString($2), ista::spef::toDouble($3), 0);
+      context->startNet(spef::tokenToString($2), spef::toDouble($3), 0);
       std::free($2);
       std::free($3);
     }
@@ -142,8 +142,8 @@ conn_entry:
 conn_start:
     conn_type name_token direction_opt
     {
-      context->startConn(static_cast<ista::spef::ConnectionType>($1), ista::spef::tokenToString($2),
-                         static_cast<ista::spef::ConnectionDirection>($3));
+      context->startConn(static_cast<spef::ConnectionType>($1), spef::tokenToString($2),
+                         static_cast<spef::ConnectionDirection>($3));
       std::free($2);
     }
   ;
@@ -156,35 +156,35 @@ conn_attrs:
 conn_attr:
     K_COORD NUMBER NUMBER
     {
-      context->setConnCoordinate(ista::spef::Coord{ista::spef::toDouble($2), ista::spef::toDouble($3)});
+      context->setConnCoordinate(spef::Coord{spef::toDouble($2), spef::toDouble($3)});
       std::free($2);
       std::free($3);
     }
   | K_LOAD NUMBER
     {
-      context->setConnLoad(ista::spef::toDouble($2));
+      context->setConnLoad(spef::toDouble($2));
       std::free($2);
     }
   | K_DRIVE name_token
     {
-      context->setConnDrivingCell(ista::spef::stripQuotes(ista::spef::tokenToString($2)));
+      context->setConnDrivingCell(spef::stripQuotes(spef::tokenToString($2)));
       std::free($2);
     }
   | K_LL NUMBER NUMBER
     {
-      context->setConnLowerLeft(ista::spef::Coord{ista::spef::toDouble($2), ista::spef::toDouble($3)});
+      context->setConnLowerLeft(spef::Coord{spef::toDouble($2), spef::toDouble($3)});
       std::free($2);
       std::free($3);
     }
   | K_UR NUMBER NUMBER
     {
-      context->setConnUpperRight(ista::spef::Coord{ista::spef::toDouble($2), ista::spef::toDouble($3)});
+      context->setConnUpperRight(spef::Coord{spef::toDouble($2), spef::toDouble($3)});
       std::free($2);
       std::free($3);
     }
   | K_LAYER NUMBER
     {
-      context->setConnLayer(ista::spef::toInt($2));
+      context->setConnLayer(spef::toInt($2));
       std::free($2);
     }
   | K_IGNORE_ATTR
@@ -193,8 +193,8 @@ conn_attr:
 cap_res_entry:
     NUMBER name_token NUMBER EOL
     {
-      if (context->section() == ista::spef::SectionType::kCap) {
-        context->addCap(ista::spef::tokenToString($2), "", ista::spef::toDouble($3));
+      if (context->section() == spef::SectionType::kCap) {
+        context->addCap(spef::tokenToString($2), "", spef::toDouble($3));
       }
       std::free($1);
       std::free($2);
@@ -202,7 +202,7 @@ cap_res_entry:
     }
   | NUMBER name_token name_token NUMBER EOL
     {
-      context->addCapOrRes(ista::spef::tokenToString($2), ista::spef::tokenToString($3), ista::spef::toDouble($4));
+      context->addCapOrRes(spef::tokenToString($2), spef::tokenToString($3), spef::toDouble($4));
       std::free($1);
       std::free($2);
       std::free($3);
@@ -211,14 +211,14 @@ cap_res_entry:
   ;
 
 direction_opt:
-    /* empty */ { $$ = static_cast<int>(ista::spef::ConnectionDirection::kUninitialized); }
+    /* empty */ { $$ = static_cast<int>(spef::ConnectionDirection::kUninitialized); }
   | direction { $$ = $1; }
   ;
 
 direction:
     DIRECTION
     {
-      $$ = static_cast<int>(ista::spef::parseDirection($1));
+      $$ = static_cast<int>(spef::parseDirection($1));
       std::free($1);
     }
   ;
@@ -226,7 +226,7 @@ direction:
 conn_type:
     CONN_TYPE
     {
-      $$ = static_cast<int>(ista::spef::parseConnectionType($1));
+      $$ = static_cast<int>(spef::parseConnectionType($1));
       std::free($1);
     }
   ;
@@ -246,7 +246,7 @@ name_value_token:
 
 %%
 
-void spef_error(ista::spef::ParserContext* context, const char* message)
+void spef_error(spef::ParserContext* context, const char* message)
 {
   if (context != nullptr) {
     context->setError(message == nullptr ? "parse error" : message);

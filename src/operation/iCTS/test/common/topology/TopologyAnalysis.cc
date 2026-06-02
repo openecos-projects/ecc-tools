@@ -34,7 +34,7 @@
 
 #include "Pin.hh"
 #include "Point.hh"
-#include "common/types/TestDataTypes.hh"
+#include "common/dataset/TestDataset.hh"
 #include "database/spatial/Tree.hh"
 
 namespace icts_test::common::topology {

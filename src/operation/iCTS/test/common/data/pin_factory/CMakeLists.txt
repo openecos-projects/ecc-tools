@@ -7,5 +7,5 @@ add_library(
 target_link_libraries(
   icts_test_common_data_pin_factory
   PUBLIC
-  icts_test_common_types
+  icts_test_common_dataset
 )

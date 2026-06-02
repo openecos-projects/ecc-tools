@@ -26,7 +26,6 @@
 #include <glog/logging.h>
 
 #include <algorithm>
-#include <cstdint>
 #include <ostream>
 #include <string>
 #include <utility>
@@ -40,10 +39,11 @@
 #include "design/Net.hh"
 #include "design/Pin.hh"
 #include "geometry/Geometry.hh"
-#include "instantiation/design_conversion/DesignConversion.hh"
 #include "io/Wrapper.hh"
 #include "logger/Schema.hh"
 #include "synthesis/distribution/ClockDistribution.hh"
+#include "synthesis/realization/ClockTreeRealization.hh"
+#include "synthesis/topology/SourceTrunkStage.hh"
 #include "synthesis/topology/sink/SinkBranch.hh"
 #include "synthesis/topology/trunk/SourceTrunk.hh"
 #include "synthesis/trace/SynthesisTrace.hh"
@@ -56,34 +56,34 @@ namespace {
 
 constexpr std::size_t kMinSynthesisSinkCount = 2U;
 
-auto recordSynthesisResult(SynthesisTraceSummary& summary, const Topology::BuildResult& result) -> void
+auto recordSynthesisBuild(SynthesisTraceSummary& summary, const Topology::Build& build) -> void
 {
-  summary.selected_htree_level_count = std::max(summary.selected_htree_level_count, result.selected_htree_level_count);
-  if (result.selected_htree_depth.has_value()) {
-    summary.selected_htree_depth = std::max(summary.selected_htree_depth, *result.selected_htree_depth);
+  summary.selected_htree_level_count = std::max(summary.selected_htree_level_count, build.summary.selected_htree_level_count);
+  if (build.summary.selected_htree_depth.has_value()) {
+    summary.selected_htree_depth = std::max(summary.selected_htree_depth, *build.summary.selected_htree_depth);
   }
-  summary.htree_inserted_buffer_count += result.htree_inserted_buffer_count;
-  summary.htree_inserted_net_count += result.htree_inserted_net_count;
+  summary.htree_inserted_buffer_count += build.summary.htree_inserted_buffer_count;
+  summary.htree_inserted_net_count += build.summary.htree_inserted_net_count;
 }
 
-auto recordSourceTrunkResult(SynthesisTraceSummary& summary, const Topology::SourceTrunkBuildResult& result) -> void
+auto recordSourceTrunkBuild(SynthesisTraceSummary& summary, const topology::SourceTrunkBuild& build) -> void
 {
-  if (result.htree_result.selected_depth.has_value()) {
-    summary.selected_htree_depth = std::max(summary.selected_htree_depth, *result.htree_result.selected_depth);
+  if (build.summary.selected_depth.has_value()) {
+    summary.selected_htree_depth = std::max(summary.selected_htree_depth, *build.summary.selected_depth);
   }
-  summary.selected_htree_level_count = std::max(summary.selected_htree_level_count, result.htree_result.levels.size());
-  summary.htree_inserted_buffer_count += result.inserted_buffer_count;
-  summary.htree_inserted_net_count += result.inserted_net_count;
+  summary.selected_htree_level_count = std::max(summary.selected_htree_level_count, build.summary.selected_level_count);
+  summary.htree_inserted_buffer_count += build.summary.inserted_buffer_count;
+  summary.htree_inserted_net_count += build.summary.inserted_net_count;
 }
 
-auto sourceTrunkSynthesisPhase(Topology::SourceTrunkStage stage) -> ClockLayoutPhase
+auto sourceTrunkSynthesisPhase(SourceTrunkStage stage) -> ClockLayoutPhase
 {
   switch (stage) {
-    case Topology::SourceTrunkStage::kSegment:
+    case SourceTrunkStage::kSegment:
       return ClockLayoutPhase::kSourceToRootSegment;
-    case Topology::SourceTrunkStage::kHTree:
+    case SourceTrunkStage::kHTree:
       return ClockLayoutPhase::kSourceToRootHTree;
-    case Topology::SourceTrunkStage::kUnknown:
+    case SourceTrunkStage::kUnknown:
       return ClockLayoutPhase::kUnknown;
   }
   return ClockLayoutPhase::kUnknown;
@@ -101,9 +101,14 @@ auto makeLogContext(const Clock& clock, const std::string& sink_domain, const st
   };
 }
 
-auto clearClockCtsMembership(Clock& clock) -> void
+auto DetailStageReportOptions() -> StageReportOptions
 {
-  DESIGN_INST.removeClockMembershipObjects(clock);
+  return StageReportOptions{.context_sink = ReportSink::kDetail, .summary_sink = ReportSink::kDetail};
+}
+
+auto clearClockCtsMembership(Design& design, Clock& clock) -> void
+{
+  design.removeClockMembershipObjects(clock);
   clock.clearMembership();
 }
 
@@ -119,14 +124,16 @@ auto collectRootInputs(const std::vector<ClockDistributionContext>& sink_domains
   return root_inputs;
 }
 
-auto collectSourceTrunkLengthsUm(Pin* clock_source, const std::vector<Pin*>& root_inputs) -> std::vector<double>
+auto collectSourceTrunkLengthsUm(Wrapper& wrapper, Pin* clock_source, const std::vector<Pin*>& root_inputs) -> std::vector<double>
 {
   std::vector<double> lengths_um;
-  if (clock_source == nullptr) {
+  if (clock_source == nullptr || root_inputs.empty()) {
     return lengths_um;
   }
 
-  const double dbu_per_um = static_cast<double>(std::max(WRAPPER_INST.queryDbUnit(), int32_t{1}));
+  const auto dbu_per_um_value = wrapper.queryDbUnit();
+  LOG_FATAL_IF(dbu_per_um_value <= 0) << "Topology: DBU-per-micron is unavailable for characterization length estimation.";
+  const auto dbu_per_um = static_cast<double>(dbu_per_um_value);
   lengths_um.reserve(root_inputs.size());
   for (const auto* root_input : root_inputs) {
     if (root_input == nullptr) {
@@ -141,61 +148,75 @@ auto collectSourceTrunkLengthsUm(Pin* clock_source, const std::vector<Pin*>& roo
   return lengths_um;
 }
 
-class ClockTopologyFormation
+class ClockTopologySynthesis
 {
  public:
-  ClockTopologyFormation(Clock& clock, std::size_t clock_index, ClockLayout& clock_layout, SynthesisTraceSummary& summary,
-                         DomainStatusTable& status_table, CharacterizationLibrary& characterization_library, std::size_t valid_sinks)
-      : _clock(&clock),
-        _clock_index(clock_index),
-        _clock_layout(&clock_layout),
-        _summary(&summary),
-        _status_table(&status_table),
-        _characterization_library(&characterization_library),
-        _valid_sinks(valid_sinks)
+  explicit ClockTopologySynthesis(const ClockTopologyInput& input)
+      : _config(input.config),
+        _design(input.design),
+        _wrapper(input.wrapper),
+        _fast_sta(input.fast_sta),
+        _reporter(input.reporter),
+        _clock(input.clock),
+        _clock_index(input.clock_index),
+        _clock_layout(input.clock_layout),
+        _summary(input.summary),
+        _status_table(input.status_table),
+        _characterization_library(input.characterization_library),
+        _valid_sinks(input.valid_sinks),
+        _sink_domains(input.sink_domains)
   {
   }
 
-  auto form(const std::vector<ClockDistributionContext>& sink_domains) -> bool
+  auto synthesize() -> bool
   {
-    auto root_inputs = collectRootInputs(sink_domains);
-    const auto source_trunk_lengths_um = collectSourceTrunkLengthsUm(_clock->get_clock_source(), root_inputs);
-    for (const auto& context : sink_domains) {
-      if (!synthesizeSinkDomain(context, source_trunk_lengths_um)) {
+    auto root_inputs = collectRootInputs(*_sink_domains);
+    const auto source_trunk_lengths_um = collectSourceTrunkLengthsUm(*_wrapper, _clock->get_clock_source(), root_inputs);
+    for (const auto& context : *_sink_domains) {
+      if (!buildAndCommitSinkDomain(context, source_trunk_lengths_um)) {
         return false;
       }
     }
-    return synthesizeSourceTrunk(root_inputs);
+    return buildAndCommitSourceTrunk(root_inputs);
   }
 
  private:
-  auto commitSinkDomain(const ClockDistributionContext& context, Topology::BuildResult& synthesis_result, std::string& failure_reason)
-      -> bool
+  auto commitSinkDomainBuild(const ClockDistributionContext& context, Topology::Build& synthesis_build, std::string& failure_reason) -> bool
   {
-    auto commit_stage = SCHEMA_WRITER_INST.beginStage("Topology", "Commit sink domain layout",
-                                                      {
-                                                          {"sink_domain", ToString(context.sink_domain)},
-                                                          {"inserted_insts", std::to_string(synthesis_result.inserted_insts.size())},
-                                                          {"inserted_nets", std::to_string(synthesis_result.inserted_nets.size())},
-                                                      });
+    auto commit_stage = _reporter->beginStage("Topology", "Commit sink domain layout",
+                                              {
+                                                  {"sink_domain", ToString(context.sink_domain)},
+                                                  {"inserted_insts", std::to_string(synthesis_build.output.inserted_insts.size())},
+                                                  {"inserted_nets", std::to_string(synthesis_build.output.inserted_nets.size())},
+                                              },
+                                              StageReportOptions{.context_sink = ReportSink::kDetail, .emit_success_summary = false});
     auto pending_clock_layout = ClockLayoutBuilder::makeSinkDomainLayout(*_clock, _clock_index, context.makeLayoutTopology(),
-                                                                         ClockLayoutAdapter::makeSinkDomainLayoutInput(synthesis_result));
-    if (!DesignConversion::commitInsertedObjects(*_clock, synthesis_result.inserted_insts, synthesis_result.inserted_pins,
-                                                 synthesis_result.inserted_nets)) {
-      DesignConversion::reconnectNet(*context.downstream_net, context.downstream_net->get_driver(), context.sinks);
+                                                                         ClockLayoutAdapter::makeSinkDomainLayoutTopology(synthesis_build));
+    if (!ClockTreeRealization::commitInsertedObjects(InsertedObjectCommitInput{
+            .design = _design,
+            .clock = _clock,
+            .inserted_insts = &synthesis_build.output.inserted_insts,
+            .inserted_pins = &synthesis_build.output.inserted_pins,
+            .inserted_nets = &synthesis_build.output.inserted_nets,
+        })) {
+      ClockTreeRealization::reconnectNet(NetConnectionInput{
+          .net = context.downstream_net,
+          .driver = context.downstream_net->get_driver(),
+          .loads = context.sinks,
+      });
       failure_reason = "failed to commit inserted synthesis objects";
-      Topology::resetClockTopology(*_clock);
+      Topology::resetClockTopology(*_design, *_clock);
       commit_stage.failed({{"reason", failure_reason}});
       return false;
     }
 
     ClockLayoutBuilder::merge(*_clock_layout, pending_clock_layout);
-    recordSynthesisResult(*_summary, synthesis_result);
+    recordSynthesisBuild(*_summary, synthesis_build);
     commit_stage.finished();
     return true;
   }
 
-  auto synthesizeSinkDomain(const ClockDistributionContext& context, const std::vector<double>& source_trunk_lengths_um) -> bool
+  auto buildAndCommitSinkDomain(const ClockDistributionContext& context, const std::vector<double>& source_trunk_lengths_um) -> bool
   {
     const auto* const sink_domain_label = ToString(context.sink_domain);
     if (context.sinks.size() < kMinSynthesisSinkCount) {
@@ -204,28 +225,39 @@ class ClockTopologyFormation
       return true;
     }
 
-    Topology::BuildOptions synthesis_options;
-    synthesis_options.object_name_prefix = context.domain_prefix;
-    synthesis_options.enable_sink_clustering = CONFIG_INST.is_enable_sink_clustering();
-    synthesis_options.characterization_library = _characterization_library;
-    synthesis_options.additional_characterization_lengths_um = source_trunk_lengths_um;
-    synthesis_options.clock_period_ns = _clock->get_clock_period_ns();
-    synthesis_options.clock_period_source = _clock->get_clock_period_source();
-    synthesis_options.log_context = makeLogContext(*_clock, sink_domain_label, "downstream_htree", context.domain_prefix);
+    Topology::Input synthesis_input{
+        .config = _config,
+        .design = _design,
+        .wrapper = _wrapper,
+        .fast_sta = _fast_sta,
+        .reporter = _reporter,
+        .root_net = context.downstream_net,
+        .object_name_prefix = context.domain_prefix,
+        .characterization_library = _characterization_library,
+        .additional_characterization_lengths_um = source_trunk_lengths_um,
+        .clock_period_ns = _clock->get_clock_period_ns(),
+        .clock_period_source = _clock->get_clock_period_source(),
+        .log_context = makeLogContext(*_clock, sink_domain_label, "downstream_htree", context.domain_prefix),
+        .htree_loads_are_local_buffers = _clock->is_preclustered_sink_reuse(),
+    };
+    Topology::Config synthesis_config{
+        .enable_sink_clustering = _clock->is_preclustered_sink_reuse() ? false : _config->is_enable_sink_clustering(),
+    };
 
     std::string failure_reason;
-    auto synthesis_result = Topology::build(*context.downstream_net, synthesis_options);
-    if (!synthesis_result.success) {
-      failure_reason = synthesis_result.failure_reason.empty() ? "sink-domain synthesis failed" : synthesis_result.failure_reason;
+    auto synthesis_build = Topology::build(synthesis_input, synthesis_config);
+    if (!synthesis_build.summary.success) {
+      failure_reason
+          = synthesis_build.summary.failure_reason.empty() ? "sink-domain synthesis failed" : synthesis_build.summary.failure_reason;
     } else {
-      (void) commitSinkDomain(context, synthesis_result, failure_reason);
+      (void) commitSinkDomainBuild(context, synthesis_build, failure_reason);
     }
 
     if (!failure_reason.empty()) {
       _status_table->append(*_clock, DomainStatus::kFailed, context.sink_domain, _valid_sinks, context.sinks.size(), failure_reason);
       LOG_ERROR << "Topology: clock \"" << _clock->get_clock_name() << "\" sink domain " << sink_domain_label
                 << " failed: " << failure_reason;
-      Topology::resetClockTopology(*_clock);
+      Topology::resetClockTopology(*_design, *_clock);
       return false;
     }
 
@@ -233,7 +265,7 @@ class ClockTopologyFormation
     return true;
   }
 
-  auto synthesizeSourceTrunk(const std::vector<Pin*>& root_inputs) -> bool
+  auto buildAndCommitSourceTrunk(const std::vector<Pin*>& root_inputs) -> bool
   {
     const auto source_trunk_domain = SinkDomainKind::kSourceToRoot;
     const auto* const source_trunk_label = ToString(source_trunk_domain);
@@ -248,65 +280,80 @@ class ClockTopologyFormation
                             "missing clock source or source net");
       LOG_ERROR << "Topology: clock \"" << _clock->get_clock_name()
                 << "\" source trunk formation failed because the source pin or net is missing.";
-      Topology::resetClockTopology(*_clock);
+      Topology::resetClockTopology(*_design, *_clock);
       return false;
     }
 
-    const auto source_trunk_prefix = DesignConversion::makeSinkDomainPrefix(*_clock, _clock_index, source_trunk_domain);
-    Topology::SourceTrunkBuildOptions options{
+    const auto source_trunk_prefix = ClockTreeRealization::makeSinkDomainPrefix(*_clock, _clock_index, source_trunk_domain);
+    topology::SourceTrunkInput source_trunk_input{
+        .config = _config,
+        .design = _design,
+        .wrapper = _wrapper,
+        .fast_sta = _fast_sta,
+        .reporter = _reporter,
+        .source_net = clock_source_net,
+        .clock_source = clock_source,
+        .root_inputs = root_inputs,
         .object_name_prefix = source_trunk_prefix,
         .characterization_library = _characterization_library,
         .clock_period_ns = _clock->get_clock_period_ns(),
         .clock_period_source = _clock->get_clock_period_source(),
         .log_context = makeLogContext(*_clock, source_trunk_label, "source_to_root", source_trunk_prefix),
     };
-    Topology::SourceTrunkBuildResult source_trunk_result;
+    topology::SourceTrunkBuild source_trunk_build;
     {
-      auto build_stage = SCHEMA_WRITER_INST.beginStage("Topology", "Build source trunk",
-                                                       {
-                                                           {"root_inputs", std::to_string(root_inputs.size())},
-                                                           {"object_name_prefix", source_trunk_prefix},
-                                                       });
-      source_trunk_result = Topology::buildSourceTrunk(*clock_source_net, clock_source, root_inputs, options);
-      if (source_trunk_result.success) {
+      auto build_stage = _reporter->beginStage("Topology", "Build source trunk",
+                                               {
+                                                   {"root_inputs", std::to_string(root_inputs.size())},
+                                                   {"object_name_prefix", source_trunk_prefix},
+                                               },
+                                               DetailStageReportOptions());
+      source_trunk_build = topology::BuildSourceTrunkTree(source_trunk_input);
+      if (source_trunk_build.summary.success) {
         build_stage.finished({
-            {"stage", ToString(source_trunk_result.stage)},
-            {"inserted_insts", std::to_string(source_trunk_result.inserted_insts.size())},
-            {"inserted_nets", std::to_string(source_trunk_result.inserted_nets.size())},
-            {"used_boundary_fallback", source_trunk_result.used_boundary_fallback ? "true" : "false"},
+            {"stage", ToString(source_trunk_build.summary.stage)},
+            {"inserted_insts", std::to_string(source_trunk_build.output.inserted_insts.size())},
+            {"inserted_nets", std::to_string(source_trunk_build.output.inserted_nets.size())},
+            {"used_boundary_relaxation", source_trunk_build.summary.used_boundary_relaxation ? "true" : "false"},
         });
       } else {
-        build_stage.failed({{"reason", source_trunk_result.failure_reason.empty() ? "source_trunk_formation_failed"
-                                                                                  : source_trunk_result.failure_reason}});
+        build_stage.failed({{"reason", source_trunk_build.summary.failure_reason.empty() ? "source_trunk_formation_failed"
+                                                                                         : source_trunk_build.summary.failure_reason}});
       }
     }
-    const auto source_trunk_phase = sourceTrunkSynthesisPhase(source_trunk_result.stage);
-    if (!source_trunk_result.success) {
+    const auto source_trunk_phase = sourceTrunkSynthesisPhase(source_trunk_build.summary.stage);
+    if (!source_trunk_build.summary.success) {
       const auto failure_reason
-          = source_trunk_result.failure_reason.empty() ? "source trunk formation failed" : source_trunk_result.failure_reason;
+          = source_trunk_build.summary.failure_reason.empty() ? "source trunk formation failed" : source_trunk_build.summary.failure_reason;
       _status_table->append(*_clock, DomainStatus::kFailed, source_trunk_domain, _valid_sinks, root_inputs.size(), failure_reason);
       LOG_ERROR << "Topology: clock \"" << _clock->get_clock_name() << "\" source trunk formation failed: " << failure_reason;
-      Topology::resetClockTopology(*_clock);
+      Topology::resetClockTopology(*_design, *_clock);
       return false;
     }
 
     {
-      auto commit_stage = SCHEMA_WRITER_INST.beginStage("Topology", "Commit source trunk layout",
-                                                        {
-                                                            {"stage", ToString(source_trunk_result.stage)},
-                                                            {"inserted_insts", std::to_string(source_trunk_result.inserted_insts.size())},
-                                                            {"inserted_nets", std::to_string(source_trunk_result.inserted_nets.size())},
-                                                        });
+      auto commit_stage = _reporter->beginStage("Topology", "Commit source trunk layout",
+                                                {
+                                                    {"stage", ToString(source_trunk_build.summary.stage)},
+                                                    {"inserted_insts", std::to_string(source_trunk_build.output.inserted_insts.size())},
+                                                    {"inserted_nets", std::to_string(source_trunk_build.output.inserted_nets.size())},
+                                                },
+                                                StageReportOptions{.context_sink = ReportSink::kDetail, .emit_success_summary = false});
       auto pending_clock_layout = ClockLayoutBuilder::makeSourceToRootLayout(
-          *_clock, _clock_index, *clock_source_net, ClockLayoutAdapter::makeSourceTrunkLayoutInput(source_trunk_result, source_trunk_phase),
-          source_trunk_phase);
-      if (!DesignConversion::commitInsertedObjects(*_clock, source_trunk_result.inserted_insts, source_trunk_result.inserted_pins,
-                                                   source_trunk_result.inserted_nets)) {
+          *_clock, _clock_index, *clock_source_net,
+          ClockLayoutAdapter::makeSourceTrunkLayoutTopology(source_trunk_build, source_trunk_phase), source_trunk_phase);
+      if (!ClockTreeRealization::commitInsertedObjects(InsertedObjectCommitInput{
+              .design = _design,
+              .clock = _clock,
+              .inserted_insts = &source_trunk_build.output.inserted_insts,
+              .inserted_pins = &source_trunk_build.output.inserted_pins,
+              .inserted_nets = &source_trunk_build.output.inserted_nets,
+          })) {
         _status_table->append(*_clock, DomainStatus::kFailed, source_trunk_domain, _valid_sinks, root_inputs.size(),
                               "failed to commit source trunk objects");
         LOG_ERROR << "Topology: clock \"" << _clock->get_clock_name()
                   << "\" source trunk formation failed while committing inserted objects.";
-        Topology::resetClockTopology(*_clock);
+        Topology::resetClockTopology(*_design, *_clock);
         commit_stage.failed({{"reason", "failed_to_commit_source_trunk_objects"}});
         return false;
       }
@@ -314,12 +361,17 @@ class ClockTopologyFormation
       ClockLayoutBuilder::merge(*_clock_layout, pending_clock_layout);
       commit_stage.finished();
     }
-    recordSourceTrunkResult(*_summary, source_trunk_result);
+    recordSourceTrunkBuild(*_summary, source_trunk_build);
     _status_table->append(*_clock, DomainStatus::kFinished, source_trunk_domain, _valid_sinks, root_inputs.size(),
-                          ToString(source_trunk_result.stage));
+                          ToString(source_trunk_build.summary.stage));
     return true;
   }
 
+  const Config* _config = nullptr;
+  Design* _design = nullptr;
+  Wrapper* _wrapper = nullptr;
+  FastSTA* _fast_sta = nullptr;
+  SchemaWriter* _reporter = nullptr;
   Clock* _clock = nullptr;
   std::size_t _clock_index = 0U;
   ClockLayout* _clock_layout = nullptr;
@@ -327,51 +379,44 @@ class ClockTopologyFormation
   DomainStatusTable* _status_table = nullptr;
   CharacterizationLibrary* _characterization_library = nullptr;
   std::size_t _valid_sinks = 0U;
+  const std::vector<ClockDistributionContext>* _sink_domains = nullptr;
 };
 
 }  // namespace
 
-auto Topology::build(Net& root_net) -> BuildResult
+auto Topology::build(const Input& input, const Config& config) -> Build
 {
-  return build(root_net, BuildOptions{});
-}
-
-auto Topology::build(Net& root_net, const BuildOptions& options) -> BuildResult
-{
-  return topology::BuildSinkTree(root_net, options);
-}
-
-auto Topology::buildSourceTrunk(Net& source_net, Pin* clock_source, const std::vector<Pin*>& root_inputs,
-                                const SourceTrunkBuildOptions& options) -> SourceTrunkBuildResult
-{
-  return topology::BuildSourceTrunkTree(source_net, clock_source, root_inputs, options);
+  return topology::BuildSinkTree(input, config);
 }
 
 auto Topology::resetClockTopology(Clock& clock) -> void
 {
-  DesignConversion::restoreClockSourceNetToClockLoads(clock);
-  clearClockCtsMembership(clock);
+  ClockTreeRealization::restoreClockSourceNetToClockLoads(clock);
+  clock.clearMembership();
 }
 
-auto Topology::formClock(Clock& clock, std::size_t clock_index, ClockLayout& clock_layout, SynthesisTraceSummary& summary,
-                         DomainStatusTable& status_table, CharacterizationLibrary& characterization_library, std::size_t valid_sinks,
-                         const std::vector<ClockDistributionContext>& sink_domains) -> bool
+auto Topology::resetClockTopology(Design& design, Clock& clock) -> void
 {
-  ClockTopologyFormation formation(clock, clock_index, clock_layout, summary, status_table, characterization_library, valid_sinks);
-  return formation.form(sink_domains);
+  ClockTreeRealization::restoreClockSourceNetToClockLoads(clock);
+  clearClockCtsMembership(design, clock);
 }
 
-auto ToString(Topology::SourceTrunkStage stage) -> const char*
+auto Topology::formClock(const ClockTopologyInput& input) -> bool
 {
-  switch (stage) {
-    case Topology::SourceTrunkStage::kSegment:
-      return "top_segment";
-    case Topology::SourceTrunkStage::kHTree:
-      return "top_htree";
-    case Topology::SourceTrunkStage::kUnknown:
-      return "unknown";
-  }
-  return "unknown";
+  LOG_FATAL_IF(input.config == nullptr) << "Topology: clock topology config is null.";
+  LOG_FATAL_IF(input.design == nullptr) << "Topology: clock topology design is null.";
+  LOG_FATAL_IF(input.wrapper == nullptr) << "Topology: clock topology wrapper is null.";
+  LOG_FATAL_IF(input.fast_sta == nullptr) << "Topology: clock topology FastSTA is null.";
+  LOG_FATAL_IF(input.reporter == nullptr) << "Topology: clock topology reporter is null.";
+  LOG_FATAL_IF(input.clock == nullptr) << "Topology: clock topology clock is null.";
+  LOG_FATAL_IF(input.clock_layout == nullptr) << "Topology: clock topology layout is null.";
+  LOG_FATAL_IF(input.summary == nullptr) << "Topology: clock topology summary is null.";
+  LOG_FATAL_IF(input.status_table == nullptr) << "Topology: clock topology status table is null.";
+  LOG_FATAL_IF(input.characterization_library == nullptr) << "Topology: clock topology characterization library is null.";
+  LOG_FATAL_IF(input.sink_domains == nullptr) << "Topology: clock topology sink domains are null.";
+
+  ClockTopologySynthesis synthesis(input);
+  return synthesis.synthesize();
 }
 
 }  // namespace icts

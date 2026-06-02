@@ -28,7 +28,7 @@
 
 namespace icts {
 
-struct ClusterResult;
+struct ClusterOutput;
 struct ClusterConfig;
 class Pin;
 
@@ -39,8 +39,8 @@ class FastClustering
   ~FastClustering() = default;
 
   static auto buildElectricalBaseConfig(std::size_t max_fanout, double max_cap) -> ClusterConfig;
-  static auto runDefault(const std::vector<Pin*>& loads, const ClusterConfig& base_config) -> ClusterResult;
-  static auto run(const std::vector<Pin*>& loads, const ClusterConfig& config) -> ClusterResult;
+  static auto runDefault(const std::vector<Pin*>& loads, const ClusterConfig& base_config) -> ClusterOutput;
+  static auto run(const std::vector<Pin*>& loads, const ClusterConfig& config) -> ClusterOutput;
 };
 
 }  // namespace icts

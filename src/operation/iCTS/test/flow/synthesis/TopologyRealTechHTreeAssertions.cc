@@ -33,21 +33,20 @@
 
 #include "Inst.hh"
 #include "Pin.hh"
-#include "TopologyRealTechSmokeSupport.hh"
+#include "TopologyRealTechScenario.hh"
 #include "Tree.hh"
 #include "database/config/Config.hh"
 #include "database/design/Net.hh"
-#include "flow/synthesis/htree/HTreeBuildObservation.hh"
 #include "synthesis/htree/HTree.hh"
 
 namespace icts_test::synthesis_realtech_smoke {
 namespace {
 
-auto FindLeafLevelPlan(const icts::HTree::BuildResult& htree_result) -> const icts::HTree::LevelPlan*
+auto FindLeafLevelPlan(const icts::HTree::Output& htree_output) -> const icts::HTree::LevelPlan*
 {
   const auto level_it
-      = std::ranges::find_if(htree_result.levels, [](const icts::HTree::LevelPlan& level) -> bool { return level.is_leaf_level; });
-  if (level_it == htree_result.levels.end()) {
+      = std::ranges::find_if(htree_output.levels, [](const icts::HTree::LevelPlan& level) -> bool { return level.is_leaf_level; });
+  if (level_it == htree_output.levels.end()) {
     return nullptr;
   }
   return &(*level_it);
@@ -55,15 +54,15 @@ auto FindLeafLevelPlan(const icts::HTree::BuildResult& htree_result) -> const ic
 
 }  // namespace
 
-auto AssertNoSingleLoadExternalLeafBuffer(const icts::HTree::BuildResult& htree_result) -> void
+auto AssertNoSingleLoadExternalLeafBuffer(const icts::HTree::Output& htree_output) -> void
 {
   std::unordered_set<const icts::Inst*> inserted_insts;
-  inserted_insts.reserve(htree_result.inserted_insts.size());
-  for (const auto& inst_owner : htree_result.inserted_insts) {
+  inserted_insts.reserve(htree_output.inserted_insts.size());
+  for (const auto& inst_owner : htree_output.inserted_insts) {
     inserted_insts.insert(inst_owner.get());
   }
 
-  for (const auto& inst_owner : htree_result.inserted_insts) {
+  for (const auto& inst_owner : htree_output.inserted_insts) {
     const auto* inst = inst_owner.get();
     if (inst == nullptr || !inst->is_buffer()) {
       continue;
@@ -84,50 +83,39 @@ auto AssertNoSingleLoadExternalLeafBuffer(const icts::HTree::BuildResult& htree_
   }
 }
 
-auto AssertUnrestrictedFrontierHTree(const icts::HTree::BuildResult& htree_result) -> void
+auto AssertTopologyHTreePayload(const icts::Topology::Build& result) -> void
 {
-  ASSERT_TRUE(htree_result.success);
-  EXPECT_FALSE(htree_result.force_branch_buffer);
-  ASSERT_FALSE(htree_result.levels.empty());
+  ASSERT_TRUE(result.summary.success);
+  const auto& htree_output = result.output.htree_output;
+  ASSERT_FALSE(htree_output.levels.empty());
+  ASSERT_TRUE(result.summary.selected_htree_depth.has_value());
+  EXPECT_EQ(result.summary.selected_htree_depth.value_or(0U), htree_output.levels.size());
+  EXPECT_EQ(result.summary.selected_htree_level_count, htree_output.levels.size());
+  EXPECT_LE(result.summary.htree_inserted_buffer_count, result.output.inserted_insts.size());
+  EXPECT_LE(result.summary.htree_inserted_net_count, result.output.inserted_nets.size());
+  EXPECT_TRUE(htree_output.best_char.has_value());
 }
 
-auto AssertBranchBufferedHTree(const icts::HTree::BuildResult& htree_result) -> void
+auto AssertBranchBufferedHTreePayload(const icts::HTree::Output& htree_output) -> void
 {
-  ASSERT_TRUE(htree_result.success);
-  EXPECT_TRUE(htree_result.force_branch_buffer);
-  ASSERT_FALSE(htree_result.levels.empty());
+  ASSERT_FALSE(htree_output.levels.empty());
 
-  const auto* leaf_level = FindLeafLevelPlan(htree_result);
+  const auto* leaf_level = FindLeafLevelPlan(htree_output);
   ASSERT_NE(leaf_level, nullptr);
   EXPECT_TRUE(leaf_level->selected_has_terminal_branch_buffer);
   EXPECT_FALSE(leaf_level->selected_terminal_cell_master.empty());
 }
 
-auto AssertDepthCandidateCoverage(const icts::HTree::BuildResult& result) -> void
+auto AssertSelectedTopologyDepth(const icts::Topology::Build& result) -> void
 {
-  const auto observation = htree::ObserveHTreeBuild(result);
-  ASSERT_GT(observation.depth_candidate_count, 0U);
-  ASSERT_TRUE(observation.has_selected_depth);
+  ASSERT_TRUE(result.summary.selected_htree_depth.has_value());
 
-  const auto topology_levels = result.topology.levels();
+  const auto& htree_output = result.output.htree_output;
+  const auto topology_levels = htree_output.topology.levels();
   ASSERT_GT(topology_levels.size(), 1U);
-  const auto max_depth = static_cast<unsigned>(topology_levels.size() - 1U);
-  EXPECT_EQ(observation.depth_candidate_count, std::min<std::size_t>(CONFIG_INST.get_htree_depth_explore_window(), max_depth));
-
-  EXPECT_EQ(observation.selected_depth, result.selected_depth.value_or(0U));
-  EXPECT_EQ(observation.selected_depth, observation.selected_level_count);
-  EXPECT_TRUE(observation.success);
-  EXPECT_GT(observation.selected_final_frontier_count, 0U);
-}
-
-auto AssertSelectedHTreeLoadDistribution(const icts::HTree::BuildResult& result) -> void
-{
-  const auto observation = htree::ObserveHTreeBuild(result);
-  ASSERT_GT(observation.htree_load_group_count, 0U);
-  EXPECT_LE(observation.htree_load_cap_min_pf, observation.htree_load_cap_mean_pf);
-  EXPECT_LE(observation.htree_load_cap_min_pf, observation.htree_load_cap_median_pf);
-  EXPECT_LE(observation.htree_load_cap_mean_pf, observation.htree_load_cap_max_pf);
-  EXPECT_LE(observation.htree_load_cap_median_pf, observation.htree_load_cap_max_pf);
+  EXPECT_EQ(result.summary.selected_htree_depth.value_or(0U), htree_output.levels.size());
+  EXPECT_LE(result.summary.selected_htree_depth.value_or(0U), static_cast<unsigned>(topology_levels.size() - 1U));
+  EXPECT_TRUE(result.summary.success);
 }
 
 }  // namespace icts_test::synthesis_realtech_smoke

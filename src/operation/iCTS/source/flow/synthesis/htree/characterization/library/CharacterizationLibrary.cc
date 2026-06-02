@@ -25,76 +25,136 @@
 
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <ostream>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "CharBuilder.hh"
 #include "Log.hh"
+#include "characterization/Characterization.hh"
 #include "config/Config.hh"
+#include "io/Wrapper.hh"
 
 namespace icts {
+namespace {
 
-auto CharacterizationLibrary::makeRequestKey(const CharBuilder::InitOptions& options) -> RequestKey
+auto BuildRuntimeCharacterizationBufferCells(Wrapper& wrapper, const std::vector<std::string>& buffer_types)
+    -> std::vector<CharacterizationBufferCell>
 {
-  return RequestKey{
-      .wirelength_unit_um = options.wirelength_unit_um,
-      .wirelength_iterations = options.wirelength_iterations,
-      .wirelength_indices = options.wirelength_indices,
-      .max_slew_ns = options.max_slew_ns,
-      .max_cap_pf = options.max_cap_pf,
-      .buffer_types = options.buffer_types,
-      .char_buf_redundancy_pct = options.char_buf_redundancy_pct,
-      .slew_steps = options.slew_steps,
-      .cap_steps = options.cap_steps,
-      .routing_layer = options.routing_layer,
-      .wire_width = options.wire_width,
+  std::vector<CharacterizationBufferCell> buffer_cells;
+  buffer_cells.reserve(buffer_types.size());
+  for (const auto& cell_master : buffer_types) {
+    auto [input_pin, output_pin] = wrapper.queryBufferPorts(cell_master);
+    buffer_cells.push_back(CharacterizationBufferCell{
+        .cell_master = cell_master,
+        .max_cap_pf = 0.0,
+        .input_cap_pf = wrapper.queryCharInputPinCap(cell_master),
+        .input_slew_limit_ns = wrapper.queryCellInPinSlewLimit(cell_master),
+        .input_slew_table_axis_max_ns = wrapper.queryCellInPinSlewTableAxisMax(cell_master),
+        .output_cap_limit_pf = wrapper.queryCellOutPinCapLimit(cell_master),
+        .output_cap_table_axis_max_pf = wrapper.queryCellOutPinCapTableAxisMax(cell_master),
+        .cell_height_um = wrapper.queryCellHeightUm(cell_master),
+        .input_pin = std::move(input_pin),
+        .output_pin = std::move(output_pin),
+    });
+  }
+  return buffer_cells;
+}
+
+}  // namespace
+
+auto CharacterizationLibrary::makeCharacterizationCacheKey(const CharBuilder::Input& input, const CharBuilder::Config& config)
+    -> CharacterizationCacheKey
+{
+  return CharacterizationCacheKey{
+      .wirelength_unit_um = config.wirelength_unit_um,
+      .wirelength_iterations = config.wirelength_iterations,
+      .wirelength_indices = config.wirelength_indices,
+      .max_slew_ns = config.max_slew_ns,
+      .max_cap_pf = config.max_cap_pf,
+      .buffer_types = input.buffer_types,
+      .characterization_buffer_cells = input.characterization_buffer_cells,
+      .char_buf_redundancy_pct = config.char_buf_redundancy_pct,
+      .slew_steps = config.slew_steps,
+      .cap_steps = config.cap_steps,
+      .routing_layer = config.routing_layer,
+      .wire_width_um = config.wire_width_um,
+      .clock_route_segment_rc = input.clock_route_segment_rc,
+      .dbu_per_um = input.dbu_per_um,
+      .root_input_slew_ns = input.root_input_slew_ns,
   };
 }
 
-auto CharacterizationLibrary::ensure(const CharBuilder::InitOptions& options) -> EnsureResult
+auto CharacterizationLibrary::ensure(const CharBuilder::Input& input, const CharBuilder::Config& config) -> EnsureSummary
 {
-  const auto request_key = makeRequestKey(options);
-  if (_ready && request_key == _request_key && !_char_builder.get_segment_chars().empty()) {
-    return EnsureResult{.success = true, .reused = true, .failure_reason = ""};
+  const auto characterization_cache_key = makeCharacterizationCacheKey(input, config);
+  if (_ready && characterization_cache_key == _characterization_cache_key && !_char_builder.get_segment_chars().empty()) {
+    return EnsureSummary{.success = true, .reused = true, .failure_reason = ""};
   }
 
-  _char_builder.init(options);
+  _char_builder.init(input, config);
   _char_builder.build();
   if (_char_builder.get_segment_chars().empty() || _char_builder.get_wirelength_unit_um() <= 0.0) {
     LOG_WARNING << "CharacterizationLibrary: characterization did not produce reusable segment chars.";
     _ready = false;
-    _request_key = {};
-    return EnsureResult{.success = false, .reused = false, .failure_reason = "no_reusable_segment_chars"};
+    _characterization_cache_key = {};
+    return EnsureSummary{.success = false, .reused = false, .failure_reason = "no_reusable_segment_chars"};
   }
 
-  _request_key = request_key;
+  _characterization_cache_key = characterization_cache_key;
   _ready = true;
-  return EnsureResult{.success = true, .reused = false, .failure_reason = ""};
+  return EnsureSummary{.success = true, .reused = false, .failure_reason = ""};
 }
 
-auto CharacterizationLibrary::buildRuntimeOptions() -> CharBuilder::InitOptions
+auto CharacterizationLibrary::buildRuntimeInput(const CharacterizationRuntimeInput& runtime_input) -> CharBuilder::Input
 {
-  CharBuilder::InitOptions options;
-  if (CONFIG_INST.has_max_buf_tran() && CONFIG_INST.get_max_buf_tran() > 0.0) {
-    options.max_slew_ns = CONFIG_INST.get_max_buf_tran();
-  }
-  if (CONFIG_INST.has_max_cap() && CONFIG_INST.get_max_cap() > 0.0) {
-    options.max_cap_pf = CONFIG_INST.get_max_cap();
-  }
-  if (CONFIG_INST.get_wirelength_unit_um() > 0.0) {
-    options.wirelength_unit_um = CONFIG_INST.get_wirelength_unit_um();
-  }
-  options.wirelength_iterations = CONFIG_INST.get_wirelength_iterations();
-  options.slew_steps = CONFIG_INST.get_slew_steps();
-  options.cap_steps = CONFIG_INST.get_cap_steps();
-  options.buffer_types = CONFIG_INST.get_buffer_types();
-  options.char_buf_redundancy_pct = CONFIG_INST.get_char_buf_redundancy_pct();
+  LOG_FATAL_IF(runtime_input.config == nullptr) << "CharacterizationLibrary: runtime config is null.";
+  LOG_FATAL_IF(runtime_input.wrapper == nullptr) << "CharacterizationLibrary: runtime wrapper is null.";
+  LOG_FATAL_IF(runtime_input.fast_sta == nullptr) << "CharacterizationLibrary: runtime FastSTA is null.";
+  LOG_FATAL_IF(runtime_input.reporter == nullptr) << "CharacterizationLibrary: runtime reporter is null.";
 
-  const auto& routing_layers = CONFIG_INST.get_routing_layers();
-  options.routing_layer = routing_layers.empty() ? 1 : static_cast<int>(routing_layers.front());
-  if (CONFIG_INST.get_wire_width() > 0.0) {
-    options.wire_width = CONFIG_INST.get_wire_width();
+  const auto& config = *runtime_input.config;
+  auto& wrapper = *runtime_input.wrapper;
+  CharBuilder::Input char_input;
+  char_input.buffer_types = config.get_buffer_types();
+  char_input.characterization_buffer_cells = BuildRuntimeCharacterizationBufferCells(wrapper, char_input.buffer_types);
+  char_input.clock_route_segment_rc = wrapper.queryConfiguredClockRouteSegmentRc(config);
+  const auto dbu_per_um = wrapper.queryDbUnit();
+  LOG_FATAL_IF(dbu_per_um <= 0) << "CharacterizationLibrary: DBU-per-micron must be available before characterization.";
+  char_input.dbu_per_um = dbu_per_um;
+  char_input.root_input_slew_ns = std::max(0.0, config.get_root_input_slew());
+  char_input.wrapper = &wrapper;
+  char_input.fast_sta = runtime_input.fast_sta;
+  char_input.reporter = runtime_input.reporter;
+  return char_input;
+}
+
+auto CharacterizationLibrary::buildRuntimeConfig(const Config& config) -> CharBuilder::Config
+{
+  CharBuilder::Config char_config;
+  if (config.has_max_buf_tran() && config.get_max_buf_tran() > 0.0) {
+    char_config.max_slew_ns = config.get_max_buf_tran();
   }
-  return options;
+  if (config.has_max_cap() && config.get_max_cap() > 0.0) {
+    char_config.max_cap_pf = config.get_max_cap();
+  }
+  if (config.get_wirelength_unit_um() > 0.0) {
+    char_config.wirelength_unit_um = config.get_wirelength_unit_um();
+  }
+  char_config.wirelength_iterations = config.get_wirelength_iterations();
+  char_config.slew_steps = config.get_slew_steps();
+  char_config.cap_steps = config.get_cap_steps();
+  char_config.char_buf_redundancy_pct = config.get_char_buf_redundancy_pct();
+
+  const auto& routing_layers = config.get_routing_layers();
+  LOG_FATAL_IF(routing_layers.empty() || routing_layers.front() == 0U)
+      << "CharacterizationLibrary: routing layer must be configured before characterization.";
+  char_config.routing_layer = static_cast<int>(routing_layers.front());
+  if (config.get_wire_width() > 0.0) {
+    char_config.wire_width_um = config.get_wire_width();
+  }
+  return char_config;
 }
 
 }  // namespace icts

@@ -26,7 +26,7 @@
 #include <string>
 #include <vector>
 
-#include "flow/synthesis/htree/HTreeRealTechSmokeSupport.hh"
+#include "flow/synthesis/htree/HTreeRealTechScenario.hh"
 
 namespace icts_test {
 namespace {
