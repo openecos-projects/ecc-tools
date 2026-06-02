@@ -97,8 +97,8 @@ PYTHONPATH="$smoke_dir/site" "$PYTHON3" -c "
 from ecc_tools_bin import ecc_py
 
 required = ['flow_init', 'flow_exit', 'db_init', 'def_init', 'lef_init',
-            'def_save', 'run_placer', 'run_cts', 'run_rt', 'run_drc',
-            'run_filler', 'init_floorplan', 'report_db', 'feature_summary']
+            'def_save', 'run_cts', 'run_rt', 'run_drc',
+            'insert_filler', 'init_floorplan', 'report_db', 'feature_summary']
 missing = [f for f in required if not callable(getattr(ecc_py, f, None))]
 assert not missing, f'missing or non-callable bindings: {missing}'
 
