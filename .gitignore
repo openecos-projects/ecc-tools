@@ -31,6 +31,7 @@ target/
 *-stamp/
 tmp/
 scripts/design/ics55/gcd/
+scripts/design/ics55/soc/
 scripts/design/sky130/gcd/
 
 
