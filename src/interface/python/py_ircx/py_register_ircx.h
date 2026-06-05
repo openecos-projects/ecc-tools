@@ -25,7 +25,7 @@ namespace py = pybind11;
 
 void register_ircx(py::module& m)
 {
-  m.def("init_rcx", init_rcx, py::arg("config"));
+  m.def("init_rcx", init_rcx, py::arg("config"), py::arg("pdk") = py::none());
   m.def("run_rcx", run_rcx);
   m.def("report_rcx", report_rcx);
 }
