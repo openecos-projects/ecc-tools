@@ -34,6 +34,11 @@ struct Library;
 
 namespace idb {
 
+class IdbViaMasterGenerate;
+class IdbCellMaster;
+class IdbInstance;
+class IdbTerm;
+
 using std::string;
 using std::vector;
 
@@ -88,10 +93,13 @@ class Def2GdsWrite
   std::unique_ptr<gdstk::Library> _library;
   gdstk::Cell* _top_cell = nullptr;
   std::map<std::string, int> _cell_name_count;
+  std::map<IdbCellMaster*, gdstk::Cell*> _component_master_cells;
+  std::map<std::string, gdstk::Cell*> _generated_via_cut_cells;
   std::set<std::string> _used_cell_names;
 
   gdstk::Cell* createCell(const string& name);
   void addReferenceDefault(gdstk::Cell* child);
+  void addInstanceReference(gdstk::Cell* child, IdbInstance* instance);
   void addLabel(gdstk::Cell* gds_cell, const string& text, int32_t x, int32_t y, int32_t layer = 0, int32_t datatype = 0);
   string sanitizeCellName(const string& name);
   bool finishWrite(const char* file);
@@ -113,6 +121,10 @@ class Def2GdsWrite
   int32_t write_specialnet_wire_segment_rect(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment);
 
   void packVia(gdstk::Cell* gds_cell, IdbVia* via);
+  bool packGeneratedVia(gdstk::Cell* gds_cell, IdbVia* via);
+  gdstk::Cell* getGeneratedViaCutCell(IdbViaMasterGenerate* master_generate);
+  gdstk::Cell* getComponentMasterCell(IdbCellMaster* cell_master);
+  void packTerm(gdstk::Cell* gds_cell, IdbTerm* term);
   void packPin(gdstk::Cell* gds_cell, IdbPin* pin);
   void packLayerShape(gdstk::Cell* gds_cell, IdbLayerShape* layer_shape);
   void packRect(gdstk::Cell* gds_cell, IdbRect* rect, IdbLayer* layer);

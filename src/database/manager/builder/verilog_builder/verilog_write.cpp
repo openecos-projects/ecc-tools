@@ -352,6 +352,15 @@ void VerilogWriter::writeInstance(IdbInstance* inst)
 
   bool first_pin = true;
   vector<IdbPin*> pin_list = inst->get_pin_list()->get_pin_list();
+  std::map<std::string, std::map<int, IdbPin*>> instance_bus_pins;
+
+  for (const auto& pin : pin_list) {
+    std::string pin_name = pin->get_pin_name();
+    auto [pin_bus_name, bus_index] = ieda::Str::matchBusName(pin_name.c_str());
+    if (bus_index) {
+      instance_bus_pins[pin_bus_name][bus_index.value()] = pin;
+    }
+  }
 
   for (const auto& pin : pin_list) {
     std::string pin_name = pin->get_pin_name();
@@ -408,23 +417,43 @@ void VerilogWriter::writeInstance(IdbInstance* inst)
     bus_name += pin_bus_name;
 
     auto pin_bus = _idb_design.get_bus_list()->findBus(bus_name);
-    assert(pin_bus);
-    int bus_left = pin_bus->get().get_left();
-    int bus_right = pin_bus->get().get_right();
+    auto local_bus_pin_it = instance_bus_pins.find(pin_bus_name);
+    int bus_left = 0;
+    int bus_right = 0;
+
+    if (pin_bus) {
+      bus_left = pin_bus->get().get_left();
+      bus_right = pin_bus->get().get_right();
+    } else {
+      if (local_bus_pin_it == instance_bus_pins.end() || local_bus_pin_it->second.empty()) {
+        LOG_WARNING << "skip missing bus pin " << bus_name << " when writing verilog instance " << inst->get_name();
+        continue;
+      }
+      bus_left = local_bus_pin_it->second.rbegin()->first;
+      bus_right = local_bus_pin_it->second.begin()->first;
+    }
 
     std::string concate_str = "{ ";
     for (int index = bus_left; index >= bus_right; --index) {
-      auto* one_pin = pin_bus->get().getPin(index);
-      assert(one_pin);
+      auto* one_pin = pin_bus ? pin_bus->get().getPin(index) : nullptr;
+      if (one_pin == nullptr && local_bus_pin_it != instance_bus_pins.end()) {
+        if (auto local_pin_it = local_bus_pin_it->second.find(index); local_pin_it != local_bus_pin_it->second.end()) {
+          one_pin = local_pin_it->second;
+        }
+      }
 
       std::string pin_net_name;
 
-      if (one_pin->get_net()) {
-        pin_net_name = one_pin->get_net()->get_net_name();
-      } else {
-        if (one_pin->get_term()->get_direction() == IdbConnectDirection::kInput) {
-          pin_net_name = R"(1'b0)";
+      if (one_pin) {
+        if (one_pin->get_net()) {
+          pin_net_name = one_pin->get_net()->get_net_name();
+        } else {
+          if (one_pin->get_term()->get_direction() == IdbConnectDirection::kInput) {
+            pin_net_name = R"(1'b0)";
+          }
         }
+      } else {
+        pin_net_name = R"(1'b0)";
       }
 
       pin_net_name = escapeName(pin_net_name);

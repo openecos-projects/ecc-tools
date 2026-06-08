@@ -171,6 +171,10 @@ int32_t WirelengthEval::evalNetHTree(PointSet point_set)
 {
   int32_t net_htree = 0;
 
+  if(point_set.size() == 0){
+    return net_htree;
+  }
+
   int32_t x_direction_gravity = 0;
   for (auto& point : point_set) {
     x_direction_gravity += point.first;
@@ -197,6 +201,9 @@ int32_t WirelengthEval::evalNetHTree(PointSet point_set)
 int32_t WirelengthEval::evalNetVTree(PointSet point_set)
 {
   int32_t net_vtree = 0;
+  if(point_set.size() == 0){
+    return net_vtree;
+  }
 
   int32_t y_direction_gravity = 0;
   for (auto& point : point_set) {
@@ -318,6 +325,9 @@ int32_t WirelengthEval::evalPathFLUTE(PointSet point_set, PointPair point_pair)
 int32_t WirelengthEval::evalPathHTree(PointSet point_set, PointPair point_pair)
 {
   int32_t path_htree = 0;
+  if(point_set.size() == 0){
+    return path_htree;
+  }
 
   int32_t x_direction_gravity = 0;
   for (auto& point : point_set) {
@@ -338,6 +348,9 @@ int32_t WirelengthEval::evalPathHTree(PointSet point_set, PointPair point_pair)
 int32_t WirelengthEval::evalPathVTree(PointSet point_set, PointPair point_pair)
 {
   int32_t path_vtree = 0;
+  if(point_set.size() == 0){
+    return path_vtree;
+  }
 
   int32_t y_direction_gravity = 0;
   for (auto& point : point_set) {

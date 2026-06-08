@@ -189,6 +189,8 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
       pin->set_bounding_box();
       pin->set_grid_coordinate();
     }
+    inst->set_halo_coodinate();
+    inst->set_obs_box_list();
     i++;
     // flag = true;
   }

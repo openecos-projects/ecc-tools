@@ -28,6 +28,57 @@
 #include "boost_definition.h"
 
 namespace idb {
+namespace {
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kPiOver2 = kPi / 2.0;
+
+void setReferenceOrient(gdstk::Reference* ref, IdbOrient orient, int32_t width, int32_t height, int32_t& origin_x, int32_t& origin_y)
+{
+  if (ref == nullptr) {
+    return;
+  }
+
+  switch (orient) {
+    case IdbOrient::kW_R90:
+      ref->rotation = kPiOver2;
+      origin_x += height;
+      break;
+    case IdbOrient::kS_R180:
+      ref->rotation = kPi;
+      origin_x += width;
+      origin_y += height;
+      break;
+    case IdbOrient::kE_R270:
+      ref->rotation = -kPiOver2;
+      origin_y += width;
+      break;
+    case IdbOrient::kFN_MY:
+      ref->x_reflection = true;
+      ref->rotation = kPi;
+      origin_x += width;
+      break;
+    case IdbOrient::kFS_MX:
+      ref->x_reflection = true;
+      origin_y += height;
+      break;
+    case IdbOrient::kFW_MX90:
+      ref->x_reflection = true;
+      ref->rotation = kPiOver2;
+      break;
+    case IdbOrient::kFE_MY90:
+      ref->x_reflection = true;
+      ref->rotation = -kPiOver2;
+      origin_x += height;
+      origin_y += width;
+      break;
+    case IdbOrient::kNone:
+    case IdbOrient::kN_R0:
+    case IdbOrient::kMax:
+    default:
+      break;
+  }
+}
+}  // namespace
 
 Def2GdsWrite::Def2GdsWrite(IdbDefService* def_service) : _def_service(def_service), _library(std::make_unique<gdstk::Library>())
 {
@@ -72,6 +123,8 @@ bool Def2GdsWrite::finishWrite(const char* file)
   _library->free_all();
   _top_cell = nullptr;
   _cell_name_count.clear();
+  _component_master_cells.clear();
+  _generated_via_cut_cells.clear();
   _used_cell_names.clear();
   return error == gdstk::ErrorCode::NoError;
 }
@@ -160,6 +213,24 @@ void Def2GdsWrite::addReferenceDefault(gdstk::Cell* child)
   auto* ref = (gdstk::Reference*) gdstk::allocate_clear(sizeof(gdstk::Reference));
   ref->init(child);
   ref->origin = gdstk::Vec2{0, 0};
+  _top_cell->reference_array.append(ref);
+}
+
+void Def2GdsWrite::addInstanceReference(gdstk::Cell* child, IdbInstance* instance)
+{
+  if (_top_cell == nullptr || child == nullptr || instance == nullptr || instance->get_coordinate() == nullptr) {
+    return;
+  }
+
+  auto* ref = (gdstk::Reference*) gdstk::allocate_clear(sizeof(gdstk::Reference));
+  ref->init(child);
+  int32_t origin_x = instance->get_coordinate()->get_x();
+  int32_t origin_y = instance->get_coordinate()->get_y();
+  auto* cell_master = instance->get_cell_master();
+  int32_t width = cell_master == nullptr ? 0 : cell_master->get_width();
+  int32_t height = cell_master == nullptr ? 0 : cell_master->get_height();
+  setReferenceOrient(ref, instance->get_orient(), width, height, origin_x, origin_y);
+  ref->origin = gdstk::Vec2{transDB2Unit(origin_x), transDB2Unit(origin_y)};
   _top_cell->reference_array.append(ref);
 }
 
@@ -323,6 +394,10 @@ void Def2GdsWrite::packVia(gdstk::Cell* gds_cell, IdbVia* via)
     return;
   }
 
+  if (packGeneratedVia(gds_cell, via)) {
+    return;
+  }
+
   auto top_layer_shape = via->get_top_layer_shape();
   packLayerShape(gds_cell, &top_layer_shape);
 
@@ -331,6 +406,137 @@ void Def2GdsWrite::packVia(gdstk::Cell* gds_cell, IdbVia* via)
 
   auto bottom_layer_shape = via->get_bottom_layer_shape();
   packLayerShape(gds_cell, &bottom_layer_shape);
+}
+
+gdstk::Cell* Def2GdsWrite::getGeneratedViaCutCell(IdbViaMasterGenerate* master_generate)
+{
+  if (master_generate == nullptr || master_generate->get_layer_cut() == nullptr) {
+    return nullptr;
+  }
+
+  string name = "VIA_CUT_" + master_generate->get_rule_name() + "_" + std::to_string(master_generate->get_cut_size_x()) + "x"
+                + std::to_string(master_generate->get_cut_size_y()) + "_L"
+                + std::to_string(master_generate->get_layer_cut()->get_order());
+  auto it = _generated_via_cut_cells.find(name);
+  if (it != _generated_via_cut_cells.end()) {
+    return it->second;
+  }
+
+  auto* cell = createCell(name);
+  packRect(cell, 0, 0, master_generate->get_cut_size_x(), master_generate->get_cut_size_y(), master_generate->get_layer_cut());
+  _generated_via_cut_cells[name] = cell;
+  return cell;
+}
+
+bool Def2GdsWrite::packGeneratedVia(gdstk::Cell* gds_cell, IdbVia* via)
+{
+  auto* master = via == nullptr ? nullptr : via->get_instance();
+  if (gds_cell == nullptr || master == nullptr || !master->is_generate()) {
+    return false;
+  }
+
+  auto* master_generate = master->get_master_generate();
+  auto* coord = via->get_coordinate();
+  if (master_generate == nullptr || coord == nullptr || master_generate->get_layer_bottom() == nullptr
+      || master_generate->get_layer_top() == nullptr || master_generate->get_layer_cut() == nullptr) {
+    return false;
+  }
+
+  int32_t rows = master_generate->get_cut_rows();
+  int32_t cols = master_generate->get_cut_cols();
+  if (rows <= 0 || cols <= 0 || master_generate->get_patttern() != nullptr) {
+    return false;
+  }
+
+  int32_t cut_width = master_generate->get_cut_size_x();
+  int32_t cut_height = master_generate->get_cut_size_y();
+  int32_t pitch_x = cut_width + master_generate->get_cut_spcing_x();
+  int32_t pitch_y = cut_height + master_generate->get_cut_spcing_y();
+  if (cut_width <= 0 || cut_height <= 0 || pitch_x <= 0 || pitch_y <= 0) {
+    return false;
+  }
+
+  auto top_layer_shape = via->get_top_layer_shape();
+  packLayerShape(gds_cell, &top_layer_shape);
+
+  auto bottom_layer_shape = via->get_bottom_layer_shape();
+  packLayerShape(gds_cell, &bottom_layer_shape);
+
+  auto* cut_cell = getGeneratedViaCutCell(master_generate);
+  if (cut_cell == nullptr) {
+    return false;
+  }
+
+  int64_t cut_width_total = static_cast<int64_t>(cols) * cut_width + static_cast<int64_t>(cols - 1) * master_generate->get_cut_spcing_x();
+  int64_t cut_height_total = static_cast<int64_t>(rows) * cut_height + static_cast<int64_t>(rows - 1) * master_generate->get_cut_spcing_y();
+  double origin_x = transDB2Unit(static_cast<int32_t>(coord->get_x() - cut_width_total / 2 + master_generate->get_original_offset_x()));
+  double origin_y = transDB2Unit(static_cast<int32_t>(coord->get_y() - cut_height_total / 2 + master_generate->get_original_offset_y()));
+
+  auto* ref = (gdstk::Reference*) gdstk::allocate_clear(sizeof(gdstk::Reference));
+  ref->init(cut_cell);
+  ref->origin = gdstk::Vec2{origin_x, origin_y};
+  ref->repetition.type = gdstk::RepetitionType::Rectangular;
+  ref->repetition.columns = static_cast<uint64_t>(cols);
+  ref->repetition.rows = static_cast<uint64_t>(rows);
+  ref->repetition.spacing = gdstk::Vec2{transDB2Unit(pitch_x), transDB2Unit(pitch_y)};
+  gds_cell->reference_array.append(ref);
+
+  return true;
+}
+
+void Def2GdsWrite::packTerm(gdstk::Cell* gds_cell, IdbTerm* term)
+{
+  if (gds_cell == nullptr || term == nullptr || !term->is_port_exist()) {
+    return;
+  }
+
+  for (auto* port : term->get_port_list()) {
+    if (port == nullptr) {
+      continue;
+    }
+
+    for (auto* layer_shape : port->get_layer_shape()) {
+      packLayerShape(gds_cell, layer_shape);
+    }
+
+    for (auto* via : port->get_via_list()) {
+      packVia(gds_cell, via);
+    }
+  }
+}
+
+gdstk::Cell* Def2GdsWrite::getComponentMasterCell(IdbCellMaster* cell_master)
+{
+  if (cell_master == nullptr) {
+    return nullptr;
+  }
+
+  auto it = _component_master_cells.find(cell_master);
+  if (it != _component_master_cells.end()) {
+    return it->second;
+  }
+
+  auto* cell = createCell("Master_" + cell_master->get_name());
+  packRect(cell, 0, 0, cell_master->get_width(), cell_master->get_height(), 0);
+
+  for (auto* term : cell_master->get_term_list()) {
+    packTerm(cell, term);
+  }
+
+  for (auto* obs : cell_master->get_obs_list()) {
+    if (obs == nullptr) {
+      continue;
+    }
+
+    for (auto* obs_layer : obs->get_obs_layer_list()) {
+      if (obs_layer != nullptr) {
+        packLayerShape(cell, obs_layer->get_shape());
+      }
+    }
+  }
+
+  _component_master_cells[cell_master] = cell;
+  return cell;
 }
 
 void Def2GdsWrite::packPin(gdstk::Cell* gds_cell, IdbPin* pin)
@@ -420,20 +626,7 @@ int32_t Def2GdsWrite::write_component()
       continue;
     }
 
-    auto* cell = createCell("Instance_" + instance->get_name());
-    addReferenceDefault(cell);
-
-    packRect(cell, instance->get_bounding_box(), 0);
-
-    if (instance->get_pin_list() != nullptr) {
-      for (auto pin : instance->get_pin_list()->get_pin_list()) {
-        packPin(cell, pin);
-      }
-    }
-
-    for (auto obs_shape : instance->get_obs_box_list()) {
-      packLayerShape(cell, obs_shape);
-    }
+    addInstanceReference(getComponentMasterCell(instance->get_cell_master()), instance);
 
     x++;
     if (x % 1000 == 0) {
@@ -547,6 +740,7 @@ int32_t Def2GdsWrite::write_specialnet_wire_segment(gdstk::Cell* gds_cell, IdbSp
   }
 
   if (segment->is_via()) {
+    return kDbSuccess;
     return write_specialnet_wire_segment_via(gds_cell, segment);
   }
   if (segment->is_rect()) {
@@ -611,10 +805,19 @@ int32_t Def2GdsWrite::write_net()
     if (net == nullptr) {
       continue;
     }
+
+    if (net->get_wire_list() == nullptr || net->get_segment_num() == 0) {
+      x++;
+      if (x % 1000 == 0) {
+        std::cout << "Write NETS. " << x << " / " << max_num << std::endl;
+      }
+      continue;
+    }
+
     auto* cell = createCell(net->get_net_name());
     addReferenceDefault(cell);
 
-    if (net->get_wire_list()->get_num() > 0) {
+    if (net->get_wire_list() != nullptr && net->get_wire_list()->get_num() > 0) {
       for (IdbRegularWire* wire : net->get_wire_list()->get_wire_list()) {
         write_net_wire(cell, wire);
       }
