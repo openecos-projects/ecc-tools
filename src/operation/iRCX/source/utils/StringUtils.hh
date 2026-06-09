@@ -16,10 +16,14 @@
 // ***************************************************************************************
 #pragma once
 
+#include <cerrno>
 #include <charconv>
+#include <cstdlib>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 
 #include "Types.hh"
 #include "log/Log.hh"
@@ -94,14 +98,29 @@ inline auto parse_number(std::string_view value) -> std::optional<T>
     return std::nullopt;
   }
 
-  T number{};
-  const auto* begin = value.data();
-  const auto* end = begin + value.size();
-  const auto [ptr, error] = std::from_chars(begin, end, number);
-  if (error != std::errc{} || ptr != end) {
+  if constexpr (std::is_integral_v<T>) {
+    T number{};
+    const auto* begin = value.data();
+    const auto* end = begin + value.size();
+    const auto [ptr, error] = std::from_chars(begin, end, number);
+    if (error != std::errc{} || ptr != end) {
+      return std::nullopt;
+    }
+    return number;
+  } else if constexpr (std::is_floating_point_v<T>) {
+    const Str number_text(value);
+    char* parse_end = nullptr;
+    errno = 0;
+
+    const auto number = std::strtod(number_text.c_str(), &parse_end);
+    if (errno == ERANGE || parse_end != number_text.c_str() + number_text.size()) {
+      return std::nullopt;
+    }
+    return static_cast<T>(number);
+  } else {
+    static_assert(std::is_arithmetic_v<T>, "parse_number only supports arithmetic types");
     return std::nullopt;
   }
-  return number;
 }
 
 template <typename T>

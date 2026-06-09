@@ -18,17 +18,50 @@
 
 #include <optional>
 #include <sstream>
-#include <source_location>
 #include <string>
 #include <utility>
+
+#if defined(__has_include)
+#if __has_include(<source_location>)
+#include <source_location>
+#define IRCX_HAS_STD_SOURCE_LOCATION 1
+#elif __has_include(<experimental/source_location>)
+#include <experimental/source_location>
+#define IRCX_HAS_EXPERIMENTAL_SOURCE_LOCATION 1
+#endif
+#endif
 
 #include "log/Log.hh"
 #include "usage/usage.hh"
 
 namespace ircx {
 
+#if defined(IRCX_HAS_STD_SOURCE_LOCATION)
+using SourceLocation = std::source_location;
+#elif defined(IRCX_HAS_EXPERIMENTAL_SOURCE_LOCATION)
+using SourceLocation = std::experimental::source_location;
+#else
+class SourceLocation
+{
+ public:
+  static constexpr auto current(const char* file_name = __builtin_FILE(), int line = __builtin_LINE()) -> SourceLocation
+  {
+    return SourceLocation(file_name, line);
+  }
+
+  constexpr auto file_name() const -> const char* { return file_name_; }
+  constexpr auto line() const -> int { return line_; }
+
+ private:
+  constexpr SourceLocation(const char* file_name, int line) : file_name_(file_name), line_(line) {}
+
+  const char* file_name_;
+  int line_;
+};
+#endif
+
 template <typename... Args>
-inline void log_stage(const std::source_location& location, const Args&... args)
+inline void log_stage(const SourceLocation& location, const Args&... args)
 {
   std::ostringstream stream;
   (stream << ... << args);
@@ -38,7 +71,7 @@ inline void log_stage(const std::source_location& location, const Args&... args)
 class StageLog
 {
  public:
-  explicit StageLog(std::string stage, std::source_location location = std::source_location::current())
+  explicit StageLog(std::string stage, SourceLocation location = SourceLocation::current())
       : stage_(std::move(stage)), location_(location)
   {
     log_stage(location_, stage_, " begin.");
@@ -52,7 +85,7 @@ class StageLog
 
  private:
   std::string stage_;
-  std::source_location location_;
+  SourceLocation location_;
   bool success_{false};
 };
 
@@ -63,7 +96,7 @@ struct StageLogOptions
 
 template <typename Func>
 auto run_stage(std::string stage, Func&& func, StageLogOptions options = {},
-              std::source_location location = std::source_location::current()) -> bool
+              SourceLocation location = SourceLocation::current()) -> bool
 {
   std::optional<ieda::Stats> stats;
   if (options.profile) {
