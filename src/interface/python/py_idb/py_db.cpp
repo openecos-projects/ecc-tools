@@ -79,6 +79,16 @@ bool saveJson(const std::string& path)
   return dmInst->saveJSON(path, options);
 }
 
+bool saveViewJson(const std::string& output_dir)
+{
+  return dmInst->saveViewJson(output_dir);
+}
+
+bool applyViewJsonEdits(const std::string& edits_path)
+{
+  return dmInst->applyViewJsonEdits(edits_path);
+}
+
 bool saveData(const std::string& path)
 {
   return dmInst->saveData(path);

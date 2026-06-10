@@ -99,6 +99,8 @@ class DataManager
   void saveVerilog(string verilog_path, std::set<std::string>&& exclude_cell_names = {}, bool is_add_space_for_escape_name = false);
   bool saveGDSII(string path, bool is_hardened = false);
   bool saveJSON(string path, string options);
+  bool saveViewJson(string output_dir);
+  bool applyViewJsonEdits(string edits_path);
   bool saveData(string data_path);
   bool loadData(string data_path);
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

@@ -192,6 +192,34 @@ class CmdSaveJSON : public TclCmd
   // private data
 };
 
+class CmdSaveViewJson : public TclCmd
+{
+ public:
+  explicit CmdSaveViewJson(const char* cmd_name);
+  ~CmdSaveViewJson() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdApplyViewJsonEdits : public TclCmd
+{
+ public:
+  explicit CmdApplyViewJsonEdits(const char* cmd_name);
+  ~CmdApplyViewJsonEdits() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
 class CmdSaveData : public TclCmd
 {
  public:

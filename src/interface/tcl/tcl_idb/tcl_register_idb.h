@@ -44,6 +44,8 @@ int registerCmdDB()
   registerTclCmd(CmdSaveLef, "lef_save");
   registerTclCmd(CmdSaveNetlist, "netlist_save");
   registerTclCmd(CmdSaveJSON, "json_save");
+  registerTclCmd(CmdSaveViewJson, "view_json_save");
+  registerTclCmd(CmdApplyViewJsonEdits, "view_json_apply_edits");
   registerTclCmd(CmdSaveData, "save_data");
   registerTclCmd(CmdResetData, "reset_data");
   registerTclCmd(CmdLoadData, "load_data");

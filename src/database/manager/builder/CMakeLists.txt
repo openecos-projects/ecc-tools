@@ -4,6 +4,7 @@ add_subdirectory(lef_builder)
 add_subdirectory(verilog_builder)
 add_subdirectory(gds_builder)
 add_subdirectory(json_builder)
+add_subdirectory(view_builder)
 
 if(BUILD_STATIC_LIB)
     add_library(IdbBuilder
@@ -22,7 +23,7 @@ else()
 
 endif()
 
-target_link_libraries(IdbBuilder def_service def_builder lef_service lef_builder verilog_builder gds_builder json_builder data_process)
+target_link_libraries(IdbBuilder def_service def_builder lef_service lef_builder verilog_builder gds_builder json_builder view_builder data_process)
 
 target_include_directories(IdbBuilder 
     PUBLIC 
@@ -31,6 +32,7 @@ target_include_directories(IdbBuilder
         ${CMAKE_CURRENT_SOURCE_DIR}/lef_builder
         ${CMAKE_CURRENT_SOURCE_DIR}/verilog_builder
         ${CMAKE_CURRENT_SOURCE_DIR}/json_builder
+        ${CMAKE_CURRENT_SOURCE_DIR}/view_builder
         ${CMAKE_CURRENT_SOURCE_DIR}/gds_builder
         ${CMAKE_CURRENT_SOURCE_DIR}/data_builder
         ${HOME_DATABASE}/data/design

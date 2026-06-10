@@ -49,6 +49,7 @@
 #include "lef_service.h"
 #include "verilog_read.h"
 #include "verilog_write.h"
+#include "view_write.h"
 
 namespace idb {
 
@@ -79,6 +80,8 @@ class IdbBuilder
   void saveVerilog(std::string verilog_file_name, std::set<std::string>& exclude_cell_names, bool is_add_space_for_escape_name);
   bool saveGDSII(string file, bool is_hardened = false);
   bool saveJSON(string file, string options);
+  bool saveViewJson(string output_dir);
+  bool applyViewJsonEdits(string edits_path);
   bool saveLef(string file);
   // Write layout
   void saveLayout(string folder);
