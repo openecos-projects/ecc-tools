@@ -9,13 +9,6 @@ ics55/
   CMakeLists.txt
   include/ircx_ics55.h
   lib/libircx_ics55.so
-  lib/libgomp.so.1
-  lib/libglog.so.1
-  lib/libgflags.so.2.2
-  lib/libunwind.so.8
-  lib/liblzma.so.5
-  lib/libstdc++.so.6
-  lib/libgcc_s.so.1
 ```
 
 `CMakeLists.txt` 定义了 imported target：
@@ -76,27 +69,9 @@ ircx_ics55_report();
 
 ## 运行依赖
 
-该 SDK 不依赖内部 iEDA/iRCX 动态库，`ics55/lib` 目录里需要放置 `libircx_ics55.so` 和随包运行库。
+该 SDK 不依赖内部 iEDA/iRCX 动态库，`ics55/lib` 目录只放置 `libircx_ics55.so`。glog、gflags、OpenMP/libgomp、libunwind、libcurl、Tcl、TBB、libstdc++、libgcc_s 等运行时依赖由 ecc-tools 的统一构建/运行环境提供。
 
-随包运行库包括：
-
-```text
-libgomp.so.1
-libglog.so.1
-libgflags.so.2.2
-libunwind.so.8
-liblzma.so.5
-libstdc++.so.6
-libgcc_s.so.1
-```
-
-仍然依赖目标机系统基础库：
-
-```text
-libc.so.6
-libm.so.6
-ld-linux-x86-64.so.2
-```
+`CMakeLists.txt` 会在配置阶段检查直接依赖是否存在；缺失时会 fail fast，而不是依赖 SDK 目录里的私有副本。
 
 ## 不能使用的情况
 
