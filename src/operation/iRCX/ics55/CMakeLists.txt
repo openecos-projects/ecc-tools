@@ -1,20 +1,20 @@
 include(GNUInstallDirs)
 
-set(_IRCX_ICS55_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/include")
-set(_IRCX_ICS55_LIBRARY "${CMAKE_CURRENT_LIST_DIR}/lib/libircx_ics55.so")
+find_package(IrcxIcs55 CONFIG REQUIRED)
 
-foreach(_IRCX_ICS55_REQUIRED_FILE IN ITEMS
-    "${_IRCX_ICS55_INCLUDE_DIR}/ircx_ics55.h"
-    "${_IRCX_ICS55_LIBRARY}"
-)
-  if(NOT EXISTS "${_IRCX_ICS55_REQUIRED_FILE}")
-    message(FATAL_ERROR "Missing iRCX ICS55 SDK file: ${_IRCX_ICS55_REQUIRED_FILE}")
-  endif()
-endforeach()
+if(NOT TARGET IrcxIcs55::ircx_ics55)
+  message(WARNING "IrcxIcs55 package must define IrcxIcs55::ircx_ics55")
+  set(_IRCX_ICS55_INCLUDE_DIR "{CMAKE_CURRENT_LIST_DIR}/include")
+  set(_IRCX_ICS55_LIBRARY "{CMAKE_CURRENT_LIST_DIR}/lib/libircx_ics55.so")
+endif()
+
+get_target_property(_IRCX_ICS55_INCLUDE_DIR IrcxIcs55::ircx_ics55 INTERFACE_INCLUDE_DIRECTORIES)
+get_target_property(_IRCX_ICS55_LIBRARY IrcxIcs55::ircx_ics55 IMPORTED_LOCATION)
+
+file(WRITE "${CMAKE_BINARY_DIR}/ircx_ics55_library.txt" "${_IRCX_ICS55_LIBRARY}\n")
 
 find_package(OpenMP REQUIRED)
 find_package(CURL REQUIRED)
-find_package(TBB REQUIRED)
 
 function(_ircx_ics55_find_library OUT_VAR)
   find_library(${OUT_VAR} NAMES ${ARGN})
@@ -34,7 +34,6 @@ _ircx_ics55_find_library(IRCX_ICS55_TCL86_LIBRARY tcl8.6)
 set(_IRCX_ICS55_LINK_LIBRARIES
   OpenMP::OpenMP_CXX
   ${CURL_LIBRARIES}
-  TBB::tbb
   ${IRCX_ICS55_GLOG_LIBRARY}
   ${IRCX_ICS55_GFLAGS_LIBRARY}
   ${IRCX_ICS55_UNWIND_LIBRARY}
