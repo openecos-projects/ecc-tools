@@ -18,6 +18,7 @@
 
 #include "RCXAPI.hh"
 #include "ircx_ics55.h"
+#include "idm.h"
 
 namespace python_interface {
 
@@ -77,7 +78,7 @@ bool init_rcx(const std::string& config, const std::optional<std::string>& pdk)
 bool run_rcx()
 {
   if (active_backend == RcxBackend::kIcs55) {
-    return ircx_ics55_run() != 0;
+    return ircx_ics55_run_with_idb_design(dmInst->get_idb_design()) != 0;
   }
 
   if (active_backend != RcxBackend::kNative) {
