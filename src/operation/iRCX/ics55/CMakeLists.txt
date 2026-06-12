@@ -11,11 +11,6 @@ if(NOT EXISTS "${_IRCX_ICS55_LIBRARY}")
   message(FATAL_ERROR "iRCX ICS55 repo-local SDK library is missing: ${_IRCX_ICS55_LIBRARY}")
 endif()
 
-# get_target_property(_IRCX_ICS55_INCLUDE_DIR IrcxIcs55::ircx_ics55 INTERFACE_INCLUDE_DIRECTORIES)
-# get_target_property(_IRCX_ICS55_LIBRARY IrcxIcs55::ircx_ics55 IMPORTED_LOCATION)
-
-# file(WRITE "${CMAKE_BINARY_DIR}/ircx_ics55_library.txt" "${_IRCX_ICS55_LIBRARY}\n")
-
 find_package(OpenMP REQUIRED)
 
 set(_IRCX_ICS55_LINK_LIBRARIES
