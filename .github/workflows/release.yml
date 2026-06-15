@@ -34,7 +34,7 @@ jobs:
         with:
           name: ecc-tools-wheel
           path: |
-            dist/wheel/repaired/ecc_tools-*.whl
+            dist/wheel/repaired/*.whl
           if-no-files-found: error
 
   release:
@@ -87,7 +87,7 @@ jobs:
             echo '```'
             (
               cd dist/wheel/repaired
-              sha256sum ecc_tools-*.whl
+              sha256sum *.whl
             )
             echo '```'
           } > release-notes.md
