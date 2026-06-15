@@ -110,9 +110,14 @@
     systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
     perSystem = { self', pkgs, system, ... }: {
       packages.default = pkgs.callPackage ecc-tools-bin {};
-      devShells.default = pkgs.mkShell {
+      devShells.default = pkgs.mkShell.override {
+        stdenv = pkgs.ccacheStdenv;
+      } {
         buildInputs = self'.packages.default.rawBuildInputs;
         nativeBuildInputs = self'.packages.default.rawNativeBuildInputs ++ (with pkgs; [ uv ]);
+        shellHook = ''
+          export CCACHE_DIR="$PWD/.ccache"
+        '';
       };
     };
   };

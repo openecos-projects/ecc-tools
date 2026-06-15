@@ -46,3 +46,4 @@ src/third_party/mt-kahypar/
 
 .direnv
 result
+.ccache

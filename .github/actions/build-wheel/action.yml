@@ -46,7 +46,9 @@ runs:
       env:
         SCCACHE_GHA_ENABLED: "true"
       run: |
-        uv build --verbose
+        export CMAKE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
+        uv sync --no-install-project
+        uv build --wheel --no-build-isolation --verbose
         mkdir -p dist/wheel/repaired
-        uv run -m auditwheel show dist/*.whl
-        uv run -m auditwheel repair dist/*.whl -w dist/wheel/repaired
+        uv run --no-sync -m auditwheel show dist/*.whl
+        uv run --no-sync -m auditwheel repair dist/*.whl -w dist/wheel/repaired
