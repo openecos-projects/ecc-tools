@@ -21,9 +21,36 @@ namespace idrc {
 
 namespace {
 
-bool isTrackableCut(const CutData& cut_data)
+bool isCutEOLDriverCut(const CutData& cut_data)
 {
   return !(cut_data.isEnv && cut_data.net_idx == -1);
+}
+
+bool isNetlessEnvCut(const CutData& cut_data)
+{
+  return cut_data.isEnv && cut_data.net_idx == -1;
+}
+
+bool hasLongNetlessRoutingEnv(const std::map<int32_t, bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>>& routing_net_env_rtrees,
+                              int32_t routing_layer_idx, const PlanarRect& env_cut_rect, int32_t min_length)
+{
+  auto env_rtree_it = routing_net_env_rtrees.find(routing_layer_idx);
+  if (env_rtree_it == routing_net_env_rtrees.end()) {
+    return false;
+  }
+
+  std::vector<std::pair<GTLRectInt, int32_t>> env_rect_list;
+  env_rtree_it->second.query(bgi::intersects(DRCUTIL.convertToGTLRectInt(env_cut_rect)), std::back_inserter(env_rect_list));
+  for (const auto& [gtl_env_rect, env_net_idx] : env_rect_list) {
+    if (env_net_idx != -1) {
+      continue;
+    }
+    PlanarRect env_rect = DRCUTIL.convertToPlanarRect(gtl_env_rect);
+    if (DRCUTIL.isOpenOverlap(env_rect, env_cut_rect) && env_rect.getLength() > min_length) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool isGlobalEolBoundary(const RVLayerData& rv_layer_data, int32_t boundary_id)
@@ -115,7 +142,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
     const RVLayerData& routing_layer_data = routing_layer_data_it->second;
 
     for (const CutData& cut_data : cut_layer_data.getCuts()) {
-      if (!isTrackableCut(cut_data)) {
+      if (!isCutEOLDriverCut(cut_data)) {
         continue;
       }
 
@@ -151,7 +178,6 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
           }
         }
       }
-
       std::vector<std::pair<Orientation, Orientation>> check_ortho_orients;
       for (auto check_orient : orientations) {
         if (orient_overhang_map[check_orient] >= smaller_overhang) {
@@ -328,15 +354,46 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
 
           std::vector<CutData> overlap_cut_list;
           cut_layer_data.queryCuts(DRCUTIL.convertToGTLRectInt(DRCUTIL.getEnlargedRect(cut_rect, eol_prl_spacing)), std::back_inserter(overlap_cut_list));
-          for (auto checking_orient : {DRCUTIL.getOppositeOrientation(check_orient), DRCUTIL.getOppositeOrientation(ortho_orient)}) {
+          std::vector<Orientation> checking_orient_list = {DRCUTIL.getOppositeOrientation(check_orient), DRCUTIL.getOppositeOrientation(ortho_orient)};
+          if (!has_wide_span && is_eol) {
+            checking_orient_list.push_back(check_orient);
+          }
+          for (auto checking_orient : checking_orient_list) {
             for (const CutData& overlap_cut_data : overlap_cut_list) {
-              if (!isTrackableCut(overlap_cut_data)) {
+              int32_t env_net_idx = overlap_cut_data.net_idx;
+              bool is_netless_env_cut = isNetlessEnvCut(overlap_cut_data);
+              if (checking_orient == check_orient && !is_netless_env_cut) {
                 continue;
               }
-              int32_t env_net_idx = overlap_cut_data.net_idx;
+              if (cut_net_idx == -1 && env_net_idx == -1) {
+                continue;
+              }
               PlanarRect env_cut_rect = DRCUTIL.convertToPlanarRect(overlap_cut_data.rect);
               if (cut_rect == env_cut_rect) {
                 continue;
+              }
+              bool has_long_netless_routing_env = false;
+              if (is_netless_env_cut) {
+                if (checking_orient != Orientation::kWest) {
+                  continue;
+                }
+                if (checking_orient == check_orient) {
+                  has_long_netless_routing_env
+                      = hasLongNetlessRoutingEnv(routing_net_env_rtrees, routing_layer_idx, env_cut_rect, backward_ext + 2 * eol_prl_spacing);
+                  if (has_wide_span || !is_eol || !has_long_netless_routing_env) {
+                    continue;
+                  }
+                } else if (checking_orient == DRCUTIL.getOppositeOrientation(check_orient)) {
+                  if (routing_rect_overhangs[checking_orient] < cut_rect.getWidth()) {
+                    continue;
+                  }
+                } else {
+                  continue;
+                }
+                if (checking_orient == check_orient
+                    && routing_rect_overhangs[DRCUTIL.getOppositeOrientation(checking_orient)] >= smaller_overhang) {
+                  continue;
+                }
               }
               PlanarRect rect = DRCUTIL.getRect(cut_rect.getOrientEdge(checking_orient));
               PlanarRect orient_rect = rect;
@@ -348,17 +405,21 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
                 rect = DRCUTIL.getEnlargedPartRect(rect, checking_orient, eol_prl_spacing);
               }
               if (checking_orient == Orientation::kEast) {
-                if (orient_rect.get_ll_x() >= env_cut_rect.get_ur_x())
+                if (orient_rect.get_ll_x() >= env_cut_rect.get_ur_x()) {
                   continue;
+                }
               } else if (checking_orient == Orientation::kSouth) {
-                if (orient_rect.get_ll_y() <= env_cut_rect.get_ll_y())
+                if (orient_rect.get_ll_y() <= env_cut_rect.get_ll_y()) {
                   continue;
+                }
               } else if (checking_orient == Orientation::kWest) {
-                if (orient_rect.get_ll_x() <= env_cut_rect.get_ll_x())
+                if (orient_rect.get_ll_x() <= env_cut_rect.get_ll_x()) {
                   continue;
+                }
               } else {
-                if (orient_rect.get_ll_y() >= env_cut_rect.get_ur_y())
+                if (orient_rect.get_ll_y() >= env_cut_rect.get_ur_y()) {
                   continue;
+                }
               }
               bool use_project_distance = DRCUTIL.isOpenOverlap(rect, env_cut_rect);
               int32_t required_size = use_project_distance ? eol_prl_spacing : eol_spacing;
