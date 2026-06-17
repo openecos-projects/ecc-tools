@@ -32,7 +32,7 @@ namespace idb {
 
 namespace data_binary {
 
-constexpr uint32_t kArchiveVersion = 1;
+constexpr uint32_t kArchiveVersion = 2;
 
 enum class ArchiveSection : uint32_t
 {

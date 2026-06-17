@@ -25,6 +25,7 @@
 #include <future>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -114,9 +115,8 @@ class BinaryReader
       throw std::runtime_error("invalid idb data magic: " + path.string());
     }
 
-    uint32_t version = 0;
-    read(version);
-    if (version != kArchiveVersion) {
+    read(_version);
+    if (_version == 0 || _version > kArchiveVersion) {
       throw std::runtime_error("unsupported idb data version: " + path.string());
     }
 
@@ -162,6 +162,8 @@ class BinaryReader
     return value;
   }
 
+  uint32_t version() const { return _version; }
+
  private:
   void read_raw(char* data, std::streamsize size)
   {
@@ -178,6 +180,7 @@ class BinaryReader
 
   std::filesystem::path _path;
   std::ifstream _in;
+  uint32_t _version = 0;
 };
 
 std::filesystem::path section_path(const std::string& folder, const char* group, const char* name)
@@ -239,6 +242,91 @@ std::string site_name(IdbSite* site)
 {
   return site == nullptr ? std::string() : site->get_name();
 }
+
+std::string rect_signature(IdbRect* rect)
+{
+  if (rect == nullptr) {
+    return "null";
+  }
+  std::ostringstream oss;
+  oss << rect->get_low_x() << ',' << rect->get_low_y() << ',' << rect->get_high_x() << ',' << rect->get_high_y();
+  return oss.str();
+}
+
+std::string via_master_generate_signature(IdbViaMasterGenerate* generate)
+{
+  if (generate == nullptr) {
+    return "null";
+  }
+  std::ostringstream oss;
+  oss << generate->get_rule_name() << '|'
+      << (generate->get_rule_generate() == nullptr ? std::string() : generate->get_rule_generate()->get_name()) << '|'
+      << generate->get_cut_size_x() << ',' << generate->get_cut_size_y() << '|'
+      << layer_name(generate->get_layer_bottom()) << ',' << layer_name(generate->get_layer_cut()) << ',' << layer_name(generate->get_layer_top())
+      << '|' << generate->get_cut_spcing_x() << ',' << generate->get_cut_spcing_y() << '|'
+      << generate->get_enclosure_bottom_x() << ',' << generate->get_enclosure_bottom_y() << ',' << generate->get_enclosure_top_x() << ','
+      << generate->get_enclosure_top_y() << '|' << generate->get_cut_rows() << ',' << generate->get_cut_cols() << '|'
+      << generate->get_original_offset_x() << ',' << generate->get_original_offset_y() << '|' << generate->get_offset_bottom_x() << ','
+      << generate->get_offset_bottom_y() << ',' << generate->get_offset_top_x() << ',' << generate->get_offset_top_y() << '|';
+  for (auto* rect : generate->get_cut_rect_list()) {
+    oss << rect_signature(rect) << ';';
+  }
+  oss << '|' << rect_signature(generate->get_cut_bouding_rect()) << '|';
+  oss << (generate->get_patttern() == nullptr ? std::string() : generate->get_patttern()->get_pattern_string());
+  return oss.str();
+}
+
+std::string via_master_signature(IdbViaMaster* master)
+{
+  if (master == nullptr) {
+    return "null";
+  }
+  std::ostringstream oss;
+  oss << master->get_name() << '|' << master->is_default() << '|' << static_cast<int>(master->get_type()) << '|'
+      << master->get_cut_rows() << ',' << master->get_cut_cols() << '|' << rect_signature(master->get_cut_rect()) << '|'
+      << via_master_generate_signature(master->get_master_generate()) << '|';
+  for (auto* fixed : master->get_master_fixed_list()) {
+    oss << layer_name(fixed == nullptr ? nullptr : fixed->get_layer()) << ':';
+    if (fixed != nullptr) {
+      for (auto* rect : fixed->get_rect_list()) {
+        oss << rect_signature(rect) << ',';
+      }
+    }
+    oss << ';';
+  }
+  return oss.str();
+}
+
+IdbViaMaster* find_matching_via_master(IdbVias* known_vias, IdbVia* via)
+{
+  if (known_vias == nullptr || via == nullptr) {
+    return nullptr;
+  }
+
+  auto* master = via->get_instance();
+  if (master == nullptr) {
+    return nullptr;
+  }
+
+  const auto signature = via_master_signature(master);
+  if (!via->get_name().empty()) {
+    auto* named_via = known_vias->find_via(via->get_name());
+    auto* named_master = named_via == nullptr ? nullptr : named_via->get_instance();
+    if (named_master != nullptr && via_master_signature(named_master) == signature) {
+      return named_master;
+    }
+  }
+
+  for (auto* candidate : known_vias->get_via_list()) {
+    auto* candidate_master = candidate == nullptr ? nullptr : candidate->get_instance();
+    if (candidate_master != nullptr && via_master_signature(candidate_master) == signature) {
+      return candidate_master;
+    }
+  }
+  return nullptr;
+}
+
+IdbVia* read_via(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules, IdbVias* known_vias = nullptr);
 
 IdbLayer* find_layer(IdbLayers* layers, const std::string& name)
 {
@@ -778,7 +866,7 @@ void write_via(BinaryWriter& writer, IdbVia* via)
   write_via_master(writer, via->get_instance());
 }
 
-IdbVia* read_via(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules)
+IdbVia* read_via(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules, IdbVias* known_vias)
 {
   if (!reader.read_bool()) {
     return nullptr;
@@ -789,6 +877,9 @@ IdbVia* read_via(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules)
     via->set_coordinate(coord);
   }
   via->set_instance(read_via_master(reader, layers, rules));
+  if (auto* matched_master = find_matching_via_master(known_vias, via)) {
+    via->set_instance_reference(matched_master);
+  }
   return via;
 }
 
@@ -815,7 +906,7 @@ void write_regular_wire_segment(BinaryWriter& writer, IdbRegularWireSegment* seg
   }
 }
 
-IdbRegularWireSegment* read_regular_wire_segment(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules)
+IdbRegularWireSegment* read_regular_wire_segment(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules, IdbVias* known_vias = nullptr)
 {
   if (!reader.read_bool()) {
     return nullptr;
@@ -841,7 +932,7 @@ IdbRegularWireSegment* read_regular_wire_segment(BinaryReader& reader, IdbLayers
   uint64_t via_count = 0;
   reader.read(via_count);
   for (uint64_t i = 0; i < via_count; ++i) {
-    if (auto* via = read_via(reader, layers, rules)) {
+    if (auto* via = read_via(reader, layers, rules, known_vias)) {
       segment->set_via(via);
     }
   }
@@ -863,7 +954,7 @@ void write_regular_wire(BinaryWriter& writer, IdbRegularWire* wire)
   }
 }
 
-IdbRegularWire* read_regular_wire(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules)
+IdbRegularWire* read_regular_wire(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules, IdbVias* known_vias = nullptr)
 {
   if (!reader.read_bool()) {
     return nullptr;
@@ -874,7 +965,7 @@ IdbRegularWire* read_regular_wire(BinaryReader& reader, IdbLayers* layers, IdbVi
   uint64_t segment_count = 0;
   reader.read(segment_count);
   for (uint64_t i = 0; i < segment_count; ++i) {
-    if (auto* segment = read_regular_wire_segment(reader, layers, rules)) {
+    if (auto* segment = read_regular_wire_segment(reader, layers, rules, known_vias)) {
       wire->add_segment(segment);
     }
   }
@@ -903,7 +994,7 @@ void write_special_wire_segment(BinaryWriter& writer, IdbSpecialWireSegment* seg
   }
 }
 
-IdbSpecialWireSegment* read_special_wire_segment(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules)
+IdbSpecialWireSegment* read_special_wire_segment(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules, IdbVias* known_vias = nullptr)
 {
   if (!reader.read_bool()) {
     return nullptr;
@@ -922,7 +1013,7 @@ IdbSpecialWireSegment* read_special_wire_segment(BinaryReader& reader, IdbLayers
   if (std::unique_ptr<IdbRect> rect(read_rect(reader)); rect != nullptr) {
     segment->set_delta_rect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
   }
-  segment->set_via(read_via(reader, layers, rules));
+  segment->set_via(read_via(reader, layers, rules, known_vias));
   uint64_t point_count = 0;
   reader.read(point_count);
   for (uint64_t i = 0; i < point_count; ++i) {
@@ -950,7 +1041,7 @@ void write_special_wire(BinaryWriter& writer, IdbSpecialWire* wire)
   }
 }
 
-IdbSpecialWire* read_special_wire(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules)
+IdbSpecialWire* read_special_wire(BinaryReader& reader, IdbLayers* layers, IdbViaRuleList* rules, IdbVias* known_vias = nullptr)
 {
   if (!reader.read_bool()) {
     return nullptr;
@@ -961,7 +1052,7 @@ IdbSpecialWire* read_special_wire(BinaryReader& reader, IdbLayers* layers, IdbVi
   uint64_t segment_count = 0;
   reader.read(segment_count);
   for (uint64_t i = 0; i < segment_count; ++i) {
-    if (auto* segment = read_special_wire_segment(reader, layers, rules)) {
+    if (auto* segment = read_special_wire_segment(reader, layers, rules, known_vias)) {
       wire->add_segment(segment);
     }
   }
@@ -1893,6 +1984,7 @@ void write_design_io_pins(const std::string& folder, IdbDesign* design)
     write_coord(writer, pin->get_average_coordinate());
     write_coord(writer, pin->get_location());
     write_coord(writer, pin->get_grid_coordinate());
+    write_rect(writer, pin->get_bounding_box());
     write_term(writer, pin->get_term());
     auto& shapes = pin->get_port_box_list();
     writer.write(static_cast<uint64_t>(shapes.size()));
@@ -1930,6 +2022,10 @@ void read_design_io_pins(const std::string& folder, IdbDesign* design, IdbLayout
     if (grid != nullptr && !pin->is_io_pin()) {
       pin->set_grid_coordinate(grid->get_x(), grid->get_y());
     }
+    std::unique_ptr<IdbRect> bounding_box;
+    if (reader.version() >= 2) {
+      bounding_box.reset(read_rect(reader));
+    }
     pin->set_term(read_term(reader, nullptr, layout->get_layers(), layout->get_via_list()));
     uint64_t shape_count = 0;
     reader.read(shape_count);
@@ -1938,6 +2034,11 @@ void read_design_io_pins(const std::string& folder, IdbDesign* design, IdbLayout
       if (auto* shape = read_layer_shape(reader, layout->get_layers())) {
         shapes.emplace_back(shape);
       }
+    }
+    if (bounding_box != nullptr) {
+      pin->IdbObject::set_bounding_box(bounding_box->get_low_x(), bounding_box->get_low_y(), bounding_box->get_high_x(), bounding_box->get_high_y());
+    } else {
+      pin->set_bounding_box();
     }
   }
 }
@@ -2048,7 +2149,7 @@ void read_design_nets(const std::string& folder, IdbDesign* design, IdbLayout* l
       reader.read(wire_count);
       for (uint64_t j = 0; j < wire_count; ++j) {
         try {
-          if (auto* wire = read_regular_wire(reader, layout->get_layers(), layout->get_via_rule_list())) {
+          if (auto* wire = read_regular_wire(reader, layout->get_layers(), layout->get_via_rule_list(), design->get_via_list())) {
             net->get_wire_list()->add_wire(wire);
           }
         } catch (const std::exception& e) {
@@ -2137,7 +2238,7 @@ void read_design_special_nets(const std::string& folder, IdbDesign* design, IdbL
 
     reader.read(count);
     for (uint64_t j = 0; j < count; ++j) {
-      if (auto* wire = read_special_wire(reader, layout->get_layers(), layout->get_via_rule_list())) {
+      if (auto* wire = read_special_wire(reader, layout->get_layers(), layout->get_via_rule_list(), design->get_via_list())) {
         net->get_wire_list()->add_wire(wire);
       }
     }

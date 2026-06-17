@@ -99,6 +99,18 @@ void IdbVia::set_instance(IdbViaMaster* instance)
   }
 }
 
+void IdbVia::set_instance_reference(IdbViaMaster* instance)
+{
+  if (_master_instance != nullptr && _b_master_clone == false) {
+    delete _master_instance;
+  }
+  _master_instance = instance;
+  _b_master_clone = true;
+  if (_master_instance != nullptr && !_master_instance->get_name().empty()) {
+    _name = _master_instance->get_name();
+  }
+}
+
 void IdbVia::reset_instance(IdbViaMaster* instance)
 {
   set_instance(instance);
