@@ -32,10 +32,17 @@
 #include "IdbDesign.h"
 #include "IdbEnum.h"
 #include "def_service.h"
+#include "zlib.h"
 
 namespace idb {
 
 class IdbInstance;
+
+enum class VerilogSaveFormat
+{
+  kUnzip,
+  kGzip
+};
 
 class VerilogWriter
 {
@@ -56,12 +63,15 @@ class VerilogWriter
   void writeAssign();
   void writeInstances();
   void writeInstance(IdbInstance* inst);
+  void writeStr(const char* strdata, ...);
 
  private:
   const char* _file_name;
   std::set<std::string> _exclude_cell_names;
 
   FILE* _stream;
+  gzFile _gzip_stream;
+  VerilogSaveFormat _save_format;
   IdbDesign& _idb_design;
   bool _is_add_space_for_escape_name;
 };

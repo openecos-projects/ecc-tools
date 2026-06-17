@@ -41,3 +41,7 @@ target_include_directories(IdbBuilder
         ${HOME_DATABASE}/manager/service/def_service
         ${HOME_DATABASE}/manager/service/lef_service
 )
+
+install(TARGETS IdbBuilder
+    LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+    RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})

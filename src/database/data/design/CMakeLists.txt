@@ -16,3 +16,7 @@ target_include_directories(idb
 )
 
 target_link_libraries(idb PRIVATE str geometry_db)
+
+install(TARGETS idb
+    LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+    RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})

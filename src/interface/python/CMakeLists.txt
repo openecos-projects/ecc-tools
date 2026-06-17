@@ -52,9 +52,13 @@ target_link_libraries(ecc_py
         py_imp
 )
 
+set_target_properties(ecc_py PROPERTIES
+    INSTALL_RPATH "$ORIGIN/lib"
+)
+
 install(TARGETS ecc_py
- DESTINATION ${CMAKE_INSTALL_PREFIX}
-    )
+    DESTINATION ${CMAKE_INSTALL_PREFIX}/ecc_tools_bin
+)
 
 get_target_property(DEPENDENCIES ecc_py INTERFACE_LINK_LIBRARIES)
 message(STATUS "ecc_py install prefix: ${CMAKE_INSTALL_PREFIX}")

@@ -74,13 +74,144 @@ void testMakeSingleModule(idb::NetlistReader* nr, string topModuleName) {
 
 #include "verilog_read.h"
 
+#include <array>
 #include <cassert>
+#include <cerrno>
+#include <cstdlib>
+#include <filesystem>
+#include <optional>
 #include <regex>
+#include <vector>
+#include <unistd.h>
+#include <zlib.h>
 
 #include "IdbDesign.h"
 #include "log/Log.hh"
 
 namespace idb {
+
+namespace {
+
+bool writeAll(int fd, const char* data, size_t size)
+{
+  size_t written_size = 0;
+  while (written_size < size) {
+    ssize_t result = write(fd, data + written_size, size - written_size);
+    if (result < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return false;
+    }
+    if (result == 0) {
+      return false;
+    }
+    written_size += static_cast<size_t>(result);
+  }
+
+  return true;
+}
+
+std::optional<std::pair<int, std::string>> createTempVerilogFile()
+{
+  std::filesystem::path temp_path = std::filesystem::temp_directory_path() / "verilog_read_XXXXXX.v";
+  std::string temp_path_template = temp_path.string();
+  std::vector<char> temp_path_buffer(temp_path_template.begin(), temp_path_template.end());
+  temp_path_buffer.push_back('\0');
+
+  int fd = mkstemps(temp_path_buffer.data(), 2);
+  if (fd < 0) {
+    return std::nullopt;
+  }
+
+  return std::make_pair(fd, std::string(temp_path_buffer.data()));
+}
+
+std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
+{
+  auto temp_file = createTempVerilogFile();
+  if (!temp_file) {
+    LOG_ERROR << "Create temporary verilog file failed for " << gzip_file;
+    return std::nullopt;
+  }
+
+  auto [temp_fd, temp_path] = *temp_file;
+  gzFile gzip_stream = gzopen(gzip_file.c_str(), "rb");
+  if (gzip_stream == nullptr) {
+    close(temp_fd);
+    std::filesystem::remove(temp_path);
+    LOG_ERROR << "Open gzip verilog file failed: " << gzip_file;
+    return std::nullopt;
+  }
+
+  bool success = true;
+  std::array<char, 64 * 1024> buffer;
+  int read_size = 0;
+  while ((read_size = gzread(gzip_stream, buffer.data(), static_cast<unsigned int>(buffer.size()))) > 0) {
+    if (!writeAll(temp_fd, buffer.data(), static_cast<size_t>(read_size))) {
+      success = false;
+      LOG_ERROR << "Write temporary verilog file failed: " << temp_path;
+      break;
+    }
+  }
+
+  if (read_size < 0) {
+    success = false;
+    LOG_ERROR << "Read gzip verilog file failed: " << gzip_file;
+  }
+
+  if (gzclose(gzip_stream) != Z_OK) {
+    success = false;
+    LOG_ERROR << "Close gzip verilog file failed: " << gzip_file;
+  }
+
+  if (close(temp_fd) != 0) {
+    success = false;
+    LOG_ERROR << "Close temporary verilog file failed: " << temp_path;
+  }
+
+  if (!success) {
+    std::filesystem::remove(temp_path);
+    return std::nullopt;
+  }
+
+  return temp_path;
+}
+
+class ScopedReadableVerilogFile
+{
+ public:
+  explicit ScopedReadableVerilogFile(const std::string& file)
+      : _read_file(file)
+  {
+    if (ieda::Str::contain(file.c_str(), ".gz")) {
+      auto temp_file = decompressGzipVerilog(file);
+      if (temp_file) {
+        _temp_file = *temp_file;
+        _read_file = _temp_file;
+      } else {
+        _read_file.clear();
+      }
+    }
+  }
+
+  ~ScopedReadableVerilogFile()
+  {
+    if (!_temp_file.empty()) {
+      std::error_code error_code;
+      std::filesystem::remove(_temp_file, error_code);
+    }
+  }
+
+  bool isValid() const { return !_read_file.empty(); }
+  const std::string& getReadFile() const { return _read_file; }
+
+ private:
+  std::string _read_file;
+  std::string _temp_file;
+};
+
+}  // namespace
 
 RustVerilogRead::RustVerilogRead(IdbDefService* def_service)
 {
@@ -93,10 +224,17 @@ RustVerilogRead::~RustVerilogRead()
 
 bool RustVerilogRead::createDb(std::string file, std::string top_module_name)
 {
+  ScopedReadableVerilogFile verilog_file(file);
+  if (!verilog_file.isValid()) {
+    return false;
+  }
+
   if (!_rust_verilog_reader) {
     _rust_verilog_reader = new ista::RustVerilogReader();
   }
-  _rust_verilog_reader->readVerilog(file.c_str());
+  if (!_rust_verilog_reader->readVerilog(verilog_file.getReadFile().c_str())) {
+    return false;
+  }
   _rust_verilog_reader->flattenModule(top_module_name.c_str());
   _rust_top_module = _rust_verilog_reader->get_top_module();
 
@@ -127,10 +265,17 @@ bool RustVerilogRead::createDb(std::string file, std::string top_module_name)
 
 bool RustVerilogRead::createDbAutoTop(std::string file)
 {
+  ScopedReadableVerilogFile verilog_file(file);
+  if (!verilog_file.isValid()) {
+    return false;
+  }
+
   if (!_rust_verilog_reader) {
     _rust_verilog_reader = new ista::RustVerilogReader();
   }
-  _rust_verilog_reader->readVerilog(file.c_str());
+  if (!_rust_verilog_reader->readVerilog(verilog_file.getReadFile().c_str())) {
+    return false;
+  }
 
   // auto set top module
   if (!_rust_verilog_reader->autoTopModule()) {

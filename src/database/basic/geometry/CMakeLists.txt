@@ -12,3 +12,7 @@ target_include_directories(geometry_db
 
 
 
+
+install(TARGETS geometry_db
+    LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+    RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})

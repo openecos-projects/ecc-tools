@@ -9,3 +9,7 @@ target_include_directories(eval_db
     PUBLIC 
         ${EVAL_DATA}
 )
+
+install(TARGETS eval_db
+    LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+    RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})

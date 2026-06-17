@@ -19,10 +19,12 @@ extern "C" {
 // Returns non-zero on success and 0 on failure.
 IRCX_ICS55_API int ircx_ics55_init(const char* config_file);
 IRCX_ICS55_API int ircx_ics55_run(void);
+IRCX_ICS55_API int ircx_ics55_run_with_idb_design(void* idb_design);
 IRCX_ICS55_API int ircx_ics55_report(void);
 
 // Convenience API: init + run + report.
 IRCX_ICS55_API int ircx_ics55_extract(const char* config_file);
+IRCX_ICS55_API int ircx_ics55_extract_with_idb_design(const char* config_file, void* idb_design);
 
 // The returned pointer is owned by the library and remains valid until the next
 // call from the same thread.

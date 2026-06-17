@@ -65,7 +65,7 @@ def require_array_data(root: Path, relative_path: str) -> list[dict[str, Any]]:
 
 def validate_manifest(root: Path) -> dict[str, Any]:
     manifest = load_json(root, "manifest.json")
-    if manifest.get("schema") != "ieda.view.v1":
+    if manifest.get("schema") != "ecc.view.v1":
         raise ViewJsonError("manifest.json: unsupported schema")
     if manifest.get("format") != "layout_view_package":
         raise ViewJsonError("manifest.json: unsupported format")

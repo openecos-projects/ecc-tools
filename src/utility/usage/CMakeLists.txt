@@ -11,3 +11,7 @@ target_include_directories(usage
     PUBLIC 
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+install(TARGETS usage
+    LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+    RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})

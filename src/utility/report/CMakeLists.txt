@@ -15,3 +15,7 @@ target_include_directories(report_table
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${HOME_THIRDPARTY}
 )
+
+install(TARGETS report_table
+    LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+    RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})

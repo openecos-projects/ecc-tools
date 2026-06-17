@@ -9,3 +9,7 @@ else()
 endif()
 
 target_link_libraries(graph PUBLIC absl::btree)
+
+install(TARGETS graph
+    LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+    RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})

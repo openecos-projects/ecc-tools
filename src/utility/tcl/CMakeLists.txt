@@ -30,3 +30,7 @@ target_include_directories(tcl
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+install(TARGETS tcl
+    LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+    RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})

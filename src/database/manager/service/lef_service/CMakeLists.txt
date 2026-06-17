@@ -17,3 +17,7 @@ target_include_directories(lef_service
         ${HOME_DATABASE}/data/design/db_design
         ${HOME_DATABASE}/data/design/db_layout
 )
+
+install(TARGETS lef_service
+    LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+    RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})

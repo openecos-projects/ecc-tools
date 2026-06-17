@@ -425,6 +425,25 @@ int32_t DefWrite::write_via()
       }
 
       writestr(" ;\n");
+    } else {
+      writestr("- %s \n", via->get_name().c_str());
+
+      for (IdbViaMasterFixed* master_fixed : via_master->get_master_fixed_list()) {
+        if (master_fixed == nullptr || master_fixed->get_layer() == nullptr) {
+          continue;
+        }
+
+        for (IdbRect* rect : master_fixed->get_rect_list()) {
+          if (rect == nullptr) {
+            continue;
+          }
+
+          writestr("  + RECT %s ( %d %d ) ( %d %d )\n", master_fixed->get_layer()->get_name().c_str(), rect->get_low_x(),
+                   rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+        }
+      }
+
+      writestr(" ;\n");
     }
   }
 

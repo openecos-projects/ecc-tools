@@ -43,3 +43,7 @@ __pycache__
 
 # Prevent accidental re-addition of removed submodules
 src/third_party/mt-kahypar/
+
+.direnv
+result
+.ccache
