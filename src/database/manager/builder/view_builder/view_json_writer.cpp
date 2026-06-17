@@ -42,7 +42,7 @@
 namespace idb {
 namespace {
 
-constexpr const char* kSchema = "ieda.view.v1";
+constexpr const char* kSchema = "ecc.view.v1";
 constexpr int32_t kDefaultTileSize = 200000;
 constexpr int32_t kInvalidLow = std::numeric_limits<int32_t>::max();
 constexpr int32_t kInvalidHigh = std::numeric_limits<int32_t>::min();

@@ -3,6 +3,8 @@ add_library(verilog_builder
     verilog_write.cpp
 )
 
+find_package(ZLIB REQUIRED)
+
 target_include_directories(verilog_builder 
      PUBLIC 
              ${CMAKE_CURRENT_SOURCE_DIR}
@@ -21,4 +23,6 @@ target_link_libraries(verilog_builder
         def_service 
         idb
         time
+    PUBLIC
+        ZLIB::ZLIB
 )
