@@ -13,16 +13,16 @@
 
 namespace idb {
 
-bool writeViewJson(IdbDefService* def_service, const std::string& output_dir)
+bool writeViewJson(IdbDefService* def_service, const std::string& output_dir, ViewJsonWriteOptions options)
 {
-  ViewJsonWriter writer(def_service);
+  ViewJsonWriter writer(def_service, options);
   return writer.write(output_dir);
 }
 
-bool applyViewJsonEdits(IdbDefService* def_service, const std::string& edits_path)
+bool applyViewJsonEdits(IdbDefService* def_service, const std::string& edits_path, bool compressed_hint)
 {
   ViewJsonEditApplier applier(def_service);
-  return applier.apply(edits_path);
+  return applier.apply(edits_path, compressed_hint);
 }
 
 }  // namespace idb

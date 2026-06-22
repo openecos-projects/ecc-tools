@@ -42,8 +42,8 @@ void register_idb(py::module& m)
         py::arg("is_add_space_for_escape_name") = false);
   m.def("gds_save", saveGDSII, py::arg("gds_name"), py::arg("is_harden") = false);
   m.def("json_save", saveJson, py::arg("path"));
-  m.def("view_json_save", saveViewJson, py::arg("output_dir"));
-  m.def("view_json_apply_edits", applyViewJsonEdits, py::arg("edits_path"));
+  m.def("view_json_save", saveViewJson, py::arg("output_dir"), py::arg("json_format") = "pretty", py::arg("compress") = false);
+  m.def("view_json_apply_edits", applyViewJsonEdits, py::arg("edits_path"), py::arg("compress") = false);
   m.def("save_data", saveData, py::arg("path"));
   m.def("reset_data", resetData);
   m.def("load_data", loadData, py::arg("path"));

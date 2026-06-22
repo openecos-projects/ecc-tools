@@ -64,10 +64,11 @@ int32_t coordY(IdbCoordinate<int32_t>* coord)
 
 }  // namespace
 
-ViewJsonWriter::ViewJsonWriter(IdbDefService* def_service)
+ViewJsonWriter::ViewJsonWriter(IdbDefService* def_service, ViewJsonWriteOptions options)
     : _def_service(def_service),
       _layout(def_service == nullptr ? nullptr : def_service->get_layout()),
-      _design(def_service == nullptr ? nullptr : def_service->get_design())
+      _design(def_service == nullptr ? nullptr : def_service->get_design()),
+      _options(options)
 {
 }
 
@@ -301,35 +302,35 @@ bool ViewJsonWriter::writeManifest()
   IdbRect* die_bbox = _layout->get_die() == nullptr ? nullptr : _layout->get_die()->get_bounding_box();
   json["bbox"] = toRectJson(die_bbox);
   json["files"] = {
-      {"meta", "meta.json"},
-      {"layers", "tech/layers.json"},
-      {"vias", "tech/vias.json"},
-      {"cell_masters", "tech/cell_masters.json"},
-      {"sites", "tech/sites.json"},
-      {"die", "design/die.json"},
-      {"rows", "design/rows.json"},
-      {"tracks", "design/tracks.json"},
-      {"gcell_grids", "design/gcell_grids.json"},
-      {"instances", "design/instances.json"},
-      {"instances_name_index", "design/instances.name_index.json"},
-      {"io_pins", "design/io_pins.json"},
-      {"io_pins_name_index", "design/io_pins.name_index.json"},
-      {"regular_nets", "design/regular_nets.json"},
-      {"regular_nets_name_index", "design/regular_nets.name_index.json"},
-      {"regular_wires", "design/regular_wires.json"},
-      {"regular_wires_index", "design/regular_wires.index.json"},
-      {"layer_index", "design/layer_index.json"},
-      {"spatial_index", "design/spatial_index.json"},
-      {"special_nets", "design/special_nets.json"},
-      {"special_nets_name_index", "design/special_nets.name_index.json"},
-      {"special_wires", "design/special_wires.json"},
-      {"special_wires_index", "design/special_wires.index.json"},
-      {"blockages", "design/blockages.json"},
-      {"blockages_index", "design/blockages.index.json"},
-      {"fills", "design/fills.json"},
-      {"fills_index", "design/fills.index.json"},
-      {"regions", "design/regions.json"},
-      {"layout_edits", "edits/layout_edits.json"},
+      {"meta", storedPath("meta.json")},
+      {"layers", storedPath("tech/layers.json")},
+      {"vias", storedPath("tech/vias.json")},
+      {"cell_masters", storedPath("tech/cell_masters.json")},
+      {"sites", storedPath("tech/sites.json")},
+      {"die", storedPath("design/die.json")},
+      {"rows", storedPath("design/rows.json")},
+      {"tracks", storedPath("design/tracks.json")},
+      {"gcell_grids", storedPath("design/gcell_grids.json")},
+      {"instances", storedPath("design/instances.json")},
+      {"instances_name_index", storedPath("design/instances.name_index.json")},
+      {"io_pins", storedPath("design/io_pins.json")},
+      {"io_pins_name_index", storedPath("design/io_pins.name_index.json")},
+      {"regular_nets", storedPath("design/regular_nets.json")},
+      {"regular_nets_name_index", storedPath("design/regular_nets.name_index.json")},
+      {"regular_wires", storedPath("design/regular_wires.json")},
+      {"regular_wires_index", storedPath("design/regular_wires.index.json")},
+      {"layer_index", storedPath("design/layer_index.json")},
+      {"spatial_index", storedPath("design/spatial_index.json")},
+      {"special_nets", storedPath("design/special_nets.json")},
+      {"special_nets_name_index", storedPath("design/special_nets.name_index.json")},
+      {"special_wires", storedPath("design/special_wires.json")},
+      {"special_wires_index", storedPath("design/special_wires.index.json")},
+      {"blockages", storedPath("design/blockages.json")},
+      {"blockages_index", storedPath("design/blockages.index.json")},
+      {"fills", storedPath("design/fills.json")},
+      {"fills_index", storedPath("design/fills.index.json")},
+      {"regions", storedPath("design/regions.json")},
+      {"layout_edits", storedPath("edits/layout_edits.json")},
   };
 
   json["capabilities"] = {
@@ -672,7 +673,7 @@ bool ViewJsonWriter::writeInstances()
     item["bbox"] = toRectJson(bbox);
     item["region"] = inst->get_region() == nullptr ? "" : inst->get_region()->get_name();
     json["data"].push_back(item);
-    registerSpatialEntry("instances", "instances.json", instanceId(inst), bbox, {});
+    registerSpatialEntry("instances", storedPath("instances.json"), instanceId(inst), bbox, {});
   }
   if (!writeJsonFile("design/instances.json", json)) {
     return false;
@@ -722,10 +723,10 @@ bool ViewJsonWriter::writeIoPins()
     item["layers"] = layers;
     json["data"].push_back(item);
     for (const int layer_id : layers) {
-      PartSummary summary{"io_pins.json", bbox, 1, {layer_id}};
+      PartSummary summary{storedPath("io_pins.json"), bbox, 1, {layer_id}};
       addLayerPart(layer_id, "io_pins", summary);
     }
-    registerSpatialEntry("io_pins", "io_pins.json", ioPinId(pin), bbox, layers);
+    registerSpatialEntry("io_pins", storedPath("io_pins.json"), ioPinId(pin), bbox, layers);
   }
   if (!writeJsonFile("design/io_pins.json", json)) {
     return false;
@@ -821,9 +822,9 @@ bool ViewJsonWriter::writeRegularWires()
           item["bbox"] = toRectJson(bbox);
           item["layers"] = ViewJson::array({layer_id});
           json["data"].push_back(item);
-          PartSummary summary{"regular_wires.json", bbox, 1, {layer_id}};
+          PartSummary summary{storedPath("regular_wires.json"), bbox, 1, {layer_id}};
           addLayerPart(layer_id, "regular_wires", summary);
-          registerSpatialEntry("regular_wires", "regular_wires.json", id - 1, bbox, {layer_id});
+          registerSpatialEntry("regular_wires", storedPath("regular_wires.json"), id - 1, bbox, {layer_id});
         }
         if (segment->is_via()) {
           for (auto* via : segment->get_via_list()) {
@@ -840,7 +841,7 @@ bool ViewJsonWriter::writeRegularWires()
             item["bbox"] = toRectJson(bbox);
             item["layers"] = layers;
             json["data"].push_back(item);
-            registerSpatialEntry("regular_wires", "regular_wires.json", entry_id, bbox, layers);
+            registerSpatialEntry("regular_wires", storedPath("regular_wires.json"), entry_id, bbox, layers);
           }
         }
         if (segment->is_rect()) {
@@ -857,9 +858,9 @@ bool ViewJsonWriter::writeRegularWires()
           item["bbox"] = toRectJson(bbox);
           item["layers"] = ViewJson::array({layer_id});
           json["data"].push_back(item);
-          PartSummary summary{"regular_wires.json", bbox, 1, {layer_id}};
+          PartSummary summary{storedPath("regular_wires.json"), bbox, 1, {layer_id}};
           addLayerPart(layer_id, "regular_wires", summary);
-          registerSpatialEntry("regular_wires", "regular_wires.json", id - 1, bbox, {layer_id});
+          registerSpatialEntry("regular_wires", storedPath("regular_wires.json"), id - 1, bbox, {layer_id});
         }
         ++segment_index;
       }
@@ -960,9 +961,9 @@ bool ViewJsonWriter::writeSpecialWires()
           item["bbox"] = toRectJson(bbox);
           item["layers"] = ViewJson::array({layer_id});
           json["data"].push_back(item);
-          PartSummary summary{"special_wires.json", bbox, 1, {layer_id}};
+          PartSummary summary{storedPath("special_wires.json"), bbox, 1, {layer_id}};
           addLayerPart(layer_id, "special_wires", summary);
-          registerSpatialEntry("special_wires", "special_wires.json", id - 1, bbox, {layer_id});
+          registerSpatialEntry("special_wires", storedPath("special_wires.json"), id - 1, bbox, {layer_id});
         }
         if (segment->is_via()) {
           const int entry_id = id++;
@@ -978,7 +979,7 @@ bool ViewJsonWriter::writeSpecialWires()
           item["bbox"] = toRectJson(bbox);
           item["layers"] = layers;
           json["data"].push_back(item);
-          registerSpatialEntry("special_wires", "special_wires.json", entry_id, bbox, layers);
+          registerSpatialEntry("special_wires", storedPath("special_wires.json"), entry_id, bbox, layers);
         }
         if (segment->is_rect()) {
           const int layer_id = layerId(segment->get_layer());
@@ -994,9 +995,9 @@ bool ViewJsonWriter::writeSpecialWires()
           item["bbox"] = toRectJson(bbox);
           item["layers"] = ViewJson::array({layer_id});
           json["data"].push_back(item);
-          PartSummary summary{"special_wires.json", bbox, 1, {layer_id}};
+          PartSummary summary{storedPath("special_wires.json"), bbox, 1, {layer_id}};
           addLayerPart(layer_id, "special_wires", summary);
-          registerSpatialEntry("special_wires", "special_wires.json", id - 1, bbox, {layer_id});
+          registerSpatialEntry("special_wires", storedPath("special_wires.json"), id - 1, bbox, {layer_id});
         }
         ++segment_index;
       }
@@ -1033,13 +1034,13 @@ bool ViewJsonWriter::writeBlockages()
         item["layer_id"] = layer_id;
         item["except_pgnet"] = routing->is_except_pgnet();
         layers.push_back(layer_id);
-        PartSummary summary{"blockages.json", bbox, 1, {layer_id}};
+        PartSummary summary{storedPath("blockages.json"), bbox, 1, {layer_id}};
         addLayerPart(layer_id, "blockages", summary);
       }
       item["bbox"] = toRectJson(isBBoxValid(bbox) ? bbox : ViewRect{0, 0, 0, 0});
       item["layers"] = layers;
       json["data"].push_back(item);
-      registerSpatialEntry("blockages", "blockages.json", id - 1, bbox, layers);
+      registerSpatialEntry("blockages", storedPath("blockages.json"), id - 1, bbox, layers);
     }
   }
   json["count"] = id;
@@ -1070,9 +1071,9 @@ bool ViewJsonWriter::writeFills()
           item["bbox"] = toRectJson(bbox);
           item["layers"] = ViewJson::array({layer_id});
           json["data"].push_back(item);
-          PartSummary summary{"fills.json", bbox, 1, {layer_id}};
+          PartSummary summary{storedPath("fills.json"), bbox, 1, {layer_id}};
           addLayerPart(layer_id, "fills", summary);
-          registerSpatialEntry("fills", "fills.json", entry_id, bbox, {layer_id});
+          registerSpatialEntry("fills", storedPath("fills.json"), entry_id, bbox, {layer_id});
         }
       } else if (fill->get_type() == IdbFill::kVia && fill->get_via() != nullptr && fill->get_via()->get_via() != nullptr) {
         auto* via_master = fill->get_via()->get_via()->get_instance();
@@ -1090,10 +1091,10 @@ bool ViewJsonWriter::writeFills()
           item["layers"] = layers;
           json["data"].push_back(item);
           for (const int layer_id : layers) {
-            PartSummary summary{"fills.json", bbox, 1, {layer_id}};
+            PartSummary summary{storedPath("fills.json"), bbox, 1, {layer_id}};
             addLayerPart(layer_id, "fills", summary);
           }
-          registerSpatialEntry("fills", "fills.json", entry_id, bbox, layers);
+          registerSpatialEntry("fills", storedPath("fills.json"), entry_id, bbox, layers);
         }
       }
     }
@@ -1137,10 +1138,10 @@ bool ViewJsonWriter::writeRegions()
 
 bool ViewJsonWriter::writeObjectIndexes()
 {
-  return writeJsonFile("design/regular_wires.index.json", makeObjectIndexJson("regular_wires", "regular_wires.json"))
-         && writeJsonFile("design/special_wires.index.json", makeObjectIndexJson("special_wires", "special_wires.json"))
-         && writeJsonFile("design/blockages.index.json", makeObjectIndexJson("blockages", "blockages.json"))
-         && writeJsonFile("design/fills.index.json", makeObjectIndexJson("fills", "fills.json"));
+  return writeJsonFile("design/regular_wires.index.json", makeObjectIndexJson("regular_wires", storedPath("regular_wires.json")))
+         && writeJsonFile("design/special_wires.index.json", makeObjectIndexJson("special_wires", storedPath("special_wires.json")))
+         && writeJsonFile("design/blockages.index.json", makeObjectIndexJson("blockages", storedPath("blockages.json")))
+         && writeJsonFile("design/fills.index.json", makeObjectIndexJson("fills", storedPath("fills.json")));
 }
 
 bool ViewJsonWriter::writeLayerIndex()
@@ -1298,7 +1299,8 @@ bool ViewJsonWriter::writeJsonFile(const std::string& relative_path, const ViewJ
     return false;
   }
 
-  const auto path = _output_dir / relative_path;
+  const auto output_relative_path = storedPath(relative_path);
+  const auto path = _output_dir / output_relative_path;
   std::error_code ec;
   std::filesystem::create_directories(path.parent_path(), ec);
   if (ec) {
@@ -1306,14 +1308,19 @@ bool ViewJsonWriter::writeJsonFile(const std::string& relative_path, const ViewJ
     return false;
   }
 
-  std::ofstream out(path);
-  if (!out.is_open()) {
-    std::cout << "Open view json file failed: " << path << std::endl;
+  std::string error;
+  const bool compress = output_relative_path != relative_path;
+  if (!writeViewJsonText(path, dumpViewJson(json, _options.format), compress, error)) {
+    std::cout << "Write view json file failed: " << path << " " << error << std::endl;
     return false;
   }
 
-  out << json.dump(2);
   return true;
+}
+
+std::string ViewJsonWriter::storedPath(const std::string& relative_path) const
+{
+  return storedViewJsonPath(relative_path, _options);
 }
 
 bool ViewJsonWriter::validateDenseData(const std::string& relative_path, const ViewJson& json) const

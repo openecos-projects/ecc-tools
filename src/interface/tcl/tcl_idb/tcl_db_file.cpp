@@ -20,6 +20,7 @@
 #include "idm.h"
 #include "report_manager.h"
 #include "tool_manager.h"
+#include "view_json_io.h"
 namespace tcl {
 
 CmdInitIdb::CmdInitIdb(const char* cmd_name) : TclCmd(cmd_name)
@@ -466,12 +467,22 @@ CmdSaveViewJson::CmdSaveViewJson(const char* cmd_name) : TclCmd(cmd_name)
 {
   auto* path = new TclStringOption(TCL_PATH, 1);
   addOption(path);
+
+  auto* json_format = new TclStringOption("-json_format", 1, "pretty");
+  addOption(json_format);
+
+  auto* compress = new TclIntOption("-compress", 1, 0);
+  addOption(compress);
 }
 
 unsigned CmdSaveViewJson::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
   LOG_FATAL_IF(!path);
+  TclOption* json_format = getOptionOrArg("-json_format");
+  LOG_FATAL_IF(!json_format);
+  TclOption* compress = getOptionOrArg("-compress");
+  LOG_FATAL_IF(!compress);
   return 1;
 }
 
@@ -487,7 +498,19 @@ unsigned CmdSaveViewJson::exec()
     return 0;
   }
 
-  return dmInst->saveViewJson(str_path) ? 1 : 0;
+  TclOption* json_format_option = getOptionOrArg("-json_format");
+  const char* json_format_value = json_format_option == nullptr ? "pretty" : json_format_option->getStringVal();
+  idb::ViewJsonWriteOptions options;
+  if (!idb::parseViewJsonFormat(json_format_value == nullptr ? "pretty" : json_format_value, options.format)) {
+    std::cout << "Save view json failed: unsupported -json_format `" << json_format_value << "`, expected `pretty` or `compact`."
+              << std::endl;
+    return 0;
+  }
+
+  TclOption* compress_option = getOptionOrArg("-compress");
+  options.compress = compress_option != nullptr && compress_option->getIntVal() != 0;
+
+  return dmInst->saveViewJson(str_path, options) ? 1 : 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -498,12 +521,17 @@ CmdApplyViewJsonEdits::CmdApplyViewJsonEdits(const char* cmd_name) : TclCmd(cmd_
 {
   auto* path = new TclStringOption(TCL_PATH, 1);
   addOption(path);
+
+  auto* compress = new TclIntOption("-compress", 1, 0);
+  addOption(compress);
 }
 
 unsigned CmdApplyViewJsonEdits::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
   LOG_FATAL_IF(!path);
+  TclOption* compress = getOptionOrArg("-compress");
+  LOG_FATAL_IF(!compress);
   return 1;
 }
 
@@ -519,7 +547,9 @@ unsigned CmdApplyViewJsonEdits::exec()
     return 0;
   }
 
-  return dmInst->applyViewJsonEdits(str_path) ? 1 : 0;
+  TclOption* compress_option = getOptionOrArg("-compress");
+  const bool compress = compress_option != nullptr && compress_option->getIntVal() != 0;
+  return dmInst->applyViewJsonEdits(str_path, compress) ? 1 : 0;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

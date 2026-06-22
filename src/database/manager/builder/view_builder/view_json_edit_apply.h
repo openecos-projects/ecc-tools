@@ -19,7 +19,7 @@ class ViewJsonEditApplier
  public:
   explicit ViewJsonEditApplier(IdbDefService* def_service);
 
-  bool apply(const std::string& edits_path);
+  bool apply(const std::string& edits_path, bool compressed_hint = false);
 
  private:
   IdbDefService* _def_service = nullptr;

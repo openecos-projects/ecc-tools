@@ -12,6 +12,7 @@
 #include <cctype>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +23,7 @@
 #include "IdbPins.h"
 #include "def_service.h"
 #include "json.hpp"
+#include "view_json_io.h"
 
 namespace idb {
 namespace {
@@ -414,21 +416,23 @@ ViewJsonEditApplier::ViewJsonEditApplier(IdbDefService* def_service) : _def_serv
 {
 }
 
-bool ViewJsonEditApplier::apply(const std::string& edits_path)
+bool ViewJsonEditApplier::apply(const std::string& edits_path, bool compressed_hint)
 {
   if (_def_service == nullptr || _def_service->get_design() == nullptr) {
     std::cout << "Apply view json edits failed: def service or design is null." << std::endl;
     return false;
   }
 
-  std::ifstream stream(edits_path);
-  if (!stream.is_open()) {
-    std::cout << "Apply view json edits failed: cannot open " << edits_path << "." << std::endl;
+  std::string content;
+  std::string error;
+  if (!readViewJsonText(edits_path, compressed_hint, content, error)) {
+    std::cout << "Apply view json edits failed: " << error << "." << std::endl;
     return false;
   }
 
   ViewJson root;
   try {
+    std::istringstream stream(content);
     stream >> root;
   } catch (const nlohmann::json::exception& error) {
     std::cout << "Apply view json edits failed: parse " << edits_path << " error: " << error.what() << std::endl;

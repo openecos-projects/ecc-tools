@@ -399,14 +399,14 @@ bool IdbBuilder::saveJSON(string file, string options)
   return json_write->writeDb(file.c_str(), options);
 }
 
-bool IdbBuilder::saveViewJson(string output_dir)
+bool IdbBuilder::saveViewJson(string output_dir, ViewJsonWriteOptions options)
 {
-  return writeViewJson(_def_service, output_dir);
+  return writeViewJson(_def_service, output_dir, options);
 }
 
-bool IdbBuilder::applyViewJsonEdits(string edits_path)
+bool IdbBuilder::applyViewJsonEdits(string edits_path, bool compressed_hint)
 {
-  return idb::applyViewJsonEdits(_def_service, edits_path);
+  return idb::applyViewJsonEdits(_def_service, edits_path, compressed_hint);
 }
 
 void IdbBuilder::saveLayout(string folder)

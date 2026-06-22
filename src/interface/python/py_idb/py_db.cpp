@@ -18,6 +18,7 @@
 
 #include "db_fm/file_soc.h"
 #include <idm.h>
+#include "view_json_io.h"
 
 namespace python_interface {
 
@@ -79,14 +80,20 @@ bool saveJson(const std::string& path)
   return dmInst->saveJSON(path, options);
 }
 
-bool saveViewJson(const std::string& output_dir)
+bool saveViewJson(const std::string& output_dir, const std::string& json_format, bool compress)
 {
-  return dmInst->saveViewJson(output_dir);
+  idb::ViewJsonWriteOptions options;
+  if (!idb::parseViewJsonFormat(json_format, options.format)) {
+    std::cout << "Save view json failed: unsupported json_format `" << json_format << "`, expected `pretty` or `compact`." << std::endl;
+    return false;
+  }
+  options.compress = compress;
+  return dmInst->saveViewJson(output_dir, options);
 }
 
-bool applyViewJsonEdits(const std::string& edits_path)
+bool applyViewJsonEdits(const std::string& edits_path, bool compress)
 {
-  return dmInst->applyViewJsonEdits(edits_path);
+  return dmInst->applyViewJsonEdits(edits_path, compress);
 }
 
 bool saveData(const std::string& path)

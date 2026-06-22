@@ -10,11 +10,13 @@
 
 #include <string>
 
+#include "view_json_io.h"
+
 namespace idb {
 
 class IdbDefService;
 
-bool writeViewJson(IdbDefService* def_service, const std::string& output_dir);
-bool applyViewJsonEdits(IdbDefService* def_service, const std::string& edits_path);
+bool writeViewJson(IdbDefService* def_service, const std::string& output_dir, ViewJsonWriteOptions options = {});
+bool applyViewJsonEdits(IdbDefService* def_service, const std::string& edits_path, bool compressed_hint = false);
 
 }  // namespace idb

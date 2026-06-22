@@ -8,6 +8,7 @@
 # ***************************************************************************************
 
 import argparse
+import gzip
 import json
 from pathlib import Path
 from typing import Any
@@ -49,7 +50,8 @@ def load_json(root: Path, relative_path: str) -> Any:
     path = root / relative_path
     if not path.is_file():
         raise ViewJsonError(f"missing file: {relative_path}")
-    with path.open("r", encoding="utf-8") as stream:
+    opener = gzip.open if path.suffix == ".gz" else Path.open
+    with opener(path, "rt", encoding="utf-8") as stream:
         return json.load(stream)
 
 

@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "IdbGeometry.h"
-#include "json.hpp"
+#include "view_json_io.h"
 #include "view_geometry_transform.h"
 
 namespace idb {
@@ -38,12 +38,10 @@ class IdbTerm;
 class IdbVia;
 class IdbViaMaster;
 
-using ViewJson = nlohmann::ordered_json;
-
 class ViewJsonWriter
 {
  public:
-  explicit ViewJsonWriter(IdbDefService* def_service);
+  explicit ViewJsonWriter(IdbDefService* def_service, ViewJsonWriteOptions options = {});
 
   bool write(const std::string& output_dir);
 
@@ -102,6 +100,7 @@ class ViewJsonWriter
   bool writeNameIndex(const std::string& relative_path, const std::string& kind,
                       const std::unordered_map<std::string, int>& name_to_id) const;
   bool writeJsonFile(const std::string& relative_path, const ViewJson& json) const;
+  std::string storedPath(const std::string& relative_path) const;
   bool validateDenseData(const std::string& relative_path, const ViewJson& json) const;
 
   ViewJson makeFileHeader(const std::string& kind, int count) const;
@@ -152,6 +151,7 @@ class ViewJsonWriter
   IdbDefService* _def_service = nullptr;
   IdbLayout* _layout = nullptr;
   IdbDesign* _design = nullptr;
+  ViewJsonWriteOptions _options;
   std::filesystem::path _output_dir;
 
   std::unordered_map<const IdbLayer*, int> _layer_id_map;
