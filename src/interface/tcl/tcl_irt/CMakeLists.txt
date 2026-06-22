@@ -1,6 +1,7 @@
 add_library(tcl_irt
     ${HOME_INTERFACE}/tcl/tcl_irt/src/tcl_init_rt.cpp
     ${HOME_INTERFACE}/tcl/tcl_irt/src/tcl_run_ert.cpp
+    ${HOME_INTERFACE}/tcl/tcl_irt/src/tcl_run_pa.cpp
     ${HOME_INTERFACE}/tcl/tcl_irt/src/tcl_run_rt.cpp
     ${HOME_INTERFACE}/tcl/tcl_irt/src/tcl_destroy_rt.cpp
     ${HOME_INTERFACE}/tcl/tcl_irt/src/tcl_rt_clean_def.cpp

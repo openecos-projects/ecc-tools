@@ -64,6 +64,20 @@ class TclRunRT : public TclCmd
   std::vector<std::pair<std::string, ValueType>> _config_list;
 };
 
+class TclRunPA : public TclCmd
+{
+ public:
+  explicit TclRunPA(const char* cmd_name);
+  ~TclRunPA() override = default;
+
+  unsigned check() override { return 1; };
+
+  unsigned exec() override;
+
+ private:
+  std::vector<std::pair<std::string, ValueType>> _config_list;
+};
+
 class TclDestroyRT : public TclCmd
 {
  public:

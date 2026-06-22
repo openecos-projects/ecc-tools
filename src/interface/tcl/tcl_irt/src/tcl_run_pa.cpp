@@ -4,36 +4,33 @@
 // Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 //
 // iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You can use this software according to the terms and conditions of Mulan PSL v2.
 // You may obtain a copy of Mulan PSL v2 at:
 // http://license.coscl.org.cn/MulanPSL2
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
-
+#include "RTInterface.hpp"
 #include "tcl_rt.h"
-
-using namespace ieda;
+#include "tcl_util.h"
 
 namespace tcl {
 
-int registerCmdRT()
+TclRunPA::TclRunPA(const char* cmd_name) : TclCmd(cmd_name)
 {
-  // rt
-  registerTclCmd(TclInitRT, "init_rt");
-  registerTclCmd(TclRunERT, "run_ert");
-  registerTclCmd(TclRunPA, "run_pa");
-  registerTclCmd(TclRunRT, "run_rt");
-  registerTclCmd(TclDestroyRT, "destroy_rt");
-  // aux
-  registerTclCmd(TclRTCleanDef, "rt_clean_def");
-  registerTclCmd(TclRTFixFanout, "rt_fix_fanout");
-  return EXIT_SUCCESS;
+}
+
+unsigned TclRunPA::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+  RTI.runPA();
+  return 1;
 }
 
 }  // namespace tcl

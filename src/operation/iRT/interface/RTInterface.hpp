@@ -77,6 +77,7 @@ class RTInterface
 #if 1  // iRT
   void initRT(std::map<std::string, std::any> config_map);
   void runERT(std::map<std::string, std::any> config_map);
+  void runPA();
   void runRT();
   void destroyRT();
   void cleanDef();

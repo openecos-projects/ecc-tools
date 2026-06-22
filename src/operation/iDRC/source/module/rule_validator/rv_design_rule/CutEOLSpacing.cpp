@@ -14,7 +14,6 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include <set>
 #include "RuleValidator.hpp"
 
 namespace idrc {
@@ -135,6 +134,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
     }
 
     int32_t routing_layer_idx = *std::max_element(routing_layer_it->second.begin(), routing_layer_it->second.end());
+    int32_t violation_routing_layer_idx = *std::min_element(routing_layer_it->second.begin(), routing_layer_it->second.end());
     auto routing_layer_data_it = layer_data.find(routing_layer_idx);
     if (routing_layer_data_it == layer_data.end()) {
       continue;
@@ -288,8 +288,6 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
 
           std::vector<std::pair<GTLRectInt, int32_t>> window_overlap_rect_list;
           routing_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(back_side), std::back_inserter(window_overlap_rect_list));
-          std::set<int32_t> overlap_net_set;
-
           GTLPolySetInt neighbor_shape;
           neighbor_shape += DRCUTIL.convertToGTLRectInt(back_side);
           neighbor_shape -= all_neighboors;
@@ -323,7 +321,6 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
             if (DRCUTIL.isOpenOverlap(empty_region, env_rect)) {
               has_check_overlap = true;
               check_overlap_rect = env_rect;
-              overlap_net_set.insert(routing_layer_data.getNetIdxByMaxRectId(env_max_rect_id));
               break;
             }
           }
@@ -362,14 +359,14 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
             for (const CutData& overlap_cut_data : overlap_cut_list) {
               int32_t env_net_idx = overlap_cut_data.net_idx;
               bool is_netless_env_cut = isNetlessEnvCut(overlap_cut_data);
-              if (checking_orient == check_orient && !is_netless_env_cut) {
-                continue;
-              }
               if (cut_net_idx == -1 && env_net_idx == -1) {
                 continue;
               }
               PlanarRect env_cut_rect = DRCUTIL.convertToPlanarRect(overlap_cut_data.rect);
               if (cut_rect == env_cut_rect) {
+                continue;
+              }
+              if (checking_orient == check_orient && !is_netless_env_cut) {
                 continue;
               }
               bool has_long_netless_routing_env = false;
@@ -435,11 +432,6 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
               }
 
               // VIAx的违例输出Mx
-              int32_t violation_routing_layer_idx = -1;
-              {
-                std::vector<int32_t>& routing_layer_idx_list = cut_to_adjacent_routing_map[cut_layer_idx];
-                violation_routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
-              }
               PlanarRect violation_rect;
               if (DRCUTIL.isClosedOverlap(cut_rect, env_cut_rect)) {
                 violation_rect = DRCUTIL.getOverlap(cut_rect, env_cut_rect);
@@ -486,9 +478,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
               Violation violation;
               violation.set_violation_type(ViolationType::kCutEOLSpacing);
               violation.set_is_routing(true);
-              std::set<int32_t> violation_net_set = {cut_net_idx, env_net_idx};
-              violation_net_set.insert(overlap_net_set.begin(), overlap_net_set.end());
-              violation.set_violation_net_set(violation_net_set);
+              violation.set_violation_net_set({cut_net_idx, env_net_idx});
               violation.set_layer_idx(violation_routing_layer_idx);
               violation.set_rect(violation_rect);
               violation.set_required_size(required_size);
