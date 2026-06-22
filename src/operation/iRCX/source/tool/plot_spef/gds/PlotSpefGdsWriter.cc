@@ -24,7 +24,6 @@
 #include <unordered_map>
 
 #include "GTWriter.hpp"
-#include "GdsBoundary.hpp"
 #include "GdsData.hpp"
 #include "GdsPath.hpp"
 #include "GdsSref.hpp"
@@ -37,27 +36,35 @@
 namespace ircx::plot_spef {
 namespace {
 
+constexpr int kNodeOutlineWidth = 2;
+constexpr int kEdgeWidth = 4;
+constexpr int kCcWidth = 2;
+
 auto findNode(const Model& model, const std::string& name) -> const Node*
 {
   const auto it = model.nodes_by_name.find(name);
   return it == model.nodes_by_name.end() ? nullptr : it->second;
 }
 
+auto addBoxOutline(idb::GdsStruct& gds_net, int layer, int data_type, int width, int llx, int lly, int urx, int ury) -> void
+{
+  idb::GdsPath path;
+  path.layer = layer;
+  path.data_type = data_type;
+  path.width = width;
+  path.add_coord(llx, lly);
+  path.add_coord(urx, lly);
+  path.add_coord(urx, ury);
+  path.add_coord(llx, ury);
+  path.add_coord(llx, lly);
+  gds_net.add_element(path);
+}
+
 auto addRect(idb::GdsStruct& gds_net, const Node& node) -> void
 {
-  if (!node.has_box) {
-    return;
+  if (node.has_box) {
+    addBoxOutline(gds_net, node.layer, kNode, kNodeOutlineWidth, node.llx, node.lly, node.urx, node.ury);
   }
-
-  idb::GdsBoundary boundary;
-  boundary.layer = node.layer;
-  boundary.data_type = kNode;
-  boundary.add_coord(node.llx, node.lly);
-  boundary.add_coord(node.urx, node.lly);
-  boundary.add_coord(node.urx, node.ury);
-  boundary.add_coord(node.llx, node.ury);
-  boundary.add_coord(node.llx, node.lly);
-  gds_net.add_element(boundary);
 }
 
 auto addText(idb::GdsStruct& gds_net, int layer, int data_type, int x, int y, const std::string& text,
@@ -72,7 +79,7 @@ auto addText(idb::GdsStruct& gds_net, int layer, int data_type, int x, int y, co
   gds_net.add_element(gds_text);
 }
 
-auto addPath(idb::GdsStruct& gds_net, int layer, int data_type, const Node& node1, const Node& node2) -> void
+auto addPath(idb::GdsStruct& gds_net, int layer, int data_type, int width, const Node& node1, const Node& node2) -> void
 {
   if (!node1.has_point || !node2.has_point) {
     return;
@@ -81,7 +88,7 @@ auto addPath(idb::GdsStruct& gds_net, int layer, int data_type, const Node& node
   idb::GdsPath path;
   path.layer = layer;
   path.data_type = data_type;
-  path.width = 1;
+  path.width = width;
   path.add_coord(node1.x, node1.y);
   path.add_coord(node2.x, node2.y);
   gds_net.add_element(path);
@@ -89,19 +96,9 @@ auto addPath(idb::GdsStruct& gds_net, int layer, int data_type, const Node& node
 
 auto addRect(idb::GdsStruct& gds_net, const Resistor& resistor, int layer) -> void
 {
-  if (!resistor.has_box) {
-    return;
+  if (resistor.has_box) {
+    addBoxOutline(gds_net, layer, kEdge, kEdgeWidth, resistor.llx, resistor.lly, resistor.urx, resistor.ury);
   }
-
-  idb::GdsBoundary boundary;
-  boundary.layer = layer;
-  boundary.data_type = kEdge;
-  boundary.add_coord(resistor.llx, resistor.lly);
-  boundary.add_coord(resistor.urx, resistor.lly);
-  boundary.add_coord(resistor.urx, resistor.ury);
-  boundary.add_coord(resistor.llx, resistor.ury);
-  boundary.add_coord(resistor.llx, resistor.lly);
-  gds_net.add_element(boundary);
 }
 
 auto addTopReference(idb::GdsData& gds_data, const std::string& name) -> void
@@ -176,26 +173,26 @@ auto GdsWriter::write(const Model& model, const Config& config) const -> bool
       }
     }
 
-    for (const auto& resistor : net.resistors) {
-      const Node* node1 = findNode(model, resistor.node1);
-      const Node* node2 = findNode(model, resistor.node2);
-      if (node1 == nullptr || node2 == nullptr || !node1->has_point || !node2->has_point) {
-        continue;
-      }
+    if (config.plotResistance()) {
+      for (const auto& resistor : net.resistors) {
+        const Node* node1 = findNode(model, resistor.node1);
+        const Node* node2 = findNode(model, resistor.node2);
+        if (node1 == nullptr || node2 == nullptr || !node1->has_point || !node2->has_point) {
+          continue;
+        }
 
-      const int layer = resistor.has_layer ? resistor.layer : node1->layer;
-      if (resistor.has_box) {
-        addRect(gds_net, resistor, layer);
-      } else {
-        addPath(gds_net, layer, kEdge, *node1, *node2);
-      }
-      if (config.output_resistance) {
+        const int layer = resistor.has_layer ? resistor.layer : node1->layer;
+        if (resistor.has_box) {
+          addRect(gds_net, resistor, layer);
+        } else {
+          addPath(gds_net, layer, kEdge, kEdgeWidth, *node1, *node2);
+        }
         addText(gds_net, layer, kTextRes, (node1->x + node2->x) / 2, (node1->y + node2->y) / 2,
                 formatValue(resistor.value, model.res_unit), idb::GdsPresentation::kTopRight);
       }
     }
 
-    if (config.output_coupling_cap) {
+    if (config.plotCouplingCap()) {
       for (const auto& cap : net.coupling_caps) {
         const Node* node1 = findNode(model, cap.node1);
         const Node* node2 = findNode(model, cap.node2);
@@ -204,13 +201,13 @@ auto GdsWriter::write(const Model& model, const Config& config) const -> bool
         }
 
         const int layer = node1->layer;
-        addPath(gds_net, layer, kCc, *node1, *node2);
+        addPath(gds_net, layer, kCc, kCcWidth, *node1, *node2);
         addText(gds_net, layer, kTextCc, (node1->x + node2->x) / 2, (node1->y + node2->y) / 2,
                 formatValue(cap.value, model.cap_unit), idb::GdsPresentation::kTopRight);
       }
     }
 
-    if (config.output_ground_cap) {
+    if (config.plotGroundCap()) {
       for (const auto& cap : net.ground_caps) {
         const Node* node = findNode(model, cap.node1);
         if (node == nullptr || !node->has_point) {

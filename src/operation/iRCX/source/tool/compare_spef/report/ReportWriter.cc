@@ -230,11 +230,11 @@ auto writeGcapReport(const std::filesystem::path& output_dir, const Config& conf
     LOG_ERROR << "compare_spef failed: cannot open report " << report_path;
     return false;
   }
-  ofs << config.test_file << '\t' << config.reference_file << "\t%diff\tNetname\tNode\n";
+  ofs << config.test_file << '\t' << config.reference_file << "\t%diff\tNetname\n";
   for (const auto& row : result.gcap_rows) {
     ofs << row.test << '\t' << row.reference << '\t';
     writePercent(ofs, row.relative_delta);
-    ofs << '\t' << row.net << '\t' << row.node << '\n';
+    ofs << '\t' << row.net << '\n';
   }
   return true;
 }
@@ -354,7 +354,7 @@ auto writeSummaryReport(const std::filesystem::path& output_dir, const Config& c
   ofs << builder.makeOverviewTable(config, errors).to_string() << '\n';
   ofs << builder.makeDistributionTable("TCAP", "TCAP threshold", config.tcap_threshold, "Number of matched nets", errors.tcap).to_string()
       << '\n';
-  ofs << builder.makeDistributionTable("GCAP", "GCAP threshold", config.ccap_abs_threshold, "Number of matched node caps", errors.gcap)
+  ofs << builder.makeDistributionTable("GCAP", "GCAP threshold", config.ccap_abs_threshold, "Number of matched nets", errors.gcap)
              .to_string()
       << '\n';
   ofs << builder.makeDistributionTable("CCAP", "CCAP threshold", config.ccap_abs_threshold, "Number of matched net pairs", errors.ccap)

@@ -28,6 +28,11 @@ struct Config
   bool output_resistance = false;
   bool output_coupling_cap = false;
   bool output_ground_cap = false;
+
+  auto hasOutputFilter() const -> bool { return output_resistance || output_coupling_cap || output_ground_cap; }
+  auto plotResistance() const -> bool { return !hasOutputFilter() || output_resistance; }
+  auto plotCouplingCap() const -> bool { return !hasOutputFilter() || output_coupling_cap; }
+  auto plotGroundCap() const -> bool { return !hasOutputFilter() || output_ground_cap; }
 };
 
 class ConfigValidator

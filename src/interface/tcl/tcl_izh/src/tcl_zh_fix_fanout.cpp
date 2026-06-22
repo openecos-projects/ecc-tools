@@ -23,6 +23,7 @@ namespace tcl {
 TclZHFixFanout::TclZHFixFanout(const char* cmd_name) : TclCmd(cmd_name)
 {
   _config_list.push_back(std::make_pair("-buffer_name", ValueType::kString));
+  _config_list.push_back(std::make_pair("-max_fanout", ValueType::kInt));
 
   TclUtil::addOption(this, _config_list);
 }

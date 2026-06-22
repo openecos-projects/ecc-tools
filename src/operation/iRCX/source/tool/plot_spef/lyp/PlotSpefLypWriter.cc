@@ -39,6 +39,7 @@ struct LayerProperty
   int dither_pattern = 0;
   int line_style = 0;
   int width = 1;
+  bool filled = true;
 };
 
 auto collectLayers(const Model& model) -> std::vector<int>
@@ -72,25 +73,32 @@ auto layerName(const Model& model, int layer) -> std::string
   return "Layer" + std::to_string(layer);
 }
 
-auto makePropertiesForLayer(const Model& model, int layer) -> std::vector<LayerProperty>
+auto makePropertiesForLayer(const Model& model, const Config& config, int layer) -> std::vector<LayerProperty>
 {
   const std::string prefix = layerName(model, layer) + "_";
-  return {
-      {.layer = layer, .data_type = kNode, .name = prefix + "Node", .color = "#2f80ed", .dither_pattern = 1},
-      {.layer = layer, .data_type = kEdge, .name = prefix + "Edge", .color = "#222222", .line_style = 0, .width = 2},
-      {.layer = layer, .data_type = kCc, .name = prefix + "Cc", .color = "#c0392b", .line_style = 2, .width = 2},
-      {.layer = layer, .data_type = kTextNode, .name = prefix + "TextNode", .color = "#0b5cad"},
-      {.layer = layer, .data_type = kTextRes, .name = prefix + "TextRes", .color = "#8e44ad"},
-      {.layer = layer, .data_type = kTextCg, .name = prefix + "TextCg", .color = "#27ae60"},
-      {.layer = layer, .data_type = kTextCc, .name = prefix + "TextCc", .color = "#d35400"},
+  std::vector<LayerProperty> properties = {
+      {.layer = layer, .data_type = kNode, .name = prefix + "Node", .color = "#0066ff", .line_style = 0, .width = 2, .filled = false},
+      {.layer = layer, .data_type = kTextNode, .name = prefix + "TextNode", .color = "#0050d8"},
   };
+  if (config.plotResistance()) {
+    properties.push_back({.layer = layer, .data_type = kEdge, .name = prefix + "Edge", .color = "#ff2d00", .line_style = 0, .width = 5, .filled = false});
+    properties.push_back({.layer = layer, .data_type = kTextRes, .name = prefix + "TextRes", .color = "#b000e8"});
+  }
+  if (config.plotGroundCap()) {
+    properties.push_back({.layer = layer, .data_type = kTextCg, .name = prefix + "TextCg", .color = "#008a00"});
+  }
+  if (config.plotCouplingCap()) {
+    properties.push_back({.layer = layer, .data_type = kCc, .name = prefix + "Cc", .color = "#ff9900", .line_style = 2, .width = 2, .filled = false});
+    properties.push_back({.layer = layer, .data_type = kTextCc, .name = prefix + "TextCc", .color = "#d06b00"});
+  }
+  return properties;
 }
 
-auto makeProperties(const Model& model) -> std::vector<LayerProperty>
+auto makeProperties(const Model& model, const Config& config) -> std::vector<LayerProperty>
 {
   std::vector<LayerProperty> properties;
   for (const int layer : collectLayers(model)) {
-    const auto layer_properties = makePropertiesForLayer(model, layer);
+    const auto layer_properties = makePropertiesForLayer(model, config, layer);
     properties.insert(properties.end(), layer_properties.begin(), layer_properties.end());
   }
   return properties;
@@ -110,7 +118,7 @@ auto writeProperty(std::ostream& os, const LayerProperty& property) -> void
   os << "<transparent>false</transparent>\n";
   os << "<width>" << property.width << "</width>\n";
   os << "<marked>false</marked>\n";
-  os << "<xfill>false</xfill>\n";
+  os << "<xfill>" << (property.filled ? "false" : "true") << "</xfill>\n";
   os << "<animation>0</animation>\n";
   os << "<name>" << format::escape_xml(property.name) << "</name>\n";
   os << "<source>" << property.layer << "/" << property.data_type << "@1</source>\n";
@@ -137,7 +145,7 @@ auto LypWriter::write(const Model& model, const Config& config) const -> bool
 
   os << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
   os << "<layer-properties>\n";
-  for (const auto& property : makeProperties(model)) {
+  for (const auto& property : makeProperties(model, config)) {
     writeProperty(os, property);
   }
   os << "</layer-properties>\n";

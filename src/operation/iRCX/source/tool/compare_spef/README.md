@@ -106,7 +106,7 @@ Capacitance comparison:
 
 - `tcap.rpt` includes matched reference nets whose reference total capacitance is
   at least `-tcap`.
-- `gcap.rpt` includes matched node ground caps when
+- `gcap.rpt` includes matched net ground caps when
   `abs(reference_gcap) >= -ccap abs` or `abs(test_gcap) >= -ccap abs`.
 - `ccap.rpt` includes matched reference coupling pairs only when both conditions
   hold:
@@ -161,7 +161,7 @@ The command writes these files under `-output_dir`:
 | --- | --- |
 | `summary.rpt` | Overview, thresholds, row counts, and error distributions. |
 | `tcap.rpt` | Total capacitance differences. |
-| `gcap.rpt` | Ground capacitance differences by net and node. |
+| `gcap.rpt` | Ground capacitance differences by net. |
 | `ccap.rpt` | Coupling capacitance differences. |
 | `p2p.rpt` | Point-to-point resistance differences. |
 | `nets.mismatched` | Nets found only in reference or only in test. |

@@ -46,19 +46,26 @@ void ZHInterface::destroyInst()
 
 void ZHInterface::fixFanout(std::map<std::string, std::any> config_map)
 {
-  ZHLOG.info(Loc::current(), "ZH fixFanout");
+  std::string buffer_name = ZHUTIL.getConfigValue<std::string>(config_map, "-buffer_name", "zh_buffer");
+  int32_t max_fanout = ZHUTIL.getConfigValue<int32_t>(config_map, "-max_fanout", 32);
 
-  std::string buffer_name = ZHUTIL.getConfigValue<std::string>(config_map, "-buffer_name", "buffer_name");
+  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(0), "ZH fixFanout");
+  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "buffer_name: ", buffer_name);
+  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "max_fanout: ", max_fanout);
+
   auto* idb_design = dmInst->get_idb_def_service()->get_design();
   idb::IdbNetList* idb_net_list = idb_design->get_net_list();
 
-  size_t max_fanout = 32;
   while (true) {
     std::set<idb::IdbNet*> origin_net_set;
     for (idb::IdbNet* idb_net : idb_net_list->get_net_list()) {
-      if (idb_net->get_connect_type() == idb::IdbConnectType::kSignal && idb_net->get_load_pins().size() > max_fanout) {
-        origin_net_set.insert(idb_net);
+      if (idb_net->get_connect_type() == idb::IdbConnectType::kClock) {
+        continue;
       }
+      if (static_cast<int32_t>(idb_net->get_load_pins().size()) <= max_fanout) {
+        continue;
+      }
+      origin_net_set.insert(idb_net);
     }
     if (origin_net_set.empty()) {
       break;

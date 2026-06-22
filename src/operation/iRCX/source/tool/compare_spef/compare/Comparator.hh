@@ -41,7 +41,7 @@ class Comparator
   void compareMatchedNets(const Data& test, const Data& reference, Result& result) const;
   void compareMatchedNet(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const;
   void addTotalCapRow(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const;
-  void addGroundCapRows(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const;
+  void addGroundCapRow(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const;
   void addResistanceRows(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const;
   void collectTestOnlyNets(const Data& test, const Data& reference, Result& result) const;
   void finishSummary(const Data& test, const Data& reference, Result& result) const;

@@ -337,25 +337,48 @@ auto buildModel(const spef::Exchange& exchange, const plot_spef::Config& config)
     net.name = spef_net.name;
     net.nodes.reserve(spef_net.conns.size());
     net.nodes_by_name.reserve(spef_net.conns.size());
-    net.resistors.reserve(spef_net.ress.size());
-    net.coupling_caps.reserve(spef_net.caps.size());
-    net.ground_caps.reserve(spef_net.caps.size());
+    if (config.plotResistance()) {
+      net.resistors.reserve(spef_net.ress.size());
+    }
+    if (config.plotCouplingCap() || config.plotGroundCap()) {
+      std::size_t coupling_cap_count = 0;
+      std::size_t ground_cap_count = 0;
+      for (const auto& cap : spef_net.caps) {
+        if (cap.node2.empty()) {
+          ground_cap_count++;
+        } else {
+          coupling_cap_count++;
+        }
+      }
+      if (config.plotCouplingCap()) {
+        net.coupling_caps.reserve(coupling_cap_count);
+      }
+      if (config.plotGroundCap()) {
+        net.ground_caps.reserve(ground_cap_count);
+      }
+    }
 
     for (const auto& conn : spef_net.conns) {
       auto node = buildNode(conn, config.dbu);
       net.nodes.push_back(std::move(node));
     }
 
-    for (const auto& res : spef_net.ress) {
-      net.resistors.push_back(plot_spef::Resistor{.node1 = res.node1, .node2 = res.node2, .value = res.res_or_cap});
+    if (config.plotResistance()) {
+      for (const auto& res : spef_net.ress) {
+        net.resistors.push_back(plot_spef::Resistor{.node1 = res.node1, .node2 = res.node2, .value = res.res_or_cap});
+      }
     }
 
-    for (const auto& cap : spef_net.caps) {
-      plot_spef::Capacitor capacitor{.node1 = cap.node1, .node2 = cap.node2, .value = cap.res_or_cap};
-      if (cap.node2.empty()) {
-        net.ground_caps.push_back(std::move(capacitor));
-      } else {
-        net.coupling_caps.push_back(std::move(capacitor));
+    if (config.plotCouplingCap() || config.plotGroundCap()) {
+      for (const auto& cap : spef_net.caps) {
+        plot_spef::Capacitor capacitor{.node1 = cap.node1, .node2 = cap.node2, .value = cap.res_or_cap};
+        if (cap.node2.empty()) {
+          if (config.plotGroundCap()) {
+            net.ground_caps.push_back(std::move(capacitor));
+          }
+        } else if (config.plotCouplingCap()) {
+          net.coupling_caps.push_back(std::move(capacitor));
+        }
       }
     }
 

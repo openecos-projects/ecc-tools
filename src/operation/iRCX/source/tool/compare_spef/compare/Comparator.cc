@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <iterator>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <utility>
@@ -133,7 +134,7 @@ void Comparator::compareMatchedNet(const std::string& net_name, const Net& refer
     if (reference_net.total_cap >= _config.tcap_threshold) {
       addTotalCapRow(net_name, reference_net, test_net, result);
     }
-    addGroundCapRows(net_name, reference_net, test_net, result);
+    addGroundCapRow(net_name, reference_net, test_net, result);
   }
 
   if (_compare_resistance) {
@@ -152,38 +153,24 @@ void Comparator::addTotalCapRow(const std::string& net_name, const Net& referenc
   result.tcap_rows.push_back(std::move(row));
 }
 
-void Comparator::addGroundCapRows(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const
+void Comparator::addGroundCapRow(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const
 {
-  for (const auto& [node, reference_cap] : reference_net.node_ground_caps) {
-    const auto test_cap_it = test_net.node_ground_caps.find(node);
-    const double test_cap = test_cap_it == test_net.node_ground_caps.end() ? 0.0 : test_cap_it->second;
-    if (std::abs(reference_cap) < _config.ccap_abs_threshold && std::abs(test_cap) < _config.ccap_abs_threshold) {
-      continue;
-    }
-
-    GcapRow row;
-    row.net = net_name;
-    row.node = node;
-    row.reference = reference_cap;
-    row.test = test_cap;
-    row.delta = row.test - row.reference;
-    row.relative_delta = math::capacitanceRelativeDelta(row.test, row.reference);
-    result.gcap_rows.push_back(std::move(row));
+  const auto sum_caps = [](const NodeGroundCapMap& caps) {
+    return std::accumulate(caps.begin(), caps.end(), 0.0, [](double total, const auto& entry) { return total + entry.second; });
+  };
+  const double reference_cap = sum_caps(reference_net.node_ground_caps);
+  const double test_cap = sum_caps(test_net.node_ground_caps);
+  if (std::abs(reference_cap) < _config.ccap_abs_threshold && std::abs(test_cap) < _config.ccap_abs_threshold) {
+    return;
   }
 
-  for (const auto& [node, test_cap] : test_net.node_ground_caps) {
-    if (reference_net.node_ground_caps.contains(node) || std::abs(test_cap) < _config.ccap_abs_threshold) {
-      continue;
-    }
-
-    GcapRow row;
-    row.net = net_name;
-    row.node = node;
-    row.test = test_cap;
-    row.delta = row.test;
-    row.relative_delta = math::capacitanceRelativeDelta(row.test, row.reference);
-    result.gcap_rows.push_back(std::move(row));
-  }
+  GcapRow row;
+  row.net = net_name;
+  row.reference = reference_cap;
+  row.test = test_cap;
+  row.delta = row.test - row.reference;
+  row.relative_delta = math::capacitanceRelativeDelta(row.test, row.reference);
+  result.gcap_rows.push_back(std::move(row));
 }
 
 void Comparator::addResistanceRows(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const

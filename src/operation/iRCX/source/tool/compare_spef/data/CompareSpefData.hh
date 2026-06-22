@@ -229,7 +229,6 @@ struct CcapRow
 
 struct GcapRow : ValueRow
 {
-  std::string node;
 };
 
 struct ResistanceRow : ValueRow

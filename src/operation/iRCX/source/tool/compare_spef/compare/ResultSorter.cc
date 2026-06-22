@@ -52,10 +52,7 @@ void sortRows(Result& result)
     if (lhs_rel != rhs_rel) {
       return lhs_rel < rhs_rel;
     }
-    if (lhs.net != rhs.net) {
-      return lhs.net < rhs.net;
-    }
-    return lhs.node < rhs.node;
+    return lhs.net < rhs.net;
   });
   std::sort(result.ccap_rows.begin(), result.ccap_rows.end(), [](const CcapRow& lhs, const CcapRow& rhs) {
     const double lhs_rel = lhs.relative_delta.value_or(std::numeric_limits<double>::infinity());
