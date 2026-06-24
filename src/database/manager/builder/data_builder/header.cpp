@@ -116,8 +116,9 @@ class BinaryReader
     }
 
     read(_version);
-    if (_version == 0 || _version > kArchiveVersion) {
-      throw std::runtime_error("unsupported idb data version: " + path.string());
+    if (!is_archive_version_supported(_version)) {
+      throw std::runtime_error("idb data version mismatch: " + path.string() + " data_version=" + std::to_string(_version)
+                               + " current_version=" + std::to_string(kArchiveVersion));
     }
 
     uint32_t section = 0;

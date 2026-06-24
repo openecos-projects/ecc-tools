@@ -22,6 +22,7 @@
 
 #include "IdbDesign.h"
 #include "IdbLayout.h"
+#include "archive_version.h"
 
 namespace idb {
 
@@ -31,8 +32,6 @@ namespace idb {
 #define CLOCKS_PER_MS 1000
 
 namespace data_binary {
-
-constexpr uint32_t kArchiveVersion = 2;
 
 enum class ArchiveSection : uint32_t
 {
