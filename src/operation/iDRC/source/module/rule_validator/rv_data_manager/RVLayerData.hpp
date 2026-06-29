@@ -3,8 +3,10 @@
 #include <cstdint>
 #include <map>
 #include <span>
+#include <string>
 #include <vector>
 
+#include "../../../../../../database/interaction/RT_DRC/ids.hpp"
 #include "PlanarRect.hpp"
 
 namespace boost::geometry::traits {
@@ -57,6 +59,11 @@ struct CutData
   GTLRectInt rect;
   int32_t net_idx = -1;
   bool isEnv = false;
+  ids::Shape::SourceType source_type = ids::Shape::SourceType::kUnknown;
+  std::string via_name;
+  std::string via_master_name;
+  int32_t via_cut_idx = -1;
+  int32_t via_cut_count = 0;
 
   bool operator==(const CutData& other) const = default;
 };

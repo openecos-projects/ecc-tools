@@ -222,7 +222,7 @@ void RuleValidator::destroyInst()
 std::vector<Violation> RuleValidator::verify(std::vector<DRCShape>& drc_env_shape_list, std::vector<DRCShape>& drc_result_shape_list,
                                              std::set<ViolationType>& drc_check_type_set, std::vector<DRCShape>& drc_check_region_list)
 {
-  auto monitor = Monitor::create();
+  Monitor monitor;
   DRCLOG.info(Loc::current(), "Starting...");
   RVModel rv_model = initRVModel(drc_env_shape_list, drc_result_shape_list, drc_check_type_set, drc_check_region_list);
   setRVComParam(rv_model);
@@ -230,7 +230,7 @@ std::vector<Violation> RuleValidator::verify(std::vector<DRCShape>& drc_env_shap
   verifyRVModel(rv_model);
   buildViolationList(rv_model);
   // debugPlotRVModel(rv_model, "best");
-  DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
+  DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
   return rv_model.get_violation_list();
 }
 
@@ -351,7 +351,7 @@ void RuleValidator::buildRVClusterList(RVModel& rv_model)
 
 void RuleValidator::verifyRVModel(RVModel& rv_model)
 {
-  auto monitor = Monitor::create();
+  Monitor monitor;
   DRCLOG.info(Loc::current(), "Starting...");
 #pragma omp parallel for schedule(dynamic)
   for (RVCluster& rv_cluster : rv_model.get_rv_cluster_list()) {
@@ -360,7 +360,7 @@ void RuleValidator::verifyRVModel(RVModel& rv_model)
       buildViolationList(rv_cluster);
     }
   }
-  DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
+  DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void RuleValidator::buildRVCluster(RVCluster& rv_cluster)
@@ -444,6 +444,11 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
       cut_data.rect = gtl_rect;
       cut_data.net_idx = drc_shape->get_net_idx();
       cut_data.isEnv = is_env_shape;
+      cut_data.source_type = drc_shape->get_source_type();
+      cut_data.via_name = drc_shape->get_via_name();
+      cut_data.via_master_name = drc_shape->get_via_master_name();
+      cut_data.via_cut_idx = drc_shape->get_via_cut_idx();
+      cut_data.via_cut_count = drc_shape->get_via_cut_count();
       layer_data[drc_shape->get_layer_idx()].cut_pool.push_back(cut_data);
       return;
     }
