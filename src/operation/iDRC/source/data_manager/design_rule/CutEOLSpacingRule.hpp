@@ -18,11 +18,30 @@
 
 #include "DRCHeader.hpp"
 
+#include <string>
+#include <vector>
+
 namespace idrc {
 
 class CutEOLSpacingRule
 {
  public:
+  struct CutClass
+  {
+    std::string name;
+    int32_t width = -1;
+    int32_t length = -1;
+    int32_t cuts = -1;
+    std::string orient;
+  };
+
+  struct EOLToClass
+  {
+    std::string class_name;
+    int32_t cut_spacing1 = -1;
+    int32_t cut_spacing2 = -1;
+  };
+
   CutEOLSpacingRule() = default;
   ~CutEOLSpacingRule() = default;
   int32_t eol_spacing = -1;
@@ -34,6 +53,9 @@ class CutEOLSpacingRule
   int32_t side_ext = -1;
   int32_t backward_ext = -1;
   int32_t span_length = -1;
+  std::string cutclass_name1;
+  std::vector<EOLToClass> to_class_list;
+  std::vector<CutClass> cutclass_list;
 };
 
 }  // namespace idrc

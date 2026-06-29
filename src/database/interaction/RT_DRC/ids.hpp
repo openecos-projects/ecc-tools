@@ -25,6 +25,16 @@ namespace ids {
 
 struct Shape
 {
+  enum class SourceType : int32_t
+  {
+    kUnknown = 0,
+    kRegularWire = 1,
+    kSpecialWire = 2,
+    kInstancePin = 3,
+    kInstanceObs = 4,
+    kIOPin = 5,
+  };
+
   int32_t net_idx = -1;
   int32_t ll_x = -1;
   int32_t ll_y = -1;
@@ -32,6 +42,11 @@ struct Shape
   int32_t ur_y = -1;
   int32_t layer_idx = -1;
   bool is_routing = true;
+  SourceType source_type = SourceType::kUnknown;
+  std::string via_name;
+  std::string via_master_name;
+  int32_t via_cut_idx = -1;
+  int32_t via_cut_count = 0;
 };
 
 struct Violation

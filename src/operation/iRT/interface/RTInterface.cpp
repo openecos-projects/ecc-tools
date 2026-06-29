@@ -108,6 +108,26 @@ void RTInterface::runERT(std::map<std::string, std::any> config_map)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
+void RTInterface::runPA()
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  initFlute();
+  RTGP.init();
+  RTDE.init();
+
+  PinAccessor::initInst();
+  RTPA.access();
+  PinAccessor::destroyInst();
+
+  destroyFlute();
+  RTGP.destroy();
+  RTDE.destroy();
+
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
 void RTInterface::runRT()
 {
   Monitor monitor;
