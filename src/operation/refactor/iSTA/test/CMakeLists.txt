@@ -7,10 +7,7 @@ set(CMAKE_BUILD_TYPE "Debug")
 message(STATUS "iSTA Test")
 
 find_package(GTest REQUIRED)
-find_library(SYSTEM_FFI_LIBRARY
-             NAMES ffi
-             PATHS /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu
-             NO_DEFAULT_PATH)
+find_library(SYSTEM_FFI_LIBRARY NAMES ffi)
 
 aux_source_directory(. SourceFiles)
 add_executable(iSTATest ${SourceFiles})
