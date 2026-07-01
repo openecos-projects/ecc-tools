@@ -29,6 +29,7 @@
       patchelf,
       pkg-config,
       cargo,
+      rustc,
     }: python3Packages.buildPythonPackage rec {
       name = "ecc-tools-bin";
       format = "pyproject";
@@ -97,6 +98,7 @@
         patchelf
         pkg-config
         cargo
+        rustc
         tcl
       ];
       dontUseCmakeConfigure = true;
