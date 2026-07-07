@@ -50,7 +50,21 @@ class RuleValidator
   RVModel initRVModel(std::vector<DRCShape>& drc_env_shape_list, std::vector<DRCShape>& drc_result_shape_list, std::set<ViolationType>& drc_check_type_set,
                       std::vector<DRCShape>& drc_check_region_list);
   void setRVComParam(RVModel& rv_model);
+#if 1
   void buildRVClusterList(RVModel& rv_model);
+  void loadBalance(RVModel& rv_model, int32_t grid_col_num, int32_t grid_row_num);
+  std::vector<std::vector<int32_t>> buildClusterGroupList(const std::vector<int32_t>& shape_count_list, int32_t grid_col_num,
+                                                          int32_t grid_row_num, int32_t target_group_num);
+  int32_t getTargetGroupNum(int32_t cluster_num);
+  void mergeToTargetGroupNum(std::vector<std::vector<int32_t>>& group_list, std::vector<std::pair<int32_t, int32_t>>& group_info_list,
+                             int32_t target_group_num, double avg_shape_count, int32_t grid_col_num, int32_t grid_row_num);
+  static bool compareByFirst(const std::pair<int32_t, int32_t>& a, const std::pair<int32_t, int32_t>& b);
+  bool isGroupsAdjacent(std::vector<int32_t>& group_a, std::vector<int32_t>& group_b, int32_t grid_col_num, int32_t grid_row_num);
+  std::vector<int32_t> getNeighborIdxList(int32_t cluster_idx, int32_t grid_col_num, int32_t grid_row_num);
+  int32_t getUniqueShapeCount(std::vector<int32_t>& cluster_idx_list, std::vector<RVCluster>& rv_cluster_list);
+  void reportGroupStatistics(RVModel& rv_model);
+  void exportClusterProfileData(RVModel& rv_model);
+#endif
   void verifyRVModel(RVModel& rv_model);
   void buildRVCluster(RVCluster& rv_cluster);
   bool needVerifying(RVCluster& rv_cluster);
