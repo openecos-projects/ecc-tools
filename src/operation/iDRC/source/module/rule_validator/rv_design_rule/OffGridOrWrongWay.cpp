@@ -21,13 +21,17 @@ namespace idrc {
 void RuleValidator::verifyOffGridOrWrongWay(RVCluster& rv_cluster)
 {
   int32_t manufacture_grid = DRCDM.getDatabase().get_off_grid_or_wrong_way_rule().manufacture_grid;
-  std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
+  const std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
 
   std::map<int32_t, std::map<int32_t, GTLPolySetInt>> routing_net_gtl_poly_set_map;
   for (DRCShape* drc_shape : rv_cluster.get_drc_result_shape_list()) {
     int32_t routing_layer_idx = -1;
     if (!drc_shape->get_is_routing()) {
-      std::vector<int32_t>& routing_layer_idx_list = cut_to_adjacent_routing_map[drc_shape->get_layer_idx()];
+      auto routing_layer_it = cut_to_adjacent_routing_map.find(drc_shape->get_layer_idx());
+      if (routing_layer_it == cut_to_adjacent_routing_map.end() || routing_layer_it->second.empty()) {
+        continue;
+      }
+      const std::vector<int32_t>& routing_layer_idx_list = routing_layer_it->second;
       routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
     } else {
       routing_layer_idx = drc_shape->get_layer_idx();

@@ -21,7 +21,7 @@ namespace idrc {
 void RuleValidator::verifyDifferentLayerCutSpacing(RVCluster& rv_cluster)
 {
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
-  std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
+  const std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
   const auto& layer_data = rv_cluster.get_layer_data();
 
   for (const auto& [cut_layer_idx, cut_layer_data] : layer_data) {
@@ -38,7 +38,11 @@ void RuleValidator::verifyDifferentLayerCutSpacing(RVCluster& rv_cluster)
     }
     int32_t routing_layer_idx = -1;
     {
-      std::vector<int32_t>& routing_layer_idx_list = cut_to_adjacent_routing_map[below_cut_layer_idx];
+      auto routing_layer_it = cut_to_adjacent_routing_map.find(below_cut_layer_idx);
+      if (routing_layer_it == cut_to_adjacent_routing_map.end() || routing_layer_it->second.empty()) {
+        continue;
+      }
+      const std::vector<int32_t>& routing_layer_idx_list = routing_layer_it->second;
       routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
     }
     CutLayer& cut_layer = cut_layer_list[cut_layer_idx];

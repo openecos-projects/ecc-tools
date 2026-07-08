@@ -25,7 +25,7 @@ namespace idrc {
 void RuleValidator::verifyEnclosureParallel(RVCluster& rv_cluster)
 {
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
-  std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
+  const std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
   const auto& layer_data = rv_cluster.get_layer_data();
   auto build_outer_ring_info
       = [this](const RVLayerData& rv_layer_data, const PolygonData& polygon_data, int32_t& coord_size, std::vector<Segment<PlanarCoord>>& edge_list,
@@ -57,7 +57,11 @@ void RuleValidator::verifyEnclosureParallel(RVCluster& rv_cluster)
     if (cut_layer_data.cut_pool.empty()) {
       continue;
     }
-    const std::vector<int32_t>& routing_layer_idx_list = cut_to_adjacent_routing_map[cut_layer_idx];
+    auto routing_layer_it = cut_to_adjacent_routing_map.find(cut_layer_idx);
+    if (routing_layer_it == cut_to_adjacent_routing_map.end()) {
+      continue;
+    }
+    const std::vector<int32_t>& routing_layer_idx_list = routing_layer_it->second;
     if (routing_layer_idx_list.size() < 2) {
       continue;
     }

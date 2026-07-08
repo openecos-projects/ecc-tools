@@ -21,7 +21,7 @@ namespace idrc {
 void RuleValidator::verifyAdjacentCutSpacing(RVCluster& rv_cluster)
 {
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
-  std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
+  const std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
   const auto& layer_data = rv_cluster.get_layer_data();
 
   for (const auto& [cut_layer_idx, cut_layer_data] : layer_data) {
@@ -31,12 +31,19 @@ void RuleValidator::verifyAdjacentCutSpacing(RVCluster& rv_cluster)
 
     int32_t routing_layer_idx = -1;
     {
-      std::vector<int32_t>& routing_layer_idx_list = cut_to_adjacent_routing_map[cut_layer_idx];
+      auto routing_layer_it = cut_to_adjacent_routing_map.find(cut_layer_idx);
+      if (routing_layer_it == cut_to_adjacent_routing_map.end() || routing_layer_it->second.empty()) {
+        continue;
+      }
+      const std::vector<int32_t>& routing_layer_idx_list = routing_layer_it->second;
       routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
     }
     CutLayer& cut_layer = cut_layer_list[cut_layer_idx];
 
     AdjacentCutSpacingRule& adj_cut_rule = cut_layer.get_adjacent_cut_rule();
+    if (adj_cut_rule.cut_spacing <= 0 || adj_cut_rule.adjacnet_cuts <= 0 || adj_cut_rule.cut_within <= 0) {
+      continue;
+    }
     for (const CutData& cut_data : cut_layer_data.getCuts()) {
       GTLRectInt cut_gtl_rect = cut_data.rect;
       PlanarRect cut_rect = DRCUTIL.convertToPlanarRect(cut_gtl_rect);

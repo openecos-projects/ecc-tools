@@ -57,7 +57,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
   const auto orientations = {Orientation::kEast, Orientation::kSouth, Orientation::kWest, Orientation::kNorth};
   using RoutingEnvRTree = bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>;
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
-  std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
+  const std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
   const auto& layer_data = rv_cluster.get_layer_data();
 
   std::map<int32_t, RoutingEnvRTree> routing_net_env_rtrees;
@@ -376,7 +376,11 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
               // VIAx的违例输出Mx
               int32_t violation_routing_layer_idx = -1;
               {
-                std::vector<int32_t>& routing_layer_idx_list = cut_to_adjacent_routing_map[cut_layer_idx];
+                auto routing_layer_it = cut_to_adjacent_routing_map.find(cut_layer_idx);
+                if (routing_layer_it == cut_to_adjacent_routing_map.end() || routing_layer_it->second.empty()) {
+                  continue;
+                }
+                const std::vector<int32_t>& routing_layer_idx_list = routing_layer_it->second;
                 violation_routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
               }
               PlanarRect violation_rect;
