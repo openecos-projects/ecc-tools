@@ -18,6 +18,7 @@
 
 #include "general_ops.h"
 #include "init_idb.h"
+#include "map_layout_writer.h"
 
 namespace ieval {
 
@@ -157,7 +158,8 @@ std::string DensityEval::evalDensity(DensityCells cells, DensityRegion region, i
   }
 
   std::string save_dir = "/density_map";
-  std::string output_path = createDirPath(save_dir) + "/" + output_filename;
+  std::string map_dir = createDirPath(save_dir);
+  std::string output_path = map_dir + "/" + output_filename;
   std::ofstream csv_file(output_path);
 
   for (size_t row_index = density_grid.size(); row_index-- > 0;) {
@@ -171,6 +173,7 @@ std::string DensityEval::evalDensity(DensityCells cells, DensityRegion region, i
   }
 
   csv_file.close();
+  writeMapLayoutCsv(map_dir, grid_cols, grid_rows, grid_size, region.lx, region.ly, region.ux, region.uy);
 
   return getAbsoluteFilePath(output_path);
 }
@@ -244,11 +247,12 @@ std::string DensityEval::evalPinDensity(DensityPins pins, DensityRegion region, 
   }
 
   std::string save_dir="/density_map";
+  std::string map_dir = createDirPath(save_dir);
   std::string output_path;
   if (neighbor) {
-    output_path = createDirPath(save_dir) + "/" + "neighbor_" + output_filename;
+    output_path = map_dir + "/" + "neighbor_" + output_filename;
   } else {
-    output_path = createDirPath(save_dir) + "/" + output_filename;
+    output_path = map_dir + "/" + output_filename;
   }
 
   std::ofstream csv_file(output_path);
@@ -264,6 +268,7 @@ std::string DensityEval::evalPinDensity(DensityPins pins, DensityRegion region, 
   }
 
   csv_file.close();
+  writeMapLayoutCsv(map_dir, grid_cols, grid_rows, grid_size, region.lx, region.ly, region.ux, region.uy);
 
   return getAbsoluteFilePath(output_path);
 }
@@ -304,6 +309,7 @@ std::string DensityEval::evalNetDensity(DensityNets nets, DensityRegion region, 
   }
 
   std::string save_dir="/density_map";
+  std::string map_dir = createDirPath(save_dir);
   std::string output_path;
   if (neighbor) {
     const std::vector<std::vector<int>> kernel = {{1, 1, 1}, {1, 1, 1}, {1, 1, 1}};
@@ -325,7 +331,7 @@ std::string DensityEval::evalNetDensity(DensityNets nets, DensityRegion region, 
         neighbor_net_count[row][col] = sum;
       }
     }
-    output_path = createDirPath(save_dir) + "/" + "neighbor_" + output_filename;
+    output_path = map_dir + "/" + "neighbor_" + output_filename;
     std::ofstream csv_file(output_path);
     for (int32_t row = grid_rows - 1; row >= 0; --row) {
       for (int32_t col = 0; col < grid_cols; ++col) {
@@ -340,7 +346,7 @@ std::string DensityEval::evalNetDensity(DensityNets nets, DensityRegion region, 
   }
 
   else {
-    output_path = createDirPath(save_dir) + "/" + output_filename;
+    output_path = map_dir + "/" + output_filename;
     std::ofstream csv_file(output_path);
     for (int32_t row = grid_rows - 1; row >= 0; --row) {
       for (int32_t col = 0; col < grid_cols; ++col) {
@@ -362,6 +368,7 @@ std::string DensityEval::evalNetDensity(DensityNets nets, DensityRegion region, 
     }
     csv_file.close();
   }
+  writeMapLayoutCsv(map_dir, grid_cols, grid_rows, grid_size, region.lx, region.ly, region.ux, region.uy);
 
   return getAbsoluteFilePath(output_path);
 }
@@ -443,7 +450,8 @@ std::string DensityEval::evalMargin(DensityCells cells, DensityRegion die, Densi
   }
 
   std::string save_dir="/margin_map";
-  std::string output_path = createDirPath(save_dir) + "/" + output_filename;
+  std::string map_dir = createDirPath(save_dir);
+  std::string output_path = map_dir + "/" + output_filename;
   std::ofstream csv_file(output_path);
 
   int32_t grid_cols = (die.ux - die.lx + grid_size - 1) / grid_size;
@@ -459,6 +467,7 @@ std::string DensityEval::evalMargin(DensityCells cells, DensityRegion die, Densi
   }
 
   csv_file.close();
+  writeMapLayoutCsv(map_dir, grid_cols, grid_rows, grid_size, die.lx, die.ly, die.ux, die.uy);
 
   return getAbsoluteFilePath(output_path);
 }

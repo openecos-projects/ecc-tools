@@ -5,6 +5,7 @@ add_library(eval_congestion_eval
 target_link_libraries(eval_congestion_eval
     PUBLIC
         eval_util_general_ops
+        eval_util_map_layout_writer
     PRIVATE
         idm
         eval_util_init_egr

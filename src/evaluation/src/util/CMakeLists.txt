@@ -15,6 +15,16 @@ target_include_directories(eval_util_general_ops
         ${EVAL_UTIL}
 )
 
+# map layout writer
+add_library(eval_util_map_layout_writer
+    ${EVAL_UTIL}/map_layout_writer.cpp
+)
+
+target_include_directories(eval_util_map_layout_writer
+    PUBLIC
+        ${EVAL_UTIL}
+)
+
 # iRT-egr
 add_library(eval_util_init_egr
     ${EVAL_UTIL}/init_egr.cpp
