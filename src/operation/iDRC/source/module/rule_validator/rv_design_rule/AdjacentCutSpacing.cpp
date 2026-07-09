@@ -37,6 +37,9 @@ void RuleValidator::verifyAdjacentCutSpacing(RVCluster& rv_cluster)
     CutLayer& cut_layer = cut_layer_list[cut_layer_idx];
 
     AdjacentCutSpacingRule& adj_cut_rule = cut_layer.get_adjacent_cut_rule();
+    if (!adj_cut_rule.has_rule) {
+      continue;
+    }
     for (const CutData& cut_data : cut_layer_data.getCuts()) {
       GTLRectInt cut_gtl_rect = cut_data.rect;
       PlanarRect cut_rect = DRCUTIL.convertToPlanarRect(cut_gtl_rect);
