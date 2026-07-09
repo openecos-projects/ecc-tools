@@ -37,6 +37,13 @@ void RuleValidator::verifyAdjacentCutSpacing(RVCluster& rv_cluster)
     CutLayer& cut_layer = cut_layer_list[cut_layer_idx];
 
     AdjacentCutSpacingRule& adj_cut_rule = cut_layer.get_adjacent_cut_rule();
+    if (!adj_cut_rule.has_rule) {
+      continue;
+    }
+
+    using RectKey = std::tuple<int32_t, int32_t, int32_t, int32_t>;
+    using CandidateKey = std::tuple<int32_t, int32_t, int32_t, int32_t, int32_t, int32_t>;
+
     for (const CutData& cut_data : cut_layer_data.getCuts()) {
       GTLRectInt cut_gtl_rect = cut_data.rect;
       PlanarRect cut_rect = DRCUTIL.convertToPlanarRect(cut_gtl_rect);
@@ -49,10 +56,10 @@ void RuleValidator::verifyAdjacentCutSpacing(RVCluster& rv_cluster)
       }
 
       int32_t adjacent_cut_count = 0;
-      bool has_violation = false;
-      int32_t cur_remote_spacing = -1;
-      int32_t cur_remote_env_net = -1;
-      std::set<std::tuple<int32_t, int32_t, int32_t, int32_t>> seen_neighboor_rects;
+      std::set<RectKey> seen_neighbor_rects;
+      bool has_representative_neighbor = false;
+      CandidateKey representative_neighbor_key;
+      int32_t representative_neighbor_net_idx = -1;
 
       for (const CutData& neighbor_cut_data : neighbor_cut_list) {
         int32_t env_net_idx = neighbor_cut_data.net_idx;
@@ -63,33 +70,35 @@ void RuleValidator::verifyAdjacentCutSpacing(RVCluster& rv_cluster)
 
         int32_t distance = DRCUTIL.getEuclideanDistance(cut_rect, env_rect);
         if (distance < adj_cut_rule.cut_within) {
-          auto nb_rect_key = std::make_tuple(env_rect.get_ll_x(), env_rect.get_ll_y(), env_rect.get_ur_x(), env_rect.get_ur_y());
-          if (!seen_neighboor_rects.insert(nb_rect_key).second) {
+          RectKey neighbor_rect_key = std::make_tuple(env_rect.get_ll_x(), env_rect.get_ll_y(), env_rect.get_ur_x(), env_rect.get_ur_y());
+          if (!seen_neighbor_rects.insert(neighbor_rect_key).second) {
             continue;
           }
           adjacent_cut_count++;
-          if (distance > cur_remote_spacing && env_net_idx != -1) {
-            cur_remote_spacing = distance;
-            cur_remote_env_net = env_net_idx;
+          if (distance < adj_cut_rule.cut_spacing && !(net_idx == -1 && env_net_idx == -1)) {
+            CandidateKey candidate_key = std::make_tuple(distance, env_rect.get_ll_x(), env_rect.get_ll_y(), env_rect.get_ur_x(),
+                                                         env_rect.get_ur_y(), env_net_idx);
+            if (!has_representative_neighbor || candidate_key < representative_neighbor_key) {
+              has_representative_neighbor = true;
+              representative_neighbor_key = candidate_key;
+              representative_neighbor_net_idx = env_net_idx;
+            }
           }
         }
-        if (distance < adj_cut_rule.cut_spacing) {
-          has_violation = true;
-        }
       }
-      if (net_idx == -1 && cur_remote_env_net == -1) {
+
+      if (adjacent_cut_count < adj_cut_rule.adjacnet_cuts || !has_representative_neighbor) {
         continue;
       }
-      if (has_violation && (adjacent_cut_count >= adj_cut_rule.adjacnet_cuts)) {
-        Violation violation;
-        violation.set_violation_type(ViolationType::kAdjacentCutSpacing);
-        violation.set_is_routing(true);
-        violation.set_violation_net_set({net_idx, cur_remote_env_net});
-        violation.set_layer_idx(routing_layer_idx);
-        violation.set_rect(cut_rect);
-        violation.set_required_size(adj_cut_rule.cut_spacing);
-        rv_cluster.get_violation_list().push_back(violation);
-      }
+
+      Violation violation;
+      violation.set_violation_type(ViolationType::kAdjacentCutSpacing);
+      violation.set_is_routing(true);
+      violation.set_violation_net_set({net_idx, representative_neighbor_net_idx});
+      violation.set_layer_idx(routing_layer_idx);
+      violation.set_rect(cut_rect);
+      violation.set_required_size(adj_cut_rule.cut_spacing);
+      rv_cluster.get_violation_list().push_back(std::move(violation));
     }
   }
 }

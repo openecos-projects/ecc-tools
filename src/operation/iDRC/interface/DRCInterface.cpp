@@ -715,6 +715,7 @@ void DRCInterface::wrapCutDesignRule(CutLayer& cut_layer, idb::IdbLayerCut* idb_
     if (!idb_layer->get_spacings().empty()) {
       for (auto& cut_spacing : idb_layer->get_spacings()) {
         if (cut_spacing->get_adjacent_cuts().has_value()) {
+          adj_cut_spacing_rule.has_rule = true;
           adj_cut_spacing_rule.cut_spacing = cut_spacing->get_spacing();
           adj_cut_spacing_rule.adjacnet_cuts = cut_spacing->get_adjacent_cuts()->get_adjacent_cuts();
           adj_cut_spacing_rule.cut_within = cut_spacing->get_adjacent_cuts()->get_cut_within();
