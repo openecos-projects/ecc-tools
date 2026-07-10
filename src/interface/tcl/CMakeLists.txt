@@ -14,6 +14,7 @@ add_subdirectory(tcl_izh)
 add_subdirectory(tcl_ircx)
 add_subdirectory(tcl_report)
 add_subdirectory(tcl_feature)
+add_subdirectory(tcl_geometry)
 
 AUX_SOURCE_DIRECTORY(./ SRC)
 
@@ -38,11 +39,13 @@ target_link_libraries(ieda_tcl
         tcl_ircx 
         tcl_report
         tcl_feature
+        tcl_geometry
 )
 
 target_include_directories(ieda_tcl 
     PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tcl_geometry
 
     ${CMAKE_CURRENT_SOURCE_DIR}/tcl_engine
 

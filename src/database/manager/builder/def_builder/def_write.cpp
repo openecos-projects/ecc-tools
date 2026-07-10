@@ -99,16 +99,16 @@ bool DefWrite::initFile(const char* file)
  */
 bool DefWrite::closeFile()
 {
-  bool result;
+  bool result = false;
   switch (_font) {
     case SaveFormat::kGzip:
-      result = gzclose(_file_write_gz);
+      result = gzclose(_file_write_gz) == Z_OK;
       _file_write_gz = nullptr;
       break;
 
     case SaveFormat::kUnzip:
     default:
-      result = fclose(_file_write);
+      result = fclose(_file_write) == 0;
       _file_write = nullptr;
       break;
   }
