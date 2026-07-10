@@ -2,8 +2,10 @@ add_library(geometry_builder
     BlockageEditAdapter.cpp
     GeometryBuilder.cpp
     GeometryEditApplier.cpp
+    GeometryEditJson.cpp
     GeometryNameQuery.cpp
     GeometrySnapshotReader.cpp
+    GeometrySnapshotWorkflow.cpp
     GeometrySnapshotWriter.cpp
     InstanceEditAdapter.cpp
     NetWireEditAdapter.cpp

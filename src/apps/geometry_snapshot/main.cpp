@@ -1,6 +1,8 @@
 #include "GeometryBuilder.h"
 #include "GeometryEditApplier.h"
+#include "GeometryEditJson.h"
 #include "GeometrySnapshotReader.h"
+#include "GeometrySnapshotWorkflow.h"
 #include "GeometrySnapshotWriter.h"
 #include "GeometryStore.h"
 #include "builder.h"
@@ -10,7 +12,6 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
-#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -187,35 +188,6 @@ bool write_text_file(const std::filesystem::path& path, std::string_view content
   return static_cast<bool>(output);
 }
 
-std::optional<int64_t> json_i64(std::string_view json, std::string_view key)
-{
-  const std::regex pattern("\"" + std::string(key) + "\"\\s*:\\s*(-?[0-9]+)");
-  std::match_results<std::string_view::const_iterator> match;
-  if (!std::regex_search(json.begin(), json.end(), match, pattern)) {
-    return std::nullopt;
-  }
-
-  return std::stoll(match[1].str());
-}
-
-ecc::geometry::GeometryEditCommand parse_edit_command(std::string_view json)
-{
-  ecc::geometry::GeometryEditCommand command;
-
-  command.command_id = static_cast<uint64_t>(json_i64(json, "command_id").value_or(0));
-  command.shape_id = static_cast<ecc::geometry::ShapeId>(json_i64(json, "shape_id").value_or(0));
-  command.expected_version = static_cast<ecc::geometry::ShapeVersion>(json_i64(json, "expected_version").value_or(0));
-  command.op = ecc::geometry::GeometryEditOp::kMoveShape;
-  command.requested_bbox = ecc::geometry::normalize(ecc::geometry::Rect32{
-      static_cast<int32_t>(json_i64(json, "lx").value_or(0)),
-      static_cast<int32_t>(json_i64(json, "ly").value_or(0)),
-      static_cast<int32_t>(json_i64(json, "hx").value_or(0)),
-      static_cast<int32_t>(json_i64(json, "hy").value_or(0)),
-  });
-
-  return command;
-}
-
 std::string edit_status_name(ecc::geometry::GeometryEditStatus status)
 {
   switch (status) {
@@ -358,23 +330,40 @@ int main(int argc, char** argv)
 
   ecc::geometry::GeometryStore store;
   const std::filesystem::path existing_manifest = std::filesystem::path(options.output_dir) / "geometry.manifest";
-  if (std::filesystem::exists(existing_manifest)) {
+  const bool has_existing_manifest = std::filesystem::exists(existing_manifest);
+  bool restored_existing_snapshot = false;
+  if (has_existing_manifest) {
     ecc::geometry::GeometrySnapshotReader reader;
     const ecc::geometry::SnapshotReadResult read_result =
         reader.read(ecc::geometry::SnapshotReadOptions{existing_manifest}, store);
-    if (!read_result.ok) {
-      if (options.mode == "apply-edit") {
-        std::cerr << "failed to restore existing geometry snapshot for edit: " << existing_manifest.string() << "\n";
-        return 1;
-      }
+    restored_existing_snapshot = read_result.ok;
+    if (!read_result.ok && options.mode != "apply-edit") {
       std::cerr << "warning: failed to restore existing geometry snapshot, rebuilding with fresh shape ids\n";
       store.clear();
     }
   }
 
   ecc::geometry::GeometryBuilder geometry_builder;
-  const ecc::geometry::GeometryBuildResult build_result =
-      geometry_builder.rebuild_from_design(*def_service->get_design(), *def_service->get_layout(), store);
+  const ecc::geometry::GeometrySnapshotRunMode run_mode = options.mode == "apply-edit"
+                                                             ? ecc::geometry::GeometrySnapshotRunMode::kApplyEdit
+                                                             : ecc::geometry::GeometrySnapshotRunMode::kSnapshot;
+  const ecc::geometry::GeometrySnapshotPreparation preparation =
+      ecc::geometry::plan_geometry_snapshot_preparation(run_mode, has_existing_manifest, restored_existing_snapshot);
+  if (!preparation.ok) {
+    if (!has_existing_manifest) {
+      std::cerr << "apply-edit requires existing geometry snapshot: " << existing_manifest.string() << "\n";
+    } else {
+      std::cerr << "failed to restore existing geometry snapshot for edit: " << existing_manifest.string() << "\n";
+    }
+    return 1;
+  }
+
+  ecc::geometry::GeometryBuildResult build_result;
+  if (preparation.rebuild_from_design) {
+    build_result = geometry_builder.rebuild_from_design(*def_service->get_design(), *def_service->get_layout(), store);
+  } else {
+    build_result.shape_count = static_cast<uint64_t>(store.records().size());
+  }
 
   if (options.mode == "apply-edit") {
     const std::optional<std::string> command_json = read_text_file(options.edit_command_path);
@@ -383,7 +372,7 @@ int main(int argc, char** argv)
       return 1;
     }
 
-    const ecc::geometry::GeometryEditCommand command = parse_edit_command(*command_json);
+    const ecc::geometry::GeometryEditCommand command = ecc::geometry::parse_geometry_edit_command_json(*command_json);
     const ecc::geometry::GeometryEditApplier applier;
     const ecc::geometry::GeometryEditResult result = applier.apply_edit(command, *def_service->get_design(), store);
 

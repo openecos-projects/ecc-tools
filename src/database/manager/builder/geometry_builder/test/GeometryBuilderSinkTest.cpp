@@ -1,8 +1,10 @@
 #include "GeometrySink.h"
 #include "GeometryEditApplier.h"
+#include "GeometryEditJson.h"
 #include "GeometryBuilder.h"
 #include "GeometryNameQuery.h"
 #include "GeometrySnapshotReader.h"
+#include "GeometrySnapshotWorkflow.h"
 #include "GeometrySnapshotWriter.h"
 #include "StoreGeometrySink.h"
 
@@ -52,6 +54,49 @@ std::string manifest_value(const std::filesystem::path& path, const std::string&
     }
   }
   return {};
+}
+
+void test_geometry_edit_json_parses_resize_rect_op()
+{
+  const GeometryEditCommand command = parse_geometry_edit_command_json(R"json({
+    "command_id": 17,
+    "shape_id": 42,
+    "expected_version": 3,
+    "op": "resize_rect",
+    "requested_bbox": {
+      "lx": 44,
+      "ly": 22,
+      "hx": 12,
+      "hy": 66
+    }
+  })json");
+
+  assert(command.command_id == 17);
+  assert(command.shape_id == 42);
+  assert(command.expected_version == 3);
+  assert(command.op == GeometryEditOp::kResizeRect);
+  assert(command.requested_bbox.lx == 12);
+  assert(command.requested_bbox.ly == 22);
+  assert(command.requested_bbox.hx == 44);
+  assert(command.requested_bbox.hy == 66);
+}
+
+void test_geometry_snapshot_workflow_skips_rebuild_for_restored_apply_edit_snapshot()
+{
+  const GeometrySnapshotPreparation apply_edit_with_snapshot = plan_geometry_snapshot_preparation(
+      GeometrySnapshotRunMode::kApplyEdit, true, true);
+  assert(apply_edit_with_snapshot.ok);
+  assert(!apply_edit_with_snapshot.rebuild_from_design);
+
+  const GeometrySnapshotPreparation apply_edit_without_snapshot = plan_geometry_snapshot_preparation(
+      GeometrySnapshotRunMode::kApplyEdit, false, false);
+  assert(!apply_edit_without_snapshot.ok);
+  assert(!apply_edit_without_snapshot.rebuild_from_design);
+
+  const GeometrySnapshotPreparation snapshot_with_snapshot = plan_geometry_snapshot_preparation(
+      GeometrySnapshotRunMode::kSnapshot, true, true);
+  assert(snapshot_with_snapshot.ok);
+  assert(snapshot_with_snapshot.rebuild_from_design);
 }
 
 ShapeId find_shape_by_owner_path(const GeometryStore& store, OwnerType type, OwnerId owner_id, uint32_t path0, uint32_t path1)
@@ -1861,10 +1906,81 @@ void test_geometry_snapshot_reload_preserves_shape_id_and_version_during_rebuild
   std::filesystem::remove_all(output_dir);
 }
 
+void test_geometry_snapshot_apply_edit_on_reloaded_store_is_incremental_without_rebuild()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbCellMaster master;
+  master.set_name("incremental_master");
+  master.set_width(40);
+  master.set_height(20);
+
+  idb::IdbInstance* instance = design.get_instance_list()->add_instance("u_incremental");
+  instance->set_id(601);
+  instance->set_cell_master(&master);
+  instance->set_coodinate(10, 20);
+  instance->set_status_placed();
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+  const std::vector<ShapeId> original_shapes = store.query_owner(OwnerType::kInstanceBBox, 601);
+  assert(original_shapes.size() == 1);
+  const ShapeId original_id = original_shapes[0];
+
+  const std::filesystem::path output_dir =
+      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_incremental_apply_edit_test";
+  std::filesystem::remove_all(output_dir);
+  GeometrySnapshotWriter writer;
+  assert(writer.write(store, SnapshotWriteOptions{output_dir}).ok);
+
+  GeometryStore reloaded;
+  GeometrySnapshotReader reader;
+  assert(reader.read(SnapshotReadOptions{output_dir / "geometry.manifest"}, reloaded).ok);
+  assert(reloaded.delta_events().empty());
+
+  GeometryEditCommand command;
+  command.command_id = 9902;
+  command.shape_id = original_id;
+  command.expected_version = 1;
+  command.op = GeometryEditOp::kMoveShape;
+  command.requested_bbox = Rect32{110, 220, 150, 240};
+
+  GeometryEditApplier applier;
+  const GeometryEditResult edit_result = applier.apply_edit(command, design, reloaded);
+  assert(edit_result.status == GeometryEditStatus::kAccepted);
+  assert(edit_result.new_version == 2);
+
+  const std::vector<ShapeId> edited_shapes = reloaded.query_owner(OwnerType::kInstanceBBox, 601);
+  assert(edited_shapes.size() == 1);
+  assert(edited_shapes[0] == original_id);
+  assert(reloaded.find_shape(original_id)->version == 2);
+  assert(reloaded.find_shape(original_id)->bbox.lx == 110);
+  assert(reloaded.find_shape(original_id)->bbox.hy == 240);
+  assert(reloaded.delta_events().size() == 1);
+  assert(reloaded.delta_events()[0].command_id == 9902);
+  assert(reloaded.delta_events()[0].op == GeometryDeltaOp::kUpdate);
+  assert(reloaded.delta_events()[0].shape_id == original_id);
+  assert(reloaded.dirty_lod_tile_count() > 0);
+
+  const SnapshotWriteResult write_result = writer.write(reloaded, SnapshotWriteOptions{output_dir});
+  assert(write_result.ok);
+  const std::filesystem::path delta_path = output_dir / manifest_value(output_dir / "geometry.manifest", "delta");
+  const GeometryFileHeader delta_header = read_header(delta_path);
+  assert(delta_header.file_kind == GeometryFileKind::kDelta);
+  assert(delta_header.record_count == 1);
+  assert(reloaded.dirty_lod_tile_count() == 0);
+
+  std::filesystem::remove_all(output_dir);
+}
+
 }  // namespace
 
 int main()
 {
+  test_geometry_edit_json_parses_resize_rect_op();
+  test_geometry_snapshot_workflow_skips_rebuild_for_restored_apply_edit_snapshot();
   test_geometry_edit_applier_moves_instance_bbox_back_to_idb();
   test_geometry_edit_applier_resolves_instance_from_design_owner_id();
   test_geometry_edit_applier_reports_adjusted_instance_bbox_when_master_size_is_preserved();
@@ -1895,5 +2011,6 @@ int main()
   test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_files();
   test_geometry_snapshot_reader_round_trips_core_binary_files();
   test_geometry_snapshot_reload_preserves_shape_id_and_version_during_rebuild();
+  test_geometry_snapshot_apply_edit_on_reloaded_store_is_incremental_without_rebuild();
   return 0;
 }
