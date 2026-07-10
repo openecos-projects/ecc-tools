@@ -12,6 +12,9 @@
 #include "IdbInstance.h"
 #include "IdbCellMaster.h"
 #include "IdbLayer.h"
+#include "IdbObs.h"
+#include "IdbViaMaster.h"
+#include "IdbVias.h"
 
 #include <cassert>
 #include <filesystem>
@@ -38,11 +41,37 @@ std::string read_text_file(const std::filesystem::path& path)
   return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
 }
 
+std::string manifest_value(const std::filesystem::path& path, const std::string& key)
+{
+  std::ifstream file(path);
+  std::string line;
+  const std::string prefix = key + "=";
+  while (std::getline(file, line)) {
+    if (line.rfind(prefix, 0) == 0) {
+      return line.substr(prefix.size());
+    }
+  }
+  return {};
+}
+
 ShapeId find_shape_by_owner_path(const GeometryStore& store, OwnerType type, OwnerId owner_id, uint32_t path0, uint32_t path1)
 {
   for (const ShapeId shape_id : store.query_owner(type, owner_id)) {
     const OwnerRef owner = store.owner_of(shape_id);
     if (owner.path0 == path0 && owner.path1 == path1) {
+      return shape_id;
+    }
+  }
+
+  return 0;
+}
+
+ShapeId find_shape_by_owner_path(const GeometryStore& store, OwnerType type, OwnerId owner_id, uint32_t path0, uint32_t path1,
+                                 uint32_t path2)
+{
+  for (const ShapeId shape_id : store.query_owner(type, owner_id)) {
+    const OwnerRef owner = store.owner_of(shape_id);
+    if (owner.path0 == path0 && owner.path1 == path1 && owner.path2 == path2) {
       return shape_id;
     }
   }
@@ -594,6 +623,116 @@ void test_geometry_builder_syncs_moved_instance_halo_without_full_rebuild()
   assert(store.delta_events().size() == 2);
 }
 
+void test_geometry_builder_syncs_moved_instance_obs_without_full_rebuild()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting routing_layer;
+  routing_layer.set_name("M2");
+  routing_layer.set_id(13);
+  routing_layer.set_order(2);
+
+  idb::IdbCellMaster master;
+  master.set_name("obs_sync_master");
+  master.set_width(40);
+  master.set_height(20);
+  idb::IdbObs* obs = master.add_obs();
+  idb::IdbObsLayer* obs_layer = obs->add_obs_layer();
+  obs_layer->get_shape()->set_layer(&routing_layer);
+  obs_layer->get_shape()->add_rect(1, 2, 9, 12);
+
+  idb::IdbInstance* instance = design.get_instance_list()->add_instance("u_sync_obs");
+  instance->set_id(93);
+  instance->set_cell_master(&master);
+  instance->set_coodinate(100, 200);
+  instance->set_status_placed();
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+
+  const std::vector<ShapeId> inst_shapes = store.query_owner(OwnerType::kInstanceBBox, 93);
+  const std::vector<ShapeId> obs_shapes = store.query_owner(OwnerType::kObs, 93);
+  assert(inst_shapes.size() == 1);
+  assert(obs_shapes.size() == 1);
+
+  const ShapeId inst_shape_id = inst_shapes[0];
+  const ShapeId obs_shape_id = obs_shapes[0];
+
+  store.clear_delta_events();
+  instance->set_coodinate(300, 400);
+
+  const GeometrySyncResult sync = builder.sync_instance(*instance, store);
+
+  assert(sync.ok);
+  assert(sync.updated_shape_count == 2);
+  assert(sync.missing_shape_count == 0);
+  assert(store.find_shape(inst_shape_id)->bbox.lx == 300);
+  assert(store.find_shape(inst_shape_id)->bbox.hy == 420);
+  assert(store.find_shape(obs_shape_id)->version == 2);
+  assert(store.find_shape(obs_shape_id)->layer_id == 13);
+  assert(store.find_shape(obs_shape_id)->bbox.lx == 301);
+  assert(store.find_shape(obs_shape_id)->bbox.ly == 402);
+  assert(store.find_shape(obs_shape_id)->bbox.hx == 309);
+  assert(store.find_shape(obs_shape_id)->bbox.hy == 412);
+  assert(store.delta_events().size() == 2);
+}
+
+void test_geometry_builder_syncs_moved_instance_pin_ports_without_full_rebuild()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting routing_layer;
+  routing_layer.set_name("M1");
+  routing_layer.set_id(11);
+  routing_layer.set_order(1);
+
+  idb::IdbCellMaster master;
+  master.set_name("pin_sync_master");
+  master.set_width(40);
+  master.set_height(20);
+  idb::IdbTerm* term = master.add_term();
+  term->set_name("A");
+  idb::IdbPort* port = term->add_port();
+  idb::IdbLayerShape* layer_shape = port->add_layer_shape();
+  layer_shape->set_layer(&routing_layer);
+  layer_shape->add_rect(1, 2, 9, 12);
+
+  idb::IdbInstance* instance = design.get_instance_list()->add_instance("u_sync_pin");
+  instance->set_id(94);
+  instance->set_cell_master(&master);
+  instance->set_coodinate(100, 200);
+  instance->set_status_placed();
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+
+  const OwnerId pin_owner_id = static_cast<OwnerId>(0);
+  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kPinPortShape, pin_owner_id);
+  assert(pin_shapes.size() == 1);
+  const ShapeId pin_shape_id = pin_shapes[0];
+  assert(store.find_shape(pin_shape_id)->bbox.lx == 101);
+  assert(store.find_shape(pin_shape_id)->bbox.hy == 212);
+
+  store.clear_delta_events();
+  instance->set_coodinate(300, 400);
+
+  const GeometrySyncResult sync = builder.sync_instance(*instance, store);
+
+  assert(sync.ok);
+  assert(sync.updated_shape_count == 2);
+  assert(sync.missing_shape_count == 0);
+  assert(store.find_shape(pin_shape_id)->version == 2);
+  assert(store.find_shape(pin_shape_id)->layer_id == 11);
+  assert(store.find_shape(pin_shape_id)->bbox.lx == 301);
+  assert(store.find_shape(pin_shape_id)->bbox.ly == 402);
+  assert(store.find_shape(pin_shape_id)->bbox.hx == 309);
+  assert(store.find_shape(pin_shape_id)->bbox.hy == 412);
+}
+
 void test_geometry_builder_sync_instance_reports_missing_owner_shape()
 {
   idb::IdbCellMaster master;
@@ -732,6 +871,102 @@ void test_geometry_builder_syncs_regular_net_deletes_removed_segments()
   assert(store.delta_events()[0].shape_id == removed_shape);
 }
 
+void test_geometry_builder_syncs_regular_net_vias_incrementally()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting bottom_layer;
+  bottom_layer.set_name("M1");
+  bottom_layer.set_id(11);
+  bottom_layer.set_order(1);
+  bottom_layer.set_width(4);
+  bottom_layer.set_direction(idb::IdbLayerDirection::kHorizontal);
+
+  idb::IdbLayerCut cut_layer;
+  cut_layer.set_name("VIA12");
+  cut_layer.set_id(12);
+  cut_layer.set_order(2);
+
+  idb::IdbLayerRouting top_layer;
+  top_layer.set_name("M2");
+  top_layer.set_id(13);
+  top_layer.set_order(3);
+  top_layer.set_width(6);
+  top_layer.set_direction(idb::IdbLayerDirection::kVertical);
+
+  idb::IdbViaMaster via_master;
+  via_master.set_name("VIA12");
+  via_master.set_type_fixed();
+  idb::IdbViaMasterFixed* bottom_fixed = via_master.add_fixed("M1");
+  bottom_fixed->set_layer(&bottom_layer);
+  bottom_fixed->add_rect(-5, -5, 5, 5);
+  idb::IdbViaMasterFixed* cut_fixed = via_master.add_fixed("VIA12");
+  cut_fixed->set_layer(&cut_layer);
+  cut_fixed->add_rect(-2, -2, 2, 2);
+  idb::IdbViaMasterFixed* top_fixed = via_master.add_fixed("M2");
+  top_fixed->set_layer(&top_layer);
+  top_fixed->add_rect(-6, -6, 6, 6);
+  via_master.set_via_shape();
+
+  idb::IdbNet* net = design.get_net_list()->add_net("n_sync_via");
+  net->set_id(104);
+  idb::IdbRegularWire* wire = net->get_wire_list()->add_wire();
+  idb::IdbRegularWireSegment* moved_segment = wire->add_segment();
+  moved_segment->set_layer(&bottom_layer);
+  moved_segment->set_layer_name("M1");
+  moved_segment->set_is_via(true);
+  idb::IdbVia* moved_via = new idb::IdbVia();
+  moved_via->set_instance_reference(&via_master);
+  moved_via->set_coordinate(100, 200);
+  moved_segment->set_via(moved_via);
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+
+  const std::vector<ShapeId> initial_via_shapes = store.query_owner_name("n_sync_via");
+  assert(initial_via_shapes.size() == 1);
+  const OwnerRef via_owner = store.owner_of(initial_via_shapes[0]);
+  assert(via_owner.type == OwnerType::kVia);
+
+  const ShapeId moved_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 0, 0);
+  assert(moved_shape != 0);
+
+  store.clear_delta_events();
+  moved_via->set_coordinate(120, 240);
+
+  idb::IdbRegularWireSegment* added_segment = wire->add_segment();
+  added_segment->set_layer(&bottom_layer);
+  added_segment->set_layer_name("M1");
+  added_segment->set_is_via(true);
+  idb::IdbVia* added_via = new idb::IdbVia();
+  added_via->set_instance_reference(&via_master);
+  added_via->set_coordinate(500, 600);
+  added_segment->set_via(added_via);
+
+  const GeometrySyncResult sync = builder.sync_net(design, *net, store);
+
+  assert(sync.ok);
+  assert(sync.updated_shape_count == 1);
+  assert(sync.added_shape_count == 1);
+  assert(sync.deleted_shape_count == 0);
+  assert(sync.missing_shape_count == 0);
+
+  const ShapeRecord* moved_record = store.find_shape(moved_shape);
+  assert(moved_record != nullptr);
+  assert(moved_record->version == 2);
+  assert(moved_record->layer_id == 12);
+  assert(moved_record->bbox.lx == 118);
+  assert(moved_record->bbox.hy == 242);
+
+  const ShapeId added_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 1, 0);
+  assert(added_shape != 0);
+  assert(added_shape != moved_shape);
+  assert(store.find_shape(added_shape)->bbox.lx == 498);
+  assert(store.find_shape(added_shape)->bbox.hy == 602);
+}
+
 void test_geometry_builder_syncs_special_net_updates_and_adds_segments()
 {
   idb::IdbLayout layout;
@@ -791,6 +1026,103 @@ void test_geometry_builder_syncs_special_net_updates_and_adds_segments()
   assert(added_shape != 0);
   assert(store.find_shape(added_shape)->bbox.lx == 197);
   assert(store.find_shape(added_shape)->bbox.hy == 30);
+}
+
+void test_geometry_builder_syncs_special_net_vias_incrementally()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting bottom_layer;
+  bottom_layer.set_name("M1");
+  bottom_layer.set_id(11);
+  bottom_layer.set_order(1);
+  bottom_layer.set_width(4);
+  bottom_layer.set_direction(idb::IdbLayerDirection::kHorizontal);
+
+  idb::IdbLayerCut cut_layer;
+  cut_layer.set_name("VIA12");
+  cut_layer.set_id(12);
+  cut_layer.set_order(2);
+
+  idb::IdbLayerRouting top_layer;
+  top_layer.set_name("M2");
+  top_layer.set_id(13);
+  top_layer.set_order(3);
+  top_layer.set_width(6);
+  top_layer.set_direction(idb::IdbLayerDirection::kVertical);
+
+  idb::IdbViaMaster via_master;
+  via_master.set_name("VIA12");
+  via_master.set_type_fixed();
+  idb::IdbViaMasterFixed* bottom_fixed = via_master.add_fixed("M1");
+  bottom_fixed->set_layer(&bottom_layer);
+  bottom_fixed->add_rect(-5, -5, 5, 5);
+  idb::IdbViaMasterFixed* cut_fixed = via_master.add_fixed("VIA12");
+  cut_fixed->set_layer(&cut_layer);
+  cut_fixed->add_rect(-2, -2, 2, 2);
+  idb::IdbViaMasterFixed* top_fixed = via_master.add_fixed("M2");
+  top_fixed->set_layer(&top_layer);
+  top_fixed->add_rect(-6, -6, 6, 6);
+  via_master.set_via_shape();
+
+  idb::IdbSpecialNet* special_net = design.get_special_net_list()->add_net("VSS_SYNC_VIA");
+  idb::IdbSpecialWire* wire = special_net->get_wire_list()->add_wire();
+  idb::IdbSpecialWireSegment* moved_segment = wire->add_segment();
+  moved_segment->set_layer(&bottom_layer);
+  moved_segment->set_is_via(true);
+  idb::IdbVia* moved_via = new idb::IdbVia();
+  moved_via->set_instance_reference(&via_master);
+  moved_via->set_coordinate(100, 200);
+  moved_segment->set_via(moved_via);
+  moved_segment->set_bounding_box();
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+
+  const std::vector<ShapeId> initial_via_shapes = store.query_owner_name("VSS_SYNC_VIA");
+  assert(initial_via_shapes.size() == 1);
+  const OwnerRef via_owner = store.owner_of(initial_via_shapes[0]);
+  assert(via_owner.type == OwnerType::kVia);
+
+  const ShapeId moved_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 0, 0);
+  assert(moved_shape != 0);
+
+  store.clear_delta_events();
+  moved_via->set_coordinate(120, 240);
+  moved_segment->set_bounding_box();
+
+  idb::IdbSpecialWireSegment* added_segment = wire->add_segment();
+  added_segment->set_layer(&bottom_layer);
+  added_segment->set_is_via(true);
+  idb::IdbVia* added_via = new idb::IdbVia();
+  added_via->set_instance_reference(&via_master);
+  added_via->set_coordinate(500, 600);
+  added_segment->set_via(added_via);
+  added_segment->set_bounding_box();
+
+  const GeometrySyncResult sync = builder.sync_special_net(design, *special_net, store);
+
+  assert(sync.ok);
+  assert(sync.updated_shape_count == 1);
+  assert(sync.added_shape_count == 1);
+  assert(sync.deleted_shape_count == 0);
+  assert(sync.missing_shape_count == 0);
+  assert(store.query_owner(OwnerType::kSpecialWireSegment, 0).empty());
+
+  const ShapeRecord* moved_record = store.find_shape(moved_shape);
+  assert(moved_record != nullptr);
+  assert(moved_record->version == 2);
+  assert(moved_record->layer_id == 12);
+  assert(moved_record->bbox.lx == 118);
+  assert(moved_record->bbox.hy == 242);
+
+  const ShapeId added_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 1, 0);
+  assert(added_shape != 0);
+  assert(added_shape != moved_shape);
+  assert(store.find_shape(added_shape)->bbox.lx == 498);
+  assert(store.find_shape(added_shape)->bbox.hy == 602);
 }
 
 void test_geometry_builder_rebuilds_def_rect_and_wire_shapes()
@@ -917,6 +1249,154 @@ void test_geometry_builder_rebuilds_def_rect_and_wire_shapes()
   assert(offline_pin_shapes[0] == pin_shapes[0]);
   assert(offline_region_shapes.size() == 1);
   assert(offline_region_shapes[0] == region_shapes[0]);
+}
+
+void test_geometry_builder_rebuilds_wire_vias_and_instance_obs_shapes()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting bottom_layer;
+  bottom_layer.set_name("M1");
+  bottom_layer.set_id(11);
+  bottom_layer.set_order(1);
+  bottom_layer.set_width(4);
+  bottom_layer.set_direction(idb::IdbLayerDirection::kHorizontal);
+
+  idb::IdbLayerCut cut_layer;
+  cut_layer.set_name("VIA12");
+  cut_layer.set_id(12);
+  cut_layer.set_order(2);
+
+  idb::IdbLayerRouting top_layer;
+  top_layer.set_name("M2");
+  top_layer.set_id(13);
+  top_layer.set_order(3);
+  top_layer.set_width(6);
+  top_layer.set_direction(idb::IdbLayerDirection::kVertical);
+
+  idb::IdbViaMaster via_master;
+  via_master.set_name("VIA12");
+  via_master.set_type_fixed();
+  idb::IdbViaMasterFixed* bottom_fixed = via_master.add_fixed("M1");
+  bottom_fixed->set_layer(&bottom_layer);
+  bottom_fixed->add_rect(-5, -5, 5, 5);
+  idb::IdbViaMasterFixed* cut_fixed = via_master.add_fixed("VIA12");
+  cut_fixed->set_layer(&cut_layer);
+  cut_fixed->add_rect(-2, -2, 2, 2);
+  idb::IdbViaMasterFixed* top_fixed = via_master.add_fixed("M2");
+  top_fixed->set_layer(&top_layer);
+  top_fixed->add_rect(-6, -6, 6, 6);
+  via_master.set_via_shape();
+
+  idb::IdbNet* net = design.get_net_list()->add_net("n_via");
+  net->set_id(301);
+  idb::IdbRegularWireSegment* regular_via_segment = net->get_wire_list()->add_wire()->add_segment();
+  regular_via_segment->set_layer(&bottom_layer);
+  regular_via_segment->set_layer_name("M1");
+  regular_via_segment->set_is_via(true);
+  idb::IdbVia* regular_via = new idb::IdbVia();
+  regular_via->set_instance_reference(&via_master);
+  regular_via->set_coordinate(100, 200);
+  regular_via_segment->set_via(regular_via);
+
+  idb::IdbSpecialNet* special_net = design.get_special_net_list()->add_net("VSS");
+  idb::IdbSpecialWireSegment* special_via_segment = special_net->get_wire_list()->add_wire()->add_segment();
+  special_via_segment->set_layer(&bottom_layer);
+  special_via_segment->set_is_via(true);
+  idb::IdbVia* special_via = new idb::IdbVia();
+  special_via->set_instance_reference(&via_master);
+  special_via->set_coordinate(300, 400);
+  special_via_segment->set_via(special_via);
+  special_via_segment->set_bounding_box();
+
+  idb::IdbVia* fill_via_template = new idb::IdbVia();
+  fill_via_template->set_instance_reference(&via_master);
+  idb::IdbFillVia* fill_via = design.get_fill_list()->add_fill_via(fill_via_template);
+  fill_via->add_coordinate(500, 600);
+
+  idb::IdbPin* pin = design.get_io_pin_list()->add_pin_list("io_via");
+  pin->set_id(501);
+  idb::IdbVia* pin_via = new idb::IdbVia();
+  pin_via->set_instance_reference(&via_master);
+  pin_via->set_coordinate(700, 800);
+  pin->get_via_list().push_back(pin_via);
+
+  idb::IdbCellMaster master;
+  master.set_name("obs_master");
+  master.set_width(40);
+  master.set_height(20);
+  idb::IdbObs* obs = master.add_obs();
+  idb::IdbObsLayer* obs_layer = obs->add_obs_layer();
+  obs_layer->get_shape()->set_layer(&top_layer);
+  obs_layer->get_shape()->add_rect(1, 2, 9, 12);
+
+  idb::IdbInstance* instance = design.get_instance_list()->add_instance("u_obs");
+  instance->set_id(401);
+  instance->set_cell_master(&master);
+  instance->set_status_placed();
+  instance->set_coodinate(1000, 2000);
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  const GeometryBuildResult result = builder.rebuild_from_design(design, layout, store);
+
+  const std::map<OwnerType, uint64_t> owner_counts = store.count_alive_shapes_by_owner_type();
+  assert(owner_counts.contains(OwnerType::kVia));
+  assert(owner_counts.at(OwnerType::kVia) == 3);
+  assert(owner_counts.contains(OwnerType::kObs));
+  assert(owner_counts.at(OwnerType::kObs) == 1);
+  assert(owner_counts.contains(OwnerType::kFill));
+  assert(owner_counts.at(OwnerType::kFill) == 1);
+  assert(result.via_shape_count == 3);
+  assert(result.fill_shape_count == 1);
+  assert(result.shape_count >= 6);
+
+  const std::vector<ShapeId> regular_via_shapes = store.query_owner_name("n_via");
+  const std::vector<ShapeId> special_via_shapes = store.query_owner_name("VSS");
+  const std::vector<ShapeId> pin_via_shapes = store.query_owner_name("io_via");
+  const std::vector<ShapeId> instance_shapes = store.query_owner_name("u_obs");
+
+  assert(regular_via_shapes.size() == 1);
+  assert(special_via_shapes.size() == 1);
+  assert(pin_via_shapes.size() == 1);
+  assert(instance_shapes.size() == 2);
+
+  const ShapeRecord* regular_via_record = store.find_shape(regular_via_shapes[0]);
+  const ShapeRecord* special_via_record = store.find_shape(special_via_shapes[0]);
+  const ShapeRecord* pin_via_record = store.find_shape(pin_via_shapes[0]);
+  assert(regular_via_record != nullptr);
+  assert(special_via_record != nullptr);
+  assert(pin_via_record != nullptr);
+  assert(regular_via_record->layer_id == 12);
+  assert(regular_via_record->bbox.lx == 98);
+  assert(regular_via_record->bbox.hy == 202);
+  assert(store.owner_of(regular_via_shapes[0]).type == OwnerType::kVia);
+  assert(special_via_record->layer_id == 12);
+  assert(special_via_record->bbox.lx == 298);
+  assert(special_via_record->bbox.hy == 402);
+  assert(pin_via_record->layer_id == 12);
+  assert(pin_via_record->bbox.lx == 698);
+  assert(pin_via_record->bbox.hy == 802);
+  assert(store.owner_of(pin_via_shapes[0]).type == OwnerType::kVia);
+
+  const std::vector<ShapeId> fill_shapes = store.query_owner(OwnerType::kFill, 0);
+  assert(fill_shapes.size() == 1);
+  const ShapeRecord* fill_via_record = store.find_shape(fill_shapes[0]);
+  assert(fill_via_record != nullptr);
+  assert(fill_via_record->layer_id == 12);
+  assert(fill_via_record->bbox.lx == 498);
+  assert(fill_via_record->bbox.hy == 602);
+  assert(store.owner_of(fill_shapes[0]).type == OwnerType::kFill);
+  assert(store.owner_of(fill_shapes[0]).path0 == 0);
+
+  const std::vector<ShapeId> obs_shapes = store.query_owner(OwnerType::kObs, 401);
+  assert(obs_shapes.size() == 1);
+  assert(store.find_shape(obs_shapes[0])->layer_id == 13);
+  assert(store.find_shape(obs_shapes[0])->bbox.lx == 1001);
+  assert(store.find_shape(obs_shapes[0])->bbox.ly == 2002);
+  assert(store.find_shape(obs_shapes[0])->bbox.hx == 1009);
+  assert(store.find_shape(obs_shapes[0])->bbox.hy == 2012);
 }
 
 void test_geometry_edit_applier_moves_regular_net_wire_segment_back_to_idb()
@@ -1114,17 +1594,22 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(result.payload_size >= sizeof(RectPayload) + sizeof(LinePayload) + sizeof(PointPayload));
 
   const std::filesystem::path manifest_path = output_dir / "geometry.manifest";
-  const std::filesystem::path shapes_path = output_dir / "geometry.shapes.bin";
-  const std::filesystem::path owners_path = output_dir / "geometry.owners.bin";
-  const std::filesystem::path payload_path = output_dir / "geometry.payload.bin";
-  const std::filesystem::path names_path = output_dir / "geometry.names.bin";
-  const std::filesystem::path name_index_path = output_dir / "geometry.name_index.bin";
-  const std::filesystem::path meta_path = output_dir / "geometry.meta.bin";
-  const std::filesystem::path sidmap_path = output_dir / "geometry.sidmap.bin";
-  const std::filesystem::path delta_path = output_dir / "geometry.delta.bin";
-  const std::filesystem::path view_path = output_dir / "geometry.view.bin";
-
   assert(std::filesystem::exists(manifest_path));
+  assert(result.epoch != 0);
+  assert(!std::filesystem::exists(output_dir / "geometry.manifest.tmp"));
+
+  const auto snapshot_path = [&](const std::string& key) { return output_dir / manifest_value(manifest_path, key); };
+  const std::filesystem::path shapes_path = snapshot_path("shapes");
+  const std::filesystem::path owners_path = snapshot_path("owners");
+  const std::filesystem::path payload_path = snapshot_path("payload");
+  const std::filesystem::path names_path = snapshot_path("names");
+  const std::filesystem::path name_index_path = snapshot_path("name_index");
+  const std::filesystem::path meta_path = snapshot_path("meta");
+  const std::filesystem::path sidmap_path = snapshot_path("sidmap");
+  const std::filesystem::path delta_path = snapshot_path("delta");
+  const std::filesystem::path view_path = snapshot_path("view");
+
+  assert(shapes_path.parent_path().parent_path() == output_dir / "epochs");
   assert(std::filesystem::exists(meta_path));
   assert(std::filesystem::exists(shapes_path));
   assert(std::filesystem::exists(owners_path));
@@ -1185,6 +1670,7 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
 
   const std::string manifest = read_text_file(manifest_path);
   assert(manifest.find("schema_version=1") != std::string::npos);
+  assert(manifest.find("active_epoch=") != std::string::npos);
   assert(manifest.find("geometry.meta.bin") != std::string::npos);
   assert(manifest.find("geometry.shapes.bin") != std::string::npos);
   assert(manifest.find("geometry.owners.bin") != std::string::npos);
@@ -1194,6 +1680,43 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(manifest.find("geometry.sidmap.bin") != std::string::npos);
   assert(manifest.find("geometry.delta.bin") != std::string::npos);
   assert(manifest.find("geometry.view.bin") != std::string::npos);
+
+  std::filesystem::remove_all(output_dir);
+}
+
+void test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_files()
+{
+  GeometryStore store;
+  const ShapeId shape_id = store.add_rect(1, Rect32{0, 0, 10, 20}, OwnerRef{OwnerType::kDie});
+  const std::filesystem::path output_dir =
+      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_epoch_switch_test";
+  std::filesystem::remove_all(output_dir);
+
+  GeometrySnapshotWriter writer;
+  const SnapshotWriteResult first = writer.write(store, SnapshotWriteOptions{output_dir});
+  assert(first.ok);
+  const std::filesystem::path manifest_path = output_dir / "geometry.manifest";
+  const std::filesystem::path first_shapes = output_dir / manifest_value(manifest_path, "shapes");
+  assert(std::filesystem::exists(first_shapes));
+
+  assert(store.update_rect(shape_id, Rect32{100, 200, 110, 220}, 77));
+  const SnapshotWriteResult second = writer.write(store, SnapshotWriteOptions{output_dir});
+  assert(second.ok);
+  const std::filesystem::path second_shapes = output_dir / manifest_value(manifest_path, "shapes");
+
+  assert(second.epoch != first.epoch);
+  assert(second_shapes != first_shapes);
+  assert(std::filesystem::exists(first_shapes));
+  assert(std::filesystem::exists(second_shapes));
+  assert(!std::filesystem::exists(output_dir / "geometry.manifest.tmp"));
+
+  GeometryStore loaded;
+  GeometrySnapshotReader reader;
+  const SnapshotReadResult read_result = reader.read(SnapshotReadOptions{manifest_path}, loaded);
+  assert(read_result.ok);
+  assert(loaded.find_shape(shape_id) != nullptr);
+  assert(loaded.find_shape(shape_id)->bbox.lx == 100);
+  assert(loaded.find_shape(shape_id)->version == 2);
 
   std::filesystem::remove_all(output_dir);
 }
@@ -1284,6 +1807,60 @@ void test_geometry_snapshot_reader_round_trips_core_binary_files()
   std::filesystem::remove_all(output_dir);
 }
 
+void test_geometry_snapshot_reload_preserves_shape_id_and_version_during_rebuild()
+{
+  idb::IdbLayout layout;
+  layout.initDie(0, 0, 1000, 800);
+  idb::IdbDesign design(&layout);
+
+  idb::IdbCellMaster master;
+  master.set_name("persistent_master");
+  master.set_width(50);
+  master.set_height(30);
+
+  idb::IdbInstance* instance = design.get_instance_list()->add_instance("u_persistent");
+  instance->set_id(501);
+  instance->set_cell_master(&master);
+  instance->set_coodinate(100, 200);
+  instance->set_status_placed();
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+  const ShapeId original_id = store.query_owner(OwnerType::kInstanceBBox, 501)[0];
+
+  GeometryEditCommand command;
+  command.command_id = 9901;
+  command.shape_id = original_id;
+  command.expected_version = 1;
+  command.op = GeometryEditOp::kMoveShape;
+  command.requested_bbox = Rect32{300, 400, 350, 430};
+  GeometryEditApplier applier;
+  const GeometryEditResult edit_result = applier.apply_edit(command, design, store);
+  assert(edit_result.status == GeometryEditStatus::kAccepted);
+  assert(edit_result.new_version == 2);
+
+  const std::filesystem::path output_dir =
+      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_persistent_rebuild_test";
+  std::filesystem::remove_all(output_dir);
+  GeometrySnapshotWriter writer;
+  assert(writer.write(store, SnapshotWriteOptions{output_dir}).ok);
+
+  GeometryStore reloaded;
+  GeometrySnapshotReader reader;
+  assert(reader.read(SnapshotReadOptions{output_dir / "geometry.manifest"}, reloaded).ok);
+  builder.rebuild_from_design(design, layout, reloaded);
+
+  const std::vector<ShapeId> rebuilt_shapes = reloaded.query_owner(OwnerType::kInstanceBBox, 501);
+  assert(rebuilt_shapes.size() == 1);
+  assert(rebuilt_shapes[0] == original_id);
+  assert(reloaded.find_shape(original_id)->version == 2);
+  assert(reloaded.find_shape(original_id)->bbox.lx == 300);
+  assert(reloaded.delta_events().empty());
+
+  std::filesystem::remove_all(output_dir);
+}
+
 }  // namespace
 
 int main()
@@ -1301,15 +1878,22 @@ int main()
   test_geometry_builder_skips_unplaced_instance_geometry();
   test_geometry_builder_syncs_moved_instance_without_full_rebuild();
   test_geometry_builder_syncs_moved_instance_halo_without_full_rebuild();
+  test_geometry_builder_syncs_moved_instance_obs_without_full_rebuild();
+  test_geometry_builder_syncs_moved_instance_pin_ports_without_full_rebuild();
   test_geometry_builder_sync_instance_reports_missing_owner_shape();
   test_geometry_builder_syncs_regular_net_updates_and_adds_segments();
   test_geometry_builder_syncs_regular_net_deletes_removed_segments();
+  test_geometry_builder_syncs_regular_net_vias_incrementally();
   test_geometry_builder_syncs_special_net_updates_and_adds_segments();
+  test_geometry_builder_syncs_special_net_vias_incrementally();
   test_geometry_builder_rebuilds_def_rect_and_wire_shapes();
+  test_geometry_builder_rebuilds_wire_vias_and_instance_obs_shapes();
   test_geometry_edit_applier_moves_regular_net_wire_segment_back_to_idb();
   test_geometry_edit_applier_moves_special_net_wire_segment_back_to_idb();
   test_geometry_edit_applier_updates_blockage_rect_back_to_idb();
   test_geometry_snapshot_writer_writes_manifest_and_core_binary_files();
+  test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_files();
   test_geometry_snapshot_reader_round_trips_core_binary_files();
+  test_geometry_snapshot_reload_preserves_shape_id_and_version_during_rebuild();
   return 0;
 }

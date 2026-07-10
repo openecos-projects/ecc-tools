@@ -22,11 +22,13 @@ struct GeometryBuildResult
   uint64_t instance_halo_shape_count = 0;
   uint64_t net_wire_shape_count = 0;
   uint64_t special_net_wire_shape_count = 0;
+  uint64_t via_shape_count = 0;
   uint64_t blockage_shape_count = 0;
   uint64_t fill_shape_count = 0;
   uint64_t region_shape_count = 0;
   uint64_t slot_shape_count = 0;
   uint64_t pin_shape_count = 0;
+  uint64_t obs_shape_count = 0;
 };
 
 struct GeometrySyncResult

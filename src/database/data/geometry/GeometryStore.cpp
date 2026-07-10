@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -30,6 +31,18 @@ bool are_valid_name_records(const std::vector<GeometryNameRecord>& name_records,
   return true;
 }
 
+bool is_same_rect(Rect32 lhs, Rect32 rhs)
+{
+  lhs = normalize(lhs);
+  rhs = normalize(rhs);
+  return lhs.lx == rhs.lx && lhs.ly == rhs.ly && lhs.hx == rhs.hx && lhs.hy == rhs.hy;
+}
+
+ShapeVersion next_version(ShapeVersion version)
+{
+  return version == std::numeric_limits<ShapeVersion>::max() ? version : version + 1;
+}
+
 }  // namespace
 
 size_t OwnerShapeKeyHash::operator()(const OwnerShapeKey& key) const
@@ -54,26 +67,29 @@ void GeometryStore::clear()
   _next_delta_sequence = 1;
   _layer_index.clear();
   _spatial_index.clear();
+  _lod_pyramid.clear();
   _owner_index.clear();
-  _shape_ids_by_owner_path.clear();
+  _preserved_shapes_by_owner_path.clear();
   _name_index.clear();
 }
 
 void GeometryStore::clear_preserving_shape_ids()
 {
-  std::unordered_map<OwnerShapeKey, ShapeId, OwnerShapeKeyHash> preserved_shape_ids;
+  std::unordered_map<OwnerShapeKey, PreservedShapeState, OwnerShapeKeyHash> preserved_shapes;
   ShapeIdAllocator preserved_allocator;
   for (const ShapeRecord& record : _shapes.records()) {
     if (record.id == 0 || record.owner_index >= _owners.size()) {
       continue;
     }
-    preserved_shape_ids.emplace(make_owner_shape_key(_owners[record.owner_index]), record.id);
+    preserved_shapes.emplace(make_owner_shape_key(_owners[record.owner_index]),
+                             PreservedShapeState{record.id, record.version, record.layer_id, record.kind, record.state,
+                                                 record.flags, record.bbox});
     preserved_allocator.reserve_seen_id(record.id);
   }
 
   clear();
   _shape_ids = preserved_allocator;
-  _shape_ids_by_owner_path = std::move(preserved_shape_ids);
+  _preserved_shapes_by_owner_path = std::move(preserved_shapes);
 }
 
 bool GeometryStore::replace_snapshot(std::vector<ShapeRecord> records, std::vector<OwnerRef> owners, std::vector<std::byte> payloads)
@@ -108,22 +124,37 @@ bool GeometryStore::replace_snapshot(std::vector<ShapeRecord> records, std::vect
     _shape_ids.reserve_seen_id(record.id);
     index_shape(record, _owners[record.owner_index]);
   }
+  _lod_pyramid.rebuild(_shapes.records());
 
   return true;
 }
 
-ShapeId GeometryStore::allocate_shape_id(OwnerRef owner)
+GeometryStore::AllocatedShapeIdentity GeometryStore::allocate_shape_identity(OwnerRef owner, LayerId layer_id, ShapeKind kind,
+                                                                            uint16_t flags, Rect32 bbox)
 {
   const OwnerShapeKey key = make_owner_shape_key(owner);
-  const auto iter = _shape_ids_by_owner_path.find(key);
-  if (iter == _shape_ids_by_owner_path.end()) {
-    return _shape_ids.allocate();
+  const auto iter = _preserved_shapes_by_owner_path.find(key);
+  if (iter == _preserved_shapes_by_owner_path.end()) {
+    return AllocatedShapeIdentity{_shape_ids.allocate(), 1, false, 0, bbox};
   }
 
-  const ShapeId id = iter->second;
-  _shape_ids_by_owner_path.erase(iter);
-  _shape_ids.reserve_seen_id(id);
-  return id;
+  const PreservedShapeState preserved = iter->second;
+  _preserved_shapes_by_owner_path.erase(iter);
+  _shape_ids.reserve_seen_id(preserved.id);
+
+  const bool unchanged = preserved.state == ShapeState::kAlive && preserved.layer_id == layer_id && preserved.kind == kind
+                         && preserved.flags == flags && is_same_rect(preserved.bbox, bbox);
+  return AllocatedShapeIdentity{preserved.id, unchanged ? preserved.version : next_version(preserved.version), true,
+                                preserved.version, preserved.bbox};
+}
+
+void GeometryStore::append_rebuild_delta(const AllocatedShapeIdentity& identity, const ShapeRecord& record)
+{
+  if (!identity.restored) {
+    append_delta(GeometryDeltaOp::kInsert, record.id, 0, record.version, record.bbox, record.bbox);
+  } else if (identity.old_version != record.version) {
+    append_delta(GeometryDeltaOp::kUpdate, record.id, identity.old_version, record.version, identity.old_bbox, record.bbox);
+  }
 }
 
 void GeometryStore::index_shape(const ShapeRecord& record, OwnerRef owner)
@@ -150,77 +181,86 @@ void GeometryStore::append_delta(GeometryDeltaOp op, ShapeId shape_id, ShapeVers
 
 ShapeId GeometryStore::add_rect(LayerId layer_id, Rect32 rect, OwnerRef owner, uint32_t flags)
 {
-  const ShapeId id = allocate_shape_id(owner);
+  rect = normalize(rect);
+  const uint16_t record_flags = static_cast<uint16_t>(flags);
+  const AllocatedShapeIdentity identity =
+      allocate_shape_identity(owner, layer_id, ShapeKind::kRect, record_flags, rect);
   const uint32_t owner_index = static_cast<uint32_t>(_owners.size());
   _owners.push_back(owner);
 
-  rect = normalize(rect);
-
   ShapeRecord record;
-  record.id = id;
-  record.version = 1;
+  record.id = identity.id;
+  record.version = identity.version;
   record.layer_id = layer_id;
   record.kind = ShapeKind::kRect;
   record.state = ShapeState::kAlive;
-  record.flags = static_cast<uint16_t>(flags);
+  record.flags = record_flags;
   record.owner_index = owner_index;
   record.bbox = rect;
 
   const RectPayload payload{rect};
   _shapes.insert(record, payload);
   index_shape(record, owner);
-  append_delta(GeometryDeltaOp::kInsert, id, 0, record.version, record.bbox, record.bbox);
-  return id;
+  _lod_pyramid.mark_dirty_tiles(layer_id, record.bbox, record.bbox);
+  append_rebuild_delta(identity, record);
+  return record.id;
 }
 
 ShapeId GeometryStore::add_point(LayerId layer_id, PointPayload point, OwnerRef owner, uint32_t flags)
 {
-  const ShapeId id = allocate_shape_id(owner);
+  const Rect32 bbox{point.point.x, point.point.y, point.point.x, point.point.y};
+  const uint16_t record_flags = static_cast<uint16_t>(flags);
+  const AllocatedShapeIdentity identity =
+      allocate_shape_identity(owner, layer_id, ShapeKind::kPoint, record_flags, bbox);
   const uint32_t owner_index = static_cast<uint32_t>(_owners.size());
   _owners.push_back(owner);
 
   ShapeRecord record;
-  record.id = id;
-  record.version = 1;
+  record.id = identity.id;
+  record.version = identity.version;
   record.layer_id = layer_id;
   record.kind = ShapeKind::kPoint;
   record.state = ShapeState::kAlive;
-  record.flags = static_cast<uint16_t>(flags);
+  record.flags = record_flags;
   record.owner_index = owner_index;
-  record.bbox = Rect32{point.point.x, point.point.y, point.point.x, point.point.y};
+  record.bbox = bbox;
 
   _shapes.insert(record, point);
   index_shape(record, owner);
-  append_delta(GeometryDeltaOp::kInsert, id, 0, record.version, record.bbox, record.bbox);
-  return id;
+  _lod_pyramid.mark_dirty_tiles(layer_id, record.bbox, record.bbox);
+  append_rebuild_delta(identity, record);
+  return record.id;
 }
 
 ShapeId GeometryStore::add_line(LayerId layer_id, LinePayload line, OwnerRef owner, uint32_t flags)
 {
-  const ShapeId id = allocate_shape_id(owner);
-  const uint32_t owner_index = static_cast<uint32_t>(_owners.size());
-  _owners.push_back(owner);
-
   const int32_t half_width = (std::abs(line.width) + 1) / 2;
   const int32_t lx = std::min(line.begin.x, line.end.x) - half_width;
   const int32_t ly = std::min(line.begin.y, line.end.y) - half_width;
   const int32_t hx = std::max(line.begin.x, line.end.x) + half_width;
   const int32_t hy = std::max(line.begin.y, line.end.y) + half_width;
+  const Rect32 bbox{lx, ly, hx, hy};
+  const uint16_t record_flags = static_cast<uint16_t>(flags);
+  const AllocatedShapeIdentity identity =
+      allocate_shape_identity(owner, layer_id, ShapeKind::kLine, record_flags, bbox);
+  const uint32_t owner_index = static_cast<uint32_t>(_owners.size());
+  _owners.push_back(owner);
 
   ShapeRecord record;
-  record.id = id;
-  record.version = 1;
+  record.id = identity.id;
+  record.version = identity.version;
   record.layer_id = layer_id;
   record.kind = ShapeKind::kLine;
   record.state = ShapeState::kAlive;
-  record.flags = static_cast<uint16_t>(flags);
+  record.flags = record_flags;
   record.owner_index = owner_index;
-  record.bbox = Rect32{lx, ly, hx, hy};
+  record.bbox = bbox;
 
   _shapes.insert(record, line);
   index_shape(record, owner);
-  append_delta(GeometryDeltaOp::kInsert, id, 0, record.version, record.bbox, record.bbox);
-  return id;
+  _lod_pyramid.mark_dirty_tiles(layer_id, record.bbox, record.bbox);
+  append_rebuild_delta(identity, record);
+  return record.id;
 }
 
 void GeometryStore::add_owner_name(OwnerType type, OwnerId owner_id, std::string_view name)
@@ -261,6 +301,7 @@ bool GeometryStore::update_rect(ShapeId id, Rect32 rect, uint64_t command_id)
   }
 
   _spatial_index.update(old_record, updated);
+  _lod_pyramid.mark_dirty_tiles(updated.layer_id, old_record.bbox, updated.bbox);
   append_delta(GeometryDeltaOp::kUpdate, id, old_record.version, updated.version, old_record.bbox, updated.bbox, command_id);
   return true;
 }
@@ -280,6 +321,7 @@ bool GeometryStore::delete_shape(ShapeId id)
 
   const ShapeRecord* deleted_record = _shapes.find(id);
   const ShapeVersion new_version = deleted_record == nullptr ? old_record.version + 1 : deleted_record->version;
+  _lod_pyramid.mark_dirty_tiles(old_record.layer_id, old_record.bbox, old_record.bbox);
   append_delta(GeometryDeltaOp::kDelete, id, old_record.version, new_version, old_record.bbox, old_record.bbox);
   return true;
 }
@@ -332,6 +374,31 @@ std::span<const GeometryDeltaEvent> GeometryStore::delta_events() const
 void GeometryStore::clear_delta_events()
 {
   _delta_events.clear();
+}
+
+void GeometryStore::rebuild_lod_tiles()
+{
+  _lod_pyramid.rebuild(_shapes.records());
+}
+
+void GeometryStore::rebuild_dirty_lod_tiles()
+{
+  _lod_pyramid.rebuild_dirty_tiles(_shapes.records());
+}
+
+size_t GeometryStore::dirty_lod_tile_count() const
+{
+  return _lod_pyramid.dirty_tile_count();
+}
+
+std::vector<GeometryTileSummary> GeometryStore::lod_summaries() const
+{
+  return _lod_pyramid.summaries();
+}
+
+std::vector<GeometryTileSummary> GeometryStore::query_lod_tiles(uint8_t lod_level, LayerId layer_id, Rect32 viewport) const
+{
+  return _lod_pyramid.query(lod_level, layer_id, viewport);
 }
 
 std::map<OwnerType, uint64_t> GeometryStore::count_alive_shapes_by_owner_type() const

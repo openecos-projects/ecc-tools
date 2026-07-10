@@ -530,6 +530,55 @@ void test_geometry_store_preserves_shape_ids_by_owner_path_across_rebuild()
   assert(restored_first_id == first_id);
 }
 
+void test_geometry_store_preserves_versions_for_unchanged_rebuilt_shapes()
+{
+  GeometryStore store;
+  OwnerRef owner;
+  owner.type = OwnerType::kInstanceBBox;
+  owner.owner_id = 41;
+  owner.path0 = 3;
+
+  const ShapeId original_id = store.add_rect(2, Rect32{0, 0, 10, 10}, owner);
+  assert(store.update_rect(original_id, Rect32{20, 20, 30, 30}, 901));
+  assert(store.find_shape(original_id)->version == 2);
+
+  store.clear_preserving_shape_ids();
+  const ShapeId unchanged_id = store.add_rect(2, Rect32{20, 20, 30, 30}, owner);
+
+  assert(unchanged_id == original_id);
+  assert(store.find_shape(unchanged_id)->version == 2);
+  assert(store.delta_events().empty());
+
+  store.clear_preserving_shape_ids();
+  const ShapeId changed_id = store.add_rect(2, Rect32{40, 40, 50, 50}, owner);
+
+  assert(changed_id == original_id);
+  assert(store.find_shape(changed_id)->version == 3);
+  assert(store.delta_events().size() == 1);
+  assert(store.delta_events()[0].op == GeometryDeltaOp::kUpdate);
+  assert(store.delta_events()[0].old_version == 2);
+  assert(store.delta_events()[0].new_version == 3);
+}
+
+void test_geometry_store_marks_and_rebuilds_dirty_lod_tiles()
+{
+  GeometryStore store;
+  const ShapeId shape_id =
+      store.add_rect(5, Rect32{0, 0, 100, 100}, OwnerRef{OwnerType::kNetWireSegment});
+
+  assert(store.dirty_lod_tile_count() > 0);
+  store.rebuild_dirty_lod_tiles();
+  assert(store.dirty_lod_tile_count() == 0);
+  assert(store.query_lod_tiles(0, 5, Rect32{0, 0, 100, 100}).size() == 1);
+
+  assert(store.update_rect(shape_id, Rect32{9000, 9000, 9100, 9100}));
+  assert(store.dirty_lod_tile_count() > 0);
+  store.rebuild_dirty_lod_tiles();
+
+  assert(store.query_lod_tiles(0, 5, Rect32{0, 0, 100, 100}).empty());
+  assert(store.query_lod_tiles(0, 5, Rect32{9000, 9000, 9100, 9100}).size() == 1);
+}
+
 void test_geometry_store_records_delta_events_for_insert_update_and_delete()
 {
   GeometryStore store;
@@ -627,6 +676,8 @@ int main()
   test_geometry_tile_pyramid_handles_large_shapes_without_tile_explosion();
   test_geometry_store_clear_resets_records_owners_payloads_and_shape_ids();
   test_geometry_store_preserves_shape_ids_by_owner_path_across_rebuild();
+  test_geometry_store_preserves_versions_for_unchanged_rebuilt_shapes();
+  test_geometry_store_marks_and_rebuilds_dirty_lod_tiles();
   test_geometry_store_records_delta_events_for_insert_update_and_delete();
   test_geometry_edit_command_carries_expected_version();
   test_snapshot_header_has_stable_schema_identity();

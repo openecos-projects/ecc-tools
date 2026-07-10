@@ -7,15 +7,24 @@
 #include "IdbRegularWire.h"
 #include "IdbSpecialNet.h"
 #include "IdbSpecialWire.h"
+#include "IdbVias.h"
 
 #include <algorithm>
 #include <unordered_set>
+#include <vector>
 
 namespace ecc::geometry {
 
 namespace {
 
 constexpr LayerId kLayoutGeometryLayer = 0;
+constexpr OwnerId kDerivedOwnerPayloadMask = 0x00ffffffffffffffULL;
+
+OwnerId make_derived_owner_id(OwnerType parent_type, OwnerId parent_owner_id)
+{
+  return (static_cast<OwnerId>(static_cast<uint8_t>(parent_type)) << 56U)
+         | (parent_owner_id & kDerivedOwnerPayloadMask);
+}
 
 Rect32 rect_from_idb(idb::IdbRect* rect)
 {
@@ -68,11 +77,54 @@ ShapeId emit_layout_rect_if_present(GeometryStore& store, Rect32 rect, OwnerRef 
   return emit_rect_if_present(store, kLayoutGeometryLayer, rect, owner);
 }
 
-ShapeId find_shape_by_owner_path(const GeometryStore& store, OwnerType type, OwnerId owner_id, uint32_t path0, uint32_t path1)
+uint64_t emit_layer_shape_rects(GeometryStore& store, idb::IdbLayerShape& layer_shape, OwnerRef owner)
+{
+  uint64_t shape_count = 0;
+  uint32_t rect_index = 0;
+  for (auto* rect : layer_shape.get_rect_list()) {
+    OwnerRef rect_owner = owner;
+    rect_owner.path3 = rect_index++;
+    if (emit_rect_if_present(store, layer_id_from_idb(layer_shape.get_layer()), rect_from_idb(rect), rect_owner) != 0) {
+      ++shape_count;
+    }
+  }
+
+  return shape_count;
+}
+
+uint64_t emit_via_cut_shapes(GeometryStore& store, idb::IdbVia* via, OwnerRef owner)
+{
+  if (via == nullptr) {
+    return 0;
+  }
+
+  if (via->get_instance() == nullptr || via->get_instance()->get_cut_layer_shape() == nullptr) {
+    return 0;
+  }
+
+  idb::IdbLayerShape cut_shape = via->get_cut_layer_shape();
+  return emit_layer_shape_rects(store, cut_shape, owner);
+}
+
+uint64_t emit_via_cut_shapes_at(GeometryStore& store, idb::IdbVia* via, idb::IdbCoordinate<int32_t>* origin, OwnerRef owner)
+{
+  if (via == nullptr || origin == nullptr || via->get_instance() == nullptr
+      || via->get_instance()->get_cut_layer_shape() == nullptr) {
+    return 0;
+  }
+
+  idb::IdbLayerShape cut_shape;
+  via->get_instance()->get_cut_layer_shape()->clone(cut_shape);
+  cut_shape.moveToLocation(origin);
+  return emit_layer_shape_rects(store, cut_shape, owner);
+}
+
+ShapeId find_shape_by_owner_path(const GeometryStore& store, OwnerType type, OwnerId owner_id, uint32_t path0, uint32_t path1,
+                                 uint32_t path2, uint32_t path3)
 {
   for (const ShapeId shape_id : store.query_owner(type, owner_id)) {
     const OwnerRef owner = store.owner_of(shape_id);
-    if (owner.path0 == path0 && owner.path1 == path1) {
+    if (owner.path0 == path0 && owner.path1 == path1 && owner.path2 == path2 && owner.path3 == path3) {
       return shape_id;
     }
   }
@@ -122,7 +174,7 @@ void reconcile_rect_shape(GeometryStore& store, OwnerType type, OwnerId owner_id
                           std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
 {
   bbox = normalize(bbox);
-  const ShapeId shape_id = find_shape_by_owner_path(store, type, owner_id, owner.path0, owner.path1);
+  const ShapeId shape_id = find_shape_by_owner_path(store, type, owner_id, owner.path0, owner.path1, owner.path2, owner.path3);
   if (shape_id == 0) {
     const ShapeId added_shape_id = store.add_rect(layer_id, bbox, owner);
     if (added_shape_id != 0) {
@@ -164,6 +216,32 @@ void reconcile_rect_shape(GeometryStore& store, OwnerType type, OwnerId owner_id
   } else {
     ++result.missing_shape_count;
   }
+}
+
+void reconcile_layer_shape_rects(GeometryStore& store, idb::IdbLayerShape& layer_shape, OwnerRef owner,
+                                 std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
+{
+  uint32_t rect_index = 0;
+  for (auto* rect : layer_shape.get_rect_list()) {
+    OwnerRef rect_owner = owner;
+    rect_owner.path3 = rect_index++;
+    const Rect32 bbox = rect_from_idb(rect);
+    if (is_non_empty(bbox)) {
+      reconcile_rect_shape(store, rect_owner.type, rect_owner.owner_id, layer_id_from_idb(layer_shape.get_layer()), bbox, rect_owner,
+                           seen_shape_ids, result);
+    }
+  }
+}
+
+void reconcile_via_cut_shapes(GeometryStore& store, idb::IdbVia* via, OwnerRef owner,
+                              std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
+{
+  if (via == nullptr || via->get_instance() == nullptr || via->get_instance()->get_cut_layer_shape() == nullptr) {
+    return;
+  }
+
+  idb::IdbLayerShape cut_shape = via->get_cut_layer_shape();
+  reconcile_layer_shape_rects(store, cut_shape, owner, seen_shape_ids, result);
 }
 
 Rect32 rect_from_regular_segment(idb::IdbRegularWireSegment* segment)
@@ -218,16 +296,33 @@ Rect32 rect_from_special_segment(idb::IdbSpecialWireSegment* segment)
                 begin->get_x() + segment->get_route_width() - half_width, std::max(begin->get_y(), end->get_y())};
 }
 
-uint64_t emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t path0, uint32_t path1)
+struct PinPortShapeCounts
+{
+  uint64_t port_shape_count = 0;
+  uint64_t via_shape_count = 0;
+};
+
+OwnerId pin_owner_id_from_path(idb::IdbPin* pin, uint32_t path0, uint32_t path1)
 {
   if (pin == nullptr) {
     return 0;
   }
 
-  const OwnerId pin_owner_id = pin->get_id() != 0 ? pin->get_id() : (static_cast<OwnerId>(path0) << 32U | path1);
-  store.add_owner_name(OwnerType::kPinPortShape, pin_owner_id, pin->get_pin_name());
+  return pin->get_id() != 0 ? pin->get_id() : (static_cast<OwnerId>(path0) << 32U | path1);
+}
 
-  uint64_t shape_count = 0;
+PinPortShapeCounts emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t path0, uint32_t path1)
+{
+  if (pin == nullptr) {
+    return {};
+  }
+
+  const OwnerId pin_owner_id = pin_owner_id_from_path(pin, path0, path1);
+  store.add_owner_name(OwnerType::kPinPortShape, pin_owner_id, pin->get_pin_name());
+  const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kPinPortShape, pin_owner_id);
+  store.add_owner_name(OwnerType::kVia, via_owner_id, pin->get_pin_name());
+
+  PinPortShapeCounts counts;
   uint32_t layer_shape_index = 0;
   for (auto* layer_shape : pin->get_port_box_list()) {
     if (layer_shape == nullptr) {
@@ -246,14 +341,70 @@ uint64_t emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t p
       owner.path3 = rect_index++;
 
       if (emit_rect_if_present(store, layer_id_from_idb(layer_shape->get_layer()), rect_from_idb(rect), owner) != 0) {
-        ++shape_count;
+        ++counts.port_shape_count;
       }
     }
 
     ++layer_shape_index;
   }
 
-  return shape_count;
+  uint32_t via_index = 0;
+  for (auto* via : pin->get_via_list()) {
+    OwnerRef owner;
+    owner.type = OwnerType::kVia;
+    owner.owner_id = via_owner_id;
+    owner.path0 = path0;
+    owner.path1 = path1;
+    owner.path2 = via_index++;
+    counts.via_shape_count += emit_via_cut_shapes(store, via, owner);
+  }
+
+  return counts;
+}
+
+void reconcile_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t path0, uint32_t path1,
+                               std::unordered_set<ShapeId>& seen_pin_shape_ids,
+                               std::unordered_set<ShapeId>& seen_via_shape_ids, GeometrySyncResult& result)
+{
+  if (pin == nullptr) {
+    return;
+  }
+
+  const OwnerId pin_owner_id = pin_owner_id_from_path(pin, path0, path1);
+  uint32_t layer_shape_index = 0;
+  for (auto* layer_shape : pin->get_port_box_list()) {
+    if (layer_shape == nullptr) {
+      ++layer_shape_index;
+      continue;
+    }
+
+    uint32_t rect_index = 0;
+    for (auto* rect : layer_shape->get_rect_list()) {
+      OwnerRef owner;
+      owner.type = OwnerType::kPinPortShape;
+      owner.owner_id = pin_owner_id;
+      owner.path0 = path0;
+      owner.path1 = path1;
+      owner.path2 = layer_shape_index;
+      owner.path3 = rect_index++;
+      reconcile_rect_shape(store, owner.type, owner.owner_id, layer_id_from_idb(layer_shape->get_layer()), rect_from_idb(rect),
+                           owner, seen_pin_shape_ids, result);
+    }
+
+    ++layer_shape_index;
+  }
+
+  const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kPinPortShape, pin_owner_id);
+  uint32_t via_index = 0;
+  for (auto* via : pin->get_via_list()) {
+    OwnerRef owner;
+    owner.type = OwnerType::kVia;
+    owner.owner_id = via_owner_id;
+    owner.path0 = path0;
+    owner.path1 = path1;
+    owner.path2 = via_index++;
+    reconcile_via_cut_shapes(store, via, owner, seen_via_shape_ids, result);
+  }
 }
 
 }  // namespace
@@ -340,7 +491,37 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
       if (auto* pins = instance->get_pin_list(); pins != nullptr) {
         uint32_t pin_index = 0;
         for (auto* pin : pins->get_pin_list()) {
-          result.pin_shape_count += emit_pin_port_shapes(store, pin, instance_index, pin_index++);
+          const PinPortShapeCounts pin_counts = emit_pin_port_shapes(store, pin, instance_index, pin_index++);
+          result.pin_shape_count += pin_counts.port_shape_count;
+          result.via_shape_count += pin_counts.via_shape_count;
+        }
+      }
+
+      if (instance->get_cell_master() != nullptr) {
+        store.add_owner_name(OwnerType::kObs, instance_owner_id, instance->get_name());
+        instance->set_obs_box_list();
+        uint32_t obs_layer_index = 0;
+        for (auto* obs_shape : instance->get_obs_box_list()) {
+          if (obs_shape == nullptr) {
+            ++obs_layer_index;
+            continue;
+          }
+
+          uint32_t rect_index = 0;
+          for (auto* rect : obs_shape->get_rect_list()) {
+            OwnerRef obs_owner;
+            obs_owner.type = OwnerType::kObs;
+            obs_owner.owner_id = instance_owner_id;
+            obs_owner.path0 = instance_index;
+            obs_owner.path1 = obs_layer_index;
+            obs_owner.path2 = rect_index++;
+
+            if (emit_rect_if_present(store, layer_id_from_idb(obs_shape->get_layer()), rect_from_idb(rect), obs_owner) != 0) {
+              ++result.obs_shape_count;
+            }
+          }
+
+          ++obs_layer_index;
         }
       }
 
@@ -351,7 +532,9 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
   if (auto* io_pins = design.get_io_pin_list(); io_pins != nullptr) {
     uint32_t pin_index = 0;
     for (auto* pin : io_pins->get_pin_list()) {
-      result.pin_shape_count += emit_pin_port_shapes(store, pin, 0, pin_index++);
+      const PinPortShapeCounts pin_counts = emit_pin_port_shapes(store, pin, 0, pin_index++);
+      result.pin_shape_count += pin_counts.port_shape_count;
+      result.via_shape_count += pin_counts.via_shape_count;
     }
   }
 
@@ -365,6 +548,8 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
 
       const OwnerId net_owner_id = net->get_id() != 0 ? net->get_id() : net_index;
       store.add_owner_name(OwnerType::kNetWireSegment, net_owner_id, net->get_net_name());
+      const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kNetWireSegment, net_owner_id);
+      store.add_owner_name(OwnerType::kVia, via_owner_id, net->get_net_name());
 
       uint32_t wire_index = 0;
       for (auto* wire : net->get_wire_list()->get_wire_list()) {
@@ -375,15 +560,29 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
 
         uint32_t segment_index = 0;
         for (auto* segment : wire->get_segment_list()) {
+          const uint32_t current_segment_index = segment_index++;
           OwnerRef owner;
           owner.type = OwnerType::kNetWireSegment;
           owner.owner_id = net_owner_id;
           owner.path0 = wire_index;
-          owner.path1 = segment_index++;
+          owner.path1 = current_segment_index;
 
           if (emit_rect_if_present(store, layer_id_from_idb(segment == nullptr ? nullptr : segment->get_layer()),
                                    rect_from_regular_segment(segment), owner) != 0) {
             ++result.net_wire_shape_count;
+          }
+
+          if (segment != nullptr) {
+            uint32_t via_index = 0;
+            for (auto* via : segment->get_via_list()) {
+              OwnerRef via_owner;
+              via_owner.type = OwnerType::kVia;
+              via_owner.owner_id = via_owner_id;
+              via_owner.path0 = wire_index;
+              via_owner.path1 = current_segment_index;
+              via_owner.path2 = via_index++;
+              result.via_shape_count += emit_via_cut_shapes(store, via, via_owner);
+            }
           }
         }
 
@@ -404,6 +603,8 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
 
       const OwnerId net_owner_id = net_index;
       store.add_owner_name(OwnerType::kSpecialWireSegment, net_owner_id, net->get_net_name());
+      const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kSpecialWireSegment, net_owner_id);
+      store.add_owner_name(OwnerType::kVia, via_owner_id, net->get_net_name());
 
       uint32_t wire_index = 0;
       for (auto* wire : net->get_wire_list()->get_wire_list()) {
@@ -414,15 +615,27 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
 
         uint32_t segment_index = 0;
         for (auto* segment : wire->get_segment_list()) {
+          const uint32_t current_segment_index = segment_index++;
           OwnerRef owner;
           owner.type = OwnerType::kSpecialWireSegment;
           owner.owner_id = net_owner_id;
           owner.path0 = wire_index;
-          owner.path1 = segment_index++;
+          owner.path1 = current_segment_index;
 
-          if (emit_rect_if_present(store, layer_id_from_idb(segment == nullptr ? nullptr : segment->get_layer()),
-                                   rect_from_special_segment(segment), owner) != 0) {
+          if (segment != nullptr && !segment->is_via()
+              && emit_rect_if_present(store, layer_id_from_idb(segment->get_layer()), rect_from_special_segment(segment), owner)
+                     != 0) {
             ++result.special_net_wire_shape_count;
+          }
+
+          if (segment != nullptr && segment->get_via() != nullptr) {
+            OwnerRef via_owner;
+            via_owner.type = OwnerType::kVia;
+            via_owner.owner_id = via_owner_id;
+            via_owner.path0 = wire_index;
+            via_owner.path1 = current_segment_index;
+            via_owner.path2 = 0;
+            result.via_shape_count += emit_via_cut_shapes(store, segment->get_via(), via_owner);
           }
         }
 
@@ -460,20 +673,34 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
   if (auto* fills = design.get_fill_list(); fills != nullptr) {
     uint32_t fill_index = 0;
     for (auto* fill : fills->get_fill_list()) {
-      if (fill == nullptr || fill->get_type() != idb::IdbFill::IdbFillType::kLayer || fill->get_layer() == nullptr) {
+      if (fill == nullptr) {
         ++fill_index;
         continue;
       }
 
-      uint32_t rect_index = 0;
-      for (auto* rect : fill->get_layer()->get_rect_list()) {
-        OwnerRef owner;
-        owner.type = OwnerType::kFill;
-        owner.owner_id = fill_index;
-        owner.path0 = rect_index++;
+      if (fill->get_type() == idb::IdbFill::IdbFillType::kLayer && fill->get_layer() != nullptr) {
+        uint32_t rect_index = 0;
+        for (auto* rect : fill->get_layer()->get_rect_list()) {
+          OwnerRef owner;
+          owner.type = OwnerType::kFill;
+          owner.owner_id = fill_index;
+          owner.path0 = rect_index++;
 
-        if (emit_rect_if_present(store, layer_id_from_idb(fill->get_layer()->get_layer()), rect_from_idb(rect), owner) != 0) {
-          ++result.fill_shape_count;
+          if (emit_rect_if_present(store, layer_id_from_idb(fill->get_layer()->get_layer()), rect_from_idb(rect), owner)
+              != 0) {
+            ++result.fill_shape_count;
+          }
+        }
+      } else if (fill->get_type() == idb::IdbFill::IdbFillType::kVia && fill->get_via() != nullptr
+                 && fill->get_via()->get_via() != nullptr) {
+        uint32_t coordinate_index = 0;
+        for (auto* coordinate : fill->get_via()->get_coordinate_list()) {
+          OwnerRef owner;
+          owner.type = OwnerType::kFill;
+          owner.owner_id = fill_index;
+          owner.path0 = coordinate_index++;
+
+          result.fill_shape_count += emit_via_cut_shapes_at(store, fill->get_via()->get_via(), coordinate, owner);
         }
       }
 
@@ -526,8 +753,8 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
 
   result.shape_count = result.die_shape_count + result.core_shape_count + result.row_shape_count + result.instance_shape_count
                        + result.instance_halo_shape_count + result.net_wire_shape_count + result.special_net_wire_shape_count
-                       + result.blockage_shape_count + result.fill_shape_count + result.region_shape_count + result.slot_shape_count
-                       + result.pin_shape_count;
+                       + result.via_shape_count + result.blockage_shape_count + result.fill_shape_count + result.region_shape_count
+                       + result.slot_shape_count + result.pin_shape_count + result.obs_shape_count;
   store.clear_delta_events();
   return result;
 }
@@ -541,7 +768,10 @@ GeometrySyncResult GeometryBuilder::sync_net(idb::IdbDesign& design, idb::IdbNet
     return result;
   }
 
+  const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kNetWireSegment, owner_id);
+
   std::unordered_set<ShapeId> seen_shape_ids;
+  std::unordered_set<ShapeId> seen_via_shape_ids;
   if (auto* wire_list = net.get_wire_list(); wire_list != nullptr) {
     uint32_t wire_index = 0;
     for (auto* wire : wire_list->get_wire_list()) {
@@ -552,16 +782,30 @@ GeometrySyncResult GeometryBuilder::sync_net(idb::IdbDesign& design, idb::IdbNet
 
       uint32_t segment_index = 0;
       for (auto* segment : wire->get_segment_list()) {
+        const uint32_t current_segment_index = segment_index++;
         OwnerRef owner;
         owner.type = OwnerType::kNetWireSegment;
         owner.owner_id = owner_id;
         owner.path0 = wire_index;
-        owner.path1 = segment_index++;
+        owner.path1 = current_segment_index;
 
         const Rect32 bbox = rect_from_regular_segment(segment);
         if (is_non_empty(bbox)) {
           reconcile_rect_shape(store, owner.type, owner.owner_id, layer_id_from_idb(segment == nullptr ? nullptr : segment->get_layer()),
                                bbox, owner, seen_shape_ids, result);
+        }
+
+        if (segment != nullptr) {
+          uint32_t via_index = 0;
+          for (auto* via : segment->get_via_list()) {
+            OwnerRef via_owner;
+            via_owner.type = OwnerType::kVia;
+            via_owner.owner_id = via_owner_id;
+            via_owner.path0 = wire_index;
+            via_owner.path1 = current_segment_index;
+            via_owner.path2 = via_index++;
+            reconcile_via_cut_shapes(store, via, via_owner, seen_via_shape_ids, result);
+          }
         }
       }
 
@@ -571,6 +815,17 @@ GeometrySyncResult GeometryBuilder::sync_net(idb::IdbDesign& design, idb::IdbNet
 
   for (const ShapeId shape_id : store.query_owner(OwnerType::kNetWireSegment, owner_id)) {
     if (seen_shape_ids.contains(shape_id)) {
+      continue;
+    }
+    if (store.delete_shape(shape_id)) {
+      ++result.deleted_shape_count;
+    } else {
+      ++result.missing_shape_count;
+    }
+  }
+
+  for (const ShapeId shape_id : store.query_owner(OwnerType::kVia, via_owner_id)) {
+    if (seen_via_shape_ids.contains(shape_id)) {
       continue;
     }
     if (store.delete_shape(shape_id)) {
@@ -593,7 +848,10 @@ GeometrySyncResult GeometryBuilder::sync_special_net(idb::IdbDesign& design, idb
     return result;
   }
 
+  const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kSpecialWireSegment, owner_id);
+
   std::unordered_set<ShapeId> seen_shape_ids;
+  std::unordered_set<ShapeId> seen_via_shape_ids;
   if (auto* wire_list = net.get_wire_list(); wire_list != nullptr) {
     uint32_t wire_index = 0;
     for (auto* wire : wire_list->get_wire_list()) {
@@ -604,20 +862,31 @@ GeometrySyncResult GeometryBuilder::sync_special_net(idb::IdbDesign& design, idb
 
       uint32_t segment_index = 0;
       for (auto* segment : wire->get_segment_list()) {
+        const uint32_t current_segment_index = segment_index++;
         OwnerRef owner;
         owner.type = OwnerType::kSpecialWireSegment;
         owner.owner_id = owner_id;
         owner.path0 = wire_index;
-        owner.path1 = segment_index++;
+        owner.path1 = current_segment_index;
 
         if (segment != nullptr && !segment->is_rect()) {
           segment->set_bounding_box();
         }
 
-        const Rect32 bbox = rect_from_special_segment(segment);
+        const Rect32 bbox = segment != nullptr && !segment->is_via() ? rect_from_special_segment(segment) : Rect32{};
         if (is_non_empty(bbox)) {
           reconcile_rect_shape(store, owner.type, owner.owner_id, layer_id_from_idb(segment == nullptr ? nullptr : segment->get_layer()),
                                bbox, owner, seen_shape_ids, result);
+        }
+
+        if (segment != nullptr && segment->get_via() != nullptr) {
+          OwnerRef via_owner;
+          via_owner.type = OwnerType::kVia;
+          via_owner.owner_id = via_owner_id;
+          via_owner.path0 = wire_index;
+          via_owner.path1 = current_segment_index;
+          via_owner.path2 = 0;
+          reconcile_via_cut_shapes(store, segment->get_via(), via_owner, seen_via_shape_ids, result);
         }
       }
 
@@ -636,6 +905,17 @@ GeometrySyncResult GeometryBuilder::sync_special_net(idb::IdbDesign& design, idb
     }
   }
 
+  for (const ShapeId shape_id : store.query_owner(OwnerType::kVia, via_owner_id)) {
+    if (seen_via_shape_ids.contains(shape_id)) {
+      continue;
+    }
+    if (store.delete_shape(shape_id)) {
+      ++result.deleted_shape_count;
+    } else {
+      ++result.missing_shape_count;
+    }
+  }
+
   result.ok = result.missing_shape_count == 0;
   return result;
 }
@@ -643,9 +923,15 @@ GeometrySyncResult GeometryBuilder::sync_special_net(idb::IdbDesign& design, idb
 GeometrySyncResult GeometryBuilder::sync_instance(idb::IdbInstance& instance, GeometryStore& store) const
 {
   GeometrySyncResult result;
+  const OwnerId instance_owner_id = instance.get_id();
+  uint32_t instance_path0 = 0;
+  const std::vector<ShapeId> instance_shape_ids = store.query_owner(OwnerType::kInstanceBBox, instance_owner_id);
+  if (!instance_shape_ids.empty()) {
+    instance_path0 = store.owner_of(instance_shape_ids[0]).path0;
+  }
 
   const auto sync_owner_rect = [&](OwnerType owner_type, Rect32 bbox) {
-    const std::vector<ShapeId> shape_ids = store.query_owner(owner_type, instance.get_id());
+    const std::vector<ShapeId> shape_ids = store.query_owner(owner_type, instance_owner_id);
     if (shape_ids.empty()) {
       ++result.missing_shape_count;
       return;
@@ -675,6 +961,84 @@ GeometrySyncResult GeometryBuilder::sync_instance(idb::IdbInstance& instance, Ge
   if (auto* halo = instance.get_halo(); halo != nullptr) {
     instance.set_halo_coodinate();
     sync_owner_rect(OwnerType::kInstanceHalo, rect_from_idb(halo->get_bounding_box()));
+  }
+
+  if (instance.get_cell_master() != nullptr) {
+    instance.set_obs_box_list();
+    std::unordered_set<ShapeId> seen_obs_shape_ids;
+    uint32_t obs_layer_index = 0;
+    for (auto* obs_shape : instance.get_obs_box_list()) {
+      if (obs_shape == nullptr) {
+        ++obs_layer_index;
+        continue;
+      }
+
+      uint32_t rect_index = 0;
+      for (auto* rect : obs_shape->get_rect_list()) {
+        OwnerRef obs_owner;
+        obs_owner.type = OwnerType::kObs;
+        obs_owner.owner_id = instance_owner_id;
+        obs_owner.path0 = instance_path0;
+        obs_owner.path1 = obs_layer_index;
+        obs_owner.path2 = rect_index++;
+
+        reconcile_rect_shape(store, obs_owner.type, obs_owner.owner_id, layer_id_from_idb(obs_shape->get_layer()),
+                             rect_from_idb(rect), obs_owner, seen_obs_shape_ids, result);
+      }
+
+      ++obs_layer_index;
+    }
+
+    for (const ShapeId shape_id : store.query_owner(OwnerType::kObs, instance_owner_id)) {
+      if (seen_obs_shape_ids.contains(shape_id)) {
+        continue;
+      }
+      if (store.delete_shape(shape_id)) {
+        ++result.deleted_shape_count;
+      } else {
+        ++result.missing_shape_count;
+      }
+    }
+  }
+
+  if (auto* pins = instance.get_pin_list(); pins != nullptr) {
+    std::unordered_set<ShapeId> seen_pin_shape_ids;
+    std::unordered_set<ShapeId> seen_pin_via_shape_ids;
+    std::vector<OwnerId> current_pin_owner_ids;
+    std::vector<OwnerId> current_pin_via_owner_ids;
+    uint32_t pin_index = 0;
+    for (auto* pin : pins->get_pin_list()) {
+      const OwnerId pin_owner_id = pin_owner_id_from_path(pin, instance_path0, pin_index);
+      current_pin_owner_ids.push_back(pin_owner_id);
+      current_pin_via_owner_ids.push_back(make_derived_owner_id(OwnerType::kPinPortShape, pin_owner_id));
+      reconcile_pin_port_shapes(store, pin, instance_path0, pin_index++, seen_pin_shape_ids, seen_pin_via_shape_ids, result);
+    }
+
+    for (const OwnerId pin_owner_id : current_pin_owner_ids) {
+      for (const ShapeId shape_id : store.query_owner(OwnerType::kPinPortShape, pin_owner_id)) {
+        if (seen_pin_shape_ids.contains(shape_id)) {
+          continue;
+        }
+        if (store.delete_shape(shape_id)) {
+          ++result.deleted_shape_count;
+        } else {
+          ++result.missing_shape_count;
+        }
+      }
+    }
+
+    for (const OwnerId via_owner_id : current_pin_via_owner_ids) {
+      for (const ShapeId shape_id : store.query_owner(OwnerType::kVia, via_owner_id)) {
+        if (seen_pin_via_shape_ids.contains(shape_id)) {
+          continue;
+        }
+        if (store.delete_shape(shape_id)) {
+          ++result.deleted_shape_count;
+        } else {
+          ++result.missing_shape_count;
+        }
+      }
+    }
   }
 
   result.ok = result.missing_shape_count == 0;

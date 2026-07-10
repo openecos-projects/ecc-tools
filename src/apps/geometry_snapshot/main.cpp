@@ -1,5 +1,6 @@
 #include "GeometryBuilder.h"
 #include "GeometryEditApplier.h"
+#include "GeometrySnapshotReader.h"
 #include "GeometrySnapshotWriter.h"
 #include "GeometryStore.h"
 #include "builder.h"
@@ -356,6 +357,21 @@ int main(int argc, char** argv)
   }
 
   ecc::geometry::GeometryStore store;
+  const std::filesystem::path existing_manifest = std::filesystem::path(options.output_dir) / "geometry.manifest";
+  if (std::filesystem::exists(existing_manifest)) {
+    ecc::geometry::GeometrySnapshotReader reader;
+    const ecc::geometry::SnapshotReadResult read_result =
+        reader.read(ecc::geometry::SnapshotReadOptions{existing_manifest}, store);
+    if (!read_result.ok) {
+      if (options.mode == "apply-edit") {
+        std::cerr << "failed to restore existing geometry snapshot for edit: " << existing_manifest.string() << "\n";
+        return 1;
+      }
+      std::cerr << "warning: failed to restore existing geometry snapshot, rebuilding with fresh shape ids\n";
+      store.clear();
+    }
+  }
+
   ecc::geometry::GeometryBuilder geometry_builder;
   const ecc::geometry::GeometryBuildResult build_result =
       geometry_builder.rebuild_from_design(*def_service->get_design(), *def_service->get_layout(), store);

@@ -3,6 +3,7 @@
 #include "GeometryDelta.h"
 #include "GeometryName.h"
 #include "GeometrySpatialIndex.h"
+#include "GeometryTilePyramid.h"
 #include "OwnerRef.h"
 #include "ShapeId.h"
 #include "ShapeTable.h"
@@ -83,6 +84,11 @@ class GeometryStore
   std::span<const std::byte> name_payloads() const;
   std::span<const GeometryDeltaEvent> delta_events() const;
   void clear_delta_events();
+  void rebuild_lod_tiles();
+  void rebuild_dirty_lod_tiles();
+  size_t dirty_lod_tile_count() const;
+  std::vector<GeometryTileSummary> lod_summaries() const;
+  std::vector<GeometryTileSummary> query_lod_tiles(uint8_t lod_level, LayerId layer_id, Rect32 viewport) const;
   std::map<OwnerType, uint64_t> count_alive_shapes_by_owner_type() const;
   std::map<LayerId, uint64_t> count_alive_shapes_by_layer() const;
 
@@ -91,7 +97,29 @@ class GeometryStore
   std::vector<ShapeId> query_owner_name(std::string_view name) const;
 
  private:
-  ShapeId allocate_shape_id(OwnerRef owner);
+  struct PreservedShapeState
+  {
+    ShapeId id = 0;
+    ShapeVersion version = 0;
+    LayerId layer_id = 0;
+    ShapeKind kind = ShapeKind::kRect;
+    ShapeState state = ShapeState::kAlive;
+    uint16_t flags = 0;
+    Rect32 bbox;
+  };
+
+  struct AllocatedShapeIdentity
+  {
+    ShapeId id = 0;
+    ShapeVersion version = 1;
+    bool restored = false;
+    ShapeVersion old_version = 0;
+    Rect32 old_bbox;
+  };
+
+  AllocatedShapeIdentity allocate_shape_identity(OwnerRef owner, LayerId layer_id, ShapeKind kind, uint16_t flags,
+                                                 Rect32 bbox);
+  void append_rebuild_delta(const AllocatedShapeIdentity& identity, const ShapeRecord& record);
   void index_shape(const ShapeRecord& record, OwnerRef owner);
   void append_delta(GeometryDeltaOp op, ShapeId shape_id, ShapeVersion old_version, ShapeVersion new_version, Rect32 old_bbox,
                     Rect32 new_bbox, uint64_t command_id = 0);
@@ -107,8 +135,9 @@ class GeometryStore
   uint64_t _next_delta_sequence = 1;
   std::unordered_map<LayerId, std::vector<ShapeId>> _layer_index;
   GeometrySpatialIndex _spatial_index;
+  GeometryTilePyramid _lod_pyramid;
   std::unordered_map<OwnerIndexKey, std::vector<ShapeId>, OwnerIndexKeyHash> _owner_index;
-  std::unordered_map<OwnerShapeKey, ShapeId, OwnerShapeKeyHash> _shape_ids_by_owner_path;
+  std::unordered_map<OwnerShapeKey, PreservedShapeState, OwnerShapeKeyHash> _preserved_shapes_by_owner_path;
   std::unordered_map<std::string, std::vector<OwnerIndexKey>> _name_index;
 };
 
