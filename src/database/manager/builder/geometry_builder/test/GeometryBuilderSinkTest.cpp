@@ -1676,6 +1676,64 @@ void test_geometry_edit_applier_resizes_special_net_wire_segment_back_to_idb()
   assert(store.delta_events().back().command_id == 805);
 }
 
+void test_geometry_edit_applier_resizes_short_horizontal_special_wire_by_points()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting routing_layer;
+  routing_layer.set_name("M1");
+  routing_layer.set_id(11);
+  routing_layer.set_width(4);
+  routing_layer.set_direction(idb::IdbLayerDirection::kHorizontal);
+
+  idb::IdbSpecialNet* special_net = design.get_special_net_list()->add_net("VDD_SHORT");
+  idb::IdbSpecialWireSegment* segment = special_net->get_wire_list()->add_wire()->add_segment();
+  segment->set_layer(&routing_layer);
+  segment->set_route_width(6);
+  segment->set_shape_type(idb::IdbWireShapeType::kStripe);
+  segment->add_point(100, 50);
+  segment->add_point(102, 50);
+  segment->set_bounding_box();
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+
+  const std::vector<ShapeId> net_shapes = store.query_owner(OwnerType::kSpecialWireSegment, 0);
+  assert(net_shapes.size() == 1);
+  assert(store.find_shape(net_shapes[0])->bbox.lx == 100);
+  assert(store.find_shape(net_shapes[0])->bbox.ly == 47);
+  assert(store.find_shape(net_shapes[0])->bbox.hx == 102);
+  assert(store.find_shape(net_shapes[0])->bbox.hy == 53);
+
+  GeometryEditCommand command;
+  command.command_id = 806;
+  command.shape_id = net_shapes[0];
+  command.expected_version = 1;
+  command.op = GeometryEditOp::kResizeRect;
+  command.requested_bbox = Rect32{90, 47, 110, 53};
+
+  GeometryEditApplier applier;
+  const GeometryEditResult result = applier.apply_edit(command, design, store);
+
+  assert(result.command_id == 806);
+  assert(result.status == GeometryEditStatus::kAccepted);
+  assert(result.committed_bbox.lx == 90);
+  assert(result.committed_bbox.ly == 47);
+  assert(result.committed_bbox.hx == 110);
+  assert(result.committed_bbox.hy == 53);
+
+  assert(segment->get_point_start()->get_x() == 90);
+  assert(segment->get_point_start()->get_y() == 50);
+  assert(segment->get_point_second()->get_x() == 110);
+  assert(segment->get_point_second()->get_y() == 50);
+  assert(segment->get_bounding_box()->get_low_x() == 90);
+  assert(segment->get_bounding_box()->get_high_x() == 110);
+  assert(store.find_shape(net_shapes[0])->bbox.hx == 110);
+  assert(store.delta_events().back().command_id == 806);
+}
+
 void test_geometry_edit_applier_updates_blockage_rect_back_to_idb()
 {
   idb::IdbLayout layout;
@@ -2123,6 +2181,7 @@ int main()
   test_geometry_edit_applier_resizes_regular_net_wire_segment_back_to_idb();
   test_geometry_edit_applier_moves_special_net_wire_segment_back_to_idb();
   test_geometry_edit_applier_resizes_special_net_wire_segment_back_to_idb();
+  test_geometry_edit_applier_resizes_short_horizontal_special_wire_by_points();
   test_geometry_edit_applier_updates_blockage_rect_back_to_idb();
   test_geometry_snapshot_writer_writes_manifest_and_core_binary_files();
   test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_files();

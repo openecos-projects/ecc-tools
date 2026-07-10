@@ -37,12 +37,6 @@ int32_t midpoint(int32_t low, int32_t high)
   return low + (high - low) / 2;
 }
 
-bool is_horizontal_bbox(Rect32 bbox)
-{
-  bbox = normalize(bbox);
-  return (bbox.hx - bbox.lx) >= (bbox.hy - bbox.ly);
-}
-
 bool set_regular_wire_points_from_bbox(idb::IdbRegularWireSegment& segment, Rect32 current_bbox, Rect32 requested_bbox)
 {
   auto* start = segment.get_point_start();
@@ -53,7 +47,7 @@ bool set_regular_wire_points_from_bbox(idb::IdbRegularWireSegment& segment, Rect
 
   current_bbox = normalize(current_bbox);
   requested_bbox = normalize(requested_bbox);
-  if (is_horizontal_bbox(current_bbox)) {
+  if (start->get_y() == end->get_y()) {
     const int32_t half_width = (current_bbox.hy - current_bbox.ly) / 2;
     const int32_t x0 = requested_bbox.lx + half_width;
     const int32_t x1 = requested_bbox.hx - half_width;
@@ -64,6 +58,10 @@ bool set_regular_wire_points_from_bbox(idb::IdbRegularWireSegment& segment, Rect
     start->set_xy(x0, y);
     end->set_xy(x1, y);
     return true;
+  }
+
+  if (start->get_x() != end->get_x()) {
+    return false;
   }
 
   const int32_t half_width = (current_bbox.hx - current_bbox.lx) / 2;
@@ -78,7 +76,7 @@ bool set_regular_wire_points_from_bbox(idb::IdbRegularWireSegment& segment, Rect
   return true;
 }
 
-bool set_special_wire_points_from_bbox(idb::IdbSpecialWireSegment& segment, Rect32 current_bbox, Rect32 requested_bbox)
+bool set_special_wire_points_from_bbox(idb::IdbSpecialWireSegment& segment, Rect32 requested_bbox)
 {
   auto* start = segment.get_point_start();
   auto* end = segment.get_point_second();
@@ -86,9 +84,8 @@ bool set_special_wire_points_from_bbox(idb::IdbSpecialWireSegment& segment, Rect
     return false;
   }
 
-  current_bbox = normalize(current_bbox);
   requested_bbox = normalize(requested_bbox);
-  if (is_horizontal_bbox(current_bbox)) {
+  if (start->get_y() == end->get_y()) {
     if (requested_bbox.hx < requested_bbox.lx) {
       return false;
     }
@@ -96,6 +93,10 @@ bool set_special_wire_points_from_bbox(idb::IdbSpecialWireSegment& segment, Rect
     start->set_xy(requested_bbox.lx, y);
     end->set_xy(requested_bbox.hx, y);
     return true;
+  }
+
+  if (start->get_x() != end->get_x()) {
+    return false;
   }
 
   if (requested_bbox.hy < requested_bbox.ly) {
@@ -310,7 +311,7 @@ bool NetWireEditAdapter::resize_special_segment(idb::IdbDesign& design, OwnerRef
     return true;
   }
 
-  if (segment->get_point_num() < 2 || !set_special_wire_points_from_bbox(*segment, current_bbox, requested_bbox)) {
+  if (segment->get_point_num() < 2 || !set_special_wire_points_from_bbox(*segment, requested_bbox)) {
     return false;
   }
 
