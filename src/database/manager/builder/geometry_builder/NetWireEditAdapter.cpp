@@ -32,6 +32,81 @@ Rect32 translate_rect(Rect32 rect, int32_t dx, int32_t dy)
   return Rect32{rect.lx + dx, rect.ly + dy, rect.hx + dx, rect.hy + dy};
 }
 
+int32_t midpoint(int32_t low, int32_t high)
+{
+  return low + (high - low) / 2;
+}
+
+bool is_horizontal_bbox(Rect32 bbox)
+{
+  bbox = normalize(bbox);
+  return (bbox.hx - bbox.lx) >= (bbox.hy - bbox.ly);
+}
+
+bool set_regular_wire_points_from_bbox(idb::IdbRegularWireSegment& segment, Rect32 current_bbox, Rect32 requested_bbox)
+{
+  auto* start = segment.get_point_start();
+  auto* end = segment.get_point_second();
+  if (start == nullptr || end == nullptr) {
+    return false;
+  }
+
+  current_bbox = normalize(current_bbox);
+  requested_bbox = normalize(requested_bbox);
+  if (is_horizontal_bbox(current_bbox)) {
+    const int32_t half_width = (current_bbox.hy - current_bbox.ly) / 2;
+    const int32_t x0 = requested_bbox.lx + half_width;
+    const int32_t x1 = requested_bbox.hx - half_width;
+    if (x1 < x0) {
+      return false;
+    }
+    const int32_t y = midpoint(requested_bbox.ly, requested_bbox.hy);
+    start->set_xy(x0, y);
+    end->set_xy(x1, y);
+    return true;
+  }
+
+  const int32_t half_width = (current_bbox.hx - current_bbox.lx) / 2;
+  const int32_t y0 = requested_bbox.ly + half_width;
+  const int32_t y1 = requested_bbox.hy - half_width;
+  if (y1 < y0) {
+    return false;
+  }
+  const int32_t x = midpoint(requested_bbox.lx, requested_bbox.hx);
+  start->set_xy(x, y0);
+  end->set_xy(x, y1);
+  return true;
+}
+
+bool set_special_wire_points_from_bbox(idb::IdbSpecialWireSegment& segment, Rect32 current_bbox, Rect32 requested_bbox)
+{
+  auto* start = segment.get_point_start();
+  auto* end = segment.get_point_second();
+  if (start == nullptr || end == nullptr) {
+    return false;
+  }
+
+  current_bbox = normalize(current_bbox);
+  requested_bbox = normalize(requested_bbox);
+  if (is_horizontal_bbox(current_bbox)) {
+    if (requested_bbox.hx < requested_bbox.lx) {
+      return false;
+    }
+    const int32_t y = midpoint(requested_bbox.ly, requested_bbox.hy);
+    start->set_xy(requested_bbox.lx, y);
+    end->set_xy(requested_bbox.hx, y);
+    return true;
+  }
+
+  if (requested_bbox.hy < requested_bbox.ly) {
+    return false;
+  }
+  const int32_t x = midpoint(requested_bbox.lx, requested_bbox.hx);
+  start->set_xy(x, requested_bbox.ly);
+  end->set_xy(x, requested_bbox.hy);
+  return true;
+}
+
 void translate_points(std::vector<idb::IdbCoordinate<int32_t>*>& points, int32_t dx, int32_t dy)
 {
   for (auto* point : points) {
@@ -142,6 +217,42 @@ bool NetWireEditAdapter::move_regular_segment(idb::IdbDesign& design, OwnerRef o
   return true;
 }
 
+bool NetWireEditAdapter::resize_regular_segment(idb::IdbDesign& design, OwnerRef owner, Rect32 current_bbox,
+                                                Rect32 requested_bbox, Rect32& committed_bbox) const
+{
+  auto* segment = find_regular_segment(design, owner);
+  if (segment == nullptr) {
+    return false;
+  }
+
+  requested_bbox = normalize(requested_bbox);
+  if (segment->is_rect()) {
+    auto* rect = segment->get_delta_rect();
+    if (rect == nullptr) {
+      return false;
+    }
+
+    rect->set_rect(requested_bbox.lx, requested_bbox.ly, requested_bbox.hx, requested_bbox.hy);
+    committed_bbox = requested_bbox;
+    if (auto* net = find_regular_net(design, owner.owner_id); net != nullptr) {
+      net->set_bounding_box();
+    }
+    return true;
+  }
+
+  if (!segment->is_wire() || !set_regular_wire_points_from_bbox(*segment, current_bbox, requested_bbox)) {
+    return false;
+  }
+
+  idb::IdbRect segment_rect = segment->get_segment_rect();
+  committed_bbox = rect_from_idb(segment_rect);
+  if (auto* net = find_regular_net(design, owner.owner_id); net != nullptr) {
+    net->set_bounding_box();
+  }
+
+  return true;
+}
+
 bool NetWireEditAdapter::move_special_segment(idb::IdbDesign& design, OwnerRef owner, Rect32 current_bbox,
                                               Rect32 requested_bbox, Rect32& committed_bbox) const
 {
@@ -171,6 +282,38 @@ bool NetWireEditAdapter::move_special_segment(idb::IdbDesign& design, OwnerRef o
   }
 
   translate_points(segment->get_point_list(), dx, dy);
+  if (!segment->set_bounding_box()) {
+    return false;
+  }
+
+  committed_bbox = rect_from_idb(segment->get_bounding_box());
+  return true;
+}
+
+bool NetWireEditAdapter::resize_special_segment(idb::IdbDesign& design, OwnerRef owner, Rect32 current_bbox,
+                                                Rect32 requested_bbox, Rect32& committed_bbox) const
+{
+  auto* segment = find_special_segment(design, owner);
+  if (segment == nullptr) {
+    return false;
+  }
+
+  requested_bbox = normalize(requested_bbox);
+  if (segment->is_rect()) {
+    auto* rect = segment->get_delta_rect();
+    if (rect == nullptr) {
+      return false;
+    }
+
+    rect->set_rect(requested_bbox.lx, requested_bbox.ly, requested_bbox.hx, requested_bbox.hy);
+    committed_bbox = requested_bbox;
+    return true;
+  }
+
+  if (segment->get_point_num() < 2 || !set_special_wire_points_from_bbox(*segment, current_bbox, requested_bbox)) {
+    return false;
+  }
+
   if (!segment->set_bounding_box()) {
     return false;
   }

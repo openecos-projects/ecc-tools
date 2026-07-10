@@ -79,7 +79,7 @@ GeometryEditResult GeometryEditApplier::apply_edit(const GeometryEditCommand& co
     return result;
   }
 
-  if (command.op != GeometryEditOp::kMoveShape) {
+  if (command.op != GeometryEditOp::kMoveShape && command.op != GeometryEditOp::kResizeRect) {
     GeometryEditResult result = make_result(command, GeometryEditStatus::kRejected);
     result.new_version = record->version;
     result.committed_bbox = record->bbox;
@@ -88,11 +88,15 @@ GeometryEditResult GeometryEditApplier::apply_edit(const GeometryEditCommand& co
 
   Rect32 committed_bbox;
   const NetWireEditAdapter adapter;
-  bool moved = false;
+  bool updated = false;
   if (owner.type == OwnerType::kNetWireSegment) {
-    moved = adapter.move_regular_segment(design, owner, record->bbox, command.requested_bbox, committed_bbox);
+    updated = command.op == GeometryEditOp::kMoveShape
+                  ? adapter.move_regular_segment(design, owner, record->bbox, command.requested_bbox, committed_bbox)
+                  : adapter.resize_regular_segment(design, owner, record->bbox, command.requested_bbox, committed_bbox);
   } else if (owner.type == OwnerType::kSpecialWireSegment) {
-    moved = adapter.move_special_segment(design, owner, record->bbox, command.requested_bbox, committed_bbox);
+    updated = command.op == GeometryEditOp::kMoveShape
+                  ? adapter.move_special_segment(design, owner, record->bbox, command.requested_bbox, committed_bbox)
+                  : adapter.resize_special_segment(design, owner, record->bbox, command.requested_bbox, committed_bbox);
   } else {
     GeometryEditResult result = make_result(command, GeometryEditStatus::kRejected);
     result.new_version = record->version;
@@ -100,7 +104,7 @@ GeometryEditResult GeometryEditApplier::apply_edit(const GeometryEditCommand& co
     return result;
   }
 
-  if (!moved || !store.update_rect(command.shape_id, committed_bbox, command.command_id)) {
+  if (!updated || !store.update_rect(command.shape_id, committed_bbox, command.command_id)) {
     GeometryEditResult result = make_result(command, GeometryEditStatus::kRejected);
     result.new_version = record->version;
     result.committed_bbox = record->bbox;
