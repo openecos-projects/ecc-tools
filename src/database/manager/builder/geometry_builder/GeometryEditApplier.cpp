@@ -5,6 +5,7 @@
 #include "IdbInstance.h"
 #include "InstanceEditAdapter.h"
 #include "NetWireEditAdapter.h"
+#include "RectOwnerEditAdapter.h"
 
 namespace ecc::geometry {
 
@@ -64,6 +65,31 @@ GeometryEditResult GeometryEditApplier::apply_edit(const GeometryEditCommand& co
 
     Rect32 committed_bbox;
     const BlockageEditAdapter adapter;
+    if (!adapter.update_rect(design, owner, command.requested_bbox, committed_bbox)
+        || !store.update_rect(command.shape_id, committed_bbox, command.command_id)) {
+      GeometryEditResult result = make_result(command, GeometryEditStatus::kRejected);
+      result.new_version = record->version;
+      result.committed_bbox = record->bbox;
+      return result;
+    }
+
+    const ShapeRecord* updated_record = store.find_shape(command.shape_id);
+    GeometryEditResult result = make_result(command, status_for_committed_bbox(command, committed_bbox));
+    result.new_version = updated_record == nullptr ? record->version : updated_record->version;
+    result.committed_bbox = committed_bbox;
+    return result;
+  }
+
+  if (owner.type == OwnerType::kFill || owner.type == OwnerType::kRegion || owner.type == OwnerType::kSlot) {
+    if (command.op != GeometryEditOp::kMoveShape && command.op != GeometryEditOp::kResizeRect) {
+      GeometryEditResult result = make_result(command, GeometryEditStatus::kRejected);
+      result.new_version = record->version;
+      result.committed_bbox = record->bbox;
+      return result;
+    }
+
+    Rect32 committed_bbox;
+    const RectOwnerEditAdapter adapter;
     if (!adapter.update_rect(design, owner, command.requested_bbox, committed_bbox)
         || !store.update_rect(command.shape_id, committed_bbox, command.command_id)) {
       GeometryEditResult result = make_result(command, GeometryEditStatus::kRejected);

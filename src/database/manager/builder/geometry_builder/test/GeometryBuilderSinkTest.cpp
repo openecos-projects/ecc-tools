@@ -1859,6 +1859,150 @@ void test_geometry_edit_applier_updates_blockage_rect_back_to_idb()
   assert(store.delta_events().back().command_id == 803);
 }
 
+void test_geometry_edit_applier_updates_fill_rect_back_to_idb()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting routing_layer;
+  routing_layer.set_name("M1");
+  routing_layer.set_id(11);
+
+  idb::IdbFillLayer* fill_layer = design.get_fill_list()->add_fill_layer(&routing_layer);
+  fill_layer->add_rect(10, 20, 30, 40);
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+
+  const std::vector<ShapeId> fill_shapes = store.query_owner(OwnerType::kFill, 0);
+  assert(fill_shapes.size() == 1);
+
+  GeometryEditCommand command;
+  command.command_id = 807;
+  command.shape_id = fill_shapes[0];
+  command.expected_version = 1;
+  command.op = GeometryEditOp::kResizeRect;
+  command.requested_bbox = Rect32{12, 22, 44, 66};
+
+  GeometryEditApplier applier;
+  const GeometryEditResult result = applier.apply_edit(command, design, store);
+
+  assert(result.command_id == 807);
+  assert(result.shape_id == fill_shapes[0]);
+  assert(result.status == GeometryEditStatus::kAccepted);
+  assert(result.new_version == 2);
+  assert(result.committed_bbox.lx == 12);
+  assert(result.committed_bbox.ly == 22);
+  assert(result.committed_bbox.hx == 44);
+  assert(result.committed_bbox.hy == 66);
+
+  const std::vector<idb::IdbRect*> rects = fill_layer->get_rect_list();
+  assert(rects.size() == 1);
+  assert(rects[0]->get_low_x() == 12);
+  assert(rects[0]->get_low_y() == 22);
+  assert(rects[0]->get_high_x() == 44);
+  assert(rects[0]->get_high_y() == 66);
+  assert(store.find_shape(fill_shapes[0])->bbox.lx == 12);
+  assert(store.find_shape(fill_shapes[0])->bbox.hy == 66);
+  assert(store.delta_events().back().command_id == 807);
+}
+
+void test_geometry_edit_applier_updates_region_boundary_rect_back_to_idb()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbRegion* region = design.get_region_list()->add_region("region0");
+  region->add_boundary(10, 20, 30, 40);
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+
+  const std::vector<ShapeId> region_shapes = store.query_owner(OwnerType::kRegion, 0);
+  assert(region_shapes.size() == 1);
+
+  GeometryEditCommand command;
+  command.command_id = 808;
+  command.shape_id = region_shapes[0];
+  command.expected_version = 1;
+  command.op = GeometryEditOp::kResizeRect;
+  command.requested_bbox = Rect32{12, 22, 44, 66};
+
+  GeometryEditApplier applier;
+  const GeometryEditResult result = applier.apply_edit(command, design, store);
+
+  assert(result.command_id == 808);
+  assert(result.shape_id == region_shapes[0]);
+  assert(result.status == GeometryEditStatus::kAccepted);
+  assert(result.new_version == 2);
+  assert(result.committed_bbox.lx == 12);
+  assert(result.committed_bbox.ly == 22);
+  assert(result.committed_bbox.hx == 44);
+  assert(result.committed_bbox.hy == 66);
+
+  const std::vector<idb::IdbRect*> boundaries = region->get_boundary();
+  assert(boundaries.size() == 1);
+  assert(boundaries[0]->get_low_x() == 12);
+  assert(boundaries[0]->get_low_y() == 22);
+  assert(boundaries[0]->get_high_x() == 44);
+  assert(boundaries[0]->get_high_y() == 66);
+  assert(store.find_shape(region_shapes[0])->bbox.lx == 12);
+  assert(store.find_shape(region_shapes[0])->bbox.hy == 66);
+  assert(store.delta_events().back().command_id == 808);
+}
+
+void test_geometry_edit_applier_updates_slot_rect_back_to_idb()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting routing_layer;
+  routing_layer.set_name("M1");
+  routing_layer.set_id(11);
+
+  idb::IdbSlot* slot = design.get_slot_list()->add_slot();
+  slot->set_layer(&routing_layer);
+  slot->add_rect(10, 20, 30, 40);
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+
+  const std::vector<ShapeId> slot_shapes = store.query_owner(OwnerType::kSlot, 0);
+  assert(slot_shapes.size() == 1);
+
+  GeometryEditCommand command;
+  command.command_id = 809;
+  command.shape_id = slot_shapes[0];
+  command.expected_version = 1;
+  command.op = GeometryEditOp::kResizeRect;
+  command.requested_bbox = Rect32{12, 22, 44, 66};
+
+  GeometryEditApplier applier;
+  const GeometryEditResult result = applier.apply_edit(command, design, store);
+
+  assert(result.command_id == 809);
+  assert(result.shape_id == slot_shapes[0]);
+  assert(result.status == GeometryEditStatus::kAccepted);
+  assert(result.new_version == 2);
+  assert(result.committed_bbox.lx == 12);
+  assert(result.committed_bbox.ly == 22);
+  assert(result.committed_bbox.hx == 44);
+  assert(result.committed_bbox.hy == 66);
+
+  const std::vector<idb::IdbRect*> rects = slot->get_rect_list();
+  assert(rects.size() == 1);
+  assert(rects[0]->get_low_x() == 12);
+  assert(rects[0]->get_low_y() == 22);
+  assert(rects[0]->get_high_x() == 44);
+  assert(rects[0]->get_high_y() == 66);
+  assert(store.find_shape(slot_shapes[0])->bbox.lx == 12);
+  assert(store.find_shape(slot_shapes[0])->bbox.hy == 66);
+  assert(store.delta_events().back().command_id == 809);
+}
+
 void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
 {
   GeometryStore store;
@@ -2259,6 +2403,9 @@ int main()
   test_geometry_edit_applier_resizes_special_net_wire_segment_back_to_idb();
   test_geometry_edit_applier_resizes_short_horizontal_special_wire_by_points();
   test_geometry_edit_applier_updates_blockage_rect_back_to_idb();
+  test_geometry_edit_applier_updates_fill_rect_back_to_idb();
+  test_geometry_edit_applier_updates_region_boundary_rect_back_to_idb();
+  test_geometry_edit_applier_updates_slot_rect_back_to_idb();
   test_geometry_snapshot_writer_writes_manifest_and_core_binary_files();
   test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_files();
   test_geometry_snapshot_reader_round_trips_core_binary_files();
