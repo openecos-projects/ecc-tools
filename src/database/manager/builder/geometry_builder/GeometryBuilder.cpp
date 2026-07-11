@@ -1,5 +1,6 @@
 #include "GeometryBuilder.h"
 
+#include "IdbBlockages.h"
 #include "IdbDesign.h"
 #include "IdbInstance.h"
 #include "IdbLayout.h"
@@ -165,6 +166,25 @@ bool resolve_special_net_owner_id(idb::IdbDesign& design, idb::IdbSpecialNet& ne
       return true;
     }
     ++net_index;
+  }
+
+  return false;
+}
+
+bool resolve_blockage_owner_id(idb::IdbDesign& design, idb::IdbBlockage& blockage, OwnerId& owner_id)
+{
+  auto* blockage_list = design.get_blockage_list();
+  if (blockage_list == nullptr) {
+    return false;
+  }
+
+  uint32_t blockage_index = 0;
+  for (auto* candidate : blockage_list->get_blockage_list()) {
+    if (candidate == &blockage) {
+      owner_id = blockage_index;
+      return true;
+    }
+    ++blockage_index;
   }
 
   return false;
@@ -907,6 +927,49 @@ GeometrySyncResult GeometryBuilder::sync_special_net(idb::IdbDesign& design, idb
 
   for (const ShapeId shape_id : store.query_owner(OwnerType::kVia, via_owner_id)) {
     if (seen_via_shape_ids.contains(shape_id)) {
+      continue;
+    }
+    if (store.delete_shape(shape_id)) {
+      ++result.deleted_shape_count;
+    } else {
+      ++result.missing_shape_count;
+    }
+  }
+
+  result.ok = result.missing_shape_count == 0;
+  return result;
+}
+
+GeometrySyncResult GeometryBuilder::sync_blockage(idb::IdbDesign& design, idb::IdbBlockage& blockage, GeometryStore& store) const
+{
+  GeometrySyncResult result;
+  OwnerId owner_id = 0;
+  if (!resolve_blockage_owner_id(design, blockage, owner_id)) {
+    result.missing_shape_count = 1;
+    return result;
+  }
+
+  idb::IdbLayer* layer = nullptr;
+  if (auto* routing_blockage = dynamic_cast<idb::IdbRoutingBlockage*>(&blockage); routing_blockage != nullptr) {
+    layer = routing_blockage->get_layer();
+  }
+
+  std::unordered_set<ShapeId> seen_shape_ids;
+  uint32_t rect_index = 0;
+  for (auto* rect : blockage.get_rect_list()) {
+    OwnerRef owner;
+    owner.type = OwnerType::kBlockage;
+    owner.owner_id = owner_id;
+    owner.path0 = rect_index++;
+
+    const Rect32 bbox = rect_from_idb(rect);
+    if (is_non_empty(bbox)) {
+      reconcile_rect_shape(store, owner.type, owner.owner_id, layer_id_from_idb(layer), bbox, owner, seen_shape_ids, result);
+    }
+  }
+
+  for (const ShapeId shape_id : store.query_owner(OwnerType::kBlockage, owner_id)) {
+    if (seen_shape_ids.contains(shape_id)) {
       continue;
     }
     if (store.delete_shape(shape_id)) {

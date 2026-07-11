@@ -471,6 +471,28 @@ void test_geometry_tile_pyramid_handles_large_shapes_without_tile_explosion()
   assert(far_tiles[0].bbox.hx == 1'000'000);
 }
 
+void test_geometry_store_accepts_spatial_and_lod_options()
+{
+  GeometryStoreOptions options;
+  options.spatial_index.tile_size = 128;
+  options.spatial_index.max_tiles_per_shape = 4;
+  options.lod_pyramid.base_tile_size = 128;
+  options.lod_pyramid.lod_level_count = 1;
+  options.lod_pyramid.max_tile_refs_per_shape = 4;
+  GeometryStore store(options);
+
+  store.add_rect(5, Rect32{0, 0, 10, 10}, OwnerRef{OwnerType::kDie});
+  store.rebuild_lod_tiles();
+
+  const std::vector<ShapeId> spatial_hits = store.query_intersect(5, Rect32{0, 0, 20, 20});
+  const std::vector<GeometryTileSummary> lod0_tiles = store.query_lod_tiles(0, 5, Rect32{0, 0, 20, 20});
+  const std::vector<GeometryTileSummary> lod1_tiles = store.query_lod_tiles(1, 5, Rect32{0, 0, 20, 20});
+
+  assert(spatial_hits.size() == 1);
+  assert(lod0_tiles.size() == 1);
+  assert(lod1_tiles.empty());
+}
+
 void test_geometry_store_clear_resets_records_owners_payloads_and_shape_ids()
 {
   GeometryStore store;
@@ -674,6 +696,7 @@ int main()
   test_geometry_tile_pyramid_coarsens_parent_lod_tiles();
   test_geometry_tile_pyramid_rebuilds_dirty_tiles_only();
   test_geometry_tile_pyramid_handles_large_shapes_without_tile_explosion();
+  test_geometry_store_accepts_spatial_and_lod_options();
   test_geometry_store_clear_resets_records_owners_payloads_and_shape_ids();
   test_geometry_store_preserves_shape_ids_by_owner_path_across_rebuild();
   test_geometry_store_preserves_versions_for_unchanged_rebuilt_shapes();

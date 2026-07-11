@@ -4,6 +4,7 @@
 
 namespace idb {
 class IdbDesign;
+class IdbBlockage;
 class IdbInstance;
 class IdbLayout;
 class IdbNet;
@@ -47,6 +48,7 @@ class GeometryBuilder
   GeometrySyncResult sync_instance(idb::IdbInstance& instance, GeometryStore& store) const;
   GeometrySyncResult sync_net(idb::IdbDesign& design, idb::IdbNet& net, GeometryStore& store) const;
   GeometrySyncResult sync_special_net(idb::IdbDesign& design, idb::IdbSpecialNet& net, GeometryStore& store) const;
+  GeometrySyncResult sync_blockage(idb::IdbDesign& design, idb::IdbBlockage& blockage, GeometryStore& store) const;
 };
 
 }  // namespace ecc::geometry

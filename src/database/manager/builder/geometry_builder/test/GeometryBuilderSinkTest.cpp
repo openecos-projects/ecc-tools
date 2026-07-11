@@ -1170,6 +1170,81 @@ void test_geometry_builder_syncs_special_net_vias_incrementally()
   assert(store.find_shape(added_shape)->bbox.hy == 602);
 }
 
+void test_geometry_builder_syncs_blockage_rects_incrementally()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting routing_layer;
+  routing_layer.set_name("M1");
+  routing_layer.set_id(11);
+
+  idb::IdbRoutingBlockage* blockage = design.get_blockage_list()->add_blockage_routing("M1");
+  blockage->set_layer(&routing_layer);
+  blockage->add_rect(10, 20, 30, 40);
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+
+  const ShapeId original_shape = find_shape_by_owner_path(store, OwnerType::kBlockage, 0, 0, 0);
+  assert(original_shape != 0);
+
+  std::vector<idb::IdbRect*> rects = blockage->get_rect_list();
+  assert(rects.size() == 1);
+
+  store.clear_delta_events();
+  rects[0]->set_rect(12, 22, 34, 44);
+  blockage->add_rect(100, 110, 130, 140);
+
+  const GeometrySyncResult update_sync = builder.sync_blockage(design, *blockage, store);
+
+  assert(update_sync.ok);
+  assert(update_sync.updated_shape_count == 1);
+  assert(update_sync.added_shape_count == 1);
+  assert(update_sync.deleted_shape_count == 0);
+  assert(update_sync.missing_shape_count == 0);
+
+  const ShapeRecord* updated_record = store.find_shape(original_shape);
+  assert(updated_record != nullptr);
+  assert(updated_record->version == 2);
+  assert(updated_record->layer_id == 11);
+  assert(updated_record->bbox.lx == 12);
+  assert(updated_record->bbox.ly == 22);
+  assert(updated_record->bbox.hx == 34);
+  assert(updated_record->bbox.hy == 44);
+
+  const ShapeId added_shape = find_shape_by_owner_path(store, OwnerType::kBlockage, 0, 1, 0);
+  assert(added_shape != 0);
+  assert(added_shape != original_shape);
+  assert(store.find_shape(added_shape)->bbox.lx == 100);
+  assert(store.find_shape(added_shape)->bbox.hy == 140);
+  assert(store.delta_events().size() == 2);
+  assert(store.delta_events()[0].op == GeometryDeltaOp::kUpdate);
+  assert(store.delta_events()[0].shape_id == original_shape);
+  assert(store.delta_events()[1].op == GeometryDeltaOp::kInsert);
+  assert(store.delta_events()[1].shape_id == added_shape);
+
+  store.clear_delta_events();
+  rects = blockage->get_rect_list();
+  assert(rects.size() == 2);
+  rects.pop_back();
+  blockage->set_rect_list(rects);
+
+  const GeometrySyncResult delete_sync = builder.sync_blockage(design, *blockage, store);
+
+  assert(delete_sync.ok);
+  assert(delete_sync.updated_shape_count == 0);
+  assert(delete_sync.added_shape_count == 0);
+  assert(delete_sync.deleted_shape_count == 1);
+  assert(delete_sync.missing_shape_count == 0);
+  assert(store.find_shape(original_shape)->state == ShapeState::kAlive);
+  assert(store.find_shape(added_shape)->state == ShapeState::kDeleted);
+  assert(store.delta_events().size() == 1);
+  assert(store.delta_events()[0].op == GeometryDeltaOp::kDelete);
+  assert(store.delta_events()[0].shape_id == added_shape);
+}
+
 void test_geometry_builder_rebuilds_def_rect_and_wire_shapes()
 {
   idb::IdbLayout layout;
@@ -2175,6 +2250,7 @@ int main()
   test_geometry_builder_syncs_regular_net_vias_incrementally();
   test_geometry_builder_syncs_special_net_updates_and_adds_segments();
   test_geometry_builder_syncs_special_net_vias_incrementally();
+  test_geometry_builder_syncs_blockage_rects_incrementally();
   test_geometry_builder_rebuilds_def_rect_and_wire_shapes();
   test_geometry_builder_rebuilds_wire_vias_and_instance_obs_shapes();
   test_geometry_edit_applier_moves_regular_net_wire_segment_back_to_idb();

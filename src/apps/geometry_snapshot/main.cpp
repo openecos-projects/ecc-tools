@@ -30,6 +30,7 @@ struct CliOptions
   std::string write_def_path;
   std::string mode = "snapshot";
   uint64_t synthetic_shape_count = 100000;
+  ecc::geometry::GeometryStoreOptions geometry_options;
   bool help = false;
 };
 
@@ -39,7 +40,11 @@ void print_usage(std::ostream& out)
       << "       ecc-geometry-snapshot --tech-lef <file> --lef <file> --def <file> --out <dir>\n"
       << "       ecc-geometry-snapshot --lef <file> --def <file> --out <dir> --mode apply-edit "
          "--edit-command <json> --edit-result <json> [--write-def <file>]\n"
-      << "       ecc-geometry-snapshot --mode synthetic --out <dir> [--synthetic-shapes <count>]\n";
+      << "       ecc-geometry-snapshot --mode synthetic --out <dir> [--synthetic-shapes <count>]\n"
+      << "Geometry tuning options:\n"
+      << "       [--geometry-base-tile-size <dbu>] [--geometry-lod-levels <count>]\n"
+      << "       [--geometry-max-tile-refs-per-shape <count>] [--geometry-spatial-tile-size <dbu>]\n"
+      << "       [--geometry-spatial-max-tiles-per-shape <count>]\n";
 }
 
 bool parse_args(int argc, char** argv, CliOptions& options)
@@ -113,6 +118,36 @@ bool parse_args(int argc, char** argv, CliOptions& options)
         return false;
       }
       options.synthetic_shape_count = std::stoull(value);
+    } else if (arg == "--geometry-base-tile-size") {
+      const char* value = require_value("--geometry-base-tile-size");
+      if (value == nullptr) {
+        return false;
+      }
+      options.geometry_options.lod_pyramid.base_tile_size = std::stoi(value);
+    } else if (arg == "--geometry-lod-levels") {
+      const char* value = require_value("--geometry-lod-levels");
+      if (value == nullptr) {
+        return false;
+      }
+      options.geometry_options.lod_pyramid.lod_level_count = static_cast<uint8_t>(std::stoul(value));
+    } else if (arg == "--geometry-max-tile-refs-per-shape") {
+      const char* value = require_value("--geometry-max-tile-refs-per-shape");
+      if (value == nullptr) {
+        return false;
+      }
+      options.geometry_options.lod_pyramid.max_tile_refs_per_shape = static_cast<uint32_t>(std::stoul(value));
+    } else if (arg == "--geometry-spatial-tile-size") {
+      const char* value = require_value("--geometry-spatial-tile-size");
+      if (value == nullptr) {
+        return false;
+      }
+      options.geometry_options.spatial_index.tile_size = std::stoi(value);
+    } else if (arg == "--geometry-spatial-max-tiles-per-shape") {
+      const char* value = require_value("--geometry-spatial-max-tiles-per-shape");
+      if (value == nullptr) {
+        return false;
+      }
+      options.geometry_options.spatial_index.max_tiles_per_shape = static_cast<uint32_t>(std::stoul(value));
     } else {
       std::cerr << "unknown option: " << arg << "\n";
       return false;
@@ -294,7 +329,7 @@ int main(int argc, char** argv)
   }
 
   if (options.mode == "synthetic") {
-    ecc::geometry::GeometryStore store;
+    ecc::geometry::GeometryStore store(options.geometry_options);
     const ecc::geometry::GeometryBuildResult build_result = build_synthetic_geometry(options.synthetic_shape_count, store);
     ecc::geometry::GeometrySnapshotWriter writer;
     const ecc::geometry::SnapshotWriteResult write_result =
@@ -328,7 +363,7 @@ int main(int argc, char** argv)
     return 1;
   }
 
-  ecc::geometry::GeometryStore store;
+  ecc::geometry::GeometryStore store(options.geometry_options);
   const std::filesystem::path existing_manifest = std::filesystem::path(options.output_dir) / "geometry.manifest";
   const bool has_existing_manifest = std::filesystem::exists(existing_manifest);
   bool restored_existing_snapshot = false;

@@ -58,9 +58,17 @@ struct OwnerShapeKeyHash
   size_t operator()(const OwnerShapeKey& key) const;
 };
 
+struct GeometryStoreOptions
+{
+  GeometrySpatialIndexOptions spatial_index;
+  GeometryTilePyramidOptions lod_pyramid;
+};
+
 class GeometryStore
 {
  public:
+  explicit GeometryStore(GeometryStoreOptions options = {});
+
   void clear();
   void clear_preserving_shape_ids();
   bool replace_snapshot(std::vector<ShapeRecord> records, std::vector<OwnerRef> owners, std::vector<std::byte> payloads);

@@ -56,6 +56,8 @@ size_t OwnerShapeKeyHash::operator()(const OwnerShapeKey& key) const
   return seed;
 }
 
+GeometryStore::GeometryStore(GeometryStoreOptions options) : _spatial_index(options.spatial_index), _lod_pyramid(options.lod_pyramid) {}
+
 void GeometryStore::clear()
 {
   _shape_ids.reset();
