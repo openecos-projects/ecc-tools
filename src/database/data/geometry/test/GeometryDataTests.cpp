@@ -450,6 +450,38 @@ void test_geometry_tile_pyramid_rebuilds_dirty_tiles_only()
   assert(parent_lod1[1].shape_count == 1);
 }
 
+void test_geometry_tile_pyramid_rebuilds_dirty_tiles_from_indexed_candidates()
+{
+  std::vector<ShapeRecord> records;
+
+  ShapeRecord moving;
+  moving.id = 350;
+  moving.layer_id = 6;
+  moving.kind = ShapeKind::kRect;
+  moving.state = ShapeState::kAlive;
+  moving.bbox = Rect32{0, 0, 10, 10};
+  records.push_back(moving);
+
+  for (int32_t i = 0; i < 128; ++i) {
+    ShapeRecord stable = moving;
+    stable.id = static_cast<ShapeId>(351 + i);
+    stable.bbox = Rect32{100000 + i * 100, 100000, 100010 + i * 100, 100010};
+    records.push_back(stable);
+  }
+
+  GeometryTilePyramid pyramid(GeometryTilePyramidOptions{4096, 3});
+  pyramid.rebuild(records);
+
+  ShapeRecord updated = moving;
+  updated.bbox = Rect32{4096, 0, 4106, 10};
+  pyramid.mark_dirty_record_update(moving, updated);
+  pyramid.rebuild_dirty_tiles();
+
+  assert(pyramid.last_dirty_rebuild_candidate_count() < records.size());
+  assert(pyramid.query(0, 6, Rect32{0, 0, 100, 100}).empty());
+  assert(pyramid.query(0, 6, Rect32{4096, 0, 4200, 100}).size() == 1);
+}
+
 void test_geometry_tile_pyramid_handles_large_shapes_without_tile_explosion()
 {
   ShapeRecord large;
@@ -695,6 +727,7 @@ int main()
   test_geometry_tile_pyramid_builds_layer_lod_summaries();
   test_geometry_tile_pyramid_coarsens_parent_lod_tiles();
   test_geometry_tile_pyramid_rebuilds_dirty_tiles_only();
+  test_geometry_tile_pyramid_rebuilds_dirty_tiles_from_indexed_candidates();
   test_geometry_tile_pyramid_handles_large_shapes_without_tile_explosion();
   test_geometry_store_accepts_spatial_and_lod_options();
   test_geometry_store_clear_resets_records_owners_payloads_and_shape_ids();

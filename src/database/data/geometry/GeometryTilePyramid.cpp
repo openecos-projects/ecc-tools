@@ -50,7 +50,12 @@ void GeometryTilePyramid::clear()
 {
   _summaries.clear();
   _large_shape_summaries.clear();
+  _tile_shape_ids.clear();
+  _shape_tile_keys.clear();
+  _records_by_id.clear();
   _dirty_tiles.clear();
+  _dirty_shape_ids.clear();
+  _last_dirty_rebuild_candidate_count = 0;
 }
 
 void GeometryTilePyramid::rebuild(std::span<const ShapeRecord> records)
@@ -62,6 +67,7 @@ void GeometryTilePyramid::rebuild(std::span<const ShapeRecord> records)
       continue;
     }
 
+    _records_by_id[record.id] = record;
     for (uint8_t lod = 0; lod < _options.lod_level_count; ++lod) {
       add_record(lod, record);
     }
@@ -76,23 +82,105 @@ void GeometryTilePyramid::mark_dirty_tiles(LayerId layer_id, Rect32 old_bbox, Re
   }
 }
 
+void GeometryTilePyramid::mark_dirty_record_insert(const ShapeRecord& record)
+{
+  if (record.id == 0 || record.state != ShapeState::kAlive) {
+    return;
+  }
+
+  _records_by_id[record.id] = record;
+  _dirty_shape_ids.insert(record.id);
+  mark_dirty_tiles(record.layer_id, record.bbox, record.bbox);
+}
+
+void GeometryTilePyramid::mark_dirty_record_update(const ShapeRecord& old_record, const ShapeRecord& new_record)
+{
+  if (old_record.id == 0) {
+    return;
+  }
+
+  remove_record_membership(old_record.id);
+  if (new_record.state == ShapeState::kAlive) {
+    _records_by_id[new_record.id] = new_record;
+  } else {
+    _records_by_id.erase(old_record.id);
+  }
+  _dirty_shape_ids.insert(old_record.id);
+  mark_dirty_tiles(old_record.layer_id, old_record.bbox, old_record.bbox);
+  if (new_record.state == ShapeState::kAlive) {
+    mark_dirty_tiles(new_record.layer_id, new_record.bbox, new_record.bbox);
+  }
+}
+
+void GeometryTilePyramid::mark_dirty_record_delete(const ShapeRecord& old_record)
+{
+  if (old_record.id == 0) {
+    return;
+  }
+
+  remove_record_membership(old_record.id);
+  _records_by_id.erase(old_record.id);
+  _dirty_shape_ids.insert(old_record.id);
+  mark_dirty_tiles(old_record.layer_id, old_record.bbox, old_record.bbox);
+}
+
+void GeometryTilePyramid::rebuild_dirty_tiles()
+{
+  if (_dirty_tiles.empty()) {
+    _last_dirty_rebuild_candidate_count = 0;
+    return;
+  }
+
+  const std::unordered_set<GeometryTileKey, GeometryTileKeyHash> dirty_tiles = _dirty_tiles;
+  std::unordered_set<ShapeId> candidate_ids = _dirty_shape_ids;
+  for (const GeometryTileKey& key : dirty_tiles) {
+    const auto iter = _tile_shape_ids.find(key);
+    if (iter != _tile_shape_ids.end()) {
+      candidate_ids.insert(iter->second.begin(), iter->second.end());
+    }
+  }
+  _last_dirty_rebuild_candidate_count = candidate_ids.size();
+
+  for (const GeometryTileKey& key : dirty_tiles) {
+    _summaries.erase(key);
+    _tile_shape_ids.erase(key);
+  }
+
+  for (ShapeId shape_id : candidate_ids) {
+    const auto iter = _records_by_id.find(shape_id);
+    if (iter == _records_by_id.end() || iter->second.state != ShapeState::kAlive) {
+      continue;
+    }
+    add_record_for_dirty_tiles(iter->second, dirty_tiles, _dirty_shape_ids.contains(shape_id));
+  }
+
+  _dirty_tiles.clear();
+  _dirty_shape_ids.clear();
+}
+
 void GeometryTilePyramid::rebuild_dirty_tiles(std::span<const ShapeRecord> records)
 {
   if (_dirty_tiles.empty()) {
+    _last_dirty_rebuild_candidate_count = 0;
     return;
   }
 
   const std::unordered_set<GeometryTileKey, GeometryTileKeyHash> dirty_tiles = _dirty_tiles;
   for (const GeometryTileKey& key : dirty_tiles) {
     _summaries.erase(key);
+    _tile_shape_ids.erase(key);
   }
   _large_shape_summaries.clear();
+  _shape_tile_keys.clear();
+  _records_by_id.clear();
+  _last_dirty_rebuild_candidate_count = records.size();
 
   for (const ShapeRecord& record : records) {
     if (record.id == 0 || record.state != ShapeState::kAlive) {
       continue;
     }
 
+    _records_by_id[record.id] = record;
     for (uint8_t lod = 0; lod < _options.lod_level_count; ++lod) {
       if (tile_span_count(lod, record.bbox) > _options.max_tile_refs_per_shape) {
         add_large_record_summary(lod, record);
@@ -107,11 +195,17 @@ void GeometryTilePyramid::rebuild_dirty_tiles(std::span<const ShapeRecord> recor
   }
 
   _dirty_tiles.clear();
+  _dirty_shape_ids.clear();
 }
 
 size_t GeometryTilePyramid::dirty_tile_count() const
 {
   return _dirty_tiles.size();
+}
+
+size_t GeometryTilePyramid::last_dirty_rebuild_candidate_count() const
+{
+  return _last_dirty_rebuild_candidate_count;
 }
 
 std::vector<GeometryTileSummary> GeometryTilePyramid::summaries() const
@@ -121,7 +215,9 @@ std::vector<GeometryTileSummary> GeometryTilePyramid::summaries() const
   for (const auto& [key, summary] : _summaries) {
     result.push_back(summary);
   }
-  result.insert(result.end(), _large_shape_summaries.begin(), _large_shape_summaries.end());
+  for (const LargeShapeSummary& large_summary : _large_shape_summaries) {
+    result.push_back(large_summary.summary);
+  }
   std::sort(result.begin(), result.end(), [](const GeometryTileSummary& lhs, const GeometryTileSummary& rhs) {
     if (lhs.lod_level != rhs.lod_level) {
       return lhs.lod_level < rhs.lod_level;
@@ -159,7 +255,8 @@ std::vector<GeometryTileSummary> GeometryTilePyramid::query(uint8_t lod_level, L
       }
     }
   }
-  for (const GeometryTileSummary& summary : _large_shape_summaries) {
+  for (const LargeShapeSummary& large_summary : _large_shape_summaries) {
+    const GeometryTileSummary& summary = large_summary.summary;
     if (summary.lod_level == lod_level && summary.layer_id == layer_id && intersects(summary.bbox, viewport)) {
       result.push_back(summary);
     }
@@ -240,6 +337,26 @@ void GeometryTilePyramid::add_record(uint8_t lod_level, const ShapeRecord& recor
   }
 }
 
+void GeometryTilePyramid::add_record_for_dirty_tiles(const ShapeRecord& record,
+                                                     const std::unordered_set<GeometryTileKey, GeometryTileKeyHash>& dirty_tiles,
+                                                     bool rebuild_large_summary)
+{
+  for (uint8_t lod = 0; lod < _options.lod_level_count; ++lod) {
+    if (tile_span_count(lod, record.bbox) > _options.max_tile_refs_per_shape) {
+      if (rebuild_large_summary) {
+        remove_large_record_summary(record.id);
+        add_large_record_summary(lod, record);
+      }
+      continue;
+    }
+    for (GeometryTileKey key : keys_for(lod, record.layer_id, record.bbox)) {
+      if (dirty_tiles.contains(key)) {
+        add_record_to_key(key, record);
+      }
+    }
+  }
+}
+
 void GeometryTilePyramid::add_record_to_key(GeometryTileKey key, const ShapeRecord& record)
 {
   auto [iter, inserted] =
@@ -249,13 +366,42 @@ void GeometryTilePyramid::add_record_to_key(GeometryTileKey key, const ShapeReco
     summary.bbox = union_rect(summary.bbox, record.bbox);
   }
   ++summary.shape_count;
+  _tile_shape_ids[key].insert(record.id);
+  _shape_tile_keys[record.id].push_back(key);
 }
 
 void GeometryTilePyramid::add_large_record_summary(uint8_t lod_level, const ShapeRecord& record)
 {
   const GeometryTileKey key = key_for(lod_level, record.layer_id, record.bbox);
   _large_shape_summaries.push_back(
-      GeometryTileSummary{key.lod_level, key.layer_id, key.tile_x, key.tile_y, 1, normalize(record.bbox)});
+      LargeShapeSummary{record.id, GeometryTileSummary{key.lod_level, key.layer_id, key.tile_x, key.tile_y, 1, normalize(record.bbox)}});
+  _tile_shape_ids[key].insert(record.id);
+  _shape_tile_keys[record.id].push_back(key);
+}
+
+void GeometryTilePyramid::remove_record_membership(ShapeId shape_id)
+{
+  const auto key_iter = _shape_tile_keys.find(shape_id);
+  if (key_iter != _shape_tile_keys.end()) {
+    for (const GeometryTileKey& key : key_iter->second) {
+      auto tile_iter = _tile_shape_ids.find(key);
+      if (tile_iter != _tile_shape_ids.end()) {
+        tile_iter->second.erase(shape_id);
+        if (tile_iter->second.empty()) {
+          _tile_shape_ids.erase(tile_iter);
+        }
+      }
+    }
+    _shape_tile_keys.erase(key_iter);
+  }
+  remove_large_record_summary(shape_id);
+}
+
+void GeometryTilePyramid::remove_large_record_summary(ShapeId shape_id)
+{
+  _large_shape_summaries.erase(std::remove_if(_large_shape_summaries.begin(), _large_shape_summaries.end(),
+                                              [shape_id](const LargeShapeSummary& summary) { return summary.shape_id == shape_id; }),
+                               _large_shape_summaries.end());
 }
 
 }  // namespace ecc::geometry

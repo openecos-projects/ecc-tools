@@ -203,7 +203,7 @@ ShapeId GeometryStore::add_rect(LayerId layer_id, Rect32 rect, OwnerRef owner, u
   const RectPayload payload{rect};
   _shapes.insert(record, payload);
   index_shape(record, owner);
-  _lod_pyramid.mark_dirty_tiles(layer_id, record.bbox, record.bbox);
+  _lod_pyramid.mark_dirty_record_insert(record);
   append_rebuild_delta(identity, record);
   return record.id;
 }
@@ -229,7 +229,7 @@ ShapeId GeometryStore::add_point(LayerId layer_id, PointPayload point, OwnerRef 
 
   _shapes.insert(record, point);
   index_shape(record, owner);
-  _lod_pyramid.mark_dirty_tiles(layer_id, record.bbox, record.bbox);
+  _lod_pyramid.mark_dirty_record_insert(record);
   append_rebuild_delta(identity, record);
   return record.id;
 }
@@ -260,7 +260,7 @@ ShapeId GeometryStore::add_line(LayerId layer_id, LinePayload line, OwnerRef own
 
   _shapes.insert(record, line);
   index_shape(record, owner);
-  _lod_pyramid.mark_dirty_tiles(layer_id, record.bbox, record.bbox);
+  _lod_pyramid.mark_dirty_record_insert(record);
   append_rebuild_delta(identity, record);
   return record.id;
 }
@@ -303,7 +303,7 @@ bool GeometryStore::update_rect(ShapeId id, Rect32 rect, uint64_t command_id)
   }
 
   _spatial_index.update(old_record, updated);
-  _lod_pyramid.mark_dirty_tiles(updated.layer_id, old_record.bbox, updated.bbox);
+  _lod_pyramid.mark_dirty_record_update(old_record, updated);
   append_delta(GeometryDeltaOp::kUpdate, id, old_record.version, updated.version, old_record.bbox, updated.bbox, command_id);
   return true;
 }
@@ -323,7 +323,7 @@ bool GeometryStore::delete_shape(ShapeId id)
 
   const ShapeRecord* deleted_record = _shapes.find(id);
   const ShapeVersion new_version = deleted_record == nullptr ? old_record.version + 1 : deleted_record->version;
-  _lod_pyramid.mark_dirty_tiles(old_record.layer_id, old_record.bbox, old_record.bbox);
+  _lod_pyramid.mark_dirty_record_delete(old_record);
   append_delta(GeometryDeltaOp::kDelete, id, old_record.version, new_version, old_record.bbox, old_record.bbox);
   return true;
 }
@@ -385,7 +385,7 @@ void GeometryStore::rebuild_lod_tiles()
 
 void GeometryStore::rebuild_dirty_lod_tiles()
 {
-  _lod_pyramid.rebuild_dirty_tiles(_shapes.records());
+  _lod_pyramid.rebuild_dirty_tiles();
 }
 
 size_t GeometryStore::dirty_lod_tile_count() const
