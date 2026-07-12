@@ -2,11 +2,14 @@
 
 #include "IdbBlockages.h"
 #include "IdbDesign.h"
+#include "IdbFill.h"
 #include "IdbGCellGrid.h"
 #include "IdbInstance.h"
 #include "IdbLayout.h"
 #include "IdbNet.h"
+#include "IdbRegion.h"
 #include "IdbRegularWire.h"
+#include "IdbSlot.h"
 #include "IdbSpecialNet.h"
 #include "IdbSpecialWire.h"
 #include "IdbTrackGrid.h"
@@ -392,6 +395,78 @@ bool resolve_blockage_owner_id(idb::IdbDesign& design, idb::IdbBlockage& blockag
   return false;
 }
 
+bool resolve_region_owner_id(idb::IdbDesign& design, idb::IdbRegion& region, OwnerId& owner_id)
+{
+  auto* region_list = design.get_region_list();
+  if (region_list == nullptr) {
+    return false;
+  }
+
+  uint32_t region_index = 0;
+  for (auto* candidate : region_list->get_region_list()) {
+    if (candidate == &region) {
+      owner_id = region_index;
+      return true;
+    }
+    ++region_index;
+  }
+
+  return false;
+}
+
+bool resolve_slot_owner_id(idb::IdbDesign& design, idb::IdbSlot& slot, OwnerId& owner_id)
+{
+  auto* slot_list = design.get_slot_list();
+  if (slot_list == nullptr) {
+    return false;
+  }
+
+  uint32_t slot_index = 0;
+  for (auto* candidate : slot_list->get_slot_list()) {
+    if (candidate == &slot) {
+      owner_id = slot_index;
+      return true;
+    }
+    ++slot_index;
+  }
+
+  return false;
+}
+
+bool resolve_fill_owner_id(idb::IdbDesign& design, idb::IdbFill& fill, OwnerId& owner_id)
+{
+  auto* fill_list = design.get_fill_list();
+  if (fill_list == nullptr) {
+    return false;
+  }
+
+  uint32_t fill_index = 0;
+  for (auto* candidate : fill_list->get_fill_list()) {
+    if (candidate == &fill) {
+      owner_id = fill_index;
+      return true;
+    }
+    ++fill_index;
+  }
+
+  return false;
+}
+
+void delete_unseen_owner_shapes(GeometryStore& store, OwnerType type, OwnerId owner_id,
+                                const std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
+{
+  for (const ShapeId shape_id : store.query_owner(type, owner_id)) {
+    if (seen_shape_ids.contains(shape_id)) {
+      continue;
+    }
+    if (store.delete_shape(shape_id)) {
+      ++result.deleted_shape_count;
+    } else {
+      ++result.missing_shape_count;
+    }
+  }
+}
+
 void reconcile_rect_shape(GeometryStore& store, OwnerType type, OwnerId owner_id, LayerId layer_id, Rect32 bbox, OwnerRef owner,
                           std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
 {
@@ -463,6 +538,20 @@ void reconcile_via_cut_shapes(GeometryStore& store, idb::IdbVia* via, OwnerRef o
   }
 
   idb::IdbLayerShape cut_shape = via->get_cut_layer_shape();
+  reconcile_layer_shape_rects(store, cut_shape, owner, seen_shape_ids, result);
+}
+
+void reconcile_via_cut_shapes_at(GeometryStore& store, idb::IdbVia* via, idb::IdbCoordinate<int32_t>* origin, OwnerRef owner,
+                                 std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
+{
+  if (via == nullptr || origin == nullptr || via->get_instance() == nullptr
+      || via->get_instance()->get_cut_layer_shape() == nullptr) {
+    return;
+  }
+
+  idb::IdbLayerShape cut_shape;
+  via->get_instance()->get_cut_layer_shape()->clone(cut_shape);
+  cut_shape.moveToLocation(origin);
   reconcile_layer_shape_rects(store, cut_shape, owner, seen_shape_ids, result);
 }
 
@@ -1241,6 +1330,107 @@ GeometrySyncResult GeometryBuilder::sync_blockage(idb::IdbDesign& design, idb::I
     }
   }
 
+  result.ok = result.missing_shape_count == 0;
+  return result;
+}
+
+GeometrySyncResult GeometryBuilder::sync_region(idb::IdbDesign& design, idb::IdbRegion& region, GeometryStore& store) const
+{
+  GeometrySyncResult result;
+  OwnerId owner_id = 0;
+  if (!resolve_region_owner_id(design, region, owner_id)) {
+    result.missing_shape_count = 1;
+    return result;
+  }
+
+  store.add_owner_name(OwnerType::kRegion, owner_id, region.get_name());
+
+  std::unordered_set<ShapeId> seen_shape_ids;
+  uint32_t boundary_index = 0;
+  for (auto* rect : region.get_boundary()) {
+    OwnerRef owner;
+    owner.type = OwnerType::kRegion;
+    owner.owner_id = owner_id;
+    owner.path0 = boundary_index++;
+
+    const Rect32 bbox = rect_from_idb(rect);
+    if (is_non_empty(bbox)) {
+      reconcile_rect_shape(store, owner.type, owner.owner_id, kLayoutGeometryLayer, bbox, owner, seen_shape_ids, result);
+    }
+  }
+
+  delete_unseen_owner_shapes(store, OwnerType::kRegion, owner_id, seen_shape_ids, result);
+  result.ok = result.missing_shape_count == 0;
+  return result;
+}
+
+GeometrySyncResult GeometryBuilder::sync_slot(idb::IdbDesign& design, idb::IdbSlot& slot, GeometryStore& store) const
+{
+  GeometrySyncResult result;
+  OwnerId owner_id = 0;
+  if (!resolve_slot_owner_id(design, slot, owner_id)) {
+    result.missing_shape_count = 1;
+    return result;
+  }
+
+  std::unordered_set<ShapeId> seen_shape_ids;
+  uint32_t rect_index = 0;
+  for (auto* rect : slot.get_rect_list()) {
+    OwnerRef owner;
+    owner.type = OwnerType::kSlot;
+    owner.owner_id = owner_id;
+    owner.path0 = rect_index++;
+
+    const Rect32 bbox = rect_from_idb(rect);
+    if (is_non_empty(bbox)) {
+      reconcile_rect_shape(store, owner.type, owner.owner_id, layer_id_from_idb(slot.get_layer()), bbox, owner, seen_shape_ids,
+                           result);
+    }
+  }
+
+  delete_unseen_owner_shapes(store, OwnerType::kSlot, owner_id, seen_shape_ids, result);
+  result.ok = result.missing_shape_count == 0;
+  return result;
+}
+
+GeometrySyncResult GeometryBuilder::sync_fill(idb::IdbDesign& design, idb::IdbFill& fill, GeometryStore& store) const
+{
+  GeometrySyncResult result;
+  OwnerId owner_id = 0;
+  if (!resolve_fill_owner_id(design, fill, owner_id)) {
+    result.missing_shape_count = 1;
+    return result;
+  }
+
+  std::unordered_set<ShapeId> seen_shape_ids;
+  if (fill.get_type() == idb::IdbFill::IdbFillType::kLayer && fill.get_layer() != nullptr) {
+    uint32_t rect_index = 0;
+    for (auto* rect : fill.get_layer()->get_rect_list()) {
+      OwnerRef owner;
+      owner.type = OwnerType::kFill;
+      owner.owner_id = owner_id;
+      owner.path0 = rect_index++;
+
+      const Rect32 bbox = rect_from_idb(rect);
+      if (is_non_empty(bbox)) {
+        reconcile_rect_shape(store, owner.type, owner.owner_id, layer_id_from_idb(fill.get_layer()->get_layer()), bbox, owner,
+                             seen_shape_ids, result);
+      }
+    }
+  } else if (fill.get_type() == idb::IdbFill::IdbFillType::kVia && fill.get_via() != nullptr
+             && fill.get_via()->get_via() != nullptr) {
+    uint32_t coordinate_index = 0;
+    for (auto* coordinate : fill.get_via()->get_coordinate_list()) {
+      OwnerRef owner;
+      owner.type = OwnerType::kFill;
+      owner.owner_id = owner_id;
+      owner.path0 = coordinate_index++;
+
+      reconcile_via_cut_shapes_at(store, fill.get_via()->get_via(), coordinate, owner, seen_shape_ids, result);
+    }
+  }
+
+  delete_unseen_owner_shapes(store, OwnerType::kFill, owner_id, seen_shape_ids, result);
   result.ok = result.missing_shape_count == 0;
   return result;
 }
