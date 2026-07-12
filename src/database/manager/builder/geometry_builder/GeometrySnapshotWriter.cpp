@@ -2,8 +2,10 @@
 
 #include "GeometrySnapshotSchema.h"
 
+#include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <map>
 #include <span>
 #include <string>
 #include <system_error>
@@ -60,6 +62,7 @@ bool write_manifest(const std::filesystem::path& path, const SnapshotWriteResult
   file << "sidmap=" << file_prefix << "/geometry.sidmap.bin\n";
   file << "delta=" << file_prefix << "/geometry.delta.bin\n";
   file << "view=" << file_prefix << "/geometry.view.bin\n";
+  file << "layers=" << file_prefix << "/geometry.layers.txt\n";
   return static_cast<bool>(file);
 }
 
@@ -153,6 +156,76 @@ std::vector<GeometryViewTileRecord> make_view_tile_records(std::span<const Geome
   return view_records;
 }
 
+std::string sanitize_layer_text(const std::string& value, const std::string& fallback)
+{
+  std::string sanitized = value.empty() ? fallback : value;
+  for (char& ch : sanitized) {
+    if (ch == '\t' || ch == '\r' || ch == '\n') {
+      ch = ' ';
+    }
+  }
+  return sanitized;
+}
+
+GeometryLayerMetadata fallback_layer_metadata(LayerId layer_id)
+{
+  GeometryLayerMetadata metadata;
+  metadata.layer_id = layer_id;
+  metadata.order = layer_id;
+  metadata.name = "L" + std::to_string(layer_id);
+  return metadata;
+}
+
+std::vector<GeometryLayerMetadata> make_layer_metadata(std::span<const ShapeRecord> records,
+                                                       std::span<const GeometryLayerMetadata> configured_layers)
+{
+  std::map<LayerId, GeometryLayerMetadata> by_layer;
+  for (const GeometryLayerMetadata& metadata : configured_layers) {
+    GeometryLayerMetadata normalized = metadata;
+    normalized.name = sanitize_layer_text(normalized.name, "L" + std::to_string(normalized.layer_id));
+    normalized.type = sanitize_layer_text(normalized.type, "unknown");
+    normalized.direction = sanitize_layer_text(normalized.direction, "unknown");
+    by_layer[metadata.layer_id] = normalized;
+  }
+
+  for (const ShapeRecord& record : records) {
+    if (record.state != ShapeState::kAlive) {
+      continue;
+    }
+    by_layer.try_emplace(record.layer_id, fallback_layer_metadata(record.layer_id));
+  }
+
+  std::vector<GeometryLayerMetadata> layers;
+  layers.reserve(by_layer.size());
+  for (const auto& [layer_id, metadata] : by_layer) {
+    layers.push_back(metadata);
+  }
+  std::sort(layers.begin(), layers.end(), [](const GeometryLayerMetadata& lhs, const GeometryLayerMetadata& rhs) {
+    if (lhs.order != rhs.order) {
+      return lhs.order < rhs.order;
+    }
+    return lhs.layer_id < rhs.layer_id;
+  });
+  return layers;
+}
+
+bool write_layer_metadata_file(const std::filesystem::path& path, std::span<const GeometryLayerMetadata> layers)
+{
+  std::ofstream file(path);
+  if (!file) {
+    return false;
+  }
+
+  file << "layer_id\torder\ttype\tdirection\twidth\tpitch_x\tpitch_y\tname\n";
+  for (const GeometryLayerMetadata& layer : layers) {
+    file << layer.layer_id << '\t' << layer.order << '\t' << sanitize_layer_text(layer.type, "unknown") << '\t'
+         << sanitize_layer_text(layer.direction, "unknown") << '\t' << layer.width << '\t' << layer.pitch_x << '\t'
+         << layer.pitch_y << '\t' << sanitize_layer_text(layer.name, "L" + std::to_string(layer.layer_id)) << '\n';
+  }
+
+  return static_cast<bool>(file);
+}
+
 }  // namespace
 
 SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const SnapshotWriteOptions& options) const
@@ -187,6 +260,8 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   const std::vector<GeometrySidMapRecord> sidmap_records = make_sidmap_records(records, owners);
   const std::vector<GeometryTileSummary> lod_summaries = store.lod_summaries();
   const std::vector<GeometryViewTileRecord> view_records = make_view_tile_records(lod_summaries);
+  const std::vector<GeometryLayerMetadata> layers = make_layer_metadata(records, options.layers);
+  result.layer_count = static_cast<uint64_t>(layers.size());
 
   GeometryMetaRecord meta;
   meta.shape_count = result.shape_count;
@@ -222,8 +297,9 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
       write_file(epoch_dir / "geometry.view.bin", GeometryFileKind::kView, sizeof(GeometryViewTileRecord),
                  view_records.size(), view_records.data(),
                  static_cast<uint64_t>(view_records.size() * sizeof(GeometryViewTileRecord)));
+  const bool wrote_layers = write_layer_metadata_file(epoch_dir / "geometry.layers.txt", layers);
   const bool wrote_files = wrote_meta && wrote_shapes && wrote_owners && wrote_payload && wrote_names && wrote_name_index
-                           && wrote_sidmap && wrote_delta && wrote_view;
+                           && wrote_sidmap && wrote_delta && wrote_view && wrote_layers;
   const std::string file_prefix = (std::filesystem::path("epochs") / std::to_string(result.epoch)).generic_string();
   const bool wrote_manifest = wrote_files && publish_manifest(options.output_dir, result, file_prefix);
 

@@ -1,6 +1,9 @@
 #pragma once
 
+#include "GeometryLayerMetadata.h"
 #include "GeometryStore.h"
+
+#include <vector>
 
 namespace idb {
 class IdbDesign;
@@ -45,6 +48,7 @@ class GeometryBuilder
 {
  public:
   GeometryBuildResult rebuild_from_design(idb::IdbDesign& design, idb::IdbLayout& layout, GeometryStore& store) const;
+  std::vector<GeometryLayerMetadata> collect_layer_metadata(idb::IdbLayout& layout) const;
   GeometrySyncResult sync_instance(idb::IdbInstance& instance, GeometryStore& store) const;
   GeometrySyncResult sync_net(idb::IdbDesign& design, idb::IdbNet& net, GeometryStore& store) const;
   GeometrySyncResult sync_special_net(idb::IdbDesign& design, idb::IdbSpecialNet& net, GeometryStore& store) const;

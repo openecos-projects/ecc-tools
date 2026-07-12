@@ -426,8 +426,10 @@ int main(int argc, char** argv)
   }
 
   ecc::geometry::GeometrySnapshotWriter writer;
+  ecc::geometry::SnapshotWriteOptions write_options{std::filesystem::path(options.output_dir)};
+  write_options.layers = geometry_builder.collect_layer_metadata(*def_service->get_layout());
   const ecc::geometry::SnapshotWriteResult write_result =
-      writer.write(store, ecc::geometry::SnapshotWriteOptions{std::filesystem::path(options.output_dir)});
+      writer.write(store, write_options);
   if (!write_result.ok) {
     std::cerr << "failed to write geometry snapshot: " << options.output_dir << "\n";
     return 1;

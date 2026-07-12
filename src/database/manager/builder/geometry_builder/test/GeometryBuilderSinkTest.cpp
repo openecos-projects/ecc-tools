@@ -2022,8 +2022,20 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
       std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_writer_test";
   std::filesystem::remove_all(output_dir);
 
+  SnapshotWriteOptions write_options{output_dir};
+  GeometryLayerMetadata layer_metadata;
+  layer_metadata.layer_id = 1;
+  layer_metadata.order = 7;
+  layer_metadata.name = "M1";
+  layer_metadata.type = "routing";
+  layer_metadata.direction = "horizontal";
+  layer_metadata.width = 100;
+  layer_metadata.pitch_x = 200;
+  layer_metadata.pitch_y = 300;
+  write_options.layers.push_back(layer_metadata);
+
   GeometrySnapshotWriter writer;
-  const SnapshotWriteResult result = writer.write(store, SnapshotWriteOptions{output_dir});
+  const SnapshotWriteResult result = writer.write(store, write_options);
 
   assert(result.ok);
   assert(result.shape_count == 3);
@@ -2045,6 +2057,7 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   const std::filesystem::path sidmap_path = snapshot_path("sidmap");
   const std::filesystem::path delta_path = snapshot_path("delta");
   const std::filesystem::path view_path = snapshot_path("view");
+  const std::filesystem::path layers_path = snapshot_path("layers");
 
   assert(shapes_path.parent_path().parent_path() == output_dir / "epochs");
   assert(std::filesystem::exists(meta_path));
@@ -2056,6 +2069,7 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(std::filesystem::exists(sidmap_path));
   assert(std::filesystem::exists(delta_path));
   assert(std::filesystem::exists(view_path));
+  assert(std::filesystem::exists(layers_path));
 
   const GeometryFileHeader meta_header = read_header(meta_path);
   assert(meta_header.file_kind == GeometryFileKind::kMeta);
@@ -2117,6 +2131,11 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(manifest.find("geometry.sidmap.bin") != std::string::npos);
   assert(manifest.find("geometry.delta.bin") != std::string::npos);
   assert(manifest.find("geometry.view.bin") != std::string::npos);
+  assert(manifest.find("geometry.layers.txt") != std::string::npos);
+
+  const std::string layer_manifest = read_text_file(layers_path);
+  assert(layer_manifest.find("layer_id\torder\ttype\tdirection\twidth\tpitch_x\tpitch_y\tname") != std::string::npos);
+  assert(layer_manifest.find("1\t7\trouting\thorizontal\t100\t200\t300\tM1") != std::string::npos);
 
   std::filesystem::remove_all(output_dir);
 }

@@ -63,10 +63,11 @@ unsigned CmdGeometrySnapshot::exec()
   ecc::geometry::GeometryStore store;
   ecc::geometry::GeometryBuilder builder;
   const ecc::geometry::GeometryBuildResult build_result = builder.rebuild_from_design(*design, *layout, store);
+  ecc::geometry::SnapshotWriteOptions write_options{std::filesystem::path(output_path)};
+  write_options.layers = builder.collect_layer_metadata(*layout);
 
   ecc::geometry::GeometrySnapshotWriter writer;
-  const ecc::geometry::SnapshotWriteResult write_result =
-      writer.write(store, ecc::geometry::SnapshotWriteOptions{std::filesystem::path(output_path)});
+  const ecc::geometry::SnapshotWriteResult write_result = writer.write(store, write_options);
   if (!write_result.ok) {
     std::cerr << "failed to write geometry snapshot: " << output_path << "\n";
     return 0;

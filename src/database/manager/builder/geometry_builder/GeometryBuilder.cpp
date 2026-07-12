@@ -51,6 +51,64 @@ LayerId layer_id_from_idb(idb::IdbLayer* layer)
   return layer_id > 0 ? static_cast<LayerId>(layer_id) : static_cast<LayerId>(layer->get_order());
 }
 
+const char* layer_type_name(idb::IdbLayerType type)
+{
+  switch (type) {
+    case idb::IdbLayerType::kLayerCut:
+      return "cut";
+    case idb::IdbLayerType::kLayerImplant:
+      return "implant";
+    case idb::IdbLayerType::kLayerMasterslice:
+      return "masterslice";
+    case idb::IdbLayerType::kLayerOverlap:
+      return "overlap";
+    case idb::IdbLayerType::kLayerRouting:
+      return "routing";
+    default:
+      return "unknown";
+  }
+}
+
+const char* layer_direction_name(idb::IdbLayerDirection direction)
+{
+  switch (direction) {
+    case idb::IdbLayerDirection::kHorizontal:
+      return "horizontal";
+    case idb::IdbLayerDirection::kVertical:
+      return "vertical";
+    case idb::IdbLayerDirection::kDiag45:
+      return "diag45";
+    case idb::IdbLayerDirection::kDiag135:
+      return "diag135";
+    default:
+      return "unknown";
+  }
+}
+
+GeometryLayerMetadata layer_metadata_from_idb(idb::IdbLayer* layer)
+{
+  GeometryLayerMetadata metadata;
+  if (layer == nullptr) {
+    return metadata;
+  }
+
+  metadata.layer_id = layer_id_from_idb(layer);
+  metadata.order = layer->get_order();
+  metadata.name = layer->get_name();
+  metadata.type = layer_type_name(layer->get_type());
+
+  if (auto* routing_layer = dynamic_cast<idb::IdbLayerRouting*>(layer); routing_layer != nullptr) {
+    metadata.direction = layer_direction_name(routing_layer->get_direction());
+    metadata.width = routing_layer->get_width();
+    metadata.pitch_x = routing_layer->get_pitch_x();
+    metadata.pitch_y = routing_layer->get_pitch_y();
+  } else if (auto* cut_layer = dynamic_cast<idb::IdbLayerCut*>(layer); cut_layer != nullptr) {
+    metadata.width = cut_layer->get_width();
+  }
+
+  return metadata;
+}
+
 bool is_non_empty(Rect32 rect)
 {
   rect = normalize(rect);
@@ -777,6 +835,30 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
                        + result.slot_shape_count + result.pin_shape_count + result.obs_shape_count;
   store.clear_delta_events();
   return result;
+}
+
+std::vector<GeometryLayerMetadata> GeometryBuilder::collect_layer_metadata(idb::IdbLayout& layout) const
+{
+  std::vector<GeometryLayerMetadata> layers;
+  auto* idb_layers = layout.get_layers();
+  if (idb_layers == nullptr) {
+    return layers;
+  }
+
+  for (auto* layer : idb_layers->get_layers()) {
+    if (layer == nullptr) {
+      continue;
+    }
+    layers.push_back(layer_metadata_from_idb(layer));
+  }
+
+  std::sort(layers.begin(), layers.end(), [](const GeometryLayerMetadata& lhs, const GeometryLayerMetadata& rhs) {
+    if (lhs.order != rhs.order) {
+      return lhs.order < rhs.order;
+    }
+    return lhs.layer_id < rhs.layer_id;
+  });
+  return layers;
 }
 
 GeometrySyncResult GeometryBuilder::sync_net(idb::IdbDesign& design, idb::IdbNet& net, GeometryStore& store) const
