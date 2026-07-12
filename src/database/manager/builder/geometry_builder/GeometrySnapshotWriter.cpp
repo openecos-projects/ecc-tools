@@ -41,7 +41,18 @@ bool write_file(const std::filesystem::path& path, GeometryFileKind file_kind, u
   return write_bytes(file, &header, sizeof(header)) && write_bytes(file, data, data_size);
 }
 
-bool write_manifest(const std::filesystem::path& path, const SnapshotWriteResult& result, const std::string& file_prefix)
+std::string sanitize_manifest_value(std::string value)
+{
+  for (char& ch : value) {
+    if (ch == '\r' || ch == '\n' || ch == '\t') {
+      ch = ' ';
+    }
+  }
+  return value;
+}
+
+bool write_manifest(const std::filesystem::path& path, const SnapshotWriteResult& result, const std::string& file_prefix,
+                    const SnapshotWriteOptions& options)
 {
   std::ofstream file(path);
   if (!file) {
@@ -50,6 +61,18 @@ bool write_manifest(const std::filesystem::path& path, const SnapshotWriteResult
 
   file << "schema_version=" << kGeometrySchemaVersion << '\n';
   file << "active_epoch=" << result.epoch << '\n';
+  if (!options.design_name.empty()) {
+    file << "design_name=" << sanitize_manifest_value(options.design_name) << '\n';
+  }
+  if (!options.design_version.empty()) {
+    file << "design_version=" << sanitize_manifest_value(options.design_version) << '\n';
+  }
+  if (options.dbu_per_micron > 0) {
+    file << "dbu_per_micron=" << options.dbu_per_micron << '\n';
+  }
+  if (options.manufacture_grid >= 0) {
+    file << "manufacture_grid=" << options.manufacture_grid << '\n';
+  }
   file << "shape_count=" << result.shape_count << '\n';
   file << "owner_count=" << result.owner_count << '\n';
   file << "payload_size=" << result.payload_size << '\n';
@@ -92,13 +115,13 @@ uint64_t create_epoch_directory(const std::filesystem::path& output_dir, std::fi
 }
 
 bool publish_manifest(const std::filesystem::path& output_dir, const SnapshotWriteResult& result,
-                      const std::string& file_prefix)
+                      const std::string& file_prefix, const SnapshotWriteOptions& options)
 {
   const std::filesystem::path manifest_path = output_dir / "geometry.manifest";
   const std::filesystem::path temporary_path = output_dir / "geometry.manifest.tmp";
   std::error_code error;
   std::filesystem::remove(temporary_path, error);
-  if (!write_manifest(temporary_path, result, file_prefix)) {
+  if (!write_manifest(temporary_path, result, file_prefix, options)) {
     return false;
   }
 
@@ -301,7 +324,7 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   const bool wrote_files = wrote_meta && wrote_shapes && wrote_owners && wrote_payload && wrote_names && wrote_name_index
                            && wrote_sidmap && wrote_delta && wrote_view && wrote_layers;
   const std::string file_prefix = (std::filesystem::path("epochs") / std::to_string(result.epoch)).generic_string();
-  const bool wrote_manifest = wrote_files && publish_manifest(options.output_dir, result, file_prefix);
+  const bool wrote_manifest = wrote_files && publish_manifest(options.output_dir, result, file_prefix, options);
 
   result.ok = wrote_files && wrote_manifest;
   return result;

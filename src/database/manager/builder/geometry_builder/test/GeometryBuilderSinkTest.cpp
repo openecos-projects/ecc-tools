@@ -2095,6 +2095,10 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   std::filesystem::remove_all(output_dir);
 
   SnapshotWriteOptions write_options{output_dir};
+  write_options.design_name = "unit_design";
+  write_options.design_version = "5.8";
+  write_options.dbu_per_micron = 2000;
+  write_options.manufacture_grid = 5;
   GeometryLayerMetadata layer_metadata;
   layer_metadata.layer_id = 1;
   layer_metadata.order = 7;
@@ -2194,6 +2198,10 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   const std::string manifest = read_text_file(manifest_path);
   assert(manifest.find("schema_version=1") != std::string::npos);
   assert(manifest.find("active_epoch=") != std::string::npos);
+  assert(manifest.find("design_name=unit_design") != std::string::npos);
+  assert(manifest.find("design_version=5.8") != std::string::npos);
+  assert(manifest.find("dbu_per_micron=2000") != std::string::npos);
+  assert(manifest.find("manufacture_grid=5") != std::string::npos);
   assert(manifest.find("geometry.meta.bin") != std::string::npos);
   assert(manifest.find("geometry.shapes.bin") != std::string::npos);
   assert(manifest.find("geometry.owners.bin") != std::string::npos);

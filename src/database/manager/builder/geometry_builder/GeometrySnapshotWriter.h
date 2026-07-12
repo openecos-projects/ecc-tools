@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <string>
 #include <vector>
 
 namespace ecc::geometry {
@@ -13,6 +14,10 @@ struct SnapshotWriteOptions
 {
   std::filesystem::path output_dir;
   std::vector<GeometryLayerMetadata> layers;
+  std::string design_name;
+  std::string design_version;
+  int32_t dbu_per_micron = 0;
+  int32_t manufacture_grid = -1;
 };
 
 struct SnapshotWriteResult

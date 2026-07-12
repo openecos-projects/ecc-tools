@@ -7,6 +7,7 @@
 #include "GeometryStore.h"
 #include "builder.h"
 #include "def_write.h"
+#include "IdbUnits.h"
 
 #include <filesystem>
 #include <fstream>
@@ -313,6 +314,19 @@ void print_geometry_report(const ecc::geometry::GeometryBuildResult& build_resul
   }
 }
 
+void populate_snapshot_design_metadata(ecc::geometry::SnapshotWriteOptions& write_options, idb::IdbDesign& design,
+                                       idb::IdbLayout& layout)
+{
+  write_options.design_name = design.get_design_name();
+  write_options.design_version = design.get_version();
+  if (design.get_units() != nullptr) {
+    write_options.dbu_per_micron = design.get_units()->get_micron_dbu();
+  } else if (layout.get_units() != nullptr) {
+    write_options.dbu_per_micron = layout.get_units()->get_micron_dbu();
+  }
+  write_options.manufacture_grid = layout.get_munufacture_grid();
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -428,6 +442,7 @@ int main(int argc, char** argv)
   ecc::geometry::GeometrySnapshotWriter writer;
   ecc::geometry::SnapshotWriteOptions write_options{std::filesystem::path(options.output_dir)};
   write_options.layers = geometry_builder.collect_layer_metadata(*def_service->get_layout());
+  populate_snapshot_design_metadata(write_options, *def_service->get_design(), *def_service->get_layout());
   const ecc::geometry::SnapshotWriteResult write_result =
       writer.write(store, write_options);
   if (!write_result.ok) {

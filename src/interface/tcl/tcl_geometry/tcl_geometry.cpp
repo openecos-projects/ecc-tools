@@ -3,6 +3,7 @@
 #include "GeometryBuilder.h"
 #include "GeometrySnapshotWriter.h"
 #include "GeometryStore.h"
+#include "IdbUnits.h"
 #include "idm.h"
 
 #include <filesystem>
@@ -21,6 +22,19 @@ void print_geometry_report(const ecc::geometry::GeometryBuildResult& build_resul
   for (const auto& [layer_id, count] : store.count_alive_shapes_by_layer()) {
     out << "layer." << layer_id << "=" << count << "\n";
   }
+}
+
+void populate_snapshot_design_metadata(ecc::geometry::SnapshotWriteOptions& write_options, idb::IdbDesign& design,
+                                       idb::IdbLayout& layout)
+{
+  write_options.design_name = design.get_design_name();
+  write_options.design_version = design.get_version();
+  if (design.get_units() != nullptr) {
+    write_options.dbu_per_micron = design.get_units()->get_micron_dbu();
+  } else if (layout.get_units() != nullptr) {
+    write_options.dbu_per_micron = layout.get_units()->get_micron_dbu();
+  }
+  write_options.manufacture_grid = layout.get_munufacture_grid();
 }
 
 }  // namespace
@@ -65,6 +79,7 @@ unsigned CmdGeometrySnapshot::exec()
   const ecc::geometry::GeometryBuildResult build_result = builder.rebuild_from_design(*design, *layout, store);
   ecc::geometry::SnapshotWriteOptions write_options{std::filesystem::path(output_path)};
   write_options.layers = builder.collect_layer_metadata(*layout);
+  populate_snapshot_design_metadata(write_options, *design, *layout);
 
   ecc::geometry::GeometrySnapshotWriter writer;
   const ecc::geometry::SnapshotWriteResult write_result = writer.write(store, write_options);
