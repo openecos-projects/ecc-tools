@@ -22,6 +22,8 @@ struct GeometryBuildResult
   uint64_t die_shape_count = 0;
   uint64_t core_shape_count = 0;
   uint64_t row_shape_count = 0;
+  uint64_t track_grid_shape_count = 0;
+  uint64_t gcell_grid_shape_count = 0;
   uint64_t instance_shape_count = 0;
   uint64_t instance_halo_shape_count = 0;
   uint64_t net_wire_shape_count = 0;

@@ -394,6 +394,78 @@ void test_geometry_builder_rebuilds_basic_layout_and_instance_shapes()
   assert(offline_inst_shapes[0] == inst_shapes[0]);
 }
 
+void test_geometry_builder_rebuilds_track_and_gcell_grid_lines()
+{
+  idb::IdbLayout layout;
+  layout.initDie(0, 0, 1000, 800);
+
+  idb::IdbLayerRouting routing_layer;
+  routing_layer.set_name("M1");
+  routing_layer.set_id(11);
+  routing_layer.set_order(1);
+
+  idb::IdbTrackGrid* track_grid = layout.get_track_grid_list()->add_track_grid();
+  idb::IdbTrack* track = track_grid->get_track();
+  track->set_direction(idb::IdbTrackDirection::kDirectionX);
+  track->set_start(100);
+  track->set_pitch(200);
+  track->set_width(2);
+  track_grid->set_track_number(3);
+  track_grid->add_layer_list(&routing_layer);
+
+  idb::IdbGCellGrid* gcell_grid = layout.get_gcell_grid_list()->add_gcell_grid();
+  gcell_grid->set_direction(idb::IdbTrackDirection::kDirectionY);
+  gcell_grid->set_start(50);
+  gcell_grid->set_space(250);
+  gcell_grid->set_num(2);
+
+  idb::IdbDesign design(&layout);
+  GeometryStore store;
+  GeometryBuilder builder;
+  const GeometryBuildResult result = builder.rebuild_from_design(design, layout, store);
+
+  const std::map<OwnerType, uint64_t> owner_counts = store.count_alive_shapes_by_owner_type();
+  assert(owner_counts.contains(OwnerType::kTrackGrid));
+  assert(owner_counts.at(OwnerType::kTrackGrid) == 3);
+  assert(owner_counts.contains(OwnerType::kGCellGrid));
+  assert(owner_counts.at(OwnerType::kGCellGrid) == 2);
+  assert(result.track_grid_shape_count == 3);
+  assert(result.gcell_grid_shape_count == 2);
+  assert(result.shape_count == 6);
+
+  const std::vector<ShapeId> track_shapes = store.query_owner(OwnerType::kTrackGrid, 0);
+  const std::vector<ShapeId> gcell_shapes = store.query_owner(OwnerType::kGCellGrid, 0);
+  assert(track_shapes.size() == 3);
+  assert(gcell_shapes.size() == 2);
+
+  const ShapeRecord* first_track = store.find_shape(track_shapes[0]);
+  assert(first_track != nullptr);
+  assert(first_track->kind == ShapeKind::kLine);
+  assert(first_track->layer_id == 11);
+  assert(first_track->bbox.lx == 99);
+  assert(first_track->bbox.ly == -1);
+  assert(first_track->bbox.hx == 101);
+  assert(first_track->bbox.hy == 801);
+
+  const OwnerRef first_track_owner = store.owner_of(track_shapes[0]);
+  assert(first_track_owner.path0 == 0);
+  assert(first_track_owner.path1 == 0);
+  assert(first_track_owner.path2 == static_cast<uint32_t>(idb::IdbTrackDirection::kDirectionX));
+
+  const ShapeRecord* first_gcell = store.find_shape(gcell_shapes[0]);
+  assert(first_gcell != nullptr);
+  assert(first_gcell->kind == ShapeKind::kLine);
+  assert(first_gcell->layer_id == 0);
+  assert(first_gcell->bbox.lx == -1);
+  assert(first_gcell->bbox.ly == 49);
+  assert(first_gcell->bbox.hx == 1001);
+  assert(first_gcell->bbox.hy == 51);
+
+  const OwnerRef first_gcell_owner = store.owner_of(gcell_shapes[0]);
+  assert(first_gcell_owner.path0 == 0);
+  assert(first_gcell_owner.path1 == static_cast<uint32_t>(idb::IdbTrackDirection::kDirectionY));
+}
+
 void test_geometry_builder_rebuilds_instance_halo_shapes()
 {
   idb::IdbLayout layout;
@@ -2398,6 +2470,7 @@ int main()
   test_geometry_edit_applier_reports_conflict_when_shape_version_changed();
   test_store_geometry_sink_emits_all_shape_kinds();
   test_geometry_builder_rebuilds_basic_layout_and_instance_shapes();
+  test_geometry_builder_rebuilds_track_and_gcell_grid_lines();
   test_geometry_builder_rebuilds_instance_halo_shapes();
   test_geometry_builder_rebuild_replaces_previous_store_contents();
   test_geometry_builder_rebuild_preserves_shape_ids_when_new_earlier_shapes_appear();

@@ -2,15 +2,18 @@
 
 #include "IdbBlockages.h"
 #include "IdbDesign.h"
+#include "IdbGCellGrid.h"
 #include "IdbInstance.h"
 #include "IdbLayout.h"
 #include "IdbNet.h"
 #include "IdbRegularWire.h"
 #include "IdbSpecialNet.h"
 #include "IdbSpecialWire.h"
+#include "IdbTrackGrid.h"
 #include "IdbVias.h"
 
 #include <algorithm>
+#include <limits>
 #include <unordered_set>
 #include <vector>
 
@@ -134,6 +137,147 @@ ShapeId emit_rect_if_present(GeometryStore& store, LayerId layer_id, Rect32 rect
 ShapeId emit_layout_rect_if_present(GeometryStore& store, Rect32 rect, OwnerRef owner)
 {
   return emit_rect_if_present(store, kLayoutGeometryLayer, rect, owner);
+}
+
+Rect32 grid_reference_bounds(idb::IdbLayout& layout)
+{
+  if (auto* die = layout.get_die(); die != nullptr) {
+    const Rect32 bounds = rect_from_idb(die->get_bounding_box());
+    if (is_non_empty(bounds)) {
+      return normalize(bounds);
+    }
+  }
+
+  if (layout.get_rows() != nullptr && layout.get_rows()->get_row_num() > 0) {
+    auto* core = layout.get_core();
+    const Rect32 bounds = rect_from_idb(core->get_bounding_box());
+    if (is_non_empty(bounds)) {
+      return normalize(bounds);
+    }
+  }
+
+  return {};
+}
+
+bool coordinate_to_i32(int64_t coordinate, int32_t& out)
+{
+  if (coordinate < std::numeric_limits<int32_t>::min() || coordinate > std::numeric_limits<int32_t>::max()) {
+    return false;
+  }
+  out = static_cast<int32_t>(coordinate);
+  return true;
+}
+
+bool make_grid_line(idb::IdbTrackDirection direction, int32_t coordinate, Rect32 bounds, int32_t width, LinePayload& line)
+{
+  bounds = normalize(bounds);
+  if (!is_non_empty(bounds)) {
+    return false;
+  }
+
+  line.width = width > 0 ? width : 1;
+  line.flags = 0;
+
+  switch (direction) {
+    case idb::IdbTrackDirection::kDirectionX:
+      line.begin = Point32{coordinate, bounds.ly};
+      line.end = Point32{coordinate, bounds.hy};
+      return true;
+    case idb::IdbTrackDirection::kDirectionY:
+      line.begin = Point32{bounds.lx, coordinate};
+      line.end = Point32{bounds.hx, coordinate};
+      return true;
+    default:
+      return false;
+  }
+}
+
+uint64_t emit_track_grid_lines(GeometryStore& store, idb::IdbTrackGrid* track_grid, Rect32 bounds, OwnerId owner_id,
+                               idb::IdbLayer* fallback_layer)
+{
+  if (track_grid == nullptr || track_grid->get_track() == nullptr || track_grid->get_track_num() == 0) {
+    return 0;
+  }
+
+  idb::IdbTrack* track = track_grid->get_track();
+  const uint32_t pitch = track->get_pitch();
+  if (pitch == 0) {
+    return 0;
+  }
+
+  std::vector<idb::IdbLayer*> layers = track_grid->get_layer_list();
+  if (layers.empty() && fallback_layer != nullptr) {
+    layers.push_back(fallback_layer);
+  }
+  if (layers.empty()) {
+    layers.push_back(nullptr);
+  }
+
+  uint64_t shape_count = 0;
+  uint32_t layer_index = 0;
+  for (auto* layer : layers) {
+    const LayerId layer_id = layer_id_from_idb(layer);
+    for (uint32_t track_index = 0; track_index < track_grid->get_track_num(); ++track_index) {
+      int32_t coordinate = 0;
+      if (!coordinate_to_i32(static_cast<int64_t>(track->get_start()) + static_cast<int64_t>(track_index) * pitch, coordinate)) {
+        continue;
+      }
+
+      LinePayload line;
+      if (!make_grid_line(track->get_direction(), coordinate, bounds, static_cast<int32_t>(track->get_width()), line)) {
+        continue;
+      }
+
+      OwnerRef owner;
+      owner.type = OwnerType::kTrackGrid;
+      owner.owner_id = owner_id;
+      owner.path0 = layer_index;
+      owner.path1 = track_index;
+      owner.path2 = static_cast<uint32_t>(track->get_direction());
+
+      if (store.add_line(layer_id, line, owner) != 0) {
+        ++shape_count;
+      }
+    }
+
+    ++layer_index;
+  }
+
+  return shape_count;
+}
+
+uint64_t emit_gcell_grid_lines(GeometryStore& store, idb::IdbGCellGrid* gcell_grid, Rect32 bounds, OwnerId owner_id)
+{
+  if (gcell_grid == nullptr || gcell_grid->get_num() <= 0 || gcell_grid->get_space() <= 0) {
+    return 0;
+  }
+
+  uint64_t shape_count = 0;
+  for (int32_t line_index = 0; line_index < gcell_grid->get_num(); ++line_index) {
+    int32_t coordinate = 0;
+    if (!coordinate_to_i32(static_cast<int64_t>(gcell_grid->get_start())
+                               + static_cast<int64_t>(line_index) * gcell_grid->get_space(),
+                           coordinate)) {
+      continue;
+    }
+
+    LinePayload line;
+    if (!make_grid_line(gcell_grid->get_direction(), coordinate, bounds, 1, line)) {
+      continue;
+    }
+
+    OwnerRef owner;
+    owner.type = OwnerType::kGCellGrid;
+    owner.owner_id = owner_id;
+    owner.path0 = static_cast<uint32_t>(line_index);
+    owner.path1 = static_cast<uint32_t>(gcell_grid->get_direction());
+
+    if (store.add_line(kLayoutGeometryLayer, line, owner) != 0) {
+      ++shape_count;
+    }
+  }
+
+  return shape_count;
 }
 
 uint64_t emit_layer_shape_rects(GeometryStore& store, idb::IdbLayerShape& layer_shape, OwnerRef owner)
@@ -530,6 +674,41 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
     }
   }
 
+  const Rect32 grid_bounds = grid_reference_bounds(layout);
+  std::unordered_set<idb::IdbTrackGrid*> emitted_track_grids;
+  OwnerId track_grid_owner_id = 0;
+  if (auto* track_grids = layout.get_track_grid_list(); track_grids != nullptr) {
+    for (auto* track_grid : track_grids->get_track_grid_list()) {
+      if (track_grid == nullptr || !emitted_track_grids.insert(track_grid).second) {
+        continue;
+      }
+      result.track_grid_shape_count += emit_track_grid_lines(store, track_grid, grid_bounds, track_grid_owner_id++, nullptr);
+    }
+  }
+
+  if (auto* layers = layout.get_layers(); layers != nullptr) {
+    for (auto* layer : layers->get_layers()) {
+      auto* routing_layer = dynamic_cast<idb::IdbLayerRouting*>(layer);
+      if (routing_layer == nullptr) {
+        continue;
+      }
+
+      for (auto* track_grid : routing_layer->get_track_grid_list()) {
+        if (track_grid == nullptr || !emitted_track_grids.insert(track_grid).second) {
+          continue;
+        }
+        result.track_grid_shape_count += emit_track_grid_lines(store, track_grid, grid_bounds, track_grid_owner_id++, routing_layer);
+      }
+    }
+  }
+
+  if (auto* gcell_grids = layout.get_gcell_grid_list(); gcell_grids != nullptr) {
+    OwnerId gcell_grid_owner_id = 0;
+    for (auto* gcell_grid : gcell_grids->get_gcell_grid_list()) {
+      result.gcell_grid_shape_count += emit_gcell_grid_lines(store, gcell_grid, grid_bounds, gcell_grid_owner_id++);
+    }
+  }
+
   if (auto* instances = design.get_instance_list(); instances != nullptr) {
     uint32_t instance_index = 0;
     for (auto* instance : instances->get_instance_list()) {
@@ -829,10 +1008,11 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
     }
   }
 
-  result.shape_count = result.die_shape_count + result.core_shape_count + result.row_shape_count + result.instance_shape_count
-                       + result.instance_halo_shape_count + result.net_wire_shape_count + result.special_net_wire_shape_count
-                       + result.via_shape_count + result.blockage_shape_count + result.fill_shape_count + result.region_shape_count
-                       + result.slot_shape_count + result.pin_shape_count + result.obs_shape_count;
+  result.shape_count = result.die_shape_count + result.core_shape_count + result.row_shape_count + result.track_grid_shape_count
+                       + result.gcell_grid_shape_count + result.instance_shape_count + result.instance_halo_shape_count
+                       + result.net_wire_shape_count + result.special_net_wire_shape_count + result.via_shape_count
+                       + result.blockage_shape_count + result.fill_shape_count + result.region_shape_count + result.slot_shape_count
+                       + result.pin_shape_count + result.obs_shape_count;
   store.clear_delta_events();
   return result;
 }
