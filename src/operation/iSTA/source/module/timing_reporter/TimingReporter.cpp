@@ -23,6 +23,52 @@
 
 namespace ista {
 
+namespace {
+
+std::string escapeJsonString(const std::string& value)
+{
+  static constexpr char kHexDigits[] = "0123456789abcdef";
+
+  std::string escaped;
+  escaped.reserve(value.size());
+  for (unsigned char character : value) {
+    switch (character) {
+      case '"':
+        escaped += "\\\"";
+        break;
+      case '\\':
+        escaped += "\\\\";
+        break;
+      case '\b':
+        escaped += "\\b";
+        break;
+      case '\f':
+        escaped += "\\f";
+        break;
+      case '\n':
+        escaped += "\\n";
+        break;
+      case '\r':
+        escaped += "\\r";
+        break;
+      case '\t':
+        escaped += "\\t";
+        break;
+      default:
+        if (character < 0x20) {
+          escaped += "\\u00";
+          escaped += kHexDigits[character >> 4];
+          escaped += kHexDigits[character & 0x0f];
+        } else {
+          escaped += static_cast<char>(character);
+        }
+    }
+  }
+  return escaped;
+}
+
+}  // namespace
+
 // public
 
 void TimingReporter::initInst()
@@ -283,10 +329,113 @@ void TimingReporter::outputQorSummaryReport()
     worst_frequency = getQorFrequencyString(setup_frequency_map[setup_group_list.front()]);
   }
 
+  const int32_t cell_area = getQorCellArea();
+  const int32_t leaf_cell_k = getQorLeafCellK();
+  auto output_qor_summary_json = [&]() {
+    std::ofstream* json_file = STAUTIL.getOutputFileStream(getQorSummaryJsonFilePath());
+    auto output_double = [json_file](double value, int32_t precision) {
+      if (!std::isfinite(value)) {
+        (*json_file) << "null";
+        return;
+      }
+      if (std::fabs(value) < STA_ERROR) {
+        value = 0.0;
+      }
+      (*json_file) << std::fixed << std::setprecision(precision) << value;
+    };
+    auto output_frequency = [&](double frequency) {
+      if (frequency <= STA_ERROR) {
+        (*json_file) << "null";
+        return;
+      }
+      output_double(frequency, 0);
+    };
+    auto output_setup = [&](const std::string& group_name) {
+      auto wns = setup_wns_map.find(group_name);
+      if (wns == setup_wns_map.end()) {
+        (*json_file) << "null";
+        return;
+      }
+      (*json_file) << "{\"wns\":";
+      output_double(wns->second, 3);
+      (*json_file) << ",\"tns\":";
+      output_double(setup_tns_map[group_name], 1);
+      (*json_file) << ",\"nvp\":" << setup_nvp_map[group_name] << ",\"frequency_mhz\":";
+      output_frequency(setup_frequency_map[group_name]);
+      (*json_file) << "}";
+    };
+    auto output_hold = [&](const std::string& group_name) {
+      auto wns = hold_wns_map.find(group_name);
+      if (wns == hold_wns_map.end()) {
+        (*json_file) << "null";
+        return;
+      }
+      (*json_file) << "{\"wns\":";
+      output_double(wns->second, 3);
+      (*json_file) << ",\"tns\":";
+      output_double(hold_tns_map[group_name], 1);
+      (*json_file) << ",\"nvp\":" << hold_nvp_map[group_name] << "}";
+    };
+    auto output_path_group = [&](const std::string& group_name) {
+      (*json_file) << "{\"name\":\"" << escapeJsonString(group_name) << "\",\"setup\":";
+      output_setup(group_name);
+      (*json_file) << ",\"hold\":";
+      output_hold(group_name);
+      (*json_file) << "}";
+    };
+
+    (*json_file) << "{\n  \"path_groups\": [";
+    bool first_group = true;
+    for (const std::string& group_name : setup_group_list) {
+      if (!first_group) {
+        (*json_file) << ",";
+      }
+      output_path_group(group_name);
+      first_group = false;
+    }
+    for (const std::string& group_name : hold_group_list) {
+      if (setup_wns_map.count(group_name) > 0) {
+        continue;
+      }
+      if (!first_group) {
+        (*json_file) << ",";
+      }
+      output_path_group(group_name);
+      first_group = false;
+    }
+    (*json_file) << "],\n  \"summary\": {\"setup\":";
+    if (setup_group_list.empty()) {
+      (*json_file) << "null";
+    } else {
+      (*json_file) << "{\"wns\":";
+      output_double(setup_wns_map[setup_group_list.front()], 3);
+      (*json_file) << ",\"tns\":";
+      output_double(total_setup_tns, 1);
+      (*json_file) << ",\"nvp\":" << total_setup_nvp << ",\"frequency_mhz\":";
+      output_frequency(setup_frequency_map[setup_group_list.front()]);
+      (*json_file) << "}";
+    }
+    (*json_file) << ",\"hold\":";
+    if (hold_group_list.empty()) {
+      (*json_file) << "null";
+    } else {
+      (*json_file) << "{\"wns\":";
+      output_double(hold_wns_map[hold_group_list.front()], 3);
+      (*json_file) << ",\"tns\":";
+      output_double(total_hold_tns, 1);
+      (*json_file) << ",\"nvp\":" << total_hold_nvp << "}";
+    }
+    (*json_file) << "},\n  \"design_statistics\": {\"cap\":0,\"fanout\":0,\"tran\":0,\"tdrc\":0,\"cella\":" << cell_area
+                 << ",\"bufs\":null,\"leafs_k\":" << leaf_cell_k
+                 << ",\"tnets_k\":null,\"ctbuf\":null,\"regs\":null}\n}\n";
+    STAUTIL.closeFileStream(json_file);
+  };
+
   std::string report_file_path = getQorSummaryReportFilePath();
   std::ofstream* report_file = STAUTIL.getOutputFileStream(report_file_path);
   if (group_set.empty()) {
     STAUTIL.closeFileStream(report_file);
+    output_qor_summary_json();
     return;
   }
   (*report_file) << std::left << std::setw(max_group_length) << "Path Group" << std::right << std::setw(11) << "WNS" << std::setw(11) << "TNS"
@@ -330,7 +479,7 @@ void TimingReporter::outputQorSummaryReport()
                  << std::setw(11) << "CTBUF" << std::setw(8) << "REGS" << "\n";
   (*report_file) << bar << "\n";
   (*report_file) << std::setw(7) << 0 << std::setw(8) << 0 << std::setw(8) << 0 << std::setw(drc_column_width + 1) << 0 << std::setw(11)
-                 << getQorCellArea() << getQorNilString(7) << "K" << getQorKString(getQorLeafCellK(), 10)
+                 << cell_area << getQorNilString(7) << "K" << getQorKString(leaf_cell_k, 10)
                  << getQorNilString(11) << "K" << getQorNilString(11) << getQorNilString(8) << "\n";
   (*report_file) << bar << "\n";
   (*report_file) << "\n";
@@ -340,11 +489,17 @@ void TimingReporter::outputQorSummaryReport()
   (*report_file) << "TNS(H) - Hold TNS\n";
   (*report_file) << "NVP(H) - Hold NVP\n";
   STAUTIL.closeFileStream(report_file);
+  output_qor_summary_json();
 }
 
 std::string TimingReporter::getQorSummaryReportFilePath()
 {
   return STAUTIL.getString(STADM.getConfig().tr_temp_directory_path, "qor_summary.rpt");
+}
+
+std::string TimingReporter::getQorSummaryJsonFilePath()
+{
+  return STAUTIL.getString(STADM.getConfig().tr_temp_directory_path, "qor_summary.json");
 }
 
 std::vector<TimingPath*> TimingReporter::getQorTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type)

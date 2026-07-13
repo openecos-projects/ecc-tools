@@ -60,6 +60,7 @@ class TimingReporter
   std::vector<TimingPath*> getEndpointWorstTimingPathList(std::vector<TimingPath*>& timing_path_list);
   void outputQorSummaryReport();
   std::string getQorSummaryReportFilePath();
+  std::string getQorSummaryJsonFilePath();
   std::vector<TimingPath*> getQorTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type);
   std::vector<std::string> getQorSortedGroupList(std::map<std::string, double>& value_map);
   double getQorFrequency(TimingPath& timing_path);
