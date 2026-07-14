@@ -37,6 +37,7 @@ bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_
 bool saveGDSII(const std::string& gds_name, bool is_harden = false);
 bool saveJson(const std::string& path);
 bool saveViewJson(const std::string& output_dir, const std::string& json_format = "pretty", bool compress = false);
+bool saveGeometrySnapshot(const std::string& output_dir);
 bool applyViewJsonEdits(const std::string& edits_path, bool compress = false);
 bool saveData(const std::string& path);
 bool resetData();

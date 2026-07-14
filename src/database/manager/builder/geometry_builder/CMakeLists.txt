@@ -5,6 +5,7 @@ add_library(geometry_builder
     GeometryEditJson.cpp
     GeometryNameQuery.cpp
     GeometrySnapshotReader.cpp
+    GeometrySnapshotExporter.cpp
     GeometrySnapshotWorkflow.cpp
     GeometrySnapshotWriter.cpp
     InstanceEditAdapter.cpp

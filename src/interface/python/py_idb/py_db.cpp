@@ -17,6 +17,7 @@
 #include "py_db.h"
 
 #include "db_fm/file_soc.h"
+#include "GeometrySnapshotExporter.h"
 #include <idm.h>
 #include "view_json_io.h"
 
@@ -113,6 +114,17 @@ bool saveViewJson(const std::string& output_dir, const std::string& json_format,
   }
   options.compress = compress;
   return dmInst->saveViewJson(output_dir, options);
+}
+
+bool saveGeometrySnapshot(const std::string& output_dir)
+{
+  idb::IdbDesign* design = dmInst->get_idb_design();
+  idb::IdbLayout* layout = dmInst->get_idb_layout();
+  if (design == nullptr || layout == nullptr) {
+    return false;
+  }
+
+  return ecc::geometry::export_geometry_snapshot(*design, *layout, output_dir).ok;
 }
 
 bool applyViewJsonEdits(const std::string& edits_path, bool compress)

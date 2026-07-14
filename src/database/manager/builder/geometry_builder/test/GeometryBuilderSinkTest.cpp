@@ -4,6 +4,7 @@
 #include "GeometryBuilder.h"
 #include "GeometryNameQuery.h"
 #include "GeometrySnapshotReader.h"
+#include "GeometrySnapshotExporter.h"
 #include "GeometrySnapshotWorkflow.h"
 #include "GeometrySnapshotWriter.h"
 #include "StoreGeometrySink.h"
@@ -2422,6 +2423,28 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   std::filesystem::remove_all(output_dir);
 }
 
+void test_geometry_snapshot_exporter_writes_current_idb_design()
+{
+  idb::IdbLayout layout;
+  layout.initDie(0, 0, 1000, 800);
+  idb::IdbDesign design(&layout);
+  design.set_design_name("exporter_design");
+  design.set_version("5.8");
+
+  const std::filesystem::path output_dir =
+      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_exporter_test";
+  std::filesystem::remove_all(output_dir);
+
+  const SnapshotWriteResult result = export_geometry_snapshot(design, layout, output_dir);
+
+  assert(result.ok);
+  assert(result.shape_count == 1);
+  assert(result.manifest_path == output_dir / "geometry.manifest");
+  assert(manifest_value(result.manifest_path, "design_name") == "exporter_design");
+
+  std::filesystem::remove_all(output_dir);
+}
+
 void test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_files()
 {
   GeometryStore store;
@@ -2712,6 +2735,7 @@ int main()
   test_geometry_edit_applier_updates_region_boundary_rect_back_to_idb();
   test_geometry_edit_applier_updates_slot_rect_back_to_idb();
   test_geometry_snapshot_writer_writes_manifest_and_core_binary_files();
+  test_geometry_snapshot_exporter_writes_current_idb_design();
   test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_files();
   test_geometry_snapshot_reader_round_trips_core_binary_files();
   test_geometry_snapshot_reload_preserves_shape_id_and_version_during_rebuild();
