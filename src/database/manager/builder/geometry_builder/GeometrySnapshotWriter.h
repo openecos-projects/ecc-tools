@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GeometryDesignMetadata.h"
 #include "GeometryLayerMetadata.h"
 #include "GeometryStore.h"
 
@@ -14,6 +15,11 @@ struct SnapshotWriteOptions
 {
   std::filesystem::path output_dir;
   std::vector<GeometryLayerMetadata> layers;
+  std::vector<GeometrySiteMetadata> sites;
+  std::vector<GeometryMasterMetadata> masters;
+  std::vector<GeometryConnectivityMetadata> connectivity;
+  std::vector<GeometryBusMetadata> buses;
+  std::vector<GeometryGroupMetadata> groups;
   std::string design_name;
   std::string design_version;
   int32_t dbu_per_micron = 0;
@@ -29,6 +35,11 @@ struct SnapshotWriteResult
   uint64_t payload_size = 0;
   uint64_t delta_count = 0;
   uint64_t layer_count = 0;
+  uint64_t site_count = 0;
+  uint64_t master_count = 0;
+  uint64_t connectivity_count = 0;
+  uint64_t bus_count = 0;
+  uint64_t group_count = 0;
   uint64_t epoch = 0;
 };
 

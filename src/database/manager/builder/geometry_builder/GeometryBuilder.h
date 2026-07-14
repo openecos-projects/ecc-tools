@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GeometryDesignMetadata.h"
 #include "GeometryLayerMetadata.h"
 #include "GeometryStore.h"
 
@@ -12,6 +13,7 @@ class IdbFill;
 class IdbInstance;
 class IdbLayout;
 class IdbNet;
+class IdbPin;
 class IdbRegion;
 class IdbSlot;
 class IdbSpecialNet;
@@ -54,6 +56,11 @@ class GeometryBuilder
  public:
   GeometryBuildResult rebuild_from_design(idb::IdbDesign& design, idb::IdbLayout& layout, GeometryStore& store) const;
   std::vector<GeometryLayerMetadata> collect_layer_metadata(idb::IdbLayout& layout) const;
+  std::vector<GeometrySiteMetadata> collect_site_metadata(idb::IdbLayout& layout) const;
+  std::vector<GeometryMasterMetadata> collect_master_metadata(idb::IdbLayout& layout) const;
+  std::vector<GeometryConnectivityMetadata> collect_connectivity_metadata(idb::IdbDesign& design) const;
+  std::vector<GeometryBusMetadata> collect_bus_metadata(idb::IdbDesign& design) const;
+  std::vector<GeometryGroupMetadata> collect_group_metadata(idb::IdbDesign& design) const;
   GeometrySyncResult sync_instance(idb::IdbInstance& instance, GeometryStore& store) const;
   GeometrySyncResult sync_net(idb::IdbDesign& design, idb::IdbNet& net, GeometryStore& store) const;
   GeometrySyncResult sync_special_net(idb::IdbDesign& design, idb::IdbSpecialNet& net, GeometryStore& store) const;
@@ -61,6 +68,7 @@ class GeometryBuilder
   GeometrySyncResult sync_region(idb::IdbDesign& design, idb::IdbRegion& region, GeometryStore& store) const;
   GeometrySyncResult sync_slot(idb::IdbDesign& design, idb::IdbSlot& slot, GeometryStore& store) const;
   GeometrySyncResult sync_fill(idb::IdbDesign& design, idb::IdbFill& fill, GeometryStore& store) const;
+  GeometrySyncResult sync_io_pin(idb::IdbDesign& design, idb::IdbPin& pin, GeometryStore& store) const;
 };
 
 }  // namespace ecc::geometry

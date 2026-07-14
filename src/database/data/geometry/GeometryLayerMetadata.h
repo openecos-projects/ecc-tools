@@ -17,6 +17,13 @@ struct GeometryLayerMetadata
   int32_t width = 0;
   int32_t pitch_x = 0;
   int32_t pitch_y = 0;
+  int32_t min_spacing = 0;
+  int32_t min_area = 0;
+  int32_t min_step = 0;
+  int32_t cut_spacing = 0;
+  std::string enclosure_below;
+  std::string enclosure_above;
+  uint32_t lef58_rule_count = 0;
 };
 
 }  // namespace ecc::geometry

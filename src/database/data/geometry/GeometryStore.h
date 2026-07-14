@@ -79,6 +79,7 @@ class GeometryStore
   ShapeId add_point(LayerId layer_id, PointPayload point, OwnerRef owner, uint32_t flags = 0);
   ShapeId add_line(LayerId layer_id, LinePayload line, OwnerRef owner, uint32_t flags = 0);
   void add_owner_name(OwnerType type, OwnerId owner_id, std::string_view name);
+  NameId add_local_name(std::string_view name);
   bool update_rect(ShapeId id, Rect32 rect, uint64_t command_id = 0);
   bool delete_shape(ShapeId id);
 

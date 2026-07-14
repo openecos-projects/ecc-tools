@@ -86,6 +86,11 @@ bool write_manifest(const std::filesystem::path& path, const SnapshotWriteResult
   file << "delta=" << file_prefix << "/geometry.delta.bin\n";
   file << "view=" << file_prefix << "/geometry.view.bin\n";
   file << "layers=" << file_prefix << "/geometry.layers.txt\n";
+  file << "sites=" << file_prefix << "/geometry.sites.txt\n";
+  file << "masters=" << file_prefix << "/geometry.masters.txt\n";
+  file << "connectivity=" << file_prefix << "/geometry.connectivity.txt\n";
+  file << "buses=" << file_prefix << "/geometry.buses.txt\n";
+  file << "groups=" << file_prefix << "/geometry.groups.txt\n";
   return static_cast<bool>(file);
 }
 
@@ -208,6 +213,8 @@ std::vector<GeometryLayerMetadata> make_layer_metadata(std::span<const ShapeReco
     normalized.name = sanitize_layer_text(normalized.name, "L" + std::to_string(normalized.layer_id));
     normalized.type = sanitize_layer_text(normalized.type, "unknown");
     normalized.direction = sanitize_layer_text(normalized.direction, "unknown");
+    normalized.enclosure_below = sanitize_layer_text(normalized.enclosure_below, "");
+    normalized.enclosure_above = sanitize_layer_text(normalized.enclosure_above, "");
     by_layer[metadata.layer_id] = normalized;
   }
 
@@ -239,11 +246,101 @@ bool write_layer_metadata_file(const std::filesystem::path& path, std::span<cons
     return false;
   }
 
-  file << "layer_id\torder\ttype\tdirection\twidth\tpitch_x\tpitch_y\tname\n";
+  file << "layer_id\torder\ttype\tdirection\twidth\tpitch_x\tpitch_y\tname\tmin_spacing\tmin_area\tmin_step\tcut_spacing\t"
+          "enclosure_below\tenclosure_above\tlef58_rule_count\n";
   for (const GeometryLayerMetadata& layer : layers) {
     file << layer.layer_id << '\t' << layer.order << '\t' << sanitize_layer_text(layer.type, "unknown") << '\t'
          << sanitize_layer_text(layer.direction, "unknown") << '\t' << layer.width << '\t' << layer.pitch_x << '\t'
-         << layer.pitch_y << '\t' << sanitize_layer_text(layer.name, "L" + std::to_string(layer.layer_id)) << '\n';
+         << layer.pitch_y << '\t' << sanitize_layer_text(layer.name, "L" + std::to_string(layer.layer_id)) << '\t'
+         << layer.min_spacing << '\t' << layer.min_area << '\t' << layer.min_step << '\t' << layer.cut_spacing << '\t'
+         << sanitize_layer_text(layer.enclosure_below, "") << '\t' << sanitize_layer_text(layer.enclosure_above, "") << '\t'
+         << layer.lef58_rule_count << '\n';
+  }
+
+  return static_cast<bool>(file);
+}
+
+bool write_site_metadata_file(const std::filesystem::path& path, std::span<const GeometrySiteMetadata> sites)
+{
+  std::ofstream file(path);
+  if (!file) {
+    return false;
+  }
+
+  file << "name\tclass\tsymmetry\torient\twidth\theight\tis_overlap\n";
+  for (const GeometrySiteMetadata& site : sites) {
+    file << sanitize_layer_text(site.name, "") << '\t' << sanitize_layer_text(site.site_class, "unknown") << '\t'
+         << sanitize_layer_text(site.symmetry, "") << '\t' << sanitize_layer_text(site.orient, "") << '\t' << site.width
+         << '\t' << site.height << '\t' << (site.is_overlap ? 1 : 0) << '\n';
+  }
+
+  return static_cast<bool>(file);
+}
+
+bool write_master_metadata_file(const std::filesystem::path& path, std::span<const GeometryMasterMetadata> masters)
+{
+  std::ofstream file(path);
+  if (!file) {
+    return false;
+  }
+
+  file << "name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count\n";
+  for (const GeometryMasterMetadata& master : masters) {
+    file << sanitize_layer_text(master.name, "") << '\t' << sanitize_layer_text(master.master_type, "unknown") << '\t'
+         << sanitize_layer_text(master.site, "") << '\t' << sanitize_layer_text(master.symmetry, "") << '\t'
+         << master.origin_x << '\t' << master.origin_y << '\t' << master.width << '\t' << master.height << '\t'
+         << master.term_count << '\t' << master.obs_count << '\n';
+  }
+
+  return static_cast<bool>(file);
+}
+
+bool write_connectivity_metadata_file(const std::filesystem::path& path,
+                                      std::span<const GeometryConnectivityMetadata> connectivity)
+{
+  std::ofstream file(path);
+  if (!file) {
+    return false;
+  }
+
+  file << "net\tkind\tendpoint_type\tinstance\tpin\tmaster\n";
+  for (const GeometryConnectivityMetadata& endpoint : connectivity) {
+    file << sanitize_layer_text(endpoint.net_name, "") << '\t' << sanitize_layer_text(endpoint.net_kind, "regular") << '\t'
+         << sanitize_layer_text(endpoint.endpoint_type, "unknown") << '\t'
+         << sanitize_layer_text(endpoint.instance_name, "") << '\t' << sanitize_layer_text(endpoint.pin_name, "") << '\t'
+         << sanitize_layer_text(endpoint.master_name, "") << '\n';
+  }
+
+  return static_cast<bool>(file);
+}
+
+bool write_bus_metadata_file(const std::filesystem::path& path, std::span<const GeometryBusMetadata> buses)
+{
+  std::ofstream file(path);
+  if (!file) {
+    return false;
+  }
+
+  file << "name\ttype\tleft\tright\tnet_count\tpin_count\n";
+  for (const GeometryBusMetadata& bus : buses) {
+    file << sanitize_layer_text(bus.name, "") << '\t' << sanitize_layer_text(bus.bus_type, "unknown") << '\t' << bus.left
+         << '\t' << bus.right << '\t' << bus.net_count << '\t' << bus.pin_count << '\n';
+  }
+
+  return static_cast<bool>(file);
+}
+
+bool write_group_metadata_file(const std::filesystem::path& path, std::span<const GeometryGroupMetadata> groups)
+{
+  std::ofstream file(path);
+  if (!file) {
+    return false;
+  }
+
+  file << "name\tregion\tinstance_count\n";
+  for (const GeometryGroupMetadata& group : groups) {
+    file << sanitize_layer_text(group.name, "") << '\t' << sanitize_layer_text(group.region_name, "") << '\t'
+         << group.instance_count << '\n';
   }
 
   return static_cast<bool>(file);
@@ -285,6 +382,11 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   const std::vector<GeometryViewTileRecord> view_records = make_view_tile_records(lod_summaries);
   const std::vector<GeometryLayerMetadata> layers = make_layer_metadata(records, options.layers);
   result.layer_count = static_cast<uint64_t>(layers.size());
+  result.site_count = static_cast<uint64_t>(options.sites.size());
+  result.master_count = static_cast<uint64_t>(options.masters.size());
+  result.connectivity_count = static_cast<uint64_t>(options.connectivity.size());
+  result.bus_count = static_cast<uint64_t>(options.buses.size());
+  result.group_count = static_cast<uint64_t>(options.groups.size());
 
   GeometryMetaRecord meta;
   meta.shape_count = result.shape_count;
@@ -321,8 +423,15 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
                  view_records.size(), view_records.data(),
                  static_cast<uint64_t>(view_records.size() * sizeof(GeometryViewTileRecord)));
   const bool wrote_layers = write_layer_metadata_file(epoch_dir / "geometry.layers.txt", layers);
+  const bool wrote_sites = write_site_metadata_file(epoch_dir / "geometry.sites.txt", options.sites);
+  const bool wrote_masters = write_master_metadata_file(epoch_dir / "geometry.masters.txt", options.masters);
+  const bool wrote_connectivity =
+      write_connectivity_metadata_file(epoch_dir / "geometry.connectivity.txt", options.connectivity);
+  const bool wrote_buses = write_bus_metadata_file(epoch_dir / "geometry.buses.txt", options.buses);
+  const bool wrote_groups = write_group_metadata_file(epoch_dir / "geometry.groups.txt", options.groups);
   const bool wrote_files = wrote_meta && wrote_shapes && wrote_owners && wrote_payload && wrote_names && wrote_name_index
-                           && wrote_sidmap && wrote_delta && wrote_view && wrote_layers;
+                           && wrote_sidmap && wrote_delta && wrote_view && wrote_layers && wrote_sites && wrote_masters
+                           && wrote_connectivity && wrote_buses && wrote_groups;
   const std::string file_prefix = (std::filesystem::path("epochs") / std::to_string(result.epoch)).generic_string();
   const bool wrote_manifest = wrote_files && publish_manifest(options.output_dir, result, file_prefix, options);
 

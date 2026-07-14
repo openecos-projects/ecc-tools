@@ -231,6 +231,25 @@ void test_geometry_store_queries_alive_shapes_by_owner_name()
   assert(store.query_owner_name("missing").empty());
 }
 
+void test_geometry_store_local_names_do_not_pollute_owner_name_queries()
+{
+  GeometryStore store;
+
+  const NameId local_name_id = store.add_local_name("via:VIA12");
+
+  OwnerRef via_owner;
+  via_owner.type = OwnerType::kVia;
+  via_owner.owner_id = 77;
+  via_owner.name_id = local_name_id;
+  const ShapeId via_shape = store.add_rect(12, Rect32{0, 0, 4, 4}, via_owner);
+
+  assert(local_name_id == 1);
+  assert(store.name_records().size() == 1);
+  assert(store.name_payloads().size() == 9);
+  assert(store.owner_of(via_shape).name_id == local_name_id);
+  assert(store.query_owner_name("via:VIA12").empty());
+}
+
 void test_geometry_store_counts_alive_shapes_by_owner_type_and_layer()
 {
   GeometryStore store;
@@ -720,6 +739,7 @@ int main()
   test_geometry_store_supports_point_and_line_shapes();
   test_geometry_store_queries_alive_shapes_by_owner();
   test_geometry_store_queries_alive_shapes_by_owner_name();
+  test_geometry_store_local_names_do_not_pollute_owner_name_queries();
   test_geometry_store_counts_alive_shapes_by_owner_type_and_layer();
   test_owner_type_label_includes_instance_halo();
   test_geometry_spatial_index_returns_unique_layer_candidates();

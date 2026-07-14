@@ -283,6 +283,24 @@ void GeometryStore::add_owner_name(OwnerType type, OwnerId owner_id, std::string
   _name_index[std::string{name}].push_back(make_owner_key(type, owner_id));
 }
 
+NameId GeometryStore::add_local_name(std::string_view name)
+{
+  if (name.empty()) {
+    return 0;
+  }
+
+  GeometryNameRecord record;
+  record.owner_type = OwnerType::kNone;
+  record.owner_id = 0;
+  record.name_offset = static_cast<uint64_t>(_name_payloads.size());
+  record.name_size = static_cast<uint32_t>(name.size());
+
+  const auto* name_begin = reinterpret_cast<const std::byte*>(name.data());
+  _name_payloads.insert(_name_payloads.end(), name_begin, name_begin + name.size());
+  _name_records.push_back(record);
+  return static_cast<NameId>(_name_records.size());
+}
+
 bool GeometryStore::update_rect(ShapeId id, Rect32 rect, uint64_t command_id)
 {
   const ShapeRecord* current = _shapes.find(id);

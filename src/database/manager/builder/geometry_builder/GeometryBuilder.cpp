@@ -1,8 +1,11 @@
 #include "GeometryBuilder.h"
 
 #include "IdbBlockages.h"
+#include "IdbBus.h"
 #include "IdbDesign.h"
+#include "IdbEnum.h"
 #include "IdbFill.h"
+#include "IdbGroup.h"
 #include "IdbGCellGrid.h"
 #include "IdbInstance.h"
 #include "IdbLayout.h"
@@ -13,10 +16,12 @@
 #include "IdbSpecialNet.h"
 #include "IdbSpecialWire.h"
 #include "IdbTrackGrid.h"
+#include "IdbViaMaster.h"
 #include "IdbVias.h"
 
 #include <algorithm>
 #include <limits>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
 
@@ -91,6 +96,252 @@ const char* layer_direction_name(idb::IdbLayerDirection direction)
   }
 }
 
+int32_t min_positive_spacing(idb::IdbLayerSpacingList* spacing_list)
+{
+  if (spacing_list == nullptr) {
+    return 0;
+  }
+
+  int32_t min_spacing = 0;
+  for (auto* spacing : spacing_list->get_spacing_list()) {
+    if (spacing == nullptr || spacing->get_min_spacing() <= 0) {
+      continue;
+    }
+    if (min_spacing == 0 || spacing->get_min_spacing() < min_spacing) {
+      min_spacing = spacing->get_min_spacing();
+    }
+  }
+  return min_spacing;
+}
+
+int32_t min_positive_area(idb::IdbMinEncloseAreaList* area_list)
+{
+  if (area_list == nullptr) {
+    return 0;
+  }
+
+  int32_t min_area = 0;
+  for (const auto& area : area_list->get_min_area_list()) {
+    if (area._area <= 0) {
+      continue;
+    }
+    if (min_area == 0 || area._area < min_area) {
+      min_area = area._area;
+    }
+  }
+  return min_area;
+}
+
+int32_t min_positive_cut_spacing(idb::IdbLayerCut* cut_layer)
+{
+  if (cut_layer == nullptr) {
+    return 0;
+  }
+
+  int32_t min_spacing = 0;
+  for (auto* spacing : cut_layer->get_spacings()) {
+    if (spacing == nullptr || spacing->get_spacing() <= 0) {
+      continue;
+    }
+    if (min_spacing == 0 || spacing->get_spacing() < min_spacing) {
+      min_spacing = spacing->get_spacing();
+    }
+  }
+  return min_spacing;
+}
+
+std::string enclosure_summary(idb::IdbLayerCutEnclosure* enclosure)
+{
+  if (enclosure == nullptr) {
+    return {};
+  }
+  return std::to_string(enclosure->get_overhang_1()) + "," + std::to_string(enclosure->get_overhang_2());
+}
+
+std::string via_local_name(idb::IdbVia* via)
+{
+  if (via == nullptr) {
+    return {};
+  }
+  if (!via->get_name().empty()) {
+    return "via:" + via->get_name();
+  }
+  if (via->get_instance() != nullptr && !via->get_instance()->get_name().empty()) {
+    return "via:" + via->get_instance()->get_name();
+  }
+  return {};
+}
+
+OwnerRef with_via_local_name(GeometryStore& store, idb::IdbVia* via, OwnerRef owner)
+{
+  const std::string local_name = via_local_name(via);
+  if (!local_name.empty()) {
+    owner.name_id = store.add_local_name(local_name);
+  }
+  return owner;
+}
+
+std::string master_local_name(idb::IdbCellMaster* master)
+{
+  if (master == nullptr || master->get_name().empty()) {
+    return {};
+  }
+
+  std::string local_name = "master:" + master->get_name();
+  if (master->get_site() != nullptr && !master->get_site()->get_name().empty()) {
+    local_name += " site:" + master->get_site()->get_name();
+  }
+  return local_name;
+}
+
+OwnerRef with_master_local_name(GeometryStore& store, idb::IdbCellMaster* master, OwnerRef owner)
+{
+  const std::string local_name = master_local_name(master);
+  if (!local_name.empty()) {
+    owner.name_id = store.add_local_name(local_name);
+  }
+  return owner;
+}
+
+uint32_t routing_lef58_rule_count(idb::IdbLayerRouting* routing_layer)
+{
+  if (routing_layer == nullptr) {
+    return 0;
+  }
+
+  uint32_t count = 0;
+  count += static_cast<uint32_t>(routing_layer->get_lef58_spacing_eol_list().size());
+  count += static_cast<uint32_t>(routing_layer->get_lef58_area().size());
+  count += routing_layer->get_lef58_corner_fill_spacing() != nullptr ? 1U : 0U;
+  count += static_cast<uint32_t>(routing_layer->get_lef58_corner_spacing_list().size());
+  count += static_cast<uint32_t>(routing_layer->get_lef58_minimum_cut().size());
+  count += static_cast<uint32_t>(routing_layer->get_lef58_min_step().size());
+  count += routing_layer->get_lef58_spacing_notchlength() != nullptr ? 1U : 0U;
+  count += routing_layer->get_lef58_spacingtable_jogtojog() != nullptr ? 1U : 0U;
+  return count;
+}
+
+uint32_t cut_lef58_rule_count(idb::IdbLayerCut* cut_layer)
+{
+  if (cut_layer == nullptr) {
+    return 0;
+  }
+
+  uint32_t count = 0;
+  count += static_cast<uint32_t>(cut_layer->get_lef58_cutclass_list().size());
+  count += static_cast<uint32_t>(cut_layer->get_lef58_enclosure_list().size());
+  count += static_cast<uint32_t>(cut_layer->get_lef58_enclosure_edge_list().size());
+  count += cut_layer->get_lef58_eol_enclosure() != nullptr ? 1U : 0U;
+  count += cut_layer->get_lef58_eol_spacing() != nullptr ? 1U : 0U;
+  count += static_cast<uint32_t>(cut_layer->get_lef58_spacing_table().size());
+  return count;
+}
+
+const char* site_class_name(idb::IdbSiteClass site_class)
+{
+  switch (site_class) {
+    case idb::IdbSiteClass::kCore:
+      return "CORE";
+    case idb::IdbSiteClass::kPad:
+      return "PAD";
+    case idb::IdbSiteClass::kCorner:
+      return "CORNER";
+    default:
+      return "unknown";
+  }
+}
+
+const char* site_symmetry_name(idb::IdbSymmetry symmetry)
+{
+  switch (symmetry) {
+    case idb::IdbSymmetry::kX:
+      return "X";
+    case idb::IdbSymmetry::kY:
+      return "Y";
+    case idb::IdbSymmetry::kR90:
+      return "R90";
+    default:
+      return "";
+  }
+}
+
+std::string orient_name(idb::IdbOrient orient)
+{
+  if (auto* site_property = idb::IdbEnum::GetInstance()->get_site_property(); site_property != nullptr) {
+    return site_property->get_orient_name(orient);
+  }
+  return {};
+}
+
+std::string cell_master_type_name(idb::CellMasterType type)
+{
+  if (auto* cell_property = idb::IdbEnum::GetInstance()->get_cell_property(); cell_property != nullptr) {
+    std::string name = cell_property->get_name(type);
+    if (!name.empty()) {
+      return name;
+    }
+  }
+  return "unknown";
+}
+
+std::string master_symmetry_name(idb::IdbCellMaster* master)
+{
+  if (master == nullptr) {
+    return {};
+  }
+
+  std::string symmetry;
+  const auto append = [&symmetry](const char* value) {
+    if (!symmetry.empty()) {
+      symmetry += ',';
+    }
+    symmetry += value;
+  };
+
+  if (master->is_symmetry_x()) {
+    append("X");
+  }
+  if (master->is_symmetry_y()) {
+    append("Y");
+  }
+  if (master->is_symmetry_R90()) {
+    append("R90");
+  }
+  return symmetry;
+}
+
+const char* bus_type_name(idb::IdbBus::kBusType type)
+{
+  switch (type) {
+    case idb::IdbBus::kBusNet:
+      return "net";
+    case idb::IdbBus::kBusInstancePin:
+      return "instance_pin";
+    case idb::IdbBus::kBusIo:
+      return "io";
+    default:
+      return "unknown";
+  }
+}
+
+GeometryConnectivityMetadata connectivity_metadata_from_pin(idb::IdbNet* net, idb::IdbPin* pin,
+                                                            const char* endpoint_type)
+{
+  GeometryConnectivityMetadata metadata;
+  metadata.net_name = net == nullptr ? std::string{} : net->get_net_name();
+  metadata.net_kind = "regular";
+  metadata.endpoint_type = endpoint_type == nullptr ? "unknown" : endpoint_type;
+  metadata.pin_name = pin == nullptr ? std::string{} : pin->get_pin_name();
+  auto* instance = pin == nullptr ? nullptr : pin->get_instance();
+  if (instance != nullptr) {
+    metadata.instance_name = instance->get_name();
+    if (instance->get_cell_master() != nullptr) {
+      metadata.master_name = instance->get_cell_master()->get_name();
+    }
+  }
+  return metadata;
+}
+
 GeometryLayerMetadata layer_metadata_from_idb(idb::IdbLayer* layer)
 {
   GeometryLayerMetadata metadata;
@@ -108,8 +359,25 @@ GeometryLayerMetadata layer_metadata_from_idb(idb::IdbLayer* layer)
     metadata.width = routing_layer->get_width();
     metadata.pitch_x = routing_layer->get_pitch_x();
     metadata.pitch_y = routing_layer->get_pitch_y();
+    metadata.min_spacing = min_positive_spacing(routing_layer->get_spacing_list());
+    metadata.min_area = routing_layer->get_area();
+    if (metadata.min_area <= 0) {
+      metadata.min_area = min_positive_area(routing_layer->get_min_enclose_area_list());
+    }
+    if (auto min_step = routing_layer->get_min_step(); min_step != nullptr) {
+      metadata.min_step = min_step->get_min_step_length();
+    }
+    if (metadata.min_step <= 0 && !routing_layer->get_lef58_min_step().empty()
+        && routing_layer->get_lef58_min_step().front() != nullptr) {
+      metadata.min_step = routing_layer->get_lef58_min_step().front()->get_min_step_length();
+    }
+    metadata.lef58_rule_count = routing_lef58_rule_count(routing_layer);
   } else if (auto* cut_layer = dynamic_cast<idb::IdbLayerCut*>(layer); cut_layer != nullptr) {
     metadata.width = cut_layer->get_width();
+    metadata.cut_spacing = min_positive_cut_spacing(cut_layer);
+    metadata.enclosure_below = enclosure_summary(cut_layer->get_enclosure_below());
+    metadata.enclosure_above = enclosure_summary(cut_layer->get_enclosure_above());
+    metadata.lef58_rule_count = cut_lef58_rule_count(cut_layer);
   }
 
   return metadata;
@@ -308,6 +576,7 @@ uint64_t emit_via_cut_shapes(GeometryStore& store, idb::IdbVia* via, OwnerRef ow
     return 0;
   }
 
+  owner = with_via_local_name(store, via, owner);
   idb::IdbLayerShape cut_shape = via->get_cut_layer_shape();
   return emit_layer_shape_rects(store, cut_shape, owner);
 }
@@ -319,6 +588,7 @@ uint64_t emit_via_cut_shapes_at(GeometryStore& store, idb::IdbVia* via, idb::Idb
     return 0;
   }
 
+  owner = with_via_local_name(store, via, owner);
   idb::IdbLayerShape cut_shape;
   via->get_instance()->get_cut_layer_shape()->clone(cut_shape);
   cut_shape.moveToLocation(origin);
@@ -452,6 +722,25 @@ bool resolve_fill_owner_id(idb::IdbDesign& design, idb::IdbFill& fill, OwnerId& 
   return false;
 }
 
+bool resolve_io_pin_path(idb::IdbDesign& design, idb::IdbPin& pin, uint32_t& pin_index)
+{
+  auto* pin_list = design.get_io_pin_list();
+  if (pin_list == nullptr) {
+    return false;
+  }
+
+  uint32_t index = 0;
+  for (auto* candidate : pin_list->get_pin_list()) {
+    if (candidate == &pin) {
+      pin_index = index;
+      return true;
+    }
+    ++index;
+  }
+
+  return false;
+}
+
 void delete_unseen_owner_shapes(GeometryStore& store, OwnerType type, OwnerId owner_id,
                                 const std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
 {
@@ -537,6 +826,7 @@ void reconcile_via_cut_shapes(GeometryStore& store, idb::IdbVia* via, OwnerRef o
     return;
   }
 
+  owner = with_via_local_name(store, via, owner);
   idb::IdbLayerShape cut_shape = via->get_cut_layer_shape();
   reconcile_layer_shape_rects(store, cut_shape, owner, seen_shape_ids, result);
 }
@@ -549,6 +839,7 @@ void reconcile_via_cut_shapes_at(GeometryStore& store, idb::IdbVia* via, idb::Id
     return;
   }
 
+  owner = with_via_local_name(store, via, owner);
   idb::IdbLayerShape cut_shape;
   via->get_instance()->get_cut_layer_shape()->clone(cut_shape);
   cut_shape.moveToLocation(origin);
@@ -622,7 +913,8 @@ OwnerId pin_owner_id_from_path(idb::IdbPin* pin, uint32_t path0, uint32_t path1)
   return pin->get_id() != 0 ? pin->get_id() : (static_cast<OwnerId>(path0) << 32U | path1);
 }
 
-PinPortShapeCounts emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t path0, uint32_t path1)
+PinPortShapeCounts emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t path0, uint32_t path1,
+                                        idb::IdbCellMaster* master = nullptr)
 {
   if (pin == nullptr) {
     return {};
@@ -650,6 +942,7 @@ PinPortShapeCounts emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, 
       owner.path1 = path1;
       owner.path2 = layer_shape_index;
       owner.path3 = rect_index++;
+      owner = with_master_local_name(store, master, owner);
 
       if (emit_rect_if_present(store, layer_id_from_idb(layer_shape->get_layer()), rect_from_idb(rect), owner) != 0) {
         ++counts.port_shape_count;
@@ -674,6 +967,7 @@ PinPortShapeCounts emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, 
 }
 
 void reconcile_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t path0, uint32_t path1,
+                               idb::IdbCellMaster* master,
                                std::unordered_set<ShapeId>& seen_pin_shape_ids,
                                std::unordered_set<ShapeId>& seen_via_shape_ids, GeometrySyncResult& result)
 {
@@ -698,6 +992,7 @@ void reconcile_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t 
       owner.path1 = path1;
       owner.path2 = layer_shape_index;
       owner.path3 = rect_index++;
+      owner = with_master_local_name(store, master, owner);
       reconcile_rect_shape(store, owner.type, owner.owner_id, layer_id_from_idb(layer_shape->get_layer()), rect_from_idb(rect),
                            owner, seen_pin_shape_ids, result);
     }
@@ -817,6 +1112,7 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
       owner.owner_id = instance_owner_id;
       owner.path0 = instance_index;
       store.add_owner_name(owner.type, owner.owner_id, instance->get_name());
+      owner = with_master_local_name(store, instance->get_cell_master(), owner);
       if (emit_layout_rect_if_present(store, rect_from_idb(instance->get_bounding_box()), owner) != 0) {
         ++result.instance_shape_count;
       }
@@ -829,6 +1125,7 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
         halo_owner.owner_id = instance_owner_id;
         halo_owner.path0 = instance_index;
         store.add_owner_name(halo_owner.type, halo_owner.owner_id, instance->get_name());
+        halo_owner = with_master_local_name(store, instance->get_cell_master(), halo_owner);
         if (emit_layout_rect_if_present(store, rect_from_idb(halo->get_bounding_box()), halo_owner) != 0) {
           ++result.instance_halo_shape_count;
         }
@@ -837,7 +1134,8 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
       if (auto* pins = instance->get_pin_list(); pins != nullptr) {
         uint32_t pin_index = 0;
         for (auto* pin : pins->get_pin_list()) {
-          const PinPortShapeCounts pin_counts = emit_pin_port_shapes(store, pin, instance_index, pin_index++);
+          const PinPortShapeCounts pin_counts =
+              emit_pin_port_shapes(store, pin, instance_index, pin_index++, instance->get_cell_master());
           result.pin_shape_count += pin_counts.port_shape_count;
           result.via_shape_count += pin_counts.via_shape_count;
         }
@@ -861,6 +1159,7 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
             obs_owner.path0 = instance_index;
             obs_owner.path1 = obs_layer_index;
             obs_owner.path2 = rect_index++;
+            obs_owner = with_master_local_name(store, instance->get_cell_master(), obs_owner);
 
             if (emit_rect_if_present(store, layer_id_from_idb(obs_shape->get_layer()), rect_from_idb(rect), obs_owner) != 0) {
               ++result.obs_shape_count;
@@ -1128,6 +1427,160 @@ std::vector<GeometryLayerMetadata> GeometryBuilder::collect_layer_metadata(idb::
     return lhs.layer_id < rhs.layer_id;
   });
   return layers;
+}
+
+std::vector<GeometrySiteMetadata> GeometryBuilder::collect_site_metadata(idb::IdbLayout& layout) const
+{
+  std::vector<GeometrySiteMetadata> sites;
+  auto* idb_sites = layout.get_sites();
+  if (idb_sites == nullptr) {
+    return sites;
+  }
+
+  for (auto* site : idb_sites->get_site_list()) {
+    if (site == nullptr) {
+      continue;
+    }
+
+    GeometrySiteMetadata metadata;
+    metadata.name = site->get_name();
+    metadata.site_class = site_class_name(site->get_site_class());
+    metadata.symmetry = site_symmetry_name(site->get_symmetry());
+    metadata.orient = orient_name(site->get_orient());
+    metadata.width = site->get_width();
+    metadata.height = site->get_height();
+    metadata.is_overlap = site->is_overlap();
+    sites.push_back(metadata);
+  }
+
+  std::sort(sites.begin(), sites.end(), [](const GeometrySiteMetadata& lhs, const GeometrySiteMetadata& rhs) {
+    return lhs.name < rhs.name;
+  });
+  return sites;
+}
+
+std::vector<GeometryMasterMetadata> GeometryBuilder::collect_master_metadata(idb::IdbLayout& layout) const
+{
+  std::vector<GeometryMasterMetadata> masters;
+  auto* master_list = layout.get_cell_master_list();
+  if (master_list == nullptr) {
+    return masters;
+  }
+
+  for (auto* master : master_list->get_cell_master()) {
+    if (master == nullptr) {
+      continue;
+    }
+
+    GeometryMasterMetadata metadata;
+    metadata.name = master->get_name();
+    metadata.master_type = cell_master_type_name(master->get_type());
+    metadata.site = master->get_site() == nullptr ? std::string{} : master->get_site()->get_name();
+    metadata.symmetry = master_symmetry_name(master);
+    metadata.origin_x = master->get_origin_x();
+    metadata.origin_y = master->get_origin_y();
+    metadata.width = master->get_width();
+    metadata.height = master->get_height();
+    metadata.term_count = static_cast<uint32_t>(master->get_term_num());
+    metadata.obs_count = static_cast<uint32_t>(master->get_obs_list().size());
+    masters.push_back(metadata);
+  }
+
+  std::sort(masters.begin(), masters.end(), [](const GeometryMasterMetadata& lhs, const GeometryMasterMetadata& rhs) {
+    return lhs.name < rhs.name;
+  });
+  return masters;
+}
+
+std::vector<GeometryConnectivityMetadata> GeometryBuilder::collect_connectivity_metadata(idb::IdbDesign& design) const
+{
+  std::vector<GeometryConnectivityMetadata> connectivity;
+  auto* net_list = design.get_net_list();
+  if (net_list == nullptr) {
+    return connectivity;
+  }
+
+  for (auto* net : net_list->get_net_list()) {
+    if (net == nullptr) {
+      continue;
+    }
+
+    if (auto* io_pins = net->get_io_pins(); io_pins != nullptr) {
+      for (auto* pin : io_pins->get_pin_list()) {
+        if (pin != nullptr) {
+          connectivity.push_back(connectivity_metadata_from_pin(net, pin, "io"));
+        }
+      }
+    }
+
+    if (auto* instance_pins = net->get_instance_pin_list(); instance_pins != nullptr) {
+      for (auto* pin : instance_pins->get_pin_list()) {
+        if (pin != nullptr) {
+          connectivity.push_back(connectivity_metadata_from_pin(net, pin, "instance"));
+        }
+      }
+    }
+  }
+
+  std::sort(connectivity.begin(), connectivity.end(),
+            [](const GeometryConnectivityMetadata& lhs, const GeometryConnectivityMetadata& rhs) {
+              return std::tie(lhs.net_name, lhs.endpoint_type, lhs.instance_name, lhs.pin_name)
+                     < std::tie(rhs.net_name, rhs.endpoint_type, rhs.instance_name, rhs.pin_name);
+            });
+  return connectivity;
+}
+
+std::vector<GeometryBusMetadata> GeometryBuilder::collect_bus_metadata(idb::IdbDesign& design) const
+{
+  std::vector<GeometryBusMetadata> buses;
+  auto* bus_list = design.get_bus_list();
+  if (bus_list == nullptr) {
+    return buses;
+  }
+
+  for (const idb::IdbBus& bus : bus_list->get_bus_list()) {
+    GeometryBusMetadata metadata;
+    metadata.name = bus.get_name();
+    metadata.bus_type = bus_type_name(bus.get_type());
+    metadata.left = bus.get_left();
+    metadata.right = bus.get_right();
+    metadata.net_count = static_cast<uint32_t>(bus.getNets().size());
+    metadata.pin_count = static_cast<uint32_t>(bus.getPins().size());
+    buses.push_back(metadata);
+  }
+
+  std::sort(buses.begin(), buses.end(), [](const GeometryBusMetadata& lhs, const GeometryBusMetadata& rhs) {
+    return lhs.name < rhs.name;
+  });
+  return buses;
+}
+
+std::vector<GeometryGroupMetadata> GeometryBuilder::collect_group_metadata(idb::IdbDesign& design) const
+{
+  std::vector<GeometryGroupMetadata> groups;
+  auto* group_list = design.get_group_list();
+  if (group_list == nullptr) {
+    return groups;
+  }
+
+  for (auto* group : group_list->get_group_list()) {
+    if (group == nullptr) {
+      continue;
+    }
+
+    GeometryGroupMetadata metadata;
+    metadata.name = group->get_group_name();
+    metadata.region_name = group->get_region() == nullptr ? std::string{} : group->get_region()->get_name();
+    metadata.instance_count = group->get_instance_list() == nullptr
+                                  ? 0
+                                  : static_cast<uint32_t>(group->get_instance_list()->get_instance_list().size());
+    groups.push_back(metadata);
+  }
+
+  std::sort(groups.begin(), groups.end(), [](const GeometryGroupMetadata& lhs, const GeometryGroupMetadata& rhs) {
+    return lhs.name < rhs.name;
+  });
+  return groups;
 }
 
 GeometrySyncResult GeometryBuilder::sync_net(idb::IdbDesign& design, idb::IdbNet& net, GeometryStore& store) const
@@ -1496,6 +1949,7 @@ GeometrySyncResult GeometryBuilder::sync_instance(idb::IdbInstance& instance, Ge
         obs_owner.path0 = instance_path0;
         obs_owner.path1 = obs_layer_index;
         obs_owner.path2 = rect_index++;
+        obs_owner = with_master_local_name(store, instance.get_cell_master(), obs_owner);
 
         reconcile_rect_shape(store, obs_owner.type, obs_owner.owner_id, layer_id_from_idb(obs_shape->get_layer()),
                              rect_from_idb(rect), obs_owner, seen_obs_shape_ids, result);
@@ -1526,7 +1980,8 @@ GeometrySyncResult GeometryBuilder::sync_instance(idb::IdbInstance& instance, Ge
       const OwnerId pin_owner_id = pin_owner_id_from_path(pin, instance_path0, pin_index);
       current_pin_owner_ids.push_back(pin_owner_id);
       current_pin_via_owner_ids.push_back(make_derived_owner_id(OwnerType::kPinPortShape, pin_owner_id));
-      reconcile_pin_port_shapes(store, pin, instance_path0, pin_index++, seen_pin_shape_ids, seen_pin_via_shape_ids, result);
+      reconcile_pin_port_shapes(store, pin, instance_path0, pin_index++, instance.get_cell_master(), seen_pin_shape_ids,
+                                seen_pin_via_shape_ids, result);
     }
 
     for (const OwnerId pin_owner_id : current_pin_owner_ids) {
@@ -1555,6 +2010,29 @@ GeometrySyncResult GeometryBuilder::sync_instance(idb::IdbInstance& instance, Ge
       }
     }
   }
+
+  result.ok = result.missing_shape_count == 0;
+  return result;
+}
+
+GeometrySyncResult GeometryBuilder::sync_io_pin(idb::IdbDesign& design, idb::IdbPin& pin, GeometryStore& store) const
+{
+  GeometrySyncResult result;
+  uint32_t pin_index = 0;
+  if (!resolve_io_pin_path(design, pin, pin_index)) {
+    result.missing_shape_count = 1;
+    return result;
+  }
+
+  std::unordered_set<ShapeId> seen_pin_shape_ids;
+  std::unordered_set<ShapeId> seen_via_shape_ids;
+  reconcile_pin_port_shapes(store, &pin, 0, pin_index, nullptr, seen_pin_shape_ids, seen_via_shape_ids, result);
+
+  const OwnerId pin_owner_id = pin_owner_id_from_path(&pin, 0, pin_index);
+  delete_unseen_owner_shapes(store, OwnerType::kPinPortShape, pin_owner_id, seen_pin_shape_ids, result);
+
+  const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kPinPortShape, pin_owner_id);
+  delete_unseen_owner_shapes(store, OwnerType::kVia, via_owner_id, seen_via_shape_ids, result);
 
   result.ok = result.missing_shape_count == 0;
   return result;
