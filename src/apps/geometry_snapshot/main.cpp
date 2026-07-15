@@ -239,6 +239,34 @@ std::string edit_status_name(ecc::geometry::GeometryEditStatus status)
   return "rejected";
 }
 
+std::string json_escape_string(std::string_view value)
+{
+  std::ostringstream escaped;
+  for (const char ch : value) {
+    switch (ch) {
+      case '\\':
+        escaped << "\\\\";
+        break;
+      case '"':
+        escaped << "\\\"";
+        break;
+      case '\n':
+        escaped << "\\n";
+        break;
+      case '\r':
+        escaped << "\\r";
+        break;
+      case '\t':
+        escaped << "\\t";
+        break;
+      default:
+        escaped << ch;
+        break;
+    }
+  }
+  return escaped.str();
+}
+
 uint64_t grid_column_count(uint64_t shape_count)
 {
   uint64_t columns = 1;
@@ -286,12 +314,18 @@ ecc::geometry::GeometryBuildResult build_synthetic_geometry(uint64_t shape_count
 
 std::string edit_result_json(const ecc::geometry::GeometryEditResult& result)
 {
+  const char* diagnostic_message =
+      ecc::geometry::geometry_edit_diagnostic_message(ecc::geometry::geometry_edit_diagnostic(result));
   std::ostringstream json;
   json << "{\n"
        << "  \"command_id\": " << result.command_id << ",\n"
        << "  \"shape_id\": " << result.shape_id << ",\n"
        << "  \"new_version\": " << result.new_version << ",\n"
-       << "  \"status\": \"" << edit_status_name(result.status) << "\",\n"
+       << "  \"status\": \"" << edit_status_name(result.status) << "\",\n";
+  if (diagnostic_message[0] != '\0') {
+    json << "  \"message\": \"" << json_escape_string(diagnostic_message) << "\",\n";
+  }
+  json
        << "  \"committed_bbox\": {\n"
        << "    \"lx\": " << result.committed_bbox.lx << ",\n"
        << "    \"ly\": " << result.committed_bbox.ly << ",\n"
@@ -442,6 +476,13 @@ int main(int argc, char** argv)
   ecc::geometry::GeometrySnapshotWriter writer;
   ecc::geometry::SnapshotWriteOptions write_options{std::filesystem::path(options.output_dir)};
   write_options.layers = geometry_builder.collect_layer_metadata(*def_service->get_layout());
+  write_options.sites = geometry_builder.collect_site_metadata(*def_service->get_layout());
+  write_options.masters = geometry_builder.collect_master_metadata(*def_service->get_layout());
+  write_options.vias = geometry_builder.collect_via_metadata(*def_service->get_layout(), *def_service->get_design());
+  write_options.grids = geometry_builder.collect_grid_metadata(*def_service->get_layout());
+  write_options.connectivity = geometry_builder.collect_connectivity_metadata(*def_service->get_design());
+  write_options.buses = geometry_builder.collect_bus_metadata(*def_service->get_design());
+  write_options.groups = geometry_builder.collect_group_metadata(*def_service->get_design());
   populate_snapshot_design_metadata(write_options, *def_service->get_design(), *def_service->get_layout());
   const ecc::geometry::SnapshotWriteResult write_result =
       writer.write(store, write_options);

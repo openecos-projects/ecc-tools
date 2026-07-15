@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cstdint>
 #include <map>
+#include <string>
 #include <vector>
 
 namespace {
@@ -712,6 +713,27 @@ void test_geometry_edit_command_carries_expected_version()
   assert(result.committed_bbox.hx == 12);
 }
 
+void test_geometry_edit_diagnostic_flags_round_trip()
+{
+  GeometryEditResult result;
+  result.flags = set_geometry_edit_diagnostic(result.flags, GeometryEditDiagnostic::kUnsupportedOwner);
+
+  assert(geometry_edit_diagnostic(result) == GeometryEditDiagnostic::kUnsupportedOwner);
+  assert(geometry_edit_diagnostic_message(geometry_edit_diagnostic(result))
+         == std::string("owner type is read-only for this edit path"));
+
+  result.flags = set_geometry_edit_diagnostic(result.flags, GeometryEditDiagnostic::kUnsupportedTransform);
+
+  assert(geometry_edit_diagnostic(result) == GeometryEditDiagnostic::kUnsupportedTransform);
+  assert(geometry_edit_diagnostic_message(geometry_edit_diagnostic(result))
+         == std::string("shape uses an orientation or transform unsupported by this edit path"));
+
+  result.flags = set_geometry_edit_diagnostic(result.flags, GeometryEditDiagnostic::kNone);
+
+  assert(geometry_edit_diagnostic(result) == GeometryEditDiagnostic::kNone);
+  assert(geometry_edit_diagnostic_message(geometry_edit_diagnostic(result))[0] == '\0');
+}
+
 void test_snapshot_header_has_stable_schema_identity()
 {
   GeometryFileHeader header;
@@ -756,6 +778,7 @@ int main()
   test_geometry_store_marks_and_rebuilds_dirty_lod_tiles();
   test_geometry_store_records_delta_events_for_insert_update_and_delete();
   test_geometry_edit_command_carries_expected_version();
+  test_geometry_edit_diagnostic_flags_round_trip();
   test_snapshot_header_has_stable_schema_identity();
   return 0;
 }

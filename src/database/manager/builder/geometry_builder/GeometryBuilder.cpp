@@ -96,6 +96,18 @@ const char* layer_direction_name(idb::IdbLayerDirection direction)
   }
 }
 
+const char* track_direction_name(idb::IdbTrackDirection direction)
+{
+  switch (direction) {
+    case idb::IdbTrackDirection::kDirectionX:
+      return "x";
+    case idb::IdbTrackDirection::kDirectionY:
+      return "y";
+    default:
+      return "unknown";
+  }
+}
+
 int32_t min_positive_spacing(idb::IdbLayerSpacingList* spacing_list)
 {
   if (spacing_list == nullptr) {
@@ -158,18 +170,289 @@ std::string enclosure_summary(idb::IdbLayerCutEnclosure* enclosure)
   return std::to_string(enclosure->get_overhang_1()) + "," + std::to_string(enclosure->get_overhang_2());
 }
 
+void append_local_name_token(std::string& local_name, const std::string& key, const std::string& value)
+{
+  if (key.empty() || value.empty()) {
+    return;
+  }
+
+  if (!local_name.empty()) {
+    local_name += " ";
+  }
+  local_name += key + ":" + value;
+}
+
+std::string layer_name(idb::IdbLayer* layer)
+{
+  if (layer == nullptr) {
+    return {};
+  }
+  return layer->get_name();
+}
+
+std::string layer_shape_name(idb::IdbLayerShape* layer_shape)
+{
+  return layer_shape == nullptr ? std::string{} : layer_name(layer_shape->get_layer());
+}
+
+std::string positive_pair_summary(int32_t x, int32_t y)
+{
+  if (x <= 0 && y <= 0) {
+    return {};
+  }
+  return std::to_string(x) + "," + std::to_string(y);
+}
+
+std::string positive_size_summary(int32_t x, int32_t y)
+{
+  if (x <= 0 && y <= 0) {
+    return {};
+  }
+  return std::to_string(x) + "x" + std::to_string(y);
+}
+
+std::vector<std::string> sorted_unique_names(std::vector<std::string> names)
+{
+  std::erase_if(names, [](const std::string& name) { return name.empty(); });
+  std::sort(names.begin(), names.end());
+  names.erase(std::unique(names.begin(), names.end()), names.end());
+  return names;
+}
+
+std::vector<std::string> bus_net_names(const idb::IdbBus& bus)
+{
+  std::vector<std::string> names;
+  for (auto* net : bus.getNets()) {
+    if (net != nullptr) {
+      names.push_back(net->get_net_name());
+    }
+  }
+  return sorted_unique_names(std::move(names));
+}
+
+std::string pin_member_name(idb::IdbPin* pin)
+{
+  if (pin == nullptr) {
+    return {};
+  }
+  const std::string pin_name = pin->get_pin_name();
+  auto* instance = pin->get_instance();
+  if (instance != nullptr && !instance->get_name().empty()) {
+    return instance->get_name() + "/" + pin_name;
+  }
+  return pin_name;
+}
+
+std::vector<std::string> bus_pin_names(const idb::IdbBus& bus)
+{
+  std::vector<std::string> names;
+  for (auto* pin : bus.getPins()) {
+    names.push_back(pin_member_name(pin));
+  }
+  return sorted_unique_names(std::move(names));
+}
+
+std::vector<std::string> group_instance_names(idb::IdbGroup* group)
+{
+  std::vector<std::string> names;
+  if (group == nullptr || group->get_instance_list() == nullptr) {
+    return names;
+  }
+  for (auto* instance : group->get_instance_list()->get_instance_list()) {
+    if (instance != nullptr) {
+      names.push_back(instance->get_name());
+    }
+  }
+  return sorted_unique_names(std::move(names));
+}
+
 std::string via_local_name(idb::IdbVia* via)
 {
   if (via == nullptr) {
     return {};
   }
+  std::string local_name;
   if (!via->get_name().empty()) {
-    return "via:" + via->get_name();
+    append_local_name_token(local_name, "via", via->get_name());
   }
-  if (via->get_instance() != nullptr && !via->get_instance()->get_name().empty()) {
-    return "via:" + via->get_instance()->get_name();
+
+  auto* master = via->get_instance();
+  if (master == nullptr) {
+    return local_name;
   }
-  return {};
+
+  if (local_name.empty() && !master->get_name().empty()) {
+    append_local_name_token(local_name, "via", master->get_name());
+  }
+  append_local_name_token(local_name, "master", master->get_name());
+
+  if (master->is_fix()) {
+    append_local_name_token(local_name, "type", "fixed");
+    append_local_name_token(local_name, "bottom", layer_shape_name(master->get_bottom_layer_shape()));
+    append_local_name_token(local_name, "cut", layer_shape_name(master->get_cut_layer_shape()));
+    append_local_name_token(local_name, "top", layer_shape_name(master->get_top_layer_shape()));
+  } else if (master->is_generate()) {
+    append_local_name_token(local_name, "type", "generated");
+    auto* generated = master->get_master_generate();
+    if (generated != nullptr) {
+      append_local_name_token(local_name, "rule", generated->get_rule_name());
+      append_local_name_token(local_name, "bottom", layer_name(generated->get_layer_bottom()));
+      append_local_name_token(local_name, "cut", layer_name(generated->get_layer_cut()));
+      append_local_name_token(local_name, "top", layer_name(generated->get_layer_top()));
+      append_local_name_token(local_name, "cut_size",
+                              positive_size_summary(generated->get_cut_size_x(), generated->get_cut_size_y()));
+      append_local_name_token(local_name, "cut_spacing",
+                              positive_pair_summary(generated->get_cut_spcing_x(), generated->get_cut_spcing_y()));
+      append_local_name_token(local_name, "enclosure_bottom",
+                              positive_pair_summary(generated->get_enclosure_bottom_x(), generated->get_enclosure_bottom_y()));
+      append_local_name_token(local_name, "enclosure_top",
+                              positive_pair_summary(generated->get_enclosure_top_x(), generated->get_enclosure_top_y()));
+    }
+  }
+
+  if (master->get_cut_rows() > 0 && master->get_cut_cols() > 0) {
+    append_local_name_token(local_name, "rowcol",
+                            std::to_string(master->get_cut_rows()) + "x" + std::to_string(master->get_cut_cols()));
+  }
+  if (master->is_default()) {
+    append_local_name_token(local_name, "default", "true");
+  }
+  return local_name;
+}
+
+std::string via_master_type_name(idb::IdbViaMaster* master)
+{
+  if (master == nullptr) {
+    return "unknown";
+  }
+  if (master->is_fix()) {
+    return "fixed";
+  }
+  if (master->is_generate()) {
+    return "generated";
+  }
+  return "unknown";
+}
+
+GeometryViaMetadata via_metadata_from_idb(idb::IdbVia* via)
+{
+  GeometryViaMetadata metadata;
+  if (via == nullptr) {
+    return metadata;
+  }
+
+  auto* master = via->get_instance();
+  metadata.name = via->get_name();
+  metadata.master_name = master == nullptr ? std::string{} : master->get_name();
+  if (metadata.name.empty()) {
+    metadata.name = metadata.master_name;
+  }
+  if (master == nullptr) {
+    return metadata;
+  }
+
+  metadata.via_type = via_master_type_name(master);
+  metadata.is_default = master->is_default();
+  metadata.rows = master->get_cut_rows() > 0 ? master->get_cut_rows() : 0;
+  metadata.cols = master->get_cut_cols() > 0 ? master->get_cut_cols() : 0;
+
+  if (master->is_fix()) {
+    metadata.bottom_layer = layer_shape_name(master->get_bottom_layer_shape());
+    metadata.cut_layer = layer_shape_name(master->get_cut_layer_shape());
+    metadata.top_layer = layer_shape_name(master->get_top_layer_shape());
+    idb::IdbRect* cut_rect = nullptr;
+    if (auto* cut_shape = master->get_cut_layer_shape(); cut_shape != nullptr && !cut_shape->get_rect_list().empty()) {
+      cut_rect = cut_shape->get_rect_list().front();
+    } else {
+      cut_rect = master->get_cut_rect();
+    }
+    if (cut_rect != nullptr) {
+      metadata.cut_width = cut_rect->get_width();
+      metadata.cut_height = cut_rect->get_height();
+    }
+  } else if (master->is_generate()) {
+    auto* generated = master->get_master_generate();
+    if (generated != nullptr) {
+      metadata.rule_name = generated->get_rule_name();
+      metadata.bottom_layer = layer_name(generated->get_layer_bottom());
+      metadata.cut_layer = layer_name(generated->get_layer_cut());
+      metadata.top_layer = layer_name(generated->get_layer_top());
+      metadata.cut_width = std::max(generated->get_cut_size_x(), 0);
+      metadata.cut_height = std::max(generated->get_cut_size_y(), 0);
+      metadata.cut_spacing_x = std::max(generated->get_cut_spcing_x(), 0);
+      metadata.cut_spacing_y = std::max(generated->get_cut_spcing_y(), 0);
+      metadata.enclosure_bottom_x = std::max(generated->get_enclosure_bottom_x(), 0);
+      metadata.enclosure_bottom_y = std::max(generated->get_enclosure_bottom_y(), 0);
+      metadata.enclosure_top_x = std::max(generated->get_enclosure_top_x(), 0);
+      metadata.enclosure_top_y = std::max(generated->get_enclosure_top_y(), 0);
+      if (generated->get_cut_rows() > 0) {
+        metadata.rows = generated->get_cut_rows();
+      }
+      if (generated->get_cut_cols() > 0) {
+        metadata.cols = generated->get_cut_cols();
+      }
+    }
+  }
+
+  return metadata;
+}
+
+std::vector<std::string> grid_layer_names(idb::IdbTrackGrid* track_grid, idb::IdbLayer* fallback_layer)
+{
+  std::vector<std::string> names;
+  if (track_grid == nullptr) {
+    return names;
+  }
+
+  std::vector<idb::IdbLayer*> layers = track_grid->get_layer_list();
+  if (layers.empty() && fallback_layer != nullptr) {
+    layers.push_back(fallback_layer);
+  }
+
+  for (auto* layer : layers) {
+    const std::string name = layer_name(layer);
+    if (!name.empty()) {
+      names.push_back(name);
+    }
+  }
+  return sorted_unique_names(std::move(names));
+}
+
+GeometryGridMetadata track_grid_metadata_from_idb(idb::IdbTrackGrid* track_grid, idb::IdbLayer* fallback_layer,
+                                                  uint32_t index)
+{
+  GeometryGridMetadata metadata;
+  metadata.grid_type = "track";
+  metadata.index = index;
+  if (track_grid == nullptr || track_grid->get_track() == nullptr) {
+    return metadata;
+  }
+
+  auto* track = track_grid->get_track();
+  metadata.direction = track_direction_name(track->get_direction());
+  metadata.start = track->get_start();
+  metadata.step = track->get_pitch();
+  metadata.count = track_grid->get_track_num();
+  metadata.width = static_cast<int32_t>(track->get_width());
+  metadata.layer_names = grid_layer_names(track_grid, fallback_layer);
+  return metadata;
+}
+
+GeometryGridMetadata gcell_grid_metadata_from_idb(idb::IdbGCellGrid* gcell_grid, uint32_t index)
+{
+  GeometryGridMetadata metadata;
+  metadata.grid_type = "gcell";
+  metadata.index = index;
+  metadata.width = 1;
+  if (gcell_grid == nullptr) {
+    return metadata;
+  }
+
+  metadata.direction = track_direction_name(gcell_grid->get_direction());
+  metadata.start = gcell_grid->get_start();
+  metadata.step = gcell_grid->get_space();
+  metadata.count = gcell_grid->get_num() > 0 ? static_cast<uint32_t>(gcell_grid->get_num()) : 0;
+  return metadata;
 }
 
 OwnerRef with_via_local_name(GeometryStore& store, idb::IdbVia* via, OwnerRef owner)
@@ -745,6 +1028,46 @@ void delete_unseen_owner_shapes(GeometryStore& store, OwnerType type, OwnerId ow
                                 const std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
 {
   for (const ShapeId shape_id : store.query_owner(type, owner_id)) {
+    if (seen_shape_ids.contains(shape_id)) {
+      continue;
+    }
+    if (store.delete_shape(shape_id)) {
+      ++result.deleted_shape_count;
+    } else {
+      ++result.missing_shape_count;
+    }
+  }
+}
+
+std::vector<ShapeId> collect_alive_owner_type_shapes(const GeometryStore& store, OwnerType type)
+{
+  std::vector<ShapeId> shape_ids;
+  for (const ShapeRecord& record : store.records()) {
+    if (record.id == 0 || record.state != ShapeState::kAlive) {
+      continue;
+    }
+    if (store.owner_of(record.id).type == type) {
+      shape_ids.push_back(record.id);
+    }
+  }
+  return shape_ids;
+}
+
+void delete_owner_type_shapes(GeometryStore& store, OwnerType type, GeometrySyncResult& result)
+{
+  for (const ShapeId shape_id : collect_alive_owner_type_shapes(store, type)) {
+    if (store.delete_shape(shape_id)) {
+      ++result.deleted_shape_count;
+    } else {
+      ++result.missing_shape_count;
+    }
+  }
+}
+
+void delete_unseen_owner_type_shapes(GeometryStore& store, OwnerType type, const std::unordered_set<ShapeId>& seen_shape_ids,
+                                     GeometrySyncResult& result)
+{
+  for (const ShapeId shape_id : collect_alive_owner_type_shapes(store, type)) {
     if (seen_shape_ids.contains(shape_id)) {
       continue;
     }
@@ -1492,6 +1815,86 @@ std::vector<GeometryMasterMetadata> GeometryBuilder::collect_master_metadata(idb
   return masters;
 }
 
+std::vector<GeometryViaMetadata> GeometryBuilder::collect_via_metadata(idb::IdbLayout& layout, idb::IdbDesign& design) const
+{
+  std::vector<GeometryViaMetadata> vias;
+  std::unordered_set<std::string> seen_keys;
+
+  const auto collect_from_list = [&](idb::IdbVias* via_list) {
+    if (via_list == nullptr) {
+      return;
+    }
+
+    for (auto* via : via_list->get_via_list()) {
+      if (via == nullptr) {
+        continue;
+      }
+
+      GeometryViaMetadata metadata = via_metadata_from_idb(via);
+      const std::string key = metadata.name.empty() ? metadata.master_name : metadata.name;
+      if (key.empty() || seen_keys.contains(key)) {
+        continue;
+      }
+
+      seen_keys.insert(key);
+      vias.push_back(std::move(metadata));
+    }
+  };
+
+  collect_from_list(layout.get_via_list());
+  collect_from_list(design.get_via_list());
+
+  std::sort(vias.begin(), vias.end(), [](const GeometryViaMetadata& lhs, const GeometryViaMetadata& rhs) {
+    return std::tie(lhs.name, lhs.master_name) < std::tie(rhs.name, rhs.master_name);
+  });
+  return vias;
+}
+
+std::vector<GeometryGridMetadata> GeometryBuilder::collect_grid_metadata(idb::IdbLayout& layout) const
+{
+  std::vector<GeometryGridMetadata> grids;
+  std::unordered_set<idb::IdbTrackGrid*> emitted_track_grids;
+  uint32_t track_grid_index = 0;
+
+  const auto collect_track_grid = [&](idb::IdbTrackGrid* track_grid, idb::IdbLayer* fallback_layer) {
+    if (track_grid == nullptr || !emitted_track_grids.insert(track_grid).second) {
+      return;
+    }
+    grids.push_back(track_grid_metadata_from_idb(track_grid, fallback_layer, track_grid_index++));
+  };
+
+  if (auto* track_grids = layout.get_track_grid_list(); track_grids != nullptr) {
+    for (auto* track_grid : track_grids->get_track_grid_list()) {
+      collect_track_grid(track_grid, nullptr);
+    }
+  }
+
+  if (auto* layers = layout.get_layers(); layers != nullptr) {
+    for (auto* layer : layers->get_layers()) {
+      auto* routing_layer = dynamic_cast<idb::IdbLayerRouting*>(layer);
+      if (routing_layer == nullptr) {
+        continue;
+      }
+
+      for (auto* track_grid : routing_layer->get_track_grid_list()) {
+        collect_track_grid(track_grid, routing_layer);
+      }
+    }
+  }
+
+  uint32_t gcell_grid_index = 0;
+  if (auto* gcell_grids = layout.get_gcell_grid_list(); gcell_grids != nullptr) {
+    for (auto* gcell_grid : gcell_grids->get_gcell_grid_list()) {
+      if (gcell_grid == nullptr) {
+        continue;
+      }
+      grids.push_back(gcell_grid_metadata_from_idb(gcell_grid, gcell_grid_index++));
+    }
+  }
+
+  return grids;
+}
+
 std::vector<GeometryConnectivityMetadata> GeometryBuilder::collect_connectivity_metadata(idb::IdbDesign& design) const
 {
   std::vector<GeometryConnectivityMetadata> connectivity;
@@ -1546,6 +1949,8 @@ std::vector<GeometryBusMetadata> GeometryBuilder::collect_bus_metadata(idb::IdbD
     metadata.right = bus.get_right();
     metadata.net_count = static_cast<uint32_t>(bus.getNets().size());
     metadata.pin_count = static_cast<uint32_t>(bus.getPins().size());
+    metadata.net_names = bus_net_names(bus);
+    metadata.pin_names = bus_pin_names(bus);
     buses.push_back(metadata);
   }
 
@@ -1574,6 +1979,7 @@ std::vector<GeometryGroupMetadata> GeometryBuilder::collect_group_metadata(idb::
     metadata.instance_count = group->get_instance_list() == nullptr
                                   ? 0
                                   : static_cast<uint32_t>(group->get_instance_list()->get_instance_list().size());
+    metadata.instance_names = group_instance_names(group);
     groups.push_back(metadata);
   }
 
@@ -1581,6 +1987,97 @@ std::vector<GeometryGroupMetadata> GeometryBuilder::collect_group_metadata(idb::
     return lhs.name < rhs.name;
   });
   return groups;
+}
+
+GeometrySyncResult GeometryBuilder::sync_layout(idb::IdbLayout& layout, GeometryStore& store) const
+{
+  GeometrySyncResult result;
+  std::unordered_set<ShapeId> seen_layout_shape_ids;
+
+  if (auto* die = layout.get_die(); die != nullptr) {
+    OwnerRef owner;
+    owner.type = OwnerType::kDie;
+    owner.owner_id = die->get_id();
+    const Rect32 bbox = rect_from_idb(die->get_bounding_box());
+    if (is_non_empty(bbox)) {
+      reconcile_rect_shape(store, owner.type, owner.owner_id, kLayoutGeometryLayer, bbox, owner, seen_layout_shape_ids, result);
+    }
+  }
+
+  if (layout.get_rows() != nullptr && layout.get_rows()->get_row_num() > 0) {
+    auto* core = layout.get_core();
+    OwnerRef owner;
+    owner.type = OwnerType::kCore;
+    owner.owner_id = core->get_id();
+    const Rect32 bbox = rect_from_idb(core->get_bounding_box());
+    if (is_non_empty(bbox)) {
+      reconcile_rect_shape(store, owner.type, owner.owner_id, kLayoutGeometryLayer, bbox, owner, seen_layout_shape_ids, result);
+    }
+  }
+
+  if (auto* rows = layout.get_rows(); rows != nullptr) {
+    uint32_t row_index = 0;
+    for (auto* row : rows->get_row_list()) {
+      if (row == nullptr) {
+        ++row_index;
+        continue;
+      }
+
+      OwnerRef owner;
+      owner.type = OwnerType::kRow;
+      owner.owner_id = row->get_id();
+      owner.path0 = row_index++;
+      const Rect32 bbox = rect_from_idb(row->get_bounding_box());
+      if (is_non_empty(bbox)) {
+        reconcile_rect_shape(store, owner.type, owner.owner_id, kLayoutGeometryLayer, bbox, owner, seen_layout_shape_ids, result);
+      }
+    }
+  }
+
+  delete_unseen_owner_type_shapes(store, OwnerType::kDie, seen_layout_shape_ids, result);
+  delete_unseen_owner_type_shapes(store, OwnerType::kCore, seen_layout_shape_ids, result);
+  delete_unseen_owner_type_shapes(store, OwnerType::kRow, seen_layout_shape_ids, result);
+
+  delete_owner_type_shapes(store, OwnerType::kTrackGrid, result);
+  delete_owner_type_shapes(store, OwnerType::kGCellGrid, result);
+
+  const Rect32 grid_bounds = grid_reference_bounds(layout);
+  std::unordered_set<idb::IdbTrackGrid*> emitted_track_grids;
+  OwnerId track_grid_owner_id = 0;
+  if (auto* track_grids = layout.get_track_grid_list(); track_grids != nullptr) {
+    for (auto* track_grid : track_grids->get_track_grid_list()) {
+      if (track_grid == nullptr || !emitted_track_grids.insert(track_grid).second) {
+        continue;
+      }
+      result.added_shape_count += emit_track_grid_lines(store, track_grid, grid_bounds, track_grid_owner_id++, nullptr);
+    }
+  }
+
+  if (auto* layers = layout.get_layers(); layers != nullptr) {
+    for (auto* layer : layers->get_layers()) {
+      auto* routing_layer = dynamic_cast<idb::IdbLayerRouting*>(layer);
+      if (routing_layer == nullptr) {
+        continue;
+      }
+
+      for (auto* track_grid : routing_layer->get_track_grid_list()) {
+        if (track_grid == nullptr || !emitted_track_grids.insert(track_grid).second) {
+          continue;
+        }
+        result.added_shape_count += emit_track_grid_lines(store, track_grid, grid_bounds, track_grid_owner_id++, routing_layer);
+      }
+    }
+  }
+
+  if (auto* gcell_grids = layout.get_gcell_grid_list(); gcell_grids != nullptr) {
+    OwnerId gcell_grid_owner_id = 0;
+    for (auto* gcell_grid : gcell_grids->get_gcell_grid_list()) {
+      result.added_shape_count += emit_gcell_grid_lines(store, gcell_grid, grid_bounds, gcell_grid_owner_id++);
+    }
+  }
+
+  result.ok = result.missing_shape_count == 0;
+  return result;
 }
 
 GeometrySyncResult GeometryBuilder::sync_net(idb::IdbDesign& design, idb::IdbNet& net, GeometryStore& store) const

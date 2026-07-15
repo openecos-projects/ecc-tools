@@ -10,6 +10,7 @@ add_library(geometry_builder
     GeometrySnapshotWriter.cpp
     InstanceEditAdapter.cpp
     NetWireEditAdapter.cpp
+    PinPortEditAdapter.cpp
     RectOwnerEditAdapter.cpp
     StoreGeometrySink.cpp
 )

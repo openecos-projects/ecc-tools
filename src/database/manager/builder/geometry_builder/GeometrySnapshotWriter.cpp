@@ -88,6 +88,8 @@ bool write_manifest(const std::filesystem::path& path, const SnapshotWriteResult
   file << "layers=" << file_prefix << "/geometry.layers.txt\n";
   file << "sites=" << file_prefix << "/geometry.sites.txt\n";
   file << "masters=" << file_prefix << "/geometry.masters.txt\n";
+  file << "vias=" << file_prefix << "/geometry.vias.txt\n";
+  file << "grids=" << file_prefix << "/geometry.grids.txt\n";
   file << "connectivity=" << file_prefix << "/geometry.connectivity.txt\n";
   file << "buses=" << file_prefix << "/geometry.buses.txt\n";
   file << "groups=" << file_prefix << "/geometry.groups.txt\n";
@@ -195,6 +197,22 @@ std::string sanitize_layer_text(const std::string& value, const std::string& fal
   return sanitized;
 }
 
+std::string join_metadata_names(const std::vector<std::string>& names)
+{
+  std::string joined;
+  for (const std::string& name : names) {
+    const std::string sanitized = sanitize_layer_text(name, "");
+    if (sanitized.empty()) {
+      continue;
+    }
+    if (!joined.empty()) {
+      joined += ",";
+    }
+    joined += sanitized;
+  }
+  return joined;
+}
+
 GeometryLayerMetadata fallback_layer_metadata(LayerId layer_id)
 {
   GeometryLayerMetadata metadata;
@@ -295,6 +313,45 @@ bool write_master_metadata_file(const std::filesystem::path& path, std::span<con
   return static_cast<bool>(file);
 }
 
+bool write_via_metadata_file(const std::filesystem::path& path, std::span<const GeometryViaMetadata> vias)
+{
+  std::ofstream file(path);
+  if (!file) {
+    return false;
+  }
+
+  file << "name\tmaster\ttype\trule\tbottom\tcut\ttop\tcut_width\tcut_height\tcut_spacing_x\tcut_spacing_y"
+          "\tenclosure_bottom_x\tenclosure_bottom_y\tenclosure_top_x\tenclosure_top_y\trows\tcols\tdefault\n";
+  for (const GeometryViaMetadata& via : vias) {
+    file << sanitize_layer_text(via.name, "") << '\t' << sanitize_layer_text(via.master_name, "") << '\t'
+         << sanitize_layer_text(via.via_type, "unknown") << '\t' << sanitize_layer_text(via.rule_name, "") << '\t'
+         << sanitize_layer_text(via.bottom_layer, "") << '\t' << sanitize_layer_text(via.cut_layer, "") << '\t'
+         << sanitize_layer_text(via.top_layer, "") << '\t' << via.cut_width << '\t' << via.cut_height << '\t'
+         << via.cut_spacing_x << '\t' << via.cut_spacing_y << '\t' << via.enclosure_bottom_x << '\t'
+         << via.enclosure_bottom_y << '\t' << via.enclosure_top_x << '\t' << via.enclosure_top_y << '\t'
+         << via.rows << '\t' << via.cols << '\t' << (via.is_default ? 1 : 0) << '\n';
+  }
+
+  return static_cast<bool>(file);
+}
+
+bool write_grid_metadata_file(const std::filesystem::path& path, std::span<const GeometryGridMetadata> grids)
+{
+  std::ofstream file(path);
+  if (!file) {
+    return false;
+  }
+
+  file << "type\tindex\tdirection\tstart\tstep\tcount\twidth\tlayers\n";
+  for (const GeometryGridMetadata& grid : grids) {
+    file << sanitize_layer_text(grid.grid_type, "unknown") << '\t' << grid.index << '\t'
+         << sanitize_layer_text(grid.direction, "unknown") << '\t' << grid.start << '\t' << grid.step << '\t'
+         << grid.count << '\t' << grid.width << '\t' << join_metadata_names(grid.layer_names) << '\n';
+  }
+
+  return static_cast<bool>(file);
+}
+
 bool write_connectivity_metadata_file(const std::filesystem::path& path,
                                       std::span<const GeometryConnectivityMetadata> connectivity)
 {
@@ -321,10 +378,11 @@ bool write_bus_metadata_file(const std::filesystem::path& path, std::span<const 
     return false;
   }
 
-  file << "name\ttype\tleft\tright\tnet_count\tpin_count\n";
+  file << "name\ttype\tleft\tright\tnet_count\tpin_count\tnets\tpins\n";
   for (const GeometryBusMetadata& bus : buses) {
     file << sanitize_layer_text(bus.name, "") << '\t' << sanitize_layer_text(bus.bus_type, "unknown") << '\t' << bus.left
-         << '\t' << bus.right << '\t' << bus.net_count << '\t' << bus.pin_count << '\n';
+         << '\t' << bus.right << '\t' << bus.net_count << '\t' << bus.pin_count << '\t'
+         << join_metadata_names(bus.net_names) << '\t' << join_metadata_names(bus.pin_names) << '\n';
   }
 
   return static_cast<bool>(file);
@@ -337,10 +395,10 @@ bool write_group_metadata_file(const std::filesystem::path& path, std::span<cons
     return false;
   }
 
-  file << "name\tregion\tinstance_count\n";
+  file << "name\tregion\tinstance_count\tinstances\n";
   for (const GeometryGroupMetadata& group : groups) {
     file << sanitize_layer_text(group.name, "") << '\t' << sanitize_layer_text(group.region_name, "") << '\t'
-         << group.instance_count << '\n';
+         << group.instance_count << '\t' << join_metadata_names(group.instance_names) << '\n';
   }
 
   return static_cast<bool>(file);
@@ -384,6 +442,8 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   result.layer_count = static_cast<uint64_t>(layers.size());
   result.site_count = static_cast<uint64_t>(options.sites.size());
   result.master_count = static_cast<uint64_t>(options.masters.size());
+  result.via_count = static_cast<uint64_t>(options.vias.size());
+  result.grid_count = static_cast<uint64_t>(options.grids.size());
   result.connectivity_count = static_cast<uint64_t>(options.connectivity.size());
   result.bus_count = static_cast<uint64_t>(options.buses.size());
   result.group_count = static_cast<uint64_t>(options.groups.size());
@@ -425,13 +485,15 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   const bool wrote_layers = write_layer_metadata_file(epoch_dir / "geometry.layers.txt", layers);
   const bool wrote_sites = write_site_metadata_file(epoch_dir / "geometry.sites.txt", options.sites);
   const bool wrote_masters = write_master_metadata_file(epoch_dir / "geometry.masters.txt", options.masters);
+  const bool wrote_vias = write_via_metadata_file(epoch_dir / "geometry.vias.txt", options.vias);
+  const bool wrote_grids = write_grid_metadata_file(epoch_dir / "geometry.grids.txt", options.grids);
   const bool wrote_connectivity =
       write_connectivity_metadata_file(epoch_dir / "geometry.connectivity.txt", options.connectivity);
   const bool wrote_buses = write_bus_metadata_file(epoch_dir / "geometry.buses.txt", options.buses);
   const bool wrote_groups = write_group_metadata_file(epoch_dir / "geometry.groups.txt", options.groups);
   const bool wrote_files = wrote_meta && wrote_shapes && wrote_owners && wrote_payload && wrote_names && wrote_name_index
                            && wrote_sidmap && wrote_delta && wrote_view && wrote_layers && wrote_sites && wrote_masters
-                           && wrote_connectivity && wrote_buses && wrote_groups;
+                           && wrote_vias && wrote_grids && wrote_connectivity && wrote_buses && wrote_groups;
   const std::string file_prefix = (std::filesystem::path("epochs") / std::to_string(result.epoch)).generic_string();
   const bool wrote_manifest = wrote_files && publish_manifest(options.output_dir, result, file_prefix, options);
 

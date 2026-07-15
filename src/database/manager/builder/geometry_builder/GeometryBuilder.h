@@ -58,9 +58,12 @@ class GeometryBuilder
   std::vector<GeometryLayerMetadata> collect_layer_metadata(idb::IdbLayout& layout) const;
   std::vector<GeometrySiteMetadata> collect_site_metadata(idb::IdbLayout& layout) const;
   std::vector<GeometryMasterMetadata> collect_master_metadata(idb::IdbLayout& layout) const;
+  std::vector<GeometryViaMetadata> collect_via_metadata(idb::IdbLayout& layout, idb::IdbDesign& design) const;
+  std::vector<GeometryGridMetadata> collect_grid_metadata(idb::IdbLayout& layout) const;
   std::vector<GeometryConnectivityMetadata> collect_connectivity_metadata(idb::IdbDesign& design) const;
   std::vector<GeometryBusMetadata> collect_bus_metadata(idb::IdbDesign& design) const;
   std::vector<GeometryGroupMetadata> collect_group_metadata(idb::IdbDesign& design) const;
+  GeometrySyncResult sync_layout(idb::IdbLayout& layout, GeometryStore& store) const;
   GeometrySyncResult sync_instance(idb::IdbInstance& instance, GeometryStore& store) const;
   GeometrySyncResult sync_net(idb::IdbDesign& design, idb::IdbNet& net, GeometryStore& store) const;
   GeometrySyncResult sync_special_net(idb::IdbDesign& design, idb::IdbSpecialNet& net, GeometryStore& store) const;
