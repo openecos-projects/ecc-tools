@@ -1347,6 +1347,8 @@ void DRCInterface::outputViolationJson(std::map<std::string, std::vector<ids::Vi
   std::vector<RoutingLayer>& routing_layer_list = DRCDM.getDatabase().get_routing_layer_list();
   std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
   std::string& temp_directory_path = DRCDM.getConfig().temp_directory_path;
+  const int32_t die_transform_offset_x = dmInst->get_die_transform_offset_x();
+  const int32_t die_transform_offset_y = dmInst->get_die_transform_offset_y();
 
   std::vector<idb::IdbNet*>& idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list();
   std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
@@ -1372,7 +1374,8 @@ void DRCInterface::outputViolationJson(std::map<std::string, std::vector<ids::Vi
         std::vector<int32_t>& routing_layer_idx_list = cut_to_adjacent_routing_map[layer_idx];
         layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
       }
-      violation_json["shape"] = {violation.ll_x, violation.ll_y, violation.ur_x, violation.ur_y, routing_layer_list[layer_idx].get_layer_name()};
+      violation_json["shape"] = {violation.ll_x + die_transform_offset_x, violation.ll_y + die_transform_offset_y, violation.ur_x + die_transform_offset_x,
+                                 violation.ur_y + die_transform_offset_y, routing_layer_list[layer_idx].get_layer_name()};
       for (int32_t net_idx : violation.violation_net_set) {
         violation_json["net"].push_back(get_net_name(net_idx, "obs"));
       }
@@ -1393,6 +1396,8 @@ void DRCInterface::outputViolationFile(std::map<std::string, std::vector<ids::Vi
   std::vector<RoutingLayer>& routing_layer_list = DRCDM.getDatabase().get_routing_layer_list();
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
   std::string& temp_directory_path = DRCDM.getConfig().temp_directory_path;
+  const int32_t die_transform_offset_x = dmInst->get_die_transform_offset_x();
+  const int32_t die_transform_offset_y = dmInst->get_die_transform_offset_y();
 
   std::vector<idb::IdbNet*>& idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list();
   std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
@@ -1410,7 +1415,8 @@ void DRCInterface::outputViolationFile(std::map<std::string, std::vector<ids::Vi
   for (auto& [type, violation_list] : type_violation_map) {
     std::ofstream* violation_file = DRCUTIL.getOutputFileStream(DRCUTIL.getString(temp_directory_path, type, ".txt"));
     for (ids::Violation& violation : violation_list) {
-      DRCUTIL.pushStream(violation_file, violation.ll_x, " ", violation.ll_y, " ", violation.ur_x, " ", violation.ur_y, " ");
+      DRCUTIL.pushStream(violation_file, violation.ll_x + die_transform_offset_x, " ", violation.ll_y + die_transform_offset_y, " ",
+                         violation.ur_x + die_transform_offset_x, " ", violation.ur_y + die_transform_offset_y, " ");
       if (violation.is_routing) {
         DRCUTIL.pushStream(violation_file, routing_layer_list[violation.layer_idx].get_layer_name(), " ");
       } else {

@@ -72,6 +72,8 @@ class DataManager
   void set_idb_def_service(IdbDefService* idb_def_service) { _idb_def_service = idb_def_service; }
   IdbLefService* get_idb_lef_service() { return _idb_lef_service; }
   void set_idb_lef_service(IdbLefService* idb_lef_service) { _idb_lef_service = idb_lef_service; }
+  int32_t get_die_transform_offset_x() const { return _die_transform_offset_x; }
+  int32_t get_die_transform_offset_y() const { return _die_transform_offset_y; }
 
   IdbDesign* get_idb_design() { return _idb_def_service != nullptr ? _idb_def_service->get_design() : nullptr; }
   IdbLayout* get_idb_layout() { return _idb_lef_service != nullptr ? _idb_lef_service->get_layout() : nullptr; }
@@ -235,6 +237,8 @@ class DataManager
   IdbLefService* _idb_lef_service = nullptr;
   IdbDesign* _design = nullptr;
   IdbLayout* _layout = nullptr;
+  int32_t _die_transform_offset_x = 0;
+  int32_t _die_transform_offset_y = 0;
   // pa
   // std::map<std::string, std::map<std::string, std::vector<ids::AccessPoint>>> _master_access_point_map;
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

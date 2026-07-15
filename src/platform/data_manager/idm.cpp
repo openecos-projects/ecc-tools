@@ -75,6 +75,8 @@ void DataManager::resetData()
   _idb_lef_service = nullptr;
   _design = nullptr;
   _layout = nullptr;
+  _die_transform_offset_x = 0;
+  _die_transform_offset_y = 0;
 }
 
 bool DataManager::readLef(string config_path)

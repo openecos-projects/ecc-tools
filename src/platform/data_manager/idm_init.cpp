@@ -42,9 +42,14 @@ bool DataManager::initDef(string def_path)
 {
   _idb_def_service = _idb_builder->buildDef(def_path);
   _design = get_idb_design();
+  _die_transform_offset_x = 0;
+  _die_transform_offset_y = 0;
 
   /// make original coordinate on (0,0)
   if (isNeedTransformByDie()) {
+    auto idb_die = _layout->get_die();
+    _die_transform_offset_x = idb_die->get_llx();
+    _die_transform_offset_y = idb_die->get_lly();
     /// transform
     transformByDie();
   }

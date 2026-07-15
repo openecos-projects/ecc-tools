@@ -153,9 +153,6 @@ bool DataManager::alignSignalSegment(IdbRegularWireSegment* idb_segment)
     alignVia(via);
   }
 
-  /// delta rect
-  alignRect(idb_segment->get_delta_rect());
-
   /// segment
   for (auto pt : idb_segment->get_point_list()) {
     alignCoord(pt);
