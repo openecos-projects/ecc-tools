@@ -253,7 +253,18 @@ void RuleValidator::setRVComParam(RVModel& rv_model)
 {
   int32_t only_pitch = DRCDM.getOnlyPitch();
   int32_t cluster_size = 100 * only_pitch;
-  int32_t expand_size = 5 * only_pitch;
+  int32_t minimum_area_expand_size = 0;
+  for (RoutingLayer& routing_layer : DRCDM.getDatabase().get_routing_layer_list()) {
+    const int32_t minimum_area = routing_layer.get_minimum_area_rule().min_area;
+    const int32_t minimum_width = routing_layer.get_minimum_width_rule().min_width;
+    if (minimum_area <= 0 || minimum_width <= 0) {
+      continue;
+    }
+    const int64_t reach = (static_cast<int64_t>(minimum_area) + minimum_width - 1) / minimum_width;
+    minimum_area_expand_size = std::max(minimum_area_expand_size, static_cast<int32_t>(reach));
+  }
+  // Minimum-area components can cross a cluster boundary by this distance.
+  int32_t expand_size = std::max(5 * only_pitch, minimum_area_expand_size);
   /**
    * cluster_size, expand_size
    */
