@@ -939,6 +939,7 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
   std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
   std::vector<idb::IdbPin*>& idb_io_pin_list = dmInst->get_idb_def_service()->get_design()->get_io_pin_list()->get_pin_list();
   std::map<idb::IdbPin*, int32_t> special_pin_net_idx_map;
+  std::map<std::string, int32_t> wildcard_special_pin_net_idx_map;
   int32_t regular_net_num = static_cast<int32_t>(idb_net_list.size());
   for (size_t i = 0; i < idb_special_net_list.size(); ++i) {
     int32_t special_net_id = regular_net_num + static_cast<int32_t>(i);
@@ -948,11 +949,20 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
     for (idb::IdbPin* idb_pin : idb_special_net_list[i]->get_io_pins()->get_pin_list()) {
       special_pin_net_idx_map[idb_pin] = special_net_id;
     }
+    for (const std::string& term_name : idb_special_net_list[i]->get_pin_string_list()) {
+      wildcard_special_pin_net_idx_map[term_name] = special_net_id;
+    }
   }
   auto get_pin_net_idx = [&](idb::IdbPin* idb_pin) {
     auto it = special_pin_net_idx_map.find(idb_pin);
     if (it != special_pin_net_idx_map.end()) {
       return it->second;
+    }
+    if (!idb_pin->is_io_pin() && idb_pin->get_term() != nullptr) {
+      auto wildcard_it = wildcard_special_pin_net_idx_map.find(idb_pin->get_term_name());
+      if (wildcard_it != wildcard_special_pin_net_idx_map.end()) {
+        return wildcard_it->second;
+      }
     }
     if (!isSkipping(idb_pin->get_net())) {
       return static_cast<int32_t>(idb_pin->get_net()->get_id());
