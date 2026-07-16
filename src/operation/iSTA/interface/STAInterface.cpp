@@ -213,6 +213,10 @@ void STAInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   /////////////////////////////////////////////
   STADM.getConfig().temp_directory_path = STAUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./sta_temp_directory");
   STADM.getConfig().thread_number = STAUTIL.getConfigValue<int32_t>(config_map, "-thread_number", 128);
+  STADM.getConfig().output_timing_reports = STAUTIL.getConfigValue<int32_t>(config_map, "-output_timing_reports", 1);
+  STADM.getConfig().output_timing_features = STAUTIL.getConfigValue<int32_t>(config_map, "-output_timing_features", 1);
+  STADM.getConfig().timing_path_limit = STAUTIL.getConfigValue<int32_t>(config_map, "-timing_path_limit", 20);
+  STADM.getConfig().timing_corner = STAUTIL.getConfigValue<std::string>(config_map, "-timing_corner", "");
   omp_set_num_threads(std::max(STADM.getConfig().thread_number, 1));
   /////////////////////////////////////////////
 }

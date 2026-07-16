@@ -21,6 +21,8 @@
 #include "Monitor.hpp"
 #include "Utility.hpp"
 
+#include <cstdint>
+
 namespace ista {
 
 namespace {
@@ -65,6 +67,30 @@ std::string escapeJsonString(const std::string& value)
     }
   }
   return escaped;
+}
+
+void outputJsonNumber(std::ofstream* json_file, double value)
+{
+  if (!std::isfinite(value)) {
+    (*json_file) << "null";
+    return;
+  }
+  if (std::fabs(value) < STA_ERROR) {
+    value = 0.0;
+  }
+  (*json_file) << std::fixed << std::setprecision(10) << value;
+}
+
+std::string stableTimingPathId(const std::string& value)
+{
+  uint64_t hash = 14695981039346656037ULL;
+  for (unsigned char character : value) {
+    hash ^= character;
+    hash *= 1099511628211ULL;
+  }
+  std::ostringstream stream;
+  stream << "timing_path_" << std::hex << hash;
+  return stream.str();
 }
 
 }  // namespace
@@ -117,15 +143,24 @@ void TimingReporter::reportTiming()
 
 void TimingReporter::outputTimingReportList()
 {
-  outputTimingReport(DelayType::kMax, StartEndType::kInToOut);
-  outputTimingReport(DelayType::kMax, StartEndType::kInToReg);
-  outputTimingReport(DelayType::kMax, StartEndType::kRegToOut);
-  outputTimingReport(DelayType::kMax, StartEndType::kRegToReg);
-  outputTimingReport(DelayType::kMin, StartEndType::kInToOut);
-  outputTimingReport(DelayType::kMin, StartEndType::kInToReg);
-  outputTimingReport(DelayType::kMin, StartEndType::kRegToOut);
-  outputTimingReport(DelayType::kMin, StartEndType::kRegToReg);
-  outputQorSummaryReport();
+  const bool output_reports = STADM.getConfig().output_timing_reports != 0;
+  const bool output_features = STADM.getConfig().output_timing_features != 0;
+  if (output_reports) {
+    outputTimingReport(DelayType::kMax, StartEndType::kInToOut);
+    outputTimingReport(DelayType::kMax, StartEndType::kInToReg);
+    outputTimingReport(DelayType::kMax, StartEndType::kRegToOut);
+    outputTimingReport(DelayType::kMax, StartEndType::kRegToReg);
+    outputTimingReport(DelayType::kMin, StartEndType::kInToOut);
+    outputTimingReport(DelayType::kMin, StartEndType::kInToReg);
+    outputTimingReport(DelayType::kMin, StartEndType::kRegToOut);
+    outputTimingReport(DelayType::kMin, StartEndType::kRegToReg);
+  }
+  if (output_reports || output_features) {
+    outputQorSummaryReport();
+  }
+  if (output_features) {
+    outputTimingPathsJson();
+  }
 }
 
 void TimingReporter::outputTimingReport(DelayType delay_type, StartEndType start_end_type)
@@ -431,11 +466,20 @@ void TimingReporter::outputQorSummaryReport()
     STAUTIL.closeFileStream(json_file);
   };
 
+  if (STADM.getConfig().output_timing_reports == 0) {
+    if (STADM.getConfig().output_timing_features != 0) {
+      output_qor_summary_json();
+    }
+    return;
+  }
+
   std::string report_file_path = getQorSummaryReportFilePath();
   std::ofstream* report_file = STAUTIL.getOutputFileStream(report_file_path);
   if (group_set.empty()) {
     STAUTIL.closeFileStream(report_file);
-    output_qor_summary_json();
+    if (STADM.getConfig().output_timing_features != 0) {
+      output_qor_summary_json();
+    }
     return;
   }
   (*report_file) << std::left << std::setw(max_group_length) << "Path Group" << std::right << std::setw(11) << "WNS" << std::setw(11) << "TNS"
@@ -489,7 +533,9 @@ void TimingReporter::outputQorSummaryReport()
   (*report_file) << "TNS(H) - Hold TNS\n";
   (*report_file) << "NVP(H) - Hold NVP\n";
   STAUTIL.closeFileStream(report_file);
-  output_qor_summary_json();
+  if (STADM.getConfig().output_timing_features != 0) {
+    output_qor_summary_json();
+  }
 }
 
 std::string TimingReporter::getQorSummaryReportFilePath()
@@ -500,6 +546,119 @@ std::string TimingReporter::getQorSummaryReportFilePath()
 std::string TimingReporter::getQorSummaryJsonFilePath()
 {
   return STAUTIL.getString(STADM.getConfig().tr_temp_directory_path, "qor_summary.json");
+}
+
+void TimingReporter::outputTimingPathsJson()
+{
+  Database& database = STADM.getDatabase();
+  std::ofstream* json_file = STAUTIL.getOutputFileStream(getTimingPathsJsonFilePath());
+  const int32_t path_limit = std::max(STADM.getConfig().timing_path_limit, 0);
+  const std::string corner = STADM.getConfig().timing_corner.empty() ? "unknown" : STADM.getConfig().timing_corner;
+
+  (*json_file) << "{\n  \"schema_version\": 1,\n  \"corner\": \"" << escapeJsonString(corner)
+               << "\",\n  \"path_limit\": " << path_limit << ",\n  \"paths\": [";
+  bool first_path = true;
+  for (DelayType delay_type : {DelayType::kMax, DelayType::kMin}) {
+    std::vector<std::pair<std::string, TimingPath*>> timing_paths;
+    for (TimingPathGroup& timing_path_group : database.get_timing_path_group_list()) {
+      std::vector<TimingPath*> group_paths = getQorTimingPathList(timing_path_group, delay_type);
+      for (TimingPath* timing_path : group_paths) {
+        timing_paths.emplace_back(timing_path_group.get_group_name(), timing_path);
+      }
+    }
+    std::sort(timing_paths.begin(), timing_paths.end(), [this](const auto& left, const auto& right) {
+      if (std::fabs(left.second->get_slack() - right.second->get_slack()) > STA_ERROR) {
+        return left.second->get_slack() < right.second->get_slack();
+      }
+      if (left.first != right.first) {
+        return left.first < right.first;
+      }
+      if (left.second->get_start_point() != right.second->get_start_point()) {
+        return left.second->get_start_point() < right.second->get_start_point();
+      }
+      if (left.second->get_end_point() != right.second->get_end_point()) {
+        return left.second->get_end_point() < right.second->get_end_point();
+      }
+      return getClockName(*left.second) < getClockName(*right.second);
+    });
+
+    int32_t output_count = 0;
+    for (const auto& [path_group_name, timing_path] : timing_paths) {
+      if (output_count >= path_limit) {
+        break;
+      }
+      if (!first_path) {
+        (*json_file) << ",";
+      }
+      std::string group_name = path_group_name;
+      outputTimingPathJson(json_file, *timing_path, group_name, delay_type);
+      first_path = false;
+      output_count++;
+    }
+  }
+  (*json_file) << "]\n}\n";
+  STAUTIL.closeFileStream(json_file);
+}
+
+std::string TimingReporter::getTimingPathsJsonFilePath()
+{
+  return STAUTIL.getString(STADM.getConfig().tr_temp_directory_path, "timing_paths.json");
+}
+
+void TimingReporter::outputTimingPathJson(std::ofstream* json_file, TimingPath& timing_path, std::string& path_group_name,
+                                          DelayType delay_type)
+{
+  const std::string analysis_type = delay_type == DelayType::kMax ? "setup" : "hold";
+  const std::string clock_name = getClockName(timing_path);
+  const std::string check_type = GetTimingCheckTypeName()(timing_path.get_check_type());
+  (*json_file) << "{\"path_id\":\"" << escapeJsonString(getTimingPathId(timing_path, path_group_name, delay_type))
+               << "\",\"analysis_type\":\"" << analysis_type << "\",\"path_group\":\""
+               << escapeJsonString(path_group_name) << "\",\"start_point\":\""
+               << escapeJsonString(timing_path.get_start_point()) << "\",\"end_point\":\""
+               << escapeJsonString(timing_path.get_end_point()) << "\",\"launch_clock\":\""
+               << escapeJsonString(clock_name) << "\",\"capture_clock\":\"" << escapeJsonString(clock_name)
+               << "\",\"check_type\":\"" << escapeJsonString(check_type) << "\",\"slack_ns\":";
+  outputJsonNumber(json_file, timing_path.get_slack());
+  (*json_file) << ",\"arrival_ns\":";
+  outputJsonNumber(json_file, timing_path.get_path_delay());
+  (*json_file) << ",\"required_ns\":";
+  outputJsonNumber(json_file, timing_path.get_required_time());
+  (*json_file) << ",\"cppr_ns\":";
+  outputJsonNumber(json_file, timing_path.get_clock_reconvergence_pessimism());
+  (*json_file) << ",\"stages\":[";
+  bool first_stage = true;
+  for (TimingPathPoint& path_point : timing_path.get_point_list()) {
+    if (!first_stage) {
+      (*json_file) << ",";
+    }
+    std::string kind = GetArcTypeName()(path_point.get_arc_type());
+    if (kind == "none") {
+      kind = "point";
+    } else {
+      kind += "_arc";
+    }
+    (*json_file) << "{\"kind\":\"" << kind << "\",\"pin\":\""
+                 << escapeJsonString(path_point.get_pin_name()) << "\",\"instance\":\""
+                 << escapeJsonString(path_point.get_instance_name()) << "\",\"cell\":\""
+                 << escapeJsonString(path_point.get_cell_name()) << "\",\"incremental_delay_ns\":";
+    outputJsonNumber(json_file, path_point.get_arc_delay());
+    (*json_file) << ",\"arrival_ns\":";
+    outputJsonNumber(json_file, path_point.get_arrival());
+    (*json_file) << ",\"transition\":\""
+                 << GetTransTypeName()(path_point.get_trans_type()) << "\"}";
+    first_stage = false;
+  }
+  (*json_file) << "]}";
+}
+
+std::string TimingReporter::getTimingPathId(TimingPath& timing_path, std::string& path_group_name, DelayType delay_type)
+{
+  const std::string analysis_type = delay_type == DelayType::kMax ? "setup" : "hold";
+  const std::string corner = STADM.getConfig().timing_corner.empty() ? "unknown" : STADM.getConfig().timing_corner;
+  const std::string clock_name = getClockName(timing_path);
+  return stableTimingPathId(
+      STAUTIL.getString(corner, "|", analysis_type, "|", path_group_name, "|", timing_path.get_start_point(), "|",
+                         timing_path.get_end_point(), "|", clock_name, "|", clock_name));
 }
 
 std::vector<TimingPath*> TimingReporter::getQorTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type)
