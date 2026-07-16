@@ -25,6 +25,8 @@ enum class OwnerType : uint8_t
   kTrackGrid = 14,
   kGCellGrid = 15,
   kObs = 16,
+  kInstancePinPortShape = 17,
+  kIoPinPortShape = 18,
 };
 
 struct OwnerRef
@@ -77,6 +79,10 @@ inline std::string_view owner_type_label(OwnerType type)
       return "gcell_grid";
     case OwnerType::kObs:
       return "obs";
+    case OwnerType::kInstancePinPortShape:
+      return "instance_pin_port_shape";
+    case OwnerType::kIoPinPortShape:
+      return "io_pin_port_shape";
   }
 
   return "unknown";

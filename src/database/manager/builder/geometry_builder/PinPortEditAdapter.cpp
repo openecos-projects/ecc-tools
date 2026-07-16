@@ -44,7 +44,9 @@ void set_diagnostic(GeometryEditDiagnostic* diagnostic, GeometryEditDiagnostic v
 
 idb::IdbPin* resolve_io_pin(idb::IdbDesign& design, OwnerRef owner, GeometryEditDiagnostic* diagnostic)
 {
-  if (owner.type != OwnerType::kPinPortShape || owner.path0 != 0) {
+  const bool io_pin_owner = owner.type == OwnerType::kIoPinPortShape
+                            || (owner.type == OwnerType::kPinPortShape && owner.path0 == 0);
+  if (!io_pin_owner || owner.path0 != 0) {
     set_diagnostic(diagnostic, GeometryEditDiagnostic::kOwnerPathUnavailable);
     return nullptr;
   }

@@ -16,6 +16,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -29,6 +30,8 @@ struct CliOptions
   std::string edit_command_path;
   std::string edit_result_path;
   std::string write_def_path;
+  std::string write_db_path;
+  std::string write_gds_path;
   std::string mode = "snapshot";
   uint64_t synthetic_shape_count = 100000;
   ecc::geometry::GeometryStoreOptions geometry_options;
@@ -40,7 +43,8 @@ void print_usage(std::ostream& out)
   out << "Usage: ecc-geometry-snapshot --lef <file> [--lef <file> ...] --def <file> --out <dir> [--mode snapshot]\n"
       << "       ecc-geometry-snapshot --tech-lef <file> --lef <file> --def <file> --out <dir>\n"
       << "       ecc-geometry-snapshot --lef <file> --def <file> --out <dir> --mode apply-edit "
-         "--edit-command <json> --edit-result <json> [--write-def <file>]\n"
+         "--edit-command <json> --edit-result <json> [--write-def <file>] [--write-db <dir>] "
+         "[--write-gds <file>]\n"
       << "       ecc-geometry-snapshot --mode synthetic --out <dir> [--synthetic-shapes <count>]\n"
       << "Geometry tuning options:\n"
       << "       [--geometry-base-tile-size <dbu>] [--geometry-lod-levels <count>]\n"
@@ -107,6 +111,18 @@ bool parse_args(int argc, char** argv, CliOptions& options)
         return false;
       }
       options.write_def_path = value;
+    } else if (arg == "--write-db") {
+      const char* value = require_value("--write-db");
+      if (value == nullptr) {
+        return false;
+      }
+      options.write_db_path = value;
+    } else if (arg == "--write-gds") {
+      const char* value = require_value("--write-gds");
+      if (value == nullptr) {
+        return false;
+      }
+      options.write_gds_path = value;
     } else if (arg == "--mode") {
       const char* value = require_value("--mode");
       if (value == nullptr) {
@@ -224,6 +240,27 @@ bool write_text_file(const std::filesystem::path& path, std::string_view content
   return static_cast<bool>(output);
 }
 
+bool ensure_parent_directory(const std::filesystem::path& path)
+{
+  const std::filesystem::path parent = path.parent_path();
+  if (parent.empty()) {
+    return true;
+  }
+  std::error_code error;
+  std::filesystem::create_directories(parent, error);
+  return !error;
+}
+
+bool ensure_directory(const std::filesystem::path& path)
+{
+  if (path.empty()) {
+    return false;
+  }
+  std::error_code error;
+  std::filesystem::create_directories(path, error);
+  return !error;
+}
+
 std::string edit_status_name(ecc::geometry::GeometryEditStatus status)
 {
   switch (status) {
@@ -237,6 +274,12 @@ std::string edit_status_name(ecc::geometry::GeometryEditStatus status)
       return "conflict";
   }
   return "rejected";
+}
+
+bool edit_result_committed(ecc::geometry::GeometryEditStatus status)
+{
+  return status == ecc::geometry::GeometryEditStatus::kAccepted ||
+         status == ecc::geometry::GeometryEditStatus::kAdjustedAccepted;
 }
 
 std::string json_escape_string(std::string_view value)
@@ -459,17 +502,45 @@ int main(int argc, char** argv)
     const ecc::geometry::GeometryEditApplier applier;
     const ecc::geometry::GeometryEditResult result = applier.apply_edit(command, *def_service->get_design(), store);
 
-    if (!write_text_file(options.edit_result_path, edit_result_json(result))) {
-      std::cerr << "failed to write edit result: " << options.edit_result_path << "\n";
-      return 1;
-    }
-
-    if (!options.write_def_path.empty()) {
+    if (edit_result_committed(result.status) && !options.write_def_path.empty()) {
+      if (!ensure_parent_directory(options.write_def_path)) {
+        std::cerr << "failed to create edited def directory: "
+                  << std::filesystem::path(options.write_def_path).parent_path().string() << "\n";
+        return 1;
+      }
       idb::DefWrite def_writer(def_service, idb::DefWriteType::kChip);
       if (!def_writer.writeDb(options.write_def_path.c_str())) {
         std::cerr << "failed to write edited def: " << options.write_def_path << "\n";
         return 1;
       }
+    }
+
+    if (edit_result_committed(result.status) && !options.write_db_path.empty()) {
+      if (!ensure_directory(options.write_db_path)) {
+        std::cerr << "failed to create edited db directory: " << options.write_db_path << "\n";
+        return 1;
+      }
+      if (!idb_builder.saveData(options.write_db_path)) {
+        std::cerr << "failed to write edited db: " << options.write_db_path << "\n";
+        return 1;
+      }
+    }
+
+    if (edit_result_committed(result.status) && !options.write_gds_path.empty()) {
+      if (!ensure_parent_directory(options.write_gds_path)) {
+        std::cerr << "failed to create edited gds directory: "
+                  << std::filesystem::path(options.write_gds_path).parent_path().string() << "\n";
+        return 1;
+      }
+      if (!idb_builder.saveGDSII(options.write_gds_path)) {
+        std::cerr << "failed to write edited gds: " << options.write_gds_path << "\n";
+        return 1;
+      }
+    }
+
+    if (!write_text_file(options.edit_result_path, edit_result_json(result))) {
+      std::cerr << "failed to write edit result: " << options.edit_result_path << "\n";
+      return 1;
     }
   }
 

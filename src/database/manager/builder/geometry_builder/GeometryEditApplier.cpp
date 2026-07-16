@@ -8,9 +8,94 @@
 #include "PinPortEditAdapter.h"
 #include "RectOwnerEditAdapter.h"
 
+#include <vector>
+
 namespace ecc::geometry {
 
 namespace {
+
+constexpr OwnerId kDerivedOwnerPayloadMask = 0x00ffffffffffffffULL;
+
+OwnerId make_derived_owner_id(OwnerType parent_type, OwnerId parent_owner_id)
+{
+  return (static_cast<OwnerId>(static_cast<uint8_t>(parent_type)) << 56U)
+         | (parent_owner_id & kDerivedOwnerPayloadMask);
+}
+
+OwnerId pin_owner_id_from_path(idb::IdbPin* pin, uint32_t path0, uint32_t path1)
+{
+  if (pin == nullptr) {
+    return 0;
+  }
+
+  return pin->get_id() != 0 ? pin->get_id() : (static_cast<OwnerId>(path0) << 32U | path1);
+}
+
+Rect32 offset_rect(Rect32 rect, int32_t dx, int32_t dy)
+{
+  return Rect32{rect.lx + dx, rect.ly + dy, rect.hx + dx, rect.hy + dy};
+}
+
+bool translate_owner_shapes(GeometryStore& store, OwnerType owner_type, OwnerId owner_id, int32_t dx, int32_t dy,
+                            uint64_t command_id)
+{
+  for (const ShapeId shape_id : store.query_owner(owner_type, owner_id)) {
+    const ShapeRecord* record = store.find_shape(shape_id);
+    if (record == nullptr || record->state != ShapeState::kAlive || record->kind != ShapeKind::kRect) {
+      continue;
+    }
+    if (!store.update_rect(shape_id, offset_rect(record->bbox, dx, dy), command_id)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool translate_instance_pin_shapes(GeometryStore& store, idb::IdbInstance& instance, OwnerType pin_owner_type,
+                                   uint32_t instance_path0, int32_t dx, int32_t dy, uint64_t command_id)
+{
+  auto* pins = instance.get_pin_list();
+  if (pins == nullptr) {
+    return true;
+  }
+
+  uint32_t pin_index = 0;
+  for (auto* pin : pins->get_pin_list()) {
+    const OwnerId pin_owner_id = pin_owner_id_from_path(pin, instance_path0, pin_index++);
+    if (!translate_owner_shapes(store, pin_owner_type, pin_owner_id, dx, dy, command_id)) {
+      return false;
+    }
+
+    const OwnerId via_owner_id = make_derived_owner_id(pin_owner_type, pin_owner_id);
+    if (!translate_owner_shapes(store, OwnerType::kVia, via_owner_id, dx, dy, command_id)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool translate_instance_dependent_shapes(GeometryStore& store, idb::IdbInstance& instance, OwnerRef instance_owner,
+                                         int32_t dx, int32_t dy, uint64_t command_id)
+{
+  if (!translate_owner_shapes(store, OwnerType::kInstanceHalo, instance_owner.owner_id, dx, dy, command_id)) {
+    return false;
+  }
+  if (!translate_owner_shapes(store, OwnerType::kObs, instance_owner.owner_id, dx, dy, command_id)) {
+    return false;
+  }
+  if (!translate_instance_pin_shapes(store, instance, OwnerType::kInstancePinPortShape, instance_owner.path0, dx, dy,
+                                     command_id)) {
+    return false;
+  }
+  return translate_instance_pin_shapes(store, instance, OwnerType::kPinPortShape, instance_owner.path0, dx, dy,
+                                       command_id);
+}
+
+bool is_editable_io_pin_owner(OwnerRef owner)
+{
+  return owner.type == OwnerType::kIoPinPortShape || owner.type == OwnerType::kPinPortShape;
+}
 
 GeometryEditResult make_result(const GeometryEditCommand& command, GeometryEditStatus status,
                                GeometryEditDiagnostic diagnostic = GeometryEditDiagnostic::kNone)
@@ -116,7 +201,7 @@ GeometryEditResult GeometryEditApplier::apply_edit(const GeometryEditCommand& co
     return result;
   }
 
-  if (owner.type == OwnerType::kPinPortShape) {
+  if (is_editable_io_pin_owner(owner)) {
     if (command.op != GeometryEditOp::kMoveShape && command.op != GeometryEditOp::kResizeRect) {
       return make_record_result(command, GeometryEditStatus::kRejected, *record,
                                 GeometryEditDiagnostic::kUnsupportedOperation);
@@ -201,10 +286,19 @@ GeometryEditResult GeometryEditApplier::apply_instance_bbox_edit(const GeometryE
                               GeometryEditDiagnostic::kInstanceOwnerMismatch);
   }
 
+  const Rect32 old_bbox = record->bbox;
   const InstanceEditAdapter adapter;
   const Rect32 committed_bbox = adapter.move_bbox(instance, command.requested_bbox);
 
   if (!store.update_rect(command.shape_id, committed_bbox, command.command_id)) {
+    return make_record_result(command, GeometryEditStatus::kRejected, *record,
+                              GeometryEditDiagnostic::kStoreUpdateFailed);
+  }
+
+  const int32_t dx = committed_bbox.lx - old_bbox.lx;
+  const int32_t dy = committed_bbox.ly - old_bbox.ly;
+  if ((dx != 0 || dy != 0)
+      && !translate_instance_dependent_shapes(store, instance, owner, dx, dy, command.command_id)) {
     return make_record_result(command, GeometryEditStatus::kRejected, *record,
                               GeometryEditDiagnostic::kStoreUpdateFailed);
   }

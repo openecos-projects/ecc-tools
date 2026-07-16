@@ -1236,16 +1236,16 @@ OwnerId pin_owner_id_from_path(idb::IdbPin* pin, uint32_t path0, uint32_t path1)
   return pin->get_id() != 0 ? pin->get_id() : (static_cast<OwnerId>(path0) << 32U | path1);
 }
 
-PinPortShapeCounts emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t path0, uint32_t path1,
-                                        idb::IdbCellMaster* master = nullptr)
+PinPortShapeCounts emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, OwnerType pin_owner_type, uint32_t path0,
+                                        uint32_t path1, idb::IdbCellMaster* master = nullptr)
 {
   if (pin == nullptr) {
     return {};
   }
 
   const OwnerId pin_owner_id = pin_owner_id_from_path(pin, path0, path1);
-  store.add_owner_name(OwnerType::kPinPortShape, pin_owner_id, pin->get_pin_name());
-  const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kPinPortShape, pin_owner_id);
+  store.add_owner_name(pin_owner_type, pin_owner_id, pin->get_pin_name());
+  const OwnerId via_owner_id = make_derived_owner_id(pin_owner_type, pin_owner_id);
   store.add_owner_name(OwnerType::kVia, via_owner_id, pin->get_pin_name());
 
   PinPortShapeCounts counts;
@@ -1259,7 +1259,7 @@ PinPortShapeCounts emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, 
     uint32_t rect_index = 0;
     for (auto* rect : layer_shape->get_rect_list()) {
       OwnerRef owner;
-      owner.type = OwnerType::kPinPortShape;
+      owner.type = pin_owner_type;
       owner.owner_id = pin_owner_id;
       owner.path0 = path0;
       owner.path1 = path1;
@@ -1289,8 +1289,8 @@ PinPortShapeCounts emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, 
   return counts;
 }
 
-void reconcile_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t path0, uint32_t path1,
-                               idb::IdbCellMaster* master,
+void reconcile_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, OwnerType pin_owner_type, uint32_t path0,
+                               uint32_t path1, idb::IdbCellMaster* master,
                                std::unordered_set<ShapeId>& seen_pin_shape_ids,
                                std::unordered_set<ShapeId>& seen_via_shape_ids, GeometrySyncResult& result)
 {
@@ -1309,7 +1309,7 @@ void reconcile_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t 
     uint32_t rect_index = 0;
     for (auto* rect : layer_shape->get_rect_list()) {
       OwnerRef owner;
-      owner.type = OwnerType::kPinPortShape;
+      owner.type = pin_owner_type;
       owner.owner_id = pin_owner_id;
       owner.path0 = path0;
       owner.path1 = path1;
@@ -1323,7 +1323,7 @@ void reconcile_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, uint32_t 
     ++layer_shape_index;
   }
 
-  const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kPinPortShape, pin_owner_id);
+  const OwnerId via_owner_id = make_derived_owner_id(pin_owner_type, pin_owner_id);
   uint32_t via_index = 0;
   for (auto* via : pin->get_via_list()) {
     OwnerRef owner;
@@ -1458,7 +1458,8 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
         uint32_t pin_index = 0;
         for (auto* pin : pins->get_pin_list()) {
           const PinPortShapeCounts pin_counts =
-              emit_pin_port_shapes(store, pin, instance_index, pin_index++, instance->get_cell_master());
+              emit_pin_port_shapes(store, pin, OwnerType::kInstancePinPortShape, instance_index, pin_index++,
+                                   instance->get_cell_master());
           result.pin_shape_count += pin_counts.port_shape_count;
           result.via_shape_count += pin_counts.via_shape_count;
         }
@@ -1500,7 +1501,7 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
   if (auto* io_pins = design.get_io_pin_list(); io_pins != nullptr) {
     uint32_t pin_index = 0;
     for (auto* pin : io_pins->get_pin_list()) {
-      const PinPortShapeCounts pin_counts = emit_pin_port_shapes(store, pin, 0, pin_index++);
+      const PinPortShapeCounts pin_counts = emit_pin_port_shapes(store, pin, OwnerType::kIoPinPortShape, 0, pin_index++);
       result.pin_shape_count += pin_counts.port_shape_count;
       result.via_shape_count += pin_counts.via_shape_count;
     }
@@ -2476,13 +2477,13 @@ GeometrySyncResult GeometryBuilder::sync_instance(idb::IdbInstance& instance, Ge
     for (auto* pin : pins->get_pin_list()) {
       const OwnerId pin_owner_id = pin_owner_id_from_path(pin, instance_path0, pin_index);
       current_pin_owner_ids.push_back(pin_owner_id);
-      current_pin_via_owner_ids.push_back(make_derived_owner_id(OwnerType::kPinPortShape, pin_owner_id));
-      reconcile_pin_port_shapes(store, pin, instance_path0, pin_index++, instance.get_cell_master(), seen_pin_shape_ids,
-                                seen_pin_via_shape_ids, result);
+      current_pin_via_owner_ids.push_back(make_derived_owner_id(OwnerType::kInstancePinPortShape, pin_owner_id));
+      reconcile_pin_port_shapes(store, pin, OwnerType::kInstancePinPortShape, instance_path0, pin_index++,
+                                instance.get_cell_master(), seen_pin_shape_ids, seen_pin_via_shape_ids, result);
     }
 
     for (const OwnerId pin_owner_id : current_pin_owner_ids) {
-      for (const ShapeId shape_id : store.query_owner(OwnerType::kPinPortShape, pin_owner_id)) {
+      for (const ShapeId shape_id : store.query_owner(OwnerType::kInstancePinPortShape, pin_owner_id)) {
         if (seen_pin_shape_ids.contains(shape_id)) {
           continue;
         }
@@ -2523,12 +2524,13 @@ GeometrySyncResult GeometryBuilder::sync_io_pin(idb::IdbDesign& design, idb::Idb
 
   std::unordered_set<ShapeId> seen_pin_shape_ids;
   std::unordered_set<ShapeId> seen_via_shape_ids;
-  reconcile_pin_port_shapes(store, &pin, 0, pin_index, nullptr, seen_pin_shape_ids, seen_via_shape_ids, result);
+  reconcile_pin_port_shapes(store, &pin, OwnerType::kIoPinPortShape, 0, pin_index, nullptr, seen_pin_shape_ids,
+                            seen_via_shape_ids, result);
 
   const OwnerId pin_owner_id = pin_owner_id_from_path(&pin, 0, pin_index);
-  delete_unseen_owner_shapes(store, OwnerType::kPinPortShape, pin_owner_id, seen_pin_shape_ids, result);
+  delete_unseen_owner_shapes(store, OwnerType::kIoPinPortShape, pin_owner_id, seen_pin_shape_ids, result);
 
-  const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kPinPortShape, pin_owner_id);
+  const OwnerId via_owner_id = make_derived_owner_id(OwnerType::kIoPinPortShape, pin_owner_id);
   delete_unseen_owner_shapes(store, OwnerType::kVia, via_owner_id, seen_via_shape_ids, result);
 
   result.ok = result.missing_shape_count == 0;

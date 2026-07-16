@@ -191,6 +191,70 @@ void test_geometry_edit_applier_moves_instance_bbox_back_to_idb()
   assert(record->bbox.hy == 90);
 }
 
+void test_geometry_edit_applier_moves_instance_pin_ports_with_instance_bbox()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting routing_layer;
+  routing_layer.set_name("M1");
+  routing_layer.set_id(11);
+  routing_layer.set_order(1);
+
+  idb::IdbCellMaster master;
+  master.set_name("pin_edit_master");
+  master.set_width(40);
+  master.set_height(20);
+  idb::IdbTerm* term = master.add_term();
+  term->set_name("A");
+  idb::IdbPort* port = term->add_port();
+  idb::IdbLayerShape* layer_shape = port->add_layer_shape();
+  layer_shape->set_layer(&routing_layer);
+  layer_shape->add_rect(1, 2, 9, 12);
+
+  idb::IdbInstance* instance = design.get_instance_list()->add_instance("u_edit_pin");
+  instance->set_id(95);
+  instance->set_cell_master(&master);
+  instance->set_coodinate(100, 200);
+  instance->set_status_placed();
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  builder.rebuild_from_design(design, layout, store);
+
+  const std::vector<ShapeId> inst_shapes = store.query_owner(OwnerType::kInstanceBBox, 95);
+  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kInstancePinPortShape, 0);
+  assert(inst_shapes.size() == 1);
+  assert(pin_shapes.size() == 1);
+  assert(store.find_shape(pin_shapes[0])->bbox.lx == 101);
+  assert(store.find_shape(pin_shapes[0])->bbox.hy == 212);
+
+  store.clear_delta_events();
+
+  GeometryEditCommand command;
+  command.command_id = 713;
+  command.shape_id = inst_shapes[0];
+  command.expected_version = 1;
+  command.op = GeometryEditOp::kMoveShape;
+  command.requested_bbox = Rect32{300, 400, 340, 420};
+
+  GeometryEditApplier applier;
+  const GeometryEditResult result = applier.apply_instance_bbox_edit(command, *instance, store);
+
+  assert(result.status == GeometryEditStatus::kAccepted);
+  assert(result.new_version == 2);
+  assert(store.find_shape(inst_shapes[0])->bbox.lx == 300);
+  assert(store.find_shape(inst_shapes[0])->bbox.hy == 420);
+  assert(store.find_shape(pin_shapes[0])->version == 2);
+  assert(store.find_shape(pin_shapes[0])->bbox.lx == 301);
+  assert(store.find_shape(pin_shapes[0])->bbox.ly == 402);
+  assert(store.find_shape(pin_shapes[0])->bbox.hx == 309);
+  assert(store.find_shape(pin_shapes[0])->bbox.hy == 412);
+  assert(store.delta_events().size() == 2);
+  assert(store.delta_events()[0].command_id == 713);
+  assert(store.delta_events()[1].command_id == 713);
+}
+
 void test_geometry_edit_applier_resolves_instance_from_design_owner_id()
 {
   idb::IdbCellMaster master;
@@ -1042,7 +1106,7 @@ void test_geometry_builder_syncs_moved_instance_pin_ports_without_full_rebuild()
   builder.rebuild_from_design(design, layout, store);
 
   const OwnerId pin_owner_id = static_cast<OwnerId>(0);
-  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kPinPortShape, pin_owner_id);
+  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kInstancePinPortShape, pin_owner_id);
   assert(pin_shapes.size() == 1);
   const ShapeId pin_shape_id = pin_shapes[0];
   assert(store.find_shape(pin_shape_id)->bbox.lx == 101);
@@ -1093,7 +1157,7 @@ void test_geometry_builder_syncs_io_pin_ports_without_full_rebuild()
   GeometryBuilder builder;
   const GeometryBuildResult rebuild = builder.rebuild_from_design(design, layout, store);
 
-  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kPinPortShape, 201);
+  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kIoPinPortShape, 201);
   assert(rebuild.pin_shape_count == 1);
   assert(pin_shapes.size() == 1);
   const ShapeId pin_shape_id = pin_shapes[0];
@@ -1860,7 +1924,7 @@ void test_geometry_builder_rebuilds_def_rect_and_wire_shapes()
   const std::vector<ShapeId> fill_shapes = store.query_owner(OwnerType::kFill, 0);
   const std::vector<ShapeId> slot_shapes = store.query_owner(OwnerType::kSlot, 0);
   const std::vector<ShapeId> region_shapes = store.query_owner(OwnerType::kRegion, 0);
-  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kPinPortShape, 201);
+  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kIoPinPortShape, 201);
 
   assert(net_shapes.size() == 1);
   assert(special_shapes.size() == 1);
@@ -2581,7 +2645,7 @@ void test_geometry_edit_applier_updates_io_pin_port_rect_back_to_idb()
   GeometryBuilder builder;
   builder.rebuild_from_design(design, layout, store);
 
-  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kPinPortShape, 201);
+  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kIoPinPortShape, 201);
   assert(pin_shapes.size() == 1);
   assert(store.find_shape(pin_shapes[0])->bbox.lx == 30);
   assert(store.find_shape(pin_shapes[0])->bbox.ly == 40);
@@ -2657,7 +2721,7 @@ void test_geometry_edit_applier_updates_placed_io_port_rect_back_to_idb()
   GeometryBuilder builder;
   builder.rebuild_from_design(design, layout, store);
 
-  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kPinPortShape, 203);
+  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kIoPinPortShape, 203);
   assert(pin_shapes.size() == 1);
   assert(store.find_shape(pin_shapes[0])->bbox.lx == 100);
   assert(store.find_shape(pin_shapes[0])->bbox.ly == 200);
@@ -2722,7 +2786,7 @@ void test_geometry_edit_applier_rejects_rotated_io_pin_port_rect_edit()
   GeometryBuilder builder;
   builder.rebuild_from_design(design, layout, store);
 
-  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kPinPortShape, 202);
+  const std::vector<ShapeId> pin_shapes = store.query_owner(OwnerType::kIoPinPortShape, 202);
   assert(pin_shapes.size() == 1);
 
   GeometryEditCommand command;
@@ -3485,6 +3549,7 @@ int main()
   test_geometry_edit_json_parses_resize_rect_op();
   test_geometry_snapshot_workflow_skips_rebuild_for_restored_apply_edit_snapshot();
   test_geometry_edit_applier_moves_instance_bbox_back_to_idb();
+  test_geometry_edit_applier_moves_instance_pin_ports_with_instance_bbox();
   test_geometry_edit_applier_resolves_instance_from_design_owner_id();
   test_geometry_edit_applier_reports_adjusted_instance_bbox_when_master_size_is_preserved();
   test_geometry_edit_applier_reports_conflict_when_shape_version_changed();

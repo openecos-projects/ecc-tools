@@ -276,6 +276,8 @@ void test_geometry_store_counts_alive_shapes_by_owner_type_and_layer()
 void test_owner_type_label_includes_instance_halo()
 {
   assert(owner_type_label(OwnerType::kInstanceHalo) == "instance_halo");
+  assert(owner_type_label(OwnerType::kInstancePinPortShape) == "instance_pin_port_shape");
+  assert(owner_type_label(OwnerType::kIoPinPortShape) == "io_pin_port_shape");
 }
 
 void test_geometry_spatial_index_returns_unique_layer_candidates()
