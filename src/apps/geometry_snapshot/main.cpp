@@ -552,6 +552,7 @@ int main(int argc, char** argv)
   write_options.vias = geometry_builder.collect_via_metadata(*def_service->get_layout(), *def_service->get_design());
   write_options.grids = geometry_builder.collect_grid_metadata(*def_service->get_layout());
   write_options.connectivity = geometry_builder.collect_connectivity_metadata(*def_service->get_design());
+  write_options.nets = geometry_builder.collect_net_metadata(*def_service->get_design());
   write_options.buses = geometry_builder.collect_bus_metadata(*def_service->get_design());
   write_options.groups = geometry_builder.collect_group_metadata(*def_service->get_design());
   populate_snapshot_design_metadata(write_options, *def_service->get_design(), *def_service->get_layout());

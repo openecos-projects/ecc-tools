@@ -2903,12 +2903,16 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   write_options.grids.push_back(grid_metadata);
   GeometryConnectivityMetadata connectivity_metadata;
   connectivity_metadata.net_name = "clk";
-  connectivity_metadata.net_kind = "regular";
+  connectivity_metadata.net_kind = "clock";
   connectivity_metadata.endpoint_type = "instance";
   connectivity_metadata.instance_name = "u0";
   connectivity_metadata.pin_name = "A";
   connectivity_metadata.master_name = "INVX1";
   write_options.connectivity.push_back(connectivity_metadata);
+  GeometryNetMetadata net_metadata;
+  net_metadata.name = "clk";
+  net_metadata.kind = "clock";
+  write_options.nets.push_back(net_metadata);
   GeometryBusMetadata bus_metadata;
   bus_metadata.name = "data";
   bus_metadata.bus_type = "net";
@@ -2934,6 +2938,7 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(result.owner_count == 3);
   assert(result.via_count == 1);
   assert(result.grid_count == 1);
+  assert(result.net_count == 1);
   assert(result.payload_size >= sizeof(RectPayload) + sizeof(LinePayload) + sizeof(PointPayload));
 
   const std::filesystem::path manifest_path = output_dir / "geometry.manifest";
@@ -2957,6 +2962,7 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   const std::filesystem::path vias_path = snapshot_path("vias");
   const std::filesystem::path grids_path = snapshot_path("grids");
   const std::filesystem::path connectivity_path = snapshot_path("connectivity");
+  const std::filesystem::path nets_path = snapshot_path("nets");
   const std::filesystem::path buses_path = snapshot_path("buses");
   const std::filesystem::path groups_path = snapshot_path("groups");
 
@@ -2976,6 +2982,7 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(std::filesystem::exists(vias_path));
   assert(std::filesystem::exists(grids_path));
   assert(std::filesystem::exists(connectivity_path));
+  assert(std::filesystem::exists(nets_path));
   assert(std::filesystem::exists(buses_path));
   assert(std::filesystem::exists(groups_path));
 
@@ -3049,6 +3056,7 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(manifest.find("geometry.vias.txt") != std::string::npos);
   assert(manifest.find("geometry.grids.txt") != std::string::npos);
   assert(manifest.find("geometry.connectivity.txt") != std::string::npos);
+  assert(manifest.find("geometry.nets.txt") != std::string::npos);
   assert(manifest.find("geometry.buses.txt") != std::string::npos);
   assert(manifest.find("geometry.groups.txt") != std::string::npos);
 
@@ -3080,7 +3088,11 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
 
   const std::string connectivity_manifest = read_text_file(connectivity_path);
   assert(connectivity_manifest.find("net\tkind\tendpoint_type\tinstance\tpin\tmaster") != std::string::npos);
-  assert(connectivity_manifest.find("clk\tregular\tinstance\tu0\tA\tINVX1") != std::string::npos);
+  assert(connectivity_manifest.find("clk\tclock\tinstance\tu0\tA\tINVX1") != std::string::npos);
+
+  const std::string nets_manifest = read_text_file(nets_path);
+  assert(nets_manifest.find("name\tkind") != std::string::npos);
+  assert(nets_manifest.find("clk\tclock") != std::string::npos);
 
   const std::string bus_manifest = read_text_file(buses_path);
   assert(bus_manifest.find("name\ttype\tleft\tright\tnet_count\tpin_count\tnets\tpins") != std::string::npos);
@@ -3163,7 +3175,7 @@ void test_geometry_builder_collects_site_and_master_metadata()
   auto* instance = design.get_instance_list()->add_instance("u0");
   instance->set_id(77);
   instance->set_cell_master(master);
-  auto* net = design.get_net_list()->add_net("clk", idb::IdbConnectType::kSignal);
+  auto* net = design.get_net_list()->add_net("clk", idb::IdbConnectType::kClock);
   auto* inst_pin = instance->get_pin("A");
   inst_pin->set_net(net);
   inst_pin->set_net_name("clk");
@@ -3245,12 +3257,19 @@ void test_geometry_builder_collects_site_and_master_metadata()
   const std::vector<GeometryConnectivityMetadata> connectivity = builder.collect_connectivity_metadata(design);
   assert(connectivity.size() == 2);
   assert(connectivity[0].net_name == "clk");
+  assert(connectivity[0].net_kind == "clock");
   assert(connectivity[0].endpoint_type == "instance");
   assert(connectivity[0].instance_name == "u0");
   assert(connectivity[0].pin_name == "A");
   assert(connectivity[0].master_name == "INVX1");
   assert(connectivity[1].endpoint_type == "io");
+  assert(connectivity[1].net_kind == "clock");
   assert(connectivity[1].pin_name == "clk_in");
+
+  const std::vector<GeometryNetMetadata> nets = builder.collect_net_metadata(design);
+  assert(nets.size() == 1);
+  assert(nets[0].name == "clk");
+  assert(nets[0].kind == "clock");
 
   const std::vector<GeometryBusMetadata> buses = builder.collect_bus_metadata(design);
   assert(buses.size() == 1);

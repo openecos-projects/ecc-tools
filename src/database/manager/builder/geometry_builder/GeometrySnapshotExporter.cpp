@@ -41,6 +41,7 @@ SnapshotWriteResult export_geometry_snapshot(idb::IdbDesign& design, idb::IdbLay
   options.vias = builder.collect_via_metadata(layout, design);
   options.grids = builder.collect_grid_metadata(layout);
   options.connectivity = builder.collect_connectivity_metadata(design);
+  options.nets = builder.collect_net_metadata(design);
   options.buses = builder.collect_bus_metadata(design);
   options.groups = builder.collect_group_metadata(design);
   populate_design_metadata(options, design, layout);

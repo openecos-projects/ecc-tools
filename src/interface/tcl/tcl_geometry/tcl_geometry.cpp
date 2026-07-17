@@ -79,6 +79,14 @@ unsigned CmdGeometrySnapshot::exec()
   const ecc::geometry::GeometryBuildResult build_result = builder.rebuild_from_design(*design, *layout, store);
   ecc::geometry::SnapshotWriteOptions write_options{std::filesystem::path(output_path)};
   write_options.layers = builder.collect_layer_metadata(*layout);
+  write_options.sites = builder.collect_site_metadata(*layout);
+  write_options.masters = builder.collect_master_metadata(*layout);
+  write_options.vias = builder.collect_via_metadata(*layout, *design);
+  write_options.grids = builder.collect_grid_metadata(*layout);
+  write_options.connectivity = builder.collect_connectivity_metadata(*design);
+  write_options.nets = builder.collect_net_metadata(*design);
+  write_options.buses = builder.collect_bus_metadata(*design);
+  write_options.groups = builder.collect_group_metadata(*design);
   populate_snapshot_design_metadata(write_options, *design, *layout);
 
   ecc::geometry::GeometrySnapshotWriter writer;

@@ -607,12 +607,32 @@ const char* bus_type_name(idb::IdbBus::kBusType type)
   }
 }
 
+const char* net_kind_name(idb::IdbNet* net)
+{
+  if (net == nullptr) {
+    return "other";
+  }
+  if (net->is_clock()) {
+    return "clock";
+  }
+  if (net->is_signal() || net->get_connect_type() == idb::IdbConnectType::kNone) {
+    return "signal";
+  }
+  if (net->is_power()) {
+    return "power";
+  }
+  if (net->is_ground()) {
+    return "ground";
+  }
+  return "other";
+}
+
 GeometryConnectivityMetadata connectivity_metadata_from_pin(idb::IdbNet* net, idb::IdbPin* pin,
                                                             const char* endpoint_type)
 {
   GeometryConnectivityMetadata metadata;
   metadata.net_name = net == nullptr ? std::string{} : net->get_net_name();
-  metadata.net_kind = "regular";
+  metadata.net_kind = net_kind_name(net);
   metadata.endpoint_type = endpoint_type == nullptr ? "unknown" : endpoint_type;
   metadata.pin_name = pin == nullptr ? std::string{} : pin->get_pin_name();
   auto* instance = pin == nullptr ? nullptr : pin->get_instance();
@@ -1932,6 +1952,31 @@ std::vector<GeometryConnectivityMetadata> GeometryBuilder::collect_connectivity_
                      < std::tie(rhs.net_name, rhs.endpoint_type, rhs.instance_name, rhs.pin_name);
             });
   return connectivity;
+}
+
+std::vector<GeometryNetMetadata> GeometryBuilder::collect_net_metadata(idb::IdbDesign& design) const
+{
+  std::vector<GeometryNetMetadata> nets;
+  auto* net_list = design.get_net_list();
+  if (net_list == nullptr) {
+    return nets;
+  }
+
+  for (auto* net : net_list->get_net_list()) {
+    if (net == nullptr) {
+      continue;
+    }
+
+    GeometryNetMetadata metadata;
+    metadata.name = net->get_net_name();
+    metadata.kind = net_kind_name(net);
+    nets.push_back(metadata);
+  }
+
+  std::sort(nets.begin(), nets.end(), [](const GeometryNetMetadata& lhs, const GeometryNetMetadata& rhs) {
+    return lhs.name < rhs.name;
+  });
+  return nets;
 }
 
 std::vector<GeometryBusMetadata> GeometryBuilder::collect_bus_metadata(idb::IdbDesign& design) const

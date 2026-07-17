@@ -75,6 +75,12 @@ struct GeometryConnectivityMetadata
   std::string master_name;
 };
 
+struct GeometryNetMetadata
+{
+  std::string name;
+  std::string kind;
+};
+
 struct GeometryBusMetadata
 {
   std::string name;

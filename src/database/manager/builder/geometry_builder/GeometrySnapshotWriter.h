@@ -20,6 +20,7 @@ struct SnapshotWriteOptions
   std::vector<GeometryViaMetadata> vias;
   std::vector<GeometryGridMetadata> grids;
   std::vector<GeometryConnectivityMetadata> connectivity;
+  std::vector<GeometryNetMetadata> nets;
   std::vector<GeometryBusMetadata> buses;
   std::vector<GeometryGroupMetadata> groups;
   std::string design_name;
@@ -42,6 +43,7 @@ struct SnapshotWriteResult
   uint64_t via_count = 0;
   uint64_t grid_count = 0;
   uint64_t connectivity_count = 0;
+  uint64_t net_count = 0;
   uint64_t bus_count = 0;
   uint64_t group_count = 0;
   uint64_t epoch = 0;
