@@ -16,11 +16,11 @@
 // ***************************************************************************************
 #pragma once
 /**
- * @project		iEDA
- * @file		feature_parser.h
- * @author		Yell
- * @date		10/08/2023
- * @version		0.1
+ * @project          iEDA
+ * @file             feature_parser.h
+ * @author           Yell
+ * @date             10/08/2023
+ * @version          0.1
  * @description
 
 
@@ -97,6 +97,7 @@ class FeatureParser
   json buildSummaryRT();
   json buildSummarySTA();
   json buildSummaryDRC();
+  json buildSummaryAntenna();
 
   json buildSummaryWirelength();
   json buildSummaryDensity();

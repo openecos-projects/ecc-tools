@@ -32,10 +32,12 @@ class AntennaChecker
   static void destroyInst();
   // function
   void check(std::map<std::string, std::any> config_map);
+  int get_violation_num() { return _violation_num; }
 
  private:
   // self
   static AntennaChecker* _ac_instance;
+  int _violation_num = 0;
 
   AntennaChecker() = default;
   AntennaChecker(const AntennaChecker& other) = delete;

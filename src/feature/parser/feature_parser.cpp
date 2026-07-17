@@ -15,11 +15,11 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @project		iEDA
- * @file		feature_parser.cpp
- * @author		Yell
- * @date		10/08/2023
- * @version		0.1
+ * @project   iEDA
+ * @file      feature_parser.h
+ * @author    Yell
+ * @date      10/08/2023
+ * @version   0.1
  * @description
 
 
@@ -111,6 +111,7 @@ bool FeatureParser::buildTools(std::string json_path, std::string step)
                                                                        {"optSetup", [this, step]() { return buildSummaryTO(step); }},
                                                                        {"sta", [this]() { return buildSummarySTA(); }},
                                                                        {"drc", [this]() { return buildSummaryDRC(); }},
+                                                                       {"antenna", [this]() { return buildSummaryAntenna(); }},
                                                                        {"route", [this]() { return buildSummaryRT(); }}};
 
   std::ofstream& file_stream = ieda::getOutputFileStream(json_path);
@@ -227,7 +228,6 @@ bool FeatureParser::buildSummaryEval(std::string json_path)
   std::cout << std::endl << "Save eval json success, path = " << json_path << std::endl;
   return true;
 }
-
 
 bool FeatureParser::buildSummaryTimingEval(std::string json_path)
 {

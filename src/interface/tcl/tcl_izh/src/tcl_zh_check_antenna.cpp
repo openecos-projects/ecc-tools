@@ -14,14 +14,25 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
+#include "ZHInterface.hpp"
+#include "tcl_util.h"
+#include "tcl_zh.h"
 
-#include <string>
+namespace tcl {
 
-namespace python_interface {
+TclZHCheckAntenna::TclZHCheckAntenna(const char* cmd_name) : TclCmd(cmd_name)
+{
+  TclUtil::addOption(this, _config_list);
+}
 
-bool fix_fanout(const std::string& config);
-bool insert_filler(const std::string& config);
-bool check_antenna(const std::string& config, const std::string& report_dir);
+unsigned TclZHCheckAntenna::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
+  ZHI.checkAntenna(config_map);
+  return 1;
+}
 
-}  // namespace python_interface
+}  // namespace tcl

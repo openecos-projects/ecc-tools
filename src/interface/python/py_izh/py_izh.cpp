@@ -54,4 +54,24 @@ bool insert_filler(const std::string& config)
   return true;
 }
 
+bool check_antenna(const std::string& config, const std::string& report_dir)
+{
+  std::map<std::string, std::any> config_map;
+
+  if (!config.empty()) {
+    bool pass = false;
+    pass = !pass ? initZHConfigMapByJSON(config, config_map) : pass;
+    if (!pass) {
+      return false;
+    }
+  }
+
+  if (!report_dir.empty()) {
+    config_map["report_dir"] = report_dir;
+  }
+
+  ZHI.checkAntenna(config_map);
+  return true;
+}
+
 }  // namespace python_interface

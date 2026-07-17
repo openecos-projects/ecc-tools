@@ -15,11 +15,11 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @project		iEDA
- * @file		feature_parser.cpp
- * @author		Yell
- * @date		10/08/2023
- * @version		0.1
+ * @project   iEDA
+ * @file      feature_parser.cpp
+ * @author    Yell
+ * @date      10/08/2023
+ * @version   0.1
  * @description
 
 
@@ -426,6 +426,12 @@ json FeatureParser::buildSummaryDRC()
   //   }
 
   return summary_drc;
+}
+  
+json FeatureParser::buildSummaryAntenna()
+{
+  json summary_antenna;
+  return summary_antenna;
 }
 
 }  // namespace ieda_feature
