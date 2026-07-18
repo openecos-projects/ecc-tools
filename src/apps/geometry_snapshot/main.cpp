@@ -396,6 +396,8 @@ void print_snapshot_write_report(const ecc::geometry::SnapshotWriteResult& write
   out << "delta_count=" << write_result.delta_count << "\n";
   out << "dirty_lod_tile_count=" << write_result.dirty_lod_tile_count << "\n";
   out << "dirty_lod_rebuild_candidate_count=" << write_result.dirty_lod_rebuild_candidate_count << "\n";
+  out << "written_side_file_count=" << write_result.written_side_file_count << "\n";
+  out << "reused_side_file_count=" << write_result.reused_side_file_count << "\n";
 }
 
 void populate_snapshot_design_metadata(ecc::geometry::SnapshotWriteOptions& write_options, idb::IdbDesign& design,

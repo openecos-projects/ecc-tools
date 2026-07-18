@@ -3045,6 +3045,8 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(manifest.find("dirty_lod_rebuild_candidate_count="
                        + std::to_string(result.dirty_lod_rebuild_candidate_count))
          != std::string::npos);
+  assert(manifest.find("written_side_file_count=" + std::to_string(result.written_side_file_count)) != std::string::npos);
+  assert(manifest.find("reused_side_file_count=" + std::to_string(result.reused_side_file_count)) != std::string::npos);
   assert(manifest.find("geometry.meta.bin") != std::string::npos);
   assert(manifest.find("geometry.shapes.bin") != std::string::npos);
   assert(manifest.find("geometry.owners.bin") != std::string::npos);
@@ -3356,6 +3358,45 @@ void test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_f
   std::filesystem::remove_all(output_dir);
 }
 
+void test_geometry_snapshot_writer_reuses_unchanged_binary_side_files()
+{
+  GeometryStore store;
+  store.add_rect(1, Rect32{0, 0, 10, 20}, OwnerRef{OwnerType::kDie});
+  const std::filesystem::path output_dir =
+      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_side_file_reuse_test";
+  std::filesystem::remove_all(output_dir);
+
+  GeometrySnapshotWriter writer;
+  const SnapshotWriteResult first = writer.write(store, SnapshotWriteOptions{output_dir});
+  assert(first.ok);
+  assert(first.reused_side_file_count == 0);
+  const std::filesystem::path manifest_path = output_dir / "geometry.manifest";
+  const std::filesystem::path first_shapes = output_dir / manifest_value(manifest_path, "shapes");
+  const std::filesystem::path first_owners = output_dir / manifest_value(manifest_path, "owners");
+  const std::filesystem::path first_names = output_dir / manifest_value(manifest_path, "names");
+  assert(std::filesystem::exists(first_shapes));
+  assert(std::filesystem::exists(first_owners));
+  assert(std::filesystem::exists(first_names));
+
+  const SnapshotWriteResult second = writer.write(store, SnapshotWriteOptions{output_dir});
+  assert(second.ok);
+  assert(second.epoch != first.epoch);
+  assert(second.reused_side_file_count >= 3);
+  assert(second.written_side_file_count >= 9);
+  assert(output_dir / manifest_value(manifest_path, "shapes") == first_shapes);
+  assert(output_dir / manifest_value(manifest_path, "owners") == first_owners);
+  assert(output_dir / manifest_value(manifest_path, "names") == first_names);
+  assert(std::filesystem::exists(first_shapes));
+
+  GeometryStore loaded;
+  GeometrySnapshotReader reader;
+  const SnapshotReadResult read_result = reader.read(SnapshotReadOptions{manifest_path}, loaded);
+  assert(read_result.ok);
+  assert(loaded.records().size() == 1);
+
+  std::filesystem::remove_all(output_dir);
+}
+
 void test_geometry_snapshot_reader_round_trips_core_binary_files()
 {
   GeometryStore store;
@@ -3625,6 +3666,7 @@ int main()
   test_geometry_builder_collects_site_and_master_metadata();
   test_geometry_snapshot_exporter_writes_current_idb_design();
   test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_files();
+  test_geometry_snapshot_writer_reuses_unchanged_binary_side_files();
   test_geometry_snapshot_reader_round_trips_core_binary_files();
   test_geometry_snapshot_reload_preserves_shape_id_and_version_during_rebuild();
   test_geometry_snapshot_apply_edit_on_reloaded_store_is_incremental_without_rebuild();

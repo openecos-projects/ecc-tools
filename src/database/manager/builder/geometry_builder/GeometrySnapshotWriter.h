@@ -48,6 +48,8 @@ struct SnapshotWriteResult
   uint64_t group_count = 0;
   uint64_t dirty_lod_tile_count = 0;
   uint64_t dirty_lod_rebuild_candidate_count = 0;
+  uint64_t written_side_file_count = 0;
+  uint64_t reused_side_file_count = 0;
   uint64_t epoch = 0;
 };
 
