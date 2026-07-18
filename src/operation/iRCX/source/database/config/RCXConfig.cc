@@ -14,13 +14,16 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file RCXConfig.cc
+ * @brief iRCX JSON configuration parser implementation.
+ */
 #include "RCXConfig.hh"
 
 #include <cmath>
 #include <exception>
 #include <filesystem>
 #include <fstream>
-#include <string_view>
 
 #include "PathUtils.hh"
 #include "json/json.hpp"
@@ -75,10 +78,10 @@ auto parseCornerConfig(const nlohmann::json& corner_json,
 
     corner_config.temperatures.clear();
     corner_config.temperatures.reserve(corner_json["temperature"].size());
-    for (size_t idx = 0; idx < corner_json["temperature"].size(); ++idx) {
+    for (Size idx = 0; idx < corner_json["temperature"].size(); ++idx) {
       const auto& temperature_json = corner_json["temperature"][idx];
       const std::string temperature_item_field = temperature_field + "["
-                                                 + std::to_string(idx) + "]";
+                                         + std::to_string(idx) + "]";
       if (!temperature_json.is_number()) {
         LOG_ERROR << "invalid optional corner field: " << temperature_item_field
                   << ", expected number";
@@ -124,8 +127,12 @@ auto parseCornerConfig(const nlohmann::json& corner_json,
   }
 
   corner_config.name = string::trim(corner_json["name"].get<std::string>());
-  corner_config.itf_file = path::resolve(config_dir, corner_json["itf_file"].get<std::string>());
-  corner_config.captab_file = path::resolve(config_dir, corner_json["captab_file"].get<std::string>());
+  corner_config.itf_file = path::resolve(
+      config_dir,
+      corner_json["itf_file"].get<std::string>());
+  corner_config.captab_file = path::resolve(
+      config_dir,
+      corner_json["captab_file"].get<std::string>());
 
   bool valid = true;
   if (corner_config.name.empty()) {
@@ -254,9 +261,9 @@ auto RCXConfig::parse(const std::string& json_file) -> bool
     }
 
     const bool corners_is_array = corners_json.is_array();
-    const size_t corner_count = corners_is_array ? corners_json.size() : 1;
+    const Size corner_count = corners_is_array ? corners_json.size() : 1;
     _corners.reserve(corner_count);
-    for (size_t idx = 0; idx < corner_count; ++idx) {
+    for (Size idx = 0; idx < corner_count; ++idx) {
       const auto& corner_json = corners_is_array ? corners_json[idx] : corners_json;
       const std::string corner_field = "corners[" + std::to_string(idx) + "]";
 

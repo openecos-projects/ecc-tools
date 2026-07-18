@@ -14,24 +14,40 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CapacitanceCalc.cc
+ * @brief iRCX module implementation detail.
+ */
 #include <algorithm>
 
 #include "CapTableQuery.hh"
 #include "CapacitanceCalc.hh"
 #include "EdgeCapAccumulator.hh"
 #include "LayerTable.hh"
+#include "LayoutData.hh"
+#include "NetEnvironment.hh"
+#include "NetEtchProfile.hh"
+#include "ParallelUtils.hh"
 #include "ProcessCorner.hpp"
 #include "CapTable.hpp"
+#include "RCTable.hh"
+#include "TopoPool.hh"
 #include "log/Log.hh"
+
 namespace ircx {
+
+void CapacitanceCalc::set_layout_data(const LayoutData* v)
+{
+  layout_data_ = v;
+  micron_per_dbu_ = unit::toMicron(1, v->dbu_per_micron);
+}
 
 namespace {
 
-void resolveCrossLayers(
-    const LayerTable& layer_table,
-    const CrossOverlapSub* cross_seg,
-    Str& below_layer,
-    Str& above_layer)
+void resolveCrossLayers(const LayerTable& layer_table,
+                        const CrossOverlapSub* cross_seg,
+                        std::string& below_layer,
+                        std::string& above_layer)
 {
   below_layer = "SUBSTRATE";
   above_layer.clear();
@@ -41,31 +57,30 @@ void resolveCrossLayers(
   }
 
   if (cross_seg->blw_layer != 0) {
-    const Size process_layer_id = layer_table.design_to_process_id(cross_seg->blw_layer);
-    below_layer = layer_table.process_name(process_layer_id);
+    const Size process_layer_id = layer_table.designToProcessId(cross_seg->blw_layer);
+    below_layer = layer_table.processName(process_layer_id);
   }
   if (cross_seg->abv_layer != 0) {
-    const Size process_layer_id = layer_table.design_to_process_id(cross_seg->abv_layer);
-    above_layer = layer_table.process_name(process_layer_id);
+    const Size process_layer_id = layer_table.designToProcessId(cross_seg->abv_layer);
+    above_layer = layer_table.processName(process_layer_id);
   }
 }
 
-void accumulateSegmentCap(
-    const LayerTable& layer_table,
-    Micron micron_per_dbu,
-    Dbu segment_lo_dbu,
-    Dbu segment_hi_dbu,
-    const CrossOverlapSub* cross_overlap,
-    const SideContext& low_side,
-    const SideContext& high_side,
-    EdgeCapAccumulator& accumulator)
+void accumulateSegmentCap(const LayerTable& layer_table,
+                          Micron micron_per_dbu,
+                          Dbu segment_lo_dbu,
+                          Dbu segment_hi_dbu,
+                          const CrossOverlapSub* cross_overlap,
+                          const SideContext& low_side,
+                          const SideContext& high_side,
+                          EdgeCapAccumulator& accumulator)
 {
   if (segment_hi_dbu <= segment_lo_dbu) {
     return;
   }
 
-  Str below_layer;
-  Str above_layer;
+  std::string below_layer;
+  std::string above_layer;
   resolveCrossLayers(layer_table, cross_overlap, below_layer, above_layer);
   accumulator.accumulateSpan(
       (segment_hi_dbu - segment_lo_dbu) * micron_per_dbu,
@@ -84,17 +99,18 @@ bool CapacitanceCalc::calc()
   }
 
   const Size corner_count = corner_data_->size();
-  const Size net_count = layout_data_->regular_net_count();
+  const Size net_count = layout_data_->get_regular_net_count();
 
   for (Size corner_idx = 0; corner_idx < corner_count; ++corner_idx) {
     const auto& corner_data = (*corner_data_)[corner_idx];
-    if (corner_data.process_corner == nullptr) {
+    if (!corner_data.process_corner) {
       LOG_ERROR << "process corner missing for corner " << corner_data.name;
       return false;
     }
     const parser::CapTable& cap_table = corner_data.cap_table;
 
-    #pragma omp parallel for schedule(dynamic)
+    const int net_threads = parallel::threadCount(net_count);
+#pragma omp parallel for schedule(dynamic) num_threads(net_threads)
     for (Size net_idx = 0; net_idx < net_count; ++net_idx) {
       calcNet(
           corner_idx,
@@ -106,7 +122,7 @@ bool CapacitanceCalc::calc()
   }
 
   // merge per-net coupling cap entries (sequential)
-  rc_table_->merge_net_ccap_entries();
+  rc_table_->mergeNetCcapEntries();
   return true;
 }
 
@@ -140,8 +156,8 @@ bool CapacitanceCalc::validateInputs() const
     LOG_ERROR << "calculate capacitance failed: process corners not set.";
     return false;
   }
-  if (corner_net_etch_pools_->corner_num() != corner_data_->size()
-      || corner_net_etch_pools_->net_num() != layout_data_->regular_net_count()) {
+  if (corner_net_etch_pools_->get_corner_num() != corner_data_->size()
+      || corner_net_etch_pools_->get_net_num() != layout_data_->get_regular_net_count()) {
     LOG_ERROR << "calculate capacitance failed: etch profile dimensions mismatch.";
     return false;
   }
@@ -149,22 +165,21 @@ bool CapacitanceCalc::validateInputs() const
   return true;
 }
 
-void CapacitanceCalc::calcNet(
-    Size corner_idx,
-    Size net_idx,
-    const parser::CapTable& cap_table,
-    const NetEtchProfile& etch_profile,
-    const NetEnvironment& environment)
+void CapacitanceCalc::calcNet(Size corner_idx,
+                              Size net_idx,
+                              const parser::CapTable& cap_table,
+                              const NetEtchProfile& etch_profile,
+                              const NetEnvironment& environment)
 {
-  const auto net_edges = topo_pool_->net_edges(net_idx);
-  auto edge_ground_caps = rc_table_->corner_net_gcap_pool({corner_idx, net_idx});
+  const auto get_net_edges = topo_pool_->get_net_edges(net_idx);
+  auto edge_ground_caps = rc_table_->get_corner_net_gcap_pool({corner_idx, net_idx});
 
-  for (Size edge_idx = 0; edge_idx < net_edges.size(); ++edge_idx) {
+  for (Size edge_idx = 0; edge_idx < get_net_edges.size(); ++edge_idx) {
     calcEdge(
         corner_idx,
         net_idx,
         edge_idx,
-        net_edges[edge_idx],
+        get_net_edges[edge_idx],
         cap_table,
         edge_ground_caps,
         environment,
@@ -172,25 +187,24 @@ void CapacitanceCalc::calcNet(
   }
 }
 
-void CapacitanceCalc::calcEdge(
-    Size corner_idx,
-    Size net_idx,
-    Size edge_idx,
-    const TopoEdge& edge,
-    const parser::CapTable& cap_table,
-    std::span<F64> edge_ground_caps,
-    const NetEnvironment& environment,
-    const NetEtchProfile& etch_profile)
+void CapacitanceCalc::calcEdge(Size corner_idx,
+                               Size net_idx,
+                               Size edge_idx,
+                               const TopoEdge& edge,
+                               const parser::CapTable& cap_table,
+                               std::span<F64> edge_ground_caps,
+                               const NetEnvironment& environment,
+                               const NetEtchProfile& etch_profile)
 {
   if (edge.is_via()) {
     return;
   }
 
-  const Size process_layer_id = layer_table_->design_to_process_id(edge.layer_id());
-  const Str& layer_name = layer_table_->process_name(process_layer_id);
+  const Size process_layer_id = layer_table_->designToProcessId(edge.get_layer_id());
+  const std::string& layer_name = layer_table_->processName(process_layer_id);
 
-  // Global index of current edge in TopoPool::edge_pool()
-  const Size edge_global_id = topo_pool_->edge_index(edge);
+  // Global index of current edge in TopoPool::get_edge_pool()
+  const Size edge_global_idx = topo_pool_->get_edge_index(edge);
 
   const auto env_intervals = environment.edgeIntervals(edge_idx);
   const auto etch_intervals = etch_profile.edgeIntervals(edge_idx);
@@ -208,7 +222,7 @@ void CapacitanceCalc::calcEdge(
       corner_idx,
       net_idx,
       edge_idx,
-      edge_global_id);
+      edge_global_idx);
 
   for (Size interval_idx = 0; interval_idx < interval_count; ++interval_idx) {
     const EdgeEnvironmentInterval& env_interval = env_intervals[interval_idx];

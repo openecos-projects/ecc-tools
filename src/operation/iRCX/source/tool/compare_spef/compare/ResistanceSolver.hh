@@ -14,11 +14,13 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file ResistanceSolver.hh
+ * @brief compare_spef implementation detail.
+ */
 #pragma once
 
-#include <cstddef>
 #include <optional>
-#include <string>
 #include <vector>
 
 #include "data/CompareSpefData.hh"
@@ -29,10 +31,16 @@ namespace compare_spef {
 class ResistanceSolver
 {
  public:
-  auto equivalentResistance(const Net& net, const std::string& from_node, const std::string& to_node) const -> std::optional<double>;
-  auto equivalentResistances(const Net& net, const std::vector<NodePair>& pairs) const -> std::vector<std::optional<double>>;
-  auto equivalentResistances(const Net& net, const std::vector<NodePair>& pairs, const std::vector<std::size_t>& pair_indices) const
-      -> std::vector<std::optional<double>>;
+  auto equivalentResistance(const Net& net,
+                            const std::string& from_node,
+                            const std::string& to_node) const -> std::optional<F64>;
+  auto equivalentResistances(const Net& net,
+                             const std::vector<NodePair>& pairs) const
+      -> std::vector<std::optional<F64>>;
+  auto equivalentResistances(const Net& net,
+                             const std::vector<NodePair>& pairs,
+                             const std::vector<Size>& pair_indices) const
+      -> std::vector<std::optional<F64>>;
 };
 
 }  // namespace compare_spef

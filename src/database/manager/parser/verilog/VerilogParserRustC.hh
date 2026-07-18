@@ -342,7 +342,7 @@ struct RustVerilogFile* rust_convert_verilog_file(void* c_verilog_file);
 void* rust_convert_rc_ref_cell_module(void* c_module_ref);
 }
 
-namespace ista {
+namespace idb {
 
 class RustVerilogReader
 {
@@ -367,4 +367,4 @@ class RustVerilogReader
   std::vector<RustVerilogModule*> _verilog_modules;  //!< The current design parsed from verilog file.
   RustVerilogModule* _top_module = nullptr;          //!< The design top module.
 };
-}  // namespace ista
+}  // namespace idb

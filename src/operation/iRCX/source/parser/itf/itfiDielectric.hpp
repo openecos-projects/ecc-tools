@@ -14,7 +14,13 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itfiDielectric.hpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
 #pragma once 
+
+#include <string>
 
 namespace itf
 {
@@ -23,8 +29,8 @@ class itfiDielectric {
  public:
   // constructor
   itfiDielectric();
-  itfiDielectric(const itfiDielectric&);
-  ~itfiDielectric();
+  itfiDielectric(const itfiDielectric&) = default;
+  ~itfiDielectric() = default;
 
   // getter
   const char* get_dielectric_name() const;
@@ -40,7 +46,8 @@ class itfiDielectric {
   int has_sw_t() const;
   int has_tw_t() const;
   int has_associated_conductor() const;
-  int get_is_conformal() const;
+  int has_measured_from_conductor() const;
+  int is_conformal() const;
   int has_damage_thickness() const;
   int has_damage_er() const;
 
@@ -52,12 +59,13 @@ class itfiDielectric {
   void set_sw_t(float);
   void set_tw_t(float);
   void set_associated_conductor(const char*);
+  void set_measured_from_conductor();
   void set_damage_thickness(float);
   void set_damage_er(float);
-  void set_is_conformal();
+  void set_conformal();
 
   // operator
-  itfiDielectric& operator=(const itfiDielectric&);
+  itfiDielectric& operator=(const itfiDielectric&) = default;
   bool operator==(const itfiDielectric&) const;
 
   // function
@@ -65,13 +73,13 @@ class itfiDielectric {
 
  private:
   // members
-  char* _dielectric_name;
+  std::string _dielectric_name;
   float _er; // Relative permittivity
   float _thickness; // Units: microns
-  char* _measured_from;
+  std::string _measured_from;
   float _sw_t; // The sidewall thickness. Units: microns
   float _tw_t; // Topwall thickness. Units: microns
-  char* _associated_conductor;
+  std::string _associated_conductor;
   float _damage_thickness; // Units: microns
   float _damage_er; // Equivalent permittivity
 
@@ -79,6 +87,7 @@ class itfiDielectric {
   unsigned _has_sw_t : 1;
   unsigned _has_tw_t : 1;
   unsigned _has_associated_conductor : 1;
+  unsigned _has_measured_from_conductor : 1;
   unsigned _is_conformal : 1;
   unsigned _has_damage_thickness : 1;
   unsigned _has_damage_er : 1;

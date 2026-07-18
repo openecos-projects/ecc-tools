@@ -95,12 +95,12 @@ double TimingAPI::getRequiredLateTime(const std::string& pin_name) const
   return EVAL_STA_INST->getRequiredLateTime(pin_name);
 }
 
-double TimingAPI::reportWNS(const char* clock_name, ista::AnalysisMode mode)
+double TimingAPI::reportWNS(const char* clock_name, idb::AnalysisMode mode)
 {
   return EVAL_STA_INST->reportWNS(clock_name, mode);
 }
 
-double TimingAPI::reportTNS(const char* clock_name, ista::AnalysisMode mode)
+double TimingAPI::reportTNS(const char* clock_name, idb::AnalysisMode mode)
 {
   return EVAL_STA_INST->reportTNS(clock_name, mode);
 }

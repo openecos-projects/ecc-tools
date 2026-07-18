@@ -14,9 +14,11 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file PlotSpefConfig.cc
+ * @brief plot_spef implementation detail.
+ */
 #include "config/PlotSpefConfig.hh"
-
-#include <filesystem>
 
 #include "PathUtils.hh"
 #include "log/Log.hh"
@@ -25,12 +27,12 @@ namespace ircx::plot_spef {
 
 auto ConfigValidator::validate(const Config& config) const -> bool
 {
-  if (!path::file_exists(config.spef_file, "plot_spef SPEF file")) {
+  if (!path::fileExists(config.spef_file, "plot_spef SPEF file")) {
     return false;
   }
 
-  if (config.output_file.empty()) {
-    LOG_ERROR << "plot_spef requires an output GDS file.";
+  if (config.output_dir.empty()) {
+    LOG_ERROR << "plot_spef requires an output directory.";
     return false;
   }
 
@@ -39,8 +41,12 @@ auto ConfigValidator::validate(const Config& config) const -> bool
     return false;
   }
 
-  const auto output_parent = std::filesystem::path(config.output_file).parent_path();
-  if (!output_parent.empty() && !path::ensure_dir(output_parent, "plot_spef output directory")) {
+  if (config.cores <= 0) {
+    LOG_ERROR << "plot_spef -cores must be a positive integer.";
+    return false;
+  }
+
+  if (!path::ensureDir(config.output_dir, "plot_spef output directory")) {
     return false;
   }
 

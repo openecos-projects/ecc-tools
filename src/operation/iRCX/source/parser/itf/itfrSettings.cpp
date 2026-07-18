@@ -14,29 +14,37 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itfrSettings.cpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
+#include <memory>
+
 #include "itfrSettings.hpp"
+
 namespace itf
 {
+namespace
+{
+
+std::unique_ptr<itfrSettings> itfSettingsOwner;
+
+} // namespace
   
 itfrSettings* itfSettings = nullptr;
-
-itfrSettings::itfrSettings()
-: user_data(nullptr)
-{ }
-
-itfrSettings::~itfrSettings()
-{
-  user_data = nullptr;
-}
 
 void
 itfrSettings::reset()
 {
-  if (itfSettings) {
-    delete itfSettings;
-  }
+  itfSettingsOwner = std::make_unique<itfrSettings>();
+  itfSettings = itfSettingsOwner.get();
+}
 
-  itfSettings = new itfrSettings();
+void
+itfrSettings::clear()
+{
+  itfSettingsOwner.reset();
+  itfSettings = nullptr;
 }
 
 } // namespace itf

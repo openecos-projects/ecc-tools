@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -16,26 +17,37 @@
 #include "IdbInstance.h"
 #include "IdbLayout.h"
 #include "IdbPins.h"
-#include "Lib.hh"
-// #include "PowerEngine.hh"
-#include "TimingEngine.hh"
-#include "TimingIDBAdapter.hh"
-#include "Type.hh"
 #include "idm.h"
-#include "netlist/Instance.hh"
-#include "netlist/Net.hh"
-#include "netlist/Pin.hh"
-#include "netlist/Port.hh"
-#include "sdc/SdcSetIODelay.hh"
-#include "sdc/SdcSetInputTransition.hh"
-#include "sdc/SdcSetLoad.hh"
-// #include "ContestDriver.h"
-#include "sta/StaArc.hh"
-// #include "Power.hh"
 #include <boost/polygon/polygon.hpp>
 #include <vector>
 
 namespace python_interface {
+
+double intersectDistance(Box const& i1, Box const& i2, bool is_x)
+{
+  coordinate_type l;
+  coordinate_type h;
+  if (is_x) {
+    l = std::max(i1.xl, i2.xl);
+    h = std::min(i1.xh, i2.xh);
+  } else {
+    l = std::max(i1.yl, i2.yl);
+    h = std::min(i1.yh, i2.yh);
+  }
+  return (l < h) ? (double) h - l : 0;
+}
+
+double intersectArea(Box const& b1, Box const& b2)
+{
+  double dist[2] = {intersectDistance(b1, b2, true), intersectDistance(b1, b2, false)};
+  return dist[0] * dist[1];
+}
+
+bool isInvailidNet(IdbNet* net)
+{
+  return net->is_ground() || net->is_power() || net->is_pdn() || net->is_clock()
+         || net->get_instance_pin_list()->get_pin_list().size() == 0;
+}
 
 void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta)
 {
@@ -54,18 +66,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   dbu = db_deisgn->get_layout()->get_units()->get_micron_dbu();
 
   if (with_sta) {
-    auto timing_engine = ista::TimingEngine::getOrCreateTimingEngine();
-    auto ista = timing_engine->get_ista();
-    for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
-      ista::Net* sta_net = ista->get_netlist()->findNet(net->get_net_name().c_str());
-      if (sta_net == nullptr) {
-        continue;
-      }
-      if (sta_net->isClockNet()) {
-        db_deisgn->setNetConnectType(net->get_net_name(), IdbConnectType::kClock);
-        continue;
-      }
-    }
+    throw std::runtime_error("PyPlaceDB timing initialization is disabled in this ecc_py build");
   }
 
   double total_fixed_node_area = 0;  // compute total area of fixed cells, which is an upper bound
@@ -114,36 +115,6 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       std::string inst_name = io_pin->get_pin_name();
       pin_names.append(inst_name);
       mPin2ID[io_pin->get_pin_name()] = pin_id++;
-    }
-  }
-  std::unordered_map<std::string, int> mClkPin2ID;
-  if (with_sta) {
-    int clk_pin_id = 0;
-    auto timing_engine = ista::TimingEngine::getOrCreateTimingEngine();
-    auto ista = timing_engine->get_ista();
-    std::map<std::string, std::string> is_ff_map;
-    for (IdbInstance* node : db_deisgn->get_instance_list()->get_instance_list()) {
-      std::string inst_name = node->get_name();
-      string cell_type = node->get_cell_master()->get_name();
-      auto lib_cell = ista->findLibertyCell(cell_type.c_str());
-      string clock_pin_name;
-      if (is_ff_map.count(cell_type) > 0) {
-        clock_pin_name = is_ff_map[cell_type];
-      } else {
-        string pin_name = "-1";
-        for (auto& port : lib_cell->get_cell_ports()) {
-          if (port->isClock()) {
-            pin_name = port->get_port_name();
-            break;
-          }
-        }
-        is_ff_map[cell_type] = pin_name;
-        clock_pin_name = pin_name;
-      }
-      if (clock_pin_name == "-1") {
-        continue;
-      }
-      mClkPin2ID[inst_name + clock_pin_name] = clk_pin_id++;
     }
   }
   // add a node to a bin
@@ -612,9 +583,6 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
 
   if (with_routability) {
     init_routability(db, inst_resort_list);
-  }
-  if (with_sta) {
-    init_timing(db, mPin2ID, mClkPin2ID, mNode2PyNondeID, inst_resort_list, ext_blockage_num);
   }
   printf("PyPlaceDB::set end!!!\n");
 

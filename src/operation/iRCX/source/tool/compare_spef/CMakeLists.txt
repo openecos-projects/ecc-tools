@@ -1,3 +1,5 @@
+find_package(Eigen3 REQUIRED)
+
 add_library(ircx_compare_spef
   compare/Comparator.cc
   compare/CouplingCapComparator.cc
@@ -23,6 +25,11 @@ target_link_libraries(ircx_compare_spef
 target_include_directories(ircx_compare_spef
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_include_directories(ircx_compare_spef SYSTEM
+  PRIVATE
+    ${EIGEN3_INCLUDE_DIR}
 )
 
 add_library(ircx_tool_compare_spef

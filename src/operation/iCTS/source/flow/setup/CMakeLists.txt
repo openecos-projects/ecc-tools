@@ -13,6 +13,7 @@ target_link_libraries(
   icts_source_database_io
   icts_source_flow_setup_clock_data
   icts_source_utils_logger
+  log
 )
 
 target_include_directories(

@@ -14,24 +14,36 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itfrData.cpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
+#include <memory>
+
 #include "itfrData.hpp"
-#include "itfMarco.h"
+
 namespace itf
 {
+namespace
+{
+
+std::unique_ptr<itfrData> itfDataOwner;
+
+} // namespace
 
 itfrData* itfData = nullptr;
 
 itfrData::itfrData()
-: itf_file(nullptr),
+: itf_file(),
   log_file(nullptr),
 
-  process_name(nullptr),
-  process_foundry(nullptr),
+  process_name(),
+  process_foundry(),
   process_node(0),
-  process_type(nullptr),
+  process_type(),
   process_version(0),
-  process_corner(nullptr),
-  reference_direction(nullptr),
+  process_corner(),
+  reference_direction(),
   global_temperature(25.f),
   background_er(1.f),
   half_node_scale_factor(1.f),
@@ -40,7 +52,6 @@ itfrData::itfrData()
   dielectric(),
   conductor(),
   via(),
-  variation_param(),
 
   use_si_density(0),
   has_open_log_file(0),
@@ -48,8 +59,7 @@ itfrData::itfrData()
   has_background_er(0),
   has_half_node_scale_factor(0),
   has_use_si_density(0),
-  has_drop_factor_lateral_spacing(0),
-  has_variation_params(0)
+  has_drop_factor_lateral_spacing(0)
 {
 
 }
@@ -57,18 +67,16 @@ itfrData::itfrData()
 itfrData::~itfrData()
 {
   log_file = nullptr;  // not release here
-  
-  ITF_FREE(itf_file);
-  ITF_FREE(process_name);
-  ITF_FREE(process_foundry);
 }
 
 void itfrData::reset() {
-  if (itfData) {
-    delete itfData;
-  }
+  itfDataOwner = std::make_unique<itfrData>();
+  itfData = itfDataOwner.get();
+}
 
-  itfData = new itfrData();
+void itfrData::clear() {
+  itfDataOwner.reset();
+  itfData = nullptr;
 }
 
 void itfrData::initRead() {

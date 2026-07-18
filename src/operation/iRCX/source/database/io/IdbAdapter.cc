@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file IdbAdapter.cc
+ * @brief iDB-to-iRCX layout adapter implementation.
+ */
 #include <algorithm>
 #include <cassert>
 #include <limits>
@@ -28,19 +32,23 @@
 #include "LayoutData.hh"
 #include "StringUtils.hh"
 #include "SpefContext.hh"
+#include "builder.h"
 #include "log/Log.hh"
 
 namespace ircx {
 
 using namespace idb;
 
+IdbAdapter::IdbAdapter(::idb::IdbBuilder* idb) : idb_(idb)
+{
+  assert(idb_);
+}
+
 auto IdbAdapter::adapt(LayoutData& layout_data,
                        LayerTable& layer_table,
                        SpefContext& spef_context) -> bool
 {
-  layout_data_ = &layout_data;
-  layer_table_ = &layer_table;
-  spef_context_ = &spef_context;
+  AdaptContext context{layout_data, layer_table, spef_context};
 
   // idb
   auto* def_service = idb_->get_def_service();
@@ -73,9 +81,9 @@ auto IdbAdapter::adapt(LayoutData& layout_data,
   layer_table.clearDesignLayers();
 
   IdbLayers* idb_layers = idb_layout->get_layers();
-  adaptLayerTable(idb_layers);
-  adaptRoutingLayer(idb_layers);
-  adaptSpefContext(idb_design);
+  adaptLayerTable(idb_layers, context);
+  adaptRoutingLayer(idb_layers, context);
+  adaptSpefContext(idb_design, context);
 
   // set LayoutData : design_name die_shape dbu_per_micron
   IdbDie* idb_die = idb_layout->get_die();
@@ -86,32 +94,34 @@ auto IdbAdapter::adapt(LayoutData& layout_data,
   if (idb_units) {
     layout_data.dbu_per_micron = idb_units->get_micron_dbu();
   }
-  adaptNet(idb_net_list);
+  adaptNet(idb_net_list, context);
 
-  adaptSpecialNet(idb_special_net_list);
+  adaptSpecialNet(idb_special_net_list, context);
 
   return true;
 }
 
-auto IdbAdapter::adaptLayerTable(IdbLayers* idb_layers) -> void
+auto IdbAdapter::adaptLayerTable(IdbLayers* idb_layers,
+                                 AdaptContext& context) const -> void
 {
-  layer_table_->registerDesignLayer(0, "SUBSTRATE");
+  context.layer_table.registerDesignLayer(0, "SUBSTRATE");
 
   Size next_layer_id = 1;
   for (IdbLayer* idb_routing_layer : idb_layers->get_routing_layers()) {
-    layer_table_->registerDesignLayer(next_layer_id, idb_routing_layer->get_name());
+    context.layer_table.registerDesignLayer(next_layer_id, idb_routing_layer->get_name());
     ++next_layer_id;
   }
   for (IdbLayer* idb_cut_layer : idb_layers->get_cut_layers()) {
-    layer_table_->registerDesignLayer(next_layer_id, idb_cut_layer->get_name());
+    context.layer_table.registerDesignLayer(next_layer_id, idb_cut_layer->get_name());
     ++next_layer_id;
   }
 }
 
-auto IdbAdapter::adaptRoutingLayer(IdbLayers* idb_layers) -> void
+auto IdbAdapter::adaptRoutingLayer(IdbLayers* idb_layers,
+                                   AdaptContext& context) const -> void
 {
   // set RoutingLayer
-  std::map<Size, RoutingLayer>& routing_layers = layout_data_->routing_layers;
+  std::map<Size, RoutingLayer>& routing_layers = context.layout_data.routing_layers;
 
   std::vector<IdbLayer*>& routing_layer_defs = idb_layers->get_routing_layers();
   for (IdbLayer* idb_layer : routing_layer_defs) {
@@ -122,7 +132,7 @@ auto IdbAdapter::adaptRoutingLayer(IdbLayers* idb_layers) -> void
 
     RoutingLayer routing_layer;
 
-    const Size design_layer_id = layer_table_->design_id(idb_routing_layer->get_name());
+    const Size design_layer_id = context.layer_table.designId(idb_routing_layer->get_name());
     routing_layer.set_layer_id(design_layer_id);
     routing_layer.set_layer_name(idb_routing_layer->get_name());
     routing_layer.set_layer_width(idb_routing_layer->get_width());
@@ -152,50 +162,52 @@ auto IdbAdapter::adaptRoutingLayer(IdbLayers* idb_layers) -> void
   }
 }
 
-auto IdbAdapter::adaptSpefContext(IdbDesign* idb_design) -> void
+auto IdbAdapter::adaptSpefContext(IdbDesign* idb_design,
+                                  AdaptContext& context) const -> void
 {
   const std::vector<IdbNet*>& idb_nets = idb_design->get_net_list()->get_net_list();
-  spef_context_->net_names.reserve(idb_nets.size());
+  context.spef_context.net_names.reserve(idb_nets.size());
   for (IdbNet* idb_net : idb_nets) {
     if (idb_net->is_pdn()) {
       continue;
     }
-    spef_context_->net_names.push_back(string::escape_spef_name(idb_net->get_net_name()));
+    context.spef_context.net_names.push_back(string::escapeSpefName(idb_net->get_net_name()));
   }
 
   const std::vector<IdbPin*>& io_pins = idb_design->get_io_pin_list()->get_pin_list();
-  spef_context_->port_names.reserve(io_pins.size());
-  spef_context_->port_io.reserve(io_pins.size());
+  context.spef_context.port_names.reserve(io_pins.size());
+  context.spef_context.port_io.reserve(io_pins.size());
   for (IdbPin* io_pin : io_pins) {
     if (io_pin->is_special_net_pin() || !io_pin->get_net()) {
       continue;
     }
-    spef_context_->port_names.push_back(string::escape_spef_name(io_pin->get_pin_name()));
+    context.spef_context.port_names.push_back(string::escapeSpefName(io_pin->get_pin_name()));
 
     if (io_pin->is_primary_input()) {
-      spef_context_->port_io.emplace_back('I');
+      context.spef_context.port_io.emplace_back('I');
     } else if (io_pin->is_primary_output()) {
-      spef_context_->port_io.emplace_back('O');
+      context.spef_context.port_io.emplace_back('O');
     } else {
-      spef_context_->port_io.emplace_back('B');
+      context.spef_context.port_io.emplace_back('B');
     }
   }
 
   const std::vector<IdbInstance*>& instances =
       idb_design->get_instance_list()->get_instance_list();
-  spef_context_->instance_names.reserve(instances.size());
+  context.spef_context.instance_names.reserve(instances.size());
   for (IdbInstance* instance : instances) {
-    const Str instance_name = string::escape_spef_name(instance->get_name());
-    spef_context_->instance_names.push_back(instance_name);
-    spef_context_->instance_to_cell[instance_name] =
-        string::escape_spef_name(instance->get_cell_master()->get_name());
+    const std::string instance_name = string::escapeSpefName(instance->get_name());
+    context.spef_context.instance_names.push_back(instance_name);
+    context.spef_context.instance_to_cell[instance_name] =
+        string::escapeSpefName(instance->get_cell_master()->get_name());
   }
 }
 
 
-auto IdbAdapter::adaptNet(IdbNetList* idb_netlist) -> void
+auto IdbAdapter::adaptNet(IdbNetList* idb_netlist,
+                          AdaptContext& context) const -> void
 {
-  std::vector<Net>& regular_nets = layout_data_->net_vec;
+  std::vector<Net>& regular_nets = context.layout_data.net_vec;
   std::vector<IdbNet*>& idb_nets = idb_netlist->get_net_list();
   const Size net_count = idb_nets.size();
   regular_nets.resize(net_count);
@@ -207,17 +219,12 @@ auto IdbAdapter::adaptNet(IdbNetList* idb_netlist) -> void
     }
 
     Net& net = regular_nets[net_idx];
-    net.id = net_idx;
-    net.name = string::escape_spef_name(idb_net->get_net_name());
-
-    auto* idb_wire_list = idb_net->get_wire_list();
-    if (!idb_wire_list || idb_wire_list->get_num() == 0) {
-      continue;
-    }
+    net.net_id = net_idx;
+    net.name = string::escapeSpefName(idb_net->get_net_name());
 
     // adapt driving
     if (IdbPin* driver_pin = idb_net->get_driving_pin()) {
-      Pin driver = adaptPin(driver_pin, true);
+      Pin driver = adaptPin(driver_pin, true, context);
       net.pins.push_back(std::move(driver));
     }
 
@@ -227,8 +234,13 @@ auto IdbAdapter::adaptNet(IdbNetList* idb_netlist) -> void
         continue;
       }
 
-      Pin load = adaptPin(load_pin, false);
+      Pin load = adaptPin(load_pin, false, context);
       net.pins.push_back(std::move(load));
+    }
+
+    auto* idb_wire_list = idb_net->get_wire_list();
+    if (!idb_wire_list || idb_wire_list->get_num() == 0) {
+      continue;
     }
 
     // adapt segments
@@ -244,17 +256,17 @@ auto IdbAdapter::adaptNet(IdbNetList* idb_netlist) -> void
 
         // convert segments
         if (idb_segment->is_wire()) {
-          if (auto segment = adaptSegments(idb_segment)) {
+          if (auto segment = adaptSegments(idb_segment, context)) {
             net.segments.push_back(std::move(segment.value()));
           }
         }
         if (idb_segment->is_rect()) {
-          if (auto patch = adaptPatch(idb_segment)) {
+          if (auto patch = adaptPatch(idb_segment, context)) {
             net.patches.push_back(std::move(patch.value()));
           }
         }
         for (auto* idb_via : idb_segment->get_via_list()) {
-          if (auto via = adaptVia(idb_via)) {
+          if (auto via = adaptVia(idb_via, context)) {
             net.vias.push_back(std::move(via.value()));
           }
         }
@@ -263,16 +275,18 @@ auto IdbAdapter::adaptNet(IdbNetList* idb_netlist) -> void
   }
 }
 
-auto IdbAdapter::adaptPin(IdbPin* idb_pin, bool is_driving) -> Pin
+auto IdbAdapter::adaptPin(IdbPin* idb_pin,
+                          bool is_driving,
+                          const AdaptContext& context) const -> Pin
 {
   Pin pin;
 
   if (idb_pin->is_io_pin()) {
-    pin.name = string::escape_spef_name(idb_pin->get_pin_name());
+    pin.name = string::escapeSpefName(idb_pin->get_pin_name());
   } else {
-    pin.name = string::escape_spef_name(idb_pin->get_instance()->get_name())
+    pin.name = string::escapeSpefName(idb_pin->get_instance()->get_name())
                + ':'
-               + string::escape_spef_name(idb_pin->get_pin_name());
+               + string::escapeSpefName(idb_pin->get_pin_name());
   }
 
   pin.is_driver = is_driving;
@@ -303,7 +317,7 @@ auto IdbAdapter::adaptPin(IdbPin* idb_pin, bool is_driving) -> Pin
       continue;
     }
     IdbLayer* idb_layer = layer_shape->get_layer();
-    const Size design_layer_id = layer_table_->design_id(idb_layer->get_name());
+    const Size design_layer_id = context.layer_table.designId(idb_layer->get_name());
     for (IdbRect* idb_rect : layer_shape->get_rect_list()) {
       if (!idb_rect) {
         continue;
@@ -315,7 +329,8 @@ auto IdbAdapter::adaptPin(IdbPin* idb_pin, bool is_driving) -> Pin
   return pin;
 }
 
-auto IdbAdapter::adaptSegments(IdbRegularWireSegment* idb_seg) -> std::optional<Segment>
+auto IdbAdapter::adaptSegments(IdbRegularWireSegment* idb_seg,
+                               const AdaptContext& context) const -> std::optional<Segment>
 {
   if (!idb_seg || !idb_seg->is_wire()) {
     LOG_ERROR << "skip invalid idb wire segment.";
@@ -340,12 +355,13 @@ auto IdbAdapter::adaptSegments(IdbRegularWireSegment* idb_seg) -> std::optional<
   Segment segment;
   segment.p0 = GtlPointI(p1->get_x(), p1->get_y());
   segment.p1 = GtlPointI(p2->get_x(), p2->get_y());
-  segment.layer_id = layer_table_->design_id(idb_layer->get_name());
+  segment.layer_id = context.layer_table.designId(idb_layer->get_name());
   segment.rect = idbRectToGtlRect(&segment_rect);
   return segment;
 }
 
-auto IdbAdapter::adaptPatch(IdbRegularWireSegment* idb_seg) -> std::optional<Patch>
+auto IdbAdapter::adaptPatch(IdbRegularWireSegment* idb_seg,
+                            const AdaptContext& context) const -> std::optional<Patch>
 {
   if (!idb_seg || !idb_seg->is_rect()) {
     LOG_ERROR << "skip invalid idb patch segment.";
@@ -367,12 +383,13 @@ auto IdbAdapter::adaptPatch(IdbRegularWireSegment* idb_seg) -> std::optional<Pat
   const int upper_y = anchor_point->get_y() + delta_rect->get_high_y();
 
   Patch patch;
-  patch.layer_id = layer_table_->design_id(idb_layer->get_name());
+  patch.layer_id = context.layer_table.designId(idb_layer->get_name());
   patch.rect = GtlRectI(lower_x, lower_y, upper_x, upper_y);
   return patch;
 }
 
-auto IdbAdapter::adaptVia(IdbVia* idb_via) -> std::optional<Via>
+auto IdbAdapter::adaptVia(IdbVia* idb_via,
+                          const AdaptContext& context) const -> std::optional<Via>
 {
   if (!idb_via) {
     LOG_ERROR << "skip null idb via.";
@@ -386,7 +403,7 @@ auto IdbAdapter::adaptVia(IdbVia* idb_via) -> std::optional<Via>
   }
 
   Via via;
-  via.name = string::escape_spef_name(idb_via->get_name());
+  via.name = string::escapeSpefName(idb_via->get_name());
   via.point = GtlPointI(center_point->get_x(), center_point->get_y());
 
   auto read_layer_rect =
@@ -404,7 +421,7 @@ auto IdbAdapter::adaptVia(IdbVia* idb_via) -> std::optional<Via>
       return std::nullopt;
     }
 
-    const Size design_layer_id = layer_table_->design_id(idb_layer->get_name());
+    const Size design_layer_id = context.layer_table.designId(idb_layer->get_name());
     return std::make_pair(design_layer_id, idbRectToGtlRect(layer_rects[0]));
   };
 
@@ -414,7 +431,9 @@ auto IdbAdapter::adaptVia(IdbVia* idb_via) -> std::optional<Via>
   }
 
   if (auto bottom_layer_rect =
-          read_layer_rect(idb_via->get_bottom_layer_shape(), "not support multirect for via bottom")) {
+          read_layer_rect(
+              idb_via->get_bottom_layer_shape(),
+              "not support multirect for via bottom")) {
     via.layer_rect_btm = *bottom_layer_rect;
   }
 
@@ -433,13 +452,14 @@ auto IdbAdapter::adaptVia(IdbVia* idb_via) -> std::optional<Via>
   return via;
 }
 
-auto IdbAdapter::adaptSpecialNet(IdbSpecialNetList* idb_special_net_list) -> void
+auto IdbAdapter::adaptSpecialNet(IdbSpecialNetList* idb_special_net_list,
+                                 AdaptContext& context) const -> void
 {
   if (!idb_special_net_list) {
     return;
   }
 
-  Net& layout_special_net = layout_data_->special_net;
+  Net& layout_special_net = context.layout_data.special_net;
 
   for (auto* special_net : idb_special_net_list->get_net_list()) {
     if (!special_net) {
@@ -473,7 +493,7 @@ auto IdbAdapter::adaptSpecialNet(IdbSpecialNetList* idb_special_net_list) -> voi
         }
 
         Segment segment;
-        segment.layer_id = layer_table_->design_id(special_layer->get_name());
+        segment.layer_id = context.layer_table.designId(special_layer->get_name());
         segment.rect = idbRectToGtlRect(special_rect);
         segment.p0 = idbPointToGtlPoint(start_point);
         segment.p1 = idbPointToGtlPoint(end_point);
@@ -489,7 +509,7 @@ auto IdbAdapter::idbRectToGtlRect(IdbRect* idb_rect) const -> GtlRectI
                   idb_rect->get_high_x(), idb_rect->get_high_y());
 }
 
-auto IdbAdapter::idbPointToGtlPoint(IdbCoordinate<int32_t>* idb_point) const -> GtlPointI
+auto IdbAdapter::idbPointToGtlPoint(IdbCoordinate<I32>* idb_point) const -> GtlPointI
 {
   return GtlPointI(idb_point->get_x(), idb_point->get_y());
 }

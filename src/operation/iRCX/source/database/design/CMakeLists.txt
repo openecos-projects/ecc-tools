@@ -8,10 +8,11 @@ add_library(ircx_database_design ${IRCX_DATABASE_DESIGN_SRC})
 target_link_libraries(ircx_database_design
   PUBLIC
     ircx_cap_table
+    ircx_config
+    ircx_database_process
     ircx_headers
     ircx_mapping
   PRIVATE
-    itf_data
     log
 )
 

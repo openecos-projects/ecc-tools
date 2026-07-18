@@ -12,6 +12,7 @@ add_library(izh_interface
 
 target_link_libraries(izh_interface
     PRIVATE
+    izh_module
     izh_toolkit
     idrc_interface
     ieda_feature

@@ -84,11 +84,6 @@ header_value:
       context->addHeaderValue(spef::stripQuotes(spef::tokenToString($1)));
       std::free($1);
     }
-  | DIRECTION
-    {
-      context->addHeaderValue(spef::tokenToString($1));
-      std::free($1);
-    }
   ;
 
 name_map_entry:
@@ -235,6 +230,7 @@ name_token:
     NAME_REF { $$ = $1; }
   | SPEF_NAME { $$ = $1; }
   | QUOTED_STRING { $$ = $1; }
+  | DIRECTION { $$ = $1; }
   ;
 
 name_value_token:
@@ -242,6 +238,7 @@ name_value_token:
   | SPEF_NAME { $$ = $1; }
   | QUOTED_STRING { $$ = $1; }
   | NUMBER { $$ = $1; }
+  | DIRECTION { $$ = $1; }
   ;
 
 %%

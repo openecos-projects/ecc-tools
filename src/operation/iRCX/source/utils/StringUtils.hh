@@ -14,14 +14,18 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file StringUtils.hh
+ * @brief String trimming, parsing, and SPEF escaping helpers.
+ */
 #pragma once
 
 #include <cerrno>
 #include <charconv>
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <optional>
-#include <string>
-#include <string_view>
 #include <system_error>
 #include <type_traits>
 
@@ -31,7 +35,7 @@
 namespace ircx {
 namespace string {
 
-inline auto trim(std::string_view value) -> Str
+inline auto trim(std::string_view value) -> std::string
 {
   const auto first = value.find_first_not_of(" \t\n\r\f\v");
   if (first == std::string_view::npos) {
@@ -39,10 +43,10 @@ inline auto trim(std::string_view value) -> Str
   }
 
   const auto last = value.find_last_not_of(" \t\n\r\f\v");
-  return Str(value.substr(first, last - first + 1));
+  return std::string(value.substr(first, last - first + 1));
 }
 
-inline auto trim_view(std::string_view value) -> std::string_view
+inline auto trimView(std::string_view value) -> std::string_view
 {
   const auto first = value.find_first_not_of(" \t\n\r\f\v");
   if (first == std::string_view::npos) {
@@ -53,14 +57,32 @@ inline auto trim_view(std::string_view value) -> std::string_view
   return value.substr(first, last - first + 1);
 }
 
-inline auto starts_with(std::string_view value, std::string_view prefix) -> bool
+inline auto startsWith(std::string_view value,
+                        std::string_view prefix) -> bool
 {
   return value.size() >= prefix.size() && value.substr(0, prefix.size()) == prefix;
 }
 
-inline auto take_token(std::string_view& value) -> std::string_view
+inline auto equalsIgnoreCase(std::string_view lhs,
+                               std::string_view rhs) -> bool
 {
-  value = trim_view(value);
+  if (lhs.size() != rhs.size()) {
+    return false;
+  }
+
+  for (Size idx = 0; idx < lhs.size(); ++idx) {
+    const auto lhs_ch = static_cast<unsigned char>(lhs[idx]);
+    const auto rhs_ch = static_cast<unsigned char>(rhs[idx]);
+    if (std::tolower(lhs_ch) != std::tolower(rhs_ch)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline auto takeToken(std::string_view& value) -> std::string_view
+{
+  value = trimView(value);
   if (value.empty()) {
     return {};
   }
@@ -77,23 +99,54 @@ inline auto take_token(std::string_view& value) -> std::string_view
   return token;
 }
 
-inline auto contains(std::string_view value, std::string_view pattern) -> bool
+inline auto contains(std::string_view value,
+                     std::string_view pattern) -> bool
 {
   return value.find(pattern) != std::string_view::npos;
 }
 
-inline auto after_prefix(std::string_view value, std::string_view prefix) -> std::optional<std::string_view>
+inline auto toLower(std::string value) -> std::string
 {
-  if (!starts_with(value, prefix)) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+    return static_cast<char>(std::tolower(ch));
+  });
+  return value;
+}
+
+inline auto identifier(std::string_view value,
+                       std::string_view fallback = "id") -> std::string
+{
+  std::string text;
+  text.reserve(value.size());
+  for (char ch : value) {
+    if (std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '$') {
+      text.push_back(ch);
+    } else {
+      text.push_back('_');
+    }
+  }
+  if (text.empty()) {
+    text = fallback.empty() ? "id" : std::string(fallback);
+  }
+  if (std::isdigit(static_cast<unsigned char>(text.front()))) {
+    text.insert(text.begin(), 'n');
+  }
+  return text;
+}
+
+inline auto afterPrefix(std::string_view value,
+                         std::string_view prefix) -> std::optional<std::string_view>
+{
+  if (!startsWith(value, prefix)) {
     return std::nullopt;
   }
   return value.substr(prefix.size());
 }
 
 template <typename T>
-inline auto parse_number(std::string_view value) -> std::optional<T>
+inline auto parseNumber(std::string_view value) -> std::optional<T>
 {
-  value = trim_view(value);
+  value = trimView(value);
   if (value.empty()) {
     return std::nullopt;
   }
@@ -108,7 +161,7 @@ inline auto parse_number(std::string_view value) -> std::optional<T>
     }
     return number;
   } else if constexpr (std::is_floating_point_v<T>) {
-    const Str number_text(value);
+    const std::string number_text(value);
     char* parse_end = nullptr;
     errno = 0;
 
@@ -124,26 +177,43 @@ inline auto parse_number(std::string_view value) -> std::optional<T>
 }
 
 template <typename T>
-inline auto parse_after_prefix(std::string_view value, std::string_view prefix) -> std::optional<T>
+inline auto parseAfterPrefix(std::string_view value,
+                               std::string_view prefix) -> std::optional<T>
 {
-  const auto token_value = after_prefix(value, prefix);
+  const auto token_value = afterPrefix(value, prefix);
   if (!token_value.has_value()) {
     return std::nullopt;
   }
-  return parse_number<T>(*token_value);
+  return parseNumber<T>(*token_value);
 }
 
-inline auto parse_int_after_prefix(std::string_view value, std::string_view prefix) -> std::optional<int>
+inline auto parseIntAfterPrefix(std::string_view value,
+                                   std::string_view prefix) -> std::optional<int>
 {
-  return parse_after_prefix<int>(value, prefix);
+  return parseAfterPrefix<int>(value, prefix);
 }
 
-inline auto parse_double_after_prefix(std::string_view value, std::string_view prefix) -> std::optional<double>
+inline auto parseDoubleAfterPrefix(std::string_view value,
+                                      std::string_view prefix) -> std::optional<F64>
 {
-  return parse_after_prefix<double>(value, prefix);
+  return parseAfterPrefix<F64>(value, prefix);
 }
 
-inline auto require_non_empty(std::string_view value, std::string_view field_name) -> bool
+template <typename T = int>
+inline auto parsePrefixedIndex(std::string_view value,
+                                 char prefix = '*') -> std::optional<T>
+{
+  static_assert(std::is_integral_v<T>, "parse_prefixed_index requires an integral result type");
+  if (value.size() < 2
+      || value.front() != prefix
+      || !std::isdigit(static_cast<unsigned char>(value[1]))) {
+    return std::nullopt;
+  }
+  return parseNumber<T>(value.substr(1));
+}
+
+inline auto requireNonEmpty(std::string_view value,
+                              std::string_view field_name) -> bool
 {
   if (!value.empty()) {
     return true;
@@ -153,13 +223,13 @@ inline auto require_non_empty(std::string_view value, std::string_view field_nam
   return false;
 }
 
-inline auto escape_spef_name(Str name) -> Str
+inline auto escapeSpefName(std::string name) -> std::string
 {
-  if (name.find('.') == Str::npos) {
+  if (name.find('.') == std::string::npos) {
     return name;
   }
 
-  Str escaped_name;
+  std::string escaped_name;
   escaped_name.reserve(name.size());
   for (Size idx = 0; idx < name.size(); ++idx) {
     const char current_char = name[idx];

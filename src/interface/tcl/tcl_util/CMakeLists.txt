@@ -7,7 +7,6 @@ add_library(tcl_util
 target_link_libraries(tcl_util 
     PUBLIC
         tcl
-        shell-cmd
 )
 
 target_include_directories(tcl_util

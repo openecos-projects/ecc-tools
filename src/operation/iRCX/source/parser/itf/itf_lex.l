@@ -17,12 +17,17 @@
 %{
 
 #include <iostream>
+#include <cstdlib>
+#include <cstdio>
+#include <cstring>
 
 #include "itf_parser.hpp"
 
 #undef YY_DECL
 #define YY_DECL int itf_lex(ITF_STYPE* yylval_param, ITF_LTYPE* yylloc_param)
 #define YYSTYPE ITF_STYPE
+
+void itf_error(const char* s);
 
 
 #define YY_USER_ACTION                                    \
@@ -40,14 +45,21 @@
 
 %option prefix = "itf_"
 %option noyywrap nounput yylineno
+%x HIDE_BLOCK
 
 DIGIT [0-9]
 ALPHA [a-zA-Z]
 FLOAT [-+]?(({DIGIT}+\.?{DIGIT}*)|(\.{DIGIT}+))([Ee][-+]?{DIGIT}+)?
 PUNCTUATION [={}(),]
 COMMENT \$.*
+BEGIN_HIDE #[ \t]*(beginHide|begin)
+END_HIDE #[ \t]*(endHide|end)
+HIDE_MARKER #[ \t]*[A-Za-z][A-Za-z0-9_]*
+ENCRYPTION_MARK #
+ENCRYPTED_VALUE @[A-Za-z0-9]+
 KEYWORD {ALPHA}({ALPHA}|{DIGIT}|_)*
-PROCESS_NAME {ALPHA}({ALPHA}|{DIGIT}|_|\.|\+|-)+
+NAME_CHAR ({ALPHA}|{DIGIT}|_|\.|\+|-)
+PROCESS_NAME {NAME_CHAR}*({ALPHA}|_){NAME_CHAR}*
 SKIP [ \r\n\t]
 
 %%
@@ -71,6 +83,7 @@ SKIP [ \r\n\t]
 "ER"                            { return K_ER; }
 "THICKNESS"                     { return K_THICKNESS; }
 "MEASURED_FROM"                 { return K_MEASURED_FROM; }
+"MEASURED_FROM_CONDUCTOR"       { return K_MEASURED_FROM_CONDUCTOR; }
 "TOP_OF_CHIP"                   { return K_TOP_OF_CHIP; }
 "SW_T"                          { return K_SW_T; }
 "TW_T"                          { return K_TW_T; }
@@ -136,7 +149,6 @@ SKIP [ \r\n\t]
 "AREA"                          { return K_AREA; }
 "RPV_VS_AREA"                   { return K_RPV_VS_AREA; }
 "ETCH_VS_WIDTH_AND_LENGTH"      { return K_ETCH_VS_WIDTH_AND_LENGTH; }
-"VARIATION_PARAMETERS"          { return K_VARIATION_PARAMETERS; }
 "DENSITY_BOX_WEIGHTING_FACTOR"  { return K_DENSITY_BOX_WEIGHTING_FACTOR; }
 "ILD_VS_WIDTH_AND_SPACING"      { return K_ILD_VS_WIDTH_AND_SPACING; }
 "DELTAPD"                       { return K_DELTAPD; }
@@ -178,15 +190,24 @@ SKIP [ \r\n\t]
 "RAISED_DIFFUSION_ETCH"                 { return K_RAISED_DIFFUSION_ETCH; }
 "RAISED_DIFFUSION_GATE_SIDE_CONFORMAL_ER" { return K_RAISED_DIFFUSION_GATE_SIDE_CONFORMAL_ER; }
 
+{BEGIN_HIDE}    { BEGIN(HIDE_BLOCK); }
 {COMMENT}       { }
+{HIDE_MARKER}   { }
+{ENCRYPTION_MARK} { }
+{ENCRYPTED_VALUE} { itf_error("encrypted ITF value is unsupported"); return yytext[0]; }
 {PUNCTUATION}   { return yytext[0]; }
 {KEYWORD}       { yylval_param->string = yytext; return KEYWORD; }
-{PROCESS_NAME}  { yylval_param->string = yytext; return PROCESS_NAME; }
 {FLOAT}         { yylval_param->dval = std::atof(yytext); return NUMBER; }
+{PROCESS_NAME}  { yylval_param->string = yytext; return PROCESS_NAME; }
 {SKIP}          { }
+.               { itf_error("unexpected character"); return yytext[0]; }
+
+<HIDE_BLOCK>{END_HIDE}[^\n]* { BEGIN(INITIAL); }
+<HIDE_BLOCK>[^\n]+           { }
+<HIDE_BLOCK>\n               { }
 
 %%
 
 void itf_error(const char* s) {
-    printf("error: %s\n yytext =%s", s, yytext);
+    std::fprintf(stderr, "%s:%d: error: %s near '%s'\n", itf::itfrFname(), yylineno, s, yytext);
 }

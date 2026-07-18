@@ -14,9 +14,12 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file NetSelector.hh
+ * @brief compare_spef implementation detail.
+ */
 #pragma once
 
-#include <string>
 #include <unordered_set>
 
 #include "config/CompareSpefConfig.hh"

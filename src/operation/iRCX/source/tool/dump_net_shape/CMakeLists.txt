@@ -4,9 +4,11 @@ add_library(ircx_tool_dump_net_shape
 
 target_link_libraries(ircx_tool_dump_net_shape
   PUBLIC
+    ircx_database_design
     ircx_headers
   PRIVATE
     log
+    OpenMP::OpenMP_CXX
 )
 
 target_include_directories(ircx_tool_dump_net_shape

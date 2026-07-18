@@ -14,13 +14,17 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CapTable.hpp
+ * @brief Cap table parser and interpolation API.
+ */
 #pragma once
 
-#include <algorithm>
-#include <cmath>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
+
 namespace ircx {
 namespace parser {
 
@@ -97,7 +101,7 @@ class CapTable {
   /**
    * @brief Return all stored captab keys.
    */
-  std::vector<std::string> get_all_keys() const;
+  std::vector<std::string> keys() const;
 
   /**
    * @brief Number of stored captab configurations.
@@ -115,10 +119,9 @@ class CapTable {
    * Negative distances are treated as a legacy compatibility path and map
    * to the isolated result.
    */
-  CapacitanceResult queryTwoLayerCap(
-      const std::string& layer_name,
-      const std::string& belowLayer,
-      double neighborDistance) const;
+  CapacitanceResult queryTwoLayerCap(const std::string& layer_name,
+                                     const std::string& belowLayer,
+                                     double neighborDistance) const;
 
   /**
    * @brief Query a B-series table (three-layer context).
@@ -129,26 +132,23 @@ class CapTable {
    * Negative distances are treated as a legacy compatibility path and map
    * to the isolated result.
    */
-  CapacitanceResult queryThreeLayerCap(
-      const std::string& layer_name,
-      const std::string& belowLayer,
-      const std::string& aboveLayer,
-      double neighborDistance) const;
+  CapacitanceResult queryThreeLayerCap(const std::string& layer_name,
+                                       const std::string& belowLayer,
+                                       const std::string& aboveLayer,
+                                       double neighborDistance) const;
 
   /**
    * @brief Query the isolated/fringe result for an A-series table.
    */
-  CapacitanceResult queryTwoLayerIsolatedCap(
-      const std::string& layer_name,
-      const std::string& belowLayer) const;
+  CapacitanceResult queryTwoLayerIsolatedCap(const std::string& layer_name,
+                                             const std::string& belowLayer) const;
 
   /**
    * @brief Query the isolated/fringe result for a B-series table.
    */
-  CapacitanceResult queryThreeLayerIsolatedCap(
-      const std::string& layer_name,
-      const std::string& belowLayer,
-      const std::string& aboveLayer) const;
+  CapacitanceResult queryThreeLayerIsolatedCap(const std::string& layer_name,
+                                               const std::string& belowLayer,
+                                               const std::string& aboveLayer) const;
 
   /**
    * @brief Query the farthest lookup row and keep both ground/coupling terms.
@@ -156,17 +156,15 @@ class CapTable {
    * Used by open-ended calculation formulas that need the asymptotic `cg + cc`
    * contribution instead of the isolated ground-only fallback.
    */
-  CapacitanceResult queryTwoLayerFarthestCap(
-      const std::string& layer_name,
-      const std::string& belowLayer) const;
+  CapacitanceResult queryTwoLayerFarthestCap(const std::string& layer_name,
+                                             const std::string& belowLayer) const;
 
   /**
    * @brief Query the farthest lookup row and keep both ground/coupling terms.
    */
-  CapacitanceResult queryThreeLayerFarthestCap(
-      const std::string& layer_name,
-      const std::string& belowLayer,
-      const std::string& aboveLayer) const;
+  CapacitanceResult queryThreeLayerFarthestCap(const std::string& layer_name,
+                                               const std::string& belowLayer,
+                                               const std::string& aboveLayer) const;
 
  private:
   // Parsing helpers
@@ -181,27 +179,28 @@ class CapTable {
                              const std::string& overLayer,
                              const std::string& underLayer);
 
-  const CapTableConfig* get_config(
-      const std::string& layer_name,
-      const std::string& overLayer,
-      const std::string& underLayer = "") const;
+  const CapTableConfig* findConfig(const std::string& layer_name,
+                                   const std::string& overLayer,
+                                   const std::string& underLayer = "") const;
 
   // Query helpers
 
-  CapacitanceResult interpolate(
-      const std::string& layer_name,
-      const std::string& overLayer,
-      const std::string& underLayer,
-      double neighborDistance) const;
+  CapacitanceResult interpolate(const std::string& layer_name,
+                                const std::string& overLayer,
+                                const std::string& underLayer,
+                                double neighborDistance) const;
 
   CapacitanceResult farthestResult(const CapTableConfig& config) const;
   CapacitanceResult isolatedResult(const CapTableConfig& config) const;
 
-  double linearInterpolate(double x, double x1, double y1, double x2, double y2) const;
+  double linearInterpolate(double x,
+                           double x1,
+                           double y1,
+                           double x2,
+                           double y2) const;
 
-  std::pair<int, int> findBracketingIndices(
-      const std::vector<CapTableEntry>& data,
-      double distance) const;
+  std::pair<int, int> findBracketingIndices(const std::vector<CapTableEntry>& data,
+                                            double distance) const;
 
  private:
   std::map<std::string, CapTableConfig> configs_;

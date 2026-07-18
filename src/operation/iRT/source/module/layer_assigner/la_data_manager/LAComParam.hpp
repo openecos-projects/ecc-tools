@@ -28,9 +28,8 @@ class LAComParam
     _via_unit = via_unit;
     _overflow_unit = overflow_unit;
   }
-  LAComParam(int32_t topo_spilt_length, int32_t mid_topo_spilt_length, int32_t long_topo_spilt_length, int32_t short_segment_length,
-             int32_t mid_segment_length, int32_t long_segment_length, double via_unit, double overflow_unit, double layer_bias_unit,
-             double layer_switch_unit)
+  LAComParam(int32_t topo_spilt_length, int32_t mid_topo_spilt_length, int32_t long_topo_spilt_length, int32_t short_segment_length, int32_t mid_segment_length,
+             int32_t long_segment_length, double via_unit, double overflow_unit, double layer_bias_unit, double layer_switch_unit)
   {
     _topo_spilt_length = topo_spilt_length;
     _mid_topo_spilt_length = mid_topo_spilt_length;

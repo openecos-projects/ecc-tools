@@ -14,13 +14,29 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file IdbAdapter.hh
+ * @brief iDB-to-iRCX layout adapter interface.
+ */
 #pragma once
 
-#include <cassert>
 #include <optional>
 
 #include "Types.hh"
-#include "builder.h"
+
+namespace idb {
+class IdbBuilder;
+class IdbLayers;
+class IdbDesign;
+class IdbNetList;
+class IdbPin;
+class IdbRegularWireSegment;
+class IdbVia;
+class IdbSpecialNetList;
+class IdbRect;
+template <typename T>
+class IdbCoordinate;
+}  // namespace idb
 
 namespace ircx {
 
@@ -37,7 +53,7 @@ class SpefContext;
 class IdbAdapter
 {
  public:
-  explicit IdbAdapter(::idb::IdbBuilder* idb) : idb_(idb) { assert(idb_); }
+  explicit IdbAdapter(::idb::IdbBuilder* idb);
   IdbAdapter() = delete;
   ~IdbAdapter() = default;
 
@@ -46,29 +62,41 @@ class IdbAdapter
              SpefContext& spef_context) -> bool;
 
  private:
-  auto adaptLayerTable(::idb::IdbLayers* idb_layers) -> void;
-  auto adaptRoutingLayer(::idb::IdbLayers* idb_layers) -> void;
+  struct AdaptContext
+  {
+    LayoutData& layout_data;
+    LayerTable& layer_table;
+    SpefContext& spef_context;
+  };
 
-  auto adaptSpefContext(::idb::IdbDesign* idb_design) -> void;
+  auto adaptLayerTable(::idb::IdbLayers* idb_layers,
+                       AdaptContext& context) const -> void;
+  auto adaptRoutingLayer(::idb::IdbLayers* idb_layers,
+                         AdaptContext& context) const -> void;
 
-  auto adaptNet(::idb::IdbNetList* idb_netlist) -> void;
-  auto adaptPin(::idb::IdbPin* idb_pin, bool is_driving) -> Pin;
-  auto adaptSegments(::idb::IdbRegularWireSegment* idb_seg) -> std::optional<Segment>;
-  auto adaptPatch(::idb::IdbRegularWireSegment* idb_seg) -> std::optional<Patch>;
-  auto adaptVia(::idb::IdbVia* idb_via) -> std::optional<Via>;
+  auto adaptSpefContext(::idb::IdbDesign* idb_design,
+                        AdaptContext& context) const -> void;
 
-  auto adaptSpecialNet(::idb::IdbSpecialNetList* idb_special_netlist) -> void;
+  auto adaptNet(::idb::IdbNetList* idb_netlist,
+                AdaptContext& context) const -> void;
+  auto adaptPin(::idb::IdbPin* idb_pin,
+                bool is_driving,
+                const AdaptContext& context) const -> Pin;
+  auto adaptSegments(::idb::IdbRegularWireSegment* idb_seg,
+                     const AdaptContext& context) const -> std::optional<Segment>;
+  auto adaptPatch(::idb::IdbRegularWireSegment* idb_seg,
+                  const AdaptContext& context) const -> std::optional<Patch>;
+  auto adaptVia(::idb::IdbVia* idb_via,
+                const AdaptContext& context) const -> std::optional<Via>;
+
+  auto adaptSpecialNet(::idb::IdbSpecialNetList* idb_special_netlist,
+                       AdaptContext& context) const -> void;
 
   // iDB source
   ::idb::IdbBuilder* idb_{nullptr};
 
-  // RCX targets
-  LayoutData* layout_data_{nullptr};
-  LayerTable* layer_table_{nullptr};
-  SpefContext* spef_context_{nullptr};
-
   auto idbRectToGtlRect(::idb::IdbRect* idb_rect) const -> GtlRectI;
-  auto idbPointToGtlPoint(::idb::IdbCoordinate<int32_t>* idb_point) const -> GtlPointI;
+  auto idbPointToGtlPoint(::idb::IdbCoordinate<I32>* idb_point) const -> GtlPointI;
 };
 
 }  // namespace ircx

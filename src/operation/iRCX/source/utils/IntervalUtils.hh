@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file IntervalUtils.hh
+ * @brief Generic interval normalization, clipping, and subtraction helpers.
+ */
 #pragma once
 
 #include <algorithm>
@@ -33,7 +37,8 @@ struct Range {
 };
 
 template <typename T>
-inline auto normalize(T& a0, T& a1) -> void
+inline auto normalize(T& a0,
+                      T& a1) -> void
 {
   if (a0 > a1) {
     std::swap(a0, a1);
@@ -41,13 +46,17 @@ inline auto normalize(T& a0, T& a1) -> void
 }
 
 template <typename T>
-inline auto is_valid(T a0, T a1) -> bool
+inline auto isValid(T a0,
+                     T a1) -> bool
 {
   return a0 < a1;
 }
 
 template <typename T>
-inline auto overlaps(T a0, T a1, T b0, T b1) -> bool
+inline auto overlaps(T a0,
+                     T a1,
+                     T b0,
+                     T b1) -> bool
 {
   normalize(a0, a1);
   normalize(b0, b1);
@@ -57,7 +66,10 @@ inline auto overlaps(T a0, T a1, T b0, T b1) -> bool
 // Returns the geometric intersection. The result may be invalid; callers that
 // have not already checked overlaps() should verify it with is_valid().
 template <typename T>
-inline auto intersection(T a0, T a1, T b0, T b1) -> Range<T>
+inline auto intersection(T a0,
+                         T a1,
+                         T b0,
+                         T b1) -> Range<T>
 {
   normalize(a0, a1);
   normalize(b0, b1);
@@ -65,18 +77,21 @@ inline auto intersection(T a0, T a1, T b0, T b1) -> Range<T>
 }
 
 template <typename T>
-inline auto midpoint(T coord0, T coord1) -> T
+inline auto midpoint(T coord0,
+                     T coord1) -> T
 {
   return coord0 + (coord1 - coord0) / 2;
 }
 
 template <typename IntervalT>
-inline auto subtract(
-    const std::vector<IntervalT>& intervals,
-    std::remove_cvref_t<decltype(std::declval<IntervalT>().a0)> cut_a0,
-    std::remove_cvref_t<decltype(std::declval<IntervalT>().a1)> cut_a1) -> std::vector<IntervalT>
+using IntervalCoordT = std::remove_cvref_t<decltype(std::declval<IntervalT>().a0)>;
+
+template <typename IntervalT>
+inline auto subtract(const std::vector<IntervalT>& intervals,
+                     IntervalCoordT<IntervalT> cut_a0,
+                     IntervalCoordT<IntervalT> cut_a1) -> std::vector<IntervalT>
 {
-  using Coord = std::remove_cvref_t<decltype(std::declval<IntervalT>().a0)>;
+  using Coord = IntervalCoordT<IntervalT>;
 
   std::vector<IntervalT> next;
   normalize(cut_a0, cut_a1);
@@ -88,12 +103,12 @@ inline auto subtract(
     }
 
     const IntervalT left{interval.a0, static_cast<Coord>(std::min(interval.a1, cut_a0))};
-    if (is_valid(left.a0, left.a1)) {
+    if (isValid(left.a0, left.a1)) {
       next.push_back(left);
     }
 
     const IntervalT right{static_cast<Coord>(std::max(interval.a0, cut_a1)), interval.a1};
-    if (is_valid(right.a0, right.a1)) {
+    if (isValid(right.a0, right.a1)) {
       next.push_back(right);
     }
   }
@@ -102,21 +117,20 @@ inline auto subtract(
 }
 
 template <typename IntervalT, typename Mergeable>
-inline auto clip(
-    const std::vector<IntervalT>& intervals,
-    std::remove_cvref_t<decltype(std::declval<IntervalT>().a0)> clip_a0,
-    std::remove_cvref_t<decltype(std::declval<IntervalT>().a1)> clip_a1,
-    Mergeable mergeable) -> std::vector<IntervalT>
+inline auto clip(const std::vector<IntervalT>& intervals,
+                 std::remove_cvref_t<decltype(std::declval<IntervalT>().a0)> clip_a0,
+                 std::remove_cvref_t<decltype(std::declval<IntervalT>().a1)> clip_a1,
+                 Mergeable mergeable) -> std::vector<IntervalT>
 {
   std::vector<IntervalT> clipped;
-  if (!is_valid(clip_a0, clip_a1)) {
+  if (!isValid(clip_a0, clip_a1)) {
     return clipped;
   }
 
   for (const auto& interval : intervals) {
     const auto a0 = std::max(clip_a0, interval.a0);
     const auto a1 = std::min(clip_a1, interval.a1);
-    if (!is_valid(a0, a1)) {
+    if (!isValid(a0, a1)) {
       continue;
     }
 

@@ -14,22 +14,29 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itfrReader.hpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
 #pragma once
 
 #include <stdio.h>
 
-#include "itfiConductor.hpp"
-#include "itfiDielectric.hpp"
-#include "itfiVariationParam.hpp"
-#include "itfiVia.hpp"
 #include "itfrSettings.hpp"
+
 namespace itf
 {
+
+class itfiConductor;
+class itfiDielectric;
+class itfiVia;
 
 // reader initialization. Must be called before itfrRead()
 extern int itfrInit();
 extern int itfrInitSession (int startSession = 1);
-extern int itfrRead(FILE* file, const char* file_name, itfiUserData user_data);
+extern int itfrRead(FILE* file,
+                    const char* file_name,
+                    itfiUserData user_data);
 extern int itfrClear();
 
 // getter
@@ -60,7 +67,6 @@ enum class itfCallBackType {
   kDielectricCbType,
   kConductorCbType,
   kViaCbType,
-  kVariationCbType,
 
   itfrEndCbType
 };
@@ -100,12 +106,13 @@ typedef int (*itfrViaCbFnType) (itfCallBackType,
                                 itfiVia*,
                                 itfiUserData);
 
-// A declaration of the signature of all callbacks that return a itfiVariationParam
-typedef int (*itfrVariationParamCbFnType) (itfCallBackType,
-                                          itfiVariationParam*,
-                                          itfiUserData);
-
 extern void itfrSetTechnologyCb(itfrStringCbFnType);
+extern void itfrSetProcessFoundryCb(itfrStringCbFnType);
+extern void itfrSetProcessNodeCb(itfrDoubleCbFnType);
+extern void itfrSetProcessTypeCb(itfrStringCbFnType);
+extern void itfrSetProcessVersionCb(itfrDoubleCbFnType);
+extern void itfrSetProcessCornerCb(itfrStringCbFnType);
+extern void itfrSetReferenceDirectionCb(itfrStringCbFnType);
 extern void itfrSetGlobalTemperatureCb(itfrDoubleCbFnType);
 extern void itfrSetBackgroundErCb(itfrDoubleCbFnType);
 extern void itfrSetHalfNodeScaleFactorCb(itfrDoubleCbFnType);
@@ -114,6 +121,5 @@ extern void itfrSetDropFactorLateralSpacingCb(itfrDoubleCbFnType);
 extern void itfrSetConductorCb(itfrConductorCbFnType);
 extern void itfrSetDielectricCb(itfrDielectricCbFnType);
 extern void itfrSetViaCb(itfrViaCbFnType);
-extern void itfrSetVariationParamCb(itfrVariationParamCbFnType);
 
 } // namespace itf

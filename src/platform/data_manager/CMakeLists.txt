@@ -23,9 +23,10 @@ target_link_libraries(idm
     PUBLIC
     flow 
     file_manager_cts 
+    liberty
+    spef
     # file_manager_drc 
-    tool_manager 
-    tool_api_ista 
+    tool_manager
     )
 
 target_include_directories(idm 
@@ -42,6 +43,7 @@ target_include_directories(idm
         ${HOME_PLATFORM}/tool_manager/tool_api/irt_io
 
         ${HOME_PLATFORM}/file_manager
+        ${HOME_DATABASE}/manager/parser
 
         ##json
         ${HOME_THIRDPARTY}/json

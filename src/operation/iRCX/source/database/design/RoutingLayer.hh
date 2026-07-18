@@ -14,9 +14,14 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file RoutingLayer.hh
+ * @brief Routing layer metadata used by extraction.
+ */
 #pragma once
 
 #include "Types.hh"
+
 namespace ircx {
 
 class RoutingLayer {
@@ -38,23 +43,23 @@ class RoutingLayer {
   };
 
   void set_layer_id(Size v) { layer_id_ = v; }
-  Size layer_id() const { return layer_id_; }
+  Size get_layer_id() const { return layer_id_; }
 
-  void set_layer_name(Str v) { layer_name_ = std::move(v); }
-  const Str& layer_name() const { return layer_name_; }
+  void set_layer_name(std::string v) { layer_name_ = std::move(v); }
+  const std::string& get_layer_name() const { return layer_name_; }
 
   void set_layer_width(Dbu v) { layer_width_ = v; }
-  Dbu layer_width() const { return layer_width_; }
+  Dbu get_layer_width() const { return layer_width_; }
 
   void set_prefer_horz(bool v) { prefer_horz_ = v; }
   bool is_prefer_horz() const { return prefer_horz_; }
 
   void set_track_info(const TrackInfo& v) { track_info_ = v; }
-  const TrackInfo& track_info() const { return track_info_; }
+  const TrackInfo& get_track_info() const { return track_info_; }
 
  private:
   Size layer_id_{};
-  Str layer_name_{};
+  std::string layer_name_{};
   Dbu layer_width_{};
 
   bool prefer_horz_{false};

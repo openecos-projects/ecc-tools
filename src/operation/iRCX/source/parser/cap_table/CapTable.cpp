@@ -14,11 +14,18 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CapTable.cpp
+ * @brief Cap table parser and interpolation implementation.
+ */
+#include "CapTable.hpp"
+
+#include <cmath>
 #include <fstream>
 #include <sstream>
 
-#include "CapTable.hpp"
 #include "log/Log.hh"
+
 namespace ircx {
 namespace parser {
 
@@ -197,10 +204,9 @@ bool CapTable::parseConfig(const std::string& headerLine,
   return true;
 }
 
-const CapTableConfig* CapTable::get_config(
-    const std::string& layer_name,
-    const std::string& overLayer,
-    const std::string& underLayer) const
+const CapTableConfig* CapTable::findConfig(const std::string& layer_name,
+                                           const std::string& overLayer,
+                                           const std::string& underLayer) const
 {
   std::string key = makeKey(layer_name, overLayer, underLayer);
   auto iter = configs_.find(key);
@@ -210,7 +216,7 @@ const CapTableConfig* CapTable::get_config(
   return nullptr;
 }
 
-std::vector<std::string> CapTable::get_all_keys() const
+std::vector<std::string> CapTable::keys() const
 {
   std::vector<std::string> keys;
   keys.reserve(configs_.size());
@@ -233,15 +239,14 @@ std::string CapTable::makeKey(const std::string& layer_name,
   return oss.str();
 }
 
-CapacitanceResult CapTable::interpolate(
-    const std::string& layer_name,
-    const std::string& overLayer,
-    const std::string& underLayer,
-    double neighborDistance) const
+CapacitanceResult CapTable::interpolate(const std::string& layer_name,
+                                        const std::string& overLayer,
+                                        const std::string& underLayer,
+                                        double neighborDistance) const
 {
   CapacitanceResult result;
 
-  const CapTableConfig* config = get_config(layer_name, overLayer, underLayer);
+  const CapTableConfig* config = findConfig(layer_name, overLayer, underLayer);
   if (!config) {
     LOG_ERROR << "Cap table config not found: "
               << formatConfigKey(layer_name, overLayer, underLayer);
@@ -309,8 +314,11 @@ CapacitanceResult CapTable::farthestResult(const CapTableConfig& config) const
   return result;
 }
 
-double CapTable::linearInterpolate(
-    double x, double x1, double y1, double x2, double y2) const
+double CapTable::linearInterpolate(double x,
+                                   double x1,
+                                   double y1,
+                                   double x2,
+                                   double y2) const
 {
   if (std::abs(x2 - x1) < 1e-9) {
     return (y1 + y2) / 2.0;
@@ -318,9 +326,8 @@ double CapTable::linearInterpolate(
   return y1 + (((y2 - y1) * (x - x1)) / (x2 - x1));
 }
 
-std::pair<int, int> CapTable::findBracketingIndices(
-    const std::vector<CapTableEntry>& data,
-    double distance) const
+std::pair<int, int> CapTable::findBracketingIndices(const std::vector<CapTableEntry>& data,
+                                                    double distance) const
 {
   if (data.size() < 2) {
     return {-1, -1};
@@ -335,30 +342,26 @@ std::pair<int, int> CapTable::findBracketingIndices(
   return {-1, -1};
 }
 
-// ======================== 查询 ========================
 
-CapacitanceResult CapTable::queryTwoLayerCap(
-    const std::string& layer_name,
-    const std::string& belowLayer,
-    double neighborDistance) const
+CapacitanceResult CapTable::queryTwoLayerCap(const std::string& layer_name,
+                                             const std::string& belowLayer,
+                                             double neighborDistance) const
 {
   return interpolate(layer_name, belowLayer, "", neighborDistance);
 }
 
-CapacitanceResult CapTable::queryThreeLayerCap(
-    const std::string& layer_name,
-    const std::string& belowLayer,
-    const std::string& aboveLayer,
-    double neighborDistance) const
+CapacitanceResult CapTable::queryThreeLayerCap(const std::string& layer_name,
+                                               const std::string& belowLayer,
+                                               const std::string& aboveLayer,
+                                               double neighborDistance) const
 {
   return interpolate(layer_name, belowLayer, aboveLayer, neighborDistance);
 }
 
-CapacitanceResult CapTable::queryTwoLayerIsolatedCap(
-    const std::string& layer_name,
-    const std::string& belowLayer) const
+CapacitanceResult CapTable::queryTwoLayerIsolatedCap(const std::string& layer_name,
+                                                     const std::string& belowLayer) const
 {
-  const CapTableConfig* config = get_config(layer_name, belowLayer, "");
+  const CapTableConfig* config = findConfig(layer_name, belowLayer, "");
   if (!config) {
     LOG_ERROR << "Cap table config not found: "
               << formatConfigKey(layer_name, belowLayer, "");
@@ -367,12 +370,11 @@ CapacitanceResult CapTable::queryTwoLayerIsolatedCap(
   return isolatedResult(*config);
 }
 
-CapacitanceResult CapTable::queryThreeLayerIsolatedCap(
-    const std::string& layer_name,
-    const std::string& belowLayer,
-    const std::string& aboveLayer) const
+CapacitanceResult CapTable::queryThreeLayerIsolatedCap(const std::string& layer_name,
+                                                       const std::string& belowLayer,
+                                                       const std::string& aboveLayer) const
 {
-  const CapTableConfig* config = get_config(layer_name, belowLayer, aboveLayer);
+  const CapTableConfig* config = findConfig(layer_name, belowLayer, aboveLayer);
   if (!config) {
     LOG_ERROR << "Cap table config not found: "
               << formatConfigKey(layer_name, belowLayer, aboveLayer);
@@ -381,11 +383,10 @@ CapacitanceResult CapTable::queryThreeLayerIsolatedCap(
   return isolatedResult(*config);
 }
 
-CapacitanceResult CapTable::queryTwoLayerFarthestCap(
-    const std::string& layer_name,
-    const std::string& belowLayer) const
+CapacitanceResult CapTable::queryTwoLayerFarthestCap(const std::string& layer_name,
+                                                     const std::string& belowLayer) const
 {
-  const CapTableConfig* config = get_config(layer_name, belowLayer, "");
+  const CapTableConfig* config = findConfig(layer_name, belowLayer, "");
   if (!config) {
     LOG_ERROR << "Cap table config not found: "
               << formatConfigKey(layer_name, belowLayer, "");
@@ -394,12 +395,11 @@ CapacitanceResult CapTable::queryTwoLayerFarthestCap(
   return farthestResult(*config);
 }
 
-CapacitanceResult CapTable::queryThreeLayerFarthestCap(
-    const std::string& layer_name,
-    const std::string& belowLayer,
-    const std::string& aboveLayer) const
+CapacitanceResult CapTable::queryThreeLayerFarthestCap(const std::string& layer_name,
+                                                       const std::string& belowLayer,
+                                                       const std::string& aboveLayer) const
 {
-  const CapTableConfig* config = get_config(layer_name, belowLayer, aboveLayer);
+  const CapTableConfig* config = findConfig(layer_name, belowLayer, aboveLayer);
   if (!config) {
     LOG_ERROR << "Cap table config not found: "
               << formatConfigKey(layer_name, belowLayer, aboveLayer);

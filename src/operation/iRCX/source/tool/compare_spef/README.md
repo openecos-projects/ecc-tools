@@ -112,6 +112,8 @@ Capacitance comparison:
   hold:
   - `abs(reference_ccap) >= -ccap abs`
   - `abs(reference_ccap) / reference_victim_total_cap >= -ccap rel`
+  The `%diff` value in `ccap.rpt` is computed as
+  `(test_ccap - reference_ccap) / reference_ccap`.
 
 Resistance comparison:
 

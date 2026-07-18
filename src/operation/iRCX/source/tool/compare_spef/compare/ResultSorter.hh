@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file ResultSorter.hh
+ * @brief compare_spef implementation detail.
+ */
 #pragma once
 
 #include "data/CompareSpefData.hh"
@@ -24,7 +28,9 @@ namespace compare_spef {
 class ResultSorter
 {
  public:
-  void sort(Result& result, const Data& test, const Data& reference) const;
+  void sort(Result& result,
+            const Data& test,
+            const Data& reference) const;
 };
 
 }  // namespace compare_spef

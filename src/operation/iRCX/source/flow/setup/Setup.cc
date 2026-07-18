@@ -14,16 +14,18 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file Setup.cc
+ * @brief iRCX setup flow implementation.
+ */
 #include "Setup.hh"
 
 #include <cmath>
-#include <iomanip>
-#include <memory>
 #include <optional>
-#include <sstream>
 #include <utility>
 
 #include "CapTable.hpp"
+#include "FormatUtils.hh"
 #include "ItfBuilder.hpp"
 #include "LayerTable.hh"
 #include "LayoutData.hh"
@@ -41,12 +43,9 @@ namespace ircx {
 
 namespace {
 
-auto temperatureName(F64 temperature) -> Str
+auto temperatureName(F64 temperature) -> std::string
 {
-  std::ostringstream oss;
-  oss << std::setprecision(12) << temperature;
-
-  Str name = oss.str();
+  std::string name = format::significant(temperature, 12);
   for (char& ch : name) {
     if (ch == '.') {
       ch = 'p';
@@ -57,40 +56,35 @@ auto temperatureName(F64 temperature) -> Str
   return name + "C";
 }
 
-auto makeTemperatureCornerName(const Str& corner_name, F64 temperature) -> Str
+auto makeTemperatureCornerName(const std::string& corner_name,
+                               F64 temperature) -> std::string
 {
   return corner_name + "_" + temperatureName(temperature);
 }
 
-auto loadProcessCorner(const Str& corner_name,
-                       const Str& itf_file) -> std::unique_ptr<::itf::ProcessCorner>
+auto loadProcessCorner(const std::string& corner_name,
+                       const std::string& itf_file) -> std::optional<ProcessCorner>
 {
-  if (!string::require_non_empty(corner_name, "corner name")) {
-    return nullptr;
+  if (!string::requireNonEmpty(corner_name, "corner name")) {
+    return std::nullopt;
   }
-  if (!path::file_exists(itf_file, "itf_file")) {
-    return nullptr;
+  if (!path::fileExists(itf_file, "itf_file")) {
+    return std::nullopt;
   }
 
-  ::itf::ItfBuilder itf_builder;
+  ItfBuilder itf_builder;
   StageLog stage_log("read_itf corner=" + corner_name + " file=" + itf_file);
-  if (!itf_builder.buildItf(itf_file)) {
+  if (!itf_builder.build(itf_file)) {
     LOG_ERROR << "failed to parse ITF file for corner "
               << corner_name << ": " << itf_file;
-    return nullptr;
+    return std::nullopt;
   }
 
-  auto* itf_service = itf_builder.get_itf_service();
-  if (!itf_service) {
-    LOG_ERROR << "ITF service is null for corner " << corner_name;
-    return nullptr;
-  }
-
-  auto pcs = itf_service->take_process_corners();
-  std::unique_ptr<::itf::ProcessCorner> loaded_corner;
+  auto pcs = itf_builder.takeProcessCorners();
+  std::optional<ProcessCorner> loaded_corner;
   Size valid_corner_num = 0;
   for (auto& pc : pcs) {
-    if (!pc || pc->get_technology().empty()) {
+    if (pc.get_technology().empty()) {
       continue;
     }
     ++valid_corner_num;
@@ -102,10 +96,10 @@ auto loadProcessCorner(const Str& corner_name,
   if (valid_corner_num != 1 || !loaded_corner) {
     LOG_ERROR << "read_corner expects exactly one process corner in ITF file "
               << itf_file << ", but got " << valid_corner_num;
-    return nullptr;
+    return std::nullopt;
   }
 
-  const Str original_corner_name = loaded_corner->get_technology();
+  const std::string original_corner_name = loaded_corner->get_technology();
   if (original_corner_name != corner_name) {
     LOG_INFO << "rename process corner "
              << original_corner_name << " -> " << corner_name;
@@ -116,13 +110,13 @@ auto loadProcessCorner(const Str& corner_name,
   return loaded_corner;
 }
 
-auto loadCapTable(const Str& corner_name,
-                  const Str& captab_file) -> std::optional<parser::CapTable>
+auto loadCapTable(const std::string& corner_name,
+                  const std::string& captab_file) -> std::optional<parser::CapTable>
 {
-  if (!string::require_non_empty(corner_name, "corner name")) {
+  if (!string::requireNonEmpty(corner_name, "corner name")) {
     return std::nullopt;
   }
-  if (!path::file_exists(captab_file, "captab_file")) {
+  if (!path::fileExists(captab_file, "captab_file")) {
     return std::nullopt;
   }
 
@@ -139,35 +133,35 @@ auto loadCapTable(const Str& corner_name,
   return cap_table;
 }
 
-auto registerProcessLayers(const ::itf::ProcessCorner& pc) -> void
+auto registerProcessLayers(const ProcessCorner& pc) -> void
 {
   RCXData& data = RCX_DATA_INST;
-  if (data.processLayersRegistered()) {
+  if (data.is_process_layers_registered()) {
     return;
   }
 
-  auto& cond_layers = pc.get_layers()->get_conductor_layers();
-  auto& via_layers = pc.get_layers()->get_via_layers();
-  LayerTable& layer_table = data.layer_table();
+  auto& cond_layers = pc.get_layers().get_conductor_layers();
+  auto& via_layers = pc.get_layers().get_via_layers();
+  LayerTable& layer_table = data.get_layer_table();
 
   for (auto* layer : cond_layers)
     layer_table.registerProcessLayer(layer->get_id(), layer->get_name());
   for (auto* layer : via_layers)
     layer_table.registerProcessLayer(layer->get_id(), layer->get_name());
 
-  data.setProcessLayersRegistered(true);
+  data.set_process_layers_registered(true);
 }
 
-auto validateProcessLayers(const ::itf::ProcessCorner& pc) -> bool
+auto validateProcessLayers(const ProcessCorner& pc) -> bool
 {
-  const auto& corner_data = RCX_DATA_INST.corner_data();
+  const auto& corner_data = RCX_DATA_INST.get_corner_data();
   if (corner_data.empty()) {
     return true;
   }
 
-  const ::itf::ProcessCorner& ref = *corner_data.front().process_corner;
-  const auto& ref_layers = ref.get_layers()->get_layers();
-  const auto& cur_layers = pc.get_layers()->get_layers();
+  const ProcessCorner& ref = corner_data.front().process_corner.value();
+  const auto& ref_layers = ref.get_layers().get_layers();
+  const auto& cur_layers = pc.get_layers().get_layers();
 
   if (ref_layers.size() != cur_layers.size()) {
     LOG_ERROR << "process layer count mismatch between corner "
@@ -231,8 +225,12 @@ auto Setup::initialize(const std::string& config) -> bool
     }
 
     for (F64 temperature : corner.temperatures) {
-      const Str runtime_corner_name = makeTemperatureCornerName(corner.name, temperature);
-      if (!readCorner(runtime_corner_name, temperature, corner.itf_file.c_str(), corner.captab_file.c_str())) {
+      const std::string runtime_corner_name = makeTemperatureCornerName(corner.name, temperature);
+      if (!readCorner(
+              runtime_corner_name,
+              temperature,
+              corner.itf_file.c_str(),
+              corner.captab_file.c_str())) {
         return false;
       }
     }
@@ -257,7 +255,7 @@ auto Setup::readCorner(const std::string& corner_name,
                        const char* itf_file,
                        const char* captab_file) -> bool
 {
-  if (!string::require_non_empty(corner_name, "corner name")) {
+  if (!string::requireNonEmpty(corner_name, "corner name")) {
     return false;
   }
   if (!std::isfinite(temperature)) {
@@ -274,7 +272,7 @@ auto Setup::readCorner(const std::string& corner_name,
   }
 
   RCXData& data = RCX_DATA_INST;
-  if (data.hasCorner(corner_name)) {
+  if (data.has_corner(corner_name)) {
     LOG_ERROR << "duplicate corner: " << corner_name;
     return false;
   }
@@ -295,10 +293,10 @@ auto Setup::readCorner(const std::string& corner_name,
   }
   corner.cap_table = std::move(cap_table.value());
 
-  auto& corner_data = data.corner_data();
+  auto& corner_data = data.get_corner_data();
   if (corner_data.empty()) {
-    registerProcessLayers(*corner.process_corner);
-  } else if (!validateProcessLayers(*corner.process_corner)) {
+    registerProcessLayers(corner.process_corner.value());
+  } else if (!validateProcessLayers(corner.process_corner.value())) {
     return false;
   }
 
@@ -312,22 +310,22 @@ auto Setup::readMapping(const char* mapping_file) -> bool
     LOG_ERROR << "mapping_file is null.";
     return false;
   }
-  if (!path::file_exists(mapping_file, "mapping_file")) {
+  if (!path::fileExists(mapping_file, "mapping_file")) {
     return false;
   }
 
-  StageLog stage_log("read_mapping file=" + Str(mapping_file));
+  StageLog stage_log("read_mapping file=" + std::string(mapping_file));
 
   RCXData& data = RCX_DATA_INST;
-  LayerTable& layer_table = data.layer_table();
-  auto& mapping_builder = data.mapping_builder();
+  LayerTable& layer_table = data.get_layer_table();
+  auto& mapping_builder = data.get_mapping_builder();
 
   layer_table.clearMappings();
   if (!mapping_builder.read(mapping_file)) {
     return false;
   }
 
-  for (const auto& [dn, pn] : mapping_builder.design_to_process_layer_names())
+  for (const auto& [dn, pn] : mapping_builder.get_design_to_process_layer_names())
     layer_table.registerMapping(dn, pn);
 
   stage_log.set_success();
@@ -357,7 +355,7 @@ auto Setup::adaptDB() -> bool
     return false;
   }
 
-  RCX_DATA_INST.setDBData(std::move(layout_data),
+  RCX_DATA_INST.set_db_data(std::move(layout_data),
                           design_layer_table,
                           std::move(spef_context));
   return true;

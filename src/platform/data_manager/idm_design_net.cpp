@@ -28,7 +28,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "idm.h"
-#include "ista_io.h"
 #include "tool_manager.h"
 
 namespace idm {
@@ -283,9 +282,10 @@ IdbInstance* DataManager::getIoCellByIoPin(IdbPin* io_pin)
  */
 vector<string> DataManager::getClockNetNameList()
 {
-  vector<string> clock_name_List;
+  // vector<string> clock_name_List;
 
-  return staInst->getClockNetNameList();
+  // return staInst->getClockNetNameList();
+  return {};
 }
 /**
  * @brief check if net is a clock net
@@ -296,7 +296,8 @@ vector<string> DataManager::getClockNetNameList()
  */
 bool DataManager::isClockNet(string net_name)
 {
-  return staInst->isClockNet(net_name);
+  // return staInst->isClockNet(net_name);
+  return false;
 }
 /**
  * merge segment wire for all nets

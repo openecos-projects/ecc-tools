@@ -14,9 +14,14 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CompareSpefTool.cc
+ * @brief compare_spef implementation detail.
+ */
 #include "CompareSpefTool.hh"
 
 #include "compare/Comparator.hh"
+#include "config/CompareSpefConfig.hh"
 #include "log/Log.hh"
 #include "reader/SpefReader.hh"
 #include "report/ReportWriter.hh"

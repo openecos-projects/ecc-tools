@@ -14,9 +14,11 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file SpefReader.hh
+ * @brief compare_spef implementation detail.
+ */
 #pragma once
-
-#include <string>
 
 #include "data/CompareSpefData.hh"
 
@@ -26,7 +28,8 @@ namespace compare_spef {
 class SpefReader
 {
  public:
-  auto read(const std::string& path, Data& data) const -> bool;
+  auto read(const std::string& path,
+            Data& data) const -> bool;
 
  private:
   void buildNetCouplingCaps(Data& data) const;

@@ -8,7 +8,6 @@ target_link_libraries(tcl_flow
     PUBLIC
         tool_manager
         tcl
-        shell-cmd
         str
         flow
         tcl_util

@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itfrSettings.hpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
 #pragma once
 
 namespace itf
@@ -23,15 +27,12 @@ typedef void* itfiUserData;
   
 class itfrSettings {
  public:
-  // constructor
-  itfrSettings();
-  ~itfrSettings();
-
   // function
   static void reset();
+  static void clear();
 
   // members
-  itfiUserData user_data;
+  itfiUserData user_data = nullptr;
 };
 
 extern itfrSettings* itfSettings;

@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file EdgeCapAccumulator.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include <span>
@@ -55,17 +59,19 @@ class EdgeCapAccumulator
                      Size corner_idx,
                      Size net_idx,
                      Size edge_idx,
-                     Size edge_global_id);
+                     Size edge_global_idx);
 
   void accumulateSpan(Micron span_length,
-                      const Str& below_layer,
-                      const Str& above_layer,
+                      const std::string& below_layer,
+                      const std::string& above_layer,
                       const SideContext& low_side,
                       const SideContext& high_side);
 
  private:
-  void accumulateGround(const SideContext& side, double ground_cap_ff);
-  void foldCoupling(const SideContext& side, double coupling_cap_ff);
+  void accumulateGround(const SideContext& side,
+                        F64 ground_cap_ff);
+  void foldCoupling(const SideContext& side,
+                    F64 coupling_cap_ff);
 
   const CapTableQuery& cap_query_;
   const TopoPool& topo_pool_;
@@ -74,7 +80,7 @@ class EdgeCapAccumulator
   Size corner_idx_;
   Size net_idx_;
   Size edge_idx_;
-  Size edge_global_id_;
+  Size edge_global_idx_;
 };
 
 }  // namespace ircx

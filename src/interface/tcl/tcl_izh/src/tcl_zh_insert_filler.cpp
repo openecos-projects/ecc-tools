@@ -15,13 +15,15 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "ZHInterface.hpp"
-#include "tcl_zh.h"
 #include "tcl_util.h"
+#include "tcl_zh.h"
 
 namespace tcl {
 
 TclZHInsertFiller::TclZHInsertFiller(const char* cmd_name) : TclCmd(cmd_name)
 {
+  _config_list.push_back(std::make_pair("-filler", ValueType::kString));
+
   TclUtil::addOption(this, _config_list);
 }
 

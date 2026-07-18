@@ -153,9 +153,7 @@ void PdnPlan::createGrid(std::string power_net_name, std::string ground_net_name
   auto idb_blockage_list = idb_design->get_blockage_list();
 
   int32_t x_start = idb_core->get_bounding_box()->get_low_x();
-  int32_t y_start = idb_core->get_bounding_box()->get_low_y();
   int32_t x_end = idb_core->get_bounding_box()->get_high_x();
-  int32_t y_end = idb_core->get_bounding_box()->get_high_y();
 
   auto layer = idb_layer_list->find_layer(layer_name);
   /// get the default layer pitch in layer metal 1
@@ -214,10 +212,8 @@ void PdnPlan::createGrid(std::string power_net_name, std::string ground_net_name
     }
   }
 
-  idb_core->get_bounding_box()->set_low_y(y_start - width / 2);
-  idb_core->get_bounding_box()->set_high_y(y_end + width / 2);
-  std::cout << "Core ll coordinate change to:" << idb_core->get_bounding_box()->get_low_x() << " , "
-            << idb_core->get_bounding_box()->get_low_y() << std::endl;
+  // Keep the floorplan core box unchanged. Expanding the real core box here
+  // can leak into later stripe generation and create PG shapes outside DIEAREA.
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -400,16 +396,7 @@ void PdnPlan::createStripe(std::string power_net_name, std::string ground_net_na
     std::cout << "Error : can not find layer." << std::endl;
   }
 
-  /// hardcode
-  // string  routing_layer_name = routing_layers[0]->get_name();
-  /// 110nm
-  std::string routing_layer_name = "METAL1";
-  /// sky 130
-  // string  routing_layer_name = "met1";
   auto core_boundingbox = idb_core->get_bounding_box();
-  int32_t rail_half_route_width = _layer_power_route_info_map[routing_layer_name].get_route_width() / 2;
-  core_boundingbox->set_low_y(core_boundingbox->get_low_y() - rail_half_route_width);
-  core_boundingbox->set_high_y(core_boundingbox->get_high_y() + rail_half_route_width);
 
   int32_t x_start = core_boundingbox->get_low_x();
   int32_t y_start = core_boundingbox->get_low_y();

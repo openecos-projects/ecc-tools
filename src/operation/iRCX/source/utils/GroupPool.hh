@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file GroupPool.hh
+ * @brief Contiguous grouped-storage helper.
+ */
 #pragma once
 
 #include <iterator>
@@ -70,7 +74,7 @@ class GroupPool
     return group_ranges_.size();
   }
 
-  auto item_count() const -> Size
+  auto itemCount() const -> Size
   {
     return items_.size();
   }
@@ -80,12 +84,12 @@ class GroupPool
     return group_ranges_.empty();
   }
 
-  auto reserve_groups(Size count) -> void
+  auto reserveGroups(Size count) -> void
   {
     group_ranges_.reserve(count);
   }
 
-  auto reserve_items(Size count) -> void
+  auto reserveItems(Size count) -> void
   {
     items_.reserve(count);
   }

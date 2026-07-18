@@ -40,7 +40,7 @@
 #include "string/Str.hh"
 #include "verilog/VerilogParserRustC.hh"
 
-namespace ista {
+namespace idb {
 
 class Sta;
 class VerilogConstantExpr;
@@ -54,11 +54,9 @@ class VerilogNetIDExpr;
 class VerilogPortRefPortConnect;
 class VerilogReader;
 class RustVerilogReader;
-};  // namespace ista
+};  // namespace idb
 class RustVerilogModule;
 namespace idb {
-
-using namespace ista;
 
 #define kVerilogSuccess 0
 #define kVerilogFail 1

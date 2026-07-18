@@ -14,17 +14,36 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itfiConductor.cpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
+#include <cstring>
 #include <iostream>
-#include <string.h>
 
 #include "itfiConductor.hpp"
-#include "itfMarco.h"
-#include "itfUtil.h"
+
 namespace itf
 {
+namespace
+{
+
+const char* stringOrNull(const std::string& value)
+{
+  return value.empty() ? nullptr : value.c_str();
+}
+
+bool isEffectType(const char* type)
+{
+  if (!type) return false;
+  return std::strncmp("RESISTIVE_ONLY", type, 14) == 0
+      || std::strncmp("CAPACITIVE_ONLY", type, 15) == 0;
+}
+
+} // namespace
 
 itfiConductor::itfiConductor()
-: _conductor_name(nullptr),
+: _conductor_name(),
   _wmin(0),
   _smin(0),
   _thickness(0),
@@ -48,12 +67,12 @@ itfiConductor::itfiConductor()
   _fill_ratio(0),
   _fill_width(0),
   _fill_spacing(0),
-  _fill_type(nullptr),
+  _fill_type(),
   _gate_to_contact_smin(0),
   _gate_to_diffusion_cap(),
   _ild_vws(),
-  _layer_type(nullptr),
-  _measured_from(nullptr),
+  _layer_type(),
+  _measured_from(),
   _PBTV(),
   _rpsq(0),
   _rho(0),
@@ -91,10 +110,10 @@ itfiConductor::itfiConductor()
 { }
 
 itfiConductor::itfiConductor(const itfiConductor& other)
-: _conductor_name(nullptr)
-, _fill_type(nullptr)
-, _layer_type(nullptr)
-, _measured_from(nullptr)
+: _conductor_name()
+, _fill_type()
+, _layer_type()
+, _measured_from()
 {
   *this = other;
 }
@@ -103,7 +122,7 @@ itfiConductor& itfiConductor::operator=(const itfiConductor& rhs)
 {
   if (this == &rhs) return *this;
 
-  ITF_STR_CPY(_conductor_name, rhs._conductor_name);
+  _conductor_name = rhs._conductor_name;
   _wmin = rhs._wmin;
   _smin = rhs._smin;
   _thickness = rhs._thickness;
@@ -127,12 +146,12 @@ itfiConductor& itfiConductor::operator=(const itfiConductor& rhs)
   _fill_ratio = rhs._fill_ratio;
   _fill_width = rhs._fill_width;
   _fill_spacing = rhs._fill_spacing;
-  ITF_STR_CPY(_fill_type, rhs._fill_type);
+  _fill_type = rhs._fill_type;
   _gate_to_contact_smin = rhs._gate_to_contact_smin;
   _gate_to_diffusion_cap = rhs._gate_to_diffusion_cap;
   _ild_vws = rhs._ild_vws;
-  ITF_STR_CPY(_layer_type, rhs._layer_type);
-  ITF_STR_CPY(_measured_from, rhs._measured_from);
+  _layer_type = rhs._layer_type;
+  _measured_from = rhs._measured_from;
   _PBTV = rhs._PBTV;
   _rpsq = rhs._rpsq;
   _rho = rhs._rho;
@@ -172,11 +191,11 @@ itfiConductor& itfiConductor::operator=(const itfiConductor& rhs)
 }
 
 bool
-itfiConductor::operator==(const itfiConductor& rhs) const 
+itfiConductor::operator==(const itfiConductor& rhs) const
 {
   if (this == &rhs) return true;
 
-  return itfStrCmp(_conductor_name, rhs._conductor_name)
+  return _conductor_name == rhs._conductor_name
     && _wmin == rhs._wmin
     && _smin == rhs._smin
     && _thickness == rhs._thickness
@@ -200,12 +219,12 @@ itfiConductor::operator==(const itfiConductor& rhs) const
     && _fill_ratio == rhs._fill_ratio
     && _fill_width == rhs._fill_width
     && _fill_spacing == rhs._fill_spacing
-    && itfStrCmp(_fill_type, rhs._fill_type) 
+    && _fill_type == rhs._fill_type
     && _gate_to_contact_smin == rhs._gate_to_contact_smin
     && _gate_to_diffusion_cap == rhs._gate_to_diffusion_cap
     && _ild_vws == rhs._ild_vws
-    && itfStrCmp(_layer_type, rhs._layer_type)
-    && itfStrCmp(_measured_from, rhs._measured_from)
+    && _layer_type == rhs._layer_type
+    && _measured_from == rhs._measured_from
     && _PBTV == rhs._PBTV
     && _rpsq == rhs._rpsq
     && _rho == rhs._rho
@@ -252,7 +271,7 @@ itfiConductor::~itfiConductor()
 const char*
 itfiConductor::get_conductor_name() const
 {
-  return _conductor_name;
+  return stringOrNull(_conductor_name);
 }
 
 float
@@ -268,7 +287,7 @@ itfiConductor::get_smin() const
 }
 
 float
-itfiConductor::get_thickness () const
+itfiConductor::get_thickness() const
 {
   return _thickness;
 }
@@ -370,20 +389,27 @@ itfiConductor::get_crt2() const
 }
 
 const std::vector<itfiWidthCrt>&
-itfiConductor::get_crt_vs_si_width() const
+itfiConductor::get_crt_by_si_width() const
 {
   return _crt_vs_si_width;
 }
 
 const std::vector<itfiDensityBox>&
 itfiConductor::get_density_box_weighting_factor() const
-{ 
+{
   if (_density_box_weighting_factor.size()) {
     return _density_box_weighting_factor;
   } else {
     static const std::vector<itfiDensityBox> kDefaultDensityBoxWeightingFactor{{50, 1}};
     return kDefaultDensityBoxWeightingFactor;
   }
+}
+
+std::optional<float>
+itfiEtchVWS::query_etch(double width,
+                        double spacing) const
+{
+  return query_interpolation(static_cast<float>(width), static_cast<float>(spacing));
 }
 
 float
@@ -444,8 +470,7 @@ itfiConductor::get_fill_spacing() const
 const char*
 itfiConductor::get_fill_type() const
 {
-  if (_fill_type) return _fill_type;
-  return "GROUNDED";
+  return _fill_type.empty() ? "GROUNDED" : _fill_type.c_str();
 }
 
 float
@@ -478,26 +503,26 @@ itfiConductor::get_ild_vws() const
   return _ild_vws;
 }
 
-char*
+const char*
 itfiConductor::get_layer_type() const
 {
-  return _layer_type;
+  return stringOrNull(_layer_type);
 }
 
-char*
+const char*
 itfiConductor::get_measured_from() const
 {
-  return _measured_from;
+  return stringOrNull(_measured_from);
 }
 
 itfiPBTV&
-itfiConductor::get_PBTV()
+itfiConductor::get_pbtv()
 {
   return _PBTV;
 }
 
 const itfiPBTV&
-itfiConductor::get_PBTV() const
+itfiConductor::get_pbtv() const
 {
   return _PBTV;
 }
@@ -526,6 +551,12 @@ itfiConductor::get_rpsq_vs_si_width() const
   return _rpsq_v_siw;
 }
 
+std::optional<float>
+itfiConductor::query_rpsq_by_si_width(double width) const
+{
+  return _rpsq_v_siw.query_interpolation(static_cast<float>(width));
+}
+
 itf2DLUT<float, float, float>&
 itfiConductor::get_rpsq_vws()
 {
@@ -539,15 +570,22 @@ itfiConductor::get_rpsq_vws() const
 }
 
 itfiRhoVWS&
-itfiConductor::get_rho_v_siw_t()
+itfiConductor::get_rho_vs_si_width_and_thickness()
 {
   return _rho_v_siw_t;
 }
 
 const itfiRhoVWS&
-itfiConductor::get_rho_v_siw_t() const
+itfiConductor::get_rho_vs_si_width_and_thickness() const
 {
   return _rho_v_siw_t;
+}
+
+std::optional<float>
+itfiConductor::query_rho_by_si_width_and_thickness(double thickness,
+                                                   double width) const
+{
+  return _rho_v_siw_t.query_interpolation(static_cast<float>(thickness), static_cast<float>(width));
 }
 
 itf2DLUT<float, float, float>&
@@ -619,7 +657,7 @@ itfiConductor::get_tvf_bt_vwd() const
 void
 itfiConductor::set_conductor_name(const char* name)
 {
-  ITF_STR_CPY(_conductor_name, name);
+  _conductor_name = name ? name : "";
 }
 
 void
@@ -667,7 +705,8 @@ itfiConductor::set_air_gap_bottom_heights(const std::vector<float>& v)
 // @param s The size of the density box. Units: microns
 // @param w The weighting factor.
 void
-itfiConductor::add_density_box_weight(int s, double w)
+itfiConductor::add_density_box_weight(int s,
+                                      double w)
 {
   if (_density_box_weighting_factor.size() >= 6) {
     std::cout << "Up to 5 entries are allowed" << std::endl;
@@ -679,7 +718,7 @@ itfiConductor::add_density_box_weight(int s, double w)
   {
     _density_box_weighting_factor.emplace_back(s, w);
   } else {
-    std::cout << "Data invalid, when s = " << s 
+    std::cout << "Data invalid, when s = " << s
               << ", w = " << w
               << std::endl;
   }
@@ -720,7 +759,9 @@ itfiConductor::set_crt2(float crt2)
 // @param crt1 Linear temperature coefficients
 // @param crt2 Quadratic temperature coefficients
 void
-itfiConductor::add_siw_crt1_crt2(float siw, float crt1, float crt2)
+itfiConductor::add_si_width_crt(float siw,
+                                float crt1,
+                                float crt2)
 {
   _crt_vs_si_width.emplace_back(siw, crt1, crt2);
 }
@@ -750,7 +791,8 @@ itfiConductor::set_resistive_only_etch(float v)
 }
 
 void
-itfiConductor::add_etch_vws(const char* title, const itf2DLUT<float, float, float>& lut)
+itfiConductor::add_etch_vws(const char* title,
+                            const itf2DLUT<float, float, float>& lut)
 {
   _etch_vws_list.emplace_back(title ? title : "", lut);
 }
@@ -776,10 +818,12 @@ itfiConductor::set_fill_spacing(float spacing)
 void
 itfiConductor::set_fill_type(const char* type)
 {
-  if ((strncmp("GROUNDED", type, 8)  == 0)
-   || (strncmp("FLOATING", type, 8) == 0) )
+  if (!type) return;
+
+  if ((std::strncmp("GROUNDED", type, 8) == 0)
+   || (std::strncmp("FLOATING", type, 8) == 0))
   {
-    ITF_STR_CPY(_fill_type, type);
+    _fill_type = type;
   } else {
     std::cout << "Invalid type: " << type << std::endl;
   }
@@ -794,7 +838,7 @@ itfiConductor::set_gate_to_contact_smin(float v)
 void
 itfiConductor::set_layer_type(const char* type)
 {
-  ITF_STR_CPY(_layer_type, type);
+  _layer_type = type ? type : "";
 }
 
 void
@@ -804,7 +848,7 @@ itfiConductor::set_side_tangent(float v)
 }
 
 void
-itfiConductor::set_is_planar()
+itfiConductor::set_planar()
 {
   _is_planar = 1;
 }
@@ -858,7 +902,7 @@ itfiConductor::set_rpsq_vws(const itf2DLUT<float, float, float>& v)
 }
 
 void
-itfiConductor::set_rho_v_siw_t(const itf2DLUT<float, float, float>& v)
+itfiConductor::set_rho_vs_si_width_and_thickness(const itf2DLUT<float, float, float>& v)
 {
   _rho_v_siw_t = v;
 }
@@ -884,14 +928,14 @@ itfiConductor::set_tvf_bt_vwd(const itf2DLUT<float, float, float>& v)
 void
 itfiConductor::set_measured_from(const char* s)
 {
-  ITF_STR_CPY(_measured_from, s);
+  _measured_from = s ? s : "";
   _has_measured_from = 1;
 }
 
 void
 itfiConductor::clear()
 {
-  ITF_FREE(_conductor_name);
+  _conductor_name.clear();
   _wmin = 0;
   _smin = 0;
   _thickness = 0;
@@ -915,12 +959,12 @@ itfiConductor::clear()
   _fill_ratio = 0;
   _fill_width = 0;
   _fill_spacing = 0;
-  ITF_FREE(_fill_type);
+  _fill_type.clear();
   _gate_to_contact_smin = 0;
   _gate_to_diffusion_cap.clear();
   _ild_vws.clear();
-  ITF_FREE(_layer_type);
-  ITF_FREE(_measured_from);
+  _layer_type.clear();
+  _measured_from.clear();
   _PBTV.clear();
   _rpsq = 0;
   _rho = 0;
@@ -958,43 +1002,51 @@ itfiConductor::clear()
   _has_tvf_adjustment_tables = 0;
 }
 
-// linear interpolation when width lies in the table,
-// otherwise use boundary value.
-// In other words, no extrapolation.
-// @param width Conductor silicon (post-etch) widths. Units: microns.
-// @param crt1 Linear temperature coefficients for the corresponding conductor widths
-// @param crt2 Quadratic temperature coefficients
 void
-itfiConductor::query_crt(double width, double& crt1, double& crt2)
+itfiConductor::queryCrtBySiWidth(double width,
+                                 std::optional<double>& crt1,
+                                 std::optional<double>& crt2) const
 {
-  if (_crt_vs_si_width.size() == 0) {
-    std::cout << "table _crt_vs_si_width is empty" << std::endl;
+  crt1.reset();
+  crt2.reset();
+
+  if (_crt_vs_si_width.empty()) {
+    return;
+  }
+  if (_crt_vs_si_width.size() == 1) {
+    crt1 = _crt_vs_si_width.front().crt_1;
+    crt2 = _crt_vs_si_width.front().crt_2;
     return;
   }
 
-  auto it_high = std::upper_bound(_crt_vs_si_width.begin(), _crt_vs_si_width.end(),
-    width, [](double v, itfiWidthCrt elem){
-      return v < elem.si_width;
+  auto it_high = std::upper_bound(
+    _crt_vs_si_width.begin(), _crt_vs_si_width.end(), width,
+    [](double query_width, const itfiWidthCrt& elem) {
+      return query_width < elem.si_width;
     });
-  
-  size_t idx_h = 0, idx_l = 0;
+
   if (it_high == _crt_vs_si_width.end()) {
-    idx_h = _crt_vs_si_width.size() - 1;
-    idx_l = idx_h;
-  } else {
-    idx_h = std::distance(_crt_vs_si_width.begin(), it_high);
-    idx_l = idx_h - (idx_h == 0 ? 0 : 1);
+    crt1 = _crt_vs_si_width.back().crt_1;
+    crt2 = _crt_vs_si_width.back().crt_2;
+    return;
+  }
+  if (width <= _crt_vs_si_width.front().si_width) {
+    crt1 = _crt_vs_si_width.front().crt_1;
+    crt2 = _crt_vs_si_width.front().crt_2;
+    return;
   }
 
-  auto& elem_h = _crt_vs_si_width.at(idx_h);
-  auto& elem_l = _crt_vs_si_width.at(idx_l);
-  auto t = (width - elem_l.si_width) / (elem_h.si_width - elem_l.si_width);
-  crt1 = std::lerp(elem_l.crt_1, elem_h.crt_1, t);
-  crt2 = std::lerp(elem_l.crt_2, elem_h.crt_2, t);
+  const size_t high_idx = std::distance(_crt_vs_si_width.begin(), it_high);
+  const size_t low_idx = high_idx - 1;
+  const auto& high = _crt_vs_si_width.at(high_idx);
+  const auto& low = _crt_vs_si_width.at(low_idx);
+  const double ratio = (width - low.si_width) / (high.si_width - low.si_width);
+  crt1 = std::lerp(low.crt_1, high.crt_1, ratio);
+  crt2 = std::lerp(low.crt_2, high.crt_2, ratio);
 }
 
 itfiBTSW::itfiBTSW()
-: _type(nullptr),
+: _type(),
   _sr_lut()
 {
 
@@ -1002,7 +1054,7 @@ itfiBTSW::itfiBTSW()
 
 itfiBTSW::itfiBTSW(
   const itfiBTSW& other)
-: _type(nullptr),
+: _type(),
   _sr_lut()
 {
   *this = other;
@@ -1013,7 +1065,7 @@ itfiBTSW::operator=(const itfiBTSW& rhs)
 {
   if (this == &rhs) return *this;
 
-  ITF_STR_CPY(_type, rhs._type);
+  _type = rhs._type;
   _sr_lut = rhs._sr_lut;
 
   return *this;
@@ -1024,7 +1076,7 @@ itfiBTSW::operator==(const itfiBTSW& rhs) const
 {
   if (this == &rhs) return true;
 
-  return itfStrCmp(_type, rhs._type)
+  return _type == rhs._type
     && _sr_lut == rhs._sr_lut
   ;
 }
@@ -1037,7 +1089,7 @@ itfiBTSW::~itfiBTSW()
 const char*
 itfiBTSW::get_type() const
 {
-  return _type;
+  return stringOrNull(_type);
 }
 
 itf1DLUT<float, float>&
@@ -1061,19 +1113,17 @@ itfiBTSW::get_sr_list() const
 void
 itfiBTSW::set_type(const char* type)
 {
-  if ((strncmp("RESISTIVE_ONLY", type, 14)  == 0)
-   || (strncmp("CAPACITIVE_ONLY", type, 15) == 0) )
-  {
-    ITF_STR_CPY(_type, type);
+  if (isEffectType(type)) {
+    _type = type;
   } else {
-    std::cout << "Invalid type: " << type << std::endl;
+    std::cout << "Invalid type: " << (type ? type : "") << std::endl;
   }
 }
 
 void
 itfiBTSW::clear()
 {
-  ITF_FREE(_type);
+  _type.clear();
   _sr_lut.clear();
 }
 
@@ -1084,22 +1134,20 @@ itfiBTSW::set_sr_list(const std::vector<std::pair<float, float>>& pair_list)
 }
 
 size_t
-itfiG2DC::get_number_of_tables() const
+itfiG2DC::get_table_count() const
 {
   return _number_of_tables;
 }
 
 void
-itfiG2DC::set_number_of_tables(size_t n)
+itfiG2DC::set_table_count(size_t n)
 {
   _number_of_tables = n;
 }
 
 void
-itfiG2DC::add_model(
-  const char* title,
-  const itf2DLUT<float, float, float>& lut
-) {
+itfiG2DC::add_model(const char* title,
+                    const itf2DLUT<float, float, float>& lut) {
   _model_list.emplace_back(title ? title : "", lut);
 }
 
@@ -1121,26 +1169,26 @@ itfiG2DC::clear()
 }
 
 const std::vector<int>&
-itfiPBTV::get_density_polynomial_orders() const 
+itfiPBTV::get_density_polynomial_orders() const
 {
   return _density_polynomial_orders;
 }
 
 const std::vector<int>&
-itfiPBTV::get_width_polynomial_orders() const 
+itfiPBTV::get_width_polynomial_orders() const
 {
   return _width_polynomial_orders;
 }
 
 const std::vector<float>&
-itfiPBTV::get_width_ranges() const 
+itfiPBTV::get_width_ranges() const
 {
   return _width_ranges;
 }
 
 // @param id index of _polynomial_coefficients_list
 const std::vector<float>&
-itfiPBTV::get_polynomial_coefficients_list(size_t id) const
+itfiPBTV::get_polynomial_coefficients(size_t id) const
 {
   if (id < _polynomial_coefficients_list.size()) {
     return _polynomial_coefficients_list.at(id);
@@ -1151,7 +1199,7 @@ itfiPBTV::get_polynomial_coefficients_list(size_t id) const
 }
 
 size_t
-itfiPBTV::get_polynomial_coefficients_list_size() const
+itfiPBTV::get_polynomial_coefficient_list_size() const
 {
   return _polynomial_coefficients_list.size();
 }
@@ -1175,19 +1223,19 @@ itfiPBTV::add_width_range(float threshold)
 }
 
 void
-itfiPBTV::set_density_polynomial_order(const std::vector<int>& list)
+itfiPBTV::set_density_polynomial_orders(const std::vector<int>& list)
 {
   _density_polynomial_orders = list;
 }
 
 void
-itfiPBTV::set_width_polynomial_order(const std::vector<int>& list)
+itfiPBTV::set_width_polynomial_orders(const std::vector<int>& list)
 {
   _width_polynomial_orders = list;
 }
 
 void
-itfiPBTV::set_width_range(const std::vector<float>& list)
+itfiPBTV::set_width_ranges(const std::vector<float>& list)
 {
   _width_ranges = list;
 }
@@ -1203,10 +1251,10 @@ itfiPBTV::operator==(const itfiPBTV& rhs) const
 {
   if (this == &rhs) return true;
 
-  return _density_polynomial_orders == rhs. _density_polynomial_orders
-    && _width_polynomial_orders == rhs. _width_polynomial_orders
-    && _width_ranges == rhs. _width_ranges
-    && _polynomial_coefficients_list == rhs. _polynomial_coefficients_list
+  return _density_polynomial_orders == rhs._density_polynomial_orders
+    && _width_polynomial_orders == rhs._width_polynomial_orders
+    && _width_ranges == rhs._width_ranges
+    && _polynomial_coefficients_list == rhs._polynomial_coefficients_list
   ;
 }
 
@@ -1220,14 +1268,14 @@ itfiPBTV::clear()
 }
 
 itfiThicknessVsDensity::itfiThicknessVsDensity()
-: _type(nullptr),
+: _type(),
   _dr_lut()
 {
 
 }
 
 itfiThicknessVsDensity::itfiThicknessVsDensity(const itfiThicknessVsDensity& other)
-: _type(nullptr),
+: _type(),
   _dr_lut()
 {
   *this = other;
@@ -1238,7 +1286,7 @@ itfiThicknessVsDensity::operator=(const itfiThicknessVsDensity& rhs)
 {
   if (this == &rhs) return *this;
 
-  ITF_STR_CPY(_type, rhs._type);
+  _type = rhs._type;
   _dr_lut = rhs._dr_lut;
 
   return *this;
@@ -1249,7 +1297,7 @@ itfiThicknessVsDensity::operator==(const itfiThicknessVsDensity& rhs) const
 {
   if (this == &rhs) return true;
 
-  return itfStrCmp(_type, rhs._type)
+  return _type == rhs._type
     && _dr_lut == rhs._dr_lut
   ;
 }
@@ -1262,7 +1310,7 @@ itfiThicknessVsDensity::~itfiThicknessVsDensity()
 const char*
 itfiThicknessVsDensity::get_type() const
 {
-  return _type;
+  return stringOrNull(_type);
 }
 
 itf1DLUT<float, float>&
@@ -1286,19 +1334,18 @@ itfiThicknessVsDensity::get_dr_list() const
 void
 itfiThicknessVsDensity::set_type(const char* type)
 {
-  if ((strncmp("RESISTIVE_ONLY", type, 14)  == 0)
-   || (strncmp("CAPACITIVE_ONLY", type, 15) == 0) )
-  {
-    ITF_STR_CPY(_type, type);
+  if (isEffectType(type)) {
+    _type = type;
   } else {
-    std::cout << "Invalid type: " << type << std::endl;
-  }  
+    std::cout << "Invalid type: " << (type ? type : "") << std::endl;
+  }
 }
 
 // @param d density
 // @param r relative change in thickness
 void
-itfiThicknessVsDensity::add_dr(float d, float r)
+itfiThicknessVsDensity::add_dr(float d,
+                               float r)
 {
   _dr_lut.add_point(d, r);
 }
@@ -1312,7 +1359,7 @@ itfiThicknessVsDensity::set_dr_list(const std::vector<std::pair<float, float>>& 
 void
 itfiThicknessVsDensity::clear()
 {
-  ITF_FREE(_type);
+  _type.clear();
   _dr_lut.clear();
 }
 

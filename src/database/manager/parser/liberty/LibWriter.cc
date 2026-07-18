@@ -35,7 +35,7 @@
 
 #include "json/json.hpp"
 
-namespace ista {
+namespace idb {
 
 namespace {
 
@@ -476,6 +476,10 @@ void writeDelayTableModel(FILE* stream, LibArc* lib_arc)
     fprintf(stream, "                       related_pin        : \"%s\";\n",
             related_pin);
   }
+  if (const auto& sdf_cond = lib_arc->get_sdf_cond(); !sdf_cond.empty()) {
+    fprintf(stream, "                       sdf_cond           : \"%s\";\n",
+            sdf_cond.c_str());
+  }
   if (const auto& when = lib_arc->get_when(); !when.empty()) {
     fprintf(stream, "                       when               : \"%s\";\n",
             when.c_str());
@@ -520,13 +524,19 @@ void writeCheckTableModel(FILE* stream, LibArc* lib_arc)
       {LibArc::TimingType::kRecoveryRising, "recovery_rising"},
       {LibArc::TimingType::kRecoveryFalling, "recovery_falling"},
       {LibArc::TimingType::kRemovalRising, "removal_rising"},
-      {LibArc::TimingType::kRemovalFalling, "removal_falling"}};
+      {LibArc::TimingType::kRemovalFalling, "removal_falling"},
+      {LibArc::TimingType::kMinPulseWidth, "min_pulse_width"},
+      {LibArc::TimingType::kMinimunPeriod, "minimum_period"}};
 
   fprintf(stream, "                timing () {\n");
   if (const char* related_pin = lib_arc->get_src_port();
       related_pin && *related_pin) {
     fprintf(stream, "                       related_pin        : \"%s\";\n",
             related_pin);
+  }
+  if (const auto& sdf_cond = lib_arc->get_sdf_cond(); !sdf_cond.empty()) {
+    fprintf(stream, "                       sdf_cond           : \"%s\";\n",
+            sdf_cond.c_str());
   }
   if (const auto& when = lib_arc->get_when(); !when.empty()) {
     fprintf(stream, "                       when               : \"%s\";\n",
@@ -559,6 +569,8 @@ bool isExportedCheckTimingType(LibArc::TimingType timing_type)
     case LibArc::TimingType::kRecoveryFalling:
     case LibArc::TimingType::kRemovalRising:
     case LibArc::TimingType::kRemovalFalling:
+    case LibArc::TimingType::kMinPulseWidth:
+    case LibArc::TimingType::kMinimunPeriod:
       return true;
     default:
       return false;
@@ -651,7 +663,7 @@ void writeLibertyCell(FILE* stream, LibCell* lib_cell,
     if (auto arc_iter = snkport2arcset.find(port_name);
         arc_iter != snkport2arcset.end()) {
       for (const auto& arc : arc_iter->second) {
-        if (arc->isCheckArc()) {
+        if (arc->isCheckTableArc()) {
           if (isExportedCheckTimingType(arc->get_timing_type())) {
             writeCheckTableModel(stream, arc);
           }
@@ -906,4 +918,4 @@ void LibLibrary::printLibertyLibraryJson(const char* json_file_name)
   }
 }
 
-}  // namespace ista
+}  // namespace idb

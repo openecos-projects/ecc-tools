@@ -14,14 +14,18 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CapTableQuery.cc
+ * @brief iRCX module implementation detail.
+ */
 #include "CapTableQuery.hh"
 
 #include <algorithm>
 
 namespace ircx {
 
-auto CapTableQuery::nearCap(const Str& below_layer,
-                            const Str& above_layer,
+auto CapTableQuery::nearCap(const std::string& below_layer,
+                            const std::string& above_layer,
                             Micron spacing) const -> parser::CapacitanceResult
 {
   const Micron lookup_dist = std::max<Micron>(spacing, 0.0);
@@ -32,8 +36,8 @@ auto CapTableQuery::nearCap(const Str& below_layer,
       layer_name_, below_layer, above_layer, lookup_dist);
 }
 
-auto CapTableQuery::farthestCap(const Str& below_layer,
-                                const Str& above_layer) const -> parser::CapacitanceResult
+auto CapTableQuery::farthestCap(const std::string& below_layer,
+                                const std::string& above_layer) const -> parser::CapacitanceResult
 {
   if (above_layer.empty()) {
     return cap_table_.queryTwoLayerFarthestCap(layer_name_, below_layer);

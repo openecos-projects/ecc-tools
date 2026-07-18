@@ -4,6 +4,7 @@ add_library(tcl_ircx
     ${HOME_INTERFACE}/tcl/tcl_ircx/src/tcl_report_rcx.cpp
     ${HOME_INTERFACE}/tcl/tcl_ircx/src/tcl_compare_spef.cpp
     ${HOME_INTERFACE}/tcl/tcl_ircx/src/tcl_dump_net_shape.cpp
+    ${HOME_INTERFACE}/tcl/tcl_ircx/src/tcl_run_rcx_from_topology.cpp
     ${HOME_INTERFACE}/tcl/tcl_ircx/src/tcl_plot_spef.cpp
 )
 

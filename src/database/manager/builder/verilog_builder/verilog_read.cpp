@@ -230,7 +230,7 @@ bool RustVerilogRead::createDb(std::string file, std::string top_module_name)
   }
 
   if (!_rust_verilog_reader) {
-    _rust_verilog_reader = new ista::RustVerilogReader();
+    _rust_verilog_reader = new idb::RustVerilogReader();
   }
   if (!_rust_verilog_reader->readVerilog(verilog_file.getReadFile().c_str())) {
     return false;
@@ -271,7 +271,7 @@ bool RustVerilogRead::createDbAutoTop(std::string file)
   }
 
   if (!_rust_verilog_reader) {
-    _rust_verilog_reader = new ista::RustVerilogReader();
+    _rust_verilog_reader = new idb::RustVerilogReader();
   }
   if (!_rust_verilog_reader->readVerilog(verilog_file.getReadFile().c_str())) {
     return false;

@@ -14,11 +14,17 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CompareSpefTool.hh
+ * @brief compare_spef implementation detail.
+ */
 #pragma once
 
-#include "config/CompareSpefConfig.hh"
-
 namespace ircx {
+
+namespace compare_spef {
+struct Config;
+}
 
 class CompareSpefTool
 {

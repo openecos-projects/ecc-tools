@@ -160,7 +160,7 @@ auto IsOutputLike(idb::IdbPin* pin) -> bool
          || term->get_direction() == idb::IdbConnectDirection::kInOut;
 }
 
-auto FindLibCell(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbInstance* inst) -> ista::LibCell*
+auto FindLibCell(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbInstance* inst) -> idb::LibCell*
 {
   auto* cell_master = inst == nullptr ? nullptr : inst->get_cell_master();
   if (cell_master == nullptr) {
@@ -169,7 +169,7 @@ auto FindLibCell(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbInstan
   return liberty_cell_lookup ? liberty_cell_lookup(cell_master->get_name()) : nullptr;
 }
 
-auto FindLibPort(ista::LibCell* lib_cell, idb::IdbPin* pin) -> ista::LibPort*
+auto FindLibPort(idb::LibCell* lib_cell, idb::IdbPin* pin) -> idb::LibPort*
 {
   if (lib_cell == nullptr || pin == nullptr) {
     return nullptr;
@@ -181,7 +181,7 @@ auto FindLibPort(ista::LibCell* lib_cell, idb::IdbPin* pin) -> ista::LibPort*
   return lib_cell->get_cell_port_or_port_bus(port_name.c_str());
 }
 
-auto IsSequentialCell(idb::IdbInstance* inst, ista::LibCell* lib_cell) -> bool
+auto IsSequentialCell(idb::IdbInstance* inst, idb::LibCell* lib_cell) -> bool
 {
   if (lib_cell != nullptr && lib_cell->isSequentialCell() && !lib_cell->isICG()) {
     return true;
@@ -189,7 +189,7 @@ auto IsSequentialCell(idb::IdbInstance* inst, ista::LibCell* lib_cell) -> bool
   return inst != nullptr && inst->is_flip_flop();
 }
 
-auto IsClockSinkPin(idb::IdbPin* pin, ista::LibCell* lib_cell) -> bool
+auto IsClockSinkPin(idb::IdbPin* pin, idb::LibCell* lib_cell) -> bool
 {
   if (pin == nullptr || pin->is_io_pin() || !IsInputLike(pin)) {
     return false;
@@ -206,7 +206,7 @@ auto IsClockSinkPin(idb::IdbPin* pin, ista::LibCell* lib_cell) -> bool
          && pin->get_instance()->is_flip_flop();
 }
 
-auto IsMacroClockSinkPin(idb::IdbPin* pin, ista::LibCell* lib_cell) -> bool
+auto IsMacroClockSinkPin(idb::IdbPin* pin, idb::LibCell* lib_cell) -> bool
 {
   if (pin == nullptr || pin->is_io_pin() || !IsInputLike(pin)) {
     return false;
@@ -322,7 +322,7 @@ auto IsStrongClockTarget(const ClockTraceRecord& record, std::size_t sink_thresh
   return record.macro_clock_sinks > 0U || record.sequential_clock_sinks > sink_threshold;
 }
 
-auto ResolveInstPinByLibPort(idb::IdbInstance* inst, ista::LibPort* lib_port) -> idb::IdbPin*
+auto ResolveInstPinByLibPort(idb::IdbInstance* inst, idb::LibPort* lib_port) -> idb::IdbPin*
 {
   if (inst == nullptr || lib_port == nullptr || inst->get_pin_list() == nullptr) {
     return nullptr;
@@ -354,8 +354,8 @@ auto BuildPreclusteredSinkAnchor(const SdcLibertyCellLookup& liberty_cell_lookup
     return std::nullopt;
   }
 
-  ista::LibPort* input_port = nullptr;
-  ista::LibPort* output_port = nullptr;
+  idb::LibPort* input_port = nullptr;
+  idb::LibPort* output_port = nullptr;
   lib_cell->bufferPorts(input_port, output_port);
   if (input_port == nullptr || output_port == nullptr) {
     return std::nullopt;

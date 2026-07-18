@@ -14,36 +14,80 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file TopoPool.cc
+ * @brief Contiguous topology pool storage implementation.
+ */
 #include <iterator>
 
 #include "TopoPool.hh"
 #include "log/Log.hh"
+
 namespace ircx {
 
-// TopoEdge
+namespace {
+
+auto checkedRange(const std::vector<std::pair<Size, Size>>& ranges,
+                  Size net_id) -> std::pair<Size, Size>
+{
+  LOG_FATAL_IF(net_id >= ranges.size()) << "net_id out of range.";
+  return ranges[net_id];
+}
+
+template <typename Item>
+auto makeSpan(const std::vector<Item>& pool,
+              std::pair<Size, Size> range) -> std::span<const Item>
+{
+  const auto [offset, count] = range;
+  return std::span<const Item>(pool).subspan(offset, count);
+}
+
+template <typename Item>
+auto makeSpan(std::vector<Item>& pool,
+              std::pair<Size, Size> range) -> std::span<Item>
+{
+  const auto [offset, count] = range;
+  return std::span<Item>(pool).subspan(offset, count);
+}
+
+}  // namespace
 
 void TopoEdge::set_shape(const GtlRectI& v) {
   shape_ = v;
 
-  line_seg_.is_horz = geom::is_horizontal_dominant(shape_);
+  line_seg_.is_horz = geom::isHorizontalDominant(shape_);
 
-  width_ = line_seg_.is_horz ? geom::delta_y(shape_) : geom::delta_x(shape_);
+  width_ = line_seg_.is_horz ? geom::deltaY(shape_) : geom::deltaX(shape_);
   half_width_ = width_ / 2;
-  length_ = line_seg_.is_horz ? geom::delta_x(shape_) : geom::delta_y(shape_);
+  length_ = line_seg_.is_horz ? geom::deltaX(shape_) : geom::deltaY(shape_);
   center_ = geom::center(shape_);
 
-  line_seg_.coord = line_seg_.is_horz ? geom::center_y(shape_) : geom::center_x(shape_);
-  line_seg_.lo    = line_seg_.is_horz ? geom::min_x(shape_)    : geom::min_y(shape_);
-  line_seg_.hi    = line_seg_.is_horz ? geom::max_x(shape_)    : geom::max_y(shape_);
+  line_seg_.coord = line_seg_.is_horz ? geom::centerY(shape_) : geom::centerX(shape_);
+  line_seg_.lo    = line_seg_.is_horz ? geom::minX(shape_)    : geom::minY(shape_);
+  line_seg_.hi    = line_seg_.is_horz ? geom::maxX(shape_)    : geom::maxY(shape_);
 }
 
-// TopoPool
-
-void TopoPool::reserve(Size net_count, Size total_nodes, Size total_edges) {
+void TopoPool::reserve(Size net_count,
+                       Size total_nodes,
+                       Size total_edges) {
   net_node_ranges_.reserve(net_count);
   net_edge_ranges_.reserve(net_count);
   node_pool_.reserve(total_nodes);
   edge_pool_.reserve(total_edges);
+}
+
+void TopoPool::assignLocalIds(std::vector<TopoNode>& nodes)
+{
+  for (Size node_idx = 0; node_idx < nodes.size(); ++node_idx) {
+    nodes[node_idx].set_local_id(node_idx);
+  }
+}
+
+void TopoPool::assignLocalIds(std::vector<TopoEdge>& edges)
+{
+  for (Size edge_idx = 0; edge_idx < edges.size(); ++edge_idx) {
+    edges[edge_idx].set_local_id(edge_idx);
+  }
 }
 
 void TopoPool::clear()
@@ -55,38 +99,28 @@ void TopoPool::clear()
   special_edge_pool_.clear();
 }
 
-std::span<const TopoNode> TopoPool::net_nodes(Size net_id) const {
-  LOG_FATAL_IF(net_id >= net_node_ranges_.size()) << "net_id out of range.";
-  auto [offset, count] = net_node_ranges_[net_id];
-  return std::span<const TopoNode>(node_pool_).subspan(offset, count);
+std::span<const TopoNode> TopoPool::get_net_nodes(Size net_id) const {
+  return makeSpan(node_pool_, checkedRange(net_node_ranges_, net_id));
 }
 
-std::span<const TopoEdge> TopoPool::net_edges(Size net_id) const {
-  LOG_FATAL_IF(net_id >= net_edge_ranges_.size()) << "net_id out of range.";
-  auto [offset, count] = net_edge_ranges_[net_id];
-  return std::span<const TopoEdge>(edge_pool_).subspan(offset, count);
+std::span<const TopoEdge> TopoPool::get_net_edges(Size net_id) const {
+  return makeSpan(edge_pool_, checkedRange(net_edge_ranges_, net_id));
 }
 
-std::span<TopoNode> TopoPool::net_nodes(Size net_id) {
-  LOG_FATAL_IF(net_id >= net_node_ranges_.size()) << "net_id out of range.";
-  auto [offset, count] = net_node_ranges_[net_id];
-  return std::span<TopoNode>(node_pool_).subspan(offset, count);
+std::span<TopoNode> TopoPool::get_net_nodes(Size net_id) {
+  return makeSpan(node_pool_, checkedRange(net_node_ranges_, net_id));
 }
 
-std::span<TopoEdge> TopoPool::net_edges(Size net_id) {
-  LOG_FATAL_IF(net_id >= net_edge_ranges_.size()) << "net_id out of range.";
-  auto [offset, count] = net_edge_ranges_[net_id];
-  return std::span<TopoEdge>(edge_pool_).subspan(offset, count);
+std::span<TopoEdge> TopoPool::get_net_edges(Size net_id) {
+  return makeSpan(edge_pool_, checkedRange(net_edge_ranges_, net_id));
 }
 
-std::pair<Size, Size> TopoPool::net_node_range(Size net_id) const {
-  LOG_FATAL_IF(net_id >= net_node_ranges_.size()) << "net_id out of range.";
-  return net_node_ranges_[net_id];
+std::pair<Size, Size> TopoPool::get_net_node_range(Size net_id) const {
+  return checkedRange(net_node_ranges_, net_id);
 }
 
-std::pair<Size, Size> TopoPool::net_edge_range(Size net_id) const {
-  LOG_FATAL_IF(net_id >= net_edge_ranges_.size()) << "net_id out of range.";
-  return net_edge_ranges_[net_id];
+std::pair<Size, Size> TopoPool::get_net_edge_range(Size net_id) const {
+  return checkedRange(net_edge_ranges_, net_id);
 }
 
 void TopoPool::addNet(std::vector<TopoNode> nodes,
@@ -97,9 +131,8 @@ void TopoPool::addNet(std::vector<TopoNode> nodes,
   const Size edge_off = edge_pool_.size();
   const Size edge_cnt = edges.size();
 
-  // Assign LOCAL ids (0..count-1) for the id() accessor.
-  for (Size node_idx = 0; node_idx < nodes.size(); ++node_idx) nodes[node_idx].set_id(node_idx);
-  for (Size edge_idx = 0; edge_idx < edges.size(); ++edge_idx) edges[edge_idx].set_id(edge_idx);
+  assignLocalIds(nodes);
+  assignLocalIds(edges);
 
   net_node_ranges_.emplace_back(node_off, node_cnt);
   net_edge_ranges_.emplace_back(edge_off, edge_cnt);
@@ -118,7 +151,7 @@ void TopoPool::addNet(std::vector<TopoNode> nodes,
 
 void TopoPool::addSpecialEdges(std::vector<TopoEdge> edges)
 {
-  for (Size edge_idx = 0; edge_idx < edges.size(); ++edge_idx) edges[edge_idx].set_id(edge_idx);
+  assignLocalIds(edges);
 
   special_edge_pool_.reserve(special_edge_pool_.size() + edges.size());
   special_edge_pool_.insert(special_edge_pool_.end(),

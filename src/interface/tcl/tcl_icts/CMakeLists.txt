@@ -9,7 +9,6 @@ target_link_libraries(tcl_icts
         tool_manager
         tcl_util
         tcl
-        shell-cmd
         str
         icts_api
         tool_api_icts

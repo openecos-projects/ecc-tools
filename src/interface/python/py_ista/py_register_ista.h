@@ -15,6 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -22,66 +23,13 @@
 
 namespace python_interface {
 namespace py = pybind11;
+
 void register_ista(py::module& m)
 {
-  m.def("run_sta", staRun, py::arg("output"));
-  m.def("init_sta", staInit, py::arg("output"));
-  m.def("release_sta", releaseSta);
-  m.def("report_sta", staReport, ("output"));
-
-  m.def("init_log", initLog, ("log_dir"));
-  m.def("set_design_workspace", setDesignWorkSpace, ("design_workspace"));
-  m.def("read_lef_def", read_lef_def, ("lef_files"), ("def_file"));
-  m.def("read_netlist", readVerilog, ("file_name"));
-  m.def("read_liberty", readLiberty, ("file_name"));
-  m.def("link_design", linkDesign, ("cell_name"));
-  m.def("read_spef", readSpef, ("file_name"));
-  m.def("read_sdc", readSdc, py::arg("file_name"));
-
-  m.def("get_net_name", getNetName, py::arg("pin_port_name"));
-  m.def("get_segment_capacitance", getSegmentCapacitance, py::arg("layer_id"), py::arg("segment_length"), py::arg("route_layer_id"));
-  m.def("get_segment_resistance", getSegmentResistance, py::arg("layer_id"), py::arg("segment_length"), py::arg("route_layer_id"));
-  
-  m.def("make_rc_tree_inner_node", makeRCTreeInnerNode, py::arg("net_name"), py::arg("id"), py::arg("cap"));
-  m.def("make_rc_tree_obj_node", makeRCTreeObjNode, py::arg("pin_port_name"), py::arg("cap"));
-  m.def("make_rc_tree_edge", makeRCTreeEdge, py::arg("net_name"), py::arg("node1"), py::arg("node2"), py::arg("res"));
-  m.def("update_rc_tree_info", updateRCTreeInfo, py::arg("net_name"));
-  m.def("update_timing", updateTiming);
-  m.def("write_timing_model", writeTimingModel, py::arg("output_lib_path"),
-        py::arg("analysis_mode") = "max");
-  m.def("report_sta", reportSta);
-
-  m.def("report_timing", reportTiming, 
-    py::arg("digits"), 
-    py::arg("delay_type"), 
-    py::arg("exclude_cell_names"), 
-    py::arg("derate"), 
-    py::arg("is_clock_cap"), 
-    py::arg("is_not_bak_rpt"),
-    py::arg("max_path"),
-    py::arg("nworst"),
-    py::arg("from_list"),
-    py::arg("through"),
-    py::arg("to_list"),
-    py::arg("is_json"));
-
-  m.def("build_timing_graph", build_timing_graph);
-  m.def("update_clock_timing", update_clock_timing);
-  m.def("build_rc_tree_from_flat_data", buildRcTreeFromFlatData);
-  m.def("update_and_get_all_pin_timings", updateAndGetAllPinTimings);
-  m.def("get_used_libs", get_used_libs);
-  m.def("convert_idb_to_timing_netlist", convertDBToTimingNetlist);
-
-  // get wire timing data
-  py::class_<WireTimingData>(m, "WireTimingData")
-      .def_readwrite("from_node_name", &WireTimingData::_from_node_name)
-      .def_readwrite("to_node_name", &WireTimingData::_to_node_name)
-      .def_readwrite("wire_resistance", &WireTimingData::_wire_resistance)
-      .def_readwrite("wire_capacitance", &WireTimingData::_wire_capacitance)
-      .def_readwrite("wire_from_slew", &WireTimingData::_wire_from_slew)
-      .def_readwrite("wire_to_slew", &WireTimingData::_wire_to_slew)
-      .def_readwrite("wire_delay", &WireTimingData::_wire_delay);
-
-  m.def("get_wire_timing_data", getWireTimingData);
+  m.def("init_sta", initSTA, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("run_sta", runSTA);
+  m.def("extract_lib", extractLib);
+  m.def("destroy_sta", destroySTA);
 }
+
 }  // namespace python_interface

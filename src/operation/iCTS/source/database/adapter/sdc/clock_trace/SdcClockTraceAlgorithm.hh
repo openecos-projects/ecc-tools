@@ -43,10 +43,10 @@ class IdbNet;
 class IdbPin;
 }  // namespace idb
 
-namespace ista {
+namespace idb {
 class LibCell;
 class LibPort;
-}  // namespace ista
+}  // namespace idb
 
 namespace icts {
 class SchemaWriter;
@@ -104,11 +104,11 @@ auto PinDisplayName(idb::IdbPin* pin) -> std::string;
 auto CollectNetPins(idb::IdbNet* net) -> IdbNetPins;
 auto IsInputLike(idb::IdbPin* pin) -> bool;
 auto IsOutputLike(idb::IdbPin* pin) -> bool;
-auto FindLibCell(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbInstance* inst) -> ista::LibCell*;
-auto FindLibPort(ista::LibCell* lib_cell, idb::IdbPin* pin) -> ista::LibPort*;
-auto IsSequentialCell(idb::IdbInstance* inst, ista::LibCell* lib_cell) -> bool;
-auto IsClockSinkPin(idb::IdbPin* pin, ista::LibCell* lib_cell) -> bool;
-auto IsMacroClockSinkPin(idb::IdbPin* pin, ista::LibCell* lib_cell) -> bool;
+auto FindLibCell(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbInstance* inst) -> idb::LibCell*;
+auto FindLibPort(idb::LibCell* lib_cell, idb::IdbPin* pin) -> idb::LibPort*;
+auto IsSequentialCell(idb::IdbInstance* inst, idb::LibCell* lib_cell) -> bool;
+auto IsClockSinkPin(idb::IdbPin* pin, idb::LibCell* lib_cell) -> bool;
+auto IsMacroClockSinkPin(idb::IdbPin* pin, idb::LibCell* lib_cell) -> bool;
 auto CountDirectClockSinks(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* net) -> ClockSinkStats;
 auto CountDirectClockSinksForReport(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* net) -> ClockSinkStats;
 auto IsClockTarget(const ClockSinkStats& stats) -> bool;
@@ -118,7 +118,7 @@ auto MasterClockName(const SdcClockDecl& clock) -> std::string;
 auto DominanceForRecord(const ClockTraceRecord& record, const std::string& clock_kind) -> std::string;
 auto StrongTargetSinkThreshold(std::size_t max_fanout) -> std::size_t;
 auto IsStrongClockTarget(const ClockTraceRecord& record, std::size_t sink_threshold) -> bool;
-auto ResolveInstPinByLibPort(idb::IdbInstance* inst, ista::LibPort* lib_port) -> idb::IdbPin*;
+auto ResolveInstPinByLibPort(idb::IdbInstance* inst, idb::LibPort* lib_port) -> idb::IdbPin*;
 auto BuildPreclusteredSinkAnchor(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* leaf_net)
     -> std::optional<ClockTracePreclusteredSinkAnchor>;
 

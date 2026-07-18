@@ -14,12 +14,18 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itfrReader.cpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
 #include "itfrReader.hpp"
+
 #include "itfrCallBacks.hpp"
 #include "itfrData.hpp"
 #include "itfrSettings.hpp"
 #include "itf_lex.hpp"
 #include "itf_parser.hpp"
+
 namespace itf
 {
 
@@ -28,6 +34,19 @@ extern int itf_parse (void);
 #define ITF_INIT itf_init(__FUNCTION__)
 
 static const char* init_call_func = nullptr;
+
+namespace
+{
+
+void resetParserSession()
+{
+  itfrData::clear();
+  itfrCallBacks::clear();
+  itfrSettings::clear();
+  init_call_func = nullptr;
+}
+
+} // namespace
 
 void itf_init(const char* func)
 {
@@ -53,7 +72,10 @@ itfrInitSession (int startSession)
 {
   if (startSession) {
     if (init_call_func) {
-      fprintf(stderr, "ERROR: Attempt to call configuration function '%s' in ITF parser before lefrInit() call in session-based mode.\n", init_call_func);
+      fprintf(stderr,
+              "ERROR: Attempt to call configuration function '%s' in ITF parser "
+              "before lefrInit() call in session-based mode.\n",
+              init_call_func);
       return 1;
     }
 
@@ -76,14 +98,7 @@ itfrInitSession (int startSession)
 int
 itfrClear()
 {
-  if (itfData) delete itfData;
-  itfData = nullptr;
-
-  if (itfCallbacks) delete itfCallbacks;
-  itfCallbacks = nullptr;
-
-  if (itfSettings) delete itfSettings;
-  itfSettings = nullptr;
+  resetParserSession();
 
   return 0;
 }
@@ -99,7 +114,7 @@ itfrRead(FILE* file, const char* file_name, itfiUserData user_data)
 
   itfrData::reset();
 
-  ITF_STR_CPY(itfData->itf_file, file_name);
+  itfData->itf_file = file_name ? file_name : "";
   if (itfSettings) itfSettings->user_data = user_data;
   itf_restart(file);
   auto status = itf_parse();
@@ -110,7 +125,7 @@ itfrRead(FILE* file, const char* file_name, itfiUserData user_data)
 const char*
 itfrFname()
 {
-  if (itfData) return itfData->itf_file;
+  if (itfData) return itfData->itf_file.c_str();
   else return "";
 }
 
@@ -148,6 +163,48 @@ itfrSetTechnologyCb(itfrStringCbFnType f)
 {
   ITF_INIT;
   itfCallbacks->technology_cb = f;
+}
+
+void
+itfrSetProcessFoundryCb(itfrStringCbFnType f)
+{
+  ITF_INIT;
+  itfCallbacks->process_foundry_cb = f;
+}
+
+void
+itfrSetProcessNodeCb(itfrDoubleCbFnType f)
+{
+  ITF_INIT;
+  itfCallbacks->process_node_cb = f;
+}
+
+void
+itfrSetProcessTypeCb(itfrStringCbFnType f)
+{
+  ITF_INIT;
+  itfCallbacks->process_type_cb = f;
+}
+
+void
+itfrSetProcessVersionCb(itfrDoubleCbFnType f)
+{
+  ITF_INIT;
+  itfCallbacks->process_version_cb = f;
+}
+
+void
+itfrSetProcessCornerCb(itfrStringCbFnType f)
+{
+  ITF_INIT;
+  itfCallbacks->process_corner_cb = f;
+}
+
+void
+itfrSetReferenceDirectionCb(itfrStringCbFnType f)
+{
+  ITF_INIT;
+  itfCallbacks->reference_direction_cb = f;
 }
 
 void
@@ -205,13 +262,6 @@ itfrSetViaCb(itfrViaCbFnType f)
 {
   ITF_INIT;
   itfCallbacks->via_cb = f;
-}
-
-void
-itfrSetVariationParamCb(itfrVariationParamCbFnType f)
-{
-  ITF_INIT;
-  itfCallbacks->variation_cb = f;
 }
 
 } // namespace itf

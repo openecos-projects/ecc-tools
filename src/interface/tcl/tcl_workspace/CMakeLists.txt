@@ -8,7 +8,6 @@ target_link_libraries(tcl_workspace
     PUBLIC
         workspace
         tcl
-        shell-cmd
         str
 )
 

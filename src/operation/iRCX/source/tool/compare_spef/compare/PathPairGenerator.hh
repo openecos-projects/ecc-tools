@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file PathPairGenerator.hh
+ * @brief compare_spef implementation detail.
+ */
 #pragma once
 
 #include <vector>

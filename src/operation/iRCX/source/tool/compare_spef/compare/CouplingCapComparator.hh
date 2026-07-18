@@ -14,9 +14,11 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CouplingCapComparator.hh
+ * @brief compare_spef implementation detail.
+ */
 #pragma once
-
-#include <string>
 
 #include "compare/NetSelector.hh"
 #include "config/CompareSpefConfig.hh"
@@ -30,7 +32,9 @@ class CouplingCapComparator
  public:
   explicit CouplingCapComparator(const Config& config);
 
-  void compare(const Data& test, const Data& reference, Result& result) const;
+  void compare(const Data& test,
+               const Data& reference,
+               Result& result) const;
 
  private:
   const Config& _config;

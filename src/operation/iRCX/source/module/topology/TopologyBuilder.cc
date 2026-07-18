@@ -14,23 +14,28 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file TopologyBuilder.cc
+ * @brief iRCX module implementation detail.
+ */
 #include "TopologyBuilder.hh"
 
 #include <algorithm>
-#include <omp.h>
 
 #include "HashUtils.hh"
 #include "LayoutData.hh"
+#include "ParallelUtils.hh"
+
 namespace ircx {
 
 // ---------------------------------------------------------------------------
-// build_one_  (stateless – safe to call from multiple threads simultaneously)
+// buildNet  (stateless - safe to call from multiple threads simultaneously)
 // ---------------------------------------------------------------------------
-TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
+TopologyBuilder::NetTopo TopologyBuilder::buildNet(const Net& net) const
 {
   TopologyBuilder::NetTopo result;
 
-  const Size net_id = net.id;
+  const Size net_id = net.net_id;
 
   auto& nodes = result.nodes;
   auto& edges = result.edges;
@@ -54,22 +59,22 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
       return;
     }
 
-    const GtlRectI& old_rect = node.shape();
-    node.set_shape(geom::make_rect<GtlRectI>(
-        std::min(geom::min_x(old_rect), geom::min_x(rect)),
-        std::min(geom::min_y(old_rect), geom::min_y(rect)),
-        std::max(geom::max_x(old_rect), geom::max_x(rect)),
-        std::max(geom::max_y(old_rect), geom::max_y(rect))));
+    const GtlRectI& old_rect = node.get_shape();
+    node.set_shape(geom::makeRect<GtlRectI>(
+        std::min(geom::minX(old_rect), geom::minX(rect)),
+        std::min(geom::minY(old_rect), geom::minY(rect)),
+        std::max(geom::maxX(old_rect), geom::maxX(rect)),
+        std::max(geom::maxY(old_rect), geom::maxY(rect))));
   };
   auto endpoint_shape = [](const Segment& wire, const GtlPointI& point) -> GtlRectI {
-    if (geom::is_horizontal_dominant(wire.p0, wire.p1)) {
-      return geom::make_rect<GtlRectI>(
-          geom::x(point), geom::min_y(wire.rect),
-          geom::x(point), geom::max_y(wire.rect));
+    if (geom::isHorizontalDominant(wire.p0, wire.p1)) {
+      return geom::makeRect<GtlRectI>(
+          geom::x(point), geom::minY(wire.rect),
+          geom::x(point), geom::maxY(wire.rect));
     }
-    return geom::make_rect<GtlRectI>(
-        geom::min_x(wire.rect), geom::y(point),
-        geom::max_x(wire.rect), geom::y(point));
+    return geom::makeRect<GtlRectI>(
+        geom::minX(wire.rect), geom::y(point),
+        geom::maxX(wire.rect), geom::y(point));
   };
 
   // (layer, point) -> local node index
@@ -78,14 +83,14 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
                      hash::LayerPointHasher> local_node_index_by_key;
 
   // Track whether each pin has already been matched to a topology node.
-  std::map<Str, bool> pin_consumed;
+  std::map<std::string, bool> pin_consumed;
   for (const auto& pin : net.pins) {
     pin_consumed[pin.name] = false;
   }
 
   struct PinMatch
   {
-    Str name;
+    std::string name;
     GtlRectI rect;
     bool matched{false};
   };
@@ -100,7 +105,7 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
       for (const auto& [pin_layer_id, pin_rect] : pin.layer_id_rects) {
         if (layer_id != pin_layer_id)
           continue;
-        if (geom::rect_contains_point(pin_rect, point)) {
+        if (geom::rectContainsPoint(pin_rect, point)) {
           pin_consumed[pin.name] = true;
           return {pin.name, pin_rect, true};
         }
@@ -128,7 +133,7 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
       node.set_shape(pin_match.rect);
       shape_valid = true;
     } else {
-      node.set_shape(geom::box_around(point, 1));
+      node.set_shape(geom::boxAround(point, 1));
     }
 
     const Size node_idx = append_node(std::move(node), shape_valid);
@@ -161,7 +166,7 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
 
     TopoEdge edge(net_id);
     edge.set_layer_id(layer_id);
-    if (geom::is_lower_left(start_point, end_point)) {
+    if (geom::isLowerLeft(start_point, end_point)) {
       edge.set_u(start_node_idx);
       edge.set_v(end_node_idx);
     } else {
@@ -202,25 +207,23 @@ TopologyBuilder::NetTopo TopologyBuilder::build_one_(const Net& net) const
 }
 
 // ---------------------------------------------------------------------------
-// build_all  – two-phase parallel build
+// buildAll - two-phase parallel build
 // ---------------------------------------------------------------------------
-void TopologyBuilder::build_all(const LayoutData& ld) const
+void TopologyBuilder::buildAll(const LayoutData& ld) const
 {
-  if (!topo_pool_)
-    return;
-
   const std::vector<Net>& regular_nets = ld.net_vec;
-  const Size net_count = ld.regular_net_count();
+  const Size net_count = ld.get_regular_net_count();
 
   // Pre-allocate to avoid any shared-container writes during the parallel phase.
   std::vector<TopologyBuilder::NetTopo> net_topologies(net_count);
+  const int net_threads = parallel::threadCount(net_count);
 
 // Phase 1: Build each net's topology into independent local storage.
 //   - No shared mutable state → threads operate completely independently.
 //   - dynamic scheduling handles variable net sizes efficiently.
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic) num_threads(net_threads)
   for (Size net_idx = 0; net_idx < net_count; ++net_idx) {
-    net_topologies[net_idx] = std::move(build_one_(regular_nets[net_idx]));
+    net_topologies[net_idx] = std::move(buildNet(regular_nets[net_idx]));
   }
 
   // Phase 1.5: Pre-reserve pools (eliminates all reallocations in Phase 2)
@@ -230,7 +233,7 @@ void TopologyBuilder::build_all(const LayoutData& ld) const
       total_nodes += net_topology.nodes.size();
       total_edges += net_topology.edges.size();
     }
-    topo_pool_->reserve(net_count, total_nodes, total_edges);
+    topo_pool_.reserve(net_count, total_nodes, total_edges);
   }
 
   // Phase 2: Serially merge all per-net results into the shared contiguous
@@ -238,30 +241,27 @@ void TopologyBuilder::build_all(const LayoutData& ld) const
   //   and preserves the cache-friendly layout expected by downstream code.
 
   for (auto& net_topology : net_topologies) {
-    topo_pool_->addNet(std::move(net_topology.nodes), std::move(net_topology.edges));
+    topo_pool_.addNet(std::move(net_topology.nodes), std::move(net_topology.edges));
   }
 
 // Phase 3: in edge, local node id → global id
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic) num_threads(net_threads)
   for (Size net_idx = 0; net_idx < net_count; ++net_idx) {
-    auto net_edges = topo_pool_->net_edges(net_idx);
-    for (auto& net_edge : net_edges) {
-      const Size local_u = net_edge.u();
-      const Size local_v = net_edge.v();
-      net_edge.set_u(topo_pool_->node_index(net_idx, local_u));
-      net_edge.set_v(topo_pool_->node_index(net_idx, local_v));
+    auto get_net_edges = topo_pool_.get_net_edges(net_idx);
+    for (auto& net_edge : get_net_edges) {
+      const Size local_u = net_edge.get_u();
+      const Size local_v = net_edge.get_v();
+      net_edge.set_u(topo_pool_.get_node_index(net_idx, local_u));
+      net_edge.set_v(topo_pool_.get_node_index(net_idx, local_v));
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-// build_special
+// buildSpecial
 // ---------------------------------------------------------------------------
-void TopologyBuilder::build_special(const LayoutData& ld) const
+void TopologyBuilder::buildSpecial(const LayoutData& ld) const
 {
-  if (!topo_pool_)
-    return;
-
   const Net& special_net = ld.special_net;
 
   const Size segment_count = special_net.segments.size();
@@ -274,19 +274,21 @@ void TopologyBuilder::build_special(const LayoutData& ld) const
     edges[edge_idx].set_shape(rect);
   };
 
-#pragma omp parallel for schedule(dynamic)
+  const int segment_threads = parallel::threadCount(segment_count);
+#pragma omp parallel for schedule(dynamic) num_threads(segment_threads)
   for (Size segment_idx = 0; segment_idx < segment_count; ++segment_idx) {
     const Segment& segment = special_net.segments[segment_idx];
     set_edge_shape(segment_idx, segment.layer_id, segment.rect);
   }
 
-#pragma omp parallel for schedule(dynamic)
+  const int patch_threads = parallel::threadCount(patch_count);
+#pragma omp parallel for schedule(dynamic) num_threads(patch_threads)
   for (Size patch_idx = 0; patch_idx < patch_count; ++patch_idx) {
     const Patch& patch = special_net.patches[patch_idx];
     set_edge_shape(patch_idx + segment_count, patch.layer_id, patch.rect);
   }
 
-  topo_pool_->addSpecialEdges(std::move(edges));
+  topo_pool_.addSpecialEdges(std::move(edges));
 }
 
 }  // namespace ircx

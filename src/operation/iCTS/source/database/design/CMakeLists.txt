@@ -13,6 +13,7 @@ target_link_libraries(
   PRIVATE
   icts_source_database_config
   icts_source_utils_logger
+  log
 )
 
 target_include_directories(

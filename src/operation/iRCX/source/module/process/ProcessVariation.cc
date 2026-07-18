@@ -14,15 +14,25 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file ProcessVariation.cc
+ * @brief iRCX module implementation detail.
+ */
 #include <limits>
-#include <omp.h>
 
+#include "CornerNetPool.hh"
+#include "LayerTable.hh"
+#include "LayoutData.hh"
+#include "NetEnvironment.hh"
+#include "NetEtchProfile.hh"
+#include "ParallelUtils.hh"
 #include "ProcessVariation.hh"
 #include "TopoPool.hh"
 #include "ThicknessModel.hh"
 #include "Types.hh"
 #include "WidthModel.hh"
 #include "log/Log.hh"
+
 namespace ircx {
 
 void ProcessVariation::reset()
@@ -65,7 +75,7 @@ bool ProcessVariation::buildEtchProfiles()
     return false;
   }
   for (const auto& corner : *corner_data_) {
-    if (corner.process_corner == nullptr) {
+    if (!corner.process_corner) {
       LOG_ERROR << "build process variation failed: null process corner "
                 << corner.name << ".";
       return false;
@@ -79,10 +89,11 @@ bool ProcessVariation::buildEtchProfiles()
   wm.set_topo_pool(topo_pool_);
   wm.set_layer_table(layer_table_);
   wm.set_corner_data(corner_data_);
+  const int net_threads = parallel::threadCount(net_num_);
   for (Size corner_idx = 0; corner_idx < corner_num_; ++corner_idx) {
-    #pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic) num_threads(net_threads)
     for (Size net_idx = 0; net_idx < net_num_; ++net_idx) {
-      wm.apply_width_variation(
+      wm.applyWidthVariation(
           corner_idx,
           net_idx,
           corner_net_etch_pools_->at({corner_idx, net_idx}));
@@ -97,9 +108,9 @@ bool ProcessVariation::buildEtchProfiles()
   tm.set_metal_density(&metal_density_);
 
   for (Size corner_idx = 0; corner_idx < corner_num_; ++corner_idx) {
-    #pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic) num_threads(net_threads)
     for (Size net_idx = 0; net_idx < net_num_; ++net_idx) {
-      tm.apply_thickness_variation(
+      tm.applyThicknessVariation(
           corner_idx,
           net_idx,
           corner_net_etch_pools_->at({corner_idx, net_idx}));
@@ -117,25 +128,26 @@ void ProcessVariation::initMetalDensity()
 
 void ProcessVariation::initEtchIntervals()
 {
-  net_num_ = layout_data_->regular_net_count();
+  net_num_ = layout_data_->get_regular_net_count();
   corner_num_ = corner_data_->size();
   corner_net_etch_pools_->init(corner_num_, net_num_);
 
   const std::vector<NetEnvironment>& net_environments = *net_environments_;
 
-  Micron micron_per_dbu = unit::to_micron(1, layout_data_->dbu_per_micron);
+  Micron micron_per_dbu = unit::toMicron(1, layout_data_->dbu_per_micron);
 
+  const int net_threads = parallel::threadCount(net_num_);
   for (Size corner_idx = 0; corner_idx < corner_num_; ++corner_idx) {
-    #pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic) num_threads(net_threads)
     for (Size net_idx = 0; net_idx < net_num_; ++net_idx) {
-      const auto net_edges = topo_pool_->net_edges(net_idx);
-      const Size edge_count = net_edges.size();
+      const auto get_net_edges = topo_pool_->get_net_edges(net_idx);
+      const Size edge_count = get_net_edges.size();
 
       NetEtchProfile& etch_profile = corner_net_etch_pools_->at({corner_idx, net_idx});
       const NetEnvironment& environment = net_environments[net_idx];
 
       for (Size edge_idx = 0; edge_idx < edge_count; ++edge_idx) {
-        const TopoEdge& edge = net_edges[edge_idx];
+        const TopoEdge& edge = get_net_edges[edge_idx];
 
         if (edge.is_via()) {
           etch_profile.appendEdgeIntervals({});  // placeholder to keep index aligned with TopoPool
@@ -153,17 +165,22 @@ void ProcessVariation::initEtchIntervals()
 
           etch_interval.a0     = env_interval.a0 * micron_per_dbu;
           etch_interval.a1     = env_interval.a1 * micron_per_dbu;
-          etch_interval.center = edge.coord() * micron_per_dbu;
-          etch_interval.width  = edge.width() * micron_per_dbu;
+          etch_interval.center = edge.get_coord() * micron_per_dbu;
+          etch_interval.width  = edge.get_width() * micron_per_dbu;
 
-          // convert center-to-center spacing (EdgeEnvironmentInterval) to edge-to-edge gap (EdgeEtchInterval)
+          // Convert center-to-center spacing (EdgeEnvironmentInterval) to
+          // edge-to-edge gap (EdgeEtchInterval).
           if (env_interval.lo_adjacent)
             etch_interval.lo_spacing =
-                (env_interval.lo_spacing - env_interval.lo_adjacent->half_width() - edge.half_width())
+                (env_interval.lo_spacing
+                 - env_interval.lo_adjacent->get_half_width()
+                 - edge.get_half_width())
                 * micron_per_dbu;
           if (env_interval.hi_adjacent)
             etch_interval.hi_spacing =
-                (env_interval.hi_spacing - env_interval.hi_adjacent->half_width() - edge.half_width())
+                (env_interval.hi_spacing
+                 - env_interval.hi_adjacent->get_half_width()
+                 - edge.get_half_width())
                 * micron_per_dbu;
 
           etch_interval.thickness = 0;

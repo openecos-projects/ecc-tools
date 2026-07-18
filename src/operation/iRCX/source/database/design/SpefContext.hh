@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file SpefContext.hh
+ * @brief SPEF name-map and cell metadata.
+ */
 #pragma once
 
 #include <map>
@@ -21,6 +25,7 @@
 #include <vector>
 
 #include "Types.hh"
+
 namespace ircx {
 
 // SpefContext
@@ -40,13 +45,13 @@ struct SpefContext {
 
   // Ordered lists for SPEF *NAME_MAP output.
   // Index 0 = first entry; SPEF IDs start at *1.
-  std::vector<Str> net_names;
-  std::vector<Str> port_names;
+  std::vector<std::string> net_names;
+  std::vector<std::string> port_names;
   std::vector<char> port_io;
-  std::vector<Str> instance_names;
+  std::vector<std::string> instance_names;
 
   // instance name → cell name (for *CELL entries)
-  std::map<Str, Str> instance_to_cell;
+  std::map<std::string, std::string> instance_to_cell;
 };
 
 }  // namespace ircx

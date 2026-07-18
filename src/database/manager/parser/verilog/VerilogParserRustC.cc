@@ -27,7 +27,7 @@
 #include "log/Log.hh"
 #include "string/Str.hh"
 
-namespace ista {
+namespace idb {
 
 /**
  * @brief Read the verilog file use rust parser.
@@ -116,4 +116,4 @@ unsigned RustVerilogReader::flattenModule(const char* top_module_name)
   return 1;
 }
 
-}  // namespace ista
+}  // namespace idb

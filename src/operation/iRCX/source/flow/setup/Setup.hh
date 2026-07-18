@@ -14,9 +14,11 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file Setup.hh
+ * @brief iRCX setup flow entry points.
+ */
 #pragma once
-
-#include <string>
 
 #include "Types.hh"
 

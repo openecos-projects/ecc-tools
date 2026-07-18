@@ -28,7 +28,7 @@
 
 #include "Config.hh"
 
-namespace ista {
+namespace idb {
 
 AocvObjectSpec::AocvObjectSpec(const char* object_spec_name, AocvLibrary* own_aocv)
     : _object_spec_name(object_spec_name), _own_aocv(own_aocv)
@@ -303,4 +303,4 @@ std::vector<out_type> AocvReader::strConvertNumList(std::string& str)
   return num_list;
 }
 
-}  // namespace ista
+}  // namespace idb

@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file Extraction.hh
+ * @brief iRCX extraction flow entry points.
+ */
 #pragma once
 
 #include "Types.hh"
@@ -26,6 +30,7 @@ class Extraction
   Extraction() = delete;
 
   static auto run() -> bool;
+  static auto runFromTopology() -> bool;
 
  private:
   static auto buildTopology() -> bool;

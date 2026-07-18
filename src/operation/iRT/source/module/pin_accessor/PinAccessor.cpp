@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #include "PinAccessor.hpp"
 
+#include "PinAccessor.hpp"
+
 #include "DRCEngine.hpp"
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
@@ -25,7 +27,6 @@
 #include "PAIterParam.hpp"
 #include "PANet.hpp"
 #include "PANode.hpp"
-#include "PinAccessor.hpp"
 #include "RTInterface.hpp"
 
 namespace irt {

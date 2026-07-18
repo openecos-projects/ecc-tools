@@ -14,24 +14,26 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file ProcessVariation.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include <vector>
 
-#include "CornerNetPool.hh"
 #include "Types.hh"
-#include "NetEtchProfile.hh"
-#include "NetEnvironment.hh"
 #include "MetalDensity.hh"
 #include "RCXData.hh"
-namespace ircx {
-  class LayoutData;
-  class LayerTable;
-  class MetalDensity;
-  class TopoPool;
-}
 
 namespace ircx {
+template <typename T>
+class CornerNetPool;
+class LayoutData;
+class LayerTable;
+class NetEnvironment;
+class NetEtchProfile;
+class TopoPool;
 
 class ProcessVariation final
 {
@@ -46,10 +48,10 @@ class ProcessVariation final
   void set_topo_pool(const TopoPool* v) { topo_pool_ = v; }
   void set_corner_data(const std::vector<RCXData::CornerData>* v) { corner_data_ = v; }
 
-  Size corner_num() const { return corner_num_; }
+  Size get_corner_num() const { return corner_num_; }
 
   // other built data
-  const MetalDensity* metal_density() const { return &metal_density_; }
+  const MetalDensity* get_metal_density() const { return &metal_density_; }
 
   // entry points
   void reset();

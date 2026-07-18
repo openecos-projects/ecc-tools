@@ -193,7 +193,7 @@ auto isOutputLike(idb::IdbPin* idb_pin) -> bool
          || term->get_direction() == idb::IdbConnectDirection::kInOut;
 }
 
-auto findLibCell(const Wrapper& wrapper, idb::IdbInstance* idb_inst) -> ista::LibCell*
+auto findLibCell(const Wrapper& wrapper, idb::IdbInstance* idb_inst) -> idb::LibCell*
 {
   auto* cell_master = idb_inst == nullptr ? nullptr : idb_inst->get_cell_master();
   if (cell_master == nullptr) {
@@ -202,7 +202,7 @@ auto findLibCell(const Wrapper& wrapper, idb::IdbInstance* idb_inst) -> ista::Li
   return wrapper.findLibertyCell(cell_master->get_name());
 }
 
-auto findLibPort(ista::LibCell* lib_cell, idb::IdbPin* idb_pin) -> ista::LibPort*
+auto findLibPort(idb::LibCell* lib_cell, idb::IdbPin* idb_pin) -> idb::LibPort*
 {
   if (lib_cell == nullptr || idb_pin == nullptr) {
     return nullptr;
@@ -214,7 +214,7 @@ auto findLibPort(ista::LibCell* lib_cell, idb::IdbPin* idb_pin) -> ista::LibPort
   return lib_cell->get_cell_port_or_port_bus(port_name.c_str());
 }
 
-auto resolveInstPinByLibPort(idb::IdbInstance* idb_inst, ista::LibPort* lib_port) -> idb::IdbPin*
+auto resolveInstPinByLibPort(idb::IdbInstance* idb_inst, idb::LibPort* lib_port) -> idb::IdbPin*
 {
   if (idb_inst == nullptr || lib_port == nullptr || idb_inst->get_pin_list() == nullptr) {
     return nullptr;
@@ -269,7 +269,7 @@ auto libertyExpressionUsesPort(LibertyExpr* expression, const std::string& port_
   return false;
 }
 
-auto outputFunctionUsesInput(ista::LibCell* lib_cell, idb::IdbPin* output_pin, idb::IdbPin* input_pin) -> bool
+auto outputFunctionUsesInput(idb::LibCell* lib_cell, idb::IdbPin* output_pin, idb::IdbPin* input_pin) -> bool
 {
   if (lib_cell == nullptr || output_pin == nullptr || input_pin == nullptr) {
     return false;
@@ -321,19 +321,19 @@ auto collectClockInputPins(idb::IdbInstance* idb_inst) -> std::vector<idb::IdbPi
   return clock_input_pins;
 }
 
-auto isLibertyClockPin(ista::LibCell* lib_cell, idb::IdbPin* idb_pin) -> bool
+auto isLibertyClockPin(idb::LibCell* lib_cell, idb::IdbPin* idb_pin) -> bool
 {
   auto* lib_port = findLibPort(lib_cell, idb_pin);
   return lib_port != nullptr && (lib_port->isClock() || lib_port->get_is_clock_pin());
 }
 
-auto isClockGateClockPin(ista::LibCell* lib_cell, idb::IdbPin* idb_pin) -> bool
+auto isClockGateClockPin(idb::LibCell* lib_cell, idb::IdbPin* idb_pin) -> bool
 {
   auto* lib_port = findLibPort(lib_cell, idb_pin);
   return lib_port != nullptr && (lib_port->get_clock_gate_clock_pin() || lib_port->isClock());
 }
 
-auto isSequentialCheckClockPin(ista::LibCell* lib_cell, idb::IdbPin* idb_pin) -> bool
+auto isSequentialCheckClockPin(idb::LibCell* lib_cell, idb::IdbPin* idb_pin) -> bool
 {
   if (lib_cell == nullptr || idb_pin == nullptr) {
     return false;
@@ -356,7 +356,7 @@ auto isSequentialCheckClockPin(ista::LibCell* lib_cell, idb::IdbPin* idb_pin) ->
   return false;
 }
 
-auto isSequentialClockToOutputArc(ista::LibCell* lib_cell, idb::IdbPin* idb_pin) -> bool
+auto isSequentialClockToOutputArc(idb::LibCell* lib_cell, idb::IdbPin* idb_pin) -> bool
 {
   if (lib_cell == nullptr || idb_pin == nullptr) {
     return false;
@@ -375,7 +375,7 @@ auto isSequentialClockToOutputArc(ista::LibCell* lib_cell, idb::IdbPin* idb_pin)
         continue;
       }
       const auto timing_type = lib_arc->get_timing_type();
-      if (timing_type != ista::LibArc::TimingType::kRisingEdge && timing_type != ista::LibArc::TimingType::kFallingEdge) {
+      if (timing_type != idb::LibArc::TimingType::kRisingEdge && timing_type != idb::LibArc::TimingType::kFallingEdge) {
         continue;
       }
       auto* output_port = lib_cell->get_cell_port_or_port_bus(lib_arc->get_snk_port());
@@ -387,13 +387,13 @@ auto isSequentialClockToOutputArc(ista::LibCell* lib_cell, idb::IdbPin* idb_pin)
   return false;
 }
 
-auto isCombinationalTimingType(ista::LibArc::TimingType timing_type) -> bool
+auto isCombinationalTimingType(idb::LibArc::TimingType timing_type) -> bool
 {
-  return timing_type == ista::LibArc::TimingType::kComb || timing_type == ista::LibArc::TimingType::kCombRise
-         || timing_type == ista::LibArc::TimingType::kCombFall || timing_type == ista::LibArc::TimingType::kDefault;
+  return timing_type == idb::LibArc::TimingType::kComb || timing_type == idb::LibArc::TimingType::kCombRise
+         || timing_type == idb::LibArc::TimingType::kCombFall || timing_type == idb::LibArc::TimingType::kDefault;
 }
 
-auto hasTransparentDataArcForClockPin(ista::LibCell* lib_cell, idb::IdbPin* clock_pin) -> bool
+auto hasTransparentDataArcForClockPin(idb::LibCell* lib_cell, idb::IdbPin* clock_pin) -> bool
 {
   if (lib_cell == nullptr || clock_pin == nullptr) {
     return false;
@@ -424,13 +424,13 @@ auto hasTransparentDataArcForClockPin(ista::LibCell* lib_cell, idb::IdbPin* cloc
   return false;
 }
 
-auto hasSequentialClockPinEvidence(ista::LibCell* lib_cell, idb::IdbPin* idb_pin) -> bool
+auto hasSequentialClockPinEvidence(idb::LibCell* lib_cell, idb::IdbPin* idb_pin) -> bool
 {
   return isLibertyClockPin(lib_cell, idb_pin) || isSequentialCheckClockPin(lib_cell, idb_pin)
          || isSequentialClockToOutputArc(lib_cell, idb_pin) || (idb_pin != nullptr && idb_pin->is_flip_flop_clk());
 }
 
-auto classifySequentialInst(ista::LibCell* lib_cell, idb::IdbPin* primary_clock_pin) -> CtsInstClassification
+auto classifySequentialInst(idb::LibCell* lib_cell, idb::IdbPin* primary_clock_pin) -> CtsInstClassification
 {
   if (primary_clock_pin != nullptr && hasTransparentDataArcForClockPin(lib_cell, primary_clock_pin)) {
     return {.type = InstType::kLatch,
@@ -474,7 +474,7 @@ auto countDirectClockSinks(const Wrapper& wrapper, idb::IdbNet* idb_net) -> std:
   return sink_count;
 }
 
-auto hasClockSinkOutput(const Wrapper& wrapper, ista::LibCell* lib_cell, idb::IdbInstance* idb_inst, idb::IdbPin* clock_input_pin) -> bool
+auto hasClockSinkOutput(const Wrapper& wrapper, idb::LibCell* lib_cell, idb::IdbInstance* idb_inst, idb::IdbPin* clock_input_pin) -> bool
 {
   for (auto* output_pin : collectOutputPins(idb_inst)) {
     if (!outputFunctionUsesInput(lib_cell, output_pin, clock_input_pin)) {
@@ -531,8 +531,8 @@ auto classifyCtsInstFromIdbInst(const Wrapper& wrapper, idb::IdbInstance* idb_in
   }
 
   if (lib_cell != nullptr && (lib_cell->isBuffer() || lib_cell->isInverter())) {
-    ista::LibPort* input_port = nullptr;
-    ista::LibPort* output_port = nullptr;
+    idb::LibPort* input_port = nullptr;
+    idb::LibPort* output_port = nullptr;
     lib_cell->bufferPorts(input_port, output_port);
     auto* input_pin = resolveInstPinByLibPort(idb_inst, input_port);
     auto* output_pin = resolveInstPinByLibPort(idb_inst, output_port);

@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "RCXAPI.hh"
+#include "config/CompareSpefConfig.hh"
 #include "log/Log.hh"
 #include "tcl_ircx.h"
 

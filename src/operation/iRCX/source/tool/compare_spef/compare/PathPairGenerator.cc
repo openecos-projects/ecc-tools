@@ -14,35 +14,47 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file PathPairGenerator.cc
+ * @brief compare_spef implementation detail.
+ */
 #include "compare/PathPairGenerator.hh"
 
 #include <algorithm>
-#include <string>
-#include <string_view>
 #include <unordered_set>
 #include <utility>
-
-#include "StringUtils.hh"
 
 namespace ircx {
 namespace compare_spef {
 namespace {
 
-constexpr std::size_t kMaxPathPairs = 250;
-constexpr std::size_t kMaxDefaultSinksPerSource = 5;
+constexpr Size kMaxPathPairs = 250;
+constexpr Size kPathPairPinWindow = 50;
+constexpr Size kDenseNetAnchorPins = 5;
+
+// compare_parasitics reaches this code with SPEF data only. Default p2p selection is
+// intentionally inferred from *CONN role and direction; it does not rely on
+// DEF/LEF/Liberty macro class or pin class metadata.
 
 struct PinCounts
 {
-  std::size_t sources = 0;
-  std::size_t sinks = 0;
+  Size sources = 0;
+  Size sinks = 0;
 };
 
 using PinList = std::vector<const Pin*>;
 
+enum class PairUniqueness
+{
+  kDirected,
+  kUndirected
+};
+
 class PathPairCollector
 {
  public:
-  explicit PathPairCollector(std::size_t reserve_count)
+  PathPairCollector(Size reserve_count,
+                    PairUniqueness uniqueness) : _uniqueness(uniqueness)
   {
     _seen.reserve(reserve_count);
     _pairs.reserve(reserve_count);
@@ -50,15 +62,23 @@ class PathPairCollector
 
   auto add(NodePair pair) -> bool
   {
-    if (pair.first.empty() || pair.second.empty() || pair.first == pair.second || !_seen.insert(pair).second) {
+    if (pair.first.empty() || pair.second.empty() || pair.first == pair.second) {
       return false;
     }
+
+    NodePair seen_pair = _uniqueness == PairUniqueness::kUndirected
+                             ? NodePair::ordered(pair.first, pair.second)
+                             : pair;
+    if (!_seen.insert(std::move(seen_pair)).second) {
+      return false;
+    }
+
     _pairs.push_back(std::move(pair));
     return true;
   }
 
   auto full() const -> bool { return _pairs.size() >= kMaxPathPairs; }
-  auto size() const -> std::size_t { return _pairs.size(); }
+  auto size() const -> Size { return _pairs.size(); }
 
   auto sortedPairs() && -> std::vector<NodePair>
   {
@@ -69,6 +89,7 @@ class PathPairCollector
   auto pairs() && -> std::vector<NodePair> { return std::move(_pairs); }
 
  private:
+  PairUniqueness _uniqueness;
   std::unordered_set<NodePair, NodePairHash> _seen;
   std::vector<NodePair> _pairs;
 };
@@ -95,41 +116,17 @@ auto isSinkPin(const Pin& pin) -> bool
   return pin.direction == "I";
 }
 
-auto isRegisterDataSinkName(std::string_view pin_name) -> bool
+auto orderedReportPair(const Pin& pin1,
+                       const Pin& pin2) -> NodePair
 {
-  return pin_name != "cs_reg_p:D" && string::contains(pin_name, "_reg_p:D");
-}
-
-auto isNamedRegisterSource(std::string_view pin_name) -> bool
-{
-  return string::starts_with(pin_name, "cs_reg_p:") || string::starts_with(pin_name, "cvtA_reg_p:");
-}
-
-auto isTopOutputBufferNet(const Net& net, std::string_view sink_name) -> bool
-{
-  return string::contains(sink_name, "fixio_buf_")
-         && std::any_of(net.pins.begin(), net.pins.end(), [](const Pin& pin) { return pin.is_external && pin.direction == "O"; });
-}
-
-auto sourceShouldPrecedeNamedLoad(std::string_view source_name, std::string_view sink_name) -> bool
-{
-  return string::starts_with(source_name, "fixio_buf_") && string::starts_with(sink_name, "max_cap");
-}
-
-auto isTieCell(const Pin& pin) -> bool
-{
-  return string::starts_with(pin.driving_cell, "TIE");
-}
-
-auto p2pReportPair(const Net& net, const std::string& source_name, const Pin& source_pin, const std::string& sink_name) -> NodePair
-{
-  const bool source_first = source_pin.is_external || isRegisterDataSinkName(sink_name) || isTieCell(source_pin)
-                            || isNamedRegisterSource(source_name) || isTopOutputBufferNet(net, sink_name)
-                            || sourceShouldPrecedeNamedLoad(source_name, sink_name);
-  if (source_first) {
-    return NodePair{source_name, sink_name};
+  if (pin1.connection_order != pin2.connection_order) {
+    return pin1.connection_order < pin2.connection_order
+               ? NodePair{pin1.name, pin2.name}
+               : NodePair{pin2.name, pin1.name};
   }
-  return NodePair{sink_name, source_name};
+  return pin1.name < pin2.name
+             ? NodePair{pin1.name, pin2.name}
+             : NodePair{pin2.name, pin1.name};
 }
 
 auto pinNames(const Net& net) -> std::vector<std::string>
@@ -147,7 +144,7 @@ auto pinNames(const Net& net) -> std::vector<std::string>
   return names;
 }
 
-auto pinList(const Net& net) -> PinList
+auto pinListForNet(const Net& net) -> PinList
 {
   PinList pins;
   pins.reserve(net.pins.size());
@@ -157,8 +154,16 @@ auto pinList(const Net& net) -> PinList
     }
     pins.push_back(&pin);
   }
-  std::stable_sort(pins.begin(), pins.end(), [](const Pin* lhs, const Pin* rhs) { return lhs->name < rhs->name; });
-  pins.erase(std::unique(pins.begin(), pins.end(), [](const Pin* lhs, const Pin* rhs) { return lhs->name == rhs->name; }), pins.end());
+  std::stable_sort(
+      pins.begin(),
+      pins.end(),
+      [](const Pin* lhs, const Pin* rhs) { return lhs->name < rhs->name; });
+  pins.erase(
+      std::unique(
+          pins.begin(),
+          pins.end(),
+          [](const Pin* lhs, const Pin* rhs) { return lhs->name == rhs->name; }),
+      pins.end());
   return pins;
 }
 
@@ -176,32 +181,35 @@ auto countPins(const PinList& pins) -> PinCounts
   return counts;
 }
 
-auto shouldStopAddingSinks(std::string_view source_name, const PinCounts& counts, std::size_t sink_count) -> bool
+auto shouldCompareWindowPair(Size lhs_index,
+                             Size rhs_index,
+                             bool dense_net) -> bool
 {
-  const bool is_small_register_output_net = string::contains(source_name, "_reg_p:Q") && counts.sinks <= kMaxDefaultSinksPerSource + 3;
-  const bool should_limit = counts.sinks > kMaxDefaultSinksPerSource && (counts.sources > 1 || is_small_register_output_net);
-  return should_limit && sink_count >= kMaxDefaultSinksPerSource;
+  return !dense_net || lhs_index < kDenseNetAnchorPins || rhs_index < kDenseNetAnchorPins;
 }
 
-auto appendSourceSinkPairs(const Net& net, const PinList& pins, const PinCounts& counts, PathPairCollector& collector) -> bool
+auto appendSourceSinkPairs(const PinList& pins,
+                           PathPairCollector& collector) -> bool
 {
-  for (const Pin* source_pin : pins) {
+  const Size pin_count = std::min(kPathPairPinWindow, pins.size());
+  const bool dense_net = pins.size() > kDenseNetAnchorPins;
+
+  for (Size source_index = 0; source_index < pin_count; ++source_index) {
+    const Pin* source_pin = pins[source_index];
     if (!isSourcePin(*source_pin)) {
       continue;
     }
-    std::size_t sink_count = 0;
-    for (const Pin* sink_pin : pins) {
-      if (source_pin->name == sink_pin->name || !isSinkPin(*sink_pin)) {
+    for (Size sink_index = 0; sink_index < pin_count; ++sink_index) {
+      const Pin* sink_pin = pins[sink_index];
+      if (source_index == sink_index
+          || !isSinkPin(*sink_pin)
+          || !shouldCompareWindowPair(source_index, sink_index, dense_net)) {
         continue;
       }
 
-      if (collector.add(p2pReportPair(net, source_pin->name, *source_pin, sink_pin->name))) {
-        sink_count++;
+      if (collector.add(orderedReportPair(*source_pin, *sink_pin))) {
         if (collector.full()) {
           return true;
-        }
-        if (shouldStopAddingSinks(source_pin->name, counts, sink_count)) {
-          break;
         }
       }
     }
@@ -209,18 +217,27 @@ auto appendSourceSinkPairs(const Net& net, const PinList& pins, const PinCounts&
   return false;
 }
 
-auto appendExternalInternalPairs(const PinList& pins, PathPairCollector& collector) -> bool
+auto appendExternalInternalPairs(const PinList& pins,
+                                 PathPairCollector& collector) -> bool
 {
-  for (const Pin* external_pin : pins) {
+  const Size pin_count = std::min(kPathPairPinWindow, pins.size());
+  const bool dense_net = pins.size() > kDenseNetAnchorPins;
+
+  for (Size external_index = 0; external_index < pin_count; ++external_index) {
+    const Pin* external_pin = pins[external_index];
     if (!external_pin->is_external || external_pin->direction == "N") {
       continue;
     }
-    for (const Pin* internal_pin : pins) {
-      if (internal_pin->is_external || external_pin->name == internal_pin->name || internal_pin->direction == "N"
-          || external_pin->direction == internal_pin->direction) {
+    for (Size internal_index = 0; internal_index < pin_count; ++internal_index) {
+      const Pin* internal_pin = pins[internal_index];
+      if (external_index == internal_index
+          || internal_pin->is_external
+          || internal_pin->direction == "N"
+          || external_pin->direction == internal_pin->direction
+          || !shouldCompareWindowPair(external_index, internal_index, dense_net)) {
         continue;
       }
-      if (collector.add(NodePair{external_pin->name, internal_pin->name}) && collector.full()) {
+      if (collector.add(orderedReportPair(*external_pin, *internal_pin)) && collector.full()) {
         return true;
       }
     }
@@ -228,11 +245,12 @@ auto appendExternalInternalPairs(const PinList& pins, PathPairCollector& collect
   return false;
 }
 
-auto configuredPathPairs(const Net& net, const Config& config) -> std::vector<NodePair>
+auto configuredPathPairs(const Net& net,
+                         const Config& config) -> std::vector<NodePair>
 {
   const auto pins = pinNames(net);
   const std::unordered_set<std::string> pin_set(pins.begin(), pins.end());
-  PathPairCollector collector(kMaxPathPairs);
+  PathPairCollector collector(kMaxPathPairs, PairUniqueness::kDirected);
 
   auto add_from_to = [&](const std::string& from_pin, const std::string& to_pin) {
     if (pin_set.contains(from_pin) && pin_set.contains(to_pin)) {
@@ -287,11 +305,13 @@ auto configuredPathPairs(const Net& net, const Config& config) -> std::vector<No
 
 auto defaultPathPairs(const Net& net) -> std::vector<NodePair>
 {
-  const auto pins = pinList(net);
+  const auto pins = pinListForNet(net);
   const PinCounts counts = countPins(pins);
 
-  PathPairCollector collector(std::min(kMaxPathPairs, counts.sources * std::max<std::size_t>(counts.sinks, 1)));
-  if (appendSourceSinkPairs(net, pins, counts, collector)) {
+  PathPairCollector collector(
+      std::min(kMaxPathPairs, counts.sources * std::max<Size>(counts.sinks, 1)),
+      PairUniqueness::kUndirected);
+  if (appendSourceSinkPairs(pins, collector)) {
     return std::move(collector).pairs();
   }
   if (appendExternalInternalPairs(pins, collector)) {
@@ -302,7 +322,8 @@ auto defaultPathPairs(const Net& net) -> std::vector<NodePair>
 
 }  // namespace
 
-PathPairGenerator::PathPairGenerator(const Config& config) : _config(config), _net_selector(config)
+PathPairGenerator::PathPairGenerator(const Config& config)
+    : _config(config), _net_selector(config)
 {
 }
 

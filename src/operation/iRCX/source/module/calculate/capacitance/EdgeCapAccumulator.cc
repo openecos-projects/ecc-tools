@@ -14,21 +14,26 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file EdgeCapAccumulator.cc
+ * @brief iRCX module implementation detail.
+ */
 #include "EdgeCapAccumulator.hh"
 
 namespace ircx {
 
 namespace {
 
-auto classifyAdjacent(const TopoEdge* adjacent, Size net_idx) -> AdjacentKind
+auto classifyAdjacent(const TopoEdge* adjacent,
+                      Size net_idx) -> AdjacentKind
 {
   if (adjacent == nullptr) {
     return AdjacentKind::kNone;
   }
-  if (adjacent->net_id() == kSpecialNetId) {
+  if (adjacent->get_net_id() == kSpecialNetId) {
     return AdjacentKind::kSpecialNet;
   }
-  if (adjacent->net_id() == net_idx) {
+  if (adjacent->get_net_id() == net_idx) {
     return AdjacentKind::kSameNet;
   }
   return AdjacentKind::kOtherNet;
@@ -50,7 +55,7 @@ EdgeCapAccumulator::EdgeCapAccumulator(const CapTableQuery& cap_query,
                                        Size corner_idx,
                                        Size net_idx,
                                        Size edge_idx,
-                                       Size edge_global_id)
+                                       Size edge_global_idx)
     : cap_query_(cap_query),
       topo_pool_(topo_pool),
       rc_table_(rc_table),
@@ -58,13 +63,13 @@ EdgeCapAccumulator::EdgeCapAccumulator(const CapTableQuery& cap_query,
       corner_idx_(corner_idx),
       net_idx_(net_idx),
       edge_idx_(edge_idx),
-      edge_global_id_(edge_global_id)
+      edge_global_idx_(edge_global_idx)
 {
 }
 
 void EdgeCapAccumulator::accumulateSpan(Micron span_length,
-                                        const Str& below_layer,
-                                        const Str& above_layer,
+                                        const std::string& below_layer,
+                                        const std::string& above_layer,
                                         const SideContext& low_side,
                                         const SideContext& high_side)
 {
@@ -102,7 +107,7 @@ void EdgeCapAccumulator::accumulateSpan(Micron span_length,
 }
 
 void EdgeCapAccumulator::accumulateGround(const SideContext& side,
-                                          double ground_cap_ff)
+                                          F64 ground_cap_ff)
 {
   if (ground_cap_ff <= 0.0 || !side.occupied()) {
     return;
@@ -113,7 +118,7 @@ void EdgeCapAccumulator::accumulateGround(const SideContext& side,
 }
 
 void EdgeCapAccumulator::foldCoupling(const SideContext& side,
-                                      double coupling_cap_ff)
+                                      F64 coupling_cap_ff)
 {
   if (coupling_cap_ff <= 0.0 || !side.occupied()) {
     return;
@@ -126,11 +131,11 @@ void EdgeCapAccumulator::foldCoupling(const SideContext& side,
     return;
   }
 
-  const Size adjacent_edge_global_id = topo_pool_.edge_index(*side.adjacent);
-  rc_table_.append_net_ccap_entry(
+  const Size adjacent_edge_global_idx = topo_pool_.get_edge_index(*side.adjacent);
+  rc_table_.appendNetCcapEntry(
       net_idx_,
-      edge_global_id_,
-      adjacent_edge_global_id,
+      edge_global_idx_,
+      adjacent_edge_global_idx,
       corner_idx_,
       static_cast<F32>(coupling_cap_ff));
 }

@@ -36,39 +36,6 @@
 
 namespace python_interface {
 
-double intersectDistance(Box const& i1, Box const& i2, bool is_x)
-{
-  coordinate_type l;
-  coordinate_type h;
-  if (is_x) {
-    l = std::max(i1.xl, i2.xl);
-    h = std::min(i1.xh, i2.xh);
-  } else {
-    l = std::max(i1.yl, i2.yl);
-    h = std::min(i1.yh, i2.yh);
-  }
-  return (l < h) ? (double) h - l : 0;
-}
-
-/// \return the intersection area of two boxes
-double intersectArea(Box const& b1, Box const& b2)
-{
-  double dist[2] = {intersectDistance(b1, b2, true), intersectDistance(b1, b2, false)};
-  return dist[0] * dist[1];
-}
-
-// /// \return true if a point is on boundary of the box
-// inline bool onBoundary(Box const& b, Point const& p)
-// {
-//   return (onBoundary(b, p.x()) && contain(b, p.y())) || (onBoundary(b, p.y()) && contain(b.get(kX), p.x()));
-// }
-
-bool isInvailidNet(IdbNet* net)
-{
-  return net->is_ground() || net->is_power() || net->is_pdn() || net->is_clock()
-         || net->get_instance_pin_list()->get_pin_list().size() == 0;
-}
-
 #if 1
 
 using Graph = std::unordered_map<std::string, std::vector<std::string>>;

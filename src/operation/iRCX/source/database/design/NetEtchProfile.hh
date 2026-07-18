@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file NetEtchProfile.hh
+ * @brief Per-net process variation intervals for extraction.
+ */
 #pragma once
 
 #include <span>
@@ -50,14 +54,14 @@ class NetEtchProfile
     edge_interval_groups_.append(std::move(intervals));
   }
 
-  std::span<const EdgeEtchInterval> edgeIntervals(Size edge_id) const
+  std::span<const EdgeEtchInterval> edgeIntervals(Size edge_idx) const
   {
-    return edge_interval_groups_.items(edge_id);
+    return edge_interval_groups_.items(edge_idx);
   }
 
-  std::span<EdgeEtchInterval> edgeIntervals(Size edge_id)
+  std::span<EdgeEtchInterval> edgeIntervals(Size edge_idx)
   {
-    return edge_interval_groups_.items(edge_id);
+    return edge_interval_groups_.items(edge_idx);
   }
 
   void clear()

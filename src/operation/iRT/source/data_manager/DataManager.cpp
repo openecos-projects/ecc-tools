@@ -560,9 +560,8 @@ std::vector<NetShape> DataManager::getNetDetailedShapeList(int32_t net_idx, Segm
     ViaMasterIdx& via_master_idx = segment.get_via_master_idx();
     int32_t below_layer_idx = std::min(first_coord.get_layer_idx(), second_coord.get_layer_idx());
     int32_t via_idx = via_master_idx.get_via_idx();
-    if (via_master_idx.get_below_layer_idx() == below_layer_idx && below_layer_idx >= 0
-        && below_layer_idx < static_cast<int32_t>(layer_via_master_list.size()) && via_idx >= 0
-        && via_idx < static_cast<int32_t>(layer_via_master_list[below_layer_idx].size())) {
+    if (via_master_idx.get_below_layer_idx() == below_layer_idx && below_layer_idx >= 0 && below_layer_idx < static_cast<int32_t>(layer_via_master_list.size())
+        && via_idx >= 0 && via_idx < static_cast<int32_t>(layer_via_master_list[below_layer_idx].size())) {
       ViaMaster& via_master = layer_via_master_list[below_layer_idx][via_idx];
 
       LayerRect& above_enclosure = via_master.get_above_enclosure();

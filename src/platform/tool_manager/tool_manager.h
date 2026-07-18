@@ -31,8 +31,6 @@
 #include <string>
 #include <vector>
 
-#include "vec_net.h"
-
 namespace iplf {
 
 #define tmInst ToolManager::getInstance()

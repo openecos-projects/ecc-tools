@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file LayerTable.hh
+ * @brief Design-to-process layer mapping table.
+ */
 #pragma once
 
 #include <string>
@@ -22,6 +26,7 @@
 #include <vector>
 
 #include "Types.hh"
+
 namespace ircx {
 
 // LayerTable
@@ -58,41 +63,44 @@ class LayerTable {
     process_to_design_name_.clear();
   }
 
-  void registerDesignLayer(Size id, Str name) {
-    design_id_to_name_[id] = name;
-    design_name_to_id_[std::move(name)] = id;
+  void registerDesignLayer(Size design_id,
+                           std::string name) {
+    design_id_to_name_[design_id] = name;
+    design_name_to_id_[std::move(name)] = design_id;
   }
 
   void copyDesignLayersFrom(const LayerTable& other) {
     clearDesignLayers();
-    for (const auto& [id, name] : other.design_layers()) {
+    for (const auto& [id, name] : other.designLayers()) {
       registerDesignLayer(id, name);
     }
   }
 
-  void registerProcessLayer(Size id, Str name) {
-    process_id_to_name_[id] = name;
-    process_name_to_id_[std::move(name)] = id;
+  void registerProcessLayer(Size process_id,
+                            std::string name) {
+    process_id_to_name_[process_id] = name;
+    process_name_to_id_[std::move(name)] = process_id;
   }
 
   // Registers both directions of the design↔process name mapping.
-  void registerMapping(const Str& design_name,
-                       const Str& process_name) {
+  void registerMapping(const std::string& design_name,
+                       const std::string& process_name)
+  {
     design_to_process_name_[design_name] = process_name;
     process_to_design_name_[process_name] = design_name;
   }
 
   // Single-domain queries
 
-  Size design_id(const Str& name) const {
+  Size designId(const std::string& name) const {
     return design_name_to_id_.at(name);
   }
-  const Str& design_name(Size id) const {
-    return design_id_to_name_.at(id);
+  const std::string& designName(Size design_id) const {
+    return design_id_to_name_.at(design_id);
   }
 
-  std::vector<std::pair<Size, Str>> design_layers() const {
-    std::vector<std::pair<Size, Str>> layers;
+  std::vector<std::pair<Size, std::string>> designLayers() const {
+    std::vector<std::pair<Size, std::string>> layers;
     layers.reserve(design_id_to_name_.size());
     for (const auto& [id, name] : design_id_to_name_) {
       layers.emplace_back(id, name);
@@ -100,34 +108,34 @@ class LayerTable {
     return layers;
   }
 
-  Size process_id(const Str& name) const {
+  Size processId(const std::string& name) const {
     return process_name_to_id_.at(name);
   }
-  const Str& process_name(Size id) const {
-    return process_id_to_name_.at(id);
+  const std::string& processName(Size process_id) const {
+    return process_id_to_name_.at(process_id);
   }
 
   // Cross-domain queries
 
-  Size design_to_process_id(Size design_id) const {
-    const Str& pname = design_to_process_name_.at(design_id_to_name_.at(design_id));
+  Size designToProcessId(Size design_id) const {
+    const std::string& pname = design_to_process_name_.at(design_id_to_name_.at(design_id));
     return process_name_to_id_.at(pname);
   }
 
-  Size process_to_design_id(Size process_id) const {
-    const Str& dname = process_to_design_name_.at(process_id_to_name_.at(process_id));
+  Size processToDesignId(Size process_id) const {
+    const std::string& dname = process_to_design_name_.at(process_id_to_name_.at(process_id));
     return design_name_to_id_.at(dname);
   }
 
  private:
-  std::unordered_map<Size, Str> design_id_to_name_;
-  std::unordered_map<Str, Size> design_name_to_id_;
+  std::unordered_map<Size, std::string> design_id_to_name_;
+  std::unordered_map<std::string, Size> design_name_to_id_;
 
-  std::unordered_map<Size, Str> process_id_to_name_;
-  std::unordered_map<Str, Size> process_name_to_id_;
+  std::unordered_map<Size, std::string> process_id_to_name_;
+  std::unordered_map<std::string, Size> process_name_to_id_;
 
-  std::unordered_map<Str, Str> design_to_process_name_;
-  std::unordered_map<Str, Str> process_to_design_name_;
+  std::unordered_map<std::string, std::string> design_to_process_name_;
+  std::unordered_map<std::string, std::string> process_to_design_name_;
 };
 
 }  // namespace ircx

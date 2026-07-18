@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file WireResistanceModel.cc
+ * @brief iRCX module implementation detail.
+ */
 #include "WireResistanceModel.hh"
 
 #include <algorithm>
@@ -26,23 +30,25 @@ namespace ircx {
 
 namespace {
 
-auto interval_resistance(const itf::LayerConductor& layer, const EdgeEtchInterval& etch_interval, Micron overlap_length) -> F64
+auto intervalResistance(const LayerConductor& layer,
+                        const EdgeEtchInterval& etch_interval,
+                        Micron overlap_length) -> F64
 {
   const Micron thickness = etch_interval.thickness;
   const Micron width = etch_interval.width;
   LOG_ERROR_IF(width <= 0.0 || thickness <= 0.0) << "etch interval width/thickness <= 0.";
 
-  float resistivity = 0.0;
-  const auto rho_opt = layer.get_rho_v_siw_t().query_interpolation(static_cast<float>(thickness), static_cast<float>(width));
+  F32 resistivity = 0.0;
+  const auto rho_opt = layer.query_rho_by_si_width_and_thickness(thickness, width);
   if (rho_opt.has_value()) {
     resistivity = rho_opt.value();
   } else {
     resistivity = layer.get_rho();
   }
 
-  float sheet_resistance = 0.0;
+  F32 sheet_resistance = 0.0;
   if (resistivity <= 0.0) {
-    const auto rpsq_opt = layer.get_rpsq_vs_si_width().query_interpolation(static_cast<float>(width));
+    const auto rpsq_opt = layer.query_rpsq_by_si_width(width);
     if (rpsq_opt.has_value()) {
       sheet_resistance = rpsq_opt.value();
     } else {
@@ -62,8 +68,11 @@ auto interval_resistance(const itf::LayerConductor& layer, const EdgeEtchInterva
 
 }  // namespace
 
-auto WireResistanceModel::calc(LineSegment<Micron> segment, std::span<const EdgeEtchInterval> edge_etch_intervals,
-                               const itf::ProcessCorner& corner, const itf::LayerConductor& layer, F64 operating_temperature) -> F64
+auto WireResistanceModel::calc(LineSegment<Micron> segment,
+                               std::span<const EdgeEtchInterval> edge_etch_intervals,
+                               const ProcessCorner& corner,
+                               const LayerConductor& layer,
+                               F64 operating_temperature) -> F64
 {
   F64 resistance = 0.0;
 
@@ -75,13 +84,16 @@ auto WireResistanceModel::calc(LineSegment<Micron> segment, std::span<const Edge
     }
 
     const Micron overlap_length = overlap_hi - overlap_lo;
-    const F64 base_resistance = interval_resistance(layer, etch_interval, overlap_length);
+    const F64 base_resistance = intervalResistance(layer, etch_interval, overlap_length);
     const ResistanceTemperatureCoefficients coefficients =
         resistanceTemperatureCoefficients(layer, [&](auto& crt1, auto& crt2) {
-          layer.query_crt_vs_si_width(etch_interval.width, crt1, crt2);
+          layer.queryCrtBySiWidth(etch_interval.width, crt1, crt2);
         });
-    resistance += applyResistanceTemperatureDerating(base_resistance, operating_temperature, resistanceNominalTemperature(layer, corner),
-                                                     coefficients);
+    resistance += applyResistanceTemperatureDerating(
+        base_resistance,
+        operating_temperature,
+        resistanceNominalTemperature(layer, corner),
+        coefficients);
   }
 
   return resistance;

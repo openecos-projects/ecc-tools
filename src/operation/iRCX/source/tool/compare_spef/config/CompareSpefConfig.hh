@@ -14,12 +14,16 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CompareSpefConfig.hh
+ * @brief compare_spef implementation detail.
+ */
 #pragma once
 
-#include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
+
+#include "Types.hh"
 
 namespace ircx {
 namespace compare_spef {
@@ -31,10 +35,10 @@ struct Config
   std::string output_dir = ".";
 
   int cores = 1;
-  double tcap_threshold = 3.0;
-  double ccap_abs_threshold = 0.3;
-  double ccap_rel_threshold = 0.1;
-  double res_threshold = 50.0;
+  F64 tcap_threshold = 3.0;
+  F64 ccap_abs_threshold = 0.3;
+  F64 ccap_rel_threshold = 0.1;
+  F64 res_threshold = 50.0;
 
   bool compare_capacitance = false;
   bool compare_resistance = false;
@@ -48,7 +52,7 @@ struct Config
   std::string to_pin;
   std::string net_config_file;
   int timeout_seconds = 5400;
-  double delay_threshold = 1.0;
+  F64 delay_threshold = 1.0;
 
   std::vector<std::string> net_names;
   std::vector<std::string> from_pins;
@@ -61,8 +65,9 @@ class NetConfigReader
  public:
   auto read(Config& config) const -> bool;
 
- private:
-  void addLine(Config& config, std::string_view raw_line) const;
+private:
+  void addLine(Config& config,
+               std::string_view raw_line) const;
 };
 
 class ConfigValidator

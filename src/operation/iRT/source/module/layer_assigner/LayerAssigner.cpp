@@ -483,8 +483,7 @@ std::vector<LayerAssigner::LAOverflowEdge> LayerAssigner::getOverflowEdgeList(LA
       }
       overflow_edge.has_true_overflow = (overflow_edge.max_true_overflow > RT_ERROR);
       bool hard_trigger = overflow_edge.has_true_overflow;
-      bool soft_trigger = (!hard_trigger && overflow_edge.max_usage_ratio >= soft_start_ratio
-                           && overflow_edge.max_soft_congestion >= min_soft_score);
+      bool soft_trigger = (!hard_trigger && overflow_edge.max_usage_ratio >= soft_start_ratio && overflow_edge.max_soft_congestion >= min_soft_score);
       if (!hard_trigger && !soft_trigger) {
         continue;
       }
@@ -622,11 +621,10 @@ void LayerAssigner::insertPointList(TNode<LayerCoord>* planar_node, TNode<LayerC
   }
   std::sort(offset_coord_pair_list.begin(), offset_coord_pair_list.end(),
             [](const std::pair<int32_t, PlanarCoord>& a, const std::pair<int32_t, PlanarCoord>& b) { return a.first < b.first; });
-  offset_coord_pair_list.erase(std::unique(offset_coord_pair_list.begin(), offset_coord_pair_list.end(),
-                                           [](const std::pair<int32_t, PlanarCoord>& a, const std::pair<int32_t, PlanarCoord>& b) {
-                                             return a.first == b.first;
-                                           }),
-                               offset_coord_pair_list.end());
+  offset_coord_pair_list.erase(
+      std::unique(offset_coord_pair_list.begin(), offset_coord_pair_list.end(),
+                  [](const std::pair<int32_t, PlanarCoord>& a, const std::pair<int32_t, PlanarCoord>& b) { return a.first == b.first; }),
+      offset_coord_pair_list.end());
   if (offset_coord_pair_list.empty()) {
     return;
   }
@@ -858,9 +856,7 @@ double LayerAssigner::getLayerBiasCost(LAModel& la_model, LAPackage& la_package,
     return layer_bias_unit * 0.4 * std::abs(layer_rank - target_rank);
   }
 
-  auto clamp = [](double value, double lower_bound, double upper_bound) {
-    return std::max(lower_bound, std::min(value, upper_bound));
-  };
+  auto clamp = [](double value, double lower_bound, double upper_bound) { return std::max(lower_bound, std::min(value, upper_bound)); };
   auto smooth_step = [&clamp](double value, double lower_bound, double upper_bound) {
     double ratio = clamp((value - lower_bound) / (upper_bound - lower_bound), 0.0, 1.0);
     return ratio * ratio * (3.0 - 2.0 * ratio);

@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file Report.cc
+ * @brief iRCX report flow implementation.
+ */
 #include "Report.hh"
 
 #include "PathUtils.hh"
@@ -26,25 +30,25 @@ namespace ircx {
 
 auto Report::dumpSpef() -> bool
 {
-  const Str& output_dir = RCX_CONFIG_INST.get_output_dir();
-  if (!path::ensure_dir(output_dir, "output_dir")) {
+  const std::string& output_dir = RCX_CONFIG_INST.get_output_dir();
+  if (!path::ensureDir(output_dir, "output_dir")) {
     return false;
   }
 
   RCXData& data = RCX_DATA_INST;
-  const auto& corner_data = data.corner_data();
+  const auto& corner_data = data.get_corner_data();
   if (corner_data.empty()) {
     LOG_ERROR << "report spef failed: process corners not loaded.";
     return false;
   }
 
   SpefDumper dumper;
-  dumper.set_spef_context(&data.spef_context());
-  dumper.set_layout_data(&data.layout());
-  dumper.set_topo_pool(&data.topo_pool());
-  dumper.set_rc_table(&data.rc_table());
+  dumper.set_spef_context(&data.get_spef_context());
+  dumper.set_layout_data(&data.get_layout());
+  dumper.set_topo_pool(&data.get_topo_pool());
+  dumper.set_rc_table(&data.get_rc_table());
   dumper.set_corner_data(&corner_data);
-  dumper.set_layer_table(&data.layer_table());
+  dumper.set_layer_table(&data.get_layer_table());
   if (!dumper.dump(output_dir)) {
     return false;
   }

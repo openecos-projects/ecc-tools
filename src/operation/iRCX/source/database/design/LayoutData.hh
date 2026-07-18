@@ -14,15 +14,19 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file LayoutData.hh
+ * @brief Layout geometry value types adapted from iDB.
+ */
 #pragma once
 
 #include <map>
-#include <string>
 #include <utility>
 #include <vector>
 
 #include "RoutingLayer.hh"
 #include "Types.hh"
+
 namespace ircx {
 
 // ============================================================
@@ -47,7 +51,7 @@ struct Patch {
 // Pin
 // ============================================================
 struct Pin {
-  Str name; // pin(inst:pin)/port name
+  std::string name; // pin(inst:pin)/port name
 
   bool is_driver{false};
   bool is_input{false};
@@ -56,18 +60,18 @@ struct Pin {
   std::vector<std::pair<Size, GtlRectI>> layer_id_rects;
 
   bool is_port() const {
-    return name.find(':') == Str::npos;
+    return name.find(':') == std::string::npos;
   }
 
-  Str instance_name() const {
-    size_t pos = name.find(':');
+  std::string get_instance_name() const {
+    Size pos = name.find(':');
     return name.substr(0, pos);
   }
-  Str instance_pin_name() const {
-    size_t pos = name.find(':');
+  std::string get_instance_pin_name() const {
+    Size pos = name.find(':');
     return name.substr(pos+1);
   }
-  Str port_name() const {
+  std::string get_port_name() const {
     return name;
   }
 };
@@ -76,7 +80,7 @@ struct Pin {
 // Via
 // ============================================================
 struct Via {
-  Str name;
+  std::string name;
 
   GtlPointI point;
   // Top/Cut/Bottom layer rect
@@ -89,8 +93,8 @@ struct Via {
 // Net
 // ============================================================
 struct Net {
-  Size id;
-  Str name;
+  Size net_id{kMaxSize};
+  std::string name;
   std::vector<Segment> segments;
   std::vector<Patch> patches;
   std::vector<Via> vias;
@@ -108,7 +112,7 @@ struct LayoutData {
   }
 
   // Design metadata
-  Str design_name;
+  std::string design_name;
   GtlRectI die_shape;
   Dbu dbu_per_micron{1};
 
@@ -123,7 +127,7 @@ struct LayoutData {
   Net special_net;
 
   // Helpers
-  Size regular_net_count() const { return net_vec.size(); }
+  Size get_regular_net_count() const { return net_vec.size(); }
   bool empty() const
   {
     return net_vec.empty() &&

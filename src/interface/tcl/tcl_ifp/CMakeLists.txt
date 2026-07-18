@@ -8,7 +8,6 @@ target_link_libraries(tcl_ifp
     PUBLIC
         tool_manager
         tcl
-        shell-cmd
         str
         ifp_api
 )

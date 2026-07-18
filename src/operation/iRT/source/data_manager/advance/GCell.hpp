@@ -47,10 +47,7 @@ class GCell : public PlanarRect
   {
     _type_layer_net_fixed_rect_map = type_layer_net_fixed_rect_map;
   }
-  void set_net_access_point_map(const std::map<int32_t, std::vector<AccessPoint*>>& net_access_point_map)
-  {
-    _net_access_point_map = net_access_point_map;
-  }
+  void set_net_access_point_map(const std::map<int32_t, std::vector<AccessPoint*>>& net_access_point_map) { _net_access_point_map = net_access_point_map; }
   void set_net_pin_access_result_map(const std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>>& net_pin_access_result_map)
   {
     _net_pin_access_result_map = net_pin_access_result_map;

@@ -7,7 +7,6 @@ add_library(tcl_contest
 target_link_libraries(tcl_contest 
     PUBLIC
         tcl
-        shell-cmd
         contest_flow
 )
 

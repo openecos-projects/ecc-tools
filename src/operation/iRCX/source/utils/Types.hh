@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file Types.hh
+ * @brief Common scalar and geometry type aliases for iRCX.
+ */
 #pragma once
 
 #include <boost/geometry.hpp>
@@ -24,6 +28,7 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <string_view>
 
 namespace ircx {
 
@@ -43,7 +48,6 @@ using I64 = std::int64_t;
 using F32 = float;
 using F64 = double;
 
-using Str = std::string;
 using Size = std::size_t;
 
 using Dbu    = I32;   // database unit
@@ -51,12 +55,14 @@ using Micron = F64;   // micron unit
 
 namespace unit {
 
-inline auto to_micron(Dbu value, Dbu dbu_per_micron) -> Micron
+inline auto toMicron(Dbu value,
+                      Dbu dbu_per_micron) -> Micron
 {
   return static_cast<Micron>(value) / static_cast<Micron>(dbu_per_micron);
 }
 
-inline auto to_dbu(Micron value, Dbu dbu_per_micron) -> Dbu
+inline auto toDbu(Micron value,
+                   Dbu dbu_per_micron) -> Dbu
 {
   return static_cast<Dbu>(std::llround(value * static_cast<Micron>(dbu_per_micron)));
 }

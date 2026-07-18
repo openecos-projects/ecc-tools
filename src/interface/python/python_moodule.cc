@@ -31,7 +31,7 @@
 #include "py_register_ista.h"
 #include "py_register_izh.h"
 #include "py_register_report.h"
-#include "py_register_vec.h"
+// #include "py_register_vec.h"  // disabled: py_vec removed
 #include "python_module.h"
 
 namespace python_interface {
@@ -55,7 +55,7 @@ PYBIND11_MODULE(ecc_py, m)
   register_report(m);
   register_feature(m);
   register_eval(m);
-  register_vectorization(m);
+  // register_vectorization(m);  // disabled: py_vec removed
 }
 
 }  // namespace python_interface

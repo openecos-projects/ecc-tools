@@ -11,7 +11,7 @@
 
 #include "timing_db.hh"
 
-namespace ista {
+namespace idb {
 enum class AnalysisMode;
 }
 
@@ -53,8 +53,8 @@ class TimingAPI
   double getArrivalLateTime(const std::string& pin_name) const;
   double getRequiredEarlyTime(const std::string& pin_name) const;
   double getRequiredLateTime(const std::string& pin_name) const;
-  double reportWNS(const char* clock_name, ista::AnalysisMode mode);
-  double reportTNS(const char* clock_name, ista::AnalysisMode mode);
+  double reportWNS(const char* clock_name, idb::AnalysisMode mode);
+  double reportTNS(const char* clock_name, idb::AnalysisMode mode);
 
   void updateTiming(const std::vector<TimingNet*>& timing_net_list, int32_t dbu_unit);
   void updateTiming(const std::vector<TimingNet*>& timing_net_list, const std::vector<std::string>& name_list, const int& propagation_level,

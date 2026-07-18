@@ -14,11 +14,13 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file RCXData.hh
+ * @brief Shared runtime data container for iRCX extraction.
+ */
 #pragma once
 
-#include <memory>
-#include <string>
-#include <utility>
+#include <optional>
 #include <vector>
 
 #include "CapTable.hpp"
@@ -29,14 +31,11 @@
 #include "LayerTable.hh"
 #include "LayoutData.hh"
 #include "MappingBuilder.hpp"
+#include "ProcessCorner.hpp"
 #include "RCTable.hh"
 #include "SpefContext.hh"
 #include "TopoPool.hh"
 #include "Types.hh"
-
-namespace itf {
-class ProcessCorner;
-}  // namespace itf
 
 namespace ircx {
 
@@ -57,14 +56,14 @@ class RCXData final {
     CornerData(const CornerData&) = delete;
     CornerData& operator=(const CornerData&) = delete;
 
-    Str name;
+    std::string name;
     F64 temperature{kDefaultOperatingTemperature};
-    Str itf_file;
-    Str captab_file;
-    std::unique_ptr<::itf::ProcessCorner> process_corner;
+    std::string itf_file;
+    std::string captab_file;
+    std::optional<ProcessCorner> process_corner;
     parser::CapTable cap_table;
 
-    F64 halfNodeScaleFactor() const;
+    F64 get_half_node_scale_factor() const;
   };
 
   static RCXData& getInst() {
@@ -73,33 +72,36 @@ class RCXData final {
   }
 
   void reset();
-  void setDBData(LayoutData layout_data,
-                 const LayerTable& design_layer_table,
-                 SpefContext spef_context);
+  void set_db_data(LayoutData layout_data,
+                   const LayerTable& design_layer_table,
+                   SpefContext spef_context);
 
-  LayoutData& layout() { return layout_; }
-  const LayoutData& layout() const { return layout_; }
-  SpefContext& spef_context() { return spef_context_; }
-  const SpefContext& spef_context() const { return spef_context_; }
-  LayerTable& layer_table() { return layer_table_; }
-  const LayerTable& layer_table() const { return layer_table_; }
-  parser::MappingBuilder& mapping_builder() { return mapping_builder_; }
-  const parser::MappingBuilder& mapping_builder() const { return mapping_builder_; }
-  TopoPool& topo_pool() { return topo_pool_; }
-  const TopoPool& topo_pool() const { return topo_pool_; }
-  RCTable& rc_table() { return rc_table_; }
-  const RCTable& rc_table() const { return rc_table_; }
-  std::vector<NetEnvironment>& net_env_pools() { return net_env_pools_; }
-  const std::vector<NetEnvironment>& net_env_pools() const { return net_env_pools_; }
-  CornerNetPool<NetEtchProfile>& corner_net_etch_pools() { return corner_net_etch_pools_; }
-  const CornerNetPool<NetEtchProfile>& corner_net_etch_pools() const { return corner_net_etch_pools_; }
-  std::vector<CornerData>& corner_data() { return corners_; }
-  const std::vector<CornerData>& corner_data() const { return corners_; }
-  F64 halfNodeScaleFactor(Size corner_idx) const;
+  LayoutData& get_layout() { return layout_; }
+  const LayoutData& get_layout() const { return layout_; }
+  SpefContext& get_spef_context() { return spef_context_; }
+  const SpefContext& get_spef_context() const { return spef_context_; }
+  LayerTable& get_layer_table() { return layer_table_; }
+  const LayerTable& get_layer_table() const { return layer_table_; }
+  parser::MappingBuilder& get_mapping_builder() { return mapping_builder_; }
+  const parser::MappingBuilder& get_mapping_builder() const { return mapping_builder_; }
+  TopoPool& get_topo_pool() { return topo_pool_; }
+  const TopoPool& get_topo_pool() const { return topo_pool_; }
+  RCTable& get_rc_table() { return rc_table_; }
+  const RCTable& get_rc_table() const { return rc_table_; }
+  std::vector<NetEnvironment>& get_net_env_pools() { return net_env_pools_; }
+  const std::vector<NetEnvironment>& get_net_env_pools() const { return net_env_pools_; }
+  CornerNetPool<NetEtchProfile>& get_corner_net_etch_pools() { return corner_net_etch_pools_; }
+  const CornerNetPool<NetEtchProfile>& get_corner_net_etch_pools() const
+  {
+    return corner_net_etch_pools_;
+  }
+  std::vector<CornerData>& get_corner_data() { return corners_; }
+  const std::vector<CornerData>& get_corner_data() const { return corners_; }
+  F64 get_half_node_scale_factor(Size corner_idx) const;
 
-  bool hasCorner(const Str& corner_name) const;
-  void setProcessLayersRegistered(bool value) { process_layers_registered_ = value; }
-  bool processLayersRegistered() const { return process_layers_registered_; }
+  bool has_corner(const std::string& corner_name) const;
+  void set_process_layers_registered(bool value) { process_layers_registered_ = value; }
+  bool is_process_layers_registered() const { return process_layers_registered_; }
 
   RCXData(const RCXData&) = delete;
   RCXData(RCXData&&) = delete;

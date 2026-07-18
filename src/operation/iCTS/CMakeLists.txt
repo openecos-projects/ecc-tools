@@ -35,7 +35,6 @@ option(DEBUG_ICTS_TEST "test" OFF)
 
 # Path setting
 set(HOME_ICTS ${HOME_OPERATION}/iCTS)
-set(HOME_ISTA ${HOME_OPERATION}/iSTA)
 
 set(ICTS_EXTERNAL_LIBS ${HOME_ICTS}/external_libs)
 set(ICTS_API ${HOME_ICTS}/api)

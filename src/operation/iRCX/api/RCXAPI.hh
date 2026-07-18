@@ -16,12 +16,21 @@
 // ***************************************************************************************
 #pragma once
 
-#include <string>
-
-#include "config/CompareSpefConfig.hh"
-#include "config/PlotSpefConfig.hh"
+#include "Types.hh"
 
 namespace ircx {
+
+namespace compare_spef {
+struct Config;
+}
+
+namespace run_rcx_from_topology {
+struct Config;
+}
+
+namespace plot_spef {
+struct Config;
+}
 
 #define RCX_API_INST (ircx::RCXAPI::getInst())
 
@@ -42,6 +51,7 @@ class RCXAPI
   // Standalone RCX utilities.
   static auto compare_spef(compare_spef::Config config) -> bool;
   static auto dump_net_shape() -> bool;
+  static auto run_rcx_from_topology(run_rcx_from_topology::Config config) -> bool;
   static auto plot_spef(plot_spef::Config config) -> bool;
 
   RCXAPI(const RCXAPI& other) = delete;

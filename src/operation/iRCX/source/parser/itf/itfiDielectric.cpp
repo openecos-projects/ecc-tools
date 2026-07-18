@@ -14,79 +14,44 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include <stdlib.h>
-#include <string.h>
-
+/**
+ * @file itfiDielectric.cpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
 #include "itfiDielectric.hpp"
-#include "itfMarco.h"
-#include "itfUtil.h"
+
 namespace itf
 {
+namespace
+{
+
+const char* stringOrNull(const std::string& value)
+{
+  return value.empty() ? nullptr : value.c_str();
+}
+
+} // namespace
 
 itfiDielectric::itfiDielectric()
-: _dielectric_name(nullptr),
+: _dielectric_name(),
   _er(0),
   _thickness(0),
-  _measured_from(nullptr),
+  _measured_from(),
   _sw_t(0),
   _tw_t(0),
-  _associated_conductor(nullptr),
+  _associated_conductor(),
   _damage_thickness(0),
   _damage_er(0),
   _has_measured_from(0),
   _has_sw_t(0),
   _has_tw_t(0),
   _has_associated_conductor(0),
+  _has_measured_from_conductor(0),
   _is_conformal(0),
   _has_damage_thickness(0),
   _has_damage_er(0)
 {
 
-}
-
-itfiDielectric::itfiDielectric(const itfiDielectric& other)
-: _dielectric_name(nullptr),
-  _er(0),
-  _thickness(0),
-  _measured_from(nullptr),
-  _sw_t(0),
-  _tw_t(0),
-  _associated_conductor(nullptr),
-  _damage_thickness(0),
-  _damage_er(0),
-  _has_measured_from(0),
-  _has_sw_t(0),
-  _has_tw_t(0),
-  _has_associated_conductor(0),
-  _is_conformal(0),
-  _has_damage_thickness(0),
-  _has_damage_er(0)
-{
-  *this = other;
-}
-
-itfiDielectric& itfiDielectric::operator=(const itfiDielectric& rhs)
-{
-  if (this == &rhs) return *this;
-
-  ITF_STR_CPY(_dielectric_name, rhs._dielectric_name);
-  _er = rhs._er;
-  _thickness = rhs._thickness;
-  ITF_STR_CPY(_measured_from, rhs._measured_from);
-  _sw_t = rhs._sw_t;
-  _tw_t = rhs._tw_t;
-  ITF_STR_CPY(_associated_conductor, rhs._associated_conductor);
-  _damage_thickness = rhs._damage_thickness;
-  _damage_er = rhs._damage_er;
-  _has_measured_from = rhs._has_measured_from;
-  _has_sw_t = rhs._has_sw_t;
-  _has_tw_t = rhs._has_tw_t;
-  _has_associated_conductor = rhs._has_associated_conductor;
-  _is_conformal = rhs._is_conformal;
-  _has_damage_thickness = rhs._has_damage_thickness;
-  _has_damage_er = rhs._has_damage_er;
-
-  return *this;
 }
 
 bool
@@ -94,13 +59,13 @@ itfiDielectric::operator==(const itfiDielectric& rhs) const
 {
   if (this == &rhs) return true;
 
-  return itfStrCmp(_dielectric_name, rhs._dielectric_name)
+  return _dielectric_name == rhs._dielectric_name
     && _er == rhs._er
     && _thickness == rhs._thickness
-    && itfStrCmp(_measured_from, rhs._measured_from)
+    && _measured_from == rhs._measured_from
     && _sw_t == rhs._sw_t
     && _tw_t == rhs._tw_t
-    && itfStrCmp(_associated_conductor, rhs._associated_conductor) 
+    && _associated_conductor == rhs._associated_conductor
     && _damage_thickness == rhs._damage_thickness
     && _damage_er == rhs._damage_er
     
@@ -108,20 +73,17 @@ itfiDielectric::operator==(const itfiDielectric& rhs) const
     && _has_sw_t == rhs._has_sw_t
     && _has_tw_t == rhs._has_tw_t
     && _has_associated_conductor == rhs._has_associated_conductor
+    && _has_measured_from_conductor == rhs._has_measured_from_conductor
     && _is_conformal == rhs._is_conformal
     && _has_damage_thickness == rhs._has_damage_thickness
     && _has_damage_er == rhs._has_damage_er
   ;
 } 
 
-itfiDielectric::~itfiDielectric() {
-  clear();
-}
-
 const char*
 itfiDielectric::get_dielectric_name() const
 {
-  return _dielectric_name;
+  return stringOrNull(_dielectric_name);
 }
 
 float
@@ -138,7 +100,7 @@ itfiDielectric::get_thickness() const
 
 const char*
 itfiDielectric::get_measured_from() const {
-  return _measured_from;
+  return stringOrNull(_measured_from);
 }
 
 float
@@ -153,7 +115,7 @@ itfiDielectric::get_tw_t() const {
 
 const char*
 itfiDielectric::get_associated_conductor() const {
-  return _associated_conductor;
+  return stringOrNull(_associated_conductor);
 }
 
 float
@@ -169,7 +131,7 @@ itfiDielectric::get_damage_er() const {
 void
 itfiDielectric::set_dielectric_name(const char* layer_name)
 {
-  ITF_STR_CPY(_dielectric_name, layer_name);
+  _dielectric_name = layer_name ? layer_name : "";
 }
 
 void
@@ -187,7 +149,7 @@ itfiDielectric::set_thickness(float thickness)
 void
 itfiDielectric::set_measured_from(const char* from)
 {
-  ITF_STR_CPY(_measured_from, from);
+  _measured_from = from ? from : "";
   _has_measured_from = 1;
 }
 
@@ -208,12 +170,18 @@ itfiDielectric::set_tw_t(float tw_t)
 void
 itfiDielectric::set_associated_conductor(const char* conductor)
 {
-  ITF_STR_CPY(_associated_conductor, conductor);
+  _associated_conductor = conductor ? conductor : "";
   _has_associated_conductor = 1;
 }
 
 void
-itfiDielectric::set_is_conformal() {
+itfiDielectric::set_measured_from_conductor()
+{
+  _has_measured_from_conductor = 1;
+}
+
+void
+itfiDielectric::set_conformal() {
   _is_conformal = 1;
 }
 
@@ -256,7 +224,13 @@ itfiDielectric::has_associated_conductor() const
 }
 
 int
-itfiDielectric::get_is_conformal() const
+itfiDielectric::has_measured_from_conductor() const
+{
+  return _has_measured_from_conductor;
+}
+
+int
+itfiDielectric::is_conformal() const
 {
   return _is_conformal;
 }
@@ -276,13 +250,13 @@ itfiDielectric::has_damage_er() const
 void
 itfiDielectric::clear()
 {
-  ITF_FREE(_dielectric_name);
+  _dielectric_name.clear();
   _er = 0;
   _thickness = 0;
-  ITF_FREE(_measured_from);
+  _measured_from.clear();
   _sw_t = 0;
   _tw_t = 0;
-  ITF_FREE(_associated_conductor);
+  _associated_conductor.clear();
   _damage_thickness = 0;
   _damage_er = 0;
 
@@ -290,6 +264,7 @@ itfiDielectric::clear()
   _has_sw_t = 0;
   _has_tw_t = 0;
   _has_associated_conductor = 0;
+  _has_measured_from_conductor = 0;
   _is_conformal = 0;
   _has_damage_thickness = 0;
   _has_damage_er = 0;

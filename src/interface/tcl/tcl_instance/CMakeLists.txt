@@ -8,7 +8,6 @@ target_link_libraries(tcl_inst
     PUBLIC
         tool_manager
         tcl
-        shell-cmd
         str
 )
 

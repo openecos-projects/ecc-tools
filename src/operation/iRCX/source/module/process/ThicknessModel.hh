@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file ThicknessModel.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include <algorithm>
@@ -28,6 +32,7 @@
 #include "MetalDensity.hh"
 #include "ProcessCorner.hpp"
 #include "RCXData.hh"
+
 namespace ircx {
 
 class ThicknessModel {
@@ -41,28 +46,41 @@ class ThicknessModel {
   void set_corner_data(const std::vector<RCXData::CornerData>* v) { corner_data_ = v; }
   void set_metal_density(const MetalDensity* v) { metal_density_ = v; }
 
-  void apply_thickness_variation(Size corner_idx, Size net_idx, NetEtchProfile& etch_profile) const {
+  void applyThicknessVariation(Size corner_idx,
+                                 Size net_idx,
+                                 NetEtchProfile& etch_profile) const
+  {
     const auto& corner = *(*corner_data_)[corner_idx].process_corner;
-    const auto net_edges = topo_pool_->net_edges(net_idx);
-    const Size edge_count = net_edges.size();
+    const auto get_net_edges = topo_pool_->get_net_edges(net_idx);
+    const Size edge_count = get_net_edges.size();
 
     for (Size edge_idx = 0; edge_idx < edge_count; ++edge_idx) {
-      const TopoEdge& edge = net_edges[edge_idx];
-      if (edge.is_via()) continue; // TODO: 针对via的thickness变化
+      const TopoEdge& edge = get_net_edges[edge_idx];
+      if (edge.is_via()) {
+        // TODO: 针对 via 的 thickness 变化.
+        continue;
+      }
 
-      const Size process_layer_id = layer_table_->design_to_process_id(edge.layer_id());
-      auto* conductor_layer = corner.get_layers()->find_conductor_layer(process_layer_id);
-      if (!conductor_layer) continue;
+      const Size process_layer_id = layer_table_->designToProcessId(edge.get_layer_id());
+      auto* conductor_layer = corner.get_layers().findConductorLayer(process_layer_id);
+      if (!conductor_layer) {
+        continue;
+      }
 
       std::span<EdgeEtchInterval> edge_etch_intervals = etch_profile.edgeIntervals(edge_idx);
-      if (edge_etch_intervals.empty()) continue;
+      if (edge_etch_intervals.empty()) {
+        continue;
+      }
 
-      const PBTVCache pbtv_cache = build_pbtv_cache_(corner, *conductor_layer);
+      const PBTVCache pbtv_cache = buildPbtvCache(corner, *conductor_layer);
       PBTVScratch scratch;
 
       if (pbtv_cache.valid()) {
-        const double effective_density = cal_effective_density_(edge, *conductor_layer);
-        fill_polynomial_terms_(effective_density, *pbtv_cache.density_orders, scratch.density_terms);
+        const F64 effective_density = calcEffectiveDensity(edge, *conductor_layer);
+        fillPolynomialTerms(
+            effective_density,
+            *pbtv_cache.density_orders,
+            scratch.density_terms);
       }
 
       for (EdgeEtchInterval& etch_interval : edge_etch_intervals) {
@@ -70,7 +88,7 @@ class ThicknessModel {
         etch_interval.height = static_cast<Micron>(conductor_layer->get_height());
 
         // Thickness (POLYNOMIAL_BASED_THICKNESS_VARIATION)
-        model_thickness_(etch_interval, *conductor_layer, pbtv_cache, scratch);
+        modelThickness(etch_interval, *conductor_layer, pbtv_cache, scratch);
       }
     }
   }
@@ -80,7 +98,7 @@ class ThicknessModel {
     const ::itf::itfiPBTV* table{nullptr};
     const std::vector<int>* density_orders{nullptr};
     const std::vector<int>* width_orders{nullptr};
-    const std::vector<float>* width_ranges{nullptr};
+    const std::vector<F32>* width_ranges{nullptr};
 
     bool valid() const
     {
@@ -90,28 +108,27 @@ class ThicknessModel {
   };
 
   struct PBTVScratch {
-    std::vector<float> density_terms;
-    std::vector<float> width_terms;
+    std::vector<F32> density_terms;
+    std::vector<F32> width_terms;
   };
 
   // POLYNOMIAL_BASED_THICKNESS_VARIATION
   // Fills d.thickness using the PBTV polynomial model.
-  void model_thickness_(
-      EdgeEtchInterval& etch,
-      const ::itf::LayerConductor& cdt,
-      const PBTVCache& pbtv_cache,
-      PBTVScratch& scratch) const
+  void modelThickness(EdgeEtchInterval& etch,
+                        const LayerConductor& cdt,
+                        const PBTVCache& pbtv_cache,
+                        PBTVScratch& scratch) const
   {
-    const float t_nom = cdt.get_thickness();
+    const F32 t_nom = cdt.get_thickness();
     if (!pbtv_cache.valid() || scratch.density_terms.empty()) {
       etch.thickness = static_cast<Micron>(t_nom);
       return;
     }
 
-    // const float rt_deff = cal_rt_deff_(
-    //     scratch.density_terms, static_cast<double>(etch.width), pbtv_cache, scratch.width_terms);
-    // const float rt_ws = 0.0f;   // f(W, S)   — not yet modeled
-    // const float rt_siw = 0.0f;  // f(SiW)    — not yet modeled
+    // const F32 rt_deff = cal_rt_deff_(
+    //     scratch.density_terms, static_cast<F64>(etch.width), pbtv_cache, scratch.width_terms);
+    // const F32 rt_ws = 0.0f;   // f(W, S)   — not yet modeled
+    // const F32 rt_siw = 0.0f;  // f(SiW)    — not yet modeled
 
     // etch.thickness = static_cast<Micron>(t_nom * (1.0f + rt_deff + rt_ws + rt_siw));
     etch.thickness = static_cast<Micron>(t_nom);
@@ -119,16 +136,15 @@ class ThicknessModel {
 
   // DENSITY_BOX_WEIGHTING_FACTOR
   // Compute density-weighted effective density at the edge center.
-  double cal_effective_density_(
-      const TopoEdge& edge,
-      const ::itf::LayerConductor& cdt) const
+  F64 calcEffectiveDensity(const TopoEdge& edge,
+                             const LayerConductor& cdt) const
   {
-    const Size process_layer_id = layer_table_->design_to_process_id(edge.layer_id());
+    const Size process_layer_id = layer_table_->designToProcessId(edge.get_layer_id());
 
-    double effective_density = 0.0;
+    F64 effective_density = 0.0;
     GtlRectI density_box;
 
-    const GtlPointI center_point = edge.center();
+    const GtlPointI center_point = edge.get_center();
     const Dbu center_x_dbu = geom::x(center_point);
     const Dbu center_y_dbu = geom::y(center_point);
 
@@ -138,7 +154,7 @@ class ThicknessModel {
       density_box = GtlRectI(center_x_dbu - half_box_size_dbu, center_y_dbu - half_box_size_dbu,
                              center_x_dbu + half_box_size_dbu, center_y_dbu + half_box_size_dbu);
 
-      effective_density += metal_density_->cal_density(process_layer_id, density_box) * weight;
+      effective_density += metal_density_->calcDensity(process_layer_id, density_box) * weight;
     }
 
     return effective_density;
@@ -146,33 +162,32 @@ class ThicknessModel {
 
   // cal_rt_deff
   // Returns relative thickness change as a function of effective density.
-  float cal_rt_deff_(
-      std::span<const float> density_terms,
-      double width,
-      const PBTVCache& pbtv_cache,
-      std::vector<float>& width_terms) const
+  F32 calcRtDeff(std::span<const F32> density_terms,
+                   F64 width,
+                   const PBTVCache& pbtv_cache,
+                   std::vector<F32>& width_terms) const
   {
     if (!pbtv_cache.valid()) {
       return 0.0f;
     }
 
-    fill_polynomial_terms_(width, *pbtv_cache.width_orders, width_terms);
+    fillPolynomialTerms(width, *pbtv_cache.width_orders, width_terms);
     if (width_terms.empty()) {
       return 0.0f;
     }
 
-    const size_t table_idx = select_width_table_(width, *pbtv_cache.width_ranges);
-    const auto& coeffs = pbtv_cache.table->get_polynomial_coefficients_list(table_idx);
+    const Size table_idx = selectWidthTable(width, *pbtv_cache.width_ranges);
+    const auto& coeffs = pbtv_cache.table->get_polynomial_coefficients(table_idx);
     if (coeffs.size() != density_terms.size() * width_terms.size()) {
       return 0.0f;
     }
 
     // Coefficients are stored row-major with density as the outer index.
-    float rt_deff = 0.0f;
-    size_t coeff_idx = 0;
-    for (size_t density_idx = 0; density_idx < density_terms.size(); ++density_idx) {
-      const float density_term = density_terms[density_idx];
-      for (size_t width_idx = 0; width_idx < width_terms.size(); ++width_idx, ++coeff_idx) {
+    F32 rt_deff = 0.0f;
+    Size coeff_idx = 0;
+    for (Size density_idx = 0; density_idx < density_terms.size(); ++density_idx) {
+      const F32 density_term = density_terms[density_idx];
+      for (Size width_idx = 0; width_idx < width_terms.size(); ++width_idx, ++coeff_idx) {
         rt_deff += density_term * coeffs[coeff_idx] * width_terms[width_idx];
       }
     }
@@ -180,16 +195,15 @@ class ThicknessModel {
     return rt_deff;
   }
 
-  PBTVCache build_pbtv_cache_(
-      const ::itf::ProcessCorner& pc,
-      const ::itf::LayerConductor& cdt) const
+  PBTVCache buildPbtvCache(const ProcessCorner& pc,
+                              const LayerConductor& cdt) const
   {
-    if (!pc.get_use_si_density()) {
+    if (!pc.use_si_density()) {
       return {};
     }
 
-    const auto& table = cdt.get_PBTV();
-    if (table.get_polynomial_coefficients_list_size() == 0) {
+    const auto& table = cdt.get_pbtv();
+    if (table.get_polynomial_coefficient_list_size() == 0) {
       return {};  // PBTV not available for this layer
     }
 
@@ -207,31 +221,29 @@ class ThicknessModel {
     return cache;
   }
 
-  void fill_polynomial_terms_(
-      double value,
-      const std::vector<int>& orders,
-      std::vector<float>& terms) const
+  void fillPolynomialTerms(F64 value,
+                              const std::vector<int>& orders,
+                              std::vector<F32>& terms) const
   {
     terms.resize(orders.size());
-    for (size_t term_idx = 0; term_idx < orders.size(); ++term_idx) {
+    for (Size term_idx = 0; term_idx < orders.size(); ++term_idx) {
       const int order = orders[term_idx];
       if (order == 0) {
         terms[term_idx] = 1.0f;
       } else if (order == 1) {
-        terms[term_idx] = static_cast<float>(value);
+        terms[term_idx] = static_cast<F32>(value);
       } else {
-        terms[term_idx] = static_cast<float>(std::pow(value, order));
+        terms[term_idx] = static_cast<F32>(std::pow(value, order));
       }
     }
   }
 
-  size_t select_width_table_(
-      double width,
-      const std::vector<float>& width_ranges) const
+  Size selectWidthTable(F64 width,
+                           const std::vector<F32>& width_ranges) const
   {
     auto it = std::upper_bound(width_ranges.begin(), width_ranges.end(),
-                               static_cast<float>(width));
-    return static_cast<size_t>(std::distance(width_ranges.begin(), it));
+                               static_cast<F32>(width));
+    return static_cast<Size>(std::distance(width_ranges.begin(), it));
   }
 
   const LayoutData* layout_data_{nullptr};

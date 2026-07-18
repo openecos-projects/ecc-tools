@@ -14,22 +14,22 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file PlotSpefLypWriter.hh
+ * @brief plot_spef implementation detail.
+ */
 #pragma once
 
-#include <string>
-
-#include "config/PlotSpefConfig.hh"
-#include "model/PlotSpefModel.hh"
-
 namespace ircx::plot_spef {
+
+struct Config;
+struct Model;
 
 class LypWriter
 {
  public:
-  auto write(const Model& model, const Config& config) const -> bool;
-
- private:
-  static auto getLypFile(const std::string& output_file) -> std::string;
+  auto write(const Model& model,
+             const Config& config) const -> bool;
 };
 
 }  // namespace ircx::plot_spef

@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file Environment.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include <map>
@@ -23,10 +27,11 @@
 #include "NetEnvironment.hh"
 #include "Pixel.hh"
 #include "Track.hh"
+
 namespace ircx {
 
-class TopoPool;
 class LayoutData;
+class TopoPool;
 
 class Environment final
 {

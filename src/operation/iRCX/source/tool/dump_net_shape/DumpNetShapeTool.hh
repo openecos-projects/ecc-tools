@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file DumpNetShapeTool.hh
+ * @brief Facade for dumping AI-readable net-shape files.
+ */
 #pragma once
 
 namespace ircx {

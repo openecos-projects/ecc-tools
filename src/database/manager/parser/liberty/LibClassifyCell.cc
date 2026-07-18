@@ -15,7 +15,7 @@
 #include <functional>
 #include <tuple>
 
-namespace ista {
+namespace idb {
 
 template <typename T>
 concept HashType = std::is_integral_v<T> || std::is_same_v<T, std::string>;
@@ -315,4 +315,4 @@ void LibClassifyCell::classifyLibCell(std::vector<LibLibrary*>& the_libs)
   }
 }
 
-}  // namespace ista
+}  // namespace idb

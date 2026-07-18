@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file IntervalEngine.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include <algorithm>
@@ -24,6 +28,7 @@
 #include "TopoPool.hh"
 #include "NetEnvironment.hh"
 #include "log/Log.hh"
+
 namespace ircx {
 
 class TrackOverlapMerge
@@ -54,7 +59,8 @@ class TrackOverlapMerge
   }
 
  private:
-  static TrackOverlap makeNullOverlap(Dbu a0, Dbu a1)
+  static TrackOverlap makeNullOverlap(Dbu a0,
+                                      Dbu a1)
   {
     TrackOverlap ov;
     ov.a0 = a0;
@@ -64,7 +70,8 @@ class TrackOverlapMerge
     return ov;
   }
 
-  static void emitTrackOverlap(std::vector<TrackOverlap>& out, const TrackOverlap& ov)
+  static void emitTrackOverlap(std::vector<TrackOverlap>& out,
+                               const TrackOverlap& ov)
   {
     if (!(ov.a0 < ov.a1)) {
       return;
@@ -352,14 +359,19 @@ class PixelOverlapMerge
     out.swap(merged);
   }
 
-  static void advanceCursor(const std::vector<PixelOverlap>& segs, Size& idx, Dbu x)
+  static void advanceCursor(const std::vector<PixelOverlap>& segs,
+                            Size& idx,
+                            Dbu x)
   {
     while (idx < segs.size() && segs[idx].a1 <= x) {
       ++idx;
     }
   }
 
-  static bool covers(const std::vector<PixelOverlap>& segs, Size idx, Dbu a0, Dbu a1)
+  static bool covers(const std::vector<PixelOverlap>& segs,
+                     Size idx,
+                     Dbu a0,
+                     Dbu a1)
   {
     return idx < segs.size() && segs[idx].a0 < a1 && segs[idx].a1 > a0;
   }

@@ -14,11 +14,16 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file MappingBuilder.cpp
+ * @brief RCX layer mapping reader implementation.
+ */
 #include <fstream>
 #include <sstream>
 
 #include "MappingBuilder.hpp"
 #include "log/Log.hh"
+
 namespace ircx {
 namespace parser {
 

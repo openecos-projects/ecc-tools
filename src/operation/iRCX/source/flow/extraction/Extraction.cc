@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file Extraction.cc
+ * @brief iRCX extraction flow implementation.
+ */
 #include "Extraction.hh"
 
 #include "CapacitanceCalc.hh"
@@ -30,27 +34,31 @@ namespace ircx {
 
 auto Extraction::run() -> bool
 {
-  return buildTopology()
-      && buildEnvironment()
+  return buildTopology() && runFromTopology();
+}
+
+auto Extraction::runFromTopology() -> bool
+{
+  return buildEnvironment()
       && buildProcessVariation()
       && calculateParasitics();
 }
 
 auto Extraction::buildTopology() -> bool
 {
-  return run_stage("build topology", []() -> bool {
+  return runStage("build topology", []() -> bool {
     RCXData& data = RCX_DATA_INST;
-    TopoPool& topo_pool = data.topo_pool();
-    const LayoutData& layout = data.layout();
-    if (layout.regular_net_count() == 0) {
+    TopoPool& topo_pool = data.get_topo_pool();
+    const LayoutData& layout = data.get_layout();
+    if (layout.get_regular_net_count() == 0) {
       LOG_ERROR << "build topology failed: layout data is empty, call adaptDB first.";
       return false;
     }
 
     topo_pool.clear();
     TopologyBuilder tb(topo_pool);
-    tb.build_all(layout);
-    tb.build_special(layout);
+    tb.buildAll(layout);
+    tb.buildSpecial(layout);
 
     return true;
   }, {.profile = true});
@@ -58,18 +66,18 @@ auto Extraction::buildTopology() -> bool
 
 auto Extraction::buildEnvironment() -> bool
 {
-  return run_stage("build environment", []() -> bool {
+  return runStage("build environment", []() -> bool {
     RCXData& data = RCX_DATA_INST;
-    if (data.topo_pool().edge_pool().empty()) {
+    if (data.get_topo_pool().get_edge_pool().empty()) {
       LOG_ERROR << "build environment failed: topology is empty, call buildTopology first.";
       return false;
     }
 
     Environment env;
-    env.set_layout_data(&data.layout());
-    env.set_topo_pool(&data.topo_pool());
+    env.set_layout_data(&data.get_layout());
+    env.set_topo_pool(&data.get_topo_pool());
 
-    if (!env.buildNetEnvironments(data.net_env_pools())) {
+    if (!env.buildNetEnvironments(data.get_net_env_pools())) {
       return false;
     }
 
@@ -79,24 +87,25 @@ auto Extraction::buildEnvironment() -> bool
 
 auto Extraction::buildProcessVariation() -> bool
 {
-  return run_stage("build process variation", []() -> bool {
+  return runStage("build process variation", []() -> bool {
     RCXData& data = RCX_DATA_INST;
-    const auto& corner_data = data.corner_data();
+    const auto& corner_data = data.get_corner_data();
     if (corner_data.empty()) {
       LOG_ERROR << "build process variation failed: process corners not loaded.";
       return false;
     }
-    if (data.net_env_pools().empty()) {
-      LOG_ERROR << "build process variation failed: environment is empty, call buildEnvironment first.";
+    if (data.get_net_env_pools().empty()) {
+      LOG_ERROR << "build process variation failed: environment is empty, "
+                   "call buildEnvironment first.";
       return false;
     }
 
     ProcessVariation pv;
-    pv.set_layout_data(&data.layout());
-    pv.set_net_environments(&data.net_env_pools());
-    pv.set_corner_net_etch_pools(&data.corner_net_etch_pools());
-    pv.set_topo_pool(&data.topo_pool());
-    pv.set_layer_table(&data.layer_table());
+    pv.set_layout_data(&data.get_layout());
+    pv.set_net_environments(&data.get_net_env_pools());
+    pv.set_corner_net_etch_pools(&data.get_corner_net_etch_pools());
+    pv.set_topo_pool(&data.get_topo_pool());
+    pv.set_layer_table(&data.get_layer_table());
     pv.set_corner_data(&corner_data);
 
     if (!pv.buildEtchProfiles()) {
@@ -109,33 +118,36 @@ auto Extraction::buildProcessVariation() -> bool
 
 auto Extraction::calculateParasitics() -> bool
 {
-  return run_stage("calculate parasitics", []() -> bool {
+  return runStage("calculate parasitics", []() -> bool {
     RCXData& data = RCX_DATA_INST;
-    const auto& corner_data = data.corner_data();
+    const auto& corner_data = data.get_corner_data();
     if (corner_data.empty()) {
       LOG_ERROR << "calculate parasitics failed: process corners not loaded.";
       return false;
     }
-    if (data.corner_net_etch_pools().empty()) {
+    if (data.get_corner_net_etch_pools().empty()) {
       LOG_ERROR << "calculate parasitics failed: process variation data is empty.";
       return false;
     }
     for (const auto& corner : corner_data) {
-      if (corner.process_corner == nullptr) {
+      if (!corner.process_corner) {
         LOG_ERROR << "calculate parasitics failed: null process corner "
                   << corner.name << ".";
         return false;
       }
     }
 
-    RCTable& rc_table = data.rc_table();
-    rc_table.init(corner_data.size(), data.layout().regular_net_count(), data.topo_pool());
+    RCTable& rc_table = data.get_rc_table();
+    rc_table.init(
+        corner_data.size(),
+        data.get_layout().get_regular_net_count(),
+        data.get_topo_pool());
 
     ResistanceCalc res_calc;
-    res_calc.set_layout_data(&data.layout());
-    res_calc.set_topo_pool(&data.topo_pool());
-    res_calc.set_layer_table(&data.layer_table());
-    res_calc.set_corner_net_etch_pools(&data.corner_net_etch_pools());
+    res_calc.set_layout_data(&data.get_layout());
+    res_calc.set_topo_pool(&data.get_topo_pool());
+    res_calc.set_layer_table(&data.get_layer_table());
+    res_calc.set_corner_net_etch_pools(&data.get_corner_net_etch_pools());
     res_calc.set_rc_table(&rc_table);
     res_calc.set_corner_data(&corner_data);
     if (!res_calc.calc()) {
@@ -143,11 +155,11 @@ auto Extraction::calculateParasitics() -> bool
     }
 
     CapacitanceCalc cap_calc;
-    cap_calc.set_layout_data(&data.layout());
-    cap_calc.set_net_environments(&data.net_env_pools());
-    cap_calc.set_corner_net_etch_pools(&data.corner_net_etch_pools());
-    cap_calc.set_topo_pool(&data.topo_pool());
-    cap_calc.set_layer_table(&data.layer_table());
+    cap_calc.set_layout_data(&data.get_layout());
+    cap_calc.set_net_environments(&data.get_net_env_pools());
+    cap_calc.set_corner_net_etch_pools(&data.get_corner_net_etch_pools());
+    cap_calc.set_topo_pool(&data.get_topo_pool());
+    cap_calc.set_layer_table(&data.get_layer_table());
     cap_calc.set_rc_table(&rc_table);
     cap_calc.set_corner_data(&corner_data);
     if (!cap_calc.calc()) {

@@ -1,19 +1,19 @@
-AUX_SOURCE_DIRECTORY(./ TCL_ISTA_SRC)
-
 add_library(tcl_ista
-    ${TCL_ISTA_SRC}
+    ${HOME_INTERFACE}/tcl/tcl_ista/src/tcl_init_sta.cpp
+    ${HOME_INTERFACE}/tcl/tcl_ista/src/tcl_run_sta.cpp
+    ${HOME_INTERFACE}/tcl/tcl_ista/src/tcl_extract_lib.cpp
+    ${HOME_INTERFACE}/tcl/tcl_ista/src/tcl_destroy_sta.cpp
 )
 
-target_link_libraries(tcl_ista 
+target_link_libraries(tcl_ista
     PUBLIC
-        tool_manager
-        tcl
-        shell-cmd
-        str
-        sta
+    tool_manager
+    tcl_util
+    PRIVATE
+    ista_interface
 )
 
 target_include_directories(tcl_ista
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}     
+    ${HOME_INTERFACE}/tcl/tcl_ista/include
 )

@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CapTableQuery.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include "CapTable.hpp"
@@ -24,20 +28,20 @@ namespace ircx {
 class CapTableQuery
 {
  public:
-  CapTableQuery(const parser::CapTable& cap_table, const Str& layer_name)
+  CapTableQuery(const parser::CapTable& cap_table, const std::string& layer_name)
       : cap_table_(cap_table), layer_name_(layer_name)
   {
   }
 
-  auto nearCap(const Str& below_layer,
-               const Str& above_layer,
+  auto nearCap(const std::string& below_layer,
+               const std::string& above_layer,
                Micron spacing) const -> parser::CapacitanceResult;
-  auto farthestCap(const Str& below_layer,
-                   const Str& above_layer) const -> parser::CapacitanceResult;
+  auto farthestCap(const std::string& below_layer,
+                   const std::string& above_layer) const -> parser::CapacitanceResult;
 
  private:
   const parser::CapTable& cap_table_;
-  const Str& layer_name_;
+  const std::string& layer_name_;
 };
 
 }  // namespace ircx

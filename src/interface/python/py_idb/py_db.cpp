@@ -51,6 +51,24 @@ bool initVerilog(const std::string& verilog_path, const std::string& top_module)
   return dmInst->readVerilog(verilog_path, top_module);
 }
 
+bool initLib(const std::vector<std::string>& lib_paths)
+{
+  dmInst->get_config().set_lib_paths(lib_paths);
+  return dmInst->readLib(lib_paths);
+}
+
+bool initSdc(const std::string& sdc_path)
+{
+  dmInst->get_config().set_sdc_path(sdc_path);
+  return true;
+}
+
+bool initSpef(const std::string& spef_path)
+{
+  dmInst->get_config().set_spef_path(spef_path);
+  return dmInst->readSpef(spef_path);
+}
+
 bool saveDef(const std::string& def_name)
 {
   return dmInst->saveDef(def_name);

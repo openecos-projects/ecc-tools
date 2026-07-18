@@ -164,7 +164,7 @@ auto Wrapper::traceSdcClocks(const SdcClockTraceInput& input) const -> ClockTrac
     idb_design = _idb->get_def_service()->get_design();
   }
   const SdcLibertyCellLookup liberty_cell_lookup
-      = [this](const std::string& cell_master) -> ista::LibCell* { return findLibertyCell(cell_master); };
+      = [this](const std::string& cell_master) -> idb::LibCell* { return findLibertyCell(cell_master); };
   return SdcClockReader::traceClockTargets(*input.clock_data, idb_design, liberty_cell_lookup, input.max_fanout, *input.reporter);
 }
 

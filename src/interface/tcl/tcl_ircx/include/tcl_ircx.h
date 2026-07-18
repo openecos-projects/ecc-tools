@@ -91,6 +91,20 @@ class TclDumpNetShape : public TclCmd
 };
 
 /**
+ * @brief Extract RC using topology reconstructed from a StarRC SPEF.
+ *
+ */
+class TclRunRCXFromTopology : public TclCmd
+{
+ public:
+  explicit TclRunRCXFromTopology(const char* cmd_name);
+  ~TclRunRCXFromTopology() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+};
+
+/**
  * @brief Plot a SPEF netlist into GDS text.
  *
  */

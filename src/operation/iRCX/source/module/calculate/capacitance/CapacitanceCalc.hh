@@ -14,35 +14,35 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CapacitanceCalc.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include <span>
 #include <vector>
 
-#include "CornerNetPool.hh"
-#include "NetEtchProfile.hh"
-#include "NetEnvironment.hh"
-#include "LayoutData.hh"
 #include "RCXData.hh"
-#include "RCTable.hh"
 #include "Types.hh"
+
 namespace ircx {
+
+template <typename T>
+class CornerNetPool;
 
 namespace parser {
 class CapTable;
 }
 
+class NetEnvironment;
+class NetEtchProfile;
 class LayoutData;
 class LayerTable;
+class RCTable;
 class TopoEdge;
 class TopoPool;
-}
-
-namespace itf {
 class ProcessCorner;
-}
-
-namespace ircx {
 
 class CapacitanceCalc
 {
@@ -50,10 +50,7 @@ class CapacitanceCalc
   CapacitanceCalc() = default;
   ~CapacitanceCalc() = default;
 
-  void set_layout_data(const LayoutData* v) {
-    layout_data_ = v;
-    micron_per_dbu_ = unit::to_micron(1, v->dbu_per_micron);
-  }
+  void set_layout_data(const LayoutData* v);
   void set_net_environments(const std::vector<NetEnvironment>* v) { net_environments_ = v; }
   void set_corner_net_etch_pools(const CornerNetPool<NetEtchProfile>* v)
   {
@@ -73,21 +70,19 @@ class CapacitanceCalc
 
  private:
   bool validateInputs() const;
-  void calcNet(
-      Size corner_idx,
-      Size net_idx,
-      const parser::CapTable& cap_table,
-      const NetEtchProfile& etch_profile,
-      const NetEnvironment& environment);
-  void calcEdge(
-      Size corner_idx,
-      Size net_idx,
-      Size edge_idx,
-      const TopoEdge& edge,
-      const parser::CapTable& cap_table,
-      std::span<F64> edge_ground_caps,
-      const NetEnvironment& environment,
-      const NetEtchProfile& etch_profile);
+  void calcNet(Size corner_idx,
+               Size net_idx,
+               const parser::CapTable& cap_table,
+               const NetEtchProfile& etch_profile,
+               const NetEnvironment& environment);
+  void calcEdge(Size corner_idx,
+                Size net_idx,
+                Size edge_idx,
+                const TopoEdge& edge,
+                const parser::CapTable& cap_table,
+                std::span<F64> edge_ground_caps,
+                const NetEnvironment& environment,
+                const NetEtchProfile& etch_profile);
 
   Micron micron_per_dbu_{1};
 

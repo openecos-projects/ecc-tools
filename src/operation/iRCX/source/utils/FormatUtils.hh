@@ -14,18 +14,24 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file FormatUtils.hh
+ * @brief Numeric and XML formatting helpers.
+ */
 #pragma once
 
 #include <cmath>
 #include <iomanip>
 #include <sstream>
-#include <string>
-#include <string_view>
+
+#include "Types.hh"
 
 namespace ircx {
 namespace format {
 
-inline auto fixed(double value, int precision = 3, std::string_view non_finite = "NA") -> std::string
+inline auto fixed(F64 value,
+                  int precision = 3,
+                  std::string_view non_finite = "NA") -> std::string
 {
   if (!std::isfinite(value)) {
     return std::string{non_finite};
@@ -35,7 +41,9 @@ inline auto fixed(double value, int precision = 3, std::string_view non_finite =
   return oss.str();
 }
 
-inline auto percent(double value, int precision = 3, std::string_view non_finite = "NA") -> std::string
+inline auto percent(F64 value,
+                    int precision = 3,
+                    std::string_view non_finite = "NA") -> std::string
 {
   if (!std::isfinite(value)) {
     return std::string{non_finite};
@@ -43,7 +51,8 @@ inline auto percent(double value, int precision = 3, std::string_view non_finite
   return fixed(value, precision, non_finite) + "%";
 }
 
-inline auto significant(double value, int digits = 3) -> std::string
+inline auto significant(F64 value,
+                        int digits = 3) -> std::string
 {
   if (!std::isfinite(value)) {
     return "NA";
@@ -53,7 +62,18 @@ inline auto significant(double value, int digits = 3) -> std::string
   return oss.str();
 }
 
-inline auto with_unit(double value, std::string_view unit_name, int digits = 3) -> std::string
+inline auto unitSymbol(std::string_view unit_name) -> std::string_view
+{
+  const auto space = unit_name.rfind(' ');
+  if (space == std::string_view::npos || space + 1 >= unit_name.size()) {
+    return unit_name;
+  }
+  return unit_name.substr(space + 1);
+}
+
+inline auto withUnit(F64 value,
+                      std::string_view unit_name,
+                      int digits = 3) -> std::string
 {
   std::string result = significant(value, digits);
   if (!unit_name.empty()) {
@@ -63,7 +83,7 @@ inline auto with_unit(double value, std::string_view unit_name, int digits = 3) 
   return result;
 }
 
-inline auto escape_xml(std::string_view text) -> std::string
+inline auto escapeXml(std::string_view text) -> std::string
 {
   std::string escaped;
   escaped.reserve(text.size());

@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file DumpNetShapeTool.cc
+ * @brief AI-readable net-shape dump writer implementation.
+ */
 #include "DumpNetShapeTool.hh"
 
 #include <algorithm>
@@ -21,11 +25,14 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <sstream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "Geometry.hh"
 #include "LayerTable.hh"
+#include "ParallelUtils.hh"
 #include "LayoutData.hh"
 #include "RCXData.hh"
 #include "log/Log.hh"
@@ -33,7 +40,7 @@
 namespace ircx {
 namespace {
 
-enum class ShapeCode : std::size_t
+enum class ShapeCode : Size
 {
   kSegment = 0,
   kPatch,
@@ -45,111 +52,150 @@ enum class ShapeCode : std::size_t
 
 constexpr std::array<char, 6> kShapeCodeNames = {'A', 'B', 'C', 'D', 'E', 'F'};
 
-struct LayerShapes
+auto shapeIndex(ShapeCode code) -> Size
 {
-  std::array<std::vector<GtlRectI>, kShapeCodeNames.size()> rects;
-};
-
-using NetShapesByLayer = std::map<Size, LayerShapes>;
-
-auto shapeIndex(ShapeCode code) -> std::size_t
-{
-  return static_cast<std::size_t>(code);
+  return static_cast<Size>(code);
 }
 
-auto validLayer(Size layer_id) -> bool
+auto shapeCodeName(ShapeCode code) -> char
+{
+  return kShapeCodeNames[shapeIndex(code)];
+}
+
+auto isValidLayer(Size layer_id) -> bool
 {
   return layer_id != kMaxSize;
 }
 
-auto layerName(const LayoutData& layout, const LayerTable& layer_table, Size layer_id) -> Str
+auto layerName(const LayoutData& layout,
+               const LayerTable& layer_table,
+               Size layer_id) -> std::string
 {
   if (auto it = layout.routing_layers.find(layer_id); it != layout.routing_layers.end()) {
-    return it->second.layer_name();
+    return it->second.get_layer_name();
   }
 
   try {
-    return layer_table.design_name(layer_id);
+    return layer_table.designName(layer_id);
   } catch (const std::out_of_range&) {
     return "UNKNOWN";
   }
 }
 
-void addRect(NetShapesByLayer& shapes, Size layer_id, ShapeCode code, const GtlRectI& rect)
+void writeQuoted(std::ostream& os,
+                 const std::string& value)
 {
-  if (!validLayer(layer_id)) {
-    return;
+  os << '"';
+  for (char ch : value) {
+    if (ch == '\\' || ch == '"') {
+      os << '\\' << ch;
+    } else if (ch == '\n') {
+      os << "\\n";
+    } else {
+      os << ch;
+    }
   }
-  shapes[layer_id].rects[shapeIndex(code)].push_back(rect);
+  os << '"';
 }
 
-auto isCutLayer(Size layer_id, const std::set<Size>& cut_layer_ids) -> bool
+void writeBool(std::ostream& os,
+               bool value)
+{
+  os << (value ? "true" : "false");
+}
+
+void writeSize(std::ostream& os,
+               Size value)
+{
+  if (value == kMaxSize) {
+    os << "NA";
+    return;
+  }
+  os << value;
+}
+
+void writePoint(std::ostream& os,
+                const GtlPointI& point)
+{
+  os << '[' << geom::x(point) << ' ' << geom::y(point) << ']';
+}
+
+void writeRect(std::ostream& os,
+               const GtlRectI& rect)
+{
+  os << '[' << geom::minX(rect)
+     << ' ' << geom::minY(rect)
+     << ' ' << geom::maxX(rect)
+     << ' ' << geom::maxY(rect)
+     << ']';
+}
+
+auto isCutLayer(Size layer_id,
+                const std::set<Size>& cut_layer_ids) -> bool
 {
   return cut_layer_ids.find(layer_id) != cut_layer_ids.end();
 }
 
-void collectCutLayers(const Net& net, std::set<Size>& cut_layer_ids)
+struct LayerCatalog
 {
-  for (const Via& via : net.vias) {
-    if (validLayer(via.layer_rect_cut.first)) {
-      cut_layer_ids.insert(via.layer_rect_cut.first);
+  std::vector<Size> order;
+  std::set<Size> cut_layer_ids;
+};
+
+void collectNetLayers(const Net& net,
+                      std::set<Size>& layer_ids_with_shapes,
+                      std::set<Size>& cut_layer_ids,
+                      std::map<std::pair<Size, Size>, Size>& cut_by_routing_pair)
+{
+  for (const Segment& segment : net.segments) {
+    if (isValidLayer(segment.layer_id)) {
+      layer_ids_with_shapes.insert(segment.layer_id);
     }
   }
-}
-
-auto buildLayerOrder(const LayoutData& layout) -> std::vector<Size>
-{
-  std::set<Size> cut_layer_ids;
-  std::map<std::pair<Size, Size>, Size> cut_by_routing_pair;
-  std::set<Size> layer_ids_with_shapes;
-
-  auto remember_via = [&](const Via& via) {
-    if (validLayer(via.layer_rect_btm.first)) {
+  for (const Patch& patch : net.patches) {
+    if (isValidLayer(patch.layer_id)) {
+      layer_ids_with_shapes.insert(patch.layer_id);
+    }
+  }
+  for (const Via& via : net.vias) {
+    if (isValidLayer(via.layer_rect_btm.first)) {
       layer_ids_with_shapes.insert(via.layer_rect_btm.first);
     }
-    if (validLayer(via.layer_rect_top.first)) {
+    if (isValidLayer(via.layer_rect_top.first)) {
       layer_ids_with_shapes.insert(via.layer_rect_top.first);
     }
-    if (validLayer(via.layer_rect_cut.first)) {
+    if (isValidLayer(via.layer_rect_cut.first)) {
       layer_ids_with_shapes.insert(via.layer_rect_cut.first);
       cut_layer_ids.insert(via.layer_rect_cut.first);
     }
 
     const Size lower = std::min(via.layer_rect_btm.first, via.layer_rect_top.first);
     const Size upper = std::max(via.layer_rect_btm.first, via.layer_rect_top.first);
-    if (validLayer(lower) && validLayer(upper) && validLayer(via.layer_rect_cut.first)) {
+    if (isValidLayer(lower)
+        && isValidLayer(upper)
+        && isValidLayer(via.layer_rect_cut.first)) {
       cut_by_routing_pair[{lower, upper}] = via.layer_rect_cut.first;
     }
-  };
+  }
+  for (const Pin& pin : net.pins) {
+    for (const auto& [layer_id, rect] : pin.layer_id_rects) {
+      (void) rect;
+      if (isValidLayer(layer_id)) {
+        layer_ids_with_shapes.insert(layer_id);
+      }
+    }
+  }
+}
 
-  auto remember_net = [&](const Net& net) {
-    for (const Segment& segment : net.segments) {
-      if (validLayer(segment.layer_id)) {
-        layer_ids_with_shapes.insert(segment.layer_id);
-      }
-    }
-    for (const Patch& patch : net.patches) {
-      if (validLayer(patch.layer_id)) {
-        layer_ids_with_shapes.insert(patch.layer_id);
-      }
-    }
-    for (const Via& via : net.vias) {
-      remember_via(via);
-    }
-    for (const Pin& pin : net.pins) {
-      for (const auto& [layer_id, rect] : pin.layer_id_rects) {
-        (void) rect;
-        if (validLayer(layer_id)) {
-          layer_ids_with_shapes.insert(layer_id);
-        }
-      }
-    }
-  };
+auto buildLayerCatalog(const LayoutData& layout) -> LayerCatalog
+{
+  LayerCatalog catalog;
+  std::map<std::pair<Size, Size>, Size> cut_by_routing_pair;
+  std::set<Size> layer_ids_with_shapes;
 
   for (const Net& net : layout.net_vec) {
-    remember_net(net);
+    collectNetLayers(net, layer_ids_with_shapes, catalog.cut_layer_ids, cut_by_routing_pair);
   }
-  remember_net(layout.special_net);
 
   std::vector<Size> routing_layer_ids;
   routing_layer_ids.reserve(layout.routing_layers.size());
@@ -160,24 +206,25 @@ auto buildLayerOrder(const LayoutData& layout) -> std::vector<Size>
   }
   std::sort(routing_layer_ids.begin(), routing_layer_ids.end());
 
-  const Size first_cut_layer_id = routing_layer_ids.empty() ? kMaxSize : routing_layer_ids.back() + 1;
-  for (std::size_t i = 0; i + 1 < routing_layer_ids.size(); ++i) {
+  const Size first_cut_layer_id = routing_layer_ids.empty()
+                                      ? kMaxSize
+                                      : routing_layer_ids.back() + 1;
+  for (Size i = 0; i + 1 < routing_layer_ids.size(); ++i) {
     const Size cut_layer_id = first_cut_layer_id + i;
-    cut_layer_ids.insert(cut_layer_id);
+    catalog.cut_layer_ids.insert(cut_layer_id);
     layer_ids_with_shapes.insert(cut_layer_id);
     cut_by_routing_pair.try_emplace({routing_layer_ids[i], routing_layer_ids[i + 1]}, cut_layer_id);
   }
 
-  std::vector<Size> ordered;
-  ordered.reserve(layer_ids_with_shapes.size());
+  catalog.order.reserve(layer_ids_with_shapes.size());
   std::set<Size> emitted;
   auto emit = [&](Size layer_id) {
-    if (validLayer(layer_id) && emitted.insert(layer_id).second) {
-      ordered.push_back(layer_id);
+    if (isValidLayer(layer_id) && emitted.insert(layer_id).second) {
+      catalog.order.push_back(layer_id);
     }
   };
 
-  for (std::size_t i = 0; i < routing_layer_ids.size(); ++i) {
+  for (Size i = 0; i < routing_layer_ids.size(); ++i) {
     emit(routing_layer_ids[i]);
     if (i + 1 >= routing_layer_ids.size()) {
       continue;
@@ -189,95 +236,179 @@ auto buildLayerOrder(const LayoutData& layout) -> std::vector<Size>
   }
 
   for (Size layer_id : layer_ids_with_shapes) {
-    if (cut_layer_ids.find(layer_id) == cut_layer_ids.end()) {
+    if (catalog.cut_layer_ids.find(layer_id) == catalog.cut_layer_ids.end()) {
       emit(layer_id);
     }
   }
-  for (Size layer_id : cut_layer_ids) {
+  for (Size layer_id : catalog.cut_layer_ids) {
     emit(layer_id);
   }
 
-  return ordered;
+  return catalog;
 }
 
-auto collectNetShapes(const Net& net, const std::set<Size>& cut_layer_ids) -> NetShapesByLayer
-{
-  NetShapesByLayer shapes;
-
-  for (const Segment& segment : net.segments) {
-    addRect(shapes, segment.layer_id, ShapeCode::kSegment, segment.rect);
-  }
-  for (const Patch& patch : net.patches) {
-    addRect(shapes, patch.layer_id, ShapeCode::kPatch, patch.rect);
-  }
-  for (const Via& via : net.vias) {
-    addRect(shapes, via.layer_rect_btm.first, ShapeCode::kViaNonCut, via.layer_rect_btm.second);
-    addRect(shapes, via.layer_rect_top.first, ShapeCode::kViaNonCut, via.layer_rect_top.second);
-    addRect(shapes, via.layer_rect_cut.first, ShapeCode::kViaCut, via.layer_rect_cut.second);
-  }
-  for (const Pin& pin : net.pins) {
-    for (const auto& [layer_id, rect] : pin.layer_id_rects) {
-      addRect(shapes, layer_id, isCutLayer(layer_id, cut_layer_ids) ? ShapeCode::kPinCut : ShapeCode::kPinNonCut, rect);
-    }
-  }
-
-  return shapes;
-}
-
-auto hasShapes(const LayerShapes& shapes) -> bool
-{
-  return std::any_of(shapes.rects.begin(), shapes.rects.end(), [](const auto& rects) { return !rects.empty(); });
-}
-
-auto outputFileName(const LayoutData& layout) -> Str
+auto outputFileName(const LayoutData& layout) -> std::string
 {
   return (layout.design_name.empty() ? "design" : layout.design_name) + ".shape";
 }
 
-void writeRect(std::ostream& os, const GtlRectI& rect)
-{
-  os << '[' << geom::min_x(rect) << ' ' << geom::min_y(rect) << ' ' << geom::max_x(rect) << ' ' << geom::max_y(rect) << ']';
-}
-
-void writeHeader(std::ostream& os, const LayoutData& layout, const LayerTable& layer_table, const std::vector<Size>& layer_order)
+void writeHeader(std::ostream& os,
+                 const LayoutData& layout,
+                 const LayerTable& layer_table,
+                 const std::vector<Size>& layer_order)
 {
   os << "# dump_net_shape\n";
+  os << "# format_version: 2\n";
+  os << "# design_name: ";
+  writeQuoted(os, layout.design_name);
+  os << '\n';
+  os << "# dbu_per_micron: " << layout.dbu_per_micron << '\n';
+  os << "# purpose: AI-readable dump of DEF/LEF-derived raw net shapes; "
+        "compare with StarRC topology from 8_spef_topology_starrc.py\n";
+  os << "# shape_code: A=Segment B=Patch C=Via_non_cut_layer "
+        "D=Via_cut_layer E=Pin_non_cut_layer F=Pin_cut_layer\n";
+  os << "# shape_code_note: C/E are non-cut shape types on the current layer; "
+        "they do not imply upper/lower layer direction\n";
+  os << "# shape_code_note: D/F are cut-layer shape types on the current layer\n";
+  os << "# coordinate_format: point=[x y], rect=[llx lly urx ury], all in DBU\n";
+  os << "# records:\n";
+  os << "#   NET <id> <name> regular <segment_count> <patch_count> <via_count> <pin_count>\n";
+  os << "#   S  <id> <layer> <rect>\n";
+  os << "#   P  <id> <layer> <rect>\n";
+  os << "#   V  <id> <name> <point>\n";
+  os << "#   VS <via_id> <shape_id> <code:C|D> <layer> <rect>\n";
+  os << "#   PN <id> <name> <is_port> <is_driver> <is_input> <is_output>\n";
+  os << "#   PS <pin_id> <shape_id> <code:E|F> <layer> <rect>\n";
   os << "# layer_order low_to_high: index layer_id design_layer_name\n";
-  for (std::size_t i = 0; i < layer_order.size(); ++i) {
-    os << "# L " << i << ' ' << layer_order[i] << ' ' << layerName(layout, layer_table, layer_order[i]) << '\n';
+  for (Size i = 0; i < layer_order.size(); ++i) {
+    os << "# L " << i << ' ' << layer_order[i] << ' ';
+    writeQuoted(os, layerName(layout, layer_table, layer_order[i]));
+    os << '\n';
   }
-  os << "# shape_code: A=Segment B=Patch C=Via_non_cut_layer D=Via_cut_layer E=Pin_non_cut_layer F=Pin_cut_layer\n";
-  os << "# rect format: [llx lly urx ury] in DBU\n";
 }
 
-void writeNet(std::ostream& os, const Net& net, const LayoutData& layout, const LayerTable& layer_table,
-              const std::vector<Size>& layer_order, const std::set<Size>& cut_layer_ids)
+struct NetDumpTask
 {
-  const NetShapesByLayer net_shapes = collectNetShapes(net, cut_layer_ids);
+  const Net* net = nullptr;
+};
 
-  os << "NET " << net.name << '\n';
-  for (Size layer_id : layer_order) {
-    const auto it = net_shapes.find(layer_id);
-    if (it == net_shapes.end() || !hasShapes(it->second)) {
-      continue;
-    }
+struct NetShapeDump
+{
+  std::string text;
+};
 
-    os << "L " << layer_id << ' ' << layerName(layout, layer_table, layer_id) << '\n';
-    for (std::size_t i = 0; i < kShapeCodeNames.size(); ++i) {
-      const auto& rects = it->second.rects[i];
-      if (rects.empty()) {
-        continue;
-      }
+auto makeNetDumpTasks(const LayoutData& layout) -> std::vector<NetDumpTask>
+{
+  std::vector<NetDumpTask> tasks;
+  tasks.reserve(layout.net_vec.size());
+  for (const Net& net : layout.net_vec) {
+    tasks.push_back(NetDumpTask{.net = &net});
+  }
+  return tasks;
+}
 
-      os << kShapeCodeNames[i];
-      for (const GtlRectI& rect : rects) {
-        os << ' ';
-        writeRect(os, rect);
-      }
+void writeNetShapes(std::ostream& os,
+                    const Net& net,
+                    const LayerCatalog& layer_catalog)
+{
+  for (Size i = 0; i < net.segments.size(); ++i) {
+    const Segment& segment = net.segments[i];
+    os << "S " << i << ' ';
+    writeSize(os, segment.layer_id);
+    os << ' ';
+    writeRect(os, segment.rect);
+    os << '\n';
+  }
+
+  for (Size i = 0; i < net.patches.size(); ++i) {
+    const Patch& patch = net.patches[i];
+    os << "P " << i << ' ';
+    writeSize(os, patch.layer_id);
+    os << ' ';
+    writeRect(os, patch.rect);
+    os << '\n';
+  }
+
+  for (Size i = 0; i < net.vias.size(); ++i) {
+    const Via& via = net.vias[i];
+    os << "V " << i << ' ';
+    writeQuoted(os, via.name);
+    os << ' ';
+    writePoint(os, via.point);
+    os << '\n';
+
+    auto write_via_shape = [&](
+        Size shape_id,
+        ShapeCode code,
+        const std::pair<Size, GtlRectI>& layer_rect) {
+      os << "VS " << i << ' ' << shape_id << ' ' << shapeCodeName(code) << ' ';
+      writeSize(os, layer_rect.first);
+      os << ' ';
+      writeRect(os, layer_rect.second);
+      os << '\n';
+    };
+    write_via_shape(0, ShapeCode::kViaNonCut, via.layer_rect_btm);
+    write_via_shape(1, ShapeCode::kViaCut, via.layer_rect_cut);
+    write_via_shape(2, ShapeCode::kViaNonCut, via.layer_rect_top);
+  }
+
+  for (Size i = 0; i < net.pins.size(); ++i) {
+    const Pin& pin = net.pins[i];
+    os << "PN " << i << ' ';
+    writeQuoted(os, pin.name);
+    os << ' ';
+    writeBool(os, pin.is_port());
+    os << ' ';
+    writeBool(os, pin.is_driver);
+    os << ' ';
+    writeBool(os, pin.is_input);
+    os << ' ';
+    writeBool(os, pin.is_output);
+    os << '\n';
+
+    for (Size shape_id = 0; shape_id < pin.layer_id_rects.size(); ++shape_id) {
+      const auto& [layer_id, rect] = pin.layer_id_rects[shape_id];
+      const ShapeCode code = isCutLayer(layer_id, layer_catalog.cut_layer_ids)
+                                 ? ShapeCode::kPinCut
+                                 : ShapeCode::kPinNonCut;
+      os << "PS " << i << ' ' << shape_id << ' ' << shapeCodeName(code) << ' ';
+      writeSize(os, layer_id);
+      os << ' ';
+      writeRect(os, rect);
       os << '\n';
     }
   }
+}
+
+void writeNet(std::ostream& os,
+              const NetDumpTask& task,
+              const LayerCatalog& layer_catalog)
+{
+  const Net& net = *task.net;
+  os << "NET " << net.net_id << ' ';
+  writeQuoted(os, net.name);
+  os << " regular ";
+  os << net.segments.size()
+     << ' ' << net.patches.size()
+     << ' ' << net.vias.size()
+     << ' ' << net.pins.size()
+     << '\n';
+  writeNetShapes(os, net, layer_catalog);
   os << "END_NET\n";
+}
+
+auto buildNetShapeDumps(const std::vector<NetDumpTask>& tasks,
+                        const LayerCatalog& layer_catalog) -> std::vector<NetShapeDump>
+{
+  std::vector<NetShapeDump> dumps(tasks.size());
+  const int threads = parallel::threadCount(tasks.size());
+#pragma omp parallel for schedule(dynamic, 16) num_threads(threads)
+  for (I64 i = 0; i < static_cast<I64>(tasks.size()); ++i) {
+    std::ostringstream stream;
+    writeNet(stream, tasks[i], layer_catalog);
+    dumps[i].text = std::move(stream).str();
+  }
+  return dumps;
 }
 
 }  // namespace
@@ -285,37 +416,27 @@ void writeNet(std::ostream& os, const Net& net, const LayoutData& layout, const 
 auto DumpNetShapeTool::run() -> bool
 {
   const RCXData& data = RCX_DATA_INST;
-  const LayoutData& layout = data.layout();
+  const LayoutData& layout = data.get_layout();
   if (layout.empty()) {
-    LOG_ERROR << "dump_net_shape failed: layout data is empty. Run init_rcx/adapt DB before dumping shapes.";
+    LOG_ERROR << "dump_net_shape failed: layout data is empty. "
+                 "Run init_rcx/adapt DB before dumping shapes.";
     return false;
   }
 
-  const Str output_file = outputFileName(layout);
+  const std::string output_file = outputFileName(layout);
   std::ofstream ofs(output_file);
   if (!ofs) {
     LOG_ERROR << "dump_net_shape failed: cannot open output file " << output_file;
     return false;
   }
 
-  std::set<Size> cut_layer_ids;
-  for (const Net& net : layout.net_vec) {
-    collectCutLayers(net, cut_layer_ids);
-  }
-  collectCutLayers(layout.special_net, cut_layer_ids);
+  const LayerCatalog layer_catalog = buildLayerCatalog(layout);
+  const std::vector<NetDumpTask> tasks = makeNetDumpTasks(layout);
+  const std::vector<NetShapeDump> dumps = buildNetShapeDumps(tasks, layer_catalog);
 
-  const std::vector<Size> layer_order = buildLayerOrder(layout);
-  writeHeader(ofs, layout, data.layer_table(), layer_order);
-
-  for (const Net& net : layout.net_vec) {
-    writeNet(ofs, net, layout, data.layer_table(), layer_order, cut_layer_ids);
-  }
-
-  if (!layout.special_net.segments.empty() || !layout.special_net.patches.empty() || !layout.special_net.vias.empty()
-      || !layout.special_net.pins.empty()) {
-    Net special_net = layout.special_net;
-    special_net.name = "__SPECIAL_NET__";
-    writeNet(ofs, special_net, layout, data.layer_table(), layer_order, cut_layer_ids);
+  writeHeader(ofs, layout, data.get_layer_table(), layer_catalog.order);
+  for (const NetShapeDump& dump : dumps) {
+    ofs << dump.text;
   }
   if (!ofs) {
     LOG_ERROR << "dump_net_shape failed: cannot write output file " << output_file;

@@ -14,10 +14,15 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file MappingBuilder.hpp
+ * @brief RCX design-to-process layer mapping reader.
+ */
 #pragma once
 
 #include <string>
 #include <unordered_map>
+
 namespace ircx {
 namespace parser {
 
@@ -27,10 +32,10 @@ class MappingBuilder
   MappingBuilder() = default;
   ~MappingBuilder() = default;
 
-  const std::unordered_map<std::string, std::string>& design_to_process_layer_names() const {
+  const std::unordered_map<std::string, std::string>& get_design_to_process_layer_names() const {
     return design_to_process_layer_names_;
   }
-  const std::unordered_map<std::string, std::string>& process_to_design_layer_names() const {
+  const std::unordered_map<std::string, std::string>& get_process_to_design_layer_names() const {
     return process_to_design_layer_names_;
   }
 

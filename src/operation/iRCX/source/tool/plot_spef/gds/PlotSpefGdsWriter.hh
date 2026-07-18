@@ -14,23 +14,28 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file PlotSpefGdsWriter.hh
+ * @brief plot_spef implementation detail.
+ */
 #pragma once
 
-#include <string>
-
-#include "config/PlotSpefConfig.hh"
-#include "model/PlotSpefModel.hh"
+#include "Types.hh"
 
 namespace ircx::plot_spef {
+
+struct Config;
+struct Model;
 
 class GdsWriter
 {
  public:
-  auto write(const Model& model, const Config& config) const -> bool;
+  auto write(const Model& model,
+             const Config& config) const -> bool;
 
  private:
-  static auto safeStructName(const std::string& name) -> std::string;
-  static auto formatValue(double value, const std::string& unit) -> std::string;
+  static auto formatValue(F64 value,
+                          const std::string& unit) -> std::string;
 };
 
 }  // namespace ircx::plot_spef

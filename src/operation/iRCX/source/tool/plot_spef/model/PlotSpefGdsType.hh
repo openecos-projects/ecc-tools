@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file PlotSpefGdsType.hh
+ * @brief plot_spef implementation detail.
+ */
 #pragma once
 
 namespace ircx::plot_spef {

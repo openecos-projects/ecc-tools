@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file Pixel.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include <algorithm>
@@ -22,6 +26,7 @@
 #include "IntervalUtils.hh"
 #include "TopoPool.hh"
 #include "log/Log.hh"
+
 namespace ircx {
 
 // Perpendicular Overlap
@@ -39,12 +44,12 @@ class Pixel
   ~Pixel() = default;
 
   // getter
-  Dbu x0() const { return x0_; }
-  Dbu y0() const { return y0_; }
-  Dbu nx() const { return nx_; }
-  Dbu ny() const { return ny_; }
-  Dbu dx() const { return dx_; }
-  Dbu dy() const { return dy_; }
+  Dbu get_x0() const { return x0_; }
+  Dbu get_y0() const { return y0_; }
+  Dbu get_nx() const { return nx_; }
+  Dbu get_ny() const { return ny_; }
+  Dbu get_dx() const { return dx_; }
+  Dbu get_dy() const { return dy_; }
 
   // setter
   void set_x0(Dbu x0) { x0_ = x0; }
@@ -80,12 +85,12 @@ class Pixel
       }
     }
 
-    const GtlRectI& rect = edge.shape();
+    const GtlRectI& rect = edge.get_shape();
 
-    Dbu x0 = geom::min_x(rect);
-    Dbu y0 = geom::min_y(rect);
-    Dbu x1 = geom::max_x(rect);
-    Dbu y1 = geom::max_y(rect);
+    Dbu x0 = geom::minX(rect);
+    Dbu y0 = geom::minY(rect);
+    Dbu x1 = geom::maxX(rect);
+    Dbu y1 = geom::maxY(rect);
 
     if (x0 >= x1 || y0 >= y1) {
       return;
@@ -108,7 +113,7 @@ class Pixel
     }
   }
 
-  std::vector<PixelOverlap> get_overlap(const LineSegmentI& line_seg) const
+  std::vector<PixelOverlap> overlap(const LineSegmentI& line_seg) const
   {
     std::vector<PixelOverlap> ret;
     if (pixel_.empty() || pixel_.front().empty()) {
@@ -193,8 +198,12 @@ class Pixel
 
       // Each occupied idx is a sample on the pixel lattice. The effective
       // overlap span is bounded by the midpoints of neighboring samples.
-      const Dbu lo = ircx::interval::midpoint(idx_to_coord(start_idx), idx_to_coord(start_idx + 1));
-      const Dbu hi = ircx::interval::midpoint(idx_to_coord(end_idx_exclusive - 1), idx_to_coord(end_idx_exclusive));
+      const Dbu lo = ircx::interval::midpoint(
+          idx_to_coord(start_idx),
+          idx_to_coord(start_idx + 1));
+      const Dbu hi = ircx::interval::midpoint(
+          idx_to_coord(end_idx_exclusive - 1),
+          idx_to_coord(end_idx_exclusive));
 
       PixelOverlap seq = clamp_sequence_bounds(lo, hi);
       if (!seq.empty()) {

@@ -33,6 +33,8 @@ target_link_libraries(
   idm
   icts_source_database_config
   icts_source_utils_logger
+  log
+  liberty
 )
 
 if(DEBUG_ICTS_SOURCE_DATABASE_ADAPTER_SDC)

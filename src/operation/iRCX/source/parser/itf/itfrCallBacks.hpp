@@ -14,37 +14,39 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itfrCallBacks.hpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
 #pragma once
 
 #include "itfrReader.hpp"
+
 namespace itf
 {
   
 class itfrCallBacks {
  public:
-  // constructor
-  itfrCallBacks();
-
   // function
   static void reset();
+  static void clear();
 
   // members
-  itfrStringCbFnType technology_cb;
-  itfrStringCbFnType process_foundry_cb;
-  itfrIntegerCbFnType process_node_cb;
-  itfrStringCbFnType process_type_cb;
-  itfrDoubleCbFnType process_version_cb;
-  itfrStringCbFnType process_corner_cb;
-  itfrStringCbFnType reference_direction_cb;
-  itfrDoubleCbFnType global_temperature_cb;
-  itfrDoubleCbFnType background_er_cb;
-  itfrDoubleCbFnType half_node_scale_factor_cb;
-  itfrIntegerCbFnType use_si_density_cb;
-  itfrDoubleCbFnType drop_factor_lateral_spacing_cb;
-  itfrConductorCbFnType conductor_cb;
-  itfrDielectricCbFnType dielectric_cb;
-  itfrViaCbFnType via_cb;
-  itfrVariationParamCbFnType variation_cb;
+  itfrStringCbFnType technology_cb = nullptr;
+  itfrStringCbFnType process_foundry_cb = nullptr;
+  itfrDoubleCbFnType process_node_cb = nullptr;
+  itfrStringCbFnType process_type_cb = nullptr;
+  itfrDoubleCbFnType process_version_cb = nullptr;
+  itfrStringCbFnType process_corner_cb = nullptr;
+  itfrStringCbFnType reference_direction_cb = nullptr;
+  itfrDoubleCbFnType global_temperature_cb = nullptr;
+  itfrDoubleCbFnType background_er_cb = nullptr;
+  itfrDoubleCbFnType half_node_scale_factor_cb = nullptr;
+  itfrIntegerCbFnType use_si_density_cb = nullptr;
+  itfrDoubleCbFnType drop_factor_lateral_spacing_cb = nullptr;
+  itfrConductorCbFnType conductor_cb = nullptr;
+  itfrDielectricCbFnType dielectric_cb = nullptr;
+  itfrViaCbFnType via_cb = nullptr;
 };
 
 extern itfrCallBacks* itfCallbacks;

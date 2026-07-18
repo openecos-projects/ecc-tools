@@ -14,9 +14,14 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file SpefDumperHeader.cc
+ * @brief iRCX module implementation detail.
+ */
 #include "SpefDumper.hh"
 
 #include <ctime>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 
@@ -26,7 +31,8 @@
 
 namespace ircx {
 
-void SpefDumper::writeHeader(std::ofstream& ofs, Size corner_idx) const
+void SpefDumper::writeHeader(std::ofstream& ofs,
+                             Size corner_idx) const
 {
   auto t = std::time(nullptr);
   auto tm = *std::localtime(&t);
@@ -48,9 +54,12 @@ void SpefDumper::writeHeader(std::ofstream& ofs, Size corner_idx) const
   ofs << "*R_UNIT 1.0 OHM\n";
   ofs << "*L_UNIT 1.0 HENRY\n";
 
-  if (RCX_CONFIG_INST.get_report_geometry()) {
+  if (RCX_CONFIG_INST.is_report_geometry()) {
     ofs << "\n// COMMENTS\n\n";
-    ofs << "//   HALF_NODE_SCALING_FACTOR " << std::setprecision(6) << (*corner_data_)[corner_idx].halfNodeScaleFactor() << "\n";
+    ofs << "//   HALF_NODE_SCALING_FACTOR "
+        << std::setprecision(6)
+        << (*corner_data_)[corner_idx].get_half_node_scale_factor()
+        << "\n";
   }
 }
 
@@ -73,14 +82,16 @@ void SpefDumper::writePorts(std::ofstream& ofs) const
 {
   ofs << "\n*PORTS\n\n";
   for (Size port_idx = 0; port_idx < spef_context_->port_names.size(); ++port_idx) {
-    const Str& name = spef_context_->port_names[port_idx];
-    ofs << "*" << name_maps_.port_name_to_id[name] << " " << spef_context_->port_io[port_idx] << "\n";
+    const std::string& name = spef_context_->port_names[port_idx];
+    ofs << "*" << name_maps_.port_name_to_id[name]
+        << " " << spef_context_->port_io[port_idx]
+        << "\n";
   }
 }
 
 void SpefDumper::writeLayerMap(std::ofstream& ofs) const
 {
-  if (!RCX_CONFIG_INST.get_report_geometry()) {
+  if (!RCX_CONFIG_INST.is_report_geometry()) {
     return;
   }
 

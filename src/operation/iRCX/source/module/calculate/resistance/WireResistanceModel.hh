@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file WireResistanceModel.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include <span>
@@ -21,20 +25,18 @@
 #include "NetEtchProfile.hh"
 #include "Types.hh"
 
-namespace itf {
+namespace ircx {
+
 class LayerConductor;
 class ProcessCorner;
-}  // namespace itf
-
-namespace ircx {
 
 class WireResistanceModel
 {
  public:
   static auto calc(LineSegment<Micron> segment,
                    std::span<const EdgeEtchInterval> edge_etch_intervals,
-                   const itf::ProcessCorner& corner,
-                   const itf::LayerConductor& layer,
+                   const ProcessCorner& corner,
+                   const LayerConductor& layer,
                    F64 operating_temperature) -> F64;
 };
 

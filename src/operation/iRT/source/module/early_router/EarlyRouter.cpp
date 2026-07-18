@@ -84,7 +84,7 @@ void EarlyRouter::route(std::map<std::string, std::any> config_map)
     outputPlanarNetCSV(er_model);
     outputPlanarOverflowCSV(er_model);
     printPlanarSummary(er_model);
-    // debugPlotERModel(er_model, "tg");
+    // debugPlotERModel(er_model, "pr");
   }
   if (er_model.get_er_com_param().get_stage() >= ERStage::kEgr3D) {
     buildLayerNodeMap(er_model);
@@ -1273,7 +1273,11 @@ std::vector<Segment<PlanarCoord>> EarlyRouter::getPlanarTopoList(ERModel& er_mod
     std::sort(planar_coord_list.begin(), planar_coord_list.end(), CmpPlanarCoordByXASC());
     planar_coord_list.erase(std::unique(planar_coord_list.begin(), planar_coord_list.end()), planar_coord_list.end());
   }
+
   std::vector<Segment<PlanarCoord>> planar_topo_list;
+  TBTask tb_task;
+  tb_task.set_planar_coord_list(planar_coord_list);
+  for (Segment<PlanarCoord>& planar_topo : RTTB.getPlanarTopoList(tb_task)) {
   TBTask tb_task;
   tb_task.set_planar_coord_list(planar_coord_list);
   for (Segment<PlanarCoord>& planar_topo : RTTB.getPlanarTopoList(tb_task)) {

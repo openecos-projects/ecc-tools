@@ -8,7 +8,6 @@ target_link_libraries(tcl_idb
     PUBLIC
         tool_manager
         tcl
-        shell-cmd
         str
         idm
         file_manager_db

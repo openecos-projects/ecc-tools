@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file CornerNetPool.hh
+ * @brief Dense storage indexed by process corner and net.
+ */
 #pragma once
 
 #include <vector>
@@ -35,7 +39,8 @@ class CornerNetPool
   CornerNetPool() = default;
   ~CornerNetPool() = default;
 
-  void init(Size corner_num, Size net_num)
+  void init(Size corner_num,
+            Size net_num)
   {
     corner_num_ = corner_num;
     net_num_ = net_num;
@@ -51,8 +56,8 @@ class CornerNetPool
   }
 
   bool empty() const { return items_.empty(); }
-  Size corner_num() const { return corner_num_; }
-  Size net_num() const { return net_num_; }
+  Size get_corner_num() const { return corner_num_; }
+  Size get_net_num() const { return net_num_; }
   Size size() const { return items_.size(); }
 
   T& at(CornerNetId id) { return items_.at(index(id)); }

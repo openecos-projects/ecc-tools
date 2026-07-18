@@ -20,7 +20,7 @@ add_subdirectory(py_izh)
 add_subdirectory(py_report)
 add_subdirectory(py_feature)
 add_subdirectory(py_eval)
-add_subdirectory(py_vec)
+# add_subdirectory(py_vec)  # disabled: depends on ivec_api (moved to refactor)
 add_subdirectory(py_imp)
 
 # ADD SOURCE FILES
@@ -48,7 +48,7 @@ target_link_libraries(ecc_py
         py_feature
         py_eval
         log
-        py_vec
+        # py_vec  # disabled: depends on ivec_api (moved to refactor)
         py_imp
 )
 

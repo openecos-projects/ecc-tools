@@ -43,10 +43,10 @@ template <typename T>
 class IdbCoordinate;
 }  // namespace idb
 
-namespace ista {
+namespace idb {
 class LibCell;
 class LibLibrary;
-}  // namespace ista
+}  // namespace idb
 
 namespace icts {
 
@@ -148,7 +148,7 @@ class Wrapper
       -> RootDriverCost;
   auto queryBufferPorts(const std::string& cell_master) const -> std::pair<std::string, std::string>;
   auto emitConfiguredUnitWireRcReport(SchemaWriter& reporter, const Config& config, const std::string& title) const -> void;
-  auto findLibertyCell(const std::string& cell_master) const -> ista::LibCell*;
+  auto findLibertyCell(const std::string& cell_master) const -> idb::LibCell*;
 
   // Setter
   auto set_idb_design(idb::IdbDesign* design) -> void { _idb_design = design; }
@@ -201,8 +201,8 @@ class Wrapper
   idb::IdbDesign* _idb_design = nullptr;
   idb::IdbLayout* _idb_layout = nullptr;
   mutable bool _liberty_loaded = false;
-  mutable std::vector<std::unique_ptr<ista::LibLibrary>> _lib_libraries;
-  mutable std::unordered_map<std::string, ista::LibCell*> _lib_cell_by_master;
+  mutable std::vector<std::unique_ptr<idb::LibLibrary>> _lib_libraries;
+  mutable std::unordered_map<std::string, idb::LibCell*> _lib_cell_by_master;
 
   std::unordered_map<Inst*, idb::IdbInstance*> _cts2idb_inst_map;
   std::unordered_map<idb::IdbInstance*, Inst*> _idb2cts_inst_map;

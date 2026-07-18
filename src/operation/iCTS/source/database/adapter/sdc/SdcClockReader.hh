@@ -33,15 +33,15 @@ namespace idb {
 class IdbDesign;
 }  // namespace idb
 
-namespace ista {
+namespace idb {
 class LibCell;
-}  // namespace ista
+}  // namespace idb
 
 namespace icts {
 
 class SchemaWriter;
 
-using SdcLibertyCellLookup = std::function<ista::LibCell*(const std::string&)>;
+using SdcLibertyCellLookup = std::function<idb::LibCell*(const std::string&)>;
 
 enum class SdcObjectKind
 {

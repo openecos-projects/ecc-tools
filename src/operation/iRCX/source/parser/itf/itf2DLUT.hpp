@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itf2DLUT.hpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
 #pragma once 
 
 #include <algorithm>
@@ -21,7 +25,10 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
+
 namespace itf
 {
 
@@ -32,7 +39,9 @@ class itf2DLUT {
  public: 
   // constructor
   itf2DLUT() = default;
-  explicit itf2DLUT(const char* row_name, const char* col_name, const char* value_name)
+  explicit itf2DLUT(const char* row_name,
+                    const char* col_name,
+                    const char* value_name)
   : _rows(),
     _cols(),
     _values(),
@@ -100,7 +109,8 @@ class itf2DLUT {
 
   // @param r_idx row index
   // @param c_idx col index
-  std::optional<T3> query(int r_idx, int c_idx) const {
+  std::optional<T3> query(int r_idx,
+                          int c_idx) const {
     int v_idx = r_idx * _cols.size() + c_idx;
     if ((0 <= r_idx) && (r_idx < (int)_rows.size()  )
      && (0 <= c_idx) && (c_idx < (int)_cols.size()  ) 
@@ -117,76 +127,47 @@ class itf2DLUT {
   // In other words, no extrapolate beyond the table.
   // @param r data in _raws 
   // @param c data in _cols
-  std::optional<T3> query_interpolation(const T1& r, const T2& c) const {
+  std::optional<T3> query_interpolation(const T1& r,
+                                        const T2& c) const {
     if (_rows.empty() || _cols.empty()) return std::nullopt;
     
-    // 找到行边界索引
-    auto r_it = std::lower_bound(_rows.begin(), _rows.end(), r);
-    size_t r_idx;
-    
-    if (r_it == _rows.end()) {
-      r_idx = _rows.size() - 1; // r 大于等于所有行
-    } else if (r_it == _rows.begin()) {
-      r_idx = 0; // r 小于等于第一行
-    } else {
-      r_idx = std::distance(_rows.begin(), r_it); // r 在两个行之间，需要插值
-    }
-    
-    // 找到列边界索引（类似）
-    auto c_it = std::lower_bound(_cols.begin(), _cols.end(), c);
-    size_t c_idx;
-    
-    if (c_it == _cols.end()) {
-      c_idx = _cols.size() - 1;
-    } else if (c_it == _cols.begin()) {
-      c_idx = 0;
-    } else {
-      c_idx = std::distance(_cols.begin(), c_it);
-    }
-    
-    // 确定是否需要插值
-    bool r_at_boundary = (r_idx == 0 || r_idx == _rows.size() - 1);
-    bool c_at_boundary = (c_idx == 0 || c_idx == _cols.size() - 1);
-    
-    // 如果查询点在边界或之外，直接返回最近的网格点
-  if (r_at_boundary || c_at_boundary) {
-      // 确定最近的行列索引
-      size_t nearest_r = r_idx;
-      size_t nearest_c = c_idx;
-      
-      // 如果 r 小于第一行，用第一行
-      if (r < _rows[0]) nearest_r = 0;
-      // 如果 r 大于最后一行，用最后一行
-      else if (r > _rows.back()) nearest_r = _rows.size() - 1;
-      // 否则 r 在范围内，但可能靠近边界
-      
-      // 列类似处理
-      if (c < _cols[0]) nearest_c = 0;
-      else if (c > _cols.back()) nearest_c = _cols.size() - 1;
-      
-      return query(nearest_r, nearest_c);
-    }
-    
-    // 完全在内部的情况，进行双线性插值
-    size_t r_low = r_idx - 1;
-    size_t r_high = r_idx;
-    size_t c_low = c_idx - 1;
-    size_t c_high = c_idx;
-    
+    const auto [r_low, r_high] = bounding_indices_(_rows, r);
+    const auto [c_low, c_high] = bounding_indices_(_cols, c);
+
     auto v_rl_cl = query(r_low, c_low);
+    if (!v_rl_cl) return std::nullopt;
+
+    if (r_low == r_high && c_low == c_high) {
+      return *v_rl_cl;
+    }
+
+    if (r_low == r_high) {
+      auto v_rl_ch = query(r_low, c_high);
+      if (!v_rl_ch) return std::nullopt;
+
+      const double col_ratio = interpolation_ratio_(_cols, c_low, c_high, c);
+      return interpolate_value_(*v_rl_cl, *v_rl_ch, col_ratio);
+    }
+
+    if (c_low == c_high) {
+      auto v_rh_cl = query(r_high, c_low);
+      if (!v_rh_cl) return std::nullopt;
+
+      const double row_ratio = interpolation_ratio_(_rows, r_low, r_high, r);
+      return interpolate_value_(*v_rl_cl, *v_rh_cl, row_ratio);
+    }
+
     auto v_rl_ch = query(r_low, c_high);
     auto v_rh_cl = query(r_high, c_low);
     auto v_rh_ch = query(r_high, c_high);
-    
-    if (v_rl_cl && v_rl_ch && v_rh_cl && v_rh_ch) {
-      // 列插值
-      double col_ratio = (c - _cols[c_low]) / (_cols[c_high] - _cols[c_low]);
-      auto v_rl_cmid = std::lerp(*v_rl_cl, *v_rl_ch, col_ratio);
-      auto v_rh_cmid = std::lerp(*v_rh_cl, *v_rh_ch, col_ratio);
-      
-      // 行插值
-      double row_ratio = (r - _rows[r_low]) / (_rows[r_high] - _rows[r_low]);
-      return std::lerp(v_rl_cmid, v_rh_cmid, row_ratio);
+
+    if (v_rl_ch && v_rh_cl && v_rh_ch) {
+      const double col_ratio = interpolation_ratio_(_cols, c_low, c_high, c);
+      auto v_rl_cmid = interpolate_value_(*v_rl_cl, *v_rl_ch, col_ratio);
+      auto v_rh_cmid = interpolate_value_(*v_rh_cl, *v_rh_ch, col_ratio);
+
+      const double row_ratio = interpolation_ratio_(_rows, r_low, r_high, r);
+      return interpolate_value_(v_rl_cmid, v_rh_cmid, row_ratio);
     }
     
     return std::nullopt;
@@ -194,7 +175,8 @@ class itf2DLUT {
 
   // @param list_name data_list name. match data_list in an order of rows, cols and values.
   template<typename E>
-  void add_data(const char* list_name, E e) {
+  void add_data(const char* list_name,
+                E e) {
     if (_row_name.compare(list_name) == 0) {
       add_row_data(T1(e));
     } else if (_col_name.compare(list_name) == 0) {
@@ -207,13 +189,14 @@ class itf2DLUT {
   }
 
   template<typename E>
-  void set_data_list(const char* list_name, const std::vector<E>& src) {
+  void set_data_list(const char* list_name,
+                     const std::vector<E>& src) {
     if (_row_name.compare(list_name) == 0) {
-      set_list<T1, E>(&_rows, src);
+      assignList<T1, E>(&_rows, src);
     } else if (_col_name.compare(list_name) == 0) {
-      set_list<T2, E>(&_cols, src);
+      assignList<T2, E>(&_cols, src);
     } else if (_value_name.compare(list_name) == 0) {
-      set_list<T3, E>(&_values, src);
+      assignList<T3, E>(&_values, src);
     } else {
       std::cout << "fail to find data list named " << list_name << std::endl;
     }
@@ -222,7 +205,9 @@ class itf2DLUT {
   // @param r rows_name
   // @param c cols_name
   // @param v values_name
-  void set_names(const char* r, const char* c, const char* v) {
+  void set_names(const char* r,
+                 const char* c,
+                 const char* v) {
     set_row_name(r);
     set_col_name(c);
     set_value_name(v);
@@ -239,9 +224,61 @@ class itf2DLUT {
  
  private:
   // function
+  template<typename T>
+  struct is_pair_ : std::false_type {};
+
+  template<typename TFirst, typename TSecond>
+  struct is_pair_<std::pair<TFirst, TSecond>> : std::true_type {};
+
+  template<typename TValue>
+  static TValue interpolate_value_(const TValue& low,
+                                   const TValue& high,
+                                   double ratio) {
+    if constexpr (is_pair_<TValue>::value) {
+      return TValue{
+        interpolate_value_(low.first, high.first, ratio),
+        interpolate_value_(low.second, high.second, ratio)
+      };
+    } else {
+      return static_cast<TValue>(
+          std::lerp(static_cast<double>(low), static_cast<double>(high), ratio));
+    }
+  }
+
+  template<typename TValue>
+  static std::pair<size_t, size_t> bounding_indices_(const std::vector<TValue>& values,
+                                                     const TValue& value) {
+    if (value <= values.front()) {
+      return {0, 0};
+    }
+    if (value >= values.back()) {
+      const size_t last = values.size() - 1;
+      return {last, last};
+    }
+
+    auto high_it = std::lower_bound(values.begin(), values.end(), value);
+    const size_t high = std::distance(values.begin(), high_it);
+    if (*high_it == value) {
+      return {high, high};
+    }
+    return {high - 1, high};
+  }
+
+  template<typename TValue>
+  static double interpolation_ratio_(const std::vector<TValue>& values,
+                                     size_t low,
+                                     size_t high,
+                                     const TValue& value) {
+    if (low == high) {
+      return 0.0;
+    }
+    return static_cast<double>(value - values[low])
+         / static_cast<double>(values[high] - values[low]);
+  }
 
   template<typename E1, typename E2>
-  void set_list(void* dst, const std::vector<E2>& src) {
+  void assignList(void* dst,
+                  const std::vector<E2>& src) {
     if (typeid(E1) == typeid(E2)) {
       std::vector<E2>* dst_ptr = (std::vector<E2>*)dst;
       dst_ptr->clear();
@@ -263,7 +300,7 @@ class itfTitleLut : public itf2DLUT<T1, T2, T3> {
 
   itfTitleLut(const char* title, const char* row_name, const char* col_name, const char* value_name)
   : itf2DLUT<T1, T2, T3>(row_name, col_name, value_name),
-    _title(title)
+    _title(title ? title : "")
   { }
 
   itfTitleLut(const itfTitleLut& other)
@@ -273,14 +310,14 @@ class itfTitleLut : public itf2DLUT<T1, T2, T3> {
 
   itfTitleLut(const char* title, const itf2DLUT<T1, T2, T3> lut)
   : itf2DLUT<T1, T2, T3>(lut),
-    _title(title)
+    _title(title ? title : "")
   { }
 
   // getter
   std::string get_title() const { return _title; }
 
   // setter
-  void set_title(const char* title) { _title = title; }
+  void set_title(const char* title) { _title = title ? title : ""; }
   void set_lut(const itf2DLUT<T1, T2, T3>& lut) {
     static_cast<itf2DLUT<T1, T2, T3>&>(*this) = lut;
   }

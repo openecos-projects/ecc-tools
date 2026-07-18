@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file Report.hh
+ * @brief iRCX report flow entry point.
+ */
 #pragma once
 
 namespace ircx {

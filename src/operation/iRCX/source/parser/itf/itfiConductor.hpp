@@ -14,12 +14,19 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itfiConductor.hpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
 #pragma once 
 
+#include <optional>
+#include <string>
 #include <vector>
 
 #include "itf1DLUT.hpp"
 #include "itf2DLUT.hpp"
+
 namespace itf
 {
 
@@ -50,7 +57,7 @@ class itfiBTSW {
 
  private:
   // members
-  char* _type;
+  std::string _type;
   itf1DLUT<float, float> _sr_lut; // (silicon width, relative change)
 };
 
@@ -61,11 +68,12 @@ class itfiG2DC {
   // constructor
 
   // getter
-  size_t get_number_of_tables() const;
+  size_t get_table_count() const;
 
   // setter
-  void set_number_of_tables(size_t);
-  void add_model(const char*, const itf2DLUT<float, float, float>&);
+  void set_table_count(size_t);
+  void add_model(const char*,
+                 const itf2DLUT<float, float, float>&);
 
   // operator
   bool operator==(const itfiG2DC&) const;
@@ -76,7 +84,8 @@ class itfiG2DC {
  private:
   // members
   size_t _number_of_tables;
-  std::vector<itfTitleLut<float, float, float>> _model_list; // (gate_to_contact, contact_to_contact) -> caps_per_micron
+  // (gate_to_contact, contact_to_contact) -> caps_per_micron
+  std::vector<itfTitleLut<float, float, float>> _model_list;
 };
 
 // Polynomial Based Thickness Variation
@@ -88,16 +97,16 @@ class itfiPBTV {
   const std::vector<int>& get_density_polynomial_orders() const;
   const std::vector<int>& get_width_polynomial_orders() const;
   const std::vector<float>& get_width_ranges() const;
-  const std::vector<float>& get_polynomial_coefficients_list(size_t) const;
-  size_t get_polynomial_coefficients_list_size() const;
+  const std::vector<float>& get_polynomial_coefficients(size_t) const;
+  size_t get_polynomial_coefficient_list_size() const;
 
   // setter
   void add_density_polynomial_order(int);
   void add_width_polynomial_order(int);
   void add_width_range(float);
-  void set_density_polynomial_order(const std::vector<int>&);
-  void set_width_polynomial_order(const std::vector<int>&);
-  void set_width_range(const std::vector<float>&);
+  void set_density_polynomial_orders(const std::vector<int>&);
+  void set_width_polynomial_orders(const std::vector<int>&);
+  void set_width_ranges(const std::vector<float>&);
   void add_polynomial_coefficients(const std::vector<float>&);
 
   // operator
@@ -129,7 +138,8 @@ class itfiThicknessVsDensity {
 
   // setter
   void set_type(const char*);
-  void add_dr(float, float);
+  void add_dr(float,
+              float);
   void set_dr_list(const std::vector<std::pair<float, float>>&);
 
   // operator
@@ -141,7 +151,7 @@ class itfiThicknessVsDensity {
 
  private:
   // members
-  char* _type;
+  std::string _type;
   itf1DLUT<float, float> _dr_lut; // (density, relative change in thickness)
 };
 
@@ -180,6 +190,8 @@ class itfiEtchVWS : public itfTitleLut<float, float, float>{
   std::vector<float> get_widths() const { return get_rows();}
   // Units: microns
   std::vector<float> get_spacings() const { return get_cols();}
+  std::optional<float> query_etch(double width,
+                                  double spacing) const;
 };
 
 // RHO_VS_SI_WIDTH_AND_THICKNESS
@@ -190,7 +202,7 @@ class itfiRhoVWS : public itf2DLUT<float, float, float> {
   // Units: microns.
   std::vector<float> get_thickness() const { return get_rows(); }
   // Units: microns.
-  std::vector<float> get_width() const { return get_cols(); }
+  std::vector<float> get_widths() const { return get_cols(); }
   // operator
   itfiRhoVWS& operator=(const itf2DLUT<float, float, float>& rhs) {
     itf2DLUT::operator=(rhs);
@@ -212,7 +224,7 @@ class itfiConductor {
   const char* get_conductor_name() const;
   float get_wmin() const;
   float get_smin() const;
-  float get_thickness () const;
+  float get_thickness() const;
   std::vector<float>& get_air_gap_spacings();
   const std::vector<float>& get_air_gap_spacings() const;
   std::vector<float>& get_air_gap_widths();
@@ -229,7 +241,7 @@ class itfiConductor {
   bool has_t0() const;
   std::optional<float> get_crt1() const;
   std::optional<float> get_crt2() const;
-  const std::vector<itfiWidthCrt>& get_crt_vs_si_width() const;
+  const std::vector<itfiWidthCrt>& get_crt_by_si_width() const;
   const std::vector<itfiDensityBox>& get_density_box_weighting_factor() const;
   float get_drop_factor() const;
   float get_etch() const;
@@ -246,18 +258,21 @@ class itfiConductor {
   const itfiG2DC& get_gate_to_diffusion_cap() const;
   itfTitleLut<float, float, float>& get_ild_vws();
   const itfTitleLut<float, float, float>& get_ild_vws() const;
-  char* get_layer_type() const;
-  char* get_measured_from() const;
-  itfiPBTV& get_PBTV();
-  const itfiPBTV& get_PBTV() const;
+  const char* get_layer_type() const;
+  const char* get_measured_from() const;
+  itfiPBTV& get_pbtv();
+  const itfiPBTV& get_pbtv() const;
   float get_rpsq() const;
   float get_rho() const;
   itf1DLUT<float, float>& get_rpsq_vs_si_width();
   const itf1DLUT<float, float>& get_rpsq_vs_si_width() const;
+  std::optional<float> query_rpsq_by_si_width(double width) const;
   itf2DLUT<float, float, float>& get_rpsq_vws();
   const itf2DLUT<float, float, float>& get_rpsq_vws() const;
-  itfiRhoVWS& get_rho_v_siw_t();
-  const itfiRhoVWS& get_rho_v_siw_t() const;
+  itfiRhoVWS& get_rho_vs_si_width_and_thickness();
+  const itfiRhoVWS& get_rho_vs_si_width_and_thickness() const;
+  std::optional<float> query_rho_by_si_width_and_thickness(double thickness,
+                                                           double width) const;
   itf2DLUT<float, float, float>& get_rho_vws();
   const itf2DLUT<float, float, float>& get_rho_vws() const;
   float get_side_tangent() const;
@@ -284,13 +299,17 @@ class itfiConductor {
   void set_t0(float);
   void set_crt1(float crt1);
   void set_crt2(float crt2);
-  void add_siw_crt1_crt2(float, float, float);
-  void add_density_box_weight(int, double);
+  void add_si_width_crt(float,
+                        float,
+                        float);
+  void add_density_box_weight(int,
+                              double);
   void set_drop_factor(float);
   void set_etch(float);
   void set_capacitive_only_etch(float);
   void set_resistive_only_etch(float);
-  void add_etch_vws(const char*, const itf2DLUT<float, float, float>&);
+  void add_etch_vws(const char*,
+                    const itf2DLUT<float, float, float>&);
   void set_fill_ratio(float);
   void set_fill_width(float);
   void set_fill_spacing(float);
@@ -298,7 +317,7 @@ class itfiConductor {
   void set_gate_to_contact_smin(float);
   void set_layer_type(const char*);
   void set_side_tangent(float);
-  void set_is_planar();
+  void set_planar();
   void set_ild_vws_lut(const itf2DLUT<float, float, float>&);
   void set_ild_vws_title(const char*);
   void set_thickness_vws_lut(const itf2DLUT<float, float, float>&);
@@ -307,7 +326,7 @@ class itfiConductor {
   void set_rho(float);
   void set_rpsq_vs_si_width(const std::vector<std::pair<float, float>>&);
   void set_rpsq_vws(const itf2DLUT<float, float, float>&);
-  void set_rho_v_siw_t(const itf2DLUT<float, float, float>&);
+  void set_rho_vs_si_width_and_thickness(const itf2DLUT<float, float, float>&);
   void set_rho_vws(const itf2DLUT<float, float, float>&);
   void set_tvf_bt_vws(const itf2DLUT<float, float, float>&);
   void set_tvf_bt_vwd(const itf2DLUT<float, float, float>&);
@@ -319,11 +338,13 @@ class itfiConductor {
 
   // function
   void clear();
-  void query_crt(double, double&, double&);
+  void queryCrtBySiWidth(double,
+                         std::optional<double>&,
+                         std::optional<double>&) const;
 
  private:
   // members
-  char* _conductor_name;
+  std::string _conductor_name;
   float _wmin;  // The minimum width of the layer. Units: microns
   float _smin;  // Minimum spacing value. Units: microns
   float _thickness; // Units: microns
@@ -347,12 +368,12 @@ class itfiConductor {
   float _fill_ratio;
   float _fill_width;
   float _fill_spacing;
-  char* _fill_type;
+  std::string _fill_type;
   float _gate_to_contact_smin;
   itfiG2DC _gate_to_diffusion_cap;
   itfTitleLut<float, float, float> _ild_vws; // (widths, spacings) -> thickness_changes
-  char* _layer_type;
-  char* _measured_from;
+  std::string _layer_type;
+  std::string _measured_from;
   itfiPBTV _PBTV; // polynomial based thickness variation
   float _rpsq{0.};
   float _rho{0.};
@@ -363,8 +384,10 @@ class itfiConductor {
   float _side_tangent;
   itfiThicknessVsDensity _thickness_vs_density;
   itfTitleLut<float, float, float> _thickness_vws; // (widths, spacings) -> values
-  itf2DLUT<float, float, float> _tvf_bt_vws; // bottom_thickness_vs_width_and_spacing. (widths, spacings) -> values
-  itf2DLUT<float, float, float> _tvf_bt_vwd; // bottom_thickness_vs_width_and_deltapd. (widths, deltapd) -> values
+  // bottom_thickness_vs_width_and_spacing. (widths, spacings) -> values
+  itf2DLUT<float, float, float> _tvf_bt_vws;
+  // bottom_thickness_vs_width_and_deltapd. (widths, deltapd) -> values
+  itf2DLUT<float, float, float> _tvf_bt_vwd;
 
   unsigned _has_air_gap_vs_spacing : 1;
   unsigned _has_bottom_dielectric_thickness : 1;

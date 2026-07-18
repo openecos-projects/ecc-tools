@@ -17,7 +17,7 @@
 #include "Lib.hh"
 #include "Vector.hh"
 
-namespace ista {
+namespace idb {
 
 /**
  * @brief class for classify the lib cell.
@@ -55,4 +55,4 @@ class LibClassifyCell
   ieda::BTreeMap<LibCell*, Vector<LibCell*>> _func_same_cells;  //!< The one cell map to the func same cell with
                                                                 //!< different size.
 };
-}  // namespace ista
+}  // namespace idb

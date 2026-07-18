@@ -14,9 +14,12 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file RCXConfig.hh
+ * @brief iRCX JSON configuration model.
+ */
 #pragma once
 
-#include <string>
 #include <vector>
 
 #include "Types.hh"
@@ -49,13 +52,13 @@ class RCXConfig
   auto reset() -> void;
   auto set_initialized(bool initialized) -> void { _initialized = initialized; }
 
-  auto get_initialized() const -> bool { return _initialized; }
+  auto is_initialized() const -> bool { return _initialized; }
   auto get_config_path() const -> const std::string& { return _config_path; }
-  auto get_thread_num() const -> unsigned { return _thread_num; }
+  auto get_thread_count() const -> unsigned { return _thread_num; }
   auto get_mapping_file() const -> const std::string& { return _mapping_file; }
   auto get_corners() const -> const std::vector<CornerConfig>& { return _corners; }
   auto get_output_dir() const -> const std::string& { return _output_dir; }
-  auto get_report_geometry() const -> bool { return _report_geometry; }
+  auto is_report_geometry() const -> bool { return _report_geometry; }
 
   auto parse(const std::string& json_file) -> bool;
 

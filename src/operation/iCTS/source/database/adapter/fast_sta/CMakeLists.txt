@@ -47,6 +47,7 @@ target_include_directories(
   ${ICTS_DATABASE_ADAPTER_FAST_STA_INTERNAL_INCLUDE_DIRS}
   ${ICTS_DATABASE}
   ${HOME_DATABASE}/manager/parser
+  ${HOME_UTILITY}/stdBase/include
 )
 
 target_include_directories(

@@ -4,7 +4,10 @@ target_link_libraries(ircx_flow_report
   PUBLIC
     ircx_headers
   PRIVATE
+    ircx_config
+    ircx_database_design
     ircx_report
+    log
 )
 
 target_include_directories(ircx_flow_report

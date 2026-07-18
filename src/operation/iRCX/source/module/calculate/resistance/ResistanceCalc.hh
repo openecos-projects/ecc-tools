@@ -14,31 +14,32 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file ResistanceCalc.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include <unordered_map>
 #include <vector>
 
-#include "CornerNetPool.hh"
 #include "NetEtchProfile.hh"
-#include "LayoutData.hh"
 #include "RCXData.hh"
-#include "RCTable.hh"
 #include "Types.hh"
+
 namespace ircx {
 
+template <typename T>
+class CornerNetPool;
+
+class LayerConductor;
 class LayerTable;
+class LayerVia;
+class LayoutData;
+class ProcessCorner;
+class RCTable;
 class TopoEdge;
 class TopoPool;
-}
-
-namespace itf {
-class LayerConductor;
-class LayerVia;
-class ProcessCorner;
-}
-
-namespace ircx {
 
 class ResistanceCalc
 {
@@ -46,10 +47,7 @@ class ResistanceCalc
   ResistanceCalc() = default;
   ~ResistanceCalc() = default;
 
-  void set_layout_data(const LayoutData* v) {
-    layout_data_ = v;
-    micron_per_dbu_ = unit::to_micron(1, v->dbu_per_micron);
-  }
+  void set_layout_data(const LayoutData* v);
   void set_layer_table(const LayerTable* v) { layer_table_ = v; }
   void set_topo_pool(const TopoPool* v) { topo_pool_ = v; }
   void set_corner_net_etch_pools(const CornerNetPool<NetEtchProfile>* v)
@@ -71,23 +69,23 @@ class ResistanceCalc
   {
    public:
     bool build(const LayerTable& layer_table,
-               const itf::ProcessCorner& corner,
+               const ProcessCorner& corner,
                const TopoPool& topo_pool,
-               const Str& corner_name);
+               const std::string& corner_name);
 
-    const itf::LayerConductor* conductor(Size design_layer_id) const;
-    const itf::LayerVia* via(Size design_layer_id) const;
+    const LayerConductor* conductor(Size design_layer_id) const;
+    const LayerVia* via(Size design_layer_id) const;
 
    private:
-    std::unordered_map<Size, const itf::LayerConductor*> conductors_;
-    std::unordered_map<Size, const itf::LayerVia*> vias_;
+    std::unordered_map<Size, const LayerConductor*> conductors_;
+    std::unordered_map<Size, const LayerVia*> vias_;
   };
 
   struct CornerCalcView
   {
     Size idx{kMaxSize};
     const RCXData::CornerData* data{nullptr};
-    const itf::ProcessCorner* process_corner{nullptr};
+    const ProcessCorner* process_corner{nullptr};
     F64 temperature{kDefaultOperatingTemperature};
     ProcessLayerResolver layers;
   };
@@ -95,7 +93,8 @@ class ResistanceCalc
   bool validateInputs() const;
   bool buildCornerViews(std::vector<CornerCalcView>& views) const;
   void calcCorner(const CornerCalcView& corner) const;
-  void calcNet(const CornerCalcView& corner, Size net_idx) const;
+  void calcNet(const CornerCalcView& corner,
+               Size net_idx) const;
   F64 calcEdgeResistance(const CornerCalcView& corner,
                          Size net_idx,
                          Size edge_idx,

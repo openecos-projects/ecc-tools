@@ -117,12 +117,12 @@ double TimingEval::getRequiredLateTime(const std::string& pin_name) const
   return EVAL_INIT_STA_INST->getRequiredLateTime(pin_name);
 }
 
-double TimingEval::reportWNS(const char* clock_name, ista::AnalysisMode mode)
+double TimingEval::reportWNS(const char* clock_name, idb::AnalysisMode mode)
 {
   return EVAL_INIT_STA_INST->reportWNS(clock_name, mode);
 }
 
-double TimingEval::reportTNS(const char* clock_name, ista::AnalysisMode mode)
+double TimingEval::reportTNS(const char* clock_name, idb::AnalysisMode mode)
 {
   return EVAL_INIT_STA_INST->reportTNS(clock_name, mode);
 }

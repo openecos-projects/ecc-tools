@@ -18,4 +18,5 @@ target_link_libraries(eval_module
         eval_timing_eval
         eval_wirelength_eval
         eval_io
+        eval_util_general_ops
 )

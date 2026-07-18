@@ -12,4 +12,4 @@ target_include_directories(gds_builder
         ${HOME_DATABASE}/manager/service/lef_service
 )
 
-target_link_libraries(gds_builder PRIVATE idb solver_geometry_boost gdstk::gdstk)
+target_link_libraries(gds_builder PRIVATE idb gdstk::gdstk geometry_db)

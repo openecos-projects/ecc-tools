@@ -42,10 +42,39 @@ struct Coord
   double y = -1.0;
 };
 
+struct GeometryAttr
+{
+  bool has_box = false;
+  Coord ll_coordinate;
+  Coord ur_coordinate;
+
+  bool has_layer = false;
+  int layer = 0;
+
+  bool has_length = false;
+  double length = 0.0;
+
+  bool has_width = false;
+  double width = 0.0;
+
+  bool has_area = false;
+  double area = 0.0;
+
+  bool has_direction = false;
+  int direction = -1;
+};
+
 struct HeaderEntry
 {
   std::string key;
   std::string value;
+};
+
+struct LayerMapEntry
+{
+  int level = 0;
+  std::string layer_name;
+  std::string raw_info;
 };
 
 struct PortEntry
@@ -66,6 +95,7 @@ struct ConnEntry
   Coord coordinate;
   Coord ll_coordinate;
   Coord ur_coordinate;
+  GeometryAttr geometry;
 };
 
 struct ResCap
@@ -73,6 +103,7 @@ struct ResCap
   std::string node1;
   std::string node2;
   double res_or_cap = 0.0;
+  GeometryAttr geometry;
 };
 
 struct Net
@@ -93,6 +124,7 @@ struct Exchange
   std::vector<HeaderEntry> header;
   std::unordered_map<std::size_t, std::string> index_to_name_map;
   std::unordered_map<std::string, std::size_t> name_to_index_map;
+  std::unordered_map<int, LayerMapEntry> layer_map;
   std::vector<PortEntry> ports;
   std::vector<Net> nets;
 };

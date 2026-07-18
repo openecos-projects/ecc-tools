@@ -33,13 +33,6 @@ class Design;
 class Wrapper;
 }  // namespace icts
 
-namespace ista {
-class TimingEngine;
-class TimingIDBAdapter;
-class DesignObject;
-class RctNode;
-class Net;
-}  // namespace ista
 namespace idb {
 class IdbPin;
 class IdbInstance;

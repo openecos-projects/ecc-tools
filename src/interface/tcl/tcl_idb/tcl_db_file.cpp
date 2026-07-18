@@ -204,6 +204,97 @@ unsigned CmdInitVerilog::exec()
   return 1;
 }
 
+CmdInitLib::CmdInitLib(const char* cmd_name) : TclCmd(cmd_name)
+{
+  auto* path = new TclStringListOption(TCL_PATH, 1);
+  addOption(path);
+}
+
+unsigned CmdInitLib::check()
+{
+  //   TclOption* path = getOptionOrArg(TCL_PATH);
+  //   LOG_FATAL_IF(!path);
+  return 1;
+}
+
+unsigned CmdInitLib::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+
+  TclOption* path = getOptionOrArg(TCL_PATH);
+  auto lib_path_list = path->getStringList();
+  if (!lib_path_list.empty()) {
+    dmInst->get_config().set_lib_paths(lib_path_list);
+    dmInst->readLib(lib_path_list);
+    return 1;
+  } else {
+    if (dmInst->get_config().get_lib_paths().size() > 0) {
+      dmInst->readLib(dmInst->get_config().get_lib_paths());
+    }
+  }
+
+  return 1;
+}
+
+CmdInitSdc::CmdInitSdc(const char* cmd_name) : TclCmd(cmd_name)
+{
+  auto* path = new TclStringOption(TCL_PATH, 1);
+  addOption(path);
+}
+
+unsigned CmdInitSdc::check()
+{
+  TclOption* path = getOptionOrArg(TCL_PATH);
+  LOG_FATAL_IF(!path);
+  return 1;
+}
+
+unsigned CmdInitSdc::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+
+  TclOption* sdc_name = getOptionOrArg(TCL_PATH);
+  auto sdc_path = sdc_name->getStringVal();
+  if (sdc_path != nullptr) {
+    dmInst->get_config().set_sdc_path(sdc_path);
+    return 1;
+  }
+  return 1;
+}
+
+CmdInitSpef::CmdInitSpef(const char* cmd_name) : TclCmd(cmd_name)
+{
+  auto* path = new TclStringOption(TCL_PATH, 1);
+  addOption(path);
+}
+
+unsigned CmdInitSpef::check()
+{
+  TclOption* path = getOptionOrArg(TCL_PATH);
+  LOG_FATAL_IF(!path);
+  return 1;
+}
+
+unsigned CmdInitSpef::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+
+  TclOption* spef_name = getOptionOrArg(TCL_PATH);
+  auto spef_path = spef_name->getStringVal();
+  if (spef_path != nullptr) {
+    dmInst->get_config().set_spef_path(spef_path);
+    dmInst->readSpef(spef_path);
+    return 1;
+  }
+  return 1;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

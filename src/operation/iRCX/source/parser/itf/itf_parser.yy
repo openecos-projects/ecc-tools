@@ -23,7 +23,6 @@
 #include <vector>
 
 #include "itfrData.hpp"
-#include "itfMarco.h"
 #include "itfrSettings.hpp"
 #include "itfrCallBacks.hpp"
 
@@ -35,7 +34,8 @@
 #define YY_DECL int itf_lex(ITF_STYPE* yylval_param, ITF_LTYPE* yylloc_param)
 YY_DECL;
 
-void itf_error(ITF_LTYPE*, const char*);
+void itf_error(ITF_LTYPE*,
+               const char*);
 
 }
 
@@ -53,18 +53,33 @@ void itf_error(ITF_LTYPE*, const char*);
 
 namespace itf {
 
-#define CALLBACK(func, typ, data) \
-  if (func) { \
-    (*func) (typ, data, itfSettings->user_data); \
-  }
-
 extern itfrData* itfData;
+
+template <typename Callback, typename Value>
+void InvokeCallback(Callback callback,
+                    itfCallBackType type,
+                    Value value)
+{
+  if (callback) {
+    (*callback)(type, value, itfSettings->user_data);
+  }
+}
+
+void InvokeStringCallback(itfrStringCbFnType callback,
+                          itfCallBackType type,
+                          const std::string& value)
+{
+  if (callback) {
+    (*callback)(type, value.empty() ? nullptr : value.c_str(), itfSettings->user_data);
+  }
+}
+
 // var
-char* v_layer_name = nullptr;
-char* v_measured_from = nullptr;
-char* v_model_name = nullptr;
-char* v_table_name = nullptr;
-char* v_etch_effect_type = nullptr;
+std::string v_layer_name;
+std::string v_measured_from;
+std::string v_model_name;
+std::string v_table_name;
+std::string v_etch_effect_type;
 float v_thickness;
 float v_sw_t;
 float v_tw_t;
@@ -78,19 +93,18 @@ std::vector<float> v_float_list;
 std::vector<std::pair<float, float>> v_float_pair_list;
 itf2DLUT<float, float, float> v_lut;
 itf2DLUT<float, float, std::pair<float, float>> v_etch_wlv_lut;
-itfiVPT v_vpt;
 unsigned v_is_lut_working = 0;
 unsigned v_flag_dielectric = 0;
 %}
 
 %token K_TECHNOLOGY K_PROCESS_FOUNDRY K_GLOBAL_TEMPERATURE K_BACKGROUND_ER K_HALF_NODE_SCALE_FACTOR
 %token K_PROCESS_NODE K_PROCESS_TYPE K_PROCESS_VERSION K_PROCESS_CORNER K_REFERENCE_DIRECTION
-%token K_USE_SI_DENSITY K_YES K_NO K_DROP_FACTOR_LATERAL_SPACING K_DIELECTRIC 
-%token K_DIELECTRIC_LAYER K_ER K_THICKNESS K_MEASURED_FROM K_TOP_OF_CHIP K_SW_T K_TW_T 
+%token K_USE_SI_DENSITY K_YES K_NO K_DROP_FACTOR_LATERAL_SPACING K_DIELECTRIC
+%token K_DIELECTRIC_LAYER K_ER K_THICKNESS K_MEASURED_FROM K_MEASURED_FROM_CONDUCTOR K_TOP_OF_CHIP K_SW_T K_TW_T
 %token K_ASSOCIATED_CONDUCTOR K_IS_CONFORMAL K_DAMAGE_THICKNESS K_DAMAGE_ER
-%token K_CONDUCTOR K_IS_PLANAR K_WMIN K_SMIN K_AIR_GAP_VS_SPACING K_SPACINGS 
+%token K_CONDUCTOR K_IS_PLANAR K_WMIN K_SMIN K_AIR_GAP_VS_SPACING K_SPACINGS
 %token K_AIR_GAP_WIDTHS K_AIR_GAP_THICKNESSES K_AIR_GAP_BOTTOM_HEIGHTS
-%token K_BOTTOM_DIELECTRIC_THICKNESS K_BOTTOM_DIELECTRIC_ER 
+%token K_BOTTOM_DIELECTRIC_THICKNESS K_BOTTOM_DIELECTRIC_ER
 %token K_BOTTOM_THICKNESS_VS_SI_WIDTH K_RESISTIVE_ONLY K_CAPACITIVE_ONLY K_T0
 %token K_CRT1 K_CRT2 K_DROP_FACTOR K_ETCH K_CAPACITIVE_ONLY_ETCH K_RESISTIVE_ONLY_ETCH
 %token K_ETCH_VS_WIDTH_AND_SPACING K_WIDTHS K_VALUES K_ETCH_FROM_TOP K_FILL_RATIO
@@ -103,7 +117,7 @@ unsigned v_flag_dielectric = 0;
 %token K_WIDTH K_SIDE_TANGENT K_THICKNESS_VS_DENSITY K_THICKNESS_VS_WIDTH_AND_SPACING
 %token K_TVF_ADJUSTMENT_TABLES K_BOTTOM_THICKNESS_VS_WIDTH_AND_SPACING 
 %token K_BOTTOM_THICKNESS_VS_WIDTH_AND_DELTAPD K_VIA K_FROM K_TO K_CRT_VS_AREA
-%token K_RPV K_AREA K_RPV_VS_AREA K_ETCH_VS_WIDTH_AND_LENGTH K_VARIATION_PARAMETERS
+%token K_RPV K_AREA K_RPV_VS_AREA K_ETCH_VS_WIDTH_AND_LENGTH
 %token K_DENSITY_BOX_WEIGHTING_FACTOR K_ILD_VS_WIDTH_AND_SPACING K_DELTAPD K_LENGTHS
 %token K_RHO_VS_SI_WIDTH_AND_THICKNESS K_RHO_VS_WIDTH_AND_SPACING K_ETCH_VS_CONTACT_AND_GATE_SPACINGS
 %token K_CRT_VS_SI_WIDTH K_DENSITY_BOUNDS_VS_WIDTH K_THICKNESS_BOUNDS
@@ -116,81 +130,101 @@ unsigned v_flag_dielectric = 0;
 
 %token <string> KEYWORD PROCESS_NAME
 %token <dval> NUMBER
+%type <string> name_token
 
 %start itf_file
 
 %%
 
 itf_file :
-  file_optionals
-  layers
-  variation_params
+  itf_statements
 ;
 
-file_optionals :
-  file_optionals file_optional
+itf_statements :
+  itf_statements itf_statement
 |
+;
+
+itf_statement :
+  file_optional
+| dielectric
+  {
+    InvokeCallback(itfCallbacks->dielectric_cb, itfCallBackType::kDielectricCbType, &itfData->dielectric);
+    itfData->dielectric.clear();
+  }
+| conductor
+  {
+    InvokeCallback(itfCallbacks->conductor_cb, itfCallBackType::kConductorCbType, &itfData->conductor);
+    itfData->conductor.clear();
+  }
+| multigate
+| via
+  {
+    InvokeCallback(itfCallbacks->via_cb, itfCallBackType::kViaCbType, &itfData->via);
+    itfData->via.clear();
+  }
+| ignored_statement
 ;
 
 file_optional :
   tech
   {
-    CALLBACK(itfCallbacks->technology_cb, itfCallBackType::kTechnologyCbType, itfData->process_name);
+    InvokeStringCallback(itfCallbacks->technology_cb, itfCallBackType::kTechnologyCbType, itfData->process_name);
   }
 | global_temperature
   {
-    CALLBACK(itfCallbacks->global_temperature_cb, itfCallBackType::kGlobalTemperatureCbType, itfData->global_temperature);
+    InvokeCallback(itfCallbacks->global_temperature_cb, itfCallBackType::kGlobalTemperatureCbType, itfData->global_temperature);
   }
 | background_er
   {
-    CALLBACK(itfCallbacks->background_er_cb, itfCallBackType::kBackgroundErCbType, itfData->background_er);
+    InvokeCallback(itfCallbacks->background_er_cb, itfCallBackType::kBackgroundErCbType, itfData->background_er);
   }
 | half_node_scale_factor
   {
-    CALLBACK(itfCallbacks->half_node_scale_factor_cb, itfCallBackType::kHalfNodeScaleFactorCbType, itfData->half_node_scale_factor);
+    InvokeCallback(itfCallbacks->half_node_scale_factor_cb, itfCallBackType::kHalfNodeScaleFactorCbType, itfData->half_node_scale_factor);
   }
 | use_si_density
   {
-    CALLBACK(itfCallbacks->use_si_density_cb, itfCallBackType::kUseSiDensityCbType, itfData->use_si_density);
+    InvokeCallback(itfCallbacks->use_si_density_cb, itfCallBackType::kUseSiDensityCbType, itfData->use_si_density);
   }
 | drop_factor_lateral_spacing
   {
-    CALLBACK(itfCallbacks->drop_factor_lateral_spacing_cb, itfCallBackType::kDropFactorLateralSpacingCbType, itfData->drop_factor_lateral_spacing);
+    InvokeCallback(itfCallbacks->drop_factor_lateral_spacing_cb, itfCallBackType::kDropFactorLateralSpacingCbType, itfData->drop_factor_lateral_spacing);
   }
 | process_foundry
   {
-    CALLBACK(itfCallbacks->process_foundry_cb, itfCallBackType::kProcessFoundryCbType, itfData->process_foundry);
+    InvokeStringCallback(itfCallbacks->process_foundry_cb, itfCallBackType::kProcessFoundryCbType, itfData->process_foundry);
   }
 | process_node
   {
-    CALLBACK(itfCallbacks->process_node_cb, itfCallBackType::kProcessNodeCbType, itfData->process_node);
+    InvokeCallback(itfCallbacks->process_node_cb, itfCallBackType::kProcessNodeCbType, itfData->process_node);
   }
 | process_type
   {
-    CALLBACK(itfCallbacks->process_type_cb, itfCallBackType::kProcessTypeCbType, itfData->process_type);
+    InvokeStringCallback(itfCallbacks->process_type_cb, itfCallBackType::kProcessTypeCbType, itfData->process_type);
   }
 | process_version
   {
-    CALLBACK(itfCallbacks->process_version_cb, itfCallBackType::kProcessVersionCbType, itfData->process_version);
+    InvokeCallback(itfCallbacks->process_version_cb, itfCallBackType::kProcessVersionCbType, itfData->process_version);
   }
 | process_corner
   {
-    CALLBACK(itfCallbacks->process_corner_cb, itfCallBackType::kProcessCornerCbType, itfData->process_corner);
+    InvokeStringCallback(itfCallbacks->process_corner_cb, itfCallBackType::kProcessCornerCbType, itfData->process_corner);
   }
 | reference_direction
   {
-    CALLBACK(itfCallbacks->reference_direction_cb, itfCallBackType::kReferenceDirectionCbType, itfData->reference_direction);
+    InvokeStringCallback(itfCallbacks->reference_direction_cb, itfCallBackType::kReferenceDirectionCbType, itfData->reference_direction);
   }
 ;
 
 tech :
   K_TECHNOLOGY '=' PROCESS_NAME
   {
-    ITF_STR_CPY(itfData->process_name, $3);
+    itfData->process_name = $3 ? $3 : "";
   }
 | K_TECHNOLOGY '=' KEYWORD
   {
-    ITF_STR_CPY(itfData->process_name, $3);
+    itfData->process_name = $3 ? $3 : "";
   }
 ;
 
@@ -240,46 +274,60 @@ drop_factor_lateral_spacing :
 
 process_foundry :
   K_PROCESS_FOUNDRY '=' KEYWORD
+  {
+    itfData->process_foundry = $3 ? $3 : "";
+  }
+| K_PROCESS_FOUNDRY '=' PROCESS_NAME
+  {
+    itfData->process_foundry = $3 ? $3 : "";
+  }
 ;
 
 process_node :
   K_PROCESS_NODE '=' NUMBER
+  {
+    itfData->process_node = $3;
+  }
 ;
 
 process_type :
   K_PROCESS_TYPE '=' KEYWORD
+  {
+    itfData->process_type = $3 ? $3 : "";
+  }
+| K_PROCESS_TYPE '=' PROCESS_NAME
+  {
+    itfData->process_type = $3 ? $3 : "";
+  }
 ;
 
 process_version :
   K_PROCESS_VERSION '=' NUMBER
+  {
+    itfData->process_version = $3;
+  }
 ;
 
 process_corner :
   K_PROCESS_CORNER '=' KEYWORD
+  {
+    itfData->process_corner = $3 ? $3 : "";
+  }
+| K_PROCESS_CORNER '=' PROCESS_NAME
+  {
+    itfData->process_corner = $3 ? $3 : "";
+  }
 ;
 
 reference_direction :
   K_REFERENCE_DIRECTION '=' KEYWORD
-;
-
-layers:
-  x_eol
-  vias
-;
-
-x_eol :
-  x_eol dielectric
   {
-    CALLBACK(itfCallbacks->dielectric_cb, itfCallBackType::kDielectricCbType, &itfData->dielectric);
-    itfData->dielectric.clear();
+    itfData->reference_direction = $3 ? $3 : "";
   }
-| x_eol conductor
+| K_REFERENCE_DIRECTION '=' PROCESS_NAME
   {
-    CALLBACK(itfCallbacks->conductor_cb, itfCallBackType::kConductorCbType, &itfData->conductor);
-    itfData->conductor.clear();
+    itfData->reference_direction = $3 ? $3 : "";
   }
-| x_eol multigate
-|
 ;
 
 dielectric :
@@ -289,7 +337,7 @@ dielectric :
   }
   layer_name
   {
-    itfData->dielectric.set_dielectric_name(v_layer_name);
+    itfData->dielectric.set_dielectric_name(v_layer_name.c_str());
   }
   '{' 
     dielectric_properties
@@ -300,7 +348,8 @@ dielectric :
 ;
 
 layer_name :
-  KEYWORD { ITF_STR_CPY(v_layer_name, $1); }
+  KEYWORD { v_layer_name = $1 ? $1 : ""; }
+| PROCESS_NAME { v_layer_name = $1 ? $1 : ""; }
 ;
 
 dielectric_properties :
@@ -314,14 +363,19 @@ dielectric_property:
 | diel_measured_from    
 | associated_conductor
   {
-    itfData->dielectric.set_associated_conductor(v_layer_name);
+    itfData->dielectric.set_associated_conductor(v_layer_name.c_str());
   }
 | damage
 | K_IS_CONFORMAL
   {
-    itfData->dielectric.set_is_conformal();
+    itfData->dielectric.set_conformal();
+  }
+| K_MEASURED_FROM_CONDUCTOR
+  {
+    itfData->dielectric.set_measured_from_conductor();
   }
 | bw_t
+| ignored_statement
 ;
 
 er :
@@ -335,7 +389,7 @@ thickness :
 ;
 
 diel_measured_from :
-  measured_from { itfData->dielectric.set_measured_from(v_measured_from); }
+  measured_from { itfData->dielectric.set_measured_from(v_measured_from.c_str()); }
 | sw_t          { itfData->dielectric.set_sw_t(v_sw_t); }
 | tw_t          { itfData->dielectric.set_tw_t(v_tw_t); }
 ;
@@ -345,8 +399,8 @@ measured_from :
 ;
 
 measured_from_value :
-  layer_name    { ITF_STR_CPY(v_measured_from, v_layer_name); }
-| K_TOP_OF_CHIP { ITF_STR_CPY(v_measured_from, "TOP_OF_CHIP"); }
+  layer_name    { v_measured_from = v_layer_name; }
+| K_TOP_OF_CHIP { v_measured_from = "TOP_OF_CHIP"; }
 ;
 
 sw_t :
@@ -380,7 +434,7 @@ bw_t :
 conductor :
   K_CONDUCTOR layer_name
   {
-    itfData->conductor.set_conductor_name(v_layer_name);
+    itfData->conductor.set_conductor_name(v_layer_name.c_str());
   }
   '{'
     conductor_properties
@@ -406,8 +460,8 @@ conductor_property :
 | etch_stmt
 | etch_vs_width_and_spacing
   {
-    itfData->conductor.add_etch_vws(v_etch_effect_type, v_lut);
-    ITF_FREE(v_etch_effect_type);
+    itfData->conductor.add_etch_vws(v_etch_effect_type.c_str(), v_lut);
+    v_etch_effect_type.clear();
     v_lut.clear();
     v_is_lut_working = 0;
   }
@@ -415,9 +469,9 @@ conductor_property :
 | gate_to_contact_smin
 | gate_to_diffusion_cap
 | ild_vs_width_and_spacing
-| K_IS_PLANAR { itfData->conductor.set_is_planar(); }
+| K_IS_PLANAR { itfData->conductor.set_planar(); }
 | layer_type
-| measured_from { itfData->conductor.set_measured_from(v_measured_from); }
+| measured_from { itfData->conductor.set_measured_from(v_measured_from.c_str()); }
 | polynomial_based_thickness_variation
 | rpsq_stmt
 | side_tangent
@@ -432,6 +486,7 @@ conductor_property :
 | raised_diffusion_to_gate_smin
 | raised_diffusion_etch
 | raised_diffusion_gate_side_conformal_er
+| ignored_statement
 ;
 
 wmin :
@@ -575,11 +630,11 @@ crt_vs_si_width :
 siw_crt1_crt2_list :
   siw_crt1_crt2_list '(' NUMBER ',' NUMBER ',' NUMBER ')'
   {
-    itfData->conductor.add_siw_crt1_crt2($3, $5, $7);
+    itfData->conductor.add_si_width_crt($3, $5, $7);
   }
 | siw_crt1_crt2_list '(' NUMBER NUMBER NUMBER ')'
   {
-    itfData->conductor.add_siw_crt1_crt2($3, $4, $5);
+    itfData->conductor.add_si_width_crt($3, $4, $5);
   }
 |
 ;
@@ -634,9 +689,9 @@ etch_vs_width_and_spacing :
 ;
 
 etch_effect_type :
-  K_RESISTIVE_ONLY  { ITF_STR_CPY(v_etch_effect_type, "RESISTIVE_ONLY"); }
-| K_CAPACITIVE_ONLY { ITF_STR_CPY(v_etch_effect_type, "CAPACITIVE_ONLY"); }
-| K_ETCH_FROM_TOP   { ITF_STR_CPY(v_etch_effect_type, "ETCH_FROM_TOP"); }
+  K_RESISTIVE_ONLY  { v_etch_effect_type = "RESISTIVE_ONLY"; }
+| K_CAPACITIVE_ONLY { v_etch_effect_type = "CAPACITIVE_ONLY"; }
+| K_ETCH_FROM_TOP   { v_etch_effect_type = "ETCH_FROM_TOP"; }
 |
 ;
 
@@ -693,7 +748,7 @@ gate_to_diffusion_cap :
     model_list
   '}'
   {
-    itfData->conductor.get_gate_to_diffusion_cap().set_number_of_tables(v_number_of_tables);
+    itfData->conductor.get_gate_to_diffusion_cap().set_table_count(v_number_of_tables);
   }
 ;
 
@@ -721,14 +776,15 @@ model :
     caps_per_micron
   '}'
   {
-    itfData->conductor.get_gate_to_diffusion_cap().add_model(v_model_name, v_lut);
+    itfData->conductor.get_gate_to_diffusion_cap().add_model(v_model_name.c_str(), v_lut);
     v_lut.clear();
     v_is_lut_working = 0;
   }
 ;
 
 model_name :
-  KEYWORD   { ITF_STR_CPY(v_model_name, $1); }
+  KEYWORD   { v_model_name = $1 ? $1 : ""; }
+| PROCESS_NAME { v_model_name = $1 ? $1 : ""; }
 ;
 
 contact_to_contact_spacings :
@@ -768,7 +824,7 @@ ild_vs_width_and_spacing :
     thickness_changes
   '}'
   {
-    itfData->conductor.set_ild_vws_title(v_layer_name);
+    itfData->conductor.set_ild_vws_title(v_layer_name.c_str());
     itfData->conductor.set_ild_vws_lut(v_lut);
     v_lut.clear();
     v_is_lut_working = 0;
@@ -820,7 +876,7 @@ polynomial_based_thickness_variation_option :
 density_polynomial_orders :
   K_DENSITY_POLYNOMIAL_ORDERS equal_op '{' int_comma_list   '}'
   {
-    itfData->conductor.get_PBTV().set_density_polynomial_order(v_int_list);
+    itfData->conductor.get_pbtv().set_density_polynomial_orders(v_int_list);
     v_int_list.clear();
   }
 ;
@@ -833,7 +889,7 @@ equal_op :
 width_polynomial_orders :
   K_WIDTH_POLYNOMIAL_ORDERS equal_op '{' int_comma_list   '}'
   {
-    itfData->conductor.get_PBTV().set_width_polynomial_order(v_int_list);
+    itfData->conductor.get_pbtv().set_width_polynomial_orders(v_int_list);
     v_int_list.clear();
   }
 ;
@@ -841,7 +897,7 @@ width_polynomial_orders :
 width_ranges :
   K_WIDTH_RANGES equal_op '{' float_comma_list '}'
   {
-    itfData->conductor.get_PBTV().set_width_range(v_float_list);
+    itfData->conductor.get_pbtv().set_width_ranges(v_float_list);
     v_float_list.clear();
   }
 ;
@@ -864,7 +920,7 @@ polynomial_valueicients_lists :
     float_comma_list
   '}'
   {
-    itfData->conductor.get_PBTV().add_polynomial_coefficients(v_float_list);
+    itfData->conductor.get_pbtv().add_polynomial_coefficients(v_float_list);
     v_float_list.clear();
   }
 | 
@@ -945,7 +1001,7 @@ rho_vs_si_width_and_thickness :
     values
   '}'
   {
-    itfData->conductor.set_rho_v_siw_t(v_lut);
+    itfData->conductor.set_rho_vs_si_width_and_thickness(v_lut);
     v_lut.clear();
     v_is_lut_working = 0;
   }
@@ -988,6 +1044,7 @@ rho_vs_width_and_spacing :
 side_tangent :
   K_SIDE_TANGENT '=' NUMBER
   { itfData->conductor.set_side_tangent($3); }
+| K_SIDE_TANGENT '=' '(' NUMBER ',' NUMBER ')'
 ;
 
 thickness_vs_density :
@@ -1102,11 +1159,13 @@ device_type :
 
 keyword_list :
   keyword_list
-  KEYWORD
-  {
-
-  }
+  name_token
 |
+;
+
+name_token :
+  KEYWORD
+| PROCESS_NAME
 ;
 
 linked_to :
@@ -1142,8 +1201,175 @@ raised_diffusion_gate_side_conformal_er :
   K_RAISED_DIFFUSION_GATE_SIDE_CONFORMAL_ER '=' NUMBER
 ;
 
+ignored_statement :
+  name_token '=' ignored_value
+| name_token ignored_block
+| name_token name_token ignored_block
+;
+
+ignored_block :
+  '{' ignored_items '}'
+;
+
+ignored_items :
+  ignored_items ignored_item
+|
+;
+
+ignored_item :
+  ignored_atom
+| ignored_block
+| ignored_tuple
+| '='
+| ','
+;
+
+ignored_tuple :
+  '(' ignored_items ')'
+;
+
+ignored_value :
+  ignored_atom
+| ignored_block
+| ignored_tuple
+;
+
+ignored_atom :
+  NUMBER
+| name_token
+| ignored_keyword
+;
+
+ignored_keyword :
+  K_YES
+| K_NO
+| K_TOP_OF_CHIP
+| K_RESISTIVE_ONLY
+| K_CAPACITIVE_ONLY
+| K_RESISTIVE_ONLY_ETCH
+| K_CAPACITIVE_ONLY_ETCH
+| K_ETCH_FROM_TOP
+| K_GROUNDED
+| K_FLOATING
+| K_PARALLEL_TO_REFERENCE
+| K_PERPENDICULAR_TO_REFERENCE
+| K_PARALLEL_TO_GATE
+| K_DIELECTRIC
+| K_DIELECTRIC_LAYER
+| K_CONDUCTOR
+| K_VIA
+| K_MULTIGATE
+| K_TECHNOLOGY
+| K_PROCESS_FOUNDRY
+| K_PROCESS_NODE
+| K_PROCESS_TYPE
+| K_PROCESS_VERSION
+| K_PROCESS_CORNER
+| K_REFERENCE_DIRECTION
+| K_GLOBAL_TEMPERATURE
+| K_BACKGROUND_ER
+| K_HALF_NODE_SCALE_FACTOR
+| K_USE_SI_DENSITY
+| K_DROP_FACTOR_LATERAL_SPACING
+| K_ER
+| K_THICKNESS
+| K_MEASURED_FROM
+| K_MEASURED_FROM_CONDUCTOR
+| K_SW_T
+| K_TW_T
+| K_ASSOCIATED_CONDUCTOR
+| K_IS_CONFORMAL
+| K_DAMAGE_THICKNESS
+| K_DAMAGE_ER
+| K_IS_PLANAR
+| K_WMIN
+| K_SMIN
+| K_AIR_GAP_VS_SPACING
+| K_SPACINGS
+| K_AIR_GAP_WIDTHS
+| K_AIR_GAP_THICKNESSES
+| K_AIR_GAP_BOTTOM_HEIGHTS
+| K_BOTTOM_DIELECTRIC_THICKNESS
+| K_BOTTOM_DIELECTRIC_ER
+| K_BOTTOM_THICKNESS_VS_SI_WIDTH
+| K_T0
+| K_CRT1
+| K_CRT2
+| K_DROP_FACTOR
+| K_ETCH
+| K_ETCH_VS_WIDTH_AND_SPACING
+| K_WIDTHS
+| K_VALUES
+| K_FILL_RATIO
+| K_FILL_SPACING
+| K_FILL_WIDTH
+| K_FILL_TYPE
+| K_GATE_TO_CONTACT_SMIN
+| K_GATE_TO_DIFFUSION_CAP
+| K_NUMBER_OF_TABLES
+| K_CONTACT_TO_CONTACT_SPACINGS
+| K_GATE_TO_CONTACT_SPACINGS
+| K_CAPS_PER_MICRON
+| K_THICKNESS_CHANGES
+| K_LAYER_TYPE
+| K_POLYNOMIAL_BASED_THICKNESS_VARIATION
+| K_DENSITY_POLYNOMIAL_ORDERS
+| K_WIDTH_POLYNOMIAL_ORDERS
+| K_WIDTH_RANGES
+| K_POLYNOMIAL_COEFFICIENTS
+| K_RPSQ
+| K_RHO
+| K_RPSQ_VS_SI_WIDTH
+| K_RPSQ_VS_WIDTH_AND_SPACING
+| K_WIDTH
+| K_SIDE_TANGENT
+| K_THICKNESS_VS_DENSITY
+| K_THICKNESS_VS_WIDTH_AND_SPACING
+| K_TVF_ADJUSTMENT_TABLES
+| K_BOTTOM_THICKNESS_VS_WIDTH_AND_SPACING
+| K_BOTTOM_THICKNESS_VS_WIDTH_AND_DELTAPD
+| K_FROM
+| K_TO
+| K_CRT_VS_AREA
+| K_RPV
+| K_AREA
+| K_RPV_VS_AREA
+| K_ETCH_VS_WIDTH_AND_LENGTH
+| K_DENSITY_BOX_WEIGHTING_FACTOR
+| K_ILD_VS_WIDTH_AND_SPACING
+| K_DELTAPD
+| K_LENGTHS
+| K_RHO_VS_SI_WIDTH_AND_THICKNESS
+| K_RHO_VS_WIDTH_AND_SPACING
+| K_ETCH_VS_CONTACT_AND_GATE_SPACINGS
+| K_CRT_VS_SI_WIDTH
+| K_DENSITY_BOUNDS_VS_WIDTH
+| K_THICKNESS_BOUNDS
+| K_DEVICE_TYPE
+| K_BW_T
+| K_LINKED_TO
+| K_EXTENSIONMIN
+| K_RAISED_DIFFUSION_THICKNESS
+| K_RAISED_DIFFUSION_TO_GATE_SMIN
+| K_FIN_SPACING
+| K_FIN_WIDTH
+| K_FIN_LENGTH
+| K_FIN_THICKNESS
+| K_GATE_OXIDE_TOP_T
+| K_GATE_OXIDE_SIDE_T
+| K_GATE_OXIDE_ER
+| K_GATE_POLY_TOP_T
+| K_GATE_POLY_SIDE_T
+| K_CHANNEL_ER
+| K_RAISED_DIFFUSION_GROWTH
+| K_GATE_DIFFUSION_LAYER_PAIR
+| K_RPV_VS_WIDTH_AND_LENGTH
+| K_RAISED_DIFFUSION_ETCH
+| K_RAISED_DIFFUSION_GATE_SIDE_CONFORMAL_ER
+;
+
 multigate :
-  K_MULTIGATE KEYWORD
+  K_MULTIGATE name_token
   '{'
     multigate_properties
   '}'
@@ -1168,6 +1394,7 @@ multigate_property :
 | channel_er
 | raised_diffusion_growth
 | gate_diffusion_layer_pair
+| ignored_statement
 ;
 
 fin_spacing :
@@ -1226,19 +1453,10 @@ gate_diffusion_layer_pair_list :
 |
 ;
 
-vias :
-  vias via
-  {
-    CALLBACK(itfCallbacks->via_cb, itfCallBackType::kViaCbType, &itfData->via);
-    itfData->via.clear();
-  }
-|
-;
-
 via :
   K_VIA layer_name
   {
-    itfData->via.set_via_name(v_layer_name);
+    itfData->via.set_via_name(v_layer_name.c_str());
   }
   '{'
     via_properties
@@ -1253,24 +1471,61 @@ via_properties :
 via_property :
   from
 | to
+| via_wmin
+| via_smin
+| via_layer_type
+| via_side_tangent
 | crt_property
 | rho_property
 | etch_property
 | device_type
 | rpv_vs_width_and_length
+| ignored_statement
 ;
 
 from :
   K_FROM '=' layer_name
   {
-    itfData->via.set_from(v_layer_name);
+    itfData->via.set_from(v_layer_name.c_str());
   }
 ; 
 
 to :
   K_TO '=' layer_name
   {
-    itfData->via.set_to(v_layer_name);
+    itfData->via.set_to(v_layer_name.c_str());
+  }
+;
+
+via_wmin :
+  K_WMIN '=' NUMBER
+  {
+    itfData->via.set_wmin($3);
+  }
+;
+
+via_smin :
+  K_SMIN '=' NUMBER
+  {
+    itfData->via.set_smin($3);
+  }
+;
+
+via_layer_type :
+  K_LAYER_TYPE '=' layer_name
+  {
+    itfData->via.set_layer_type(v_layer_name.c_str());
+  }
+;
+
+via_side_tangent :
+  K_SIDE_TANGENT '=' NUMBER
+  {
+    itfData->via.set_side_tangent($3);
+  }
+| K_SIDE_TANGENT '=' '(' NUMBER ',' NUMBER ')'
+  {
+    itfData->via.set_side_tangent($4, $6);
   }
 ;
 
@@ -1293,7 +1548,7 @@ crt_vs_area :
 area_crt1_crt2_list :
   area_crt1_crt2_list '(' NUMBER ',' NUMBER ',' NUMBER ')'
   {
-    itfData->via.add_area_crt1_ct2($3, $5, $7);
+    itfData->via.add_area_crt1_crt2($3, $5, $7);
   }
 |
 ;
@@ -1335,8 +1590,8 @@ etch_property :
   etch_vs_contact_and_gate_spacings
 | etch_vs_width_and_spacing
   {
-    itfData->via.set_etch_vws(v_etch_effect_type, v_lut);
-    ITF_FREE(v_etch_effect_type);
+    itfData->via.set_etch_width_spacing(v_etch_effect_type.c_str(), v_lut);
+    v_etch_effect_type.clear();
     v_lut.clear();
     v_is_lut_working = 0;
   }
@@ -1362,12 +1617,12 @@ etch_vs_contact_and_gate_spacings :
 etch_vs_contact_and_gate_spacings_property :
   table
   {
-    itfData->via.get_etch_cg().add_table("", v_lut);
+    itfData->via.get_etch_contact_gate().add_table("", v_lut);
     v_lut.clear();
   }
 | number_of_tables name_tables
   {
-    itfData->via.get_etch_cg().set_number_of_tables(v_number_of_tables);
+    itfData->via.get_etch_contact_gate().set_table_count(v_number_of_tables);
     v_lut.clear();
   }
 ;
@@ -1384,7 +1639,7 @@ name_tables :
     table
   '}'
   {
-    itfData->via.get_etch_cg().add_table(v_table_name, v_lut);
+    itfData->via.get_etch_contact_gate().add_table(v_table_name.c_str(), v_lut);
     v_lut.clear();
 
     v_lut.set_names("GATE_TO_CONTACT_SPACINGS", "CONTACT_TO_CONTACT_SPACINGS", "VALUES");
@@ -1393,7 +1648,8 @@ name_tables :
 ;
 
 table_name :
-  KEYWORD { ITF_STR_CPY(v_table_name, $1); }
+  KEYWORD { v_table_name = $1 ? $1 : ""; }
+| PROCESS_NAME { v_table_name = $1 ? $1 : ""; }
 ;
 
 etch_vs_width_and_length :
@@ -1401,7 +1657,7 @@ etch_vs_width_and_length :
   {
     v_etch_wlv_lut.set_names("WIDTHS", "LENGTHS", "VALUES");
   }
-  K_CAPACITIVE_ONLY '{'
+  etch_width_length_effect_type '{'
     K_LENGTHS '{' float_list '}'
     {
       v_etch_wlv_lut.set_data_list<float>("LENGTHS", v_float_list);
@@ -1419,9 +1675,17 @@ etch_vs_width_and_length :
     }
   '}'
   {
-    itfData->via.set_etch_vwl(v_etch_wlv_lut);
+    itfData->via.set_etch_width_length(v_etch_effect_type.c_str(), v_etch_wlv_lut);
+    v_etch_effect_type.clear();
     v_etch_wlv_lut.clear();
   }
+;
+
+etch_width_length_effect_type :
+  K_RESISTIVE_ONLY  { v_etch_effect_type = "RESISTIVE_ONLY"; }
+| K_CAPACITIVE_ONLY { v_etch_effect_type = "CAPACITIVE_ONLY"; }
+|
+  { v_etch_effect_type.clear(); }
 ;
 
 rpv_vs_width_and_length :
@@ -1432,66 +1696,14 @@ rpv_vs_width_and_length :
   '}'
 ;
 
-variation_params :
-  K_VARIATION_PARAMETERS '{'
-    variation_params_list
-  '}'
-|
-;
-
-variation_params_list :
-  variation_params_list variation_param
-|
-;
-
-variation_param :
-  variation_param_name '=' '{'
-    variation_param_table
-  '}'
-  {
-    CALLBACK(itfCallbacks->variation_cb, itfCallBackType::kVariationCbType, &itfData->variation_param);
-    itfData->variation_param.clear();
-  }
-;
-
-variation_param_name :
-  KEYWORD
-  {
-    itfData->variation_param.param_name = $1;
-  }
-;
-
-variation_param_table :
-  variation_param_table
-  variation_param_table_term
-|
-;
-
-variation_param_table_term :
-  '(' layer_name ',' variation_param_type ',' NUMBER ')'
-  { 
-    v_vpt.layer = v_layer_name;
-    v_vpt.coeff = $6;
-    itfData->variation_param.add_term(v_vpt);
-    v_vpt.clear();
-  }
-;
-
-variation_param_type :
-  K_THICKNESS { v_vpt.type = "THICKNESS"; }
-| K_WIDTH     { v_vpt.type = "WIDTH";     }
-| K_RHO       { v_vpt.type = "RHO";       }
-| K_ER        { v_vpt.type = "ER";        }
-| K_RPV       { v_vpt.type = "RPV";       }
-| KEYWORD     { v_vpt.type = $1;          }
-;
-
 %%
 
 } // namespace itf
 
-void itf_error(ITF_LTYPE* yylloc_param, const char* s) {
-  std::cout << "error: " << s << ", "
-            << "at line " << yylloc_param->last_line << ", "
-            << "col " << yylloc_param->last_column << std::endl;
+void itf_error(ITF_LTYPE* yylloc_param,
+               const char* s) {
+  std::cerr << itf::itfrFname() << ":"
+            << yylloc_param->last_line << ":"
+            << yylloc_param->last_column << ": error: "
+            << s << std::endl;
 }

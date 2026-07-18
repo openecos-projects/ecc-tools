@@ -20,11 +20,13 @@
 #include "AdjacentCutSpacingRule.hpp"
 #include "DataManager.hpp"
 #include "GDSPlotter.hpp"
+#include "IdbBlockages.h"
 #include "IdbEnum.h"
 #include "Monitor.hpp"
 #include "ParallelRunLengthSpacingRule.hpp"
 #include "RuleValidator.hpp"
 #include "SameLayerCutSpacingRule.hpp"
+#include "Utility.hpp"
 #include "feature_manager.h"
 #include "idm.h"
 
@@ -899,6 +901,7 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
   std::vector<idb::IdbNet*>& idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list();
   std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
   std::vector<idb::IdbPin*>& idb_io_pin_list = dmInst->get_idb_def_service()->get_design()->get_io_pin_list()->get_pin_list();
+  std::vector<idb::IdbBlockage*> idb_blockage_list = dmInst->get_idb_def_service()->get_design()->get_blockage_list()->get_blockage_list();
   idb::IdbDesign* idb_design = dmInst->get_idb_def_service()->get_design();
   std::map<idb::IdbPin*, int32_t> special_pin_net_idx_map;
   std::map<idb::IdbSpecialNet*, int32_t> special_net_idx_map;
@@ -961,6 +964,17 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
     for (idb::IdbPin* idb_io_pin : idb_io_pin_list) {
       for (idb::IdbLayerShape* port_box : idb_io_pin->get_port_box_list()) {
         total_env_shape_num += port_box->get_rect_list().size();
+      }
+    }
+
+    // routing blockage
+    for (idb::IdbBlockage* idb_blockage : idb_blockage_list) {
+      if (!idb_blockage->is_routing_blockage()) {
+        continue;
+      }
+      idb::IdbRoutingBlockage* routing_blockage = static_cast<idb::IdbRoutingBlockage*>(idb_blockage);
+      if (routing_blockage->get_layer() != nullptr) {
+        total_env_shape_num += routing_blockage->get_rect_num();
       }
     }
   }
@@ -1065,6 +1079,58 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
           ids_shape.is_routing = port_box->get_layer()->is_routing();
           env_shape_list.push_back(ids_shape);
         }
+      }
+    }
+
+    // routing blockage
+    for (idb::IdbBlockage* idb_blockage : idb_blockage_list) {
+      if (!idb_blockage->is_routing_blockage()) {
+        continue;
+      }
+      idb::IdbRoutingBlockage* routing_blockage = static_cast<idb::IdbRoutingBlockage*>(idb_blockage);
+      idb::IdbLayer* layer = routing_blockage->get_layer();
+      if (layer == nullptr) {
+        continue;
+      }
+      GTLPolySetInt blockage_polyset;
+      for (idb::IdbRect* rect : routing_blockage->get_rect_list()) {
+        blockage_polyset += GTLRectInt(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+      }
+      idb::IdbInstance* idb_instance = routing_blockage->get_instance();
+      if (idb_instance != nullptr) {
+        GTLPolySetInt pin_polyset;
+        for (idb::IdbPin* idb_pin : idb_instance->get_pin_list()->get_pin_list()) {
+          for (idb::IdbLayerShape* port_box : idb_pin->get_port_box_list()) {
+            if (port_box->get_layer() != layer) {
+              continue;
+            }
+            for (idb::IdbRect* rect : port_box->get_rect_list()) {
+              pin_polyset += GTLRectInt(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+            }
+          }
+          for (idb::IdbVia* idb_via : idb_pin->get_via_list()) {
+            for (idb::IdbLayerShape via_shape : {idb_via->get_top_layer_shape(), idb_via->get_bottom_layer_shape()}) {
+              if (via_shape.get_layer() == layer) {
+                idb::IdbRect via_box = via_shape.get_bounding_box();
+                pin_polyset += GTLRectInt(via_box.get_low_x(), via_box.get_low_y(), via_box.get_high_x(), via_box.get_high_y());
+              }
+            }
+          }
+        }
+        blockage_polyset -= pin_polyset;
+      }
+      std::vector<GTLRectInt> blockage_rect_list;
+      gtl::get_max_rectangles(blockage_rect_list, blockage_polyset);
+      for (const GTLRectInt& rect : blockage_rect_list) {
+        ids::Shape ids_shape;
+        ids_shape.net_idx = -1;
+        ids_shape.ll_x = gtl::xl(rect);
+        ids_shape.ll_y = gtl::yl(rect);
+        ids_shape.ur_x = gtl::xh(rect);
+        ids_shape.ur_y = gtl::yh(rect);
+        ids_shape.layer_idx = layer->get_id();
+        ids_shape.is_routing = layer->is_routing();
+        env_shape_list.push_back(ids_shape);
       }
     }
   }

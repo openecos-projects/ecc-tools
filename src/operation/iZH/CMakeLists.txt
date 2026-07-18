@@ -13,6 +13,12 @@ set(CMAKE_CXX_STANDARD 20)
 
 # set(DEBUG_IZH_INTERFACE ON)
 
+############################ debug module ############################
+
+# set(DEBUG_IZH_ANTENNA_CHECKER ON)
+# set(DEBUG_IZH_FANOUT_FIXER ON)
+# set(DEBUG_IZH_FILLER_INSERTER ON)
+
 ############################ debug source utility ############################
 
 # set(DEBUG_IZH_LOGGER ON)
@@ -24,11 +30,13 @@ set(CMAKE_CXX_STANDARD 20)
 set(HOME_IZH ${HOME_OPERATION}/iZH)
 
 set(IZH_INTERFACE ${HOME_IZH}/interface)
+set(IZH_MODULE ${HOME_IZH}/module)
 set(IZH_TOOLKIT ${HOME_IZH}/toolkit)
 
 ############################ cmake subdirectory ############################
 
 add_subdirectory(${IZH_INTERFACE})
+add_subdirectory(${IZH_MODULE})
 add_subdirectory(${IZH_TOOLKIT})
 
 ########################################################

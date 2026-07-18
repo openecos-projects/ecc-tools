@@ -31,6 +31,7 @@ target_link_libraries(
   icts_source_flow_setup_clock_data
   icts_source_module_routing
   icts_source_module_topology_clustering
+  log
 )
 
 target_include_directories(

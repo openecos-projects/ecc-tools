@@ -141,7 +141,7 @@ auto LibertyExpressionUsesPort(LibertyExpr* expression, const std::string& port_
   return false;
 }
 
-auto OutputFunctionUsesInput(ista::LibCell* lib_cell, idb::IdbPin* output_pin, idb::IdbPin* input_pin) -> bool
+auto OutputFunctionUsesInput(idb::LibCell* lib_cell, idb::IdbPin* output_pin, idb::IdbPin* input_pin) -> bool
 {
   if (lib_cell == nullptr) {
     return true;
@@ -184,7 +184,7 @@ auto CountClockTargetOutputs(const SdcLibertyCellLookup& liberty_cell_lookup, co
   return clock_target_output_count;
 }
 
-auto LibertyMarksClockInput(idb::IdbPin* input_pin, ista::LibCell* lib_cell) -> bool
+auto LibertyMarksClockInput(idb::IdbPin* input_pin, idb::LibCell* lib_cell) -> bool
 {
   if (input_pin == nullptr || lib_cell == nullptr) {
     return false;
@@ -193,7 +193,7 @@ auto LibertyMarksClockInput(idb::IdbPin* input_pin, ista::LibCell* lib_cell) -> 
   return lib_port != nullptr && (lib_port->isClock() || lib_port->get_clock_gate_clock_pin());
 }
 
-auto OtherInputsAreControlCandidates(idb::IdbInstance* inst, idb::IdbPin* clock_input_pin, ista::LibCell* lib_cell,
+auto OtherInputsAreControlCandidates(idb::IdbInstance* inst, idb::IdbPin* clock_input_pin, idb::LibCell* lib_cell,
                                      const CaseConstraintSet& case_constraints, const SdcLibertyCellLookup& liberty_cell_lookup) -> bool
 {
   bool has_other_input = false;
@@ -240,8 +240,8 @@ auto CollectSafeTransitions(const SdcLibertyCellLookup& liberty_cell_lookup, idb
     }
 
     if (lib_cell != nullptr && (lib_cell->isBuffer() || lib_cell->isInverter())) {
-      ista::LibPort* input_port = nullptr;
-      ista::LibPort* output_port = nullptr;
+      idb::LibPort* input_port = nullptr;
+      idb::LibPort* output_port = nullptr;
       lib_cell->bufferPorts(input_port, output_port);
       if (input_port != nullptr && output_port != nullptr) {
         auto* input_pin = ResolveInstPinByLibPort(inst, input_port);

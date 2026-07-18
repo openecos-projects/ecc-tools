@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file ResistanceCalc.cc
+ * @brief iRCX module implementation detail.
+ */
 #include "ResistanceCalc.hh"
 
 #include <algorithm>
@@ -21,38 +25,42 @@
 
 #include "LayerTable.hh"
 #include "LayoutData.hh"
+#include "NetEtchProfile.hh"
+#include "ParallelUtils.hh"
 #include "TopoPool.hh"
 #include "ProcessCorner.hpp"
+#include "RCTable.hh"
 #include "ViaResistanceModel.hh"
 #include "WireResistanceModel.hh"
 #include "log/Log.hh"
+
 namespace ircx {
 
-bool ResistanceCalc::ProcessLayerResolver::build(
-    const LayerTable& layer_table,
-    const itf::ProcessCorner& corner,
-    const TopoPool& topo_pool,
-    const Str& corner_name)
+void ResistanceCalc::set_layout_data(const LayoutData* v)
+{
+  layout_data_ = v;
+  micron_per_dbu_ = unit::toMicron(1, v->dbu_per_micron);
+}
+
+bool ResistanceCalc::ProcessLayerResolver::build(const LayerTable& layer_table,
+                                                 const ProcessCorner& corner,
+                                                 const TopoPool& topo_pool,
+                                                 const std::string& corner_name)
 {
   conductors_.clear();
   vias_.clear();
+  const ProcessLayerStack& process_layers = corner.get_layers();
 
-  if (corner.get_layers() == nullptr) {
-    LOG_ERROR << "calculate resistance failed: process layers missing for corner "
-              << corner_name << ".";
-    return false;
-  }
+  for (const TopoEdge& edge : topo_pool.get_edge_pool()) {
+    const Size design_layer_id = edge.get_layer_id();
 
-  for (const TopoEdge& edge : topo_pool.edge_pool()) {
-    const Size design_layer_id = edge.layer_id();
-
-    Str design_layer_name;
-    Str process_layer_name;
+    std::string design_layer_name;
+    std::string process_layer_name;
     Size process_layer_id = kMaxSize;
     try {
-      design_layer_name = layer_table.design_name(design_layer_id);
-      process_layer_id = layer_table.design_to_process_id(design_layer_id);
-      process_layer_name = layer_table.process_name(process_layer_id);
+      design_layer_name = layer_table.designName(design_layer_id);
+      process_layer_id = layer_table.designToProcessId(design_layer_id);
+      process_layer_name = layer_table.processName(process_layer_id);
     } catch (const std::out_of_range&) {
       LOG_ERROR << "calculate resistance failed: layer mapping missing, corner="
                 << corner_name << ", design_layer_id=" << design_layer_id << ".";
@@ -64,8 +72,8 @@ bool ResistanceCalc::ProcessLayerResolver::build(
         continue;
       }
 
-      const itf::LayerVia* via_layer =
-          corner.get_layers()->find_via_layer(process_layer_id);
+      const LayerVia* via_layer =
+          process_layers.findViaLayer(process_layer_id);
       if (via_layer == nullptr) {
         LOG_ERROR << "calculate resistance failed: via layer not found, corner="
                   << corner_name << ", design_layer_id=" << design_layer_id
@@ -82,8 +90,8 @@ bool ResistanceCalc::ProcessLayerResolver::build(
       continue;
     }
 
-    const itf::LayerConductor* conductor_layer =
-        corner.get_layers()->find_conductor_layer(process_layer_id);
+    const LayerConductor* conductor_layer =
+        process_layers.findConductorLayer(process_layer_id);
     if (conductor_layer == nullptr) {
       LOG_ERROR << "calculate resistance failed: conductor layer not found, corner="
                 << corner_name << ", design_layer_id=" << design_layer_id
@@ -98,14 +106,14 @@ bool ResistanceCalc::ProcessLayerResolver::build(
   return true;
 }
 
-const itf::LayerConductor* ResistanceCalc::ProcessLayerResolver::conductor(
+const LayerConductor* ResistanceCalc::ProcessLayerResolver::conductor(
     Size design_layer_id) const
 {
   const auto it = conductors_.find(design_layer_id);
   return it == conductors_.end() ? nullptr : it->second;
 }
 
-const itf::LayerVia* ResistanceCalc::ProcessLayerResolver::via(
+const LayerVia* ResistanceCalc::ProcessLayerResolver::via(
     Size design_layer_id) const
 {
   const auto it = vias_.find(design_layer_id);
@@ -139,14 +147,14 @@ bool ResistanceCalc::validateInputs() const
     return false;
   }
   for (const auto& corner : *corner_data_) {
-    if (corner.process_corner == nullptr) {
+    if (!corner.process_corner) {
       LOG_ERROR << "calculate resistance failed: null process corner "
                 << corner.name << ".";
       return false;
     }
   }
-  if (corner_net_etch_pools_->corner_num() != corner_data_->size()
-      || corner_net_etch_pools_->net_num() != layout_data_->regular_net_count()) {
+  if (corner_net_etch_pools_->get_corner_num() != corner_data_->size()
+      || corner_net_etch_pools_->get_net_num() != layout_data_->get_regular_net_count()) {
     LOG_ERROR << "calculate resistance failed: etch profile dimensions mismatch.";
     return false;
   }
@@ -165,7 +173,7 @@ bool ResistanceCalc::buildCornerViews(std::vector<CornerCalcView>& views) const
     CornerCalcView view;
     view.idx = corner_idx;
     view.data = &corner_data;
-    view.process_corner = corner_data.process_corner.get();
+    view.process_corner = &corner_data.process_corner.value();
     view.temperature = corner_data.temperature;
     if (!view.layers.build(*layer_table_, *view.process_corner,
                            *topo_pool_, corner_data.name)) {
@@ -198,24 +206,26 @@ bool ResistanceCalc::calc()
 
 void ResistanceCalc::calcCorner(const CornerCalcView& corner) const
 {
-  const Size regular_net_count = layout_data_->regular_net_count();
+  const Size regular_net_count = layout_data_->get_regular_net_count();
+  const int net_threads = parallel::threadCount(regular_net_count);
 
-  #pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(dynamic) num_threads(net_threads)
   for (Size net_idx = 0; net_idx < regular_net_count; ++net_idx) {
     calcNet(corner, net_idx);
   }
 }
 
-void ResistanceCalc::calcNet(const CornerCalcView& corner, Size net_idx) const
+void ResistanceCalc::calcNet(const CornerCalcView& corner,
+                             Size net_idx) const
 {
   const CornerNetId corner_net_id{corner.idx, net_idx};
-  const auto net_edges = topo_pool_->net_edges(net_idx);
-  auto edge_resistances = rc_table_->corner_net_res_pool(corner_net_id);
+  const auto get_net_edges = topo_pool_->get_net_edges(net_idx);
+  auto edge_resistances = rc_table_->get_corner_net_res_pool(corner_net_id);
   const NetEtchProfile& etch_profile = corner_net_etch_pools_->at(corner_net_id);
 
-  for (Size edge_idx = 0; edge_idx < net_edges.size(); ++edge_idx) {
+  for (Size edge_idx = 0; edge_idx < get_net_edges.size(); ++edge_idx) {
     edge_resistances[edge_idx] =
-        calcEdgeResistance(corner, net_idx, edge_idx, net_edges[edge_idx], etch_profile);
+        calcEdgeResistance(corner, net_idx, edge_idx, get_net_edges[edge_idx], etch_profile);
   }
 }
 
@@ -243,10 +253,10 @@ F64 ResistanceCalc::calcEdgeResistance(const CornerCalcView& corner,
 F64 ResistanceCalc::calcViaResistance(const CornerCalcView& corner,
                                       const TopoEdge& edge) const
 {
-  const itf::LayerVia* via_layer = corner.layers.via(edge.layer_id());
+  const LayerVia* via_layer = corner.layers.via(edge.get_layer_id());
   if (via_layer == nullptr) {
     LOG_ERROR << "calculate resistance failed: via layer not bound, corner="
-              << corner.data->name << ", design_layer_id=" << edge.layer_id()
+              << corner.data->name << ", design_layer_id=" << edge.get_layer_id()
               << ".";
     return 0.0;
   }
@@ -255,15 +265,15 @@ F64 ResistanceCalc::calcViaResistance(const CornerCalcView& corner,
                                   micron_per_dbu_, corner.temperature);
 }
 
-F64 ResistanceCalc::calcConductorResistance(
-    const CornerCalcView& corner,
-    const TopoEdge& edge,
-    std::span<const EdgeEtchInterval> edge_etch_intervals) const
+F64 ResistanceCalc::calcConductorResistance(const CornerCalcView& corner,
+                                            const TopoEdge& edge,
+                                            std::span<const EdgeEtchInterval>
+                                                edge_etch_intervals) const
 {
-  const itf::LayerConductor* conductor_layer = corner.layers.conductor(edge.layer_id());
+  const LayerConductor* conductor_layer = corner.layers.conductor(edge.get_layer_id());
   if (conductor_layer == nullptr) {
     LOG_ERROR << "calculate resistance failed: conductor layer not bound, corner="
-              << corner.data->name << ", design_layer_id=" << edge.layer_id()
+              << corner.data->name << ", design_layer_id=" << edge.get_layer_id()
               << ".";
     return 0.0;
   }
@@ -275,18 +285,18 @@ F64 ResistanceCalc::calcConductorResistance(
 
 LineSegment<Micron> ResistanceCalc::edgeSegment(const TopoEdge& edge) const
 {
-  const TopoNode& u_node = topo_pool_->node_at(edge.u());
-  const TopoNode& v_node = topo_pool_->node_at(edge.v());
+  const TopoNode& u_node = topo_pool_->get_node(edge.get_u());
+  const TopoNode& v_node = topo_pool_->get_node(edge.get_v());
 
   LineSegment<Micron> segment;
   segment.is_horz = edge.is_horz();
-  segment.coord = edge.coord() * micron_per_dbu_;
+  segment.coord = edge.get_coord() * micron_per_dbu_;
   if (edge.is_horz()) {
-    segment.lo = geom::x(u_node.point()) * micron_per_dbu_;
-    segment.hi = geom::x(v_node.point()) * micron_per_dbu_;
+    segment.lo = geom::x(u_node.get_point()) * micron_per_dbu_;
+    segment.hi = geom::x(v_node.get_point()) * micron_per_dbu_;
   } else {
-    segment.lo = geom::y(u_node.point()) * micron_per_dbu_;
-    segment.hi = geom::y(v_node.point()) * micron_per_dbu_;
+    segment.lo = geom::y(u_node.get_point()) * micron_per_dbu_;
+    segment.hi = geom::y(v_node.get_point()) * micron_per_dbu_;
   }
   if (segment.hi < segment.lo) {
     std::swap(segment.lo, segment.hi);

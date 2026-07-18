@@ -40,16 +40,16 @@ namespace {
 
 constexpr double kMilliwattToWatt = 1.0 / 1000.0;
 
-auto convertLibCapToPf(ista::LibCell* lib_cell, double cap_value) -> double
+auto convertLibCapToPf(idb::LibCell* lib_cell, double cap_value) -> double
 {
   auto* owner_lib = lib_cell != nullptr ? lib_cell->get_owner_lib() : nullptr;
   if (owner_lib == nullptr) {
     return cap_value;
   }
-  return ista::ConvertCapUnit(owner_lib->get_cap_unit(), ista::CapacitiveUnit::kPF, cap_value);
+  return idb::ConvertCapUnit(owner_lib->get_cap_unit(), idb::CapacitiveUnit::kPF, cap_value);
 }
 
-auto convertLibTimeToNs(ista::LibCell* lib_cell, double time_value) -> double
+auto convertLibTimeToNs(idb::LibCell* lib_cell, double time_value) -> double
 {
   auto* owner_lib = lib_cell != nullptr ? lib_cell->get_owner_lib() : nullptr;
   if (owner_lib == nullptr) {
@@ -58,56 +58,56 @@ auto convertLibTimeToNs(ista::LibCell* lib_cell, double time_value) -> double
   return owner_lib->convert_time_unit_to_ns(time_value);
 }
 
-auto queryLibPortCapacitancePf(ista::LibCell* lib_cell, ista::LibPort* lib_port) -> double
+auto queryLibPortCapacitancePf(idb::LibCell* lib_cell, idb::LibPort* lib_port) -> double
 {
   if (lib_cell == nullptr || lib_port == nullptr || lib_port->isInput() == 0U) {
     return 0.0;
   }
 
   double cap_value = lib_port->get_port_cap();
-  cap_value = std::max(cap_value, lib_port->get_port_cap(ista::AnalysisMode::kMax, ista::TransType::kRise).value_or(0.0));
-  cap_value = std::max(cap_value, lib_port->get_port_cap(ista::AnalysisMode::kMax, ista::TransType::kFall).value_or(0.0));
-  cap_value = std::max(cap_value, lib_port->get_port_cap(ista::AnalysisMode::kMin, ista::TransType::kRise).value_or(0.0));
-  cap_value = std::max(cap_value, lib_port->get_port_cap(ista::AnalysisMode::kMin, ista::TransType::kFall).value_or(0.0));
+  cap_value = std::max(cap_value, lib_port->get_port_cap(idb::AnalysisMode::kMax, idb::TransType::kRise).value_or(0.0));
+  cap_value = std::max(cap_value, lib_port->get_port_cap(idb::AnalysisMode::kMax, idb::TransType::kFall).value_or(0.0));
+  cap_value = std::max(cap_value, lib_port->get_port_cap(idb::AnalysisMode::kMin, idb::TransType::kRise).value_or(0.0));
+  cap_value = std::max(cap_value, lib_port->get_port_cap(idb::AnalysisMode::kMin, idb::TransType::kFall).value_or(0.0));
   return convertLibCapToPf(lib_cell, cap_value);
 }
 
-auto findBufferArcSet(ista::LibCell* lib_cell) -> std::optional<ista::LibArcSet*>
+auto findBufferArcSet(idb::LibCell* lib_cell) -> std::optional<idb::LibArcSet*>
 {
   if (lib_cell == nullptr) {
     return std::nullopt;
   }
 
-  ista::LibPort* input = nullptr;
-  ista::LibPort* output = nullptr;
+  idb::LibPort* input = nullptr;
+  idb::LibPort* output = nullptr;
   lib_cell->bufferPorts(input, output);
   if (input == nullptr || output == nullptr) {
     return std::nullopt;
   }
 
-  auto timing_arc_set = lib_cell->findLibertyArcSet(input->get_port_name(), output->get_port_name(), ista::LibArc::TimingType::kComb);
+  auto timing_arc_set = lib_cell->findLibertyArcSet(input->get_port_name(), output->get_port_name(), idb::LibArc::TimingType::kComb);
   if (!timing_arc_set.has_value()) {
     timing_arc_set = lib_cell->findLibertyArcSet(input->get_port_name(), output->get_port_name());
   }
   return timing_arc_set;
 }
 
-auto toFastStaAxisKind(ista::LibLutTableTemplate::Variable variable) -> FastStaLibertyAxisKind
+auto toFastStaAxisKind(idb::LibLutTableTemplate::Variable variable) -> FastStaLibertyAxisKind
 {
   switch (variable) {
-    case ista::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION:
-    case ista::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION:
-    case ista::LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME:
+    case idb::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION:
+    case idb::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION:
+    case idb::LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME:
       return FastStaLibertyAxisKind::kInputSlew;
-    case ista::LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE:
-    case ista::LibLutTableTemplate::Variable::EQUAL_OR_OPPOSITE_OUTPUT_NET_CAPACITANCE:
+    case idb::LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE:
+    case idb::LibLutTableTemplate::Variable::EQUAL_OR_OPPOSITE_OUTPUT_NET_CAPACITANCE:
       return FastStaLibertyAxisKind::kOutputLoad;
     default:
       return FastStaLibertyAxisKind::kUnknown;
   }
 }
 
-auto convertTableAxisValue(ista::LibCell* lib_cell, ista::LibLutTableTemplate::Variable variable, double value) -> double
+auto convertTableAxisValue(idb::LibCell* lib_cell, idb::LibLutTableTemplate::Variable variable, double value) -> double
 {
   auto* owner_lib = lib_cell != nullptr ? lib_cell->get_owner_lib() : nullptr;
   if (owner_lib == nullptr) {
@@ -125,7 +125,7 @@ auto convertTableAxisValue(ista::LibCell* lib_cell, ista::LibLutTableTemplate::V
   return value;
 }
 
-auto convertTableValue(ista::LibCell* lib_cell, FastStaLibertyTableKind kind, double value) -> double
+auto convertTableValue(idb::LibCell* lib_cell, FastStaLibertyTableKind kind, double value) -> double
 {
   switch (kind) {
     case FastStaLibertyTableKind::kCellDelay:
@@ -137,7 +137,7 @@ auto convertTableValue(ista::LibCell* lib_cell, FastStaLibertyTableKind kind, do
   return value;
 }
 
-auto appendAxis(ista::LibCell* lib_cell, ista::LibTable* table, std::optional<ista::LibLutTableTemplate::Variable> variable,
+auto appendAxis(idb::LibCell* lib_cell, idb::LibTable* table, std::optional<idb::LibLutTableTemplate::Variable> variable,
                 unsigned axis_index, FastStaLibertyTable& table_record) -> void
 {
   if (!variable.has_value() || axis_index >= table->getAxesSize()) {
@@ -157,7 +157,7 @@ auto appendAxis(ista::LibCell* lib_cell, ista::LibTable* table, std::optional<is
   table_record.axes.push_back(std::move(axis));
 }
 
-auto extractTable(ista::LibCell* lib_cell, ista::LibTable* table, FastStaLibertyTableKind kind, FastStaTransition transition)
+auto extractTable(idb::LibCell* lib_cell, idb::LibTable* table, FastStaLibertyTableKind kind, FastStaTransition transition)
     -> FastStaLibertyTable
 {
   FastStaLibertyTable table_record;
@@ -184,7 +184,7 @@ auto extractTable(ista::LibCell* lib_cell, ista::LibTable* table, FastStaLiberty
   return table_record;
 }
 
-auto appendDelayTable(ista::LibCell* lib_cell, ista::LibDelayTableModel* delay_model, ista::LibTable::TableType table_type,
+auto appendDelayTable(idb::LibCell* lib_cell, idb::LibDelayTableModel* delay_model, idb::LibTable::TableType table_type,
                       FastStaLibertyTableKind kind, FastStaTransition transition, std::vector<FastStaLibertyTable>& tables) -> void
 {
   auto* table = delay_model != nullptr ? delay_model->getTable(static_cast<int>(table_type)) : nullptr;
@@ -194,7 +194,7 @@ auto appendDelayTable(ista::LibCell* lib_cell, ista::LibDelayTableModel* delay_m
   tables.push_back(extractTable(lib_cell, table, kind, transition));
 }
 
-auto appendPowerTable(ista::LibCell* lib_cell, ista::LibPowerTableModel* power_model, ista::LibTable::TableType table_type,
+auto appendPowerTable(idb::LibCell* lib_cell, idb::LibPowerTableModel* power_model, idb::LibTable::TableType table_type,
                       FastStaTransition transition, std::vector<FastStaLibertyTable>& tables) -> void
 {
   auto* table = power_model != nullptr ? power_model->getTable(CAST_POWER_TYPE_TO_INDEX(table_type)) : nullptr;
@@ -204,7 +204,7 @@ auto appendPowerTable(ista::LibCell* lib_cell, ista::LibPowerTableModel* power_m
   tables.push_back(extractTable(lib_cell, table, FastStaLibertyTableKind::kInternalPower, transition));
 }
 
-auto calcLeakagePowerW(ista::LibCell* lib_cell) -> double
+auto calcLeakagePowerW(idb::LibCell* lib_cell) -> double
 {
   if (lib_cell == nullptr) {
     return 0.0;
@@ -229,12 +229,12 @@ auto percentOrDefault(double value, double default_value) -> double
   return value > 0.0 && value < 1.0 ? value : default_value;
 }
 
-auto findBestTimingArc(ista::LibArcSet* arc_set) -> ista::LibArc*
+auto findBestTimingArc(idb::LibArcSet* arc_set) -> idb::LibArc*
 {
   if (arc_set == nullptr) {
     return nullptr;
   }
-  ista::LibArc* first_enabled = nullptr;
+  idb::LibArc* first_enabled = nullptr;
   for (const auto& arc_holder : arc_set->get_arcs()) {
     auto* arc = arc_holder.get();
     if (arc == nullptr || arc->isDisableArc() != 0U) {
@@ -250,7 +250,7 @@ auto findBestTimingArc(ista::LibArcSet* arc_set) -> ista::LibArc*
   return first_enabled;
 }
 
-auto appendPowerArcTables(ista::LibCell* lib_cell, ista::LibPowerArcSet* power_arc_set, FastStaLibertyArc& arc_record) -> void
+auto appendPowerArcTables(idb::LibCell* lib_cell, idb::LibPowerArcSet* power_arc_set, FastStaLibertyArc& arc_record) -> void
 {
   if (power_arc_set == nullptr) {
     return;
@@ -260,25 +260,25 @@ auto appendPowerArcTables(ista::LibCell* lib_cell, ista::LibPowerArcSet* power_a
     auto* internal_power
         = power_arc != nullptr && power_arc->get_internal_power_info() != nullptr ? power_arc->get_internal_power_info().get() : nullptr;
     auto* power_model
-        = internal_power != nullptr ? dynamic_cast<ista::LibPowerTableModel*>(internal_power->get_power_table_model()) : nullptr;
+        = internal_power != nullptr ? dynamic_cast<idb::LibPowerTableModel*>(internal_power->get_power_table_model()) : nullptr;
     if (power_model == nullptr) {
       continue;
     }
-    appendPowerTable(lib_cell, power_model, ista::LibTable::TableType::kRisePower, FastStaTransition::kRise,
+    appendPowerTable(lib_cell, power_model, idb::LibTable::TableType::kRisePower, FastStaTransition::kRise,
                      arc_record.internal_power_tables);
-    appendPowerTable(lib_cell, power_model, ista::LibTable::TableType::kFallPower, FastStaTransition::kFall,
+    appendPowerTable(lib_cell, power_model, idb::LibTable::TableType::kFallPower, FastStaTransition::kFall,
                      arc_record.internal_power_tables);
   }
 }
 
-auto extractBufferCellFromLibCell(Wrapper& wrapper, ista::LibCell* lib_cell) -> FastStaLibertyCell
+auto extractBufferCellFromLibCell(Wrapper& wrapper, idb::LibCell* lib_cell) -> FastStaLibertyCell
 {
   if (lib_cell == nullptr) {
     return FastStaLibertyCell{};
   }
 
-  ista::LibPort* input_port = nullptr;
-  ista::LibPort* output_port = nullptr;
+  idb::LibPort* input_port = nullptr;
+  idb::LibPort* output_port = nullptr;
   lib_cell->bufferPorts(input_port, output_port);
   const auto cell_master = std::string(lib_cell->get_cell_name());
   const auto input_port_name = input_port != nullptr ? std::string(input_port->get_port_name()) : std::string{};
@@ -287,7 +287,7 @@ auto extractBufferCellFromLibCell(Wrapper& wrapper, ista::LibCell* lib_cell) -> 
 
   auto output_cap_limit_pf = 0.0;
   if (output_port != nullptr) {
-    if (auto cap_limit = output_port->get_port_cap_limit(ista::AnalysisMode::kMax); cap_limit.has_value()) {
+    if (auto cap_limit = output_port->get_port_cap_limit(idb::AnalysisMode::kMax); cap_limit.has_value()) {
       output_cap_limit_pf = convertLibCapToPf(lib_cell, *cap_limit);
     }
   }
@@ -297,7 +297,7 @@ auto extractBufferCellFromLibCell(Wrapper& wrapper, ista::LibCell* lib_cell) -> 
 
   auto input_slew_limit_ns = 0.0;
   if (input_port != nullptr) {
-    if (auto slew_limit = input_port->get_port_slew_limit(ista::AnalysisMode::kMax); slew_limit.has_value()) {
+    if (auto slew_limit = input_port->get_port_slew_limit(idb::AnalysisMode::kMax); slew_limit.has_value()) {
       input_slew_limit_ns = convertLibTimeToNs(lib_cell, *slew_limit);
     }
   }
@@ -337,18 +337,18 @@ auto extractBufferCellFromLibCell(Wrapper& wrapper, ista::LibCell* lib_cell) -> 
 
   auto timing_arc_set = findBufferArcSet(lib_cell);
   auto* timing_arc = findBestTimingArc(timing_arc_set.value_or(nullptr));
-  auto* delay_model = timing_arc != nullptr ? dynamic_cast<ista::LibDelayTableModel*>(timing_arc->get_table_model()) : nullptr;
+  auto* delay_model = timing_arc != nullptr ? dynamic_cast<idb::LibDelayTableModel*>(timing_arc->get_table_model()) : nullptr;
   if (timing_arc != nullptr) {
     cell.timing_arc.negative_unate = timing_arc->isNegativeArc() != 0U;
   }
   if (delay_model != nullptr) {
-    appendDelayTable(lib_cell, delay_model, ista::LibTable::TableType::kCellRise, FastStaLibertyTableKind::kCellDelay,
+    appendDelayTable(lib_cell, delay_model, idb::LibTable::TableType::kCellRise, FastStaLibertyTableKind::kCellDelay,
                      FastStaTransition::kRise, cell.timing_arc.delay_tables);
-    appendDelayTable(lib_cell, delay_model, ista::LibTable::TableType::kCellFall, FastStaLibertyTableKind::kCellDelay,
+    appendDelayTable(lib_cell, delay_model, idb::LibTable::TableType::kCellFall, FastStaLibertyTableKind::kCellDelay,
                      FastStaTransition::kFall, cell.timing_arc.delay_tables);
-    appendDelayTable(lib_cell, delay_model, ista::LibTable::TableType::kRiseTransition, FastStaLibertyTableKind::kOutputSlew,
+    appendDelayTable(lib_cell, delay_model, idb::LibTable::TableType::kRiseTransition, FastStaLibertyTableKind::kOutputSlew,
                      FastStaTransition::kRise, cell.timing_arc.slew_tables);
-    appendDelayTable(lib_cell, delay_model, ista::LibTable::TableType::kFallTransition, FastStaLibertyTableKind::kOutputSlew,
+    appendDelayTable(lib_cell, delay_model, idb::LibTable::TableType::kFallTransition, FastStaLibertyTableKind::kOutputSlew,
                      FastStaTransition::kFall, cell.timing_arc.slew_tables);
   }
 

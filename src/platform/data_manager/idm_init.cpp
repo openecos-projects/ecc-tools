@@ -29,6 +29,8 @@
 
 #include "idm.h"
 
+#include "liberty/Lib.hh"
+
 namespace idm {
 bool DataManager::initLef(vector<string> lef_path, bool b_techlef)
 {
@@ -59,6 +61,28 @@ bool DataManager::initVerilog(string verilog_path, string top_module)
   _design = get_idb_design();
 
   return _idb_def_service == nullptr ? false : true;
+}
+
+bool DataManager::initLib(vector<string> lib_paths)
+{
+  _lib_readers.clear();
+  Lib lib;
+  for (string& lib_path : lib_paths) {
+    _lib_readers.emplace_back(lib.loadLibertyWithCppParser(lib_path.c_str()));
+  }
+
+  return true;
+}
+
+bool DataManager::initSpef(string spef_path)
+{
+  _spef_reader = std::make_unique<spef::SpefReader>();
+  if (!_spef_reader->read(spef_path)) {
+    return false;
+  }
+  _spef_reader->expandName();
+
+  return true;
 }
 
 }  // namespace idm

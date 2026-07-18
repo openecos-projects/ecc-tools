@@ -14,9 +14,12 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file NetEnvironment.hh
+ * @brief Per-net neighboring geometry environment intervals.
+ */
 #pragma once
 
-#include <cstdint>
 #include <span>
 #include <utility>
 #include <vector>
@@ -41,9 +44,9 @@ struct CrossOverlapSub {
 struct DiagCoupSub {
   Dbu a0{0};
   Dbu a1{0};
-  TopoEdge* neighbor{nullptr};
+  const TopoEdge* neighbor{nullptr};
   Dbu dist{0};         // center-to-center, fixed direction, dbu
-  int16_t layer_delta{0};  // target layer = this_edge.layer + layer_delta
+  I16 layer_delta{0};  // target layer = this_edge.layer + layer_delta
 };
 
 struct EdgeEnvironmentInterval {
@@ -71,9 +74,9 @@ class NetEnvironment
     edge_interval_groups_.append(std::move(intervals));
   }
 
-  std::span<const EdgeEnvironmentInterval> edgeIntervals(Size edge_id) const
+  std::span<const EdgeEnvironmentInterval> edgeIntervals(Size edge_idx) const
   {
-    return edge_interval_groups_.items(edge_id);
+    return edge_interval_groups_.items(edge_idx);
   }
 
   void clear()

@@ -14,25 +14,26 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file ViaResistanceModel.hh
+ * @brief iRCX module implementation detail.
+ */
 #pragma once
 
 #include "Types.hh"
 
-namespace itf {
-class LayerVia;
-class ProcessCorner;
-}  // namespace itf
-
 namespace ircx {
 
+class LayerVia;
+class ProcessCorner;
 class TopoEdge;
 
 class ViaResistanceModel
 {
  public:
   static auto calc(const TopoEdge& edge,
-                   const itf::ProcessCorner& corner,
-                   const itf::LayerVia& layer,
+                   const ProcessCorner& corner,
+                   const LayerVia& layer,
                    Micron micron_per_dbu,
                    F64 operating_temperature) -> F64;
 };

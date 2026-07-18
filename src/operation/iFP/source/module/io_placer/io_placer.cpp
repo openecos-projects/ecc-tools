@@ -129,11 +129,84 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
   int side_num = sides.size() > 0 ? sides.size() : 4;
   int edge_num = pin_num % side_num == 0 ? pin_num / side_num : pin_num / side_num + 1;
   int manufacture_grid = dmInst->get_idb_lef_service()->get_layout()->get_munufacture_grid();
-  int width_step = idb_core->get_bounding_box()->get_width() / (edge_num + 1);
-  int height_step = idb_core->get_bounding_box()->get_height() / (edge_num + 1);
-  width_step = width_step / manufacture_grid * manufacture_grid;
-  height_step = height_step / manufacture_grid * manufacture_grid;
   int pin_index = 0;
+
+  auto align_down = [&](int value) -> int {
+    if (manufacture_grid <= 0) {
+      return value;
+    }
+    int remainder = value % manufacture_grid;
+    if (remainder == 0) {
+      return value;
+    }
+    return value >= 0 ? value - remainder : value - remainder - manufacture_grid;
+  };
+
+  auto align_up = [&](int value) -> int {
+    if (manufacture_grid <= 0) {
+      return value;
+    }
+    int remainder = value % manufacture_grid;
+    if (remainder == 0) {
+      return value;
+    }
+    return value >= 0 ? value + manufacture_grid - remainder : value - remainder;
+  };
+
+  auto align_nearest = [&](int value) -> int {
+    int lower = align_down(value);
+    int upper = align_up(value);
+    return value - lower <= upper - value ? lower : upper;
+  };
+
+  auto get_track_pitch = [](idb::IdbLayer* layer) -> int {
+    auto* routing_layer = dynamic_cast<idb::IdbLayerRouting*>(layer);
+    if (routing_layer == nullptr) {
+      return 0;
+    }
+
+    int pitch = 0;
+    auto* prefer_track_grid = routing_layer->get_prefer_track_grid();
+    if (prefer_track_grid != nullptr && prefer_track_grid->get_track() != nullptr) {
+      pitch = std::max(pitch, static_cast<int>(prefer_track_grid->get_track()->get_pitch()));
+    }
+    auto* nonprefer_track_grid = routing_layer->get_nonprefer_track_grid();
+    if (nonprefer_track_grid != nullptr && nonprefer_track_grid->get_track() != nullptr) {
+      pitch = std::max(pitch, static_cast<int>(nonprefer_track_grid->get_track()->get_pitch()));
+    }
+    if (pitch <= 0) {
+      pitch = std::max(routing_layer->get_pitch_x(), routing_layer->get_pitch_y());
+    }
+    return pitch;
+  };
+
+  int horizontal_pitch = get_track_pitch(horizontal_layer);
+  int vertical_pitch = get_track_pitch(vertical_layer);
+
+  auto get_along_coord = [&](int range_low, int range_high, int die_low, int die_high, int pin_span, int access_pitch,
+                             int side_pin_num, int index) -> int {
+    int legal_low = std::max(range_low, die_low + access_pitch);
+    int legal_high = std::min(range_high, die_high - access_pitch);
+    int start = align_up(legal_low + pin_span / 2);
+    int end = align_down(legal_high - pin_span / 2);
+
+    if (start > end) {
+      start = align_up(range_low + pin_span / 2);
+      end = align_down(range_high - pin_span / 2);
+    }
+    if (start > end) {
+      return align_nearest((range_low + range_high) / 2);
+    }
+    if (side_pin_num <= 1) {
+      return align_nearest((start + end) / 2);
+    }
+
+    long long span = static_cast<long long>(end - start);
+    int coord = start + static_cast<int>((span * index + (side_pin_num - 1) / 2) / (side_pin_num - 1));
+    coord = align_nearest(coord);
+    coord = std::max(start, std::min(end, coord));
+    return coord;
+  };
 
   auto sync_pin_location = [](idb::IdbPin* pin, idb::IdbPort* port, int x, int y) {
     if (pin == nullptr || port == nullptr || pin->get_term() == nullptr) {
@@ -152,13 +225,12 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
 
   /// left
   if (has_side("left")) {
-    for (int i = 0; i < edge_num; ++i) {
-      if (pin_index >= pin_num) {
-        break;
-      }
+    int side_pin_num = std::min(edge_num, pin_num - pin_index);
+    for (int i = 0; i < side_pin_num; ++i) {
 
       int x = idb_die->get_llx() + height / 2;
-      int y = idb_core->get_bounding_box()->get_low_y() + i * width_step;
+      int y = get_along_coord(idb_core->get_bounding_box()->get_low_y(), idb_core->get_bounding_box()->get_high_y(),
+                              idb_die->get_lly(), idb_die->get_ury(), width, horizontal_pitch, side_pin_num, i);
 
       auto pin = pin_list[pin_index++];
 
@@ -185,13 +257,12 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
 
   /// right
   if (has_side("right")) {
-    for (int i = 0; i < edge_num; ++i) {
-      if (pin_index >= pin_num) {
-        break;
-      }
+    int side_pin_num = std::min(edge_num, pin_num - pin_index);
+    for (int i = 0; i < side_pin_num; ++i) {
 
       int x = idb_die->get_urx() - height / 2;
-      int y = idb_core->get_bounding_box()->get_low_y() + i * width_step;
+      int y = get_along_coord(idb_core->get_bounding_box()->get_low_y(), idb_core->get_bounding_box()->get_high_y(),
+                              idb_die->get_lly(), idb_die->get_ury(), width, horizontal_pitch, side_pin_num, i);
 
       auto pin = pin_list[pin_index++];
 
@@ -219,12 +290,11 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
 
   /// bottom
   if (has_side("bottom")) {
-    for (int i = 0; i < edge_num; ++i) {
-      if (pin_index >= pin_num) {
-        break;
-      }
+    int side_pin_num = std::min(edge_num, pin_num - pin_index);
+    for (int i = 0; i < side_pin_num; ++i) {
 
-      int x = idb_core->get_bounding_box()->get_low_x() + i * width_step;
+      int x = get_along_coord(idb_core->get_bounding_box()->get_low_x(), idb_core->get_bounding_box()->get_high_x(),
+                              idb_die->get_llx(), idb_die->get_urx(), width, vertical_pitch, side_pin_num, i);
       int y = idb_die->get_lly() + height / 2;
 
       auto pin = pin_list[pin_index++];
@@ -253,12 +323,11 @@ bool IoPlacer::autoPlacePins(std::string layer_name, int width, int height, std:
 
   /// top
   if (has_side("top")) {
-    for (int i = 0; i < edge_num; ++i) {
-      if (pin_index >= pin_num) {
-        break;
-      }
+    int side_pin_num = std::min(edge_num, pin_num - pin_index);
+    for (int i = 0; i < side_pin_num; ++i) {
 
-      int x = idb_core->get_bounding_box()->get_low_x() + i * width_step;
+      int x = get_along_coord(idb_core->get_bounding_box()->get_low_x(), idb_core->get_bounding_box()->get_high_x(),
+                              idb_die->get_llx(), idb_die->get_urx(), width, vertical_pitch, side_pin_num, i);
       int y = idb_die->get_ury() - height / 2;
 
       auto pin = pin_list[pin_index++];

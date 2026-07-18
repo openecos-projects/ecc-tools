@@ -17,6 +17,7 @@ target_include_directories(
   ${HOME_DATABASE}/data/design/db_design
   ${HOME_DATABASE}/data/design/db_layout
   ${HOME_DATABASE}/manager/builder
+  ${HOME_UTILITY}/stdBase/include
 )
 
 target_link_libraries(

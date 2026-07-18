@@ -32,9 +32,9 @@
 #include <vector>
 
 #include "BTreeMap.hh"
-#include "include/Type.hh"
+#include "Type.hh"
 
-namespace ista {
+namespace idb {
 
 class AocvLibrary;
 
@@ -183,4 +183,4 @@ class AocvReader
   std::ifstream _stream;
 };
 
-}  // namespace ista
+}  // namespace idb

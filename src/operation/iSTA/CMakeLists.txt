@@ -1,108 +1,54 @@
-cmake_minimum_required(VERSION 3.11)
+message(STATUS "")
+message(STATUS "############## iSTA: START CMAKE ##############")
+
+############################ cmake flag ############################
 
 set(CMAKE_CXX_STANDARD 20)
-# set(CMAKE_BUILD_TYPE "Debug") include(cmake/conanbuildinfo.cmake)
-# conan_basic_setup()
 
-if(TEST_SHELL)
-  add_definitions(-DTEST_SHELL)
-endif(TEST_SHELL)
+# add_compile_options("-Wconversion")
+# add_compile_options("-fsanitize=address")
+# link_libraries("-fsanitize=address")
 
-# ADD_COMPILE_OPTIONS("-fsanitize=address") LINK_LIBRARIES("-fsanitize=address")
+############################ debug interface ############################
 
-include_directories(${HOME_UTILITY}/stdBase)
-include_directories(${HOME_UTILITY}/stdBase/include)
-include_directories(${HOME_UTILITY})
-include_directories(${HOME_DATABASE}/manager/parser)
-include_directories(SYSTEM ${HOME_THIRDPARTY})
-include_directories(${HOME_OPERATION}/iSTA)
-include_directories(${HOME_OPERATION}/iSTA/source/module)
-include_directories(${HOME_OPERATION}/iSTA/source/module/include)
-include_directories(${HOME_THIRDPARTY}/onnxruntime/include)
-include_directories(${HOME_THIRDPARTY}/yaml-cpp/include)
+# set(DEBUG_ISTA_INTERFACE ON)
 
-include(${HOME_CMAKE}/operation/idb.cmake)
+############################ debug source data_manager ############################
 
-link_directories(${CMAKE_BINARY_DIR}/lib)
-link_directories(${HOME_THIRDPARTY}/onnxruntime/)
+# set(DEBUG_ISTA_DATA_MANAGER ON)
 
-find_package(Eigen3 REQUIRED)
+############################ debug source module ############################
 
-include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
-message(STATUS "Eigen3 ${EIGEN3_INCLUDE_DIR}")
-link_directories(${EIGEN3_LIBRARY})
+# set(DEBUG_ISTA_DESIGN_LOADER ON)
+# set(DEBUG_ISTA_CONSTRAINT_MANAGER ON)
+# set(DEBUG_ISTA_GRAPH_BUILDER ON)
+# set(DEBUG_ISTA_DELAY_CALCULATOR ON)
+# set(DEBUG_ISTA_CLOCK_PROPAGATOR ON)
+# set(DEBUG_ISTA_TIMING_PROPAGATOR ON)
+# set(DEBUG_ISTA_TIMING_ANALYZER ON)
+# set(DEBUG_ISTA_TIMING_REPORTER ON)
+# set(DEBUG_ISTA_SDF_WRITER ON)
 
-option(UPDATE_RELEASE_VERSION "update git version for release" OFF)
+############################ debug source toolkit ############################
 
-if(UPDATE_RELEASE_VERSION)
-  find_package(Git QUIET)
-  if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --abbrev=40 --always
-                    OUTPUT_VARIABLE GIT_VERSION)
-    string(STRIP "${GIT_VERSION}" GIT_VERSION)
-    message(STATUS "Git version: " ${GIT_VERSION})
-  endif()
+# set(DEBUG_ISTA_LOGGER ON)
+# set(DEBUG_ISTA_MONITOR ON)
+# set(DEBUG_ISTA_UTILITY ON)
 
-  configure_file("${HOME_OPERATION}/iSTA/source/module/include/Version.hh.in"
-                 "${HOME_OPERATION}/iSTA/source/module/include/Version.hh")
-endif()
+############################ setting path ############################
 
-if (USE_GPU)
-  find_package(CUDAToolkit)
+set(HOME_ISTA ${HOME_OPERATION}/iSTA)
 
-  if(CUDAToolkit_FOUND)
-      set(USE_CUDA_MODE ON)
-      if (USE_CUDA_MODE)
-          message(STATUS "CUDAToolkit is available, use cuda delay")
-          add_definitions(-DCUDA_DELAY=1)
-          add_definitions(-DCUDA_PROPAGATION=1)
-          add_subdirectory(source/module/delay-cuda)
-          add_subdirectory(source/module/propagation-cuda)
-      endif()
-  else()
-      message("CUDAToolkit is not available.")
-  endif()
-endif()
+set(ISTA_INTERFACE ${HOME_ISTA}/interface)
+set(ISTA_SOURCE ${HOME_ISTA}/source)
+set(ISTA_TEST ${HOME_ISTA}/test)
 
-add_subdirectory(api)
-add_subdirectory(source/module/netlist)
-add_subdirectory(source/module/sdc)
-add_subdirectory(source/module/sdc-cmd)
-add_subdirectory(source/module/AI-inference)
-add_subdirectory(source/module/python-api)
-add_subdirectory(source/module/shell-cmd)
-add_subdirectory(source/module/sta)
-add_subdirectory(source/module/delay)
-add_subdirectory(source/solver)
-add_subdirectory(source/utility)
+############################ cmake subdirectory ############################
 
-add_subdirectory(test)
+add_subdirectory(${ISTA_INTERFACE})
+add_subdirectory(${ISTA_SOURCE})
+add_subdirectory(${ISTA_TEST})
 
-add_executable(iSTA main.cc)
+########################################################
 
-target_link_libraries(
-  iSTA
-  sdc
-  ista-engine
-  inference
-  sdc-cmd
-  shell-cmd
-  sta
-  log
-  str
-  time
-  netlist
-  liberty
-  delay
-  ista_utility
-  sta-solver
-  verilog
-  graph
-  idb
-  tcl
-  usage
-  pthread
-  stdc++fs
-  IdbBuilder
-  def_service
-  lef_service)
+message(STATUS "############## iSTA: END CMAKE ##############\n")

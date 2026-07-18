@@ -7,7 +7,6 @@ add_library(tcl_ipdn
 target_link_libraries(tcl_ipdn 
     PUBLIC
         tcl
-        shell-cmd
         str
         tool_manager
         ipdn_api

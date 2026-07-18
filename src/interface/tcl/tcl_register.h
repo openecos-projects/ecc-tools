@@ -38,12 +38,11 @@
 #include "tcl_register_idrc.h"
 #include "tcl_register_inst.h"
 #include "tcl_register_irt.h"
+#include "tcl_register_ista.h"
 #include "tcl_register_izh.h"
 #include "tcl_register_ircx.h"
 #include "tcl_register_pdn.h"
 #include "tcl_register_report.h"
-#include "tcl_register_sta.h"
-#include "tcl_register_vec.h"
 #include "tcl_register_notification.h"
 #include "tcl_register_workspace.h"
 
@@ -83,26 +82,22 @@ int registerCommands()
   /// Router
   registerCmdRT();
 
+  /// STA
+  registerCmdSTA();
+
   /// DRC
   registerCmdDRC();
 
   /// RCX
   registerCmdRCX();
 
-  /// STA
-  registerCmdSTA();
-
   /// ZH
   registerCmdZH();
 
   registerCmdReport();
 
-  registerCmdFeature();
-
   registerCmdEval();
 
-  registerCmdVectorization();
-  
   registerCmdNotification();
 
 #ifdef CONTEST

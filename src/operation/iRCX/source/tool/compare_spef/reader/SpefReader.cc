@@ -14,16 +14,21 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file SpefReader.cc
+ * @brief compare_spef implementation detail.
+ */
 #include "reader/SpefReader.hh"
 
 #include <cctype>
 #include <cstdlib>
-#include <string>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
 #include "SpefParser.hh"
+#include "utils/SpefUnit.hh"
 
 namespace ircx {
 namespace compare_spef {
@@ -46,6 +51,20 @@ auto directionName(spef::ConnectionDirection direction) -> std::string
   return "";
 }
 
+auto nameMapIndex(const std::string& name) -> std::optional<Size>
+{
+  if (name.size() < 2
+      || name.front() != '*'
+      || !std::isdigit(static_cast<unsigned char>(name[1]))) {
+    return std::nullopt;
+  }
+
+  const Size begin = 1;
+  const Size colon = name.find(':', begin);
+  return static_cast<Size>(
+      std::strtoull(name.substr(begin, colon - begin).c_str(), nullptr, 10));
+}
+
 }  // namespace
 
 class NameExpander
@@ -62,10 +81,11 @@ class NameExpander
       return name;
     }
 
-    const std::size_t begin = 1;
-    const std::size_t colon = name.find(':', begin);
-    const std::size_t index = static_cast<std::size_t>(std::strtoull(name.substr(begin, colon - begin).c_str(), nullptr, 10));
-    const std::string* base_name = expandedBaseName(index);
+    const Size begin = 1;
+    const Size colon = name.find(':', begin);
+    const Size index = static_cast<Size>(
+        std::strtoull(name.substr(begin, colon - begin).c_str(), nullptr, 10));
+    const std::string* base_name = get_expanded_base_name(index);
     if (base_name == nullptr) {
       return name;
     }
@@ -83,10 +103,12 @@ class NameExpander
  private:
   static auto startsWithNameIndex(const std::string& name) -> bool
   {
-    return name.size() >= 2 && name.front() == '*' && std::isdigit(static_cast<unsigned char>(name[1]));
+    return name.size() >= 2
+           && name.front() == '*'
+           && std::isdigit(static_cast<unsigned char>(name[1]));
   }
 
-  auto expandedBaseName(std::size_t index) -> const std::string*
+  auto get_expanded_base_name(Size index) -> const std::string*
   {
     const auto cache_it = _expanded_base_names.find(index);
     if (cache_it != _expanded_base_names.end()) {
@@ -103,12 +125,12 @@ class NameExpander
   }
 
   const spef::Exchange& _exchange;
-  std::unordered_map<std::size_t, std::string> _expanded_base_names;
+  std::unordered_map<Size, std::string> _expanded_base_names;
 };
 
 void SpefReader::buildNetCouplingCaps(Data& data) const
 {
-  std::size_t coupling_count = 0;
+  Size coupling_count = 0;
   for (const Net& net : data.nets) {
     coupling_count += net.node_coupling_caps.size();
   }
@@ -134,7 +156,8 @@ void SpefReader::buildNetCouplingCaps(Data& data) const
   }
 }
 
-auto SpefReader::read(const std::string& path, Data& data) const -> bool
+auto SpefReader::read(const std::string& path,
+                      Data& data) const -> bool
 {
   spef::SpefReader reader;
   if (!reader.read(path)) {
@@ -150,18 +173,22 @@ auto SpefReader::read(const std::string& path, Data& data) const -> bool
   data.file_name = path;
   data.cap_unit = reader.getSpefCapUnit();
   data.res_unit = reader.getSpefResUnit();
+  const F64 cap_scale = spef_unit::capacitanceScaleToFf(data.cap_unit);
+  const F64 res_scale = spef_unit::resistanceScaleToOhm(data.res_unit);
+  data.cap_unit = "1.0 FF";
+  data.res_unit = "1.0 OHM";
   data.reserveNets(spef_file->nets.size());
   NameExpander name_expander(*spef_file);
 
   for (const auto& spef_net : spef_file->nets) {
     Net net;
     net.name = name_expander.expand(spef_net.name);
-    net.total_cap = spef_net.lcap;
+    net.total_cap = spef_net.lcap * cap_scale;
     net.pins.reserve(spef_net.conns.size());
     net.resistors.reserve(spef_net.ress.size());
 
-    std::size_t ground_cap_count = 0;
-    std::size_t coupling_cap_count = 0;
+    Size ground_cap_count = 0;
+    Size coupling_cap_count = 0;
     for (const auto& cap : spef_net.caps) {
       if (cap.node2.empty()) {
         ground_cap_count++;
@@ -172,7 +199,8 @@ auto SpefReader::read(const std::string& path, Data& data) const -> bool
     net.node_ground_caps.reserve(ground_cap_count);
     net.node_coupling_caps.reserve(coupling_cap_count);
 
-    for (const auto& conn : spef_net.conns) {
+    for (Size conn_index = 0; conn_index < spef_net.conns.size(); ++conn_index) {
+      const auto& conn = spef_net.conns[conn_index];
       Pin pin;
       pin.name = name_expander.expand(conn.pin_port_name);
       pin.direction = directionName(conn.conn_direction);
@@ -181,6 +209,11 @@ auto SpefReader::read(const std::string& path, Data& data) const -> bool
       pin.x = conn.coordinate.x;
       pin.y = conn.coordinate.y;
       pin.has_coordinate = conn.coordinate.x >= 0.0 && conn.coordinate.y >= 0.0;
+      pin.connection_order = conn_index;
+      if (const auto index = nameMapIndex(conn.pin_port_name)) {
+        pin.name_map_index = *index;
+        pin.has_name_map_index = true;
+      }
       data.index.rememberNodeNet(pin.name, net.name);
       net.pins.push_back(std::move(pin));
     }
@@ -189,11 +222,12 @@ auto SpefReader::read(const std::string& path, Data& data) const -> bool
       std::string node1 = name_expander.expand(cap.node1);
       if (cap.node2.empty()) {
         data.index.rememberNodeNet(node1, net.name);
-        net.node_ground_caps[std::move(node1)] += cap.res_or_cap;
+        net.node_ground_caps[std::move(node1)] += cap.res_or_cap * cap_scale;
       } else {
         std::string node2 = name_expander.expand(cap.node2);
         data.index.rememberNodeNet(node1, net.name);
-        net.node_coupling_caps[NodePair::ordered(std::move(node1), std::move(node2))] += cap.res_or_cap;
+        net.node_coupling_caps[NodePair::ordered(std::move(node1), std::move(node2))]
+            += cap.res_or_cap * cap_scale;
       }
     }
 
@@ -205,7 +239,10 @@ auto SpefReader::read(const std::string& path, Data& data) const -> bool
       std::string node2 = name_expander.expand(res.node2);
       data.index.rememberNodeNet(node1, net.name);
       data.index.rememberNodeNet(node2, net.name);
-      net.resistors.push_back(Resistor{std::move(node1), std::move(node2), res.res_or_cap});
+      net.resistors.push_back(Resistor{
+          std::move(node1),
+          std::move(node2),
+          res.res_or_cap * res_scale});
     }
 
     data.addOrAssignNet(std::move(net));

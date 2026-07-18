@@ -63,11 +63,39 @@ bool InitDesign::initCore(double core_lx, double core_ly, double core_ux, double
 
   int site_dx = core_site->get_width();
   int site_dy = core_site->get_height();
-  // floor core lower left corner to multiple of core_site dx/dy.
-  int core_lx_int = (transUnitDB(core_lx) / site_dx) * site_dx;
-  int core_ly_int = (transUnitDB(core_ly) / site_dy) * site_dy;
-  int core_ux_int = (transUnitDB(core_ux) / site_dx) * site_dx;
-  int core_uy_int = (transUnitDB(core_uy) / site_dy) * site_dy;
+
+  auto align_down = [](int value, int step) -> int {
+    if (step <= 0) {
+      return value;
+    }
+    int remainder = value % step;
+    if (remainder == 0) {
+      return value;
+    }
+    return value >= 0 ? value - remainder : value - remainder - step;
+  };
+
+  auto align_up = [](int value, int step) -> int {
+    if (step <= 0) {
+      return value;
+    }
+    int remainder = value % step;
+    if (remainder == 0) {
+      return value;
+    }
+    return value >= 0 ? value + step - remainder : value - remainder;
+  };
+
+  // Snap the core box inward to the placement site grid. Snapping the lower
+  // left corner down can consume the requested margin and put PG rails on the
+  // die boundary.
+  int core_lx_int = align_up(transUnitDB(core_lx), site_dx);
+  int core_ly_int = align_up(transUnitDB(core_ly), site_dy);
+  int core_ux_int = align_down(transUnitDB(core_ux), site_dx);
+  int core_uy_int = align_down(transUnitDB(core_uy), site_dy);
+  if (core_lx_int >= core_ux_int || core_ly_int >= core_uy_int) {
+    return false;
+  }
 
   /// make enough space for io cell
   //   int32_t io_height = io_site != nullptr ? io_site->get_height() : 0;

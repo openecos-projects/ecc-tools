@@ -12,6 +12,7 @@ target_link_libraries(str PUBLIC absl::strings)
 
 target_include_directories(str
     PUBLIC
+        ${HOME_UTILITY}
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

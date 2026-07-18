@@ -23,7 +23,6 @@
 #include "ieval_io.h"
 #include "ifp_io.h"
 #include "irt_io.h"
-#include "ista_io.h"
 
 namespace iplf {
 ToolManager* ToolManager::_instance = nullptr;
@@ -103,7 +102,6 @@ bool ToolManager::runAiPlacer(std::string config, std::string onnx_path, std::st
 {
   return false;
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -197,24 +195,28 @@ bool ToolManager::saveDrcDetailToFile(std::string path)
 /// iSTA
 bool ToolManager::autoRunSTA(std::string config)
 {
-  return staInst->autoRunSTA(config);
+  // return staInst->autoRunSTA(config);
+  return false;
 }
 
 bool ToolManager::initSTA(std::string config)
 {
-  return staInst->initSTA(config);
+  // return staInst->initSTA(config);
+  return false;
 }
 
 bool ToolManager::runSTA(std::string config)
 {
-  return staInst->runSTA(config);
+  // return staInst->runSTA(config);
+  return false;
 }
 
 bool ToolManager::buildClockTree(std::string config, std::string data_path)
 {
   bool is_ok;
   if (data_path.empty()) {
-    is_ok = staInst->buildClockTree(config);
+    // is_ok = staInst->buildClockTree(config);
+    is_ok = false;
   } else {
     // read clock tree from file
     is_ok = ctsInst->readTreeDataFromFile(data_path);

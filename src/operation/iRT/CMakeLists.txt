@@ -20,6 +20,7 @@ set(CMAKE_CXX_STANDARD 20)
 ############################ debug source module ############################
 
 # set(DEBUG_IRT_DRC_ENGINE ON)
+# set(DEBUG_IRT_TOPO_BUILDER ON)
 # set(DEBUG_IRT_GDS_PLOTTER ON)
 # set(DEBUG_IRT_PIN_ACCESSOR ON)
 # set(DEBUG_IRT_SUPPLY_ANALYZER ON)
@@ -32,7 +33,7 @@ set(CMAKE_CXX_STANDARD 20)
 # set(DEBUG_IRT_VIOLATION_REPORTER ON)
 # set(DEBUG_IRT_EARLY_ROUTER ON)
 
-############################ debug source utility ############################
+############################ debug source toolkit ############################
 
 # set(DEBUG_IRT_LOGGER ON)
 # set(DEBUG_IRT_MONITOR ON)

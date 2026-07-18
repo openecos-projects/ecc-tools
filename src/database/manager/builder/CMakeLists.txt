@@ -23,7 +23,7 @@ else()
 
 endif()
 
-target_link_libraries(IdbBuilder def_service def_builder lef_service lef_builder verilog_builder gds_builder json_builder view_builder data_process)
+target_link_libraries(IdbBuilder def_service def_builder lef_service lef_builder verilog_builder gds_builder json_builder view_builder data_process geometry_db)
 
 target_include_directories(IdbBuilder 
     PUBLIC 

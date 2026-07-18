@@ -57,11 +57,11 @@ namespace {
 
 constexpr double kMilliwattToWatt = 1.0 / 1000.0;
 constexpr double kClockToggleDensityNumerator = 2.0;
-constexpr std::array<ista::LibTable::TableType, 4> kCharArcTableTypes = {
-    ista::LibTable::TableType::kCellRise,
-    ista::LibTable::TableType::kCellFall,
-    ista::LibTable::TableType::kRiseTransition,
-    ista::LibTable::TableType::kFallTransition,
+constexpr std::array<idb::LibTable::TableType, 4> kCharArcTableTypes = {
+    idb::LibTable::TableType::kCellRise,
+    idb::LibTable::TableType::kCellFall,
+    idb::LibTable::TableType::kRiseTransition,
+    idb::LibTable::TableType::kFallTransition,
 };
 
 auto normalizePortName(const std::string& pin_name) -> std::string
@@ -87,16 +87,16 @@ auto resolvePositiveMax(const std::vector<std::optional<double>>& values) -> dou
   return max_value;
 }
 
-auto convertLibCapToPf(ista::LibCell* lib_cell, double cap_value) -> double
+auto convertLibCapToPf(idb::LibCell* lib_cell, double cap_value) -> double
 {
   auto* owner_lib = lib_cell != nullptr ? lib_cell->get_owner_lib() : nullptr;
   if (owner_lib == nullptr) {
     return cap_value;
   }
-  return ista::ConvertCapUnit(owner_lib->get_cap_unit(), ista::CapacitiveUnit::kPF, cap_value);
+  return idb::ConvertCapUnit(owner_lib->get_cap_unit(), idb::CapacitiveUnit::kPF, cap_value);
 }
 
-auto convertLibTimeToNs(ista::LibCell* lib_cell, double time_value) -> double
+auto convertLibTimeToNs(idb::LibCell* lib_cell, double time_value) -> double
 {
   auto* owner_lib = lib_cell != nullptr ? lib_cell->get_owner_lib() : nullptr;
   if (owner_lib == nullptr) {
@@ -105,81 +105,81 @@ auto convertLibTimeToNs(ista::LibCell* lib_cell, double time_value) -> double
   return owner_lib->convert_time_unit_to_ns(time_value);
 }
 
-auto convertPfLoadToLibUnit(ista::LibCell* lib_cell, double load_pf) -> double
+auto convertPfLoadToLibUnit(idb::LibCell* lib_cell, double load_pf) -> double
 {
   auto* owner_lib = lib_cell != nullptr ? lib_cell->get_owner_lib() : nullptr;
   if (owner_lib == nullptr) {
     return load_pf;
   }
 
-  if (owner_lib->get_cap_unit() == ista::CapacitiveUnit::kFF) {
+  if (owner_lib->get_cap_unit() == idb::CapacitiveUnit::kFF) {
     return PF_TO_FF(load_pf);
   }
-  if (owner_lib->get_cap_unit() == ista::CapacitiveUnit::kPF) {
+  if (owner_lib->get_cap_unit() == idb::CapacitiveUnit::kPF) {
     return load_pf;
   }
-  if (owner_lib->get_cap_unit() == ista::CapacitiveUnit::kF) {
+  if (owner_lib->get_cap_unit() == idb::CapacitiveUnit::kF) {
     return PF_TO_F(load_pf);
   }
   return load_pf;
 }
 
-auto queryLibPortCapacitancePf(ista::LibCell* lib_cell, ista::LibPort* lib_port) -> double
+auto queryLibPortCapacitancePf(idb::LibCell* lib_cell, idb::LibPort* lib_port) -> double
 {
   if (lib_cell == nullptr || lib_port == nullptr || lib_port->isInput() == 0U) {
     return 0.0;
   }
 
   double cap_value = lib_port->get_port_cap();
-  cap_value = std::max(cap_value, lib_port->get_port_cap(ista::AnalysisMode::kMax, ista::TransType::kRise).value_or(0.0));
-  cap_value = std::max(cap_value, lib_port->get_port_cap(ista::AnalysisMode::kMax, ista::TransType::kFall).value_or(0.0));
-  cap_value = std::max(cap_value, lib_port->get_port_cap(ista::AnalysisMode::kMin, ista::TransType::kRise).value_or(0.0));
-  cap_value = std::max(cap_value, lib_port->get_port_cap(ista::AnalysisMode::kMin, ista::TransType::kFall).value_or(0.0));
+  cap_value = std::max(cap_value, lib_port->get_port_cap(idb::AnalysisMode::kMax, idb::TransType::kRise).value_or(0.0));
+  cap_value = std::max(cap_value, lib_port->get_port_cap(idb::AnalysisMode::kMax, idb::TransType::kFall).value_or(0.0));
+  cap_value = std::max(cap_value, lib_port->get_port_cap(idb::AnalysisMode::kMin, idb::TransType::kRise).value_or(0.0));
+  cap_value = std::max(cap_value, lib_port->get_port_cap(idb::AnalysisMode::kMin, idb::TransType::kFall).value_or(0.0));
   return convertLibCapToPf(lib_cell, cap_value);
 }
 
-auto findBufferArcSet(ista::LibCell* lib_cell) -> std::optional<ista::LibArcSet*>
+auto findBufferArcSet(idb::LibCell* lib_cell) -> std::optional<idb::LibArcSet*>
 {
   if (lib_cell == nullptr) {
     return std::nullopt;
   }
 
-  ista::LibPort* input = nullptr;
-  ista::LibPort* output = nullptr;
+  idb::LibPort* input = nullptr;
+  idb::LibPort* output = nullptr;
   lib_cell->bufferPorts(input, output);
   if (input == nullptr || output == nullptr) {
     return std::nullopt;
   }
 
-  auto timing_arc_set = lib_cell->findLibertyArcSet(input->get_port_name(), output->get_port_name(), ista::LibArc::TimingType::kComb);
+  auto timing_arc_set = lib_cell->findLibertyArcSet(input->get_port_name(), output->get_port_name(), idb::LibArc::TimingType::kComb);
   if (!timing_arc_set.has_value()) {
     timing_arc_set = lib_cell->findLibertyArcSet(input->get_port_name(), output->get_port_name());
   }
   return timing_arc_set;
 }
 
-auto convertAxisValue(ista::LibLibrary* owner_lib, ista::LibLutTableTemplate::Variable variable, double axis_value) -> double
+auto convertAxisValue(idb::LibLibrary* owner_lib, idb::LibLutTableTemplate::Variable variable, double axis_value) -> double
 {
   if (owner_lib == nullptr) {
     return 0.0;
   }
 
   switch (variable) {
-    case ista::LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE:
-    case ista::LibLutTableTemplate::Variable::EQUAL_OR_OPPOSITE_OUTPUT_NET_CAPACITANCE:
-      return ista::ConvertCapUnit(owner_lib->get_cap_unit(), ista::CapacitiveUnit::kPF, axis_value);
-    case ista::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION:
-    case ista::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION:
-    case ista::LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME:
-    case ista::LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION:
+    case idb::LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE:
+    case idb::LibLutTableTemplate::Variable::EQUAL_OR_OPPOSITE_OUTPUT_NET_CAPACITANCE:
+      return idb::ConvertCapUnit(owner_lib->get_cap_unit(), idb::CapacitiveUnit::kPF, axis_value);
+    case idb::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION:
+    case idb::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION:
+    case idb::LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME:
+    case idb::LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION:
       return owner_lib->convert_time_unit_to_ns(axis_value);
     default:
       return 0.0;
   }
 }
 
-auto queryBufferTableAxisMax(ista::LibCell* lib_cell, const char* query_name,
-                             std::initializer_list<ista::LibLutTableTemplate::Variable> target_variables) -> double
+auto queryBufferTableAxisMax(idb::LibCell* lib_cell, const char* query_name,
+                             std::initializer_list<idb::LibLutTableTemplate::Variable> target_variables) -> double
 {
   if (lib_cell == nullptr) {
     return 0.0;
@@ -198,7 +198,7 @@ auto queryBufferTableAxisMax(ista::LibCell* lib_cell, const char* query_name,
     return 0.0;
   }
 
-  auto is_target_variable = [&target_variables](ista::LibLutTableTemplate::Variable variable) -> bool {
+  auto is_target_variable = [&target_variables](idb::LibLutTableTemplate::Variable variable) -> bool {
     return std::ranges::find(target_variables, variable) != target_variables.end();
   };
 
@@ -207,7 +207,7 @@ auto queryBufferTableAxisMax(ista::LibCell* lib_cell, const char* query_name,
 
   for (const auto& timing_arc_holder : timing_arc_set.value()->get_arcs()) {
     auto* timing_arc = timing_arc_holder.get();
-    auto* delay_model = timing_arc != nullptr ? dynamic_cast<ista::LibDelayTableModel*>(timing_arc->get_table_model()) : nullptr;
+    auto* delay_model = timing_arc != nullptr ? dynamic_cast<idb::LibDelayTableModel*>(timing_arc->get_table_model()) : nullptr;
     if (delay_model == nullptr) {
       continue;
     }
@@ -223,7 +223,7 @@ auto queryBufferTableAxisMax(ista::LibCell* lib_cell, const char* query_name,
         continue;
       }
 
-      auto inspect_axis = [&](std::optional<ista::LibLutTableTemplate::Variable> variable, unsigned axis_index) -> void {
+      auto inspect_axis = [&](std::optional<idb::LibLutTableTemplate::Variable> variable, unsigned axis_index) -> void {
         if (!variable.has_value() || !is_target_variable(*variable) || axis_index >= table->getAxesSize()) {
           return;
         }
@@ -253,7 +253,7 @@ auto queryBufferTableAxisMax(ista::LibCell* lib_cell, const char* query_name,
   return min_axis_max;
 }
 
-auto queryLibOutputPinCapLimitPf(ista::LibCell* lib_cell, const Pin* pin) -> double
+auto queryLibOutputPinCapLimitPf(idb::LibCell* lib_cell, const Pin* pin) -> double
 {
   if (pin == nullptr || pin->get_inst() == nullptr) {
     return 0.0;
@@ -278,7 +278,7 @@ auto queryLibOutputPinCapLimitPf(ista::LibCell* lib_cell, const Pin* pin) -> dou
     return 0.0;
   }
 
-  const auto cap_limit = lib_port->get_port_cap_limit(ista::AnalysisMode::kMax);
+  const auto cap_limit = lib_port->get_port_cap_limit(idb::AnalysisMode::kMax);
   if (!cap_limit.has_value() || *cap_limit <= 0.0) {
     return 0.0;
   }
@@ -296,9 +296,9 @@ auto queryConfiguredMaxCapBoundaryPf(std::optional<double> configured_max_cap_pf
   return 0.0;
 }
 
-auto flipTrans(ista::TransType trans_type) -> ista::TransType
+auto flipTrans(idb::TransType trans_type) -> idb::TransType
 {
-  return trans_type == ista::TransType::kRise ? ista::TransType::kFall : ista::TransType::kRise;
+  return trans_type == idb::TransType::kRise ? idb::TransType::kFall : idb::TransType::kRise;
 }
 
 auto makeInvalidCost(const std::string& method, const std::string& cell_master, double input_slew_ns, double output_load_pf)
@@ -312,7 +312,7 @@ auto makeInvalidCost(const std::string& method, const std::string& cell_master, 
   return cost;
 }
 
-auto lookupRootCellDelayNs(ista::LibCell* lib_cell, ista::LibArcSet* timing_arc_set, double input_slew_ns, double output_load_pf) -> double
+auto lookupRootCellDelayNs(idb::LibCell* lib_cell, idb::LibArcSet* timing_arc_set, double input_slew_ns, double output_load_pf) -> double
 {
   if (lib_cell == nullptr || timing_arc_set == nullptr || input_slew_ns < 0.0 || output_load_pf < 0.0) {
     return 0.0;
@@ -321,7 +321,7 @@ auto lookupRootCellDelayNs(ista::LibCell* lib_cell, ista::LibArcSet* timing_arc_
   const double output_load = convertPfLoadToLibUnit(lib_cell, output_load_pf);
   double worst_delay_ns = 0.0;
   bool has_delay = false;
-  for (const auto input_trans : {ista::TransType::kRise, ista::TransType::kFall}) {
+  for (const auto input_trans : {idb::TransType::kRise, idb::TransType::kFall}) {
     const auto output_trans = timing_arc_set->isNegativeArc() != 0U ? flipTrans(input_trans) : input_trans;
     if (!timing_arc_set->isMatchTimingType(output_trans)) {
       continue;
@@ -338,7 +338,7 @@ auto lookupRootCellDelayNs(ista::LibCell* lib_cell, ista::LibArcSet* timing_arc_
   return has_delay ? worst_delay_ns : 0.0;
 }
 
-auto lookupRootCellOutputSlewNs(ista::LibCell* lib_cell, ista::LibArcSet* timing_arc_set, double input_slew_ns, double output_load_pf)
+auto lookupRootCellOutputSlewNs(idb::LibCell* lib_cell, idb::LibArcSet* timing_arc_set, double input_slew_ns, double output_load_pf)
     -> double
 {
   if (lib_cell == nullptr || timing_arc_set == nullptr || input_slew_ns < 0.0 || output_load_pf < 0.0) {
@@ -348,7 +348,7 @@ auto lookupRootCellOutputSlewNs(ista::LibCell* lib_cell, ista::LibArcSet* timing
   const double output_load = convertPfLoadToLibUnit(lib_cell, output_load_pf);
   double worst_slew_ns = 0.0;
   bool has_slew = false;
-  for (const auto input_trans : {ista::TransType::kRise, ista::TransType::kFall}) {
+  for (const auto input_trans : {idb::TransType::kRise, idb::TransType::kFall}) {
     const auto output_trans = timing_arc_set->isNegativeArc() != 0U ? flipTrans(input_trans) : input_trans;
     if (!timing_arc_set->isMatchTimingType(output_trans)) {
       continue;
@@ -365,7 +365,7 @@ auto lookupRootCellOutputSlewNs(ista::LibCell* lib_cell, ista::LibArcSet* timing
   return has_slew ? worst_slew_ns : 0.0;
 }
 
-auto lookupInternalPowerW(ista::LibCell* lib_cell, ista::LibPowerArcSet* power_arc_set, double input_slew_ns, double output_load_pf,
+auto lookupInternalPowerW(idb::LibCell* lib_cell, idb::LibPowerArcSet* power_arc_set, double input_slew_ns, double output_load_pf,
                           double clock_period_ns) -> double
 {
   if (lib_cell == nullptr || power_arc_set == nullptr || input_slew_ns < 0.0 || output_load_pf < 0.0 || clock_period_ns <= 0.0) {
@@ -383,9 +383,9 @@ auto lookupInternalPowerW(ista::LibCell* lib_cell, ista::LibPowerArcSet* power_a
     }
     auto* internal_power_info = power_arc->get_internal_power_info().get();
     const double rise_energy_mw_ns
-        = lib_cell->convertInternalPowerTableToMwNs(internal_power_info->gatePower(ista::TransType::kRise, input_slew_ns, output_load));
+        = lib_cell->convertInternalPowerTableToMwNs(internal_power_info->gatePower(idb::TransType::kRise, input_slew_ns, output_load));
     const double fall_energy_mw_ns
-        = lib_cell->convertInternalPowerTableToMwNs(internal_power_info->gatePower(ista::TransType::kFall, input_slew_ns, output_load));
+        = lib_cell->convertInternalPowerTableToMwNs(internal_power_info->gatePower(idb::TransType::kFall, input_slew_ns, output_load));
     const double average_energy_mw_ns = (rise_energy_mw_ns + fall_energy_mw_ns) / 2.0;
     if (std::isfinite(average_energy_mw_ns)) {
       power_mw += output_toggle_per_ns * average_energy_mw_ns;
@@ -395,7 +395,7 @@ auto lookupInternalPowerW(ista::LibCell* lib_cell, ista::LibPowerArcSet* power_a
   return power_mw * kMilliwattToWatt;
 }
 
-auto lookupLeakagePowerW(ista::LibCell* lib_cell) -> double
+auto lookupLeakagePowerW(idb::LibCell* lib_cell) -> double
 {
   if (lib_cell == nullptr) {
     return 0.0;
@@ -433,7 +433,7 @@ auto Wrapper::loadLibertyIfNeeded() const -> void
   }
 
   for (const auto& lib_path : lib_paths) {
-    ista::Lib lib;
+    idb::Lib lib;
     auto reader = lib.loadLibertyWithCppParser(lib_path.c_str());
     LOG_FATAL_IF(reader.linkLib() == 0U) << "Wrapper: failed to link Liberty file " << lib_path << ".";
     auto* library_builder = reader.get_library_builder();
@@ -451,7 +451,7 @@ auto Wrapper::loadLibertyIfNeeded() const -> void
   LOG_INFO << "Wrapper: loaded " << _lib_libraries.size() << " Liberty file(s) for CTS queries.";
 }
 
-auto Wrapper::findLibertyCell(const std::string& cell_master) const -> ista::LibCell*
+auto Wrapper::findLibertyCell(const std::string& cell_master) const -> idb::LibCell*
 {
   if (cell_master.empty()) {
     return nullptr;
@@ -470,8 +470,8 @@ auto Wrapper::queryCellOutPinCapLimit(const std::string& cell_master) const -> d
     return 0.0;
   }
 
-  ista::LibPort* input = nullptr;
-  ista::LibPort* output = nullptr;
+  idb::LibPort* input = nullptr;
+  idb::LibPort* output = nullptr;
   lib_cell->bufferPorts(input, output);
   if (output == nullptr) {
     LOG_WARNING << makeCharQueryContext("output pin cap limit", cell_master)
@@ -479,7 +479,7 @@ auto Wrapper::queryCellOutPinCapLimit(const std::string& cell_master) const -> d
     return 0.0;
   }
 
-  auto cap_limit = output->get_port_cap_limit(ista::AnalysisMode::kMax);
+  auto cap_limit = output->get_port_cap_limit(idb::AnalysisMode::kMax);
   if (!cap_limit.has_value()) {
     LOG_WARNING << makeCharQueryContext("output pin cap limit", cell_master)
                 << " failed: max cap limit is not defined on output pin; caller may use table-axis max policy.";
@@ -491,8 +491,8 @@ auto Wrapper::queryCellOutPinCapLimit(const std::string& cell_master) const -> d
 auto Wrapper::queryCellOutPinCapTableAxisMax(const std::string& cell_master) const -> double
 {
   return queryBufferTableAxisMax(findLibertyCell(cell_master), "output pin cap table-axis max",
-                                 {ista::LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE,
-                                  ista::LibLutTableTemplate::Variable::EQUAL_OR_OPPOSITE_OUTPUT_NET_CAPACITANCE});
+                                 {idb::LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE,
+                                  idb::LibLutTableTemplate::Variable::EQUAL_OR_OPPOSITE_OUTPUT_NET_CAPACITANCE});
 }
 
 auto Wrapper::queryClockSourceDriveCapLimit(const ClockSourceDriveCapLimitInput& input) const -> double
@@ -549,8 +549,8 @@ auto Wrapper::queryCellInPinSlewLimit(const std::string& cell_master) const -> d
     return 0.0;
   }
 
-  ista::LibPort* input = nullptr;
-  ista::LibPort* output = nullptr;
+  idb::LibPort* input = nullptr;
+  idb::LibPort* output = nullptr;
   lib_cell->bufferPorts(input, output);
   if (input == nullptr) {
     LOG_WARNING << makeCharQueryContext("input pin slew limit", cell_master)
@@ -558,7 +558,7 @@ auto Wrapper::queryCellInPinSlewLimit(const std::string& cell_master) const -> d
     return 0.0;
   }
 
-  auto slew_limit = input->get_port_slew_limit(ista::AnalysisMode::kMax);
+  auto slew_limit = input->get_port_slew_limit(idb::AnalysisMode::kMax);
   if (!slew_limit.has_value()) {
     LOG_WARNING << makeCharQueryContext("input pin slew limit", cell_master)
                 << " failed: max slew limit is not defined on input pin; caller may use table-axis max policy.";
@@ -571,8 +571,8 @@ auto Wrapper::queryCellInPinSlewTableAxisMax(const std::string& cell_master) con
 {
   return queryBufferTableAxisMax(
       findLibertyCell(cell_master), "input pin slew table-axis max",
-      {ista::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION, ista::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION,
-       ista::LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME, ista::LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION});
+      {idb::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION, idb::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION,
+       idb::LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME, idb::LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION});
 }
 
 auto Wrapper::queryPinSlewLimit(const PinSlewLimitInput& input) const -> double
@@ -606,7 +606,7 @@ auto Wrapper::queryPinSlewLimit(const PinSlewLimitInput& input) const -> double
   const auto port_name = normalizePortName(pin->get_name());
   auto* lib_port = lib_cell->get_cell_port_or_port_bus(port_name.c_str());
   if (lib_port != nullptr && lib_port->isInput() != 0U) {
-    if (auto slew_limit_ns = lib_port->get_port_slew_limit(ista::AnalysisMode::kMax); slew_limit_ns.has_value() && *slew_limit_ns > 0.0) {
+    if (auto slew_limit_ns = lib_port->get_port_slew_limit(idb::AnalysisMode::kMax); slew_limit_ns.has_value() && *slew_limit_ns > 0.0) {
       return convertLibTimeToNs(lib_cell, *slew_limit_ns);
     }
   }
@@ -688,8 +688,8 @@ auto Wrapper::queryCharInputPinCap(const std::string& cell_master) const -> doub
     LOG_WARNING << makeCharQueryContext("input pin cap", cell_master) << " failed: liberty cell not found; return 0.0.";
     return 0.0;
   }
-  ista::LibPort* input = nullptr;
-  ista::LibPort* output = nullptr;
+  idb::LibPort* input = nullptr;
+  idb::LibPort* output = nullptr;
   lib_cell->bufferPorts(input, output);
   if (input == nullptr) {
     return 0.0;
@@ -742,8 +742,8 @@ auto Wrapper::queryRootDriverCostDirect(const std::string& cell_master, double i
     return cost;
   }
 
-  ista::LibPort* input_port = nullptr;
-  ista::LibPort* output_port = nullptr;
+  idb::LibPort* input_port = nullptr;
+  idb::LibPort* output_port = nullptr;
   lib_cell->bufferPorts(input_port, output_port);
   if (input_port == nullptr || output_port == nullptr) {
     LOG_WARNING << "Direct root-driver cost query skipped: cell is not a single-input/single-output buffer or inverter: " << cell_master
@@ -769,8 +769,8 @@ auto Wrapper::queryBufferPorts(const std::string& cell_master) const -> std::pai
     LOG_WARNING << makeCharQueryContext("buffer ports", cell_master) << " failed: liberty cell not found; return empty port names.";
     return {"", ""};
   }
-  ista::LibPort* input = nullptr;
-  ista::LibPort* output = nullptr;
+  idb::LibPort* input = nullptr;
+  idb::LibPort* output = nullptr;
   lib_cell->bufferPorts(input, output);
   const std::string in_name = input != nullptr ? input->get_port_name() : "";
   const std::string out_name = output != nullptr ? output->get_port_name() : "";

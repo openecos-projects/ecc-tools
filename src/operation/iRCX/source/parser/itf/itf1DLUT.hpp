@@ -14,6 +14,10 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file itf1DLUT.hpp
+ * @brief Legacy ITF parser data structure implementation detail.
+ */
 #pragma once
 
 #include <algorithm>
@@ -22,6 +26,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+
 namespace itf
 {
 
@@ -37,7 +42,8 @@ class itf1DLUT {
  public:
   itf1DLUT() = default;
 
-  explicit itf1DLUT(const char* key_name, const char* value_name)
+  explicit itf1DLUT(const char* key_name,
+                    const char* value_name)
   : _points(),
     _key_name(key_name ? key_name : ""),
     _value_name(value_name ? value_name : "")
@@ -49,7 +55,8 @@ class itf1DLUT {
   bool empty() const { return _points.empty(); }
   size_t size() const { return _points.size(); }
 
-  void add_point(TKey key, TValue value) {
+  void add_point(TKey key,
+                 TValue value) {
     _points.emplace_back(key, value);
     sort_points_();
   }
@@ -62,7 +69,8 @@ class itf1DLUT {
   void set_key_name(const char* value) { _key_name = value ? value : ""; }
   void set_value_name(const char* value) { _value_name = value ? value : ""; }
 
-  void set_names(const char* key_name, const char* value_name) {
+  void set_names(const char* key_name,
+                 const char* value_name) {
     set_key_name(key_name);
     set_value_name(value_name);
   }

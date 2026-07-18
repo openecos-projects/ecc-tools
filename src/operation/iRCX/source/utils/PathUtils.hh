@@ -14,10 +14,13 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+/**
+ * @file PathUtils.hh
+ * @brief Filesystem validation and path construction helpers.
+ */
 #pragma once
 
 #include <filesystem>
-#include <string_view>
 #include <system_error>
 
 #include "StringUtils.hh"
@@ -32,9 +35,10 @@ inline auto absolute(const std::filesystem::path& path) -> std::filesystem::path
   return std::filesystem::absolute(path).lexically_normal();
 }
 
-inline auto resolve(const std::filesystem::path& base_dir, std::string_view raw_path) -> Str
+inline auto resolve(const std::filesystem::path& base_dir,
+                    std::string_view raw_path) -> std::string
 {
-  const Str trimmed_path = string::trim(raw_path);
+  const std::string trimmed_path = string::trim(raw_path);
   if (trimmed_path.empty()) {
     return "";
   }
@@ -47,10 +51,11 @@ inline auto resolve(const std::filesystem::path& base_dir, std::string_view raw_
   return path.lexically_normal().string();
 }
 
-inline auto file_exists(const std::filesystem::path& file, std::string_view field_name) -> bool
+inline auto fileExists(const std::filesystem::path& file,
+                        std::string_view field_name) -> bool
 {
-  const Str file_string = file.string();
-  if (!string::require_non_empty(file_string, field_name)) {
+  const std::string file_string = file.string();
+  if (!string::requireNonEmpty(file_string, field_name)) {
     return false;
   }
 
@@ -62,10 +67,11 @@ inline auto file_exists(const std::filesystem::path& file, std::string_view fiel
   return false;
 }
 
-inline auto ensure_dir(const std::filesystem::path& dir, std::string_view field_name) -> bool
+inline auto ensureDir(const std::filesystem::path& dir,
+                       std::string_view field_name) -> bool
 {
-  const Str dir_string = dir.string();
-  if (!string::require_non_empty(dir_string, field_name)) {
+  const std::string dir_string = dir.string();
+  if (!string::requireNonEmpty(dir_string, field_name)) {
     return false;
   }
 
@@ -110,6 +116,28 @@ inline auto ensure_dir(const std::filesystem::path& dir, std::string_view field_
   LOG_ERROR << "Failed to create RCX directory for " << field_name
             << " " << dir_string;
   return false;
+}
+
+inline auto fileUnderDir(const std::filesystem::path& dir,
+                           std::string_view stem,
+                           std::string_view extension) -> std::filesystem::path
+{
+  std::string file_name(stem);
+  if (file_name.empty()) {
+    file_name = "output";
+  }
+  if (!extension.empty() && extension.front() != '.') {
+    file_name.push_back('.');
+  }
+  file_name.append(extension);
+  return dir / file_name;
+}
+
+inline auto stemOr(std::string_view file_path,
+                    std::string_view fallback) -> std::string
+{
+  const std::string stem = std::filesystem::path(std::string(file_path)).stem().string();
+  return stem.empty() ? std::string{fallback} : stem;
 }
 
 }  // namespace path
