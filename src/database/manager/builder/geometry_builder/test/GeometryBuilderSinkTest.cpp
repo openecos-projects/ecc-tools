@@ -463,6 +463,90 @@ void test_geometry_edit_applier_rejects_locked_instance_placement_status()
   }
 }
 
+void test_geometry_edit_applier_validates_instance_move_layout_bounds()
+{
+  idb::IdbLayout layout;
+  layout.initDie(0, 0, 200, 200);
+  idb::IdbSite* site = layout.get_sites()->add_site_list("core_site");
+  site->set_type_core();
+  site->set_width(10);
+  site->set_height(20);
+  layout.get_sites()->set_core_site(site);
+  layout.createRow("row0", "core_site", 10, 20, idb::IdbOrient::kN_R0, 10, 1, 10, 20);
+
+  idb::IdbDesign design(&layout);
+
+  idb::IdbCellMaster core_master;
+  core_master.set_type(idb::CellMasterType::kCore);
+  core_master.set_width(20);
+  core_master.set_height(10);
+
+  idb::IdbInstance* core_instance = design.get_instance_list()->add_instance("u_core_bounds");
+  core_instance->set_id(48);
+  core_instance->set_cell_master(&core_master);
+  core_instance->set_coodinate(20, 25);
+  core_instance->set_status_placed();
+
+  GeometryStore store;
+  OwnerRef core_owner;
+  core_owner.type = OwnerType::kInstanceBBox;
+  core_owner.owner_id = core_instance->get_id();
+  const ShapeId core_shape_id = store.add_rect(0, Rect32{20, 25, 40, 35}, core_owner);
+
+  GeometryEditCommand reject_command;
+  reject_command.command_id = 717;
+  reject_command.shape_id = core_shape_id;
+  reject_command.expected_version = 1;
+  reject_command.op = GeometryEditOp::kMoveShape;
+  reject_command.requested_bbox = Rect32{95, 25, 999, 999};
+
+  GeometryEditApplier applier;
+  const GeometryEditResult reject_result = applier.apply_instance_bbox_edit(reject_command, design, store);
+
+  assert(reject_result.status == GeometryEditStatus::kRejected);
+  assert(geometry_edit_diagnostic(reject_result) == GeometryEditDiagnostic::kInstanceMoveOutsideLayoutBounds);
+  assert(reject_result.new_version == 1);
+  assert(reject_result.committed_bbox.lx == 20);
+  assert(core_instance->get_coordinate()->get_x() == 20);
+  assert(core_instance->get_coordinate()->get_y() == 25);
+  assert(store.find_shape(core_shape_id)->version == 1);
+  assert(store.find_shape(core_shape_id)->bbox.lx == 20);
+
+  idb::IdbCellMaster pad_master;
+  pad_master.set_type(idb::CellMasterType::kPad);
+  pad_master.set_width(20);
+  pad_master.set_height(10);
+
+  idb::IdbInstance* pad_instance = design.get_instance_list()->add_instance("u_pad_bounds");
+  pad_instance->set_id(49);
+  pad_instance->set_cell_master(&pad_master);
+  pad_instance->set_coodinate(20, 25);
+  pad_instance->set_status_placed();
+
+  OwnerRef pad_owner;
+  pad_owner.type = OwnerType::kInstanceBBox;
+  pad_owner.owner_id = pad_instance->get_id();
+  const ShapeId pad_shape_id = store.add_rect(0, Rect32{20, 25, 40, 35}, pad_owner);
+
+  GeometryEditCommand accept_command;
+  accept_command.command_id = 718;
+  accept_command.shape_id = pad_shape_id;
+  accept_command.expected_version = 1;
+  accept_command.op = GeometryEditOp::kMoveShape;
+  accept_command.requested_bbox = Rect32{150, 150, 999, 999};
+
+  const GeometryEditResult accept_result = applier.apply_instance_bbox_edit(accept_command, design, store);
+
+  assert(accept_result.status == GeometryEditStatus::kAdjustedAccepted);
+  assert(accept_result.new_version == 2);
+  assert(accept_result.committed_bbox.lx == 150);
+  assert(accept_result.committed_bbox.hy == 160);
+  assert(pad_instance->get_coordinate()->get_x() == 150);
+  assert(pad_instance->get_coordinate()->get_y() == 150);
+  assert(store.find_shape(pad_shape_id)->version == 2);
+  assert(store.find_shape(pad_shape_id)->bbox.lx == 150);
+}
+
 void test_geometry_edit_applier_reports_diagnostic_for_missing_design_instance()
 {
   idb::IdbDesign design;
@@ -3667,6 +3751,7 @@ int main()
   test_geometry_edit_applier_reports_diagnostic_for_missing_shape();
   test_geometry_edit_applier_reports_diagnostic_for_unsupported_instance_resize();
   test_geometry_edit_applier_rejects_locked_instance_placement_status();
+  test_geometry_edit_applier_validates_instance_move_layout_bounds();
   test_geometry_edit_applier_reports_diagnostic_for_missing_design_instance();
   test_geometry_edit_applier_reports_diagnostic_for_unsupported_operation_and_owner();
   test_store_geometry_sink_emits_all_shape_kinds();

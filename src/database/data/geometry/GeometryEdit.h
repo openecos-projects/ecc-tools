@@ -36,6 +36,7 @@ enum class GeometryEditDiagnostic : uint16_t
   kOwnerPathUnavailable = 10,
   kUnsupportedTransform = 11,
   kInstancePlacementLocked = 12,
+  kInstanceMoveOutsideLayoutBounds = 13,
 };
 
 constexpr uint16_t kGeometryEditDiagnosticMask = 0x00ff;
@@ -80,6 +81,8 @@ inline const char* geometry_edit_diagnostic_message(GeometryEditDiagnostic diagn
       return "shape uses an orientation or transform unsupported by this edit path";
     case GeometryEditDiagnostic::kInstancePlacementLocked:
       return "instance placement status is fixed or cover; move is not allowed";
+    case GeometryEditDiagnostic::kInstanceMoveOutsideLayoutBounds:
+      return "instance move leaves placement core or die bounds";
   }
   return "unknown edit diagnostic";
 }

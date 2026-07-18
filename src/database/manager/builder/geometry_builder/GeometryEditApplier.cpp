@@ -3,6 +3,7 @@
 #include "BlockageEditAdapter.h"
 #include "IdbDesign.h"
 #include "IdbInstance.h"
+#include "IdbLayout.h"
 #include "InstanceEditAdapter.h"
 #include "NetWireEditAdapter.h"
 #include "PinPortEditAdapter.h"
@@ -34,6 +35,67 @@ OwnerId pin_owner_id_from_path(idb::IdbPin* pin, uint32_t path0, uint32_t path1)
 Rect32 offset_rect(Rect32 rect, int32_t dx, int32_t dy)
 {
   return Rect32{rect.lx + dx, rect.ly + dy, rect.hx + dx, rect.hy + dy};
+}
+
+Rect32 rect_from_idb(idb::IdbRect* rect)
+{
+  if (rect == nullptr) {
+    return Rect32{};
+  }
+  return Rect32{rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y()};
+}
+
+bool is_valid_bounds(Rect32 rect)
+{
+  rect = normalize(rect);
+  return rect.lx < rect.hx && rect.ly < rect.hy;
+}
+
+bool contains_rect(Rect32 bounds, Rect32 rect)
+{
+  bounds = normalize(bounds);
+  rect = normalize(rect);
+  return rect.lx >= bounds.lx && rect.ly >= bounds.ly && rect.hx <= bounds.hx && rect.hy <= bounds.hy;
+}
+
+Rect32 planned_instance_move_bbox(Rect32 current_bbox, Rect32 requested_bbox)
+{
+  current_bbox = normalize(current_bbox);
+  requested_bbox = normalize(requested_bbox);
+  const int32_t width = current_bbox.hx - current_bbox.lx;
+  const int32_t height = current_bbox.hy - current_bbox.ly;
+  return Rect32{requested_bbox.lx, requested_bbox.ly, requested_bbox.lx + width, requested_bbox.ly + height};
+}
+
+bool instance_uses_core_bounds(idb::IdbInstance& instance)
+{
+  auto* master = instance.get_cell_master();
+  return master != nullptr && master->is_core();
+}
+
+bool find_instance_move_bounds(idb::IdbDesign& design, idb::IdbInstance& instance, Rect32& bounds)
+{
+  auto* layout = design.get_layout();
+  if (layout == nullptr) {
+    return false;
+  }
+
+  if (instance_uses_core_bounds(instance)) {
+    auto* core = layout->get_core();
+    if (core != nullptr) {
+      bounds = rect_from_idb(core->get_bounding_box());
+      if (is_valid_bounds(bounds)) {
+        return true;
+      }
+    }
+  }
+
+  auto* die = layout->get_die();
+  if (die == nullptr) {
+    return false;
+  }
+  bounds = rect_from_idb(die->get_bounding_box());
+  return is_valid_bounds(bounds);
 }
 
 bool translate_owner_shapes(GeometryStore& store, OwnerType owner_type, OwnerId owner_id, int32_t dx, int32_t dy,
@@ -331,6 +393,17 @@ GeometryEditResult GeometryEditApplier::apply_instance_bbox_edit(const GeometryE
 
   for (auto* instance : instance_list->get_instance_list()) {
     if (instance != nullptr && instance->get_id() == owner.owner_id) {
+      const ShapeRecord* record = store.find_shape(command.shape_id);
+      if (record != nullptr && record->state == ShapeState::kAlive && record->kind == ShapeKind::kRect
+          && record->version == command.expected_version && command.op == GeometryEditOp::kMoveShape
+          && !instance->is_fixed() && !instance->is_cover()) {
+        Rect32 bounds;
+        const Rect32 planned_bbox = planned_instance_move_bbox(record->bbox, command.requested_bbox);
+        if (find_instance_move_bounds(design, *instance, bounds) && !contains_rect(bounds, planned_bbox)) {
+          return make_record_result(command, GeometryEditStatus::kRejected, *record,
+                                    GeometryEditDiagnostic::kInstanceMoveOutsideLayoutBounds);
+        }
+      }
       return apply_instance_bbox_edit(command, *instance, store);
     }
   }
