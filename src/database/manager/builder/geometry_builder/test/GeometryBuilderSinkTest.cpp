@@ -3041,6 +3041,10 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(manifest.find("design_version=5.8") != std::string::npos);
   assert(manifest.find("dbu_per_micron=2000") != std::string::npos);
   assert(manifest.find("manufacture_grid=5") != std::string::npos);
+  assert(manifest.find("dirty_lod_tile_count=" + std::to_string(result.dirty_lod_tile_count)) != std::string::npos);
+  assert(manifest.find("dirty_lod_rebuild_candidate_count="
+                       + std::to_string(result.dirty_lod_rebuild_candidate_count))
+         != std::string::npos);
   assert(manifest.find("geometry.meta.bin") != std::string::npos);
   assert(manifest.find("geometry.shapes.bin") != std::string::npos);
   assert(manifest.find("geometry.owners.bin") != std::string::npos);

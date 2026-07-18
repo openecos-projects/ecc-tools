@@ -76,6 +76,8 @@ bool write_manifest(const std::filesystem::path& path, const SnapshotWriteResult
   file << "shape_count=" << result.shape_count << '\n';
   file << "owner_count=" << result.owner_count << '\n';
   file << "payload_size=" << result.payload_size << '\n';
+  file << "dirty_lod_tile_count=" << result.dirty_lod_tile_count << '\n';
+  file << "dirty_lod_rebuild_candidate_count=" << result.dirty_lod_rebuild_candidate_count << '\n';
   file << "meta=" << file_prefix << "/geometry.meta.bin\n";
   file << "shapes=" << file_prefix << "/geometry.shapes.bin\n";
   file << "owners=" << file_prefix << "/geometry.owners.bin\n";
