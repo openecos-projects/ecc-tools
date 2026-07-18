@@ -287,6 +287,11 @@ GeometryEditResult GeometryEditApplier::apply_instance_bbox_edit(const GeometryE
   }
 
   const Rect32 old_bbox = record->bbox;
+  if (instance.is_fixed() || instance.is_cover()) {
+    return make_record_result(command, GeometryEditStatus::kRejected, *record,
+                              GeometryEditDiagnostic::kInstancePlacementLocked);
+  }
+
   const InstanceEditAdapter adapter;
   const Rect32 committed_bbox = adapter.move_bbox(instance, command.requested_bbox);
 

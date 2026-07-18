@@ -419,6 +419,50 @@ void test_geometry_edit_applier_reports_diagnostic_for_unsupported_instance_resi
   assert(result.committed_bbox.lx == 5);
 }
 
+void test_geometry_edit_applier_rejects_locked_instance_placement_status()
+{
+  idb::IdbCellMaster master;
+  master.set_width(20);
+  master.set_height(10);
+
+  for (const bool cover_status : {false, true}) {
+    idb::IdbInstance instance;
+    instance.set_id(46 + static_cast<int>(cover_status));
+    instance.set_cell_master(&master);
+    instance.set_coodinate(5, 6);
+    if (cover_status) {
+      instance.set_status_coverd();
+    } else {
+      instance.set_status_fixed();
+    }
+
+    GeometryStore store;
+    OwnerRef owner;
+    owner.type = OwnerType::kInstanceBBox;
+    owner.owner_id = instance.get_id();
+    const ShapeId shape_id = store.add_rect(0, Rect32{5, 6, 25, 16}, owner);
+
+    GeometryEditCommand command;
+    command.command_id = 715 + static_cast<uint64_t>(cover_status);
+    command.shape_id = shape_id;
+    command.expected_version = 1;
+    command.op = GeometryEditOp::kMoveShape;
+    command.requested_bbox = Rect32{50, 60, 70, 80};
+
+    GeometryEditApplier applier;
+    const GeometryEditResult result = applier.apply_instance_bbox_edit(command, instance, store);
+
+    assert(result.status == GeometryEditStatus::kRejected);
+    assert(geometry_edit_diagnostic(result) == GeometryEditDiagnostic::kInstancePlacementLocked);
+    assert(result.new_version == 1);
+    assert(result.committed_bbox.lx == 5);
+    assert(instance.get_coordinate()->get_x() == 5);
+    assert(instance.get_coordinate()->get_y() == 6);
+    assert(store.find_shape(shape_id)->version == 1);
+    assert(store.find_shape(shape_id)->bbox.lx == 5);
+  }
+}
+
 void test_geometry_edit_applier_reports_diagnostic_for_missing_design_instance()
 {
   idb::IdbDesign design;
@@ -3622,6 +3666,7 @@ int main()
   test_geometry_edit_applier_reports_conflict_when_shape_version_changed();
   test_geometry_edit_applier_reports_diagnostic_for_missing_shape();
   test_geometry_edit_applier_reports_diagnostic_for_unsupported_instance_resize();
+  test_geometry_edit_applier_rejects_locked_instance_placement_status();
   test_geometry_edit_applier_reports_diagnostic_for_missing_design_instance();
   test_geometry_edit_applier_reports_diagnostic_for_unsupported_operation_and_owner();
   test_store_geometry_sink_emits_all_shape_kinds();
