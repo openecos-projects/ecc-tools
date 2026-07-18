@@ -96,6 +96,7 @@ class GeometryStore
   void rebuild_lod_tiles();
   void rebuild_dirty_lod_tiles();
   size_t dirty_lod_tile_count() const;
+  size_t last_dirty_lod_rebuild_candidate_count() const;
   std::vector<GeometryTileSummary> lod_summaries() const;
   std::vector<GeometryTileSummary> query_lod_tiles(uint8_t lod_level, LayerId layer_id, Rect32 viewport) const;
   std::map<OwnerType, uint64_t> count_alive_shapes_by_owner_type() const;

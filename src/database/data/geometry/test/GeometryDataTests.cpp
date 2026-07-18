@@ -650,9 +650,33 @@ void test_geometry_store_marks_and_rebuilds_dirty_lod_tiles()
   assert(store.update_rect(shape_id, Rect32{9000, 9000, 9100, 9100}));
   assert(store.dirty_lod_tile_count() > 0);
   store.rebuild_dirty_lod_tiles();
+  assert(store.last_dirty_lod_rebuild_candidate_count() > 0);
 
   assert(store.query_lod_tiles(0, 5, Rect32{0, 0, 100, 100}).empty());
   assert(store.query_lod_tiles(0, 5, Rect32{9000, 9000, 9100, 9100}).size() == 1);
+}
+
+void test_geometry_store_reports_indexed_dirty_lod_rebuild_candidate_count()
+{
+  GeometryStoreOptions options;
+  options.lod_pyramid = GeometryTilePyramidOptions{4096, 3};
+  GeometryStore store(options);
+
+  const ShapeId moving_shape =
+      store.add_rect(6, Rect32{0, 0, 10, 10}, OwnerRef{OwnerType::kNetWireSegment});
+  for (int32_t i = 0; i < 128; ++i) {
+    store.add_rect(6, Rect32{100000 + i * 100, 100000, 100010 + i * 100, 100010},
+                   OwnerRef{OwnerType::kNetWireSegment});
+  }
+  store.rebuild_lod_tiles();
+
+  assert(store.update_rect(moving_shape, Rect32{4096, 0, 4106, 10}));
+  store.rebuild_dirty_lod_tiles();
+
+  assert(store.last_dirty_lod_rebuild_candidate_count() > 0);
+  assert(store.last_dirty_lod_rebuild_candidate_count() < store.records().size());
+  assert(store.query_lod_tiles(0, 6, Rect32{0, 0, 100, 100}).empty());
+  assert(store.query_lod_tiles(0, 6, Rect32{4096, 0, 4200, 100}).size() == 1);
 }
 
 void test_geometry_store_records_delta_events_for_insert_update_and_delete()
@@ -778,6 +802,7 @@ int main()
   test_geometry_store_preserves_shape_ids_by_owner_path_across_rebuild();
   test_geometry_store_preserves_versions_for_unchanged_rebuilt_shapes();
   test_geometry_store_marks_and_rebuilds_dirty_lod_tiles();
+  test_geometry_store_reports_indexed_dirty_lod_rebuild_candidate_count();
   test_geometry_store_records_delta_events_for_insert_update_and_delete();
   test_geometry_edit_command_carries_expected_version();
   test_geometry_edit_diagnostic_flags_round_trip();

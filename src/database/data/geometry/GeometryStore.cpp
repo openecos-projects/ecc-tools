@@ -411,6 +411,11 @@ size_t GeometryStore::dirty_lod_tile_count() const
   return _lod_pyramid.dirty_tile_count();
 }
 
+size_t GeometryStore::last_dirty_lod_rebuild_candidate_count() const
+{
+  return _lod_pyramid.last_dirty_rebuild_candidate_count();
+}
+
 std::vector<GeometryTileSummary> GeometryStore::lod_summaries() const
 {
   return _lod_pyramid.summaries();

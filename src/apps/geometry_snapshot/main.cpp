@@ -391,6 +391,13 @@ void print_geometry_report(const ecc::geometry::GeometryBuildResult& build_resul
   }
 }
 
+void print_snapshot_write_report(const ecc::geometry::SnapshotWriteResult& write_result, std::ostream& out)
+{
+  out << "delta_count=" << write_result.delta_count << "\n";
+  out << "dirty_lod_tile_count=" << write_result.dirty_lod_tile_count << "\n";
+  out << "dirty_lod_rebuild_candidate_count=" << write_result.dirty_lod_rebuild_candidate_count << "\n";
+}
+
 void populate_snapshot_design_metadata(ecc::geometry::SnapshotWriteOptions& write_options, idb::IdbDesign& design,
                                        idb::IdbLayout& layout)
 {
@@ -433,6 +440,7 @@ int main(int argc, char** argv)
     std::cout << "geometry snapshot written: " << (std::filesystem::path(options.output_dir) / "geometry.manifest").string()
               << "\n";
     print_geometry_report(build_result, store, std::cout);
+    print_snapshot_write_report(write_result, std::cout);
     return 0;
   }
 
@@ -566,5 +574,6 @@ int main(int argc, char** argv)
   std::cout << "geometry snapshot written: " << (std::filesystem::path(options.output_dir) / "geometry.manifest").string()
             << "\n";
   print_geometry_report(build_result, store, std::cout);
+  print_snapshot_write_report(write_result, std::cout);
   return 0;
 }

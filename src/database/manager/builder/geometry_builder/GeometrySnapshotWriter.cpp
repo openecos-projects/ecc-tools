@@ -443,7 +443,9 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
     return result;
   }
 
+  result.dirty_lod_tile_count = static_cast<uint64_t>(store.dirty_lod_tile_count());
   store.rebuild_dirty_lod_tiles();
+  result.dirty_lod_rebuild_candidate_count = static_cast<uint64_t>(store.last_dirty_lod_rebuild_candidate_count());
 
   const std::span<const ShapeRecord> records = store.records();
   const std::span<const OwnerRef> owners = store.owners();

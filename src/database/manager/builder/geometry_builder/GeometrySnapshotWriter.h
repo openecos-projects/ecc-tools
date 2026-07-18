@@ -46,6 +46,8 @@ struct SnapshotWriteResult
   uint64_t net_count = 0;
   uint64_t bus_count = 0;
   uint64_t group_count = 0;
+  uint64_t dirty_lod_tile_count = 0;
+  uint64_t dirty_lod_rebuild_candidate_count = 0;
   uint64_t epoch = 0;
 };
 

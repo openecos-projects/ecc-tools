@@ -3550,8 +3550,11 @@ void test_geometry_snapshot_apply_edit_on_reloaded_store_is_incremental_without_
   assert(reloaded.delta_events()[0].shape_id == original_id);
   assert(reloaded.dirty_lod_tile_count() > 0);
 
+  const size_t dirty_tiles_before_write = reloaded.dirty_lod_tile_count();
   const SnapshotWriteResult write_result = writer.write(reloaded, SnapshotWriteOptions{output_dir});
   assert(write_result.ok);
+  assert(write_result.dirty_lod_tile_count == dirty_tiles_before_write);
+  assert(write_result.dirty_lod_rebuild_candidate_count > 0);
   const std::filesystem::path delta_path = output_dir / manifest_value(output_dir / "geometry.manifest", "delta");
   const GeometryFileHeader delta_header = read_header(delta_path);
   assert(delta_header.file_kind == GeometryFileKind::kDelta);
