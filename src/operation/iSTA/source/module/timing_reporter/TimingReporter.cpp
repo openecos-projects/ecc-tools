@@ -625,6 +625,10 @@ void TimingReporter::outputTimingPathJson(std::ofstream* json_file, TimingPath& 
   outputJsonNumber(json_file, timing_path.get_required_time());
   (*json_file) << ",\"cppr_ns\":";
   outputJsonNumber(json_file, timing_path.get_clock_reconvergence_pessimism());
+  (*json_file) << ",\"launch_clock_network_delay_ns\":";
+  outputJsonNumber(json_file, timing_path.get_launch_clock_network_delay());
+  (*json_file) << ",\"capture_clock_network_delay_ns\":";
+  outputJsonNumber(json_file, timing_path.get_capture_clock_network_delay());
   (*json_file) << ",\"stages\":[";
   bool first_stage = true;
   for (TimingPathPoint& path_point : timing_path.get_point_list()) {

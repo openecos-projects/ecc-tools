@@ -24,6 +24,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "CTSStatus.hh"
 
@@ -37,6 +38,19 @@ namespace icts {
 
 class Flow;
 struct CTSRuntime;
+
+struct CTSTimingClock
+{
+  std::string clock;
+  std::size_t sink_count = 0U;
+  double target_skew_ns = 0.0;
+  double initial_skew_ns = 0.0;
+  double optimized_skew_ns = 0.0;
+  double min_insertion_latency_ns = 0.0;
+  double max_insertion_latency_ns = 0.0;
+  double mean_insertion_latency_ns = 0.0;
+  bool target_met = false;
+};
 
 class CTSAPI
 {
@@ -58,6 +72,7 @@ class CTSAPI
 
   // Feature API
   static auto outputSummary() -> ieda_feature::CTSSummary;
+  static auto outputClockTiming() -> std::vector<CTSTimingClock>;
   CTSAPI(const CTSAPI& other) = delete;
   CTSAPI(CTSAPI&& other) = delete;
   auto operator=(const CTSAPI& other) -> CTSAPI& = delete;

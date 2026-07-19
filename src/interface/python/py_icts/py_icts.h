@@ -15,9 +15,12 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
+#include <pybind11/pybind11.h>
+
 #include <string>
 
 namespace python_interface {
 bool CtsAutoRun(const std::string& cts_config, const std::string& cts_work_dir);
 bool CtsReport(const std::string& path);
+pybind11::dict CtsTimingFeature();
 }  // namespace python_interface

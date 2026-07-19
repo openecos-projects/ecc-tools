@@ -24,6 +24,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "database/adapter/fast_sta/FastSta.hh"
 #include "database/config/Config.hh"
@@ -101,6 +102,7 @@ class Flow
   auto emitReports(const std::string& save_dir) -> FlowReportStatus;
   auto outputRuntimeSetup() -> void;
   auto outputSummary() const -> QorSummary;
+  auto outputClockTiming() const -> std::vector<ClockTimingSummary>;
   auto outputRunSummary() const -> SynthesisTraceSummary;
   auto setSetupReady(bool setup_ready) -> void { _setup_ready = setup_ready; }
   auto reset() -> void;
@@ -129,6 +131,7 @@ class Flow
   ClockLayout _clock_layout;
   EvaluationState _evaluation_state;
   InstantiationSummary _instantiation_summary;
+  OptimizationSummary _optimization_summary;
   CharacterizationLibrary _char_library;
   bool _runtime_setup_emitted = false;
   bool _setup_ready = false;

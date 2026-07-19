@@ -161,4 +161,23 @@ auto CTSAPI::outputSummary() -> ieda_feature::CTSSummary
   return buildFeatureSummary(getInst().flow().outputSummary());
 }
 
+auto CTSAPI::outputClockTiming() -> std::vector<CTSTimingClock>
+{
+  std::vector<CTSTimingClock> clock_timing;
+  for (const auto& timing : getInst().flow().outputClockTiming()) {
+    clock_timing.push_back(CTSTimingClock{
+        .clock = timing.clock,
+        .sink_count = timing.sink_count,
+        .target_skew_ns = timing.target_skew_ns,
+        .initial_skew_ns = timing.initial_skew_ns,
+        .optimized_skew_ns = timing.optimized_skew_ns,
+        .min_insertion_latency_ns = timing.min_insertion_latency_ns,
+        .max_insertion_latency_ns = timing.max_insertion_latency_ns,
+        .mean_insertion_latency_ns = timing.mean_insertion_latency_ns,
+        .target_met = timing.target_met,
+    });
+  }
+  return clock_timing;
+}
+
 }  // namespace icts
