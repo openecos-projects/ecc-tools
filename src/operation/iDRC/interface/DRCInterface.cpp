@@ -420,26 +420,27 @@ std::vector<DRCShape> DRCInterface::buildEnvShapeList()
   Monitor monitor;
   DRCLOG.info(Loc::current(), "Starting...");
 
-  std::vector<idb::IdbInstance*>& idb_instance_list = dmInst->get_idb_def_service()->get_design()->get_instance_list()->get_instance_list();
-  std::vector<idb::IdbNet*>& idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list();
-  std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
-  std::vector<idb::IdbPin*>& idb_io_pin_list = dmInst->get_idb_def_service()->get_design()->get_io_pin_list()->get_pin_list();
-  std::map<idb::IdbPin*, int32_t> special_pin_net_idx_map;
+  auto* idb_design = dmInst->get_idb_def_service()->get_design();
+  std::vector<idb::IdbInstance*>& idb_instance_list = idb_design->get_instance_list()->get_instance_list();
+  std::vector<idb::IdbNet*>& idb_net_list = idb_design->get_net_list()->get_net_list();
+  std::vector<idb::IdbSpecialNet*>& idb_special_net_list = idb_design->get_special_net_list()->get_net_list();
+  std::vector<idb::IdbPin*>& idb_io_pin_list = idb_design->get_io_pin_list()->get_pin_list();
+  std::map<idb::IdbSpecialNet*, int32_t> special_net_idx_map;
   int32_t regular_net_num = static_cast<int32_t>(idb_net_list.size());
   for (size_t i = 0; i < idb_special_net_list.size(); ++i) {
-    int32_t special_net_id = regular_net_num + static_cast<int32_t>(i);
-    for (idb::IdbPin* idb_pin : idb_special_net_list[i]->get_instance_pin_list()->get_pin_list()) {
-      special_pin_net_idx_map[idb_pin] = special_net_id;
-    }
-    for (idb::IdbPin* idb_pin : idb_special_net_list[i]->get_io_pins()->get_pin_list()) {
-      special_pin_net_idx_map[idb_pin] = special_net_id;
-    }
+    special_net_idx_map[idb_special_net_list[i]] = regular_net_num + static_cast<int32_t>(i);
   }
   auto get_pin_net_idx = [&](idb::IdbPin* idb_pin) {
-    auto it = special_pin_net_idx_map.find(idb_pin);
-    if (it != special_pin_net_idx_map.end()) {
-      return it->second;
+    if (idb_pin == nullptr) {
+      return -1;
     }
+    idb::IdbSpecialNet* special_net = idb_pin->is_io_pin() ? idb_pin->get_special_net()
+                                                            : idb_design->findSpecialNetForInstancePin(idb_pin);
+    auto special_net_it = special_net_idx_map.find(special_net);
+    if (special_net_it != special_net_idx_map.end()) {
+      return special_net_it->second;
+    }
+
     if (!isSkipping(idb_pin->get_net())) {
       return static_cast<int32_t>(idb_pin->get_net()->get_id());
     }
