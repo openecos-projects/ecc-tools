@@ -463,7 +463,12 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
       layer_data[drc_shape->get_layer_idx()].cut_pool.push_back(cut_data);
       return;
     }
-    layer_data[drc_shape->get_layer_idx()].nets[drc_shape->get_net_idx()].polyset += gtl_rect;
+    RVLayerData& rv_layer_data = layer_data[drc_shape->get_layer_idx()];
+    if (!is_env_shape) {
+      rv_layer_data.result_routing_shape_pool.push_back({gtl_rect, drc_shape->get_net_idx(), drc_shape->get_via_name()});
+    }
+    RVRoutingNet& routing_net = rv_layer_data.nets[drc_shape->get_net_idx()];
+    routing_net.polyset += gtl_rect;
     if (is_env_shape) {
       env_routing_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += gtl_rect;
     }
@@ -616,6 +621,7 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
     }
 
     rv_layer_data.rect_rtrees = decltype(rv_layer_data.rect_rtrees)(rect_rtree_inputs);
+    rv_layer_data.result_routing_shape_rtree = decltype(rv_layer_data.result_routing_shape_rtree)(rv_layer_data.result_routing_shape_pool);
     rv_layer_data.boundary_rtrees = decltype(rv_layer_data.boundary_rtrees)(boundary_rtree_inputs);
     rv_layer_data.cut_rtrees = decltype(rv_layer_data.cut_rtrees)(rv_layer_data.cut_pool);
   }

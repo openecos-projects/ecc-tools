@@ -37,6 +37,9 @@ void RuleValidator::verifyNonsufficientMetalOverlap(RVCluster& rv_cluster)
         }
         const GTLRectInt& gtl_rect = max_rect_data.rect;
         PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
+        if (rect.getXSpan() < min_width || rect.getYSpan() < min_width) {
+          continue;
+        }
         std::vector<std::pair<GTLRectInt, int32_t>> env_rect_id_list;
         {
           PlanarRect check_rect = rect;
@@ -47,6 +50,9 @@ void RuleValidator::verifyNonsufficientMetalOverlap(RVCluster& rv_cluster)
             continue;
           }
           PlanarRect env_rect = DRCUTIL.convertToPlanarRect(env_gtl_rect);
+          if (env_rect.getXSpan() < min_width || env_rect.getYSpan() < min_width) {
+            continue;
+          }
           if (!DRCUTIL.isClosedOverlap(rect, env_rect)) {
             continue;
           }
@@ -54,6 +60,28 @@ void RuleValidator::verifyNonsufficientMetalOverlap(RVCluster& rv_cluster)
             continue;
           }
           PlanarRect overlap_rect = DRCUTIL.getOverlap(rect, env_rect);
+          auto get_direct_result_via_name = [&](const PlanarRect& candidate_rect, std::string& via_name) {
+            std::vector<ResultRoutingShapeData> result_shape_list;
+            rv_layer_data.queryResultRoutingShapes(DRCUTIL.convertToGTLRectInt(candidate_rect), std::back_inserter(result_shape_list));
+            bool has_direct_shape = false;
+            for (const ResultRoutingShapeData& result_shape : result_shape_list) {
+              if (result_shape.net_idx != net_idx || DRCUTIL.convertToPlanarRect(result_shape.rect) != candidate_rect) {
+                continue;
+              }
+              if (result_shape.via_name.empty() || (has_direct_shape && via_name != result_shape.via_name)) {
+                return false;
+              }
+              via_name = result_shape.via_name;
+              has_direct_shape = true;
+            }
+            return has_direct_shape;
+          };
+          std::string rect_via_name;
+          std::string env_via_name;
+          if (!DRCUTIL.isOpenOverlap(rect, env_rect) && get_direct_result_via_name(rect, rect_via_name)
+              && get_direct_result_via_name(env_rect, env_via_name) && rect_via_name != env_via_name) {
+            continue;
+          }
           double diag_length = std::hypot(overlap_rect.getXSpan(), overlap_rect.getYSpan());
           if (diag_length >= min_width) {
             continue;
@@ -76,8 +104,25 @@ void RuleValidator::verifyNonsufficientMetalOverlap(RVCluster& rv_cluster)
           for (auto& overlap_rect_env : overlap_rect_env_list) {
             PlanarRect thirdrect = DRCUTIL.convertToPlanarRect(overlap_rect_env);
             // 如果有第三个矩形包含overlap， 且和rect env_rect还有其他重叠，称该违例在金属中，跳过
-            if ((DRCUTIL.isInside(thirdrect, overlap_rect) && DRCUTIL.isClosedOverlap(thirdrect, overlap_rect)) && thirdrect != rect && thirdrect != env_rect
-                && thirdrect.getWidth() >= min_width && DRCUTIL.getOverlap(thirdrect, rect) != overlap_rect
+            if ((DRCUTIL.isInside(thirdrect, overlap_rect) && DRCUTIL.isClosedOverlap(thirdrect, overlap_rect)) && thirdrect != rect
+                && thirdrect != env_rect && thirdrect.getWidth() >= min_width && DRCUTIL.getOverlap(thirdrect, rect) != overlap_rect
+                && DRCUTIL.getOverlap(thirdrect, env_rect) != overlap_rect) {
+              is_inside = true;
+              break;
+            }
+          }
+          if (is_inside) {
+            continue;
+          }
+          std::vector<ResultRoutingShapeData> result_bridge_shape_list;
+          rv_layer_data.queryResultRoutingShapes(DRCUTIL.convertToGTLRectInt(overlap_rect), std::back_inserter(result_bridge_shape_list));
+          for (const ResultRoutingShapeData& result_bridge_shape : result_bridge_shape_list) {
+            if (result_bridge_shape.net_idx != net_idx) {
+              continue;
+            }
+            PlanarRect thirdrect = DRCUTIL.convertToPlanarRect(result_bridge_shape.rect);
+            if ((DRCUTIL.isInside(thirdrect, overlap_rect) && DRCUTIL.isClosedOverlap(thirdrect, overlap_rect)) && thirdrect != rect
+                && thirdrect != env_rect && DRCUTIL.getOverlap(thirdrect, rect) != overlap_rect
                 && DRCUTIL.getOverlap(thirdrect, env_rect) != overlap_rect) {
               is_inside = true;
               break;
