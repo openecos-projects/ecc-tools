@@ -34,6 +34,13 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
     int32_t max_eol_within = 0;
   };
 
+  struct CheckingEdgeData
+  {
+    GTLRectInt edge;
+    int32_t boundary_id = -1;
+    int32_t polygon_id = -1;
+  };
+
   const auto& layer_data = rv_cluster.get_layer_data();
 
   // query original net, return -1 if not exist
@@ -414,7 +421,7 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
       };
 
       // to be checked spacing rects
-      std::vector<std::pair<GTLRectInt, int32_t>> env_checking_poly_list;
+      std::vector<CheckingEdgeData> env_checking_poly_list;
 
       // enclosed cut rects
       std::vector<CutData> env_cut_list;
@@ -445,12 +452,13 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
         std::vector<std::pair<GTLRectInt, int32_t>> env_max_rects;
         merged_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(max_check_rect), std::back_inserter(env_max_rects));
 
-        std::vector<std::pair<GTLRectInt, int32_t>> temp_checking_poly_list;
+        std::vector<CheckingEdgeData> temp_checking_poly_list;
         for (auto& [gtl_rect, idx] : env_max_rects) {
           PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
           if (DRCUTIL.isOpenOverlap(rect, max_check_rect)) {
             PlanarRect rect_edge = DRCUTIL.getRect(rect.getOrientEdge(oppo_orient));
-            temp_checking_poly_list.push_back({DRCUTIL.convertToGTLRectInt(rect_edge), -1});
+            temp_checking_poly_list.push_back(
+                {DRCUTIL.convertToGTLRectInt(rect_edge), -1, merged_layer_data.getMaxRect(idx).polygon_id});
           }
         }
 
@@ -458,7 +466,7 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
           PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
           if (DRCUTIL.isOpenOverlap(rect, max_check_rect)) {
             if (eol_boundary.orient == DRCUTIL.getOppositeOrientation(merged_layer_data.getBoundary(idx).orient)) {
-              env_checking_poly_list.push_back({gtl_rect, idx});
+              env_checking_poly_list.push_back({gtl_rect, idx, merged_layer_data.getBoundary(idx).polygon_id});
             }
           }
         }
@@ -467,10 +475,10 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
         std::vector<PlanarRect> env_checking_rect_list;
         env_checking_rect_list.reserve(env_checking_poly_list.size() + temp_checking_poly_list.size());
         for (const auto& env_poly : env_checking_poly_list) {
-          env_checking_rect_list.emplace_back(DRCUTIL.convertToPlanarRect(env_poly.first));
+          env_checking_rect_list.emplace_back(DRCUTIL.convertToPlanarRect(env_poly.edge));
         }
         for (const auto& temp_poly : temp_checking_poly_list) {
-          PlanarRect temp_rect = DRCUTIL.convertToPlanarRect(temp_poly.first);
+          PlanarRect temp_rect = DRCUTIL.convertToPlanarRect(temp_poly.edge);
           bool has_overlap = false;
           for (const auto& env_rect : env_checking_rect_list) {
             if (DRCUTIL.isClosedOverlap(temp_rect, env_rect)) {
@@ -511,8 +519,9 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
           continue;
         }
 
-        for (auto& [env_gtl_rect, boundary_idx] : env_checking_poly_list) {
-          PlanarRect env_rect = DRCUTIL.convertToPlanarRect(env_gtl_rect);
+        for (const CheckingEdgeData& checking_edge : env_checking_poly_list) {
+          const int32_t boundary_idx = checking_edge.boundary_id;
+          PlanarRect env_rect = DRCUTIL.convertToPlanarRect(checking_edge.edge);
           if (DRCUTIL.isClosedOverlap(env_rect, eol_rect)) {
             continue;
           }
@@ -668,7 +677,9 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
           PlanarRect spacing_rect = DRCUTIL.getSpacingRect(eol_rect, env_rect);
           std::set<int32_t> net_list{getCheckingNet(), queryNetIdxByRect(rv_layer_data, env_rect)};
           int32_t req_size = violation_type == 1 ? eol_rule.ete_spacing : eol_rule.eol_spacing;
-          if (DRCUTIL.getEuclideanDistance(eol_edge_rect, env_rect) >= req_size) {
+          int32_t euclidean_distance = DRCUTIL.getEuclideanDistance(eol_edge_rect, env_rect);
+          // Keep the legacy distance guard for self-polygon candidates; separate polygons follow the directional EOL window.
+          if (checking_edge.polygon_id == eol_boundary.polygon_id && euclidean_distance >= req_size) {
             continue;
           }
 
