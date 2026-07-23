@@ -81,6 +81,16 @@ Exits nonzero with one message per violation when any of these fail:
    `std::optional<std::filesystem::path>` when optional,
    `std::vector<std::filesystem::path>` for lists).
 
+## Interface unit fixture
+
+The converted bindings canonicalize optional path parameters through
+`path_or_empty` in `src/interface/python/py_path_utils.h`. Its self-contained
+compile-plus-assert fixture builds and runs with the system compiler:
+
+```sh
+g++ -std=c++20 -Wall -Werror src/interface/python/test/py_path_utils_test.cc -o /tmp/py_path_utils_test && /tmp/py_path_utils_test
+```
+
 ## Known limitation
 
 The lexer discovers parameters from `py::arg(...)` entries. String parameters

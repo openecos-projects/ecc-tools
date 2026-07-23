@@ -52,3 +52,8 @@ jobs:
 
       - name: Check census manifest
         run: uv run --no-project --with jsonschema python scripts/binding_census/binding_census.py --check
+
+      - name: Compile and run path helper fixture
+        run: |
+          g++ -std=c++20 -Wall -Werror src/interface/python/test/py_path_utils_test.cc -o /tmp/py_path_utils_test
+          /tmp/py_path_utils_test
