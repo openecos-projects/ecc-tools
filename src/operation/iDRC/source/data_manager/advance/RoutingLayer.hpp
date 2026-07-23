@@ -45,6 +45,7 @@ class RoutingLayer
   std::string& get_layer_name() { return _layer_name; }
   Direction& get_prefer_direction() { return _prefer_direction; }
   int32_t get_pitch() const { return _pitch; }
+  int32_t get_width() const { return _width; }
   CornerFillSpacingRule& get_corner_fill_spacing_rule() { return _corner_fill_spacing_rule; }
   std::vector<CornerSpacingRule>& get_corner_spacing_rule_list() { return _corner_spacing_rule_list; }
   std::vector<EndOfLineSpacingRule>& get_end_of_line_spacing_rule_list() { return _end_of_line_spacing_rule_list; }
@@ -63,6 +64,7 @@ class RoutingLayer
   void set_layer_name(const std::string& layer_name) { _layer_name = layer_name; }
   void set_prefer_direction(const Direction& prefer_direction) { _prefer_direction = prefer_direction; }
   void set_pitch(const int32_t pitch) { _pitch = pitch; }
+  void set_width(const int32_t width) { _width = width; }
   // function
   bool isPreferH() const { return _prefer_direction == Direction::kHorizontal; }
 
@@ -72,6 +74,7 @@ class RoutingLayer
   std::string _layer_name;
   Direction _prefer_direction = Direction::kNone;
   int32_t _pitch = -1;
+  int32_t _width = -1;
   CornerFillSpacingRule _corner_fill_spacing_rule;
   std::vector<CornerSpacingRule> _corner_spacing_rule_list;
   std::vector<EndOfLineSpacingRule> _end_of_line_spacing_rule_list;

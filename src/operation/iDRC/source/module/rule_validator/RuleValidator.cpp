@@ -447,6 +447,8 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
 
   layer_data.clear();
   std::map<int32_t, std::map<int32_t, GTLPolySetInt>> env_routing_polysets;
+  std::map<int32_t, std::map<int32_t, GTLPolySetInt>> obs_routing_polysets;
+  std::map<int32_t, std::set<int32_t>> special_net_idx_map;
 
   auto add_shape_to_layer_data = [&](DRCShape* drc_shape, bool is_env_shape) {
     GTLRectInt gtl_rect = DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
@@ -464,13 +466,21 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
       return;
     }
     RVLayerData& rv_layer_data = layer_data[drc_shape->get_layer_idx()];
+    if (drc_shape->get_source_type() == ids::Shape::SourceType::kSpecialWire) {
+      special_net_idx_map[drc_shape->get_layer_idx()].insert(drc_shape->get_net_idx());
+    }
     if (!is_env_shape) {
       rv_layer_data.result_routing_shape_pool.push_back({gtl_rect, drc_shape->get_net_idx(), drc_shape->get_via_name()});
+    } else if (drc_shape->get_source_type() == ids::Shape::SourceType::kInstancePin && drc_shape->get_net_idx() == -1) {
+      rv_layer_data.env_routing_shape_pool.push_back({gtl_rect, drc_shape->get_net_idx(), drc_shape->get_source_type(), false});
     }
     RVRoutingNet& routing_net = rv_layer_data.nets[drc_shape->get_net_idx()];
     routing_net.polyset += gtl_rect;
     if (is_env_shape) {
       env_routing_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += gtl_rect;
+      if (drc_shape->get_source_type() == ids::Shape::SourceType::kInstanceObs) {
+        obs_routing_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += gtl_rect;
+      }
     }
   };
   for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
@@ -483,6 +493,19 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
   for (auto& [layer_idx, rv_layer_data] : layer_data) {
     using DeltaRectRTree = bgi::rtree<GTLRectInt, bgi::quadratic<16>>;
 
+    auto layer_obs_it = obs_routing_polysets.find(layer_idx);
+    if (layer_obs_it != obs_routing_polysets.end()) {
+      auto net_obs_it = layer_obs_it->second.find(-1);
+      if (net_obs_it != layer_obs_it->second.end()) {
+        for (EnvRoutingShapeData& env_shape_data : rv_layer_data.env_routing_shape_pool) {
+          GTLPolySetInt uncovered_pin;
+          uncovered_pin += env_shape_data.rect;
+          uncovered_pin -= net_obs_it->second;
+          env_shape_data.isObsCovered = gtl::empty(uncovered_pin);
+        }
+      }
+    }
+
     std::vector<std::pair<GTLRectInt, int32_t>> rect_rtree_inputs;
     std::vector<std::pair<GTLRectInt, int32_t>> boundary_rtree_inputs;
     rv_layer_data.polygon_pool.clear();
@@ -494,6 +517,7 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
       const GTLPolySetInt* env_polyset = nullptr;
       GTLPolySetInt delta_polyset;
       DeltaRectRTree delta_rect_rtree;
+      DeltaRectRTree obs_rect_rtree;
       bool has_delta_geometry = false;
       {
         auto layer_env_it = env_routing_polysets.find(layer_idx);
@@ -509,6 +533,18 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
               gtl::get_max_rectangles(delta_rect_list, delta_polyset);
               delta_rect_rtree = DeltaRectRTree(delta_rect_list);
             }
+          }
+        }
+      }
+
+      if (DRCDM.getDatabase().get_use_min_spacing_obs()) {
+        auto layer_obs_it = obs_routing_polysets.find(layer_idx);
+        if (layer_obs_it != obs_routing_polysets.end()) {
+          auto net_obs_it = layer_obs_it->second.find(net_idx);
+          if (net_obs_it != layer_obs_it->second.end()) {
+            std::vector<GTLRectInt> obs_rect_list;
+            gtl::get_max_rectangles(obs_rect_list, net_obs_it->second);
+            obs_rect_rtree = DeltaRectRTree(obs_rect_list);
           }
         }
       }
@@ -562,6 +598,7 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
           MaxRectData max_rect_data;
           max_rect_data.rect = gtl_rect;
           max_rect_data.polygon_id = polygon_id;
+          max_rect_data.isSpecialNet = special_net_idx_map[layer_idx].contains(net_idx);
           if (env_polyset != nullptr) {
             if (!has_delta_geometry) {
               max_rect_data.isEnv = true;
@@ -576,6 +613,17 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
                   max_rect_data.isEnv = false;
                   break;
                 }
+              }
+            }
+          }
+          if (!obs_rect_rtree.empty()) {
+            std::vector<GTLRectInt> obs_overlap_list;
+            obs_rect_rtree.query(bgi::intersects(gtl_rect), std::back_inserter(obs_overlap_list));
+            PlanarRect max_rect = DRCUTIL.convertToPlanarRect(gtl_rect);
+            for (const GTLRectInt& obs_rect : obs_overlap_list) {
+              if (DRCUTIL.isInside(DRCUTIL.convertToPlanarRect(obs_rect), max_rect)) {
+                max_rect_data.isObs = true;
+                break;
               }
             }
           }
@@ -622,6 +670,7 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
 
     rv_layer_data.rect_rtrees = decltype(rv_layer_data.rect_rtrees)(rect_rtree_inputs);
     rv_layer_data.result_routing_shape_rtree = decltype(rv_layer_data.result_routing_shape_rtree)(rv_layer_data.result_routing_shape_pool);
+    rv_layer_data.env_routing_shape_rtree = decltype(rv_layer_data.env_routing_shape_rtree)(rv_layer_data.env_routing_shape_pool);
     rv_layer_data.boundary_rtrees = decltype(rv_layer_data.boundary_rtrees)(boundary_rtree_inputs);
     rv_layer_data.cut_rtrees = decltype(rv_layer_data.cut_rtrees)(rv_layer_data.cut_pool);
   }

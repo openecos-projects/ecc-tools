@@ -36,6 +36,7 @@ class Database
   std::string& get_def_file_path() { return _def_file_path; }
   int32_t get_micron_dbu() const { return _micron_dbu; }
   int32_t get_manufacture_grid() const { return _manufacture_grid; }
+  bool get_use_min_spacing_obs() const { return _use_min_spacing_obs; }
   Die& get_die() { return _die; }
   MaxViaStackRule& get_max_via_stack_rule() { return _max_via_stack_rule; }
   OffGridOrWrongWayRule& get_off_grid_or_wrong_way_rule() { return _off_grid_or_wrong_way_rule; }
@@ -54,6 +55,7 @@ class Database
   void set_def_file_path(const std::string& def_file_path) { _def_file_path = def_file_path; }
   void set_micron_dbu(const int32_t micron_dbu) { _micron_dbu = micron_dbu; }
   void set_manufacture_grid(const int32_t manufacture_grid) { _manufacture_grid = manufacture_grid; }
+  void set_use_min_spacing_obs(bool value) { _use_min_spacing_obs = value; }
   // function
 
  private:
@@ -62,6 +64,7 @@ class Database
   std::string _def_file_path;
   int32_t _micron_dbu = -1;
   int32_t _manufacture_grid = -1;
+  bool _use_min_spacing_obs = true;
   Die _die;
   MaxViaStackRule _max_via_stack_rule;
   OffGridOrWrongWayRule _off_grid_or_wrong_way_rule;

@@ -61,6 +61,8 @@ class IdbLayout
 
   // getter
   int32_t get_munufacture_grid() { return _manufacture_grid; }
+  bool get_use_min_spacing_obs() const { return _has_use_min_spacing_obs ? _use_min_spacing_obs : true; }
+  bool get_use_min_spacing_pin() const { return _has_use_min_spacing_pin ? _use_min_spacing_pin : false; }
   IdbDie* get_die() { return _die; }
   IdbCore* get_core();
   IdbUnits* get_units() { return _units; }
@@ -77,6 +79,16 @@ class IdbLayout
 
   // setter
   void set_manufacture_grid(int32_t value) { _manufacture_grid = value; }
+  void set_use_min_spacing_obs(bool value)
+  {
+    _has_use_min_spacing_obs = true;
+    _use_min_spacing_obs = value;
+  }
+  void set_use_min_spacing_pin(bool value)
+  {
+    _has_use_min_spacing_pin = true;
+    _use_min_spacing_pin = value;
+  }
   void set_die(IdbDie* die) { _die = die; }
   void set_units(IdbUnits* units) { _units = units; }
   void set_layer(IdbLayers* layers) { _layers = layers; }
@@ -98,6 +110,10 @@ class IdbLayout
 
  private:
   int32_t _manufacture_grid;  //<---------tbd---------------
+  bool _has_use_min_spacing_obs = false;
+  bool _use_min_spacing_obs = true;
+  bool _has_use_min_spacing_pin = false;
+  bool _use_min_spacing_pin = false;
   IdbUnits* _units;
   IdbDie* _die;
   IdbCore* _core;

@@ -28,6 +28,35 @@ void RuleValidator::verifyParallelRunLengthSpacing(RVCluster& rv_cluster)
     ParallelRunLengthSpacingRule& parallel_run_length_spacing_rule = routing_layer.get_parallel_run_length_spacing_rule();
     std::map<std::set<int32_t>, std::map<int32_t, std::vector<PlanarRect>>> net_required_violation_rect_map;
     std::map<std::set<int32_t>, std::map<int32_t, std::vector<PlanarRect>>> env_net_required_violation_rect_map;
+    auto has_opposing_polygon_edges = [&](const PlanarRect& marker_rect, int32_t net_idx) {
+      std::vector<std::pair<GTLRectInt, int32_t>> boundary_id_list;
+      rv_layer_data.queryBoundaries(DRCUTIL.convertToGTLRectInt(marker_rect), std::back_inserter(boundary_id_list));
+
+      bool has_left = false;
+      bool has_right = false;
+      bool has_bottom = false;
+      bool has_top = false;
+      for (const auto& [edge, boundary_id] : boundary_id_list) {
+        if (rv_layer_data.getNetIdxByBoundaryId(boundary_id) != net_idx) {
+          continue;
+        }
+        PlanarRect edge_rect = DRCUTIL.convertToPlanarRect(edge);
+        int32_t x_overlap
+            = std::min(edge_rect.get_ur_x(), marker_rect.get_ur_x()) - std::max(edge_rect.get_ll_x(), marker_rect.get_ll_x());
+        int32_t y_overlap
+            = std::min(edge_rect.get_ur_y(), marker_rect.get_ur_y()) - std::max(edge_rect.get_ll_y(), marker_rect.get_ll_y());
+        if (edge_rect.getXSpan() == 0 && edge_rect.get_ll_x() == marker_rect.get_ll_x() && y_overlap >= 0) {
+          has_left = true;
+        } else if (edge_rect.getXSpan() == 0 && edge_rect.get_ll_x() == marker_rect.get_ur_x() && y_overlap >= 0) {
+          has_right = true;
+        } else if (edge_rect.getYSpan() == 0 && edge_rect.get_ll_y() == marker_rect.get_ll_y() && x_overlap >= 0) {
+          has_bottom = true;
+        } else if (edge_rect.getYSpan() == 0 && edge_rect.get_ll_y() == marker_rect.get_ur_y() && x_overlap >= 0) {
+          has_top = true;
+        }
+      }
+      return (has_left && has_right) || (has_bottom && has_top);
+    };
     for (auto& [net_idx, routing_net] : rv_layer_data.nets) {
       for (const MaxRectData& max_rect_data : rv_layer_data.getMaxRects(routing_net)) {
         PlanarRect rect = DRCUTIL.convertToPlanarRect(max_rect_data.rect);
@@ -49,6 +78,7 @@ void RuleValidator::verifyParallelRunLengthSpacing(RVCluster& rv_cluster)
 
         for (const auto& [gtl_rect, env_max_rect_id] : neighbor_rect_id_list) {
           PlanarRect env_rect = DRCUTIL.convertToPlanarRect(gtl_rect);
+          const MaxRectData& env_max_rect_data = rv_layer_data.getMaxRect(env_max_rect_id);
           int32_t env_net_idx = rv_layer_data.getNetIdxByMaxRectId(env_max_rect_id);
           if (DRCUTIL.isClosedOverlap(rect, env_rect)) {
             continue;
@@ -58,15 +88,18 @@ void RuleValidator::verifyParallelRunLengthSpacing(RVCluster& rv_cluster)
           bool is_prl_violation = false, is_spacing_violation = false;
           int32_t real_prl_spacing = 0, real_spacing = 0;
           // prl rules
+          int32_t rect_width = max_rect_data.isObs ? routing_layer.get_width() : rect.getWidth();
+          int32_t env_rect_width = env_max_rect_data.isObs ? routing_layer.get_width() : env_rect.getWidth();
+          int32_t check_width = std::max(rect_width, env_rect_width);
           if (has_spacing_table) {
             int32_t prl = DRCUTIL.getParallelLength(rect, env_rect);
-            real_prl_spacing = parallel_run_length_spacing_rule.getSpacing(std::max(rect.getWidth(), env_rect.getWidth()), prl);
+            real_prl_spacing = parallel_run_length_spacing_rule.getSpacing(check_width, prl);
             is_prl_violation = DRCUTIL.getEuclideanDistance(rect, env_rect) < real_prl_spacing;
           }
 
           // spacing rules
           if (has_spacing_list) {
-            real_spacing = parallel_run_length_spacing_rule.getSpacingWithWidth(std::max(rect.getWidth(), env_rect.getWidth()));
+            real_spacing = parallel_run_length_spacing_rule.getSpacingWithWidth(check_width);
             is_spacing_violation = DRCUTIL.getEuclideanDistance(rect, env_rect) < real_spacing;
           }
 
@@ -76,7 +109,6 @@ void RuleValidator::verifyParallelRunLengthSpacing(RVCluster& rv_cluster)
 
           // sameNet
           if (net_idx == env_net_idx) {
-            std::set<Orientation> orient_inside;
             bool total_inside = false;
             // for violation area = 0
             bool zero_area_inside = false;
@@ -95,27 +127,22 @@ void RuleValidator::verifyParallelRunLengthSpacing(RVCluster& rv_cluster)
                 if (DRCUTIL.isInside(violation_env_rect, violation_rect)) {
                   zero_area_inside = true;
                 }
-
-                for (auto orient : {Orientation::kEast, Orientation::kWest, Orientation::kNorth, Orientation::kSouth}) {
-                  if (!DRCUTIL.exist(orient_inside, orient) && DRCUTIL.isInside(violation_env_rect, violation_rect.getOrientEdge(orient))) {
-                    orient_inside.insert(orient);
-                  }
-                }
               }
             }
-            bool hor = DRCUTIL.exist(orient_inside, Orientation::kWest) && DRCUTIL.exist(orient_inside, Orientation::kEast);
-            bool ver = DRCUTIL.exist(orient_inside, Orientation::kNorth) && DRCUTIL.exist(orient_inside, Orientation::kSouth);
 
             if (violation_rect.getArea() == 0) {
               if (zero_area_inside) {
                 continue;
               }
-            } else if ((orient_inside.size() != 0 && !hor && !ver) || total_inside) {
+            } else if (total_inside) {
               continue;
             } else {
               GTLRectInt violation_bbox;
               violation_ps.extents(violation_bbox);
               violation_rect = DRCUTIL.convertToPlanarRect(violation_bbox);
+              if (!has_opposing_polygon_edges(violation_rect, net_idx)) {
+                continue;
+              }
             }
           }
 
@@ -125,6 +152,13 @@ void RuleValidator::verifyParallelRunLengthSpacing(RVCluster& rv_cluster)
             GTLPolySetInt violation_ps;
             violation_ps += DRCUTIL.convertToGTLRectInt(violation_rect);
             for (const auto& [gtl_rect, max_rect_id] : neighbor_rect_id_list) {
+              int32_t violation_env_net_idx = rv_layer_data.getNetIdxByMaxRectId(max_rect_id);
+              const MaxRectData& violation_env_max_rect_data = rv_layer_data.getMaxRect(max_rect_id);
+              bool is_unrelated_filler = violation_env_net_idx != net_idx && violation_env_net_idx != env_net_idx;
+              bool preserve_pair_marker = violation_env_max_rect_data.isObs || max_rect_data.isSpecialNet || env_max_rect_data.isSpecialNet;
+              if (is_unrelated_filler && preserve_pair_marker) {
+                continue;
+              }
               PlanarRect violation_env_rect = DRCUTIL.convertToPlanarRect(gtl_rect);
               if (DRCUTIL.isOpenOverlap(violation_env_rect, violation_rect)) {
                 violation_ps -= gtl_rect;
@@ -145,7 +179,7 @@ void RuleValidator::verifyParallelRunLengthSpacing(RVCluster& rv_cluster)
             }
           }
 
-          if (max_rect_data.isEnv && rv_layer_data.getMaxRect(env_max_rect_id).isEnv) {
+          if (max_rect_data.isEnv && env_max_rect_data.isEnv) {
             if (is_prl_violation) {
               env_net_required_violation_rect_map[{net_idx, env_net_idx}][real_prl_spacing].push_back(violation_rect);
             }
@@ -158,6 +192,47 @@ void RuleValidator::verifyParallelRunLengthSpacing(RVCluster& rv_cluster)
             }
             if (is_spacing_violation) {
               net_required_violation_rect_map[{net_idx, env_net_idx}][real_spacing].push_back(violation_rect);
+            }
+          }
+        }
+
+        if (!max_rect_data.isEnv) {
+          int32_t max_check_spacing = 0;
+          if (has_spacing_table) {
+            max_check_spacing = parallel_run_length_spacing_rule.getMaxSpacing();
+          }
+          if (has_spacing_list) {
+            max_check_spacing = std::max(max_check_spacing, parallel_run_length_spacing_rule.getSpacingMaxWidth());
+          }
+
+          PlanarRect check_rect = DRCUTIL.getEnlargedRect(rect, max_check_spacing);
+          std::vector<EnvRoutingShapeData> env_shape_list;
+          rv_layer_data.queryEnvRoutingShapes(DRCUTIL.convertToGTLRectInt(check_rect), std::back_inserter(env_shape_list));
+          for (const EnvRoutingShapeData& env_shape_data : env_shape_list) {
+            if (!env_shape_data.isObsCovered || env_shape_data.source_type != ids::Shape::SourceType::kInstancePin) {
+              continue;
+            }
+
+            PlanarRect env_rect = DRCUTIL.convertToPlanarRect(env_shape_data.rect);
+            if (DRCUTIL.isClosedOverlap(rect, env_rect)) {
+              continue;
+            }
+
+            int32_t check_width = std::max(rect.getWidth(), env_rect.getWidth());
+            if (has_spacing_table) {
+              int32_t prl = DRCUTIL.getParallelLength(rect, env_rect);
+              int32_t real_prl_spacing = parallel_run_length_spacing_rule.getSpacing(check_width, prl);
+              if (DRCUTIL.getEuclideanDistance(rect, env_rect) < real_prl_spacing) {
+                PlanarRect violation_rect = DRCUTIL.getSpacingRect(rect, env_rect);
+                net_required_violation_rect_map[{net_idx, env_shape_data.net_idx}][real_prl_spacing].push_back(violation_rect);
+              }
+            }
+            if (has_spacing_list) {
+              int32_t real_spacing = parallel_run_length_spacing_rule.getSpacingWithWidth(check_width);
+              if (DRCUTIL.getEuclideanDistance(rect, env_rect) < real_spacing) {
+                PlanarRect violation_rect = DRCUTIL.getSpacingRect(rect, env_rect);
+                net_required_violation_rect_map[{net_idx, env_shape_data.net_idx}][real_spacing].push_back(violation_rect);
+              }
             }
           }
         }

@@ -80,6 +80,7 @@ class LefRead
   static int maxStackViaCB(lefrCallbackType_e c, lefiMaxStackVia* maxStack, lefiUserData);
   static int siteCB(lefrCallbackType_e c, lefiSite* lef_site, lefiUserData data);
   static int unitsCB(lefrCallbackType_e c, lefiUnits* lef_unit, lefiUserData data);
+  static int useMinSpacingCB(lefrCallbackType_e c, lefiUseMinSpacing* spacing, lefiUserData data);
   static int layerCB(lefrCallbackType_e c, lefiLayer* lef_layer, lefiUserData data);
   static int macroBeginCB(lefrCallbackType_e c, const char* lef_name, lefiUserData data);
   static int macroCB(lefrCallbackType_e c, lefiMacro* lef_macro, lefiUserData data);
@@ -97,6 +98,7 @@ class LefRead
   int parse_max_stack_via(lefiMaxStackVia* maxStack);
   int parse_sites(lefiSite* lef_site);
   int parse_units(lefiUnits* lef_units);
+  int parse_use_min_spacing(lefiUseMinSpacing* spacing);
   int parse_layer(lefiLayer* lef_layer);
   int parse_layer_routing(lefiLayer* lef_layer, IdbLayerRouting* layer_routing);
   int parse_layer_cut(lefiLayer* lef_layer, IdbLayerCut* layer_cut);

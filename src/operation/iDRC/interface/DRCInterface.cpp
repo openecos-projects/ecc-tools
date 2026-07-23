@@ -376,7 +376,9 @@ void DRCInterface::wrapMicronDBU()
 
 void DRCInterface::wrapManufactureGrid()
 {
-  DRCDM.getDatabase().set_manufacture_grid(dmInst->get_idb_lef_service()->get_layout()->get_munufacture_grid());
+  idb::IdbLayout* layout = dmInst->get_idb_lef_service()->get_layout();
+  DRCDM.getDatabase().set_manufacture_grid(layout->get_munufacture_grid());
+  DRCDM.getDatabase().set_use_min_spacing_obs(layout->get_use_min_spacing_obs());
 }
 
 void DRCInterface::wrapDie()
@@ -430,6 +432,7 @@ void DRCInterface::wrapLayerList()
       routing_layer.set_layer_order(idb_routing_layer->get_order());
       routing_layer.set_layer_name(idb_routing_layer->get_name());
       routing_layer.set_prefer_direction(getDRCDirectionByDB(idb_routing_layer->get_direction()));
+      routing_layer.set_width(idb_routing_layer->get_width());
       wrapTrackAxis(routing_layer, idb_routing_layer);
       wrapRoutingDesignRule(routing_layer, idb_routing_layer);
       routing_layer_list.push_back(std::move(routing_layer));

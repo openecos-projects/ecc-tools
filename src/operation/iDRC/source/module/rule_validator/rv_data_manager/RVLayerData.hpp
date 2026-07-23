@@ -80,6 +80,8 @@ struct MaxRectData
   GTLRectInt rect;
   int32_t polygon_id = -1;
   bool isEnv = false;
+  bool isObs = false;
+  bool isSpecialNet = false;
 };
 
 struct ResultRoutingShapeData
@@ -94,6 +96,21 @@ struct ResultRoutingShapeDataIndexable
   using result_type = GTLRectInt const&;
 
   GTLRectInt const& operator()(ResultRoutingShapeData const& routing_shape_data) const { return routing_shape_data.rect; }
+};
+
+struct EnvRoutingShapeData
+{
+  GTLRectInt rect;
+  int32_t net_idx = -1;
+  ids::Shape::SourceType source_type = ids::Shape::SourceType::kUnknown;
+  bool isObsCovered = false;
+};
+
+struct EnvRoutingShapeDataIndexable
+{
+  using result_type = GTLRectInt const&;
+
+  GTLRectInt const& operator()(EnvRoutingShapeData const& routing_shape_data) const { return routing_shape_data.rect; }
 };
 
 struct BoundaryData
@@ -138,11 +155,13 @@ struct RVLayerData
   std::map<int32_t, RVRoutingNet> nets;
   std::vector<CutData> cut_pool;
   std::vector<ResultRoutingShapeData> result_routing_shape_pool;
+  std::vector<EnvRoutingShapeData> env_routing_shape_pool;
   std::vector<PolygonData> polygon_pool;
   std::vector<MaxRectData> max_rect_pool;
   std::vector<BoundaryData> boundary_pool;
   bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> rect_rtrees;
   bgi::rtree<ResultRoutingShapeData, bgi::quadratic<16>, ResultRoutingShapeDataIndexable> result_routing_shape_rtree;
+  bgi::rtree<EnvRoutingShapeData, bgi::quadratic<16>, EnvRoutingShapeDataIndexable> env_routing_shape_rtree;
   bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> boundary_rtrees;
   bgi::rtree<CutData, bgi::quadratic<16>, CutDataIndexable> cut_rtrees;
 
@@ -209,6 +228,12 @@ struct RVLayerData
   void queryResultRoutingShapes(const GTLRectInt& query_rect, OutputIt out) const
   {
     result_routing_shape_rtree.query(bgi::intersects(query_rect), out);
+  }
+
+  template <typename OutputIt>
+  void queryEnvRoutingShapes(const GTLRectInt& query_rect, OutputIt out) const
+  {
+    env_routing_shape_rtree.query(bgi::intersects(query_rect), out);
   }
 
   template <typename OutputIt>

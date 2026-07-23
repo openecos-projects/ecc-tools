@@ -113,7 +113,7 @@ bool LefRead::createDb(const char* file_name)
   // lefrSetSpacingEndCbk(spacingEndCB);
   // lefrSetTimingCbk(timingCB);
   lefrSetUnitsCbk(unitsCB);
-  // lefrSetUseMinSpacingCbk(useMinSpacingCB);
+  lefrSetUseMinSpacingCbk(useMinSpacingCB);
   // lefrSetVersionCbk(versionCB);
   lefrSetViaCbk(viaCB);
   lefrSetViaRuleCbk(viaRuleCB);
@@ -176,6 +176,28 @@ int LefRead::parse_manufacture_grid(double value)
   IdbLayout* layout = _lef_service->get_layout();
   layout->set_manufacture_grid(transUnitDB(value));
 
+  return kDbSuccess;
+}
+
+int LefRead::useMinSpacingCB(lefrCallbackType_e c, lefiUseMinSpacing* spacing, lefiUserData data)
+{
+  LefRead* lef_reader = (LefRead*) data;
+  if (!lef_reader->check_type(c)) {
+    std::cout << "Check Type Error [Lef : Use Min Spacing] ..." << std::endl;
+    return kDbFail;
+  }
+
+  return lef_reader->parse_use_min_spacing(spacing);
+}
+
+int LefRead::parse_use_min_spacing(lefiUseMinSpacing* spacing)
+{
+  IdbLayout* layout = _lef_service->get_layout();
+  if (ieda::Str::noCaseEqual(spacing->name(), "OBS")) {
+    layout->set_use_min_spacing_obs(spacing->value());
+  } else if (ieda::Str::noCaseEqual(spacing->name(), "PIN")) {
+    layout->set_use_min_spacing_pin(spacing->value());
+  }
   return kDbSuccess;
 }
 
