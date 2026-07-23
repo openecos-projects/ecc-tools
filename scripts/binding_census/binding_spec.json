@@ -1,0 +1,2251 @@
+{
+  "bindings": [
+    {
+      "module": "py_config",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "flow config JSON file; wrapper init_config passes it positionally (chipcompiler/tools/ecc/module.py:86)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "flow_config",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "flow_init"
+    },
+    {
+      "module": "py_config",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "db config JSON file; wrapper init_config/update_step_paths pass path_text(db_config)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "config_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "technology LEF file; empty string is the unset sentinel in db_init's C++ body",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "tech_lef_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "cell LEF file list; empty list is the unset sentinel, no optional-ization",
+          "new_default": "std::vector<std::filesystem::path>{}",
+          "new_type": "std::vector<std::filesystem::path>",
+          "old_default": "std::vector<std::string> {}",
+          "old_type": "const std::vector<std::string>&",
+          "param": "lef_paths",
+          "required_or_optional": "required",
+          "scalar_or_list": "list"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "DEF file; empty string is the unset sentinel",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "def_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "netlist Verilog file; empty string is the unset sentinel",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "verilog_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "output directory; wrapper passes path_text(output_dir)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "output_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "feature output directory; wrapper passes path_text(feature_dir)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "feature_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "Liberty file list; wrapper update_sta_data_config passes path_texts(lib_paths); empty list is the unset sentinel",
+          "new_default": "std::vector<std::filesystem::path>{}",
+          "new_type": "std::vector<std::filesystem::path>",
+          "old_default": "std::vector<std::string>{}",
+          "old_type": "const std::vector<std::string>&",
+          "param": "lib_paths",
+          "required_or_optional": "required",
+          "scalar_or_list": "list"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "SDC constraints file; empty string is the unset sentinel",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "sdc_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "db_init"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "plot output file; empty string skips saving (lambda forwards save_path to the eval implementation)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "save_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "cell_density"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "plot output file; empty string skips saving (lambda forwards save_path to the eval implementation)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "save_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "pin_density"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "plot output file; empty string skips saving (lambda forwards save_path to the eval implementation)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "save_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "net_density"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "plot output file; empty string skips saving (lambda forwards save_path to the eval implementation)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "save_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "rudy_congestion"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "plot output file; empty string skips saving (lambda forwards save_path to the eval implementation)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "save_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "lut_rudy_congestion"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "plot output file; empty string skips saving (lambda forwards save_path to the eval implementation)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "save_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "egr_congestion"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "hierarchy tree plot output file (eval_*_hierarchy declarations take const std::string& plot_path)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "plot_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "eval_cell_hierarchy"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "hierarchy tree plot output file (eval_*_hierarchy declarations take const std::string& plot_path)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "plot_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "eval_macro_hierarchy"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "hierarchy tree plot output file (eval_*_hierarchy declarations take const std::string& plot_path)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "plot_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "eval_macro_connection"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "hierarchy tree plot output file (eval_*_hierarchy declarations take const std::string& plot_path)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "plot_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "eval_macro_pin_connection"
+    },
+    {
+      "module": "py_eval",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "hierarchy tree plot output file (eval_*_hierarchy declarations take const std::string& plot_path)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "plot_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "eval_macro_io_pin_connection"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "feature summary output file (featureInst->save_summary target)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_summary"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "tool feature output file (featureInst->save_tools target)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "flow step selector string forwarded to save_tools, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "step",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_tool"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "placement eval JSON output file",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "json_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_pl_eval"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "CTS eval JSON output file",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "json_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_cts_eval"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "eval map output file (featureInst->save_eval_map target)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_eval_map"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "route feature output file",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_route"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "route feature input file read back by the feature API",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_route_read"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "macro DRC feature output file",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "DRC report input file consumed by the macro DRC feature builder",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "drc_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_macro_drc"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "eval summary output file",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_eval_summary"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "timing eval summary output file",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_timing_eval_summary"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "net eval output file",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_net_eval"
+    },
+    {
+      "module": "py_feature",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "flow step selector string forwarded to save_cong_map, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "step",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "congestion map output directory (featureInst->save_cong_map target)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "dir",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "feature_cong_map"
+    },
+    {
+      "module": "py_icts",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "CTS config JSON file; wrapper run_cts passes path_text(config) (chipcompiler/tools/ecc/module.py:401)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "cts_config",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "CTS working directory; wrapper run_cts passes path_text(output) (chipcompiler/tools/ecc/module.py:401)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "cts_work_dir",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "run_cts"
+    },
+    {
+      "module": "py_icts",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "CTS report output file",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "cts_report"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "idb config JSON file; wrapper idb_init passes path_text(config_path) (chipcompiler/tools/ecc/module.py:114); py::arg-free binding, parameter name from the initIdb declaration",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "config_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "idb_init"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "technology LEF file; wrapper init_techlef passes path_text(tech_lef_path) (chipcompiler/tools/ecc/module.py:180); py::arg-free binding, parameter name from the initTechLef declaration",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "techlef_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "tech_lef_init"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "cell LEF file list; wrapper init_lefs passes path_texts(lef_paths) (chipcompiler/tools/ecc/module.py:184); empty list is the unset sentinel",
+          "new_default": null,
+          "new_type": "std::vector<std::filesystem::path>",
+          "old_default": null,
+          "old_type": "const std::vector<std::string>&",
+          "param": "lef_paths",
+          "required_or_optional": "required",
+          "scalar_or_list": "list"
+        }
+      ],
+      "py_name": "lef_init"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "DEF file; wrapper read_def passes path_text(path) (chipcompiler/tools/ecc/module.py:188)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "def_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "def_init"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "netlist Verilog file; wrapper read_verilog passes path_text(verilog)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "verilog_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "design top module name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "top_module",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "verilog_init"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "Liberty file list; wrapper passes path_texts(lib_paths) (chipcompiler/tools/ecc/module.py:907); empty list is the unset sentinel",
+          "new_default": null,
+          "new_type": "std::vector<std::filesystem::path>",
+          "old_default": null,
+          "old_type": "const std::vector<std::string>&",
+          "param": "lib_paths",
+          "required_or_optional": "required",
+          "scalar_or_list": "list"
+        }
+      ],
+      "py_name": "lib_init"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "SDC constraints file; initSdc stores the value as-is and the timing flow treats empty as unset; the production harden flow passes None natively (runner.py passes workspace.pdk.sdc which is Path|None), so the converted binding takes an optional path",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "sdc_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "sdc_init"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "SPEF parasitics file; wrapper passes path_text(spef_path)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "spef_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "spef_init"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "DEF output file; wrapper def_save passes path_text(def_path)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "def_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "def_save"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "macro placement TCL output file (saveMacroTCL writes a .tcl file)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "tcl_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "tcl_save"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "netlist output file (saveNetList writes a Verilog netlist)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "netlist_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "cell master names to exclude from the netlist, not filesystem paths",
+          "new_default": "std::set<std::string>{}",
+          "new_type": "std::set<std::string>",
+          "old_default": "std::set<std::string>{}",
+          "old_type": "std::set<std::string>",
+          "param": "exclude_cell_names",
+          "required_or_optional": "optional",
+          "scalar_or_list": "list"
+        }
+      ],
+      "py_name": "netlist_save"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "GDSII output file; wrapper gds_save passes path_text(output_path)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "gds_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "gds_save"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "idb JSON output file (saveJson serializes the database)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "json_save"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "view JSON output directory",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "output_dir",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "serialization format keyword (e.g. \"pretty\"), not a filesystem path",
+          "new_default": "\"pretty\"",
+          "new_type": "const std::string&",
+          "old_default": "\"pretty\"",
+          "old_type": "const std::string&",
+          "param": "json_format",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "view_json_save"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "view JSON edits input file read by applyViewJsonEdits",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "edits_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "view_json_apply_edits"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "serialized database output file/directory (saveData persists the DataManager state)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "save_data"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "serialized database input file/directory read by loadData",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "load_data"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "SoC JSON output file",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "harden core instance names embedded in the JSON, not filesystem paths",
+          "new_default": "std::vector<std::string>{}",
+          "new_type": "const std::vector<std::string>&",
+          "old_default": "std::vector<std::string>{}",
+          "old_type": "const std::vector<std::string>&",
+          "param": "harden_cores",
+          "required_or_optional": "optional",
+          "scalar_or_list": "list"
+        }
+      ],
+      "py_name": "write_soc_json"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "abstract LEF output file; wrapper write_abstract_lef passes path_text (chipcompiler/tools/ecc/module.py:1001)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "output_lef_path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "write_abstract_lef"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "net name in the design database, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "net type keyword (signal/power/ground), not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_type",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "set_net"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "blockage type keyword, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "type",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "clear_blockage"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance name filter, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "inst_name",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "net name filter, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "net_name",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "report output file: idbGet forwards file_name to rptInst->reportInstance/reportNet (py_db_op.h), which write the report to that file",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "file_name",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "idb_get"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance name in the design database, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "inst_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "delete_inst"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "net name in the design database, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "delete_net"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance name to create, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "inst_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "cell master name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "cell_master",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "placement orientation keyword, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "orient",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance type tag, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "type",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "placement status keyword, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "status",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "create_inst"
+    },
+    {
+      "module": "py_idb",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "net name to create, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "connection type keyword, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "conn_type",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "create_net"
+    },
+    {
+      "module": "py_idrc",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "DRC working directory; wrapper init_drc passes path_text(output_dir) (chipcompiler/tools/ecc/module.py:419)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "temp_directory_path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "init_drc"
+    },
+    {
+      "module": "py_idrc",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "DRC config JSON file; wrapper run_drc passes path_text(config) (chipcompiler/tools/ecc/module.py:425)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "config",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "path",
+          "classification_rationale": "DRC report output file; wrapper run_drc passes path_text(report_path) (chipcompiler/tools/ecc/module.py:425)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "report",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "run_drc"
+    },
+    {
+      "module": "py_idrc",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "DRC feature output file; wrapper save_drc passes path_text(feature_path) (chipcompiler/tools/ecc/module.py:431)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "save_drc"
+    },
+    {
+      "module": "py_ifp",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "die rectangle as a coordinate string (\"llx lly urx ury\"), not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "die_area",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "core rectangle as a coordinate string, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "core_area",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "core site name from the technology LEF, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "core_site",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "IO site name from the technology LEF, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "io_site",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "corner site name from the technology LEF, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "corner_site",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "init_floorplan"
+    },
+    {
+      "module": "py_ifp",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "routing layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "layer",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "gern_track"
+    },
+    {
+      "module": "py_ifp",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "pin layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "layer",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "die side names (e.g. \"left\"/\"right\"), not filesystem paths",
+          "new_default": null,
+          "new_type": "std::vector<std::string>&",
+          "old_default": null,
+          "old_type": "std::vector<std::string>&",
+          "param": "sides",
+          "required_or_optional": "required",
+          "scalar_or_list": "list"
+        }
+      ],
+      "py_name": "auto_place_pins"
+    },
+    {
+      "module": "py_ifp",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "pin name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "pin_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "pin layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "layer",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "place_port"
+    },
+    {
+      "module": "py_ifp",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "IO filler cell master names, not filesystem paths",
+          "new_default": null,
+          "new_type": "std::vector<std::string>&",
+          "old_default": null,
+          "old_type": "std::vector<std::string>&",
+          "param": "filler_types",
+          "required_or_optional": "required",
+          "scalar_or_list": "list"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance name prefix for created filler cells, not a filesystem path",
+          "new_default": "\"IOFill\"",
+          "new_type": "const std::string&",
+          "old_default": "\"IOFill\"",
+          "old_type": "const std::string&",
+          "param": "prefix",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "place_io_filler"
+    },
+    {
+      "module": "py_ifp",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "blockage rectangle as a coordinate string, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "box",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "add_placement_blockage"
+    },
+    {
+      "module": "py_ifp",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "inst_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "halo distance encoded as a string, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "distance",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "add_placement_halo"
+    },
+    {
+      "module": "py_ifp",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "routing layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "layer",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "blockage rectangle as a coordinate string, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "box",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "add_routing_blockage"
+    },
+    {
+      "module": "py_ifp",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "routing layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "layer",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "halo distance encoded as a string, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "distance",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "inst_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "add_routing_halo"
+    },
+    {
+      "module": "py_ifp",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "tapcell master name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "tapcell",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "endcap master name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "endcap",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "tapcell"
+    },
+    {
+      "module": "py_instance",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "inst_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "placement orientation keyword, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "orient",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "cell master name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "cellmaster",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance source tag: DataManager::placeInst forwards source to instance->set_type (idm_design_inst.cpp), a provenance label with no filesystem semantics",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "source",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "place_instance"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "IO pin name, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "pin_name",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "net name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "pin direction keyword, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "direction",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "add_pdn_io"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "net name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance pin name pattern, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "instance_pin_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "global_net_connect"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "pin name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "pin_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "IO cell master name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "io_cell_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "layer",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "place_pdn_port"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "layer_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "power net name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name_power",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "ground net name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name_ground",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "create_grid"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "layer_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "power net name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name_power",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "ground net name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name_ground",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "create_stripe"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "layer name pair to connect, not filesystem paths",
+          "new_default": null,
+          "new_type": "std::vector<std::string>&",
+          "old_default": null,
+          "old_type": "std::vector<std::string>&",
+          "param": "layers",
+          "required_or_optional": "required",
+          "scalar_or_list": "list"
+        }
+      ],
+      "py_name": "connect_two_layer"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "macro pin layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "pin_layer",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "PDN layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "pdn_layer",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "power pin names, not filesystem paths",
+          "new_default": null,
+          "new_type": "std::vector<std::string>&",
+          "old_default": null,
+          "old_type": "std::vector<std::string>&",
+          "param": "power_pins",
+          "required_or_optional": "required",
+          "scalar_or_list": "list"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "ground pin names, not filesystem paths",
+          "new_default": null,
+          "new_type": "std::vector<std::string>&",
+          "old_default": null,
+          "old_type": "std::vector<std::string>&",
+          "param": "ground_pins",
+          "required_or_optional": "required",
+          "scalar_or_list": "list"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "orientation keyword, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "orient",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "connectMacroPdn"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "layer",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "connectIoPinToPower"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "net name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "layer name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "layer",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "connectPowerStripe"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "net name, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "net_name",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "layer name, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "layer",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "start layer name, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "layer_start",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "end layer name, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "layer_end",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "add_segment_stripe"
+    },
+    {
+      "module": "py_ipdn",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "net name, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "net_name",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "layer name, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "layer",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "top layer name, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "top_layer",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "bottom layer name, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "bottom_layer",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "add_segment_via"
+    },
+    {
+      "module": "py_ircx",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "RCX config JSON file; wrapper init_rcx passes path_text(config) (chipcompiler/tools/ecc/module.py:884)",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "config",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "PDK identifier string (e.g. \"ics55\") selecting a built-in rule set, already std::optional<std::string>; not a filesystem path",
+          "new_default": "py::none()",
+          "new_type": "const std::optional<std::string>&",
+          "old_default": "py::none()",
+          "old_type": "const std::optional<std::string>&",
+          "param": "pdk",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "init_rcx"
+    },
+    {
+      "module": "py_irt",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "router config JSON file; wrapper passes path_text(config) (chipcompiler/tools/ecc/module.py:852)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "std::string&",
+          "param": "config",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "init_rt"
+    },
+    {
+      "module": "py_irt",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "early-router config JSON file; wrapper run_ert passes path_text(config) (chipcompiler/tools/ecc/module.py:849)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "std::string&",
+          "param": "config",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "run_ert"
+    },
+    {
+      "module": "py_ista",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "STA config JSON file; wrapper passes path_text(config) (chipcompiler/tools/ecc/module.py:913)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "std::string&",
+          "param": "config",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "init_sta"
+    },
+    {
+      "module": "py_izh",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "fanout-fix config JSON file; wrapper passes path_text(config) (chipcompiler/tools/ecc/module.py:1293)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "config",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "fix_fanout"
+    },
+    {
+      "module": "py_izh",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "filler config JSON file; wrapper passes path_text(config) (chipcompiler/tools/ecc/module.py:802)",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "config",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "insert_filler"
+    },
+    {
+      "module": "py_report",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "wirelength report output file; empty string reports to stdout only",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "report_wirelength"
+    },
+    {
+      "module": "py_report",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "database summary report output file; empty string reports to stdout only",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "report_db"
+    },
+    {
+      "module": "py_report",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "congestion report output file; empty string reports to stdout only",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "report_congestion"
+    },
+    {
+      "module": "py_report",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "dangling-net report output file; empty string reports to stdout only",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "report_dangling_net"
+    },
+    {
+      "module": "py_report",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "route report output file; empty string reports to stdout only",
+          "new_default": "py::none()",
+          "new_type": "std::optional<std::filesystem::path>",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        },
+        {
+          "classification": "non_path",
+          "classification_rationale": "net name filter for the route report, not a filesystem path",
+          "new_default": "\"\"",
+          "new_type": "const std::string&",
+          "old_default": "\"\"",
+          "old_type": "const std::string&",
+          "param": "net",
+          "required_or_optional": "optional",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "report_route"
+    },
+    {
+      "module": "py_report",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance name prefixes to bucket, not filesystem paths",
+          "new_default": "std::vector<std::string>{}",
+          "new_type": "const std::vector<std::string>&",
+          "old_default": "std::vector<std::string>{}",
+          "old_type": "const std::vector<std::string>&",
+          "param": "prefixes",
+          "required_or_optional": "optional",
+          "scalar_or_list": "list"
+        }
+      ],
+      "py_name": "report_place_distribution"
+    },
+    {
+      "module": "py_report",
+      "params": [
+        {
+          "classification": "non_path",
+          "classification_rationale": "instance name prefix to report on, not a filesystem path",
+          "new_default": null,
+          "new_type": "const std::string&",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "prefix",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "report_prefixed_instance"
+    },
+    {
+      "module": "py_report",
+      "params": [
+        {
+          "classification": "path",
+          "classification_rationale": "DRC report output path by API shape; the currently bound one-argument ReportManager::reportDRC overload is a stub with its write lines commented out (report_manager.cpp:186), pending re-enable",
+          "new_default": null,
+          "new_type": "std::filesystem::path",
+          "old_default": null,
+          "old_type": "const std::string&",
+          "param": "path",
+          "required_or_optional": "required",
+          "scalar_or_list": "scalar"
+        }
+      ],
+      "py_name": "report_drc"
+    }
+  ],
+  "version": 1
+}

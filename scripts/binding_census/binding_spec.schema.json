@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ecc_py binding spec (curated)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "bindings"],
+  "properties": {
+    "version": {"const": 1},
+    "bindings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/binding"}
+    }
+  },
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "py_name", "params"],
+      "properties": {
+        "module": {"type": "string", "pattern": "^py_[a-z]+$"},
+        "py_name": {"type": "string", "minLength": 1},
+        "params": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/param"}
+        }
+      }
+    },
+    "param": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "param",
+        "old_type",
+        "old_default",
+        "new_type",
+        "new_default",
+        "scalar_or_list",
+        "required_or_optional",
+        "classification",
+        "classification_rationale"
+      ],
+      "properties": {
+        "param": {"type": "string", "minLength": 1},
+        "old_type": {"type": "string", "minLength": 1},
+        "old_default": {"type": ["string", "null"]},
+        "new_type": {"type": "string", "minLength": 1},
+        "new_default": {"type": ["string", "null"]},
+        "scalar_or_list": {"enum": ["scalar", "list"]},
+        "required_or_optional": {"enum": ["required", "optional"]},
+        "classification": {"enum": ["path", "non_path", "ambiguous"]},
+        "classification_rationale": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"classification": {"const": "ambiguous"}},
+            "required": ["classification"]
+          },
+          "then": {
+            "properties": {"classification_rationale": {"minLength": 1}}
+          }
+        }
+      ]
+    }
+  }
+}
