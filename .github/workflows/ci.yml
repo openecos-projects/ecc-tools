@@ -13,7 +13,6 @@ on:
       - 'CMakeLists.txt'
       - 'pyproject.toml'
       - 'build.sh'
-      - 'scripts/binding_census/**'
       - '.github/**'
   push:
     branches: [main]
