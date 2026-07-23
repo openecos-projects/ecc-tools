@@ -2019,7 +2019,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "router config JSON file; ECCToolsModule.init_rt passes path_text(config)",
+          "classification_rationale": "router config JSON file; ECCToolsModule.run_routing passes path_text(config)",
           "new_default": "py::none()",
           "new_type": "std::optional<std::filesystem::path>",
           "old_default": "\"\"",

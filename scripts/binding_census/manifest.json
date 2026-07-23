@@ -2383,7 +2383,7 @@
     {
       "binding_status": "active",
       "classification": "path",
-      "classification_rationale": "router config JSON file; ECCToolsModule.init_rt passes path_text(config)",
+      "classification_rationale": "router config JSON file; ECCToolsModule.run_routing passes path_text(config)",
       "cpp_target": "initRT",
       "file": "src/interface/python/py_irt/py_register_irt.h",
       "line": 28,
