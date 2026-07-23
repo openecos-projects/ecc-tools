@@ -19,15 +19,18 @@
 #include <tool_manager.h>
 
 namespace python_interface {
-bool CtsAutoRun(const std::string& cts_config, const std::string& cts_work_dir)
+bool CtsAutoRun(const std::filesystem::path& cts_config, const std::filesystem::path& cts_work_dir)
 {
-  bool cts_run_ok = iplf::tmInst->autoRunCTS(cts_config, cts_work_dir);
+  const std::string cts_config_ = cts_config.string();
+  const std::string cts_work_dir_ = cts_work_dir.string();
+  bool cts_run_ok = iplf::tmInst->autoRunCTS(cts_config_, cts_work_dir_);
   return cts_run_ok;
 }
 
-bool CtsReport(const std::string& path)
+bool CtsReport(const std::filesystem::path& path)
 {
-  return iplf::tmInst->reportCTS(path);
+  const std::string path_ = path.string();
+  return iplf::tmInst->reportCTS(path_);
 }
 
 }  // namespace python_interface
