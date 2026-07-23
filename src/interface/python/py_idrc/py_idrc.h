@@ -16,11 +16,13 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
+#include <optional>
 #include <string>
 
 namespace python_interface {
 
-bool init_drc(const std::string& temp_directory_path, const int& thread_number);
-bool run_drc(const std::string& config, const std::string& report);
-bool save_drc(const std::string& path);
+bool init_drc(const std::optional<std::filesystem::path>& temp_directory_path, const int& thread_number);
+bool run_drc(const std::optional<std::filesystem::path>& config, const std::optional<std::filesystem::path>& report);
+bool save_drc(const std::optional<std::filesystem::path>& path);
 }  // namespace python_interface

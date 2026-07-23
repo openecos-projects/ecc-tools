@@ -17,6 +17,7 @@
 #pragma once
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 
 #include "py_izh.h"
 
@@ -25,8 +26,8 @@ namespace py = pybind11;
 
 void register_izh(py::module& m)
 {
-  m.def("fix_fanout", fix_fanout, py::arg("config") = "");
-  m.def("insert_filler", insert_filler, py::arg("config") = "");
+  m.def("fix_fanout", fix_fanout, py::arg("config") = py::none());
+  m.def("insert_filler", insert_filler, py::arg("config") = py::none());
 }
 
 }  // namespace python_interface

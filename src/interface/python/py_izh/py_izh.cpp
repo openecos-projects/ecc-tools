@@ -20,18 +20,20 @@
 #include <map>
 #include <string>
 
+#include "../py_path_utils.h"
 #include "ZHInterface.hpp"
 
 namespace python_interface {
 
 bool initZHConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 
-bool fix_fanout(const std::string& config)
+bool fix_fanout(const std::optional<std::filesystem::path>& config)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
 
   bool pass = false;
-  pass = !pass ? initZHConfigMapByJSON(config, config_map) : pass;
+  pass = !pass ? initZHConfigMapByJSON(config_, config_map) : pass;
   if (!pass) {
     return false;
   }
@@ -40,12 +42,13 @@ bool fix_fanout(const std::string& config)
   return true;
 }
 
-bool insert_filler(const std::string& config)
+bool insert_filler(const std::optional<std::filesystem::path>& config)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
 
   bool pass = false;
-  pass = !pass ? initZHConfigMapByJSON(config, config_map) : pass;
+  pass = !pass ? initZHConfigMapByJSON(config_, config_map) : pass;
   if (!pass) {
     return false;
   }

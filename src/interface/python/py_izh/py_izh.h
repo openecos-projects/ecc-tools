@@ -16,11 +16,13 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
+#include <optional>
 #include <string>
 
 namespace python_interface {
 
-bool fix_fanout(const std::string& config);
-bool insert_filler(const std::string& config);
+bool fix_fanout(const std::optional<std::filesystem::path>& config);
+bool insert_filler(const std::optional<std::filesystem::path>& config);
 
 }  // namespace python_interface
