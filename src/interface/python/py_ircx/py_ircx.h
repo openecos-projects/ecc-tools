@@ -16,13 +16,13 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
 #include <optional>
 #include <string>
 
 namespace python_interface {
 
-bool destroy_rcx();
-bool init_rcx(const std::string& config, const std::optional<std::string>& pdk = std::nullopt);
+bool init_rcx(const std::filesystem::path& config, const std::optional<std::string>& pdk = std::nullopt);
 bool run_rcx();
 
 }  // namespace python_interface
