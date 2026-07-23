@@ -362,7 +362,7 @@ void RuleValidator::verifyCornerSpacing(RVCluster& rv_cluster)
                     continue;
                   }
 
-                  int32_t width = max_rect.getWidth();
+                  int32_t width = max_rect_data.isObs ? routing_layer.get_width() : max_rect.getWidth();
                   auto corner_key = std::make_tuple(corner_point.get_x(), corner_point.get_y(), width, static_cast<int32_t>(orient1),
                                                     static_cast<int32_t>(orient2), polygon_id);
                   if (!seen_corner_keys.insert(corner_key).second) {
