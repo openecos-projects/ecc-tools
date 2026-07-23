@@ -183,10 +183,10 @@ bool saveDef(const std::string& def_name)
   return dmInst->saveDef(def_name_);
 }
 
-bool saveMacroTCL(const std::string& def_name)
+bool saveMacroTCL(const std::filesystem::path& tcl_name)
 {
-  const std::string def_name_ = def_name.string();
-  return dmInst->saveMacroTCL(def_name_);
+  const std::string tcl_name_ = tcl_name.string();
+  return dmInst->saveMacroTCL(tcl_name_);
 }
 
 bool saveNetList(const std::filesystem::path& netlist_path, std::set<std::string> exclude_cell_names /* = {} */,
