@@ -16,31 +16,33 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
 namespace python_interface {
 
-bool initIdb(const std::string& config_path);
-bool initTechLef(const std::string& techlef_path);
-bool initLef(const std::vector<std::string>& lef_paths);
-bool initDef(const std::string& def_path);
-bool initVerilog(const std::string& verilog_path, const std::string& top_module);
-bool initLib(const std::vector<std::string>& lib_paths);
-bool initSdc(const std::string& sdc_path);
-bool initSpef(const std::string& spef_path);
-bool saveDef(const std::string& def_name);
-bool saveMacroTCL(const std::string& tcl_name);
-bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_cell_names = {}, bool is_add_space_for_escape_name = false);
-bool saveGDSII(const std::string& gds_name, bool is_harden = false);
-bool saveJson(const std::string& path);
-bool saveViewJson(const std::string& output_dir, const std::string& json_format = "pretty", bool compress = false);
-bool applyViewJsonEdits(const std::string& edits_path, bool compress = false);
-bool saveData(const std::string& path);
+bool initIdb(const std::filesystem::path& config_path);
+bool initTechLef(const std::filesystem::path& techlef_path);
+bool initLef(const std::vector<std::filesystem::path>& lef_paths);
+bool initDef(const std::filesystem::path& def_path);
+bool initVerilog(const std::filesystem::path& verilog_path, const std::string& top_module);
+bool initLib(const std::vector<std::filesystem::path>& lib_paths);
+bool initSdc(const std::optional<std::filesystem::path>& sdc_path);
+bool initSpef(const std::filesystem::path& spef_path);
+bool saveDef(const std::filesystem::path& def_name);
+bool saveMacroTCL(const std::filesystem::path& tcl_name);
+bool saveNetList(const std::filesystem::path& netlist_path, std::set<std::string> exclude_cell_names = {}, bool is_add_space_for_escape_name = false);
+bool saveGDSII(const std::filesystem::path& gds_name, bool is_harden = false);
+bool saveJson(const std::filesystem::path& path);
+bool saveViewJson(const std::filesystem::path& output_dir, const std::string& json_format = "pretty", bool compress = false);
+bool applyViewJsonEdits(const std::filesystem::path& edits_path, bool compress = false);
+bool saveData(const std::filesystem::path& path);
 bool resetData();
-bool loadData(const std::string& path);
-bool writeSocJson(const std::string& path, const std::vector<std::string>& harden_cores = {});
-bool writeAbstractLef(const std::string& output_lef_path);
+bool loadData(const std::filesystem::path& path);
+bool writeSocJson(const std::filesystem::path& path, const std::vector<std::string>& harden_cores = {});
+bool writeAbstractLef(const std::filesystem::path& output_lef_path);
 
 }  // namespace python_interface

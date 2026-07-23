@@ -16,107 +16,132 @@
 // ***************************************************************************************
 #include "py_db.h"
 
+#include "../py_path_utils.h"
 #include "db_fm/file_soc.h"
 #include <idm.h>
 #include "view_json_io.h"
 
 namespace python_interface {
 
-bool initIdb(const std::string& config_path)
+bool initIdb(const std::filesystem::path& config_path)
 {
-  return dmInst->init(config_path);
+  const std::string config_path_ = config_path.string();
+  return dmInst->init(config_path_);
 }
 
-bool initTechLef(const std::string& techlef_path)
+bool initTechLef(const std::filesystem::path& techlef_path)
 {
-  dmInst->get_config().set_tech_lef_path(techlef_path);
-  return dmInst->readLef(vector<string>{techlef_path}, true);
+  const std::string techlef_path_ = techlef_path.string();
+  dmInst->get_config().set_tech_lef_path(techlef_path_);
+  return dmInst->readLef(vector<string>{techlef_path_}, true);
 }
 
-bool initLef(const std::vector<std::string>& lef_paths)
+bool initLef(const std::vector<std::filesystem::path>& lef_paths)
 {
-  dmInst->get_config().set_lef_paths(lef_paths);
-  return dmInst->readLef(lef_paths);
+  std::vector<std::string> lef_paths_;
+  lef_paths_.reserve(lef_paths.size());
+  for (const auto& lef_path : lef_paths) {
+    lef_paths_.push_back(lef_path.string());
+  }
+  dmInst->get_config().set_lef_paths(lef_paths_);
+  return dmInst->readLef(lef_paths_);
 }
 
-bool initDef(const std::string& def_path)
+bool initDef(const std::filesystem::path& def_path)
 {
-  dmInst->get_config().set_def_path(def_path);
-  return dmInst->readDef(def_path);
+  const std::string def_path_ = def_path.string();
+  dmInst->get_config().set_def_path(def_path_);
+  return dmInst->readDef(def_path_);
 }
 
-bool initVerilog(const std::string& verilog_path, const std::string& top_module)
+bool initVerilog(const std::filesystem::path& verilog_path, const std::string& top_module)
 {
-  dmInst->get_config().set_verilog_path(verilog_path);
-  return dmInst->readVerilog(verilog_path, top_module);
+  const std::string verilog_path_ = verilog_path.string();
+  dmInst->get_config().set_verilog_path(verilog_path_);
+  return dmInst->readVerilog(verilog_path_, top_module);
 }
 
-bool initLib(const std::vector<std::string>& lib_paths)
+bool initLib(const std::vector<std::filesystem::path>& lib_paths)
 {
-  dmInst->get_config().set_lib_paths(lib_paths);
-  return dmInst->readLib(lib_paths);
+  std::vector<std::string> lib_paths_;
+  lib_paths_.reserve(lib_paths.size());
+  for (const auto& lib_path : lib_paths) {
+    lib_paths_.push_back(lib_path.string());
+  }
+  dmInst->get_config().set_lib_paths(lib_paths_);
+  return dmInst->readLib(lib_paths_);
 }
 
-bool initSdc(const std::string& sdc_path)
+bool initSdc(const std::optional<std::filesystem::path>& sdc_path)
 {
-  dmInst->get_config().set_sdc_path(sdc_path);
+  const std::string sdc_path_ = path_or_empty(sdc_path);
+  dmInst->get_config().set_sdc_path(sdc_path_);
   return true;
 }
 
-bool initSpef(const std::string& spef_path)
+bool initSpef(const std::filesystem::path& spef_path)
 {
-  dmInst->get_config().set_spef_path(spef_path);
-  return dmInst->readSpef(spef_path);
+  const std::string spef_path_ = spef_path.string();
+  dmInst->get_config().set_spef_path(spef_path_);
+  return dmInst->readSpef(spef_path_);
 }
 
-bool saveDef(const std::string& def_name)
+bool saveDef(const std::filesystem::path& def_name)
 {
-  return dmInst->saveDef(def_name);
+  const std::string def_name_ = def_name.string();
+  return dmInst->saveDef(def_name_);
 }
 
-bool saveMacroTCL(const std::string& def_name)
+bool saveMacroTCL(const std::filesystem::path& def_name)
 {
-  return dmInst->saveMacroTCL(def_name);
+  const std::string def_name_ = def_name.string();
+  return dmInst->saveMacroTCL(def_name_);
 }
 
-bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_cell_names /* = {} */,
+bool saveNetList(const std::filesystem::path& netlist_path, std::set<std::string> exclude_cell_names /* = {} */,
                  bool is_add_space_for_escape_name /* = false*/)
 {
-  dmInst->saveVerilog(netlist_path, std::move(exclude_cell_names), is_add_space_for_escape_name);
+  const std::string netlist_path_ = netlist_path.string();
+  dmInst->saveVerilog(netlist_path_, std::move(exclude_cell_names), is_add_space_for_escape_name);
   return true;
 }
 
-bool saveGDSII(const std::string& gds_name, bool is_hardened /* = false */)
+bool saveGDSII(const std::filesystem::path& gds_name, bool is_hardened /* = false */)
 {
-  return dmInst->saveGDSII(gds_name, is_hardened);
+  const std::string gds_name_ = gds_name.string();
+  return dmInst->saveGDSII(gds_name_, is_hardened);
 }
 
-bool saveJson(const std::string& path)
+bool saveJson(const std::filesystem::path& path)
 {
+  const std::string path_ = path.string();
   std::string options = "";
 
-  return dmInst->saveJSON(path, options);
+  return dmInst->saveJSON(path_, options);
 }
 
-bool saveViewJson(const std::string& output_dir, const std::string& json_format, bool compress)
+bool saveViewJson(const std::filesystem::path& output_dir, const std::string& json_format, bool compress)
 {
+  const std::string output_dir_ = output_dir.string();
   idb::ViewJsonWriteOptions options;
   if (!idb::parseViewJsonFormat(json_format, options.format)) {
     std::cout << "Save view json failed: unsupported json_format `" << json_format << "`, expected `pretty` or `compact`." << std::endl;
     return false;
   }
   options.compress = compress;
-  return dmInst->saveViewJson(output_dir, options);
+  return dmInst->saveViewJson(output_dir_, options);
 }
 
-bool applyViewJsonEdits(const std::string& edits_path, bool compress)
+bool applyViewJsonEdits(const std::filesystem::path& edits_path, bool compress)
 {
-  return dmInst->applyViewJsonEdits(edits_path, compress);
+  const std::string edits_path_ = edits_path.string();
+  return dmInst->applyViewJsonEdits(edits_path_, compress);
 }
 
-bool saveData(const std::string& path)
+bool saveData(const std::filesystem::path& path)
 {
-  return dmInst->saveData(path);
+  const std::string path_ = path.string();
+  return dmInst->saveData(path_);
 }
 
 bool resetData()
@@ -125,22 +150,23 @@ bool resetData()
   return true;
 }
 
-bool loadData(const std::string& path)
+bool loadData(const std::filesystem::path& path)
 {
-  return dmInst->loadData(path);
+  const std::string path_ = path.string();
+  return dmInst->loadData(path_);
 }
 
-bool writeSocJson(const std::string& path, const std::vector<std::string>& harden_cores /* = {} */)
+bool writeSocJson(const std::filesystem::path& path, const std::vector<std::string>& harden_cores /* = {} */)
 {
-  idb::JsonSoc soc_file(path, harden_cores);
+  const std::string path_ = path.string();
+  idb::JsonSoc soc_file(path_, harden_cores);
   return soc_file.saveFileData();
 }
 
-bool writeAbstractLef(const std::string& output_lef_path)
+bool writeAbstractLef(const std::filesystem::path& output_lef_path)
 {
-  namespace fs = std::filesystem;
-
-  return dmInst->saveLef(output_lef_path);
+  const std::string output_lef_path_ = output_lef_path.string();
+  return dmInst->saveLef(output_lef_path_);
 }
 
 }  // namespace python_interface

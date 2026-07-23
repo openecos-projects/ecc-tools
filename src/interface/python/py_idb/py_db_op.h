@@ -17,12 +17,15 @@
 #pragma once
 
 #include <algorithm>
+#include <filesystem>
+#include <optional>
 
 #include <idm.h>
 #include <report_manager.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/numpy.h>
+#include "../py_path_utils.h"
 #include "IdbEnum.h"
 #include "IdbInstance.h"
 
@@ -44,14 +47,15 @@ bool clearBlockage(const std::string& type)
   return true;
 }
 
-bool idbGet(const std::string& inst_name, const std::string& net_name, const std::string& file_name)
+bool idbGet(const std::string& inst_name, const std::string& net_name, const std::optional<std::filesystem::path>& file_name)
 {
+  const std::string file_name_ = path_or_empty(file_name);
   bool ok = false;
   if (not inst_name.empty()) {
-    ok |= rptInst->reportInstance(file_name, inst_name);
+    ok |= rptInst->reportInstance(file_name_, inst_name);
   }
   if (not net_name.empty()) {
-    ok |= rptInst->reportNet(file_name, net_name);
+    ok |= rptInst->reportNet(file_name_, net_name);
   }
   return ok;
 }
