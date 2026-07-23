@@ -16,13 +16,17 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace python_interface {
-bool flow_init(const std::string& flow_config);
+bool flow_init(const std::filesystem::path& flow_config);
 
-bool db_init(const std::string& config_path, const std::string& tech_lef_path, const std::vector<std::string>& lef_paths,
-             const std::string& def_path, const std::string& verilog_path, const std::string& output_path, const std::string& feature_path,
-             const std::vector<std::string>& lib_paths, const std::string& sdc_path);
+bool db_init(const std::optional<std::filesystem::path>& config_path, const std::optional<std::filesystem::path>& tech_lef_path,
+             const std::vector<std::filesystem::path>& lef_paths, const std::optional<std::filesystem::path>& def_path,
+             const std::optional<std::filesystem::path>& verilog_path, const std::optional<std::filesystem::path>& output_path,
+             const std::optional<std::filesystem::path>& feature_path, const std::vector<std::filesystem::path>& lib_paths,
+             const std::optional<std::filesystem::path>& sdc_path);
 }  // namespace python_interface
