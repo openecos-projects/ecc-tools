@@ -87,7 +87,7 @@ void register_eval(py::module& m)
       const std::string save_path_ = path_or_empty(save_path);
       auto [max_congestion, total_congestion] = egr_congestion(save_path_);
       return py::make_tuple(max_congestion, total_congestion);
-  }, py::arg("save_path") = py::none());  
+  }, py::arg("save_path") = py::none());
 
 
   // timing and power evaluation
