@@ -5,7 +5,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "flow config JSON file; wrapper init_config passes it positionally (chipcompiler/tools/ecc/module.py:86)",
+          "classification_rationale": "flow config JSON file; wrapper init_config passes it positionally (ECCToolsModule.init_config)",
           "new_default": null,
           "new_type": "std::filesystem::path",
           "old_default": null,
@@ -551,7 +551,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "CTS config JSON file; wrapper run_cts passes path_text(config) (chipcompiler/tools/ecc/module.py:401)",
+          "classification_rationale": "CTS config JSON file; ECCToolsModule.run_cts passes path_text(config)",
           "new_default": null,
           "new_type": "std::filesystem::path",
           "old_default": null,
@@ -562,7 +562,7 @@
         },
         {
           "classification": "path",
-          "classification_rationale": "CTS working directory; wrapper run_cts passes path_text(output) (chipcompiler/tools/ecc/module.py:401)",
+          "classification_rationale": "CTS working directory; ECCToolsModule.run_cts passes path_text(output)",
           "new_default": null,
           "new_type": "std::filesystem::path",
           "old_default": null,
@@ -596,7 +596,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "idb config JSON file; wrapper idb_init passes path_text(config_path) (chipcompiler/tools/ecc/module.py:114); py::arg-free binding, parameter name from the initIdb declaration",
+          "classification_rationale": "idb config JSON file; ECCToolsModule.idb_init passes path_text(config_path); py::arg-free binding, parameter name from the initIdb declaration",
           "new_default": null,
           "new_type": "std::filesystem::path",
           "old_default": null,
@@ -613,7 +613,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "technology LEF file; wrapper init_techlef passes path_text(tech_lef_path) (chipcompiler/tools/ecc/module.py:180); py::arg-free binding, parameter name from the initTechLef declaration",
+          "classification_rationale": "technology LEF file; ECCToolsModule.init_techlef passes path_text(tech_lef_path); py::arg-free binding, parameter name from the initTechLef declaration",
           "new_default": null,
           "new_type": "std::filesystem::path",
           "old_default": null,
@@ -630,7 +630,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "cell LEF file list; wrapper init_lefs passes path_texts(lef_paths) (chipcompiler/tools/ecc/module.py:184); empty list is the unset sentinel",
+          "classification_rationale": "cell LEF file list; ECCToolsModule.init_lefs passes path_texts(lef_paths); empty list is the unset sentinel",
           "new_default": null,
           "new_type": "std::vector<std::filesystem::path>",
           "old_default": null,
@@ -647,7 +647,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "DEF file; wrapper read_def passes path_text(path) (chipcompiler/tools/ecc/module.py:188)",
+          "classification_rationale": "DEF file; ECCToolsModule.read_def passes path_text(path)",
           "new_default": null,
           "new_type": "std::filesystem::path",
           "old_default": null,
@@ -692,7 +692,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "Liberty file list; wrapper passes path_texts(lib_paths) (chipcompiler/tools/ecc/module.py:907); empty list is the unset sentinel",
+          "classification_rationale": "Liberty file list; ECCToolsModule.run_timing passes path_texts(lib_paths); empty list is the unset sentinel",
           "new_default": null,
           "new_type": "std::vector<std::filesystem::path>",
           "old_default": null,
@@ -946,7 +946,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "abstract LEF output file; wrapper write_abstract_lef passes path_text (chipcompiler/tools/ecc/module.py:1001)",
+          "classification_rationale": "abstract LEF output file; ECCToolsModule.write_abstract_lef passes path_text(output_lef_path)",
           "new_default": null,
           "new_type": "std::filesystem::path",
           "old_default": null,
@@ -1170,7 +1170,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "DRC working directory; wrapper init_drc passes path_text(output_dir) (chipcompiler/tools/ecc/module.py:419)",
+          "classification_rationale": "DRC working directory; ECCToolsModule.init_drc passes path_text(output_dir)",
           "new_default": "py::none()",
           "new_type": "std::optional<std::filesystem::path>",
           "old_default": "\"\"",
@@ -1187,7 +1187,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "DRC config JSON file; wrapper run_drc passes path_text(config) (chipcompiler/tools/ecc/module.py:425)",
+          "classification_rationale": "DRC config JSON file; ECCToolsModule.run_drc passes path_text(config)",
           "new_default": "py::none()",
           "new_type": "std::optional<std::filesystem::path>",
           "old_default": "\"\"",
@@ -1198,7 +1198,7 @@
         },
         {
           "classification": "path",
-          "classification_rationale": "DRC report output file; wrapper run_drc passes path_text(report_path) (chipcompiler/tools/ecc/module.py:425)",
+          "classification_rationale": "DRC report output file; ECCToolsModule.run_drc passes path_text(report_path)",
           "new_default": "py::none()",
           "new_type": "std::optional<std::filesystem::path>",
           "old_default": "\"\"",
@@ -1215,7 +1215,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "DRC feature output file; wrapper save_drc passes path_text(feature_path) (chipcompiler/tools/ecc/module.py:431)",
+          "classification_rationale": "DRC feature output file; ECCToolsModule.save_drc passes path_text(feature_path)",
           "new_default": "py::none()",
           "new_type": "std::optional<std::filesystem::path>",
           "old_default": "\"\"",
@@ -1991,7 +1991,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "RCX config JSON file; wrapper init_rcx passes path_text(config) (chipcompiler/tools/ecc/module.py:884)",
+          "classification_rationale": "RCX config JSON file; ECCToolsModule.init_rcx passes path_text(config)",
           "new_default": null,
           "new_type": "std::filesystem::path",
           "old_default": null,
@@ -2019,7 +2019,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "router config JSON file; wrapper passes path_text(config) (chipcompiler/tools/ecc/module.py:852)",
+          "classification_rationale": "router config JSON file; ECCToolsModule.init_rt passes path_text(config)",
           "new_default": "py::none()",
           "new_type": "std::optional<std::filesystem::path>",
           "old_default": "\"\"",
@@ -2036,7 +2036,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "early-router config JSON file; wrapper run_ert passes path_text(config) (chipcompiler/tools/ecc/module.py:849)",
+          "classification_rationale": "early-router config JSON file; ECCToolsModule.run_ert passes path_text(config)",
           "new_default": "py::none()",
           "new_type": "std::optional<std::filesystem::path>",
           "old_default": "\"\"",
@@ -2053,7 +2053,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "STA config JSON file; wrapper passes path_text(config) (chipcompiler/tools/ecc/module.py:913)",
+          "classification_rationale": "STA config JSON file; ECCToolsModule.run_timing passes path_text(config)",
           "new_default": "py::none()",
           "new_type": "std::optional<std::filesystem::path>",
           "old_default": "\"\"",
@@ -2070,7 +2070,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "fanout-fix config JSON file; wrapper passes path_text(config) (chipcompiler/tools/ecc/module.py:1293)",
+          "classification_rationale": "fanout-fix config JSON file; ECCToolsModule.run_net_opt passes path_text(config)",
           "new_default": "py::none()",
           "new_type": "std::optional<std::filesystem::path>",
           "old_default": "\"\"",
@@ -2087,7 +2087,7 @@
       "params": [
         {
           "classification": "path",
-          "classification_rationale": "filler config JSON file; wrapper passes path_text(config) (chipcompiler/tools/ecc/module.py:802)",
+          "classification_rationale": "filler config JSON file; ECCToolsModule.run_filler passes path_text(config)",
           "new_default": "py::none()",
           "new_type": "std::optional<std::filesystem::path>",
           "old_default": "\"\"",
