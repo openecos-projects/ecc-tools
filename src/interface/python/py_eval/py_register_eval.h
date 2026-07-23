@@ -17,7 +17,12 @@
 #pragma once
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 
+#include <filesystem>
+#include <optional>
+
+#include "../py_path_utils.h"
 #include "py_eval.h"
 
 namespace python_interface {
@@ -46,37 +51,43 @@ void register_eval(py::module& m)
 
 
   // density evaluation functions
-  m.def("cell_density", [](int bin_cnt_x = 256, int bin_cnt_y = 256, const std::string& save_path = "") -> py::tuple {
-      auto [max_density, avg_density] = cell_density(bin_cnt_x, bin_cnt_y, save_path);
+  m.def("cell_density", [](int bin_cnt_x = 256, int bin_cnt_y = 256, const std::optional<std::filesystem::path>& save_path = std::nullopt) -> py::tuple {
+      const std::string save_path_ = path_or_empty(save_path);
+      auto [max_density, avg_density] = cell_density(bin_cnt_x, bin_cnt_y, save_path_);
       return py::make_tuple(max_density, avg_density);
-  }, py::arg("bin_cnt_x") = 256, py::arg("bin_cnt_y") = 256, py::arg("save_path") = "");
+  }, py::arg("bin_cnt_x") = 256, py::arg("bin_cnt_y") = 256, py::arg("save_path") = py::none());
 
-  m.def("pin_density", [](int bin_cnt_x = 256, int bin_cnt_y = 256, const std::string& save_path = "") -> py::tuple {
-      auto [max_density, avg_density] = pin_density(bin_cnt_x, bin_cnt_y, save_path);
+  m.def("pin_density", [](int bin_cnt_x = 256, int bin_cnt_y = 256, const std::optional<std::filesystem::path>& save_path = std::nullopt) -> py::tuple {
+      const std::string save_path_ = path_or_empty(save_path);
+      auto [max_density, avg_density] = pin_density(bin_cnt_x, bin_cnt_y, save_path_);
       return py::make_tuple(max_density, avg_density);
-  }, py::arg("bin_cnt_x") = 256, py::arg("bin_cnt_y") = 256, py::arg("save_path") = "");
+  }, py::arg("bin_cnt_x") = 256, py::arg("bin_cnt_y") = 256, py::arg("save_path") = py::none());
 
-  m.def("net_density", [](int bin_cnt_x = 256, int bin_cnt_y = 256, const std::string& save_path = "") -> py::tuple {
-      auto [max_density, avg_density] = net_density(bin_cnt_x, bin_cnt_y, save_path);
+  m.def("net_density", [](int bin_cnt_x = 256, int bin_cnt_y = 256, const std::optional<std::filesystem::path>& save_path = std::nullopt) -> py::tuple {
+      const std::string save_path_ = path_or_empty(save_path);
+      auto [max_density, avg_density] = net_density(bin_cnt_x, bin_cnt_y, save_path_);
       return py::make_tuple(max_density, avg_density);
-  }, py::arg("bin_cnt_x") = 256, py::arg("bin_cnt_y") = 256, py::arg("save_path") = "");
+  }, py::arg("bin_cnt_x") = 256, py::arg("bin_cnt_y") = 256, py::arg("save_path") = py::none());
     
 
   // congestion evalation
-  m.def("rudy_congestion", [](int bin_cnt_x = 256, int bin_cnt_y = 256, const std::string& save_path = "") -> py::tuple {
-      auto [max_congestion, total_congestion] = rudy_congestion(bin_cnt_x, bin_cnt_y, save_path);
+  m.def("rudy_congestion", [](int bin_cnt_x = 256, int bin_cnt_y = 256, const std::optional<std::filesystem::path>& save_path = std::nullopt) -> py::tuple {
+      const std::string save_path_ = path_or_empty(save_path);
+      auto [max_congestion, total_congestion] = rudy_congestion(bin_cnt_x, bin_cnt_y, save_path_);
       return py::make_tuple(max_congestion, total_congestion);
-  }, py::arg("bin_cnt_x") = 256, py::arg("bin_cnt_y") = 256, py::arg("save_path") = "");
+  }, py::arg("bin_cnt_x") = 256, py::arg("bin_cnt_y") = 256, py::arg("save_path") = py::none());
 
-  m.def("lut_rudy_congestion", [](int bin_cnt_x = 256, int bin_cnt_y = 256, const std::string& save_path = "") -> py::tuple {
-      auto [max_congestion, total_congestion] = lut_rudy_congestion(bin_cnt_x, bin_cnt_y, save_path);
+  m.def("lut_rudy_congestion", [](int bin_cnt_x = 256, int bin_cnt_y = 256, const std::optional<std::filesystem::path>& save_path = std::nullopt) -> py::tuple {
+      const std::string save_path_ = path_or_empty(save_path);
+      auto [max_congestion, total_congestion] = lut_rudy_congestion(bin_cnt_x, bin_cnt_y, save_path_);
       return py::make_tuple(max_congestion, total_congestion);
-  }, py::arg("bin_cnt_x") = 256, py::arg("bin_cnt_y") = 256, py::arg("save_path") = "");
+  }, py::arg("bin_cnt_x") = 256, py::arg("bin_cnt_y") = 256, py::arg("save_path") = py::none());
 
-  m.def("egr_congestion", [](const std::string& save_path = "") -> py::tuple {
-      auto [max_congestion, total_congestion] = egr_congestion(save_path);
+  m.def("egr_congestion", [](const std::optional<std::filesystem::path>& save_path = std::nullopt) -> py::tuple {
+      const std::string save_path_ = path_or_empty(save_path);
+      auto [max_congestion, total_congestion] = egr_congestion(save_path_);
       return py::make_tuple(max_congestion, total_congestion);
-  }, py::arg("save_path") = "");  
+  }, py::arg("save_path") = py::none());  
 
 
   // timing and power evaluation
