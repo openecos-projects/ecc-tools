@@ -121,6 +121,7 @@ def test_init_rt_none_and_empty_match_omitted(tmp_path):
     _run(
         """
         omitted = ecc_py.init_rt(config_dict={})
+        assert omitted is False
         assert ecc_py.init_rt(config=None, config_dict={}) == omitted
         assert ecc_py.init_rt(config='', config_dict={}) == omitted
         """,
@@ -132,6 +133,7 @@ def test_init_rt_path_matches_str(tmp_path):
     _run(
         """
         expected = ecc_py.init_rt(config='/nonexistent/rt.toml', config_dict={})
+        assert expected is False
         assert ecc_py.init_rt(config=Path('/nonexistent/rt.toml'), config_dict={}) == expected
         """,
         cwd=tmp_path,
@@ -175,6 +177,7 @@ def test_idb_get_none_and_empty_match_omitted(tmp_path):
     _run(
         """
         omitted = ecc_py.idb_get()
+        assert omitted is False
         assert ecc_py.idb_get(file_name=None) == omitted
         assert ecc_py.idb_get(file_name='') == omitted
         """,
@@ -186,6 +189,7 @@ def test_idb_get_path_matches_str(tmp_path):
     _run(
         """
         expected = ecc_py.idb_get(file_name='/nonexistent/out.db')
+        assert expected is False
         assert ecc_py.idb_get(file_name=Path('/nonexistent/out.db')) == expected
         """,
         cwd=tmp_path,
