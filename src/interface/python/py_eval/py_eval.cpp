@@ -180,22 +180,27 @@ void eval_macro_channel(float die_size_ratio)
 
 void eval_cell_hierarchy(const std::filesystem::path& plot_path, int level, int forward)
 {
+  [[maybe_unused]] const std::string plot_path_ = plot_path.string();
 }
 
 void eval_macro_hierarchy(const std::filesystem::path& plot_path, int level, int forward)
 {
+  [[maybe_unused]] const std::string plot_path_ = plot_path.string();
 }
 
 void eval_macro_connection(const std::filesystem::path& plot_path, int level, int forward)
 {
+  [[maybe_unused]] const std::string plot_path_ = plot_path.string();
 }
 
 void eval_macro_pin_connection(const std::filesystem::path& plot_path, int level, int forward)
 {
+  [[maybe_unused]] const std::string plot_path_ = plot_path.string();
 }
 
 void eval_macro_io_pin_connection(const std::filesystem::path& plot_path, int level, int forward)
 {
+  [[maybe_unused]] const std::string plot_path_ = plot_path.string();
 }
 
 
