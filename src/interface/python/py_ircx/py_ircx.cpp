@@ -50,8 +50,9 @@ bool validate_pdk(const std::optional<std::string>& pdk)
 
 }  // namespace
 
-bool init_rcx(const std::string& config, const std::optional<std::string>& pdk)
+bool init_rcx(const std::filesystem::path& config, const std::optional<std::string>& pdk)
 {
+  const std::string config_ = config.string();
   active_backend = RcxBackend::kUninitialized;
 
   if (!validate_pdk(pdk)) {
@@ -59,7 +60,7 @@ bool init_rcx(const std::string& config, const std::optional<std::string>& pdk)
   }
 
   if (is_ics55_pdk(pdk)) {
-    if (ircx_ics55_init(config.c_str()) != 0) {
+    if (ircx_ics55_init(config_.c_str()) != 0) {
       active_backend = RcxBackend::kIcs55;
       return true;
     }
@@ -67,7 +68,7 @@ bool init_rcx(const std::string& config, const std::optional<std::string>& pdk)
     return false;
   }
 
-  if (RCX_API_INST.init(config)) {
+  if (RCX_API_INST.init(config_)) {
     active_backend = RcxBackend::kNative;
     return true;
   }

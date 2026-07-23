@@ -20,6 +20,7 @@
 
 #include <string>
 
+#include "../py_path_utils.h"
 #include "RTInterface.hpp"
 #include "flow_config.h"
 namespace python_interface {
@@ -32,12 +33,13 @@ bool destroyRT()
   return true;
 }
 
-bool runERT(std::string& config, std::map<std::string, std::string>& config_dict)
+bool runERT(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
 
   bool pass = false;
-  pass = !pass ? initConfigMapByJSON(config, config_map) : pass;
+  pass = !pass ? initConfigMapByJSON(config_, config_map) : pass;
   if (!pass) {
     return false;
   }
@@ -51,14 +53,15 @@ bool runRT()
   return true;
 }
 
-bool initRT(std::string& config, std::map<std::string, std::string>& config_dict)
+bool initRT(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   iplf::flowConfigInst->set_status_stage("iRT - Routing");
 
   std::map<std::string, std::any> config_map;
 
   bool pass = false;
-  pass = !pass ? initConfigMapByJSON(config, config_map) : pass;
+  pass = !pass ? initConfigMapByJSON(config_, config_map) : pass;
   if (!pass) {
     return false;
   }
