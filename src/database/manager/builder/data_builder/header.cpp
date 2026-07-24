@@ -1770,6 +1770,8 @@ void write_design_metadata(const std::string& folder, IdbDesign* design)
     writer.write(bus_bit_chars->getLeftDelimiter());
     writer.write(bus_bit_chars->getRightDelimiter());
   }
+  writer.write(design == nullptr ? int32_t{0} : design->get_die_transform_offset_x());
+  writer.write(design == nullptr ? int32_t{0} : design->get_die_transform_offset_y());
 }
 
 void read_design_metadata(const std::string& folder, IdbDesign* design)
@@ -1785,6 +1787,13 @@ void read_design_metadata(const std::string& folder, IdbDesign* design)
     reader.read(right);
     design->get_bus_bit_chars()->setLeftDelimiter(left);
     design->get_bus_bit_chars()->setRightDelimter(right);
+  }
+  if (reader.has_remaining()) {
+    int32_t offset_x = 0;
+    int32_t offset_y = 0;
+    reader.read(offset_x);
+    reader.read(offset_y);
+    design->set_die_transform_offset(offset_x, offset_y);
   }
 }
 

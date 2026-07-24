@@ -87,6 +87,8 @@ class IdbDesign
   IdbLayout* get_layout() { return _layout; }
   const std::string& get_version() const { return _version; }
   const std::string& get_design_name() const { return _design_name; }
+  int32_t get_die_transform_offset_x() const { return _die_transform_offset_x; }
+  int32_t get_die_transform_offset_y() const { return _die_transform_offset_y; }
   IdbUnits* get_units() { return _units; }
 
   IdbInstanceList* get_instance_list() { return _instance_list; }
@@ -105,6 +107,11 @@ class IdbDesign
   // setter
   void set_version(std::string version) { _version = version; }
   void set_design_name(std::string name) { _design_name = name; }
+  void set_die_transform_offset(int32_t offset_x, int32_t offset_y)
+  {
+    _die_transform_offset_x = offset_x;
+    _die_transform_offset_y = offset_y;
+  }
   void set_units(IdbUnits* units) { _units = units; }
   void set_instance_list(IdbInstanceList* instance_list) { _instance_list = instance_list; }
   void set_io_pin_list(IdbPins* pin_list) { _io_pin_list = pin_list; }
@@ -174,6 +181,8 @@ class IdbDesign
  private:
   std::string _version = "5.8";
   std::string _design_name;
+  int32_t _die_transform_offset_x = 0;
+  int32_t _die_transform_offset_y = 0;
   IdbUnits* _units;
   IdbInstanceList* _instance_list;
   IdbPins* _io_pin_list;

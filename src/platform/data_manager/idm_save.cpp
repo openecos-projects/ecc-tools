@@ -125,6 +125,10 @@ bool DataManager::saveData(string data_path)
     return false;
   }
 
+  if (_design != nullptr) {
+    _design->set_die_transform_offset(_die_transform_offset_x, _die_transform_offset_y);
+  }
+
   return _idb_builder->saveData(data_path);
 }
 
@@ -141,6 +145,10 @@ bool DataManager::loadData(string data_path)
   _idb_def_service = _idb_builder->get_def_service();
   _layout = get_idb_layout();
   _design = get_idb_design();
+  if (_design != nullptr) {
+    _die_transform_offset_x = _design->get_die_transform_offset_x();
+    _die_transform_offset_y = _design->get_die_transform_offset_y();
+  }
 
   return _idb_lef_service != nullptr && _idb_def_service != nullptr && _layout != nullptr && _design != nullptr;
 }
