@@ -162,6 +162,8 @@ class BinaryReader
     return value;
   }
 
+  bool has_remaining() { return _in.peek() != std::ifstream::traits_type::eof(); }
+
  private:
   void read_raw(char* data, std::streamsize size)
   {
@@ -972,6 +974,10 @@ void write_layout_metadata(const std::string& folder, IdbLayout* layout)
 {
   BinaryWriter writer(section_path(folder, kLayoutDir, "metadata"), ArchiveSection::kLayoutMetadata);
   writer.write(layout == nullptr ? int32_t{-1} : layout->get_munufacture_grid());
+  writer.write_bool(layout != nullptr && layout->has_use_min_spacing_obs());
+  writer.write_bool(layout != nullptr && layout->get_use_min_spacing_obs());
+  writer.write_bool(layout != nullptr && layout->has_use_min_spacing_pin());
+  writer.write_bool(layout != nullptr && layout->get_use_min_spacing_pin());
 }
 
 void read_layout_metadata(const std::string& folder, IdbLayout* layout)
@@ -980,6 +986,20 @@ void read_layout_metadata(const std::string& folder, IdbLayout* layout)
   int32_t grid = -1;
   reader.read(grid);
   layout->set_manufacture_grid(grid);
+  if (!reader.has_remaining()) {
+    return;
+  }
+
+  const bool has_obs = reader.read_bool();
+  const bool use_obs = reader.read_bool();
+  const bool has_pin = reader.read_bool();
+  const bool use_pin = reader.read_bool();
+  if (has_obs) {
+    layout->set_use_min_spacing_obs(use_obs);
+  }
+  if (has_pin) {
+    layout->set_use_min_spacing_pin(use_pin);
+  }
 }
 
 void write_layout_units(const std::string& folder, IdbLayout* layout)

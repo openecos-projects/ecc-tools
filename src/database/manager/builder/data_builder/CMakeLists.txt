@@ -15,3 +15,9 @@ PUBLIC
         ${HOME_DATABASE}/basic/geometry
         ${HOME_DATABASE}/manager/service/def_service
 )
+
+if(BUILD_TESTING)
+    add_executable(idb_data_binary_roundtrip_test test/data_binary_roundtrip_test.cpp)
+    target_link_libraries(idb_data_binary_roundtrip_test PRIVATE data_process idb geometry_db str)
+    add_test(NAME idb_data_binary_roundtrip_test COMMAND idb_data_binary_roundtrip_test)
+endif()

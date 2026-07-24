@@ -61,7 +61,9 @@ class IdbLayout
 
   // getter
   int32_t get_munufacture_grid() { return _manufacture_grid; }
+  bool has_use_min_spacing_obs() const { return _has_use_min_spacing_obs; }
   bool get_use_min_spacing_obs() const { return _has_use_min_spacing_obs ? _use_min_spacing_obs : true; }
+  bool has_use_min_spacing_pin() const { return _has_use_min_spacing_pin; }
   bool get_use_min_spacing_pin() const { return _has_use_min_spacing_pin ? _use_min_spacing_pin : false; }
   IdbDie* get_die() { return _die; }
   IdbCore* get_core();
