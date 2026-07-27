@@ -46,29 +46,7 @@ namespace izh {
 
 namespace {
 
-enum class ViolationType
-{
-  kAntennaPar,
-  kAntennaDiffPar,
-  kAntennaCar,
-  kAntennaDiffCar,
-  kAntennaPsr,
-  kAntennaDiffPsr,
-  kAntennaCsr,
-  kAntennaDiffCsr,
-  kAntennaCutPar,
-  kAntennaCutCar
-};
 
-struct Violation
-{
-  std::string net_name;
-  std::string layer_name;
-  ViolationType type;
-  double ratio;
-  double threshold;
-  double lx = 0.0, ly = 0.0, hx = 0.0, hy = 0.0;
-};
 
 class AntennaRule
 {
@@ -281,9 +259,9 @@ class AntennaCheckerImpl
 
     _max_layer_order = 0;
     for (idb::IdbLayer* layer : layers->get_routing_layers())
-      _max_layer_order = std::max(_max_layer_order, layer->get_order());
+      _max_layer_order = std::max(_max_layer_order, static_cast<int>(layer->get_order()));
     for (idb::IdbLayer* layer : layers->get_cut_layers())
-      _max_layer_order = std::max(_max_layer_order, layer->get_order());
+      _max_layer_order = std::max(_max_layer_order, static_cast<int>(layer->get_order()));
 
     for (idb::IdbLayer* layer : layers->get_routing_layers()) {
       idb::IdbLayerRouting* routing = dynamic_cast<idb::IdbLayerRouting*>(layer);
@@ -644,8 +622,8 @@ class AntennaCheckerImpl
         }
 
         for (const auto& res : results) {
-          if (res.second > i) {
-            all_edges.push_back({i, res.second});
+          if (res.second > static_cast<int>(i)) {
+            all_edges.push_back({static_cast<int>(i), res.second});
           }
         }
       }
@@ -894,6 +872,8 @@ ACModel AntennaChecker::initACModel(std::map<std::string, std::any>& config_map)
   auto* idb_design = dmInst->get_idb_def_service()->get_design();
   AntennaCheckerImpl checker(idb_design);
   checker.run();
+
+  this->set_violations(checker.get_violations());
 
   ZHLOG.info(Loc::current(), "violation count: ", checker.get_violation_count());
 

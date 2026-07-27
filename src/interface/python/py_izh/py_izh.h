@@ -22,6 +22,6 @@ namespace python_interface {
 
 bool fix_fanout(const std::string& config);
 bool insert_filler(const std::string& config);
-bool check_antenna(const std::string& config, const std::string& report_dir);
+bool check_antenna(const std::string& config, const std::string& report_dir, const std::string& feature_file);
 
 }  // namespace python_interface

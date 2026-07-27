@@ -15,12 +15,38 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
+#include <vector>
+#include <string>
 
 #include "ACModel.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 
 namespace izh {
+
+enum class ViolationType
+{
+  kAntennaPar,
+  kAntennaDiffPar,
+  kAntennaCar,
+  kAntennaDiffCar,
+  kAntennaPsr,
+  kAntennaDiffPsr,
+  kAntennaCsr,
+  kAntennaDiffCsr,
+  kAntennaCutPar,
+  kAntennaCutCar
+};
+
+struct Violation
+{
+  std::string net_name;
+  std::string layer_name;
+  ViolationType type;
+  double ratio;
+  double threshold;
+  double lx = 0.0, ly = 0.0, hx = 0.0, hy = 0.0;
+};
 
 #define ZHAC (izh::AntennaChecker::getInst())
 
@@ -33,11 +59,14 @@ class AntennaChecker
   // function
   void check(std::map<std::string, std::any> config_map);
   int get_violation_num() { return _violation_num; }
+  const std::vector<Violation>& get_violations() const { return _violations; }
+  void set_violations(const std::vector<Violation>& violations) { _violations = violations; }
 
  private:
   // self
   static AntennaChecker* _ac_instance;
   int _violation_num = 0;
+  std::vector<Violation> _violations;
 
   AntennaChecker() = default;
   AntennaChecker(const AntennaChecker& other) = delete;

@@ -15,6 +15,8 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
+#include <string>
+#include <vector>
 
 #include <any>
 #include <cstdint>
@@ -76,12 +78,22 @@ class ZHInterface
   void fixFanout(std::map<std::string, std::any> config_map);
   void insertFiller(std::map<std::string, std::any> config_map);
   void checkAntenna(std::map<std::string, std::any> config_map);
+  struct AntennaViolation {
+    std::string net_name;
+    std::string layer_name;
+    std::string type;
+    double ratio = 0.0;
+    double threshold = 0.0;
+    double lx = 0.0, ly = 0.0, hx = 0.0, hy = 0.0;
+  };
+  const std::vector<AntennaViolation>& getAntennaViolations() const { return _antenna_violations; }
 #endif
 
 #endif
 
  private:
   static ZHInterface* _zh_interface_instance;
+  std::vector<AntennaViolation> _antenna_violations;
 
   ZHInterface() = default;
   ZHInterface(const ZHInterface& other) = delete;

@@ -60,8 +60,40 @@ void ZHInterface::insertFiller(std::map<std::string, std::any> config_map)
 
 void ZHInterface::checkAntenna(std::map<std::string, std::any> config_map)
 {
+  static const auto type_to_str = [](const izh::ViolationType t) -> std::string {
+    switch (t) {
+      case izh::ViolationType::kAntennaPar: return "kAntennaPar";
+      case izh::ViolationType::kAntennaDiffPar: return "kAntennaDiffPar";
+      case izh::ViolationType::kAntennaCar: return "kAntennaCar";
+      case izh::ViolationType::kAntennaDiffCar: return "kAntennaDiffCar";
+      case izh::ViolationType::kAntennaPsr: return "kAntennaPsr";
+      case izh::ViolationType::kAntennaDiffPsr: return "kAntennaDiffPsr";
+      case izh::ViolationType::kAntennaCsr: return "kAntennaCsr";
+      case izh::ViolationType::kAntennaDiffCsr: return "kAntennaDiffCsr";
+      case izh::ViolationType::kAntennaCutPar: return "kAntennaCutPar";
+      case izh::ViolationType::kAntennaCutCar: return "kAntennaCutCar";
+      default: return "Unknown";
+    }
+  };
+
   AntennaChecker::initInst();
   ZHAC.check(config_map);
+
+  _antenna_violations.clear();
+  for (const auto& v : ZHAC.get_violations()) {
+    AntennaViolation av;
+    av.net_name = v.net_name;
+    av.layer_name = v.layer_name;
+    av.type = type_to_str(v.type);
+    av.ratio = v.ratio;
+    av.threshold = v.threshold;
+    av.lx = v.lx;
+    av.ly = v.ly;
+    av.hx = v.hx;
+    av.hy = v.hy;
+    _antenna_violations.push_back(std::move(av));
+  }
+
   AntennaChecker::destroyInst();
 }
 

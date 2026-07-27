@@ -27,7 +27,7 @@ void register_izh(py::module& m)
 {
   m.def("fix_fanout", fix_fanout, py::arg("config") = "");
   m.def("insert_filler", insert_filler, py::arg("config") = "");
-  m.def("check_antenna", check_antenna, py::arg("config") = "", py::arg("report_dir") = "");
+  m.def("check_antenna", check_antenna, py::arg("config") = "", py::arg("report_dir") = "", py::arg("feature_file") = "");
 }
 
 }  // namespace python_interface
