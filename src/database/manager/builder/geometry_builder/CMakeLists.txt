@@ -1,6 +1,7 @@
 add_library(geometry_builder
     BlockageEditAdapter.cpp
     GeometryBuilder.cpp
+    GeometryEditSession.cpp
     GeometryEditApplier.cpp
     GeometryEditJson.cpp
     GeometryNameQuery.cpp

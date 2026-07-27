@@ -1,6 +1,7 @@
 #include "GeometrySink.h"
 #include "GeometryEditApplier.h"
 #include "GeometryEditJson.h"
+#include "GeometryEditSession.h"
 #include "GeometryBuilder.h"
 #include "GeometryNameQuery.h"
 #include "GeometrySnapshotReader.h"
@@ -1329,6 +1330,109 @@ void test_geometry_builder_sync_instance_reports_missing_owner_shape()
   assert(sync.updated_shape_count == 0);
   assert(sync.missing_shape_count == 1);
   assert(store.delta_events().empty());
+}
+
+void test_geometry_edit_session_returns_stable_instance_delta()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbCellMaster master;
+  master.set_name("session_master");
+  master.set_width(50);
+  master.set_height(30);
+
+  idb::IdbInstance* instance = design.get_instance_list()->add_instance("u_session");
+  instance->set_id(701);
+  instance->set_cell_master(&master);
+  instance->set_coodinate(100, 200);
+  instance->set_status_placed();
+
+  GeometryEditSession session;
+  assert(session.begin(design, layout));
+  const std::vector<ShapeId> original_shapes = session.store().query_owner(OwnerType::kInstanceBBox, 701);
+  assert(original_shapes.size() == 1);
+  const ShapeId original_shape_id = original_shapes[0];
+
+  instance->set_coodinate(300, 400);
+  const GeometryInstanceSyncResult sync = session.sync_instance(*instance);
+
+  assert(sync.ok);
+  assert(!sync.snapshot_required);
+  assert(sync.sync.updated_shape_count == 1);
+  assert(sync.events.size() == 1);
+  assert(sync.events[0].event.op == GeometryDeltaOp::kUpdate);
+  assert(sync.events[0].event.shape_id == original_shape_id);
+  assert(sync.events[0].event.old_version == 1);
+  assert(sync.events[0].event.new_version == 2);
+  assert(sync.events[0].has_shape);
+  assert(sync.events[0].shape.id == original_shape_id);
+  assert(sync.events[0].shape.version == 2);
+  assert(sync.events[0].owner.type == OwnerType::kInstanceBBox);
+  assert(sync.events[0].owner.owner_id == 701);
+  assert(sync.events[0].shape.bbox.lx == 300);
+  assert(sync.events[0].shape.bbox.hy == 430);
+}
+
+void test_geometry_edit_session_requires_initial_snapshot()
+{
+  idb::IdbCellMaster master;
+  master.set_name("session_uninitialized_master");
+  master.set_width(10);
+  master.set_height(10);
+
+  idb::IdbInstance instance;
+  instance.set_id(702);
+  instance.set_cell_master(&master);
+  instance.set_coodinate(10, 20);
+  instance.set_status_placed();
+
+  GeometryEditSession session;
+  const GeometryInstanceSyncResult sync = session.sync_instance(instance);
+  assert(!sync.ok);
+  assert(sync.snapshot_required);
+  assert(sync.events.empty());
+}
+
+void test_geometry_edit_session_writes_incremental_snapshot()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbCellMaster master;
+  master.set_name("session_snapshot_master");
+  master.set_width(50);
+  master.set_height(30);
+
+  idb::IdbInstance* instance = design.get_instance_list()->add_instance("u_session_snapshot");
+  instance->set_id(703);
+  instance->set_cell_master(&master);
+  instance->set_coodinate(100, 200);
+  instance->set_status_placed();
+
+  GeometryEditSession session;
+  assert(session.begin(design, layout));
+  instance->set_coodinate(300, 400);
+  const GeometryInstanceSyncResult sync = session.sync_instance(*instance);
+  assert(sync.ok);
+  assert(sync.events.size() == 1);
+
+  const std::filesystem::path output_dir =
+      std::filesystem::temp_directory_path() / "ecc_geometry_edit_session_snapshot_test";
+  std::filesystem::remove_all(output_dir);
+  const SnapshotWriteResult write = session.write_snapshot(output_dir);
+  assert(write.ok);
+  assert(write.delta_count == 1);
+
+  GeometryStore loaded;
+  GeometrySnapshotReader reader;
+  assert(reader.read(SnapshotReadOptions{write.manifest_path}, loaded).ok);
+  const std::vector<ShapeId> shapes = loaded.query_owner(OwnerType::kInstanceBBox, 703);
+  assert(shapes.size() == 1);
+  assert(loaded.find_shape(shapes[0])->bbox.lx == 300);
+  assert(loaded.find_shape(shapes[0])->bbox.hy == 430);
+
+  std::filesystem::remove_all(output_dir);
 }
 
 void test_geometry_builder_syncs_regular_net_updates_and_adds_segments()
@@ -3768,6 +3872,9 @@ int main()
   test_geometry_builder_syncs_moved_instance_obs_without_full_rebuild();
   test_geometry_builder_syncs_moved_instance_pin_ports_without_full_rebuild();
   test_geometry_builder_sync_instance_reports_missing_owner_shape();
+  test_geometry_edit_session_returns_stable_instance_delta();
+  test_geometry_edit_session_requires_initial_snapshot();
+  test_geometry_edit_session_writes_incremental_snapshot();
   test_geometry_builder_syncs_regular_net_updates_and_adds_segments();
   test_geometry_builder_syncs_regular_net_deletes_removed_segments();
   test_geometry_builder_syncs_regular_net_vias_incrementally();
