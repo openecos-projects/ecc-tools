@@ -85,4 +85,14 @@ bool DataManager::initSpef(string spef_path)
   return true;
 }
 
+bool DataManager::initVcd(string vcd_path)
+{
+  _vcd_reader = std::make_unique<vcd::VcdReader>();
+  if (!_vcd_reader->read(vcd_path)) {
+    return false;
+  }
+
+  return true;
+}
+
 }  // namespace idm

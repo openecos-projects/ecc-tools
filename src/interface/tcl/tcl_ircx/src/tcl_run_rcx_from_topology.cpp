@@ -10,54 +10,24 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-/**
- * @file tcl_run_rcx_from_topology.cpp
- * @brief Tcl command for RC extraction using StarRC SPEF topology.
- */
-#include <utility>
-
-#include "RCXAPI.hh"
-#include "config/RunRCXFromTopologyConfig.hh"
-#include "log/Log.hh"
-#include "tcl_ircx.h"
+#include "RCXInterface.hpp"
+#include "tcl_rcx.h"
+#include "tcl_util.h"
 
 namespace tcl {
-namespace {
 
-constexpr const char* kSpefArg = "spef";
-
-auto getStringValue(TclOption* option) -> const char*
-{
-  if (option == nullptr || !option->is_set_val()) {
-    return nullptr;
-  }
-  return option->getStringVal();
-}
-
-auto isOptionSet(TclOption* option) -> bool
-{
-  return option != nullptr && option->is_set_val();
-}
-
-}  // namespace
+// public
 
 TclRunRCXFromTopology::TclRunRCXFromTopology(const char* cmd_name) : TclCmd(cmd_name)
 {
-  addOption(new TclStringOption(kSpefArg, 1, nullptr));
-  addOption(new TclSwitchOption("-non_strict"));
-}
+  _config_list.push_back(std::make_pair("-spef_file", ValueType::kString));
+  _config_list.push_back(std::make_pair("-strict", ValueType::kInt));
 
-unsigned TclRunRCXFromTopology::check()
-{
-  if (getStringValue(getOptionOrArg(kSpefArg)) == nullptr) {
-    LOG_ERROR << "run_rcx_from_topology requires a SPEF argument.";
-    return 0;
-  }
-  return 1;
+  TclUtil::addOption(this, _config_list);
 }
 
 unsigned TclRunRCXFromTopology::exec()
@@ -65,12 +35,11 @@ unsigned TclRunRCXFromTopology::exec()
   if (!check()) {
     return 0;
   }
-
-  ircx::run_rcx_from_topology::Config config;
-  config.spef_file = getStringValue(getOptionOrArg(kSpefArg));
-  config.strict = !isOptionSet(getOptionOrArg("-non_strict"));
-
-  return RCX_API_INST.run_rcx_from_topology(std::move(config)) ? 1U : 0U;
+  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
+  RCXI.runRCXFromTopo(config_map);
+  return 1;
 }
+
+// private
 
 }  // namespace tcl

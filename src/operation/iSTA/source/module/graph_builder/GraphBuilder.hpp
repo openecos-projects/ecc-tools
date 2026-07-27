@@ -44,6 +44,7 @@ class GraphBuilder
   GraphBuilder& operator=(GraphBuilder&& other) = delete;
   // function
   void buildTimingPointList();
+  void normalizePinDirectionByTimingCell();
   void buildCellArcs();
   bool buildLibraryCellArcs(Instance& instance);
   std::string getInstancePinName(Instance& instance, std::string& port_name);

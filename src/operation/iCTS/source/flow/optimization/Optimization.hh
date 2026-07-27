@@ -25,6 +25,7 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 namespace icts {
 
@@ -46,6 +47,19 @@ struct OptimizationInput
   CharacterizationLibrary* characterization_library = nullptr;
 };
 
+struct ClockTimingSummary
+{
+  std::string clock;
+  std::size_t sink_count = 0U;
+  double target_skew_ns = 0.0;
+  double initial_skew_ns = 0.0;
+  double optimized_skew_ns = 0.0;
+  double min_insertion_latency_ns = 0.0;
+  double max_insertion_latency_ns = 0.0;
+  double mean_insertion_latency_ns = 0.0;
+  bool target_met = false;
+};
+
 struct OptimizationSummary
 {
   bool success = true;
@@ -55,6 +69,7 @@ struct OptimizationSummary
   std::size_t accepted_edit_count = 0U;
   std::string status = "no_op";
   std::string reason = "n/a";
+  std::vector<ClockTimingSummary> clock_timing;
 };
 
 class Optimization

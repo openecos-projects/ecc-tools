@@ -22,10 +22,10 @@ catboost_info
 *.pwr
 *.codex
 
-# .agents 
-.codex 
-# .trellis
-# AGENTS.md
+.agents
+.codex
+.trellis
+AGENTS.md
 
 rpt*/
 target/

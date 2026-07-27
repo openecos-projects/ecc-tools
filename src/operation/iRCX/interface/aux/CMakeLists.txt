@@ -1,0 +1,50 @@
+find_package(Eigen3 REQUIRED NO_MODULE)
+
+add_library(ircx_aux
+    ${IRCX_INTERFACE}/aux/compare_spef/CompareSpefTool.cc
+    ${IRCX_INTERFACE}/aux/compare_spef/compare/Comparator.cc
+    ${IRCX_INTERFACE}/aux/compare_spef/compare/CouplingCapComparator.cc
+    ${IRCX_INTERFACE}/aux/compare_spef/compare/NetSelector.cc
+    ${IRCX_INTERFACE}/aux/compare_spef/compare/PathPairGenerator.cc
+    ${IRCX_INTERFACE}/aux/compare_spef/compare/ResistanceSolver.cc
+    ${IRCX_INTERFACE}/aux/compare_spef/compare/ResultSorter.cc
+    ${IRCX_INTERFACE}/aux/compare_spef/config/CompareSpefConfig.cc
+    ${IRCX_INTERFACE}/aux/compare_spef/reader/SpefReader.cc
+    ${IRCX_INTERFACE}/aux/compare_spef/report/ReportWriter.cc
+    ${IRCX_INTERFACE}/aux/dump_net_shape/DumpNetShapeTool.cc
+    ${IRCX_INTERFACE}/aux/plot_spef/PlotSpefTool.cc
+    ${IRCX_INTERFACE}/aux/plot_spef/builder/PlotSpefModelBuilder.cc
+    ${IRCX_INTERFACE}/aux/plot_spef/cap/PlotSpefCapToEdge.cc
+    ${IRCX_INTERFACE}/aux/plot_spef/config/PlotSpefConfig.cc
+    ${IRCX_INTERFACE}/aux/plot_spef/gds/PlotSpefGdsWriter.cc
+    ${IRCX_INTERFACE}/aux/plot_spef/lyp/PlotSpefLypWriter.cc
+    ${IRCX_INTERFACE}/aux/plot_spef/report/PlotSpefCgEdgeReport.cc
+    ${IRCX_INTERFACE}/aux/plot_spef/select/PlotSpefSelect.cc
+    ${IRCX_INTERFACE}/aux/run_rcx_from_topology/RunRCXFromTopologyTool.cc
+    ${IRCX_INTERFACE}/aux/run_rcx_from_topology/config/RunRCXFromTopologyConfig.cc
+    ${IRCX_INTERFACE}/aux/run_rcx_from_topology/topology/SpefTopologyBuilder.cc
+)
+
+target_link_libraries(ircx_aux
+    PRIVATE
+    Eigen3::Eigen
+    fort
+    gdsii-parser
+    spef
+    OpenMP::OpenMP_CXX
+)
+
+target_include_directories(ircx_aux
+    PUBLIC
+    ${IRCX_INTERFACE}
+    ${IRCX_INTERFACE}/aux/common
+    ${IRCX_INTERFACE}/aux/compare_spef
+    ${IRCX_INTERFACE}/aux/dump_net_shape
+    ${IRCX_INTERFACE}/aux/plot_spef
+    ${IRCX_INTERFACE}/aux/run_rcx_from_topology
+    ${IRCX_SOURCE}/data_manager
+    ${IRCX_SOURCE}/data_manager/advance
+    ${IRCX_SOURCE}/data_manager/basic
+    ${IRCX_SOURCE}/toolkit/logger
+    ${IRCX_SOURCE}/toolkit/utility
+)

@@ -41,6 +41,22 @@ bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std
   if (!value.empty()) {
     config_map.insert(std::make_pair("-thread_number", std::stoi(value)));
   }
+  value = ieda::getJsonData(json, {"STA", "-output_timing_reports"});
+  if (!value.empty()) {
+    config_map.insert(std::make_pair("-output_timing_reports", std::stoi(value)));
+  }
+  value = ieda::getJsonData(json, {"STA", "-output_timing_features"});
+  if (!value.empty()) {
+    config_map.insert(std::make_pair("-output_timing_features", std::stoi(value)));
+  }
+  value = ieda::getJsonData(json, {"STA", "-timing_path_limit"});
+  if (!value.empty()) {
+    config_map.insert(std::make_pair("-timing_path_limit", std::stoi(value)));
+  }
+  value = ieda::getJsonData(json, {"STA", "-timing_corner"});
+  if (!value.empty()) {
+    config_map.insert(std::make_pair("-timing_corner", value));
+  }
   return true;
 }
 
@@ -51,6 +67,18 @@ void initStaConfigMapByDict(std::map<std::string, std::string>& config_dict, std
   }
   if (config_dict.count("-thread_number") > 0 && !config_dict["-thread_number"].empty()) {
     config_map["-thread_number"] = std::stoi(config_dict["-thread_number"]);
+  }
+  if (config_dict.count("-output_timing_reports") > 0 && !config_dict["-output_timing_reports"].empty()) {
+    config_map["-output_timing_reports"] = std::stoi(config_dict["-output_timing_reports"]);
+  }
+  if (config_dict.count("-output_timing_features") > 0 && !config_dict["-output_timing_features"].empty()) {
+    config_map["-output_timing_features"] = std::stoi(config_dict["-output_timing_features"]);
+  }
+  if (config_dict.count("-timing_path_limit") > 0 && !config_dict["-timing_path_limit"].empty()) {
+    config_map["-timing_path_limit"] = std::stoi(config_dict["-timing_path_limit"]);
+  }
+  if (config_dict.count("-timing_corner") > 0 && !config_dict["-timing_corner"].empty()) {
+    config_map["-timing_corner"] = config_dict["-timing_corner"];
   }
 }
 

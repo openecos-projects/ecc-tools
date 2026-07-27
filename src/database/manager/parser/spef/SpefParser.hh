@@ -14,9 +14,11 @@ enum class SectionType
   kHeader,
   kNameMap,
   kPorts,
+  kPhysicalPorts,
   kConn,
   kCap,
   kRes,
+  kInduc,
   kEnd
 };
 
@@ -40,6 +42,16 @@ struct Coord
 {
   double x = -1.0;
   double y = -1.0;
+};
+
+struct ParValue
+{
+  double first = 0.0;
+  double second = 0.0;
+  double third = 0.0;
+  bool is_triple = false;
+
+  double selected() const { return first; }
 };
 
 struct GeometryAttr
@@ -82,6 +94,7 @@ struct PortEntry
   std::string name;
   ConnectionDirection direction = ConnectionDirection::kUninitialized;
   Coord coordinate;
+  bool physical = false;
 };
 
 struct ConnEntry
@@ -91,6 +104,7 @@ struct ConnEntry
   std::string pin_port_name;
   std::string driving_cell;
   double load = 0.0;
+  ParValue load_value;
   int layer = 0;
   Coord coordinate;
   Coord ll_coordinate;
@@ -103,7 +117,9 @@ struct ResCap
   std::string node1;
   std::string node2;
   double res_or_cap = 0.0;
+  ParValue value;
   GeometryAttr geometry;
+  std::size_t index = 0;
 };
 
 struct Net
@@ -111,9 +127,39 @@ struct Net
   std::string name;
   std::size_t line_no = 0;
   double lcap = 0.0;
+  ParValue lcap_value;
+  bool physical = false;
   std::vector<ConnEntry> conns;
   std::vector<ResCap> caps;
   std::vector<ResCap> ress;
+  std::vector<ResCap> inductances;
+};
+
+struct ReducedLoad
+{
+  std::string pin_name;
+  double rc = 0.0;
+  ParValue rc_value;
+};
+
+struct ReducedDriver
+{
+  std::string pin_name;
+  std::string cell_type;
+  ParValue c2;
+  ParValue r1;
+  ParValue c1;
+  std::vector<ReducedLoad> loads;
+};
+
+struct ReducedNet
+{
+  std::string name;
+  std::size_t line_no = 0;
+  double total_cap = 0.0;
+  ParValue total_cap_value;
+  bool physical = false;
+  std::vector<ReducedDriver> drivers;
 };
 
 struct Exchange
@@ -127,6 +173,7 @@ struct Exchange
   std::unordered_map<int, LayerMapEntry> layer_map;
   std::vector<PortEntry> ports;
   std::vector<Net> nets;
+  std::vector<ReducedNet> reduced_nets;
 };
 
 #define FOREACH_SPEF_NET(spef_file, spef_net) \
@@ -140,6 +187,9 @@ struct Exchange
 
 #define FOREACH_SPEF_RES(spef_net, res) \
   for (const auto& res : (spef_net).ress)
+
+#define FOREACH_SPEF_INDUC(spef_net, induc) \
+  for (const auto& induc : (spef_net).inductances)
 
 class ParserContext
 {
@@ -158,13 +208,18 @@ class ParserContext
 
   void addNameMap(std::string index_name, std::string mapped_name);
   void addPort(std::string name, ConnectionDirection direction, Coord coordinate);
+  void startPort(std::string name, ConnectionDirection direction, bool physical);
+  void setPortCoordinate(Coord coordinate);
+  void finishPort();
 
   void startNet(std::string name, double lcap, std::size_t line_no);
+  void startNet(std::string name, ParValue lcap, bool physical, std::size_t line_no);
   void finishNet();
 
   void startConn(ConnectionType type, std::string name, ConnectionDirection direction);
   void setConnCoordinate(Coord coordinate);
   void setConnLoad(double load);
+  void setConnLoad(ParValue load);
   void setConnDrivingCell(std::string driving_cell);
   void setConnLowerLeft(Coord coordinate);
   void setConnUpperRight(Coord coordinate);
@@ -172,8 +227,26 @@ class ParserContext
   void finishConn();
 
   void addCap(std::string node1, std::string node2, double cap);
+  void addCap(std::string node1, std::string node2, ParValue cap);
+  void addCap(std::size_t index, std::string node1, std::string node2, ParValue cap);
   void addRes(std::string node1, std::string node2, double res);
+  void addRes(std::string node1, std::string node2, ParValue res);
+  void addRes(std::size_t index, std::string node1, std::string node2, ParValue res);
+  void addInductance(std::string node1, std::string node2, ParValue inductance);
+  void addInductance(std::size_t index,
+                     std::string node1,
+                     std::string node2,
+                     ParValue inductance);
   void addCapOrRes(std::string node1, std::string node2, double value);
+  void addCapOrRes(std::string node1, std::string node2, ParValue value);
+  void addCapOrRes(std::size_t index, std::string node1, std::string node2, ParValue value);
+
+  void startReducedNet(std::string name, ParValue total_cap, bool physical, std::size_t line_no);
+  void finishReducedNet();
+  void startReducedDriver(std::string pin_name);
+  void setReducedDriverCell(std::string cell_type);
+  void setReducedPi(ParValue c2, ParValue r1, ParValue c1);
+  void addReducedLoad(std::string pin_name, ParValue rc);
 
   void setError(std::string message);
   bool ok() const { return error_message_.empty(); }
@@ -186,15 +259,23 @@ class ParserContext
   SectionType current_section_ = SectionType::kHeader;
   Net current_net_;
   bool has_current_net_ = false;
+  PortEntry current_port_;
+  bool has_current_port_ = false;
   ConnEntry current_conn_;
   bool has_current_conn_ = false;
+  ReducedNet current_reduced_net_;
+  bool has_current_reduced_net_ = false;
+  ReducedDriver current_reduced_driver_;
+  bool has_current_reduced_driver_ = false;
   std::string pending_header_key_;
   std::vector<std::string> pending_header_values_;
   std::string error_message_;
 };
 
 double toDouble(const char* text);
+ParValue parseParValue(const char* text);
 int toInt(const char* text);
+std::size_t toSize(const char* text);
 std::string tokenToString(const char* text);
 std::string stripQuotes(std::string text);
 ConnectionDirection parseDirection(const char* text);

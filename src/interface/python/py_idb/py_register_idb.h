@@ -38,6 +38,7 @@ void register_idb(py::module& m)
   m.def("lib_init", initLib, py::arg("lib_paths"));
   m.def("sdc_init", initSdc, py::arg("sdc_path"));
   m.def("spef_init", initSpef, py::arg("spef_path"));
+  m.def("vcd_init", initVcd, py::arg("vcd_path"));
   m.def("def_save", saveDef, py::arg("def_name"));
   // TODO:
   m.def("tcl_save", saveMacroTCL, py::arg("tcl_name"));

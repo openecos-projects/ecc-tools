@@ -20,6 +20,8 @@
 #include "TimingCellArc.hpp"
 #include "TimingCellPort.hpp"
 #include "TimingCheckArc.hpp"
+#include "TimingLeakagePower.hpp"
+#include "TimingPowerArc.hpp"
 
 namespace ista {
 
@@ -32,9 +34,12 @@ class TimingCell
   std::string& get_cell_name() { return _cell_name; }
   std::string& get_library_name() { return _library_name; }
   double get_area() const { return _area; }
+  double get_nom_voltage() const { return _nom_voltage; }
+  double get_cell_leakage_power() const { return _cell_leakage_power; }
   std::map<std::string, TimingCellPort>& get_port_map() { return _port_map; }
   std::vector<TimingCellArc>& get_cell_arc_list() { return _cell_arc_list; }
-  std::vector<TimingCheckArc>& get_setup_arc_list() { return _setup_arc_list; }
+  std::vector<TimingPowerArc>& get_power_arc_list() { return _power_arc_list; }
+  std::vector<TimingLeakagePower>& get_leakage_power_list() { return _leakage_power_list; }
   std::vector<TimingCheckArc>& get_check_arc_list() { return _check_arc_list; }
   std::vector<TimingCheckArc>& get_sdf_check_arc_list() { return _sdf_check_arc_list; }
   bool get_is_sequential() const { return _is_sequential; }
@@ -55,9 +60,12 @@ class TimingCell
   void set_cell_name(const std::string& cell_name) { _cell_name = cell_name; }
   void set_library_name(const std::string& library_name) { _library_name = library_name; }
   void set_area(const double area) { _area = area; }
+  void set_nom_voltage(const double nom_voltage) { _nom_voltage = nom_voltage; }
+  void set_cell_leakage_power(const double cell_leakage_power) { _cell_leakage_power = cell_leakage_power; }
   void set_port_map(const std::map<std::string, TimingCellPort>& port_map) { _port_map = port_map; }
   void set_cell_arc_list(const std::vector<TimingCellArc>& cell_arc_list) { _cell_arc_list = cell_arc_list; }
-  void set_setup_arc_list(const std::vector<TimingCheckArc>& setup_arc_list) { _setup_arc_list = setup_arc_list; }
+  void set_power_arc_list(const std::vector<TimingPowerArc>& power_arc_list) { _power_arc_list = power_arc_list; }
+  void set_leakage_power_list(const std::vector<TimingLeakagePower>& leakage_power_list) { _leakage_power_list = leakage_power_list; }
   void set_check_arc_list(const std::vector<TimingCheckArc>& check_arc_list) { _check_arc_list = check_arc_list; }
   void set_sdf_check_arc_list(const std::vector<TimingCheckArc>& sdf_check_arc_list) { _sdf_check_arc_list = sdf_check_arc_list; }
   void set_is_sequential(const bool is_sequential) { _is_sequential = is_sequential; }
@@ -92,9 +100,12 @@ class TimingCell
   std::string _cell_name;
   std::string _library_name;
   double _area = 0.0;
+  double _nom_voltage = 0.0;
+  double _cell_leakage_power = 0.0;
   std::map<std::string, TimingCellPort> _port_map;
   std::vector<TimingCellArc> _cell_arc_list;
-  std::vector<TimingCheckArc> _setup_arc_list;
+  std::vector<TimingPowerArc> _power_arc_list;
+  std::vector<TimingLeakagePower> _leakage_power_list;
   std::vector<TimingCheckArc> _check_arc_list;
   std::vector<TimingCheckArc> _sdf_check_arc_list;
   bool _is_sequential = false;

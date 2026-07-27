@@ -19,21 +19,6 @@
 #include "Config.hpp"
 #include "Database.hpp"
 
-namespace spef {
-struct ConnEntry;
-struct Net;
-struct ResCap;
-}  // namespace spef
-
-namespace idb {
-class LibArc;
-class LibArcSet;
-class LibCell;
-class LibLibrary;
-class LibPort;
-class LibTable;
-}  // namespace idb
-
 namespace ista {
 
 #define STADM (ista::DataManager::getInst())
@@ -68,33 +53,6 @@ class DataManager
 #if 1  // build
   void buildConfig();
   void buildDatabase();
-  void buildTimingLibrary();
-  void buildTimingCellMap(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
-  void buildTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
-  idb::LibLibrary* getReferenceLib(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
-  TimingCapacitiveUnit getTimingCapacitiveUnit(idb::LibLibrary* lib_library);
-  TimingResistanceUnit getTimingResistanceUnit(idb::LibLibrary* lib_library);
-  TimingTimeUnit getTimingTimeUnit(idb::LibLibrary* lib_library);
-  void makeTimingCell(idb::LibCell* lib_cell);
-  void makeTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib_port);
-  void makeTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* lib_arc_set);
-  bool isSDFDelayArc(idb::LibArc* lib_arc);
-  bool isSDFCheckArc(idb::LibArc* lib_arc);
-  TimingCellArc makeDelayArc(idb::LibArcSet* lib_arc_set);
-  void updateClearPresetArc(TimingCell& timing_cell, idb::LibArc* lib_arc);
-  TimingCheckArc makeCheckArc(idb::LibArcSet* lib_arc_set);
-  std::vector<TimingArc> makeTimingArcList(idb::LibArcSet* lib_arc_set);
-  TimingArc makeTimingArc(idb::LibArc* lib_arc);
-  void makeTimingArcTable(TimingArc& timing_arc, idb::LibArc* lib_arc);
-  TimingTable makeTimingTable(idb::LibTable* lib_table);
-  TimingTableVariableType getTimingTableVariableType(idb::LibTable* lib_table, bool is_first_variable);
-  double getLibTimeUnitScale(idb::LibLibrary* lib_library);
-  double getLibCapUnitScale(idb::LibLibrary* lib_library);
-  TimingArcSense getTimingArcSense(idb::LibArc* lib_arc);
-  TransType getTriggerTransType(idb::LibArc* lib_arc);
-  TransType getCheckTransType(idb::LibArc* lib_arc);
-  TimingCheckType getTimingCheckType(idb::LibArc* lib_arc);
-  void updateTimingCell(TimingCell& timing_cell);
   void buildInstanceList();
   void makeInstanceList();
   void buildInstanceTimingInfo();
@@ -108,15 +66,6 @@ class DataManager
   void buildNetList();
   void makeNetList();
   void makeNet(const std::string& net_name, Net& net);
-  void buildParasiticLibrary();
-  void buildParasiticNetMap(spef::Net& spef_net);
-  void makeParasiticConnection(ParasiticNet& parasitic_net, spef::ConnEntry& spef_conn);
-  void makeParasiticCapacitance(ParasiticNet& parasitic_net, spef::ResCap& spef_cap);
-  void makeParasiticResistance(ParasiticNet& parasitic_net, spef::ResCap& spef_res);
-  double getParasiticCapacitance(double spef_capacitance);
-  double getParasiticResistance(double spef_resistance);
-  double getSpefUnitScale(std::string& spef_unit, std::string& target_unit);
-  ParasiticNode& getParasiticNode(ParasiticNet& parasitic_net, const std::string& node_name);
   void readConstraint();
   std::vector<std::vector<std::string>> readCommandList(std::string& sdc_file_path);
   std::vector<std::vector<std::string>> resolveCommandList(std::vector<std::vector<std::string>>& command_list);
@@ -135,6 +84,7 @@ class DataManager
   std::vector<std::string> tokenizeSdc(std::string& content);
   std::string removeComment(std::string& line);
   void parseCommand(std::vector<std::string>& token_list);
+  void parseSetCaseAnalysis(std::vector<std::string>& token_list);
   void parseCreateClock(std::vector<std::string>& token_list);
   void parseSetInputDelay(std::vector<std::string>& token_list);
   void parseSetOutputDelay(std::vector<std::string>& token_list);

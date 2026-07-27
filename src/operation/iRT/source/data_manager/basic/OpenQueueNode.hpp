@@ -36,7 +36,10 @@ class OpenQueueNode
   OpenQueueNode() = default;
   ~OpenQueueNode() = default;
   OpenQueueNode(T* node)
-      : _node(node), _neighbor_node_map_size(getNeighborNodeMapSize(node)), _estimated_cost(node->get_estimated_cost()), _known_cost(node->get_known_cost())
+      : _node(node),
+        _neighbor_node_map_size(getNeighborNodeMapSize(node)),
+        _estimated_cost(node->get_estimated_cost()),
+        _known_cost(node->get_known_cost())
   {
     set_state(OpenQueueNodeState::kOpen);
   }

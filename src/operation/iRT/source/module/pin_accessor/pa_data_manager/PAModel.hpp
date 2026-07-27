@@ -25,30 +25,6 @@
 
 namespace irt {
 
-struct PAAccessResultRef
-{
-  int32_t net_idx = -1;
-  int32_t pin_idx = -1;
-  int32_t result_idx = -1;
-};
-
-struct PAAccessPatchRef
-{
-  int32_t net_idx = -1;
-  int32_t pin_idx = -1;
-  int32_t patch_idx = -1;
-};
-
-struct PAResultPatchGCell
-{
-  std::vector<PAAccessResultRef>& get_access_result_ref_list() { return _access_result_ref_list; }
-  std::vector<PAAccessPatchRef>& get_access_patch_ref_list() { return _access_patch_ref_list; }
-
- private:
-  std::vector<PAAccessResultRef> _access_result_ref_list;
-  std::vector<PAAccessPatchRef> _access_patch_ref_list;
-};
-
 class PAModel
 {
  public:
@@ -62,12 +38,6 @@ class PAModel
   PAIterParam& get_pa_iter_param() { return _pa_iter_param; }
   GridMap<PABox>& get_pa_box_map() { return _pa_box_map; }
   std::vector<std::vector<PABoxId>>& get_pa_box_id_list_list() { return _pa_box_id_list_list; }
-  std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& get_type_layer_net_fixed_rect_map() { return _type_layer_net_fixed_rect_map; }
-  std::set<std::pair<int32_t, int32_t>>& get_pattern_fallback_pin_set() { return _pattern_fallback_pin_set; }
-  std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_curr_net_pin_access_result_map() { return _curr_net_pin_access_result_map; }
-  std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>>& get_curr_net_pin_access_patch_map() { return _curr_net_pin_access_patch_map; }
-  GridMap<PAResultPatchGCell>& get_result_patch_gcell_map() { return _result_patch_gcell_map; }
-  std::vector<PlanarRect>& get_dirty_region_list() { return _dirty_region_list; }
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_best_net_pin_access_result_map() { return _best_net_pin_access_result_map; }
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>>& get_best_net_pin_access_patch_map() { return _best_net_pin_access_patch_map; }
   std::vector<Violation>& get_best_route_violation_list() { return _best_route_violation_list; }
@@ -79,10 +49,6 @@ class PAModel
   void set_pa_iter_param(const PAIterParam& pa_iter_param) { _pa_iter_param = pa_iter_param; }
   void set_pa_box_map(const GridMap<PABox>& pa_box_map) { _pa_box_map = pa_box_map; }
   void set_pa_box_id_list_list(const std::vector<std::vector<PABoxId>>& pa_box_id_list_list) { _pa_box_id_list_list = pa_box_id_list_list; }
-  void set_type_layer_net_fixed_rect_map(const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& type_layer_net_fixed_rect_map)
-  {
-    _type_layer_net_fixed_rect_map = type_layer_net_fixed_rect_map;
-  }
   void set_best_net_pin_access_result_map(const std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& best_net_pin_access_result_map)
   {
     _best_net_pin_access_result_map = best_net_pin_access_result_map;
@@ -101,12 +67,6 @@ class PAModel
   PAIterParam _pa_iter_param;
   GridMap<PABox> _pa_box_map;
   std::vector<std::vector<PABoxId>> _pa_box_id_list_list;
-  std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> _type_layer_net_fixed_rect_map;
-  std::set<std::pair<int32_t, int32_t>> _pattern_fallback_pin_set;
-  std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _curr_net_pin_access_result_map;
-  std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>> _curr_net_pin_access_patch_map;
-  GridMap<PAResultPatchGCell> _result_patch_gcell_map;
-  std::vector<PlanarRect> _dirty_region_list;
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _best_net_pin_access_result_map;
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>> _best_net_pin_access_patch_map;
   std::vector<Violation> _best_route_violation_list;

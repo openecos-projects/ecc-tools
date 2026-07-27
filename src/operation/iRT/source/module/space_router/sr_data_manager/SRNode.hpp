@@ -21,6 +21,7 @@
 #include "Direction.hpp"
 #include "LayerCoord.hpp"
 #include "Orientation.hpp"
+#include "RoutingAllowedNet.hpp"
 #include "RTHeader.hpp"
 #include "Utility.hpp"
 
@@ -37,7 +38,8 @@ enum class SRNodeState
 
 inline bool isSRPlanarOrientation(Orientation orientation)
 {
-  return orientation == Orientation::kEast || orientation == Orientation::kWest || orientation == Orientation::kSouth || orientation == Orientation::kNorth;
+  return orientation == Orientation::kEast || orientation == Orientation::kWest || orientation == Orientation::kSouth
+         || orientation == Orientation::kNorth;
 }
 
 inline bool isSRViaOrientation(Orientation orientation)
@@ -91,9 +93,9 @@ class SRNode : public LayerCoord
   std::map<Orientation, SRNode*>& get_neighbor_node_map() { return _neighbor_node_map; }
   std::map<Orientation, int32_t>& get_orient_supply_map() { return _orient_supply_map; }
   std::map<int32_t, std::set<Orientation>>& get_ignore_net_orient_map() { return _ignore_net_orient_map; }
+  RoutingOrientAllowedNetMap& get_orient_allowed_net_map() { return _orient_allowed_net_map; }
   std::map<Orientation, std::set<int32_t>>& get_orient_net_map() { return _orient_net_map; }
   std::map<int32_t, std::set<Orientation>>& get_net_orient_map() { return _net_orient_map; }
-  double get_congestion_risk() const { return _congestion_risk; }
   // setter
   void set_boundary_wire_unit(const double boundary_wire_unit) { _boundary_wire_unit = boundary_wire_unit; }
   void set_internal_wire_unit(const double internal_wire_unit) { _internal_wire_unit = internal_wire_unit; }
@@ -105,9 +107,13 @@ class SRNode : public LayerCoord
     rebuildFastSupply();
   }
   void set_ignore_net_orient_map(const std::map<int32_t, std::set<Orientation>>& ignore_net_orient_map) { _ignore_net_orient_map = ignore_net_orient_map; }
+  void set_orient_allowed_net_map(const RoutingOrientAllowedNetMap& orient_allowed_net_map)
+  {
+    _orient_allowed_net_map = orient_allowed_net_map;
+    rebuildFastDemand();
+  }
   void set_orient_net_map(const std::map<Orientation, std::set<int32_t>>& orient_net_map) { _orient_net_map = orient_net_map; }
   void set_net_orient_map(const std::map<int32_t, std::set<Orientation>>& net_orient_map) { _net_orient_map = net_orient_map; }
-  void set_congestion_risk(const double congestion_risk) { _congestion_risk = congestion_risk; }
   // function
   SRNode* getNeighborNode(Orientation orientation)
   {
@@ -193,6 +199,10 @@ class SRNode : public LayerCoord
     }
     double cost = 0;
     cost += (overflow_unit * (boundary_overflow + internal_overflow));
+    int32_t policy_overflow = getRoutingPolicyOverflow(_orient_allowed_net_map, net_orient_map);
+    if (policy_overflow > 0) {
+      cost += overflow_unit * calcCost(policy_overflow, 0);
+    }
     return cost;
   }
   double getFastCost(int32_t net_idx, Direction direction, double overflow_unit)
@@ -203,16 +213,19 @@ class SRNode : public LayerCoord
     std::array<int32_t, 4> orient_demand_count = _orient_demand_count;
     int32_t internal_wire_demand_count = _internal_wire_demand_count;
     int32_t internal_via_only_demand_count = _internal_via_only_demand_count;
+    int32_t policy_overflow = _policy_overflow;
 
     std::set<Orientation> orient_set;
     if (RTUTIL.exist(_net_orient_map, net_idx)) {
       orient_set = _net_orient_map[net_idx];
     }
+    policy_overflow -= getRoutingPolicyOverflow(_orient_allowed_net_map, net_idx, orient_set);
     delFastDemand(net_idx, orient_set, orient_demand_count, internal_wire_demand_count, internal_via_only_demand_count);
     addDirectionToOrientSet(direction, orient_set);
+    policy_overflow += getRoutingPolicyOverflow(_orient_allowed_net_map, net_idx, orient_set);
     addFastDemand(net_idx, orient_set, orient_demand_count, internal_wire_demand_count, internal_via_only_demand_count);
 
-    return getFastCostByDemandCount(orient_demand_count, internal_wire_demand_count, internal_via_only_demand_count, overflow_unit);
+    return getFastCostByDemandCount(orient_demand_count, internal_wire_demand_count, internal_via_only_demand_count, policy_overflow, overflow_unit);
   }
   bool validDemandUnit()
   {
@@ -335,7 +348,7 @@ class SRNode : public LayerCoord
       }
       internal_overflow += std::max(0.0, internal_demand - internal_supply);
     }
-    return (boundary_overflow + internal_overflow);
+    return (boundary_overflow + internal_overflow + _policy_overflow);
   }
   std::set<int32_t> getOverflowNetSet()
   {
@@ -394,6 +407,11 @@ class SRNode : public LayerCoord
         for (auto& [net_idx, orient_set] : _net_orient_map) {
           overflow_net_set.insert(net_idx);
         }
+      }
+    }
+    for (auto& [net_idx, orient_set] : _net_orient_map) {
+      if (getRoutingPolicyOverflow(_orient_allowed_net_map, net_idx, orient_set) > 0) {
+        overflow_net_set.insert(net_idx);
       }
     }
     return overflow_net_set;
@@ -494,13 +512,14 @@ class SRNode : public LayerCoord
   std::array<int32_t, 4> _orient_supply_count = {0, 0, 0, 0};
   int32_t _internal_wire_demand_count = 0;
   int32_t _internal_via_only_demand_count = 0;
+  int32_t _policy_overflow = 0;
   double _internal_supply_count = 0;
   std::map<Orientation, SRNode*> _neighbor_node_map;
   std::map<Orientation, int32_t> _orient_supply_map;
   std::map<int32_t, std::set<Orientation>> _ignore_net_orient_map;
+  RoutingOrientAllowedNetMap _orient_allowed_net_map;
   std::map<Orientation, std::set<int32_t>> _orient_net_map;
   std::map<int32_t, std::set<Orientation>> _net_orient_map;
-  double _congestion_risk = 0;
 #if 1  // astar
   // single path
   SRNodeState _state = SRNodeState::kNone;
@@ -529,22 +548,25 @@ class SRNode : public LayerCoord
     _orient_demand_count.fill(0);
     _internal_wire_demand_count = 0;
     _internal_via_only_demand_count = 0;
+    _policy_overflow = 0;
   }
   void addFastDemand(int32_t net_idx, const std::set<Orientation>& orient_set)
   {
+    _policy_overflow += getRoutingPolicyOverflow(_orient_allowed_net_map, net_idx, orient_set);
     addFastDemand(net_idx, orient_set, _orient_demand_count, _internal_wire_demand_count, _internal_via_only_demand_count);
   }
   void delFastDemand(int32_t net_idx, const std::set<Orientation>& orient_set)
   {
+    _policy_overflow -= getRoutingPolicyOverflow(_orient_allowed_net_map, net_idx, orient_set);
     delFastDemand(net_idx, orient_set, _orient_demand_count, _internal_wire_demand_count, _internal_via_only_demand_count);
   }
-  void addFastDemand(int32_t net_idx, const std::set<Orientation>& orient_set, std::array<int32_t, 4>& orient_demand_count, int32_t& internal_wire_demand_count,
-                     int32_t& internal_via_only_demand_count)
+  void addFastDemand(int32_t net_idx, const std::set<Orientation>& orient_set, std::array<int32_t, 4>& orient_demand_count,
+                     int32_t& internal_wire_demand_count, int32_t& internal_via_only_demand_count)
   {
     updateFastDemand(net_idx, orient_set, 1, orient_demand_count, internal_wire_demand_count, internal_via_only_demand_count);
   }
-  void delFastDemand(int32_t net_idx, const std::set<Orientation>& orient_set, std::array<int32_t, 4>& orient_demand_count, int32_t& internal_wire_demand_count,
-                     int32_t& internal_via_only_demand_count)
+  void delFastDemand(int32_t net_idx, const std::set<Orientation>& orient_set, std::array<int32_t, 4>& orient_demand_count,
+                     int32_t& internal_wire_demand_count, int32_t& internal_via_only_demand_count)
   {
     updateFastDemand(net_idx, orient_set, -1, orient_demand_count, internal_wire_demand_count, internal_via_only_demand_count);
   }
@@ -572,8 +594,8 @@ class SRNode : public LayerCoord
       internal_via_only_demand_count += delta;
     }
   }
-  double getFastCostByDemandCount(const std::array<int32_t, 4>& orient_demand_count, int32_t internal_wire_demand_count, int32_t internal_via_only_demand_count,
-                                  double overflow_unit)
+  double getFastCostByDemandCount(const std::array<int32_t, 4>& orient_demand_count, int32_t internal_wire_demand_count,
+                                  int32_t internal_via_only_demand_count, int32_t policy_overflow, double overflow_unit)
   {
     double boundary_overflow = 0;
     for (int32_t orient_idx = 0; orient_idx < 4; orient_idx++) {
@@ -581,7 +603,11 @@ class SRNode : public LayerCoord
     }
     double internal_demand = internal_wire_demand_count * _internal_wire_unit + internal_via_only_demand_count * _internal_via_unit;
     double internal_overflow = calcCost(internal_demand, _internal_supply_count);
-    return overflow_unit * (boundary_overflow + internal_overflow);
+    double cost = overflow_unit * (boundary_overflow + internal_overflow);
+    if (policy_overflow > 0) {
+      cost += overflow_unit * calcCost(policy_overflow, 0);
+    }
+    return cost;
   }
   bool isIgnored(int32_t net_idx, Orientation orient)
   {
@@ -590,7 +616,8 @@ class SRNode : public LayerCoord
   bool isViaIgnored(int32_t net_idx)
   {
     return RTUTIL.exist(_ignore_net_orient_map, net_idx)
-           && (RTUTIL.exist(_ignore_net_orient_map[net_idx], Orientation::kAbove) || RTUTIL.exist(_ignore_net_orient_map[net_idx], Orientation::kBelow));
+           && (RTUTIL.exist(_ignore_net_orient_map[net_idx], Orientation::kAbove)
+               || RTUTIL.exist(_ignore_net_orient_map[net_idx], Orientation::kBelow));
   }
 };
 

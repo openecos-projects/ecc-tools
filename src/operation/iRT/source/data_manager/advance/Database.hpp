@@ -20,6 +20,7 @@
 #include "Die.hpp"
 #include "GCell.hpp"
 #include "Logger.hpp"
+#include "Macro.hpp"
 #include "Net.hpp"
 #include "Obstacle.hpp"
 #include "RTHeader.hpp"
@@ -58,6 +59,7 @@ class Database
   std::map<int32_t, PlanarRect>& get_layer_cut_shape_map() { return _layer_cut_shape_map; }
   std::vector<Obstacle>& get_routing_obstacle_list() { return _routing_obstacle_list; }
   std::vector<Obstacle>& get_cut_obstacle_list() { return _cut_obstacle_list; }
+  std::vector<Macro>& get_macro_list() { return _macro_list; }
   std::vector<Net>& get_net_list() { return _net_list; }
   int32_t get_detection_distance() const { return _detection_distance; }
   GridMap<GCell>& get_gcell_map() { return _gcell_map; }
@@ -94,6 +96,7 @@ class Database
   std::map<int32_t, PlanarRect> _layer_cut_shape_map;
   std::vector<Obstacle> _routing_obstacle_list;
   std::vector<Obstacle> _cut_obstacle_list;
+  std::vector<Macro> _macro_list;
   std::vector<Net> _net_list;
   int32_t _detection_distance = -1;
   GridMap<GCell> _gcell_map;

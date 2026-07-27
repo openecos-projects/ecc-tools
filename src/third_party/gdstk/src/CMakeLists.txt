@@ -4,6 +4,10 @@ include(CMakePackageConfigHelpers)
 # --- Dependencies ---
 
 find_package(ZLIB 1.2.7 REQUIRED)
+# ecc_py is distributed as a self-contained wheel/AppImage payload.  Prefer
+# Qhull's static target so importing the binding does not require a host
+# libqhull_r shared library.
+set(QHULL_REQUIRED_TYPE STATIC)
 find_package(Qhull 8 QUIET)
 
 # --- Source and header lists ---

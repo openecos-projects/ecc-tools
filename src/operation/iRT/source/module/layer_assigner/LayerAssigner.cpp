@@ -69,7 +69,6 @@ void LayerAssigner::assign()
   outputGuide(la_model);
   outputNetCSV(la_model);
   outputOverflowCSV(la_model);
-  outputCongestionCSV(la_model);
   outputJson(la_model);
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -178,6 +177,9 @@ void LayerAssigner::buildLayerNodeMap(LAModel& la_model)
         la_node.set_internal_via_unit(gcell_map[x][y].get_internal_via_unit());
         if (RTUTIL.exist(gcell_map[x][y].get_routing_ignore_net_orient_map(), layer_idx)) {
           la_node.set_ignore_net_orient_map(gcell_map[x][y].get_routing_ignore_net_orient_map()[layer_idx]);
+        }
+        if (RTUTIL.exist(gcell_map[x][y].get_routing_allowed_net_map(), layer_idx)) {
+          la_node.set_orient_allowed_net_map(gcell_map[x][y].get_routing_allowed_net_map()[layer_idx]);
         }
       }
     }
@@ -481,7 +483,8 @@ std::vector<LayerAssigner::LAOverflowEdge> LayerAssigner::getOverflowEdgeList(LA
       }
       overflow_edge.has_true_overflow = (overflow_edge.max_true_overflow > RT_ERROR);
       bool hard_trigger = overflow_edge.has_true_overflow;
-      bool soft_trigger = (!hard_trigger && overflow_edge.max_usage_ratio >= soft_start_ratio && overflow_edge.max_soft_congestion >= min_soft_score);
+      bool soft_trigger = (!hard_trigger && overflow_edge.max_usage_ratio >= soft_start_ratio
+                           && overflow_edge.max_soft_congestion >= min_soft_score);
       if (!hard_trigger && !soft_trigger) {
         continue;
       }
@@ -619,10 +622,11 @@ void LayerAssigner::insertPointList(TNode<LayerCoord>* planar_node, TNode<LayerC
   }
   std::sort(offset_coord_pair_list.begin(), offset_coord_pair_list.end(),
             [](const std::pair<int32_t, PlanarCoord>& a, const std::pair<int32_t, PlanarCoord>& b) { return a.first < b.first; });
-  offset_coord_pair_list.erase(
-      std::unique(offset_coord_pair_list.begin(), offset_coord_pair_list.end(),
-                  [](const std::pair<int32_t, PlanarCoord>& a, const std::pair<int32_t, PlanarCoord>& b) { return a.first == b.first; }),
-      offset_coord_pair_list.end());
+  offset_coord_pair_list.erase(std::unique(offset_coord_pair_list.begin(), offset_coord_pair_list.end(),
+                                           [](const std::pair<int32_t, PlanarCoord>& a, const std::pair<int32_t, PlanarCoord>& b) {
+                                             return a.first == b.first;
+                                           }),
+                               offset_coord_pair_list.end());
   if (offset_coord_pair_list.empty()) {
     return;
   }
@@ -854,7 +858,9 @@ double LayerAssigner::getLayerBiasCost(LAModel& la_model, LAPackage& la_package,
     return layer_bias_unit * 0.4 * std::abs(layer_rank - target_rank);
   }
 
-  auto clamp = [](double value, double lower_bound, double upper_bound) { return std::max(lower_bound, std::min(value, upper_bound)); };
+  auto clamp = [](double value, double lower_bound, double upper_bound) {
+    return std::max(lower_bound, std::min(value, upper_bound));
+  };
   auto smooth_step = [&clamp](double value, double lower_bound, double upper_bound) {
     double ratio = clamp((value - lower_bound) / (upper_bound - lower_bound), 0.0, 1.0);
     return ratio * ratio * (3.0 - 2.0 * ratio);
@@ -1466,220 +1472,6 @@ void LayerAssigner::outputOverflowCSV(LAModel& la_model)
       RTUTIL.pushStream(overflow_csv_file, "\n");
     }
     RTUTIL.closeFileStream(overflow_csv_file);
-  }
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void LayerAssigner::outputCongestionCSV(LAModel& la_model)
-{
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  std::string& la_temp_directory_path = RTDM.getConfig().la_temp_directory_path;
-  int32_t output_inter_result = RTDM.getConfig().output_inter_result;
-  if (!output_inter_result) {
-    return;
-  }
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  constexpr int32_t kMaxNetListSize = 64;
-  constexpr double kHighUsageThreshold = 0.90;
-  bool output_full = (output_inter_result >= 2);
-  int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
-  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
-  std::vector<GridMap<LANode>>& layer_node_map = la_model.get_layer_node_map();
-
-  auto calcUsageRatio = [](double demand, double supply) {
-    if (supply <= 0) {
-      return demand <= 0 ? 0.0 : demand + 1.0;
-    }
-    return demand / supply;
-  };
-  auto joinNetSet = [&](const std::set<int32_t>& net_set) {
-    std::string net_list_str;
-    int32_t output_num = 0;
-    for (int32_t net_idx : net_set) {
-      if (output_num >= kMaxNetListSize) {
-        net_list_str += "|...";
-        break;
-      }
-      if (!net_list_str.empty()) {
-        net_list_str += "|";
-      }
-      net_list_str += std::to_string(net_idx);
-      output_num++;
-    }
-    return net_list_str;
-  };
-  auto getDemandNetSet = [](LANode& la_node, Orientation orient) {
-    std::set<int32_t> net_set;
-    if (RTUTIL.exist(la_node.get_orient_net_map(), orient)) {
-      for (int32_t net_idx : la_node.get_orient_net_map()[orient]) {
-        if (RTUTIL.exist(la_node.get_ignore_net_orient_map(), net_idx) && RTUTIL.exist(la_node.get_ignore_net_orient_map()[net_idx], orient)) {
-          continue;
-        }
-        net_set.insert(net_idx);
-      }
-    }
-    return net_set;
-  };
-  auto getInternalDemand = [](LANode& la_node, std::set<int32_t>& internal_net_set) {
-    double demand = 0;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      if (RTUTIL.exist(la_node.get_orient_net_map(), orient)) {
-        for (int32_t net_idx : la_node.get_orient_net_map()[orient]) {
-          if (RTUTIL.exist(la_node.get_ignore_net_orient_map(), net_idx) && RTUTIL.exist(la_node.get_ignore_net_orient_map()[net_idx], orient)) {
-            continue;
-          }
-          demand += la_node.get_internal_wire_unit();
-          internal_net_set.insert(net_idx);
-        }
-      }
-    }
-    for (auto& [net_idx, orient_set] : la_node.get_net_orient_map()) {
-      if (RTUTIL.exist(la_node.get_ignore_net_orient_map(), net_idx)
-          && (RTUTIL.exist(la_node.get_ignore_net_orient_map()[net_idx], Orientation::kAbove)
-              || RTUTIL.exist(la_node.get_ignore_net_orient_map()[net_idx], Orientation::kBelow))) {
-        continue;
-      }
-      if (RTUTIL.exist(orient_set, Orientation::kEast) || RTUTIL.exist(orient_set, Orientation::kWest) || RTUTIL.exist(orient_set, Orientation::kSouth)
-          || RTUTIL.exist(orient_set, Orientation::kNorth)) {
-        continue;
-      }
-      if (RTUTIL.exist(orient_set, Orientation::kAbove) || RTUTIL.exist(orient_set, Orientation::kBelow)) {
-        demand += la_node.get_internal_via_unit();
-        internal_net_set.insert(net_idx);
-      }
-    }
-    return demand;
-  };
-  auto getSupply = [](LANode& la_node, Orientation orient) {
-    if (RTUTIL.exist(la_node.get_orient_supply_map(), orient)) {
-      return static_cast<double>(la_node.get_orient_supply_map()[orient]);
-    }
-    return 0.0;
-  };
-  auto getInternalSupply = [](LANode& la_node) {
-    double supply = 0;
-    for (auto& [orient, orient_supply] : la_node.get_orient_supply_map()) {
-      if (orient == Orientation::kEast || orient == Orientation::kWest || orient == Orientation::kSouth || orient == Orientation::kNorth) {
-        supply += orient_supply;
-      }
-    }
-    return supply;
-  };
-  auto getMaxUsageRatio = [&](LANode& la_node) {
-    double max_usage_ratio = 0;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      std::set<int32_t> net_set = getDemandNetSet(la_node, orient);
-      max_usage_ratio = std::max(max_usage_ratio, calcUsageRatio(net_set.size() * la_node.get_boundary_wire_unit(), getSupply(la_node, orient)));
-    }
-    std::set<int32_t> internal_net_set;
-    max_usage_ratio = std::max(max_usage_ratio, calcUsageRatio(getInternalDemand(la_node, internal_net_set), getInternalSupply(la_node)));
-    return max_usage_ratio;
-  };
-  auto getHighUsage = [&](LANode& la_node) {
-    double high_usage = 0;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      std::set<int32_t> net_set = getDemandNetSet(la_node, orient);
-      high_usage += std::max(0.0, calcUsageRatio(net_set.size() * la_node.get_boundary_wire_unit(), getSupply(la_node, orient)) - kHighUsageThreshold);
-    }
-    std::set<int32_t> internal_net_set;
-    high_usage += std::max(0.0, calcUsageRatio(getInternalDemand(la_node, internal_net_set), getInternalSupply(la_node)) - kHighUsageThreshold);
-    return high_usage;
-  };
-  auto getOverflowNetSet = [&](LANode& la_node) {
-    std::set<int32_t> overflow_net_set;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      std::set<int32_t> net_set = getDemandNetSet(la_node, orient);
-      double demand = net_set.size() * la_node.get_boundary_wire_unit();
-      if (demand > getSupply(la_node, orient)) {
-        overflow_net_set.insert(net_set.begin(), net_set.end());
-      }
-    }
-    std::set<int32_t> internal_net_set;
-    if (getInternalDemand(la_node, internal_net_set) > getInternalSupply(la_node)) {
-      overflow_net_set.insert(internal_net_set.begin(), internal_net_set.end());
-    }
-    return overflow_net_set;
-  };
-  auto getHighUsageNetSet = [&](LANode& la_node) {
-    std::set<int32_t> high_usage_net_set;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      std::set<int32_t> net_set = getDemandNetSet(la_node, orient);
-      double demand = net_set.size() * la_node.get_boundary_wire_unit();
-      if (calcUsageRatio(demand, getSupply(la_node, orient)) > kHighUsageThreshold + RT_ERROR) {
-        high_usage_net_set.insert(net_set.begin(), net_set.end());
-      }
-    }
-    std::set<int32_t> internal_net_set;
-    if (calcUsageRatio(getInternalDemand(la_node, internal_net_set), getInternalSupply(la_node)) > kHighUsageThreshold + RT_ERROR) {
-      high_usage_net_set.insert(internal_net_set.begin(), internal_net_set.end());
-    }
-    return high_usage_net_set;
-  };
-  auto pushHeader = [](std::ofstream* csv_file) {
-    RTUTIL.pushStream(csv_file,
-                      "stage,iter,layer_idx,layer_name,x,y,real_llx,real_lly,real_urx,real_ury,resource,orient,demand,supply,overflow,"
-                      "usage_ratio,node_total_demand,node_total_overflow,node_max_usage_ratio,high_usage,congestion_risk,net_count,"
-                      "overflow_net_count,high_usage_net_count,net_list,overflow_net_list,high_usage_net_list\n");
-  };
-  auto pushRow = [&](std::ofstream* csv_file, bool include_all, LANode& la_node, RoutingLayer& routing_layer, const std::string& resource,
-                     const std::string& orient_name, double demand, double supply, const std::set<int32_t>& net_set, const std::set<int32_t>& overflow_net_set,
-                     const std::set<int32_t>& high_usage_net_set) {
-    double usage_ratio = calcUsageRatio(demand, supply);
-    double overflow = std::max(0.0, demand - supply);
-    if (!include_all && overflow <= 0 && usage_ratio < kHighUsageThreshold) {
-      return;
-    }
-    PlanarRect real_rect = RTUTIL.getRealRectByGCell(la_node.get_planar_coord(), gcell_axis);
-    RTUTIL.pushStream(csv_file, "LA,-1,", routing_layer.get_layer_idx(), ",", routing_layer.get_layer_name(), ",", la_node.get_x(), ",", la_node.get_y(), ",",
-                      real_rect.get_ll_x() / 1.0 / micron_dbu, ",", real_rect.get_ll_y() / 1.0 / micron_dbu, ",", real_rect.get_ur_x() / 1.0 / micron_dbu, ",",
-                      real_rect.get_ur_y() / 1.0 / micron_dbu, ",", resource, ",", orient_name, ",", demand, ",", supply, ",", overflow, ",", usage_ratio, ",",
-                      la_node.getDemand(), ",", la_node.getOverflow(), ",", getMaxUsageRatio(la_node), ",", getHighUsage(la_node), ",0,", net_set.size(), ",",
-                      overflow_net_set.size(), ",", high_usage_net_set.size(), ",", joinNetSet(net_set), ",", joinNetSet(overflow_net_set), ",",
-                      joinNetSet(high_usage_net_set), "\n");
-  };
-
-  std::ofstream* hotspot_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(la_temp_directory_path, "congestion_hotspot_LA.csv"));
-  pushHeader(hotspot_csv_file);
-  std::ofstream* full_csv_file = nullptr;
-  if (output_full) {
-    full_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(la_temp_directory_path, "congestion_full_LA.csv"));
-    pushHeader(full_csv_file);
-  }
-  auto pushToFiles
-      = [&](LANode& la_node, RoutingLayer& routing_layer, const std::string& resource, const std::string& orient_name, double demand, double supply,
-            const std::set<int32_t>& net_set, const std::set<int32_t>& overflow_net_set, const std::set<int32_t>& high_usage_net_set) {
-          pushRow(hotspot_csv_file, false, la_node, routing_layer, resource, orient_name, demand, supply, net_set, overflow_net_set, high_usage_net_set);
-          if (full_csv_file != nullptr) {
-            pushRow(full_csv_file, true, la_node, routing_layer, resource, orient_name, demand, supply, net_set, overflow_net_set, high_usage_net_set);
-          }
-        };
-
-  for (RoutingLayer& routing_layer : routing_layer_list) {
-    GridMap<LANode>& la_node_map = layer_node_map[routing_layer.get_layer_idx()];
-    for (int32_t x = 0; x < la_node_map.get_x_size(); x++) {
-      for (int32_t y = 0; y < la_node_map.get_y_size(); y++) {
-        LANode& la_node = la_node_map[x][y];
-        std::set<int32_t> overflow_net_set = getOverflowNetSet(la_node);
-        std::set<int32_t> high_usage_net_set = getHighUsageNetSet(la_node);
-        for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-          std::set<int32_t> net_set = getDemandNetSet(la_node, orient);
-          double demand = net_set.size() * la_node.get_boundary_wire_unit();
-          pushToFiles(la_node, routing_layer, "boundary", GetOrientationName()(orient), demand, getSupply(la_node, orient), net_set, overflow_net_set,
-                      high_usage_net_set);
-        }
-        std::set<int32_t> internal_net_set;
-        double internal_demand = getInternalDemand(la_node, internal_net_set);
-        pushToFiles(la_node, routing_layer, "internal", "internal", internal_demand, getInternalSupply(la_node), internal_net_set, overflow_net_set,
-                    high_usage_net_set);
-      }
-    }
-  }
-
-  RTUTIL.closeFileStream(hotspot_csv_file);
-  if (full_csv_file != nullptr) {
-    RTUTIL.closeFileStream(full_csv_file);
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

@@ -24,8 +24,7 @@ class SRIterParam
 {
  public:
   SRIterParam() = default;
-  SRIterParam(double prefer_wire_unit, double via_unit, int32_t size, int32_t offset, int32_t schedule_interval, double overflow_unit,
-              double congestion_risk_unit, int32_t congestion_risk_radius, int32_t max_routed_times)
+  SRIterParam(double prefer_wire_unit, double via_unit, int32_t size, int32_t offset, int32_t schedule_interval, double overflow_unit, int32_t max_routed_times)
   {
     _prefer_wire_unit = prefer_wire_unit;
     _via_unit = via_unit;
@@ -33,8 +32,6 @@ class SRIterParam
     _offset = offset;
     _schedule_interval = schedule_interval;
     _overflow_unit = overflow_unit;
-    _congestion_risk_unit = congestion_risk_unit;
-    _congestion_risk_radius = congestion_risk_radius;
     _max_routed_times = max_routed_times;
   }
   ~SRIterParam() = default;
@@ -45,8 +42,6 @@ class SRIterParam
   int32_t get_offset() const { return _offset; }
   int32_t get_schedule_interval() const { return _schedule_interval; }
   double get_overflow_unit() const { return _overflow_unit; }
-  double get_congestion_risk_unit() const { return _congestion_risk_unit; }
-  int32_t get_congestion_risk_radius() const { return _congestion_risk_radius; }
   int32_t get_max_routed_times() const { return _max_routed_times; }
   // setter
   void set_prefer_wire_unit(const double prefer_wire_unit) { _prefer_wire_unit = prefer_wire_unit; }
@@ -55,8 +50,6 @@ class SRIterParam
   void set_offset(const int32_t offset) { _offset = offset; }
   void set_schedule_interval(const int32_t schedule_interval) { _schedule_interval = schedule_interval; }
   void set_overflow_unit(const double overflow_unit) { _overflow_unit = overflow_unit; }
-  void set_congestion_risk_unit(const double congestion_risk_unit) { _congestion_risk_unit = congestion_risk_unit; }
-  void set_congestion_risk_radius(const int32_t congestion_risk_radius) { _congestion_risk_radius = congestion_risk_radius; }
   void set_max_routed_times(const int32_t max_routed_times) { _max_routed_times = max_routed_times; }
 
  private:
@@ -66,8 +59,6 @@ class SRIterParam
   int32_t _offset = -1;
   int32_t _schedule_interval = -1;
   double _overflow_unit = 0;
-  double _congestion_risk_unit = 0;
-  int32_t _congestion_risk_radius = 0;
   int32_t _max_routed_times = 0;
 };
 

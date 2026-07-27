@@ -20,7 +20,6 @@
 #include "DRIterParam.hpp"
 #include "DRNet.hpp"
 #include "GridMap.hpp"
-#include "PlanarRect.hpp"
 
 namespace irt {
 
@@ -36,7 +35,6 @@ class DRModel
   DRIterParam& get_dr_iter_param() { return _dr_iter_param; }
   GridMap<DRBox>& get_dr_box_map() { return _dr_box_map; }
   std::vector<std::vector<DRBoxId>>& get_dr_box_id_list_list() { return _dr_box_id_list_list; }
-  std::vector<PlanarRect>& get_dirty_region_list() { return _dirty_region_list; }
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_best_net_detailed_result_map() { return _best_net_detailed_result_map; }
   std::map<int32_t, std::vector<EXTLayerRect>>& get_best_net_detailed_patch_map() { return _best_net_detailed_patch_map; }
   std::vector<Violation>& get_best_route_violation_list() { return _best_route_violation_list; }
@@ -47,7 +45,6 @@ class DRModel
   void set_dr_iter_param(const DRIterParam& dr_iter_param) { _dr_iter_param = dr_iter_param; }
   void set_dr_box_map(const GridMap<DRBox>& dr_box_map) { _dr_box_map = dr_box_map; }
   void set_dr_box_id_list_list(const std::vector<std::vector<DRBoxId>>& dr_box_id_list_list) { _dr_box_id_list_list = dr_box_id_list_list; }
-  void set_dirty_region_list(const std::vector<PlanarRect>& dirty_region_list) { _dirty_region_list = dirty_region_list; }
   void set_best_net_detailed_result_map(const std::map<int32_t, std::vector<Segment<LayerCoord>>>& best_net_detailed_result_map)
   {
     _best_net_detailed_result_map = best_net_detailed_result_map;
@@ -65,7 +62,6 @@ class DRModel
   DRIterParam _dr_iter_param;
   GridMap<DRBox> _dr_box_map;
   std::vector<std::vector<DRBoxId>> _dr_box_id_list_list;
-  std::vector<PlanarRect> _dirty_region_list;
   std::map<int32_t, std::vector<Segment<LayerCoord>>> _best_net_detailed_result_map;
   std::map<int32_t, std::vector<EXTLayerRect>> _best_net_detailed_patch_map;
   std::vector<Violation> _best_route_violation_list;

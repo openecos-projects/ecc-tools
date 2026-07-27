@@ -14,15 +14,8 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-/**
- * @file tcl_run_rcx.cpp
- * @author Yipei Xu (yipeix@163.com)
- * @brief
- * @version 0.1
- * @date 2025-12-09
- */
-#include "RCXAPI.hh"
-#include "tcl_ircx.h"
+#include "RCXInterface.hpp"
+#include "tcl_rcx.h"
 
 namespace tcl {
 
@@ -35,8 +28,8 @@ unsigned TclRunRCX::exec()
   if (!check()) {
     return 0;
   }
-
-  return RCX_API_INST.run() ? 1U : 0U;
+  RCXI.runRCX();
+  return 1;
 }
 
 }  // namespace tcl

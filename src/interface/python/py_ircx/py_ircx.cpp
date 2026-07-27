@@ -16,7 +16,8 @@
 // ***************************************************************************************
 #include "py_ircx.h"
 
-#include "RCXAPI.hh"
+#include "RCXBackendType.hpp"
+#include "RCXInterface.hpp"
 #include "ircx_ics55.h"
 #include "idm.h"
 
@@ -24,14 +25,7 @@ namespace python_interface {
 
 namespace {
 
-enum class RcxBackend
-{
-  kUninitialized,
-  kNative,
-  kIcs55,
-};
-
-RcxBackend active_backend = RcxBackend::kUninitialized;
+RCXBackendType active_backend = RCXBackendType::kNone;
 
 bool is_native_pdk(const std::optional<std::string>& pdk)
 {
@@ -50,55 +44,51 @@ bool validate_pdk(const std::optional<std::string>& pdk)
 
 }  // namespace
 
+bool destroy_rcx()
+{
+  if (active_backend == RCXBackendType::kNative) {
+    RCXI.destroyRCX();
+  } else if (active_backend == RCXBackendType::kIcs55) {
+    ircx_ics55_destroy();
+  }
+  active_backend = RCXBackendType::kNone;
+  return true;
+}
+
 bool init_rcx(const std::string& config, const std::optional<std::string>& pdk)
 {
-  active_backend = RcxBackend::kUninitialized;
+  active_backend = RCXBackendType::kNone;
 
   if (!validate_pdk(pdk)) {
     return false;
   }
 
   if (is_ics55_pdk(pdk)) {
-    if (ircx_ics55_init(config.c_str()) != 0) {
-      active_backend = RcxBackend::kIcs55;
-      return true;
-    }
-
-    return false;
-  }
-
-  if (RCX_API_INST.init(config)) {
-    active_backend = RcxBackend::kNative;
+    ircx_ics55_init(config.c_str(), dmInst->get_idb_design());
+    active_backend = RCXBackendType::kIcs55;
     return true;
   }
 
-  return false;
+  std::map<std::string, std::any> config_map;
+  config_map["-config"] = config;
+  RCXI.initRCX(config_map);
+  active_backend = RCXBackendType::kNative;
+  return true;
 }
 
 bool run_rcx()
 {
-  if (active_backend == RcxBackend::kIcs55) {
-    return ircx_ics55_run_with_idb_design(dmInst->get_idb_design()) != 0;
+  if (active_backend == RCXBackendType::kIcs55) {
+    ircx_ics55_run();
+    return true;
   }
 
-  if (active_backend != RcxBackend::kNative) {
+  if (active_backend != RCXBackendType::kNative) {
     return false;
   }
 
-  return RCX_API_INST.run();
-}
-
-bool report_rcx()
-{
-  if (active_backend == RcxBackend::kIcs55) {
-    return ircx_ics55_report() != 0;
-  }
-
-  if (active_backend != RcxBackend::kNative) {
-    return false;
-  }
-
-  return RCX_API_INST.report();
+  RCXI.runRCX();
+  return true;
 }
 
 }  // namespace python_interface

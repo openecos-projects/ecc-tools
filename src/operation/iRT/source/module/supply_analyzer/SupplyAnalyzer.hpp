@@ -54,6 +54,7 @@ class SupplyAnalyzer
   std::vector<LayerRect> getCrossingWireList(EXTLayerRect& search_rect);
   bool isAccess(LayerRect& wire, std::vector<PlanarRect>& obs_rect_list);
   void buildIgnoreNet(SAModel& sa_model);
+  void buildMacroPinEscapeAllow(SAModel& sa_model);
   void analyzeDemandUnit(SAModel& sa_model);
 
 #if 1  // exhibit

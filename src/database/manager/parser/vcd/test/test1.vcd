@@ -1,0 +1,26 @@
+$timescale 1ns $end
+$scope module top $end
+$var wire 1 ! a $end
+$var wire 1 ! alias_a $end
+$scope module u0 $end
+$var reg 2 " bus [1:0] $end
+$var wire 4 # hexbus [3:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+#10
+0!
+b00 "
+h0 #
+#20
+1!
+b01 "
+ha #
+#30
+x!
+b11 "
+hf #
+#40
+0!
+bzz "
+h0 #

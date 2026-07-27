@@ -32,19 +32,16 @@ class SRModel
   std::vector<SRNet>& get_sr_net_list() { return _sr_net_list; }
   bool get_initial_routing() const { return _initial_routing; }
   std::vector<GridMap<SRNode>>& get_layer_node_map() { return _layer_node_map; }
-  std::vector<GridMap<double>>& get_layer_congestion_risk_map() { return _layer_congestion_risk_map; }
   int32_t get_iter() const { return _iter; }
   SRIterParam& get_sr_iter_param() { return _sr_iter_param; }
   GridMap<SRBox>& get_sr_box_map() { return _sr_box_map; }
   std::vector<std::vector<SRBoxId>>& get_sr_box_id_list_list() { return _sr_box_id_list_list; }
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_best_net_task_global_result_map() { return _best_net_task_global_result_map; }
   double get_best_overflow() const { return _best_overflow; }
-  double get_best_congestion_risk() const { return _best_congestion_risk; }
   // setter
   void set_sr_net_list(const std::vector<SRNet>& sr_net_list) { _sr_net_list = sr_net_list; }
   void set_initial_routing(const bool initial_routing) { _initial_routing = initial_routing; }
   void set_layer_node_map(const std::vector<GridMap<SRNode>>& layer_node_map) { _layer_node_map = layer_node_map; }
-  void set_layer_congestion_risk_map(const std::vector<GridMap<double>>& layer_congestion_risk_map) { _layer_congestion_risk_map = layer_congestion_risk_map; }
   void set_iter(const int32_t iter) { _iter = iter; }
   void set_sr_iter_param(const SRIterParam& sr_iter_param) { _sr_iter_param = sr_iter_param; }
   void set_sr_box_map(const GridMap<SRBox>& sr_box_map) { _sr_box_map = sr_box_map; }
@@ -54,20 +51,17 @@ class SRModel
     _best_net_task_global_result_map = best_net_task_global_result_map;
   }
   void set_best_overflow(const double best_overflow) { _best_overflow = best_overflow; }
-  void set_best_congestion_risk(const double best_congestion_risk) { _best_congestion_risk = best_congestion_risk; }
 
  private:
   std::vector<SRNet> _sr_net_list;
   bool _initial_routing = true;
   std::vector<GridMap<SRNode>> _layer_node_map;
-  std::vector<GridMap<double>> _layer_congestion_risk_map;
   int32_t _iter = -1;
   SRIterParam _sr_iter_param;
   GridMap<SRBox> _sr_box_map;
   std::vector<std::vector<SRBoxId>> _sr_box_id_list_list;
   std::map<int32_t, std::vector<Segment<LayerCoord>>> _best_net_task_global_result_map;
   double _best_overflow = 0;
-  double _best_congestion_risk = 0;
 };
 
 }  // namespace irt

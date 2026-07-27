@@ -295,6 +295,35 @@ unsigned CmdInitSpef::exec()
   return 1;
 }
 
+CmdInitVcd::CmdInitVcd(const char* cmd_name) : TclCmd(cmd_name)
+{
+  TclStringOption* path = new TclStringOption(TCL_PATH, 1);
+  addOption(path);
+}
+
+unsigned CmdInitVcd::check()
+{
+  TclOption* path = getOptionOrArg(TCL_PATH);
+  LOG_FATAL_IF(!path);
+  return 1;
+}
+
+unsigned CmdInitVcd::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+
+  TclOption* vcd_name = getOptionOrArg(TCL_PATH);
+  const char* vcd_path = vcd_name->getStringVal();
+  if (vcd_path != nullptr) {
+    dmInst->get_config().set_vcd_path(vcd_path);
+    dmInst->readVcd(vcd_path);
+    return 1;
+  }
+  return 1;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

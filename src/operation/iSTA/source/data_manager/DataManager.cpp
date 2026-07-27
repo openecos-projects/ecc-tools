@@ -20,9 +20,6 @@
 #include "Monitor.hpp"
 #include "STAInterface.hpp"
 #include "Utility.hpp"
-#include "idm.h"
-#include "liberty/Lib.hh"
-#include "spef/SpefParser.hh"
 
 namespace ista {
 
@@ -97,12 +94,18 @@ void DataManager::buildConfig()
   _config.cp_temp_directory_path = _config.temp_directory_path + "clock_propagator/";
   // ********* TimingPropagator   ********* //
   _config.tp_temp_directory_path = _config.temp_directory_path + "timing_propagator/";
+  // ********* PowerPropagator    ********* //
+  _config.pp_temp_directory_path = _config.temp_directory_path + "power_propagator/";
   // ********** TimingAnalyzer   ********* //
   _config.ta_temp_directory_path = _config.temp_directory_path + "timing_analyzer/";
+  // ********** PowerAnalyzer    ********* //
+  _config.pa_temp_directory_path = _config.temp_directory_path + "power_analyzer/";
   // ******* TimingCharacterizer ******* //
   _config.tc_temp_directory_path = _config.temp_directory_path + "timing_characterizer/";
   // **********  TimingReporter   ********** //
   _config.tr_temp_directory_path = _config.temp_directory_path + "timing_reporter/";
+  // **********  PowerReporter    ********** //
+  _config.pr_temp_directory_path = _config.temp_directory_path + "power_reporter/";
   // ************  SDFWriter  ************* //
   _config.sw_temp_directory_path = _config.temp_directory_path + "sdf_writer/";
   /////////////////////////////////////////////
@@ -120,12 +123,18 @@ void DataManager::buildConfig()
   STAUTIL.createDir(_config.cp_temp_directory_path);
   // ********* TimingPropagator   ********* //
   STAUTIL.createDir(_config.tp_temp_directory_path);
+  // ********* PowerPropagator    ********* //
+  STAUTIL.createDir(_config.pp_temp_directory_path);
   // ********** TimingAnalyzer   ********* //
   STAUTIL.createDir(_config.ta_temp_directory_path);
+  // ********** PowerAnalyzer    ********* //
+  STAUTIL.createDir(_config.pa_temp_directory_path);
   // ******* TimingCharacterizer ******* //
   STAUTIL.createDir(_config.tc_temp_directory_path);
   // **********  TimingReporter   ********** //
   STAUTIL.createDir(_config.tr_temp_directory_path);
+  // **********  PowerReporter    ********** //
+  STAUTIL.createDir(_config.pr_temp_directory_path);
   // ************  SDFWriter  ************* //
   STAUTIL.createDir(_config.sw_temp_directory_path);
   /////////////////////////////////////////////
@@ -134,488 +143,10 @@ void DataManager::buildConfig()
 
 void DataManager::buildDatabase()
 {
-  buildTimingLibrary();
   buildInstanceList();
   buildNetList();
   buildInstanceTimingInfo();
-  buildParasiticLibrary();
   readConstraint();
-}
-
-void DataManager::buildTimingLibrary()
-{
-  Monitor monitor;
-  STALOG.info(Loc::current(), "Starting...");
-  bool old_silent_output = idb::Lib::isSilentOutput();
-  idb::Lib::setSilentOutput(true);
-  std::vector<std::unique_ptr<idb::LibLibrary>> lib_list;
-  for (idb::LibertyReader& liberty_reader : dmInst->get_lib_readers()) {
-    liberty_reader.linkLib();
-    idb::LibBuilder* lib_builder = liberty_reader.get_library_builder();
-    lib_list.push_back(lib_builder->takeLib());
-    delete lib_builder;
-    liberty_reader.set_library_builder(nullptr);
-  }
-  buildTimingCellMap(lib_list);
-  buildTimingLibraryInfo(lib_list);
-  idb::Lib::setSilentOutput(old_silent_output);
-  STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void DataManager::buildTimingCellMap(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
-{
-  Database& database = _database;
-  database.get_timing_library().get_cell_map().clear();
-  for (std::unique_ptr<idb::LibLibrary>& lib : lib_list) {
-    for (std::unique_ptr<idb::LibCell>& lib_cell : lib->get_cells()) {
-      makeTimingCell(lib_cell.get());
-    }
-  }
-}
-
-void DataManager::buildTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
-{
-  Database& database = _database;
-  idb::LibLibrary* reference_lib = getReferenceLib(lib_list);
-  if (reference_lib == nullptr) {
-    return;
-  }
-  TimingLibrary& timing_library = database.get_timing_library();
-  timing_library.set_has_library_info(true);
-  timing_library.set_comment(reference_lib->get_comment());
-  timing_library.set_simulation(reference_lib->get_simulation());
-  timing_library.set_library_feature_list(reference_lib->get_library_features());
-  timing_library.set_leakage_power_unit(reference_lib->get_leakage_power_unit());
-  timing_library.set_current_unit_name(reference_lib->get_current_unit_name());
-  timing_library.set_voltage_unit_name(reference_lib->get_voltage_unit_name());
-  timing_library.set_cap_unit(getTimingCapacitiveUnit(reference_lib));
-  timing_library.set_resistance_unit(getTimingResistanceUnit(reference_lib));
-  timing_library.set_time_unit(getTimingTimeUnit(reference_lib));
-  timing_library.set_default_max_transition(reference_lib->get_default_max_transition());
-  timing_library.set_default_max_fanout(reference_lib->get_default_max_fanout());
-  timing_library.set_default_fanout_load(reference_lib->get_default_fanout_load());
-  timing_library.set_nom_process(reference_lib->get_nom_process());
-  timing_library.set_nom_voltage(reference_lib->get_nom_voltage());
-  timing_library.set_nom_temperature(reference_lib->get_nom_temperature());
-  timing_library.set_slew_lower_threshold_pct_rise(reference_lib->get_slew_lower_threshold_pct_rise());
-  timing_library.set_slew_upper_threshold_pct_rise(reference_lib->get_slew_upper_threshold_pct_rise());
-  timing_library.set_slew_lower_threshold_pct_fall(reference_lib->get_slew_lower_threshold_pct_fall());
-  timing_library.set_slew_upper_threshold_pct_fall(reference_lib->get_slew_upper_threshold_pct_fall());
-  timing_library.set_input_threshold_pct_rise(reference_lib->get_input_threshold_pct_rise());
-  timing_library.set_output_threshold_pct_rise(reference_lib->get_output_threshold_pct_rise());
-  timing_library.set_input_threshold_pct_fall(reference_lib->get_input_threshold_pct_fall());
-  timing_library.set_output_threshold_pct_fall(reference_lib->get_output_threshold_pct_fall());
-  timing_library.set_slew_derate_from_library(reference_lib->get_slew_derate_from_library());
-}
-
-idb::LibLibrary* DataManager::getReferenceLib(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
-{
-  Database& database = _database;
-  std::map<idb::LibLibrary*, std::pair<int32_t, int32_t>> lib_usage_map;
-  for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
-    Instance& instance = instance_pair.second;
-    for (std::unique_ptr<idb::LibLibrary>& lib : lib_list) {
-      idb::LibCell* lib_cell = lib->findCell(instance.get_cell_name().c_str());
-      if (lib_cell == nullptr) {
-        continue;
-      }
-      lib_usage_map[lib.get()].first++;
-      if (!lib_cell->isMacroCell()) {
-        lib_usage_map[lib.get()].second++;
-      }
-    }
-  }
-
-  idb::LibLibrary* reference_lib = nullptr;
-  std::tuple<int32_t, int32_t, std::string> reference_key;
-  for (std::pair<idb::LibLibrary* const, std::pair<int32_t, int32_t>>& usage_pair : lib_usage_map) {
-    idb::LibLibrary* lib = usage_pair.first;
-    std::pair<int32_t, int32_t>& usage = usage_pair.second;
-    std::tuple<int32_t, int32_t, std::string> lib_key = std::make_tuple(usage.second, usage.first, lib->get_lib_name());
-    if (reference_lib == nullptr || lib_key > reference_key) {
-      reference_lib = lib;
-      reference_key = lib_key;
-    }
-  }
-  if (reference_lib != nullptr) {
-    return reference_lib;
-  }
-  if (!lib_list.empty()) {
-    return lib_list.front().get();
-  }
-  return nullptr;
-}
-
-TimingCapacitiveUnit DataManager::getTimingCapacitiveUnit(idb::LibLibrary* lib_library)
-{
-  if (lib_library->get_cap_unit() == idb::CapacitiveUnit::kFF) {
-    return TimingCapacitiveUnit::kFF;
-  }
-  if (lib_library->get_cap_unit() == idb::CapacitiveUnit::kF) {
-    return TimingCapacitiveUnit::kF;
-  }
-  return TimingCapacitiveUnit::kPF;
-}
-
-TimingResistanceUnit DataManager::getTimingResistanceUnit(idb::LibLibrary* lib_library)
-{
-  if (lib_library->get_resistance_unit() == idb::ResistanceUnit::kOHM) {
-    return TimingResistanceUnit::kOHM;
-  }
-  return TimingResistanceUnit::kkOHM;
-}
-
-TimingTimeUnit DataManager::getTimingTimeUnit(idb::LibLibrary* lib_library)
-{
-  if (lib_library->get_time_unit() == idb::TimeUnit::kPS) {
-    return TimingTimeUnit::kPS;
-  }
-  if (lib_library->get_time_unit() == idb::TimeUnit::kFS) {
-    return TimingTimeUnit::kFS;
-  }
-  return TimingTimeUnit::kNS;
-}
-
-void DataManager::makeTimingCell(idb::LibCell* lib_cell)
-{
-  Database& database = _database;
-  idb::LibLibrary* lib_library = lib_cell->get_owner_lib();
-  TimingCell timing_cell;
-  timing_cell.set_cell_name(lib_cell->get_cell_name());
-  timing_cell.set_library_name(lib_library->get_lib_name());
-  timing_cell.set_area(lib_cell->get_cell_area());
-  timing_cell.set_is_sequential(lib_cell->isSequentialCell());
-  timing_cell.set_is_clock_gating(lib_cell->isICG());
-  timing_cell.set_is_macro(lib_cell->isMacroCell());
-  timing_cell.set_slew_lower_threshold_pct_rise(lib_library->get_slew_lower_threshold_pct_rise());
-  timing_cell.set_slew_upper_threshold_pct_rise(lib_library->get_slew_upper_threshold_pct_rise());
-  timing_cell.set_slew_lower_threshold_pct_fall(lib_library->get_slew_lower_threshold_pct_fall());
-  timing_cell.set_slew_upper_threshold_pct_fall(lib_library->get_slew_upper_threshold_pct_fall());
-  timing_cell.set_input_threshold_pct_rise(lib_library->get_input_threshold_pct_rise());
-  timing_cell.set_output_threshold_pct_rise(lib_library->get_output_threshold_pct_rise());
-  timing_cell.set_input_threshold_pct_fall(lib_library->get_input_threshold_pct_fall());
-  timing_cell.set_output_threshold_pct_fall(lib_library->get_output_threshold_pct_fall());
-  timing_cell.set_slew_derate_from_library(lib_library->get_slew_derate_from_library());
-
-  for (std::unique_ptr<idb::LibPort>& lib_port : lib_cell->get_cell_ports()) {
-    makeTimingCellPort(timing_cell, lib_port.get());
-  }
-
-  for (std::unique_ptr<idb::LibArcSet>& lib_arc_set : lib_cell->get_cell_arcs()) {
-    makeTimingCellArc(timing_cell, lib_arc_set.get());
-  }
-
-  updateTimingCell(timing_cell);
-  database.get_timing_library().get_cell_map()[timing_cell.get_cell_name()] = timing_cell;
-}
-
-void DataManager::makeTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib_port)
-{
-  TimingCellPort timing_cell_port;
-  timing_cell_port.set_port_name(lib_port->get_port_name());
-  timing_cell_port.set_capacitance(lib_port->get_port_cap());
-  timing_cell_port.set_drive_resistance(lib_port->driveResistance());
-  for (idb::AnalysisMode analysis_mode : {idb::AnalysisMode::kMax, idb::AnalysisMode::kMin}) {
-    for (idb::TransType trans_type : {idb::TransType::kRise, idb::TransType::kFall}) {
-      std::optional<double> port_cap = lib_port->get_port_cap(analysis_mode, trans_type);
-      if (port_cap) {
-        AnalysisType sta_analysis_type = analysis_mode == idb::AnalysisMode::kMin ? AnalysisType::kMin : AnalysisType::kMax;
-        TransType sta_trans_type = trans_type == idb::TransType::kFall ? TransType::kFall : TransType::kRise;
-        timing_cell_port.get_trans_capacitance_map()[sta_analysis_type][sta_trans_type] = *port_cap;
-      }
-    }
-  }
-  timing_cell_port.set_is_input(lib_port->isInput());
-  timing_cell_port.set_is_output(lib_port->isOutput());
-  timing_cell_port.set_is_clock(lib_port->isClock() || lib_port->get_is_clock_pin() || lib_port->get_is_clock());
-  timing_cell.get_port_map()[timing_cell_port.get_port_name()] = timing_cell_port;
-}
-
-void DataManager::makeTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* lib_arc_set)
-{
-  idb::LibArc* lib_arc = lib_arc_set->front();
-  if (isSDFDelayArc(lib_arc)) {
-    TimingCellArc timing_cell_arc = makeDelayArc(lib_arc_set);
-    timing_cell_arc.set_is_timing_graph_arc(lib_arc->isDelayArc());
-    timing_cell.get_cell_arc_list().push_back(timing_cell_arc);
-    if (lib_arc->isClearPresetArc()) {
-      updateClearPresetArc(timing_cell, lib_arc);
-    }
-    return;
-  }
-  if (isSDFCheckArc(lib_arc)) {
-    TimingCheckArc timing_check_arc = makeCheckArc(lib_arc_set);
-    timing_cell.get_sdf_check_arc_list().push_back(timing_check_arc);
-    if (!lib_arc->isCheckArc()) {
-      return;
-    }
-    timing_cell.get_check_arc_list().push_back(timing_check_arc);
-    if (timing_check_arc.get_check_type() == TimingCheckType::kSetup) {
-      timing_cell.get_setup_arc_list().push_back(timing_check_arc);
-    }
-  }
-}
-
-bool DataManager::isSDFDelayArc(idb::LibArc* lib_arc)
-{
-  if (lib_arc->isDelayArc() || lib_arc->isClearPresetArc()) {
-    return true;
-  }
-  idb::LibArc::TimingType timing_type = lib_arc->get_timing_type();
-  return timing_type == idb::LibArc::TimingType::kThreeStateEnable || timing_type == idb::LibArc::TimingType::kThreeStateEnableRise
-         || timing_type == idb::LibArc::TimingType::kThreeStateEnableFall || timing_type == idb::LibArc::TimingType::kThreeStateDisable
-         || timing_type == idb::LibArc::TimingType::kThreeStateDisableRise || timing_type == idb::LibArc::TimingType::kThreeStateDisableFall;
-}
-
-bool DataManager::isSDFCheckArc(idb::LibArc* lib_arc)
-{
-  return lib_arc->isCheckTableArc();
-}
-
-TimingCellArc DataManager::makeDelayArc(idb::LibArcSet* lib_arc_set)
-{
-  idb::LibArc* lib_arc = lib_arc_set->front();
-  TimingCellArc timing_cell_arc;
-  timing_cell_arc.set_source_port(lib_arc->get_src_port());
-  timing_cell_arc.set_sink_port(lib_arc->get_snk_port());
-  double delay = lib_arc->isDelayArc() ? lib_arc->getDelayOrConstrainCheckNs(idb::TransType::kRise, 0.0, 0.0) : 0.0;
-  timing_cell_arc.set_delay(delay);
-  timing_cell_arc.set_delay_max(delay);
-  timing_cell_arc.set_delay_min(delay);
-  timing_cell_arc.set_timing_arc_list(makeTimingArcList(lib_arc_set));
-  timing_cell_arc.set_is_clock_arc(lib_arc->isRisingTriggerArc() || lib_arc->isFallingTriggerArc());
-  timing_cell_arc.set_is_disable_arc(lib_arc->isDisableArc());
-  return timing_cell_arc;
-}
-
-void DataManager::updateClearPresetArc(TimingCell& timing_cell, idb::LibArc* lib_arc)
-{
-  if (lib_arc->get_timing_type() == idb::LibArc::TimingType::kClear) {
-    timing_cell.set_has_clear_arc(true);
-  } else if (lib_arc->get_timing_type() == idb::LibArc::TimingType::kPreset) {
-    timing_cell.set_has_preset_arc(true);
-  }
-}
-
-TimingCheckArc DataManager::makeCheckArc(idb::LibArcSet* lib_arc_set)
-{
-  idb::LibArc* lib_arc = lib_arc_set->front();
-  TimingCheckArc timing_check_arc;
-  timing_check_arc.set_clock_port(lib_arc->get_src_port());
-  timing_check_arc.set_data_port(lib_arc->get_snk_port());
-  timing_check_arc.set_check_type(getTimingCheckType(lib_arc));
-  if (lib_arc->isCheckArc()) {
-    timing_check_arc.set_check_time(lib_arc->getDelayOrConstrainCheckNs(idb::TransType::kRise, 0.0, 0.0));
-  }
-  timing_check_arc.set_timing_arc_list(makeTimingArcList(lib_arc_set));
-  timing_check_arc.set_clock_trans_type(getCheckTransType(lib_arc));
-  if (timing_check_arc.get_check_type() == TimingCheckType::kSetup) {
-    timing_check_arc.set_setup_time(timing_check_arc.get_check_time());
-  }
-  return timing_check_arc;
-}
-
-std::vector<TimingArc> DataManager::makeTimingArcList(idb::LibArcSet* lib_arc_set)
-{
-  std::vector<TimingArc> timing_arc_list;
-  int32_t arc_idx = 0;
-  for (std::unique_ptr<idb::LibArc>& lib_arc : lib_arc_set->get_arcs()) {
-    if (lib_arc->isDisableArc()) {
-      continue;
-    }
-    TimingArc timing_arc = makeTimingArc(lib_arc.get());
-    timing_arc.set_arc_idx(arc_idx++);
-    timing_arc_list.push_back(timing_arc);
-  }
-  return timing_arc_list;
-}
-
-TimingArc DataManager::makeTimingArc(idb::LibArc* lib_arc)
-{
-  TimingArc timing_arc;
-  idb::LibLibrary* lib_library = lib_arc->get_owner_cell()->get_owner_lib();
-  timing_arc.set_sense(getTimingArcSense(lib_arc));
-  timing_arc.set_trigger_trans_type(getTriggerTransType(lib_arc));
-  timing_arc.set_check_trans_type(getCheckTransType(lib_arc));
-  timing_arc.set_library_name(lib_library->get_lib_name());
-  timing_arc.set_sdf_cond(lib_arc->get_sdf_cond());
-  timing_arc.set_time_unit_scale(getLibTimeUnitScale(lib_library));
-  timing_arc.set_cap_unit_scale(getLibCapUnitScale(lib_library));
-  timing_arc.set_slew_derate(lib_library->get_slew_derate_from_library());
-  timing_arc.set_slew_lower_threshold_pct_rise(lib_library->get_slew_lower_threshold_pct_rise());
-  timing_arc.set_slew_upper_threshold_pct_rise(lib_library->get_slew_upper_threshold_pct_rise());
-  timing_arc.set_slew_lower_threshold_pct_fall(lib_library->get_slew_lower_threshold_pct_fall());
-  timing_arc.set_slew_upper_threshold_pct_fall(lib_library->get_slew_upper_threshold_pct_fall());
-  timing_arc.set_input_threshold_pct_rise(lib_library->get_input_threshold_pct_rise());
-  timing_arc.set_output_threshold_pct_rise(lib_library->get_output_threshold_pct_rise());
-  timing_arc.set_input_threshold_pct_fall(lib_library->get_input_threshold_pct_fall());
-  timing_arc.set_output_threshold_pct_fall(lib_library->get_output_threshold_pct_fall());
-  makeTimingArcTable(timing_arc, lib_arc);
-  return timing_arc;
-}
-
-void DataManager::makeTimingArcTable(TimingArc& timing_arc, idb::LibArc* lib_arc)
-{
-  idb::LibTableModel* table_model = lib_arc->get_table_model();
-  if (table_model == nullptr) {
-    return;
-  }
-  if (table_model->isDelayModel()) {
-    idb::LibTable* rise_delay_table = table_model->getTable(CAST_TYPE_TO_INDEX(idb::LibTable::TableType::kCellRise));
-    idb::LibTable* fall_delay_table = table_model->getTable(CAST_TYPE_TO_INDEX(idb::LibTable::TableType::kCellFall));
-    idb::LibTable* rise_slew_table = table_model->getTable(CAST_TYPE_TO_INDEX(idb::LibTable::TableType::kRiseTransition));
-    idb::LibTable* fall_slew_table = table_model->getTable(CAST_TYPE_TO_INDEX(idb::LibTable::TableType::kFallTransition));
-    if (rise_delay_table != nullptr) {
-      timing_arc.get_delay_table_map()[TransType::kRise] = makeTimingTable(rise_delay_table);
-    }
-    if (fall_delay_table != nullptr) {
-      timing_arc.get_delay_table_map()[TransType::kFall] = makeTimingTable(fall_delay_table);
-    }
-    if (rise_slew_table != nullptr) {
-      timing_arc.get_slew_table_map()[TransType::kRise] = makeTimingTable(rise_slew_table);
-    }
-    if (fall_slew_table != nullptr) {
-      timing_arc.get_slew_table_map()[TransType::kFall] = makeTimingTable(fall_slew_table);
-    }
-    return;
-  }
-  if (!table_model->isCheckModel()) {
-    return;
-  }
-  idb::LibTable* rise_check_table = table_model->getTable(CAST_TYPE_TO_INDEX(idb::LibTable::TableType::kRiseConstrain));
-  idb::LibTable* fall_check_table = table_model->getTable(CAST_TYPE_TO_INDEX(idb::LibTable::TableType::kFallConstrain));
-  if (rise_check_table != nullptr) {
-    timing_arc.get_check_table_map()[TransType::kRise] = makeTimingTable(rise_check_table);
-  }
-  if (fall_check_table != nullptr) {
-    timing_arc.get_check_table_map()[TransType::kFall] = makeTimingTable(fall_check_table);
-  }
-}
-
-TimingTable DataManager::makeTimingTable(idb::LibTable* lib_table)
-{
-  TimingTable timing_table;
-  timing_table.set_variable_type1(getTimingTableVariableType(lib_table, true));
-  timing_table.set_variable_type2(getTimingTableVariableType(lib_table, false));
-  std::vector<std::vector<double>> axis_list;
-  for (std::unique_ptr<idb::LibAxis>& lib_axis : lib_table->get_axes()) {
-    std::vector<double> axis_value_list;
-    for (std::unique_ptr<idb::LibAttrValue>& axis_value : lib_axis->get_axis_values()) {
-      axis_value_list.push_back(axis_value->getFloatValue());
-    }
-    axis_list.push_back(axis_value_list);
-  }
-  std::vector<double> value_list;
-  for (std::unique_ptr<idb::LibAttrValue>& lib_value : lib_table->get_table_values()) {
-    value_list.push_back(lib_value->getFloatValue());
-  }
-  timing_table.set_axis_list(axis_list);
-  timing_table.set_value_list(value_list);
-  return timing_table;
-}
-
-TimingTableVariableType DataManager::getTimingTableVariableType(idb::LibTable* lib_table, bool is_first_variable)
-{
-  idb::LibLutTableTemplate* table_template = lib_table->get_table_template();
-  if (table_template == nullptr) {
-    return TimingTableVariableType::kNone;
-  }
-  std::optional<idb::LibLutTableTemplate::Variable> variable
-      = is_first_variable ? table_template->get_template_variable1() : table_template->get_template_variable2();
-  if (!variable) {
-    return TimingTableVariableType::kNone;
-  }
-  if (*variable == idb::LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE) {
-    return TimingTableVariableType::kOutputCapacitance;
-  }
-  if (*variable == idb::LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION) {
-    return TimingTableVariableType::kConstrainedTransition;
-  }
-  if (*variable == idb::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION
-      || *variable == idb::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION
-      || *variable == idb::LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME) {
-    return TimingTableVariableType::kInputTransition;
-  }
-  return TimingTableVariableType::kNone;
-}
-
-double DataManager::getLibTimeUnitScale(idb::LibLibrary* lib_library)
-{
-  if (lib_library->get_time_unit() == idb::TimeUnit::kPS) {
-    return 1e3;
-  }
-  if (lib_library->get_time_unit() == idb::TimeUnit::kFS) {
-    return 1e6;
-  }
-  return 1.0;
-}
-
-double DataManager::getLibCapUnitScale(idb::LibLibrary* lib_library)
-{
-  if (lib_library->get_cap_unit() == idb::CapacitiveUnit::kFF) {
-    return static_cast<double>(idb::g_pf2ff);
-  }
-  return 1.0;
-}
-
-TimingArcSense DataManager::getTimingArcSense(idb::LibArc* lib_arc)
-{
-  if (lib_arc->isNegativeArc()) {
-    return TimingArcSense::kNegative;
-  }
-  if (lib_arc->isNonUnateArc()) {
-    return TimingArcSense::kNonUnate;
-  }
-  return TimingArcSense::kPositive;
-}
-
-TransType DataManager::getTriggerTransType(idb::LibArc* lib_arc)
-{
-  if (lib_arc->isFallingTriggerArc()) {
-    return TransType::kFall;
-  }
-  if (lib_arc->isRisingTriggerArc()) {
-    return TransType::kRise;
-  }
-  return TransType::kNone;
-}
-
-TransType DataManager::getCheckTransType(idb::LibArc* lib_arc)
-{
-  if (lib_arc->isFallingEdgeCheck()) {
-    return TransType::kFall;
-  }
-  return TransType::kRise;
-}
-
-TimingCheckType DataManager::getTimingCheckType(idb::LibArc* lib_arc)
-{
-  if (lib_arc->isSetupArc()) {
-    return TimingCheckType::kSetup;
-  }
-  if (lib_arc->isHoldArc()) {
-    return TimingCheckType::kHold;
-  }
-  if (lib_arc->isRecoveryArc()) {
-    return TimingCheckType::kRecovery;
-  }
-  if (lib_arc->isRemovalArc()) {
-    return TimingCheckType::kRemoval;
-  }
-  if (lib_arc->isMpwArc()) {
-    return TimingCheckType::kWidth;
-  }
-  if (lib_arc->get_timing_type() == idb::LibArc::TimingType::kMinimunPeriod) {
-    return TimingCheckType::kPeriod;
-  }
-  return TimingCheckType::kNone;
-}
-
-void DataManager::updateTimingCell(TimingCell& timing_cell)
-{
-  if (!timing_cell.get_check_arc_list().empty()) {
-    timing_cell.set_is_sequential(true);
-  }
 }
 
 void DataManager::buildInstanceList()
@@ -668,17 +199,23 @@ void DataManager::makeInstanceTimingInfo(Instance& instance)
   } else {
     instance.set_output_pin_name(findOutputPinName(instance, timing_cell));
   }
-  if (timing_cell.get_setup_arc_list().empty()) {
-    return;
-  }
-
-  TimingCheckArc& setup_arc = timing_cell.get_setup_arc_list().front();
-  instance.set_clock_pin_name(getInstancePinName(instance, setup_arc.get_clock_port()));
-  instance.set_data_pin_name(getInstancePinName(instance, setup_arc.get_data_port()));
-  instance.set_setup_time(setup_arc.get_setup_time());
   instance.get_check_arc_list().clear();
   for (TimingCheckArc& timing_check_arc : timing_cell.get_check_arc_list()) {
     instance.get_check_arc_list().push_back(makeInstanceTimingCheckArc(instance, timing_check_arc));
+  }
+
+  TimingCheckArc* representative_check_arc = nullptr;
+  for (TimingCheckArc& timing_check_arc : timing_cell.get_check_arc_list()) {
+    if (representative_check_arc == nullptr || timing_check_arc.get_check_type() == TimingCheckType::kSetup) {
+      representative_check_arc = &timing_check_arc;
+    }
+    if (timing_check_arc.get_check_type() == TimingCheckType::kSetup) {
+      break;
+    }
+  }
+  if (representative_check_arc != nullptr) {
+    instance.set_clock_pin_name(getInstancePinName(instance, representative_check_arc->get_clock_port()));
+    instance.set_data_pin_name(getInstancePinName(instance, representative_check_arc->get_data_port()));
   }
 }
 
@@ -687,7 +224,6 @@ TimingCheckArc DataManager::makeInstanceTimingCheckArc(Instance& instance, Timin
   TimingCheckArc instance_timing_check_arc;
   instance_timing_check_arc.set_clock_port(getInstancePinName(instance, timing_check_arc.get_clock_port()));
   instance_timing_check_arc.set_data_port(getInstancePinName(instance, timing_check_arc.get_data_port()));
-  instance_timing_check_arc.set_setup_time(timing_check_arc.get_setup_time());
   instance_timing_check_arc.set_check_type(timing_check_arc.get_check_type());
   instance_timing_check_arc.set_check_time(timing_check_arc.get_check_time());
   instance_timing_check_arc.set_timing_arc_list(timing_check_arc.get_timing_arc_list());
@@ -763,139 +299,13 @@ void DataManager::makeNet(const std::string& net_name, Net& net)
   }
 }
 
-void DataManager::buildParasiticLibrary()
-{
-  Database& database = _database;
-  database.get_parasitic_library().set_spef_file_path(dmInst->get_config().get_spef_path());
-  database.get_parasitic_library().get_net_map().clear();
-  spef::SpefReader* spef_reader = dmInst->get_spef_reader();
-  if (spef_reader == nullptr || spef_reader->getSpefFile() == nullptr) {
-    return;
-  }
-
-  database.get_parasitic_library().set_capacitive_unit(spef_reader->getSpefCapUnit());
-  database.get_parasitic_library().set_resistance_unit(spef_reader->getSpefResUnit());
-
-  spef::Exchange* spef_file = spef_reader->getSpefFile();
-  for (spef::Net& spef_net : spef_file->nets) {
-    buildParasiticNetMap(spef_net);
-  }
-}
-
-void DataManager::buildParasiticNetMap(spef::Net& spef_net)
-{
-  Database& database = _database;
-  ParasiticNet parasitic_net;
-  parasitic_net.set_net_name(spef_net.name);
-  parasitic_net.set_lumped_capacitance(getParasiticCapacitance(spef_net.lcap));
-  for (spef::ConnEntry& spef_conn : spef_net.conns) {
-    makeParasiticConnection(parasitic_net, spef_conn);
-  }
-  for (spef::ResCap& spef_res : spef_net.ress) {
-    makeParasiticResistance(parasitic_net, spef_res);
-  }
-  for (spef::ResCap& spef_cap : spef_net.caps) {
-    makeParasiticCapacitance(parasitic_net, spef_cap);
-  }
-  database.get_parasitic_library().get_net_map()[parasitic_net.get_net_name()] = parasitic_net;
-}
-
-void DataManager::makeParasiticConnection(ParasiticNet& parasitic_net, spef::ConnEntry& spef_conn)
-{
-  ParasiticNode& parasitic_node = getParasiticNode(parasitic_net, spef_conn.pin_port_name);
-  parasitic_node.set_x(spef_conn.coordinate.x);
-  parasitic_node.set_y(spef_conn.coordinate.y);
-}
-
-void DataManager::makeParasiticCapacitance(ParasiticNet& parasitic_net, spef::ResCap& spef_cap)
-{
-  double capacitance = getParasiticCapacitance(spef_cap.res_or_cap);
-  ParasiticNode& parasitic_node = getParasiticNode(parasitic_net, spef_cap.node1);
-  parasitic_node.set_capacitance(parasitic_node.get_capacitance() + capacitance);
-
-  if (spef_cap.node2.empty()) {
-    return;
-  }
-  if (parasitic_net.get_node_map().count(spef_cap.node2) > 0) {
-    ParasiticNode& coupled_node = parasitic_net.get_node_map()[spef_cap.node2];
-    coupled_node.set_capacitance(coupled_node.get_capacitance() + capacitance);
-  }
-}
-
-void DataManager::makeParasiticResistance(ParasiticNet& parasitic_net, spef::ResCap& spef_res)
-{
-  ParasiticResistor parasitic_resistor;
-  parasitic_resistor.set_source_node(spef_res.node1);
-  parasitic_resistor.set_sink_node(spef_res.node2);
-  parasitic_resistor.set_resistance(getParasiticResistance(spef_res.res_or_cap));
-  parasitic_net.get_resistor_list().push_back(parasitic_resistor);
-  getParasiticNode(parasitic_net, spef_res.node1);
-  getParasiticNode(parasitic_net, spef_res.node2);
-}
-
-double DataManager::getParasiticCapacitance(double spef_capacitance)
-{
-  Database& database = _database;
-  std::string spef_unit = database.get_parasitic_library().get_capacitive_unit();
-  std::string target_unit = "PF";
-  return spef_capacitance * getSpefUnitScale(spef_unit, target_unit);
-}
-
-double DataManager::getParasiticResistance(double spef_resistance)
-{
-  Database& database = _database;
-  std::string spef_unit = database.get_parasitic_library().get_resistance_unit();
-  std::string target_unit = "OHM";
-  return spef_resistance * getSpefUnitScale(spef_unit, target_unit);
-}
-
-double DataManager::getSpefUnitScale(std::string& spef_unit, std::string& target_unit)
-{
-  double unit_value = 1.0;
-  std::string unit_name;
-  std::stringstream spef_unit_stream(spef_unit);
-  spef_unit_stream >> unit_value >> unit_name;
-  std::transform(unit_name.begin(), unit_name.end(), unit_name.begin(), ::toupper);
-  std::transform(target_unit.begin(), target_unit.end(), target_unit.begin(), ::toupper);
-
-  if (unit_name == target_unit) {
-    return unit_value;
-  }
-  if (unit_name == "FF" && target_unit == "PF") {
-    return unit_value * 1E-3;
-  }
-  if (unit_name == "PF" && target_unit == "FF") {
-    return unit_value * 1E3;
-  }
-  if (unit_name == "F" && target_unit == "PF") {
-    return unit_value * 1E12;
-  }
-  if (unit_name == "PF" && target_unit == "F") {
-    return unit_value * 1E-12;
-  }
-  if (unit_name == "KOHM" && target_unit == "OHM") {
-    return unit_value * 1E3;
-  }
-  if (unit_name == "OHM" && target_unit == "KOHM") {
-    return unit_value * 1E-3;
-  }
-  return unit_value;
-}
-
-ParasiticNode& DataManager::getParasiticNode(ParasiticNet& parasitic_net, const std::string& node_name)
-{
-  ParasiticNode& parasitic_node = parasitic_net.get_node_map()[node_name];
-  parasitic_node.set_node_name(node_name);
-  return parasitic_node;
-}
-
 void DataManager::readConstraint()
 {
   Database& database = _database;
-  std::string sdc_file_path = dmInst->get_config().get_sdc_path();
-  database.get_timing_constraint().set_sdc_file_path(sdc_file_path);
+  std::string sdc_file_path = database.get_timing_constraint().get_sdc_file_path();
   database.get_timing_constraint().get_clock_map().clear();
   database.get_timing_constraint().get_port_constraint_map().clear();
+  database.get_timing_constraint().get_case_analysis_map().clear();
   if (sdc_file_path.empty()) {
     return;
   }
@@ -1218,6 +628,8 @@ void DataManager::parseCommand(std::vector<std::string>& token_list)
   }
   if (token_list.front() == "create_clock") {
     parseCreateClock(token_list);
+  } else if (token_list.front() == "set_case_analysis") {
+    parseSetCaseAnalysis(token_list);
   } else if (token_list.front() == "set_input_delay") {
     parseSetInputDelay(token_list);
   } else if (token_list.front() == "set_output_delay") {
@@ -1226,6 +638,18 @@ void DataManager::parseCommand(std::vector<std::string>& token_list)
     parseSetInputTransition(token_list);
   } else if (token_list.front() == "set_load") {
     parseSetLoad(token_list);
+  }
+}
+
+void DataManager::parseSetCaseAnalysis(std::vector<std::string>& token_list)
+{
+  if (token_list.size() < 2 || (token_list[1] != "0" && token_list[1] != "1")) {
+    return;
+  }
+  bool case_value = token_list[1] == "1";
+  std::vector<std::string> object_list = getObjectList(token_list);
+  for (std::string& pin_name : resolveObjectList(object_list)) {
+    _database.get_timing_constraint().get_case_analysis_map()[pin_name] = case_value;
   }
 }
 
@@ -1553,10 +977,18 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "TimingPropagator");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "tp_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.tp_temp_directory_path);
+  // ********* PowerPropagator    ********* //
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "PowerPropagator");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "pp_temp_directory_path");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.pp_temp_directory_path);
   // ********** TimingAnalyzer   ********* //
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "TimingAnalyzer");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "ta_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.ta_temp_directory_path);
+  // ********** PowerAnalyzer    ********* //
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "PowerAnalyzer");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "pa_temp_directory_path");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.pa_temp_directory_path);
   // ******* TimingCharacterizer ******* //
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "TimingCharacterizer");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "tc_temp_directory_path");
@@ -1565,6 +997,14 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "TimingReporter");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "tr_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.tr_temp_directory_path);
+  // **********  PowerReporter    ********** //
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "PowerReporter");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "pr_temp_directory_path");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.pr_temp_directory_path);
+  // ************  SDFWriter  ************* //
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "SDFWriter");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "sw_temp_directory_path");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.sw_temp_directory_path);
   /////////////////////////////////////////////
 }
 

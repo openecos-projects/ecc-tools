@@ -43,6 +43,7 @@ int registerCmdDB()
   registerTclCmd(CmdInitLib, "lib_init");
   registerTclCmd(CmdInitSdc, "sdc_init");
   registerTclCmd(CmdInitSpef, "spef_init");
+  registerTclCmd(CmdInitVcd, "vcd_init");
   registerTclCmd(CmdSaveDef, "def_save");
   registerTclCmd(CmdSaveLef, "lef_save");
   registerTclCmd(CmdSaveNetlist, "netlist_save");

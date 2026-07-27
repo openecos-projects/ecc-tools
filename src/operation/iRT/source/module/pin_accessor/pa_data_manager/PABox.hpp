@@ -38,23 +38,15 @@ class PABox
   // getter
   EXTPlanarRect& get_box_rect() { return _box_rect; }
   PABoxId& get_pa_box_id() { return _pa_box_id; }
-  int32_t get_iter() const { return _iter; }
   PAIterParam* get_pa_iter_param() { return _pa_iter_param; }
   bool get_initial_routing() const { return _initial_routing; }
-  bool get_has_pattern_local_rect() const { return _has_pattern_local_rect; }
-  PlanarRect& get_pattern_local_rect() { return _pattern_local_rect; }
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& get_type_layer_net_fixed_rect_map() { return _type_layer_net_fixed_rect_map; }
-  std::vector<std::pair<EXTLayerRect*, bool>>& get_env_shape_list() { return _env_shape_list; }
-  std::map<int32_t, std::vector<std::pair<EXTLayerRect*, bool>>>& get_net_pin_shape_map() { return _net_pin_shape_map; }
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& get_net_access_point_map() { return _net_access_point_map; }
-  std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_net_pin_access_result_list_map() { return _net_pin_access_result_list_map; }
   std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>>& get_net_pin_access_result_map() { return _net_pin_access_result_map; }
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_net_task_access_result_map() { return _net_task_access_result_map; }
-  std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>>& get_net_pin_access_patch_list_map() { return _net_pin_access_patch_list_map; }
   std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>& get_net_pin_access_patch_map() { return _net_pin_access_patch_map; }
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>>& get_net_task_access_patch_map() { return _net_task_access_patch_map; }
   std::vector<PATask*>& get_pa_task_list() { return _pa_task_list; }
-  std::set<int32_t>& get_pattern_fallback_task_idx_set() { return _pattern_fallback_task_idx_set; }
   std::vector<Violation>& get_route_violation_list() { return _route_violation_list; }
   ScaleAxis& get_box_track_axis() { return _box_track_axis; }
   std::vector<GridMap<PANode>>& get_layer_node_map() { return _layer_node_map; }
@@ -65,22 +57,11 @@ class PABox
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>>& get_best_net_task_access_patch_map() { return _best_net_task_access_patch_map; }
   std::map<PAPin*, AccessPoint>& get_best_pin_access_point_map() { return _best_pin_access_point_map; }
   std::vector<Violation>& get_best_route_violation_list() { return _best_route_violation_list; }
-  void deletePATask(PATask* pa_task) { delete pa_task; }
-  void clearPATaskList()
-  {
-    for (PATask* pa_task : _pa_task_list) {
-      deletePATask(pa_task);
-    }
-    _pa_task_list.clear();
-  }
   // setter
   void set_box_rect(const EXTPlanarRect& box_rect) { _box_rect = box_rect; }
   void set_pa_box_id(const PABoxId& pa_box_id) { _pa_box_id = pa_box_id; }
-  void set_iter(const int32_t iter) { _iter = iter; }
   void set_pa_iter_param(PAIterParam* pa_iter_param) { _pa_iter_param = pa_iter_param; }
   void set_initial_routing(const bool initial_routing) { _initial_routing = initial_routing; }
-  void set_has_pattern_local_rect(const bool has_pattern_local_rect) { _has_pattern_local_rect = has_pattern_local_rect; }
-  void set_pattern_local_rect(const PlanarRect& pattern_local_rect) { _pattern_local_rect = pattern_local_rect; }
   void set_type_layer_net_fixed_rect_map(const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& type_layer_net_fixed_rect_map)
   {
     _type_layer_net_fixed_rect_map = type_layer_net_fixed_rect_map;
@@ -131,7 +112,6 @@ class PABox
   std::vector<PANode*>& get_path_node_list() { return _path_node_list; }
   std::vector<PANode*>& get_single_task_visited_node_list() { return _single_task_visited_node_list; }
   std::vector<Segment<LayerCoord>>& get_routing_segment_list() { return _routing_segment_list; }
-  std::map<PANode*, AccessPoint*>& get_source_node_access_point_map() { return _source_node_access_point_map; }
   void set_curr_route_task(PATask* curr_route_task) { _curr_route_task = curr_route_task; }
   void set_start_node_list_list(const std::vector<std::vector<PANode*>>& start_node_list_list) { _start_node_list_list = start_node_list_list; }
   void set_end_node_list_list(const std::vector<std::vector<PANode*>>& end_node_list_list) { _end_node_list_list = end_node_list_list; }
@@ -172,24 +152,15 @@ class PABox
  private:
   EXTPlanarRect _box_rect;
   PABoxId _pa_box_id;
-  int32_t _iter = -1;
   PAIterParam* _pa_iter_param = nullptr;
   bool _initial_routing = true;
-  bool _has_pattern_local_rect = false;
-  PlanarRect _pattern_local_rect;
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> _type_layer_net_fixed_rect_map;
-  // 缓存fix/pin_shape避免drc check重复从gcell构建
-  std::vector<std::pair<EXTLayerRect*, bool>> _env_shape_list;
-  std::map<int32_t, std::vector<std::pair<EXTLayerRect*, bool>>> _net_pin_shape_map;
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> _net_access_point_map;
-  std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_pin_access_result_list_map;
   std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>> _net_pin_access_result_map;
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_task_access_result_map;
-  std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>> _net_pin_access_patch_list_map;
   std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>> _net_pin_access_patch_map;
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>> _net_task_access_patch_map;
   std::vector<PATask*> _pa_task_list;
-  std::set<int32_t> _pattern_fallback_task_idx_set;
   std::vector<Violation> _route_violation_list;
   ScaleAxis _box_track_axis;
   std::vector<GridMap<PANode>> _layer_node_map;
@@ -208,7 +179,6 @@ class PABox
   std::vector<PANode*> _path_node_list;
   std::vector<PANode*> _single_task_visited_node_list;
   std::vector<Segment<LayerCoord>> _routing_segment_list;
-  std::map<PANode*, AccessPoint*> _source_node_access_point_map;
   // single path
   OpenQueue<PANode> _open_queue;
   std::vector<PANode*> _single_path_visited_node_list;

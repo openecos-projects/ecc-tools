@@ -4,7 +4,7 @@ add_library(py_ircx ${PY_IRCX_SRC})
 
 target_link_libraries(py_ircx
     PUBLIC
-        ircx_api
+        ircx_interface
         ircx_ics55
         pybind11::pybind11
         idm

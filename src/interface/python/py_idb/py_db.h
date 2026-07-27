@@ -30,6 +30,7 @@ bool initVerilog(const std::string& verilog_path, const std::string& top_module)
 bool initLib(const std::vector<std::string>& lib_paths);
 bool initSdc(const std::string& sdc_path);
 bool initSpef(const std::string& spef_path);
+bool initVcd(const std::string& vcd_path);
 bool saveDef(const std::string& def_name);
 bool saveMacroTCL(const std::string& tcl_name);
 bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_cell_names = {}, bool is_add_space_for_escape_name = false);

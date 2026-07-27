@@ -69,6 +69,12 @@ bool initSpef(const std::string& spef_path)
   return dmInst->readSpef(spef_path);
 }
 
+bool initVcd(const std::string& vcd_path)
+{
+  dmInst->get_config().set_vcd_path(vcd_path);
+  return dmInst->readVcd(vcd_path);
+}
+
 bool saveDef(const std::string& def_name)
 {
   return dmInst->saveDef(def_name);

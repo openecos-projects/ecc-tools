@@ -73,6 +73,7 @@ bool DataConfig::initConfig(string config_path)
 
       set_sdc_path(ieda::getJsonData(json, {"INPUT", "sdc_path"}));
       set_spef_path(ieda::getJsonData(json, {"INPUT", "spef_path"}));
+      set_vcd_path(ieda::getJsonData(json, {"INPUT", "vcd_path"}));
 
       set_output_path(ieda::getJsonData(json, {"OUTPUT", "output_dir_path"}));
 

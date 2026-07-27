@@ -19,8 +19,9 @@
 #include "ERStage.hpp"
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
-#include "TOPOBuilder.hpp"
+#include "RTInterface.hpp"
 #include "TBTask.hpp"
+#include "TOPOBuilder.hpp"
 #include "Utility.hpp"
 
 namespace irt {
@@ -83,7 +84,7 @@ void EarlyRouter::route(std::map<std::string, std::any> config_map)
     outputPlanarNetCSV(er_model);
     outputPlanarOverflowCSV(er_model);
     printPlanarSummary(er_model);
-    // debugPlotERModel(er_model, "pr");
+    // debugPlotERModel(er_model, "tg");
   }
   if (er_model.get_er_com_param().get_stage() >= ERStage::kEgr3D) {
     buildLayerNodeMap(er_model);
@@ -1077,6 +1078,24 @@ void EarlyRouter::buildPlanarNodeMap(ERModel& er_model)
           er_node.get_ignore_net_orient_map()[net_idx].insert(orient_set.begin(), orient_set.end());
         }
       }
+      std::map<Orientation, std::set<int32_t>> planar_orient_allowed_net_map;
+      std::set<Orientation> unrestricted_orient_set;
+      for (auto& [layer_idx, orient_supply_map] : gcell_map[x][y].get_routing_orient_supply_map()) {
+        for (auto& [orient, supply] : orient_supply_map) {
+          if (supply <= 0 || RTUTIL.exist(unrestricted_orient_set, orient)) {
+            continue;
+          }
+          RoutingLayerAllowedNetMap& routing_allowed_net_map = gcell_map[x][y].get_routing_allowed_net_map();
+          if (!RTUTIL.exist(routing_allowed_net_map, layer_idx) || !RTUTIL.exist(routing_allowed_net_map[layer_idx], orient)) {
+            planar_orient_allowed_net_map.erase(orient);
+            unrestricted_orient_set.insert(orient);
+          } else {
+            planar_orient_allowed_net_map[orient].insert(routing_allowed_net_map[layer_idx][orient].begin(),
+                                                         routing_allowed_net_map[layer_idx][orient].end());
+          }
+        }
+      }
+      er_node.set_orient_allowed_net_map(planar_orient_allowed_net_map);
     }
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -1254,7 +1273,6 @@ std::vector<Segment<PlanarCoord>> EarlyRouter::getPlanarTopoList(ERModel& er_mod
     std::sort(planar_coord_list.begin(), planar_coord_list.end(), CmpPlanarCoordByXASC());
     planar_coord_list.erase(std::unique(planar_coord_list.begin(), planar_coord_list.end()), planar_coord_list.end());
   }
-
   std::vector<Segment<PlanarCoord>> planar_topo_list;
   TBTask tb_task;
   tb_task.set_planar_coord_list(planar_coord_list);
@@ -1716,6 +1734,9 @@ void EarlyRouter::buildLayerNodeMap(ERModel& er_model)
         er_node.set_internal_via_unit(gcell_map[x][y].get_internal_via_unit());
         if (RTUTIL.exist(gcell_map[x][y].get_routing_ignore_net_orient_map(), layer_idx)) {
           er_node.set_ignore_net_orient_map(gcell_map[x][y].get_routing_ignore_net_orient_map()[layer_idx]);
+        }
+        if (RTUTIL.exist(gcell_map[x][y].get_routing_allowed_net_map(), layer_idx)) {
+          er_node.set_orient_allowed_net_map(gcell_map[x][y].get_routing_allowed_net_map()[layer_idx]);
         }
       }
     }

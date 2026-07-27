@@ -16,9 +16,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include <array>
-#include <cstdint>
-
 #include "LayerCoord.hpp"
 #include "LayerRect.hpp"
 #include "OpenQueue.hpp"
@@ -44,14 +41,11 @@ class SRBox
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_task_global_result_map() { return _net_task_global_result_map; }
   std::vector<SRTask*>& get_sr_task_list() { return _sr_task_list; }
   double get_total_overflow() const { return _total_overflow; }
-  double get_total_congestion_risk() const { return _total_congestion_risk; }
   std::vector<std::set<int32_t>>& get_overflow_net_set_list() { return _overflow_net_set_list; }
-  std::vector<std::set<int32_t>>& get_congestion_risk_net_set_list() { return _congestion_risk_net_set_list; }
   ScaleAxis& get_box_track_axis() { return _box_track_axis; }
   std::vector<GridMap<SRNode>>& get_layer_node_map() { return _layer_node_map; }
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_best_net_task_global_result_map() { return _best_net_task_global_result_map; }
   double get_best_total_overflow() const { return _best_total_overflow; }
-  double get_best_total_congestion_risk() const { return _best_total_congestion_risk; }
   // setter
   void set_box_rect(const EXTPlanarRect& box_rect) { _box_rect = box_rect; }
   void set_sr_box_id(const SRBoxId& sr_box_id) { _sr_box_id = sr_box_id; }
@@ -63,12 +57,7 @@ class SRBox
   }
   void set_sr_task_list(const std::vector<SRTask*>& sr_task_list) { _sr_task_list = sr_task_list; }
   void set_total_overflow(const double total_overflow) { _total_overflow = total_overflow; }
-  void set_total_congestion_risk(const double total_congestion_risk) { _total_congestion_risk = total_congestion_risk; }
   void set_overflow_net_set_list(const std::vector<std::set<int32_t>>& overflow_net_set_list) { _overflow_net_set_list = overflow_net_set_list; }
-  void set_congestion_risk_net_set_list(const std::vector<std::set<int32_t>>& congestion_risk_net_set_list)
-  {
-    _congestion_risk_net_set_list = congestion_risk_net_set_list;
-  }
   void set_box_track_axis(const ScaleAxis& box_track_axis) { _box_track_axis = box_track_axis; }
   void set_layer_node_map(const std::vector<GridMap<SRNode>>& layer_node_map) { _layer_node_map = layer_node_map; }
   void set_best_net_task_global_result_map(const std::map<int32_t, std::vector<Segment<LayerCoord>>>& best_net_task_global_result_map)
@@ -76,7 +65,6 @@ class SRBox
     _best_net_task_global_result_map = best_net_task_global_result_map;
   }
   void set_best_total_overflow(const double best_total_overflow) { _best_total_overflow = best_total_overflow; }
-  void set_best_total_congestion_risk(const double best_total_congestion_risk) { _best_total_congestion_risk = best_total_congestion_risk; }
   // function
 #if 1  // astar
   // single task
@@ -86,9 +74,6 @@ class SRBox
   std::vector<SRNode*>& get_path_node_list() { return _path_node_list; }
   std::vector<SRNode*>& get_single_task_visited_node_list() { return _single_task_visited_node_list; }
   std::vector<Segment<LayerCoord>>& get_routing_segment_list() { return _routing_segment_list; }
-  std::vector<std::array<double, 3>>& get_node_cost_cache() { return _node_cost_cache; }
-  std::vector<uint8_t>& get_node_cost_cache_valid_mask() { return _node_cost_cache_valid_mask; }
-  std::vector<int32_t>& get_node_cost_cache_touched_index_list() { return _node_cost_cache_touched_index_list; }
   void set_curr_sr_task(SRTask* curr_sr_task) { _curr_sr_task = curr_sr_task; }
   void set_start_node_list_list(const std::vector<std::vector<SRNode*>>& start_node_list_list) { _start_node_list_list = start_node_list_list; }
   void set_end_node_list_list(const std::vector<std::vector<SRNode*>>& end_node_list_list) { _end_node_list_list = end_node_list_list; }
@@ -120,14 +105,11 @@ class SRBox
   std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_task_global_result_map;
   std::vector<SRTask*> _sr_task_list;
   double _total_overflow = 0;
-  double _total_congestion_risk = 0;
   std::vector<std::set<int32_t>> _overflow_net_set_list;
-  std::vector<std::set<int32_t>> _congestion_risk_net_set_list;
   ScaleAxis _box_track_axis;
   std::vector<GridMap<SRNode>> _layer_node_map;
   std::map<int32_t, std::vector<Segment<LayerCoord>>> _best_net_task_global_result_map;
   double _best_total_overflow = 0;
-  double _best_total_congestion_risk = 0;
 #if 1  // astar
   // single task
   SRTask* _curr_sr_task = nullptr;
@@ -136,9 +118,6 @@ class SRBox
   std::vector<SRNode*> _path_node_list;
   std::vector<SRNode*> _single_task_visited_node_list;
   std::vector<Segment<LayerCoord>> _routing_segment_list;
-  std::vector<std::array<double, 3>> _node_cost_cache;
-  std::vector<uint8_t> _node_cost_cache_valid_mask;
-  std::vector<int32_t> _node_cost_cache_touched_index_list;
   // single path
   OpenQueue<SRNode> _open_queue;
   std::vector<SRNode*> _single_path_visited_node_list;

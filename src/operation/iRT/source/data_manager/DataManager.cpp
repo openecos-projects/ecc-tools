@@ -560,8 +560,9 @@ std::vector<NetShape> DataManager::getNetDetailedShapeList(int32_t net_idx, Segm
     ViaMasterIdx& via_master_idx = segment.get_via_master_idx();
     int32_t below_layer_idx = std::min(first_coord.get_layer_idx(), second_coord.get_layer_idx());
     int32_t via_idx = via_master_idx.get_via_idx();
-    if (via_master_idx.get_below_layer_idx() == below_layer_idx && below_layer_idx >= 0 && below_layer_idx < static_cast<int32_t>(layer_via_master_list.size())
-        && via_idx >= 0 && via_idx < static_cast<int32_t>(layer_via_master_list[below_layer_idx].size())) {
+    if (via_master_idx.get_below_layer_idx() == below_layer_idx && below_layer_idx >= 0
+        && below_layer_idx < static_cast<int32_t>(layer_via_master_list.size()) && via_idx >= 0
+        && via_idx < static_cast<int32_t>(layer_via_master_list[below_layer_idx].size())) {
       ViaMaster& via_master = layer_via_master_list[below_layer_idx][via_idx];
 
       LayerRect& above_enclosure = via_master.get_above_enclosure();
@@ -717,7 +718,7 @@ void DataManager::buildConfig()
   _config.pa_temp_directory_path = _config.temp_directory_path + "pin_accessor/";
   // ********     SupplyAnalyzer    ******** //
   _config.sa_temp_directory_path = _config.temp_directory_path + "supply_analyzer/";
-  // ********   PlanarRouter   ******** //
+  // ********     PlanarRouter     ******** //
   _config.pr_temp_directory_path = _config.temp_directory_path + "planar_router/";
   // **********   LayerAssigner   ********** //
   _config.la_temp_directory_path = _config.temp_directory_path + "layer_assigner/";
@@ -746,7 +747,7 @@ void DataManager::buildConfig()
   RTUTIL.createDir(_config.pa_temp_directory_path);
   // **********  SupplyAnalyzer   ********** //
   RTUTIL.createDir(_config.sa_temp_directory_path);
-  // *********  PlanarRouter  ********* //
+  // **********    PlanarRouter    ********** //
   RTUTIL.createDir(_config.pr_temp_directory_path);
   // **********   LayerAssigner   ********** //
   RTUTIL.createDir(_config.la_temp_directory_path);
@@ -770,6 +771,7 @@ void DataManager::buildDatabase()
   buildLayerInfo();
   buildGCellAxis();
   buildDie();
+  buildMacroList();
   buildLayerViaMasterList();
   buildLayerViaMasterInfo();
   buildObstacleList();
@@ -1109,6 +1111,41 @@ void DataManager::checkDie()
   }
 }
 
+void DataManager::buildMacroList()
+{
+  makeMacroList();
+  checkMacroList();
+}
+
+void DataManager::makeMacroList()
+{
+  Die& die = _database.get_die();
+  std::vector<Macro>& macro_list = _database.get_macro_list();
+  std::vector<Macro> valid_macro_list;
+  valid_macro_list.reserve(macro_list.size());
+
+  for (Macro& macro : macro_list) {
+    if (!RTUTIL.hasRegularRect(macro.get_body_rect(), die.get_real_rect())) {
+      continue;
+    }
+    macro.set_body_rect(RTUTIL.getRegularRect(macro.get_body_rect(), die.get_real_rect()));
+    valid_macro_list.push_back(macro);
+  }
+  macro_list = valid_macro_list;
+}
+
+void DataManager::checkMacroList()
+{
+  Die& die = _database.get_die();
+  std::vector<Macro>& macro_list = _database.get_macro_list();
+
+  for (Macro& macro : macro_list) {
+    if (!RTUTIL.hasRegularRect(macro.get_body_rect(), die.get_real_rect())) {
+      RTLOG.error(Loc::current(), "The macro is outside die for instance ", macro.get_inst_name());
+    }
+  }
+}
+
 void DataManager::buildLayerViaMasterList()
 {
   transLayerViaMasterList();
@@ -1361,6 +1398,14 @@ void DataManager::transPinList(Net& net)
     }
     for (EXTLayerRect& cut_shape : pin.get_cut_shape_list()) {
       cut_shape.set_layer_idx(cut_idb_layer_id_to_idx_map[cut_shape.get_layer_idx()]);
+    }
+    if (pin.get_preferred_conn_layer_idx() != -1) {
+      auto iter = routing_idb_layer_id_to_idx_map.find(pin.get_preferred_conn_layer_idx());
+      if (iter != routing_idb_layer_id_to_idx_map.end()) {
+        pin.set_preferred_conn_layer_idx(iter->second);
+      } else {
+        pin.set_preferred_conn_layer_idx(-1);
+      }
     }
   }
 }
@@ -1627,7 +1672,7 @@ void DataManager::printConfig()
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "SupplyAnalyzer");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), "sa_temp_directory_path");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(3), _config.sa_temp_directory_path);
-  // ********** PlanarRouter  ********* //
+  // **********    PlanarRouter    ********** //
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "PlanarRouter");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), "pr_temp_directory_path");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(3), _config.pr_temp_directory_path);
@@ -1747,6 +1792,10 @@ void DataManager::printDatabase()
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _database.get_routing_obstacle_list().size());
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "cut_obstacle_num");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _database.get_cut_obstacle_list().size());
+  // **********       Macro       ********** //
+  std::vector<Macro>& macro_list = _database.get_macro_list();
+  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "macro_num");
+  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), macro_list.size());
   // **********        Net        ********** //
   std::vector<Net>& net_list = _database.get_net_list();
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "net_num");

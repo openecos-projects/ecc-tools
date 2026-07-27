@@ -45,7 +45,8 @@ class PRCandidate
  public:
   PRCandidate() = default;
   PRCandidate(int32_t topo_idx, const std::vector<Segment<PlanarCoord>>& routing_segment_list, int32_t total_corner_num, int32_t total_wire_length,
-              bool is_path_blocked, double total_overflow_cost, double total_usage_cost = 0.0, double total_overflow = 0.0, int32_t overflow_node_num = 0)
+              bool is_path_blocked, double total_overflow_cost, double total_usage_cost = 0.0, double total_overflow = 0.0,
+              int32_t overflow_node_num = 0)
   {
     _topo_idx = topo_idx;
     _routing_segment_list = routing_segment_list;

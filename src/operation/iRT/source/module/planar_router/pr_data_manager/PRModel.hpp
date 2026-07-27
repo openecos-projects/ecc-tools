@@ -17,13 +17,45 @@
 
 #pragma once
 
+#include "RTHeader.hpp"
 #include "PRComParam.hpp"
-#include "PRIterParam.hpp"
 #include "PRNet.hpp"
 #include "PRNode.hpp"
-#include "RTHeader.hpp"
 
 namespace irt {
+
+struct PRMacroRegion
+{
+  std::string inst_name;
+  PlanarRect body_grid_rect;
+};
+
+struct PRMacroRepairStat
+{
+  int32_t raw_steiner_in_macro = 0;
+  int32_t fixed_steiner_in_macro = 0;
+  int32_t failed_steiner_legalize_num = 0;
+  int32_t filtered_macro_cross_candidate_num = 0;
+  int32_t astar_fallback_attempt_num = 0;
+  int32_t astar_fallback_success_num = 0;
+  int32_t astar_fallback_failed_num = 0;
+  int64_t astar_search_num = 0;
+  int64_t astar_escape_pair_num = 0;
+  int64_t astar_pruned_pair_num = 0;
+  int64_t astar_max_workspace_cell_num = 0;
+  int64_t astar_expanded_node_num = 0;
+  int64_t astar_push_node_num = 0;
+  int64_t astar_stale_pop_num = 0;
+  int64_t astar_cost_cache_hit_num = 0;
+  int64_t astar_cost_cache_miss_num = 0;
+  double astar_prepare_time_ms = 0;
+  double astar_search_time_ms = 0;
+  double astar_validate_time_ms = 0;
+  int32_t failed_routing_edge_num = 0;
+  std::set<int32_t> failed_routing_net_set;
+  int32_t pattern_astar_macro_cross_edge_num = 0;
+  std::set<int32_t> pattern_astar_macro_cross_net_set;
+};
 
 class PRModel
 {
@@ -33,50 +65,23 @@ class PRModel
   // getter
   std::vector<PRNet>& get_pr_net_list() { return _pr_net_list; }
   PRComParam& get_pr_com_param() { return _pr_com_param; }
-  PRIterParam& get_pr_iter_param() { return _pr_iter_param; }
   std::vector<PRNet*>& get_pr_task_list() { return _pr_task_list; }
   GridMap<PRNode>& get_pr_node_map() { return _pr_node_map; }
-  GridMap<double>& get_congestion_risk_map() { return _congestion_risk_map; }
-  GridMap<uint8_t>& get_shadow_orient_mask_map() { return _shadow_orient_mask_map; }
-  GridMap<int32_t>& get_shadow_stamp_map() { return _shadow_stamp_map; }
-  int32_t get_shadow_stamp() const { return _shadow_stamp; }
-  std::map<int32_t, std::set<Segment<LayerCoord>*>>& get_net_global_result_map() { return _net_global_result_map; }
-  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_best_net_global_result_map() { return _best_net_global_result_map; }
-  std::set<int32_t>& get_changed_net_set() { return _changed_net_set; }
-  double get_curr_overflow() const { return _curr_overflow; }
-  double get_curr_high_usage() const { return _curr_high_usage; }
-  double get_curr_congestion_risk() const { return _curr_congestion_risk; }
-  double get_curr_wire_length() const { return _curr_wire_length; }
-  bool get_metric_valid() const { return _metric_valid; }
-  double get_best_overflow() const { return _best_overflow; }
-  double get_best_high_usage() const { return _best_high_usage; }
-  double get_best_congestion_risk() const { return _best_congestion_risk; }
-  double get_best_wire_length() const { return _best_wire_length; }
+  std::vector<PRMacroRegion>& get_pr_macro_region_list() { return _pr_macro_region_list; }
+  GridMap<bool>& get_macro_body_forbidden_map() { return _macro_body_forbidden_map; }
+  const std::vector<PlanarRect>& get_macro_body_obs_list() const { return _macro_body_obs_list; }
+  PRMacroRepairStat& get_pr_macro_repair_stat() { return _pr_macro_repair_stat; }
+  bool get_enable_astar_fallback() const { return _enable_astar_fallback; }
   // setter
   void set_pr_net_list(const std::vector<PRNet>& pr_net_list) { _pr_net_list = pr_net_list; }
   void set_pr_com_param(const PRComParam& pr_com_param) { _pr_com_param = pr_com_param; }
-  void set_pr_iter_param(const PRIterParam& pr_iter_param) { _pr_iter_param = pr_iter_param; }
   void set_pr_task_list(const std::vector<PRNet*>& pr_task_list) { _pr_task_list = pr_task_list; }
   void set_pr_node_map(const GridMap<PRNode>& pr_node_map) { _pr_node_map = pr_node_map; }
-  void set_congestion_risk_map(const GridMap<double>& congestion_risk_map) { _congestion_risk_map = congestion_risk_map; }
-  void set_shadow_stamp(const int32_t shadow_stamp) { _shadow_stamp = shadow_stamp; }
-  void set_net_global_result_map(const std::map<int32_t, std::set<Segment<LayerCoord>*>>& net_global_result_map)
-  {
-    _net_global_result_map = net_global_result_map;
-  }
-  void set_best_net_global_result_map(const std::map<int32_t, std::vector<Segment<LayerCoord>>>& best_net_global_result_map)
-  {
-    _best_net_global_result_map = best_net_global_result_map;
-  }
-  void set_curr_overflow(const double curr_overflow) { _curr_overflow = curr_overflow; }
-  void set_curr_high_usage(const double curr_high_usage) { _curr_high_usage = curr_high_usage; }
-  void set_curr_congestion_risk(const double curr_congestion_risk) { _curr_congestion_risk = curr_congestion_risk; }
-  void set_curr_wire_length(const double curr_wire_length) { _curr_wire_length = curr_wire_length; }
-  void set_metric_valid(const bool metric_valid) { _metric_valid = metric_valid; }
-  void set_best_overflow(const double best_overflow) { _best_overflow = best_overflow; }
-  void set_best_high_usage(const double best_high_usage) { _best_high_usage = best_high_usage; }
-  void set_best_congestion_risk(const double best_congestion_risk) { _best_congestion_risk = best_congestion_risk; }
-  void set_best_wire_length(const double best_wire_length) { _best_wire_length = best_wire_length; }
+  void set_pr_macro_region_list(const std::vector<PRMacroRegion>& pr_macro_region_list) { _pr_macro_region_list = pr_macro_region_list; }
+  void set_macro_body_forbidden_map(const GridMap<bool>& macro_body_forbidden_map) { _macro_body_forbidden_map = macro_body_forbidden_map; }
+  void set_macro_body_obs_list(std::vector<PlanarRect> macro_body_obs_list) { _macro_body_obs_list = std::move(macro_body_obs_list); }
+  void set_pr_macro_repair_stat(const PRMacroRepairStat& pr_macro_repair_stat) { _pr_macro_repair_stat = pr_macro_repair_stat; }
+  void set_enable_astar_fallback(const bool enable_astar_fallback) { _enable_astar_fallback = enable_astar_fallback; }
 #if 1
   // single task
   PRNet* get_curr_pr_task() { return _curr_pr_task; }
@@ -86,25 +91,13 @@ class PRModel
  private:
   std::vector<PRNet> _pr_net_list;
   PRComParam _pr_com_param;
-  PRIterParam _pr_iter_param;
   std::vector<PRNet*> _pr_task_list;
   GridMap<PRNode> _pr_node_map;
-  GridMap<double> _congestion_risk_map;
-  GridMap<uint8_t> _shadow_orient_mask_map;
-  GridMap<int32_t> _shadow_stamp_map;
-  int32_t _shadow_stamp = 0;
-  std::map<int32_t, std::set<Segment<LayerCoord>*>> _net_global_result_map;
-  std::map<int32_t, std::vector<Segment<LayerCoord>>> _best_net_global_result_map;
-  std::set<int32_t> _changed_net_set;
-  double _curr_overflow = 0.0;
-  double _curr_high_usage = 0.0;
-  double _curr_congestion_risk = 0.0;
-  double _curr_wire_length = 0.0;
-  bool _metric_valid = false;
-  double _best_overflow = DBL_MAX;
-  double _best_high_usage = DBL_MAX;
-  double _best_congestion_risk = DBL_MAX;
-  double _best_wire_length = DBL_MAX;
+  std::vector<PRMacroRegion> _pr_macro_region_list;
+  GridMap<bool> _macro_body_forbidden_map;
+  std::vector<PlanarRect> _macro_body_obs_list;
+  PRMacroRepairStat _pr_macro_repair_stat;
+  bool _enable_astar_fallback = false;
 #if 1
   // single task
   PRNet* _curr_pr_task = nullptr;

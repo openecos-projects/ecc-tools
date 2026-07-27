@@ -312,6 +312,10 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     double default_fanout_load_val = attri_value_handle->value;
     current_lib->set_default_fanout_load(default_fanout_load_val);
     liberty_free_float_value(attri_value_handle);
+  } else if (is_attri("default_operating_conditions")) {
+    auto* attri_value_handle = liberty_convert_string_value(attri_value);
+    current_lib->set_default_operating_conditions(attri_value_handle->value);
+    liberty_free_string_value(attri_value_handle);
   } else if (is_attri("default_wire_load")) {
     auto* attri_value_handle = liberty_convert_string_value(attri_value);
     const char* default_wire_load = attri_value_handle->value;

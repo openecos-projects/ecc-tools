@@ -35,6 +35,16 @@ class SDFWriter
   void write();
 
  private:
+  struct SDFCellArcKey
+  {
+    std::string condition;
+    TransType trigger_trans_type = TransType::kNone;
+
+    bool operator<(const SDFCellArcKey& other) const { return std::tie(condition, trigger_trans_type) < std::tie(other.condition, other.trigger_trans_type); }
+  };
+
+  using SDFCellArcDelayMap = std::map<SDFCellArcKey, SDFDelay>;
+
   // self
   static SDFWriter* _sw_instance;
   SWModel _sw_model;
@@ -59,11 +69,13 @@ class SDFWriter
   bool hasSDFTimingCheck(Instance& instance);
   void outputSDFCellDelay(std::ofstream* sdf_file, Instance& instance);
   void outputSDFGraphCellArc(std::ofstream* sdf_file, Arc& arc);
+  void mergeSDFCellArcDelay(SDFCellArcDelayMap& cell_arc_delay_map, TimingArc& timing_arc, SDFDelay& sdf_delay);
   void mergeSDFDelay(SDFDelay& target_delay, SDFDelay& source_delay);
+  void outputSDFCellArcDelayMap(std::ofstream* sdf_file, std::string& source_port_name, std::string& sink_port_name, SDFCellArcDelayMap& cell_arc_delay_map);
   void outputSDFOnlyCellArcList(std::ofstream* sdf_file, Instance& instance);
   void outputSDFOnlyCellArc(std::ofstream* sdf_file, Instance& instance, TimingCellArc& timing_cell_arc);
   void outputSDFCellArc(std::ofstream* sdf_file, std::string& source_port_name, std::string& sink_port_name, std::string& condition,
-                        SDFDelay& sdf_delay);
+                        TransType trigger_trans_type, SDFDelay& sdf_delay);
   void outputSDFTimingCheckList(std::ofstream* sdf_file, Instance& instance);
   void outputSDFTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc);
   void outputSDFEdgeTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc,

@@ -56,6 +56,7 @@ void GraphBuilder::build()
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
   buildTimingPointList();
+  normalizePinDirectionByTimingCell();
   buildCellArcs();
   buildInoutPinDirectionByGraph();
   buildNetDriverLoadList();
@@ -77,6 +78,22 @@ void GraphBuilder::buildTimingPointList()
   Database& database = STADM.getDatabase();
   for (std::pair<const std::string, Pin>& pin_pair : database.get_pin_map()) {
     database.get_timing_point_map()[pin_pair.first] = TimingPoint();
+  }
+}
+
+void GraphBuilder::normalizePinDirectionByTimingCell()
+{
+  Database& database = STADM.getDatabase();
+  for (auto& pin_pair : database.get_pin_map()) {
+    Pin& pin = pin_pair.second;
+    if (pin.get_is_port()) {
+      continue;
+    }
+    PinDirection timing_cell_direction = inferInoutPinDirectionByTimingCell(pin);
+    if (timing_cell_direction != PinDirection::kNone) {
+      // Liberty is the timing authority when its port direction is unambiguous.
+      pin.set_direction(timing_cell_direction);
+    }
   }
 }
 

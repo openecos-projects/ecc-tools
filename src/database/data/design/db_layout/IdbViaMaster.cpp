@@ -401,6 +401,7 @@ IdbViaMaster* IdbViaMaster::clone()
   master_new->_name = _name;
   master_new->_is_default = _is_default;
   master_new->_type = _type;
+  master_new->_resistance = _resistance;
   master_new->_master_generate = _master_generate->clone();
   master_new->_master_fixed_list = _master_fixed_list;
   master_new->_cut_rect->set_rect(_cut_rect);

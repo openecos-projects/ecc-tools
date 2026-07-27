@@ -20,7 +20,10 @@ bison_target(spefParser
 )
 
 add_library(spef
-  SpefParser.cc
+  SpefAnnotationScanner.cc
+  SpefParserContext.cc
+  SpefReader.cc
+  SpefText.cc
   ${FLEX_spefScanner_OUTPUTS}
   ${BISON_spefParser_OUTPUTS}
 )

@@ -575,7 +575,15 @@ int32_t RustVerilogRead::build_assign()
           auto* the_left_io_pin = idb_io_pin_list->find_pin(left_net_name.c_str());
           auto* the_right_io_pin = idb_io_pin_list->find_pin(right_net_name.c_str());
 
-          if (the_left_idb_net && the_right_idb_net && the_left_idb_net != the_right_idb_net) {
+          // A top-level port can have the same name as an internal net.  Preserve
+          // port-to-net assigns before considering a net-to-net merge.
+          if (the_left_io_pin && the_left_io_pin->is_io_pin() && the_right_idb_net) {
+            // assign output_port = net;
+            idb_design->connectPinToNet(the_left_io_pin, the_right_idb_net);
+          } else if (the_right_io_pin && the_right_io_pin->is_io_pin() && the_left_idb_net) {
+            // assign net = input_port;
+            idb_design->connectPinToNet(the_right_io_pin, the_left_idb_net);
+          } else if (the_left_idb_net && the_right_idb_net && the_left_idb_net != the_right_idb_net) {
             // assign net = net, need merge two net to one net.
 
             // std::cout << "merge " << left_net_name << " = " << right_net_name << "\n";

@@ -30,7 +30,6 @@ class TimingCheckArc
   // getter
   std::string& get_clock_port() { return _clock_port; }
   std::string& get_data_port() { return _data_port; }
-  double get_setup_time() const { return _setup_time; }
   TimingCheckType get_check_type() const { return _check_type; }
   double get_check_time() const { return _check_time; }
   std::vector<TimingArc>& get_timing_arc_list() { return _timing_arc_list; }
@@ -38,7 +37,6 @@ class TimingCheckArc
   // setter
   void set_clock_port(const std::string& clock_port) { _clock_port = clock_port; }
   void set_data_port(const std::string& data_port) { _data_port = data_port; }
-  void set_setup_time(const double setup_time) { _setup_time = setup_time; }
   void set_check_type(const TimingCheckType& check_type) { _check_type = check_type; }
   void set_check_time(const double check_time) { _check_time = check_time; }
   void set_timing_arc_list(const std::vector<TimingArc>& timing_arc_list) { _timing_arc_list = timing_arc_list; }
@@ -48,7 +46,6 @@ class TimingCheckArc
  private:
   std::string _clock_port;
   std::string _data_port;
-  double _setup_time = 0.0;
   TimingCheckType _check_type = TimingCheckType::kNone;
   double _check_time = 0.0;
   std::vector<TimingArc> _timing_arc_list;

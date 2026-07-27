@@ -77,6 +77,7 @@ void DataManager::resetData()
   _layout = nullptr;
   _lib_readers.clear();
   _spef_reader.reset();
+  _vcd_reader.reset();
 }
 
 bool DataManager::readLef(string config_path)
@@ -241,6 +242,15 @@ bool DataManager::readLib(vector<string> lib_paths)
 bool DataManager::readSpef(string spef_path)
 {
   if (!initSpef(spef_path)) {
+    return false;
+  }
+
+  return true;
+}
+
+bool DataManager::readVcd(string vcd_path)
+{
+  if (!initVcd(vcd_path)) {
     return false;
   }
 

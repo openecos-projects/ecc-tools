@@ -24,30 +24,15 @@ class PAComParam
 {
  public:
   PAComParam() = default;
-  PAComParam(int32_t max_candidate_point_num, int32_t extra_via_master_num, int32_t ap_per_via_master, bool enable_pattern_seed)
-  {
-    _max_candidate_point_num = max_candidate_point_num;
-    _extra_via_master_num = extra_via_master_num;
-    _ap_per_via_master = ap_per_via_master;
-    _enable_pattern_seed = enable_pattern_seed;
-  }
+  PAComParam(int32_t max_candidate_point_num) { _max_candidate_point_num = max_candidate_point_num; }
   ~PAComParam() = default;
   // getter
   int32_t get_max_candidate_point_num() const { return _max_candidate_point_num; }
-  int32_t get_extra_via_master_num() const { return _extra_via_master_num; }
-  int32_t get_ap_per_via_master() const { return _ap_per_via_master; }
-  bool get_enable_pattern_seed() const { return _enable_pattern_seed; }
   // setter
   void set_max_candidate_point_num(const int32_t max_candidate_point_num) { _max_candidate_point_num = max_candidate_point_num; }
-  void set_extra_via_master_num(const int32_t extra_via_master_num) { _extra_via_master_num = extra_via_master_num; }
-  void set_ap_per_via_master(const int32_t ap_per_via_master) { _ap_per_via_master = ap_per_via_master; }
-  void set_enable_pattern_seed(const bool enable_pattern_seed) { _enable_pattern_seed = enable_pattern_seed; }
 
  private:
   int32_t _max_candidate_point_num = 0;
-  int32_t _extra_via_master_num = 0;
-  int32_t _ap_per_via_master = 0;
-  bool _enable_pattern_seed = false;
 };
 
 }  // namespace irt

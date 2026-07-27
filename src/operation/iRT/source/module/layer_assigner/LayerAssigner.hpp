@@ -122,7 +122,6 @@ class LayerAssigner
   void outputGuide(LAModel& la_model);
   void outputNetCSV(LAModel& la_model);
   void outputOverflowCSV(LAModel& la_model);
-  void outputCongestionCSV(LAModel& la_model);
   void outputJson(LAModel& la_model);
   std::string outputNetJson(LAModel& la_model);
   std::string outputOverflowJson(LAModel& la_model);

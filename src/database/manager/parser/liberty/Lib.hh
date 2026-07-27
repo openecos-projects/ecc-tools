@@ -1384,6 +1384,8 @@ class LibLibrary : public LibObject
         _power_unit_mw_scale(other._power_unit_mw_scale),
         _current_unit_name(std::move(other._current_unit_name)),
         _voltage_unit_name(std::move(other._voltage_unit_name)),
+        _default_operating_conditions(std::move(other._default_operating_conditions)),
+        _default_wire_load(std::move(other._default_wire_load)),
         _nom_process(other._nom_process),
         _nom_temperature(other._nom_temperature)
   {
@@ -1400,6 +1402,8 @@ class LibLibrary : public LibObject
     _power_unit_mw_scale = rhs._power_unit_mw_scale;
     _current_unit_name = std::move(rhs._current_unit_name);
     _voltage_unit_name = std::move(rhs._voltage_unit_name);
+    _default_operating_conditions = std::move(rhs._default_operating_conditions);
+    _default_wire_load = std::move(rhs._default_wire_load);
     _nom_process = rhs._nom_process;
     _nom_temperature = rhs._nom_temperature;
 
@@ -1467,6 +1471,12 @@ class LibLibrary : public LibObject
   }
   auto get_lib_name() { return _lib_name; }
   auto& get_wire_loads() { return _wire_loads; }
+
+  void set_default_operating_conditions(const char* operating_conditions_name)
+  {
+    _default_operating_conditions = operating_conditions_name;
+  }
+  std::string get_default_operating_conditions() { return _default_operating_conditions; }
 
   void set_default_wire_load(const char* wire_load_name) { _default_wire_load = wire_load_name; }
 
@@ -1662,6 +1672,7 @@ class LibLibrary : public LibObject
   std::optional<double> _default_max_fanout;
   std::optional<double> _default_fanout_load;
 
+  std::string _default_operating_conditions;
   std::string _default_wire_load;
 
   std::optional<double> _nom_process;

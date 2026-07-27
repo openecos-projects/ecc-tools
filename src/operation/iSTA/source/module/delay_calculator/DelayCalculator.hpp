@@ -34,6 +34,7 @@ class DelayCalculator
   void init();
   void calculate(DCTask& dc_task);
   void destroy();
+  double getPowerOutputLoad(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type);
 
  private:
   // self

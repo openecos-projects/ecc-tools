@@ -19,6 +19,7 @@
 #include "Direction.hpp"
 #include "LayerCoord.hpp"
 #include "Orientation.hpp"
+#include "RoutingAllowedNet.hpp"
 #include "RTHeader.hpp"
 #include "Utility.hpp"
 
@@ -36,6 +37,7 @@ class ERNode : public LayerCoord
   std::map<Orientation, ERNode*>& get_neighbor_node_map() { return _neighbor_node_map; }
   std::map<Orientation, int32_t>& get_orient_supply_map() { return _orient_supply_map; }
   std::map<int32_t, std::set<Orientation>>& get_ignore_net_orient_map() { return _ignore_net_orient_map; }
+  RoutingOrientAllowedNetMap& get_orient_allowed_net_map() { return _orient_allowed_net_map; }
   std::map<Orientation, std::set<int32_t>>& get_orient_net_map() { return _orient_net_map; }
   std::map<int32_t, std::set<Orientation>>& get_net_orient_map() { return _net_orient_map; }
   // setter
@@ -45,6 +47,7 @@ class ERNode : public LayerCoord
   void set_neighbor_node_map(const std::map<Orientation, ERNode*>& neighbor_node_map) { _neighbor_node_map = neighbor_node_map; }
   void set_orient_supply_map(const std::map<Orientation, int32_t>& orient_supply_map) { _orient_supply_map = orient_supply_map; }
   void set_ignore_net_orient_map(const std::map<int32_t, std::set<Orientation>>& ignore_net_orient_map) { _ignore_net_orient_map = ignore_net_orient_map; }
+  void set_orient_allowed_net_map(const RoutingOrientAllowedNetMap& orient_allowed_net_map) { _orient_allowed_net_map = orient_allowed_net_map; }
   void set_orient_net_map(const std::map<Orientation, std::set<int32_t>>& orient_net_map) { _orient_net_map = orient_net_map; }
   void set_net_orient_map(const std::map<int32_t, std::set<Orientation>>& net_orient_map) { _net_orient_map = net_orient_map; }
   // function
@@ -127,6 +130,10 @@ class ERNode : public LayerCoord
     }
     double cost = 0;
     cost += (overflow_unit * (boundary_overflow + internal_overflow));
+    int32_t policy_overflow = getRoutingPolicyOverflow(_orient_allowed_net_map, net_orient_map);
+    if (policy_overflow > 0) {
+      cost += overflow_unit * calcCost(policy_overflow, 0);
+    }
     return cost;
   }
   bool validDemandUnit()
@@ -250,7 +257,7 @@ class ERNode : public LayerCoord
       }
       internal_overflow += std::max(0.0, internal_demand - internal_supply);
     }
-    return (boundary_overflow + internal_overflow);
+    return (boundary_overflow + internal_overflow + getRoutingPolicyOverflow(_orient_allowed_net_map, _net_orient_map));
   }
   void updateDemand(int32_t net_idx, std::set<Orientation> orient_set, ChangeType change_type)
   {
@@ -278,6 +285,7 @@ class ERNode : public LayerCoord
   std::map<Orientation, ERNode*> _neighbor_node_map;
   std::map<Orientation, int32_t> _orient_supply_map;
   std::map<int32_t, std::set<Orientation>> _ignore_net_orient_map;
+  RoutingOrientAllowedNetMap _orient_allowed_net_map;
   std::map<Orientation, std::set<int32_t>> _orient_net_map;
   std::map<int32_t, std::set<Orientation>> _net_orient_map;
 };

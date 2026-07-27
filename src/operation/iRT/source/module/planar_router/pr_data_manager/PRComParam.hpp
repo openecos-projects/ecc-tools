@@ -22,7 +22,8 @@ class PRComParam
 {
  public:
   PRComParam() = default;
-  PRComParam(int32_t topo_spilt_length, int32_t expand_step_num, int32_t expand_step_length, double overflow_unit, double corner_weight = 0.3)
+  PRComParam(int32_t topo_spilt_length, int32_t expand_step_num, int32_t expand_step_length, double overflow_unit,
+             double corner_weight = 0.3)
   {
     _topo_spilt_length = topo_spilt_length;
     _expand_step_num = expand_step_num;

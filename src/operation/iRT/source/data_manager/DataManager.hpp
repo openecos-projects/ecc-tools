@@ -107,6 +107,9 @@ class DataManager
   void buildDie();
   void makeDie();
   void checkDie();
+  void buildMacroList();
+  void makeMacroList();
+  void checkMacroList();
   void buildLayerViaMasterList();
   void transLayerViaMasterList();
   void makeLayerViaMasterList();

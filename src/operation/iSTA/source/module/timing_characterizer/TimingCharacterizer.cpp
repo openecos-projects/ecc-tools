@@ -11,7 +11,6 @@
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 // MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "TimingCharacterizer.hpp"
@@ -19,6 +18,7 @@
 #include "DataManager.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
+#include "STAInterface.hpp"
 #include "TCCheckArcCandidate.hpp"
 #include "TCDelayArcCandidate.hpp"
 #include "Utility.hpp"
@@ -57,7 +57,9 @@ void TimingCharacterizer::characterize()
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
-  outputLibFileList();
+  TCModel tc_model = initTCModel();
+  buildTCLibList(tc_model);
+  writeLib(tc_model);
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -66,132 +68,36 @@ void TimingCharacterizer::characterize()
 
 TimingCharacterizer* TimingCharacterizer::_tc_instance = nullptr;
 
-void TimingCharacterizer::outputLibFileList()
+TCModel TimingCharacterizer::initTCModel()
 {
-  outputLibFile(AnalysisType::kMax);
-  outputLibFile(AnalysisType::kMin);
+  TCModel tc_model;
+  return tc_model;
 }
 
-void TimingCharacterizer::outputLibFile(AnalysisType analysis_type)
+void TimingCharacterizer::buildTCLibList(TCModel& tc_model)
+{
+  buildTCLib(tc_model, AnalysisType::kMax);
+  buildTCLib(tc_model, AnalysisType::kMin);
+}
+
+void TimingCharacterizer::writeLib(TCModel& tc_model)
+{
+  std::string output_path = STADM.getConfig().tc_temp_directory_path;
+  STAI.writeLib(tc_model, output_path);
+}
+
+void TimingCharacterizer::buildTCLib(TCModel& tc_model, AnalysisType analysis_type)
 {
   Database& database = STADM.getDatabase();
-  std::string lib_file_path = getLibFilePath(database.get_design_name(), analysis_type);
-  std::unique_ptr<idb::LibLibrary> timing_model = buildTimingModel(analysis_type);
-  timing_model->printLibertyLibrary(lib_file_path.c_str());
-  STALOG.info(Loc::current(), "Output iSTA extracted lib: ", lib_file_path);
-}
-
-std::unique_ptr<idb::LibLibrary> TimingCharacterizer::buildTimingModel(AnalysisType analysis_type)
-{
-  Database& database = STADM.getDatabase();
-  std::unique_ptr<idb::LibLibrary> timing_model = std::make_unique<idb::LibLibrary>(database.get_design_name().c_str());
-  buildTimingModelHeader(*timing_model);
-  timing_model->addLibertyCell(buildDesignCell(*timing_model, analysis_type));
-  return timing_model;
-}
-
-void TimingCharacterizer::buildTimingModelHeader(idb::LibLibrary& timing_model)
-{
-  TimingLibrary& timing_library = STADM.getDatabase().get_timing_library();
-  if (timing_library.get_has_library_info()) {
-    if (timing_library.get_comment()) {
-      timing_model.set_comment(*timing_library.get_comment());
-    }
-    if (timing_library.get_simulation()) {
-      timing_model.set_simulation(*timing_library.get_simulation());
-    }
-    for (std::string& library_feature : timing_library.get_library_feature_list()) {
-      timing_model.add_library_feature(library_feature);
-    }
-    if (timing_library.get_leakage_power_unit()) {
-      timing_model.set_leakage_power_unit(*timing_library.get_leakage_power_unit());
-    }
-    if (timing_library.get_current_unit_name()) {
-      timing_model.set_current_unit_name(*timing_library.get_current_unit_name());
-    }
-    if (timing_library.get_voltage_unit_name()) {
-      timing_model.set_voltage_unit_name(*timing_library.get_voltage_unit_name());
-    }
-    timing_model.set_cap_unit(getLibCapacitiveUnit(timing_library));
-    timing_model.set_resistance_unit(getLibResistanceUnit(timing_library));
-    timing_model.set_time_unit(getLibTimeUnit(timing_library));
-    if (timing_library.get_default_max_transition()) {
-      timing_model.set_default_max_transition(*timing_library.get_default_max_transition());
-    }
-    if (timing_library.get_default_max_fanout()) {
-      timing_model.set_default_max_fanout(*timing_library.get_default_max_fanout());
-    }
-    if (timing_library.get_default_fanout_load()) {
-      timing_model.set_default_fanout_load(*timing_library.get_default_fanout_load());
-    }
-    if (timing_library.get_nom_process()) {
-      timing_model.set_nom_process(*timing_library.get_nom_process());
-    }
-    timing_model.set_nom_voltage(timing_library.get_nom_voltage());
-    if (timing_library.get_nom_temperature()) {
-      timing_model.set_nom_temperature(*timing_library.get_nom_temperature());
-    }
-    timing_model.set_slew_lower_threshold_pct_rise(timing_library.get_slew_lower_threshold_pct_rise() * 100.0);
-    timing_model.set_slew_upper_threshold_pct_rise(timing_library.get_slew_upper_threshold_pct_rise() * 100.0);
-    timing_model.set_slew_lower_threshold_pct_fall(timing_library.get_slew_lower_threshold_pct_fall() * 100.0);
-    timing_model.set_slew_upper_threshold_pct_fall(timing_library.get_slew_upper_threshold_pct_fall() * 100.0);
-    timing_model.set_input_threshold_pct_rise(timing_library.get_input_threshold_pct_rise() * 100.0);
-    timing_model.set_output_threshold_pct_rise(timing_library.get_output_threshold_pct_rise() * 100.0);
-    timing_model.set_input_threshold_pct_fall(timing_library.get_input_threshold_pct_fall() * 100.0);
-    timing_model.set_output_threshold_pct_fall(timing_library.get_output_threshold_pct_fall() * 100.0);
-    timing_model.set_slew_derate_from_library(timing_library.get_slew_derate_from_library());
-  } else {
-    timing_model.set_simulation(false);
-    timing_model.set_time_unit(idb::TimeUnit::kNS);
-    timing_model.set_cap_unit(idb::CapacitiveUnit::kPF);
-    timing_model.set_resistance_unit(idb::ResistanceUnit::kkOHM);
-  }
-  if (timing_model.get_library_features().empty()) {
-    timing_model.add_library_feature("report_delay_calculation");
-  }
-}
-
-idb::CapacitiveUnit TimingCharacterizer::getLibCapacitiveUnit(TimingLibrary& timing_library)
-{
-  if (timing_library.get_cap_unit() == TimingCapacitiveUnit::kFF) {
-    return idb::CapacitiveUnit::kFF;
-  }
-  if (timing_library.get_cap_unit() == TimingCapacitiveUnit::kF) {
-    return idb::CapacitiveUnit::kF;
-  }
-  return idb::CapacitiveUnit::kPF;
-}
-
-idb::ResistanceUnit TimingCharacterizer::getLibResistanceUnit(TimingLibrary& timing_library)
-{
-  if (timing_library.get_resistance_unit() == TimingResistanceUnit::kOHM) {
-    return idb::ResistanceUnit::kOHM;
-  }
-  return idb::ResistanceUnit::kkOHM;
-}
-
-idb::TimeUnit TimingCharacterizer::getLibTimeUnit(TimingLibrary& timing_library)
-{
-  if (timing_library.get_time_unit() == TimingTimeUnit::kPS) {
-    return idb::TimeUnit::kPS;
-  }
-  if (timing_library.get_time_unit() == TimingTimeUnit::kFS) {
-    return idb::TimeUnit::kFS;
-  }
-  return idb::TimeUnit::kNS;
-}
-
-std::unique_ptr<idb::LibCell> TimingCharacterizer::buildDesignCell(idb::LibLibrary& timing_model, AnalysisType analysis_type)
-{
-  Database& database = STADM.getDatabase();
-  std::unique_ptr<idb::LibCell> design_cell = std::make_unique<idb::LibCell>(database.get_design_name().c_str(), &timing_model);
-  design_cell->set_is_macro();
-  design_cell->set_cell_area(getDesignArea());
-  buildPortList(*design_cell);
-  buildClockPathArcList(*design_cell);
-  buildCheckArcList(*design_cell, analysis_type);
-  buildDelayArcList(*design_cell, analysis_type);
-  return design_cell;
+  TCLib tc_lib;
+  tc_lib.set_design_name(database.get_design_name());
+  tc_lib.set_analysis_type(analysis_type);
+  tc_lib.set_area(getDesignArea());
+  buildTCPortList(tc_lib);
+  buildTCClockPathArcList(tc_lib);
+  buildTCCheckArcList(tc_lib, analysis_type);
+  buildTCDelayArcList(tc_lib, analysis_type);
+  tc_model.get_lib_list().push_back(tc_lib);
 }
 
 double TimingCharacterizer::getDesignArea()
@@ -208,39 +114,25 @@ double TimingCharacterizer::getDesignArea()
   return design_area;
 }
 
-void TimingCharacterizer::buildPortList(idb::LibCell& design_cell)
+void TimingCharacterizer::buildTCPortList(TCLib& tc_lib)
 {
   Database& database = STADM.getDatabase();
   for (std::pair<const std::string, Pin>& pin_pair : database.get_pin_map()) {
     Pin& pin = pin_pair.second;
     if (pin.get_is_port()) {
-      buildPort(design_cell, pin);
+      buildTCPort(tc_lib, pin);
     }
   }
 }
 
-void TimingCharacterizer::buildPort(idb::LibCell& design_cell, Pin& pin)
+void TimingCharacterizer::buildTCPort(TCLib& tc_lib, Pin& pin)
 {
-  std::unique_ptr<idb::LibPort> lib_port = std::make_unique<idb::LibPort>(pin.get_pin_name().c_str());
-  lib_port->set_ower_cell(&design_cell);
-  lib_port->set_port_type(getLibPortType(pin));
-  lib_port->set_is_clock(isClockPort(pin.get_full_name()));
-  lib_port->set_port_cap(getPortCapacitance(pin));
-  design_cell.addLibertyPort(std::move(lib_port));
-}
-
-idb::LibPort::LibertyPortType TimingCharacterizer::getLibPortType(Pin& pin)
-{
-  if (pin.get_direction() == PinDirection::kInput) {
-    return idb::LibPort::LibertyPortType::kInput;
-  }
-  if (pin.get_direction() == PinDirection::kOutput) {
-    return idb::LibPort::LibertyPortType::kOutput;
-  }
-  if (pin.get_direction() == PinDirection::kInout) {
-    return idb::LibPort::LibertyPortType::kInOut;
-  }
-  return idb::LibPort::LibertyPortType::kDefault;
+  TCPort tc_port;
+  tc_port.set_port_name(pin.get_pin_name());
+  tc_port.set_direction(pin.get_direction());
+  tc_port.set_is_clock(isClockPort(pin.get_full_name()));
+  tc_port.set_capacitance(getPortCapacitance(pin));
+  tc_lib.get_port_map()[tc_port.get_port_name()] = tc_port;
 }
 
 double TimingCharacterizer::getPortCapacitance(Pin& pin)
@@ -272,33 +164,39 @@ double TimingCharacterizer::getPortCapacitance(Pin& pin)
   return port_capacitance;
 }
 
-void TimingCharacterizer::buildClockPathArcList(idb::LibCell& design_cell)
+void TimingCharacterizer::buildTCClockPathArcList(TCLib& tc_lib)
 {
   Database& database = STADM.getDatabase();
   for (std::pair<const std::string, TimingClock>& clock_pair : database.get_timing_constraint().get_clock_map()) {
     for (std::string& clock_port_name : clock_pair.second.get_source_list()) {
       if (isClockPort(clock_port_name)) {
-        buildClockPathArc(design_cell, clock_port_name, "min_clock_tree_path");
-        buildClockPathArc(design_cell, clock_port_name, "max_clock_tree_path");
+        buildTCClockPathArc(tc_lib, clock_port_name, "min_clock_tree_path");
+        buildTCClockPathArc(tc_lib, clock_port_name, "max_clock_tree_path");
       }
     }
   }
 }
 
-void TimingCharacterizer::buildClockPathArc(idb::LibCell& design_cell, std::string& clock_port_name, std::string timing_type)
+void TimingCharacterizer::buildTCClockPathArc(TCLib& tc_lib, std::string& clock_port_name, std::string timing_type)
 {
-  std::string empty_source_port;
-  std::unique_ptr<idb::LibArc> lib_arc = makeLibArc(empty_source_port, clock_port_name, timing_type);
-  lib_arc->set_timing_sense("positive_unate");
-  std::unique_ptr<idb::LibDelayTableModel> delay_model = std::make_unique<idb::LibDelayTableModel>();
-  delay_model->addTable(makeScalarTable(idb::LibTable::TableType::kCellRise, 0.0));
-  delay_model->addTable(makeScalarTable(idb::LibTable::TableType::kCellFall, 0.0));
-  lib_arc->set_table_model(std::move(delay_model));
-  lib_arc->set_owner_cell(&design_cell);
-  design_cell.addLibertyArc(std::move(lib_arc));
+  TCTimingArc timing_arc;
+  timing_arc.set_sink_port(clock_port_name);
+  timing_arc.set_timing_type(timing_type);
+  timing_arc.set_timing_sense("positive_unate");
+  addTCScalarTable(timing_arc, "cell_rise", 0.0);
+  addTCScalarTable(timing_arc, "cell_fall", 0.0);
+  tc_lib.get_timing_arc_list().push_back(timing_arc);
 }
 
-void TimingCharacterizer::buildCheckArcList(idb::LibCell& design_cell, AnalysisType analysis_type)
+void TimingCharacterizer::addTCScalarTable(TCTimingArc& timing_arc, std::string table_name, double value)
+{
+  TCScalarTable scalar_table;
+  scalar_table.set_table_name(table_name);
+  scalar_table.set_value(value);
+  timing_arc.get_scalar_table_list().push_back(scalar_table);
+}
+
+void TimingCharacterizer::buildTCCheckArcList(TCLib& tc_lib, AnalysisType analysis_type)
 {
   std::map<std::tuple<std::string, std::string, std::string>, TCCheckArcCandidate> candidate_map;
   for (TimingPath* timing_path : getTimingPathList(analysis_type)) {
@@ -326,28 +224,29 @@ void TimingCharacterizer::buildCheckArcList(idb::LibCell& design_cell, AnalysisT
   }
   for (std::pair<const std::tuple<std::string, std::string, std::string>, TCCheckArcCandidate>& candidate_pair : candidate_map) {
     TCCheckArcCandidate& candidate = candidate_pair.second;
-    buildCheckArc(design_cell, candidate.get_source_port(), candidate.get_sink_port(), candidate.get_timing_type(), candidate.get_rise_constraint(),
-                  candidate.get_fall_constraint(), candidate.get_has_rise_constraint(), candidate.get_has_fall_constraint());
+    buildTCCheckArc(tc_lib, candidate.get_source_port(), candidate.get_sink_port(), candidate.get_timing_type(), candidate.get_rise_constraint(),
+                    candidate.get_fall_constraint(), candidate.get_has_rise_constraint(), candidate.get_has_fall_constraint());
   }
 }
 
-void TimingCharacterizer::buildCheckArc(idb::LibCell& design_cell, std::string& source_port, std::string& sink_port, std::string& timing_type,
-                                        double rise_constraint, double fall_constraint, bool has_rise_constraint, bool has_fall_constraint)
+void TimingCharacterizer::buildTCCheckArc(TCLib& tc_lib, std::string& source_port, std::string& sink_port, std::string& timing_type,
+                                           double rise_constraint, double fall_constraint, bool has_rise_constraint, bool has_fall_constraint)
 {
   if (source_port.empty() || sink_port.empty() || timing_type.empty() || (!has_rise_constraint && !has_fall_constraint)) {
     return;
   }
-  std::unique_ptr<idb::LibArc> lib_arc = makeLibArc(source_port, sink_port, timing_type);
-  std::unique_ptr<idb::LibCheckTableModel> check_model = std::make_unique<idb::LibCheckTableModel>();
+  TCTimingArc timing_arc;
+  timing_arc.set_source_port(source_port);
+  timing_arc.set_sink_port(sink_port);
+  timing_arc.set_timing_type(timing_type);
+  timing_arc.set_is_check_arc(true);
   if (has_rise_constraint) {
-    check_model->addTable(makeScalarTable(idb::LibTable::TableType::kRiseConstrain, rise_constraint));
+    addTCScalarTable(timing_arc, "rise_constraint", rise_constraint);
   }
   if (has_fall_constraint) {
-    check_model->addTable(makeScalarTable(idb::LibTable::TableType::kFallConstrain, fall_constraint));
+    addTCScalarTable(timing_arc, "fall_constraint", fall_constraint);
   }
-  lib_arc->set_table_model(std::move(check_model));
-  lib_arc->set_owner_cell(&design_cell);
-  design_cell.addLibertyArc(std::move(lib_arc));
+  tc_lib.get_timing_arc_list().push_back(timing_arc);
 }
 
 std::string TimingCharacterizer::getTimingCheckType(TimingPath& timing_path, AnalysisType analysis_type)
@@ -425,7 +324,7 @@ double TimingCharacterizer::getCheckConstraint(TimingPath& timing_path, Analysis
   return timing_path.get_check_time();
 }
 
-void TimingCharacterizer::buildDelayArcList(idb::LibCell& design_cell, AnalysisType analysis_type)
+void TimingCharacterizer::buildTCDelayArcList(TCLib& tc_lib, AnalysisType analysis_type)
 {
   std::map<std::tuple<std::string, std::string, std::string>, TCDelayArcCandidate> candidate_map;
   for (TimingPath* timing_path : getTimingPathList(analysis_type)) {
@@ -454,8 +353,8 @@ void TimingCharacterizer::buildDelayArcList(idb::LibCell& design_cell, AnalysisT
   }
   for (std::pair<const std::tuple<std::string, std::string, std::string>, TCDelayArcCandidate>& candidate_pair : candidate_map) {
     TCDelayArcCandidate& candidate = candidate_pair.second;
-    buildDelayArc(design_cell, candidate.get_source_port(), candidate.get_sink_port(), candidate.get_timing_type(), candidate.get_timing_sense(),
-                  candidate.get_rise_delay(), candidate.get_fall_delay(), candidate.get_has_rise_delay(), candidate.get_has_fall_delay());
+    buildTCDelayArc(tc_lib, candidate.get_source_port(), candidate.get_sink_port(), candidate.get_timing_type(), candidate.get_timing_sense(),
+                    candidate.get_rise_delay(), candidate.get_fall_delay(), candidate.get_has_rise_delay(), candidate.get_has_fall_delay());
   }
 }
 
@@ -470,26 +369,26 @@ double TimingCharacterizer::getWorseDelay(double current_delay, double delay, bo
   return std::max(current_delay, delay);
 }
 
-void TimingCharacterizer::buildDelayArc(idb::LibCell& design_cell, std::string& source_port, std::string& sink_port, std::string& timing_type,
-                                        std::string& timing_sense, double rise_delay, double fall_delay, bool has_rise_delay, bool has_fall_delay)
+void TimingCharacterizer::buildTCDelayArc(TCLib& tc_lib, std::string& source_port, std::string& sink_port, std::string& timing_type,
+                                           std::string& timing_sense, double rise_delay, double fall_delay, bool has_rise_delay, bool has_fall_delay)
 {
   if (source_port.empty() || sink_port.empty() || timing_type.empty() || (!has_rise_delay && !has_fall_delay)) {
     return;
   }
-  std::unique_ptr<idb::LibArc> lib_arc = makeLibArc(source_port, sink_port, timing_type);
-  lib_arc->set_timing_sense(timing_sense.c_str());
-  std::unique_ptr<idb::LibDelayTableModel> delay_model = std::make_unique<idb::LibDelayTableModel>();
+  TCTimingArc timing_arc;
+  timing_arc.set_source_port(source_port);
+  timing_arc.set_sink_port(sink_port);
+  timing_arc.set_timing_type(timing_type);
+  timing_arc.set_timing_sense(timing_sense);
   if (has_rise_delay) {
-    delay_model->addTable(makeScalarTable(idb::LibTable::TableType::kCellRise, rise_delay));
-    delay_model->addTable(makeScalarTable(idb::LibTable::TableType::kRiseTransition, 0.0));
+    addTCScalarTable(timing_arc, "cell_rise", rise_delay);
+    addTCScalarTable(timing_arc, "rise_transition", 0.0);
   }
   if (has_fall_delay) {
-    delay_model->addTable(makeScalarTable(idb::LibTable::TableType::kCellFall, fall_delay));
-    delay_model->addTable(makeScalarTable(idb::LibTable::TableType::kFallTransition, 0.0));
+    addTCScalarTable(timing_arc, "cell_fall", fall_delay);
+    addTCScalarTable(timing_arc, "fall_transition", 0.0);
   }
-  lib_arc->set_table_model(std::move(delay_model));
-  lib_arc->set_owner_cell(&design_cell);
-  design_cell.addLibertyArc(std::move(lib_arc));
+  tc_lib.get_timing_arc_list().push_back(timing_arc);
 }
 
 std::string TimingCharacterizer::getDelayArcRelatedPin(TimingPath& timing_path)
@@ -540,27 +439,6 @@ std::string TimingCharacterizer::getDelayArcTimingSense(TimingPath& timing_path)
 double TimingCharacterizer::getDelayArcValue(TimingPath& timing_path)
 {
   return timing_path.get_path_delay();
-}
-
-std::unique_ptr<idb::LibArc> TimingCharacterizer::makeLibArc(std::string& source_port, std::string& sink_port, std::string& timing_type)
-{
-  std::unique_ptr<idb::LibArc> lib_arc = std::make_unique<idb::LibArc>();
-  lib_arc->set_src_port(source_port.c_str());
-  lib_arc->set_snk_port(sink_port.c_str());
-  lib_arc->set_timing_type(timing_type.c_str());
-  return lib_arc;
-}
-
-std::unique_ptr<idb::LibTable> TimingCharacterizer::makeScalarTable(idb::LibTable::TableType table_type, double value)
-{
-  std::unique_ptr<idb::LibTable> table = std::make_unique<idb::LibTable>(table_type, nullptr);
-  table->addTableValue(std::make_unique<idb::LibFloatValue>(value));
-  return table;
-}
-
-std::string TimingCharacterizer::getLibFilePath(std::string& design_name, AnalysisType analysis_type)
-{
-  return STAUTIL.getString(STADM.getConfig().tc_temp_directory_path, design_name, "_", GetAnalysisTypeName()(analysis_type), ".lib");
 }
 
 std::vector<TimingPath*> TimingCharacterizer::getTimingPathList(AnalysisType analysis_type)

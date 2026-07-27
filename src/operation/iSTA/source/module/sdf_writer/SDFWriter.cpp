@@ -71,7 +71,6 @@ void SDFWriter::outputSDF()
   outputSDFCellList(sdf_file);
   (*sdf_file) << ")\n";
   STAUTIL.closeFileStream(sdf_file);
-  STALOG.info(Loc::current(), "Output iSTA SDF: ", sdf_file_path);
 }
 
 std::string SDFWriter::getSDFFilePath()
@@ -253,29 +252,31 @@ void SDFWriter::outputSDFGraphCellArc(std::ofstream* sdf_file, Arc& arc)
   if (timing_cell_arc == nullptr || timing_cell_arc->get_timing_arc_list().empty()) {
     std::string condition;
     SDFDelay sdf_delay = getSDFArcDelay(arc);
-    outputSDFCellArc(sdf_file, source_port_name, sink_port_name, condition, sdf_delay);
+    outputSDFCellArc(sdf_file, source_port_name, sink_port_name, condition, TransType::kNone, sdf_delay);
     return;
   }
 
-  std::map<std::string, SDFDelay> condition_delay_map;
+  SDFCellArcDelayMap cell_arc_delay_map;
   for (TimingArc& timing_arc : timing_cell_arc->get_timing_arc_list()) {
     SDFDelay sdf_delay = getSDFTimingArcDelay(arc, timing_arc);
-    if (!hasSDFDelay(sdf_delay)) {
-      continue;
-    }
-    std::string condition = getSDFCondition(timing_arc);
-    mergeSDFDelay(condition_delay_map[condition], sdf_delay);
+    mergeSDFCellArcDelay(cell_arc_delay_map, timing_arc, sdf_delay);
   }
-  if (condition_delay_map.empty()) {
+  if (cell_arc_delay_map.empty()) {
     std::string condition;
     SDFDelay sdf_delay = getSDFArcDelay(arc);
-    outputSDFCellArc(sdf_file, source_port_name, sink_port_name, condition, sdf_delay);
+    outputSDFCellArc(sdf_file, source_port_name, sink_port_name, condition, TransType::kNone, sdf_delay);
     return;
   }
-  for (std::pair<const std::string, SDFDelay>& condition_delay_pair : condition_delay_map) {
-    std::string condition = condition_delay_pair.first;
-    outputSDFCellArc(sdf_file, source_port_name, sink_port_name, condition, condition_delay_pair.second);
+  outputSDFCellArcDelayMap(sdf_file, source_port_name, sink_port_name, cell_arc_delay_map);
+}
+
+void SDFWriter::mergeSDFCellArcDelay(SDFCellArcDelayMap& cell_arc_delay_map, TimingArc& timing_arc, SDFDelay& sdf_delay)
+{
+  if (!hasSDFDelay(sdf_delay)) {
+    return;
   }
+  SDFCellArcKey cell_arc_key{getSDFCondition(timing_arc), timing_arc.get_trigger_trans_type()};
+  mergeSDFDelay(cell_arc_delay_map[cell_arc_key], sdf_delay);
 }
 
 void SDFWriter::mergeSDFDelay(SDFDelay& target_delay, SDFDelay& source_delay)
@@ -291,6 +292,16 @@ void SDFWriter::mergeSDFDelay(SDFDelay& target_delay, SDFDelay& source_delay)
   }
   if (source_delay.get_fall_max_delay()) {
     target_delay.update(AnalysisType::kMax, TransType::kFall, *source_delay.get_fall_max_delay());
+  }
+}
+
+void SDFWriter::outputSDFCellArcDelayMap(std::ofstream* sdf_file, std::string& source_port_name, std::string& sink_port_name,
+                                         SDFCellArcDelayMap& cell_arc_delay_map)
+{
+  for (std::pair<const SDFCellArcKey, SDFDelay>& cell_arc_delay_pair : cell_arc_delay_map) {
+    std::string condition = cell_arc_delay_pair.first.condition;
+    TransType trigger_trans_type = cell_arc_delay_pair.first.trigger_trans_type;
+    outputSDFCellArc(sdf_file, source_port_name, sink_port_name, condition, trigger_trans_type, cell_arc_delay_pair.second);
   }
 }
 
@@ -319,27 +330,20 @@ void SDFWriter::outputSDFOnlyCellArc(std::ofstream* sdf_file, Instance& instance
     sdf_delay.update(AnalysisType::kMax, TransType::kRise, timing_cell_arc.get_delay_max());
     sdf_delay.update(AnalysisType::kMin, TransType::kFall, timing_cell_arc.get_delay_min());
     sdf_delay.update(AnalysisType::kMax, TransType::kFall, timing_cell_arc.get_delay_max());
-    outputSDFCellArc(sdf_file, source_port_name, sink_port_name, condition, sdf_delay);
+    outputSDFCellArc(sdf_file, source_port_name, sink_port_name, condition, TransType::kNone, sdf_delay);
     return;
   }
 
-  std::map<std::string, SDFDelay> condition_delay_map;
+  SDFCellArcDelayMap cell_arc_delay_map;
   for (TimingArc& timing_arc : timing_cell_arc.get_timing_arc_list()) {
     SDFDelay sdf_delay = getSDFTimingCellArcDelay(timing_cell_arc, timing_arc);
-    if (!hasSDFDelay(sdf_delay)) {
-      continue;
-    }
-    std::string condition = getSDFCondition(timing_arc);
-    mergeSDFDelay(condition_delay_map[condition], sdf_delay);
+    mergeSDFCellArcDelay(cell_arc_delay_map, timing_arc, sdf_delay);
   }
-  for (std::pair<const std::string, SDFDelay>& condition_delay_pair : condition_delay_map) {
-    std::string condition = condition_delay_pair.first;
-    outputSDFCellArc(sdf_file, source_port_name, sink_port_name, condition, condition_delay_pair.second);
-  }
+  outputSDFCellArcDelayMap(sdf_file, source_port_name, sink_port_name, cell_arc_delay_map);
 }
 
 void SDFWriter::outputSDFCellArc(std::ofstream* sdf_file, std::string& source_port_name, std::string& sink_port_name, std::string& condition,
-                                 SDFDelay& sdf_delay)
+                                 TransType trigger_trans_type, SDFDelay& sdf_delay)
 {
   if (!hasSDFDelay(sdf_delay)) {
     return;
@@ -348,7 +352,13 @@ void SDFWriter::outputSDFCellArc(std::ofstream* sdf_file, std::string& source_po
   if (!condition.empty()) {
     (*sdf_file) << "(COND " << condition << " ";
   }
-  (*sdf_file) << "(IOPATH " << source_port_name << " " << sink_port_name << " ";
+  (*sdf_file) << "(IOPATH ";
+  if (trigger_trans_type == TransType::kRise || trigger_trans_type == TransType::kFall) {
+    (*sdf_file) << "(" << getSDFEdgeName(trigger_trans_type) << " " << source_port_name << ")";
+  } else {
+    (*sdf_file) << source_port_name;
+  }
+  (*sdf_file) << " " << sink_port_name << " ";
   outputSDFDelay(sdf_file, sdf_delay);
   (*sdf_file) << ")";
   if (!condition.empty()) {

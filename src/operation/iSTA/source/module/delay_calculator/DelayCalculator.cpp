@@ -94,6 +94,11 @@ void DelayCalculator::destroy()
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
+double DelayCalculator::getPowerOutputLoad(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type)
+{
+  return getOutputPinLoad(output_pin, analysis_type, output_trans_type);
+}
+
 // private
 
 DelayCalculator* DelayCalculator::_dc_instance = nullptr;

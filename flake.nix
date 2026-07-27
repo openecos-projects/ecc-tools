@@ -47,7 +47,6 @@
 
       postPatch = lib.pipe {
         sdf_parser = "src/database/manager/parser/sdf/sdf_parse";
-        vcd_parser = "src/database/manager/parser/vcd/vcd_parser";
         verilog-parser = "src/database/manager/parser/verilog/verilog-rust/verilog-parser";
       } [
         (lib.mapAttrsToList (name: path: ''

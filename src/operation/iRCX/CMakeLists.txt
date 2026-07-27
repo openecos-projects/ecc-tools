@@ -1,45 +1,47 @@
-if(TEST_SHELL)
-  add_definitions(-DTEST_SHELL)
-endif()
+message(STATUS "")
+message(STATUS "############## iRCX: START CMAKE ##############")
 
-# ADD_COMPILE_OPTIONS("-fsanitize=address") LINK_LIBRARIES("-fsanitize=address")
+############################ cmake flag ############################
 
-add_library(ircx_headers INTERFACE)
+set(CMAKE_CXX_STANDARD 20)
 
-target_compile_features(ircx_headers INTERFACE cxx_std_20)
+############################ debug interface ############################
 
-target_include_directories(ircx_headers
-  INTERFACE
-    ${HOME_UTILITY}
-    ${HOME_UTILITY}/log
-    ${HOME_UTILITY}/stdBase
-    ${HOME_UTILITY}/stdBase/include
-    ${HOME_OPERATION}/iRCX/source/utils
-)
+# set(DEBUG_IRCX_INTERFACE ON)
 
-target_include_directories(ircx_headers
-  SYSTEM INTERFACE
-    ${HOME_THIRDPARTY}
-)
+############################ debug source data_manager ############################
 
-add_subdirectory(ics55)
-add_subdirectory(source/parser)
-add_subdirectory(source/database)
+# set(DEBUG_IRCX_DATA_MANAGER ON)
 
-add_subdirectory(source/flow/setup)
-add_subdirectory(source/flow/extraction)
-add_subdirectory(source/flow/report)
-add_subdirectory(source/flow)
+############################ debug source module ############################
 
-add_subdirectory(source/module/topology)
-add_subdirectory(source/module/environment)
-add_subdirectory(source/module/process)
-add_subdirectory(source/module/calculate)
-add_subdirectory(source/module/report)
+# set(DEBUG_IRCX_TOPO_BUILDER ON)
+# set(DEBUG_IRCX_ENV_BUILDER ON)
+# set(DEBUG_IRCX_VAR_PROCESSOR ON)
+# set(DEBUG_IRCX_RES_EXTRACTOR ON)
+# set(DEBUG_IRCX_CAP_EXTRACTOR ON)
+# set(DEBUG_IRCX_SPEF_WRITER ON)
 
-add_subdirectory(source/tool/compare_spef)
-add_subdirectory(source/tool/dump_net_shape)
-add_subdirectory(source/tool/run_rcx_from_topology)
-add_subdirectory(source/tool/plot_spef)
+############################ debug source toolkit ############################
 
-add_subdirectory(api)
+# set(DEBUG_IRCX_LOGGER ON)
+# set(DEBUG_IRCX_MONITOR ON)
+# set(DEBUG_IRCX_UTILITY ON)
+
+############################ setting path ############################
+
+set(HOME_IRCX ${HOME_OPERATION}/iRCX)
+
+set(IRCX_INTERFACE ${HOME_IRCX}/interface)
+set(IRCX_SOURCE ${HOME_IRCX}/source)
+set(IRCX_TEST ${HOME_IRCX}/test)
+
+############################ cmake subdirectory ############################
+
+add_subdirectory(${IRCX_INTERFACE})
+add_subdirectory(${IRCX_SOURCE})
+add_subdirectory(${IRCX_TEST})
+
+########################################################
+
+message(STATUS "############## iRCX: END CMAKE ##############\n")

@@ -15,21 +15,24 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
-#include "tcl_ircx.h"
+
+#include "tcl_rcx.h"
 
 using namespace ieda;
 
 namespace tcl {
+
 int registerCmdRCX()
 {
-  registerTclCmd(TclRunRCX, "run_rcx");
+  // rcx
   registerTclCmd(TclInitRCX, "init_rcx");
-  registerTclCmd(TclReportRCX, "report_rcx");
+  registerTclCmd(TclRunRCX, "run_rcx");
+  registerTclCmd(TclDestroyRCX, "destroy_rcx");
+  // aux
   registerTclCmd(TclCompareSpef, "compare_spef");
   registerTclCmd(TclDumpNetShape, "dump_net_shape");
   registerTclCmd(TclRunRCXFromTopology, "run_rcx_from_topology");
   registerTclCmd(TclPlotSpef, "plot_spef");
-
   return EXIT_SUCCESS;
 }
 

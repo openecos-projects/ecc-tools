@@ -126,6 +126,37 @@ auto buildFastStaEnvironment(const OptimizationInput& input) -> FastStaEnvironme
   };
 }
 
+auto captureClockTimingSummary(const Clock& clock, const FastSTA& fast_sta, FastStaClockId clock_id,
+                               const oi::ClockSizingSummary& optimization, double target_skew_ns)
+    -> std::optional<ClockTimingSummary>
+{
+  const auto sink_arrivals = fast_sta.collectClockSinkArrivals(clock_id);
+  if (!optimization.valid || sink_arrivals.empty()) {
+    return std::nullopt;
+  }
+
+  double min_arrival_ns = sink_arrivals.front().arrival_ns;
+  double max_arrival_ns = sink_arrivals.front().arrival_ns;
+  double total_arrival_ns = 0.0;
+  for (const auto& sink : sink_arrivals) {
+    min_arrival_ns = std::min(min_arrival_ns, sink.arrival_ns);
+    max_arrival_ns = std::max(max_arrival_ns, sink.arrival_ns);
+    total_arrival_ns += sink.arrival_ns;
+  }
+
+  return ClockTimingSummary{
+      .clock = clock.get_clock_name(),
+      .sink_count = sink_arrivals.size(),
+      .target_skew_ns = target_skew_ns,
+      .initial_skew_ns = optimization.before.skew.skew_ns,
+      .optimized_skew_ns = optimization.after.skew.skew_ns,
+      .min_insertion_latency_ns = min_arrival_ns,
+      .max_insertion_latency_ns = max_arrival_ns,
+      .mean_insertion_latency_ns = total_arrival_ns / static_cast<double>(sink_arrivals.size()),
+      .target_met = optimization.target_met,
+  };
+}
+
 }  // namespace
 
 auto Optimization::run(const OptimizationInput& input) -> OptimizationSummary
@@ -272,6 +303,10 @@ auto Optimization::run(const OptimizationInput& input) -> OptimizationSummary
                   << summary.stop_reason << ".";
       no_op_reason = summary.stop_reason.empty() ? "solver_failed" : summary.stop_reason;
       continue;
+    }
+    if (const auto timing_summary = captureClockTimingSummary(*clock, fast_sta, clock_id, summary, target_skew_ns);
+        timing_summary.has_value()) {
+      optimization_summary.clock_timing.push_back(*timing_summary);
     }
     stage_start = std::chrono::steady_clock::now();
     if (!summary.accepted_edits.empty()

@@ -42,8 +42,8 @@ constexpr size_t kGDSFileBufferSize = 16 * 1024 * 1024;
 
 const std::string& getInnovusColor(int32_t layer_idx)
 {
-  static const std::vector<std::string> color_list
-      = {"#2f3bff", "#e52b2b", "#41e65a", "#f0ee66", "#8e2631", "#f2b63f", "#c438d0", "#35d4c8", "#8b5a3c", "#f0e85a"};
+  static const std::vector<std::string> color_list = {"#2f3bff", "#e52b2b", "#41e65a", "#f0ee66", "#8e2631",
+                                                      "#f2b63f", "#c438d0", "#35d4c8", "#8b5a3c", "#f0e85a"};
   if (layer_idx < 0) {
     layer_idx = 0;
   }

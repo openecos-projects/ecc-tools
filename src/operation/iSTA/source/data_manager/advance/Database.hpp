@@ -21,12 +21,15 @@
 #include "Net.hpp"
 #include "ParasiticLibrary.hpp"
 #include "Pin.hpp"
+#include "PowerActivity.hpp"
+#include "PowerSummary.hpp"
 #include "STAHeader.hpp"
 #include "Summary.hpp"
 #include "TimingConstraint.hpp"
 #include "TimingLibrary.hpp"
 #include "TimingPathGroup.hpp"
 #include "TimingPoint.hpp"
+#include "InstancePower.hpp"
 
 namespace ista {
 
@@ -48,6 +51,10 @@ class Database
   std::vector<std::string>& get_timing_order_list() { return _timing_order_list; }
   std::map<std::string, TimingPoint>& get_timing_point_map() { return _timing_point_map; }
   std::vector<TimingPathGroup>& get_timing_path_group_list() { return _timing_path_group_list; }
+  std::map<std::string, PowerActivity>& get_vcd_activity_map() { return _vcd_activity_map; }
+  std::map<std::string, PowerActivity>& get_power_activity_map() { return _power_activity_map; }
+  std::map<std::string, InstancePower>& get_instance_power_map() { return _instance_power_map; }
+  PowerSummary& get_power_summary() { return _power_summary; }
   TimingLibrary& get_timing_library() { return _timing_library; }
   ParasiticLibrary& get_parasitic_library() { return _parasitic_library; }
   TimingConstraint& get_timing_constraint() { return _timing_constraint; }
@@ -69,6 +76,10 @@ class Database
   std::vector<std::string> _timing_order_list;
   std::map<std::string, TimingPoint> _timing_point_map;
   std::vector<TimingPathGroup> _timing_path_group_list;
+  std::map<std::string, PowerActivity> _vcd_activity_map;
+  std::map<std::string, PowerActivity> _power_activity_map;
+  std::map<std::string, InstancePower> _instance_power_map;
+  PowerSummary _power_summary;
   TimingLibrary _timing_library;
   ParasiticLibrary _parasitic_library;
   TimingConstraint _timing_constraint;

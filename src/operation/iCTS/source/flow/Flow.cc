@@ -212,19 +212,20 @@ auto Flow::runSynthesis() -> SynthesisTraceSummary
 auto Flow::runOptimization() -> OptimizationSummary
 {
   if (_run_summary.outcome != SynthesisOutcome::kFinished || !_run_summary.success) {
-    return OptimizationSummary{};
+    _optimization_summary = OptimizationSummary{};
+    return _optimization_summary;
   }
-  const auto optimization_summary = Optimization::run(OptimizationInput{.config = &_runtime.config,
-                                                                        .design = &_runtime.design,
-                                                                        .wrapper = &_runtime.wrapper,
-                                                                        .fast_sta = &_runtime.fast_sta,
-                                                                        .reporter = &_runtime.reporter,
-                                                                        .clock_layout = &_clock_layout,
-                                                                        .characterization_library = &_char_library});
-  if (!optimization_summary.success) {
+  _optimization_summary = Optimization::run(OptimizationInput{.config = &_runtime.config,
+                                                               .design = &_runtime.design,
+                                                               .wrapper = &_runtime.wrapper,
+                                                               .fast_sta = &_runtime.fast_sta,
+                                                               .reporter = &_runtime.reporter,
+                                                               .clock_layout = &_clock_layout,
+                                                               .characterization_library = &_char_library});
+  if (!_optimization_summary.success) {
     _run_summary.success = false;
     _run_summary.outcome = SynthesisOutcome::kFailed;
-    return optimization_summary;
+    return _optimization_summary;
   }
   if (!_runtime.design.rebuildClockDAG()) {
     _run_summary.success = false;
@@ -233,7 +234,7 @@ auto Flow::runOptimization() -> OptimizationSummary
                    "optimized CTS topology is not a valid clock DAG; instantiation and final evaluation are blocked.",
                    {{"reason", _runtime.design.get_clock_dag().get_status()}});
   }
-  return optimization_summary;
+  return _optimization_summary;
 }
 
 auto Flow::instantiateClockTree() -> InstantiationSummary
@@ -342,6 +343,11 @@ auto Flow::outputSummary() const -> QorSummary
   return Evaluation::outputSummary(_evaluation_state);
 }
 
+auto Flow::outputClockTiming() const -> std::vector<ClockTimingSummary>
+{
+  return _optimization_summary.clock_timing;
+}
+
 auto Flow::outputRunSummary() const -> SynthesisTraceSummary
 {
   return _run_summary;
@@ -354,6 +360,7 @@ auto Flow::reset() -> void
   _clock_layout.reset();
   _char_library = CharacterizationLibrary{};
   _instantiation_summary = InstantiationSummary{};
+  _optimization_summary = OptimizationSummary{};
   _runtime_setup_emitted = false;
   _setup_ready = false;
   _evaluation_ready = false;

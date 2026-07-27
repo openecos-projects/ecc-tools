@@ -121,6 +121,9 @@ void SpaceRouter::buildLayerNodeMap(SRModel& sr_model)
         if (RTUTIL.exist(gcell_map[x][y].get_routing_ignore_net_orient_map(), layer_idx)) {
           sr_node.set_ignore_net_orient_map(gcell_map[x][y].get_routing_ignore_net_orient_map()[layer_idx]);
         }
+        if (RTUTIL.exist(gcell_map[x][y].get_routing_allowed_net_map(), layer_idx)) {
+          sr_node.set_orient_allowed_net_map(gcell_map[x][y].get_routing_allowed_net_map()[layer_idx]);
+        }
       }
     }
   }
@@ -168,77 +171,20 @@ void SpaceRouter::reviseNodeDemand(SRModel& sr_model)
   }
 }
 
-void SpaceRouter::updateCongestionRisk(SRModel& sr_model)
-{
-  std::vector<GridMap<SRNode>>& layer_node_map = sr_model.get_layer_node_map();
-  std::vector<GridMap<double>>& layer_congestion_risk_map = sr_model.get_layer_congestion_risk_map();
-  if (layer_node_map.empty()) {
-    layer_congestion_risk_map.clear();
-    return;
-  }
-
-  int32_t risk_radius = std::max(0, sr_model.get_sr_iter_param().get_congestion_risk_radius());
-  double history_risk_decay = 0.5;
-  layer_congestion_risk_map.resize(layer_node_map.size());
-  for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_node_map.size()); layer_idx++) {
-    GridMap<SRNode>& sr_node_map = layer_node_map[layer_idx];
-    GridMap<double>& congestion_risk_map = layer_congestion_risk_map[layer_idx];
-    GridMap<double> history_congestion_risk_map = congestion_risk_map;
-    congestion_risk_map.init(sr_node_map.get_x_size(), sr_node_map.get_y_size(), 0.0);
-    for (int32_t x = 0; x < sr_node_map.get_x_size(); x++) {
-      for (int32_t y = 0; y < sr_node_map.get_y_size(); y++) {
-        double overflow = sr_node_map[x][y].getOverflow();
-        if (overflow <= 0) {
-          continue;
-        }
-        for (int32_t dx = -risk_radius; dx <= risk_radius; dx++) {
-          for (int32_t dy = -risk_radius; dy <= risk_radius; dy++) {
-            int32_t risk_x = x + dx;
-            int32_t risk_y = y + dy;
-            if (!congestion_risk_map.isInside(risk_x, risk_y)) {
-              continue;
-            }
-            int32_t distance = std::abs(dx) + std::abs(dy);
-            if (distance > risk_radius) {
-              continue;
-            }
-            double decay = 1.0 / (distance + 1);
-            congestion_risk_map[risk_x][risk_y] += overflow * decay;
-          }
-        }
-      }
-    }
-    if (history_congestion_risk_map.get_x_size() == congestion_risk_map.get_x_size()
-        && history_congestion_risk_map.get_y_size() == congestion_risk_map.get_y_size()) {
-      for (int32_t x = 0; x < congestion_risk_map.get_x_size(); x++) {
-        for (int32_t y = 0; y < congestion_risk_map.get_y_size(); y++) {
-          congestion_risk_map[x][y] = std::max(congestion_risk_map[x][y], history_congestion_risk_map[x][y] * history_risk_decay);
-        }
-      }
-    }
-    for (int32_t x = 0; x < sr_node_map.get_x_size(); x++) {
-      for (int32_t y = 0; y < sr_node_map.get_y_size(); y++) {
-        sr_node_map[x][y].set_congestion_risk(congestion_risk_map[x][y]);
-      }
-    }
-  }
-}
-
 void SpaceRouter::routeSRModel(SRModel& sr_model)
 {
   double prefer_wire_unit = 1;
   double non_prefer_wire_unit = 2.5 * prefer_wire_unit;
   double via_unit = 2 * non_prefer_wire_unit;
   double overflow_unit = 4 * non_prefer_wire_unit;
-  double congestion_risk_unit = overflow_unit;
   /**
-   * prefer_wire_unit, via_unit, size, offset, schedule_interval, overflow_unit, congestion_risk_unit, congestion_risk_radius, max_routed_times
+   * prefer_wire_unit, via_unit, size, offset, schedule_interval, overflow_unit, max_routed_times
    */
   std::vector<SRIterParam> sr_iter_param_list;
   // clang-format off
-  sr_iter_param_list.emplace_back(prefer_wire_unit, via_unit, 30, 0, 3, overflow_unit, congestion_risk_unit, 2, 4);
-  sr_iter_param_list.emplace_back(prefer_wire_unit, via_unit, 30, 10, 3, overflow_unit, 2 * congestion_risk_unit, 3, 4);
-  sr_iter_param_list.emplace_back(prefer_wire_unit, via_unit, 30, 20, 3, overflow_unit, 4 * congestion_risk_unit, 4, 5);
+  sr_iter_param_list.emplace_back(prefer_wire_unit, via_unit, 12, 0, 3, overflow_unit, 3);
+  sr_iter_param_list.emplace_back(prefer_wire_unit, via_unit, 12, 4, 3, overflow_unit, 3);
+  sr_iter_param_list.emplace_back(prefer_wire_unit, via_unit, 12, 8, 3, overflow_unit, 3);
   // clang-format on
   initRoutingState(sr_model);
   for (int32_t i = 0, iter = 1; i < static_cast<int32_t>(sr_iter_param_list.size()); i++, iter++) {
@@ -247,7 +193,6 @@ void SpaceRouter::routeSRModel(SRModel& sr_model)
                ") *****");
     // debugPlotSRModel(sr_model, "before");
     setSRIterParam(sr_model, iter, sr_iter_param_list[i]);
-    updateCongestionRisk(sr_model);
     initSRBoxMap(sr_model);
     resetRoutingState(sr_model);
     buildBoxSchedule(sr_model);
@@ -256,7 +201,6 @@ void SpaceRouter::routeSRModel(SRModel& sr_model)
     routeSRBoxMap(sr_model);
     uploadNetResult(sr_model);
     reviseNodeDemand(sr_model);
-    updateCongestionRisk(sr_model);
     updateBestResult(sr_model);
     // debugPlotSRModel(sr_model, "after");
     updateSummary(sr_model);
@@ -264,7 +208,6 @@ void SpaceRouter::routeSRModel(SRModel& sr_model)
     outputGuide(sr_model);
     outputNetCSV(sr_model);
     outputOverflowCSV(sr_model);
-    outputCongestionCSV(sr_model);
     outputJson(sr_model);
     RTLOG.info(Loc::current(), "***** End Iteration ", iter, "/", sr_iter_param_list.size(), "(", RTUTIL.getPercentage(iter, sr_iter_param_list.size()), ")",
                iter_monitor.getStatsInfo(), "*****");
@@ -289,8 +232,6 @@ void SpaceRouter::setSRIterParam(SRModel& sr_model, int32_t iter, SRIterParam& s
   RTLOG.info(Loc::current(), "offset: ", sr_iter_param.get_offset());
   RTLOG.info(Loc::current(), "schedule_interval: ", sr_iter_param.get_schedule_interval());
   RTLOG.info(Loc::current(), "overflow_unit: ", sr_iter_param.get_overflow_unit());
-  RTLOG.info(Loc::current(), "congestion_risk_unit: ", sr_iter_param.get_congestion_risk_unit());
-  RTLOG.info(Loc::current(), "congestion_risk_radius: ", sr_iter_param.get_congestion_risk_radius());
   RTLOG.info(Loc::current(), "max_routed_times: ", sr_iter_param.get_max_routed_times());
   sr_model.set_sr_iter_param(sr_iter_param);
 }
@@ -513,12 +454,10 @@ void SpaceRouter::routeSRBoxMap(SRModel& sr_model)
       buildNetResult(sr_box);
       initSRTaskList(sr_model, sr_box);
       buildOverflow(sr_model, sr_box);
-      buildCongestionRisk(sr_model, sr_box);
       if (needRouting(sr_model, sr_box)) {
         buildBoxTrackAxis(sr_box);
         buildLayerNodeMap(sr_model, sr_box);
         buildSRNodeNeighbor(sr_box);
-        buildCongestionRisk(sr_model, sr_box);
         buildOrientSupply(sr_model, sr_box);
         buildOrientDemand(sr_model, sr_box);
         // debugCheckSRBox(sr_box);
@@ -678,7 +617,7 @@ bool SpaceRouter::needRouting(SRModel& sr_model, SRBox& sr_box)
   if (sr_box.get_sr_task_list().empty()) {
     return false;
   }
-  if (sr_box.get_initial_routing() == false && sr_box.get_total_overflow() <= 0 && sr_box.get_total_congestion_risk() <= 0) {
+  if (sr_box.get_initial_routing() == false && sr_box.get_total_overflow() <= 0) {
     return false;
   }
   return true;
@@ -742,6 +681,7 @@ void SpaceRouter::buildLayerNodeMap(SRModel& sr_model, SRBox& sr_box)
         sr_node.set_internal_wire_unit(top_sr_node_map[sr_node.get_x()][sr_node.get_y()].get_internal_wire_unit());
         sr_node.set_internal_via_unit(top_sr_node_map[sr_node.get_x()][sr_node.get_y()].get_internal_via_unit());
         sr_node.set_ignore_net_orient_map(top_sr_node_map[sr_node.get_x()][sr_node.get_y()].get_ignore_net_orient_map());
+        sr_node.set_orient_allowed_net_map(top_sr_node_map[sr_node.get_x()][sr_node.get_y()].get_orient_allowed_net_map());
       }
     }
   }
@@ -792,61 +732,6 @@ void SpaceRouter::buildSRNodeNeighbor(SRBox& sr_box)
   }
 }
 
-void SpaceRouter::buildCongestionRisk(SRModel& sr_model, SRBox& sr_box)
-{
-  std::vector<GridMap<double>>& top_layer_congestion_risk_map = sr_model.get_layer_congestion_risk_map();
-  if (top_layer_congestion_risk_map.empty()) {
-    updateCongestionRisk(sr_model);
-  }
-
-  double total_congestion_risk = 0;
-  std::vector<std::set<int32_t>> congestion_risk_net_set_list;
-  if (sr_box.get_layer_node_map().empty()) {
-    EXTPlanarRect& box_rect = sr_box.get_box_rect();
-    for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(top_layer_congestion_risk_map.size()); layer_idx++) {
-      GridMap<double>& congestion_risk_map = top_layer_congestion_risk_map[layer_idx];
-      for (int32_t x = box_rect.get_grid_ll_x(); x <= box_rect.get_grid_ur_x(); x++) {
-        for (int32_t y = box_rect.get_grid_ll_y(); y <= box_rect.get_grid_ur_y(); y++) {
-          if (congestion_risk_map[x][y] > 0) {
-            congestion_risk_net_set_list.push_back(sr_model.get_layer_node_map()[layer_idx][x][y].getOverflowNetSet());
-          }
-        }
-      }
-    }
-  } else {
-    std::vector<GridMap<SRNode>>& layer_node_map = sr_box.get_layer_node_map();
-    for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_node_map.size()); layer_idx++) {
-      GridMap<SRNode>& sr_node_map = layer_node_map[layer_idx];
-      GridMap<double>& congestion_risk_map = top_layer_congestion_risk_map[layer_idx];
-      for (int32_t x = 0; x < sr_node_map.get_x_size(); x++) {
-        for (int32_t y = 0; y < sr_node_map.get_y_size(); y++) {
-          SRNode& sr_node = sr_node_map[x][y];
-          double congestion_risk = congestion_risk_map[sr_node.get_x()][sr_node.get_y()];
-          sr_node.set_congestion_risk(congestion_risk);
-          if (congestion_risk > 0) {
-            congestion_risk_net_set_list.push_back(sr_model.get_layer_node_map()[layer_idx][sr_node.get_x()][sr_node.get_y()].getOverflowNetSet());
-          }
-        }
-      }
-    }
-  }
-  if (!sr_box.get_layer_node_map().empty()) {
-    for (auto& [net_idx, segment_list] : sr_box.get_net_task_global_result_map()) {
-      for (Segment<LayerCoord>& segment : segment_list) {
-        total_congestion_risk += getSegmentCongestionRisk(sr_box, segment);
-      }
-    }
-  } else {
-    for (auto& [net_idx, segment_list] : sr_box.get_net_task_global_result_map()) {
-      for (Segment<LayerCoord>& segment : segment_list) {
-        total_congestion_risk += getSegmentCongestionRisk(segment, top_layer_congestion_risk_map);
-      }
-    }
-  }
-  sr_box.set_total_congestion_risk(total_congestion_risk);
-  sr_box.set_congestion_risk_net_set_list(congestion_risk_net_set_list);
-}
-
 void SpaceRouter::buildOrientSupply(SRModel& sr_model, SRBox& sr_box)
 {
   std::vector<GridMap<SRNode>>& top_layer_node_map = sr_model.get_layer_node_map();
@@ -885,45 +770,16 @@ void SpaceRouter::buildOrientDemand(SRModel& sr_model, SRBox& sr_box)
 
 void SpaceRouter::routeSRBox(SRBox& sr_box)
 {
-  initNodeCostCache(sr_box);
   std::vector<SRTask*> routing_task_list = initTaskSchedule(sr_box);
   while (!routing_task_list.empty()) {
     for (SRTask* routing_task : routing_task_list) {
-      resetNodeCostCache(sr_box);
       routeSRTask(sr_box, routing_task);
       routing_task->addRoutedTimes();
     }
     updateOverflow(sr_box);
-    updateCongestionRisk(sr_box);
     updateBestResult(sr_box);
     updateTaskSchedule(sr_box, routing_task_list);
   }
-}
-
-void SpaceRouter::initNodeCostCache(SRBox& sr_box)
-{
-  std::vector<GridMap<SRNode>>& layer_node_map = sr_box.get_layer_node_map();
-  if (layer_node_map.empty()) {
-    return;
-  }
-  size_t node_num = 0;
-  for (GridMap<SRNode>& sr_node_map : layer_node_map) {
-    node_num += static_cast<size_t>(sr_node_map.get_x_size()) * static_cast<size_t>(sr_node_map.get_y_size());
-  }
-  sr_box.get_node_cost_cache().assign(node_num, {0.0, 0.0, 0.0});
-  sr_box.get_node_cost_cache_valid_mask().assign(node_num, 0);
-  sr_box.get_node_cost_cache_touched_index_list().clear();
-}
-
-void SpaceRouter::resetNodeCostCache(SRBox& sr_box)
-{
-  std::vector<uint8_t>& valid_mask = sr_box.get_node_cost_cache_valid_mask();
-  for (int32_t cache_idx : sr_box.get_node_cost_cache_touched_index_list()) {
-    if (0 <= cache_idx && cache_idx < static_cast<int32_t>(valid_mask.size())) {
-      valid_mask[cache_idx] = 0;
-    }
-  }
-  sr_box.get_node_cost_cache_touched_index_list().clear();
 }
 
 std::vector<SRTask*> SpaceRouter::initTaskSchedule(SRBox& sr_box)
@@ -1254,31 +1110,10 @@ double SpaceRouter::getKnownCost(SRBox& sr_box, SRNode* start_node, SRNode* end_
 
 double SpaceRouter::getNodeCost(SRBox& sr_box, SRNode* curr_node, Direction direction)
 {
-  int32_t cache_idx = getNodeCostCacheIndex(sr_box, curr_node);
-  int32_t direction_idx = getNodeCostCacheDirectionIndex(direction);
-  if (direction_idx < 0) {
-    return 0;
-  }
-  std::vector<std::array<double, 3>>& cost_cache = sr_box.get_node_cost_cache();
-  std::vector<uint8_t>& valid_mask = sr_box.get_node_cost_cache_valid_mask();
-  uint8_t direction_mask = static_cast<uint8_t>(1 << direction_idx);
-  if (0 <= cache_idx && cache_idx < static_cast<int32_t>(cost_cache.size()) && (valid_mask[cache_idx] & direction_mask)) {
-    return cost_cache[cache_idx][direction_idx];
-  }
-
   double overflow_unit = sr_box.get_sr_iter_param()->get_overflow_unit();
-  double congestion_risk_unit = sr_box.get_sr_iter_param()->get_congestion_risk_unit();
 
   double node_cost = 0;
   node_cost += curr_node->getFastCost(sr_box.get_curr_sr_task()->get_net_idx(), direction, overflow_unit);
-  node_cost += congestion_risk_unit * curr_node->get_congestion_risk();
-  if (0 <= cache_idx && cache_idx < static_cast<int32_t>(cost_cache.size())) {
-    cost_cache[cache_idx][direction_idx] = node_cost;
-    if (valid_mask[cache_idx] == 0) {
-      sr_box.get_node_cost_cache_touched_index_list().push_back(cache_idx);
-    }
-    valid_mask[cache_idx] |= direction_mask;
-  }
   return node_cost;
 }
 
@@ -1368,134 +1203,19 @@ void SpaceRouter::updateOverflow(SRBox& sr_box)
   sr_box.set_overflow_net_set_list(overflow_net_set_list);
 }
 
-void SpaceRouter::updateCongestionRisk(SRBox& sr_box)
-{
-  std::vector<GridMap<SRNode>>& layer_node_map = sr_box.get_layer_node_map();
-
-  double total_congestion_risk = 0;
-  std::vector<std::set<int32_t>> congestion_risk_net_set_list;
-  for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_node_map.size()); layer_idx++) {
-    GridMap<SRNode>& sr_node_map = layer_node_map[layer_idx];
-    for (int32_t x = 0; x < sr_node_map.get_x_size(); x++) {
-      for (int32_t y = 0; y < sr_node_map.get_y_size(); y++) {
-        SRNode& sr_node = sr_node_map[x][y];
-        double congestion_risk = sr_node.get_congestion_risk();
-        if (congestion_risk > 0) {
-          congestion_risk_net_set_list.push_back(sr_node.getOverflowNetSet());
-        }
-      }
-    }
-  }
-  for (auto& [net_idx, segment_list] : sr_box.get_net_task_global_result_map()) {
-    for (Segment<LayerCoord>& segment : segment_list) {
-      total_congestion_risk += getSegmentCongestionRisk(sr_box, segment);
-    }
-  }
-  sr_box.set_total_congestion_risk(total_congestion_risk);
-  sr_box.set_congestion_risk_net_set_list(congestion_risk_net_set_list);
-}
-
-double SpaceRouter::getTaskCongestionRisk(SRBox& sr_box, SRTask* sr_task)
-{
-  std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_task_global_result_map = sr_box.get_net_task_global_result_map();
-  if (!RTUTIL.exist(net_task_global_result_map, sr_task->get_net_idx())) {
-    return 0;
-  }
-
-  double task_congestion_risk = 0;
-  for (Segment<LayerCoord>& segment : net_task_global_result_map[sr_task->get_net_idx()]) {
-    if (sr_box.get_layer_node_map().empty()) {
-      continue;
-    }
-    task_congestion_risk += getSegmentCongestionRisk(sr_box, segment);
-  }
-  return task_congestion_risk;
-}
-
-double SpaceRouter::getSegmentCongestionRisk(SRBox& sr_box, Segment<LayerCoord>& segment)
-{
-  int32_t grid_ll_x = sr_box.get_box_rect().get_grid_ll_x();
-  int32_t grid_ll_y = sr_box.get_box_rect().get_grid_ll_y();
-  std::vector<GridMap<SRNode>>& layer_node_map = sr_box.get_layer_node_map();
-
-  LayerCoord first_coord = segment.get_first();
-  LayerCoord second_coord = segment.get_second();
-  int32_t first_x = first_coord.get_x();
-  int32_t first_y = first_coord.get_y();
-  int32_t first_layer_idx = first_coord.get_layer_idx();
-  int32_t second_x = second_coord.get_x();
-  int32_t second_y = second_coord.get_y();
-  int32_t second_layer_idx = second_coord.get_layer_idx();
-  RTUTIL.swapByASC(first_x, second_x);
-  RTUTIL.swapByASC(first_y, second_y);
-  RTUTIL.swapByASC(first_layer_idx, second_layer_idx);
-
-  double segment_congestion_risk = 0;
-  for (int32_t x = first_x; x <= second_x; x++) {
-    for (int32_t y = first_y; y <= second_y; y++) {
-      for (int32_t layer_idx = first_layer_idx; layer_idx <= second_layer_idx; layer_idx++) {
-        GridMap<SRNode>& sr_node_map = layer_node_map[layer_idx];
-        int32_t node_x = x - grid_ll_x;
-        int32_t node_y = y - grid_ll_y;
-        if (sr_node_map.isInside(node_x, node_y)) {
-          segment_congestion_risk += sr_node_map[node_x][node_y].get_congestion_risk();
-        }
-      }
-    }
-  }
-  return segment_congestion_risk;
-}
-
-double SpaceRouter::getSegmentCongestionRisk(Segment<LayerCoord>& segment, std::vector<GridMap<double>>& layer_congestion_risk_map)
-{
-  LayerCoord first_coord = segment.get_first();
-  LayerCoord second_coord = segment.get_second();
-  int32_t first_x = first_coord.get_x();
-  int32_t first_y = first_coord.get_y();
-  int32_t first_layer_idx = first_coord.get_layer_idx();
-  int32_t second_x = second_coord.get_x();
-  int32_t second_y = second_coord.get_y();
-  int32_t second_layer_idx = second_coord.get_layer_idx();
-  RTUTIL.swapByASC(first_x, second_x);
-  RTUTIL.swapByASC(first_y, second_y);
-  RTUTIL.swapByASC(first_layer_idx, second_layer_idx);
-
-  double segment_congestion_risk = 0;
-  for (int32_t x = first_x; x <= second_x; x++) {
-    for (int32_t y = first_y; y <= second_y; y++) {
-      for (int32_t layer_idx = first_layer_idx; layer_idx <= second_layer_idx; layer_idx++) {
-        if (layer_idx < 0 || static_cast<int32_t>(layer_congestion_risk_map.size()) <= layer_idx) {
-          continue;
-        }
-        GridMap<double>& congestion_risk_map = layer_congestion_risk_map[layer_idx];
-        if (congestion_risk_map.isInside(x, y)) {
-          segment_congestion_risk += congestion_risk_map[x][y];
-        }
-      }
-    }
-  }
-  return segment_congestion_risk;
-}
-
 void SpaceRouter::updateBestResult(SRBox& sr_box)
 {
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& best_net_task_global_result_map = sr_box.get_best_net_task_global_result_map();
   double best_total_overflow = sr_box.get_best_total_overflow();
-  double best_total_congestion_risk = sr_box.get_best_total_congestion_risk();
 
   double curr_total_overflow = sr_box.get_total_overflow();
-  double curr_total_congestion_risk = sr_box.get_total_congestion_risk();
   if (!best_net_task_global_result_map.empty()) {
     if (best_total_overflow < curr_total_overflow) {
-      return;
-    }
-    if (RTUTIL.equalDoubleByError(best_total_overflow, curr_total_overflow, RT_ERROR) && best_total_congestion_risk < curr_total_congestion_risk) {
       return;
     }
   }
   best_net_task_global_result_map = sr_box.get_net_task_global_result_map();
   sr_box.set_best_total_overflow(curr_total_overflow);
-  sr_box.set_best_total_congestion_risk(curr_total_congestion_risk);
 }
 
 void SpaceRouter::updateTaskSchedule(SRBox& sr_box, std::vector<SRTask*>& routing_task_list)
@@ -1516,32 +1236,6 @@ void SpaceRouter::updateTaskSchedule(SRBox& sr_box, std::vector<SRTask*>& routin
       break;
     }
   }
-  for (std::set<int32_t>& congestion_risk_net_set : sr_box.get_congestion_risk_net_set_list()) {
-    for (SRTask* sr_task : sr_box.get_sr_task_list()) {
-      if (!RTUTIL.exist(congestion_risk_net_set, sr_task->get_net_idx())) {
-        continue;
-      }
-      if (sr_task->get_routed_times() < max_routed_times && !RTUTIL.exist(visited_routing_task_set, sr_task)) {
-        visited_routing_task_set.insert(sr_task);
-        new_routing_task_list.push_back(sr_task);
-      }
-      break;
-    }
-  }
-  for (SRTask* sr_task : sr_box.get_sr_task_list()) {
-    if (sr_task->get_routed_times() < max_routed_times && getTaskCongestionRisk(sr_box, sr_task) > 0 && !RTUTIL.exist(visited_routing_task_set, sr_task)) {
-      visited_routing_task_set.insert(sr_task);
-      new_routing_task_list.push_back(sr_task);
-    }
-  }
-  std::sort(new_routing_task_list.begin(), new_routing_task_list.end(), [&sr_box, this](SRTask* a, SRTask* b) {
-    double a_congestion_risk = getTaskCongestionRisk(sr_box, a);
-    double b_congestion_risk = getTaskCongestionRisk(sr_box, b);
-    if (!RTUTIL.equalDoubleByError(a_congestion_risk, b_congestion_risk, RT_ERROR)) {
-      return a_congestion_risk > b_congestion_risk;
-    }
-    return CmpSRTask()(b, a);
-  });
   routing_task_list = new_routing_task_list;
 
   std::vector<SRTask*> new_sr_task_list;
@@ -1579,40 +1273,6 @@ void SpaceRouter::freeSRBox(SRBox& sr_box)
   }
   sr_box.get_sr_task_list().clear();
   sr_box.get_layer_node_map().clear();
-  sr_box.get_node_cost_cache().clear();
-  sr_box.get_node_cost_cache_valid_mask().clear();
-  sr_box.get_node_cost_cache_touched_index_list().clear();
-}
-
-int32_t SpaceRouter::getNodeCostCacheIndex(SRBox& sr_box, SRNode* curr_node)
-{
-  std::vector<GridMap<SRNode>>& layer_node_map = sr_box.get_layer_node_map();
-  int32_t layer_idx = curr_node->get_layer_idx();
-  if (layer_idx < 0 || static_cast<int32_t>(layer_node_map.size()) <= layer_idx) {
-    return -1;
-  }
-  GridMap<SRNode>& sr_node_map = layer_node_map[layer_idx];
-  int32_t x = curr_node->get_x() - sr_box.get_box_rect().get_grid_ll_x();
-  int32_t y = curr_node->get_y() - sr_box.get_box_rect().get_grid_ll_y();
-  if (!sr_node_map.isInside(x, y)) {
-    return -1;
-  }
-  return (layer_idx * sr_node_map.get_x_size() + x) * sr_node_map.get_y_size() + y;
-}
-
-int32_t SpaceRouter::getNodeCostCacheDirectionIndex(Direction direction)
-{
-  if (direction == Direction::kHorizontal) {
-    return 0;
-  }
-  if (direction == Direction::kVertical) {
-    return 1;
-  }
-  if (direction == Direction::kProximal) {
-    return 2;
-  }
-  RTLOG.error(Loc::current(), "The direction is error!");
-  return -1;
 }
 
 double SpaceRouter::getOverflow(SRModel& sr_model)
@@ -1629,20 +1289,6 @@ double SpaceRouter::getOverflow(SRModel& sr_model)
     }
   }
   return total_overflow;
-}
-
-double SpaceRouter::getCongestionRisk(SRModel& sr_model)
-{
-  Die& die = RTDM.getDatabase().get_die();
-  std::vector<GridMap<double>>& layer_congestion_risk_map = sr_model.get_layer_congestion_risk_map();
-
-  double total_congestion_risk = 0;
-  for (auto& [net_idx, segment_set] : RTDM.getNetGlobalResultMap(die)) {
-    for (Segment<LayerCoord>* segment : segment_set) {
-      total_congestion_risk += getSegmentCongestionRisk(*segment, layer_congestion_risk_map);
-    }
-  }
-  return total_congestion_risk;
 }
 
 void SpaceRouter::uploadNetResult(SRModel& sr_model)
@@ -1694,15 +1340,10 @@ void SpaceRouter::updateBestResult(SRModel& sr_model)
 
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& best_net_task_global_result_map = sr_model.get_best_net_task_global_result_map();
   double best_overflow = sr_model.get_best_overflow();
-  double best_congestion_risk = sr_model.get_best_congestion_risk();
 
   double curr_overflow = getOverflow(sr_model);
-  double curr_congestion_risk = getCongestionRisk(sr_model);
   if (!best_net_task_global_result_map.empty()) {
     if (best_overflow < curr_overflow) {
-      return;
-    }
-    if (RTUTIL.equalDoubleByError(best_overflow, curr_overflow, RT_ERROR) && best_congestion_risk < curr_congestion_risk) {
       return;
     }
   }
@@ -1713,7 +1354,6 @@ void SpaceRouter::updateBestResult(SRModel& sr_model)
     }
   }
   sr_model.set_best_overflow(curr_overflow);
-  sr_model.set_best_congestion_risk(curr_congestion_risk);
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -1740,7 +1380,6 @@ void SpaceRouter::selectBestResult(SRModel& sr_model)
   outputGuide(sr_model);
   outputNetCSV(sr_model);
   outputOverflowCSV(sr_model);
-  outputCongestionCSV(sr_model);
   outputJson(sr_model);
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -2163,205 +1802,6 @@ void SpaceRouter::outputOverflowCSV(SRModel& sr_model)
       RTUTIL.pushStream(overflow_csv_file, "\n");
     }
     RTUTIL.closeFileStream(overflow_csv_file);
-  }
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void SpaceRouter::outputCongestionCSV(SRModel& sr_model)
-{
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  std::string& sr_temp_directory_path = RTDM.getConfig().sr_temp_directory_path;
-  int32_t output_inter_result = RTDM.getConfig().output_inter_result;
-  if (!output_inter_result) {
-    return;
-  }
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  constexpr int32_t kMaxNetListSize = 64;
-  constexpr double kHighUsageThreshold = 0.90;
-  bool output_full = (output_inter_result >= 2);
-  int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
-  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
-  std::vector<GridMap<SRNode>>& layer_node_map = sr_model.get_layer_node_map();
-
-  auto calcUsageRatio = [](double demand, double supply) {
-    if (supply <= 0) {
-      return demand <= 0 ? 0.0 : demand + 1.0;
-    }
-    return demand / supply;
-  };
-  auto joinNetSet = [&](const std::set<int32_t>& net_set) {
-    std::string net_list_str;
-    int32_t output_num = 0;
-    for (int32_t net_idx : net_set) {
-      if (output_num >= kMaxNetListSize) {
-        net_list_str += "|...";
-        break;
-      }
-      if (!net_list_str.empty()) {
-        net_list_str += "|";
-      }
-      net_list_str += std::to_string(net_idx);
-      output_num++;
-    }
-    return net_list_str;
-  };
-  auto getDemandNetSet = [](SRNode& sr_node, Orientation orient) {
-    std::set<int32_t> net_set;
-    if (RTUTIL.exist(sr_node.get_orient_net_map(), orient)) {
-      for (int32_t net_idx : sr_node.get_orient_net_map()[orient]) {
-        if (RTUTIL.exist(sr_node.get_ignore_net_orient_map(), net_idx) && RTUTIL.exist(sr_node.get_ignore_net_orient_map()[net_idx], orient)) {
-          continue;
-        }
-        net_set.insert(net_idx);
-      }
-    }
-    return net_set;
-  };
-  auto getInternalDemand = [](SRNode& sr_node, std::set<int32_t>& internal_net_set) {
-    double demand = 0;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      if (RTUTIL.exist(sr_node.get_orient_net_map(), orient)) {
-        for (int32_t net_idx : sr_node.get_orient_net_map()[orient]) {
-          if (RTUTIL.exist(sr_node.get_ignore_net_orient_map(), net_idx) && RTUTIL.exist(sr_node.get_ignore_net_orient_map()[net_idx], orient)) {
-            continue;
-          }
-          demand += sr_node.get_internal_wire_unit();
-          internal_net_set.insert(net_idx);
-        }
-      }
-    }
-    for (auto& [net_idx, orient_set] : sr_node.get_net_orient_map()) {
-      if (RTUTIL.exist(sr_node.get_ignore_net_orient_map(), net_idx)
-          && (RTUTIL.exist(sr_node.get_ignore_net_orient_map()[net_idx], Orientation::kAbove)
-              || RTUTIL.exist(sr_node.get_ignore_net_orient_map()[net_idx], Orientation::kBelow))) {
-        continue;
-      }
-      if (RTUTIL.exist(orient_set, Orientation::kEast) || RTUTIL.exist(orient_set, Orientation::kWest) || RTUTIL.exist(orient_set, Orientation::kSouth)
-          || RTUTIL.exist(orient_set, Orientation::kNorth)) {
-        continue;
-      }
-      if (RTUTIL.exist(orient_set, Orientation::kAbove) || RTUTIL.exist(orient_set, Orientation::kBelow)) {
-        demand += sr_node.get_internal_via_unit();
-        internal_net_set.insert(net_idx);
-      }
-    }
-    return demand;
-  };
-  auto getSupply = [](SRNode& sr_node, Orientation orient) {
-    if (RTUTIL.exist(sr_node.get_orient_supply_map(), orient)) {
-      return static_cast<double>(sr_node.get_orient_supply_map()[orient]);
-    }
-    return 0.0;
-  };
-  auto getInternalSupply = [](SRNode& sr_node) {
-    double supply = 0;
-    for (auto& [orient, orient_supply] : sr_node.get_orient_supply_map()) {
-      if (orient == Orientation::kEast || orient == Orientation::kWest || orient == Orientation::kSouth || orient == Orientation::kNorth) {
-        supply += orient_supply;
-      }
-    }
-    return supply;
-  };
-  auto getMaxUsageRatio = [&](SRNode& sr_node) {
-    double max_usage_ratio = 0;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      std::set<int32_t> net_set = getDemandNetSet(sr_node, orient);
-      max_usage_ratio = std::max(max_usage_ratio, calcUsageRatio(net_set.size() * sr_node.get_boundary_wire_unit(), getSupply(sr_node, orient)));
-    }
-    std::set<int32_t> internal_net_set;
-    max_usage_ratio = std::max(max_usage_ratio, calcUsageRatio(getInternalDemand(sr_node, internal_net_set), getInternalSupply(sr_node)));
-    return max_usage_ratio;
-  };
-  auto getHighUsage = [&](SRNode& sr_node) {
-    double high_usage = 0;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      std::set<int32_t> net_set = getDemandNetSet(sr_node, orient);
-      high_usage += std::max(0.0, calcUsageRatio(net_set.size() * sr_node.get_boundary_wire_unit(), getSupply(sr_node, orient)) - kHighUsageThreshold);
-    }
-    std::set<int32_t> internal_net_set;
-    high_usage += std::max(0.0, calcUsageRatio(getInternalDemand(sr_node, internal_net_set), getInternalSupply(sr_node)) - kHighUsageThreshold);
-    return high_usage;
-  };
-  auto getHighUsageNetSet = [&](SRNode& sr_node) {
-    std::set<int32_t> high_usage_net_set;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      std::set<int32_t> net_set = getDemandNetSet(sr_node, orient);
-      double demand = net_set.size() * sr_node.get_boundary_wire_unit();
-      if (calcUsageRatio(demand, getSupply(sr_node, orient)) > kHighUsageThreshold + RT_ERROR) {
-        high_usage_net_set.insert(net_set.begin(), net_set.end());
-      }
-    }
-    std::set<int32_t> internal_net_set;
-    if (calcUsageRatio(getInternalDemand(sr_node, internal_net_set), getInternalSupply(sr_node)) > kHighUsageThreshold + RT_ERROR) {
-      high_usage_net_set.insert(internal_net_set.begin(), internal_net_set.end());
-    }
-    return high_usage_net_set;
-  };
-  auto pushHeader = [](std::ofstream* csv_file) {
-    RTUTIL.pushStream(csv_file,
-                      "stage,iter,layer_idx,layer_name,x,y,real_llx,real_lly,real_urx,real_ury,resource,orient,demand,supply,overflow,"
-                      "usage_ratio,node_total_demand,node_total_overflow,node_max_usage_ratio,high_usage,congestion_risk,net_count,"
-                      "overflow_net_count,high_usage_net_count,net_list,overflow_net_list,high_usage_net_list\n");
-  };
-  auto pushRow = [&](std::ofstream* csv_file, bool include_all, SRNode& sr_node, RoutingLayer& routing_layer, const std::string& resource,
-                     const std::string& orient_name, double demand, double supply, const std::set<int32_t>& net_set, const std::set<int32_t>& overflow_net_set,
-                     const std::set<int32_t>& high_usage_net_set) {
-    double usage_ratio = calcUsageRatio(demand, supply);
-    double overflow = std::max(0.0, demand - supply);
-    if (!include_all && overflow <= 0 && usage_ratio < kHighUsageThreshold && sr_node.get_congestion_risk() <= 0) {
-      return;
-    }
-    PlanarRect real_rect = RTUTIL.getRealRectByGCell(sr_node.get_planar_coord(), gcell_axis);
-    RTUTIL.pushStream(csv_file, "SR,", sr_model.get_iter(), ",", routing_layer.get_layer_idx(), ",", routing_layer.get_layer_name(), ",", sr_node.get_x(), ",",
-                      sr_node.get_y(), ",", real_rect.get_ll_x() / 1.0 / micron_dbu, ",", real_rect.get_ll_y() / 1.0 / micron_dbu, ",",
-                      real_rect.get_ur_x() / 1.0 / micron_dbu, ",", real_rect.get_ur_y() / 1.0 / micron_dbu, ",", resource, ",", orient_name, ",", demand, ",",
-                      supply, ",", overflow, ",", usage_ratio, ",", sr_node.getDemand(), ",", sr_node.getOverflow(), ",", getMaxUsageRatio(sr_node), ",",
-                      getHighUsage(sr_node), ",", sr_node.get_congestion_risk(), ",", net_set.size(), ",", overflow_net_set.size(), ",",
-                      high_usage_net_set.size(), ",", joinNetSet(net_set), ",", joinNetSet(overflow_net_set), ",", joinNetSet(high_usage_net_set), "\n");
-  };
-
-  std::ofstream* hotspot_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(sr_temp_directory_path, "congestion_hotspot_SR_", sr_model.get_iter(), ".csv"));
-  pushHeader(hotspot_csv_file);
-  std::ofstream* full_csv_file = nullptr;
-  if (output_full) {
-    full_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(sr_temp_directory_path, "congestion_full_SR_", sr_model.get_iter(), ".csv"));
-    pushHeader(full_csv_file);
-  }
-  auto pushToFiles
-      = [&](SRNode& sr_node, RoutingLayer& routing_layer, const std::string& resource, const std::string& orient_name, double demand, double supply,
-            const std::set<int32_t>& net_set, const std::set<int32_t>& overflow_net_set, const std::set<int32_t>& high_usage_net_set) {
-          pushRow(hotspot_csv_file, false, sr_node, routing_layer, resource, orient_name, demand, supply, net_set, overflow_net_set, high_usage_net_set);
-          if (full_csv_file != nullptr) {
-            pushRow(full_csv_file, true, sr_node, routing_layer, resource, orient_name, demand, supply, net_set, overflow_net_set, high_usage_net_set);
-          }
-        };
-
-  for (RoutingLayer& routing_layer : routing_layer_list) {
-    GridMap<SRNode>& sr_node_map = layer_node_map[routing_layer.get_layer_idx()];
-    for (int32_t x = 0; x < sr_node_map.get_x_size(); x++) {
-      for (int32_t y = 0; y < sr_node_map.get_y_size(); y++) {
-        SRNode& sr_node = sr_node_map[x][y];
-        std::set<int32_t> overflow_net_set = sr_node.getOverflowNetSet();
-        std::set<int32_t> high_usage_net_set = getHighUsageNetSet(sr_node);
-        for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-          std::set<int32_t> net_set = getDemandNetSet(sr_node, orient);
-          double demand = net_set.size() * sr_node.get_boundary_wire_unit();
-          pushToFiles(sr_node, routing_layer, "boundary", GetOrientationName()(orient), demand, getSupply(sr_node, orient), net_set, overflow_net_set,
-                      high_usage_net_set);
-        }
-        std::set<int32_t> internal_net_set;
-        double internal_demand = getInternalDemand(sr_node, internal_net_set);
-        pushToFiles(sr_node, routing_layer, "internal", "internal", internal_demand, getInternalSupply(sr_node), internal_net_set, overflow_net_set,
-                    high_usage_net_set);
-      }
-    }
-  }
-
-  RTUTIL.closeFileStream(hotspot_csv_file);
-  if (full_csv_file != nullptr) {
-    RTUTIL.closeFileStream(full_csv_file);
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

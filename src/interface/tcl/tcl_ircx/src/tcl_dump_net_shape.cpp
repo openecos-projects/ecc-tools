@@ -14,15 +14,8 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-/**
- * @file tcl_dump_net_shape.cpp
- * @author Yipei Xu (yipeix@163.com)
- * @brief
- * @version 0.1
- * @date 2026-05-31
- */
-#include "RCXAPI.hh"
-#include "tcl_ircx.h"
+#include "RCXInterface.hpp"
+#include "tcl_rcx.h"
 
 namespace tcl {
 
@@ -30,18 +23,13 @@ TclDumpNetShape::TclDumpNetShape(const char* cmd_name) : TclCmd(cmd_name)
 {
 }
 
-unsigned TclDumpNetShape::check()
-{
-  return 1;
-}
-
 unsigned TclDumpNetShape::exec()
 {
   if (!check()) {
     return 0;
   }
-
-  return RCX_API_INST.dump_net_shape() ? 1U : 0U;
+  RCXI.dumpNetShape();
+  return 1;
 }
 
 }  // namespace tcl

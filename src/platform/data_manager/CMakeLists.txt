@@ -25,6 +25,7 @@ target_link_libraries(idm
     file_manager_cts 
     liberty
     spef
+    vcd
     # file_manager_drc 
     tool_manager
     )

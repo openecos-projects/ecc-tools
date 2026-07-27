@@ -59,6 +59,7 @@ void SupplyAnalyzer::analyze()
   buildSupplySchedule(sa_model);
   analyzeSupply(sa_model);
   buildIgnoreNet(sa_model);
+  buildMacroPinEscapeAllow(sa_model);
   analyzeDemandUnit(sa_model);
   // debugPlotSAModel(sa_model);
   updateSummary(sa_model);
@@ -362,6 +363,118 @@ void SupplyAnalyzer::buildIgnoreNet(SAModel& sa_model)
         }
       }
       gcell_map[x][y].set_routing_ignore_net_orient_map(routing_ignore_net_orient_map);
+    }
+  }
+}
+
+void SupplyAnalyzer::buildMacroPinEscapeAllow(SAModel& sa_model)
+{
+  (void) sa_model;
+  Die& die = RTDM.getDatabase().get_die();
+  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
+  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  std::vector<Macro>& macro_list = RTDM.getDatabase().get_macro_list();
+  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+  std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
+
+  std::map<std::string, std::set<int32_t>> inst_pin_shape_net_map;
+  for (Net& net : net_list) {
+    for (Pin& pin : net.get_pin_list()) {
+      if (!pin.get_inst_name().empty() && !pin.get_routing_shape_list().empty()) {
+        inst_pin_shape_net_map[pin.get_inst_name()].insert(net.get_net_idx());
+      }
+    }
+  }
+  for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
+    for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
+      gcell_map[x][y].get_routing_allowed_net_map().clear();
+    }
+  }
+  for (Macro& macro : macro_list) {
+    std::set<int32_t>& allowed_net_set = inst_pin_shape_net_map[macro.get_inst_name()];
+    PlanarRect body_grid_rect = RTUTIL.getClosedGCellGridRect(macro.get_body_rect(), gcell_axis);
+    for (int32_t x = body_grid_rect.get_ll_x() - 2; x <= body_grid_rect.get_ur_x() + 2; x++) {
+      for (int32_t y = body_grid_rect.get_ll_y() - 2; y <= body_grid_rect.get_ur_y() + 2; y++) {
+        if (!gcell_map.isInside(x, y) || (body_grid_rect.get_ll_x() <= x && x <= body_grid_rect.get_ur_x() && body_grid_rect.get_ll_y() <= y
+                                         && y <= body_grid_rect.get_ur_y())) {
+          continue;
+        }
+        RoutingLayerAllowedNetMap& routing_allowed_net_map = gcell_map[x][y].get_routing_allowed_net_map();
+        for (RoutingLayer& routing_layer : routing_layer_list) {
+          for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth, Orientation::kAbove,
+                                     Orientation::kBelow}) {
+            routing_allowed_net_map[routing_layer.get_layer_idx()][orient].insert(allowed_net_set.begin(), allowed_net_set.end());
+          }
+        }
+      }
+    }
+  }
+
+  for (Net& net : net_list) {
+    int32_t net_idx = net.get_net_idx();
+    for (Pin& pin : net.get_pin_list()) {
+      if (!pin.get_is_macro() && !pin.get_is_pad()) {
+        continue;
+      }
+      AccessPoint& access_point = pin.get_access_point();
+      if (access_point.get_real_coord() == PlanarCoord(-1, -1) || access_point.get_layer_idx() == -1) {
+        continue;
+      }
+      MacroPinEdge macro_pin_edge = pin.get_macro_pin_edge();
+      if (macro_pin_edge == MacroPinEdge::kNone) {
+        continue;
+      }
+
+      PlanarCoord access_grid_coord = access_point.get_grid_coord();
+      if (access_grid_coord == PlanarCoord(-1, -1)) {
+        PlanarRect real_rect(access_point.get_real_coord(), access_point.get_real_coord());
+        if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
+          continue;
+        }
+        access_grid_coord = RTUTIL.getClosedGCellGridRect(real_rect, gcell_axis).get_ll();
+      }
+
+      int32_t step_x = 0;
+      int32_t step_y = 0;
+      std::set<Orientation> orient_set = {Orientation::kAbove, Orientation::kBelow};
+      if (macro_pin_edge == MacroPinEdge::kNorth) {
+        step_y = 1;
+        orient_set.insert(Orientation::kNorth);
+        orient_set.insert(Orientation::kSouth);
+      } else if (macro_pin_edge == MacroPinEdge::kSouth) {
+        step_y = -1;
+        orient_set.insert(Orientation::kNorth);
+        orient_set.insert(Orientation::kSouth);
+      } else if (macro_pin_edge == MacroPinEdge::kEast) {
+        step_x = 1;
+        orient_set.insert(Orientation::kEast);
+        orient_set.insert(Orientation::kWest);
+      } else {
+        step_x = -1;
+        orient_set.insert(Orientation::kEast);
+        orient_set.insert(Orientation::kWest);
+      }
+      std::set<int32_t> allowed_net_set;
+      if (RTUTIL.exist(inst_pin_shape_net_map, pin.get_inst_name())) {
+        allowed_net_set = inst_pin_shape_net_map[pin.get_inst_name()];
+      }
+      allowed_net_set.insert(net_idx);
+      PlanarCoord outside_grid_coord(access_grid_coord.get_x() + step_x, access_grid_coord.get_y() + step_y);
+
+      for (PlanarCoord grid_coord : {access_grid_coord, outside_grid_coord}) {
+        if (!gcell_map.isInside(grid_coord.get_x(), grid_coord.get_y())) {
+          continue;
+        }
+        for (int32_t layer_idx : {access_point.get_layer_idx(), pin.get_preferred_conn_layer_idx()}) {
+          if (layer_idx == -1 || (layer_idx == pin.get_preferred_conn_layer_idx() && layer_idx == access_point.get_layer_idx())) {
+            continue;
+          }
+          GCell& gcell = gcell_map[grid_coord.get_x()][grid_coord.get_y()];
+          for (Orientation orient : orient_set) {
+            gcell.get_routing_allowed_net_map()[layer_idx][orient].insert(allowed_net_set.begin(), allowed_net_set.end());
+          }
+        }
+      }
     }
   }
 }

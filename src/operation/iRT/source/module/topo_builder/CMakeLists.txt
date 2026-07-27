@@ -16,6 +16,8 @@ target_link_libraries(irt_topo_builder
     irt_data_manager
     irt_module
     irt_toolkit
+    PRIVATE
+    flute
 )
 
 target_include_directories(irt_topo_builder

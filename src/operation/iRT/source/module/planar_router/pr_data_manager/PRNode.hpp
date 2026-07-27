@@ -22,6 +22,7 @@
 #include "Direction.hpp"
 #include "LayerCoord.hpp"
 #include "Orientation.hpp"
+#include "RoutingAllowedNet.hpp"
 #include "RTHeader.hpp"
 #include "Utility.hpp"
 
@@ -100,13 +101,6 @@ inline int32_t getPRMaskBitNum(uint8_t mask)
   return bit_num;
 }
 
-enum class PRNodeState
-{
-  kNone = 0,
-  kOpen = 1,
-  kClose = 2
-};
-
 struct PRNodeCost
 {
   double usage_cost = 0.0;
@@ -146,10 +140,10 @@ class PRNode : public PlanarCoord
   std::map<Orientation, PRNode*>& get_neighbor_node_map() { return _neighbor_node_map; }
   std::map<Orientation, int32_t>& get_orient_supply_map() { return _orient_supply_map; }
   std::map<int32_t, std::set<Orientation>>& get_ignore_net_orient_map() { return _ignore_net_orient_map; }
+  RoutingOrientAllowedNetMap& get_orient_allowed_net_map() { return _orient_allowed_net_map; }
   std::map<Orientation, std::set<int32_t>>& get_orient_net_map() { return _orient_net_map; }
   std::map<int32_t, std::set<Orientation>>& get_net_orient_map() { return _net_orient_map; }
   std::map<Orientation, std::map<int32_t, int32_t>>& get_orient_net_ref_count_map() { return _orient_net_ref_count_map; }
-  double get_congestion_risk() const { return _congestion_risk; }
   // setter
   void set_boundary_wire_unit(const double boundary_wire_unit) { _boundary_wire_unit = boundary_wire_unit; }
   void set_internal_wire_unit(const double internal_wire_unit) { _internal_wire_unit = internal_wire_unit; }
@@ -172,6 +166,11 @@ class PRNode : public PlanarCoord
     _ignore_net_orient_map = ignore_net_orient_map;
     rebuildFastDemand();
   }
+  void set_orient_allowed_net_map(const RoutingOrientAllowedNetMap& orient_allowed_net_map)
+  {
+    _orient_allowed_net_map = orient_allowed_net_map;
+    rebuildFastDemand();
+  }
   void set_orient_net_map(const std::map<Orientation, std::set<int32_t>>& orient_net_map)
   {
     _orient_net_map = orient_net_map;
@@ -184,7 +183,6 @@ class PRNode : public PlanarCoord
     rebuildDemandRefCount();
     rebuildFastDemand();
   }
-  void set_congestion_risk(const double congestion_risk) { _congestion_risk = congestion_risk; }
   // function
   void clearDemand()
   {
@@ -201,23 +199,14 @@ class PRNode : public PlanarCoord
     }
     return neighbor_node;
   }
-  PRNodeCost getCost(int32_t net_idx, Direction direction, double overflow_unit, const std::set<Orientation>* extra_orient_set = nullptr,
-                     bool ignore_curr_net = false)
+  PRNodeCost getCost(int32_t net_idx, Direction direction, double overflow_unit,
+                     const std::set<Orientation>* extra_orient_set = nullptr)
   {
     if (!validDemandUnit()) {
       RTLOG.error(Loc::current(), "The demand unit is error!");
     }
     std::map<Orientation, std::set<int32_t>> orient_net_map = _orient_net_map;
     std::map<int32_t, std::set<Orientation>> net_orient_map = _net_orient_map;
-    if (ignore_curr_net && RTUTIL.exist(net_orient_map, net_idx)) {
-      for (Orientation orient : net_orient_map[net_idx]) {
-        orient_net_map[orient].erase(net_idx);
-        if (orient_net_map[orient].empty()) {
-          orient_net_map.erase(orient);
-        }
-      }
-      net_orient_map.erase(net_idx);
-    }
     if (extra_orient_set) {
       for (Orientation orient : *extra_orient_set) {
         orient_net_map[orient].insert(net_idx);
@@ -272,19 +261,20 @@ class PRNode : public PlanarCoord
       }
       node_cost.addCost(calcCost(internal_demand, internal_supply, overflow_unit));
     }
+    addPolicyOverflow(node_cost, getRoutingPolicyOverflow(_orient_allowed_net_map, net_orient_map), overflow_unit);
     return node_cost;
   }
-  double getOverflowCost(int32_t net_idx, Direction direction, double overflow_unit, const std::set<Orientation>* extra_orient_set = nullptr,
-                         bool ignore_curr_net = false)
+  double getOverflowCost(int32_t net_idx, Direction direction, double overflow_unit,
+                         const std::set<Orientation>* extra_orient_set = nullptr)
   {
-    return getCost(net_idx, direction, overflow_unit, extra_orient_set, ignore_curr_net).getTotalCost();
+    return getCost(net_idx, direction, overflow_unit, extra_orient_set).getTotalCost();
   }
   PRNodeCost getFastCost(uint8_t orient_mask, double overflow_unit)
   {
     if (!validDemandUnit()) {
       RTLOG.error(Loc::current(), "The demand unit is error!");
     }
-    return getFastCostByDemandCount(_orient_demand_count, _internal_demand_count, orient_mask, overflow_unit);
+    return getFastCostByDemandCount(_orient_demand_count, _internal_demand_count, orient_mask, _policy_overflow, overflow_unit);
   }
   PRNodeCost getFastCost(int32_t net_idx, uint8_t orient_mask, double overflow_unit, bool ignore_curr_net)
   {
@@ -293,6 +283,7 @@ class PRNode : public PlanarCoord
     }
     std::array<int32_t, 4> orient_demand_count = _orient_demand_count;
     int32_t internal_demand_count = _internal_demand_count;
+    int32_t policy_overflow = _policy_overflow;
     uint8_t add_orient_mask = orient_mask;
     for (int32_t orient_idx = 0; orient_idx < 4; orient_idx++) {
       Orientation orient = getPROrientationByIndex(orient_idx);
@@ -302,6 +293,9 @@ class PRNode : public PlanarCoord
     }
     if (RTUTIL.exist(_net_orient_map, net_idx)) {
       for (Orientation orient : _net_orient_map[net_idx]) {
+        if (ignore_curr_net && !isRoutingNetAllowed(_orient_allowed_net_map, net_idx, orient)) {
+          policy_overflow--;
+        }
         if (isIgnored(net_idx, orient)) {
           continue;
         }
@@ -313,7 +307,16 @@ class PRNode : public PlanarCoord
         }
       }
     }
-    return getFastCostByDemandCount(orient_demand_count, internal_demand_count, add_orient_mask, overflow_unit);
+    for (int32_t orient_idx = 0; orient_idx < 4; orient_idx++) {
+      Orientation orient = getPROrientationByIndex(orient_idx);
+      bool has_curr_orient = RTUTIL.exist(_net_orient_map, net_idx) && RTUTIL.exist(_net_orient_map[net_idx], orient);
+      if ((orient_mask & (1 << orient_idx)) && (ignore_curr_net || !has_curr_orient)
+          && !isRoutingNetAllowed(_orient_allowed_net_map, net_idx, orient)) {
+        policy_overflow++;
+      }
+    }
+    return getFastCostByDemandCount(orient_demand_count, internal_demand_count, add_orient_mask,
+                                    policy_overflow, overflow_unit);
   }
   bool validDemandUnit()
   {
@@ -439,93 +442,7 @@ class PRNode : public PlanarCoord
       }
       internal_overflow += std::max(0.0, internal_demand - internal_supply);
     }
-    return (boundary_overflow + internal_overflow);
-  }
-  double getMaxUsageRatio()
-  {
-    if (!validDemandUnit()) {
-      RTLOG.error(Loc::current(), "The demand unit is error!");
-    }
-    double max_usage_ratio = 0;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      double boundary_demand = 0;
-      if (RTUTIL.exist(_orient_net_map, orient)) {
-        for (int32_t demand_net_idx : _orient_net_map[orient]) {
-          if (RTUTIL.exist(_ignore_net_orient_map, demand_net_idx) && RTUTIL.exist(_ignore_net_orient_map[demand_net_idx], orient)) {
-            continue;
-          }
-          boundary_demand += _boundary_wire_unit;
-        }
-      }
-      double boundary_supply = 0;
-      if (RTUTIL.exist(_orient_supply_map, orient)) {
-        boundary_supply = _orient_supply_map[orient];
-      }
-      max_usage_ratio = std::max(max_usage_ratio, calcUsageRatio(boundary_demand, boundary_supply));
-    }
-    {
-      double internal_demand = 0;
-      for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-        if (RTUTIL.exist(_orient_net_map, orient)) {
-          for (int32_t demand_net_idx : _orient_net_map[orient]) {
-            if (RTUTIL.exist(_ignore_net_orient_map, demand_net_idx) && RTUTIL.exist(_ignore_net_orient_map[demand_net_idx], orient)) {
-              continue;
-            }
-            internal_demand += _internal_wire_unit;
-          }
-        }
-      }
-      double internal_supply = 0;
-      for (auto& [orient, supply] : _orient_supply_map) {
-        internal_supply += supply;
-      }
-      max_usage_ratio = std::max(max_usage_ratio, calcUsageRatio(internal_demand, internal_supply));
-    }
-    return max_usage_ratio;
-  }
-  double getHighUsage(double threshold)
-  {
-    if (!validDemandUnit()) {
-      RTLOG.error(Loc::current(), "The demand unit is error!");
-    }
-    double high_usage = 0;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      double boundary_demand = 0;
-      if (RTUTIL.exist(_orient_net_map, orient)) {
-        for (int32_t demand_net_idx : _orient_net_map[orient]) {
-          if (RTUTIL.exist(_ignore_net_orient_map, demand_net_idx) && RTUTIL.exist(_ignore_net_orient_map[demand_net_idx], orient)) {
-            continue;
-          }
-          boundary_demand += _boundary_wire_unit;
-        }
-      }
-      double boundary_supply = 0;
-      if (RTUTIL.exist(_orient_supply_map, orient)) {
-        boundary_supply = _orient_supply_map[orient];
-      }
-      double usage_ratio = calcUsageRatio(boundary_demand, boundary_supply);
-      high_usage += std::max(0.0, usage_ratio - threshold);
-    }
-    {
-      double internal_demand = 0;
-      for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-        if (RTUTIL.exist(_orient_net_map, orient)) {
-          for (int32_t demand_net_idx : _orient_net_map[orient]) {
-            if (RTUTIL.exist(_ignore_net_orient_map, demand_net_idx) && RTUTIL.exist(_ignore_net_orient_map[demand_net_idx], orient)) {
-              continue;
-            }
-            internal_demand += _internal_wire_unit;
-          }
-        }
-      }
-      double internal_supply = 0;
-      for (auto& [orient, supply] : _orient_supply_map) {
-        internal_supply += supply;
-      }
-      double usage_ratio = calcUsageRatio(internal_demand, internal_supply);
-      high_usage += std::max(0.0, usage_ratio - threshold);
-    }
-    return high_usage;
+    return (boundary_overflow + internal_overflow + _policy_overflow);
   }
   void updateDemand(int32_t net_idx, std::set<Orientation> orient_set, ChangeType change_type)
   {
@@ -558,123 +475,15 @@ class PRNode : public PlanarCoord
         if (_orient_net_map[orient].empty()) {
           _orient_net_map.erase(orient);
         }
-        _net_orient_map[net_idx].erase(orient);
-        if (_net_orient_map[net_idx].empty()) {
-          _net_orient_map.erase(net_idx);
+        if (RTUTIL.exist(_net_orient_map, net_idx)) {
+          _net_orient_map[net_idx].erase(orient);
+          if (_net_orient_map[net_idx].empty()) {
+            _net_orient_map.erase(net_idx);
+          }
         }
       }
     }
   }
-  std::set<int32_t> getOverflowNetSet()
-  {
-    if (!validDemandUnit()) {
-      RTLOG.error(Loc::current(), "The demand unit is error!");
-    }
-    std::set<int32_t> overflow_net_set;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      double boundary_demand = 0;
-      if (RTUTIL.exist(_orient_net_map, orient)) {
-        for (int32_t demand_net_idx : _orient_net_map[orient]) {
-          if (RTUTIL.exist(_ignore_net_orient_map, demand_net_idx) && RTUTIL.exist(_ignore_net_orient_map[demand_net_idx], orient)) {
-            continue;
-          }
-          boundary_demand += _boundary_wire_unit;
-        }
-      }
-      double boundary_supply = 0;
-      if (RTUTIL.exist(_orient_supply_map, orient)) {
-        boundary_supply = _orient_supply_map[orient];
-      }
-      if (boundary_demand > boundary_supply && RTUTIL.exist(_orient_net_map, orient)) {
-        overflow_net_set.insert(_orient_net_map[orient].begin(), _orient_net_map[orient].end());
-      }
-    }
-    {
-      double internal_demand = 0;
-      for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-        if (RTUTIL.exist(_orient_net_map, orient)) {
-          for (int32_t demand_net_idx : _orient_net_map[orient]) {
-            if (RTUTIL.exist(_ignore_net_orient_map, demand_net_idx) && RTUTIL.exist(_ignore_net_orient_map[demand_net_idx], orient)) {
-              continue;
-            }
-            internal_demand += _internal_wire_unit;
-          }
-        }
-      }
-      double internal_supply = 0;
-      for (auto& [orient, supply] : _orient_supply_map) {
-        internal_supply += supply;
-      }
-      if (internal_demand > internal_supply) {
-        for (auto& [net_idx, orient_set] : _net_orient_map) {
-          overflow_net_set.insert(net_idx);
-        }
-      }
-    }
-    return overflow_net_set;
-  }
-  std::set<int32_t> getHighUsageNetSet(double threshold)
-  {
-    if (!validDemandUnit()) {
-      RTLOG.error(Loc::current(), "The demand unit is error!");
-    }
-    std::set<int32_t> high_usage_net_set;
-    for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-      double boundary_demand = 0;
-      std::set<int32_t> boundary_net_set;
-      if (RTUTIL.exist(_orient_net_map, orient)) {
-        for (int32_t demand_net_idx : _orient_net_map[orient]) {
-          if (RTUTIL.exist(_ignore_net_orient_map, demand_net_idx) && RTUTIL.exist(_ignore_net_orient_map[demand_net_idx], orient)) {
-            continue;
-          }
-          boundary_demand += _boundary_wire_unit;
-          boundary_net_set.insert(demand_net_idx);
-        }
-      }
-      double boundary_supply = 0;
-      if (RTUTIL.exist(_orient_supply_map, orient)) {
-        boundary_supply = _orient_supply_map[orient];
-      }
-      if (calcUsageRatio(boundary_demand, boundary_supply) > threshold + RT_ERROR) {
-        high_usage_net_set.insert(boundary_net_set.begin(), boundary_net_set.end());
-      }
-    }
-    {
-      double internal_demand = 0;
-      std::set<int32_t> internal_net_set;
-      for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-        if (RTUTIL.exist(_orient_net_map, orient)) {
-          for (int32_t demand_net_idx : _orient_net_map[orient]) {
-            if (RTUTIL.exist(_ignore_net_orient_map, demand_net_idx) && RTUTIL.exist(_ignore_net_orient_map[demand_net_idx], orient)) {
-              continue;
-            }
-            internal_demand += _internal_wire_unit;
-            internal_net_set.insert(demand_net_idx);
-          }
-        }
-      }
-      double internal_supply = 0;
-      for (auto& [orient, supply] : _orient_supply_map) {
-        internal_supply += supply;
-      }
-      if (calcUsageRatio(internal_demand, internal_supply) > threshold + RT_ERROR) {
-        high_usage_net_set.insert(internal_net_set.begin(), internal_net_set.end());
-      }
-    }
-    return high_usage_net_set;
-  }
-  PRNodeState& get_state() { return _state; }
-  PRNode* get_parent_node() const { return _parent_node; }
-  double get_known_cost() const { return _known_cost; }
-  double get_estimated_cost() const { return _estimated_cost; }
-  void set_state(PRNodeState state) { _state = state; }
-  void set_parent_node(PRNode* parent_node) { _parent_node = parent_node; }
-  void set_known_cost(const double known_cost) { _known_cost = known_cost; }
-  void set_estimated_cost(const double estimated_cost) { _estimated_cost = estimated_cost; }
-  bool isNone() { return _state == PRNodeState::kNone; }
-  bool isOpen() { return _state == PRNodeState::kOpen; }
-  bool isClose() { return _state == PRNodeState::kClose; }
-  double getTotalCost() { return (_known_cost + _estimated_cost); }
 
  private:
   bool isIgnored(int32_t net_idx, Orientation orient)
@@ -685,6 +494,7 @@ class PRNode : public PlanarCoord
   {
     _orient_demand_count.fill(0);
     _internal_demand_count = 0;
+    _policy_overflow = 0;
   }
   void rebuildFastDemand()
   {
@@ -717,6 +527,9 @@ class PRNode : public PlanarCoord
   }
   void addFastDemand(int32_t net_idx, Orientation orient)
   {
+    if (!isRoutingNetAllowed(_orient_allowed_net_map, net_idx, orient)) {
+      _policy_overflow++;
+    }
     if (isIgnored(net_idx, orient)) {
       return;
     }
@@ -725,14 +538,23 @@ class PRNode : public PlanarCoord
   }
   void delFastDemand(int32_t net_idx, Orientation orient)
   {
+    if (!isRoutingNetAllowed(_orient_allowed_net_map, net_idx, orient)) {
+      _policy_overflow--;
+    }
     if (isIgnored(net_idx, orient)) {
       return;
     }
     _orient_demand_count[getPROrientIndex(orient)]--;
     _internal_demand_count--;
   }
-  PRNodeCost getFastCostByDemandCount(const std::array<int32_t, 4>& orient_demand_count, int32_t internal_demand_count, uint8_t orient_mask,
-                                      double overflow_unit)
+  void addPolicyOverflow(PRNodeCost& node_cost, int32_t policy_overflow, double overflow_unit)
+  {
+    if (policy_overflow > 0) {
+      node_cost.addCost(calcCost(policy_overflow, 0, overflow_unit));
+    }
+  }
+  PRNodeCost getFastCostByDemandCount(const std::array<int32_t, 4>& orient_demand_count, int32_t internal_demand_count,
+                                      uint8_t orient_mask, int32_t policy_overflow, double overflow_unit)
   {
     PRNodeCost node_cost;
     for (int32_t orient_idx = 0; orient_idx < 4; orient_idx++) {
@@ -744,17 +566,8 @@ class PRNode : public PlanarCoord
     }
     int32_t total_internal_demand_count = internal_demand_count + getPRMaskBitNum(orient_mask);
     node_cost.addCost(calcCost(total_internal_demand_count * _internal_wire_unit, _internal_supply_count, overflow_unit));
+    addPolicyOverflow(node_cost, policy_overflow, overflow_unit);
     return node_cost;
-  }
-  double calcUsageRatio(double demand, double supply)
-  {
-    if (supply <= 0) {
-      if (demand <= 0) {
-        return 0;
-      }
-      return demand + 1.0;
-    }
-    return demand / supply;
   }
 
   double _boundary_wire_unit = -1;
@@ -764,17 +577,14 @@ class PRNode : public PlanarCoord
   std::array<int32_t, 4> _orient_supply_count = {0, 0, 0, 0};
   int32_t _internal_demand_count = 0;
   int32_t _internal_supply_count = 0;
+  int32_t _policy_overflow = 0;
   std::map<Orientation, PRNode*> _neighbor_node_map;
   std::map<Orientation, int32_t> _orient_supply_map;
   std::map<int32_t, std::set<Orientation>> _ignore_net_orient_map;
+  RoutingOrientAllowedNetMap _orient_allowed_net_map;
   std::map<Orientation, std::map<int32_t, int32_t>> _orient_net_ref_count_map;
   std::map<Orientation, std::set<int32_t>> _orient_net_map;
   std::map<int32_t, std::set<Orientation>> _net_orient_map;
-  double _congestion_risk = 0;
-  PRNodeState _state = PRNodeState::kNone;
-  PRNode* _parent_node = nullptr;
-  double _known_cost = 0.0;
-  double _estimated_cost = 0.0;
 };
 
 }  // namespace irt
