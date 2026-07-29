@@ -308,17 +308,7 @@ std::string join_metadata_names(const std::vector<std::string>& names)
   return joined;
 }
 
-GeometryLayerMetadata fallback_layer_metadata(LayerId layer_id)
-{
-  GeometryLayerMetadata metadata;
-  metadata.layer_id = layer_id;
-  metadata.order = layer_id;
-  metadata.name = "L" + std::to_string(layer_id);
-  return metadata;
-}
-
-std::vector<GeometryLayerMetadata> make_layer_metadata(std::span<const ShapeRecord> records,
-                                                       std::span<const GeometryLayerMetadata> configured_layers)
+std::vector<GeometryLayerMetadata> make_layer_metadata(std::span<const GeometryLayerMetadata> configured_layers)
 {
   std::map<LayerId, GeometryLayerMetadata> by_layer;
   for (const GeometryLayerMetadata& metadata : configured_layers) {
@@ -329,13 +319,6 @@ std::vector<GeometryLayerMetadata> make_layer_metadata(std::span<const ShapeReco
     normalized.enclosure_below = sanitize_layer_text(normalized.enclosure_below, "");
     normalized.enclosure_above = sanitize_layer_text(normalized.enclosure_above, "");
     by_layer[metadata.layer_id] = normalized;
-  }
-
-  for (const ShapeRecord& record : records) {
-    if (record.state != ShapeState::kAlive) {
-      continue;
-    }
-    by_layer.try_emplace(record.layer_id, fallback_layer_metadata(record.layer_id));
   }
 
   std::vector<GeometryLayerMetadata> layers;
@@ -551,7 +534,10 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   const std::vector<GeometrySidMapRecord> sidmap_records = make_sidmap_records(records, owners);
   const std::vector<GeometryTileSummary> lod_summaries = store.lod_summaries();
   const std::vector<GeometryViewTileRecord> view_records = make_view_tile_records(lod_summaries);
-  const std::vector<GeometryLayerMetadata> layers = make_layer_metadata(records, options.layers);
+  // The physical-layer catalog is defined exclusively by IDB-derived options.layers.
+  // Geometry records may use the internal layout layer or legacy unknown layers,
+  // but must not manufacture technology entries for the viewer controls.
+  const std::vector<GeometryLayerMetadata> layers = make_layer_metadata(options.layers);
   result.layer_count = static_cast<uint64_t>(layers.size());
   result.site_count = static_cast<uint64_t>(options.sites.size());
   result.master_count = static_cast<uint64_t>(options.masters.size());

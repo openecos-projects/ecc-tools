@@ -3168,6 +3168,7 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(result.ok);
   assert(result.shape_count == 3);
   assert(result.owner_count == 3);
+  assert(result.layer_count == 1);
   assert(result.via_count == 1);
   assert(result.grid_count == 1);
   assert(result.net_count == 1);
@@ -3305,6 +3306,8 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
          != std::string::npos);
   assert(layer_manifest.find("1\t7\trouting\thorizontal\t100\t200\t300\tM1\t70\t400\t50\t0\t1,2\t3,4\t5")
          != std::string::npos);
+  assert(layer_manifest.find("L2") == std::string::npos);
+  assert(layer_manifest.find("L3") == std::string::npos);
 
   const std::string site_manifest = read_text_file(sites_path);
   assert(site_manifest.find("name\tclass\tsymmetry\torient\twidth\theight\tis_overlap") != std::string::npos);
