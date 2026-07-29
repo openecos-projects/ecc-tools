@@ -101,6 +101,31 @@ void test_geometry_edit_json_parses_resize_rect_op()
   assert(command.requested_bbox.hy == 66);
 }
 
+void test_geometry_builder_uses_unique_geometry_layer_ids_for_mixed_idb_layers()
+{
+  idb::IdbLayout layout;
+  idb::IdbLayers* layers = layout.get_layers();
+  assert(layers != nullptr);
+
+  idb::IdbLayer* m1 = layers->set_layer("M1", "ROUTING");
+  idb::IdbLayer* via1 = layers->set_layer("VIA1", "CUT");
+  idb::IdbLayer* m2 = layers->set_layer("M2", "ROUTING");
+  assert(m1 != nullptr);
+  assert(via1 != nullptr);
+  assert(m2 != nullptr);
+
+  GeometryBuilder builder;
+  const std::vector<GeometryLayerMetadata> metadata = builder.collect_layer_metadata(layout);
+
+  assert(metadata.size() == 3);
+  assert(metadata[0].name == "M1");
+  assert(metadata[0].layer_id == 1);
+  assert(metadata[1].name == "VIA1");
+  assert(metadata[1].layer_id == 2);
+  assert(metadata[2].name == "M2");
+  assert(metadata[2].layer_id == 3);
+}
+
 void test_geometry_snapshot_workflow_skips_rebuild_for_restored_apply_edit_snapshot()
 {
   const GeometrySnapshotPreparation apply_edit_with_snapshot = plan_geometry_snapshot_preparation(
@@ -3861,6 +3886,7 @@ int main()
   test_geometry_edit_applier_validates_instance_move_layout_bounds();
   test_geometry_edit_applier_reports_diagnostic_for_missing_design_instance();
   test_geometry_edit_applier_reports_diagnostic_for_unsupported_operation_and_owner();
+  test_geometry_builder_uses_unique_geometry_layer_ids_for_mixed_idb_layers();
   test_store_geometry_sink_emits_all_shape_kinds();
   test_geometry_builder_rebuilds_basic_layout_and_instance_shapes();
   test_geometry_builder_rebuilds_track_and_gcell_grid_lines();

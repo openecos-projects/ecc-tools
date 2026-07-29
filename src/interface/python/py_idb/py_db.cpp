@@ -280,12 +280,20 @@ bool saveData(const std::string& path)
 
 bool resetData()
 {
+  // resetData destroys the IDB objects retained by the process-wide geometry
+  // edit session. Drop those raw pointers before releasing the database.
+  geometry_edit_session().reset();
   dmInst->resetData();
   return true;
 }
 
 bool loadData(const std::string& path)
 {
+  // DataManager::loadData begins by resetting its current IdbBuilder, so the
+  // session must be cleared before it can invalidate its design/layout
+  // pointers. Callers initialize a new geometry session after a successful
+  // load.
+  geometry_edit_session().reset();
   return dmInst->loadData(path);
 }
 

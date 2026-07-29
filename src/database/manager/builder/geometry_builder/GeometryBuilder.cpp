@@ -59,7 +59,14 @@ LayerId layer_id_from_idb(idb::IdbLayer* layer)
   }
 
   const int32_t layer_id = layer->get_id();
-  return layer_id > 0 ? static_cast<LayerId>(layer_id) : static_cast<LayerId>(layer->get_order());
+  const LayerId layer_order = static_cast<LayerId>(layer->get_order());
+  // IdbLayer IDs are allocated independently for routing and cut layers, so
+  // ordinary LEF data (where ID does not exceed its global order) cannot use
+  // them as geometry-wide keys. Use the global order and reserve zero for
+  // derived layout geometry. Explicit archive IDs above the order are already
+  // global identifiers and remain stable for backwards compatibility.
+  return layer_id > static_cast<int32_t>(layer_order) ? static_cast<LayerId>(layer_id)
+                                                      : layer_order + 1;
 }
 
 const char* layer_type_name(idb::IdbLayerType type)
