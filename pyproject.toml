@@ -7,6 +7,7 @@ name = "ecc-tools-bin"
 version = "0.1.0-alpha.8"
 requires-python = ">=3.11"
 dependencies = [
+    "matplotlib>=3.4",
     "numpy",
 ]
 
@@ -14,7 +15,10 @@ dependencies = [
 cmake.define.BUILD_ECOS = 1
 build.verbose = true
 build.targets = ["ecc_py"]
-editable.rebuild = true
+# Rebuilding and reinstalling the extension while Python is importing it can
+# replace the native payload before dlopen completes. Native builds remain an
+# explicit build step; editable imports use the last completed install.
+editable.rebuild = false
 build-dir = "build"
 
 [dependency-groups]

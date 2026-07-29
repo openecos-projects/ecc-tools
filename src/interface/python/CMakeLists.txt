@@ -5,6 +5,26 @@ SET(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 # DEFINE PYTHON MODULE & CMAKE TARGET
 pybind11_add_module(ecc_py python_moodule.cc)
 
+# ecc_py statically incorporates a large part of the native ECC stack.  Leaving
+# those implementation symbols in the module's dynamic symbol table lets later
+# Python extensions resolve against ECC's private C++ implementation instead of
+# their own dependencies (for example matplotlib.ft2font), which can abort the
+# interpreter at import time.  A Python extension only needs to export its
+# PyInit entry point, so keep the rest local on ELF platforms.
+if(UNIX AND NOT APPLE)
+    set(ECC_PY_EXPORT_MAP "${CMAKE_CURRENT_BINARY_DIR}/ecc_py.exports.map")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/ecc_py.exports.map.in"
+        "${ECC_PY_EXPORT_MAP}"
+        COPYONLY
+    )
+    set_property(
+        TARGET ecc_py
+        APPEND_STRING PROPERTY LINK_FLAGS
+        " -Wl,--version-script=${ECC_PY_EXPORT_MAP}"
+    )
+endif()
+
 add_subdirectory(py_idb)
 add_subdirectory(py_config)
 add_subdirectory(py_flow)
