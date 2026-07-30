@@ -56,7 +56,10 @@ CmdGeometrySnapshot::CmdGeometrySnapshot(const char* cmd_name) : TclCmd(cmd_name
 unsigned CmdGeometrySnapshot::check()
 {
   TclOption* path_option = getOptionOrArg(TCL_PATH);
-  LOG_FATAL_IF(!path_option);
+  if (path_option == nullptr) {
+    std::cerr << "geometry_snapshot requires -path <snapshot-dir>\n";
+    return 0;
+  }
   return 1;
 }
 
