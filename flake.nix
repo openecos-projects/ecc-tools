@@ -45,6 +45,7 @@
 
       dependencies = with python3Packages; [
         torch
+        matplotlib
       ];
 
       buildInputs = [
