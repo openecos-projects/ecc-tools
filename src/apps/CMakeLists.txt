@@ -18,8 +18,6 @@ endif()
 
 add_definitions(-DiEDA_GIT_VERSION="${iEDA_GIT_VERSION}")
 
-add_subdirectory(geometry_snapshot)
-
 add_executable(ecc_bin
     ieda_main.cpp
 )

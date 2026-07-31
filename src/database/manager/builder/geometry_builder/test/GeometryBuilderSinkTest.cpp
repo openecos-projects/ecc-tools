@@ -3082,7 +3082,7 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   store.add_point(3, point, OwnerRef{OwnerType::kPinPortShape});
 
   const std::filesystem::path output_dir =
-      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_writer_test";
+      std::filesystem::temp_directory_path() / "geometry_writer_test";
   std::filesystem::remove_all(output_dir);
 
   SnapshotWriteOptions write_options{output_dir};
@@ -3568,7 +3568,7 @@ void test_geometry_snapshot_exporter_writes_current_idb_design()
   design.set_version("5.8");
 
   const std::filesystem::path output_dir =
-      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_exporter_test";
+      std::filesystem::temp_directory_path() / "geometry_exporter_test";
   std::filesystem::remove_all(output_dir);
 
   const SnapshotWriteResult result = export_geometry_snapshot(design, layout, output_dir);
@@ -3586,7 +3586,7 @@ void test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_f
   GeometryStore store;
   const ShapeId shape_id = store.add_rect(1, Rect32{0, 0, 10, 20}, OwnerRef{OwnerType::kDie});
   const std::filesystem::path output_dir =
-      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_epoch_switch_test";
+      std::filesystem::temp_directory_path() / "geometry_epoch_switch_test";
   std::filesystem::remove_all(output_dir);
 
   GeometrySnapshotWriter writer;
@@ -3623,7 +3623,7 @@ void test_geometry_snapshot_writer_reuses_unchanged_binary_side_files()
   GeometryStore store;
   store.add_rect(1, Rect32{0, 0, 10, 20}, OwnerRef{OwnerType::kDie});
   const std::filesystem::path output_dir =
-      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_side_file_reuse_test";
+      std::filesystem::temp_directory_path() / "geometry_side_file_reuse_test";
   std::filesystem::remove_all(output_dir);
 
   GeometrySnapshotWriter writer;
@@ -3681,7 +3681,7 @@ void test_geometry_snapshot_reader_round_trips_core_binary_files()
   store.add_owner_name(OwnerType::kNetWireSegment, 2002, "clk");
 
   const std::filesystem::path output_dir =
-      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_reader_round_trip_test";
+      std::filesystem::temp_directory_path() / "geometry_reader_round_trip_test";
   std::filesystem::remove_all(output_dir);
 
   GeometrySnapshotWriter writer;
@@ -3777,7 +3777,7 @@ void test_geometry_snapshot_reload_preserves_shape_id_and_version_during_rebuild
   assert(edit_result.new_version == 2);
 
   const std::filesystem::path output_dir =
-      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_persistent_rebuild_test";
+      std::filesystem::temp_directory_path() / "geometry_persistent_rebuild_test";
   std::filesystem::remove_all(output_dir);
   GeometrySnapshotWriter writer;
   assert(writer.write(store, SnapshotWriteOptions{output_dir}).ok);
@@ -3821,7 +3821,7 @@ void test_geometry_snapshot_apply_edit_on_reloaded_store_is_incremental_without_
   const ShapeId original_id = original_shapes[0];
 
   const std::filesystem::path output_dir =
-      std::filesystem::temp_directory_path() / "ecc_geometry_snapshot_incremental_apply_edit_test";
+      std::filesystem::temp_directory_path() / "geometry_incremental_apply_edit_test";
   std::filesystem::remove_all(output_dir);
   GeometrySnapshotWriter writer;
   assert(writer.write(store, SnapshotWriteOptions{output_dir}).ok);
