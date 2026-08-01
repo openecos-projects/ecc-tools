@@ -125,7 +125,7 @@ void SDFWriter::outputSDFInterconnect(std::ofstream* sdf_file)
   (*sdf_file) << "  (DELAY\n";
   (*sdf_file) << "   (ABSOLUTE\n";
   for (Arc& arc : database.get_arc_list()) {
-    if (arc.get_type() != ArcType::kNet || arc.get_is_disable_arc()) {
+    if (arc.get_type() != ArcType::kNet || arc.get_is_disable_arc() || isSDFOutputOnlyCellArc(arc)) {
       continue;
     }
     outputSDFInterconnectArc(sdf_file, arc);
@@ -150,6 +150,36 @@ void SDFWriter::outputSDFInterconnectArc(std::ofstream* sdf_file, Arc& arc)
   (*sdf_file) << "    (INTERCONNECT " << source_pin_name << " " << sink_pin_name << " ";
   outputSDFDelay(sdf_file, sdf_delay);
   (*sdf_file) << ")\n";
+}
+
+bool SDFWriter::isSDFOutputOnlyCellArc(Arc& arc)
+{
+  Database& database = STADM.getDatabase();
+  auto source_pin_it = database.get_pin_map().find(arc.get_source_pin());
+  if (source_pin_it == database.get_pin_map().end() || source_pin_it->second.get_is_port()) {
+    return false;
+  }
+  auto instance_it = database.get_instance_map().find(source_pin_it->second.get_instance_name());
+  if (instance_it == database.get_instance_map().end()) {
+    return false;
+  }
+
+  bool has_output_pin = false;
+  for (std::string& pin_name : instance_it->second.get_pin_name_list()) {
+    auto pin_it = database.get_pin_map().find(pin_name);
+    if (pin_it == database.get_pin_map().end()) {
+      continue;
+    }
+
+    const PinDirection direction = pin_it->second.get_direction();
+    if (direction == PinDirection::kInput || direction == PinDirection::kInout) {
+      return false;
+    }
+    if (direction == PinDirection::kOutput) {
+      has_output_pin = true;
+    }
+  }
+  return has_output_pin;
 }
 
 void SDFWriter::outputSDFCellList(std::ofstream* sdf_file)
@@ -317,7 +347,8 @@ void SDFWriter::outputSDFOnlyCellArcList(std::ofstream* sdf_file, Instance& inst
     return;
   }
   for (TimingCellArc& timing_cell_arc : timing_cell->get_cell_arc_list()) {
-    if (timing_cell_arc.get_is_timing_graph_arc() || timing_cell_arc.get_is_disable_arc() || !isSDFCellArc(instance, timing_cell_arc)) {
+    if (timing_cell_arc.get_is_timing_graph_arc() || timing_cell_arc.get_is_clear_preset_arc() || timing_cell_arc.get_is_disable_arc()
+        || !isSDFCellArc(instance, timing_cell_arc)) {
       continue;
     }
     outputSDFOnlyCellArc(sdf_file, instance, timing_cell_arc);
@@ -490,10 +521,19 @@ void SDFWriter::outputSDFWidthTimingCheck(std::ofstream* sdf_file, Instance& ins
   }
   std::string port_name = getSDFPortName(database.get_pin_map()[pin_name]);
   std::string edge_name = getSDFEdgeName(trans_type);
+  std::string condition = getSDFCondition(timing_arc);
   double min_delay = getSDFTimingCheckDelay(instance, timing_check_arc, timing_arc, AnalysisType::kMin, trans_type);
   double max_delay = getSDFTimingCheckDelay(instance, timing_check_arc, timing_arc, AnalysisType::kMax, trans_type);
 
-  (*sdf_file) << "    (WIDTH (" << edge_name << " " << port_name << ") ";
+  (*sdf_file) << "    (WIDTH ";
+  if (!condition.empty()) {
+    (*sdf_file) << "(COND " << condition << " ";
+  }
+  (*sdf_file) << "(" << edge_name << " " << port_name << ")";
+  if (!condition.empty()) {
+    (*sdf_file) << ")";
+  }
+  (*sdf_file) << " ";
   outputSDFTriple(sdf_file, min_delay, max_delay);
   (*sdf_file) << ")\n";
 }

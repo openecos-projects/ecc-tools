@@ -835,6 +835,7 @@ void STAInterface::wrapTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* li
   if (isSDFDelayArc(lib_arc)) {
     TimingCellArc timing_cell_arc = wrapDelayArc(lib_arc_set);
     timing_cell_arc.set_is_timing_graph_arc(lib_arc->isDelayArc());
+    timing_cell_arc.set_is_clear_preset_arc(lib_arc->isClearPresetArc());
     timing_cell.get_cell_arc_list().push_back(timing_cell_arc);
     if (lib_arc->isClearPresetArc()) {
       wrapClearPresetArc(timing_cell, lib_arc);

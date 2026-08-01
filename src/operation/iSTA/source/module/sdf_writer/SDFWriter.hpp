@@ -61,6 +61,7 @@ class SDFWriter
   void outputSDFHeader(std::ofstream* sdf_file);
   void outputSDFInterconnect(std::ofstream* sdf_file);
   void outputSDFInterconnectArc(std::ofstream* sdf_file, Arc& arc);
+  bool isSDFOutputOnlyCellArc(Arc& arc);
   void outputSDFCellList(std::ofstream* sdf_file);
   void buildInstanceCellArcMap();
   void outputSDFCell(std::ofstream* sdf_file, Instance& instance);
