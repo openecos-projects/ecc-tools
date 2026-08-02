@@ -73,28 +73,27 @@ class MetalInserter
   double getMetalArea(ecc::geometry::GeometryStore& geometry_store, int32_t geometry_layer_idx, const MIRect& rect);
   bool isMetalShape(ecc::geometry::OwnerType owner_type);
   double getUnionArea(const std::vector<MIRect>& rect_list);
-  void buildDensityWindowFill(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer,
-                              MIDensityWindow& density_window);
+  void buildLayerFill(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer);
   std::vector<int32_t> getTrackCoordList(MILayer& mi_layer, const MIRect& rect);
+  int32_t getTrackStep(MILayer& mi_layer);
   int32_t getFirstTrackCoord(int32_t coordinate, int32_t track_start, int32_t track_pitch);
   std::vector<MIRect> getFillRectList(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer,
-                                      const MIRect& density_window_rect, int32_t track_coord);
+                                      const MIRect& fill_region_rect, int32_t track_coord);
   std::vector<std::pair<int32_t, int32_t>> getBlockedCoordIntervalList(ecc::geometry::GeometryStore& geometry_store,
                                                                         MILayer& mi_layer, const MIRect& fill_rect);
-  MIRect getFillRect(MIModel& mi_model, MILayer& mi_layer, const MIRect& density_window_rect, int32_t track_coord);
+  MIRect getFillRect(MIModel& mi_model, MILayer& mi_layer, const MIRect& fill_region_rect, int32_t track_coord);
+  std::vector<MIRect> getUniformFillRectList(MIModel& mi_model, MILayer& mi_layer, const MIRect& free_fill_rect);
+  int32_t getFillSpacing(MILayer& mi_layer, int32_t parallel_length);
   int32_t getAlignUp(int32_t coordinate, int32_t grid);
   int32_t getAlignDown(int32_t coordinate, int32_t grid);
-  bool isLegalFillRect(ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer, const MIRect& fill_rect);
   bool isIgnoredShape(ecc::geometry::OwnerType owner_type);
-  double getRectDistance(const MIRect& first_rect, const MIRect& second_rect);
   int32_t getRequiredSpacing(MILayer& mi_layer, const MIRect& first_rect, const MIRect& second_rect);
   idb::IdbLayerRouting* getRoutingLayer(const std::string& layer_name);
   int32_t getDefaultSpacing(idb::IdbLayerRouting* idb_routing_layer, int32_t wire_width);
   int32_t getPRLSpacing(idb::IdbLayerRouting* idb_routing_layer, int32_t wire_width, int32_t parallel_length);
   int32_t getParallelLength(const MIRect& first_rect, const MIRect& second_rect);
-  bool isDensityLegal(MIModel& mi_model, MILayer& mi_layer, const MIRect& fill_rect);
   std::vector<int32_t> getAffectedDensityWindowIdxList(MIModel& mi_model, MILayer& mi_layer, const MIRect& rect);
-  void addFillRect(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer, const MIRect& fill_rect);
+  void addFillRect(MIModel& mi_model, MILayer& mi_layer, const MIRect& fill_rect);
   void updateDensityWindowList(MIModel& mi_model, MILayer& mi_layer, const MIRect& fill_rect);
 
 #endif
