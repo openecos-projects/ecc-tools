@@ -45,6 +45,7 @@ class TimingPropagator
   bool isDisableArc(Arc& arc);
   bool shouldStopDataPropagation(Arc& arc);
   bool isSequentialClockPin(std::string& pin_name);
+  bool hasIncomingPhysicalSlewArc(std::string& pin_name);
   TPModel initTPModel();
   void buildStartPointList(TPModel& tp_model);
   double getClockArrival(std::string& pin_name, AnalysisType analysis_type);

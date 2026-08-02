@@ -101,6 +101,18 @@ bool TimingPropagator::isSequentialClockPin(std::string& pin_name)
   return instance.get_is_sequential() && pin_name == instance.get_clock_pin_name();
 }
 
+bool TimingPropagator::hasIncomingPhysicalSlewArc(std::string& pin_name)
+{
+  Database& database = STADM.getDatabase();
+  for (std::size_t arc_idx : database.get_incoming_arc_list_map()[pin_name]) {
+    Arc& arc = database.get_arc_list()[arc_idx];
+    if (arc.get_type() == ArcType::kNet && !isDisableArc(arc)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 TPModel TimingPropagator::initTPModel()
 {
   TPModel tp_model;
@@ -193,8 +205,16 @@ void TimingPropagator::seedDataSlew(std::string& start_point, AnalysisType analy
 void TimingPropagator::seedDataSlew(std::string& start_point, AnalysisType analysis_type, TransType trans_type)
 {
   Database& database = STADM.getDatabase();
-  database.get_timing_point_map()[start_point].get_data_slew_map()[analysis_type][trans_type]
-      = getStartPointSlew(start_point, analysis_type, trans_type);
+  TimingPoint& timing_point = database.get_timing_point_map()[start_point];
+  if (isSequentialClockPin(start_point)
+      && hasIncomingPhysicalSlewArc(start_point)
+      && (timing_point.get_clock_slew_map().count(analysis_type) == 0
+          || timing_point.get_clock_slew_map()[analysis_type].count(trans_type) == 0)) {
+    // A propagated divider or gated-clock path will provide the physical slew
+    // through this net arc. Seeding zero here would win min-slew selection.
+    return;
+  }
+  timing_point.get_data_slew_map()[analysis_type][trans_type] = getStartPointSlew(start_point, analysis_type, trans_type);
 }
 
 void TimingPropagator::propagateDataSlewDelayArc(std::size_t arc_idx)
@@ -212,9 +232,8 @@ void TimingPropagator::propagateDataSlewDelayArc(std::size_t arc_idx, AnalysisTy
   if (isDisableArc(arc)) {
     return;
   }
-  if (shouldStopDataPropagation(arc)) {
-    return;
-  }
+  // Slew must reach a sequential CK for C2Q delay and timing checks.  Arrival
+  // and path-state propagation still stop at this boundary.
   TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
   if (!hasDataSlew(source_point, analysis_type, input_trans_type)) {
     return;
@@ -236,6 +255,12 @@ void TimingPropagator::updateDataSlewDelay(Arc& arc, TimingPoint& source_point, 
   dc_task.set_input_trans_type(input_trans_type);
   dc_task.set_output_trans_type(output_trans_type);
   dc_task.set_input_slew(input_slew);
+  if (isSequentialClockPin(arc.get_source_pin())) {
+    // PT uses the ordinary propagated slew for C2Q delay, but uses the clock
+    // slew for its output-transition lookup.  A CK reached through data logic
+    // has no clock slew, so the latter intentionally falls back to zero.
+    dc_task.set_output_slew_input_slew(getClockSlew(arc.get_source_pin(), analysis_type, input_trans_type));
+  }
   STADC.calculate(dc_task);
   if (!dc_task.get_is_valid()) {
     return;
