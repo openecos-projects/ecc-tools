@@ -22,11 +22,6 @@ namespace tcl {
 
 TclZHInsertMetal::TclZHInsertMetal(const char* cmd_name) : TclCmd(cmd_name)
 {
-  _config_list.push_back(std::make_pair("-rules", ValueType::kString));
-  _config_list.push_back(std::make_pair("-area", ValueType::kIntList));
-  _config_list.push_back(std::make_pair("-reset_fill", ValueType::kInt));
-
-  TclUtil::addOption(this, _config_list);
 }
 
 unsigned TclZHInsertMetal::exec()
@@ -34,8 +29,7 @@ unsigned TclZHInsertMetal::exec()
   if (!check()) {
     return 0;
   }
-  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
-  ZHI.insertMetal(config_map);
+  ZHI.insertMetal();
   return 1;
 }
 

@@ -59,10 +59,10 @@ void ZHInterface::insertFiller(std::map<std::string, std::any> config_map)
   FillerInserter::destroyInst();
 }
 
-void ZHInterface::insertMetal(std::map<std::string, std::any> config_map)
+void ZHInterface::insertMetal()
 {
   MetalInserter::initInst();
-  ZHMI.insert(config_map);
+  ZHMI.insert();
   MetalInserter::destroyInst();
 }
 

@@ -15,12 +15,12 @@
 // ***************************************************************************************
 #pragma once
 
-#include "Logger.hpp"
 #include "GeometryLayerMetadata.h"
 #include "GeometryStore.h"
+#include "IdbLayer.h"
+#include "Logger.hpp"
 #include "MIModel.hpp"
 #include "Monitor.hpp"
-#include "json.hpp"
 
 namespace izh {
 
@@ -33,7 +33,7 @@ class MetalInserter
   static MetalInserter& getInst();
   static void destroyInst();
   // function
-  void insert(std::map<std::string, std::any> config_map);
+  void insert();
 
  private:
   // self
@@ -46,27 +46,65 @@ class MetalInserter
   MetalInserter& operator=(const MetalInserter& other) = delete;
   MetalInserter& operator=(MetalInserter&& other) = delete;
   // function
-  MIModel initMIModel(std::map<std::string, std::any>& config_map);
-  void initRuleFilePath(MIModel& mi_model, std::map<std::string, std::any>& config_map);
-  void initFillArea(MIModel& mi_model, std::map<std::string, std::any>& config_map);
-  void initResetFill(MIModel& mi_model, std::map<std::string, std::any>& config_map);
-  void initLayerRuleList(MIModel& mi_model);
-  std::vector<std::string> getLayerNameList(nlohmann::json& layer_group);
-  std::vector<MIFillShape> getFillShapeList(nlohmann::json& non_opc, int32_t dbu_per_micron);
-  std::vector<double> getNumberList(nlohmann::json& number_config);
-  int32_t getDbuValue(double micron_value, int32_t dbu_per_micron);
+
+#if 1  // 初始化
+
+  MIModel initMIModel();
+  void setMIComParam(MIModel& mi_model);
+  void initDatabaseInfo(MIModel& mi_model);
+  void initMILayerList(MIModel& mi_model);
+  MILayer initMILayer(idb::IdbLayerRouting* idb_routing_layer,
+                      const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list);
+  int32_t getGeometryLayerIdx(const std::string& layer_name,
+                              const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list);
+  int32_t getMinArea(idb::IdbLayerRouting* idb_routing_layer);
+  int32_t getCeilDiv(int32_t dividend, int32_t divisor);
+  int32_t getMaxSpacing(idb::IdbLayerRouting* idb_routing_layer);
+
+#endif
+
+#if 1  // 构建
+
   void buildMetalFill(MIModel& mi_model);
-  void resetMetalFill(MIModel& mi_model);
-  void initLayerDirection(MILayerRule& layer_rule);
-  void buildLayerMetalFill(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store,
-                           const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list, MILayerRule& layer_rule);
-  int32_t getGeometryLayerIdx(const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list, const MILayerRule& layer_rule);
-  std::vector<MIRect> buildFillRectList(ecc::geometry::GeometryStore& geometry_store, int32_t geometry_layer_idx,
-                                        const MILayerRule& layer_rule, const MIRect& fill_area);
-  MIFillShape getOrientFillShape(MIFillShape fill_shape, bool is_horizontal);
-  bool isBlocked(ecc::geometry::GeometryStore& geometry_store, int32_t geometry_layer_idx, const MIRect& metal_rect, int32_t spacing);
-  ecc::geometry::Rect32 getGeometryRect(const MIRect& metal_rect);
-  void writeMetalFill(MIModel& mi_model, const MILayerRule& layer_rule, const std::vector<MIRect>& metal_rect_list);
+  void buildGeometryStore(ecc::geometry::GeometryStore& geometry_store);
+  void buildLayerMetalFill(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer);
+  void buildDensityWindowList(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer);
+  double getMetalArea(ecc::geometry::GeometryStore& geometry_store, int32_t geometry_layer_idx, const MIRect& rect);
+  bool isMetalShape(ecc::geometry::OwnerType owner_type);
+  double getUnionArea(const std::vector<MIRect>& rect_list);
+  void buildDensityWindowFill(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer,
+                              MIDensityWindow& density_window);
+  std::vector<int32_t> getTrackCoordList(MILayer& mi_layer, const MIRect& rect);
+  int32_t getFirstTrackCoord(int32_t coordinate, int32_t track_start, int32_t track_pitch);
+  std::vector<MIRect> getFillRectList(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer,
+                                      const MIRect& density_window_rect, int32_t track_coord);
+  std::vector<std::pair<int32_t, int32_t>> getBlockedCoordIntervalList(ecc::geometry::GeometryStore& geometry_store,
+                                                                        MILayer& mi_layer, const MIRect& fill_rect);
+  MIRect getFillRect(MIModel& mi_model, MILayer& mi_layer, const MIRect& density_window_rect, int32_t track_coord);
+  int32_t getAlignUp(int32_t coordinate, int32_t grid);
+  int32_t getAlignDown(int32_t coordinate, int32_t grid);
+  bool isLegalFillRect(ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer, const MIRect& fill_rect);
+  bool isIgnoredShape(ecc::geometry::OwnerType owner_type);
+  double getRectDistance(const MIRect& first_rect, const MIRect& second_rect);
+  int32_t getRequiredSpacing(MILayer& mi_layer, const MIRect& first_rect, const MIRect& second_rect);
+  idb::IdbLayerRouting* getRoutingLayer(const std::string& layer_name);
+  int32_t getDefaultSpacing(idb::IdbLayerRouting* idb_routing_layer, int32_t wire_width);
+  int32_t getPRLSpacing(idb::IdbLayerRouting* idb_routing_layer, int32_t wire_width, int32_t parallel_length);
+  int32_t getParallelLength(const MIRect& first_rect, const MIRect& second_rect);
+  bool isDensityLegal(MIModel& mi_model, MILayer& mi_layer, const MIRect& fill_rect);
+  std::vector<int32_t> getAffectedDensityWindowIdxList(MIModel& mi_model, MILayer& mi_layer, const MIRect& rect);
+  void addFillRect(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer, const MIRect& fill_rect);
+  void updateDensityWindowList(MIModel& mi_model, MILayer& mi_layer, const MIRect& fill_rect);
+
+#endif
+
+#if 1  // 输出
+
+  void writeMetalFill(MIModel& mi_model);
+  void printResult(MIModel& mi_model);
+  void printLayerResult(MIModel& mi_model, MILayer& mi_layer);
+
+#endif
 };
 
 }  // namespace izh

@@ -5,7 +5,7 @@
 //
 // iEDA is licensed under Mulan PSL v2.
 // You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of the Mulan PSL v2 at:
+// You may obtain a copy of Mulan PSL v2 at:
 // http://license.coscl.org.cn/MulanPSL2
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
@@ -15,28 +15,31 @@
 // ***************************************************************************************
 #pragma once
 
-#include "ZHHeader.hpp"
+#include "MIRect.hpp"
 
 namespace izh {
 
-class MIFillShape
+class MIDensityWindow
 {
  public:
-  MIFillShape() = default;
-  MIFillShape(int32_t width, int32_t height) : _width(width), _height(height) {}
-  ~MIFillShape() = default;
+  MIDensityWindow() = default;
+  MIDensityWindow(const MIRect& rect, double metal_area) : _rect(rect), _metal_area(metal_area) {}
+  ~MIDensityWindow() = default;
   // getter
-  int32_t get_width() const { return _width; }
-  int32_t get_height() const { return _height; }
+  MIRect& get_rect() { return _rect; }
+  double get_metal_area() const { return _metal_area; }
+  double get_density() const { return _rect.get_area() <= 0.0 ? 0.0 : _metal_area / _rect.get_area(); }
+  // const getter
+  const MIRect& get_rect() const { return _rect; }
   // setter
-  void set_width(int32_t width) { _width = width; }
-  void set_height(int32_t height) { _height = height; }
+  void set_rect(const MIRect& rect) { _rect = rect; }
+  void set_metal_area(double metal_area) { _metal_area = metal_area; }
   // function
-  bool isValid() const { return _width > 0 && _height > 0; }
+  void add_metal_area(double metal_area) { _metal_area += metal_area; }
 
  private:
-  int32_t _width = 0;
-  int32_t _height = 0;
+  MIRect _rect;
+  double _metal_area = 0.0;
 };
 
 }  // namespace izh
