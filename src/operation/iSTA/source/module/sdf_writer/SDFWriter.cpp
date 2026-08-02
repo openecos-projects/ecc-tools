@@ -524,6 +524,11 @@ void SDFWriter::outputSDFWidthTimingCheck(std::ofstream* sdf_file, Instance& ins
   std::string condition = getSDFCondition(timing_arc);
   double min_delay = getSDFTimingCheckDelay(instance, timing_check_arc, timing_arc, AnalysisType::kMin, trans_type);
   double max_delay = getSDFTimingCheckDelay(instance, timing_check_arc, timing_arc, AnalysisType::kMax, trans_type);
+  // Keep the WIDTH SDF triple ordered when the constraint table reverses the
+  // numeric order of the analysis corners.
+  if (min_delay > max_delay) {
+    std::swap(min_delay, max_delay);
+  }
 
   (*sdf_file) << "    (WIDTH ";
   if (!condition.empty()) {
