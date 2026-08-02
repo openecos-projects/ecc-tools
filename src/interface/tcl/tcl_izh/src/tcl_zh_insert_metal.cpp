@@ -22,6 +22,12 @@ namespace tcl {
 
 TclZHInsertMetal::TclZHInsertMetal(const char* cmd_name) : TclCmd(cmd_name)
 {
+  // std::string min_fill_layer;  // optional
+  _config_list.push_back(std::make_pair("-min_fill_layer", ValueType::kString));
+  // std::string max_fill_layer;  // optional
+  _config_list.push_back(std::make_pair("-max_fill_layer", ValueType::kString));
+
+  TclUtil::addOption(this, _config_list);
 }
 
 unsigned TclZHInsertMetal::exec()
@@ -29,7 +35,8 @@ unsigned TclZHInsertMetal::exec()
   if (!check()) {
     return 0;
   }
-  ZHI.insertMetal();
+  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
+  ZHI.insertMetal(config_map);
   return 1;
 }
 

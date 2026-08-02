@@ -29,8 +29,11 @@ int main()
   }
 
   izh::MIComParam mi_com_param(100.0, 50.0, 0.10, 0.80);
+  mi_com_param.set_min_fill_layer("MET1");
+  mi_com_param.set_max_fill_layer("MET5");
   if (mi_com_param.get_density_window_size_micron() != 100.0 || mi_com_param.get_density_window_step_micron() != 50.0
-      || mi_com_param.get_min_density() != 0.10 || mi_com_param.get_max_density() != 0.80) {
+      || mi_com_param.get_min_density() != 0.10 || mi_com_param.get_max_density() != 0.80
+      || mi_com_param.get_min_fill_layer() != "MET1" || mi_com_param.get_max_fill_layer() != "MET5") {
     return 1;
   }
 

@@ -33,7 +33,7 @@ class MetalInserter
   static MetalInserter& getInst();
   static void destroyInst();
   // function
-  void insert();
+  void insert(std::map<std::string, std::any> config_map);
 
  private:
   // self
@@ -49,10 +49,11 @@ class MetalInserter
 
 #if 1  // 初始化
 
-  MIModel initMIModel();
-  void setMIComParam(MIModel& mi_model);
+  MIModel initMIModel(std::map<std::string, std::any>& config_map);
+  void setMIComParam(MIModel& mi_model, std::map<std::string, std::any>& config_map);
   void initDatabaseInfo(MIModel& mi_model);
   void initMILayerList(MIModel& mi_model);
+  int32_t getRoutingLayerIdx(const std::vector<idb::IdbLayer*>& idb_routing_layer_list, const std::string& layer_name);
   MILayer initMILayer(idb::IdbLayerRouting* idb_routing_layer,
                       const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list);
   int32_t getGeometryLayerIdx(const std::string& layer_name,

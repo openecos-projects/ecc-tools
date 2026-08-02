@@ -36,17 +36,26 @@ class MIComParam
   double get_density_window_step_micron() const { return _density_window_step_micron; }
   double get_min_density() const { return _min_density; }
   double get_max_density() const { return _max_density; }
+  std::string& get_min_fill_layer() { return _min_fill_layer; }
+  std::string& get_max_fill_layer() { return _max_fill_layer; }
+  // const getter
+  const std::string& get_min_fill_layer() const { return _min_fill_layer; }
+  const std::string& get_max_fill_layer() const { return _max_fill_layer; }
   // setter
   void set_density_window_size_micron(double density_window_size_micron) { _density_window_size_micron = density_window_size_micron; }
   void set_density_window_step_micron(double density_window_step_micron) { _density_window_step_micron = density_window_step_micron; }
   void set_min_density(double min_density) { _min_density = min_density; }
   void set_max_density(double max_density) { _max_density = max_density; }
+  void set_min_fill_layer(const std::string& min_fill_layer) { _min_fill_layer = min_fill_layer; }
+  void set_max_fill_layer(const std::string& max_fill_layer) { _max_fill_layer = max_fill_layer; }
 
  private:
   double _density_window_size_micron = 0.0;
   double _density_window_step_micron = 0.0;
   double _min_density = 0.0;
   double _max_density = 0.0;
+  std::string _min_fill_layer;
+  std::string _max_fill_layer;
 };
 
 }  // namespace izh

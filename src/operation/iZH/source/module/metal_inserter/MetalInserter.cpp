@@ -52,12 +52,12 @@ void MetalInserter::destroyInst()
 
 // function
 
-void MetalInserter::insert()
+void MetalInserter::insert(std::map<std::string, std::any> config_map)
 {
   Monitor monitor;
   ZHLOG.info(Loc::current(), "Starting...");
 
-  MIModel mi_model = initMIModel();
+  MIModel mi_model = initMIModel(config_map);
   buildMetalFill(mi_model);
   writeMetalFill(mi_model);
   printResult(mi_model);
@@ -69,18 +69,24 @@ void MetalInserter::insert()
 
 #if 1  // 初始化
 
-MIModel MetalInserter::initMIModel()
+MIModel MetalInserter::initMIModel(std::map<std::string, std::any>& config_map)
 {
   MIModel mi_model;
-  setMIComParam(mi_model);
+  setMIComParam(mi_model, config_map);
   initDatabaseInfo(mi_model);
   initMILayerList(mi_model);
   return mi_model;
 }
 
-void MetalInserter::setMIComParam(MIModel& mi_model)
+void MetalInserter::setMIComParam(MIModel& mi_model, std::map<std::string, std::any>& config_map)
 {
   MIComParam mi_com_param(100.0, 50.0, 0.10, 0.80);
+  if (Utility::exist(config_map, std::string("-min_fill_layer"))) {
+    mi_com_param.set_min_fill_layer(ZHUTIL.getConfigValue<std::string>(config_map, "-min_fill_layer", ""));
+  }
+  if (Utility::exist(config_map, std::string("-max_fill_layer"))) {
+    mi_com_param.set_max_fill_layer(ZHUTIL.getConfigValue<std::string>(config_map, "-max_fill_layer", ""));
+  }
   mi_model.set_mi_com_param(mi_com_param);
 }
 
@@ -110,8 +116,28 @@ void MetalInserter::initMILayerList(MIModel& mi_model)
 
   ecc::geometry::GeometryBuilder geometry_builder;
   std::vector<ecc::geometry::GeometryLayerMetadata> geometry_layer_list = geometry_builder.collect_layer_metadata(*idb_layout);
+  std::vector<idb::IdbLayer*>& idb_routing_layer_list = idb_layout->get_layers()->get_routing_layers();
+  if (idb_routing_layer_list.empty()) {
+    ZHLOG.error(Loc::current(), "The iDB routing layer list is empty!");
+  }
+
+  MIComParam& mi_com_param = mi_model.get_mi_com_param();
+  if (mi_com_param.get_min_fill_layer().empty()) {
+    mi_com_param.set_min_fill_layer(idb_routing_layer_list.front()->get_name());
+  }
+  if (mi_com_param.get_max_fill_layer().empty()) {
+    mi_com_param.set_max_fill_layer(idb_routing_layer_list.back()->get_name());
+  }
+  int32_t min_fill_layer_idx = getRoutingLayerIdx(idb_routing_layer_list, mi_com_param.get_min_fill_layer());
+  int32_t max_fill_layer_idx = getRoutingLayerIdx(idb_routing_layer_list, mi_com_param.get_max_fill_layer());
+  if (min_fill_layer_idx < 0 || max_fill_layer_idx < 0 || min_fill_layer_idx > max_fill_layer_idx) {
+    ZHLOG.error(Loc::current(), "The metal fill layer range is invalid: ", mi_com_param.get_min_fill_layer(), " to ",
+                mi_com_param.get_max_fill_layer());
+  }
+
   std::vector<MILayer> mi_layer_list;
-  for (idb::IdbLayer* idb_layer : idb_layout->get_layers()->get_routing_layers()) {
+  for (int32_t layer_idx = min_fill_layer_idx; layer_idx <= max_fill_layer_idx; ++layer_idx) {
+    idb::IdbLayer* idb_layer = idb_routing_layer_list[layer_idx];
     idb::IdbLayerRouting* idb_routing_layer = dynamic_cast<idb::IdbLayerRouting*>(idb_layer);
     if (idb_routing_layer == nullptr) {
       continue;
@@ -122,6 +148,16 @@ void MetalInserter::initMILayerList(MIModel& mi_model)
     ZHLOG.error(Loc::current(), "The iDB routing layer list is empty!");
   }
   mi_model.set_mi_layer_list(mi_layer_list);
+}
+
+int32_t MetalInserter::getRoutingLayerIdx(const std::vector<idb::IdbLayer*>& idb_routing_layer_list, const std::string& layer_name)
+{
+  for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(idb_routing_layer_list.size()); ++layer_idx) {
+    if (idb_routing_layer_list[layer_idx]->get_name() == layer_name) {
+      return layer_idx;
+    }
+  }
+  return -1;
 }
 
 MILayer MetalInserter::initMILayer(idb::IdbLayerRouting* idb_routing_layer,
@@ -712,6 +748,8 @@ void MetalInserter::printResult(MIModel& mi_model)
              mi_model.get_mi_com_param().get_density_window_step_micron());
   ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "min_density: ", mi_model.get_mi_com_param().get_min_density());
   ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "max_density: ", mi_model.get_mi_com_param().get_max_density());
+  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "min_fill_layer: ", mi_model.get_mi_com_param().get_min_fill_layer());
+  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "max_fill_layer: ", mi_model.get_mi_com_param().get_max_fill_layer());
   ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "inserted_metal_num: ", mi_model.get_inserted_metal_num());
   for (MILayer& mi_layer : mi_model.get_mi_layer_list()) {
     printLayerResult(mi_model, mi_layer);
