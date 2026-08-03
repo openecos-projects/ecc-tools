@@ -153,13 +153,16 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.macro_place_file_path = "";
   config.macro_placement_halo = -1.0;
   config.macro_routing_halo = -1.0;
-  config.layout_site_name = "";
-  config.layout_xy_ratio = -1.0;
-  config.layout_core_util = -1.0;
-  config.layout_margin_left_micron = -1.0;
-  config.layout_margin_right_micron = -1.0;
-  config.layout_margin_top_micron = -1.0;
-  config.layout_margin_bottom_micron = -1.0;
+  config.die_mode = DieMode::kNone;
+  config.die_site_name = "";
+  config.die_aspect_ratio = -1.0;
+  config.die_utilization = -1.0;
+  config.die_width_micron = -1.0;
+  config.die_height_micron = -1.0;
+  config.die_margin_left_micron = -1.0;
+  config.die_margin_right_micron = -1.0;
+  config.die_margin_top_micron = -1.0;
+  config.die_margin_bottom_micron = -1.0;
   config.io_pin_layer_name_list.clear();
   config.io_pin_width_micron = -1.0;
   config.io_pin_depth_micron = -1.0;
@@ -199,13 +202,22 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.macro_routing_halo = macro_placer_json["macro_routing_halo"].get<double>();
 
   nlohmann::json& die_builder_json = config_json["die_builder"];
-  config.layout_site_name = die_builder_json["site_name"].get<std::string>();
-  config.layout_xy_ratio = die_builder_json["core_width_to_height_ratio"].get<double>();
-  config.layout_core_util = die_builder_json["core_utilization"].get<double>();
-  config.layout_margin_left_micron = die_builder_json["left_margin_micron"].get<double>();
-  config.layout_margin_right_micron = die_builder_json["right_margin_micron"].get<double>();
-  config.layout_margin_top_micron = die_builder_json["top_margin_micron"].get<double>();
-  config.layout_margin_bottom_micron = die_builder_json["bottom_margin_micron"].get<double>();
+  config.die_mode = GetDieModeByName()(die_builder_json["mode"].get<std::string>());
+  config.die_site_name = die_builder_json["site_name"].get<std::string>();
+  nlohmann::json& die_margin_json = die_builder_json["margin"];
+  config.die_margin_left_micron = die_margin_json["left_micron"].get<double>();
+  config.die_margin_right_micron = die_margin_json["right_micron"].get<double>();
+  config.die_margin_top_micron = die_margin_json["top_micron"].get<double>();
+  config.die_margin_bottom_micron = die_margin_json["bottom_micron"].get<double>();
+  if (config.die_mode == DieMode::kDieUtil) {
+    nlohmann::json& die_util_json = die_builder_json["die_util"];
+    config.die_aspect_ratio = die_util_json["aspect_ratio"].get<double>();
+    config.die_utilization = die_util_json["utilization"].get<double>();
+  } else if (config.die_mode == DieMode::kDieSize) {
+    nlohmann::json& die_size_json = die_builder_json["die_size"];
+    config.die_width_micron = die_size_json["width_micron"].get<double>();
+    config.die_height_micron = die_size_json["height_micron"].get<double>();
+  }
 
   nlohmann::json& io_placer_json = config_json["io_placer"];
   for (nlohmann::json& layer_name_json : io_placer_json["io_layer_list"]) {
