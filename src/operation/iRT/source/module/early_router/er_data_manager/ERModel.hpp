@@ -22,6 +22,7 @@
 #include "ERNet.hpp"
 #include "ERNode.hpp"
 #include "ERPanel.hpp"
+#include "ERTGCell.hpp"
 #include "RTHeader.hpp"
 
 namespace irt {
@@ -29,6 +30,9 @@ namespace irt {
 class ERModel
 {
  public:
+  using AccessPointRTree = bgi::rtree<std::pair<BGRectInt, std::pair<int32_t, AccessPoint*>>, bgi::quadratic<16>>;
+  using GlobalResultRTree = bgi::rtree<std::pair<BGRectInt, std::pair<int32_t, int32_t>>, bgi::quadratic<16>>;
+
   ERModel() = default;
   ~ERModel() = default;
   // getter
@@ -36,12 +40,18 @@ class ERModel
   ERComParam& get_er_com_param() { return _er_com_param; }
   std::vector<ERConflictGroup>& get_er_conflict_group_list() { return _er_conflict_group_list; }
   std::vector<std::vector<std::pair<LayerCoord, LayerCoord>>>& get_grid_pair_list_list() { return _grid_pair_list_list; }
+  GridMap<ERTGCell>& get_ert_gcell_map() { return _ert_gcell_map; }
+  AccessPointRTree& get_access_point_rtree() { return _access_point_rtree; }
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_global_result_map() { return _net_global_result_map; }
+  GlobalResultRTree& get_global_result_rtree() { return _global_result_rtree; }
   GridMap<ERNode>& get_planar_node_map() { return _planar_node_map; }
   std::vector<GridMap<ERNode>>& get_layer_node_map() { return _layer_node_map; }
   std::vector<std::vector<ERPanel>>& get_layer_panel_list() { return _layer_panel_list; }
   std::vector<std::vector<ERPanelId>>& get_er_panel_id_list_list() { return _er_panel_id_list_list; }
   GridMap<ERBox>& get_er_box_map() { return _er_box_map; }
   std::vector<std::vector<ERBoxId>>& get_er_box_id_list_list() { return _er_box_id_list_list; }
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
+  std::map<int32_t, std::vector<EXTLayerRect>>& get_net_detailed_patch_map() { return _net_detailed_patch_map; }
   // setter
   void set_er_net_list(const std::vector<ERNet>& er_net_list) { _er_net_list = er_net_list; }
   void set_er_com_param(const ERComParam& er_com_param) { _er_com_param = er_com_param; }
@@ -68,12 +78,18 @@ class ERModel
   ERComParam _er_com_param;
   std::vector<ERConflictGroup> _er_conflict_group_list;
   std::vector<std::vector<std::pair<LayerCoord, LayerCoord>>> _grid_pair_list_list;
+  GridMap<ERTGCell> _ert_gcell_map;
+  AccessPointRTree _access_point_rtree;
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_global_result_map;
+  GlobalResultRTree _global_result_rtree;
   GridMap<ERNode> _planar_node_map;
   std::vector<GridMap<ERNode>> _layer_node_map;
   std::vector<std::vector<ERPanel>> _layer_panel_list;
   std::vector<std::vector<ERPanelId>> _er_panel_id_list_list;
   GridMap<ERBox> _er_box_map;
   std::vector<std::vector<ERBoxId>> _er_box_id_list_list;
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_detailed_result_map;
+  std::map<int32_t, std::vector<EXTLayerRect>> _net_detailed_patch_map;
 #if 1
   // single task
   ERNet* _curr_er_task = nullptr;

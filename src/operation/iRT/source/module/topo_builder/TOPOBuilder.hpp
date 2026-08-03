@@ -58,9 +58,8 @@ class TOPOBuilder
   // function
   std::vector<Segment<PlanarCoord>> getFlutePlanarTopoList(const std::vector<PlanarCoord>& planar_coord_list);
   std::vector<Segment<PlanarCoord>> legalizePlanarTopo(const TBTask& tb_task, std::vector<Segment<PlanarCoord>> raw_topo_list,
-                                                      TBSteinerRepairStat& steiner_repair_stat);
-  PlanarCoord getNearestLegalCoord(const std::vector<PlanarRect>& planar_obs_list, const PlanarRect& planar_search_region,
-                                   const PlanarCoord& coord);
+                                                       TBSteinerRepairStat& steiner_repair_stat);
+  PlanarCoord getNearestLegalCoord(const std::vector<PlanarRect>& planar_obs_list, const PlanarRect& planar_search_region, const PlanarCoord& coord);
   bool isSteinerForbiddenCoord(const std::vector<PlanarRect>& planar_obs_list, const PlanarCoord& coord);
 };
 

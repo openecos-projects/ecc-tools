@@ -16,36 +16,37 @@
 // ***************************************************************************************
 #pragma once
 
+#include "Orientation.hpp"
+#include "RTHeader.hpp"
+
 namespace irt {
 
-class SAComParam
+class ERTGCell
 {
  public:
-  SAComParam() = default;
-  SAComParam(int32_t supply_reduction, double boundary_wire_unit, double internal_wire_unit, double internal_via_unit)
-  {
-    _supply_reduction = supply_reduction;
-    _boundary_wire_unit = boundary_wire_unit;
-    _internal_wire_unit = internal_wire_unit;
-    _internal_via_unit = internal_via_unit;
-  }
-  ~SAComParam() = default;
+  ERTGCell() = default;
+  ~ERTGCell() = default;
   // getter
-  int32_t get_supply_reduction() const { return _supply_reduction; }
   double get_boundary_wire_unit() const { return _boundary_wire_unit; }
   double get_internal_wire_unit() const { return _internal_wire_unit; }
   double get_internal_via_unit() const { return _internal_via_unit; }
+  std::map<int32_t, std::map<Orientation, int32_t>>& get_routing_orient_supply_map() { return _routing_orient_supply_map; }
+  std::map<int32_t, std::map<int32_t, std::set<Orientation>>>& get_routing_ignore_net_orient_map() { return _routing_ignore_net_orient_map; }
   // setter
-  void set_supply_reduction(const int32_t supply_reduction) { _supply_reduction = supply_reduction; }
   void set_boundary_wire_unit(const double boundary_wire_unit) { _boundary_wire_unit = boundary_wire_unit; }
   void set_internal_wire_unit(const double internal_wire_unit) { _internal_wire_unit = internal_wire_unit; }
   void set_internal_via_unit(const double internal_via_unit) { _internal_via_unit = internal_via_unit; }
+  void set_routing_ignore_net_orient_map(const std::map<int32_t, std::map<int32_t, std::set<Orientation>>>& routing_ignore_net_orient_map)
+  {
+    _routing_ignore_net_orient_map = routing_ignore_net_orient_map;
+  }
 
  private:
-  int32_t _supply_reduction = -1;
   double _boundary_wire_unit = -1;
   double _internal_wire_unit = -1;
   double _internal_via_unit = -1;
+  std::map<int32_t, std::map<Orientation, int32_t>> _routing_orient_supply_map;
+  std::map<int32_t, std::map<int32_t, std::set<Orientation>>> _routing_ignore_net_orient_map;
 };
 
 }  // namespace irt

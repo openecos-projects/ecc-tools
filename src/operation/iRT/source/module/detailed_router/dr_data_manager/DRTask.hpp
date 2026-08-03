@@ -31,10 +31,10 @@ class DRTask
   ~DRTask() = default;
   // getter
   int32_t get_net_idx() { return _net_idx; }
+  int32_t get_component_idx() const { return _component_idx; }
   ConnectType& get_connect_type() { return _connect_type; }
   std::vector<DRGroup>& get_dr_group_list() { return _dr_group_list; }
   PlanarRect& get_bounding_box() { return _bounding_box; }
-  int32_t get_routed_times() { return _routed_times; }
   // const getter
   const int32_t get_net_idx() const { return _net_idx; }
   const ConnectType& get_connect_type() const { return _connect_type; }
@@ -42,19 +42,17 @@ class DRTask
   const PlanarRect& get_bounding_box() const { return _bounding_box; }
   // setter
   void set_net_idx(const int32_t net_idx) { _net_idx = net_idx; }
+  void set_component_idx(const int32_t component_idx) { _component_idx = component_idx; }
   void set_connect_type(const ConnectType& connect_type) { _connect_type = connect_type; }
   void set_dr_group_list(const std::vector<DRGroup>& dr_group_list) { _dr_group_list = dr_group_list; }
   void set_bounding_box(const PlanarRect& bounding_box) { _bounding_box = bounding_box; }
-  void set_routed_times(const int32_t routed_times) { _routed_times = routed_times; }
-  // function
-  void addRoutedTimes() { ++_routed_times; }
 
  private:
   int32_t _net_idx = -1;
+  int32_t _component_idx = -1;
   ConnectType _connect_type = ConnectType::kNone;
   std::vector<DRGroup> _dr_group_list;
   PlanarRect _bounding_box;
-  int32_t _routed_times = 0;
 };
 
 struct CmpDRTask
@@ -124,10 +122,10 @@ struct CmpDRTask
           b_coord_list.push_back(coord);
         }
       }
-      std::sort(a_coord_list.begin(), a_coord_list.end(), CmpLayerCoordByLayerASC());
-      std::sort(b_coord_list.begin(), b_coord_list.end(), CmpLayerCoordByLayerASC());
+      std::ranges::sort(a_coord_list, CmpLayerCoordByLayerASC());
+      std::ranges::sort(b_coord_list, CmpLayerCoordByLayerASC());
 
-      if (std::lexicographical_compare(a_coord_list.begin(), a_coord_list.end(), b_coord_list.begin(), b_coord_list.end(), CmpLayerCoordByLayerASC())) {
+      if (std::ranges::lexicographical_compare(a_coord_list, b_coord_list, CmpLayerCoordByLayerASC())) {
         sort_status = SortStatus::kTrue;
       } else if (a_coord_list == b_coord_list) {
         sort_status = SortStatus::kEqual;

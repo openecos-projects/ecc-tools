@@ -18,6 +18,7 @@
 
 #include "ERBoxId.hpp"
 #include "EXTPlanarRect.hpp"
+#include "Segment.hpp"
 
 namespace irt {
 
@@ -29,6 +30,8 @@ class ERBox
   // getter
   EXTPlanarRect& get_box_rect() { return _box_rect; }
   ERBoxId& get_er_box_id() { return _er_box_id; }
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_task_detailed_result_map() { return _net_task_detailed_result_map; }
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
 
   // setter
   void set_box_rect(const EXTPlanarRect& box_rect) { _box_rect = box_rect; }
@@ -38,6 +41,8 @@ class ERBox
  private:
   EXTPlanarRect _box_rect;
   ERBoxId _er_box_id;
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_task_detailed_result_map;
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_detailed_result_map;
 };
 
 }  // namespace irt

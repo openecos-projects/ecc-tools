@@ -38,6 +38,8 @@ class TrackAssigner
   void assign();
 
  private:
+  struct DetailedEnvironment;
+
   // self
   static TrackAssigner* _ta_instance;
 
@@ -54,9 +56,14 @@ class TrackAssigner
   void setTAComParam(TAModel& ta_model);
   void initTAPanelMap(TAModel& ta_model);
   void buildPanelSchedule(TAModel& ta_model);
+  TAPanelId getTAPanelId(const LayerCoord& coord);
+  void splitDetailedResult(TAModel& ta_model);
   void assignTAPanelMap(TAModel& ta_model);
-  void buildNetResult(TAPanel& ta_panel);
-  void buildNetPatch(TAPanel& ta_panel);
+  DetailedEnvironment buildDetailedEnvironment(TAModel& ta_model);
+  void buildTAPanelEnvironment(TAModel& ta_model, const std::vector<TAPanelId>& ta_panel_id_list, DetailedEnvironment& detailed_env);
+  void routeTAPanelList(TAModel& ta_model, const std::vector<TAPanelId>& ta_panel_id_list);
+  void updateTAPanelEnvironment(TAModel& ta_model, const std::vector<TAPanelId>& ta_panel_id_list, DetailedEnvironment& detailed_env);
+  void freeTAPanelList(TAModel& ta_model, const std::vector<TAPanelId>& ta_panel_id_list);
   void initTATaskList(TAModel& ta_model, TAPanel& ta_panel);
   void buildViolation(TAPanel& ta_panel);
   bool needRouting(TAPanel& ta_panel);
@@ -97,9 +104,11 @@ class TrackAssigner
   std::vector<Violation> getViolationListByShort(TAPanel& ta_panel, std::map<int32_t, std::vector<PlanarRect>>& env_net_rect_map,
                                                  std::map<int32_t, std::vector<PlanarRect>>& result_net_rect_map);
   void updateTaskSchedule(TAPanel& ta_panel, std::vector<TATask*>& routing_task_list);
-  void uploadNetResult(TAPanel& ta_panel);
+  void updateTAPanel(TAPanel& ta_panel);
   void uploadViolation(TAPanel& ta_panel);
   void freeTAPanel(TAPanel& ta_panel);
+  void updateTAModel(TAModel& ta_model);
+  void uploadTAModel(TAModel& ta_model);
   int32_t getViolationNum(TAModel& ta_model);
 
 #if 1  // update env
@@ -108,8 +117,8 @@ class TrackAssigner
   void updateRoutedRectToGraph(TAPanel& ta_panel, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>& segment);
   void addViolationToGraph(TAPanel& ta_panel, Violation& violation);
   void addViolationToGraph(TAPanel& ta_panel, LayerRect& searched_rect, std::vector<Segment<LayerCoord>>& overlap_segment_list);
-  std::map<TANode*, std::set<Orientation>> getNodeOrientationMap(TAPanel& ta_panel, NetShape& net_shape);
-  std::map<TANode*, std::set<Orientation>> getRoutingNodeOrientationMap(TAPanel& ta_panel, NetShape& net_shape);
+  void updateNetShapeToGraph(TAPanel& ta_panel, ChangeType change_type, NetShape& net_shape, bool is_fixed);
+  void updateNodeNetToGraph(TANode& ta_node, ChangeType change_type, int32_t net_idx, Orientation orientation, bool is_fixed);
 #endif
 
 #if 1  // exhibit

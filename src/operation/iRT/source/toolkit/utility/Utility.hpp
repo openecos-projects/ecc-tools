@@ -20,6 +20,7 @@
 #include "EXTPlanarRect.hpp"
 #include "GridMap.hpp"
 #include "LayerCoord.hpp"
+#include "LayerRect.hpp"
 #include "MTree.hpp"
 #include "Orientation.hpp"
 #include "PlanarCoord.hpp"
@@ -28,12 +29,30 @@
 #include "ScaleAxis.hpp"
 #include "ScaleGrid.hpp"
 #include "Segment.hpp"
-#include "ViaMaster.hpp"
 #include "json.hpp"
 
 namespace irt {
 
 #define RTUTIL (irt::Utility::getInst())
+
+struct TrackGridOrientation
+{
+  TrackGridOrientation(const PlanarRect& grid_rect, std::initializer_list<Orientation> orientation_list) : grid_rect(grid_rect)
+  {
+    for (Orientation orientation : orientation_list) {
+      orientations[orientation_num++] = orientation;
+    }
+  }
+
+  bool isValid() const { return grid_rect.get_ll_x() >= 0 && grid_rect.get_ll_y() >= 0 && !grid_rect.isIncorrect(); }
+  bool hasOrientation(Orientation orientation) const { return std::find(begin(), end(), orientation) != end(); }
+  const Orientation* begin() const { return orientations.data(); }
+  const Orientation* end() const { return orientations.data() + orientation_num; }
+
+  PlanarRect grid_rect;
+  std::array<Orientation, 6> orientations{};
+  int32_t orientation_num = 0;
+};
 
 class Utility
 {
@@ -42,6 +61,8 @@ class Utility
   static Utility& getInst();
   static void destroyInst();
   // function
+  static std::string getCurrentRSS();
+  static void releaseMemory(const std::string& stage);
 
 #if 1  // 方向方位计算
 
@@ -1623,92 +1644,41 @@ class Utility
 
   static PlanarRect getTrackGrid(const PlanarRect& real_rect, ScaleAxis& track_axis)
   {
-    std::set<int32_t> x_pre_set;
-    std::set<int32_t> x_mid_set;
-    std::set<int32_t> x_post_set;
-    getTrackIndexSet(track_axis.get_x_grid_list(), real_rect.get_ll_x(), real_rect.get_ur_x(), x_pre_set, x_mid_set, x_post_set);
-
-    std::set<int32_t> y_pre_set;
-    std::set<int32_t> y_mid_set;
-    std::set<int32_t> y_post_set;
-    getTrackIndexSet(track_axis.get_y_grid_list(), real_rect.get_ll_y(), real_rect.get_ur_y(), y_pre_set, y_mid_set, y_post_set);
+    std::array<int32_t, 4> x_range = getTrackIndexRange(track_axis.get_x_scale_list(), real_rect.get_ll_x(), real_rect.get_ur_x());
+    std::array<int32_t, 4> y_range = getTrackIndexRange(track_axis.get_y_scale_list(), real_rect.get_ll_y(), real_rect.get_ur_y());
 
     PlanarRect grid_rect;
-    if (x_mid_set.empty() || y_mid_set.empty()) {
+    if (x_range[1] == -1 || y_range[1] == -1) {
       grid_rect.set_ll(-1, -1);
       grid_rect.set_ur(-1, -1);
     } else {
-      grid_rect.set_ll(*x_mid_set.begin(), *y_mid_set.begin());
-      grid_rect.set_ur(*x_mid_set.rbegin(), *y_mid_set.rbegin());
+      grid_rect.set_ll(x_range[1], y_range[1]);
+      grid_rect.set_ur(x_range[2], y_range[2]);
     }
     return grid_rect;
   }
 
-  static std::map<std::pair<std::shared_ptr<std::set<int32_t>>, std::shared_ptr<std::set<int32_t>>>, std::set<Orientation>> getTrackGridOrientationMap(
-      const PlanarRect& real_rect, ScaleAxis& track_axis)
+  static std::array<TrackGridOrientation, 5> getTrackGridOrientationList(const PlanarRect& real_rect, ScaleAxis& track_axis)
   {
-    std::shared_ptr<std::set<int32_t>> x_pre_set = std::make_shared<std::set<int32_t>>();
-    std::shared_ptr<std::set<int32_t>> x_mid_set = std::make_shared<std::set<int32_t>>();
-    std::shared_ptr<std::set<int32_t>> x_post_set = std::make_shared<std::set<int32_t>>();
-    getTrackIndexSet(track_axis.get_x_grid_list(), real_rect.get_ll_x(), real_rect.get_ur_x(), *x_pre_set, *x_mid_set, *x_post_set);
-
-    std::shared_ptr<std::set<int32_t>> y_pre_set = std::make_shared<std::set<int32_t>>();
-    std::shared_ptr<std::set<int32_t>> y_mid_set = std::make_shared<std::set<int32_t>>();
-    std::shared_ptr<std::set<int32_t>> y_post_set = std::make_shared<std::set<int32_t>>();
-    getTrackIndexSet(track_axis.get_y_grid_list(), real_rect.get_ll_y(), real_rect.get_ur_y(), *y_pre_set, *y_mid_set, *y_post_set);
-
-    std::map<std::pair<std::shared_ptr<std::set<int32_t>>, std::shared_ptr<std::set<int32_t>>>, std::set<Orientation>> grid_orientation_map;
-    grid_orientation_map[{std::make_pair(x_pre_set, y_mid_set)}] = {Orientation::kEast};
-    grid_orientation_map[{std::make_pair(x_post_set, y_mid_set)}] = {Orientation::kWest};
-    grid_orientation_map[{std::make_pair(x_mid_set, y_pre_set)}] = {Orientation::kNorth};
-    grid_orientation_map[{std::make_pair(x_mid_set, y_post_set)}] = {Orientation::kSouth};
-    grid_orientation_map[{std::make_pair(x_mid_set, y_mid_set)}]
-        = {Orientation::kEast, Orientation::kWest, Orientation::kNorth, Orientation::kSouth, Orientation::kAbove, Orientation::kBelow};
-    return grid_orientation_map;
+    std::array<int32_t, 4> x = getTrackIndexRange(track_axis.get_x_scale_list(), real_rect.get_ll_x(), real_rect.get_ur_x());
+    std::array<int32_t, 4> y = getTrackIndexRange(track_axis.get_y_scale_list(), real_rect.get_ll_y(), real_rect.get_ur_y());
+    return {TrackGridOrientation(PlanarRect(x[0], y[1], x[0], y[2]), {Orientation::kEast}),
+            TrackGridOrientation(PlanarRect(x[3], y[1], x[3], y[2]), {Orientation::kWest}),
+            TrackGridOrientation(PlanarRect(x[1], y[0], x[2], y[0]), {Orientation::kNorth}),
+            TrackGridOrientation(PlanarRect(x[1], y[3], x[2], y[3]), {Orientation::kSouth}),
+            TrackGridOrientation(PlanarRect(x[1], y[1], x[2], y[2]),
+                                 {Orientation::kEast, Orientation::kWest, Orientation::kNorth, Orientation::kSouth, Orientation::kAbove, Orientation::kBelow})};
   }
 
-  static void getTrackIndexSet(std::vector<ScaleGrid>& scale_grid_list, int32_t ll_scale, int32_t ur_scale, std::set<int32_t>& pre_index_set,
-                               std::set<int32_t>& mid_index_set, std::set<int32_t>& post_index_set)
+  static std::array<int32_t, 4> getTrackIndexRange(const std::vector<int32_t>& scale_list, int32_t ll_scale, int32_t ur_scale)
   {
-    int32_t pre_index = -1;
-    int32_t post_index = -1;
-    int32_t pre_scale = INT32_MIN;
-    int32_t post_scale = INT32_MAX;
-
-    int32_t index = -1;
-    int32_t index_scale = -1;
-    for (ScaleGrid& scale_grid : scale_grid_list) {
-      for (int32_t i = 0; i <= scale_grid.get_step_num(); ++i) {
-        int32_t scale = scale_grid.get_start_line() + i * scale_grid.get_step_length();
-        if (index_scale != scale) {
-          ++index;
-          index_scale = scale;
-        } else {
-          continue;
-        }
-        if (scale < ll_scale) {
-          if (pre_scale < scale) {
-            pre_scale = scale;
-            pre_index = index;
-          }
-        } else if (ur_scale < scale) {
-          if (scale < post_scale) {
-            post_scale = scale;
-            post_index = index;
-          }
-          goto here;
-        } else {
-          mid_index_set.insert(index);
-        }
-      }
-    }
-  here:
-    if (pre_index != -1) {
-      pre_index_set.insert(pre_index);
-    }
-    if (post_index != -1) {
-      post_index_set.insert(post_index);
-    }
+    auto mid_begin = std::lower_bound(scale_list.begin(), scale_list.end(), ll_scale);
+    auto mid_end = std::upper_bound(mid_begin, scale_list.end(), ur_scale);
+    int32_t pre = mid_begin == scale_list.begin() ? -1 : static_cast<int32_t>(mid_begin - scale_list.begin() - 1);
+    int32_t post = mid_end == scale_list.end() ? -1 : static_cast<int32_t>(mid_end - scale_list.begin());
+    int32_t mid_ll = mid_begin == mid_end ? -1 : static_cast<int32_t>(mid_begin - scale_list.begin());
+    int32_t mid_ur = mid_begin == mid_end ? -1 : static_cast<int32_t>(mid_end - scale_list.begin() - 1);
+    return {pre, mid_ll, mid_ur, post};
   }
 
   static void getTrackScaleSet(std::vector<ScaleGrid>& scale_grid_list, int32_t ll_scale, int32_t ur_scale, std::set<int32_t>& pre_scale_set,
