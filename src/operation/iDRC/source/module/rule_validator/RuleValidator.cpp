@@ -277,17 +277,27 @@ void RuleValidator::buildRVClusterList(RVModel& rv_model)
   int32_t grid_x_size = -1;
   int32_t grid_y_size = -1;
   {
-    for (DRCShape& drc_env_shape : rv_model.get_drc_env_shape_list()) {
-      bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), drc_env_shape.get_ll_x()));
-      bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), drc_env_shape.get_ll_y()));
-      bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), drc_env_shape.get_ur_x()));
-      bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), drc_env_shape.get_ur_y()));
-    }
-    for (DRCShape& drc_result_shape : rv_model.get_drc_result_shape_list()) {
-      bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), drc_result_shape.get_ll_x()));
-      bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), drc_result_shape.get_ll_y()));
-      bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), drc_result_shape.get_ur_x()));
-      bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), drc_result_shape.get_ur_y()));
+    if (rv_model.get_drc_check_region_list().empty()) {
+      for (DRCShape& drc_env_shape : rv_model.get_drc_env_shape_list()) {
+        bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), drc_env_shape.get_ll_x()));
+        bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), drc_env_shape.get_ll_y()));
+        bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), drc_env_shape.get_ur_x()));
+        bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), drc_env_shape.get_ur_y()));
+      }
+      for (DRCShape& drc_result_shape : rv_model.get_drc_result_shape_list()) {
+        bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), drc_result_shape.get_ll_x()));
+        bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), drc_result_shape.get_ll_y()));
+        bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), drc_result_shape.get_ur_x()));
+        bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), drc_result_shape.get_ur_y()));
+      }
+    } else {
+      for (DRCShape& check_region : rv_model.get_drc_check_region_list()) {
+        PlanarRect region_rect = DRCUTIL.getEnlargedRect(check_region.get_rect(), expand_size);
+        bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), region_rect.get_ll_x()));
+        bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), region_rect.get_ll_y()));
+        bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), region_rect.get_ur_x()));
+        bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), region_rect.get_ur_y()));
+      }
     }
     offset_x = bounding_box.get_ll_x();
     offset_y = bounding_box.get_ll_y();
@@ -306,6 +316,9 @@ void RuleValidator::buildRVClusterList(RVModel& rv_model)
   }
   for (DRCShape& drc_env_shape : rv_model.get_drc_env_shape_list()) {
     PlanarRect searched_rect = DRCUTIL.getEnlargedRect(drc_env_shape.get_rect(), expand_size);
+    if (!DRCUTIL.isClosedOverlap(searched_rect, bounding_box)) {
+      continue;
+    }
     searched_rect = DRCUTIL.getRegularRect(searched_rect, bounding_box);
     int32_t grid_ll_x = (searched_rect.get_ll_x() - offset_x) / cluster_size;
     int32_t grid_ll_y = (searched_rect.get_ll_y() - offset_y) / cluster_size;
@@ -323,6 +336,9 @@ void RuleValidator::buildRVClusterList(RVModel& rv_model)
   }
   for (DRCShape& drc_result_shape : rv_model.get_drc_result_shape_list()) {
     PlanarRect searched_rect = DRCUTIL.getEnlargedRect(drc_result_shape.get_rect(), expand_size);
+    if (!DRCUTIL.isClosedOverlap(searched_rect, bounding_box)) {
+      continue;
+    }
     searched_rect = DRCUTIL.getRegularRect(searched_rect, bounding_box);
     int32_t grid_ll_x = (searched_rect.get_ll_x() - offset_x) / cluster_size;
     int32_t grid_ll_y = (searched_rect.get_ll_y() - offset_y) / cluster_size;

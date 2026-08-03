@@ -1,0 +1,45 @@
+// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+//
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.
+// ***************************************************************************************
+#pragma once
+
+#include "RTHeader.hpp"
+
+namespace irt {
+
+class RoutingEdge
+{
+ public:
+  RoutingEdge() = default;
+  ~RoutingEdge() = default;
+  // getter
+  int32_t get_supply() const { return _supply; }
+  int32_t get_demand() const { return _demand; }
+  std::set<int32_t>& get_ignore_net_set() { return _ignore_net_set; }
+  double get_congestion_cost() const { return _congestion_cost; }
+  int32_t get_overflow() const { return std::max(0, _demand - _supply); }
+  // setter
+  void set_supply(const int32_t supply) { _supply = supply; }
+  void set_demand(const int32_t demand) { _demand = demand; }
+  void set_ignore_net_set(const std::set<int32_t>& ignore_net_set) { _ignore_net_set = ignore_net_set; }
+  void set_congestion_cost(const double congestion_cost) { _congestion_cost = congestion_cost; }
+
+ private:
+  int32_t _supply = 0;
+  int32_t _demand = 0;
+  std::set<int32_t> _ignore_net_set;
+  double _congestion_cost = 0;
+};
+
+}  // namespace irt

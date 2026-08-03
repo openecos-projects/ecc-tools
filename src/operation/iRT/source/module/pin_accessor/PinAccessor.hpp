@@ -62,20 +62,28 @@ class PinAccessor
   std::vector<PlanarRect> getPlanarLegalRectList(PAModel& pa_model, int32_t curr_net_idx, PAPin* pa_pin, std::vector<EXTLayerRect>& pin_shape_list);
   std::vector<AccessPoint> getAccessPointList(PAModel& pa_model, int32_t pin_idx, std::vector<LayerRect>& legal_shape_list);
   void uniformSampleCoordList(PAModel& pa_model, std::vector<LayerCoord>& layer_coord_list);
-  void uploadAccessPointList(PAModel& pa_model);
+  void buildAccessPointRTree(PAModel& pa_model);
   void routePAModel(PAModel& pa_model);
   void initRoutingState(PAModel& pa_model);
   void setPAIterParam(PAModel& pa_model, int32_t iter, PAIterParam& pa_iter_param);
   void initPABoxMap(PAModel& pa_model);
+  PABoxId getPABoxId(PAModel& pa_model, const PlanarCoord& coord);
+  std::set<PABoxId, CmpPABoxId> getPABoxIdSet(PAModel& pa_model, PlanarRect real_rect);
   void resetRoutingState(PAModel& pa_model);
   void buildBoxSchedule(PAModel& pa_model);
+  void splitPAResult(PAModel& pa_model);
   void routePABoxMap(PAModel& pa_model);
+  void freePABoxMap(PAModel& pa_model);
+  void buildPAEnvironment(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list, bool include_active_box);
+  void addPAResultToEnvironment(PAModel& pa_model, GridMap<bool>& active_box_map, GridMap<omp_lock_t>& environment_lock_map, int32_t net_idx, int32_t pin_idx,
+                                Segment<LayerCoord>& segment);
+  void addPAPatchToEnvironment(PAModel& pa_model, GridMap<bool>& active_box_map, GridMap<omp_lock_t>& environment_lock_map, int32_t net_idx, int32_t pin_idx,
+                               EXTLayerRect& patch);
   void buildFixedRect(PABox& pa_box);
-  void buildAccessPoint(PABox& pa_box);
-  void buildAccessResult(PABox& pa_box);
-  void buildAccessPatch(PABox& pa_box);
+  void buildAccessPoint(PAModel& pa_model, PABox& pa_box);
   void initPATaskList(PAModel& pa_model, PABox& pa_box);
-  void buildRouteViolation(PABox& pa_box);
+  void buildRouteViolation(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list);
+  void updateRouteViolation(PAModel& pa_model, std::vector<std::vector<Violation>>& stage_violation_list_list);
   bool needRouting(PABox& pa_box);
   void buildBoxTrackAxis(PABox& pa_box);
   void buildLayerNodeMap(PABox& pa_box);
@@ -133,18 +141,19 @@ class PinAccessor
   void updateBestResult(PABox& pa_box);
   void updateTaskSchedule(PABox& pa_box, std::vector<PATask*>& routing_task_list);
   void selectBestResult(PABox& pa_box);
-  void uploadBestResult(PABox& pa_box);
   void freePABox(PABox& pa_box);
+  void updatePAModel(PAModel& pa_model);
   int32_t getRouteViolationNum(PAModel& pa_model);
-  void uploadViolation(PAModel& pa_model);
-  std::vector<Violation> getRouteViolationList(PAModel& pa_model);
+  void updateViolation(PAModel& pa_model);
+  std::vector<Violation> getFullRouteViolationList(PAModel& pa_model);
+  std::vector<Violation> getDirtyRouteViolationList(PAModel& pa_model, PABox& pa_box);
   void updateBestResult(PAModel& pa_model);
   bool stopIteration(PAModel& pa_model, std::vector<PAIterParam>& pa_iter_param_list);
   void selectBestResult(PAModel& pa_model);
-  void uploadBestResult(PAModel& pa_model);
   void uploadAccessPoint(PAModel& pa_model);
   void uploadAccessResult(PAModel& pa_model);
   void uploadAccessPatch(PAModel& pa_model);
+  void uploadViolation(PAModel& pa_model);
 
 #if 1  // update env
   void updateFixedRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
@@ -155,9 +164,10 @@ class PinAccessor
   void updateRoutedRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect& routed_rect, bool is_routing);
   void addRouteViolationToGraph(PABox& pa_box, Violation& violation);
   void addRouteViolationToGraph(PABox& pa_box, LayerRect& searched_rect, std::vector<Segment<LayerCoord>>& overlap_segment_list);
-  std::map<PANode*, std::set<Orientation>> getNodeOrientationMap(PABox& pa_box, NetShape& net_shape);
-  std::map<PANode*, std::set<Orientation>> getRoutingNodeOrientationMap(PABox& pa_box, NetShape& net_shape);
-  std::map<PANode*, std::set<Orientation>> getCutNodeOrientationMap(PABox& pa_box, NetShape& net_shape);
+  void updateNetShapeToGraph(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
+  void updateRoutingNetShapeToGraph(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
+  void updateCutNetShapeToGraph(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
+  void updateNodeNetToGraph(PANode& pa_node, ChangeType change_type, int32_t net_idx, Orientation orientation, bool is_fixed);
   void updateFixedRectToShadow(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
   void updateFixedRectToShadow(PABox& pa_box, ChangeType change_type, int32_t net_idx, LayerRect& real_rect, bool is_routing);
   void updateFixedRectToShadow(PABox& pa_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>* segment);

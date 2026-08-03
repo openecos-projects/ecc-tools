@@ -28,6 +28,13 @@ class Violation
  public:
   Violation() = default;
   ~Violation() = default;
+  bool operator==(const Violation& other) const
+  {
+    return _violation_type == other._violation_type && _violation_shape.get_real_rect() == other._violation_shape.get_real_rect()
+           && _violation_shape.get_grid_rect() == other._violation_shape.get_grid_rect()
+           && _violation_shape.get_layer_idx() == other._violation_shape.get_layer_idx() && _is_routing == other._is_routing
+           && _violation_net_set == other._violation_net_set && _required_size == other._required_size;
+  }
   // getter
   ViolationType get_violation_type() const { return _violation_type; }
   EXTLayerRect& get_violation_shape() { return _violation_shape; }

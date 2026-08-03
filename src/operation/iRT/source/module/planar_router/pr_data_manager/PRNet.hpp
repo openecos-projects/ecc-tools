@@ -18,6 +18,9 @@
 
 #include "Net.hpp"
 #include "PRPin.hpp"
+#include "PlanarCoord.hpp"
+#include "RoutingEdge.hpp"
+#include "Segment.hpp"
 
 namespace irt {
 
@@ -32,6 +35,8 @@ class PRNet
   ConnectType& get_connect_type() { return _connect_type; }
   std::vector<PRPin>& get_pr_pin_list() { return _pr_pin_list; }
   BoundingBox& get_bounding_box() { return _bounding_box; }
+  std::vector<Segment<PlanarCoord>>& get_routing_segment_list() { return _routing_segment_list; }
+  std::unordered_set<RoutingEdge*>& get_routing_edge_set() { return _routing_edge_set; }
   // const getter
   const ConnectType& get_connect_type() const { return _connect_type; }
   const std::vector<PRPin>& get_pr_pin_list() const { return _pr_pin_list; }
@@ -42,6 +47,8 @@ class PRNet
   void set_connect_type(const ConnectType& connect_type) { _connect_type = connect_type; }
   void set_pr_pin_list(const std::vector<PRPin>& pr_pin_list) { _pr_pin_list = pr_pin_list; }
   void set_bounding_box(const BoundingBox& bounding_box) { _bounding_box = bounding_box; }
+  void set_routing_segment_list(const std::vector<Segment<PlanarCoord>>& routing_segment_list) { _routing_segment_list = routing_segment_list; }
+  void set_routing_segment_list(std::vector<Segment<PlanarCoord>>&& routing_segment_list) { _routing_segment_list = std::move(routing_segment_list); }
   // function
 
  private:
@@ -50,6 +57,8 @@ class PRNet
   ConnectType _connect_type = ConnectType::kNone;
   std::vector<PRPin> _pr_pin_list;
   BoundingBox _bounding_box;
+  std::vector<Segment<PlanarCoord>> _routing_segment_list;
+  std::unordered_set<RoutingEdge*> _routing_edge_set;
 };
 
 struct CmpPRNet

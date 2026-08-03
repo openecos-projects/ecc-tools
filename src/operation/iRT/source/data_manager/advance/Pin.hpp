@@ -19,8 +19,8 @@
 #include "AccessPoint.hpp"
 #include "Direction.hpp"
 #include "EXTLayerRect.hpp"
-#include "PlanarRect.hpp"
 #include "PlanarCoord.hpp"
+#include "PlanarRect.hpp"
 #include "RTHeader.hpp"
 
 namespace irt {

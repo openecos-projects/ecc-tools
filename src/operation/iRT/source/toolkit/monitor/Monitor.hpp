@@ -34,6 +34,7 @@ class Monitor
   std::string getElapsedTime();
   std::string getCPUTime();
   std::string getUsageMemory();
+  std::string getCurrentRSS();
 
  private:
   double _init_elapsed_time = 0;  // \s
