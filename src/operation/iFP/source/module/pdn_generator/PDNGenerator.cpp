@@ -130,9 +130,8 @@ void PDNGenerator::buildRail(PGModel& pg_model)
       std::string bottom_net_name = row.get_orient() == PlacementOrientation::kN || row.get_orient() == PlacementOrientation::kFN
                                         ? pg_model.get_default_ground_net_name()
                                         : pg_model.get_default_power_net_name();
-      // Followpin 由合法 row 的边界决定，不能被相邻 macro 的 routing halo 切断。
-      addUnblockedLineSegment(bottom_net_name, routing_layer->get_name(), PGSegmentType::kFollowPin, width, row.get_ll_x(), row.get_y(),
-                              row.get_ur_x(), row.get_y());
+      addLineSegment(bottom_net_name, routing_layer->get_name(), PGSegmentType::kFollowPin, width, row.get_ll_x(), row.get_y(),
+                     row.get_ur_x(), row.get_y());
     }
 
     for (Row& row : database.get_row_list()) {
@@ -160,8 +159,8 @@ void PDNGenerator::buildRail(PGModel& pg_model)
           continue;
         }
         if (current_x < covered_interval.first) {
-          addUnblockedLineSegment(top_net_name, routing_layer->get_name(), PGSegmentType::kFollowPin, width, current_x, row.get_ur_y(),
-                                  covered_interval.first, row.get_ur_y());
+          addLineSegment(top_net_name, routing_layer->get_name(), PGSegmentType::kFollowPin, width, current_x, row.get_ur_y(),
+                         covered_interval.first, row.get_ur_y());
         }
         current_x = std::max(current_x, covered_interval.second);
         if (row.get_ur_x() <= current_x) {
@@ -169,8 +168,8 @@ void PDNGenerator::buildRail(PGModel& pg_model)
         }
       }
       if (current_x < row.get_ur_x()) {
-        addUnblockedLineSegment(top_net_name, routing_layer->get_name(), PGSegmentType::kFollowPin, width, current_x, row.get_ur_y(),
-                                row.get_ur_x(), row.get_ur_y());
+        addLineSegment(top_net_name, routing_layer->get_name(), PGSegmentType::kFollowPin, width, current_x, row.get_ur_y(), row.get_ur_x(),
+                       row.get_ur_y());
       }
     }
   }
@@ -646,7 +645,7 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
         connectMacroPin(pg_model, pg_net, pin_shape);
         processed_macro_pin_num++;
         if (processed_macro_pin_num % batch_size == 0 || processed_macro_pin_num == macro_pin_num) {
-          FPLOG.info(Loc::current(), "Processed ", processed_macro_pin_num, "/", macro_pin_num, " macro pins",
+          FPLOG.info(Loc::current(), "Processed ", processed_macro_pin_num, "/", macro_pin_num, " macro power pins",
                      stage_monitor.getStatsInfo());
         }
       }
