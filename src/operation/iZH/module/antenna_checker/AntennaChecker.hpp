@@ -15,8 +15,11 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
-#include <vector>
+
+#include <any>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "ACModel.hpp"
 #include "Logger.hpp"
@@ -35,17 +38,22 @@ enum class ViolationType
   kAntennaCsr,
   kAntennaDiffCsr,
   kAntennaCutPar,
-  kAntennaCutCar
+  kAntennaCutCar,
+  kAntennaDiffCutPar,
+  kAntennaDiffCutCar
 };
 
 struct Violation
 {
   std::string net_name;
   std::string layer_name;
-  ViolationType type;
-  double ratio;
-  double threshold;
-  double lx = 0.0, ly = 0.0, hx = 0.0, hy = 0.0;
+  ViolationType type = ViolationType::kAntennaPar;
+  double ratio = 0.0;
+  double threshold = 0.0;
+  double lx = 0.0;
+  double ly = 0.0;
+  double hx = 0.0;
+  double hy = 0.0;
 };
 
 #define ZHAC (izh::AntennaChecker::getInst())
@@ -56,15 +64,22 @@ class AntennaChecker
   static void initInst();
   static AntennaChecker& getInst();
   static void destroyInst();
+
   // function
   void check(std::map<std::string, std::any> config_map);
-  int get_violation_num() { return _violation_num; }
+
+  int get_violation_num() const { return _violation_num; }
   const std::vector<Violation>& get_violations() const { return _violations; }
-  void set_violations(const std::vector<Violation>& violations) { _violations = violations; }
+  void set_violations(const std::vector<Violation>& violations)
+  {
+    _violations = violations;
+    _violation_num = static_cast<int>(_violations.size());
+  }
 
  private:
   // self
   static AntennaChecker* _ac_instance;
+
   int _violation_num = 0;
   std::vector<Violation> _violations;
 
@@ -72,8 +87,10 @@ class AntennaChecker
   AntennaChecker(const AntennaChecker& other) = delete;
   AntennaChecker(AntennaChecker&& other) = delete;
   ~AntennaChecker() = default;
+
   AntennaChecker& operator=(const AntennaChecker& other) = delete;
   AntennaChecker& operator=(AntennaChecker&& other) = delete;
+
   // function
   ACModel initACModel(std::map<std::string, std::any>& config_map);
 };
