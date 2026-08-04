@@ -51,7 +51,7 @@ int main(int argc, char** argv)
 
     // support specific log directory
     if (std::string("-log") == argv[i]) {
-      IEDALOG.openLogFileStream((std::filesystem::path(argv[i + 1]) / "ieda.log").string());
+      IEDALOG.openLogFileStream((std::filesystem::path(argv[i + 1]) / "ecc.log").string());
     }
 
     if (std::string("-script") == argv[i]) {
