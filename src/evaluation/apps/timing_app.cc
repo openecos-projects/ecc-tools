@@ -6,7 +6,6 @@
  * @brief application for timing evaluation
  */
 
-#include "PLAPI.hh"
 #include "idm.h"
 #include "utility/logger/Logger.hpp"
 #include "timing_api.hh"
@@ -15,8 +14,8 @@ void TestTiming(const string& db_config_path);
 void PrintUsage(const char* program_name)
 {
   ECCLOG.info(ecc::Loc::current(), "timing evaluation");
-  ECCLOG.info(ecc::Loc::current(), "Usage: ", program_name, " <function_name>");
-  ECCLOG.info(ecc::Loc::current(), "Available parameters:");
+  ECCLOG.info(ecc::Loc::current(), "Usage: ", program_name, " <db_config_path>");
+  ECCLOG.info(ecc::Loc::current(), "Available arguments:");
   ECCLOG.info(ecc::Loc::current(), "  <db_config_path> Path to the database configuration file.");
   ECCLOG.info(ecc::Loc::current(), "  --help, -h       Show this help message and exit.");
 }
@@ -39,19 +38,7 @@ int main(const int argc, const char* argv[])
 
 void TestTiming(const string& db_config_path)
 {
-  // dmInst->init("/data/project_share/dataset_baseline/gcd/workspace/config/ECC_config/db_default_config.json");
-  // auto config = dmInst->get_config();
-  // config.set_output_path("/home/liweiguo/project/ECC/scripts/design/eval/result");
-
-  // iPLAPIInst.initAPI("/data/project_share/dataset_baseline/gcd/workspace/config/ECC_config/pl_default_config.json",
-  //                    dmInst->get_idb_builder());
-  // iPLAPIInst.runFlow();
   dmInst->init(db_config_path);
-  auto config = dmInst->get_config();
-  config.set_output_path("/home/liweiguo/project/ECC/scripts/design/eval/result");
-  dmInst->readLef(std::vector<std::string>{config.get_tech_lef_path()}, true);
-  dmInst->readLef(config.get_lef_paths());
-  dmInst->readDef("/data/project_share/dataset_baseline/s15850/workspace/output/ECC/result/s15850_place.def.gz");
 
   auto* timing_api = ieval::TimingAPI::getInst();
   // timing_api->runSTA();
