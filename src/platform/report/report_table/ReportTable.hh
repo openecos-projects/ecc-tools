@@ -30,7 +30,7 @@
 #define TABLE_ENDLINE fort::endr
 #define TABLE_SKIP ""
 
-namespace ieda {
+namespace ecc {
 class ReportTable : public fort::char_table
 {
  public:
@@ -64,4 +64,4 @@ class ReportTable : public fort::char_table
   void initHeader();
 };
 
-}  // namespace ieda
+}  // namespace ecc

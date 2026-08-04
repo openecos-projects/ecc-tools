@@ -30,7 +30,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "feature_summary.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 FeatureSummary::FeatureSummary()
 {
@@ -40,4 +40,4 @@ FeatureSummary::~FeatureSummary()
 {
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

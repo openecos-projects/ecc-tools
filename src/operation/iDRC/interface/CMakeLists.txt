@@ -15,7 +15,7 @@ target_link_libraries(idrc_interface
     idrc_source
     idm
     file_manager_drc
-    ieda_logger
+    ecc_logger
 )
 
 target_include_directories(idrc_interface

@@ -5,7 +5,7 @@ T* getFileStream(std::string file_path)
 {
   T* file = new T(file_path);
   if (!file->is_open()) {
-    IEDALOG.warn(ieda::Loc::current(), "Failed to open file '", file_path, "'!");
+    ECCLOG.warn(ecc::Loc::current(), "Failed to open file '", file_path, "'!");
     assert(0);
   }
   return file;

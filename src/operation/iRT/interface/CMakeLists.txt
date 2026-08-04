@@ -14,7 +14,7 @@ target_link_libraries(irt_interface
     PRIVATE
     irt_source
     idrc_interface
-    ieda_feature
+    ecc_feature
     idm
 )
 

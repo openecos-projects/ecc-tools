@@ -31,20 +31,20 @@ using ordered_json = nlohmann::ordered_json;
 
 namespace tcl {
 
-using ieda::ScriptEngine;
-using ieda::TclCmd;
-using ieda::TclCmds;
-using ieda::TclDoubleListOption;
-using ieda::TclDoubleOption;
-using ieda::TclIntListOption;
-using ieda::TclIntOption;
-using ieda::TclOption;
-using ieda::TclStringListOption;
-using ieda::TclStringListListOption;
-using ieda::TclStringListListListOption;
-using ieda::TclStringListListListListOption;
-using ieda::TclStringOption;
-using ieda::TclSwitchOption;
+using ecc::ScriptEngine;
+using ecc::TclCmd;
+using ecc::TclCmds;
+using ecc::TclDoubleListOption;
+using ecc::TclDoubleOption;
+using ecc::TclIntListOption;
+using ecc::TclIntOption;
+using ecc::TclOption;
+using ecc::TclStringListOption;
+using ecc::TclStringListListOption;
+using ecc::TclStringListListListOption;
+using ecc::TclStringListListListListOption;
+using ecc::TclStringOption;
+using ecc::TclSwitchOption;
 
 enum class ValueType
 {
@@ -81,7 +81,7 @@ class TclUtil : public TclCmd
       // Remove the first character '-' from the parameter list.
       std::string sub_key = key.substr(1, key.size() - 1);
       if (!modifyJsonValue(j, sub_key, value)) {
-        IEDALOG.warn(ieda::Loc::current(), "The key is not found.", sub_key);
+        ECCLOG.warn(ecc::Loc::current(), "The key is not found.", sub_key);
       }
     }
   }
@@ -111,7 +111,7 @@ class TclUtil : public TclCmd
             modified = true;
           }
         } catch (const std::bad_any_cast& e) {
-            IEDALOG.warn(ieda::Loc::current(), "Type trans error: ", e.what());
+            ECCLOG.warn(ecc::Loc::current(), "Type trans error: ", e.what());
         }
         break;
       } else if (item.value().is_object()) {

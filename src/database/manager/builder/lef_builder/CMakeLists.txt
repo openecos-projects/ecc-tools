@@ -6,8 +6,8 @@ add_library(lef_builder
     ${parser_src}
 )
 
-target_include_directories(lef_builder 
-    PUBLIC 
+target_include_directories(lef_builder
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${HOME_DATABASE}/basic/geometry
         ${HOME_DATABASE}/data/design
@@ -17,12 +17,12 @@ target_include_directories(lef_builder
         ${HOME_DATABASE}/manager/service/lef_service
 )
 
-target_include_directories(lef_builder 
-    SYSTEM PUBLIC 
+target_include_directories(lef_builder
+    SYSTEM PUBLIC
         ${HOME_THIRDPARTY}/lefdef/lef
 )
 
-target_link_libraries(lef_builder PRIVATE lef geometry_db ieda_logger)
+target_link_libraries(lef_builder PRIVATE lef geometry_db ecc_logger)
 target_link_libraries(lef_builder PUBLIC absl::strings)
 
 option(TEST_LEFPARSER "If ON, test db." OFF)
@@ -31,7 +31,7 @@ if(TEST_LEFPARSER)
     add_executable(test_parser)
     aux_source_directory(property_parser/lef58_property/test testsrc)
     target_sources(test_parser PUBLIC ${testsrc})
-    target_include_directories(test_parser PRIVATE         
+    target_include_directories(test_parser PRIVATE
         ${HOME_DATABASE}/data/design
         ${HOME_DATABASE}/manager/service/lef_service
     )

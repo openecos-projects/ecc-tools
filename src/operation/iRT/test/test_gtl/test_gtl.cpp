@@ -68,9 +68,9 @@ void plotGDS(std::string gds_name, std::vector<GTLRectInt>& rect_list)
     gds_file << "ENDSTR" << std::endl;
     gds_file << "ENDLIB" << std::endl;
     gds_file.close();
-    IEDALOG.info(ieda::Loc::current(), "[Info] Result has been written to '", gds_file_path, "'!");
+    ECCLOG.info(ecc::Loc::current(), "[Info] Result has been written to '", gds_file_path, "'!");
   } else {
-    IEDALOG.warn(ieda::Loc::current(), "[Error] Failed to open gds file '", gds_file_path, "'!");
+    ECCLOG.warn(ecc::Loc::current(), "[Error] Failed to open gds file '", gds_file_path, "'!");
     assert(false);
   }
 }

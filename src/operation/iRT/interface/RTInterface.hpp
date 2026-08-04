@@ -57,10 +57,10 @@ class PlanarCoord;
 enum class MacroPinEdge;
 }  // namespace irt
 
-namespace ieda_feature {
+namespace ecc_feature {
 class RTSummary;
 class FeatureManager;
-}  // namespace ieda_feature
+}  // namespace ecc_feature
 
 #endif
 

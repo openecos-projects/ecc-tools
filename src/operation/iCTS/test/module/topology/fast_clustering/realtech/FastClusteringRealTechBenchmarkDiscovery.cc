@@ -193,16 +193,16 @@ auto ResolveTechAssets() -> TechAssets
   });
 
   assets.tech_lef_path = FirstExistingPath({
-      assets.pdk_root / "prtech/techLEF/N551P6M_ieda.lef",
+      assets.pdk_root / "prtech/techLEF/N551P6M_ecc.lef",
       assets.pdk_root / "prtech/techLEF/N551P6M_ecos.lef",
   });
   assets.lef_paths = {
       FirstExistingPath({
-          assets.pdk_root / "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ieda.lef",
+          assets.pdk_root / "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecc.lef",
           assets.pdk_root / "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef",
       }),
       FirstExistingPath({
-          assets.pdk_root / "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ieda.lef",
+          assets.pdk_root / "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecc.lef",
           assets.pdk_root / "IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/lef/ics55_LLSC_H7CL_ecos.lef",
       }),
   };

@@ -2,11 +2,11 @@ add_library(file_manager_drc
     file_drc.cpp
 )
 
-target_link_libraries(file_manager_drc 
-file_manager_base  
+target_link_libraries(file_manager_drc
+file_manager_base
 idm
-ieda_feature
-ieda_logger
+ecc_feature
+ecc_logger
 )
 
 target_include_directories(file_manager_drc

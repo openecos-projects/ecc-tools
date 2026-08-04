@@ -13,9 +13,9 @@ add_compile_options(-Wall -Wextra -pedantic)
 aux_source_directory(. SRC)
 add_library(json-parser ${SRC})
 
-target_include_directories(json-parser 
-    PUBLIC 
+target_include_directories(json-parser
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(json-parser PRIVATE ieda_logger)
+target_link_libraries(json-parser PRIVATE ecc_logger)

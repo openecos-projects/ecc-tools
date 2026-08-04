@@ -256,7 +256,7 @@ float InitEGR::parsePathEGRWL(std::string guide_path, std::string net_name, std:
     }
 
     if (!wire_found) {
-      IEDALOG.warn(ieda::Loc::current(), "Error: Path interrupted. Unable to reach load pin.");
+      ECCLOG.warn(ecc::Loc::current(), "Error: Path interrupted. Unable to reach load pin.");
       return -1;
     }
 
@@ -266,7 +266,7 @@ float InitEGR::parsePathEGRWL(std::string guide_path, std::string net_name, std:
     }
   }
 
-  IEDALOG.warn(ieda::Loc::current(), "Error: Reached end of wires without finding load pin.");
+  ECCLOG.warn(ecc::Loc::current(), "Error: Reached end of wires without finding load pin.");
   return -1;
 }
 

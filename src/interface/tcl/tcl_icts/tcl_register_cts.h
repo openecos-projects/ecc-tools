@@ -28,7 +28,7 @@
 #include "tcl_cts.h"
 #include "tcl_ctsconfig.h"
 
-using namespace ieda;
+using namespace ecc;
 namespace tcl {
 
 int registerCmdCTS() {

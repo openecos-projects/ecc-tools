@@ -15,7 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @project		iEDA
+ * @project		ECC
  * @file		feature_parser.cpp
  * @author		Yell
  * @date		10/08/2023
@@ -34,7 +34,7 @@
 #include "feature_parser.h"
 #include "feature_summary.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 json FeatureParser::buildSummaryRT()
 {
@@ -428,4 +428,4 @@ json FeatureParser::buildSummaryDRC()
   return summary_drc;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

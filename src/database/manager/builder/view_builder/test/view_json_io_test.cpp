@@ -100,7 +100,7 @@ int main()
     testGzipRoundTrip();
     testFormatParser();
   } catch (const std::exception& error) {
-    IEDALOG.warn(ieda::Loc::current(), error.what());
+    ECCLOG.warn(ecc::Loc::current(), error.what());
     return 1;
   }
   return 0;

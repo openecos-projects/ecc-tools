@@ -8,7 +8,7 @@ target_link_libraries(py_ista
         ista_interface
         tcl_util
         pybind11::pybind11
-        ieda_logger
+        ecc_logger
 )
 
 target_include_directories(py_ista

@@ -42,7 +42,7 @@ CmdFlowInitConfig::CmdFlowInitConfig(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdFlowInitConfig::check()
 {
   TclOption* file_name_option = getOptionOrArg(TCL_CONFIG);
-  ieda::checkTclOption(file_name_option, TCL_CONFIG);
+  ecc::checkTclOption(file_name_option, TCL_CONFIG);
   return 1;
 }
 
@@ -56,7 +56,7 @@ unsigned CmdFlowInitConfig::exec()
   auto data_config = option->getStringVal();
   iplf::plfInst->initFlow(data_config);
 
-  IEDALOG.info(ieda::Loc::current(), "Init Flow Config success.");
+  ECCLOG.info(ecc::Loc::current(), "Init Flow Config success.");
   return 1;
 }
 

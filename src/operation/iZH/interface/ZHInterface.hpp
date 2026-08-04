@@ -53,10 +53,10 @@ class TAPanel;
 class PlanarCoord;
 }  // namespace izh
 
-namespace ieda_feature {
+namespace ecc_feature {
 class ZHSummary;
 class FeatureManager;
-}  // namespace ieda_feature
+}  // namespace ecc_feature
 
 #endif
 

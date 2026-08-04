@@ -1014,7 +1014,7 @@ void InitSTA::updateTiming(const std::vector<TimingNet*>& timing_net_list, int32
 
 //       // if (_unit == -1) {
 //       //   _unit = 1000;
-//       //   IEDALOG.info(ieda::Loc::current(), "Setting the default unit as 1000");
+//       //   ECCLOG.info(ecc::Loc::current(), "Setting the default unit as 1000");
 //       // }
 
 //       double cap

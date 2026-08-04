@@ -11,12 +11,12 @@ add_library(feature_builder
     feature_eval_union.cpp
 )
 
-target_include_directories(feature_builder 
-    PUBLIC 
+target_include_directories(feature_builder
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_link_libraries(feature_builder 
-    PRIVATE 
+target_link_libraries(feature_builder
+    PRIVATE
         feature_db
         idb
         flow_config
@@ -25,11 +25,11 @@ target_link_libraries(feature_builder
         icts_interface
         # ista-engine
         # idrc_pro_api
-        ieda_report_evaluator
+        ecc_report_evaluator
         eval_congestion_api
         eval_density_api
         eval_wirelength_api
         eval_timing_api
         eval_union_api
-        ieda_logger
+        ecc_logger
 )

@@ -56,7 +56,7 @@ namespace idb::routinglayer_property {
     bool ok = qi::phrase_parse(beg, end, area_rule % lit(";") >> -lit(";"), space, areas);
 
     if (!ok || beg != end) {
-      IEDALOG.warn(ieda::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+      ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
       return false;
     }
     return true;
@@ -70,7 +70,7 @@ namespace idb::routinglayer_property {
 
     bool ok = qi::phrase_parse(beg, end, corner_spacing_rule, space, spacing);
     if (!ok || beg != end) {
-      IEDALOG.warn(ieda::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+      ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
       return false;
     }
     return true;
@@ -89,7 +89,7 @@ namespace idb::routinglayer_property {
 
     bool ok = qi::phrase_parse(beg, end, +corner_spacing_rule, space, spacings);
     if (!ok || beg != end) {
-      IEDALOG.warn(ieda::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+      ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
       return false;
     }
     return true;
@@ -112,7 +112,7 @@ namespace idb::routinglayer_property {
 
     bool ok = qi::phrase_parse(beg, end, minimumcut_rule % lit(";") >> lit(";"), space, cuts);
     if (!ok || beg != end) {
-      IEDALOG.warn(ieda::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+      ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
       return false;
     }
     return true;
@@ -140,7 +140,7 @@ namespace idb::routinglayer_property {
 
     bool ok = qi::phrase_parse(beg, end, minstep_rule % lit(";") >> lit(";"), space, minsteps);
     if (!ok || beg != end) {
-      IEDALOG.warn(ieda::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+      ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
       return false;
     }
     return true;
@@ -156,7 +156,7 @@ namespace idb::routinglayer_property {
       >> -(lit("NOTCHWIDTH") >> double_ ) >> lit(";");
     bool ok = qi::phrase_parse(beg, end, spacing_rule, space, spacing_notchlen);
     if (!ok || beg != end) {
-      IEDALOG.warn(ieda::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+      ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
       return false;
     }
     return true;
@@ -217,7 +217,7 @@ namespace idb::routinglayer_property {
     ;
     bool ok = qi::phrase_parse(beg, end, spacing_eol_rule % lit(";") >> lit(";"), space, spacings);
     if (!ok || beg != end) {
-      IEDALOG.warn(ieda::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+      ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
       return false;
     }
     return true;
@@ -239,7 +239,7 @@ namespace idb::routinglayer_property {
       ;
     bool ok = qi::phrase_parse(beg, end, spacingtable_jog_rule, space, spacingtable);
     if (!ok || beg != end) {
-      IEDALOG.warn(ieda::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+      ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
       return false;
     }
     return true;

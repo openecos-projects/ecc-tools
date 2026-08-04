@@ -49,7 +49,7 @@ add_library(verilog
   ${BISON_verilogParser_OUTPUTS}
 )
 
-target_link_libraries(verilog ieda_logger ${ZLIB_LIBRARIES})
+target_link_libraries(verilog ecc_logger ${ZLIB_LIBRARIES})
 
 target_include_directories(verilog
     PUBLIC

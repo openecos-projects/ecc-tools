@@ -26,6 +26,8 @@
 #include "PhyPlacer.hpp"
 #include "Utility.hpp"
 #include "IdbTerm.h"
+#include "IdbViaMaster.h"
+#include "IdbVias.h"
 #include "idm.h"
 
 namespace ifp {
@@ -153,13 +155,16 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.macro_place_file_path = "";
   config.macro_placement_halo = -1.0;
   config.macro_routing_halo = -1.0;
-  config.layout_site_name = "";
-  config.layout_xy_ratio = -1.0;
-  config.layout_core_util = -1.0;
-  config.layout_margin_left_micron = -1.0;
-  config.layout_margin_right_micron = -1.0;
-  config.layout_margin_top_micron = -1.0;
-  config.layout_margin_bottom_micron = -1.0;
+  config.die_mode = DieMode::kNone;
+  config.die_site_name = "";
+  config.die_aspect_ratio = -1.0;
+  config.die_utilization = -1.0;
+  config.die_width_micron = -1.0;
+  config.die_height_micron = -1.0;
+  config.die_margin_left_micron = -1.0;
+  config.die_margin_right_micron = -1.0;
+  config.die_margin_top_micron = -1.0;
+  config.die_margin_bottom_micron = -1.0;
   config.io_pin_layer_name_list.clear();
   config.io_pin_width_micron = -1.0;
   config.io_pin_depth_micron = -1.0;
@@ -199,13 +204,22 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.macro_routing_halo = macro_placer_json["macro_routing_halo"].get<double>();
 
   nlohmann::json& die_builder_json = config_json["die_builder"];
-  config.layout_site_name = die_builder_json["site_name"].get<std::string>();
-  config.layout_xy_ratio = die_builder_json["core_width_to_height_ratio"].get<double>();
-  config.layout_core_util = die_builder_json["core_utilization"].get<double>();
-  config.layout_margin_left_micron = die_builder_json["left_margin_micron"].get<double>();
-  config.layout_margin_right_micron = die_builder_json["right_margin_micron"].get<double>();
-  config.layout_margin_top_micron = die_builder_json["top_margin_micron"].get<double>();
-  config.layout_margin_bottom_micron = die_builder_json["bottom_margin_micron"].get<double>();
+  config.die_mode = GetDieModeByName()(die_builder_json["mode"].get<std::string>());
+  config.die_site_name = die_builder_json["site_name"].get<std::string>();
+  nlohmann::json& die_margin_json = die_builder_json["margin"];
+  config.die_margin_left_micron = die_margin_json["left_micron"].get<double>();
+  config.die_margin_right_micron = die_margin_json["right_micron"].get<double>();
+  config.die_margin_top_micron = die_margin_json["top_micron"].get<double>();
+  config.die_margin_bottom_micron = die_margin_json["bottom_micron"].get<double>();
+  if (config.die_mode == DieMode::kDieUtil) {
+    nlohmann::json& die_util_json = die_builder_json["die_util"];
+    config.die_aspect_ratio = die_util_json["aspect_ratio"].get<double>();
+    config.die_utilization = die_util_json["utilization"].get<double>();
+  } else if (config.die_mode == DieMode::kDieSize) {
+    nlohmann::json& die_size_json = die_builder_json["die_size"];
+    config.die_width_micron = die_size_json["width_micron"].get<double>();
+    config.die_height_micron = die_size_json["height_micron"].get<double>();
+  }
 
   nlohmann::json& io_placer_json = config_json["io_placer"];
   for (nlohmann::json& layer_name_json : io_placer_json["io_layer_list"]) {
@@ -948,7 +962,7 @@ void FPInterface::outputNewInstanceList()
 
 void FPInterface::outputPGSegmentList()
 {
-  adjustStripeSegmentListByViaEnclosure();
+  adjustPGLineSegmentListByViaEnclosure();
 
   idb::IdbDesign* idb_design = dmInst->get_idb_design();
   idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
@@ -991,7 +1005,7 @@ void FPInterface::outputPGSegmentList()
   }
 }
 
-void FPInterface::adjustStripeSegmentListByViaEnclosure()
+void FPInterface::adjustPGLineSegmentListByViaEnclosure()
 {
   idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
   std::vector<PGSegment>& pg_segment_list = FPDM.getDatabase().get_pg_segment_list();
@@ -1001,8 +1015,8 @@ void FPInterface::adjustStripeSegmentListByViaEnclosure()
       continue;
     }
     std::string pg_net_layer_key = FPUTIL.getString(pg_segment.get_net_name(), "|", pg_segment.get_layer_name());
-    int32_t stripe_coord = pg_segment.is_vertical() ? pg_segment.get_start_x() : pg_segment.get_start_y();
-    pg_net_layer_coord_to_stripe_segment_list_map[pg_net_layer_key][stripe_coord].push_back(&pg_segment);
+    int32_t line_coord = pg_segment.is_vertical() ? pg_segment.get_start_x() : pg_segment.get_start_y();
+    pg_net_layer_coord_to_stripe_segment_list_map[pg_net_layer_key][line_coord].push_back(&pg_segment);
   }
 
   for (PGSegment& pg_segment : pg_segment_list) {
@@ -1023,17 +1037,20 @@ void FPInterface::adjustStripeSegmentListByViaEnclosure()
 
     for (idb::IdbLayerCut* idb_cut_layer : idb_cut_layer_list) {
       idb::IdbVia* idb_via = getIDBVia(idb_cut_layer, pg_segment);
+      if (idb_via == nullptr) {
+        continue;
+      }
       idb::IdbLayerShape idb_bottom_layer_shape = idb_via->get_bottom_layer_shape();
       idb::IdbRect idb_bottom_enclosure = idb_bottom_layer_shape.get_bounding_box();
-      adjustStripeSegmentListByViaEnclosure(
-          pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, idb_bottom_layer_shape.get_layer()->get_name(),
+      adjustLineSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment,
+          idb_bottom_layer_shape.get_layer()->get_name(),
           pg_segment.get_start_x() + idb_bottom_enclosure.get_low_x(), pg_segment.get_start_y() + idb_bottom_enclosure.get_low_y(),
           pg_segment.get_start_x() + idb_bottom_enclosure.get_high_x(), pg_segment.get_start_y() + idb_bottom_enclosure.get_high_y());
 
       idb::IdbLayerShape idb_top_layer_shape = idb_via->get_top_layer_shape();
       idb::IdbRect idb_top_enclosure = idb_top_layer_shape.get_bounding_box();
-      adjustStripeSegmentListByViaEnclosure(
-          pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, idb_top_layer_shape.get_layer()->get_name(),
+      adjustLineSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment,
+          idb_top_layer_shape.get_layer()->get_name(),
           pg_segment.get_start_x() + idb_top_enclosure.get_low_x(), pg_segment.get_start_y() + idb_top_enclosure.get_low_y(),
           pg_segment.get_start_x() + idb_top_enclosure.get_high_x(), pg_segment.get_start_y() + idb_top_enclosure.get_high_y());
     }
@@ -1046,84 +1063,219 @@ idb::IdbVia* FPInterface::getIDBVia(idb::IdbLayerCut* idb_cut_layer, PGSegment& 
       = idb_cut_layer->get_name() + "_" + std::to_string(pg_segment.get_via_width()) + "x" + std::to_string(pg_segment.get_via_height());
   idb::IdbVia* idb_via = dmInst->get_idb_design()->get_via_list()->find_via(via_name);
   if (idb_via == nullptr) {
-    idb_via = dmInst->get_idb_design()->get_via_list()->createVia(via_name, idb_cut_layer, pg_segment.get_via_width(),
-                                                                  pg_segment.get_via_height());
+    idb_via = buildIDBVia(via_name, idb_cut_layer, pg_segment);
   }
   return idb_via;
 }
 
-void FPInterface::adjustStripeSegmentListByViaEnclosure(
+idb::IdbVia* FPInterface::buildIDBVia(std::string via_name, idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment)
+{
+  idb::IdbViaRuleGenerate* idb_via_rule = idb_cut_layer->get_via_rule();
+  if (idb_via_rule == nullptr) {
+    return nullptr;
+  }
+
+  std::pair<int32_t, int32_t> row_col_pair = getIDBViaRowCol(idb_cut_layer, pg_segment);
+  int32_t cut_row_num = row_col_pair.first;
+  int32_t cut_col_num = row_col_pair.second;
+  if (cut_row_num == 0 || cut_col_num == 0) {
+    return nullptr;
+  }
+
+  int32_t cut_size_x = idb_via_rule->get_cut_rect()->get_width();
+  int32_t cut_size_y = idb_via_rule->get_cut_rect()->get_height();
+  int32_t cut_spacing_x = idb_via_rule->get_spacing_x();
+  int32_t cut_spacing_y = idb_via_rule->get_spacing_y();
+  std::vector<idb::IdbLayerCutSpacing*> idb_cut_spacing_list = idb_cut_layer->get_spacings();
+  if (!idb_cut_spacing_list.empty()) {
+    int32_t cut_spacing = idb_cut_spacing_list.front()->get_spacing();
+    cut_spacing_x = std::max(cut_spacing_x, cut_size_x + cut_spacing);
+    cut_spacing_y = std::max(cut_spacing_y, cut_size_y + cut_spacing);
+  }
+  cut_spacing_x -= cut_size_x;
+  cut_spacing_y -= cut_size_y;
+
+  int32_t cut_width = cut_col_num * cut_size_x + (cut_col_num - 1) * cut_spacing_x;
+  int32_t cut_height = cut_row_num * cut_size_y + (cut_row_num - 1) * cut_spacing_y;
+  int32_t enclosure_x = (pg_segment.get_via_width() - cut_width) / 2;
+  int32_t enclosure_y = (pg_segment.get_via_height() - cut_height) / 2;
+
+  idb::IdbVias* idb_via_list = dmInst->get_idb_design()->get_via_list();
+  idb::IdbVia* idb_via = idb_via_list->add_via(via_name);
+  idb::IdbViaMaster* idb_via_master = idb_via->get_instance();
+  idb_via_master->set_type_generate();
+  idb::IdbViaMasterGenerate* idb_via_master_generate = idb_via_master->get_master_generate();
+  idb_via_master_generate->set_rule_name(idb_via_rule->get_name());
+  idb_via_master_generate->set_rule_generate(idb_via_rule);
+  idb_via_master_generate->set_layer_bottom(idb_via_rule->get_layer_bottom());
+  idb_via_master_generate->set_layer_cut(idb_cut_layer);
+  idb_via_master_generate->set_layer_top(idb_via_rule->get_layer_top());
+  idb_via_master_generate->set_cut_size(cut_size_x, cut_size_y);
+  idb_via_master_generate->set_cut_spacing(cut_spacing_x, cut_spacing_y);
+  idb_via_master_generate->set_cut_row_col(cut_row_num, cut_col_num);
+  idb_via_master->set_cut_row_col(cut_row_num, cut_col_num);
+  std::string pattern_string = idb_via_list->createViaPatternString(cut_row_num, cut_col_num, idb_cut_layer->get_array_spacing());
+  if (!pattern_string.empty()) {
+    idb_via_master_generate->set_patttern(pattern_string);
+  }
+  idb_via_master_generate->set_enclosure_bottom(enclosure_x, enclosure_y);
+  idb_via_master_generate->set_enclosure_top(enclosure_x, enclosure_y);
+
+  int32_t cut_ll_x = -cut_width / 2 + idb_via_master_generate->get_original_offset_x();
+  int32_t cut_ll_y = -cut_height / 2 + idb_via_master_generate->get_original_offset_y();
+  for (int32_t row_idx = 0; row_idx < cut_row_num; ++row_idx) {
+    for (int32_t col_idx = 0; col_idx < cut_col_num; ++col_idx) {
+      if (idb_via_master_generate->get_patttern() != nullptr && !idb_via_master_generate->is_pattern_cut_exist(row_idx, col_idx)) {
+        continue;
+      }
+      int32_t ll_x = cut_ll_x + col_idx * (cut_size_x + cut_spacing_x);
+      int32_t ll_y = cut_ll_y + row_idx * (cut_size_y + cut_spacing_y);
+      idb_via_master_generate->add_cut_rect(ll_x, ll_y, ll_x + cut_size_x, ll_y + cut_size_y);
+    }
+  }
+  idb_via_master_generate->set_cut_bouding_rect(cut_ll_x, cut_ll_y, cut_ll_x + cut_width, cut_ll_y + cut_height);
+  idb_via_master->set_via_shape();
+  return idb_via;
+}
+
+std::pair<int32_t, int32_t> FPInterface::getIDBViaRowCol(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment)
+{
+  idb::IdbViaRuleGenerate* idb_via_rule = idb_cut_layer->get_via_rule();
+  if (idb_via_rule == nullptr) {
+    return std::make_pair(0, 0);
+  }
+
+  int32_t cut_size_x = idb_via_rule->get_cut_rect()->get_width();
+  int32_t cut_size_y = idb_via_rule->get_cut_rect()->get_height();
+  int32_t cut_pitch_x = idb_via_rule->get_spacing_x();
+  int32_t cut_pitch_y = idb_via_rule->get_spacing_y();
+  std::vector<idb::IdbLayerCutSpacing*> idb_cut_spacing_list = idb_cut_layer->get_spacings();
+  if (!idb_cut_spacing_list.empty()) {
+    int32_t cut_spacing = idb_cut_spacing_list.front()->get_spacing();
+    cut_pitch_x = std::max(cut_pitch_x, cut_size_x + cut_spacing);
+    cut_pitch_y = std::max(cut_pitch_y, cut_size_y + cut_spacing);
+  }
+
+  int32_t bottom_overhang_1 = std::max(idb_via_rule->get_enclosure_bottom()->get_overhang_1(), 0);
+  int32_t bottom_overhang_2 = std::max(idb_via_rule->get_enclosure_bottom()->get_overhang_2(), 0);
+  int32_t top_overhang_1 = std::max(idb_via_rule->get_enclosure_top()->get_overhang_1(), 0);
+  int32_t top_overhang_2 = std::max(idb_via_rule->get_enclosure_top()->get_overhang_2(), 0);
+  int32_t cut_row_num = 0;
+  int32_t cut_col_num = 0;
+  int64_t max_cut_num = 0;
+
+  // LEF generated VIA 的 ENCLOSURE 使用长边和短边约束，X/Y 可以交换。
+  for (int32_t bottom_swap = 0; bottom_swap < 2; ++bottom_swap) {
+    int32_t bottom_enclosure_x = bottom_swap == 0 ? bottom_overhang_1 : bottom_overhang_2;
+    int32_t bottom_enclosure_y = bottom_swap == 0 ? bottom_overhang_2 : bottom_overhang_1;
+    for (int32_t top_swap = 0; top_swap < 2; ++top_swap) {
+      int32_t top_enclosure_x = top_swap == 0 ? top_overhang_1 : top_overhang_2;
+      int32_t top_enclosure_y = top_swap == 0 ? top_overhang_2 : top_overhang_1;
+      int32_t min_width = cut_size_x + std::max(bottom_enclosure_x, top_enclosure_x) * 2;
+      int32_t min_height = cut_size_y + std::max(bottom_enclosure_y, top_enclosure_y) * 2;
+      if (pg_segment.get_via_width() < min_width || pg_segment.get_via_height() < min_height) {
+        continue;
+      }
+      int32_t candidate_row_num = 1 + (pg_segment.get_via_height() - min_height) / cut_pitch_y;
+      int32_t candidate_col_num = 1 + (pg_segment.get_via_width() - min_width) / cut_pitch_x;
+      int64_t candidate_cut_num = static_cast<int64_t>(candidate_row_num) * candidate_col_num;
+      if (max_cut_num < candidate_cut_num) {
+        cut_row_num = candidate_row_num;
+        cut_col_num = candidate_col_num;
+        max_cut_num = candidate_cut_num;
+      }
+    }
+  }
+  return std::make_pair(cut_row_num, cut_col_num);
+}
+
+void FPInterface::adjustLineSegmentListByViaEnclosure(
     std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map,
+    PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
+    int32_t enclosure_ur_y)
+{
+  adjustStripeSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, layer_name, enclosure_ll_x,
+                                        enclosure_ll_y, enclosure_ur_x, enclosure_ur_y);
+}
+
+bool FPInterface::adjustStripeSegmentListByViaEnclosure(
+    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_line_segment_list_map,
     PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
     int32_t enclosure_ur_y)
 {
   std::string pg_net_layer_key = FPUTIL.getString(pg_segment.get_net_name(), "|", layer_name);
   std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>::iterator pg_net_layer_map_iter
-      = pg_net_layer_coord_to_stripe_segment_list_map.find(pg_net_layer_key);
-  if (pg_net_layer_map_iter == pg_net_layer_coord_to_stripe_segment_list_map.end()) {
-    return;
+      = pg_net_layer_coord_to_line_segment_list_map.find(pg_net_layer_key);
+  if (pg_net_layer_map_iter == pg_net_layer_coord_to_line_segment_list_map.end()) {
+    return false;
   }
 
-  std::map<int32_t, std::vector<PGSegment*>>& coord_to_stripe_segment_list_map = pg_net_layer_map_iter->second;
+  bool covered = false;
+  std::map<int32_t, std::vector<PGSegment*>>& coord_to_line_segment_list_map = pg_net_layer_map_iter->second;
   std::map<int32_t, std::vector<PGSegment*>>::iterator x_coord_iter
-      = coord_to_stripe_segment_list_map.find(pg_segment.get_start_x());
-  if (x_coord_iter != coord_to_stripe_segment_list_map.end()) {
-    adjustStripeSegmentByViaEnclosure(x_coord_iter->second, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x, enclosure_ur_y);
+      = coord_to_line_segment_list_map.find(pg_segment.get_start_x());
+  if (x_coord_iter != coord_to_line_segment_list_map.end()) {
+    covered = adjustLineSegmentByViaEnclosure(x_coord_iter->second, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x, enclosure_ur_y);
   }
   std::map<int32_t, std::vector<PGSegment*>>::iterator y_coord_iter
-      = coord_to_stripe_segment_list_map.find(pg_segment.get_start_y());
-  if (y_coord_iter != coord_to_stripe_segment_list_map.end()) {
-    adjustStripeSegmentByViaEnclosure(y_coord_iter->second, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x, enclosure_ur_y);
+      = coord_to_line_segment_list_map.find(pg_segment.get_start_y());
+  if (y_coord_iter != coord_to_line_segment_list_map.end()) {
+    covered = adjustLineSegmentByViaEnclosure(y_coord_iter->second, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x, enclosure_ur_y) || covered;
   }
+  return covered;
 }
 
-void FPInterface::adjustStripeSegmentByViaEnclosure(std::vector<PGSegment*>& stripe_segment_list, int32_t enclosure_ll_x,
-                                                     int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y)
+bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_segment_list, int32_t enclosure_ll_x,
+                                                   int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y)
 {
-  for (PGSegment* stripe_segment : stripe_segment_list) {
-    int32_t half_width = stripe_segment->get_width() / 2;
-    if (stripe_segment->is_vertical()) {
-      if (stripe_segment->get_ur_x() <= enclosure_ll_x || enclosure_ur_x <= stripe_segment->get_ll_x()
-          || stripe_segment->get_ur_y() < enclosure_ll_y || enclosure_ur_y < stripe_segment->get_ll_y()) {
+  bool covered = false;
+  for (PGSegment* line_segment : line_segment_list) {
+    int32_t half_width = line_segment->get_width() / 2;
+    if (line_segment->is_vertical()) {
+      if (enclosure_ll_x < line_segment->get_ll_x() || line_segment->get_ur_x() < enclosure_ur_x
+          || line_segment->get_ur_y() < enclosure_ll_y || enclosure_ur_y < line_segment->get_ll_y()) {
         continue;
       }
-      if (stripe_segment->get_start_y() <= stripe_segment->get_end_y()) {
-        if (enclosure_ll_y < stripe_segment->get_ll_y()) {
-          stripe_segment->set_start_y(enclosure_ll_y + half_width);
+      if (line_segment->get_start_y() <= line_segment->get_end_y()) {
+        if (enclosure_ll_y < line_segment->get_ll_y()) {
+          line_segment->set_start_y(enclosure_ll_y + half_width);
         }
-        if (stripe_segment->get_ur_y() < enclosure_ur_y) {
-          stripe_segment->set_end_y(enclosure_ur_y - half_width);
+        if (line_segment->get_ur_y() < enclosure_ur_y) {
+          line_segment->set_end_y(enclosure_ur_y - half_width);
         }
       } else {
-        if (enclosure_ll_y < stripe_segment->get_ll_y()) {
-          stripe_segment->set_end_y(enclosure_ll_y + half_width);
+        if (enclosure_ll_y < line_segment->get_ll_y()) {
+          line_segment->set_end_y(enclosure_ll_y + half_width);
         }
-        if (stripe_segment->get_ur_y() < enclosure_ur_y) {
-          stripe_segment->set_start_y(enclosure_ur_y - half_width);
+        if (line_segment->get_ur_y() < enclosure_ur_y) {
+          line_segment->set_start_y(enclosure_ur_y - half_width);
         }
       }
-    } else if (stripe_segment->is_horizontal()) {
-      if (stripe_segment->get_ur_y() <= enclosure_ll_y || enclosure_ur_y <= stripe_segment->get_ll_y()
-          || stripe_segment->get_ur_x() < enclosure_ll_x || enclosure_ur_x < stripe_segment->get_ll_x()) {
+      covered = (enclosure_ll_y >= line_segment->get_ll_y() && line_segment->get_ur_y() >= enclosure_ur_y) || covered;
+    } else if (line_segment->is_horizontal()) {
+      if (enclosure_ll_y < line_segment->get_ll_y() || line_segment->get_ur_y() < enclosure_ur_y
+          || line_segment->get_ur_x() < enclosure_ll_x || enclosure_ur_x < line_segment->get_ll_x()) {
         continue;
       }
-      if (stripe_segment->get_start_x() <= stripe_segment->get_end_x()) {
-        if (enclosure_ll_x < stripe_segment->get_ll_x()) {
-          stripe_segment->set_start_x(enclosure_ll_x + half_width);
+      if (line_segment->get_start_x() <= line_segment->get_end_x()) {
+        if (enclosure_ll_x < line_segment->get_ll_x()) {
+          line_segment->set_start_x(enclosure_ll_x + half_width);
         }
-        if (stripe_segment->get_ur_x() < enclosure_ur_x) {
-          stripe_segment->set_end_x(enclosure_ur_x - half_width);
+        if (line_segment->get_ur_x() < enclosure_ur_x) {
+          line_segment->set_end_x(enclosure_ur_x - half_width);
         }
       } else {
-        if (enclosure_ll_x < stripe_segment->get_ll_x()) {
-          stripe_segment->set_end_x(enclosure_ll_x + half_width);
+        if (enclosure_ll_x < line_segment->get_ll_x()) {
+          line_segment->set_end_x(enclosure_ll_x + half_width);
         }
-        if (stripe_segment->get_ur_x() < enclosure_ur_x) {
-          stripe_segment->set_start_x(enclosure_ur_x - half_width);
+        if (line_segment->get_ur_x() < enclosure_ur_x) {
+          line_segment->set_start_x(enclosure_ur_x - half_width);
         }
       }
+      covered = (enclosure_ll_x >= line_segment->get_ll_x() && line_segment->get_ur_x() >= enclosure_ur_x) || covered;
     }
   }
+  return covered;
 }
 
 void FPInterface::outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& pg_segment)
@@ -1141,6 +1293,9 @@ void FPInterface::outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& 
   }
   for (idb::IdbLayerCut* idb_cut_layer : idb_cut_layer_list) {
     idb::IdbVia* idb_via = getIDBVia(idb_cut_layer, pg_segment);
+    if (idb_via == nullptr) {
+      continue;
+    }
     idb::IdbSpecialWireSegment* idb_segment = idb_special_wire->add_segment();
     idb_segment->set_is_via(true);
     idb_segment->add_point(pg_segment.get_start_x(), pg_segment.get_start_y());

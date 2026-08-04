@@ -262,7 +262,7 @@ IdbInstance* DataManager::getIoCellByIoPin(IdbPin* io_pin)
 {
   IdbNet* net = io_pin->get_net();
   if (net == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Error : can not find net for IO pin ", io_pin->get_pin_name());
+    ECCLOG.warn(ecc::Loc::current(), "Error : can not find net for IO pin ", io_pin->get_pin_name());
     return nullptr;
   }
 

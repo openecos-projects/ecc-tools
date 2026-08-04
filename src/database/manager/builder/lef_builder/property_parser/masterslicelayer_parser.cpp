@@ -25,7 +25,7 @@ bool MastersliceLayerParser::parse(const std::string& name, const std::string& v
     if(name == "LEF58_TYPE"){
         return parse_lef58_type(value, data);
     }
-    IEDALOG.warn(ieda::Loc::current(), "Unhandled PROPERTY: ", name, " \"", value, "\"");
+    ECCLOG.warn(ecc::Loc::current(), "Unhandled PROPERTY: ", name, " \"", value, "\"");
     return false;
 
 }

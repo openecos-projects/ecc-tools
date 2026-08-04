@@ -210,10 +210,10 @@ int main(int argc, char** argv)
     regenerateMaps(workspace, generated_feature_dir);
     verifyReplay(workspace, generated_feature_dir);
   } catch (const std::exception& error) {
-    IEDALOG.warn(ieda::Loc::current(), error.what());
+    ECCLOG.warn(ecc::Loc::current(), error.what());
     return 1;
   }
 
-  IEDALOG.info(ieda::Loc::current(), "map replay ok: ", generated_feature_dir);
+  ECCLOG.info(ecc::Loc::current(), "map replay ok: ", generated_feature_dir);
   return 0;
 }

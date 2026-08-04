@@ -75,7 +75,7 @@ bool FileDrcManager::saveJson()
   if (tail_str != "json") {
     return false;
   }
-  IEDALOG.info(ieda::Loc::current(), "Begin save feature json, path = ", path);
+  ECCLOG.info(ecc::Loc::current(), "Begin save feature json, path = ", path);
 
   //   auto idb_insts = dmInst->get_idb_design()->get_instance_list();
   auto idb_nets = dmInst->get_idb_design()->get_net_list();
@@ -164,7 +164,7 @@ bool FileDrcManager::saveJson()
 
   file_stream.close();
 
-  IEDALOG.info(ieda::Loc::current(), "Save feature json success, path = ", path, " total violation : ", total);
+  ECCLOG.info(ecc::Loc::current(), "Save feature json success, path = ", path, " total violation : ", total);
   return true;
 }
 
@@ -184,11 +184,11 @@ void FileDrcManager::parseJson(std::string path)
 
   nlohmann::json json;
 
-  ieda::initJson(path, json);
+  ecc::initJson(path, json);
 
   /// total number
-  auto total_drc = ieda::getJsonData(json, {"drc", "number"});
-  auto json_distribution = ieda::getJsonData(json, {"drc", "distribution"});
+  auto total_drc = ecc::getJsonData(json, {"drc", "number"});
+  auto json_distribution = ecc::getJsonData(json, {"drc", "distribution"});
 
   /// drc distribution
   for (auto& json_drc_type : json_distribution.items()) {

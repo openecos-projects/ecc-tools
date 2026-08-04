@@ -17,20 +17,20 @@ add_library(idm
     checker/check_connection.cpp
 )
 
-target_link_libraries(idm 
+target_link_libraries(idm
     PUBLIC
     IdbBuilder
-    flow 
+    flow
     liberty
     spef
     vcd
-    # file_manager_drc 
+    # file_manager_drc
     tool_manager
-    ieda_logger
+    ecc_logger
     )
 
-target_include_directories(idm 
-    PUBLIC 
+target_include_directories(idm
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/config
         ${CMAKE_CURRENT_SOURCE_DIR}/checker

@@ -1247,11 +1247,11 @@ bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point
   /// find the IO pin that covered by the point list
   IdbPin* pin = _io_pin_list->find_pin_by_coordinate_list(point_list, layer);
   if (pin == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Error : no IO pin covered by point list.");
+    ECCLOG.warn(ecc::Loc::current(), "Error : no IO pin covered by point list.");
     for (IdbCoordinate<int32_t>* pt : point_list) {
-      IEDALOG.info(ieda::Loc::current(), " ( ", pt->get_x(), " , ", pt->get_y(), " )");
+      ECCLOG.info(ecc::Loc::current(), " ( ", pt->get_x(), " , ", pt->get_y(), " )");
     }
-    IEDALOG.info(ieda::Loc::current(), "");
+    ECCLOG.info(ecc::Loc::current(), "");
     return false;
   }
 
@@ -1283,7 +1283,7 @@ bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point
       new_coordinate = new IdbCoordinate<int32_t>(end_x, mid_y);
       point_list.insert(point_list.begin() + 2, new_coordinate);
     } else {
-      IEDALOG.warn(ieda::Loc::current(), "Error : illegal point list.");
+      ECCLOG.warn(ecc::Loc::current(), "Error : illegal point list.");
       return false;
     }
   }

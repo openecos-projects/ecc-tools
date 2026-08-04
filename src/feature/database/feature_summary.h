@@ -43,7 +43,7 @@
 #include "feature_irt.h"
 #include "feature_ito.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 class FeatureSummary
 {
@@ -96,4 +96,4 @@ class FeatureSummary
   CongestionSummary _summary_congestion_eval;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature
