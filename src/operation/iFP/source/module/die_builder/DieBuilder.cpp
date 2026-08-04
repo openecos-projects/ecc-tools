@@ -64,23 +64,23 @@ void DieBuilder::build()
 void DieBuilder::buildFloorplan()
 {
   Config& config = FPDM.getConfig();
-  if (config.layout_core_util > 0.0 && !config.layout_site_name.empty()) {
-    buildAutoFloorplan();
+  double die_width_micron = -1.0;
+  double die_height_micron = -1.0;
+  if (config.die_mode == DieMode::kDieUtil) {
+    double die_area = FPDM.getDatabase().get_cell_area() / config.die_utilization;
+    die_height_micron = std::sqrt(die_area / config.die_aspect_ratio);
+    die_width_micron = die_area / die_height_micron;
+  } else if (config.die_mode == DieMode::kDieSize) {
+    die_width_micron = config.die_width_micron;
+    die_height_micron = config.die_height_micron;
+  } else {
+    return;
   }
-}
 
-void DieBuilder::buildAutoFloorplan()
-{
-  Config& config = FPDM.getConfig();
-  double cell_area = FPDM.getDatabase().get_cell_area();
-  double core_area = cell_area / config.layout_core_util;
-  double core_height = std::sqrt(core_area / config.layout_xy_ratio);
-  double core_width = core_area / core_height;
-
-  buildDie(0.0, 0.0, core_width + config.layout_margin_left_micron + config.layout_margin_right_micron,
-           core_height + config.layout_margin_bottom_micron + config.layout_margin_top_micron);
-  buildCore(config.layout_margin_left_micron, config.layout_margin_bottom_micron, config.layout_margin_left_micron + core_width,
-            config.layout_margin_bottom_micron + core_height, config.layout_site_name);
+  buildDie(0.0, 0.0, die_width_micron, die_height_micron);
+  buildCore(config.die_margin_left_micron, config.die_margin_bottom_micron,
+            die_width_micron - config.die_margin_right_micron, die_height_micron - config.die_margin_top_micron,
+            config.die_site_name);
 }
 
 void DieBuilder::buildDie(double die_lx, double die_ly, double die_ux, double die_uy)

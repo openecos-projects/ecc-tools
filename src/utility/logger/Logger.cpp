@@ -16,7 +16,7 @@
 // ***************************************************************************************
 #include "Logger.hpp"
 
-namespace ieda {
+namespace ecc {
 
 // public
 
@@ -47,4 +47,4 @@ void Logger::destroyInst()
 
 Logger* Logger::_log_instance = nullptr;
 
-}  // namespace ieda
+}  // namespace ecc

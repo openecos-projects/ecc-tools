@@ -37,7 +37,7 @@ void readGuide(const std::string& guide_file_path, std::vector<Net>& net_list)
           static int32_t net_num = 0;
           net_num++;
           if (net_num % 10000 == 0) {
-            IEDALOG.info(ieda::Loc::current(), "read ", net_num, " nets");
+            ECCLOG.info(ecc::Loc::current(), "read ", net_num, " nets");
           }
           break;
         }
@@ -55,7 +55,7 @@ void readGuide(const std::string& guide_file_path, std::vector<Net>& net_list)
     }
   }
   closeFileStream(guide_file_stream);
-  IEDALOG.info(ieda::Loc::current(), "read end");
+  ECCLOG.info(ecc::Loc::current(), "read end");
 }
 
 void writeGuide(std::vector<Net>& net_list, const std::string& guide_file_path)
@@ -71,11 +71,11 @@ void writeGuide(std::vector<Net>& net_list, const std::string& guide_file_path)
     }
     (*guide_file_stream) << ")\n";
     if ((i + 1) % 10000 == 0) {
-      IEDALOG.info(ieda::Loc::current(), "wrote ", (i + 1), " nets");
+      ECCLOG.info(ecc::Loc::current(), "wrote ", (i + 1), " nets");
     }
   }
   closeFileStream(guide_file_stream);
-  IEDALOG.info(ieda::Loc::current(), "write end");
+  ECCLOG.info(ecc::Loc::current(), "write end");
 }
 
 int32_t main()
@@ -87,11 +87,11 @@ int32_t main()
   readGuide(guide_file_path_read, net_list);
   writeGuide(net_list, guide_file_path_write);
 
-  IEDALOG.info(ieda::Loc::current(), "////////////////////////////////////////////");
-  IEDALOG.info(ieda::Loc::current(), "guide_file_path_read: ", guide_file_path_read);
-  IEDALOG.info(ieda::Loc::current(), "guide_file_path_write: ", guide_file_path_write);
-  IEDALOG.info(ieda::Loc::current(), "************ file_diff_lines_num: ", countDifferentLines(guide_file_path_read, guide_file_path_write), " ************");
-  IEDALOG.info(ieda::Loc::current(), "////////////////////////////////////////////");
+  ECCLOG.info(ecc::Loc::current(), "////////////////////////////////////////////");
+  ECCLOG.info(ecc::Loc::current(), "guide_file_path_read: ", guide_file_path_read);
+  ECCLOG.info(ecc::Loc::current(), "guide_file_path_write: ", guide_file_path_write);
+  ECCLOG.info(ecc::Loc::current(), "************ file_diff_lines_num: ", countDifferentLines(guide_file_path_read, guide_file_path_write), " ************");
+  ECCLOG.info(ecc::Loc::current(), "////////////////////////////////////////////");
 
   return 0;
 }

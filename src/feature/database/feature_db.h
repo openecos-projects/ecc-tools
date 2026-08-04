@@ -36,7 +36,7 @@
 #include <string>
 #include <vector>
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 struct SummaryInfo
 {
@@ -165,4 +165,4 @@ struct DBSummary
   SummaryPins pins;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

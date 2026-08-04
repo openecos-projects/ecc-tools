@@ -171,7 +171,7 @@ vector<IdbCoordinate<int32_t>> getCandidatePointList(IdbPin* idb_pin)
     for (int i = low_index_x; i <= high_index_x; i += pitch_x) {
       for (int j = low_index_y; j <= high_index_y; j += pitch_y) {
         if (i < rect->get_low_x() || i > rect->get_high_x() || j < rect->get_low_y() || j > rect->get_high_y()) {
-          IEDALOG.warn(ieda::Loc::current(), "Error pin grid coordinate, pin list empty.");
+          ECCLOG.warn(ecc::Loc::current(), "Error pin grid coordinate, pin list empty.");
           continue;
         }
         point_list.emplace_back(i, j);
@@ -211,7 +211,7 @@ void IdbBuilder::buildPinFeatureCoord(IdbNet* net)
     }
 
     if (idb_pin->get_grid_coordinate()->get_x() == -1 || idb_pin->get_grid_coordinate()->get_y() == -1) {
-      IEDALOG.warn(ieda::Loc::current(), "Error pin grid coordinate, pin =  ", idb_pin->get_pin_name());
+      ECCLOG.warn(ecc::Loc::current(), "Error pin grid coordinate, pin =  ", idb_pin->get_pin_name());
     }
   }
 }

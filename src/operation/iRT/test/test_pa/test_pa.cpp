@@ -64,9 +64,9 @@ int32_t main()
   // Print the connected components
   for (const auto& component : connectedComponents) {
     for (int32_t node : component) {
-      IEDALOG.info(ieda::Loc::current(), node, " ");
+      ECCLOG.info(ecc::Loc::current(), node, " ");
     }
-    IEDALOG.info(ieda::Loc::current(), "");
+    ECCLOG.info(ecc::Loc::current(), "");
   }
 
   return 0;

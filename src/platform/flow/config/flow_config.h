@@ -52,7 +52,7 @@ struct EnvironmentInfo
 
 struct FlowStatus
 {
-  string stage = "iDB - iEDA Database";
+  string stage = "iDB - ECC Database";
   double memmory = 0;
   double runtime = 0;
 };

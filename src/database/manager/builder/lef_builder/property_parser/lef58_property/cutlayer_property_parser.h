@@ -60,7 +60,7 @@ bool parse_lef58_cutclass(Iterator beg, Iterator end, std::vector<lef58_cutclass
   const static qi::rule<Iterator, std::vector<cutlayer_property::lef58_cutclass>(), space_type> rule = cutclass_rule % qi::eps;
   bool ok = qi::phrase_parse(beg, end, rule, space, vec);
   if (!ok || beg != end) {
-    IEDALOG.warn(ieda::Loc::current(), "Parse property \"", std::string(beg, end), "\" failed");
+    ECCLOG.warn(ecc::Loc::current(), "Parse property \"", std::string(beg, end), "\" failed");
     return false;
   }
   return true;
@@ -82,7 +82,7 @@ bool parse_lef58_enclosure(Iterator beg, Iterator end, std::vector<lef58_enclosu
 
   bool ok = qi::phrase_parse(beg, end, (enclosure_rule % qi::eps), space, vec);
   if (!ok || beg != end) {
-    IEDALOG.warn(ieda::Loc::current(), "Parse property \"", std::string(beg, end), "\" failed");
+    ECCLOG.warn(ecc::Loc::current(), "Parse property \"", std::string(beg, end), "\" failed");
     return false;
   }
   return true;
@@ -109,7 +109,7 @@ bool parse_lef58_enclosureedge(Iterator beg, Iterator end, std::vector<lef58_enc
 
   bool ok = qi::phrase_parse(beg, end, rule % qi::eps, space, vec);
   if (!ok || beg != end) {
-    IEDALOG.warn(ieda::Loc::current(), "Parse property \n\"", std::string(beg, end), "\"\n failed");
+    ECCLOG.warn(ecc::Loc::current(), "Parse property \n\"", std::string(beg, end), "\"\n failed");
     return false;
   }
   return true;
@@ -131,7 +131,7 @@ bool parse_lef58_eolenclosure(Iterator beg, Iterator end, lef58_eolenclosure& eo
 
   bool ok = qi::phrase_parse(beg, end, eol_enclosure_rule, space, eol_enclosure);
   if (!ok || beg != end) {
-    IEDALOG.info(ieda::Loc::current(), "Parse property \n\"", std::string(beg, end), "\"\nfailed");
+    ECCLOG.info(ecc::Loc::current(), "Parse property \n\"", std::string(beg, end), "\"\nfailed");
     return false;
   }
   return true;
@@ -150,7 +150,7 @@ bool parse_lef58_eolspacing(Iterator beg, Iterator end, lef58_eolspacing& eolspa
 
   bool ok = qi::phrase_parse(beg, end, eolspacing_rule, space, eolspacing);
   if (!ok || beg != end) {
-    IEDALOG.info(ieda::Loc::current(), "Parse property \n\"", std::string(beg, end), "\"\nfailed");
+    ECCLOG.info(ecc::Loc::current(), "Parse property \n\"", std::string(beg, end), "\"\nfailed");
     return false;
   }
   return true;
@@ -176,7 +176,7 @@ bool parse_lef58_spacingtable(Iterator beg, Iterator end, lef58_spacingtable& sp
 
   bool ok = qi::phrase_parse(beg, end, spacingtable_rule, space, spacingtable);
   if (!ok || beg != end) {
-    IEDALOG.info(ieda::Loc::current(), "Parse property \n\"", std::string(beg, end), "\"\nfailed");
+    ECCLOG.info(ecc::Loc::current(), "Parse property \n\"", std::string(beg, end), "\"\nfailed");
     return false;
   }
   return true;

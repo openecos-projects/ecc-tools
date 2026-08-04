@@ -43,14 +43,14 @@ EvalWirelength::~EvalWirelength() = default;
 
 bool EvalWirelength::runWirelengthEvalAndOutput()
 {
-  IEDALOG.info(ieda::Loc::current(), "Running wirelength evaluation...");
+  ECCLOG.info(ecc::Loc::current(), "Running wirelength evaluation...");
   WirelengthAPI wirelength_api;
   auto [HPWL, FLUTE, HTree, VTree, GRWL] = wirelength_api.totalWL();
-  IEDALOG.info(ieda::Loc::current(), "Total HPWL: ", HPWL);
-  IEDALOG.info(ieda::Loc::current(), "Total FLUTE: ", FLUTE);
-  IEDALOG.info(ieda::Loc::current(), "Total HTree: ", HTree);
-  IEDALOG.info(ieda::Loc::current(), "Total VTree: ", VTree);
-  IEDALOG.info(ieda::Loc::current(), "Total GRWL: ", GRWL);
+  ECCLOG.info(ecc::Loc::current(), "Total HPWL: ", HPWL);
+  ECCLOG.info(ecc::Loc::current(), "Total FLUTE: ", FLUTE);
+  ECCLOG.info(ecc::Loc::current(), "Total HTree: ", HTree);
+  ECCLOG.info(ecc::Loc::current(), "Total VTree: ", VTree);
+  ECCLOG.info(ecc::Loc::current(), "Total GRWL: ", GRWL);
 
   nlohmann::json json_output;
   json_output["HPWL"] = HPWL;
@@ -65,9 +65,9 @@ bool EvalWirelength::runWirelengthEvalAndOutput()
   if (json_file.is_open()) {
     json_file << json_output.dump(2);
     json_file.close();
-    IEDALOG.info(ieda::Loc::current(), "Wirelength summary saved to: ", json_path);
+    ECCLOG.info(ecc::Loc::current(), "Wirelength summary saved to: ", json_path);
   } else {
-    IEDALOG.warn(ieda::Loc::current(), "Failed to open file: ", json_path);
+    ECCLOG.warn(ecc::Loc::current(), "Failed to open file: ", json_path);
   }
   return true;
 }
@@ -75,14 +75,14 @@ bool EvalWirelength::runWirelengthEvalAndOutput()
 void EvalWirelength::setOutputPath(const std::string& path)
 {
   if (path == "") {
-    IEDALOG.info(ieda::Loc::current(), "Output path is empty, using default path: ", _output_path);
+    ECCLOG.info(ecc::Loc::current(), "Output path is empty, using default path: ", _output_path);
   }
   if (_output_path == path) {
-    IEDALOG.info(ieda::Loc::current(), "Output path is already exists, using default path: ", _output_path);
+    ECCLOG.info(ecc::Loc::current(), "Output path is already exists, using default path: ", _output_path);
     return;
   }
   _output_path = path + "/wirelength_result.json";
-  IEDALOG.info(ieda::Loc::current(), "[Evaluate Wirelength] Output path set to: ", _output_path);
+  ECCLOG.info(ecc::Loc::current(), "[Evaluate Wirelength] Output path set to: ", _output_path);
   std::filesystem::create_directories(std::filesystem::path(path));
 }
 }  // namespace ieval

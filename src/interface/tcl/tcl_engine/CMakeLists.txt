@@ -11,7 +11,7 @@ endif(TCL_FOUND)
 
 aux_source_directory(./ SRC)
 set(LINK_tcl "tcl8.6")
-find_library(TCL_STATIC_LIB 
+find_library(TCL_STATIC_LIB
   NAMES libtcl8.6.a
   PATHS /usr/lib/x86_64-linux-gnu
   NO_DEFAULT_PATH
@@ -24,7 +24,7 @@ else()
   add_library(tcl SHARED ${SRC})
 endif()
 
-target_link_libraries(tcl PUBLIC ${LINK_tcl} absl::inlined_vector ieda_logger)
+target_link_libraries(tcl PUBLIC ${LINK_tcl} absl::inlined_vector ecc_logger)
 
 target_include_directories(tcl
     PUBLIC

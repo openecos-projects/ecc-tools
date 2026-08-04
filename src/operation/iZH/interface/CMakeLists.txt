@@ -14,7 +14,7 @@ target_link_libraries(izh_interface
     PRIVATE
     izh_source
     idrc_interface
-    ieda_feature
+    ecc_feature
     idm
 )
 

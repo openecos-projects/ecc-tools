@@ -373,7 +373,7 @@ int32_t IdbSpecialWireSegment::length()
       /// vertical
       return std::abs(pt1->get_y() - pt2->get_y());
     } else {
-      IEDALOG.warn(ieda::Loc::current(), "[Idb Error} Net segment error.");
+      ECCLOG.warn(ecc::Loc::current(), "[Idb Error} Net segment error.");
     }
   }
 
@@ -534,7 +534,7 @@ void IdbSpecialWire::removeViaInBoundingBox(IdbRect rect, IdbLayer* layer)
   for (auto segment = _segment_list.begin(); segment != _segment_list.end();) {
     if ((*segment)->is_via() && (*segment)->get_via()->isIntersection(rect, layer)) {
       segment = _segment_list.erase(std::begin(_segment_list) + i);
-      IEDALOG.info(ieda::Loc::current(), "Success : remove via = ", (*segment)->get_via()->get_name());
+      ECCLOG.info(ecc::Loc::current(), "Success : remove via = ", (*segment)->get_via()->get_name());
     } else {
       ++segment;
       ++i;
@@ -694,12 +694,12 @@ IdbSpecialWireSegment* IdbSpecialNetEdgeSegment::cutStripe(IdbSpecialNetEdgeSegm
                                                            IdbCoordinate<int32_t>* end)
 {
   ///
-  IEDALOG.info(ieda::Loc::current(), "Segment == ");
+  ECCLOG.info(ecc::Loc::current(), "Segment == ");
   for (IdbSpecialWireSegment* st : _segment_list) {
-    IEDALOG.info(ieda::Loc::current(), " ( ", st->get_point(0)->get_x(), " , ", st->get_point(0)->get_y(), " ) , ( ", st->get_point(1)->get_x(), " , ", st->get_point(1)->get_y(), " ) ");
+    ECCLOG.info(ecc::Loc::current(), " ( ", st->get_point(0)->get_x(), " , ", st->get_point(0)->get_y(), " ) , ( ", st->get_point(1)->get_x(), " , ", st->get_point(1)->get_y(), " ) ");
   }
 
-  IEDALOG.info(ieda::Loc::current(), "_coordinate_x_y = ", _coordinate_x_y, " edge_segment_connected = ", edge_segment_connected->get_coordinate());
+  ECCLOG.info(ecc::Loc::current(), "_coordinate_x_y = ", _coordinate_x_y, " edge_segment_connected = ", edge_segment_connected->get_coordinate());
 
   /// exclude the connected stripe
   if (edge_segment_connected->get_coordinate() != _coordinate_x_y) {
@@ -741,11 +741,11 @@ IdbSpecialWireSegment* IdbSpecialNetEdgeSegment::cutStripe(IdbSpecialNetEdgeSegm
         IdbRect rect_cut(top_point->get_x() - width / 2, bottom_y, top_point->get_x() + width / 2, top_y);
         _wire->removeViaInBoundingBox(rect_cut, segment_cut->get_layer());
 
-        IEDALOG.info(ieda::Loc::current(), "Success : cutStripe. ");
+        ECCLOG.info(ecc::Loc::current(), "Success : cutStripe. ");
         ///
-        IEDALOG.info(ieda::Loc::current(), "Segment == ");
+        ECCLOG.info(ecc::Loc::current(), "Segment == ");
         for (IdbSpecialWireSegment* st : _segment_list) {
-          IEDALOG.info(ieda::Loc::current(), " ( ", st->get_point(0)->get_x(), " , ", st->get_point(0)->get_y(), " ) , ( ", st->get_point(1)->get_x(), " , ", st->get_point(1)->get_y(), " ) ");
+          ECCLOG.info(ecc::Loc::current(), " ( ", st->get_point(0)->get_x(), " , ", st->get_point(0)->get_y(), " ) , ( ", st->get_point(1)->get_x(), " , ", st->get_point(1)->get_y(), " ) ");
         }
 
         return new_segment;
@@ -782,21 +782,21 @@ IdbSpecialWireSegment* IdbSpecialNetEdgeSegment::cutStripe(IdbSpecialNetEdgeSegm
         IdbRect rect_cut(left_x, right_point->get_y() - width / 2, right_x, right_point->get_y() + width / 2);
         _wire->removeViaInBoundingBox(rect_cut, segment_cut->get_layer());
 
-        IEDALOG.info(ieda::Loc::current(), "Success : cutStripe. ");
+        ECCLOG.info(ecc::Loc::current(), "Success : cutStripe. ");
         ///
-        IEDALOG.info(ieda::Loc::current(), "Segment == ");
+        ECCLOG.info(ecc::Loc::current(), "Segment == ");
         for (IdbSpecialWireSegment* st : _segment_list) {
-          IEDALOG.info(ieda::Loc::current(), " ( ", st->get_point(0)->get_x(), " , ", st->get_point(0)->get_y(), " ) , ( ", st->get_point(1)->get_x(), " , ", st->get_point(1)->get_y(), " ) ");
+          ECCLOG.info(ecc::Loc::current(), " ( ", st->get_point(0)->get_x(), " , ", st->get_point(0)->get_y(), " ) , ( ", st->get_point(1)->get_x(), " , ", st->get_point(1)->get_y(), " ) ");
         }
 
         return new_segment;
       }
     } else {
-      IEDALOG.info(ieda::Loc::current(), "CutStripe : no intersection. ");
+      ECCLOG.info(ecc::Loc::current(), "CutStripe : no intersection. ");
       return nullptr;
     }
   }
-  IEDALOG.info(ieda::Loc::current(), "Same Coordinate. ");
+  ECCLOG.info(ecc::Loc::current(), "Same Coordinate. ");
 
   return nullptr;
 }
@@ -831,7 +831,7 @@ IdbSpecialWireSegment* IdbSpecialNetEdgeSegment::cutStripe(IdbSpecialNetEdgeSegm
 //       top_point->set_y(bottom_y);
 //       segment_cut->set_bounding_box();
 
-//       IEDALOG.info(ieda::Loc::current(), "Success: cutStripe by (", start->get_x(), ", ", start->get_y(), "), (",
+//       ECCLOG.info(ecc::Loc::current(), "Success: cutStripe by (", start->get_x(), ", ", start->get_y(), "), (",
 //                     end->get_x(), ", ", end->get_y(), ").");
 
 //       return true;
@@ -859,7 +859,7 @@ IdbSpecialWireSegment* IdbSpecialNetEdgeSegment::cutStripe(IdbSpecialNetEdgeSegm
 //       right_point->set_x(left_x);
 //       segment_cut->set_bounding_box();
 
-//       IEDALOG.info(ieda::Loc::current(), "Success: cutStripe by (", start->get_x(), ", ", start->get_y(), "), (",
+//       ECCLOG.info(ecc::Loc::current(), "Success: cutStripe by (", start->get_x(), ", ", start->get_y(), "), (",
 //                     end->get_x(), ", ", end->get_y(), ").");
 
 //       return true;
@@ -956,7 +956,7 @@ void IdbSpecialNetEdgeSegmenArray::updateSegmentEdgePoints(IdbSpecialWireSegment
     }
   } else {
     /// error
-    IEDALOG.warn(ieda::Loc::current(), "Error : segment type error.");
+    ECCLOG.warn(ecc::Loc::current(), "Error : segment type error.");
   }
 }
 
@@ -991,7 +991,7 @@ void IdbSpecialNetEdgeSegmenArray::updateSegmentArray(IdbSpecialWireSegment* seg
     vdd_new->set_wire(wire);
   } else {
     /// error
-    IEDALOG.warn(ieda::Loc::current(), "Error : segment type error.");
+    ECCLOG.warn(ecc::Loc::current(), "Error : segment type error.");
   }
 }
 
@@ -1054,7 +1054,7 @@ bool IdbSpecialNetEdgeSegmenArray::addSegmentByCoordinateList(vector<IdbCoordina
 {
   int32_t point_size = coordinate_list.size();
   if (point_size < _POINT_MAX_) {
-    IEDALOG.warn(ieda::Loc::current(), "Error : size of point list should be larger than 2 to connect stripe.");
+    ECCLOG.warn(ecc::Loc::current(), "Error : size of point list should be larger than 2 to connect stripe.");
     return false;
   }
 
@@ -1093,9 +1093,9 @@ bool IdbSpecialNetEdgeSegmenArray::addSegmentByCoordinateList(vector<IdbCoordina
     return true;
   }
 
-  IEDALOG.warn(ieda::Loc::current(), "Error : can not addSegmentByCoordinateList.");
+  ECCLOG.warn(ecc::Loc::current(), "Error : can not addSegmentByCoordinateList.");
   for (IdbCoordinate<int32_t>* point_print : coordinate_list) {
-    IEDALOG.info(ieda::Loc::current(), "coordinate.", point_print->get_x(), ",", point_print->get_y());
+    ECCLOG.info(ecc::Loc::current(), "coordinate.", point_print->get_x(), ",", point_print->get_y());
   }
 
   return false;
@@ -1118,35 +1118,35 @@ void IdbSpecialNetEdgeSegmenArray::cutStripe(IdbSpecialNetEdgeSegment* edge_segm
   //       nullptr != _segment_vss_1->cutStripe(edge_segment_connected, start, end) ||
   //       nullptr != _segment_vss_2->cutStripe(edge_segment_connected, start, end)) {
   //   } else {
-  //     // IEDALOG.info(ieda::Loc::current(), "Do not cut stripe. (", start->get_x(), ", ", start->get_y(), "), (",
+  //     // ECCLOG.info(ecc::Loc::current(), "Do not cut stripe. (", start->get_x(), ", ", start->get_y(), "), (",
   //     //              end->get_x(), ", ", end->get_y(), ").");
   //   }
   //   edge_segment_connected->cutStripe(start, end);
-  IEDALOG.info(ieda::Loc::current(), "####################################################################");
-  IEDALOG.info(ieda::Loc::current(), "Points  == ");
-  IEDALOG.info(ieda::Loc::current(), " ( ", start->get_x(), " , ", start->get_y(), " ) , ( ", end->get_x(), " , ", end->get_y(), " ) ");
+  ECCLOG.info(ecc::Loc::current(), "####################################################################");
+  ECCLOG.info(ecc::Loc::current(), "Points  == ");
+  ECCLOG.info(ecc::Loc::current(), " ( ", start->get_x(), " , ", start->get_y(), " ) , ( ", end->get_x(), " , ", end->get_y(), " ) ");
   IdbSpecialWireSegment* segment = nullptr;
-  IEDALOG.info(ieda::Loc::current(), " VDD 1 ");
+  ECCLOG.info(ecc::Loc::current(), " VDD 1 ");
   if ((segment = _segment_vdd_1->cutStripe(edge_segment_connected, start, end)) != nullptr) {
     _segment_vdd_1->add_segment(segment);
-    IEDALOG.info(ieda::Loc::current(), "success : VDD 1");
+    ECCLOG.info(ecc::Loc::current(), "success : VDD 1");
   }
-  IEDALOG.info(ieda::Loc::current(), " VDD 2 ");
+  ECCLOG.info(ecc::Loc::current(), " VDD 2 ");
   if ((segment = _segment_vdd_2->cutStripe(edge_segment_connected, start, end)) != nullptr) {
     _segment_vdd_2->add_segment(segment);
-    IEDALOG.info(ieda::Loc::current(), "success : VDD 2");
+    ECCLOG.info(ecc::Loc::current(), "success : VDD 2");
   }
-  IEDALOG.info(ieda::Loc::current(), " VSS 1 ");
+  ECCLOG.info(ecc::Loc::current(), " VSS 1 ");
   if ((segment = _segment_vss_1->cutStripe(edge_segment_connected, start, end)) != nullptr) {
     _segment_vss_1->add_segment(segment);
-    IEDALOG.info(ieda::Loc::current(), "success : VSS 1");
+    ECCLOG.info(ecc::Loc::current(), "success : VSS 1");
   }
-  IEDALOG.info(ieda::Loc::current(), " VSS 2 ");
+  ECCLOG.info(ecc::Loc::current(), " VSS 2 ");
   if ((segment = _segment_vss_2->cutStripe(edge_segment_connected, start, end)) != nullptr) {
     _segment_vss_2->add_segment(segment);
-    IEDALOG.info(ieda::Loc::current(), "success : VSS 2");
+    ECCLOG.info(ecc::Loc::current(), "success : VSS 2");
   }
-  IEDALOG.info(ieda::Loc::current(), "####################################################################");
+  ECCLOG.info(ecc::Loc::current(), "####################################################################");
 }
 
 }  // namespace idb

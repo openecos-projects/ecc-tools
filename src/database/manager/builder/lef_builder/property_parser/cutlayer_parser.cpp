@@ -45,7 +45,7 @@ bool CutLayerParser::parse(const std::string& name, const std::string& value, Id
   if (name == "LEF58_SPACINGTABLE") {
     return parse_lef58_spacingtable(value, data);
   }
-  IEDALOG.warn(ieda::Loc::current(), "Unhandled PROPERTY: ", name, " \"", value, "\"");
+  ECCLOG.warn(ecc::Loc::current(), "Unhandled PROPERTY: ", name, " \"", value, "\"");
   return false;
 }
 }  // namespace idb

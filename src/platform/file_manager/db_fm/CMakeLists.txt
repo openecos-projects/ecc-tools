@@ -6,7 +6,7 @@ target_link_libraries(file_manager_db
     PUBLIC
         file_manager_base
         idm
-        ieda_logger
+        ecc_logger
 )
 
 target_include_directories(file_manager_db

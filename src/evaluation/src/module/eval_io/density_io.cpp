@@ -38,20 +38,20 @@ bool EvalDensity::runDensityEvalAndOutput(int grid_size, const std::string& stag
   DensityAPI density_api;
   const auto [cell_map_summary, pin_map_summary, net_map_summary] = density_api.densityMap(stage, _grid_size);
 
-  IEDALOG.info(ieda::Loc::current(), "Macro density: ", cell_map_summary.macro_density);
-  IEDALOG.info(ieda::Loc::current(), "StdCell density: ", cell_map_summary.stdcell_density);
-  IEDALOG.info(ieda::Loc::current(), "AllCell density: ", cell_map_summary.allcell_density);
-  IEDALOG.info(ieda::Loc::current(), "Macro pin density: ", pin_map_summary.macro_pin_density);
-  IEDALOG.info(ieda::Loc::current(), "StdCell pin density: ", pin_map_summary.stdcell_pin_density);
-  IEDALOG.info(ieda::Loc::current(), "AllCell pin density: ", pin_map_summary.allcell_pin_density);
-  IEDALOG.info(ieda::Loc::current(), "Local net density: ", net_map_summary.local_net_density);
-  IEDALOG.info(ieda::Loc::current(), "Global net density: ", net_map_summary.global_net_density);
-  IEDALOG.info(ieda::Loc::current(), "All net density: ", net_map_summary.allnet_density);
+  ECCLOG.info(ecc::Loc::current(), "Macro density: ", cell_map_summary.macro_density);
+  ECCLOG.info(ecc::Loc::current(), "StdCell density: ", cell_map_summary.stdcell_density);
+  ECCLOG.info(ecc::Loc::current(), "AllCell density: ", cell_map_summary.allcell_density);
+  ECCLOG.info(ecc::Loc::current(), "Macro pin density: ", pin_map_summary.macro_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "StdCell pin density: ", pin_map_summary.stdcell_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "AllCell pin density: ", pin_map_summary.allcell_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "Local net density: ", net_map_summary.local_net_density);
+  ECCLOG.info(ecc::Loc::current(), "Global net density: ", net_map_summary.global_net_density);
+  ECCLOG.info(ecc::Loc::current(), "All net density: ", net_map_summary.allnet_density);
 
   const auto [local_net_density, global_net_density, allnet_density] = density_api.netDensityMap(stage, _grid_size);
-  IEDALOG.info(ieda::Loc::current(), "Local net density: ", local_net_density);
-  IEDALOG.info(ieda::Loc::current(), "Global net density: ", global_net_density);
-  IEDALOG.info(ieda::Loc::current(), "All net density: ", allnet_density);
+  ECCLOG.info(ecc::Loc::current(), "Local net density: ", local_net_density);
+  ECCLOG.info(ecc::Loc::current(), "Global net density: ", global_net_density);
+  ECCLOG.info(ecc::Loc::current(), "All net density: ", allnet_density);
 
   nlohmann::json density_json;
 
@@ -76,13 +76,13 @@ bool EvalDensity::runDensityEvalAndOutput(int grid_size, const std::string& stag
     if (std::ofstream outfile(_output_path); outfile.is_open()) {
       outfile << density_json.dump(2);
       outfile.close();
-      IEDALOG.info(ieda::Loc::current(), "Density evaluation results saved to ", _output_path);
+      ECCLOG.info(ecc::Loc::current(), "Density evaluation results saved to ", _output_path);
     } else {
-      IEDALOG.warn(ieda::Loc::current(), "Failed to open output file: ", _output_path);
+      ECCLOG.warn(ecc::Loc::current(), "Failed to open output file: ", _output_path);
       return false;
     }
   } catch (const std::exception& e) {
-    IEDALOG.warn(ieda::Loc::current(), "Error writing JSON output: ", e.what());
+    ECCLOG.warn(ecc::Loc::current(), "Error writing JSON output: ", e.what());
     return false;
   }
 
@@ -99,15 +99,15 @@ EvalDensity::~EvalDensity() = default;
 void EvalDensity::setOutputPath(const std::string& path)
 {
   if (path.empty()) {
-    IEDALOG.info(ieda::Loc::current(), "Output path is empty, using default path: ", _output_path);
+    ECCLOG.info(ecc::Loc::current(), "Output path is empty, using default path: ", _output_path);
     return;
   }
   if (_output_path == path) {
-    IEDALOG.info(ieda::Loc::current(), "Output path already exists, using default path: ", _output_path);
+    ECCLOG.info(ecc::Loc::current(), "Output path already exists, using default path: ", _output_path);
     return;
   }
   _output_path = path + "/density_result.json";
-  IEDALOG.info(ieda::Loc::current(), "Setting Density Evaluation report output path to ", _output_path);
+  ECCLOG.info(ecc::Loc::current(), "Setting Density Evaluation report output path to ", _output_path);
   std::filesystem::create_directories(std::filesystem::path(path));
 }
 }  // namespace ieval

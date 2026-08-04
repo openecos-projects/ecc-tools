@@ -15,7 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @File Name: ieda_main.cpp
+ * @File Name: ecc_main.cpp
  * @Brief :
  * @Author : Yell (12112088@qq.com)
  * @Version : 1.0
@@ -37,7 +37,7 @@ using namespace iplf;
 
 int main(int argc, char** argv)
 {
-  ieda::Logger::initInst();
+  ecc::Logger::initInst();
 
   if (argc == 1) {
     argv[0] = const_cast<char*>("UserShell\n");
@@ -51,7 +51,7 @@ int main(int argc, char** argv)
 
     // support specific log directory
     if (std::string("-log") == argv[i]) {
-      IEDALOG.openLogFileStream((std::filesystem::path(argv[i + 1]) / "ieda.log").string());
+      ECCLOG.openLogFileStream((std::filesystem::path(argv[i + 1]) / "ecc.log").string());
     }
 
     if (std::string("-script") == argv[i]) {
@@ -64,12 +64,12 @@ int main(int argc, char** argv)
   }
 
   if (printVersion) {
-    IEDALOG.info(ieda::Loc::current(), "Git version: ", iEDA_GIT_VERSION);
+    ECCLOG.info(ecc::Loc::current(), "Git version: ", ECC_GIT_VERSION);
   }
 
   plfInst->runTcl(argc, argv);
 
-  ieda::Logger::destroyInst();
+  ecc::Logger::destroyInst();
 
   return 0;
 }

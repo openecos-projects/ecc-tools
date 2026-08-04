@@ -40,7 +40,7 @@ unsigned TclReadLVS::check()
   TclOption* def_path_option = getOptionOrArg(kDefBinPath);
   if (netlist_path_option == nullptr || netlist_path_option->getStringVal() == nullptr || def_path_option == nullptr
       || def_path_option->getStringVal() == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Please specify both iLVS snapshot paths by: read_lvs -netlist_bin_path <file> -def_bin_path <file>.");
+    ECCLOG.warn(ecc::Loc::current(), "Please specify both iLVS snapshot paths by: read_lvs -netlist_bin_path <file> -def_bin_path <file>.");
     return 0;
   }
   return 1;

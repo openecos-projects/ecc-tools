@@ -132,7 +132,7 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
 {
   auto temp_file = createTempVerilogFile();
   if (!temp_file) {
-    IEDALOG.warn(ieda::Loc::current(), "Create temporary verilog file failed for ", gzip_file);
+    ECCLOG.warn(ecc::Loc::current(), "Create temporary verilog file failed for ", gzip_file);
     return std::nullopt;
   }
 
@@ -141,7 +141,7 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
   if (gzip_stream == nullptr) {
     close(temp_fd);
     std::filesystem::remove(temp_path);
-    IEDALOG.warn(ieda::Loc::current(), "Open gzip verilog file failed: ", gzip_file);
+    ECCLOG.warn(ecc::Loc::current(), "Open gzip verilog file failed: ", gzip_file);
     return std::nullopt;
   }
 
@@ -151,24 +151,24 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
   while ((read_size = gzread(gzip_stream, buffer.data(), static_cast<unsigned int>(buffer.size()))) > 0) {
     if (!writeAll(temp_fd, buffer.data(), static_cast<size_t>(read_size))) {
       success = false;
-      IEDALOG.warn(ieda::Loc::current(), "Write temporary verilog file failed: ", temp_path);
+      ECCLOG.warn(ecc::Loc::current(), "Write temporary verilog file failed: ", temp_path);
       break;
     }
   }
 
   if (read_size < 0) {
     success = false;
-    IEDALOG.warn(ieda::Loc::current(), "Read gzip verilog file failed: ", gzip_file);
+    ECCLOG.warn(ecc::Loc::current(), "Read gzip verilog file failed: ", gzip_file);
   }
 
   if (gzclose(gzip_stream) != Z_OK) {
     success = false;
-    IEDALOG.warn(ieda::Loc::current(), "Close gzip verilog file failed: ", gzip_file);
+    ECCLOG.warn(ecc::Loc::current(), "Close gzip verilog file failed: ", gzip_file);
   }
 
   if (close(temp_fd) != 0) {
     success = false;
-    IEDALOG.warn(ieda::Loc::current(), "Close temporary verilog file failed: ", temp_path);
+    ECCLOG.warn(ecc::Loc::current(), "Close temporary verilog file failed: ", temp_path);
   }
 
   if (!success) {
@@ -312,7 +312,7 @@ bool VerilogRead::createDbAutoTop(std::string file)
 
   // auto set top module
   if (!_verilog_reader->autoTopModule()) {
-    IEDALOG.warn(ieda::Loc::current(), "auto top module is wrong!");
+    ECCLOG.warn(ecc::Loc::current(), "auto top module is wrong!");
     return false;
   }
   _top_module = _verilog_reader->get_top_module();
@@ -347,7 +347,7 @@ IdbConnectDirection VerilogRead::netlistToIdb(DclType port_direction) const
   } else if (port_direction == DclType::KInout) {
     return IdbConnectDirection::kInOut;
   } else {
-    IEDALOG.warn(ieda::Loc::current(), "not support.");
+    ECCLOG.warn(ecc::Loc::current(), "not support.");
     return IdbConnectDirection::kNone;
   }
 }
@@ -445,7 +445,7 @@ int32_t VerilogRead::build_pins()
         process_dcl_stmt(verilog_convert_dcl(verilog_dcl));
         num++;
         if (num % 1000 == 0) {
-          IEDALOG.info(ieda::Loc::current(), "Processed ", num, " pins...");
+          ECCLOG.info(ecc::Loc::current(), "Processed ", num, " pins...");
         }
       }
     }
@@ -557,7 +557,7 @@ int32_t VerilogRead::build_nets()
         process_dcl_stmt(verilog_convert_dcl(verilog_dcl));
         num++;
         if (num % 1000 == 0) {
-          IEDALOG.info(ieda::Loc::current(), "Processed ", num, " nets...");
+          ECCLOG.info(ecc::Loc::current(), "Processed ", num, " nets...");
         }
       }
     }
@@ -614,7 +614,7 @@ int32_t VerilogRead::build_assign()
           } else if (the_left_idb_net && the_right_idb_net && the_left_idb_net != the_right_idb_net) {
             // assign net = net, need merge two net to one net.
 
-            // IEDALOG.info(ieda::Loc::current(), "Merge ", left_net_name, " = ", right_net_name);
+            // ECCLOG.info(ecc::Loc::current(), "Merge ", left_net_name, " = ", right_net_name);
 
             assert(the_left_idb_net != the_right_idb_net);
             // the remove map to merge net maybe removed, need update the new net.
@@ -633,11 +633,11 @@ int32_t VerilogRead::build_assign()
               // assign net = input_port;
               idb_design->connectPinToNet(the_right_io_pin, the_left_idb_net);
             } else {
-              IEDALOG.warn(ieda::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
+              ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
               bool has_b0 = (right_net_name.find("1'b0") != std::string::npos);
               bool has_b1 = (right_net_name.find("1'b1") != std::string::npos);
               if (has_b0 || has_b1) {
-                IEDALOG.warn(ieda::Loc::current(), "constant net should connect to tie cell.");
+                ECCLOG.warn(ecc::Loc::current(), "constant net should connect to tie cell.");
               }
             }
           } else if (the_right_idb_net) {
@@ -645,7 +645,7 @@ int32_t VerilogRead::build_assign()
                // assign output_port = net;
               idb_design->connectPinToNet(the_left_io_pin, the_right_idb_net);
             } else {
-              IEDALOG.warn(ieda::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
+              ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
             }
           } else if (!the_left_idb_net && !the_right_idb_net && the_right_io_pin) {
             // assign output_port = input_port;
@@ -662,10 +662,10 @@ int32_t VerilogRead::build_assign()
             if (the_left_io_pin && the_left_io_pin->is_io_pin()) {
               idb_design->connectPinToNet(the_left_io_pin, idb_net);
             } else {
-              IEDALOG.warn(ieda::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
+              ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
             }
           } else {
-            IEDALOG.warn(ieda::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
+            ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
           }
         };
 
@@ -715,7 +715,7 @@ int32_t VerilogRead::build_assign()
             id_net_name = slice_net_id->base_id;
             base_id_index = slice_net_id->range_base;
           } else {
-            IEDALOG.error(ieda::Loc::current(), "left net id should be id or bus slice id");
+            ECCLOG.error(ecc::Loc::current(), "left net id should be id or bus slice id");
           }
 
           auto verilog_id_concat = verilog_convert_net_concat_expr(concat_net_expr)->verilog_id_concat;
@@ -832,7 +832,7 @@ int32_t VerilogRead::build_assign()
         }
 
       } else {
-        IEDALOG.error(ieda::Loc::current(), "assign declaration's lhs/rhs is not VerilogNetIDExpr class.");
+        ECCLOG.error(ecc::Loc::current(), "assign declaration's lhs/rhs is not VerilogNetIDExpr class.");
       }
     }
   }
@@ -980,12 +980,12 @@ int32_t VerilogRead::build_components()
 
       auto* cell_master = idb_master_list->find_cell_master(cell_master_name);
       if (cell_master == nullptr) {
-        IEDALOG.warn(ieda::Loc::current(), "Error : can not find cell master = ", cell_master_name);
+        ECCLOG.warn(ecc::Loc::current(), "Error : can not find cell master = ", cell_master_name);
         continue;
       }
       IdbInstance* idb_instance = idb_design->createInstance(inst_name, cell_master->get_name());
       if (idb_instance == nullptr) {
-        IEDALOG.warn(ieda::Loc::current(), "Error : can not create instance = ", inst_name);
+        ECCLOG.warn(ecc::Loc::current(), "Error : can not create instance = ", inst_name);
         continue;
       }
 
@@ -1095,7 +1095,7 @@ int32_t VerilogRead::build_components()
                 net_name = verilog_convert_slice_id(net_id)->id;
               } else {
                 static int index = 0;
-                generated_net_name = "IEDA_CONST_" + std::to_string(index++);
+                generated_net_name = "ECC_CONST_" + std::to_string(index++);
                 net_name = generated_net_name.c_str();
               }
               add_pin(net_name, idb_pin);
@@ -1206,7 +1206,7 @@ int32_t VerilogRead::build_components()
       }
       num++;
       if (num % 1000 == 0) {
-        IEDALOG.info(ieda::Loc::current(), "Processed ", num, " components...");
+        ECCLOG.info(ecc::Loc::current(), "Processed ", num, " components...");
       }
     }
   }

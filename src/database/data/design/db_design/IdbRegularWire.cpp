@@ -231,7 +231,7 @@ uint64_t IdbRegularWireSegment::length()
         /// vertical
         return std::abs(pt1->get_y() - pt2->get_y());
       } else {
-        IEDALOG.warn(ieda::Loc::current(), "[Idb Error} Net segment error.");
+        ECCLOG.warn(ecc::Loc::current(), "[Idb Error} Net segment error.");
       }
     }
   }

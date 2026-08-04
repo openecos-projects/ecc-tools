@@ -8,7 +8,7 @@
 #include "feature_builder.h"
 #include "wirelength_api.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 TotalWLSummary FeatureBuilder::buildWirelengthEvalSummary()
 {
@@ -24,4 +24,4 @@ TotalWLSummary FeatureBuilder::buildWirelengthEvalSummary()
   return total_wl_summary;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

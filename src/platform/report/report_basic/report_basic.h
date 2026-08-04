@@ -44,13 +44,13 @@ class ReportBase
 
   [[nodiscard]] const std::string& get_report_name() const { return _report_name; }
 
-  bool add_table(std::shared_ptr<ieda::ReportTable> table);
+  bool add_table(std::shared_ptr<ecc::ReportTable> table);
 
-  std::shared_ptr<ieda::ReportTable> get_table(int type);
+  std::shared_ptr<ecc::ReportTable> get_table(int type);
 
   virtual std::string seperator();
   virtual std::string title();
-  std::vector<std::shared_ptr<ieda::ReportTable>>& get_table_list() { return _table_list; }
+  std::vector<std::shared_ptr<ecc::ReportTable>>& get_table_list() { return _table_list; }
 
   template <typename... Args>
   static std::string format(const char* format, Args... args)
@@ -67,7 +67,7 @@ class ReportBase
 
  private:
   std::string _report_name;
-  std::vector<std::shared_ptr<ieda::ReportTable>> _table_list;
+  std::vector<std::shared_ptr<ecc::ReportTable>> _table_list;
 };
 
 std::ostream& operator<<(std::ostream& ost, ReportBase& report);

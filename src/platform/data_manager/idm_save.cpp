@@ -38,7 +38,7 @@ namespace idm {
 bool DataManager::save(std::string name, std::string def_path)
 {
   std::string full_path = def_path + "/" + name + ".def";
-  IEDALOG.info(ieda::Loc::current(), full_path);
+  ECCLOG.info(ecc::Loc::current(), full_path);
 
   if (_idb_builder == nullptr) {
     return false;
@@ -100,7 +100,7 @@ void DataManager::saveVerilog(string verilog_path, std::set<std::string>&& exclu
                               bool is_add_space_for_escape_name /*=false*/)
 {
   if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "idb_builder error.");
+    ECCLOG.warn(ecc::Loc::current(), "idb_builder error.");
   }
   return _idb_builder->saveVerilog(verilog_path, exclude_cell_names, is_add_space_for_escape_name);
 }

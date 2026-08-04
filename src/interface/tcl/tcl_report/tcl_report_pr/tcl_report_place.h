@@ -21,7 +21,7 @@
 
 namespace tcl {
 
-using ieda::TclCmd;
+using ecc::TclCmd;
 
 class CmdReportPlaceDistro : public TclCmd
 {

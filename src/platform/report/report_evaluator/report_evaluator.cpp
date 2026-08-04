@@ -72,7 +72,7 @@ auto ReportEvaluator::CongStats(float threshold, float step, vector<float>& data
   return std::tuple(range, count);
 }
 
-std::shared_ptr<ieda::ReportTable> ReportEvaluator::createWireLengthReport()
+std::shared_ptr<ecc::ReportTable> ReportEvaluator::createWireLengthReport()
 {
   // prepare data & initialization work
   auto& nets = dmInst->get_idb_design()->get_net_list()->get_net_list();
@@ -91,7 +91,7 @@ std::shared_ptr<ieda::ReportTable> ReportEvaluator::createWireLengthReport()
   // std::vector<std::string> header = {"Wire-length Model", "Total Length", "Average Length", "Longest Net Name", "Longest Length"};
   std::vector<std::string> header = {"Wire-length Model", "Total Length", "Average Length"};
 
-  auto tbl = std::make_shared<ieda::ReportTable>("Wire Length Report", header, static_cast<int>(ReportEvaluatorType::kWireLength));
+  auto tbl = std::make_shared<ecc::ReportTable>("Wire Length Report", header, static_cast<int>(ReportEvaluatorType::kWireLength));
   if (real_total > 0) {
     *tbl << "Real Length" << real_total << real_total / net_num << TABLE_ENDLINE;
   }
@@ -105,7 +105,7 @@ std::shared_ptr<ieda::ReportTable> ReportEvaluator::createWireLengthReport()
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportEvaluator::createCongestionReport()
+std::shared_ptr<ecc::ReportTable> ReportEvaluator::createCongestionReport()
 {
   // evaluate Instance Density & Pin Density
   std::string stage = "place";  // hard code , only for place stage
@@ -114,7 +114,7 @@ std::shared_ptr<ieda::ReportTable> ReportEvaluator::createCongestionReport()
   std::string pin_density_file_path = density_map_summay.pin_map_summary.allcell_pin_density;
   std::ifstream pin_density_file(pin_density_file_path);
   if (!pin_density_file.is_open()) {
-    IEDALOG.warn(ieda::Loc::current(), "Error opening file: ", pin_density_file_path);
+    ECCLOG.warn(ecc::Loc::current(), "Error opening file: ", pin_density_file_path);
   }
   std::string pin_density_line;
   std::vector<float> pin_density;
@@ -131,7 +131,7 @@ std::shared_ptr<ieda::ReportTable> ReportEvaluator::createCongestionReport()
   std::string inst_density_file_path = density_map_summay.cell_map_summary.allcell_density;
   std::ifstream inst_density_file(inst_density_file_path);
   if (!inst_density_file.is_open()) {
-    IEDALOG.warn(ieda::Loc::current(), "Error opening file: ", inst_density_file_path);
+    ECCLOG.warn(ecc::Loc::current(), "Error opening file: ", inst_density_file_path);
   }
   std::string inst_density_line;
   std::vector<float> inst_density;
@@ -155,7 +155,7 @@ std::shared_ptr<ieda::ReportTable> ReportEvaluator::createCongestionReport()
   pin_den_range.push_back(pin_den_max);
 
   std::vector<std::string> header = {"Grid Bin Size", "Bin Partition", "Total Count"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Congestion Report", header, static_cast<int>(ReportEvaluatorType::kCongestion));
+  auto tbl = std::make_shared<ecc::ReportTable>("Congestion Report", header, static_cast<int>(ReportEvaluatorType::kCongestion));
   // // Bin information
   //      << cong_grid->get_bin_cnt_x() * cong_grid->get_bin_cnt_y() << TABLE_ENDLINE;
 

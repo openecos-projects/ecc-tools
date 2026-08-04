@@ -48,7 +48,7 @@ bool RoutingLayerParser::parse(const std::string& name, const std::string& value
   if (name == "LEF58_SPACINGTABLE") {
     return parse_lef58_spacingtable(value, data);
   }
-  IEDALOG.warn(ieda::Loc::current(), "Unhandled property: ", name, value);
+  ECCLOG.warn(ecc::Loc::current(), "Unhandled property: ", name, value);
   return false;
 }
 
@@ -322,7 +322,7 @@ bool RoutingLayerParser::parse_lef58_spacing(const std::string& value, IdbLayerR
   if (absl::StrContains(value, "ENDOFLINE")) {
     return parse_lef58_spacing_eol(value, data);
   }
-  IEDALOG.warn(ieda::Loc::current(), "Unhandled LEF58_SPACING value: ", value);
+  ECCLOG.warn(ecc::Loc::current(), "Unhandled LEF58_SPACING value: ", value);
   return false;
 }
 
@@ -331,7 +331,7 @@ bool RoutingLayerParser::parse_lef58_spacingtable(const std::string& value, IdbL
   if (absl::StrContains(value, "JOGTOJOGSPACING")) {
     return parse_lef58_spacingtable_jogtojog(value, data);
   }
-  IEDALOG.warn(ieda::Loc::current(), "Unhandled LEF58_SPACINGTABLE value: ", value);
+  ECCLOG.warn(ecc::Loc::current(), "Unhandled LEF58_SPACINGTABLE value: ", value);
   return false;
 }
 

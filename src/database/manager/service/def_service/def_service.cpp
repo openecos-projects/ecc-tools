@@ -53,12 +53,12 @@ IdbDefServiceResult IdbDefService::DefFileInit(const char* file_name)
   // FILE* file = fopen(file_name, "r");
   // if (file == nullptr)
   // {
-  //     IEDALOG.warn(ieda::Loc::current(), "Can not open DEF file (", file_name, ").");
+  //     ECCLOG.warn(ecc::Loc::current(), "Can not open DEF file (", file_name, ").");
 
   //     return IdbDefServiceResult::kServiceFailed;
   // }
   // else
-  //     IEDALOG.info(ieda::Loc::current(), "Open DEF file success (", file_name, ").");
+  //     ECCLOG.info(ecc::Loc::current(), "Open DEF file success (", file_name, ").");
 
   // fclose(file);
 
@@ -80,11 +80,11 @@ IdbDefServiceResult IdbDefService::DefFileWriteInit(const char* file_name)
 {
   FILE* file = fopen(file_name, "w+");
   if (file == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Can not create file ( ", file_name, " )");
+    ECCLOG.warn(ecc::Loc::current(), "Can not create file ( ", file_name, " )");
 
     return IdbDefServiceResult::kServiceFailed;
   } else
-    IEDALOG.info(ieda::Loc::current(), "Create file success ( ", file_name, " )");
+    ECCLOG.info(ecc::Loc::current(), "Create file success ( ", file_name, " )");
 
   fclose(file);
 

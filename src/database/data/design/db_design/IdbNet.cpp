@@ -171,7 +171,7 @@ IdbPin* IdbNet::get_driving_pin()
     return _instance_pin_list->get_pin_list().front();
   }
 
-  IEDALOG.warn(ieda::Loc::current(), "Error : No driver pin exist...");
+  ECCLOG.warn(ecc::Loc::current(), "Error : No driver pin exist...");
   return nullptr;
 }
 
@@ -310,7 +310,7 @@ bool IdbNet::checkConnection()
   // }
 
   if (!b_result) {
-    IEDALOG.warn(ieda::Loc::current(), "[IdbNetList Error] Net connected failed. Net name = ", get_net_name());
+    ECCLOG.warn(ecc::Loc::current(), "[IdbNetList Error] Net connected failed. Net name = ", get_net_name());
   }
 
   return b_result;
@@ -690,7 +690,7 @@ bool IdbNetChecker::checkNetConnection(IdbNet* net)
   // }
 
   if (!b_result) {
-    IEDALOG.warn(ieda::Loc::current(), "[IdbNetList Error] Net connected failed. Net name = ", net->get_net_name());
+    ECCLOG.warn(ecc::Loc::current(), "[IdbNetList Error] Net connected failed. Net name = ", net->get_net_name());
   }
 
   return b_result;

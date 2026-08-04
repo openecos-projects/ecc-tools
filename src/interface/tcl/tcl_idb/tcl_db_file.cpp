@@ -35,7 +35,7 @@ unsigned CmdInitIdb::check()
 {
   TclOption* option = getOptionOrArg(TCL_CONFIG);
 
-  ieda::checkTclOption(option, TCL_CONFIG);
+  ecc::checkTclOption(option, TCL_CONFIG);
 
   return 1;
 }
@@ -51,7 +51,7 @@ unsigned CmdInitIdb::exec()
   auto data_config = option->getStringVal();
 
   if (iplf::tmInst->idbStart(data_config)) {
-    IEDALOG.info(ieda::Loc::current(), "idb start.");
+    ECCLOG.info(ecc::Loc::current(), "idb start.");
   }
 
   return 1;
@@ -144,7 +144,7 @@ CmdInitDef::CmdInitDef(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdInitDef::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
   return 1;
 }
 
@@ -180,8 +180,8 @@ unsigned CmdInitVerilog::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
   TclOption* top = getOptionOrArg(TCL_VERILOG_TOP);
-  ieda::checkTclOption(path, TCL_PATH);
-  ieda::checkTclOption(top, TCL_VERILOG_TOP);
+  ecc::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(top, TCL_VERILOG_TOP);
   return 1;
 }
 
@@ -248,7 +248,7 @@ CmdInitSdc::CmdInitSdc(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdInitSdc::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
   return 1;
 }
 
@@ -276,7 +276,7 @@ CmdInitSpef::CmdInitSpef(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdInitSpef::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
   return 1;
 }
 
@@ -305,7 +305,7 @@ CmdInitVcd::CmdInitVcd(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdInitVcd::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
   return 1;
 }
 
@@ -341,10 +341,10 @@ CmdSaveDef::CmdSaveDef(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdSaveDef::check()
 {
   TclOption* option = getOptionOrArg(TCL_NAME);
-  ieda::checkTclOption(option, TCL_NAME);
+  ecc::checkTclOption(option, TCL_NAME);
 
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
   return 1;
 }
 
@@ -358,7 +358,7 @@ unsigned CmdSaveDef::exec()
   auto name = option->getStringVal();
   if (name != nullptr) {
     if (iplf::tmInst->idbSave(name)) {
-      IEDALOG.info(ieda::Loc::current(), "idb save success.");
+      ECCLOG.info(ecc::Loc::current(), "idb save success.");
       return 1;
     }
   }
@@ -386,7 +386,7 @@ CmdSaveLef::CmdSaveLef(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdSaveLef::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
   return 1;
 }
 
@@ -428,16 +428,16 @@ CmdSaveNetlist::CmdSaveNetlist(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdSaveNetlist::check()
 {
   TclOption* option = getOptionOrArg(TCL_NAME);
-  ieda::checkTclOption(option, TCL_NAME);
+  ecc::checkTclOption(option, TCL_NAME);
 
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
 
   TclOption* exclude_cell_names = getOptionOrArg(EXCLUDE_CELL_NAMES);
-  ieda::checkTclOption(exclude_cell_names, EXCLUDE_CELL_NAMES);
+  ecc::checkTclOption(exclude_cell_names, EXCLUDE_CELL_NAMES);
 
   TclOption* is_add_space = getOptionOrArg(TCL_ADD_SPACE);
-  ieda::checkTclOption(is_add_space, TCL_ADD_SPACE);
+  ecc::checkTclOption(is_add_space, TCL_ADD_SPACE);
 
   return 1;
 }
@@ -452,7 +452,7 @@ unsigned CmdSaveNetlist::exec()
   auto name = option->getStringVal();
   if (name != nullptr) {
     if (iplf::tmInst->idbSave(name)) {
-      IEDALOG.info(ieda::Loc::current(), "idb save success.");
+      ECCLOG.info(ecc::Loc::current(), "idb save success.");
       return 1;
     }
   }
@@ -501,13 +501,13 @@ CmdSaveGDS::CmdSaveGDS(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdSaveGDS::check()
 {
   TclOption* option = getOptionOrArg(TCL_NAME);
-  ieda::checkTclOption(option, TCL_NAME);
+  ecc::checkTclOption(option, TCL_NAME);
 
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
 
   TclOption* harden_option = getOptionOrArg("-harden");
-  ieda::checkTclOption(harden_option, "-harden");
+  ecc::checkTclOption(harden_option, "-harden");
 
   return 1;
 }
@@ -557,7 +557,7 @@ unsigned CmdSaveJSON::check()
   // LOG_FATAL_IF(!discard);
 
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
   return 1;
 }
 
@@ -571,7 +571,7 @@ unsigned CmdSaveJSON::exec()
   // TclOption* discard = getOptionOrArg(TCL_JSON_OPTION);
   auto str_path = def_path->getStringVal();
   auto str_option = "";
-  // IEDALOG.info(ieda::Loc::current(), "Path: ", str_path);
+  // ECCLOG.info(ecc::Loc::current(), "Path: ", str_path);
   if (str_path != nullptr) {
     dmInst->saveJSON(str_path, str_option);
     return 1;
@@ -599,11 +599,11 @@ CmdSaveViewJson::CmdSaveViewJson(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdSaveViewJson::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
   TclOption* json_format = getOptionOrArg("-json_format");
-  ieda::checkTclOption(json_format, "-json_format");
+  ecc::checkTclOption(json_format, "-json_format");
   TclOption* compress = getOptionOrArg("-compress");
-  ieda::checkTclOption(compress, "-compress");
+  ecc::checkTclOption(compress, "-compress");
   return 1;
 }
 
@@ -623,7 +623,7 @@ unsigned CmdSaveViewJson::exec()
   const char* json_format_value = json_format_option == nullptr ? "pretty" : json_format_option->getStringVal();
   idb::ViewJsonWriteOptions options;
   if (!idb::parseViewJsonFormat(json_format_value == nullptr ? "pretty" : json_format_value, options.format)) {
-    IEDALOG.warn(ieda::Loc::current(), "Save view json failed: unsupported -json_format `", json_format_value, "`, expected `pretty` or `compact`.");
+    ECCLOG.warn(ecc::Loc::current(), "Save view json failed: unsupported -json_format `", json_format_value, "`, expected `pretty` or `compact`.");
     return 0;
   }
 
@@ -649,9 +649,9 @@ CmdApplyViewJsonEdits::CmdApplyViewJsonEdits(const char* cmd_name) : TclCmd(cmd_
 unsigned CmdApplyViewJsonEdits::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
   TclOption* compress = getOptionOrArg("-compress");
-  ieda::checkTclOption(compress, "-compress");
+  ecc::checkTclOption(compress, "-compress");
   return 1;
 }
 
@@ -687,10 +687,10 @@ CmdWriteSocJson::CmdWriteSocJson(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdWriteSocJson::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
 
   TclOption* harden_cores = getOptionOrArg("-harden_cores");
-  ieda::checkTclOption(harden_cores, "-harden_cores");
+  ecc::checkTclOption(harden_cores, "-harden_cores");
 
   return 1;
 }
@@ -729,7 +729,7 @@ CmdWriteAbstractLef::CmdWriteAbstractLef(const char* cmd_name) : TclCmd(cmd_name
 unsigned CmdWriteAbstractLef::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
 
   return 1;
 }
@@ -762,7 +762,7 @@ CmdSaveData::CmdSaveData(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdSaveData::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
 
   return 1;
 }
@@ -794,7 +794,7 @@ CmdLoadData::CmdLoadData(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdLoadData::check()
 {
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
 
   return 1;
 }
@@ -858,7 +858,7 @@ unsigned CmdValidateIdb::exec()
 
   auto* design = dmInst->get_idb_design();
   if (design == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "iDB validate failed: design is null.");
+    ECCLOG.warn(ecc::Loc::current(), "iDB validate failed: design is null.");
     return 0;
   }
 
@@ -868,13 +868,13 @@ unsigned CmdValidateIdb::exec()
   TclOption* path_option = getOptionOrArg(TCL_PATH);
   const char* path = path_option == nullptr ? nullptr : path_option->getStringVal();
   if (path != nullptr && path[0] != '\0' && !design->writeConnectivitySnapshot(path, check_floating)) {
-    IEDALOG.warn(ieda::Loc::current(), "iDB validate failed: cannot write snapshot ", path);
+    ECCLOG.warn(ecc::Loc::current(), "iDB validate failed: cannot write snapshot ", path);
     return 0;
   }
 
-  IEDALOG.warn(ieda::Loc::current(), "iDB validate ", (result.ok ? "passed" : "failed"), ": duplicate_net=", result.duplicate_net_count, ", duplicate_instance=", result.duplicate_instance_count, ", duplicate_io_pin=", result.duplicate_io_pin_count, ", stale_regular_pin_ref=", result.stale_regular_pin_ref_count, ", stale_special_pin_ref=", result.stale_special_pin_ref_count, ", pin_reverse_mismatch=", result.pin_reverse_mismatch_count, ", net_instance_mismatch=", result.net_instance_mismatch_count, ", duplicate_pin_ref=", result.duplicate_pin_ref_count, ", floating_pin=", result.floating_pin_count);
+  ECCLOG.warn(ecc::Loc::current(), "iDB validate ", (result.ok ? "passed" : "failed"), ": duplicate_net=", result.duplicate_net_count, ", duplicate_instance=", result.duplicate_instance_count, ", duplicate_io_pin=", result.duplicate_io_pin_count, ", stale_regular_pin_ref=", result.stale_regular_pin_ref_count, ", stale_special_pin_ref=", result.stale_special_pin_ref_count, ", pin_reverse_mismatch=", result.pin_reverse_mismatch_count, ", net_instance_mismatch=", result.net_instance_mismatch_count, ", duplicate_pin_ref=", result.duplicate_pin_ref_count, ", floating_pin=", result.floating_pin_count);
   for (const auto& message : result.messages) {
-    IEDALOG.info(ieda::Loc::current(), "  ", message);
+    ECCLOG.info(ecc::Loc::current(), "  ", message);
   }
 
   return result.ok ? 1 : 0;
@@ -896,13 +896,13 @@ CmdGenerateMPScript::CmdGenerateMPScript(const char* cmd_name) : TclCmd(cmd_name
 unsigned CmdGenerateMPScript::check()
 {
   TclOption* dir = getOptionOrArg(TCL_DIRECTORY);
-  ieda::checkTclOption(dir, TCL_DIRECTORY);
+  ecc::checkTclOption(dir, TCL_DIRECTORY);
 
   TclOption* name = getOptionOrArg(TCL_NAME);
-  ieda::checkTclOption(name, TCL_NAME);
+  ecc::checkTclOption(name, TCL_NAME);
 
   auto* number = new TclIntOption("-number", 0);
-  ieda::checkTclOption(number, "-number");
+  ecc::checkTclOption(number, "-number");
   return 1;
 }
 /*

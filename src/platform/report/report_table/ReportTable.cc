@@ -23,7 +23,7 @@
  */
 #include "ReportTable.hh"
 
-namespace ieda {
+namespace ecc {
 /**
  * @brief Write one row in table.
  *
@@ -68,4 +68,4 @@ void ReportTable::initHeader()
   (*this) << TABLE_ENDLINE;
 }
 
-}  // namespace ieda
+}  // namespace ecc

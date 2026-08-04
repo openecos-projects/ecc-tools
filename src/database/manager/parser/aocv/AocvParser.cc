@@ -248,10 +248,10 @@ std::unique_ptr<AocvObjectSpec> AocvReader::readAocvObjectSpec(std::string curre
 std::unique_ptr<AocvLibrary> AocvReader::readAocvLibrary()
 {
   if (!_stream) {
-    IEDALOG.warn(ieda::Loc::current(), "File ", _file_name, " NotReadable");
+    ECCLOG.warn(ecc::Loc::current(), "File ", _file_name, " NotReadable");
   }
 
-  IEDALOG.info(ieda::Loc::current(), "start read aocv file ", _file_name);
+  ECCLOG.info(ecc::Loc::current(), "start read aocv file ", _file_name);
 
   auto aocv_library = std::make_unique<AocvLibrary>(_file_name.c_str());
 
@@ -274,7 +274,7 @@ std::unique_ptr<AocvLibrary> AocvReader::readAocvLibrary()
     }
 
     if (_stream.eof()) {
-      IEDALOG.info(ieda::Loc::current(), "read aocv file EOF", _file_name);
+      ECCLOG.info(ecc::Loc::current(), "read aocv file EOF", _file_name);
       break;
     }
   }

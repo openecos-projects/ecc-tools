@@ -39,7 +39,7 @@ class ReportPlace : public ReportBase
     }
     auto instances = trie.nextLevel(prefix, level, num_threshold);
     for (auto& [prefix, cnt] : instances) {
-      IEDALOG.info(ieda::Loc::current(), cnt, "\t", prefix);
+      ECCLOG.info(ecc::Loc::current(), cnt, "\t", prefix);
     }
   }
   void createInstDistributionReport(const std::vector<std::string>& prefixes, const std::string& file)
@@ -76,7 +76,7 @@ class ReportPlace : public ReportBase
     }
     std::string bmpfile = file.empty()? "inst_distro.bmp" : file;
     // write_view(bmpfile, flipped_up_down_view(view(img)), bmp_tag{});
-    IEDALOG.info(ieda::Loc::current(), "result saved to ", bmpfile);
+    ECCLOG.info(ecc::Loc::current(), "result saved to ", bmpfile);
   }
 
   template <typename View, typename Color>

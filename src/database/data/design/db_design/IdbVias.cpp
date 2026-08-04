@@ -136,7 +136,7 @@ void IdbVia::set_coordinate(IdbCoordinate<int32_t>* point)
 //     rect->set_rect(_coordinate->get_x() + fix_rect->get_low_x(), _coordinate->get_y() + fix_rect->get_low_y(),
 //                    _coordinate->get_x() + fix_rect->get_high_x(), _coordinate->get_y() + fix_rect->get_high_y());
 //   } else {
-//     IEDALOG.warn(ieda::Loc::current(), "Error setting via bounding box, name = ", _name);
+//     ECCLOG.warn(ecc::Loc::current(), "Error setting via bounding box, name = ", _name);
 //   }
 
 //   return true;
@@ -257,7 +257,7 @@ IdbVia* IdbVias::find_via_generate(IdbLayerCut* layer_cut, int32_t width, int32_
   }
   /// step 2 : find the matched via rule between cut layer and via list
   if (layer_cut == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Error: Cut layer illegal.");
+    ECCLOG.warn(ecc::Loc::current(), "Error: Cut layer illegal.");
     return nullptr;
   }
 
@@ -273,7 +273,7 @@ IdbVia* IdbVias::find_via_generate(IdbLayerCut* layer_cut, int32_t width, int32_
 
   /// step 3 : if find none, create via as via_name
   if (width == 0 || height == 0) {
-    IEDALOG.warn(ieda::Loc::current(), "Error: width and height must be set.");
+    ECCLOG.warn(ecc::Loc::current(), "Error: width and height must be set.");
     return nullptr;
   }
 
@@ -389,7 +389,6 @@ IdbVia* IdbVias::createVia(string via_name, IdbLayerCut* layer_cut, int32_t widt
 
     bottom_enclosure_y = (height - (rows * cutsize_y + (rows - kMinRowColNum) * cut_spacing_y)) / 2;
     bottom_enclosure_y = std::max(bottom_enclosure_y, rule_bottom_enclosure_y);
-    bottom_enclosure_y = rule_bottom_enclosure_y;  /// set enclosure y as default
 
     /// caculate bottom width
     int32_t bottom_height = rows * cutsize_y + (rows - kMinRowColNum) * cut_spacing_y + bottom_enclosure_y * 2;
@@ -411,7 +410,6 @@ IdbVia* IdbVias::createVia(string via_name, IdbLayerCut* layer_cut, int32_t widt
                                                                                      : layer_bottom->get_power_segment_width());
     bottom_enclosure_x = (width - (cols * cutsize_x + (cols - kMinRowColNum) * cut_spacing_x)) / 2;
     bottom_enclosure_x = std::max(bottom_enclosure_x, rule_bottom_enclosure_x);
-    bottom_enclosure_x = rule_bottom_enclosure_x;  /// set enclosure x as default
 
     /// caculate bottom height
     int32_t bottom_width = cols * cutsize_x + (cols - kMinRowColNum) * cut_spacing_x + bottom_enclosure_x * 2;
@@ -448,7 +446,6 @@ IdbVia* IdbVias::createVia(string via_name, IdbLayerCut* layer_cut, int32_t widt
                          : (layer_top->get_power_segment_width() == 0 ? layer_top->get_width() : layer_top->get_power_segment_width());
     top_enclosure_y = (height - (rows * cutsize_y + (rows - kMinRowColNum) * cut_spacing_y)) / 2;
     top_enclosure_y = std::max(top_enclosure_y, rule_top_enclosure_y);
-    top_enclosure_y = rule_top_enclosure_y;  /// set enclosure y as default
 
     /// caculate top width
     int32_t top_height = rows * cutsize_y + (rows - kMinRowColNum) * cut_spacing_y + top_enclosure_y * 2;
@@ -470,7 +467,6 @@ IdbVia* IdbVias::createVia(string via_name, IdbLayerCut* layer_cut, int32_t widt
                         : (layer_top->get_power_segment_width() == 0 ? layer_top->get_width() : layer_top->get_power_segment_width());
     top_enclosure_x = (width - (cols * cutsize_x + (cols - kMinRowColNum) * cut_spacing_x)) / 2;
     top_enclosure_x = std::max(top_enclosure_x, rule_top_enclosure_x);
-    top_enclosure_x = rule_top_enclosure_x;  /// set enclosure x as default
 
     /// caculate top height
     int32_t top_width = cols * cutsize_x + (cols - kMinRowColNum) * cut_spacing_x + top_enclosure_x * 2;

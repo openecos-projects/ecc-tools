@@ -41,11 +41,11 @@ bool Flow::initFlow(string flow_config)
 {
   /// read flow config
   if (!PLFConfig::getInstance()->initConfig(flow_config)) {
-    IEDALOG.warn(ieda::Loc::current(), "PLFConfig init failed.");
+    ECCLOG.warn(ecc::Loc::current(), "PLFConfig init failed.");
   }
 
   /// init GUI
-  // IEDALOG.info(ieda::Loc::current(), "GUI start.");
+  // ECCLOG.info(ecc::Loc::current(), "GUI start.");
 
   return true;
 }

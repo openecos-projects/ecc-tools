@@ -27,7 +27,7 @@
 #include "UserShell.hh"
 #include "tcl_config.h"
 
-using namespace ieda;
+using namespace ecc;
 namespace tcl {
 
 int registerConfig()

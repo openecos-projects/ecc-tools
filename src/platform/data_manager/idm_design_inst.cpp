@@ -210,7 +210,7 @@ IdbInstance* DataManager::insertBufferToNet(string inst_name, string cell_master
     }
     /// this pin can not found in master
     if (!b_find) {
-      IEDALOG.warn(ieda::Loc::current(), "[IDM Error] can not find pin ", pin_name, " in master ", cell_master_name);
+      ECCLOG.warn(ecc::Loc::current(), "[IDM Error] can not find pin ", pin_name, " in master ", cell_master_name);
       return nullptr;
     }
   }
@@ -317,7 +317,7 @@ bool DataManager::placeInst(string inst_name, int32_t x, int32_t y, string orien
                          ? instance->get_orient()
                          : IdbEnum::GetInstance()->get_site_property()->get_orient_value(orient_name);
   if (cellmaster == nullptr || orient == IdbOrient::kNone) {
-    IEDALOG.warn(ieda::Loc::current(), "[IDM Error] inst_name = ", inst_name, " cell_master_name = ", cell_master_name, " orient_name = ", orient_name);
+    ECCLOG.warn(ecc::Loc::current(), "[IDM Error] inst_name = ", inst_name, " cell_master_name = ", cell_master_name, " orient_name = ", orient_name);
     return false;
   }
 
@@ -340,13 +340,13 @@ bool DataManager::placeInst(string inst_name, int32_t x, int32_t y, string orien
 
   if (cellmaster->is_endcap()) {
     if (!isOnDieBoundary(x, y, urx, ury, orient)) {
-      IEDALOG.warn(ieda::Loc::current(), "Instance ", inst_name, " placement information has a problem.");
+      ECCLOG.warn(ecc::Loc::current(), "Instance ", inst_name, " placement information has a problem.");
       return false;
     }
   } else if (cellmaster->is_pad() || cellmaster->is_pad_filler()) {
     bool can_place = checkInstPlacer(x, y, urx, ury, orient);
     if (!can_place) {
-      IEDALOG.warn(ieda::Loc::current(), "Instance ", inst_name, " placement information has a problem.");
+      ECCLOG.warn(ecc::Loc::current(), "Instance ", inst_name, " placement information has a problem.");
       return false;
     }
   }

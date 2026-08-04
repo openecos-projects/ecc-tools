@@ -62,7 +62,7 @@ void TclUtil::addOption(TclCmd* tcl_ptr, std::string config_name, ValueType type
       tcl_ptr->addOption(new TclStringListOption(config_name.c_str(), 0));
       break;
     default:
-      IEDALOG.warn(ieda::Loc::current(), "[TclUtil] The value type is error!");
+      ECCLOG.warn(ecc::Loc::current(), "[TclUtil] The value type is error!");
       exit(0);
       break;
   }
@@ -125,7 +125,7 @@ std::any TclUtil::getValue(TclCmd* tcl_ptr, std::string config_name, ValueType t
       break;
     }
     default:
-      IEDALOG.warn(ieda::Loc::current(), "[TclUtil] The value type is error!");
+      ECCLOG.warn(ecc::Loc::current(), "[TclUtil] The value type is error!");
       exit(0);
       break;
   }
@@ -136,14 +136,14 @@ bool TclUtil::alterJsonConfig(std::string json_path, std::map<std::string, std::
 {
   ordered_json config;
   if(json_path.empty()){
-    IEDALOG.warn(ieda::Loc::current(), "Failed: There is no json_path to be found.");
+    ECCLOG.warn(ecc::Loc::current(), "Failed: There is no json_path to be found.");
     return 0;
   }
 
   // 从json_path先读入json
   std::ifstream file(json_path);
   if (!file.is_open()) {
-    IEDALOG.warn(ieda::Loc::current(), "Failed to open JSON file for reading.");
+    ECCLOG.warn(ecc::Loc::current(), "Failed to open JSON file for reading.");
     return 0;
   }
   file >> config;
@@ -169,7 +169,7 @@ bool TclUtil::alterJsonConfig(std::string json_path, std::map<std::string, std::
 
   std::ofstream ofs(json_path);
   if (!ofs.is_open()) {
-    IEDALOG.warn(ieda::Loc::current(), "Failed to open JSON file for writing.");
+    ECCLOG.warn(ecc::Loc::current(), "Failed to open JSON file for writing.");
     return 0;
   }
   ofs << std::setw(4) << config;

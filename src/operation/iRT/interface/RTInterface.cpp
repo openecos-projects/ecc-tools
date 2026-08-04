@@ -1487,14 +1487,14 @@ void RTInterface::outputNetList()
 
 void RTInterface::outputSummary()
 {
-  ieda_feature::RTSummary& top_rt_summary = featureInst->get_summary()->get_summary_irt();
+  ecc_feature::RTSummary& top_rt_summary = featureInst->get_summary()->get_summary_irt();
 
   Summary& rt_summary = RTDM.getDatabase().get_summary();
 
   // pa_summary
   {
     for (auto& [iter, pa_summary] : rt_summary.iter_pa_summary_map) {
-      ieda_feature::PASummary& top_pa_summary = top_rt_summary.iter_pa_summary_map[iter];
+      ecc_feature::PASummary& top_pa_summary = top_rt_summary.iter_pa_summary_map[iter];
       top_pa_summary.routing_wire_length_map = pa_summary.routing_wire_length_map;
       top_pa_summary.total_wire_length = pa_summary.total_wire_length;
       top_pa_summary.cut_via_num_map = pa_summary.cut_via_num_map;
@@ -1532,7 +1532,7 @@ void RTInterface::outputSummary()
   // sr_summary
   {
     for (auto& [iter, sr_summary] : rt_summary.iter_sr_summary_map) {
-      ieda_feature::SRSummary& top_sr_summary = top_rt_summary.iter_sr_summary_map[iter];
+      ecc_feature::SRSummary& top_sr_summary = top_rt_summary.iter_sr_summary_map[iter];
       top_sr_summary.routing_demand_map = sr_summary.routing_demand_map;
       top_sr_summary.total_demand = sr_summary.total_demand;
       top_sr_summary.routing_overflow_map = sr_summary.routing_overflow_map;
@@ -1554,7 +1554,7 @@ void RTInterface::outputSummary()
   // dr_summary
   {
     for (auto& [iter, dr_summary] : rt_summary.iter_dr_summary_map) {
-      ieda_feature::DRSummary& top_dr_summary = top_rt_summary.iter_dr_summary_map[iter];
+      ecc_feature::DRSummary& top_dr_summary = top_rt_summary.iter_dr_summary_map[iter];
       top_dr_summary.routing_wire_length_map = dr_summary.routing_wire_length_map;
       top_dr_summary.total_wire_length = dr_summary.total_wire_length;
       top_dr_summary.cut_via_num_map = dr_summary.cut_via_num_map;
