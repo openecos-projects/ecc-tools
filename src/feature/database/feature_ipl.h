@@ -18,7 +18,7 @@
 
 #include <cstdint>
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 struct PLCommonSummary
 {
@@ -51,4 +51,4 @@ struct PlaceSummary
   LGSummary lg_summary;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

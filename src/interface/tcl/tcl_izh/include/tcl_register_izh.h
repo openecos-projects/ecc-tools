@@ -18,7 +18,7 @@
 
 #include "tcl_zh.h"
 
-using namespace ieda;
+using namespace ecc;
 
 namespace tcl {
 

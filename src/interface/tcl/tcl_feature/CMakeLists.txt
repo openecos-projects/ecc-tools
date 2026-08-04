@@ -1,13 +1,13 @@
 AUX_SOURCE_DIRECTORY(./ TCL_FEATURE_SRC)
 
-add_library(tcl_feature 
+add_library(tcl_feature
     ${TCL_FEATURE_SRC}
 )
 
-target_link_libraries(tcl_feature 
+target_link_libraries(tcl_feature
     PUBLIC
         tcl
-        ieda_feature
+        ecc_feature
 )
 
 target_include_directories(tcl_feature

@@ -508,10 +508,10 @@ void GdsiiTextWriter::write_xy(GdsElemBase* e) const
   assert(num);
 
   if (min > num)
-    IEDALOG.warn(ieda::Loc::current(), "Warn: coordinate total is less than the expected", ", GdsElemType =", (int) e->get_elem_type());
+    ECCLOG.warn(ecc::Loc::current(), "Warn: coordinate total is less than the expected", ", GdsElemType =", (int) e->get_elem_type());
 
   if (max < num)
-    IEDALOG.warn(ieda::Loc::current(), "Warn: coordinate total is more than the expected", ", GdsElemType =", (int) e->get_elem_type());
+    ECCLOG.warn(ecc::Loc::current(), "Warn: coordinate total is more than the expected", ", GdsElemType =", (int) e->get_elem_type());
 
   (*_stream) << "XY ";
   for (auto& xy : e->get_xy().get_coords()) {

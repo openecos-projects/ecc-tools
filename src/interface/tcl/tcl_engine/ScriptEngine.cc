@@ -30,7 +30,7 @@
 #include <string_view>
 #include <utility>
 
-namespace ieda {
+namespace ecc {
 ScriptEngine* ScriptEngine::_instance = nullptr;
 
 ScriptEngine::ScriptEngine()
@@ -159,7 +159,7 @@ TclOption::~TclOption() = default;
 void checkTclOption(TclOption* option, const char* option_name, Loc location)
 {
   if (option == nullptr) {
-    IEDALOG.error(location, "The Tcl option '", option_name, "' is null.");
+    ECCLOG.error(location, "The Tcl option '", option_name, "' is null.");
   }
 }
 
@@ -414,7 +414,7 @@ int CmdProc(ClientData clientData, Tcl_Interp* interp, int objc, struct Tcl_Obj*
         TclOption* arg = cmd->getArg(arg_index);
         ++arg_index;
         if (!arg) {
-          IEDALOG.warn(Loc::current(), "The cmd ", cmd->get_cmd_name(), " syntax has error.");
+          ECCLOG.warn(Loc::current(), "The cmd ", cmd->get_cmd_name(), " syntax has error.");
           return TCL_ERROR;
         }
 
@@ -427,7 +427,7 @@ int CmdProc(ClientData clientData, Tcl_Interp* interp, int objc, struct Tcl_Obj*
   }
 
   if (next_is_option_val) {
-    IEDALOG.warn(Loc::current(), "The cmd syntax has error ", curr_option->get_option_name(), " need val.");
+    ECCLOG.warn(Loc::current(), "The cmd syntax has error ", curr_option->get_option_name(), " need val.");
   }
 
   unsigned result = cmd->exec();
@@ -543,4 +543,4 @@ bool matchWildcardWithtarget(const char* const pattern, const char* const target
   }
 }
 
-}  // namespace ieda
+}  // namespace ecc

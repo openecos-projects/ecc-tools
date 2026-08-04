@@ -23,7 +23,7 @@ std::vector<std::string> readLines(const std::filesystem::path& path)
 void expectEqual(const std::string& actual, const std::string& expected, const std::string& message)
 {
   if (actual != expected) {
-    IEDALOG.warn(ieda::Loc::current(), message, "\nexpected: ", expected, "\nactual:   ", actual);
+    ECCLOG.warn(ecc::Loc::current(), message, "\nexpected: ", expected, "\nactual:   ", actual);
     std::exit(1);
   }
 }
@@ -37,13 +37,13 @@ int main()
 
   const bool ok = ieval::writeMapLayoutCsv(out_dir.string(), 3, 2, 10, 100, 200, 125, 218);
   if (!ok) {
-    IEDALOG.warn(ieda::Loc::current(), "writeMapLayoutCsv returned false\n");
+    ECCLOG.warn(ecc::Loc::current(), "writeMapLayoutCsv returned false\n");
     return 1;
   }
 
   const auto lines = readLines(out_dir / "layout.csv");
   if (lines.size() != 7) {
-    IEDALOG.warn(ieda::Loc::current(), "expected header plus 6 layout rows, got ", lines.size());
+    ECCLOG.warn(ecc::Loc::current(), "expected header plus 6 layout rows, got ", lines.size());
     return 1;
   }
 
@@ -60,12 +60,12 @@ int main()
   const std::filesystem::path gcell_dir = out_dir / "egr";
   std::filesystem::create_directories(gcell_dir);
   if (!ieval::writeMapLayoutCsv(gcell_dir.string(), gcell_layout)) {
-    IEDALOG.warn(ieda::Loc::current(), "writeMapLayoutCsv for explicit cells returned false\n");
+    ECCLOG.warn(ecc::Loc::current(), "writeMapLayoutCsv for explicit cells returned false\n");
     return 1;
   }
   const auto gcell_lines = readLines(gcell_dir / "layout.csv");
   if (gcell_lines.size() != 3) {
-    IEDALOG.warn(ieda::Loc::current(), "expected header plus 2 gcell rows, got ", gcell_lines.size());
+    ECCLOG.warn(ecc::Loc::current(), "expected header plus 2 gcell rows, got ", gcell_lines.size());
     return 1;
   }
   expectEqual(gcell_lines[1], "0,0,0,7,10,30,20,40", "explicit gcell row 0 mismatch");

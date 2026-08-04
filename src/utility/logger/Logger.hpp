@@ -31,11 +31,11 @@
 
 #include "LogLevel.hpp"
 
-namespace ieda {
+namespace ecc {
 
 using Loc = std::experimental::source_location;
 
-#define IEDALOG (ieda::Logger::getInst())
+#define ECCLOG (ecc::Logger::getInst())
 
 class Logger
 {
@@ -210,4 +210,4 @@ class Logger
   }
 };
 
-}  // namespace ieda
+}  // namespace ecc

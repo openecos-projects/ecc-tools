@@ -55,11 +55,11 @@ IdbLefServiceResult IdbLefService::LefFileInit(vector<string> lef_files)
     string filename = *it;
     FILE* file = fopen(filename.c_str(), "r");
     if (file == nullptr) {
-      IEDALOG.warn(ieda::Loc::current(), "Can not open LEF file ( ", filename.c_str(), " )");
+      ECCLOG.warn(ecc::Loc::current(), "Can not open LEF file ( ", filename.c_str(), " )");
 
       return IdbLefServiceResult::kServiceFailed;
     } else {
-      //   IEDALOG.info(ieda::Loc::current(), "Open LEF file success (", filename, ").");
+      //   ECCLOG.info(ecc::Loc::current(), "Open LEF file success (", filename, ").");
     }
   }
   // set lef files

@@ -62,7 +62,7 @@ bool DefRead::check_type(defrCallbackType_e type)
   if (type >= 0 && type <= defrDesignEndCbkType) {
     return true;
   } else {
-    IEDALOG.warn(ieda::Loc::current(), "Error defrCallbackType_e = ", type);
+    ECCLOG.warn(ecc::Loc::current(), "Error defrCallbackType_e = ", type);
     return false;
   }
 }
@@ -75,7 +75,7 @@ bool DefRead::createDb(const char* file)
     FILE* f = fopen(file, "r");
 
     if (f == NULL) {
-      IEDALOG.warn(ieda::Loc::current(), "Open def file failed...");
+      ECCLOG.warn(ecc::Loc::current(), "Open def file failed...");
       return false;
     }
 
@@ -258,7 +258,7 @@ bool DefRead::createDbGzip(const char* gzip_file)
   defGZFile f = defrGZipOpen(gzip_file, "r");
 
   if (f == NULL) {
-    IEDALOG.warn(ieda::Loc::current(), "Open def file failed...");
+    ECCLOG.warn(ecc::Loc::current(), "Open def file failed...");
     return false;
   }
 
@@ -442,7 +442,7 @@ bool DefRead::createFloorplanDb(const char* file)
 
   FILE* f = fopen(file, "r");
   if (f == NULL) {
-    IEDALOG.warn(ieda::Loc::current(), "Open def file failed...");
+    ECCLOG.warn(ecc::Loc::current(), "Open def file failed...");
     return false;
   }
 
@@ -620,7 +620,7 @@ int32_t DefRead::versionCallback(defrCallbackType_e type, const char* version, d
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Version] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Version] ...");
     return kDbFail;
   }
 
@@ -641,7 +641,7 @@ int32_t DefRead::designCallback(defrCallbackType_e type, const char* name, defiU
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Design name] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Design name] ...");
     return kDbFail;
   }
 
@@ -662,7 +662,7 @@ int32_t DefRead::unitsCallback(defrCallbackType_e type, double d, defiUserData d
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Units] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Units] ...");
     return kDbFail;
   }
 
@@ -678,7 +678,7 @@ int32_t DefRead::parse_units(double microns)
 
   uint32_t lef_microns = layout->get_units()->get_micron_dbu();
   if (microns != lef_microns) {
-    IEDALOG.warn(ieda::Loc::current(), "Warning : Def DBU dismatch LEF DBU");
+    ECCLOG.warn(ecc::Loc::current(), "Warning : Def DBU dismatch LEF DBU");
     //   return kDbFail;
   }
 
@@ -691,13 +691,13 @@ int32_t DefRead::parse_units(double microns)
 int32_t DefRead::dieAreaCallback(defrCallbackType_e type, defiBox* def_box, defiUserData data)
 {
   if (def_box == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Die Area is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Die Area is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Die Area] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Die Area] ...");
     return kDbFail;
   }
 
@@ -709,7 +709,7 @@ int32_t DefRead::dieAreaCallback(defrCallbackType_e type, defiBox* def_box, defi
 int32_t DefRead::parse_die(defiBox* def_box)
 {
   if (def_box == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Parse die error...");
+    ECCLOG.warn(ecc::Loc::current(), "Parse die error...");
 
     return kDbFail;
   }
@@ -731,13 +731,13 @@ int32_t DefRead::parse_die(defiBox* def_box)
 int32_t DefRead::trackGridCallback(defrCallbackType_e type, defiTrack* def_track, defiUserData data)
 {
   if (def_track == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Track Grid is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Track Grid is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Track Grid] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Track Grid] ...");
     return kDbFail;
   }
 
@@ -749,7 +749,7 @@ int32_t DefRead::trackGridCallback(defrCallbackType_e type, defiTrack* def_track
 int32_t DefRead::parse_track_grid(defiTrack* def_track)
 {
   if (def_track == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Track Grid is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Track Grid is nullPtr...");
     return kDbFail;
   }
 
@@ -779,7 +779,7 @@ int32_t DefRead::parse_track_grid(defiTrack* def_track)
         routing_layer->add_track_grid(track_grid);
       }
     } else {
-      IEDALOG.warn(ieda::Loc::current(), "Track Grid Error : no layer exist...");
+      ECCLOG.warn(ecc::Loc::current(), "Track Grid Error : no layer exist...");
     }
   }
 
@@ -789,13 +789,13 @@ int32_t DefRead::parse_track_grid(defiTrack* def_track)
 int32_t DefRead::rowCallback(defrCallbackType_e type, defiRow* def_row, defiUserData data)
 {
   if (def_row == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Row is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Row is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Row] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Row] ...");
     return kDbFail;
   }
 
@@ -807,7 +807,7 @@ int32_t DefRead::rowCallback(defrCallbackType_e type, defiRow* def_row, defiUser
 int32_t DefRead::parse_row(defiRow* def_row)
 {
   if (def_row == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Row is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Row is nullPtr...");
     return kDbFail;
   }
 
@@ -836,7 +836,7 @@ int32_t DefRead::parse_row(defiRow* def_row)
 
   row->set_bounding_box();
 
-  // IEDALOG.info(ieda::Loc::current(), "Parse row success.");
+  // ECCLOG.info(ecc::Loc::current(), "Parse row success.");
   return kDbSuccess;
 }
 
@@ -844,7 +844,7 @@ int32_t DefRead::componentNumberCallback(defrCallbackType_e type, int def_num, d
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Component] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Component] ...");
     return kDbFail;
   }
 
@@ -866,13 +866,13 @@ int32_t DefRead::parse_component_number(int32_t def_component_num)
 int32_t DefRead::componentsCallback(defrCallbackType_e type, defiComponent* def_component, defiUserData data)
 {
   if (def_component == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Component is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Component is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Component] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Component] ...");
     return kDbFail;
   }
 
@@ -884,7 +884,7 @@ int32_t DefRead::componentsCallback(defrCallbackType_e type, defiComponent* def_
 int32_t DefRead::parse_component(defiComponent* def_component)
 {
   if (def_component == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Component is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Component is nullPtr...");
     return kDbFail;
   }
 
@@ -898,7 +898,7 @@ int32_t DefRead::parse_component(defiComponent* def_component)
     _cur_cell_master = master_list->find_cell_master(def_component->name());
   }
   if (_cur_cell_master == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Error can not find Cell Master : ", def_component->name());
+    ECCLOG.warn(ecc::Loc::current(), "Error can not find Cell Master : ", def_component->name());
     return kDbFail;
   }
 
@@ -909,12 +909,12 @@ int32_t DefRead::parse_component(defiComponent* def_component)
   IdbInstance* instance = design->createInstance(new_inst_name, _cur_cell_master->get_name(), IdbInstanceType::kNone,
                                                  IdbPlacementStatus::kNone, IdbOrient::kNone);
   if (instance == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Create Instance Error...");
+    ECCLOG.warn(ecc::Loc::current(), "Create Instance Error...");
     return kDbFail;
   }
   instance->set_status_by_def_enum(def_component->placementStatus());
   instance->set_orient_by_enum(def_component->placementOrient());
-  // IEDALOG.info(ieda::Loc::current(), "def_component ", def_component, ", instance name ", instance->get_name(),
+  // ECCLOG.info(ecc::Loc::current(), "def_component ", def_component, ", instance name ", instance->get_name(),
   //              ", placement orient ", def_component->placementOrient());
   if (def_component->hasSource()) {
     instance->set_type(def_component->source());
@@ -954,9 +954,9 @@ int32_t DefRead::parse_component(defiComponent* def_component)
   instance->set_coodinate(def_component->placementX(), def_component->placementY());
 
   if (design->get_instance_list()->get_num() % 1000 == 0) {
-    IEDALOG.info(ieda::Loc::current(), "-");
+    ECCLOG.info(ecc::Loc::current(), "-");
     if (design->get_instance_list()->get_num() % 100000 == 0) {
-      IEDALOG.info(ieda::Loc::current(), "");
+      ECCLOG.info(ecc::Loc::current(), "");
     }
   }
 
@@ -971,11 +971,11 @@ int32_t DefRead::componentEndCallback(defrCallbackType_e type, void*, defiUserDa
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Component] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Component] ...");
     return kDbFail;
   }
 
-  IEDALOG.info(ieda::Loc::current(), "");
+  ECCLOG.info(ecc::Loc::current(), "");
   def_reader->set_end_time(clock());
 
   return kDbSuccess;
@@ -985,7 +985,7 @@ int32_t DefRead::netBeginCallback(defrCallbackType_e type, int def_num, defiUser
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Net] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Net] ...");
     return kDbFail;
   }
 
@@ -1007,13 +1007,13 @@ int32_t DefRead::parse_net_number(int32_t def_net_num)
 int32_t DefRead::netCallback(defrCallbackType_e type, defiNet* def_net, defiUserData data)
 {
   if (def_net == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Net is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Net is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Net] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Net] ...");
     return kDbFail;
   }
 
@@ -1025,7 +1025,7 @@ int32_t DefRead::netCallback(defrCallbackType_e type, defiNet* def_net, defiUser
 int32_t DefRead::parse_net(defiNet* def_net)
 {
   if (def_net == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Net is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Net is nullPtr...");
     return kDbFail;
   }
 
@@ -1044,7 +1044,7 @@ int32_t DefRead::parse_net(defiNet* def_net)
   IdbNet* net = design->createOrFindNet(new_net_name);
 
   if (net == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Create Net Error...");
+    ECCLOG.warn(ecc::Loc::current(), "Create Net Error...");
     return kDbFail;
   }
 
@@ -1093,7 +1093,7 @@ int32_t DefRead::parse_net(defiNet* def_net)
       std::erase(pin_name, '\\');
       pin = io_pin_list->find_pin(pin_name);
       if (pin == nullptr) {
-        IEDALOG.warn(ieda::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
+        ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
       } else {
         connectPin(pin);
       }
@@ -1104,12 +1104,12 @@ int32_t DefRead::parse_net(defiNet* def_net)
         std::erase(pin_name, '\\');
         pin = instance->get_pin_by_term(pin_name);
         if (pin == nullptr) {
-          IEDALOG.warn(ieda::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
+          ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
         } else {
           connectPin(pin);
         }
       } else {
-        IEDALOG.warn(ieda::Loc::current(), "Can not find instance in instance list ... instance name = ", io_name);
+        ECCLOG.warn(ecc::Loc::current(), "Can not find instance in instance list ... instance name = ", io_name);
       }
     }
   }
@@ -1150,7 +1150,7 @@ int32_t DefRead::parse_net(defiNet* def_net)
             }
 
             if (via == nullptr) {
-              IEDALOG.warn(ieda::Loc::current(), "Error : can not find the via = ", def_path->getVia());
+              ECCLOG.warn(ecc::Loc::current(), "Error : can not find the via = ", def_path->getVia());
               break;
             }
 
@@ -1220,14 +1220,14 @@ int32_t DefRead::parse_net(defiNet* def_net)
   }
 
   if (design->get_net_list()->get_num() % 1000 == 0) {
-    IEDALOG.info(ieda::Loc::current(), "-");
+    ECCLOG.info(ecc::Loc::current(), "-");
 
     if (design->get_net_list()->get_num() % 100000 == 0) {
-      IEDALOG.info(ieda::Loc::current(), "");
+      ECCLOG.info(ecc::Loc::current(), "");
     }
   }
 
-  //   IEDALOG.info(ieda::Loc::current(), "Parse net success, net name = ", net->get_net_name());
+  //   ECCLOG.info(ecc::Loc::current(), "Parse net success, net name = ", net->get_net_name());
 
   return kDbSuccess;
 }
@@ -1236,11 +1236,11 @@ int32_t DefRead::netEndCallback(defrCallbackType_e type, void*, defiUserData dat
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Net] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Net] ...");
     return kDbFail;
   }
 
-  IEDALOG.info(ieda::Loc::current(), "");
+  ECCLOG.info(ecc::Loc::current(), "");
 
   return kDbSuccess;
 }
@@ -1249,11 +1249,11 @@ int32_t DefRead::specialNetBeginCallback(defrCallbackType_e type, int def_num, d
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Special Net Number] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Special Net Number] ...");
     return kDbFail;
   }
 
-  IEDALOG.info(ieda::Loc::current(), "Begin parse Specialnet.");
+  ECCLOG.info(ecc::Loc::current(), "Begin parse Specialnet.");
 
   return kDbSuccess;
 }
@@ -1261,13 +1261,13 @@ int32_t DefRead::specialNetBeginCallback(defrCallbackType_e type, int def_num, d
 int32_t DefRead::specialNetCallback(defrCallbackType_e type, defiNet* def_net, defiUserData data)
 {
   if (def_net == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Special Net is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Special Net is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Special Net] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Special Net] ...");
     return kDbFail;
   }
 
@@ -1279,7 +1279,7 @@ int32_t DefRead::specialNetCallback(defrCallbackType_e type, defiNet* def_net, d
 int32_t DefRead::parse_special_net(defiNet* def_net)
 {
   if (def_net == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Special Net is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Special Net is nullPtr...");
     return kDbFail;
   }
 
@@ -1307,7 +1307,7 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
   IdbSpecialNet* net = design->createOrFindSpecialNet(def_net->name());
 
   if (net == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Create Net Error...");
+    ECCLOG.warn(ecc::Loc::current(), "Create Net Error...");
     return kDbFail;
   }
 
@@ -1340,7 +1340,7 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
       std::erase(pin_name, '\\');
       pin = io_pin_list->find_pin(pin_name);
       if (pin == nullptr) {
-        IEDALOG.warn(ieda::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
+        ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
       } else {
         design->connectPinToSpecialNet(pin, net);
       }
@@ -1351,12 +1351,12 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
         std::erase(pin_name, '\\');
         pin = instance->get_pin_by_term(pin_name);
         if (pin == nullptr) {
-          IEDALOG.warn(ieda::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
+          ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
         } else {
           design->connectPinToSpecialNet(pin, net);
         }
       } else {
-        IEDALOG.warn(ieda::Loc::current(), "Can not find instance in instance list ... instance name = ", io_name);
+        ECCLOG.warn(ecc::Loc::current(), "Can not find instance in instance list ... instance name = ", io_name);
       }
     }
   }
@@ -1370,10 +1370,10 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
   parse_pdn_rects(def_net, wire_list);
 
   if (design->get_special_net_list()->get_num() % 1000 == 0) {
-    IEDALOG.info(ieda::Loc::current(), "-");
+    ECCLOG.info(ecc::Loc::current(), "-");
 
     if (design->get_special_net_list()->get_num() % 100000 == 0) {
-      IEDALOG.info(ieda::Loc::current(), "");
+      ECCLOG.info(ecc::Loc::current(), "");
     }
   }
 
@@ -1510,13 +1510,13 @@ int32_t DefRead::specialNetEndCallback(defrCallbackType_e type, void*, defiUserD
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Special Net] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Special Net] ...");
     return kDbFail;
   }
 
-  IEDALOG.info(ieda::Loc::current(), "");
+  ECCLOG.info(ecc::Loc::current(), "");
 
-  IEDALOG.info(ieda::Loc::current(), "End parse Specialnet.");
+  ECCLOG.info(ecc::Loc::current(), "End parse Specialnet.");
 
   return kDbSuccess;
 }
@@ -1525,7 +1525,7 @@ int32_t DefRead::pinsBeginCallback(defrCallbackType_e type, int def_num, defiUse
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Pin] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Pin] ...");
     return kDbFail;
   }
 
@@ -1547,13 +1547,13 @@ int32_t DefRead::parse_pin_number(int32_t def_pin_num)
 int32_t DefRead::pinCallback(defrCallbackType_e type, defiPin* def_pin, defiUserData data)
 {
   if (def_pin == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Pin is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Pin is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Pin] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Pin] ...");
     return kDbFail;
   }
 
@@ -1568,7 +1568,7 @@ int32_t DefRead::pinCallback(defrCallbackType_e type, defiPin* def_pin, defiUser
 int32_t DefRead::parse_pin(defiPin* def_pin)
 {
   if (def_pin == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Pin is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Pin is nullPtr...");
     return kDbFail;
   }
 
@@ -1583,7 +1583,7 @@ int32_t DefRead::parse_pin(defiPin* def_pin)
 
   IdbPin* pin = design->createOrFindIoPin(new_pin_name, IdbCreatePolicy::kErrorIfExists);
   if (pin == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Create Pin Error...");
+    ECCLOG.warn(ecc::Loc::current(), "Create Pin Error...");
     return kDbFail;
   }
 
@@ -1747,7 +1747,7 @@ int32_t DefRead::pinsEndCallback(defrCallbackType_e type, void*, defiUserData da
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Pin] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Pin] ...");
     return kDbFail;
   }
 
@@ -1758,7 +1758,7 @@ int32_t DefRead::viaBeginCallback(defrCallbackType_e type, int def_num, defiUser
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Via] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Via] ...");
     return kDbFail;
   }
 
@@ -1780,13 +1780,13 @@ int32_t DefRead::parse_via_num(int32_t via_num)
 int32_t DefRead::viaCallback(defrCallbackType_e type, defiVia* def_via, defiUserData data)
 {
   if (def_via == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Via is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Via is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Via] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Via] ...");
     return kDbFail;
   }
 
@@ -1798,7 +1798,7 @@ int32_t DefRead::viaCallback(defrCallbackType_e type, defiVia* def_via, defiUser
 int32_t DefRead::parse_via(defiVia* def_via)
 {
   if (def_via == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Via is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Via is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // Def
@@ -1945,13 +1945,13 @@ int32_t DefRead::parse_via(defiVia* def_via)
 int32_t DefRead::blockageCallback(defrCallbackType_e type, defiBlockage* def_blockage, defiUserData data)
 {
   if (def_blockage == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Blockage is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Blockage is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Blockage] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Blockage] ...");
     return kDbFail;
   }
 
@@ -1963,7 +1963,7 @@ int32_t DefRead::blockageCallback(defrCallbackType_e type, defiBlockage* def_blo
 int32_t DefRead::parse_blockage(defiBlockage* def_blockage)
 {
   if (def_blockage == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Blockage is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Blockage is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // Def
@@ -2042,13 +2042,13 @@ int32_t DefRead::parse_blockage(defiBlockage* def_blockage)
 int32_t DefRead::gcellGridCallback(defrCallbackType_e type, defiGcellGrid* def_grid, defiUserData data)
 {
   if (def_grid == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "GCell Grid is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "GCell Grid is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : GCell Grid] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : GCell Grid] ...");
     return kDbFail;
   }
 
@@ -2060,7 +2060,7 @@ int32_t DefRead::gcellGridCallback(defrCallbackType_e type, defiGcellGrid* def_g
 int32_t DefRead::parse_gcell_grid(defiGcellGrid* def_grid)
 {
   if (def_grid == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "GCell Grid is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "GCell Grid is nullPtr...");
     return kDbFail;
   }
 
@@ -2083,13 +2083,13 @@ int32_t DefRead::parse_gcell_grid(defiGcellGrid* def_grid)
 int32_t DefRead::regionCallback(defrCallbackType_e type, defiRegion* def_region, defiUserData data)
 {
   if (def_region == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Region is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Region is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Region] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Region] ...");
     return kDbFail;
   }
 
@@ -2101,7 +2101,7 @@ int32_t DefRead::regionCallback(defrCallbackType_e type, defiRegion* def_region,
 int32_t DefRead::parse_region(defiRegion* def_region)
 {
   if (def_region == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Region is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Region is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // def
@@ -2125,13 +2125,13 @@ int32_t DefRead::parse_region(defiRegion* def_region)
 int32_t DefRead::slotsCallback(defrCallbackType_e type, defiSlot* def_slot, defiUserData data)
 {
   if (def_slot == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Slot is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Slot is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Slot] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Slot] ...");
     return kDbFail;
   }
 
@@ -2143,7 +2143,7 @@ int32_t DefRead::slotsCallback(defrCallbackType_e type, defiSlot* def_slot, defi
 int32_t DefRead::parse_slot(defiSlot* def_slot)
 {
   if (def_slot == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Slot is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Slot is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // def
@@ -2166,13 +2166,13 @@ int32_t DefRead::parse_slot(defiSlot* def_slot)
 int32_t DefRead::groupCallback(defrCallbackType_e type, defiGroup* def_group, defiUserData data)
 {
   if (def_group == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Group is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Group is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Group] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Group] ...");
     return kDbFail;
   }
 
@@ -2184,7 +2184,7 @@ int32_t DefRead::groupCallback(defrCallbackType_e type, defiGroup* def_group, de
 int32_t DefRead::parse_group(defiGroup* def_group)
 {
   if (def_group == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Group is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Group is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // def
@@ -2206,7 +2206,7 @@ int32_t DefRead::fillsCallback(defrCallbackType_e type, int32_t def_num, defiUse
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Fill] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Fill] ...");
     return kDbFail;
   }
 
@@ -2226,13 +2226,13 @@ int32_t DefRead::parse_fill_number(int32_t def_fill_num)
 int32_t DefRead::fillCallback(defrCallbackType_e type, defiFill* def_fill, defiUserData data)
 {
   if (def_fill == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Fill is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Fill is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Def : Fill] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Fill] ...");
     return kDbFail;
   }
 
@@ -2244,7 +2244,7 @@ int32_t DefRead::fillCallback(defrCallbackType_e type, defiFill* def_fill, defiU
 int32_t DefRead::parse_fill(defiFill* def_fill)
 {
   if (def_fill == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "Fill is nullPtr...");
+    ECCLOG.info(ecc::Loc::current(), "Fill is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // def
@@ -2290,21 +2290,21 @@ int32_t DefRead::parse_fill(defiFill* def_fill)
 int32_t DefRead::busBitCharsCallBack(defrCallbackType_e c, const char* bus_bit_chars_str, defiUserData data)
 {
   if (c != defrBusBitCbkType) {
-    IEDALOG.info(ieda::Loc::current(), "busBitCharsCB callback type unmatch!");
+    ECCLOG.info(ecc::Loc::current(), "busBitCharsCB callback type unmatch!");
     return kDbFail;
   }
   if (bus_bit_chars_str == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "BusBitChars is nullptr...");
+    ECCLOG.info(ecc::Loc::current(), "BusBitChars is nullptr...");
     return kDbFail;
   }
   if (strlen(bus_bit_chars_str) != 2) {
-    IEDALOG.warn(ieda::Loc::current(), "Unsupported Bus Bit Chars...");
+    ECCLOG.warn(ecc::Loc::current(), "Unsupported Bus Bit Chars...");
     return kDbFail;
   }
 
   auto* def_reader = static_cast<DefRead*>(data);
   if (!def_reader->check_type(c)) {
-    IEDALOG.warn(ieda::Loc::current(), "Check Type Error [Lef : BusBitChars] ...");
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : BusBitChars] ...");
     return kDbFail;
   }
   int32_t parse_status = def_reader->parse_bus_bit_chars(bus_bit_chars_str);

@@ -38,7 +38,7 @@ bool parse_lef58_type(Iterator beg, Iterator end, std::string& type)
   const static qi::rule<Iterator, std::string(), qi::ascii::space_type> type_rule = qi::lit("TYPE") >> value_string >> qi::lit(";");
   bool ok = qi::phrase_parse(beg, end, type_rule, qi::ascii::space, type);
   if (not ok || beg != end) {
-    IEDALOG.warn(ieda::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+    ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
     return false;
   }
   return true;

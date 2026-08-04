@@ -313,7 +313,7 @@ void DRCInterface::cmpViolation(std::map<std::string, std::any> config_map)
               LayerRect violation_rect(llx, lly, urx, ury, routing_layer_name_to_idx_map[layer]);
               violation_rect_set.insert(violation_rect);
             } else {
-              IEDALOG.warn(ieda::Loc::current(), "这一行解析失败: ", line);
+              ECCLOG.warn(ecc::Loc::current(), "这一行解析失败: ", line);
             }
           }
         }

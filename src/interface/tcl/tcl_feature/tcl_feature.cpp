@@ -48,7 +48,7 @@ unsigned CmdFeatureSummary::check()
 {
   TclOption* path_option = getOptionOrArg(TCL_PATH);
   // TclOption* step_option = getOptionOrArg(TCL_STEP);
-  ieda::checkTclOption(path_option, TCL_PATH);
+  ecc::checkTclOption(path_option, TCL_PATH);
   //   LOG_FATAL_IF(!step_option);
   return 1;
 }
@@ -91,7 +91,7 @@ unsigned CmdFeatureTool::check()
 {
   TclOption* path_option = getOptionOrArg(TCL_PATH);
   TclOption* step_option = getOptionOrArg(TCL_STEP);
-  ieda::checkTclOption(path_option, TCL_PATH);
+  ecc::checkTclOption(path_option, TCL_PATH);
   //   LOG_FATAL_IF(!step_option);
   return 1;
 }
@@ -137,9 +137,9 @@ unsigned CmdFeatureEvalMap::check()
   TclOption* path_option = getOptionOrArg(TCL_PATH);
   TclOption* bin_cnt_x = getOptionOrArg("-bin_cnt_x");
   TclOption* bin_cnt_y = getOptionOrArg("-bin_cnt_y");
-  ieda::checkTclOption(path_option, TCL_PATH);
-  ieda::checkTclOption(bin_cnt_x, "-bin_cnt_x");
-  ieda::checkTclOption(bin_cnt_y, "-bin_cnt_y");
+  ecc::checkTclOption(path_option, TCL_PATH);
+  ecc::checkTclOption(bin_cnt_x, "-bin_cnt_x");
+  ecc::checkTclOption(bin_cnt_y, "-bin_cnt_y");
   return 1;
 }
 
@@ -246,8 +246,8 @@ unsigned CmdFeatureCongMap::check()
   TclOption* dir_option = getOptionOrArg(TCL_DIRECTORY);
   TclOption* step_option = getOptionOrArg(TCL_STEP);
 
-  ieda::checkTclOption(dir_option, TCL_DIRECTORY);
-  ieda::checkTclOption(step_option, TCL_STEP);
+  ecc::checkTclOption(dir_option, TCL_DIRECTORY);
+  ecc::checkTclOption(step_option, TCL_STEP);
 
   return 1;
 }

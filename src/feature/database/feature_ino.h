@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <string>
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 struct NOClockTiming
 {
@@ -44,4 +44,4 @@ struct NetOptSummary
   std::vector<NOClockTimingCmp> clock_timings;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

@@ -1,5 +1,5 @@
 if(BUILD_STATIC_LIB)
-  add_library( lef_service  
+  add_library( lef_service
   lef_service.cpp
   )
 else()
@@ -8,10 +8,10 @@ else()
   )
 endif()
 
-target_link_libraries(lef_service idb ieda_logger)
+target_link_libraries(lef_service idb ecc_logger)
 
-target_include_directories(lef_service 
-    PUBLIC 
+target_include_directories(lef_service
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${HOME_DATABASE}/data/design
         ${HOME_DATABASE}/data/design/db_design

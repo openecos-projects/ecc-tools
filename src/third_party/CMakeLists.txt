@@ -13,7 +13,7 @@ add_subdirectory(lefdef EXCLUDE_FROM_ALL)
 add_subdirectory(salt)
 add_subdirectory(lemon)
 
-function(ieda_add_highs)
+function(ecc_add_highs)
     set(FAST_BUILD ON)
     set(BUILD_CXX ON)
     set(BUILD_CXX_EXE OFF)
@@ -31,7 +31,7 @@ function(ieda_add_highs)
     add_subdirectory(highs EXCLUDE_FROM_ALL)
 endfunction()
 
-ieda_add_highs()
+ecc_add_highs()
 
 set(GDSTK_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(gdstk EXCLUDE_FROM_ALL)

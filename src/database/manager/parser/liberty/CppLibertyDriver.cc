@@ -73,12 +73,12 @@ LibertyDriver::~LibertyDriver()
 
 void LibertyDriver::reportError(const YYLTYPE& loc, const std::string& msg)
 {
-    IEDALOG.warn(ieda::Loc::current(), *loc.filename, ":", loc.first_line, ":", loc.first_column, ": ", msg);
+    ECCLOG.warn(ecc::Loc::current(), *loc.filename, ":", loc.first_line, ":", loc.first_column, ": ", msg);
 }
 
 void LibertyDriver::reportError(const std::string& msg)
 {
-    IEDALOG.warn(ieda::Loc::current(), _filename, ": ", msg);
+    ECCLOG.warn(ecc::Loc::current(), _filename, ": ", msg);
 }
 
 void LibertyDriver::setParseResult(LibNode* node)
@@ -237,9 +237,9 @@ bool LibertyDriver::parseGroupBody(LibertyScanner& scanner)
             }
         } else {
             if (token > 0 && token < 256) {
-                IEDALOG.warn(ieda::Loc::current(), "Debug: Unexpected token ", token, " at line ", yylloc.first_line, " (char: '", static_cast<char>(token), "')");
+                ECCLOG.warn(ecc::Loc::current(), "Debug: Unexpected token ", token, " at line ", yylloc.first_line, " (char: '", static_cast<char>(token), "')");
             } else {
-                IEDALOG.warn(ieda::Loc::current(), "Debug: Unexpected token ", token, " at line ", yylloc.first_line);
+                ECCLOG.warn(ecc::Loc::current(), "Debug: Unexpected token ", token, " at line ", yylloc.first_line);
             }
             reportError(yylloc, "unexpected token in group body");
             return false;

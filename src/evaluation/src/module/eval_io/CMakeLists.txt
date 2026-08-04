@@ -11,7 +11,7 @@ set(EVAL_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR} CACHE INTERNAL "Path to eval mo
 target_link_libraries(eval_io
     PRIVATE
         idm
-        ieda_logger
+        ecc_logger
         eval_density_api
         eval_timing_api
         eval_wirelength_api

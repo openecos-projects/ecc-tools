@@ -137,9 +137,9 @@ evaluation/api文件夹提供外部使用的接口，根据指标进行分类，
 |  `patchIRDropMap(patch_id_coord_map)` |     所有网格(patch)组成的`map<id, coord_pair>`            |        `map<patch_id, max_irdrop>`             | 根据传入的网格划分信息，启动iPW评估IRDrop，返回网格id与其对应内部所有单元的max_irdrop  |
 
 
-## 三、AIEDA的特征接口
+## 三、AECC的特征接口
 
-在iEDA/src/feature/feature_manager中，对evaluation的接口进一步进行封装，输出`place`和`CTS`两个阶段的汇总性评估结果：
+在ECC/src/feature/feature_manager中，对evaluation的接口进一步进行封装，输出`place`和`CTS`两个阶段的汇总性评估结果：
 - 设计级：wirelength、density、congestion、timing、power，保存在jsonl中；
 - 线网级：各类线网级别的指标，如引脚个数、引脚分布、斯坦纳树线长、功耗等，保存在csv文件中
 

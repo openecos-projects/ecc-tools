@@ -3,8 +3,8 @@ add_library(json_builder
     json_write.cpp
 )
 
-target_include_directories(json_builder 
-    PUBLIC 
+target_include_directories(json_builder
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${HOME_DATABASE}/data/design
         ${HOME_DATABASE}/data/design/db_design
@@ -14,4 +14,4 @@ target_include_directories(json_builder
         ${HOME_DATABASE}/manager/parser/json
 )
 
-target_link_libraries(json_builder PRIVATE json-parser idb ieda_logger)
+target_link_libraries(json_builder PRIVATE json-parser idb ecc_logger)

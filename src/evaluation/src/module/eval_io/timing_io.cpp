@@ -42,7 +42,7 @@ bool EvalTiming::runTimingEval(const std::string& routing_type)
 {
   const auto timing_api = TimingAPI::getInst();
   timing_api->evalTiming(routing_type);
-  IEDALOG.info(ieda::Loc::current(), "Timing evaluation completed for routing type: ", routing_type);
+  ECCLOG.info(ecc::Loc::current(), "Timing evaluation completed for routing type: ", routing_type);
   return true;
 }
 
@@ -53,20 +53,20 @@ void EvalTiming::printTimingResult()
 
   nlohmann::json result_json;
 
-  IEDALOG.info(ieda::Loc::current(), ">> Design Timing Evaluation: ");
+  ECCLOG.info(ecc::Loc::current(), ">> Design Timing Evaluation: ");
   for (const auto routing_type : {"HPWL", "FLUTE", "SALT", "EGR", "DR"}) {
     if (summary.contains(routing_type) == false) {
       continue;
     }
 
     auto timing_summary = summary[routing_type];
-    IEDALOG.info(ieda::Loc::current(), "Routing type: ", routing_type);
+    ECCLOG.info(ecc::Loc::current(), "Routing type: ", routing_type);
 
     nlohmann::json routing_json;
 
     nlohmann::json clocks_json = nlohmann::json::array();
     for (const auto& clock_timing : timing_summary.clock_timings) {
-      IEDALOG.info(ieda::Loc::current(), "Clock: ", clock_timing.clock_name, " Setup WNS: ", clock_timing.setup_wns,
+      ECCLOG.info(ecc::Loc::current(), "Clock: ", clock_timing.clock_name, " Setup WNS: ", clock_timing.setup_wns,
                    " Setup TNS: ", clock_timing.setup_tns, " Hold WNS: ", clock_timing.hold_wns, " Hold TNS: ",
                    clock_timing.hold_tns, " Suggest freq: ", clock_timing.suggest_freq);
 
@@ -81,8 +81,8 @@ void EvalTiming::printTimingResult()
       clocks_json.push_back(clock_json);
     }
 
-    IEDALOG.info(ieda::Loc::current(), "Static power: ", timing_summary.static_power);
-    IEDALOG.info(ieda::Loc::current(), "Dynamic power: ", timing_summary.dynamic_power);
+    ECCLOG.info(ecc::Loc::current(), "Static power: ", timing_summary.static_power);
+    ECCLOG.info(ecc::Loc::current(), "Dynamic power: ", timing_summary.dynamic_power);
 
     routing_json["clock_timings"] = clocks_json;
     routing_json["static_power"] = timing_summary.static_power;
@@ -96,24 +96,24 @@ void EvalTiming::printTimingResult()
   if (std::ofstream output_file(output_path); output_file.is_open()) {
     output_file << result_json.dump(2);
     output_file.close();
-    IEDALOG.info(ieda::Loc::current(), "Timing evaluation results saved to ", output_path);
+    ECCLOG.info(ecc::Loc::current(), "Timing evaluation results saved to ", output_path);
   } else {
-    IEDALOG.warn(ieda::Loc::current(), "Failed to open file for writing: ", output_path);
+    ECCLOG.warn(ecc::Loc::current(), "Failed to open file for writing: ", output_path);
   }
 }
 
 void EvalTiming::setOutputPath(const std::string& path)
 {
   if (path.empty()) {
-    IEDALOG.info(ieda::Loc::current(), "Output path is empty, using default path: ", _output_path);
+    ECCLOG.info(ecc::Loc::current(), "Output path is empty, using default path: ", _output_path);
     return;
   }
   if (_output_path == path) {
-    IEDALOG.info(ieda::Loc::current(), "Output path already exists, using default path: ", _output_path);
+    ECCLOG.info(ecc::Loc::current(), "Output path already exists, using default path: ", _output_path);
     return;
   }
   _output_path = path + "/timing_result.json";
-  IEDALOG.info(ieda::Loc::current(), "Setting Timing Evaluation report output path to ", _output_path);
+  ECCLOG.info(ecc::Loc::current(), "Setting Timing Evaluation report output path to ", _output_path);
   std::filesystem::create_directories(std::filesystem::path(path));
 }
 

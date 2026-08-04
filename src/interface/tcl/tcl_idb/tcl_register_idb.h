@@ -30,7 +30,7 @@
 #include "tcl_db_file.h"
 #include "tcl_db_operate.h"
 
-using namespace ieda;
+using namespace ecc;
 namespace tcl {
 
 int registerCmdDB()

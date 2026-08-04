@@ -65,7 +65,7 @@ bool JsonSoc::saveJson()
   if (tail_str != "json") {
     return false;
   }
-  IEDALOG.info(ieda::Loc::current(), "Begin save feature json, path = ", path);
+  ECCLOG.info(ecc::Loc::current(), "Begin save feature json, path = ", path);
 
   auto* idb_design = dmInst->get_idb_design();
   auto* idb_layout = dmInst->get_idb_layout();
@@ -372,7 +372,7 @@ bool JsonSoc::saveJson()
 
   file_stream.close();
 
-  IEDALOG.info(ieda::Loc::current(), "Save feature json success, path = ", path);
+  ECCLOG.info(ecc::Loc::current(), "Save feature json success, path = ", path);
   return true;
 }
 
@@ -389,7 +389,7 @@ void JsonSoc::parseJson(std::string path)
 {
   nlohmann::json json;
 
-  ieda::initJson(path, json);
+  ecc::initJson(path, json);
 
 }
 

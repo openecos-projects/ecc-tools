@@ -34,7 +34,7 @@
 #include "report_evaluator.h"
 #include "route_builder.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 PlaceSummary FeatureBuilder::buildPLSummary(std::string step)
 {
@@ -78,4 +78,4 @@ bool FeatureBuilder::buildRouteData(RouteAnalyseData* data)
   return route_builder.buildRouteData();
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

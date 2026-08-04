@@ -6,7 +6,7 @@ target_link_libraries(py_report
 PUBLIC
         tool_manager
         pybind11::pybind11
-        ieda_report
+        ecc_report
 
 )
 target_include_directories(py_report

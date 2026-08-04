@@ -45,7 +45,7 @@ bool FileManager::readFile()
 
     closeFile();
 
-    IEDALOG.info(ieda::Loc::current(), "[FileManager Info] : Read file success. Path = ", _data_path);
+    ECCLOG.info(ecc::Loc::current(), "[FileManager Info] : Read file success. Path = ", _data_path);
     return result;
   }
 
@@ -62,7 +62,7 @@ bool FileManager::writeFile()
 
   closeFile();
 
-  IEDALOG.info(ieda::Loc::current(), "[FileManager Info] : Write file success. Path = ", _data_path);
+  ECCLOG.info(ecc::Loc::current(), "[FileManager Info] : Write file success. Path = ", _data_path);
 
   return result;
 }
@@ -71,10 +71,10 @@ bool FileManager::openFile()
 {
   _fstream.open(_data_path, ios_base::in | ios_base::binary);
   if (!_fstream.is_open()) {
-    IEDALOG.warn(ieda::Loc::current(), "[FileManager Error] : Open file failed. Path = ", _data_path);
+    ECCLOG.warn(ecc::Loc::current(), "[FileManager Error] : Open file failed. Path = ", _data_path);
     return false;
   }
-  IEDALOG.info(ieda::Loc::current(), "[FileManager Info] : Open file success. Path = ", _data_path);
+  ECCLOG.info(ecc::Loc::current(), "[FileManager Info] : Open file success. Path = ", _data_path);
 
   _fstream.seekg(ios::beg);
 
@@ -86,20 +86,20 @@ bool FileManager::createFile()
   _fstream.clear();
   _fstream.open(_data_path, ios_base::in | ios_base::out | ios_base::binary | ios::trunc);
   if (!_fstream.is_open()) {
-    IEDALOG.warn(ieda::Loc::current(), "[FileManager Error] : Create file failed. Path = ", _data_path);
+    ECCLOG.warn(ecc::Loc::current(), "[FileManager Error] : Create file failed. Path = ", _data_path);
     return false;
   }
 
   _fstream.seekg(ios::beg);
 
-  IEDALOG.info(ieda::Loc::current(), "[FileManager Info] : Create file success. Path = ", _data_path);
+  ECCLOG.info(ecc::Loc::current(), "[FileManager Info] : Create file success. Path = ", _data_path);
   return true;
 }
 
 bool FileManager::closeFile()
 {
   _fstream.close();
-  IEDALOG.info(ieda::Loc::current(), "[FileManager Info] : Close file success. Path = ", _data_path);
+  ECCLOG.info(ecc::Loc::current(), "[FileManager Info] : Close file success. Path = ", _data_path);
   return true;
 }
 

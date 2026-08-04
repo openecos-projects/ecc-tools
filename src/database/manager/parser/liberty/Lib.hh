@@ -66,12 +66,12 @@ class LibObject
   LibObject() = default;
   virtual ~LibObject() = default;
 
-  virtual void addAxis(std::unique_ptr<LibAxis>&& axis) { IEDALOG.error(ieda::Loc::current(), "not support"); }
-  virtual void set_template_variable1(const char*) { IEDALOG.error(ieda::Loc::current(), "not support"); }
-  virtual void set_template_variable2(const char*) { IEDALOG.error(ieda::Loc::current(), "not support"); }
-  virtual void set_template_variable3(const char*) { IEDALOG.error(ieda::Loc::current(), "not support"); }
+  virtual void addAxis(std::unique_ptr<LibAxis>&& axis) { ECCLOG.error(ecc::Loc::current(), "not support"); }
+  virtual void set_template_variable1(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
+  virtual void set_template_variable2(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
+  virtual void set_template_variable3(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
 
-  virtual void set_template_variable4(const char*) { IEDALOG.error(ieda::Loc::current(), "not support"); }
+  virtual void set_template_variable4(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
 
   virtual unsigned isLibertyPortBus() { return 0; }
 
@@ -322,25 +322,25 @@ class LibTableModel : public LibObject
   virtual LibTable* getTable(int index) = 0;
   virtual std::optional<double> gateDelay(TransType trans_type, double slew, double load)
   {
-    IEDALOG.error(ieda::Loc::current(), "not support");
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
   virtual std::optional<double> gateDelaySigma(AnalysisMode mode, TransType trans_type, double slew, double load) { return 0.0; }
   virtual std::optional<double> gateSlew(TransType trans_type, double slew, double load)
   {
-    IEDALOG.error(ieda::Loc::current(), "not support");
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
   virtual std::optional<double> gateSlewSigma(AnalysisMode mode, TransType trans_type, double slew, double load) { return 0.0; }
   virtual std::optional<double> gateCheckConstrain(TransType trans_type, double slew, double load)
   {
-    IEDALOG.error(ieda::Loc::current(), "not support");
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
 
   virtual std::unique_ptr<LibCurrentData> gateOutputCurrent(TransType trans_type, double slew, double load)
   {
-    IEDALOG.error(ieda::Loc::current(), "not support");
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return nullptr;
   }
 
@@ -348,7 +348,7 @@ class LibTableModel : public LibObject
 
   virtual double gatePower(TransType trans_type, double slew, std::optional<double> load)
   {
-    IEDALOG.error(ieda::Loc::current(), "not support");
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
 
@@ -1298,7 +1298,7 @@ class LibLutTableTemplate : public LibObject
 
   void set_template_variable1(const char* template_variable1) override {
     if(!_str2var.contains(template_variable1)){
-      IEDALOG.warn(ieda::Loc::current(), "not contain the template variable ");
+      ECCLOG.warn(ecc::Loc::current(), "not contain the template variable ");
     }
     // DLOG_FATAL_IF(!_str2var.contains(template_variable1))
     //     << "not contain the template variable " << template_variable1;
@@ -1727,12 +1727,12 @@ class LibAttrValue
 
   virtual double getFloatValue()
   {
-    IEDALOG.error(ieda::Loc::current(), "This is unknown value.");
+    ECCLOG.error(ecc::Loc::current(), "This is unknown value.");
     return 0.0;
   }
   virtual const char* getStringValue()
   {
-    IEDALOG.error(ieda::Loc::current(), "This is unknown value.");
+    ECCLOG.error(ecc::Loc::current(), "This is unknown value.");
     return nullptr;
   }
 };

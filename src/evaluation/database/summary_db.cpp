@@ -7,7 +7,7 @@
 
 #include "summary_db.h"
 
-namespace ieda_eval {
+namespace ecc_eval {
 
 SummaryDB::SummaryDB()
 {
@@ -17,4 +17,4 @@ SummaryDB::~SummaryDB()
 {
 }
 
-}  // namespace ieda_eval
+}  // namespace ecc_eval

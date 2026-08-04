@@ -14,11 +14,11 @@ void TestTiming(const string& db_config_path);
 
 void PrintUsage(const char* program_name)
 {
-  IEDALOG.info(ieda::Loc::current(), "timing evaluation");
-  IEDALOG.info(ieda::Loc::current(), "Usage: ", program_name, " <function_name>");
-  IEDALOG.info(ieda::Loc::current(), "Available parameters:");
-  IEDALOG.info(ieda::Loc::current(), "  <db_config_path> Path to the database configuration file.");
-  IEDALOG.info(ieda::Loc::current(), "  --help, -h       Show this help message and exit.");
+  ECCLOG.info(ecc::Loc::current(), "timing evaluation");
+  ECCLOG.info(ecc::Loc::current(), "Usage: ", program_name, " <function_name>");
+  ECCLOG.info(ecc::Loc::current(), "Available parameters:");
+  ECCLOG.info(ecc::Loc::current(), "  <db_config_path> Path to the database configuration file.");
+  ECCLOG.info(ecc::Loc::current(), "  --help, -h       Show this help message and exit.");
 }
 
 int main(const int argc, const char* argv[])
@@ -32,44 +32,44 @@ int main(const int argc, const char* argv[])
     }
     return 0;
   }
-  IEDALOG.warn(ieda::Loc::current(), "Error: Incorrect number of arguments.");
+  ECCLOG.warn(ecc::Loc::current(), "Error: Incorrect number of arguments.");
   PrintUsage(argv[0]);
   return 1;
 }
 
 void TestTiming(const string& db_config_path)
 {
-  // dmInst->init("/data/project_share/dataset_baseline/gcd/workspace/config/iEDA_config/db_default_config.json");
+  // dmInst->init("/data/project_share/dataset_baseline/gcd/workspace/config/ECC_config/db_default_config.json");
   // auto config = dmInst->get_config();
-  // config.set_output_path("/home/liweiguo/project/iEDA/scripts/design/eval/result");
+  // config.set_output_path("/home/liweiguo/project/ECC/scripts/design/eval/result");
 
-  // iPLAPIInst.initAPI("/data/project_share/dataset_baseline/gcd/workspace/config/iEDA_config/pl_default_config.json",
+  // iPLAPIInst.initAPI("/data/project_share/dataset_baseline/gcd/workspace/config/ECC_config/pl_default_config.json",
   //                    dmInst->get_idb_builder());
   // iPLAPIInst.runFlow();
   dmInst->init(db_config_path);
   auto config = dmInst->get_config();
-  config.set_output_path("/home/liweiguo/project/iEDA/scripts/design/eval/result");
+  config.set_output_path("/home/liweiguo/project/ECC/scripts/design/eval/result");
   dmInst->readLef(std::vector<std::string>{config.get_tech_lef_path()}, true);
   dmInst->readLef(config.get_lef_paths());
-  dmInst->readDef("/data/project_share/dataset_baseline/s15850/workspace/output/iEDA/result/s15850_place.def.gz");
+  dmInst->readDef("/data/project_share/dataset_baseline/s15850/workspace/output/ECC/result/s15850_place.def.gz");
 
   auto* timing_api = ieval::TimingAPI::getInst();
   // timing_api->runSTA();
   timing_api->evalTiming("FLUTE");
   auto summary = timing_api->evalDesign();
-  IEDALOG.info(ieda::Loc::current(), ">> Design Timing Evaluation: ");
+  ECCLOG.info(ecc::Loc::current(), ">> Design Timing Evaluation: ");
   for (auto routing_type : {"HPWL", "FLUTE", "SALT", "EGR", "DR"}) {
     if (summary.contains(routing_type) == false) {
       continue;
     }
     auto timing_summary = summary[routing_type];
-    IEDALOG.info(ieda::Loc::current(), "Routing type: ", routing_type);
+    ECCLOG.info(ecc::Loc::current(), "Routing type: ", routing_type);
     for (auto& clock_timing : timing_summary.clock_timings) {
-      IEDALOG.info(ieda::Loc::current(), "Clock: ", clock_timing.clock_name, " Setup WNS: ", clock_timing.setup_wns,
+      ECCLOG.info(ecc::Loc::current(), "Clock: ", clock_timing.clock_name, " Setup WNS: ", clock_timing.setup_wns,
                    " Setup TNS: ", clock_timing.setup_tns, " Hold WNS: ", clock_timing.hold_wns, " Hold TNS: ",
                    clock_timing.hold_tns, " Suggest freq: ", clock_timing.suggest_freq);
     }
-    IEDALOG.info(ieda::Loc::current(), "Static power: ", timing_summary.static_power);
-    IEDALOG.info(ieda::Loc::current(), "Dynamic power: ", timing_summary.dynamic_power);
+    ECCLOG.info(ecc::Loc::current(), "Static power: ", timing_summary.static_power);
+    ECCLOG.info(ecc::Loc::current(), "Dynamic power: ", timing_summary.dynamic_power);
   }
 }

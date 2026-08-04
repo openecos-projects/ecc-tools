@@ -10,7 +10,7 @@ target_link_libraries(tcl_ilvs
     tcl_util
     PRIVATE
     ilvs_interface
-    ieda_logger
+    ecc_logger
 )
 
 target_include_directories(tcl_ilvs

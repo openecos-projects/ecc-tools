@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 struct CTSSummary
 {
@@ -32,4 +32,4 @@ struct CTSSummary
   double total_clock_wirelength = 0.0;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

@@ -170,7 +170,7 @@ void augmentAnnotations(Exchange& exchange)
 {
   std::ifstream file(exchange.file_name);
   if (!file.is_open()) {
-    IEDALOG.warn(ieda::Loc::current(), "open SPEF annotation scan file failed: ", exchange.file_name);
+    ECCLOG.warn(ecc::Loc::current(), "open SPEF annotation scan file failed: ", exchange.file_name);
     return;
   }
 

@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 struct TOClockTiming
 {
@@ -44,4 +44,4 @@ struct TimingOptSummary
   std::vector<TOClockTimingCmp> clock_timings;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

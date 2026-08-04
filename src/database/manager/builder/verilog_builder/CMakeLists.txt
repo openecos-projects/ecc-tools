@@ -5,8 +5,8 @@ add_library(verilog_builder
 
 find_package(ZLIB REQUIRED)
 
-target_include_directories(verilog_builder 
-     PUBLIC 
+target_include_directories(verilog_builder
+     PUBLIC
              ${CMAKE_CURRENT_SOURCE_DIR}
              ${HOME_DATABASE}/basic
              ${HOME_DATABASE}/data/design
@@ -18,12 +18,12 @@ target_include_directories(verilog_builder
              ${HOME_UTILITY}
 )
 
-target_link_libraries(verilog_builder 
+target_link_libraries(verilog_builder
     PRIVATE
-        verilog 
-        def_service 
+        verilog
+        def_service
         idb
-        ieda_logger
+        ecc_logger
     PUBLIC
         ZLIB::ZLIB
 )

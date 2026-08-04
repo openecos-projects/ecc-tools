@@ -218,7 +218,7 @@ bool DataManager::isNeedTransformByDie()
     return false;
   }
 
-  IEDALOG.info(ieda::Loc::current(), "transform by die");
+  ECCLOG.info(ecc::Loc::current(), "transform by die");
   return true;
 }
 /**

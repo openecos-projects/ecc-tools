@@ -11,7 +11,7 @@ target_link_libraries(eval_congestion_eval
         eval_util_init_egr
         eval_util_wirelength_lut
         eval_util_init_idb
-        ieda_logger
+        ecc_logger
 )
 
 target_include_directories(eval_congestion_eval

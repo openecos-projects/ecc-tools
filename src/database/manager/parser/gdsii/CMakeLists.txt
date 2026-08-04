@@ -12,10 +12,10 @@ add_compile_options(-Wall -Wextra -pedantic)
 aux_source_directory(. SRC)
 add_library(gdsii-parser ${SRC})
 
-target_include_directories(gdsii-parser 
-    PUBLIC 
+target_include_directories(gdsii-parser
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(gdsii-parser PRIVATE ieda_logger)
+target_link_libraries(gdsii-parser PRIVATE ecc_logger)
 # SET(CMAKE_BUILD_TYPE "Debug")

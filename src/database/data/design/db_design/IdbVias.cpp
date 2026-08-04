@@ -136,7 +136,7 @@ void IdbVia::set_coordinate(IdbCoordinate<int32_t>* point)
 //     rect->set_rect(_coordinate->get_x() + fix_rect->get_low_x(), _coordinate->get_y() + fix_rect->get_low_y(),
 //                    _coordinate->get_x() + fix_rect->get_high_x(), _coordinate->get_y() + fix_rect->get_high_y());
 //   } else {
-//     IEDALOG.warn(ieda::Loc::current(), "Error setting via bounding box, name = ", _name);
+//     ECCLOG.warn(ecc::Loc::current(), "Error setting via bounding box, name = ", _name);
 //   }
 
 //   return true;
@@ -257,7 +257,7 @@ IdbVia* IdbVias::find_via_generate(IdbLayerCut* layer_cut, int32_t width, int32_
   }
   /// step 2 : find the matched via rule between cut layer and via list
   if (layer_cut == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Error: Cut layer illegal.");
+    ECCLOG.warn(ecc::Loc::current(), "Error: Cut layer illegal.");
     return nullptr;
   }
 
@@ -273,7 +273,7 @@ IdbVia* IdbVias::find_via_generate(IdbLayerCut* layer_cut, int32_t width, int32_
 
   /// step 3 : if find none, create via as via_name
   if (width == 0 || height == 0) {
-    IEDALOG.warn(ieda::Loc::current(), "Error: width and height must be set.");
+    ECCLOG.warn(ecc::Loc::current(), "Error: width and height must be set.");
     return nullptr;
   }
 

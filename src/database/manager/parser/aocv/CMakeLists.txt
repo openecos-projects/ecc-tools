@@ -14,4 +14,4 @@ TARGET_INCLUDE_DIRECTORIES(aocv-parser
         ${HOME_UTILITY}
 )
 
-TARGET_LINK_LIBRARIES(aocv-parser PUBLIC absl::btree ieda_logger tcl)
+TARGET_LINK_LIBRARIES(aocv-parser PUBLIC absl::btree ecc_logger tcl)

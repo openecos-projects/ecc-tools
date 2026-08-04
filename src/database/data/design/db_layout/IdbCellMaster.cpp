@@ -315,7 +315,7 @@ vector<IdbCellMaster*> IdbCellMasterList::getCoreFillers(vector<string> name_lis
         cell_master->set_type_core_filler();
         cell_master_list.push_back(cell_master);
       } else {
-        IEDALOG.warn(ieda::Loc::current(), "Error : Not a filler, please check it in lef file, name = ", name);
+        ECCLOG.warn(ecc::Loc::current(), "Error : Not a filler, please check it in lef file, name = ", name);
       }
     }
   }
@@ -340,7 +340,7 @@ vector<IdbCellMaster*> IdbCellMasterList::getIOFillers(vector<string> name_list)
         cell_master->set_type_pad_filler();
         cell_master_list.push_back(cell_master);
       } else {
-        IEDALOG.warn(ieda::Loc::current(), "Error : Not a pad filler, please check it in lef file, name = ", name);
+        ECCLOG.warn(ecc::Loc::current(), "Error : Not a pad filler, please check it in lef file, name = ", name);
       }
     }
   }
