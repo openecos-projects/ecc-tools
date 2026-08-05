@@ -21,7 +21,6 @@
 #include <string>
 
 #include "ZHInterface.hpp"
-#include "file_zh.h"
 
 
 namespace python_interface {
