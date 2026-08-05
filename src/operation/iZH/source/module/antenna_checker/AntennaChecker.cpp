@@ -1317,7 +1317,7 @@ class AntennaCheckerImpl
     }
 
     // 4. Same-layer geometric overlap edges
-    std::vector<std::vector<std::pair<ieda_solver::BgRect, int>>> items_by_layer(static_cast<size_t>(max_layer_idx) + 1);
+    std::vector<std::vector<std::pair<ecc_solver::BgRect, int>>> items_by_layer(static_cast<size_t>(max_layer_idx) + 1);
 
     for (size_t i = 0; i < nodes.size(); ++i) {
       if (!nodes[i].is_conductor) {
@@ -1329,16 +1329,16 @@ class AntennaCheckerImpl
           continue;
         }
 
-        ieda_solver::BgPoint p_min(s.rect.get_low_x(), s.rect.get_low_y());
-        ieda_solver::BgPoint p_max(s.rect.get_high_x(), s.rect.get_high_y());
-        ieda_solver::BgRect b_rect(p_min, p_max);
+        ecc_solver::BgPoint p_min(s.rect.get_low_x(), s.rect.get_low_y());
+        ecc_solver::BgPoint p_max(s.rect.get_high_x(), s.rect.get_high_y());
+        ecc_solver::BgRect b_rect(p_min, p_max);
 
         items_by_layer[s.layer_order].emplace_back(b_rect, static_cast<int>(i));
       }
     }
 
     constexpr size_t kBruteForceThreshold = 8;
-    using RTree = ieda_solver::bg::index::rtree<std::pair<ieda_solver::BgRect, int>, ieda_solver::bg::index::quadratic<16>>;
+    using RTree = ecc_solver::bg::index::rtree<std::pair<ecc_solver::BgRect, int>, ecc_solver::bg::index::quadratic<16>>;
 
     std::vector<std::optional<RTree>> rtrees(static_cast<size_t>(max_layer_idx) + 1);
 
@@ -1355,7 +1355,7 @@ class AntennaCheckerImpl
               continue;
             }
 
-            if (ieda_solver::bg::intersects(items[a].first, items[b].first)) {
+            if (ecc_solver::bg::intersects(items[a].first, items[b].first)) {
               addEdge(items[a].second, items[b].second, layer);
             }
           }
@@ -1380,13 +1380,13 @@ class AntennaCheckerImpl
           continue;
         }
 
-        ieda_solver::BgPoint p_min(s.rect.get_low_x(), s.rect.get_low_y());
-        ieda_solver::BgPoint p_max(s.rect.get_high_x(), s.rect.get_high_y());
-        ieda_solver::BgRect b_rect(p_min, p_max);
+        ecc_solver::BgPoint p_min(s.rect.get_low_x(), s.rect.get_low_y());
+        ecc_solver::BgPoint p_max(s.rect.get_high_x(), s.rect.get_high_y());
+        ecc_solver::BgRect b_rect(p_min, p_max);
 
-        std::vector<std::pair<ieda_solver::BgRect, int>> results;
+        std::vector<std::pair<ecc_solver::BgRect, int>> results;
         if (rtrees[s.layer_order].has_value()) {
-          rtrees[s.layer_order]->query(ieda_solver::bg::index::intersects(b_rect), std::back_inserter(results));
+          rtrees[s.layer_order]->query(ecc_solver::bg::index::intersects(b_rect), std::back_inserter(results));
         }
 
         for (const auto& res : results) {
