@@ -55,7 +55,7 @@ bool insert_filler(const std::string& config)
   return true;
 }
 
-bool check_antenna(const std::string& config, const std::string& report_dir, const std::string& feature_file)
+bool check_antenna(const std::string& config, const std::string& report_dir, const std::string& /*feature_file*/)
 {
   std::map<std::string, std::any> config_map;
 
@@ -72,11 +72,6 @@ bool check_antenna(const std::string& config, const std::string& report_dir, con
   }
 
   ZHI.checkAntenna(config_map);
-
-  if (!feature_file.empty()) {
-    iplf::FileZHManager fm(feature_file);
-    fm.saveFileData();
-  }
 
   return true;
 }
