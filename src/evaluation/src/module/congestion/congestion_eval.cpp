@@ -25,6 +25,7 @@
 #include "map_layout_writer.h"
 #include "wirelength_lut.h"
 
+#include "utility/logger/Logger.hpp"
 namespace ieval {
 
 #define EVAL_INIT_EGR_INST (ieval::InitEGR::getInst())
@@ -230,8 +231,8 @@ string CongestionEval::evalEGR(string rt_dir_path, string egr_type, string outpu
       = EVAL_INIT_EGR_INST->parseLayerDirection(rt_dir_path + "/early_router/route.guide");
 
   // for (const auto& [layer, direction] : LayerDirections) {
-  //   std::cout << "Layer: " << layer << ", Direction: " << (direction == LayerDirection::Horizontal ? "Horizontal" : "Vertical")
-  //             << std::endl;
+  //   ECCLOG.info(ecc::Loc::current(), "Layer: ", layer, ", Direction: ",
+  //                direction == LayerDirection::Horizontal ? "Horizontal" : "Vertical");
   // }
   std::vector<std::string> target_layers;
   if (egr_type == "horizontal" || egr_type == "vertical") {
@@ -1598,7 +1599,7 @@ std::map<std::string, std::vector<std::vector<int>>> CongestionEval::getEGRMap(b
 {
   std::string congestion_dir = dmInst->get_config().get_output_path() + "/rt/rt_temp_directory/early_router";
 
-  printf("congestion_dir: %s\n", congestion_dir.c_str());
+  ECCLOG.info(ecc::Loc::current(), "congestion_dir: ", congestion_dir);
   // check if congestion_dir is empty
   // if (is_run_egr == true) {
   std::filesystem::path cong_dir_path(congestion_dir);
@@ -1655,7 +1656,7 @@ std::map<std::string, std::vector<std::vector<int>>> CongestionEval::getDemandSu
   std::string demand_dir = congestion_dir + "/early_router";
   std::string supply_dir = congestion_dir + "/early_router";
 
-  printf("demand_dir: %s\nsupply_dir: %s\n", demand_dir.c_str(), supply_dir.c_str());
+  ECCLOG.info(ecc::Loc::current(), "demand_dir: ", demand_dir, ", supply_dir: ", supply_dir);
 
   // store the final diff matrices
   std::map<std::string, std::vector<std::vector<int>>> diff_map;
@@ -1736,7 +1737,7 @@ std::map<std::string, std::vector<std::vector<int>>> CongestionEval::getDemandSu
         }
         diff_map[layer_name] = diff_matrix;
       } else {
-        printf("Warning: Matrix size mismatch for layer %s\n", layer_name.c_str());
+        ECCLOG.warn(ecc::Loc::current(), "Matrix size mismatch for layer ", layer_name, ".");
       }
     }
   }
@@ -1759,7 +1760,7 @@ std::tuple<std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>>,
   std::string demand_dir = congestion_dir + "/early_router";
   std::string supply_dir = congestion_dir + "/early_router";
 
-  printf("demand_dir: %s\nsupply_dir: %s\n", demand_dir.c_str(), supply_dir.c_str());
+  ECCLOG.info(ecc::Loc::current(), "demand_dir: ", demand_dir, ", supply_dir: ", supply_dir);
 
   // 用于存储最终的差值矩阵
   std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>> result_map;
@@ -1834,7 +1835,7 @@ std::tuple<std::map<std::string, std::pair<CongestionMatrix, CongestionMatrix>>,
         CongestionMatrix supply_congestion(supply_matrix);
         result_map[layer_name] = std::make_pair(demand_congestion, supply_congestion);
       } else {
-        printf("Warning: Matrix size mismatch for layer %s\n", layer_name.c_str());
+        ECCLOG.warn(ecc::Loc::current(), "Matrix size mismatch for layer ", layer_name, ".");
       }
     }
   }
@@ -1941,7 +1942,7 @@ std::map<int, double> CongestionEval::patchEGRCongestion(std::map<int, std::pair
   const size_t matrix_cols = matrix_rows > 0 ? first_matrix[0].size() : 0;
 
   if (matrix_rows == 0 || matrix_cols == 0) {
-    std::cerr << "Error: Empty congestion matrix" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error: Empty congestion matrix");
     return patch_egr_congestion;
   }
 
@@ -2004,7 +2005,7 @@ std::map<int, std::map<std::string, double>> CongestionEval::patchLayerEGRConges
   const size_t matrix_cols = matrix_rows > 0 ? first_matrix[0].size() : 0;
 
   if (matrix_rows == 0 || matrix_cols == 0) {
-    std::cerr << "Error: Empty congestion matrix" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error: Empty congestion matrix");
     return patch_layer_congestion;
   }
 

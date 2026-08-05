@@ -18,14 +18,10 @@
  * @file BoundSkewTreeImpl.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-05-20
- * @brief Bound-skew tree Pimpl implementation: constructors / destructor,
- *        public-API forwarders, component accessors, and shared math used by
- *        multiple cooperating components.
+ * @brief Bound-skew tree orchestration and shared calculations.
  */
 
 #include "bound_skew_tree/algorithm/BoundSkewTreeImpl.hh"
-
-#include <glog/logging.h>
 
 #include <algorithm>
 #include <cmath>
@@ -37,13 +33,13 @@
 #include <utility>
 #include <vector>
 
-#include "Log.hh"
+#include "Logger.hh"
 #include "Point.hh"
+#include "bound_skew_tree/algorithm/BSTPipeline.hh"
 #include "bound_skew_tree/algorithm/BinaryTopology.hh"
 #include "bound_skew_tree/algorithm/BottomUpMergeBalance.hh"
 #include "bound_skew_tree/algorithm/BottomUpMergeInfeasibility.hh"
 #include "bound_skew_tree/algorithm/BottomUpMergeJoining.hh"
-#include "bound_skew_tree/algorithm/BstPipeline.hh"
 #include "bound_skew_tree/algorithm/TopDownEmbedding.hh"
 
 namespace icts::bst::detail {
@@ -61,7 +57,9 @@ BoundSkewTreeImpl::BoundSkewTreeImpl(std::vector<std::unique_ptr<Area>> load_are
       _delay_quadratic_factor{.horizontal = kHalfFactor * _unit_horizontal_resistance * _unit_horizontal_capacitance,
                               .vertical = kHalfFactor * _unit_vertical_resistance * _unit_vertical_capacitance}
 {
-  LOG_FATAL_IF(topology_mode == BSTRoutingTopologyMode::kSourceRouteTree) << "Normal BST construction cannot use source-route-tree mode.";
+  if (topology_mode == BSTRoutingTopologyMode::kSourceRouteTree) {
+    CTSLOG.error(Loc::current(), "Normal BST construction cannot use source-route-tree mode.");
+  }
   _unmerged_nodes.reserve(_owned_areas.size());
   for (const auto& area : _owned_areas) {
     _unmerged_nodes.push_back(area.get());
@@ -89,7 +87,9 @@ BoundSkewTreeImpl::BoundSkewTreeImpl(std::vector<std::unique_ptr<Area>> owned_ar
       _delay_quadratic_factor{.horizontal = kHalfFactor * _unit_horizontal_resistance * _unit_horizontal_capacitance,
                               .vertical = kHalfFactor * _unit_vertical_resistance * _unit_vertical_capacitance}
 {
-  LOG_FATAL_IF(root == nullptr) << "BST source-route-tree root area is null.";
+  if (root == nullptr) {
+    CTSLOG.error(Loc::current(), "BST source-route-tree root area is null.");
+  }
   if (parameters.root_guide.has_value()) {
     set_root_guide(parameters.root_guide->get_x(), parameters.root_guide->get_y());
   }
@@ -175,8 +175,8 @@ auto BoundSkewTreeImpl::mergeCost(Area* left, Area* right) const -> double
   auto left_max = closest_left_point.max;
   auto right_max = closest_right_point.max;
   auto factor = left->get_cap_load() + right->get_cap_load() + (_unit_horizontal_capacitance * min_distance);
-  auto len_to_left = (((right_max - left_max) / _unit_horizontal_resistance)
-                      + (kHalfFactor * _unit_horizontal_capacitance * min_distance * min_distance) + (min_distance * right->get_cap_load()))
+  auto len_to_left = (((right_max - left_max) / _unit_horizontal_resistance) + (kHalfFactor * _unit_horizontal_capacitance * min_distance * min_distance)
+                      + (min_distance * right->get_cap_load()))
                      / factor;
   if (len_to_left < 0) {
     len_to_left = -len_to_left;

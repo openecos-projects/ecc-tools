@@ -4,6 +4,7 @@
  * @Date: 2024-08-24 15:37:27
  * @Description:
  */
+#include "utility/logger/Logger.hpp"
 #include <iostream>
 
 #include "congestion_api.h"
@@ -18,11 +19,11 @@ void TestEgrMapFromIDB(const std::string& db_config_path);
 
 void PrintUsage(const char* program_name)
 {
-  std::cout << "Congestion Evaluation" << std::endl;
-  std::cout << "Usage: " << program_name << " <function_name>" << std::endl;
-  std::cout << "Available parameters:" << std::endl;
-  std::cout << "  <map_config_path> Path to the database configuration file." << std::endl;
-  std::cout << "  --help, -h       Show this help message and exit." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Congestion Evaluation");
+  ECCLOG.info(ecc::Loc::current(), "Usage: ", program_name, " <function_name>");
+  ECCLOG.info(ecc::Loc::current(), "Available parameters:");
+  ECCLOG.info(ecc::Loc::current(), "  <map_config_path> Path to the database configuration file.");
+  ECCLOG.info(ecc::Loc::current(), "  --help, -h       Show this help message and exit.");
 }
 
 int main(const int argc, const char* argv[])
@@ -32,7 +33,7 @@ int main(const int argc, const char* argv[])
       PrintUsage(argv[0]);
       return 0;
     } else {
-      std::cout << "map_path: " << arg << std::endl;
+      ECCLOG.info(ecc::Loc::current(), "map_path: ", arg);
       TestRudyMapFromIDB(arg);
       // Here are some test functions that can be uncommented to run
       // TestEgrMapFromIDB(arg);
@@ -43,11 +44,11 @@ int main(const int argc, const char* argv[])
       return 0;
     }
   }
-  std::cerr << "Error: Incorrect number of arguments." << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Error: Incorrect number of arguments.");
   PrintUsage(argv[0]);
   return 1;
 
-  std::cerr << "Error: Incorrect number of arguments." << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Error: Incorrect number of arguments.");
   PrintUsage(argv[0]);
   return 1;
 }
@@ -61,16 +62,16 @@ void TestEgrDataStructure()
   std::map<std::string, std::vector<std::vector<int>>> egr_map = api.getEGRMap();
 
   for (const auto& pair : egr_map) {
-    std::cout << "Layer: " << pair.first << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Layer: ", pair.first);
     const auto& matrix = pair.second;
 
     for (size_t i = 0; i < matrix.size() && i < 3; ++i) {
       for (const auto& value : matrix[i]) {
-        std::cout << value << " ";
+        ECCLOG.info(ecc::Loc::current(), value, " ");
       }
-      std::cout << std::endl;
+      ECCLOG.info(ecc::Loc::current(), "");
     }
-    std::cout << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "");
   }
 }
 
@@ -83,9 +84,9 @@ void TestEgrMap()
   std::string stage = "place";
 
   ieval::EGRMapSummary egr_map_summary = congestion_api.egrMap(stage, map_path);
-  std::cout << "egr horizontal sum: " << egr_map_summary.horizontal_sum << std::endl;
-  std::cout << "egr vertical sum: " << egr_map_summary.vertical_sum << std::endl;
-  std::cout << "egr union sum: " << egr_map_summary.union_sum << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "egr horizontal sum: ", egr_map_summary.horizontal_sum);
+  ECCLOG.info(ecc::Loc::current(), "egr vertical sum: ", egr_map_summary.vertical_sum);
+  ECCLOG.info(ecc::Loc::current(), "egr union sum: ", egr_map_summary.union_sum);
 }
 
 void TestRudyMap()
@@ -128,12 +129,12 @@ void TestRudyMap()
   std::string stage = "place";
 
   ieval::RUDYMapSummary rudy_map_summary = congestion_api.rudyMap(stage, congestion_nets, region, grid_size);
-  std::cout << "rudy horizontal: " << rudy_map_summary.rudy_horizontal << std::endl;
-  std::cout << "rudy vertical: " << rudy_map_summary.rudy_vertical << std::endl;
-  std::cout << "rudy union: " << rudy_map_summary.rudy_union << std::endl;
-  std::cout << "lut rudy horizontal: " << rudy_map_summary.lutrudy_horizontal << std::endl;
-  std::cout << "lut rudy vertical: " << rudy_map_summary.lutrudy_vertical << std::endl;
-  std::cout << "lut rudy union: " << rudy_map_summary.lutrudy_union << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "rudy horizontal: ", rudy_map_summary.rudy_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "rudy vertical: ", rudy_map_summary.rudy_vertical);
+  ECCLOG.info(ecc::Loc::current(), "rudy union: ", rudy_map_summary.rudy_union);
+  ECCLOG.info(ecc::Loc::current(), "lut rudy horizontal: ", rudy_map_summary.lutrudy_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "lut rudy vertical: ", rudy_map_summary.lutrudy_vertical);
+  ECCLOG.info(ecc::Loc::current(), "lut rudy union: ", rudy_map_summary.lutrudy_union);
 }
 
 void TestEgrOverflow()
@@ -146,15 +147,15 @@ void TestEgrOverflow()
 
   ieval::OverflowSummary overflow_summary;
   overflow_summary = congestion_api.egrOverflow(stage, map_path);
-  std::cout << "total overflow horizontal: " << overflow_summary.total_overflow_horizontal << std::endl;
-  std::cout << "total overflow vertical: " << overflow_summary.total_overflow_vertical << std::endl;
-  std::cout << "total overflow union: " << overflow_summary.total_overflow_union << std::endl;
-  std::cout << "max overflow horizontal: " << overflow_summary.max_overflow_horizontal << std::endl;
-  std::cout << "max overflow vertical: " << overflow_summary.max_overflow_vertical << std::endl;
-  std::cout << "max overflow union: " << overflow_summary.max_overflow_union << std::endl;
-  std::cout << "weighted average overflow horizontal: " << overflow_summary.weighted_average_overflow_horizontal << std::endl;
-  std::cout << "weighted average overflow vertical: " << overflow_summary.weighted_average_overflow_vertical << std::endl;
-  std::cout << "weighted average overflow union: " << overflow_summary.weighted_average_overflow_union << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "total overflow horizontal: ", overflow_summary.total_overflow_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "total overflow vertical: ", overflow_summary.total_overflow_vertical);
+  ECCLOG.info(ecc::Loc::current(), "total overflow union: ", overflow_summary.total_overflow_union);
+  ECCLOG.info(ecc::Loc::current(), "max overflow horizontal: ", overflow_summary.max_overflow_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "max overflow vertical: ", overflow_summary.max_overflow_vertical);
+  ECCLOG.info(ecc::Loc::current(), "max overflow union: ", overflow_summary.max_overflow_union);
+  ECCLOG.info(ecc::Loc::current(), "weighted average overflow horizontal: ", overflow_summary.weighted_average_overflow_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "weighted average overflow vertical: ", overflow_summary.weighted_average_overflow_vertical);
+  ECCLOG.info(ecc::Loc::current(), "weighted average overflow union: ", overflow_summary.weighted_average_overflow_union);
 }
 
 void TestRudyUtilization()
@@ -167,20 +168,20 @@ void TestRudyUtilization()
   
   ieval::UtilizationSummary utilization_summary;
   utilization_summary = congestion_api.rudyUtilization(stage, map_path, false);
-  std::cout << "max utilization horizontal: " << utilization_summary.max_utilization_horizontal << std::endl;
-  std::cout << "max utilization vertical: " << utilization_summary.max_utilization_vertical << std::endl;
-  std::cout << "max utilization union: " << utilization_summary.max_utilization_union << std::endl;
-  std::cout << "average utilization horizontal: " << utilization_summary.weighted_average_utilization_horizontal << std::endl;
-  std::cout << "average utilization vertical: " << utilization_summary.weighted_average_utilization_vertical << std::endl;
-  std::cout << "average utilization union: " << utilization_summary.weighted_average_utilization_union << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "max utilization horizontal: ", utilization_summary.max_utilization_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "max utilization vertical: ", utilization_summary.max_utilization_vertical);
+  ECCLOG.info(ecc::Loc::current(), "max utilization union: ", utilization_summary.max_utilization_union);
+  ECCLOG.info(ecc::Loc::current(), "average utilization horizontal: ", utilization_summary.weighted_average_utilization_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "average utilization vertical: ", utilization_summary.weighted_average_utilization_vertical);
+  ECCLOG.info(ecc::Loc::current(), "average utilization union: ", utilization_summary.weighted_average_utilization_union);
 
   utilization_summary = congestion_api.rudyUtilization(stage, map_path, true);
-  std::cout << "max utilization horizontal: " << utilization_summary.max_utilization_horizontal << std::endl;
-  std::cout << "max utilization vertical: " << utilization_summary.max_utilization_vertical << std::endl;
-  std::cout << "max utilization union: " << utilization_summary.max_utilization_union << std::endl;
-  std::cout << "average utilization horizontal: " << utilization_summary.weighted_average_utilization_horizontal << std::endl;
-  std::cout << "average utilization vertical: " << utilization_summary.weighted_average_utilization_vertical << std::endl;
-  std::cout << "average utilization union: " << utilization_summary.weighted_average_utilization_union << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "max utilization horizontal: ", utilization_summary.max_utilization_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "max utilization vertical: ", utilization_summary.max_utilization_vertical);
+  ECCLOG.info(ecc::Loc::current(), "max utilization union: ", utilization_summary.max_utilization_union);
+  ECCLOG.info(ecc::Loc::current(), "average utilization horizontal: ", utilization_summary.weighted_average_utilization_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "average utilization vertical: ", utilization_summary.weighted_average_utilization_vertical);
+  ECCLOG.info(ecc::Loc::current(), "average utilization union: ", utilization_summary.weighted_average_utilization_union);
 }
 
 void TestRudyMapFromIDB(const std::string& db_config_path)
@@ -192,31 +193,31 @@ void TestRudyMapFromIDB(const std::string& db_config_path)
   ieval::CongestionAPI congestion_api;
   ieval::RUDYMapSummary rudy_map_summary = congestion_api.rudyMap(stage);
 
-  std::cout << "rudy horizontal: " << rudy_map_summary.rudy_horizontal << std::endl;
-  std::cout << "rudy vertical: " << rudy_map_summary.rudy_vertical << std::endl;
-  std::cout << "rudy union: " << rudy_map_summary.rudy_union << std::endl;
-  std::cout << "lut rudy horizontal: " << rudy_map_summary.lutrudy_horizontal << std::endl;
-  std::cout << "lut rudy vertical: " << rudy_map_summary.lutrudy_vertical << std::endl;
-  std::cout << "lut rudy union: " << rudy_map_summary.lutrudy_union << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "rudy horizontal: ", rudy_map_summary.rudy_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "rudy vertical: ", rudy_map_summary.rudy_vertical);
+  ECCLOG.info(ecc::Loc::current(), "rudy union: ", rudy_map_summary.rudy_union);
+  ECCLOG.info(ecc::Loc::current(), "lut rudy horizontal: ", rudy_map_summary.lutrudy_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "lut rudy vertical: ", rudy_map_summary.lutrudy_vertical);
+  ECCLOG.info(ecc::Loc::current(), "lut rudy union: ", rudy_map_summary.lutrudy_union);
 
   ieval::UtilizationSummary utilization_summary;
   utilization_summary = congestion_api.rudyUtilization(stage, false);
-  std::cout << ">>  RUDY " << std::endl;
-  std::cout << "max utilization horizontal: " << utilization_summary.max_utilization_horizontal << std::endl;
-  std::cout << "max utilization vertical: " << utilization_summary.max_utilization_vertical << std::endl;
-  std::cout << "max utilization union: " << utilization_summary.max_utilization_union << std::endl;
-  std::cout << "average utilization horizontal: " << utilization_summary.weighted_average_utilization_horizontal << std::endl;
-  std::cout << "average utilization vertical: " << utilization_summary.weighted_average_utilization_vertical << std::endl;
-  std::cout << "average utilization union: " << utilization_summary.weighted_average_utilization_union << std::endl;
+  ECCLOG.info(ecc::Loc::current(), ">>  RUDY ");
+  ECCLOG.info(ecc::Loc::current(), "max utilization horizontal: ", utilization_summary.max_utilization_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "max utilization vertical: ", utilization_summary.max_utilization_vertical);
+  ECCLOG.info(ecc::Loc::current(), "max utilization union: ", utilization_summary.max_utilization_union);
+  ECCLOG.info(ecc::Loc::current(), "average utilization horizontal: ", utilization_summary.weighted_average_utilization_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "average utilization vertical: ", utilization_summary.weighted_average_utilization_vertical);
+  ECCLOG.info(ecc::Loc::current(), "average utilization union: ", utilization_summary.weighted_average_utilization_union);
 
   utilization_summary = congestion_api.rudyUtilization(stage, true);
-  std::cout << ">>  LUTRUDY " << std::endl;
-  std::cout << "max utilization horizontal: " << utilization_summary.max_utilization_horizontal << std::endl;
-  std::cout << "max utilization vertical: " << utilization_summary.max_utilization_vertical << std::endl;
-  std::cout << "max utilization union: " << utilization_summary.max_utilization_union << std::endl;
-  std::cout << "average utilization horizontal: " << utilization_summary.weighted_average_utilization_horizontal << std::endl;
-  std::cout << "average utilization vertical: " << utilization_summary.weighted_average_utilization_vertical << std::endl;
-  std::cout << "average utilization union: " << utilization_summary.weighted_average_utilization_union << std::endl;
+  ECCLOG.info(ecc::Loc::current(), ">>  LUTRUDY ");
+  ECCLOG.info(ecc::Loc::current(), "max utilization horizontal: ", utilization_summary.max_utilization_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "max utilization vertical: ", utilization_summary.max_utilization_vertical);
+  ECCLOG.info(ecc::Loc::current(), "max utilization union: ", utilization_summary.max_utilization_union);
+  ECCLOG.info(ecc::Loc::current(), "average utilization horizontal: ", utilization_summary.weighted_average_utilization_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "average utilization vertical: ", utilization_summary.weighted_average_utilization_vertical);
+  ECCLOG.info(ecc::Loc::current(), "average utilization union: ", utilization_summary.weighted_average_utilization_union);
 }
 
 void TestEgrMapFromIDB(const std::string& db_config_path)
@@ -229,17 +230,17 @@ void TestEgrMapFromIDB(const std::string& db_config_path)
   ieval::EGRMapSummary egr_map_summary = congestion_api.egrMap(stage);
   overflow_summary = congestion_api.egrOverflow(stage);
 
-  std::cout << "egr horizontal sum: " << egr_map_summary.horizontal_sum << std::endl;
-  std::cout << "egr vertical sum: " << egr_map_summary.vertical_sum << std::endl;
-  std::cout << "egr union sum: " << egr_map_summary.union_sum << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "egr horizontal sum: ", egr_map_summary.horizontal_sum);
+  ECCLOG.info(ecc::Loc::current(), "egr vertical sum: ", egr_map_summary.vertical_sum);
+  ECCLOG.info(ecc::Loc::current(), "egr union sum: ", egr_map_summary.union_sum);
 
-  std::cout << "total overflow horizontal: " << overflow_summary.total_overflow_horizontal << std::endl;
-  std::cout << "total overflow vertical: " << overflow_summary.total_overflow_vertical << std::endl;
-  std::cout << "total overflow union: " << overflow_summary.total_overflow_union << std::endl;
-  std::cout << "max overflow horizontal: " << overflow_summary.max_overflow_horizontal << std::endl;
-  std::cout << "max overflow vertical: " << overflow_summary.max_overflow_vertical << std::endl;
-  std::cout << "max overflow union: " << overflow_summary.max_overflow_union << std::endl;
-  std::cout << "weighted average overflow horizontal: " << overflow_summary.weighted_average_overflow_horizontal << std::endl;
-  std::cout << "weighted average overflow vertical: " << overflow_summary.weighted_average_overflow_vertical << std::endl;
-  std::cout << "weighted average overflow union: " << overflow_summary.weighted_average_overflow_union << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "total overflow horizontal: ", overflow_summary.total_overflow_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "total overflow vertical: ", overflow_summary.total_overflow_vertical);
+  ECCLOG.info(ecc::Loc::current(), "total overflow union: ", overflow_summary.total_overflow_union);
+  ECCLOG.info(ecc::Loc::current(), "max overflow horizontal: ", overflow_summary.max_overflow_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "max overflow vertical: ", overflow_summary.max_overflow_vertical);
+  ECCLOG.info(ecc::Loc::current(), "max overflow union: ", overflow_summary.max_overflow_union);
+  ECCLOG.info(ecc::Loc::current(), "weighted average overflow horizontal: ", overflow_summary.weighted_average_overflow_horizontal);
+  ECCLOG.info(ecc::Loc::current(), "weighted average overflow vertical: ", overflow_summary.weighted_average_overflow_vertical);
+  ECCLOG.info(ecc::Loc::current(), "weighted average overflow union: ", overflow_summary.weighted_average_overflow_union);
 }

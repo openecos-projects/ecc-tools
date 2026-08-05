@@ -27,6 +27,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "IdbInstance.h"
 #include "IdbNet.h"
 #include "IdbPins.h"
@@ -76,7 +77,7 @@ bool DataManager::wrapPA()
         auto access_point = pa_list[0];
         idb_pin->set_grid_coordinate(access_point.x, access_point.y);
       } else {
-        std::cout << "[idm error] PA do not exist for net = " << net->get_net_name() << " pin =  " << idb_pin->get_pin_name() << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "[idm error] PA do not exist for net = ", net->get_net_name(), " pin =  ", idb_pin->get_pin_name());
       }
     }
   }
@@ -88,11 +89,11 @@ std::vector<ids::AccessPoint> DataManager::getMasterPaPointList(std::string mast
 {
   auto master_iter = _master_access_point_map.find(master_name);
   if (master_iter == _master_access_point_map.end()) {
-    std::cout << "[idm Wraning] Can not find cell master = " << master_name << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[idm Wraning] Can not find cell master = ", master_name);
   }
   auto pin_iter = (master_iter->second).find(pin_name);
   if (pin_iter == (master_iter->second).end()) {
-    std::cout << "[idm Wraning] Can not find pin = " << pin_name << " in cell master = " << master_name << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[idm Wraning] Can not find pin = ", pin_name, " in cell master = ", master_name);
     return {};
   }
 
@@ -121,9 +122,7 @@ std::vector<ids::AccessPoint> DataManager::getInstancePaPointList(std::string in
       auto inst_boundary = idb_inst->get_bounding_box();
       if (pa.x > inst_boundary->get_high_x() || pa.x < inst_boundary->get_low_x() || pa.y > inst_boundary->get_high_y()
           || pa.y < inst_boundary->get_low_y()) {
-        std::cout << "[idm error] PA x = " << pa.x << " y = " << pa.y << " is not inside the instance " << idb_inst->get_name() << " ( "
-                  << inst_boundary->get_low_x() << ", " << inst_boundary->get_low_y() << ") ( " << inst_boundary->get_high_x() << ", "
-                  << inst_boundary->get_high_y() << ") " << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "[idm error] PA x = ", pa.x, " y = ", pa.y, " is not inside the instance ", idb_inst->get_name(), " ( ", inst_boundary->get_low_x(), ", ", inst_boundary->get_low_y(), ") ( ", inst_boundary->get_high_x(), ", ", inst_boundary->get_high_y(), ") ");
       }
     }
   }

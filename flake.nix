@@ -6,18 +6,15 @@
     ecc-tools-bin = {
       lib,
       python3Packages,
-      rustPlatform,
       stdenv,
       zlib,
       tcl,
       boost,
       eigen,
-      yaml-cpp,
       libunwind,
       glog,
       gtest,
       gflags,
-      metis,
       gmp,
       curl,
       tbb_2022,
@@ -28,8 +25,6 @@
       bison,
       patchelf,
       pkg-config,
-      cargo,
-      rustc,
     }: python3Packages.buildPythonPackage rec {
       name = "ecc-tools-bin";
       format = "pyproject";
@@ -38,31 +33,11 @@
         root = ./.;
         fileset = unions [
           ./src
-          ./cmake
           ./CMakeLists.txt
           ./pyproject.toml
           ./uv.lock
         ];
       };
-
-      postPatch = lib.pipe {
-        sdf_parser = "src/database/manager/parser/sdf/sdf_parse";
-        verilog-parser = "src/database/manager/parser/verilog/verilog-rust/verilog-parser";
-      } [
-        (lib.mapAttrsToList (name: path: ''
-          mkdir -p ${path}/.cargo
-          cat <<EOF > ${path}/.cargo/config.toml
-          [source."crates-io"]
-          "replace-with" = "vendored-sources"
-
-          [source."vendored-sources"]
-          "directory" = "${rustPlatform.importCargoLock {
-            lockFile = "${src}/${path}/Cargo.lock";
-          }}"
-          EOF
-        ''))
-        (lib.concatStringsSep "\n")
-      ];
 
       build-system = [
         python3Packages.scikit-build-core
@@ -70,6 +45,7 @@
 
       dependencies = with python3Packages; [
         torch
+        matplotlib
       ];
 
       buildInputs = [
@@ -78,16 +54,15 @@
         tcl
         boost
         eigen
-        yaml-cpp
         libunwind
         glog
         gtest
         gflags
-        metis
         gmp
         curl
         tbb_2022
         qhull
+        flex
       ];
       nativeBuildInputs = [
         cmake
@@ -96,8 +71,6 @@
         bison
         patchelf
         pkg-config
-        cargo
-        rustc
         tcl
       ];
       dontUseCmakeConfigure = true;

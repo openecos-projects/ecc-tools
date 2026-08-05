@@ -30,18 +30,16 @@
 #include <string>
 #include <vector>
 
-#include "ClockRouteSegmentRc.hh"
+#include "ClockRouteSegmentRC.hh"
 #include "characterization/buffer_cell/CharacterizationBufferCell.hh"
 #include "characterization/builder/CharBuilderImpl.hh"
 
 namespace icts::char_builder::detail {
 
-auto CharFeasibilityChecker::findCharacterizationBufferCell(const std::string& cell_master) const
-    -> const ::icts::CharacterizationBufferCell*
+auto CharFeasibilityChecker::findCharacterizationBufferCell(const std::string& cell_master) const -> const ::icts::CharacterizationBufferCell*
 {
-  auto it = std::ranges::find_if(_impl._sorted_buffers, [&cell_master](const ::icts::CharacterizationBufferCell& buffer_cell) -> bool {
-    return buffer_cell.cell_master == cell_master;
-  });
+  auto it = std::ranges::find_if(
+      _impl._sorted_buffers, [&cell_master](const ::icts::CharacterizationBufferCell& buffer_cell) -> bool { return buffer_cell.cell_master == cell_master; });
   return it == _impl._sorted_buffers.end() ? nullptr : &(*it);
 }
 
@@ -50,8 +48,7 @@ auto CharFeasibilityChecker::calcClockRouteWireCapPf(double wirelength_um) const
   return std::max(0.0, wirelength_um) * _impl._clock_route_segment_rc.capacitance_per_um_pf;
 }
 
-auto CharFeasibilityChecker::analyzePatternFeasibility(const TopologyDesc& topo, const std::vector<std::string>& buf_masters) const
-    -> PatternFeasibility
+auto CharFeasibilityChecker::analyzePatternFeasibility(const TopologyDesc& topo, const std::vector<std::string>& buf_masters) const -> PatternFeasibility
 {
   if (_impl._sorted_buffers.empty()) {
     return {};
@@ -74,8 +71,7 @@ auto CharFeasibilityChecker::analyzePatternFeasibility(const TopologyDesc& topo,
 
     const double wire_cap_pf = calcClockRouteWireCapPf(topo.wire_segments_um.at(segment_index));
     const bool is_last_segment = (segment_index + 1U == topo.wire_segments_um.size());
-    const ::icts::CharacterizationBufferCell* next_buffer
-        = is_last_segment ? sink_buffer : findCharacterizationBufferCell(buf_masters.at(segment_index));
+    const ::icts::CharacterizationBufferCell* next_buffer = is_last_segment ? sink_buffer : findCharacterizationBufferCell(buf_masters.at(segment_index));
     const double next_input_cap_pf = next_buffer != nullptr ? next_buffer->input_cap_pf : 0.0;
     if (!is_last_segment && next_input_cap_pf <= 0.0) {
       return {};

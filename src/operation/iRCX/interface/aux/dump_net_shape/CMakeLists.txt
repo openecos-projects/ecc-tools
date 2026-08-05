@@ -7,7 +7,7 @@ target_link_libraries(ircx_tool_dump_net_shape
     ircx_database_design
     ircx_headers
   PRIVATE
-    log
+    ircx_logger
     OpenMP::OpenMP_CXX
 )
 

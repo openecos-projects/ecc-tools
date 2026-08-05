@@ -34,7 +34,7 @@
 
 #include "AnalyticalFit.hh"
 #include "BufferingPattern.hh"
-#include "ClockRouteSegmentRc.hh"
+#include "ClockRouteSegmentRC.hh"
 #include "PatternId.hh"
 #include "SegmentChar.hh"
 #include "ValueLattice.hh"
@@ -51,8 +51,7 @@ struct GroupedSegmentChars
 
 auto FindPattern(PatternId pattern_id, const std::vector<BufferingPattern>& buffering_patterns) -> const BufferingPattern*
 {
-  const auto it = std::ranges::find_if(buffering_patterns,
-                                       [&](const BufferingPattern& pattern) -> bool { return pattern.get_pattern_id() == pattern_id; });
+  const auto it = std::ranges::find_if(buffering_patterns, [&](const BufferingPattern& pattern) -> bool { return pattern.get_pattern_id() == pattern_id; });
   return it == buffering_patterns.end() ? nullptr : &*it;
 }
 
@@ -167,9 +166,8 @@ auto AssignStructuralCapOperator(StructuralCapOperator& dst, const StructuralCap
   dst.source = src.source;
 }
 
-auto BuildSparseConstantModel(const std::vector<AnalyticalFitSample>& samples, const AnalyticalFitConfig& fit_config,
-                              const UniformValueLattice& slew_lattice, const UniformValueLattice& cap_lattice)
-    -> std::optional<AnalyticalSurfaceModel>
+auto BuildSparseConstantModel(const std::vector<AnalyticalFitSample>& samples, const AnalyticalFitConfig& fit_config, const UniformValueLattice& slew_lattice,
+                              const UniformValueLattice& cap_lattice) -> std::optional<AnalyticalSurfaceModel>
 {
   if (samples.empty() || !slew_lattice.isValid() || !cap_lattice.isValid()) {
     return std::nullopt;
@@ -204,8 +202,7 @@ auto BuildSparseConstantModel(const std::vector<AnalyticalFitSample>& samples, c
     const double abs_residual = std::abs(residual);
     square_error += residual * residual;
     quality.max_abs_residual = std::max(quality.max_abs_residual, abs_residual);
-    quality.max_relative_residual
-        = std::max(quality.max_relative_residual, abs_residual / std::max(std::abs(sample.value), fit_config.relative_floor));
+    quality.max_relative_residual = std::max(quality.max_relative_residual, abs_residual / std::max(std::abs(sample.value), fit_config.relative_floor));
     if (fit_config.bucket_size > 0.0) {
       quality.max_bucket_residual = std::max(quality.max_bucket_residual, abs_residual / fit_config.bucket_size);
     }
@@ -220,9 +217,9 @@ auto BuildSparseConstantModel(const std::vector<AnalyticalFitSample>& samples, c
   return model;
 }
 
-auto FitMetric(const GroupedSegmentChars& group, const UniformValueLattice& slew_lattice, const UniformValueLattice& cap_lattice,
-               AnalyticalMetric metric, const AnalyticalCharacterizationConfig& config, AnalyticalCharacterizationBuild& result,
-               std::optional<AnalyticalSurfaceModel>& model_slot) -> void
+auto FitMetric(const GroupedSegmentChars& group, const UniformValueLattice& slew_lattice, const UniformValueLattice& cap_lattice, AnalyticalMetric metric,
+               const AnalyticalCharacterizationConfig& config, AnalyticalCharacterizationBuild& result, std::optional<AnalyticalSurfaceModel>& model_slot)
+    -> void
 {
   auto fit_config = MakeFitConfig(metric, config);
   if (metric == AnalyticalMetric::kOutputSlew) {
@@ -251,8 +248,7 @@ auto FitMetric(const GroupedSegmentChars& group, const UniformValueLattice& slew
   });
 }
 
-auto ValidateBucketCompatibility(const StructuralCapOperator& op, const std::vector<SegmentChar>& grouped_chars,
-                                 const UniformValueLattice& cap_lattice) -> bool
+auto ValidateBucketCompatibility(const StructuralCapOperator& op, const std::vector<SegmentChar>& grouped_chars, const UniformValueLattice& cap_lattice) -> bool
 {
   for (const auto& segment_char : grouped_chars) {
     const double load_cap_pf = cap_lattice.valueForIndex(segment_char.get_load_cap_idx());
@@ -264,8 +260,7 @@ auto ValidateBucketCompatibility(const StructuralCapOperator& op, const std::vec
   return true;
 }
 
-auto MakeExactStructuralCapOperator(const BufferingPattern* pattern, const AnalyticalCharacterizationConfig& config)
-    -> std::optional<StructuralCapOperator>
+auto MakeExactStructuralCapOperator(const BufferingPattern* pattern, const AnalyticalCharacterizationConfig& config) -> std::optional<StructuralCapOperator>
 {
   if (pattern == nullptr || config.length_unit_um <= 0.0 || !std::isfinite(config.clock_route_segment_rc.capacitance_per_um_pf)
       || config.clock_route_segment_rc.capacitance_per_um_pf <= 0.0) {
@@ -313,8 +308,8 @@ auto MakeExactStructuralCapOperator(const BufferingPattern* pattern, const Analy
   return op;
 }
 
-auto MakeBucketRepresentativeOperator(const BufferingPattern* pattern, const std::vector<SegmentChar>& grouped_chars,
-                                      const UniformValueLattice& cap_lattice) -> std::optional<StructuralCapOperator>
+auto MakeBucketRepresentativeOperator(const BufferingPattern* pattern, const std::vector<SegmentChar>& grouped_chars, const UniformValueLattice& cap_lattice)
+    -> std::optional<StructuralCapOperator>
 {
   if (grouped_chars.empty()) {
     return std::nullopt;
@@ -340,9 +335,9 @@ auto MakeBucketRepresentativeOperator(const BufferingPattern* pattern, const std
   return op;
 }
 
-auto BuildStructuralCapOperator(PatternId pattern_id, const std::vector<BufferingPattern>& buffering_patterns,
-                                const std::vector<SegmentChar>& grouped_chars, const UniformValueLattice& cap_lattice,
-                                const AnalyticalCharacterizationConfig& config, std::optional<StructuralCapOperator>& operator_slot) -> void
+auto BuildStructuralCapOperator(PatternId pattern_id, const std::vector<BufferingPattern>& buffering_patterns, const std::vector<SegmentChar>& grouped_chars,
+                                const UniformValueLattice& cap_lattice, const AnalyticalCharacterizationConfig& config,
+                                std::optional<StructuralCapOperator>& operator_slot) -> void
 {
   const auto* pattern = FindPattern(pattern_id, buffering_patterns);
   auto op = config.prefer_exact_structural_cap ? MakeExactStructuralCapOperator(pattern, config)
@@ -389,8 +384,7 @@ auto AnalyticalCharacterization::buildFromCharBuilder(const CharBuilder& char_bu
                                char_builder.get_cap_lattice(), builder_config);
 }
 
-auto AnalyticalCharacterization::buildFromSegmentChars(const std::vector<SegmentChar>& segment_chars,
-                                                       const std::vector<BufferingPattern>& buffering_patterns,
+auto AnalyticalCharacterization::buildFromSegmentChars(const std::vector<SegmentChar>& segment_chars, const std::vector<BufferingPattern>& buffering_patterns,
                                                        const UniformValueLattice& slew_lattice, const UniformValueLattice& cap_lattice,
                                                        const AnalyticalCharacterizationConfig& config) -> AnalyticalCharacterizationBuild
 {
@@ -410,8 +404,7 @@ auto AnalyticalCharacterization::buildFromSegmentChars(const std::vector<Segment
     FitMetric(group, slew_lattice, cap_lattice, AnalyticalMetric::kOutputSlew, config, result, model_set.output_slew_model);
     FitMetric(group, slew_lattice, cap_lattice, AnalyticalMetric::kDelay, config, result, model_set.delay_model);
     FitMetric(group, slew_lattice, cap_lattice, AnalyticalMetric::kPower, config, result, model_set.power_model);
-    FitMetric(group, slew_lattice, cap_lattice, AnalyticalMetric::kSourceBoundaryNetSwitchPower, config, result,
-              model_set.source_boundary_power_model);
+    FitMetric(group, slew_lattice, cap_lattice, AnalyticalMetric::kSourceBoundaryNetSwitchPower, config, result, model_set.source_boundary_power_model);
     BuildStructuralCapOperator(group.key.pattern_id, buffering_patterns, group.chars, cap_lattice, config, model_set.source_cap_operator);
     if (model_set.source_cap_operator.has_value()) {
       ++result.summary.structural_cap_operator_count;

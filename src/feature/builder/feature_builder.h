@@ -43,7 +43,7 @@
 #include "feature_irt.h"
 #include "feature_ito.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 class FeatureBuilder
 {
@@ -83,4 +83,4 @@ class FeatureBuilder
   SummaryPins buildSummaryPins();
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

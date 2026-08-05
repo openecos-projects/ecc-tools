@@ -21,9 +21,6 @@ runs:
       shell: bash
       run: echo "/opt/python/cp311-cp311/bin" >> "$GITHUB_PATH"
 
-    - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
-
     - name: Setup sccache
       uses: mozilla-actions/sccache-action@v0.0.9
 

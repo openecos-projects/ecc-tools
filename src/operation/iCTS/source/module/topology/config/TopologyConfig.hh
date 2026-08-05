@@ -27,7 +27,7 @@
 #include <limits>
 #include <unordered_map>
 
-#include "routing/ClockRouteSegmentRc.hh"
+#include "routing/ClockRouteSegmentRC.hh"
 
 namespace icts {
 

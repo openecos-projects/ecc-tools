@@ -20,7 +20,6 @@
 #include "flow_config.h"
 #include "tcl_rt.h"
 #include "tcl_util.h"
-#include "usage/usage.hh"
 
 namespace tcl {
 

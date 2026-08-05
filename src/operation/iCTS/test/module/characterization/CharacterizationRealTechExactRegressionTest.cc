@@ -78,14 +78,13 @@ TEST(CharacterizationRealTechExactRegressionTest, ExactComposeAndExactJoinRemain
   ASSERT_FALSE(frontier_by_length.at(length_50_idx).empty());
   ASSERT_FALSE(frontier_by_length.at(length_100_idx).empty());
 
-  auto exact_segment_100_raw = realtech_fixture::ComposeSegmentEntriesExact(frontier_by_length.at(length_50_idx),
-                                                                            frontier_by_length.at(length_50_idx), segment_context);
+  auto exact_segment_100_raw
+      = realtech_fixture::ComposeSegmentEntriesExact(frontier_by_length.at(length_50_idx), frontier_by_length.at(length_50_idx), segment_context);
   ASSERT_FALSE(exact_segment_100_raw.empty());
   auto exact_segment_100_frontier = realtech_fixture::BuildSegmentStateFrontier(exact_segment_100_raw, segment_context);
   ASSERT_FALSE(exact_segment_100_frontier.empty());
-  EXPECT_TRUE(std::ranges::all_of(exact_segment_100_frontier, [length_100_idx](const icts::SegmentChar& entry) -> bool {
-    return entry.get_length_idx() == length_100_idx;
-  }));
+  EXPECT_TRUE(std::ranges::all_of(exact_segment_100_frontier,
+                                  [length_100_idx](const icts::SegmentChar& entry) -> bool { return entry.get_length_idx() == length_100_idx; }));
 
   realtech_fixture::HTreeFrontierContext htree_context;
 
@@ -98,16 +97,14 @@ TEST(CharacterizationRealTechExactRegressionTest, ExactComposeAndExactJoinRemain
   realtech_fixture::HTreeStageSummary mid_stage;
   mid_stage.label = "mid_50um_to_25um";
   mid_stage.raw_entries = realtech_fixture::ComposeHTreeEntriesExact(
-      realtech_fixture::MakeHTreeSeedEntries(frontier_by_length.at(length_50_idx), segment_context, htree_context),
-      leaf_stage.frontier_entries, htree_context);
+      realtech_fixture::MakeHTreeSeedEntries(frontier_by_length.at(length_50_idx), segment_context, htree_context), leaf_stage.frontier_entries, htree_context);
   mid_stage.frontier_entries = realtech_fixture::BuildHTreeStateFrontier(mid_stage.raw_entries, htree_context);
   ASSERT_FALSE(mid_stage.frontier_entries.empty());
 
   realtech_fixture::HTreeStageSummary root_stage;
   root_stage.label = "root_100um_to_50um_to_25um";
   root_stage.raw_entries = realtech_fixture::ComposeHTreeEntriesExact(
-      realtech_fixture::MakeHTreeSeedEntries(frontier_by_length.at(length_100_idx), segment_context, htree_context),
-      mid_stage.frontier_entries, htree_context);
+      realtech_fixture::MakeHTreeSeedEntries(frontier_by_length.at(length_100_idx), segment_context, htree_context), mid_stage.frontier_entries, htree_context);
   root_stage.frontier_entries = realtech_fixture::BuildHTreeStateFrontier(root_stage.raw_entries, htree_context);
   ASSERT_FALSE(root_stage.frontier_entries.empty());
 
@@ -137,21 +134,17 @@ TEST(CharacterizationRealTechExactRegressionTest, ExactComposeAndExactJoinRemain
                 << ",frontier_count=" << exact_segment_100_frontier.size() << "}\n";
   report_stream << "exact_htree_frontier_counts{leaf=" << leaf_stage.frontier_entries.size() << ",mid=" << mid_stage.frontier_entries.size()
                 << ",root=" << root_stage.frontier_entries.size() << "}\n";
-  realtech_fixture::AppendExamples(
-      report_stream, "exact_segment_100_example=", exact_segment_100_frontier,
-      [&](const icts::SegmentChar& entry) -> std::string { return realtech_fixture::FormatSegmentChar(entry, grid); });
-  realtech_fixture::AppendExamples(
-      report_stream, "exact_htree_leaf_example=", leaf_stage.frontier_entries,
-      [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
-  realtech_fixture::AppendExamples(
-      report_stream, "exact_htree_mid_example=", mid_stage.frontier_entries,
-      [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
-  realtech_fixture::AppendExamples(
-      report_stream, "exact_htree_root_example=", root_stage.frontier_entries,
-      [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
+  realtech_fixture::AppendExamples(report_stream, "exact_segment_100_example=", exact_segment_100_frontier,
+                                   [&](const icts::SegmentChar& entry) -> std::string { return realtech_fixture::FormatSegmentChar(entry, grid); });
+  realtech_fixture::AppendExamples(report_stream, "exact_htree_leaf_example=", leaf_stage.frontier_entries,
+                                   [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
+  realtech_fixture::AppendExamples(report_stream, "exact_htree_mid_example=", mid_stage.frontier_entries,
+                                   [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
+  realtech_fixture::AppendExamples(report_stream, "exact_htree_root_example=", root_stage.frontier_entries,
+                                   [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
   report_stream << "best_exact_htree_char=" << realtech_fixture::FormatHTreeChar(best_exact_htree.value(), grid) << "\n";
 
-  ASSERT_TRUE(realtech_fixture::WriteScenarioLog("exact_regression", "exact_regression_report.txt", report_stream.str()));
+  ASSERT_TRUE(realtech_fixture::WriteScenarioReport("exact_regression", "exact_regression_report.txt", report_stream.str()));
 }
 
 TEST(CharacterizationRealTechExactRegressionTest, IterOneFitAndComposedFrontierGapReport)
@@ -188,10 +181,10 @@ TEST(CharacterizationRealTechExactRegressionTest, IterOneFitAndComposedFrontierG
   ASSERT_FALSE(iter_one_frontier_by_length.at(2U).empty());
   ASSERT_FALSE(iter_one_frontier_by_length.at(3U).empty());
 
-  const auto length_two_gap = CompareComposedFrontierToDirect(2U, direct_frontier_by_length.at(2U), iter_one_frontier_by_length.at(2U),
-                                                              iter_one_segment_context, grid);
-  const auto length_three_gap = CompareComposedFrontierToDirect(3U, direct_frontier_by_length.at(3U), iter_one_frontier_by_length.at(3U),
-                                                                iter_one_segment_context, grid);
+  const auto length_two_gap
+      = CompareComposedFrontierToDirect(2U, direct_frontier_by_length.at(2U), iter_one_frontier_by_length.at(2U), iter_one_segment_context, grid);
+  const auto length_three_gap
+      = CompareComposedFrontierToDirect(3U, direct_frontier_by_length.at(3U), iter_one_frontier_by_length.at(3U), iter_one_segment_context, grid);
   ASSERT_GT(length_two_gap.matched_count, 0U);
   ASSERT_GT(length_three_gap.matched_count, 0U);
 
@@ -213,7 +206,7 @@ TEST(CharacterizationRealTechExactRegressionTest, IterOneFitAndComposedFrontierG
   AppendComposeGapStats(report_stream, length_two_gap, grid);
   AppendComposeGapStats(report_stream, length_three_gap, grid);
 
-  ASSERT_TRUE(realtech_fixture::WriteScenarioLog("iter1_fit_compose_gap", "iter1_fit_compose_gap_report.txt", report_stream.str()));
+  ASSERT_TRUE(realtech_fixture::WriteScenarioReport("iter1_fit_compose_gap", "iter1_fit_compose_gap_report.txt", report_stream.str()));
 }
 
 }  // namespace

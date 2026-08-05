@@ -43,10 +43,7 @@
 #include "design_write.h"
 #include "layout_read.h"
 #include "layout_write.h"
-#include "log/Log.hh"
-
-using std::cout;
-using std::endl;
+#include "utility/logger/Logger.hpp"
 
 namespace idb {
 
@@ -156,15 +153,15 @@ IdbDefService* IdbBuilder::buildDef(string file)
   _def_service = new IdbDefService(layout);
 
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileInit(file.c_str())) {
-    std::cout << "Read DEF file failed..." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Read DEF file failed...");
     return nullptr;
   }
 
-  std::cout << "Read DEF file : " << file << endl;
+  ECCLOG.info(ecc::Loc::current(), "Read DEF file : ", file);
 
   std::shared_ptr<DefRead> def_read = std::make_shared<DefRead>(_def_service);
   if (const auto ret = def_read->createDb(file.c_str()); !ret) {
-    LOG_FATAL << "Def file read failed..." << endl;
+    ECCLOG.error(ecc::Loc::current(), "Def file read failed...");
   }
 
   buildNet();
@@ -185,15 +182,15 @@ IdbDefService* IdbBuilder::buildDefGzip(string gzip_file)
   _def_service = new IdbDefService(layout);
 
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileInit(gzip_file.c_str())) {
-    std::cout << "Read DEF ZIP file failed..." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Read DEF ZIP file failed...");
     return nullptr;
   }
 
-  std::cout << "Read DEF ZIP file : " << gzip_file << endl;
+  ECCLOG.info(ecc::Loc::current(), "Read DEF ZIP file : ", gzip_file);
 
   std::shared_ptr<DefRead> def_read = std::make_shared<DefRead>(_def_service);
   if (const auto ret = def_read->createDbGzip(gzip_file.c_str()); !ret) {
-    LOG_FATAL << "Def file read failed..." << endl;
+    ECCLOG.error(ecc::Loc::current(), "Def file read failed...");
   }
 
   buildNet();
@@ -221,7 +218,7 @@ IdbLefService* IdbBuilder::buildLef(vector<string>& files, bool b_techfile)
   vector<string>::iterator it = files.begin();
   for (; it != files.end(); ++it) {
     string file = *it;
-    std::cout << "Read LEF file : " << file << endl;
+    ECCLOG.info(ecc::Loc::current(), "Read LEF file : ", file);
     std::shared_ptr<LefRead> lef_read = std::make_shared<LefRead>(_lef_service);
     lef_read->createDb(file.c_str());
   }
@@ -235,7 +232,7 @@ IdbLefService* IdbBuilder::buildLef(vector<string>& files, bool b_techfile)
   return _lef_service;
 }
 
-IdbDefService* IdbBuilder::rustBuildVerilog(string file, std::string top_module_name)
+IdbDefService* IdbBuilder::buildVerilog(string file, std::string top_module_name)
 {
   if (_def_service != nullptr) {
     delete _def_service;
@@ -246,17 +243,17 @@ IdbDefService* IdbBuilder::rustBuildVerilog(string file, std::string top_module_
   _def_service = new IdbDefService(layout);
 
   if (IdbDefServiceResult::kServiceFailed == _def_service->VerilogFileInit(file.c_str())) {
-    std::cout << "Read Verilog file failed..." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Read Verilog file failed...");
     return nullptr;
   } else {
-    std::cout << "Read Verilog file success : " << file << endl;
+    ECCLOG.info(ecc::Loc::current(), "Read Verilog file success : ", file);
   }
 
-  std::shared_ptr<RustVerilogRead> rust_verilog_read = std::make_shared<RustVerilogRead>(_def_service);
+  std::shared_ptr<VerilogRead> verilog_read = std::make_shared<VerilogRead>(_def_service);
   if (top_module_name.empty())
-    rust_verilog_read->createDbAutoTop(file);
+    verilog_read->createDbAutoTop(file);
   else
-    rust_verilog_read->createDb(file.c_str(), top_module_name);
+    verilog_read->createDb(file.c_str(), top_module_name);
 
   // update def unit 
   updateDefUnit();
@@ -310,10 +307,10 @@ IdbDefService* IdbBuilder::buildDefFloorplan(string file)
   _def_service = new IdbDefService(layout);
 
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileInit(file.c_str())) {
-    std::cout << "Read DEF file failed..." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Read DEF file failed...");
     return nullptr;
   } else {
-    std::cout << "Read DEF file : " << file << endl;
+    ECCLOG.info(ecc::Loc::current(), "Read DEF file : ", file);
   }
 
   std::shared_ptr<DefRead> def_read = std::make_shared<DefRead>(_def_service);
@@ -337,7 +334,7 @@ IdbDefService* IdbBuilder::buildDefFloorplan(string file)
 //     }
 
 //     if (IdbDataServiceResult::kServiceFailed == _data_service->DefServiceInit(def_service)) {
-//       std::cout << "Get def_service failed..." << endl;
+//       ECCLOG.warn(ecc::Loc::current(), "Get def_service failed.");
 //       return nullptr;
 //     }
 
@@ -347,7 +344,7 @@ IdbDefService* IdbBuilder::buildDefFloorplan(string file)
 bool IdbBuilder::saveDef(string file, DefWriteType type)
 {
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
-    std::cout << "Create DEF file failed..." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create DEF file failed...");
     return false;
   }
 
@@ -358,7 +355,7 @@ bool IdbBuilder::saveDef(string file, DefWriteType type)
 bool IdbBuilder::saveLef(string file)
 {
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
-    std::cout << "Create LEF file failed..." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create LEF file failed...");
     return false;
   }
 
@@ -376,7 +373,7 @@ void IdbBuilder::saveVerilog(std::string verilog_file_name, std::set<std::string
 bool IdbBuilder::saveGDSII(string file, bool is_hardened /* = false */)
 {
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
-    std::cout << "Create GDSII file failed..." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create GDSII file failed...");
     return false;
   }
 
@@ -391,10 +388,10 @@ bool IdbBuilder::saveGDSII(string file, bool is_hardened /* = false */)
 bool IdbBuilder::saveJSON(string file, string options)
 {
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
-    std::cout << "Create JSON file failed..." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create JSON file failed...");
     return false;
   }
-  // std::cout << options << endl;
+  // ECCLOG.info(ecc::Loc::current(), "Options: ", options);
   std::shared_ptr<Gds2JsonWrite> json_write = std::make_shared<Gds2JsonWrite>(_def_service);
   return json_write->writeDb(file.c_str(), options);
 }
@@ -413,13 +410,13 @@ void IdbBuilder::saveLayout(string folder)
 {
   IdbLayout* layout = _lef_service != nullptr ? _lef_service->get_layout() : (_def_service != nullptr ? _def_service->get_layout() : nullptr);
   if (layout == nullptr) {
-    std::cout << "Write binary layout failed: layout is null." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write binary layout failed: layout is null.");
     return;
   }
 
   LayoutWrite layout_write(layout);
   if (!layout_write.writeLayout(folder)) {
-    std::cout << "Write binary layout failed: " << folder << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write binary layout failed: ", folder);
   }
 }
 
@@ -431,7 +428,7 @@ void IdbBuilder::loadLayout(string folder)
 
   LayoutRead layout_read;
   if (!layout_read.readLayout(_lef_service->get_layout(), folder)) {
-    std::cout << "Read binary layout failed: " << folder << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Read binary layout failed: ", folder);
   }
 }
 
@@ -439,7 +436,7 @@ bool IdbBuilder::saveDesign(string folder)
 {
   IdbDesign* design = _def_service != nullptr ? _def_service->get_design() : nullptr;
   if (design == nullptr) {
-    std::cout << "Write binary design failed: design is null." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write binary design failed: design is null.");
     return false;
   }
 
@@ -451,7 +448,7 @@ bool IdbBuilder::loadDesign(string folder)
 {
   IdbLayout* layout = _lef_service != nullptr ? _lef_service->get_layout() : nullptr;
   if (layout == nullptr) {
-    std::cout << "Read binary design failed: layout must be loaded first." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Read binary design failed: layout must be loaded first.");
     return false;
   }
 
@@ -475,7 +472,7 @@ bool IdbBuilder::saveData(string folder)
   IdbLayout* layout = _lef_service != nullptr ? _lef_service->get_layout() : (_def_service != nullptr ? _def_service->get_layout() : nullptr);
   IdbDesign* design = _def_service != nullptr ? _def_service->get_design() : nullptr;
   if (layout == nullptr || design == nullptr) {
-    std::cout << "Write binary data failed: layout or design is null." << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write binary data failed: layout or design is null.");
     return false;
   }
 
@@ -495,7 +492,7 @@ bool IdbBuilder::loadData(string folder)
 
   LayoutRead layout_read;
   if (!layout_read.readLayout(_lef_service->get_layout(), folder, false)) {
-    std::cout << "Read binary layout failed: " << folder << endl;
+    ECCLOG.warn(ecc::Loc::current(), "Read binary layout failed: ", folder);
     return false;
   }
 

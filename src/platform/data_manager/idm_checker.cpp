@@ -27,6 +27,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "checker/check_connection.h"
 #include "idm.h"
 #include "omp.h"
@@ -141,13 +142,13 @@ bool DataManager::isOnIOSite(int32_t llx, int32_t lly, int32_t urx, int32_t ury,
   if (orient == IdbOrient::kE_R270 || orient == IdbOrient::kW_R90) {
     int32_t y_to_bottom = lly - y_start;
     if (y_to_bottom % site_width != 0) {
-      printf("do not match IOSite\n");
+      ECCLOG.warn(ecc::Loc::current(), "IO cell does not match IO site.");
       return false;
     }
   } else if (orient == IdbOrient::kN_R0 || orient == IdbOrient::kS_R180) {
     int32_t x_to_left = llx - x_start;
     if (x_to_left % site_width != 0) {
-      printf("do not match IOSite\n");
+      ECCLOG.warn(ecc::Loc::current(), "IO cell does not match IO site.");
       return false;
     }
   }
@@ -186,7 +187,7 @@ bool DataManager::isNetConnected(IdbNet* net)
 
 std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int> DataManager::isAllNetConnected()
 {
-  std::cout << "[CheckNet Info] Begin check connected ..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Begin check connected ...");
 
   std::map<int, std::vector<std::string>> pin_num_disconnected_net_map;
 
@@ -210,26 +211,22 @@ std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int> DataMa
   omp_destroy_lock(&lck);
 
   for (auto disconnected_net : pin_num_disconnected_net_map[2]) {
-    std::cout << "[CheckNet Info] Disconneted net [pin number == 2] : " << disconnected_net << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Disconneted net [pin number == 2] : ", disconnected_net);
   }
   for (auto disconnected_net : pin_num_disconnected_net_map[3]) {
-    std::cout << "[CheckNet Info] Disconneted net [pin number >= 3] : " << disconnected_net << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Disconneted net [pin number >= 3] : ", disconnected_net);
   }
   if (!pin_num_disconnected_net_map[0].empty()) {
-    std::cout << "[CheckNet Info] Disconneted net [pin number == 0] : " << pin_num_disconnected_net_map[0].size() << " / "
-              << _design->get_net_list()->get_net_list().size() << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Disconneted net [pin number == 0] : ", pin_num_disconnected_net_map[0].size(), " / ", _design->get_net_list()->get_net_list().size());
   }
   if (!pin_num_disconnected_net_map[1].empty()) {
-    std::cout << "[CheckNet Info] Disconneted net [pin number == 1] : " << pin_num_disconnected_net_map[1].size() << " / "
-              << _design->get_net_list()->get_net_list().size() << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Disconneted net [pin number == 1] : ", pin_num_disconnected_net_map[1].size(), " / ", _design->get_net_list()->get_net_list().size());
   }
   if (!pin_num_disconnected_net_map[2].empty()) {
-    std::cout << "[CheckNet Info] Disconneted net [pin number == 2] : " << pin_num_disconnected_net_map[2].size() << " / "
-              << _design->get_net_list()->get_net_list().size() << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Disconneted net [pin number == 2] : ", pin_num_disconnected_net_map[2].size(), " / ", _design->get_net_list()->get_net_list().size());
   }
   if (!pin_num_disconnected_net_map[3].empty()) {
-    std::cout << "[CheckNet Info] Disconneted net [pin number >= 3] : " << pin_num_disconnected_net_map[3].size() << " / "
-              << _design->get_net_list()->get_net_list().size() << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Disconneted net [pin number >= 3] : ", pin_num_disconnected_net_map[3].size(), " / ", _design->get_net_list()->get_net_list().size());
   }
   std::vector<std::string> disconnected_net_list;
   for (size_t i = 0; i <= 3; i++) {
@@ -244,7 +241,7 @@ std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int> DataMa
 
   int num_net = _design->get_net_list()->get_net_list().size();
 
-  std::cout << "[CheckNet Info] End check connected" << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] End check connected");
 
   return std::make_tuple(b_result, disconnected_net_list, one_pin_net_list, num_net);
 }

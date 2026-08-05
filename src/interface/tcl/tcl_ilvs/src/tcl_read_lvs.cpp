@@ -18,6 +18,7 @@
 #include "tcl_ilvs.h"
 #include "tcl_util.h"
 
+#include "utility/logger/Logger.hpp"
 namespace tcl {
 
 namespace {
@@ -39,7 +40,7 @@ unsigned TclReadLVS::check()
   TclOption* def_path_option = getOptionOrArg(kDefBinPath);
   if (netlist_path_option == nullptr || netlist_path_option->getStringVal() == nullptr || def_path_option == nullptr
       || def_path_option->getStringVal() == nullptr) {
-    std::cerr << "Please specify both iLVS snapshot paths by: read_lvs -netlist_bin_path <file> -def_bin_path <file>." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Please specify both iLVS snapshot paths by: read_lvs -netlist_bin_path <file> -def_bin_path <file>.");
     return 0;
   }
   return 1;

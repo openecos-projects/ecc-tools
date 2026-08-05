@@ -77,6 +77,7 @@ class LVSInterface
   void wrapDatabase();
   NetlistData wrapNetlistData(idb::IdbDesign* idb_design);
   DefData wrapDefData(idb::IdbDesign* idb_design);
+  void wrapDie(idb::IdbDesign* idb_design, DefData& def_data);
   void wrapDesignData(idb::IdbDesign* idb_design, DesignData& design_data);
   void wrapInstanceList(idb::IdbDesign* idb_design, DesignData& design_data);
   void wrapInstance(idb::IdbInstance* idb_instance, DesignData& design_data);
@@ -91,7 +92,7 @@ class LVSInterface
   void wrapNetRoutingData(idb::IdbDesign* idb_design, DefData& def_data);
   void wrapRoutingDataPin(const std::string& net_name, idb::IdbPin* idb_pin, bool is_power_net, bool is_ground_net,
                           DefData& def_data);
-  RoutingShape wrapRoutingDataShape(idb::IdbLayer* idb_layer, const idb::IdbRect& idb_rect, bool is_supply_route_shape);
+  RoutingShape wrapRoutingDataShape(idb::IdbLayer* idb_layer, const idb::IdbRect& idb_rect);
   void wrapRoutingDataVia(idb::IdbVia* idb_via, NetRoutingData& net_routing_data);
   void wrapSpecialNetRoutingData(idb::IdbDesign* idb_design, DefData& def_data);
   Shape wrapShape(int32_t layer_idx, idb::IdbRect idb_rect);

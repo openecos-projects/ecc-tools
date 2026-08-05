@@ -335,7 +335,7 @@ bool ClockPropagator::shouldStopClockPropagation(std::string& pin_name)
     return false;
   }
   Instance& instance = database.get_instance_map()[pin.get_instance_name()];
-  return instance.get_is_sequential() && pin_name == instance.get_clock_pin_name();
+  return instance.get_is_sequential() && !instance.get_is_clock_gating() && pin_name == instance.get_clock_pin_name();
 }
 
 void ClockPropagator::updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay)

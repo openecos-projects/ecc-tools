@@ -30,7 +30,7 @@
 #include "builder/PlotSpefModelBuilder.hh"
 #include "config/PlotSpefConfig.hh"
 #include "gds/PlotSpefGdsWriter.hh"
-#include "log/Log.hh"
+#include "Logger.hpp"
 #include "lyp/PlotSpefLypWriter.hh"
 #include "model/PlotSpefModel.hh"
 #include "report/PlotSpefCgEdgeReport.hh"
@@ -51,8 +51,7 @@ auto cleanEdgeGdsDir(const plot_spef::Config& config) -> bool
   if (!std::filesystem::exists(edge_dir)) {
     std::filesystem::create_directories(edge_dir, error_code);
     if (error_code) {
-      LOG_ERROR << "plot_spef failed: cannot create edge GDS directory "
-                << edge_dir.string() << ": " << error_code.message();
+      RCXLOG.warn(Loc::current(), "plot_spef failed: cannot create edge GDS directory ", edge_dir.string(), ": ", error_code.message());
       return false;
     }
     return true;
@@ -60,8 +59,7 @@ auto cleanEdgeGdsDir(const plot_spef::Config& config) -> bool
 
   for (const auto& entry : std::filesystem::directory_iterator(edge_dir, error_code)) {
     if (error_code) {
-      LOG_ERROR << "plot_spef failed: cannot scan edge GDS directory "
-                << edge_dir.string() << ": " << error_code.message();
+      RCXLOG.warn(Loc::current(), "plot_spef failed: cannot scan edge GDS directory ", edge_dir.string(), ": ", error_code.message());
       return false;
     }
     if (!entry.is_regular_file(error_code)
@@ -71,8 +69,7 @@ auto cleanEdgeGdsDir(const plot_spef::Config& config) -> bool
     }
     std::filesystem::remove(entry.path(), error_code);
     if (error_code) {
-      LOG_ERROR << "plot_spef failed: cannot remove stale edge GDS "
-                << entry.path().string() << ": " << error_code.message();
+      RCXLOG.warn(Loc::current(), "plot_spef failed: cannot remove stale edge GDS ", entry.path().string(), ": ", error_code.message());
       return false;
     }
   }
@@ -91,7 +88,7 @@ auto writeEdgeGdsBatch(const plot_spef::Model& model,
 {
   const auto rows = plot_spef::collectCoupledEdgeRows(model);
   if (rows.empty()) {
-    LOG_ERROR << "plot_spef warning: no coupling-cap edge assignments found.";
+    RCXLOG.warn(Loc::current(), "plot_spef warning: no coupling-cap edge assignments found.");
     return true;
   }
 
@@ -125,9 +122,8 @@ auto writeEdgeGdsBatch(const plot_spef::Model& model,
     return false;
   }
 
-  LOG_INFO << "plot_spef wrote " << rows.size()
-           << " edge GDS files using " << threads
-           << " thread(s) to " << config.output_dir << "/edge_gds";
+  RCXLOG.info(Loc::current(), "plot_spef wrote ", rows.size(), " edge GDS files using ", threads, " thread(s) to ", config.output_dir,
+              "/edge_gds");
   return true;
 }
 
@@ -142,14 +138,14 @@ auto PlotSpefTool::run(plot_spef::Config config) -> bool
 
   spef::SpefReader reader;
   if (!reader.read(config.spef_file)) {
-    LOG_ERROR << "plot_spef failed: read external SPEF failed: " << config.spef_file;
+    RCXLOG.warn(Loc::current(), "plot_spef failed: read external SPEF failed: ", config.spef_file);
     return false;
   }
   reader.expandName();
 
   const spef::Exchange* exchange = reader.getSpefFile();
   if (exchange == nullptr) {
-    LOG_ERROR << "plot_spef failed: SPEF reader returned empty data.";
+    RCXLOG.warn(Loc::current(), "plot_spef failed: SPEF reader returned empty data.");
     return false;
   }
 
@@ -174,7 +170,7 @@ auto PlotSpefTool::run(plot_spef::Config config) -> bool
     return false;
   }
 
-  LOG_INFO << "plot_spef wrote output to " << config.output_dir;
+  RCXLOG.info(Loc::current(), "plot_spef wrote output to ", config.output_dir);
   return true;
 }
 

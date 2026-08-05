@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "utility/logger/Logger.hpp"
 #include <boost/spirit/include/qi.hpp>
 #include <string>
 
@@ -37,7 +38,7 @@ bool parse_lef58_type(Iterator beg, Iterator end, std::string& type)
   const static qi::rule<Iterator, std::string(), qi::ascii::space_type> type_rule = qi::lit("TYPE") >> value_string >> qi::lit(";");
   bool ok = qi::phrase_parse(beg, end, type_rule, qi::ascii::space, type);
   if (not ok || beg != end) {
-    std::cout << "Parse \"" << std::string(beg, end) << "\" failed" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
     return false;
   }
   return true;

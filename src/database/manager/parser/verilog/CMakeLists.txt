@@ -24,28 +24,36 @@ else()
   find_package(ZLIB REQUIRED)
 endif()
 
-aux_source_directory(./ SRC)
+set(VERILOG_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+file(MAKE_DIRECTORY ${VERILOG_GENERATED_DIR})
 
-add_library(verilog ${SRC})
+find_package(FLEX REQUIRED)
+flex_target(verilogScanner
+  ${CMAKE_CURRENT_SOURCE_DIR}/VerilogLexer.l
+  ${VERILOG_GENERATED_DIR}/VerilogLexer.cc
+  DEFINES_FILE ${VERILOG_GENERATED_DIR}/VerilogLexer.hh
+)
 
-set(RUST_PROJECT_NAME verilog_parser)
-set(RUST_PROJECT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/verilog-rust/verilog-parser)
-set(RUST_LIB_TYPE a)
+find_package(BISON REQUIRED)
+bison_target(verilogParser
+  ${CMAKE_CURRENT_SOURCE_DIR}/VerilogParser.yy
+  ${VERILOG_GENERATED_DIR}/VerilogParser.cc
+  DEFINES_FILE ${VERILOG_GENERATED_DIR}/VerilogParser.hh
+)
+add_flex_bison_dependency(verilogScanner verilogParser)
 
-SETUP_RUST_PROJECT()
+add_library(verilog
+  VerilogReader.cc
+  VerilogParserContext.cc
+  ${FLEX_verilogScanner_OUTPUTS}
+  ${BISON_verilogParser_OUTPUTS}
+)
 
-if(IEDA_BUILD_AS_THIRDPARTY)
-    install(FILES ${RUST_LIB_PATH} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
-endif()
-
-message(STATUS "verilog parser rust lib path ${RUST_LIB_PATH}")
-
-ADD_EXTERNAL_PROJ(verilog)
-
-target_link_libraries(verilog str log ${ZLIB_LIBRARIES} ${RUST_LIB_PATH} dl) 
+target_link_libraries(verilog ecc_logger ${ZLIB_LIBRARIES})
 
 target_include_directories(verilog
     PUBLIC
-        ${HOME_OPERATION}/iSTA/include
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+        ${VERILOG_GENERATED_DIR}
 )

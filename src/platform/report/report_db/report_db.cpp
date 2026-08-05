@@ -42,8 +42,8 @@ std::string ReportDB::title()
   //   std::string name = design->get_design_name();
   //   std::string version = design->get_version();
 
-  //   std::vector<std::string> header_list = {"iEDA", flowConfigInst->get_env_info_software_version()};
-  //   auto tbl = std::make_shared<ieda::ReportTable>("Design Info", header_list, static_cast<int>(ReportDBType::kTitle));
+  //   std::vector<std::string> header_list = {"ECC", flowConfigInst->get_env_info_software_version()};
+  //   auto tbl = std::make_shared<ecc::ReportTable>("Design Info", header_list, static_cast<int>(ReportDBType::kTitle));
 
   //   *tbl << "Flow Stage" << flowConfigInst->get_status_stage() << TABLE_ENDLINE;
 
@@ -62,10 +62,10 @@ std::string ReportDB::title()
   return ReportBase::title();
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryTable()
+std::shared_ptr<ecc::ReportTable> ReportDB::createSummaryTable()
 {
   std::vector<std::string> header_list = {"Module", "Value"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Summary", header_list, static_cast<int>(ReportDBType::kSummary));
+  auto tbl = std::make_shared<ecc::ReportTable>("Summary", header_list, static_cast<int>(ReportDBType::kSummary));
   auto idb_design = dmInst->get_idb_design();
   auto idb_layout = idb_design->get_layout();
 
@@ -75,15 +75,15 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryTable()
   auto* idb_die = idb_layout->get_die();
   auto die_width = ((double) idb_die->get_width()) / dbu;
   auto die_height = ((double) idb_die->get_height()) / dbu;
-  *tbl << "DIE Area ( um^2 )" << ieda::Str::printf("%f = %03f * %03f", die_width * die_height, die_width, die_height) << TABLE_ENDLINE;
-  *tbl << "DIE Usage" << ieda::Str::printf("%f", dmInst->dieUtilization()) << TABLE_ENDLINE;
+  *tbl << "DIE Area ( um^2 )" << ReportBase::format("%f = %03f * %03f", die_width * die_height, die_width, die_height) << TABLE_ENDLINE;
+  *tbl << "DIE Usage" << ReportBase::format("%f", dmInst->dieUtilization()) << TABLE_ENDLINE;
 
   /// Core
   auto idb_core_box = idb_layout->get_core()->get_bounding_box();
   auto core_width = ((double) idb_core_box->get_width()) / dbu;
   auto core_height = ((double) idb_core_box->get_height()) / dbu;
-  *tbl << "CORE Area ( um^2 )" << ieda::Str::printf("%f = %03f * %03f", core_width * core_height, core_width, core_height) << TABLE_ENDLINE;
-  *tbl << "CORE Usage" << ieda::Str::printf("%f", dmInst->coreUtilization()) << TABLE_ENDLINE;
+  *tbl << "CORE Area ( um^2 )" << ReportBase::format("%f = %03f * %03f", core_width * core_height, core_width, core_height) << TABLE_ENDLINE;
+  *tbl << "CORE Usage" << ReportBase::format("%f", dmInst->coreUtilization()) << TABLE_ENDLINE;
 
   *tbl << TABLE_SKIP << TABLE_SKIP << TABLE_ENDLINE;
   /// site
@@ -135,10 +135,10 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryTable()
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryInstances()
+std::shared_ptr<ecc::ReportTable> ReportDB::createSummaryInstances()
 {
   std::vector<std::string> header_list = {"Type", "Number", "Number Ratio", "Area", "Area Ratio"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Summary - Instance", header_list, static_cast<int>(ReportDBType::kSummaryInstance));
+  auto tbl = std::make_shared<ecc::ReportTable>("Summary - Instance", header_list, static_cast<int>(ReportDBType::kSummaryInstance));
 
   auto idb_design = dmInst->get_idb_design();
   auto idb_layout = dmInst->get_idb_layout();
@@ -194,10 +194,10 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryInstances()
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryNets()
+std::shared_ptr<ecc::ReportTable> ReportDB::createSummaryNets()
 {
   std::vector<std::string> header_list = {"Net Type", "Number", "Number Ratio", "Length", "Length Ratio"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Summary - Net", header_list, static_cast<int>(ReportDBType::kSummaryNet));
+  auto tbl = std::make_shared<ecc::ReportTable>("Summary - Net", header_list, static_cast<int>(ReportDBType::kSummaryNet));
 
   auto idb_design = dmInst->get_idb_design();
 
@@ -224,7 +224,7 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryNets()
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryLayers()
+std::shared_ptr<ecc::ReportTable> ReportDB::createSummaryLayers()
 {
   std::vector<std::string> header_list = {"Layer",
                                           "Net - Wire Length",
@@ -235,7 +235,7 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryLayers()
                                           "Special Net - Wire Length",
                                           "Special Net - Wire Number",
                                           "Special Net - Via Number"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Summary - Layer", header_list, static_cast<int>(ReportDBType::kSummaryLayer));
+  auto tbl = std::make_shared<ecc::ReportTable>("Summary - Layer", header_list, static_cast<int>(ReportDBType::kSummaryLayer));
 
   auto idb_design = dmInst->get_idb_design();
   auto idb_layout = idb_design->get_layout();
@@ -327,10 +327,10 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryLayers()
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryPins()
+std::shared_ptr<ecc::ReportTable> ReportDB::createSummaryPins()
 {
   std::vector<std::string> header_list = {"Pin Number", "Net Number", "Net Ratio", "Instance Number", "Instance Ratio"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Summary - Pin Distribution", header_list, static_cast<int>(ReportDBType::kSummaryPin));
+  auto tbl = std::make_shared<ecc::ReportTable>("Summary - Pin Distribution", header_list, static_cast<int>(ReportDBType::kSummaryPin));
 
   auto idb_design = dmInst->get_idb_design();
   // auto idb_layout = idb_design->get_layout();
@@ -363,13 +363,13 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryPins()
   }
 
   for (int i = 0; i <= max_fanout; i++) {
-    *tbl << i << net_array[i] << ieda::Str::printf("%f", ((float) net_array[i]) / net_total) << inst_array[i]
-         << ieda::Str::printf("%f", ((float) inst_array[i]) / instance_total) << TABLE_ENDLINE;
+    *tbl << i << net_array[i] << ReportBase::format("%f", ((float) net_array[i]) / net_total) << inst_array[i]
+         << ReportBase::format("%f", ((float) inst_array[i]) / instance_total) << TABLE_ENDLINE;
   }
 
-  *tbl << ieda::Str::printf(">= %d ", max_fanout) << net_array[max_num - 1]
-       << ieda::Str::printf("%f", ((float) net_array[max_num - 1]) / net_total) << inst_array[max_num - 1]
-       << ieda::Str::printf("%f", ((float) inst_array[max_num - 1]) / instance_total) << TABLE_ENDLINE;
+  *tbl << ReportBase::format(">= %d ", max_fanout) << net_array[max_num - 1]
+       << ReportBase::format("%f", ((float) net_array[max_num - 1]) / net_total) << inst_array[max_num - 1]
+       << ReportBase::format("%f", ((float) inst_array[max_num - 1]) / instance_total) << TABLE_ENDLINE;
 
   return tbl;
 }

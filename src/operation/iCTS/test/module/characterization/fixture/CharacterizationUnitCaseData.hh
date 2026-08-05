@@ -23,10 +23,10 @@
 
 #pragma once
 
-#include "database/characterization/CharCore.hh"
-#include "database/characterization/HTreeTopologyChar.hh"
-#include "database/characterization/PatternId.hh"
-#include "database/characterization/SegmentChar.hh"
+#include "data_manager/characterization/CharCore.hh"
+#include "data_manager/characterization/HTreeTopologyChar.hh"
+#include "data_manager/characterization/PatternId.hh"
+#include "data_manager/characterization/SegmentChar.hh"
 
 namespace icts_test::characterization {
 
@@ -87,8 +87,8 @@ struct SegmentShape
   unsigned length_idx = 0;
 };
 
-inline auto MakeSegmentChar(unsigned input_slew, unsigned output_slew, unsigned driven_cap, unsigned load_cap, double delay, double power,
-                            SegmentShape shape, double source_boundary_net_switch_power = 0.0) -> icts::SegmentChar
+inline auto MakeSegmentChar(unsigned input_slew, unsigned output_slew, unsigned driven_cap, unsigned load_cap, double delay, double power, SegmentShape shape,
+                            double source_boundary_net_switch_power = 0.0) -> icts::SegmentChar
 {
   const icts::CharCore core(input_slew, output_slew, driven_cap, load_cap, delay, power, icts::PatternId::segment(shape.pattern_id),
                             source_boundary_net_switch_power);
@@ -101,8 +101,8 @@ struct HTreeShape
   unsigned levels = 0;
 };
 
-inline auto MakeHTreeChar(unsigned input_slew, unsigned output_slew, unsigned driven_cap, unsigned load_cap, double delay, double power,
-                          HTreeShape shape, double source_boundary_net_switch_power = 0.0) -> icts::HTreeTopologyChar
+inline auto MakeHTreeChar(unsigned input_slew, unsigned output_slew, unsigned driven_cap, unsigned load_cap, double delay, double power, HTreeShape shape,
+                          double source_boundary_net_switch_power = 0.0) -> icts::HTreeTopologyChar
 {
   const icts::CharCore core(input_slew, output_slew, driven_cap, load_cap, delay, power, icts::PatternId::topology(shape.pattern_id),
                             source_boundary_net_switch_power);

@@ -1,1 +1,0 @@
-ADD_CUDA_PROJ(delay-gpu)

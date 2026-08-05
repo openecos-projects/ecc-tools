@@ -52,17 +52,14 @@ class BottomUpMergeBalance
   auto calcBalancePointOffLine(const BalancePointQuery& query, BalancePointResult& result) const -> void;
   static auto calcMergeDist(const double& unit_resistance, const double& unit_capacitance, const double& cap_load_1, const double& delay_1,
                             const double& cap_load_2, const double& delay_2, const double& total_distance) -> MergeDistances;
-  static auto calcPointCoordOnLine(const Point& first_point, const Point& second_point, const double& distance_to_first,
-                                   const double& distance_to_second, Point& point) -> void;
-  auto calcXBalancePosition(const double& delay_1, const double& delay_2, const double& cap_load_1, const double& cap_load_2,
-                            const double& horizontal_distance, const double& vertical_distance, BalanceRefAxis balance_ref_axis) const
-      -> double;
-  auto calcYBalancePosition(const double& delay_1, const double& delay_2, const double& cap_load_1, const double& cap_load_2,
-                            const double& horizontal_distance, const double& vertical_distance, BalanceRefAxis balance_ref_axis) const
-      -> double;
+  static auto calcPointCoordOnLine(const Point& first_point, const Point& second_point, const double& distance_to_first, const double& distance_to_second,
+                                   Point& point) -> void;
+  auto calcXBalancePosition(const double& delay_1, const double& delay_2, const double& cap_load_1, const double& cap_load_2, const double& horizontal_distance,
+                            const double& vertical_distance, BalanceRefAxis balance_ref_axis) const -> double;
+  auto calcYBalancePosition(const double& delay_1, const double& delay_2, const double& cap_load_1, const double& cap_load_2, const double& horizontal_distance,
+                            const double& vertical_distance, BalanceRefAxis balance_ref_axis) const -> double;
   auto calcFeasibleMergeSegmentOnLine(const Area& current_area, Point& point, const Point& reference_point, const size_t& end_side) -> bool;
-  auto calcFeasibleMergeSegmentBetweenPoints(const Point& high_skew_point, const Point& low_skew_point, Point& feasible_merge_point) const
-      -> void;
+  auto calcFeasibleMergeSegmentBetweenPoints(const Point& high_skew_point, const Point& low_skew_point, Point& feasible_merge_point) const -> void;
   auto isJoiningRegionLine() const -> bool;
   auto addMergeRegionBetweenJoiningSegments(Area* current_area, const size_t& end_side) const -> void;
   auto addMergeRegionOnJoiningSegment(Area* current_area, const size_t& side) const -> void;

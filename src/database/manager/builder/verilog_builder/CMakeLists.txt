@@ -5,8 +5,8 @@ add_library(verilog_builder
 
 find_package(ZLIB REQUIRED)
 
-target_include_directories(verilog_builder 
-     PUBLIC 
+target_include_directories(verilog_builder
+     PUBLIC
              ${CMAKE_CURRENT_SOURCE_DIR}
              ${HOME_DATABASE}/basic
              ${HOME_DATABASE}/data/design
@@ -15,14 +15,15 @@ target_include_directories(verilog_builder
              ${HOME_DATABASE}/manager/service/def_service
              ${HOME_DATABASE}/manager/service/lef_service
              ${HOME_DATABASE}/manager/parser
+             ${HOME_UTILITY}
 )
 
-target_link_libraries(verilog_builder 
+target_link_libraries(verilog_builder
     PRIVATE
-        verilog 
-        def_service 
+        verilog
+        def_service
         idb
-        time
+        ecc_logger
     PUBLIC
         ZLIB::ZLIB
 )

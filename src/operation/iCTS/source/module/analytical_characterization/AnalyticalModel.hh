@@ -141,18 +141,14 @@ class AnalyticalModelCatalog
   auto find(PatternId pattern_id, unsigned length_idx) const -> const AnalyticalModelSet*;
   auto size() const -> std::size_t { return _models.size(); }
   auto empty() const -> bool { return _models.empty(); }
-  auto get_model_sets() const -> const std::unordered_map<AnalyticalModelKey, AnalyticalModelSet, AnalyticalModelKeyHash>&
-  {
-    return _models;
-  }
+  auto get_model_sets() const -> const std::unordered_map<AnalyticalModelKey, AnalyticalModelSet, AnalyticalModelKeyHash>& { return _models; }
 
  private:
   std::unordered_map<AnalyticalModelKey, AnalyticalModelSet, AnalyticalModelKeyHash> _models;
 };
 
 auto AnalyticalBasisTermCount(AnalyticalModelBasis basis) -> std::size_t;
-auto BuildAnalyticalFeatures(AnalyticalModelBasis basis, const AnalyticalDomain& domain, double input_slew_ns, double load_cap_pf)
-    -> std::vector<double>;
+auto BuildAnalyticalFeatures(AnalyticalModelBasis basis, const AnalyticalDomain& domain, double input_slew_ns, double load_cap_pf) -> std::vector<double>;
 auto ToString(AnalyticalMetric metric) -> std::string;
 auto ToString(AnalyticalModelBasis basis) -> std::string;
 

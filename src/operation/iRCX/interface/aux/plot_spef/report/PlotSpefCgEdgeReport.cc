@@ -27,7 +27,7 @@
 #include <vector>
 
 #include "config/PlotSpefConfig.hh"
-#include "log/Log.hh"
+#include "Logger.hpp"
 #include "model/PlotSpefModel.hh"
 #include "PathUtils.hh"
 
@@ -144,7 +144,7 @@ auto CgEdgeReport::write(const Model& model,
   const auto report_file = path::fileUnderDir(config.output_dir, "cg_edges", ".csv");
   std::ofstream out(report_file);
   if (!out.is_open()) {
-    LOG_ERROR << "plot_spef failed: cannot open CG edge report " << report_file.string();
+    RCXLOG.warn(Loc::current(), "plot_spef failed: cannot open CG edge report ", report_file.string());
     return false;
   }
 
@@ -154,7 +154,7 @@ auto CgEdgeReport::write(const Model& model,
         << row.res_index << '\n';
   }
 
-  LOG_INFO << "plot_spef wrote CG edge report to " << report_file.string();
+  RCXLOG.info(Loc::current(), "plot_spef wrote CG edge report to ", report_file.string());
   return true;
 }
 

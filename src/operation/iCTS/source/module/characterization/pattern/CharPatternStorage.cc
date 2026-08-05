@@ -52,8 +52,7 @@ auto CharPatternStorage::storeBufferingPattern(unsigned length_idx, const Topolo
       }
     }
   }
-  if (topo.has_terminal_branch_buffer
-      && (buffer_positions_norm.empty() || std::abs(buffer_positions_norm.back() - 1.0) > ::icts::kValueLatticeEpsilon)) {
+  if (topo.has_terminal_branch_buffer && (buffer_positions_norm.empty() || std::abs(buffer_positions_norm.back() - 1.0) > ::icts::kValueLatticeEpsilon)) {
     buffer_positions_norm.push_back(1.0);
   }
 

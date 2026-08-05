@@ -30,10 +30,7 @@
 #include "RTInterface.hpp"
 #include "idm.h"
 #include "json/json.hpp"
-#include "salt/base/flute.h"
-#include "salt/salt.h"
 #include "timing_db.hh"
-#include "usage/usage.hh"
 
 namespace ieval {
 
@@ -519,7 +516,6 @@ void InitSTA::buildVecRCTree(ivec::VecLayout* vec_layout, std::string work_dir)
 //   for (size_t net_id = 0; net_id < idb_nets.size(); ++net_id) {
 //     auto* idb_net = idb_nets[net_id];
 //     std::string the_idb_net_name = idb_net->get_net_name();
-//     the_idb_net_name = ieda::Str::replace(the_idb_net_name, R"(\\)", "");
 //     sta_net = sta_netlist->findNet(the_idb_net_name.c_str());
 
 //     if (!wire_graph.contains(net_id)) {
@@ -1018,7 +1014,7 @@ void InitSTA::updateTiming(const std::vector<TimingNet*>& timing_net_list, int32
 
 //       // if (_unit == -1) {
 //       //   _unit = 1000;
-//       //   std::cout << "Setting the default unit as 1000" << std::endl;
+//       //   ECCLOG.info(ecc::Loc::current(), "Setting the default unit as 1000");
 //       // }
 
 //       double cap
@@ -1042,7 +1038,6 @@ void InitSTA::updateTiming(const std::vector<TimingNet*>& timing_net_list, int32
 TimingWireGraph InitSTA::getTimingWireGraph()
 {
 //   LOG_INFO << "get wire timing graph start";
-//   ieda::Stats stats;
 
 //   auto* ista = STA_INST->get_ista();
 //   LOG_ERROR_IF(!ista->isBuildGraph()) << "timing graph is not build";
@@ -1217,7 +1212,6 @@ TimingWireGraph InitSTA::getTimingWireGraph()
 //         auto min_fall_all_nodes_slew = rc_tree->getAllNodeSlew(vertex_slew.value_or(0.0), AnalysisMode::kMin, TransType::kFall);
 
 //         for (auto* wire_edge : wire_topo | std::views::reverse) {
-//           ieda::Stats stats2;
 //           auto& from_node = wire_edge->get_from();
 //           auto& to_node = wire_edge->get_to();
 
@@ -1282,7 +1276,6 @@ TimingWireGraph InitSTA::getTimingWireGraph()
 
 //   LOG_INFO << "get wire timing graph end";
 
-//   LOG_INFO << "get wire timing graph memory usage " << stats.memoryDelta() << " MB";
 //   double total_time = stats.elapsedRunTime();
 //   LOG_INFO << "get wire timing graph elapsed time " << total_time << " s";
 
@@ -1296,7 +1289,6 @@ TimingWireGraph InitSTA::getTimingWireGraph()
 TimingInstanceGraph InitSTA::getTimingInstanceGraph()
 {
 //   LOG_INFO << "get timing instance graph start";
-//   ieda::Stats stats;
 
 //   TimingInstanceGraph timing_instance_graph;
 
@@ -1354,7 +1346,6 @@ TimingInstanceGraph InitSTA::getTimingInstanceGraph()
 
 //   LOG_INFO << "get timing instance graph end";
 
-//   LOG_INFO << "get timing instance graph memory usage " << stats.memoryDelta() << " MB";
 //   double total_time = stats.elapsedRunTime();
 //   LOG_INFO << "get timing instance graph elapsed time " << total_time << " s";
 

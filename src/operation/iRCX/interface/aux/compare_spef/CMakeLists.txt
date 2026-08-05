@@ -16,7 +16,7 @@ target_link_libraries(ircx_compare_spef
   PUBLIC
     ircx_headers
   PRIVATE
-    log
+    ircx_logger
     spef
     fort
     OpenMP::OpenMP_CXX
@@ -41,7 +41,7 @@ target_link_libraries(ircx_tool_compare_spef
     ircx_compare_spef
     ircx_headers
   PRIVATE
-    log
+    ircx_logger
 )
 
 target_include_directories(ircx_tool_compare_spef

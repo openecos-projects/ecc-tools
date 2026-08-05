@@ -15,7 +15,6 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "RCXInterface.hpp"
-#include "log/Log.hh"
 #include "tcl_rcx.h"
 #include "tcl_util.h"
 
@@ -36,7 +35,6 @@ unsigned TclInitRCX::check()
   TclOption* config_option = getOptionOrArg("-config");
   if (config_option == nullptr || !config_option->is_set_val() || config_option->getStringVal() == nullptr
       || config_option->getStringVal()[0] == '\0') {
-    LOG_ERROR << "init_rcx requires a non-empty -config file.";
     return 0;
   }
   return 1;

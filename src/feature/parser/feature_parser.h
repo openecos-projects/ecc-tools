@@ -16,11 +16,11 @@
 // ***************************************************************************************
 #pragma once
 /**
- * @project          iEDA
- * @file             feature_parser.h
- * @author           Yell
- * @date             10/08/2023
- * @version          0.1
+ * @project		ECC
+ * @file		feature_parser.h
+ * @author		Yell
+ * @date		10/08/2023
+ * @version		0.1
  * @description
 
 
@@ -46,7 +46,7 @@ class IdbLayout;
 
 using namespace idb;
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 using std::vector;
 
@@ -105,4 +105,4 @@ class FeatureParser
   json buildSummaryTiming();
   json buildSummaryPower();
 };
-}  // namespace ieda_feature
+}  // namespace ecc_feature

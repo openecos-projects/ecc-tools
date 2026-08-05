@@ -1,12 +1,13 @@
 AUX_SOURCE_DIRECTORY(./ TCL_UTIL_SRC)
 
-add_library(tcl_util 
+add_library(tcl_util
     ${TCL_UTIL_SRC}
 )
 
-target_link_libraries(tcl_util 
+target_link_libraries(tcl_util
     PUBLIC
         tcl
+        ecc_logger
 )
 
 target_include_directories(tcl_util

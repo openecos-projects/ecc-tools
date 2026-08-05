@@ -81,12 +81,13 @@ void testMakeSingleModule(idb::NetlistReader* nr, string topModuleName) {
 #include <filesystem>
 #include <optional>
 #include <regex>
+#include <string_view>
 #include <vector>
 #include <unistd.h>
 #include <zlib.h>
 
 #include "IdbDesign.h"
-#include "log/Log.hh"
+#include "utility/logger/Logger.hpp"
 
 namespace idb {
 
@@ -131,7 +132,7 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
 {
   auto temp_file = createTempVerilogFile();
   if (!temp_file) {
-    LOG_ERROR << "Create temporary verilog file failed for " << gzip_file;
+    ECCLOG.warn(ecc::Loc::current(), "Create temporary verilog file failed for ", gzip_file);
     return std::nullopt;
   }
 
@@ -140,7 +141,7 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
   if (gzip_stream == nullptr) {
     close(temp_fd);
     std::filesystem::remove(temp_path);
-    LOG_ERROR << "Open gzip verilog file failed: " << gzip_file;
+    ECCLOG.warn(ecc::Loc::current(), "Open gzip verilog file failed: ", gzip_file);
     return std::nullopt;
   }
 
@@ -150,24 +151,24 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
   while ((read_size = gzread(gzip_stream, buffer.data(), static_cast<unsigned int>(buffer.size()))) > 0) {
     if (!writeAll(temp_fd, buffer.data(), static_cast<size_t>(read_size))) {
       success = false;
-      LOG_ERROR << "Write temporary verilog file failed: " << temp_path;
+      ECCLOG.warn(ecc::Loc::current(), "Write temporary verilog file failed: ", temp_path);
       break;
     }
   }
 
   if (read_size < 0) {
     success = false;
-    LOG_ERROR << "Read gzip verilog file failed: " << gzip_file;
+    ECCLOG.warn(ecc::Loc::current(), "Read gzip verilog file failed: ", gzip_file);
   }
 
   if (gzclose(gzip_stream) != Z_OK) {
     success = false;
-    LOG_ERROR << "Close gzip verilog file failed: " << gzip_file;
+    ECCLOG.warn(ecc::Loc::current(), "Close gzip verilog file failed: ", gzip_file);
   }
 
   if (close(temp_fd) != 0) {
     success = false;
-    LOG_ERROR << "Close temporary verilog file failed: " << temp_path;
+    ECCLOG.warn(ecc::Loc::current(), "Close temporary verilog file failed: ", temp_path);
   }
 
   if (!success) {
@@ -178,13 +179,45 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
   return temp_path;
 }
 
+std::pair<std::string, std::optional<int>> splitBusName(const char* name)
+{
+  std::string_view name_view(name);
+  if (!name_view.ends_with("]")) {
+    return {std::string(name_view), std::nullopt};
+  }
+
+  size_t left_bracket_idx = name_view.find('[');
+  size_t right_bracket_idx = name_view.find(']', left_bracket_idx);
+  if (left_bracket_idx == std::string_view::npos || right_bracket_idx == std::string_view::npos) {
+    return {std::string(name_view), std::nullopt};
+  }
+
+  int index = std::atoi(std::string(name_view.substr(left_bracket_idx + 1, right_bracket_idx - left_bracket_idx - 1)).c_str());
+  return {std::string(name_view.substr(0, left_bracket_idx)), index};
+}
+
+std::string makeIndexedName(std::string_view name, int index)
+{
+  return std::string(name) + "[" + std::to_string(index) + "]";
+}
+
+std::string normalizeEscapedName(std::string name)
+{
+  while (!name.empty() && name.back() == '\n') {
+    name.pop_back();
+  }
+  std::erase(name, '\\');
+  std::erase(name, ' ');
+  return name;
+}
+
 class ScopedReadableVerilogFile
 {
  public:
   explicit ScopedReadableVerilogFile(const std::string& file)
       : _read_file(file)
   {
-    if (ieda::Str::contain(file.c_str(), ".gz")) {
+    if (file.find(".gz") != std::string::npos) {
       auto temp_file = decompressGzipVerilog(file);
       if (temp_file) {
         _temp_file = *temp_file;
@@ -213,37 +246,37 @@ class ScopedReadableVerilogFile
 
 }  // namespace
 
-RustVerilogRead::RustVerilogRead(IdbDefService* def_service)
+VerilogRead::VerilogRead(IdbDefService* def_service)
 {
   _def_service = def_service;
 }
 
-RustVerilogRead::~RustVerilogRead()
+VerilogRead::~VerilogRead()
 {
 }
 
-bool RustVerilogRead::createDb(std::string file, std::string top_module_name)
+bool VerilogRead::createDb(std::string file, std::string top_module_name)
 {
   ScopedReadableVerilogFile verilog_file(file);
   if (!verilog_file.isValid()) {
     return false;
   }
 
-  if (!_rust_verilog_reader) {
-    _rust_verilog_reader = new idb::RustVerilogReader();
+  if (!_verilog_reader) {
+    _verilog_reader = new idb::VerilogReader();
   }
-  if (!_rust_verilog_reader->readVerilog(verilog_file.getReadFile().c_str())) {
+  if (!_verilog_reader->readVerilog(verilog_file.getReadFile().c_str())) {
     return false;
   }
-  _rust_verilog_reader->flattenModule(top_module_name.c_str());
-  _rust_top_module = _rust_verilog_reader->get_top_module();
+  _verilog_reader->flattenModule(top_module_name.c_str());
+  _top_module = _verilog_reader->get_top_module();
 
-  if (_rust_top_module == nullptr) {
+  if (_top_module == nullptr) {
     return false;
   }
 
   IdbDesign* idb_design = _def_service->get_design();
-  idb_design->set_design_name(_rust_top_module->module_name);
+  idb_design->set_design_name(_top_module->module_name);
 
   // string testStr = "FLAT";
 
@@ -263,33 +296,33 @@ bool RustVerilogRead::createDb(std::string file, std::string top_module_name)
   return true;
 }
 
-bool RustVerilogRead::createDbAutoTop(std::string file)
+bool VerilogRead::createDbAutoTop(std::string file)
 {
   ScopedReadableVerilogFile verilog_file(file);
   if (!verilog_file.isValid()) {
     return false;
   }
 
-  if (!_rust_verilog_reader) {
-    _rust_verilog_reader = new idb::RustVerilogReader();
+  if (!_verilog_reader) {
+    _verilog_reader = new idb::VerilogReader();
   }
-  if (!_rust_verilog_reader->readVerilog(verilog_file.getReadFile().c_str())) {
+  if (!_verilog_reader->readVerilog(verilog_file.getReadFile().c_str())) {
     return false;
   }
 
   // auto set top module
-  if (!_rust_verilog_reader->autoTopModule()) {
-    std::cerr << "auto top module is wrong!\n";
+  if (!_verilog_reader->autoTopModule()) {
+    ECCLOG.warn(ecc::Loc::current(), "auto top module is wrong!");
     return false;
   }
-  _rust_top_module = _rust_verilog_reader->get_top_module();
+  _top_module = _verilog_reader->get_top_module();
 
-  if (_rust_top_module == nullptr) {
+  if (_top_module == nullptr) {
     return false;
   }
 
   IdbDesign* idb_design = _def_service->get_design();
-  idb_design->set_design_name(_rust_top_module->module_name);
+  idb_design->set_design_name(_top_module->module_name);
 
   build_pins();
   build_nets();
@@ -305,7 +338,7 @@ bool RustVerilogRead::createDbAutoTop(std::string file)
  * @param port_direction
  * @return IdbConnectDirection
  */
-IdbConnectDirection RustVerilogRead::netlistToIdb(DclType port_direction) const
+IdbConnectDirection VerilogRead::netlistToIdb(DclType port_direction) const
 {
   if (port_direction == DclType::KInput) {
     return IdbConnectDirection::kInput;
@@ -314,7 +347,7 @@ IdbConnectDirection RustVerilogRead::netlistToIdb(DclType port_direction) const
   } else if (port_direction == DclType::KInout) {
     return IdbConnectDirection::kInOut;
   } else {
-    std::cout << "not support.";
+    ECCLOG.warn(ecc::Loc::current(), "not support.");
     return IdbConnectDirection::kNone;
   }
 }
@@ -324,11 +357,11 @@ IdbConnectDirection RustVerilogRead::netlistToIdb(DclType port_direction) const
  *
  * @return int32_t
  */
-int32_t RustVerilogRead::build_pins()
+int32_t VerilogRead::build_pins()
 {
   IdbDesign* idb_design = _def_service->get_design();
 
-  auto& top_module_stmts = _rust_top_module->module_stmts;
+  auto& top_module_stmts = _top_module->module_stmts;
 
   IdbPins* idb_io_pin_list = idb_design->get_io_pin_list();
   if (!idb_io_pin_list) {
@@ -366,10 +399,10 @@ int32_t RustVerilogRead::build_pins()
   };
 
   // process declare statement.
-  auto process_dcl_stmt = [&dcl_process, idb_design](auto* rust_verilog_dcl) {
-    auto dcl_type = rust_verilog_dcl->dcl_type;
-    const auto* dcl_name = rust_verilog_dcl->dcl_name;
-    auto dcl_range = rust_verilog_dcl->range;
+  auto process_dcl_stmt = [&dcl_process, idb_design](auto* verilog_dcl) {
+    auto dcl_type = verilog_dcl->dcl_type;
+    const auto* dcl_name = verilog_dcl->dcl_name;
+    auto dcl_range = verilog_dcl->range;
 
     if (!dcl_range.has_value) {
       dcl_process(dcl_type, dcl_name);
@@ -377,8 +410,8 @@ int32_t RustVerilogRead::build_pins()
       auto bus_range = std::make_pair(dcl_range.start, dcl_range.end);
       for (int index = bus_range.second; index <= bus_range.first; index++) {
         // for port or wire bus, we split to one bye one port.
-        const char* one_name = ieda::Str::printf("%s[%d]", dcl_name, index);
-        auto io_pin = dcl_process(dcl_type, one_name);
+        std::string one_name = makeIndexedName(dcl_name, index);
+        auto io_pin = dcl_process(dcl_type, one_name.c_str());
         if (io_pin) {
           if (index == bus_range.second) {
             IdbBus io_pin_bus(dcl_name, bus_range.first, bus_range.second);
@@ -401,18 +434,18 @@ int32_t RustVerilogRead::build_pins()
   int num = 0;
 
   void* stmt;
-  FOREACH_VEC_ELEM(&top_module_stmts, void, stmt)
+  FOREACH_VERILOG_VEC_ELEM(&top_module_stmts, void, stmt)
   {
-    if (rust_is_verilog_dcls_stmt(stmt)) {
-      RustVerilogDcls* verilog_dcls_struct = rust_convert_verilog_dcls(stmt);
+    if (verilog_is_dcls_stmt(stmt)) {
+      ParsedVerilogDcls* verilog_dcls_struct = verilog_convert_dcls(stmt);
       auto verilog_dcls = verilog_dcls_struct->verilog_dcls;
       void* verilog_dcl = nullptr;
-      FOREACH_VEC_ELEM(&verilog_dcls, void, verilog_dcl)
+      FOREACH_VERILOG_VEC_ELEM(&verilog_dcls, void, verilog_dcl)
       {
-        process_dcl_stmt(rust_convert_verilog_dcl(verilog_dcl));
+        process_dcl_stmt(verilog_convert_dcl(verilog_dcl));
         num++;
         if (num % 1000 == 0) {
-          std::cout << "Processed " << num << " pins..." << std::endl;
+          ECCLOG.info(ecc::Loc::current(), "Processed ", num, " pins...");
         }
       }
     }
@@ -425,11 +458,11 @@ int32_t RustVerilogRead::build_pins()
  *
  * @return int32_t
  */
-int32_t RustVerilogRead::build_nets()
+int32_t VerilogRead::build_nets()
 {
   IdbDesign* idb_design = _def_service->get_design();
 
-  auto& top_module_stmts = _rust_top_module->module_stmts;
+  auto& top_module_stmts = _top_module->module_stmts;
   IdbNetList* idb_net_list = idb_design->get_net_list();
   if (!idb_net_list) {
     idb_net_list = new IdbNetList;
@@ -455,9 +488,9 @@ int32_t RustVerilogRead::build_nets()
     return idb_net;
   };
 
-  auto process_dcl_stmt = [&add_wire_net, &replace_str, idb_design](auto* rust_verilog_dcl) {
-    auto dcl_type = rust_verilog_dcl->dcl_type;
-    const auto* dcl_name = rust_verilog_dcl->dcl_name;
+  auto process_dcl_stmt = [&add_wire_net, &replace_str, idb_design](auto* verilog_dcl) {
+    auto dcl_type = verilog_dcl->dcl_type;
+    const auto* dcl_name = verilog_dcl->dcl_name;
     if (dcl_type == DclType::KWire) {
       std::string net_name = dcl_name;
 
@@ -466,13 +499,13 @@ int32_t RustVerilogRead::build_nets()
         net_name = replace_str(net_name, R"( )", "");
       }
 
-      auto dcl_range = rust_verilog_dcl->range;
+      auto dcl_range = verilog_dcl->range;
 
       if (!dcl_range.has_value) {
         auto* idb_net = add_wire_net(net_name);
 
-        if (!ieda::Str::contain(dcl_name, "\\[")) {
-          auto [bus_name, bus_index] = ieda::Str::matchBusName(net_name.c_str());
+        if (std::string_view(dcl_name).find("\\[") == std::string_view::npos) {
+          auto [bus_name, bus_index] = splitBusName(net_name.c_str());
           if (bus_index) {
             if (auto found_pin_bus = idb_design->get_bus_list()->findBus(bus_name); !found_pin_bus) {
               IdbBus io_pin_bus(bus_name, bus_index.value(), 0);
@@ -490,7 +523,7 @@ int32_t RustVerilogRead::build_nets()
         auto bus_range = std::make_pair(dcl_range.start, dcl_range.end);
         for (int index = bus_range.second; index <= bus_range.first; index++) {
           // for port or wire bus, we split to one bye one port.
-          const char* one_name = ieda::Str::printf("%s[%d]", net_name.c_str(), index);
+          std::string one_name = makeIndexedName(net_name, index);
           auto idb_net = add_wire_net(one_name);
           if (index == bus_range.second) {
             IdbBus io_pin_bus(net_name, bus_range.first, bus_range.second);
@@ -513,18 +546,18 @@ int32_t RustVerilogRead::build_nets()
   int num = 0;
 
   void* stmt;
-  FOREACH_VEC_ELEM(&top_module_stmts, void, stmt)
+  FOREACH_VERILOG_VEC_ELEM(&top_module_stmts, void, stmt)
   {
-    if (rust_is_verilog_dcls_stmt(stmt)) {
-      RustVerilogDcls* verilog_dcls_struct = rust_convert_verilog_dcls(stmt);
+    if (verilog_is_dcls_stmt(stmt)) {
+      ParsedVerilogDcls* verilog_dcls_struct = verilog_convert_dcls(stmt);
       auto verilog_dcls = verilog_dcls_struct->verilog_dcls;
       void* verilog_dcl = nullptr;
-      FOREACH_VEC_ELEM(&verilog_dcls, void, verilog_dcl)
+      FOREACH_VERILOG_VEC_ELEM(&verilog_dcls, void, verilog_dcl)
       {
-        process_dcl_stmt(rust_convert_verilog_dcl(verilog_dcl));
+        process_dcl_stmt(verilog_convert_dcl(verilog_dcl));
         num++;
         if (num % 1000 == 0) {
-          std::cout << "Processed " << num << " nets..." << std::endl;
+          ECCLOG.info(ecc::Loc::current(), "Processed ", num, " nets...");
         }
       }
     }
@@ -538,13 +571,13 @@ int32_t RustVerilogRead::build_nets()
  *
  * @return int32_t
  */
-int32_t RustVerilogRead::build_assign()
+int32_t VerilogRead::build_assign()
 {
   IdbDesign* idb_design = _def_service->get_design();
   IdbPins* idb_io_pin_list = idb_design->get_io_pin_list();
   IdbNetList* idb_net_list = idb_design->get_net_list();
 
-  auto& top_module_stmts = _rust_top_module->module_stmts;
+  auto& top_module_stmts = _top_module->module_stmts;
   void* stmt;
 
   // record the merge nets.
@@ -552,13 +585,8 @@ int32_t RustVerilogRead::build_assign()
 
   auto process_one_to_one_net
       = [idb_design, idb_io_pin_list, idb_net_list, &remove_to_merge_nets](std::string left_net_name, std::string right_net_name) {
-          left_net_name = ieda::Str::trimmed(left_net_name.c_str());
-          right_net_name = ieda::Str::trimmed(right_net_name.c_str());
-
-          left_net_name = ieda::Str::replace(left_net_name, R"(\\)", "");
-          left_net_name = ieda::Str::replace(left_net_name, R"( )", "");
-          right_net_name = ieda::Str::replace(right_net_name, R"(\\)", "");
-          right_net_name = ieda::Str::replace(right_net_name, R"( )", "");
+          left_net_name = normalizeEscapedName(std::move(left_net_name));
+          right_net_name = normalizeEscapedName(std::move(right_net_name));
 
           // according to assign's lhs/rhs to connect port to net.
 
@@ -586,7 +614,7 @@ int32_t RustVerilogRead::build_assign()
           } else if (the_left_idb_net && the_right_idb_net && the_left_idb_net != the_right_idb_net) {
             // assign net = net, need merge two net to one net.
 
-            // std::cout << "merge " << left_net_name << " = " << right_net_name << "\n";
+            // ECCLOG.info(ecc::Loc::current(), "Merge ", left_net_name, " = ", right_net_name);
 
             assert(the_left_idb_net != the_right_idb_net);
             // the remove map to merge net maybe removed, need update the new net.
@@ -605,11 +633,11 @@ int32_t RustVerilogRead::build_assign()
               // assign net = input_port;
               idb_design->connectPinToNet(the_right_io_pin, the_left_idb_net);
             } else {
-              LOG_WARNING << "assign " << left_net_name << " = " << right_net_name << " is not processed.";
+              ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
               bool has_b0 = (right_net_name.find("1'b0") != std::string::npos);
               bool has_b1 = (right_net_name.find("1'b1") != std::string::npos);
               if (has_b0 || has_b1) {
-                LOG_ERROR << "constant net should connect to tie cell.";
+                ECCLOG.warn(ecc::Loc::current(), "constant net should connect to tie cell.");
               }
             }
           } else if (the_right_idb_net) {
@@ -617,7 +645,7 @@ int32_t RustVerilogRead::build_assign()
                // assign output_port = net;
               idb_design->connectPinToNet(the_left_io_pin, the_right_idb_net);
             } else {
-              LOG_WARNING << "assign " << left_net_name << " = " << right_net_name << " is not processed.";
+              ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
             }
           } else if (!the_left_idb_net && !the_right_idb_net && the_right_io_pin) {
             // assign output_port = input_port;
@@ -634,88 +662,88 @@ int32_t RustVerilogRead::build_assign()
             if (the_left_io_pin && the_left_io_pin->is_io_pin()) {
               idb_design->connectPinToNet(the_left_io_pin, idb_net);
             } else {
-              LOG_WARNING << "assign " << left_net_name << " = " << right_net_name << " is not processed.";
+              ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
             }
           } else {
-            LOG_WARNING << "assign " << left_net_name << " = " << right_net_name << " is not processed.";
+            ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
           }
         };
 
-  FOREACH_VEC_ELEM(&top_module_stmts, void, stmt)
+  FOREACH_VERILOG_VEC_ELEM(&top_module_stmts, void, stmt)
   {
-    if (rust_is_module_assign_stmt(stmt)) {
-      RustVerilogAssign* verilog_assign = rust_convert_verilog_assign(stmt);
+    if (verilog_is_module_assign_stmt(stmt)) {
+      ParsedVerilogAssign* verilog_assign = verilog_convert_assign(stmt);
 
       auto* left_net_expr = const_cast<void*>(verilog_assign->left_net_expr);
       auto* right_net_expr = const_cast<void*>(verilog_assign->right_net_expr);
       std::string left_net_name;
       std::string right_net_name;
-      if (rust_is_id_expr(left_net_expr) && rust_is_id_expr(right_net_expr)) {
+      if (verilog_is_id_expr(left_net_expr) && verilog_is_id_expr(right_net_expr)) {
         // get left_net_name.
-        auto* left_net_id = const_cast<void*>(rust_convert_verilog_net_id_expr(left_net_expr)->verilog_id);
-        if (rust_is_id(left_net_id)) {
-          left_net_name = rust_convert_verilog_id(left_net_id)->id;
-        } else if (rust_is_bus_index_id(left_net_id)) {
-          left_net_name = rust_convert_verilog_index_id(left_net_id)->id;
+        auto* left_net_id = const_cast<void*>(verilog_convert_net_id_expr(left_net_expr)->verilog_id);
+        if (verilog_is_id(left_net_id)) {
+          left_net_name = verilog_convert_id(left_net_id)->id;
+        } else if (verilog_is_bus_index_id(left_net_id)) {
+          left_net_name = verilog_convert_index_id(left_net_id)->id;
         } else {
-          left_net_name = rust_convert_verilog_slice_id(left_net_id)->id;
+          left_net_name = verilog_convert_slice_id(left_net_id)->id;
         }
         // get right_net_name.
-        auto* right_net_id = const_cast<void*>(rust_convert_verilog_net_id_expr(right_net_expr)->verilog_id);
-        if (rust_is_id(right_net_id)) {
-          right_net_name = rust_convert_verilog_id(right_net_id)->id;
-        } else if (rust_is_bus_index_id(right_net_id)) {
-          right_net_name = rust_convert_verilog_index_id(right_net_id)->id;
+        auto* right_net_id = const_cast<void*>(verilog_convert_net_id_expr(right_net_expr)->verilog_id);
+        if (verilog_is_id(right_net_id)) {
+          right_net_name = verilog_convert_id(right_net_id)->id;
+        } else if (verilog_is_bus_index_id(right_net_id)) {
+          right_net_name = verilog_convert_index_id(right_net_id)->id;
         } else {
-          right_net_name = rust_convert_verilog_slice_id(right_net_id)->id;
+          right_net_name = verilog_convert_slice_id(right_net_id)->id;
         }
 
         process_one_to_one_net(left_net_name, right_net_name);
-      } else if ((rust_is_id_expr(left_net_expr) && rust_is_concat_expr(right_net_expr))
-                 || (rust_is_concat_expr(left_net_expr) && rust_is_id_expr(right_net_expr))) {
+      } else if ((verilog_is_id_expr(left_net_expr) && verilog_is_concat_expr(right_net_expr))
+                 || (verilog_is_concat_expr(left_net_expr) && verilog_is_id_expr(right_net_expr))) {
         auto process_id_concat_assign = [&process_one_to_one_net](auto* id_net_expr, auto* concat_net_expr, bool is_first_left) {
           std::string id_net_name;
           std::string concat_net_name;
 
           // assume left the not concatenation, right is concatenation. such as "assign io_out_arsize = { _41_, _41_, io_in_size };"
-          auto* id_net_expr_id = const_cast<void*>(rust_convert_verilog_net_id_expr(id_net_expr)->verilog_id);
+          auto* id_net_expr_id = const_cast<void*>(verilog_convert_net_id_expr(id_net_expr)->verilog_id);
           unsigned base_id_index = 0;
-          if (rust_is_id(id_net_expr_id)) {
-            id_net_name = rust_convert_verilog_id(id_net_expr_id)->id;
-          } else if (rust_is_bus_slice_id(id_net_expr_id)) {
-            auto slice_net_id = rust_convert_verilog_slice_id(id_net_expr_id);
+          if (verilog_is_id(id_net_expr_id)) {
+            id_net_name = verilog_convert_id(id_net_expr_id)->id;
+          } else if (verilog_is_bus_slice_id(id_net_expr_id)) {
+            auto slice_net_id = verilog_convert_slice_id(id_net_expr_id);
             id_net_name = slice_net_id->base_id;
             base_id_index = slice_net_id->range_base;
           } else {
-            LOG_FATAL << "left net id should be id or bus slice id";
+            ECCLOG.error(ecc::Loc::current(), "left net id should be id or bus slice id");
           }
 
-          auto verilog_id_concat = rust_convert_verilog_net_concat_expr(concat_net_expr)->verilog_id_concat;
+          auto verilog_id_concat = verilog_convert_net_concat_expr(concat_net_expr)->verilog_id_concat;
 
           void* one_net_expr;
-          FOREACH_VEC_ELEM(&verilog_id_concat, void, one_net_expr)
+          FOREACH_VERILOG_VEC_ELEM(&verilog_id_concat, void, one_net_expr)
           {
-            assert(rust_is_id_expr(one_net_expr));
-            auto* one_net_id = (void*) (rust_convert_verilog_net_id_expr(one_net_expr)->verilog_id);
-            if (rust_is_id(one_net_id)) {
+            assert(verilog_is_id_expr(one_net_expr));
+            auto* one_net_id = (void*) (verilog_convert_net_id_expr(one_net_expr)->verilog_id);
+            if (verilog_is_id(one_net_id)) {
               std::string one_id_net_name = id_net_name + "[" + std::to_string(base_id_index) + "]";
-              std::string one_concat_net_name = rust_convert_verilog_id(one_net_id)->id;
+              std::string one_concat_net_name = verilog_convert_id(one_net_id)->id;
               if (is_first_left) {
                 process_one_to_one_net(one_id_net_name, one_concat_net_name);
               } else {
                 process_one_to_one_net(one_concat_net_name, one_id_net_name);
               }
 
-            } else if (rust_is_bus_index_id(one_net_id)) {
+            } else if (verilog_is_bus_index_id(one_net_id)) {
               std::string one_id_net_name = id_net_name + "[" + std::to_string(base_id_index) + "]";
-              std::string one_concat_net_name = rust_convert_verilog_index_id(one_net_id)->id;
+              std::string one_concat_net_name = verilog_convert_index_id(one_net_id)->id;
               if (is_first_left) {
                 process_one_to_one_net(one_id_net_name, one_concat_net_name);
               } else {
                 process_one_to_one_net(one_concat_net_name, one_id_net_name);
               }
             } else {
-              auto right_slice_id = rust_convert_verilog_slice_id(one_net_id);
+              auto right_slice_id = verilog_convert_slice_id(one_net_id);
               std::string right_net_base_name = right_slice_id->base_id;
               auto right_base_index = right_slice_id->range_base;
               while (right_base_index <= right_slice_id->range_max) {
@@ -737,29 +765,29 @@ int32_t RustVerilogRead::build_assign()
           }
         };
 
-        if (rust_is_id_expr(left_net_expr) && rust_is_concat_expr(right_net_expr)) {
+        if (verilog_is_id_expr(left_net_expr) && verilog_is_concat_expr(right_net_expr)) {
           process_id_concat_assign(left_net_expr, right_net_expr, true);
         } else {
           process_id_concat_assign(right_net_expr, left_net_expr, false);
         }
 
-      } else if (rust_is_concat_expr(left_net_expr) && rust_is_concat_expr(right_net_expr)) {
-        std::function<std::vector<std::string>(RustVec&)> get_concat_net_names
-            = [&get_concat_net_names](RustVec& verilog_id_concat) -> std::vector<std::string> {
+      } else if (verilog_is_concat_expr(left_net_expr) && verilog_is_concat_expr(right_net_expr)) {
+        std::function<std::vector<std::string>(VerilogVec&)> get_concat_net_names
+            = [&get_concat_net_names](VerilogVec& verilog_id_concat) -> std::vector<std::string> {
           std::vector<std::string> concat_net_names;
           void* one_net_expr;
-          FOREACH_VEC_ELEM(&verilog_id_concat, void, one_net_expr)
+          FOREACH_VERILOG_VEC_ELEM(&verilog_id_concat, void, one_net_expr)
           {
-            if (rust_is_id_expr(one_net_expr)) {
-              auto* one_net_id = (void*) (rust_convert_verilog_net_id_expr(one_net_expr)->verilog_id);
-              if (rust_is_id(one_net_id)) {
-                std::string one_concat_net_name = rust_convert_verilog_id(one_net_id)->id;
+            if (verilog_is_id_expr(one_net_expr)) {
+              auto* one_net_id = (void*) (verilog_convert_net_id_expr(one_net_expr)->verilog_id);
+              if (verilog_is_id(one_net_id)) {
+                std::string one_concat_net_name = verilog_convert_id(one_net_id)->id;
                 concat_net_names.emplace_back(std::move(one_concat_net_name));
-              } else if (rust_is_bus_index_id(one_net_id)) {
-                std::string one_concat_net_name = rust_convert_verilog_index_id(one_net_id)->id;
+              } else if (verilog_is_bus_index_id(one_net_id)) {
+                std::string one_concat_net_name = verilog_convert_index_id(one_net_id)->id;
                 concat_net_names.emplace_back(std::move(one_concat_net_name));
               } else {
-                auto right_slice_id = rust_convert_verilog_slice_id(one_net_id);
+                auto right_slice_id = verilog_convert_slice_id(one_net_id);
                 std::string right_net_base_name = right_slice_id->base_id;
                 auto right_base_index = right_slice_id->range_base;
                 while (right_base_index <= right_slice_id->range_max) {
@@ -768,8 +796,8 @@ int32_t RustVerilogRead::build_assign()
                   ++right_base_index;
                 }
               }
-            } else if (rust_is_concat_expr(one_net_expr)) {
-              auto one_net_concat_expr = rust_convert_verilog_net_concat_expr(one_net_expr);
+            } else if (verilog_is_concat_expr(one_net_expr)) {
+              auto one_net_concat_expr = verilog_convert_net_concat_expr(one_net_expr);
               auto one_net_verilog_id_concat = one_net_concat_expr->verilog_id_concat;
               auto one_concat_net_names = get_concat_net_names(one_net_verilog_id_concat);
               concat_net_names.insert(concat_net_names.end(), one_concat_net_names.begin(), one_concat_net_names.end());
@@ -782,10 +810,10 @@ int32_t RustVerilogRead::build_assign()
           return concat_net_names;
         };
 
-        auto left_concat_net_expr = rust_convert_verilog_net_concat_expr(left_net_expr);
+        auto left_concat_net_expr = verilog_convert_net_concat_expr(left_net_expr);
         auto left_concat_net_names = get_concat_net_names(left_concat_net_expr->verilog_id_concat);
 
-        auto right_concat_net_expr = rust_convert_verilog_net_concat_expr(right_net_expr);
+        auto right_concat_net_expr = verilog_convert_net_concat_expr(right_net_expr);
         auto right_concat_net_names = get_concat_net_names(right_concat_net_expr->verilog_id_concat);
 
         assert(left_concat_net_names.size() == right_concat_net_names.size());
@@ -804,7 +832,7 @@ int32_t RustVerilogRead::build_assign()
         }
 
       } else {
-        LOG_FATAL << "assign declaration's lhs/rhs is not VerilogNetIDExpr class.";
+        ECCLOG.error(ecc::Loc::current(), "assign declaration's lhs/rhs is not VerilogNetIDExpr class.");
       }
     }
   }
@@ -816,14 +844,14 @@ int32_t RustVerilogRead::build_assign()
  *
  * @return int32_t
  */
-int32_t RustVerilogRead::build_components()
+int32_t VerilogRead::build_components()
 {
   IdbDesign* idb_design = _def_service->get_design();
   IdbLayout* idb_layout = _def_service->get_layout();
   IdbCellMasterList* idb_master_list = idb_layout->get_cell_master_list();
   IdbPins* idb_io_pin_list = idb_design->get_io_pin_list();
 
-  auto& top_module_stmts = _rust_top_module->module_stmts;
+  auto& top_module_stmts = _top_module->module_stmts;
 
   IdbInstanceList* idb_instance_list = idb_design->get_instance_list();
   if (!idb_instance_list) {
@@ -857,9 +885,9 @@ int32_t RustVerilogRead::build_components()
 
         // judge whether contain bus index name, if bus name contain \\[, should
         // not treat as bus.
-        if (!ieda::Str::contain(net_name.c_str(), "\\[")) {
+        if (net_name.find("\\[") == std::string::npos) {
           // is bus index net.
-          auto [bus_name, bus_index] = ieda::Str::matchBusName(net_name.c_str());
+          auto [bus_name, bus_index] = splitBusName(net_name.c_str());
           if (bus_index) {
             if (auto found_net_bus = idb_design->get_bus_list()->findBus(bus_name); !found_net_bus) {
               // not found net bus, create it.
@@ -878,7 +906,7 @@ int32_t RustVerilogRead::build_components()
       } else {
         // existed bus net, get one net of bus.
         std::string pin_name = idb_pin->get_pin_name();
-        auto [pin_bus_name, pin_bus_index] = ieda::Str::matchBusName(pin_name.c_str());
+        auto [pin_bus_name, pin_bus_index] = splitBusName(pin_name.c_str());
         if (!pin_bus_index) {
           // if net bus only exist one net, get the bus index directly.
           if ((*net_bus).get().get_left() == (*net_bus).get().get_right()) {
@@ -906,15 +934,15 @@ int32_t RustVerilogRead::build_components()
   };
 
   /*lambda function flatten concate net, which maybe nested.*/
-  std::function<void(RustVerilogNetConcatExpr*, std::vector<void*>&)> flatten_concat_net_expr
-      = [&flatten_concat_net_expr](RustVerilogNetConcatExpr* net_concat_expr, std::vector<void*>& net_concat_vec) {
+  std::function<void(ParsedVerilogNetConcatExpr*, std::vector<void*>&)> flatten_concat_net_expr
+      = [&flatten_concat_net_expr](ParsedVerilogNetConcatExpr* net_concat_expr, std::vector<void*>& net_concat_vec) {
           auto verilog_id_concat = net_concat_expr->verilog_id_concat;
 
           void* verilog_id;
-          FOREACH_VEC_ELEM(&verilog_id_concat, void, verilog_id)
+          FOREACH_VERILOG_VEC_ELEM(&verilog_id_concat, void, verilog_id)
           {
-            if (rust_is_concat_expr(verilog_id)) {
-              flatten_concat_net_expr(rust_convert_verilog_net_concat_expr(verilog_id), net_concat_vec);
+            if (verilog_is_concat_expr(verilog_id)) {
+              flatten_concat_net_expr(verilog_convert_net_concat_expr(verilog_id), net_concat_vec);
             } else {
               net_concat_vec.push_back(verilog_id);
             }
@@ -937,10 +965,10 @@ int32_t RustVerilogRead::build_components()
   };
   int num = 0;
   void* stmt;
-  FOREACH_VEC_ELEM(&top_module_stmts, void, stmt)
+  FOREACH_VERILOG_VEC_ELEM(&top_module_stmts, void, stmt)
   {
-    if (rust_is_module_inst_stmt(stmt)) {
-      RustVerilogInst* verilog_inst = rust_convert_verilog_inst(stmt);
+    if (verilog_is_module_inst_stmt(stmt)) {
+      ParsedVerilogInst* verilog_inst = verilog_convert_inst(stmt);
       std::string inst_name = verilog_inst->inst_name;
 
       if (std::string::npos != inst_name.find('\\')) {
@@ -952,39 +980,39 @@ int32_t RustVerilogRead::build_components()
 
       auto* cell_master = idb_master_list->find_cell_master(cell_master_name);
       if (cell_master == nullptr) {
-        LOG_ERROR << "Error : can not find cell master = " << cell_master_name;
+        ECCLOG.warn(ecc::Loc::current(), "Error : can not find cell master = ", cell_master_name);
         continue;
       }
       IdbInstance* idb_instance = idb_design->createInstance(inst_name, cell_master->get_name());
       if (idb_instance == nullptr) {
-        LOG_ERROR << "Error : can not create instance = " << inst_name;
+        ECCLOG.warn(ecc::Loc::current(), "Error : can not create instance = ", inst_name);
         continue;
       }
 
       // build instance pin connected net.
       auto& port_connections = verilog_inst->port_connections;
-      void* port_connection;
-      FOREACH_VEC_ELEM(&port_connections, void, port_connection)
+      void* port_connection_handle;
+      FOREACH_VERILOG_VEC_ELEM(&port_connections, void, port_connection_handle)
       {
-        RustVerilogPortRefPortConnect* rust_port_connection = rust_convert_verilog_port_ref_port_connect(port_connection);
+        ParsedVerilogPortRefPortConnect* port_connection = verilog_convert_port_ref_port_connect(port_connection_handle);
         // *const c_void
-        void* cell_port_id = const_cast<void*>(rust_port_connection->port_id);
+        void* cell_port_id = const_cast<void*>(port_connection->port_id);
         // *mut c_void
-        void* net_expr = rust_port_connection->net_expr;  // get net name
+        void* net_expr = port_connection->net_expr;  // get net name
 
         const char* cell_port_name;
-        if (rust_is_id(cell_port_id)) {
-          cell_port_name = rust_convert_verilog_id(cell_port_id)->id;
-        } else if (rust_is_bus_index_id(cell_port_id)) {
-          cell_port_name = rust_convert_verilog_index_id(cell_port_id)->id;
+        if (verilog_is_id(cell_port_id)) {
+          cell_port_name = verilog_convert_id(cell_port_id)->id;
+        } else if (verilog_is_bus_index_id(cell_port_id)) {
+          cell_port_name = verilog_convert_index_id(cell_port_id)->id;
         } else {
-          cell_port_name = rust_convert_verilog_slice_id(cell_port_id)->id;
+          cell_port_name = verilog_convert_slice_id(cell_port_id)->id;
         }
         if (!net_expr) {
           continue;
         }
 
-        if (rust_is_id_expr(net_expr) || rust_is_constant(net_expr)) {
+        if (verilog_is_id_expr(net_expr) || verilog_is_constant(net_expr)) {
           // condition for common ID and constant.
           auto* idb_pin = idb_instance->get_pin(cell_port_name);
           if (!idb_pin) {
@@ -1004,27 +1032,27 @@ int32_t RustVerilogRead::build_components()
                 // the net should be net bus too, select bus index net.
 
                 // const char* net_name = net_expr->get_verilog_id()->getBaseName();
-                void* net_id;
-                if (rust_is_id_expr(net_expr)) {
-                  net_id = const_cast<void*>(rust_convert_verilog_net_id_expr(net_expr)->verilog_id);
-                } else if (rust_is_constant(net_expr)) {
-                  net_id = const_cast<void*>(rust_convert_verilog_constant_expr(net_expr)->verilog_id);
+                void* net_id = nullptr;
+                if (verilog_is_id_expr(net_expr)) {
+                  net_id = const_cast<void*>(verilog_convert_net_id_expr(net_expr)->verilog_id);
+                } else if (verilog_is_constant(net_expr)) {
+                  net_id = const_cast<void*>(verilog_convert_constant_expr(net_expr)->verilog_id);
                 }
-                const char* net_name;
-                if (rust_is_id(net_id)) {
-                  net_name = rust_convert_verilog_id(net_id)->id;
-                } else if (rust_is_bus_index_id(net_id)) {
-                  net_name = rust_convert_verilog_index_id(net_id)->base_id;
+                const char* net_name = nullptr;
+                if (verilog_is_id(net_id)) {
+                  net_name = verilog_convert_id(net_id)->id;
+                } else if (verilog_is_bus_index_id(net_id)) {
+                  net_name = verilog_convert_index_id(net_id)->base_id;
                 } else {
-                  net_name = rust_convert_verilog_slice_id(net_id)->base_id;
+                  net_name = verilog_convert_slice_id(net_id)->base_id;
                 }
 
                 std::optional<int> net_bus_base_index;
                 // if (net_expr->get_verilog_id()->isBusSliceID()) {
                 //   net_bus_base_index = dynamic_cast<VerilogSliceID*>(net_expr->get_verilog_id())->get_range_base();
                 // }
-                if (rust_is_bus_slice_id(net_id)) {
-                  net_bus_base_index = rust_convert_verilog_slice_id(net_id)->range_base;
+                if (verilog_is_bus_slice_id(net_id)) {
+                  net_bus_base_index = verilog_convert_slice_id(net_id)->range_base;
                 }
 
                 std::string bus_net_name = std::string(net_name) + "[" + std::to_string(i + net_bus_base_index.value_or(0)) + "]";
@@ -1037,7 +1065,7 @@ int32_t RustVerilogRead::build_components()
               }
             }
 
-            std::string bus_name = ieda::Str::printf("%s/%s", inst_name.c_str(), cell_port_name);
+            std::string bus_name = inst_name + "/" + cell_port_name;
             for (int i = 0; auto* idb_bus_pin : bus_pins) {
               if (i == 0) {
                 create_or_found_bus(bus_name, idb_bus_pin, max_bus_bit - 1, true);
@@ -1049,24 +1077,26 @@ int32_t RustVerilogRead::build_components()
 
           } else {
             // exist idb pin, add to net.
-            if (!rust_is_constant(net_expr)) {
+            if (!verilog_is_constant(net_expr)) {
               // const char* net_name = net_expr->get_verilog_id()->getName();
-              const char* net_name;
-              void* net_id;
-              if (rust_is_id_expr(net_expr)) {
-                net_id = const_cast<void*>(rust_convert_verilog_net_id_expr(net_expr)->verilog_id);
-              } else if (rust_is_constant(net_expr)) {
-                net_id = const_cast<void*>(rust_convert_verilog_constant_expr(net_expr)->verilog_id);
+              std::string generated_net_name;
+              const char* net_name = nullptr;
+              void* net_id = nullptr;
+              if (verilog_is_id_expr(net_expr)) {
+                net_id = const_cast<void*>(verilog_convert_net_id_expr(net_expr)->verilog_id);
+              } else if (verilog_is_constant(net_expr)) {
+                net_id = const_cast<void*>(verilog_convert_constant_expr(net_expr)->verilog_id);
               }
-              if (rust_is_id(net_id)) {
-                net_name = rust_convert_verilog_id(net_id)->id;
-              } else if (rust_is_bus_index_id(net_id)) {
-                net_name = rust_convert_verilog_index_id(net_id)->id;
-              } else if (rust_is_bus_slice_id(net_id)) {
-                net_name = rust_convert_verilog_slice_id(net_id)->id;
+              if (verilog_is_id(net_id)) {
+                net_name = verilog_convert_id(net_id)->id;
+              } else if (verilog_is_bus_index_id(net_id)) {
+                net_name = verilog_convert_index_id(net_id)->id;
+              } else if (verilog_is_bus_slice_id(net_id)) {
+                net_name = verilog_convert_slice_id(net_id)->id;
               } else {
                 static int index = 0;
-                net_name = ieda::Str::printf("IEDA_CONST_%d", index++);
+                generated_net_name = "ECC_CONST_" + std::to_string(index++);
+                net_name = generated_net_name.c_str();
               }
               add_pin(net_name, idb_pin);
             }
@@ -1074,16 +1104,16 @@ int32_t RustVerilogRead::build_components()
 
         } else {
           // condition for net concat(wire   [23:0] buf11_dout).
-          auto* net_concat_expr = rust_convert_verilog_net_concat_expr(net_expr);
+          auto* net_concat_expr = verilog_convert_net_concat_expr(net_expr);
           std::vector<void*> verilog_id_concat_vec;
           flatten_concat_net_expr(net_concat_expr, verilog_id_concat_vec);
 
-          std::string bus_name = ieda::Str::printf("%s/%s", inst_name.c_str(), cell_port_name);
+          std::string bus_name = inst_name + "/" + cell_port_name;
 
           // found pin bus size.
           std::vector<IdbPin*> bus_pin_vec;
           for (int i = 0;; ++i) {
-            std::string pin_name = ieda::Str::printf("%s[%d]", cell_port_name, i);
+            std::string pin_name = makeIndexedName(cell_port_name, i);
             auto* idb_pin = idb_instance->get_pin(pin_name);
             if (!idb_pin) {
               break;
@@ -1109,7 +1139,7 @@ int32_t RustVerilogRead::build_components()
               create_or_found_bus(bus_name, idb_pin, i, true);
             }
 
-            if (rust_is_constant(verilog_id_net_expr)) {
+            if (verilog_is_constant(verilog_id_net_expr)) {
               --i;
               // the next pin add to pin bus.
               if (i >= 0) {
@@ -1121,19 +1151,19 @@ int32_t RustVerilogRead::build_components()
 
             // create net bus and add net pin.
             // const char* net_name = verilog_id_net_expr->get_verilog_id()->getBaseName();
-            void* net_expr_verilog_id;
-            if (rust_is_id_expr(verilog_id_net_expr)) {
-              net_expr_verilog_id = const_cast<void*>(rust_convert_verilog_net_id_expr(verilog_id_net_expr)->verilog_id);
-            } else if (rust_is_constant(verilog_id_net_expr)) {
-              net_expr_verilog_id = const_cast<void*>(rust_convert_verilog_constant_expr(verilog_id_net_expr)->verilog_id);
+            void* net_expr_verilog_id = nullptr;
+            if (verilog_is_id_expr(verilog_id_net_expr)) {
+              net_expr_verilog_id = const_cast<void*>(verilog_convert_net_id_expr(verilog_id_net_expr)->verilog_id);
+            } else if (verilog_is_constant(verilog_id_net_expr)) {
+              net_expr_verilog_id = const_cast<void*>(verilog_convert_constant_expr(verilog_id_net_expr)->verilog_id);
             }
-            const char* net_name;
-            if (rust_is_id(net_expr_verilog_id)) {
-              net_name = rust_convert_verilog_id(net_expr_verilog_id)->id;
-            } else if (rust_is_bus_index_id(net_expr_verilog_id)) {
-              net_name = rust_convert_verilog_index_id(net_expr_verilog_id)->base_id;
+            const char* net_name = nullptr;
+            if (verilog_is_id(net_expr_verilog_id)) {
+              net_name = verilog_convert_id(net_expr_verilog_id)->id;
+            } else if (verilog_is_bus_index_id(net_expr_verilog_id)) {
+              net_name = verilog_convert_index_id(net_expr_verilog_id)->base_id;
             } else {
-              net_name = rust_convert_verilog_slice_id(net_expr_verilog_id)->base_id;
+              net_name = verilog_convert_slice_id(net_expr_verilog_id)->base_id;
             }
             auto net_bus = idb_design->get_bus_list()->findBus(net_name);
 
@@ -1142,16 +1172,16 @@ int32_t RustVerilogRead::build_components()
               int bus_left = (*net_bus).get().get_left();
               int bus_right = (*net_bus).get().get_right();
 
-              if (rust_is_bus_index_id(net_expr_verilog_id)) {
-                bus_left = rust_convert_verilog_index_id(net_expr_verilog_id)->index;
+              if (verilog_is_bus_index_id(net_expr_verilog_id)) {
+                bus_left = verilog_convert_index_id(net_expr_verilog_id)->index;
                 bus_right = bus_left;
-              } else if (rust_is_bus_slice_id(net_expr_verilog_id)) {
-                bus_left = rust_convert_verilog_slice_id(net_expr_verilog_id)->range_max;
-                bus_right = rust_convert_verilog_slice_id(net_expr_verilog_id)->range_base;
+              } else if (verilog_is_bus_slice_id(net_expr_verilog_id)) {
+                bus_left = verilog_convert_slice_id(net_expr_verilog_id)->range_max;
+                bus_right = verilog_convert_slice_id(net_expr_verilog_id)->range_base;
               }
 
               for (int j = bus_left; j >= bus_right; --j) {
-                const char* bus_one_net_name = ieda::Str::printf("%s[%d]", net_name, j);
+                std::string bus_one_net_name = makeIndexedName(net_name, j);
                 auto* idb_net = idb_net_list->find_net(bus_one_net_name);
                 assert(idb_net);
                 add_pin(bus_one_net_name, idb_pin);
@@ -1176,7 +1206,7 @@ int32_t RustVerilogRead::build_components()
       }
       num++;
       if (num % 1000 == 0) {
-        std::cout << "Processed " << num << " components..." << std::endl;
+        ECCLOG.info(ecc::Loc::current(), "Processed ", num, " components...");
       }
     }
   }
@@ -1184,7 +1214,7 @@ int32_t RustVerilogRead::build_components()
   return kVerilogSuccess;
 }
 
-int32_t RustVerilogRead::post_process_float_io_pins() {
+int32_t VerilogRead::post_process_float_io_pins() {
   IdbDesign* idb_design = _def_service->get_design();
   IdbPins* idb_io_pin_list = idb_design->get_io_pin_list();
 

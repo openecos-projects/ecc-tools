@@ -29,6 +29,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "utility/logger/Logger.hpp"
 #include "IdbNet.h"
 
 #include <algorithm>
@@ -170,7 +171,7 @@ IdbPin* IdbNet::get_driving_pin()
     return _instance_pin_list->get_pin_list().front();
   }
 
-  std::cout << "Error : No driver pin exist..." << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Error : No driver pin exist...");
   return nullptr;
 }
 
@@ -309,7 +310,7 @@ bool IdbNet::checkConnection()
   // }
 
   if (!b_result) {
-    std::cout << "[IdbNetList Error] Net connected failed. Net name = " << get_net_name() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[IdbNetList Error] Net connected failed. Net name = ", get_net_name());
   }
 
   return b_result;
@@ -689,7 +690,7 @@ bool IdbNetChecker::checkNetConnection(IdbNet* net)
   // }
 
   if (!b_result) {
-    std::cout << "[IdbNetList Error] Net connected failed. Net name = " << net->get_net_name() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[IdbNetList Error] Net connected failed. Net name = ", net->get_net_name());
   }
 
   return b_result;

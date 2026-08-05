@@ -19,6 +19,7 @@
 #include "DisjointSet.hpp"
 #include "LVSHeader.hpp"
 #include "Logger.hpp"
+#include "RCSummary.hpp"
 #include "Utility.hpp"
 
 namespace ilvs {
@@ -54,9 +55,6 @@ void RoutingChecker::check()
 {
   Monitor monitor;
   LVSLOG.info(Loc::current(), "Starting...");
-
-  Database& database = LVSDM.getDatabase();
-  database.get_summary().rc_summary.reset();
 
   RCModel rc_model = initRCModel();
   checkRouting(rc_model);
@@ -238,6 +236,7 @@ void RoutingChecker::checkShort(RCModel& rc_model)
 void RoutingChecker::updateSummary(RCModel& rc_model)
 {
   RCSummary& rc_summary = LVSDM.getDatabase().get_summary().rc_summary;
+  rc_summary.reset();
   PhysicalGraph& physical_graph = LVSDM.getDatabase().get_def_data().get_physical_graph();
   std::vector<RoutingCheck>& routing_check_list = rc_model.get_routing_check_list();
 

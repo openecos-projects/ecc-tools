@@ -40,7 +40,7 @@
 #include "TopoPool.hh"
 #include "config/PlotSpefConfig.hh"
 #include "gds/PlotSpefGdsWriter.hh"
-#include "log/Log.hh"
+#include "Logger.hpp"
 #include "lyp/PlotSpefLypWriter.hh"
 #include "model/PlotSpefModel.hh"
 #include "model/PlotSpefVisibility.hh"
@@ -462,7 +462,7 @@ class DirectModelBuilder
     }
 
     if (target_net_index == kMaxSize) {
-      LOG_ERROR << "plot_spef warning: target net not found: " << target_net;
+      RCXLOG.warn(Loc::current(), "plot_spef warning: target net not found: ", target_net);
       return visibility;
     }
 
@@ -551,28 +551,28 @@ auto writeInternalPlotSpef(const RCXData& data,
   }
 
   if (data.get_corner_data().empty()) {
-    LOG_ERROR << "plot_spef failed: process corners not loaded.";
+    RCXLOG.warn(Loc::current(), "plot_spef failed: process corners not loaded.");
     return false;
   }
   if (data.get_layout().get_regular_net_count() == 0
       || data.get_topo_pool().get_node_pool().empty()
       || data.get_rc_table().get_corner_num() == 0
       || data.get_rc_table().get_net_num() == 0) {
-    LOG_ERROR << "plot_spef failed: internal iRCX data is not available.";
+    RCXLOG.warn(Loc::current(), "plot_spef failed: internal iRCX data is not available.");
     return false;
   }
 
   const plot_spef::Config plot_config = makePlotSpefConfig(config, data.get_layout());
   if (plot_config.output_dir.empty()) {
-    LOG_ERROR << "plot_spef requires an output directory.";
+    RCXLOG.warn(Loc::current(), "plot_spef requires an output directory.");
     return false;
   }
   if (plot_config.dbu <= 0) {
-    LOG_ERROR << "plot_spef requires a positive DBU.";
+    RCXLOG.warn(Loc::current(), "plot_spef requires a positive DBU.");
     return false;
   }
   if (plot_config.cores <= 0) {
-    LOG_ERROR << "plot_spef requires a positive core count.";
+    RCXLOG.warn(Loc::current(), "plot_spef requires a positive core count.");
     return false;
   }
   if (!path::ensureDir(plot_config.output_dir, "plot_spef output directory")) {
@@ -593,7 +593,7 @@ auto writeInternalPlotSpef(const RCXData& data,
     }
   }
 
-  LOG_INFO << "plot_spef wrote direct iRCX GDS to " << plot_config.output_dir;
+  RCXLOG.info(Loc::current(), "plot_spef wrote direct iRCX GDS to ", plot_config.output_dir);
   return true;
 }
 

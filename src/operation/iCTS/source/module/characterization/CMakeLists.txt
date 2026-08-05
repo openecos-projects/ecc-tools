@@ -9,7 +9,7 @@ set(ICTS_MODULE_CHAR_SRC
   ${CMAKE_CURRENT_SOURCE_DIR}/circuit/CharCircuitBuilder.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/pattern/CharPatternEnumerator.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/pattern/CharPatternStorage.cc
-  ${CMAKE_CURRENT_SOURCE_DIR}/sampling/CharStaSampler.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/sampling/CharSTASampler.cc
 )
 
 add_library(icts_source_module_characterization_headers INTERFACE)
@@ -17,8 +17,8 @@ add_library(icts_source_module_characterization_headers INTERFACE)
 target_link_libraries(
   icts_source_module_characterization_headers
   INTERFACE
-  icts_source_database_characterization
-  icts_source_database_routing
+  icts_source_data_manager_characterization
+  icts_source_data_manager_routing
 )
 
 target_include_directories(
@@ -33,12 +33,12 @@ target_link_libraries(
   icts_source_module_characterization
   PUBLIC
   icts_source_module_characterization_headers
-  icts_source_database_characterization
-  icts_source_database_routing
+  icts_source_data_manager_characterization
+  icts_source_data_manager_routing
   PRIVATE
-  icts_source_database_adapter_fast_sta
-  icts_source_utils_logger
-  log
+  icts_source_data_manager_adapter_fast_sta
+  icts_source_toolkit_logger
+  icts_source_toolkit_utility
 )
 
 if(DEBUG_ICTS_SOURCE_MODULE_CHARACTERIZATION)

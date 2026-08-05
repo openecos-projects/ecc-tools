@@ -30,11 +30,9 @@
 
 #include "Clustering.hh"
 #include "FastClusteringRealTechBenchmarkFixture.hh"
-#include "common/dataset/TestDataset.hh"
-#include "common/io/TestArtifactIO.hh"
-#include "common/logging/ScopedLogFile.hh"
+#include "Logger.hh"
 #include "module/topology/fast_clustering/FastClustering.hh"
-#include "utils/logger/Schema.hh"
+#include "toolkit/io/TestArtifactIO.hh"
 
 namespace icts {
 class Pin;
@@ -43,20 +41,19 @@ class Pin;
 namespace icts_test::fast_clustering::realtech {
 namespace {
 
-using common::io::PrepareCleanOutputDir;
-using common::io::ResolveOutputDir;
-using common::io::WriteRawTextLog;
-using common::logging::ScopedLogFile;
+using toolkit::io::PrepareCleanOutputDir;
+using toolkit::io::ResolveOutputDir;
+using toolkit::io::WriteTextArtifact;
 
 TEST(FastClusteringRealTechBenchmarkTest, BenchmarkTwentyPlacementCases)
 {
   const auto output_dir = PrepareCleanOutputDir(ResolveOutputDir() / "fast_clustering" / "realtech_benchmark" / "current_run");
   const auto cts_log_path = output_dir / "cts.log";
-  ScopedLogFile scoped_log(cts_log_path, "Fast Clustering RealTech Benchmark");
+  CTSLOG.openLogFileStream(cts_log_path.string());
 
   const auto cases = DiscoverBenchmarkCases();
   const auto assets = ResolveTechAssets();
-  common::io::EmitInfoReport(InfoReport{.title = "CTS Clustering Benchmark Inventory", .content = BuildInventoryReport(cases, assets)});
+  toolkit::io::EmitInfoReport(toolkit::io::InfoReport{.title = "CTS Clustering Benchmark Inventory", .content = BuildInventoryReport(cases, assets)});
 
   if (cases.empty()) {
     GTEST_SKIP() << "benchmark root unavailable: " << kBenchmarkRoot;
@@ -75,14 +72,13 @@ TEST(FastClusteringRealTechBenchmarkTest, BenchmarkTwentyPlacementCases)
   for (const auto& benchmark_case : cases) {
     auto loaded = LoadBenchmarkCase(benchmark_case, assets, output_dir);
     ASSERT_TRUE(loaded.ok) << benchmark_case.case_name << ": " << loaded.error;
-    common::io::EmitInfoReport(
-        InfoReport{.title = "CTS Clustering Case Statistics", .content = BuildLoadedCaseReport(benchmark_case, loaded)});
+    toolkit::io::EmitInfoReport(toolkit::io::InfoReport{.title = "CTS Clustering Case Statistics", .content = BuildLoadedCaseReport(benchmark_case, loaded)});
 
     auto config = BuildBenchmarkConfig(loaded.loads);
-    auto fast_run = RunAndMeasure("fast", loaded.loads, config,
-                                  [](const std::vector<icts::Pin*>& loads, const auto& run_config) -> icts::ClusterOutput {
-                                    return icts::FastClustering::runDefault(loads, run_config);
-                                  });
+    ASSERT_TRUE(config.has_value()) << benchmark_case.case_name << ": sink pin capacitance unavailable";
+    auto fast_run = RunAndMeasure("fast", loaded.loads, *config, [](const std::vector<icts::Pin*>& loads, const auto& run_config) -> icts::ClusterOutput {
+      return icts::FastClustering::runDefault(loads, run_config);
+    });
 
     fast_runtime_ms += fast_run.metrics.runtime_ms;
     fast_score += fast_run.metrics.total_score;
@@ -93,24 +89,21 @@ TEST(FastClusteringRealTechBenchmarkTest, BenchmarkTwentyPlacementCases)
     std::string cluster_svg;
     if (!svg_path.empty()) {
       cluster_svg = (std::filesystem::path(std::string(kClusterSvgDirName)) / svg_path.filename()).string();
-      icts::EmitArtifact(icts_test::runtime::CurrentRuntime().reporter, "CTS clustering structure svg", svg_path);
     }
 
     loaded.loads.clear();
-    results.push_back(CaseResult{.benchmark_case = benchmark_case,
-                                 .loaded = std::move(loaded),
-                                 .fast = std::move(fast_run.metrics),
-                                 .cluster_svg = std::move(cluster_svg)});
+    results.push_back(
+        CaseResult{.benchmark_case = benchmark_case, .loaded = std::move(loaded), .fast = std::move(fast_run.metrics), .cluster_svg = std::move(cluster_svg)});
   }
 
   auto summary = BuildSummaryReport(results, fast_runtime_ms, fast_score);
   summary += "visualization_svg_dir=" + std::string(kClusterSvgDirName) + "\n";
   summary += "visualization_svg_count=" + std::to_string(results.size()) + "\n";
-  WriteRawTextLog(output_dir / "cts_clustering_cases.csv", BuildCasesCsv(results));
-  WriteRawTextLog(output_dir / "cts_clustering_metrics.csv", BuildMetricsCsv(results));
-  WriteRawTextLog(output_dir / "cts_clustering_visualizations.csv", BuildVisualizationCsv(results));
-  WriteRawTextLog(output_dir / "report.log", summary);
-  common::io::EmitInfoReport(InfoReport{.title = "CTS Clustering Benchmark Summary", .content = summary});
+  WriteTextArtifact(output_dir / "cts_clustering_cases.csv", BuildCasesCsv(results));
+  WriteTextArtifact(output_dir / "cts_clustering_metrics.csv", BuildMetricsCsv(results));
+  WriteTextArtifact(output_dir / "cts_clustering_visualizations.csv", BuildVisualizationCsv(results));
+  WriteTextArtifact(output_dir / "clustering_report.txt", summary);
+  toolkit::io::EmitInfoReport(toolkit::io::InfoReport{.title = "CTS Clustering Benchmark Summary", .content = summary});
 
   for (const auto& result : results) {
     EXPECT_TRUE(result.fast.legal) << result.benchmark_case.case_name << " fast illegal";

@@ -10,9 +10,8 @@ if(ICTS_BUILD_REALTECH_TESTS AND ICTS_BUILD_SLOW_REALTECH_TESTS)
       ${ICTS_TEST}/module/topology/fast_clustering/realtech/FastClusteringRealTechBenchmarkTest.cc
     LIBS
       icts_source_module_topology
-      icts_test_common_clustering_artifact
-      icts_test_common_scoped_log_file
-      icts_test_common_realtech_setup
-      icts_test_common_visualization
+      icts_test_module_topology_fast_clustering_fixture_artifact
+      icts_test_data_manager_realtech_setup
+      icts_test_toolkit_visualization
   )
 endif()

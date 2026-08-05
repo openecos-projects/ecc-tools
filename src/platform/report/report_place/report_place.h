@@ -16,7 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
-// #include <boost/gil/extension/io/bmp.hpp>
+// #include "utility/logger/Logger.hpp"
+#include <boost/gil/extension/io/bmp.hpp>
 #include <boost/gil/typedefs.hpp>
 
 #include "IdbInstance.h"
@@ -38,7 +39,7 @@ class ReportPlace : public ReportBase
     }
     auto instances = trie.nextLevel(prefix, level, num_threshold);
     for (auto& [prefix, cnt] : instances) {
-      std::cout << cnt << "\t" << prefix << std::endl;
+      ECCLOG.info(ecc::Loc::current(), cnt, "\t", prefix);
     }
   }
   void createInstDistributionReport(const std::vector<std::string>& prefixes, const std::string& file)
@@ -75,7 +76,7 @@ class ReportPlace : public ReportBase
     }
     std::string bmpfile = file.empty()? "inst_distro.bmp" : file;
     // write_view(bmpfile, flipped_up_down_view(view(img)), bmp_tag{});
-    std::cout << "result saved to "<< bmpfile << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "result saved to ", bmpfile);
   }
 
   template <typename View, typename Color>

@@ -14,6 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "utility/logger/Logger.hpp"
 #include "builder.h"
 
 namespace idb {
@@ -170,7 +171,7 @@ vector<IdbCoordinate<int32_t>> getCandidatePointList(IdbPin* idb_pin)
     for (int i = low_index_x; i <= high_index_x; i += pitch_x) {
       for (int j = low_index_y; j <= high_index_y; j += pitch_y) {
         if (i < rect->get_low_x() || i > rect->get_high_x() || j < rect->get_low_y() || j > rect->get_high_y()) {
-          std::cout << "Error pin grid coordinate, pin list empty." << std::endl;
+          ECCLOG.warn(ecc::Loc::current(), "Error pin grid coordinate, pin list empty.");
           continue;
         }
         point_list.emplace_back(i, j);
@@ -210,7 +211,7 @@ void IdbBuilder::buildPinFeatureCoord(IdbNet* net)
     }
 
     if (idb_pin->get_grid_coordinate()->get_x() == -1 || idb_pin->get_grid_coordinate()->get_y() == -1) {
-      std::cout << "Error pin grid coordinate, pin =  " << idb_pin->get_pin_name() << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Error pin grid coordinate, pin =  ", idb_pin->get_pin_name());
     }
   }
 }

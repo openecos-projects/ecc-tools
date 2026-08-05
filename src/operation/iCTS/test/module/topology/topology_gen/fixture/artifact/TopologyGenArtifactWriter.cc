@@ -20,8 +20,6 @@
  * @date 2026-04-11
  * @brief Artifact emission for topology generation tests.
  */
-
-#include <glog/logging.h>
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -32,12 +30,12 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Log.hh"
+#include "Logger.hh"
 #include "Point.hh"
-#include "common/topology/TopologyAnalysis.hh"
-#include "common/visualization/TestVisualization.hh"
+#include "module/topology/fixture/analysis/TopologyAnalysis.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenCaseFixture.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenScenario.hh"
+#include "toolkit/visualization/TestVisualization.hh"
 
 namespace icts {
 class Pin;
@@ -53,26 +51,25 @@ auto ValidateOutputDir(const std::filesystem::path& output_dir) -> void
   ASSERT_FALSE(error_code) << "Failed to create output dir: " << output_dir.string() << " (" << error_code.message() << ")";
 }
 
-auto WriteArtifacts(const std::filesystem::path& output_dir, const TopologyCase& test_case, const icts::Tree& tree,
-                    const std::vector<icts::Pin*>& loads) -> void
+auto WriteArtifacts(const std::filesystem::path& output_dir, const TopologyCase& test_case, const icts::Tree& tree, const std::vector<icts::Pin*>& loads)
+    -> void
 {
   std::unordered_map<const icts::Pin*, std::size_t> first_level_cluster_map;
   std::vector<icts::Point<int>> first_level_centers;
   std::string first_level_error;
-  ASSERT_TRUE(common::topology::AnalyzeFirstLevelClusters(tree, loads, first_level_cluster_map, first_level_centers, first_level_error))
+  ASSERT_TRUE(module::topology::fixture::analysis::AnalyzeFirstLevelClusters(tree, loads, first_level_cluster_map, first_level_centers, first_level_error))
       << first_level_error;
 
   const std::string cluster_name = "cluster_" + test_case.name + "_" + std::to_string(test_case.count) + ".svg";
   const auto cluster_path = output_dir / cluster_name;
-  EXPECT_TRUE(common::visualization::WriteClusterSvg(cluster_path.string(), loads, first_level_cluster_map, first_level_centers))
+  EXPECT_TRUE(toolkit::visualization::WriteClusterSvg(cluster_path.string(), loads, first_level_cluster_map, first_level_centers))
       << "Failed to write cluster svg: " << cluster_path.string();
-  LOG_INFO << "Cluster svg saved (first-level only): " << cluster_path.string();
+  CTSLOG.info(icts::Loc::current(), "Cluster svg saved (first-level only): ", cluster_path.string());
 
   const std::string topo_name = "topology_" + test_case.name + "_" + std::to_string(test_case.count) + ".svg";
   const auto topo_path = output_dir / topo_name;
-  EXPECT_TRUE(common::visualization::WriteTopologySvg(topo_path.string(), tree, loads))
-      << "Failed to write topology svg: " << topo_path.string();
-  LOG_INFO << "Topology svg saved: " << topo_path.string();
+  EXPECT_TRUE(toolkit::visualization::WriteTopologySvg(topo_path.string(), tree, loads)) << "Failed to write topology svg: " << topo_path.string();
+  CTSLOG.info(icts::Loc::current(), "Topology svg saved: ", topo_path.string());
 }
 
 }  // namespace icts_test::topology_gen::detail

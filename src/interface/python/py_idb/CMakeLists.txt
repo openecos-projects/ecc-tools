@@ -7,7 +7,9 @@ PUBLIC
         idm
         file_manager_db
         pybind11::pybind11
-        ieda_report
+        ecc_report
+        ecc_logger
+        geometry_builder
 )
 target_include_directories(py_idb
 PUBLIC

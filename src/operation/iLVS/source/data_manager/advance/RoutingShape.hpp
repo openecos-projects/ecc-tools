@@ -29,18 +29,15 @@ class RoutingShape
   // getter
   Shape& get_shape() { return _shape; }
   int32_t get_layer_order() const { return _layer_order; }
-  bool get_is_supply_route_shape() const { return _is_supply_route_shape; }
   // const getter
   const Shape& get_shape() const { return _shape; }
   // setter
   void set_shape(const Shape& shape) { _shape = shape; }
   void set_layer_order(const int32_t layer_order) { _layer_order = layer_order; }
-  void set_is_supply_route_shape(const bool is_supply_route_shape) { _is_supply_route_shape = is_supply_route_shape; }
 
  private:
   Shape _shape;
   int32_t _layer_order = -1;
-  bool _is_supply_route_shape = false;
 };
 
 }  // namespace ilvs

@@ -66,8 +66,9 @@ class DataManager
   int32_t buildRoutingGraphShape(NetRoutingGraph& net_routing_graph, const RoutingShape& routing_shape);
   void buildPhysicalGraph();
   void buildPhysicalGraphNode(PhysicalGraphBuildData& physical_graph_build_data, const std::string& net_name,
-                              const NetRoutingGraph& routing_graph);
+                              const NetRoutingGraph& routing_graph, bool build_terminal_shape);
   void buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_graph_build_data);
+  BGRectInt convertToBGRectInt(const Shape& shape);
   void printConfig();
   void printDatabase();
 #endif

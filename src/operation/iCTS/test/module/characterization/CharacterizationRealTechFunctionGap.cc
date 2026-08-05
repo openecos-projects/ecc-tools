@@ -64,10 +64,9 @@ auto MetricMeanAbs(const MetricGapAccumulator& accumulator) -> double
 }
 
 auto AnalyzeFunctionComposeGap(const std::string& source_label, unsigned target_length_idx, FitBasisKind basis_kind,
-                               const std::vector<icts::SegmentChar>& direct_entries,
-                               const realtech_fixture::SegmentFrontierContext& segment_context,
-                               const std::unordered_map<std::string, FunctionalSurfaceModel>& model_by_unit_key,
-                               const realtech_fixture::CharGrid& grid, double max_slew_ns, double max_cap_pf) -> FunctionComposeGapStats
+                               const std::vector<icts::SegmentChar>& direct_entries, const realtech_fixture::SegmentFrontierContext& segment_context,
+                               const std::unordered_map<std::string, FunctionalSurfaceModel>& model_by_unit_key, const realtech_fixture::CharGrid& grid,
+                               double max_slew_ns, double max_cap_pf) -> FunctionComposeGapStats
 {
   FunctionComposeGapStats stats;
   stats.source_label = source_label;
@@ -134,20 +133,16 @@ auto AnalyzeFunctionComposeGap(const std::string& source_label, unsigned target_
 
     ++stats.evaluated_count;
     std::ostringstream example;
-    example << "direct=" << realtech_fixture::FormatSegmentChar(direct_entry, grid)
-            << ", predicted{output_slew_ns=" << prediction.output_slew_ns << ",driven_cap_pf=" << prediction.driven_cap_pf
-            << ",delay_ns=" << prediction.delay_ns << ",power_w=" << prediction.power_w
+    example << "direct=" << realtech_fixture::FormatSegmentChar(direct_entry, grid) << ", predicted{output_slew_ns=" << prediction.output_slew_ns
+            << ",driven_cap_pf=" << prediction.driven_cap_pf << ",delay_ns=" << prediction.delay_ns << ",power_w=" << prediction.power_w
             << ",source_boundary_power_w=" << prediction.source_boundary_power_w << "}";
     const auto example_text = example.str();
 
-    AddMetricGap(stats.output_slew, static_cast<double>(direct_entry.get_output_slew_idx()) * grid.slew_step_ns, prediction.output_slew_ns,
-                 example_text);
-    AddMetricGap(stats.driven_cap, static_cast<double>(direct_entry.get_driven_cap_idx()) * grid.cap_step_pf, prediction.driven_cap_pf,
-                 example_text);
+    AddMetricGap(stats.output_slew, static_cast<double>(direct_entry.get_output_slew_idx()) * grid.slew_step_ns, prediction.output_slew_ns, example_text);
+    AddMetricGap(stats.driven_cap, static_cast<double>(direct_entry.get_driven_cap_idx()) * grid.cap_step_pf, prediction.driven_cap_pf, example_text);
     AddMetricGap(stats.delay, direct_entry.get_delay(), prediction.delay_ns, example_text);
     AddMetricGap(stats.power, direct_entry.get_power(), prediction.power_w, example_text);
-    AddMetricGap(stats.source_boundary_power, direct_entry.get_source_boundary_net_switch_power(), prediction.source_boundary_power_w,
-                 example_text);
+    AddMetricGap(stats.source_boundary_power, direct_entry.get_source_boundary_net_switch_power(), prediction.source_boundary_power_w, example_text);
   }
 
   return stats;
@@ -158,8 +153,8 @@ auto AnalyzeStructuralCapFunctionComposeGap(const std::string& source_label, uns
                                             const realtech_fixture::SegmentFrontierContext& segment_context,
                                             const std::unordered_map<std::string, FunctionalSurfaceModel>& model_by_unit_key,
                                             const std::unordered_map<std::string, StructuralCapOperator>& cap_operator_by_unit_key,
-                                            const realtech_fixture::CharGrid& grid, const icts::UniformValueLattice& cap_lattice,
-                                            double max_slew_ns, double max_cap_pf) -> FunctionComposeGapStats
+                                            const realtech_fixture::CharGrid& grid, const icts::UniformValueLattice& cap_lattice, double max_slew_ns,
+                                            double max_cap_pf) -> FunctionComposeGapStats
 {
   FunctionComposeGapStats stats;
   stats.source_label = source_label;
@@ -207,8 +202,7 @@ auto AnalyzeStructuralCapFunctionComposeGap(const std::string& source_label, uns
 
     const double input_slew_ns = static_cast<double>(direct_entry.get_input_slew_idx()) * grid.slew_step_ns;
     const double load_cap_pf = static_cast<double>(direct_entry.get_load_cap_idx()) * grid.cap_step_pf;
-    const auto prediction
-        = PredictStructuralCapFunctionalCompose(unit_models, cap_operators, input_slew_ns, load_cap_pf, max_slew_ns, max_cap_pf);
+    const auto prediction = PredictStructuralCapFunctionalCompose(unit_models, cap_operators, input_slew_ns, load_cap_pf, max_slew_ns, max_cap_pf);
     stats.max_fixed_point_residual = std::max(stats.max_fixed_point_residual, prediction.residual);
     stats.max_fixed_point_iterations = std::max(stats.max_fixed_point_iterations, prediction.iterations);
     if (!prediction.converged) {
@@ -231,44 +225,36 @@ auto AnalyzeStructuralCapFunctionComposeGap(const std::string& source_label, uns
 
     ++stats.evaluated_count;
     std::ostringstream example;
-    example << "direct=" << realtech_fixture::FormatSegmentChar(direct_entry, grid)
-            << ", predicted{output_slew_ns=" << prediction.output_slew_ns << ",driven_cap_pf=" << prediction.driven_cap_pf
-            << ",delay_ns=" << prediction.delay_ns << ",power_w=" << prediction.power_w
+    example << "direct=" << realtech_fixture::FormatSegmentChar(direct_entry, grid) << ", predicted{output_slew_ns=" << prediction.output_slew_ns
+            << ",driven_cap_pf=" << prediction.driven_cap_pf << ",delay_ns=" << prediction.delay_ns << ",power_w=" << prediction.power_w
             << ",source_boundary_power_w=" << prediction.source_boundary_power_w << "}";
     const auto example_text = example.str();
-    const double predicted_driven_cap_bucket_pf
-        = static_cast<double>(cap_lattice.coveringIndex(prediction.driven_cap_pf)) * grid.cap_step_pf;
+    const double predicted_driven_cap_bucket_pf = static_cast<double>(cap_lattice.coveringIndex(prediction.driven_cap_pf)) * grid.cap_step_pf;
 
-    AddMetricGap(stats.output_slew, static_cast<double>(direct_entry.get_output_slew_idx()) * grid.slew_step_ns, prediction.output_slew_ns,
-                 example_text);
-    AddMetricGap(stats.driven_cap, static_cast<double>(direct_entry.get_driven_cap_idx()) * grid.cap_step_pf,
-                 predicted_driven_cap_bucket_pf, example_text);
+    AddMetricGap(stats.output_slew, static_cast<double>(direct_entry.get_output_slew_idx()) * grid.slew_step_ns, prediction.output_slew_ns, example_text);
+    AddMetricGap(stats.driven_cap, static_cast<double>(direct_entry.get_driven_cap_idx()) * grid.cap_step_pf, predicted_driven_cap_bucket_pf, example_text);
     AddMetricGap(stats.delay, direct_entry.get_delay(), prediction.delay_ns, example_text);
     AddMetricGap(stats.power, direct_entry.get_power(), prediction.power_w, example_text);
-    AddMetricGap(stats.source_boundary_power, direct_entry.get_source_boundary_net_switch_power(), prediction.source_boundary_power_w,
-                 example_text);
+    AddMetricGap(stats.source_boundary_power, direct_entry.get_source_boundary_net_switch_power(), prediction.source_boundary_power_w, example_text);
   }
 
   return stats;
 }
 
-auto AppendMetricGap(std::ostringstream& report_stream, const std::string& source_label, FitBasisKind basis_kind,
-                     unsigned target_length_idx, const std::string& metric_name, const MetricGapAccumulator& accumulator) -> void
+auto AppendMetricGap(std::ostringstream& report_stream, const std::string& source_label, FitBasisKind basis_kind, unsigned target_length_idx,
+                     const std::string& metric_name, const MetricGapAccumulator& accumulator) -> void
 {
-  report_stream << "function_compose_metric{source=" << source_label << ",basis=" << FitBasisName(basis_kind)
-                << ",target_length_idx=" << target_length_idx << ",metric=" << metric_name << ",count=" << accumulator.count
-                << ",sum_direct=" << accumulator.sum_direct << ",sum_predicted=" << accumulator.sum_predicted
-                << ",ratio_predicted_over_direct=" << SafeRatio(accumulator.sum_predicted, accumulator.sum_direct)
-                << ",rmse=" << MetricRmse(accumulator) << ",mean_abs=" << MetricMeanAbs(accumulator)
-                << ",max_abs=" << accumulator.max_abs_delta << ",max_rel=" << accumulator.max_rel_delta
-                << ",predicted_lower_count=" << accumulator.predicted_lower_count
-                << ",predicted_higher_count=" << accumulator.predicted_higher_count << "}\n";
+  report_stream << "function_compose_metric{source=" << source_label << ",basis=" << FitBasisName(basis_kind) << ",target_length_idx=" << target_length_idx
+                << ",metric=" << metric_name << ",count=" << accumulator.count << ",sum_direct=" << accumulator.sum_direct
+                << ",sum_predicted=" << accumulator.sum_predicted
+                << ",ratio_predicted_over_direct=" << SafeRatio(accumulator.sum_predicted, accumulator.sum_direct) << ",rmse=" << MetricRmse(accumulator)
+                << ",mean_abs=" << MetricMeanAbs(accumulator) << ",max_abs=" << accumulator.max_abs_delta << ",max_rel=" << accumulator.max_rel_delta
+                << ",predicted_lower_count=" << accumulator.predicted_lower_count << ",predicted_higher_count=" << accumulator.predicted_higher_count << "}\n";
   report_stream << "function_compose_metric_worst{source=" << source_label << ",basis=" << FitBasisName(basis_kind)
                 << ",target_length_idx=" << target_length_idx << ",metric=" << metric_name << "," << accumulator.worst_example << "}\n";
 }
 
-auto AppendFunctionComposeGapStats(std::ostringstream& report_stream, const FunctionComposeGapStats& stats,
-                                   const realtech_fixture::CharGrid& grid) -> void
+auto AppendFunctionComposeGapStats(std::ostringstream& report_stream, const FunctionComposeGapStats& stats, const realtech_fixture::CharGrid& grid) -> void
 {
   const std::string label = "function_compose_gap{source=" + stats.source_label + ",basis=" + FitBasisName(stats.basis_kind)
                             + ",target_length_idx=" + std::to_string(stats.target_length_idx);
@@ -282,27 +268,24 @@ auto AppendFunctionComposeGapStats(std::ostringstream& report_stream, const Func
   AppendMetricGap(report_stream, stats.source_label, stats.basis_kind, stats.target_length_idx, "driven_cap_pf", stats.driven_cap);
   AppendMetricGap(report_stream, stats.source_label, stats.basis_kind, stats.target_length_idx, "delay_ns", stats.delay);
   AppendMetricGap(report_stream, stats.source_label, stats.basis_kind, stats.target_length_idx, "power_w", stats.power);
-  AppendMetricGap(report_stream, stats.source_label, stats.basis_kind, stats.target_length_idx, "source_boundary_power_w",
-                  stats.source_boundary_power);
+  AppendMetricGap(report_stream, stats.source_label, stats.basis_kind, stats.target_length_idx, "source_boundary_power_w", stats.source_boundary_power);
   report_stream << "function_compose_missing_model_example{source=" << stats.source_label << ",basis=" << FitBasisName(stats.basis_kind)
                 << ",target_length_idx=" << stats.target_length_idx << "," << stats.missing_model_example << "}\n";
-  report_stream << "function_compose_convergence_failure_example{source=" << stats.source_label
-                << ",basis=" << FitBasisName(stats.basis_kind) << ",target_length_idx=" << stats.target_length_idx << ","
-                << stats.convergence_failure_example << "}\n";
-  report_stream << "function_compose_invalid_prediction_example{source=" << stats.source_label
-                << ",basis=" << FitBasisName(stats.basis_kind) << ",target_length_idx=" << stats.target_length_idx << ","
-                << stats.invalid_prediction_example << "}\n";
+  report_stream << "function_compose_convergence_failure_example{source=" << stats.source_label << ",basis=" << FitBasisName(stats.basis_kind)
+                << ",target_length_idx=" << stats.target_length_idx << "," << stats.convergence_failure_example << "}\n";
+  report_stream << "function_compose_invalid_prediction_example{source=" << stats.source_label << ",basis=" << FitBasisName(stats.basis_kind)
+                << ",target_length_idx=" << stats.target_length_idx << "," << stats.invalid_prediction_example << "}\n";
 }
 
-auto AppendStructuralCapOperatorStats(std::ostringstream& report_stream,
-                                      const std::unordered_map<std::string, StructuralCapOperator>& cap_operator_by_unit_key) -> void
+auto AppendStructuralCapOperatorStats(std::ostringstream& report_stream, const std::unordered_map<std::string, StructuralCapOperator>& cap_operator_by_unit_key)
+    -> void
 {
   std::size_t wire_operator_count = 0U;
   std::size_t buffered_operator_count = 0U;
   std::size_t sample_count = 0U;
   double max_abs_residual_pf = 0.0;
-  for (const auto& [unit_key, cap_operator] : cap_operator_by_unit_key) {
-    (void) unit_key;
+  for (const auto& cap_operator_entry : cap_operator_by_unit_key) {
+    const auto& cap_operator = cap_operator_entry.second;
     if (cap_operator.alpha == 1.0) {
       ++wire_operator_count;
     } else {
@@ -313,14 +296,12 @@ auto AppendStructuralCapOperatorStats(std::ostringstream& report_stream,
   }
 
   report_stream << "structural_cap_operator_count{total=" << cap_operator_by_unit_key.size() << ",wire=" << wire_operator_count
-                << ",buffered=" << buffered_operator_count << ",samples=" << sample_count << ",max_abs_residual_pf=" << max_abs_residual_pf
-                << "}\n";
+                << ",buffered=" << buffered_operator_count << ",samples=" << sample_count << ",max_abs_residual_pf=" << max_abs_residual_pf << "}\n";
 }
 
 auto AppendStructuralCapOperatorSampleGap(std::ostringstream& report_stream,
                                           const std::unordered_map<std::string, StructuralCapOperator>& cap_operator_by_unit_key,
-                                          const std::vector<icts::SegmentChar>& entries,
-                                          const realtech_fixture::SegmentFrontierContext& segment_context,
+                                          const std::vector<icts::SegmentChar>& entries, const realtech_fixture::SegmentFrontierContext& segment_context,
                                           const realtech_fixture::CharGrid& grid, const icts::UniformValueLattice& cap_lattice) -> void
 {
   MetricGapAccumulator physical_gap;
@@ -343,8 +324,7 @@ auto AppendStructuralCapOperatorSampleGap(std::ostringstream& report_stream,
     const double direct_pf = static_cast<double>(entry.get_driven_cap_idx()) * grid.cap_step_pf;
     const double load_cap_pf = static_cast<double>(entry.get_load_cap_idx()) * grid.cap_step_pf;
     const double predicted_physical_pf = (operator_it->second.alpha * load_cap_pf) + operator_it->second.eta_pf;
-    const double predicted_bucket_pf
-        = static_cast<double>(cap_lattice.tryObservedIndex(predicted_physical_pf).value_or(0U)) * grid.cap_step_pf;
+    const double predicted_bucket_pf = static_cast<double>(cap_lattice.tryObservedIndex(predicted_physical_pf).value_or(0U)) * grid.cap_step_pf;
     const std::string example = realtech_fixture::FormatSegmentChar(entry, grid);
     AddMetricGap(physical_gap, direct_pf, predicted_physical_pf, example);
     AddMetricGap(bucket_gap, direct_pf, predicted_bucket_pf, example);

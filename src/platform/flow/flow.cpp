@@ -27,6 +27,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "flow.h"
 
 #include "tcl_main.h"
@@ -40,11 +41,11 @@ bool Flow::initFlow(string flow_config)
 {
   /// read flow config
   if (!PLFConfig::getInstance()->initConfig(flow_config)) {
-    std::cout << "PLFConfig init failed." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "PLFConfig init failed.");
   }
 
   /// init GUI
-  // std::cout << "gui start." << std::endl;
+  // ECCLOG.info(ecc::Loc::current(), "GUI start.");
 
   return true;
 }

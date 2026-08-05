@@ -27,20 +27,25 @@ class LVSConnectivitySummaryRow
   ~LVSConnectivitySummaryRow() = default;
   // getter
   std::string& get_connectivity() { return _connectivity; }
-  std::string& get_type() { return _type; }
-  int64_t get_count() const { return _count; }
+  int64_t get_open_num() const { return _open_num; }
+  int64_t get_short_num() const { return _short_num; }
+  int64_t get_connected_num() const { return _connected_num; }
+  int64_t get_total_num() const { return _total_num; }
   // const getter
   const std::string& get_connectivity() const { return _connectivity; }
-  const std::string& get_type() const { return _type; }
   // setter
   void set_connectivity(const std::string& connectivity) { _connectivity = connectivity; }
-  void set_type(const std::string& type) { _type = type; }
-  void set_count(const int64_t count) { _count = count; }
+  void set_open_num(const int64_t open_num) { _open_num = open_num; }
+  void set_short_num(const int64_t short_num) { _short_num = short_num; }
+  void set_connected_num(const int64_t connected_num) { _connected_num = connected_num; }
+  void set_total_num(const int64_t total_num) { _total_num = total_num; }
 
  private:
   std::string _connectivity;
-  std::string _type;
-  int64_t _count = 0;
+  int64_t _open_num = 0;
+  int64_t _short_num = 0;
+  int64_t _connected_num = 0;
+  int64_t _total_num = 0;
 };
 
 }  // namespace ilvs

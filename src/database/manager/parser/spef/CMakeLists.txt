@@ -28,7 +28,7 @@ add_library(spef
   ${BISON_spefParser_OUTPUTS}
 )
 
-target_link_libraries(spef log)
+target_link_libraries(spef ecc_logger)
 target_include_directories(spef
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

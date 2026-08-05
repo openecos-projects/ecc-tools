@@ -5,6 +5,7 @@
  * @Description:
  */
 
+#include "utility/logger/Logger.hpp"
 #include <iostream>
 
 #include "density_api.h"
@@ -15,11 +16,11 @@ void TestDensityMapFromIDB(const string& db_config_path);
 void TestMarginMap();
 
 void PrintUsage(const char* program_name) {
-  std::cout << "Density Evaluation" << std::endl;
-  std::cout << "Usage: " << program_name << " <function_name>" << std::endl;
-  std::cout << "Available parameters:" << std::endl;
-  std::cout << "  <db_config_path> Path to the database configuration file." << std::endl;
-  std::cout << "  --help, -h       Show this help message and exit." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Density Evaluation");
+  ECCLOG.info(ecc::Loc::current(), "Usage: ", program_name, " <function_name>");
+  ECCLOG.info(ecc::Loc::current(), "Available parameters:");
+  ECCLOG.info(ecc::Loc::current(), "  <db_config_path> Path to the database configuration file.");
+  ECCLOG.info(ecc::Loc::current(), "  --help, -h       Show this help message and exit.");
 }
 
 int main(const int argc, const char* argv[])
@@ -37,7 +38,7 @@ int main(const int argc, const char* argv[])
       return 0;
     }
   }
-  std::cerr << "Error: Incorrect number of arguments." << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Error: Incorrect number of arguments.");
   PrintUsage(argv[0]);
   return 1;
 }
@@ -100,19 +101,19 @@ void TestDensityMap()
   nets.push_back(net2);
 
   ieval::CellMapSummary cell_map_summary = density_api.cellDensityMap(cells, region, grid_size, stage);
-  std::cout << "Macro density: " << cell_map_summary.macro_density << std::endl;
-  std::cout << "StdCell density: " << cell_map_summary.stdcell_density << std::endl;
-  std::cout << "AllCell density: " << cell_map_summary.allcell_density << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Macro density: ", cell_map_summary.macro_density);
+  ECCLOG.info(ecc::Loc::current(), "StdCell density: ", cell_map_summary.stdcell_density);
+  ECCLOG.info(ecc::Loc::current(), "AllCell density: ", cell_map_summary.allcell_density);
 
   ieval::PinMapSummary pin_map_summary = density_api.pinDensityMap(pins, region, grid_size, stage, neighbor);
-  std::cout << "Macro pin density: " << pin_map_summary.macro_pin_density << std::endl;
-  std::cout << "StdCell pin density: " << pin_map_summary.stdcell_pin_density << std::endl;
-  std::cout << "AllCell pin density: " << pin_map_summary.allcell_pin_density << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Macro pin density: ", pin_map_summary.macro_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "StdCell pin density: ", pin_map_summary.stdcell_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "AllCell pin density: ", pin_map_summary.allcell_pin_density);
 
   ieval::NetMapSummary net_map_summary = density_api.netDensityMap(nets, region, grid_size, stage, neighbor);
-  std::cout << "Local net density: " << net_map_summary.local_net_density << std::endl;
-  std::cout << "Global net density: " << net_map_summary.global_net_density << std::endl;
-  std::cout << "All net density: " << net_map_summary.allnet_density << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Local net density: ", net_map_summary.local_net_density);
+  ECCLOG.info(ecc::Loc::current(), "Global net density: ", net_map_summary.global_net_density);
+  ECCLOG.info(ecc::Loc::current(), "All net density: ", net_map_summary.allnet_density);
 }
 
 void TestDensityMapFromIDB(const string& db_config_path)
@@ -124,20 +125,20 @@ void TestDensityMapFromIDB(const string& db_config_path)
   ieval::DensityAPI density_api;
   ieval::DensityMapSummary density_map_summary = density_api.densityMap(stage, grid_size);
 
-  std::cout << "Macro density: " << density_map_summary.cell_map_summary.macro_density << std::endl;
-  std::cout << "StdCell density: " << density_map_summary.cell_map_summary.stdcell_density << std::endl;
-  std::cout << "AllCell density: " << density_map_summary.cell_map_summary.allcell_density << std::endl;
-  std::cout << "Macro pin density: " << density_map_summary.pin_map_summary.macro_pin_density << std::endl;
-  std::cout << "StdCell pin density: " << density_map_summary.pin_map_summary.stdcell_pin_density << std::endl;
-  std::cout << "AllCell pin density: " << density_map_summary.pin_map_summary.allcell_pin_density << std::endl;
-  std::cout << "Local net density: " << density_map_summary.net_map_summary.local_net_density << std::endl;
-  std::cout << "Global net density: " << density_map_summary.net_map_summary.global_net_density << std::endl;
-  std::cout << "All net density: " << density_map_summary.net_map_summary.allnet_density << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Macro density: ", density_map_summary.cell_map_summary.macro_density);
+  ECCLOG.info(ecc::Loc::current(), "StdCell density: ", density_map_summary.cell_map_summary.stdcell_density);
+  ECCLOG.info(ecc::Loc::current(), "AllCell density: ", density_map_summary.cell_map_summary.allcell_density);
+  ECCLOG.info(ecc::Loc::current(), "Macro pin density: ", density_map_summary.pin_map_summary.macro_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "StdCell pin density: ", density_map_summary.pin_map_summary.stdcell_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "AllCell pin density: ", density_map_summary.pin_map_summary.allcell_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "Local net density: ", density_map_summary.net_map_summary.local_net_density);
+  ECCLOG.info(ecc::Loc::current(), "Global net density: ", density_map_summary.net_map_summary.global_net_density);
+  ECCLOG.info(ecc::Loc::current(), "All net density: ", density_map_summary.net_map_summary.allnet_density);
 
   ieval::NetMapSummary net_map = density_api.netDensityMap(stage, grid_size);
-  std::cout << "Local net density: " << net_map.local_net_density << std::endl;
-  std::cout << "Global net density: " << net_map.global_net_density << std::endl;
-  std::cout << "All net density: " << net_map.allnet_density << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Local net density: ", net_map.local_net_density);
+  ECCLOG.info(ecc::Loc::current(), "Global net density: ", net_map.global_net_density);
+  ECCLOG.info(ecc::Loc::current(), "All net density: ", net_map.allnet_density);
 }
 
 void TestMarginMap()
@@ -176,7 +177,7 @@ void TestMarginMap()
   std::string stage = "place";
 
   ieval::MacroMarginSummary macro_margin_summary = density_api.macroMarginMap(cells, die, core, grid_size, stage);
-  std::cout << "Horizontal margin: " << macro_margin_summary.horizontal_margin << std::endl;
-  std::cout << "Vertical margin: " << macro_margin_summary.vertical_margin << std::endl;
-  std::cout << "Union margin: " << macro_margin_summary.union_margin << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Horizontal margin: ", macro_margin_summary.horizontal_margin);
+  ECCLOG.info(ecc::Loc::current(), "Vertical margin: ", macro_margin_summary.vertical_margin);
+  ECCLOG.info(ecc::Loc::current(), "Union margin: ", macro_margin_summary.union_margin);
 }

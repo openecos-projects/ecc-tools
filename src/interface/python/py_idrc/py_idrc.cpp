@@ -16,8 +16,6 @@
 // ***************************************************************************************
 #include "py_idrc.h"
 
-#include <tool_manager.h>
-
 #include "DRCInterface.hpp"
 
 namespace python_interface {
@@ -35,14 +33,15 @@ bool init_drc(const std::string& temp_directory_path, const int& thread_number)
   return true;
 }
 
-bool run_drc(const std::string& config, const std::string& report)
+bool run_drc(const std::string&, const std::string&)
 {
-  return iplf::tmInst->autoRunDRC(config, report, true);
+  DRCI.runDRC();
+  return true;
 }
 
 bool save_drc(const std::string& path)
 {
-  return iplf::tmInst->saveDrcDetailToFile(path);
+  return DRCI.saveDRC(path);
 }
 
 }  // namespace python_interface

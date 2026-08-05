@@ -154,15 +154,14 @@ auto CheckMonotonicity(const AnalyticalSurfaceModel& model, const std::vector<An
   return true;
 }
 
-auto EvaluateQuality(AnalyticalSurfaceModel& model, const std::vector<AnalyticalFitSample>& samples, const AnalyticalFitConfig& config)
-    -> void
+auto EvaluateQuality(AnalyticalSurfaceModel& model, const std::vector<AnalyticalFitSample>& samples, const AnalyticalFitConfig& config) -> void
 {
   auto& quality = model.quality;
   quality.sample_count = samples.size();
 
-  const double mean_value = std::accumulate(samples.begin(), samples.end(), 0.0,
-                                            [](double total, const AnalyticalFitSample& sample) -> double { return total + sample.value; })
-                            / static_cast<double>(samples.size());
+  const double mean_value
+      = std::accumulate(samples.begin(), samples.end(), 0.0, [](double total, const AnalyticalFitSample& sample) -> double { return total + sample.value; })
+        / static_cast<double>(samples.size());
 
   double square_error = 0.0;
   double square_total = 0.0;

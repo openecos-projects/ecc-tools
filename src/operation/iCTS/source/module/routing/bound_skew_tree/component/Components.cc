@@ -23,20 +23,19 @@
 
 #include "bound_skew_tree/component/Components.hh"
 
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <ostream>
 
-#include "Log.hh"
+#include "Logger.hh"
 
 namespace icts::bst {
 
 auto TransformedRect::check() -> void
 {
   correction();
-  LOG_FATAL_IF(is_empty()) << "TRR is empty, which x_low: " << _x_low << ", x_high: " << _x_high << ", y_low: " << _y_low
-                           << ", y_high: " << _y_high;
+  if (is_empty()) {
+    CTSLOG.error(Loc::current(), "TRR is empty, which x_low: ", _x_low, ", x_high: ", _x_high, ", y_low: ", _y_low, ", y_high: ", _y_high);
+  }
 }
 
 auto TransformedRect::correction() -> void

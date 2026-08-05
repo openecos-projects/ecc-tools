@@ -29,11 +29,11 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "utility/logger/Logger.hpp"
 #include "IdbViaMaster.h"
 
+#include <sstream>
 #include <string>
-
-#include "Str.hh"
 
 namespace idb {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -76,10 +76,15 @@ void IdbViaMasterRulePattern::parse_pattern(size_t row, size_t col)
  */
 void IdbViaMasterRulePattern::parse_pattern_array(vector<pair<string, string>>& pattern_array)
 {
-  const char* sep = "_";
-
   string pattern = _pattern;
-  vector<string> strs = ieda::Str::split(pattern.c_str(), sep);
+  vector<string> strs;
+  std::istringstream stream(pattern);
+  string str;
+  while (std::getline(stream, str, '_')) {
+    if (!str.empty()) {
+      strs.push_back(str);
+    }
+  }
   for (size_t i = 0; i < strs.size(); i += 2) {
     pattern_array.push_back(std::make_pair(strs[i], strs[i + 1]));
   }
@@ -93,7 +98,7 @@ void IdbViaMasterRulePattern::parse_pattern_array(vector<pair<string, string>>& 
 void IdbViaMasterRulePattern::parse_pattern_row_value(size_t row_index, string value)
 {
   if (row_index >= _pattern_state.size()) {
-    std::cout << "Error : pattern index error, pattern size = " << _pattern_state.size() << " row index = " << row_index << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : pattern index error, pattern size = ", _pattern_state.size(), " row index = ", row_index);
     return;
   }
 
@@ -492,7 +497,7 @@ void IdbViaMaster::set_layer_shape(IdbViaLayerIndex layer_index)
         break;
     }
     if (_master_fixed_list.size() != IdbViaLayerIndex::kMax) {
-      std::cout << "Error fix via : fix layer number must be ==3..." << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Error fix via : fix layer number must be ==3...");
     } else {
       //   if (layer_index == IdbViaLayerIndex::kLayerBottom || layer_index == IdbViaLayerIndex::kLayerTop) {
       //     IdbViaMasterFixed* master_fix_find = get_master_fixed(layer_index);
@@ -518,7 +523,7 @@ void IdbViaMaster::set_layer_shape(IdbViaLayerIndex layer_index)
     }
 
   } else {
-    std::cout << "Error IdbViaMaster : No via master exist..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error IdbViaMaster : No via master exist...");
   }
 }
 /// find top\bottom\cut fix master according to layer index

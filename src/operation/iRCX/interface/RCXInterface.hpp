@@ -104,6 +104,8 @@ class RCXInterface
   RCXInterface& operator=(const RCXInterface& other) = delete;
   RCXInterface& operator=(RCXInterface&& other) = delete;
   // function
+  // 归一化 thread_num，避免过量起线程。
+  static int32_t normalizeThreadNumber(const nlohmann::json& config_json);
 };
 
 }  // namespace ircx

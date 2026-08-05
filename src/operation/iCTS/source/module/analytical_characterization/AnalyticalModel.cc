@@ -51,8 +51,8 @@ auto AnalyticalDomain::isValid() const -> bool
 
 auto AnalyticalDomain::contains(double input_slew_ns, double load_cap_pf, double epsilon) const -> bool
 {
-  return isValid() && input_slew_ns + epsilon >= slew_min_ns && input_slew_ns <= slew_max_ns + epsilon
-         && load_cap_pf + epsilon >= cap_min_pf && load_cap_pf <= cap_max_pf + epsilon;
+  return isValid() && input_slew_ns + epsilon >= slew_min_ns && input_slew_ns <= slew_max_ns + epsilon && load_cap_pf + epsilon >= cap_min_pf
+         && load_cap_pf <= cap_max_pf + epsilon;
 }
 
 auto AnalyticalDomain::slewScale() const -> double
@@ -206,8 +206,7 @@ auto AnalyticalBasisTermCount(AnalyticalModelBasis basis) -> std::size_t
   return 0U;
 }
 
-auto BuildAnalyticalFeatures(AnalyticalModelBasis basis, const AnalyticalDomain& domain, double input_slew_ns, double load_cap_pf)
-    -> std::vector<double>
+auto BuildAnalyticalFeatures(AnalyticalModelBasis basis, const AnalyticalDomain& domain, double input_slew_ns, double load_cap_pf) -> std::vector<double>
 {
   const double s_norm = input_slew_ns / domain.slewScale();
   const double c_norm = load_cap_pf / domain.capScale();

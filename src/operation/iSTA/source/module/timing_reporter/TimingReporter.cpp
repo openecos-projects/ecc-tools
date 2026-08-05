@@ -93,6 +93,65 @@ std::string stableTimingPathId(const std::string& value)
   return stream.str();
 }
 
+std::string normalizeTimingReportOption(std::string value)
+{
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+  std::replace(value.begin(), value.end(), '-', '_');
+  return value;
+}
+
+std::vector<DelayType> getReportDelayTypeList()
+{
+  const std::string delay_type = normalizeTimingReportOption(STADM.getConfig().timing_report_delay_type);
+  if (delay_type == "max" || delay_type == "setup" || delay_type.empty()) {
+    return {DelayType::kMax};
+  }
+  if (delay_type == "min" || delay_type == "hold") {
+    return {DelayType::kMin};
+  }
+  if (delay_type == "max_min" || delay_type == "min_max" || delay_type == "all") {
+    return {DelayType::kMax, DelayType::kMin};
+  }
+
+  STALOG.warn(Loc::current(), "Unrecognized timing report delay_type='", STADM.getConfig().timing_report_delay_type,
+              "', use default 'max'.");
+  return {DelayType::kMax};
+}
+
+std::vector<StartEndType> getReportStartEndTypeList()
+{
+  const std::string start_end_type = normalizeTimingReportOption(STADM.getConfig().timing_report_start_end_type);
+  if (start_end_type.empty() || start_end_type == "all" || start_end_type == "none") {
+    return {StartEndType::kNone};
+  }
+  if (start_end_type == "all_separate" || start_end_type == "separate") {
+    return {StartEndType::kInToOut, StartEndType::kInToReg, StartEndType::kRegToOut, StartEndType::kRegToReg};
+  }
+  if (start_end_type == "in_to_out" || start_end_type == "in2out") {
+    return {StartEndType::kInToOut};
+  }
+  if (start_end_type == "in_to_reg" || start_end_type == "in2reg") {
+    return {StartEndType::kInToReg};
+  }
+  if (start_end_type == "reg_to_out" || start_end_type == "reg2out") {
+    return {StartEndType::kRegToOut};
+  }
+  if (start_end_type == "reg_to_reg" || start_end_type == "reg2reg") {
+    return {StartEndType::kRegToReg};
+  }
+
+  STALOG.warn(Loc::current(), "Unrecognized timing report start_end_type='",
+              STADM.getConfig().timing_report_start_end_type, "', use default 'all'.");
+  return {StartEndType::kNone};
+}
+
+bool hasImplicitReportSlackLesserThan()
+{
+  return !STADM.getConfig().has_timing_report_slack_lesser_than && !STADM.getConfig().has_timing_report_slack_greater_than
+         && (STADM.getConfig().path_report_number > 1 || STADM.getConfig().endpoint_path_report_number > 1);
+}
+
 }  // namespace
 
 // public
@@ -146,14 +205,11 @@ void TimingReporter::outputTimingReportList()
   const bool output_reports = STADM.getConfig().output_timing_reports != 0;
   const bool output_features = STADM.getConfig().output_timing_features != 0;
   if (output_reports) {
-    outputTimingReport(DelayType::kMax, StartEndType::kInToOut);
-    outputTimingReport(DelayType::kMax, StartEndType::kInToReg);
-    outputTimingReport(DelayType::kMax, StartEndType::kRegToOut);
-    outputTimingReport(DelayType::kMax, StartEndType::kRegToReg);
-    outputTimingReport(DelayType::kMin, StartEndType::kInToOut);
-    outputTimingReport(DelayType::kMin, StartEndType::kInToReg);
-    outputTimingReport(DelayType::kMin, StartEndType::kRegToOut);
-    outputTimingReport(DelayType::kMin, StartEndType::kRegToReg);
+    for (DelayType delay_type : getReportDelayTypeList()) {
+      for (StartEndType start_end_type : getReportStartEndTypeList()) {
+        outputTimingReport(delay_type, start_end_type);
+      }
+    }
   }
   if (output_reports || output_features) {
     outputQorSummaryReport();
@@ -175,6 +231,9 @@ void TimingReporter::outputTimingReport(DelayType delay_type, StartEndType start
 
 std::string TimingReporter::getReportFilePath(DelayType delay_type, StartEndType start_end_type)
 {
+  if (start_end_type == StartEndType::kNone) {
+    return STAUTIL.getString(STADM.getConfig().tr_temp_directory_path, "timing_", GetDelayTypeName()(delay_type), ".rpt");
+  }
   return STAUTIL.getString(STADM.getConfig().tr_temp_directory_path, "timing_", GetDelayTypeName()(delay_type), "_",
                            GetStartEndTypeReportName()(start_end_type), ".rpt");
 }
@@ -185,8 +244,25 @@ void TimingReporter::outputReportHeader(std::ofstream* report_file, DelayType de
   (*report_file) << "****************************************\n";
   (*report_file) << "Design : " << database.get_design_name() << "\n";
   (*report_file) << "DelayType : " << GetDelayTypeName()(delay_type) << "\n";
-  (*report_file) << "StartEndType : " << GetStartEndTypeName()(start_end_type) << "\n";
-  (*report_file) << "MaxSlack : 1000\n";
+  (*report_file) << "StartEndType : "
+                 << (start_end_type == StartEndType::kNone ? "all" : GetStartEndTypeName()(start_end_type)) << "\n";
+  (*report_file) << "SlackLesserThan : ";
+  if (STADM.getConfig().has_timing_report_slack_lesser_than) {
+    (*report_file) << getNumberString(STADM.getConfig().timing_report_slack_lesser_than);
+  } else if (hasImplicitReportSlackLesserThan()) {
+    (*report_file) << getNumberString(0.0);
+  } else {
+    (*report_file) << "infinity";
+  }
+  (*report_file) << "\n";
+  (*report_file) << "SlackGreaterThan : ";
+  if (STADM.getConfig().has_timing_report_slack_greater_than) {
+    (*report_file) << getNumberString(STADM.getConfig().timing_report_slack_greater_than);
+  } else {
+    (*report_file) << "-infinity";
+  }
+  (*report_file) << "\n";
+  (*report_file) << "Nworst : " << STADM.getConfig().endpoint_path_report_number << "\n";
   (*report_file) << "MaxPaths : " << STADM.getConfig().path_report_number << "\n";
   (*report_file) << "SortBy : slack\n";
   (*report_file) << "****************************************\n\n";
@@ -194,21 +270,13 @@ void TimingReporter::outputReportHeader(std::ofstream* report_file, DelayType de
 
 void TimingReporter::outputPathGroupList(std::ofstream* report_file, DelayType delay_type, StartEndType start_end_type)
 {
-  Database& database = STADM.getDatabase();
-  if (database.get_timing_path_group_list().empty()) {
+  std::vector<std::pair<std::string, TimingPath*>> timing_path_list = getReportTimingPathList(delay_type, start_end_type);
+  if (timing_path_list.empty()) {
     (*report_file) << "No constrained paths.\n\n";
     return;
   }
-  bool has_timing_path = false;
-  for (TimingPathGroup& timing_path_group : database.get_timing_path_group_list()) {
-    std::vector<TimingPath*> timing_path_list = getSortedTimingPathList(timing_path_group, delay_type, start_end_type);
-    if (!timing_path_list.empty()) {
-      has_timing_path = true;
-    }
-    outputTimingPathGroup(report_file, timing_path_group, delay_type, start_end_type);
-  }
-  if (!has_timing_path) {
-    (*report_file) << "No constrained paths.\n\n";
+  for (std::pair<std::string, TimingPath*>& timing_path_pair : timing_path_list) {
+    outputTimingPath(report_file, *timing_path_pair.second, timing_path_pair.first, delay_type);
   }
 }
 
@@ -217,28 +285,63 @@ void TimingReporter::outputReportFooter(std::ofstream* report_file)
   (*report_file) << "1\n";
 }
 
-void TimingReporter::outputTimingPathGroup(std::ofstream* report_file, TimingPathGroup& timing_path_group, DelayType delay_type,
-                                           StartEndType start_end_type)
-{
-  std::vector<TimingPath*> timing_path_list = getReportTimingPathList(timing_path_group, delay_type, start_end_type);
-  for (TimingPath* timing_path : timing_path_list) {
-    outputTimingPath(report_file, *timing_path, timing_path_group.get_group_name(), delay_type);
-  }
-}
-
-std::vector<TimingPath*> TimingReporter::getReportTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type,
-                                                                 StartEndType start_end_type)
+std::vector<std::pair<std::string, TimingPath*>> TimingReporter::getReportTimingPathList(DelayType delay_type,
+                                                                                        StartEndType start_end_type)
 {
   int32_t path_report_number = STADM.getConfig().path_report_number;
-  std::vector<TimingPath*> sorted_timing_path_list = getSortedTimingPathList(timing_path_group, delay_type, start_end_type);
-  std::vector<TimingPath*> report_timing_path_list;
-  for (TimingPath* timing_path : sorted_timing_path_list) {
+  std::vector<std::pair<std::string, TimingPath*>> sorted_timing_path_list = getSortedReportTimingPathList(delay_type, start_end_type);
+  std::vector<std::pair<std::string, TimingPath*>> report_timing_path_list;
+  for (std::pair<std::string, TimingPath*>& timing_path_pair : sorted_timing_path_list) {
     if (static_cast<int32_t>(report_timing_path_list.size()) >= path_report_number) {
       break;
     }
-    report_timing_path_list.push_back(timing_path);
+    report_timing_path_list.push_back(timing_path_pair);
   }
   return report_timing_path_list;
+}
+
+std::vector<std::pair<std::string, TimingPath*>> TimingReporter::getSortedReportTimingPathList(DelayType delay_type,
+                                                                                               StartEndType start_end_type)
+{
+  Database& database = STADM.getDatabase();
+  std::vector<std::pair<std::string, TimingPath*>> timing_path_list;
+  for (TimingPathGroup& timing_path_group : database.get_timing_path_group_list()) {
+    std::string& group_name = timing_path_group.get_group_name();
+    for (auto& [end_point, timing_path_end] : timing_path_group.get_timing_path_end_map()) {
+      for (TimingPath& timing_path : timing_path_end.get_timing_path_list()) {
+        if (isMatchAnalysisType(timing_path, delay_type) && isMatchStartEndType(timing_path, start_end_type)
+            && isMatchReportSlack(timing_path)) {
+          timing_path_list.emplace_back(group_name, &timing_path);
+        }
+      }
+    }
+  }
+
+  std::sort(timing_path_list.begin(), timing_path_list.end(),
+            [](const std::pair<std::string, TimingPath*>& left, const std::pair<std::string, TimingPath*>& right) {
+              if (std::fabs(left.second->get_slack() - right.second->get_slack()) > STA_ERROR) {
+                return left.second->get_slack() < right.second->get_slack();
+              }
+              if (left.first != right.first) {
+                return left.first < right.first;
+              }
+              if (left.second->get_start_point() != right.second->get_start_point()) {
+                return left.second->get_start_point() < right.second->get_start_point();
+              }
+              return left.second->get_end_point() < right.second->get_end_point();
+            });
+
+  std::map<std::string, int32_t> endpoint_path_count_map;
+  std::vector<std::pair<std::string, TimingPath*>> endpoint_limited_timing_path_list;
+  for (std::pair<std::string, TimingPath*>& timing_path_pair : timing_path_list) {
+    std::string& end_point = timing_path_pair.second->get_end_point();
+    if (endpoint_path_count_map[end_point] >= STADM.getConfig().endpoint_path_report_number) {
+      continue;
+    }
+    endpoint_path_count_map[end_point]++;
+    endpoint_limited_timing_path_list.push_back(timing_path_pair);
+  }
+  return endpoint_limited_timing_path_list;
 }
 
 std::vector<TimingPath*> TimingReporter::getSortedTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type,
@@ -272,6 +375,21 @@ std::vector<TimingPath*> TimingReporter::getEndpointWorstTimingPathList(std::vec
     endpoint_worst_timing_path_list.push_back(timing_path_pair.second);
   }
   return endpoint_worst_timing_path_list;
+}
+
+bool TimingReporter::isMatchReportSlack(TimingPath& timing_path)
+{
+  double slack = timing_path.get_slack();
+  if (STADM.getConfig().has_timing_report_slack_lesser_than && !(slack < STADM.getConfig().timing_report_slack_lesser_than)) {
+    return false;
+  }
+  if (STADM.getConfig().has_timing_report_slack_greater_than && !(slack > STADM.getConfig().timing_report_slack_greater_than)) {
+    return false;
+  }
+  if (hasImplicitReportSlackLesserThan() && !(slack < 0.0)) {
+    return false;
+  }
+  return true;
 }
 
 void TimingReporter::outputQorSummaryReport()
@@ -779,6 +897,9 @@ bool TimingReporter::isMatchAnalysisType(TimingPath& timing_path, DelayType dela
 
 bool TimingReporter::isMatchStartEndType(TimingPath& timing_path, StartEndType start_end_type)
 {
+  if (start_end_type == StartEndType::kNone) {
+    return true;
+  }
   bool start_is_port = isPort(timing_path.get_start_point());
   bool end_is_port = isPort(timing_path.get_end_point());
   if (start_end_type == StartEndType::kInToOut) {

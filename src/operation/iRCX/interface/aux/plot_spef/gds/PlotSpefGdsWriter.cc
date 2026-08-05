@@ -41,7 +41,7 @@
 #include "ParallelUtils.hh"
 #include "PathUtils.hh"
 #include "StringUtils.hh"
-#include "log/Log.hh"
+#include "Logger.hpp"
 #include "model/PlotSpefGdsType.hh"
 #include "model/PlotSpefModel.hh"
 #include "model/PlotSpefVisibility.hh"
@@ -835,11 +835,11 @@ auto GdsWriter::write(const Model& model,
 
   idb::GdsiiTextWriter writer;
   if (!writer.init(gds_file.string(), &gds_data)) {
-    LOG_ERROR << "plot_spef failed: cannot open GDS output file " << gds_file.string();
+    RCXLOG.warn(Loc::current(), "plot_spef failed: cannot open GDS output file ", gds_file.string());
     return false;
   }
   if (!writer.begin()) {
-    LOG_ERROR << "plot_spef failed: cannot begin GDS output file " << gds_file.string();
+    RCXLOG.warn(Loc::current(), "plot_spef failed: cannot begin GDS output file ", gds_file.string());
     return false;
   }
 
@@ -851,7 +851,7 @@ auto GdsWriter::write(const Model& model,
     return false;
   }
   if (config.log_gds_file) {
-    LOG_INFO << "plot_spef wrote GDS to " << gds_file.string();
+    RCXLOG.info(Loc::current(), "plot_spef wrote GDS to ", gds_file.string());
   }
   return true;
 }

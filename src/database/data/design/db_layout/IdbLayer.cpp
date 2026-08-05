@@ -29,6 +29,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "utility/logger/Logger.hpp"
 #include "IdbLayer.h"
 
 #include <algorithm>
@@ -83,7 +84,7 @@ void IdbLayer::set_type(string type)
 
 void IdbLayer::print()
 {
-  std::cout << "name =  " << _name << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "name =  ", _name);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -171,7 +172,7 @@ IdbLayer* IdbLayers::set_layer(string layer_name, string type)
     _z_order++;
   }
 
-  // std::cout << "Routing layer id = " << _routing_layer_index << std::endl;
+  // ECCLOG.info(ecc::Loc::current(), "Routing layer idx = ", _routing_layer_index);
 
   return layer_find;
 }  // namespace idb
@@ -196,7 +197,7 @@ IdbLayer* IdbLayers::find_layer(const string& src_name, bool new_layer)
   }
 
   //   if (!new_layer) {
-  //     std::cout << "[IdbLayer Error] : can not find layer = " << src_name << std::endl;
+  //     ECCLOG.warn(ecc::Loc::current(), "[IdbLayer Error] : can not find layer = ", src_name);
   //   }
 
   return nullptr;
@@ -272,7 +273,7 @@ IdbLayer* IdbLayers::find_layer_by_order(uint8_t order)
     }
   }
 
-  std::cout << "[IdbLayer Error] : can not find layer with order = " << order << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "[IdbLayer Error] : can not find layer with order = ", order);
 
   return nullptr;
 }

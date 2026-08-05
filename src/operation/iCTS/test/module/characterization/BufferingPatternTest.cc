@@ -26,18 +26,16 @@
 #include <string>
 #include <vector>
 
-#include "database/characterization/BufferingPattern.hh"
-#include "database/characterization/PatternId.hh"
+#include "data_manager/characterization/BufferingPattern.hh"
+#include "data_manager/characterization/PatternId.hh"
 
 namespace icts_test {
 namespace {
 
 TEST(BufferingPatternTest, ConcatPreservesTerminalBranchBufferFromDownstream)
 {
-  const icts::BufferingPattern upstream(2U, icts::PatternId::segment(1U), std::vector<double>{0.5}, std::vector<std::string>{"BUF_X4"},
-                                        false);
-  const icts::BufferingPattern downstream(3U, icts::PatternId::segment(2U), std::vector<double>{1.0}, std::vector<std::string>{"BUF_X2"},
-                                          true);
+  const icts::BufferingPattern upstream(2U, icts::PatternId::segment(1U), std::vector<double>{0.5}, std::vector<std::string>{"BUF_X4"}, false);
+  const icts::BufferingPattern downstream(3U, icts::PatternId::segment(2U), std::vector<double>{1.0}, std::vector<std::string>{"BUF_X2"}, true);
 
   const auto merged = icts::BufferingPattern::concat(upstream, downstream);
 
@@ -52,10 +50,8 @@ TEST(BufferingPatternTest, ConcatPreservesTerminalBranchBufferFromDownstream)
 
 TEST(BufferingPatternTest, ConcatUsesDownstreamTerminalBranchBufferSemantics)
 {
-  const icts::BufferingPattern upstream(2U, icts::PatternId::segment(1U), std::vector<double>{1.0}, std::vector<std::string>{"BUF_X4"},
-                                        true);
-  const icts::BufferingPattern downstream(3U, icts::PatternId::segment(2U), std::vector<double>{0.5}, std::vector<std::string>{"BUF_X2"},
-                                          false);
+  const icts::BufferingPattern upstream(2U, icts::PatternId::segment(1U), std::vector<double>{1.0}, std::vector<std::string>{"BUF_X4"}, true);
+  const icts::BufferingPattern downstream(3U, icts::PatternId::segment(2U), std::vector<double>{0.5}, std::vector<std::string>{"BUF_X2"}, false);
 
   const auto merged = icts::BufferingPattern::concat(upstream, downstream);
 

@@ -6,15 +6,15 @@ add_library(
 target_link_libraries(
   icts_source_module_topology_clustering
   PUBLIC
-  icts_source_database_spatial
+  icts_source_data_manager_spatial
   PRIVATE
-  icts_source_database_design
+  icts_source_data_manager_design
   icts_source_module_topology_fast_clustering
   icts_source_module_topology_config
   icts_source_module_topology_cluster_constraints
   icts_source_module_topology_kmeans
   icts_source_module_topology_mcf
-  icts_source_utils_geometry
+  icts_source_toolkit_geometry
 )
 
 target_include_directories(

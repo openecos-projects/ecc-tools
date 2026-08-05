@@ -12,12 +12,10 @@ add_library(izh_interface
 
 target_link_libraries(izh_interface
     PRIVATE
-    izh_module
-    izh_toolkit
+    izh_source
     idrc_interface
-    ieda_feature
+    ecc_feature
     idm
-    notification
 )
 
 target_include_directories(izh_interface

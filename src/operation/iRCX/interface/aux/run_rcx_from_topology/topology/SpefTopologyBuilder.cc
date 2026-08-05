@@ -31,7 +31,7 @@
 #include "TopoEdge.hpp"
 #include "TopoNode.hpp"
 #include "TopoPool.hpp"
-#include "log/Log.hh"
+#include "Logger.hpp"
 
 namespace ircx::run_rcx_from_topology::detail {
 
@@ -199,13 +199,13 @@ std::optional<int32_t> getLayerIdx(int32_t net_idx,
     if (design_layer_it != layer_table.get_design_name_to_idx_map().end()) {
       return design_layer_it->second;
     }
-    LOG_ERROR << "run_rcx_from_topology warning: layer map entry not found in design layers, net_idx=" << net_idx
-              << ", annotation_layer=" << annotation_layer_idx << ", layer_name=" << layer_map_it->second.layer_name << ".";
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology warning: layer map entry not found in design layers, net_idx=", net_idx,
+                ", annotation_layer=", annotation_layer_idx, ", layer_name=", layer_map_it->second.layer_name, ".");
     return std::nullopt;
   }
   if (annotation_layer_idx < 0) {
     if (strict) {
-      LOG_ERROR << "run_rcx_from_topology failed: invalid annotation layer " << annotation_layer_idx << ", net_idx=" << net_idx << ".";
+      RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: invalid annotation layer ", annotation_layer_idx, ", net_idx=", net_idx, ".");
     }
     return std::nullopt;
   }
@@ -215,8 +215,8 @@ std::optional<int32_t> getLayerIdx(int32_t net_idx,
     return annotation_layer_idx;
   }
   if (strict) {
-    LOG_ERROR << "run_rcx_from_topology failed: missing layer map for annotation layer " << annotation_layer_idx
-              << ", net_idx=" << net_idx << ".";
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: missing layer map for annotation layer ", annotation_layer_idx,
+                ", net_idx=", net_idx, ".");
   }
   return std::nullopt;
 }
@@ -234,7 +234,7 @@ std::optional<int32_t> getConnLayerIdx(int32_t net_idx,
     return getLayerIdx(net_idx, exchange, layer_table, conn.layer, strict);
   }
   if (strict) {
-    LOG_ERROR << "run_rcx_from_topology failed: node missing layer, net_idx=" << net_idx << ", node=" << conn.pin_port_name << ".";
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: node missing layer, net_idx=", net_idx, ", node=", conn.pin_port_name, ".");
   }
   return std::nullopt;
 }
@@ -253,8 +253,8 @@ std::optional<int32_t> getResLayerIdx(int32_t net_idx,
     return fallback_layer_idx;
   }
   if (strict) {
-    LOG_ERROR << "run_rcx_from_topology failed: resistor missing layer, net_idx=" << net_idx << ", node1=" << res.node1
-              << ", node2=" << res.node2 << ".";
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: resistor missing layer, net_idx=", net_idx, ", node1=", res.node1,
+                ", node2=", res.node2, ".");
   }
   return std::nullopt;
 }
@@ -299,8 +299,8 @@ std::optional<NetTopo> buildNetTopo(LayoutData& layout_data,
     std::optional<GTLPointInt> point = getConnPoint(conn, layout_data.get_dbu_per_micron());
     if (!layer_idx.has_value() || !point.has_value()) {
       if (strict) {
-        LOG_ERROR << "run_rcx_from_topology failed: invalid node geometry, net=" << spef_net.name << ", node=" << conn.pin_port_name
-                  << ".";
+        RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: invalid node geometry, net=", spef_net.name, ", node=", conn.pin_port_name,
+                    ".");
         return std::nullopt;
       }
       continue;
@@ -328,8 +328,8 @@ std::optional<NetTopo> buildNetTopo(LayoutData& layout_data,
     std::unordered_map<std::string, NodeInfo>::iterator second_node_it = node_name_to_info_map.find(second_node_name);
     if (first_node_it == node_name_to_info_map.end() || second_node_it == node_name_to_info_map.end()) {
       if (strict) {
-        LOG_ERROR << "run_rcx_from_topology failed: resistor endpoint missing from *CONN, net=" << spef_net.name
-                  << ", node1=" << res.node1 << ", node2=" << res.node2 << ".";
+        RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: resistor endpoint missing from *CONN, net=", spef_net.name,
+                    ", node1=", res.node1, ", node2=", res.node2, ".");
         return std::nullopt;
       }
       continue;
@@ -389,23 +389,23 @@ bool SpefTopologyBuilder::build(LayoutData& layout_data, LayerTable& layer_table
 {
   int32_t net_num = layout_data.get_regular_net_num();
   if (net_num == 0) {
-    LOG_ERROR << "run_rcx_from_topology failed: layout data is empty.";
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: layout data is empty.");
     return false;
   }
   if (spef_file_path.empty()) {
-    LOG_ERROR << "run_rcx_from_topology failed: SPEF file is empty.";
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: SPEF file is empty.");
     return false;
   }
 
   spef::SpefReader reader;
   if (!reader.read(spef_file_path)) {
-    LOG_ERROR << "run_rcx_from_topology failed: read SPEF failed: " << spef_file_path;
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: read SPEF failed: ", spef_file_path);
     return false;
   }
   reader.expandName();
   const spef::Exchange* exchange = reader.getSpefFile();
   if (exchange == nullptr) {
-    LOG_ERROR << "run_rcx_from_topology failed: parser returned null exchange.";
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: parser returned null exchange.");
     return false;
   }
 
@@ -414,8 +414,8 @@ bool SpefTopologyBuilder::build(LayoutData& layout_data, LayerTable& layer_table
   for (const spef::Net& spef_net : exchange->nets) {
     std::unordered_map<std::string, int32_t>::iterator net_idx_it = layout_net_name_to_idx_map.find(detail::getNormalizedSpefName(spef_net.name));
     if (net_idx_it == layout_net_name_to_idx_map.end()) {
-      LOG_ERROR << (strict ? "run_rcx_from_topology failed" : "run_rcx_from_topology warning")
-                << ": net not found in layout, net=" << spef_net.name << ".";
+      RCXLOG.warn(Loc::current(), (strict ? "run_rcx_from_topology failed" : "run_rcx_from_topology warning"),
+                  ": net not found in layout, net=", spef_net.name, ".");
       if (strict) {
         return false;
       }
@@ -435,7 +435,7 @@ bool SpefTopologyBuilder::build(LayoutData& layout_data, LayerTable& layer_table
     edge_num += static_cast<int32_t>(net_topo.edge_list.size());
   }
   if (edge_num == 0) {
-    LOG_ERROR << "run_rcx_from_topology failed: no topology edges were built from " << spef_file_path << ".";
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: no topology edges were built from ", spef_file_path, ".");
     return false;
   }
 
@@ -444,7 +444,7 @@ bool SpefTopologyBuilder::build(LayoutData& layout_data, LayerTable& layer_table
     _topo_pool.add_net(std::move(net_topo.node_list), std::move(net_topo.edge_list));
   }
   detail::remapEdgeNodeIdx(_topo_pool, net_num);
-  LOG_INFO << "run_rcx_from_topology built " << node_num << " nodes and " << edge_num << " edges from " << spef_file_path;
+  RCXLOG.info(Loc::current(), "run_rcx_from_topology built ", node_num, " nodes and ", edge_num, " edges from ", spef_file_path);
   return true;
 }
 

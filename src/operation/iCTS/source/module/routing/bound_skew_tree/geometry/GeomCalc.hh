@@ -118,12 +118,11 @@ class GeomCalc
 
   // transformed rect
   static auto transformedRectDistance(TransformedRect& lhs_transformed_rect, TransformedRect& rhs_transformed_rect) -> double;
-  static auto makeIntersection(const TransformedRect& first_transformed_rect, const TransformedRect& second_transformed_rect,
-                               TransformedRect& intersection) -> void;
+  static auto makeIntersection(const TransformedRect& first_transformed_rect, const TransformedRect& second_transformed_rect, TransformedRect& intersection)
+      -> void;
   static auto coreMidPoint(TransformedRect& transformed_rect, Point& midpoint) -> void;
   static auto containsTransformedRect(const TransformedRect& inner_transformed_rect, const TransformedRect& outer_transformed_rect) -> bool;
-  static auto buildTransformedRect(const TransformedRect& transformed_rect, const double& radius,
-                                   TransformedRect& expanded_transformed_rect) -> void;
+  static auto buildTransformedRect(const TransformedRect& transformed_rect, const double& radius, TransformedRect& expanded_transformed_rect) -> void;
   static auto transformedRectCore(const TransformedRect& transformed_rect, TransformedRect& core_transformed_rect) -> void;
   static auto transformedRectToPoint(const TransformedRect& transformed_rect, Point& point) -> void;
   static auto transformedRectToRegion(TransformedRect& transformed_rect, Region& region) -> void;

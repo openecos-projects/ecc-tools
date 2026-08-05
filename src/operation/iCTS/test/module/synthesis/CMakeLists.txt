@@ -1,0 +1,31 @@
+add_subdirectory(htree)
+
+icts_add_test_executable(
+  icts_test_module_synthesis
+  SOURCES
+    ${ICTS_TEST}/module/synthesis/TopologyTest.cc
+)
+
+if(ICTS_BUILD_REALTECH_TESTS)
+  icts_add_test_executable(
+    icts_test_module_synthesis_realtech
+    REALTECH
+    SOURCES
+      ${ICTS_TEST}/module/synthesis/TopologyArtifactWriter.cc
+      ${ICTS_TEST}/module/synthesis/TopologyVisualizationSVG.cc
+      ${ICTS_TEST}/module/synthesis/TopologyNonClusteredRealTechSmokeTest.cc
+      ${ICTS_TEST}/module/synthesis/TopologyRealTechMatrixRunner.cc
+      ${ICTS_TEST}/module/synthesis/TopologyRealTechMatrixTest.cc
+      ${ICTS_TEST}/module/synthesis/TopologyRealTechArtifactAssertions.cc
+      ${ICTS_TEST}/module/synthesis/TopologyRealTechClusterAssertions.cc
+      ${ICTS_TEST}/module/synthesis/TopologyRealTechClusterValidation.cc
+      ${ICTS_TEST}/module/synthesis/TopologyRealTechHTreeAssertions.cc
+      ${ICTS_TEST}/module/synthesis/TopologyRealTechExperimentReport.cc
+      ${ICTS_TEST}/module/synthesis/TopologyRealTechSmokeTest.cc
+    LIBS
+      icts_test_toolkit_io
+      icts_test_data_manager_realtech_setup
+      icts_test_module_characterization_fixture
+      icts_source_module_topology_clustering
+  )
+endif()

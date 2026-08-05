@@ -62,7 +62,7 @@ typedef struct LibertyExpr
 } LibertyExpr;
 
 /**
- * @brief parse expression in rust.
+ * @brief Parse expression.
  *
  * @param expr_str
  * @return void*

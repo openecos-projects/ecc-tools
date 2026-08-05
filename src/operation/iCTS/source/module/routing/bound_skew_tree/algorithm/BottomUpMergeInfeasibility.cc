@@ -23,14 +23,12 @@
 
 #include "bound_skew_tree/algorithm/BottomUpMergeInfeasibility.hh"
 
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <limits>
 #include <ostream>
 #include <utility>
 
-#include "Log.hh"
+#include "Logger.hh"
 #include "bound_skew_tree/algorithm/BottomUpMergeBalance.hh"
 #include "bound_skew_tree/algorithm/BoundSkewTreeImpl.hh"
 #include "bound_skew_tree/algorithm/TopDownEmbedding.hh"
@@ -52,9 +50,8 @@ auto BottomUpMergeInfeasibility::calcMinSkewSection(Area* current_area) const ->
   FOR_EACH_BST_SIDE(side)
   {
     auto min_side_point_skew = std::numeric_limits<double>::max();
-    std::ranges::for_each(_impl.joiningRegionPoints(side), [&](const Point& point) -> void {
-      min_side_point_skew = std::min(min_side_point_skew, TopDownEmbedding::pointSkew(point));
-    });
+    std::ranges::for_each(_impl.joiningRegionPoints(side),
+                          [&](const Point& point) -> void { min_side_point_skew = std::min(min_side_point_skew, TopDownEmbedding::pointSkew(point)); });
     if (min_side_point_skew < min_skew) {
       min_skew = min_side_point_skew;
       min_skew_side = side;
@@ -76,12 +73,13 @@ auto BottomUpMergeInfeasibility::calcDetourEdgeLength(Area* current_area) const 
   left_point.val = current_area->get_left()->get_cap_load();
   right_point.val = current_area->get_right()->get_cap_load();
   auto delta = TopDownEmbedding::pointSkew(current_area->get_merge_region().front()) - _impl._skew_bound;
-  LOG_FATAL_IF(delta <= 0) << "remain skew less than 0";
+  if (delta <= 0) {
+    CTSLOG.error(Loc::current(), "remain skew less than 0");
+  }
   auto [horizontal_distance, vertical_distance] = BoundSkewTreeImpl::calcManhattanDistanceComponents(left_point, right_point);
   if (left_point.max > right_point.max) {
     right_point.max
-        = left_point.max - delta
-          - _impl.topDownEmbedding().calcDelayIncrease(horizontal_distance, vertical_distance, right_point.val, _impl._rc_pattern);
+        = left_point.max - delta - _impl.topDownEmbedding().calcDelayIncrease(horizontal_distance, vertical_distance, right_point.val, _impl._rc_pattern);
     BalancePointResult result;
     _impl.bottomUpMergeBalance().calcBalanceBetweenPoints(BalancePointQuery{.first_point = left_point,
                                                                             .second_point = right_point,
@@ -89,13 +87,14 @@ auto BottomUpMergeInfeasibility::calcDetourEdgeLength(Area* current_area) const 
                                                                             .balance_ref_axis = BalanceRefAxis::kX,
                                                                             .rc_pattern = _impl._rc_pattern},
                                                           result);
-    LOG_FATAL_IF(result.distance_to_first > kEpsilon) << "dist to left_point should be zero";
+    if (result.distance_to_first > kEpsilon) {
+      CTSLOG.error(Loc::current(), "dist to left_point should be zero");
+    }
     current_area->set_edge_len(kLeft, 0);
     current_area->set_edge_len(kRight, result.distance_to_second);
   } else {
     left_point.max
-        = right_point.max - delta
-          - _impl.topDownEmbedding().calcDelayIncrease(horizontal_distance, vertical_distance, left_point.val, _impl._rc_pattern);
+        = right_point.max - delta - _impl.topDownEmbedding().calcDelayIncrease(horizontal_distance, vertical_distance, left_point.val, _impl._rc_pattern);
     BalancePointResult result;
     _impl.bottomUpMergeBalance().calcBalanceBetweenPoints(BalancePointQuery{.first_point = left_point,
                                                                             .second_point = right_point,
@@ -103,7 +102,9 @@ auto BottomUpMergeInfeasibility::calcDetourEdgeLength(Area* current_area) const 
                                                                             .balance_ref_axis = BalanceRefAxis::kX,
                                                                             .rc_pattern = _impl._rc_pattern},
                                                           result);
-    LOG_FATAL_IF(result.distance_to_second > kEpsilon) << "dist to right_point should be zero";
+    if (result.distance_to_second > kEpsilon) {
+      CTSLOG.error(Loc::current(), "dist to right_point should be zero");
+    }
     current_area->set_edge_len(kLeft, result.distance_to_first);
     current_area->set_edge_len(kRight, 0);
   }

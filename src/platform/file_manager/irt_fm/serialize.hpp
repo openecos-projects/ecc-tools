@@ -1,4 +1,5 @@
 #pragma once
+#include "utility/logger/Logger.hpp"
 #include <boost/archive/binary_iarchive.hpp>
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/text_iarchive.hpp>
@@ -61,7 +62,7 @@ class Persister
     oarchive oar = getOarchive();
     Archive(oar, args...);
     oar << _signature;
-    std::cout << "Serialize timecost: " << timer.elapsed() << " ms\n";
+    ECCLOG.info(ecc::Loc::current(), "Serialize timecost: ", timer.elapsed(), " ms");
   }
   template <InEqualable T>
   void saveWithHeader(const T& header, Args&... args)
@@ -107,7 +108,7 @@ class Persister
     if (sig != _signature) {
       throw std::runtime_error("Invalid serialize data.");
     }
-    std::cout << "Deserialize timecost: " << timer.elapsed() << " ms\n";
+    ECCLOG.info(ecc::Loc::current(), "Deserialize timecost: ", timer.elapsed(), " ms");
   }
 
   oarchive getOarchive()
@@ -152,7 +153,7 @@ class Persister
 namespace boost::serialization {
 
 template <typename Serializable, typename Archive>
-concept iEDALoadSavable = requires(Serializable& obj, Archive& ar, const unsigned int version)
+concept ECCLoadSavable = requires(Serializable& obj, Archive& ar, const unsigned int version)
 {
   {
     load(ar, obj, version)
@@ -163,10 +164,10 @@ concept iEDALoadSavable = requires(Serializable& obj, Archive& ar, const unsigne
 };
 
 template <typename Serializable, typename Archive>
-concept iEDASerializable = !iEDALoadSavable<Serializable, Archive>;
+concept ECCSerializable = !ECCLoadSavable<Serializable, Archive>;
 
 template <typename Archive, typename T>
-requires iEDALoadSavable<T, Archive>
+requires ECCLoadSavable<T, Archive>
 void serialize(Archive& ar, T& t, const unsigned int version)
 {
   //   using namespace iplf;

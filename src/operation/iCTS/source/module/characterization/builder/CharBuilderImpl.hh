@@ -37,12 +37,11 @@
 #include <string>
 #include <vector>
 
-#include "ClockRouteSegmentRc.hh"
+#include "ClockRouteSegmentRC.hh"
 
 namespace icts {
 class BufferingPattern;
 class FastSTA;
-class SchemaWriter;
 class SegmentChar;
 class Wrapper;
 struct CharacterizationBufferCell;
@@ -171,6 +170,7 @@ class CharBuilderImpl
   auto maxObservedOutputSlewIdx() const -> unsigned { return _max_observed_output_slew_idx; }
   auto maxObservedDrivenCapPf() const -> double { return _max_observed_driven_cap_pf; }
   auto maxObservedDrivenCapIdx() const -> unsigned { return _max_observed_driven_cap_idx; }
+  auto buildFailureReason() const -> const std::string& { return _build_failure_reason; }
 
  private:
   std::vector<::icts::CharacterizationBufferCell> _sorted_buffers;
@@ -209,11 +209,10 @@ class CharBuilderImpl
   std::size_t _fast_sta_char_context_id = std::numeric_limits<std::size_t>::max();
   ::icts::Wrapper* _wrapper = nullptr;
   ::icts::FastSTA* _fast_sta = nullptr;
-  ::icts::SchemaWriter* _reporter = nullptr;
-
   std::vector<::icts::SegmentChar> _segment_chars;
   std::vector<::icts::BufferingPattern> _buffering_patterns;
   unsigned _next_pattern_id = 0;
+  std::string _build_failure_reason;
   std::size_t _executed_sta_samples = 0;
   std::size_t _skipped_sta_samples = 0;
   std::size_t _output_slew_overflow_samples = 0;

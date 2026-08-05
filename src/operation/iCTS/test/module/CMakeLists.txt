@@ -1,4 +1,7 @@
 add_subdirectory(analytical_characterization)
 add_subdirectory(characterization)
+add_subdirectory(optimization)
+add_subdirectory(output)
 add_subdirectory(routing)
+add_subdirectory(synthesis)
 add_subdirectory(topology)

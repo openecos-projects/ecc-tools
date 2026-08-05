@@ -32,6 +32,7 @@
 
 #include "IdbNet.h"
 
+#include "utility/logger/Logger.hpp"
 namespace idb {
 
 std::optional<IdbBus> IdbBus::parseBusObj(const std::string& name_str, const IdbBusBitChars* bus_bit_chars)
@@ -167,9 +168,9 @@ std::optional<std::pair<std::string, unsigned>> IdbBus::parseBusName(std::string
       try {
         index = std::stoi(extracted_str);
       } catch (const std::invalid_argument& e) {
-        std::cerr << "Error: Invalid number format." << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "Error: Invalid number format.");
       } catch (const std::out_of_range& e) {
-        std::cerr << "Error: Number out of range." << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "Error: Number out of range.");
       }
 
       name_str.erase(start_pos, end_pos - start_pos + 1);

@@ -1,0 +1,30 @@
+add_library(
+  icts_source_module_synthesis_topology_trunk
+  ${ICTS_MODULE_SYNTHESIS_TOPOLOGY_TRUNK}/SourceTrunk.cc
+  ${ICTS_MODULE_SYNTHESIS_TOPOLOGY_TRUNK}/SourceTrunkSegment.cc
+)
+
+target_link_libraries(
+  icts_source_module_synthesis_topology_trunk
+  PUBLIC
+  icts_source_module_synthesis_htree
+  icts_source_module_synthesis_topology_source_trunk_stage
+  PRIVATE
+  icts_source_data_manager_config
+  icts_source_data_manager_io
+  icts_source_data_manager_routing
+  icts_source_module_synthesis_htree_characterization_library
+  icts_source_module_synthesis_htree_characterization_wirelength
+  icts_source_module_synthesis_htree_embedding
+  icts_source_module_synthesis_topology_buffer
+  icts_source_module_synthesis_trace_topology_build
+  icts_source_module_topology_clustering
+  icts_source_toolkit_geometry
+  icts_source_toolkit_logger
+)
+
+target_include_directories(
+  icts_source_module_synthesis_topology_trunk
+  PUBLIC
+  ${ICTS_MODULE}
+)

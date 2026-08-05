@@ -37,7 +37,7 @@
 #include "ParallelUtils.hh"
 #include "PathUtils.hh"
 #include "libfort/fort.hpp"
-#include "log/Log.hh"
+#include "Logger.hpp"
 #include "utils/CompareMath.hh"
 
 namespace ircx {
@@ -225,7 +225,7 @@ auto writeTcapReport(const std::filesystem::path& output_dir,
   const auto report_path = output_dir / "tcap.rpt";
   auto ofs = openReport(report_path);
   if (!ofs.is_open()) {
-    LOG_ERROR << "compare_spef failed: cannot open report " << report_path;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: cannot open report ", report_path);
     return false;
   }
   ofs << config.test_file << '\t' << config.reference_file << "\t%diff\tNetname\n";
@@ -244,7 +244,7 @@ auto writeGcapReport(const std::filesystem::path& output_dir,
   const auto report_path = output_dir / "gcap.rpt";
   auto ofs = openReport(report_path);
   if (!ofs.is_open()) {
-    LOG_ERROR << "compare_spef failed: cannot open report " << report_path;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: cannot open report ", report_path);
     return false;
   }
   ofs << config.test_file << '\t' << config.reference_file << "\t%diff\tNetname\n";
@@ -263,7 +263,7 @@ auto writeCcapReport(const std::filesystem::path& output_dir,
   const auto report_path = output_dir / "ccap.rpt";
   auto ofs = openReport(report_path);
   if (!ofs.is_open()) {
-    LOG_ERROR << "compare_spef failed: cannot open report " << report_path;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: cannot open report ", report_path);
     return false;
   }
   ofs << config.test_file << '\t' << config.reference_file
@@ -292,7 +292,7 @@ auto writeP2PReport(const std::filesystem::path& output_dir,
   const auto report_path = output_dir / "p2p.rpt";
   auto ofs = openReport(report_path);
   if (!ofs.is_open()) {
-    LOG_ERROR << "compare_spef failed: cannot open report " << report_path;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: cannot open report ", report_path);
     return false;
   }
   ofs << config.test_file << '\t' << config.reference_file << "\t%diff\tNetname\tPin1\tPin2\n";
@@ -313,7 +313,7 @@ auto writeMismatchedNets(const std::filesystem::path& output_dir,
   const auto report_path = output_dir / "nets.mismatched";
   auto ofs = openReport(report_path);
   if (!ofs.is_open()) {
-    LOG_ERROR << "compare_spef failed: cannot open report " << report_path;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: cannot open report ", report_path);
     return false;
   }
   ofs << "Total# of nets in reference: " << result.summary.reference_net_count << '\n';
@@ -335,7 +335,7 @@ auto writeMismatchedCouplings(const std::filesystem::path& output_dir,
   const auto report_path = output_dir / "coupling_caps.mismatched";
   auto ofs = openReport(report_path);
   if (!ofs.is_open()) {
-    LOG_ERROR << "compare_spef failed: cannot open report " << report_path;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: cannot open report ", report_path);
     return false;
   }
 
@@ -387,7 +387,7 @@ auto writeSummaryReport(const std::filesystem::path& output_dir,
   const auto report_path = output_dir / "summary.rpt";
   auto ofs = openReport(report_path);
   if (!ofs.is_open()) {
-    LOG_ERROR << "compare_spef failed: cannot open report " << report_path;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: cannot open report ", report_path);
     return false;
   }
 
@@ -531,8 +531,7 @@ auto ReportWriter::write(const Result& result) const -> bool
   const std::filesystem::path output_dir(_config.output_dir);
   const bool ok = writeReports(output_dir, _config, result);
   if (!ok) {
-    LOG_ERROR << "compare_spef failed: cannot write one or more reports under "
-              << _config.output_dir;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: cannot write one or more reports under ", _config.output_dir);
   }
   return ok;
 }

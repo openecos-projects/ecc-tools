@@ -29,6 +29,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "utility/logger/Logger.hpp"
 #include "IdbSpecialNet.h"
 
 #include <algorithm>
@@ -243,7 +244,7 @@ void IdbSpecialNetList::initEdge(IdbLayers* layers)
     }
   }
 
-  std::cout << "Init Special Net Edge." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Init Special Net Edge.");
 }
 
 IdbSpecialNet* IdbSpecialNetList::find_net(string name)
@@ -408,7 +409,7 @@ bool IdbSpecialNetList::connectIO(vector<IdbCoordinate<int32_t>*>& point_list, I
   /// find segment array of layer
   IdbSpecialNetEdgeSegmenArray* layer_segment_array = find_edge_segment_array_by_layer(layer);
   if (layer_segment_array == nullptr) {
-    std::cout << "Error : can not find edge." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : can not find edge.");
     return false;
   }
 
@@ -420,19 +421,19 @@ bool IdbSpecialNetList::addPowerStripe(vector<IdbCoordinate<int32_t>*>& point_li
 {
   IdbSpecialNet* net = find_net(net_name);
   if (net == nullptr) {
-    std::cout << "Error : can't find the net. " << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : can't find the net. ");
     return false;
   }
 
   IdbSpecialWire* wire = net->get_wire_list()->get_num() > 0 ? net->get_wire_list()->find_wire(0) : net->get_wire_list()->add_wire(nullptr);
   if (wire == nullptr) {
-    std::cout << "Error : can't get the wire." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : can't get the wire.");
     return false;
   }
 
   IdbSpecialWireSegment* segment = wire->get_layer_segment(layer_name);
   if (segment == nullptr) {
-    std::cout << "Error : can't find any power stripe in the net." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : can't find any power stripe in the net.");
     return false;
   }
 

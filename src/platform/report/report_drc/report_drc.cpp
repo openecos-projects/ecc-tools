@@ -26,10 +26,10 @@ std::string ReportDRC::title()
   return ReportBase::title();
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDRC::createDRCTable(std::map<std::string, int>& drc_result)
+std::shared_ptr<ecc::ReportTable> ReportDRC::createDRCTable(std::map<std::string, int>& drc_result)
 {
   std::vector<std::string> header_list = {"DRC Type", "Number"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Drc Summary", header_list, static_cast<int>(ReportDrcType::kSummary));
+  auto tbl = std::make_shared<ecc::ReportTable>("Drc Summary", header_list, static_cast<int>(ReportDrcType::kSummary));
 
   for (auto& [name, nums] : drc_result) {
     *tbl << name << nums << TABLE_ENDLINE;
@@ -38,11 +38,11 @@ std::shared_ptr<ieda::ReportTable> ReportDRC::createDRCTable(std::map<std::strin
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDRC::createConnectivityTable(
+std::shared_ptr<ecc::ReportTable> ReportDRC::createConnectivityTable(
     std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int>& connectivity_result)
 {
   std::vector<std::string> header_list = {"Connectivity Check", "Number"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Connectivity Summary", header_list, static_cast<int>(ReportDrcType::kConnectivity));
+  auto tbl = std::make_shared<ecc::ReportTable>("Connectivity Summary", header_list, static_cast<int>(ReportDrcType::kConnectivity));
 
   auto b_result = std::get<0>(connectivity_result);
   auto disconnect_net_list = std::get<1>(connectivity_result);
@@ -52,14 +52,14 @@ std::shared_ptr<ieda::ReportTable> ReportDRC::createConnectivityTable(
   if (b_result) {
     *tbl << "Nets are all connected!" << TABLE_SKIP << TABLE_ENDLINE;
   } else {
-    *tbl << "Disconneted nets [pin number >= 2]" << ieda::Str::printf("%d / %d", disconnect_net_list.size(), net_max) << TABLE_ENDLINE;
-    *tbl << "Disconneted nets [pin number < 2]" << ieda::Str::printf("%d / %d", one_pin_list.size(), net_max) << TABLE_ENDLINE;
+    *tbl << "Disconneted nets [pin number >= 2]" << ReportBase::format("%d / %d", disconnect_net_list.size(), net_max) << TABLE_ENDLINE;
+    *tbl << "Disconneted nets [pin number < 2]" << ReportBase::format("%d / %d", one_pin_list.size(), net_max) << TABLE_ENDLINE;
   }
 
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDRC::createConnectivityDetailTable(
+std::shared_ptr<ecc::ReportTable> ReportDRC::createConnectivityDetailTable(
     std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int>& connectivity_result)
 {
   auto b_result = std::get<0>(connectivity_result);
@@ -69,7 +69,7 @@ std::shared_ptr<ieda::ReportTable> ReportDRC::createConnectivityDetailTable(
 
   std::vector<std::string> header_list = {"Disconnected Net"};
   auto tbl
-      = std::make_shared<ieda::ReportTable>("DRC - Disconnected Net", header_list, static_cast<int>(ReportDrcType::kConnectivityDetail));
+      = std::make_shared<ecc::ReportTable>("DRC - Disconnected Net", header_list, static_cast<int>(ReportDrcType::kConnectivityDetail));
 
   if (b_result) {
     *tbl << "Nets are all connected!" << TABLE_SKIP << TABLE_ENDLINE;

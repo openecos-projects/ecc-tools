@@ -18,6 +18,7 @@
 
 #include "LVSHeader.hpp"
 #include "SupplyPoint.hpp"
+#include "Violation.hpp"
 
 namespace ilvs {
 
@@ -28,11 +29,14 @@ class PCModel
   ~PCModel() = default;
   // getter
   std::vector<SupplyPoint>& get_supply_point_list() { return _supply_point_list; }
+  std::vector<Violation>& get_violation_list() { return _violation_list; }
   // const getter
   const std::vector<SupplyPoint>& get_supply_point_list() const { return _supply_point_list; }
+  const std::vector<Violation>& get_violation_list() const { return _violation_list; }
 
  private:
   std::vector<SupplyPoint> _supply_point_list;
+  std::vector<Violation> _violation_list;
 };
 
 }  // namespace ilvs

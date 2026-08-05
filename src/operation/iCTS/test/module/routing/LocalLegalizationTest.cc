@@ -27,9 +27,9 @@
 #include <string>
 #include <vector>
 
-#include "database/spatial/Point.hh"
-#include "database/spatial/Rect.hh"
-#include "database/spatial/Region.hh"
+#include "data_manager/spatial/Point.hh"
+#include "data_manager/spatial/Rect.hh"
+#include "data_manager/spatial/Region.hh"
 #include "module/routing/local_legalization/LocalLegalization.hh"
 
 namespace icts_test {

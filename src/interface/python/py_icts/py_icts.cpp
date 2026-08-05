@@ -18,19 +18,17 @@
 
 #include <algorithm>
 
-#include "iCTS/api/CTSAPI.hh"
-#include <tool_manager.h>
+#include "CTSAPI.hh"
 
 namespace python_interface {
 bool CtsAutoRun(const std::string& cts_config, const std::string& cts_work_dir)
 {
-  bool cts_run_ok = iplf::tmInst->autoRunCTS(cts_config, cts_work_dir);
-  return cts_run_ok;
+  return CTS_API_INST.runCTS(cts_config, cts_work_dir).ok();
 }
 
 bool CtsReport(const std::string& path)
 {
-  return iplf::tmInst->reportCTS(path);
+  return CTS_API_INST.report(path).ok();
 }
 
 pybind11::dict CtsTimingFeature()

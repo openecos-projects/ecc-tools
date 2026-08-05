@@ -3,9 +3,9 @@ add_library(icts_source_module_timing ${ICTS_MODULE_TIMING}/TimingEngine.cc)
 target_link_libraries(
   icts_source_module_timing
   PUBLIC
-  icts_source_database_timing
+  icts_source_data_manager_timing
   PRIVATE
-  log
+  icts_source_toolkit_logger
 )
 
 target_include_directories(

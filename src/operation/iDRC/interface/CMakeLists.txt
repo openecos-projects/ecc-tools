@@ -14,6 +14,8 @@ target_link_libraries(idrc_interface
     PRIVATE
     idrc_source
     idm
+    file_manager_drc
+    ecc_logger
 )
 
 target_include_directories(idrc_interface

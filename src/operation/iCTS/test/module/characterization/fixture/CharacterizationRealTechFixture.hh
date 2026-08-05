@@ -25,7 +25,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -33,14 +32,10 @@
 #include <vector>
 
 #include "characterization/Characterization.hh"
-#include "database/characterization/BufferingPattern.hh"
-#include "database/characterization/HTreeTopologyChar.hh"
-#include "database/characterization/PatternId.hh"
-#include "database/characterization/SegmentChar.hh"
-
-namespace icts_test::common::logging {
-class ScopedLogFile;
-}  // namespace icts_test::common::logging
+#include "data_manager/characterization/BufferingPattern.hh"
+#include "data_manager/characterization/HTreeTopologyChar.hh"
+#include "data_manager/characterization/PatternId.hh"
+#include "data_manager/characterization/SegmentChar.hh"
 
 namespace icts_test::characterization::realtech {
 
@@ -52,7 +47,7 @@ inline constexpr double kExactLeafLevelLengthUm = 25.0;
 inline constexpr double kExactMidLevelLengthUm = 50.0;
 inline constexpr double kExactRootLevelLengthUm = 100.0;
 inline constexpr double kRealTechCharWirelengthUnitUm = 25.0;
-inline constexpr unsigned kRealTechCharWirelengthIterations = 3U;
+inline constexpr unsigned kRealTechCharWirelengthIterations = 4U;
 inline constexpr unsigned kRealTechCharSlewSteps = 15U;
 inline constexpr unsigned kRealTechCharCapSteps = 15U;
 
@@ -65,7 +60,6 @@ struct ConfigState
   double max_cap = 0.0;
   bool has_max_buf_tran = false;
   bool has_max_cap = false;
-  double max_length = 0.0;
   double wirelength_unit_um = 0.0;
   unsigned wirelength_iterations = 0U;
   unsigned slew_steps = 0U;
@@ -76,7 +70,6 @@ struct ConfigState
   std::vector<std::string> buffer_types;
   double char_buf_redundancy_pct = 0.0;
   bool force_branch_buffer = false;
-  unsigned htree_depth_explore_window = 4U;
   bool enable_sink_clustering = true;
   std::string work_dir;
   std::string log_file;
@@ -93,9 +86,8 @@ struct RuntimeCharBuilderContract
 auto CaptureConfigState() -> ConfigState;
 auto ApplyConfigState(const ConfigState& state) -> void;
 auto MakeRuntimeCharBuilderContract() -> RuntimeCharBuilderContract;
-auto MakeRealTechCharConfigState(const ConfigState& baseline_state, std::optional<std::vector<std::string>> buffer_types,
-                                 double max_buf_tran_ns, double max_cap_pf, bool omit_wirelength_unit, bool force_branch_buffer = false)
-    -> ConfigState;
+auto MakeRealTechCharConfigState(const ConfigState& baseline_state, std::optional<std::vector<std::string>> buffer_types, double max_buf_tran_ns,
+                                 double max_cap_pf, bool omit_wirelength_unit, bool force_branch_buffer = false) -> ConfigState;
 
 struct RealTechCharFixture
 {
@@ -107,15 +99,14 @@ struct RealTechCharFixture
   RealTechCharFixture(RealTechCharFixture&&) = delete;
   auto operator=(RealTechCharFixture&&) -> RealTechCharFixture& = delete;
 
-  auto prepare(const std::string& scenario_name, std::optional<std::vector<std::string>> buffer_types, double max_buf_tran_ns,
-               double max_cap_pf, bool omit_wirelength_unit = false, bool force_branch_buffer = false) -> std::optional<std::string>;
+  auto prepare(const std::string& scenario_name, std::optional<std::vector<std::string>> buffer_types, double max_buf_tran_ns, double max_cap_pf,
+               bool omit_wirelength_unit = false, bool force_branch_buffer = false) -> std::optional<std::string>;
 
  private:
   auto restore() -> void;
 
   bool _is_prepared = false;
   std::optional<ConfigState> _original_config_state;
-  std::unique_ptr<::icts_test::common::logging::ScopedLogFile> _cts_log_guard;
 };
 
 struct BufferLimitInfo
@@ -123,11 +114,16 @@ struct BufferLimitInfo
   std::string cell_master;
   std::string input_pin;
   std::string output_pin;
-  double port_slew_limit_ns = 0.0;
-  double table_slew_limit_ns = 0.0;
-  double port_cap_limit_pf = 0.0;
-  double table_cap_limit_pf = 0.0;
+  std::optional<double> port_slew_limit_ns = std::nullopt;
+  std::optional<double> table_slew_limit_ns = std::nullopt;
+  std::optional<double> port_cap_limit_pf = std::nullopt;
+  std::optional<double> table_cap_limit_pf = std::nullopt;
 };
+
+inline auto HasPositiveValue(const std::optional<double>& value) -> bool
+{
+  return value.has_value() && *value > 0.0;
+}
 
 struct CharGrid
 {
@@ -173,12 +169,11 @@ struct HTreeFrontierContext
 };
 
 auto JoinStrings(const std::vector<std::string>& values) -> std::string;
-auto WriteScenarioLog(const std::string& scenario_name, const std::string& file_name, const std::string& content) -> bool;
+auto WriteScenarioReport(const std::string& scenario_name, const std::string& file_name, const std::string& content) -> bool;
 auto CollectConfiguredBufferLimitInfo() -> std::vector<BufferLimitInfo>;
 auto CollectUsableBufferMasters(const std::vector<BufferLimitInfo>& infos) -> std::vector<std::string>;
 auto LookupBufferInfo(const std::vector<BufferLimitInfo>& infos, const std::string& cell_master) -> const BufferLimitInfo*;
-auto MinPositiveResolvedLimit(const std::vector<BufferLimitInfo>& infos, const std::vector<std::string>& selected_masters, bool for_slew)
-    -> double;
+auto MinPositiveResolvedLimit(const std::vector<BufferLimitInfo>& infos, const std::vector<std::string>& selected_masters, bool for_slew) -> double;
 auto ResolveDefaultWirelengthUnitUm(const std::vector<BufferLimitInfo>& infos, const std::vector<std::string>& selected_masters) -> double;
 
 template <class PredicateT>
@@ -220,22 +215,19 @@ inline auto SortCharsForReport(std::vector<CharT>& chars) -> void
 }
 
 auto BuildSegmentFrontierContext(const std::vector<icts::BufferingPattern>& patterns) -> SegmentFrontierContext;
-auto BuildSegmentStateFrontier(const std::vector<icts::SegmentChar>& chars, const SegmentFrontierContext& context)
-    -> std::vector<icts::SegmentChar>;
-auto BuildHTreeStateFrontier(const std::vector<icts::HTreeTopologyChar>& chars, const HTreeFrontierContext& context)
-    -> std::vector<icts::HTreeTopologyChar>;
+auto BuildSegmentStateFrontier(const std::vector<icts::SegmentChar>& chars, const SegmentFrontierContext& context) -> std::vector<icts::SegmentChar>;
+auto BuildHTreeStateFrontier(const std::vector<icts::HTreeTopologyChar>& chars, const HTreeFrontierContext& context) -> std::vector<icts::HTreeTopologyChar>;
 
 auto MakeLengthIndex(double length_um, double length_step_um) -> unsigned;
 auto CalcCharGrid(const icts::CharBuilder& builder) -> CharGrid;
-auto SummarizeSegmentCharLattice(const std::vector<icts::SegmentChar>& chars, const icts::CharBuilder& builder)
-    -> SegmentCharLatticeSummary;
+auto SummarizeSegmentCharLattice(const std::vector<icts::SegmentChar>& chars, const icts::CharBuilder& builder) -> SegmentCharLatticeSummary;
 auto FormatSegmentCharLatticeSummary(const SegmentCharLatticeSummary& summary, const icts::CharBuilder& builder) -> std::string;
 auto ComposeSegmentEntriesExact(const std::vector<icts::SegmentChar>& upstream, const std::vector<icts::SegmentChar>& downstream,
                                 SegmentFrontierContext& context) -> std::vector<icts::SegmentChar>;
 auto BuildSegmentLengthFrontiers(const std::vector<icts::SegmentChar>& chars, const SegmentFrontierContext& context)
     -> std::unordered_map<unsigned, std::vector<icts::SegmentChar>>;
-auto SynthesizeSegmentFrontierExactOnly(std::unordered_map<unsigned, std::vector<icts::SegmentChar>>& frontier_by_length,
-                                        unsigned target_length_idx, SegmentFrontierContext& context) -> bool;
+auto SynthesizeSegmentFrontierExactOnly(std::unordered_map<unsigned, std::vector<icts::SegmentChar>>& frontier_by_length, unsigned target_length_idx,
+                                        SegmentFrontierContext& context) -> bool;
 auto MakeHTreeSeedEntries(const std::vector<icts::SegmentChar>& segment_frontier, const SegmentFrontierContext& segment_context,
                           HTreeFrontierContext& htree_context) -> std::vector<icts::HTreeTopologyChar>;
 auto ComposeHTreeEntriesExact(const std::vector<icts::HTreeTopologyChar>& upstream, const std::vector<icts::HTreeTopologyChar>& downstream,
@@ -245,8 +237,7 @@ auto FormatSegmentChar(const icts::SegmentChar& entry, const CharGrid& grid) -> 
 auto FormatHTreeChar(const icts::HTreeTopologyChar& entry, const CharGrid& grid) -> std::string;
 
 template <class CharT, class FormatFn>
-inline auto AppendExamples(std::ostringstream& output_stream, const std::string& prefix, std::vector<CharT> entries,
-                           const FormatFn& format_fn) -> void
+inline auto AppendExamples(std::ostringstream& output_stream, const std::string& prefix, std::vector<CharT> entries, const FormatFn& format_fn) -> void
 {
   SortCharsForReport(entries);
   for (std::size_t index = 0; index < std::min(kReportExampleLimit, entries.size()); ++index) {

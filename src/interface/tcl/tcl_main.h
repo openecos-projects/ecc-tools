@@ -36,7 +36,7 @@ int tcl_start(int tcl_argc, char** tcl_argv)
 {
   // this_thread::sleep_for(chrono::seconds(10));
 
-  auto shell = ieda::UserShell::getShell();
+  auto shell = ecc::UserShell::getShell();
   shell->set_init_func(registerCommands);
   shell->userMain(tcl_argc, tcl_argv);
 

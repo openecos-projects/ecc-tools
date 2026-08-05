@@ -17,6 +17,7 @@
 #include "DefData.hpp"
 #include "DataManager.hpp"
 #include "IdbDesign.h"
+#include "IdbLayout.h"
 #include "LVSHeader.hpp"
 #include "LVSInterface.hpp"
 #include "NetlistData.hpp"
@@ -30,7 +31,9 @@ int main()
   assert(ilvs::Utility::getIOPinName("PIN/IN") == "IN");
   assert(ilvs::Utility::getIOPinName("IN") == "IN");
 
-  idb::IdbDesign design;
+  idb::IdbLayout layout;
+  layout.initDie(10, 20, 1000, 2000);
+  idb::IdbDesign design(&layout);
   design.set_design_name("top");
   idb::IdbPin* io_pin = design.createOrFindIoPin("IN");
   assert(io_pin != nullptr);
@@ -71,6 +74,10 @@ int main()
 
   ilvs::DefData def_data = LVSI.wrapDefData(&design);
   assert(def_data.get_design_name() == "top");
+  assert(def_data.get_die().get_real_ll_x() == 10);
+  assert(def_data.get_die().get_real_ll_y() == 20);
+  assert(def_data.get_die().get_real_ur_x() == 1000);
+  assert(def_data.get_die().get_real_ur_y() == 2000);
   assert(LVSUTIL.exist(def_data.get_net_map(), std::string("n1")));
   assert(def_data.get_physical_graph().get_net_routing_graph_map().empty());
   assert(LVSUTIL.exist(def_data.get_def_routing_data().get_net_routing_data_map(), std::string("n1")));

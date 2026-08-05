@@ -23,18 +23,16 @@
 
 #include "FastClustering.hh"
 
-#include <glog/logging.h>
-
+#include <algorithm>
 #include <limits>
-#include <map>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "Clustering.hh"
-#include "Log.hh"
+#include "LogTable.hh"
+#include "Logger.hh"
 #include "TopologyConfig.hh"
 #include "cluster_draft/FastClusteringDraft.hh"
 
@@ -44,76 +42,7 @@ namespace detail = fast_clustering;
 
 namespace {
 
-using detail::ElapsedSeconds;
 using detail::FormatRatio;
-using detail::FormatSeconds;
-using detail::SteadyClock;
-
-auto FormatFanoutHistogram(const std::map<std::size_t, std::size_t>& histogram) -> std::string
-{
-  if (histogram.empty()) {
-    return "none";
-  }
-
-  std::ostringstream stream;
-  bool first = true;
-  for (const auto& [fanout, count] : histogram) {
-    if (!first) {
-      stream << ",";
-    }
-    stream << fanout << "=" << count;
-    first = false;
-  }
-  return stream.str();
-}
-
-auto BuildDraftFanoutHistogram(const std::vector<detail::ClusterDraft>& drafts) -> std::map<std::size_t, std::size_t>
-{
-  std::map<std::size_t, std::size_t> histogram;
-  for (const auto& draft : drafts) {
-    if (!draft.active || draft.entry_ids.empty()) {
-      continue;
-    }
-    ++histogram[draft.entry_ids.size()];
-  }
-  return histogram;
-}
-
-auto CountDraftLoads(const std::vector<detail::ClusterDraft>& drafts) -> std::size_t
-{
-  std::size_t load_count = 0U;
-  for (const auto& draft : drafts) {
-    if (!draft.active || draft.entry_ids.empty()) {
-      continue;
-    }
-    load_count += draft.entry_ids.size();
-  }
-  return load_count;
-}
-
-auto CountDraftClusters(const std::vector<detail::ClusterDraft>& drafts) -> std::size_t
-{
-  std::size_t cluster_count = 0U;
-  for (const auto& draft : drafts) {
-    if (!draft.active || draft.entry_ids.empty()) {
-      continue;
-    }
-    ++cluster_count;
-  }
-  return cluster_count;
-}
-
-auto BuildResultFanoutHistogram(const ClusterOutput& result) -> std::map<std::size_t, std::size_t>
-{
-  std::map<std::size_t, std::size_t> histogram;
-  for (const auto& cluster : result.clusters) {
-    if (cluster.empty()) {
-      continue;
-    }
-    ++histogram[cluster.size()];
-  }
-  return histogram;
-}
 
 auto CalcAverageFanout(std::size_t load_count, std::size_t cluster_count) -> double
 {
@@ -141,53 +70,65 @@ auto FastClustering::runDefault(const std::vector<Pin*>& loads, const ClusterCon
 
 auto FastClustering::run(const std::vector<Pin*>& loads, const ClusterConfig& config) -> ClusterOutput
 {
-  const auto run_start = SteadyClock::now();
   ClusterOutput result;
   if (loads.empty()) {
     return result;
   }
 
-  const auto collect_start = SteadyClock::now();
   auto entries = detail::CollectEntries(loads);
-  LOG_INFO << "Fast clustering collect entries: input_loads=" << loads.size() << ", valid_entries=" << entries.size()
-           << ", elapsed_time=" << FormatSeconds(ElapsedSeconds(collect_start)) << " s";
   if (entries.empty()) {
-    LOG_WARNING << "Fast clustering skipped: no valid load pins.";
+    CTSLOG.warn(Loc::current(), "Fast clustering skipped: no valid load pins.");
     return result;
   }
 
-  const auto partition_start = SteadyClock::now();
   auto drafts = detail::BuildSpatialRecursiveClusters(entries, config);
-  const auto partition_cluster_count = CountDraftClusters(drafts);
-  LOG_INFO << "Fast clustering recursive partition: entries=" << entries.size() << ", drafts=" << partition_cluster_count
-           << ", avg_fanout=" << FormatRatio(CalcAverageFanout(CountDraftLoads(drafts), partition_cluster_count))
-           << ", fanout_histogram=" << FormatFanoutHistogram(BuildDraftFanoutHistogram(drafts))
-           << ", elapsed_time=" << FormatSeconds(ElapsedSeconds(partition_start)) << " s";
 
-  const auto polish_start = SteadyClock::now();
   detail::PolishSmallClusters(drafts, entries, config);
-  const auto polished_cluster_count = CountDraftClusters(drafts);
-  LOG_INFO << "Fast clustering polish: drafts=" << polished_cluster_count
-           << ", avg_fanout=" << FormatRatio(CalcAverageFanout(CountDraftLoads(drafts), polished_cluster_count))
-           << ", fanout_histogram=" << FormatFanoutHistogram(BuildDraftFanoutHistogram(drafts))
-           << ", elapsed_time=" << FormatSeconds(ElapsedSeconds(polish_start)) << " s";
 
-  const auto finalize_start = SteadyClock::now();
   auto finalized = detail::FinalizeClusters(drafts, entries, config);
-  const auto finalize_elapsed_seconds = ElapsedSeconds(finalize_start);
   if (!finalized.has_value() || detail::CountAssignedLoads(*finalized) != entries.size()) {
-    LOG_WARNING << "Fast clustering failed to produce a legal complete partition.";
+    CTSLOG.warn(Loc::current(), "Fast clustering failed to produce a legal complete partition.");
     return result;
   }
 
   const auto assigned_load_count = detail::CountAssignedLoads(*finalized);
-  LOG_INFO << "Fast clustering finalize: clusters=" << finalized->clusters.size() << ", assigned_loads=" << assigned_load_count
-           << ", avg_fanout=" << FormatRatio(CalcAverageFanout(assigned_load_count, finalized->clusters.size()))
-           << ", fanout_histogram=" << FormatFanoutHistogram(BuildResultFanoutHistogram(*finalized))
-           << ", elapsed_time=" << FormatSeconds(finalize_elapsed_seconds) << " s";
-  LOG_INFO << "Fast clustering done: loads=" << entries.size() << ", clusters=" << finalized->clusters.size()
-           << ", avg_fanout=" << FormatRatio(CalcAverageFanout(assigned_load_count, finalized->clusters.size()))
-           << ", total_elapsed_time=" << FormatSeconds(ElapsedSeconds(run_start)) << " s, strategy=recursive_spatial_bisect";
+  std::size_t min_fanout = finalized->clusters.empty() ? 0U : finalized->clusters.front().size();
+  std::size_t max_fanout = 0U;
+  for (const auto& cluster : finalized->clusters) {
+    min_fanout = std::min(min_fanout, cluster.size());
+    max_fanout = std::max(max_fanout, cluster.size());
+  }
+
+  std::size_t exact_cluster_count = 0U;
+  std::size_t route_failure_count = 0U;
+  int max_diameter_dbu = 0;
+  double min_total_cap_pf = finalized->electrical_summaries.empty() ? 0.0 : finalized->electrical_summaries.front().total_cap_pf;
+  double max_total_cap_pf = 0.0;
+  double total_wirelength_dbu = 0.0;
+  for (const auto& summary : finalized->electrical_summaries) {
+    exact_cluster_count += summary.exact ? 1U : 0U;
+    route_failure_count += summary.exact && !summary.route_success ? 1U : 0U;
+    max_diameter_dbu = std::max(max_diameter_dbu, summary.diameter_dbu);
+    min_total_cap_pf = std::min(min_total_cap_pf, summary.total_cap_pf);
+    max_total_cap_pf = std::max(max_total_cap_pf, summary.total_cap_pf);
+    total_wirelength_dbu += summary.wirelength_dbu;
+  }
+  EmitLogTable(Loc::current(), "CTS Clustering Summary", {"Metric", "Value"},
+               {{"Strategy", "recursive_spatial_bisect"},
+                {"Loads", ToLogTableCell(entries.size())},
+                {"Clusters", ToLogTableCell(finalized->clusters.size())},
+                {"Fanout Minimum", ToLogTableCell(min_fanout)},
+                {"Fanout Average", FormatRatio(CalcAverageFanout(assigned_load_count, finalized->clusters.size()))},
+                {"Fanout Maximum", ToLogTableCell(max_fanout)},
+                {"Constraint Maximum Fanout", ToLogTableCell(config.max_fanout)},
+                {"Constraint Maximum Diameter (DBU)", ToLogTableCell(config.max_diameter)},
+                {"Constraint Maximum Capacitance (pF)", ToLogTableCell(config.max_cap)},
+                {"Exact Clusters", ToLogTableCell(exact_cluster_count)},
+                {"Exact Route Failures", ToLogTableCell(route_failure_count)},
+                {"Maximum Diameter (DBU)", ToLogTableCell(max_diameter_dbu)},
+                {"Total Capacitance Minimum (pF)", ToLogTableCell(min_total_cap_pf)},
+                {"Total Capacitance Maximum (pF)", ToLogTableCell(max_total_cap_pf)},
+                {"Routed Wirelength (DBU)", ToLogTableCell(total_wirelength_dbu)}});
   return *finalized;
 }
 

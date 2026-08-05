@@ -28,8 +28,10 @@
 #include "SameLayerCutSpacingRule.hpp"
 #include "Utility.hpp"
 #include "feature_manager.h"
+#include "file_drc.h"
 #include "idm.h"
 
+#include "utility/logger/Logger.hpp"
 namespace idrc {
 
 // public
@@ -83,6 +85,12 @@ void DRCInterface::initDRC(std::map<std::string, std::any> config_map, bool enab
   DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
 }
 
+void DRCInterface::runDRC()
+{
+  checkDef();
+  destroyDRC();
+}
+
 void DRCInterface::checkDef()
 {
   bool origin_quiet = DRCLOG.isQuiet();
@@ -126,6 +134,16 @@ void DRCInterface::destroyDRC()
   DRCLOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   // clang-format on
   Logger::destroyInst();
+}
+
+bool DRCInterface::saveDRC(std::string path)
+{
+  if (path.empty()) {
+    return false;
+  }
+
+  iplf::FileDrcManager file(path, static_cast<int32_t>(iplf::DrcDbId::kDrcDetailInfo));
+  return file.writeFile();
 }
 
 std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids::Shape>& ids_env_shape_list,
@@ -295,7 +313,7 @@ void DRCInterface::cmpViolation(std::map<std::string, std::any> config_map)
               LayerRect violation_rect(llx, lly, urx, ury, routing_layer_name_to_idx_map[layer]);
               violation_rect_set.insert(violation_rect);
             } else {
-              std::cerr << "这一行解析失败: " << line << '\n';
+              ECCLOG.warn(ecc::Loc::current(), "这一行解析失败: ", line);
             }
           }
         }

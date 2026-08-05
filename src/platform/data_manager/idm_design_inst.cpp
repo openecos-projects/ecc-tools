@@ -27,6 +27,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "idm.h"
 
 namespace idm {
@@ -209,7 +210,7 @@ IdbInstance* DataManager::insertBufferToNet(string inst_name, string cell_master
     }
     /// this pin can not found in master
     if (!b_find) {
-      std::cout << "[IDM Error] can not find pin " << pin_name << " in master " << cell_master_name << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "[IDM Error] can not find pin ", pin_name, " in master ", cell_master_name);
       return nullptr;
     }
   }
@@ -262,23 +263,66 @@ IdbInstance* DataManager::insertIOFiller(string inst_name, string cell_master_na
  * @param orient_name
  * @param cell_master_name
  * @param source
+ * @param placement_status one of fixed, placed, unplaced, or preserve
+ * @param create_if_missing create a missing instance when true
  * @return true
  * @return false
  */
-bool DataManager::placeInst(string inst_name, int32_t x, int32_t y, string orient_name, string cell_master_name, string source)
+bool DataManager::placeInst(string inst_name, int32_t x, int32_t y, string orient_name, string cell_master_name, string source,
+                            string placement_status_name, bool create_if_missing)
 {
-  IdbInstance* instance = _design->get_instance_list()->find_instance(inst_name);
-  IdbCellMaster* cellmaster = nullptr;
-  if (cell_master_name == "") {
-    cellmaster = instance == nullptr ? nullptr : instance->get_cell_master();
-  } else {
-    cellmaster = _layout->get_cell_master_list()->find_cell_master(cell_master_name);
+  if (_design == nullptr || _layout == nullptr || _design->get_instance_list() == nullptr || _layout->get_cell_master_list() == nullptr
+      || inst_name.empty()) {
+    return false;
   }
 
-  IdbOrient orient = IdbEnum::GetInstance()->get_site_property()->get_orient_value(orient_name);
+  IdbInstance* instance = _design->get_instance_list()->find_instance(inst_name);
+  const bool is_new_instance = instance == nullptr;
+  if (is_new_instance && !create_if_missing) {
+    return false;
+  }
+
+  IdbCellMaster* cellmaster = nullptr;
+  if (is_new_instance) {
+    if (cell_master_name.empty()) {
+      return false;
+    }
+    cellmaster = _layout->get_cell_master_list()->find_cell_master(cell_master_name);
+  } else {
+    cellmaster = instance->get_cell_master();
+    if (cellmaster == nullptr || (!cell_master_name.empty() && cellmaster->get_name() != cell_master_name)) {
+      return false;
+    }
+  }
+
+  IdbPlacementStatus placement_status = IdbPlacementStatus::kNone;
+  if (placement_status_name == "fixed") {
+    placement_status = IdbPlacementStatus::kFixed;
+  } else if (placement_status_name == "placed") {
+    placement_status = IdbPlacementStatus::kPlaced;
+  } else if (placement_status_name == "unplaced") {
+    placement_status = IdbPlacementStatus::kUnplaced;
+  } else if (placement_status_name == "preserve" && !is_new_instance) {
+    placement_status = instance->get_status();
+    if (placement_status == IdbPlacementStatus::kFixed || placement_status == IdbPlacementStatus::kCover) {
+      return false;
+    }
+  } else {
+    return false;
+  }
+
+  // GUI move commands preserve an existing instance's orientation. This keeps
+  // the direct placement API usable without copying orientation into Geometry.
+  IdbOrient orient = orient_name.empty() && placement_status_name == "preserve" && !is_new_instance
+                         ? instance->get_orient()
+                         : IdbEnum::GetInstance()->get_site_property()->get_orient_value(orient_name);
   if (cellmaster == nullptr || orient == IdbOrient::kNone) {
-    std::cout << "[IDM Error] inst_name = " << inst_name << " cell_master_name = " << cell_master_name << " orient_name = " << orient_name
-              << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[IDM Error] inst_name = ", inst_name, " cell_master_name = ", cell_master_name, " orient_name = ", orient_name);
+    return false;
+  }
+
+  if (!source.empty() && source != "NONE" && source != "NETLIST" && source != "DIST" && source != "USER" && source != "TIMING"
+      && source != "TEST") {
     return false;
   }
 
@@ -296,27 +340,29 @@ bool DataManager::placeInst(string inst_name, int32_t x, int32_t y, string orien
 
   if (cellmaster->is_endcap()) {
     if (!isOnDieBoundary(x, y, urx, ury, orient)) {
-      printf("%s info have problem\n", inst_name.c_str());
+      ECCLOG.warn(ecc::Loc::current(), "Instance ", inst_name, " placement information has a problem.");
+      return false;
     }
   } else if (cellmaster->is_pad() || cellmaster->is_pad_filler()) {
     bool can_place = checkInstPlacer(x, y, urx, ury, orient);
     if (!can_place) {
-      printf("%s info have problem\n", inst_name.c_str());
+      ECCLOG.warn(ecc::Loc::current(), "Instance ", inst_name, " placement information has a problem.");
+      return false;
     }
   }
 
-  if (instance == nullptr) {
-    instance = _design->createInstance(inst_name, cellmaster->get_name(), IdbInstanceType::kNone, IdbPlacementStatus::kNone, orient, x, y);
+  if (is_new_instance) {
+    instance = _design->createInstance(inst_name, cellmaster->get_name(), IdbInstanceType::kNone, placement_status, orient, x, y);
     if (instance == nullptr) {
       return false;
     }
+  } else if (!_design->placeInstance(inst_name, x, y, orient, placement_status)) {
+    return false;
   }
 
   if (!source.empty()) {
     instance->set_type(source);
   }
-
-  _design->placeInstance(inst_name, x, y, orient, IdbPlacementStatus::kFixed);
 
   return true;
 }

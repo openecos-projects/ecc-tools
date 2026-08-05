@@ -33,14 +33,20 @@ class NetRoutingGraph
   std::map<std::string, std::vector<int32_t>>& get_terminal_shape_idx_map() { return _terminal_shape_idx_map; }
   // const getter
   const std::string& get_driver_terminal_name() const { return _driver_terminal_name; }
+  int32_t get_terminal_routing_shape_num() const { return _terminal_routing_shape_num; }
   const std::vector<RoutingShape>& get_routing_shape_list() const { return _routing_shape_list; }
   const std::vector<std::pair<int32_t, int32_t>>& get_via_shape_idx_pair_list() const { return _via_shape_idx_pair_list; }
   const std::map<std::string, std::vector<int32_t>>& get_terminal_shape_idx_map() const { return _terminal_shape_idx_map; }
   // setter
   void set_driver_terminal_name(const std::string& driver_terminal_name) { _driver_terminal_name = driver_terminal_name; }
+  void set_terminal_routing_shape_num(int32_t terminal_routing_shape_num)
+  {
+    _terminal_routing_shape_num = terminal_routing_shape_num;
+  }
 
  private:
   std::string _driver_terminal_name;
+  int32_t _terminal_routing_shape_num = 0;
   std::vector<RoutingShape> _routing_shape_list;
   std::vector<std::pair<int32_t, int32_t>> _via_shape_idx_pair_list;
   std::map<std::string, std::vector<int32_t>> _terminal_shape_idx_map;

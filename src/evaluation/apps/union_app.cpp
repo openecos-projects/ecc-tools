@@ -1,3 +1,4 @@
+#include "utility/logger/Logger.hpp"
 #include <iostream>
 
 #include "congestion_api.h"
@@ -9,11 +10,11 @@
 void TestBuildNetEval(const std::string& db_config_path);
 
 void PrintUsage(const char* program_name) {
-  std::cout << "Union Evaluation" << std::endl;
-  std::cout << "Usage: " << program_name << " <function_name>" << std::endl;
-  std::cout << "Available parameters:" << std::endl;
-  std::cout << "  <db_config_path> Path to the database configuration file." << std::endl;
-  std::cout << "  --help, -h       Show this help message and exit." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Union Evaluation");
+  ECCLOG.info(ecc::Loc::current(), "Usage: ", program_name, " <function_name>");
+  ECCLOG.info(ecc::Loc::current(), "Available parameters:");
+  ECCLOG.info(ecc::Loc::current(), "  <db_config_path> Path to the database configuration file.");
+  ECCLOG.info(ecc::Loc::current(), "  --help, -h       Show this help message and exit.");
 }
 
 int main(const int argc, const char * argv[])
@@ -27,7 +28,7 @@ int main(const int argc, const char * argv[])
       return 0;
     }
   }
-  std::cerr << "Error: Incorrect number of arguments." << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Error: Incorrect number of arguments.");
   PrintUsage(argv[0]);
   return 1;
 }
@@ -39,7 +40,7 @@ void TestBuildNetEval(const std::string& db_config_path)
   UNION_API_INST->initEGR(true);
   UNION_API_INST->initFlute();
 
-  std::cout << "Building net evaluation data...\n";
+  ECCLOG.info(ecc::Loc::current(), "Building net evaluation data...");
 
   auto* idb_builder = dmInst->get_idb_builder();
   idb::IdbDesign* idb_design = idb_builder->get_def_service()->get_design();
@@ -85,7 +86,7 @@ void TestBuildNetEval(const std::string& db_config_path)
     if (net_power_data["HPWL"].find(net_name) == net_power_data["HPWL"].end()
         || net_power_data["FLUTE"].find(net_name) == net_power_data["FLUTE"].end()
         || net_power_data["EGR"].find(net_name) == net_power_data["EGR"].end()) {
-      std::cerr << "Error: net_name '" << net_name << "' not found in net_power_data.\n";
+      ECCLOG.warn(ecc::Loc::current(), "Error: net_name '", net_name, "' not found in net_power_data.");
       std::exit(EXIT_FAILURE);
     }
 
@@ -94,9 +95,7 @@ void TestBuildNetEval(const std::string& db_config_path)
     double egr_power = net_power_data["EGR"][net_name];
 
     if (net_name == "InvalidSymbol") {
-      std::cout << net_name << ',' << net_type << "," << pin_num << ',' << aspect_ratio << ',' << bbox_width << "," << bbox_height << ","
-                << bbox_area << "," << bbox_lx << "," << bbox_ly << "," << bbox_ux << "," << bbox_uy << "," << l_ness << ',' << hpwl << ','
-                << flute << ',' << grwl << ',' << hpwl_power << ',' << flute_power << "," << egr_power << '\n';
+      ECCLOG.info(ecc::Loc::current(), net_name, ',', net_type, ",", pin_num, ',', aspect_ratio, ',', bbox_width, ",", bbox_height, ",", bbox_area, ",", bbox_lx, ",", bbox_ly, ",", bbox_ux, ",", bbox_uy, ",", l_ness, ',', hpwl, ',', flute, ',', grwl, ',', hpwl_power, ',', flute_power, ",", egr_power);
     }
   }
 }

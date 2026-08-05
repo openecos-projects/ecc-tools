@@ -60,7 +60,6 @@ void DataManager::input(std::map<std::string, std::any>& config_map)
   printConfig();
   printDatabase();
   outputScript();
-  outputJson();
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -69,377 +68,181 @@ void DataManager::output()
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
   RTI.output();
-  destroyGCellMap();
+  destroyDatabaseResult();
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-#if 1  // 更新GCellMap
+#if 1  // 更新Database
 
-void DataManager::updateFixedRectToGCellMap(ChangeType change_type, int32_t net_idx, EXTLayerRect* ext_layer_rect, bool is_routing)
+void DataManager::rebuildAccessPointRTree()
 {
-  ScaleAxis& gcell_axis = _database.get_gcell_axis();
-  Die& die = _database.get_die();
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-  int32_t detection_distance = _database.get_detection_distance();
-  if (detection_distance == -1) {
-    RTLOG.error(Loc::current(), "The detection_distance is not initialize!");
-  }
-  PlanarRect real_rect = RTUTIL.getEnlargedRect(ext_layer_rect->get_real_rect(), detection_distance);
-  if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
-    return;
-  }
-  real_rect = RTUTIL.getRegularRect(real_rect, die.get_real_rect());
-  PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(real_rect, gcell_axis);
-  for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-    for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-      auto& net_fixed_rect_map = gcell_map[x][y].get_type_layer_net_fixed_rect_map()[is_routing][ext_layer_rect->get_layer_idx()];
-      if (change_type == ChangeType::kAdd) {
-        net_fixed_rect_map[net_idx].insert(ext_layer_rect);
-      } else if (change_type == ChangeType::kDel) {
-        net_fixed_rect_map[net_idx].erase(ext_layer_rect);
-        if (net_fixed_rect_map[net_idx].empty()) {
-          net_fixed_rect_map.erase(net_idx);
-        }
+  std::vector<Database::AccessPointRTree::value_type> value_list;
+  for (Net& net : _database.get_net_list()) {
+    for (Pin& pin : net.get_pin_list()) {
+      AccessPoint& access_point = pin.get_access_point();
+      if (access_point.get_layer_idx() >= 0) {
+        value_list.emplace_back(RTUTIL.convertToBGRectInt(PlanarRect(access_point.get_real_coord(), access_point.get_real_coord())),
+                                std::make_pair(net.get_net_idx(), &access_point));
       }
     }
   }
-  if (change_type == ChangeType::kDel) {
-    // 由于在database内的obstacle_list引用过来,所以不需要delete,也不能delete
-  }
+  _database.get_access_point_rtree() = Database::AccessPointRTree(value_list);
 }
 
-void DataManager::updateNetAccessPointToGCellMap(ChangeType change_type, int32_t net_idx, AccessPoint* access_point)
+void DataManager::rebuildGlobalResultRTree()
 {
-  ScaleAxis& gcell_axis = _database.get_gcell_axis();
-  Die& die = _database.get_die();
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-  int32_t detection_distance = _database.get_detection_distance();
-  if (detection_distance == -1) {
-    RTLOG.error(Loc::current(), "The detection_distance is not initialize!");
-  }
-  PlanarRect real_rect = RTUTIL.getEnlargedRect(access_point->get_real_coord(), detection_distance);
-  if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
-    return;
-  }
-  real_rect = RTUTIL.getRegularRect(real_rect, die.get_real_rect());
-  PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(real_rect, gcell_axis);
-  for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-    for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-      auto& net_access_point_map = gcell_map[x][y].get_net_access_point_map();
-      if (change_type == ChangeType::kAdd) {
-        net_access_point_map[net_idx].push_back(access_point);
-      } else if (change_type == ChangeType::kDel) {
-        std::vector<AccessPoint*>& access_point_list = net_access_point_map[net_idx];
-        access_point_list.erase(std::remove(access_point_list.begin(), access_point_list.end(), access_point), access_point_list.end());
-        if (access_point_list.empty()) {
-          net_access_point_map.erase(net_idx);
-        }
-      }
+  std::vector<Database::GlobalResultRTree::value_type> value_list;
+  for (auto& [net_idx, segment_list] : _database.get_net_global_result_map()) {
+    for (int32_t segment_idx = 0; segment_idx < static_cast<int32_t>(segment_list.size()); segment_idx++) {
+      Segment<LayerCoord>& segment = segment_list[segment_idx];
+      PlanarRect segment_rect(
+          std::min(segment.get_first().get_x(), segment.get_second().get_x()), std::min(segment.get_first().get_y(), segment.get_second().get_y()),
+          std::max(segment.get_first().get_x(), segment.get_second().get_x()), std::max(segment.get_first().get_y(), segment.get_second().get_y()));
+      value_list.emplace_back(RTUTIL.convertToBGRectInt(segment_rect), std::make_pair(net_idx, segment_idx));
     }
   }
-  if (change_type == ChangeType::kDel) {
-    // 由于在pin内的access_point_list引用过来,所以不需要delete,也不能delete
-  }
+  _database.get_global_result_rtree() = Database::GlobalResultRTree(value_list);
 }
 
-void DataManager::updateNetPinAccessResultToGCellMap(ChangeType change_type, int32_t net_idx, int32_t pin_idx, Segment<LayerCoord>* segment)
+void DataManager::updateViolationToRTree(ChangeType change_type, const Violation& violation)
 {
-  ScaleAxis& gcell_axis = _database.get_gcell_axis();
-  Die& die = _database.get_die();
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-  int32_t detection_distance = _database.get_detection_distance();
-  if (detection_distance == -1) {
-    RTLOG.error(Loc::current(), "The detection_distance is not initialize!");
-  }
-  for (NetShape& net_shape : getNetDetailedShapeList(net_idx, *segment)) {
-    PlanarRect real_rect = RTUTIL.getEnlargedRect(net_shape, detection_distance);
-    if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
-      continue;
-    }
-    real_rect = RTUTIL.getRegularRect(real_rect, die.get_real_rect());
-    PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(real_rect, gcell_axis);
-    for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-      for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-        auto& net_pin_access_result_map = gcell_map[x][y].get_net_pin_access_result_map();
-        if (change_type == ChangeType::kAdd) {
-          net_pin_access_result_map[net_idx][pin_idx].insert(segment);
-        } else if (change_type == ChangeType::kDel) {
-          net_pin_access_result_map[net_idx][pin_idx].erase(segment);
-          if (net_pin_access_result_map[net_idx][pin_idx].empty()) {
-            net_pin_access_result_map[net_idx].erase(pin_idx);
-          }
-          if (net_pin_access_result_map[net_idx].empty()) {
-            net_pin_access_result_map.erase(net_idx);
-          }
-        }
+  Database::ViolationRTree& violation_rtree = _database.get_violation_rtree();
+  Database::ViolationRTree::value_type violation_value(RTUTIL.convertToBGRectInt(violation.get_violation_shape().get_real_rect()), violation);
+  if (change_type == ChangeType::kAdd) {
+    std::vector<Database::ViolationRTree::value_type> value_list;
+    violation_rtree.query(bgi::intersects(violation_value.first), std::back_inserter(value_list));
+    for (auto& [rect, stored_violation] : value_list) {
+      if (stored_violation == violation) {
+        return;
       }
     }
-  }
-  if (change_type == ChangeType::kDel) {
-    delete segment;
-    segment = nullptr;
-  }
-}
-
-void DataManager::updateNetPinAccessPatchToGCellMap(ChangeType change_type, int32_t net_idx, int32_t pin_idx, EXTLayerRect* ext_layer_rect)
-{
-  ScaleAxis& gcell_axis = _database.get_gcell_axis();
-  Die& die = _database.get_die();
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-  int32_t detection_distance = _database.get_detection_distance();
-  if (detection_distance == -1) {
-    RTLOG.error(Loc::current(), "The detection_distance is not initialize!");
-  }
-  PlanarRect real_rect = RTUTIL.getEnlargedRect(ext_layer_rect->get_real_rect(), detection_distance);
-  if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
-    return;
-  }
-  real_rect = RTUTIL.getRegularRect(real_rect, die.get_real_rect());
-  PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(real_rect, gcell_axis);
-  for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-    for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-      auto& net_pin_access_patch_map = gcell_map[x][y].get_net_pin_access_patch_map();
-      if (change_type == ChangeType::kAdd) {
-        net_pin_access_patch_map[net_idx][pin_idx].insert(ext_layer_rect);
-      } else if (change_type == ChangeType::kDel) {
-        net_pin_access_patch_map[net_idx][pin_idx].erase(ext_layer_rect);
-        if (net_pin_access_patch_map[net_idx][pin_idx].empty()) {
-          net_pin_access_patch_map[net_idx].erase(pin_idx);
-        }
-        if (net_pin_access_patch_map[net_idx].empty()) {
-          net_pin_access_patch_map.erase(net_idx);
-        }
-      }
-    }
-  }
-  if (change_type == ChangeType::kDel) {
-    delete ext_layer_rect;
-    ext_layer_rect = nullptr;
-  }
-}
-
-void DataManager::updateNetGlobalResultToGCellMap(ChangeType change_type, int32_t net_idx, Segment<LayerCoord>* segment)
-{
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-
-  LayerCoord& first_coord = segment->get_first();
-  LayerCoord& second_coord = segment->get_second();
-
-  int32_t first_x = first_coord.get_x();
-  int32_t first_y = first_coord.get_y();
-  int32_t second_x = second_coord.get_x();
-  int32_t second_y = second_coord.get_y();
-  RTUTIL.swapByASC(first_x, second_x);
-  RTUTIL.swapByASC(first_y, second_y);
-
-  for (int32_t x = first_x; x <= second_x; x++) {
-    for (int32_t y = first_y; y <= second_y; y++) {
-      auto& net_global_result_map = gcell_map[x][y].get_net_global_result_map();
-      if (change_type == ChangeType::kAdd) {
-        net_global_result_map[net_idx].insert(segment);
-      } else if (change_type == ChangeType::kDel) {
-        net_global_result_map[net_idx].erase(segment);
-        if (net_global_result_map[net_idx].empty()) {
-          net_global_result_map.erase(net_idx);
-        }
-      }
-    }
-  }
-  if (change_type == ChangeType::kDel) {
-    delete segment;
-    segment = nullptr;
-  }
-}
-
-void DataManager::updateNetDetailedResultToGCellMap(ChangeType change_type, int32_t net_idx, Segment<LayerCoord>* segment)
-{
-  ScaleAxis& gcell_axis = _database.get_gcell_axis();
-  Die& die = _database.get_die();
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-  int32_t detection_distance = _database.get_detection_distance();
-  if (detection_distance == -1) {
-    RTLOG.error(Loc::current(), "The detection_distance is not initialize!");
-  }
-  for (NetShape& net_shape : getNetDetailedShapeList(net_idx, *segment)) {
-    PlanarRect real_rect = RTUTIL.getEnlargedRect(net_shape, detection_distance);
-    if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
-      continue;
-    }
-    real_rect = RTUTIL.getRegularRect(real_rect, die.get_real_rect());
-    PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(real_rect, gcell_axis);
-    for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-      for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-        auto& net_detailed_result_map = gcell_map[x][y].get_net_detailed_result_map();
-        if (change_type == ChangeType::kAdd) {
-          net_detailed_result_map[net_idx].insert(segment);
-        } else if (change_type == ChangeType::kDel) {
-          net_detailed_result_map[net_idx].erase(segment);
-          if (net_detailed_result_map[net_idx].empty()) {
-            net_detailed_result_map.erase(net_idx);
-          }
-        }
-      }
-    }
-  }
-  if (change_type == ChangeType::kDel) {
-    delete segment;
-    segment = nullptr;
-  }
-}
-
-void DataManager::updateNetDetailedPatchToGCellMap(ChangeType change_type, int32_t net_idx, EXTLayerRect* ext_layer_rect)
-{
-  ScaleAxis& gcell_axis = _database.get_gcell_axis();
-  Die& die = _database.get_die();
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-  int32_t detection_distance = _database.get_detection_distance();
-  if (detection_distance == -1) {
-    RTLOG.error(Loc::current(), "The detection_distance is not initialize!");
-  }
-  PlanarRect real_rect = RTUTIL.getEnlargedRect(ext_layer_rect->get_real_rect(), detection_distance);
-  if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
-    return;
-  }
-  real_rect = RTUTIL.getRegularRect(real_rect, die.get_real_rect());
-  PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(real_rect, gcell_axis);
-  for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-    for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-      auto& net_detailed_patch_map = gcell_map[x][y].get_net_detailed_patch_map();
-      if (change_type == ChangeType::kAdd) {
-        net_detailed_patch_map[net_idx].insert(ext_layer_rect);
-      } else if (change_type == ChangeType::kDel) {
-        net_detailed_patch_map[net_idx].erase(ext_layer_rect);
-        if (net_detailed_patch_map[net_idx].empty()) {
-          net_detailed_patch_map.erase(net_idx);
-        }
-      }
-    }
-  }
-  if (change_type == ChangeType::kDel) {
-    delete ext_layer_rect;
-    ext_layer_rect = nullptr;
-  }
-}
-
-void DataManager::updateViolationToGCellMap(ChangeType change_type, Violation* violation)
-{
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-
-  PlanarRect& grid_rect = violation->get_violation_shape().get_grid_rect();
-
-  for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-    for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-      GCell& gcell = gcell_map[x][y];
-      if (change_type == ChangeType::kAdd) {
-        gcell.get_violation_set().insert(violation);
-      } else if (change_type == ChangeType::kDel) {
-        gcell.get_violation_set().erase(violation);
-      }
-    }
-  }
-  if (change_type == ChangeType::kDel) {
-    delete violation;
-    violation = nullptr;
+    violation_rtree.insert(violation_value);
+  } else if (change_type == ChangeType::kDel) {
+    violation_rtree.remove(violation_value);
   }
 }
 
 std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> DataManager::getTypeLayerNetFixedRectMap(EXTPlanarRect& region)
 {
-  Die& die = _database.get_die();
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-
-  if (region == die) {
-    return _database.get_type_layer_net_fixed_rect_map();
-  } else {
-    std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> type_layer_net_fixed_rect_map;
-    for (int32_t x = region.get_grid_ll_x(); x <= region.get_grid_ur_x(); x++) {
-      for (int32_t y = region.get_grid_ll_y(); y <= region.get_grid_ur_y(); y++) {
-        for (auto& [is_routing, layer_net_fixed_rect_map] : gcell_map[x][y].get_type_layer_net_fixed_rect_map()) {
-          for (auto& [layer_idx, net_fixed_rect_map] : layer_net_fixed_rect_map) {
-            for (auto& [net_idx, fixed_rect_set] : net_fixed_rect_map) {
-              type_layer_net_fixed_rect_map[is_routing][layer_idx][net_idx].insert(fixed_rect_set.begin(), fixed_rect_set.end());
-            }
-          }
-        }
+  std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> type_layer_net_fixed_rect_map;
+  BGRectInt query_rect = RTUTIL.convertToBGRectInt(RTUTIL.getEnlargedRect(region.get_real_rect(), _database.get_detection_distance()));
+  auto& type_layer_fixed_rect_rtree_map = _database.get_type_layer_fixed_rect_rtree_map();
+  for (bool is_routing : {false, true}) {
+    for (auto& [layer_idx, fixed_rect_rtree] : type_layer_fixed_rect_rtree_map[is_routing]) {
+      std::vector<Database::FixedRectRTree::value_type> value_list;
+      fixed_rect_rtree.query(bgi::intersects(query_rect), std::back_inserter(value_list));
+      for (auto& [rect, net_fixed_rect] : value_list) {
+        type_layer_net_fixed_rect_map[is_routing][layer_idx][net_fixed_rect.first].insert(net_fixed_rect.second);
       }
     }
-    return type_layer_net_fixed_rect_map;
   }
+  return type_layer_net_fixed_rect_map;
+}
+
+std::map<int32_t, std::set<EXTLayerRect*>> DataManager::getNetFixedRectMap(bool is_routing, EXTLayerRect& region)
+{
+  std::map<int32_t, std::set<EXTLayerRect*>> net_fixed_rect_map;
+  auto& layer_fixed_rect_rtree_map = _database.get_type_layer_fixed_rect_rtree_map()[is_routing];
+  auto rtree_iter = layer_fixed_rect_rtree_map.find(region.get_layer_idx());
+  if (rtree_iter == layer_fixed_rect_rtree_map.end()) {
+    return net_fixed_rect_map;
+  }
+  BGRectInt query_rect = RTUTIL.convertToBGRectInt(RTUTIL.getEnlargedRect(region.get_real_rect(), _database.get_detection_distance()));
+  std::vector<Database::FixedRectRTree::value_type> value_list;
+  rtree_iter->second.query(bgi::intersects(query_rect), std::back_inserter(value_list));
+  for (auto& [rect, net_fixed_rect] : value_list) {
+    net_fixed_rect_map[net_fixed_rect.first].insert(net_fixed_rect.second);
+  }
+  return net_fixed_rect_map;
+}
+
+std::vector<Violation> DataManager::getViolationList(EXTPlanarRect& region)
+{
+  std::vector<Violation> violation_list;
+  if (region == _database.get_die()) {
+    violation_list.reserve(_database.get_violation_rtree().size());
+    for (const auto& [rect, violation] : _database.get_violation_rtree()) {
+      violation_list.push_back(violation);
+    }
+    std::sort(violation_list.begin(), violation_list.end(), CmpViolation());
+    return violation_list;
+  }
+  BGRectInt query_rect = RTUTIL.convertToBGRectInt(region.get_real_rect());
+  std::vector<Database::ViolationRTree::value_type> value_list;
+  _database.get_violation_rtree().query(bgi::intersects(query_rect), std::back_inserter(value_list));
+  for (auto& [rect, violation] : value_list) {
+    violation_list.push_back(std::move(violation));
+  }
+  std::sort(violation_list.begin(), violation_list.end(), CmpViolation());
+  return violation_list;
+}
+
+std::vector<Violation> DataManager::getViolationList(EXTLayerRect& region)
+{
+  std::vector<Violation> violation_list;
+  BGRectInt query_rect = RTUTIL.convertToBGRectInt(region.get_real_rect());
+  std::vector<Database::ViolationRTree::value_type> value_list;
+  _database.get_violation_rtree().query(bgi::intersects(query_rect), std::back_inserter(value_list));
+  for (auto& [rect, violation] : value_list) {
+    if (violation.get_violation_shape().get_layer_idx() == region.get_layer_idx()) {
+      violation_list.push_back(std::move(violation));
+    }
+  }
+  std::sort(violation_list.begin(), violation_list.end(), CmpViolation());
+  return violation_list;
 }
 
 std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> DataManager::getNetAccessPointMap(EXTPlanarRect& region)
 {
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> net_access_point_map;
-  for (int32_t x = region.get_grid_ll_x(); x <= region.get_grid_ur_x(); x++) {
-    for (int32_t y = region.get_grid_ll_y(); y <= region.get_grid_ur_y(); y++) {
-      for (auto& [net_idx, access_point_list] : gcell_map[x][y].get_net_access_point_map()) {
-        net_access_point_map[net_idx].insert(access_point_list.begin(), access_point_list.end());
-      }
-    }
+  PlanarRect query_rect = RTUTIL.getEnlargedRect(region.get_real_rect(), _database.get_detection_distance());
+  std::vector<Database::AccessPointRTree::value_type> value_list;
+  _database.get_access_point_rtree().query(bgi::intersects(RTUTIL.convertToBGRectInt(query_rect)), std::back_inserter(value_list));
+  for (auto& [rect, net_access_point] : value_list) {
+    net_access_point_map[net_access_point.first].insert(net_access_point.second);
   }
   return net_access_point_map;
 }
 
-std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>> DataManager::getNetPinAccessResultMap(EXTPlanarRect& region)
+std::map<int32_t, std::vector<Segment<LayerCoord>>> DataManager::getNetGlobalResultMap(EXTPlanarRect& region)
 {
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-
-  std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>> net_pin_access_result_map;
-  for (int32_t x = region.get_grid_ll_x(); x <= region.get_grid_ur_x(); x++) {
-    for (int32_t y = region.get_grid_ll_y(); y <= region.get_grid_ur_y(); y++) {
-      for (auto& [net_idx, pin_access_result_map] : gcell_map[x][y].get_net_pin_access_result_map()) {
-        for (auto& [pin_idx, segment_set] : pin_access_result_map) {
-          net_pin_access_result_map[net_idx][pin_idx].insert(segment_set.begin(), segment_set.end());
-        }
-      }
-    }
+  if (region == _database.get_die()) {
+    return _database.get_net_global_result_map();
   }
-  return net_pin_access_result_map;
-}
-
-std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>> DataManager::getNetPinAccessPatchMap(EXTPlanarRect& region)
-{
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-
-  std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>> net_pin_access_patch_map;
-  for (int32_t x = region.get_grid_ll_x(); x <= region.get_grid_ur_x(); x++) {
-    for (int32_t y = region.get_grid_ll_y(); y <= region.get_grid_ur_y(); y++) {
-      for (auto& [net_idx, pin_access_patch_map] : gcell_map[x][y].get_net_pin_access_patch_map()) {
-        for (auto& [pin_idx, patch_set] : pin_access_patch_map) {
-          net_pin_access_patch_map[net_idx][pin_idx].insert(patch_set.begin(), patch_set.end());
-        }
-      }
-    }
-  }
-  return net_pin_access_patch_map;
-}
-
-std::map<int32_t, std::set<Segment<LayerCoord>*>> DataManager::getNetGlobalResultMap(EXTPlanarRect& region)
-{
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-
-  std::map<int32_t, std::set<Segment<LayerCoord>*>> net_global_result_map;
-  for (int32_t x = region.get_grid_ll_x(); x <= region.get_grid_ur_x(); x++) {
-    for (int32_t y = region.get_grid_ll_y(); y <= region.get_grid_ur_y(); y++) {
-      for (auto& [net_idx, segment_set] : gcell_map[x][y].get_net_global_result_map()) {
-        net_global_result_map[net_idx].insert(segment_set.begin(), segment_set.end());
-      }
-    }
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> net_global_result_map;
+  std::vector<Database::GlobalResultRTree::value_type> value_list;
+  _database.get_global_result_rtree().query(bgi::intersects(RTUTIL.convertToBGRectInt(region.get_grid_rect())), std::back_inserter(value_list));
+  for (auto& [rect, net_segment_idx] : value_list) {
+    net_global_result_map[net_segment_idx.first].push_back(_database.get_net_global_result_map().at(net_segment_idx.first).at(net_segment_idx.second));
   }
   return net_global_result_map;
 }
 
 std::map<int32_t, std::set<Segment<LayerCoord>*>> DataManager::getNetDetailedResultMap(EXTPlanarRect& region)
 {
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-
   std::map<int32_t, std::set<Segment<LayerCoord>*>> net_detailed_result_map;
-  for (int32_t x = region.get_grid_ll_x(); x <= region.get_grid_ur_x(); x++) {
-    for (int32_t y = region.get_grid_ll_y(); y <= region.get_grid_ur_y(); y++) {
-      for (auto& [net_idx, segment_set] : gcell_map[x][y].get_net_detailed_result_map()) {
-        net_detailed_result_map[net_idx].insert(segment_set.begin(), segment_set.end());
+  Die& die = _database.get_die();
+  if (region == die) {
+    for (auto& [net_idx, segment_list] : _database.get_net_detailed_result_map()) {
+      for (Segment<LayerCoord>& segment : segment_list) {
+        net_detailed_result_map[net_idx].insert(&segment);
+      }
+    }
+    return net_detailed_result_map;
+  }
+  int32_t detection_distance = _database.get_detection_distance();
+  for (auto& [net_idx, segment_list] : _database.get_net_detailed_result_map()) {
+    for (Segment<LayerCoord>& segment : segment_list) {
+      for (NetShape& net_shape : getNetDetailedShapeList(net_idx, segment)) {
+        PlanarRect real_rect = RTUTIL.getEnlargedRect(net_shape, detection_distance);
+        if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
+          continue;
+        }
+        PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(real_rect, die.get_real_rect()), _database.get_gcell_axis());
+        if (RTUTIL.isClosedOverlap(grid_rect, region.get_grid_rect())) {
+          net_detailed_result_map[net_idx].insert(&segment);
+          break;
+        }
       }
     }
   }
@@ -448,63 +251,41 @@ std::map<int32_t, std::set<Segment<LayerCoord>*>> DataManager::getNetDetailedRes
 
 std::map<int32_t, std::set<EXTLayerRect*>> DataManager::getNetDetailedPatchMap(EXTPlanarRect& region)
 {
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-
   std::map<int32_t, std::set<EXTLayerRect*>> net_detailed_patch_map;
-  for (int32_t x = region.get_grid_ll_x(); x <= region.get_grid_ur_x(); x++) {
-    for (int32_t y = region.get_grid_ll_y(); y <= region.get_grid_ur_y(); y++) {
-      for (auto& [net_idx, patch_set] : gcell_map[x][y].get_net_detailed_patch_map()) {
-        net_detailed_patch_map[net_idx].insert(patch_set.begin(), patch_set.end());
+  Die& die = _database.get_die();
+  if (region == die) {
+    for (auto& [net_idx, patch_list] : _database.get_net_detailed_patch_map()) {
+      for (EXTLayerRect& patch : patch_list) {
+        net_detailed_patch_map[net_idx].insert(&patch);
+      }
+    }
+    return net_detailed_patch_map;
+  }
+  int32_t detection_distance = _database.get_detection_distance();
+  for (auto& [net_idx, patch_list] : _database.get_net_detailed_patch_map()) {
+    for (EXTLayerRect& patch : patch_list) {
+      PlanarRect real_rect = RTUTIL.getEnlargedRect(patch.get_real_rect(), detection_distance);
+      if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
+        continue;
+      }
+      PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(real_rect, die.get_real_rect()), _database.get_gcell_axis());
+      if (RTUTIL.isClosedOverlap(grid_rect, region.get_grid_rect())) {
+        net_detailed_patch_map[net_idx].insert(&patch);
       }
     }
   }
   return net_detailed_patch_map;
 }
 
-std::set<Violation*, CmpViolation> DataManager::getViolationSet(EXTPlanarRect& region)
-{
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-
-  std::set<Violation*, CmpViolation> violation_set;
-  for (int32_t x = region.get_grid_ll_x(); x <= region.get_grid_ur_x(); x++) {
-    for (int32_t y = region.get_grid_ll_y(); y <= region.get_grid_ur_y(); y++) {
-      violation_set.insert(gcell_map[x][y].get_violation_set().begin(), gcell_map[x][y].get_violation_set().end());
-    }
-  }
-  return violation_set;
-}
-
 #endif
 
 #if 1  // 获得NetShapeList
-
-std::vector<NetShape> DataManager::getNetGlobalShapeList(int32_t net_idx, std::vector<Segment<LayerCoord>>& segment_list)
-{
-  std::vector<NetShape> net_shape_list;
-  for (Segment<LayerCoord>& segment : segment_list) {
-    for (NetShape& net_shape : getNetGlobalShapeList(net_idx, segment)) {
-      net_shape_list.push_back(net_shape);
-    }
-  }
-  return net_shape_list;
-}
 
 std::vector<NetShape> DataManager::getNetGlobalShapeList(int32_t net_idx, Segment<LayerCoord>& segment)
 {
   std::vector<NetShape> net_shape_list;
   for (NetShape& net_shape : getNetGlobalShapeList(net_idx, segment.get_first(), segment.get_second())) {
     net_shape_list.push_back(net_shape);
-  }
-  return net_shape_list;
-}
-
-std::vector<NetShape> DataManager::getNetGlobalShapeList(int32_t net_idx, MTree<LayerCoord>& coord_tree)
-{
-  std::vector<NetShape> net_shape_list;
-  for (Segment<TNode<LayerCoord>*>& coord_segment : RTUTIL.getSegListByTree(coord_tree)) {
-    for (NetShape& net_shape : getNetGlobalShapeList(net_idx, coord_segment.get_first()->value(), coord_segment.get_second()->value())) {
-      net_shape_list.push_back(net_shape);
-    }
   }
   return net_shape_list;
 }
@@ -538,17 +319,6 @@ std::vector<NetShape> DataManager::getNetGlobalShapeList(int32_t net_idx, LayerC
   return net_shape_list;
 }
 
-std::vector<NetShape> DataManager::getNetDetailedShapeList(int32_t net_idx, std::vector<Segment<LayerCoord>>& segment_list)
-{
-  std::vector<NetShape> net_shape_list;
-  for (Segment<LayerCoord>& segment : segment_list) {
-    for (NetShape& net_shape : getNetDetailedShapeList(net_idx, segment)) {
-      net_shape_list.push_back(net_shape);
-    }
-  }
-  return net_shape_list;
-}
-
 std::vector<NetShape> DataManager::getNetDetailedShapeList(int32_t net_idx, Segment<LayerCoord>& segment)
 {
   std::vector<NetShape> net_shape_list;
@@ -560,9 +330,8 @@ std::vector<NetShape> DataManager::getNetDetailedShapeList(int32_t net_idx, Segm
     ViaMasterIdx& via_master_idx = segment.get_via_master_idx();
     int32_t below_layer_idx = std::min(first_coord.get_layer_idx(), second_coord.get_layer_idx());
     int32_t via_idx = via_master_idx.get_via_idx();
-    if (via_master_idx.get_below_layer_idx() == below_layer_idx && below_layer_idx >= 0
-        && below_layer_idx < static_cast<int32_t>(layer_via_master_list.size()) && via_idx >= 0
-        && via_idx < static_cast<int32_t>(layer_via_master_list[below_layer_idx].size())) {
+    if (via_master_idx.get_below_layer_idx() == below_layer_idx && below_layer_idx >= 0 && below_layer_idx < static_cast<int32_t>(layer_via_master_list.size())
+        && via_idx >= 0 && via_idx < static_cast<int32_t>(layer_via_master_list[below_layer_idx].size())) {
       ViaMaster& via_master = layer_via_master_list[below_layer_idx][via_idx];
 
       LayerRect& above_enclosure = via_master.get_above_enclosure();
@@ -582,17 +351,6 @@ std::vector<NetShape> DataManager::getNetDetailedShapeList(int32_t net_idx, Segm
   }
   for (NetShape& net_shape : getNetDetailedShapeList(net_idx, segment.get_first(), segment.get_second())) {
     net_shape_list.push_back(net_shape);
-  }
-  return net_shape_list;
-}
-
-std::vector<NetShape> DataManager::getNetDetailedShapeList(int32_t net_idx, MTree<LayerCoord>& coord_tree)
-{
-  std::vector<NetShape> net_shape_list;
-  for (Segment<TNode<LayerCoord>*>& coord_segment : RTUTIL.getSegListByTree(coord_tree)) {
-    for (NetShape& net_shape : getNetDetailedShapeList(net_idx, coord_segment.get_first()->value(), coord_segment.get_second()->value())) {
-      net_shape_list.push_back(net_shape);
-    }
   }
   return net_shape_list;
 }
@@ -870,8 +628,8 @@ void DataManager::makeRoutingLayerList()
   };
   ScaleAxis track_axis;
   {
-    track_axis.get_x_grid_list().push_back(getScaleGrid(die.get_real_ll_x(), die.get_real_ur_x(), start_line, step_length));
-    track_axis.get_y_grid_list().push_back(getScaleGrid(die.get_real_ll_y(), die.get_real_ur_y(), start_line, step_length));
+    track_axis.set_x_grid_list({getScaleGrid(die.get_real_ll_x(), die.get_real_ur_x(), start_line, step_length)});
+    track_axis.set_y_grid_list({getScaleGrid(die.get_real_ll_y(), die.get_real_ur_y(), start_line, step_length)});
   }
   for (RoutingLayer& routing_layer : routing_layer_list) {
     routing_layer.set_track_axis(track_axis);
@@ -1296,23 +1054,13 @@ void DataManager::makeObstacleList()
   std::vector<Obstacle>& routing_obstacle_list = _database.get_routing_obstacle_list();
   std::vector<Obstacle>& cut_obstacle_list = _database.get_cut_obstacle_list();
 
-  std::map<int32_t, std::vector<PlanarRect>> routing_rect_list_map;
+#pragma omp parallel for
   for (Obstacle& routing_obstacle : routing_obstacle_list) {
     if (!RTUTIL.hasRegularRect(routing_obstacle.get_real_rect(), die.get_real_rect())) {
       RTLOG.error(Loc::current(), "This shape is outside the die!");
     }
-    PlanarRect regular_rect = RTUTIL.getRegularRect(routing_obstacle.get_real_rect(), die.get_real_rect());
-    routing_rect_list_map[routing_obstacle.get_layer_idx()].push_back(regular_rect);
-  }
-  routing_obstacle_list.clear();
-  for (auto& [routing_layer_idx, rect_list] : routing_rect_list_map) {
-    for (PlanarRect& real_rect : RTUTIL.getMaxRectList(rect_list)) {
-      Obstacle routing_obstacle;
-      routing_obstacle.set_real_rect(real_rect);
-      routing_obstacle.set_grid_rect(RTUTIL.getClosedGCellGridRect(routing_obstacle.get_real_rect(), gcell_axis));
-      routing_obstacle.set_layer_idx(routing_layer_idx);
-      routing_obstacle_list.push_back(routing_obstacle);
-    }
+    routing_obstacle.set_real_rect(RTUTIL.getRegularRect(routing_obstacle.get_real_rect(), die.get_real_rect()));
+    routing_obstacle.set_grid_rect(RTUTIL.getClosedGCellGridRect(routing_obstacle.get_real_rect(), gcell_axis));
   }
 #pragma omp parallel for
   for (Obstacle& cut_obstacle : cut_obstacle_list) {
@@ -1473,7 +1221,6 @@ void DataManager::buildGCellMap()
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
   initGCellMap();
-  updateGCellMap();
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -1482,7 +1229,7 @@ void DataManager::initGCellMap()
   ScaleAxis& gcell_axis = _database.get_gcell_axis();
   Die& die = _database.get_die();
 
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
+  GridMap<PlanarRect>& gcell_map = _database.get_gcell_map();
   gcell_map.init(die.getXSize(), die.getYSize());
 
 #pragma omp parallel for collapse(2)
@@ -1495,134 +1242,56 @@ void DataManager::initGCellMap()
   }
 }
 
-void DataManager::updateGCellMap()
+void DataManager::buildFixRectMap()
 {
-  ScaleAxis& gcell_axis = _database.get_gcell_axis();
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
   Die& die = _database.get_die();
   std::vector<Obstacle>& routing_obstacle_list = _database.get_routing_obstacle_list();
   std::vector<Obstacle>& cut_obstacle_list = _database.get_cut_obstacle_list();
   std::vector<Net>& net_list = _database.get_net_list();
   int32_t detection_distance = _database.get_detection_distance();
-  if (detection_distance == -1) {
-    RTLOG.error(Loc::current(), "The detection_distance is not initialize!");
-  }
-  struct AUXShape
-  {
-    // info
-    int32_t net_idx = -1;
-    EXTLayerRect* rect = nullptr;
-    bool is_routing = true;
-    // process
-    PlanarRect grid_rect;
-    bool is_save = false;
-  };
-  std::vector<AUXShape> aux_shape_list;
-  {
-    size_t total_shape_num = 0;
-    total_shape_num += routing_obstacle_list.size();
-    total_shape_num += cut_obstacle_list.size();
-    for (Net& net : net_list) {
-      for (Pin& pin : net.get_pin_list()) {
-        total_shape_num += pin.get_routing_shape_list().size();
-        total_shape_num += pin.get_cut_shape_list().size();
-      }
-    }
-    aux_shape_list.reserve(total_shape_num);
-  }
-  {
-    for (Obstacle& routing_obstacle : routing_obstacle_list) {
-      aux_shape_list.emplace_back(-1, &routing_obstacle, true);
-    }
-    for (Obstacle& cut_obstacle : cut_obstacle_list) {
-      aux_shape_list.emplace_back(-1, &cut_obstacle, false);
-    }
-    for (Net& net : net_list) {
-      for (Pin& pin : net.get_pin_list()) {
-        for (EXTLayerRect& routing_shape : pin.get_routing_shape_list()) {
-          aux_shape_list.emplace_back(net.get_net_idx(), &routing_shape, true);
-        }
-        for (EXTLayerRect& cut_shape : pin.get_cut_shape_list()) {
-          aux_shape_list.emplace_back(net.get_net_idx(), &cut_shape, false);
-        }
-      }
-    }
-#pragma omp parallel for
-    for (AUXShape& aux_shape : aux_shape_list) {
-      PlanarRect real_rect = RTUTIL.getEnlargedRect(aux_shape.rect->get_real_rect(), detection_distance);
-      if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
-        continue;
-      }
-      real_rect = RTUTIL.getRegularRect(real_rect, die.get_real_rect());
-      aux_shape.grid_rect = RTUTIL.getClosedGCellGridRect(real_rect, gcell_axis);
-    }
-  }
-  // 以y方向分割,主要依据为第一层往往是横方向的shape
-  int32_t bucket_length = 6;
-  int32_t die_grid_ll_y = die.get_grid_ll_y();
-  int32_t die_grid_ur_y = die.get_grid_ur_y();
-  if (bucket_length <= (die_grid_ur_y - die_grid_ll_y)) {
-    for (int32_t bucket_start : {0, bucket_length / 2}) {
-      std::vector<std::vector<AUXShape>> aux_shape_list_list;
-      aux_shape_list_list.resize((die_grid_ur_y - bucket_start) / bucket_length + 1);
+  std::array<std::map<int32_t, std::vector<Database::FixedRectRTree::value_type>>, 2> type_layer_value_list_map;
 
-      for (AUXShape& aux_shape : aux_shape_list) {
-        if (aux_shape.is_save) {
-          continue;
-        }
-        int32_t aux_shape_grid_ll_y = aux_shape.grid_rect.get_ll_y();
-        int32_t aux_shape_grid_ur_y = aux_shape.grid_rect.get_ur_y();
-        int32_t bucket_idx = getBucketIdx(aux_shape_grid_ll_y, aux_shape_grid_ur_y, bucket_start, die_grid_ur_y, bucket_length);
-        if (bucket_idx != -1) {
-          aux_shape_list_list[bucket_idx].push_back(aux_shape);
-          aux_shape.is_save = true;
-        }
-      }
-#pragma omp parallel for
-      for (std::vector<AUXShape>& aux_shape_list : aux_shape_list_list) {
-        for (AUXShape& aux_shape : aux_shape_list) {
-          updateFixedRectToGCellMap(ChangeType::kAdd, aux_shape.net_idx, aux_shape.rect, aux_shape.is_routing);
-        }
-      }
+  for (Obstacle& obstacle : routing_obstacle_list) {
+    PlanarRect real_rect = RTUTIL.getEnlargedRect(obstacle.get_real_rect(), detection_distance);
+    if (RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
+      type_layer_value_list_map[true][obstacle.get_layer_idx()].emplace_back(RTUTIL.convertToBGRectInt(obstacle.get_real_rect()),
+                                                                             std::make_pair(-1, &obstacle));
     }
   }
-  for (AUXShape& aux_shape : aux_shape_list) {
-    if (aux_shape.is_save) {
-      continue;
+  for (Obstacle& obstacle : cut_obstacle_list) {
+    PlanarRect real_rect = RTUTIL.getEnlargedRect(obstacle.get_real_rect(), detection_distance);
+    if (RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
+      type_layer_value_list_map[false][obstacle.get_layer_idx()].emplace_back(RTUTIL.convertToBGRectInt(obstacle.get_real_rect()),
+                                                                              std::make_pair(-1, &obstacle));
     }
-    updateFixedRectToGCellMap(ChangeType::kAdd, aux_shape.net_idx, aux_shape.rect, aux_shape.is_routing);
   }
-}
-
-int32_t DataManager::getBucketIdx(int32_t scale_start, int32_t scale_end, int32_t bucket_start, int32_t bucket_end, int32_t bucket_length)
-{
-  if (scale_start < bucket_start || scale_end > bucket_end) {
-    return -1;
-  }
-  int32_t start_idx = (scale_start - bucket_start) / bucket_length;
-  int32_t end_idx = (scale_end - bucket_start) / bucket_length;
-  if (start_idx != end_idx) {
-    return -1;
-  }
-  return start_idx;
-}
-
-void DataManager::buildFixRectMap()
-{
-  Die& die = _database.get_die();
-  GridMap<GCell>& gcell_map = _database.get_gcell_map();
-  std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& type_layer_net_fixed_rect_map = _database.get_type_layer_net_fixed_rect_map();
-
-  for (int32_t x = die.get_grid_ll_x(); x <= die.get_grid_ur_x(); x++) {
-    for (int32_t y = die.get_grid_ll_y(); y <= die.get_grid_ur_y(); y++) {
-      for (auto& [is_routing, layer_net_fixed_rect_map] : gcell_map[x][y].get_type_layer_net_fixed_rect_map()) {
-        for (auto& [layer_idx, net_fixed_rect_map] : layer_net_fixed_rect_map) {
-          for (auto& [net_idx, fixed_rect_set] : net_fixed_rect_map) {
-            type_layer_net_fixed_rect_map[is_routing][layer_idx][net_idx].insert(fixed_rect_set.begin(), fixed_rect_set.end());
-          }
+  for (Net& net : net_list) {
+    for (Pin& pin : net.get_pin_list()) {
+      for (EXTLayerRect& shape : pin.get_routing_shape_list()) {
+        PlanarRect real_rect = RTUTIL.getEnlargedRect(shape.get_real_rect(), detection_distance);
+        if (RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
+          type_layer_value_list_map[true][shape.get_layer_idx()].emplace_back(RTUTIL.convertToBGRectInt(shape.get_real_rect()),
+                                                                              std::make_pair(net.get_net_idx(), &shape));
+        }
+      }
+      for (EXTLayerRect& shape : pin.get_cut_shape_list()) {
+        PlanarRect real_rect = RTUTIL.getEnlargedRect(shape.get_real_rect(), detection_distance);
+        if (RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
+          type_layer_value_list_map[false][shape.get_layer_idx()].emplace_back(RTUTIL.convertToBGRectInt(shape.get_real_rect()),
+                                                                               std::make_pair(net.get_net_idx(), &shape));
         }
       }
     }
   }
+  auto& type_layer_fixed_rect_rtree_map = _database.get_type_layer_fixed_rect_rtree_map();
+  for (bool is_routing : {false, true}) {
+    for (auto& [layer_idx, value_list] : type_layer_value_list_map[is_routing]) {
+      type_layer_fixed_rect_rtree_map[is_routing][layer_idx] = Database::FixedRectRTree(value_list.begin(), value_list.end());
+    }
+  }
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void DataManager::printConfig()
@@ -1640,8 +1309,6 @@ void DataManager::printConfig()
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _config.top_routing_layer);
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "output_inter_result");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _config.output_inter_result);
-  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "enable_notification");
-  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _config.enable_notification);
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "enable_timing");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _config.enable_timing);
   // **********        RT         ********** //
@@ -1852,105 +1519,18 @@ void DataManager::outputScript()
   RTUTIL.closeFileStream(python_file);
 }
 
-void DataManager::outputJson()
-{
-  int32_t enable_notification = _config.enable_notification;
-  if (!enable_notification) {
-    return;
-  }
-  std::map<std::string, std::string> json_path_map;
-  json_path_map["env_map"] = outputEnvJson();
-  RTI.sendNotification("DM", 1, json_path_map);
-}
-
-std::string DataManager::outputEnvJson()
-{
-  Die& die = _database.get_die();
-  std::vector<RoutingLayer>& routing_layer_list = _database.get_routing_layer_list();
-  std::vector<CutLayer>& cut_layer_list = _database.get_cut_layer_list();
-  std::vector<Net>& net_list = _database.get_net_list();
-  std::string& dm_temp_directory_path = _config.dm_temp_directory_path;
-
-  std::vector<nlohmann::json> env_json_list;
-  {
-    nlohmann::json die_json;
-    die_json["die"] = {die.get_real_ll_x(), die.get_real_ll_y(), die.get_real_ur_x(), die.get_real_ur_y()};
-    env_json_list.push_back(die_json);
-  }
-  {
-    nlohmann::json env_shape_json;
-    for (Obstacle& routing_obstacle : _database.get_routing_obstacle_list()) {
-      env_shape_json["env_shape"]["obs"]["shape"].push_back({routing_obstacle.get_real_ll_x(), routing_obstacle.get_real_ll_y(),
-                                                             routing_obstacle.get_real_ur_x(), routing_obstacle.get_real_ur_y(),
-                                                             routing_layer_list[routing_obstacle.get_layer_idx()].get_layer_name()});
-    }
-    for (Obstacle& cut_obstacle : _database.get_cut_obstacle_list()) {
-      env_shape_json["env_shape"]["obs"]["shape"].push_back({cut_obstacle.get_real_ll_x(), cut_obstacle.get_real_ll_y(), cut_obstacle.get_real_ur_x(),
-                                                             cut_obstacle.get_real_ur_y(), cut_layer_list[cut_obstacle.get_layer_idx()].get_layer_name()});
-    }
-    for (Net& net : net_list) {
-      for (Pin& pin : net.get_pin_list()) {
-        for (EXTLayerRect& routing_shape : pin.get_routing_shape_list()) {
-          env_shape_json["env_shape"][net.get_net_name()]["shape"].push_back({routing_shape.get_real_ll_x(), routing_shape.get_real_ll_y(),
-                                                                              routing_shape.get_real_ur_x(), routing_shape.get_real_ur_y(),
-                                                                              routing_layer_list[routing_shape.get_layer_idx()].get_layer_name()});
-        }
-        for (EXTLayerRect& cut_shape : pin.get_cut_shape_list()) {
-          env_shape_json["env_shape"][net.get_net_name()]["shape"].push_back({cut_shape.get_real_ll_x(), cut_shape.get_real_ll_y(), cut_shape.get_real_ur_x(),
-                                                                              cut_shape.get_real_ur_y(),
-                                                                              cut_layer_list[cut_shape.get_layer_idx()].get_layer_name()});
-        }
-      }
-    }
-    env_json_list.push_back(env_shape_json);
-  }
-  std::string env_json_file_path = RTUTIL.getString(dm_temp_directory_path, "env_map.json");
-  std::ofstream* env_json_file = RTUTIL.getOutputFileStream(env_json_file_path);
-  (*env_json_file) << env_json_list;
-  RTUTIL.closeFileStream(env_json_file);
-  return env_json_file_path;
-}
-
 #endif
 
 #if 1  // destroy
 
-void DataManager::destroyGCellMap()
+void DataManager::destroyDatabaseResult()
 {
-  Die& die = _database.get_die();
-
-  for (auto& [net_idx, pin_access_result_map] : getNetPinAccessResultMap(die)) {
-    for (auto& [pin_idx, segment_set] : pin_access_result_map) {
-      for (Segment<LayerCoord>* segment : segment_set) {
-        RTDM.updateNetPinAccessResultToGCellMap(ChangeType::kDel, net_idx, pin_idx, segment);
-      }
-    }
-  }
-  for (auto& [net_idx, pin_access_patch_map] : getNetPinAccessPatchMap(die)) {
-    for (auto& [pin_idx, patch_set] : pin_access_patch_map) {
-      for (EXTLayerRect* patch : patch_set) {
-        RTDM.updateNetPinAccessPatchToGCellMap(ChangeType::kDel, net_idx, pin_idx, patch);
-      }
-    }
-  }
-  for (auto& [net_idx, segment_set] : getNetGlobalResultMap(die)) {
-    for (Segment<LayerCoord>* segment : segment_set) {
-      RTDM.updateNetGlobalResultToGCellMap(ChangeType::kDel, net_idx, segment);
-    }
-  }
-  for (auto& [net_idx, segment_set] : getNetDetailedResultMap(die)) {
-    for (Segment<LayerCoord>* segment : segment_set) {
-      RTDM.updateNetDetailedResultToGCellMap(ChangeType::kDel, net_idx, segment);
-    }
-  }
-  for (auto& [net_idx, patch_set] : getNetDetailedPatchMap(die)) {
-    for (EXTLayerRect* patch : patch_set) {
-      RTDM.updateNetDetailedPatchToGCellMap(ChangeType::kDel, net_idx, patch);
-    }
-  }
-  for (Violation* violation : getViolationSet(die)) {
-    RTDM.updateViolationToGCellMap(ChangeType::kDel, violation);
-  }
+  _database.get_net_global_result_map().clear();
+  _database.get_net_detailed_result_map().clear();
+  _database.get_net_detailed_patch_map().clear();
+  _database.get_access_point_rtree().clear();
+  _database.get_global_result_rtree().clear();
+  _database.get_violation_rtree().clear();
 }
 
 #endif

@@ -1,3 +1,4 @@
+#include "utility/logger/Logger.hpp"
 #include <boost/geometry.hpp>
 #include <boost/polygon/polygon.hpp>
 #include <cassert>
@@ -67,9 +68,9 @@ void plotGDS(std::string gds_name, std::vector<GTLRectInt>& rect_list)
     gds_file << "ENDSTR" << std::endl;
     gds_file << "ENDLIB" << std::endl;
     gds_file.close();
-    std::cout << "[Info] Result has been written to '" << gds_file_path << "'!" << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "[Info] Result has been written to '", gds_file_path, "'!");
   } else {
-    std::cout << "[Error] Failed to open gds file '" << gds_file_path << "'!" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[Error] Failed to open gds file '", gds_file_path, "'!");
     assert(false);
   }
 }

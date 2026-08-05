@@ -31,6 +31,7 @@
 #include <utility>
 #include <vector>
 
+#include "utility/logger/Logger.hpp"
 namespace idb {
 namespace data_binary {
 namespace {
@@ -196,7 +197,7 @@ bool run_section(const char* name, Func&& func)
     func();
     return true;
   } catch (const std::exception& e) {
-    std::cerr << "[IdbData] " << name << " failed: " << e.what() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[IdbData] ", name, " failed: ", e.what());
     return false;
   }
 }
@@ -1118,10 +1119,16 @@ void read_layout_die(const std::string& folder, IdbLayout* layout)
     }
   }
   std::unique_ptr<IdbRect> rect(read_rect(reader));
-  if (rect != nullptr) {
-    die->IdbObject::set_bounding_box(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
-  } else {
+  if (!die->get_points().empty()) {
     die->set_bounding_box();
+    auto* points_rect = die->get_bounding_box();
+    if (rect != nullptr
+        && (rect->get_low_x() != points_rect->get_low_x() || rect->get_low_y() != points_rect->get_low_y()
+            || rect->get_high_x() != points_rect->get_high_x() || rect->get_high_y() != points_rect->get_high_y())) {
+      ECCLOG.warn(ecc::Loc::current(), "[IdbData] Warning: serialized die bounding box does not match DIEAREA points; using points-derived bounding box");
+    }
+  } else if (rect != nullptr) {
+    die->IdbObject::set_bounding_box(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
   }
 }
 
@@ -2522,7 +2529,7 @@ void read_design_fills(const std::string& folder, IdbDesign* design, IdbLayout* 
 bool write_layout(const std::string& folder, IdbLayout* layout, bool parallel)
 {
   if (layout == nullptr) {
-    std::cerr << "[IdbData] layout is null" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[IdbData] layout is null");
     return false;
   }
   std::filesystem::create_directories(std::filesystem::path(folder) / kLayoutDir);
@@ -2545,7 +2552,7 @@ bool write_layout(const std::string& folder, IdbLayout* layout, bool parallel)
 bool read_layout_into(const std::string& folder, IdbLayout* layout, bool parallel)
 {
   if (layout == nullptr) {
-    std::cerr << "[IdbData] layout is null" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[IdbData] layout is null");
     return false;
   }
 
@@ -2592,7 +2599,7 @@ std::unique_ptr<IdbLayout> read_layout(const std::string& folder, bool parallel)
 bool write_design(const std::string& folder, IdbDesign* design, bool parallel)
 {
   if (design == nullptr) {
-    std::cerr << "[IdbData] design is null" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[IdbData] design is null");
     return false;
   }
   std::filesystem::create_directories(std::filesystem::path(folder) / kDesignDir);
@@ -2615,7 +2622,7 @@ bool write_design(const std::string& folder, IdbDesign* design, bool parallel)
 bool read_design_into(const std::string& folder, IdbDesign* design, IdbLayout* layout, bool parallel)
 {
   if (design == nullptr || layout == nullptr) {
-    std::cerr << "[IdbData] design or layout is null" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[IdbData] design or layout is null");
     return false;
   }
 

@@ -20,8 +20,6 @@
  * @date 2026-04-24
  * @brief Line classification, intersection, and distance helpers for bound-skew tree routing
  */
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -29,7 +27,7 @@
 #include <limits>
 #include <ostream>
 
-#include "Log.hh"
+#include "Logger.hh"
 #include "bound_skew_tree/component/Components.hh"
 #include "bound_skew_tree/geometry/GeomCalc.hh"
 
@@ -68,15 +66,17 @@ struct LinePairView
 
 [[nodiscard]] auto IsSameDirectedLine(const Line& first_line, const Line& second_line) -> bool
 {
-  return GeomCalc::distance(HeadPoint(first_line), HeadPoint(second_line))
-             + GeomCalc::distance(TailPoint(first_line), TailPoint(second_line))
-         < kEpsilon;
+  return GeomCalc::distance(HeadPoint(first_line), HeadPoint(second_line)) + GeomCalc::distance(TailPoint(first_line), TailPoint(second_line)) < kEpsilon;
 }
 
 auto AccumulateEndpointIntersections(const EndpointIntersectionContext& context, const LinePairView& line_pair) -> void
 {
-  LOG_FATAL_IF(context.intersection_point == nullptr || context.intersection_count == nullptr) << "endpoint intersection context is null";
-  LOG_FATAL_IF(line_pair.source_line == nullptr || line_pair.target_line == nullptr) << "line pair is null";
+  if (context.intersection_point == nullptr || context.intersection_count == nullptr) {
+    CTSLOG.error(Loc::current(), "endpoint intersection context is null");
+  }
+  if (line_pair.source_line == nullptr || line_pair.target_line == nullptr) {
+    CTSLOG.error(Loc::current(), "line pair is null");
+  }
 
   for (const Point& point_source : *line_pair.source_line) {
     Point candidate_point = point_source;
@@ -91,7 +91,9 @@ auto RemoveDuplicatedEndpointIntersections(size_t& intersection_count, const std
 {
   const LinePairView& left_to_right = line_pairs.at(kLeft);
   const LinePairView& right_to_left = line_pairs.at(kRight);
-  LOG_FATAL_IF(left_to_right.source_line == nullptr || right_to_left.source_line == nullptr) << "line pair is null";
+  if (left_to_right.source_line == nullptr || right_to_left.source_line == nullptr) {
+    CTSLOG.error(Loc::current(), "line pair is null");
+  }
 
   for (const Point& first_point : *left_to_right.source_line) {
     for (const Point& second_point : *right_to_left.source_line) {
@@ -125,8 +127,7 @@ auto RemoveDuplicatedEndpointIntersections(size_t& intersection_count, const std
 
 [[nodiscard]] auto CalcLineYAtX(const Line& line, const double target_x) -> double
 {
-  return ((HeadPoint(line).y - TailPoint(line).y) * (target_x - HeadPoint(line).x) / (HeadPoint(line).x - TailPoint(line).x))
-         + HeadPoint(line).y;
+  return ((HeadPoint(line).y - TailPoint(line).y) * (target_x - HeadPoint(line).x) / (HeadPoint(line).x - TailPoint(line).x)) + HeadPoint(line).y;
 }
 
 [[nodiscard]] auto SolveInfiniteLineIntersection(Point& intersection_point, const Line& first_line, const Line& second_line) -> bool
@@ -156,13 +157,12 @@ auto RemoveDuplicatedEndpointIntersections(size_t& intersection_count, const std
     return false;
   }
 
-  intersection_point.x = (HeadPoint(second_line).y - HeadPoint(first_line).y + (HeadPoint(first_line).x * first_line_slope)
-                          - (HeadPoint(second_line).x * second_line_slope))
-                         / (first_line_slope - second_line_slope);
-  intersection_point.y
-      = (HeadPoint(first_line).y + HeadPoint(second_line).y + (first_line_slope * (intersection_point.x - HeadPoint(first_line).x))
-         + (second_line_slope * (intersection_point.x - HeadPoint(second_line).x)))
-        / kAverageFactor;
+  intersection_point.x
+      = (HeadPoint(second_line).y - HeadPoint(first_line).y + (HeadPoint(first_line).x * first_line_slope) - (HeadPoint(second_line).x * second_line_slope))
+        / (first_line_slope - second_line_slope);
+  intersection_point.y = (HeadPoint(first_line).y + HeadPoint(second_line).y + (first_line_slope * (intersection_point.x - HeadPoint(first_line).x))
+                          + (second_line_slope * (intersection_point.x - HeadPoint(second_line).x)))
+                         / kAverageFactor;
   return true;
 }
 
@@ -194,7 +194,9 @@ auto GeomCalc::lineType(const Point& first_point, const Point& second_point) -> 
 
 auto GeomCalc::lineIntersect(Point& intersection_point, const Line& first_line, const Line& second_line) -> IntersectType
 {
-  LOG_FATAL_IF(HasZeroLength(first_line) || HasZeroLength(second_line)) << "line length is zero";
+  if (HasZeroLength(first_line) || HasZeroLength(second_line)) {
+    CTSLOG.error(Loc::current(), "line length is zero");
+  }
   if (!boundBoxOverlap(first_line, second_line)) {
     return IntersectType::kNone;
   }
@@ -226,7 +228,9 @@ auto GeomCalc::lineRelative(const Line& lhs_line, const Line& rhs_line, const si
 {
   const auto lhs_line_type = lineType(lhs_line);
   const auto rhs_line_type = lineType(rhs_line);
-  LOG_FATAL_IF(lhs_line_type != rhs_line_type) << "line type is not same";
+  if (lhs_line_type != rhs_line_type) {
+    CTSLOG.error(Loc::current(), "line type is not same");
+  }
 
   if (lhs_line_type == LineType::kVertical || lhs_line_type == LineType::kTilt) {
     const auto lhs_max_x = std::max(lhs_line.at(kHead).x, lhs_line.at(kTail).x);
@@ -250,7 +254,7 @@ auto GeomCalc::lineRelative(const Line& lhs_line, const Line& rhs_line, const si
     return RelativeType::kManhattanParallel;
   }
 
-  LOG_FATAL << "line type error";
+  CTSLOG.error(Loc::current(), "line type error");
   return RelativeType::kManhattanParallel;
 }
 
@@ -281,7 +285,9 @@ auto GeomCalc::lineDist(const Line& lhs_line, const Line& rhs_line) -> LineDista
   for (size_t side = 0; side < line_pairs.size(); ++side) {
     const size_t opposite_side = (side + 1) % kLinePointCount;
     const LinePairView& line_pair = line_pairs.at(side);
-    LOG_FATAL_IF(line_pair.source_line == nullptr || line_pair.target_line == nullptr) << "line pair is null";
+    if (line_pair.source_line == nullptr || line_pair.target_line == nullptr) {
+      CTSLOG.error(Loc::current(), "line pair is null");
+    }
 
     for (size_t point_index = 0; point_index < point_counts.at(side); ++point_index) {
       Point closest_point_on_target_line;
@@ -316,15 +322,13 @@ auto GeomCalc::onLine(Point& point, const Line& line) -> bool
     const auto delta_x = std::abs(line.at(kTail).x - line.at(kHead).x);
     const auto delta_y = std::abs(line.at(kTail).y - line.at(kHead).y);
     if (delta_y > delta_x) {
-      const auto snapped_x = ((line.at(kTail).x - line.at(kHead).x) * (point.y - line.at(kHead).y) / (line.at(kTail).y - line.at(kHead).y))
-                             + line.at(kHead).x;
+      const auto snapped_x = ((line.at(kTail).x - line.at(kHead).x) * (point.y - line.at(kHead).y) / (line.at(kTail).y - line.at(kHead).y)) + line.at(kHead).x;
       if (Equal(snapped_x, point.x)) {
         point.x = snapped_x;
         return true;
       }
     } else {
-      const auto snapped_y = ((line.at(kTail).y - line.at(kHead).y) * (point.x - line.at(kHead).x) / (line.at(kTail).x - line.at(kHead).x))
-                             + line.at(kHead).y;
+      const auto snapped_y = ((line.at(kTail).y - line.at(kHead).y) * (point.x - line.at(kHead).x) / (line.at(kTail).x - line.at(kHead).x)) + line.at(kHead).y;
       if (Equal(snapped_y, point.y)) {
         point.y = snapped_y;
         return true;

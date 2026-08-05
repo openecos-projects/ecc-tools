@@ -42,8 +42,8 @@ class CharCircuitBuilder
   CharCircuitBuilder(const CharCircuitBuilder&) = delete;
   auto operator=(const CharCircuitBuilder&) -> CharCircuitBuilder& = delete;
 
-  auto createCharCircuit(const TopologyDesc& topo, const std::vector<std::string>& buf_masters) -> void;
-  auto setCharParasitics(const TopologyDesc& topo, double load_pf) const -> void;
+  auto createCharCircuit(const TopologyDesc& topo, const std::vector<std::string>& buf_masters) -> bool;
+  auto setCharParasitics(double load_pf) const -> void;
   auto destroyCharCircuit() -> void;
 
  private:

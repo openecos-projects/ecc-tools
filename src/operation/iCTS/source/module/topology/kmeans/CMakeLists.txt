@@ -3,8 +3,8 @@ add_library(icts_source_module_topology_kmeans INTERFACE)
 target_link_libraries(
   icts_source_module_topology_kmeans
   INTERFACE
-  icts_source_database_spatial
-  icts_source_utils_geometry
+  icts_source_data_manager_spatial
+  icts_source_toolkit_geometry
 )
 
 target_include_directories(

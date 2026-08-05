@@ -57,10 +57,10 @@ class PlanarCoord;
 enum class MacroPinEdge;
 }  // namespace irt
 
-namespace ieda_feature {
+namespace ecc_feature {
 class RTSummary;
 class FeatureManager;
-}  // namespace ieda_feature
+}  // namespace ecc_feature
 
 #endif
 
@@ -149,12 +149,8 @@ class RTInterface
 
 #if 1  // iSTA
   void updateTiming(std::vector<std::map<std::string, std::vector<LayerCoord>>>& real_pin_coord_map_list,
-                            std::vector<std::vector<Segment<LayerCoord>>>& routing_segment_list_list,
-                            std::map<std::string, std::map<std::string, double>>& clock_timing);
-#endif
-
-#if 1  // ecos
-  void sendNotification(std::string stage, int32_t iter, std::map<std::string, std::string> json_path_map);
+                    std::vector<std::vector<Segment<LayerCoord>>>& routing_segment_list_list,
+                    std::map<std::string, std::map<std::string, double>>& clock_timing);
 #endif
 
 #endif

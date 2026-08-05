@@ -1,6 +1,0 @@
-add_subdirectory(evaluator)
-add_subdirectory(fix_drv)
-add_subdirectory(fix_hold)
-add_subdirectory(fix_setup)
-add_subdirectory(placer)
-add_subdirectory(solver)

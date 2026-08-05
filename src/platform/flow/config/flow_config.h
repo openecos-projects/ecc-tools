@@ -20,8 +20,8 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #include <mutex>
+#include <string>
 
-#include "Str.hh"
 #include "json.hpp"
 using json = nlohmann::json;
 
@@ -52,7 +52,7 @@ struct EnvironmentInfo
 
 struct FlowStatus
 {
-  string stage = "iDB - iEDA Database";
+  string stage = "iDB - ECC Database";
   double memmory = 0;
   double runtime = 0;
 };
@@ -85,8 +85,8 @@ class PLFConfig
   string get_status_stage() { return _status.stage; }
   double get_status_runtime() { return _status.runtime; }
   double get_status_memmory() { return _status.memmory; }
-  string get_status_runtime_string() { return ieda::Str::printf("%f s", _status.runtime); }
-  string get_status_memmory_string() { return ieda::Str::printf("%f MB", _status.memmory); }
+  string get_status_runtime_string() { return std::to_string(_status.runtime) + " s"; }
+  string get_status_memmory_string() { return std::to_string(_status.memmory) + " MB"; }
 
   EnvironmentInfo& get_env_info() { return _env_info; }
   string& get_env_info_software_version() { return _env_info.software_version; }

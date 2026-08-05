@@ -145,8 +145,7 @@ auto Clustering::biPartition(const std::vector<Pin*>& loads, std::size_t min_clu
   max_cluster_size = std::max<std::size_t>(1, max_cluster_size);
 
   const KMeans<Pin*> kmeans;
-  auto kmeans_result
-      = kmeans.run(loads, kBipartitionClusterCount, [](Pin* pin) -> auto { return pin->get_location(); }, config.kmeans_iter_count);
+  auto kmeans_result = kmeans.run(loads, kBipartitionClusterCount, [](Pin* pin) -> auto { return pin->get_location(); }, config.kmeans_iter_count);
 
   auto centers = kmeans_result.centers;
   if (centers.size() < 2) {
@@ -217,15 +216,14 @@ auto Clustering::fastClustering(const std::vector<Pin*>& loads, const ClusterCon
   return FastClustering::run(loads, config);
 }
 
-auto Clustering::evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config)
-    -> ClusterElectricalEvaluation
+auto Clustering::evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config) -> ClusterElectricalEvaluation
 {
   const bool need_exact_cap = config.enable_exact_cap || config.always_build_exact_cap || IsFiniteCapLimit(config.max_cap);
   return evaluateClusterElectrical(loads, anchor, config, need_exact_cap);
 }
 
-auto Clustering::evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config,
-                                           bool need_exact_cap) -> ClusterElectricalEvaluation
+auto Clustering::evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config, bool need_exact_cap)
+    -> ClusterElectricalEvaluation
 {
   const auto evaluation = ClusterConstraintEvaluator::evaluateLoads(loads, anchor, config, need_exact_cap);
   const auto& metrics = evaluation.metrics;

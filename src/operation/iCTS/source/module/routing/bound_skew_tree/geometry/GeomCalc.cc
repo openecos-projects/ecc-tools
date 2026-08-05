@@ -22,15 +22,13 @@
  */
 #include "bound_skew_tree/geometry/GeomCalc.hh"
 
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <ostream>
 #include <vector>
 
-#include "Log.hh"
+#include "Logger.hh"
 #include "bound_skew_tree/component/Components.hh"
 
 namespace icts::bst {
@@ -82,15 +80,13 @@ auto GeomCalc::pointToLineDistanceNonManhattan(const Point& point, const Line& l
   if (!Equal(HeadPoint(line).x, TailPoint(line).x) && (point.x - HeadPoint(line).x) * (point.x - TailPoint(line).x) <= 0) {
     Point candidate_point;
     candidate_point.x = point.x;
-    candidate_point.y = ((TailPoint(line).x - point.x) * (HeadPoint(line).y - TailPoint(line).y) / (TailPoint(line).x - HeadPoint(line).x))
-                        + TailPoint(line).y;
+    candidate_point.y = ((TailPoint(line).x - point.x) * (HeadPoint(line).y - TailPoint(line).y) / (TailPoint(line).x - HeadPoint(line).x)) + TailPoint(line).y;
     candidate_points.push_back(candidate_point);
   }
 
   if (!Equal(HeadPoint(line).y, TailPoint(line).y) && (point.y - HeadPoint(line).y) * (point.y - TailPoint(line).y) <= 0) {
     Point candidate_point;
-    candidate_point.x = ((TailPoint(line).y - point.y) * (HeadPoint(line).x - TailPoint(line).x) / (TailPoint(line).y - HeadPoint(line).y))
-                        + TailPoint(line).x;
+    candidate_point.x = ((TailPoint(line).y - point.y) * (HeadPoint(line).x - TailPoint(line).x) / (TailPoint(line).y - HeadPoint(line).y)) + TailPoint(line).x;
     candidate_point.y = point.y;
     candidate_points.push_back(candidate_point);
   }
@@ -134,7 +130,9 @@ auto GeomCalc::pointToLineDistance(const Point& point, const Line& line, Point& 
   }
 
   Point validated_point = closest_point;
-  LOG_FATAL_IF(!onLine(validated_point, line)) << "closest point is not on line";
+  if (!onLine(validated_point, line)) {
+    CTSLOG.error(Loc::current(), "closest point is not on line");
+  }
   return min_distance;
 }
 
@@ -198,16 +196,13 @@ auto GeomCalc::calcRelativeCoord(Point& point, const RelativeType& type, const d
 
 auto GeomCalc::crossProduct(const Point& origin_point, const Point& lhs_point, const Point& rhs_point) -> double
 {
-  return ((lhs_point.x - origin_point.x) * (rhs_point.y - origin_point.y))
-         - ((rhs_point.x - origin_point.x) * (lhs_point.y - origin_point.y));
+  return ((lhs_point.x - origin_point.x) * (rhs_point.y - origin_point.y)) - ((rhs_point.x - origin_point.x) * (lhs_point.y - origin_point.y));
 }
 
 auto GeomCalc::inBoundBox(const Point& point, const Line& line) -> bool
 {
-  return point.x <= std::max(line.at(kHead).x, line.at(kTail).x) + kEpsilon
-         && point.x >= std::min(line.at(kHead).x, line.at(kTail).x) - kEpsilon
-         && point.y <= std::max(line.at(kHead).y, line.at(kTail).y) + kEpsilon
-         && point.y >= std::min(line.at(kHead).y, line.at(kTail).y) - kEpsilon;
+  return point.x <= std::max(line.at(kHead).x, line.at(kTail).x) + kEpsilon && point.x >= std::min(line.at(kHead).x, line.at(kTail).x) - kEpsilon
+         && point.y <= std::max(line.at(kHead).y, line.at(kTail).y) + kEpsilon && point.y >= std::min(line.at(kHead).y, line.at(kTail).y) - kEpsilon;
 }
 
 auto GeomCalc::boundBoxOverlap(const Line& lhs_line, const Line& rhs_line, const double& epsilon) -> bool

@@ -25,6 +25,7 @@
 #include "Lib.hh"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -32,11 +33,11 @@
 #include <map>
 #include <sstream>
 #include <set>
+#include <string_view>
 #include <utility>
 
 #include "json/json.hpp"
 #include "Interpolation.hh"
-#include "string/StrMap.hh"
 
 namespace idb {
 
@@ -44,10 +45,32 @@ bool Lib::_silent_output = false;
 
 namespace {
 
+bool isEqual(std::string_view lhs, std::string_view rhs)
+{
+  return lhs == rhs;
+}
+
+std::pair<std::string, std::optional<int>> splitPortName(const char* port_name)
+{
+  std::string_view name(port_name);
+  if (!name.ends_with("]")) {
+    return {std::string(name), std::nullopt};
+  }
+
+  size_t left_bracket_idx = name.find('[');
+  size_t right_bracket_idx = name.find(']', left_bracket_idx);
+  if (left_bracket_idx == std::string_view::npos || right_bracket_idx == std::string_view::npos) {
+    return {std::string(name), std::nullopt};
+  }
+
+  int index = std::atoi(std::string(name.substr(left_bracket_idx + 1, right_bracket_idx - left_bracket_idx - 1)).c_str());
+  return {std::string(name.substr(0, left_bracket_idx)), index};
+}
+
 bool shouldTraceLibCheckLookup()
 {
   static const bool kEnabled = []() {
-    if (const char* env = std::getenv("IEDA_LIB_CHECK_TRACE"); env && *env) {
+    if (const char* env = std::getenv("ECC_LIB_CHECK_TRACE"); env && *env) {
       return std::strcmp(env, "0") != 0;
     }
     return false;
@@ -58,7 +81,7 @@ bool shouldTraceLibCheckLookup()
 bool libCheckTraceMatchesFilter(const char* cell_name, const char* src_port,
                                 const char* snk_port)
 {
-  const char* filter_env = std::getenv("IEDA_LIB_CHECK_TRACE_FILTER");
+  const char* filter_env = std::getenv("ECC_LIB_CHECK_TRACE_FILTER");
   if (!filter_env || !*filter_env) {
     return true;
   }
@@ -83,6 +106,55 @@ bool libCheckTraceMatchesFilter(const char* cell_name, const char* src_port,
   }
 
   return false;
+}
+
+bool isSameTimingSenseBundle(const std::vector<LibArc*>& candidate_arcs)
+{
+  if (candidate_arcs.size() <= 1) {
+    return false;
+  }
+
+  auto* first_arc = candidate_arcs.front();
+  return first_arc &&
+         std::ranges::all_of(candidate_arcs, [&](LibArc* lib_arc) {
+           return lib_arc &&
+                  lib_arc->get_timing_type() == first_arc->get_timing_type() &&
+                  lib_arc->isPositiveArc() == first_arc->isPositiveArc() &&
+                  lib_arc->isNegativeArc() == first_arc->isNegativeArc() &&
+                  lib_arc->isNonUnateArc() == first_arc->isNonUnateArc();
+         });
+}
+
+LibArc* findDeclaredFallbackArc(const std::vector<LibArc*>& candidate_arcs)
+{
+  if (candidate_arcs.size() <= 1) {
+    return nullptr;
+  }
+
+  LibArc* fallback_arc = nullptr;
+  for (auto* lib_arc : candidate_arcs) {
+    if (!lib_arc) {
+      return nullptr;
+    }
+
+    if (lib_arc->get_when().empty()) {
+      if (fallback_arc) {
+        return nullptr;
+      }
+      fallback_arc = lib_arc;
+    }
+  }
+
+  if (!fallback_arc) {
+    return nullptr;
+  }
+
+  return std::ranges::all_of(candidate_arcs, [fallback_arc](LibArc* lib_arc) {
+           return lib_arc &&
+                  (lib_arc == fallback_arc || !lib_arc->get_when().empty());
+         })
+             ? fallback_arc
+             : nullptr;
 }
 
 }  // namespace
@@ -166,7 +238,7 @@ LibTable& LibTable::operator=(LibTable&& rhs) noexcept
  * @Brief : get axes or template axes.
  * @return auto&
  */
-Vector<std::unique_ptr<LibAxis>>& LibTable::get_axes()
+absl::InlinedVector<std::unique_ptr<LibAxis>, 64>& LibTable::get_axes()
 {
   if (_axes.empty()) {
     LibLutTableTemplate* table_template = get_table_template();
@@ -210,8 +282,10 @@ double LibTable::findValue(double slew, double constrain_slew_or_load)
     // power
     case LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME:
       if (auto variable2 = table_template->get_template_variable2(); variable2) {
-        LOG_FATAL_IF(*variable2 != LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE
-                     && *variable2 != LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION);
+        if (*variable2 != LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE
+            && *variable2 != LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION) {
+          ECCLOG.error(ecc::Loc::current(), "Invalid liberty delay table variable.");
+        }
       }
 
       val1 = slew;
@@ -221,9 +295,11 @@ double LibTable::findValue(double slew, double constrain_slew_or_load)
     case LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE:
     case LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION:
       if (auto variable2 = table_template->get_template_variable2(); variable2) {
-        LOG_FATAL_IF(*variable2 != LibLutTableTemplate::Variable::INPUT_NET_TRANSITION
-                     && *variable2 != LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION
-                     && *variable2 != LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME);
+        if (*variable2 != LibLutTableTemplate::Variable::INPUT_NET_TRANSITION
+            && *variable2 != LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION
+            && *variable2 != LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME) {
+          ECCLOG.error(ecc::Loc::current(), "Invalid liberty delay table variable.");
+        }
       }
 
       val1 = constrain_slew_or_load;
@@ -231,7 +307,7 @@ double LibTable::findValue(double slew, double constrain_slew_or_load)
       break;
 
     default:
-      LOG_FATAL << "lut table " << get_file_name() << " " << get_line_no() << " invalid delay lut template variable";
+      ECCLOG.error(ecc::Loc::current(), "lut table ", get_file_name(), " ", get_line_no(), " invalid delay lut template variable");
       break;
   }
 
@@ -243,8 +319,11 @@ double LibTable::findValue(double slew, double constrain_slew_or_load)
     auto max_val = getAxis(axis_index)[num_val - 1];
 
     if (!Lib::isSilentOutput() && ((val < min_val) || (val > max_val))) {
-      LOG_ERROR_FIRST_N(10) << "Warning: val outside table ranges:  "
-                            << "val = " << val << "; min_val = " << min_val << "; max_val = " << max_val << std::endl;
+      static std::atomic<int32_t> warning_count = 0;
+      if (warning_count.fetch_add(1, std::memory_order_relaxed) < 10) {
+        ECCLOG.warn(ecc::Loc::current(), "Warning: val outside table ranges: val = ", val, "; min_val = ", min_val,
+                     "; max_val = ", max_val);
+      }
     }
     return num_val;
   };
@@ -275,7 +354,9 @@ double LibTable::findValue(double slew, double constrain_slew_or_load)
 
   auto get_table_value = [this](auto index) -> double {
     auto& table_values = get_table_values();
-    LOG_FATAL_IF(index >= table_values.size()) << "index " << index << " beyond table value size " << table_values.size();
+    if (index >= table_values.size()) {
+      ECCLOG.error(ecc::Loc::current(), "index ", index, " beyond table value size ", table_values.size());
+    }
     return table_values[index]->getFloatValue();
   };
 
@@ -409,7 +490,9 @@ std::vector<double> LibVectorTable::getOutputCurrent(std::optional<LibCurrentSim
       }
       ++start_index;
     }
-    LOG_FATAL_IF(start_index >= axis_size) << "start index beyond axis size.";
+    if (start_index >= axis_size) {
+      ECCLOG.error(ecc::Loc::current(), "start index beyond axis size.");
+    }
     return start_index;
   };
 
@@ -433,7 +516,9 @@ std::vector<double> LibVectorTable::getOutputCurrent(std::optional<LibCurrentSim
     output_currents.push_back(output_current);
   }
 
-  LOG_FATAL_IF(simu_info->_num_sim_point != output_currents.size()) << "output currents size is not equal sim point num.";
+  if (simu_info->_num_sim_point != output_currents.size()) {
+    ECCLOG.error(ecc::Loc::current(), "output currents size is not equal sim point num.");
+  }
 
   return output_currents;
 }
@@ -451,7 +536,7 @@ LibCurrentData::LibCurrentData(LibVectorTable* low_low, LibVectorTable* low_high
  */
 std::tuple<double, int> LibCurrentData::getSimulationTotalTimeAndNumPoints()
 {
-  BTreeMap<double, int> total_simulation_times;
+  absl::btree_map<double, int> total_simulation_times;
 
   for (auto* table : {_low_low, _low_high, _high_low, _high_high}) {
     auto [total_time, num_point] = table->getSimulationTotalTimeAndNumPoints();
@@ -970,7 +1055,7 @@ bool LibPort::isSeqDataIn()
   for (auto& liberty_arc_set : liberty_cell->get_cell_arcs()) {
     auto& lib_arc = liberty_arc_set->get_arcs().front();
     if (lib_arc->isClearPresetArc()) {
-      if (Str::equal(lib_arc->get_src_port(), get_port_name())) {
+      if (isEqual(lib_arc->get_src_port(), get_port_name())) {
         return false;
       }
     }
@@ -1009,13 +1094,13 @@ LibLeakagePower& LibLeakagePower::operator=(LibLeakagePower&& rhs) noexcept
   return *this;
 }
 
-BTreeMap<std::string, LibArc::TimingType> LibArc::_str_to_type = {{"setup_rising", TimingType::kSetupRising},
-                                                                  {"hold_rising", TimingType::kHoldRising},
-                                                                  {"recovery_rising", TimingType::kRecoveryRising},
-                                                                  {"removal_rising", TimingType::kRemovalRising},
-                                                                  {"rising_edge", TimingType::kRisingEdge},
-                                                                  {"preset", TimingType::kPreset},
-                                                                  {"clear", TimingType::kClear},
+absl::btree_map<std::string, LibArc::TimingType> LibArc::_str_to_type = {{"setup_rising", TimingType::kSetupRising},
+                                                                          {"hold_rising", TimingType::kHoldRising},
+                                                                          {"recovery_rising", TimingType::kRecoveryRising},
+                                                                          {"removal_rising", TimingType::kRemovalRising},
+                                                                          {"rising_edge", TimingType::kRisingEdge},
+                                                                          {"preset", TimingType::kPreset},
+                                                                          {"clear", TimingType::kClear},
                                                                   {"three_state_enable", TimingType::kThreeStateEnable},
                                                                   {"three_state_enable_rise", TimingType::kThreeStateEnableRise},
                                                                   {"three_state_enable_fall", TimingType::kThreeStateEnableFall},
@@ -1092,9 +1177,9 @@ LibArc& LibArc::operator=(LibArc&& rhs) noexcept
  */
 void LibArc::set_timing_sense(const char* timing_sense)
 {
-  if (Str::equal(timing_sense, "positive_unate")) {
+  if (isEqual(timing_sense, "positive_unate")) {
     _timing_sense = TimingSense::kPositiveUnate;
-  } else if (Str::equal(timing_sense, "negative_unate")) {
+  } else if (isEqual(timing_sense, "negative_unate")) {
     _timing_sense = TimingSense::kNegativeUnate;
   } else {
     _timing_sense = TimingSense::kNonUnate;
@@ -1191,9 +1276,13 @@ unsigned LibArc::isClockGateCheckArc()
   const char* src_port_name = this->get_src_port();
   const char* snk_port_name = this->get_snk_port();
   auto* src_port = _owner_cell->get_cell_port_or_port_bus(src_port_name);
-  LOG_FATAL_IF(!src_port) << "src port " << src_port_name << " is not found.";
+  if (!src_port) {
+    ECCLOG.error(ecc::Loc::current(), "src port ", src_port_name, " is not found.");
+  }
   auto* snk_port = _owner_cell->get_cell_port_or_port_bus(snk_port_name);
-  LOG_FATAL_IF(!snk_port) << "snk port " << snk_port_name << " is not found.";
+  if (!snk_port) {
+    ECCLOG.error(ecc::Loc::current(), "snk port ", snk_port_name, " is not found.");
+  }
 
   return (_owner_cell->get_is_clock_gating_integrated_cell() && src_port->get_clock_gate_clock_pin()
           && snk_port->get_clock_gate_enable_pin());
@@ -1239,16 +1328,13 @@ double LibArc::getDelayOrConstrainCheckNs(TransType trans_type, double slew, dou
       const char* src_port = get_src_port();
       const char* snk_port = get_snk_port();
       if (libCheckTraceMatchesFilter(cell_name, src_port, snk_port)) {
-        LOG_INFO_FIRST_N(40)
-            << "[lib_check_lookup] cell=" << cell_name << " arc=" << src_port
-            << "->" << snk_port << " trans="
-            << (trans_type == TransType::kRise ? "rise" : "fall")
-            << " raw_arg1=" << slew << " raw_arg2="
-            << load_or_constrain_slew << " converted_arg1=" << arg1
-            << " converted_arg2=" << arg2 << " liberty_time_unit="
-            << (liberty_time_unit == TimeUnit::kPS
-                    ? "ps"
-                    : (liberty_time_unit == TimeUnit::kFS ? "fs" : "ns"));
+        static std::atomic<int32_t> trace_count = 0;
+        if (trace_count.fetch_add(1, std::memory_order_relaxed) < 40) {
+          ECCLOG.info(ecc::Loc::current(), "[lib_check_lookup] cell=", cell_name, " arc=", src_port, "->", snk_port,
+                       " trans=", (trans_type == TransType::kRise ? "rise" : "fall"), " raw_arg1=", slew, " raw_arg2=",
+                       load_or_constrain_slew, " converted_arg1=", arg1, " converted_arg2=", arg2, " liberty_time_unit=",
+                       (liberty_time_unit == TimeUnit::kPS ? "ps" : (liberty_time_unit == TimeUnit::kFS ? "fs" : "ns")));
+        }
       }
     }
     found_delay = _table_model->gateCheckConstrain(trans_type, arg1, arg2);
@@ -1318,7 +1404,7 @@ double LibArc::getDelaySigma(AnalysisMode mode, TransType trans_type, double sle
 double LibArc::getSlewNs(TransType trans_type, double slew, double load)
 {
   if (!isDelayArc()) {
-    LOG_FATAL << "check arc has not output slew.";
+    ECCLOG.error(ecc::Loc::current(), "check arc has not output slew.");
   }
 
   // set/get time units in liberty
@@ -1359,7 +1445,7 @@ double LibArc::getSlewNs(TransType trans_type, double slew, double load)
 double LibArc::getSlewSigma(AnalysisMode mode, TransType trans_type, double slew, double load)
 {
   if (!isDelayArc()) {
-    LOG_FATAL << "check arc has not output slew.";
+    ECCLOG.error(ecc::Loc::current(), "check arc has not output slew.");
   }
 
   // set/get time units in liberty
@@ -1401,7 +1487,7 @@ double LibArc::getSlewSigma(AnalysisMode mode, TransType trans_type, double slew
 std::unique_ptr<LibCurrentData> LibArc::getOutputCurrent(TransType trans_type, double slew, double load)
 {
   if (!isDelayArc()) {
-    LOG_FATAL << "check arc has not output current.";
+    ECCLOG.error(ecc::Loc::current(), "check arc has not output current.");
   }
   auto current_data = _table_model->gateOutputCurrent(trans_type, slew, load);
   return current_data;
@@ -1453,6 +1539,16 @@ std::vector<double> LibArcSet::getDelayOrConstrainCheckNs(TransType input_trans_
     candidate_arcs.push_back(lib_arc.get());
   }
 
+  // Same-sense bundles should only collapse when they contain one real
+  // unconditional fallback arc for otherwise-conditional declarations.
+  auto* declared_default_arc = isSameTimingSenseBundle(candidate_arcs)
+                                   ? findDeclaredFallbackArc(candidate_arcs)
+                                   : nullptr;
+
+  if (declared_default_arc) {
+    candidate_arcs = {declared_default_arc};
+  }
+
   for (auto* lib_arc : candidate_arcs) {
 
     double find_value =
@@ -1464,7 +1560,9 @@ std::vector<double> LibArcSet::getDelayOrConstrainCheckNs(TransType input_trans_
   // sort by descending.
   std::ranges::sort(values, std::greater<double>());
 
-  LOG_FATAL_IF(values.empty()) << "No arc found for find table value.";
+  if (values.empty()) {
+    ECCLOG.error(ecc::Loc::current(), "No arc found for find table value.");
+  }
 
   return values;
 }
@@ -1499,6 +1597,16 @@ std::vector<double> LibArcSet::getSlewNs(TransType input_trans_type, TransType o
     candidate_arcs.push_back(lib_arc.get());
   }
 
+  // Same-sense bundles should only collapse when they contain one real
+  // unconditional fallback arc for otherwise-conditional declarations.
+  auto* declared_default_arc = isSameTimingSenseBundle(candidate_arcs)
+                                   ? findDeclaredFallbackArc(candidate_arcs)
+                                   : nullptr;
+
+  if (declared_default_arc) {
+    candidate_arcs = {declared_default_arc};
+  }
+
   for (auto* lib_arc : candidate_arcs) {
 
     double find_value = lib_arc->getSlewNs(output_trans_type, slew, load);
@@ -1508,7 +1616,9 @@ std::vector<double> LibArcSet::getSlewNs(TransType input_trans_type, TransType o
   // sort by descending.
   std::ranges::sort(values, std::greater<double>());
 
-  LOG_FATAL_IF(values.empty()) << "No arc found for find table value.";
+  if (values.empty()) {
+    ECCLOG.error(ecc::Loc::current(), "No arc found for find table value.");
+  }
 
   return values;
 }
@@ -1715,7 +1825,7 @@ LibPort* LibCell::get_cell_port_or_port_bus(const char* port_name)
   }
 
   // find the port bus.
-  auto [bus_name, index] = Str::matchBusName(port_name);
+  auto [bus_name, index] = splitPortName(port_name);
 
   if (auto p = _str2portbuses.find(bus_name.c_str()); p != _str2portbuses.end()) {
     if (!index) {
@@ -1741,7 +1851,7 @@ std::optional<LibArcSet*> LibCell::findLibertyArcSet(const char* from_port_name,
   for (auto& cell_arc_set : _cell_arcs) {
     auto* cell_arc = cell_arc_set->front();
 
-    if (Str::equal(from_port_name, cell_arc->get_src_port()) && Str::equal(to_port_name, cell_arc->get_snk_port())
+    if (isEqual(from_port_name, cell_arc->get_src_port()) && isEqual(to_port_name, cell_arc->get_snk_port())
         && (timing_type == cell_arc->get_timing_type())) {
       return cell_arc_set.get();
     }
@@ -1762,7 +1872,7 @@ std::optional<LibArcSet*> LibCell::findLibertyArcSet(const char* from_port_name,
   for (auto& cell_arc_set : _cell_arcs) {
     auto* cell_arc = cell_arc_set->front();
 
-    if (Str::equal(from_port_name, cell_arc->get_src_port()) && Str::equal(to_port_name, cell_arc->get_snk_port())) {
+    if (isEqual(from_port_name, cell_arc->get_src_port()) && isEqual(to_port_name, cell_arc->get_snk_port())) {
       return cell_arc_set.get();
     }
   }
@@ -1782,7 +1892,7 @@ std::vector<LibArcSet*> LibCell::findLibertyArcSet(const char* to_port_name)
   for (auto& cell_arc_set : _cell_arcs) {
     auto* cell_arc = cell_arc_set->front();
 
-    if (Str::equal(to_port_name, cell_arc->get_snk_port())) {
+    if (isEqual(to_port_name, cell_arc->get_snk_port())) {
       ret_value.emplace_back(cell_arc_set.get());
     }
   }
@@ -1802,7 +1912,7 @@ std::optional<LibPowerArcSet*> LibCell::findLibertyPowerArcSet(const char* from_
   for (auto& cell_power_arc_set : _cell_power_arcs) {
     auto* cell_power_arc = cell_power_arc_set->front();
 
-    if (Str::equal(from_port_name, cell_power_arc->get_src_port()) && Str::equal(to_port_name, cell_power_arc->get_snk_port())) {
+    if (isEqual(from_port_name, cell_power_arc->get_src_port()) && isEqual(to_port_name, cell_power_arc->get_snk_port())) {
       return cell_power_arc_set.get();
     }
   }
@@ -1920,13 +2030,34 @@ bool LibCell::isSequentialCell()
  */
 bool LibCell::isICG()
 {
+  bool has_check_arc = false;
+  bool has_combinational_clock_to_output_arc = false;
   for (auto& liberty_arc_set : _cell_arcs) {
+    if (liberty_arc_set->get_arcs().empty()) {
+      continue;
+    }
     auto& lib_arc = liberty_arc_set->get_arcs().front();
     if (lib_arc->isClockGateCheckArc()) {
       return true;
     }
+
+    has_check_arc = has_check_arc || lib_arc->isCheckArc();
+    LibArc::TimingType timing_type = lib_arc->get_timing_type();
+    bool is_combinational_arc = timing_type == LibArc::TimingType::kCombRise || timing_type == LibArc::TimingType::kCombFall
+                                || timing_type == LibArc::TimingType::kComb;
+    if (!is_combinational_arc) {
+      continue;
+    }
+    LibPort* source_port = get_cell_port_or_port_bus(lib_arc->get_src_port());
+    LibPort* sink_port = get_cell_port_or_port_bus(lib_arc->get_snk_port());
+    has_combinational_clock_to_output_arc = has_combinational_clock_to_output_arc
+                                           || (source_port != nullptr && sink_port != nullptr && source_port->isClock() && sink_port->isOutput());
   }
-  return false;
+
+  // Some libraries omit the clock_gating_integrated_cell and clock_gate_* attributes.
+  // Their ICG cells are still identifiable by a sequential check arc and a combinational
+  // clock-input-to-output arc (for example, CK -> ECK).
+  return has_check_arc && has_combinational_clock_to_output_arc;
 }
 
 /**
@@ -2061,7 +2192,7 @@ LibCurrentTemplate::LibCurrentTemplate(const char* template_name) : LibLutTableT
 }
 
 /**
- * @brief Load liberty with rust parse API.
+ * @brief Load liberty with C++ parse API.
  *
  * @param file_name
  * @return std::unique_ptr<LibLibrary>
@@ -2072,7 +2203,9 @@ LibertyReader Lib::loadLibertyWithCppParser(const char* file_name)
 
   LibertyReader liberty_reader(file_name);
   unsigned is_success = liberty_reader.readLib();
-  LOG_FATAL_IF(!is_success) << "read lib " << file_name << " failed.";
+  if (!is_success) {
+    ECCLOG.error(ecc::Loc::current(), "read lib ", file_name, " failed.");
+  }
 
   // LOG_INFO << "Load lib " << file_name << " finish.";
   return liberty_reader;

@@ -31,18 +31,16 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "def_write.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <stdarg.h>
+#include <string_view>
 #include <zlib.h>
 #include "../../../data/design/IdbDesign.h"
-#include "Str.hh"
 #include "boost_definition.h"
-
-using std::cout;
-using std::endl;
 
 namespace idb {
 
@@ -72,19 +70,19 @@ DefWrite::~DefWrite()
 bool DefWrite::initFile(const char* file)
 {
   // Creating a compressed format handle
-  if (ieda::Str::contain(file, ".gz")) {
+  if (std::string_view(file).find(".gz") != std::string_view::npos) {
     _font = SaveFormat::kGzip;
     _file_write_gz = gzopen(file, "w");
 
     if (_file_write_gz == nullptr) {
-      std::cout << "Open gz file failed..." << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Open gz file failed...");
       return false;
     }
   } else {
     _font = SaveFormat::kUnzip;
     _file_write = fopen(file, "w+");
     if (_file_write == nullptr) {
-      std::cerr << "Open def file failed..." << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Open def file failed...");
       return false;
     }
   }
@@ -99,16 +97,16 @@ bool DefWrite::initFile(const char* file)
  */
 bool DefWrite::closeFile()
 {
-  bool result;
+  bool result = false;
   switch (_font) {
     case SaveFormat::kGzip:
-      result = gzclose(_file_write_gz);
+      result = gzclose(_file_write_gz) == Z_OK;
       _file_write_gz = nullptr;
       break;
 
     case SaveFormat::kUnzip:
     default:
-      result = fclose(_file_write);
+      result = fclose(_file_write) == 0;
       _file_write = nullptr;
       break;
   }
@@ -275,7 +273,7 @@ int32_t DefWrite::write_version()
   string version = design->get_version().empty() ? "5.8" : design->get_version();
   writestr("VERSION %s ;\n", version.c_str());
 
-  std::cout << "Write VERSION success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write VERSION success...");
   return kDbSuccess;
 }
 
@@ -297,7 +295,7 @@ int32_t DefWrite::write_busbit_char()
 
   writestr("BUSBITCHARS \"%c%c\" ;\n", bus_bit_chars->getLeftDelimiter(), bus_bit_chars->getRightDelimiter());
 
-  std::cout << "Write BUSBITCHARS success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write BUSBITCHARS success...");
 
   return kDbSuccess;
 }
@@ -312,7 +310,7 @@ int32_t DefWrite::write_design()
   string design_name = design->get_design_name();
   writestr("DESIGN %s ;\n", design_name.c_str());
 
-  std::cout << "Write DESIGN name success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write DESIGN name success...");
   return kDbSuccess;
 }
 
@@ -322,19 +320,19 @@ int32_t DefWrite::write_units()
   IdbUnits* def_units = design->get_units();
   IdbUnits* lef_units = design->get_layout()->get_units();
   if (def_units == nullptr && lef_units == nullptr) {
-    std::cout << "Write UNITS error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write UNITS error...");
 
     return kDbFail;
   }
 
   uint32_t def_microns = def_units->get_micron_dbu() > 0 ? def_units->get_micron_dbu() : lef_units->get_micron_dbu();
   if (def_microns <= 0) {
-    std::cout << "Write UNITS error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write UNITS error...");
 
     return kDbFail;
   }
   writestr("UNITS DISTANCE MICRONS %u ;\n", def_microns);
-  std::cout << "Write UNITS success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write UNITS success...");
   return kDbSuccess;
 }
 
@@ -343,7 +341,7 @@ int32_t DefWrite::write_die()
   IdbLayout* layout = _def_service->get_layout();
   IdbDie* die = layout->get_die();
   if (die == nullptr) {
-    std::cout << "Write DIE error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write DIE error...");
 
     return kDbFail;
   }
@@ -356,7 +354,7 @@ int32_t DefWrite::write_die()
 
   writestr(";\n");
 
-  std::cout << "Write DIE success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write DIE success...");
   return kDbSuccess;
 }
 
@@ -365,7 +363,7 @@ int32_t DefWrite::write_track_grid()
   IdbLayout* layout = _def_service->get_layout();
   IdbTrackGridList* track_grid_list = layout->get_track_grid_list();
   if (track_grid_list == nullptr) {
-    std::cout << "Write Track Grid error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write Track Grid error...");
     return kDbFail;
   }
 
@@ -384,7 +382,7 @@ int32_t DefWrite::write_track_grid()
     writestr(";\n \n");
   }
 
-  std::cout << "Write Track Grid success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write Track Grid success...");
   return kDbSuccess;
 }
 
@@ -393,12 +391,12 @@ int32_t DefWrite::write_via()
   IdbDesign* design = _def_service->get_design();  // Def
   IdbVias* via_list = design->get_via_list();
   if (via_list == nullptr) {
-    std::cout << "Write VIAS error" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write VIAS error");
     return kDbFail;
   }
 
   if (via_list->get_num_via() == 0) {
-    std::cout << "No VIAS To Write..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No VIAS To Write...");
     return kDbFail;
   }
 
@@ -449,7 +447,7 @@ int32_t DefWrite::write_via()
 
   writestr("END VIAS\n \n");
 
-  std::cout << "Write VIAS success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write VIAS success...");
 
   return kDbSuccess;
 }
@@ -459,7 +457,7 @@ int32_t DefWrite::write_row()
   IdbLayout* layout = _def_service->get_layout();
   IdbRows* rows = layout->get_rows();
   if (rows == nullptr) {
-    std::cout << "Write ROWS error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write ROWS error...");
     return kDbFail;
   }
 
@@ -473,7 +471,7 @@ int32_t DefWrite::write_row()
 
   writestr(" \n");
 
-  std::cout << "Write ROWS success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write ROWS success...");
   return kDbSuccess;
 }
 
@@ -482,12 +480,12 @@ int32_t DefWrite::write_component()
   IdbDesign* design = _def_service->get_design();  // Def
   IdbInstanceList* instance_list = design->get_instance_list();
   if (instance_list == nullptr) {
-    std::cout << "Write COMPONENTS error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write COMPONENTS error...");
     return kDbFail;
   }
 
   if (instance_list->get_num() == 0) {
-    std::cout << "No COMPONENT To Write..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No COMPONENT To Write...");
     return kDbFail;
   }
 
@@ -495,8 +493,6 @@ int32_t DefWrite::write_component()
 
   for (IdbInstance* instance : instance_list->get_instance_list()) {
     std::string inst_name = instance->get_name();
-    // std::string new_inst_name = ieda::Str::addBackslash(inst_name);
-
     string type = instance->get_type() != IdbInstanceType::kNone
                       ? "+ SOURCE " + IdbEnum::GetInstance()->get_instance_property()->get_type_str(instance->get_type())
                       : "";
@@ -530,7 +526,7 @@ int32_t DefWrite::write_component()
 
   writestr("END COMPONENTS\n \n");
 
-  std::cout << "Write COMPONENTS success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write COMPONENTS success...");
   return kDbSuccess;
 }
 
@@ -539,7 +535,7 @@ int32_t DefWrite::write_pin()
   IdbDesign* design = _def_service->get_design();
   IdbPins* pin_list = design->get_io_pin_list();
   if (pin_list == nullptr) {
-    std::cout << "Write PINS error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write PINS error...");
     return kDbFail;
   }
 
@@ -601,7 +597,7 @@ int32_t DefWrite::write_pin()
 
   writestr("END PINS\n \n");
 
-  cout << "Write PINS success..." << endl;
+  ECCLOG.info(ecc::Loc::current(), "Write PINS success...");
 
   return kDbSuccess;
 }
@@ -611,12 +607,12 @@ int32_t DefWrite::write_blockage()
   IdbDesign* design = _def_service->get_design();
   IdbBlockageList* blockage_list = design->get_blockage_list();
   if (blockage_list == nullptr) {
-    std::cout << "Write VIAS error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write VIAS error...");
     return kDbFail;
   }
 
   if (blockage_list->get_num() == 0) {
-    std::cout << "No VIA To Write..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No VIA To Write...");
     return kDbFail;
   }
 
@@ -666,14 +662,14 @@ int32_t DefWrite::write_blockage()
 
   writestr("END BLOCKAGES\n \n");
 
-  std::cout << "Write BLOCKAGE success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write BLOCKAGE success...");
   return kDbSuccess;
 }
 
 int32_t DefWrite::write_specialnet_wire_segment_points(IdbSpecialWireSegment* segment, string& wire_new_str)
 {
   if (segment->get_point_list().size() < _POINT_MAX_) {
-    std::cout << "Error special net wire point..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error special net wire point...");
     return kDbFail;
   }
 
@@ -699,7 +695,7 @@ int32_t DefWrite::write_specialnet_wire_segment_points(IdbSpecialWireSegment* se
 int32_t DefWrite::write_specialnet_wire_segment_via(IdbSpecialWireSegment* segment, string& wire_new_str)
 {
   if (segment->get_point_list().size() <= 0 || segment->get_via() == nullptr) {
-    std::cout << "Error special wire segment via..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error special wire segment via...");
     return kDbFail;
   }
 
@@ -734,7 +730,7 @@ int32_t DefWrite::write_specialnet_wire_segment_via(IdbSpecialWireSegment* segme
 int32_t DefWrite::write_specialnet_wire_segment_rect(IdbSpecialWireSegment* segment, string& wire_new_str)
 {
   if (segment->get_layer() == nullptr || segment->get_delta_rect() == nullptr) {
-    std::cout << "Error net wire segment rect..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error net wire segment rect...");
     return kDbFail;
   }
 
@@ -790,7 +786,7 @@ int32_t DefWrite::write_special_net()
 {
   IdbSpecialNetList* special_net_list = _def_service->get_design()->get_special_net_list();
   if (special_net_list == nullptr || special_net_list->get_num() == 0) {
-    std::cout << "No SPECIALNETS..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No SPECIALNETS...");
     return kDbFail;
   }
 
@@ -827,7 +823,7 @@ int32_t DefWrite::write_special_net()
 
   writestr("END SPECIALNETS\n \n");
 
-  std::cout << "Write SPECIALNETS success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write SPECIALNETS success...");
 
   return kDbSuccess;
 }
@@ -837,12 +833,12 @@ int32_t DefWrite::write_net()
   IdbDesign* design = _def_service->get_design();  // Def
   IdbNetList* net_list = design->get_net_list();
   if (net_list == nullptr) {
-    std::cout << "No NET To Write..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No NET To Write...");
     return kDbFail;
   }
 
   if (net_list->get_num() == 0) {
-    std::cout << "NO NET ..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "NO NET ...");
     return kDbFail;
   }
 
@@ -850,7 +846,6 @@ int32_t DefWrite::write_net()
 
   for (IdbNet* net : net_list->get_net_list()) {
     std::string net_name = net->get_net_name();
-    // std::string net_name_new = ieda::Str::addBackslash(net_name);
     writestr("- %s", net_name.c_str());
 
     auto* io_pins = net->get_io_pins();
@@ -881,7 +876,7 @@ int32_t DefWrite::write_net()
 
   writestr("END NETS\n \n");
 
-  std::cout << "Write NETS success..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write NETS success...");
   return kDbSuccess;
 }
 
@@ -925,7 +920,7 @@ int32_t DefWrite::write_net_wire_segment(IdbRegularWireSegment* segment, string&
 int32_t DefWrite::write_net_wire_segment_points(IdbRegularWireSegment* segment, string& wire_new_str)
 {
   if (segment->get_point_list().size() < _POINT_MAX_ || segment->get_layer() == nullptr) {
-    // std::cout << "Error net wire point..." << std::endl;
+    // ECCLOG.warn(ecc::Loc::current(), "Net wire point is invalid.");
     return kDbFail;
   }
   bool is_virtual = segment->is_virtual(segment->get_point_second());
@@ -948,7 +943,7 @@ int32_t DefWrite::write_net_wire_segment_points(IdbRegularWireSegment* segment, 
 int32_t DefWrite::write_net_wire_segment_via(IdbRegularWireSegment* segment, string& wire_new_str)
 {
   if (segment->get_point_list().size() <= 0 || segment->get_layer() == nullptr || segment->get_via_list().size() <= 0) {
-    std::cout << "Error net wire segment via..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error net wire segment via...");
     return kDbFail;
   }
 
@@ -977,7 +972,7 @@ int32_t DefWrite::write_net_wire_segment_via(IdbRegularWireSegment* segment, str
 int32_t DefWrite::write_net_wire_segment_rect(IdbRegularWireSegment* segment, string& wire_new_str)
 {
   if (segment->get_point_list().size() <= 0 || segment->get_layer() == nullptr || segment->get_delta_rect() == nullptr) {
-    std::cout << "Error net wire segment rect..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error net wire segment rect...");
     return kDbFail;
   }
 
@@ -998,12 +993,12 @@ int32_t DefWrite::write_gcell_grid()
   IdbLayout* layout = _def_service->get_layout();  // Lef
   IdbGCellGridList* gcell_grid_list = layout->get_gcell_grid_list();
   if (gcell_grid_list == nullptr) {
-    std::cout << "Write GCELLGRID error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write GCELLGRID error...");
     return kDbFail;
   }
 
   if (gcell_grid_list->get_gcell_grid_num() <= 0) {
-    std::cout << "No GCELLGRID..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No GCELLGRID...");
     return kDbFail;
   }
 
@@ -1016,7 +1011,7 @@ int32_t DefWrite::write_gcell_grid()
              gcell_grid->get_space());
   }
 
-  cout << "Write GCELLGRID success..." << endl;
+  ECCLOG.info(ecc::Loc::current(), "Write GCELLGRID success...");
   return kDbSuccess;
 }
 
@@ -1025,11 +1020,11 @@ int32_t DefWrite::write_region()
   IdbDesign* design = _def_service->get_design();  // def
   IdbRegionList* region_list = design->get_region_list();
   if (region_list == nullptr) {
-    std::cout << "Write REGIONS error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write REGIONS error...");
     return kDbFail;
   }
   if (region_list->get_num() == 0) {
-    std::cout << "No REGION To Write..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No REGION To Write...");
     return kDbFail;
   }
 
@@ -1048,7 +1043,7 @@ int32_t DefWrite::write_region()
     writestr(";\n");
   }
 
-  cout << "Write REGIONS success..." << endl;
+  ECCLOG.info(ecc::Loc::current(), "Write REGIONS success...");
   return kDbSuccess;
 }
 
@@ -1057,12 +1052,12 @@ int32_t DefWrite::write_slot()
   IdbDesign* design = _def_service->get_design();  // def
   IdbSlotList* slot_list = design->get_slot_list();
   if (slot_list == nullptr) {
-    std::cout << "Write SLOTS error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write SLOTS error...");
     return kDbFail;
   }
 
   if (slot_list->get_num() == 0) {
-    std::cout << "No SLOT To Write..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No SLOT To Write...");
     return kDbFail;
   }
 
@@ -1080,7 +1075,7 @@ int32_t DefWrite::write_slot()
 
   writestr("END SLOTS\n");
 
-  cout << "Write SLOTS success..." << endl;
+  ECCLOG.info(ecc::Loc::current(), "Write SLOTS success...");
   return kDbSuccess;
 }
 
@@ -1089,12 +1084,12 @@ int32_t DefWrite::write_group()
   IdbDesign* design = _def_service->get_design();  // def
   IdbGroupList* group_list = design->get_group_list();
   if (group_list == nullptr) {
-    std::cout << "Write GROUPS error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write GROUPS error...");
     return kDbFail;
   }
 
   if (group_list->get_num() == 0) {
-    std::cout << "No GROUP To Write..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No GROUP To Write...");
     return kDbFail;
   }
 
@@ -1114,7 +1109,7 @@ int32_t DefWrite::write_group()
 
   writestr("END GROUPS\n");
 
-  cout << "Write GROUPS success..." << endl;
+  ECCLOG.info(ecc::Loc::current(), "Write GROUPS success...");
   return kDbSuccess;
 }
 
@@ -1123,36 +1118,43 @@ int32_t DefWrite::write_fill()
   IdbDesign* design = _def_service->get_design();  // def
   IdbFillList* fill_list = design->get_fill_list();
   if (fill_list == nullptr) {
-    std::cout << "Write FILLS error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write FILLS error...");
     return kDbFail;
   }
 
   if (fill_list->get_num_fill() == 0) {
-    std::cout << "No FILL To Write..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No FILL To Write...");
     return kDbFail;
   }
 
   writestr("FILLS %d ;\n", fill_list->get_num_fill());
 
   for (IdbFill* fill : fill_list->get_fill_list()) {
-    writestr("    - LAYER %s ", fill->get_layer()->get_layer()->get_name().c_str());
+    if (fill->get_type() == IdbFill::IdbFillType::kLayer) {
+      writestr("    - LAYER %s ", fill->get_layer()->get_layer()->get_name().c_str());
 
-    for (IdbRect* rect : fill->get_layer()->get_rect_list()) {
-      writestr("RECT ( %d %d ) ( %d %d ) ", rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+      for (IdbRect* rect : fill->get_layer()->get_rect_list()) {
+        writestr("RECT ( %d %d ) ( %d %d ) ", rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+      }
+
+      writestr(";\n");
+      continue;
     }
 
-    writestr(";\n");
+    if (fill->get_type() == IdbFill::IdbFillType::kVia) {
+      writestr("    - VIA %s ", fill->get_via()->get_via()->get_name().c_str());
 
-    writestr("    - VIA %s ", fill->get_via()->get_via()->get_name().c_str());
+      for (IdbCoordinate<int32_t>* point : fill->get_via()->get_coordinate_list()) {
+        writestr("( %d %d ) ", point->get_x(), point->get_y());
+      }
 
-    for (IdbCoordinate<int32_t>* point : fill->get_via()->get_coordinate_list()) {
-      writestr("( %d %d ) ", point->get_x(), point->get_y());
+      writestr(";\n");
     }
-
-    writestr(";\n");
   }
 
-  cout << "Write FILLS success..." << endl;
+  writestr("END FILLS\n");
+
+  ECCLOG.info(ecc::Loc::current(), "Write FILLS success...");
   return kDbSuccess;
 }
 
@@ -1176,7 +1178,7 @@ int32_t DefWrite::write_lef_macro()
   writestr("\n");
   writestr("END %s\n", design->get_design_name().c_str());
 
-  cout << "Write Macro success..." << endl;
+  ECCLOG.info(ecc::Loc::current(), "Write Macro success...");
   return kDbSuccess;
 }
 
@@ -1214,7 +1216,7 @@ int32_t DefWrite::write_lef_macro_pins()
         for (auto* rect : layer_shape->get_rect_list()) {
           if (rect->get_low_x() < die->get_bounding_box()->get_low_x() || rect->get_low_y() < die->get_bounding_box()->get_low_y()
               || rect->get_high_x() > die->get_bounding_box()->get_high_x() || rect->get_high_y() > die->get_bounding_box()->get_high_y()) {
-            std::cout << "error boundry" << std::endl;
+            ECCLOG.warn(ecc::Loc::current(), "error boundry");
           }
 
           writestr("%s%s%s%sRECT %.3f %.3f %.3f %.3f ;\n", _spacer, _spacer, _spacer, _spacer, design->transToUDB(rect->get_low_x()),
@@ -1356,13 +1358,13 @@ int32_t DefWrite::write_lef_macro_obs()
   auto get_obs_rect = [&](IdbLayer* layer, bool is_top) -> std::vector<IdbRect> {
     std::vector<IdbRect> obs_list;
 
-    ieda_solver::GtlPolygon90Set polyset_die;
+    ecc_solver::GtlPolygon90Set polyset_die;
 
     auto* die_bbox = die->get_bounding_box();
-    ieda_solver::GtlRect die_rect(die_bbox->get_low_x(), die_bbox->get_low_y(), die_bbox->get_high_x(), die_bbox->get_high_y());
+    ecc_solver::GtlRect die_rect(die_bbox->get_low_x(), die_bbox->get_low_y(), die_bbox->get_high_x(), die_bbox->get_high_y());
     polyset_die += die_rect;
 
-    ieda_solver::GtlPolygon90Set polyset_data;
+    ecc_solver::GtlPolygon90Set polyset_data;
     if (is_top) {
       /// exclude pdn data for top layer of pdn
       for (auto* net : pdn_list->get_net_list()) {
@@ -1401,7 +1403,7 @@ int32_t DefWrite::write_lef_macro_obs()
             int32_t required_size_h = ((IdbLayerRouting*) layer)->get_spacing(ur_x - ll_x, ur_y - ll_y);
             int32_t required_size_v = ((IdbLayerRouting*) layer)->get_spacing(ur_y - ll_y, ur_x - ll_x);
 
-            ieda_solver::GtlRect bloat_rect(ll_x, ll_y, ur_x, ur_y);
+            ecc_solver::GtlRect bloat_rect(ll_x, ll_y, ur_x, ur_y);
 
             gtl::bloat(bloat_rect, gtl::HORIZONTAL, required_size_h);
             gtl::bloat(bloat_rect, gtl::VERTICAL, required_size_v);
@@ -1424,7 +1426,7 @@ int32_t DefWrite::write_lef_macro_obs()
           int32_t required_size_h = ((IdbLayerRouting*) layer)->get_spacing(port_rect->get_width(), port_rect->get_height());
           int32_t required_size_v = ((IdbLayerRouting*) layer)->get_spacing(port_rect->get_height(), port_rect->get_width());
 
-          ieda_solver::GtlRect bloat_rect(port_rect->get_low_x(), port_rect->get_low_y(), port_rect->get_high_x(), port_rect->get_high_y());
+          ecc_solver::GtlRect bloat_rect(port_rect->get_low_x(), port_rect->get_low_y(), port_rect->get_high_x(), port_rect->get_high_y());
 
           gtl::bloat(bloat_rect, gtl::HORIZONTAL, required_size_h);
           gtl::bloat(bloat_rect, gtl::VERTICAL, required_size_v);
@@ -1440,7 +1442,7 @@ int32_t DefWrite::write_lef_macro_obs()
     auto polyset_obs = polyset_die - polyset_data;
 
     auto direction = ((IdbLayerRouting*) layer)->is_horizontal() ? gtl::HORIZONTAL : gtl::VERTICAL;
-    std::vector<ieda_solver::GtlRect> obs_rects;
+    std::vector<ecc_solver::GtlRect> obs_rects;
     gtl::get_rectangles(obs_rects, polyset_obs, direction);
     obs_list.reserve(obs_rects.size());
     for (auto obs_rect : obs_rects) {

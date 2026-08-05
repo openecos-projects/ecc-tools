@@ -1,3 +1,0 @@
-#pragma once
-
-constexpr auto GIT_VERSION = "@GIT_VERSION@";

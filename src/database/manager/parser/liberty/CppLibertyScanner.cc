@@ -5,6 +5,7 @@
 #include <cstring>
 #include <iostream>
 
+#include "utility/logger/Logger.hpp"
 namespace liberty {
 
 LibertyScanner::LibertyScanner()
@@ -134,6 +135,10 @@ bool LibertyScanner::readString(std::string& result)
             c = getChar();
             if (c == EOF) return false;
             if (c == '\n') continue;
+            if (c == '\r' && peekChar() == '\n') {
+                getChar();
+                continue;
+            }
             result += static_cast<char>(c);
         } else if (c == '\n') {
             return false;
@@ -435,6 +440,10 @@ int LibertyScanner::yylex(YYSTYPE* yylval, YYLTYPE* yylloc)
             if (next == '\n') {
                 continue;
             }
+            if (next == '\r' && peekChar() == '\n') {
+                getChar();
+                continue;
+            }
             ungetChar(next);
             return c;
         }
@@ -446,7 +455,7 @@ int LibertyScanner::yylex(YYSTYPE* yylval, YYLTYPE* yylloc)
                 continue;
             } else if (c == '*') {
                 if (!skipBlockComment()) {
-                    std::cerr << "Error: Unterminated block comment at line " << yylloc->first_line << std::endl;
+                    ECCLOG.warn(ecc::Loc::current(), "Error: Unterminated block comment at line ", yylloc->first_line);
                     return 0;
                 }
                 continue;
@@ -521,7 +530,7 @@ int LibertyScanner::yylex(YYSTYPE* yylval, YYLTYPE* yylloc)
             case '\'':
                 return c;
             default:
-                std::cerr << "Debug: Unknown character '" << (char)c << "' (code " << c << ") at line " << _line_no << std::endl;
+                ECCLOG.warn(ecc::Loc::current(), "Debug: Unknown character '", (char)c, "' (code ", c, ") at line ", _line_no);
                 return c;
         }
     }

@@ -13,6 +13,7 @@
 
 #include <concepts>
 #include <functional>
+#include <string_view>
 #include <tuple>
 
 namespace idb {
@@ -132,7 +133,7 @@ std::size_t LibClassifyCell::calculateCellHash(LibCell* the_cell)
 bool LibClassifyCell::comparePort(LibPort* port1, LibPort* port2)
 {
   return (port1 == nullptr && port2 == nullptr)
-         || (port1 != nullptr && port2 != nullptr && Str::equal(port1->get_port_name(), port2->get_port_name())
+         || (port1 != nullptr && port2 != nullptr && std::string_view(port1->get_port_name()) == port2->get_port_name()
              && port1->get_port_type() == port2->get_port_type());
 }
 
@@ -153,7 +154,7 @@ bool LibClassifyCell::comparePortFunc(::LibertyExpr* expr1, ::LibertyExpr* expr2
   if (expr1 != nullptr && expr2 != nullptr && expr1->op == expr2->op) {
     switch (expr1->op) {
       case LibertyExprOp::kBuffer:
-        return Str::equal(expr1->port_name, expr2->port_name);
+        return std::string_view(expr1->port_name) == expr2->port_name;
       case LibertyExprOp::kNot: {
         auto* left_expr1 = liberty_get_expr_left(expr1);
         auto* left_expr2 = liberty_get_expr_left(expr2);
@@ -228,8 +229,8 @@ bool LibClassifyCell::comparePorts(LibCell* cell1, LibCell* cell2)
  */
 bool LibClassifyCell::compareTimingArc(LibArcSet* set1, LibArcSet* set2)
 {
-  return Str::equal(set1->front()->get_src_port(), set2->front()->get_src_port())
-         && Str::equal(set1->front()->get_snk_port(), set2->front()->get_snk_port())
+  return std::string_view(set1->front()->get_src_port()) == set2->front()->get_src_port()
+         && std::string_view(set1->front()->get_snk_port()) == set2->front()->get_snk_port()
          && set1->front()->get_timing_type() == set2->front()->get_timing_type();
 }
 
@@ -278,7 +279,8 @@ bool LibClassifyCell::compareFunction(LibCell* the_cell1, LibCell* the_cell2)
  * @param the_lib
  * @param hash_to_cells
  */
-void LibClassifyCell::classifyOneLibCell(LibLibrary* the_lib, std::unordered_map<u_int64_t, Vector<LibCell*>>& hash_to_cells)
+void LibClassifyCell::classifyOneLibCell(LibLibrary* the_lib,
+                                         std::unordered_map<std::size_t, absl::InlinedVector<LibCell*, 64>>& hash_to_cells)
 {
   LibCell* cell;
   FOREACH_LIB_CELL(the_lib, cell)
@@ -309,7 +311,7 @@ void LibClassifyCell::classifyOneLibCell(LibLibrary* the_lib, std::unordered_map
  */
 void LibClassifyCell::classifyLibCell(std::vector<LibLibrary*>& the_libs)
 {
-  std::unordered_map<std::size_t, Vector<LibCell*>> hash_to_cells;
+  std::unordered_map<std::size_t, absl::InlinedVector<LibCell*, 64>> hash_to_cells;
   for (auto* the_lib : the_libs) {
     classifyOneLibCell(the_lib, hash_to_cells);
   }

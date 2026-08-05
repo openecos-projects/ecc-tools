@@ -129,12 +129,7 @@ class Area
   Area(const size_t& id) { _name = "steiner_" + std::to_string(id); };
   Area(const std::string& name, const Point& location, const double& cap_load, const double& sub_len = 0.0,
        const BSTRoutingRCPattern& rc_pattern = BSTRoutingRCPattern::kHV, const bool is_fixed_terminal = false)
-      : _name(name),
-        _cap_load(cap_load),
-        _sub_len(sub_len),
-        _rc_pattern(rc_pattern),
-        _location(location),
-        _is_fixed_terminal(is_fixed_terminal)
+      : _name(name), _cap_load(cap_load), _sub_len(sub_len), _rc_pattern(rc_pattern), _location(location), _is_fixed_terminal(is_fixed_terminal)
   {
     if (is_fixed_terminal) {
       _merge_region.push_back(_location);
@@ -142,9 +137,8 @@ class Area
     }
   }
 
-  Area(const std::string& name, const double& x, const double& y, const double& cap_load, const double& min_delay = 0.0,
-       const double& max_delay = 0.0, const double& sub_len = 0.0, const BSTRoutingRCPattern& rc_pattern = BSTRoutingRCPattern::kHV,
-       const bool is_fixed_terminal = false)
+  Area(const std::string& name, const double& x, const double& y, const double& cap_load, const double& min_delay = 0.0, const double& max_delay = 0.0,
+       const double& sub_len = 0.0, const BSTRoutingRCPattern& rc_pattern = BSTRoutingRCPattern::kHV, const bool is_fixed_terminal = false)
       : Area(name, Point(x, y, max_delay, min_delay, cap_load), cap_load, sub_len, rc_pattern, is_fixed_terminal)
   {
   }

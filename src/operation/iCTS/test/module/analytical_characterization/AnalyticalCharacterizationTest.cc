@@ -28,29 +28,28 @@
 #include <unordered_map>
 #include <vector>
 
-#include "ClockRouteSegmentRc.hh"
+#include "ClockRouteSegmentRC.hh"
 #include "analytical_characterization/AnalyticalCharacterization.hh"
 #include "analytical_characterization/AnalyticalModel.hh"
-#include "database/characterization/BufferingPattern.hh"
-#include "database/characterization/CharCore.hh"
-#include "database/characterization/PatternId.hh"
-#include "database/characterization/SegmentChar.hh"
-#include "database/characterization/ValueLattice.hh"
+#include "data_manager/characterization/BufferingPattern.hh"
+#include "data_manager/characterization/CharCore.hh"
+#include "data_manager/characterization/PatternId.hh"
+#include "data_manager/characterization/SegmentChar.hh"
+#include "data_manager/characterization/ValueLattice.hh"
 
 namespace icts_test {
 namespace {
 
-auto MakeSegmentChar(unsigned input_slew_idx, unsigned output_slew_idx, unsigned driven_cap_idx, unsigned load_cap_idx,
-                     icts::PatternId pattern_id, unsigned length_idx) -> icts::SegmentChar
+auto MakeSegmentChar(unsigned input_slew_idx, unsigned output_slew_idx, unsigned driven_cap_idx, unsigned load_cap_idx, icts::PatternId pattern_id,
+                     unsigned length_idx) -> icts::SegmentChar
 {
   const double input_slew = static_cast<double>(input_slew_idx) * 0.01;
   const double load_cap = static_cast<double>(load_cap_idx) * 0.02;
   const double delay = 0.1 + input_slew + load_cap;
   const double power = 1e-6 + 1e-7 * input_slew_idx + 2e-7 * load_cap_idx;
   const double source_boundary_power = 0.25 * power;
-  return icts::SegmentChar(
-      icts::CharCore(input_slew_idx, output_slew_idx, driven_cap_idx, load_cap_idx, delay, power, pattern_id, source_boundary_power),
-      length_idx);
+  return icts::SegmentChar(icts::CharCore(input_slew_idx, output_slew_idx, driven_cap_idx, load_cap_idx, delay, power, pattern_id, source_boundary_power),
+                           length_idx);
 }
 
 TEST(AnalyticalCharacterizationTest, BuildsCatalogFromSyntheticSegmentRows)
@@ -71,8 +70,8 @@ TEST(AnalyticalCharacterizationTest, BuildsCatalogFromSyntheticSegmentRows)
   icts::analytical::AnalyticalCharacterizationConfig config;
   config.require_monotonic_power = true;
   config.require_monotonic_source_boundary_power = true;
-  const auto result = icts::analytical::AnalyticalCharacterization::buildFromSegmentChars(
-      chars, patterns, icts::UniformValueLattice(0.01, 16U), icts::UniformValueLattice(0.02, 16U), config);
+  const auto result = icts::analytical::AnalyticalCharacterization::buildFromSegmentChars(chars, patterns, icts::UniformValueLattice(0.01, 16U),
+                                                                                          icts::UniformValueLattice(0.02, 16U), config);
 
   ASSERT_TRUE(result.summary.success);
   EXPECT_EQ(result.summary.model_set_count, 1U);
@@ -116,8 +115,8 @@ TEST(AnalyticalCharacterizationTest, ExactStructuralCapUsesExplicitRouteRcAndBuf
   config.require_monotonic_power = true;
   config.require_monotonic_source_boundary_power = true;
 
-  const auto result = icts::analytical::AnalyticalCharacterization::buildFromSegmentChars(
-      chars, patterns, icts::UniformValueLattice(0.01, 16U), icts::UniformValueLattice(0.02, 16U), config);
+  const auto result = icts::analytical::AnalyticalCharacterization::buildFromSegmentChars(chars, patterns, icts::UniformValueLattice(0.01, 16U),
+                                                                                          icts::UniformValueLattice(0.02, 16U), config);
 
   ASSERT_TRUE(result.summary.success);
   const auto* model_set = result.output.catalog.find(pattern_id, length_idx);
@@ -152,8 +151,7 @@ TEST(AnalyticalCharacterizationTest, PreservesPatternAndLengthKey)
   }
 
   const auto result = icts::analytical::AnalyticalCharacterization::buildFromSegmentChars(
-      chars, patterns, icts::UniformValueLattice(0.01, 16U), icts::UniformValueLattice(0.02, 16U),
-      icts::analytical::AnalyticalCharacterizationConfig{});
+      chars, patterns, icts::UniformValueLattice(0.01, 16U), icts::UniformValueLattice(0.02, 16U), icts::analytical::AnalyticalCharacterizationConfig{});
 
   ASSERT_TRUE(result.summary.success);
   EXPECT_NE(result.output.catalog.find(pattern_a, 1U), nullptr);

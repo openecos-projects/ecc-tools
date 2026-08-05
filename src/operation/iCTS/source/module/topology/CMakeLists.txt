@@ -13,15 +13,14 @@ add_library(
 target_link_libraries(
   icts_source_module_topology
   PUBLIC
-  icts_source_database_spatial
+  icts_source_data_manager_spatial
   icts_source_module_topology_config
   PRIVATE
-  icts_source_database_design
+  icts_source_data_manager_design
   icts_source_module_topology_clustering
   icts_source_module_topology_fast_clustering
-  icts_source_utils_geometry
-  icts_source_utils_logger
-  log
+  icts_source_toolkit_geometry
+  icts_source_toolkit_logger
 )
 
 target_include_directories(

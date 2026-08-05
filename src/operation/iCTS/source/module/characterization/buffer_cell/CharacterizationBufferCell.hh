@@ -24,6 +24,7 @@
 #pragma once
 // IWYU pragma: private, include "characterization/buffer_cell/CharacterizationBufferCell.hh"
 
+#include <optional>
 #include <string>
 
 namespace icts {
@@ -33,11 +34,11 @@ struct CharacterizationBufferCell
   std::string cell_master;
   double max_cap_pf = 0.0;  // Drive-strength proxy used for ordering and explicit auto-derivation.
   double input_cap_pf = 0.0;
-  double input_slew_limit_ns = 0.0;
-  double input_slew_table_axis_max_ns = 0.0;
-  double output_cap_limit_pf = 0.0;
-  double output_cap_table_axis_max_pf = 0.0;
-  double cell_height_um = 0.0;
+  std::optional<double> input_slew_limit_ns = std::nullopt;
+  std::optional<double> input_slew_table_axis_max_ns = std::nullopt;
+  std::optional<double> output_cap_limit_pf = std::nullopt;
+  std::optional<double> output_cap_table_axis_max_pf = std::nullopt;
+  std::optional<double> cell_height_um = std::nullopt;
   std::string input_pin;
   std::string output_pin;
 

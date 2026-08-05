@@ -235,8 +235,7 @@ inline auto MakeSegmentStateFrontierPruner(StateResolverT state_resolver)
         .source_exposed_load_count = state.source_exposed_load_count,
     };
   };
-  return StateFrontierPruner<SegmentChar, SegmentFrontierStateKey, SegmentFrontierStateKeyHash, decltype(key_builder)>(
-      std::move(key_builder));
+  return StateFrontierPruner<SegmentChar, SegmentFrontierStateKey, SegmentFrontierStateKeyHash, decltype(key_builder)>(std::move(key_builder));
 }
 
 template <class StateResolverT>
@@ -256,13 +255,11 @@ inline auto MakeHTreeStateFrontierPruner(StateResolverT state_resolver)
         .source_exposed_load_count = state.source_exposed_load_count,
     };
   };
-  return StateFrontierPruner<HTreeTopologyChar, HTreeFrontierStateKey, HTreeFrontierStateKeyHash, decltype(key_builder)>(
-      std::move(key_builder));
+  return StateFrontierPruner<HTreeTopologyChar, HTreeFrontierStateKey, HTreeFrontierStateKeyHash, decltype(key_builder)>(std::move(key_builder));
 }
 
 template <class CharT, class KeyT, class KeyHashT, class KeyBuilderT, class SortFnT>
-inline auto BuildStateFrontierImpl(const std::vector<CharT>& chars, const KeyBuilderT& key_builder, const SortFnT& sort_fn)
-    -> std::vector<CharT>
+inline auto BuildStateFrontierImpl(const std::vector<CharT>& chars, const KeyBuilderT& key_builder, const SortFnT& sort_fn) -> std::vector<CharT>
 {
   std::unordered_map<KeyT, std::vector<const CharT*>, KeyHashT> grouped_entries;
   grouped_entries.reserve(chars.size());
@@ -273,8 +270,8 @@ inline auto BuildStateFrontierImpl(const std::vector<CharT>& chars, const KeyBui
 
   std::vector<CharT> frontier_entries;
   frontier_entries.reserve(chars.size());
-  for (auto& [group_key, entries] : grouped_entries) {
-    (void) group_key;
+  for (auto& group_entry : grouped_entries) {
+    auto& entries = group_entry.second;
     std::ranges::sort(entries, [](const CharT* lhs, const CharT* rhs) -> bool {
       if (lhs->get_delay() != rhs->get_delay()) {
         return lhs->get_delay() < rhs->get_delay();
@@ -309,8 +306,8 @@ inline auto BuildSegmentStateFrontier(const std::vector<SegmentChar>& chars, con
 }
 
 template <class CompositionStateResolverT>
-inline auto BuildHTreeStateFrontier(const std::vector<HTreeTopologyChar>& chars,
-                                    const CompositionStateResolverT& composition_state_resolver) -> std::vector<HTreeTopologyChar>
+inline auto BuildHTreeStateFrontier(const std::vector<HTreeTopologyChar>& chars, const CompositionStateResolverT& composition_state_resolver)
+    -> std::vector<HTreeTopologyChar>
 {
   auto pruner = MakeHTreeStateFrontierPruner(std::move(composition_state_resolver));
   return BuildStateFrontierImpl<HTreeTopologyChar, HTreeFrontierStateKey, HTreeFrontierStateKeyHash>(

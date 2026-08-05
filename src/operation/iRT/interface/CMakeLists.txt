@@ -14,9 +14,8 @@ target_link_libraries(irt_interface
     PRIVATE
     irt_source
     idrc_interface
-    ieda_feature
+    ecc_feature
     idm
-    notification
 )
 
 target_include_directories(irt_interface

@@ -42,6 +42,56 @@
 
 namespace ircx {
 
+int32_t RCXInterface::normalizeThreadNumber(const nlohmann::json& config_json)
+{
+  // 使用当前运行环境的线程上限做保护。
+  int32_t safe_thread_limit = std::max(1, omp_get_num_procs());
+  const int32_t omp_thread_limit = omp_get_thread_limit();
+  if (omp_thread_limit > 0) {
+    safe_thread_limit = std::min(safe_thread_limit, omp_thread_limit);
+  }
+
+  if (!config_json.contains("thread_num")) {
+    RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is missing. Using 1 thread.");
+    return 1;
+  }
+
+  const nlohmann::json& thread_json = config_json["thread_num"];
+  if (!(thread_json.is_number_integer() || thread_json.is_number_unsigned())) {
+    RCXLOG.warn(Loc::current(), "RCX config 'thread_num' must be a positive integer. Using 1 thread.");
+    return 1;
+  }
+
+  if (thread_json.is_number_unsigned()) {
+    const std::uint64_t requested_thread_num = thread_json.get<std::uint64_t>();
+    if (requested_thread_num == 0) {
+      RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is 0, but it must be positive. Using 1 thread.");
+      return 1;
+    }
+    if (requested_thread_num > static_cast<std::uint64_t>(safe_thread_limit)) {
+      RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is ", requested_thread_num,
+                  ", but this machine/OpenMP runtime allows ", safe_thread_limit, " safe threads. Using ",
+                  safe_thread_limit, " threads to avoid CPU oversubscription and resource exhaustion.");
+      return safe_thread_limit;
+    }
+    return static_cast<int32_t>(requested_thread_num);
+  }
+
+  const std::int64_t requested_thread_num = thread_json.get<std::int64_t>();
+  if (requested_thread_num < 1) {
+    RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is ", requested_thread_num,
+                ", but it must be positive. Using 1 thread.");
+    return 1;
+  }
+  if (requested_thread_num > safe_thread_limit) {
+    RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is ", requested_thread_num,
+                ", but this machine/OpenMP runtime allows ", safe_thread_limit, " safe threads. Using ",
+                safe_thread_limit, " threads to avoid CPU oversubscription and resource exhaustion.");
+    return safe_thread_limit;
+  }
+  return static_cast<int32_t>(requested_thread_num);
+}
+
 // public
 
 RCXInterface& RCXInterface::getInst()
@@ -293,7 +343,7 @@ void RCXInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   std::filesystem::path config_directory_path = config_file_path.parent_path();
 
   // 通用配置
-  config.thread_number = std::max(config_json["thread_num"].get<int32_t>(), 1);
+  config.thread_number = normalizeThreadNumber(config_json);
   if (config_json.contains("output")) {
     std::string output_directory_path = config_json["output"].get<std::string>();
     if (!output_directory_path.empty()) {

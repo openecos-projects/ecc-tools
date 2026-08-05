@@ -21,9 +21,9 @@
 #include "Database.hpp"
 #include "LVSHeader.hpp"
 #include "Monitor.hpp"
+#include "NetRoutingGraph.hpp"
 #include "PCModel.hpp"
-#include "PhysicalGraph.hpp"
-#include "SupplyTrack.hpp"
+#include "Shape.hpp"
 
 namespace ilvs {
 
@@ -51,12 +51,20 @@ class PDNChecker
 
   PCModel initPCModel();
   void buildSupplyPoint(PCModel& pc_model);
-  std::vector<SupplyPoint> getSupplyPointList(const PhysicalGraph& physical_graph);
+  std::vector<SupplyPoint> getSupplyPointList();
+  bool getSupplyRoutingLayerOrder(int32_t& top_layer_order, int32_t& second_top_layer_order);
+  void addSupplyViaLayerOrder(std::set<int32_t>& layer_order_set, ConnectType connect_type);
   bool isPowerGround(ConnectType connect_type);
-  int32_t getMidpoint(int32_t first_coordinate, int32_t second_coordinate);
-  SupplyPoint makeSupplyPoint(const SupplyTrack& supply_track);
-  void checkSupplyConnectivity(PCModel& pc_model, const std::map<std::string, std::string>& instance_pin_net_map,
-                               ConnectType connect_type);
+  void addCenterSupplyPoint(std::vector<SupplyPoint>& supply_point_list, int32_t center_x, int32_t center_y,
+                            int32_t top_layer_order, int32_t second_top_layer_order);
+  SupplyPoint getCenterSupplyPoint(ConnectType connect_type, int32_t center_x, int32_t center_y, int32_t top_layer_order,
+                                   int32_t second_top_layer_order);
+  int32_t getTopRoutingShapeIdx(const NetRoutingGraph& routing_graph, const std::pair<int32_t, int32_t>& via_shape_idx_pair,
+                                int32_t top_layer_order, int32_t second_top_layer_order);
+  bool isValidRoutingShapeIdx(int32_t routing_shape_idx, const std::vector<RoutingShape>& routing_shape_list);
+  int64_t getShapeCenterDistance(const Shape& shape, int32_t point_x, int32_t point_y);
+  void checkSupplyConnectivity(PCModel& pc_model, ConnectType connect_type);
+  void updateSummary(PCModel& pc_model);
 };
 
 }  // namespace ilvs

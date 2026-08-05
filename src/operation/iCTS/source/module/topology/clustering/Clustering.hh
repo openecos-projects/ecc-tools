@@ -81,10 +81,9 @@ class Clustering
   static auto fastClustering(const std::vector<Pin*>& loads) -> ClusterOutput;
   static auto defaultFastClustering(const std::vector<Pin*>& loads, const ClusterConfig& base_config) -> ClusterOutput;
   static auto fastClustering(const std::vector<Pin*>& loads, const ClusterConfig& config) -> ClusterOutput;
-  static auto evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config)
+  static auto evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config) -> ClusterElectricalEvaluation;
+  static auto evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config, bool need_exact_cap)
       -> ClusterElectricalEvaluation;
-  static auto evaluateClusterElectrical(const std::vector<Pin*>& loads, const Point<int>& anchor, const ClusterConfig& config,
-                                        bool need_exact_cap) -> ClusterElectricalEvaluation;
 };
 
 }  // namespace icts

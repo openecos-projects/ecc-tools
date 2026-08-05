@@ -52,15 +52,15 @@ ilvs::RoutingShape makeRoutingShape(const int32_t layer_idx, const int32_t ll_x,
   return routing_shape;
 }
 
-ilvs::SupplyRouteShape makeSupplyRouteShape(const std::string& net_name, const int32_t component_id, const int32_t layer_order,
-                                            const ilvs::Shape& shape)
+void addSupplyVia(ilvs::NetRoutingGraph& routing_graph, std::vector<int32_t>& component_id_list, int32_t& routing_shape_idx,
+                  const int32_t component_id, const int32_t ll_x, const int32_t ll_y, const int32_t ur_x, const int32_t ur_y)
 {
-  ilvs::SupplyRouteShape supply_route_shape;
-  supply_route_shape.set_net_name(net_name);
-  supply_route_shape.set_component_id(component_id);
-  supply_route_shape.set_layer_order(layer_order);
-  supply_route_shape.set_shape(shape);
-  return supply_route_shape;
+  routing_graph.get_routing_shape_list().push_back(makeRoutingShape(9, ll_x, ll_y, ur_x, ur_y));
+  routing_graph.get_routing_shape_list().push_back(makeRoutingShape(10, ll_x, ll_y, ur_x, ur_y));
+  routing_graph.get_via_shape_idx_pair_list().emplace_back(routing_shape_idx, routing_shape_idx + 1);
+  component_id_list.push_back(component_id);
+  component_id_list.push_back(component_id);
+  routing_shape_idx += 2;
 }
 
 void addPowerTerminal(ilvs::DesignData& design_data, const std::string& terminal_name)
@@ -88,6 +88,8 @@ void buildDefData(ilvs::Database& database)
 {
   ilvs::DefData def_data;
   def_data.set_design_name("def_top");
+  def_data.get_die().set_real_ll(0, 0);
+  def_data.get_die().set_real_ur(1000, 1000);
   def_data.set_io_terminal_name_list({"PIN/IN", "PIN/OUT", "PIN/VDD", "PIN/EXTRA"});
   addPowerTerminal(def_data, "PIN/VDD");
   def_data.get_instance_name_set().insert("U1");
@@ -118,17 +120,31 @@ void buildDefData(ilvs::Database& database)
 
   physical_graph.get_component_net_name_map()[42] = {"n_connected", "n_open"};
   physical_graph.get_component_shape_map()[42] = {makeShape(2, 0, 20, 30, 22)};
+  physical_graph.get_component_net_name_map()[300] = {"VDD", "VSS"};
   physical_graph.get_power_net_name_set().insert("VDD");
   physical_graph.get_ground_net_name_set().insert("VSS");
-  physical_graph.get_supply_route_shape_list().push_back(makeSupplyRouteShape("VDD", 100, 10, makeShape(5, 0, 0, 100, 4)));
-  physical_graph.get_supply_route_shape_list().push_back(makeSupplyRouteShape("VSS", 200, 10, makeShape(5, 0, 100, 100, 104)));
-  physical_graph.get_supply_route_shape_list().push_back(makeSupplyRouteShape("VDD", 400, 10, makeShape(5, 0, 200, 100, 204)));
+  ilvs::NetRoutingGraph& power_routing_graph = physical_graph.get_net_routing_graph_map()["VDD"];
+  std::vector<int32_t>& power_component_id_list = physical_graph.get_net_routing_shape_component_id_list_map()["VDD"];
+  int32_t power_routing_shape_idx = 0;
+  addSupplyVia(power_routing_graph, power_component_id_list, power_routing_shape_idx, 100, 490, 490, 510, 510);
+  addSupplyVia(power_routing_graph, power_component_id_list, power_routing_shape_idx, 101, 0, 0, 10, 10);
+  ilvs::NetRoutingGraph& ground_routing_graph = physical_graph.get_net_routing_graph_map()["VSS"];
+  std::vector<int32_t>& ground_component_id_list = physical_graph.get_net_routing_shape_component_id_list_map()["VSS"];
+  int32_t ground_routing_shape_idx = 0;
+  addSupplyVia(ground_routing_graph, ground_component_id_list, ground_routing_shape_idx, 200, 520, 490, 540, 510);
+  addSupplyVia(ground_routing_graph, ground_component_id_list, ground_routing_shape_idx, 201, 20, 20, 30, 30);
   physical_graph.get_power_instance_pin_net_map()["U1/VDD"] = "VDD";
   physical_graph.get_power_instance_pin_net_map()["U2/VDD"] = "VDD";
+  physical_graph.get_power_instance_pin_net_map()["U3/VDD"] = "VDD";
   physical_graph.get_ground_instance_pin_net_map()["U1/VSS"] = "VSS";
+  physical_graph.get_ground_instance_pin_net_map()["U2/VSS"] = "VSS";
+  physical_graph.get_ground_instance_pin_net_map()["U3/VSS"] = "VSS";
   physical_graph.get_terminal_component_map()["U1/VDD"] = 300;
   physical_graph.get_terminal_component_map()["U2/VDD"] = 100;
+  physical_graph.get_terminal_component_map()["U3/VDD"] = 101;
   physical_graph.get_terminal_component_map()["U1/VSS"] = 300;
+  physical_graph.get_terminal_component_map()["U2/VSS"] = 200;
+  physical_graph.get_terminal_component_map()["U3/VSS"] = 201;
   database.set_def_data(std::move(def_data));
 }
 
@@ -184,9 +200,9 @@ int main()
   assert(summary.ec_summary.instance_difference_num == 2);
   assert(summary.ec_summary.net_difference_num == 3);
   assert(summary.rc_summary.open_net_num == 2);
-  assert(summary.rc_summary.short_net_num == 1);
-  assert(summary.pc_summary.open_vdd_num == 1);
-  assert(summary.pc_summary.open_vss_num == 1);
+  assert(summary.rc_summary.short_net_num == 2);
+  assert(summary.pc_summary.open_vdd_num == 2);
+  assert(summary.pc_summary.open_vss_num == 2);
 
   std::map<ilvs::ViolationType, int32_t> violation_type_num_map;
   for (ilvs::Violation& violation : summary.ec_summary.violation_list) {
@@ -202,9 +218,9 @@ int main()
   assert(violation_type_num_map[ilvs::ViolationType::kInstance] == 2);
   assert(violation_type_num_map[ilvs::ViolationType::kNet] == 3);
   assert(violation_type_num_map[ilvs::ViolationType::kRoutingOpen] == 2);
-  assert(violation_type_num_map[ilvs::ViolationType::kRoutingShort] == 1);
-  assert(violation_type_num_map[ilvs::ViolationType::kPowerOpenVDD] == 1);
-  assert(violation_type_num_map[ilvs::ViolationType::kPowerOpenVSS] == 1);
+  assert(violation_type_num_map[ilvs::ViolationType::kRoutingShort] == 2);
+  assert(violation_type_num_map[ilvs::ViolationType::kPowerOpenVDD] == 2);
+  assert(violation_type_num_map[ilvs::ViolationType::kPowerOpenVSS] == 2);
   assert(ilvs::GetViolationTypeName()(ilvs::ViolationType::kIO) == "IO");
   assert(ilvs::GetViolationTypeName()(ilvs::ViolationType::kInstance) == "Instance");
   assert(ilvs::GetViolationTypeName()(ilvs::ViolationType::kNet) == "Net");
@@ -230,9 +246,24 @@ int main()
   assert(rpt_content.find("PowerOpenVDD") != std::string::npos);
   assert(rpt_content.find("PowerOpenVSS") != std::string::npos);
   assert(rpt_content.find("RoutingDriverMissing") == std::string::npos);
-  assert(rpt_content.find("Open VSS") != std::string::npos);
+  assert(rpt_content.find("Connectivity") != std::string::npos);
+  assert(rpt_content.find("Open") != std::string::npos);
+  assert(rpt_content.find("Short") != std::string::npos);
+  assert(rpt_content.find("Connected") != std::string::npos);
+  assert(rpt_content.find("Total") != std::string::npos);
+  assert(rpt_content.find("Routing") != std::string::npos);
+  assert(rpt_content.find("Power VDD") != std::string::npos);
+  assert(rpt_content.find("Power VSS") != std::string::npos);
+  assert(rpt_content.find("2 (40.00%)") != std::string::npos);
+  assert(rpt_content.find("1 (20.00%)") != std::string::npos);
+  assert(rpt_content.find("1 (33.33%)") != std::string::npos);
   assert(json_content.find("\"entity\"") != std::string::npos);
   assert(json_content.find("\"connectivity\"") != std::string::npos);
+  assert(json_content.find("\"open\"") != std::string::npos);
+  assert(json_content.find("\"short\"") != std::string::npos);
+  assert(json_content.find("\"connected\"") != std::string::npos);
+  assert(json_content.find("\"total\"") != std::string::npos);
+  assert(json_content.find("33.33") != std::string::npos);
   assert(json_content.find("\"violations\"") != std::string::npos);
 
   ilvs::DataManager::destroyInst();

@@ -7,7 +7,7 @@ add_library(
 target_link_libraries(
   icts_test_module_topology_gen_tree_assertions
   PUBLIC
-  icts_test_common_topology_analysis
+  icts_test_module_topology_fixture_analysis
   PRIVATE
   icts_test_base
 )

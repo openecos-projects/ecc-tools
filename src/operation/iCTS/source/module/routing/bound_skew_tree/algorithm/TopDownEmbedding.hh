@@ -75,12 +75,11 @@ class TopDownEmbedding
   auto calcPointDelays(const Area& current_area, Point& point, Line& boundary_segment) const -> void;
   auto updatePointDelaysByEndSide(const Area& current_area, const size_t& end_side, Point& point) const -> void;
   auto calcIrregularPointDelays(const Area& current_area, Point& point, Line& boundary_segment) const -> void;
-  auto pointDelayIncrease(const Point& lhs_point, const Point& rhs_point, const double& cap_load,
-                          const BSTRoutingRCPattern& rc_pattern) const -> double;
+  auto pointDelayIncrease(const Point& lhs_point, const Point& rhs_point, const double& cap_load, const BSTRoutingRCPattern& rc_pattern) const -> double;
   auto pointDelayIncrease(const Point& lhs_point, const Point& rhs_point, const double& length, const double& cap_load,
                           const BSTRoutingRCPattern& rc_pattern) const -> double;
-  auto calcDelayIncrease(const double& horizontal_length, const double& vertical_length, const double& cap_load,
-                         const BSTRoutingRCPattern& rc_pattern) const -> double;
+  auto calcDelayIncrease(const double& horizontal_length, const double& vertical_length, const double& cap_load, const BSTRoutingRCPattern& rc_pattern) const
+      -> double;
 
  private:
   BoundSkewTreeImpl& _impl;

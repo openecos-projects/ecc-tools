@@ -34,6 +34,7 @@ class ERPanel
   // getter
   EXTLayerRect& get_panel_rect() { return _panel_rect; }
   ERPanelId& get_er_panel_id() { return _er_panel_id; }
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
   // setter
   void set_panel_rect(const EXTLayerRect& panel_rect) { _panel_rect = panel_rect; }
   void set_er_panel_id(const ERPanelId& er_panel_id) { _er_panel_id = er_panel_id; }
@@ -42,6 +43,7 @@ class ERPanel
  private:
   EXTLayerRect _panel_rect;
   ERPanelId _er_panel_id;
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_detailed_result_map;
 };
 
 }  // namespace irt

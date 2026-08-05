@@ -6,8 +6,8 @@ add_library(feature_parser
     feature_parser_drc.cpp
 )
 
-target_include_directories(feature_parser 
-    PUBLIC 
+target_include_directories(feature_parser
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
 
         ##json
@@ -21,8 +21,8 @@ target_include_directories(feature_parser
         ${HOME_DATABASE}/interaction
 )
 
-target_link_libraries(feature_parser 
-    PRIVATE 
+target_link_libraries(feature_parser
+    PRIVATE
         idb
         feature_db
         flow_config
@@ -30,11 +30,12 @@ target_link_libraries(feature_parser
         # irt_interface
         # ipl-source
         # ipl-api
-        # icts_api
+        # icts_interface
         # ista-engine
         # idrc_pro_api
-        # ieda_report_evaluator
+        # ecc_report_evaluator
         eval_wirelength_api
-        eval_congestion_api    
+        eval_congestion_api
         eval_timing_api
+        ecc_logger
 )

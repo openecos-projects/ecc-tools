@@ -15,11 +15,11 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @project   iEDA
- * @file      feature_parser.cpp
- * @author    Yell
- * @date      10/08/2023
- * @version   0.1
+ * @project		ECC
+ * @file		feature_parser.cpp
+ * @author		Yell
+ * @date		10/08/2023
+ * @version		0.1
  * @description
 
 
@@ -34,7 +34,7 @@
 #include "feature_parser.h"
 #include "feature_summary.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 json FeatureParser::buildSummaryRT()
 {
@@ -290,7 +290,7 @@ json FeatureParser::buildSummaryCTS()
   CTSSummary& summary = _summary->get_summary_icts();
 
   json_cts["buffer_num"] = summary.buffer_num;
-  json_cts["buffer_area"] = summary.buffer_area;
+  json_cts["buffer_area"] = summary.buffer_area.has_value() ? json(*summary.buffer_area) : json(nullptr);
   json_cts["clock_path_min_buffer"] = summary.clock_path_min_buffer;
   json_cts["clock_path_max_buffer"] = summary.clock_path_max_buffer;
   json_cts["max_level_of_clock_tree"] = summary.max_level_of_clock_tree;
@@ -434,4 +434,4 @@ json FeatureParser::buildSummaryAntenna()
   return summary_antenna;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

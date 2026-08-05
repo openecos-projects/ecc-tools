@@ -19,14 +19,14 @@
 set -e
 
 # variables
-IEDA_WORKSPACE=$(cd "$(dirname "$0")";pwd)
+ECC_WORKSPACE=$(cd "$(dirname "$0")";pwd)
 BINARY_TARGET="ecc_bin"
-BINARY_DIR="${IEDA_WORKSPACE}/bin"
-BUILD_DIR="${IEDA_WORKSPACE}/build"
+BINARY_DIR="${ECC_WORKSPACE}/bin"
+BUILD_DIR="${ECC_WORKSPACE}/build"
 CPP_COMPILER_PATH="g++-10"
 C_COMPILER_PATH="gcc-10"
 DRY_RUN="OFF"
-RUN_IEDA="OFF"
+RUN_ECC="OFF"
 NO_BUILD="OFF"
 DEL_BUILD="OFF"
 INSTALL_DEP="OFF"
@@ -41,7 +41,6 @@ CMAKE_OPTIONS=(
   # "-DCOMPATIBILITY_MODE=${COMPATIBILITY_MODE:-OFF}"
   # "-DUSE_PROFILER=${USE_PROFILER:-OFF}"
   # "-DSANITIZER=${SANITIZER:-OFF}"
-  # "-DUSE_GPU=${USE_GPU:-OFF}"
 G_BUILD_GENERATOR=""
 
 # pretty print
@@ -55,24 +54,23 @@ green="\e[32m"
 # functions
 help_msg_exit()
 {
-echo -e "build.sh: Build iEDA executable binary"
+echo -e "build.sh: Build ECC executable binary"
 echo -e "Usage:"
 echo -e "  ${bold}bash build.sh${clear} [-h] [-n] [-r] [-b] [-d] [-i] [-p] "
-echo -e "                [-g] [-s] [-P] [-G] [-C] [-D] [-y] [-M]"
+echo -e "                [-g] [-s] [-P] [-C] [-D] [-y] [-M]"
 echo -e "                [-b ${underline}binary path${clear}] [-j ${underline}num${clear}] [-i apt|docker]"
 echo -e "Options:"
 echo -e "  ${bold}-h${clear} display this help and exit"
-echo -e "  ${bold}-n${clear} do not build iEDA (default OFF)"
-echo -e "  ${bold}-d${clear} delete all build artifacts including cmake and rust, (default OFF)"
-echo -e "  ${bold}-r${clear} run iEDA hello test after build (default OFF)"
-echo -e "  ${bold}-j${clear} job threads for building iEDA (default ${BUILD_THREADS} (num of cores))"
-echo -e "  ${bold}-b${clear} iEDA binary path (default at ${BINARY_DIR})"
+echo -e "  ${bold}-n${clear} do not build ECC (default OFF)"
+echo -e "  ${bold}-d${clear} delete all CMake build artifacts (default OFF)"
+echo -e "  ${bold}-r${clear} run ECC hello test after build (default OFF)"
+echo -e "  ${bold}-j${clear} job threads for building ECC (default ${BUILD_THREADS} (num of cores))"
+echo -e "  ${bold}-b${clear} ECC binary path (default at ${BINARY_DIR})"
 echo -e "  ${bold}-i${clear} apt-get install (root/sudo required) dependencies before build (default OFF)"
 echo -e "  ${bold}-p${clear} build ECOS (default OFF)"
 echo -e "  ${bold}-g${clear} enable GUI components (default OFF)"
 echo -e "  ${bold}-s${clear} enable address sanitizer (default OFF)"
 echo -e "  ${bold}-P${clear} enable performance profiling (default OFF)"
-echo -e "  ${bold}-G${clear} enable GPU acceleration (default OFF)"
 echo -e "  ${bold}-C${clear} enable compatibility mode (disable optimizations, default OFF)"
 echo -e "  ${bold}-M${clear} set CMAKE_BUILD_TYPE to Debug (default Release)"
 echo -e "  ${bold}-l${clear} select linker type (default/lld/mold)"
@@ -81,12 +79,12 @@ echo -e "  ${bold}-y${clear} auto confirm all actions, non-interactive mode (def
 exit "$1";
 }
 
-build_ieda()
+build_ecc()
 {
   check_build
 
   local cmake_config=(
-    cmake -S "$IEDA_WORKSPACE" -B "$BUILD_DIR"
+    cmake -S "$ECC_WORKSPACE" -B "$BUILD_DIR"
     "-DCMAKE_CXX_COMPILER=$CPP_COMPILER_PATH"
     "-DCMAKE_C_COMPILER=$C_COMPILER_PATH"
     "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$BINARY_DIR"
@@ -182,7 +180,7 @@ install_dependencies_apt()
     apt-get update && apt-get install -y \
       g++-10 cmake ninja-build \
       tcl-dev libgflags-dev libgoogle-glog-dev libboost-all-dev libgtest-dev flex\
-      libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison rustc cargo\
+      libeigen3-dev libunwind-dev libgmp-dev bison \
       libhwloc-dev libcairo2-dev libcurl4-openssl-dev libtbb-dev git\
       mold lld
     exit 0
@@ -242,7 +240,7 @@ install_docker_experimental()
 {
   if command_exists docker; then
     echo -e "${yellow}Warning:"
-    echo -e "  Docker exists, try \`docker pull iedaopensource/base:latest\` instead${clear}"
+    echo -e "  Docker exists, try \`docker pull eccopensource/base:latest\` instead${clear}"
     exit 1;
   fi
 
@@ -262,16 +260,16 @@ install_docker_experimental()
 }
 
 # hello_test
-run_ieda()
+run_ecc()
 {
-  "${BINARY_DIR}/${BINARY_TARGET}" -script "${IEDA_WORKSPACE}"/scripts/hello.tcl
+  "${BINARY_DIR}/${BINARY_TARGET}" -script "${ECC_WORKSPACE}"/scripts/hello.tcl
 }
 
 sys_requirement_warning()
 {
   echo -e "${yellow}Warning:"
-  echo -e "  iEDA had only been tested on Debian-Based Linux distribution (Debian 11, Ubuntu 20.04)"
-  echo -e "  We recommend using Docker image (based on Debian 11): iedaopensource/base:latest"
+  echo -e "  ECC had only been tested on Debian-Based Linux distribution (Debian 11, Ubuntu 20.04)"
+  echo -e "  We recommend using Docker image (based on Debian 11): eccopensource/base:latest"
   echo -e "  Continue the script may cause problems.${clear}"
   read_continue_or_exit
 }
@@ -281,7 +279,7 @@ perf_report_svg()
   rm -rf perf_report
   mkdir perf_report
   for PROF_REPORT in *.prof; do
-    pprof --svg iEDA "${PROF_REPORT}" > perf_report/"${PROF_REPORT%.prof}".svg
+    pprof --svg ECC "${PROF_REPORT}" > perf_report/"${PROF_REPORT%.prof}".svg
   done
 }
 
@@ -296,9 +294,9 @@ opt_binary_dir()
   BINARY_DIR=$1
 }
 
-opt_run_ieda()
+opt_run_ecc()
 {
-  RUN_IEDA="ON"
+  RUN_ECC="ON"
 }
 
 opt_thread_num()
@@ -316,19 +314,9 @@ perform_clean()
   echo -e "${yellow}Cleaning all build artifacts...${clear}"
 
   local cmake_build_dir="$BUILD_DIR"
-  local rust_target_dirs=$(find "$IEDA_WORKSPACE/src" -type d -name "target" \
-    -exec test -f "{}/../Cargo.toml" \; -print 2>/dev/null)
-  local rust_tmp_dirs=$(find "$IEDA_WORKSPACE/src" -type d -name "tmp" \
-    -exec test -f "{}/../Cargo.toml" \; -print 2>/dev/null)
 
   local delete_list=()
   [[ -d "$cmake_build_dir" ]] && delete_list+=("$cmake_build_dir (CMake build)")
-  [[ -n "$rust_target_dirs" ]] && while IFS= read -r dir; do
-    delete_list+=("$dir (Rust build)")
-  done <<< "$rust_target_dirs"
-  [[ -n "$rust_tmp_dirs" ]] && while IFS= read -r dir; do
-    delete_list+=("$dir (Rust build)")
-  done <<< "$rust_tmp_dirs"
 
   if [[ ${#delete_list[@]} -eq 0 ]]; then
     echo -e "${green}No build artifacts found, nothing to clean.${clear}"
@@ -342,20 +330,12 @@ perform_clean()
 
   if [[ $NON_INTERACTIVE == "ON" ]]; then
     [[ -d "$cmake_build_dir" ]] && rm -rf "$cmake_build_dir"
-    [[ -n "$rust_target_dirs" ]] && xargs -I{} rm -rf {} <<< "$rust_target_dirs"
-    [[ -n "$rust_tmp_dirs" ]] && xargs -I{} rm -rf {} <<< "$rust_tmp_dirs"
   else
     read -p $'\nAre you sure to delete these? [y/N] ' confirm
     [[ $confirm == [yY] ]] || return 0
 
     echo -e "\n${yellow}Starting deletion...${clear}"
     [[ -d "$cmake_build_dir" ]] && rm -rf "$cmake_build_dir" && echo "Deleted: $cmake_build_dir"
-    [[ -n "$rust_target_dirs" ]] && while IFS= read -r dir; do
-      rm -rf "$dir" && echo "Deleted: $dir"
-    done <<< "$rust_target_dirs"
-    [[ -n "$rust_tmp_dirs" ]] && while IFS= read -r dir; do
-      rm -rf "$dir" && echo "Deleted: $dir"
-    done <<< "$rust_tmp_dirs"
   fi
 
   echo -e "${green}Cleanup completed.${clear}"
@@ -392,13 +372,13 @@ if [[ $1 != "" ]] && [[ $1 != -* ]]; then
   help_msg_exit 1
 fi
 
-while getopts j:b:t:i:l:rndDypgsPGChM opt; do
+while getopts j:b:t:i:l:rndDypgsPChM opt; do
   case "${opt}" in
     j) opt_thread_num "$OPTARG"   ;;
     b) opt_binary_dir "$OPTARG"   ;;
     t) opt_build_target "$OPTARG" ;;
     i) opt_install_dependencies "$OPTARG" ;;
-    r) opt_run_ieda               ;;
+    r) opt_run_ecc               ;;
     n) opt_no_build               ;;
     d) opt_del_build              ;;
     D) opt_dry_run                ;;
@@ -407,7 +387,6 @@ while getopts j:b:t:i:l:rndDypgsPGChM opt; do
     g) CMAKE_OPTIONS+=("-DBUILD_GUI=ON")    ;;
     s) CMAKE_OPTIONS+=("-DSANITIZER=ON")    ;;
     P) CMAKE_OPTIONS+=("-DUSE_PROFILER=ON") ;;
-    G) CMAKE_OPTIONS+=("-DUSE_GPU=ON")      ;;
     C) CMAKE_OPTIONS+=("-DCOMPATIBILITY_MODE=ON") ;;
     M) opt_debug_build            ;;
     l) CMAKE_OPTIONS+=("-DLINKER=${OPTARG}") ;;
@@ -425,9 +404,9 @@ if [[ ${INSTALL_DEP} != "OFF" ]]; then
 fi
 
 if [[ ${NO_BUILD} == "OFF" ]]; then
-  build_ieda
+  build_ecc
 fi
 
-if [[ ${RUN_IEDA} == "ON" ]]; then
-  run_ieda
+if [[ ${RUN_ECC} == "ON" ]]; then
+  run_ecc
 fi

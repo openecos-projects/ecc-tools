@@ -50,8 +50,7 @@ class CharPatternEnumerator
   auto enumerateWirelength(unsigned length_idx, double wirelength_um, BuildProgress& build_progress) -> void;
 
  private:
-  auto enumerateTopology(unsigned length_idx, double wirelength_um, unsigned num_slots, TopologyBits topology_bits,
-                         BuildProgress& build_progress) -> void;
+  auto enumerateTopology(unsigned length_idx, double wirelength_um, unsigned num_slots, TopologyBits topology_bits, BuildProgress& build_progress) -> void;
   static auto getMonotonicComboCount(std::size_t num_buf_types, std::size_t num_positions) -> std::size_t;
   static auto advanceToNextMonotonic(std::vector<std::size_t>& buf_indices, std::size_t num_buf_types) -> bool;
 

@@ -21,7 +21,7 @@
 #include "config/PlotSpefConfig.hh"
 
 #include "PathUtils.hh"
-#include "log/Log.hh"
+#include "Logger.hpp"
 
 namespace ircx::plot_spef {
 
@@ -32,22 +32,22 @@ auto ConfigValidator::validate(const Config& config) const -> bool
   }
 
   if (config.output_dir.empty()) {
-    LOG_ERROR << "plot_spef requires an output directory.";
+    RCXLOG.warn(Loc::current(), "plot_spef requires an output directory.");
     return false;
   }
 
   if (config.dbu <= 0) {
-    LOG_ERROR << "plot_spef requires a positive DBU.";
+    RCXLOG.warn(Loc::current(), "plot_spef requires a positive DBU.");
     return false;
   }
 
   if (config.cores <= 0) {
-    LOG_ERROR << "plot_spef -cores must be a positive integer.";
+    RCXLOG.warn(Loc::current(), "plot_spef -cores must be a positive integer.");
     return false;
   }
 
   if (config.hasNetFilter() && config.hasEdgeGdsOutput()) {
-    LOG_ERROR << "plot_spef does not support using -net and -edge together.";
+    RCXLOG.warn(Loc::current(), "plot_spef does not support using -net and -edge together.");
     return false;
   }
 

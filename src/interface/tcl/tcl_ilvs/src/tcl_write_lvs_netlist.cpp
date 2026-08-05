@@ -18,6 +18,7 @@
 #include "tcl_ilvs.h"
 #include "tcl_util.h"
 
+#include "utility/logger/Logger.hpp"
 namespace tcl {
 
 namespace {
@@ -35,7 +36,7 @@ unsigned TclWriteLVSNetlist::check()
 {
   TclOption* path_option = getOptionOrArg(kPath);
   if (path_option == nullptr || path_option->getStringVal() == nullptr) {
-    std::cerr << "Please specify the iLVS netlist snapshot path by: write_lvs_netlist -path <file>." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Please specify the iLVS netlist snapshot path by: write_lvs_netlist -path <file>.");
     return 0;
   }
   return 1;

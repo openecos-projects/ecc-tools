@@ -1,11 +1,3 @@
-if(DEBUG_ISTA_DATA_MANAGER)
-    message(STATUS "iSTA: DEBUG_ISTA_DATA_MANAGER")
-    set(CMAKE_BUILD_TYPE "Debug")
-else()
-    message(STATUS "iSTA: RELEASE_ISTA_DATA_MANAGER")
-    set(CMAKE_BUILD_TYPE "Release")
-endif()
-
 add_library(ista_data_manager
     ${ISTA_DATA_MANAGER}/DataManager.cpp
 )

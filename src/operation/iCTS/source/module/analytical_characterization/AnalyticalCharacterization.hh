@@ -30,7 +30,7 @@
 #include <vector>
 
 #include "AnalyticalModel.hh"
-#include "routing/ClockRouteSegmentRc.hh"
+#include "routing/ClockRouteSegmentRC.hh"
 
 namespace icts {
 class BufferingPattern;
@@ -94,8 +94,7 @@ struct AnalyticalCharacterizationBuild
 class AnalyticalCharacterization
 {
  public:
-  static auto buildFromCharBuilder(const CharBuilder& char_builder, const AnalyticalCharacterizationConfig& config)
-      -> AnalyticalCharacterizationBuild;
+  static auto buildFromCharBuilder(const CharBuilder& char_builder, const AnalyticalCharacterizationConfig& config) -> AnalyticalCharacterizationBuild;
   static auto buildFromSegmentChars(const std::vector<SegmentChar>& segment_chars, const std::vector<BufferingPattern>& buffering_patterns,
                                     const UniformValueLattice& slew_lattice, const UniformValueLattice& cap_lattice,
                                     const AnalyticalCharacterizationConfig& config) -> AnalyticalCharacterizationBuild;

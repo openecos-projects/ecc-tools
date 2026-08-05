@@ -27,16 +27,11 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include <iostream>
 #include <string>
-#include <vector>
 
 namespace iplf {
 
 #define tmInst ToolManager::getInstance()
-
-class RtIO;
-class FpIO;
 
 class ToolManager
 {
@@ -52,61 +47,6 @@ class ToolManager
   /// iDB
   bool idbStart(std::string config_path);
   bool idbSave(std::string name);
-
-  /// Eval
-  // int64_t evalTotalWL(const std::vector<eval::WLNet*>& net_list, const std::string& wl_type);
-  // void estimateDelay(std::vector<eval::TimingNet*> timing_net_list, const char* sta_workspace_path, const char* sdc_file_path,
-  //                    std::vector<const char*> lib_file_path_list);
-
-  /// iFP
-  //   bool autoRunFloorplan(std::string config = "");
-  //   bool floorplanInit();
-
-  /// iPL
-  bool autoRunPlacer(std::string config = "", bool enableJsonOutput = false);
-  bool runPlacerFiller(std::string config = "");
-  bool runPlacerIncrementalFlow(std::string config);
-  bool runPlacerIncrementalLegalization();
-  bool checkLegality();
-  bool reportPlacer();
-  bool runAiPlacer(std::string config = "", std::string onnx_path = "", std::string normalization_path="");
-
-  // iNO
-  bool RunNOFixIO(std::string config = "");
-  bool RunNOFixFanout(std::string config = "");
-
-  /// iTO
-  bool autoRunTO(std::string config = "");
-  bool RunTODrv(std::string config = "");
-  bool RunTODrvSpecialNet(std::string config = "", std::string net_name = "");
-  bool RunTOHold(std::string config = "");
-  bool RunTOSetup(std::string config = "");
-  bool RunTOBuffering(std::string config = "", std::string net_name = "");
-
-  /// iCTS
-  bool autoRunCTS(std::string config = "", std::string work_dir = "");
-  bool reportCTS(std::string path = "");
-  /// iRT
-  bool autoRunRouter(std::string config_file_path = "");
-
-  /// iDRC
-  bool autoRunDRC(std::string config = "", std::string path = "", bool has_init = false);
-  bool readDrcDetailFromFile(std::string path = "");
-  bool saveDrcDetailToFile(std::string path = "");
-
-  /// iSTA
-  bool autoRunSTA(std::string config = "");
-  bool initSTA(std::string config = "");
-  bool runSTA(std::string config = "");
-
-  /// iPW
-  bool autoRunPower(std::string config = "");
-
-  /// iPNP
-  bool autoRunPNP(std::string config = "");
-
-  bool buildClockTree(std::string config = "", std::string data_path = "");
-  bool saveClockTree(std::string data_path);
 
  private:
   static ToolManager* _instance;

@@ -9,8 +9,8 @@ add_library(icts_source_module_analytical_characterization ${ICTS_MODULE_ANALYTI
 target_link_libraries(
   icts_source_module_analytical_characterization
   PUBLIC
-  icts_source_database_characterization
-  icts_source_database_routing
+  icts_source_data_manager_characterization
+  icts_source_data_manager_routing
   PRIVATE
   icts_source_module_characterization
 )

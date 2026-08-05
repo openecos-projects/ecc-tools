@@ -83,8 +83,7 @@ auto MakeFitBasis(FitBasisKind basis_kind, const icts::SegmentChar& entry) -> st
   return MakeFitBasis(basis_kind, s, c);
 }
 
-auto SolveSmallLinearSystem(std::array<std::array<double, 6>, 6> matrix, std::array<double, 6> rhs, std::size_t size,
-                            std::array<double, 6>& solution) -> bool
+auto SolveSmallLinearSystem(std::array<std::array<double, 6>, 6> matrix, std::array<double, 6> rhs, std::size_t size, std::array<double, 6>& solution) -> bool
 {
   for (std::size_t pivot_col = 0U; pivot_col < size; ++pivot_col) {
     std::size_t pivot_row = pivot_col;
@@ -153,8 +152,8 @@ struct FitStats
   double min_group_r2 = 1.0;
 };
 
-auto TryFitGroup(const std::vector<const icts::SegmentChar*>& group, const std::function<double(const icts::SegmentChar&)>& metric_fn,
-                 FitBasisKind basis_kind) -> std::optional<GroupFitResult>
+auto TryFitGroup(const std::vector<const icts::SegmentChar*>& group, const std::function<double(const icts::SegmentChar&)>& metric_fn, FitBasisKind basis_kind)
+    -> std::optional<GroupFitResult>
 {
   const std::size_t basis_size = FitBasisSize(basis_kind);
   if (group.size() < basis_size) {
@@ -213,9 +212,8 @@ auto TryFitGroup(const std::vector<const icts::SegmentChar*>& group, const std::
   return result;
 }
 
-auto TryFitSurfaceCoefficients(const std::vector<const icts::SegmentChar*>& group,
-                               const std::function<double(const icts::SegmentChar&)>& metric_fn, const realtech_fixture::CharGrid& grid,
-                               FitBasisKind basis_kind) -> std::optional<std::array<double, 6>>
+auto TryFitSurfaceCoefficients(const std::vector<const icts::SegmentChar*>& group, const std::function<double(const icts::SegmentChar&)>& metric_fn,
+                               const realtech_fixture::CharGrid& grid, FitBasisKind basis_kind) -> std::optional<std::array<double, 6>>
 {
   const std::size_t basis_size = FitBasisSize(basis_kind);
   if (group.size() < basis_size) {
@@ -244,8 +242,8 @@ auto TryFitSurfaceCoefficients(const std::vector<const icts::SegmentChar*>& grou
   return coefficients;
 }
 
-auto FitMetricByPattern(const std::vector<icts::SegmentChar>& entries, unsigned length_idx,
-                        const std::function<double(const icts::SegmentChar&)>& metric_fn, FitBasisKind basis_kind) -> FitStats
+auto FitMetricByPattern(const std::vector<icts::SegmentChar>& entries, unsigned length_idx, const std::function<double(const icts::SegmentChar&)>& metric_fn,
+                        FitBasisKind basis_kind) -> FitStats
 {
   std::unordered_map<icts::PatternId, std::vector<const icts::SegmentChar*>> groups;
   for (const auto& entry : entries) {
@@ -255,9 +253,8 @@ auto FitMetricByPattern(const std::vector<icts::SegmentChar>& entries, unsigned 
   }
 
   FitStats stats;
-  for (const auto& [pattern_id, group] : groups) {
-    (void) pattern_id;
-    const auto group_result = TryFitGroup(group, metric_fn, basis_kind);
+  for (const auto& pattern_group : groups) {
+    const auto group_result = TryFitGroup(pattern_group.second, metric_fn, basis_kind);
     if (!group_result.has_value()) {
       ++stats.skipped_groups;
       continue;
@@ -298,8 +295,7 @@ auto RelativeRmse(const FitStats& stats) -> double
   return OverallRmse(stats) / denominator;
 }
 
-auto AppendFitStats(std::ostringstream& report_stream, const std::string& metric_name, FitBasisKind basis_kind, const FitStats& stats)
-    -> void
+auto AppendFitStats(std::ostringstream& report_stream, const std::string& metric_name, FitBasisKind basis_kind, const FitStats& stats) -> void
 {
   report_stream << "iter1_fit{metric=" << metric_name << ",basis=" << FitBasisName(basis_kind) << ",fitted_groups=" << stats.fitted_groups
                 << ",skipped_groups=" << stats.skipped_groups << ",samples=" << stats.sample_count << ",rmse=" << OverallRmse(stats)
@@ -307,8 +303,8 @@ auto AppendFitStats(std::ostringstream& report_stream, const std::string& metric
                 << ",min_group_r2=" << stats.min_group_r2 << "}\n";
 }
 
-auto AppendIterOneFitReport(std::ostringstream& report_stream, const std::vector<icts::SegmentChar>& entries,
-                            const realtech_fixture::CharGrid& grid, unsigned length_idx) -> void
+auto AppendIterOneFitReport(std::ostringstream& report_stream, const std::vector<icts::SegmentChar>& entries, const realtech_fixture::CharGrid& grid,
+                            unsigned length_idx) -> void
 {
   std::size_t length_one_sample_count = 0U;
   std::unordered_map<icts::PatternId, std::size_t> pattern_sample_counts;
@@ -327,22 +323,17 @@ auto AppendIterOneFitReport(std::ostringstream& report_stream, const std::vector
   report_stream << "iter1_fit_pattern_group_count=" << pattern_sample_counts.size() << "\n";
 
   const auto append_metric = [&](const std::string& metric_name, const std::function<double(const icts::SegmentChar&)>& metric_fn) -> void {
-    AppendFitStats(report_stream, metric_name, FitBasisKind::kLinear,
-                   FitMetricByPattern(entries, length_idx, metric_fn, FitBasisKind::kLinear));
-    AppendFitStats(report_stream, metric_name, FitBasisKind::kQuadratic,
-                   FitMetricByPattern(entries, length_idx, metric_fn, FitBasisKind::kQuadratic));
+    AppendFitStats(report_stream, metric_name, FitBasisKind::kLinear, FitMetricByPattern(entries, length_idx, metric_fn, FitBasisKind::kLinear));
+    AppendFitStats(report_stream, metric_name, FitBasisKind::kQuadratic, FitMetricByPattern(entries, length_idx, metric_fn, FitBasisKind::kQuadratic));
   };
 
-  append_metric("output_slew_ns", [&grid](const icts::SegmentChar& entry) -> double {
-    return static_cast<double>(entry.get_output_slew_idx()) * grid.slew_step_ns;
-  });
-  append_metric("driven_cap_pf", [&grid](const icts::SegmentChar& entry) -> double {
-    return static_cast<double>(entry.get_driven_cap_idx()) * grid.cap_step_pf;
-  });
+  append_metric("output_slew_ns",
+                [&grid](const icts::SegmentChar& entry) -> double { return static_cast<double>(entry.get_output_slew_idx()) * grid.slew_step_ns; });
+  append_metric("driven_cap_pf",
+                [&grid](const icts::SegmentChar& entry) -> double { return static_cast<double>(entry.get_driven_cap_idx()) * grid.cap_step_pf; });
   append_metric("delay_ns", [](const icts::SegmentChar& entry) -> double { return entry.get_delay(); });
   append_metric("power_w", [](const icts::SegmentChar& entry) -> double { return entry.get_power(); });
-  append_metric("source_boundary_net_switch_power_w",
-                [](const icts::SegmentChar& entry) -> double { return entry.get_source_boundary_net_switch_power(); });
+  append_metric("source_boundary_net_switch_power_w", [](const icts::SegmentChar& entry) -> double { return entry.get_source_boundary_net_switch_power(); });
 }
 
 }  // namespace icts_test

@@ -1,38 +1,30 @@
+add_subdirectory(tcl_engine)
 add_subdirectory(tcl_util)
-add_subdirectory(tcl_workspace)
 add_subdirectory(tcl_config)
 add_subdirectory(tcl_idb)
 add_subdirectory(tcl_flow)
 add_subdirectory(tcl_icts)
 add_subdirectory(tcl_idrc)
-add_subdirectory(tcl_instance)
 add_subdirectory(tcl_irt)
 add_subdirectory(tcl_ilvs)
 add_subdirectory(tcl_ista)
+add_subdirectory(tcl_ifp)
 add_subdirectory(tcl_iemir)
 add_subdirectory(tcl_izh)
 add_subdirectory(tcl_ircx)
-add_subdirectory(tcl_ifp)
-add_subdirectory(tcl_ipdn)
 add_subdirectory(tcl_report)
 add_subdirectory(tcl_feature)
-add_subdirectory(tcl_eval)
-add_subdirectory(tcl_notification)
-
-if(CONTEST)
-add_subdirectory(tcl_contest)
-endif()
+add_subdirectory(tcl_geometry)
 
 AUX_SOURCE_DIRECTORY(./ SRC)
 
-add_library(ieda_tcl ${SRC})
+add_library(ecc_tcl ${SRC})
 
-target_link_libraries(ieda_tcl 
-    PUBLIC 
-        flow 
+target_link_libraries(ecc_tcl
+    PUBLIC
+        flow
         tool_manager
-        tcl 
-        tcl_workspace
+        tcl
         tcl_config
         tcl_idb
         tcl_flow
@@ -41,36 +33,23 @@ target_link_libraries(ieda_tcl
         tcl_irt
         tcl_ilvs
         tcl_ista
+        tcl_ifp
         tcl_iemir
         tcl_izh
-        tcl_ircx 
-        tcl_ifp 
-        tcl_ipdn
-        tcl_inst 
+        tcl_ircx
         tcl_report
         tcl_feature
-        tcl_eval
-        tcl_notification
+        tcl_geometry
 )
 
-target_include_directories(ieda_tcl 
-    PUBLIC 
+target_include_directories(ecc_tcl
+    PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/tcl_workspace
+    ${CMAKE_CURRENT_SOURCE_DIR}/tcl_geometry
 
-    ${HOME_UTILITY}/tcl
+    ${CMAKE_CURRENT_SOURCE_DIR}/tcl_engine
 
     ${HOME_PLATFORM}/flow
     ${HOME_PLATFORM}/data_manager
     ${HOME_PLATFORM}/tool_manager
-    ${HOME_PLATFORM}/tool_manager/tool_api
 )
-
-if(CONTEST)
-  target_link_libraries(ieda_tcl PUBLIC tcl_contest)
-
-  target_include_directories(ieda_tcl 
-    PUBLIC 
-    ${HOME_INTERFACE}/tcl/tcl_contest
-  )
-endif()

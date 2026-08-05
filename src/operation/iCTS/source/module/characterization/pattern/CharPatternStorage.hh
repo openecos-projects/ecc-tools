@@ -46,8 +46,8 @@ class CharPatternStorage
   CharPatternStorage(const CharPatternStorage&) = delete;
   auto operator=(const CharPatternStorage&) -> CharPatternStorage& = delete;
 
-  auto storeBufferingPattern(unsigned length_idx, const TopologyDesc& topo, const std::vector<std::string>& buf_masters,
-                             double total_length_um) -> ::icts::PatternId;
+  auto storeBufferingPattern(unsigned length_idx, const TopologyDesc& topo, const std::vector<std::string>& buf_masters, double total_length_um)
+      -> ::icts::PatternId;
 
  private:
   CharBuilderImpl& _impl;

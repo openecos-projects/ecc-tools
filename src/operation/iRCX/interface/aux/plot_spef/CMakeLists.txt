@@ -16,7 +16,7 @@ target_link_libraries(ircx_tool_plot_spef
   PRIVATE
     gdsii-parser
     ircx_database_design
-    log
+    ircx_logger
     OpenMP::OpenMP_CXX
     spef
 )

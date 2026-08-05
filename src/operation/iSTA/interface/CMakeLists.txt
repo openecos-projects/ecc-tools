@@ -1,11 +1,3 @@
-if(DEBUG_ISTA_INTERFACE)
-    message(STATUS "iSTA: DEBUG_ISTA_INTERFACE")
-    set(CMAKE_BUILD_TYPE "Debug")
-else()
-    message(STATUS "iSTA: RELEASE_ISTA_INTERFACE")
-    set(CMAKE_BUILD_TYPE "Release")
-endif()
-
 add_library(ista_interface
     ${ISTA_INTERFACE}/STAInterface.cpp
 )

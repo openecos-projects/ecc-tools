@@ -1,11 +1,3 @@
-if(DEBUG_ISTA_POWER_PROPAGATOR)
-    message(STATUS "iSTA: DEBUG_ISTA_POWER_PROPAGATOR")
-    set(CMAKE_BUILD_TYPE "Debug")
-else()
-    message(STATUS "iSTA: RELEASE_ISTA_POWER_PROPAGATOR")
-    set(CMAKE_BUILD_TYPE "Release")
-endif()
-
 add_library(ista_power_propagator
     ${ISTA_MODULE}/power_propagator/PowerPropagator.cpp
 )

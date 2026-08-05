@@ -23,8 +23,6 @@
 
 #include "bound_skew_tree/algorithm/BinaryTopology.hh"
 
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -40,7 +38,7 @@
 #include <utility>
 #include <vector>
 
-#include "Log.hh"
+#include "Logger.hh"
 #include "bound_skew_tree/algorithm/BoundSkewTreeImpl.hh"
 #include "bound_skew_tree/component/Components.hh"
 
@@ -59,7 +57,9 @@ struct TreeBuildFrame
 
 auto copyAreaRange(const std::vector<Area*>& areas, const size_t begin_index, const size_t end_index) -> std::vector<Area*>
 {
-  LOG_FATAL_IF(begin_index > end_index || end_index > areas.size()) << "Area range is invalid.";
+  if (begin_index > end_index || end_index > areas.size()) {
+    CTSLOG.error(Loc::current(), "Area range is invalid.");
+  }
 
   std::vector<Area*> area_range;
   area_range.reserve(end_index - begin_index);
@@ -84,10 +84,12 @@ auto assignTreeBuildResult(std::vector<TreeBuildFrame>& frames, const TreeBuildF
 }
 
 template <typename SplitFunc, typename MergeFunc, typename CenterFunc>
-auto buildBinaryTreeIteratively(const std::vector<Area*>& areas, const SplitFunc& split_func, const MergeFunc& merge_func,
-                                const CenterFunc& center_func, std::string_view tree_name) -> Area*
+auto buildBinaryTreeIteratively(const std::vector<Area*>& areas, const SplitFunc& split_func, const MergeFunc& merge_func, const CenterFunc& center_func,
+                                std::string_view tree_name) -> Area*
 {
-  LOG_FATAL_IF(areas.empty()) << tree_name << " areas are empty.";
+  if (areas.empty()) {
+    CTSLOG.error(Loc::current(), tree_name, " areas are empty.");
+  }
 
   std::vector<TreeBuildFrame> frames;
   frames.push_back(TreeBuildFrame{.areas = areas, .parent_index = std::nullopt});
@@ -116,7 +118,9 @@ auto buildBinaryTreeIteratively(const std::vector<Area*>& areas, const SplitFunc
     if (area_count == 2) {
       result = merge_func(frame.areas.front(), frame.areas.back());
     } else {
-      LOG_FATAL_IF(frame.left_result == nullptr || frame.right_result == nullptr) << tree_name << " child result is null.";
+      if (frame.left_result == nullptr || frame.right_result == nullptr) {
+        CTSLOG.error(Loc::current(), tree_name, " child result is null.");
+      }
       result = merge_func(frame.left_result, frame.right_result);
     }
     result->set_location(center_func(frame.areas));
@@ -124,7 +128,9 @@ auto buildBinaryTreeIteratively(const std::vector<Area*>& areas, const SplitFunc
     frames.pop_back();
   }
 
-  LOG_FATAL_IF(root == nullptr) << tree_name << " root is null.";
+  if (root == nullptr) {
+    CTSLOG.error(Loc::current(), tree_name, " root is null.");
+  }
   return root;
 }
 
@@ -147,8 +153,7 @@ auto calcSquaredDistancesToCenters(const std::vector<Area*>& areas, const std::v
   return squared_distances;
 }
 
-auto expandCentersByKMeansPlus(const std::vector<Area*>& areas, const size_t cluster_count, std::vector<Point>& center_points,
-                               std::mt19937& generator) -> void
+auto expandCentersByKMeansPlus(const std::vector<Area*>& areas, const size_t cluster_count, std::vector<Point>& center_points, std::mt19937& generator) -> void
 {
   while (center_points.size() < cluster_count) {
     auto squared_distances = calcSquaredDistancesToCenters(areas, center_points);
@@ -158,8 +163,7 @@ auto expandCentersByKMeansPlus(const std::vector<Area*>& areas, const size_t clu
   }
 }
 
-auto assignAreasToCenters(const std::vector<Area*>& areas, const std::vector<Point>& center_points, std::vector<size_t>& center_assignments)
-    -> void
+auto assignAreasToCenters(const std::vector<Area*>& areas, const std::vector<Point>& center_points, std::vector<size_t>& center_assignments) -> void
 {
   for (size_t area_index = 0; area_index < areas.size(); ++area_index) {
     double min_distance = std::numeric_limits<double>::max();
@@ -175,8 +179,7 @@ auto assignAreasToCenters(const std::vector<Area*>& areas, const std::vector<Poi
   }
 }
 
-auto calcUpdatedCenters(const std::vector<Area*>& areas, const std::vector<size_t>& center_assignments, const size_t cluster_count)
-    -> std::vector<Point>
+auto calcUpdatedCenters(const std::vector<Area*>& areas, const std::vector<size_t>& center_assignments, const size_t cluster_count) -> std::vector<Point>
 {
   std::vector<Point> center_points(cluster_count, Point(0, 0));
   std::vector<size_t> center_counts(cluster_count, 0);
@@ -193,8 +196,8 @@ auto calcUpdatedCenters(const std::vector<Area*>& areas, const std::vector<size_
   return center_points;
 }
 
-auto calcWithinClusterDistance(const std::vector<Area*>& areas, const std::vector<Point>& center_points,
-                               const std::vector<size_t>& center_assignments) -> double
+auto calcWithinClusterDistance(const std::vector<Area*>& areas, const std::vector<Point>& center_points, const std::vector<size_t>& center_assignments)
+    -> double
 {
   double total_distance = 0.0;
   for (size_t area_index = 0; area_index < areas.size(); ++area_index) {
@@ -210,8 +213,7 @@ auto collectClusters(const std::vector<Area*>& areas, const std::vector<size_t>&
   for (size_t area_index = 0; area_index < areas.size(); ++area_index) {
     clusters.at(center_assignments.at(area_index)).push_back(areas.at(area_index));
   }
-  auto [remove_begin, remove_end]
-      = std::ranges::remove_if(clusters, [](const std::vector<Area*>& cluster) -> bool { return cluster.empty(); });
+  auto [remove_begin, remove_end] = std::ranges::remove_if(clusters, [](const std::vector<Area*>& cluster) -> bool { return cluster.empty(); });
   clusters.erase(remove_begin, remove_end);
   return clusters;
 }
@@ -220,7 +222,9 @@ auto collectClusters(const std::vector<Area*>& areas, const std::vector<size_t>&
 
 auto BinaryTopology::biPartition() -> void
 {
-  LOG_FATAL_IF(_impl._unmerged_nodes.size() < 2) << "unmerged nodes size is less than 2";
+  if (_impl._unmerged_nodes.size() < 2) {
+    CTSLOG.error(Loc::current(), "unmerged nodes size is less than 2");
+  }
   _impl._root = buildBiPartitionTree(_impl._unmerged_nodes);
   _impl.areaReset();
 }
@@ -228,16 +232,14 @@ auto BinaryTopology::biPartition() -> void
 auto BinaryTopology::buildBiPartitionTree(const std::vector<Area*>& areas) -> Area*
 {
   return buildBinaryTreeIteratively(
-      areas,
-      [&](std::vector<Area*>& split_areas) -> std::pair<std::vector<Area*>, std::vector<Area*>> { return octagonDivide(split_areas); },
+      areas, [&](std::vector<Area*>& split_areas) -> std::pair<std::vector<Area*>, std::vector<Area*>> { return octagonDivide(split_areas); },
       [&](Area* left_area, Area* right_area) -> Area* { return _impl.merge(left_area, right_area); },
       [&](const std::vector<Area*>& center_areas) -> Point { return calcAreasCenter(center_areas); }, "Bi-partition");
 }
 
 auto BinaryTopology::octagonDivide(std::vector<Area*>& areas) -> std::pair<std::vector<Area*>, std::vector<Area*>>
 {
-  auto cap_sum
-      = std::accumulate(areas.begin(), areas.end(), 0.0, [](double sum, Area* area) -> double { return sum + area->get_cap_load(); });
+  auto cap_sum = std::accumulate(areas.begin(), areas.end(), 0.0, [](double sum, Area* area) -> double { return sum + area->get_cap_load(); });
   auto half_cap = 1.0 * cap_sum / 2;
 
   auto octagon = calcOctagon(areas);
@@ -368,7 +370,9 @@ auto BinaryTopology::areaOnOctagonBound(const std::vector<Area*>& areas, const s
 
 auto BinaryTopology::biCluster() -> void
 {
-  LOG_FATAL_IF(_impl._unmerged_nodes.size() < 2) << "unmerged nodes size is less than 2";
+  if (_impl._unmerged_nodes.size() < 2) {
+    CTSLOG.error(Loc::current(), "unmerged nodes size is less than 2");
+  }
   _impl._root = buildBiClusterTree(_impl._unmerged_nodes);
   _impl.areaReset();
 }
@@ -379,7 +383,9 @@ auto BinaryTopology::buildBiClusterTree(const std::vector<Area*>& areas) -> Area
       areas,
       [&](const std::vector<Area*>& split_areas) -> std::pair<std::vector<Area*>, std::vector<Area*>> {
         auto clusters = kMeansPlus(split_areas, KMeansConfig{.cluster_count = 2});
-        LOG_FATAL_IF(clusters.size() != 2) << "Bi-cluster requires exactly two non-empty clusters.";
+        if (clusters.size() != 2) {
+          CTSLOG.error(Loc::current(), "Bi-cluster requires exactly two non-empty clusters.");
+        }
         return std::pair<std::vector<Area*>, std::vector<Area*>>{clusters.front(), clusters.back()};
       },
       [&](Area* left_area, Area* right_area) -> Area* { return _impl.merge(left_area, right_area); },

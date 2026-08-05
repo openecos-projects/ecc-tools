@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <sstream>
 
+#include "utility/logger/Logger.hpp"
 namespace liberty {
 namespace {
 
@@ -72,12 +73,12 @@ LibertyDriver::~LibertyDriver()
 
 void LibertyDriver::reportError(const YYLTYPE& loc, const std::string& msg)
 {
-    std::cerr << *loc.filename << ":" << loc.first_line << ":" << loc.first_column << ": " << msg << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), *loc.filename, ":", loc.first_line, ":", loc.first_column, ": ", msg);
 }
 
 void LibertyDriver::reportError(const std::string& msg)
 {
-    std::cerr << _filename << ": " << msg << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), _filename, ": ", msg);
 }
 
 void LibertyDriver::setParseResult(LibNode* node)
@@ -235,11 +236,11 @@ bool LibertyDriver::parseGroupBody(LibertyScanner& scanner)
                 return false;
             }
         } else {
-            std::cerr << "Debug: Unexpected token " << token << " at line " << yylloc.first_line;
             if (token > 0 && token < 256) {
-                std::cerr << " (char: '" << (char)token << "')";
+                ECCLOG.warn(ecc::Loc::current(), "Debug: Unexpected token ", token, " at line ", yylloc.first_line, " (char: '", static_cast<char>(token), "')");
+            } else {
+                ECCLOG.warn(ecc::Loc::current(), "Debug: Unexpected token ", token, " at line ", yylloc.first_line);
             }
-            std::cerr << std::endl;
             reportError(yylloc, "unexpected token in group body");
             return false;
         }

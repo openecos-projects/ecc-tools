@@ -5,6 +5,7 @@
  * @Description:
  */
 
+#include "utility/logger/Logger.hpp"
 #include "wirelength_eval.h"
 
 #include <cmath>
@@ -394,7 +395,7 @@ std::vector<std::pair<int32_t, int32_t>> WirelengthEval::getNetPointSet(std::str
   if (name_point_set.find(net_name) != name_point_set.end()) {
     return name_point_set[net_name];
   } else {
-    std::cout << "Net " << net_name << " not found!" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Net ", net_name, " not found!");
     return {};
   }
 }

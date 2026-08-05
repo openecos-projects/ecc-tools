@@ -13,9 +13,9 @@
 
 #include <unordered_map>
 
-#include "BTreeMap.hh"
+#include "absl/container/btree_map.h"
+#include "absl/container/inlined_vector.h"
 #include "Lib.hh"
-#include "Vector.hh"
 
 namespace idb {
 
@@ -27,7 +27,7 @@ class LibClassifyCell
 {
  public:
   void classifyLibCell(std::vector<LibLibrary*>& the_libs);
-  Vector<LibCell*>* getClassOfCell(LibCell* cell)
+  absl::InlinedVector<LibCell*, 64>* getClassOfCell(LibCell* cell)
   {
     if (_func_same_cells.contains(cell)) {
       return &_func_same_cells[cell];
@@ -50,9 +50,9 @@ class LibClassifyCell
 
   bool compareFunction(LibCell* the_cell1, LibCell* the_cell2);
 
-  void classifyOneLibCell(LibLibrary* the_lib, std::unordered_map<std::size_t, Vector<LibCell*>>& hash_to_cells);
+  void classifyOneLibCell(LibLibrary* the_lib, std::unordered_map<std::size_t, absl::InlinedVector<LibCell*, 64>>& hash_to_cells);
 
-  ieda::BTreeMap<LibCell*, Vector<LibCell*>> _func_same_cells;  //!< The one cell map to the func same cell with
-                                                                //!< different size.
+  absl::btree_map<LibCell*, absl::InlinedVector<LibCell*, 64>> _func_same_cells;  //!< The one cell map to the func same cell with
+                                                                                     //!< different size.
 };
 }  // namespace idb

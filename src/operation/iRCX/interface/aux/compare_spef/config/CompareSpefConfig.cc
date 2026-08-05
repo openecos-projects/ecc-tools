@@ -24,7 +24,7 @@
 #include <utility>
 
 #include "StringUtils.hh"
-#include "log/Log.hh"
+#include "Logger.hpp"
 
 namespace ircx {
 namespace compare_spef {
@@ -37,7 +37,7 @@ auto NetConfigReader::read(Config& config) const -> bool
 
   std::ifstream ifs(config.net_config_file);
   if (!ifs.is_open()) {
-    LOG_ERROR << "compare_spef failed: cannot open -net_config file " << config.net_config_file;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: cannot open -net_config file ", config.net_config_file);
     return false;
   }
 
@@ -96,35 +96,35 @@ void NetConfigReader::addLine(Config& config,
 auto ConfigValidator::validate(const Config& config) const -> bool
 {
   if (config.test_file.empty() || config.reference_file.empty()) {
-    LOG_ERROR << "compare_spef requires test and reference SPEF files.";
+    RCXLOG.warn(Loc::current(), "compare_spef requires test and reference SPEF files.");
     return false;
   }
   if (config.match_mode != "name") {
-    LOG_ERROR << "compare_spef currently supports only -match name for SPEF comparison.";
+    RCXLOG.warn(Loc::current(), "compare_spef currently supports only -match name for SPEF comparison.");
     return false;
   }
   if (!config.corner.empty()) {
-    LOG_ERROR << "compare_spef -corner is valid only for GPD comparison, "
-                 "which is not supported yet.";
+    RCXLOG.warn(Loc::current(), "compare_spef -corner is valid only for GPD comparison, "
+                 "which is not supported yet.");
     return false;
   }
   if (config.compare_delay) {
-    LOG_ERROR << "compare_spef -d/-delay Elmore delay comparison is not implemented yet.";
+    RCXLOG.warn(Loc::current(), "compare_spef -d/-delay Elmore delay comparison is not implemented yet.");
     return false;
   }
   if (!config.net_name.empty() && (!config.from_pin.empty() || !config.to_pin.empty())) {
-    LOG_ERROR << "compare_spef -net cannot be used with -from_pin or -to_pin.";
+    RCXLOG.warn(Loc::current(), "compare_spef -net cannot be used with -from_pin or -to_pin.");
     return false;
   }
   if (config.tcap_threshold < 0.0
       || config.ccap_abs_threshold < 0.0
       || config.ccap_rel_threshold < 0.0
       || config.res_threshold < 0.0) {
-    LOG_ERROR << "compare_spef thresholds must be non-negative.";
+    RCXLOG.warn(Loc::current(), "compare_spef thresholds must be non-negative.");
     return false;
   }
   if (config.cores <= 0) {
-    LOG_ERROR << "compare_spef -cores must be a positive integer.";
+    RCXLOG.warn(Loc::current(), "compare_spef -cores must be a positive integer.");
     return false;
   }
 

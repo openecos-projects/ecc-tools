@@ -23,8 +23,6 @@
 
 #include "ClusterConstraintEvaluator.hh"
 
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -35,8 +33,8 @@
 #include <utility>
 #include <vector>
 
-#include "ClockRouteSegmentRc.hh"
-#include "Log.hh"
+#include "ClockRouteSegmentRC.hh"
+#include "Logger.hh"
 #include "Pin.hh"
 #include "PinLocationHelper.hh"
 #include "Point.hh"
@@ -55,16 +53,20 @@ auto BuildBstParameters(const ClusterConfig& config, const Point<int>& routing_r
 {
   BSTRoutingConfig parameters;
   parameters.dbu_per_um = config.clock_route_segment_rc.dbu_per_um;
-  LOG_FATAL_IF(parameters.dbu_per_um <= 0) << "ClusterConstraintEvaluator: DBU-per-micron is unavailable.";
+  if (parameters.dbu_per_um <= 0) {
+    CTSLOG.error(Loc::current(), "ClusterConstraintEvaluator: DBU-per-micron is unavailable.");
+  }
   parameters.skew_bound = 0.0;
   parameters.rc_pattern = BSTRoutingRCPattern::kHV;
   parameters.topology_mode = BSTRoutingTopologyMode::kGreedyDistance;
   parameters.root_guide = routing_root;
 
-  LOG_FATAL_IF(config.clock_route_segment_rc.capacitance_per_um_pf <= 0.0)
-      << "ClusterConstraintEvaluator: clock route segment capacitance is unavailable.";
-  LOG_FATAL_IF(config.clock_route_segment_rc.resistance_per_um_ohm <= 0.0)
-      << "ClusterConstraintEvaluator: clock route segment resistance is unavailable.";
+  if (config.clock_route_segment_rc.capacitance_per_um_pf <= 0.0) {
+    CTSLOG.error(Loc::current(), "ClusterConstraintEvaluator: clock route segment capacitance is unavailable.");
+  }
+  if (config.clock_route_segment_rc.resistance_per_um_ohm <= 0.0) {
+    CTSLOG.error(Loc::current(), "ClusterConstraintEvaluator: clock route segment resistance is unavailable.");
+  }
   parameters.unit_h_cap = config.clock_route_segment_rc.capacitance_per_um_pf;
   parameters.unit_v_cap = parameters.unit_h_cap;
   parameters.unit_h_res = config.clock_route_segment_rc.resistance_per_um_ohm;
@@ -77,8 +79,7 @@ auto IsPointOverlappingAnyLoad(const Point<int>& point, const std::vector<Point<
   return std::ranges::any_of(load_locations, [&](const auto& location) -> bool { return location == point; });
 }
 
-auto LegalizeRoutingRoot(const Point<int>& raw_synthetic_root, const std::vector<Point<int>>& load_locations, Point<int>& legalized_root)
-    -> bool
+auto LegalizeRoutingRoot(const Point<int>& raw_synthetic_root, const std::vector<Point<int>>& load_locations, Point<int>& legalized_root) -> bool
 {
   legalized_root = raw_synthetic_root;
   if (!IsPointOverlappingAnyLoad(raw_synthetic_root, load_locations)) {
@@ -89,19 +90,19 @@ auto LegalizeRoutingRoot(const Point<int>& raw_synthetic_root, const std::vector
   LocalLegalization::Config legalization_config;
   legalization_config.failure_policy = LocalLegalization::FailurePolicy::kKeepOriginal;
 
-  const auto result = LocalLegalization::legalize(movable_points, load_locations, LocalLegalization::RegionType{},
-                                                  LocalLegalization::RegionType{}, legalization_config);
+  const auto result
+      = LocalLegalization::legalize(movable_points, load_locations, LocalLegalization::RegionType{}, LocalLegalization::RegionType{}, legalization_config);
 
   if (result.legalized_points.empty()) {
-    LOG_WARNING << "Cluster constraint exact-cap root legalization failed: legalization returned empty points, synthetic root "
-                << raw_synthetic_root << ".";
+    CTSLOG.warn(Loc::current(), "Cluster constraint exact-cap root legalization failed: legalization returned empty points, synthetic root ",
+                raw_synthetic_root, ".");
     return false;
   }
 
   legalized_root = result.legalized_points.front();
   if (IsPointOverlappingAnyLoad(legalized_root, load_locations)) {
-    LOG_WARNING << "Cluster constraint exact-cap root legalization failed: legalized root still overlaps load location, synthetic root "
-                << raw_synthetic_root << ", legalized root " << legalized_root << ".";
+    CTSLOG.warn(Loc::current(), "Cluster constraint exact-cap root legalization failed: legalized root still overlaps load location, synthetic root ",
+                raw_synthetic_root, ", legalized root ", legalized_root, ".");
     return false;
   }
 
@@ -120,7 +121,7 @@ auto CalcTreeWirelength(const Router::ClockSteinerTreeType& tree) -> double
 auto UpdateEstimateFromRcTree(ElectricalEstimate& estimate, RCTree& rc_tree) -> bool
 {
   if (!rc_tree.validate()) {
-    LOG_WARNING << "Cluster constraint electrical estimate got invalid RCTree.";
+    CTSLOG.warn(Loc::current(), "Cluster constraint electrical estimate got invalid RCTree.");
     return false;
   }
   const auto metrics = TimingEngine::update(rc_tree);
@@ -132,8 +133,8 @@ auto UpdateEstimateFromRcTree(ElectricalEstimate& estimate, RCTree& rc_tree) -> 
 
 }  // namespace
 
-auto ClusterConstraintEvaluator::evaluateLoads(const std::vector<Pin*>& loads, const Point<int>& routing_root, const ClusterConfig& config,
-                                               bool need_exact_cap) -> ConstraintEvaluation
+auto ClusterConstraintEvaluator::evaluateLoads(const std::vector<Pin*>& loads, const Point<int>& routing_root, const ClusterConfig& config, bool need_exact_cap)
+    -> ConstraintEvaluation
 {
   std::vector<Pin*> active_loads;
   active_loads.reserve(loads.size());
@@ -167,9 +168,8 @@ auto ClusterConstraintEvaluator::evaluateLoads(const std::vector<Pin*>& loads, c
   return evaluatePinnedLoads(active_loads, active_loads.size(), diameter, routing_root, config, need_exact_cap);
 }
 
-auto ClusterConstraintEvaluator::evaluatePinnedLoads(const std::vector<Pin*>& loads, std::size_t fanout, int diameter,
-                                                     const Point<int>& routing_root, const ClusterConfig& config, bool need_exact_cap)
-    -> ConstraintEvaluation
+auto ClusterConstraintEvaluator::evaluatePinnedLoads(const std::vector<Pin*>& loads, std::size_t fanout, int diameter, const Point<int>& routing_root,
+                                                     const ClusterConfig& config, bool need_exact_cap) -> ConstraintEvaluation
 {
   ConstraintEvaluation evaluation;
   evaluation.legal = false;
@@ -246,8 +246,8 @@ auto ClusterConstraintEvaluator::estimatePinCap(const std::vector<Pin*>& loads, 
   return total_pin_cap;
 }
 
-auto ClusterConstraintEvaluator::estimateExactCap(const std::vector<Pin*>& loads, const Point<int>& synthetic_root,
-                                                  const ClusterConfig& config) -> ElectricalEstimate
+auto ClusterConstraintEvaluator::estimateExactCap(const std::vector<Pin*>& loads, const Point<int>& synthetic_root, const ClusterConfig& config)
+    -> ElectricalEstimate
 {
   ElectricalEstimate estimate;
   estimate.exact = true;
@@ -314,7 +314,7 @@ auto ClusterConstraintEvaluator::estimateExactCap(const std::vector<Pin*>& loads
   }
 
   if (!clock_terminals.empty() && (clock_tree.node_count() == 0 || !clock_tree.validate())) {
-    LOG_WARNING << "Cluster constraint clock-aware routing returned an empty or invalid tree.";
+    CTSLOG.warn(Loc::current(), "Cluster constraint clock-aware routing returned an empty or invalid tree.");
     return estimate;
   }
 
@@ -336,8 +336,9 @@ auto ClusterConstraintEvaluator::queryPinCap(const Pin* pin, const ClusterConfig
 
   const auto iter = config.sink_pin_cap_pf_by_pin.find(pin);
   if (iter != config.sink_pin_cap_pf_by_pin.end()) {
-    LOG_FATAL_IF(!std::isfinite(iter->second)) << "ClusterConstraintEvaluator: load pin capacitance must be finite for " << pin->get_name()
-                                               << ".";
+    if (!std::isfinite(iter->second)) {
+      CTSLOG.error(Loc::current(), "ClusterConstraintEvaluator: load pin capacitance must be finite for ", pin->get_name(), ".");
+    }
     return std::max(0.0, iter->second);
   }
 
@@ -345,7 +346,7 @@ auto ClusterConstraintEvaluator::queryPinCap(const Pin* pin, const ClusterConfig
     return 0.0;
   }
 
-  LOG_FATAL << "ClusterConstraintEvaluator: load pin capacitance is missing for " << pin->get_name() << ".";
+  CTSLOG.error(Loc::current(), "ClusterConstraintEvaluator: load pin capacitance is missing for ", pin->get_name(), ".");
   return 0.0;
 }
 

@@ -51,13 +51,13 @@ class TimingReporter
   void outputReportHeader(std::ofstream* report_file, DelayType delay_type, StartEndType start_end_type);
   void outputPathGroupList(std::ofstream* report_file, DelayType delay_type, StartEndType start_end_type);
   void outputReportFooter(std::ofstream* report_file);
-  void outputTimingPathGroup(std::ofstream* report_file, TimingPathGroup& timing_path_group, DelayType delay_type,
-                             StartEndType start_end_type);
-  std::vector<TimingPath*> getReportTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type,
-                                                   StartEndType start_end_type);
+  std::vector<std::pair<std::string, TimingPath*>> getReportTimingPathList(DelayType delay_type, StartEndType start_end_type);
+  std::vector<std::pair<std::string, TimingPath*>> getSortedReportTimingPathList(DelayType delay_type,
+                                                                                 StartEndType start_end_type);
   std::vector<TimingPath*> getSortedTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type,
                                                    StartEndType start_end_type);
   std::vector<TimingPath*> getEndpointWorstTimingPathList(std::vector<TimingPath*>& timing_path_list);
+  bool isMatchReportSlack(TimingPath& timing_path);
   void outputQorSummaryReport();
   std::string getQorSummaryReportFilePath();
   std::string getQorSummaryJsonFilePath();

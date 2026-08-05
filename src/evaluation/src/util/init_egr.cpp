@@ -5,6 +5,7 @@
  * @Description:
  */
 
+#include "utility/logger/Logger.hpp"
 #include "init_egr.h"
 
 #include <any>
@@ -255,7 +256,7 @@ float InitEGR::parsePathEGRWL(std::string guide_path, std::string net_name, std:
     }
 
     if (!wire_found) {
-      std::cout << "Error: Path interrupted. Unable to reach load pin." << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Error: Path interrupted. Unable to reach load pin.");
       return -1;
     }
 
@@ -265,7 +266,7 @@ float InitEGR::parsePathEGRWL(std::string guide_path, std::string net_name, std:
     }
   }
 
-  std::cout << "Error: Reached end of wires without finding load pin." << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Error: Reached end of wires without finding load pin.");
   return -1;
 }
 

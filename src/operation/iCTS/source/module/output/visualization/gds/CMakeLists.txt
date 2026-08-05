@@ -1,0 +1,23 @@
+set(ICTS_MODULE_OUTPUT_VISUALIZATION_GDS_LAYER ${ICTS_MODULE_OUTPUT_VISUALIZATION_GDS}/layer)
+set(ICTS_MODULE_OUTPUT_VISUALIZATION_GDS_WRITER ${ICTS_MODULE_OUTPUT_VISUALIZATION_GDS}/writer)
+
+add_subdirectory(${ICTS_MODULE_OUTPUT_VISUALIZATION_GDS_WRITER})
+add_subdirectory(${ICTS_MODULE_OUTPUT_VISUALIZATION_GDS_LAYER})
+
+add_library(icts_source_module_output_visualization_gds ${ICTS_MODULE_OUTPUT_VISUALIZATION_GDS}/GDSVisualization.cc)
+
+target_link_libraries(
+  icts_source_module_output_visualization_gds
+  PRIVATE
+  icts_source_data_manager_config
+  icts_source_module_output_visualization_drawing
+  icts_source_module_output_visualization_gds_layer
+  icts_source_module_output_visualization_gds_writer
+  icts_source_toolkit_logger
+)
+
+target_include_directories(
+  icts_source_module_output_visualization_gds
+  PUBLIC
+  ${ICTS_MODULE}
+)

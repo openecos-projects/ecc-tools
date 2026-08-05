@@ -30,6 +30,7 @@ target_link_libraries(ircx_aux
     Eigen3::Eigen
     fort
     gdsii-parser
+    ircx_logger
     spef
     OpenMP::OpenMP_CXX
 )

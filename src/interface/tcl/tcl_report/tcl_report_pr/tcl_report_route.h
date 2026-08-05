@@ -18,13 +18,13 @@
 
 #include "../../tcl_definition.h"
 #include "report_manager.h"
-#include "tcl/ScriptEngine.hh"
+#include "ScriptEngine.hh"
 
 namespace tcl {
 
-using ieda::TclCmd;
-using ieda::TclOption;
-using ieda::TclStringOption;
+using ecc::TclCmd;
+using ecc::TclOption;
+using ecc::TclStringOption;
 
 class CmdReportRoute : public TclCmd
 {

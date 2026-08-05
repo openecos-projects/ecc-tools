@@ -5,6 +5,7 @@ add_executable(eval_map_layout_writer_test
 target_link_libraries(eval_map_layout_writer_test
     PRIVATE
         eval_util_map_layout_writer
+        ecc_logger
 )
 
 add_test(NAME eval_map_layout_writer_test COMMAND eval_map_layout_writer_test)
@@ -15,8 +16,9 @@ add_executable(eval_map_layout_reference_replay
 
 target_link_libraries(eval_map_layout_reference_replay
     PRIVATE
-        ieda_feature
+        ecc_feature
         idm
+        ecc_logger
 )
 
 set(EVAL_MAP_LAYOUT_REFERENCE_WORKSPACE

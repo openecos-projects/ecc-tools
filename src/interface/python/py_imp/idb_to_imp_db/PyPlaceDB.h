@@ -8,23 +8,12 @@
 #ifndef _DREAMPLACE_PLACE_IO_PYPLACEDB_H
 #define _DREAMPLACE_PLACE_IO_PYPLACEDB_H
 
-#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
-#include <pybind11/stl_bind.h>
-
-#include <sstream>
 
 #include "IdbEnum.h"
 #include "IdbInstance.h"
 #include "idm.h"
 
-// Forward declarations
-namespace ista {
-class LibTable;
-class LibCell;
-}  // namespace ista
-
-// #include <boost/timer/timer.hpp>
 namespace python_interface {
 typedef int coordinate_type;
 typedef int index_type;
@@ -105,99 +94,10 @@ struct PyPlaceDB
   pybind11::list initial_horizontal_demand_map;  ///< initial routing demand from fixed cells, indexed by (layer, grid x, grid y)
   pybind11::list initial_vertical_demand_map;    ///< initial routing demand from fixed cells, indexed by (layer, grid x, grid y)
 
-  pybind11::list net2driver_pin_map;
-
-  /* topo */
-  pybind11::list FF_ids;         //
-  pybind11::list start_points;   //
-  pybind11::list end_points;     //
-  pybind11::list clock_pins;     //
-  pybind11::list clk_pin_rtran;  //
-  pybind11::list clk_pin_ftran;  //
-  pybind11::list clk_pin_names;  ///< 1D array, pin name
-
-  pybind11::list flat_cells_by_level;          //
-  pybind11::list flat_cells_by_reverse_level;  //
-
-  pybind11::list flat_cells_by_level_start;          //
-  pybind11::list flat_cells_by_reverse_level_start;  //
-
-  /*sdc */
-  pybind11::list inrdelays;  //
-  pybind11::list infdelays;  //
-  pybind11::list inrtrans;   //
-  pybind11::list inftrans;   //
-  pybind11::list outcaps;    //
-  pybind11::list endpoints_rRAT;
-  pybind11::list endpoints_fRAT;
-
-  /*instance arcs */
-  pybind11::list net_flat_arcs_start;   //
-  pybind11::list net_flat_arcs;         //
-  pybind11::list inst_flat_arcs_start;  //
-  pybind11::list inst_flat_arcs;        //
-
-  pybind11::list endpoints_constraint_arcs;  // constraint arcs,
-
-  /* ------------------------info for gate sizing----------------------*/
-  pybind11::list main_id_2_cell_id_start;  // [num_main_type, ] main_id_2_cell_id_start + cell_width -> cell_id
-  // main_id -> cell_id
-  pybind11::list cell_id_2_arc_id_start;  //[num_lib_cells, ] cell_id_2_arc_id_start + arc_offset -> arc
-
-  pybind11::list inst_main_id;  // [inst_num, ] cell_main_id + cell_width -> cell_id
-  pybind11::list inst_size;     // [inst_num, ] cell_main_id + cell_width -> cell_id
-
-  pybind11::list cell_id_2_libpin_id_start;  // [num_lib_cells, ] cell_id_2_libpin_id_start[cell_id] + lib_pin_offset -> libpin_id
-  pybind11::list pin_2_libpin_offset;
-  pybind11::list flat_lib_pin_cap;         //
-  pybind11::list flat_lib_pin_rcap;        //
-  pybind11::list flat_lib_pin_fcap;        //
-  pybind11::list flat_lib_pin_cap_limit;   //
-  pybind11::list flat_lib_pin_slew_limit;  //
-
-  /* ------------------------end info for gate sizing----------------------*/
-
-  /**/
-  /* luts table*/
-  pybind11::list f_delay_flat_luts_values;       // Forward delay flat LUT values
-  pybind11::list f_delay_flat_luts_trans_table;  // Forward delay flat LUT transition table
-  pybind11::list f_delay_flat_luts_cap_table;    // Forward delay flat LUT capacitance table
-  pybind11::list f_delay_flat_luts_dim;          // Forward delay flat LUT dimensions
-
-  pybind11::list r_delay_flat_luts_values;       // Reverse delay flat LUT values
-  pybind11::list r_delay_flat_luts_trans_table;  // Reverse delay flat LUT transition table
-  pybind11::list r_delay_flat_luts_cap_table;    // Reverse delay flat LUT capacitance table
-  pybind11::list r_delay_flat_luts_dim;          // Reverse delay flat LUT dimensions
-
-  pybind11::list f_trans_flat_luts_values;       // Forward transition flat LUT values
-  pybind11::list f_trans_flat_luts_trans_table;  // Forward transition flat LUT transition table
-  pybind11::list f_trans_flat_luts_cap_table;    // Forward transition flat LUT capacitance table
-  pybind11::list f_trans_flat_luts_dim;          // Forward transition flat LUT dimensions
-
-  pybind11::list r_trans_flat_luts_values;       // Reverse transition flat LUT values
-  pybind11::list r_trans_flat_luts_trans_table;  // Reverse transition flat LUT transition table
-  pybind11::list r_trans_flat_luts_cap_table;    // Reverse transition flat LUT capacitance table
-  pybind11::list r_trans_flat_luts_dim;          // Reverse transition flat LUT dimensions
-
-  // 把rise setup 存到 r_delay
-  // 把clk trans 存到 trans
-  // 把data trans 存到 cap
-
-  /*-------------RC------------*/
-  double c_unit;
-  double r_unit;
-
   int xl;
   int yl;
   int xh;
   int yh;
-
-  int origin_xl;
-  int origin_yl;
-  int origin_xh;
-  int origin_yh;
-
-  int origin_row_height;
 
   int row_height;
   int site_width;
@@ -207,37 +107,14 @@ struct PyPlaceDB
 
   int num_movable_pins;
 
-  /// for contest
-  double _bin_scale;
-  bool _is_same_tech;
-
-  PyPlaceDB() {}
-
   PyPlaceDB(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta)
   {
     set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta);
   }
 
   void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta);
-  void set_sta();
   void init_routability(idm::DataManager* db, std::vector<IdbInstance*> inst_resort_list);
-  void init_timing(idm::DataManager* db, std::unordered_map<std::string, int>& mPin2ID, std::unordered_map<std::string, int>& mClkPin2ID,
-                   std::map<std::string, index_type>& mNodeName2ID, std::vector<IdbInstance*>& inst_resort_list, int ext_blockage_num);
   std::vector<std::vector<float>> getCongestionMap(string method = "max", string stage = "egr3D", string resolve_congestion = "low");
-
- private:
-  // 统一的LUT表格初始化函数
-  void init_lut_table_unified(pybind11::list& flat_luts_values, pybind11::list& flat_luts_axis1_table,
-                              pybind11::list& flat_luts_axis2_table, pybind11::list& flat_luts_dim, ista::LibTable* table,
-                              ista::LibCell* lib_cell, bool is_constraint_table = false);
-  std::string getLibPinName(std::string libpin_name)
-  {
-    auto bracket_pos = libpin_name.find('[');
-    if (bracket_pos != string::npos) {
-      libpin_name = libpin_name.substr(0, bracket_pos);
-    }
-    return libpin_name;
-  }
 };
 
 }  // namespace python_interface

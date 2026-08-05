@@ -7,10 +7,10 @@ add_library(
 target_link_libraries(
   icts_source_module_routing_helper
   PUBLIC
-  icts_source_database_routing
-  icts_source_database_spatial
+  icts_source_data_manager_routing
+  icts_source_data_manager_spatial
   PRIVATE
-  icts_source_database_design
+  icts_source_data_manager_design
   salt
 )
 

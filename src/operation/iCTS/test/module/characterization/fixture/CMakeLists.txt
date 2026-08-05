@@ -10,7 +10,6 @@ target_link_libraries(
   PUBLIC
     icts_test_base
   PRIVATE
-    icts_test_common_io
-    icts_test_common_scoped_log_file
-    icts_test_common_realtech_setup
+    icts_test_toolkit_io
+    icts_test_data_manager_realtech_setup
 )

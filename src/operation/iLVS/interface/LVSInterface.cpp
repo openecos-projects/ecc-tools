@@ -24,7 +24,9 @@
 #include <vector>
 
 #include "IdbDesign.h"
+#include "IdbDie.h"
 #include "IdbInstance.h"
+#include "IdbLayout.h"
 #include "IdbNet.h"
 #include "IdbPins.h"
 #include "IdbSpecialNet.h"
@@ -206,8 +208,21 @@ DefData LVSInterface::wrapDefData(idb::IdbDesign* design)
 {
   DefData def_data;
   wrapDesignData(design, def_data);
+  wrapDie(design, def_data);
   wrapDefRoutingData(design, def_data);
   return def_data;
+}
+
+void LVSInterface::wrapDie(idb::IdbDesign* design, DefData& def_data)
+{
+  if (design == nullptr || design->get_layout() == nullptr || design->get_layout()->get_die() == nullptr) {
+    return;
+  }
+
+  idb::IdbDie* idb_die = design->get_layout()->get_die();
+  Die& die = def_data.get_die();
+  die.set_real_ll(idb_die->get_llx(), idb_die->get_lly());
+  die.set_real_ur(idb_die->get_urx(), idb_die->get_ury());
 }
 
 void LVSInterface::wrapDesignData(idb::IdbDesign* design, DesignData& design_data)
@@ -415,8 +430,7 @@ void LVSInterface::wrapNetRoutingData(idb::IdbDesign* design, DefData& def_data)
                 wrapRoutingDataVia(via, net_routing_data);
               }
             } else if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && (segment->is_wire() || segment->is_rect())) {
-              net_routing_data.get_wire_routing_shape_list().push_back(
-                  wrapRoutingDataShape(segment->get_layer(), getPhysicalSegmentRect(segment), false));
+              net_routing_data.get_wire_routing_shape_list().push_back(wrapRoutingDataShape(segment->get_layer(), getPhysicalSegmentRect(segment)));
             }
           }
         }
@@ -461,7 +475,7 @@ void LVSInterface::wrapRoutingDataPin(const std::string& net_name, idb::IdbPin* 
       if (rect == nullptr) {
         continue;
       }
-      terminal_routing_shape_list.push_back(wrapRoutingDataShape(layer_shape->get_layer(), *rect, false));
+      terminal_routing_shape_list.push_back(wrapRoutingDataShape(layer_shape->get_layer(), *rect));
     }
   }
   if (!terminal_routing_shape_list.empty()) {
@@ -470,12 +484,11 @@ void LVSInterface::wrapRoutingDataPin(const std::string& net_name, idb::IdbPin* 
   }
 }
 
-RoutingShape LVSInterface::wrapRoutingDataShape(idb::IdbLayer* layer, const idb::IdbRect& rect, const bool is_supply_route_shape)
+RoutingShape LVSInterface::wrapRoutingDataShape(idb::IdbLayer* layer, const idb::IdbRect& rect)
 {
   RoutingShape routing_shape;
   routing_shape.set_shape(wrapShape(layer->get_id(), rect));
   routing_shape.set_layer_order(layer->get_order());
-  routing_shape.set_is_supply_route_shape(is_supply_route_shape);
   return routing_shape;
 }
 
@@ -493,8 +506,8 @@ void LVSInterface::wrapRoutingDataVia(idb::IdbVia* via, NetRoutingData& net_rout
   }
 
   RoutingVia routing_via;
-  routing_via.set_bottom_routing_shape(wrapRoutingDataShape(bottom_shape.get_layer(), bottom_shape.get_bounding_box(), false));
-  routing_via.set_top_routing_shape(wrapRoutingDataShape(top_shape.get_layer(), top_shape.get_bounding_box(), false));
+  routing_via.set_bottom_routing_shape(wrapRoutingDataShape(bottom_shape.get_layer(), bottom_shape.get_bounding_box()));
+  routing_via.set_top_routing_shape(wrapRoutingDataShape(top_shape.get_layer(), top_shape.get_bounding_box()));
   net_routing_data.get_routing_via_list().push_back(std::move(routing_via));
 }
 
@@ -562,12 +575,11 @@ void LVSInterface::wrapSpecialNetRoutingData(idb::IdbDesign* design, DefData& de
             } else if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && segment->is_line()) {
               net_routing_data.get_wire_routing_shape_list().push_back(
                   wrapRoutingDataShape(segment->get_layer(),
-                                       idb::IdbRect(segment->get_point_start(), segment->get_point_second(), segment->get_route_width()),
-                                       is_power_net || is_ground_net));
+                                       idb::IdbRect(segment->get_point_start(), segment->get_point_second(), segment->get_route_width())));
             } else if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && segment->is_rect()
                        && segment->get_delta_rect() != nullptr) {
               net_routing_data.get_wire_routing_shape_list().push_back(
-                  wrapRoutingDataShape(segment->get_layer(), *segment->get_delta_rect(), is_power_net || is_ground_net));
+                  wrapRoutingDataShape(segment->get_layer(), *segment->get_delta_rect()));
             }
           }
         }

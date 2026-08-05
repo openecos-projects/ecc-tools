@@ -40,8 +40,7 @@ namespace realtech_fixture = characterization::realtech;
 TEST(CharacterizationRealTechExactRegressionTest, ExactComposePowerAccountingProducesComparableDirectReport)
 {
   realtech_fixture::RealTechCharFixture char_fixture;
-  if (const auto prepare_error = char_fixture.prepare("exact_compose_power_accounting", std::nullopt, 0.0, 0.0);
-      prepare_error.has_value()) {
+  if (const auto prepare_error = char_fixture.prepare("exact_compose_power_accounting", std::nullopt, 0.0, 0.0); prepare_error.has_value()) {
     GTEST_SKIP() << *prepare_error;
     return;
   }
@@ -65,8 +64,8 @@ TEST(CharacterizationRealTechExactRegressionTest, ExactComposePowerAccountingPro
   ASSERT_FALSE(frontier_by_length.at(length_50_idx).empty());
   ASSERT_FALSE(frontier_by_length.at(length_100_idx).empty());
 
-  auto exact_segment_100_raw = realtech_fixture::ComposeSegmentEntriesExact(frontier_by_length.at(length_50_idx),
-                                                                            frontier_by_length.at(length_50_idx), segment_context);
+  auto exact_segment_100_raw
+      = realtech_fixture::ComposeSegmentEntriesExact(frontier_by_length.at(length_50_idx), frontier_by_length.at(length_50_idx), segment_context);
   ASSERT_FALSE(exact_segment_100_raw.empty());
   auto exact_segment_100_frontier = realtech_fixture::BuildSegmentStateFrontier(exact_segment_100_raw, segment_context);
   ASSERT_FALSE(exact_segment_100_frontier.empty());
@@ -159,15 +158,13 @@ TEST(CharacterizationRealTechExactRegressionTest, ExactComposePowerAccountingPro
   report_stream << "sum_direct_delay_ns=" << sum_direct_delay_ns << "\n";
   report_stream << "sum_exact_delay_ns=" << sum_exact_delay_ns << "\n";
   report_stream << "sum_delay_delta_ns=" << (sum_exact_delay_ns - sum_direct_delay_ns) << "\n";
-  report_stream << "delay_ratio_exact_over_direct=" << (sum_direct_delay_ns > 0.0 ? (sum_exact_delay_ns / sum_direct_delay_ns) : 0.0)
-                << "\n";
+  report_stream << "delay_ratio_exact_over_direct=" << (sum_direct_delay_ns > 0.0 ? (sum_exact_delay_ns / sum_direct_delay_ns) : 0.0) << "\n";
   report_stream << "worst_power_underestimate_w=" << worst_power_underestimate_w << "\n";
   report_stream << "worst_power_underestimate_example=" << worst_power_example << "\n";
   report_stream << "worst_delay_underestimate_ns=" << worst_delay_underestimate_ns << "\n";
   report_stream << "worst_delay_underestimate_example=" << worst_delay_example << "\n";
 
-  ASSERT_TRUE(realtech_fixture::WriteScenarioLog("exact_compose_power_accounting", "exact_compose_power_accounting_report.txt",
-                                                 report_stream.str()));
+  ASSERT_TRUE(realtech_fixture::WriteScenarioReport("exact_compose_power_accounting", "exact_compose_power_accounting_report.txt", report_stream.str()));
 }
 
 }  // namespace

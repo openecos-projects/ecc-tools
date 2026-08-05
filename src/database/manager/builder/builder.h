@@ -31,6 +31,7 @@
  *
  */
 
+#include "utility/logger/Logger.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -68,7 +69,7 @@ class IdbBuilder
   IdbDefService* buildDef(string file);
   IdbDefService* buildDefGzip(string gzip_file);
   IdbLefService* buildLef(vector<string>& files, bool b_techfile = false);
-  IdbDefService* rustBuildVerilog(string file, std::string top_module_name = "asic_top");
+  IdbDefService* buildVerilog(string file, std::string top_module_name = "asic_top");
 
   IdbDefService* buildDefFloorplan(string file);
 
@@ -114,22 +115,22 @@ class IdbBuilder
     logNumber(mudule, number);
     // logSeperate();
   }
-  void logSeperate() { std::cout << "**************************************************************" << std::endl; }
+  void logSeperate() { ECCLOG.info(ecc::Loc::current(), "**************************************************************"); }
   void logNumber(string mudule, int32_t number = -1)
   {
-    std::cout << mudule;
+    ECCLOG.info(ecc::Loc::current(), mudule);
     if (number != -1) {
-      std::cout << " number : " << number;
+      ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    std::cout << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "");
   }
   void logInfo(string info, int32_t number = -1)
   {
-    std::cout << info;
+    ECCLOG.info(ecc::Loc::current(), info);
     if (number != -1) {
-      std::cout << " number : " << number;
+      ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    std::cout << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "");
   }
 
  private:

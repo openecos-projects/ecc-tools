@@ -29,11 +29,19 @@ class Config
   // **********        STA        ********** //
   std::string temp_directory_path;  // required
   int32_t thread_number;            // optional
-  int32_t path_report_number;       // optional
+  int32_t path_report_number = 1;   // optional, report_timing -max_paths
+  int32_t endpoint_path_report_number = 1;  // optional, report_timing -nworst
   int32_t output_timing_reports = 1;
   int32_t output_timing_features = 1;
   int32_t timing_path_limit = 20;
   std::string timing_corner;
+  std::string timing_report_delay_type = "max";
+  std::string timing_report_start_end_type = "all";
+  bool is_path_report_number_specified = false;
+  bool has_timing_report_slack_lesser_than = false;
+  bool has_timing_report_slack_greater_than = false;
+  double timing_report_slack_lesser_than = 0.0;
+  double timing_report_slack_greater_than = 0.0;
   /////////////////////////////////////////////
   // **********        STA        ********** //
   std::string log_file_path;  // building

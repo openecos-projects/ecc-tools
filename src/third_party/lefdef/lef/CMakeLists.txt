@@ -6,6 +6,9 @@ project(LEF_PARSER
 cmake_minimum_required(VERSION 3.11)
 
 set(LEFLIB_HOME ${CMAKE_CURRENT_SOURCE_DIR})
+set(LEF_GENERATED_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated)
+set(LEF_PARSER_SOURCE ${LEF_GENERATED_DIRECTORY}/lef.tab.cpp)
+set(LEF_PARSER_HEADER ${LEF_GENERATED_DIRECTORY}/lef.tab.h)
 # message(STATUS "leflib_home: ${LEFLIB_HOME}")
 
 # BISON and ZLIB are required to compile LEF/LEF Parsers.
@@ -36,7 +39,7 @@ set( LEFLIB_LEF_SRC
   lef/lefrData.cpp
   lef/lefrReader.cpp
   lef/lefrSettings.cpp
-  lef/lef.tab.cpp
+  ${LEF_PARSER_SOURCE}
   lef/lefwWriterCalls.cpp
   lef/lefwWriter.cpp
   )
@@ -46,7 +49,7 @@ set( LEFLIB_LEFZLIB_SRC
   )
 
 set (LEFLIB_HEADERS
-  lef/lef.tab.h
+  ${LEF_PARSER_HEADER}
   lef/lex.h
   lef/crypt.hpp
   lef/lefiArray.hpp
@@ -77,14 +80,21 @@ set (LEFLIB_HEADERS
 )
 
 # BISON dependencies
-add_custom_command( 
-  OUTPUT ${LEFLIB_HOME}/lef/lef.tab.cpp
-  COMMAND ${BISON_EXECUTABLE} -v -plefyy -d ${LEFLIB_HOME}/lef/lef.y
-  COMMAND mv lef.tab.h ${LEFLIB_HOME}/lef/lef.tab.h
-  COMMAND mv lef.tab.c ${LEFLIB_HOME}/lef/lef.tab.cpp
+add_custom_command(
+  OUTPUT
+    ${LEF_PARSER_SOURCE}
+    ${LEF_PARSER_HEADER}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${LEF_GENERATED_DIRECTORY}
+  COMMAND ${BISON_EXECUTABLE}
+          --no-lines
+          -plefyy
+          --defines=${LEF_PARSER_HEADER}
+          --output=${LEF_PARSER_SOURCE}
+          ${LEFLIB_HOME}/lef/lef.y
   DEPENDS ${LEFLIB_HOME}/lef/lef.y
+  VERBATIM
 )
-add_custom_target(LefBisonTarget ALL DEPENDS lef/lef.tab.cpp)
+add_custom_target(LefBisonTarget ALL DEPENDS ${LEF_PARSER_SOURCE} ${LEF_PARSER_HEADER})
 
 
 add_library( lef ${LEFLIB_LEF_SRC} )
@@ -111,6 +121,7 @@ set_target_properties( lefzlib
 # include directory settings
 target_include_directories( lef
   PUBLIC
+  ${LEF_GENERATED_DIRECTORY}
   lef
   )
 

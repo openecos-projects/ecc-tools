@@ -26,30 +26,38 @@
 #include "ScriptEngine.hh"
 #include "json.hpp"
 
+#include "utility/logger/Logger.hpp"
 using ordered_json = nlohmann::ordered_json;
 
 namespace tcl {
 
-using ieda::ScriptEngine;
-using ieda::TclCmd;
-using ieda::TclCmds;
-using ieda::TclDoubleListOption;
-using ieda::TclDoubleOption;
-using ieda::TclIntListOption;
-using ieda::TclIntOption;
-using ieda::TclOption;
-using ieda::TclStringListOption;
-using ieda::TclStringOption;
-using ieda::TclSwitchOption;
+using ecc::ScriptEngine;
+using ecc::TclCmd;
+using ecc::TclCmds;
+using ecc::TclDoubleListOption;
+using ecc::TclDoubleOption;
+using ecc::TclIntListOption;
+using ecc::TclIntOption;
+using ecc::TclOption;
+using ecc::TclStringListOption;
+using ecc::TclStringListListOption;
+using ecc::TclStringListListListOption;
+using ecc::TclStringListListListListOption;
+using ecc::TclStringOption;
+using ecc::TclSwitchOption;
 
 enum class ValueType
 {
+  kNone,
   kInt,
   kIntList,
   kDouble,
   kDoubleList,
   kString,
   kStringList,
+  kStringListList,
+  kStringListListList,
+  kStringListListListList,
   kStringDoubleMap
 };
 
@@ -73,7 +81,7 @@ class TclUtil : public TclCmd
       // Remove the first character '-' from the parameter list.
       std::string sub_key = key.substr(1, key.size() - 1);
       if (!modifyJsonValue(j, sub_key, value)) {
-        std::cerr << "The key is not found." << sub_key << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "The key is not found.", sub_key);
       }
     }
   }
@@ -98,9 +106,12 @@ class TclUtil : public TclCmd
           }else if (value.type() == typeid(std::vector<std::string>)){
             item.value() = std::any_cast<std::vector<std::string>>(value);
             modified = true;
+          }else if (value.type() == typeid(std::vector<std::vector<std::string>>)){
+            item.value() = std::any_cast<std::vector<std::vector<std::string>>>(value);
+            modified = true;
           }
         } catch (const std::bad_any_cast& e) {
-            std::cerr << "Type trans error: " << e.what() << std::endl;
+            ECCLOG.warn(ecc::Loc::current(), "Type trans error: ", e.what());
         }
         break;
       } else if (item.value().is_object()) {

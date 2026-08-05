@@ -35,18 +35,18 @@
 #include "IdbInstance.h"
 #include "IdbNet.h"
 #include "IdbPins.h"
-#include "common/io/TestArtifactIO.hh"
-#include "database/config/Config.hh"
-#include "database/design/Clock.hh"
-#include "database/design/Design.hh"
-#include "database/io/Wrapper.hh"
+#include "data_manager/DataManager.hh"
+#include "data_manager/config/Config.hh"
+#include "data_manager/design/Clock.hh"
+#include "data_manager/design/Design.hh"
+#include "data_manager/io/Wrapper.hh"
 #include "dm_config.h"
 #include "idm.h"
-#include "setup/clock_data/ClockDataRead.hh"
+#include "toolkit/io/TestArtifactIO.hh"
 
 namespace icts_test::fast_clustering::realtech {
 namespace {
-using common::io::SanitizeOutputName;
+using toolkit::io::SanitizeOutputName;
 
 auto LoadTechnologyOnce(const TechAssets& assets, std::string& error) -> bool
 {
@@ -130,8 +130,8 @@ auto BuildClockNetCandidate(idb::IdbNet* idb_net) -> ClockNetCandidate
   }
 
   std::ostringstream reason_stream;
-  reason_stream << "idb_clock=" << candidate.idb_clock << ",name_clock_like=" << candidate.name_clock_like
-                << ",clock_pin_count=" << candidate.clock_pin_count << ",inst_load_count=" << candidate.inst_load_count;
+  reason_stream << "idb_clock=" << candidate.idb_clock << ",name_clock_like=" << candidate.name_clock_like << ",clock_pin_count=" << candidate.clock_pin_count
+                << ",inst_load_count=" << candidate.inst_load_count;
   candidate.reason = reason_stream.str();
   return candidate;
 }
@@ -164,10 +164,9 @@ auto SelectClockNetCandidate(idb::IdbDesign* idb_design) -> std::optional<ClockN
 auto LoadBenchmarkCase(const BenchmarkCase& benchmark_case, const TechAssets& assets, const std::filesystem::path& output_dir) -> LoadedCase
 {
   LoadedCase loaded;
-  icts_test::runtime::CurrentRuntime().config.reset();
-  icts_test::runtime::CurrentRuntime().config.init(assets.cts_config_path.string());
-  icts_test::runtime::CurrentRuntime().config.set_work_dir(
-      (output_dir / "cts_workspace" / SanitizeOutputName(benchmark_case.case_name)).string());
+  CTSDM.getConfig().reset();
+  CTSDM.getConfig().init(assets.cts_config_path.string());
+  CTSDM.getConfig().set_work_dir((output_dir / "cts_workspace" / SanitizeOutputName(benchmark_case.case_name)).string());
 
   std::string tech_error;
   if (!LoadTechnologyOnce(assets, tech_error)) {
@@ -191,7 +190,7 @@ auto LoadBenchmarkCase(const BenchmarkCase& benchmark_case, const TechAssets& as
     return loaded;
   }
 
-  icts_test::runtime::CurrentRuntime().design.reset();
+  CTSDM.getDesign().reset();
   auto* idb_design = dmInst->get_idb_design();
   if (idb_design == nullptr) {
     loaded.error = "iDB design is null after load";
@@ -202,27 +201,24 @@ auto LoadBenchmarkCase(const BenchmarkCase& benchmark_case, const TechAssets& as
     return loaded;
   }
 
-  icts_test::runtime::CurrentRuntime().wrapper.reset();
-  icts_test::runtime::CurrentRuntime().wrapper.init(idb_builder);
-  auto& runtime = icts_test::runtime::CurrentRuntime();
-  if (!icts::ClockDataRead::read(icts::ClockDataReadInput{
-          .config = &runtime.config,
-          .design = &runtime.design,
-          .wrapper = &runtime.wrapper,
-          .reporter = &runtime.reporter,
-      })) {
-    loaded.error = "readClockData failed for SDC-declared clocks";
+  const auto input_status = CTSDM.input(icts::DataManagerInput{
+      .config_file = assets.cts_config_path.string(),
+      .work_dir = (output_dir / "cts_workspace" / SanitizeOutputName(benchmark_case.case_name)).string(),
+  });
+  if (!input_status.ok()) {
+    loaded.error = "CTS data input failed: " + input_status.message;
     return loaded;
   }
 
-  loaded.dbu_per_micron = icts_test::runtime::CurrentRuntime().wrapper.queryDbUnit();
-  if (loaded.dbu_per_micron <= 0) {
+  const auto dbu_per_micron = CTSDM.getWrapper().queryDbUnit();
+  if (!dbu_per_micron.has_value() || *dbu_per_micron <= 0) {
     loaded.error = "DBU-per-micron unavailable after DEF load";
     return loaded;
   }
+  loaded.dbu_per_micron = *dbu_per_micron;
   loaded.inst_count = idb_design->get_instance_list() == nullptr ? 0U : idb_design->get_instance_list()->get_instance_list().size();
   loaded.net_count = idb_design->get_net_list() == nullptr ? 0U : idb_design->get_net_list()->get_net_list().size();
-  const auto clocks = icts_test::runtime::CurrentRuntime().design.get_clocks();
+  const auto clocks = CTSDM.getDesign().get_clocks();
   loaded.clock_count = clocks.size();
   for (auto* clock : clocks) {
     if (clock == nullptr || clock->get_loads().size() <= loaded.loads.size()) {

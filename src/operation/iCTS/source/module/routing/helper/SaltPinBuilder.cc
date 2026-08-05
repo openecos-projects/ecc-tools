@@ -38,12 +38,10 @@ auto BuildSaltPins(const ClockRoutingTerminal& driver_terminal, const std::vecto
 {
   std::vector<std::shared_ptr<salt::Pin>> salt_pins;
   salt_pins.reserve(load_terminals.size() + 1);
-  salt_pins.push_back(
-      std::make_shared<salt::Pin>(driver_terminal.location.get_x(), driver_terminal.location.get_y(), 0, driver_terminal.pin_cap));
+  salt_pins.push_back(std::make_shared<salt::Pin>(driver_terminal.location.get_x(), driver_terminal.location.get_y(), 0, driver_terminal.pin_cap));
   for (std::size_t i = 0; i < load_terminals.size(); ++i) {
     const auto& terminal = load_terminals.at(i);
-    salt_pins.push_back(
-        std::make_shared<salt::Pin>(terminal.location.get_x(), terminal.location.get_y(), static_cast<int>(i + 1), terminal.pin_cap));
+    salt_pins.push_back(std::make_shared<salt::Pin>(terminal.location.get_x(), terminal.location.get_y(), static_cast<int>(i + 1), terminal.pin_cap));
   }
   return salt_pins;
 }

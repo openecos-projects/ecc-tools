@@ -44,8 +44,7 @@ class BSTRouter
 
   static auto buildTree(const std::vector<Terminal>& load_terminals, const BSTRoutingConfig& parameters) -> ClockSteinerTreeType;
 
-  static auto buildTreeFromTopology(const ClockSteinerTreeType& source_route_tree, const BSTRoutingConfig& parameters)
-      -> ClockSteinerTreeType;
+  static auto buildTreeFromTopology(const ClockSteinerTreeType& source_route_tree, const BSTRoutingConfig& parameters) -> ClockSteinerTreeType;
 };
 
 }  // namespace icts

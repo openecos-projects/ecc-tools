@@ -65,30 +65,23 @@ TEST(CharacterizationRealTechExactRegressionTest, IterOneFunctionComposeGapRepor
   ASSERT_FALSE(linear_models.empty());
   ASSERT_FALSE(quadratic_models.empty());
 
-  const auto linear_raw_length_two
-      = AnalyzeFunctionComposeGap("raw", 2U, FitBasisKind::kLinear, builder.get_segment_chars(), segment_context, linear_models, grid,
-                                  builder.get_max_slew(), builder.get_max_cap());
-  const auto linear_raw_length_three
-      = AnalyzeFunctionComposeGap("raw", 3U, FitBasisKind::kLinear, builder.get_segment_chars(), segment_context, linear_models, grid,
-                                  builder.get_max_slew(), builder.get_max_cap());
-  const auto quadratic_raw_length_two
-      = AnalyzeFunctionComposeGap("raw", 2U, FitBasisKind::kQuadratic, builder.get_segment_chars(), segment_context, quadratic_models, grid,
-                                  builder.get_max_slew(), builder.get_max_cap());
-  const auto quadratic_raw_length_three
-      = AnalyzeFunctionComposeGap("raw", 3U, FitBasisKind::kQuadratic, builder.get_segment_chars(), segment_context, quadratic_models, grid,
-                                  builder.get_max_slew(), builder.get_max_cap());
-  const auto linear_frontier_length_two
-      = AnalyzeFunctionComposeGap("frontier", 2U, FitBasisKind::kLinear, direct_frontier_by_length.at(2U), segment_context, linear_models,
-                                  grid, builder.get_max_slew(), builder.get_max_cap());
-  const auto linear_frontier_length_three
-      = AnalyzeFunctionComposeGap("frontier", 3U, FitBasisKind::kLinear, direct_frontier_by_length.at(3U), segment_context, linear_models,
-                                  grid, builder.get_max_slew(), builder.get_max_cap());
-  const auto quadratic_frontier_length_two
-      = AnalyzeFunctionComposeGap("frontier", 2U, FitBasisKind::kQuadratic, direct_frontier_by_length.at(2U), segment_context,
-                                  quadratic_models, grid, builder.get_max_slew(), builder.get_max_cap());
+  const auto linear_raw_length_two = AnalyzeFunctionComposeGap("raw", 2U, FitBasisKind::kLinear, builder.get_segment_chars(), segment_context, linear_models,
+                                                               grid, builder.get_max_slew(), builder.get_max_cap());
+  const auto linear_raw_length_three = AnalyzeFunctionComposeGap("raw", 3U, FitBasisKind::kLinear, builder.get_segment_chars(), segment_context, linear_models,
+                                                                 grid, builder.get_max_slew(), builder.get_max_cap());
+  const auto quadratic_raw_length_two = AnalyzeFunctionComposeGap("raw", 2U, FitBasisKind::kQuadratic, builder.get_segment_chars(), segment_context,
+                                                                  quadratic_models, grid, builder.get_max_slew(), builder.get_max_cap());
+  const auto quadratic_raw_length_three = AnalyzeFunctionComposeGap("raw", 3U, FitBasisKind::kQuadratic, builder.get_segment_chars(), segment_context,
+                                                                    quadratic_models, grid, builder.get_max_slew(), builder.get_max_cap());
+  const auto linear_frontier_length_two = AnalyzeFunctionComposeGap("frontier", 2U, FitBasisKind::kLinear, direct_frontier_by_length.at(2U), segment_context,
+                                                                    linear_models, grid, builder.get_max_slew(), builder.get_max_cap());
+  const auto linear_frontier_length_three = AnalyzeFunctionComposeGap("frontier", 3U, FitBasisKind::kLinear, direct_frontier_by_length.at(3U), segment_context,
+                                                                      linear_models, grid, builder.get_max_slew(), builder.get_max_cap());
+  const auto quadratic_frontier_length_two = AnalyzeFunctionComposeGap("frontier", 2U, FitBasisKind::kQuadratic, direct_frontier_by_length.at(2U),
+                                                                       segment_context, quadratic_models, grid, builder.get_max_slew(), builder.get_max_cap());
   const auto quadratic_frontier_length_three
-      = AnalyzeFunctionComposeGap("frontier", 3U, FitBasisKind::kQuadratic, direct_frontier_by_length.at(3U), segment_context,
-                                  quadratic_models, grid, builder.get_max_slew(), builder.get_max_cap());
+      = AnalyzeFunctionComposeGap("frontier", 3U, FitBasisKind::kQuadratic, direct_frontier_by_length.at(3U), segment_context, quadratic_models, grid,
+                                  builder.get_max_slew(), builder.get_max_cap());
 
   ASSERT_GT(linear_raw_length_two.evaluated_count, 0U);
   ASSERT_GT(linear_raw_length_three.evaluated_count, 0U);
@@ -121,15 +114,13 @@ TEST(CharacterizationRealTechExactRegressionTest, IterOneFunctionComposeGapRepor
   AppendFunctionComposeGapStats(report_stream, quadratic_frontier_length_two, grid);
   AppendFunctionComposeGapStats(report_stream, quadratic_frontier_length_three, grid);
 
-  ASSERT_TRUE(
-      realtech_fixture::WriteScenarioLog("iter1_function_compose_gap", "iter1_function_compose_gap_report.txt", report_stream.str()));
+  ASSERT_TRUE(realtech_fixture::WriteScenarioReport("iter1_function_compose_gap", "iter1_function_compose_gap_report.txt", report_stream.str()));
 }
 
 TEST(CharacterizationRealTechExactRegressionTest, IterOneStructuralCapFunctionComposeGapReport)
 {
   realtech_fixture::RealTechCharFixture char_fixture;
-  if (const auto prepare_error = char_fixture.prepare("iter1_structural_cap_function_compose_gap", std::nullopt, 0.0, 0.0);
-      prepare_error.has_value()) {
+  if (const auto prepare_error = char_fixture.prepare("iter1_structural_cap_function_compose_gap", std::nullopt, 0.0, 0.0); prepare_error.has_value()) {
     GTEST_SKIP() << *prepare_error;
     return;
   }
@@ -159,30 +150,30 @@ TEST(CharacterizationRealTechExactRegressionTest, IterOneStructuralCapFunctionCo
   ASSERT_FALSE(quadratic_models.empty());
   ASSERT_FALSE(cap_operators.empty());
 
-  const auto linear_raw_length_two = AnalyzeStructuralCapFunctionComposeGap(
-      "raw_structural_cap", 2U, FitBasisKind::kLinear, builder.get_segment_chars(), segment_context, linear_models, cap_operators, grid,
-      builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
-  const auto linear_raw_length_three = AnalyzeStructuralCapFunctionComposeGap(
-      "raw_structural_cap", 3U, FitBasisKind::kLinear, builder.get_segment_chars(), segment_context, linear_models, cap_operators, grid,
-      builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
-  const auto quadratic_raw_length_two = AnalyzeStructuralCapFunctionComposeGap(
-      "raw_structural_cap", 2U, FitBasisKind::kQuadratic, builder.get_segment_chars(), segment_context, quadratic_models, cap_operators,
-      grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
-  const auto quadratic_raw_length_three = AnalyzeStructuralCapFunctionComposeGap(
-      "raw_structural_cap", 3U, FitBasisKind::kQuadratic, builder.get_segment_chars(), segment_context, quadratic_models, cap_operators,
-      grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
-  const auto linear_frontier_length_two = AnalyzeStructuralCapFunctionComposeGap(
-      "frontier_structural_cap", 2U, FitBasisKind::kLinear, direct_frontier_by_length.at(2U), segment_context, linear_models, cap_operators,
-      grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
-  const auto linear_frontier_length_three = AnalyzeStructuralCapFunctionComposeGap(
-      "frontier_structural_cap", 3U, FitBasisKind::kLinear, direct_frontier_by_length.at(3U), segment_context, linear_models, cap_operators,
-      grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
-  const auto quadratic_frontier_length_two = AnalyzeStructuralCapFunctionComposeGap(
-      "frontier_structural_cap", 2U, FitBasisKind::kQuadratic, direct_frontier_by_length.at(2U), segment_context, quadratic_models,
-      cap_operators, grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
-  const auto quadratic_frontier_length_three = AnalyzeStructuralCapFunctionComposeGap(
-      "frontier_structural_cap", 3U, FitBasisKind::kQuadratic, direct_frontier_by_length.at(3U), segment_context, quadratic_models,
-      cap_operators, grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
+  const auto linear_raw_length_two
+      = AnalyzeStructuralCapFunctionComposeGap("raw_structural_cap", 2U, FitBasisKind::kLinear, builder.get_segment_chars(), segment_context, linear_models,
+                                               cap_operators, grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
+  const auto linear_raw_length_three
+      = AnalyzeStructuralCapFunctionComposeGap("raw_structural_cap", 3U, FitBasisKind::kLinear, builder.get_segment_chars(), segment_context, linear_models,
+                                               cap_operators, grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
+  const auto quadratic_raw_length_two
+      = AnalyzeStructuralCapFunctionComposeGap("raw_structural_cap", 2U, FitBasisKind::kQuadratic, builder.get_segment_chars(), segment_context,
+                                               quadratic_models, cap_operators, grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
+  const auto quadratic_raw_length_three
+      = AnalyzeStructuralCapFunctionComposeGap("raw_structural_cap", 3U, FitBasisKind::kQuadratic, builder.get_segment_chars(), segment_context,
+                                               quadratic_models, cap_operators, grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
+  const auto linear_frontier_length_two
+      = AnalyzeStructuralCapFunctionComposeGap("frontier_structural_cap", 2U, FitBasisKind::kLinear, direct_frontier_by_length.at(2U), segment_context,
+                                               linear_models, cap_operators, grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
+  const auto linear_frontier_length_three
+      = AnalyzeStructuralCapFunctionComposeGap("frontier_structural_cap", 3U, FitBasisKind::kLinear, direct_frontier_by_length.at(3U), segment_context,
+                                               linear_models, cap_operators, grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
+  const auto quadratic_frontier_length_two
+      = AnalyzeStructuralCapFunctionComposeGap("frontier_structural_cap", 2U, FitBasisKind::kQuadratic, direct_frontier_by_length.at(2U), segment_context,
+                                               quadratic_models, cap_operators, grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
+  const auto quadratic_frontier_length_three
+      = AnalyzeStructuralCapFunctionComposeGap("frontier_structural_cap", 3U, FitBasisKind::kQuadratic, direct_frontier_by_length.at(3U), segment_context,
+                                               quadratic_models, cap_operators, grid, builder.get_cap_lattice(), builder.get_max_slew(), builder.get_max_cap());
 
   ASSERT_GT(linear_raw_length_two.evaluated_count, 0U);
   ASSERT_GT(linear_raw_length_three.evaluated_count, 0U);
@@ -207,8 +198,7 @@ TEST(CharacterizationRealTechExactRegressionTest, IterOneStructuralCapFunctionCo
   report_stream << "function_model_count{basis=linear,count=" << linear_models.size() << "}\n";
   report_stream << "function_model_count{basis=quadratic,count=" << quadratic_models.size() << "}\n";
   AppendStructuralCapOperatorStats(report_stream, cap_operators);
-  AppendStructuralCapOperatorSampleGap(report_stream, cap_operators, builder.get_segment_chars(), segment_context, grid,
-                                       builder.get_cap_lattice());
+  AppendStructuralCapOperatorSampleGap(report_stream, cap_operators, builder.get_segment_chars(), segment_context, grid, builder.get_cap_lattice());
   AppendFunctionComposeGapStats(report_stream, linear_raw_length_two, grid);
   AppendFunctionComposeGapStats(report_stream, linear_raw_length_three, grid);
   AppendFunctionComposeGapStats(report_stream, quadratic_raw_length_two, grid);
@@ -218,8 +208,8 @@ TEST(CharacterizationRealTechExactRegressionTest, IterOneStructuralCapFunctionCo
   AppendFunctionComposeGapStats(report_stream, quadratic_frontier_length_two, grid);
   AppendFunctionComposeGapStats(report_stream, quadratic_frontier_length_three, grid);
 
-  ASSERT_TRUE(realtech_fixture::WriteScenarioLog("iter1_structural_cap_function_compose_gap",
-                                                 "iter1_structural_cap_function_compose_gap_report.txt", report_stream.str()));
+  ASSERT_TRUE(realtech_fixture::WriteScenarioReport("iter1_structural_cap_function_compose_gap", "iter1_structural_cap_function_compose_gap_report.txt",
+                                                    report_stream.str()));
 }
 
 }  // namespace

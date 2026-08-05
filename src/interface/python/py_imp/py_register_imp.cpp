@@ -20,23 +20,15 @@
 
 #include <pybind11/cast.h>
 
-// #include "../../../operation/iMP/api/MPAPI.hh"
 #include "idb_to_imp_db/PyPlaceDB.h"
 
-// #include "../../../operation/iMP/api/MPAPI.hh"
-#include "py_mp.h"
 namespace python_interface {
 namespace py = pybind11;
 
 void register_imp(pybind11::module& m)
 {
-  // m.def("SAPlaceSeqPairInt64", imp::SAPlaceSeqPairInt64);
-
   pybind11::class_<PyPlaceDB>(m, "PyPlaceDB")
-      .def(pybind11::init<>())
-      /*----------functions ---------*/
       .def("getCongestionMap", &PyPlaceDB::getCongestionMap, py::arg("method") = "max", py::arg("stage") = "egr3D", py::arg("resolve_congestion") = "low")
-      /*----------end  functions ---------*/
       .def_readwrite("num_nodes", &PyPlaceDB::num_nodes)
       .def_readwrite("num_terminals", &PyPlaceDB::num_terminals)
       .def_readwrite("num_terminal_NIs", &PyPlaceDB::num_terminal_NIs)
@@ -90,73 +82,14 @@ void register_imp(pybind11::module& m)
       .def_readwrite("unit_vertical_capacities", &PyPlaceDB::unit_vertical_capacities)
       .def_readwrite("initial_horizontal_demand_map", &PyPlaceDB::initial_horizontal_demand_map)
       .def_readwrite("initial_vertical_demand_map", &PyPlaceDB::initial_vertical_demand_map)
-      .def_readwrite("start_points", &PyPlaceDB::start_points)
-      .def_readwrite("end_points", &PyPlaceDB::end_points)
-      .def_readwrite("clock_pins", &PyPlaceDB::clock_pins)
-      .def_readwrite("FF_ids", &PyPlaceDB::FF_ids)
-      .def_readwrite("clk_pin_rtran", &PyPlaceDB::clk_pin_rtran)
-      .def_readwrite("clk_pin_ftran", &PyPlaceDB::clk_pin_ftran)
-      .def_readwrite("clk_pin_names", &PyPlaceDB::clk_pin_names)
-      // .def_readwrite("cells_by_level", &PyPlaceDB::cells_by_level)
-      // .def_readwrite("cells_by_reverse_level", &PyPlaceDB::cells_by_reverse_level)
-      .def_readwrite("inrdelays", &PyPlaceDB::inrdelays)
-      .def_readwrite("infdelays", &PyPlaceDB::infdelays)
-      .def_readwrite("inrtrans", &PyPlaceDB::inrtrans)
-      .def_readwrite("inftrans", &PyPlaceDB::inftrans)
-      .def_readwrite("outcaps", &PyPlaceDB::outcaps)
-      .def_readwrite("net_flat_arcs_start", &PyPlaceDB::net_flat_arcs_start)
-      .def_readwrite("net_flat_arcs", &PyPlaceDB::net_flat_arcs)
-      .def_readwrite("inst_flat_arcs_start", &PyPlaceDB::inst_flat_arcs_start)
-      .def_readwrite("inst_flat_arcs", &PyPlaceDB::inst_flat_arcs)
-      .def_readwrite("endpoints_constraint_arcs", &PyPlaceDB::endpoints_constraint_arcs)
-      .def_readwrite("main_id_2_cell_id_start", &PyPlaceDB::main_id_2_cell_id_start)
-      .def_readwrite("cell_id_2_arc_id_start", &PyPlaceDB::cell_id_2_arc_id_start)
-      .def_readwrite("inst_main_id", &PyPlaceDB::inst_main_id)
-      .def_readwrite("inst_size", &PyPlaceDB::inst_size)
-      .def_readwrite("f_delay_flat_luts_values", &PyPlaceDB::f_delay_flat_luts_values)
-      .def_readwrite("f_delay_flat_luts_trans_table", &PyPlaceDB::f_delay_flat_luts_trans_table)
-      .def_readwrite("f_delay_flat_luts_cap_table", &PyPlaceDB::f_delay_flat_luts_cap_table)
-      .def_readwrite("f_delay_flat_luts_dim", &PyPlaceDB::f_delay_flat_luts_dim)
-      .def_readwrite("r_delay_flat_luts_values", &PyPlaceDB::r_delay_flat_luts_values)
-      .def_readwrite("r_delay_flat_luts_trans_table", &PyPlaceDB::r_delay_flat_luts_trans_table)
-      .def_readwrite("r_delay_flat_luts_cap_table", &PyPlaceDB::r_delay_flat_luts_cap_table)
-      .def_readwrite("r_delay_flat_luts_dim", &PyPlaceDB::r_delay_flat_luts_dim)
-      .def_readwrite("f_trans_flat_luts_values", &PyPlaceDB::f_trans_flat_luts_values)
-      .def_readwrite("f_trans_flat_luts_trans_table", &PyPlaceDB::f_trans_flat_luts_trans_table)
-      .def_readwrite("f_trans_flat_luts_cap_table", &PyPlaceDB::f_trans_flat_luts_cap_table)
-      .def_readwrite("f_trans_flat_luts_dim", &PyPlaceDB::f_trans_flat_luts_dim)
-      .def_readwrite("r_trans_flat_luts_values", &PyPlaceDB::r_trans_flat_luts_values)
-      .def_readwrite("r_trans_flat_luts_trans_table", &PyPlaceDB::r_trans_flat_luts_trans_table)
-      .def_readwrite("r_trans_flat_luts_cap_table", &PyPlaceDB::r_trans_flat_luts_cap_table)
-      .def_readwrite("r_trans_flat_luts_dim", &PyPlaceDB::r_trans_flat_luts_dim)
-      .def_readwrite("flat_cells_by_level", &PyPlaceDB::flat_cells_by_level)
-      .def_readwrite("flat_cells_by_reverse_level", &PyPlaceDB::flat_cells_by_reverse_level)
-      .def_readwrite("flat_cells_by_level_start", &PyPlaceDB::flat_cells_by_level_start)
-      .def_readwrite("net2driver_pin_map", &PyPlaceDB::net2driver_pin_map)
-      .def_readwrite("cell_id_2_libpin_id_start", &PyPlaceDB::cell_id_2_libpin_id_start)
-      .def_readwrite("pin_2_libpin_offset", &PyPlaceDB::pin_2_libpin_offset)
-      .def_readwrite("flat_lib_pin_cap", &PyPlaceDB::flat_lib_pin_cap)
-      .def_readwrite("flat_lib_pin_rcap", &PyPlaceDB::flat_lib_pin_rcap)
-      .def_readwrite("flat_lib_pin_fcap", &PyPlaceDB::flat_lib_pin_fcap)
-      .def_readwrite("flat_lib_pin_cap_limit", &PyPlaceDB::flat_lib_pin_cap_limit)
-      .def_readwrite("flat_lib_pin_slew_limit", &PyPlaceDB::flat_lib_pin_slew_limit)
-      .def_readwrite("flat_cells_by_reverse_level_start", &PyPlaceDB::flat_cells_by_reverse_level_start)
-      .def_readwrite("c_unit", &PyPlaceDB::c_unit)
-      .def_readwrite("r_unit", &PyPlaceDB::r_unit)
-      .def_readwrite("dbu", &PyPlaceDB::dbu)
-      .def_readwrite("endpoints_rRAT", &PyPlaceDB::endpoints_rRAT)
-      .def_readwrite("endpoints_fRAT", &PyPlaceDB::endpoints_fRAT);
+      .def_readwrite("dbu", &PyPlaceDB::dbu);
 
-  // .def("sum_pin_weights", &_pybind::sum_pin_weights);
   m.def(
       "pydb",
       [](idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta) {
         return PyPlaceDB(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta);
       },
       "Convert PlaceDB to PyPlaceDB");
-  // m.def("SAPlaceSeqPairInt64", imp::SAPlaceSeqPairInt64);
-  // m.def("runMP", runMP, py::arg("config"), py::arg("output_tcl") = "");
-  // m.def("runRef", runRef, py::arg("output_tcl") = "");
 }
 
 }  // namespace python_interface

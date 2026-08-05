@@ -20,7 +20,7 @@
 
 #include "Types.hh"
 #include "Utility.hpp"
-#include "log/Log.hh"
+#include "Logger.hpp"
 
 namespace ircx::string {
 
@@ -170,7 +170,7 @@ inline bool requireNonEmpty(std::string_view value, std::string_view field_name)
   if (!value.empty()) {
     return true;
   }
-  LOG_ERROR << "RCX field is empty: " << field_name;
+  RCXLOG.warn(Loc::current(), "RCX field is empty: ", field_name);
   return false;
 }
 

@@ -12,7 +12,7 @@
 #include "feature_builder.h"
 #include "timing_api.hh"
 #include "timing_db.hh"
-namespace ieda_feature {
+namespace ecc_feature {
 #define EVAL_STA_API_INST (ieval::TimingAPI::getInst())
 
 TimingEvalSummary FeatureBuilder::buildTimingEvalSummary()
@@ -147,4 +147,4 @@ void FeatureBuilder::evalTiming(const std::string& routing_type, const bool& rt_
 {
   EVAL_STA_API_INST->evalTiming(routing_type, rt_done);
 }
-}  // namespace ieda_feature
+}  // namespace ecc_feature

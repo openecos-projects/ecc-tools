@@ -78,8 +78,7 @@ auto GeomCalc::uniquePointLocations(std::vector<Point>& points) -> void
 
 auto GeomCalc::uniquePointValues(std::vector<Point>& points) -> void
 {
-  auto [first, last] = std::ranges::unique(
-      points, [](const Point& lhs_point, const Point& rhs_point) -> bool { return Equal(lhs_point.val, rhs_point.val); });
+  auto [first, last] = std::ranges::unique(points, [](const Point& lhs_point, const Point& rhs_point) -> bool { return Equal(lhs_point.val, rhs_point.val); });
   points.erase(first, last);
 }
 
@@ -109,8 +108,7 @@ auto GeomCalc::convexHull(std::vector<Point>& points) -> void
     hull_points.at(hull_size++) = point;
   }
   for (size_t point_index = points.size() - 1, lower_hull_size = hull_size + 1; point_index > 0; --point_index) {
-    while (hull_size >= lower_hull_size
-           && crossProduct(hull_points.at(hull_size - 2), hull_points.at(hull_size - 1), points.at(point_index - 1)) <= kEpsilon) {
+    while (hull_size >= lower_hull_size && crossProduct(hull_points.at(hull_size - 2), hull_points.at(hull_size - 1), points.at(point_index - 1)) <= kEpsilon) {
       --hull_size;
     }
     hull_points.at(hull_size++) = points.at(point_index - 1);

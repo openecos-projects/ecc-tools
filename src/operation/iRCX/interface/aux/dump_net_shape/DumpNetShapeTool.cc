@@ -37,7 +37,7 @@
 #include "Segment.hpp"
 #include "Utility.hpp"
 #include "Via.hpp"
-#include "log/Log.hh"
+#include "Logger.hpp"
 
 namespace ircx::dump_net_shape {
 
@@ -364,7 +364,7 @@ bool DumpNetShapeTool::run()
   Database& database = RCXDM.getDatabase();
   LayoutData& layout_data = database.get_layout_data();
   if (layout_data.get_is_empty()) {
-    LOG_ERROR << "dump_net_shape failed: layout data is empty. Run init_rcx before dumping shapes.";
+    RCXLOG.warn(Loc::current(), "dump_net_shape failed: layout data is empty. Run init_rcx before dumping shapes.");
     return false;
   }
 
@@ -372,7 +372,7 @@ bool DumpNetShapeTool::run()
   std::string output_file_path = (design_name.empty() ? "design" : design_name) + ".shape";
   std::ofstream* output_file_stream = RCXUTIL.getOutputFileStream(output_file_path);
   if (!output_file_stream->is_open()) {
-    LOG_ERROR << "dump_net_shape failed: cannot open output file " << output_file_path;
+    RCXLOG.warn(Loc::current(), "dump_net_shape failed: cannot open output file ", output_file_path);
     RCXUTIL.closeFileStream(output_file_stream);
     return false;
   }
@@ -383,13 +383,13 @@ bool DumpNetShapeTool::run()
     dump_net_shape::writeNet(*output_file_stream, net, layer_catalog);
   }
   if (!output_file_stream->good()) {
-    LOG_ERROR << "dump_net_shape failed: cannot write output file " << output_file_path;
+    RCXLOG.warn(Loc::current(), "dump_net_shape failed: cannot write output file ", output_file_path);
     RCXUTIL.closeFileStream(output_file_stream);
     return false;
   }
   RCXUTIL.closeFileStream(output_file_stream);
 
-  LOG_INFO << "dump_net_shape wrote " << output_file_path;
+  RCXLOG.info(Loc::current(), "dump_net_shape wrote ", output_file_path);
   return true;
 }
 

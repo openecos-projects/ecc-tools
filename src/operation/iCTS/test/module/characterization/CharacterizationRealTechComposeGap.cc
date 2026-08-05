@@ -64,8 +64,7 @@ auto MakePatternSignature(const realtech_fixture::SegmentFrontierContext& segmen
   return stream.str();
 }
 
-auto MakeSegmentCompareKey(const realtech_fixture::SegmentFrontierContext& segment_context, const icts::SegmentChar& entry)
-    -> SegmentCompareKey
+auto MakeSegmentCompareKey(const realtech_fixture::SegmentFrontierContext& segment_context, const icts::SegmentChar& entry) -> SegmentCompareKey
 {
   return SegmentCompareKey{
       .pattern_signature = MakePatternSignature(segment_context, entry.get_pattern_id()),
@@ -90,8 +89,7 @@ auto SafeRatio(double numerator, double denominator) -> double
 }
 
 auto CompareComposedFrontierToDirect(unsigned target_length_idx, const std::vector<icts::SegmentChar>& direct_entries,
-                                     const std::vector<icts::SegmentChar>& composed_entries,
-                                     const realtech_fixture::SegmentFrontierContext& segment_context,
+                                     const std::vector<icts::SegmentChar>& composed_entries, const realtech_fixture::SegmentFrontierContext& segment_context,
                                      const realtech_fixture::CharGrid& grid) -> ComposeGapStats
 {
   ComposeGapStats stats;
@@ -133,8 +131,7 @@ auto CompareComposedFrontierToDirect(unsigned target_length_idx, const std::vect
     const double abs_delay_delta_ns = std::abs(delay_delta_ns);
     stats.sum_abs_delay_delta_ns += abs_delay_delta_ns;
     stats.sum_sq_delay_delta_ns += delay_delta_ns * delay_delta_ns;
-    stats.max_rel_delay_delta
-        = std::max(stats.max_rel_delay_delta, abs_delay_delta_ns / std::max(std::abs(direct_entry.get_delay()), 1e-30));
+    stats.max_rel_delay_delta = std::max(stats.max_rel_delay_delta, abs_delay_delta_ns / std::max(std::abs(direct_entry.get_delay()), 1e-30));
     if (delay_delta_ns < -1e-15) {
       ++stats.composed_lower_delay_count;
     } else if (delay_delta_ns > 1e-15) {
@@ -152,8 +149,7 @@ auto CompareComposedFrontierToDirect(unsigned target_length_idx, const std::vect
     const double abs_power_delta_w = std::abs(power_delta_w);
     stats.sum_abs_power_delta_w += abs_power_delta_w;
     stats.sum_sq_power_delta_w += power_delta_w * power_delta_w;
-    stats.max_rel_power_delta
-        = std::max(stats.max_rel_power_delta, abs_power_delta_w / std::max(std::abs(direct_entry.get_power()), 1e-30));
+    stats.max_rel_power_delta = std::max(stats.max_rel_power_delta, abs_power_delta_w / std::max(std::abs(direct_entry.get_power()), 1e-30));
     if (power_delta_w < -1e-15) {
       ++stats.composed_lower_power_count;
     } else if (power_delta_w > 1e-15) {
@@ -189,21 +185,17 @@ auto AppendComposeGapStats(std::ostringstream& report_stream, const ComposeGapSt
                 << ",sum_direct_delay_ns=" << stats.sum_direct_delay_ns << ",sum_composed_delay_ns=" << stats.sum_composed_delay_ns
                 << ",delay_sum_delta_ns=" << (stats.sum_composed_delay_ns - stats.sum_direct_delay_ns)
                 << ",delay_ratio_composed_over_direct=" << SafeRatio(stats.sum_composed_delay_ns, stats.sum_direct_delay_ns)
-                << ",delay_rmse_ns=" << delay_rmse_ns << ",delay_mean_abs_ns=" << delay_mean_abs_ns
-                << ",delay_max_abs_ns=" << stats.max_abs_delay_delta_ns << ",delay_max_rel=" << stats.max_rel_delay_delta
-                << ",composed_lower_delay_count=" << stats.composed_lower_delay_count
-                << ",composed_higher_delay_count=" << stats.composed_higher_delay_count
-                << ",sum_direct_power_w=" << stats.sum_direct_power_w << ",sum_composed_power_w=" << stats.sum_composed_power_w
-                << ",power_sum_delta_w=" << (stats.sum_composed_power_w - stats.sum_direct_power_w)
-                << ",power_ratio_composed_over_direct=" << SafeRatio(stats.sum_composed_power_w, stats.sum_direct_power_w)
-                << ",power_rmse_w=" << power_rmse_w << ",power_mean_abs_w=" << power_mean_abs_w
-                << ",power_max_abs_w=" << stats.max_abs_power_delta_w << ",power_max_rel=" << stats.max_rel_power_delta
-                << ",composed_lower_power_count=" << stats.composed_lower_power_count
+                << ",delay_rmse_ns=" << delay_rmse_ns << ",delay_mean_abs_ns=" << delay_mean_abs_ns << ",delay_max_abs_ns=" << stats.max_abs_delay_delta_ns
+                << ",delay_max_rel=" << stats.max_rel_delay_delta << ",composed_lower_delay_count=" << stats.composed_lower_delay_count
+                << ",composed_higher_delay_count=" << stats.composed_higher_delay_count << ",sum_direct_power_w=" << stats.sum_direct_power_w
+                << ",sum_composed_power_w=" << stats.sum_composed_power_w << ",power_sum_delta_w=" << (stats.sum_composed_power_w - stats.sum_direct_power_w)
+                << ",power_ratio_composed_over_direct=" << SafeRatio(stats.sum_composed_power_w, stats.sum_direct_power_w) << ",power_rmse_w=" << power_rmse_w
+                << ",power_mean_abs_w=" << power_mean_abs_w << ",power_max_abs_w=" << stats.max_abs_power_delta_w
+                << ",power_max_rel=" << stats.max_rel_power_delta << ",composed_lower_power_count=" << stats.composed_lower_power_count
                 << ",composed_higher_power_count=" << stats.composed_higher_power_count << "}\n";
   report_stream << "compose_gap_worst_delay{target_length_idx=" << stats.target_length_idx << "," << stats.worst_delay_example << "}\n";
   report_stream << "compose_gap_worst_power{target_length_idx=" << stats.target_length_idx << "," << stats.worst_power_example << "}\n";
-  report_stream << "compose_gap_missing_example{target_length_idx=" << stats.target_length_idx << "," << stats.missing_composed_example
-                << "}\n";
+  report_stream << "compose_gap_missing_example{target_length_idx=" << stats.target_length_idx << "," << stats.missing_composed_example << "}\n";
 }
 
 }  // namespace icts_test

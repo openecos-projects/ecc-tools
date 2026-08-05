@@ -37,24 +37,24 @@ bool PLFConfig::initConfig(string path)
 {
   _path = path;
 
-  std::ifstream& config_stream = ieda::getInputFileStream(_path);
+  std::ifstream& config_stream = ecc::getInputFileStream(_path);
 
   {
     nlohmann::json json;
     config_stream >> json;
 
     /// read config path
-    _config_path.idb_path = ieda::getJsonData(json, {"ConfigPath", "idb_path"});
-    _config_path.ifp_path = ieda::getJsonData(json, {"ConfigPath", "ifp_path"});
-    _config_path.ipl_path = ieda::getJsonData(json, {"ConfigPath", "ipl_path"});
-    _config_path.icts_path = ieda::getJsonData(json, {"ConfigPath", "icts_path"});
-    _config_path.irt_path = ieda::getJsonData(json, {"ConfigPath", "irt_path"});
-    _config_path.idrc_path = ieda::getJsonData(json, {"ConfigPath", "idrc_path"});
-    _config_path.ito_path = ieda::getJsonData(json, {"ConfigPath", "ito_path"});
-    _config_path.ipnp_path = ieda::getJsonData(json, {"ConfigPath", "ipnp_path"});
+    _config_path.idb_path = ecc::getJsonData(json, {"ConfigPath", "idb_path"});
+    _config_path.ifp_path = ecc::getJsonData(json, {"ConfigPath", "ifp_path"});
+    _config_path.ipl_path = ecc::getJsonData(json, {"ConfigPath", "ipl_path"});
+    _config_path.icts_path = ecc::getJsonData(json, {"ConfigPath", "icts_path"});
+    _config_path.irt_path = ecc::getJsonData(json, {"ConfigPath", "irt_path"});
+    _config_path.idrc_path = ecc::getJsonData(json, {"ConfigPath", "idrc_path"});
+    _config_path.ito_path = ecc::getJsonData(json, {"ConfigPath", "ito_path"});
+    _config_path.ipnp_path = ecc::getJsonData(json, {"ConfigPath", "ipnp_path"});
   }
 
-  ieda::closeFileStream(config_stream);
+  ecc::closeFileStream(config_stream);
 
   return true;
 }

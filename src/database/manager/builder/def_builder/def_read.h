@@ -27,6 +27,7 @@
         There is a def builder to build data structure from def.
  *
  */
+#include "utility/logger/Logger.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -139,22 +140,22 @@ class DefRead
     logNumber(mudule, number);
     logSeperate();
   }
-  void logSeperate() { std::cout << "**************************************************************" << std::endl; }
+  void logSeperate() { ECCLOG.info(ecc::Loc::current(), "**************************************************************"); }
   void logNumber(string mudule, int32_t number = -1)
   {
-    std::cout << mudule;
+    ECCLOG.info(ecc::Loc::current(), mudule);
     if (number != -1) {
-      std::cout << " number : " << number;
+      ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    std::cout << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "");
   }
   void logInfo(string info, int32_t number = -1)
   {
-    std::cout << info;
+    ECCLOG.info(ecc::Loc::current(), info);
     if (number != -1) {
-      std::cout << " number : " << number;
+      ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    std::cout << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "");
   }
 
  private:

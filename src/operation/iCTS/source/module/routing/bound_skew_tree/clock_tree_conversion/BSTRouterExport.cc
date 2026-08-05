@@ -20,9 +20,6 @@
  * @date 2026-05-19
  * @brief ClockSteinerTree export helpers for the bounded-skew router adapter.
  */
-
-#include <glog/logging.h>
-
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -32,11 +29,11 @@
 #include <vector>
 
 #include "Geometry.hh"
-#include "Log.hh"
+#include "Logger.hh"
 #include "Point.hh"
 #include "SteinerTree.hh"
 #include "bound_skew_tree/BSTRouter.hh"
-#include "bound_skew_tree/clock_tree_conversion/BstClockTreeConversion.hh"
+#include "bound_skew_tree/clock_tree_conversion/BSTClockTreeConversion.hh"
 #include "bound_skew_tree/component/Components.hh"
 
 namespace icts {
@@ -67,16 +64,24 @@ auto ExportAreaNode(const Area* area, const BSTRoutingConfig& parameters, BSTRou
   auto add_edge = [&](std::size_t parent_id, std::size_t child_id, const Area* parent_area, std::size_t side) -> void {
     const auto* parent_node = tree.get_node(parent_id);
     const auto* child_node = tree.get_node(child_id);
-    LOG_FATAL_IF(parent_node == nullptr || child_node == nullptr) << "BST exported node is null.";
+    if (parent_node == nullptr || child_node == nullptr) {
+      CTSLOG.error(Loc::current(), "BST exported node is null.");
+    }
 
     const auto distance = geometry::Manhattan(parent_node->location, child_node->location);
-    LOG_FATAL_IF(distance < 0) << "BST embedded edge distance is negative.";
+    if (distance < 0) {
+      CTSLOG.error(Loc::current(), "BST embedded edge distance is negative.");
+    }
 
     const auto routed_distance = static_cast<int>(std::lround(parent_area->get_edge_len(side) * parameters.dbu_per_um));
-    LOG_FATAL_IF(routed_distance < distance) << "BST routed edge length is shorter than embedded Manhattan distance.";
+    if (routed_distance < distance) {
+      CTSLOG.error(Loc::current(), "BST routed edge length is shorter than embedded Manhattan distance.");
+    }
 
     auto edge_id = tree.addEdge(parent_id, child_id, distance, routed_distance);
-    LOG_FATAL_IF(edge_id == BSTRouter::ClockSteinerTreeType::kInvalidId) << "Failed to add edge when exporting BST ClockSteinerTree.";
+    if (edge_id == BSTRouter::ClockSteinerTreeType::kInvalidId) {
+      CTSLOG.error(Loc::current(), "Failed to add edge when exporting BST ClockSteinerTree.");
+    }
   };
 
   std::size_t return_node_id = BSTRouter::ClockSteinerTreeType::kInvalidId;
@@ -97,12 +102,13 @@ auto ExportAreaNode(const Area* area, const BSTRoutingConfig& parameters, BSTRou
         const auto& location = frame.area->get_location();
         auto insertion_delay = frame.area->is_fixed_terminal() ? location.max : 0.0;
         auto pin_cap = frame.area->is_fixed_terminal() ? frame.area->get_cap_load() : 0.0;
-        frame.node_id = tree.addNode(frame.area->get_name(),
-                                     Point<int>(static_cast<int>(std::lround(location.x * parameters.dbu_per_um)),
-                                                static_cast<int>(std::lround(location.y * parameters.dbu_per_um))),
-                                     frame.area->is_fixed_terminal(), pin_cap, insertion_delay);
-        LOG_FATAL_IF(frame.node_id == BSTRouter::ClockSteinerTreeType::kInvalidId)
-            << "Failed to add node when exporting BST ClockSteinerTree.";
+        frame.node_id = tree.addNode(
+            frame.area->get_name(),
+            Point<int>(static_cast<int>(std::lround(location.x * parameters.dbu_per_um)), static_cast<int>(std::lround(location.y * parameters.dbu_per_um))),
+            frame.area->is_fixed_terminal(), pin_cap, insertion_delay);
+        if (frame.node_id == BSTRouter::ClockSteinerTreeType::kInvalidId) {
+          CTSLOG.error(Loc::current(), "Failed to add node when exporting BST ClockSteinerTree.");
+        }
         area_to_node_id[frame.area] = frame.node_id;
 
         if (frame.area->get_left() == nullptr) {
@@ -143,12 +149,16 @@ auto ExportAreaNode(const Area* area, const BSTRoutingConfig& parameters, BSTRou
 auto ExportBstClockTree(const bst::Area* root, const BSTRoutingConfig& parameters) -> BSTRouter::ClockSteinerTreeType
 {
   BSTRouter::ClockSteinerTreeType tree;
-  LOG_FATAL_IF(root == nullptr) << "BST root area is null when exporting ClockSteinerTree.";
+  if (root == nullptr) {
+    CTSLOG.error(Loc::current(), "BST root area is null when exporting ClockSteinerTree.");
+  }
 
   std::unordered_map<const bst::Area*, std::size_t> area_to_node_id;
   auto root_id = ExportAreaNode(root, parameters, tree, area_to_node_id);
   tree.setRoot(root_id);
-  LOG_FATAL_IF(!tree.validate()) << "Constructed BST ClockSteinerTree is invalid.";
+  if (!tree.validate()) {
+    CTSLOG.error(Loc::current(), "Constructed BST ClockSteinerTree is invalid.");
+  }
   return tree;
 }
 

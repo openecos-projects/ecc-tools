@@ -22,15 +22,21 @@
  * @date 2023-10-13
  *
  */
-#include "BTreeSet.hh"
+#include "absl/container/btree_set.h"
 #include "CppLibertyDriver.hh"
 #include "Lib.hh"
 #include "LibParserCpp.hh"
-#include "log/Log.hh"
+#include "utility/logger/Logger.hpp"
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
 #include <cstdlib>
 #include <memory>
+#include <regex>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -43,6 +49,58 @@ double getRawFloatValue(const liberty_ast::LibValue* value) {
 
 const char* getRawStringValue(const liberty_ast::LibValue* value) {
   return value ? value->asString() : "";
+}
+
+bool isEqual(std::string_view lhs, std::string_view rhs)
+{
+  return lhs == rhs;
+}
+
+bool isNoCaseEqual(std::string_view lhs, std::string_view rhs)
+{
+  return lhs.size() == rhs.size()
+         && std::equal(lhs.begin(), lhs.end(), rhs.begin(), [](char lhs_char, char rhs_char) {
+              return std::tolower(static_cast<unsigned char>(lhs_char)) == std::tolower(static_cast<unsigned char>(rhs_char));
+            });
+}
+
+bool startsWith(std::string_view str, std::string_view prefix)
+{
+  return str.starts_with(prefix);
+}
+
+std::vector<std::string> splitString(std::string_view str, char delimiter)
+{
+  std::vector<std::string> result;
+  size_t start_idx = 0;
+  while (start_idx < str.size()) {
+    size_t end_idx = str.find(delimiter, start_idx);
+    size_t length = end_idx == std::string_view::npos ? str.size() - start_idx : end_idx - start_idx;
+    if (length > 0) {
+      result.emplace_back(str.substr(start_idx, length));
+    }
+    if (end_idx == std::string_view::npos) {
+      break;
+    }
+    start_idx = end_idx + 1;
+  }
+  return result;
+}
+
+std::vector<std::string> matchPattern(const char* str, const std::string& regex_pattern)
+{
+  std::vector<std::string> result;
+  std::cmatch match;
+  std::regex_match(str, match, std::regex(regex_pattern));
+  for (const std::csub_match& sub_match : match) {
+    result.push_back(sub_match.str());
+  }
+  return result;
+}
+
+std::string makeIndexedName(const std::string& name, int index)
+{
+  return name + "[" + std::to_string(index) + "]";
 }
 
 void appendFloatValue(std::vector<std::unique_ptr<LibAttrValue>>& values,
@@ -106,7 +164,7 @@ void LibertyExprBuilder::execute() {
   if (std::string::npos != _expr_str.find('\\')) {
     // LOG_INFO << "before remove backslash, expr is " << _expr_str;
     // contain backslash, remove backslash.
-    _expr_str = Str::concateBackSlashStr(_expr_str);
+    std::erase(_expr_str, '\\');
     // LOG_INFO << "after remove backslash, expr is " << _expr_str;
   }
   auto* expr_result = liberty_parse_expr(_expr_str.c_str());
@@ -156,7 +214,7 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
   };
 
   auto is_attri = [attri_name](const char* candidate) {
-    return Str::equal(attri_name, candidate);
+    return isEqual(attri_name, candidate);
   };
 
   if (is_attri("slew_lower_threshold_pct_rise")) {
@@ -211,9 +269,9 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
   } else if (is_attri("pulling_resistance_unit")) {
     auto* attri_value_handle = liberty_convert_string_value(attri_value);
     const char* pulling_resistance_unit = attri_value_handle->value;
-    if (Str::equal(pulling_resistance_unit, "1kohm")) {
+    if (isEqual(pulling_resistance_unit, "1kohm")) {
       current_lib->set_resistance_unit(ResistanceUnit::kkOHM);
-    } else if (Str::equal(pulling_resistance_unit, "1ohm")) {
+    } else if (isEqual(pulling_resistance_unit, "1ohm")) {
       current_lib->set_resistance_unit(ResistanceUnit::kOHM);
     }
     liberty_free_string_value(attri_value_handle);
@@ -229,9 +287,9 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
   } else if (is_attri("time_unit")) {
     auto* attri_value_handle = liberty_convert_string_value(attri_value);
     const char* time_unit = attri_value_handle->value;
-    if (Str::equal(time_unit, "1fs")) {
+    if (isEqual(time_unit, "1fs")) {
       current_lib->set_time_unit(TimeUnit::kFS);
-    } else if (Str::equal(time_unit, "1ps")) {
+    } else if (isEqual(time_unit, "1ps")) {
       current_lib->set_time_unit(TimeUnit::kPS);
     }
     liberty_free_string_value(attri_value_handle);
@@ -247,13 +305,13 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     auto* attri_value_handle = liberty_convert_string_value(attri_value);
     const char* leakage_power_unit = attri_value_handle->value;
     double power_unit_mw_scale = 1.0;
-    if (Str::noCaseEqual(leakage_power_unit, "1pw")) {
+    if (isNoCaseEqual(leakage_power_unit, "1pw")) {
       power_unit_mw_scale = 1e-9;
-    } else if (Str::noCaseEqual(leakage_power_unit, "1nw")) {
+    } else if (isNoCaseEqual(leakage_power_unit, "1nw")) {
       power_unit_mw_scale = 1e-6;
-    } else if (Str::noCaseEqual(leakage_power_unit, "1uw")) {
+    } else if (isNoCaseEqual(leakage_power_unit, "1uw")) {
       power_unit_mw_scale = 1e-3;
-    } else if (Str::noCaseEqual(leakage_power_unit, "1mw")) {
+    } else if (isNoCaseEqual(leakage_power_unit, "1mw")) {
       power_unit_mw_scale = 1.0;
     }
     current_lib->set_leakage_power_unit(leakage_power_unit);
@@ -346,7 +404,7 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
   } else if (is_attri("is_macro_cell")) {
     auto* attri_value_handle = liberty_convert_string_value(attri_value);
     const char* is_macro = attri_value_handle->value;
-    if (Str::noCaseEqual(is_macro, "TRUE")) {
+    if (isNoCaseEqual(is_macro, "TRUE")) {
       lib_cell->set_is_macro();
     }
     liberty_free_string_value(attri_value_handle);
@@ -610,9 +668,11 @@ unsigned LibertyReader::visitAxisOrValues(
   if (lib_obj) {
     auto result_values = convert_attri_values(attribute_values);
 
-    if (Str::equal(attri_name, "values")) {
+    if (isEqual(attri_name, "values")) {
       auto* lib_table = dynamic_cast<LibTable*>(lib_obj);
-      LOG_FATAL_IF(!lib_table);
+      if (!lib_table) {
+        ECCLOG.error(ecc::Loc::current(), "Liberty table is null.");
+      }
       lib_table->set_value_scale(LibValueScale::kLibrary);
       lib_table->set_table_values(std::move(result_values));
     } else {
@@ -652,12 +712,12 @@ unsigned LibertyReader::visitComplexAttri(
     cap_unit_convert = 0.001;
   }
 
-  if (Str::equal(attri_name, "capacitive_load_unit")) {
+  if (isEqual(attri_name, "capacitive_load_unit")) {
     if ((static_cast<int>(liberty_convert_float_value(attri_0)->value) == 1)
-        && (Str::equal(liberty_convert_string_value(attri_1)->value, "pf"))) {
+        && (isEqual(liberty_convert_string_value(attri_1)->value, "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
     }
-  } else if (Str::equal(attri_name, "rise_capacitance_range")) {
+  } else if (isEqual(attri_name, "rise_capacitance_range")) {
     double min_rise_cap = liberty_convert_float_value(attri_0)->value;
     double max_rise_cap = liberty_convert_float_value(attri_1)->value;
     min_rise_cap *= cap_unit_convert;
@@ -667,7 +727,7 @@ unsigned LibertyReader::visitComplexAttri(
                            min_rise_cap);
     lib_port->set_port_cap(AnalysisMode::kMax, TransType::kRise,
                            max_rise_cap);
-  } else if (Str::equal(attri_name, "fall_capacitance_range")) {
+  } else if (isEqual(attri_name, "fall_capacitance_range")) {
     double min_fall_cap = liberty_convert_float_value(attri_0)->value;
     double max_fall_cap = liberty_convert_float_value(attri_1)->value;
     min_fall_cap *= cap_unit_convert;
@@ -677,7 +737,7 @@ unsigned LibertyReader::visitComplexAttri(
                            min_fall_cap);
     lib_port->set_port_cap(AnalysisMode::kMax, TransType::kFall,
                            max_fall_cap);
-  } else if (Str::equal(attri_name, "fanout_length")) {
+  } else if (isEqual(attri_name, "fanout_length")) {
     if (attri_values.len == 2) {
       double fanout = liberty_convert_float_value(attri_0)->value;
       double length = liberty_convert_float_value(attri_1)->value;
@@ -689,8 +749,10 @@ unsigned LibertyReader::visitComplexAttri(
       //  "0");
 
       char* fanout_length = liberty_convert_string_value(attri_0)->value;
-      auto fanout_lenth_vec = Str::split(fanout_length, ",");
-      LOG_FATAL_IF(fanout_lenth_vec.size() != 2);
+      auto fanout_lenth_vec = splitString(fanout_length, ',');
+      if (fanout_lenth_vec.size() != 2) {
+        ECCLOG.error(ecc::Loc::current(), "Invalid liberty fanout_length attribute.");
+      }
 
       double fanout = std::atof(fanout_lenth_vec[0].c_str());
       double length = std::atof(fanout_lenth_vec[1].c_str());
@@ -698,7 +760,7 @@ unsigned LibertyReader::visitComplexAttri(
       dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(
           static_cast<int>(fanout), length);
     }
-  } else if (Str::equal(attri_name, "library_features")) {
+  } else if (isEqual(attri_name, "library_features")) {
     void* attri_value = nullptr;
     FOREACH_LIBERTY_VEC_ELEM(&attri_values, void, attri_value)
     {
@@ -712,12 +774,14 @@ unsigned LibertyReader::visitComplexAttri(
         liberty_free_float_value(feature_value);
       }
     }
-  } else if (Str::startWith(attri_name, "index") ||
-             Str::equal(attri_name, "values")) {
+  } else if (startsWith(attri_name, "index") ||
+             isEqual(attri_name, "values")) {
     is_ok = visitAxisOrValues(attri);
   } else if (!Lib::isSilentOutput()) {
-    LOG_INFO_EVERY_N(10) << "unkown attri name: " << attri_name << " in "
-                         << attri->file_name << " line no " << attri->line_no;
+    static std::atomic<int32_t> unknown_attribute_count = 0;
+    if (unknown_attribute_count.fetch_add(1, std::memory_order_relaxed) % 10 == 0) {
+      ECCLOG.info(ecc::Loc::current(), "unkown attri name: ", attri_name, " in ", attri->file_name, " line no ", attri->line_no);
+    }
   }
   return is_ok;
 }
@@ -730,7 +794,9 @@ unsigned LibertyReader::visitComplexAttri(
  */
 const char* LibertyReader::getGroupAttriName(LibertyGroupStmt* group) {
   auto& attri_values = group->attri_values;
-  LOG_FATAL_IF(!liberty_is_string_value(attri_values.data));
+  if (!liberty_is_string_value(attri_values.data)) {
+    ECCLOG.error(ecc::Loc::current(), "Liberty group attribute is not a string.");
+  }
   auto* lib_name_attri = liberty_convert_string_value(attri_values.data);
 
   return lib_name_attri->value;
@@ -812,9 +878,11 @@ unsigned LibertyReader::visitAxisOrValues(
   if (lib_obj) {
     auto result_values = convertRawAxisValues(attri->getAllValues());
 
-    if (Str::equal(attri_name, "values")) {
+    if (isEqual(attri_name, "values")) {
       auto* lib_table = dynamic_cast<LibTable*>(lib_obj);
-      LOG_FATAL_IF(!lib_table);
+      if (!lib_table) {
+        ECCLOG.error(ecc::Loc::current(), "Liberty table is null.");
+      }
       lib_table->set_value_scale(LibValueScale::kLibrary);
       lib_table->set_table_values(std::move(result_values));
     } else {
@@ -851,12 +919,12 @@ unsigned LibertyReader::visitComplexAttri(
     cap_unit_convert = 0.001;
   }
 
-  if (Str::equal(attri_name, "capacitive_load_unit")) {
+  if (isEqual(attri_name, "capacitive_load_unit")) {
     if ((static_cast<int>(getRawFloatValue(attri_0)) == 1) &&
-        (Str::equal(getRawStringValue(attri_1), "pf"))) {
+        (isEqual(getRawStringValue(attri_1), "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
     }
-  } else if (Str::equal(attri_name, "rise_capacitance_range")) {
+  } else if (isEqual(attri_name, "rise_capacitance_range")) {
     double min_rise_cap = getRawFloatValue(attri_0);
     double max_rise_cap = getRawFloatValue(attri_1);
     min_rise_cap *= cap_unit_convert;
@@ -866,7 +934,7 @@ unsigned LibertyReader::visitComplexAttri(
                            min_rise_cap);
     lib_port->set_port_cap(AnalysisMode::kMax, TransType::kRise,
                            max_rise_cap);
-  } else if (Str::equal(attri_name, "fall_capacitance_range")) {
+  } else if (isEqual(attri_name, "fall_capacitance_range")) {
     double min_fall_cap = getRawFloatValue(attri_0);
     double max_fall_cap = getRawFloatValue(attri_1);
     min_fall_cap *= cap_unit_convert;
@@ -876,15 +944,17 @@ unsigned LibertyReader::visitComplexAttri(
                            min_fall_cap);
     lib_port->set_port_cap(AnalysisMode::kMax, TransType::kFall,
                            max_fall_cap);
-  } else if (Str::equal(attri_name, "fanout_length")) {
+  } else if (isEqual(attri_name, "fanout_length")) {
     if (attri_values && attri_values->size() == 2) {
       double fanout = getRawFloatValue(attri_0);
       double length = getRawFloatValue(attri_1);
       dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(
           static_cast<int>(fanout), length);
     } else if (attri_values && attri_values->size() == 1) {
-      auto fanout_lenth_vec = Str::split(getRawStringValue(attri_0), ",");
-      LOG_FATAL_IF(fanout_lenth_vec.size() != 2);
+      auto fanout_lenth_vec = splitString(getRawStringValue(attri_0), ',');
+      if (fanout_lenth_vec.size() != 2) {
+        ECCLOG.error(ecc::Loc::current(), "Invalid liberty fanout_length attribute.");
+      }
 
       double fanout = std::atof(fanout_lenth_vec[0].c_str());
       double length = std::atof(fanout_lenth_vec[1].c_str());
@@ -892,7 +962,7 @@ unsigned LibertyReader::visitComplexAttri(
       dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(
           static_cast<int>(fanout), length);
     }
-  } else if (Str::equal(attri_name, "library_features")) {
+  } else if (isEqual(attri_name, "library_features")) {
     if (attri_values) {
       for (auto& attri_value : *attri_values) {
         if (attri_value->isString()) {
@@ -902,13 +972,15 @@ unsigned LibertyReader::visitComplexAttri(
         }
       }
     }
-  } else if (Str::startWith(attri_name, "index") ||
-             Str::equal(attri_name, "values")) {
+  } else if (startsWith(attri_name, "index") ||
+             isEqual(attri_name, "values")) {
     is_ok = visitAxisOrValues(attri);
   } else if (!Lib::isSilentOutput()) {
-    LOG_INFO_EVERY_N(10) << "unkown attri name: " << attri_name << " in "
-                         << attri->getSourceFile() << " line no "
-                         << attri->getSourceLine();
+    static std::atomic<int32_t> unknown_attribute_count = 0;
+    if (unknown_attribute_count.fetch_add(1, std::memory_order_relaxed) % 10 == 0) {
+      ECCLOG.info(ecc::Loc::current(), "unkown attri name: ", attri_name, " in ", attri->getSourceFile(), " line no ",
+                   attri->getSourceLine());
+    }
   }
   return is_ok;
 }
@@ -1171,7 +1243,7 @@ unsigned LibertyReader::visitPin(LibertyGroupStmt* group) {
   std::vector<std::string> ret_val;
   if (has_bus_range_marker(port_name)) {
     std::string regex_pattern = "([A-Za-z]+)\\[(\\d+):(\\d+)\\]";
-    ret_val = Str::matchPattern(port_name, regex_pattern);
+    ret_val = matchPattern(port_name, regex_pattern);
   }
   if (ret_val.empty()) {
     create_port(port_name);
@@ -1181,9 +1253,8 @@ unsigned LibertyReader::visitPin(LibertyGroupStmt* group) {
     int port_range_right = std::atoi(ret_val[3].c_str());
 
     for (int index = port_range_left; index >= port_range_right; --index) {
-      const char* one_port_name =
-          Str::printf("%s[%d]", port_bus_name.c_str(), index);
-      create_port(one_port_name);
+      std::string one_port_name = makeIndexedName(port_bus_name, index);
+      create_port(one_port_name.c_str());
     }
   }
 
@@ -1334,7 +1405,9 @@ unsigned LibertyReader::visitVector(LibertyGroupStmt* group) {
   const char* table_template_name = getGroupAttriName(group);
   auto* the_lib = lib_builder->get_lib();
   auto* lut_template = the_lib->getLutTemplate(table_template_name);
-  LOG_FATAL_IF(!lut_template) << "not found template " << table_template_name;
+  if (!lut_template) {
+    ECCLOG.error(ecc::Loc::current(), "not found template ", table_template_name);
+  }
 
   auto* current_table =
       dynamic_cast<LibCCSTable*>(lib_builder->get_current_table());
@@ -1458,46 +1531,49 @@ unsigned LibertyReader::visitGroup(LibertyGroupStmt* group) {
   unsigned is_ok = 1;
   const char* group_name = group->group_name;
 
-  static const ieda::BTreeSet<std::string> table_names = {
+  static const absl::btree_set<std::string> table_names = {
       "cell_rise",       "cell_fall",       "rise_transition",
       "fall_transition", "rise_constraint", "fall_constraint"};
-  static const ieda::BTreeSet<std::string> power_table_names = {"rise_power",
+  static const absl::btree_set<std::string> power_table_names = {"rise_power",
                                                                 "fall_power"};
 
-  if (Str::equal(group_name, "library")) {
+  if (isEqual(group_name, "library")) {
     is_ok = visitLibrary(group);
-  } else if (Str::equal(group_name, "wire_load")) {
+  } else if (isEqual(group_name, "wire_load")) {
     is_ok = visitWireLoad(group);
-  } else if (Str::equal(group_name, "lu_table_template") ||
-             Str::equal(group_name, "power_lut_template")) {
+  } else if (isEqual(group_name, "lu_table_template") ||
+             isEqual(group_name, "power_lut_template")) {
     is_ok = visitLuTableTemplate(group);
-  } else if (Str::equal(group_name, "type")) {
+  } else if (isEqual(group_name, "type")) {
     is_ok = visitType(group);
-  } else if (Str::equal(group_name, "output_current_template")) {
+  } else if (isEqual(group_name, "output_current_template")) {
     is_ok = visitOutputCurrentTemplate(group);
-  } else if (Str::equal(group_name, "cell")) {
+  } else if (isEqual(group_name, "cell")) {
     is_ok = visitCell(group);
-  } else if (Str::equal(group_name, "leakage_power")) {
+  } else if (isEqual(group_name, "leakage_power")) {
     is_ok = visitLeakagePower(group);
-  } else if (Str::equal(group_name, "bus") || Str::equal(group_name, "bundle")) {
+  } else if (isEqual(group_name, "bus") || isEqual(group_name, "bundle")) {
     is_ok = visitBus(group);
-  } else if (Str::equal(group_name, "pin")) {
+  } else if (isEqual(group_name, "pin")) {
     is_ok = visitPin(group);
-  } else if (Str::equal(group_name, "timing")) {
+  } else if (isEqual(group_name, "timing")) {
     is_ok = visitTiming(group);
-  } else if (Str::equal(group_name, "internal_power")) {
+  } else if (isEqual(group_name, "internal_power")) {
     is_ok = visitInternalPower(group);
-  } else if (Str::equal(group_name, "output_current_rise") ||
-             Str::equal(group_name, "output_current_fall")) {
+  } else if (isEqual(group_name, "output_current_rise") ||
+             isEqual(group_name, "output_current_fall")) {
     is_ok = visitCurrentTable(group);
-  } else if (Str::equal(group_name, "vector")) {
+  } else if (isEqual(group_name, "vector")) {
     is_ok = visitVector(group);
   } else if (table_names.contains(group_name)) {
     is_ok = visitTable(group);
   } else if (power_table_names.contains(group_name)) {
     is_ok = visitPowerTable(group);
   } else if (!Lib::isSilentOutput()) {
-    DLOG_INFO_EVERY_N(100000) << "group " << group_name << " is not supported.";
+    static std::atomic<int32_t> unsupported_group_count = 0;
+    if (unsupported_group_count.fetch_add(1, std::memory_order_relaxed) % 100000 == 0) {
+      ECCLOG.info(ecc::Loc::current(), "group ", group_name, " is not supported.");
+    }
   }
 
   return 1;
@@ -1505,8 +1581,9 @@ unsigned LibertyReader::visitGroup(LibertyGroupStmt* group) {
 
 const char* LibertyReader::getGroupAttriName(liberty_ast::LibGroup* group) {
   auto* attri_values = group->getParams();
-  LOG_FATAL_IF(!attri_values || attri_values->empty() ||
-               !(*attri_values)[0]->isString());
+  if (!attri_values || attri_values->empty() || !(*attri_values)[0]->isString()) {
+    ECCLOG.error(ecc::Loc::current(), "Liberty group attribute is not a string.");
+  }
 
   return (*attri_values)[0]->asString();
 }
@@ -1693,7 +1770,7 @@ unsigned LibertyReader::visitPin(liberty_ast::LibGroup* group) {
   std::vector<std::string> ret_val;
   if (has_bus_range_marker(port_name)) {
     std::string regex_pattern = "([A-Za-z]+)\\[(\\d+):(\\d+)\\]";
-    ret_val = Str::matchPattern(port_name, regex_pattern);
+    ret_val = matchPattern(port_name, regex_pattern);
   }
   if (ret_val.empty()) {
     create_port(port_name);
@@ -1703,9 +1780,8 @@ unsigned LibertyReader::visitPin(liberty_ast::LibGroup* group) {
     int port_range_right = std::atoi(ret_val[3].c_str());
 
     for (int index = port_range_left; index >= port_range_right; --index) {
-      const char* one_port_name =
-          Str::printf("%s[%d]", port_bus_name.c_str(), index);
-      create_port(one_port_name);
+      std::string one_port_name = makeIndexedName(port_bus_name, index);
+      create_port(one_port_name.c_str());
     }
   }
 
@@ -1825,7 +1901,9 @@ unsigned LibertyReader::visitVector(liberty_ast::LibGroup* group) {
   const char* table_template_name = getGroupAttriName(group);
   auto* the_lib = lib_builder->get_lib();
   auto* lut_template = the_lib->getLutTemplate(table_template_name);
-  LOG_FATAL_IF(!lut_template) << "not found template " << table_template_name;
+  if (!lut_template) {
+    ECCLOG.error(ecc::Loc::current(), "not found template ", table_template_name);
+  }
 
   auto* current_table =
       dynamic_cast<LibCCSTable*>(lib_builder->get_current_table());
@@ -1925,57 +2003,60 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
   unsigned is_ok = 1;
   const char* group_name = group->getGroupType();
 
-  static const ieda::BTreeSet<std::string> table_names = {
+  static const absl::btree_set<std::string> table_names = {
       "cell_rise",       "cell_fall",       "rise_transition",
       "fall_transition", "rise_constraint", "fall_constraint"};
-  static const ieda::BTreeSet<std::string> power_table_names = {"rise_power",
+  static const absl::btree_set<std::string> power_table_names = {"rise_power",
                                                                 "fall_power"};
 
-  if (Str::equal(group_name, "library")) {
+  if (isEqual(group_name, "library")) {
     is_ok = visitLibrary(group);
-  } else if (Str::equal(group_name, "wire_load")) {
+  } else if (isEqual(group_name, "wire_load")) {
     is_ok = visitWireLoad(group);
-  } else if (Str::equal(group_name, "lu_table_template") ||
-             Str::equal(group_name, "power_lut_template")) {
+  } else if (isEqual(group_name, "lu_table_template") ||
+             isEqual(group_name, "power_lut_template")) {
     is_ok = visitLuTableTemplate(group);
-  } else if (Str::equal(group_name, "type")) {
+  } else if (isEqual(group_name, "type")) {
     is_ok = visitType(group);
-  } else if (Str::equal(group_name, "output_current_template")) {
+  } else if (isEqual(group_name, "output_current_template")) {
     is_ok = visitOutputCurrentTemplate(group);
-  } else if (Str::equal(group_name, "cell")) {
+  } else if (isEqual(group_name, "cell")) {
     is_ok = visitCell(group);
-  } else if (Str::equal(group_name, "leakage_power")) {
+  } else if (isEqual(group_name, "leakage_power")) {
     is_ok = visitLeakagePower(group);
-  } else if (Str::equal(group_name, "bus") || Str::equal(group_name, "bundle")) {
+  } else if (isEqual(group_name, "bus") || isEqual(group_name, "bundle")) {
     is_ok = visitBus(group);
-  } else if (Str::equal(group_name, "pin")) {
+  } else if (isEqual(group_name, "pin")) {
     is_ok = visitPin(group);
-  } else if (Str::equal(group_name, "timing")) {
+  } else if (isEqual(group_name, "timing")) {
     is_ok = visitTiming(group);
-  } else if (Str::equal(group_name, "internal_power")) {
+  } else if (isEqual(group_name, "internal_power")) {
     is_ok = visitInternalPower(group);
-  } else if (Str::equal(group_name, "output_current_rise") ||
-             Str::equal(group_name, "output_current_fall")) {
+  } else if (isEqual(group_name, "output_current_rise") ||
+             isEqual(group_name, "output_current_fall")) {
     is_ok = visitCurrentTable(group);
-  } else if (Str::equal(group_name, "vector")) {
+  } else if (isEqual(group_name, "vector")) {
     is_ok = visitVector(group);
   } else if (table_names.contains(group_name)) {
     is_ok = visitTable(group);
   } else if (power_table_names.contains(group_name)) {
     is_ok = visitPowerTable(group);
   } else if (!Lib::isSilentOutput()) {
-    DLOG_INFO_EVERY_N(100000) << "group " << group_name << " is not supported.";
+    static std::atomic<int32_t> unsupported_group_count = 0;
+    if (unsupported_group_count.fetch_add(1, std::memory_order_relaxed) % 100000 == 0) {
+      ECCLOG.info(ecc::Loc::current(), "group ", group_name, " is not supported.");
+    }
   }
 
   return is_ok;
 }
 
 unsigned LibertyReader::readLib() {
-  LOG_INFO << "load liberty file " << _file_name;
+  ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name);
 
   auto* driver = new liberty_ast::LibertyDriver();
   if (!driver->parse(_file_name.c_str())) {
-    LOG_INFO << "load liberty file " << _file_name << " failed.";
+    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
     delete driver;
     return 0;
   }
@@ -1983,11 +2064,11 @@ unsigned LibertyReader::readLib() {
   _lib_file = driver;
 
   if (!_lib_file) {
-    LOG_INFO << "load liberty file " << _file_name << " failed.";
+    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
     return 0;
   }
 
-  LOG_INFO << "load liberty file " << _file_name << " success.";
+  ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " success.");
   return 1;
 }
 
@@ -1998,24 +2079,25 @@ unsigned LibertyReader::readLib() {
  */
 unsigned LibertyReader::linkLib() {
   if (!Lib::isSilentOutput()) {
-    LOG_INFO << "link liberty file " << _file_name << " start.";
+    ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " start.");
   }
   if (_lib_file) {
     auto* driver = reinterpret_cast<liberty_ast::LibertyDriver*>(_lib_file);
     auto* lib_group = driver ? driver->getParseResult() : nullptr;
-    LOG_FATAL_IF(!lib_group) << "parsed liberty root group is null: "
-                             << _file_name;
+    if (!lib_group) {
+      ECCLOG.error(ecc::Loc::current(), "parsed liberty root group is null: ", _file_name);
+    }
     unsigned result = visitGroup(lib_group);
     liberty_free_lib_group(_lib_file);
     _lib_file = nullptr;
 
     if (!Lib::isSilentOutput()) {
-      LOG_INFO << "link liberty file " << _file_name << " success.";
+      ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " success.");
     }
     return result;
   }
 
-  LOG_INFO << "link liberty file " << _file_name << " failed.";
+  ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " failed.");
   return 0;
 }
 

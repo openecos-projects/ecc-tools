@@ -75,18 +75,15 @@ class HTreeTopologyCharTable
    * - halfCapKey(this.load_cap_idx) == downstream.driven_cap_idx
    *
    * @tparam CombinerT Pattern combiner type
-   * @tparam PrunerT Pruner type (default: NullPruner for no pruning)
    * @param downstream Downstream table to join with
    * @param combiner Pattern combiner for merged pattern IDs
-   * @param pruner Optional pruner (nullptr to disable)
    * @return New table with composed entries
    */
-  template <class CombinerT, class PrunerT = detail::NullPruner>
-  auto concatWith(const HTreeTopologyCharTable& downstream, const CombinerT& combiner, const PrunerT* pruner = nullptr) const
-      -> HTreeTopologyCharTable
+  template <class CombinerT>
+  auto concatWith(const HTreeTopologyCharTable& downstream, const CombinerT& combiner) const -> HTreeTopologyCharTable
   {
     HTreeTopologyCharTable result;
-    detail::HashJoinConcat<HTreeTopologyChar, HTreeTraits>(_chars, downstream._chars, combiner, result._chars, pruner);
+    detail::HashJoinConcat<HTreeTopologyChar, HTreeTraits>(_chars, downstream._chars, combiner, result._chars);
     return result;
   }
 

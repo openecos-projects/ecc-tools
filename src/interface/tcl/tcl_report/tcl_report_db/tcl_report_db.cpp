@@ -32,7 +32,7 @@ CmdReportDbSummary::CmdReportDbSummary(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdReportDbSummary::check()
 {
   TclOption* file_name_option = getOptionOrArg(TCL_PATH);
-  LOG_FATAL_IF(!file_name_option);
+  ecc::checkTclOption(file_name_option, TCL_PATH);
   return 1;
 }
 

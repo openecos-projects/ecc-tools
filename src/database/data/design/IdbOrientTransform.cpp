@@ -30,6 +30,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "IdbOrientTransform.h"
 
 #include <algorithm>
@@ -43,7 +44,7 @@ IdbOrientTransform::~IdbOrientTransform()
 bool IdbOrientTransform::transformCoordinate(IdbCoordinate<int32_t>* coordinate_transform)
 {
   if (coordinate_transform == nullptr) {
-    std::cout << "Error : coordinate is null..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : coordinate is null...");
     return false;
     ;
   }
@@ -209,7 +210,7 @@ void IdbOrientTransform::transform_my90(IdbCoordinate<int32_t>* coordinate_trans
 bool IdbOrientTransform::cellMasterCoordinate(IdbCoordinate<int32_t>* coordinate_transform)
 {
   if (coordinate_transform == nullptr) {
-    std::cout << "Error : coordinate is null..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : coordinate is null...");
     return false;
     ;
   }

@@ -23,8 +23,6 @@
 
 #include "Router.hh"
 
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -33,9 +31,10 @@
 #include <utility>
 #include <vector>
 
-#include "ClockRouteSegmentRc.hh"
+#include "ClockRouteSegmentRC.hh"
 #include "Inst.hh"
-#include "Log.hh"
+#include "LocalLegalization.hh"
+#include "Logger.hh"
 #include "Net.hh"
 #include "Pin.hh"
 #include "PinLocationHelper.hh"
@@ -46,7 +45,6 @@
 #include "concurrent_bst_salt/CBSRouter.hh"
 #include "flute/FLUTERouter.hh"
 #include "geometry/Geometry.hh"
-#include "module/routing/local_legalization/LocalLegalization.hh"
 #include "salt/SALTRouter.hh"
 
 namespace icts {
@@ -54,11 +52,15 @@ namespace {
 
 auto ValidateClockRouteSegmentRc(const ClockRouteSegmentRc& route_segment_rc) -> void
 {
-  LOG_FATAL_IF(route_segment_rc.dbu_per_um <= 0) << "Router: DBU-per-micron is unavailable for RC-tree construction.";
-  LOG_FATAL_IF(!std::isfinite(route_segment_rc.resistance_per_um_ohm) || route_segment_rc.resistance_per_um_ohm <= 0.0)
-      << "Router: clock route segment resistance must be positive for RC-tree construction.";
-  LOG_FATAL_IF(!std::isfinite(route_segment_rc.capacitance_per_um_pf) || route_segment_rc.capacitance_per_um_pf <= 0.0)
-      << "Router: clock route segment capacitance must be positive for RC-tree construction.";
+  if (route_segment_rc.dbu_per_um <= 0) {
+    CTSLOG.error(Loc::current(), "Router: DBU-per-micron is unavailable for RC-tree construction.");
+  }
+  if (!std::isfinite(route_segment_rc.resistance_per_um_ohm) || route_segment_rc.resistance_per_um_ohm <= 0.0) {
+    CTSLOG.error(Loc::current(), "Router: clock route segment resistance must be positive for RC-tree construction.");
+  }
+  if (!std::isfinite(route_segment_rc.capacitance_per_um_pf) || route_segment_rc.capacitance_per_um_pf <= 0.0) {
+    CTSLOG.error(Loc::current(), "Router: clock route segment capacitance must be positive for RC-tree construction.");
+  }
 }
 
 auto QueryArcParasitics(int route_distance_dbu, const ClockRouteSegmentRc& route_segment_rc) -> std::pair<double, double>
@@ -124,8 +126,7 @@ auto MakeTerminal(Pin* pin) -> Router::ClockTerminal
   return terminal;
 }
 
-auto HasOverlappingTerminalLocation(const Router::ClockTerminal& driver_terminal, const std::vector<Router::ClockTerminal>& load_terminals)
-    -> bool
+auto HasOverlappingTerminalLocation(const Router::ClockTerminal& driver_terminal, const std::vector<Router::ClockTerminal>& load_terminals) -> bool
 {
   std::vector<Point<int>> terminal_locations;
   terminal_locations.reserve(load_terminals.size() + 1U);
@@ -165,10 +166,10 @@ auto LegalizeFluteLoadTerminals(const Router::ClockTerminal& driver_terminal, co
 
   LocalLegalization::Config legalization_config;
   legalization_config.failure_policy = LocalLegalization::FailurePolicy::kKeepOriginal;
-  auto result = LocalLegalization::legalize(movable_points, std::vector<Point<int>>{driver_terminal.location},
-                                            LocalLegalization::RegionType{}, LocalLegalization::RegionType{}, legalization_config);
+  auto result = LocalLegalization::legalize(movable_points, std::vector<Point<int>>{driver_terminal.location}, LocalLegalization::RegionType{},
+                                            LocalLegalization::RegionType{}, legalization_config);
   if (result.legalized_points.size() != legalized_terminals.size()) {
-    LOG_WARNING << "Router: terminal legalization before FLUTE returned an unexpected point count; continuing with original locations.";
+    CTSLOG.warn(Loc::current(), "Router: terminal legalization before FLUTE returned an unexpected point count; continuing with original locations.");
     return load_terminals;
   }
 
@@ -177,27 +178,24 @@ auto LegalizeFluteLoadTerminals(const Router::ClockTerminal& driver_terminal, co
   }
 
   if (!result.success || HasOverlappingTerminalLocation(driver_terminal, legalized_terminals)) {
-    LOG_WARNING << "Router: terminal legalization before FLUTE did not fully resolve overlaps; continuing with original locations.";
+    CTSLOG.warn(Loc::current(), "Router: terminal legalization before FLUTE did not fully resolve overlaps; continuing with original locations.");
     return load_terminals;
   }
 
   return legalized_terminals;
 }
 
-auto BuildClockStarTree(const Router::ClockTerminal& driver_terminal, const std::vector<Router::ClockTerminal>& load_terminals)
-    -> Router::ClockSteinerTreeType
+auto BuildClockStarTree(const Router::ClockTerminal& driver_terminal, const std::vector<Router::ClockTerminal>& load_terminals) -> Router::ClockSteinerTreeType
 {
   Router::ClockSteinerTreeType route_tree;
-  const auto root_id
-      = route_tree.addNode(driver_terminal.name, driver_terminal.location, true, driver_terminal.pin_cap, driver_terminal.insertion_delay);
+  const auto root_id = route_tree.addNode(driver_terminal.name, driver_terminal.location, true, driver_terminal.pin_cap, driver_terminal.insertion_delay);
   if (root_id == Router::ClockSteinerTreeType::kInvalidId) {
     return {};
   }
   route_tree.setRoot(root_id);
 
   for (const auto& load_terminal : load_terminals) {
-    const auto load_id
-        = route_tree.addNode(load_terminal.name, load_terminal.location, true, load_terminal.pin_cap, load_terminal.insertion_delay);
+    const auto load_id = route_tree.addNode(load_terminal.name, load_terminal.location, true, load_terminal.pin_cap, load_terminal.insertion_delay);
     if (load_id == Router::ClockSteinerTreeType::kInvalidId) {
       return {};
     }
@@ -220,7 +218,9 @@ auto BuildClockRCTree(const Router::ClockSteinerTreeType& tree, const ClockRoute
   }
 
   ValidateClockRouteSegmentRc(route_segment_rc);
-  LOG_FATAL_IF(!tree.validate()) << "Routing tree is invalid before RCTree conversion.";
+  if (!tree.validate()) {
+    CTSLOG.error(Loc::current(), "Routing tree is invalid before RCTree conversion.");
+  }
 
   rc_tree.reserveVertices(tree.node_count());
   rc_tree.reserveArcs(tree.edge_count());
@@ -229,7 +229,9 @@ auto BuildClockRCTree(const Router::ClockSteinerTreeType& tree, const ClockRoute
   for (const auto& node : tree.get_nodes()) {
     auto vertex_name = ResolveVertexName(node, rc_tree);
     auto vertex_id = rc_tree.addVertex(vertex_name, node.is_terminal, node.pin_cap);
-    LOG_FATAL_IF(vertex_id == Router::RCTreeType::kInvalidId) << "Failed to add RCTree vertex for routing node: " << vertex_name;
+    if (vertex_id == Router::RCTreeType::kInvalidId) {
+      CTSLOG.error(Loc::current(), "Failed to add RCTree vertex for routing node: ", vertex_name);
+    }
     node_to_vertex_id.at(node.id) = vertex_id;
   }
 
@@ -238,40 +240,41 @@ auto BuildClockRCTree(const Router::ClockSteinerTreeType& tree, const ClockRoute
   for (const auto& edge : tree.get_edges()) {
     auto source_vertex_id = node_to_vertex_id.at(edge.source_node_id);
     auto sink_vertex_id = node_to_vertex_id.at(edge.target_node_id);
-    LOG_FATAL_IF(source_vertex_id == Router::RCTreeType::kInvalidId || sink_vertex_id == Router::RCTreeType::kInvalidId)
-        << "Routing edge endpoint is missing during RCTree conversion.";
+    if (source_vertex_id == Router::RCTreeType::kInvalidId || sink_vertex_id == Router::RCTreeType::kInvalidId) {
+      CTSLOG.error(Loc::current(), "Routing edge endpoint is missing during RCTree conversion.");
+    }
 
     const auto [arc_resistance, arc_capacitance] = QueryArcParasitics(GetWireDistance(edge), route_segment_rc);
     auto arc_id = rc_tree.addArc(source_vertex_id, sink_vertex_id, arc_resistance, arc_capacitance);
-    LOG_FATAL_IF(arc_id == Router::RCTreeType::kInvalidId) << "Failed to add RCTree arc when converting routing tree edge " << edge.id;
+    if (arc_id == Router::RCTreeType::kInvalidId) {
+      CTSLOG.error(Loc::current(), "Failed to add RCTree arc when converting routing tree edge ", edge.id);
+    }
   }
 
-  LOG_FATAL_IF(!rc_tree.validate()) << "Constructed RCTree is invalid after routing conversion.";
+  if (!rc_tree.validate()) {
+    CTSLOG.error(Loc::current(), "Constructed RCTree is invalid after routing conversion.");
+  }
   return rc_tree;
 }
 
 }  // namespace
 
-auto Router::buildFluteTree(const ClockTerminal& driver_terminal, const std::vector<ClockTerminal>& load_terminals)
-    -> Router::ClockSteinerTreeType
+auto Router::buildFluteTree(const ClockTerminal& driver_terminal, const std::vector<ClockTerminal>& load_terminals) -> Router::ClockSteinerTreeType
 {
   return FLUTERouter::buildTree(driver_terminal, LegalizeFluteLoadTerminals(driver_terminal, load_terminals));
 }
 
-auto Router::buildSaltTree(const ClockTerminal& driver_terminal, const std::vector<ClockTerminal>& load_terminals)
-    -> Router::ClockSteinerTreeType
+auto Router::buildSaltTree(const ClockTerminal& driver_terminal, const std::vector<ClockTerminal>& load_terminals) -> Router::ClockSteinerTreeType
 {
   return SALTRouter::buildTree(driver_terminal, load_terminals);
 }
 
-auto Router::buildBstTree(const std::vector<ClockTerminal>& load_terminals, const BSTRoutingConfig& parameters)
-    -> Router::ClockSteinerTreeType
+auto Router::buildBstTree(const std::vector<ClockTerminal>& load_terminals, const BSTRoutingConfig& parameters) -> Router::ClockSteinerTreeType
 {
   return BSTRouter::buildTree(load_terminals, parameters);
 }
 
-auto Router::buildCbsTree(const std::vector<ClockTerminal>& load_terminals, const BSTRoutingConfig& parameters)
-    -> Router::ClockSteinerTreeType
+auto Router::buildCbsTree(const std::vector<ClockTerminal>& load_terminals, const BSTRoutingConfig& parameters) -> Router::ClockSteinerTreeType
 {
   return CBSRouter::buildTree(load_terminals, parameters);
 }
@@ -315,7 +318,7 @@ auto Router::legalizePins(std::vector<Pin*>& movable_pins, const std::vector<Pin
   const auto fixed_points = CollectPinLocations(fixed_pins);
   auto result = LocalLegalization::legalize(movable_points, fixed_points, feasible_region, block_region, config);
   if (!result.success) {
-    LOG_WARNING << "Router::legalizePins did not produce a successful legalization result.";
+    CTSLOG.warn(Loc::current(), "Router::legalizePins did not produce a successful legalization result.");
   }
   if (result.success || config.failure_policy == LocalLegalization::FailurePolicy::kKeepOriginal) {
     WriteBackPinLocations(movable_pins, result.legalized_points);

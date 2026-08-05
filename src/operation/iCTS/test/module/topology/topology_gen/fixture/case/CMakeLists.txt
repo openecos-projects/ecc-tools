@@ -7,5 +7,5 @@ add_library(
 target_link_libraries(
   icts_test_module_topology_gen_case_factory
   PUBLIC
-  icts_test_common_data
+  icts_test_data_manager_design_fixture_data
 )

@@ -1,11 +1,3 @@
-if(DEBUG_ISTA_CLOCK_PROPAGATOR)
-    message(STATUS "iSTA: DEBUG_ISTA_CLOCK_PROPAGATOR")
-    set(CMAKE_BUILD_TYPE "Debug")
-else()
-    message(STATUS "iSTA: RELEASE_ISTA_CLOCK_PROPAGATOR")
-    set(CMAKE_BUILD_TYPE "Release")
-endif()
-
 add_library(ista_clock_propagator
     ${ISTA_MODULE}/clock_propagator/ClockPropagator.cpp
 )

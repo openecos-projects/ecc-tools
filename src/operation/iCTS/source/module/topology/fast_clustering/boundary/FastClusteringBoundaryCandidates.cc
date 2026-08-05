@@ -36,9 +36,8 @@ struct ClusterConfig;
 
 namespace icts::fast_clustering {
 
-auto TryBuildDraftAfterMove(const ClusterDraft& source, const ClusterDraft& target, std::size_t moved_entry_id,
-                            const std::vector<LoadEntry>& entries, const ClusterConfig& config, ClusterDraft& source_after,
-                            ClusterDraft& target_after) -> bool
+auto TryBuildDraftAfterMove(const ClusterDraft& source, const ClusterDraft& target, std::size_t moved_entry_id, const std::vector<LoadEntry>& entries,
+                            const ClusterConfig& config, ClusterDraft& source_after, ClusterDraft& target_after) -> bool
 {
   if (source.entry_ids.size() <= 1U) {
     return false;
@@ -65,8 +64,8 @@ auto TryBuildDraftAfterMove(const ClusterDraft& source, const ClusterDraft& targ
   return IsDraftGeometryLegal(source_after, config) && IsDraftGeometryLegal(target_after, config);
 }
 
-auto BuildBoundaryEntryCandidates(const ClusterDraft& source, const ClusterDraft& target, const std::vector<LoadEntry>& entries,
-                                  const ClusterConfig& config) -> std::vector<std::size_t>
+auto BuildBoundaryEntryCandidates(const ClusterDraft& source, const ClusterDraft& target, const std::vector<LoadEntry>& entries, const ClusterConfig& config)
+    -> std::vector<std::size_t>
 {
   struct EntryCandidate
   {

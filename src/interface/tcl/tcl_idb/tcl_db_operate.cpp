@@ -14,6 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "utility/logger/Logger.hpp"
 #include "tcl_db_operate.h"
 
 #include "IdbEnum.h"
@@ -36,8 +37,8 @@ unsigned CmdIdbSetNet::check()
   TclOption* tcl_net_name = getOptionOrArg("-net_name");
   TclOption* tcl_net_type = getOptionOrArg("-type");
 
-  LOG_FATAL_IF(!tcl_net_name);
-  LOG_FATAL_IF(!tcl_net_type);
+  ecc::checkTclOption(tcl_net_name, "-net_name");
+  ecc::checkTclOption(tcl_net_type, "-type");
   return 1;
 }
 
@@ -99,7 +100,7 @@ unsigned CmdIdbClearBlockage::check()
 {
   TclOption* tcl_type = getOptionOrArg("-type");
 
-  LOG_FATAL_IF(!tcl_type);
+  ecc::checkTclOption(tcl_type, "-type");
   return 1;
 }
 
@@ -152,9 +153,9 @@ unsigned CmdIdbDeleteInstance::exec()
   std::string name = getOptionOrArg(INST_NAME_OPT)->getStringVal();
   bool deleted = dmInst->get_idb_design()->removeInstanceSafe(name);
   if (deleted) {
-    std::cout << "Instance " << name << " removed." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Instance ", name, " removed.");
   } else {
-    std::cout << "Remove instance" << name << " failed." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Remove instance", name, " failed.");
   }
   return 1;
 }
@@ -174,9 +175,9 @@ unsigned CmdIdbDeleteNet::exec()
   std::string name = getOptionOrArg(NET_NAME_OPT)->getStringVal();
   bool deleted = dmInst->get_idb_design()->removeNetSafe(name);
   if (deleted) {
-    std::cout << "Net " << name << " removed." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Net ", name, " removed.");
   } else {
-    std::cout << "Remove net " << name << " failed." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Remove net ", name, " failed.");
   }
 
   return 1;
@@ -200,14 +201,14 @@ CmdIdbCreateInstance::CmdIdbCreateInstance(const char* name) : TclCmd(name)
     addOption(new TclStringOption(opt, 1, EMPTY_STR));
   }
   // int options
-  addOption(new ieda::TclIntOption(COORD_X, 1, 0));
-  addOption(new ieda::TclIntOption(COORD_Y, 1, 0));
+  addOption(new ecc::TclIntOption(COORD_X, 1, 0));
+  addOption(new ecc::TclIntOption(COORD_Y, 1, 0));
 }
 unsigned CmdIdbCreateInstance::check()
 {
   for (const auto* opt : {INST_NAME_OPT, CELL_MASTER_OPT}) {
-    if (char* val = getOptionOrArg(opt)->getStringVal(); val == nullptr || val[0] == '\0') {
-      std::cout << "should specify option " << opt << std::endl;
+    if (const char* val = getOptionOrArg(opt)->getStringVal(); val == nullptr || val[0] == '\0') {
+      ECCLOG.info(ecc::Loc::current(), "should specify option ", opt);
       return 0;
     }
   }
@@ -237,9 +238,9 @@ unsigned CmdIdbCreateInstance::exec()
 
   idb::IdbInstance* inst = dmInst->createInstance(inst_name, cell_master_name, coord_x, coord_y, orient, type, status);
   if (inst) {
-    std::cout << "Create instance " << inst_name << " succeed." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Create instance ", inst_name, " succeed.");
   } else {
-    std::cout << "Create instance" << inst_name << " failed." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create instance", inst_name, " failed.");
   }
   return 1;
 }
@@ -253,7 +254,7 @@ unsigned CmdIdbCreateNet::check()
 {
   std::string name = getOptionOrArg(NET_NAME_OPT)->getStringVal();
   if (name.empty()) {
-    std::cout << "Create failed, please specify a net name.";
+    ECCLOG.warn(ecc::Loc::current(), "Create failed, please specify a net name.");
     return 0;
   }
   return 1;
@@ -268,7 +269,7 @@ unsigned CmdIdbCreateNet::exec()
   IdbConnectType conn_type = IdbEnum::GetInstance()->get_connect_property()->get_type(type);
 
   idb::IdbNet* net = dmInst->createNet(name, conn_type);
-  std::cout << "Create net " << name << (net ? " succeed." : " failed.") << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Create net ", name, (net ? " succeed." : " failed."));
 
   return 1;
 }

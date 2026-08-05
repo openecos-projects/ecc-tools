@@ -37,7 +37,7 @@
 
 #include "ValueLattice.hh"
 #include "characterization/buffer_cell/CharacterizationBufferCell.hh"
-#include "routing/ClockRouteSegmentRc.hh"
+#include "routing/ClockRouteSegmentRC.hh"
 
 namespace icts::char_builder::detail {
 class CharBuilderImpl;
@@ -45,7 +45,6 @@ class CharBuilderImpl;
 
 namespace icts {
 
-class SchemaWriter;
 class BufferingPattern;
 class FastSTA;
 class SegmentChar;
@@ -59,7 +58,6 @@ struct CharBuilderInput
   double root_input_slew_ns = 0.0;
   Wrapper* wrapper = nullptr;
   FastSTA* fast_sta = nullptr;
-  SchemaWriter* reporter = nullptr;
 };
 
 struct CharBuilderConfig
@@ -128,6 +126,7 @@ class CharBuilder
   auto get_max_observed_output_slew_idx() const -> unsigned;
   auto get_max_observed_driven_cap_pf() const -> double;
   auto get_max_observed_driven_cap_idx() const -> unsigned;
+  auto get_build_failure_reason() const -> const std::string&;
 
  private:
   std::unique_ptr<char_builder::detail::CharBuilderImpl> _impl;

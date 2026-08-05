@@ -172,4 +172,9 @@ auto CharBuilder::get_max_observed_driven_cap_idx() const -> unsigned
   return _impl->maxObservedDrivenCapIdx();
 }
 
+auto CharBuilder::get_build_failure_reason() const -> const std::string&
+{
+  return _impl->buildFailureReason();
+}
+
 }  // namespace icts

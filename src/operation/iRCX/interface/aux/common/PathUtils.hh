@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include "Logger.hpp"
 #include "StringUtils.hh"
 
 namespace ircx::path {
@@ -28,7 +29,7 @@ inline bool fileExists(const std::filesystem::path& file_path, std::string_view 
   if (std::filesystem::exists(file_path)) {
     return true;
   }
-  LOG_ERROR << "RCX file not found for " << field_name << ": " << file_path.string();
+  RCXLOG.warn(Loc::current(), "RCX file not found for ", field_name, ": ", file_path.string());
   return false;
 }
 
@@ -40,7 +41,7 @@ inline bool ensureDir(const std::filesystem::path& directory_path, std::string_v
   std::error_code error_code;
   std::filesystem::create_directories(directory_path, error_code);
   if (error_code || !std::filesystem::is_directory(directory_path)) {
-    LOG_ERROR << "Failed to create RCX directory for " << field_name << ": " << directory_path.string();
+    RCXLOG.warn(Loc::current(), "Failed to create RCX directory for ", field_name, ": ", directory_path.string());
     return false;
   }
   return true;

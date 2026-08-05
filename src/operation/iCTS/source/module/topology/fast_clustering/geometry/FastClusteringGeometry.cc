@@ -129,16 +129,14 @@ auto CalcEntryMedian(const std::vector<std::size_t>& entry_ids, const std::vecto
 
 }  // namespace
 
-auto ResolveDraftRoot(const std::vector<std::size_t>& entry_ids, const std::vector<LoadEntry>& entries, const ClusterConfig& config)
-    -> Point<int>
+auto ResolveDraftRoot(const std::vector<std::size_t>& entry_ids, const std::vector<LoadEntry>& entries, const ClusterConfig& config) -> Point<int>
 {
   return config.root_policy == ClusterRootPolicy::kCenter ? CalcEntryCenter(entry_ids, entries) : CalcEntryMedian(entry_ids, entries);
 }
 
 namespace {
 
-auto CalcRoutingCapProxy(const std::vector<std::size_t>& entry_ids, const std::vector<LoadEntry>& entries, const ClusterConfig& config)
-    -> double
+auto CalcRoutingCapProxy(const std::vector<std::size_t>& entry_ids, const std::vector<LoadEntry>& entries, const ClusterConfig& config) -> double
 {
   if (entry_ids.size() <= 1U) {
     return 0.0;
@@ -274,11 +272,9 @@ auto CalcRoutingCapVariancePenalty(double routing_cap_proxy, double target_routi
   return delta * delta / safe_target;
 }
 
-auto DraftObjective(const ClusterDraft& draft, const ClusterConfig& config, double target_routing_cap_proxy,
-                    double routing_cap_balance_weight) -> double
+auto DraftObjective(const ClusterDraft& draft, const ClusterConfig& config, double target_routing_cap_proxy, double routing_cap_balance_weight) -> double
 {
-  return ClusterScoreProxy(draft, config)
-         + routing_cap_balance_weight * CalcRoutingCapVariancePenalty(draft.routing_cap_proxy, target_routing_cap_proxy);
+  return ClusterScoreProxy(draft, config) + routing_cap_balance_weight * CalcRoutingCapVariancePenalty(draft.routing_cap_proxy, target_routing_cap_proxy);
 }
 
 auto CalcDraftAggregate(const std::vector<ClusterDraft>& drafts) -> DraftAggregate

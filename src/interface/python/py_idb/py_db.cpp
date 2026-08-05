@@ -14,13 +14,86 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "utility/logger/Logger.hpp"
 #include "py_db.h"
 
 #include "db_fm/file_soc.h"
+#include "GeometryEditSession.h"
+#include "GeometrySnapshotExporter.h"
 #include <idm.h>
 #include "view_json_io.h"
 
 namespace python_interface {
+namespace {
+
+ecc::geometry::GeometryEditSession& geometry_edit_session()
+{
+  static ecc::geometry::GeometryEditSession session;
+  return session;
+}
+
+pybind11::dict rect_to_dict(const ecc::geometry::Rect32& rect)
+{
+  pybind11::dict result;
+  result["lx"] = rect.lx;
+  result["ly"] = rect.ly;
+  result["hx"] = rect.hx;
+  result["hy"] = rect.hy;
+  return result;
+}
+
+const char* delta_op_name(ecc::geometry::GeometryDeltaOp op)
+{
+  switch (op) {
+    case ecc::geometry::GeometryDeltaOp::kInsert:
+      return "insert";
+    case ecc::geometry::GeometryDeltaOp::kUpdate:
+      return "update";
+    case ecc::geometry::GeometryDeltaOp::kDelete:
+      return "delete";
+    default:
+      return "none";
+  }
+}
+
+pybind11::dict owner_to_dict(const ecc::geometry::OwnerRef& owner)
+{
+  pybind11::dict result;
+  result["type"] = std::string(ecc::geometry::owner_type_label(owner.type));
+  result["ownerId"] = owner.owner_id;
+  result["path0"] = owner.path0;
+  result["path1"] = owner.path1;
+  result["path2"] = owner.path2;
+  result["path3"] = owner.path3;
+  return result;
+}
+
+pybind11::dict delta_to_dict(const ecc::geometry::GeometryDeltaShape& delta)
+{
+  pybind11::dict result;
+  result["sequenceId"] = delta.event.sequence_id;
+  result["commandId"] = delta.event.command_id;
+  result["op"] = delta_op_name(delta.event.op);
+  result["shapeId"] = delta.event.shape_id;
+  result["oldVersion"] = delta.event.old_version;
+  result["newVersion"] = delta.event.new_version;
+  result["oldBbox"] = rect_to_dict(delta.event.old_bbox);
+  result["newBbox"] = rect_to_dict(delta.event.new_bbox);
+  if (delta.has_shape) {
+    pybind11::dict shape;
+    shape["id"] = delta.shape.id;
+    shape["version"] = delta.shape.version;
+    shape["layerId"] = delta.shape.layer_id;
+    shape["kind"] = static_cast<uint8_t>(delta.shape.kind);
+    shape["state"] = static_cast<uint8_t>(delta.shape.state);
+    shape["bbox"] = rect_to_dict(delta.shape.bbox);
+    result["shape"] = std::move(shape);
+    result["owner"] = owner_to_dict(delta.owner);
+  }
+  return result;
+}
+
+}  // namespace
 
 bool initIdb(const std::string& config_path)
 {
@@ -108,11 +181,92 @@ bool saveViewJson(const std::string& output_dir, const std::string& json_format,
 {
   idb::ViewJsonWriteOptions options;
   if (!idb::parseViewJsonFormat(json_format, options.format)) {
-    std::cout << "Save view json failed: unsupported json_format `" << json_format << "`, expected `pretty` or `compact`." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Save view json failed: unsupported json_format `", json_format, "`, expected `pretty` or `compact`.");
     return false;
   }
   options.compress = compress;
   return dmInst->saveViewJson(output_dir, options);
+}
+
+bool saveGeometrySnapshot(const std::string& output_dir)
+{
+  idb::IdbDesign* design = dmInst->get_idb_design();
+  idb::IdbLayout* layout = dmInst->get_idb_layout();
+  if (design == nullptr || layout == nullptr) {
+    return false;
+  }
+
+  return ecc::geometry::export_geometry_snapshot(*design, *layout, output_dir).ok;
+}
+
+bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,
+                   const std::string& source, const std::string& placement_status, bool create_if_missing)
+{
+  return dmInst->placeInst(inst_name, llx, lly, orient, cellmaster, source, placement_status, create_if_missing);
+}
+
+bool initializeGeometrySession()
+{
+  idb::IdbDesign* design = dmInst->get_idb_design();
+  idb::IdbLayout* layout = dmInst->get_idb_layout();
+  if (design == nullptr || layout == nullptr) {
+    return false;
+  }
+
+  return geometry_edit_session().begin(*design, *layout);
+}
+
+pybind11::dict syncInstanceGeometry(const std::string& inst_name)
+{
+  pybind11::dict result;
+  result["ok"] = false;
+  result["snapshotRequired"] = true;
+  result["updatedShapeCount"] = 0;
+  result["insertedShapeCount"] = 0;
+  result["deletedShapeCount"] = 0;
+  result["missingShapeCount"] = 0;
+  result["events"] = pybind11::list();
+
+  if (!geometry_edit_session().initialized()) {
+    return result;
+  }
+
+  idb::IdbDesign* design = dmInst->get_idb_design();
+  if (design == nullptr || design->get_instance_list() == nullptr) {
+    return result;
+  }
+
+  idb::IdbInstance* instance = design->get_instance_list()->find_instance(inst_name);
+  if (instance == nullptr) {
+    result["missingShapeCount"] = 1;
+    return result;
+  }
+
+  const ecc::geometry::GeometryInstanceSyncResult sync = geometry_edit_session().sync_instance(*instance);
+  result["ok"] = sync.ok;
+  result["snapshotRequired"] = sync.snapshot_required;
+  result["updatedShapeCount"] = sync.sync.updated_shape_count;
+  result["insertedShapeCount"] = sync.sync.added_shape_count;
+  result["deletedShapeCount"] = sync.sync.deleted_shape_count;
+  result["missingShapeCount"] = sync.sync.missing_shape_count;
+
+  pybind11::list events;
+  for (const ecc::geometry::GeometryDeltaShape& delta : sync.events) {
+    events.append(delta_to_dict(delta));
+  }
+  result["events"] = std::move(events);
+  return result;
+}
+
+bool saveGeometrySessionSnapshot(const std::string& output_dir)
+{
+  return geometry_edit_session().write_snapshot(output_dir).ok;
+}
+
+bool resetGeometrySession()
+{
+  geometry_edit_session().reset();
+  return true;
 }
 
 bool applyViewJsonEdits(const std::string& edits_path, bool compress)
@@ -127,12 +281,20 @@ bool saveData(const std::string& path)
 
 bool resetData()
 {
+  // resetData destroys the IDB objects retained by the process-wide geometry
+  // edit session. Drop those raw pointers before releasing the database.
+  geometry_edit_session().reset();
   dmInst->resetData();
   return true;
 }
 
 bool loadData(const std::string& path)
 {
+  // DataManager::loadData begins by resetting its current IdbBuilder, so the
+  // session must be cleared before it can invalidate its design/layout
+  // pointers. Callers initialize a new geometry session after a successful
+  // load.
+  geometry_edit_session().reset();
   return dmInst->loadData(path);
 }
 

@@ -83,7 +83,9 @@ void DataManager::buildConfig()
   _config.temp_directory_path = std::filesystem::absolute(_config.temp_directory_path);
   _config.temp_directory_path += "/";
   _config.log_file_path = _config.temp_directory_path + "sta.log";
-  _config.path_report_number = 10000;
+  _config.path_report_number = std::max(_config.path_report_number, 1);
+  _config.endpoint_path_report_number = std::max(_config.endpoint_path_report_number, 1);
+  _config.timing_path_limit = std::max(_config.timing_path_limit, 0);
   // **********    DataManager    ********** //
   _config.dm_temp_directory_path = _config.temp_directory_path + "data_manager/";
   // **********   GraphBuilder    ********** //
@@ -189,6 +191,7 @@ void DataManager::makeInstanceTimingInfo(Instance& instance)
 
   TimingCell& timing_cell = timing_cell_map[instance.get_cell_name()];
   instance.set_is_sequential(timing_cell.get_is_sequential());
+  instance.set_is_clock_gating(timing_cell.get_is_clock_gating());
   instance.set_has_clear_arc(timing_cell.get_has_clear_arc());
   instance.set_has_preset_arc(timing_cell.get_has_preset_arc());
   TimingCellArc* clock_to_q_arc = findClockToQArc(timing_cell);
@@ -953,6 +956,26 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.thread_number);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "path_report_number");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.path_report_number);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "endpoint_path_report_number");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.endpoint_path_report_number);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_report_delay_type");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_report_delay_type);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_report_start_end_type");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_report_start_end_type);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "has_timing_report_slack_lesser_than");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.has_timing_report_slack_lesser_than);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_report_slack_lesser_than");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_report_slack_lesser_than);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "has_timing_report_slack_greater_than");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.has_timing_report_slack_greater_than);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_report_slack_greater_than");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_report_slack_greater_than);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "output_timing_reports");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.output_timing_reports);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "output_timing_features");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.output_timing_features);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_path_limit");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_path_limit);
   // **********        STA        ********** //
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(0), "STA_CONFIG_BUILD");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "log_file_path");

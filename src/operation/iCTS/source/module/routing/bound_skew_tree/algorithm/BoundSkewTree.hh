@@ -47,8 +47,7 @@ class BoundSkewTree
  public:
   static constexpr double kHalfFactor = 0.5;
 
-  BoundSkewTree(std::vector<std::unique_ptr<Area>> load_areas, const BSTRoutingConfig& parameters,
-                const BSTRoutingTopologyMode& topology_mode);
+  BoundSkewTree(std::vector<std::unique_ptr<Area>> load_areas, const BSTRoutingConfig& parameters, const BSTRoutingTopologyMode& topology_mode);
   BoundSkewTree(std::vector<std::unique_ptr<Area>> owned_areas, Area* root, const BSTRoutingConfig& parameters);
   BoundSkewTree(const BoundSkewTree&) = delete;
   BoundSkewTree(BoundSkewTree&&) = delete;

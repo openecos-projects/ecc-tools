@@ -1,5 +1,3 @@
-include(${HOME_CMAKE}/operation/idb.cmake)
-
 add_library(idm
     idm.cpp
     idm_init.cpp
@@ -19,19 +17,20 @@ add_library(idm
     checker/check_connection.cpp
 )
 
-target_link_libraries(idm 
+target_link_libraries(idm
     PUBLIC
-    flow 
-    file_manager_cts 
+    IdbBuilder
+    flow
     liberty
     spef
     vcd
-    # file_manager_drc 
+    # file_manager_drc
     tool_manager
+    ecc_logger
     )
 
-target_include_directories(idm 
-    PUBLIC 
+target_include_directories(idm
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/config
         ${CMAKE_CURRENT_SOURCE_DIR}/checker
@@ -40,8 +39,6 @@ target_include_directories(idm
         ${HOME_PLATFORM}/flow/config
 
         ${HOME_PLATFORM}/tool_manager
-        ${HOME_PLATFORM}/tool_manager/tool_api
-        ${HOME_PLATFORM}/tool_manager/tool_api/irt_io
 
         ${HOME_PLATFORM}/file_manager
         ${HOME_DATABASE}/manager/parser

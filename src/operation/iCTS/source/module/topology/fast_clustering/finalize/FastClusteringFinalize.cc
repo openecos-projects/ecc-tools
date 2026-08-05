@@ -20,9 +20,6 @@
  * @date 2026-04-24
  * @brief Final legal cluster materialization for fast topology clustering.
  */
-
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <compare>
 #include <cstddef>
@@ -35,7 +32,7 @@
 #include "ClusterConstraintEvaluation.hh"
 #include "ClusterConstraintEvaluator.hh"
 #include "Clustering.hh"
-#include "Log.hh"
+#include "Logger.hh"
 #include "Pin.hh"
 #include "Point.hh"
 #include "TopologyConfig.hh"
@@ -130,8 +127,8 @@ auto AppendFinalCluster(const std::vector<Pin*>& cluster, const ClusterConfig& c
     }
 
     if (current_cluster.size() <= 1U) {
-      LOG_WARNING << "Fast clustering could not legalize singleton cluster: violation=" << static_cast<int>(evaluation.violation)
-                  << ", pin=" << (current_cluster.front() == nullptr ? std::string("<null>") : current_cluster.front()->get_name());
+      CTSLOG.warn(Loc::current(), "Fast clustering could not legalize singleton cluster: violation=", static_cast<int>(evaluation.violation),
+                  ", pin=", (current_cluster.front() == nullptr ? std::string("<null>") : current_cluster.front()->get_name()));
       return false;
     }
 

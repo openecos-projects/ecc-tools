@@ -37,7 +37,7 @@
 #include "characterization/circuit/CharCircuitBuilder.hh"
 #include "characterization/pattern/CharPatternEnumerator.hh"
 #include "characterization/pattern/CharPatternStorage.hh"
-#include "characterization/sampling/CharStaSampler.hh"
+#include "characterization/sampling/CharSTASampler.hh"
 
 namespace icts::char_builder::detail {
 

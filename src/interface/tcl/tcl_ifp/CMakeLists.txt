@@ -1,18 +1,18 @@
-AUX_SOURCE_DIRECTORY(./ TCL_IFP_SRC)
-
-add_library(tcl_ifp 
-    ${TCL_IFP_SRC}
+add_library(tcl_ifp
+    ${HOME_INTERFACE}/tcl/tcl_ifp/src/tcl_init_fp.cpp
+    ${HOME_INTERFACE}/tcl/tcl_ifp/src/tcl_run_fp.cpp
+    ${HOME_INTERFACE}/tcl/tcl_ifp/src/tcl_destroy_fp.cpp
 )
 
-target_link_libraries(tcl_ifp 
+target_link_libraries(tcl_ifp
     PUBLIC
-        tool_manager
-        tcl
-        str
-        ifp_api
+    tool_manager
+    tcl_util
+    PRIVATE
+    ifp_interface
 )
 
 target_include_directories(tcl_ifp
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}  
+    ${HOME_INTERFACE}/tcl/tcl_ifp/include
 )

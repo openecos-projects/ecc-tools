@@ -1,0 +1,29 @@
+add_library(
+  icts_source_module_synthesis_htree_solution
+  ${ICTS_MODULE_SYNTHESIS_HTREE_SOLUTION}/Solution.cc
+  ${ICTS_MODULE_SYNTHESIS_HTREE_SOLUTION}/analytical/AnalyticalSolution.cc
+  ${ICTS_MODULE_SYNTHESIS_HTREE_SOLUTION}/finalization/SolutionFinalizer.cc
+  ${ICTS_MODULE_SYNTHESIS_HTREE_SOLUTION}/discrete/DiscreteSolution.cc
+  ${ICTS_MODULE_SYNTHESIS_HTREE_SOLUTION}/selection/SolutionSelection.cc
+)
+
+target_link_libraries(
+  icts_source_module_synthesis_htree_solution
+  PRIVATE
+  icts_source_data_manager_io
+  icts_source_module_synthesis_htree_synthesis_state
+  icts_source_module_synthesis_htree_analytical_solver
+  icts_source_module_synthesis_htree_depth_plan
+  icts_source_module_synthesis_htree_embedding
+  icts_source_module_synthesis_htree_plan
+  icts_source_module_synthesis_htree_topology_pruning
+  icts_source_data_manager_design
+  icts_source_toolkit_logger
+)
+
+target_include_directories(
+  icts_source_module_synthesis_htree_solution
+  PUBLIC
+  ${ICTS_SOURCE}
+  ${ICTS_MODULE}
+)

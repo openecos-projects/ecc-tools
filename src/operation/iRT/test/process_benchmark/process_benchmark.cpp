@@ -1,3 +1,4 @@
+#include "utility/logger/Logger.hpp"
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -193,9 +194,9 @@ void writeCSV(const std::string& filename, const std::vector<std::vector<std::st
       file << "\n";
     }
     file.close();
-    std::cout << "CSV file " << filename << " written successfully." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "CSV file ", filename, " written successfully.");
   } else {
-    std::cout << "Unable to open file " << filename << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Unable to open file ", filename);
   }
 }
 
@@ -239,7 +240,7 @@ void printMultiCoreList(std::vector<MultiCore>& multi_core_list)
     csv_data.push_back(value_csv);
   }
 
-  writeCSV("/home/zengzhisheng/iEDA/aaa.csv", csv_data);
+  writeCSV("/home/zengzhisheng/ECC/aaa.csv", csv_data);
 }
 
 int32_t main()

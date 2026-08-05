@@ -30,7 +30,7 @@
 
 #include "SpefParser.hh"
 #include "config/PlotSpefConfig.hh"
-#include "log/Log.hh"
+#include "Logger.hpp"
 #include "model/PlotSpefModel.hh"
 #include "model/PlotSpefVisibility.hh"
 
@@ -124,15 +124,14 @@ auto parseEdgeName(const spef::Exchange& exchange,
 {
   const auto delimiter = config.edge_name.rfind(':');
   if (delimiter == std::string::npos || delimiter + 1 >= config.edge_name.size()) {
-    LOG_ERROR << "plot_spef -edge expects net_name:index, got " << config.edge_name;
+    RCXLOG.warn(Loc::current(), "plot_spef -edge expects net_name:index, got ", config.edge_name);
     return std::nullopt;
   }
 
   EdgeName edge_name;
   edge_name.net_name = normalizeSpefName(exchange, config.edge_name.substr(0, delimiter));
   if (!parseSize(std::string_view{config.edge_name}.substr(delimiter + 1), edge_name.res_index)) {
-    LOG_ERROR << "plot_spef -edge expects a non-negative *RES index, got "
-              << config.edge_name;
+    RCXLOG.warn(Loc::current(), "plot_spef -edge expects a non-negative *RES index, got ", config.edge_name);
     return std::nullopt;
   }
   return edge_name;
@@ -330,7 +329,7 @@ auto makeNetVisibleObjects(const Model& model,
   const bool found_target = showOnlyNet(model, visibility, target_net);
   showCoupledNetContext(model, visibility, net_map, target_net);
   if (!found_target) {
-    LOG_ERROR << "plot_spef warning: target net not found: " << config.net_name;
+    RCXLOG.warn(Loc::current(), "plot_spef warning: target net not found: ", config.net_name);
   }
   return visibility;
 }
@@ -348,7 +347,7 @@ auto makeEdgeVisibleObjectsImpl(const Model& model,
   auto net_map = buildNetMap(model);
   const EdgeRef target_edge = findEdgeRef(model, *edge_name);
   if (!target_edge.valid) {
-    LOG_ERROR << "plot_spef warning: target edge not found: " << config.edge_name;
+    RCXLOG.warn(Loc::current(), "plot_spef warning: target edge not found: ", config.edge_name);
     return visibility;
   }
 

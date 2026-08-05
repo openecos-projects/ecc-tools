@@ -11,7 +11,7 @@ target_link_libraries(ircx_tool_run_rcx_from_topology
     ircx_headers
   PRIVATE
     ircx_topology
-    log
+    ircx_logger
     spef
 )
 

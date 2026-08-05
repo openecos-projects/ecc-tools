@@ -29,6 +29,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "utility/logger/Logger.hpp"
 #include "IdbLayout.h"
 
 #include <limits.h>
@@ -114,7 +115,7 @@ IdbCore* IdbLayout::get_core()
     int32_t max_y = INT_MIN;
     for (IdbRow* row : _rows->get_row_list()) {
       if (row->get_site() != nullptr && row->get_site()->is_core_site() == false) {
-        std::cout << "Warning: row " << row->get_name() << " " << row->get_site()->get_name() << " site is not core site!" << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "Warning: row ", row->get_name(), " ", row->get_site()->get_name(), " site is not core site!");
         continue;
       }
       IdbRect* row_rect = row->get_bounding_box();
@@ -128,7 +129,8 @@ IdbCore* IdbLayout::get_core()
     }
     _core->set_bounding_box(min_x, min_y, max_x, max_y);
   } else {
-    _core->set_bounding_box(_die->get_bounding_box());
+    auto* die_bbox = _die->get_bounding_box();
+    _core->set_bounding_box(die_bbox->get_low_x(), die_bbox->get_low_y(), die_bbox->get_high_x(), die_bbox->get_high_y());
   }
 
   return _core;

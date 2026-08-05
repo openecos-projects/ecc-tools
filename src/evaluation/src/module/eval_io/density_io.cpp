@@ -22,6 +22,7 @@
  * @date 2025-06-014
  */
 
+#include "utility/logger/Logger.hpp"
 #include "density_io.h"
 
 #include "density_api.h"
@@ -37,20 +38,20 @@ bool EvalDensity::runDensityEvalAndOutput(int grid_size, const std::string& stag
   DensityAPI density_api;
   const auto [cell_map_summary, pin_map_summary, net_map_summary] = density_api.densityMap(stage, _grid_size);
 
-  std::cout << "Macro density: " << cell_map_summary.macro_density << std::endl;
-  std::cout << "StdCell density: " << cell_map_summary.stdcell_density << std::endl;
-  std::cout << "AllCell density: " << cell_map_summary.allcell_density << std::endl;
-  std::cout << "Macro pin density: " << pin_map_summary.macro_pin_density << std::endl;
-  std::cout << "StdCell pin density: " << pin_map_summary.stdcell_pin_density << std::endl;
-  std::cout << "AllCell pin density: " << pin_map_summary.allcell_pin_density << std::endl;
-  std::cout << "Local net density: " << net_map_summary.local_net_density << std::endl;
-  std::cout << "Global net density: " << net_map_summary.global_net_density << std::endl;
-  std::cout << "All net density: " << net_map_summary.allnet_density << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Macro density: ", cell_map_summary.macro_density);
+  ECCLOG.info(ecc::Loc::current(), "StdCell density: ", cell_map_summary.stdcell_density);
+  ECCLOG.info(ecc::Loc::current(), "AllCell density: ", cell_map_summary.allcell_density);
+  ECCLOG.info(ecc::Loc::current(), "Macro pin density: ", pin_map_summary.macro_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "StdCell pin density: ", pin_map_summary.stdcell_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "AllCell pin density: ", pin_map_summary.allcell_pin_density);
+  ECCLOG.info(ecc::Loc::current(), "Local net density: ", net_map_summary.local_net_density);
+  ECCLOG.info(ecc::Loc::current(), "Global net density: ", net_map_summary.global_net_density);
+  ECCLOG.info(ecc::Loc::current(), "All net density: ", net_map_summary.allnet_density);
 
   const auto [local_net_density, global_net_density, allnet_density] = density_api.netDensityMap(stage, _grid_size);
-  std::cout << "Local net density: " << local_net_density << std::endl;
-  std::cout << "Global net density: " << global_net_density << std::endl;
-  std::cout << "All net density: " << allnet_density << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Local net density: ", local_net_density);
+  ECCLOG.info(ecc::Loc::current(), "Global net density: ", global_net_density);
+  ECCLOG.info(ecc::Loc::current(), "All net density: ", allnet_density);
 
   nlohmann::json density_json;
 
@@ -75,13 +76,13 @@ bool EvalDensity::runDensityEvalAndOutput(int grid_size, const std::string& stag
     if (std::ofstream outfile(_output_path); outfile.is_open()) {
       outfile << density_json.dump(2);
       outfile.close();
-      std::cout << "Density evaluation results saved to " << _output_path << std::endl;
+      ECCLOG.info(ecc::Loc::current(), "Density evaluation results saved to ", _output_path);
     } else {
-      std::cerr << "Failed to open output file: " << _output_path << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Failed to open output file: ", _output_path);
       return false;
     }
   } catch (const std::exception& e) {
-    std::cerr << "Error writing JSON output: " << e.what() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error writing JSON output: ", e.what());
     return false;
   }
 
@@ -98,15 +99,15 @@ EvalDensity::~EvalDensity() = default;
 void EvalDensity::setOutputPath(const std::string& path)
 {
   if (path.empty()) {
-    std::cout << "Output path is empty, using default path: " << _output_path << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Output path is empty, using default path: ", _output_path);
     return;
   }
   if (_output_path == path) {
-    std::cout << "Output path already exists, using default path: " << _output_path << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Output path already exists, using default path: ", _output_path);
     return;
   }
   _output_path = path + "/density_result.json";
-  std::cout << "Setting Density Evaluation report output path to " << _output_path << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Setting Density Evaluation report output path to ", _output_path);
   std::filesystem::create_directories(std::filesystem::path(path));
 }
 }  // namespace ieval

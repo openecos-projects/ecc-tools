@@ -22,7 +22,7 @@
 
 #include "compare/Comparator.hh"
 #include "config/CompareSpefConfig.hh"
-#include "log/Log.hh"
+#include "Logger.hpp"
 #include "reader/SpefReader.hh"
 #include "report/ReportWriter.hh"
 
@@ -40,11 +40,11 @@ auto CompareSpefTool::run(compare_spef::Config config) -> bool
   compare_spef::Data reference;
   const compare_spef::SpefReader spef_reader;
   if (!spef_reader.read(config.test_file, test)) {
-    LOG_ERROR << "compare_spef failed: read test SPEF failed: " << config.test_file;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: read test SPEF failed: ", config.test_file);
     return false;
   }
   if (!spef_reader.read(config.reference_file, reference)) {
-    LOG_ERROR << "compare_spef failed: read reference SPEF failed: " << config.reference_file;
+    RCXLOG.warn(Loc::current(), "compare_spef failed: read reference SPEF failed: ", config.reference_file);
     return false;
   }
 
@@ -55,7 +55,7 @@ auto CompareSpefTool::run(compare_spef::Config config) -> bool
     return false;
   }
 
-  LOG_INFO << "compare_spef wrote reports to " << config.output_dir;
+  RCXLOG.info(Loc::current(), "compare_spef wrote reports to ", config.output_dir);
   return true;
 }
 

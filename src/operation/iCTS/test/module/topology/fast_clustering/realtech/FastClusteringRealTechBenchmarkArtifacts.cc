@@ -31,9 +31,9 @@
 #include <vector>
 
 #include "FastClusteringRealTechBenchmarkFixture.hh"
-#include "common/clustering/artifact/ClusterArtifactWriter.hh"
-#include "common/io/TestArtifactIO.hh"
-#include "common/visualization/TestVisualization.hh"
+#include "module/topology/fast_clustering/fixture/artifact/ClusterArtifactWriter.hh"
+#include "toolkit/io/TestArtifactIO.hh"
+#include "toolkit/visualization/TestVisualization.hh"
 
 namespace icts {
 class Pin;
@@ -42,7 +42,7 @@ struct ClusterOutput;
 
 namespace icts_test::fast_clustering::realtech {
 namespace {
-using common::io::SanitizeOutputName;
+using toolkit::io::SanitizeOutputName;
 
 auto CsvEscape(const std::string& text) -> std::string
 {
@@ -87,15 +87,14 @@ auto WriteCaseClusterSvg(const std::filesystem::path& svg_dir, const BenchmarkCa
   }
 
   ClusterSvgArtifacts fast_artifacts;
-  if (!common::clustering::BuildClusterArtifacts(fast_result, loads, fast_artifacts.cluster_map, fast_artifacts.centers,
-                                                 fast_artifacts.cluster_sizes, error)) {
+  if (!module::topology::fast_clustering::fixture::BuildClusterArtifacts(fast_result, loads, fast_artifacts.cluster_map, fast_artifacts.centers,
+                                                                         fast_artifacts.cluster_sizes, error)) {
     error = "fast artifacts: " + error;
     return {};
   }
 
   auto svg_path = svg_dir / BuildClusterSvgName(benchmark_case);
-  const bool wrote_svg
-      = common::visualization::WriteClusterSvg(svg_path.string(), loads, fast_artifacts.cluster_map, fast_artifacts.centers);
+  const bool wrote_svg = toolkit::visualization::WriteClusterSvg(svg_path.string(), loads, fast_artifacts.cluster_map, fast_artifacts.centers);
   if (!wrote_svg) {
     error = "failed to write fast cluster svg: " + svg_path.string();
     return {};
@@ -109,13 +108,11 @@ auto BuildCasesCsv(const std::vector<CaseResult>& results) -> std::string
   stream << "index,case,top,def,verilog,dbu_per_micron,inst_count,net_count,clock_count,clock_name,clock_net,"
             "clock_selection_reason,load_count,span_diameter\n";
   for (const auto& result : results) {
-    stream << result.benchmark_case.index << "," << CsvEscape(result.benchmark_case.case_name) << ","
-           << CsvEscape(result.benchmark_case.top_module) << "," << CsvEscape(result.benchmark_case.def_path.string()) << ","
-           << CsvEscape(result.benchmark_case.verilog_path.string()) << "," << result.loaded.dbu_per_micron << ","
-           << result.loaded.inst_count << "," << result.loaded.net_count << "," << result.loaded.clock_count << ","
-           << CsvEscape(result.loaded.clock_name) << "," << CsvEscape(result.loaded.clock_net_name) << ","
-           << CsvEscape(result.loaded.clock_selection_reason) << "," << result.loaded.load_count << "," << result.loaded.span_diameter
-           << "\n";
+    stream << result.benchmark_case.index << "," << CsvEscape(result.benchmark_case.case_name) << "," << CsvEscape(result.benchmark_case.top_module) << ","
+           << CsvEscape(result.benchmark_case.def_path.string()) << "," << CsvEscape(result.benchmark_case.verilog_path.string()) << ","
+           << result.loaded.dbu_per_micron << "," << result.loaded.inst_count << "," << result.loaded.net_count << "," << result.loaded.clock_count << ","
+           << CsvEscape(result.loaded.clock_name) << "," << CsvEscape(result.loaded.clock_net_name) << "," << CsvEscape(result.loaded.clock_selection_reason)
+           << "," << result.loaded.load_count << "," << result.loaded.span_diameter << "\n";
   }
   return stream.str();
 }
@@ -124,13 +121,12 @@ namespace {
 
 auto AppendMetricsCsvRow(std::ostringstream& stream, const BenchmarkCase& benchmark_case, const ResultMetrics& metrics) -> void
 {
-  stream << benchmark_case.index << "," << CsvEscape(benchmark_case.case_name) << "," << metrics.algorithm << "," << std::fixed
-         << std::setprecision(3) << metrics.runtime_ms << "," << std::setprecision(6) << metrics.total_score << "," << metrics.legal << ","
-         << metrics.expected_load_count << "," << metrics.load_count << "," << metrics.missing_load_count << "," << metrics.cluster_count
-         << "," << metrics.singleton_count << "," << metrics.max_fanout << "," << metrics.max_diameter << "," << metrics.fanout_violations
-         << "," << metrics.diameter_violations << "," << metrics.cap_violations << "," << metrics.route_failures << ","
-         << metrics.total_wirelength << "," << metrics.total_routing_cap_proxy << "," << metrics.avg_routing_cap_proxy << ","
-         << metrics.routing_cap_proxy_variance << "," << metrics.routing_cap_proxy_stddev << "\n";
+  stream << benchmark_case.index << "," << CsvEscape(benchmark_case.case_name) << "," << metrics.algorithm << "," << std::fixed << std::setprecision(3)
+         << metrics.runtime_ms << "," << std::setprecision(6) << metrics.total_score << "," << metrics.legal << "," << metrics.expected_load_count << ","
+         << metrics.load_count << "," << metrics.missing_load_count << "," << metrics.cluster_count << "," << metrics.singleton_count << ","
+         << metrics.max_fanout << "," << metrics.max_diameter << "," << metrics.fanout_violations << "," << metrics.diameter_violations << ","
+         << metrics.cap_violations << "," << metrics.route_failures << "," << metrics.total_wirelength << "," << metrics.total_routing_cap_proxy << ","
+         << metrics.avg_routing_cap_proxy << "," << metrics.routing_cap_proxy_variance << "," << metrics.routing_cap_proxy_stddev << "\n";
 }
 
 }  // namespace
@@ -153,8 +149,7 @@ auto BuildVisualizationCsv(const std::vector<CaseResult>& results) -> std::strin
   std::ostringstream stream;
   stream << "index,case,cluster_svg\n";
   for (const auto& result : results) {
-    stream << result.benchmark_case.index << "," << CsvEscape(result.benchmark_case.case_name) << "," << CsvEscape(result.cluster_svg)
-           << "\n";
+    stream << result.benchmark_case.index << "," << CsvEscape(result.benchmark_case.case_name) << "," << CsvEscape(result.cluster_svg) << "\n";
   }
   return stream.str();
 }
@@ -170,8 +165,8 @@ auto BuildInventoryReport(const std::vector<BenchmarkCase>& cases, const TechAss
   stream << "tech_lef=" << assets.tech_lef_path.string() << "\n";
   for (std::size_t index = 0; index < cases.size(); ++index) {
     const auto& benchmark_case = cases.at(index);
-    stream << "case_" << (index + 1U) << "=" << benchmark_case.case_name << ",top=" << benchmark_case.top_module
-           << ",def=" << benchmark_case.def_path.string() << ",verilog=" << benchmark_case.verilog_path.string() << "\n";
+    stream << "case_" << (index + 1U) << "=" << benchmark_case.case_name << ",top=" << benchmark_case.top_module << ",def=" << benchmark_case.def_path.string()
+           << ",verilog=" << benchmark_case.verilog_path.string() << "\n";
   }
   return stream.str();
 }

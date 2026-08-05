@@ -30,25 +30,26 @@
 
 #include "Pin.hh"
 #include "Point.hh"
-#include "common/dataset/TestDataset.hh"
-#include "database/spatial/Tree.hh"
+#include "data_manager/design/fixture/data/GeneratedPins.hh"
+#include "data_manager/spatial/Tree.hh"
+#include "module/topology/fixture/analysis/TopologyStats.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenScenario.hh"
 
 namespace icts_test::topology_gen::detail {
 
 struct TopologyArtifacts
 {
-  TopologyStats stats;
+  module::topology::fixture::analysis::TopologyStats stats;
   std::unordered_map<const icts::Pin*, std::size_t> cluster_map;
   std::vector<icts::Point<int>> centers;
 };
 
-auto GenerateCase(const TopologyCase& test_case) -> GeneratedPins;
+auto GenerateCase(const TopologyCase& test_case) -> data_manager::fixture::data::GeneratedPins;
 auto ValidateOutputDir(const std::filesystem::path& output_dir) -> void;
 auto AnalyzeBuiltTopology(const icts::Tree& tree, const std::vector<icts::Pin*>& loads, TopologyArtifacts& artifacts) -> void;
-auto LogTopologySummary(const TopologyStats& stats) -> void;
+auto LogTopologySummary(const module::topology::fixture::analysis::TopologyStats& stats) -> void;
 auto ValidateTreeEdges(const icts::Tree& tree) -> void;
-auto WriteArtifacts(const std::filesystem::path& output_dir, const TopologyCase& test_case, const icts::Tree& tree,
-                    const std::vector<icts::Pin*>& loads) -> void;
+auto WriteArtifacts(const std::filesystem::path& output_dir, const TopologyCase& test_case, const icts::Tree& tree, const std::vector<icts::Pin*>& loads)
+    -> void;
 
 }  // namespace icts_test::topology_gen::detail

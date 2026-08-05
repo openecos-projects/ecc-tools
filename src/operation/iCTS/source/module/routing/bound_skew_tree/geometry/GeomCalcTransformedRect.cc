@@ -20,13 +20,11 @@
  * @date 2026-04-24
  * @brief Transformed-rectangle geometry operations for bound-skew tree routing
  */
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <cmath>
 #include <ostream>
 
-#include "Log.hh"
+#include "Logger.hh"
 #include "bound_skew_tree/component/Components.hh"
 #include "bound_skew_tree/geometry/GeomCalc.hh"
 
@@ -67,8 +65,8 @@ auto GeomCalc::transformedRectDistance(TransformedRect& lhs_transformed_rect, Tr
   return 0;
 }
 
-auto GeomCalc::makeIntersection(const TransformedRect& first_transformed_rect, const TransformedRect& second_transformed_rect,
-                                TransformedRect& intersection) -> void
+auto GeomCalc::makeIntersection(const TransformedRect& first_transformed_rect, const TransformedRect& second_transformed_rect, TransformedRect& intersection)
+    -> void
 {
   intersection.x_low(std::max(first_transformed_rect.x_low(), second_transformed_rect.x_low()));
   intersection.x_high(std::min(first_transformed_rect.x_high(), second_transformed_rect.x_high()));
@@ -93,8 +91,7 @@ auto GeomCalc::containsTransformedRect(const TransformedRect& inner_transformed_
          && inner_transformed_rect.y_low() >= outer_transformed_rect.y_low() - kEpsilon;
 }
 
-auto GeomCalc::buildTransformedRect(const TransformedRect& transformed_rect, const double& radius,
-                                    TransformedRect& expanded_transformed_rect) -> void
+auto GeomCalc::buildTransformedRect(const TransformedRect& transformed_rect, const double& radius, TransformedRect& expanded_transformed_rect) -> void
 {
   expanded_transformed_rect.x_low(transformed_rect.x_low() - radius);
   expanded_transformed_rect.x_high(transformed_rect.x_high() + radius);
@@ -145,8 +142,7 @@ auto GeomCalc::transformedRectToRegion(TransformedRect& transformed_rect, Region
     return;
   }
 
-  TransformedRect edge_transformed_rect(transformed_rect.x_high(), transformed_rect.x_high(), transformed_rect.y_low(),
-                                        transformed_rect.y_high());
+  TransformedRect edge_transformed_rect(transformed_rect.x_high(), transformed_rect.x_high(), transformed_rect.y_low(), transformed_rect.y_high());
   Point head_point;
   Point tail_point;
 
@@ -200,7 +196,9 @@ auto GeomCalc::transformedRectToLine(TransformedRect& transformed_rect, Point& f
   first_point.y = (transformed_rect.y_low() - transformed_rect.x_high()) / 2;
   second_point.x = (transformed_rect.y_high() + transformed_rect.x_low()) / 2;
   second_point.y = (transformed_rect.y_high() - transformed_rect.x_low()) / 2;
-  LOG_FATAL_IF(first_point.y > second_point.y) << "second point y should be larger than first point y";
+  if (first_point.y > second_point.y) {
+    CTSLOG.error(Loc::current(), "second point y should be larger than first point y");
+  }
 }
 
 auto GeomCalc::normalizeTransformedRect(TransformedRect& transformed_rect) -> void
@@ -220,8 +218,9 @@ auto GeomCalc::normalizeTransformedRect(TransformedRect& transformed_rect) -> vo
     transformed_rect.y_low(average_y);
     transformed_rect.y_high(average_y);
   }
-  LOG_FATAL_IF(transformed_rect.x_low() > transformed_rect.x_high() || transformed_rect.y_low() > transformed_rect.y_high())
-      << "transformed rect is not valid";
+  if (transformed_rect.x_low() > transformed_rect.x_high() || transformed_rect.y_low() > transformed_rect.y_high()) {
+    CTSLOG.error(Loc::current(), "transformed rect is not valid");
+  }
 }
 
 }  // namespace icts::bst

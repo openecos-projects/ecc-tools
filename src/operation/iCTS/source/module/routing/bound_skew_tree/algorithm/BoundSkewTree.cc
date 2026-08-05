@@ -39,8 +39,7 @@ struct BSTRoutingConfig;
 
 namespace icts::bst {
 
-BoundSkewTree::BoundSkewTree(std::vector<std::unique_ptr<Area>> load_areas, const BSTRoutingConfig& parameters,
-                             const BSTRoutingTopologyMode& topology_mode)
+BoundSkewTree::BoundSkewTree(std::vector<std::unique_ptr<Area>> load_areas, const BSTRoutingConfig& parameters, const BSTRoutingTopologyMode& topology_mode)
     : _impl(std::make_unique<detail::BoundSkewTreeImpl>(std::move(load_areas), parameters, topology_mode))
 {
 }

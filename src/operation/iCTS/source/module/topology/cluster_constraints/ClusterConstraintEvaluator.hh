@@ -41,15 +41,14 @@ class ClusterConstraintEvaluator
   ClusterConstraintEvaluator() = default;
   ~ClusterConstraintEvaluator() = default;
 
-  static auto evaluateLoads(const std::vector<Pin*>& loads, const Point<int>& routing_root, const ClusterConfig& config,
-                            bool need_exact_cap) -> ConstraintEvaluation;
-  static auto evaluatePinnedLoads(const std::vector<Pin*>& loads, std::size_t fanout, int diameter, const Point<int>& routing_root,
-                                  const ClusterConfig& config, bool need_exact_cap) -> ConstraintEvaluation;
+  static auto evaluateLoads(const std::vector<Pin*>& loads, const Point<int>& routing_root, const ClusterConfig& config, bool need_exact_cap)
+      -> ConstraintEvaluation;
+  static auto evaluatePinnedLoads(const std::vector<Pin*>& loads, std::size_t fanout, int diameter, const Point<int>& routing_root, const ClusterConfig& config,
+                                  bool need_exact_cap) -> ConstraintEvaluation;
 
  private:
   static auto estimatePinCap(const std::vector<Pin*>& loads, const ClusterConfig& config) -> double;
-  static auto estimateExactCap(const std::vector<Pin*>& loads, const Point<int>& synthetic_root, const ClusterConfig& config)
-      -> ElectricalEstimate;
+  static auto estimateExactCap(const std::vector<Pin*>& loads, const Point<int>& synthetic_root, const ClusterConfig& config) -> ElectricalEstimate;
   static auto queryPinCap(const Pin* pin, const ClusterConfig& config) -> double;
 };
 

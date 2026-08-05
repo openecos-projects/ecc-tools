@@ -12,6 +12,7 @@
 #include "TOPOBuilder.hpp"
 #include "TopoSvgPlotter.hpp"
 
+#include "utility/logger/Logger.hpp"
 namespace {
 
 using irt::PlanarCoord;
@@ -41,14 +42,14 @@ bool parsePlotConfig(int argc, char* argv[], PlotConfig& plot_config)
     plot_config.output_directory = argv[2];
     return true;
   }
-  std::cerr << "Usage: test_topo_builder [--plot-dir <directory>]\n";
+  ECCLOG.warn(ecc::Loc::current(), "Usage: test_topo_builder [--plot-dir <directory>]");
   return false;
 }
 
 bool check(bool condition, const std::string& case_name)
 {
   if (!condition) {
-    std::cerr << "Failed: " << case_name << '\n';
+    ECCLOG.warn(ecc::Loc::current(), "Failed: ", case_name);
   }
   return condition;
 }
@@ -69,16 +70,15 @@ bool isSameTopo(const std::vector<Segment<PlanarCoord>>& expected, const std::ve
 bool isInsideAnyObs(const PlanarCoord& coord, const std::vector<PlanarRect>& planar_obs_list)
 {
   for (const PlanarRect& planar_obs : planar_obs_list) {
-    if (planar_obs.get_ll_x() <= coord.get_x() && coord.get_x() <= planar_obs.get_ur_x()
-        && planar_obs.get_ll_y() <= coord.get_y() && coord.get_y() <= planar_obs.get_ur_y()) {
+    if (planar_obs.get_ll_x() <= coord.get_x() && coord.get_x() <= planar_obs.get_ur_x() && planar_obs.get_ll_y() <= coord.get_y()
+        && coord.get_y() <= planar_obs.get_ur_y()) {
       return true;
     }
   }
   return false;
 }
 
-std::vector<PlanarCoord> getSteinerCoordList(const std::vector<PlanarCoord>& terminal_list,
-                                             const std::vector<Segment<PlanarCoord>>& planar_topo_list)
+std::vector<PlanarCoord> getSteinerCoordList(const std::vector<PlanarCoord>& terminal_list, const std::vector<Segment<PlanarCoord>>& planar_topo_list)
 {
   std::set<PlanarCoord, irt::CmpPlanarCoordByXASC> terminal_coord_set(terminal_list.begin(), terminal_list.end());
   std::set<PlanarCoord, irt::CmpPlanarCoordByXASC> steiner_coord_set;
@@ -113,8 +113,7 @@ irt::TBTask makeTask(const std::vector<PlanarCoord>& terminal_list, std::vector<
   return tb_task;
 }
 
-TopoRunResult runTopoCase(const std::vector<PlanarCoord>& terminal_list, const std::vector<PlanarRect>& planar_obs_list,
-                          const PlanarRect& planar_search_region)
+TopoRunResult runTopoCase(const std::vector<PlanarCoord>& terminal_list, const std::vector<PlanarRect>& planar_obs_list, const PlanarRect& planar_search_region)
 {
   TopoRunResult result;
   result.flute_topo_list = RTTB.getPlanarTopoList(makeTask(terminal_list, {}, planar_search_region));
@@ -123,8 +122,8 @@ TopoRunResult runTopoCase(const std::vector<PlanarCoord>& terminal_list, const s
   return result;
 }
 
-bool checkRepairStat(const irt::TBSteinerRepairStat& stat, int32_t raw_steiner_num, int32_t fixed_steiner_num,
-                     int32_t failed_steiner_num, const std::string& case_name)
+bool checkRepairStat(const irt::TBSteinerRepairStat& stat, int32_t raw_steiner_num, int32_t fixed_steiner_num, int32_t failed_steiner_num,
+                     const std::string& case_name)
 {
   bool passed = true;
   passed = check(stat.raw_steiner_in_macro == raw_steiner_num, case_name + " raw Steiner statistic") && passed;
@@ -133,19 +132,18 @@ bool checkRepairStat(const irt::TBSteinerRepairStat& stat, int32_t raw_steiner_n
   return passed;
 }
 
-bool writeTopoPlot(const PlotConfig& plot_config, const std::string& case_id, const std::string& title,
-                   const PlanarRect& planar_search_region, const std::vector<PlanarRect>& planar_obs_list,
-                   const std::vector<PlanarCoord>& terminal_list, const TopoRunResult& topo_run_result)
+bool writeTopoPlot(const PlotConfig& plot_config, const std::string& case_id, const std::string& title, const PlanarRect& planar_search_region,
+                   const std::vector<PlanarRect>& planar_obs_list, const std::vector<PlanarCoord>& terminal_list, const TopoRunResult& topo_run_result)
 {
   if (!plot_config.isEnabled()) {
     return true;
   }
   std::filesystem::path file_path = plot_config.output_directory / case_id / "topology.svg";
-  irt::TopoSvgPlotRequest request{title, planar_search_region, planar_obs_list, terminal_list, topo_run_result.flute_topo_list,
-                                  topo_run_result.legal_topo_list};
+  irt::TopoSvgPlotRequest request{
+      title, planar_search_region, planar_obs_list, terminal_list, topo_run_result.flute_topo_list, topo_run_result.legal_topo_list};
   std::string error_message;
   if (!irt::writeTopoSvg(file_path.string(), request, error_message)) {
-    std::cerr << "Failed to write " << file_path << ": " << error_message << '\n';
+    ECCLOG.warn(ecc::Loc::current(), "Failed to write ", file_path, ": ", error_message);
     return false;
   }
 
@@ -154,7 +152,7 @@ bool writeTopoPlot(const PlotConfig& plot_config, const std::string& case_id, co
   if (svg_content.find("<svg") == std::string::npos || svg_content.find("data-layer=\"obstacle\"") == std::string::npos
       || svg_content.find("data-layer=\"flute-topology\"") == std::string::npos
       || svg_content.find("data-layer=\"legal-topology\"") == std::string::npos) {
-    std::cerr << "The SVG output is incomplete: " << file_path << '\n';
+    ECCLOG.warn(ecc::Loc::current(), "The SVG output is incomplete: ", file_path);
     return false;
   }
   return true;
@@ -173,8 +171,10 @@ std::vector<PlanarCoord> getBaseTerminalList()
 
 std::vector<Segment<PlanarCoord>> getBaseFluteTopoList()
 {
-  return {{PlanarCoord(0, 0), PlanarCoord(30, 10)}, {PlanarCoord(10, 30), PlanarCoord(30, 30)},
-          {PlanarCoord(40, 40), PlanarCoord(30, 30)}, {PlanarCoord(30, 10), PlanarCoord(30, 30)}};
+  return {{PlanarCoord(0, 0), PlanarCoord(30, 10)},
+          {PlanarCoord(10, 30), PlanarCoord(30, 30)},
+          {PlanarCoord(40, 40), PlanarCoord(30, 30)},
+          {PlanarCoord(30, 10), PlanarCoord(30, 30)}};
 }
 
 bool checkCase1Baseline(const PlotConfig& plot_config)
@@ -184,8 +184,7 @@ bool checkCase1Baseline(const PlotConfig& plot_config)
   passed = check(RTTB.getPlanarTopoList(makeTask({PlanarCoord(10, 20)})).empty(), "case1 single-pin FLUTE topology") && passed;
 
   std::vector<Segment<PlanarCoord>> two_pin_expected = {{PlanarCoord(10, 20), PlanarCoord(40, 20)}};
-  passed = check(isSameTopo(two_pin_expected, RTTB.getPlanarTopoList(makeTask({PlanarCoord(10, 20), PlanarCoord(40, 20)}))),
-                 "case1 two-pin FLUTE topology")
+  passed = check(isSameTopo(two_pin_expected, RTTB.getPlanarTopoList(makeTask({PlanarCoord(10, 20), PlanarCoord(40, 20)}))), "case1 two-pin FLUTE topology")
            && passed;
 
   std::vector<PlanarCoord> terminal_list = getBaseTerminalList();
@@ -215,13 +214,11 @@ bool checkCase3SingleCellObstacle(const PlotConfig& plot_config)
   std::vector<PlanarRect> planar_obs_list = {PlanarRect(30, 30, 30, 30)};
   TopoRunResult result = runTopoCase(terminal_list, planar_obs_list, getDefaultSearchRegion());
   std::vector<Segment<PlanarCoord>> expected = {{PlanarCoord(0, 0), PlanarCoord(30, 10)},
-                                                 {PlanarCoord(10, 30), PlanarCoord(29, 30)},
-                                                 {PlanarCoord(40, 40), PlanarCoord(29, 30)},
-                                                 {PlanarCoord(30, 10), PlanarCoord(29, 30)}};
+                                                {PlanarCoord(10, 30), PlanarCoord(29, 30)},
+                                                {PlanarCoord(40, 40), PlanarCoord(29, 30)},
+                                                {PlanarCoord(30, 10), PlanarCoord(29, 30)}};
   bool passed = true;
-  passed = writeTopoPlot(plot_config, "case3", "Single-cell Steiner legalization", getDefaultSearchRegion(), planar_obs_list,
-                          terminal_list, result)
-           && passed;
+  passed = writeTopoPlot(plot_config, "case3", "Single-cell Steiner legalization", getDefaultSearchRegion(), planar_obs_list, terminal_list, result) && passed;
   passed = check(isSameTopo(expected, result.legal_topo_list), "case3 nearest legal Steiner point") && passed;
   passed = checkRepairStat(result.steiner_repair_stat, 1, 1, 0, "case3") && passed;
   return passed;
@@ -233,13 +230,11 @@ bool checkCase4RectangularObstacle(const PlotConfig& plot_config)
   std::vector<PlanarRect> planar_obs_list = {PlanarRect(30, 30, 31, 31)};
   TopoRunResult result = runTopoCase(terminal_list, planar_obs_list, getDefaultSearchRegion());
   std::vector<Segment<PlanarCoord>> expected = {{PlanarCoord(0, 0), PlanarCoord(30, 10)},
-                                                 {PlanarCoord(10, 30), PlanarCoord(29, 30)},
-                                                 {PlanarCoord(40, 40), PlanarCoord(29, 30)},
-                                                 {PlanarCoord(30, 10), PlanarCoord(29, 30)}};
+                                                {PlanarCoord(10, 30), PlanarCoord(29, 30)},
+                                                {PlanarCoord(40, 40), PlanarCoord(29, 30)},
+                                                {PlanarCoord(30, 10), PlanarCoord(29, 30)}};
   bool passed = true;
-  passed = writeTopoPlot(plot_config, "case4", "Rectangular Steiner legalization", getDefaultSearchRegion(), planar_obs_list,
-                          terminal_list, result)
-           && passed;
+  passed = writeTopoPlot(plot_config, "case4", "Rectangular Steiner legalization", getDefaultSearchRegion(), planar_obs_list, terminal_list, result) && passed;
   passed = check(isSameTopo(expected, result.legal_topo_list), "case4 rectangular obstacle legalization") && passed;
   passed = checkRepairStat(result.steiner_repair_stat, 1, 1, 0, "case4") && passed;
   return passed;
@@ -251,9 +246,7 @@ bool checkCase5TerminalInsideObstacle(const PlotConfig& plot_config)
   std::vector<PlanarRect> planar_obs_list = {PlanarRect(30, 10, 30, 10)};
   TopoRunResult result = runTopoCase(terminal_list, planar_obs_list, getDefaultSearchRegion());
   bool passed = true;
-  passed = writeTopoPlot(plot_config, "case5", "Terminal inside obstacle", getDefaultSearchRegion(), planar_obs_list, terminal_list,
-                          result)
-           && passed;
+  passed = writeTopoPlot(plot_config, "case5", "Terminal inside obstacle", getDefaultSearchRegion(), planar_obs_list, terminal_list, result) && passed;
   passed = check(isInsideAnyObs(PlanarCoord(30, 10), planar_obs_list), "case5 terminal belongs to obstacle") && passed;
   passed = check(isSameTopo(result.flute_topo_list, result.legal_topo_list), "case5 terminal remains unchanged") && passed;
   passed = checkRepairStat(result.steiner_repair_stat, 0, 0, 0, "case5") && passed;
@@ -266,13 +259,11 @@ bool checkCase6OverlappingObstacles(const PlotConfig& plot_config)
   std::vector<PlanarRect> planar_obs_list = {PlanarRect(30, 30, 31, 31), PlanarRect(31, 29, 32, 31)};
   TopoRunResult result = runTopoCase(terminal_list, planar_obs_list, getDefaultSearchRegion());
   std::vector<Segment<PlanarCoord>> expected = {{PlanarCoord(0, 0), PlanarCoord(30, 10)},
-                                                 {PlanarCoord(10, 30), PlanarCoord(29, 30)},
-                                                 {PlanarCoord(40, 40), PlanarCoord(29, 30)},
-                                                 {PlanarCoord(30, 10), PlanarCoord(29, 30)}};
+                                                {PlanarCoord(10, 30), PlanarCoord(29, 30)},
+                                                {PlanarCoord(40, 40), PlanarCoord(29, 30)},
+                                                {PlanarCoord(30, 10), PlanarCoord(29, 30)}};
   bool passed = true;
-  passed = writeTopoPlot(plot_config, "case6", "Overlapping obstacles", getDefaultSearchRegion(), planar_obs_list, terminal_list,
-                          result)
-           && passed;
+  passed = writeTopoPlot(plot_config, "case6", "Overlapping obstacles", getDefaultSearchRegion(), planar_obs_list, terminal_list, result) && passed;
   passed = check(isSameTopo(expected, result.legal_topo_list), "case6 obstacle union legalization") && passed;
   passed = checkRepairStat(result.steiner_repair_stat, 1, 1, 0, "case6") && passed;
   return passed;
@@ -285,8 +276,7 @@ bool checkCase7SearchBoundary(const PlotConfig& plot_config)
   std::vector<PlanarRect> planar_obs_list = {PlanarRect(30, 30, 30, 30)};
   TopoRunResult result = runTopoCase(terminal_list, planar_obs_list, planar_search_region);
   bool passed = true;
-  passed = writeTopoPlot(plot_config, "case7", "Search-region boundary", planar_search_region, planar_obs_list, terminal_list, result)
-           && passed;
+  passed = writeTopoPlot(plot_config, "case7", "Search-region boundary", planar_search_region, planar_obs_list, terminal_list, result) && passed;
   passed = check(isSameTopo(result.flute_topo_list, result.legal_topo_list), "case7 does not escape search region") && passed;
   passed = checkRepairStat(result.steiner_repair_stat, 1, 0, 1, "case7") && passed;
   return passed;
@@ -298,9 +288,7 @@ bool checkCase8FullyBlocked(const PlotConfig& plot_config)
   std::vector<PlanarRect> planar_obs_list = {getDefaultSearchRegion()};
   TopoRunResult result = runTopoCase(terminal_list, planar_obs_list, getDefaultSearchRegion());
   bool passed = true;
-  passed = writeTopoPlot(plot_config, "case8", "Fully blocked search region", getDefaultSearchRegion(), planar_obs_list,
-                          terminal_list, result)
-           && passed;
+  passed = writeTopoPlot(plot_config, "case8", "Fully blocked search region", getDefaultSearchRegion(), planar_obs_list, terminal_list, result) && passed;
   passed = check(isSameTopo(result.flute_topo_list, result.legal_topo_list), "case8 keeps raw topology") && passed;
   passed = checkRepairStat(result.steiner_repair_stat, 1, 0, 1, "case8") && passed;
   return passed;
@@ -308,8 +296,8 @@ bool checkCase8FullyBlocked(const PlotConfig& plot_config)
 
 bool checkCase9MultipleSteiner(const PlotConfig& plot_config)
 {
-  std::vector<PlanarCoord> terminal_list = {PlanarCoord(0, 0), PlanarCoord(0, 40), PlanarCoord(10, 15),
-                                             PlanarCoord(25, 30), PlanarCoord(40, 0), PlanarCoord(40, 40)};
+  std::vector<PlanarCoord> terminal_list
+      = {PlanarCoord(0, 0), PlanarCoord(0, 40), PlanarCoord(10, 15), PlanarCoord(25, 30), PlanarCoord(40, 0), PlanarCoord(40, 40)};
   TopoRunResult baseline_result = runTopoCase(terminal_list, {}, getDefaultSearchRegion());
   std::vector<PlanarCoord> raw_steiner_coord_list = getSteinerCoordList(terminal_list, baseline_result.flute_topo_list);
   if (!check(raw_steiner_coord_list.size() >= 2, "case9 produces multiple raw Steiner points")) {
@@ -324,9 +312,7 @@ bool checkCase9MultipleSteiner(const PlotConfig& plot_config)
   TopoRunResult result = runTopoCase(terminal_list, planar_obs_list, getDefaultSearchRegion());
   int32_t raw_steiner_num = static_cast<int32_t>(raw_steiner_coord_list.size());
   bool passed = true;
-  passed = writeTopoPlot(plot_config, "case9", "Multiple Steiner legalizations", getDefaultSearchRegion(), planar_obs_list,
-                          terminal_list, result)
-           && passed;
+  passed = writeTopoPlot(plot_config, "case9", "Multiple Steiner legalizations", getDefaultSearchRegion(), planar_obs_list, terminal_list, result) && passed;
   passed = check(isSameTopo(baseline_result.flute_topo_list, result.flute_topo_list), "case9 raw FLUTE topology is stable") && passed;
   passed = check(hasOnlyLegalSteiner(terminal_list, result.legal_topo_list, planar_obs_list), "case9 all Steiner points are legal") && passed;
   passed = checkRepairStat(result.steiner_repair_stat, raw_steiner_num, raw_steiner_num, 0, "case9") && passed;
@@ -336,16 +322,12 @@ bool checkCase9MultipleSteiner(const PlotConfig& plot_config)
 bool checkCase10CollapsedSteinerEdge(const PlotConfig& plot_config)
 {
   std::vector<PlanarCoord> terminal_list = getBaseTerminalList();
-  std::vector<PlanarRect> planar_obs_list = {PlanarRect(0, 0, 29, 49), PlanarRect(31, 0, 49, 49),
-                                             PlanarRect(30, 0, 30, 9), PlanarRect(30, 11, 30, 49)};
+  std::vector<PlanarRect> planar_obs_list = {PlanarRect(0, 0, 29, 49), PlanarRect(31, 0, 49, 49), PlanarRect(30, 0, 30, 9), PlanarRect(30, 11, 30, 49)};
   TopoRunResult result = runTopoCase(terminal_list, planar_obs_list, getDefaultSearchRegion());
-  std::vector<Segment<PlanarCoord>> expected = {{PlanarCoord(0, 0), PlanarCoord(30, 10)},
-                                                 {PlanarCoord(10, 30), PlanarCoord(30, 10)},
-                                                 {PlanarCoord(40, 40), PlanarCoord(30, 10)}};
+  std::vector<Segment<PlanarCoord>> expected
+      = {{PlanarCoord(0, 0), PlanarCoord(30, 10)}, {PlanarCoord(10, 30), PlanarCoord(30, 10)}, {PlanarCoord(40, 40), PlanarCoord(30, 10)}};
   bool passed = true;
-  passed = writeTopoPlot(plot_config, "case10", "Collapsed Steiner edge", getDefaultSearchRegion(), planar_obs_list, terminal_list,
-                          result)
-           && passed;
+  passed = writeTopoPlot(plot_config, "case10", "Collapsed Steiner edge", getDefaultSearchRegion(), planar_obs_list, terminal_list, result) && passed;
   passed = check(isSameTopo(expected, result.legal_topo_list), "case10 removes collapsed edge") && passed;
   passed = check(result.legal_topo_list.size() + 1 == result.flute_topo_list.size(), "case10 removes exactly one edge") && passed;
   passed = checkRepairStat(result.steiner_repair_stat, 1, 1, 0, "case10") && passed;

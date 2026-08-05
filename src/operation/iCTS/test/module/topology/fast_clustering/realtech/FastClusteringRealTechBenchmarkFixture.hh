@@ -26,14 +26,15 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
-#include "database/design/Pin.hh"
-#include "database/spatial/Point.hh"
+#include "data_manager/design/Pin.hh"
+#include "data_manager/spatial/Point.hh"
 #include "module/topology/clustering/Clustering.hh"
 #include "module/topology/config/TopologyConfig.hh"
 
@@ -41,8 +42,7 @@ namespace icts_test::fast_clustering::realtech {
 
 inline constexpr std::string_view kBenchmarkRoot = "/nfs/share/home/huangzhipeng/code-new/ecc-benchmark/runs/20260422_125008";
 inline constexpr std::string_view kIcs55Workspace = "/home/liweiguo/project/ecc-tools-dev/scripts/design/ics55_dev";
-inline constexpr std::string_view kCtsConfigPath
-    = "/home/liweiguo/project/ecc-tools-dev/scripts/design/ics55_dev/iEDA_config/cts_default_config.json";
+inline constexpr std::string_view kCtsConfigPath = "/home/liweiguo/project/ecc-tools-dev/scripts/design/ics55_dev/ECC_config/cts_default_config.json";
 inline constexpr std::string_view kDefaultSdcPath = "/home/liweiguo/project/ecc-tools-dev/scripts/design/ics55_dev/default.sdc";
 inline constexpr std::size_t kRequiredCaseCount = 20;
 inline constexpr std::string_view kClusterSvgDirName = "cluster_svgs";
@@ -144,12 +144,11 @@ auto ContainsClockToken(std::string_view name) -> bool;
 auto DiscoverBenchmarkCases() -> std::vector<BenchmarkCase>;
 auto ResolveTechAssets() -> TechAssets;
 auto ValidateTechAssets(const TechAssets& assets, std::string& error) -> bool;
-auto LoadBenchmarkCase(const BenchmarkCase& benchmark_case, const TechAssets& assets, const std::filesystem::path& output_dir)
-    -> LoadedCase;
+auto LoadBenchmarkCase(const BenchmarkCase& benchmark_case, const TechAssets& assets, const std::filesystem::path& output_dir) -> LoadedCase;
 auto CalcClusterDiameter(const std::vector<icts::Pin*>& loads) -> int;
-auto BuildBenchmarkConfig(const std::vector<icts::Pin*>& loads) -> icts::ClusterConfig;
-auto EvaluateResult(const std::string& algorithm, const icts::ClusterOutput& result, const icts::ClusterConfig& config,
-                    std::size_t expected_load_count, double runtime_ms) -> ResultMetrics;
+auto BuildBenchmarkConfig(const std::vector<icts::Pin*>& loads) -> std::optional<icts::ClusterConfig>;
+auto EvaluateResult(const std::string& algorithm, const icts::ClusterOutput& result, const icts::ClusterConfig& config, std::size_t expected_load_count,
+                    double runtime_ms) -> ResultMetrics;
 auto WriteCaseClusterSvg(const std::filesystem::path& svg_dir, const BenchmarkCase& benchmark_case, const std::vector<icts::Pin*>& loads,
                          const icts::ClusterOutput& fast_result, std::string& error) -> std::filesystem::path;
 auto BuildCasesCsv(const std::vector<CaseResult>& results) -> std::string;
@@ -161,8 +160,7 @@ auto SumFastRoutingCapProxyVariance(const std::vector<CaseResult>& results) -> d
 auto BuildSummaryReport(const std::vector<CaseResult>& results, double fast_runtime_ms, double fast_score) -> std::string;
 
 template <typename Runner>
-auto RunAndMeasure(const std::string& algorithm, const std::vector<icts::Pin*>& loads, const icts::ClusterConfig& config, Runner runner)
-    -> ClusterRunResult
+auto RunAndMeasure(const std::string& algorithm, const std::vector<icts::Pin*>& loads, const icts::ClusterConfig& config, Runner runner) -> ClusterRunResult
 {
   const auto start = std::chrono::steady_clock::now();
   auto result = runner(loads, config);

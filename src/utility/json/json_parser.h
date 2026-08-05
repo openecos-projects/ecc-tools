@@ -25,6 +25,7 @@
  * @Creat Date : 2022-04-15
  *
  */
+#include "utility/logger/Logger.hpp"
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <time.h>
@@ -38,18 +39,18 @@
 #include <queue>
 #include <set>
 #include <sstream>
+#include <string>
 #include <vector>
 
-#include "../string/Str.hh"
 #include "json.hpp"
 #include "zlib.h"
 
-namespace ieda {
+namespace ecc {
 
 static nlohmann::json getJsonData(nlohmann::json value, std::vector<std::string> flag_list, nlohmann::json default_value = "")
 {
   if (flag_list.empty()) {
-    std::cout << "[json error] : The flag list is empty!" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[json error] : The flag list is empty!");
   }
 
   int flag_size = flag_list.size();
@@ -69,7 +70,7 @@ static nlohmann::json getJsonData(nlohmann::json value, std::vector<std::string>
       key += ".";
     }
   }
-  //   std::cout << "[json error] : The configuration file key = " << key << " do not exist." << std::endl;
+  //   ECCLOG.warn(ecc::Loc::current(), "[json error] : The configuration file key = ", key, " does not exist.");
   return default_value;
 }
 
@@ -78,7 +79,7 @@ static T& getFileStream(std::string file_path)
 {
   T* file = new T(file_path);
   if (!file->is_open()) {
-    std::cout << "[json error] : Failed to open file = " << file_path << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[json error] : Failed to open file = ", file_path);
   }
   return *file;
 }
@@ -87,7 +88,7 @@ static std::string get_gz_string(std::string file_path)
 {
   gzFile file = gzopen(file_path.c_str(), "rb");
   if (!file) {
-    std::cout << "[json error] : Failed to open file = " << file_path << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[json error] : Failed to open file = ", file_path);
     return "";
   }
 
@@ -98,28 +99,30 @@ static std::string get_gz_string(std::string file_path)
 
   char* content = (char*) malloc(file_length);
   if (!content) {
-    std::cout << "[json warning] : File empty." << file_path << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[json warning] : File empty.", file_path);
     gzclose(file);
     return "";
   }
 
   int bytes_read = gzread(file, content, file_length);
   if (bytes_read < 0) {
-    printf("Error reading from file\n");
+    ECCLOG.warn(ecc::Loc::current(), "[json error] : Failed to read file = ", file_path);
     free(content);
     gzclose(file);
-    return std::string(content);
+    return "";
   }
 
   gzclose(file);
 
-  return std::string(content);
+  std::string result(content, bytes_read);
+  free(content);
+  return result;
 }
 
 static std::istringstream& getGzFileStream(std::string file_path)
 {
-  if (ieda::Str::contain(file_path.c_str(), ".gz")) {
-    std::cout << "[json error] : do not support gz file by now." << std::endl;
+  if (file_path.find(".gz") != std::string::npos) {
+    ECCLOG.warn(ecc::Loc::current(), "[json error] : do not support gz file by now.");
     auto content = get_gz_string(file_path);
     std::istringstream* dataStream = new std::istringstream(content);
     return *dataStream;
@@ -131,23 +134,12 @@ static std::istringstream& getGzFileStream(std::string file_path)
 
 static std::ifstream& getInputFileStream(std::string file_path)
 {
-  //   if (ieda::Str::contain(file_path.c_str(), ".gz")) {
-  //     std::cout << "[json error] : do not support gz file by now." << std::endl;
-  //     auto content = get_gz_string(file_path);
-  //     std::istringstream dataStream(content);
-  //     std::ifstream* file = new std::ifstream(dataStream);
-  //     if (!file->is_open()) {
-  //       std::cout << "[json error] : Failed to open file = " << file_path << std::endl;
-  //     }
-  //     return *file;
-  //   } else {
   return getFileStream<std::ifstream>(file_path);
-  //   }
 }
 
 static void initJson(std::string file_path, nlohmann::json& json)
 {
-  if (ieda::Str::contain(file_path.c_str(), ".gz")) {
+  if (file_path.find(".gz") != std::string::npos) {
     auto& file_stream = getGzFileStream(file_path);
     file_stream >> json;
   } else {
@@ -191,4 +183,4 @@ static void pushStream(Stream& stream, T t)
   stream << t;
 }
 
-}  // namespace ieda
+}  // namespace ecc

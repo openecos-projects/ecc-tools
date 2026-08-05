@@ -32,8 +32,8 @@
 #include <vector>
 
 #include "characterization/Characterization.hh"
-#include "database/characterization/SegmentChar.hh"
-#include "database/characterization/ValueLattice.hh"
+#include "data_manager/characterization/SegmentChar.hh"
+#include "data_manager/characterization/ValueLattice.hh"
 #include "module/characterization/fixture/CharacterizationRealTechFixture.hh"
 
 namespace icts_test {
@@ -52,11 +52,10 @@ enum class FitBasisKind
 auto FitBasisName(FitBasisKind basis_kind) -> std::string;
 auto FitBasisSize(FitBasisKind basis_kind) -> std::size_t;
 auto MakeFitBasis(FitBasisKind basis_kind, double s, double c) -> std::array<double, 6>;
-auto TryFitSurfaceCoefficients(const std::vector<const icts::SegmentChar*>& group,
-                               const std::function<double(const icts::SegmentChar&)>& metric_fn, const realtech_fixture::CharGrid& grid,
-                               FitBasisKind basis_kind) -> std::optional<std::array<double, 6>>;
-auto AppendIterOneFitReport(std::ostringstream& report_stream, const std::vector<icts::SegmentChar>& entries,
-                            const realtech_fixture::CharGrid& grid, unsigned length_idx) -> void;
+auto TryFitSurfaceCoefficients(const std::vector<const icts::SegmentChar*>& group, const std::function<double(const icts::SegmentChar&)>& metric_fn,
+                               const realtech_fixture::CharGrid& grid, FitBasisKind basis_kind) -> std::optional<std::array<double, 6>>;
+auto AppendIterOneFitReport(std::ostringstream& report_stream, const std::vector<icts::SegmentChar>& entries, const realtech_fixture::CharGrid& grid,
+                            unsigned length_idx) -> void;
 
 struct SegmentCompareKey
 {
@@ -111,12 +110,10 @@ struct ComposeGapStats
   std::string missing_composed_example;
 };
 
-auto MakeSegmentCompareKey(const realtech_fixture::SegmentFrontierContext& segment_context, const icts::SegmentChar& entry)
-    -> SegmentCompareKey;
+auto MakeSegmentCompareKey(const realtech_fixture::SegmentFrontierContext& segment_context, const icts::SegmentChar& entry) -> SegmentCompareKey;
 auto SafeRatio(double numerator, double denominator) -> double;
 auto CompareComposedFrontierToDirect(unsigned target_length_idx, const std::vector<icts::SegmentChar>& direct_entries,
-                                     const std::vector<icts::SegmentChar>& composed_entries,
-                                     const realtech_fixture::SegmentFrontierContext& segment_context,
+                                     const std::vector<icts::SegmentChar>& composed_entries, const realtech_fixture::SegmentFrontierContext& segment_context,
                                      const realtech_fixture::CharGrid& grid) -> ComposeGapStats;
 auto AppendComposeGapStats(std::ostringstream& report_stream, const ComposeGapStats& stats, const realtech_fixture::CharGrid& grid) -> void;
 
@@ -165,19 +162,16 @@ struct FunctionalComposePrediction
 
 auto MakeUnitPatternKey(const std::vector<double>& buffer_positions, const std::vector<std::string>& cell_masters) -> std::string;
 auto MakeUnitPatternKey(const icts::BufferingPattern& pattern) -> std::string;
-auto BuildFunctionalSurfaceModels(const std::vector<icts::SegmentChar>& entries,
-                                  const realtech_fixture::SegmentFrontierContext& segment_context, const realtech_fixture::CharGrid& grid,
-                                  FitBasisKind basis_kind) -> std::unordered_map<std::string, FunctionalSurfaceModel>;
-auto BuildPhysicalStructuralCapOperators(const realtech_fixture::SegmentFrontierContext& segment_context,
-                                         const icts::CharBuilder::Config& config, const realtech_fixture::CharGrid& grid)
-    -> std::unordered_map<std::string, StructuralCapOperator>;
-auto DecomposeToUnitPatternKeys(const icts::BufferingPattern& pattern, unsigned target_length_idx)
-    -> std::optional<std::vector<std::string>>;
-auto PredictFunctionalCompose(const std::vector<const FunctionalSurfaceModel*>& unit_models, double input_slew_ns, double load_cap_pf,
-                              double max_slew_ns, double max_cap_pf) -> FunctionalComposePrediction;
+auto BuildFunctionalSurfaceModels(const std::vector<icts::SegmentChar>& entries, const realtech_fixture::SegmentFrontierContext& segment_context,
+                                  const realtech_fixture::CharGrid& grid, FitBasisKind basis_kind) -> std::unordered_map<std::string, FunctionalSurfaceModel>;
+auto BuildPhysicalStructuralCapOperators(const realtech_fixture::SegmentFrontierContext& segment_context, const icts::CharBuilder::Config& config,
+                                         const realtech_fixture::CharGrid& grid) -> std::unordered_map<std::string, StructuralCapOperator>;
+auto DecomposeToUnitPatternKeys(const icts::BufferingPattern& pattern, unsigned target_length_idx) -> std::optional<std::vector<std::string>>;
+auto PredictFunctionalCompose(const std::vector<const FunctionalSurfaceModel*>& unit_models, double input_slew_ns, double load_cap_pf, double max_slew_ns,
+                              double max_cap_pf) -> FunctionalComposePrediction;
 auto PredictStructuralCapFunctionalCompose(const std::vector<const FunctionalSurfaceModel*>& unit_models,
-                                           const std::vector<const StructuralCapOperator*>& cap_operators, double input_slew_ns,
-                                           double load_cap_pf, double max_slew_ns, double max_cap_pf) -> FunctionalComposePrediction;
+                                           const std::vector<const StructuralCapOperator*>& cap_operators, double input_slew_ns, double load_cap_pf,
+                                           double max_slew_ns, double max_cap_pf) -> FunctionalComposePrediction;
 
 struct MetricGapAccumulator
 {
@@ -218,25 +212,22 @@ struct FunctionComposeGapStats
 };
 
 auto AnalyzeFunctionComposeGap(const std::string& source_label, unsigned target_length_idx, FitBasisKind basis_kind,
-                               const std::vector<icts::SegmentChar>& direct_entries,
-                               const realtech_fixture::SegmentFrontierContext& segment_context,
-                               const std::unordered_map<std::string, FunctionalSurfaceModel>& model_by_unit_key,
-                               const realtech_fixture::CharGrid& grid, double max_slew_ns, double max_cap_pf) -> FunctionComposeGapStats;
+                               const std::vector<icts::SegmentChar>& direct_entries, const realtech_fixture::SegmentFrontierContext& segment_context,
+                               const std::unordered_map<std::string, FunctionalSurfaceModel>& model_by_unit_key, const realtech_fixture::CharGrid& grid,
+                               double max_slew_ns, double max_cap_pf) -> FunctionComposeGapStats;
 auto AnalyzeStructuralCapFunctionComposeGap(const std::string& source_label, unsigned target_length_idx, FitBasisKind basis_kind,
                                             const std::vector<icts::SegmentChar>& direct_entries,
                                             const realtech_fixture::SegmentFrontierContext& segment_context,
                                             const std::unordered_map<std::string, FunctionalSurfaceModel>& model_by_unit_key,
                                             const std::unordered_map<std::string, StructuralCapOperator>& cap_operator_by_unit_key,
-                                            const realtech_fixture::CharGrid& grid, const icts::UniformValueLattice& cap_lattice,
-                                            double max_slew_ns, double max_cap_pf) -> FunctionComposeGapStats;
-auto AppendFunctionComposeGapStats(std::ostringstream& report_stream, const FunctionComposeGapStats& stats,
-                                   const realtech_fixture::CharGrid& grid) -> void;
-auto AppendStructuralCapOperatorStats(std::ostringstream& report_stream,
-                                      const std::unordered_map<std::string, StructuralCapOperator>& cap_operator_by_unit_key) -> void;
+                                            const realtech_fixture::CharGrid& grid, const icts::UniformValueLattice& cap_lattice, double max_slew_ns,
+                                            double max_cap_pf) -> FunctionComposeGapStats;
+auto AppendFunctionComposeGapStats(std::ostringstream& report_stream, const FunctionComposeGapStats& stats, const realtech_fixture::CharGrid& grid) -> void;
+auto AppendStructuralCapOperatorStats(std::ostringstream& report_stream, const std::unordered_map<std::string, StructuralCapOperator>& cap_operator_by_unit_key)
+    -> void;
 auto AppendStructuralCapOperatorSampleGap(std::ostringstream& report_stream,
                                           const std::unordered_map<std::string, StructuralCapOperator>& cap_operator_by_unit_key,
-                                          const std::vector<icts::SegmentChar>& entries,
-                                          const realtech_fixture::SegmentFrontierContext& segment_context,
+                                          const std::vector<icts::SegmentChar>& entries, const realtech_fixture::SegmentFrontierContext& segment_context,
                                           const realtech_fixture::CharGrid& grid, const icts::UniformValueLattice& cap_lattice) -> void;
 
 }  // namespace icts_test

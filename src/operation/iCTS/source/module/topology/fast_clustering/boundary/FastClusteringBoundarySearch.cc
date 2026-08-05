@@ -40,8 +40,8 @@ auto IsBoundaryTargetUseful(const ClusterDraft& target, double target_routing_ca
   return target.active && !target.entry_ids.empty() && target.routing_cap_proxy < target_routing_cap_proxy;
 }
 
-auto CalcAfterTargetRoutingCapProxy(const DraftAggregate& aggregate, const ClusterDraft& source, const ClusterDraft& target,
-                                    const ClusterDraft& source_after, const ClusterDraft& target_after) -> double
+auto CalcAfterTargetRoutingCapProxy(const DraftAggregate& aggregate, const ClusterDraft& source, const ClusterDraft& target, const ClusterDraft& source_after,
+                                    const ClusterDraft& target_after) -> double
 {
   const auto after_total_routing_cap_proxy = aggregate.total_routing_cap_proxy - source.routing_cap_proxy - target.routing_cap_proxy
                                              + source_after.routing_cap_proxy + target_after.routing_cap_proxy;
@@ -60,8 +60,7 @@ auto BuildBoundaryMoveIfImproves(std::size_t target_id, const ClusterDraft& sour
 
   const auto before_score = PairObjective(source, target, config, target_routing_cap_proxy, kBoundaryRoutingCapBalanceWeight);
   const auto after_target_routing_cap_proxy = CalcAfterTargetRoutingCapProxy(aggregate, source, target, source_after, target_after);
-  const auto after_score
-      = PairObjective(source_after, target_after, config, after_target_routing_cap_proxy, kBoundaryRoutingCapBalanceWeight);
+  const auto after_score = PairObjective(source_after, target_after, config, after_target_routing_cap_proxy, kBoundaryRoutingCapBalanceWeight);
   const auto score_delta = after_score - before_score;
   if (score_delta + kScoreEpsilon >= 0.0) {
     return std::nullopt;
@@ -85,9 +84,8 @@ auto SelectBetterBoundaryMove(std::optional<BoundaryMove> best_move, BoundaryMov
 
 }  // namespace
 
-auto FindBestBoundaryMove(std::size_t source_id, const std::vector<ClusterDraft>& clusters, const std::vector<LoadEntry>& entries,
-                          const ClusterConfig& config, const DraftAggregate& aggregate, const NeighborGraph* neighbor_graph)
-    -> std::optional<BoundaryMove>
+auto FindBestBoundaryMove(std::size_t source_id, const std::vector<ClusterDraft>& clusters, const std::vector<LoadEntry>& entries, const ClusterConfig& config,
+                          const DraftAggregate& aggregate, const NeighborGraph* neighbor_graph) -> std::optional<BoundaryMove>
 {
   const auto& source = clusters.at(source_id);
   const auto target_routing_cap_proxy = CalcMeanRoutingCapProxy(aggregate);
@@ -105,8 +103,7 @@ auto FindBestBoundaryMove(std::size_t source_id, const std::vector<ClusterDraft>
 
     const auto entry_candidates = BuildBoundaryEntryCandidates(source, target, entries, config);
     for (const auto moved_entry_id : entry_candidates) {
-      auto candidate
-          = BuildBoundaryMoveIfImproves(target_id, source, target, moved_entry_id, entries, config, aggregate, target_routing_cap_proxy);
+      auto candidate = BuildBoundaryMoveIfImproves(target_id, source, target, moved_entry_id, entries, config, aggregate, target_routing_cap_proxy);
       if (candidate.has_value()) {
         best_move = SelectBetterBoundaryMove(std::move(best_move), std::move(*candidate));
       }

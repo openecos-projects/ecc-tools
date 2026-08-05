@@ -43,8 +43,6 @@
 #include "config/dm_config.h"
 #include "def_service.h"
 #include "lef_service.h"
-#include "string/Str.hh"
-#include "usage/usage.hh"
 
 using std::string;
 using std::vector;
@@ -158,7 +156,8 @@ class DataManager
   IdbInstance* insertIOFiller(string inst_name, string cell_master_name, int32_t coord_x = 0, int32_t coord_y = 0,
                               IdbOrient orient = IdbOrient::kN_R0);
 
-  bool placeInst(string inst_name, int32_t x, int32_t y, string orient, string cell_master_name, string source = "");
+  bool placeInst(string inst_name, int32_t x, int32_t y, string orient, string cell_master_name, string source = "",
+                 string placement_status = "fixed", bool create_if_missing = true);
 
   void place_macro_generate_tcl(std::string directory, std::string tcl_name, int number = 100);
   bool place_macro_loc_rand(std::string tcl_path);

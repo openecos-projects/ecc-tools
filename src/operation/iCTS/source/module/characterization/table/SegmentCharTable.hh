@@ -75,17 +75,15 @@ class SegmentCharTable
    * - this.load_cap == downstream.driven_cap
    *
    * @tparam CombinerT Pattern combiner type
-   * @tparam PrunerT Pruner type (default: NullPruner for no pruning)
    * @param downstream Downstream table to join with
    * @param combiner Pattern combiner for merged pattern IDs
-   * @param pruner Optional pruner (nullptr to disable)
    * @return New table with composed entries
    */
-  template <class CombinerT, class PrunerT = detail::NullPruner>
-  auto concatWith(const SegmentCharTable& downstream, const CombinerT& combiner, const PrunerT* pruner = nullptr) const -> SegmentCharTable
+  template <class CombinerT>
+  auto concatWith(const SegmentCharTable& downstream, const CombinerT& combiner) const -> SegmentCharTable
   {
     SegmentCharTable result;
-    detail::HashJoinConcat<SegmentChar, SegmentTraits>(_chars, downstream._chars, combiner, result._chars, pruner);
+    detail::HashJoinConcat<SegmentChar, SegmentTraits>(_chars, downstream._chars, combiner, result._chars);
     return result;
   }
 

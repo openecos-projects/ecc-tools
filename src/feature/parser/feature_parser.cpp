@@ -15,11 +15,11 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @project   iEDA
- * @file      feature_parser.h
- * @author    Yell
- * @date      10/08/2023
- * @version   0.1
+ * @project		ECC
+ * @file		feature_parser.cpp
+ * @author		Yell
+ * @date		10/08/2023
+ * @version		0.1
  * @description
 
 
@@ -31,6 +31,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "feature_parser.h"
 
 #include "feature_summary.h"
@@ -38,7 +39,7 @@
 #include "idm.h"
 #include "json_parser.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 FeatureParser::FeatureParser()
 {
   _layout = dmInst->getInstance()->get_idb_layout();
@@ -60,7 +61,7 @@ FeatureParser::~FeatureParser()
 
 bool FeatureParser::buildSummary(std::string json_path)
 {
-  std::ofstream& file_stream = ieda::getOutputFileStream(json_path);
+  std::ofstream& file_stream = ecc::getOutputFileStream(json_path);
   json root;
 
   root["Design Information"] = buildSummaryInfo();
@@ -85,9 +86,9 @@ bool FeatureParser::buildSummary(std::string json_path)
 
   file_stream << std::setw(4) << root;
 
-  ieda::closeFileStream(file_stream);
+  ecc::closeFileStream(file_stream);
 
-  std::cout << std::endl << "Save feature json success, path = " << json_path << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Save feature json success, path = ", json_path);
   return true;
 }
 
@@ -114,23 +115,23 @@ bool FeatureParser::buildTools(std::string json_path, std::string step)
                                                                        {"antenna", [this]() { return buildSummaryAntenna(); }},
                                                                        {"route", [this]() { return buildSummaryRT(); }}};
 
-  std::ofstream& file_stream = ieda::getOutputFileStream(json_path);
+  std::ofstream& file_stream = ecc::getOutputFileStream(json_path);
   json root;
 
   root[step] = stepToBuilder[step]();
 
   file_stream << std::setw(4) << root;
 
-  ieda::closeFileStream(file_stream);
+  ecc::closeFileStream(file_stream);
 
-  std::cout << std::endl << "Save feature json success, path = " << json_path << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Save feature json success, path = ", json_path);
 
   return true;
 }
 
 bool FeatureParser::buildRouteData(std::string json_path, RouteAnalyseData* data)
 {
-  std::ofstream& file_stream = ieda::getOutputFileStream(json_path);
+  std::ofstream& file_stream = ecc::getOutputFileStream(json_path);
   json root;
 
   for (auto [cellmaster_name, cell_master] : data->cell_master_list) {
@@ -156,9 +157,9 @@ bool FeatureParser::buildRouteData(std::string json_path, RouteAnalyseData* data
 
   /// build route data json
   file_stream << std::setw(4) << root;
-  ieda::closeFileStream(file_stream);
+  ecc::closeFileStream(file_stream);
 
-  std::cout << std::endl << "Save feature json success, path = " << json_path << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Save feature json success, path = ", json_path);
   return true;
 }
 
@@ -208,7 +209,7 @@ bool FeatureParser::readRouteData(std::string json_path, RouteAnalyseData* data)
 
 bool FeatureParser::buildSummaryEval(std::string json_path)
 {
-  std::ofstream& file_stream = ieda::getOutputFileStream(json_path);
+  std::ofstream& file_stream = ecc::getOutputFileStream(json_path);
   json root;
 
   root["Wirelength"] = buildSummaryWirelength();
@@ -223,15 +224,15 @@ bool FeatureParser::buildSummaryEval(std::string json_path)
 
   file_stream << std::setw(4) << root;
 
-  ieda::closeFileStream(file_stream);
+  ecc::closeFileStream(file_stream);
 
-  std::cout << std::endl << "Save eval json success, path = " << json_path << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Save eval json success, path = ", json_path);
   return true;
 }
 
 bool FeatureParser::buildSummaryTimingEval(std::string json_path)
 {
-  std::ofstream& file_stream = ieda::getOutputFileStream(json_path);
+  std::ofstream& file_stream = ecc::getOutputFileStream(json_path);
   json root;
 
   root["clocks_timing"] = buildSummaryTiming();
@@ -240,10 +241,10 @@ bool FeatureParser::buildSummaryTimingEval(std::string json_path)
 
   file_stream << std::setw(4) << root;
 
-  ieda::closeFileStream(file_stream);
+  ecc::closeFileStream(file_stream);
 
-  std::cout << std::endl << "Save eval json success, path = " << json_path << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Save eval json success, path = ", json_path);
   return true;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

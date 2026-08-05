@@ -23,8 +23,6 @@
 
 #include "characterization/pattern/CharPatternEnumerator.hh"
 
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -35,12 +33,12 @@
 #include <string>
 #include <vector>
 
-#include "Log.hh"
+#include "Logger.hh"
 #include "ValueLattice.hh"
 #include "characterization/buffer_cell/CharacterizationBufferCell.hh"
 #include "characterization/builder/CharBuilderImpl.hh"
 #include "characterization/builder/CharTopologyPlanner.hh"
-#include "characterization/sampling/CharStaSampler.hh"
+#include "characterization/sampling/CharSTASampler.hh"
 
 namespace icts::char_builder::detail {
 namespace {
@@ -57,7 +55,7 @@ auto CharPatternEnumerator::calcTopologySlotCount(double wirelength_um) const ->
   if (slot_count > kMaxTopologySlots) {
     static bool has_logged_slot_clamp = false;
     if (!has_logged_slot_clamp) {
-      LOG_WARNING << "CharBuilder: slot count exceeds topology bit capacity, clamp to " << kMaxTopologySlots;
+      CTSLOG.warn(Loc::current(), "CharBuilder: slot count exceeds topology bit capacity, clamp to ", kMaxTopologySlots);
       has_logged_slot_clamp = true;
     }
     slot_count = kMaxTopologySlots;
@@ -79,8 +77,9 @@ auto CharPatternEnumerator::countSelectedSlots(TopologyBits topology_bits) -> un
 auto CharPatternEnumerator::estimatePatternCountPerWirelength(double wirelength_um) const -> std::size_t
 {
   const unsigned num_slots = calcTopologySlotCount(wirelength_um);
-  LOG_FATAL_IF(num_slots >= std::numeric_limits<std::uint64_t>::digits)
-      << "CharBuilder: buffer slot count " << num_slots << " exceeds topology bit capacity.";
+  if (num_slots >= std::numeric_limits<std::uint64_t>::digits) {
+    CTSLOG.error(Loc::current(), "CharBuilder: buffer slot count ", num_slots, " exceeds topology bit capacity.");
+  }
 
   std::size_t total_patterns = 0;
   const std::uint64_t num_topologies = std::uint64_t{1} << num_slots;
@@ -94,8 +93,9 @@ auto CharPatternEnumerator::estimatePatternCountPerWirelength(double wirelength_
 auto CharPatternEnumerator::enumerateWirelength(unsigned length_idx, double wirelength_um, BuildProgress& build_progress) -> void
 {
   const unsigned num_slots = calcTopologySlotCount(wirelength_um);
-  LOG_FATAL_IF(num_slots >= std::numeric_limits<std::uint64_t>::digits)
-      << "CharBuilder: buffer slot count " << num_slots << " exceeds topology bit capacity.";
+  if (num_slots >= std::numeric_limits<std::uint64_t>::digits) {
+    CTSLOG.error(Loc::current(), "CharBuilder: buffer slot count ", num_slots, " exceeds topology bit capacity.");
+  }
 
   const std::uint64_t num_topologies = std::uint64_t{1} << num_slots;
   for (std::uint64_t topology_bits_value = 0; topology_bits_value < num_topologies; ++topology_bits_value) {

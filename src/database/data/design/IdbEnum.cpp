@@ -228,7 +228,7 @@ string IdbSiteProperty::get_orient_name(IdbOrient oreint_value)
 {
   auto iter = _orient_string_list.find(oreint_value);
   if (iter == _orient_string_list.end()) {
-    // printf("Warning : IdbSiteProperty::get_orient_name: Invalid IdbOrient value\n");
+    // ECCLOG.warn(ecc::Loc::current(), "IdbSiteProperty::get_orient_name: Invalid IdbOrient value.");
     return string("");
   }
 

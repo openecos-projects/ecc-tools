@@ -32,7 +32,8 @@
 #include <utility>
 #include <vector>
 
-#include "database/io/Wrapper.hh"
+#include "data_manager/DataManager.hh"
+#include "data_manager/io/Wrapper.hh"
 #include "module/characterization/CharacterizationRealTechExactRegression.hh"
 
 namespace icts_test {
@@ -58,8 +59,7 @@ auto MakeUnitPatternKey(const icts::BufferingPattern& pattern) -> std::string
   return MakeUnitPatternKey(pattern.get_buffer_positions(), pattern.get_cell_masters());
 }
 
-auto EvalSurface(const FunctionalSurfaceModel& model, const std::array<double, 6>& coefficients, double input_slew_ns, double load_cap_pf)
-    -> double
+auto EvalSurface(const FunctionalSurfaceModel& model, const std::array<double, 6>& coefficients, double input_slew_ns, double load_cap_pf) -> double
 {
   const auto basis = MakeFitBasis(model.basis_kind, input_slew_ns, load_cap_pf);
   double value = 0.0;
@@ -85,9 +85,8 @@ auto IsFinitePositive(double value) -> bool
   return std::isfinite(value) && value > 0.0;
 }
 
-auto BuildFunctionalSurfaceModels(const std::vector<icts::SegmentChar>& entries,
-                                  const realtech_fixture::SegmentFrontierContext& segment_context, const realtech_fixture::CharGrid& grid,
-                                  FitBasisKind basis_kind) -> std::unordered_map<std::string, FunctionalSurfaceModel>
+auto BuildFunctionalSurfaceModels(const std::vector<icts::SegmentChar>& entries, const realtech_fixture::SegmentFrontierContext& segment_context,
+                                  const realtech_fixture::CharGrid& grid, FitBasisKind basis_kind) -> std::unordered_map<std::string, FunctionalSurfaceModel>
 {
   std::unordered_map<icts::PatternId, std::vector<const icts::SegmentChar*>> groups;
   for (const auto& entry : entries) {
@@ -104,21 +103,19 @@ auto BuildFunctionalSurfaceModels(const std::vector<icts::SegmentChar>& entries,
     }
 
     const auto output_slew_coefficients = TryFitSurfaceCoefficients(
-        group,
-        [&grid](const icts::SegmentChar& entry) -> double { return static_cast<double>(entry.get_output_slew_idx()) * grid.slew_step_ns; },
-        grid, basis_kind);
+        group, [&grid](const icts::SegmentChar& entry) -> double { return static_cast<double>(entry.get_output_slew_idx()) * grid.slew_step_ns; }, grid,
+        basis_kind);
     const auto driven_cap_coefficients = TryFitSurfaceCoefficients(
-        group,
-        [&grid](const icts::SegmentChar& entry) -> double { return static_cast<double>(entry.get_driven_cap_idx()) * grid.cap_step_pf; },
-        grid, basis_kind);
+        group, [&grid](const icts::SegmentChar& entry) -> double { return static_cast<double>(entry.get_driven_cap_idx()) * grid.cap_step_pf; }, grid,
+        basis_kind);
     const auto delay_coefficients
         = TryFitSurfaceCoefficients(group, [](const icts::SegmentChar& entry) -> double { return entry.get_delay(); }, grid, basis_kind);
     const auto power_coefficients
         = TryFitSurfaceCoefficients(group, [](const icts::SegmentChar& entry) -> double { return entry.get_power(); }, grid, basis_kind);
     const auto source_boundary_power_coefficients = TryFitSurfaceCoefficients(
         group, [](const icts::SegmentChar& entry) -> double { return entry.get_source_boundary_net_switch_power(); }, grid, basis_kind);
-    if (!output_slew_coefficients.has_value() || !driven_cap_coefficients.has_value() || !delay_coefficients.has_value()
-        || !power_coefficients.has_value() || !source_boundary_power_coefficients.has_value()) {
+    if (!output_slew_coefficients.has_value() || !driven_cap_coefficients.has_value() || !delay_coefficients.has_value() || !power_coefficients.has_value()
+        || !source_boundary_power_coefficients.has_value()) {
       continue;
     }
 
@@ -137,17 +134,16 @@ auto BuildFunctionalSurfaceModels(const std::vector<icts::SegmentChar>& entries,
   return models;
 }
 
-auto BuildPhysicalStructuralCapOperators(const realtech_fixture::SegmentFrontierContext& segment_context,
-                                         const icts::CharBuilder::Config& config, const realtech_fixture::CharGrid& grid)
-    -> std::unordered_map<std::string, StructuralCapOperator>
+auto BuildPhysicalStructuralCapOperators(const realtech_fixture::SegmentFrontierContext& segment_context, const icts::CharBuilder::Config& config,
+                                         const realtech_fixture::CharGrid& grid) -> std::unordered_map<std::string, StructuralCapOperator>
 {
   std::unordered_map<std::string, StructuralCapOperator> operators;
   if (!config.routing_layer.has_value() || *config.routing_layer <= 0) {
     return operators;
   }
   const int routing_layer = *config.routing_layer;
-  for (const auto& [pattern_id, pattern] : segment_context.patterns) {
-    (void) pattern_id;
+  for (const auto& pattern_entry : segment_context.patterns) {
+    const auto& pattern = pattern_entry.second;
     if (pattern.get_length_idx() != 1U) {
       continue;
     }
@@ -160,23 +156,27 @@ auto BuildPhysicalStructuralCapOperators(const realtech_fixture::SegmentFrontier
 
     const double unit_length_um = static_cast<double>(pattern.get_length_idx()) * grid.length_step_um;
     double alpha = 1.0;
-    double eta_pf = icts_test::runtime::CurrentRuntime().wrapper.queryWireCapacitance(routing_layer, unit_length_um, config.wire_width_um);
+    auto eta_pf = CTSDM.getWrapper().queryWireCapacitance(routing_layer, unit_length_um, config.wire_width_um);
     if (!cell_masters.empty()) {
       alpha = 0.0;
       const double first_buffer_position = buffer_positions.front();
       const double prewire_length_um = std::clamp(first_buffer_position, 0.0, 1.0) * unit_length_um;
-      eta_pf = icts_test::runtime::CurrentRuntime().wrapper.queryCharInputPinCap(cell_masters.front());
-      eta_pf += icts_test::runtime::CurrentRuntime().wrapper.queryWireCapacitance(routing_layer, prewire_length_um, config.wire_width_um);
+      const auto input_cap_pf = CTSDM.getWrapper().queryCharInputPinCap(cell_masters.front());
+      const auto prewire_cap_pf = CTSDM.getWrapper().queryWireCapacitance(routing_layer, prewire_length_um, config.wire_width_um);
+      if (!input_cap_pf.has_value() || !prewire_cap_pf.has_value()) {
+        continue;
+      }
+      eta_pf = *input_cap_pf + *prewire_cap_pf;
     }
 
-    if (!std::isfinite(eta_pf) || eta_pf < 0.0) {
+    if (!eta_pf.has_value() || !std::isfinite(*eta_pf) || *eta_pf < 0.0) {
       continue;
     }
 
     operators[MakeUnitPatternKey(pattern)] = StructuralCapOperator{
         .unit_key = MakeUnitPatternKey(pattern),
         .alpha = alpha,
-        .eta_pf = eta_pf,
+        .eta_pf = *eta_pf,
         .sample_count = 0U,
         .max_abs_residual_pf = 0.0,
     };
@@ -185,8 +185,7 @@ auto BuildPhysicalStructuralCapOperators(const realtech_fixture::SegmentFrontier
   return operators;
 }
 
-auto DecomposeToUnitPatternKeys(const icts::BufferingPattern& pattern, unsigned target_length_idx)
-    -> std::optional<std::vector<std::string>>
+auto DecomposeToUnitPatternKeys(const icts::BufferingPattern& pattern, unsigned target_length_idx) -> std::optional<std::vector<std::string>>
 {
   if (target_length_idx == 0U) {
     return std::nullopt;
@@ -227,8 +226,8 @@ auto DecomposeToUnitPatternKeys(const icts::BufferingPattern& pattern, unsigned 
   return unit_keys;
 }
 
-auto PredictFunctionalCompose(const std::vector<const FunctionalSurfaceModel*>& unit_models, double input_slew_ns, double load_cap_pf,
-                              double max_slew_ns, double max_cap_pf) -> FunctionalComposePrediction
+auto PredictFunctionalCompose(const std::vector<const FunctionalSurfaceModel*>& unit_models, double input_slew_ns, double load_cap_pf, double max_slew_ns,
+                              double max_cap_pf) -> FunctionalComposePrediction
 {
   FunctionalComposePrediction prediction;
   const std::size_t unit_count = unit_models.size();
@@ -261,8 +260,7 @@ auto PredictFunctionalCompose(const std::vector<const FunctionalSurfaceModel*>& 
     next_load_caps.back() = load_cap_pf;
     for (std::size_t reverse_index = 0U; reverse_index < unit_count; ++reverse_index) {
       const std::size_t unit_index = unit_count - 1U - reverse_index;
-      const auto response
-          = EvalFunctionalSurfaceModel(*unit_models.at(unit_index), slews.at(unit_index), next_load_caps.at(unit_index + 1U));
+      const auto response = EvalFunctionalSurfaceModel(*unit_models.at(unit_index), slews.at(unit_index), next_load_caps.at(unit_index + 1U));
       if (!std::isfinite(response.driven_cap_pf)) {
         return prediction;
       }
@@ -310,10 +308,9 @@ auto PredictFunctionalCompose(const std::vector<const FunctionalSurfaceModel*>& 
     }
   }
 
-  prediction.is_valid = IsFinitePositive(prediction.output_slew_ns) && IsFinitePositive(prediction.driven_cap_pf)
-                        && std::isfinite(prediction.delay_ns) && prediction.delay_ns >= 0.0 && std::isfinite(prediction.power_w)
-                        && prediction.power_w >= 0.0 && std::isfinite(prediction.source_boundary_power_w)
-                        && prediction.source_boundary_power_w >= 0.0;
+  prediction.is_valid = IsFinitePositive(prediction.output_slew_ns) && IsFinitePositive(prediction.driven_cap_pf) && std::isfinite(prediction.delay_ns)
+                        && prediction.delay_ns >= 0.0 && std::isfinite(prediction.power_w) && prediction.power_w >= 0.0
+                        && std::isfinite(prediction.source_boundary_power_w) && prediction.source_boundary_power_w >= 0.0;
   if (!prediction.is_valid) {
     return prediction;
   }
@@ -332,8 +329,8 @@ auto PredictFunctionalCompose(const std::vector<const FunctionalSurfaceModel*>& 
 }
 
 auto PredictStructuralCapFunctionalCompose(const std::vector<const FunctionalSurfaceModel*>& unit_models,
-                                           const std::vector<const StructuralCapOperator*>& cap_operators, double input_slew_ns,
-                                           double load_cap_pf, double max_slew_ns, double max_cap_pf) -> FunctionalComposePrediction
+                                           const std::vector<const StructuralCapOperator*>& cap_operators, double input_slew_ns, double load_cap_pf,
+                                           double max_slew_ns, double max_cap_pf) -> FunctionalComposePrediction
 {
   FunctionalComposePrediction prediction;
   const std::size_t unit_count = unit_models.size();
@@ -380,10 +377,9 @@ auto PredictStructuralCapFunctionalCompose(const std::vector<const FunctionalSur
     }
   }
 
-  prediction.is_valid = IsFinitePositive(prediction.output_slew_ns) && IsFinitePositive(prediction.driven_cap_pf)
-                        && std::isfinite(prediction.delay_ns) && prediction.delay_ns >= 0.0 && std::isfinite(prediction.power_w)
-                        && prediction.power_w >= 0.0 && std::isfinite(prediction.source_boundary_power_w)
-                        && prediction.source_boundary_power_w >= 0.0;
+  prediction.is_valid = IsFinitePositive(prediction.output_slew_ns) && IsFinitePositive(prediction.driven_cap_pf) && std::isfinite(prediction.delay_ns)
+                        && prediction.delay_ns >= 0.0 && std::isfinite(prediction.power_w) && prediction.power_w >= 0.0
+                        && std::isfinite(prediction.source_boundary_power_w) && prediction.source_boundary_power_w >= 0.0;
   if (!prediction.is_valid) {
     return prediction;
   }

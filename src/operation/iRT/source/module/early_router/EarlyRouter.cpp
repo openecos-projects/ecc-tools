@@ -100,6 +100,17 @@ void EarlyRouter::route(std::map<std::string, std::any> config_map)
     // debugPlotERModel(er_model, "la");
   }
   if (er_model.get_er_com_param().get_stage() >= ERStage::kEdr) {
+    std::vector<ERModel::GlobalResultRTree::value_type> value_list;
+    for (auto& [net_idx, segment_list] : er_model.get_net_global_result_map()) {
+      for (int32_t segment_idx = 0; segment_idx < static_cast<int32_t>(segment_list.size()); segment_idx++) {
+        Segment<LayerCoord>& segment = segment_list[segment_idx];
+        PlanarRect segment_rect(
+            std::min(segment.get_first().get_x(), segment.get_second().get_x()), std::min(segment.get_first().get_y(), segment.get_second().get_y()),
+            std::max(segment.get_first().get_x(), segment.get_second().get_x()), std::max(segment.get_first().get_y(), segment.get_second().get_y()));
+        value_list.emplace_back(RTUTIL.convertToBGRectInt(segment_rect), std::make_pair(net_idx, segment_idx));
+      }
+    }
+    er_model.get_global_result_rtree() = ERModel::GlobalResultRTree(value_list);
     initERPanelMap(er_model);
     buildPanelSchedule(er_model);
     assignTrack(er_model);
@@ -115,6 +126,7 @@ void EarlyRouter::route(std::map<std::string, std::any> config_map)
   } else {
     cleanTempResult(er_model);
   }
+  uploadERModel(er_model);
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -125,9 +137,14 @@ EarlyRouter* EarlyRouter::_er_instance = nullptr;
 ERModel EarlyRouter::initERModel()
 {
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
 
   ERModel er_model;
   er_model.set_er_net_list(convertToERNetList(net_list));
+  er_model.get_ert_gcell_map().init(gcell_map.get_x_size(), gcell_map.get_y_size());
+  er_model.get_net_global_result_map() = RTDM.getDatabase().get_net_global_result_map();
+  er_model.get_net_detailed_result_map() = RTDM.getDatabase().get_net_detailed_result_map();
+  er_model.get_net_detailed_patch_map() = RTDM.getDatabase().get_net_detailed_patch_map();
   return er_model;
 }
 
@@ -212,6 +229,7 @@ void EarlyRouter::initAccessPointList(ERModel& er_model)
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
 
   std::vector<ERNet>& er_net_list = er_model.get_er_net_list();
+  std::vector<ERModel::AccessPointRTree::value_type> value_list;
 
   for (ERNet& er_net : er_net_list) {
     for (ERPin& er_pin : er_net.get_er_pin_list()) {
@@ -255,10 +273,12 @@ void EarlyRouter::initAccessPointList(ERModel& er_model)
     for (ERPin& er_pin : er_net.get_er_pin_list()) {
       for (AccessPoint& access_point : er_pin.get_access_point_list()) {
         access_point.set_grid_coord(RTUTIL.getGCellGridCoordByBBox(access_point.get_real_coord(), gcell_axis, bounding_box));
-        RTDM.updateNetAccessPointToGCellMap(ChangeType::kAdd, er_net.get_net_idx(), &access_point);
+        value_list.emplace_back(RTUTIL.convertToBGRectInt(PlanarRect(access_point.get_real_coord(), access_point.get_real_coord())),
+                                std::make_pair(er_net.get_net_idx(), &access_point));
       }
     }
   }
+  er_model.get_access_point_rtree() = ERModel::AccessPointRTree(value_list);
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -491,7 +511,7 @@ void EarlyRouter::buildConflictList(ERModel& er_model)
 
 std::vector<std::pair<ERPin*, std::set<ERPin*>>> EarlyRouter::getPinConlictMap(ERModel& er_model)
 {
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   Die& die = RTDM.getDatabase().get_die();
 
   std::vector<ERNet>& er_net_list = er_model.get_er_net_list();
@@ -509,22 +529,19 @@ std::vector<std::pair<ERPin*, std::set<ERPin*>>> EarlyRouter::getPinConlictMap(E
 
     for (AccessPoint& access_point : er_pin->get_access_point_list()) {
       PlanarCoord& grid_coord = access_point.get_grid_coord();
-      for (int32_t x : {grid_coord.get_x() - 1, grid_coord.get_x(), grid_coord.get_x() + 1}) {
-        for (int32_t y : {grid_coord.get_y() - 1, grid_coord.get_y(), grid_coord.get_y() + 1}) {
-          if (!RTUTIL.isInside(die.get_grid_rect(), PlanarCoord(x, y))) {
-            continue;
-          }
-          for (auto& [net_idx, access_point_set] : gcell_map[x][y].get_net_access_point_map()) {
-            for (AccessPoint* gcell_access_point : access_point_set) {
-              ERPin* gcell_pin = &er_net_list[net_idx].get_er_pin_list()[gcell_access_point->get_pin_idx()];
-              if (gcell_pin == er_pin) {
-                continue;
-              }
-              if (hasConflict(access_point, *gcell_access_point)) {
-                conflict_pin_set.insert(gcell_pin);
-              }
-            }
-          }
+      int32_t ll_x = std::max(die.get_grid_ll_x(), grid_coord.get_x() - 1);
+      int32_t ll_y = std::max(die.get_grid_ll_y(), grid_coord.get_y() - 1);
+      int32_t ur_x = std::min(die.get_grid_ur_x(), grid_coord.get_x() + 1);
+      int32_t ur_y = std::min(die.get_grid_ur_y(), grid_coord.get_y() + 1);
+      PlanarRect query_rect(gcell_map[ll_x][ll_y].get_ll(), gcell_map[ur_x][ur_y].get_ur());
+      query_rect = RTUTIL.getEnlargedRect(query_rect, RTDM.getDatabase().get_detection_distance());
+      std::vector<ERModel::AccessPointRTree::value_type> value_list;
+      er_model.get_access_point_rtree().query(bgi::intersects(RTUTIL.convertToBGRectInt(query_rect)), std::back_inserter(value_list));
+      for (auto& [rect, net_access_point] : value_list) {
+        AccessPoint* nearby_access_point = net_access_point.second;
+        ERPin* nearby_pin = &er_net_list[net_access_point.first].get_er_pin_list()[nearby_access_point->get_pin_idx()];
+        if (nearby_pin != er_pin && hasConflict(access_point, *nearby_access_point)) {
+          conflict_pin_set.insert(nearby_pin);
         }
       }
     }
@@ -656,13 +673,7 @@ void EarlyRouter::uploadAccessPoint(ERModel& er_model)
   RTLOG.info(Loc::current(), "Starting...");
 
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
-  Die& die = RTDM.getDatabase().get_die();
-
-  for (auto& [net_idx, access_point_set] : RTDM.getNetAccessPointMap(die)) {
-    for (AccessPoint* access_point : access_point_set) {
-      RTDM.updateNetAccessPointToGCellMap(ChangeType::kDel, net_idx, access_point);
-    }
-  }
+  std::vector<ERModel::AccessPointRTree::value_type> value_list;
   for (ERNet& er_net : er_model.get_er_net_list()) {
     std::vector<PlanarCoord> coord_list;
     for (ERPin& er_pin : er_net.get_er_pin_list()) {
@@ -674,9 +685,11 @@ void EarlyRouter::uploadAccessPoint(ERModel& er_model)
     for (ERPin& er_pin : er_net.get_er_pin_list()) {
       AccessPoint& access_point = er_pin.get_access_point();
       access_point.set_grid_coord(RTUTIL.getGCellGridCoordByBBox(access_point.get_real_coord(), gcell_axis, bounding_box));
-      RTDM.updateNetAccessPointToGCellMap(ChangeType::kAdd, er_net.get_net_idx(), &access_point);
+      value_list.emplace_back(RTUTIL.convertToBGRectInt(PlanarRect(access_point.get_real_coord(), access_point.get_real_coord())),
+                              std::make_pair(er_net.get_net_idx(), &access_point));
     }
   }
+  er_model.get_access_point_rtree() = ERModel::AccessPointRTree(value_list);
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -762,7 +775,7 @@ void EarlyRouter::uploadAccessPatch(ERModel& er_model)
         }
         patch.set_grid_rect(RTUTIL.getClosedGCellGridRect(patch.get_real_rect(), gcell_axis));
         patch.set_layer_idx(layer_idx);
-        RTDM.updateNetDetailedPatchToGCellMap(ChangeType::kAdd, er_net.get_net_idx(), new EXTLayerRect(patch));
+        er_model.get_net_detailed_patch_map()[er_net.get_net_idx()].push_back(std::move(patch));
       }
     }
   }
@@ -809,8 +822,47 @@ void EarlyRouter::analyzeSupply(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
   int32_t supply_reduction = er_model.get_er_com_param().get_supply_reduction();
+
+  GridMap<std::map<int32_t, std::vector<LayerRect>>> detailed_env_map;
+  detailed_env_map.init(ert_gcell_map.get_x_size(), ert_gcell_map.get_y_size());
+  Die& die = RTDM.getDatabase().get_die();
+  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
+  int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
+  for (auto& [net_idx, segment_list] : er_model.get_net_detailed_result_map()) {
+    for (Segment<LayerCoord>& segment : segment_list) {
+      for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, segment)) {
+        if (!net_shape.get_is_routing()) {
+          continue;
+        }
+        PlanarRect real_rect = RTUTIL.getEnlargedRect(net_shape, detection_distance);
+        if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
+          continue;
+        }
+        PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(real_rect, die.get_real_rect()), gcell_axis);
+        for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
+          for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
+            detailed_env_map[x][y][net_shape.get_layer_idx()].push_back(net_shape);
+          }
+        }
+      }
+    }
+  }
+  for (auto& [net_idx, patch_list] : er_model.get_net_detailed_patch_map()) {
+    for (EXTLayerRect& patch : patch_list) {
+      PlanarRect real_rect = RTUTIL.getEnlargedRect(patch.get_real_rect(), detection_distance);
+      if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
+        continue;
+      }
+      PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(real_rect, die.get_real_rect()), gcell_axis);
+      for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
+        for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
+          detailed_env_map[x][y][patch.get_layer_idx()].push_back(patch.getRealLayerRect());
+        }
+      }
+    }
+  }
 
   size_t total_pair_num = 0;
   for (std::vector<std::pair<LayerCoord, LayerCoord>>& grid_pair_list : er_model.get_grid_pair_list_list()) {
@@ -827,9 +879,9 @@ void EarlyRouter::analyzeSupply(ERModel& er_model)
       EXTLayerRect search_rect = getSearchRect(first_coord, second_coord);
 
       std::map<Orientation, int32_t>& first_orient_supply_map
-          = gcell_map[first_coord.get_x()][first_coord.get_y()].get_routing_orient_supply_map()[search_rect.get_layer_idx()];
+          = ert_gcell_map[first_coord.get_x()][first_coord.get_y()].get_routing_orient_supply_map()[search_rect.get_layer_idx()];
       std::map<Orientation, int32_t>& second_orient_supply_map
-          = gcell_map[second_coord.get_x()][second_coord.get_y()].get_routing_orient_supply_map()[search_rect.get_layer_idx()];
+          = ert_gcell_map[second_coord.get_x()][second_coord.get_y()].get_routing_orient_supply_map()[search_rect.get_layer_idx()];
 
       Orientation first_orientation = RTUTIL.getOrientation(first_coord, second_coord);
       Orientation second_orientation = RTUTIL.getOppositeOrientation(first_orientation);
@@ -851,25 +903,14 @@ void EarlyRouter::analyzeSupply(ERModel& er_model)
             }
           }
         }
-        for (auto& [net_idx, segment_set] : RTDM.getNetDetailedResultMap(search_rect)) {
-          for (Segment<LayerCoord>* segment : segment_set) {
-            for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, *segment)) {
-              if (!net_shape.get_is_routing()) {
-                continue;
+        for (int32_t x = search_rect.get_grid_ll_x(); x <= search_rect.get_grid_ur_x(); x++) {
+          for (int32_t y = search_rect.get_grid_ll_y(); y <= search_rect.get_grid_ur_y(); y++) {
+            auto detailed_env_iter = detailed_env_map[x][y].find(search_rect.get_layer_idx());
+            if (detailed_env_iter != detailed_env_map[x][y].end()) {
+              for (LayerRect& detailed_shape : detailed_env_iter->second) {
+                obs_rect_list.push_back(detailed_shape);
               }
-              if (search_rect.get_layer_idx() != net_shape.get_layer_idx()) {
-                continue;
-              }
-              obs_rect_list.push_back(net_shape);
             }
-          }
-        }
-        for (auto& [net_idx, patch_set] : RTDM.getNetDetailedPatchMap(search_rect)) {
-          for (EXTLayerRect* patch : patch_set) {
-            if (search_rect.get_layer_idx() != patch->get_layer_idx()) {
-              continue;
-            }
-            obs_rect_list.push_back(patch->get_real_rect());
           }
         }
       }
@@ -975,47 +1016,72 @@ bool EarlyRouter::isAccess(LayerRect& wire, std::vector<PlanarRect>& obs_rect_li
 void EarlyRouter::buildIgnoreNet(ERModel& er_model)
 {
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
   int32_t bottom_routing_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
   int32_t top_routing_layer_idx = RTDM.getConfig().top_routing_layer_idx;
 
+  GridMap<std::map<int32_t, std::set<int32_t>>> detailed_net_map;
+  detailed_net_map.init(gcell_map.get_x_size(), gcell_map.get_y_size());
+  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
+  Die& die = RTDM.getDatabase().get_die();
+  for (auto& [net_idx, segment_list] : er_model.get_net_detailed_result_map()) {
+    for (Segment<LayerCoord>& segment : segment_list) {
+      for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, segment)) {
+        if (!net_shape.get_is_routing() || !RTUTIL.hasRegularRect(net_shape.get_rect(), die.get_real_rect())) {
+          continue;
+        }
+        PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(net_shape.get_rect(), die.get_real_rect()), gcell_axis);
+        for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
+          for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
+            if (RTUTIL.isClosedOverlap(gcell_map[x][y], net_shape.get_rect())) {
+              detailed_net_map[x][y][net_shape.get_layer_idx()].insert(net_idx);
+            }
+          }
+        }
+      }
+    }
+  }
+  for (auto& [net_idx, patch_list] : er_model.get_net_detailed_patch_map()) {
+    for (EXTLayerRect& patch : patch_list) {
+      if (!RTUTIL.hasRegularRect(patch.get_real_rect(), die.get_real_rect())) {
+        continue;
+      }
+      PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(patch.get_real_rect(), die.get_real_rect()), gcell_axis);
+      for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
+        for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
+          if (RTUTIL.isClosedOverlap(gcell_map[x][y], patch.get_real_rect())) {
+            detailed_net_map[x][y][patch.get_layer_idx()].insert(net_idx);
+          }
+        }
+      }
+    }
+  }
+  for (auto& [layer_idx, fixed_rect_rtree] : RTDM.getDatabase().get_type_layer_fixed_rect_rtree_map()[true]) {
+    for (const auto& [rect, net_fixed_rect] : fixed_rect_rtree) {
+      auto [net_idx, fixed_rect] = net_fixed_rect;
+      if (net_idx == -1) {
+        continue;
+      }
+      if (!RTUTIL.hasRegularRect(fixed_rect->get_real_rect(), die.get_real_rect())) {
+        continue;
+      }
+      PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(fixed_rect->get_real_rect(), die.get_real_rect()), gcell_axis);
+      for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
+        for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
+          if (RTUTIL.isClosedOverlap(gcell_map[x][y], fixed_rect->get_real_rect())) {
+            detailed_net_map[x][y][layer_idx].insert(net_idx);
+          }
+        }
+      }
+    }
+  }
   for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
     for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
       std::map<int32_t, std::map<int32_t, std::set<Orientation>>> routing_ignore_net_orient_map;
-      for (auto& [is_routing, layer_net_fixed_rect_map] : gcell_map[x][y].get_type_layer_net_fixed_rect_map()) {
-        if (!is_routing) {
-          continue;
-        }
-        for (auto& [layer_idx, net_fixed_rect_map] : layer_net_fixed_rect_map) {
-          for (auto& [net_idx, fixed_rect_set] : net_fixed_rect_map) {
-            if (net_idx == -1) {
-              continue;
-            }
-            for (EXTLayerRect* fixed_rect : fixed_rect_set) {
-              if (RTUTIL.isClosedOverlap(gcell_map[x][y], fixed_rect->get_real_rect())) {
-                routing_ignore_net_orient_map[layer_idx][net_idx] = {};
-              }
-            }
-          }
-        }
-      }
-      for (auto& [net_idx, segment_set] : gcell_map[x][y].get_net_detailed_result_map()) {
-        for (Segment<LayerCoord>* segment : segment_set) {
-          for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, *segment)) {
-            if (!net_shape.get_is_routing()) {
-              continue;
-            }
-            if (RTUTIL.isClosedOverlap(gcell_map[x][y], net_shape.get_rect())) {
-              routing_ignore_net_orient_map[net_shape.get_layer_idx()][net_idx] = {};
-            }
-          }
-        }
-      }
-      for (auto& [net_idx, patch_set] : gcell_map[x][y].get_net_detailed_patch_map()) {
-        for (EXTLayerRect* patch : patch_set) {
-          if (RTUTIL.isClosedOverlap(gcell_map[x][y], patch->get_real_rect())) {
-            routing_ignore_net_orient_map[patch->get_layer_idx()][net_idx] = {};
-          }
+      for (auto& [layer_idx, net_set] : detailed_net_map[x][y]) {
+        for (int32_t net_idx : net_set) {
+          routing_ignore_net_orient_map[layer_idx][net_idx] = {};
         }
       }
       for (auto& [routing_layer_idx, ignore_net_orient_map] : routing_ignore_net_orient_map) {
@@ -1035,24 +1101,24 @@ void EarlyRouter::buildIgnoreNet(ERModel& er_model)
           orient_set = ignore_orient_set;
         }
       }
-      gcell_map[x][y].set_routing_ignore_net_orient_map(routing_ignore_net_orient_map);
+      ert_gcell_map[x][y].set_routing_ignore_net_orient_map(routing_ignore_net_orient_map);
     }
   }
 }
 
 void EarlyRouter::analyzeDemandUnit(ERModel& er_model)
 {
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
   double boundary_wire_unit = er_model.get_er_com_param().get_boundary_wire_unit();
   double internal_wire_unit = er_model.get_er_com_param().get_internal_wire_unit();
   double internal_via_unit = er_model.get_er_com_param().get_internal_via_unit();
 
-  for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
-      GCell& gcell = gcell_map[x][y];
-      gcell.set_boundary_wire_unit(boundary_wire_unit);
-      gcell.set_internal_wire_unit(internal_wire_unit);
-      gcell.set_internal_via_unit(internal_via_unit);
+  for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
+    for (int32_t y = 0; y < ert_gcell_map.get_y_size(); y++) {
+      ERTGCell& ert_gcell = ert_gcell_map[x][y];
+      ert_gcell.set_boundary_wire_unit(boundary_wire_unit);
+      ert_gcell.set_internal_wire_unit(internal_wire_unit);
+      ert_gcell.set_internal_via_unit(internal_via_unit);
     }
   }
 }
@@ -1062,7 +1128,8 @@ void EarlyRouter::buildPlanarNodeMap(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
   GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
   planar_node_map.init(gcell_map.get_x_size(), gcell_map.get_y_size());
 #pragma omp parallel for collapse(2)
@@ -1070,32 +1137,14 @@ void EarlyRouter::buildPlanarNodeMap(ERModel& er_model)
     for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
       ERNode& er_node = planar_node_map[x][y];
       er_node.set_coord(x, y);
-      er_node.set_boundary_wire_unit(gcell_map[x][y].get_boundary_wire_unit());
-      er_node.set_internal_wire_unit(gcell_map[x][y].get_internal_wire_unit());
-      er_node.set_internal_via_unit(gcell_map[x][y].get_internal_via_unit());
-      for (auto& [routing_layer_idx, ignore_net_orient_map] : gcell_map[x][y].get_routing_ignore_net_orient_map()) {
+      er_node.set_boundary_wire_unit(ert_gcell_map[x][y].get_boundary_wire_unit());
+      er_node.set_internal_wire_unit(ert_gcell_map[x][y].get_internal_wire_unit());
+      er_node.set_internal_via_unit(ert_gcell_map[x][y].get_internal_via_unit());
+      for (auto& [routing_layer_idx, ignore_net_orient_map] : ert_gcell_map[x][y].get_routing_ignore_net_orient_map()) {
         for (auto& [net_idx, orient_set] : ignore_net_orient_map) {
           er_node.get_ignore_net_orient_map()[net_idx].insert(orient_set.begin(), orient_set.end());
         }
       }
-      std::map<Orientation, std::set<int32_t>> planar_orient_allowed_net_map;
-      std::set<Orientation> unrestricted_orient_set;
-      for (auto& [layer_idx, orient_supply_map] : gcell_map[x][y].get_routing_orient_supply_map()) {
-        for (auto& [orient, supply] : orient_supply_map) {
-          if (supply <= 0 || RTUTIL.exist(unrestricted_orient_set, orient)) {
-            continue;
-          }
-          RoutingLayerAllowedNetMap& routing_allowed_net_map = gcell_map[x][y].get_routing_allowed_net_map();
-          if (!RTUTIL.exist(routing_allowed_net_map, layer_idx) || !RTUTIL.exist(routing_allowed_net_map[layer_idx], orient)) {
-            planar_orient_allowed_net_map.erase(orient);
-            unrestricted_orient_set.insert(orient);
-          } else {
-            planar_orient_allowed_net_map[orient].insert(routing_allowed_net_map[layer_idx][orient].begin(),
-                                                         routing_allowed_net_map[layer_idx][orient].end());
-          }
-        }
-      }
-      er_node.set_orient_allowed_net_map(planar_orient_allowed_net_map);
     }
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -1106,7 +1155,7 @@ void EarlyRouter::buildPlanarNodeNeighbor(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
 
   GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
 #pragma omp parallel for collapse(2)
@@ -1135,14 +1184,14 @@ void EarlyRouter::buildPlanarOrientSupply(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
   GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
 
 #pragma omp parallel for collapse(2)
-  for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
+  for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
+    for (int32_t y = 0; y < ert_gcell_map.get_y_size(); y++) {
       std::map<Orientation, int32_t> planar_orient_supply_map;
-      for (auto& [layer_idx, orient_supply_map] : gcell_map[x][y].get_routing_orient_supply_map()) {
+      for (auto& [layer_idx, orient_supply_map] : ert_gcell_map[x][y].get_routing_orient_supply_map()) {
         for (auto& [orient, supply] : orient_supply_map) {
           planar_orient_supply_map[orient] += supply;
         }
@@ -1700,8 +1749,8 @@ MTree<PlanarCoord> EarlyRouter::getCoordTree(ERModel& er_model, std::vector<Segm
 void EarlyRouter::uploadPlanarNetResult(ERModel& er_model, MTree<PlanarCoord>& coord_tree)
 {
   for (Segment<TNode<PlanarCoord>*>& coord_segment : RTUTIL.getSegListByTree(coord_tree)) {
-    Segment<LayerCoord>* segment = new Segment<LayerCoord>({coord_segment.get_first()->value(), 0}, {coord_segment.get_second()->value(), 0});
-    RTDM.updateNetGlobalResultToGCellMap(ChangeType::kAdd, er_model.get_curr_er_task()->get_net_idx(), segment);
+    er_model.get_net_global_result_map()[er_model.get_curr_er_task()->get_net_idx()].emplace_back(LayerCoord(coord_segment.get_first()->value(), 0),
+                                                                                                  LayerCoord(coord_segment.get_second()->value(), 0));
   }
 }
 
@@ -1715,7 +1764,8 @@ void EarlyRouter::buildLayerNodeMap(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
 
   std::vector<GridMap<ERNode>>& layer_node_map = er_model.get_layer_node_map();
@@ -1729,14 +1779,11 @@ void EarlyRouter::buildLayerNodeMap(ERModel& er_model)
         ERNode& er_node = er_node_map[x][y];
         er_node.set_coord(x, y);
         er_node.set_layer_idx(layer_idx);
-        er_node.set_boundary_wire_unit(gcell_map[x][y].get_boundary_wire_unit());
-        er_node.set_internal_wire_unit(gcell_map[x][y].get_internal_wire_unit());
-        er_node.set_internal_via_unit(gcell_map[x][y].get_internal_via_unit());
-        if (RTUTIL.exist(gcell_map[x][y].get_routing_ignore_net_orient_map(), layer_idx)) {
-          er_node.set_ignore_net_orient_map(gcell_map[x][y].get_routing_ignore_net_orient_map()[layer_idx]);
-        }
-        if (RTUTIL.exist(gcell_map[x][y].get_routing_allowed_net_map(), layer_idx)) {
-          er_node.set_orient_allowed_net_map(gcell_map[x][y].get_routing_allowed_net_map()[layer_idx]);
+        er_node.set_boundary_wire_unit(ert_gcell_map[x][y].get_boundary_wire_unit());
+        er_node.set_internal_wire_unit(ert_gcell_map[x][y].get_internal_wire_unit());
+        er_node.set_internal_via_unit(ert_gcell_map[x][y].get_internal_via_unit());
+        if (RTUTIL.exist(ert_gcell_map[x][y].get_routing_ignore_net_orient_map(), layer_idx)) {
+          er_node.set_ignore_net_orient_map(ert_gcell_map[x][y].get_routing_ignore_net_orient_map()[layer_idx]);
         }
       }
     }
@@ -1751,7 +1798,7 @@ void EarlyRouter::buildLayerNodeNeighbor(ERModel& er_model)
   RTLOG.info(Loc::current(), "Starting...");
 
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   int32_t bottom_routing_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
   int32_t top_routing_layer_idx = RTDM.getConfig().top_routing_layer_idx;
 
@@ -1803,15 +1850,15 @@ void EarlyRouter::buildLayerOrientSupply(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
 
   std::vector<GridMap<ERNode>>& layer_node_map = er_model.get_layer_node_map();
 
 #pragma omp parallel for collapse(2)
-  for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
+  for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
+    for (int32_t y = 0; y < ert_gcell_map.get_y_size(); y++) {
       for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_node_map.size()); layer_idx++) {
-        layer_node_map[layer_idx][x][y].set_orient_supply_map(gcell_map[x][y].get_routing_orient_supply_map()[layer_idx]);
+        layer_node_map[layer_idx][x][y].set_orient_supply_map(ert_gcell_map[x][y].get_routing_orient_supply_map()[layer_idx]);
       }
     }
   }
@@ -1824,16 +1871,14 @@ void EarlyRouter::buildPlaneTree(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  Die& die = RTDM.getDatabase().get_die();
-
   std::vector<ERNet>& er_net_list = er_model.get_er_net_list();
 
-  for (auto& [net_idx, segment_set] : RTDM.getNetGlobalResultMap(die)) {
+  for (auto& [net_idx, segment_set] : er_model.get_net_global_result_map()) {
     ERNet& er_net = er_net_list[net_idx];
 
     std::vector<Segment<LayerCoord>> routing_segment_list;
-    for (Segment<LayerCoord>* segment : segment_set) {
-      routing_segment_list.push_back(*segment);
+    for (Segment<LayerCoord>& segment : segment_set) {
+      routing_segment_list.push_back(segment);
     }
     std::vector<LayerCoord> candidate_root_coord_list;
     std::map<LayerCoord, std::set<int32_t>, CmpLayerCoordByXASC> key_coord_pin_map;
@@ -1845,11 +1890,7 @@ void EarlyRouter::buildPlaneTree(ERModel& er_model)
     }
     er_net.set_planar_tree(RTUTIL.getTreeByFullFlow(candidate_root_coord_list, routing_segment_list, key_coord_pin_map));
   }
-  for (auto& [net_idx, segment_set] : RTDM.getNetGlobalResultMap(die)) {
-    for (Segment<LayerCoord>* segment : segment_set) {
-      RTDM.updateNetGlobalResultToGCellMap(ChangeType::kDel, net_idx, segment);
-    }
-  }
+  er_model.get_net_global_result_map().clear();
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -2272,8 +2313,8 @@ MTree<LayerCoord> EarlyRouter::getCoordTree(ERModel& er_model, std::vector<Segme
 void EarlyRouter::uploadLayerNetResult(ERModel& er_model, MTree<LayerCoord>& coord_tree)
 {
   for (Segment<TNode<LayerCoord>*>& coord_segment : RTUTIL.getSegListByTree(coord_tree)) {
-    Segment<LayerCoord>* segment = new Segment<LayerCoord>(coord_segment.get_first()->value(), coord_segment.get_second()->value());
-    RTDM.updateNetGlobalResultToGCellMap(ChangeType::kAdd, er_model.get_curr_er_task()->get_net_idx(), segment);
+    er_model.get_net_global_result_map()[er_model.get_curr_er_task()->get_net_idx()].emplace_back(coord_segment.get_first()->value(),
+                                                                                                  coord_segment.get_second()->value());
   }
 }
 
@@ -2366,7 +2407,15 @@ void EarlyRouter::assignTrack(ERModel& er_model)
 #pragma omp parallel for
     for (ERPanelId& er_panel_id : er_panel_id_list) {
       ERPanel& er_panel = layer_panel_list[er_panel_id.get_layer_idx()][er_panel_id.get_panel_idx()];
-      routeERPanel(er_panel);
+      routeERPanel(er_model, er_panel);
+    }
+    for (ERPanelId& er_panel_id : er_panel_id_list) {
+      ERPanel& er_panel = layer_panel_list[er_panel_id.get_layer_idx()][er_panel_id.get_panel_idx()];
+      for (auto& [net_idx, segment_list] : er_panel.get_net_detailed_result_map()) {
+        std::vector<Segment<LayerCoord>>& model_segment_list = er_model.get_net_detailed_result_map()[net_idx];
+        model_segment_list.insert(model_segment_list.end(), std::make_move_iterator(segment_list.begin()), std::make_move_iterator(segment_list.end()));
+      }
+      er_panel.get_net_detailed_result_map().clear();
     }
     assigned_panel_num += er_panel_id_list.size();
     RTLOG.info(Loc::current(), "Assigned ", assigned_panel_num, "/", total_panel_num, "(", RTUTIL.getPercentage(assigned_panel_num, total_panel_num),
@@ -2376,69 +2425,70 @@ void EarlyRouter::assignTrack(ERModel& er_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void EarlyRouter::routeERPanel(ERPanel& er_panel)
+void EarlyRouter::routeERPanel(ERModel& er_model, ERPanel& er_panel)
 {
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
 
-  for (auto& [net_idx, segment_set] : RTDM.getNetGlobalResultMap(er_panel.get_panel_rect())) {
-    for (Segment<LayerCoord>* segment : segment_set) {
-      LayerCoord& first_coord = segment->get_first();
-      LayerCoord& second_coord = segment->get_second();
-      if (first_coord.get_layer_idx() != second_coord.get_layer_idx()) {
-        continue;
-      }
-      if (first_coord.get_layer_idx() != er_panel.get_er_panel_id().get_layer_idx()) {
-        continue;
-      }
-      PlanarRect ll_rect = RTUTIL.getRealRectByGCell(first_coord, gcell_axis);
-      PlanarRect ur_rect = RTUTIL.getRealRectByGCell(second_coord, gcell_axis);
-      int32_t layer_idx = first_coord.get_layer_idx();
+  std::vector<ERModel::GlobalResultRTree::value_type> value_list;
+  er_model.get_global_result_rtree().query(bgi::intersects(RTUTIL.convertToBGRectInt(er_panel.get_panel_rect().get_grid_rect())),
+                                           std::back_inserter(value_list));
+  for (auto& [rect, net_segment_idx] : value_list) {
+    int32_t net_idx = net_segment_idx.first;
+    Segment<LayerCoord>* segment = &er_model.get_net_global_result_map().at(net_idx).at(net_segment_idx.second);
+    LayerCoord& first_coord = segment->get_first();
+    LayerCoord& second_coord = segment->get_second();
+    if (first_coord.get_layer_idx() != second_coord.get_layer_idx()) {
+      continue;
+    }
+    if (first_coord.get_layer_idx() != er_panel.get_er_panel_id().get_layer_idx()) {
+      continue;
+    }
+    PlanarRect ll_rect = RTUTIL.getRealRectByGCell(first_coord, gcell_axis);
+    PlanarRect ur_rect = RTUTIL.getRealRectByGCell(second_coord, gcell_axis);
+    int32_t layer_idx = first_coord.get_layer_idx();
 
-      RoutingLayer& routing_layer = routing_layer_list[layer_idx];
-      std::vector<ScaleGrid>& x_track_grid_list = routing_layer.getXTrackGridList();
-      std::vector<ScaleGrid>& y_track_grid_list = routing_layer.getYTrackGridList();
+    RoutingLayer& routing_layer = routing_layer_list[layer_idx];
+    std::vector<ScaleGrid>& x_track_grid_list = routing_layer.getXTrackGridList();
+    std::vector<ScaleGrid>& y_track_grid_list = routing_layer.getYTrackGridList();
 
-      if (RTUTIL.isHorizontal(first_coord, second_coord)) {
-        RTUTIL.swapByCMP(ll_rect, ur_rect, [](PlanarRect& a, PlanarRect& b) { return CmpPlanarCoordByXASC()(a.getMidPoint(), b.getMidPoint()); });
-        std::vector<int32_t> ll_scale_list = RTUTIL.getScaleList(ll_rect.get_ll_x(), ll_rect.get_ur_x(), x_track_grid_list);
-        std::vector<int32_t> ur_scale_list = RTUTIL.getScaleList(ur_rect.get_ll_x(), ur_rect.get_ur_x(), x_track_grid_list);
-        auto ll_iter = ll_scale_list.rbegin();
-        auto ur_iter = ur_scale_list.begin();
-        while (ll_iter != ll_scale_list.rend() && ur_iter != ur_scale_list.end()) {
-          if (*ll_iter != *ur_iter) {
-            break;
-          }
-          ++ll_iter;
-          ++ur_iter;
+    if (RTUTIL.isHorizontal(first_coord, second_coord)) {
+      RTUTIL.swapByCMP(ll_rect, ur_rect, [](PlanarRect& a, PlanarRect& b) { return CmpPlanarCoordByXASC()(a.getMidPoint(), b.getMidPoint()); });
+      std::vector<int32_t> ll_scale_list = RTUTIL.getScaleList(ll_rect.get_ll_x(), ll_rect.get_ur_x(), x_track_grid_list);
+      std::vector<int32_t> ur_scale_list = RTUTIL.getScaleList(ur_rect.get_ll_x(), ur_rect.get_ur_x(), x_track_grid_list);
+      auto ll_iter = ll_scale_list.rbegin();
+      auto ur_iter = ur_scale_list.begin();
+      while (ll_iter != ll_scale_list.rend() && ur_iter != ur_scale_list.end()) {
+        if (*ll_iter != *ur_iter) {
+          break;
         }
-        int32_t ll_x = *ll_iter;
-        int32_t ur_x = *ur_iter;
-        std::vector<int32_t> scale_list = RTUTIL.getScaleList(ll_rect.get_ll_y(), ll_rect.get_ur_y(), y_track_grid_list);
-        int32_t y = scale_list[ll_x % scale_list.size()];
-        RTDM.updateNetDetailedResultToGCellMap(ChangeType::kAdd, net_idx,
-                                               new Segment<LayerCoord>(LayerCoord(ll_x, y, layer_idx), LayerCoord(ur_x, y, layer_idx)));
-
-      } else if (RTUTIL.isVertical(first_coord, second_coord)) {
-        RTUTIL.swapByCMP(ll_rect, ur_rect, [](PlanarRect& a, PlanarRect& b) { return CmpPlanarCoordByYASC()(a.getMidPoint(), b.getMidPoint()); });
-        std::vector<int32_t> ll_scale_list = RTUTIL.getScaleList(ll_rect.get_ll_y(), ll_rect.get_ur_y(), y_track_grid_list);
-        std::vector<int32_t> ur_scale_list = RTUTIL.getScaleList(ur_rect.get_ll_y(), ur_rect.get_ur_y(), y_track_grid_list);
-        auto ll_iter = ll_scale_list.rbegin();
-        auto ur_iter = ur_scale_list.begin();
-        while (ll_iter != ll_scale_list.rend() && ur_iter != ur_scale_list.end()) {
-          if (*ll_iter != *ur_iter) {
-            break;
-          }
-          ++ll_iter;
-          ++ur_iter;
-        }
-        int32_t ll_y = *ll_iter;
-        int32_t ur_y = *ur_iter;
-        std::vector<int32_t> scale_list = RTUTIL.getScaleList(ll_rect.get_ll_x(), ll_rect.get_ur_x(), x_track_grid_list);
-        int32_t x = scale_list[ll_y % scale_list.size()];
-        RTDM.updateNetDetailedResultToGCellMap(ChangeType::kAdd, net_idx,
-                                               new Segment<LayerCoord>(LayerCoord(x, ll_y, layer_idx), LayerCoord(x, ur_y, layer_idx)));
+        ++ll_iter;
+        ++ur_iter;
       }
+      int32_t ll_x = *ll_iter;
+      int32_t ur_x = *ur_iter;
+      std::vector<int32_t> scale_list = RTUTIL.getScaleList(ll_rect.get_ll_y(), ll_rect.get_ur_y(), y_track_grid_list);
+      int32_t y = scale_list[ll_x % scale_list.size()];
+      er_panel.get_net_detailed_result_map()[net_idx].emplace_back(LayerCoord(ll_x, y, layer_idx), LayerCoord(ur_x, y, layer_idx));
+
+    } else if (RTUTIL.isVertical(first_coord, second_coord)) {
+      RTUTIL.swapByCMP(ll_rect, ur_rect, [](PlanarRect& a, PlanarRect& b) { return CmpPlanarCoordByYASC()(a.getMidPoint(), b.getMidPoint()); });
+      std::vector<int32_t> ll_scale_list = RTUTIL.getScaleList(ll_rect.get_ll_y(), ll_rect.get_ur_y(), y_track_grid_list);
+      std::vector<int32_t> ur_scale_list = RTUTIL.getScaleList(ur_rect.get_ll_y(), ur_rect.get_ur_y(), y_track_grid_list);
+      auto ll_iter = ll_scale_list.rbegin();
+      auto ur_iter = ur_scale_list.begin();
+      while (ll_iter != ll_scale_list.rend() && ur_iter != ur_scale_list.end()) {
+        if (*ll_iter != *ur_iter) {
+          break;
+        }
+        ++ll_iter;
+        ++ur_iter;
+      }
+      int32_t ll_y = *ll_iter;
+      int32_t ur_y = *ur_iter;
+      std::vector<int32_t> scale_list = RTUTIL.getScaleList(ll_rect.get_ll_x(), ll_rect.get_ur_x(), x_track_grid_list);
+      int32_t x = scale_list[ll_y % scale_list.size()];
+      er_panel.get_net_detailed_result_map()[net_idx].emplace_back(LayerCoord(x, ll_y, layer_idx), LayerCoord(x, ur_y, layer_idx));
     }
   }
 }
@@ -2534,6 +2584,11 @@ void EarlyRouter::routeDetailed(ERModel& er_model)
   RTLOG.info(Loc::current(), "Starting...");
 
   GridMap<ERBox>& er_box_map = er_model.get_er_box_map();
+  for (auto& [net_idx, segment_list] : er_model.get_net_detailed_result_map()) {
+    for (Segment<LayerCoord>& segment : segment_list) {
+      addNetResultToERBoxTask(er_model, net_idx, segment);
+    }
+  }
 
   size_t total_box_num = 0;
   for (std::vector<ERBoxId>& er_box_id_list : er_model.get_er_box_id_list_list()) {
@@ -2546,7 +2601,18 @@ void EarlyRouter::routeDetailed(ERModel& er_model)
 #pragma omp parallel for
     for (ERBoxId& er_box_id : er_box_id_list) {
       ERBox& er_box = er_box_map[er_box_id.get_x()][er_box_id.get_y()];
-      routeERBox(er_box);
+      routeERBox(er_model, er_box);
+    }
+    for (ERBoxId& er_box_id : er_box_id_list) {
+      ERBox& er_box = er_box_map[er_box_id.get_x()][er_box_id.get_y()];
+      for (auto& [net_idx, segment_list] : er_box.get_net_detailed_result_map()) {
+        for (Segment<LayerCoord>& segment : segment_list) {
+          addNetResultToERBoxTask(er_model, net_idx, segment);
+        }
+        std::vector<Segment<LayerCoord>>& model_segment_list = er_model.get_net_detailed_result_map()[net_idx];
+        model_segment_list.insert(model_segment_list.end(), std::make_move_iterator(segment_list.begin()), std::make_move_iterator(segment_list.end()));
+      }
+      er_box.get_net_detailed_result_map().clear();
     }
     routed_box_num += er_box_id_list.size();
     RTLOG.info(Loc::current(), "Routed ", routed_box_num, "/", total_box_num, "(", RTUTIL.getPercentage(routed_box_num, total_box_num), ") boxes",
@@ -2556,7 +2622,28 @@ void EarlyRouter::routeDetailed(ERModel& er_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void EarlyRouter::routeERBox(ERBox& er_box)
+void EarlyRouter::addNetResultToERBoxTask(ERModel& er_model, int32_t net_idx, Segment<LayerCoord>& segment)
+{
+  GridMap<ERBox>& er_box_map = er_model.get_er_box_map();
+  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
+  std::set<ERBoxId, CmpERBoxId> box_id_set;
+  for (LayerCoord* coord : {&segment.get_first(), &segment.get_second()}) {
+    PlanarRect coord_rect(coord->get_x(), coord->get_y(), coord->get_x(), coord->get_y());
+    PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(coord_rect, gcell_axis);
+    for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
+      for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
+        if (RTUTIL.isInside(er_box_map[x][y].get_box_rect().get_real_rect(), *coord)) {
+          box_id_set.emplace(x, y);
+        }
+      }
+    }
+  }
+  for (const ERBoxId& box_id : box_id_set) {
+    er_box_map[box_id.get_x()][box_id.get_y()].get_net_task_detailed_result_map()[net_idx].push_back(segment);
+  }
+}
+
+void EarlyRouter::routeERBox(ERModel& er_model, ERBox& er_box)
 {
   int32_t bottom_routing_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
   int32_t top_routing_layer_idx = RTDM.getConfig().top_routing_layer_idx;
@@ -2564,15 +2651,14 @@ void EarlyRouter::routeERBox(ERBox& er_box)
   EXTPlanarRect& box_rect = er_box.get_box_rect();
   PlanarRect& box_real_rect = box_rect.get_real_rect();
 
-  std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> net_access_point_map = RTDM.getNetAccessPointMap(box_rect);
-  std::map<int32_t, std::vector<Segment<LayerCoord>>> net_task_detailed_result_map;
-  for (auto& [net_idx, segment_set] : RTDM.getNetDetailedResultMap(box_rect)) {
-    for (Segment<LayerCoord>* segment : segment_set) {
-      if (RTUTIL.isInside(box_real_rect, segment->get_first()) || RTUTIL.isInside(box_real_rect, segment->get_second())) {
-        net_task_detailed_result_map[net_idx].push_back(*segment);
-      }
-    }
+  std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> net_access_point_map;
+  PlanarRect query_rect = RTUTIL.getEnlargedRect(box_rect.get_real_rect(), RTDM.getDatabase().get_detection_distance());
+  std::vector<ERModel::AccessPointRTree::value_type> value_list;
+  er_model.get_access_point_rtree().query(bgi::intersects(RTUTIL.convertToBGRectInt(query_rect)), std::back_inserter(value_list));
+  for (auto& [rect, net_access_point] : value_list) {
+    net_access_point_map[net_access_point.first].insert(net_access_point.second);
   }
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_task_detailed_result_map = er_box.get_net_task_detailed_result_map();
 
   std::map<int32_t, std::vector<std::vector<LayerCoord>>> net_coord_list_list_map;
   {
@@ -2658,7 +2744,7 @@ void EarlyRouter::routeERBox(ERBox& er_box)
       }
 
       for (Segment<LayerCoord>& routing_segment : routing_segment_list) {
-        RTDM.updateNetDetailedResultToGCellMap(ChangeType::kAdd, net_idx, new Segment<LayerCoord>(routing_segment));
+        er_box.get_net_detailed_result_map()[net_idx].push_back(std::move(routing_segment));
       }
     }
   }
@@ -2669,24 +2755,19 @@ void EarlyRouter::updateNetResult(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  Die& die = RTDM.getDatabase().get_die();
   std::vector<ERNet>& er_net_list = er_model.get_er_net_list();
 
   // detailed result
   {
-    std::vector<std::set<Segment<LayerCoord>*>> detailed_result_list;
-    detailed_result_list.resize(er_net_list.size());
-    for (auto& [net_idx, segment_set] : RTDM.getNetDetailedResultMap(die)) {
-      detailed_result_list[net_idx] = segment_set;
+    std::vector<std::vector<Segment<LayerCoord>>> detailed_result_list(er_net_list.size());
+    for (auto& [net_idx, segment_list] : er_model.get_net_detailed_result_map()) {
+      detailed_result_list[net_idx] = std::move(segment_list);
     }
-    std::vector<std::set<Segment<LayerCoord>*>> new_detailed_result_list;
-    new_detailed_result_list.resize(er_net_list.size());
+    er_model.get_net_detailed_result_map().clear();
+    std::vector<std::vector<Segment<LayerCoord>>> new_detailed_result_list(er_net_list.size());
 #pragma omp parallel for
     for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(detailed_result_list.size()); net_idx++) {
-      std::vector<Segment<LayerCoord>> routing_segment_list;
-      for (Segment<LayerCoord>* segment : detailed_result_list[net_idx]) {
-        routing_segment_list.emplace_back(segment->get_first(), segment->get_second());
-      }
+      std::vector<Segment<LayerCoord>>& routing_segment_list = detailed_result_list[net_idx];
       std::vector<LayerCoord> candidate_root_coord_list;
       std::map<LayerCoord, std::set<int32_t>, CmpLayerCoordByXASC> key_coord_pin_map;
       std::vector<ERPin>& er_pin_list = er_net_list[net_idx].get_er_pin_list();
@@ -2697,17 +2778,12 @@ void EarlyRouter::updateNetResult(ERModel& er_model)
       }
       MTree<LayerCoord> coord_tree = RTUTIL.getTreeByFullFlow(candidate_root_coord_list, routing_segment_list, key_coord_pin_map);
       for (Segment<TNode<LayerCoord>*>& coord_segment : RTUTIL.getSegListByTree(coord_tree)) {
-        new_detailed_result_list[net_idx].insert(new Segment<LayerCoord>(coord_segment.get_first()->value(), coord_segment.get_second()->value()));
-      }
-    }
-    for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(detailed_result_list.size()); net_idx++) {
-      for (Segment<LayerCoord>* segment : detailed_result_list[net_idx]) {
-        RTDM.updateNetDetailedResultToGCellMap(ChangeType::kDel, net_idx, segment);
+        new_detailed_result_list[net_idx].emplace_back(coord_segment.get_first()->value(), coord_segment.get_second()->value());
       }
     }
     for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(new_detailed_result_list.size()); net_idx++) {
-      for (Segment<LayerCoord>* segment : new_detailed_result_list[net_idx]) {
-        RTDM.updateNetDetailedResultToGCellMap(ChangeType::kAdd, net_idx, segment);
+      if (!new_detailed_result_list[net_idx].empty()) {
+        er_model.get_net_detailed_result_map()[net_idx] = std::move(new_detailed_result_list[net_idx]);
       }
     }
   }
@@ -2720,31 +2796,31 @@ void EarlyRouter::updateNetPatch(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  Die& die = RTDM.getDatabase().get_die();
-
-  for (auto& [net_idx, patch_set] : RTDM.getNetDetailedPatchMap(die)) {
-    for (EXTLayerRect* patch : patch_set) {
-      RTDM.updateNetDetailedPatchToGCellMap(ChangeType::kDel, net_idx, patch);
-    }
-  }
+  er_model.get_net_detailed_patch_map().clear();
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void EarlyRouter::cleanTempResult(ERModel& er_model)
 {
-  Die& die = RTDM.getDatabase().get_die();
+  er_model.get_net_detailed_result_map().clear();
+  er_model.get_net_detailed_patch_map().clear();
+}
 
-  for (auto& [net_idx, segment_set] : RTDM.getNetDetailedResultMap(die)) {
-    for (Segment<LayerCoord>* segment : segment_set) {
-      RTDM.updateNetDetailedResultToGCellMap(ChangeType::kDel, net_idx, segment);
+void EarlyRouter::uploadERModel(ERModel& er_model)
+{
+  for (ERNet& er_net : er_model.get_er_net_list()) {
+    Net* origin_net = er_net.get_origin_net();
+    origin_net->set_bounding_box(er_net.get_bounding_box());
+    for (ERPin& er_pin : er_net.get_er_pin_list()) {
+      origin_net->get_pin_list()[er_pin.get_pin_idx()].set_access_point(er_pin.get_access_point());
     }
   }
-  for (auto& [net_idx, patch_set] : RTDM.getNetDetailedPatchMap(die)) {
-    for (EXTLayerRect* patch : patch_set) {
-      RTDM.updateNetDetailedPatchToGCellMap(ChangeType::kDel, net_idx, patch);
-    }
-  }
+  RTDM.rebuildAccessPointRTree();
+  RTDM.getDatabase().get_net_global_result_map() = std::move(er_model.get_net_global_result_map());
+  RTDM.rebuildGlobalResultRTree();
+  RTDM.getDatabase().get_net_detailed_result_map() = std::move(er_model.get_net_detailed_result_map());
+  RTDM.getDatabase().get_net_detailed_patch_map() = std::move(er_model.get_net_detailed_patch_map());
 }
 
 #if 1  // output
@@ -2754,7 +2830,7 @@ void EarlyRouter::outputGCellCSV(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
 
   std::ofstream* guide_file_stream = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "gcell.info"));
@@ -2763,7 +2839,7 @@ void EarlyRouter::outputGCellCSV(ERModel& er_model)
   }
   for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
     for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
-      GCell& gcell = gcell_map[x][y];
+      PlanarRect& gcell = gcell_map[x][y];
       RTUTIL.pushStream(guide_file_stream, x, ",", y, ",", gcell.get_ll_x(), ",", gcell.get_ll_y(), ",", gcell.get_ur_x(), ",", gcell.get_ur_y(), "\n");
     }
   }
@@ -2778,15 +2854,15 @@ void EarlyRouter::outputPlanarSupplyCSV(ERModel& er_model)
   RTLOG.info(Loc::current(), "Starting...");
 
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
   std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
 
   std::ofstream* supply_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "supply_map_planar.csv"));
-  for (int32_t y = gcell_map.get_y_size() - 1; y >= 0; y--) {
-    for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
+  for (int32_t y = ert_gcell_map.get_y_size() - 1; y >= 0; y--) {
+    for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
       int32_t total_supply = 0;
       for (RoutingLayer& routing_layer : routing_layer_list) {
-        for (auto& [orient, supply] : gcell_map[x][y].get_routing_orient_supply_map()[routing_layer.get_layer_idx()]) {
+        for (auto& [orient, supply] : ert_gcell_map[x][y].get_routing_orient_supply_map()[routing_layer.get_layer_idx()]) {
           // boundary_supply + internal_supply
           total_supply += (2 * supply);
         }
@@ -2806,7 +2882,6 @@ void EarlyRouter::outputPlanarGuide(ERModel& er_model)
 
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
-  Die& die = RTDM.getDatabase().get_die();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
 
@@ -2821,7 +2896,7 @@ void EarlyRouter::outputPlanarGuide(ERModel& er_model)
   RTUTIL.pushStream(guide_file_stream, "wire grid1_x grid1_y grid2_x grid2_y real1_x real1_y real2_x real2_y layer\n");
   RTUTIL.pushStream(guide_file_stream, "via grid_x grid_y real_x real_y layer1 layer2\n");
 
-  for (auto& [net_idx, segment_set] : RTDM.getNetGlobalResultMap(die)) {
+  for (auto& [net_idx, segment_set] : er_model.get_net_global_result_map()) {
     ERNet& er_net = er_net_list[net_idx];
     RTUTIL.pushStream(guide_file_stream, "guide ", er_net.get_origin_net()->get_net_name(), "\n");
 
@@ -2841,7 +2916,8 @@ void EarlyRouter::outputPlanarGuide(ERModel& er_model)
       RTUTIL.pushStream(guide_file_stream, "pin ", grid_x, " ", grid_y, " ", real_x, " ", real_y, " ", layer, " ", connnect, " ", er_pin.get_pin_name(), "\n");
     }
 
-    for (Segment<LayerCoord>* segment : segment_set) {
+    for (Segment<LayerCoord>& segment_value : segment_set) {
+      Segment<LayerCoord>* segment = &segment_value;
       LayerCoord first_layer_coord = segment->get_first();
       double grid1_x = first_layer_coord.get_x();
       double grid1_y = first_layer_coord.get_y();
@@ -2920,16 +2996,16 @@ void EarlyRouter::outputLayerSupplyCSV(ERModel& er_model)
   RTLOG.info(Loc::current(), "Starting...");
 
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
   std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
 
   for (RoutingLayer& routing_layer : routing_layer_list) {
     std::ofstream* supply_csv_file
         = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "supply_map_", routing_layer.get_layer_name(), ".csv"));
-    for (int32_t y = gcell_map.get_y_size() - 1; y >= 0; y--) {
-      for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
+    for (int32_t y = ert_gcell_map.get_y_size() - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
         int32_t total_supply = 0;
-        for (auto& [orient, supply] : gcell_map[x][y].get_routing_orient_supply_map()[routing_layer.get_layer_idx()]) {
+        for (auto& [orient, supply] : ert_gcell_map[x][y].get_routing_orient_supply_map()[routing_layer.get_layer_idx()]) {
           // boundary_supply + internal_supply
           total_supply += (2 * supply);
         }
@@ -2949,7 +3025,6 @@ void EarlyRouter::outputLayerGuide(ERModel& er_model)
 
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
-  Die& die = RTDM.getDatabase().get_die();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
 
@@ -2964,7 +3039,7 @@ void EarlyRouter::outputLayerGuide(ERModel& er_model)
   RTUTIL.pushStream(guide_file_stream, "wire grid1_x grid1_y grid2_x grid2_y real1_x real1_y real2_x real2_y layer\n");
   RTUTIL.pushStream(guide_file_stream, "via grid_x grid_y real_x real_y layer1 layer2\n");
 
-  for (auto& [net_idx, segment_set] : RTDM.getNetGlobalResultMap(die)) {
+  for (auto& [net_idx, segment_set] : er_model.get_net_global_result_map()) {
     ERNet& er_net = er_net_list[net_idx];
     RTUTIL.pushStream(guide_file_stream, "guide ", er_net.get_origin_net()->get_net_name(), "\n");
 
@@ -2984,7 +3059,8 @@ void EarlyRouter::outputLayerGuide(ERModel& er_model)
       RTUTIL.pushStream(guide_file_stream, "pin ", grid_x, " ", grid_y, " ", real_x, " ", real_y, " ", layer, " ", connnect, " ", er_pin.get_pin_name(), "\n");
     }
 
-    for (Segment<LayerCoord>* segment : segment_set) {
+    for (Segment<LayerCoord>& segment_value : segment_set) {
+      Segment<LayerCoord>* segment = &segment_value;
       LayerCoord first_layer_coord = segment->get_first();
       double grid1_x = first_layer_coord.get_x();
       double grid1_y = first_layer_coord.get_y();
@@ -3172,15 +3248,14 @@ void EarlyRouter::updateDemandToGraph(ERModel& er_model, ChangeType change_type,
 
 void EarlyRouter::printAccessSummary(ERModel& er_model)
 {
-  Die& die = RTDM.getDatabase().get_die();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
 
   std::map<int32_t, int32_t> routing_patch_num_map;
   int32_t total_patch_num = 0;
 
-  for (auto& [net_idx, patch_set] : RTDM.getNetDetailedPatchMap(die)) {
-    for (EXTLayerRect* patch : patch_set) {
-      routing_patch_num_map[patch->get_layer_idx()]++;
+  for (auto& [net_idx, patch_list] : er_model.get_net_detailed_patch_map()) {
+    for (EXTLayerRect& patch : patch_list) {
+      routing_patch_num_map[patch.get_layer_idx()]++;
       total_patch_num++;
     }
   }
@@ -3202,15 +3277,15 @@ void EarlyRouter::printAccessSummary(ERModel& er_model)
 
 void EarlyRouter::printSupplySummary(ERModel& er_model)
 {
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
 
   std::map<int32_t, int32_t> routing_supply_map;
   int32_t total_supply = 0;
 
-  for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
-      for (auto& [routing_layer_idx, orient_supply_map] : gcell_map[x][y].get_routing_orient_supply_map()) {
+  for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
+    for (int32_t y = 0; y < ert_gcell_map.get_y_size(); y++) {
+      for (auto& [routing_layer_idx, orient_supply_map] : ert_gcell_map[x][y].get_routing_orient_supply_map()) {
         for (auto& [orient, supply] : orient_supply_map) {
           // boundary_supply + internal_supply
           routing_supply_map[routing_layer_idx] += (2 * supply);
@@ -3238,8 +3313,7 @@ void EarlyRouter::printSupplySummary(ERModel& er_model)
 void EarlyRouter::printPlanarSummary(ERModel& er_model)
 {
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
-  Die& die = RTDM.getDatabase().get_die();
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
 
   double total_demand = 0;
   double total_overflow = 0;
@@ -3255,16 +3329,17 @@ void EarlyRouter::printPlanarSummary(ERModel& er_model)
       total_overflow += node_overflow;
     }
   }
-  for (auto& [net_idx, segment_set] : RTDM.getNetGlobalResultMap(die)) {
-    for (Segment<LayerCoord>* segment : segment_set) {
+  for (auto& [net_idx, segment_set] : er_model.get_net_global_result_map()) {
+    for (Segment<LayerCoord>& segment_value : segment_set) {
+      Segment<LayerCoord>* segment = &segment_value;
       LayerCoord& first_coord = segment->get_first();
       int32_t first_layer_idx = first_coord.get_layer_idx();
       LayerCoord& second_coord = segment->get_second();
       int32_t second_layer_idx = second_coord.get_layer_idx();
 
       if (first_layer_idx == second_layer_idx) {
-        GCell& first_gcell = gcell_map[first_coord.get_x()][first_coord.get_y()];
-        GCell& second_gcell = gcell_map[second_coord.get_x()][second_coord.get_y()];
+        PlanarRect& first_gcell = gcell_map[first_coord.get_x()][first_coord.get_y()];
+        PlanarRect& second_gcell = gcell_map[second_coord.get_x()][second_coord.get_y()];
         double wire_length = RTUTIL.getManhattanDistance(first_gcell.getMidPoint(), second_gcell.getMidPoint()) / 1.0 / micron_dbu;
         total_wire_length += wire_length;
       } else {
@@ -3286,10 +3361,9 @@ void EarlyRouter::printPlanarSummary(ERModel& er_model)
 void EarlyRouter::printLayerSummary(ERModel& er_model)
 {
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
-  Die& die = RTDM.getDatabase().get_die();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::vector<CutLayer>& cut_layer_list = RTDM.getDatabase().get_cut_layer_list();
-  GridMap<GCell>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
 
   std::map<int32_t, double> routing_demand_map;
@@ -3316,16 +3390,17 @@ void EarlyRouter::printLayerSummary(ERModel& er_model)
       }
     }
   }
-  for (auto& [net_idx, segment_set] : RTDM.getNetGlobalResultMap(die)) {
-    for (Segment<LayerCoord>* segment : segment_set) {
+  for (auto& [net_idx, segment_set] : er_model.get_net_global_result_map()) {
+    for (Segment<LayerCoord>& segment_value : segment_set) {
+      Segment<LayerCoord>* segment = &segment_value;
       LayerCoord& first_coord = segment->get_first();
       int32_t first_layer_idx = first_coord.get_layer_idx();
       LayerCoord& second_coord = segment->get_second();
       int32_t second_layer_idx = second_coord.get_layer_idx();
 
       if (first_layer_idx == second_layer_idx) {
-        GCell& first_gcell = gcell_map[first_coord.get_x()][first_coord.get_y()];
-        GCell& second_gcell = gcell_map[second_coord.get_x()][second_coord.get_y()];
+        PlanarRect& first_gcell = gcell_map[first_coord.get_x()][first_coord.get_y()];
+        PlanarRect& second_gcell = gcell_map[second_coord.get_x()][second_coord.get_y()];
         double wire_length = RTUTIL.getManhattanDistance(first_gcell.getMidPoint(), second_gcell.getMidPoint()) / 1.0 / micron_dbu;
         routing_wire_length_map[first_layer_idx] += wire_length;
         total_wire_length += wire_length;
@@ -3393,16 +3468,15 @@ void EarlyRouter::printLayerSummary(ERModel& er_model)
 void EarlyRouter::printTrackSummary(ERModel& er_model)
 {
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
-  Die& die = RTDM.getDatabase().get_die();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
 
   std::map<int32_t, double> routing_wire_length_map;
   double total_wire_length = 0;
 
-  for (auto& [net_idx, segment_set] : RTDM.getNetDetailedResultMap(die)) {
-    for (Segment<LayerCoord>* segment : segment_set) {
-      LayerCoord& first_coord = segment->get_first();
-      LayerCoord& second_coord = segment->get_second();
+  for (auto& [net_idx, segment_list] : er_model.get_net_detailed_result_map()) {
+    for (Segment<LayerCoord>& segment : segment_list) {
+      LayerCoord& first_coord = segment.get_first();
+      LayerCoord& second_coord = segment.get_second();
       if (first_coord.get_layer_idx() == second_coord.get_layer_idx()) {
         double wire_length = RTUTIL.getManhattanDistance(first_coord, second_coord) / 1.0 / micron_dbu;
         routing_wire_length_map[first_coord.get_layer_idx()] += wire_length;
@@ -3429,7 +3503,6 @@ void EarlyRouter::printTrackSummary(ERModel& er_model)
 void EarlyRouter::printDetailedSummary(ERModel& er_model)
 {
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
-  Die& die = RTDM.getDatabase().get_die();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::vector<CutLayer>& cut_layer_list = RTDM.getDatabase().get_cut_layer_list();
   std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
@@ -3441,11 +3514,11 @@ void EarlyRouter::printDetailedSummary(ERModel& er_model)
   std::map<int32_t, int32_t> routing_patch_num_map;
   int32_t total_patch_num = 0;
 
-  for (auto& [net_idx, segment_set] : RTDM.getNetDetailedResultMap(die)) {
-    for (Segment<LayerCoord>* segment : segment_set) {
-      LayerCoord& first_coord = segment->get_first();
+  for (auto& [net_idx, segment_list] : er_model.get_net_detailed_result_map()) {
+    for (Segment<LayerCoord>& segment : segment_list) {
+      LayerCoord& first_coord = segment.get_first();
       int32_t first_layer_idx = first_coord.get_layer_idx();
-      LayerCoord& second_coord = segment->get_second();
+      LayerCoord& second_coord = segment.get_second();
       int32_t second_layer_idx = second_coord.get_layer_idx();
 
       if (first_layer_idx == second_layer_idx) {
@@ -3461,9 +3534,9 @@ void EarlyRouter::printDetailedSummary(ERModel& er_model)
       }
     }
   }
-  for (auto& [net_idx, patch_set] : RTDM.getNetDetailedPatchMap(die)) {
-    for (EXTLayerRect* patch : patch_set) {
-      routing_patch_num_map[patch->get_layer_idx()]++;
+  for (auto& [net_idx, patch_list] : er_model.get_net_detailed_patch_map()) {
+    for (EXTLayerRect& patch : patch_list) {
+      routing_patch_num_map[patch.get_layer_idx()]++;
       total_patch_num++;
     }
   }
@@ -3580,35 +3653,35 @@ void EarlyRouter::debugPlotERModel(ERModel& er_model, std::string flag)
   }
 
   // fixed_rect
-  for (auto& [is_routing, layer_net_rect_map] : RTDM.getTypeLayerNetFixedRectMap(die)) {
-    for (auto& [layer_idx, net_rect_map] : layer_net_rect_map) {
-      for (auto& [net_idx, rect_set] : net_rect_map) {
-        GPStruct fixed_rect_struct(RTUTIL.getString("fixed_rect(net_", net_idx, ")"));
-        for (EXTLayerRect* rect : rect_set) {
-          GPBoundary gp_boundary;
-          gp_boundary.set_data_type(static_cast<int32_t>(GPDataType::kShape));
-          gp_boundary.set_rect(rect->get_real_rect());
-          if (is_routing) {
-            gp_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(layer_idx));
-          } else {
-            gp_boundary.set_layer_idx(RTGP.getGDSIdxByCut(layer_idx));
-          }
-          fixed_rect_struct.push(gp_boundary);
-        }
+  auto& type_layer_fixed_rect_rtree_map = RTDM.getDatabase().get_type_layer_fixed_rect_rtree_map();
+  for (bool is_routing : {false, true}) {
+    for (auto& [layer_idx, fixed_rect_rtree] : type_layer_fixed_rect_rtree_map[is_routing]) {
+      std::map<int32_t, GPStruct> net_fixed_rect_struct_map;
+      for (const auto& [rect, net_fixed_rect] : fixed_rect_rtree) {
+        auto [net_idx, fixed_rect] = net_fixed_rect;
+        auto struct_iter = net_fixed_rect_struct_map.try_emplace(net_idx, RTUTIL.getString("fixed_rect(net_", net_idx, ")")).first;
+        GPBoundary gp_boundary;
+        gp_boundary.set_data_type(static_cast<int32_t>(GPDataType::kShape));
+        gp_boundary.set_rect(fixed_rect->get_real_rect());
+        gp_boundary.set_layer_idx(is_routing ? RTGP.getGDSIdxByRouting(layer_idx) : RTGP.getGDSIdxByCut(layer_idx));
+        struct_iter->second.push(gp_boundary);
+      }
+      for (auto& [net_idx, fixed_rect_struct] : net_fixed_rect_struct_map) {
         gp_gds.addStruct(fixed_rect_struct);
       }
     }
   }
 
   // access_point
-  for (auto& [net_idx, access_point_set] : RTDM.getNetAccessPointMap(die)) {
-    GPStruct access_point_struct(RTUTIL.getString("access_point(net_", net_idx, ")"));
-    for (AccessPoint* access_point : access_point_set) {
-      int32_t x = access_point->get_real_x();
-      int32_t y = access_point->get_real_y();
+  for (ERNet& er_net : er_model.get_er_net_list()) {
+    GPStruct access_point_struct(RTUTIL.getString("access_point(net_", er_net.get_net_idx(), ")"));
+    for (ERPin& er_pin : er_net.get_er_pin_list()) {
+      AccessPoint& access_point = er_pin.get_access_point();
+      int32_t x = access_point.get_real_x();
+      int32_t y = access_point.get_real_y();
 
       GPBoundary access_point_boundary;
-      access_point_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(access_point->get_layer_idx()));
+      access_point_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(access_point.get_layer_idx()));
       access_point_boundary.set_data_type(static_cast<int32_t>(GPDataType::kAccessPoint));
       access_point_boundary.set_rect(x - point_size, y - point_size, x + point_size, y + point_size);
       access_point_struct.push(access_point_boundary);
@@ -3617,9 +3690,10 @@ void EarlyRouter::debugPlotERModel(ERModel& er_model, std::string flag)
   }
 
   // routing result
-  for (auto& [net_idx, segment_set] : RTDM.getNetGlobalResultMap(die)) {
+  for (auto& [net_idx, segment_set] : er_model.get_net_global_result_map()) {
     GPStruct global_result_struct(RTUTIL.getString("global_result(net_", net_idx, ")"));
-    for (Segment<LayerCoord>* segment : segment_set) {
+    for (Segment<LayerCoord>& segment_value : segment_set) {
+      Segment<LayerCoord>* segment = &segment_value;
       for (NetShape& net_shape : RTDM.getNetGlobalShapeList(net_idx, *segment)) {
         GPBoundary gp_boundary;
         gp_boundary.set_data_type(static_cast<int32_t>(GPDataType::kGlobalPath));
@@ -3636,10 +3710,10 @@ void EarlyRouter::debugPlotERModel(ERModel& er_model, std::string flag)
   }
 
   // routing result
-  for (auto& [net_idx, segment_set] : RTDM.getNetDetailedResultMap(die)) {
+  for (auto& [net_idx, segment_list] : er_model.get_net_detailed_result_map()) {
     GPStruct detailed_result_struct(RTUTIL.getString("detailed_result(net_", net_idx, ")"));
-    for (Segment<LayerCoord>* segment : segment_set) {
-      for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, *segment)) {
+    for (Segment<LayerCoord>& segment : segment_list) {
+      for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, segment)) {
         GPBoundary gp_boundary;
         gp_boundary.set_data_type(static_cast<int32_t>(GPDataType::kDetailedPath));
         gp_boundary.set_rect(net_shape.get_rect());
@@ -3655,13 +3729,13 @@ void EarlyRouter::debugPlotERModel(ERModel& er_model, std::string flag)
   }
 
   // routing patch
-  for (auto& [net_idx, patch_set] : RTDM.getNetDetailedPatchMap(die)) {
+  for (auto& [net_idx, patch_list] : er_model.get_net_detailed_patch_map()) {
     GPStruct detailed_patch_struct(RTUTIL.getString("detailed_patch(net_", net_idx, ")"));
-    for (EXTLayerRect* patch : patch_set) {
+    for (EXTLayerRect& patch : patch_list) {
       GPBoundary gp_boundary;
       gp_boundary.set_data_type(static_cast<int32_t>(GPDataType::kPatch));
-      gp_boundary.set_rect(patch->get_real_rect());
-      gp_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(patch->get_layer_idx()));
+      gp_boundary.set_rect(patch.get_real_rect());
+      gp_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(patch.get_layer_idx()));
       detailed_patch_struct.push(gp_boundary);
     }
     gp_gds.addStruct(detailed_patch_struct);

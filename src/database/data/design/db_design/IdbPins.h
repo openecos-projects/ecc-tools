@@ -32,7 +32,9 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include <iostream>
+#include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "../../../basic/geometry/IdbGeometry.h"
@@ -166,7 +168,12 @@ class IdbPins
   void checkPins();
 
  private:
+  static constexpr size_t kPinRefIndexThreshold = 32;
+
+  void update_pin_ref_index(IdbPin* pin);
+
   std::vector<IdbPin*> _pin_list;
+  std::unique_ptr<std::unordered_set<IdbPin*>> _pin_ref_index;
 };
 
 }  // namespace idb

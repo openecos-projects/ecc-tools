@@ -29,7 +29,7 @@
 #include "FormatUtils.hh"
 #include "PathUtils.hh"
 #include "StringUtils.hh"
-#include "log/Log.hh"
+#include "Logger.hpp"
 #include "model/PlotSpefGdsType.hh"
 #include "model/PlotSpefModel.hh"
 #include "model/PlotSpefVisibility.hh"
@@ -310,7 +310,7 @@ auto LypWriter::write(const Model& model,
       ".lyp");
   std::ofstream os(lyp_file);
   if (!os.is_open()) {
-    LOG_ERROR << "plot_spef failed: cannot open LYP output file " << lyp_file.string();
+    RCXLOG.warn(Loc::current(), "plot_spef failed: cannot open LYP output file ", lyp_file.string());
     return false;
   }
 
@@ -322,7 +322,7 @@ auto LypWriter::write(const Model& model,
   }
   os << "</layer-properties>\n";
 
-  LOG_INFO << "plot_spef wrote LYP to " << lyp_file.string();
+  RCXLOG.info(Loc::current(), "plot_spef wrote LYP to ", lyp_file.string());
   return os.good();
 }
 

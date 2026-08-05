@@ -47,8 +47,7 @@ class KMeans
   ~KMeans() = default;
 
   template <typename PointGetter>
-  auto run(const std::vector<Value>& values, std::size_t k, PointGetter getter, std::size_t max_iter = 10,
-           double converge_threshold = 1.0) const -> Result
+  auto run(const std::vector<Value>& values, std::size_t k, PointGetter getter, std::size_t max_iter = 10, double converge_threshold = 1.0) const -> Result
   {
     Result result;
     if (values.empty() || k == 0) {

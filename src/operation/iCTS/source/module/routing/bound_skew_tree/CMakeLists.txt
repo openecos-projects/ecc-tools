@@ -7,7 +7,7 @@ add_library(
   ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BottomUpMergeJoining.cc
   ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BoundSkewTree.cc
   ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BoundSkewTreeImpl.cc
-  ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BstPipeline.cc
+  ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/BSTPipeline.cc
   ${ICTS_MODULE_ROUTING}/bound_skew_tree/algorithm/TopDownEmbedding.cc
   ${ICTS_MODULE_ROUTING}/bound_skew_tree/clock_tree_conversion/BSTRouterBinaryTopology.cc
   ${ICTS_MODULE_ROUTING}/bound_skew_tree/clock_tree_conversion/BSTRouterExport.cc
@@ -21,10 +21,10 @@ add_library(
 target_link_libraries(
   icts_source_module_routing_bst
   PRIVATE
-  icts_source_database_routing
-  icts_source_database_spatial
-  icts_source_utils_geometry
-  log
+  icts_source_data_manager_routing
+  icts_source_data_manager_spatial
+  icts_source_toolkit_geometry
+  icts_source_toolkit_logger
 )
 
 target_include_directories(

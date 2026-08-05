@@ -31,6 +31,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "data_service.h"
 
 namespace idb {
@@ -63,11 +64,11 @@ IdbDataServiceResult IdbDataService::LayoutFileWriteInit(const char* folder_name
   FILE* file = fopen(test_file.c_str(), "wb");
 
   if (file == nullptr) {
-    std::cout << "Can not create layout data file ( " << folder_name << " )" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Can not create layout data file ( ", folder_name, " )");
 
     return IdbDataServiceResult::kServiceFailed;
   } else {
-    std::cout << "Create layout data file success ( " << folder_name << " )" << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Create layout data file success ( ", folder_name, " )");
   }
 
   fclose(file);
@@ -86,11 +87,11 @@ IdbDataServiceResult IdbDataService::LayoutFileReadInit(const char* folder_name)
   file = fopen(test_file.c_str(), "rb");
 
   if (file == nullptr) {
-    std::cout << "Can not open layout data file ( " << folder_name << " )" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Can not open layout data file ( ", folder_name, " )");
 
     return IdbDataServiceResult::kServiceFailed;
   } else {
-    std::cout << "Open layout data file success ( " << folder_name << " )" << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Open layout data file success ( ", folder_name, " )");
   }
 
   fclose(file);

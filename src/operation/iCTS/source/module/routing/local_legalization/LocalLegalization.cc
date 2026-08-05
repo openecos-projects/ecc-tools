@@ -22,8 +22,6 @@
  */
 #include "LocalLegalization.hh"
 
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
@@ -34,7 +32,7 @@
 #include <utility>
 #include <vector>
 
-#include "Log.hh"
+#include "Logger.hh"
 #include "geometry/Geometry.hh"
 
 namespace icts {
@@ -54,8 +52,7 @@ struct HungarianColumnState
 };
 
 auto AdvanceAugmentingColumn(const std::vector<std::vector<long long>>& cost_matrix, std::vector<long long>& row_potential,
-                             std::vector<long long>& col_potential, const HungarianColumnState& column_state, std::size_t col_count,
-                             std::size_t& col0) -> void
+                             std::vector<long long>& col_potential, const HungarianColumnState& column_state, std::size_t col_count, std::size_t& col0) -> void
 {
   std::vector<long long> min_v(col_count + 1, std::numeric_limits<long long>::max());
   std::vector<bool> used(col_count + 1, false);
@@ -97,8 +94,7 @@ auto AdvanceAugmentingColumn(const std::vector<std::vector<long long>>& cost_mat
   }
 }
 
-auto ApplyAugmentingPath(std::vector<std::size_t>& matched_row_by_col, const std::vector<std::size_t>& predecessor_col_by_col,
-                         std::size_t col0) -> void
+auto ApplyAugmentingPath(std::vector<std::size_t>& matched_row_by_col, const std::vector<std::size_t>& predecessor_col_by_col, std::size_t col0) -> void
 {
   while (true) {
     const std::size_t prev_col = predecessor_col_by_col.at(col0);
@@ -162,7 +158,7 @@ auto LocalLegalization::legalize(const Problem& problem, const Config& config) -
   Output result;
   result.legalized_points = problem.movable_points;
   if (problem.movable_points.empty()) {
-    LOG_WARNING << "LocalLegalization skipped: movable point set is empty.";
+    CTSLOG.warn(Loc::current(), "LocalLegalization skipped: movable point set is empty.");
     result.success = true;
     return result;
   }
@@ -186,7 +182,7 @@ auto LocalLegalization::legalize(const Problem& problem, const Config& config) -
     }
 
     if (!complete) {
-      LOG_WARNING << "LocalLegalization expansion round " << round << " generated incomplete candidate sets; retrying with wider search.";
+      CTSLOG.warn(Loc::current(), "LocalLegalization expansion round ", round, " generated incomplete candidate sets; retrying with wider search.");
       continue;
     }
 
@@ -200,24 +196,23 @@ auto LocalLegalization::legalize(const Problem& problem, const Config& config) -
   }
 
   if (config.failure_policy == FailurePolicy::kKeepOriginal) {
-    LOG_WARNING << "LocalLegalization failed to find a legal assignment; keeping original point locations.";
+    CTSLOG.warn(Loc::current(), "LocalLegalization failed to find a legal assignment; keeping original point locations.");
     result.legalized_points = problem.movable_points;
     return result;
   }
 
-  LOG_ERROR << "LocalLegalization failed to find a legal assignment.";
+  CTSLOG.warn(Loc::current(), "LocalLegalization failed to find a legal assignment.");
   return result;
 }
 
-auto LocalLegalization::legalize(std::vector<PointType>& movable_points, const std::vector<PointType>& fixed_points,
-                                 const RegionType& feasible_region, const RegionType& block_region) -> LocalLegalization::Output
+auto LocalLegalization::legalize(std::vector<PointType>& movable_points, const std::vector<PointType>& fixed_points, const RegionType& feasible_region,
+                                 const RegionType& block_region) -> LocalLegalization::Output
 {
   return legalize(movable_points, fixed_points, feasible_region, block_region, Config{});
 }
 
-auto LocalLegalization::legalize(std::vector<PointType>& movable_points, const std::vector<PointType>& fixed_points,
-                                 const RegionType& feasible_region, const RegionType& block_region, const Config& config)
-    -> LocalLegalization::Output
+auto LocalLegalization::legalize(std::vector<PointType>& movable_points, const std::vector<PointType>& fixed_points, const RegionType& feasible_region,
+                                 const RegionType& block_region, const Config& config) -> LocalLegalization::Output
 {
   Problem problem;
   problem.movable_points = movable_points;
@@ -232,9 +227,8 @@ auto LocalLegalization::legalize(std::vector<PointType>& movable_points, const s
   return result;
 }
 
-auto LocalLegalization::generateCandidates(const PointType& origin, const RegionType& legal_region,
-                                           const std::vector<PointType>& fixed_points, std::size_t candidate_budget,
-                                           int local_search_radius) -> std::vector<LocalLegalization::CandidateSite>
+auto LocalLegalization::generateCandidates(const PointType& origin, const RegionType& legal_region, const std::vector<PointType>& fixed_points,
+                                           std::size_t candidate_budget, int local_search_radius) -> std::vector<LocalLegalization::CandidateSite>
 {
   std::vector<CandidateSite> candidates;
   candidates.reserve(candidate_budget);
@@ -283,9 +277,8 @@ auto LocalLegalization::generateCandidates(const PointType& origin, const Region
   return candidates;
 }
 
-auto LocalLegalization::enumerateProjectedNeighbors(const PointType& seed, const RegionType& legal_region,
-                                                    const std::vector<PointType>& fixed_points, int max_radius,
-                                                    std::size_t candidate_budget) -> std::vector<LocalLegalization::CandidateSite>
+auto LocalLegalization::enumerateProjectedNeighbors(const PointType& seed, const RegionType& legal_region, const std::vector<PointType>& fixed_points,
+                                                    int max_radius, std::size_t candidate_budget) -> std::vector<LocalLegalization::CandidateSite>
 {
   std::vector<CandidateSite> candidates;
   candidates.reserve(candidate_budget);
@@ -303,9 +296,8 @@ auto LocalLegalization::enumerateProjectedNeighbors(const PointType& seed, const
   return candidates;
 }
 
-auto LocalLegalization::enumerateBoundaryBreakpoints(const PointType& origin, const RegionType& legal_region,
-                                                     const std::vector<PointType>& fixed_points, std::size_t candidate_budget)
-    -> std::vector<LocalLegalization::CandidateSite>
+auto LocalLegalization::enumerateBoundaryBreakpoints(const PointType& origin, const RegionType& legal_region, const std::vector<PointType>& fixed_points,
+                                                     std::size_t candidate_budget) -> std::vector<LocalLegalization::CandidateSite>
 {
   std::vector<CandidateSite> candidates;
   candidates.reserve(candidate_budget);
@@ -331,8 +323,7 @@ auto LocalLegalization::enumerateBoundaryBreakpoints(const PointType& origin, co
   return candidates;
 }
 
-auto LocalLegalization::solveAssignment(const std::vector<PointType>& movable_points,
-                                        const std::vector<std::vector<CandidateSite>>& candidate_sets)
+auto LocalLegalization::solveAssignment(const std::vector<PointType>& movable_points, const std::vector<std::vector<CandidateSite>>& candidate_sets)
     -> std::vector<LocalLegalization::PointType>
 {
   if (movable_points.empty()) {
@@ -381,8 +372,7 @@ auto LocalLegalization::solveAssignment(const std::vector<PointType>& movable_po
   return legalized_points;
 }
 
-auto LocalLegalization::computeTotalDisplacement(const std::vector<PointType>& original_points,
-                                                 const std::vector<PointType>& legalized_points) -> long long
+auto LocalLegalization::computeTotalDisplacement(const std::vector<PointType>& original_points, const std::vector<PointType>& legalized_points) -> long long
 {
   long long total_displacement = 0;
   const auto count = std::min(original_points.size(), legalized_points.size());

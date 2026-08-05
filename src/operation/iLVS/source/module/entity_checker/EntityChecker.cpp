@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "EntityChecker.hpp"
 
+#include "ECSummary.hpp"
 #include "LVSHeader.hpp"
 #include "Logger.hpp"
 #include "Utility.hpp"
@@ -54,13 +55,11 @@ void EntityChecker::check()
   Monitor monitor;
   LVSLOG.info(Loc::current(), "Starting...");
 
-  Database& database = LVSDM.getDatabase();
-  database.get_summary().ec_summary.reset();
-
   ECModel ec_model = initECModel();
   checkIO(ec_model);
   checkInstance(ec_model);
   checkNet(ec_model);
+  updateSummary(ec_model);
 
   LVSLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -117,26 +116,23 @@ bool EntityChecker::isPowerGroundIO(const DesignData& design_data, const std::st
 
 void EntityChecker::checkIO(ECModel& ec_model)
 {
-  ECSummary& ec_summary = LVSDM.getDatabase().get_summary().ec_summary;
   std::vector<std::string>& netlist_io_name_list = ec_model.get_netlist_io_name_list();
   std::vector<std::string>& def_io_name_list = ec_model.get_def_io_name_list();
+  std::vector<Violation>& violation_list = ec_model.get_violation_list();
 
-  ec_summary.netlist_io_num = netlist_io_name_list.size();
-  ec_summary.def_io_num = def_io_name_list.size();
   std::vector<std::string> missing_io_name_list = getDifference(netlist_io_name_list, def_io_name_list);
   std::vector<std::string> unexpected_io_name_list = getDifference(def_io_name_list, netlist_io_name_list);
-  ec_summary.io_difference_num = missing_io_name_list.size() + unexpected_io_name_list.size();
   for (std::string& io_terminal_name : missing_io_name_list) {
     Violation violation;
     violation.set_violation_type(ViolationType::kIO);
     violation.get_terminal_name_list().push_back(LVSUTIL.getString("NETLIST/", io_terminal_name));
-    ec_summary.violation_list.push_back(std::move(violation));
+    violation_list.push_back(std::move(violation));
   }
   for (std::string& io_terminal_name : unexpected_io_name_list) {
     Violation violation;
     violation.set_violation_type(ViolationType::kIO);
     violation.get_terminal_name_list().push_back(LVSUTIL.getString("DEF/", io_terminal_name));
-    ec_summary.violation_list.push_back(std::move(violation));
+    violation_list.push_back(std::move(violation));
   }
 }
 
@@ -151,26 +147,23 @@ std::vector<std::string> EntityChecker::getDifference(const std::vector<std::str
 
 void EntityChecker::checkInstance(ECModel& ec_model)
 {
-  ECSummary& ec_summary = LVSDM.getDatabase().get_summary().ec_summary;
   std::vector<std::string>& netlist_instance_name_list = ec_model.get_netlist_instance_name_list();
   std::vector<std::string>& def_instance_name_list = ec_model.get_def_instance_name_list();
+  std::vector<Violation>& violation_list = ec_model.get_violation_list();
 
-  ec_summary.netlist_instance_num = netlist_instance_name_list.size();
-  ec_summary.def_instance_num = def_instance_name_list.size();
   std::vector<std::string> missing_instance_name_list = getDifference(netlist_instance_name_list, def_instance_name_list);
   std::vector<std::string> unexpected_instance_name_list = getDifference(def_instance_name_list, netlist_instance_name_list);
-  ec_summary.instance_difference_num = missing_instance_name_list.size() + unexpected_instance_name_list.size();
   for (std::string& instance_name : missing_instance_name_list) {
     Violation violation;
     violation.set_violation_type(ViolationType::kInstance);
     violation.set_instance_name(LVSUTIL.getString("NETLIST/", instance_name));
-    ec_summary.violation_list.push_back(std::move(violation));
+    violation_list.push_back(std::move(violation));
   }
   for (std::string& instance_name : unexpected_instance_name_list) {
     Violation violation;
     violation.set_violation_type(ViolationType::kInstance);
     violation.set_instance_name(LVSUTIL.getString("DEF/", instance_name));
-    ec_summary.violation_list.push_back(std::move(violation));
+    violation_list.push_back(std::move(violation));
   }
 }
 
@@ -179,28 +172,25 @@ void EntityChecker::checkNet(ECModel& ec_model)
   Database& database = LVSDM.getDatabase();
   NetlistData& netlist_data = database.get_netlist_data();
   DefData& def_data = database.get_def_data();
-  ECSummary& ec_summary = LVSDM.getDatabase().get_summary().ec_summary;
   std::vector<std::string>& netlist_net_name_list = ec_model.get_netlist_net_name_list();
   std::vector<std::string>& def_net_name_list = ec_model.get_def_net_name_list();
+  std::vector<Violation>& violation_list = ec_model.get_violation_list();
 
-  ec_summary.netlist_net_num = netlist_net_name_list.size();
-  ec_summary.def_net_num = def_net_name_list.size();
   std::vector<std::string> missing_net_name_list = getDifference(netlist_net_name_list, def_net_name_list);
   std::vector<std::string> unexpected_net_name_list = getDifference(def_net_name_list, netlist_net_name_list);
-  ec_summary.net_difference_num = missing_net_name_list.size() + unexpected_net_name_list.size();
   for (std::string& net_name : missing_net_name_list) {
     Violation violation;
     violation.set_violation_type(ViolationType::kNet);
     violation.set_net_name(LVSUTIL.getString("NETLIST/", net_name));
     violation.set_terminal_name_list(netlist_data.get_net_map().at(net_name).get_terminal_name_list());
-    ec_summary.violation_list.push_back(std::move(violation));
+    violation_list.push_back(std::move(violation));
   }
   for (std::string& net_name : unexpected_net_name_list) {
     Violation violation;
     violation.set_violation_type(ViolationType::kNet);
     violation.set_net_name(LVSUTIL.getString("DEF/", net_name));
     violation.set_terminal_name_list(def_data.get_net_map().at(net_name).get_terminal_name_list());
-    ec_summary.violation_list.push_back(std::move(violation));
+    violation_list.push_back(std::move(violation));
   }
   for (std::string& net_name : netlist_net_name_list) {
     auto def_net_iter = def_data.get_net_map().find(net_name);
@@ -213,7 +203,6 @@ void EntityChecker::checkNet(ECModel& ec_model)
     if (netlist_terminal_name_list == def_terminal_name_list) {
       continue;
     }
-    ec_summary.net_difference_num++;
     Violation violation;
     violation.set_violation_type(ViolationType::kNet);
     violation.set_net_name(net_name);
@@ -223,8 +212,33 @@ void EntityChecker::checkNet(ECModel& ec_model)
     for (std::string& terminal_name : getDifference(def_terminal_name_list, netlist_terminal_name_list)) {
       violation.get_terminal_name_list().push_back(LVSUTIL.getString("DEF/", terminal_name));
     }
-    ec_summary.violation_list.push_back(std::move(violation));
+    violation_list.push_back(std::move(violation));
   }
+}
+
+void EntityChecker::updateSummary(ECModel& ec_model)
+{
+  ECSummary& ec_summary = LVSDM.getDatabase().get_summary().ec_summary;
+  ec_summary.reset();
+
+  ec_summary.netlist_io_num = ec_model.get_netlist_io_name_list().size();
+  ec_summary.def_io_num = ec_model.get_def_io_name_list().size();
+  ec_summary.netlist_instance_num = ec_model.get_netlist_instance_name_list().size();
+  ec_summary.def_instance_num = ec_model.get_def_instance_name_list().size();
+  ec_summary.netlist_net_num = ec_model.get_netlist_net_name_list().size();
+  ec_summary.def_net_num = ec_model.get_def_net_name_list().size();
+
+  std::vector<Violation>& violation_list = ec_model.get_violation_list();
+  for (Violation& violation : violation_list) {
+    if (violation.get_violation_type() == ViolationType::kIO) {
+      ec_summary.io_difference_num++;
+    } else if (violation.get_violation_type() == ViolationType::kInstance) {
+      ec_summary.instance_difference_num++;
+    } else if (violation.get_violation_type() == ViolationType::kNet) {
+      ec_summary.net_difference_num++;
+    }
+  }
+  ec_summary.violation_list = std::move(violation_list);
 }
 
 // private

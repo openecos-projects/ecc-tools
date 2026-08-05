@@ -27,6 +27,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "idm.h"
 #include "tool_manager.h"
 
@@ -261,7 +262,7 @@ IdbInstance* DataManager::getIoCellByIoPin(IdbPin* io_pin)
 {
   IdbNet* net = io_pin->get_net();
   if (net == nullptr) {
-    std::cout << "Error : can not find net for IO pin " << io_pin->get_pin_name() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : can not find net for IO pin ", io_pin->get_pin_name());
     return nullptr;
   }
 

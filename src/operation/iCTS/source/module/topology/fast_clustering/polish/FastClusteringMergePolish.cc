@@ -55,8 +55,8 @@ auto MergeDrafts(ClusterDraft& target, ClusterDraft& source, const std::vector<L
 
 }  // namespace
 
-auto MergeDraftsIfUseful(std::size_t cluster_id, std::vector<ClusterDraft>& clusters, const std::vector<LoadEntry>& entries,
-                         const ClusterConfig& config, const NeighborGraph* neighbor_graph) -> bool
+auto MergeDraftsIfUseful(std::size_t cluster_id, std::vector<ClusterDraft>& clusters, const std::vector<LoadEntry>& entries, const ClusterConfig& config,
+                         const NeighborGraph* neighbor_graph) -> bool
 {
   const auto aggregate = CalcDraftAggregate(clusters);
   const auto before_target_proxy = CalcMeanRoutingCapProxy(aggregate);
@@ -73,8 +73,7 @@ auto MergeDraftsIfUseful(std::size_t cluster_id, std::vector<ClusterDraft>& clus
     }
 
     const auto after_count = aggregate.active_count > 1U ? aggregate.active_count - 1U : aggregate.active_count;
-    const auto after_total_proxy
-        = aggregate.total_routing_cap_proxy - cluster.routing_cap_proxy - neighbor.routing_cap_proxy + merged.routing_cap_proxy;
+    const auto after_total_proxy = aggregate.total_routing_cap_proxy - cluster.routing_cap_proxy - neighbor.routing_cap_proxy + merged.routing_cap_proxy;
     const auto after_target_proxy = after_count == 0U ? 0.0 : after_total_proxy / static_cast<double>(after_count);
     const auto separate_score = PairObjective(cluster, neighbor, config, before_target_proxy, kMergeRoutingCapBalanceWeight);
     const auto merged_score = DraftObjective(merged, config, after_target_proxy, kMergeRoutingCapBalanceWeight);

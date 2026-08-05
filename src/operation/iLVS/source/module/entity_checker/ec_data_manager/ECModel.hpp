@@ -17,6 +17,7 @@
 #pragma once
 
 #include "LVSHeader.hpp"
+#include "Violation.hpp"
 
 namespace ilvs {
 
@@ -32,6 +33,7 @@ class ECModel
   std::vector<std::string>& get_def_instance_name_list() { return _def_instance_name_list; }
   std::vector<std::string>& get_netlist_net_name_list() { return _netlist_net_name_list; }
   std::vector<std::string>& get_def_net_name_list() { return _def_net_name_list; }
+  std::vector<Violation>& get_violation_list() { return _violation_list; }
   // const getter
   const std::vector<std::string>& get_netlist_io_name_list() const { return _netlist_io_name_list; }
   const std::vector<std::string>& get_def_io_name_list() const { return _def_io_name_list; }
@@ -39,6 +41,7 @@ class ECModel
   const std::vector<std::string>& get_def_instance_name_list() const { return _def_instance_name_list; }
   const std::vector<std::string>& get_netlist_net_name_list() const { return _netlist_net_name_list; }
   const std::vector<std::string>& get_def_net_name_list() const { return _def_net_name_list; }
+  const std::vector<Violation>& get_violation_list() const { return _violation_list; }
   // setter
   void set_netlist_io_name_list(const std::vector<std::string>& netlist_io_name_list)
   {
@@ -66,6 +69,7 @@ class ECModel
   std::vector<std::string> _def_instance_name_list;
   std::vector<std::string> _netlist_net_name_list;
   std::vector<std::string> _def_net_name_list;
+  std::vector<Violation> _violation_list;
 };
 
 }  // namespace ilvs

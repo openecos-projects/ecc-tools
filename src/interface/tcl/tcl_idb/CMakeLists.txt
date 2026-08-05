@@ -1,17 +1,17 @@
 AUX_SOURCE_DIRECTORY(./ TCL_IDB_SRC)
 
-add_library(tcl_idb 
+add_library(tcl_idb
     ${TCL_IDB_SRC}
 )
 
-target_link_libraries(tcl_idb 
+target_link_libraries(tcl_idb
     PUBLIC
         tool_manager
         tcl
-        str
         idm
         file_manager_db
-        ieda_report
+        ecc_report
+        ecc_logger
 )
 
 target_include_directories(tcl_idb

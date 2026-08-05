@@ -24,9 +24,7 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 #include <optional>
-#include <string>
 #include <vector>
 
 #include "Point.hh"
@@ -36,7 +34,6 @@
 namespace icts {
 
 class Pin;
-class SchemaWriter;
 enum class TopologyGenLoadCountKind
 {
   kSink,
@@ -46,19 +43,13 @@ enum class TopologyGenLoadCountKind
 struct TopologyGenInput
 {
   std::optional<Point<int>> fixed_root_location = std::nullopt;
-  int32_t dbu_per_um = 1;
-  TopologyGenLoadCountKind load_count_kind = TopologyGenLoadCountKind::kSink;
-  std::string clock_name;
-  std::string clock_net_name;
-  std::string sink_domain;
-  std::string stage;
-  SchemaWriter* reporter = nullptr;
 };
 
 struct TopologyGenConfig
 {
   BiPartitionConfig partition_config;
   std::optional<unsigned> target_depth = std::nullopt;
+  std::size_t branching_factor = 0U;
 };
 
 class TopologyGen
@@ -72,6 +63,7 @@ class TopologyGen
   ~TopologyGen() = default;
 
   static auto build(const std::vector<Pin*>& loads, const Input& input, const Config& config) -> Tree;
+  static auto resolveBranchingFactor(std::size_t max_leaf_load_count) -> std::size_t;
 
  private:
   struct BuildCursor
@@ -80,15 +72,12 @@ class TopologyGen
     int depth = 0;
   };
 
-  static auto reportLoadDistribution(SchemaWriter* reporter, const std::vector<Pin*>& loads, LoadCountKind load_count_kind,
-                                     int32_t dbu_per_um) -> void;
-  static auto reportRootToLeafLengths(SchemaWriter* reporter, const Tree& tree, int32_t dbu_per_um) -> void;
-  static auto calcMaxDepth(std::size_t load_count) -> unsigned;
-  static auto calcLeafCount(std::size_t load_count) -> std::size_t;
+  static auto calcMaxDepth(std::size_t load_count, std::size_t branching_factor) -> unsigned;
+  static auto calcLeafCount(std::size_t load_count, std::size_t branching_factor) -> std::size_t;
   static auto buildWithConfig(const std::vector<Pin*>& loads, const Input& input, const Config& config) -> Tree;
-  static auto buildFullTree(Tree& tree, const BuildCursor& cursor, int height) -> void;
-  static auto embedPositions(Tree& tree, std::size_t node, const std::vector<Pin*>& loads, std::size_t leaf_need,
-                             const BiPartitionConfig& config) -> void;
+  static auto buildFullTree(Tree& tree, const BuildCursor& cursor, int height, std::size_t branching_factor) -> void;
+  static auto embedPositions(Tree& tree, std::size_t node, const std::vector<Pin*>& loads, std::size_t leaf_need, const BiPartitionConfig& config,
+                             std::size_t branching_factor) -> void;
   static auto balanceTopology(Tree& tree, int min_x, int min_y, int max_x, int max_y, double topology_tolerance) -> void;
 };
 

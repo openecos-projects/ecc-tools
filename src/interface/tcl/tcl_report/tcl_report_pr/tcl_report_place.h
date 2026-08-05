@@ -17,11 +17,11 @@
 #pragma once
 
 #include "../../tcl_definition.h"
-#include "tcl/ScriptEngine.hh"
+#include "ScriptEngine.hh"
 
 namespace tcl {
 
-using ieda::TclCmd;
+using ecc::TclCmd;
 
 class CmdReportPlaceDistro : public TclCmd
 {

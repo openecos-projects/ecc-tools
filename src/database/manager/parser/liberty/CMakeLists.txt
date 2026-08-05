@@ -8,8 +8,9 @@ set(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -DNDEBUG")
 aux_source_directory(./ SRC)
 add_library(liberty ${SRC})
 
-target_link_libraries(liberty str log dl)
+target_link_libraries(liberty PUBLIC absl::btree absl::inlined_vector ecc_logger tcl dl)
 
-target_include_directories(liberty PUBLIC 
-    ${CMAKE_CURRENT_SOURCE_DIR} 
+target_include_directories(liberty PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${HOME_UTILITY}
     ${HOME_THIRDPARTY}/parser/liberty/)

@@ -37,8 +37,7 @@
 #include <vector>
 
 #include "def_service.h"
-#include "string/Str.hh"
-#include "verilog/VerilogParserRustC.hh"
+#include "verilog/VerilogReader.hh"
 
 namespace idb {
 
@@ -52,10 +51,7 @@ class VerilogNetConcatExpr;
 class VerilogNetExpr;
 class VerilogNetIDExpr;
 class VerilogPortRefPortConnect;
-class VerilogReader;
-class RustVerilogReader;
 };  // namespace idb
-class RustVerilogModule;
 namespace idb {
 
 #define kVerilogSuccess 0
@@ -63,11 +59,11 @@ namespace idb {
 
 #define CLOCKS_PER_MS 1000
 
-class RustVerilogRead
+class VerilogRead
 {
  public:
-  RustVerilogRead(IdbDefService* def_service);
-  ~RustVerilogRead();
+  VerilogRead(IdbDefService* def_service);
+  ~VerilogRead();
 
   // getter
   IdbDefService* get_service() { return _def_service; }
@@ -90,8 +86,8 @@ class RustVerilogRead
  private:
   IdbDesign* _idb_design = nullptr;
   IdbDefService* _def_service = nullptr;
-  RustVerilogReader* _rust_verilog_reader = nullptr;
-  RustVerilogModule* _rust_top_module = nullptr;
+  VerilogReader* _verilog_reader = nullptr;
+  ParsedVerilogModule* _top_module = nullptr;
 };
 
 }  // namespace idb

@@ -1,3 +1,4 @@
+#include "utility/logger/Logger.hpp"
 #include "feature_manager.h"
 #include "idm.h"
 
@@ -209,10 +210,10 @@ int main(int argc, char** argv)
     regenerateMaps(workspace, generated_feature_dir);
     verifyReplay(workspace, generated_feature_dir);
   } catch (const std::exception& error) {
-    std::cerr << error.what() << "\n";
+    ECCLOG.warn(ecc::Loc::current(), error.what());
     return 1;
   }
 
-  std::cout << "map replay ok: " << generated_feature_dir << "\n";
+  ECCLOG.info(ecc::Loc::current(), "map replay ok: ", generated_feature_dir);
   return 0;
 }

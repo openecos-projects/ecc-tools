@@ -2,7 +2,6 @@ add_subdirectory(fixture)
 
 icts_add_test_executable(
   icts_test_module_characterization
-  PUBLIC_RUNTIME
   SOURCES
     ${ICTS_TEST}/module/characterization/BufferingPatternTest.cc
     ${ICTS_TEST}/module/characterization/SegmentJoinTest.cc
@@ -18,8 +17,8 @@ if(ICTS_BUILD_REALTECH_TESTS)
       ${ICTS_TEST}/module/characterization/CharacterizationRealTechSmokeTest.cc
     LIBS
       icts_test_module_characterization_fixture
-      icts_test_common_realtech_setup
-      icts_test_common_io
+      icts_test_data_manager_realtech_setup
+      icts_test_toolkit_io
   )
 
   target_compile_definitions(
@@ -45,8 +44,8 @@ if(ICTS_BUILD_REALTECH_TESTS AND ICTS_BUILD_SLOW_REALTECH_TESTS)
       ${ICTS_TEST}/module/characterization/CharacterizationRealTechPowerAccountingTest.cc
     LIBS
       icts_test_module_characterization_fixture
-      icts_test_common_realtech_setup
-      icts_test_common_io
+      icts_test_data_manager_realtech_setup
+      icts_test_toolkit_io
   )
 
   target_compile_definitions(

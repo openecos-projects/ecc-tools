@@ -55,6 +55,7 @@ class EntityChecker
                                          const std::vector<std::string>& second_name_list);
   void checkInstance(ECModel& ec_model);
   void checkNet(ECModel& ec_model);
+  void updateSummary(ECModel& ec_model);
 };
 
 }  // namespace ilvs

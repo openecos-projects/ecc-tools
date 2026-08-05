@@ -99,8 +99,7 @@ auto CalcBoundsCenterY(const Bounds& bounds) -> long long
   return (static_cast<long long>(bounds.min_y) + static_cast<long long>(bounds.max_y)) / 2LL;
 }
 
-auto ResolveBucketCount(std::size_t active_count, std::size_t max_candidate_count, long long span_x, long long span_y)
-    -> std::pair<std::size_t, std::size_t>
+auto ResolveBucketCount(std::size_t active_count, std::size_t max_candidate_count, long long span_x, long long span_y) -> std::pair<std::size_t, std::size_t>
 {
   const auto target_bucket_load = static_cast<double>(std::max<std::size_t>(max_candidate_count, 8U));
   const auto target_bucket_count = std::max(1.0, static_cast<double>(active_count) / target_bucket_load);
@@ -114,8 +113,8 @@ auto ResolveBucketCount(std::size_t active_count, std::size_t max_candidate_coun
   return {x_count, y_count};
 }
 
-auto ResolveBucketCoordinate(const ClusterSpatialPoint& point, long long min_x, long long min_y, long long span_x, long long span_y,
-                             std::size_t x_bucket_count, std::size_t y_bucket_count) -> BucketCoordinate
+auto ResolveBucketCoordinate(const ClusterSpatialPoint& point, long long min_x, long long min_y, long long span_x, long long span_y, std::size_t x_bucket_count,
+                             std::size_t y_bucket_count) -> BucketCoordinate
 {
   auto resolve_axis = [](long long value, long long min_value, long long span, std::size_t bucket_count) -> std::size_t {
     if (bucket_count <= 1U || span <= 0LL) {
@@ -136,9 +135,8 @@ auto BucketIndex(std::size_t x, std::size_t y, std::size_t y_bucket_count) -> st
   return x * y_bucket_count + y;
 }
 
-auto SelectNearestFromSpatialCandidates(std::size_t cluster_id, const std::vector<ClusterDraft>& clusters,
-                                        const std::vector<std::size_t>& candidate_ids, std::size_t max_candidate_count)
-    -> std::vector<std::size_t>
+auto SelectNearestFromSpatialCandidates(std::size_t cluster_id, const std::vector<ClusterDraft>& clusters, const std::vector<std::size_t>& candidate_ids,
+                                        std::size_t max_candidate_count) -> std::vector<std::size_t>
 {
   std::vector<NeighborCandidate> candidates;
   candidates.reserve(max_candidate_count);
@@ -178,8 +176,7 @@ auto FormatRatio(double value) -> std::string
   return stream.str();
 }
 
-auto BuildMergedDraft(const ClusterDraft& lhs, const ClusterDraft& rhs, const std::vector<LoadEntry>& entries, const ClusterConfig& config)
-    -> ClusterDraft
+auto BuildMergedDraft(const ClusterDraft& lhs, const ClusterDraft& rhs, const std::vector<LoadEntry>& entries, const ClusterConfig& config) -> ClusterDraft
 {
   std::vector<std::size_t> merged_entry_ids;
   merged_entry_ids.reserve(lhs.entry_ids.size() + rhs.entry_ids.size());
@@ -299,8 +296,7 @@ auto SelectNearestActiveNeighbors(std::size_t cluster_id, const std::vector<Clus
       if (active_neighbor_ids.size() == max_candidate_count) {
         break;
       }
-      if (neighbor_id < clusters.size() && neighbor_id != cluster_id && clusters.at(neighbor_id).active
-          && !clusters.at(neighbor_id).entry_ids.empty()) {
+      if (neighbor_id < clusters.size() && neighbor_id != cluster_id && clusters.at(neighbor_id).active && !clusters.at(neighbor_id).entry_ids.empty()) {
         active_neighbor_ids.push_back(neighbor_id);
       }
     }

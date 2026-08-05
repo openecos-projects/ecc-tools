@@ -27,8 +27,7 @@
 #include <type_traits>
 #include <vector>
 
-#include "common/data/TestDataGenerator.hh"
-#include "common/dataset/TestDataset.hh"
+#include "data_manager/design/fixture/data/TestDataGenerator.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenCaseFixture.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenScenario.hh"
 
@@ -56,17 +55,17 @@ constexpr std::array<double, 4> kQuadrantUnevenWeights = {0.5, 0.2, 0.3, 0.0};
 
 namespace detail {
 
-auto GenerateCase(const TopologyCase& test_case) -> GeneratedPins
+auto GenerateCase(const TopologyCase& test_case) -> data_manager::fixture::data::GeneratedPins
 {
-  const CanvasSize canvas{.width = test_case.width, .height = test_case.height};
+  const data_manager::fixture::data::CanvasSize canvas{.width = test_case.width, .height = test_case.height};
   switch (test_case.kind) {
     case DistKind::kNormal:
-      return common::data::MakeNormal(test_case.count, canvas, test_case.seed);
+      return data_manager::fixture::data::MakeNormal(test_case.count, canvas, test_case.seed);
     case DistKind::kMixture:
-      return common::data::MakeGaussianMixture(test_case.count, canvas, test_case.seed);
+      return data_manager::fixture::data::MakeGaussianMixture(test_case.count, canvas, test_case.seed);
     case DistKind::kQuadrants:
     default:
-      return common::data::MakeWeightedQuadrants(test_case.count, canvas, test_case.seed, test_case.quadrant_weights);
+      return data_manager::fixture::data::MakeWeightedQuadrants(test_case.count, canvas, test_case.seed, test_case.quadrant_weights);
   }
 }
 
@@ -87,12 +86,7 @@ auto BuildTopologyCases() -> std::vector<TopologyCase>
                    .width = kCanvasWidth,
                    .height = kCanvasHeight,
                    .seed = kSeedNormalLarge},
-      TopologyCase{.name = "mixture",
-                   .kind = DistKind::kMixture,
-                   .count = kMixtureCount,
-                   .width = kCanvasWidth,
-                   .height = kCanvasHeight,
-                   .seed = kSeedMixture},
+      TopologyCase{.name = "mixture", .kind = DistKind::kMixture, .count = kMixtureCount, .width = kCanvasWidth, .height = kCanvasHeight, .seed = kSeedMixture},
       TopologyCase{.name = "quadrant_one",
                    .kind = DistKind::kQuadrants,
                    .count = kQuadrantOneCount,

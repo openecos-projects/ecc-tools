@@ -27,6 +27,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "idm.h"
 
 #include <cassert>
@@ -119,10 +120,10 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
 {
   // std::vector<ContestParser::Instance*> inst_list;
   int i = 0;
-  printf("write_placement_back start!!! Db address is %p\n", this);
-  printf("write_placement_back start!!! idb_design address is %p\n", this->get_idb_design());
+  ECCLOG.info(ecc::Loc::current(), "write_placement_back start. Db address is ", this);
+  ECCLOG.info(ecc::Loc::current(), "write_placement_back start. idb_design address is ", this->get_idb_design());
   if (x == nullptr || y == nullptr || len <= 0) {
-    std::cout << "WriteBack placement finished!!" << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "WriteBack placement finished!!");
     return;
   }
   auto const& row_list = this->get_idb_layout()->get_rows()->get_row_list();
@@ -198,9 +199,9 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
     // flag = true;
   }
   // output hpwl
-  std::cout << "WriteBack placement finished!!" << std::endl;
-  // std::cout << "WriteBack double finished, Current Contest DB Total HPWL : " << contest_db->obtainTotalHPWL() <<
-  // std::endl;
+  ECCLOG.info(ecc::Loc::current(), "WriteBack placement finished!!");
+  // ECCLOG.info(ecc::Loc::current(), "WriteBack double finished, Current Contest DB Total HPWL: ",
+  //              contest_db->obtainTotalHPWL());
 
   return;
 }

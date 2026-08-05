@@ -24,6 +24,7 @@
 
 #include "tcl_util.h"
 
+#include "utility/logger/Logger.hpp"
 namespace tcl {
 namespace {
 
@@ -72,7 +73,7 @@ unsigned CmdCTSConfig::exec()
 
   const auto config_path_iter = config_map.find("-config_json_path");
   if (config_path_iter == config_map.end()) {
-    std::cerr << "CTS config update requires -config_json_path." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "CTS config update requires -config_json_path.");
     return 0;
   }
   const auto config_json_path = std::any_cast<std::string>(config_path_iter->second);

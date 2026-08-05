@@ -1,5 +1,4 @@
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
 
 #include <boost/archive/binary_iarchive.hpp>
@@ -13,6 +12,7 @@
 #include "EXTPlanarCoord.hpp"
 #include "PlanarRect.hpp"
 #include "WireNode.hpp"
+#include "utility/logger/Logger.hpp"
 #include "rt_serialize.hpp"
 #include "serialize.hpp"
 
@@ -120,8 +120,8 @@ TEST_F(SerializeTest, BoundingBox)
        << "}";
     return ss.str();
   };
-  DLOG(INFO) << "Origin:      " << str(box);
-  DLOG(INFO) << "Deserialized:" << str(deserialized);
+  ECCLOG.info(ecc::Loc::current(), "Origin:      ", str(box));
+  ECCLOG.info(ecc::Loc::current(), "Deserialized:", str(deserialized));
 }
 
 TEST_F(SerializeTest, GridMap_double)
@@ -130,7 +130,7 @@ TEST_F(SerializeTest, GridMap_double)
   int ysize = rnd();
   irt::GridMap<double> origin(xsize, ysize);
 
-  DLOG(INFO) << "generate random gridmap with x=" << xsize << " and y=" << ysize;
+  ECCLOG.info(ecc::Loc::current(), "generate random gridmap with x=", xsize, " and y=", ysize);
 
   for (int x = 0; x < xsize; ++x) {
     for (int y = 0; y < ysize; ++y) {
@@ -183,7 +183,7 @@ TEST_F(SerializeTest, TNode)
   };
   EXPECT_TRUE(dfs(dfs, ptr, &root));
 
-  DLOG(INFO) << "Checked " << cnt << " nodes for TNode";
+  ECCLOG.info(ecc::Loc::current(), "Checked ", cnt, " nodes for TNode");
 
   auto free = [](auto& freet, irt::TNode<int>* root) -> void {
     for (irt::TNode<int>* next : root->get_child_list()) {
@@ -201,8 +201,8 @@ TEST_F(SerializeTest, LayerRect)
 
   irt::LayerRect deserialized;
   iar >> deserialized;
-  DLOG(INFO) << "Generated Random LayerRect layer:" << rect.get_layer_idx();
-  DLOG(INFO) << "Deserialized LayerRect layer:" << deserialized.get_layer_idx();
+  ECCLOG.info(ecc::Loc::current(), "Generated Random LayerRect layer:", rect.get_layer_idx());
+  ECCLOG.info(ecc::Loc::current(), "Deserialized LayerRect layer:", deserialized.get_layer_idx());
   EXPECT_EQ(rect.get_layer_idx(), deserialized.get_layer_idx());
   EXPECT_EQ(rect.get_lb(), deserialized.get_lb());
 }
@@ -234,7 +234,7 @@ TEST_F(SerializeTest, SegmentGuide)
 
   EXPECT_EQ(segment.get_first(), deserialized.get_first());
   EXPECT_EQ(segment.get_second(), deserialized.get_second());
-  DLOG(INFO) << "Random segment first layer idx is " << deserialized.get_first().get_layer_idx();
+  ECCLOG.info(ecc::Loc::current(), "Random segment first layer idx is ", deserialized.get_first().get_layer_idx());
 }
 
 TEST_F(SerializeTest, LayerCoord)

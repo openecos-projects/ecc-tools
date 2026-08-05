@@ -29,20 +29,16 @@
 #include <optional>
 #include <queue>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
-#include "Array.hh"
-#include "BTreeMap.hh"
-#include "FlatMap.hh"
-#include "FlatSet.hh"
+#include "absl/container/btree_map.h"
+#include "absl/container/inlined_vector.h"
 #include "LibParserCpp.hh"
-#include "Vector.hh"
 #include "Config.hh"
 #include "Type.hh"
-#include "log/Log.hh"
-#include "string/Str.hh"
-#include "string/StrMap.hh"
+#include "utility/logger/Logger.hpp"
 
 namespace idb {
 
@@ -70,12 +66,12 @@ class LibObject
   LibObject() = default;
   virtual ~LibObject() = default;
 
-  virtual void addAxis(std::unique_ptr<LibAxis>&& axis) { LOG_FATAL << "not support"; }
-  virtual void set_template_variable1(const char*) { LOG_FATAL << "not support"; }
-  virtual void set_template_variable2(const char*) { LOG_FATAL << "not support"; }
-  virtual void set_template_variable3(const char*) { LOG_FATAL << "not support"; }
+  virtual void addAxis(std::unique_ptr<LibAxis>&& axis) { ECCLOG.error(ecc::Loc::current(), "not support"); }
+  virtual void set_template_variable1(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
+  virtual void set_template_variable2(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
+  virtual void set_template_variable3(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
 
-  virtual void set_template_variable4(const char*) { LOG_FATAL << "not support"; }
+  virtual void set_template_variable4(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
 
   virtual unsigned isLibertyPortBus() { return 0; }
 
@@ -173,7 +169,7 @@ class LibTable : public LibObject
 
   LibAxis& getAxis(unsigned int index);
 
-  Vector<std::unique_ptr<LibAxis>>& get_axes();
+  absl::InlinedVector<std::unique_ptr<LibAxis>, 64>& get_axes();
   auto getAxesSize() { return _axes.size(); }
 
   void addTableValue(std::unique_ptr<LibAttrValue> table_value) { _table_values.emplace_back(std::move(table_value)); }
@@ -195,7 +191,7 @@ class LibTable : public LibObject
   double driveResistance();
 
  private:
-  Vector<std::unique_ptr<LibAxis>> _axes;                    //!< May be zero, one, two, three axes.
+  absl::InlinedVector<std::unique_ptr<LibAxis>, 64> _axes;  //!< May be zero, one, two, three axes.
   std::vector<std::unique_ptr<LibAttrValue>> _table_values;  //!< The axis values.
   TableType _table_type;                                     //!< The table type.
 
@@ -326,25 +322,25 @@ class LibTableModel : public LibObject
   virtual LibTable* getTable(int index) = 0;
   virtual std::optional<double> gateDelay(TransType trans_type, double slew, double load)
   {
-    LOG_FATAL << "not support";
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
   virtual std::optional<double> gateDelaySigma(AnalysisMode mode, TransType trans_type, double slew, double load) { return 0.0; }
   virtual std::optional<double> gateSlew(TransType trans_type, double slew, double load)
   {
-    LOG_FATAL << "not support";
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
   virtual std::optional<double> gateSlewSigma(AnalysisMode mode, TransType trans_type, double slew, double load) { return 0.0; }
   virtual std::optional<double> gateCheckConstrain(TransType trans_type, double slew, double load)
   {
-    LOG_FATAL << "not support";
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
 
   virtual std::unique_ptr<LibCurrentData> gateOutputCurrent(TransType trans_type, double slew, double load)
   {
-    LOG_FATAL << "not support";
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return nullptr;
   }
 
@@ -352,7 +348,7 @@ class LibTableModel : public LibObject
 
   virtual double gatePower(TransType trans_type, double slew, std::optional<double> load)
   {
-    LOG_FATAL << "not support";
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
 
@@ -599,9 +595,9 @@ class LibPort : public LibObject
 
   void set_port_type(const char* port_type)
   {
-    if (Str::equal(port_type, "input")) {
+    if (std::string_view(port_type) == "input") {
       _port_type = LibertyPortType::kInput;
-    } else if (Str::equal(port_type, "output")) {
+    } else if (std::string_view(port_type) == "output") {
       _port_type = LibertyPortType::kOutput;
     } else {
       _port_type = LibertyPortType::kInOut;
@@ -640,7 +636,7 @@ class LibPort : public LibObject
 
   std::optional<double> _fanout_load;
 
-  Vector<std::unique_ptr<LibInternalPowerInfo>> _internal_powers;  //!< The internal power information.
+  absl::InlinedVector<std::unique_ptr<LibInternalPowerInfo>, 64> _internal_powers;  //!< The internal power information.
 
   FORBIDDEN_COPY(LibPort);
 };
@@ -723,7 +719,7 @@ class LibPortBus : public LibPort
   LibPort* operator[](int index) { return _ports.empty() ? this : _ports[index].get(); }
 
  private:
-  Vector<std::unique_ptr<LibPort>> _ports;  //!< The bus ports.
+  absl::InlinedVector<std::unique_ptr<LibPort>, 64> _ports;  //!< The bus ports.
   LibType* _bus_type = nullptr;
 
   FORBIDDEN_COPY(LibPortBus);
@@ -929,7 +925,7 @@ class LibArc : public LibObject
 
   std::unique_ptr<LibTableModel> _table_model;  //!< The arc timing model.
 
-  static BTreeMap<std::string, TimingType> _str_to_type;
+  static absl::btree_map<std::string, TimingType> _str_to_type;
 
   unsigned _is_disable_arc = 0;  //!< Forbidden arc.
 
@@ -964,7 +960,7 @@ class LibArcSet
   unsigned isTwoTypeSenseArcSet();
 
  private:
-  Vector<std::unique_ptr<LibArc>> _arcs;
+  absl::InlinedVector<std::unique_ptr<LibArc>, 64> _arcs;
 
   FORBIDDEN_COPY(LibArcSet);
 };
@@ -1041,7 +1037,7 @@ class LibPowerArcSet
   auto& get_power_arcs() { return _power_arcs; }
 
  private:
-  Vector<std::unique_ptr<LibPowerArc>> _power_arcs;
+  absl::InlinedVector<std::unique_ptr<LibPowerArc>, 64> _power_arcs;
 
   FORBIDDEN_COPY(LibPowerArcSet);
 };
@@ -1154,9 +1150,9 @@ class LibCell : public LibObject
   bool _is_clock_gating_integrated_cell = false;                      //!< The flag of the clock gate cell.
   std::vector<std::unique_ptr<LibLeakagePower>> _leakage_power_list;  //!< All leakage powers of the cell.
   std::vector<std::unique_ptr<LibPort>> _cell_ports;
-  StrMap<LibPort*> _str2ports;  //!< The cell ports.
+  std::map<std::string, LibPort*> _str2ports;  //!< The cell ports.
   std::vector<std::unique_ptr<LibPortBus>> _cell_port_buses;
-  StrMap<LibPortBus*> _str2portbuses;                             //!< The cell port buses.
+  std::map<std::string, LibPortBus*> _str2portbuses;              //!< The cell port buses.
   std::vector<std::unique_ptr<LibArcSet>> _cell_arcs;             //!< All timing arcs of the cell.
   std::vector<std::unique_ptr<LibPowerArcSet>> _cell_power_arcs;  //!< All power arcs of the cell.
 
@@ -1302,7 +1298,7 @@ class LibLutTableTemplate : public LibObject
 
   void set_template_variable1(const char* template_variable1) override {
     if(!_str2var.contains(template_variable1)){
-      std::cout << "not contain the template variable " <<std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "not contain the template variable ");
     }
     // DLOG_FATAL_IF(!_str2var.contains(template_variable1))
     //     << "not contain the template variable " << template_variable1;
@@ -1334,7 +1330,7 @@ class LibLutTableTemplate : public LibObject
   std::optional<Variable> _template_variable3;
   std::optional<Variable> _template_variable4;
 
-  Vector<std::unique_ptr<LibAxis>> _axes;  //!< May be zero, one, two, three axes.
+  absl::InlinedVector<std::unique_ptr<LibAxis>, 64> _axes;  //!< May be zero, one, two, three axes.
 
   FORBIDDEN_COPY(LibLutTableTemplate);
 };
@@ -1642,19 +1638,19 @@ class LibLibrary : public LibObject
  private:
   std::string _lib_name;
   std::vector<std::unique_ptr<LibCell>> _cells;  //!< The liberty cell, perserve the cell read order.
-  StrMap<LibCell*> _str2cell;
+  std::map<std::string, LibCell*> _str2cell;
 
-  Vector<std::unique_ptr<LibLutTableTemplate>> _lut_templates;  //!< The timing table lut template, preserve the
-                                                                //!< template order.
+  absl::InlinedVector<std::unique_ptr<LibLutTableTemplate>, 64> _lut_templates;  //!< The timing table lut template, preserve the
+                                                                                   //!< template order.
 
-  StrMap<LibLutTableTemplate*> _str2template;
+  std::map<std::string, LibLutTableTemplate*> _str2template;
 
-  Vector<std::unique_ptr<LibWireLoad>> _wire_loads;  //!< The wire load models.
-  StrMap<LibWireLoad*> _str2wireLoad;
+  absl::InlinedVector<std::unique_ptr<LibWireLoad>, 64> _wire_loads;  //!< The wire load models.
+  std::map<std::string, LibWireLoad*> _str2wireLoad;
 
-  Vector<std::unique_ptr<LibType>> _types;  //!< The lib type
+  absl::InlinedVector<std::unique_ptr<LibType>, 64> _types;  //!< The lib type
 
-  StrMap<LibType*> _str2type;
+  std::map<std::string, LibType*> _str2type;
 
   std::optional<std::string> _comment;
   std::optional<bool> _simulation;
@@ -1731,12 +1727,12 @@ class LibAttrValue
 
   virtual double getFloatValue()
   {
-    DLOG_FATAL << "This is unknown value.";
+    ECCLOG.error(ecc::Loc::current(), "This is unknown value.");
     return 0.0;
   }
   virtual const char* getStringValue()
   {
-    DLOG_FATAL << "This is unknown value.";
+    ECCLOG.error(ecc::Loc::current(), "This is unknown value.");
     return nullptr;
   }
 };

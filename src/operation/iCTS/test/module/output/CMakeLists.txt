@@ -1,0 +1,9 @@
+icts_add_test_executable(
+  icts_test_module_output
+  SOURCES
+    ${ICTS_TEST}/module/output/QORReportTest.cc
+    ${ICTS_TEST}/module/output/OutputTest.cc
+  LIBS
+    icts_source_module_output
+    icts_source_module_output_qor
+)

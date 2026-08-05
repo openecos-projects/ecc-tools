@@ -29,6 +29,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "utility/logger/Logger.hpp"
 #include "IdbUnits.h"
 
 namespace idb {
@@ -47,9 +48,7 @@ IdbUnits::IdbUnits()
 
 void IdbUnits::print()
 {
-  std::cout << "nanoseconds = " << _nanoseconds << " picofarads = " << _picofarads << " ohms = "
-            << " milliwatts = " << _milliwatts << " milliamps = " << _milliamps << " volts = " << _volts << " micron_dbu = " << _micron_dbu
-            << " megahertz = " << _megahertz << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "nanoseconds = ", _nanoseconds, " picofarads = ", _picofarads, " ohms = ", " milliwatts = ", _milliwatts, " milliamps = ", _milliamps, " volts = ", _volts, " micron_dbu = ", _micron_dbu, " megahertz = ", _megahertz);
 }
 
 }  // namespace idb

@@ -1,0 +1,9 @@
+icts_add_test_executable(
+  icts_test_module_optimization
+  SOURCES
+    ${ICTS_TEST}/module/optimization/OptimizationTargetSkewTest.cc
+  LIBS
+    icts_source_data_manager_config
+    icts_source_data_manager_design
+    icts_source_module_optimization_preparation
+)

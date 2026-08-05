@@ -183,8 +183,7 @@ class BoundSkewTreeImpl
   static constexpr double kHalfFactor = 0.5;
   using CostFunc = std::function<double(Area*, Area*)>;
 
-  BoundSkewTreeImpl(std::vector<std::unique_ptr<Area>> load_areas, const BSTRoutingConfig& parameters,
-                    const BSTRoutingTopologyMode& topology_mode);
+  BoundSkewTreeImpl(std::vector<std::unique_ptr<Area>> load_areas, const BSTRoutingConfig& parameters, const BSTRoutingTopologyMode& topology_mode);
   BoundSkewTreeImpl(std::vector<std::unique_ptr<Area>> owned_areas, Area* root, const BSTRoutingConfig& parameters);
 
   BoundSkewTreeImpl(const BoundSkewTreeImpl&) = delete;
@@ -233,22 +232,10 @@ class BoundSkewTreeImpl
   auto joiningCornerPoint(const size_t& end_side) const -> const Point& { return _joining_corner.forEnd(end_side); }
   auto feasibleMergeSegmentPoints(const size_t& end_side) -> Points& { return _feasible_merge_segment_points.forEnd(end_side); }
   auto feasibleMergeSegmentPoints(const size_t& end_side) const -> const Points& { return _feasible_merge_segment_points.forEnd(end_side); }
-  auto joiningSegmentPoint(const size_t& side, const size_t& point_index) -> Point&
-  {
-    return pointAt(joiningSegmentPoints(side), point_index);
-  }
-  auto joiningSegmentPoint(const size_t& side, const size_t& point_index) const -> const Point&
-  {
-    return pointAt(joiningSegmentPoints(side), point_index);
-  }
-  auto joiningRegionPoint(const size_t& side, const size_t& point_index) -> Point&
-  {
-    return pointAt(joiningRegionPoints(side), point_index);
-  }
-  auto joiningRegionPoint(const size_t& side, const size_t& point_index) const -> const Point&
-  {
-    return pointAt(joiningRegionPoints(side), point_index);
-  }
+  auto joiningSegmentPoint(const size_t& side, const size_t& point_index) -> Point& { return pointAt(joiningSegmentPoints(side), point_index); }
+  auto joiningSegmentPoint(const size_t& side, const size_t& point_index) const -> const Point& { return pointAt(joiningSegmentPoints(side), point_index); }
+  auto joiningRegionPoint(const size_t& side, const size_t& point_index) -> Point& { return pointAt(joiningRegionPoints(side), point_index); }
+  auto joiningRegionPoint(const size_t& side, const size_t& point_index) const -> const Point& { return pointAt(joiningRegionPoints(side), point_index); }
 
  private:
   size_t _id = 0;

@@ -22,8 +22,6 @@
  */
 #include "CBSRouter.hh"
 
-#include <glog/logging.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <limits>
@@ -34,7 +32,7 @@
 #include <utility>
 #include <vector>
 
-#include "Log.hh"
+#include "Logger.hh"
 #include "Point.hh"
 #include "bound_skew_tree/BSTRouter.hh"
 #include "geometry/Geometry.hh"
@@ -50,7 +48,9 @@ namespace {
 
 inline auto ToSaltIndex(int node_id) -> std::size_t
 {
-  LOG_FATAL_IF(node_id < 0) << "SALT node id is negative.";
+  if (node_id < 0) {
+    CTSLOG.error(Loc::current(), "SALT node id is negative.");
+  }
   return static_cast<std::size_t>(node_id);
 }
 
@@ -69,7 +69,9 @@ auto BuildSaltPin(const CBSRouter::ClockSteinerTreeType::NodeType& node) -> std:
     return nullptr;
   }
 
-  LOG_FATAL_IF(node.name.empty()) << "Missing node name for CBS salt conversion terminal node " << node.id << ".";
+  if (node.name.empty()) {
+    CTSLOG.error(Loc::current(), "Missing node name for CBS salt conversion terminal node ", node.id, ".");
+  }
   return std::make_shared<salt::Pin>(node.location.get_x(), node.location.get_y(), static_cast<int>(node.id), node.pin_cap);
 }
 
@@ -92,8 +94,7 @@ auto BuildSaltTreeFromClockTree(const CBSRouter::ClockSteinerTreeType& clock_tre
   std::vector<std::shared_ptr<salt::TreeNode>> salt_nodes(clock_tree.node_count());
   for (const auto& node : clock_tree.get_nodes()) {
     auto salt_pin = BuildSaltPin(node);
-    salt_nodes.at(node.id)
-        = std::make_shared<salt::TreeNode>(node.location.get_x(), node.location.get_y(), salt_pin, static_cast<int>(node.id));
+    salt_nodes.at(node.id) = std::make_shared<salt::TreeNode>(node.location.get_x(), node.location.get_y(), salt_pin, static_cast<int>(node.id));
   }
 
   for (const auto& edge : clock_tree.get_edges()) {
@@ -103,7 +104,9 @@ auto BuildSaltTreeFromClockTree(const CBSRouter::ClockSteinerTreeType& clock_tre
   }
 
   auto root_id = clock_tree.get_root();
-  LOG_FATAL_IF(root_id >= salt_nodes.size()) << "CBS input clock tree root id is invalid.";
+  if (root_id >= salt_nodes.size()) {
+    CTSLOG.error(Loc::current(), "CBS input clock tree root id is invalid.");
+  }
   return {salt_nodes.at(root_id), &salt_net};
 }
 
@@ -120,20 +123,28 @@ auto ExportSaltTree(const salt::Tree& tree, const CBSRouter::ClockSteinerTreeTyp
     double insertion_delay = 0.0;
     if (node->pin != nullptr) {
       const auto* initial_node = initial_tree.get_node(ToSaltIndex(node->id));
-      LOG_FATAL_IF(initial_node == nullptr || initial_node->name.empty()) << "Missing terminal name when exporting CBS refined topology.";
+      if (initial_node == nullptr || initial_node->name.empty()) {
+        CTSLOG.error(Loc::current(), "Missing terminal name when exporting CBS refined topology.");
+      }
       node_name = initial_node->name;
       pin_cap = initial_node->pin_cap;
       insertion_delay = initial_node->insertion_delay;
     }
     auto node_id = clock_tree.addNode(node_name, Point<int>(node->loc.x, node->loc.y), node->pin != nullptr, pin_cap, insertion_delay);
-    LOG_FATAL_IF(node_id == CBSRouter::ClockSteinerTreeType::kInvalidId) << "Failed to add node when exporting CBS refined tree.";
+    if (node_id == CBSRouter::ClockSteinerTreeType::kInvalidId) {
+      CTSLOG.error(Loc::current(), "Failed to add node when exporting CBS refined tree.");
+    }
     salt_to_clock_id[node->id] = node_id;
   }
 
   auto source = tree.source;
-  LOG_FATAL_IF(source == nullptr) << "CBS refined salt tree source is null.";
+  if (source == nullptr) {
+    CTSLOG.error(Loc::current(), "CBS refined salt tree source is null.");
+  }
   auto root_iter = salt_to_clock_id.find(source->id);
-  LOG_FATAL_IF(root_iter == salt_to_clock_id.end()) << "CBS refined salt tree root id is missing.";
+  if (root_iter == salt_to_clock_id.end()) {
+    CTSLOG.error(Loc::current(), "CBS refined salt tree root id is missing.");
+  }
   clock_tree.setRoot(root_iter->second);
 
   for (const auto& node : nodes) {
@@ -143,19 +154,28 @@ auto ExportSaltTree(const salt::Tree& tree, const CBSRouter::ClockSteinerTreeTyp
 
     auto parent_iter = salt_to_clock_id.find(node->parent->id);
     auto child_iter = salt_to_clock_id.find(node->id);
-    LOG_FATAL_IF(parent_iter == salt_to_clock_id.end() || child_iter == salt_to_clock_id.end())
-        << "CBS refined salt tree node id mapping is missing.";
+    if (parent_iter == salt_to_clock_id.end() || child_iter == salt_to_clock_id.end()) {
+      CTSLOG.error(Loc::current(), "CBS refined salt tree node id mapping is missing.");
+    }
 
     const auto* parent_node = clock_tree.get_node(parent_iter->second);
     const auto* child_node = clock_tree.get_node(child_iter->second);
-    LOG_FATAL_IF(parent_node == nullptr || child_node == nullptr) << "CBS refined topology node is null.";
+    if (parent_node == nullptr || child_node == nullptr) {
+      CTSLOG.error(Loc::current(), "CBS refined topology node is null.");
+    }
     const auto distance = geometry::Manhattan(parent_node->location, child_node->location);
-    LOG_FATAL_IF(distance < 0) << "CBS embedded edge distance is negative.";
+    if (distance < 0) {
+      CTSLOG.error(Loc::current(), "CBS embedded edge distance is negative.");
+    }
     auto edge_id = clock_tree.addEdge(parent_iter->second, child_iter->second, distance, distance);
-    LOG_FATAL_IF(edge_id == CBSRouter::ClockSteinerTreeType::kInvalidId) << "Failed to add edge when exporting CBS refined tree.";
+    if (edge_id == CBSRouter::ClockSteinerTreeType::kInvalidId) {
+      CTSLOG.error(Loc::current(), "Failed to add edge when exporting CBS refined tree.");
+    }
   }
 
-  LOG_FATAL_IF(!clock_tree.validate()) << "Constructed CBS refined ClockSteinerTree is invalid.";
+  if (!clock_tree.validate()) {
+    CTSLOG.error(Loc::current(), "Constructed CBS refined ClockSteinerTree is invalid.");
+  }
   return clock_tree;
 }
 
@@ -163,7 +183,9 @@ auto RefineTopology(const CBSRouter::ClockSteinerTreeType& initial_tree) -> CBSR
 {
   auto root_id = initial_tree.get_root();
   const auto* root_node = initial_tree.get_node(root_id);
-  LOG_FATAL_IF(root_node == nullptr || root_node->name.empty()) << "Missing root node name for CBS initial BST tree.";
+  if (root_node == nullptr || root_node->name.empty()) {
+    CTSLOG.error(Loc::current(), "Missing root node name for CBS initial BST tree.");
+  }
 
   auto salt_pins = BuildSaltPinList(initial_tree);
   salt::Net salt_net;
@@ -237,8 +259,7 @@ auto CustomSaltBuilder::run(const salt::Net& net, salt::Tree& input_tree, double
   }
 }
 
-auto CustomSaltBuilder::relax(const std::shared_ptr<salt::TreeNode>& source_node, const std::shared_ptr<salt::TreeNode>& target_node)
-    -> bool
+auto CustomSaltBuilder::relax(const std::shared_ptr<salt::TreeNode>& source_node, const std::shared_ptr<salt::TreeNode>& target_node) -> bool
 {
   const auto source_index = ToSaltIndex(source_node->id);
   const auto target_index = ToSaltIndex(target_node->id);
@@ -256,8 +277,7 @@ auto CustomSaltBuilder::relax(const std::shared_ptr<salt::TreeNode>& source_node
   return false;
 }
 
-auto CustomSaltBuilder::dfs(const std::shared_ptr<salt::TreeNode>& tree_node, const std::shared_ptr<salt::TreeNode>& cbs_node, double eps)
-    -> void
+auto CustomSaltBuilder::dfs(const std::shared_ptr<salt::TreeNode>& tree_node, const std::shared_ptr<salt::TreeNode>& cbs_node, double eps) -> void
 {
   struct DfsFrame
   {
@@ -299,8 +319,7 @@ auto CustomSaltBuilder::dfs(const std::shared_ptr<salt::TreeNode>& tree_node, co
   }
 }
 
-auto CBSRouter::buildTree(const std::vector<Terminal>& load_terminals, const BSTRoutingConfig& parameters)
-    -> CBSRouter::ClockSteinerTreeType
+auto CBSRouter::buildTree(const std::vector<Terminal>& load_terminals, const BSTRoutingConfig& parameters) -> CBSRouter::ClockSteinerTreeType
 {
   auto initial_tree = BSTRouter::buildTree(load_terminals, parameters);
   if (initial_tree.node_count() == 0) {

@@ -1,8 +1,54 @@
-initPRModel:初始化model
-setPRComParam:设置pr_model的参数
-initPRTaskList:构建PRTask,数据结构是PRNet
-buildPRNodeMap:构建Graph,只有节点,其他信息后续构建
-buildPRNodeNeighbor:将所有节点连接
-buildOrientSupply:构建Graph的supply
-generatePRModel:生成线网的拓扑
-    routePRTask:通过topo逐个生成布线结果
+generate
+    initPRModel: 将 Net 转为 PRNet，保存 pin access point、最终 routing segment 和已使用的 planar routing edge
+    setPRComParam: 设置 topo split、pattern 扩展参数、A* search margin、cost 参数
+    initPRTaskList: 按 PRNet 优先级排序
+    buildPlanarRoutingEdgeMap: 聚合各 routing layer 的 supply、ignore net 和初始 congestion cost 到平面 H/V edge
+    runRouteFlow
+    updateSummary / output: 在最终 global result 上统计和输出
+
+runRouteFlow
+    1. 所有 net 做 initial LZ pattern route
+    2. updateCongestion
+    3. 所有 net 做 congestion LZ pattern route
+    4. updateCongestion
+    5. overflow net 做 All pattern route
+    6. updateCongestion
+    7. overflow net 做三轮 A*：第一轮局部 rip-up guard=1，后两轮全网 rip-up
+    8. 每轮 A* 后 updateCongestion
+    9. 迭代结束后，将各 PRNet 的最终 planar segment 一次性写入 NetGlobalResultMap
+
+routePRNet
+    局部模式：getOverflowTask 生成 kept segment、rip-up segment 和两端 anchor topo
+    全网模式或局部拓扑不满足两端 anchor：删除全部旧 segment，并由 TopoBuilder 生成 topo
+    routePlanarTopoList: 逐条 topo edge 选择 route candidate，并立即更新 planar edge demand
+        kLZPattern: 生成 straight/L/Z candidate，全部参与比较
+        kAllPattern: 长度 50~100 的斜 topo 拆为两段，更长的拆为三段；split point 尽量避开 macro，再增加 inner/outer 3-bend 和 U candidate
+        kAStar: 生成 A* route
+        candidate 优先级: 无 fixed-shape blocked > 无 overflow > 更低 score
+    getCoordTree: 将 kept segment 和新 route 合并为无环树
+    统一清理临时 demand，成功时提交新 tree，失败时恢复全部旧 segment
+
+planar edge demand
+    每条 segment 展开为 unit edge
+    同一 net 对同一 planar edge 仅计一次 demand
+    ignore net 不计 demand
+    supply 为 0 且非 ignore net 的 edge 仅标记 candidate path blocked
+    overflow 由加入 candidate demand 后的 demand > supply 判断
+
+congestion
+    对每个平面 edge 统计同方向、半径 1 邻域的平均 usage ratio
+    history congestion cost = old cost * 0.5 + new local cost
+
+A* route
+    搜索范围以 topo/macro bounding box 为基础，失败后按固定 margin 递增
+    workspace 复用 node state 和 open heap；search stamp 惰性重置访问过的 node
+    每个 grid cell 按水平/垂直到达方向保存两个 state，准确计算 corner cost
+    同一 grid cell 中，被另一方向支配的 state 和冗余转向扩展直接剪枝
+    heuristic 使用 Manhattan distance；已有 edge 时使用 owned bounding box 的零成本松弛下界
+    supply 为 0 且非 ignore net 的 edge 不可走
+    step cost = wire cost + planar edge cost + corner cost
+
+output
+    summary: planar edge usage/overflow + 最终 global result wire length
+    guide / net json: 最终 NetGlobalResultMap
+    net csv / overflow csv: planar routing edge map

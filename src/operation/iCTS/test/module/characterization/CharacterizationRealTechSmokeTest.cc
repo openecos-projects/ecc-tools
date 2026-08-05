@@ -30,13 +30,15 @@
 #include <unordered_map>
 #include <vector>
 
+#include "data_manager/DataManager.hh"
+
 #if defined(ICTS_ENABLE_SLOW_REALTECH_REGRESSION) && ICTS_ENABLE_SLOW_REALTECH_REGRESSION
 #include "BufferingPattern.hh"
 #endif
 #include "characterization/Characterization.hh"
-#include "database/characterization/HTreeTopologyChar.hh"
-#include "database/characterization/SegmentChar.hh"
-#include "database/config/Config.hh"
+#include "data_manager/characterization/HTreeTopologyChar.hh"
+#include "data_manager/characterization/SegmentChar.hh"
+#include "data_manager/config/Config.hh"
 #include "module/characterization/fixture/CharacterizationRealTechFixture.hh"
 
 namespace icts_test {
@@ -124,8 +126,7 @@ TEST(CharacterizationRealTechSmokeTest, ManualHTreeTopologyAssemblyProducesInspe
 
   const auto run_htree_flow
       = [](const std::vector<icts::SegmentChar>& leaf_candidates, const std::vector<icts::SegmentChar>& mid_candidates,
-           const std::vector<icts::SegmentChar>& root_candidates,
-           const realtech_fixture::SegmentFrontierContext& segment_context) -> HTreeFlowResult {
+           const std::vector<icts::SegmentChar>& root_candidates, const realtech_fixture::SegmentFrontierContext& segment_context) -> HTreeFlowResult {
     HTreeFlowResult result;
     result.leaf_candidates = leaf_candidates;
     result.mid_candidates = mid_candidates;
@@ -139,14 +140,12 @@ TEST(CharacterizationRealTechSmokeTest, ManualHTreeTopologyAssemblyProducesInspe
 
     result.mid_stage.label = "mid_100um_to_50um";
     result.mid_stage.raw_entries = realtech_fixture::ComposeHTreeEntriesExact(
-        realtech_fixture::MakeHTreeSeedEntries(result.mid_candidates, segment_context, htree_context), result.leaf_stage.frontier_entries,
-        htree_context);
+        realtech_fixture::MakeHTreeSeedEntries(result.mid_candidates, segment_context, htree_context), result.leaf_stage.frontier_entries, htree_context);
     result.mid_stage.frontier_entries = realtech_fixture::BuildHTreeStateFrontier(result.mid_stage.raw_entries, htree_context);
 
     result.root_stage.label = "root_200um_to_100um_to_50um";
     result.root_stage.raw_entries = realtech_fixture::ComposeHTreeEntriesExact(
-        realtech_fixture::MakeHTreeSeedEntries(result.root_candidates, segment_context, htree_context), result.mid_stage.frontier_entries,
-        htree_context);
+        realtech_fixture::MakeHTreeSeedEntries(result.root_candidates, segment_context, htree_context), result.mid_stage.frontier_entries, htree_context);
     result.root_stage.frontier_entries = realtech_fixture::BuildHTreeStateFrontier(result.root_stage.raw_entries, htree_context);
     result.best_char = realtech_fixture::SelectBestHTreeChar(result.root_stage.frontier_entries);
     return result;
@@ -173,8 +172,7 @@ TEST(CharacterizationRealTechSmokeTest, ManualHTreeTopologyAssemblyProducesInspe
   report_stream.setf(std::ostringstream::fixed, std::ostringstream::floatfield);
   report_stream << std::setprecision(3);
   report_stream << "scenario=smoke_manual_htree\n";
-  report_stream << "configured_buffers=" << realtech_fixture::JoinStrings(icts_test::runtime::CurrentRuntime().config.get_buffer_types())
-                << "\n";
+  report_stream << "configured_buffers=" << realtech_fixture::JoinStrings(CTSDM.getConfig().get_buffer_types()) << "\n";
   report_stream << "usable_buffers=" << realtech_fixture::JoinStrings(usable_buffers) << "\n";
   report_stream << "resolved_max_slew_ns=" << builder.get_max_slew() << "\n";
   report_stream << "resolved_max_cap_pf=" << builder.get_max_cap() << "\n";
@@ -191,36 +189,27 @@ TEST(CharacterizationRealTechSmokeTest, ManualHTreeTopologyAssemblyProducesInspe
   report_stream << "segment_200_source=" << synthesized_200_mode << "\n";
   report_stream << "positive_power_segment_chars=" << realtech_fixture::CountPositivePower(builder.get_segment_chars()) << "/"
                 << builder.get_segment_chars().size() << "\n";
-  report_stream << "segment_frontier_counts{50um=" << frontier_by_length.at(length_50_idx).size()
-                << ",100um=" << frontier_by_length.at(length_100_idx).size() << ",200um=" << frontier_by_length.at(length_200_idx).size()
-                << "}\n";
+  report_stream << "segment_frontier_counts{50um=" << frontier_by_length.at(length_50_idx).size() << ",100um=" << frontier_by_length.at(length_100_idx).size()
+                << ",200um=" << frontier_by_length.at(length_200_idx).size() << "}\n";
   report_stream << "htree_exact_counts{leaf_raw=" << exact_flow.leaf_stage.raw_entries.size()
-                << ",leaf_frontier=" << exact_flow.leaf_stage.frontier_entries.size()
-                << ",mid_raw=" << exact_flow.mid_stage.raw_entries.size()
-                << ",mid_frontier=" << exact_flow.mid_stage.frontier_entries.size()
-                << ",root_raw=" << exact_flow.root_stage.raw_entries.size()
+                << ",leaf_frontier=" << exact_flow.leaf_stage.frontier_entries.size() << ",mid_raw=" << exact_flow.mid_stage.raw_entries.size()
+                << ",mid_frontier=" << exact_flow.mid_stage.frontier_entries.size() << ",root_raw=" << exact_flow.root_stage.raw_entries.size()
                 << ",root_frontier=" << exact_flow.root_stage.frontier_entries.size() << "}\n";
-  realtech_fixture::AppendExamples(
-      report_stream, "segment_50_example=", frontier_by_length.at(length_50_idx),
-      [&](const icts::SegmentChar& entry) -> std::string { return realtech_fixture::FormatSegmentChar(entry, grid); });
-  realtech_fixture::AppendExamples(
-      report_stream, "segment_100_example=", frontier_by_length.at(length_100_idx),
-      [&](const icts::SegmentChar& entry) -> std::string { return realtech_fixture::FormatSegmentChar(entry, grid); });
-  realtech_fixture::AppendExamples(
-      report_stream, "segment_200_example=", frontier_by_length.at(length_200_idx),
-      [&](const icts::SegmentChar& entry) -> std::string { return realtech_fixture::FormatSegmentChar(entry, grid); });
-  realtech_fixture::AppendExamples(
-      report_stream, "htree_exact_leaf_example=", exact_flow.leaf_stage.frontier_entries,
-      [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
-  realtech_fixture::AppendExamples(
-      report_stream, "htree_exact_mid_example=", exact_flow.mid_stage.frontier_entries,
-      [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
-  realtech_fixture::AppendExamples(
-      report_stream, "htree_exact_root_example=", exact_flow.root_stage.frontier_entries,
-      [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
+  realtech_fixture::AppendExamples(report_stream, "segment_50_example=", frontier_by_length.at(length_50_idx),
+                                   [&](const icts::SegmentChar& entry) -> std::string { return realtech_fixture::FormatSegmentChar(entry, grid); });
+  realtech_fixture::AppendExamples(report_stream, "segment_100_example=", frontier_by_length.at(length_100_idx),
+                                   [&](const icts::SegmentChar& entry) -> std::string { return realtech_fixture::FormatSegmentChar(entry, grid); });
+  realtech_fixture::AppendExamples(report_stream, "segment_200_example=", frontier_by_length.at(length_200_idx),
+                                   [&](const icts::SegmentChar& entry) -> std::string { return realtech_fixture::FormatSegmentChar(entry, grid); });
+  realtech_fixture::AppendExamples(report_stream, "htree_exact_leaf_example=", exact_flow.leaf_stage.frontier_entries,
+                                   [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
+  realtech_fixture::AppendExamples(report_stream, "htree_exact_mid_example=", exact_flow.mid_stage.frontier_entries,
+                                   [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
+  realtech_fixture::AppendExamples(report_stream, "htree_exact_root_example=", exact_flow.root_stage.frontier_entries,
+                                   [&](const icts::HTreeTopologyChar& entry) -> std::string { return realtech_fixture::FormatHTreeChar(entry, grid); });
   report_stream << "best_exact_htree_char=" << realtech_fixture::FormatHTreeChar(exact_flow.best_char.value(), grid) << "\n";
 
-  ASSERT_TRUE(realtech_fixture::WriteScenarioLog("smoke_manual_htree", "smoke_manual_htree_report.txt", report_stream.str()));
+  ASSERT_TRUE(realtech_fixture::WriteScenarioReport("smoke_manual_htree", "smoke_manual_htree_report.txt", report_stream.str()));
 }
 
 #if ICTS_ENABLE_SLOW_REALTECH_REGRESSION
@@ -228,8 +217,8 @@ TEST(CharacterizationRealTechSmokeTest, TerminalBranchBufferedPatternsRemainAvai
 {
   auto collect_terminal_pattern_count = [](bool force_branch_buffer) -> std::optional<unsigned> {
     realtech_fixture::RealTechCharFixture char_fixture;
-    if (const auto prepare_error = char_fixture.prepare(force_branch_buffer ? "branch_buffer_on" : "branch_buffer_off", std::nullopt, 0.0,
-                                                        0.0, false, force_branch_buffer);
+    if (const auto prepare_error
+        = char_fixture.prepare(force_branch_buffer ? "branch_buffer_on" : "branch_buffer_off", std::nullopt, 0.0, 0.0, false, force_branch_buffer);
         prepare_error.has_value()) {
       return std::nullopt;
     }

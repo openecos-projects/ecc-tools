@@ -14,6 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "utility/logger/Logger.hpp"
 #include "tcl_util.h"
 
 namespace tcl {
@@ -48,11 +49,20 @@ void TclUtil::addOption(TclCmd* tcl_ptr, std::string config_name, ValueType type
     case ValueType::kStringList:
       tcl_ptr->addOption(new TclStringListOption(config_name.c_str(), 0));
       break;
+    case ValueType::kStringListList:
+      tcl_ptr->addOption(new TclStringListListOption(config_name.c_str(), 0));
+      break;
+    case ValueType::kStringListListList:
+      tcl_ptr->addOption(new TclStringListListListOption(config_name.c_str(), 0));
+      break;
+    case ValueType::kStringListListListList:
+      tcl_ptr->addOption(new TclStringListListListListOption(config_name.c_str(), 0));
+      break;
     case ValueType::kStringDoubleMap:
       tcl_ptr->addOption(new TclStringListOption(config_name.c_str(), 0));
       break;
     default:
-      std::cout << "[TclUtil] The value type is error!" << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "[TclUtil] The value type is error!");
       exit(0);
       break;
   }
@@ -96,6 +106,15 @@ std::any TclUtil::getValue(TclCmd* tcl_ptr, std::string config_name, ValueType t
     case ValueType::kStringList:
       config_value = option->getStringList();
       break;
+    case ValueType::kStringListList:
+      config_value = option->getStringListList();
+      break;
+    case ValueType::kStringListListList:
+      config_value = option->getStringListListList();
+      break;
+    case ValueType::kStringListListListList:
+      config_value = option->getStringListListListList();
+      break;
     case ValueType::kStringDoubleMap: {
       std::map<std::string, double> string_double_map;
       for (std::string temp : option->getStringList()) {
@@ -106,7 +125,7 @@ std::any TclUtil::getValue(TclCmd* tcl_ptr, std::string config_name, ValueType t
       break;
     }
     default:
-      std::cout << "[TclUtil] The value type is error!" << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "[TclUtil] The value type is error!");
       exit(0);
       break;
   }
@@ -117,14 +136,14 @@ bool TclUtil::alterJsonConfig(std::string json_path, std::map<std::string, std::
 {
   ordered_json config;
   if(json_path.empty()){
-    LOG_ERROR << "Failed: There is no json_path to be found.";
+    ECCLOG.warn(ecc::Loc::current(), "Failed: There is no json_path to be found.");
     return 0;
   }
 
   // 从json_path先读入json
   std::ifstream file(json_path);
   if (!file.is_open()) {
-    LOG_ERROR << "Failed to open JSON file for reading.";
+    ECCLOG.warn(ecc::Loc::current(), "Failed to open JSON file for reading.");
     return 0;
   }
   file >> config;
@@ -150,7 +169,7 @@ bool TclUtil::alterJsonConfig(std::string json_path, std::map<std::string, std::
 
   std::ofstream ofs(json_path);
   if (!ofs.is_open()) {
-    LOG_ERROR << "Failed to open JSON file for writing.";
+    ECCLOG.warn(ecc::Loc::current(), "Failed to open JSON file for writing.");
     return 0;
   }
   ofs << std::setw(4) << config;

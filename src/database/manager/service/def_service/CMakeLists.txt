@@ -1,5 +1,5 @@
 if(BUILD_STATIC_LIB)
-  add_library( def_service   
+  add_library( def_service
   def_service.cpp
   )
 else()
@@ -8,9 +8,9 @@ else()
   )
 endif()
 
-target_link_libraries(def_service PRIVATE  idb)
+target_link_libraries(def_service PRIVATE idb ecc_logger)
 
-target_include_directories(def_service 
+target_include_directories(def_service
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${HOME_DATABASE}/data/design

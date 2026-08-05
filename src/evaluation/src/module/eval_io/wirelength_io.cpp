@@ -22,6 +22,7 @@
  * @date 2025-06-14
  */
 
+#include "utility/logger/Logger.hpp"
 #include "wirelength_io.h"
 
 #include <filesystem>
@@ -42,14 +43,14 @@ EvalWirelength::~EvalWirelength() = default;
 
 bool EvalWirelength::runWirelengthEvalAndOutput()
 {
-  std::cout << "Running wirelength evaluation..." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Running wirelength evaluation...");
   WirelengthAPI wirelength_api;
   auto [HPWL, FLUTE, HTree, VTree, GRWL] = wirelength_api.totalWL();
-  std::cout << "Total HPWL: " << HPWL << std::endl;
-  std::cout << "Total FLUTE: " << FLUTE << std::endl;
-  std::cout << "Total HTree: " << HTree << std::endl;
-  std::cout << "Total VTree: " << VTree << std::endl;
-  std::cout << "Total GRWL: " << GRWL << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Total HPWL: ", HPWL);
+  ECCLOG.info(ecc::Loc::current(), "Total FLUTE: ", FLUTE);
+  ECCLOG.info(ecc::Loc::current(), "Total HTree: ", HTree);
+  ECCLOG.info(ecc::Loc::current(), "Total VTree: ", VTree);
+  ECCLOG.info(ecc::Loc::current(), "Total GRWL: ", GRWL);
 
   nlohmann::json json_output;
   json_output["HPWL"] = HPWL;
@@ -64,9 +65,9 @@ bool EvalWirelength::runWirelengthEvalAndOutput()
   if (json_file.is_open()) {
     json_file << json_output.dump(2);
     json_file.close();
-    std::cout << "Wirelength summary saved to: " << json_path << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Wirelength summary saved to: ", json_path);
   } else {
-    std::cerr << "Failed to open file: " << json_path << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Failed to open file: ", json_path);
   }
   return true;
 }
@@ -74,14 +75,14 @@ bool EvalWirelength::runWirelengthEvalAndOutput()
 void EvalWirelength::setOutputPath(const std::string& path)
 {
   if (path == "") {
-    std::cout << "Output path is empty, using default path: " << _output_path << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Output path is empty, using default path: ", _output_path);
   }
   if (_output_path == path) {
-    std::cout << "Output path is already exists, using default path: " << _output_path << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Output path is already exists, using default path: ", _output_path);
     return;
   }
   _output_path = path + "/wirelength_result.json";
-  std::cout << "[Evaluate Wirelength] Output path set to: " << _output_path << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "[Evaluate Wirelength] Output path set to: ", _output_path);
   std::filesystem::create_directories(std::filesystem::path(path));
 }
 }  // namespace ieval

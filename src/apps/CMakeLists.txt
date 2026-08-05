@@ -9,17 +9,17 @@ endif()
 find_package(Git)
 if(GIT_FOUND)
     execute_process(COMMAND ${GIT_EXECUTABLE} describe --abbrev=40 --always OUTPUT_VARIABLE GIT_VERSION)
-    string(STRIP "${GIT_VERSION}" iEDA_GIT_VERSION)
-    message(STATUS "Git Version: " ${iEDA_GIT_VERSION})
+    string(STRIP "${GIT_VERSION}" ECC_GIT_VERSION)
+    message(STATUS "Git Version: " ${ECC_GIT_VERSION})
 else()
     message(WARNING "Git Version: not available")
-    set(iEDA_GIT_VERSION "not available")
+    set(ECC_GIT_VERSION "not available")
 endif()
 
-add_definitions(-DiEDA_GIT_VERSION="${iEDA_GIT_VERSION}")
+add_definitions(-DECC_GIT_VERSION="${ECC_GIT_VERSION}")
 
 add_executable(ecc_bin
-    ieda_main.cpp
+    ecc_main.cpp
 )
 
-target_link_libraries(ecc_bin flow)
+target_link_libraries(ecc_bin flow ecc_logger)
