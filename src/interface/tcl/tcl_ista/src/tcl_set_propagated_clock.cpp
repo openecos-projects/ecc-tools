@@ -14,30 +14,29 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
-
+#include "STAInterface.hpp"
+#include "tcl_ista_util.hpp"
 #include "tcl_sta.h"
-
-using namespace ecc;
 
 namespace tcl {
 
-int registerCmdSTA()
+TclSetPropagatedClock::TclSetPropagatedClock(const char* cmd_name) : TclCmd(cmd_name)
 {
-  // sta
-  registerTclCmd(TclInitSTA, "init_sta");
-  registerTclCmd(TclRunSTA, "run_sta");
-  registerTclCmd(TclRemoveWireLoadModel, "remove_wire_load_model");
-  registerTclCmd(TclUpdateTiming, "update_timing");
-  registerTclCmd(TclWriteSDF, "write_sdf");
-  registerTclCmd(TclReportTiming, "report_timing");
-  registerTclCmd(TclCreateClock, "create_clock");
-  registerTclCmd(TclSetPropagatedClock, "set_propagated_clock");
-  registerTclCmd(TclGetPorts, "get_ports");
-  registerTclCmd(TclGetClocks, "get_clocks");
-  registerTclCmd(TclExtractLib, "extract_lib");
-  registerTclCmd(TclDestroySTA, "destroy_sta");
-  return EXIT_SUCCESS;
+  addOption(new TclStringListOption("clocks", 1));
+}
+
+unsigned TclSetPropagatedClock::exec()
+{
+  TclOption* clock_option = getOptionOrArg("clocks");
+  if (!clock_option->is_set_val()) {
+    setTclError("set_propagated_clock requires a clock collection");
+    return 0;
+  }
+  if (std::string error_message; !STAI.setPropagatedClock(clock_option->getStringList(), error_message)) {
+    setTclError(error_message);
+    return 0;
+  }
+  return 1;
 }
 
 }  // namespace tcl

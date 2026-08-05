@@ -44,6 +44,7 @@ class TimingPropagator
   // function
   bool isDisableArc(Arc& arc);
   bool shouldStopDataPropagation(Arc& arc);
+  bool shouldStopDataSlewPropagation(Arc& arc);
   bool isSequentialClockPin(std::string& pin_name);
   bool hasIncomingPhysicalSlewArc(std::string& pin_name);
   TPModel initTPModel();
@@ -79,7 +80,7 @@ class TimingPropagator
   std::string getStartPointCrprClockPin(std::string& start_point);
   TransType getStartPointCrprClockTransType(std::string& start_point);
   TransType getClockTransType(TimingCellArc& timing_cell_arc);
-  std::string getClockName(std::string& pin_name);
+  std::string_view getClockName(std::string& pin_name);
   std::string getPathStateStartPoint(std::string& start_point);
   void seedPathState(std::string& start_point, AnalysisType analysis_type);
   PathSourceType getStartPointSourceType(std::string& start_point, AnalysisType analysis_type);

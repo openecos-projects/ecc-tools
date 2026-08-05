@@ -16,28 +16,33 @@
 // ***************************************************************************************
 #pragma once
 
-#include "tcl_sta.h"
+#include "tcl_util.h"
 
-using namespace ecc;
+namespace {
 
-namespace tcl {
-
-int registerCmdSTA()
+void setResult(const std::string& result)
 {
-  // sta
-  registerTclCmd(TclInitSTA, "init_sta");
-  registerTclCmd(TclRunSTA, "run_sta");
-  registerTclCmd(TclRemoveWireLoadModel, "remove_wire_load_model");
-  registerTclCmd(TclUpdateTiming, "update_timing");
-  registerTclCmd(TclWriteSDF, "write_sdf");
-  registerTclCmd(TclReportTiming, "report_timing");
-  registerTclCmd(TclCreateClock, "create_clock");
-  registerTclCmd(TclSetPropagatedClock, "set_propagated_clock");
-  registerTclCmd(TclGetPorts, "get_ports");
-  registerTclCmd(TclGetClocks, "get_clocks");
-  registerTclCmd(TclExtractLib, "extract_lib");
-  registerTclCmd(TclDestroySTA, "destroy_sta");
-  return EXIT_SUCCESS;
+  Tcl_Interp* _interp{tcl::ScriptEngine::getOrCreateInstance()->get_interp()};
+  auto* buffer = new char[result.size() + 1];
+  std::strcpy(buffer, result.c_str());
+  Tcl_SetResult(_interp, buffer, [](auto* buffer) {
+    delete[] buffer;
+  });
 }
 
-}  // namespace tcl
+void setResult(const std::vector<std::string>& result)
+{
+  Tcl_Obj* list_obj{Tcl_NewListObj(0, nullptr)};
+  Tcl_Interp* _interp{tcl::ScriptEngine::getOrCreateInstance()->get_interp()};
+  for (const std::string& value : result) {
+    Tcl_ListObjAppendElement(_interp, list_obj, Tcl_NewStringObj(value.c_str(), static_cast<int>(value.size())));
+  }
+  Tcl_SetObjResult(_interp, list_obj);
+}
+
+void setTclError(const std::string& message)
+{
+  setResult(message);
+}
+
+}  // namespace

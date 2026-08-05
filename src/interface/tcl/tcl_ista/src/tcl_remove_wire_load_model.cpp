@@ -14,30 +14,18 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
-
 #include "tcl_sta.h"
-
-using namespace ecc;
 
 namespace tcl {
 
-int registerCmdSTA()
+TclRemoveWireLoadModel::TclRemoveWireLoadModel(const char* cmd_name) : TclCmd(cmd_name)
 {
-  // sta
-  registerTclCmd(TclInitSTA, "init_sta");
-  registerTclCmd(TclRunSTA, "run_sta");
-  registerTclCmd(TclRemoveWireLoadModel, "remove_wire_load_model");
-  registerTclCmd(TclUpdateTiming, "update_timing");
-  registerTclCmd(TclWriteSDF, "write_sdf");
-  registerTclCmd(TclReportTiming, "report_timing");
-  registerTclCmd(TclCreateClock, "create_clock");
-  registerTclCmd(TclSetPropagatedClock, "set_propagated_clock");
-  registerTclCmd(TclGetPorts, "get_ports");
-  registerTclCmd(TclGetClocks, "get_clocks");
-  registerTclCmd(TclExtractLib, "extract_lib");
-  registerTclCmd(TclDestroySTA, "destroy_sta");
-  return EXIT_SUCCESS;
+}
+
+unsigned TclRemoveWireLoadModel::exec()
+{
+  // Wire-load models are not modeled by iSTA yet.
+  return check();
 }
 
 }  // namespace tcl

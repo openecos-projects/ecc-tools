@@ -51,10 +51,15 @@ void SDFWriter::destroyInst()
 
 void SDFWriter::write()
 {
+  write(getSDFFilePath());
+}
+
+void SDFWriter::write(const std::string_view file_path)
+{
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
-  outputSDF();
+  outputSDF(file_path);
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -63,10 +68,9 @@ void SDFWriter::write()
 
 SDFWriter* SDFWriter::_sw_instance = nullptr;
 
-void SDFWriter::outputSDF()
+void SDFWriter::outputSDF(const std::string_view file_path)
 {
-  std::string sdf_file_path = getSDFFilePath();
-  std::ofstream* sdf_file = STAUTIL.getOutputFileStream(sdf_file_path);
+  std::ofstream* sdf_file = STAUTIL.getOutputFileStream(file_path);
   outputSDFHeader(sdf_file);
   outputSDFInterconnect(sdf_file);
   outputSDFCellList(sdf_file);

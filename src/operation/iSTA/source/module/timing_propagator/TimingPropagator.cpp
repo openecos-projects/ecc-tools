@@ -90,6 +90,14 @@ bool TimingPropagator::shouldStopDataPropagation(Arc& arc)
   return arc.get_type() == ArcType::kNet && isSequentialClockPin(arc.get_sink_pin());
 }
 
+bool TimingPropagator::shouldStopDataSlewPropagation(Arc& arc)
+{
+  if (arc.get_type() != ArcType::kNet || !isSequentialClockPin(arc.get_sink_pin())) {
+    return false;
+  }
+  return STADM.getDatabase().get_timing_point_map()[arc.get_sink_pin()].get_is_clock_point();
+}
+
 bool TimingPropagator::isSequentialClockPin(std::string& pin_name)
 {
   Database& database = STADM.getDatabase();
@@ -232,8 +240,9 @@ void TimingPropagator::propagateDataSlewDelayArc(std::size_t arc_idx, AnalysisTy
   if (isDisableArc(arc)) {
     return;
   }
-  // Slew must reach a sequential CK for C2Q delay and timing checks.  Arrival
-  // and path-state propagation still stop at this boundary.
+  if (shouldStopDataSlewPropagation(arc)) {
+    return;
+  }
   TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
   if (!hasDataSlew(source_point, analysis_type, input_trans_type)) {
     return;
@@ -505,7 +514,7 @@ TransType TimingPropagator::getClockTransType(TimingCellArc& timing_cell_arc)
   return TransType::kRise;
 }
 
-std::string TimingPropagator::getClockName(std::string& pin_name)
+std::string_view TimingPropagator::getClockName(std::string& pin_name)
 {
   Database& database = STADM.getDatabase();
   TimingClock* timing_clock = getStartPointClock(pin_name);
@@ -513,6 +522,21 @@ std::string TimingPropagator::getClockName(std::string& pin_name)
     return timing_clock->get_clock_name();
   }
   Pin& pin = database.get_pin_map()[pin_name];
+  if (!pin.get_is_port() && database.get_instance_map().count(pin.get_instance_name()) > 0) {
+    Instance& instance = database.get_instance_map()[pin.get_instance_name()];
+    if (instance.get_is_sequential() && database.get_timing_point_map().count(instance.get_clock_pin_name()) > 0) {
+      const auto& propagated_clock_name = database.get_timing_point_map()[instance.get_clock_pin_name()].get_clock_name();
+      if (!propagated_clock_name.empty()) {
+        return propagated_clock_name;
+      }
+    }
+  }
+  if (database.get_timing_point_map().count(pin_name) > 0) {
+    TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
+    if (timing_point.get_is_clock_point() && !timing_point.get_clock_name().empty()) {
+      return timing_point.get_clock_name();
+    }
+  }
   std::map<std::string, TimingClock>& clock_map = database.get_timing_constraint().get_clock_map();
   if (pin.get_is_port()) {
     std::map<std::string, TimingPortConstraint>& port_constraint_map = database.get_timing_constraint().get_port_constraint_map();
