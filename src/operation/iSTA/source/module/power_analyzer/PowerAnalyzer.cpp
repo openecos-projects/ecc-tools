@@ -369,9 +369,8 @@ void PowerAnalyzer::analyzeLeakagePower(Instance& instance, PowerValue& power_va
     power_value.add_leakage_power(timing_cell.get_cell_leakage_power());
     return;
   }
-  std::map<std::string, PALeakageSummary> leakage_summary_map;
+  PALeakageSummary leakage_summary;
   for (TimingLeakagePower& timing_leakage_power : timing_cell.get_leakage_power_list()) {
-    PALeakageSummary& leakage_summary = leakage_summary_map[timing_leakage_power.get_related_pg_port()];
     if (timing_leakage_power.get_when_expression().get_is_empty()) {
       leakage_summary.add_unconditional_leakage_power(timing_leakage_power.get_leakage_power());
     } else {
@@ -379,9 +378,7 @@ void PowerAnalyzer::analyzeLeakagePower(Instance& instance, PowerValue& power_va
                                                      getLeakageConditionProbability(instance, timing_leakage_power));
     }
   }
-  for (std::pair<const std::string, PALeakageSummary>& leakage_pair : leakage_summary_map) {
-    power_value.add_leakage_power(leakage_pair.second.get_leakage_power(timing_cell.get_cell_leakage_power()));
-  }
+  power_value.add_leakage_power(leakage_summary.get_leakage_power(timing_cell.get_cell_leakage_power()));
 }
 
 double PowerAnalyzer::getLeakageConditionProbability(Instance& instance, TimingLeakagePower& timing_leakage_power)
