@@ -21,6 +21,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <utility>
 
 #include "Logger.hpp"
@@ -35,10 +36,14 @@ using PlanarTopo = std::vector<Segment<PlanarCoord>>;
 using NeighborList = std::vector<std::vector<int32_t>>;
 
 constexpr double kCostEpsilon = 1e-9;
-constexpr int32_t kRepairExtraRadius = 2;
 constexpr double kMaxWarpStretch = 8.0;
 constexpr int64_t kWarpScale = 100;
 constexpr int32_t kMaxAxisSampleNum = 64;
+constexpr int32_t kMaxThreePinAxisNum = 32;
+constexpr int32_t kMaxThreePinCandidateNum = 4096;
+constexpr int32_t kThreePinExtraRadius = 2;
+constexpr int32_t kMaxRefineAxisNum = 8;
+constexpr int32_t kMaxRefinePassNum = 2;
 
 enum class TBAxis
 {
@@ -75,6 +80,13 @@ struct TBSteinerShift
   double gain = -1;
 
   bool isValid() const { return first_idx >= 0; }
+};
+
+struct TBRefineScore
+{
+  int32_t inf_edge_num = 0;
+  double finite_cost = 0;
+  int64_t wire_length = 0;
 };
 
 int32_t getBranchNum(const Flute::Tree& tree)
@@ -240,89 +252,150 @@ bool shiftBestSteinerEdge(const TBTask& task, Flute::Tree& tree)
   return best_shift.isValid();
 }
 
-double getEscapeCost(const TBTask& task, const PlanarCoord& coord)
+int32_t compareRefineScore(const TBRefineScore& first, const TBRefineScore& second)
 {
-  double cost = std::numeric_limits<double>::infinity();
-  for (const PlanarCoord& neighbor : {PlanarCoord(coord.get_x() - 1, coord.get_y()), PlanarCoord(coord.get_x() + 1, coord.get_y()),
-                                      PlanarCoord(coord.get_x(), coord.get_y() - 1), PlanarCoord(coord.get_x(), coord.get_y() + 1)}) {
-    if (isInsideSearchRegion(task, neighbor)) {
-      cost = std::min(cost, getSegmentCost(task, coord, neighbor));
-    }
+  if (first.inf_edge_num != second.inf_edge_num) {
+    return first.inf_edge_num < second.inf_edge_num ? -1 : 1;
   }
-  return cost;
+  if (std::abs(first.finite_cost - second.finite_cost) > kCostEpsilon) {
+    return first.finite_cost < second.finite_cost ? -1 : 1;
+  }
+  if (first.wire_length != second.wire_length) {
+    return first.wire_length < second.wire_length ? -1 : 1;
+  }
+  return 0;
 }
 
-std::optional<PlanarCoord> findRepairCoord(const TBTask& task, const PlanarCoord& raw_coord)
+std::vector<int32_t> getRefineAxisList(int32_t lower, int32_t upper, int32_t current, const std::vector<int32_t>& neighbor_axis_list)
 {
-  if (!task.has_planar_search_region() || task.get_planar_search_region().isIncorrect()) {
-    return std::nullopt;
-  }
-  const PlanarRect& region = task.get_planar_search_region();
-  int32_t max_radius = 0;
-  for (const PlanarCoord& corner : {region.get_ll(), PlanarCoord(region.get_ll_x(), region.get_ur_y()),
-                                    PlanarCoord(region.get_ur_x(), region.get_ll_y()), region.get_ur()}) {
-    max_radius = std::max(max_radius, std::abs(raw_coord.get_x() - corner.get_x()) + std::abs(raw_coord.get_y() - corner.get_y()));
-  }
-
-  int32_t found_radius = -1;
-  double best_cost = std::numeric_limits<double>::infinity();
-  std::optional<PlanarCoord> best_coord;
-  auto updateBest = [&](const PlanarCoord& candidate, int32_t radius) {
-    if (!isInsideSearchRegion(task, candidate)) {
-      return;
-    }
-    double escape_cost = getEscapeCost(task, candidate);
-    if (!std::isfinite(escape_cost)) {
-      return;
-    }
-    double candidate_cost = escape_cost + radius;
-    if (!best_coord.has_value() || candidate_cost + kCostEpsilon < best_cost
-        || (std::abs(candidate_cost - best_cost) <= kCostEpsilon && CmpPlanarCoordByXASC()(candidate, *best_coord))) {
-      found_radius = found_radius == -1 ? radius : found_radius;
-      best_cost = candidate_cost;
-      best_coord = candidate;
-    }
-  };
-  for (int32_t radius = 1; radius <= max_radius && (found_radius == -1 || radius <= found_radius + kRepairExtraRadius); radius++) {
-    for (int32_t dx = -radius; dx <= radius; dx++) {
-      updateBest(PlanarCoord(raw_coord.get_x() + dx, raw_coord.get_y() - radius), radius);
-      updateBest(PlanarCoord(raw_coord.get_x() + dx, raw_coord.get_y() + radius), radius);
-    }
-    for (int32_t dy = -radius + 1; dy < radius; dy++) {
-      updateBest(PlanarCoord(raw_coord.get_x() - radius, raw_coord.get_y() + dy), radius);
-      updateBest(PlanarCoord(raw_coord.get_x() + radius, raw_coord.get_y() + dy), radius);
+  std::set<int32_t> axis_set{std::clamp(current, lower, upper)};
+  for (int32_t value : neighbor_axis_list) {
+    if (lower <= value && value <= upper && axis_set.size() < kMaxRefineAxisNum) {
+      axis_set.insert(value);
     }
   }
-  return best_coord;
+  int32_t sample_num = kMaxRefineAxisNum - static_cast<int32_t>(axis_set.size());
+  int64_t span = static_cast<int64_t>(upper) - lower;
+  for (int32_t sample_idx = 0; sample_idx < sample_num; sample_idx++) {
+    int64_t offset = sample_num <= 1 ? span / 2 : span * sample_idx / (sample_num - 1);
+    axis_set.insert(static_cast<int32_t>(lower + offset));
+  }
+  return {axis_set.begin(), axis_set.end()};
 }
 
-void repairIsolatedSteiner(const TBTask& task, Flute::Tree& tree, TBRefineStat& stat)
+TBRefineScore getSteinerScore(const TBTask& task, const Flute::Tree& tree, const NeighborList& neighbor_list,
+                              const std::vector<int32_t>& branch_idx_list, const PlanarCoord& candidate)
 {
-  if (!task.has_segment_cost_query()) {
-    return;
+  std::set<int32_t> branch_idx_set(branch_idx_list.begin(), branch_idx_list.end());
+  std::set<std::pair<int32_t, int32_t>> edge_set;
+  TBRefineScore score;
+  for (int32_t branch_idx : branch_idx_list) {
+    for (int32_t neighbor_idx : neighbor_list[branch_idx]) {
+      if (!branch_idx_set.contains(neighbor_idx)) {
+        edge_set.emplace(std::min(branch_idx, neighbor_idx), std::max(branch_idx, neighbor_idx));
+      }
+    }
   }
-  std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC> coord_branch_map;
-  for (int32_t branch_idx = tree.deg; branch_idx < getBranchNum(tree); branch_idx++) {
-    coord_branch_map[getBranchCoord(tree, branch_idx)].push_back(branch_idx);
+  for (const auto& [first_idx, second_idx] : edge_set) {
+    int32_t neighbor_idx = branch_idx_set.contains(first_idx) ? second_idx : first_idx;
+    PlanarCoord neighbor = getBranchCoord(tree, neighbor_idx);
+    double cost = getPatternCost(task, candidate, neighbor);
+    if (std::isfinite(cost)) {
+      score.finite_cost += cost;
+    } else {
+      score.inf_edge_num++;
+    }
+    score.wire_length += std::abs(static_cast<int64_t>(candidate.get_x()) - neighbor.get_x())
+                         + std::abs(static_cast<int64_t>(candidate.get_y()) - neighbor.get_y());
   }
-  for (const auto& [raw_coord, branch_idx_list] : coord_branch_map) {
-    if (std::isfinite(getEscapeCost(task, raw_coord))) {
-      continue;
+  return score;
+}
+
+std::vector<PlanarCoord> getSteinerCandidateList(const TBTask& task, const Flute::Tree& tree, const NeighborList& neighbor_list,
+                                                 const std::vector<int32_t>& branch_idx_list)
+{
+  PlanarCoord current = getBranchCoord(tree, branch_idx_list.front());
+  int32_t ll_x = current.get_x();
+  int32_t ur_x = current.get_x();
+  int32_t ll_y = current.get_y();
+  int32_t ur_y = current.get_y();
+  for (const PlanarCoord& terminal : task.get_planar_coord_list()) {
+    ll_x = std::min(ll_x, terminal.get_x());
+    ur_x = std::max(ur_x, terminal.get_x());
+    ll_y = std::min(ll_y, terminal.get_y());
+    ur_y = std::max(ur_y, terminal.get_y());
+  }
+  if (task.has_planar_search_region()) {
+    const PlanarRect& region = task.get_planar_search_region();
+    ll_x = std::max(ll_x, region.get_ll_x());
+    ur_x = std::min(ur_x, region.get_ur_x());
+    ll_y = std::max(ll_y, region.get_ll_y());
+    ur_y = std::min(ur_y, region.get_ur_y());
+  }
+
+  std::vector<int32_t> neighbor_x_list;
+  std::vector<int32_t> neighbor_y_list;
+  for (int32_t branch_idx : branch_idx_list) {
+    for (int32_t neighbor_idx : neighbor_list[branch_idx]) {
+      PlanarCoord neighbor = getBranchCoord(tree, neighbor_idx);
+      neighbor_x_list.push_back(neighbor.get_x());
+      neighbor_y_list.push_back(neighbor.get_y());
     }
-    stat.isolated_steiner_num++;
-    std::optional<PlanarCoord> repair_coord = findRepairCoord(task, raw_coord);
-    if (!repair_coord.has_value()) {
-      stat.failed_repair_num++;
-      continue;
+  }
+  std::vector<int32_t> x_list = getRefineAxisList(ll_x, ur_x, current.get_x(), neighbor_x_list);
+  std::vector<int32_t> y_list = getRefineAxisList(ll_y, ur_y, current.get_y(), neighbor_y_list);
+  std::vector<PlanarCoord> candidate_list;
+  candidate_list.reserve(x_list.size() * y_list.size());
+  for (int32_t x : x_list) {
+    for (int32_t y : y_list) {
+      PlanarCoord candidate(x, y);
+      if (candidate != current && isInsideSearchRegion(task, candidate)) {
+        candidate_list.push_back(candidate);
+      }
     }
-    for (int32_t branch_idx : branch_idx_list) {
-      setBranchCoord(tree, branch_idx, *repair_coord);
+  }
+  return candidate_list;
+}
+
+void refineSteinerByCost(const TBTask& task, Flute::Tree& tree, TBRefineStat& stat)
+{
+  for (int32_t pass = 0; pass < kMaxRefinePassNum; pass++) {
+    NeighborList neighbor_list = getNeighborList(tree);
+    std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC> coord_branch_map;
+    for (int32_t branch_idx = tree.deg; branch_idx < getBranchNum(tree); branch_idx++) {
+      coord_branch_map[getBranchCoord(tree, branch_idx)].push_back(branch_idx);
     }
-    stat.repaired_steiner_num++;
+    bool moved = false;
+    for (const auto& [current, branch_idx_list] : coord_branch_map) {
+      if (getBranchCoord(tree, branch_idx_list.front()) != current) {
+        continue;
+      }
+      TBRefineScore best_score = getSteinerScore(task, tree, neighbor_list, branch_idx_list, current);
+      PlanarCoord best_coord = current;
+      for (const PlanarCoord& candidate : getSteinerCandidateList(task, tree, neighbor_list, branch_idx_list)) {
+        TBRefineScore candidate_score = getSteinerScore(task, tree, neighbor_list, branch_idx_list, candidate);
+        int32_t score_cmp = compareRefineScore(candidate_score, best_score);
+        if (score_cmp < 0 || (score_cmp == 0 && best_coord != current && CmpPlanarCoordByXASC()(candidate, best_coord))) {
+          best_score = candidate_score;
+          best_coord = candidate;
+        }
+      }
+      if (best_coord == current) {
+        continue;
+      }
+      for (int32_t branch_idx : branch_idx_list) {
+        setBranchCoord(tree, branch_idx, best_coord);
+      }
+      stat.refined_steiner_num++;
+      moved = true;
+    }
+    if (!moved) {
+      break;
+    }
   }
 }
 
-void refineFluteTree(const TBTask& task, Flute::Tree& tree, TBRefineStat& stat)
+void refineFluteTree(const TBTask& task, Flute::Tree& tree, TBRefineStat& stat, bool enable_steiner_refine)
 {
   if (!task.has_segment_cost_query()) {
     return;
@@ -331,7 +404,9 @@ void refineFluteTree(const TBTask& task, Flute::Tree& tree, TBRefineStat& stat)
   while (stat.shifted_edge_num < max_shift_num && shiftBestSteinerEdge(task, tree)) {
     stat.shifted_edge_num++;
   }
-  repairIsolatedSteiner(task, tree, stat);
+  if (enable_steiner_refine) {
+    refineSteinerByCost(task, tree, stat);
+  }
 }
 
 std::vector<int32_t> getUniqueAxisList(const std::vector<PlanarCoord>& coord_list, TBAxis axis)
@@ -459,16 +534,63 @@ double getTopoCost(const TBTask& task, const PlanarTopo& topo_list)
   return cost;
 }
 
-TBTopoCandidate finalizeCandidate(const TBTask& task, Flute::Tree& tree)
+int64_t getTopoWireLength(const PlanarTopo& topo_list)
+{
+  int64_t wire_length = 0;
+  for (const Segment<PlanarCoord>& segment : topo_list) {
+    wire_length += std::abs(static_cast<int64_t>(segment.get_first().get_x()) - segment.get_second().get_x())
+                   + std::abs(static_cast<int64_t>(segment.get_first().get_y()) - segment.get_second().get_y());
+  }
+  return wire_length;
+}
+
+PlanarTopo getThreePinTopo(const std::vector<PlanarCoord>& terminal_list, const PlanarCoord& steiner)
+{
+  PlanarTopo topo_list;
+  topo_list.reserve(terminal_list.size());
+  for (const PlanarCoord& terminal : terminal_list) {
+    if (terminal != steiner) {
+      topo_list.emplace_back(terminal, steiner);
+    }
+  }
+  return topo_list;
+}
+
+std::vector<int32_t> getCandidateAxisList(int32_t lower, int32_t upper, std::vector<int32_t> mandatory_list)
+{
+  std::erase_if(mandatory_list, [&](int32_t coord) { return coord < lower || upper < coord; });
+  std::ranges::sort(mandatory_list);
+  mandatory_list.erase(std::ranges::unique(mandatory_list).begin(), mandatory_list.end());
+
+  int64_t span = static_cast<int64_t>(upper) - lower;
+  if (span + 1 <= kMaxThreePinAxisNum) {
+    mandatory_list.clear();
+    for (int64_t coord = lower; coord <= upper; coord++) {
+      mandatory_list.push_back(static_cast<int32_t>(coord));
+    }
+    return mandatory_list;
+  }
+
+  int32_t sample_num = std::max(0, kMaxThreePinAxisNum - static_cast<int32_t>(mandatory_list.size()));
+  for (int32_t sample_idx = 0; sample_idx < sample_num; sample_idx++) {
+    int64_t offset = sample_num <= 1 ? span / 2 : span * sample_idx / (sample_num - 1);
+    mandatory_list.push_back(static_cast<int32_t>(lower + offset));
+  }
+  std::ranges::sort(mandatory_list);
+  mandatory_list.erase(std::ranges::unique(mandatory_list).begin(), mandatory_list.end());
+  return mandatory_list;
+}
+
+TBTopoCandidate finalizeCandidate(const TBTask& task, Flute::Tree& tree, bool enable_steiner_refine)
 {
   TBTopoCandidate candidate;
-  refineFluteTree(task, tree, candidate.refine_stat);
+  refineFluteTree(task, tree, candidate.refine_stat, enable_steiner_refine);
   candidate.topo_list = getTopoListByTree(tree);
   candidate.cost = getTopoCost(task, candidate.topo_list);
   return candidate;
 }
 
-TBTopoCandidate buildBaselineCandidate(const TBTask& task)
+TBTopoCandidate buildBaselineCandidate(const TBTask& task, bool enable_steiner_refine)
 {
   const std::vector<PlanarCoord>& coord_list = task.get_planar_coord_list();
   std::vector<Flute::DTYPE> x_list(coord_list.size());
@@ -478,12 +600,158 @@ TBTopoCandidate buildBaselineCandidate(const TBTask& task)
     y_list[coord_idx] = coord_list[coord_idx].get_y();
   }
   Flute::Tree tree = Flute::flute(static_cast<int32_t>(coord_list.size()), x_list.data(), y_list.data(), FLUTE_ACCURACY);
-  TBTopoCandidate candidate = finalizeCandidate(task, tree);
+  TBTopoCandidate candidate = finalizeCandidate(task, tree, enable_steiner_refine);
   Flute::free_tree(tree);
   return candidate;
 }
 
-std::optional<TBTopoCandidate> buildCongestionCandidate(const TBTask& task)
+TBTopoCandidate buildTerminalMSTCandidate(const TBTask& task)
+{
+  struct Link
+  {
+    int32_t parent = -1;
+    double cost = std::numeric_limits<double>::infinity();
+    int64_t wire_length = std::numeric_limits<int64_t>::max();
+  };
+  auto is_better = [](const Link& first, const Link& second) {
+    bool first_finite = std::isfinite(first.cost);
+    bool second_finite = std::isfinite(second.cost);
+    if (first_finite != second_finite) {
+      return first_finite;
+    }
+    if (first_finite && std::abs(first.cost - second.cost) > kCostEpsilon) {
+      return first.cost < second.cost;
+    }
+    if (first.wire_length != second.wire_length) {
+      return first.wire_length < second.wire_length;
+    }
+    return first.parent < second.parent;
+  };
+
+  const std::vector<PlanarCoord>& terminal_list = task.get_planar_coord_list();
+  std::vector<bool> visited(terminal_list.size(), false);
+  std::vector<Link> link_list(terminal_list.size());
+  TBTopoCandidate candidate;
+  visited.front() = true;
+  auto update_link = [&](int32_t parent_idx, int32_t child_idx) {
+    const PlanarCoord& parent = terminal_list[parent_idx];
+    const PlanarCoord& child = terminal_list[child_idx];
+    Link link{parent_idx, getPatternCost(task, parent, child),
+              std::abs(static_cast<int64_t>(parent.get_x()) - child.get_x())
+                  + std::abs(static_cast<int64_t>(parent.get_y()) - child.get_y())};
+    if (link_list[child_idx].parent < 0 || is_better(link, link_list[child_idx])) {
+      link_list[child_idx] = link;
+    }
+  };
+  for (int32_t child_idx = 1; child_idx < static_cast<int32_t>(terminal_list.size()); child_idx++) {
+    update_link(0, child_idx);
+  }
+  while (candidate.topo_list.size() + 1 < terminal_list.size()) {
+    int32_t best_idx = -1;
+    for (int32_t idx = 0; idx < static_cast<int32_t>(terminal_list.size()); idx++) {
+      if (!visited[idx] && (best_idx < 0 || is_better(link_list[idx], link_list[best_idx]))) {
+        best_idx = idx;
+      }
+    }
+    if (best_idx < 0) {
+      break;
+    }
+    visited[best_idx] = true;
+    candidate.topo_list.emplace_back(terminal_list[link_list[best_idx].parent], terminal_list[best_idx]);
+    for (int32_t idx = 0; idx < static_cast<int32_t>(terminal_list.size()); idx++) {
+      if (!visited[idx]) {
+        update_link(best_idx, idx);
+      }
+    }
+  }
+  candidate.cost = getTopoCost(task, candidate.topo_list);
+  return candidate;
+}
+
+std::optional<TBTopoCandidate> buildThreePinCongestionCandidate(const TBTask& task)
+{
+  const std::vector<PlanarCoord>& terminal_list = task.get_planar_coord_list();
+  int32_t ll_x = terminal_list.front().get_x();
+  int32_t ur_x = ll_x;
+  int32_t ll_y = terminal_list.front().get_y();
+  int32_t ur_y = ll_y;
+
+  std::vector<int32_t> terminal_x_list;
+  std::vector<int32_t> terminal_y_list;
+  for (const PlanarCoord& terminal : terminal_list) {
+    ll_x = std::min(ll_x, terminal.get_x());
+    ur_x = std::max(ur_x, terminal.get_x());
+    ll_y = std::min(ll_y, terminal.get_y());
+    ur_y = std::max(ur_y, terminal.get_y());
+    terminal_x_list.push_back(terminal.get_x());
+    terminal_y_list.push_back(terminal.get_y());
+  }
+  std::vector<int32_t> candidate_x_list = getCandidateAxisList(ll_x, ur_x, terminal_x_list);
+  std::vector<int32_t> candidate_y_list = getCandidateAxisList(ll_y, ur_y, terminal_y_list);
+
+  std::optional<TBTopoCandidate> best_candidate;
+  PlanarCoord best_steiner;
+  int64_t best_wire_length = std::numeric_limits<int64_t>::max();
+  int32_t candidate_num = 0;
+  std::set<PlanarCoord, CmpPlanarCoordByXASC> visited_set;
+  auto evaluateCandidate = [&](const PlanarCoord& steiner) {
+    if (candidate_num >= kMaxThreePinCandidateNum || !isInsideSearchRegion(task, steiner) || !visited_set.insert(steiner).second) {
+      return;
+    }
+    candidate_num++;
+    TBTopoCandidate candidate;
+    candidate.topo_list = getThreePinTopo(terminal_list, steiner);
+    candidate.cost = getTopoCost(task, candidate.topo_list);
+    if (!std::isfinite(candidate.cost)) {
+      return;
+    }
+    int64_t wire_length = getTopoWireLength(candidate.topo_list);
+    bool has_equal_cost = best_candidate.has_value() && std::abs(candidate.cost - best_candidate->cost) <= kCostEpsilon;
+    bool is_better = !best_candidate.has_value() || isStrictlyBetterCost(best_candidate->cost, candidate.cost)
+                     || (has_equal_cost && (wire_length < best_wire_length
+                                            || (wire_length == best_wire_length && CmpPlanarCoordByXASC()(steiner, best_steiner))));
+    if (is_better) {
+      best_candidate = std::move(candidate);
+      best_steiner = steiner;
+      best_wire_length = wire_length;
+    }
+  };
+
+  for (int32_t x : candidate_x_list) {
+    for (int32_t y : candidate_y_list) {
+      evaluateCandidate(PlanarCoord(x, y));
+    }
+  }
+  if (best_candidate.has_value() || !task.has_planar_search_region()) {
+    return best_candidate;
+  }
+
+  const PlanarRect& region = task.get_planar_search_region();
+  int32_t max_radius = std::max({ll_x - region.get_ll_x(), region.get_ur_x() - ur_x, ll_y - region.get_ll_y(), region.get_ur_y() - ur_y});
+  int32_t found_radius = -1;
+  for (int32_t radius = 1; radius <= max_radius && candidate_num < kMaxThreePinCandidateNum
+                           && (found_radius == -1 || radius <= found_radius + kThreePinExtraRadius);
+       radius++) {
+    int32_t expanded_ll_x = std::max(region.get_ll_x(), ll_x - radius);
+    int32_t expanded_ur_x = std::min(region.get_ur_x(), ur_x + radius);
+    int32_t expanded_ll_y = std::max(region.get_ll_y(), ll_y - radius);
+    int32_t expanded_ur_y = std::min(region.get_ur_y(), ur_y + radius);
+    for (int64_t x = expanded_ll_x; x <= expanded_ur_x && candidate_num < kMaxThreePinCandidateNum; x++) {
+      evaluateCandidate(PlanarCoord(static_cast<int32_t>(x), expanded_ll_y));
+      evaluateCandidate(PlanarCoord(static_cast<int32_t>(x), expanded_ur_y));
+    }
+    for (int64_t y = static_cast<int64_t>(expanded_ll_y) + 1; y < expanded_ur_y && candidate_num < kMaxThreePinCandidateNum; y++) {
+      evaluateCandidate(PlanarCoord(expanded_ll_x, static_cast<int32_t>(y)));
+      evaluateCandidate(PlanarCoord(expanded_ur_x, static_cast<int32_t>(y)));
+    }
+    if (found_radius == -1 && best_candidate.has_value()) {
+      found_radius = radius;
+    }
+  }
+  return best_candidate;
+}
+
+std::optional<TBTopoCandidate> buildWarpedCongestionCandidate(const TBTask& task)
 {
   const std::vector<PlanarCoord>& coord_list = task.get_planar_coord_list();
   std::vector<int32_t> raw_x_axis = getUniqueAxisList(coord_list, TBAxis::kX);
@@ -521,10 +789,15 @@ std::optional<TBTopoCandidate> buildCongestionCandidate(const TBTask& task)
   bool is_mapped = restoreRawCoordinates(tree, raw_x_axis, raw_y_axis, warped_x_axis, warped_y_axis);
   TBTopoCandidate candidate;
   if (is_mapped) {
-    candidate = finalizeCandidate(task, tree);
+    candidate = finalizeCandidate(task, tree, false);
   }
   Flute::free_tree(tree);
   return is_mapped ? std::optional<TBTopoCandidate>(std::move(candidate)) : std::nullopt;
+}
+
+std::optional<TBTopoCandidate> buildCongestionCandidate(const TBTask& task)
+{
+  return task.get_planar_coord_list().size() == 3 ? buildThreePinCongestionCandidate(task) : buildWarpedCongestionCandidate(task);
 }
 
 }  // namespace
@@ -576,8 +849,8 @@ std::vector<Segment<PlanarCoord>> TOPOBuilder::getPlanarTopoList(const TBTask& t
     return {};
   }
 
-  TBTopoCandidate selected_candidate = buildBaselineCandidate(task);
-  bool attempted_congestion_flute = task.is_congestion_driven() && coord_list.size() > 3 && task.has_segment_cost_query();
+  bool attempted_congestion_flute = task.is_congestion_driven() && coord_list.size() >= 3 && task.has_segment_cost_query();
+  TBTopoCandidate selected_candidate = buildBaselineCandidate(task, false);
   bool used_congestion_flute = false;
   if (attempted_congestion_flute) {
     std::optional<TBTopoCandidate> congestion_candidate = buildCongestionCandidate(task);
@@ -586,10 +859,27 @@ std::vector<Segment<PlanarCoord>> TOPOBuilder::getPlanarTopoList(const TBTask& t
       used_congestion_flute = true;
     }
   }
+  bool attempted_steiner_refine = false;
+  bool used_steiner_refine = false;
+  if (attempted_congestion_flute && coord_list.size() > 3 && !std::isfinite(selected_candidate.cost)) {
+    attempted_steiner_refine = true;
+    TBTopoCandidate refined_candidate = buildBaselineCandidate(task, true);
+    if (std::isfinite(refined_candidate.cost)) {
+      selected_candidate = std::move(refined_candidate);
+      used_steiner_refine = true;
+    }
+  }
+  bool used_terminal_mst = attempted_congestion_flute && !std::isfinite(selected_candidate.cost);
+  if (used_terminal_mst) {
+    selected_candidate = buildTerminalMSTCandidate(task);
+  }
 
   stat = selected_candidate.refine_stat;
   stat.attempted_congestion_flute = attempted_congestion_flute;
   stat.used_congestion_flute = used_congestion_flute;
+  stat.attempted_steiner_refine = attempted_steiner_refine;
+  stat.used_steiner_refine = used_steiner_refine;
+  stat.used_terminal_mst = used_terminal_mst;
   return std::move(selected_candidate.topo_list);
 }
 

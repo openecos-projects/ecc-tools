@@ -801,8 +801,11 @@ std::vector<PRCandidate> PlanarRouter::getPRCandidateListByTopo(PRModel& pr_mode
 
 bool PlanarRouter::shouldUseCongestionFlute(PRModel& pr_model, size_t unique_pin_num)
 {
-  if (unique_pin_num <= 3) {
+  if (unique_pin_num < 3) {
     return false;
+  }
+  if (unique_pin_num == 3) {
+    return true;
   }
   PRNet* curr_net = pr_model.get_curr_pr_task();
   double history_threshold = 0.64 * pr_model.get_pr_com_param().get_overflow_unit();

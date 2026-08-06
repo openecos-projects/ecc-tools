@@ -208,10 +208,11 @@ CanonicalTopo canonicalizeTopo(const std::vector<Segment<PlanarCoord>>& topo_lis
 
 bool isSameStat(const irt::TBRefineStat& first, const irt::TBRefineStat& second)
 {
-  return first.shifted_edge_num == second.shifted_edge_num && first.isolated_steiner_num == second.isolated_steiner_num
-         && first.repaired_steiner_num == second.repaired_steiner_num && first.failed_repair_num == second.failed_repair_num
+  return first.shifted_edge_num == second.shifted_edge_num && first.refined_steiner_num == second.refined_steiner_num
          && first.attempted_congestion_flute == second.attempted_congestion_flute
-         && first.used_congestion_flute == second.used_congestion_flute;
+         && first.used_congestion_flute == second.used_congestion_flute
+         && first.attempted_steiner_refine == second.attempted_steiner_refine && first.used_steiner_refine == second.used_steiner_refine
+         && first.used_terminal_mst == second.used_terminal_mst;
 }
 
 bool isTopoValid(const std::vector<PlanarCoord>& terminal_list, const std::vector<Segment<PlanarCoord>>& topo_list, const PlanarRect& region)
@@ -484,7 +485,7 @@ bool checkBaseline()
   irt::TBRefineStat stat;
   std::vector<Segment<PlanarCoord>> topo_list = RTTB.getPlanarTopoList(makeTask(getBaseTerminalList(), getWireCostQuery()), stat);
   passed = check(isSameTopo(topo_list, getBaseFluteTopoList()), "uniform finite cost keeps FLUTE topology") && passed;
-  passed = check(stat.shifted_edge_num == 0 && stat.isolated_steiner_num == 0, "uniform cost does not refine topology") && passed;
+  passed = check(stat.shifted_edge_num == 0 && stat.refined_steiner_num == 0, "uniform cost does not refine topology") && passed;
   return passed;
 }
 
@@ -513,13 +514,13 @@ bool checkCongestionFluteGuard()
 {
   irt::TBRefineStat low_degree_stat;
   std::vector<Segment<PlanarCoord>> low_degree_topo
-      = RTTB.getPlanarTopoList(makeTask({PlanarCoord(0, 0), PlanarCoord(10, 20), PlanarCoord(20, 0)}, getWireCostQuery(), true), low_degree_stat);
+      = RTTB.getPlanarTopoList(makeTask({PlanarCoord(0, 0), PlanarCoord(20, 20)}, getWireCostQuery(), true), low_degree_stat);
 
   irt::TBRefineStat uniform_stat;
   std::vector<Segment<PlanarCoord>> uniform_topo = RTTB.getPlanarTopoList(makeTask(getBaseTerminalList(), getWireCostQuery(), true), uniform_stat);
 
   bool passed = true;
-  passed = check(!low_degree_topo.empty() && !low_degree_stat.attempted_congestion_flute, "three-pin net skips congestion FLUTE") && passed;
+  passed = check(!low_degree_topo.empty() && !low_degree_stat.attempted_congestion_flute, "two-pin net skips congestion FLUTE") && passed;
   passed = check(uniform_stat.attempted_congestion_flute && !uniform_stat.used_congestion_flute,
                  "uniform cost rejects equal congestion FLUTE candidate")
            && passed;
@@ -595,25 +596,34 @@ irt::TBSegmentCostQuery getBlockedCoordQuery(const PlanarCoord& blocked_coord, b
   };
 }
 
-GridCostMap getBlockedMacroCostMap(const PlanarRect& macro)
+GridCostMap getMacroRingCostMap(const PlanarRect& macro, int32_t ring_width, double ring_cost)
 {
   const PlanarRect region(0, 0, 49, 49);
+  const PlanarRect expanded_macro(macro.get_ll_x() - ring_width, macro.get_ll_y() - ring_width, macro.get_ur_x() + ring_width,
+                                  macro.get_ur_y() + ring_width);
   GridCostMap cost_map(region);
+  auto getEdgeCost = [&](const PlanarCoord& first, const PlanarCoord& second) {
+    if (isInsideRect(macro, first) || isInsideRect(macro, second)) {
+      return kInf;
+    }
+    return isInsideRect(expanded_macro, first) || isInsideRect(expanded_macro, second) ? ring_cost : 1.0;
+  };
   for (int32_t y = region.get_ll_y(); y <= region.get_ur_y(); y++) {
     for (int32_t x = region.get_ll_x(); x < region.get_ur_x(); x++) {
-      if (isInsideRect(macro, PlanarCoord(x, y)) || isInsideRect(macro, PlanarCoord(x + 1, y))) {
-        cost_map.setHorizontalCost(x, y, kInf);
-      }
+      cost_map.setHorizontalCost(x, y, getEdgeCost(PlanarCoord(x, y), PlanarCoord(x + 1, y)));
     }
   }
   for (int32_t x = region.get_ll_x(); x <= region.get_ur_x(); x++) {
     for (int32_t y = region.get_ll_y(); y < region.get_ur_y(); y++) {
-      if (isInsideRect(macro, PlanarCoord(x, y)) || isInsideRect(macro, PlanarCoord(x, y + 1))) {
-        cost_map.setVerticalCost(x, y, kInf);
-      }
+      cost_map.setVerticalCost(x, y, getEdgeCost(PlanarCoord(x, y), PlanarCoord(x, y + 1)));
     }
   }
   return cost_map;
+}
+
+GridCostMap getBlockedMacroCostMap(const PlanarRect& macro)
+{
+  return getMacroRingCostMap(macro, 0, 1);
 }
 
 bool checkCongestionFluteInfHandling()
@@ -624,7 +634,6 @@ bool checkCongestionFluteInfHandling()
       = RTTB.getPlanarTopoList(makeTask(terminal_list, getBlockedCoordQuery(PlanarCoord(20, 20), false), true), partial_stat);
 
   irt::TBSegmentCostQuery fully_blocked_query = getBlockedCoordQuery({}, true);
-  std::vector<Segment<PlanarCoord>> normal_topo = RTTB.getPlanarTopoList(makeTask(terminal_list, fully_blocked_query));
   irt::TBRefineStat fully_blocked_stat;
   std::vector<Segment<PlanarCoord>> fully_blocked_topo
       = RTTB.getPlanarTopoList(makeTask(terminal_list, fully_blocked_query, true), fully_blocked_stat);
@@ -635,53 +644,97 @@ bool checkCongestionFluteInfHandling()
     passed = check(containsCoord(partial_topo, terminal), "partial INF congestion FLUTE keeps terminal") && passed;
   }
   passed = check(fully_blocked_stat.attempted_congestion_flute && !fully_blocked_stat.used_congestion_flute,
-                 "fully blocked bbox falls back to normal FLUTE")
+                 "fully blocked bbox rejects congestion FLUTE")
            && passed;
-  passed = check(isSameTopo(fully_blocked_topo, normal_topo), "fully blocked fallback keeps normal topology") && passed;
+  passed = check(fully_blocked_stat.used_terminal_mst, "fully blocked bbox uses terminal MST fallback") && passed;
+  passed = check(fully_blocked_topo.size() == terminal_list.size() - 1, "fully blocked fallback builds a tree") && passed;
+  for (const Segment<PlanarCoord>& segment : fully_blocked_topo) {
+    passed = check(std::ranges::find(terminal_list, segment.get_first()) != terminal_list.end()
+                       && std::ranges::find(terminal_list, segment.get_second()) != terminal_list.end(),
+                   "fully blocked fallback only uses terminals")
+             && passed;
+  }
   return passed;
 }
 
-bool checkIsolatedSteinerRepair()
+bool checkThreePinCongestionAvoidsMacro()
 {
   const PlanarRect region(0, 0, 49, 49);
   const PlanarRect macro(4, 0, 16, 8);
   std::vector<PlanarCoord> terminal_list = {PlanarCoord(0, 0), PlanarCoord(10, 20), PlanarCoord(20, 0)};
   PlanarCoord raw_steiner(10, 0);
   std::vector<Segment<PlanarCoord>> raw_topo = RTTB.getPlanarTopoList(makeTask(terminal_list));
+  irt::TBSegmentCostQuery query = getBlockedMacroCostMap(macro).getQuery();
   irt::TBRefineStat stat;
-  std::vector<Segment<PlanarCoord>> topo_list
-      = RTTB.getPlanarTopoList(makeTask(terminal_list, getBlockedMacroCostMap(macro).getQuery()), stat);
+  std::vector<Segment<PlanarCoord>> topo_list = RTTB.getPlanarTopoList(makeTask(terminal_list, query, true), stat);
+  std::vector<Segment<PlanarCoord>> repeated_topo = RTTB.getPlanarTopoList(makeTask(terminal_list, query, true));
 
   bool passed = true;
   passed = check(isInsideRect(macro, raw_steiner) && containsCoord(raw_topo, raw_steiner), "full-layer macro contains raw Steiner") && passed;
   passed = check(std::ranges::none_of(terminal_list, [&](const PlanarCoord& terminal) { return isInsideRect(macro, terminal); }),
                  "full-layer macro excludes all terminals")
            && passed;
-  passed = check(stat.isolated_steiner_num == 1 && stat.repaired_steiner_num == 1 && stat.failed_repair_num == 0,
-                 "isolated Steiner is repaired")
+  passed = check(!std::isfinite(getTopoCost(raw_topo, query)), "full-layer macro blocks normal FLUTE topology") && passed;
+  passed = check(stat.attempted_congestion_flute && stat.used_congestion_flute, "three-pin congestion FLUTE is selected") && passed;
+  passed = check(stat.shifted_edge_num == 0 && !stat.attempted_steiner_refine && !stat.used_terminal_mst,
+                 "three-pin congestion FLUTE avoids fallback")
            && passed;
-  passed = check(!containsCoord(topo_list, raw_steiner), "repaired topology leaves isolated coordinate") && passed;
+  passed = check(std::isfinite(getTopoCost(topo_list, query)), "three-pin congestion topology has finite cost") && passed;
+  passed = check(!containsCoord(topo_list, raw_steiner), "three-pin congestion topology leaves blocked coordinate") && passed;
   passed = check(std::ranges::none_of(getSteinerCoordList(terminal_list, topo_list),
                                      [&](const PlanarCoord& steiner) { return isInsideRect(macro, steiner); }),
-                 "repaired topology keeps Steiner coordinates outside full-layer macro")
+                 "three-pin congestion topology keeps Steiner outside full-layer macro")
            && passed;
   for (const PlanarCoord& terminal : terminal_list) {
-    passed = check(containsCoord(topo_list, terminal), "repair keeps terminal coordinate") && passed;
+    passed = check(containsCoord(topo_list, terminal), "three-pin congestion topology keeps terminal") && passed;
   }
-  passed = check(isTopoValid(terminal_list, topo_list, region), "full-layer macro repair topology is valid") && passed;
+  passed = check(isTopoValid(terminal_list, topo_list, region), "three-pin congestion topology is valid") && passed;
+  passed = check(canonicalizeTopo(topo_list) == canonicalizeTopo(repeated_topo), "three-pin congestion topology is deterministic") && passed;
   return passed;
 }
 
-bool checkFailedRepair()
+bool checkThreePinCongestionOutsidePinBBox()
 {
+  const PlanarRect region(0, 0, 49, 49);
+  std::vector<PlanarCoord> terminal_list = {PlanarCoord(10, 10), PlanarCoord(15, 20), PlanarCoord(20, 10)};
+  GridCostMap cost_map(region, kInf);
+  for (int32_t x = 10; x < 20; x++) {
+    cost_map.setHorizontalCost(x, 9, 1);
+  }
+  cost_map.setVerticalCost(10, 9, 1);
+  cost_map.setVerticalCost(20, 9, 1);
+  for (int32_t y = 9; y < 20; y++) {
+    cost_map.setVerticalCost(15, y, 1);
+  }
+  irt::TBSegmentCostQuery query = cost_map.getQuery();
+  irt::TBRefineStat stat;
+  std::vector<Segment<PlanarCoord>> topo_list = RTTB.getPlanarTopoList(makeTask(terminal_list, query, true), stat);
+  std::vector<PlanarCoord> steiner_list = getSteinerCoordList(terminal_list, topo_list);
+
+  bool passed = true;
+  passed = check(stat.attempted_congestion_flute && stat.used_congestion_flute, "three-pin congestion searches outside pin bbox") && passed;
+  passed = check(!stat.attempted_steiner_refine && !stat.used_terminal_mst, "outside-bbox three-pin congestion avoids fallback")
+           && passed;
+  passed = check(std::isfinite(getTopoCost(topo_list, query)), "outside-bbox three-pin topology has finite cost") && passed;
+  passed = check(std::ranges::any_of(steiner_list, [](const PlanarCoord& steiner) { return steiner.get_y() < 10; }),
+                 "three-pin congestion places Steiner outside pin bbox")
+           && passed;
+  passed = check(isTopoValid(terminal_list, topo_list, region), "outside-bbox three-pin topology is valid") && passed;
+  return passed;
+}
+
+bool checkNormalDefersBlockedSteiner()
+{
+  const PlanarRect macro(4, 0, 16, 8);
   std::vector<PlanarCoord> terminal_list = {PlanarCoord(0, 0), PlanarCoord(10, 20), PlanarCoord(20, 0)};
   irt::TBRefineStat stat;
-  std::vector<Segment<PlanarCoord>> topo_list = RTTB.getPlanarTopoList(makeTask(terminal_list, getBlockedCoordQuery({}, true)), stat);
+  std::vector<Segment<PlanarCoord>> topo_list = RTTB.getPlanarTopoList(makeTask(terminal_list, getBlockedMacroCostMap(macro).getQuery()), stat);
   bool passed = true;
-  passed = check(stat.isolated_steiner_num == 1 && stat.repaired_steiner_num == 0 && stat.failed_repair_num == 1,
-                 "fully blocked search region records failed repair")
+  passed = check(!stat.attempted_steiner_refine && !stat.used_terminal_mst, "normal mode skips congestion fallback") && passed;
+  passed = check(containsCoord(topo_list, PlanarCoord(10, 0)), "normal mode defers blocked Steiner handling") && passed;
+  passed = check(!std::isfinite(getTopoCost(topo_list, getBlockedMacroCostMap(macro).getQuery())),
+                 "deferred normal topology remains blocked")
            && passed;
-  passed = check(containsCoord(topo_list, PlanarCoord(10, 0)), "failed repair keeps raw Steiner") && passed;
   return passed;
 }
 
@@ -724,7 +777,7 @@ bool checkFiniteCorridor()
   return passed;
 }
 
-bool checkMultipleSteinerRepair()
+bool checkHighDegreeSteinerRefine()
 {
   const PlanarRect region(0, 0, 49, 49);
   std::vector<PlanarCoord> terminal_list
@@ -732,18 +785,26 @@ bool checkMultipleSteinerRepair()
   std::vector<Segment<PlanarCoord>> raw_topo = RTTB.getPlanarTopoList(makeTask(terminal_list));
   std::vector<PlanarCoord> raw_steiner_list = getSteinerCoordList(terminal_list, raw_topo);
   irt::TBSegmentCostQuery query = getSteinerBlockedCostMap(raw_steiner_list).getQuery();
+  int64_t query_num = 0;
+  irt::TBSegmentCostQuery counted_query = [&query_num, query](const PlanarCoord& first, const PlanarCoord& second) {
+    query_num++;
+    return query(first, second);
+  };
   irt::TBRefineStat stat;
-  std::vector<Segment<PlanarCoord>> repaired_topo = RTTB.getPlanarTopoList(makeTask(terminal_list, query), stat);
+  std::vector<Segment<PlanarCoord>> refined_topo = RTTB.getPlanarTopoList(makeTask(terminal_list, counted_query, true), stat);
 
   bool passed = true;
-  passed = check(raw_steiner_list.size() >= 2, "multiple repair case has multiple raw Steiner coordinates") && passed;
-  passed = check(stat.isolated_steiner_num >= 2 && stat.repaired_steiner_num == stat.isolated_steiner_num && stat.failed_repair_num == 0,
-                 "multiple isolated Steiner coordinates are repaired")
+  passed = check(raw_steiner_list.size() >= 2, "high-degree case has multiple raw Steiner coordinates") && passed;
+  passed = check(stat.attempted_steiner_refine && stat.used_steiner_refine && stat.refined_steiner_num > 0,
+                 "high-degree blocked topology uses Steiner refinement")
            && passed;
+  passed = check(!stat.used_terminal_mst, "finite high-degree refinement avoids terminal MST") && passed;
   for (const PlanarCoord& raw_steiner : raw_steiner_list) {
-    passed = check(!containsCoord(repaired_topo, raw_steiner), "multiple repair leaves blocked Steiner coordinate") && passed;
+    passed = check(!containsCoord(refined_topo, raw_steiner), "high-degree refinement leaves blocked Steiner coordinate") && passed;
   }
-  passed = check(isTopoValid(terminal_list, repaired_topo, region), "multiple repair topology is valid") && passed;
+  passed = check(std::isfinite(getTopoCost(refined_topo, query)), "high-degree refinement produces finite topology") && passed;
+  passed = check(isTopoValid(terminal_list, refined_topo, region), "high-degree refined topology is valid") && passed;
+  passed = check(query_num <= 50000, "high-degree refinement bounds cost queries") && passed;
   return passed;
 }
 
@@ -794,11 +855,50 @@ bool checkPartialLayerMacroKeepsSteiner()
   }
   passed = check(canonicalizeTopo(selected_topo) == canonicalizeTopo(baseline_topo), "partial-layer macro keeps FLUTE topology") && passed;
   passed = check(containsCoord(selected_topo, steiner), "partial-layer macro keeps Steiner coordinate") && passed;
-  passed = check(stat.shifted_edge_num == 0 && stat.isolated_steiner_num == 0 && stat.repaired_steiner_num == 0 && stat.failed_repair_num == 0,
+  passed = check(stat.shifted_edge_num == 0 && stat.refined_steiner_num == 0 && !stat.used_terminal_mst,
                  "partial-layer macro does not refine Steiner")
            && passed;
   passed = check(std::isfinite(getTopoCost(selected_topo, query)), "partial-layer macro topology has finite cost") && passed;
   passed = check(isTopoValid(terminal_list, selected_topo, region), "partial-layer macro topology is valid") && passed;
+  return passed;
+}
+
+bool checkFullLayerMacroCongestionRing()
+{
+  const PlanarRect region(0, 0, 49, 49);
+  const PlanarRect macro(18, 20, 36, 36);
+  const PlanarRect expanded_macro(16, 18, 38, 38);
+  const PlanarCoord raw_steiner(30, 30);
+  std::vector<PlanarCoord> terminal_list = getBaseTerminalList();
+  irt::TBSegmentCostQuery query = getMacroRingCostMap(macro, 2, 50).getQuery();
+  irt::TBSegmentCostQuery strict_avoid_query = getMacroRingCostMap(macro, 2, kInf).getQuery();
+  std::vector<Segment<PlanarCoord>> raw_topo = RTTB.getPlanarTopoList(makeTask(terminal_list));
+  irt::TBRefineStat stat;
+  std::vector<Segment<PlanarCoord>> selected_topo = RTTB.getPlanarTopoList(makeTask(terminal_list, query, true), stat);
+  std::vector<Segment<PlanarCoord>> repeated_topo = RTTB.getPlanarTopoList(makeTask(terminal_list, query, true));
+
+  bool passed = true;
+  passed = check(isInsideRect(macro, raw_steiner) && containsCoord(raw_topo, raw_steiner), "full-layer macro contains raw Steiner") && passed;
+  passed = check(std::ranges::none_of(terminal_list, [&](const PlanarCoord& terminal) { return isInsideRect(expanded_macro, terminal); }),
+                 "full-layer macro ring excludes all terminals")
+           && passed;
+  passed = check(!std::isfinite(query(PlanarCoord(18, 20), PlanarCoord(19, 20))), "full-layer macro edges are INF") && passed;
+  passed = check(query(PlanarCoord(16, 18), PlanarCoord(17, 18)) == 50, "macro congestion ring has high finite cost") && passed;
+  passed = check(query(PlanarCoord(0, 0), PlanarCoord(1, 0)) == 1, "edges outside macro ring keep base cost") && passed;
+  passed = check(!std::isfinite(getTopoCost(raw_topo, query)), "full-layer macro blocks raw FLUTE topology") && passed;
+  passed = check(stat.attempted_congestion_flute, "full-layer macro ring attempts congestion FLUTE") && passed;
+  passed = check(stat.used_congestion_flute || stat.shifted_edge_num > 0, "full-layer macro ring selects a cost-driven topology") && passed;
+  passed = check(!stat.attempted_steiner_refine && !stat.used_terminal_mst, "full-layer macro ring avoids fallback")
+           && passed;
+  passed = check(std::isfinite(getTopoCost(selected_topo, query)), "full-layer macro ring topology has finite cost") && passed;
+  passed = check(canonicalizeTopo(selected_topo) != canonicalizeTopo(raw_topo), "full-layer macro ring changes raw topology") && passed;
+  passed = check(std::isfinite(getTopoCost(selected_topo, strict_avoid_query)), "selected topology can avoid macro congestion ring") && passed;
+  passed = check(std::ranges::none_of(getSteinerCoordList(terminal_list, selected_topo),
+                                     [&](const PlanarCoord& steiner) { return isInsideRect(expanded_macro, steiner); }),
+                 "selected Steiner coordinates avoid macro congestion ring")
+           && passed;
+  passed = check(isTopoValid(terminal_list, selected_topo, region), "full-layer macro ring topology is valid") && passed;
+  passed = check(canonicalizeTopo(selected_topo) == canonicalizeTopo(repeated_topo), "full-layer macro ring topology is deterministic") && passed;
   return passed;
 }
 
@@ -1226,26 +1326,27 @@ bool generatePlots(const std::filesystem::path& plot_dir)
                             .marker_list = {{blocked_coord, "blocked coordinate", "#dc2626"}},
                             .cost_query = blocked_query});
 
-  std::vector<PlanarCoord> repair_terminal_list = {PlanarCoord(0, 0), PlanarCoord(10, 20), PlanarCoord(20, 0)};
+  std::vector<PlanarCoord> three_pin_terminal_list = {PlanarCoord(0, 0), PlanarCoord(10, 20), PlanarCoord(20, 0)};
   PlanarCoord raw_steiner(10, 0);
-  PlanarRect repair_macro(4, 0, 16, 8);
-  std::vector<Segment<PlanarCoord>> raw_repair_topo = RTTB.getPlanarTopoList(makeTask(repair_terminal_list));
-  irt::TBSegmentCostQuery repair_query = getBlockedMacroCostMap(repair_macro).getQuery();
-  irt::TBRefineStat repair_stat;
-  std::vector<Segment<PlanarCoord>> repaired_topo
-      = RTTB.getPlanarTopoList(makeTask(repair_terminal_list, repair_query), repair_stat);
-  plot_case_list.push_back({.file_name = "05_steiner_repair.svg",
-                            .title = "Isolated Steiner repair",
-                            .summary = "isolated=" + std::to_string(repair_stat.isolated_steiner_num) + ", repaired="
-                                       + std::to_string(repair_stat.repaired_steiner_num) + ", failed="
-                                       + std::to_string(repair_stat.failed_repair_num),
+  PlanarRect three_pin_macro(4, 0, 16, 8);
+  std::vector<Segment<PlanarCoord>> raw_three_pin_topo = RTTB.getPlanarTopoList(makeTask(three_pin_terminal_list));
+  irt::TBSegmentCostQuery three_pin_query = getBlockedMacroCostMap(three_pin_macro).getQuery();
+  irt::TBRefineStat three_pin_stat;
+  std::vector<Segment<PlanarCoord>> congestion_topo
+      = RTTB.getPlanarTopoList(makeTask(three_pin_terminal_list, three_pin_query, true), three_pin_stat);
+  plot_case_list.push_back({.file_name = "05_three_pin_congestion.svg",
+                            .title = "Three-pin congestion FLUTE",
+                            .summary = "attempted=" + std::to_string(three_pin_stat.attempted_congestion_flute) + ", used="
+                                       + std::to_string(three_pin_stat.used_congestion_flute) + ", cost="
+                                       + formatCost(getTopoCost(congestion_topo, three_pin_query)) + ", mst="
+                                       + std::to_string(three_pin_stat.used_terminal_mst),
                             .region = PlanarRect(0, 0, 24, 24),
-                            .terminal_list = repair_terminal_list,
-                            .macro_rect_list = {repair_macro},
+                            .terminal_list = three_pin_terminal_list,
+                            .macro_rect_list = {three_pin_macro},
                             .macro_label = "full-layer macro",
-                            .topo_layer_list = {{"raw", raw_repair_topo, "#6b7280", true}, {"repaired", repaired_topo, "#2563eb", false}},
-                            .marker_list = {{raw_steiner, "raw isolated Steiner", "#dc2626"}},
-                            .cost_query = repair_query});
+                            .topo_layer_list = {{"raw", raw_three_pin_topo, "#6b7280", true}, {"congestion", congestion_topo, "#2563eb", false}},
+                            .marker_list = {{raw_steiner, "raw blocked Steiner", "#dc2626"}},
+                            .cost_query = three_pin_query});
 
   std::vector<PlanarCoord> hotspot_terminal_list = getMultiHotspotTerminalList();
   irt::TBSegmentCostQuery hotspot_query = getMultiHotspotCostMap().getQuery();
@@ -1281,28 +1382,28 @@ bool generatePlots(const std::filesystem::path& plot_dir)
                                                 {"selected", corridor_selected, "#16a34a", false}},
                             .cost_query = corridor_query});
 
-  std::vector<PlanarCoord> multi_repair_terminal_list
+  std::vector<PlanarCoord> refine_terminal_list
       = {PlanarCoord(0, 0), PlanarCoord(0, 40), PlanarCoord(10, 15), PlanarCoord(25, 30), PlanarCoord(40, 0), PlanarCoord(40, 40)};
-  std::vector<Segment<PlanarCoord>> multi_repair_raw = RTTB.getPlanarTopoList(makeTask(multi_repair_terminal_list));
-  std::vector<PlanarCoord> multi_raw_steiner_list = getSteinerCoordList(multi_repair_terminal_list, multi_repair_raw);
-  irt::TBSegmentCostQuery multi_repair_query = getSteinerBlockedCostMap(multi_raw_steiner_list).getQuery();
-  irt::TBRefineStat multi_repair_stat;
-  std::vector<Segment<PlanarCoord>> multi_repaired
-      = RTTB.getPlanarTopoList(makeTask(multi_repair_terminal_list, multi_repair_query), multi_repair_stat);
-  std::vector<PlotMarker> multi_repair_marker_list;
+  std::vector<Segment<PlanarCoord>> refine_raw = RTTB.getPlanarTopoList(makeTask(refine_terminal_list));
+  std::vector<PlanarCoord> multi_raw_steiner_list = getSteinerCoordList(refine_terminal_list, refine_raw);
+  irt::TBSegmentCostQuery refine_query = getSteinerBlockedCostMap(multi_raw_steiner_list).getQuery();
+  irt::TBRefineStat refine_stat;
+  std::vector<Segment<PlanarCoord>> refined_topo = RTTB.getPlanarTopoList(makeTask(refine_terminal_list, refine_query, true), refine_stat);
+  std::vector<PlotMarker> refine_marker_list;
   for (const PlanarCoord& steiner : multi_raw_steiner_list) {
-    multi_repair_marker_list.push_back({steiner, "blocked Steiner", "#dc2626"});
+    refine_marker_list.push_back({steiner, "blocked Steiner", "#dc2626"});
   }
-  plot_case_list.push_back({.file_name = "08_multiple_steiner_repair.svg",
-                            .title = "Multiple isolated Steiner repairs",
-                            .summary = "isolated=" + std::to_string(multi_repair_stat.isolated_steiner_num) + ", repaired="
-                                       + std::to_string(multi_repair_stat.repaired_steiner_num) + ", shifted="
-                                       + std::to_string(multi_repair_stat.shifted_edge_num),
+  plot_case_list.push_back({.file_name = "08_high_degree_refine.svg",
+                            .title = "High-degree Steiner refinement",
+                            .summary = "attempted=" + std::to_string(refine_stat.attempted_steiner_refine) + ", used="
+                                       + std::to_string(refine_stat.used_steiner_refine) + ", refined="
+                                       + std::to_string(refine_stat.refined_steiner_num) + ", cost="
+                                       + formatCost(getTopoCost(refined_topo, refine_query)),
                             .region = region,
-                            .terminal_list = multi_repair_terminal_list,
-                            .topo_layer_list = {{"raw", multi_repair_raw, "#6b7280", true}, {"repaired", multi_repaired, "#2563eb", false}},
-                            .marker_list = std::move(multi_repair_marker_list),
-                            .cost_query = multi_repair_query});
+                            .terminal_list = refine_terminal_list,
+                            .topo_layer_list = {{"raw", refine_raw, "#6b7280", true}, {"refined", refined_topo, "#2563eb", false}},
+                            .marker_list = std::move(refine_marker_list),
+                            .cost_query = refine_query});
 
   std::vector<PlanarCoord> stress_terminal_list = getHighDegreeTerminalList();
   irt::TBSegmentCostQuery stress_query = getHighDegreeCostMap().getQuery();
@@ -1331,14 +1432,35 @@ bool generatePlots(const std::filesystem::path& plot_dir)
   plot_case_list.push_back({.file_name = "10_partial_layer_macro.svg",
                             .title = "Partial-layer macro keeps Steiner",
                             .summary = "steiner=(" + std::to_string(macro_steiner.get_x()) + "," + std::to_string(macro_steiner.get_y())
-                                       + "), finite_escape=1, shifted=" + std::to_string(partial_macro_stat.shifted_edge_num) + ", repaired="
-                                       + std::to_string(partial_macro_stat.repaired_steiner_num),
+                                       + "), finite_escape=1, shifted=" + std::to_string(partial_macro_stat.shifted_edge_num) + ", refined="
+                                       + std::to_string(partial_macro_stat.refined_steiner_num),
                             .region = region,
                             .terminal_list = base_terminal_list,
                             .macro_rect_list = {partial_macro},
                             .macro_label = "partial-layer macro",
                             .topo_layer_list = {{"selected", partial_macro_topo, "#0f766e", false}},
                             .cost_query = partial_macro_query});
+
+  PlanarRect full_layer_macro(18, 20, 36, 36);
+  PlanarCoord blocked_macro_steiner(30, 30);
+  irt::TBSegmentCostQuery macro_ring_query = getMacroRingCostMap(full_layer_macro, 2, 50).getQuery();
+  irt::TBRefineStat macro_ring_stat;
+  std::vector<Segment<PlanarCoord>> macro_ring_topo
+      = RTTB.getPlanarTopoList(makeTask(base_terminal_list, macro_ring_query, true), macro_ring_stat);
+  plot_case_list.push_back({.file_name = "11_full_layer_macro_ring.svg",
+                            .title = "Full-layer macro with congestion ring",
+                            .summary = "attempted=" + std::to_string(macro_ring_stat.attempted_congestion_flute) + ", used="
+                                       + std::to_string(macro_ring_stat.used_congestion_flute) + ", shifted="
+                                       + std::to_string(macro_ring_stat.shifted_edge_num) + ", cost="
+                                       + formatCost(getTopoCost(macro_ring_topo, macro_ring_query)) + ", refined="
+                                       + std::to_string(macro_ring_stat.refined_steiner_num),
+                            .region = region,
+                            .terminal_list = base_terminal_list,
+                            .macro_rect_list = {full_layer_macro},
+                            .macro_label = "full-layer macro",
+                            .topo_layer_list = {{"raw", baseline, "#6b7280", true}, {"selected", macro_ring_topo, "#0f766e", false}},
+                            .marker_list = {{blocked_macro_steiner, "raw blocked Steiner", "#dc2626"}},
+                            .cost_query = macro_ring_query});
 
   bool generated = true;
   for (const PlotCase& plot_case : plot_case_list) {
@@ -1378,13 +1500,15 @@ int main(int argc, char* argv[])
   passed = checkCongestionFluteCostGuard() && passed;
   passed = checkCongestionFluteQueryBound() && passed;
   passed = checkCongestionFluteInfHandling() && passed;
-  passed = checkIsolatedSteinerRepair() && passed;
-  passed = checkFailedRepair() && passed;
+  passed = checkThreePinCongestionAvoidsMacro() && passed;
+  passed = checkThreePinCongestionOutsidePinBBox() && passed;
+  passed = checkNormalDefersBlockedSteiner() && passed;
   passed = checkMultiHotspotCompetition() && passed;
   passed = checkFiniteCorridor() && passed;
-  passed = checkMultipleSteinerRepair() && passed;
+  passed = checkHighDegreeSteinerRefine() && passed;
   passed = checkHighDegreeStress() && passed;
   passed = checkPartialLayerMacroKeepsSteiner() && passed;
+  passed = checkFullLayerMacroCongestionRing() && passed;
   passed = checkSteinerUsageClassification() && passed;
   if (options.plot_dir.has_value()) {
     passed = generatePlots(*options.plot_dir) && passed;

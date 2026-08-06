@@ -26,11 +26,12 @@ namespace irt {
 struct TBRefineStat
 {
   int32_t shifted_edge_num = 0;
-  int32_t isolated_steiner_num = 0;
-  int32_t repaired_steiner_num = 0;
-  int32_t failed_repair_num = 0;
+  int32_t refined_steiner_num = 0;
   bool attempted_congestion_flute = false;
   bool used_congestion_flute = false;
+  bool attempted_steiner_refine = false;
+  bool used_steiner_refine = false;
+  bool used_terminal_mst = false;
 };
 
 class TOPOBuilder
