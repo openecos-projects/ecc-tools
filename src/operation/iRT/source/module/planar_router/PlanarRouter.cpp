@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 #include "GDSPlotter.hpp"
@@ -201,30 +202,20 @@ void PlanarRouter::buildPlanarRoutingEdgeMap()
 void PlanarRouter::initMacroGridRectList()
 {
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   std::vector<Macro>& macro_list = RTDM.getDatabase().get_macro_list();
   _macro_grid_rect_list.clear();
-  _macro_obs_rect_list.clear();
   _macro_grid_rect_list.reserve(macro_list.size());
-  _macro_obs_rect_list.reserve(macro_list.size());
   for (Macro& macro : macro_list) {
-    PlanarRect macro_rect = RTUTIL.getClosedGCellGridRect(macro.get_body_rect(), gcell_axis);
-    _macro_grid_rect_list.push_back(macro_rect);
-    _macro_obs_rect_list.emplace_back(std::max(0, macro_rect.get_ll_x() - 1), std::max(0, macro_rect.get_ll_y() - 1),
-                                      std::min(gcell_map.get_x_size() - 1, macro_rect.get_ur_x() + 1),
-                                      std::min(gcell_map.get_y_size() - 1, macro_rect.get_ur_y() + 1));
+    _macro_grid_rect_list.push_back(RTUTIL.getClosedGCellGridRect(macro.get_body_rect(), gcell_axis));
   }
 }
 
-PREdgeCost PlanarRouter::getRoutingEdgeCost(const RoutingEdge& routing_edge)
+PREdgeCost PlanarRouter::getRoutingEdgeCost(int32_t supply, int32_t demand)
 {
   constexpr double saturation_start_ratio = 0.8;
   constexpr double hotspot_start_ratio = 0.9;
 
-  // Evaluate the edge after adding one unit of demand. Overflow uses a steep penalty; otherwise usage cost grows quartically.
   PREdgeCost edge_cost;
-  int32_t supply = routing_edge.get_supply();
-  int32_t demand = routing_edge.get_demand() + 1;
   if (supply <= 0 || demand > supply) {
     double overflow_ratio = demand - std::max(supply, 0) + 1;
     double overflow_ratio_square = overflow_ratio * overflow_ratio;
@@ -252,6 +243,64 @@ PREdgeCost PlanarRouter::getRoutingEdgeCost(const RoutingEdge& routing_edge)
   edge_cost.is_hotspot = true;
   edge_cost.unit_cost += 2.0 * hotspot_ratio * hotspot_ratio;
   return edge_cost;
+}
+
+PREdgeCost PlanarRouter::getRoutingEdgeCost(const RoutingEdge& routing_edge)
+{
+  return getRoutingEdgeCost(routing_edge.get_supply(), routing_edge.get_demand() + 1);
+}
+
+double PlanarRouter::getTopologyEdgeCost(PRModel& pr_model, RoutingEdge& routing_edge)
+{
+  constexpr double wire_cost = 1;
+  PRNet* curr_net = pr_model.get_curr_pr_task();
+  int32_t net_idx = curr_net->get_net_idx();
+  if (routing_edge.get_ignore_net_set().contains(net_idx)) {
+    return wire_cost;
+  }
+  if (routing_edge.get_supply() <= 0) {
+    return std::numeric_limits<double>::infinity();
+  }
+
+  int32_t effective_demand = routing_edge.get_demand() - curr_net->get_routing_edge_set().contains(&routing_edge);
+  effective_demand = std::max(0, effective_demand);
+  PREdgeCost edge_cost = getRoutingEdgeCost(routing_edge.get_supply(), effective_demand + 1);
+  return wire_cost + edge_cost.getTotalCost(pr_model.get_pr_com_param().get_overflow_unit(), routing_edge.get_congestion_cost());
+}
+
+double PlanarRouter::getTopologySegmentCost(PRModel& pr_model, const PlanarCoord& first_coord, const PlanarCoord& second_coord)
+{
+  if (first_coord == second_coord) {
+    return 0;
+  }
+  if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
+    return std::numeric_limits<double>::infinity();
+  }
+
+  GridMap<RoutingEdge>& routing_h_edge_map = RTDM.getDatabase().get_planar_routing_h_edge_map();
+  GridMap<RoutingEdge>& routing_v_edge_map = RTDM.getDatabase().get_planar_routing_v_edge_map();
+  bool is_horizontal = RTUTIL.isHorizontal(first_coord, second_coord);
+  int32_t first_x = std::min(first_coord.get_x(), second_coord.get_x());
+  int32_t second_x = std::max(first_coord.get_x(), second_coord.get_x());
+  int32_t first_y = std::min(first_coord.get_y(), second_coord.get_y());
+  int32_t second_y = std::max(first_coord.get_y(), second_coord.get_y());
+  double segment_cost = 0;
+  int32_t first_idx = is_horizontal ? first_x : first_y;
+  int32_t second_idx = is_horizontal ? second_x : second_y;
+  for (int32_t idx = first_idx; idx < second_idx; idx++) {
+    int32_t edge_x = is_horizontal ? idx : first_x;
+    int32_t edge_y = is_horizontal ? first_y : idx;
+    GridMap<RoutingEdge>& edge_map = is_horizontal ? routing_h_edge_map : routing_v_edge_map;
+    if (!edge_map.isInside(edge_x, edge_y)) {
+      return std::numeric_limits<double>::infinity();
+    }
+    double edge_cost = getTopologyEdgeCost(pr_model, edge_map[edge_x][edge_y]);
+    if (!std::isfinite(edge_cost)) {
+      return edge_cost;
+    }
+    segment_cost += edge_cost;
+  }
+  return segment_cost;
 }
 
 void PlanarRouter::updateRoutingEdgeToGraph(RoutingEdge& routing_edge, PREdgeCost& edge_cost, int32_t curr_net_idx, ChangeType change_type,
@@ -322,11 +371,11 @@ void PlanarRouter::runRouteFlow(PRModel& pr_model)
   constexpr int32_t partial_rip_up_guard = 1;
   std::vector<PRNet*>& pr_task_list = pr_model.get_pr_task_list();
 
-  routePRNetList(pr_model, pr_task_list, "initial LZ pattern", PRRouteMode::kLZPattern);
+  routePRNetList(pr_model, pr_task_list, "initial LZ pattern", PRRouteMode::kLZPattern, PRTopoMode::kNormal);
   updateCongestion(pr_model);
-  routePRNetList(pr_model, pr_task_list, "congestion LZ pattern", PRRouteMode::kLZPattern);
+  routePRNetList(pr_model, pr_task_list, "congestion LZ pattern", PRRouteMode::kLZPattern, PRTopoMode::kCongestion);
   updateCongestion(pr_model);
-  routePRNetList(pr_model, getOverflowPRNetList(pr_model), "overflow All pattern", PRRouteMode::kAllPattern);
+  routePRNetList(pr_model, getOverflowPRNetList(pr_model), "overflow All pattern", PRRouteMode::kAllPattern, PRTopoMode::kCongestion);
   updateCongestion(pr_model);
 
   for (int32_t iter = 0; iter < max_iter; iter++) {
@@ -337,7 +386,7 @@ void PlanarRouter::runRouteFlow(PRModel& pr_model)
 
     bool is_partial_rip_up = enable_partial_rip_up && iter == 0;
     int32_t rip_up_guard = is_partial_rip_up ? partial_rip_up_guard : 0;
-    routePRNetList(pr_model, reroute_net_list, "overflow A*", PRRouteMode::kAStar, is_partial_rip_up, rip_up_guard);
+    routePRNetList(pr_model, reroute_net_list, "overflow A*", PRRouteMode::kAStar, PRTopoMode::kCongestion, is_partial_rip_up, rip_up_guard);
     updateCongestion(pr_model);
     auto& param = pr_model.get_pr_com_param();
     param.set_astar_search_margin(param.get_astar_search_margin() * 2);
@@ -350,13 +399,13 @@ void PlanarRouter::runRouteFlow(PRModel& pr_model)
 }
 
 void PlanarRouter::routePRNetList(PRModel& pr_model, const std::vector<PRNet*>& pr_net_list, const char* route_mode, PRRouteMode pr_route_mode,
-                                  bool is_partial_rip_up, int32_t rip_up_guard)
+                                  PRTopoMode pr_topo_mode, bool is_partial_rip_up, int32_t rip_up_guard)
 {
   RTLOG.info(Loc::current(), "Mode: ", route_mode, ", net_num: ", pr_net_list.size());
   size_t next_percent = 10;
   for (size_t i = 0; i < pr_net_list.size(); i++) {
     PRNet* pr_net = pr_net_list[i];
-    routePRNet(pr_model, pr_net, pr_route_mode, is_partial_rip_up, rip_up_guard);
+    routePRNet(pr_model, pr_net, pr_route_mode, pr_topo_mode, is_partial_rip_up, rip_up_guard);
     size_t percent = ((i + 1) * 100) / pr_net_list.size();
     if (percent >= next_percent || (i + 1) == pr_net_list.size()) {
       RTLOG.info(Loc::current(), "Mode: ", route_mode, ", progress: ", percent, "% (", (i + 1), "/", pr_net_list.size(), ")");
@@ -365,7 +414,8 @@ void PlanarRouter::routePRNetList(PRModel& pr_model, const std::vector<PRNet*>& 
   }
 }
 
-void PlanarRouter::routePRNet(PRModel& pr_model, PRNet* pr_net, PRRouteMode pr_route_mode, bool is_partial_rip_up, int32_t rip_up_guard)
+void PlanarRouter::routePRNet(PRModel& pr_model, PRNet* pr_net, PRRouteMode pr_route_mode, PRTopoMode pr_topo_mode, bool is_partial_rip_up,
+                              int32_t rip_up_guard)
 {
   pr_model.set_curr_pr_task(pr_net);
   std::vector<Segment<PlanarCoord>> old_routing_segment_list = pr_net->get_routing_segment_list();
@@ -389,7 +439,7 @@ void PlanarRouter::routePRNet(PRModel& pr_model, PRNet* pr_net, PRRouteMode pr_r
 
   // rip up all segments
   if (!is_partial_route) {
-    planar_topo_list = getPlanarTopoList(pr_model);
+    planar_topo_list = getPlanarTopoList(pr_model, pr_topo_mode);
     updateRoutingSegmentListToGraph(pr_model, old_routing_segment_list, ChangeType::kDel, pr_net->get_routing_edge_set());
   }
 
@@ -597,7 +647,6 @@ void PlanarRouter::splitLongPlanarTopoList(PRModel& pr_model, std::vector<Segmen
 {
   constexpr int32_t min_subsegment_length = 30;
   int32_t split_length = pr_model.get_pr_com_param().get_topo_spilt_length();
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   std::vector<Segment<PlanarCoord>> split_topo_list;
   split_topo_list.reserve(planar_topo_list.size() * 3);
   for (Segment<PlanarCoord>& planar_topo : planar_topo_list) {
@@ -617,43 +666,19 @@ void PlanarRouter::splitLongPlanarTopoList(PRModel& pr_model, std::vector<Segmen
     for (int32_t i = 1; i <= split_num; i++) {
       PlanarCoord ideal_coord(std::round(first_coord.get_x() + ((second_coord.get_x() - first_coord.get_x()) * i / static_cast<double>(piece_num))),
                               std::round(first_coord.get_y() + ((second_coord.get_y() - first_coord.get_y()) * i / static_cast<double>(piece_num))));
-      std::vector<PlanarCoord> legal_candidate_list;
-      bool ideal_is_blocked = false;
-      for (const PlanarRect& obs_rect : _macro_obs_rect_list) {
-        if (!RTUTIL.isInside(obs_rect, ideal_coord)) {
-          continue;
-        }
-        ideal_is_blocked = true;
-        legal_candidate_list.emplace_back(obs_rect.get_ll_x() - 1, ideal_coord.get_y());
-        legal_candidate_list.emplace_back(obs_rect.get_ur_x() + 1, ideal_coord.get_y());
-        legal_candidate_list.emplace_back(ideal_coord.get_x(), obs_rect.get_ll_y() - 1);
-        legal_candidate_list.emplace_back(ideal_coord.get_x(), obs_rect.get_ur_y() + 1);
-      }
-      PlanarCoord legal_coord = ideal_coord;
-      int32_t min_distance = INT_MAX;
-      for (const PlanarCoord& candidate_coord : legal_candidate_list) {
-        if (candidate_coord.get_x() < 0 || gcell_map.get_x_size() <= candidate_coord.get_x() || candidate_coord.get_y() < 0
-            || gcell_map.get_y_size() <= candidate_coord.get_y()) {
-          continue;
-        }
-        bool is_inside_obs = false;
-        for (const PlanarRect& obs_rect : _macro_obs_rect_list) {
-          if (RTUTIL.isInside(obs_rect, candidate_coord)) {
-            is_inside_obs = true;
-            break;
-          }
-        }
-        int32_t distance = RTUTIL.getManhattanDistance(ideal_coord, candidate_coord);
-        if (!is_inside_obs && distance < min_distance) {
-          legal_coord = candidate_coord;
-          min_distance = distance;
+      bool has_escape = false;
+      for (const PlanarCoord& neighbor : {PlanarCoord(ideal_coord.get_x() - 1, ideal_coord.get_y()), PlanarCoord(ideal_coord.get_x() + 1, ideal_coord.get_y()),
+                                          PlanarCoord(ideal_coord.get_x(), ideal_coord.get_y() - 1), PlanarCoord(ideal_coord.get_x(), ideal_coord.get_y() + 1)}) {
+        if (std::isfinite(getTopologySegmentCost(pr_model, ideal_coord, neighbor))) {
+          has_escape = true;
+          break;
         }
       }
-      if (ideal_is_blocked && min_distance == INT_MAX) {
+      if (!has_escape) {
         has_legal_split = false;
         break;
       }
-      legal_coord_list.push_back(legal_coord);
+      legal_coord_list.push_back(ideal_coord);
     }
     legal_coord_list.push_back(second_coord);
 
@@ -774,7 +799,27 @@ std::vector<PRCandidate> PlanarRouter::getPRCandidateListByTopo(PRModel& pr_mode
   return pr_candidate_list;
 }
 
-std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(PRModel& pr_model)
+bool PlanarRouter::shouldUseCongestionFlute(PRModel& pr_model, size_t unique_pin_num)
+{
+  if (unique_pin_num <= 3) {
+    return false;
+  }
+  PRNet* curr_net = pr_model.get_curr_pr_task();
+  double history_threshold = 0.64 * pr_model.get_pr_com_param().get_overflow_unit();
+  for (RoutingEdge* routing_edge : curr_net->get_routing_edge_set()) {
+    if (routing_edge->get_ignore_net_set().contains(curr_net->get_net_idx())) {
+      continue;
+    }
+    int32_t supply = routing_edge->get_supply();
+    if (supply <= 0 || routing_edge->get_demand() / static_cast<double>(supply) >= 0.8
+        || routing_edge->get_congestion_cost() >= history_threshold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(PRModel& pr_model, PRTopoMode pr_topo_mode)
 {
   std::vector<PlanarCoord> planar_coord_list;
   {
@@ -787,8 +832,10 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(PRModel& pr_mo
   TBTask tb_task;
   tb_task.set_planar_coord_list(planar_coord_list);
   GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
-  tb_task.set_planar_obs_list(_macro_obs_rect_list);
   tb_task.set_planar_search_region(PlanarRect(0, 0, gcell_map.get_x_size() - 1, gcell_map.get_y_size() - 1));
+  tb_task.set_segment_cost_query(
+      [this, &pr_model](const PlanarCoord& first, const PlanarCoord& second) { return getTopologySegmentCost(pr_model, first, second); });
+  tb_task.set_congestion_driven(pr_topo_mode == PRTopoMode::kCongestion && shouldUseCongestionFlute(pr_model, planar_coord_list.size()));
 
   return RTTB.getPlanarTopoList(tb_task);
 }
