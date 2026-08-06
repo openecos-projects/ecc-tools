@@ -52,8 +52,8 @@ bool isInvailidNet(IdbNet* net)
 
 void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta)
 {
-  IEDALOG.info(ieda::Loc::current(), "PyPlaceDB::set start. Db address is ", db);
-  IEDALOG.info(ieda::Loc::current(), "PyPlaceDB::set start. idb_design address is ", db->get_idb_design());
+  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. Db address is ", db);
+  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. idb_design address is ", db->get_idb_design());
   num_routing_grids_x = numRoutingGridsX;
   num_routing_grids_y = numRoutingGridsY;
   using namespace idb;
@@ -161,18 +161,18 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   for (int i = 0; i < inst_num; ++i) {
     IdbInstance* node = inst_resort_list.at(i);
     if (node->get_cell_master()->is_block()) {
-      IEDALOG.info(ieda::Loc::current(), "Node ", node->get_name(), " is a block.");
+      ECCLOG.info(ecc::Loc::current(), "Node ", node->get_name(), " is a block.");
     }
     if (node->get_status() != IdbPlacementStatus::kFixed) {
       Box box_tmp = buildInstanceBox(node);
       if (node->get_halo()) {
         // Jiaqi: add halo for fixed cells
-        // IEDALOG.info(ieda::Loc::current(), "PyPlaceDB detects fixed cell with halo.");
+        // ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed cell with halo.");
         box_tmp.xl -= node->get_halo()->get_extend_lef();
         box_tmp.yl -= node->get_halo()->get_extend_bottom();
         box_tmp.xh += node->get_halo()->get_extend_right();
         box_tmp.yh += node->get_halo()->get_extend_top();
-        IEDALOG.info(ieda::Loc::current(), "Instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(), ", ",
+        ECCLOG.info(ecc::Loc::current(), "Instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(), ", ",
                      node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
                      node->get_halo()->get_extend_top(), ").");
       }
@@ -183,18 +183,18 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       Box box_tmp = buildInstanceBox(node);
       if (node->get_halo()) {
         // Jiaqi: add halo for fixed cells
-        // IEDALOG.info(ieda::Loc::current(), "PyPlaceDB detects fixed cell with halo.");
+        // ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed cell with halo.");
         box_tmp.xl -= node->get_halo()->get_extend_lef();
         box_tmp.yl -= node->get_halo()->get_extend_bottom();
         box_tmp.xh += node->get_halo()->get_extend_right();
         box_tmp.yh += node->get_halo()->get_extend_top();
-        IEDALOG.info(ieda::Loc::current(), "Macro instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(),
+        ECCLOG.info(ecc::Loc::current(), "Macro instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(),
                      ", ", node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
                      node->get_halo()->get_extend_top(), ").");
       }
       addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, true);
       if (node->get_cell_master()->is_io_cell()) {
-        IEDALOG.info(ieda::Loc::current(), "Fixed IO instance ", node->get_name(), ", coordinate (",
+        ECCLOG.info(ecc::Loc::current(), "Fixed IO instance ", node->get_name(), ", coordinate (",
                      node->get_coordinate()->get_x(), ", ", node->get_coordinate()->get_y(), ", ",
                      node->get_bounding_box()->get_high_x(), ", ", node->get_bounding_box()->get_high_y(), ").");
       }
@@ -259,7 +259,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     Box box(gtl::xl(rect), gtl::yl(rect), gtl::xh(rect), gtl::yh(rect));
     int id = node_names.size();
     string block_name = "blockage" + std::to_string(id);
-    IEDALOG.info(ieda::Loc::current(), "PyPlaceDB detects fixed blockage ", block_name, ", (", box.xl, ", ", box.yl, ", ",
+    ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed blockage ", block_name, ", (", box.xl, ", ", box.yl, ", ",
                  box.xh, ", ", box.yh, ").");
     addNode("R0", block_name, box, true);
     total_fixed_node_area += 1LL * box.area();
@@ -284,11 +284,11 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
     Box box_tmp(lx, ly, lx + 1, ly + 1);
     addNode("R0", io_pin->get_pin_name(), box_tmp, false);
-    IEDALOG.info(ieda::Loc::current(), "IO pin ", io_pin->get_pin_name(), ", coordinate (", lx, ", ", ly, ").");
+    ECCLOG.info(ecc::Loc::current(), "IO pin ", io_pin->get_pin_name(), ", coordinate (", lx, ", ", ly, ").");
     num_terminal_NIs += 1;
   }
   // we only know num_nodes when all fixed cells with shapes are expanded
-  IEDALOG.info(ieda::Loc::current(), "num_terminals ", num_terminals, ", num_place_blockages ", ext_blockage_num,
+  ECCLOG.info(ecc::Loc::current(), "num_terminals ", num_terminals, ", num_place_blockages ", ext_blockage_num,
                ", num_terminal_NIs ", num_terminal_NIs, ".");
   num_nodes = inst_num + ext_blockage_num + num_terminal_NIs;  // db.nodes().size() + num_terminals - db.numFixed() - db.numPlaceBlockages()
   // this is different from simply summing up the area of all fixed nodes
@@ -358,9 +358,9 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       string temp_name = node->get_name();
       // if (mNode2PyNondeID.find(node->get_name()) == mNode2PyNondeID.end()
       //     || (mNode2PyNondeID.find(node->get_name()) != mNode2PyNondeID.end() && mNode2PyNondeID[node->get_name()].size() == 0)) {
-      //   IEDALOG.warn(ieda::Loc::current(), "Node ", node->get_name(), " is not found in mNode2PyNondeID.");
+      //   ECCLOG.warn(ecc::Loc::current(), "Node ", node->get_name(), " is not found in mNode2PyNondeID.");
       // } else if (mNode2PyNondeID[node->get_name()].size() == 0) {
-      //   IEDALOG.warn(ieda::Loc::current(), "Node ", node->get_name(), " has no new nodes.");
+      //   ECCLOG.warn(ecc::Loc::current(), "Node ", node->get_name(), " has no new nodes.");
       // }
       assert(mNode2PyNondeID.count(temp_name));
       index_type new_node_id = mNode2PyNondeID[node->get_name()];  //==0
@@ -427,7 +427,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       flat_net2pin_map.append(mPin2ID[driver_name]);
       pin_num = 1;  // include driving pin
     } else {
-      IEDALOG.error(ieda::Loc::current(), "Net ", net->get_net_name(), " has no driver.");
+      ECCLOG.error(ecc::Loc::current(), "Net ", net->get_net_name(), " has no driver.");
       pin_num = 0;
     }
     for (IdbPin* pin : net->get_instance_pin_list()->get_pin_list()) {
@@ -510,7 +510,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   if (with_routability) {
     init_routability(db, inst_resort_list);
   }
-  IEDALOG.info(ieda::Loc::current(), "PyPlaceDB::set end.");
+  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set end.");
 
 #endif
 }

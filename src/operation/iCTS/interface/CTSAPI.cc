@@ -41,9 +41,9 @@
 namespace icts {
 namespace {
 
-auto buildFeatureSummary(const QorSummary& qor_summary) -> ieda_feature::CTSSummary
+auto buildFeatureSummary(const QorSummary& qor_summary) -> ecc_feature::CTSSummary
 {
-  ieda_feature::CTSSummary summary{};
+  ecc_feature::CTSSummary summary{};
   summary.buffer_num = qor_summary.final_clock_buffer_count;
   summary.buffer_area = qor_summary.final_buffer_area_um2;
   summary.clock_path_min_buffer = qor_summary.clock_path_min_buffer;
@@ -191,10 +191,10 @@ auto CTSAPI::lastStatus() -> CTSStatus
   return getInst()._last_status;
 }
 
-auto CTSAPI::outputSummary() -> ieda_feature::CTSSummary
+auto CTSAPI::outputSummary() -> ecc_feature::CTSSummary
 {
   const auto& api = getInst();
-  return api._initialized ? buildFeatureSummary(CTSDM.getEvaluationState().summary) : ieda_feature::CTSSummary{};
+  return api._initialized ? buildFeatureSummary(CTSDM.getEvaluationState().summary) : ecc_feature::CTSSummary{};
 }
 
 auto CTSAPI::outputClockTiming() -> std::vector<CTSTimingClock>

@@ -19,7 +19,7 @@
 #include "feature_builder.h"
 #include "feature_parser.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 FeatureManager* FeatureManager::_instance = nullptr;
 
 FeatureManager::FeatureManager()
@@ -241,4 +241,4 @@ bool FeatureManager::save_cong_map(std::string stage, std::string csv_dir)
   FeatureParser feature_parser;
   return feature_parser.buildCongMap(stage, csv_dir);
 }
-}  // namespace ieda_feature
+}  // namespace ecc_feature

@@ -194,9 +194,9 @@ void writeCSV(const std::string& filename, const std::vector<std::vector<std::st
       file << "\n";
     }
     file.close();
-    IEDALOG.info(ieda::Loc::current(), "CSV file ", filename, " written successfully.");
+    ECCLOG.info(ecc::Loc::current(), "CSV file ", filename, " written successfully.");
   } else {
-    IEDALOG.info(ieda::Loc::current(), "Unable to open file ", filename);
+    ECCLOG.info(ecc::Loc::current(), "Unable to open file ", filename);
   }
 }
 
@@ -240,7 +240,7 @@ void printMultiCoreList(std::vector<MultiCore>& multi_core_list)
     csv_data.push_back(value_csv);
   }
 
-  writeCSV("/home/zengzhisheng/iEDA/aaa.csv", csv_data);
+  writeCSV("/home/zengzhisheng/ECC/aaa.csv", csv_data);
 }
 
 int32_t main()

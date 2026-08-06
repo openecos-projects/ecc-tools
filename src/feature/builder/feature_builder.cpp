@@ -35,7 +35,7 @@
 #include "flow_config.h"
 #include "idm.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 FeatureBuilder::FeatureBuilder()
 {
@@ -371,4 +371,4 @@ SummaryPins FeatureBuilder::buildSummaryPins()
   return summary_pins;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

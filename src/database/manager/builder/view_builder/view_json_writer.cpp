@@ -76,7 +76,7 @@ ViewJsonWriter::ViewJsonWriter(IdbDefService* def_service, ViewJsonWriteOptions 
 bool ViewJsonWriter::write(const std::string& output_dir)
 {
   if (_def_service == nullptr || _layout == nullptr || _design == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Write view json failed: def service, layout or design is null.");
+    ECCLOG.warn(ecc::Loc::current(), "Write view json failed: def service, layout or design is null.");
     return false;
   }
 
@@ -99,19 +99,19 @@ bool ViewJsonWriter::prepareOutputDir(const std::filesystem::path& output_dir) c
   std::error_code ec;
   std::filesystem::create_directories(output_dir / "tech", ec);
   if (ec) {
-    IEDALOG.warn(ieda::Loc::current(), "Create view json tech directory failed: ", ec.message());
+    ECCLOG.warn(ecc::Loc::current(), "Create view json tech directory failed: ", ec.message());
     return false;
   }
 
   std::filesystem::create_directories(output_dir / "design", ec);
   if (ec) {
-    IEDALOG.warn(ieda::Loc::current(), "Create view json design directory failed: ", ec.message());
+    ECCLOG.warn(ecc::Loc::current(), "Create view json design directory failed: ", ec.message());
     return false;
   }
 
   std::filesystem::create_directories(output_dir / "edits", ec);
   if (ec) {
-    IEDALOG.warn(ieda::Loc::current(), "Create view json edits directory failed: ", ec.message());
+    ECCLOG.warn(ecc::Loc::current(), "Create view json edits directory failed: ", ec.message());
     return false;
   }
 
@@ -1269,7 +1269,7 @@ bool ViewJsonWriter::writeSpatialIndex()
 bool ViewJsonWriter::writeEditOverlay()
 {
   ViewJson json;
-  json["schema"] = "ieda.view.edit.v1";
+  json["schema"] = "ecc.view.edit.v1";
   json["kind"] = "layout_edits";
   json["version"] = 1;
   json["base_manifest"] = "../manifest.json";
@@ -1305,14 +1305,14 @@ bool ViewJsonWriter::writeJsonFile(const std::string& relative_path, const ViewJ
   std::error_code ec;
   std::filesystem::create_directories(path.parent_path(), ec);
   if (ec) {
-    IEDALOG.warn(ieda::Loc::current(), "Create view json directory failed: ", path.parent_path(), " ", ec.message());
+    ECCLOG.warn(ecc::Loc::current(), "Create view json directory failed: ", path.parent_path(), " ", ec.message());
     return false;
   }
 
   std::string error;
   const bool compress = output_relative_path != relative_path;
   if (!writeViewJsonText(path, dumpViewJson(json, _options.format), compress, error)) {
-    IEDALOG.warn(ieda::Loc::current(), "Write view json file failed: ", path, " ", error);
+    ECCLOG.warn(ecc::Loc::current(), "Write view json file failed: ", path, " ", error);
     return false;
   }
 
@@ -1337,7 +1337,7 @@ bool ViewJsonWriter::validateDenseData(const std::string& relative_path, const V
       continue;
     }
     if (!item["id"].is_number_integer() || item["id"].get<int>() != static_cast<int>(index)) {
-      IEDALOG.warn(ieda::Loc::current(), "Write view json failed: ", relative_path, " data[", index, "].id is not dense.");
+      ECCLOG.warn(ecc::Loc::current(), "Write view json failed: ", relative_path, " data[", index, "].id is not dense.");
       return false;
     }
   }

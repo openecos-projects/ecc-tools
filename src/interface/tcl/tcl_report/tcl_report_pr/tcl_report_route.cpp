@@ -25,7 +25,7 @@ CmdReportRoute::CmdReportRoute(const char* cmd_name) : TclCmd(cmd_name)
 {
   addOption(new TclStringOption(TCL_PATH, 1, EMPTY_STR));
   addOption(new TclStringOption(TCL_NET, 1, EMPTY_STR));
-  addOption(new ieda::TclIntOption(TCL_SUMMARY, 1, 1));
+  addOption(new ecc::TclIntOption(TCL_SUMMARY, 1, 1));
 }
 unsigned CmdReportRoute::exec()
 {

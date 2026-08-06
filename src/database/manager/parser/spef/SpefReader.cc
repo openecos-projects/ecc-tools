@@ -20,7 +20,7 @@ Exchange* parseSpefFile(const char* spef_path)
 
   FILE* file = std::fopen(spef_path, "r");
   if (file == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "open spef file failed: ", spef_path);
+    ECCLOG.warn(ecc::Loc::current(), "open spef file failed: ", spef_path);
     return nullptr;
   }
 
@@ -32,7 +32,7 @@ Exchange* parseSpefFile(const char* spef_path)
   spef_in = nullptr;
 
   if (parse_status != 0 || !context.ok()) {
-    IEDALOG.warn(ieda::Loc::current(), "parse spef file failed: ", spef_path, " ", context.errorMessage());
+    ECCLOG.warn(ecc::Loc::current(), "parse spef file failed: ", spef_path, " ", context.errorMessage());
     return nullptr;
   }
 

@@ -20,7 +20,7 @@ target_include_directories(view_builder
         ${HOME_THIRDPARTY}/json
 )
 
-target_link_libraries(view_builder PRIVATE idb ZLIB::ZLIB ieda_logger)
+target_link_libraries(view_builder PRIVATE idb ZLIB::ZLIB ecc_logger)
 
 add_executable(view_json_io_test
     test/view_json_io_test.cpp
@@ -33,5 +33,5 @@ target_include_directories(view_json_io_test
         ${HOME_THIRDPARTY}/json
 )
 
-target_link_libraries(view_json_io_test PRIVATE ZLIB::ZLIB ieda_logger)
+target_link_libraries(view_json_io_test PRIVATE ZLIB::ZLIB ecc_logger)
 add_test(NAME view_json_io_test COMMAND view_json_io_test)

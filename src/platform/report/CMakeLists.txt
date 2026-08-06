@@ -6,22 +6,22 @@ add_subdirectory(report_route)
 add_subdirectory(report_place)
 add_subdirectory(report_drc)
 
-add_library(ieda_report
+add_library(ecc_report
   report_manager.cpp
 )
 
-target_link_libraries(ieda_report 
+target_link_libraries(ecc_report
     PRIVATE
-        report_basic 
-        ieda_report_db
-        ieda_report_evaluator
-        ieda_report_route
-        ieda_report_place
-        ieda_report_drc
-        ieda_logger
+        report_basic
+        ecc_report_db
+        ecc_report_evaluator
+        ecc_report_route
+        ecc_report_place
+        ecc_report_drc
+        ecc_logger
 )
 
-target_include_directories(ieda_report 
-    PUBLIC 
+target_include_directories(ecc_report
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
 )

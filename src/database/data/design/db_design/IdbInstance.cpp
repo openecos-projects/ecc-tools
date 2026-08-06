@@ -257,7 +257,7 @@ void IdbInstance::set_pin_list_coodinate()
           || pin->get_average_coordinate()->get_x() > get_bounding_box()->get_high_x()
           || pin->get_average_coordinate()->get_y() < get_bounding_box()->get_low_y()
           || pin->get_average_coordinate()->get_y() > get_bounding_box()->get_high_y()) {
-        // IEDALOG.warn(ieda::Loc::current(), "Pin coordinate is outside the instance bounding box.");
+        // ECCLOG.warn(ecc::Loc::current(), "Pin coordinate is outside the instance bounding box.");
       }
     }
   }

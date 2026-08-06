@@ -671,7 +671,7 @@ unsigned LibertyReader::visitAxisOrValues(
     if (isEqual(attri_name, "values")) {
       auto* lib_table = dynamic_cast<LibTable*>(lib_obj);
       if (!lib_table) {
-        IEDALOG.error(ieda::Loc::current(), "Liberty table is null.");
+        ECCLOG.error(ecc::Loc::current(), "Liberty table is null.");
       }
       lib_table->set_value_scale(LibValueScale::kLibrary);
       lib_table->set_table_values(std::move(result_values));
@@ -751,7 +751,7 @@ unsigned LibertyReader::visitComplexAttri(
       char* fanout_length = liberty_convert_string_value(attri_0)->value;
       auto fanout_lenth_vec = splitString(fanout_length, ',');
       if (fanout_lenth_vec.size() != 2) {
-        IEDALOG.error(ieda::Loc::current(), "Invalid liberty fanout_length attribute.");
+        ECCLOG.error(ecc::Loc::current(), "Invalid liberty fanout_length attribute.");
       }
 
       double fanout = std::atof(fanout_lenth_vec[0].c_str());
@@ -780,7 +780,7 @@ unsigned LibertyReader::visitComplexAttri(
   } else if (!Lib::isSilentOutput()) {
     static std::atomic<int32_t> unknown_attribute_count = 0;
     if (unknown_attribute_count.fetch_add(1, std::memory_order_relaxed) % 10 == 0) {
-      IEDALOG.info(ieda::Loc::current(), "unkown attri name: ", attri_name, " in ", attri->file_name, " line no ", attri->line_no);
+      ECCLOG.info(ecc::Loc::current(), "unkown attri name: ", attri_name, " in ", attri->file_name, " line no ", attri->line_no);
     }
   }
   return is_ok;
@@ -795,7 +795,7 @@ unsigned LibertyReader::visitComplexAttri(
 const char* LibertyReader::getGroupAttriName(LibertyGroupStmt* group) {
   auto& attri_values = group->attri_values;
   if (!liberty_is_string_value(attri_values.data)) {
-    IEDALOG.error(ieda::Loc::current(), "Liberty group attribute is not a string.");
+    ECCLOG.error(ecc::Loc::current(), "Liberty group attribute is not a string.");
   }
   auto* lib_name_attri = liberty_convert_string_value(attri_values.data);
 
@@ -881,7 +881,7 @@ unsigned LibertyReader::visitAxisOrValues(
     if (isEqual(attri_name, "values")) {
       auto* lib_table = dynamic_cast<LibTable*>(lib_obj);
       if (!lib_table) {
-        IEDALOG.error(ieda::Loc::current(), "Liberty table is null.");
+        ECCLOG.error(ecc::Loc::current(), "Liberty table is null.");
       }
       lib_table->set_value_scale(LibValueScale::kLibrary);
       lib_table->set_table_values(std::move(result_values));
@@ -953,7 +953,7 @@ unsigned LibertyReader::visitComplexAttri(
     } else if (attri_values && attri_values->size() == 1) {
       auto fanout_lenth_vec = splitString(getRawStringValue(attri_0), ',');
       if (fanout_lenth_vec.size() != 2) {
-        IEDALOG.error(ieda::Loc::current(), "Invalid liberty fanout_length attribute.");
+        ECCLOG.error(ecc::Loc::current(), "Invalid liberty fanout_length attribute.");
       }
 
       double fanout = std::atof(fanout_lenth_vec[0].c_str());
@@ -978,7 +978,7 @@ unsigned LibertyReader::visitComplexAttri(
   } else if (!Lib::isSilentOutput()) {
     static std::atomic<int32_t> unknown_attribute_count = 0;
     if (unknown_attribute_count.fetch_add(1, std::memory_order_relaxed) % 10 == 0) {
-      IEDALOG.info(ieda::Loc::current(), "unkown attri name: ", attri_name, " in ", attri->getSourceFile(), " line no ",
+      ECCLOG.info(ecc::Loc::current(), "unkown attri name: ", attri_name, " in ", attri->getSourceFile(), " line no ",
                    attri->getSourceLine());
     }
   }
@@ -1406,7 +1406,7 @@ unsigned LibertyReader::visitVector(LibertyGroupStmt* group) {
   auto* the_lib = lib_builder->get_lib();
   auto* lut_template = the_lib->getLutTemplate(table_template_name);
   if (!lut_template) {
-    IEDALOG.error(ieda::Loc::current(), "not found template ", table_template_name);
+    ECCLOG.error(ecc::Loc::current(), "not found template ", table_template_name);
   }
 
   auto* current_table =
@@ -1572,7 +1572,7 @@ unsigned LibertyReader::visitGroup(LibertyGroupStmt* group) {
   } else if (!Lib::isSilentOutput()) {
     static std::atomic<int32_t> unsupported_group_count = 0;
     if (unsupported_group_count.fetch_add(1, std::memory_order_relaxed) % 100000 == 0) {
-      IEDALOG.info(ieda::Loc::current(), "group ", group_name, " is not supported.");
+      ECCLOG.info(ecc::Loc::current(), "group ", group_name, " is not supported.");
     }
   }
 
@@ -1582,7 +1582,7 @@ unsigned LibertyReader::visitGroup(LibertyGroupStmt* group) {
 const char* LibertyReader::getGroupAttriName(liberty_ast::LibGroup* group) {
   auto* attri_values = group->getParams();
   if (!attri_values || attri_values->empty() || !(*attri_values)[0]->isString()) {
-    IEDALOG.error(ieda::Loc::current(), "Liberty group attribute is not a string.");
+    ECCLOG.error(ecc::Loc::current(), "Liberty group attribute is not a string.");
   }
 
   return (*attri_values)[0]->asString();
@@ -1902,7 +1902,7 @@ unsigned LibertyReader::visitVector(liberty_ast::LibGroup* group) {
   auto* the_lib = lib_builder->get_lib();
   auto* lut_template = the_lib->getLutTemplate(table_template_name);
   if (!lut_template) {
-    IEDALOG.error(ieda::Loc::current(), "not found template ", table_template_name);
+    ECCLOG.error(ecc::Loc::current(), "not found template ", table_template_name);
   }
 
   auto* current_table =
@@ -2044,7 +2044,7 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
   } else if (!Lib::isSilentOutput()) {
     static std::atomic<int32_t> unsupported_group_count = 0;
     if (unsupported_group_count.fetch_add(1, std::memory_order_relaxed) % 100000 == 0) {
-      IEDALOG.info(ieda::Loc::current(), "group ", group_name, " is not supported.");
+      ECCLOG.info(ecc::Loc::current(), "group ", group_name, " is not supported.");
     }
   }
 
@@ -2052,11 +2052,11 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
 }
 
 unsigned LibertyReader::readLib() {
-  IEDALOG.info(ieda::Loc::current(), "load liberty file ", _file_name);
+  ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name);
 
   auto* driver = new liberty_ast::LibertyDriver();
   if (!driver->parse(_file_name.c_str())) {
-    IEDALOG.info(ieda::Loc::current(), "load liberty file ", _file_name, " failed.");
+    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
     delete driver;
     return 0;
   }
@@ -2064,11 +2064,11 @@ unsigned LibertyReader::readLib() {
   _lib_file = driver;
 
   if (!_lib_file) {
-    IEDALOG.info(ieda::Loc::current(), "load liberty file ", _file_name, " failed.");
+    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
     return 0;
   }
 
-  IEDALOG.info(ieda::Loc::current(), "load liberty file ", _file_name, " success.");
+  ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " success.");
   return 1;
 }
 
@@ -2079,25 +2079,25 @@ unsigned LibertyReader::readLib() {
  */
 unsigned LibertyReader::linkLib() {
   if (!Lib::isSilentOutput()) {
-    IEDALOG.info(ieda::Loc::current(), "link liberty file ", _file_name, " start.");
+    ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " start.");
   }
   if (_lib_file) {
     auto* driver = reinterpret_cast<liberty_ast::LibertyDriver*>(_lib_file);
     auto* lib_group = driver ? driver->getParseResult() : nullptr;
     if (!lib_group) {
-      IEDALOG.error(ieda::Loc::current(), "parsed liberty root group is null: ", _file_name);
+      ECCLOG.error(ecc::Loc::current(), "parsed liberty root group is null: ", _file_name);
     }
     unsigned result = visitGroup(lib_group);
     liberty_free_lib_group(_lib_file);
     _lib_file = nullptr;
 
     if (!Lib::isSilentOutput()) {
-      IEDALOG.info(ieda::Loc::current(), "link liberty file ", _file_name, " success.");
+      ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " success.");
     }
     return result;
   }
 
-  IEDALOG.info(ieda::Loc::current(), "link liberty file ", _file_name, " failed.");
+  ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " failed.");
   return 0;
 }
 

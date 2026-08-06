@@ -15,7 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @project		iEDA
+ * @project		ECC
  * @file		feature_parser.cpp
  * @author		Yell
  * @date		10/08/2023
@@ -46,7 +46,7 @@
 #include "wirelength_api.h"
 
 #include "utility/logger/Logger.hpp"
-namespace ieda_feature {
+namespace ecc_feature {
 
 bool FeatureParser::buildSummaryMap(std::string csv_path, int bin_cnt_x, int bin_cnt_y)
 {
@@ -69,7 +69,7 @@ bool FeatureParser::buildSummaryMap(std::string csv_path, int bin_cnt_x, int bin
   // eval_api.plotBinValue(csv_path, "macro_continuous_white_space", eval::CONGESTION_TYPE::kContinuousWS);
   // eval_api.evalIOPinAccess(csv_path + "io_pin_access.csv");
 
-  // IEDALOG.info(ieda::Loc::current(), "Save feature map success, path = ", csv_path);
+  // ECCLOG.info(ecc::Loc::current(), "Save feature map success, path = ", csv_path);
   return true;
 }
 
@@ -111,7 +111,7 @@ bool FeatureParser::buildNetEval(std::string csv_path)
     if (net_power_data["HPWL"].find(net_name) == net_power_data["HPWL"].end()
         || net_power_data["FLUTE"].find(net_name) == net_power_data["FLUTE"].end()
         || net_power_data["EGR"].find(net_name) == net_power_data["EGR"].end()) {
-      IEDALOG.warn(ieda::Loc::current(), "Error: net_name '", net_name, "' not found in net_power_data.");
+      ECCLOG.warn(ecc::Loc::current(), "Error: net_name '", net_name, "' not found in net_power_data.");
       std::exit(EXIT_FAILURE);
     }
 
@@ -291,4 +291,4 @@ json FeatureParser::buildSummaryPower()
   return power;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

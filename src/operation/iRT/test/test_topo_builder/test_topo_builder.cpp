@@ -86,11 +86,10 @@ bool preparePlotDirectory(const std::filesystem::path& plot_dir)
   }
   return true;
 }
-
 bool check(bool condition, const std::string& case_name)
 {
   if (!condition) {
-    IEDALOG.warn(ieda::Loc::current(), "Failed: ", case_name);
+    ECCLOG.warn(ecc::Loc::current(), "Failed: ", case_name);
   }
   return condition;
 }

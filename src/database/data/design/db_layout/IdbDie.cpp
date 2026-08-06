@@ -98,7 +98,7 @@ void IdbDie::print()
   vector<IdbCoordinate<int32_t>*>::iterator it = _points.begin();
   for (; it != _points.end(); ++it) {
     IdbCoordinate<int32_t>* point = *it;
-    IEDALOG.info(ieda::Loc::current(), point->get_x(), "  ", point->get_y());
+    ECCLOG.info(ecc::Loc::current(), point->get_x(), "  ", point->get_y());
   }
 }
 

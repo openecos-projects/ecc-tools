@@ -153,15 +153,15 @@ IdbDefService* IdbBuilder::buildDef(string file)
   _def_service = new IdbDefService(layout);
 
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileInit(file.c_str())) {
-    IEDALOG.warn(ieda::Loc::current(), "Read DEF file failed...");
+    ECCLOG.warn(ecc::Loc::current(), "Read DEF file failed...");
     return nullptr;
   }
 
-  IEDALOG.info(ieda::Loc::current(), "Read DEF file : ", file);
+  ECCLOG.info(ecc::Loc::current(), "Read DEF file : ", file);
 
   std::shared_ptr<DefRead> def_read = std::make_shared<DefRead>(_def_service);
   if (const auto ret = def_read->createDb(file.c_str()); !ret) {
-    IEDALOG.error(ieda::Loc::current(), "Def file read failed...");
+    ECCLOG.error(ecc::Loc::current(), "Def file read failed...");
   }
 
   buildNet();
@@ -182,15 +182,15 @@ IdbDefService* IdbBuilder::buildDefGzip(string gzip_file)
   _def_service = new IdbDefService(layout);
 
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileInit(gzip_file.c_str())) {
-    IEDALOG.warn(ieda::Loc::current(), "Read DEF ZIP file failed...");
+    ECCLOG.warn(ecc::Loc::current(), "Read DEF ZIP file failed...");
     return nullptr;
   }
 
-  IEDALOG.info(ieda::Loc::current(), "Read DEF ZIP file : ", gzip_file);
+  ECCLOG.info(ecc::Loc::current(), "Read DEF ZIP file : ", gzip_file);
 
   std::shared_ptr<DefRead> def_read = std::make_shared<DefRead>(_def_service);
   if (const auto ret = def_read->createDbGzip(gzip_file.c_str()); !ret) {
-    IEDALOG.error(ieda::Loc::current(), "Def file read failed...");
+    ECCLOG.error(ecc::Loc::current(), "Def file read failed...");
   }
 
   buildNet();
@@ -218,7 +218,7 @@ IdbLefService* IdbBuilder::buildLef(vector<string>& files, bool b_techfile)
   vector<string>::iterator it = files.begin();
   for (; it != files.end(); ++it) {
     string file = *it;
-    IEDALOG.info(ieda::Loc::current(), "Read LEF file : ", file);
+    ECCLOG.info(ecc::Loc::current(), "Read LEF file : ", file);
     std::shared_ptr<LefRead> lef_read = std::make_shared<LefRead>(_lef_service);
     lef_read->createDb(file.c_str());
   }
@@ -243,10 +243,10 @@ IdbDefService* IdbBuilder::buildVerilog(string file, std::string top_module_name
   _def_service = new IdbDefService(layout);
 
   if (IdbDefServiceResult::kServiceFailed == _def_service->VerilogFileInit(file.c_str())) {
-    IEDALOG.warn(ieda::Loc::current(), "Read Verilog file failed...");
+    ECCLOG.warn(ecc::Loc::current(), "Read Verilog file failed...");
     return nullptr;
   } else {
-    IEDALOG.info(ieda::Loc::current(), "Read Verilog file success : ", file);
+    ECCLOG.info(ecc::Loc::current(), "Read Verilog file success : ", file);
   }
 
   std::shared_ptr<VerilogRead> verilog_read = std::make_shared<VerilogRead>(_def_service);
@@ -307,10 +307,10 @@ IdbDefService* IdbBuilder::buildDefFloorplan(string file)
   _def_service = new IdbDefService(layout);
 
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileInit(file.c_str())) {
-    IEDALOG.warn(ieda::Loc::current(), "Read DEF file failed...");
+    ECCLOG.warn(ecc::Loc::current(), "Read DEF file failed...");
     return nullptr;
   } else {
-    IEDALOG.info(ieda::Loc::current(), "Read DEF file : ", file);
+    ECCLOG.info(ecc::Loc::current(), "Read DEF file : ", file);
   }
 
   std::shared_ptr<DefRead> def_read = std::make_shared<DefRead>(_def_service);
@@ -334,7 +334,7 @@ IdbDefService* IdbBuilder::buildDefFloorplan(string file)
 //     }
 
 //     if (IdbDataServiceResult::kServiceFailed == _data_service->DefServiceInit(def_service)) {
-//       IEDALOG.warn(ieda::Loc::current(), "Get def_service failed.");
+//       ECCLOG.warn(ecc::Loc::current(), "Get def_service failed.");
 //       return nullptr;
 //     }
 
@@ -344,7 +344,7 @@ IdbDefService* IdbBuilder::buildDefFloorplan(string file)
 bool IdbBuilder::saveDef(string file, DefWriteType type)
 {
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
-    IEDALOG.warn(ieda::Loc::current(), "Create DEF file failed...");
+    ECCLOG.warn(ecc::Loc::current(), "Create DEF file failed...");
     return false;
   }
 
@@ -355,7 +355,7 @@ bool IdbBuilder::saveDef(string file, DefWriteType type)
 bool IdbBuilder::saveLef(string file)
 {
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
-    IEDALOG.warn(ieda::Loc::current(), "Create LEF file failed...");
+    ECCLOG.warn(ecc::Loc::current(), "Create LEF file failed...");
     return false;
   }
 
@@ -373,7 +373,7 @@ void IdbBuilder::saveVerilog(std::string verilog_file_name, std::set<std::string
 bool IdbBuilder::saveGDSII(string file, bool is_hardened /* = false */)
 {
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
-    IEDALOG.warn(ieda::Loc::current(), "Create GDSII file failed...");
+    ECCLOG.warn(ecc::Loc::current(), "Create GDSII file failed...");
     return false;
   }
 
@@ -388,10 +388,10 @@ bool IdbBuilder::saveGDSII(string file, bool is_hardened /* = false */)
 bool IdbBuilder::saveJSON(string file, string options)
 {
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
-    IEDALOG.warn(ieda::Loc::current(), "Create JSON file failed...");
+    ECCLOG.warn(ecc::Loc::current(), "Create JSON file failed...");
     return false;
   }
-  // IEDALOG.info(ieda::Loc::current(), "Options: ", options);
+  // ECCLOG.info(ecc::Loc::current(), "Options: ", options);
   std::shared_ptr<Gds2JsonWrite> json_write = std::make_shared<Gds2JsonWrite>(_def_service);
   return json_write->writeDb(file.c_str(), options);
 }
@@ -410,13 +410,13 @@ void IdbBuilder::saveLayout(string folder)
 {
   IdbLayout* layout = _lef_service != nullptr ? _lef_service->get_layout() : (_def_service != nullptr ? _def_service->get_layout() : nullptr);
   if (layout == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Write binary layout failed: layout is null.");
+    ECCLOG.warn(ecc::Loc::current(), "Write binary layout failed: layout is null.");
     return;
   }
 
   LayoutWrite layout_write(layout);
   if (!layout_write.writeLayout(folder)) {
-    IEDALOG.warn(ieda::Loc::current(), "Write binary layout failed: ", folder);
+    ECCLOG.warn(ecc::Loc::current(), "Write binary layout failed: ", folder);
   }
 }
 
@@ -428,7 +428,7 @@ void IdbBuilder::loadLayout(string folder)
 
   LayoutRead layout_read;
   if (!layout_read.readLayout(_lef_service->get_layout(), folder)) {
-    IEDALOG.warn(ieda::Loc::current(), "Read binary layout failed: ", folder);
+    ECCLOG.warn(ecc::Loc::current(), "Read binary layout failed: ", folder);
   }
 }
 
@@ -436,7 +436,7 @@ bool IdbBuilder::saveDesign(string folder)
 {
   IdbDesign* design = _def_service != nullptr ? _def_service->get_design() : nullptr;
   if (design == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Write binary design failed: design is null.");
+    ECCLOG.warn(ecc::Loc::current(), "Write binary design failed: design is null.");
     return false;
   }
 
@@ -448,7 +448,7 @@ bool IdbBuilder::loadDesign(string folder)
 {
   IdbLayout* layout = _lef_service != nullptr ? _lef_service->get_layout() : nullptr;
   if (layout == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Read binary design failed: layout must be loaded first.");
+    ECCLOG.warn(ecc::Loc::current(), "Read binary design failed: layout must be loaded first.");
     return false;
   }
 
@@ -472,7 +472,7 @@ bool IdbBuilder::saveData(string folder)
   IdbLayout* layout = _lef_service != nullptr ? _lef_service->get_layout() : (_def_service != nullptr ? _def_service->get_layout() : nullptr);
   IdbDesign* design = _def_service != nullptr ? _def_service->get_design() : nullptr;
   if (layout == nullptr || design == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Write binary data failed: layout or design is null.");
+    ECCLOG.warn(ecc::Loc::current(), "Write binary data failed: layout or design is null.");
     return false;
   }
 
@@ -492,7 +492,7 @@ bool IdbBuilder::loadData(string folder)
 
   LayoutRead layout_read;
   if (!layout_read.readLayout(_lef_service->get_layout(), folder, false)) {
-    IEDALOG.warn(ieda::Loc::current(), "Read binary layout failed: ", folder);
+    ECCLOG.warn(ecc::Loc::current(), "Read binary layout failed: ", folder);
     return false;
   }
 

@@ -4,7 +4,7 @@
 #include "UserShell.hh"
 #include "tcl_geometry.h"
 
-using namespace ieda;
+using namespace ecc;
 
 namespace tcl {
 

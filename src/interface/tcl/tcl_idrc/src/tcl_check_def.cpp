@@ -48,8 +48,8 @@ unsigned CmdDRCAutoRun::check()
 {
   TclOption* file_name_option = getOptionOrArg(TCL_CONFIG);
   TclOption* file_path_option = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(file_name_option, TCL_CONFIG);
-  ieda::checkTclOption(file_path_option, TCL_PATH);
+  ecc::checkTclOption(file_name_option, TCL_CONFIG);
+  ecc::checkTclOption(file_path_option, TCL_PATH);
   return 1;
 }
 
@@ -60,7 +60,7 @@ unsigned CmdDRCAutoRun::exec()
   }
 
   DRCI.runDRC();
-  IEDALOG.info(ieda::Loc::current(), "iDRC run successfully.");
+  ECCLOG.info(ecc::Loc::current(), "iDRC run successfully.");
 
   return 1;
 }
@@ -78,7 +78,7 @@ CmdDRCSaveDetailFile::CmdDRCSaveDetailFile(const char* cmd_name) : TclCmd(cmd_na
 unsigned CmdDRCSaveDetailFile::check()
 {
   TclOption* file_path_option = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(file_path_option, TCL_PATH);
+  ecc::checkTclOption(file_path_option, TCL_PATH);
   return 1;
 }
 
@@ -92,7 +92,7 @@ unsigned CmdDRCSaveDetailFile::exec()
   auto data_path = path_option->getStringVal();
 
   if (DRCI.saveDRC(data_path)) {
-    IEDALOG.info(ieda::Loc::current(), "iDRC save detail drc to file success. path = ", data_path);
+    ECCLOG.info(ecc::Loc::current(), "iDRC save detail drc to file success. path = ", data_path);
   }
 
   return 1;

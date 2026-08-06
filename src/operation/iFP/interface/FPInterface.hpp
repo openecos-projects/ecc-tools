@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if 1  // 前向声明
@@ -102,14 +103,20 @@ class FPInterface
   void outputMacroPlacement();
   void outputNewInstanceList();
   void outputPGSegmentList();
-  void adjustStripeSegmentListByViaEnclosure();
+  void adjustPGLineSegmentListByViaEnclosure();
   idb::IdbVia* getIDBVia(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
-  void adjustStripeSegmentListByViaEnclosure(
+  idb::IdbVia* buildIDBVia(std::string via_name, idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
+  std::pair<int32_t, int32_t> getIDBViaRowCol(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
+  void adjustLineSegmentListByViaEnclosure(
       std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map,
       PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
       int32_t enclosure_ur_y);
-  void adjustStripeSegmentByViaEnclosure(std::vector<PGSegment*>& stripe_segment_list, int32_t enclosure_ll_x,
-                                         int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y);
+  bool adjustStripeSegmentListByViaEnclosure(
+      std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_line_segment_list_map,
+      PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
+      int32_t enclosure_ur_y);
+  bool adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_segment_list, int32_t enclosure_ll_x, int32_t enclosure_ll_y,
+                                        int32_t enclosure_ur_x, int32_t enclosure_ur_y);
   void outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& pg_segment);
 #endif
 

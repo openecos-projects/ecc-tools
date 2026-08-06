@@ -176,7 +176,7 @@ void IdbPin::set_grid_coordinate(int32_t x, int32_t y)
   //                                   _instance->get_cell_master()->get_height());
   //   db_transform.transformCoordinate(_grid_coordinate);
   if (_grid_coordinate->get_x() == -1 || _grid_coordinate->get_y() == -1) {
-    IEDALOG.warn(ieda::Loc::current(), "Error : no grid coordinate in this instance");
+    ECCLOG.warn(ecc::Loc::current(), "Error : no grid coordinate in this instance");
   }
 }
 
@@ -202,7 +202,7 @@ IdbLayerShape* IdbPin::get_bottom_routing_layer_shape()
   }
 
   if (bottom_layer == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "[IdbPin Error] : can not find layer shape for this Pin = ", _pin_name);
+    ECCLOG.warn(ecc::Loc::current(), "[IdbPin Error] : can not find layer shape for this Pin = ", _pin_name);
   }
 
   return bottom_layer;
@@ -229,7 +229,7 @@ bool IdbPin::calculateGridCoordinate()
       return true;
     }
 
-    IEDALOG.warn(ieda::Loc::current(), "Warning : No track grid.");
+    ECCLOG.warn(ecc::Loc::current(), "Warning : No track grid.");
     return false;
   }
 
@@ -281,7 +281,7 @@ bool IdbPin::calculateGridCoordinate()
     for (int i = low_index_x; i <= high_index_x; i += pitch_x) {
       for (int j = low_index_y; j <= high_index_y; j += pitch_y) {
         if (i < rect->get_low_x() || i > rect->get_high_x() || j < rect->get_low_y() || j > rect->get_high_y()) {
-          IEDALOG.warn(ieda::Loc::current(), "Error pin grid coordinate, pin list empty.");
+          ECCLOG.warn(ecc::Loc::current(), "Error pin grid coordinate, pin list empty.");
           continue;
         }
         point_list.emplace_back(i, j);
@@ -290,7 +290,7 @@ bool IdbPin::calculateGridCoordinate()
   }
 
   if (point_list.empty()) {
-    // IEDALOG.warn(ieda::Loc::current(), "Can not find pin in track grid coordinate.");
+    // ECCLOG.warn(ecc::Loc::current(), "Can not find pin in track grid coordinate.");
 
     /// if points in grid not exist, find the average point in the rect with max area
     IdbRect* rect_max_area = nullptr;
@@ -303,7 +303,7 @@ bool IdbPin::calculateGridCoordinate()
       _grid_coordinate->set_xy(rect_max_area->get_middle_point().get_x(), rect_max_area->get_middle_point().get_y());
     } else {
       _grid_coordinate->set_xy(_average_coordinate->get_x(), _average_coordinate->get_y());
-      //   IEDALOG.warn(ieda::Loc::current(), "Can not find pin in rect.");
+      //   ECCLOG.warn(ecc::Loc::current(), "Can not find pin in rect.");
     }
   } else {
     int32_t min_distance = INT32_MAX;
@@ -319,7 +319,7 @@ bool IdbPin::calculateGridCoordinate()
   }
 
   if (_grid_coordinate->get_x() == -1 || _grid_coordinate->get_y() == -1) {
-    IEDALOG.warn(ieda::Loc::current(), "Error pin grid coordinate", get_pin_name());
+    ECCLOG.warn(ecc::Loc::current(), "Error pin grid coordinate", get_pin_name());
   }
 
   return true;
@@ -633,7 +633,7 @@ IdbPin* IdbPins::find_pin_by_coordinate_list(vector<IdbCoordinate<int32_t>*>& co
 {
   int32_t point_size = coordinate_list.size();
   if (point_size < _POINT_MAX_) {
-    IEDALOG.warn(ieda::Loc::current(), "Error : size of point list should be larger than 2 to connect IO pin.");
+    ECCLOG.warn(ecc::Loc::current(), "Error : size of point list should be larger than 2 to connect IO pin.");
     return nullptr;
   }
 

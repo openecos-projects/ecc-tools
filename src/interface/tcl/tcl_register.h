@@ -44,7 +44,7 @@
 #include "tcl_register_ircx.h"
 #include "tcl_register_report.h"
 
-using namespace ieda;
+using namespace ecc;
 namespace tcl {
 
 int registerCommands()

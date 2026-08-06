@@ -168,9 +168,9 @@ std::optional<std::pair<std::string, unsigned>> IdbBus::parseBusName(std::string
       try {
         index = std::stoi(extracted_str);
       } catch (const std::invalid_argument& e) {
-        IEDALOG.warn(ieda::Loc::current(), "Error: Invalid number format.");
+        ECCLOG.warn(ecc::Loc::current(), "Error: Invalid number format.");
       } catch (const std::out_of_range& e) {
-        IEDALOG.warn(ieda::Loc::current(), "Error: Number out of range.");
+        ECCLOG.warn(ecc::Loc::current(), "Error: Number out of range.");
       }
 
       name_str.erase(start_pos, end_pos - start_pos + 1);

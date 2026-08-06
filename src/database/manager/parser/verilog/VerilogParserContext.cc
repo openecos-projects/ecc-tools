@@ -1321,9 +1321,9 @@ void* verilog_parse_file(const char* verilog_path)
   auto context = std::make_unique<idb::verilog::ParserContext>();
   if (!context->parseFile(verilog_path)) {
     if (context->errorLine() > 0) {
-      IEDALOG.warn(ieda::Loc::current(), "Parse Verilog failed at line ", context->errorLine(), ": ", context->errorMessage());
+      ECCLOG.warn(ecc::Loc::current(), "Parse Verilog failed at line ", context->errorLine(), ": ", context->errorMessage());
     } else {
-      IEDALOG.warn(ieda::Loc::current(), "Parse Verilog failed: ", context->errorMessage());
+      ECCLOG.warn(ecc::Loc::current(), "Parse Verilog failed: ", context->errorMessage());
     }
     return nullptr;
   }

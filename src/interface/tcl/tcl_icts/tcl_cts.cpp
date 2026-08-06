@@ -31,9 +31,9 @@ CmdCTSAutoRun::CmdCTSAutoRun(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdCTSAutoRun::check()
 {
   TclOption* file_name_option = getOptionOrArg(TCL_CONFIG);
-  ieda::checkTclOption(file_name_option, TCL_CONFIG);
+  ecc::checkTclOption(file_name_option, TCL_CONFIG);
   TclOption* dir_name_option = getOptionOrArg(TCL_WORK_DIR);
-  ieda::checkTclOption(dir_name_option, TCL_WORK_DIR);
+  ecc::checkTclOption(dir_name_option, TCL_WORK_DIR);
   return 1;
 }
 
@@ -71,10 +71,10 @@ CmdCTSReport::CmdCTSReport(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdCTSReport::check()
 {
   TclOption* option = getOptionOrArg(TCL_NAME);
-  ieda::checkTclOption(option, TCL_NAME);
+  ecc::checkTclOption(option, TCL_NAME);
 
   TclOption* path = getOptionOrArg(TCL_PATH);
-  ieda::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
   return 1;
 }
 

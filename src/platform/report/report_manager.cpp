@@ -74,7 +74,7 @@ ReportOStream::~ReportOStream()
   if (_fs.is_open()) {
     _fs.close();
   } else if (!_log_stream.str().empty()) {
-    IEDALOG.info(ieda::Loc::current(), _log_stream.str());
+    ECCLOG.info(ecc::Loc::current(), _log_stream.str());
   }
 }
 
@@ -87,7 +87,7 @@ bool ReportManager::reportWL(const std::string& file_name)
   report.add_table(report.createWireLengthReport());
 
   auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
-  IEDALOG.info(ieda::Loc::current(), "report time cost: ", ms, " ms");
+  ECCLOG.info(ecc::Loc::current(), "report time cost: ", ms, " ms");
   ofs << report;
 
   return true;
@@ -102,7 +102,7 @@ bool ReportManager::reportCongestion(const std::string& file_name)
   report.add_table(report.createCongestionReport());
 
   auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
-  IEDALOG.info(ieda::Loc::current(), "report time cost: ", ms, " ms");
+  ECCLOG.info(ecc::Loc::current(), "report time cost: ", ms, " ms");
   ofs << report;
   return true;
 }
@@ -115,7 +115,7 @@ bool ReportManager::reportInstance(const std::string& file_name, const std::stri
   auto* inst = dmInst->get_idb_design()->get_instance_list()->find_instance(inst_name);
 
   if (!inst) {
-    IEDALOG.warn(ieda::Loc::current(), "Can not find instance \"", inst_name, "\"");
+    ECCLOG.warn(ecc::Loc::current(), "Can not find instance \"", inst_name, "\"");
     return false;
   }
   report.add_table(report.createInstanceTable(inst_name));
@@ -130,7 +130,7 @@ bool ReportManager::reportNet(const std::string& file_name, const std::string& n
   ReportDesign report("Net Report");
   auto* net = dmInst->get_idb_design()->get_net_list()->find_net(net_name);
   if (!net) {
-    IEDALOG.warn(ieda::Loc::current(), "Can not find net \"", net_name, "\"");
+    ECCLOG.warn(ecc::Loc::current(), "Can not find net \"", net_name, "\"");
     return false;
   }
   report.add_table(report.createNetTable(net));
@@ -143,9 +143,9 @@ bool ReportManager::reportDanglingNet(const std::string& file_name)
   ReportOStream ofs(file_name);
   ReportDanglingNet report;
   ofs << report;
-  IEDALOG.info(ieda::Loc::current(), "Total Dangling Nets: ", report.get_count());
+  ECCLOG.info(ecc::Loc::current(), "Total Dangling Nets: ", report.get_count());
   if (ofs.fileOpen()) {
-    IEDALOG.info(ieda::Loc::current(), "Details outputs to ", file_name);
+    ECCLOG.info(ecc::Loc::current(), "Details outputs to ", file_name);
   }
   return true;
 }
@@ -158,7 +158,7 @@ bool ReportManager::reportRoute(const std::string& file, const std::string& net_
   if (!net_name.empty()) {
     auto* net = dmInst->get_idb_design()->get_net_list()->find_net(net_name);
     if (!net) {
-      IEDALOG.warn(ieda::Loc::current(), "Cannot find net ", net_name);
+      ECCLOG.warn(ecc::Loc::current(), "Cannot find net ", net_name);
       return false;
     }
     report.createNetReport(net);
@@ -200,7 +200,7 @@ bool ReportManager::reportDRC(const std::string& file_name, std::map<std::string
   ReportOStream os(file_name);
   ReportDRC report_drc("Report DRC Summary");
   report_drc.add_table(report_drc.createDRCTable(drc_result));
-  IEDALOG.info(ieda::Loc::current(), report_drc);  // TODO: remove this line
+  ECCLOG.info(ecc::Loc::current(), report_drc);  // TODO: remove this line
   report_drc.add_table(report_drc.createConnectivityTable(connectivity_result));
   report_drc.add_table(report_drc.createConnectivityDetailTable(connectivity_result));
 

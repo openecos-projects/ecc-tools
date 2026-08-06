@@ -181,7 +181,7 @@ bool saveViewJson(const std::string& output_dir, const std::string& json_format,
 {
   idb::ViewJsonWriteOptions options;
   if (!idb::parseViewJsonFormat(json_format, options.format)) {
-    IEDALOG.warn(ieda::Loc::current(), "Save view json failed: unsupported json_format `", json_format, "`, expected `pretty` or `compact`.");
+    ECCLOG.warn(ecc::Loc::current(), "Save view json failed: unsupported json_format `", json_format, "`, expected `pretty` or `compact`.");
     return false;
   }
   options.compress = compress;

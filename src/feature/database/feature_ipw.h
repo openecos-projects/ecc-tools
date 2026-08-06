@@ -16,7 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 struct PowerInfo
 {
@@ -24,4 +24,4 @@ struct PowerInfo
   double dynamic_power = 0.0;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

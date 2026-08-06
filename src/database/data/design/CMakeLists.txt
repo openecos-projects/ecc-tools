@@ -5,8 +5,8 @@ else()
   add_library(idb SHARED ${DB_SRC})
 endif()
 
-target_include_directories(idb 
-    PUBLIC 
+target_include_directories(idb
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/db_design
         ${CMAKE_CURRENT_SOURCE_DIR}/db_layout
@@ -14,7 +14,7 @@ target_include_directories(idb
         ${HOME_DATABASE}/basic/geometry
 )
 
-target_link_libraries(idb PRIVATE geometry_db ieda_logger)
+target_link_libraries(idb PRIVATE geometry_db ecc_logger)
 
 install(TARGETS idb
     LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}

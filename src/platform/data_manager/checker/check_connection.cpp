@@ -124,7 +124,7 @@ void CheckNet::buildGraph()
 
     index++;
 
-    // IEDALOG.info(ieda::Loc::current(), "[CheckNet Info] Net = ", _net_name, ", graph_id = ", graph.get_id(),
+    // ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Net = ", _net_name, ", graph_id = ", graph.get_id(),
     //              ", vertex_num = ", graph.get_vertex_num(), ", edge_num = ", graph.get_edge_num(), ", pin_num = ", graph.get_pin_num());
   }
 }
@@ -191,12 +191,12 @@ CheckInfo CheckNet::isAllPinConnected()
 {
   for (auto net_graph : _graph_list) {
     if (_pin_num >= 0 && _pin_num == net_graph.get_pin_num()) {
-      // IEDALOG.info(ieda::Loc::current(), "[CheckNet Info] Net ", _net_name, " is connected.");
+      // ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Net ", _net_name, " is connected.");
       return CheckInfo::kConnected;
     }
   }
 
-  IEDALOG.warn(ieda::Loc::current(), "[CheckNet Error] Net ", _net_name, " is disconnected.");
+  ECCLOG.warn(ecc::Loc::current(), "[CheckNet Error] Net ", _net_name, " is disconnected.");
   return CheckInfo::kDisconnected;
 }
 
@@ -204,12 +204,12 @@ bool CheckNet::hasRing()
 {
   for (auto net_graph : _graph_list) {
     if (net_graph.has_ring()) {
-      IEDALOG.warn(ieda::Loc::current(), "[CheckNet Error] Net ", _net_name, " has ring.", " vertex_num = ", net_graph.get_vertex_num(), " edge_num = ", net_graph.get_edge_num());
+      ECCLOG.warn(ecc::Loc::current(), "[CheckNet Error] Net ", _net_name, " has ring.", " vertex_num = ", net_graph.get_vertex_num(), " edge_num = ", net_graph.get_edge_num());
       return true;
     }
   }
 
-  //   IEDALOG.info(ieda::Loc::current(), "[CheckNet Info] Net ", _net_name, " has no ring.");
+  //   ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Net ", _net_name, " has no ring.");
   return false;
 }
 

@@ -10,11 +10,11 @@
 void TestBuildNetEval(const std::string& db_config_path);
 
 void PrintUsage(const char* program_name) {
-  IEDALOG.info(ieda::Loc::current(), "Union Evaluation");
-  IEDALOG.info(ieda::Loc::current(), "Usage: ", program_name, " <function_name>");
-  IEDALOG.info(ieda::Loc::current(), "Available parameters:");
-  IEDALOG.info(ieda::Loc::current(), "  <db_config_path> Path to the database configuration file.");
-  IEDALOG.info(ieda::Loc::current(), "  --help, -h       Show this help message and exit.");
+  ECCLOG.info(ecc::Loc::current(), "Union Evaluation");
+  ECCLOG.info(ecc::Loc::current(), "Usage: ", program_name, " <function_name>");
+  ECCLOG.info(ecc::Loc::current(), "Available parameters:");
+  ECCLOG.info(ecc::Loc::current(), "  <db_config_path> Path to the database configuration file.");
+  ECCLOG.info(ecc::Loc::current(), "  --help, -h       Show this help message and exit.");
 }
 
 int main(const int argc, const char * argv[])
@@ -28,7 +28,7 @@ int main(const int argc, const char * argv[])
       return 0;
     }
   }
-  IEDALOG.warn(ieda::Loc::current(), "Error: Incorrect number of arguments.");
+  ECCLOG.warn(ecc::Loc::current(), "Error: Incorrect number of arguments.");
   PrintUsage(argv[0]);
   return 1;
 }
@@ -40,7 +40,7 @@ void TestBuildNetEval(const std::string& db_config_path)
   UNION_API_INST->initEGR(true);
   UNION_API_INST->initFlute();
 
-  IEDALOG.info(ieda::Loc::current(), "Building net evaluation data...");
+  ECCLOG.info(ecc::Loc::current(), "Building net evaluation data...");
 
   auto* idb_builder = dmInst->get_idb_builder();
   idb::IdbDesign* idb_design = idb_builder->get_def_service()->get_design();
@@ -86,7 +86,7 @@ void TestBuildNetEval(const std::string& db_config_path)
     if (net_power_data["HPWL"].find(net_name) == net_power_data["HPWL"].end()
         || net_power_data["FLUTE"].find(net_name) == net_power_data["FLUTE"].end()
         || net_power_data["EGR"].find(net_name) == net_power_data["EGR"].end()) {
-      IEDALOG.warn(ieda::Loc::current(), "Error: net_name '", net_name, "' not found in net_power_data.");
+      ECCLOG.warn(ecc::Loc::current(), "Error: net_name '", net_name, "' not found in net_power_data.");
       std::exit(EXIT_FAILURE);
     }
 
@@ -95,7 +95,7 @@ void TestBuildNetEval(const std::string& db_config_path)
     double egr_power = net_power_data["EGR"][net_name];
 
     if (net_name == "InvalidSymbol") {
-      IEDALOG.info(ieda::Loc::current(), net_name, ',', net_type, ",", pin_num, ',', aspect_ratio, ',', bbox_width, ",", bbox_height, ",", bbox_area, ",", bbox_lx, ",", bbox_ly, ",", bbox_ux, ",", bbox_uy, ",", l_ness, ',', hpwl, ',', flute, ',', grwl, ',', hpwl_power, ',', flute_power, ",", egr_power);
+      ECCLOG.info(ecc::Loc::current(), net_name, ',', net_type, ",", pin_num, ',', aspect_ratio, ',', bbox_width, ",", bbox_height, ",", bbox_area, ",", bbox_lx, ",", bbox_ly, ",", bbox_ux, ",", bbox_uy, ",", l_ness, ',', hpwl, ',', flute, ',', grwl, ',', hpwl_power, ',', flute_power, ",", egr_power);
     }
   }
 }

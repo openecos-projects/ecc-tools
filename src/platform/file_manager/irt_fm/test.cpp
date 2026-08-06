@@ -120,8 +120,8 @@ TEST_F(SerializeTest, BoundingBox)
        << "}";
     return ss.str();
   };
-  IEDALOG.info(ieda::Loc::current(), "Origin:      ", str(box));
-  IEDALOG.info(ieda::Loc::current(), "Deserialized:", str(deserialized));
+  ECCLOG.info(ecc::Loc::current(), "Origin:      ", str(box));
+  ECCLOG.info(ecc::Loc::current(), "Deserialized:", str(deserialized));
 }
 
 TEST_F(SerializeTest, GridMap_double)
@@ -130,7 +130,7 @@ TEST_F(SerializeTest, GridMap_double)
   int ysize = rnd();
   irt::GridMap<double> origin(xsize, ysize);
 
-  IEDALOG.info(ieda::Loc::current(), "generate random gridmap with x=", xsize, " and y=", ysize);
+  ECCLOG.info(ecc::Loc::current(), "generate random gridmap with x=", xsize, " and y=", ysize);
 
   for (int x = 0; x < xsize; ++x) {
     for (int y = 0; y < ysize; ++y) {
@@ -183,7 +183,7 @@ TEST_F(SerializeTest, TNode)
   };
   EXPECT_TRUE(dfs(dfs, ptr, &root));
 
-  IEDALOG.info(ieda::Loc::current(), "Checked ", cnt, " nodes for TNode");
+  ECCLOG.info(ecc::Loc::current(), "Checked ", cnt, " nodes for TNode");
 
   auto free = [](auto& freet, irt::TNode<int>* root) -> void {
     for (irt::TNode<int>* next : root->get_child_list()) {
@@ -201,8 +201,8 @@ TEST_F(SerializeTest, LayerRect)
 
   irt::LayerRect deserialized;
   iar >> deserialized;
-  IEDALOG.info(ieda::Loc::current(), "Generated Random LayerRect layer:", rect.get_layer_idx());
-  IEDALOG.info(ieda::Loc::current(), "Deserialized LayerRect layer:", deserialized.get_layer_idx());
+  ECCLOG.info(ecc::Loc::current(), "Generated Random LayerRect layer:", rect.get_layer_idx());
+  ECCLOG.info(ecc::Loc::current(), "Deserialized LayerRect layer:", deserialized.get_layer_idx());
   EXPECT_EQ(rect.get_layer_idx(), deserialized.get_layer_idx());
   EXPECT_EQ(rect.get_lb(), deserialized.get_lb());
 }
@@ -234,7 +234,7 @@ TEST_F(SerializeTest, SegmentGuide)
 
   EXPECT_EQ(segment.get_first(), deserialized.get_first());
   EXPECT_EQ(segment.get_second(), deserialized.get_second());
-  IEDALOG.info(ieda::Loc::current(), "Random segment first layer idx is ", deserialized.get_first().get_layer_idx());
+  ECCLOG.info(ecc::Loc::current(), "Random segment first layer idx is ", deserialized.get_first().get_layer_idx());
 }
 
 TEST_F(SerializeTest, LayerCoord)
