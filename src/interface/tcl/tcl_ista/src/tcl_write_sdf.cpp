@@ -14,30 +14,29 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
-
+#include "STAInterface.hpp"
+#include "tcl_ista_util.hpp"
 #include "tcl_sta.h"
-
-using namespace ecc;
 
 namespace tcl {
 
-int registerCmdSTA()
+TclWriteSDF::TclWriteSDF(const char* cmd_name) : TclCmd(cmd_name)
 {
-  // sta
-  registerTclCmd(TclInitSTA, "init_sta");
-  registerTclCmd(TclRunSTA, "run_sta");
-  registerTclCmd(TclRemoveWireLoadModel, "remove_wire_load_model");
-  registerTclCmd(TclUpdateTiming, "update_timing");
-  registerTclCmd(TclWriteSDF, "write_sdf");
-  registerTclCmd(TclReportTiming, "report_timing");
-  registerTclCmd(TclCreateClock, "create_clock");
-  registerTclCmd(TclSetPropagatedClock, "set_propagated_clock");
-  registerTclCmd(TclGetPorts, "get_ports");
-  registerTclCmd(TclGetClocks, "get_clocks");
-  registerTclCmd(TclExtractLib, "extract_lib");
-  registerTclCmd(TclDestroySTA, "destroy_sta");
-  return EXIT_SUCCESS;
+  addOption(new TclStringOption("file", 1));
+}
+
+unsigned TclWriteSDF::exec()
+{
+  TclOption* file_option = getOptionOrArg("file");
+  if (!file_option->is_set_val()) {
+    setTclError("write_sdf requires an output file path");
+    return 0;
+  }
+  if (std::string error_message; !STAI.writeSDF(file_option->getStringVal(), error_message)) {
+    setTclError(error_message);
+    return 0;
+  }
+  return 1;
 }
 
 }  // namespace tcl

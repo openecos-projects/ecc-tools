@@ -14,30 +14,31 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
-
+#include "STAInterface.hpp"
+#include "tcl_ista_util.hpp"
 #include "tcl_sta.h"
-
-using namespace ecc;
 
 namespace tcl {
 
-int registerCmdSTA()
+TclGetClocks::TclGetClocks(const char* cmd_name) : TclCmd(cmd_name)
 {
-  // sta
-  registerTclCmd(TclInitSTA, "init_sta");
-  registerTclCmd(TclRunSTA, "run_sta");
-  registerTclCmd(TclRemoveWireLoadModel, "remove_wire_load_model");
-  registerTclCmd(TclUpdateTiming, "update_timing");
-  registerTclCmd(TclWriteSDF, "write_sdf");
-  registerTclCmd(TclReportTiming, "report_timing");
-  registerTclCmd(TclCreateClock, "create_clock");
-  registerTclCmd(TclSetPropagatedClock, "set_propagated_clock");
-  registerTclCmd(TclGetPorts, "get_ports");
-  registerTclCmd(TclGetClocks, "get_clocks");
-  registerTclCmd(TclExtractLib, "extract_lib");
-  registerTclCmd(TclDestroySTA, "destroy_sta");
-  return EXIT_SUCCESS;
+  addOption(new TclStringListOption("clocks", 1));
+}
+
+unsigned TclGetClocks::exec()
+{
+  TclOption* clock_option = getOptionOrArg("clocks");
+  if (!clock_option->is_set_val()) {
+    setTclError("get_clocks requires a clock list");
+    return 0;
+  }
+  std::vector<std::string> resolved_clock_list;
+  if (std::string error_message; !STAI.getClocks(clock_option->getStringList(), resolved_clock_list, error_message)) {
+    setTclError(error_message);
+    return 0;
+  }
+  setResult(resolved_clock_list);
+  return 1;
 }
 
 }  // namespace tcl

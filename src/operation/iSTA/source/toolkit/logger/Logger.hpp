@@ -67,7 +67,7 @@ class Logger
   }
 
   template <typename T, typename... Args>
-  void error(Loc location, const T& value, const Args&... args)
+  [[noreturn]] void error(Loc location, const T& value, const Args&... args)
   {
     printLog(LogLevel::kError, location, value, args...);
     closeLogFileStream();
@@ -157,13 +157,12 @@ class Logger
   void pushStream(Stream& stream, T t, const Args&... args)
   {
     stream << t;
-    pushStream(stream, args...);
-  }
-
-  template <typename Stream, typename T>
-  void pushStream(Stream& stream, T t)
-  {
-    stream << t;
+    /*
+     * this equals to
+     * stream << args[0] << args[1], ...
+     * use void to suppress unused-value warning for fold expression
+     */
+    (void)(stream << ... << args);
   }
 
   std::string getTimestamp()
