@@ -98,7 +98,7 @@ void IdbViaMasterRulePattern::parse_pattern_array(vector<pair<string, string>>& 
 void IdbViaMasterRulePattern::parse_pattern_row_value(size_t row_index, string value)
 {
   if (row_index >= _pattern_state.size()) {
-    IEDALOG.warn(ieda::Loc::current(), "Error : pattern index error, pattern size = ", _pattern_state.size(), " row index = ", row_index);
+    ECCLOG.warn(ecc::Loc::current(), "Error : pattern index error, pattern size = ", _pattern_state.size(), " row index = ", row_index);
     return;
   }
 
@@ -497,7 +497,7 @@ void IdbViaMaster::set_layer_shape(IdbViaLayerIndex layer_index)
         break;
     }
     if (_master_fixed_list.size() != IdbViaLayerIndex::kMax) {
-      IEDALOG.warn(ieda::Loc::current(), "Error fix via : fix layer number must be ==3...");
+      ECCLOG.warn(ecc::Loc::current(), "Error fix via : fix layer number must be ==3...");
     } else {
       //   if (layer_index == IdbViaLayerIndex::kLayerBottom || layer_index == IdbViaLayerIndex::kLayerTop) {
       //     IdbViaMasterFixed* master_fix_find = get_master_fixed(layer_index);
@@ -523,7 +523,7 @@ void IdbViaMaster::set_layer_shape(IdbViaLayerIndex layer_index)
     }
 
   } else {
-    IEDALOG.warn(ieda::Loc::current(), "Error IdbViaMaster : No via master exist...");
+    ECCLOG.warn(ecc::Loc::current(), "Error IdbViaMaster : No via master exist...");
   }
 }
 /// find top\bottom\cut fix master according to layer index

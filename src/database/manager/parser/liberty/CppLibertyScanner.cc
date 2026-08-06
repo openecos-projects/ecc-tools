@@ -455,7 +455,7 @@ int LibertyScanner::yylex(YYSTYPE* yylval, YYLTYPE* yylloc)
                 continue;
             } else if (c == '*') {
                 if (!skipBlockComment()) {
-                    IEDALOG.warn(ieda::Loc::current(), "Error: Unterminated block comment at line ", yylloc->first_line);
+                    ECCLOG.warn(ecc::Loc::current(), "Error: Unterminated block comment at line ", yylloc->first_line);
                     return 0;
                 }
                 continue;
@@ -530,7 +530,7 @@ int LibertyScanner::yylex(YYSTYPE* yylval, YYLTYPE* yylloc)
             case '\'':
                 return c;
             default:
-                IEDALOG.warn(ieda::Loc::current(), "Debug: Unknown character '", (char)c, "' (code ", c, ") at line ", _line_no);
+                ECCLOG.warn(ecc::Loc::current(), "Debug: Unknown character '", (char)c, "' (code ", c, ") at line ", _line_no);
                 return c;
         }
     }

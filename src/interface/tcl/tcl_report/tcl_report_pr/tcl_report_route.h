@@ -22,9 +22,9 @@
 
 namespace tcl {
 
-using ieda::TclCmd;
-using ieda::TclOption;
-using ieda::TclStringOption;
+using ecc::TclCmd;
+using ecc::TclOption;
+using ecc::TclStringOption;
 
 class CmdReportRoute : public TclCmd
 {

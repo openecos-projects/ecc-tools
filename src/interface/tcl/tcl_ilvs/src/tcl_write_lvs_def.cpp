@@ -36,7 +36,7 @@ unsigned TclWriteLVSDef::check()
 {
   TclOption* path_option = getOptionOrArg(kPath);
   if (path_option == nullptr || path_option->getStringVal() == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Please specify the iLVS DEF snapshot path by: write_lvs_def -path <file>.");
+    ECCLOG.warn(ecc::Loc::current(), "Please specify the iLVS DEF snapshot path by: write_lvs_def -path <file>.");
     return 0;
   }
   return 1;

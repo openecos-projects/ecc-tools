@@ -79,59 +79,59 @@ class DataConfig
   void set_tech_lef_path(const string lef_path)
   {
     _tech_lef_path = lef_path;
-    IEDALOG.info(ieda::Loc::current(), "[Data config set] tech lef = ", _tech_lef_path);
+    ECCLOG.info(ecc::Loc::current(), "[Data config set] tech lef = ", _tech_lef_path);
   }
   void set_lef_paths(const vector<string> lef_paths)
   {
     _lef_paths = lef_paths;
     for (auto lef : _lef_paths) {
-      IEDALOG.info(ieda::Loc::current(), "[Data config set] lef = ", lef);
+      ECCLOG.info(ecc::Loc::current(), "[Data config set] lef = ", lef);
     }
   }
   void set_def_path(const string def_path)
   {
     _def_path = def_path;
-    IEDALOG.info(ieda::Loc::current(), "[Data config set] def = ", _def_path);
+    ECCLOG.info(ecc::Loc::current(), "[Data config set] def = ", _def_path);
   }
   void set_verilog_path(const string verilog_path)
   {
     _verilog_path = verilog_path;
-    IEDALOG.info(ieda::Loc::current(), "[Data config set] verilog = ", _verilog_path);
+    ECCLOG.info(ecc::Loc::current(), "[Data config set] verilog = ", _verilog_path);
   }
   void set_output_path(const string output_path)
   {
     _output_path = output_path;
-    IEDALOG.info(ieda::Loc::current(), "[Data config set] output dir = ", _output_path);
+    ECCLOG.info(ecc::Loc::current(), "[Data config set] output dir = ", _output_path);
   }
   void set_lib_paths(const vector<string> lib_paths)
   {
     _lib_paths = lib_paths;
     for (auto lib : _lib_paths) {
-      IEDALOG.info(ieda::Loc::current(), "[Data config set] lib = ", lib);
+      ECCLOG.info(ecc::Loc::current(), "[Data config set] lib = ", lib);
     }
   }
   void set_sdc_path(const string sdc_path)
   {
     _sdc_path = sdc_path;
-    IEDALOG.info(ieda::Loc::current(), "[Data config set] sdc = ", _sdc_path);
+    ECCLOG.info(ecc::Loc::current(), "[Data config set] sdc = ", _sdc_path);
   }
 
   void set_spef_path(const string spef_path)
   {
     _spef_path = spef_path;
-    IEDALOG.info(ieda::Loc::current(), "[Data config set] spef = ", _spef_path);
+    ECCLOG.info(ecc::Loc::current(), "[Data config set] spef = ", _spef_path);
   }
 
   void set_vcd_path(const string vcd_path)
   {
     _vcd_path = vcd_path;
-    IEDALOG.info(ieda::Loc::current(), "[Data config set] vcd = ", _vcd_path);
+    ECCLOG.info(ecc::Loc::current(), "[Data config set] vcd = ", _vcd_path);
   }
 
   void set_feature_path(const string feature_path)
   {
     _feature_path = feature_path;
-    IEDALOG.info(ieda::Loc::current(), "[Data config set] feature = ", _feature_path);
+    ECCLOG.info(ecc::Loc::current(), "[Data config set] feature = ", _feature_path);
   }
 
   void set_routing_layer_1st(string layer) { _settings.routing_layer_1st = layer; }

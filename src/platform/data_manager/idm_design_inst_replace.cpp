@@ -62,7 +62,7 @@ void DataManager::place_macro_generate_tcl(std::string directory, std::string tc
       ++index;
     }
 
-    IEDALOG.info(ieda::Loc::current(), " iterate_index = ", iterate_index++);
+    ECCLOG.info(ecc::Loc::current(), " iterate_index = ", iterate_index++);
   }
 }
 
@@ -97,8 +97,8 @@ bool DataManager::place_macro_loc_rand(std::string tcl_path)
   int urx = _layout->get_die()->get_bounding_box()->get_high_x();
   int ury = _layout->get_die()->get_bounding_box()->get_high_y();
   //double Avaliable_area = (double) (urx - llx) * (double) (ury - lly);
-  // IEDALOG.info(ieda::Loc::current(), "grid_width = ", grid_width, ", grid_height = ", grid_height);
-  // IEDALOG.info(ieda::Loc::current(), "llx = ", llx, ", lly = ", lly, ", urx = ", urx, ", ury = ", ury);
+  // ECCLOG.info(ecc::Loc::current(), "grid_width = ", grid_width, ", grid_height = ", grid_height);
+  // ECCLOG.info(ecc::Loc::current(), "llx = ", llx, ", lly = ", lly, ", urx = ", urx, ", ury = ", ury);
 
   double total_area = 0.0;
   // Macro包含center_coor, orient, width, height(宽高可包含halo)
@@ -120,7 +120,7 @@ bool DataManager::place_macro_loc_rand(std::string tcl_path)
     }
   }
   std::sort(Avaliable_macro.begin(), Avaliable_macro.end(), compareByArea);
-  // IEDALOG.info(ieda::Loc::current(), "available_macro_num = ", Avaliable_macro.size(), ", total_area = ", total_area,
+  // ECCLOG.info(ecc::Loc::current(), "available_macro_num = ", Avaliable_macro.size(), ", total_area = ", total_area,
   //              ", available_area = ", Avaliable_area);
 
   string orientations[] = {"R0", "MX", "R180", "MY"};
@@ -190,14 +190,14 @@ bool DataManager::place_macro_loc_rand(std::string tcl_path)
         }
       }
     }
-    // IEDALOG.info(ieda::Loc::current(), "false_grid_point_num = ", falseGridPoints.size());
+    // ECCLOG.info(ecc::Loc::current(), "false_grid_point_num = ", falseGridPoints.size());
     if (!falseGridPoints.empty()) {
       int random_number = rand() % (falseGridPoints.size() + 1);
       std::pair<int, int> selectedPoint = falseGridPoints[random_number];
       Avaliable_macro[i].center_x = selectedPoint.first * grid_width + grid_width / 2;
       Avaliable_macro[i].center_y = selectedPoint.second * grid_height + grid_height / 2;
     } else {
-      IEDALOG.info(ieda::Loc::current(), "没有可选的false格点", " i = ", i);
+      ECCLOG.info(ecc::Loc::current(), "没有可选的false格点", " i = ", i);
       return false;
     }
   }
@@ -209,7 +209,7 @@ bool DataManager::place_macro_loc_rand(std::string tcl_path)
 
   for (size_t i = 0; i < Avaliable_macro.size(); i++) {
     if (Avaliable_macro[i].center_x < 0.1 || Avaliable_macro[i].center_y < 0.1) {
-      IEDALOG.warn(ieda::Loc::current(), " error: exist unplaced macro");
+      ECCLOG.warn(ecc::Loc::current(), " error: exist unplaced macro");
       return false;
     }
   }
@@ -219,7 +219,7 @@ bool DataManager::place_macro_loc_rand(std::string tcl_path)
         || Avaliable_macro[i].center_y - Avaliable_macro[i].height / 2 < lly
         || Avaliable_macro[i].center_x + Avaliable_macro[i].width / 2 > urx
         || Avaliable_macro[i].center_y + Avaliable_macro[i].height / 2 > ury) {
-      IEDALOG.warn(ieda::Loc::current(), " error: out of bound");
+      ECCLOG.warn(ecc::Loc::current(), " error: out of bound");
       return false;
     }
   }
@@ -228,7 +228,7 @@ bool DataManager::place_macro_loc_rand(std::string tcl_path)
     for (auto& macro2 : Avaliable_macro) {
       if (macro1.name.compare(macro2.name) == 1) {
         if (isOverlap(macro1, macro2)) {
-          IEDALOG.warn(ieda::Loc::current(), "error, is overlap");
+          ECCLOG.warn(ecc::Loc::current(), "error, is overlap");
           return false;
         }
       }
@@ -328,7 +328,7 @@ void DataManager::scale_macro_loc()
         for (auto& macro2 : Avaliable_macro) {
           if (abs(macro1.center_x - macro2.center_x) > 1e-3 || abs(macro1.center_y - macro2.center_y) > 1e-3) {
             if (isOverlap(macro1, macro2)) {
-              IEDALOG.warn(ieda::Loc::current(), "error, is overlap");
+              ECCLOG.warn(ecc::Loc::current(), "error, is overlap");
               return;
             }
           }

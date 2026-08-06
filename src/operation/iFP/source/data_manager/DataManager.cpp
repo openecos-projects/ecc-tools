@@ -165,11 +165,18 @@ void DataManager::printConfig()
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "location_path: ", _config.macro_place_file_path,
              ", placement_halo: ", _config.macro_placement_halo, ", routing_halo: ", _config.macro_routing_halo);
 
-  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "layout");
-  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "site: ", _config.layout_site_name, ", ratio: ", _config.layout_xy_ratio,
-             ", util: ", _config.layout_core_util, ", margin: {l:", _config.layout_margin_left_micron,
-             ", r:", _config.layout_margin_right_micron, ", t:", _config.layout_margin_top_micron,
-             ", b:", _config.layout_margin_bottom_micron, "}");
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "die");
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "site: ", _config.die_site_name,
+             ", mode: ", GetDieModeName()(_config.die_mode), ", margin: {l: ", _config.die_margin_left_micron,
+             ", r: ", _config.die_margin_right_micron, ", t: ", _config.die_margin_top_micron,
+             ", b: ", _config.die_margin_bottom_micron, "}");
+  if (_config.die_mode == DieMode::kDieUtil) {
+    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "aspect_ratio: ", _config.die_aspect_ratio,
+               ", utilization: ", _config.die_utilization);
+  } else if (_config.die_mode == DieMode::kDieSize) {
+    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "width: ", _config.die_width_micron,
+               ", height: ", _config.die_height_micron);
+  }
 
   std::string io_layer_name_string = "{";
   for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(_config.io_pin_layer_name_list.size()); layer_idx++) {

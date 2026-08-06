@@ -28,7 +28,7 @@
 #include "tcl_flow.h"
 #include "tcl_flowconfig.h"
 
-using namespace ieda;
+using namespace ecc;
 
 namespace tcl {
 

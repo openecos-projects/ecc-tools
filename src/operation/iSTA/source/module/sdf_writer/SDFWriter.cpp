@@ -97,7 +97,7 @@ void SDFWriter::outputSDFHeader(std::ofstream* sdf_file)
     }
   }
 
-  (*sdf_file) << " (VENDOR \"iEDA\")\n";
+  (*sdf_file) << " (VENDOR \"ECC\")\n";
   (*sdf_file) << " (PROGRAM \"iSTA\")\n";
   (*sdf_file) << " (VERSION \"iSTA\")\n";
   (*sdf_file) << " (DIVIDER /)\n";

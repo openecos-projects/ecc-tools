@@ -140,22 +140,22 @@ class DefRead
     logNumber(mudule, number);
     logSeperate();
   }
-  void logSeperate() { IEDALOG.info(ieda::Loc::current(), "**************************************************************"); }
+  void logSeperate() { ECCLOG.info(ecc::Loc::current(), "**************************************************************"); }
   void logNumber(string mudule, int32_t number = -1)
   {
-    IEDALOG.info(ieda::Loc::current(), mudule);
+    ECCLOG.info(ecc::Loc::current(), mudule);
     if (number != -1) {
-      IEDALOG.info(ieda::Loc::current(), " number : ", number);
+      ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    IEDALOG.info(ieda::Loc::current(), "");
+    ECCLOG.info(ecc::Loc::current(), "");
   }
   void logInfo(string info, int32_t number = -1)
   {
-    IEDALOG.info(ieda::Loc::current(), info);
+    ECCLOG.info(ecc::Loc::current(), info);
     if (number != -1) {
-      IEDALOG.info(ieda::Loc::current(), " number : ", number);
+      ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    IEDALOG.info(ieda::Loc::current(), "");
+    ECCLOG.info(ecc::Loc::current(), "");
   }
 
  private:

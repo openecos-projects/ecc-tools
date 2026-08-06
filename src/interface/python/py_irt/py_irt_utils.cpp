@@ -99,20 +99,20 @@ bool initConfigMapByJSON(const std::string& config, std::map<std::string, std::a
   config_file >> json;
   nlohmann::json rt_json = json["RT"];
   std::string value;
-  value = ieda::getJsonData(json, {"RT", "-temp_directory_path"});
+  value = ecc::getJsonData(json, {"RT", "-temp_directory_path"});
   config_map.insert(std::make_pair("-temp_directory_path", value));
-  value = ieda::getJsonData(json, {"RT", "-bottom_routing_layer"});
+  value = ecc::getJsonData(json, {"RT", "-bottom_routing_layer"});
   config_map.insert(std::make_pair("-bottom_routing_layer", value));
-  value = ieda::getJsonData(json, {"RT", "-top_routing_layer"});
+  value = ecc::getJsonData(json, {"RT", "-top_routing_layer"});
   config_map.insert(std::make_pair("-top_routing_layer", value));
-  value = ieda::getJsonData(json, {"RT", "-thread_number"});
+  value = ecc::getJsonData(json, {"RT", "-thread_number"});
   config_map.insert(std::make_pair("-thread_number", std::stoi(value)));
-  value = ieda::getJsonData(json, {"RT", "-enable_timing"});
+  value = ecc::getJsonData(json, {"RT", "-enable_timing"});
   config_map.insert(std::make_pair("-enable_timing", std::stoi(value)));
-  value = ieda::getJsonData(json, {"RT", "-output_inter_result"});
+  value = ecc::getJsonData(json, {"RT", "-output_inter_result"});
   config_map.insert(std::make_pair("-output_inter_result", std::stoi(value)));
   if (json.contains("RT") && json["RT"].contains("-enable_fast_mode")) {
-    value = ieda::getJsonData(json, {"RT", "-enable_fast_mode"});
+    value = ecc::getJsonData(json, {"RT", "-enable_fast_mode"});
     config_map.insert(std::make_pair("-enable_fast_mode", std::stoi(value)));
   }
   for (nlohmann::json::iterator item = rt_json.begin(); item != rt_json.end(); ++item) {

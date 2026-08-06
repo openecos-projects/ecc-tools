@@ -48,42 +48,42 @@ bool DataConfig::initConfig(string config_path)
 {
   if (checkFilePath(config_path)) {
     _config_path = config_path;
-    IEDALOG.info(ieda::Loc::current(), "[Data config] begin config, path = ", _config_path);
+    ECCLOG.info(ecc::Loc::current(), "[Data config] begin config, path = ", _config_path);
 
-    std::ifstream& config_stream = ieda::getInputFileStream(_config_path);
+    std::ifstream& config_stream = ecc::getInputFileStream(_config_path);
 
     {
       nlohmann::json json;
       config_stream >> json;
 
-      set_tech_lef_path(ieda::getJsonData(json, {"INPUT", "tech_lef_path"}));
+      set_tech_lef_path(ecc::getJsonData(json, {"INPUT", "tech_lef_path"}));
       vector<string> lef_paths;
-      for (string lef_path : ieda::getJsonData(json, {"INPUT", "lef_paths"})) {
+      for (string lef_path : ecc::getJsonData(json, {"INPUT", "lef_paths"})) {
         lef_paths.emplace_back(lef_path);
       }
       set_lef_paths(lef_paths);
 
-      set_def_path(ieda::getJsonData(json, {"INPUT", "def_path"}));
-      set_verilog_path(ieda::getJsonData(json, {"INPUT", "verilog_path"}));
+      set_def_path(ecc::getJsonData(json, {"INPUT", "def_path"}));
+      set_verilog_path(ecc::getJsonData(json, {"INPUT", "verilog_path"}));
 
       vector<string> lib_paths;
-      for (std::string lib_path : ieda::getJsonData(json, {"INPUT", "lib_path"})) {
+      for (std::string lib_path : ecc::getJsonData(json, {"INPUT", "lib_path"})) {
         lib_paths.emplace_back(lib_path);
       }
       set_lib_paths(lib_paths);
 
-      set_sdc_path(ieda::getJsonData(json, {"INPUT", "sdc_path"}));
-      set_spef_path(ieda::getJsonData(json, {"INPUT", "spef_path"}));
-      set_vcd_path(ieda::getJsonData(json, {"INPUT", "vcd_path"}));
+      set_sdc_path(ecc::getJsonData(json, {"INPUT", "sdc_path"}));
+      set_spef_path(ecc::getJsonData(json, {"INPUT", "spef_path"}));
+      set_vcd_path(ecc::getJsonData(json, {"INPUT", "vcd_path"}));
 
-      set_output_path(ieda::getJsonData(json, {"OUTPUT", "output_dir_path"}));
+      set_output_path(ecc::getJsonData(json, {"OUTPUT", "output_dir_path"}));
 
-      set_routing_layer_1st(ieda::getJsonData(json, {"LayerSettings", "routing_layer_1st"}));
+      set_routing_layer_1st(ecc::getJsonData(json, {"LayerSettings", "routing_layer_1st"}));
     }
 
-    ieda::closeFileStream(config_stream);
+    ecc::closeFileStream(config_stream);
 
-    IEDALOG.info(ieda::Loc::current(), "[Data config] end config");
+    ECCLOG.info(ecc::Loc::current(), "[Data config] end config");
 
     return true;
   }
@@ -100,7 +100,7 @@ bool DataConfig::checkFilePath(string path)
 {
   FILE* file = fopen(path.c_str(), "r");
   if (file == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "[DataConfig error] : Can not open file = ", path);
+    ECCLOG.warn(ecc::Loc::current(), "[DataConfig error] : Can not open file = ", path);
 
     return false;
   }

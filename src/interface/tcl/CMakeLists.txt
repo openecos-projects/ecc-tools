@@ -18,13 +18,13 @@ add_subdirectory(tcl_geometry)
 
 AUX_SOURCE_DIRECTORY(./ SRC)
 
-add_library(ieda_tcl ${SRC})
+add_library(ecc_tcl ${SRC})
 
-target_link_libraries(ieda_tcl 
-    PUBLIC 
-        flow 
+target_link_libraries(ecc_tcl
+    PUBLIC
+        flow
         tool_manager
-        tcl 
+        tcl
         tcl_config
         tcl_idb
         tcl_flow
@@ -36,14 +36,14 @@ target_link_libraries(ieda_tcl
         tcl_ifp
         tcl_iemir
         tcl_izh
-        tcl_ircx 
+        tcl_ircx
         tcl_report
         tcl_feature
         tcl_geometry
 )
 
-target_include_directories(ieda_tcl 
-    PUBLIC 
+target_include_directories(ecc_tcl
+    PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/tcl_geometry
 

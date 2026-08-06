@@ -120,10 +120,10 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
 {
   // std::vector<ContestParser::Instance*> inst_list;
   int i = 0;
-  IEDALOG.info(ieda::Loc::current(), "write_placement_back start. Db address is ", this);
-  IEDALOG.info(ieda::Loc::current(), "write_placement_back start. idb_design address is ", this->get_idb_design());
+  ECCLOG.info(ecc::Loc::current(), "write_placement_back start. Db address is ", this);
+  ECCLOG.info(ecc::Loc::current(), "write_placement_back start. idb_design address is ", this->get_idb_design());
   if (x == nullptr || y == nullptr || len <= 0) {
-    IEDALOG.info(ieda::Loc::current(), "WriteBack placement finished!!");
+    ECCLOG.info(ecc::Loc::current(), "WriteBack placement finished!!");
     return;
   }
   auto const& row_list = this->get_idb_layout()->get_rows()->get_row_list();
@@ -199,8 +199,8 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
     // flag = true;
   }
   // output hpwl
-  IEDALOG.info(ieda::Loc::current(), "WriteBack placement finished!!");
-  // IEDALOG.info(ieda::Loc::current(), "WriteBack double finished, Current Contest DB Total HPWL: ",
+  ECCLOG.info(ecc::Loc::current(), "WriteBack placement finished!!");
+  // ECCLOG.info(ecc::Loc::current(), "WriteBack double finished, Current Contest DB Total HPWL: ",
   //              contest_db->obtainTotalHPWL());
 
   return;

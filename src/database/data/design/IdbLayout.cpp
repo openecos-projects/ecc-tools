@@ -115,7 +115,7 @@ IdbCore* IdbLayout::get_core()
     int32_t max_y = INT_MIN;
     for (IdbRow* row : _rows->get_row_list()) {
       if (row->get_site() != nullptr && row->get_site()->is_core_site() == false) {
-        IEDALOG.warn(ieda::Loc::current(), "Warning: row ", row->get_name(), " ", row->get_site()->get_name(), " site is not core site!");
+        ECCLOG.warn(ecc::Loc::current(), "Warning: row ", row->get_name(), " ", row->get_site()->get_name(), " site is not core site!");
         continue;
       }
       IdbRect* row_rect = row->get_bounding_box();

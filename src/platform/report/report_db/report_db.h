@@ -64,11 +64,11 @@ class ReportDB : public ReportBase
 
   std::string title() override;
 
-  std::shared_ptr<ieda::ReportTable> createSummaryTable();
-  std::shared_ptr<ieda::ReportTable> createSummaryInstances();
-  std::shared_ptr<ieda::ReportTable> createSummaryNets();
-  std::shared_ptr<ieda::ReportTable> createSummaryLayers();
-  std::shared_ptr<ieda::ReportTable> createSummaryPins();
+  std::shared_ptr<ecc::ReportTable> createSummaryTable();
+  std::shared_ptr<ecc::ReportTable> createSummaryInstances();
+  std::shared_ptr<ecc::ReportTable> createSummaryNets();
+  std::shared_ptr<ecc::ReportTable> createSummaryLayers();
+  std::shared_ptr<ecc::ReportTable> createSummaryPins();
 };
 
 class ReportDesign : public ReportBase
@@ -77,13 +77,13 @@ class ReportDesign : public ReportBase
   explicit ReportDesign(const std::string& report_name) : ReportBase(report_name) {}
 
   std::string title() override;
-  std::shared_ptr<ieda::ReportTable> createInstanceTable(const std::string& inst_name);
-  std::shared_ptr<ieda::ReportTable> createInstanceTable(idb::IdbInstance* inst);
-  std::shared_ptr<ieda::ReportTable> createInstancePinTable(const std::string& inst_name);
-  std::shared_ptr<ieda::ReportTable> createInstancePinTable(idb::IdbInstance* inst);
+  std::shared_ptr<ecc::ReportTable> createInstanceTable(const std::string& inst_name);
+  std::shared_ptr<ecc::ReportTable> createInstanceTable(idb::IdbInstance* inst);
+  std::shared_ptr<ecc::ReportTable> createInstancePinTable(const std::string& inst_name);
+  std::shared_ptr<ecc::ReportTable> createInstancePinTable(idb::IdbInstance* inst);
 
-  std::shared_ptr<ieda::ReportTable> createNetTable(const std::string& net_name);
-  std::shared_ptr<ieda::ReportTable> createNetTable(idb::IdbNet* net);
+  std::shared_ptr<ecc::ReportTable> createNetTable(const std::string& net_name);
+  std::shared_ptr<ecc::ReportTable> createNetTable(idb::IdbNet* net);
 
  private:
 };

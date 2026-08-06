@@ -1,16 +1,16 @@
 AUX_SOURCE_DIRECTORY(./ TCL_ICTS_SRC)
 
-add_library(tcl_icts 
+add_library(tcl_icts
     ${TCL_ICTS_SRC}
 )
 
-target_link_libraries(tcl_icts 
+target_link_libraries(tcl_icts
     PUBLIC
         tcl_util
         tcl
         icts_interface
     PRIVATE
-        ieda_logger
+        ecc_logger
 )
 
 target_include_directories(tcl_icts

@@ -84,7 +84,7 @@ void IdbLayer::set_type(string type)
 
 void IdbLayer::print()
 {
-  IEDALOG.info(ieda::Loc::current(), "name =  ", _name);
+  ECCLOG.info(ecc::Loc::current(), "name =  ", _name);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -172,7 +172,7 @@ IdbLayer* IdbLayers::set_layer(string layer_name, string type)
     _z_order++;
   }
 
-  // IEDALOG.info(ieda::Loc::current(), "Routing layer idx = ", _routing_layer_index);
+  // ECCLOG.info(ecc::Loc::current(), "Routing layer idx = ", _routing_layer_index);
 
   return layer_find;
 }  // namespace idb
@@ -197,7 +197,7 @@ IdbLayer* IdbLayers::find_layer(const string& src_name, bool new_layer)
   }
 
   //   if (!new_layer) {
-  //     IEDALOG.warn(ieda::Loc::current(), "[IdbLayer Error] : can not find layer = ", src_name);
+  //     ECCLOG.warn(ecc::Loc::current(), "[IdbLayer Error] : can not find layer = ", src_name);
   //   }
 
   return nullptr;
@@ -273,7 +273,7 @@ IdbLayer* IdbLayers::find_layer_by_order(uint8_t order)
     }
   }
 
-  IEDALOG.warn(ieda::Loc::current(), "[IdbLayer Error] : can not find layer with order = ", order);
+  ECCLOG.warn(ecc::Loc::current(), "[IdbLayer Error] : can not find layer with order = ", order);
 
   return nullptr;
 }

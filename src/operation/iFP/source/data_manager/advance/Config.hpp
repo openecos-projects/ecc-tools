@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include "DieMode.hpp"
 #include "FPHeader.hpp"
 #include "PGGlobalConnect.hpp"
 #include "PGRail.hpp"
@@ -36,13 +37,16 @@ class Config
   std::string macro_place_file_path;                // optional
   double macro_placement_halo;                      // optional
   double macro_routing_halo;                        // optional
-  std::string layout_site_name;                     // optional
-  double layout_xy_ratio;                           // optional
-  double layout_core_util;                          // optional
-  double layout_margin_left_micron;                 // optional
-  double layout_margin_right_micron;                // optional
-  double layout_margin_top_micron;                  // optional
-  double layout_margin_bottom_micron;               // optional
+  DieMode die_mode;                                 // optional
+  std::string die_site_name;                        // optional
+  double die_aspect_ratio;                          // optional
+  double die_utilization;                           // optional
+  double die_width_micron;                          // optional
+  double die_height_micron;                         // optional
+  double die_margin_left_micron;                    // optional
+  double die_margin_right_micron;                   // optional
+  double die_margin_top_micron;                     // optional
+  double die_margin_bottom_micron;                  // optional
   std::vector<std::string> io_pin_layer_name_list;  // optional
   double io_pin_width_micron;                       // optional
   double io_pin_depth_micron;                       // optional

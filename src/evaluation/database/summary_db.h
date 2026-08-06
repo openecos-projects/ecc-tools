@@ -10,7 +10,7 @@
 #include "timing_db.hh"
 #include "wirelength_db.h"
 
-namespace ieda_eval {
+namespace ecc_eval {
 
 class SummaryDB
 {
@@ -19,4 +19,4 @@ class SummaryDB
   ~SummaryDB();
 };
 
-}  // namespace ieda_eval
+}  // namespace ecc_eval

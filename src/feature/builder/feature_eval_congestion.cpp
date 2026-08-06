@@ -8,7 +8,7 @@
 #include "congestion_api.h"
 #include "feature_builder.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 CongestionSummary FeatureBuilder::buildCongestionEvalSummary(int32_t grid_size)
 {
@@ -64,4 +64,4 @@ CongestionSummary FeatureBuilder::buildCongestionEvalSummary(int32_t grid_size)
   return congestion_summary;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

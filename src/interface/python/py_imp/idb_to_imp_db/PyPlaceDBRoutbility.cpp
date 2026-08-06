@@ -98,7 +98,7 @@ void PyPlaceDB::init_routability(idm::DataManager* db, std::vector<IdbInstance*>
 
     if (node->get_status() == IdbPlacementStatus::kFixed) {
       // Macro const& macro = db.macro(db.macroId(node));
-      // IEDALOG.info(ieda::Loc::current(), "PyPlaceDB detects fixed cell.");
+      // ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed cell.");
       for (auto obs : node->get_cell_master()->get_obs_list()) {
         Box box(node->get_coordinate()->get_x(), node->get_coordinate()->get_y(), node->get_bounding_box()->get_high_x(),
                 node->get_bounding_box()->get_high_y());
@@ -116,7 +116,7 @@ void PyPlaceDB::init_routability(idm::DataManager* db, std::vector<IdbInstance*>
             Box grid_box(grid_xl, grid_yl, grid_xh, grid_yh);
             for (auto obs_layer : obs->get_obs_layer_list()) {
               if (obs_layer->get_shape()->get_layer() == nullptr) {
-                IEDALOG.info(ieda::Loc::current(), "continue because obs_layer->get_shape()->get_layer() is nullptr");
+                ECCLOG.info(ecc::Loc::current(), "continue because obs_layer->get_shape()->get_layer() is nullptr");
                 continue;
               }
               int layer_idx = obs_layer->get_shape()->get_layer()->get_id();
@@ -141,7 +141,7 @@ void PyPlaceDB::init_routability(idm::DataManager* db, std::vector<IdbInstance*>
                 }
               }
             }
-            // IEDALOG.info(ieda::Loc::current(), "Instance ", node->get_name(), ", coordinate (",
+            // ECCLOG.info(ecc::Loc::current(), "Instance ", node->get_name(), ", coordinate (",
             //              node->get_coordinate()->get_x(), ", ", node->get_coordinate()->get_y(), ", ",
             //              node->get_bounding_box()->get_high_x(), ", ", node->get_bounding_box()->get_high_y(), ").");
           }
@@ -259,8 +259,8 @@ std::vector<std::vector<float>> PyPlaceDB::getCongestionMap(string method, strin
         }
       }
     }
-    IEDALOG.info(ieda::Loc::current(), "Num gcell is ", overflow_gcell_num, " / ", gcell_info_list.size(), ".");
-    IEDALOG.info(ieda::Loc::current(), "Layer ", key, ", overflow: ", sum_overflow, " / ", sum_supply, ".");
+    ECCLOG.info(ecc::Loc::current(), "Num gcell is ", overflow_gcell_num, " / ", gcell_info_list.size(), ".");
+    ECCLOG.info(ecc::Loc::current(), "Layer ", key, ", overflow: ", sum_overflow, " / ", sum_supply, ".");
     // assert(num_routing_grids_x <= old_size_x);
     // assert(num_routing_grids_y <= old_size_y);
     std::vector<std::vector<float>> result_map_supply(new_size_y, std::vector<float>(new_size_x, 0));
@@ -311,10 +311,10 @@ std::vector<std::vector<float>> PyPlaceDB::getCongestionMap(string method, strin
           }
           // if (result_map[i][j] > 5.0) {
           //   result_map[i][j] = 5.0;
-          //   IEDALOG.warn(ieda::Loc::current(), "Congestion map value is too large.");
+          //   ECCLOG.warn(ecc::Loc::current(), "Congestion map value is too large.");
           // }
         } else {
-          IEDALOG.warn(ieda::Loc::current(), "Error: unsupported method ", method, ", use sum instead.");
+          ECCLOG.warn(ecc::Loc::current(), "Error: unsupported method ", method, ", use sum instead.");
           sum_supply_map[i][j] += supply_val;
           sum_demand_map[i][j] += demand_val;
         }

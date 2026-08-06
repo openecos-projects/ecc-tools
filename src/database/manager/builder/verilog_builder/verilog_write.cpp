@@ -108,9 +108,9 @@ VerilogWriter::~VerilogWriter()
 void VerilogWriter::writeModule()
 {
   if (_stream == nullptr && _gzip_stream == nullptr) {
-    IEDALOG.info(ieda::Loc::current(), "File", _file_name, "NotWritable");
+    ECCLOG.info(ecc::Loc::current(), "File", _file_name, "NotWritable");
   }
-  IEDALOG.info(ieda::Loc::current(), "start write verilog file ", _file_name);
+  ECCLOG.info(ecc::Loc::current(), "start write verilog file ", _file_name);
 
   writeStr("module %s (", _idb_design.get_design_name().c_str());
   writeStr("\n");
@@ -126,7 +126,7 @@ void VerilogWriter::writeModule()
   writeStr("\n");
   writeStr("endmodule\n");
 
-  IEDALOG.info(ieda::Loc::current(), "finish write verilog file ", _file_name);
+  ECCLOG.info(ecc::Loc::current(), "finish write verilog file ", _file_name);
 }
 
 void VerilogWriter::writeStr(const char* strdata, ...)
@@ -490,7 +490,7 @@ void VerilogWriter::writeInstance(IdbInstance* inst)
       bus_right = pin_bus->get().get_right();
     } else {
       if (local_bus_pin_it == instance_bus_pins.end() || local_bus_pin_it->second.empty()) {
-        IEDALOG.warn(ieda::Loc::current(), "skip missing bus pin ", bus_name, " when writing verilog instance ", inst->get_name());
+        ECCLOG.warn(ecc::Loc::current(), "skip missing bus pin ", bus_name, " when writing verilog instance ", inst->get_name());
         continue;
       }
       bus_left = local_bus_pin_it->second.rbegin()->first;

@@ -16,9 +16,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include "Logger.hpp"
-#include "Monitor.hpp"
-#include "PlanarCoord.hpp"
 #include "Segment.hpp"
 #include "TBTask.hpp"
 
@@ -26,11 +23,14 @@ namespace irt {
 
 #define RTTB (irt::TOPOBuilder::getInst())
 
-struct TBSteinerRepairStat
+struct TBRefineStat
 {
-  int32_t raw_steiner_in_macro = 0;
-  int32_t fixed_steiner_in_macro = 0;
-  int32_t failed_steiner_legalize_num = 0;
+  int32_t shifted_edge_num = 0;
+  int32_t isolated_steiner_num = 0;
+  int32_t repaired_steiner_num = 0;
+  int32_t failed_repair_num = 0;
+  bool attempted_congestion_flute = false;
+  bool used_congestion_flute = false;
 };
 
 class TOPOBuilder
@@ -42,7 +42,7 @@ class TOPOBuilder
   // function
   void init();
   std::vector<Segment<PlanarCoord>> getPlanarTopoList(const TBTask& tb_task);
-  std::vector<Segment<PlanarCoord>> getPlanarTopoList(const TBTask& tb_task, TBSteinerRepairStat& steiner_repair_stat);
+  std::vector<Segment<PlanarCoord>> getPlanarTopoList(const TBTask& tb_task, TBRefineStat& refine_stat);
   void destroy();
 
  private:
@@ -55,12 +55,6 @@ class TOPOBuilder
   ~TOPOBuilder() = default;
   TOPOBuilder& operator=(const TOPOBuilder& other) = delete;
   TOPOBuilder& operator=(TOPOBuilder&& other) = delete;
-  // function
-  std::vector<Segment<PlanarCoord>> getFlutePlanarTopoList(const std::vector<PlanarCoord>& planar_coord_list);
-  std::vector<Segment<PlanarCoord>> legalizePlanarTopo(const TBTask& tb_task, std::vector<Segment<PlanarCoord>> raw_topo_list,
-                                                       TBSteinerRepairStat& steiner_repair_stat);
-  PlanarCoord getNearestLegalCoord(const std::vector<PlanarRect>& planar_obs_list, const PlanarRect& planar_search_region, const PlanarCoord& coord);
-  bool isSteinerForbiddenCoord(const std::vector<PlanarRect>& planar_obs_list, const PlanarCoord& coord);
 };
 
 }  // namespace irt

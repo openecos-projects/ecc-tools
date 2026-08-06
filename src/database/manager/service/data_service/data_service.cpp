@@ -64,11 +64,11 @@ IdbDataServiceResult IdbDataService::LayoutFileWriteInit(const char* folder_name
   FILE* file = fopen(test_file.c_str(), "wb");
 
   if (file == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Can not create layout data file ( ", folder_name, " )");
+    ECCLOG.warn(ecc::Loc::current(), "Can not create layout data file ( ", folder_name, " )");
 
     return IdbDataServiceResult::kServiceFailed;
   } else {
-    IEDALOG.info(ieda::Loc::current(), "Create layout data file success ( ", folder_name, " )");
+    ECCLOG.info(ecc::Loc::current(), "Create layout data file success ( ", folder_name, " )");
   }
 
   fclose(file);
@@ -87,11 +87,11 @@ IdbDataServiceResult IdbDataService::LayoutFileReadInit(const char* folder_name)
   file = fopen(test_file.c_str(), "rb");
 
   if (file == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "Can not open layout data file ( ", folder_name, " )");
+    ECCLOG.warn(ecc::Loc::current(), "Can not open layout data file ( ", folder_name, " )");
 
     return IdbDataServiceResult::kServiceFailed;
   } else {
-    IEDALOG.info(ieda::Loc::current(), "Open layout data file success ( ", folder_name, " )");
+    ECCLOG.info(ecc::Loc::current(), "Open layout data file success ( ", folder_name, " )");
   }
 
   fclose(file);

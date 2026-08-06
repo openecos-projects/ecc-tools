@@ -49,18 +49,18 @@ bool CtsConfig::initConfig(string config_path)
   if (checkFilePath(config_path)) {
     _config_path = config_path;
 
-    std::ifstream& config_stream = ieda::getInputFileStream(_config_path);
+    std::ifstream& config_stream = ecc::getInputFileStream(_config_path);
 
     {
       nlohmann::json json;
       config_stream >> json;
 
-      _read_cts_data = ieda::getJsonData(json, {"file_path", "read_cts_data"});
-      _write_cts_data = ieda::getJsonData(json, {"file_path", "write_cts_data"});
-      _cts_data_path = ieda::getJsonData(json, {"file_path", "cts_data_file"});
+      _read_cts_data = ecc::getJsonData(json, {"file_path", "read_cts_data"});
+      _write_cts_data = ecc::getJsonData(json, {"file_path", "write_cts_data"});
+      _cts_data_path = ecc::getJsonData(json, {"file_path", "cts_data_file"});
     }
 
-    ieda::closeFileStream(config_stream);
+    ecc::closeFileStream(config_stream);
 
     return true;
   }
@@ -77,7 +77,7 @@ bool CtsConfig::checkFilePath(string path)
 {
   FILE* file = fopen(path.c_str(), "r");
   if (file == nullptr) {
-    IEDALOG.warn(ieda::Loc::current(), "[DataConfig error] : Can not open file = ", path);
+    ECCLOG.warn(ecc::Loc::current(), "[DataConfig error] : Can not open file = ", path);
 
     return false;
   }

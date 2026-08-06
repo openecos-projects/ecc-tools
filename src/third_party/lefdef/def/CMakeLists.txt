@@ -5,6 +5,9 @@ project(DEF_PARSER
 
 cmake_minimum_required(VERSION 3.11)
 set(DEFLIB_HOME ${CMAKE_CURRENT_SOURCE_DIR})
+set(DEF_GENERATED_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated)
+set(DEF_PARSER_SOURCE ${DEF_GENERATED_DIRECTORY}/def.tab.cpp)
+set(DEF_PARSER_HEADER ${DEF_GENERATED_DIRECTORY}/def.tab.h)
 
 # BISON and ZLIB is required to compile DEF/LEF Parsers.
 find_package(BISON)
@@ -66,7 +69,7 @@ set( DEFLIB_DEF_SRC
   def/defrSettings.cpp
   def/defwWriterCalls.cpp
   def/defwWriter.cpp
-  def/def.tab.cpp
+  ${DEF_PARSER_SOURCE}
   )
 
 set( DEFLIB_DEFZLIB_SRC 
@@ -74,7 +77,7 @@ set( DEFLIB_DEFZLIB_SRC
   )
 
 set (DEFLIB_HEADERS
-  def/def.tab.h
+  ${DEF_PARSER_HEADER}
   def/lex.h
   def/defiAlias.hpp
   def/defiAssertion.hpp
@@ -117,13 +120,21 @@ set (DEFLIB_HEADERS
 
 
 # BISON dependencies
-add_custom_command( 
-  OUTPUT ${DEFLIB_HOME}/def/def.tab.cpp
-  COMMAND ${BISON_EXECUTABLE} -v -pdefyy -d ${DEFLIB_HOME}/def/def.y 
-  COMMAND mv def.tab.h ${DEFLIB_HOME}/def/def.tab.h
-  COMMAND mv def.tab.c ${DEFLIB_HOME}/def/def.tab.cpp
+add_custom_command(
+  OUTPUT
+    ${DEF_PARSER_SOURCE}
+    ${DEF_PARSER_HEADER}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${DEF_GENERATED_DIRECTORY}
+  COMMAND ${BISON_EXECUTABLE}
+          --no-lines
+          -pdefyy
+          --defines=${DEF_PARSER_HEADER}
+          --output=${DEF_PARSER_SOURCE}
+          ${DEFLIB_HOME}/def/def.y
+  DEPENDS ${DEFLIB_HOME}/def/def.y
+  VERBATIM
 )
-add_custom_target(DefBisonTarget ALL DEPENDS def/def.tab.cpp)
+add_custom_target(DefBisonTarget ALL DEPENDS ${DEF_PARSER_SOURCE} ${DEF_PARSER_HEADER})
 
 
 add_library( def ${DEFLIB_DEF_SRC} )
@@ -150,6 +161,7 @@ set_target_properties( defzlib
 # include directory settings
 target_include_directories( def
   PUBLIC
+  ${DEF_GENERATED_DIRECTORY}
   def
   )
 

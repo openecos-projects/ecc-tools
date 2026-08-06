@@ -43,7 +43,7 @@ class IdbVia;
 }  // namespace idb
 using namespace idb;
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 class RouteDataBuilder
 {
@@ -63,4 +63,4 @@ class RouteDataBuilder
   TermPA& find_cell_term_pa(std::string cell_master_name, std::string term_name);
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

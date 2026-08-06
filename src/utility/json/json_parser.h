@@ -45,12 +45,12 @@
 #include "json.hpp"
 #include "zlib.h"
 
-namespace ieda {
+namespace ecc {
 
 static nlohmann::json getJsonData(nlohmann::json value, std::vector<std::string> flag_list, nlohmann::json default_value = "")
 {
   if (flag_list.empty()) {
-    IEDALOG.warn(ieda::Loc::current(), "[json error] : The flag list is empty!");
+    ECCLOG.warn(ecc::Loc::current(), "[json error] : The flag list is empty!");
   }
 
   int flag_size = flag_list.size();
@@ -70,7 +70,7 @@ static nlohmann::json getJsonData(nlohmann::json value, std::vector<std::string>
       key += ".";
     }
   }
-  //   IEDALOG.warn(ieda::Loc::current(), "[json error] : The configuration file key = ", key, " does not exist.");
+  //   ECCLOG.warn(ecc::Loc::current(), "[json error] : The configuration file key = ", key, " does not exist.");
   return default_value;
 }
 
@@ -79,7 +79,7 @@ static T& getFileStream(std::string file_path)
 {
   T* file = new T(file_path);
   if (!file->is_open()) {
-    IEDALOG.warn(ieda::Loc::current(), "[json error] : Failed to open file = ", file_path);
+    ECCLOG.warn(ecc::Loc::current(), "[json error] : Failed to open file = ", file_path);
   }
   return *file;
 }
@@ -88,7 +88,7 @@ static std::string get_gz_string(std::string file_path)
 {
   gzFile file = gzopen(file_path.c_str(), "rb");
   if (!file) {
-    IEDALOG.warn(ieda::Loc::current(), "[json error] : Failed to open file = ", file_path);
+    ECCLOG.warn(ecc::Loc::current(), "[json error] : Failed to open file = ", file_path);
     return "";
   }
 
@@ -99,14 +99,14 @@ static std::string get_gz_string(std::string file_path)
 
   char* content = (char*) malloc(file_length);
   if (!content) {
-    IEDALOG.warn(ieda::Loc::current(), "[json warning] : File empty.", file_path);
+    ECCLOG.warn(ecc::Loc::current(), "[json warning] : File empty.", file_path);
     gzclose(file);
     return "";
   }
 
   int bytes_read = gzread(file, content, file_length);
   if (bytes_read < 0) {
-    IEDALOG.warn(ieda::Loc::current(), "[json error] : Failed to read file = ", file_path);
+    ECCLOG.warn(ecc::Loc::current(), "[json error] : Failed to read file = ", file_path);
     free(content);
     gzclose(file);
     return "";
@@ -122,7 +122,7 @@ static std::string get_gz_string(std::string file_path)
 static std::istringstream& getGzFileStream(std::string file_path)
 {
   if (file_path.find(".gz") != std::string::npos) {
-    IEDALOG.warn(ieda::Loc::current(), "[json error] : do not support gz file by now.");
+    ECCLOG.warn(ecc::Loc::current(), "[json error] : do not support gz file by now.");
     auto content = get_gz_string(file_path);
     std::istringstream* dataStream = new std::istringstream(content);
     return *dataStream;
@@ -183,4 +183,4 @@ static void pushStream(Stream& stream, T t)
   stream << t;
 }
 
-}  // namespace ieda
+}  // namespace ecc

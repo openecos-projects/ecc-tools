@@ -11,7 +11,7 @@ target_link_libraries(py_imp
     idm
     eval_congestion_api
     pybind11::pybind11
-    ieda_logger
+    ecc_logger
 )
 
 target_include_directories(py_imp

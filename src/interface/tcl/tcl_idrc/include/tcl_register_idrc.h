@@ -18,7 +18,7 @@
 
 #include "tcl_drc.h"
 
-using namespace ieda;
+using namespace ecc;
 
 namespace tcl {
 
