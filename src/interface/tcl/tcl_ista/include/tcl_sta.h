@@ -28,7 +28,7 @@ class TclInitSTA : public TclCmd
   explicit TclInitSTA(const char* cmd_name);
   ~TclInitSTA() override = default;
 
-  unsigned check() override { return 1; };
+  unsigned check() override { return 1; }
 
   unsigned exec() override;
 
@@ -42,12 +42,92 @@ class TclRunSTA : public TclCmd
   explicit TclRunSTA(const char* cmd_name);
   ~TclRunSTA() override = default;
 
-  unsigned check() override { return 1; };
+  unsigned check() override { return 1; }
 
   unsigned exec() override;
 
  private:
   std::vector<std::pair<std::string, ValueType>> _config_list;
+};
+
+class TclRemoveWireLoadModel : public TclCmd
+{
+ public:
+  explicit TclRemoveWireLoadModel(const char* cmd_name);
+  ~TclRemoveWireLoadModel() override = default;
+
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclUpdateTiming : public TclCmd
+{
+ public:
+  explicit TclUpdateTiming(const char* cmd_name);
+  ~TclUpdateTiming() override = default;
+
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclWriteSDF : public TclCmd
+{
+ public:
+  explicit TclWriteSDF(const char* cmd_name);
+  ~TclWriteSDF() override = default;
+
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclReportTiming : public TclCmd
+{
+ public:
+  explicit TclReportTiming(const char* cmd_name);
+  ~TclReportTiming() override = default;
+
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclCreateClock : public TclCmd
+{
+ public:
+  explicit TclCreateClock(const char* cmd_name);
+  ~TclCreateClock() override = default;
+
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclSetPropagatedClock : public TclCmd
+{
+ public:
+  explicit TclSetPropagatedClock(const char* cmd_name);
+  ~TclSetPropagatedClock() override = default;
+
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclGetPorts : public TclCmd
+{
+ public:
+  explicit TclGetPorts(const char* cmd_name);
+  ~TclGetPorts() override = default;
+
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclGetClocks : public TclCmd
+{
+ public:
+  explicit TclGetClocks(const char* cmd_name);
+  ~TclGetClocks() override = default;
+
+  unsigned check() override { return 1; }
+  unsigned exec() override;
 };
 
 class TclExtractLib : public TclCmd
@@ -56,7 +136,7 @@ class TclExtractLib : public TclCmd
   explicit TclExtractLib(const char* cmd_name);
   ~TclExtractLib() override = default;
 
-  unsigned check() override { return 1; };
+  unsigned check() override { return 1; }
 
   unsigned exec() override;
 
@@ -70,7 +150,7 @@ class TclDestroySTA : public TclCmd
   explicit TclDestroySTA(const char* cmd_name);
   ~TclDestroySTA() override = default;
 
-  unsigned check() override { return 1; };
+  unsigned check() override { return 1; }
 
   unsigned exec() override;
 
