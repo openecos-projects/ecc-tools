@@ -46,6 +46,12 @@ enum class PRRouteMode
   kAStar
 };
 
+enum class PRTopoMode
+{
+  kNormal,
+  kCongestion
+};
+
 struct PROverflowTask
 {
   std::vector<Segment<PlanarCoord>> kept_segment_list;
@@ -123,7 +129,10 @@ class PlanarRouter
   void initMacroGridRectList();
 
   // routing edge
+  PREdgeCost getRoutingEdgeCost(int32_t supply, int32_t demand);
   PREdgeCost getRoutingEdgeCost(const RoutingEdge& routing_edge);
+  double getTopologyEdgeCost(PRModel& pr_model, RoutingEdge& routing_edge);
+  double getTopologySegmentCost(PRModel& pr_model, const PlanarCoord& first_coord, const PlanarCoord& second_coord);
   void updateRoutingEdgeToGraph(RoutingEdge& routing_edge, PREdgeCost& edge_cost, int32_t curr_net_idx, ChangeType change_type,
                                 std::unordered_set<RoutingEdge*>& routing_edge_set);
   void updateRoutingSegmentListToGraph(PRModel& pr_model, std::span<const Segment<PlanarCoord>> routing_segment_list, ChangeType change_type,
@@ -132,8 +141,9 @@ class PlanarRouter
   // routing flow
   void runRouteFlow(PRModel& pr_model);
   void routePRNetList(PRModel& pr_model, const std::vector<PRNet*>& pr_net_list, const char* route_mode, PRRouteMode pr_route_mode,
-                      bool is_partial_rip_up = false, int32_t rip_up_guard = 0);
-  void routePRNet(PRModel& pr_model, PRNet* pr_net, PRRouteMode pr_route_mode, bool is_partial_rip_up, int32_t rip_up_guard);
+                      PRTopoMode pr_topo_mode, bool is_partial_rip_up = false, int32_t rip_up_guard = 0);
+  void routePRNet(PRModel& pr_model, PRNet* pr_net, PRRouteMode pr_route_mode, PRTopoMode pr_topo_mode, bool is_partial_rip_up,
+                  int32_t rip_up_guard);
   void splitLongPlanarTopoList(PRModel& pr_model, std::vector<Segment<PlanarCoord>>& planar_topo_list);
   bool routePlanarTopoList(PRModel& pr_model, std::vector<Segment<PlanarCoord>>& planar_topo_list, PRRouteMode pr_route_mode,
                            std::vector<Segment<PlanarCoord>>& routing_segment_list);
@@ -142,7 +152,8 @@ class PlanarRouter
   PROverflowTask getOverflowTask(PRModel& pr_model, int32_t rip_up_guard);
   bool isBetterCandidate(PRModel& pr_model, const PRCandidate& candidate, const PRCandidate& best_candidate);
   std::vector<PRCandidate> getPRCandidateListByTopo(PRModel& pr_model, Segment<PlanarCoord>& planar_topo, PRRouteMode pr_route_mode);
-  std::vector<Segment<PlanarCoord>> getPlanarTopoList(PRModel& pr_model);
+  bool shouldUseCongestionFlute(PRModel& pr_model, size_t unique_pin_num);
+  std::vector<Segment<PlanarCoord>> getPlanarTopoList(PRModel& pr_model, PRTopoMode pr_topo_mode);
 
   // A* route
   std::vector<Segment<PlanarCoord>> getRoutingSegmentListByAStar(PRModel& pr_model, const Segment<PlanarCoord>& planar_topo,
@@ -187,7 +198,6 @@ class PlanarRouter
   GridMap<PREdgeCost> _routing_h_edge_cost_map;
   GridMap<PREdgeCost> _routing_v_edge_cost_map;
   std::vector<PlanarRect> _macro_grid_rect_list;
-  std::vector<PlanarRect> _macro_obs_rect_list;
 };
 
 }  // namespace irt
