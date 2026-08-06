@@ -26,6 +26,7 @@ class RoutingEdge
   // getter
   int32_t get_supply() const { return _supply; }
   int32_t get_demand() const { return _demand; }
+  std::vector<int32_t>& get_demand_net_idx_list() { return _demand_net_idx_list; }
   std::set<int32_t>& get_ignore_net_set() { return _ignore_net_set; }
   double get_congestion_cost() const { return _congestion_cost; }
   int32_t get_overflow() const { return std::max(0, _demand - _supply); }
@@ -38,6 +39,7 @@ class RoutingEdge
  private:
   int32_t _supply = 0;
   int32_t _demand = 0;
+  std::vector<int32_t> _demand_net_idx_list;
   std::set<int32_t> _ignore_net_set;
   double _congestion_cost = 0;
 };
