@@ -6,10 +6,12 @@ target_link_libraries(py_izh
     PUBLIC
         izh_interface
         pybind11::pybind11
+        file_manager_zh
 )
 
 target_include_directories(py_izh
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${HOME_THIRDPARTY}/json
+    ${HOME_PLATFORM}/file_manager/izh_fm
 )
