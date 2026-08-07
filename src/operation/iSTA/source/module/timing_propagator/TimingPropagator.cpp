@@ -572,34 +572,29 @@ void TimingPropagator::seedPathState(std::string& start_point, AnalysisType anal
     return;
   }
   std::string path_state_start_point = getPathStateStartPoint(start_point);
-  TimingPathState& rise_path_state
-      = database.get_timing_point_map()[start_point].get_path_state_map()[analysis_type][source_type][TransType::kRise][path_state_start_point];
-  rise_path_state.set_arrival(getStartPointArrival(start_point, analysis_type, TransType::kRise));
-  rise_path_state.set_slew(getStartPointSlew(start_point, analysis_type, TransType::kRise));
-  rise_path_state.set_launch_time(getStartPointLaunchTime(start_point, analysis_type, TransType::kRise));
-  rise_path_state.set_start_point(path_state_start_point);
-  rise_path_state.set_clock_name(getClockName(start_point));
-  rise_path_state.set_crpr_clock_pin(getStartPointCrprClockPin(start_point));
-  rise_path_state.get_predecessor().clear();
-  rise_path_state.set_predecessor_arc_idx(std::numeric_limits<std::size_t>::max());
-  rise_path_state.set_predecessor_arc_delay(0.0);
-  rise_path_state.set_trans_type(TransType::kRise);
-  rise_path_state.set_predecessor_trans_type(TransType::kNone);
-  rise_path_state.set_crpr_clock_trans_type(getStartPointCrprClockTransType(start_point));
-  TimingPathState& fall_path_state
-      = database.get_timing_point_map()[start_point].get_path_state_map()[analysis_type][source_type][TransType::kFall][path_state_start_point];
-  fall_path_state.set_arrival(getStartPointArrival(start_point, analysis_type, TransType::kFall));
-  fall_path_state.set_slew(getStartPointSlew(start_point, analysis_type, TransType::kFall));
-  fall_path_state.set_launch_time(getStartPointLaunchTime(start_point, analysis_type, TransType::kFall));
-  fall_path_state.set_start_point(path_state_start_point);
-  fall_path_state.set_clock_name(getClockName(start_point));
-  fall_path_state.set_crpr_clock_pin(getStartPointCrprClockPin(start_point));
-  fall_path_state.get_predecessor().clear();
-  fall_path_state.set_predecessor_arc_idx(std::numeric_limits<std::size_t>::max());
-  fall_path_state.set_predecessor_arc_delay(0.0);
-  fall_path_state.set_trans_type(TransType::kFall);
-  fall_path_state.set_predecessor_trans_type(TransType::kNone);
-  fall_path_state.set_crpr_clock_trans_type(getStartPointCrprClockTransType(start_point));
+  std::string path_state_tag{getClockName(start_point)};
+  TimingPoint& timing_point = database.get_timing_point_map()[start_point];
+  for (TransType trans_type : {TransType::kRise, TransType::kFall}) {
+    double arrival = getStartPointArrival(start_point, analysis_type, trans_type);
+    std::map<std::string, TimingPathState>& path_state_map = getPathStateMap(timing_point, analysis_type, source_type, trans_type);
+    if (path_state_map.count(path_state_tag) > 0 && !isBetterArrival(arrival, path_state_map[path_state_tag].get_arrival(), analysis_type)) {
+      continue;
+    }
+
+    TimingPathState& path_state = path_state_map[path_state_tag];
+    path_state.set_arrival(arrival);
+    path_state.set_slew(getStartPointSlew(start_point, analysis_type, trans_type));
+    path_state.set_launch_time(getStartPointLaunchTime(start_point, analysis_type, trans_type));
+    path_state.set_start_point(path_state_start_point);
+    path_state.set_clock_name(path_state_tag);
+    path_state.set_crpr_clock_pin(getStartPointCrprClockPin(start_point));
+    path_state.get_predecessor().clear();
+    path_state.set_predecessor_arc_idx(std::numeric_limits<std::size_t>::max());
+    path_state.set_predecessor_arc_delay(0.0);
+    path_state.set_trans_type(trans_type);
+    path_state.set_predecessor_trans_type(TransType::kNone);
+    path_state.set_crpr_clock_trans_type(getStartPointCrprClockTransType(start_point));
+  }
 }
 
 PathSourceType TimingPropagator::getStartPointSourceType(std::string& start_point, AnalysisType analysis_type)
@@ -721,13 +716,14 @@ void TimingPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisType a
     }
     double arc_delay = getArcDelay(arc, analysis_type, input_trans_type, output_trans_type);
     double candidate_arrival = roundTime(source_path_state.get_arrival() + arc_delay);
-    std::string& start_point = source_path_state.get_start_point();
+    const std::string& path_state_tag = source_path_state.get_clock_name();
     std::map<std::string, TimingPathState>& sink_path_state_map = getPathStateMap(sink_point, analysis_type, source_type, output_trans_type);
-    if (sink_path_state_map.count(start_point) == 0 || isBetterArrival(candidate_arrival, sink_path_state_map[start_point].get_arrival(), analysis_type)) {
-      TimingPathState& sink_path_state = sink_path_state_map[start_point];
+    if (sink_path_state_map.count(path_state_tag) == 0
+        || isBetterArrival(candidate_arrival, sink_path_state_map[path_state_tag].get_arrival(), analysis_type)) {
+      TimingPathState& sink_path_state = sink_path_state_map[path_state_tag];
       sink_path_state.set_arrival(candidate_arrival);
       sink_path_state.set_slew(getDataSlew(sink_point, analysis_type, output_trans_type));
-      sink_path_state.set_start_point(start_point);
+      sink_path_state.set_start_point(source_path_state.get_start_point());
       sink_path_state.set_predecessor(arc.get_source_pin());
       sink_path_state.set_predecessor_arc_idx(arc_idx);
       sink_path_state.set_predecessor_arc_delay(arc_delay);
@@ -797,9 +793,9 @@ std::map<std::string, TimingPathState>& TimingPropagator::getPathStateMap(Timing
 }
 
 TimingPathState& TimingPropagator::getPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type, TransType trans_type,
-                                                std::string& start_point)
+                                                std::string& path_state_tag)
 {
-  return timing_point.get_path_state_map()[analysis_type][source_type][trans_type][start_point];
+  return timing_point.get_path_state_map()[analysis_type][source_type][trans_type][path_state_tag];
 }
 
 TimingPathState* TimingPropagator::getWorstPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type)
