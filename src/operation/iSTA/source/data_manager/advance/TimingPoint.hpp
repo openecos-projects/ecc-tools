@@ -60,6 +60,7 @@ class TimingPoint
     return _physical_clock_predecessor_trans_type_map;
   }
   std::map<AnalysisType, std::map<TransType, double>>& get_data_slew_map() { return _data_slew_map; }
+  // The innermost key is the launch clock name, not the individual startpoint.
   std::map<AnalysisType, std::map<PathSourceType, std::map<TransType, std::map<std::string, TimingPathState>>>>& get_path_state_map()
   {
     return _path_state_map;
