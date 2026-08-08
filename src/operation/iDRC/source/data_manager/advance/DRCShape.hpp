@@ -35,14 +35,17 @@ class DRCShape : public LayerRect
   // getter
   int32_t get_net_idx() const { return _net_idx; }
   bool get_is_routing() const { return _is_routing; }
+  bool get_is_obs() const { return _is_obs; }
   // setter
   void set_net_idx(const int32_t net_idx) { _net_idx = net_idx; }
   void set_is_routing(const bool is_routing) { _is_routing = is_routing; }
+  void set_is_obs(const bool is_obs) { _is_obs = is_obs; }
   // function
 
  private:
   int32_t _net_idx = -1;
   bool _is_routing = true;
+  bool _is_obs = false;
 };
 
 }  // namespace idrc
