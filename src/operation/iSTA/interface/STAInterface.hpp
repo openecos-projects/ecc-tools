@@ -104,6 +104,16 @@ class STAInterface
   void runSTA();
   void extractLib();
   void destroySTA();
+  bool updateTiming(std::string& error_message);
+  bool writeSDF(const std::string& file_path, std::string& error_message);
+  bool reportTiming(std::string& error_message);
+  bool createClock(const std::string& clock_name, double period, double rise_edge, double fall_edge,
+                   const std::vector<std::string>& source_list, std::string& error_message);
+  bool setPropagatedClock(const std::vector<std::string>& clock_name_list, std::string& error_message);
+  bool getPorts(const std::vector<std::string>& port_name_list, std::vector<std::string>& resolved_port_list,
+                std::string& error_message);
+  bool getClocks(const std::vector<std::string>& clock_name_list, std::vector<std::string>& resolved_clock_list,
+                 std::string& error_message);
 #endif
 
 #endif
@@ -158,7 +168,7 @@ class STAInterface
   TimingLeakagePower wrapTimingLeakagePower(idb::LibLeakagePower* lib_leakage_power);
   LogicExpression wrapLogicExpression(std::string& expression_string);
   void wrapLogicExpressionTermList(LogicExpression& logic_expression, LibertyExpr* liberty_expr);
-  LogicOperationType wrapLogicOperationType(const int32_t liberty_expr_op);
+  LogicOperationType wrapLogicOperationType(int32_t liberty_expr_op);
   void wrapTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* lib_arc_set);
   bool isSDFDelayArc(idb::LibArc* lib_arc);
   bool isSDFCheckArc(idb::LibArc* lib_arc);
@@ -214,6 +224,8 @@ class STAInterface
 
  private:
   static STAInterface* _sta_interface_instance;
+  bool _is_initialized = false;
+  bool _is_timing_updated = false;
 
   STAInterface() = default;
   STAInterface(const STAInterface& other) = delete;
@@ -222,6 +234,7 @@ class STAInterface
   STAInterface& operator=(const STAInterface& other) = delete;
   STAInterface& operator=(STAInterface&& other) = delete;
   // function
+  bool isSTAInitialized(std::string& error_message) const;
 };
 
 }  // namespace ista
