@@ -90,6 +90,7 @@ class DataManager
   void parseSetOutputDelay(std::vector<std::string>& token_list);
   void parseSetInputTransition(std::vector<std::string>& token_list);
   void parseSetLoad(std::vector<std::string>& token_list);
+  void parseSetClockUncertainty(std::vector<std::string>& token_list);
   double getCommandDoubleValue(std::vector<std::string>& token_list);
   std::string getOptionValue(std::vector<std::string>& token_list, const std::string& option);
   double getOptionDoubleValue(std::vector<std::string>& token_list, const std::string& option, double default_value);

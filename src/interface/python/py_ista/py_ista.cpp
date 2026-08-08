@@ -37,6 +37,12 @@ bool initSTA(std::string& config, std::map<std::string, std::string>& config_dic
   return true;
 }
 
+bool setPropagatedClock(const std::vector<std::string>& clock_name_list)
+{
+  std::string error_message;
+  return STAI.setPropagatedClock(clock_name_list, error_message);
+}
+
 bool runSTA()
 {
   STAI.runSTA();

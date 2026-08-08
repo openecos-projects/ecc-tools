@@ -641,6 +641,8 @@ void DataManager::parseCommand(std::vector<std::string>& token_list)
     parseSetInputTransition(token_list);
   } else if (token_list.front() == "set_load") {
     parseSetLoad(token_list);
+  } else if (token_list.front() == "set_clock_uncertainty") {
+    parseSetClockUncertainty(token_list);
   }
 }
 
@@ -741,6 +743,33 @@ void DataManager::parseSetLoad(std::vector<std::string>& token_list)
     TimingPortConstraint& port_constraint = getPortConstraint(port_name);
     port_constraint.set_load(load_value);
     port_constraint.set_has_load(true);
+  }
+}
+
+void DataManager::parseSetClockUncertainty(std::vector<std::string>& token_list)
+{
+  const double uncertainty = getCommandDoubleValue(token_list);
+  if (!std::isfinite(uncertainty) || uncertainty < 0.0) {
+    return;
+  }
+
+  std::vector<std::string> clock_list = getObjectList(token_list);
+  if (clock_list.empty()) {
+    return;
+  }
+  auto& clock_map = _database.get_timing_constraint().get_clock_map();
+  auto clock_it = clock_map.find(clock_list.front());
+  if (clock_it == clock_map.end()) {
+    return;
+  }
+
+  const bool setup = hasOption(token_list, "-setup");
+  const bool hold = hasOption(token_list, "-hold");
+  if (!hold || setup) {
+    clock_it->second.set_setup_uncertainty(uncertainty);
+  }
+  if (!setup || hold) {
+    clock_it->second.set_hold_uncertainty(uncertainty);
   }
 }
 

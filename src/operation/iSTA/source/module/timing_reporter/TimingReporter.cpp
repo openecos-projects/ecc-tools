@@ -1305,6 +1305,17 @@ double TimingReporter::getClockPeriod(std::string& clock_name)
   return 0.0;
 }
 
+double TimingReporter::getClockUncertainty(std::string& clock_name, DelayType delay_type)
+{
+  Database& database = STADM.getDatabase();
+  auto& clock_map = database.get_timing_constraint().get_clock_map();
+  auto clock_it = clock_map.find(clock_name);
+  if (clock_it == clock_map.end()) {
+    return 0.0;
+  }
+  return delay_type == DelayType::kMin ? clock_it->second.get_hold_uncertainty() : clock_it->second.get_setup_uncertainty();
+}
+
 double TimingReporter::getInputDelay(TimingPath& timing_path, DelayType delay_type)
 {
   Database& database = STADM.getDatabase();
@@ -1400,6 +1411,15 @@ void TimingReporter::outputRequiredClockInfo(std::ofstream* report_file, TimingP
   outputTimingLine(report_file, "clock reconvergence pessimism", timing_path.get_clock_reconvergence_pessimism(), capture_time, true, "", label_width);
   if (!timing_path.get_capture_clock_pin().empty()) {
     outputTimingLine(report_file, getPinLabel(timing_path.get_capture_clock_pin()), 0.0, capture_time, false, "r", label_width);
+  }
+  double uncertainty = getClockUncertainty(clock_name, delay_type);
+  if (uncertainty > STA_ERROR) {
+    double signed_uncertainty = delay_type == DelayType::kMax ? -uncertainty : uncertainty;
+    double required_before_check = timing_path.get_required_time();
+    if (std::fabs(timing_path.get_check_time()) > STA_ERROR) {
+      required_before_check -= delay_type == DelayType::kMax ? -timing_path.get_check_time() : timing_path.get_check_time();
+    }
+    outputTimingLine(report_file, "clock uncertainty", signed_uncertainty, required_before_check, true, "", label_width);
   }
   if (std::fabs(timing_path.get_check_time()) > STA_ERROR) {
     double check_time = timing_path.get_check_time();
