@@ -22,6 +22,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <unordered_set>
 #include <utility>
 
 #include "Logger.hpp"
@@ -105,11 +106,6 @@ void setBranchCoord(Flute::Tree& tree, int32_t branch_idx, const PlanarCoord& co
   tree.branch[branch_idx].y = coord.get_y();
 }
 
-double addCost(double first, double second)
-{
-  return std::isfinite(first) && std::isfinite(second) ? first + second : std::numeric_limits<double>::infinity();
-}
-
 double getSegmentCost(const TBTask& task, const PlanarCoord& first, const PlanarCoord& second)
 {
   if (first == second) {
@@ -125,12 +121,27 @@ double getSegmentCost(const TBTask& task, const PlanarCoord& first, const Planar
   return std::isnan(cost) || cost < 0 ? std::numeric_limits<double>::infinity() : cost;
 }
 
+double getBendCost(const TBTask& task, const PlanarCoord& first, const PlanarCoord& bend, const PlanarCoord& second)
+{
+  double cost = getSegmentCost(task, first, bend);
+  if (!std::isfinite(cost)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  double second_cost = getSegmentCost(task, bend, second);
+  return std::isfinite(second_cost) ? cost + second_cost : std::numeric_limits<double>::infinity();
+}
+
 double getPatternCost(const TBTask& task, const PlanarCoord& first, const PlanarCoord& second)
 {
+  if (first == second) {
+    return 0;
+  }
+  if (first.get_x() == second.get_x() || first.get_y() == second.get_y()) {
+    return getSegmentCost(task, first, second);
+  }
   PlanarCoord x_bend(second.get_x(), first.get_y());
   PlanarCoord y_bend(first.get_x(), second.get_y());
-  return std::min(addCost(getSegmentCost(task, first, x_bend), getSegmentCost(task, x_bend, second)),
-                  addCost(getSegmentCost(task, first, y_bend), getSegmentCost(task, y_bend, second)));
+  return std::min(getBendCost(task, first, x_bend, second), getBendCost(task, first, y_bend, second));
 }
 
 bool isInsideSearchRegion(const TBTask& task, const PlanarCoord& coord)
@@ -162,14 +173,25 @@ double getIncidentEdgeCost(const TBTask& task, const Flute::Tree& tree, const Ne
                            const PlanarCoord& first_coord, const PlanarCoord& second_coord)
 {
   double cost = getPatternCost(task, first_coord, second_coord);
+  if (!std::isfinite(cost)) {
+    return cost;
+  }
   for (int32_t neighbor_idx : neighbor_list[first_idx]) {
     if (neighbor_idx != second_idx) {
-      cost = addCost(cost, getPatternCost(task, first_coord, getBranchCoord(tree, neighbor_idx)));
+      double pattern_cost = getPatternCost(task, first_coord, getBranchCoord(tree, neighbor_idx));
+      if (!std::isfinite(pattern_cost)) {
+        return pattern_cost;
+      }
+      cost += pattern_cost;
     }
   }
   for (int32_t neighbor_idx : neighbor_list[second_idx]) {
     if (neighbor_idx != first_idx) {
-      cost = addCost(cost, getPatternCost(task, second_coord, getBranchCoord(tree, neighbor_idx)));
+      double pattern_cost = getPatternCost(task, second_coord, getBranchCoord(tree, neighbor_idx));
+      if (!std::isfinite(pattern_cost)) {
+        return pattern_cost;
+      }
+      cost += pattern_cost;
     }
   }
   return cost;
@@ -529,19 +551,13 @@ double getTopoCost(const TBTask& task, const PlanarTopo& topo_list)
 {
   double cost = 0;
   for (const Segment<PlanarCoord>& segment : topo_list) {
-    cost = addCost(cost, getPatternCost(task, segment.get_first(), segment.get_second()));
+    double pattern_cost = getPatternCost(task, segment.get_first(), segment.get_second());
+    if (!std::isfinite(pattern_cost)) {
+      return pattern_cost;
+    }
+    cost += pattern_cost;
   }
   return cost;
-}
-
-int64_t getTopoWireLength(const PlanarTopo& topo_list)
-{
-  int64_t wire_length = 0;
-  for (const Segment<PlanarCoord>& segment : topo_list) {
-    wire_length += std::abs(static_cast<int64_t>(segment.get_first().get_x()) - segment.get_second().get_x())
-                   + std::abs(static_cast<int64_t>(segment.get_first().get_y()) - segment.get_second().get_y());
-  }
-  return wire_length;
 }
 
 PlanarTopo getThreePinTopo(const std::vector<PlanarCoord>& terminal_list, const PlanarCoord& steiner)
@@ -693,25 +709,38 @@ std::optional<TBTopoCandidate> buildThreePinCongestionCandidate(const TBTask& ta
   PlanarCoord best_steiner;
   int64_t best_wire_length = std::numeric_limits<int64_t>::max();
   int32_t candidate_num = 0;
-  std::set<PlanarCoord, CmpPlanarCoordByXASC> visited_set;
+  std::unordered_set<uint64_t> visited_set;
+  visited_set.reserve(kMaxThreePinCandidateNum);
   auto evaluateCandidate = [&](const PlanarCoord& steiner) {
-    if (candidate_num >= kMaxThreePinCandidateNum || !isInsideSearchRegion(task, steiner) || !visited_set.insert(steiner).second) {
+    uint64_t coord_key = (static_cast<uint64_t>(static_cast<uint32_t>(steiner.get_x())) << 32)
+                         | static_cast<uint32_t>(steiner.get_y());
+    if (candidate_num >= kMaxThreePinCandidateNum || !isInsideSearchRegion(task, steiner) || !visited_set.insert(coord_key).second) {
       return;
     }
     candidate_num++;
-    TBTopoCandidate candidate;
-    candidate.topo_list = getThreePinTopo(terminal_list, steiner);
-    candidate.cost = getTopoCost(task, candidate.topo_list);
-    if (!std::isfinite(candidate.cost)) {
-      return;
+    double cost = 0;
+    int64_t wire_length = 0;
+    for (const PlanarCoord& terminal : terminal_list) {
+      if (terminal == steiner) {
+        continue;
+      }
+      double pattern_cost = getPatternCost(task, terminal, steiner);
+      if (!std::isfinite(pattern_cost)) {
+        return;
+      }
+      cost += pattern_cost;
+      wire_length += std::abs(static_cast<int64_t>(terminal.get_x()) - steiner.get_x())
+                     + std::abs(static_cast<int64_t>(terminal.get_y()) - steiner.get_y());
+      if (best_candidate.has_value() && cost > best_candidate->cost + kCostEpsilon) {
+        return;
+      }
     }
-    int64_t wire_length = getTopoWireLength(candidate.topo_list);
-    bool has_equal_cost = best_candidate.has_value() && std::abs(candidate.cost - best_candidate->cost) <= kCostEpsilon;
-    bool is_better = !best_candidate.has_value() || isStrictlyBetterCost(best_candidate->cost, candidate.cost)
+    bool has_equal_cost = best_candidate.has_value() && std::abs(cost - best_candidate->cost) <= kCostEpsilon;
+    bool is_better = !best_candidate.has_value() || isStrictlyBetterCost(best_candidate->cost, cost)
                      || (has_equal_cost && (wire_length < best_wire_length
                                             || (wire_length == best_wire_length && CmpPlanarCoordByXASC()(steiner, best_steiner))));
     if (is_better) {
-      best_candidate = std::move(candidate);
+      best_candidate = TBTopoCandidate{.topo_list = getThreePinTopo(terminal_list, steiner), .cost = cost};
       best_steiner = steiner;
       best_wire_length = wire_length;
     }

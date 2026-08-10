@@ -567,6 +567,33 @@ bool checkCongestionFluteQueryBound()
   return check(query_num <= 30000, "congestion FLUTE bounds bbox cost queries");
 }
 
+bool checkAlignedSegmentQueryOnce()
+{
+  int64_t query_num = 0;
+  irt::TBSegmentCostQuery query = [&query_num](const PlanarCoord& first, const PlanarCoord& second) {
+    query_num++;
+    return static_cast<double>(getDistance(first, second));
+  };
+  std::vector<Segment<PlanarCoord>> topo_list
+      = RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 7)}, query));
+
+  bool passed = true;
+  passed = check(topo_list.size() == 1, "aligned two-pin net keeps one topology edge") && passed;
+  passed = check(query_num == 1, "aligned topology edge queries segment cost once") && passed;
+  return passed;
+}
+
+bool checkInfCostPruning()
+{
+  int64_t query_num = 0;
+  irt::TBSegmentCostQuery query = [&query_num](const PlanarCoord&, const PlanarCoord&) {
+    query_num++;
+    return kInf;
+  };
+  RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 29)}, query));
+  return check(query_num == 2, "blocked L-patterns stop after their first segment");
+}
+
 irt::TBSegmentCostQuery getBlockedCoordQuery(const PlanarCoord& blocked_coord, bool block_all)
 {
   return [blocked_coord, block_all](const PlanarCoord& first, const PlanarCoord& second) {
@@ -1499,6 +1526,8 @@ int main(int argc, char* argv[])
   passed = checkCongestionFluteGuard() && passed;
   passed = checkCongestionFluteCostGuard() && passed;
   passed = checkCongestionFluteQueryBound() && passed;
+  passed = checkAlignedSegmentQueryOnce() && passed;
+  passed = checkInfCostPruning() && passed;
   passed = checkCongestionFluteInfHandling() && passed;
   passed = checkThreePinCongestionAvoidsMacro() && passed;
   passed = checkThreePinCongestionOutsidePinBBox() && passed;

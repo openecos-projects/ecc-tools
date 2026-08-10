@@ -20,6 +20,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <unordered_map>
 #include <utility>
 
 #include "GDSPlotter.hpp"
@@ -30,6 +31,67 @@
 #include "Utility.hpp"
 
 namespace irt {
+
+namespace {
+
+struct PRSegmentKey
+{
+  int32_t ll_x;
+  int32_t ll_y;
+  int32_t ur_x;
+  int32_t ur_y;
+
+  bool operator==(const PRSegmentKey&) const = default;
+};
+
+struct PRSegmentKeyHash
+{
+  size_t operator()(const PRSegmentKey& key) const
+  {
+    size_t seed = 0;
+    for (int32_t value : {key.ll_x, key.ll_y, key.ur_x, key.ur_y}) {
+      seed ^= std::hash<int32_t>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    }
+    return seed;
+  }
+};
+
+class PRTopologyCostCache
+{
+ public:
+  explicit PRTopologyCostCache(TBSegmentCostQuery cost_query) : _cost_query(std::move(cost_query)) {}
+
+  double getCost(const PlanarCoord& first, const PlanarCoord& second)
+  {
+    if (first == second) {
+      return 0;
+    }
+    if (first.get_x() != second.get_x() && first.get_y() != second.get_y()) {
+      return std::numeric_limits<double>::infinity();
+    }
+    int64_t span = std::abs(static_cast<int64_t>(first.get_x()) - second.get_x())
+                   + std::abs(static_cast<int64_t>(first.get_y()) - second.get_y());
+    if (span == 1) {
+      return _cost_query(first, second);
+    }
+
+    PRSegmentKey key{std::min(first.get_x(), second.get_x()), std::min(first.get_y(), second.get_y()),
+                     std::max(first.get_x(), second.get_x()), std::max(first.get_y(), second.get_y())};
+    if (auto iter = _segment_cost_map.find(key); iter != _segment_cost_map.end()) {
+      return iter->second;
+    }
+
+    double cost = _cost_query(first, second);
+    _segment_cost_map.emplace(key, cost);
+    return cost;
+  }
+
+ private:
+  TBSegmentCostQuery _cost_query;
+  std::unordered_map<PRSegmentKey, double, PRSegmentKeyHash> _segment_cost_map;
+};
+
+}  // namespace
 
 // public
 
@@ -814,10 +876,10 @@ bool PlanarRouter::shouldUseCongestionFlute(PRModel& pr_model, size_t unique_pin
   if (unique_pin_num < 3) {
     return false;
   }
-  if (unique_pin_num == 3) {
+  PRNet* curr_net = pr_model.get_curr_pr_task();
+  if (curr_net->get_routing_edge_set().empty()) {
     return true;
   }
-  PRNet* curr_net = pr_model.get_curr_pr_task();
   double history_threshold = 0.64 * pr_model.get_pr_com_param().get_overflow_unit();
   for (RoutingEdge* routing_edge : curr_net->get_routing_edge_set()) {
     if (routing_edge->get_ignore_net_set().contains(curr_net->get_net_idx())) {
@@ -846,10 +908,18 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(PRModel& pr_mo
   tb_task.set_planar_coord_list(planar_coord_list);
   GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   tb_task.set_planar_search_region(PlanarRect(0, 0, gcell_map.get_x_size() - 1, gcell_map.get_y_size() - 1));
-  tb_task.set_segment_cost_query(
-      [this, &pr_model](const PlanarCoord& first, const PlanarCoord& second) { return getTopologySegmentCost(pr_model, first, second); });
-  tb_task.set_congestion_driven(pr_topo_mode == PRTopoMode::kCongestion && shouldUseCongestionFlute(pr_model, planar_coord_list.size()));
+  TBSegmentCostQuery segment_cost_query
+      = [this, &pr_model](const PlanarCoord& first, const PlanarCoord& second) { return getTopologySegmentCost(pr_model, first, second); };
+  bool congestion_driven = pr_topo_mode == PRTopoMode::kCongestion && shouldUseCongestionFlute(pr_model, planar_coord_list.size());
+  tb_task.set_congestion_driven(congestion_driven);
+  if (pr_topo_mode == PRTopoMode::kNormal) {
+    tb_task.set_segment_cost_query(std::move(segment_cost_query));
+    return RTTB.getPlanarTopoList(tb_task);
+  }
 
+  PRTopologyCostCache topology_cost_cache(std::move(segment_cost_query));
+  tb_task.set_segment_cost_query(
+      [&topology_cost_cache](const PlanarCoord& first, const PlanarCoord& second) { return topology_cost_cache.getCost(first, second); });
   return RTTB.getPlanarTopoList(tb_task);
 }
 
