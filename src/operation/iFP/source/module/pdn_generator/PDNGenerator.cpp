@@ -364,6 +364,7 @@ void PDNGenerator::buildStripe(PGModel& pg_model)
     int32_t line_begin = routing_layer->get_prefer_direction() == Direction::kHorizontal ? core.get_ll_y() : core.get_ll_x();
     int32_t line_end = routing_layer->get_prefer_direction() == Direction::kHorizontal ? core.get_ur_y() : core.get_ur_x();
     int32_t start = line_begin + offset + width / 2;
+    int32_t half_width = width / 2;
     int32_t half_pitch = pitch / 2;
     int32_t track_pitch = routing_layer->get_prefer_track_pitch();
     int32_t track_offset = routing_layer->get_prefer_track_offset();
@@ -371,6 +372,12 @@ void PDNGenerator::buildStripe(PGModel& pg_model)
       int32_t power_coord = coord;
       if (width <= track_pitch && track_pitch > 0) {
         power_coord = (power_coord - track_offset) / track_pitch * track_pitch + track_offset;
+      }
+      if (power_coord - half_width < line_begin) {
+        continue;
+      }
+      if (power_coord + half_width > line_end) {
+        break;
       }
       if (routing_layer->get_prefer_direction() == Direction::kHorizontal) {
         addLineSegment(pg_model.get_default_power_net_name(), routing_layer->get_name(), PGSegmentType::kStripe, width, core.get_ll_x(),
@@ -381,7 +388,7 @@ void PDNGenerator::buildStripe(PGModel& pg_model)
       }
 
       int32_t ground_coord = power_coord + half_pitch;
-      if (ground_coord + width / 2 > line_end) {
+      if (ground_coord + half_width > line_end) {
         continue;
       }
       if (routing_layer->get_prefer_direction() == Direction::kHorizontal) {
@@ -434,12 +441,20 @@ void PDNGenerator::alignStripeSegment(PGSegment& stripe_segment)
       if (stripe_segment.get_start_y() == routing_halo_rect.get_ur_y() + half_width) {
         int32_t rail_coord = getClosestRailEdgeCoord(stripe_segment, instance, true);
         if (rail_coord != INT32_MAX && rail_coord <= stripe_segment.get_end_y()) {
+          int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, true);
+          if (cross_stripe_coord != INT32_MAX) {
+            rail_coord = cross_stripe_coord;
+          }
           stripe_segment.set_start_y(rail_coord);
         }
       }
       if (stripe_segment.get_end_y() == routing_halo_rect.get_ll_y() - half_width) {
         int32_t rail_coord = getClosestRailEdgeCoord(stripe_segment, instance, false);
         if (rail_coord != INT32_MAX && stripe_segment.get_start_y() <= rail_coord) {
+          int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, false);
+          if (cross_stripe_coord != INT32_MAX) {
+            rail_coord = cross_stripe_coord;
+          }
           stripe_segment.set_end_y(rail_coord);
         }
       }
@@ -450,12 +465,20 @@ void PDNGenerator::alignStripeSegment(PGSegment& stripe_segment)
       if (stripe_segment.get_start_x() == routing_halo_rect.get_ur_x() + half_width) {
         int32_t rail_coord = getClosestRailEdgeCoord(stripe_segment, instance, true);
         if (rail_coord != INT32_MAX && rail_coord <= stripe_segment.get_end_x()) {
+          int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, true);
+          if (cross_stripe_coord != INT32_MAX) {
+            rail_coord = cross_stripe_coord;
+          }
           stripe_segment.set_start_x(rail_coord);
         }
       }
       if (stripe_segment.get_end_x() == routing_halo_rect.get_ll_x() - half_width) {
         int32_t rail_coord = getClosestRailEdgeCoord(stripe_segment, instance, false);
         if (rail_coord != INT32_MAX && stripe_segment.get_start_x() <= rail_coord) {
+          int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, false);
+          if (cross_stripe_coord != INT32_MAX) {
+            rail_coord = cross_stripe_coord;
+          }
           stripe_segment.set_end_x(rail_coord);
         }
       }
@@ -524,6 +547,62 @@ int32_t PDNGenerator::getClosestRailEdgeCoord(PGSegment& stripe_segment, Instanc
     }
   }
   return closest_rail_edge_coord;
+}
+
+int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, Instance& instance, int32_t rail_coord, bool high_side)
+{
+  PlanarRect& routing_halo_rect = instance.get_routing_halo_rect();
+  bool vertical = stripe_segment.is_vertical();
+  int32_t closest_stripe_edge_coord = INT32_MAX;
+  int32_t closest_distance = INT32_MAX;
+  for (PGSegment& cross_stripe : FPDM.getDatabase().get_pg_segment_list()) {
+    if (cross_stripe.get_type() != PGSegmentType::kStripe || cross_stripe.get_net_name() != stripe_segment.get_net_name()
+        || cross_stripe.is_vertical() == vertical) {
+      continue;
+    }
+
+    bool connect_layers = false;
+    for (PGLayerPair& pg_layer_pair : FPDM.getConfig().pg_layer_pair_list) {
+      if ((pg_layer_pair.get_first_layer_name() == stripe_segment.get_layer_name()
+           && pg_layer_pair.get_second_layer_name() == cross_stripe.get_layer_name())
+          || (pg_layer_pair.get_second_layer_name() == stripe_segment.get_layer_name()
+              && pg_layer_pair.get_first_layer_name() == cross_stripe.get_layer_name())) {
+        connect_layers = true;
+        break;
+      }
+    }
+    if (!connect_layers) {
+      continue;
+    }
+
+    int32_t stripe_edge_coord = INT32_MAX;
+    if (vertical) {
+      if (stripe_segment.get_ur_x() <= cross_stripe.get_ll_x() || cross_stripe.get_ur_x() <= stripe_segment.get_ll_x()) {
+        continue;
+      }
+      stripe_edge_coord = high_side ? cross_stripe.get_ur_y() : cross_stripe.get_ll_y();
+      if ((high_side && (stripe_edge_coord < routing_halo_rect.get_ur_y() || rail_coord < stripe_edge_coord))
+          || (!high_side && (stripe_edge_coord < rail_coord || routing_halo_rect.get_ll_y() < stripe_edge_coord))) {
+        continue;
+      }
+    } else {
+      if (stripe_segment.get_ur_y() <= cross_stripe.get_ll_y() || cross_stripe.get_ur_y() <= stripe_segment.get_ll_y()) {
+        continue;
+      }
+      stripe_edge_coord = high_side ? cross_stripe.get_ur_x() : cross_stripe.get_ll_x();
+      if ((high_side && (stripe_edge_coord < routing_halo_rect.get_ur_x() || rail_coord < stripe_edge_coord))
+          || (!high_side && (stripe_edge_coord < rail_coord || routing_halo_rect.get_ll_x() < stripe_edge_coord))) {
+        continue;
+      }
+    }
+
+    int32_t distance = std::abs(stripe_edge_coord - rail_coord);
+    if (distance < closest_distance) {
+      closest_distance = distance;
+      closest_stripe_edge_coord = stripe_edge_coord;
+    }
+  }
+  return closest_stripe_edge_coord;
 }
 
 void PDNGenerator::buildLayerConnect(PGModel& pg_model)
