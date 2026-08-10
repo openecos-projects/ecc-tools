@@ -14,14 +14,19 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
-#include <pybind11/pybind11.h>
+/**
+ * @file CTSProcessExitTest.cc
+ * @author Dawn Li (dawnli619215645@gmail.com)
+ * @date 2026-08-10
+ * @brief Process-exit fallback test for CTS static RAII owners.
+ */
 
-#include <string>
+#include "Logger.hh"
+#include "data_manager/DataManager.hh"
 
-namespace python_interface {
-bool CtsAutoRun(const std::string& cts_config, const std::string& cts_work_dir);
-bool CtsReport(const std::string& path);
-bool CtsDestroy();
-pybind11::dict CtsTimingFeature();
-}  // namespace python_interface
+auto main() -> int
+{
+  icts::Logger::initInst();
+  icts::DataManager::initInst();
+  return CTSDM.getDesign().makeInst("process_exit_owned_inst") == nullptr ? 1 : 0;
+}

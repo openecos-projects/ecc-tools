@@ -570,6 +570,17 @@ TEST(FastSTATest, CharacterizationSampleRejectsMissingSourceBoundaryNet)
   EXPECT_FALSE(sample.valid);
 }
 
+TEST(FastSTATest, InvalidCharacterizationContextAccessIsSafe)
+{
+  icts::FastSTA fast_sta;
+
+  EXPECT_FALSE(fast_sta.eraseCharContext(0U));
+  EXPECT_FALSE(fast_sta.setCharLoad(0U, 0.25));
+  EXPECT_FALSE(fast_sta.runCharSample(0U, 0.10).valid);
+  fast_sta.reset();
+  EXPECT_FALSE(fast_sta.eraseCharContext(0U));
+}
+
 TEST(FastSTATest, IncrementalMasterChangeMatchesFullRecompute)
 {
   auto incremental_context = MakeTwoLevelContext();

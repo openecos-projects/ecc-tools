@@ -193,10 +193,12 @@ auto FastSTA::buildClockContext(const FastStaClockBuildInput& input) -> FastStaC
 
 auto FastSTA::eraseClockContext(FastStaClockId clock_id) -> bool
 {
-  if (clock_id >= _contexts->clock_context_valid.size() || !_contexts->clock_context_valid.at(clock_id)) {
+  if (clock_id >= _contexts->clock_contexts.size() || clock_id >= _contexts->clock_context_valid.size() || !_contexts->clock_context_valid.at(clock_id)
+      || _contexts->clock_contexts.at(clock_id) == nullptr) {
     return false;
   }
   _contexts->clock_context_valid.at(clock_id) = false;
+  _contexts->clock_contexts.at(clock_id).reset();
   return true;
 }
 
@@ -223,17 +225,19 @@ auto FastSTA::buildCharContext(const FastStaCharTopologySpec& spec) -> FastStaCh
 
 auto FastSTA::eraseCharContext(FastStaCharContextId char_context_id) -> bool
 {
-  if (char_context_id >= _contexts->char_context_valid.size() || !_contexts->char_context_valid.at(char_context_id)) {
+  if (char_context_id >= _contexts->char_contexts.size() || char_context_id >= _contexts->char_context_valid.size()
+      || !_contexts->char_context_valid.at(char_context_id) || _contexts->char_contexts.at(char_context_id) == nullptr) {
     return false;
   }
   _contexts->char_context_valid.at(char_context_id) = false;
+  _contexts->char_contexts.at(char_context_id).reset();
   return true;
 }
 
 auto FastSTA::setCharLoad(FastStaCharContextId char_context_id, double effective_load_pf) -> bool
 {
   if (char_context_id >= _contexts->char_contexts.size() || char_context_id >= _contexts->char_context_valid.size()
-      || !_contexts->char_context_valid.at(char_context_id)) {
+      || !_contexts->char_context_valid.at(char_context_id) || _contexts->char_contexts.at(char_context_id) == nullptr) {
     CTSLOG.warn(Loc::current(), "FastSTA: characterization load update skipped because char context id is invalid.");
     return false;
   }
@@ -243,7 +247,7 @@ auto FastSTA::setCharLoad(FastStaCharContextId char_context_id, double effective
 auto FastSTA::runCharSample(FastStaCharContextId char_context_id, double input_slew_ns) -> FastStaCharSampleResult
 {
   if (char_context_id >= _contexts->char_contexts.size() || char_context_id >= _contexts->char_context_valid.size()
-      || !_contexts->char_context_valid.at(char_context_id)) {
+      || !_contexts->char_context_valid.at(char_context_id) || _contexts->char_contexts.at(char_context_id) == nullptr) {
     CTSLOG.warn(Loc::current(), "FastSTA: characterization sample skipped because char context id is invalid.");
     return {};
   }
@@ -444,7 +448,8 @@ auto FastSTA::queryPower(FastStaClockId clock_id) const -> std::optional<FastSta
 
 auto FastSTA::queryClockContext(FastStaClockId clock_id) const -> const FastStaClockContext*
 {
-  if (clock_id >= _contexts->clock_contexts.size() || clock_id >= _contexts->clock_context_valid.size() || !_contexts->clock_context_valid.at(clock_id)) {
+  if (clock_id >= _contexts->clock_contexts.size() || clock_id >= _contexts->clock_context_valid.size() || !_contexts->clock_context_valid.at(clock_id)
+      || _contexts->clock_contexts.at(clock_id) == nullptr) {
     return nullptr;
   }
   return _contexts->clock_contexts.at(clock_id).get();
@@ -452,7 +457,8 @@ auto FastSTA::queryClockContext(FastStaClockId clock_id) const -> const FastStaC
 
 auto FastSTA::mutableClockContext(FastStaClockId clock_id) -> FastStaClockContext*
 {
-  if (clock_id >= _contexts->clock_contexts.size() || clock_id >= _contexts->clock_context_valid.size() || !_contexts->clock_context_valid.at(clock_id)) {
+  if (clock_id >= _contexts->clock_contexts.size() || clock_id >= _contexts->clock_context_valid.size() || !_contexts->clock_context_valid.at(clock_id)
+      || _contexts->clock_contexts.at(clock_id) == nullptr) {
     return nullptr;
   }
   return _contexts->clock_contexts.at(clock_id).get();
