@@ -33,6 +33,7 @@ class SDFWriter
   static void destroyInst();
   // function
   void write();
+  void write(std::string_view file_path);
 
  private:
   struct SDFCellArcKey
@@ -56,11 +57,12 @@ class SDFWriter
   SDFWriter& operator=(const SDFWriter& other) = delete;
   SDFWriter& operator=(SDFWriter&& other) = delete;
   // function
-  void outputSDF();
+  void outputSDF(const std::string_view file_path);
   std::string getSDFFilePath();
   void outputSDFHeader(std::ofstream* sdf_file);
   void outputSDFInterconnect(std::ofstream* sdf_file);
   void outputSDFInterconnectArc(std::ofstream* sdf_file, Arc& arc);
+  bool isSDFOutputOnlyCellArc(Arc& arc);
   void outputSDFCellList(std::ofstream* sdf_file);
   void buildInstanceCellArcMap();
   void outputSDFCell(std::ofstream* sdf_file, Instance& instance);

@@ -792,6 +792,12 @@ bool IdbPins::erase_pin_ref(IdbPin* pin_remove)
   return true;
 }
 
+void IdbPins::clear_pin_refs()
+{
+  _pin_list.clear();
+  _pin_ref_index.reset();
+}
+
 bool IdbPins::delete_pin(IdbPin* pin_remove)
 {
   if (!erase_pin_ref(pin_remove)) {
