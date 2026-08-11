@@ -190,8 +190,10 @@ void DelayCalculator::calculateArc(DCTask& dc_task)
   timing_result.set_output_trans_type(dc_task.get_output_trans_type());
   timing_result.set_delay(calcArcDelay(*arc, dc_task.get_analysis_type(), dc_task.get_input_trans_type(), dc_task.get_output_trans_type(),
                                        dc_task.get_input_slew()));
+  const double output_slew_input_slew
+      = dc_task.get_has_output_slew_input_slew() ? dc_task.get_output_slew_input_slew() : dc_task.get_input_slew();
   timing_result.set_slew(calcArcSlew(*arc, dc_task.get_analysis_type(), dc_task.get_input_trans_type(), dc_task.get_output_trans_type(),
-                                     dc_task.get_input_slew()));
+                                     output_slew_input_slew));
   dc_task.set_timing_result(timing_result);
   dc_task.set_is_valid(true);
 }

@@ -122,6 +122,8 @@ struct RVLayerData
   bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> rect_rtrees;
   bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> boundary_rtrees;
   bgi::rtree<CutData, bgi::quadratic<16>, CutDataIndexable> cut_rtrees;
+  bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> metal_rtree;
+  bgi::rtree<GTLRectInt, bgi::quadratic<16>> obs_rtree;
 
   const CutData& getCut(int32_t cut_id) const { return cut_pool[cut_id]; }
   int32_t getCutId(const CutData& cut_data) const { return static_cast<int32_t>(&cut_data - cut_pool.data()); }
@@ -180,6 +182,18 @@ struct RVLayerData
   void queryMaxRects(const GTLRectInt& query_rect, OutputIt out) const
   {
     rect_rtrees.query(bgi::intersects(query_rect), out);
+  }
+
+  template <typename OutputIt>
+  void queryMetalRects(const GTLRectInt& query_rect, OutputIt out) const
+  {
+    metal_rtree.query(bgi::intersects(query_rect), out);
+  }
+
+  template <typename OutputIt>
+  void queryObsRects(const GTLRectInt& query_rect, OutputIt out) const
+  {
+    obs_rtree.query(bgi::intersects(query_rect), out);
   }
 
   template <typename OutputIt>

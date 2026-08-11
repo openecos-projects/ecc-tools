@@ -43,10 +43,10 @@ class TimingPathState
   void set_arrival(const double arrival) { _arrival = arrival; }
   void set_slew(const double slew) { _slew = slew; }
   void set_launch_time(const double launch_time) { _launch_time = launch_time; }
-  void set_start_point(const std::string& start_point) { _start_point = start_point; }
-  void set_predecessor(const std::string& predecessor) { _predecessor = predecessor; }
-  void set_clock_name(const std::string& clock_name) { _clock_name = clock_name; }
-  void set_crpr_clock_pin(const std::string& crpr_clock_pin) { _crpr_clock_pin = crpr_clock_pin; }
+  void set_start_point(const std::string_view start_point) { _start_point = start_point; }
+  void set_predecessor(const std::string_view predecessor) { _predecessor = predecessor; }
+  void set_clock_name(const std::string_view clock_name) { _clock_name = clock_name; }
+  void set_crpr_clock_pin(const std::string_view crpr_clock_pin) { _crpr_clock_pin = crpr_clock_pin; }
   void set_predecessor_arc_idx(const std::size_t predecessor_arc_idx) { _predecessor_arc_idx = predecessor_arc_idx; }
   void set_predecessor_arc_delay(const double predecessor_arc_delay) { _predecessor_arc_delay = predecessor_arc_delay; }
   void set_trans_type(const TransType& trans_type) { _trans_type = trans_type; }

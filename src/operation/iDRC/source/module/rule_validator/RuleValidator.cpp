@@ -455,6 +455,14 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
 
   auto add_shape_to_layer_data = [&](DRCShape* drc_shape, bool is_env_shape) {
     GTLRectInt gtl_rect = DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
+    if (drc_shape->get_is_routing()) {
+      RVLayerData& rv_layer_data = layer_data[drc_shape->get_layer_idx()];
+      if (drc_shape->get_is_obs()) {
+        rv_layer_data.obs_rtree.insert(gtl_rect);
+      } else {
+        rv_layer_data.metal_rtree.insert({gtl_rect, drc_shape->get_net_idx()});
+      }
+    }
     if (!drc_shape->get_is_routing()) {
       CutData cut_data;
       cut_data.rect = gtl_rect;
