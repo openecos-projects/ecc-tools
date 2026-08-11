@@ -553,11 +553,16 @@ int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, 
 {
   PlanarRect& routing_halo_rect = instance.get_routing_halo_rect();
   bool vertical = stripe_segment.is_vertical();
-  int32_t closest_stripe_edge_coord = INT32_MAX;
-  int32_t closest_distance = INT32_MAX;
+  int32_t half_width = stripe_segment.get_width() / 2;
+  int32_t closest_full_overlap_coord = INT32_MAX;
+  int32_t closest_full_overlap_gap_distance = INT32_MAX;
+  int32_t closest_full_overlap_extension_distance = INT32_MAX;
+  int32_t closest_contact_coord = INT32_MAX;
+  int32_t closest_contact_gap_distance = INT32_MAX;
+  int32_t closest_contact_extension_distance = INT32_MAX;
   for (PGSegment& cross_stripe : FPDM.getDatabase().get_pg_segment_list()) {
     if (cross_stripe.get_type() != PGSegmentType::kStripe || cross_stripe.get_net_name() != stripe_segment.get_net_name()
-        || cross_stripe.is_vertical() == vertical) {
+        || (vertical && !cross_stripe.is_horizontal()) || (!vertical && !cross_stripe.is_vertical())) {
       continue;
     }
 
@@ -575,34 +580,84 @@ int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, 
       continue;
     }
 
-    int32_t stripe_edge_coord = INT32_MAX;
+    int32_t full_overlap_coord = INT32_MAX;
+    int32_t contact_coord = INT32_MAX;
+    int32_t gap_distance = INT32_MAX;
+    bool full_overlap_valid = false;
+    bool contact_valid = false;
     if (vertical) {
-      if (stripe_segment.get_ur_x() <= cross_stripe.get_ll_x() || cross_stripe.get_ur_x() <= stripe_segment.get_ll_x()) {
+      int32_t stripe_ll_x = stripe_segment.get_start_x() - half_width;
+      int32_t stripe_ur_x = stripe_segment.get_start_x() + half_width;
+      int32_t cross_begin_x = std::min(cross_stripe.get_start_x(), cross_stripe.get_end_x());
+      int32_t cross_end_x = std::max(cross_stripe.get_start_x(), cross_stripe.get_end_x());
+      bool full_width_overlap = cross_begin_x <= stripe_ll_x && stripe_ur_x <= cross_end_x;
+      bool positive_width_overlap
+          = std::max(stripe_ll_x, cross_stripe.get_ll_x()) < std::min(stripe_ur_x, cross_stripe.get_ur_x());
+      if (!positive_width_overlap) {
         continue;
       }
-      stripe_edge_coord = high_side ? cross_stripe.get_ur_y() : cross_stripe.get_ll_y();
-      if ((high_side && (stripe_edge_coord < routing_halo_rect.get_ur_y() || rail_coord < stripe_edge_coord))
-          || (!high_side && (stripe_edge_coord < rail_coord || routing_halo_rect.get_ll_y() < stripe_edge_coord))) {
-        continue;
+      if (high_side) {
+        full_overlap_coord = cross_stripe.get_ll_y();
+        contact_coord = cross_stripe.get_ur_y();
+        gap_distance = std::max(rail_coord - cross_stripe.get_ur_y(), 0);
+        full_overlap_valid = full_width_overlap && routing_halo_rect.get_ur_y() <= full_overlap_coord && full_overlap_coord <= rail_coord;
+        contact_valid = routing_halo_rect.get_ur_y() <= contact_coord && contact_coord <= rail_coord;
+      } else {
+        full_overlap_coord = cross_stripe.get_ur_y();
+        contact_coord = cross_stripe.get_ll_y();
+        gap_distance = std::max(cross_stripe.get_ll_y() - rail_coord, 0);
+        full_overlap_valid = full_width_overlap && rail_coord <= full_overlap_coord && full_overlap_coord <= routing_halo_rect.get_ll_y();
+        contact_valid = rail_coord <= contact_coord && contact_coord <= routing_halo_rect.get_ll_y();
       }
     } else {
-      if (stripe_segment.get_ur_y() <= cross_stripe.get_ll_y() || cross_stripe.get_ur_y() <= stripe_segment.get_ll_y()) {
+      int32_t stripe_ll_y = stripe_segment.get_start_y() - half_width;
+      int32_t stripe_ur_y = stripe_segment.get_start_y() + half_width;
+      int32_t cross_begin_y = std::min(cross_stripe.get_start_y(), cross_stripe.get_end_y());
+      int32_t cross_end_y = std::max(cross_stripe.get_start_y(), cross_stripe.get_end_y());
+      bool full_width_overlap = cross_begin_y <= stripe_ll_y && stripe_ur_y <= cross_end_y;
+      bool positive_width_overlap
+          = std::max(stripe_ll_y, cross_stripe.get_ll_y()) < std::min(stripe_ur_y, cross_stripe.get_ur_y());
+      if (!positive_width_overlap) {
         continue;
       }
-      stripe_edge_coord = high_side ? cross_stripe.get_ur_x() : cross_stripe.get_ll_x();
-      if ((high_side && (stripe_edge_coord < routing_halo_rect.get_ur_x() || rail_coord < stripe_edge_coord))
-          || (!high_side && (stripe_edge_coord < rail_coord || routing_halo_rect.get_ll_x() < stripe_edge_coord))) {
-        continue;
+      if (high_side) {
+        full_overlap_coord = cross_stripe.get_ll_x();
+        contact_coord = cross_stripe.get_ur_x();
+        gap_distance = std::max(rail_coord - cross_stripe.get_ur_x(), 0);
+        full_overlap_valid = full_width_overlap && routing_halo_rect.get_ur_x() <= full_overlap_coord && full_overlap_coord <= rail_coord;
+        contact_valid = routing_halo_rect.get_ur_x() <= contact_coord && contact_coord <= rail_coord;
+      } else {
+        full_overlap_coord = cross_stripe.get_ur_x();
+        contact_coord = cross_stripe.get_ll_x();
+        gap_distance = std::max(cross_stripe.get_ll_x() - rail_coord, 0);
+        full_overlap_valid = full_width_overlap && rail_coord <= full_overlap_coord && full_overlap_coord <= routing_halo_rect.get_ll_x();
+        contact_valid = rail_coord <= contact_coord && contact_coord <= routing_halo_rect.get_ll_x();
       }
     }
 
-    int32_t distance = std::abs(stripe_edge_coord - rail_coord);
-    if (distance < closest_distance) {
-      closest_distance = distance;
-      closest_stripe_edge_coord = stripe_edge_coord;
+    // Repair only the small gaps that buildLayerConnect already treats as overlaps because it expands line endpoints by half the width.
+    contact_valid = contact_valid && 0 < gap_distance && gap_distance < half_width;
+    if (full_overlap_valid) {
+      int32_t extension_distance = std::abs(full_overlap_coord - rail_coord);
+      if (gap_distance < closest_full_overlap_gap_distance
+          || (gap_distance == closest_full_overlap_gap_distance
+              && extension_distance < closest_full_overlap_extension_distance)) {
+        closest_full_overlap_gap_distance = gap_distance;
+        closest_full_overlap_extension_distance = extension_distance;
+        closest_full_overlap_coord = full_overlap_coord;
+      }
+    }
+    if (contact_valid) {
+      int32_t extension_distance = std::abs(contact_coord - rail_coord);
+      if (gap_distance < closest_contact_gap_distance
+          || (gap_distance == closest_contact_gap_distance && extension_distance < closest_contact_extension_distance)) {
+        closest_contact_gap_distance = gap_distance;
+        closest_contact_extension_distance = extension_distance;
+        closest_contact_coord = contact_coord;
+      }
     }
   }
-  return closest_stripe_edge_coord;
+  return closest_full_overlap_coord != INT32_MAX ? closest_full_overlap_coord : closest_contact_coord;
 }
 
 void PDNGenerator::buildLayerConnect(PGModel& pg_model)
