@@ -81,16 +81,25 @@ auto appendPinNode(const Clock& clock, Pin* pin, FastStaClockContext& context) -
   const auto node_id = context.nodes.size();
   context.node_id_by_name[node_name] = node_id;
   context.node_id_by_location.emplace(makeLocationKey(location), node_id);
+  const auto node_kind = makeNodeKind(clock, pin);
+  const auto inst_name = inst != nullptr ? inst->get_name() : std::string{};
   context.nodes.push_back(FastStaNode{
-      .kind = makeNodeKind(clock, pin),
+      .kind = node_kind,
       .name = node_name,
-      .inst_name = inst != nullptr ? inst->get_name() : std::string{},
+      .inst_name = inst_name,
       .pin_name = pin->get_name(),
       .cell_master = inst != nullptr ? inst->get_cell_master() : std::string{},
       .location = location,
       .output_net_ids = {},
       .timing = {},
   });
+  if (!inst_name.empty()) {
+    if (node_kind == FastStaNodeKind::kBufferInput) {
+      context.buffer_input_node_id_by_inst[inst_name] = node_id;
+    } else if (node_kind == FastStaNodeKind::kBufferOutput) {
+      context.buffer_output_node_id_by_inst[inst_name] = node_id;
+    }
+  }
   return node_id;
 }
 

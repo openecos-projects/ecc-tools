@@ -104,21 +104,31 @@ auto makeClockTreeTopology(const FastStaClockContext& context) -> FastStaClockTr
   topology.source_node_id = context.source_node_id;
   topology.parent_by_node.assign(context.nodes.size(), kInvalidFastStaNodeId);
 
-  std::unordered_map<std::string, FastStaNodeId> input_by_inst;
-  input_by_inst.reserve(context.nodes.size());
-  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-    const auto& node = context.nodes.at(node_id);
-    if (node.kind == FastStaNodeKind::kBufferInput && !node.inst_name.empty()) {
-      input_by_inst[node.inst_name] = node_id;
+  const auto find_buffer_input = [&](const std::string& inst_name) -> FastStaNodeId {
+    if (const auto indexed = context.buffer_input_node_id_by_inst.find(inst_name); indexed != context.buffer_input_node_id_by_inst.end()) {
+      if (indexed->second < context.nodes.size()) {
+        const auto& node = context.nodes.at(indexed->second);
+        if (node.kind == FastStaNodeKind::kBufferInput && node.inst_name == inst_name) {
+          return indexed->second;
+        }
+      }
+      return kInvalidFastStaNodeId;
     }
-  }
+    for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+      const auto& node = context.nodes.at(node_id);
+      if (node.kind == FastStaNodeKind::kBufferInput && node.inst_name == inst_name) {
+        return node_id;
+      }
+    }
+    return kInvalidFastStaNodeId;
+  };
 
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
     const auto& node = context.nodes.at(node_id);
     if (node.kind == FastStaNodeKind::kBufferOutput) {
-      const auto input_iter = input_by_inst.find(node.inst_name);
-      if (input_iter != input_by_inst.end()) {
-        topology.parent_by_node.at(node_id) = input_iter->second;
+      const auto input_node_id = find_buffer_input(node.inst_name);
+      if (input_node_id != kInvalidFastStaNodeId) {
+        topology.parent_by_node.at(node_id) = input_node_id;
       }
       continue;
     }
@@ -280,12 +290,14 @@ auto FastSTA::changeBufferMastersTimingOnly(FastStaClockId clock_id, const std::
   if (changes.empty()) {
     return context->timing_valid;
   }
-  if (!FastStaIncremental::changeBufferMasters(*context, changes)) {
+  const auto dirty_region = FastStaIncremental::changeBufferMastersIncremental(*context, changes);
+  if (!dirty_region.has_value() || !FastStaTiming::updateRegion(*context, *dirty_region)) {
+    context->timing_valid = false;
+    context->power_valid = false;
     return false;
   }
-  const bool timing_updated = FastStaTiming::update(*context);
   context->power_valid = false;
-  return timing_updated;
+  return context->timing_valid;
 }
 
 auto FastSTA::updateTiming(FastStaClockId clock_id) -> bool
