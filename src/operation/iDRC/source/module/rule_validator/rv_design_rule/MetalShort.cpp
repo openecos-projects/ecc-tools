@@ -47,7 +47,8 @@ void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
     }
     const RVLayerData& rv_layer_data = layer_data_it->second;
     std::vector<Violation> layer_violations;
-    std::vector<std::pair<GTLRectInt, int32_t>> overlap_max_rects;
+    std::vector<std::pair<GTLRectInt, int32_t>> overlap_metal_rects;
+    std::vector<GTLRectInt> overlap_obs_rects;
     for (auto& [net_idx, polyset] : net_polyset) {
       std::vector<GTLRectInt> rect_list;
       gtl::get_max_rectangles(rect_list, polyset);
@@ -55,10 +56,9 @@ void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
       for (GTLRectInt& gtl_rect : rect_list) {
         PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
 
-        overlap_max_rects.clear();
-        rv_layer_data.queryMaxRects(gtl_rect, std::back_inserter(overlap_max_rects));
-        for (auto [env_gtl_rect, env_max_rect_id] : overlap_max_rects) {
-          int32_t env_net_idx = rv_layer_data.getNetIdxByMaxRectId(env_max_rect_id);
+        overlap_metal_rects.clear();
+        rv_layer_data.queryMetalRects(gtl_rect, std::back_inserter(overlap_metal_rects));
+        for (auto [env_gtl_rect, env_net_idx] : overlap_metal_rects) {
           if (net_idx == env_net_idx) {
             continue;
           }
@@ -72,6 +72,23 @@ void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
           violation.set_violation_net_set({net_idx, env_net_idx});
           violation.set_layer_idx(routing_layer_idx);
           violation.set_rect(DRCUTIL.getOverlap(rect, env_rect));
+          violation.set_required_size(0);
+          layer_violations.push_back(std::move(violation));
+        }
+
+        overlap_obs_rects.clear();
+        rv_layer_data.queryObsRects(gtl_rect, std::back_inserter(overlap_obs_rects));
+        for (const GTLRectInt& obs_gtl_rect : overlap_obs_rects) {
+          PlanarRect obs_rect = DRCUTIL.convertToPlanarRect(obs_gtl_rect);
+          if (!DRCUTIL.isOpenOverlap(rect, obs_rect)) {
+            continue;
+          }
+          Violation violation;
+          violation.set_violation_type(ViolationType::kMetalShort);
+          violation.set_is_routing(true);
+          violation.set_violation_net_set({net_idx, -1});
+          violation.set_layer_idx(routing_layer_idx);
+          violation.set_rect(DRCUTIL.getOverlap(rect, obs_rect));
           violation.set_required_size(0);
           layer_violations.push_back(std::move(violation));
         }

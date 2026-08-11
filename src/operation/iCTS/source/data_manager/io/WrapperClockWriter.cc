@@ -83,18 +83,7 @@ auto DetachIdbNetPins(idb::IdbDesign* idb_design, idb::IdbNet* idb_net) -> void
   if (idb_design == nullptr || idb_net == nullptr) {
     return;
   }
-  std::vector<idb::IdbPin*> pins;
-  if (idb_net->get_io_pins() != nullptr) {
-    const auto& io_pins = idb_net->get_io_pins()->get_pin_list();
-    pins.insert(pins.end(), io_pins.begin(), io_pins.end());
-  }
-  if (idb_net->get_instance_pin_list() != nullptr) {
-    const auto& inst_pins = idb_net->get_instance_pin_list()->get_pin_list();
-    pins.insert(pins.end(), inst_pins.begin(), inst_pins.end());
-  }
-  for (auto* pin : pins) {
-    idb_design->disconnectPinFromNet(pin);
-  }
+  idb_design->disconnectAllPinsFromNet(idb_net);
 }
 
 auto FindIdbInstPinByCtsPinName(idb::IdbInstance* idb_inst, const std::string& pin_name) -> idb::IdbPin*
