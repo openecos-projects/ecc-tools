@@ -65,6 +65,8 @@ class PowerPropagator
   PowerActivity getPropagatedActivity(PowerActivity source_activity);
   void propagateOutputActivity(std::string& pin_name);
   PowerActivity getOutputActivity(std::string& pin_name);
+  void limitDataTransitionDensity(std::string& pin_name, PowerActivity& activity);
+  double getMinimumClockPeriod();
   PowerActivity normalizeConstantActivity(PowerActivity activity);
   std::map<std::string, PowerActivity> getInputActivityMap(Instance& instance);
   PowerActivity getFallbackInputActivity(std::string& pin_name);

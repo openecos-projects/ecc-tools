@@ -16,10 +16,14 @@
 // ***************************************************************************************
 #include "STAInterface.hpp"
 
+#include <cmath>
+#include <set>
+
+#include "ClockPropagator.hpp"
 #include "DataManager.hpp"
 #include "DelayCalculator.hpp"
-#include "ClockPropagator.hpp"
 #include "GraphBuilder.hpp"
+#include "Lib.hh"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PowerAnalyzer.hpp"
@@ -28,14 +32,13 @@
 #include "SDFWriter.hpp"
 #include "STAHeader.hpp"
 #include "TCModel.hpp"
-#include "TimingCharacterizer.hpp"
 #include "TimingAnalyzer.hpp"
+#include "TimingCharacterizer.hpp"
 #include "TimingPropagator.hpp"
 #include "TimingReporter.hpp"
 #include "Utility.hpp"
 #include "VcdParser.hh"
 #include "idm.h"
-#include "Lib.hh"
 #include "spef/SpefParser.hh"
 
 namespace ista {
@@ -84,6 +87,8 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   DataManager::initInst();
   STADM.input(config_map);
   DelayCalculator::initInst();
+  _is_initialized = true;
+  _is_timing_updated = false;
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -173,9 +178,12 @@ void STAInterface::destroySTA()
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
+  STADC.destroy();
   DelayCalculator::destroyInst();
   STADM.output();
   DataManager::destroyInst();
+  _is_initialized = false;
+  _is_timing_updated = false;
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 
@@ -190,6 +198,224 @@ void STAInterface::destroySTA()
   STALOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   // clang-format on
   Logger::destroyInst();
+}
+
+bool STAInterface::updateTiming(std::string& error_message)
+{
+  if (!isSTAInitialized(error_message)) {
+    return false;
+  }
+  if (_is_timing_updated) {
+    error_message = "update_timing may only be called once after init_sta";
+    return false;
+  }
+
+  STADC.init();
+
+  GraphBuilder::initInst();
+  STAGB.build();
+  GraphBuilder::destroyInst();
+
+  ClockPropagator::initInst();
+  STACP.propagate();
+  ClockPropagator::destroyInst();
+
+  TimingPropagator::initInst();
+  STATP.propagate();
+  TimingPropagator::destroyInst();
+
+  _is_timing_updated = true;
+  return true;
+}
+
+bool STAInterface::writeSDF(const std::string& file_path, std::string& error_message)
+{
+  if (!isSTAInitialized(error_message)) {
+    return false;
+  }
+  if (!_is_timing_updated) {
+    error_message = "update_timing must be called before write_sdf";
+    return false;
+  }
+  if (file_path.empty()) {
+    error_message = "write_sdf requires a non-empty output file path";
+    return false;
+  }
+
+  SDFWriter::initInst();
+  STASW.write(file_path);
+  SDFWriter::destroyInst();
+  return true;
+}
+
+bool STAInterface::reportTiming(std::string& error_message)
+{
+  if (!isSTAInitialized(error_message)) {
+    return false;
+  }
+  if (!_is_timing_updated) {
+    error_message = "update_timing must be called before report_timing";
+    return false;
+  }
+
+  TimingAnalyzer::initInst();
+  STATA.analyze();
+  TimingAnalyzer::destroyInst();
+
+  TimingReporter::initInst();
+  STATR.report();
+  TimingReporter::destroyInst();
+
+  return true;
+}
+
+bool STAInterface::createClock(const std::string& clock_name, const double period, const double rise_edge, const double fall_edge,
+                               const std::vector<std::string>& source_list, std::string& error_message)
+{
+  if (!isSTAInitialized(error_message)) {
+    return false;
+  }
+  if (clock_name.empty()) {
+    error_message = "create_clock requires a non-empty -name";
+    return false;
+  }
+  if (!std::isfinite(period) || period <= 0.0) {
+    error_message = "create_clock -period must be a positive finite value";
+    return false;
+  }
+  if (!std::isfinite(rise_edge) || !std::isfinite(fall_edge) || rise_edge < 0.0 || fall_edge < 0.0 || rise_edge >= fall_edge || fall_edge >= period) {
+    error_message = "create_clock -waveform must satisfy 0 <= rise < fall < period";
+    return false;
+  }
+  if (source_list.empty()) {
+    error_message = "create_clock requires at least one source port";
+    return false;
+  }
+
+  Database& database = STADM.getDatabase();
+  auto& clock_map = database.get_timing_constraint().get_clock_map();
+  if (clock_map.contains(clock_name)) {
+    STALOG.warn(Loc::current(), "clock '", clock_name, "' already exists and will be overwritten");
+  }
+
+  std::vector<std::string> unique_source_list;
+  std::set<std::string> source_set;
+  for (const auto& source_name : source_list) {
+    auto pin_it = database.get_pin_map().find(source_name);
+    if (pin_it == database.get_pin_map().end()) {
+      STALOG.warn(Loc::current(), "source '", source_name, "' not found");
+      error_message = "clock source is not a top-level port";
+      return false;
+    }
+    if (!pin_it->second.get_is_port()) {
+      STALOG.warn(Loc::current(), "clock source '", source_name, "' found but is not a top-level port");
+      error_message = "clock source is not a top-level port";
+      return false;
+    }
+    if (source_set.insert(source_name).second) {
+      unique_source_list.push_back(source_name);
+    }
+  }
+
+  TimingClock timing_clock;
+  timing_clock.set_clock_name(clock_name);
+  timing_clock.set_period(period);
+  timing_clock.set_rise_edge(rise_edge);
+  timing_clock.set_fall_edge(fall_edge);
+  timing_clock.set_source_list(unique_source_list);
+  timing_clock.set_is_propagated(false);
+  clock_map[clock_name] = timing_clock;
+  return true;
+}
+
+bool STAInterface::setPropagatedClock(const std::vector<std::string>& clock_name_list, std::string& error_message)
+{
+  if (!isSTAInitialized(error_message)) {
+    return false;
+  }
+  if (clock_name_list.empty()) {
+    error_message = "set_propagated_clock requires at least one clock";
+    return false;
+  }
+
+  auto& clock_map = STADM.getDatabase().get_timing_constraint().get_clock_map();
+  for (const std::string& clock_name : clock_name_list) {
+    if (!clock_map.contains(clock_name)) {
+      STALOG.warn(Loc::current(), "clock '", clock_name, "' does not exist");
+      error_message = "clock does not exist";
+      return false;
+    }
+  }
+  for (const auto& clock_name : clock_name_list) {
+    clock_map[clock_name].set_is_propagated(true);
+  }
+  return true;
+}
+
+bool STAInterface::getPorts(const std::vector<std::string>& port_name_list, std::vector<std::string>& resolved_port_list, std::string& error_message)
+{
+  if (!isSTAInitialized(error_message)) {
+    return false;
+  }
+  if (port_name_list.empty()) {
+    error_message = "get_ports requires at least one port name";
+    return false;
+  }
+
+  Database& database = STADM.getDatabase();
+  resolved_port_list.clear();
+  for (const std::string& port_name : port_name_list) {
+    auto pin_it = database.get_pin_map().find(port_name);
+    if (pin_it == database.get_pin_map().end()) {
+      STALOG.warn(Loc::current(), "source '", port_name, "' not found");
+      error_message = "clock source not found";
+      return false;
+    }
+    if (!pin_it->second.get_is_port()) {
+      STALOG.warn(Loc::current(), "clock source '", port_name, "' found but is not a top-level port");
+      error_message = "clock source is not a top-level port";
+      return false;
+    }
+    if (auto pin_it = database.get_pin_map().find(port_name); pin_it == database.get_pin_map().end() || !pin_it->second.get_is_port()) {
+      STALOG.warn(Loc::current(), "port '", port_name, "' does not exist");
+      error_message = "port does not exist";
+      return false;
+    }
+    resolved_port_list.push_back(port_name);
+  }
+  return true;
+}
+
+bool STAInterface::getClocks(const std::vector<std::string>& clock_name_list, std::vector<std::string>& resolved_clock_list, std::string& error_message)
+{
+  if (!isSTAInitialized(error_message)) {
+    return false;
+  }
+  if (clock_name_list.empty()) {
+    error_message = "get_clocks requires at least one clock name";
+    return false;
+  }
+
+  std::map<std::string, TimingClock>& clock_map = STADM.getDatabase().get_timing_constraint().get_clock_map();
+  resolved_clock_list.clear();
+  for (const std::string& clock_name : clock_name_list) {
+    if (!clock_map.contains(clock_name)) {
+      STALOG.error(Loc::current(), "clock '", clock_name, "' does not exist");
+      error_message = "clock does not exist";
+      return false;
+    }
+    resolved_clock_list.push_back(clock_name);
+  }
+  return true;
+}
+
+bool STAInterface::isSTAInitialized(std::string& error_message) const
+{
+  if (_is_initialized) {
+    return true;
+  }
+  error_message = "init_sta must be called before STA commands";
+  return false;
 }
 
 #endif
@@ -218,8 +444,8 @@ void STAInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   STADM.getConfig().timing_path_limit = STAUTIL.getConfigValue<int32_t>(config_map, "-timing_path_limit", 20);
   STADM.getConfig().timing_corner = STAUTIL.getConfigValue<std::string>(config_map, "-timing_corner", "");
   STADM.getConfig().is_path_report_number_specified = STAUTIL.exist(config_map, std::string("-max_paths"))
-                                                       || STAUTIL.exist(config_map, std::string("-max_path"))
-                                                       || STAUTIL.exist(config_map, std::string("-path_report_number"));
+                                                      || STAUTIL.exist(config_map, std::string("-max_path"))
+                                                      || STAUTIL.exist(config_map, std::string("-path_report_number"));
   STADM.getConfig().path_report_number = STAUTIL.getConfigValue<int32_t>(config_map, "-max_paths", 1);
   if (STAUTIL.exist(config_map, std::string("-max_path"))) {
     STADM.getConfig().path_report_number = std::any_cast<int32_t>(config_map["-max_path"]);
@@ -683,7 +909,6 @@ void STAInterface::wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib
   timing_cell.get_port_map()[timing_cell_port.get_port_name()] = timing_cell_port;
 }
 
-
 void STAInterface::wrapTimingCellPower(TimingCell& timing_cell, idb::LibCell* lib_cell)
 {
   idb::LibLibrary* lib_library = lib_cell->get_owner_lib();
@@ -723,8 +948,7 @@ TimingPowerArc STAInterface::wrapTimingPowerArc(idb::LibPowerArc* lib_power_arc)
   return timing_power_arc;
 }
 
-TimingPowerArc STAInterface::wrapTimingPortPowerArc(idb::LibInternalPowerInfo* internal_power_info, std::string& port_name,
-                                                     idb::LibLibrary* lib_library)
+TimingPowerArc STAInterface::wrapTimingPortPowerArc(idb::LibInternalPowerInfo* internal_power_info, std::string& port_name, idb::LibLibrary* lib_library)
 {
   TimingPowerArc timing_power_arc;
   timing_power_arc.set_sink_port(port_name);
@@ -835,6 +1059,7 @@ void STAInterface::wrapTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* li
   if (isSDFDelayArc(lib_arc)) {
     TimingCellArc timing_cell_arc = wrapDelayArc(lib_arc_set);
     timing_cell_arc.set_is_timing_graph_arc(lib_arc->isDelayArc());
+    timing_cell_arc.set_is_clear_preset_arc(lib_arc->isClearPresetArc());
     timing_cell.get_cell_arc_list().push_back(timing_cell_arc);
     if (lib_arc->isClearPresetArc()) {
       wrapClearPresetArc(timing_cell, lib_arc);
@@ -1023,8 +1248,7 @@ TimingTableVariableType STAInterface::wrapTimingTableVariableType(idb::LibTable*
   if (*variable == idb::LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION) {
     return TimingTableVariableType::kConstrainedTransition;
   }
-  if (*variable == idb::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION
-      || *variable == idb::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION
+  if (*variable == idb::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION || *variable == idb::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION
       || *variable == idb::LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME) {
     return TimingTableVariableType::kInputTransition;
   }
@@ -1446,8 +1670,7 @@ std::unique_ptr<idb::LibArc> STAInterface::makeLibArc(std::string& source_port, 
 
 std::unique_ptr<idb::LibTable> STAInterface::makeLibScalarTable(int32_t table_type, TCScalarTable& tc_scalar_table)
 {
-  std::unique_ptr<idb::LibTable> lib_table
-      = std::make_unique<idb::LibTable>(static_cast<idb::LibTable::TableType>(table_type), nullptr);
+  std::unique_ptr<idb::LibTable> lib_table = std::make_unique<idb::LibTable>(static_cast<idb::LibTable::TableType>(table_type), nullptr);
   lib_table->addTableValue(std::make_unique<idb::LibFloatValue>(tc_scalar_table.get_value()));
   return lib_table;
 }

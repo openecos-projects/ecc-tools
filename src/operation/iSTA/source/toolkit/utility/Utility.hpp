@@ -171,14 +171,14 @@ class Utility
     return all;
   }
 
-  static std::ifstream* getInputFileStream(std::string file_path) { return getFileStream<std::ifstream>(file_path); }
+  static std::ifstream* getInputFileStream(const std::string_view file_path) { return getFileStream<std::ifstream>(std::string{file_path}); }
 
-  static std::ofstream* getOutputFileStream(std::string file_path) { return getFileStream<std::ofstream>(file_path); }
+  static std::ofstream* getOutputFileStream(const std::string_view file_path) { return getFileStream<std::ofstream>(std::string{file_path}); }
 
   template <typename T>
-  static T* getFileStream(std::string file_path)
+  static T* getFileStream(const std::string_view file_path)
   {
-    T* file = new T(file_path);
+    T* file = new T(std::string{file_path});
     if (!file->is_open()) {
       STALOG.error(Loc::current(), "Failed to open file '", file_path, "'!");
     }

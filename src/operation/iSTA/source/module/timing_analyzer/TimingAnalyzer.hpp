@@ -73,7 +73,7 @@ class TimingAnalyzer
                              double data_slew);
   double getEndPointRequired(std::string& start_point, std::string& end_point, double default_required_time, AnalysisType analysis_type,
                              TransType data_trans_type, double data_slew);
-  std::string getClockName(std::string& pin_name);
+  std::string_view getClockName(std::string& pin_name);
   TimingClock* getStartPointClock(std::string& start_point);
   double getEndPointRequired(TimingPathState& end_path_state, std::string& end_point, double default_required_time,
                              AnalysisType analysis_type);
@@ -111,7 +111,7 @@ class TimingAnalyzer
   double getClockCommonPathArrival(std::pair<std::string, TransType>& common_pin, AnalysisType analysis_type);
   TimingCheckArc* getEndPointCheckArc(std::string& end_point, AnalysisType analysis_type);
   bool isMatchCheckType(TimingCheckArc& timing_check_arc, AnalysisType analysis_type);
-  double getClockPeriod(std::string& clock_name);
+  double getClockPeriod(std::string_view clock_name);
   void propagateRequiredArc(Arc& arc);
   void updateSlack();
   void analyzeEndPointList(TAModel& ta_model);

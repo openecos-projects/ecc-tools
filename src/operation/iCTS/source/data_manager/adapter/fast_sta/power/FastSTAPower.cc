@@ -73,6 +73,15 @@ auto resolveVoltage(const FastStaClockContext& context) -> std::optional<double>
 
 auto findBufferInputNode(const FastStaClockContext& context, const FastStaNode& output_node) -> FastStaNodeId
 {
+  if (const auto indexed = context.buffer_input_node_id_by_inst.find(output_node.inst_name); indexed != context.buffer_input_node_id_by_inst.end()) {
+    if (indexed->second < context.nodes.size()) {
+      const auto& input_node = context.nodes.at(indexed->second);
+      if (input_node.kind == FastStaNodeKind::kBufferInput && input_node.inst_name == output_node.inst_name) {
+        return indexed->second;
+      }
+    }
+    return kInvalidFastStaNodeId;
+  }
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
     const auto& node = context.nodes.at(node_id);
     if (node.kind == FastStaNodeKind::kBufferInput && node.inst_name == output_node.inst_name) {
