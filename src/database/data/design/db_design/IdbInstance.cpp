@@ -456,6 +456,14 @@ bool IdbInstanceList::contains(IdbInstance* instance)
     return false;
   }
 
+  const auto& name = instance->get_name();
+  if (!name.empty()) {
+    const auto iter = _instance_map.find(name);
+    if (iter != _instance_map.end() && iter->second == instance) {
+      return true;
+    }
+  }
+
   auto iter = std::find(_instance_list.begin(), _instance_list.end(), instance);
   return iter != _instance_list.end();
 }

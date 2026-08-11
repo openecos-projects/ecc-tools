@@ -49,6 +49,15 @@ auto findBufferInputNode(const FastStaClockContext& context, const FastStaNode& 
   if (output_node.inst_name.empty()) {
     return kInvalidFastStaNodeId;
   }
+  if (const auto indexed = context.buffer_input_node_id_by_inst.find(output_node.inst_name); indexed != context.buffer_input_node_id_by_inst.end()) {
+    if (indexed->second < context.nodes.size()) {
+      const auto& input_node = context.nodes.at(indexed->second);
+      if (input_node.kind == FastStaNodeKind::kBufferInput && input_node.inst_name == output_node.inst_name) {
+        return indexed->second;
+      }
+    }
+    return kInvalidFastStaNodeId;
+  }
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
     const auto& node = context.nodes.at(node_id);
     if (node.kind == FastStaNodeKind::kBufferInput && node.inst_name == output_node.inst_name) {
@@ -207,7 +216,23 @@ auto hasCompleteSinkTiming(const FastStaClockContext& context) -> bool
 
 auto propagateReadyQueue(FastStaClockContext& context, std::queue<FastStaNodeId>& ready_nodes) -> void
 {
-  const auto output_by_inst = mapBufferOutputByInst(context);
+  std::unordered_map<std::string, FastStaNodeId> fallback_output_by_inst;
+  const auto find_buffer_output = [&](const FastStaNode& input_node) -> FastStaNodeId {
+    if (const auto indexed = context.buffer_output_node_id_by_inst.find(input_node.inst_name); indexed != context.buffer_output_node_id_by_inst.end()) {
+      if (indexed->second < context.nodes.size()) {
+        const auto& output_node = context.nodes.at(indexed->second);
+        if (output_node.kind == FastStaNodeKind::kBufferOutput && output_node.inst_name == input_node.inst_name) {
+          return indexed->second;
+        }
+      }
+      return kInvalidFastStaNodeId;
+    }
+    if (fallback_output_by_inst.empty()) {
+      fallback_output_by_inst = mapBufferOutputByInst(context);
+    }
+    const auto fallback = fallback_output_by_inst.find(input_node.inst_name);
+    return fallback == fallback_output_by_inst.end() ? kInvalidFastStaNodeId : fallback->second;
+  };
   std::size_t visited_steps = 0U;
   const auto max_steps = std::max<std::size_t>(1U, context.nodes.size() + context.nets.size() + 1U) * 4U;
   while (!ready_nodes.empty() && visited_steps < max_steps) {
@@ -219,16 +244,16 @@ auto propagateReadyQueue(FastStaClockContext& context, std::queue<FastStaNodeId>
     }
     auto& node = context.nodes.at(node_id);
     if (node.kind == FastStaNodeKind::kBufferInput) {
-      const auto output_iter = output_by_inst.find(node.inst_name);
-      if (output_iter != output_by_inst.end() && output_iter->second < context.nodes.size()) {
-        auto& output_node = context.nodes.at(output_iter->second);
+      const auto output_node_id = find_buffer_output(node);
+      if (output_node_id < context.nodes.size()) {
+        auto& output_node = context.nodes.at(output_node_id);
         if (!output_node.output_net_ids.empty() && output_node.output_net_ids.front() < context.nets.size()) {
-          propagateBufferOutput(context, output_iter->second, context.nets.at(output_node.output_net_ids.front()));
+          propagateBufferOutput(context, output_node_id, context.nets.at(output_node.output_net_ids.front()));
         } else {
           output_node.timing = node.timing;
         }
         if (output_node.timing.valid) {
-          ready_nodes.push(output_iter->second);
+          ready_nodes.push(output_node_id);
         }
       }
       continue;
