@@ -78,7 +78,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   std::map<std::string, index_type> mNode2idbID;
   std::vector<IdbInstance*> inst_resort_list = db_deisgn->get_instance_list()->get_instance_list();
   std::stable_sort(inst_resort_list.begin(), inst_resort_list.end(),
-                   [](IdbInstance* a, IdbInstance* b) { return a->is_fixed() < b->is_fixed(); });
+                   [](IdbInstance* a, IdbInstance* b) { return isPlacementFixed(a) < isPlacementFixed(b); });
   for (IdbInstance* node : inst_resort_list) {
     mNode2idbID[node->get_name()] = node->get_id();
   }
@@ -163,7 +163,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     if (node->get_cell_master()->is_block()) {
       ECCLOG.info(ecc::Loc::current(), "Node ", node->get_name(), " is a block.");
     }
-    if (node->get_status() != IdbPlacementStatus::kFixed) {
+    if (!isPlacementFixed(node)) {
       Box box_tmp = buildInstanceBox(node);
       if (node->get_halo()) {
         // Jiaqi: add halo for fixed cells
@@ -373,7 +373,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       assert(mNet2ID.count(pin->get_net()->get_net_name()));
       pin2net_map.append(mNet2ID[pin->get_net()->get_net_name()]);
 
-      if (node->get_status() != IdbPlacementStatus::kFixed /*&& node.status() != PlaceStatusEnum::DUMMY_FIXED*/) {
+      if (!isPlacementFixed(node) /*&& node.status() != PlaceStatusEnum::DUMMY_FIXED*/) {
         num_movable_pins += 1;
       }
     }
@@ -485,7 +485,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       for (IdbInstance* inst : region->get_instance_list()) {
         // FIXME:
         index_type node_id = mNode2PyNondeID[inst->get_name()];
-        if (inst->get_status() != IdbPlacementStatus::kFixed)  // ignore fixed cells
+        if (!isPlacementFixed(inst))  // ignore fixed cells
         {
           vNode2FenceRegion.at(node_id) = region_id;
         }
