@@ -69,9 +69,13 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     throw std::runtime_error("PyPlaceDB timing initialization is disabled in this ecc_py build");
   }
 
-  double total_fixed_node_area = 0;  // compute total area of fixed cells, which is an upper bound
-  // collect boxes for fixed cells and put in a polygon set to remove overlap later
+  double total_fixed_node_area = 0;  // sum of fixed body and synthetic obstacle rectangles
+  // Collect the rectangles used by DreamPlace and the corresponding unioned geometry
+  // separately.  Fixed instances retain their body rectangle for pin/write-back
+  // identity, while halos and blockages become pin-less synthetic terminals.
   std::vector<gtl::rectangle_data<coordinate_type>> fixed_boxes;
+  std::vector<gtl::rectangle_data<coordinate_type>> fixed_body_boxes;
+  std::vector<gtl::rectangle_data<coordinate_type>> fixed_halo_boxes;
   // record original node to new node mapping
   int inst_num = db_deisgn->get_instance_list()->get_num();
   std::map<std::string, index_type> mNode2PyNondeID;
@@ -157,7 +161,6 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
   };
   num_terminals = 0;  // regard only fixed macros as macros, placement blockages are ignored
-  PolygonSet fixed_node_ps;
   for (int i = 0; i < inst_num; ++i) {
     IdbInstance* node = inst_resort_list.at(i);
     if (node->get_cell_master()->is_block()) {
@@ -180,29 +183,33 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
     else
     {
-      Box box_tmp = buildInstanceBox(node);
+      Box body_box = buildInstanceBox(node);
+      Box halo_box = body_box;
       if (node->get_halo()) {
-        // Jiaqi: add halo for fixed cells
-        // ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed cell with halo.");
-        box_tmp.xl -= node->get_halo()->get_extend_lef();
-        box_tmp.yl -= node->get_halo()->get_extend_bottom();
-        box_tmp.xh += node->get_halo()->get_extend_right();
-        box_tmp.yh += node->get_halo()->get_extend_top();
+        halo_box.xl -= node->get_halo()->get_extend_lef();
+        halo_box.yl -= node->get_halo()->get_extend_bottom();
+        halo_box.xh += node->get_halo()->get_extend_right();
+        halo_box.yh += node->get_halo()->get_extend_top();
         ECCLOG.info(ecc::Loc::current(), "Macro instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(),
                      ", ", node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
                      node->get_halo()->get_extend_top(), ").");
       }
-      addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, true);
+      // Keep the real instance as a body-only terminal.  Its halo is added to
+      // the unioned obstacle set below so overlapping halos cannot be counted
+      // multiple times as independent fixed nodes.
+      addNode(IdbOrientToString(node->get_orient()), node->get_name(), body_box, true);
       if (node->get_cell_master()->is_io_cell()) {
         ECCLOG.info(ecc::Loc::current(), "Fixed IO instance ", node->get_name(), ", coordinate (",
                      node->get_coordinate()->get_x(), ", ", node->get_coordinate()->get_y(), ", ",
                      node->get_bounding_box()->get_high_x(), ", ", node->get_bounding_box()->get_high_y(), ").");
       }
       num_terminals += 1;
-      // compute upper bound of total fixed cell area
-      total_fixed_node_area += 1LL * node->get_cell_master()->get_height() * node->get_cell_master()->get_width();
+      total_fixed_node_area += body_box.area();
 
-      fixed_node_ps += gtl::rectangle_data<coordinate_type>(box_tmp.xl, box_tmp.yl, box_tmp.xh, box_tmp.yh);
+      fixed_body_boxes.emplace_back(body_box.xl, body_box.yl, body_box.xh, body_box.yh);
+      if (node->get_halo()) {
+        fixed_halo_boxes.emplace_back(halo_box.xl, halo_box.yl, halo_box.xh, halo_box.yh);
+      }
     }
   }
 
@@ -250,11 +257,18 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
   }
 #endif
-  blockage_ps_list -= fixed_node_ps;  // remove overlap with fixed cells
+  // Union all hard obstacles before decomposition.  Subtract only the fixed
+  // body union: halo area outside the body must remain unavailable, while any
+  // overlap between halos, blockages, and bodies is represented exactly once.
+  PolygonSet fixed_body_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
+  PolygonSet fixed_halo_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
+  PolygonSet obstacle_ps = blockage_ps_list;
+  obstacle_ps += fixed_halo_ps;
+  obstacle_ps -= fixed_body_ps;
   int ext_blockage_num = 0;
 
   std::vector<gtl::rectangle_data<coordinate_type>> vRect;
-  blockage_ps_list.get_rectangles(vRect);
+  obstacle_ps.get_rectangles(vRect);
   for (auto const& rect : vRect) {
     Box box(gtl::xl(rect), gtl::yl(rect), gtl::xh(rect), gtl::yh(rect));
     int id = node_names.size();
@@ -291,19 +305,27 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   ECCLOG.info(ecc::Loc::current(), "num_terminals ", num_terminals, ", num_place_blockages ", ext_blockage_num,
                ", num_terminal_NIs ", num_terminal_NIs, ".");
   num_nodes = inst_num + ext_blockage_num + num_terminal_NIs;  // db.nodes().size() + num_terminals - db.numFixed() - db.numPlaceBlockages()
-  // this is different from simply summing up the area of all fixed nodes
-  double total_fixed_node_overlap_area = 0;
-  // compute total area uniquely
+  // Compute the exact fixed/obstacle area inside the core from the same union
+  // represented by the terminal rectangles above.
   PolygonSet ps(gtl::HORIZONTAL, fixed_boxes.begin(), fixed_boxes.end());
   // critical to make sure only overlap with the die area is computed
   IdbRect* core_rect = db->get_idb_layout()->get_core()->get_bounding_box();
-  ps &= gtl::rectangle_data<coordinate_type>(core_rect->get_low_x(), core_rect->get_low_y(), core_rect->get_high_x(),
-                                             core_rect->get_high_y());
-  total_fixed_node_overlap_area = gtl::area(ps);
+  auto core_box = gtl::rectangle_data<coordinate_type>(core_rect->get_low_x(), core_rect->get_low_y(), core_rect->get_high_x(),
+                                                       core_rect->get_high_y());
+  ps &= core_box;
+  double total_fixed_geometry_area = gtl::area(ps);
+  total_space_area = core_rect->get_area() - total_fixed_geometry_area;
 
-  // the total overlap area should not exceed the upper bound;
-  // current estimation may exceed if there are many overlapping fixed cells or boxes
-  total_space_area = core_rect->get_area() - std::min(total_fixed_node_overlap_area, total_fixed_node_area);
+  PolygonSet body_core_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
+  body_core_ps &= core_box;
+  PolygonSet halo_core_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
+  halo_core_ps &= core_box;
+  PolygonSet residual_obstacle_core_ps(gtl::HORIZONTAL, vRect.begin(), vRect.end());
+  residual_obstacle_core_ps &= core_box;
+  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB fixed geometry: body_union_area ", gtl::area(body_core_ps),
+               ", halo_union_area ", gtl::area(halo_core_ps), ", residual_obstacle_area ",
+               gtl::area(residual_obstacle_core_ps), ", terminal_union_area ", total_fixed_geometry_area,
+               ", terminal_area_sum ", total_fixed_node_area, ", synthetic_rectangles ", ext_blockage_num, ".");
   int count = 0;
   for (int i = 0; i < mNode2PyNondeID.size() - num_terminal_NIs - ext_blockage_num; ++i) {
     auto node_name = node_names[i].cast<std::string>();
