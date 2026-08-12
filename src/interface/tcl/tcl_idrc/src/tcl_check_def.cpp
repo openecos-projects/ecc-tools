@@ -17,11 +17,8 @@
 #include <set>
 
 #include "DRCInterface.hpp"
-#include "flow_config.h"
 #include "tcl_drc.h"
 #include "tcl_util.h"
-#include "tool_manager.h"
-#include "usage/usage.hh"
 
 namespace tcl {
 
@@ -50,8 +47,8 @@ unsigned CmdDRCAutoRun::check()
 {
   TclOption* file_name_option = getOptionOrArg(TCL_CONFIG);
   TclOption* file_path_option = getOptionOrArg(TCL_PATH);
-  LOG_FATAL_IF(!file_name_option);
-  LOG_FATAL_IF(!file_path_option);
+  ieda::checkTclOption(file_name_option, TCL_CONFIG);
+  ieda::checkTclOption(file_path_option, TCL_PATH);
   return 1;
 }
 
@@ -61,15 +58,8 @@ unsigned CmdDRCAutoRun::exec()
     return 0;
   }
 
-  TclOption* option = getOptionOrArg(TCL_CONFIG);
-  auto data_config = option->getStringVal();
-
-  TclOption* path_option = getOptionOrArg(TCL_PATH);
-  auto data_path = path_option->getStringVal();
-
-  if (iplf::tmInst->autoRunDRC(data_config, data_path)) {
-    std::cout << "iDRC run successfully." << std::endl;
-  }
+  DRCI.runDRC();
+  std::cout << "iDRC run successfully." << std::endl;
 
   return 1;
 }
@@ -87,7 +77,7 @@ CmdDRCSaveDetailFile::CmdDRCSaveDetailFile(const char* cmd_name) : TclCmd(cmd_na
 unsigned CmdDRCSaveDetailFile::check()
 {
   TclOption* file_path_option = getOptionOrArg(TCL_PATH);
-  LOG_FATAL_IF(!file_path_option);
+  ieda::checkTclOption(file_path_option, TCL_PATH);
   return 1;
 }
 
@@ -100,7 +90,7 @@ unsigned CmdDRCSaveDetailFile::exec()
   TclOption* path_option = getOptionOrArg(TCL_PATH);
   auto data_path = path_option->getStringVal();
 
-  if (iplf::tmInst->saveDrcDetailToFile(data_path)) {
+  if (DRCI.saveDRC(data_path)) {
     std::cout << "iDRC save detail drc to file success. path = " << data_path << std::endl;
   }
 

@@ -70,6 +70,7 @@ class DataManager
 
 #if 1  // 获得唯一的结果
   int32_t getOnlyOffset();
+  int32_t getOnlyOffset(Direction direction);
   int32_t getOnlyPitch();
 #endif
 
@@ -106,6 +107,9 @@ class DataManager
   void buildDie();
   void makeDie();
   void checkDie();
+  void buildMacroList();
+  void makeMacroList();
+  void checkMacroList();
   void buildLayerViaMasterList();
   void transLayerViaMasterList();
   void makeLayerViaMasterList();
@@ -128,8 +132,6 @@ class DataManager
   void printConfig();
   void printDatabase();
   void outputScript();
-  void outputJson();
-  std::string outputEnvJson();
 #endif
 
 #if 1  // destroy

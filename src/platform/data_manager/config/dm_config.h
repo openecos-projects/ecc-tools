@@ -68,6 +68,7 @@ class DataConfig
   vector<string>& get_lib_paths() { return _lib_paths; }
   string& get_sdc_path() { return _sdc_path; }
   string& get_spef_path() { return _spef_path; }
+  string& get_vcd_path() { return _vcd_path; }
   string& get_feature_path() { return _feature_path;}
 
   /// settings
@@ -120,6 +121,12 @@ class DataConfig
     std::cout << "[Data config set] spef = " << _spef_path << std::endl;
   }
 
+  void set_vcd_path(const string vcd_path)
+  {
+    _vcd_path = vcd_path;
+    std::cout << "[Data config set] vcd = " << _vcd_path << std::endl;
+  }
+
   void set_feature_path(const string feature_path)
   {
     _feature_path = feature_path;
@@ -145,6 +152,7 @@ class DataConfig
   vector<string> _lib_paths;
   string _sdc_path;
   string _spef_path;
+  string _vcd_path;
   string _feature_path;
 
   LayerSettings _settings;

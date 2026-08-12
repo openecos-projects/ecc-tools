@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <cstdint>
+
 #include <boost/foreach.hpp>
 #include <boost/geometry.hpp>
 #include <boost/geometry/geometries/box.hpp>
@@ -34,6 +36,11 @@ using GTLPolyInt = gtl::polygon_90_data<int32_t>;
 using GTLHolePolyInt = gtl::polygon_90_with_holes_data<int32_t>; 
 using GTLPolySetInt = gtl::polygon_90_set_data<int32_t>;
 
+using GTLPointDBL = gtl::point_data<double>;
+using GTLRectDBL = gtl::rectangle_data<double>;
+using GTLPolyDBL = gtl::polygon_90_data<double>;
+using GTLPolySetDBL = gtl::polygon_90_set_data<double>;
+
 using BGPointInt = bg::model::d2::point_xy<int32_t>;
 using BGMultiPointInt = bg::model::multi_point<BGPointInt>;
 using BGSegmentInt = bg::model::segment<BGPointInt>;
@@ -51,4 +58,3 @@ using BGMultiLineDBL = bg::model::multi_linestring<BGLineDBL>;
 using BGRectDBL = bg::model::box<BGPointDBL>;
 using BGPolyDBL = bg::model::polygon<BGPointDBL>;
 using BGMultiPolyDBL = bg::model::multi_polygon<BGPolyDBL>;
-

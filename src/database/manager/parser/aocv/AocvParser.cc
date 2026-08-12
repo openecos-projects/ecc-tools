@@ -28,7 +28,7 @@
 
 #include "Config.hh"
 
-namespace ista {
+namespace idb {
 
 AocvObjectSpec::AocvObjectSpec(const char* object_spec_name, AocvLibrary* own_aocv)
     : _object_spec_name(object_spec_name), _own_aocv(own_aocv)
@@ -116,11 +116,10 @@ AocvObjectSpec* AocvObjectSpecSet::get_object_spec(TransType trans_type, Analysi
  */
 std::optional<AocvObjectSpecSet*> AocvLibrary::findAocvObjectSpecSet(const char* object_spec_name, AocvObjectSpec::PathType path_type)
 {
-  auto object_specs = _obj_name_to_spec_set.values(object_spec_name);
-
-  for (auto* object_spec : object_specs) {
-    if (object_spec->front()->get_path_type() == path_type) {
-      return object_spec;
+  auto [begin, end] = _obj_name_to_spec_set.equal_range(object_spec_name);
+  for (auto iter = begin; iter != end; ++iter) {
+    if (iter->second->front()->get_path_type() == path_type) {
+      return iter->second;
     }
   }
 
@@ -167,7 +166,7 @@ void AocvLibrary::addAocvObjectSpec(std::unique_ptr<AocvObjectSpec>&& object_spe
   } else {
     auto* new_object_spec_set = new AocvObjectSpecSet();
     _object_spec_sets.emplace_back(new_object_spec_set);
-    _obj_name_to_spec_set.insert(object_spec->get_object_spec_name(), new_object_spec_set);
+    _obj_name_to_spec_set.emplace(object_spec->get_object_spec_name(), new_object_spec_set);
     new_object_spec_set->addAocvObjectSpec(std::move(object_spec));
   }
 }
@@ -249,10 +248,10 @@ std::unique_ptr<AocvObjectSpec> AocvReader::readAocvObjectSpec(std::string curre
 std::unique_ptr<AocvLibrary> AocvReader::readAocvLibrary()
 {
   if (!_stream) {
-    LOG_ERROR << "File " << _file_name << " NotReadable";
+    IEDALOG.warn(ieda::Loc::current(), "File ", _file_name, " NotReadable");
   }
 
-  LOG_INFO << "start read aocv file " << _file_name;
+  IEDALOG.info(ieda::Loc::current(), "start read aocv file ", _file_name);
 
   auto aocv_library = std::make_unique<AocvLibrary>(_file_name.c_str());
 
@@ -275,7 +274,7 @@ std::unique_ptr<AocvLibrary> AocvReader::readAocvLibrary()
     }
 
     if (_stream.eof()) {
-      LOG_INFO << "read aocv file EOF" << _file_name;
+      IEDALOG.info(ieda::Loc::current(), "read aocv file EOF", _file_name);
       break;
     }
   }
@@ -303,4 +302,4 @@ std::vector<out_type> AocvReader::strConvertNumList(std::string& str)
   return num_list;
 }
 
-}  // namespace ista
+}  // namespace idb

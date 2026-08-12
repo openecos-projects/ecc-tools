@@ -2,7 +2,7 @@
 # SET(CMAKE_BUILD_TYPE "Debug")
 
 if(NOT DEFINED CMD_BUILD)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/design/sky130_gcd)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../bin)
 endif()
 
 # add GIT_VERSION to definitions
@@ -18,8 +18,8 @@ endif()
 
 add_definitions(-DiEDA_GIT_VERSION="${iEDA_GIT_VERSION}")
 
-add_executable(iEDA
+add_executable(ecc_bin
     ieda_main.cpp
 )
 
-target_link_libraries(iEDA flow)
+target_link_libraries(ecc_bin flow ieda_logger)

@@ -1,0 +1,3 @@
+add_subdirectory(fixture)
+add_subdirectory(topology_gen)
+add_subdirectory(fast_clustering)

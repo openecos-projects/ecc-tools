@@ -108,6 +108,62 @@ class CmdInitVerilog : public TclCmd
   // private data
 };
 
+class CmdInitLib : public TclCmd
+{
+ public:
+  explicit CmdInitLib(const char* cmd_name);
+  ~CmdInitLib() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdInitSdc : public TclCmd
+{
+ public:
+  explicit CmdInitSdc(const char* cmd_name);
+  ~CmdInitSdc() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdInitSpef : public TclCmd
+{
+ public:
+  explicit CmdInitSpef(const char* cmd_name);
+  ~CmdInitSpef() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdInitVcd : public TclCmd
+{
+ public:
+  explicit CmdInitVcd(const char* cmd_name);
+  ~CmdInitVcd() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
 class CmdSaveDef : public TclCmd
 {
  public:
@@ -183,6 +239,118 @@ class CmdSaveJSON : public TclCmd
  public:
   explicit CmdSaveJSON(const char* cmd_name);
   ~CmdSaveJSON() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdSaveViewJson : public TclCmd
+{
+ public:
+  explicit CmdSaveViewJson(const char* cmd_name);
+  ~CmdSaveViewJson() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdApplyViewJsonEdits : public TclCmd
+{
+ public:
+  explicit CmdApplyViewJsonEdits(const char* cmd_name);
+  ~CmdApplyViewJsonEdits() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdSaveData : public TclCmd
+{
+ public:
+  explicit CmdSaveData(const char* cmd_name);
+  ~CmdSaveData() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdLoadData : public TclCmd
+{
+ public:
+  explicit CmdLoadData(const char* cmd_name);
+  ~CmdLoadData() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdResetData : public TclCmd
+{
+ public:
+  explicit CmdResetData(const char* cmd_name);
+  ~CmdResetData() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdValidateIdb : public TclCmd
+{
+ public:
+  explicit CmdValidateIdb(const char* cmd_name);
+  ~CmdValidateIdb() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdWriteSocJson : public TclCmd
+{
+ public:
+  explicit CmdWriteSocJson(const char* cmd_name);
+  ~CmdWriteSocJson() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdWriteAbstractLef : public TclCmd
+{
+ public:
+  explicit CmdWriteAbstractLef(const char* cmd_name);
+  ~CmdWriteAbstractLef() override = default;
 
   unsigned check() override;
   unsigned exec() override;

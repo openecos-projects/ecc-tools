@@ -7,7 +7,6 @@ target_link_libraries(ieda_report_drc
         report_basic
         tool_manager 
         def_service
-        log
         idm
 )
 

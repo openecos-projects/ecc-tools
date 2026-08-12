@@ -75,6 +75,7 @@ class IdbViaRuleGenerate
   IdbRect* get_cut_rect() { return _cut_rect; }
   const int32_t get_spacing_x() const { return _spacing_x; }
   const int32_t get_spacing_y() const { return _spacing_y; }
+  double get_resistance_per_cut() { return _resistance_per_cut; }
 
   // setter
   void set_name(string name) { _name = name; }
@@ -90,6 +91,7 @@ class IdbViaRuleGenerate
     _spacing_x = x;
     _spacing_y = y;
   }
+  void set_resistance_per_cut(double resistance_per_cut) { _resistance_per_cut = resistance_per_cut; }
 
   // operator
   void swap_routing_layer();
@@ -102,6 +104,7 @@ class IdbViaRuleGenerate
   IdbRect* _cut_rect;
   int32_t _spacing_x;
   int32_t _spacing_y;
+  double _resistance_per_cut = -1.0;
   IdbLayerRouting* _layer_top;
   IdbLayerCutEnclosure* _enclosure_top;
 };
@@ -138,7 +141,16 @@ class IdbViaRuleList
   IdbViaRuleGenerate* add_via_rule_generate(IdbViaRuleGenerate* via_rule = nullptr);
   IdbViaRuleGenerate* add_via_rule_generate(string name);
 
-  void reset();
+  void reset(){
+    for (IdbViaRuleGenerate* via_rule : _via_rule_generate_list) {
+      if (via_rule != nullptr) {
+        delete via_rule;
+        via_rule = nullptr;
+      }
+    }
+    _via_rule_generate_list.clear();
+    _num_rule_generate = 0;
+  }
 
   // operator
   void init_via_rule_list(int32_t size) { _via_rule_generate_list.reserve(size); }

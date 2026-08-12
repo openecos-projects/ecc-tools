@@ -25,7 +25,7 @@
 #include "timing_io.h"
 
 #include "json/json.hpp"
-#include "log/Log.hh"
+#include "utility/logger/Logger.hpp"
 #include "timing_api.hh"
 
 namespace ieval {
@@ -53,22 +53,22 @@ void EvalTiming::printTimingResult()
 
   nlohmann::json result_json;
 
-  LOG_INFO << ">> Design Timing Evaluation: ";
+  IEDALOG.info(ieda::Loc::current(), ">> Design Timing Evaluation: ");
   for (const auto routing_type : {"HPWL", "FLUTE", "SALT", "EGR", "DR"}) {
     if (summary.contains(routing_type) == false) {
       continue;
     }
 
     auto timing_summary = summary[routing_type];
-    LOG_INFO << "Routing type: " << routing_type;
+    IEDALOG.info(ieda::Loc::current(), "Routing type: ", routing_type);
 
     nlohmann::json routing_json;
 
     nlohmann::json clocks_json = nlohmann::json::array();
     for (const auto& clock_timing : timing_summary.clock_timings) {
-      LOG_INFO << "Clock: " << clock_timing.clock_name << " Setup WNS: " << clock_timing.setup_wns
-               << " Setup TNS: " << clock_timing.setup_tns << " Hold WNS: " << clock_timing.hold_wns
-               << " Hold TNS: " << clock_timing.hold_tns << " Suggest freq: " << clock_timing.suggest_freq;
+      IEDALOG.info(ieda::Loc::current(), "Clock: ", clock_timing.clock_name, " Setup WNS: ", clock_timing.setup_wns,
+                   " Setup TNS: ", clock_timing.setup_tns, " Hold WNS: ", clock_timing.hold_wns, " Hold TNS: ",
+                   clock_timing.hold_tns, " Suggest freq: ", clock_timing.suggest_freq);
 
       nlohmann::json clock_json;
       clock_json["clock_name"] = clock_timing.clock_name;
@@ -81,8 +81,8 @@ void EvalTiming::printTimingResult()
       clocks_json.push_back(clock_json);
     }
 
-    LOG_INFO << "Static power: " << timing_summary.static_power;
-    LOG_INFO << "Dynamic power: " << timing_summary.dynamic_power;
+    IEDALOG.info(ieda::Loc::current(), "Static power: ", timing_summary.static_power);
+    IEDALOG.info(ieda::Loc::current(), "Dynamic power: ", timing_summary.dynamic_power);
 
     routing_json["clock_timings"] = clocks_json;
     routing_json["static_power"] = timing_summary.static_power;
@@ -96,9 +96,9 @@ void EvalTiming::printTimingResult()
   if (std::ofstream output_file(output_path); output_file.is_open()) {
     output_file << result_json.dump(2);
     output_file.close();
-    LOG_INFO << "Timing evaluation results saved to " << output_path;
+    IEDALOG.info(ieda::Loc::current(), "Timing evaluation results saved to ", output_path);
   } else {
-    LOG_ERROR << "Failed to open file for writing: " << output_path;
+    IEDALOG.warn(ieda::Loc::current(), "Failed to open file for writing: ", output_path);
   }
 }
 

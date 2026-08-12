@@ -49,6 +49,7 @@
 #include "lef_service.h"
 #include "verilog_read.h"
 #include "verilog_write.h"
+#include "view_write.h"
 
 namespace idb {
 
@@ -67,7 +68,7 @@ class IdbBuilder
   IdbDefService* buildDef(string file);
   IdbDefService* buildDefGzip(string gzip_file);
   IdbLefService* buildLef(vector<string>& files, bool b_techfile = false);
-  IdbDefService* rustBuildVerilog(string file, std::string top_module_name = "asic_top");
+  IdbDefService* buildVerilog(string file, std::string top_module_name = "asic_top");
 
   IdbDefService* buildDefFloorplan(string file);
 
@@ -77,13 +78,20 @@ class IdbBuilder
   // Write def
   bool saveDef(string file, DefWriteType type = DefWriteType::kChip);
   void saveVerilog(std::string verilog_file_name, std::set<std::string>& exclude_cell_names, bool is_add_space_for_escape_name);
-  bool saveGDSII(string file);
+  bool saveGDSII(string file, bool is_hardened = false);
   bool saveJSON(string file, string options);
+  bool saveViewJson(string output_dir, ViewJsonWriteOptions options = {});
+  bool applyViewJsonEdits(string edits_path, bool compressed_hint = false);
   bool saveLef(string file);
   // Write layout
   void saveLayout(string folder);
   // Read layout
   void loadLayout(string folder);
+  // Write/read design binary data. Layout must be available before loading design.
+  bool saveDesign(string folder);
+  bool loadDesign(string folder);
+  bool saveData(string folder);
+  bool loadData(string folder);
 
   IdbLefService* get_lef_service() { return _lef_service; }
   IdbDefService* get_def_service() { return _def_service; }
@@ -130,6 +138,7 @@ class IdbBuilder
   //   std::shared_ptr<IdbDataService> _data_service;
 
   void checkNetPins();
+  void updateDefUnit();
 };
 
 }  // namespace idb

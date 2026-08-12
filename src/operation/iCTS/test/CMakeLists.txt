@@ -1,42 +1,70 @@
-if(DEBUG_ICTS_TEST)
-  message(STATUS "CTS: DEBUG_ICTS_TEST")
-  set(CMAKE_BUILD_TYPE "Debug")
-else()
-  message(STATUS "CTS: RELEASE_ICTS_TEST")
-  set(CMAKE_BUILD_TYPE "Release")
-endif()
-# Set(GTest_DIR "/usr/src/googletest/googletest")
+include(CMakeParseArguments)
 
-# TreeBuilderTest
-# add_executable(icts_tree_builder_test ${ICTS_TEST}/TreeBuilderTest.cc)
-# target_link_libraries(
-#   icts_tree_builder_test PUBLIC icts_source icts_api icts_test_external_libs
-#   ) # ${GTEST_LIBRARY} ${GTEST_MAIN_LIBRARY}
-# target_include_directories(icts_tree_builder_test PUBLIC ${ICTS_TEST})
-find_package(GTest REQUIRED)
-# AnnealOptTest
-add_executable(icts_anneal_opt_test ${ICTS_TEST}/AnnealOptTest.cc)
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+add_library(icts_test_base INTERFACE)
+
+target_include_directories(
+  icts_test_base
+  INTERFACE
+  ${ICTS_TEST}
+  $<TARGET_PROPERTY:idm,INTERFACE_INCLUDE_DIRECTORIES>
+)
+
 target_link_libraries(
-  icts_anneal_opt_test PUBLIC icts_source icts_api icts_test_external_libs
-  gtestd gtest_maind
-  -u_ZN3ipl17SteinerWirelength25updateAllNetWorkPointPairEv
-  -u_ZN3ipl13NesterovPlace21printNesterovDatabaseEv
-  -u_ZN3ito3iTO5runTOEv
-  -u_ZN3idm11DataManager7saveDefENSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
-  -u_ZN4icts9GDSPloter10plotDesignERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+  icts_test_base
+  INTERFACE
+  icts_source_toolkit_logger
+  icts_source
+  icts_interface
+  gtest
+  pthread
+  geometry_db
+  idb
+  IdbBuilder
+  def_builder
+  lef_builder
+  def_service
+  lef_service
+)
 
-  )
-else()
+target_include_directories(
+  icts_test_base
+  INTERFACE
+  ${HOME_DATABASE}/db
+  ${HOME_DATABASE}/builder/builder
+  ${HOME_DATABASE}/builder/def_builder/def_service
+  ${HOME_DATABASE}/builder/lef_builder/lef_service
+)
+
+add_library(icts_test_realtech_base INTERFACE)
+
 target_link_libraries(
-  icts_anneal_opt_test PUBLIC icts_source icts_api icts_test_external_libs
-  gtest gtest_main
-  -u_ZN3ipl17SteinerWirelength25updateAllNetWorkPointPairEv
-  -u_ZN3ipl13NesterovPlace21printNesterovDatabaseEv
-  -u_ZN3ito3iTO5runTOEv
-  -u_ZN3idm11DataManager7saveDefENSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
-  -u_ZN4icts9GDSPloter10plotDesignERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+  icts_test_realtech_base
+  INTERFACE
+  icts_test_base
+)
 
-  ) # ${GTEST_LIBRARY} ${GTEST_MAIN_LIBRARY}
-endif()
-target_include_directories(icts_anneal_opt_test PUBLIC ${ICTS_TEST})
+add_library(icts_test_main OBJECT ${ICTS_TEST}/main.cc)
+target_link_libraries(icts_test_main PUBLIC icts_test_base)
+
+option(ICTS_BUILD_REALTECH_TESTS "Build opt-in iCTS real-tech smoke tests" OFF)
+option(ICTS_BUILD_SLOW_REALTECH_TESTS "Build opt-in slow iCTS real-tech regression and benchmark tests" OFF)
+
+function(icts_add_test_executable target_name)
+  set(options REALTECH)
+  set(one_value_args)
+  set(multi_value_args SOURCES LIBS)
+  cmake_parse_arguments(ICTS_ADD_TEST "${options}" "${one_value_args}" "${multi_value_args}" ${ARGN})
+
+  add_executable(${target_name} ${ICTS_ADD_TEST_SOURCES} $<TARGET_OBJECTS:icts_test_main>)
+  target_link_libraries(${target_name} PRIVATE icts_test_base icts_test_toolkit_io ${ICTS_ADD_TEST_LIBS})
+
+  if(ICTS_ADD_TEST_REALTECH)
+    target_link_libraries(${target_name} PRIVATE icts_test_realtech_base)
+  endif()
+
+  add_test(NAME ${target_name} COMMAND ${target_name})
+endfunction()
+
+add_subdirectory(toolkit)
+add_subdirectory(data_manager)
+add_subdirectory(module)

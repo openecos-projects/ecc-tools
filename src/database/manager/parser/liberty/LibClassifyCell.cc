@@ -13,9 +13,10 @@
 
 #include <concepts>
 #include <functional>
+#include <string_view>
 #include <tuple>
 
-namespace ista {
+namespace idb {
 
 template <typename T>
 concept HashType = std::is_integral_v<T> || std::is_same_v<T, std::string>;
@@ -72,30 +73,30 @@ std::size_t LibClassifyCell::hashCellPort(LibPort* port)
  * @param expr
  * @return std::size_t
  */
-std::size_t LibClassifyCell::hashCellPortFuncExpr(RustLibertyExpr* expr)
+std::size_t LibClassifyCell::hashCellPortFuncExpr(::LibertyExpr* expr)
 {
   if (!expr) {
     return 0;
   }
 
   switch (expr->op) {
-    case RustLibertyExprOp::kBuffer:
+    case LibertyExprOp::kBuffer:
       return Hash(std::string(expr->port_name));
-    case RustLibertyExprOp::kNot: {
-      auto* left_expr = rust_get_expr_left(expr);
+    case LibertyExprOp::kNot: {
+      auto* left_expr = liberty_get_expr_left(expr);
       auto result = hashCellPortFuncExpr(left_expr);
-      rust_free_expr(left_expr);
+      liberty_free_expr(left_expr);
       return result;
     }
 
     default: {
-      auto* left_expr = rust_get_expr_left(expr);
-      auto* right_expr = rust_get_expr_right(expr);
+      auto* left_expr = liberty_get_expr_left(expr);
+      auto* right_expr = liberty_get_expr_right(expr);
 
       auto result = (hashCellPortFuncExpr(left_expr) ^ hashCellPortFuncExpr(right_expr)) ^ Hash(static_cast<unsigned>(expr->op));
 
-      rust_free_expr(left_expr);
-      rust_free_expr(right_expr);
+      liberty_free_expr(left_expr);
+      liberty_free_expr(right_expr);
 
       return result;
     }
@@ -132,7 +133,7 @@ std::size_t LibClassifyCell::calculateCellHash(LibCell* the_cell)
 bool LibClassifyCell::comparePort(LibPort* port1, LibPort* port2)
 {
   return (port1 == nullptr && port2 == nullptr)
-         || (port1 != nullptr && port2 != nullptr && Str::equal(port1->get_port_name(), port2->get_port_name())
+         || (port1 != nullptr && port2 != nullptr && std::string_view(port1->get_port_name()) == port2->get_port_name()
              && port1->get_port_type() == port2->get_port_type());
 }
 
@@ -144,7 +145,7 @@ bool LibClassifyCell::comparePort(LibPort* port1, LibPort* port2)
  * @return true
  * @return false
  */
-bool LibClassifyCell::comparePortFunc(RustLibertyExpr* expr1, RustLibertyExpr* expr2)
+bool LibClassifyCell::comparePortFunc(::LibertyExpr* expr1, ::LibertyExpr* expr2)
 {
   if (expr1 == nullptr && expr2 == nullptr) {
     return true;
@@ -152,35 +153,35 @@ bool LibClassifyCell::comparePortFunc(RustLibertyExpr* expr1, RustLibertyExpr* e
 
   if (expr1 != nullptr && expr2 != nullptr && expr1->op == expr2->op) {
     switch (expr1->op) {
-      case RustLibertyExprOp::kBuffer:
-        return Str::equal(expr1->port_name, expr2->port_name);
-      case RustLibertyExprOp::kNot: {
-        auto* left_expr1 = rust_get_expr_left(expr1);
-        auto* left_expr2 = rust_get_expr_left(expr2);
+      case LibertyExprOp::kBuffer:
+        return std::string_view(expr1->port_name) == expr2->port_name;
+      case LibertyExprOp::kNot: {
+        auto* left_expr1 = liberty_get_expr_left(expr1);
+        auto* left_expr2 = liberty_get_expr_left(expr2);
         bool result = comparePortFunc(left_expr1, left_expr2);
-        rust_free_expr(left_expr1);
-        rust_free_expr(left_expr2);
+        liberty_free_expr(left_expr1);
+        liberty_free_expr(left_expr2);
         return result;
       }
 
       default: {
         {
-          auto* left_expr1 = rust_get_expr_left(expr1);
-          auto* left_expr2 = rust_get_expr_left(expr2);
+          auto* left_expr1 = liberty_get_expr_left(expr1);
+          auto* left_expr2 = liberty_get_expr_left(expr2);
           bool result = comparePortFunc(left_expr1, left_expr2);
-          rust_free_expr(left_expr1);
-          rust_free_expr(left_expr2);
+          liberty_free_expr(left_expr1);
+          liberty_free_expr(left_expr2);
           if (!result) {
             return result;
           }
         }
         {
-          auto* right_expr1 = rust_get_expr_right(expr1);
-          auto* right_expr2 = rust_get_expr_right(expr2);
+          auto* right_expr1 = liberty_get_expr_right(expr1);
+          auto* right_expr2 = liberty_get_expr_right(expr2);
 
           bool result = comparePortFunc(right_expr1, right_expr2);
-          rust_free_expr(right_expr1);
-          rust_free_expr(right_expr2);
+          liberty_free_expr(right_expr1);
+          liberty_free_expr(right_expr2);
 
           return result;
         }
@@ -228,8 +229,8 @@ bool LibClassifyCell::comparePorts(LibCell* cell1, LibCell* cell2)
  */
 bool LibClassifyCell::compareTimingArc(LibArcSet* set1, LibArcSet* set2)
 {
-  return Str::equal(set1->front()->get_src_port(), set2->front()->get_src_port())
-         && Str::equal(set1->front()->get_snk_port(), set2->front()->get_snk_port())
+  return std::string_view(set1->front()->get_src_port()) == set2->front()->get_src_port()
+         && std::string_view(set1->front()->get_snk_port()) == set2->front()->get_snk_port()
          && set1->front()->get_timing_type() == set2->front()->get_timing_type();
 }
 
@@ -278,7 +279,8 @@ bool LibClassifyCell::compareFunction(LibCell* the_cell1, LibCell* the_cell2)
  * @param the_lib
  * @param hash_to_cells
  */
-void LibClassifyCell::classifyOneLibCell(LibLibrary* the_lib, std::unordered_map<u_int64_t, Vector<LibCell*>>& hash_to_cells)
+void LibClassifyCell::classifyOneLibCell(LibLibrary* the_lib,
+                                         std::unordered_map<std::size_t, absl::InlinedVector<LibCell*, 64>>& hash_to_cells)
 {
   LibCell* cell;
   FOREACH_LIB_CELL(the_lib, cell)
@@ -309,10 +311,10 @@ void LibClassifyCell::classifyOneLibCell(LibLibrary* the_lib, std::unordered_map
  */
 void LibClassifyCell::classifyLibCell(std::vector<LibLibrary*>& the_libs)
 {
-  std::unordered_map<std::size_t, Vector<LibCell*>> hash_to_cells;
+  std::unordered_map<std::size_t, absl::InlinedVector<LibCell*, 64>> hash_to_cells;
   for (auto* the_lib : the_libs) {
     classifyOneLibCell(the_lib, hash_to_cells);
   }
 }
 
-}  // namespace ista
+}  // namespace idb

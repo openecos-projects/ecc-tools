@@ -63,7 +63,6 @@ void DataManager::input(std::map<std::string, std::any>& config_map)
   printConfig();
   printDatabase();
   outputScript();
-  outputJson();
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -130,10 +129,11 @@ void DataManager::updateNetAccessPointToGCellMap(ChangeType change_type, int32_t
     for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
       auto& net_access_point_map = gcell_map[x][y].get_net_access_point_map();
       if (change_type == ChangeType::kAdd) {
-        net_access_point_map[net_idx].insert(access_point);
+        net_access_point_map[net_idx].push_back(access_point);
       } else if (change_type == ChangeType::kDel) {
-        net_access_point_map[net_idx].erase(access_point);
-        if (net_access_point_map[net_idx].empty()) {
+        std::vector<AccessPoint*>& access_point_list = net_access_point_map[net_idx];
+        access_point_list.erase(std::remove(access_point_list.begin(), access_point_list.end(), access_point), access_point_list.end());
+        if (access_point_list.empty()) {
           net_access_point_map.erase(net_idx);
         }
       }
@@ -376,8 +376,8 @@ std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> DataManager::getNetAcc
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> net_access_point_map;
   for (int32_t x = region.get_grid_ll_x(); x <= region.get_grid_ur_x(); x++) {
     for (int32_t y = region.get_grid_ll_y(); y <= region.get_grid_ur_y(); y++) {
-      for (auto& [net_idx, access_point_set] : gcell_map[x][y].get_net_access_point_map()) {
-        net_access_point_map[net_idx].insert(access_point_set.begin(), access_point_set.end());
+      for (auto& [net_idx, access_point_list] : gcell_map[x][y].get_net_access_point_map()) {
+        net_access_point_map[net_idx].insert(access_point_list.begin(), access_point_list.end());
       }
     }
   }
@@ -554,6 +554,34 @@ std::vector<NetShape> DataManager::getNetDetailedShapeList(int32_t net_idx, std:
 std::vector<NetShape> DataManager::getNetDetailedShapeList(int32_t net_idx, Segment<LayerCoord>& segment)
 {
   std::vector<NetShape> net_shape_list;
+  LayerCoord& first_coord = segment.get_first();
+  LayerCoord& second_coord = segment.get_second();
+  if (segment.hasValidViaMaster() && first_coord.get_layer_idx() != second_coord.get_layer_idx()
+      && first_coord.get_planar_coord() == second_coord.get_planar_coord() && std::abs(first_coord.get_layer_idx() - second_coord.get_layer_idx()) == 1) {
+    std::vector<std::vector<ViaMaster>>& layer_via_master_list = _database.get_layer_via_master_list();
+    ViaMasterIdx& via_master_idx = segment.get_via_master_idx();
+    int32_t below_layer_idx = std::min(first_coord.get_layer_idx(), second_coord.get_layer_idx());
+    int32_t via_idx = via_master_idx.get_via_idx();
+    if (via_master_idx.get_below_layer_idx() == below_layer_idx && below_layer_idx >= 0
+        && below_layer_idx < static_cast<int32_t>(layer_via_master_list.size()) && via_idx >= 0
+        && via_idx < static_cast<int32_t>(layer_via_master_list[below_layer_idx].size())) {
+      ViaMaster& via_master = layer_via_master_list[below_layer_idx][via_idx];
+
+      LayerRect& above_enclosure = via_master.get_above_enclosure();
+      LayerRect offset_above_enclosure(RTUTIL.getOffsetRect(above_enclosure, first_coord), above_enclosure.get_layer_idx());
+      net_shape_list.emplace_back(net_idx, offset_above_enclosure, true);
+
+      LayerRect& below_enclosure = via_master.get_below_enclosure();
+      LayerRect offset_below_enclosure(RTUTIL.getOffsetRect(below_enclosure, first_coord), below_enclosure.get_layer_idx());
+      net_shape_list.emplace_back(net_idx, offset_below_enclosure, true);
+
+      for (PlanarRect& cut_shape : via_master.get_cut_shape_list()) {
+        LayerRect offset_cut_shape(RTUTIL.getOffsetRect(cut_shape, first_coord), via_master.get_cut_layer_idx());
+        net_shape_list.emplace_back(net_idx, offset_cut_shape, false);
+      }
+      return net_shape_list;
+    }
+  }
   for (NetShape& net_shape : getNetDetailedShapeList(net_idx, segment.get_first(), segment.get_second())) {
     net_shape_list.push_back(net_shape);
   }
@@ -611,15 +639,20 @@ std::vector<NetShape> DataManager::getNetDetailedShapeList(int32_t net_idx, Laye
 
 int32_t DataManager::getOnlyOffset()
 {
-  std::vector<RoutingLayer>& routing_layer_list = _database.get_routing_layer_list();
+  int32_t x_offset = getOnlyOffset(Direction::kVertical);
+  int32_t y_offset = getOnlyOffset(Direction::kHorizontal);
+  (void) y_offset;
+  return x_offset;
+}
 
+int32_t DataManager::getOnlyOffset(Direction direction)
+{
+  std::vector<RoutingLayer>& routing_layer_list = _database.get_routing_layer_list();
   std::vector<int32_t> offset_list;
   for (RoutingLayer& routing_layer : routing_layer_list) {
-    for (ScaleGrid& x_grid : routing_layer.get_track_axis().get_x_grid_list()) {
-      offset_list.push_back(x_grid.get_start_line());
-    }
-    for (ScaleGrid& y_grid : routing_layer.get_track_axis().get_y_grid_list()) {
-      offset_list.push_back(y_grid.get_start_line());
+    std::vector<ScaleGrid>& grid_list = (direction == Direction::kVertical ? routing_layer.getXTrackGridList() : routing_layer.getYTrackGridList());
+    for (ScaleGrid& grid : grid_list) {
+      offset_list.push_back(grid.get_start_line());
     }
   }
   for (int32_t offset : offset_list) {
@@ -694,8 +727,8 @@ void DataManager::buildConfig()
   _config.pa_temp_directory_path = _config.temp_directory_path + "pin_accessor/";
   // ********     SupplyAnalyzer    ******** //
   _config.sa_temp_directory_path = _config.temp_directory_path + "supply_analyzer/";
-  // ********   TopologyGenerator   ******** //
-  _config.tg_temp_directory_path = _config.temp_directory_path + "topology_generator/";
+  // ********     PlanarRouter     ******** //
+  _config.pr_temp_directory_path = _config.temp_directory_path + "planar_router/";
   // **********   LayerAssigner   ********** //
   _config.la_temp_directory_path = _config.temp_directory_path + "layer_assigner/";
   // **********    SpaceRouter    ********** //
@@ -723,8 +756,8 @@ void DataManager::buildConfig()
   RTUTIL.createDir(_config.pa_temp_directory_path);
   // **********  SupplyAnalyzer   ********** //
   RTUTIL.createDir(_config.sa_temp_directory_path);
-  // *********  TopologyGenerator  ********* //
-  RTUTIL.createDir(_config.tg_temp_directory_path);
+  // **********    PlanarRouter    ********** //
+  RTUTIL.createDir(_config.pr_temp_directory_path);
   // **********   LayerAssigner   ********** //
   RTUTIL.createDir(_config.la_temp_directory_path);
   // **********    SpaceRouter    ********** //
@@ -747,6 +780,7 @@ void DataManager::buildDatabase()
   buildLayerInfo();
   buildGCellAxis();
   buildDie();
+  buildMacroList();
   buildLayerViaMasterList();
   buildLayerViaMasterInfo();
   buildObstacleList();
@@ -999,7 +1033,7 @@ std::vector<ScaleGrid> DataManager::makeGCellGridList(Direction direction)
   Die& die = _database.get_die();
   Row& row = _database.get_row();
   int32_t row_height = row.get_height();
-  int32_t only_offset = getOnlyOffset();
+  int32_t only_offset = getOnlyOffset(direction);
   int32_t only_pitch = getOnlyPitch();
 
   int32_t die_start_scale = (direction == Direction::kVertical ? die.get_real_ll_x() : die.get_real_ll_y());
@@ -1083,6 +1117,41 @@ void DataManager::checkDie()
   if ((die.get_real_ur_x() <= die.get_real_ll_x()) || (die.get_real_ur_y() <= die.get_real_ll_y())) {
     RTLOG.error(Loc::current(), "The die '(", die.get_real_ll_x(), " , ", die.get_real_ll_y(), ") - (", die.get_real_ur_x(), " , ", die.get_real_ur_y(),
                 ")' is wrong!");
+  }
+}
+
+void DataManager::buildMacroList()
+{
+  makeMacroList();
+  checkMacroList();
+}
+
+void DataManager::makeMacroList()
+{
+  Die& die = _database.get_die();
+  std::vector<Macro>& macro_list = _database.get_macro_list();
+  std::vector<Macro> valid_macro_list;
+  valid_macro_list.reserve(macro_list.size());
+
+  for (Macro& macro : macro_list) {
+    if (!RTUTIL.hasRegularRect(macro.get_body_rect(), die.get_real_rect())) {
+      continue;
+    }
+    macro.set_body_rect(RTUTIL.getRegularRect(macro.get_body_rect(), die.get_real_rect()));
+    valid_macro_list.push_back(macro);
+  }
+  macro_list = valid_macro_list;
+}
+
+void DataManager::checkMacroList()
+{
+  Die& die = _database.get_die();
+  std::vector<Macro>& macro_list = _database.get_macro_list();
+
+  for (Macro& macro : macro_list) {
+    if (!RTUTIL.hasRegularRect(macro.get_body_rect(), die.get_real_rect())) {
+      RTLOG.error(Loc::current(), "The macro is outside die for instance ", macro.get_inst_name());
+    }
   }
 }
 
@@ -1339,6 +1408,14 @@ void DataManager::transPinList(Net& net)
     for (EXTLayerRect& cut_shape : pin.get_cut_shape_list()) {
       cut_shape.set_layer_idx(cut_idb_layer_id_to_idx_map[cut_shape.get_layer_idx()]);
     }
+    if (pin.get_preferred_conn_layer_idx() != -1) {
+      auto iter = routing_idb_layer_id_to_idx_map.find(pin.get_preferred_conn_layer_idx());
+      if (iter != routing_idb_layer_id_to_idx_map.end()) {
+        pin.set_preferred_conn_layer_idx(iter->second);
+      } else {
+        pin.set_preferred_conn_layer_idx(-1);
+      }
+    }
   }
 }
 
@@ -1572,8 +1649,6 @@ void DataManager::printConfig()
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _config.top_routing_layer);
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "output_inter_result");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _config.output_inter_result);
-  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "enable_notification");
-  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _config.enable_notification);
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "enable_timing");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _config.enable_timing);
   // **********        RT         ********** //
@@ -1604,10 +1679,10 @@ void DataManager::printConfig()
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "SupplyAnalyzer");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), "sa_temp_directory_path");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(3), _config.sa_temp_directory_path);
-  // ********** TopologyGenerator  ********* //
-  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "TopologyGenerator");
-  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), "tg_temp_directory_path");
-  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(3), _config.tg_temp_directory_path);
+  // **********    PlanarRouter    ********** //
+  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "PlanarRouter");
+  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), "pr_temp_directory_path");
+  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(3), _config.pr_temp_directory_path);
   // **********   LayerAssigner   ********** //
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "LayerAssigner");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), "la_temp_directory_path");
@@ -1724,6 +1799,10 @@ void DataManager::printDatabase()
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _database.get_routing_obstacle_list().size());
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "cut_obstacle_num");
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), _database.get_cut_obstacle_list().size());
+  // **********       Macro       ********** //
+  std::vector<Macro>& macro_list = _database.get_macro_list();
+  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "macro_num");
+  RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(2), macro_list.size());
   // **********        Net        ********** //
   std::vector<Net>& net_list = _database.get_net_list();
   RTLOG.info(Loc::current(), RTUTIL.getSpaceByTabNum(1), "net_num");
@@ -1780,64 +1859,9 @@ void DataManager::outputScript()
   RTUTIL.closeFileStream(python_file);
 }
 
-void DataManager::outputJson()
-{
-  int32_t enable_notification = _config.enable_notification;
-  if (!enable_notification) {
-    return;
-  }
-  std::map<std::string, std::string> json_path_map;
-  json_path_map["env_map"] = outputEnvJson();
-  RTI.sendNotification("DM", 1, json_path_map);
-}
 
-std::string DataManager::outputEnvJson()
-{
-  Die& die = _database.get_die();
-  std::vector<RoutingLayer>& routing_layer_list = _database.get_routing_layer_list();
-  std::vector<CutLayer>& cut_layer_list = _database.get_cut_layer_list();
-  std::vector<Net>& net_list = _database.get_net_list();
-  std::string& dm_temp_directory_path = _config.dm_temp_directory_path;
 
-  std::vector<nlohmann::json> env_json_list;
-  {
-    nlohmann::json die_json;
-    die_json["die"] = {die.get_real_ll_x(), die.get_real_ll_y(), die.get_real_ur_x(), die.get_real_ur_y()};
-    env_json_list.push_back(die_json);
-  }
-  {
-    nlohmann::json env_shape_json;
-    for (Obstacle& routing_obstacle : _database.get_routing_obstacle_list()) {
-      env_shape_json["env_shape"]["obs"]["shape"].push_back({routing_obstacle.get_real_ll_x(), routing_obstacle.get_real_ll_y(),
-                                                             routing_obstacle.get_real_ur_x(), routing_obstacle.get_real_ur_y(),
-                                                             routing_layer_list[routing_obstacle.get_layer_idx()].get_layer_name()});
-    }
-    for (Obstacle& cut_obstacle : _database.get_cut_obstacle_list()) {
-      env_shape_json["env_shape"]["obs"]["shape"].push_back({cut_obstacle.get_real_ll_x(), cut_obstacle.get_real_ll_y(), cut_obstacle.get_real_ur_x(),
-                                                             cut_obstacle.get_real_ur_y(), cut_layer_list[cut_obstacle.get_layer_idx()].get_layer_name()});
-    }
-    for (Net& net : net_list) {
-      for (Pin& pin : net.get_pin_list()) {
-        for (EXTLayerRect& routing_shape : pin.get_routing_shape_list()) {
-          env_shape_json["env_shape"][net.get_net_name()]["shape"].push_back({routing_shape.get_real_ll_x(), routing_shape.get_real_ll_y(),
-                                                                              routing_shape.get_real_ur_x(), routing_shape.get_real_ur_y(),
-                                                                              routing_layer_list[routing_shape.get_layer_idx()].get_layer_name()});
-        }
-        for (EXTLayerRect& cut_shape : pin.get_cut_shape_list()) {
-          env_shape_json["env_shape"][net.get_net_name()]["shape"].push_back({cut_shape.get_real_ll_x(), cut_shape.get_real_ll_y(), cut_shape.get_real_ur_x(),
-                                                                              cut_shape.get_real_ur_y(),
-                                                                              cut_layer_list[cut_shape.get_layer_idx()].get_layer_name()});
-        }
-      }
-    }
-    env_json_list.push_back(env_shape_json);
-  }
-  std::string env_json_file_path = RTUTIL.getString(dm_temp_directory_path, "env_map.json");
-  std::ofstream* env_json_file = RTUTIL.getOutputFileStream(env_json_file_path);
-  (*env_json_file) << env_json_list;
-  RTUTIL.closeFileStream(env_json_file);
-  return env_json_file_path;
-}
+
 
 #endif
 

@@ -26,13 +26,13 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include <cstdio>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "ReportTable.hh"
-#include "Str.hh"
 namespace iplf {
 
 class ReportBase
@@ -48,10 +48,22 @@ class ReportBase
 
   std::shared_ptr<ieda::ReportTable> get_table(int type);
 
-  virtual std::string timestamp();
   virtual std::string seperator();
   virtual std::string title();
   std::vector<std::shared_ptr<ieda::ReportTable>>& get_table_list() { return _table_list; }
+
+  template <typename... Args>
+  static std::string format(const char* format, Args... args)
+  {
+    int size = std::snprintf(nullptr, 0, format, args...);
+    if (size < 0) {
+      return "";
+    }
+
+    std::string result(size, '\0');
+    std::snprintf(result.data(), result.size() + 1, format, args...);
+    return result;
+  }
 
  private:
   std::string _report_name;

@@ -92,6 +92,9 @@ class IdbLayout
   // operator
   int32_t transAreaDB(double value) { return std::round(std::pow(_units->get_micron_dbu(), 2) * value); }
   int32_t transUnitDB(double value) { return std::round(_units->get_micron_dbu() * value); }      // get (class IdbUnits -> (int32) _micron_dbu) * value
+  void initDie(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y);
+  IdbRow* createRow(std::string row_name, std::string site_name, int32_t orig_x, int32_t orig_y, IdbOrient site_orient, int32_t num_x,
+                    int32_t num_y, int32_t step_x, int32_t step_y);
 
  private:
   int32_t _manufacture_grid;  //<---------tbd---------------

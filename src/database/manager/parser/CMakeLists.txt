@@ -1,4 +1,4 @@
-SET(CMAKE_BUILD_TYPE "Release")
+# SET(CMAKE_BUILD_TYPE "Release")
 
 include_directories(${HOME_DATABASE}/manager/parser)
 add_compile_options(-w)

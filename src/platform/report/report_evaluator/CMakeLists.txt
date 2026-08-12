@@ -7,7 +7,6 @@ target_link_libraries(ieda_report_evaluator
         report_basic
         tool_manager 
         def_service
-        log
         eval_wirelength_api
         eval_congestion_api
         eval_density_api

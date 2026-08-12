@@ -29,7 +29,6 @@
 
 #include "report_basic.h"
 
-#include "Time.hh"
 #include "flow_config.h"
 #include "idm.h"
 
@@ -84,18 +83,9 @@ std::string ReportBase::title()
   return tbl->to_string();
 }
 
-std::string ReportBase::timestamp()
-{
-  // Str::printf is not re-entrant , getNowWallTime will call it, thus we should save it to a string.
-  std::string time_str = ieda::Time::getNowWallTime();
-  std::string str = ieda::Str::printf("Time : %s\n", time_str.c_str());
-
-  return str;
-}
-
 std::ostream& operator<<(std::ostream& ost, ReportBase& report)
 {
-  ost << report.seperator() << report.timestamp() << report.seperator();
+  ost << report.seperator();
   ost << report.title() << std::endl << report.seperator();
   for (auto& tbl : report.get_table_list()) {
     ost << tbl->get_tbl_name() << std::endl;

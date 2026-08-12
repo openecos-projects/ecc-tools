@@ -22,6 +22,9 @@ namespace tcl {
 
 TclRTFixFanout::TclRTFixFanout(const char* cmd_name) : TclCmd(cmd_name)
 {
+  _config_list.push_back(std::make_pair("-buffer_name", ValueType::kString));
+
+  TclUtil::addOption(this, _config_list);
 }
 
 unsigned TclRTFixFanout::exec()
@@ -29,9 +32,8 @@ unsigned TclRTFixFanout::exec()
   if (!check()) {
     return 0;
   }
-
-  RTI.fixFanout();
-
+  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
+  RTI.fixFanout(config_map);
   return 1;
 }
 

@@ -25,37 +25,24 @@
  */
 #include "ScriptEngine.hh"
 #include "UserShell.hh"
-#ifdef BUILD_GUI
-#include "tcl_register_gui.h"
-#endif
 
 #include "flow.h"
 #include "tcl_flow.h"
 #include "tcl_register_config.h"
 #include "tcl_register_cts.h"
-#include "tcl_register_eco.h"
-#include "tcl_register_eval.h"
 #include "tcl_register_feature.h"
 #include "tcl_register_flow.h"
-#include "tcl_register_fp.h"
+#include "tcl_register_geometry.h"
 #include "tcl_register_idb.h"
 #include "tcl_register_idrc.h"
-#include "tcl_register_inst.h"
 #include "tcl_register_irt.h"
-#include "tcl_register_no.h"
-#include "tcl_register_pdn.h"
-#include "tcl_register_pl.h"
-#include "tcl_register_power.h"
+#include "tcl_register_ilvs.h"
+#include "tcl_register_ista.h"
+#include "tcl_register_ifp.h"
+#include "tcl_register_iemir.h"
+#include "tcl_register_izh.h"
+#include "tcl_register_ircx.h"
 #include "tcl_register_report.h"
-#include "tcl_register_sta.h"
-#include "tcl_register_to.h"
-#include "tcl_register_vec.h"
-#include "tcl_register_pnp.h"
-#include "tcl_register_notification.h"
-
-#ifdef CONTEST
-#include "tcl_register_contest.h"
-#endif
 
 using namespace ieda;
 namespace tcl {
@@ -71,63 +58,36 @@ int registerCommands()
   /// db
   registerCmdDB();
 
-  /// instance operation
-  registerCmdInstance();
-
-  /// FP
-  registerCmdFP();
-
-  /// PDN
-  registerCmdPDN();
-
-  // /// Placer
-  registerCmdPlacer();
-
   /// CTS
   registerCmdCTS();
-
-  /// NO
-  registerCmdNO();
-
-  /// TO
-  registerCmdTO();
 
   /// Router
   registerCmdRT();
 
-  /// DRC
-  registerCmdDRC();
+  /// LVS
+  registerCmdLVS();
 
   /// STA
   registerCmdSTA();
 
-  /// Power
-  registerCmdPower();
+  /// FP
+  registerCmdFP();
 
-#ifdef BUILD_GUI
-  /// gui
-  registerCmdGUI();
-#endif
+  /// EMIR
+  registerCmdEMIR();
+
+  /// DRC
+  registerCmdDRC();
+
+  /// RCX
+  registerCmdRCX();
+
+  /// ZH
+  registerCmdZH();
 
   registerCmdReport();
 
-  registerCmdFeature();
-
-  registerCmdEval();
-
-  registerCmdECO();
-
-  registerCmdVectorization();
-
-  /// PNP
-  registerCmdPNP();
-  
-  registerCmdNotification();
-
-#ifdef CONTEST
-  registerCmdContest();
-#endif
-
+  registerCmdGeometry();
   return EXIT_SUCCESS;
 }
 

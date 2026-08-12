@@ -30,7 +30,7 @@ target_link_libraries(feature_parser
         # irt_interface
         # ipl-source
         # ipl-api
-        # icts_api
+        # icts_interface
         # ista-engine
         # idrc_pro_api
         # ieda_report_evaluator

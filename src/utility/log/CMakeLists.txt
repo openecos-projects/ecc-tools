@@ -54,5 +54,12 @@ TARGET_LINK_LIBRARIES(log PUBLIC ${LINK_glog} ${LINK_gflags} ${LINK_unwind})
 
 target_include_directories(log
     PUBLIC
+    ${HOME_UTILITY}
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+if(NOT BUILD_PYTHON)
+  install(TARGETS log
+      LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+      RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})
+endif()

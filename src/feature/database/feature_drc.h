@@ -18,6 +18,7 @@
 #pragma once
 
 #include <map>
+#include <cstdint>
 #include <string>
 #include <vector>
 

@@ -31,9 +31,8 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #include "IdbViaMaster.h"
 
+#include <sstream>
 #include <string>
-
-#include "Str.hh"
 
 namespace idb {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -76,10 +75,15 @@ void IdbViaMasterRulePattern::parse_pattern(size_t row, size_t col)
  */
 void IdbViaMasterRulePattern::parse_pattern_array(vector<pair<string, string>>& pattern_array)
 {
-  const char* sep = "_";
-
   string pattern = _pattern;
-  vector<string> strs = ieda::Str::split(pattern.c_str(), sep);
+  vector<string> strs;
+  std::istringstream stream(pattern);
+  string str;
+  while (std::getline(stream, str, '_')) {
+    if (!str.empty()) {
+      strs.push_back(str);
+    }
+  }
   for (size_t i = 0; i < strs.size(); i += 2) {
     pattern_array.push_back(std::make_pair(strs[i], strs[i + 1]));
   }
@@ -401,6 +405,7 @@ IdbViaMaster* IdbViaMaster::clone()
   master_new->_name = _name;
   master_new->_is_default = _is_default;
   master_new->_type = _type;
+  master_new->_resistance = _resistance;
   master_new->_master_generate = _master_generate->clone();
   master_new->_master_fixed_list = _master_fixed_list;
   master_new->_cut_rect->set_rect(_cut_rect);

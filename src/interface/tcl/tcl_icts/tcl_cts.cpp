@@ -17,7 +17,6 @@
 #include "tcl_cts.h"
 
 #include "CTSAPI.hh"
-#include "tool_manager.h"
 
 namespace tcl {
 
@@ -32,9 +31,9 @@ CmdCTSAutoRun::CmdCTSAutoRun(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdCTSAutoRun::check()
 {
   TclOption* file_name_option = getOptionOrArg(TCL_CONFIG);
-  LOG_FATAL_IF(!file_name_option);
+  ieda::checkTclOption(file_name_option, TCL_CONFIG);
   TclOption* dir_name_option = getOptionOrArg(TCL_WORK_DIR);
-  LOG_FATAL_IF(!dir_name_option);
+  ieda::checkTclOption(dir_name_option, TCL_WORK_DIR);
   return 1;
 }
 
@@ -49,17 +48,13 @@ unsigned CmdCTSAutoRun::exec()
 
   TclOption* dir_option = getOptionOrArg(TCL_WORK_DIR);
   auto dir_path = dir_option->getStringVal();
-  bool is_ok = false;
+  icts::CTSStatus cts_status;
   if (dir_path == nullptr) {
-    is_ok = iplf::tmInst->autoRunCTS(config_path);
+    cts_status = CTS_API_INST.runCTS(config_path);
   } else {
-    is_ok = iplf::tmInst->autoRunCTS(config_path, dir_path);
+    cts_status = CTS_API_INST.runCTS(config_path, dir_path);
   }
-
-  LOG_FATAL_IF(!is_ok) << "iCTS run failed." << std::endl;
-
-  LOG_INFO << "iCTS run successfully." << std::endl;
-  return 1;
+  return cts_status.ok() ? 1U : 0U;
 }
 
 /////////////////////////////////////////////////////////////
@@ -76,10 +71,10 @@ CmdCTSReport::CmdCTSReport(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdCTSReport::check()
 {
   TclOption* option = getOptionOrArg(TCL_NAME);
-  LOG_FATAL_IF(!option);
+  ieda::checkTclOption(option, TCL_NAME);
 
   TclOption* path = getOptionOrArg(TCL_PATH);
-  LOG_FATAL_IF(!path);
+  ieda::checkTclOption(path, TCL_PATH);
   return 1;
 }
 
@@ -92,35 +87,15 @@ unsigned CmdCTSReport::exec()
   TclOption* option = getOptionOrArg(TCL_NAME);
   auto name = option->getStringVal();
   if (name != nullptr) {
-    if (iplf::tmInst->reportCTS(name)) {
-      return 1;
-    }
+    return CTS_API_INST.report(name).ok() ? 1U : 0U;
   }
 
   TclOption* def_path = getOptionOrArg(TCL_PATH);
   auto str_path = def_path->getStringVal();
   if (str_path != nullptr) {
-    CTSAPIInst.report(str_path);
-    return 1;
+    return CTS_API_INST.report(str_path).ok() ? 1U : 0U;
   }
 
-  return 1;
+  return 0;
 }
-
-/////////////////////////////////////////////////////////////
-CmdCTSSaveTree::CmdCTSSaveTree(const char* cmd_name) : TclCmd(cmd_name)
-{
-  addOption(new TclStringOption(TCL_PATH, 1, nullptr));
-}
-unsigned CmdCTSSaveTree::check()
-{
-  if (not getOptionOrArg(TCL_PATH)->getStringVal()) {
-    (std::cerr << "Please specify the clock tree data path by : cts_save_tree "
-                  "-path $file ")
-        .flush();
-    return 0;
-  }
-  return 1;
-}
-CMD_CLASS_DEFAULT_EXEC(CmdCTSSaveTree, iplf::tmInst->saveClockTree(getOptionOrArg(TCL_PATH)->getStringVal()))
 }  // namespace tcl

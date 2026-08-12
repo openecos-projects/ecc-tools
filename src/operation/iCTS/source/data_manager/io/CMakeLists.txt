@@ -1,21 +1,42 @@
-if(DEBUG_ICTS_IO)
-  message(STATUS "CTS: DEBUG_ICTS_IO")
-  set(CMAKE_BUILD_TYPE "Debug")
-else()
-  message(STATUS "CTS: RELEASE_ICTS_IO")
-  set(CMAKE_BUILD_TYPE "Release")
-endif()
-
-add_subdirectory(report)
-
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${HOME_THIRDPARTY}/json
+add_library(
+  icts_source_data_manager_io
+  ${ICTS_DATA_MANAGER_IO}/Wrapper.cc
+  ${ICTS_DATA_MANAGER_IO}/WrapperLiberty.cc
+  ${ICTS_DATA_MANAGER_IO}/WrapperRC.cc
+  ${ICTS_DATA_MANAGER_IO}/WrapperClockReader.cc
+  ${ICTS_DATA_MANAGER_IO}/WrapperClockWriter.cc
 )
 
-add_library(icts_io ${ICTS_DATA_MANAGER}/io/CtsDBWrapper.cc
-                    ${ICTS_DATA_MANAGER}/io/GDSPloter.cc)
+target_include_directories(
+  icts_source_data_manager_io
+  PUBLIC
+  ${ICTS_DATA_MANAGER_IO}
+  ${ICTS_DATA_MANAGER}
+  PRIVATE
+  ${HOME_DATABASE}/data/design
+  ${HOME_DATABASE}/data/design/db_design
+  ${HOME_DATABASE}/data/design/db_layout
+  ${HOME_DATABASE}/manager/builder
+)
 
-target_link_libraries(icts_io PUBLIC icts_data_manager icts_report)
+target_link_libraries(
+  icts_source_data_manager_io
+  PUBLIC
+  icts_source_data_manager_spatial
+  icts_source_data_manager_routing
+  PRIVATE
+  idm
+  icts_source_data_manager_adapter_sdc
+  icts_source_data_manager_design
+  icts_source_toolkit_logger
+  liberty
+)
 
-target_include_directories(icts_io PUBLIC ${ICTS_DATA_MANAGER}/io)
+if(DEBUG_ICTS_SOURCE_DATA_MANAGER_IO)
+  if(MSVC)
+    target_compile_options(icts_source_data_manager_io PRIVATE /Zi /Od /Ob0)
+    target_link_options(icts_source_data_manager_io PRIVATE /DEBUG)
+  else()
+    target_compile_options(icts_source_data_manager_io PRIVATE -g3 -O0 -fno-inline -fno-omit-frame-pointer)
+  endif()
+endif()

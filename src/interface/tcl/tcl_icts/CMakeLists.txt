@@ -6,16 +6,13 @@ add_library(tcl_icts
 
 target_link_libraries(tcl_icts 
     PUBLIC
-        tool_manager
         tcl_util
         tcl
-        shell-cmd
-        str
-        icts_api
-        tool_api_icts
+        icts_interface
 )
 
 target_include_directories(tcl_icts
     PUBLIC
+        ${HOME_INTERFACE}/tcl
         ${CMAKE_CURRENT_SOURCE_DIR}
 )

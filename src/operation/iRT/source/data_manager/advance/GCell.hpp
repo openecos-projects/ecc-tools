@@ -17,6 +17,7 @@
 #pragma once
 
 #include "AccessPoint.hpp"
+#include "RoutingAllowedNet.hpp"
 #include "Violation.hpp"
 
 namespace irt {
@@ -28,7 +29,7 @@ class GCell : public PlanarRect
   ~GCell() = default;
   // getter
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& get_type_layer_net_fixed_rect_map() { return _type_layer_net_fixed_rect_map; }
-  std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& get_net_access_point_map() { return _net_access_point_map; }
+  std::map<int32_t, std::vector<AccessPoint*>>& get_net_access_point_map() { return _net_access_point_map; }
   std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>>& get_net_pin_access_result_map() { return _net_pin_access_result_map; }
   std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>& get_net_pin_access_patch_map() { return _net_pin_access_patch_map; }
   double get_boundary_wire_unit() const { return _boundary_wire_unit; }
@@ -36,6 +37,7 @@ class GCell : public PlanarRect
   double get_internal_via_unit() const { return _internal_via_unit; }
   std::map<int32_t, std::map<Orientation, int32_t>>& get_routing_orient_supply_map() { return _routing_orient_supply_map; }
   std::map<int32_t, std::map<int32_t, std::set<Orientation>>>& get_routing_ignore_net_orient_map() { return _routing_ignore_net_orient_map; }
+  RoutingLayerAllowedNetMap& get_routing_allowed_net_map() { return _routing_allowed_net_map; }
   std::map<int32_t, std::set<Segment<LayerCoord>*>>& get_net_global_result_map() { return _net_global_result_map; }
   std::map<int32_t, std::set<Segment<LayerCoord>*>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
   std::map<int32_t, std::set<EXTLayerRect*>>& get_net_detailed_patch_map() { return _net_detailed_patch_map; }
@@ -45,7 +47,7 @@ class GCell : public PlanarRect
   {
     _type_layer_net_fixed_rect_map = type_layer_net_fixed_rect_map;
   }
-  void set_net_access_point_map(const std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& net_access_point_map)
+  void set_net_access_point_map(const std::map<int32_t, std::vector<AccessPoint*>>& net_access_point_map)
   {
     _net_access_point_map = net_access_point_map;
   }
@@ -68,6 +70,7 @@ class GCell : public PlanarRect
   {
     _routing_ignore_net_orient_map = routing_ignore_net_orient_map;
   }
+  void set_routing_allowed_net_map(const RoutingLayerAllowedNetMap& routing_allowed_net_map) { _routing_allowed_net_map = routing_allowed_net_map; }
   void set_net_global_result_map(const std::map<int32_t, std::set<Segment<LayerCoord>*>>& net_global_result_map)
   {
     _net_global_result_map = net_global_result_map;
@@ -87,7 +90,7 @@ class GCell : public PlanarRect
   // obstacle & pin_shape
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> _type_layer_net_fixed_rect_map;
   // access point
-  std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> _net_access_point_map;
+  std::map<int32_t, std::vector<AccessPoint*>> _net_access_point_map;
   // access routing result
   std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>> _net_pin_access_result_map;
   // access routing patch
@@ -100,6 +103,8 @@ class GCell : public PlanarRect
   std::map<int32_t, std::map<Orientation, int32_t>> _routing_orient_supply_map;
   // global ignore net orient
   std::map<int32_t, std::map<int32_t, std::set<Orientation>>> _routing_ignore_net_orient_map;
+  // global allowed net
+  RoutingLayerAllowedNetMap _routing_allowed_net_map;
   // global routing result
   std::map<int32_t, std::set<Segment<LayerCoord>*>> _net_global_result_map;
   // detailed routing result

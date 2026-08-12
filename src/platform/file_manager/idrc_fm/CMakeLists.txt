@@ -5,7 +5,7 @@ add_library(file_manager_drc
 target_link_libraries(file_manager_drc 
 file_manager_base  
 idm
-tool_api_idrc
+ieda_feature
 )
 
 target_include_directories(file_manager_drc

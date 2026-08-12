@@ -219,6 +219,8 @@ class IdbInstanceList
   IdbInstance* find_instance(string name);
   IdbInstance* find_instance(size_t index);
   vector<IdbInstance*> find_instance_by_master(string master_name);
+  bool contains(IdbInstance* instance);
+  bool contains(string name) { return find_instance(name) != nullptr; }
   bool has_io_cell()
   {
     for (IdbInstance* instance : _instance_list) {
@@ -244,6 +246,9 @@ class IdbInstanceList
   // setter
   IdbInstance* add_instance(IdbInstance* instance = nullptr);
   IdbInstance* add_instance(string name);
+  bool add_instance_ref(IdbInstance* instance);
+  bool erase_instance_ref(string name);
+  bool erase_instance_ref(IdbInstance* instance);
   bool remove_instance(string name);
   void reset(bool delete_memory = true);
 

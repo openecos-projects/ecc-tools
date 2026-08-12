@@ -25,9 +25,6 @@
  */
 #include "ScriptEngine.hh"
 #include "UserShell.hh"
-#ifdef BUILD_GUI
-#include "tcl_register_gui.h"
-#endif
 
 #include "tcl_db.h"
 #include "tcl_db_file.h"
@@ -43,10 +40,22 @@ int registerCmdDB()
   registerTclCmd(CmdInitLef, "lef_init");
   registerTclCmd(CmdInitDef, "def_init");
   registerTclCmd(CmdInitVerilog, "verilog_init");
+  registerTclCmd(CmdInitLib, "lib_init");
+  registerTclCmd(CmdInitSdc, "sdc_init");
+  registerTclCmd(CmdInitSpef, "spef_init");
+  registerTclCmd(CmdInitVcd, "vcd_init");
   registerTclCmd(CmdSaveDef, "def_save");
   registerTclCmd(CmdSaveLef, "lef_save");
   registerTclCmd(CmdSaveNetlist, "netlist_save");
   registerTclCmd(CmdSaveJSON, "json_save");
+  registerTclCmd(CmdSaveViewJson, "view_json_save");
+  registerTclCmd(CmdApplyViewJsonEdits, "view_json_apply_edits");
+  registerTclCmd(CmdSaveData, "save_data");
+  registerTclCmd(CmdResetData, "reset_data");
+  registerTclCmd(CmdLoadData, "load_data");
+  registerTclCmd(CmdValidateIdb, "idb_validate");
+  registerTclCmd(CmdWriteSocJson, "write_soc_json");
+  registerTclCmd(CmdWriteAbstractLef, "write_abstract_lef");
   registerTclCmd(CmdSaveGDS, "gds_save");
   registerTclCmd(CmdGenerateMPScript, "aimp_random");
 

@@ -38,7 +38,6 @@
 
 #include "../db_layout/IdbLayer.h"
 #include "IdbViaMaster.h"
-#include "Str.hh"
 
 namespace idb {
 
@@ -94,7 +93,21 @@ void IdbVia::set_instance(IdbViaMaster* instance)
     _master_instance = nullptr;
   }
   _master_instance = instance;
-  _name = instance->get_name();
+  if (_master_instance != nullptr && !_master_instance->get_name().empty()) {
+    _name = _master_instance->get_name();
+  }
+}
+
+void IdbVia::set_instance_reference(IdbViaMaster* instance)
+{
+  if (_master_instance != nullptr && _b_master_clone == false) {
+    delete _master_instance;
+  }
+  _master_instance = instance;
+  _b_master_clone = true;
+  if (_master_instance != nullptr && !_master_instance->get_name().empty()) {
+    _name = _master_instance->get_name();
+  }
 }
 
 void IdbVia::reset_instance(IdbViaMaster* instance)

@@ -41,7 +41,7 @@ CmdFlowInitConfig::CmdFlowInitConfig(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdFlowInitConfig::check()
 {
   TclOption* file_name_option = getOptionOrArg(TCL_CONFIG);
-  LOG_FATAL_IF(!file_name_option);
+  ieda::checkTclOption(file_name_option, TCL_CONFIG);
   return 1;
 }
 

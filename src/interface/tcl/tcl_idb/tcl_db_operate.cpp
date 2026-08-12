@@ -36,8 +36,8 @@ unsigned CmdIdbSetNet::check()
   TclOption* tcl_net_name = getOptionOrArg("-net_name");
   TclOption* tcl_net_type = getOptionOrArg("-type");
 
-  LOG_FATAL_IF(!tcl_net_name);
-  LOG_FATAL_IF(!tcl_net_type);
+  ieda::checkTclOption(tcl_net_name, "-net_name");
+  ieda::checkTclOption(tcl_net_type, "-type");
   return 1;
 }
 
@@ -99,7 +99,7 @@ unsigned CmdIdbClearBlockage::check()
 {
   TclOption* tcl_type = getOptionOrArg("-type");
 
-  LOG_FATAL_IF(!tcl_type);
+  ieda::checkTclOption(tcl_type, "-type");
   return 1;
 }
 
@@ -150,7 +150,7 @@ unsigned CmdIdbDeleteInstance::check()
 unsigned CmdIdbDeleteInstance::exec()
 {
   std::string name = getOptionOrArg(INST_NAME_OPT)->getStringVal();
-  bool deleted = dmInst->get_idb_design()->get_instance_list()->remove_instance(name);
+  bool deleted = dmInst->get_idb_design()->removeInstanceSafe(name);
   if (deleted) {
     std::cout << "Instance " << name << " removed." << std::endl;
   } else {
@@ -172,7 +172,7 @@ unsigned CmdIdbDeleteNet::check()
 unsigned CmdIdbDeleteNet::exec()
 {
   std::string name = getOptionOrArg(NET_NAME_OPT)->getStringVal();
-  bool deleted = dmInst->get_idb_design()->get_net_list()->remove_net(name);
+  bool deleted = dmInst->get_idb_design()->removeNetSafe(name);
   if (deleted) {
     std::cout << "Net " << name << " removed." << std::endl;
   } else {
@@ -206,7 +206,7 @@ CmdIdbCreateInstance::CmdIdbCreateInstance(const char* name) : TclCmd(name)
 unsigned CmdIdbCreateInstance::check()
 {
   for (const auto* opt : {INST_NAME_OPT, CELL_MASTER_OPT}) {
-    if (char* val = getOptionOrArg(opt)->getStringVal(); val == nullptr || val[0] == '\0') {
+    if (const char* val = getOptionOrArg(opt)->getStringVal(); val == nullptr || val[0] == '\0') {
       std::cout << "should specify option " << opt << std::endl;
       return 0;
     }

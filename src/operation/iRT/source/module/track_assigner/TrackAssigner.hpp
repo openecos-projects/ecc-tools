@@ -117,10 +117,6 @@ class TrackAssigner
   void printSummary(TAModel& ta_model);
   void outputNetCSV(TAModel& ta_model);
   void outputViolationCSV(TAModel& ta_model);
-  void outputJson(TAModel& ta_model);
-  std::string outputNetJson(TAModel& ta_model);
-  std::string outputViolationJson(TAModel& ta_model);
-  std::string outputSummaryJson(TAModel& ta_model);
 #endif
 
 #if 1  // debug

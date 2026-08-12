@@ -34,7 +34,6 @@ namespace tcl {
 int registerCmdCTS() {
   registerTclCmd(CmdCTSAutoRun, "run_cts");
   registerTclCmd(CmdCTSReport, "cts_report");
-  registerTclCmd(CmdCTSSaveTree, "cts_save_tree");
   registerTclCmd(CmdCTSConfig, "cts_config");
 
   return EXIT_SUCCESS;

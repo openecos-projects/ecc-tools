@@ -45,9 +45,6 @@ bool Flow::initFlow(string flow_config)
 
   /// init GUI
   // std::cout << "gui start." << std::endl;
-  // tmInst->guiStart();
-  // tmInst->guiShow();
-  // tmInst->guiReadDb();
 
   return true;
 }

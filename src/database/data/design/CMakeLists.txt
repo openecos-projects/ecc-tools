@@ -12,7 +12,10 @@ target_include_directories(idb
         ${CMAKE_CURRENT_SOURCE_DIR}/db_layout
         ${CMAKE_CURRENT_SOURCE_DIR}/db_property
         ${HOME_DATABASE}/basic/geometry
-        ${HOME_UTILITY}/string
 )
 
-target_link_libraries(idb PRIVATE str geometry_db)
+target_link_libraries(idb PRIVATE geometry_db)
+
+install(TARGETS idb
+    LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
+    RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})

@@ -44,16 +44,15 @@ class SASummary
   int32_t total_supply = 0;
 };
 
-class TGSummary
+class PRSummary
 {
  public:
-  TGSummary() = default;
-  ~TGSummary() = default;
+  PRSummary() = default;
+  ~PRSummary() = default;
   double total_demand = 0;
   double total_overflow = 0;
   double total_wire_length = 0;
   std::map<std::string, std::map<std::string, double>> clock_timing_map;
-  std::map<std::string, double> type_power_map;
 };
 
 class LASummary
@@ -70,7 +69,6 @@ class LASummary
   std::map<int32_t, int32_t> cut_via_num_map;
   int32_t total_via_num = 0;
   std::map<std::string, std::map<std::string, double>> clock_timing_map;
-  std::map<std::string, double> type_power_map;
 };
 
 class SRSummary
@@ -87,7 +85,6 @@ class SRSummary
   std::map<int32_t, int32_t> cut_via_num_map;
   int32_t total_via_num = 0;
   std::map<std::string, std::map<std::string, double>> clock_timing_map;
-  std::map<std::string, double> type_power_map;
 };
 
 class TASummary
@@ -115,7 +112,6 @@ class DRSummary
   std::map<int32_t, int32_t> routing_violation_num_map;
   int32_t total_violation_num = 0;
   std::map<std::string, std::map<std::string, double>> clock_timing_map;
-  std::map<std::string, double> type_power_map;
 };
 
 class VRSummary
@@ -138,7 +134,6 @@ class VRSummary
   std::map<int32_t, int32_t> among_net_routing_violation_num_map;
   int32_t among_net_total_violation_num = 0;
   std::map<std::string, std::map<std::string, double>> clock_timing_map;
-  std::map<std::string, double> type_power_map;
 };
 
 class Summary
@@ -148,7 +143,7 @@ class Summary
   ~Summary() = default;
   std::map<int32_t, PASummary> iter_pa_summary_map;
   SASummary sa_summary;
-  TGSummary tg_summary;
+  PRSummary pr_summary;
   LASummary la_summary;
   std::map<int32_t, SRSummary> iter_sr_summary_map;
   TASummary ta_summary;

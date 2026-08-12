@@ -60,6 +60,4 @@ class CmdCTSReport : public TclCmd {
   // private function
   // private data
 };
-
-DEFINE_CMD_CLASS(CTSSaveTree);
 }  // namespace tcl

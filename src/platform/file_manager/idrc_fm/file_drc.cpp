@@ -37,8 +37,8 @@
 
 #include "DRCViolationType.h"
 #include "IdbLayer.h"
+#include "feature_manager.h"
 #include "idm.h"
-#include "idrc_io.h"
 #include "ids.hpp"
 #include "json_parser.h"
 
@@ -85,7 +85,7 @@ bool FileDrcManager::saveJson()
   int total = 0;  /// drc total number
 
   json json_distribution;
-  std::map<std::string, std::map<std::string, std::vector<ids::Violation>>>& detail_rule_map = drcInst->getDetailCheckResult();
+  std::map<std::string, std::map<std::string, std::vector<ids::Violation>>>& detail_rule_map = featureInst->get_type_layer_violation_map();
 
   for (auto& [type, drc_list_map] : detail_rule_map) {
     json json_rule;
@@ -178,7 +178,7 @@ bool FileDrcManager::readJson()
 
 void FileDrcManager::parseJson(std::string path)
 {
-  std::map<std::string, std::map<std::string, std::vector<ids::Violation>>>& detail_rule_map = drcInst->getDetailCheckResult();
+  std::map<std::string, std::map<std::string, std::vector<ids::Violation>>>& detail_rule_map = featureInst->get_type_layer_violation_map();
   detail_rule_map.clear();
 
   nlohmann::json json;

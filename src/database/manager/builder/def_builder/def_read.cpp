@@ -33,12 +33,14 @@
 
 #include "def_read.h"
 
+#include <cstdlib>
 #include <cstdio>
 #include <regex>
+#include <string>
+#include <string_view>
 
 #include "../../../data/design/IdbDesign.h"
 #include "../def/defzlib/defzlib.hpp"
-#include "Str.hh"
 #include "defiPath.hpp"
 #include "defrReader.hpp"
 
@@ -69,7 +71,7 @@ bool DefRead::check_type(defrCallbackType_e type)
 
 bool DefRead::createDb(const char* file)
 {
-  if (ieda::Str::contain(file, ".gz")) {
+  if (std::string_view(file).find(".gz") != std::string_view::npos) {
     return createDbGzip(file);
   } else {
     FILE* f = fopen(file, "r");
@@ -892,7 +894,6 @@ int32_t DefRead::parse_component(defiComponent* def_component)
   IdbLayout* layout = _def_service->get_layout();  // Lef
   IdbLayers* layer_list = layout->get_layers();
   IdbRegionList* region_list = design->get_region_list();
-  IdbInstanceList* instance_list = design->get_instance_list();
   IdbCellMasterList* master_list = layout->get_cell_master_list();
 
   if (nullptr == _cur_cell_master || _cur_cell_master->get_name() != def_component->name()) {
@@ -904,14 +905,15 @@ int32_t DefRead::parse_component(defiComponent* def_component)
   }
 
   std::string inst_name = def_component->id();
-  std::string new_inst_name = ieda::Str::trimEscape(inst_name);
+  std::string new_inst_name = inst_name;
+  std::erase(new_inst_name, '\\');
 
-  IdbInstance* instance = instance_list->add_instance(new_inst_name);
+  IdbInstance* instance = design->createInstance(new_inst_name, _cur_cell_master->get_name(), IdbInstanceType::kNone,
+                                                 IdbPlacementStatus::kNone, IdbOrient::kNone);
   if (instance == nullptr) {
     std::cout << "Create Instance Error..." << std::endl;
     return kDbFail;
   }
-  instance->set_cell_master(_cur_cell_master);
   instance->set_status_by_def_enum(def_component->placementStatus());
   instance->set_orient_by_enum(def_component->placementOrient());
   // printf("def_component %p, instance name %s, placementOrient %d\n", def_component, instance->get_name().c_str(),
@@ -953,9 +955,9 @@ int32_t DefRead::parse_component(defiComponent* def_component)
 
   instance->set_coodinate(def_component->placementX(), def_component->placementY());
 
-  if (instance_list->get_num() % 1000 == 0) {
+  if (design->get_instance_list()->get_num() % 1000 == 0) {
     std::cout << "-" << std::flush;
-    if (instance_list->get_num() % 100000 == 0) {
+    if (design->get_instance_list()->get_num() % 100000 == 0) {
       std::cout << std::endl;
     }
   }
@@ -1036,13 +1038,12 @@ int32_t DefRead::parse_net(defiNet* def_net)
   IdbPins* io_pin_list = design->get_io_pin_list();
   IdbInstanceList* instance_list = design->get_instance_list();
 
-  IdbNetList* net_list = design->get_net_list();
-
   //   IdbNet* net = net_list->add_net(def_net->name());
 
   std::string net_name = def_net->name();
-  std::string new_net_name = ieda::Str::trimEscape(net_name);
-  IdbNet* net = net_list->add_net(new_net_name);
+  std::string new_net_name = net_name;
+  std::erase(new_net_name, '\\');
+  IdbNet* net = design->createOrFindNet(new_net_name);
 
   if (net == nullptr) {
     std::cout << "Create Net Error..." << std::endl;
@@ -1074,43 +1075,40 @@ int32_t DefRead::parse_net(defiNet* def_net)
   }
 
   int num_connections = def_net->numConnections();
-  auto setPinNet = [net, num_connections](IdbPin* pin) {
+  auto connectPin = [design, net, num_connections](IdbPin* pin) {
     if (num_connections < 2) {
       if (pin->get_net() == nullptr) {
-        pin->set_net(net);
+        design->connectPinToNet(pin, net);
       }
     } else {
-      pin->set_net(net);
+      design->connectPinToNet(pin, net);
     }
   };
 
   for (int i = 0; i < num_connections; i++) {
     std::string io_name = def_net->instance(i);
-    io_name = ieda::Str::trimEscape(io_name);
+    std::erase(io_name, '\\');
 
     IdbPin* pin = nullptr;
     if (io_name.compare("PIN") == 0) {
       std::string pin_name = def_net->pin(i);
-      pin_name = ieda::Str::trimEscape(pin_name);
+      std::erase(pin_name, '\\');
       pin = io_pin_list->find_pin(pin_name);
       if (pin == nullptr) {
         std::cout << "Can not find Pin in Pin list ... pin name = " << def_net->pin(i) << std::endl;
       } else {
-        net->add_io_pin(pin);
-        setPinNet(pin);
+        connectPin(pin);
       }
     } else {
       IdbInstance* instance = instance_list->find_instance(io_name);
       if (instance != nullptr) {
-        net->get_instance_list()->add_instance(instance);
         std::string pin_name = def_net->pin(i);
-        pin_name = ieda::Str::trimEscape(pin_name);
+        std::erase(pin_name, '\\');
         pin = instance->get_pin_by_term(pin_name);
         if (pin == nullptr) {
           std::cout << "Can not find Pin in Pin list ... pin name = " << def_net->pin(i) << std::endl;
         } else {
-          net->add_instance_pin(pin);
-          setPinNet(pin);
+          connectPin(pin);
         }
       } else {
         std::cout << "Can not find instance in instance list ... instance name = " << io_name << std::endl;
@@ -1223,10 +1221,10 @@ int32_t DefRead::parse_net(defiNet* def_net)
     }
   }
 
-  if (net_list->get_num() % 1000 == 0) {
+  if (design->get_net_list()->get_num() % 1000 == 0) {
     std::cout << "-" << std::flush;
 
-    if (net_list->get_num() % 100000 == 0) {
+    if (design->get_net_list()->get_num() % 100000 == 0) {
       std::cout << std::endl;
     }
   }
@@ -1308,8 +1306,7 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
   IdbPins* io_pin_list = design->get_io_pin_list();
   IdbInstanceList* instance_list = design->get_instance_list();
 
-  IdbSpecialNetList* net_list = design->get_special_net_list();
-  IdbSpecialNet* net = net_list->add_net(def_net->name());
+  IdbSpecialNet* net = design->createOrFindSpecialNet(def_net->name());
 
   if (net == nullptr) {
     std::cout << "Create Net Error..." << std::endl;
@@ -1334,32 +1331,31 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
 
   for (int i = 0; i < def_net->numConnections(); i++) {
     string io_name = def_net->instance(i);
-    io_name = ieda::Str::trimEscape(io_name);
+    std::erase(io_name, '\\');
     IdbPin* pin = nullptr;
     if (io_name.compare("*") == 0) {
-      net->add_pin_string(def_net->pin(i));
+      std::string pin_name = def_net->pin(i);
+      std::erase(pin_name, '\\');
+      net->add_pin_string(pin_name);
     } else if (io_name.compare("PIN") == 0) {
       std::string pin_name = def_net->pin(i);
-      pin_name = ieda::Str::trimEscape(pin_name);
+      std::erase(pin_name, '\\');
       pin = io_pin_list->find_pin(pin_name);
       if (pin == nullptr) {
         std::cout << "Can not find Pin in Pin list ... pin name = " << def_net->pin(i) << std::endl;
       } else {
-        net->add_io_pin(pin);
-        pin->set_special_net(net);
+        design->connectPinToSpecialNet(pin, net);
       }
     } else {
       IdbInstance* instance = instance_list->find_instance(io_name);
       if (instance != nullptr) {
-        net->add_instance(instance);
         std::string pin_name = def_net->pin(i);
-        pin_name = ieda::Str::trimEscape(pin_name);
+        std::erase(pin_name, '\\');
         pin = instance->get_pin_by_term(pin_name);
         if (pin == nullptr) {
           std::cout << "Can not find Pin in Pin list ... pin name = " << def_net->pin(i) << std::endl;
         } else {
-          net->add_instance_pin(pin);
-          pin->set_special_net(net);
+          design->connectPinToSpecialNet(pin, net);
         }
       } else {
         std::cout << "Can not find instance in instance list ... instance name = " << io_name << std::endl;
@@ -1367,19 +1363,18 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
     }
   }
 
-  vector<string> io_name_array = net->get_pin_string_list();
-  if (io_name_array.size() > 0) {
-    instance_list->get_pin_list_by_names(io_name_array, net->get_instance_pin_list(), net->get_instance_list());
+  if (net->has_wildcard_instance_pins() && std::getenv("IDB_MATERIALIZE_SPECIALNET_WILDCARD_PINS") != nullptr) {
+    design->materializeSpecialNetWildcardPins(net);
   }
 
   IdbSpecialWireList* wire_list = net->get_wire_list();
   parse_pdn_wire(def_net, wire_list);
   parse_pdn_rects(def_net, wire_list);
 
-  if (net_list->get_num() % 1000 == 0) {
+  if (design->get_special_net_list()->get_num() % 1000 == 0) {
     std::cout << "-" << std::flush;
 
-    if (net_list->get_num() % 100000 == 0) {
+    if (design->get_special_net_list()->get_num() % 100000 == 0) {
       std::cout << std::endl;
     }
   }
@@ -1583,25 +1578,23 @@ int32_t DefRead::parse_pin(defiPin* def_pin)
   IdbLayout* layout = _def_service->get_layout();  // Lef
   IdbLayers* layer_list = layout->get_layers();
   // IdbNetList* net_list = design->get_net_list();
-  IdbPins* pin_list = design->get_io_pin_list();
 
   std::string pin_name = def_pin->pinName();
-  std::string new_pin_name = ieda::Str::trimEscape(pin_name);
-  if (pin_name == "oDRAM1_CLK") {
-    printf("hhh");
-  }
-  IdbPin* pin = pin_list->add_pin_list(new_pin_name);
+  std::string new_pin_name = pin_name;
+  std::erase(new_pin_name, '\\');
+
+  IdbPin* pin = design->createOrFindIoPin(new_pin_name, IdbCreatePolicy::kErrorIfExists);
   if (pin == nullptr) {
     std::cout << "Create Pin Error..." << std::endl;
     return kDbFail;
   }
 
   std::string net_name = def_pin->netName();
-  std::string new_net_name = ieda::Str::trimEscape(net_name);
+  std::string new_net_name = net_name;
+  std::erase(new_net_name, '\\');
   pin->set_net_name(new_net_name);
   // pin->set_net(net_list->find_net(pin->get_net_name()));
   pin->set_orient_by_enum(def_pin->orient());
-  pin->set_as_io();
   // net ptr ----tbd---------
 
   IdbTerm* io_term = pin->set_term(nullptr);

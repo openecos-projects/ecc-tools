@@ -57,10 +57,6 @@ class ViolationReporter
   void printSummary(VRModel& vr_model);
   void outputNetCSV(VRModel& vr_model);
   void outputViolationCSV(VRModel& vr_model);
-  void outputJson(VRModel& vr_model);
-  std::string outputNetJson(VRModel& vr_model);
-  std::string outputViolationJson(VRModel& vr_model);
-  std::string outputSummaryJson(VRModel& vr_model);
 #endif
 
 #if 1  // debug

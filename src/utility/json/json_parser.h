@@ -38,9 +38,9 @@
 #include <queue>
 #include <set>
 #include <sstream>
+#include <string>
 #include <vector>
 
-#include "../string/Str.hh"
 #include "json.hpp"
 #include "zlib.h"
 
@@ -118,7 +118,7 @@ static std::string get_gz_string(std::string file_path)
 
 static std::istringstream& getGzFileStream(std::string file_path)
 {
-  if (ieda::Str::contain(file_path.c_str(), ".gz")) {
+  if (file_path.find(".gz") != std::string::npos) {
     std::cout << "[json error] : do not support gz file by now." << std::endl;
     auto content = get_gz_string(file_path);
     std::istringstream* dataStream = new std::istringstream(content);
@@ -131,23 +131,12 @@ static std::istringstream& getGzFileStream(std::string file_path)
 
 static std::ifstream& getInputFileStream(std::string file_path)
 {
-  //   if (ieda::Str::contain(file_path.c_str(), ".gz")) {
-  //     std::cout << "[json error] : do not support gz file by now." << std::endl;
-  //     auto content = get_gz_string(file_path);
-  //     std::istringstream dataStream(content);
-  //     std::ifstream* file = new std::ifstream(dataStream);
-  //     if (!file->is_open()) {
-  //       std::cout << "[json error] : Failed to open file = " << file_path << std::endl;
-  //     }
-  //     return *file;
-  //   } else {
   return getFileStream<std::ifstream>(file_path);
-  //   }
 }
 
 static void initJson(std::string file_path, nlohmann::json& json)
 {
-  if (ieda::Str::contain(file_path.c_str(), ".gz")) {
+  if (file_path.find(".gz") != std::string::npos) {
     auto& file_stream = getGzFileStream(file_path);
     file_stream >> json;
   } else {

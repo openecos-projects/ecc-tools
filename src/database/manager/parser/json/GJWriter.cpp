@@ -18,7 +18,7 @@
 #include <unordered_map>
 #include <vector>
 #include <string.h>
-// #include "/home/shuyuz/iEDA/src/platform/data_manager/idm.h"
+
 #include <fstream>
 #define sref_expension 0
 namespace idb {
@@ -83,6 +83,7 @@ void JsonTextWriter::flush()
 
 bool JsonTextWriter::begin(int i)
 {
+  _has_data_entry = false;
   // <stream format>
   (*_stream) <<"{"<< std::endl;
   write_header(i+1);
@@ -273,10 +274,11 @@ void JsonTextWriter::writeTopStruct(int i)
     auto element_list = str->get_element_list();
     temp=0;
 for (size_t j = 0; j < element_list.size(); j++) {
-  // if (j != 0) {
-    // (*_stream) << ",\n";
-  // }
-  write_struct_element(element_list[j],i,temp!=0);
+  size_t previous_temp = temp;
+  write_struct_element(element_list[j], i, _has_data_entry || temp != 0);
+  if (temp != previous_temp) {
+    _has_data_entry = true;
+  }
 }
   write_endstr(i,1);
 
@@ -341,6 +343,9 @@ void JsonTextWriter::writeStruct(int i)
   
 
     // <structure>
+    if (_has_data_entry) {
+      (*_stream) << ",\n";
+    }
     write_bgnstr(str, i+1);
     write_strname(str, i + 2);
 
@@ -358,10 +363,7 @@ void JsonTextWriter::writeStruct(int i)
     // if(element_list.size()>1)
       (*_stream) <<std::endl<<indent3<<"]";
     write_endstr(i+1,0);
-
-    if (k != structListSize - 1) {
-      (*_stream) << ",\n";
-    }
+    _has_data_entry = true;
   }
   /// @brief clear
   flush();

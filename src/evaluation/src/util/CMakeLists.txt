@@ -15,6 +15,16 @@ target_include_directories(eval_util_general_ops
         ${EVAL_UTIL}
 )
 
+# map layout writer
+add_library(eval_util_map_layout_writer
+    ${EVAL_UTIL}/map_layout_writer.cpp
+)
+
+target_include_directories(eval_util_map_layout_writer
+    PUBLIC
+        ${EVAL_UTIL}
+)
+
 # iRT-egr
 add_library(eval_util_init_egr
     ${EVAL_UTIL}/init_egr.cpp
@@ -56,18 +66,13 @@ target_link_libraries(eval_util_init_ista
     PRIVATE
         ieda_feature
         idm
-        ivec_api
         irt_interface
-        ista-engine
-        power
-        salt
-        ivec_layout_db
+        eval_db
 )
 
 target_include_directories(eval_util_init_ista
     PUBLIC
         ${EVAL_UTIL}
-        ${PROJECT_SOURCE_DIR}/src/third_party/salt
 )
 
 

@@ -22,9 +22,11 @@
 
 namespace python_interface {
 namespace py = pybind11;
-void register_icts(pybind11::module& m) {
-  m.def("run_cts", ctsAutoRun, py::arg("cts_config"), py::arg("cts_work_dir"));
-  m.def("cts_report", ctsReport, py::arg("path"));
+void register_icts(pybind11::module& m)
+{
+  m.def("run_cts", CtsAutoRun, py::arg("cts_config"), py::arg("cts_work_dir"));
+  m.def("cts_report", CtsReport, py::arg("path"));
+  m.def("cts_timing_feature", CtsTimingFeature);
 }
 
 }  // namespace python_interface

@@ -1,0 +1,21 @@
+icts_add_test_executable(
+  icts_test_data_manager_adapter_fast_sta
+  SOURCES
+    ${ICTS_TEST}/data_manager/adapter/fast_sta/FastSTATest.cc
+  LIBS
+    icts_source_data_manager_adapter_fast_sta
+    icts_source_data_manager_adapter_fast_sta_clock_net_parasitic
+    icts_source_data_manager_adapter_fast_sta_clock_sizing
+    icts_source_data_manager_adapter_fast_sta_power
+    icts_source_data_manager_adapter_fast_sta_timing
+    icts_source_module_optimization_preparation
+)
+
+target_include_directories(
+  icts_test_data_manager_adapter_fast_sta
+  PRIVATE
+  ${ICTS_SOURCE}/data_manager/adapter/fast_sta/clock_net_parasitic
+  ${ICTS_SOURCE}/data_manager/adapter/fast_sta/clock_sizing
+  ${ICTS_SOURCE}/data_manager/adapter/fast_sta/power
+  ${ICTS_SOURCE}/data_manager/adapter/fast_sta/timing
+)

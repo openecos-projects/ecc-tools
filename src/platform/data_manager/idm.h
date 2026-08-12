@@ -29,18 +29,20 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "../../database/interaction/ids.hpp"
 #include "IdbDesign.h"
 #include "IdbLayout.h"
+#include "liberty/LibParserCpp.hh"
+#include "spef/SpefParser.hh"
+#include "vcd/VcdParser.hh"
 #include "builder.h"
 #include "config/dm_config.h"
 #include "def_service.h"
 #include "lef_service.h"
-#include "string/Str.hh"
-#include "usage/usage.hh"
 
 using std::string;
 using std::vector;
@@ -74,8 +76,14 @@ class DataManager
   void set_idb_lef_service(IdbLefService* idb_lef_service) { _idb_lef_service = idb_lef_service; }
 
   IdbDesign* get_idb_design() { return _idb_def_service != nullptr ? _idb_def_service->get_design() : nullptr; }
+  // TODO: Return independent views after IDB supports concurrent logical and physical designs.
+  IdbDesign* get_netlist_idb_design() { return get_idb_design(); }
+  IdbDesign* get_def_idb_design() { return get_idb_design(); }
   IdbLayout* get_idb_layout() { return _idb_lef_service != nullptr ? _idb_lef_service->get_layout() : nullptr; }
   bool is_def_read() { return _idb_def_service != nullptr ? true : false; }
+  vector<LibertyReader>& get_lib_readers() { return _lib_readers; }
+  spef::SpefReader* get_spef_reader() { return _spef_reader.get(); }
+  vcd::VcdReader* get_vcd_reader() { return _vcd_reader.get(); }
 
   int get_routing_layer_1st();
 
@@ -84,10 +92,15 @@ class DataManager
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   /// iDB init
   bool init(string config_path);
+  void reset();
+  void resetData();
   bool readLef(string config_path);
   bool readLef(vector<string> lef_paths, bool b_techlef = false);
   bool readDef(string path);
   bool readVerilog(string path, string top_module = "");
+  bool readLib(vector<string> lib_paths);
+  bool readSpef(string spef_path);
+  bool readVcd(string vcd_path);
 
   /// iDB save
   bool save(string name, string def_path = "");
@@ -95,8 +108,12 @@ class DataManager
   bool saveLef(string lef_path);
   bool saveMacroTCL(string tcl_path);
   void saveVerilog(string verilog_path, std::set<std::string>&& exclude_cell_names = {}, bool is_add_space_for_escape_name = false);
-  bool saveGDSII(string path);
+  bool saveGDSII(string path, bool is_hardened = false);
   bool saveJSON(string path, string options);
+  bool saveViewJson(string output_dir, ViewJsonWriteOptions options = {});
+  bool applyViewJsonEdits(string edits_path, bool compressed_hint = false);
+  bool saveData(string data_path);
+  bool loadData(string data_path);
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -139,7 +156,8 @@ class DataManager
   IdbInstance* insertIOFiller(string inst_name, string cell_master_name, int32_t coord_x = 0, int32_t coord_y = 0,
                               IdbOrient orient = IdbOrient::kN_R0);
 
-  bool placeInst(string inst_name, int32_t x, int32_t y, string orient, string cell_master_name, string source = "");
+  bool placeInst(string inst_name, int32_t x, int32_t y, string orient, string cell_master_name, string source = "",
+                 string placement_status = "fixed", bool create_if_missing = true);
 
   void place_macro_generate_tcl(std::string directory, std::string tcl_name, int number = 100);
   bool place_macro_loc_rand(std::string tcl_path);
@@ -218,7 +236,7 @@ class DataManager
   bool isOnDieBoundary(int32_t llx, int32_t lly, int32_t urx, int32_t ury, IdbOrient orient);
   bool isOnIOSite(int32_t llx, int32_t lly, int32_t urx, int32_t ury, IdbOrient orient);
   bool checkInstPlacer(int32_t llx, int32_t lly, int32_t urx, int32_t ury, IdbOrient orient);
-  void write_placement_back(float* x, float* y, int len);
+  void write_placement_back(const float* x, const float* y, int len);
   std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int> isAllNetConnected();
   bool isNetConnected(std::string net_name);
   bool isNetConnected(IdbNet* net);
@@ -231,6 +249,9 @@ class DataManager
   IdbLefService* _idb_lef_service = nullptr;
   IdbDesign* _design = nullptr;
   IdbLayout* _layout = nullptr;
+  vector<LibertyReader> _lib_readers;
+  std::unique_ptr<spef::SpefReader> _spef_reader;
+  std::unique_ptr<vcd::VcdReader> _vcd_reader;
   // pa
   // std::map<std::string, std::map<std::string, std::vector<ids::AccessPoint>>> _master_access_point_map;
   ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -246,6 +267,9 @@ class DataManager
   bool initLef(vector<string> lef_paths, bool b_techlef = false);
   bool initDef(string def_path);
   bool initVerilog(string verilog_path, string top_module);
+  bool initLib(vector<string> lib_paths);
+  bool initSpef(string spef_path);
+  bool initVcd(string vcd_path);
 
   /// iDB save
   // bool saveDef(string def_path);

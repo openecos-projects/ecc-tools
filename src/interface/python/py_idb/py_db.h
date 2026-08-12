@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <pybind11/pybind11.h>
+
 #include <set>
 #include <string>
 #include <vector>
@@ -27,9 +29,28 @@ bool initTechLef(const std::string& techlef_path);
 bool initLef(const std::vector<std::string>& lef_paths);
 bool initDef(const std::string& def_path);
 bool initVerilog(const std::string& verilog_path, const std::string& top_module);
+bool initLib(const std::vector<std::string>& lib_paths);
+bool initSdc(const std::string& sdc_path);
+bool initSpef(const std::string& spef_path);
+bool initVcd(const std::string& vcd_path);
 bool saveDef(const std::string& def_name);
 bool saveMacroTCL(const std::string& tcl_name);
 bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_cell_names = {}, bool is_add_space_for_escape_name = false);
-bool saveGDSII(const std::string& gds_name);
+bool saveGDSII(const std::string& gds_name, bool is_harden = false);
+bool saveJson(const std::string& path);
+bool saveViewJson(const std::string& output_dir, const std::string& json_format = "pretty", bool compress = false);
+bool saveGeometrySnapshot(const std::string& output_dir);
+bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,
+                   const std::string& source = "", const std::string& placement_status = "fixed", bool create_if_missing = true);
+bool initializeGeometrySession();
+pybind11::dict syncInstanceGeometry(const std::string& inst_name);
+bool saveGeometrySessionSnapshot(const std::string& output_dir);
+bool resetGeometrySession();
+bool applyViewJsonEdits(const std::string& edits_path, bool compress = false);
+bool saveData(const std::string& path);
+bool resetData();
+bool loadData(const std::string& path);
+bool writeSocJson(const std::string& path, const std::vector<std::string>& harden_cores = {});
+bool writeAbstractLef(const std::string& output_lef_path);
 
 }  // namespace python_interface

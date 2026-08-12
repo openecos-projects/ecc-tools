@@ -34,10 +34,6 @@ namespace tcl {
 
 int tcl_start(int tcl_argc, char** tcl_argv)
 {
-#ifdef BUILD_GUI
-  iplf::tmInst->guiInit();
-#endif
-
   // this_thread::sleep_for(chrono::seconds(10));
 
   auto shell = ieda::UserShell::getShell();

@@ -27,42 +27,12 @@ class Str;
 class Time;
 }  // namespace ieda
 namespace icts {
-struct PathInfo;
-enum class LayerPattern;
-class Node;
-class Pin;
-class Net;
-class Inst;
-enum class TopoType;
-class CtsCellLib;
-class CtsLibs;
-class CtsReportTable;
-class CtsLog;
-class CtsInstance;
-class CtsConfig;
-class CtsDesign;
-class CtsDBWrapper;
-class CtsPin;
-class CtsSignalWire;
-class CtsNet;
-class EvalNet;
-class Evaluator;
-class Endpoint;
-enum class FitType;
-class ModelBase;
-class ModelFactory;
-template <typename T>
-class CtsPoint;
-using Point = icts::CtsPoint<int>;
+enum class InstType;
+class Config;
+class Design;
+class Wrapper;
 }  // namespace icts
 
-namespace ista {
-class TimingEngine;
-class TimingIDBAdapter;
-class DesignObject;
-class RctNode;
-class Net;
-}  // namespace ista
 namespace idb {
 class IdbPin;
 class IdbInstance;

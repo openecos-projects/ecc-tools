@@ -1,2 +1,0 @@
-add_subdirectory(database)
-add_subdirectory(data_manager)

@@ -31,7 +31,7 @@
 #include <vector>
 #include <optional>
 
-namespace ista {
+namespace idb {
 enum class AnalysisMode;
 }
 namespace salt {
@@ -247,8 +247,8 @@ class InitSTA
   double getArrivalLateTime(const std::string& pin_name) const;
   double getRequiredEarlyTime(const std::string& pin_name) const;
   double getRequiredLateTime(const std::string& pin_name) const;
-  double reportWNS(const char* clock_name, ista::AnalysisMode mode);
-  double reportTNS(const char* clock_name, ista::AnalysisMode mode);
+  double reportWNS(const char* clock_name, idb::AnalysisMode mode);
+  double reportTNS(const char* clock_name, idb::AnalysisMode mode);
 
   // for net R、C、slew、delay power.
   double getNetResistance(const std::string& net_name) const;

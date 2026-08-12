@@ -61,6 +61,7 @@ class JsonTextWriter
   // members
   JsonData* _data = nullptr;
   std::ofstream* _stream = nullptr;
+  bool _has_data_entry = false;
 
   void flush();
 

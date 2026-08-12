@@ -18,7 +18,7 @@
 
 #include "../../tcl_definition.h"
 #include "report_manager.h"
-#include "tcl/ScriptEngine.hh"
+#include "ScriptEngine.hh"
 
 namespace tcl {
 

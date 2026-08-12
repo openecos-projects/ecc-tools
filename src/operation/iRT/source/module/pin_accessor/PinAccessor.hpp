@@ -181,10 +181,6 @@ class PinAccessor
   void printSummary(PAModel& pa_model);
   void outputNetCSV(PAModel& pa_model);
   void outputViolationCSV(PAModel& pa_model);
-  void outputJson(PAModel& pa_model);
-  std::string outputNetJson(PAModel& pa_model);
-  std::string outputViolationJson(PAModel& pa_model);
-  std::string outputSummaryJson(PAModel& pa_model);
 #endif
 
 #if 1  // debug

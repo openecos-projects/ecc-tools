@@ -4,7 +4,7 @@ add_library(py_idrc ${PY_IDRC_SRC})
 
 target_link_libraries(py_idrc
     PUBLIC
-        tool_manager
+        idrc_interface
         pybind11::pybind11
 )
 target_include_directories(py_idrc

@@ -17,22 +17,19 @@
 #pragma once
 
 #include <cstdint>
-
-#include "feature_ista.h"
+#include <optional>
 
 namespace ieda_feature {
 
 struct CTSSummary
 {
-  int32_t buffer_num;
-  double buffer_area;
-  int32_t clock_path_min_buffer;
-  int32_t clock_path_max_buffer;
-  int32_t max_level_of_clock_tree;
-  int32_t max_clock_wirelength;
-  double total_clock_wirelength;
-
-  std::vector<ClockTiming> clocks_timing;
+  int32_t buffer_num = 0;
+  std::optional<double> buffer_area = std::nullopt;
+  int32_t clock_path_min_buffer = 0;
+  int32_t clock_path_max_buffer = 0;
+  int32_t max_level_of_clock_tree = 0;
+  int32_t max_clock_wirelength = 0;
+  double total_clock_wirelength = 0.0;
 };
 
 }  // namespace ieda_feature

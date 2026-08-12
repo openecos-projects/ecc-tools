@@ -20,17 +20,31 @@ catboost_info
 *.def
 *.log
 *.pwr
+*.codex
+
+.agents
+.codex
+.trellis
+AGENTS.md
 
 rpt*/
 target/
 *-stamp/
 tmp/
-scripts
+scripts/design/ics55/gcd/
+scripts/design/ics55/soc/
+scripts/design/sky130/gcd/
+
+
 *.patch
 CMakePresets.json
 .venv/
 __pycache__
-mcp_iEDA.egg-info/
+.humanize/
 
 # Prevent accidental re-addition of removed submodules
 src/third_party/mt-kahypar/
+
+.direnv
+result
+.ccache

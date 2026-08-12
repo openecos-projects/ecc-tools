@@ -1,7 +1,7 @@
-if(NOT DEFINED CMD_BUILD)
-    # set(CMAKE_BUILD_TYPE "Release")
-    set(CMAKE_BUILD_TYPE "Debug")
-endif()
+# if(NOT DEFINED CMD_BUILD)
+#     # set(CMAKE_BUILD_TYPE "Release")
+#     set(CMAKE_BUILD_TYPE "Debug")
+# endif()
 
 # Congestion Evaluation APP
 add_executable(congestion_app
@@ -46,6 +46,7 @@ target_link_libraries(timing_app
     PRIVATE
     eval_timing_api
     idm
+    ieda_logger
     -u_ZN3ipl17SteinerWirelength25updateAllNetWorkPointPairEv
     -u_ZN3ipl13NesterovPlace21printNesterovDatabaseEv
     -u_ZN3ito3iTO5runTOEv
@@ -95,4 +96,3 @@ target_include_directories(union_app
     ${HOME_EVALUATION}/api
     ${HOME_EVALUATION}/database
 )
-

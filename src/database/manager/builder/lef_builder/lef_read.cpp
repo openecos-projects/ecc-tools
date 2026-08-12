@@ -35,12 +35,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 
 #include "IdbLayer.h"
 #include "IdbLayerShape.h"
 #include "IdbLayout.h"
 #include "IdbObs.h"
-#include "Str.hh"
 #include "property_parser/cutlayer_parser.h"
 #include "property_parser/masterslicelayer_parser.h"
 #include "property_parser/routinglayer_parser.h"
@@ -214,8 +214,12 @@ int LefRead::parse_max_stack_via_lef58(std::string data)
 
   auto max_via_stack = new IdbMaxViaStack();
 
-  const char* sep = " ";
-  vector<std::string> strs = ieda::Str::split(data.c_str(), sep);
+  vector<std::string> strs;
+  std::istringstream stream(data);
+  std::string str;
+  while (stream >> str) {
+    strs.push_back(str);
+  }
   for (size_t i = 0; i < strs.size(); ++i) {
     if (strs[i] == "MAXVIASTACK") {
       auto number = atoi(strs[i + 1].c_str());
@@ -495,6 +499,7 @@ int LefRead::parse_layer_cut(lefiLayer* lef_layer, IdbLayerCut* layer_cut)
       double cut_within = lef_layer->spacingAdjacentWithin(i);
       spacing->set_adjacent_cuts(IdbLayerCutSpacing::AdjacentCuts(adj_cuts, transUnitDB(cut_within)));
     }
+    spacing->set_has_same_net(lef_layer->hasSpacingSamenet(i));
     layer_cut->add_spacing(spacing);
   }
 
@@ -670,6 +675,19 @@ int LefRead::parse_layer_routing(lefiLayer* lef_layer, IdbLayerRouting* layer_ro
         auto& spacing_notch = layer_routing->get_spacing_notchlength();
         spacing_notch.set_notch_length(transUnitDB(lef_layer->spacingNotchLength(i)));
         spacing_notch.set_min_spacing(transUnitDB(lef_layer->spacing(i)));
+        // 如果有notchLength关键字，不能再算作Spacing规则
+        continue;
+      }
+      if (lef_layer->hasSpacingEndOfLine(i)) {
+        layer_spacing->set_spacing_type(IdbLayerSpacingType::kSpacingEndOfLine);
+        layer_spacing->set_eol_width(transUnitDB(lef_layer->spacingEolWidth(i)));
+        layer_spacing->set_eol_within(transUnitDB(lef_layer->spacingEolWithin(i)));
+        layer_spacing->set_has_parallel_edge(lef_layer->hasSpacingParellelEdge(i));
+        if (layer_spacing->get_has_parallel_edge()) {
+          layer_spacing->set_par_space(transUnitDB(lef_layer->spacingParSpace(i)));
+          layer_spacing->set_par_within(transUnitDB(lef_layer->spacingParWithin(i)));
+          layer_spacing->set_has_two_edges(lef_layer->hasSpacingTwoEdges(i));
+        }
       }
       spacing_list->add_spacing(layer_spacing);
     }
@@ -1260,20 +1278,75 @@ int LefRead::parse_via(lefiVia* lef_via)
   IdbVia* via_instance = via_list->add_via(lef_via->name());
   IdbViaMaster* via_master = via_instance->get_instance();
   via_master->set_name(lef_via->name());
+  if (lef_via->hasResistance()) {
+    via_master->set_resistance(lef_via->resistance());
+  }
 
   if (lef_via->hasDefault()) {
     via_master->set_default(true);
   }
 
-  if (lef_via->hasGenerated()) {
-    // generate type
-    //<--------------------tbd-------------------
-    via_master->set_type_generate();
-  }
-
   if (lef_via->hasViaRule()) {
-    // IdbViaMasterGenerate* master_gernerate = via_master->get_master_generate();
-    //  master_gernerate->set_cut_size();
+    via_master->set_type_generate();
+    IdbViaMasterGenerate* master_generate = via_master->get_master_generate();
+    IdbViaRuleGenerate* via_rule = layout->get_via_rule_list()->find_via_rule_generate(lef_via->viaRuleName());
+    IdbLayerRouting* layer_bottom = dynamic_cast<IdbLayerRouting*>(layer_list->find_layer(lef_via->botMetalLayer()));
+    IdbLayerCut* layer_cut = dynamic_cast<IdbLayerCut*>(layer_list->find_layer(lef_via->cutLayer()));
+    IdbLayerRouting* layer_top = dynamic_cast<IdbLayerRouting*>(layer_list->find_layer(lef_via->topMetalLayer()));
+    if (via_rule == nullptr || layer_bottom == nullptr || layer_cut == nullptr || layer_top == nullptr) {
+      std::cout << "Via rule data is invalid, name = " << lef_via->name() << std::endl;
+      return kDbFail;
+    }
+    master_generate->set_rule_name(lef_via->viaRuleName());
+    master_generate->set_rule_generate(via_rule);
+    master_generate->set_cut_size(transUnitDB(lef_via->xCutSize()), transUnitDB(lef_via->yCutSize()));
+    master_generate->set_layer_bottom(layer_bottom);
+    master_generate->set_layer_cut(layer_cut);
+    master_generate->set_layer_top(layer_top);
+    master_generate->set_cut_spacing(transUnitDB(lef_via->xCutSpacing()), transUnitDB(lef_via->yCutSpacing()));
+    master_generate->set_enclosure_bottom(transUnitDB(lef_via->xBotEnc()), transUnitDB(lef_via->yBotEnc()));
+    master_generate->set_enclosure_top(transUnitDB(lef_via->xTopEnc()), transUnitDB(lef_via->yTopEnc()));
+    layer_cut->set_via_rule(via_rule);
+
+    int32_t num_rows = 1;
+    int32_t num_cols = 1;
+    if (lef_via->hasRowCol()) {
+      num_rows = lef_via->numCutRows();
+      num_cols = lef_via->numCutCols();
+    }
+    master_generate->set_cut_row_col(num_rows, num_cols);
+    via_master->set_cut_row_col(num_rows, num_cols);
+    if (lef_via->hasOrigin()) {
+      master_generate->set_original(transUnitDB(lef_via->xOffset()), transUnitDB(lef_via->yOffset()));
+    }
+    if (lef_via->hasOffset()) {
+      master_generate->set_offset_bottom(transUnitDB(lef_via->xBotOffset()), transUnitDB(lef_via->yBotOffset()));
+      master_generate->set_offset_top(transUnitDB(lef_via->xTopOffset()), transUnitDB(lef_via->yTopOffset()));
+    }
+    if (lef_via->hasCutPattern()) {
+      master_generate->set_patttern(lef_via->cutPattern());
+    }
+
+    int32_t cut_size_x = master_generate->get_cut_size_x();
+    int32_t cut_size_y = master_generate->get_cut_size_y();
+    int32_t cut_spacing_x = master_generate->get_cut_spcing_x();
+    int32_t cut_spacing_y = master_generate->get_cut_spcing_y();
+    int32_t cut_width_total = num_cols * cut_size_x + (num_cols - 1) * cut_spacing_x;
+    int32_t cut_height_total = num_rows * cut_size_y + (num_rows - 1) * cut_spacing_y;
+    int32_t ll_x_min = -cut_width_total / 2 + master_generate->get_original_offset_x();
+    int32_t ll_y_min = -cut_height_total / 2 + master_generate->get_original_offset_y();
+    for (int32_t row_idx = 0; row_idx < num_rows; row_idx++) {
+      for (int32_t col_idx = 0; col_idx < num_cols; col_idx++) {
+        if (master_generate->get_patttern() != nullptr && !master_generate->is_pattern_cut_exist(row_idx, col_idx)) {
+          continue;
+        }
+        int32_t ll_x = ll_x_min + col_idx * (cut_size_x + cut_spacing_x);
+        int32_t ll_y = ll_y_min + row_idx * (cut_size_y + cut_spacing_y);
+        master_generate->add_cut_rect(ll_x, ll_y, ll_x + cut_size_x, ll_y + cut_size_y);
+      }
+    }
+    master_generate->set_cut_bouding_rect(ll_x_min, ll_y_min, ll_x_min + cut_width_total, ll_y_min + cut_height_total);
+    via_master->set_via_shape();
   } else {
     via_master->set_type_fixed();
     // Fixed via
@@ -1393,6 +1466,9 @@ int LefRead::parse_via_rule(lefiViaRule* lef_via_rule)
           int32_t spacing_x = transUnitDB(leflay->spacingStepX());
           int32_t spacing_y = transUnitDB(leflay->spacingStepY());
           via_rule_generate->set_spacing(spacing_x, spacing_y);
+        }
+        if (leflay->hasResistance()) {
+          via_rule_generate->set_resistance_per_cut(leflay->resistance());
         }
       } else {
         /// do nothing

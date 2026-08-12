@@ -16,22 +16,33 @@
 # ***************************************************************************************
 
 cmake_minimum_required(VERSION 3.11)
-project(iEDA)
+project(ecc)
+
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_VERBOSE_MAKEFILE OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Choose linker for linking
+set(LINKER "default" CACHE STRING "Select linker type (default, lld, mold)")
+set_property(CACHE LINKER PROPERTY STRINGS "default" "lld" "mold")
+string(TOLOWER "${LINKER}" LINKER_CHOICE)
+
+
+
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall -Werror=return-type")
 set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -g -Wall -Werror=return-type")
 # set(CMAKE_BUILD_TYPE "Release")
-set(BUILD_AIEDA ON)
+set(BUILD_ECOS ON)
 set(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -g2 -ggdb -Werror=return-type")
 
 # if(NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
 #     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type (default: Release)" FORCE)
 # endif()
 
-if(DEFINED BUILD_AIEDA)
+if(DEFINED BUILD_ECOS)
     option(BUILD_STATIC_LIB "Build static library OFF" OFF)
     option(BUILD_PYTHON "Build Python bindings ON" ON)
 else()
@@ -40,14 +51,42 @@ else()
 endif()
 option(USE_PROFILER "Enable performance profiling (default OFF)" OFF)
 option(SANITIZER "Enable address sanitizer (default OFF)" OFF)
-option(BUILD_GUI "Enable GUI components (default OFF)" OFF)
-option(USE_GPU "Enable GPU acceleration (default OFF)" OFF)
 option(COMPATIBILITY_MODE "Enable compatibility mode (disable aggressive optimizations)" OFF)
 
 
 set(BUILD_PYTHON ON)
 set(BUILD_STATIC_LIB OFF)
 set(COMPATIBILITY_MODE ON)
+
+if(LINKER_CHOICE STREQUAL "lld")
+    find_program(LLD_PATH NAMES "ld.lld" "lld")
+    if(LLD_PATH)
+        message(STATUS "Use LLD linker: ${LLD_PATH}")
+        add_link_options("-fuse-ld=lld")
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            # https://github.com/llvm/llvm-project/issues/41791
+            message(STATUS "Disable compatibility-sensitive optimizations for GNU + LLD")
+            if(COMPATIBILITY_MODE_DEFINED AND NOT COMPATIBILITY_MODE)
+                message(FATAL_ERROR "GNU + LLD requires COMPATIBILITY_MODE=ON because ld.lld does not handle GCC LTO objects reliably")
+            endif()
+            if(NOT COMPATIBILITY_MODE_DEFINED)
+                set(COMPATIBILITY_MODE ON)
+            endif()
+            set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+        endif()
+    else()
+        message(WARNING "LLD not found. Falling back to system default linker.")
+    endif()
+
+elseif(LINKER_CHOICE STREQUAL "mold")
+    find_program(MOLD_PATH NAMES "mold")
+    if(MOLD_PATH)
+        message(STATUS "Use MOLD linker: ${MOLD_PATH}")
+        add_link_options("-fuse-ld=mold")
+    else()
+        message(WARNING "MOLD not found. Falling back to system default linker.")
+    endif()
+endif()
 
 # Define GLOG_USE_GLOG_EXPORT for glog 0.7.1+ compatibility
 add_definitions(-DGLOG_USE_GLOG_EXPORT)
@@ -68,6 +107,9 @@ endif()
 if(BUILD_PYTHON)
     set(BUILD_STATIC_LIB OFF)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
+    set(ECC_INSTALL_LIB_DIR ${CMAKE_INSTALL_PREFIX}/ecc_tools_bin/lib)
+else()
+    set(ECC_INSTALL_LIB_DIR ${CMAKE_INSTALL_PREFIX})
 endif()
 
 if (BUILD_STATIC_LIB)
@@ -90,8 +132,6 @@ if(NOT COMPATIBILITY_MODE)
     set(CMAKE_AR "gcc-ar")
     set(CMAKE_RANLIB "gcc-ranlib")
     
-    # diable use gpu for lto confilct with cuda
-    set(USE_GPU OFF)
 endif()
 
 if(USE_PROFILER)
@@ -107,35 +147,42 @@ if(SANITIZER)
     message("address sanitizer load")
 endif()
 
-if(BUILD_GUI)
-    add_definitions(-DBUILD_GUI)
+set(HOME_CMAKE ${PROJECT_SOURCE_DIR}/cmake)
+set(HOME_UTILITY ${PROJECT_SOURCE_DIR}/src/utility)
+set(HOME_DATABASE ${PROJECT_SOURCE_DIR}/src/database)
+set(HOME_INTERFACE ${PROJECT_SOURCE_DIR}/src/interface)
+set(HOME_OPERATION ${PROJECT_SOURCE_DIR}/src/operation)
+set(HOME_PLATFORM ${PROJECT_SOURCE_DIR}/src/platform)
+set(HOME_EVALUATION ${PROJECT_SOURCE_DIR}/src/evaluation)
+set(HOME_THIRDPARTY ${PROJECT_SOURCE_DIR}/src/third_party)
+
+SET(THIRD_PARTY_HOME ${HOME_THIRDPARTY})
+
+add_definitions("-DBOOST_ALLOW_DEPRECATED_HEADERS")
+add_definitions("-DBOOST_BIND_GLOBAL_PLACEHOLDERS")
+
+include_directories(SYSTEM
+    ## third party
+    ${THIRD_PARTY_HOME}
+    ${THIRD_PARTY_HOME}/json
+)
+
+find_package(OpenMP REQUIRED)
+if (OPENMP_CXX_FOUND)
+    message("OPENMP FOUND")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 endif()
 
-
-if (USE_GPU)
-    add_definitions(-DUSE_GPU)
-    include(cmake/cuda.cmake)
-endif()
-
-include(cmake/setting.cmake)
-include(cmake/third_party.cmake)
-include(cmake/operation/ista.cmake)
-include(cmake/operation/ipa.cmake)
-include(cmake/rust.cmake)
-
-if(ENABLE_AI)
-add_definitions(-DENABLE_AI)
-add_subdirectory(src/ai)
-endif()
+# Disable building tests and examples in libfort project
+set(FORT_ENABLE_TESTING OFF CACHE INTERNAL "")
 
 add_subdirectory(src/third_party)
 add_subdirectory(src/utility)
 add_subdirectory(src/apps)
 add_subdirectory(src/database)
 add_subdirectory(src/interface)
-add_subdirectory(src/vectorization)
 add_subdirectory(src/evaluation)
 add_subdirectory(src/operation)
 add_subdirectory(src/platform)
-add_subdirectory(src/solver)
 add_subdirectory(src/feature)

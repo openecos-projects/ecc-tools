@@ -34,6 +34,7 @@
 #include <limits.h>
 
 #include <algorithm>
+#include <cstdio>
 
 namespace idb {
 
@@ -112,7 +113,14 @@ IdbCore* IdbLayout::get_core()
     int32_t max_x = INT_MIN;
     int32_t max_y = INT_MIN;
     for (IdbRow* row : _rows->get_row_list()) {
+      if (row->get_site() != nullptr && row->get_site()->is_core_site() == false) {
+        std::cout << "Warning: row " << row->get_name() << " " << row->get_site()->get_name() << " site is not core site!" << std::endl;
+        continue;
+      }
       IdbRect* row_rect = row->get_bounding_box();
+      if (row_rect == nullptr) {
+        continue;
+      }
       min_x = std::min(min_x, row_rect->get_low_x());
       min_y = std::min(min_y, row_rect->get_low_y());
       max_x = std::max(max_x, row_rect->get_high_x());
@@ -120,10 +128,37 @@ IdbCore* IdbLayout::get_core()
     }
     _core->set_bounding_box(min_x, min_y, max_x, max_y);
   } else {
-    _core->set_bounding_box(_die->get_bounding_box());
+    auto* die_bbox = _die->get_bounding_box();
+    _core->set_bounding_box(die_bbox->get_low_x(), die_bbox->get_low_y(), die_bbox->get_high_x(), die_bbox->get_high_y());
   }
 
   return _core;
+}
+
+void IdbLayout::initDie(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y)
+{
+  if (_die == nullptr) {
+    _die = new IdbDie();
+  }
+
+  _die->reset();
+  _die->add_point(ll_x, ll_y);
+  _die->add_point(ur_x, ur_y);
+}
+
+IdbRow* IdbLayout::createRow(std::string row_name, std::string site_name, int32_t orig_x, int32_t orig_y, IdbOrient site_orient,
+                             int32_t num_x, int32_t num_y, int32_t step_x, int32_t step_y)
+{
+  if (_rows == nullptr || _sites == nullptr) {
+    return nullptr;
+  }
+
+  IdbSite* site = _sites->find_site(site_name);
+  if (site == nullptr) {
+    return nullptr;
+  }
+
+  return _rows->createRow(row_name, site, orig_x, orig_y, site_orient, num_x, num_y, step_x, step_y);
 }
 
 }  // namespace idb

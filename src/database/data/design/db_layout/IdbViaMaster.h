@@ -342,6 +342,7 @@ class IdbViaMaster
 
   const int32_t get_cut_rows() const { return _num_cut_rows; }
   const int32_t get_cut_cols() const { return _num_cut_cols; }
+  double get_resistance() { return _resistance; }
   bool isOneCut();
 
   // setter
@@ -372,6 +373,7 @@ class IdbViaMaster
     _num_cut_rows = rows;
     _num_cut_cols = cols;
   }
+  void set_resistance(double resistance) { _resistance = resistance; }
 
   // operator
   IdbViaMaster* clone();
@@ -385,6 +387,7 @@ class IdbViaMaster
   IdbViaMasterType _type;
   int32_t _num_cut_rows = -1;
   int32_t _num_cut_cols = -1;
+  double _resistance = -1.0;
   vector<IdbViaMasterFixed*> _master_fixed_list;
 
   IdbLayerShape* _layer_shape_bottom;

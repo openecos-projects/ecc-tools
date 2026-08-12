@@ -32,7 +32,6 @@ class Config
   std::string bottom_routing_layer;  // optional
   std::string top_routing_layer;     // optional
   int32_t output_inter_result;       // optional
-  int32_t enable_notification;       // optional
   int32_t enable_timing;             // optional
   /////////////////////////////////////////////
   // **********        RT         ********** //
@@ -49,8 +48,8 @@ class Config
   std::string pa_temp_directory_path;  // building
   // ********     SupplyAnalyzer    ******** //
   std::string sa_temp_directory_path;  // building
-  // ********   TopologyGenerator   ******** //
-  std::string tg_temp_directory_path;  // building
+  // ********     PlanarRouter     ******** //
+  std::string pr_temp_directory_path;  // building
   // **********   LayerAssigner   ********** //
   std::string la_temp_directory_path;  // building
   // **********    SpaceRouter    ********** //

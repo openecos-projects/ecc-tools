@@ -11,7 +11,7 @@ target_include_directories(def_builder
         ${HOME_DATABASE}/data/design/db_layout
         ${HOME_DATABASE}/manager/service/def_service
         ${HOME_DATABASE}/manager/service/lef_service
-        ${HOME_UTILITY}/string
+        ${HOME_DATABASE}/basic/geometry
 )
 
 target_include_directories(def_builder 
@@ -21,4 +21,4 @@ target_include_directories(def_builder
         ${HOME_THIRDPARTY}/lefdef/def/defzlib
 )
 
-target_link_libraries(def_builder PRIVATE  def defzlib str solver_geometry_boost)
+target_link_libraries(def_builder PRIVATE  def defzlib geometry_db)

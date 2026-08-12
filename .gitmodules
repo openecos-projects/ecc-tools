@@ -1,4 +1,0 @@
-[submodule "scripts/foundry/ihp130"]
-	path = scripts/foundry/ihp130
-	url = https://github.com/IHP-GmbH/IHP-Open-PDK.git
-	branch = main

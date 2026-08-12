@@ -48,8 +48,7 @@ bool FeatureParser::buildMacroDrc(std::string path, std::string drc_path)
   /// init macro info
   auto macro_list = _design->get_instance_list()->get_macro_list();
   for (auto macro : macro_list) {
-    DrcMacroCount drc_macro;
-    memset(&drc_macro, 0, sizeof(DrcMacroCount));
+    DrcMacroCount drc_macro{};
     drc_macro.name = macro->get_name();
     drc_macro.llx = macro->get_bounding_box()->get_low_x();
     drc_macro.lly = macro->get_bounding_box()->get_low_y();

@@ -33,15 +33,11 @@ namespace idm {
 
 void DataManager::initDie(int ll_x, int ll_y, int ur_x, int ur_y)
 {
-  IdbDie* die = _layout->get_die();
-  die->reset();
-
   auto io_site = _layout->get_sites()->get_io_site();
   auto corner_site = _layout->get_sites()->get_corner_site();
 
   if (io_site == nullptr || corner_site == nullptr) {
-    die->add_point(ll_x, ll_y);
-    die->add_point(ur_x, ur_y);
+    _layout->initDie(ll_x, ll_y, ur_x, ur_y);
   } else {
     /// adjust urx & ury
     int corner_width = corner_site->get_width();
@@ -51,8 +47,7 @@ void DataManager::initDie(int ll_x, int ll_y, int ur_x, int ur_y)
     ur_x = ll_x + ((width - corner_width * 2) / io_site_width * io_site_width + corner_width * 2);
     ur_y = ll_y + ((height - corner_width * 2) / io_site_width * io_site_width + corner_width * 2);
 
-    die->add_point(ll_x, ll_y);
-    die->add_point(ur_x, ur_y);
+    _layout->initDie(ll_x, ll_y, ur_x, ur_y);
   }
 }
 
@@ -111,21 +106,7 @@ float DataManager::coreUtilization()
 IdbRow* DataManager::createRow(string row_name, string site_name, int32_t orig_x, int32_t orig_y, IdbOrient site_orient, int32_t num_x,
                                int32_t num_y, int32_t step_x, int32_t step_y)
 {
-  IdbSites* site_list = _layout->get_sites();
-  if (site_list == nullptr) {
-    return nullptr;
-  }
-  IdbSite* site = site_list->find_site(site_name);
-  if (site == nullptr) {
-    return nullptr;
-  }
-
-  IdbRows* row_list_ptr = _layout->get_rows();
-  if (row_list_ptr == nullptr) {
-    return nullptr;
-  }
-
-  return row_list_ptr->createRow(row_name, site, orig_x, orig_y, site_orient, num_x, num_y, step_x, step_y);
+  return _layout->createRow(row_name, site_name, orig_x, orig_y, site_orient, num_x, num_y, step_x, step_y);
 }
 
 IdbOrient DataManager::getDefaultOrient(int32_t coord_x, int32_t coord_y)

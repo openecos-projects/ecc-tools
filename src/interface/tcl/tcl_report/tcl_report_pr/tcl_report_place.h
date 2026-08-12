@@ -17,7 +17,7 @@
 #pragma once
 
 #include "../../tcl_definition.h"
-#include "tcl/ScriptEngine.hh"
+#include "ScriptEngine.hh"
 
 namespace tcl {
 

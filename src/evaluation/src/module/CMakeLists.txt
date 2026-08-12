@@ -1,7 +1,7 @@
-if(NOT DEFINED CMD_BUILD)
-    # set(CMAKE_BUILD_TYPE "Release")
-    set(CMAKE_BUILD_TYPE "Debug")
-endif()
+# if(NOT DEFINED CMD_BUILD)
+#     # set(CMAKE_BUILD_TYPE "Release")
+#     set(CMAKE_BUILD_TYPE "Debug")
+# endif()
 
 add_subdirectory(${EVAL_MODULE}/congestion)
 add_subdirectory(${EVAL_MODULE}/density)
@@ -18,4 +18,5 @@ target_link_libraries(eval_module
         eval_timing_eval
         eval_wirelength_eval
         eval_io
+        eval_util_general_ops
 )

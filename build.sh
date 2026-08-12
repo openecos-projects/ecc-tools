@@ -20,7 +20,7 @@ set -e
 
 # variables
 IEDA_WORKSPACE=$(cd "$(dirname "$0")";pwd)
-BINARY_TARGET="iEDA"
+BINARY_TARGET="ecc_bin"
 BINARY_DIR="${IEDA_WORKSPACE}/bin"
 BUILD_DIR="${IEDA_WORKSPACE}/build"
 CPP_COMPILER_PATH="g++-10"
@@ -32,16 +32,15 @@ DEL_BUILD="OFF"
 INSTALL_DEP="OFF"
 NON_INTERACTIVE="OFF"
 BUILD_THREADS="$(nproc)"
+BUILD_TYPE="Release"
 
 CMAKE_OPTIONS=(
-  "-DCMAKE_BUILD_TYPE=Release"
   "-DCMD_BUILD=ON"
 )
   # "-DBUILD_GUI=${BUILD_GUI:-OFF}"
   # "-DCOMPATIBILITY_MODE=${COMPATIBILITY_MODE:-OFF}"
   # "-DUSE_PROFILER=${USE_PROFILER:-OFF}"
   # "-DSANITIZER=${SANITIZER:-OFF}"
-  # "-DUSE_GPU=${USE_GPU:-OFF}"
 G_BUILD_GENERATOR=""
 
 # pretty print
@@ -58,22 +57,23 @@ help_msg_exit()
 echo -e "build.sh: Build iEDA executable binary"
 echo -e "Usage:"
 echo -e "  ${bold}bash build.sh${clear} [-h] [-n] [-r] [-b] [-d] [-i] [-p] "
-echo -e "                [-g] [-s] [-P] [-G] [-C] [-D] [-y]"
+echo -e "                [-g] [-s] [-P] [-C] [-D] [-y] [-M]"
 echo -e "                [-b ${underline}binary path${clear}] [-j ${underline}num${clear}] [-i apt|docker]"
 echo -e "Options:"
 echo -e "  ${bold}-h${clear} display this help and exit"
 echo -e "  ${bold}-n${clear} do not build iEDA (default OFF)"
-echo -e "  ${bold}-d${clear} delete all build artifacts including cmake and rust, (default OFF)"
+echo -e "  ${bold}-d${clear} delete all CMake build artifacts (default OFF)"
 echo -e "  ${bold}-r${clear} run iEDA hello test after build (default OFF)"
 echo -e "  ${bold}-j${clear} job threads for building iEDA (default ${BUILD_THREADS} (num of cores))"
 echo -e "  ${bold}-b${clear} iEDA binary path (default at ${BINARY_DIR})"
 echo -e "  ${bold}-i${clear} apt-get install (root/sudo required) dependencies before build (default OFF)"
-echo -e "  ${bold}-p${clear} build AIEDA (default OFF)"
+echo -e "  ${bold}-p${clear} build ECOS (default OFF)"
 echo -e "  ${bold}-g${clear} enable GUI components (default OFF)"
 echo -e "  ${bold}-s${clear} enable address sanitizer (default OFF)"
 echo -e "  ${bold}-P${clear} enable performance profiling (default OFF)"
-echo -e "  ${bold}-G${clear} enable GPU acceleration (default OFF)"
 echo -e "  ${bold}-C${clear} enable compatibility mode (disable optimizations, default OFF)"
+echo -e "  ${bold}-M${clear} set CMAKE_BUILD_TYPE to Debug (default Release)"
+echo -e "  ${bold}-l${clear} select linker type (default/lld/mold)"
 echo -e "  ${bold}-D${clear} dry-run mode (show cmake build commands)"
 echo -e "  ${bold}-y${clear} auto confirm all actions, non-interactive mode (defaults: OFF)"
 exit "$1";
@@ -88,6 +88,7 @@ build_ieda()
     "-DCMAKE_CXX_COMPILER=$CPP_COMPILER_PATH"
     "-DCMAKE_C_COMPILER=$C_COMPILER_PATH"
     "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=$BINARY_DIR"
+    "-DCMAKE_BUILD_TYPE=${BUILD_TYPE}"
     "${CMAKE_OPTIONS[@]}"
     "$G_BUILD_GENERATOR"
   )
@@ -179,8 +180,9 @@ install_dependencies_apt()
     apt-get update && apt-get install -y \
       g++-10 cmake ninja-build \
       tcl-dev libgflags-dev libgoogle-glog-dev libboost-all-dev libgtest-dev flex\
-      libeigen3-dev libunwind-dev libmetis-dev libgmp-dev bison rustc cargo\
-      libhwloc-dev libcairo2-dev libcurl4-openssl-dev libtbb-dev git
+      libeigen3-dev libunwind-dev libgmp-dev bison \
+      libhwloc-dev libcairo2-dev libcurl4-openssl-dev libtbb-dev git\
+      mold lld
     exit 0
   else
     echo -e "${red}apt-get not found, pleas make sure you were running on Debian-Based Linux distribution${clear}"
@@ -260,7 +262,7 @@ install_docker_experimental()
 # hello_test
 run_ieda()
 {
-  "${BINARY_DIR}"/iEDA -script "${IEDA_WORKSPACE}"/scripts/hello.tcl
+  "${BINARY_DIR}/${BINARY_TARGET}" -script "${IEDA_WORKSPACE}"/scripts/hello.tcl
 }
 
 sys_requirement_warning()
@@ -312,19 +314,9 @@ perform_clean()
   echo -e "${yellow}Cleaning all build artifacts...${clear}"
 
   local cmake_build_dir="$BUILD_DIR"
-  local rust_target_dirs=$(find "$IEDA_WORKSPACE/src" -type d -name "target" \
-    -exec test -f "{}/../Cargo.toml" \; -print 2>/dev/null)
-  local rust_tmp_dirs=$(find "$IEDA_WORKSPACE/src" -type d -name "tmp" \
-    -exec test -f "{}/../Cargo.toml" \; -print 2>/dev/null)
 
   local delete_list=()
   [[ -d "$cmake_build_dir" ]] && delete_list+=("$cmake_build_dir (CMake build)")
-  [[ -n "$rust_target_dirs" ]] && while IFS= read -r dir; do
-    delete_list+=("$dir (Rust build)")
-  done <<< "$rust_target_dirs"
-  [[ -n "$rust_tmp_dirs" ]] && while IFS= read -r dir; do
-    delete_list+=("$dir (Rust build)")
-  done <<< "$rust_tmp_dirs"
 
   if [[ ${#delete_list[@]} -eq 0 ]]; then
     echo -e "${green}No build artifacts found, nothing to clean.${clear}"
@@ -338,20 +330,12 @@ perform_clean()
 
   if [[ $NON_INTERACTIVE == "ON" ]]; then
     [[ -d "$cmake_build_dir" ]] && rm -rf "$cmake_build_dir"
-    [[ -n "$rust_target_dirs" ]] && xargs -I{} rm -rf {} <<< "$rust_target_dirs"
-    [[ -n "$rust_tmp_dirs" ]] && xargs -I{} rm -rf {} <<< "$rust_tmp_dirs"
   else
     read -p $'\nAre you sure to delete these? [y/N] ' confirm
     [[ $confirm == [yY] ]] || return 0
 
     echo -e "\n${yellow}Starting deletion...${clear}"
     [[ -d "$cmake_build_dir" ]] && rm -rf "$cmake_build_dir" && echo "Deleted: $cmake_build_dir"
-    [[ -n "$rust_target_dirs" ]] && while IFS= read -r dir; do
-      rm -rf "$dir" && echo "Deleted: $dir"
-    done <<< "$rust_target_dirs"
-    [[ -n "$rust_tmp_dirs" ]] && while IFS= read -r dir; do
-      rm -rf "$dir" && echo "Deleted: $dir"
-    done <<< "$rust_tmp_dirs"
   fi
 
   echo -e "${green}Cleanup completed.${clear}"
@@ -372,10 +356,15 @@ opt_non_interactive()
   NON_INTERACTIVE="ON"
 }
 
-opt_build_aieda()
+opt_debug_build()
 {
-  CMAKE_OPTIONS+=("-DBUILD_AIEDA=ON")
-  opt_build_target "ieda_py"
+  BUILD_TYPE="Debug"
+}
+
+opt_build_ecos()
+{
+  CMAKE_OPTIONS+=("-DBUILD_ECOS=ON")
+  opt_build_target "ecc_py"
 }
 
 # invalid args
@@ -383,7 +372,7 @@ if [[ $1 != "" ]] && [[ $1 != -* ]]; then
   help_msg_exit 1
 fi
 
-while getopts j:b:t:i:rndDyp opt; do
+while getopts j:b:t:i:l:rndDypgsPChM opt; do
   case "${opt}" in
     j) opt_thread_num "$OPTARG"   ;;
     b) opt_binary_dir "$OPTARG"   ;;
@@ -394,12 +383,13 @@ while getopts j:b:t:i:rndDyp opt; do
     d) opt_del_build              ;;
     D) opt_dry_run                ;;
     y) opt_non_interactive        ;;
-    p) opt_build_aieda            ;;
+    p) opt_build_ecos             ;;
     g) CMAKE_OPTIONS+=("-DBUILD_GUI=ON")    ;;
     s) CMAKE_OPTIONS+=("-DSANITIZER=ON")    ;;
     P) CMAKE_OPTIONS+=("-DUSE_PROFILER=ON") ;;
-    G) CMAKE_OPTIONS+=("-DUSE_GPU=ON")      ;;
     C) CMAKE_OPTIONS+=("-DCOMPATIBILITY_MODE=ON") ;;
+    M) opt_debug_build            ;;
+    l) CMAKE_OPTIONS+=("-DLINKER=${OPTARG}") ;;
     h) help_msg_exit 0            ;;
     *) help_msg_exit 1            ;;
   esac

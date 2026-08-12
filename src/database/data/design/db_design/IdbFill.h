@@ -140,7 +140,16 @@ class IdbFillList
   IdbFillLayer* add_fill_layer(IdbLayer* layer = nullptr);
   IdbFillVia* add_fill_via(IdbVia* via = nullptr);
 
-  void reset();
+  void reset(){
+    for (IdbFill* fill : _fill_list) {
+      if (fill != nullptr) {
+        delete fill;
+        fill = nullptr;
+      }
+    }
+    _fill_list.clear();
+    _num_fill = 0;
+  }
 
   // operator
   void init_fill_list(int32_t size) { _fill_list.reserve(size); }

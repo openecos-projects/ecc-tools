@@ -586,9 +586,9 @@ void PinAccessor::routePAModel(PAModel& pa_model)
   pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 0, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 20, 10);
   pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 1, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 20, 10);
   pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 2, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 20, 10);
-  pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 0, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 20, 10);
-  pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 1, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 20, 10);
-  pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 2, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 20, 10);
+  pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 0, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 20, 10);
+  pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 1, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 20, 10);
+  pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 2, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 20, 10);
   // clang-format on
   initRoutingState(pa_model);
   for (int32_t i = 0, iter = 1; i < static_cast<int32_t>(pa_iter_param_list.size()); i++, iter++) {
@@ -609,7 +609,6 @@ void PinAccessor::routePAModel(PAModel& pa_model)
     printSummary(pa_model);
     outputNetCSV(pa_model);
     outputViolationCSV(pa_model);
-    outputJson(pa_model);
     RTLOG.info(Loc::current(), "***** End Iteration ", iter, "/", pa_iter_param_list.size(), "(", RTUTIL.getPercentage(iter, pa_iter_param_list.size()), ")",
                iter_monitor.getStatsInfo(), "*****");
     if (stopIteration(pa_model, pa_iter_param_list)) {
@@ -2658,7 +2657,6 @@ void PinAccessor::selectBestResult(PAModel& pa_model)
   printSummary(pa_model);
   outputNetCSV(pa_model);
   outputViolationCSV(pa_model);
-  outputJson(pa_model);
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -3617,138 +3615,13 @@ void PinAccessor::outputViolationCSV(PAModel& pa_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void PinAccessor::outputJson(PAModel& pa_model)
-{
-  int32_t enable_notification = RTDM.getConfig().enable_notification;
-  if (!enable_notification) {
-    return;
-  }
-  std::map<std::string, std::string> json_path_map;
-  json_path_map["net_map"] = outputNetJson(pa_model);
-  json_path_map["violation_map"] = outputViolationJson(pa_model);
-  json_path_map["summary"] = outputSummaryJson(pa_model);
-  RTI.sendNotification("PA", pa_model.get_iter(), json_path_map);
-}
 
-std::string PinAccessor::outputNetJson(PAModel& pa_model)
-{
-  Die& die = RTDM.getDatabase().get_die();
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  std::vector<CutLayer>& cut_layer_list = RTDM.getDatabase().get_cut_layer_list();
-  std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
-  std::string& pa_temp_directory_path = RTDM.getConfig().pa_temp_directory_path;
 
-  std::vector<nlohmann::json> net_json_list;
-  {
-    nlohmann::json result_shape_json;
-    for (auto& [net_idx, pin_access_result_map] : RTDM.getNetPinAccessResultMap(die)) {
-      std::string net_name = net_list[net_idx].get_net_name();
-      for (auto& [pin_idx, segment_set] : pin_access_result_map) {
-        for (Segment<LayerCoord>* segment : segment_set) {
-          for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, *segment)) {
-            std::string layer_name;
-            if (net_shape.get_is_routing()) {
-              layer_name = routing_layer_list[net_shape.get_layer_idx()].get_layer_name();
-            } else {
-              layer_name = cut_layer_list[net_shape.get_layer_idx()].get_layer_name();
-            }
-            result_shape_json["result_shape"][net_name]["path"].push_back(
-                {net_shape.get_ll_x(), net_shape.get_ll_y(), net_shape.get_ur_x(), net_shape.get_ur_y(), layer_name});
-          }
-        }
-      }
-    }
-    for (auto& [net_idx, pin_access_patch_map] : RTDM.getNetPinAccessPatchMap(die)) {
-      std::string net_name = net_list[net_idx].get_net_name();
-      for (auto& [pin_idx, patch_set] : pin_access_patch_map) {
-        for (EXTLayerRect* patch : patch_set) {
-          result_shape_json["result_shape"][net_name]["patch"].push_back({patch->get_real_ll_x(), patch->get_real_ll_y(), patch->get_real_ur_x(),
-                                                                          patch->get_real_ur_y(), routing_layer_list[patch->get_layer_idx()].get_layer_name()});
-        }
-      }
-    }
-    net_json_list.push_back(result_shape_json);
-  }
-  std::string net_json_file_path = RTUTIL.getString(pa_temp_directory_path, "net_map_", pa_model.get_iter(), ".json");
-  std::ofstream* net_json_file = RTUTIL.getOutputFileStream(net_json_file_path);
-  (*net_json_file) << net_json_list;
-  RTUTIL.closeFileStream(net_json_file);
-  return net_json_file_path;
-}
 
-std::string PinAccessor::outputViolationJson(PAModel& pa_model)
-{
-  Die& die = RTDM.getDatabase().get_die();
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
-  std::string& pa_temp_directory_path = RTDM.getConfig().pa_temp_directory_path;
 
-  std::vector<nlohmann::json> violation_json_list;
-  for (Violation* violation : RTDM.getViolationSet(die)) {
-    EXTLayerRect& violation_shape = violation->get_violation_shape();
 
-    nlohmann::json violation_json;
-    violation_json["type"] = GetViolationTypeName()(violation->get_violation_type());
-    violation_json["shape"]
-        = {violation_shape.get_real_rect().get_ll_x(), violation_shape.get_real_rect().get_ll_y(), violation_shape.get_real_rect().get_ur_x(),
-           violation_shape.get_real_rect().get_ur_y(), routing_layer_list[violation_shape.get_layer_idx()].get_layer_name()};
-    for (int32_t net_idx : violation->get_violation_net_set()) {
-      if (net_idx != -1) {
-        violation_json["net"].push_back(net_list[net_idx].get_net_name());
-      } else {
-        violation_json["net"].push_back("obs");
-      }
-    }
-    violation_json_list.push_back(violation_json);
-  }
-  std::string violation_json_file_path = RTUTIL.getString(pa_temp_directory_path, "violation_map_", pa_model.get_iter(), ".json");
-  std::ofstream* violation_json_file = RTUTIL.getOutputFileStream(violation_json_file_path);
-  (*violation_json_file) << violation_json_list;
-  RTUTIL.closeFileStream(violation_json_file);
-  return violation_json_file_path;
-}
 
-std::string PinAccessor::outputSummaryJson(PAModel& pa_model)
-{
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  std::vector<CutLayer>& cut_layer_list = RTDM.getDatabase().get_cut_layer_list();
-  Summary& summary = RTDM.getDatabase().get_summary();
-  std::string& pa_temp_directory_path = RTDM.getConfig().pa_temp_directory_path;
 
-  std::map<int32_t, double>& routing_wire_length_map = summary.iter_pa_summary_map[pa_model.get_iter()].routing_wire_length_map;
-  double& total_wire_length = summary.iter_pa_summary_map[pa_model.get_iter()].total_wire_length;
-  std::map<int32_t, int32_t>& cut_via_num_map = summary.iter_pa_summary_map[pa_model.get_iter()].cut_via_num_map;
-  int32_t& total_via_num = summary.iter_pa_summary_map[pa_model.get_iter()].total_via_num;
-  std::map<int32_t, int32_t>& routing_patch_num_map = summary.iter_pa_summary_map[pa_model.get_iter()].routing_patch_num_map;
-  int32_t& total_patch_num = summary.iter_pa_summary_map[pa_model.get_iter()].total_patch_num;
-  std::map<int32_t, int32_t>& routing_violation_num_map = summary.iter_pa_summary_map[pa_model.get_iter()].routing_violation_num_map;
-  int32_t& total_violation_num = summary.iter_pa_summary_map[pa_model.get_iter()].total_violation_num;
-
-  nlohmann::json summary_json;
-  summary_json["iter"] = pa_model.get_iter();
-  for (auto& [routing_layer_idx, wire_length] : routing_wire_length_map) {
-    summary_json["routing_wire_length_map"][routing_layer_list[routing_layer_idx].get_layer_name()] = wire_length;
-  }
-  summary_json["total_wire_length"] = total_wire_length;
-  for (auto& [cut_layer_idx, via_num] : cut_via_num_map) {
-    summary_json["cut_via_num_map"][cut_layer_list[cut_layer_idx].get_layer_name()] = via_num;
-  }
-  summary_json["total_via_num"] = total_via_num;
-  for (auto& [routing_layer_idx, patch_num] : routing_patch_num_map) {
-    summary_json["routing_patch_num_map"][routing_layer_list[routing_layer_idx].get_layer_name()] = patch_num;
-  }
-  summary_json["total_patch_num"] = total_patch_num;
-  for (auto& [routing_layer_idx, violation_num] : routing_violation_num_map) {
-    summary_json["routing_violation_num_map"][routing_layer_list[routing_layer_idx].get_layer_name()] = violation_num;
-  }
-  summary_json["total_violation_num"] = total_violation_num;
-
-  std::string summary_json_file_path = RTUTIL.getString(pa_temp_directory_path, "summary_", pa_model.get_iter(), ".json");
-  std::ofstream* summary_json_file = RTUTIL.getOutputFileStream(summary_json_file_path);
-  (*summary_json_file) << summary_json;
-  RTUTIL.closeFileStream(summary_json_file);
-  return summary_json_file_path;
-}
 
 #endif
 

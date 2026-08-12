@@ -7,8 +7,9 @@ add_library(eval_congestion_api
 )
 
 target_link_libraries(eval_congestion_api
-    PRIVATE
+    PUBLIC
     eval_db
+    PRIVATE
     eval_congestion_eval
 )
 
@@ -23,8 +24,9 @@ add_library(eval_density_api
 )
 
 target_link_libraries(eval_density_api
-    PRIVATE
+    PUBLIC
     eval_db
+    PRIVATE
     eval_density_eval
 )
 
@@ -40,8 +42,9 @@ add_library(eval_timing_api
 )
 
 target_link_libraries(eval_timing_api
-    PRIVATE
+    PUBLIC
     eval_db
+    PRIVATE
     eval_timing_eval
 )
 
@@ -59,8 +62,9 @@ add_library(eval_wirelength_api
 )
 
 target_link_libraries(eval_wirelength_api
-    PRIVATE
+    PUBLIC
     eval_db
+    PRIVATE
     eval_wirelength_eval
 )
 

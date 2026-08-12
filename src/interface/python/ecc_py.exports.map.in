@@ -1,0 +1,6 @@
+{
+    global:
+        PyInit_ecc_py;
+    local:
+        *;
+};

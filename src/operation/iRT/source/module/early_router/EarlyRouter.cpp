@@ -20,6 +20,8 @@
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
 #include "RTInterface.hpp"
+#include "TBTask.hpp"
+#include "TOPOBuilder.hpp"
 #include "Utility.hpp"
 
 namespace irt {
@@ -169,6 +171,7 @@ void EarlyRouter::setERComParam(ERModel& er_model, std::map<std::string, std::an
   double boundary_wire_unit = 1;
   double internal_wire_unit = 1;
   double internal_via_unit = 1;
+  int32_t topo_spilt_length = 10;
   int32_t expand_step_num = 5;
   int32_t expand_step_length = 2;
   double prefer_wire_unit = 1;
@@ -178,11 +181,12 @@ void EarlyRouter::setERComParam(ERModel& er_model, std::map<std::string, std::an
   int32_t schedule_interval = 3;
 
   /**
-   * stage, resolve_congestion, max_candidate_point_num, supply_reduction, boundary_wire_unit, internal_wire_unit, internal_via_unit, expand_step_num,
-   * expand_step_length, via_unit, overflow_unit, schedule_interval
+   * stage, resolve_congestion, max_candidate_point_num, supply_reduction, boundary_wire_unit, internal_wire_unit, internal_via_unit, topo_spilt_length,
+   * expand_step_num, expand_step_length, via_unit, overflow_unit, schedule_interval
    */
   ERComParam er_com_param(GetERStageByName()(stage_string), resolve_congestion, max_candidate_point_num, supply_reduction, boundary_wire_unit,
-                          internal_wire_unit, internal_via_unit, expand_step_num, expand_step_length, via_unit, overflow_unit, schedule_interval);
+                          internal_wire_unit, internal_via_unit, topo_spilt_length, expand_step_num, expand_step_length, via_unit, overflow_unit,
+                          schedule_interval);
   RTLOG.info(Loc::current(), "stage: ", GetERStageName()(er_com_param.get_stage()));
   RTLOG.info(Loc::current(), "resolve_congestion: ", er_com_param.get_resolve_congestion());
   RTLOG.info(Loc::current(), "max_candidate_point_num: ", er_com_param.get_max_candidate_point_num());
@@ -190,6 +194,7 @@ void EarlyRouter::setERComParam(ERModel& er_model, std::map<std::string, std::an
   RTLOG.info(Loc::current(), "boundary_wire_unit: ", er_com_param.get_boundary_wire_unit());
   RTLOG.info(Loc::current(), "internal_wire_unit: ", er_com_param.get_internal_wire_unit());
   RTLOG.info(Loc::current(), "internal_via_unit: ", er_com_param.get_internal_via_unit());
+  RTLOG.info(Loc::current(), "topo_spilt_length: ", er_com_param.get_topo_spilt_length());
   RTLOG.info(Loc::current(), "expand_step_num: ", er_com_param.get_expand_step_num());
   RTLOG.info(Loc::current(), "expand_step_length: ", er_com_param.get_expand_step_length());
   RTLOG.info(Loc::current(), "via_unit: ", er_com_param.get_via_unit());
@@ -1111,6 +1116,24 @@ void EarlyRouter::buildPlanarNodeMap(ERModel& er_model)
           er_node.get_ignore_net_orient_map()[net_idx].insert(orient_set.begin(), orient_set.end());
         }
       }
+      std::map<Orientation, std::set<int32_t>> planar_orient_allowed_net_map;
+      std::set<Orientation> unrestricted_orient_set;
+      for (auto& [layer_idx, orient_supply_map] : gcell_map[x][y].get_routing_orient_supply_map()) {
+        for (auto& [orient, supply] : orient_supply_map) {
+          if (supply <= 0 || RTUTIL.exist(unrestricted_orient_set, orient)) {
+            continue;
+          }
+          RoutingLayerAllowedNetMap& routing_allowed_net_map = gcell_map[x][y].get_routing_allowed_net_map();
+          if (!RTUTIL.exist(routing_allowed_net_map, layer_idx) || !RTUTIL.exist(routing_allowed_net_map[layer_idx], orient)) {
+            planar_orient_allowed_net_map.erase(orient);
+            unrestricted_orient_set.insert(orient);
+          } else {
+            planar_orient_allowed_net_map[orient].insert(routing_allowed_net_map[layer_idx][orient].begin(),
+                                                         routing_allowed_net_map[layer_idx][orient].end());
+          }
+        }
+      }
+      er_node.set_orient_allowed_net_map(planar_orient_allowed_net_map);
     }
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -1215,14 +1238,7 @@ void EarlyRouter::initSinglePlanarTask(ERModel& er_model, ERNet* er_task)
 
 std::vector<Segment<PlanarCoord>> EarlyRouter::getPlanarRoutingSegmentList(ERModel& er_model)
 {
-  std::vector<Segment<PlanarCoord>> planar_topo_list = getPlanarTopoList(er_model);
-
-  std::vector<ERCandidate> er_candidate_list;
-  for (size_t i = 0; i < planar_topo_list.size(); i++) {
-    for (std::vector<Segment<PlanarCoord>> routing_segment_list : getRoutingSegmentListList(er_model, planar_topo_list[i])) {
-      er_candidate_list.emplace_back(i, routing_segment_list, 0, false, 0);
-    }
-  }
+  std::vector<ERCandidate> er_candidate_list = getERCandidateList(er_model);
 #pragma omp parallel for
   for (ERCandidate& er_candidate : er_candidate_list) {
     updateERCandidate(er_model, er_candidate);
@@ -1235,14 +1251,18 @@ std::vector<Segment<PlanarCoord>> EarlyRouter::getPlanarRoutingSegmentList(ERMod
       continue;
     }
     ERCandidate* current_best = topo_candidate_map[topo_idx];
-    if (!er_candidate.get_is_blocked() && current_best->get_is_blocked()) {
+    if (!er_candidate.get_is_path_blocked() && current_best->get_is_path_blocked()) {
       topo_candidate_map[topo_idx] = &er_candidate;
-    } else if (!er_candidate.get_is_blocked() && !current_best->get_is_blocked()) {
-      if (er_candidate.get_total_length() < current_best->get_total_length()) {
+    } else if (!er_candidate.get_is_path_blocked() && !current_best->get_is_path_blocked()) {
+      if (er_candidate.get_total_wire_length() < current_best->get_total_wire_length()) {
         topo_candidate_map[topo_idx] = &er_candidate;
+      } else if (er_candidate.get_total_wire_length() == current_best->get_total_wire_length()) {
+        if (er_candidate.get_total_corner_num() < current_best->get_total_corner_num()) {
+          topo_candidate_map[topo_idx] = &er_candidate;
+        }
       }
-    } else if (er_candidate.get_is_blocked() && current_best->get_is_blocked()) {
-      if (er_candidate.get_total_cost() < current_best->get_total_cost()) {
+    } else if (er_candidate.get_is_path_blocked() && current_best->get_is_path_blocked()) {
+      if (er_candidate.get_total_overflow_cost() < current_best->get_total_overflow_cost()) {
         topo_candidate_map[topo_idx] = &er_candidate;
       }
     }
@@ -1256,8 +1276,33 @@ std::vector<Segment<PlanarCoord>> EarlyRouter::getPlanarRoutingSegmentList(ERMod
   return routing_segment_list;
 }
 
+std::vector<ERCandidate> EarlyRouter::getERCandidateList(ERModel& er_model)
+{
+  std::vector<Segment<PlanarCoord>> planar_topo_list = getPlanarTopoList(er_model);
+  std::vector<std::pair<int32_t, std::vector<std::vector<Segment<PlanarCoord>>> (EarlyRouter::*)(ERModel&, Segment<PlanarCoord>&)>> strategy_list;
+  strategy_list.emplace_back(0, &EarlyRouter::getRoutingSegmentListByStraight);
+  strategy_list.emplace_back(1, &EarlyRouter::getRoutingSegmentListByLPattern);
+  if (er_model.get_er_com_param().get_resolve_congestion() == "high") {
+    strategy_list.emplace_back(2, &EarlyRouter::getRoutingSegmentListByZPattern);
+    strategy_list.emplace_back(2, &EarlyRouter::getRoutingSegmentListByUPattern);
+    strategy_list.emplace_back(3, &EarlyRouter::getRoutingSegmentListByInner3Bends);
+    strategy_list.emplace_back(3, &EarlyRouter::getRoutingSegmentListByOuter3Bends);
+  }
+  std::vector<ERCandidate> er_candidate_list;
+  for (size_t i = 0; i < planar_topo_list.size(); i++) {
+    for (const auto& [corner_num, getRoutingSegmentList] : strategy_list) {
+      for (const std::vector<Segment<PlanarCoord>>& routing_segment_list : (this->*getRoutingSegmentList)(er_model, planar_topo_list[i])) {
+        er_candidate_list.emplace_back(i, routing_segment_list, corner_num, 0, false, 0);
+      }
+    }
+  }
+  return er_candidate_list;
+}
+
 std::vector<Segment<PlanarCoord>> EarlyRouter::getPlanarTopoList(ERModel& er_model)
 {
+  int32_t topo_spilt_length = er_model.get_er_com_param().get_topo_spilt_length();
+
   std::vector<PlanarCoord> planar_coord_list;
   {
     for (ERPin& er_pin : er_model.get_curr_er_task()->get_er_pin_list()) {
@@ -1267,32 +1312,44 @@ std::vector<Segment<PlanarCoord>> EarlyRouter::getPlanarTopoList(ERModel& er_mod
     planar_coord_list.erase(std::unique(planar_coord_list.begin(), planar_coord_list.end()), planar_coord_list.end());
   }
   std::vector<Segment<PlanarCoord>> planar_topo_list;
-  for (Segment<PlanarCoord>& planar_topo : RTI.getPlanarTopoList(planar_coord_list)) {
+  TBTask tb_task;
+  tb_task.set_planar_coord_list(planar_coord_list);
+  for (Segment<PlanarCoord>& planar_topo : RTTB.getPlanarTopoList(tb_task)) {
     PlanarCoord& first_coord = planar_topo.get_first();
     PlanarCoord& second_coord = planar_topo.get_second();
-    planar_topo_list.emplace_back(first_coord, second_coord);
-  }
-  return planar_topo_list;
-}
+    int32_t span_x = std::abs(first_coord.get_x() - second_coord.get_x());
+    int32_t span_y = std::abs(first_coord.get_y() - second_coord.get_y());
+    if (span_x > 1 && span_y > 1 && (span_x > topo_spilt_length || span_y > topo_spilt_length)) {
+      int32_t stick_num_x;
+      if (span_x % topo_spilt_length == 0) {
+        stick_num_x = (span_x / topo_spilt_length - 1);
+      } else {
+        stick_num_x = (span_x < topo_spilt_length) ? (span_x - 1) : (span_x / topo_spilt_length);
+      }
+      int32_t stick_num_y;
+      if (span_y % topo_spilt_length == 0) {
+        stick_num_y = (span_y / topo_spilt_length - 1);
+      } else {
+        stick_num_y = (span_y < topo_spilt_length) ? (span_y - 1) : (span_y / topo_spilt_length);
+      }
+      int32_t stick_num = std::min(stick_num_x, stick_num_y);
 
-std::vector<std::vector<Segment<PlanarCoord>>> EarlyRouter::getRoutingSegmentListList(ERModel& er_model, Segment<PlanarCoord>& planar_topo)
-{
-  std::vector<std::function<std::vector<std::vector<Segment<PlanarCoord>>>(ERModel&, Segment<PlanarCoord>&)>> strategy_list;
-  strategy_list.push_back(std::bind(&EarlyRouter::getRoutingSegmentListByStraight, this, std::placeholders::_1, std::placeholders::_2));
-  strategy_list.push_back(std::bind(&EarlyRouter::getRoutingSegmentListByLPattern, this, std::placeholders::_1, std::placeholders::_2));
-  if (er_model.get_er_com_param().get_resolve_congestion() == "high") {
-    strategy_list.push_back(std::bind(&EarlyRouter::getRoutingSegmentListByZPattern, this, std::placeholders::_1, std::placeholders::_2));
-    strategy_list.push_back(std::bind(&EarlyRouter::getRoutingSegmentListByUPattern, this, std::placeholders::_1, std::placeholders::_2));
-    strategy_list.push_back(std::bind(&EarlyRouter::getRoutingSegmentListByInner3Bends, this, std::placeholders::_1, std::placeholders::_2));
-    strategy_list.push_back(std::bind(&EarlyRouter::getRoutingSegmentListByOuter3Bends, this, std::placeholders::_1, std::placeholders::_2));
-  }
-  std::vector<std::vector<Segment<PlanarCoord>>> routing_segment_list_list;
-  for (auto getRoutingSegmentList : strategy_list) {
-    for (std::vector<Segment<PlanarCoord>> routing_segment_list : getRoutingSegmentList(er_model, planar_topo)) {
-      routing_segment_list_list.push_back(routing_segment_list);
+      std::vector<PlanarCoord> coord_list;
+      coord_list.push_back(first_coord);
+      double delta_x = static_cast<double>(second_coord.get_x() - first_coord.get_x()) / (stick_num + 1);
+      double delta_y = static_cast<double>(second_coord.get_y() - first_coord.get_y()) / (stick_num + 1);
+      for (int32_t i = 1; i <= stick_num; i++) {
+        coord_list.emplace_back(std::round(first_coord.get_x() + i * delta_x), std::round(first_coord.get_y() + i * delta_y));
+      }
+      coord_list.push_back(second_coord);
+      for (size_t i = 1; i < coord_list.size(); i++) {
+        planar_topo_list.emplace_back(coord_list[i - 1], coord_list[i]);
+      }
+    } else {
+      planar_topo_list.emplace_back(first_coord, second_coord);
     }
   }
-  return routing_segment_list_list;
+  return planar_topo_list;
 }
 
 std::vector<std::vector<Segment<PlanarCoord>>> EarlyRouter::getRoutingSegmentListByStraight(ERModel& er_model, Segment<PlanarCoord>& planar_topo)
@@ -1632,18 +1689,17 @@ void EarlyRouter::updateERCandidate(ERModel& er_model, ERCandidate& er_candidate
   GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
   int32_t curr_net_idx = er_model.get_curr_er_task()->get_net_idx();
 
-  int32_t total_length = 0;
-  for (Segment<PlanarCoord>& coord_segment : er_candidate.get_routing_segment_list()) {
-    total_length += RTUTIL.getManhattanDistance(coord_segment.get_first(), coord_segment.get_second());
-  }
-  bool is_blocked = false;
-  double total_cost = 0;
+  int32_t total_wire_length = 0;
+  bool is_path_blocked = false;
+  double total_overflow_cost = 0;
   for (Segment<PlanarCoord>& coord_segment : er_candidate.get_routing_segment_list()) {
     PlanarCoord& first_coord = coord_segment.get_first();
     PlanarCoord& second_coord = coord_segment.get_second();
     if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
       RTLOG.error(Loc::current(), "The direction is error!");
     }
+    total_wire_length += RTUTIL.getManhattanDistance(first_coord, second_coord);
+
     int32_t first_x = first_coord.get_x();
     int32_t second_x = second_coord.get_x();
     int32_t first_y = first_coord.get_y();
@@ -1655,15 +1711,15 @@ void EarlyRouter::updateERCandidate(ERModel& er_model, ERCandidate& er_candidate
       for (int32_t y = first_y; y <= second_y; y++) {
         double overflow_cost = planar_node_map[x][y].getOverflowCost(curr_net_idx, direction, overflow_unit);
         if (overflow_cost > 1) {
-          is_blocked = true;
+          is_path_blocked = true;
         }
-        total_cost += overflow_cost;
+        total_overflow_cost += overflow_cost;
       }
     }
   }
-  er_candidate.set_total_length(total_length);
-  er_candidate.set_is_blocked(is_blocked);
-  er_candidate.set_total_cost(total_cost);
+  er_candidate.set_total_wire_length(total_wire_length);
+  er_candidate.set_is_path_blocked(is_path_blocked);
+  er_candidate.set_total_overflow_cost(total_overflow_cost);
 }
 
 MTree<PlanarCoord> EarlyRouter::getCoordTree(ERModel& er_model, std::vector<Segment<PlanarCoord>>& routing_segment_list)
@@ -1716,6 +1772,9 @@ void EarlyRouter::buildLayerNodeMap(ERModel& er_model)
         er_node.set_internal_via_unit(gcell_map[x][y].get_internal_via_unit());
         if (RTUTIL.exist(gcell_map[x][y].get_routing_ignore_net_orient_map(), layer_idx)) {
           er_node.set_ignore_net_orient_map(gcell_map[x][y].get_routing_ignore_net_orient_map()[layer_idx]);
+        }
+        if (RTUTIL.exist(gcell_map[x][y].get_routing_allowed_net_map(), layer_idx)) {
+          er_node.set_orient_allowed_net_map(gcell_map[x][y].get_routing_allowed_net_map()[layer_idx]);
         }
       }
     }
@@ -2766,7 +2825,8 @@ void EarlyRouter::outputPlanarSupplyCSV(ERModel& er_model)
       int32_t total_supply = 0;
       for (RoutingLayer& routing_layer : routing_layer_list) {
         for (auto& [orient, supply] : gcell_map[x][y].get_routing_orient_supply_map()[routing_layer.get_layer_idx()]) {
-          total_supply += supply;
+          // boundary_supply + internal_supply
+          total_supply += (2 * supply);
         }
       }
       RTUTIL.pushStream(supply_csv_file, total_supply, ",");
@@ -2908,7 +2968,8 @@ void EarlyRouter::outputLayerSupplyCSV(ERModel& er_model)
       for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
         int32_t total_supply = 0;
         for (auto& [orient, supply] : gcell_map[x][y].get_routing_orient_supply_map()[routing_layer.get_layer_idx()]) {
-          total_supply += supply;
+          // boundary_supply + internal_supply
+          total_supply += (2 * supply);
         }
         RTUTIL.pushStream(supply_csv_file, total_supply, ",");
       }
@@ -3189,8 +3250,9 @@ void EarlyRouter::printSupplySummary(ERModel& er_model)
     for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
       for (auto& [routing_layer_idx, orient_supply_map] : gcell_map[x][y].get_routing_orient_supply_map()) {
         for (auto& [orient, supply] : orient_supply_map) {
-          routing_supply_map[routing_layer_idx] += supply;
-          total_supply += supply;
+          // boundary_supply + internal_supply
+          routing_supply_map[routing_layer_idx] += (2 * supply);
+          total_supply += (2 * supply);
         }
       }
     }

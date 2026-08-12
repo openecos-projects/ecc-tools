@@ -28,7 +28,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include "idm.h"
-#include "ista_io.h"
 #include "tool_manager.h"
 
 namespace idm {
@@ -111,21 +110,7 @@ uint64_t DataManager::netListLength(vector<string>& net_name_list)
  */
 bool DataManager::setNetIO(string io_pin_name, string net_name)
 {
-  IdbNetList* net_list_ptr = _design->get_net_list();
-  IdbPins* pin_list_ptr = _design->get_io_pin_list();
-  if (net_list_ptr == nullptr || pin_list_ptr == nullptr) {
-    return 0;
-  }
-
-  IdbPin* io_pin = pin_list_ptr->find_pin(io_pin_name);
-  IdbNet* net = net_list_ptr->find_net(net_name);
-  if (io_pin == nullptr || net == nullptr) {
-    return false;
-  }
-
-  net->add_io_pin(io_pin);
-
-  return true;
+  return _design->connectIoPinToNet(io_pin_name, net_name);
 }
 /**
  * @Brief : get clock net list
@@ -236,32 +221,40 @@ uint64_t DataManager::getIONetListLength()
 
 IdbNet* DataManager::createNet(const string& net_name, IdbConnectType type)
 {
-  auto* netlist = _design->get_net_list();
-
-  auto* net = netlist->add_net(net_name, type);
-  return net;
+  return _design->createOrFindNet(net_name, type);
 }
 
 bool DataManager::disconnectNet(IdbNet* net)
 {
+  if (net == nullptr) {
+    return false;
+  }
+
+  std::vector<IdbPin*> pin_list;
+  auto& io_pins = net->get_io_pins()->get_pin_list();
+  auto& inst_pins = net->get_instance_pin_list()->get_pin_list();
+  pin_list.insert(pin_list.end(), io_pins.begin(), io_pins.end());
+  pin_list.insert(pin_list.end(), inst_pins.begin(), inst_pins.end());
+  for (auto* pin : pin_list) {
+    _design->disconnectPinFromNet(pin);
+  }
+
   return true;
 }
 
 bool DataManager::connectNet(IdbNet* net)
 {
-  return true;
+  return net != nullptr;
 }
 
 bool DataManager::setNetType(string net_name, string type)
 {
-  IdbNetList* net_list_ptr = _design->get_net_list();
-  auto net = net_list_ptr->find_net(net_name);
-  if (net != nullptr) {
-    net->set_connect_type(type);
-    return true;
+  if (_design == nullptr) {
+    return false;
   }
 
-  return false;
+  IdbConnectType connect_type = IdbEnum::GetInstance()->get_connect_property()->get_type(type);
+  return _design->setNetConnectType(net_name, connect_type);
 }
 
 IdbInstance* DataManager::getIoCellByIoPin(IdbPin* io_pin)
@@ -289,9 +282,10 @@ IdbInstance* DataManager::getIoCellByIoPin(IdbPin* io_pin)
  */
 vector<string> DataManager::getClockNetNameList()
 {
-  vector<string> clock_name_List;
+  // vector<string> clock_name_List;
 
-  return staInst->getClockNetNameList();
+  // return staInst->getClockNetNameList();
+  return {};
 }
 /**
  * @brief check if net is a clock net
@@ -302,26 +296,26 @@ vector<string> DataManager::getClockNetNameList()
  */
 bool DataManager::isClockNet(string net_name)
 {
-  return staInst->isClockNet(net_name);
+  // return staInst->isClockNet(net_name);
+  return false;
 }
 /**
  * merge segment wire for all nets
  */
 void DataManager::mergeNets()
 {
-  IdbNetList* net_list_ptr = _design->get_net_list();
-  if (net_list_ptr != nullptr) {
-#pragma omp parallel for schedule(dynamic)
-    for (auto net : net_list_ptr->get_net_list()) {
-      mergeNet(net);
-    }
-  }
+  _design->mergeAllNetWires();
 }
 /**
  * merge segment wire for net
  */
 void DataManager::mergeNet(IdbNet* net)
 {
+  if (net != nullptr) {
+    net->mergeWireSegments();
+  }
+  return;
+
   /// split segment into segment wire and segment via,
   /// keep_via : if true, delete points and use this segment as via
   /// return : nullpt or a new segment via

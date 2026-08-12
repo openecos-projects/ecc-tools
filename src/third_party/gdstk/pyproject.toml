@@ -1,0 +1,54 @@
+[build-system]
+requires = [
+    "scikit_build_core",
+    "numpy >= 2.0"
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "gdstk"
+version = "1.0.0"
+authors = [{name = "Lucas H. Gabrielli", email = "heitzmann@gmail.com"}]
+description = "Python module for creation and manipulation of GDSII files."
+readme = "README.md"
+keywords = ["GDSII", "OASIS", "CAD",  "layout"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Manufacturing",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Boost Software License 1.0 (BSL-1.0)",
+    "Operating System :: OS Independent",
+    "Programming Language :: C++",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Typing :: Typed",
+]
+license = {file = "LICENSE"}
+dependencies = [
+    "numpy",
+    "typing_extensions; python_version < '3.11'"
+]
+requires-python = ">=3.9"
+
+[project.optional-dependencies]
+docs = ["sphinx", "sphinx_rtd_theme", "sphinx-inline-tabs", "matplotlib"]
+
+[project.urls]
+documentation = "https://heitzmann.github.io/gdstk/"
+repository = "https://github.com/heitzmann/gdstk"
+changelog = "https://github.com/heitzmann/gdstk/blob/main/CHANGELOG.md"
+
+[tool.scikit-build]
+cmake.version = ">=3.26"
+# cmake.build-type = "debug"
+build-dir = "build/{wheel_tag}"
+sdist.reproducible = false
+# package_data={"gdstk": ["*.pyi", "py.typed"]},
+wheel.packages = ["gdstk"]
+install.components = ["_gdstk"]
+
+[tool.black]
+line-length = 100

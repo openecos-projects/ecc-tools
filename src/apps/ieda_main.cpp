@@ -26,15 +26,18 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include <filesystem>
+#include <iostream>
+#include <string>
+
 #include "../platform/flow/flow.h"
-#include "log/Log.hh"
-#include "time/Time.hh"
+#include "utility/logger/Logger.hpp"
 
 using namespace iplf;
 
 int main(int argc, char** argv)
 {
-  ieda::Time::start();
+  ieda::Logger::initInst();
 
   if (argc == 1) {
     argv[0] = const_cast<char*>("UserShell\n");
@@ -48,7 +51,7 @@ int main(int argc, char** argv)
 
     // support specific log directory
     if (std::string("-log") == argv[i]) {
-      ieda::Log::init(argv, argv[i + 1]);
+      IEDALOG.openLogFileStream((std::filesystem::path(argv[i + 1]) / "ieda.log").string());
     }
 
     if (std::string("-script") == argv[i]) {
@@ -65,6 +68,8 @@ int main(int argc, char** argv)
   }
 
   plfInst->runTcl(argc, argv);
+
+  ieda::Logger::destroyInst();
 
   return 0;
 }

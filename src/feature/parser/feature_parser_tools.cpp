@@ -80,20 +80,20 @@ json FeatureParser::buildSummaryRT()
   }
 
   {
-    // TGSummary
-    json tg_json;
-    tg_json["total_demand"] = summary_irt.tg_summary.total_demand;
-    tg_json["total_overflow"] = summary_irt.tg_summary.total_overflow;
-    tg_json["total_wire_length"] = summary_irt.tg_summary.total_wire_length;
-    for (auto& [clock_name, timing] : summary_irt.tg_summary.clock_timing_map) {
-      tg_json["clock_timing_map"]["clock_name"] = clock_name;
-      tg_json["clock_timing_map"]["timing"] = timing;
+    // PRSummary
+    json pr_json;
+    pr_json["total_demand"] = summary_irt.pr_summary.total_demand;
+    pr_json["total_overflow"] = summary_irt.pr_summary.total_overflow;
+    pr_json["total_wire_length"] = summary_irt.pr_summary.total_wire_length;
+    for (auto& [clock_name, timing] : summary_irt.pr_summary.clock_timing_map) {
+      pr_json["clock_timing_map"]["clock_name"] = clock_name;
+      pr_json["clock_timing_map"]["timing"] = timing;
     }
-    for (auto& [type, power] : summary_irt.tg_summary.type_power_map) {
-      tg_json["type_power_map"]["type"] = type;
-      tg_json["type_power_map"]["power"] = power;
+    for (auto& [type, power] : summary_irt.pr_summary.type_power_map) {
+      pr_json["type_power_map"]["type"] = type;
+      pr_json["type_power_map"]["power"] = power;
     }
-    json_rt["TG"] = tg_json;
+    json_rt["PR"] = pr_json;
   }
 
   {
@@ -290,26 +290,12 @@ json FeatureParser::buildSummaryCTS()
   CTSSummary& summary = _summary->get_summary_icts();
 
   json_cts["buffer_num"] = summary.buffer_num;
-  json_cts["buffer_area"] = summary.buffer_area;
+  json_cts["buffer_area"] = summary.buffer_area.has_value() ? json(*summary.buffer_area) : json(nullptr);
   json_cts["clock_path_min_buffer"] = summary.clock_path_min_buffer;
   json_cts["clock_path_max_buffer"] = summary.clock_path_max_buffer;
   json_cts["max_level_of_clock_tree"] = summary.max_level_of_clock_tree;
   json_cts["max_clock_wirelength"] = summary.max_clock_wirelength;
   json_cts["total_clock_wirelength"] = summary.total_clock_wirelength;
-
-  json json_timing;
-  for (int i = 0; i < (int) summary.clocks_timing.size(); ++i) {
-    auto clock_timing = summary.clocks_timing[i];
-
-    json_timing[i]["clock_name"] = clock_timing.clock_name;
-    json_timing[i]["setup_tns"] = clock_timing.setup_tns;
-    json_timing[i]["setup_wns"] = clock_timing.setup_wns;
-    json_timing[i]["hold_tns"] = clock_timing.hold_tns;
-    json_timing[i]["hold_wns"] = clock_timing.hold_wns;
-    json_timing[i]["suggest_freq"] = clock_timing.suggest_freq;
-  }
-
-  json_cts["clocks_timing"] = json_timing;
 
   return json_cts;
 }

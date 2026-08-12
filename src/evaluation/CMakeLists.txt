@@ -12,3 +12,7 @@ add_subdirectory(${EVAL_API})
 #add_subdirectory(${EVAL_APPS})
 add_subdirectory(${EVAL_DATA})
 add_subdirectory(${EVAL_SOURCE})
+
+if(BUILD_TESTING)
+  add_subdirectory(${HOME_EVALUATION}/test)
+endif()

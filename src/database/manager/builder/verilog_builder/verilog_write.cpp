@@ -24,27 +24,81 @@
 #include "verilog_write.h"
 
 #include <cassert>
+#include <cstdarg>
+#include <cstdlib>
 #include <map>
+#include <optional>
 #include <regex>
+#include <string>
+#include <string_view>
 
-#include "log/Log.hh"
-#include "string/Str.hh"
-#include "time/Time.hh"
+#include "utility/logger/Logger.hpp"
 
 namespace idb {
+
+namespace {
+
+std::pair<std::string, std::optional<int>> splitBusName(const char* name)
+{
+  std::string_view name_view(name);
+  if (!name_view.ends_with("]")) {
+    return {std::string(name_view), std::nullopt};
+  }
+
+  size_t left_bracket_idx = name_view.find('[');
+  size_t right_bracket_idx = name_view.find(']', left_bracket_idx);
+  if (left_bracket_idx == std::string_view::npos || right_bracket_idx == std::string_view::npos) {
+    return {std::string(name_view), std::nullopt};
+  }
+
+  int index = std::atoi(std::string(name_view.substr(left_bracket_idx + 1, right_bracket_idx - left_bracket_idx - 1)).c_str());
+  return {std::string(name_view.substr(0, left_bracket_idx)), index};
+}
+
+std::string removeBackslash(std::string name)
+{
+  std::erase(name, '\\');
+  return name;
+}
+
+}  // namespace
+
 VerilogWriter::VerilogWriter(const char* file_name, std::set<std::string>& exclude_cell_names, IdbDesign& idb_design,
                              bool is_add_space_for_escape_name)
     : _file_name(file_name),
       _exclude_cell_names(exclude_cell_names),
+      _stream(nullptr),
+      _gzip_stream(nullptr),
+      _save_format(VerilogSaveFormat::kUnzip),
       _idb_design(idb_design),
       _is_add_space_for_escape_name(is_add_space_for_escape_name)
 {
-  _stream = std::fopen(file_name, "w");
+  if (std::string_view(file_name).find(".gz") != std::string_view::npos) {
+    _save_format = VerilogSaveFormat::kGzip;
+    _gzip_stream = gzopen(file_name, "w");
+  } else {
+    _save_format = VerilogSaveFormat::kUnzip;
+    _stream = std::fopen(file_name, "w");
+  }
 }
 
 VerilogWriter::~VerilogWriter()
 {
-  std::fclose(_stream);
+  switch (_save_format) {
+    case VerilogSaveFormat::kGzip:
+      if (_gzip_stream != nullptr) {
+        gzclose(_gzip_stream);
+        _gzip_stream = nullptr;
+      }
+      break;
+    case VerilogSaveFormat::kUnzip:
+    default:
+      if (_stream != nullptr) {
+        std::fclose(_stream);
+        _stream = nullptr;
+      }
+      break;
+  }
 }
 
 /**
@@ -53,28 +107,42 @@ VerilogWriter::~VerilogWriter()
  */
 void VerilogWriter::writeModule()
 {
-  if (!_stream) {
-    LOG_INFO << "File" << _file_name << "NotWritable";
+  if (_stream == nullptr && _gzip_stream == nullptr) {
+    IEDALOG.info(ieda::Loc::current(), "File", _file_name, "NotWritable");
   }
-  LOG_INFO << "start write verilog file " << _file_name;
+  IEDALOG.info(ieda::Loc::current(), "start write verilog file ", _file_name);
 
-  fprintf(_stream, "//Generate the verilog at %s by iSTA.\n", ieda::Time::getNowWallTime());
-
-  fprintf(_stream, "module %s (", _idb_design.get_design_name().c_str());
-  fprintf(_stream, "\n");
+  writeStr("module %s (", _idb_design.get_design_name().c_str());
+  writeStr("\n");
   writePorts();
-  fprintf(_stream, "\n");
+  writeStr("\n");
   writePortDcls();
-  fprintf(_stream, "\n");
+  writeStr("\n");
   writeWire();
-  fprintf(_stream, "\n");
+  writeStr("\n");
   writeAssign();
-  fprintf(_stream, "\n");
+  writeStr("\n");
   writeInstances();
-  fprintf(_stream, "\n");
-  fprintf(_stream, "endmodule\n");
+  writeStr("\n");
+  writeStr("endmodule\n");
 
-  LOG_INFO << "finish write verilog file " << _file_name;
+  IEDALOG.info(ieda::Loc::current(), "finish write verilog file ", _file_name);
+}
+
+void VerilogWriter::writeStr(const char* strdata, ...)
+{
+  va_list args;
+  va_start(args, strdata);
+  switch (_save_format) {
+    case VerilogSaveFormat::kGzip:
+      gzvprintf(_gzip_stream, strdata, args);
+      break;
+    case VerilogSaveFormat::kUnzip:
+    default:
+      vfprintf(_stream, strdata, args);
+      break;
+  }
+  va_end(args);
 }
 
 /**
@@ -89,7 +157,7 @@ void VerilogWriter::writePorts()
 
   for (const auto& io_pin : io_pin_list) {
     std::string pin_name = io_pin->get_pin_name();
-    auto [pin_bus_name, is_bus] = ieda::Str::matchBusName(pin_name.c_str());
+    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
 
     if (is_bus) {
       continue;
@@ -105,10 +173,10 @@ void VerilogWriter::writePorts()
         || io_pin->get_term()->get_direction() == IdbConnectDirection::kOutput
         || io_pin->get_term()->get_direction() == IdbConnectDirection::kInOut) {
       if (!first) {
-        fprintf(_stream, ",\n");
+        writeStr(",\n");
       }
 
-      fprintf(_stream, "%s", pin_name.c_str());
+      writeStr("%s", pin_name.c_str());
       first = false;
     }
   }
@@ -116,7 +184,7 @@ void VerilogWriter::writePorts()
   std::set<std::string> bus_processed;
   for (const auto& io_pin : io_pin_list) {
     std::string pin_name = io_pin->get_pin_name();
-    auto [pin_bus_name, is_bus] = ieda::Str::matchBusName(pin_name.c_str());
+    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
 
     if (!is_bus) {
       continue;
@@ -127,16 +195,16 @@ void VerilogWriter::writePorts()
     // }
 
     if (!first) {
-      fprintf(_stream, ",\n");
+      writeStr(",\n");
     }
 
     // bus_processed.insert(pin_bus_name);
 
-    fprintf(_stream, "\\%s ", pin_name.c_str());
+    writeStr("\\%s ", pin_name.c_str());
     first = false;
   }
 
-  fprintf(_stream, ");\n");
+  writeStr(");\n");
 }
 
 /**
@@ -153,7 +221,7 @@ void VerilogWriter::writePortDcls()
 
   for (const auto& io_pin : io_pin_list) {
     std::string pin_name = io_pin->get_pin_name();
-    auto [pin_bus_name, is_bus] = ieda::Str::matchBusName(pin_name.c_str());
+    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
 
     if (is_bus) {
       continue;
@@ -167,11 +235,11 @@ void VerilogWriter::writePortDcls()
     IdbConnectDirection port_dir = io_pin->get_term()->get_direction();
 
     if (port_dir == IdbConnectDirection::kInput) {
-      fprintf(_stream, "input %s ;\n", pin_name.c_str());
+      writeStr("input %s ;\n", pin_name.c_str());
     } else if (port_dir == IdbConnectDirection::kOutput) {
-      fprintf(_stream, "output %s ;\n", pin_name.c_str());
+      writeStr("output %s ;\n", pin_name.c_str());
     } else if (port_dir == IdbConnectDirection::kInOut) {
-      fprintf(_stream, "inout %s ;\n", pin_name.c_str());
+      writeStr("inout %s ;\n", pin_name.c_str());
     } else {
       continue;
     }
@@ -180,7 +248,7 @@ void VerilogWriter::writePortDcls()
   std::set<std::string> bus_processed;
   for (const auto& io_pin : io_pin_list) {
     std::string pin_name = io_pin->get_pin_name();
-    auto [pin_bus_name, is_bus] = ieda::Str::matchBusName(pin_name.c_str());
+    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
 
     if (!is_bus) {
       continue;
@@ -198,14 +266,12 @@ void VerilogWriter::writePortDcls()
 
     IdbConnectDirection port_dir = io_pin->get_term()->get_direction();
 
-    // const char* bus_range = ieda::Str::printf("[%d:%d]", bus_left, bus_right);
-
     if (port_dir == IdbConnectDirection::kInput) {
-      fprintf(_stream, "input \\%s ;\n",  pin_name.c_str());
+      writeStr("input \\%s ;\n",  pin_name.c_str());
     } else if (port_dir == IdbConnectDirection::kOutput) {
-      fprintf(_stream, "output \\%s ;\n",  pin_name.c_str());
+      writeStr("output \\%s ;\n",  pin_name.c_str());
     } else if (port_dir == IdbConnectDirection::kInOut) {
-      fprintf(_stream, "inout \\%s ;\n",  pin_name.c_str());
+      writeStr("inout \\%s ;\n",  pin_name.c_str());
     } else {
       continue;
     }
@@ -228,7 +294,7 @@ void VerilogWriter::writeWire()
   for (const auto& net : net_list) {
     std::string net_name = net->get_net_name();
 
-    auto [net_bus_name, is_bus] = ieda::Str::matchBusName(net_name.c_str());
+    auto [net_bus_name, is_bus] = splitBusName(net_name.c_str());
 
     if (net_bus_name.back() == '\\') {
       is_bus = std::nullopt;
@@ -245,14 +311,12 @@ void VerilogWriter::writeWire()
 
     std::string new_net_name = replace_str(net_name, R"(\\)", "");
     std::string escape_net_name = escapeName(new_net_name);
-    fprintf(_stream, "wire %s ;\n", escape_net_name.c_str());
+    writeStr("wire %s ;\n", escape_net_name.c_str());
   }
 
   // std::set<std::string> bus_processed;
   // for (const auto& net : net_list) {
   //   std::string net_name = net->get_net_name();
-
-  //   auto [net_bus_name, is_bus] = ieda::Str::matchBusName(net_name.c_str());
 
   //   if (net_bus_name.back() == '\\') {
   //     is_bus = std::nullopt;
@@ -297,19 +361,19 @@ void VerilogWriter::writeAssign()
     for (const auto& io_pin : net->get_io_pins()->get_pin_list()) {
       // assign net = input_port;
 
-      std::string new_net_name = ieda::Str::replace(net_name, R"(\\)", "");
+      std::string new_net_name = removeBackslash(net_name);
       std::string escape_net_name = escapeName(new_net_name);
 
-      std::string new_io_pin_name = ieda::Str::replace(io_pin->get_pin_name(), R"(\\)", "");
+      std::string new_io_pin_name = removeBackslash(io_pin->get_pin_name());
       std::string escape_io_pin_name = escapeName(new_io_pin_name);
 
       if (io_pin->get_term()->get_direction() == IdbConnectDirection::kInput && io_pin->get_pin_name() != net_name) {
-        fprintf(_stream, "assign %s = %s ;\n", escape_net_name.c_str(), escape_io_pin_name.c_str());
+        writeStr("assign %s = %s ;\n", escape_net_name.c_str(), escape_io_pin_name.c_str());
       }
       // assign output_port = net;
       // assign output_port = input_port;
       if (io_pin->get_term()->get_direction() == IdbConnectDirection::kOutput && io_pin->get_pin_name() != net_name) {
-        fprintf(_stream, "assign %s = %s ;\n", escape_io_pin_name.c_str(), escape_net_name.c_str());
+        writeStr("assign %s = %s ;\n", escape_io_pin_name.c_str(), escape_net_name.c_str());
       }
     }
   }
@@ -348,15 +412,24 @@ void VerilogWriter::writeInstance(IdbInstance* inst)
   std::string new_inst_name = replace_str(inst_name, R"(\\)", "");
   std::string inst_escape_name = escapeName(new_inst_name);
 
-  fprintf(_stream, "%s %s ( ", inst_cell_name.c_str(), inst_escape_name.c_str());
+  writeStr("%s %s ( ", inst_cell_name.c_str(), inst_escape_name.c_str());
 
   bool first_pin = true;
   vector<IdbPin*> pin_list = inst->get_pin_list()->get_pin_list();
+  std::map<std::string, std::map<int, IdbPin*>> instance_bus_pins;
+
+  for (const auto& pin : pin_list) {
+    std::string pin_name = pin->get_pin_name();
+    auto [pin_bus_name, bus_index] = splitBusName(pin_name.c_str());
+    if (bus_index) {
+      instance_bus_pins[pin_bus_name][bus_index.value()] = pin;
+    }
+  }
 
   for (const auto& pin : pin_list) {
     std::string pin_name = pin->get_pin_name();
 
-    auto [pin_bus_name, is_bus] = ieda::Str::matchBusName(pin_name.c_str());
+    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
 
     if (is_bus) {
       continue;
@@ -380,10 +453,10 @@ void VerilogWriter::writeInstance(IdbInstance* inst)
     pin_net_name = escapeName(pin_net_name);
 
     if (!first_pin) {
-      fprintf(_stream, ", ");
+      writeStr(", ");
     }
 
-    fprintf(_stream, ".%s(%s )", pin_name.c_str(), pin_net_name.c_str());
+    writeStr(".%s(%s )", pin_name.c_str(), pin_net_name.c_str());
     first_pin = false;
   }
 
@@ -391,7 +464,7 @@ void VerilogWriter::writeInstance(IdbInstance* inst)
   for (const auto& pin : pin_list) {
     std::string pin_name = pin->get_pin_name();
 
-    auto [pin_bus_name, is_bus] = ieda::Str::matchBusName(pin_name.c_str());
+    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
 
     if (!is_bus) {
       continue;
@@ -408,23 +481,43 @@ void VerilogWriter::writeInstance(IdbInstance* inst)
     bus_name += pin_bus_name;
 
     auto pin_bus = _idb_design.get_bus_list()->findBus(bus_name);
-    assert(pin_bus);
-    int bus_left = pin_bus->get().get_left();
-    int bus_right = pin_bus->get().get_right();
+    auto local_bus_pin_it = instance_bus_pins.find(pin_bus_name);
+    int bus_left = 0;
+    int bus_right = 0;
+
+    if (pin_bus) {
+      bus_left = pin_bus->get().get_left();
+      bus_right = pin_bus->get().get_right();
+    } else {
+      if (local_bus_pin_it == instance_bus_pins.end() || local_bus_pin_it->second.empty()) {
+        IEDALOG.warn(ieda::Loc::current(), "skip missing bus pin ", bus_name, " when writing verilog instance ", inst->get_name());
+        continue;
+      }
+      bus_left = local_bus_pin_it->second.rbegin()->first;
+      bus_right = local_bus_pin_it->second.begin()->first;
+    }
 
     std::string concate_str = "{ ";
     for (int index = bus_left; index >= bus_right; --index) {
-      auto* one_pin = pin_bus->get().getPin(index);
-      assert(one_pin);
+      auto* one_pin = pin_bus ? pin_bus->get().getPin(index) : nullptr;
+      if (one_pin == nullptr && local_bus_pin_it != instance_bus_pins.end()) {
+        if (auto local_pin_it = local_bus_pin_it->second.find(index); local_pin_it != local_bus_pin_it->second.end()) {
+          one_pin = local_pin_it->second;
+        }
+      }
 
       std::string pin_net_name;
 
-      if (one_pin->get_net()) {
-        pin_net_name = one_pin->get_net()->get_net_name();
-      } else {
-        if (one_pin->get_term()->get_direction() == IdbConnectDirection::kInput) {
-          pin_net_name = R"(1'b0)";
+      if (one_pin) {
+        if (one_pin->get_net()) {
+          pin_net_name = one_pin->get_net()->get_net_name();
+        } else {
+          if (one_pin->get_term()->get_direction() == IdbConnectDirection::kInput) {
+            pin_net_name = R"(1'b0)";
+          }
         }
+      } else {
+        pin_net_name = R"(1'b0)";
       }
 
       pin_net_name = escapeName(pin_net_name);
@@ -440,15 +533,15 @@ void VerilogWriter::writeInstance(IdbInstance* inst)
     concate_str += " }";
 
     if (!first_pin) {
-      fprintf(_stream, ", ");
+      writeStr(", ");
     }
 
-    fprintf(_stream, ".%s(%s )", pin_bus_name.c_str(), concate_str.c_str());
+    writeStr(".%s(%s )", pin_bus_name.c_str(), concate_str.c_str());
 
     first_pin = false;
   }
 
-  fprintf(_stream, " );\n");
+  writeStr(" );\n");
 }
 
 /**
@@ -478,7 +571,7 @@ bool VerilogWriter::isNeedEscape(const std::string& name)
  */
 std::string VerilogWriter::escapeName(const std::string& name)
 {
-  std::string trim_name = ieda::Str::trimBackslash(name);
+  std::string trim_name = removeBackslash(name);
 
   std::string escape_name;
   if (_is_add_space_for_escape_name) {

@@ -59,9 +59,9 @@ class IdbSite
   const int32_t get_height() const { return _heigtht; }
   const IdbOrient get_orient() { return _orient; }
 
-  bool is_core_site() { return _type == IdbSiteType::kCore ? true : false; }
-  bool is_pad_site() { return _type == IdbSiteType::kPad ? true : false; }
-  bool is_corner_site() { return _type == IdbSiteType::kCorner ? true : false; }
+  bool is_core_site() { return _site_class == IdbSiteClass::kCore ? true : false; }
+  bool is_pad_site() { return _site_class == IdbSiteClass::kPad ? true : false; }
+  bool is_corner_site() { return _site_class == IdbSiteClass::kCorner || _width == _heigtht ? true : false; }
 
   IdbSite* clone();
 
@@ -76,9 +76,9 @@ class IdbSite
   void set_width(int32_t width) { _width = width; }
   void set_height(int32_t height) { _heigtht = height; }
 
-  void set_type_core() { _type = IdbSiteType::kCore; }
-  void set_type_pad() { _type = IdbSiteType::kPad; }
-  void set_type_corner() { _type = IdbSiteType::kCorner; }
+  void set_type_core() { _site_class = IdbSiteClass::kCore; }
+  void set_type_pad() { _site_class = IdbSiteClass::kPad; }
+  void set_type_corner() { _site_class = IdbSiteClass::kCorner; }
 
  private:
   string _name;
@@ -90,7 +90,7 @@ class IdbSite
   IdbSymmetry _symmetry;
   IdbOrient _orient;
 
-  IdbSiteType _type = IdbSiteType::kNone;
+  // IdbSiteType _type = IdbSiteType::kNone;
 
   // RowPattern预留
 };
@@ -111,23 +111,42 @@ class IdbSites
   // setter
   void set_io_site(IdbSite* site)
   {
-    site->set_type_pad();
     _io_site = site;
   }
   void set_corener_site(IdbSite* site)
   {
-    site->set_type_corner();
     _corner_site = site;
   }
   void set_core_site(IdbSite* site)
   {
-    site->set_type_core();
+
     _core_site = site;
   }
   void set_sites_number(uint32_t number) { _site_num = number; }
   IdbSite* add_site_list(IdbSite* site = nullptr);
   IdbSite* add_site_list(string site_name);
   void reset();
+  
+  bool is_core_site(string site_name){
+   if(_core_site != nullptr && _core_site->get_name() == site_name){
+     return true;
+   }
+    return false;
+  }
+
+  bool is_corner_site(string site_name){
+   if(_corner_site != nullptr && _corner_site->get_name() == site_name){
+     return true;
+   }
+    return false;
+  }
+
+  bool is_io_site(string site_name){
+   if(_io_site != nullptr && _io_site->get_name() == site_name){
+     return true;
+   }
+    return false;
+  }
 
  private:
   uint32_t _site_num;
