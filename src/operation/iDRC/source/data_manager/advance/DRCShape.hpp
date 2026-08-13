@@ -36,16 +36,19 @@ class DRCShape : public LayerRect
   int32_t get_net_idx() const { return _net_idx; }
   bool get_is_routing() const { return _is_routing; }
   bool get_is_obs() const { return _is_obs; }
+  bool get_is_special_net() const { return _is_special_net; }
   // setter
   void set_net_idx(const int32_t net_idx) { _net_idx = net_idx; }
   void set_is_routing(const bool is_routing) { _is_routing = is_routing; }
   void set_is_obs(const bool is_obs) { _is_obs = is_obs; }
+  void set_is_special_net(const bool is_special_net) { _is_special_net = is_special_net; }
   // function
 
  private:
   int32_t _net_idx = -1;
   bool _is_routing = true;
   bool _is_obs = false;
+  bool _is_special_net = false;
 };
 
 }  // namespace idrc
