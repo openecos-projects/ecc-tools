@@ -166,8 +166,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.die_margin_top_micron = -1.0;
   config.die_margin_bottom_micron = -1.0;
   config.io_pin_layer_name_list.clear();
-  config.io_pin_width_micron = -1.0;
-  config.io_pin_depth_micron = -1.0;
   config.pg_connect_list.clear();
   config.pg_rail_list.clear();
   config.pg_stripe_list.clear();
@@ -225,8 +223,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   for (nlohmann::json& layer_name_json : io_placer_json["io_layer_list"]) {
     config.io_pin_layer_name_list.push_back(layer_name_json.get<std::string>());
   }
-  config.io_pin_width_micron = io_placer_json["width_micron"].get<double>();
-  config.io_pin_depth_micron = io_placer_json["depth_micron"].get<double>();
 
   nlohmann::json& phy_placer_json = config_json["phy_placer"];
   nlohmann::json& well_tap_json = phy_placer_json["well_tap"];
