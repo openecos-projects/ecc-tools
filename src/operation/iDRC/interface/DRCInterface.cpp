@@ -170,8 +170,10 @@ std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids
   }
   std::vector<DRCShape> drc_result_shape_list;
   drc_result_shape_list.reserve(ids_result_shape_list.size());
+  const int32_t regular_net_num = static_cast<int32_t>(dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list().size());
   for (const ids::Shape& ids_result_shape : ids_result_shape_list) {
     drc_result_shape_list.push_back(convertToDRCShape(ids_result_shape));
+    drc_result_shape_list.back().set_is_special_net(ids_result_shape.net_idx >= regular_net_num);
   }
   std::set<ViolationType> drc_check_type_set;
   for (std::string ids_check_type : ids_check_type_set) {
