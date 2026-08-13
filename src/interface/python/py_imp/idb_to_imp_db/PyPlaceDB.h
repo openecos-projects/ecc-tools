@@ -35,6 +35,19 @@ double intersectArea(Box const& b1, Box const& b2);
 bool isInvailidNet(IdbNet* net);
 
 std::string IdbOrientToString(IdbOrient orient);
+
+inline bool isPlacementFixed(idb::IdbInstance* node)
+{
+  const auto status = node->get_status();
+  if (status == idb::IdbPlacementStatus::kFixed) {
+    return true;
+  }
+
+  auto* cell_master = node->get_cell_master();
+  return cell_master != nullptr && cell_master->is_block()
+         && (status == idb::IdbPlacementStatus::kPlaced || status == idb::IdbPlacementStatus::kCover);
+}
+
 /// database for python
 struct PyPlaceDB
 {
