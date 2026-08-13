@@ -911,7 +911,7 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(PRModel& pr_mo
   TBSegmentCostQuery segment_cost_query
       = [this, &pr_model](const PlanarCoord& first, const PlanarCoord& second) { return getTopologySegmentCost(pr_model, first, second); };
   bool congestion_driven = pr_topo_mode == PRTopoMode::kCongestion && shouldUseCongestionFlute(pr_model, planar_coord_list.size());
-  tb_task.set_congestion_driven(congestion_driven);
+  tb_task.set_topo_mode(congestion_driven ? TBTopoMode::kCongestion : TBTopoMode::kCost);
   if (pr_topo_mode == PRTopoMode::kNormal) {
     tb_task.set_segment_cost_query(std::move(segment_cost_query));
     return RTTB.getPlanarTopoList(tb_task);
