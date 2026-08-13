@@ -452,15 +452,16 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
 
   layer_data.clear();
   std::map<int32_t, std::map<int32_t, GTLPolySetInt>> env_routing_polysets;
+  std::map<int32_t, std::map<int32_t, GTLPolySetInt>> metal_short_metal_polysets;
+  std::map<int32_t, GTLPolySetInt> metal_short_obs_polysets;
 
   auto add_shape_to_layer_data = [&](DRCShape* drc_shape, bool is_env_shape) {
     GTLRectInt gtl_rect = DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
     if (drc_shape->get_is_routing()) {
-      RVLayerData& rv_layer_data = layer_data[drc_shape->get_layer_idx()];
       if (drc_shape->get_is_obs()) {
-        rv_layer_data.obs_rtree.insert(gtl_rect);
+        metal_short_obs_polysets[drc_shape->get_layer_idx()] += gtl_rect;
       } else {
-        rv_layer_data.metal_rtree.insert({gtl_rect, drc_shape->get_net_idx()});
+        metal_short_metal_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += gtl_rect;
       }
     }
     if (!drc_shape->get_is_routing()) {
@@ -488,6 +489,8 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
 
     std::vector<std::pair<GTLRectInt, int32_t>> rect_rtree_inputs;
     std::vector<std::pair<GTLRectInt, int32_t>> boundary_rtree_inputs;
+    std::vector<std::pair<GTLRectInt, int32_t>> metal_short_metal_rtree_inputs;
+    std::vector<GTLRectInt> metal_short_obs_rtree_inputs;
     rv_layer_data.polygon_pool.clear();
     rv_layer_data.max_rect_pool.clear();
     rv_layer_data.boundary_pool.clear();
@@ -626,6 +629,24 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
     rv_layer_data.rect_rtrees = decltype(rv_layer_data.rect_rtrees)(rect_rtree_inputs);
     rv_layer_data.boundary_rtrees = decltype(rv_layer_data.boundary_rtrees)(boundary_rtree_inputs);
     rv_layer_data.cut_rtrees = decltype(rv_layer_data.cut_rtrees)(rv_layer_data.cut_pool);
+
+    auto layer_metal_it = metal_short_metal_polysets.find(layer_idx);
+    if (layer_metal_it != metal_short_metal_polysets.end()) {
+      for (auto& [net_idx, polyset] : layer_metal_it->second) {
+        std::vector<GTLRectInt> max_rect_list;
+        gtl::get_max_rectangles(max_rect_list, polyset);
+        for (const GTLRectInt& max_rect : max_rect_list) {
+          metal_short_metal_rtree_inputs.push_back({max_rect, net_idx});
+        }
+      }
+    }
+    rv_layer_data.metal_short_metal_rtree = decltype(rv_layer_data.metal_short_metal_rtree)(metal_short_metal_rtree_inputs);
+
+    auto layer_obs_it = metal_short_obs_polysets.find(layer_idx);
+    if (layer_obs_it != metal_short_obs_polysets.end()) {
+      gtl::get_max_rectangles(metal_short_obs_rtree_inputs, layer_obs_it->second);
+    }
+    rv_layer_data.metal_short_obs_rtree = decltype(rv_layer_data.metal_short_obs_rtree)(metal_short_obs_rtree_inputs);
   }
 }
 

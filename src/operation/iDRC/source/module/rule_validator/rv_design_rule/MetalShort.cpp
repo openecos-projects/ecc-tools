@@ -22,6 +22,7 @@ void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
 {
   const auto& layer_data = rv_cluster.get_layer_data();
   std::map<int32_t, std::map<int32_t, GTLPolySetInt>> routing_net_checking_polysets;
+  std::map<int32_t, std::map<int32_t, bool>> routing_net_is_special;
 
   // checking polyset keeps the result routing only.
   {
@@ -29,6 +30,7 @@ void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
     for (DRCShape* drc_shape : rv_cluster.get_drc_result_shape_list()) {
       if (drc_shape->get_is_routing() && drc_shape->get_net_idx() != -1) {
         net_rects_to_merge_checking[drc_shape->get_layer_idx()][drc_shape->get_net_idx()].push_back(DRCUTIL.convertToGTLRectInt(drc_shape->get_rect()));
+        routing_net_is_special[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] = drc_shape->get_is_special_net();
       }
     }
     for (auto& [layer_idx, net_map] : net_rects_to_merge_checking) {
@@ -50,6 +52,7 @@ void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
     std::vector<std::pair<GTLRectInt, int32_t>> overlap_metal_rects;
     std::vector<GTLRectInt> overlap_obs_rects;
     for (auto& [net_idx, polyset] : net_polyset) {
+      bool is_special_net = routing_net_is_special[routing_layer_idx][net_idx];
       std::vector<GTLRectInt> rect_list;
       gtl::get_max_rectangles(rect_list, polyset);
 
@@ -57,7 +60,7 @@ void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
         PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
 
         overlap_metal_rects.clear();
-        rv_layer_data.queryMetalRects(gtl_rect, std::back_inserter(overlap_metal_rects));
+        rv_layer_data.queryMetalShortMetalRects(gtl_rect, std::back_inserter(overlap_metal_rects));
         for (auto [env_gtl_rect, env_net_idx] : overlap_metal_rects) {
           if (net_idx == env_net_idx) {
             continue;
@@ -77,10 +80,13 @@ void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
         }
 
         overlap_obs_rects.clear();
-        rv_layer_data.queryObsRects(gtl_rect, std::back_inserter(overlap_obs_rects));
+        rv_layer_data.queryMetalShortObsRects(gtl_rect, std::back_inserter(overlap_obs_rects));
         for (const GTLRectInt& obs_gtl_rect : overlap_obs_rects) {
           PlanarRect obs_rect = DRCUTIL.convertToPlanarRect(obs_gtl_rect);
-          if (!DRCUTIL.isOpenOverlap(rect, obs_rect)) {
+          if (!DRCUTIL.isClosedOverlap(rect, obs_rect)) {
+            continue;
+          }
+          if (is_special_net && !DRCUTIL.isOpenOverlap(rect, obs_rect)) {
             continue;
           }
           Violation violation;
