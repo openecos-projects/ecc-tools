@@ -363,6 +363,7 @@ void FPInterface::wrapRoutingLayerList()
     routing_layer.set_order(idb_routing_layer->get_order());
     routing_layer.set_pitch_x(idb_routing_layer->get_pitch_x());
     routing_layer.set_pitch_y(idb_routing_layer->get_pitch_y());
+    routing_layer.set_min_width(idb_routing_layer->get_min_width());
     routing_layer.set_prefer_track_offset(idb_routing_layer->get_offset_prefer());
     routing_layer.set_spacing(idb_routing_layer->get_spacing(0));
     routing_layer.set_prefer_direction(idb_routing_layer->is_horizontal() ? Direction::kHorizontal : Direction::kVertical);

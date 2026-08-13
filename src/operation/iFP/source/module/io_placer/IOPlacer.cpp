@@ -93,9 +93,11 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
     return;
   }
 
+  int32_t horizontal_width = getLayerMinWidth(horizontal_layer_name);
+  int32_t vertical_width = getLayerMinWidth(vertical_layer_name);
   int32_t horizontal_pitch = getTrackPitch(horizontal_layer_name);
   int32_t vertical_pitch = getTrackPitch(vertical_layer_name);
-  if (horizontal_pitch <= 0 || vertical_pitch <= 0) {
+  if (horizontal_width <= 0 || vertical_width <= 0 || horizontal_pitch <= 0 || vertical_pitch <= 0) {
     return;
   }
 
@@ -109,14 +111,24 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
   int32_t horizontal_offset = getTrackOffset(horizontal_layer_name);
   int32_t vertical_offset = getTrackOffset(vertical_layer_name);
 
-  placeIOPinsOnEdge(IOEdgeType::kLeft, io_pin_list, io_pin_idx, edge_pin_num, horizontal_layer_name, horizontal_pitch,
+  placeIOPinsOnEdge(IOEdgeType::kLeft, io_pin_list, io_pin_idx, edge_pin_num, horizontal_layer_name, horizontal_width,
                     horizontal_depth, vertical_pitch, horizontal_offset, horizontal_pitch);
-  placeIOPinsOnEdge(IOEdgeType::kRight, io_pin_list, io_pin_idx, edge_pin_num, horizontal_layer_name, horizontal_pitch,
+  placeIOPinsOnEdge(IOEdgeType::kRight, io_pin_list, io_pin_idx, edge_pin_num, horizontal_layer_name, horizontal_width,
                     horizontal_depth, vertical_pitch, horizontal_offset, horizontal_pitch);
-  placeIOPinsOnEdge(IOEdgeType::kBottom, io_pin_list, io_pin_idx, edge_pin_num, vertical_layer_name, vertical_pitch,
+  placeIOPinsOnEdge(IOEdgeType::kBottom, io_pin_list, io_pin_idx, edge_pin_num, vertical_layer_name, vertical_width,
                     vertical_depth, horizontal_pitch, vertical_offset, vertical_pitch);
-  placeIOPinsOnEdge(IOEdgeType::kTop, io_pin_list, io_pin_idx, edge_pin_num, vertical_layer_name, vertical_pitch,
+  placeIOPinsOnEdge(IOEdgeType::kTop, io_pin_list, io_pin_idx, edge_pin_num, vertical_layer_name, vertical_width,
                     vertical_depth, horizontal_pitch, vertical_offset, vertical_pitch);
+}
+
+int32_t IOPlacer::getLayerMinWidth(std::string layer_name)
+{
+  Database& database = FPDM.getDatabase();
+  auto iter = database.get_routing_layer_name_to_idx_map().find(layer_name);
+  if (iter == database.get_routing_layer_name_to_idx_map().end()) {
+    return 0;
+  }
+  return database.get_routing_layer_list()[iter->second].get_min_width();
 }
 
 int32_t IOPlacer::getTrackPitch(std::string layer_name)

@@ -48,6 +48,7 @@ class IOPlacer
 
   void placeIOPin();
   void autoPlacePins(std::vector<std::string>& layer_name_list);
+  int32_t getLayerMinWidth(std::string layer_name);
   int32_t getTrackPitch(std::string layer_name);
   int32_t getTrackOffset(std::string layer_name);
   void placeIOPinsOnEdge(IOEdgeType edge_type, std::vector<IOPin>& io_pin_list, int32_t& io_pin_idx, int32_t edge_pin_num,
