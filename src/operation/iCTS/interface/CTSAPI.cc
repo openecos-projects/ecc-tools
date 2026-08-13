@@ -29,6 +29,7 @@
 #include "LogTable.hh"
 #include "Logger.hh"
 #include "Monitor.hh"
+#include "Utility.hh"
 #include "data_manager/DataManager.hh"
 #include "evaluation/Evaluation.hh"
 #include "evaluation/qor/QOREvaluation.hh"
@@ -71,11 +72,7 @@ auto buildInputStatus(const DataManagerStatus& input_status) -> CTSStatus
 
 CTSAPI::CTSAPI() = default;
 
-CTSAPI::~CTSAPI()
-{
-  DataManager::destroyInst();
-  Logger::destroyInst();
-}
+CTSAPI::~CTSAPI() = default;
 
 auto CTSAPI::setLastStatus(CTSStatus status) -> CTSStatus
 {
@@ -152,18 +149,28 @@ auto CTSAPI::report(const std::string& save_dir) -> CTSStatus
                                           : CTSStatus{.code = CTSStatusCode::kReportError, .message = "CTS report generation failed.", .diagnostics = {}});
 }
 
-auto CTSAPI::resetAPI() -> void
+auto CTSAPI::destroyCTS() -> CTSStatus
 {
   auto& api = getInst();
+  Logger::initInst();
+  CTSLOG.info(Loc::current(), "Starting CTS destruction...");
   DataManager::destroyInst();
-  Logger::destroyInst();
   api._initialized = false;
-  api.setLastStatus(buildOkStatus("CTS API reset."));
+  const auto memory_stats = Utility::releaseMemory();
+  const auto status = api.setLastStatus(buildOkStatus("CTS destruction completed."));
+  if (memory_stats.supported) {
+    CTSLOG.info(Loc::current(), "Completed CTS destruction; allocator release supported, RSS before=", Utility::formatFixed(memory_stats.rss_before_mb, 2),
+                " MiB, RSS after=", Utility::formatFixed(memory_stats.rss_after_mb, 2), " MiB.");
+  } else {
+    CTSLOG.info(Loc::current(), "Completed CTS destruction; allocator release unsupported.");
+  }
+  Logger::destroyInst();
+  return status;
 }
 
 auto CTSAPI::init(const std::string& config_file, const std::string& work_dir) -> CTSStatus
 {
-  resetAPI();
+  (void) destroyCTS();
   auto& api = getInst();
   Logger::initInst();
   Monitor monitor;
@@ -176,8 +183,7 @@ auto CTSAPI::init(const std::string& config_file, const std::string& work_dir) -
   auto status = buildInputStatus(input_status);
   if (!input_status.ok()) {
     CTSLOG.warn(Loc::current(), "CTS initialization failed: ", input_status.message, monitor.getStatsInfo());
-    DataManager::destroyInst();
-    Logger::destroyInst();
+    (void) destroyCTS();
     return api.setLastStatus(std::move(status));
   }
   api._initialized = true;

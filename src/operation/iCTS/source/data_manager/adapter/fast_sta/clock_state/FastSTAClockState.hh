@@ -91,6 +91,8 @@ struct FastStaClockContext
   std::vector<FastStaNode> nodes;
   std::vector<FastStaNet> nets;
   std::unordered_map<std::string, FastStaNodeId> node_id_by_name;
+  std::unordered_map<std::string, FastStaNodeId> buffer_input_node_id_by_inst;
+  std::unordered_map<std::string, FastStaNodeId> buffer_output_node_id_by_inst;
   std::unordered_map<std::pair<int, int>, FastStaNodeId, FastStaPointKeyHash> node_id_by_location;
   std::unordered_map<std::string, FastStaNetId> net_id_by_name;
   std::unordered_map<std::string, FastStaLibertyCell> liberty_cell_by_master;

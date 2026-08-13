@@ -32,6 +32,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include <cmath>
+#include <cstddef>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -144,6 +145,7 @@ class IdbDesign
   bool connectIoPinToNet(const std::string& io_pin_name, const std::string& net_name);
   bool connectInstancePinToNet(const std::string& inst_name, const std::string& pin_name, const std::string& net_name);
   bool disconnectPinFromNet(IdbPin* pin);
+  std::size_t disconnectAllPinsFromNet(IdbNet* net);
   bool removeNetSafe(const std::string& net_name);
   bool renameNet(IdbNet* net, const std::string& new_name);
   bool mergeNetInto(const std::string& target_net_name, const std::string& source_net_name, bool move_wires = true);
