@@ -124,6 +124,12 @@ bool initVerilog(const std::string& verilog_path, const std::string& top_module)
   return dmInst->readVerilog(verilog_path, top_module);
 }
 
+bool initLvsVerilog(const std::string& verilog_path, const std::string& top_module)
+{
+  dmInst->get_config().set_verilog_path(verilog_path);
+  return dmInst->addVerilog(verilog_path, top_module);
+}
+
 bool initLib(const std::vector<std::string>& lib_paths)
 {
   dmInst->get_config().set_lib_paths(lib_paths);

@@ -108,6 +108,20 @@ class CmdInitVerilog : public TclCmd
   // private data
 };
 
+class CmdLvsInitVerilog : public TclCmd
+{
+ public:
+  explicit CmdLvsInitVerilog(const char* cmd_name);
+  ~CmdLvsInitVerilog() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
 class CmdInitLib : public TclCmd
 {
  public:
