@@ -22,6 +22,5 @@
 namespace python_interface {
 bool CtsAutoRun(const std::string& cts_config, const std::string& cts_work_dir);
 bool CtsReport(const std::string& path);
-bool CtsDestroy();
 pybind11::dict CtsTimingFeature();
 }  // namespace python_interface

@@ -29,6 +29,7 @@ target_link_libraries(tcl PUBLIC ${LINK_tcl} absl::inlined_vector ecc_logger)
 target_include_directories(tcl
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 install(TARGETS tcl

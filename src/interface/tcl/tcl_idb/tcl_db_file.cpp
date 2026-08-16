@@ -20,7 +20,6 @@
 #include "db_fm/file_soc.h"
 #include "idm.h"
 #include "report_manager.h"
-#include "tool_manager.h"
 #include "view_json_io.h"
 namespace tcl {
 
@@ -50,7 +49,7 @@ unsigned CmdInitIdb::exec()
 
   auto data_config = option->getStringVal();
 
-  if (iplf::tmInst->idbStart(data_config)) {
+  if (dmInst->init(data_config)) {
     ECCLOG.info(ecc::Loc::current(), "idb start.");
   }
 
@@ -397,7 +396,7 @@ unsigned CmdSaveDef::exec()
   TclOption* option = getOptionOrArg(TCL_NAME);
   auto name = option->getStringVal();
   if (name != nullptr) {
-    if (iplf::tmInst->idbSave(name)) {
+    if (dmInst->save(name)) {
       ECCLOG.info(ecc::Loc::current(), "idb save success.");
       return 1;
     }
@@ -491,7 +490,7 @@ unsigned CmdSaveNetlist::exec()
   TclOption* option = getOptionOrArg(TCL_NAME);
   auto name = option->getStringVal();
   if (name != nullptr) {
-    if (iplf::tmInst->idbSave(name)) {
+    if (dmInst->save(name)) {
       ECCLOG.info(ecc::Loc::current(), "idb save success.");
       return 1;
     }

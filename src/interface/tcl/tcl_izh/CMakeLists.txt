@@ -5,7 +5,6 @@ add_library(tcl_izh
 
 target_link_libraries(tcl_izh
     PUBLIC
-    tool_manager
     tcl_util
     PRIVATE
     izh_interface

@@ -6,7 +6,6 @@ add_library(tcl_ilvs
 
 target_link_libraries(tcl_ilvs
     PUBLIC
-    tool_manager
     tcl_util
     PRIVATE
     ilvs_interface

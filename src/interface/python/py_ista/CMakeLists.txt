@@ -4,7 +4,6 @@ add_library(py_ista ${PY_ISTA_SRC})
 
 target_link_libraries(py_ista
     PUBLIC
-        tool_manager
         ista_interface
         tcl_util
         pybind11::pybind11

@@ -10,7 +10,6 @@ add_library(tcl_ircx
 
 target_link_libraries(tcl_ircx
     PUBLIC
-    tool_manager
     tcl_util
     PRIVATE
     ircx_interface

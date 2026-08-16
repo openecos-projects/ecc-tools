@@ -31,19 +31,6 @@ bool destroyRT()
   return true;
 }
 
-bool runERT(std::string& config, std::map<std::string, std::string>& config_dict)
-{
-  std::map<std::string, std::any> config_map;
-
-  bool pass = false;
-  pass = !pass ? initConfigMapByJSON(config, config_map) : pass;
-  if (!pass) {
-    return false;
-  }
-  RTI.runERT(config_map);
-  return true;
-}
-
 bool runRT()
 {
   RTI.runRT();

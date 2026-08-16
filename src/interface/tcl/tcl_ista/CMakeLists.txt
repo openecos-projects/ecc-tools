@@ -7,7 +7,6 @@ add_library(tcl_ista
 
 target_link_libraries(tcl_ista
     PUBLIC
-    tool_manager
     tcl_util
     PRIVATE
     ista_interface

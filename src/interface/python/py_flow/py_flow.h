@@ -17,6 +17,4 @@
 #pragma once
 
 namespace python_interface {
-    bool flowExit();
-
 }

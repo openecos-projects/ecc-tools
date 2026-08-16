@@ -4,7 +4,6 @@ add_library(py_irt ${PY_IRT_SRC})
 
 target_link_libraries(py_irt
     PUBLIC
-        tool_manager
         irt_interface
         tcl_util
         pybind11::pybind11

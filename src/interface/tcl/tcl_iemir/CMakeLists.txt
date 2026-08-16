@@ -6,7 +6,6 @@ add_library(tcl_iemir
 
 target_link_libraries(tcl_iemir
     PUBLIC
-    tool_manager
     tcl_util
     PRIVATE
     iemir_interface

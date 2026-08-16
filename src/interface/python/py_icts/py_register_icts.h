@@ -26,7 +26,6 @@ void register_icts(pybind11::module& m)
 {
   m.def("run_cts", CtsAutoRun, py::arg("cts_config"), py::arg("cts_work_dir"));
   m.def("cts_report", CtsReport, py::arg("path"));
-  m.def("destroy_cts", CtsDestroy);
   m.def("cts_timing_feature", CtsTimingFeature);
 }
 

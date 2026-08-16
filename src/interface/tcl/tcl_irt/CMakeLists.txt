@@ -8,7 +8,6 @@ add_library(tcl_irt
 
 target_link_libraries(tcl_irt
     PUBLIC
-    tool_manager
     tcl_util
     PRIVATE
     irt_interface

@@ -31,11 +31,6 @@ bool CtsReport(const std::string& path)
   return CTS_API_INST.report(path).ok();
 }
 
-bool CtsDestroy()
-{
-  return CTS_API_INST.destroyCTS().ok();
-}
-
 pybind11::dict CtsTimingFeature()
 {
   namespace py = pybind11;

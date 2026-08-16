@@ -63,7 +63,7 @@
 #include <variant>
 #include <vector>
 
-#include "../../../database/interaction/Boost.hpp"
+#include "../../../eccdb/interaction/Boost.hpp"
 #include "json.hpp"
 #include "libfort/fort.hpp"
 

@@ -6,7 +6,6 @@ add_library(tcl_flow
 
 target_link_libraries(tcl_flow 
     PUBLIC
-        tool_manager
         tcl
         tcl_util
 )

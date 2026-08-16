@@ -22,8 +22,6 @@ namespace python_interface {
 
 bool destroyRT();
 bool initRT(std::string& config, std::map<std::string, std::string>& config_dict);
-bool runDR();
-bool runERT(std::string& config, std::map<std::string, std::string>& config_dict);
 bool runRT();
 
 }  // namespace python_interface

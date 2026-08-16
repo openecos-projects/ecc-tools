@@ -67,7 +67,6 @@ int registerCmdDB()
   registerTclCmd(CmdIdbClearBlockageExceptPgNet, "remove_except_pg_net");
   registerTclCmd(CmdIdbClearBlockage, "clear_blockage");
 
-  registerTclCmd(CmdIdbGet, "idb_get");
   registerTclCmd(CmdIdbDeleteInstance, "delete_inst");
   registerTclCmd(CmdIdbDeleteNet, "delete_net");
 

@@ -95,11 +95,6 @@ pybind11::dict delta_to_dict(const ecc::geometry::GeometryDeltaShape& delta)
 
 }  // namespace
 
-bool initIdb(const std::string& config_path)
-{
-  return dmInst->init(config_path);
-}
-
 bool initTechLef(const std::string& techlef_path)
 {
   dmInst->get_config().set_tech_lef_path(techlef_path);
@@ -148,12 +143,6 @@ bool initSpef(const std::string& spef_path)
   return dmInst->readSpef(spef_path);
 }
 
-bool initVcd(const std::string& vcd_path)
-{
-  dmInst->get_config().set_vcd_path(vcd_path);
-  return dmInst->readVcd(vcd_path);
-}
-
 bool saveDef(const std::string& def_name)
 {
   return dmInst->saveDef(def_name);
@@ -174,13 +163,6 @@ bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_
 bool saveGDSII(const std::string& gds_name, bool is_hardened /* = false */)
 {
   return dmInst->saveGDSII(gds_name, is_hardened);
-}
-
-bool saveJson(const std::string& path)
-{
-  std::string options = "";
-
-  return dmInst->saveJSON(path, options);
 }
 
 bool saveViewJson(const std::string& output_dir, const std::string& json_format, bool compress)

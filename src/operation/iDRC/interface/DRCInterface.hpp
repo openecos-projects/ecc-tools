@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-#include "../../../database/interaction/RT_DRC/ids.hpp"
+#include "../../../eccdb/interaction/RT_DRC/ids.hpp"
 
 #if 1  // 前向声明
 

@@ -24,7 +24,6 @@ namespace python_interface {
 namespace py = pybind11;
 void register_flow(pybind11::module& m)
 {
-  m.def("flow_exit", flowExit);
 }
 
 }  // namespace python_interface

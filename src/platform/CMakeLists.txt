@@ -1,5 +1,0 @@
-add_subdirectory(data_manager)
-add_subdirectory(file_manager)
-add_subdirectory(report)
-add_subdirectory(service)
-add_subdirectory(tool_manager)
