@@ -205,6 +205,46 @@ unsigned CmdInitVerilog::exec()
   return 1;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+CmdLvsInitVerilog::CmdLvsInitVerilog(const char* cmd_name) : TclCmd(cmd_name)
+{
+  auto* path = new TclStringOption(TCL_PATH, 1);
+  auto* top = new TclStringOption(TCL_VERILOG_TOP, 1);
+  addOption(path);
+  addOption(top);
+}
+
+unsigned CmdLvsInitVerilog::check()
+{
+  TclOption* path = getOptionOrArg(TCL_PATH);
+  TclOption* top = getOptionOrArg(TCL_VERILOG_TOP);
+  ecc::checkTclOption(path, TCL_PATH);
+  ecc::checkTclOption(top, TCL_VERILOG_TOP);
+  return 1;
+}
+
+unsigned CmdLvsInitVerilog::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+
+  TclOption* path = getOptionOrArg(TCL_PATH);
+  TclOption* top = getOptionOrArg(TCL_VERILOG_TOP);
+
+  auto path_string = path->getStringVal();
+  auto top_module = top->getStringVal();
+  if (path_string != nullptr && top_module != nullptr) {
+    dmInst->addVerilog(path_string, top_module);
+    return 1;
+  }
+
+  return 1;
+}
+
 CmdInitLib::CmdInitLib(const char* cmd_name) : TclCmd(cmd_name)
 {
   auto* path = new TclStringListOption(TCL_PATH, 1);

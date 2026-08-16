@@ -14,41 +14,38 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "py_ilvs.h"
+
+#include <any>
+#include <map>
+
 #include "LVSInterface.hpp"
-#include "tcl_ilvs.h"
-#include "tcl_util.h"
 
-#include "utility/logger/Logger.hpp"
-namespace tcl {
+namespace python_interface {
 
-namespace {
-
-constexpr const char* kPath = "-path";
-
-}  // namespace
-
-TclWriteLVSDef::TclWriteLVSDef(const char* cmd_name) : TclCmd(cmd_name)
+bool init_lvs(const std::string& temp_directory_path, const int& thread_number)
 {
-  addOption(new TclStringOption(kPath, 1, nullptr));
-}
-
-unsigned TclWriteLVSDef::check()
-{
-  TclOption* path_option = getOptionOrArg(kPath);
-  if (path_option == nullptr || path_option->getStringVal() == nullptr) {
-    ECCLOG.warn(ecc::Loc::current(), "Please specify the iLVS DEF snapshot path by: write_lvs_def -path <file>.");
-    return 0;
+  std::map<std::string, std::any> config_map;
+  if (temp_directory_path != "") {
+    config_map.insert(std::make_pair("-temp_directory_path", temp_directory_path));
   }
-  return 1;
+
+  config_map.insert(std::make_pair("-thread_number", thread_number));
+
+  LVSI.initLVS(config_map);
+  return true;
 }
 
-unsigned TclWriteLVSDef::exec()
+bool run_lvs()
 {
-  if (!check()) {
-    return 0;
-  }
-  LVSI.writeDef(getOptionOrArg(kPath)->getStringVal());
-  return 1;
+  LVSI.runLVS();
+  return true;
 }
 
-}  // namespace tcl
+bool destroy_lvs()
+{
+  LVSI.destroyLVS();
+  return true;
+}
+
+}  // namespace python_interface
