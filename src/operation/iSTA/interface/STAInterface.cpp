@@ -19,6 +19,10 @@
 #include <cmath>
 #include <set>
 
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
 #include "ClockPropagator.hpp"
 #include "DataManager.hpp"
 #include "DelayCalculator.hpp"
@@ -198,6 +202,14 @@ void STAInterface::destroySTA()
   STALOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   // clang-format on
   Logger::destroyInst();
+
+#ifdef __GLIBC__
+  // Every STA object (liberty trees, wrapped netlist, timing graph, report
+  // buffers, ...) has been deleted above, but glibc keeps the freed pages
+  // mapped in its arenas, so repeated in-process STA sessions keep inflating
+  // the process RSS. Hand every freeable heap page back to the OS here.
+  malloc_trim(0);
+#endif
 }
 
 bool STAInterface::updateTiming(std::string& error_message)

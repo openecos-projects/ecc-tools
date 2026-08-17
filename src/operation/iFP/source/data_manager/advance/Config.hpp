@@ -48,8 +48,6 @@ class Config
   double die_margin_top_micron;                     // optional
   double die_margin_bottom_micron;                  // optional
   std::vector<std::string> io_pin_layer_name_list;  // optional
-  double io_pin_width_micron;                       // optional
-  double io_pin_depth_micron;                       // optional
   std::vector<PGGlobalConnect> pg_connect_list;     // optional
   std::vector<PGRail> pg_rail_list;                 // optional
   std::vector<PGStripe> pg_stripe_list;             // optional

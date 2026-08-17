@@ -57,6 +57,7 @@ void MacroPlacer::place()
 
   MPComParam mp_com_param;
   setMPComParam(mp_com_param);
+  checkMacroPlacement();
   checkMacroInCore();
   buildMacroPlacementHalo(mp_com_param);
   buildMacroRoutingHalo(mp_com_param);
@@ -71,6 +72,27 @@ void MacroPlacer::setMPComParam(MPComParam& mp_com_param)
   mp_com_param.set_routing_halo_micron(FPDM.getConfig().macro_routing_halo);
   FPLOG.info(Loc::current(), "placement_halo_micron: ", mp_com_param.get_placement_halo_micron());
   FPLOG.info(Loc::current(), "routing_halo_micron: ", mp_com_param.get_routing_halo_micron());
+}
+
+void MacroPlacer::checkMacroPlacement()
+{
+  std::string unplaced_macro_name_list;
+  int32_t unplaced_macro_num = 0;
+  for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (!instance.get_macro() || instance.get_placed()) {
+      continue;
+    }
+    if (!unplaced_macro_name_list.empty()) {
+      unplaced_macro_name_list += ", ";
+    }
+    unplaced_macro_name_list += instance.get_name();
+    unplaced_macro_num++;
+  }
+
+  if (unplaced_macro_num > 0) {
+    FPLOG.error(Loc::current(), "Found ", unplaced_macro_num, " unplaced macro(s): ", unplaced_macro_name_list,
+                ". Please place all macros before running iFP!");
+  }
 }
 
 void MacroPlacer::checkMacroInCore()

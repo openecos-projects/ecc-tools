@@ -35,7 +35,9 @@
 #include "def_write.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
+#include <optional>
 #include <stdarg.h>
 #include <string_view>
 #include <zlib.h>
@@ -43,6 +45,61 @@
 #include "boost_definition.h"
 
 namespace idb {
+
+namespace {
+
+struct DefBusBitName
+{
+  std::string base_name;
+  unsigned index = 0;
+  size_t left_delimiter_pos = 0;
+  size_t right_delimiter_pos = 0;
+};
+
+std::optional<DefBusBitName> parseDefBusBitName(const std::string& name, const IdbBusBitChars& bus_bit_chars)
+{
+  if (name.empty() || name.back() != bus_bit_chars.getRightDelimiter()) {
+    return std::nullopt;
+  }
+
+  const size_t left_delimiter_pos = name.rfind(bus_bit_chars.getLeftDelimiter());
+  if (left_delimiter_pos == std::string::npos || left_delimiter_pos + 1 == name.size() - 1) {
+    return std::nullopt;
+  }
+
+  const std::string_view index_text(name.data() + left_delimiter_pos + 1, name.size() - left_delimiter_pos - 2);
+  unsigned index = 0;
+  const auto [parsed_end, error] = std::from_chars(index_text.data(), index_text.data() + index_text.size(), index);
+  if (error != std::errc{} || parsed_end != index_text.data() + index_text.size()) {
+    return std::nullopt;
+  }
+
+  return DefBusBitName{std::string(name.substr(0, left_delimiter_pos)), index, left_delimiter_pos, name.size() - 1};
+}
+
+std::string escapeDefBusBitChars(const std::string& name, const IdbBusBitChars* bus_bit_chars,
+                                 const std::optional<DefBusBitName>& unescaped_bus_bit)
+{
+  if (bus_bit_chars == nullptr) {
+    return name;
+  }
+
+  std::string escaped_name;
+  escaped_name.reserve(name.size());
+  for (size_t index = 0; index < name.size(); ++index) {
+    const char character = name[index];
+    const bool is_bus_bit_delimiter = unescaped_bus_bit
+                                      && (index == unescaped_bus_bit->left_delimiter_pos
+                                          || index == unescaped_bus_bit->right_delimiter_pos);
+    if ((character == bus_bit_chars->getLeftDelimiter() || character == bus_bit_chars->getRightDelimiter()) && !is_bus_bit_delimiter) {
+      escaped_name.push_back('\\');
+    }
+    escaped_name.push_back(character);
+  }
+  return escaped_name;
+}
+
+}  // namespace
 
 /**
  * @brief Constructor for DefWrite class.
@@ -131,6 +188,49 @@ void DefWrite::writestr(const char* strdata, ...)
       break;
   }
   va_end(args);
+}
+
+std::string DefWrite::format_instance_name(const std::string& name) const
+{
+  return escapeDefBusBitChars(name, _def_service->get_design()->get_bus_bit_chars(), std::nullopt);
+}
+
+std::string DefWrite::format_io_pin_name(const std::string& name) const
+{
+  auto* design = _def_service->get_design();
+  auto* bus_bit_chars = design->get_bus_bit_chars();
+  if (bus_bit_chars == nullptr) {
+    return name;
+  }
+
+  auto bus_bit_name = parseDefBusBitName(name, *bus_bit_chars);
+  if (bus_bit_name) {
+    auto bus = design->get_bus_list()->findBus(bus_bit_name->base_name);
+    if (bus && (*bus).get().get_type() == IdbBus::kBusType::kBusIo && (*bus).get().getPin(bus_bit_name->index) != nullptr) {
+      return escapeDefBusBitChars(name, bus_bit_chars, bus_bit_name);
+    }
+  }
+
+  return escapeDefBusBitChars(name, bus_bit_chars, std::nullopt);
+}
+
+std::string DefWrite::format_net_name(const std::string& name) const
+{
+  auto* design = _def_service->get_design();
+  auto* bus_bit_chars = design->get_bus_bit_chars();
+  if (bus_bit_chars == nullptr) {
+    return name;
+  }
+
+  auto bus_bit_name = parseDefBusBitName(name, *bus_bit_chars);
+  if (bus_bit_name) {
+    auto bus = design->get_bus_list()->findBus(bus_bit_name->base_name);
+    if (bus && (*bus).get().get_type() == IdbBus::kBusType::kBusNet && (*bus).get().getNet(bus_bit_name->index) != nullptr) {
+      return escapeDefBusBitChars(name, bus_bit_chars, bus_bit_name);
+    }
+  }
+
+  return escapeDefBusBitChars(name, bus_bit_chars, std::nullopt);
 }
 
 /**
@@ -492,7 +592,7 @@ int32_t DefWrite::write_component()
   writestr("COMPONENTS %d ;\n", instance_list->get_num());
 
   for (IdbInstance* instance : instance_list->get_instance_list()) {
-    std::string inst_name = instance->get_name();
+    std::string inst_name = format_instance_name(instance->get_name());
     string type = instance->get_type() != IdbInstanceType::kNone
                       ? "+ SOURCE " + IdbEnum::GetInstance()->get_instance_property()->get_type_str(instance->get_type())
                       : "";
@@ -545,10 +645,10 @@ int32_t DefWrite::write_pin()
     string direction = IdbEnum::GetInstance()->get_connect_property()->get_direction_name(pin->get_term()->get_direction());
     string use = IdbEnum::GetInstance()->get_connect_property()->get_type_name(pin->get_term()->get_type());
     string is_special = pin->is_special_net_pin() || pin->get_term()->is_special_net() ? "+ SPECIAL " : "";
+    const std::string pin_name = format_io_pin_name(pin->get_pin_name());
+    const std::string net_name = format_net_name(pin->get_net_name() == "" ? pin->get_net()->get_net_name() : pin->get_net_name());
 
-    writestr(" - %s + NET %s %s+ DIRECTION %s", pin->get_pin_name().c_str(),
-             pin->get_net_name() == "" ? pin->get_net()->get_net_name().c_str() : pin->get_net_name().c_str(), is_special.c_str(),
-             direction.c_str());
+    writestr(" - %s + NET %s %s+ DIRECTION %s", pin_name.c_str(), net_name.c_str(), is_special.c_str(), direction.c_str());
 
     if (use.empty()) {
       writestr("  \n");
@@ -633,7 +733,8 @@ int32_t DefWrite::write_blockage()
       }
 
       if (routing_blockage->get_instance() != nullptr) {
-        writestr("+ COMPONENT %s ", routing_blockage->get_instance_name().c_str());
+        const std::string instance_name = format_instance_name(routing_blockage->get_instance_name());
+        writestr("+ COMPONENT %s ", instance_name.c_str());
       }
 
       for (IdbRect* rect : routing_blockage->get_rect_list()) {
@@ -649,7 +750,8 @@ int32_t DefWrite::write_blockage()
       }
 
       if (placement_blockage->get_instance() != nullptr) {
-        writestr("+ COMPONENT %s ", placement_blockage->get_instance_name().c_str());
+        const std::string instance_name = format_instance_name(placement_blockage->get_instance_name());
+        writestr("+ COMPONENT %s ", instance_name.c_str());
       }
 
       for (IdbRect* rect : placement_blockage->get_rect_list()) {
@@ -793,7 +895,8 @@ int32_t DefWrite::write_special_net()
   writestr("SPECIALNETS %ld ;\n", special_net_list->get_num());
 
   for (IdbSpecialNet* special_net : special_net_list->get_net_list()) {
-    writestr("- %s ", special_net->get_net_name().c_str());
+    const std::string net_name = format_net_name(special_net->get_net_name());
+    writestr("- %s ", net_name.c_str());
 
     if (special_net->get_pin_string_list().size() > 0) {
       for (string pin_string : special_net->get_pin_string_list()) {
@@ -801,11 +904,13 @@ int32_t DefWrite::write_special_net()
       }
     } else {
       for (IdbPin* pin_io : special_net->get_io_pin_list()->get_pin_list()) {
-        writestr("( PIN %s ) ", pin_io->get_pin_name().c_str());
+        const std::string pin_name = format_io_pin_name(pin_io->get_pin_name());
+        writestr("( PIN %s ) ", pin_name.c_str());
       }
 
       for (IdbPin* pin_instance : special_net->get_instance_pin_list()->get_pin_list()) {
-        writestr("( %s %s ) ", pin_instance->get_instance()->get_name().c_str(), pin_instance->get_pin_name().c_str());
+        const std::string instance_name = format_instance_name(pin_instance->get_instance()->get_name());
+        writestr("( %s %s ) ", instance_name.c_str(), pin_instance->get_pin_name().c_str());
       }
     }
 
@@ -845,16 +950,18 @@ int32_t DefWrite::write_net()
   writestr("NETS %ld ;\n", net_list->get_num());
 
   for (IdbNet* net : net_list->get_net_list()) {
-    std::string net_name = net->get_net_name();
+    std::string net_name = format_net_name(net->get_net_name());
     writestr("- %s", net_name.c_str());
 
     auto* io_pins = net->get_io_pins();
     for (auto* io_pin : io_pins->get_pin_list()) {
-      writestr(" ( PIN %s )", io_pin->get_pin_name().c_str());
+      const std::string pin_name = format_io_pin_name(io_pin->get_pin_name());
+      writestr(" ( PIN %s )", pin_name.c_str());
     }
 
     for (IdbPin* instance : net->get_instance_pin_list()->get_pin_list()) {
-      writestr(" ( %s %s )", instance->get_instance()->get_name().c_str(), instance->get_pin_name().c_str());
+      const std::string instance_name = format_instance_name(instance->get_instance()->get_name());
+      writestr(" ( %s %s )", instance_name.c_str(), instance->get_pin_name().c_str());
     }
 
     writestr("\n");
@@ -1031,7 +1138,8 @@ int32_t DefWrite::write_region()
   writestr("REGIONS %d ;\n", region_list->get_num());
 
   for (IdbRegion* region : region_list->get_region_list()) {
-    writestr("    - %s ", region->get_name().c_str());
+    const std::string region_name = format_instance_name(region->get_name());
+    writestr("    - %s ", region_name.c_str());
 
     for (IdbRect* rect : region->get_boundary()) {
       writestr("( %d %d ) ( %d %d ) ", rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
@@ -1096,13 +1204,16 @@ int32_t DefWrite::write_group()
   writestr("GROUPS %d ;\n", group_list->get_num());
 
   for (IdbGroup* group : group_list->get_group_list()) {
-    writestr("    - %s ", group->get_group_name().c_str());
+    const std::string group_name = format_instance_name(group->get_group_name());
+    writestr("    - %s ", group_name.c_str());
 
     for (IdbInstance* instance : group->get_instance_list()->get_instance_list()) {
-      writestr("%s ", instance->get_name().c_str());
+      const std::string instance_name = format_instance_name(instance->get_name());
+      writestr("%s ", instance_name.c_str());
     }
 
-    writestr("+ REGION %s ", group->get_region()->get_name().c_str());
+    const std::string region_name = format_instance_name(group->get_region()->get_name());
+    writestr("+ REGION %s ", region_name.c_str());
 
     writestr(";\n");
   }
