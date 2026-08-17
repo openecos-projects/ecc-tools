@@ -72,6 +72,7 @@ class PDNGenerator
   void alignStripeSegmentList();
   void alignStripeSegment(PGSegment& stripe_segment);
   int32_t getClosestRailEdgeCoord(PGSegment& stripe_segment, Instance& instance, bool high_side);
+  int32_t getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, Instance& instance, int32_t rail_coord, bool high_side);
 
   void buildLayerConnect(PGModel& pg_model);
   PlanarRect getOverlapRect(PlanarRect first_rect, PlanarRect second_rect);
