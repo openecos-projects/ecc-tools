@@ -29,20 +29,14 @@ bool setNet(const std::string& net_name, const std::string& type)
   return dmInst->setNetType(net_name, type);
 }
 
-idm::DataManager* getDMInst()
-{
-  return dmInst;
-}
-
 template <typename T>
-bool write_placement_back(       idm::DataManager*   db,                                         
-                                 pybind11::array_t<T, pybind11::array::c_style | pybind11::array::forcecast> const& x,
-                                 pybind11::array_t<T, pybind11::array::c_style | pybind11::array::forcecast> const& y)
+bool write_placement_back(pybind11::array_t<T, pybind11::array::c_style | pybind11::array::forcecast> const& x,
+                          pybind11::array_t<T, pybind11::array::c_style | pybind11::array::forcecast> const& y)
 {
   // assume all the movable nodes are in front of fixed nodes
   // this is ensured by sortNodeByPlaceStatus()
   auto len = std::min(x.size(), y.size());
-  db->write_placement_back(x.data(), y.data(), static_cast<int>(len));
+  dmInst->write_placement_back(x.data(), y.data(), static_cast<int>(len));
 
   return true;
 }

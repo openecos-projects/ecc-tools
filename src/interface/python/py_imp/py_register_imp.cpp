@@ -89,10 +89,14 @@ void register_imp(pybind11::module& m)
 
   m.def(
       "pydb",
-      [](idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta) {
-        return PyPlaceDB(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta);
+      [](int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta) {
+        return PyPlaceDB(dmInst, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta);
       },
-      "Convert PlaceDB to PyPlaceDB");
+      py::arg("route_num_bins_x"),
+      py::arg("route_num_bins_y"),
+      py::arg("routability") = false,
+      py::arg("with_sta") = false,
+      "Export the current ECC design as PyPlaceDB");
 }
 
 }  // namespace python_interface

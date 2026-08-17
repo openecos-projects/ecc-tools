@@ -64,16 +64,15 @@ void register_idb_op(pybind11::module& m)
 {
   m.def("set_net", setNet, py::arg("net_name"), py::arg("net_type"));
 
-  pybind11::class_<idm::DataManager>(m, "DataManager").def(pybind11::init<>());
-
-  m.def("get_dmInst", &getDMInst, "A function which returns a DataManager instance", pybind11::return_value_policy::reference);
   m.def(
       "write_placement_back",
-      [](idm::DataManager* db, pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> const& x,
+      [](pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> const& x,
          pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> const& y) {
-        return write_placement_back(db, x, y);
+        return write_placement_back(x, y);
       },
-      "Write Placement Solution (float)");
+      py::arg("x"),
+      py::arg("y"),
+      "Write placement coordinates back to the current ECC design");
 }
 
 }  // namespace python_interface
