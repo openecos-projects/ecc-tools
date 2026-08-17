@@ -67,9 +67,54 @@ void DieBuilder::buildFloorplan()
   double die_width_micron = -1.0;
   double die_height_micron = -1.0;
   if (config.die_mode == DieMode::kDieUtil) {
-    double die_area = FPDM.getDatabase().get_cell_area() / config.die_utilization;
-    die_height_micron = std::sqrt(die_area / config.die_aspect_ratio);
-    die_width_micron = die_area / die_height_micron;
+    Database& database = FPDM.getDatabase();
+    if (config.die_utilization <= 0.0 || config.die_utilization > 1.0) {
+      FPLOG.error(Loc::current(), "Die utilization must be in (0, 1]!");
+      return;
+    }
+    if (config.die_aspect_ratio <= 0.0) {
+      FPLOG.error(Loc::current(), "Die aspect ratio must be greater than 0!");
+      return;
+    }
+    if (database.get_cell_area() <= 0.0) {
+      FPLOG.error(Loc::current(), "Cell area must be greater than 0!");
+      return;
+    }
+    if (database.get_micron_dbu() <= 0) {
+      FPLOG.error(Loc::current(), "Micron DBU must be greater than 0!");
+      return;
+    }
+    if (config.die_margin_left_micron < 0.0 || config.die_margin_right_micron < 0.0 || config.die_margin_top_micron < 0.0
+        || config.die_margin_bottom_micron < 0.0) {
+      FPLOG.error(Loc::current(), "Die margins must not be negative!");
+      return;
+    }
+
+    auto site_iter = database.get_site_map().find(config.die_site_name);
+    if (site_iter == database.get_site_map().end() || site_iter->second.get_width() <= 0 || site_iter->second.get_height() <= 0) {
+      FPLOG.error(Loc::current(), "The site '", config.die_site_name, "' does not exist or has invalid dimensions!");
+      return;
+    }
+
+    int32_t micron_dbu = database.get_micron_dbu();
+    Site& core_site = site_iter->second;
+    double core_area = database.get_cell_area() / config.die_utilization;
+    double core_height_micron = std::sqrt(core_area / config.die_aspect_ratio);
+    double core_width_micron = core_area / core_height_micron;
+    int32_t core_width = FPUTIL.alignUp(static_cast<int32_t>(std::ceil(core_width_micron * micron_dbu)), core_site.get_width());
+    int32_t core_height = FPUTIL.alignUp(static_cast<int32_t>(std::ceil(core_height_micron * micron_dbu)), core_site.get_height());
+    int32_t margin_left = FPUTIL.transMicronToDBU(config.die_margin_left_micron, micron_dbu);
+    int32_t margin_right = FPUTIL.transMicronToDBU(config.die_margin_right_micron, micron_dbu);
+    int32_t margin_top = FPUTIL.transMicronToDBU(config.die_margin_top_micron, micron_dbu);
+    int32_t margin_bottom = FPUTIL.transMicronToDBU(config.die_margin_bottom_micron, micron_dbu);
+
+    die_width_micron = (margin_left + core_width + margin_right) / static_cast<double>(micron_dbu);
+    die_height_micron = (margin_bottom + core_height + margin_top) / static_cast<double>(micron_dbu);
+    buildDie(0.0, 0.0, die_width_micron, die_height_micron);
+    buildCore(config.die_margin_left_micron, config.die_margin_bottom_micron,
+              (margin_left + core_width) / static_cast<double>(micron_dbu),
+              (margin_bottom + core_height) / static_cast<double>(micron_dbu), config.die_site_name);
+    return;
   } else if (config.die_mode == DieMode::kDieSize) {
     die_width_micron = config.die_width_micron;
     die_height_micron = config.die_height_micron;
@@ -99,10 +144,16 @@ void DieBuilder::buildCore(double core_lx, double core_ly, double core_ux, doubl
 
   int32_t site_width = core_site.get_width();
   int32_t site_height = core_site.get_height();
-  int32_t core_lx_int = FPUTIL.alignUp(FPUTIL.transMicronToDBU(core_lx, database.get_micron_dbu()), site_width);
-  int32_t core_ly_int = FPUTIL.alignUp(FPUTIL.transMicronToDBU(core_ly, database.get_micron_dbu()), site_height);
-  int32_t core_ux_int = FPUTIL.alignDown(FPUTIL.transMicronToDBU(core_ux, database.get_micron_dbu()), site_width);
-  int32_t core_uy_int = FPUTIL.alignDown(FPUTIL.transMicronToDBU(core_uy, database.get_micron_dbu()), site_height);
+  int32_t requested_lx = FPUTIL.transMicronToDBU(core_lx, database.get_micron_dbu());
+  int32_t requested_ly = FPUTIL.transMicronToDBU(core_ly, database.get_micron_dbu());
+  int32_t requested_ux = FPUTIL.transMicronToDBU(core_ux, database.get_micron_dbu());
+  int32_t requested_uy = FPUTIL.transMicronToDBU(core_uy, database.get_micron_dbu());
+  int32_t core_width = FPUTIL.alignDown(requested_ux - requested_lx, site_width);
+  int32_t core_height = FPUTIL.alignDown(requested_uy - requested_ly, site_height);
+  int32_t core_lx_int = requested_lx;
+  int32_t core_ly_int = requested_ly;
+  int32_t core_ux_int = core_lx_int + core_width;
+  int32_t core_uy_int = core_ly_int + core_height;
 
   Core& core = database.get_core();
   core.set_rect(core_lx_int, core_ly_int, core_ux_int, core_uy_int);
