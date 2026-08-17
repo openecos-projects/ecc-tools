@@ -71,13 +71,14 @@ class DataManager
   IdbBuilder* get_idb_builder() { return _idb_builder; }
   void set_idb_builder(IdbBuilder* idb_builder) { _idb_builder = idb_builder; }
   IdbDefService* get_idb_def_service() { return _idb_def_service; }
+  IdbDefService* get_idb_verilog_service() { return _idb_verilog_service; }
   void set_idb_def_service(IdbDefService* idb_def_service) { _idb_def_service = idb_def_service; }
   IdbLefService* get_idb_lef_service() { return _idb_lef_service; }
   void set_idb_lef_service(IdbLefService* idb_lef_service) { _idb_lef_service = idb_lef_service; }
 
   IdbDesign* get_idb_design() { return _idb_def_service != nullptr ? _idb_def_service->get_design() : nullptr; }
   // TODO: Return independent views after IDB supports concurrent logical and physical designs.
-  IdbDesign* get_netlist_idb_design() { return get_idb_design(); }
+  IdbDesign* get_netlist_idb_design() { return _idb_verilog_service != nullptr ? _idb_verilog_service->get_design() : nullptr; }
   IdbDesign* get_def_idb_design() { return get_idb_design(); }
   IdbLayout* get_idb_layout() { return _idb_lef_service != nullptr ? _idb_lef_service->get_layout() : nullptr; }
   bool is_def_read() { return _idb_def_service != nullptr ? true : false; }
@@ -98,6 +99,7 @@ class DataManager
   bool readLef(vector<string> lef_paths, bool b_techlef = false);
   bool readDef(string path);
   bool readVerilog(string path, string top_module = "");
+  bool addVerilog(string path, string top_module = "");
   bool readLib(vector<string> lib_paths);
   bool readSpef(string spef_path);
   bool readVcd(string vcd_path);
@@ -246,6 +248,7 @@ class DataManager
   DataConfig _config;
   IdbBuilder* _idb_builder = nullptr;
   IdbDefService* _idb_def_service = nullptr;
+  IdbDefService* _idb_verilog_service = nullptr;
   IdbLefService* _idb_lef_service = nullptr;
   IdbDesign* _design = nullptr;
   IdbLayout* _layout = nullptr;

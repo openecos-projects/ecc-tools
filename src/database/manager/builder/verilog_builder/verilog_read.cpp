@@ -77,6 +77,7 @@ void testMakeSingleModule(idb::NetlistReader* nr, string topModuleName) {
 #include <array>
 #include <cassert>
 #include <cerrno>
+#include <charconv>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
@@ -181,18 +182,27 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
 
 std::pair<std::string, std::optional<int>> splitBusName(const char* name)
 {
+  if (name == nullptr) {
+    return {"", std::nullopt};
+  }
+
   std::string_view name_view(name);
   if (!name_view.ends_with("]")) {
     return {std::string(name_view), std::nullopt};
   }
 
-  size_t left_bracket_idx = name_view.find('[');
-  size_t right_bracket_idx = name_view.find(']', left_bracket_idx);
-  if (left_bracket_idx == std::string_view::npos || right_bracket_idx == std::string_view::npos) {
+  const size_t left_bracket_idx = name_view.rfind('[');
+  if (left_bracket_idx == std::string_view::npos || left_bracket_idx + 1 == name_view.size() - 1) {
     return {std::string(name_view), std::nullopt};
   }
 
-  int index = std::atoi(std::string(name_view.substr(left_bracket_idx + 1, right_bracket_idx - left_bracket_idx - 1)).c_str());
+  const auto index_text = name_view.substr(left_bracket_idx + 1, name_view.size() - left_bracket_idx - 2);
+  int index = 0;
+  const auto [parsed_end, error] = std::from_chars(index_text.data(), index_text.data() + index_text.size(), index);
+  if (error != std::errc{} || parsed_end != index_text.data() + index_text.size()) {
+    return {std::string(name_view), std::nullopt};
+  }
+
   return {std::string(name_view.substr(0, left_bracket_idx)), index};
 }
 
@@ -209,6 +219,11 @@ std::string normalizeEscapedName(std::string name)
   std::erase(name, '\\');
   std::erase(name, ' ');
   return name;
+}
+
+bool isEscapedVerilogIdentifier(std::string_view name)
+{
+  return !name.empty() && name.front() == '\\';
 }
 
 class ScopedReadableVerilogFile
@@ -493,6 +508,7 @@ int32_t VerilogRead::build_nets()
     const auto* dcl_name = verilog_dcl->dcl_name;
     if (dcl_type == DclType::KWire) {
       std::string net_name = dcl_name;
+      const bool is_escaped_name = isEscapedVerilogIdentifier(net_name);
 
       if (std::string::npos != net_name.find('\\')) {
         net_name = replace_str(net_name, R"(\\)", "");
@@ -504,7 +520,7 @@ int32_t VerilogRead::build_nets()
       if (!dcl_range.has_value) {
         auto* idb_net = add_wire_net(net_name);
 
-        if (std::string_view(dcl_name).find("\\[") == std::string_view::npos) {
+        if (!is_escaped_name) {
           auto [bus_name, bus_index] = splitBusName(net_name.c_str());
           if (bus_index) {
             if (auto found_pin_bus = idb_design->get_bus_list()->findBus(bus_name); !found_pin_bus) {
@@ -868,6 +884,7 @@ int32_t VerilogRead::build_components()
 
   auto add_pin = [idb_net_list, replace_str, idb_io_pin_list, idb_design](const std::string& raw_name, auto* idb_pin) {
     std::string net_name = raw_name;
+    const bool is_escaped_name = isEscapedVerilogIdentifier(raw_name);
 
     // strip \\\ char.
     if (std::string::npos != raw_name.find('\\')) {
@@ -883,9 +900,9 @@ int32_t VerilogRead::build_components()
         // not bus net name, create common idb net.
         idb_net = idb_design->createOrFindNet(net_name, IdbConnectType::kSignal);
 
-        // judge whether contain bus index name, if bus name contain \\[, should
-        // not treat as bus.
-        if (net_name.find("\\[") == std::string::npos) {
+        // An escaped Verilog identifier may contain literal bus-bit
+        // characters, so it must remain a scalar net after normalization.
+        if (!is_escaped_name) {
           // is bus index net.
           auto [bus_name, bus_index] = splitBusName(net_name.c_str());
           if (bus_index) {
@@ -1158,14 +1175,19 @@ int32_t VerilogRead::build_components()
               net_expr_verilog_id = const_cast<void*>(verilog_convert_constant_expr(verilog_id_net_expr)->verilog_id);
             }
             const char* net_name = nullptr;
+            const char* net_full_name = nullptr;
             if (verilog_is_id(net_expr_verilog_id)) {
               net_name = verilog_convert_id(net_expr_verilog_id)->id;
+              net_full_name = net_name;
             } else if (verilog_is_bus_index_id(net_expr_verilog_id)) {
+              net_full_name = verilog_convert_index_id(net_expr_verilog_id)->id;
               net_name = verilog_convert_index_id(net_expr_verilog_id)->base_id;
             } else {
+              net_full_name = verilog_convert_slice_id(net_expr_verilog_id)->id;
               net_name = verilog_convert_slice_id(net_expr_verilog_id)->base_id;
             }
-            auto net_bus = idb_design->get_bus_list()->findBus(net_name);
+            std::string bus_lookup_name = normalizeEscapedName(net_name);
+            auto net_bus = idb_design->get_bus_list()->findBus(bus_lookup_name);
 
             if (net_bus) {
               // for net bus, we need span the bus.
@@ -1181,7 +1203,7 @@ int32_t VerilogRead::build_components()
               }
 
               for (int j = bus_left; j >= bus_right; --j) {
-                std::string bus_one_net_name = makeIndexedName(net_name, j);
+                std::string bus_one_net_name = makeIndexedName(bus_lookup_name, j);
                 auto* idb_net = idb_net_list->find_net(bus_one_net_name);
                 assert(idb_net);
                 add_pin(bus_one_net_name, idb_pin);
@@ -1193,7 +1215,7 @@ int32_t VerilogRead::build_components()
                 }
               }
             } else {
-              add_pin(net_name, idb_pin);
+              add_pin(net_full_name, idb_pin);
               --i;
               // the next pin add to pin bus.
               if (i >= 0) {
