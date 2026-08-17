@@ -69,6 +69,11 @@ void DataManager::reset()
 
 void DataManager::resetData()
 {
+  if(_idb_verilog_service != nullptr){
+    delete _idb_verilog_service;
+    _idb_verilog_service = nullptr;
+  }
+
   delete _idb_builder;
   _idb_builder = nullptr;
 
@@ -227,6 +232,23 @@ bool DataManager::readVerilog(string path, string top_module)
   if (!initVerilog(path, top_module)) {
     return false;
   }
+
+  return true;
+}
+
+bool DataManager::addVerilog(string path, string top_module)
+{
+  if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
+    return false;
+  }
+
+  IdbDefService* verilog_service = _idb_builder->addVerilog(path, top_module);
+  if (verilog_service == nullptr) {
+    return false;
+  }
+
+  delete _idb_verilog_service;
+  _idb_verilog_service = verilog_service;
 
   return true;
 }

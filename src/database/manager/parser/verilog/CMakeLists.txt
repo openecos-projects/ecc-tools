@@ -57,3 +57,11 @@ target_include_directories(verilog
         ${CMAKE_CURRENT_SOURCE_DIR}/..
         ${VERILOG_GENERATED_DIR}
 )
+
+if(BUILD_TESTING)
+  add_executable(verilog_escaped_identifier_test
+      VerilogEscapedIdentifierTest.cpp
+  )
+  target_link_libraries(verilog_escaped_identifier_test PRIVATE verilog ecc_logger)
+  add_test(NAME verilog_escaped_identifier_test COMMAND verilog_escaped_identifier_test)
+endif()

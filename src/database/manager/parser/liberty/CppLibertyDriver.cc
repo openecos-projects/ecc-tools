@@ -69,6 +69,12 @@ LibertyDriver::LibertyDriver()
 
 LibertyDriver::~LibertyDriver()
 {
+    // The parse-result tree is owned by the driver: every child is held via
+    // unique_ptr inside LibGroup, so deleting the root releases the whole
+    // AST. Without this, each parsed liberty file leaks its entire tree
+    // (~hundreds of MB per library) whenever the driver is freed.
+    delete _result;
+    _result = nullptr;
 }
 
 void LibertyDriver::reportError(const YYLTYPE& loc, const std::string& msg)

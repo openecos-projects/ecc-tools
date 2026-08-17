@@ -263,6 +263,30 @@ IdbDefService* IdbBuilder::buildVerilog(string file, std::string top_module_name
   return _def_service;
 }
 
+IdbDefService* IdbBuilder::addVerilog(string file, std::string top_module_name)
+{
+  IdbLayout* layout = _lef_service->get_layout();
+  auto def_service = new IdbDefService(layout);
+
+  if (IdbDefServiceResult::kServiceFailed == def_service->VerilogFileInit(file.c_str())) {
+    ECCLOG.warn(ecc::Loc::current(), "Read Verilog file failed...");
+    delete def_service;
+    return nullptr;
+  } else {
+    ECCLOG.info(ecc::Loc::current(), "Read Verilog file success : ", file);
+  }
+
+  std::shared_ptr<VerilogRead> verilog_read = std::make_shared<VerilogRead>(def_service);
+  const bool parsed = top_module_name.empty() ? verilog_read->createDbAutoTop(file) : verilog_read->createDb(file, top_module_name);
+  if (!parsed) {
+    ECCLOG.warn(ecc::Loc::current(), "Read Verilog file failed: ", file);
+    delete def_service;
+    return nullptr;
+  }
+
+  return def_service;
+}
+
 void IdbBuilder::updateDefUnit(){
   IdbLayout* layout = _def_service->get_layout();
   IdbDesign* design = _def_service->get_design();

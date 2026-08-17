@@ -69,7 +69,8 @@ class IdbBuilder
   IdbDefService* buildDef(string file);
   IdbDefService* buildDefGzip(string gzip_file);
   IdbLefService* buildLef(vector<string>& files, bool b_techfile = false);
-  IdbDefService* buildVerilog(string file, std::string top_module_name = "asic_top");
+  IdbDefService* buildVerilog(string file, std::string top_module_name = "");
+  IdbDefService* addVerilog(string file, std::string top_module_name = "");
 
   IdbDefService* buildDefFloorplan(string file);
 
