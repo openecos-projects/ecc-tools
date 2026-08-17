@@ -187,8 +187,7 @@ void DataManager::printConfig()
   }
   io_layer_name_string += "}";
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "io_pin");
-  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "layer: ", io_layer_name_string, ", width: ", _config.io_pin_width_micron,
-             ", depth: ", _config.io_pin_depth_micron);
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "layer: ", io_layer_name_string);
 
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "pg_connect_list");
   std::vector<std::string> pg_net_name_list;
