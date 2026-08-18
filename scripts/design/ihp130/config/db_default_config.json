@@ -1,0 +1,21 @@
+{
+    "INPUT": {
+        "tech_lef_path": "/libs.ref/sg13g2_stdcell/lef/sg13g2_tech.lef",
+        "lef_paths": [
+            "/libs.ref/sg13g2_stdcell/lef/sg13g2_stdcell.lef"
+        ],
+        "def_path": "/origin/gcd.def",
+        "verilog_path": "/origin/gcd.v",
+        "lib_path": [
+            "/libs.ref/sg13g2_stdcell/lib/sg13g2_stdcell_typ_1p20V_25C.lib"
+        ],
+        "sdc_path": "/origin/gcd.sdc",
+        "spef": "/spef/gcd.spef"
+    },
+    "OUTPUT": {
+        "output_dir_path": "/output"
+    },
+    "LayerSettings": {
+        "routing_layer_1st": "Metal1"
+    }
+}

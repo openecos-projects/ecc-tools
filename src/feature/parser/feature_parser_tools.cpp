@@ -427,5 +427,11 @@ json FeatureParser::buildSummaryDRC()
 
   return summary_drc;
 }
+  
+json FeatureParser::buildSummaryAntenna()
+{
+  json summary_antenna;
+  return summary_antenna;
+}
 
 }  // namespace ecc_feature

@@ -16,10 +16,10 @@
 // ***************************************************************************************
 #pragma once
 /**
- * @project		iDB
- * @file		IdbLayer.h
- * @date		25/05/2021
- * @version		0.1
+ * @project   iDB
+ * @file      IdbLayer.h
+ * @date      25/05/2021
+ * @version   0.1
  * @description
 
 
@@ -299,8 +299,136 @@ class IdbMinStep
   Type _type{Type::kNone};
 };
 
+class IdbLayerAntennaProps
+{
+ public:
+  IdbLayerAntennaProps() = default;
+  virtual ~IdbLayerAntennaProps() = default;
+
+  // Area ratio
+  bool has_antenna_area_ratio() const { return _has_area_ratio; }
+  double get_antenna_area_ratio() const { return _area_ratio; }
+  void set_antenna_area_ratio(double v) { _has_area_ratio = true; _area_ratio = v; }
+  
+  // Cum Area ratio
+  bool has_antenna_cum_area_ratio() const { return _has_cum_area_ratio; }
+  double get_antenna_cum_area_ratio() const { return _cum_area_ratio; }
+  void set_antenna_cum_area_ratio(double v) { _has_cum_area_ratio = true; _cum_area_ratio = v; }
+  
+  // Area factor
+  bool has_antenna_area_factor() const { return _has_area_factor; }
+  double get_antenna_area_factor() const { return _area_factor; }
+  void set_antenna_area_factor(double v) { _has_area_factor = true; _area_factor = v; }
+  bool get_antenna_area_factor_diffuse_only() const { return _area_factor_diffuse_only; }
+  void set_antenna_area_factor_diffuse_only(bool v) { _area_factor_diffuse_only = v; }
+  
+  // Side area ratio
+  bool has_antenna_side_area_ratio() const { return _has_side_area_ratio; }
+  double get_antenna_side_area_ratio() const { return _side_area_ratio; }
+  void set_antenna_side_area_ratio(double v) { _has_side_area_ratio = true; _side_area_ratio = v; }
+  
+  // Cum side area ratio
+  bool has_antenna_cum_side_area_ratio() const { return _has_cum_side_area_ratio; }
+  double get_antenna_cum_side_area_ratio() const { return _cum_side_area_ratio; }
+  void set_antenna_cum_side_area_ratio(double v) { _has_cum_side_area_ratio = true; _cum_side_area_ratio = v; }
+  
+  // Side area factor
+  bool has_antenna_side_area_factor() const { return _has_side_area_factor; }
+  double get_antenna_side_area_factor() const { return _side_area_factor; }
+  void set_antenna_side_area_factor(double v) { _has_side_area_factor = true; _side_area_factor = v; }
+  bool get_antenna_side_area_factor_diffuse_only() const { return _side_area_factor_diffuse_only; }
+  void set_antenna_side_area_factor_diffuse_only(bool v) { _side_area_factor_diffuse_only = v; }
+
+  // Gate plus diff
+  bool has_antenna_gate_plus_diff() const { return _has_gate_plus_diff; }
+  double get_antenna_gate_plus_diff() const { return _gate_plus_diff; }
+  void set_antenna_gate_plus_diff(double v) { _has_gate_plus_diff = true; _gate_plus_diff = v; }
+  
+  // Area minus diff
+  bool has_antenna_area_minus_diff() const { return _has_area_minus_diff; }
+  double get_antenna_area_minus_diff() const { return _area_minus_diff; }
+  void set_antenna_area_minus_diff(double v) { _has_area_minus_diff = true; _area_minus_diff = v; }
+
+  // Diff area ratio
+  bool has_antenna_diff_area_ratio() const { return _has_diff_area_ratio; }
+  double get_antenna_diff_area_ratio() const { return _diff_area_ratio; }
+  void set_antenna_diff_area_ratio(double v) { _has_diff_area_ratio = true; _diff_area_ratio = v; }
+  
+  // Cum diff area ratio
+  bool has_antenna_cum_diff_area_ratio() const { return _has_cum_diff_area_ratio; }
+  double get_antenna_cum_diff_area_ratio() const { return _cum_diff_area_ratio; }
+  void set_antenna_cum_diff_area_ratio(double v) { _has_cum_diff_area_ratio = true; _cum_diff_area_ratio = v; }
+  
+  // Diff side area ratio
+  bool has_antenna_diff_side_area_ratio() const { return _has_diff_side_area_ratio; }
+  double get_antenna_diff_side_area_ratio() const { return _diff_side_area_ratio; }
+  void set_antenna_diff_side_area_ratio(double v) { _has_diff_side_area_ratio = true; _diff_side_area_ratio = v; }
+  
+  // Cum diff side area ratio
+  bool has_antenna_cum_diff_side_area_ratio() const { return _has_cum_diff_side_area_ratio; }
+  double get_antenna_cum_diff_side_area_ratio() const { return _cum_diff_side_area_ratio; }
+  void set_antenna_cum_diff_side_area_ratio(double v) { _has_cum_diff_side_area_ratio = true; _cum_diff_side_area_ratio = v; }
+
+  // Cum routing plus cut
+  bool get_antenna_cum_routing_plus_cut() const { return _cum_routing_plus_cut; }
+  void set_antenna_cum_routing_plus_cut(bool v) { _cum_routing_plus_cut = v; }
+
+  // Cut Area factor
+  bool has_antenna_cut_area_factor() const { return _has_cut_area_factor; }
+  double get_antenna_cut_area_factor() const { return _cut_area_factor; }
+  void set_antenna_cut_area_factor(double v) { _has_cut_area_factor = true; _cut_area_factor = v; }
+  bool get_antenna_cut_area_factor_diffuse_only() const { return _cut_area_factor_diffuse_only; }
+  void set_antenna_cut_area_factor_diffuse_only(bool v) { _cut_area_factor_diffuse_only = v; }
+
+  // PWL versions
+  bool has_antenna_diff_area_ratio_pwl() const { return _has_diff_area_ratio_pwl; }
+  const std::vector<std::pair<double, double>>& get_antenna_diff_area_ratio_pwl() const { return _diff_area_ratio_pwl; }
+  void set_antenna_diff_area_ratio_pwl(const std::vector<std::pair<double, double>>& v) { _has_diff_area_ratio_pwl = true; _diff_area_ratio_pwl = v; }
+  
+  bool has_antenna_cum_diff_area_ratio_pwl() const { return _has_cum_diff_area_ratio_pwl; }
+  const std::vector<std::pair<double, double>>& get_antenna_cum_diff_area_ratio_pwl() const { return _cum_diff_area_ratio_pwl; }
+  void set_antenna_cum_diff_area_ratio_pwl(const std::vector<std::pair<double, double>>& v) { _has_cum_diff_area_ratio_pwl = true; _cum_diff_area_ratio_pwl = v; }
+
+  bool has_antenna_diff_side_area_ratio_pwl() const { return _has_diff_side_area_ratio_pwl; }
+  const std::vector<std::pair<double, double>>& get_antenna_diff_side_area_ratio_pwl() const { return _diff_side_area_ratio_pwl; }
+  void set_antenna_diff_side_area_ratio_pwl(const std::vector<std::pair<double, double>>& v) { _has_diff_side_area_ratio_pwl = true; _diff_side_area_ratio_pwl = v; }
+
+  bool has_antenna_cum_diff_side_area_ratio_pwl() const { return _has_cum_diff_side_area_ratio_pwl; }
+  const std::vector<std::pair<double, double>>& get_antenna_cum_diff_side_area_ratio_pwl() const { return _cum_diff_side_area_ratio_pwl; }
+  void set_antenna_cum_diff_side_area_ratio_pwl(const std::vector<std::pair<double, double>>& v) { _has_cum_diff_side_area_ratio_pwl = true; _cum_diff_side_area_ratio_pwl = v; }
+
+ private:
+  bool _has_area_ratio = false; double _area_ratio = 0.0;
+  bool _has_cum_area_ratio = false; double _cum_area_ratio = 0.0;
+  bool _has_area_factor = false; double _area_factor = 1.0;
+  bool _area_factor_diffuse_only = false;
+  
+  bool _has_side_area_ratio = false; double _side_area_ratio = 0.0;
+  bool _has_cum_side_area_ratio = false; double _cum_side_area_ratio = 0.0;
+  bool _has_side_area_factor = false; double _side_area_factor = 1.0;
+  bool _side_area_factor_diffuse_only = false;
+  
+  bool _has_gate_plus_diff = false; double _gate_plus_diff = 0.0;
+  bool _has_area_minus_diff = false; double _area_minus_diff = 0.0;
+  
+  bool _has_diff_area_ratio = false; double _diff_area_ratio = 0.0;
+  bool _has_cum_diff_area_ratio = false; double _cum_diff_area_ratio = 0.0;
+  bool _has_diff_side_area_ratio = false; double _diff_side_area_ratio = 0.0;
+  bool _has_cum_diff_side_area_ratio = false; double _cum_diff_side_area_ratio = 0.0;
+  
+  bool _cum_routing_plus_cut = false;
+
+  bool _has_cut_area_factor = false; double _cut_area_factor = 1.0;
+  bool _cut_area_factor_diffuse_only = false;
+
+  bool _has_diff_area_ratio_pwl = false; std::vector<std::pair<double, double>> _diff_area_ratio_pwl;
+  bool _has_cum_diff_area_ratio_pwl = false; std::vector<std::pair<double, double>> _cum_diff_area_ratio_pwl;
+  bool _has_diff_side_area_ratio_pwl = false; std::vector<std::pair<double, double>> _diff_side_area_ratio_pwl;
+  bool _has_cum_diff_side_area_ratio_pwl = false; std::vector<std::pair<double, double>> _cum_diff_side_area_ratio_pwl;
+};
+
 // Direction, Rect, Pitch, OffSet, Width, Space, TrackGrid, res, cap, WireExtension, Thickness,
-class IdbLayerRouting : public IdbLayer
+class IdbLayerRouting : public IdbLayer, public IdbLayerAntennaProps
 {
  public:
   IdbLayerRouting();
@@ -591,7 +719,7 @@ class IdbLayerCutSpacing
   bool _has_same_net;
 };
 
-class IdbLayerCut : public IdbLayer
+class IdbLayerCut : public IdbLayer, public IdbLayerAntennaProps
 {
  public:
   IdbLayerCut();

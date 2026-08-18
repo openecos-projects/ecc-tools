@@ -21,6 +21,7 @@
 #include <string>
 
 #include "ZHInterface.hpp"
+#include "file_zh.h"
 
 namespace python_interface {
 
@@ -51,6 +52,32 @@ bool insert_filler(const std::string& config)
   }
 
   ZHI.insertFiller(config_map);
+  return true;
+}
+
+bool check_antenna(const std::string& config, const std::string& report_dir, const std::string& feature_file)
+{
+  std::map<std::string, std::any> config_map;
+
+  if (!config.empty()) {
+    bool pass = false;
+    pass = !pass ? initZHConfigMapByJSON(config, config_map) : pass;
+    if (!pass) {
+      return false;
+    }
+  }
+
+  if (!report_dir.empty()) {
+    config_map["report_dir"] = report_dir;
+  }
+
+  ZHI.checkAntenna(config_map);
+
+  if (!feature_file.empty()) {
+    iplf::FileZHManager fm(feature_file);
+    fm.saveFileData();
+  }
+
   return true;
 }
 

@@ -112,6 +112,7 @@ bool FeatureParser::buildTools(std::string json_path, std::string step)
                                                                        {"optSetup", [this, step]() { return buildSummaryTO(step); }},
                                                                        {"sta", [this]() { return buildSummarySTA(); }},
                                                                        {"drc", [this]() { return buildSummaryDRC(); }},
+                                                                       {"antenna", [this]() { return buildSummaryAntenna(); }},
                                                                        {"route", [this]() { return buildSummaryRT(); }}};
 
   std::ofstream& file_stream = ecc::getOutputFileStream(json_path);
@@ -228,7 +229,6 @@ bool FeatureParser::buildSummaryEval(std::string json_path)
   ECCLOG.info(ecc::Loc::current(), "Save eval json success, path = ", json_path);
   return true;
 }
-
 
 bool FeatureParser::buildSummaryTimingEval(std::string json_path)
 {
