@@ -15,7 +15,6 @@
     "ConfigPath": {
         "idb_path": "<path>",
         "ifp_path": "<path>",
-        "ipl_path": "<path>",
         "irt_path": "<path>",
         "idrc_path": "<path>",
         "icts_path": "<path>",
