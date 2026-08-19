@@ -19,15 +19,15 @@
 #include "DataManager.hpp"
 #include "DieBuilder.hpp"
 #include "IOPlacer.hpp"
+#include "IdbTerm.h"
+#include "IdbViaMaster.h"
+#include "IdbVias.h"
 #include "Logger.hpp"
 #include "MacroPlacer.hpp"
 #include "Monitor.hpp"
 #include "PDNGenerator.hpp"
 #include "PhyPlacer.hpp"
 #include "Utility.hpp"
-#include "IdbTerm.h"
-#include "IdbViaMaster.h"
-#include "IdbVias.h"
 #include "idm.h"
 
 namespace ifp {
@@ -272,8 +272,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   std::filesystem::path config_directory_path = config_file_path.parent_path();
 
   nlohmann::json& ifp_json = config_json["ifp"];
-  config.temp_directory_path
-      = FPUTIL.getAbsolutePath(config_directory_path, ifp_json["temp_directory_path"].get<std::string>());
+  config.temp_directory_path = FPUTIL.getAbsolutePath(config_directory_path, ifp_json["temp_directory_path"].get<std::string>());
   config.thread_number = std::max(ifp_json["thread_number"].get<int32_t>(), 1);
 
   nlohmann::json& macro_placer_json = config_json["macro_placer"];
@@ -894,8 +893,8 @@ void FPInterface::outputNewInstanceList()
     if (orient == idb::IdbOrient::kNone) {
       orient = idb::IdbOrient::kN_R0;
     }
-    dmInst->createInstance(instance.get_name(), instance.get_master_name(), instance.get_x(), instance.get_y(), orient,
-                           idb::IdbInstanceType::kDist, idb::IdbPlacementStatus::kFixed);
+    dmInst->createInstance(instance.get_name(), instance.get_master_name(), instance.get_x(), instance.get_y(), orient, idb::IdbInstanceType::kDist,
+                           idb::IdbPlacementStatus::kFixed);
     instance.set_new_instance(false);
   }
 }
@@ -936,8 +935,7 @@ void FPInterface::outputPGSegmentList()
     idb_segment->set_layer_as_new();
     idb_segment->set_layer(idb_layer);
     idb_segment->set_route_width(pg_segment.get_width());
-    idb_segment->set_shape_type(pg_segment.get_type() == PGSegmentType::kFollowPin ? idb::IdbWireShapeType::kFollowPin
-                                                                                   : idb::IdbWireShapeType::kStripe);
+    idb_segment->set_shape_type(pg_segment.get_type() == PGSegmentType::kFollowPin ? idb::IdbWireShapeType::kFollowPin : idb::IdbWireShapeType::kStripe);
     idb_segment->add_point(pg_segment.get_start_x(), pg_segment.get_start_y());
     idb_segment->add_point(pg_segment.get_end_x(), pg_segment.get_end_y());
     idb_segment->set_bounding_box();
@@ -982,25 +980,23 @@ void FPInterface::adjustPGLineSegmentListByViaEnclosure()
       }
       idb::IdbLayerShape idb_bottom_layer_shape = idb_via->get_bottom_layer_shape();
       idb::IdbRect idb_bottom_enclosure = idb_bottom_layer_shape.get_bounding_box();
-      adjustLineSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment,
-          idb_bottom_layer_shape.get_layer()->get_name(),
+      adjustLineSegmentListByViaEnclosure(
+          pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, idb_bottom_layer_shape.get_layer()->get_name(),
           pg_segment.get_start_x() + idb_bottom_enclosure.get_low_x(), pg_segment.get_start_y() + idb_bottom_enclosure.get_low_y(),
           pg_segment.get_start_x() + idb_bottom_enclosure.get_high_x(), pg_segment.get_start_y() + idb_bottom_enclosure.get_high_y());
 
       idb::IdbLayerShape idb_top_layer_shape = idb_via->get_top_layer_shape();
       idb::IdbRect idb_top_enclosure = idb_top_layer_shape.get_bounding_box();
-      adjustLineSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment,
-          idb_top_layer_shape.get_layer()->get_name(),
-          pg_segment.get_start_x() + idb_top_enclosure.get_low_x(), pg_segment.get_start_y() + idb_top_enclosure.get_low_y(),
-          pg_segment.get_start_x() + idb_top_enclosure.get_high_x(), pg_segment.get_start_y() + idb_top_enclosure.get_high_y());
+      adjustLineSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, idb_top_layer_shape.get_layer()->get_name(),
+                                          pg_segment.get_start_x() + idb_top_enclosure.get_low_x(), pg_segment.get_start_y() + idb_top_enclosure.get_low_y(),
+                                          pg_segment.get_start_x() + idb_top_enclosure.get_high_x(), pg_segment.get_start_y() + idb_top_enclosure.get_high_y());
     }
   }
 }
 
 idb::IdbVia* FPInterface::getIDBVia(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment)
 {
-  std::string via_name
-      = idb_cut_layer->get_name() + "_" + std::to_string(pg_segment.get_via_width()) + "x" + std::to_string(pg_segment.get_via_height());
+  std::string via_name = idb_cut_layer->get_name() + "_" + std::to_string(pg_segment.get_via_width()) + "x" + std::to_string(pg_segment.get_via_height());
   idb::IdbVia* idb_via = dmInst->get_idb_design()->get_via_list()->find_via(via_name);
   if (idb_via == nullptr) {
     idb_via = buildIDBVia(via_name, idb_cut_layer, pg_segment);
@@ -1130,18 +1126,16 @@ std::pair<int32_t, int32_t> FPInterface::getIDBViaRowCol(idb::IdbLayerCut* idb_c
 }
 
 void FPInterface::adjustLineSegmentListByViaEnclosure(
-    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map,
-    PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
-    int32_t enclosure_ur_y)
+    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map, PGSegment& pg_segment,
+    std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y)
 {
-  adjustStripeSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, layer_name, enclosure_ll_x,
-                                        enclosure_ll_y, enclosure_ur_x, enclosure_ur_y);
+  adjustStripeSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, layer_name, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x,
+                                        enclosure_ur_y);
 }
 
 bool FPInterface::adjustStripeSegmentListByViaEnclosure(
-    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_line_segment_list_map,
-    PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
-    int32_t enclosure_ur_y)
+    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_line_segment_list_map, PGSegment& pg_segment,
+    std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y)
 {
   std::string pg_net_layer_key = FPUTIL.getString(pg_segment.get_net_name(), "|", layer_name);
   std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>::iterator pg_net_layer_map_iter
@@ -1152,28 +1146,26 @@ bool FPInterface::adjustStripeSegmentListByViaEnclosure(
 
   bool covered = false;
   std::map<int32_t, std::vector<PGSegment*>>& coord_to_line_segment_list_map = pg_net_layer_map_iter->second;
-  std::map<int32_t, std::vector<PGSegment*>>::iterator x_coord_iter
-      = coord_to_line_segment_list_map.find(pg_segment.get_start_x());
+  std::map<int32_t, std::vector<PGSegment*>>::iterator x_coord_iter = coord_to_line_segment_list_map.find(pg_segment.get_start_x());
   if (x_coord_iter != coord_to_line_segment_list_map.end()) {
     covered = adjustLineSegmentByViaEnclosure(x_coord_iter->second, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x, enclosure_ur_y);
   }
-  std::map<int32_t, std::vector<PGSegment*>>::iterator y_coord_iter
-      = coord_to_line_segment_list_map.find(pg_segment.get_start_y());
+  std::map<int32_t, std::vector<PGSegment*>>::iterator y_coord_iter = coord_to_line_segment_list_map.find(pg_segment.get_start_y());
   if (y_coord_iter != coord_to_line_segment_list_map.end()) {
     covered = adjustLineSegmentByViaEnclosure(y_coord_iter->second, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x, enclosure_ur_y) || covered;
   }
   return covered;
 }
 
-bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_segment_list, int32_t enclosure_ll_x,
-                                                   int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y)
+bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_segment_list, int32_t enclosure_ll_x, int32_t enclosure_ll_y,
+                                                  int32_t enclosure_ur_x, int32_t enclosure_ur_y)
 {
   bool covered = false;
   for (PGSegment* line_segment : line_segment_list) {
     int32_t half_width = line_segment->get_width() / 2;
     if (line_segment->is_vertical()) {
-      if (enclosure_ll_x < line_segment->get_ll_x() || line_segment->get_ur_x() < enclosure_ur_x
-          || line_segment->get_ur_y() < enclosure_ll_y || enclosure_ur_y < line_segment->get_ll_y()) {
+      if (enclosure_ll_x < line_segment->get_ll_x() || line_segment->get_ur_x() < enclosure_ur_x || line_segment->get_ur_y() < enclosure_ll_y
+          || enclosure_ur_y < line_segment->get_ll_y()) {
         continue;
       }
       if (line_segment->get_start_y() <= line_segment->get_end_y()) {
@@ -1193,8 +1185,8 @@ bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_
       }
       covered = (enclosure_ll_y >= line_segment->get_ll_y() && line_segment->get_ur_y() >= enclosure_ur_y) || covered;
     } else if (line_segment->is_horizontal()) {
-      if (enclosure_ll_y < line_segment->get_ll_y() || line_segment->get_ur_y() < enclosure_ur_y
-          || line_segment->get_ur_x() < enclosure_ll_x || enclosure_ur_x < line_segment->get_ll_x()) {
+      if (enclosure_ll_y < line_segment->get_ll_y() || line_segment->get_ur_y() < enclosure_ur_y || line_segment->get_ur_x() < enclosure_ll_x
+          || enclosure_ur_x < line_segment->get_ll_x()) {
         continue;
       }
       if (line_segment->get_start_x() <= line_segment->get_end_x()) {
