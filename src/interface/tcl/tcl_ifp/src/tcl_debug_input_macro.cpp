@@ -14,22 +14,25 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
-
+#include "FPInterface.hpp"
 #include "tcl_fp.h"
-
-using namespace ecc;
+#include "tcl_util.h"
 
 namespace tcl {
 
-int registerCmdFP()
+TclDebugInputMacro::TclDebugInputMacro(const char* cmd_name) : TclCmd(cmd_name)
 {
-  // fp
-  registerTclCmd(TclInitFP, "init_fp");
-  registerTclCmd(TclRunFP, "run_fp");
-  registerTclCmd(TclDestroyFP, "destroy_fp");
-  registerTclCmd(TclDebugInputMacro, "debug_input_macro");
-  return EXIT_SUCCESS;
+  TclUtil::addOption(this, _config_list);
+}
+
+unsigned TclDebugInputMacro::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
+  FPI.debugInputMacro(config_map);
+  return 1;
 }
 
 }  // namespace tcl

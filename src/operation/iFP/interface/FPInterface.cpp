@@ -133,6 +133,14 @@ void FPInterface::destroyFP()
 
 #endif
 
+#if 1  // debug iFP
+
+void FPInterface::debugInputMacro(std::map<std::string, std::any> config_map)
+{
+}
+
+#endif
+
 #endif
 
 #if 1  // FP调用外部的API
