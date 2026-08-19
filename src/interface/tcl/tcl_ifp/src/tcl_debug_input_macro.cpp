@@ -22,6 +22,8 @@ namespace tcl {
 
 TclDebugInputMacro::TclDebugInputMacro(const char* cmd_name) : TclCmd(cmd_name)
 {
+  _config_list.push_back(std::make_pair("-path", ValueType::kString));
+
   TclUtil::addOption(this, _config_list);
 }
 

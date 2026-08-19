@@ -137,6 +137,80 @@ void FPInterface::destroyFP()
 
 void FPInterface::debugInputMacro(std::map<std::string, std::any> config_map)
 {
+  std::string macro_place_file_path = FPUTIL.getConfigValue<std::string>(config_map, "-path", "");
+  if (macro_place_file_path.empty()) {
+    FPLOG.error(Loc::current(), "The macro placement file path is empty!");
+    return;
+  }
+
+  idb::IdbDesign* idb_design = dmInst->get_idb_design();
+  idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
+  if (idb_design == nullptr || idb_layout == nullptr) {
+    FPLOG.error(Loc::current(), "Failed to get the IDB design or layout!");
+    return;
+  }
+
+  int32_t micron_dbu = idb_design->get_units() == nullptr ? 0 : idb_design->get_units()->get_micron_dbu();
+  if (micron_dbu <= 0 && idb_layout->get_units() != nullptr) {
+    micron_dbu = idb_layout->get_units()->get_micron_dbu();
+  }
+  if (micron_dbu <= 0) {
+    FPLOG.error(Loc::current(), "Failed to get a valid micron DBU from IDB!");
+    return;
+  }
+
+  std::ifstream macro_place_file(macro_place_file_path);
+  if (!macro_place_file.is_open()) {
+    FPLOG.error(Loc::current(), "Failed to open macro placement file '", macro_place_file_path, "'!");
+    return;
+  }
+
+  int32_t placed_macro_num = 0;
+  int32_t skipped_macro_num = 0;
+  int32_t line_num = 0;
+  std::string line;
+  while (std::getline(macro_place_file, line)) {
+    ++line_num;
+    if (line.empty() || line[0] == '#') {
+      continue;
+    }
+
+    std::istringstream line_stream(line);
+    std::string instance_name;
+    double x_micron = 0.0;
+    double y_micron = 0.0;
+    std::string orient_name;
+    if (!(line_stream >> instance_name >> x_micron >> y_micron >> orient_name)) {
+      FPLOG.warn(Loc::current(), "Skip malformed macro placement at line ", line_num, " in '", macro_place_file_path, "'.");
+      ++skipped_macro_num;
+      continue;
+    }
+
+    idb::IdbInstance* idb_instance = idb_design->get_instance_list()->find_instance(instance_name);
+    if (idb_instance == nullptr) {
+      FPLOG.warn(Loc::current(), "Skip unknown macro '", instance_name, "' from line ", line_num, " in '", macro_place_file_path, "'.");
+      ++skipped_macro_num;
+      continue;
+    }
+    if (idb_instance->get_cell_master() == nullptr || !idb_instance->get_cell_master()->is_block()) {
+      FPLOG.warn(Loc::current(), "Skip non-block macro '", instance_name, "' from line ", line_num, " in '", macro_place_file_path,
+                 "'.");
+      ++skipped_macro_num;
+      continue;
+    }
+
+    int32_t x = FPUTIL.transMicronToDBU(x_micron, micron_dbu);
+    int32_t y = FPUTIL.transMicronToDBU(y_micron, micron_dbu);
+    if (!dmInst->placeInst(instance_name, x, y, orient_name, "", "", "fixed", false)) {
+      FPLOG.warn(Loc::current(), "Failed to place macro '", instance_name, "' from line ", line_num, " in '", macro_place_file_path,
+                 "'.");
+      ++skipped_macro_num;
+      continue;
+    }
+    ++placed_macro_num;
+  }
+
+  FPLOG.info(Loc::current(), "Placed ", placed_macro_num, " macros from '", macro_place_file_path, "'; skipped ", skipped_macro_num, ".");
 }
 
 #endif
@@ -160,7 +234,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   Config& config = FPDM.getConfig();
   config.temp_directory_path = "./fp_temp_directory";
   config.thread_number = 128;
-  config.macro_place_file_path = "";
   config.macro_placement_halo = -1.0;
   config.macro_routing_halo = -1.0;
   config.die_mode = DieMode::kNone;
@@ -204,8 +277,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.thread_number = std::max(ifp_json["thread_number"].get<int32_t>(), 1);
 
   nlohmann::json& macro_placer_json = config_json["macro_placer"];
-  config.macro_place_file_path
-      = FPUTIL.getAbsolutePath(config_directory_path, macro_placer_json["macro_location_path"].get<std::string>());
   config.macro_placement_halo = macro_placer_json["macro_placement_halo"].get<double>();
   config.macro_routing_halo = macro_placer_json["macro_routing_halo"].get<double>();
 
@@ -298,7 +369,6 @@ void FPInterface::wrapDatabase()
   wrapRoutingLayerList();
   wrapInstanceList();
   wrapNetList();
-  wrapMacroPlacement();
   wrapIOPinList();
 }
 
@@ -514,141 +584,6 @@ void FPInterface::wrapNetList()
       net.get_net_pin_list().push_back(net_pin);
     }
     net_list.push_back(net);
-  }
-}
-
-void FPInterface::wrapMacroPlacement()
-{
-  if (FPDM.getConfig().macro_place_file_path.empty()) {
-    return;
-  }
-
-  std::ifstream* macro_place_file = FPUTIL.getInputFileStream(FPDM.getConfig().macro_place_file_path);
-  std::string line;
-  while (std::getline(*macro_place_file, line)) {
-    if (line.empty() || line[0] == '#') {
-      continue;
-    }
-
-    std::istringstream line_stream(line);
-    std::string instance_name;
-    double x_micron = -1.0;
-    double y_micron = -1.0;
-    std::string orient_name;
-    line_stream >> instance_name >> x_micron >> y_micron >> orient_name;
-    for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
-      if (!instance.get_macro() || instance.get_name() != instance_name) {
-        continue;
-      }
-      wrapMacroPlacement(instance, x_micron, y_micron, GetPlacementOrientationByName()(orient_name));
-      break;
-    }
-  }
-  FPUTIL.closeFileStream(macro_place_file);
-}
-
-void FPInterface::wrapMacroPlacement(Instance& instance, double x_micron, double y_micron, PlacementOrientation orient)
-{
-  int32_t x = FPUTIL.transMicronToDBU(x_micron, FPDM.getDatabase().get_micron_dbu());
-  int32_t y = FPUTIL.transMicronToDBU(y_micron, FPDM.getDatabase().get_micron_dbu());
-  int32_t bounding_width = instance.get_width();
-  int32_t bounding_height = instance.get_height();
-  if (orient == PlacementOrientation::kW || orient == PlacementOrientation::kE || orient == PlacementOrientation::kFE
-      || orient == PlacementOrientation::kFW) {
-    std::swap(bounding_width, bounding_height);
-  }
-
-  instance.set_coord(x, y);
-  instance.set_orient(orient);
-  instance.set_bounding_rect(x, y, x + bounding_width, y + bounding_height);
-  for (InstancePinShape& pin_shape : instance.get_pin_shape_list()) {
-    int32_t ll_x = pin_shape.get_ll_x();
-    int32_t ll_y = pin_shape.get_ll_y();
-    int32_t ur_x = pin_shape.get_ur_x();
-    int32_t ur_y = pin_shape.get_ur_y();
-    int32_t transformed_ll_x = ll_x;
-    int32_t transformed_ll_y = ll_y;
-    int32_t transformed_ur_x = ur_x;
-    int32_t transformed_ur_y = ur_y;
-    switch (orient) {
-      case PlacementOrientation::kW:
-        transformed_ll_x = instance.get_height() - ur_y;
-        transformed_ll_y = ll_x;
-        transformed_ur_x = instance.get_height() - ll_y;
-        transformed_ur_y = ur_x;
-        break;
-      case PlacementOrientation::kS:
-        transformed_ll_x = instance.get_width() - ur_x;
-        transformed_ll_y = instance.get_height() - ur_y;
-        transformed_ur_x = instance.get_width() - ll_x;
-        transformed_ur_y = instance.get_height() - ll_y;
-        break;
-      case PlacementOrientation::kE:
-        transformed_ll_x = ll_y;
-        transformed_ll_y = instance.get_width() - ur_x;
-        transformed_ur_x = ur_y;
-        transformed_ur_y = instance.get_width() - ll_x;
-        break;
-      case PlacementOrientation::kFN:
-        transformed_ll_x = instance.get_width() - ur_x;
-        transformed_ur_x = instance.get_width() - ll_x;
-        break;
-      case PlacementOrientation::kFE:
-        transformed_ll_x = instance.get_height() - ur_y;
-        transformed_ll_y = instance.get_width() - ur_x;
-        transformed_ur_x = instance.get_height() - ll_y;
-        transformed_ur_y = instance.get_width() - ll_x;
-        break;
-      case PlacementOrientation::kFS:
-        transformed_ll_y = instance.get_height() - ur_y;
-        transformed_ur_y = instance.get_height() - ll_y;
-        break;
-      case PlacementOrientation::kFW:
-        transformed_ll_x = ll_y;
-        transformed_ll_y = ll_x;
-        transformed_ur_x = ur_y;
-        transformed_ur_y = ur_x;
-        break;
-      default:
-        break;
-    }
-    pin_shape.set_rect(x + transformed_ll_x, y + transformed_ll_y, x + transformed_ur_x, y + transformed_ur_y);
-  }
-  instance.set_fixed(true);
-  instance.set_cover(false);
-  instance.set_placed(true);
-  instance.set_placement_updated(true);
-  wrapMacroNetPinList(instance);
-}
-
-void FPInterface::wrapMacroNetPinList(Instance& instance)
-{
-  for (Net& net : FPDM.getDatabase().get_net_list()) {
-    for (NetPin& net_pin : net.get_net_pin_list()) {
-      if (net_pin.get_io() || net_pin.get_instance_name() != instance.get_name()) {
-        continue;
-      }
-      int32_t ll_x = INT32_MAX;
-      int32_t ll_y = INT32_MAX;
-      int32_t ur_x = INT32_MIN;
-      int32_t ur_y = INT32_MIN;
-      bool pin_shape_exist = false;
-      for (InstancePinShape& pin_shape : instance.get_pin_shape_list()) {
-        if (pin_shape.get_pin_name() != net_pin.get_pin_name()) {
-          continue;
-        }
-        ll_x = std::min(ll_x, pin_shape.get_ll_x());
-        ll_y = std::min(ll_y, pin_shape.get_ll_y());
-        ur_x = std::max(ur_x, pin_shape.get_ur_x());
-        ur_y = std::max(ur_y, pin_shape.get_ur_y());
-        pin_shape_exist = true;
-      }
-      if (!pin_shape_exist) {
-        continue;
-      }
-      net_pin.set_coord((ll_x + ur_x) / 2, (ll_y + ur_y) / 2);
-      net_pin.set_placed(true);
-    }
   }
 }
 

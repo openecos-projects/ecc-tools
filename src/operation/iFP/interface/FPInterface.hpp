@@ -86,9 +86,6 @@ class FPInterface
   void wrapUnplacedMacroPinShapeList(idb::IdbInstance* idb_instance, Instance& instance);
   PlacementOrientation wrapPlacementOrientation(idb::IdbOrient idb_orient);
   void wrapNetList();
-  void wrapMacroPlacement();
-  void wrapMacroPlacement(Instance& instance, double x_micron, double y_micron, PlacementOrientation orient);
-  void wrapMacroNetPinList(Instance& instance);
   void wrapIOPinList();
 #endif
 
