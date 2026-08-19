@@ -147,6 +147,10 @@ bool IdbSpecialWireSegment::set_bounding_box()
   if (is_via() && _via != nullptr) {
     IdbObject::set_bounding_box(_via->get_cut_bounding_box());
     return true;
+  } else if (is_rect() && _delta_rect != nullptr) {
+    /// the delta rect of a special wire segment is in absolute coordinates
+    return IdbObject::set_bounding_box(_delta_rect->get_low_x(), _delta_rect->get_low_y(), _delta_rect->get_high_x(),
+                                       _delta_rect->get_high_y());
   } else {
     if (_point_list.size() >= 2) {
       // ensure there are 2 point in a segment

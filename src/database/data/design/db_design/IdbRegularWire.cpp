@@ -139,7 +139,18 @@ IdbCoordinate<int32_t>* IdbRegularWireSegment::get_point_end()
 idb::IdbRect IdbRegularWireSegment::get_segment_rect()
 {
   if (is_rect()) {
-    return get_delta_rect();
+    /// the delta rect is an offset from the start point
+    if (get_delta_rect() == nullptr) {
+      return IdbRect();
+    }
+
+    IdbRect rect(get_delta_rect());
+    IdbCoordinate<int32_t>* point_start = get_point_start();
+    if (point_start != nullptr) {
+      rect.moveByStep(point_start->get_x(), point_start->get_y());
+    }
+
+    return rect;
   } else {
     int32_t routing_width = dynamic_cast<IdbLayerRouting*>(_layer)->get_width();
     IdbCoordinate<int32_t>* point_1 = get_point_start();
