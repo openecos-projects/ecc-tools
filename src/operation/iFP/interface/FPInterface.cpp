@@ -19,6 +19,7 @@
 #include "DataManager.hpp"
 #include "DieBuilder.hpp"
 #include "IOPlacer.hpp"
+#include "IdbHalo.h"
 #include "IdbTerm.h"
 #include "IdbViaMaster.h"
 #include "IdbVias.h"
@@ -632,6 +633,8 @@ void FPInterface::output()
   outputIOPinList();
   outputIOInstancePlacement();
   outputMacroPlacement();
+  outputMacroHalo();
+  outputMacroRouteHalo();
   outputNewInstanceList();
   outputPGSegmentList();
 }
@@ -880,6 +883,109 @@ void FPInterface::outputMacroPlacement()
     }
     idb_design->placeInstance(instance.get_name(), instance.get_x(), instance.get_y(), orient, idb::IdbPlacementStatus::kFixed);
     instance.set_placement_updated(false);
+  }
+}
+
+void FPInterface::outputMacroHalo()
+{
+  idb::IdbInstanceList* idb_instance_list = dmInst->get_idb_design()->get_instance_list();
+  for (const Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (!instance.get_macro() || !instance.get_placed()) {
+      continue;
+    }
+
+    const PlanarRect& macro_rect = instance.get_bounding_rect();
+    const PlanarRect& halo_rect = instance.get_placement_halo_rect();
+    int32_t extend_left = macro_rect.get_ll_x() - halo_rect.get_ll_x();
+    int32_t extend_bottom = macro_rect.get_ll_y() - halo_rect.get_ll_y();
+    int32_t extend_right = halo_rect.get_ur_x() - macro_rect.get_ur_x();
+    int32_t extend_top = halo_rect.get_ur_y() - macro_rect.get_ur_y();
+    if (extend_left < 0 || extend_bottom < 0 || extend_right < 0 || extend_top < 0) {
+      FPLOG.error(Loc::current(), "The placement halo of macro '", instance.get_name(), "' does not enclose the macro!");
+      continue;
+    }
+
+    idb::IdbInstance* idb_instance = idb_instance_list->find_instance(instance.get_name());
+    if (idb_instance == nullptr) {
+      FPLOG.error(Loc::current(), "Failed to find macro '", instance.get_name(), "' in IDB when outputting its placement halo!");
+      continue;
+    }
+
+    idb::IdbHalo* idb_halo = idb_instance->get_halo();
+    if (idb_halo == nullptr) {
+      idb_halo = idb_instance->set_halo();
+    }
+    idb_halo->set_soft(false);
+    idb_halo->set_extend_lef(extend_left);
+    idb_halo->set_extend_bottom(extend_bottom);
+    idb_halo->set_extend_right(extend_right);
+    idb_halo->set_extend_top(extend_top);
+    idb_instance->set_halo_coodinate();
+  }
+}
+
+void FPInterface::outputMacroRouteHalo()
+{
+  Config& config = FPDM.getConfig();
+  if (config.macro_routing_halo < 0) {
+    return;
+  }
+
+  idb::IdbLayers* idb_layer_list = dmInst->get_idb_layout()->get_layers();
+  idb::IdbLayer* bottom_layer = idb_layer_list->get_bottom_routing_layer();
+  if (bottom_layer == nullptr) {
+    FPLOG.error(Loc::current(), "Failed to determine the bottom routing layer for macro route halos!");
+    return;
+  }
+
+  idb::IdbInstanceList* idb_instance_list = dmInst->get_idb_design()->get_instance_list();
+  for (const Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (!instance.get_macro() || !instance.get_placed()) {
+      continue;
+    }
+
+    const PlanarRect& macro_rect = instance.get_bounding_rect();
+    const PlanarRect& halo_rect = instance.get_routing_halo_rect();
+    int32_t extend_left = macro_rect.get_ll_x() - halo_rect.get_ll_x();
+    int32_t extend_bottom = macro_rect.get_ll_y() - halo_rect.get_ll_y();
+    int32_t extend_right = halo_rect.get_ur_x() - macro_rect.get_ur_x();
+    int32_t extend_top = halo_rect.get_ur_y() - macro_rect.get_ur_y();
+    if (extend_left < 0 || extend_left != extend_bottom || extend_left != extend_right || extend_left != extend_top) {
+      FPLOG.error(Loc::current(), "The routing halo of macro '", instance.get_name(), "' is invalid or asymmetric!");
+      continue;
+    }
+
+    idb::IdbInstance* idb_instance = idb_instance_list->find_instance(instance.get_name());
+    if (idb_instance == nullptr) {
+      FPLOG.error(Loc::current(), "Failed to find macro '", instance.get_name(), "' in IDB when outputting its route halo!");
+      continue;
+    }
+
+    idb::IdbCellMaster* cell_master = idb_instance->get_cell_master();
+    if (cell_master == nullptr) {
+      FPLOG.error(Loc::current(), "The macro '", instance.get_name(), "' has no cell master when outputting its route halo!");
+      continue;
+    }
+    idb::IdbLayer* top_layer = cell_master->get_top_layer();
+    for (idb::IdbLayerShape* obs_shape : idb_instance->get_obs_box_list()) {
+      idb::IdbLayer* obs_layer = obs_shape == nullptr ? nullptr : obs_shape->get_layer();
+      if (obs_layer != nullptr && obs_layer->is_routing()
+          && (top_layer == nullptr || top_layer->get_order() < obs_layer->get_order())) {
+        top_layer = obs_layer;
+      }
+    }
+    if (top_layer == nullptr || !top_layer->is_routing() || top_layer->get_order() < bottom_layer->get_order()) {
+      FPLOG.error(Loc::current(), "Failed to determine a valid top routing layer for macro '", instance.get_name(), "'!");
+      continue;
+    }
+
+    idb::IdbRouteHalo* idb_route_halo = idb_instance->get_route_halo();
+    if (idb_route_halo == nullptr) {
+      idb_route_halo = idb_instance->set_route_halo();
+    }
+    idb_route_halo->set_route_distance(extend_left);
+    idb_route_halo->set_layer_bottom(bottom_layer);
+    idb_route_halo->set_layer_top(top_layer);
   }
 }
 

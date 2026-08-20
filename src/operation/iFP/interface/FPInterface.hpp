@@ -102,6 +102,8 @@ class FPInterface
   void outputIOPinList();
   void outputIOInstancePlacement();
   void outputMacroPlacement();
+  void outputMacroHalo();
+  void outputMacroRouteHalo();
   void outputNewInstanceList();
   void outputPGSegmentList();
   void adjustPGLineSegmentListByViaEnclosure();
