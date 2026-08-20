@@ -27,7 +27,6 @@ int registerCmdSTA()
   // sta
   registerTclCmd(TclInitSTA, "init_sta");
   registerTclCmd(TclRunSTA, "run_sta");
-  registerTclCmd(TclRemoveWireLoadModel, "remove_wire_load_model");
   registerTclCmd(TclExtractLib, "extract_lib");
   registerTclCmd(TclDestroySTA, "destroy_sta");
   return EXIT_SUCCESS;

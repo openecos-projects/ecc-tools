@@ -50,16 +50,6 @@ class TclRunSTA : public TclCmd
   std::vector<std::pair<std::string, ValueType>> _config_list;
 };
 
-class TclRemoveWireLoadModel : public TclCmd
-{
- public:
-  explicit TclRemoveWireLoadModel(const char* cmd_name);
-  ~TclRemoveWireLoadModel() override = default;
-
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
 class TclExtractLib : public TclCmd
 {
  public:
