@@ -67,6 +67,9 @@ IdbSpecialWireSegment::~IdbSpecialWireSegment()
     delete _via;
     _via = nullptr;
   }
+
+  delete _delta_rect;
+  _delta_rect = nullptr;
 }
 
 void IdbSpecialWireSegment::set_shape_type(string type)
@@ -107,6 +110,7 @@ IdbCoordinate<int32_t>* IdbSpecialWireSegment::add_point(int32_t x, int32_t y)
 
 void IdbSpecialWireSegment::set_delta_rect(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y)
 {
+  delete _delta_rect;
   _delta_rect = new IdbRect(ll_x, ll_y, ur_x, ur_y);
 }
 
@@ -155,7 +159,8 @@ bool IdbSpecialWireSegment::set_bounding_box()
     if (_point_list.size() >= 2) {
       // ensure there are 2 point in a segment
       //   IdbLayerRouting* routing_layer = dynamic_cast<IdbLayerRouting*>(_layer);
-      int32_t routing_width = _route_width == 0 ? _route_width : _route_width;
+      auto* routing_layer = dynamic_cast<IdbLayerRouting*>(_layer);
+      int32_t routing_width = _route_width > 0 ? _route_width : (routing_layer == nullptr ? 0 : routing_layer->get_width());
 
       IdbCoordinate<int32_t>* point_1 = get_point_start();
       IdbCoordinate<int32_t>* point_2 = get_point_second();
@@ -534,14 +539,16 @@ int32_t IdbSpecialWire::add_segment_list(vector<IdbCoordinate<int32_t>*>& point_
 
 void IdbSpecialWire::removeViaInBoundingBox(IdbRect rect, IdbLayer* layer)
 {
-  int i = 0;
   for (auto segment = _segment_list.begin(); segment != _segment_list.end();) {
-    if ((*segment)->is_via() && (*segment)->get_via()->isIntersection(rect, layer)) {
-      segment = _segment_list.erase(std::begin(_segment_list) + i);
-      ECCLOG.info(ecc::Loc::current(), "Success : remove via = ", (*segment)->get_via()->get_name());
+    auto* wire_segment = *segment;
+    if (wire_segment != nullptr && wire_segment->is_via() && wire_segment->get_via() != nullptr
+        && wire_segment->get_via()->isIntersection(rect, layer)) {
+      const std::string via_name = wire_segment->get_via()->get_name();
+      segment = _segment_list.erase(segment);
+      delete wire_segment;
+      ECCLOG.info(ecc::Loc::current(), "Success : remove via = ", via_name);
     } else {
       ++segment;
-      ++i;
     }
   }
 }

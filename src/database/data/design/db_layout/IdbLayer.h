@@ -293,9 +293,9 @@ class IdbMinStep
  private:
   bool _has_max_edges{false};
   bool _has_length_sum{false};
-  int32_t _min_step_length;
-  int32_t _max_length_sum;
-  int32_t _max_edges;
+  int32_t _min_step_length{0};
+  int32_t _max_length_sum{0};
+  int32_t _max_edges{0};
   Type _type{Type::kNone};
 };
 
@@ -748,7 +748,7 @@ class IdbLayerImplantSpacingList
   vector<IdbLayerImplantSpacing*>& get_min_spacing_list() { return _spacing_list; }
   IdbLayerImplantSpacing* get_min_spacing(int i)
   {
-    if (i > 0 && i < (int) _spacing_list.size()) {
+    if (i >= 0 && i < (int) _spacing_list.size()) {
       return _spacing_list[i];
     }
 
@@ -789,9 +789,10 @@ class IdbLayerImplant : public IdbLayer
   IdbLayerImplant()
   {
     set_type(IdbLayerType::kLayerImplant);
+    _min_width = -1;
     _spacing_list = new IdbLayerImplantSpacingList();
   }
-  virtual ~IdbLayerImplant() = default;
+  virtual ~IdbLayerImplant() { delete _spacing_list; }
 
   ////getter
   int32_t get_min_spacing()
@@ -799,6 +800,7 @@ class IdbLayerImplant : public IdbLayer
     if (_spacing_list->get_num() == 1) {
       return _spacing_list->get_min_spacing(0)->get_min_spacing();
     }
+    return -1;
   }
   IdbLayerImplantSpacingList* get_min_spacing_list() { return _spacing_list; }
   int32_t get_min_width() { return _min_width; }
