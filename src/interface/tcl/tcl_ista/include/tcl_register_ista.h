@@ -28,13 +28,6 @@ int registerCmdSTA()
   registerTclCmd(TclInitSTA, "init_sta");
   registerTclCmd(TclRunSTA, "run_sta");
   registerTclCmd(TclRemoveWireLoadModel, "remove_wire_load_model");
-  registerTclCmd(TclUpdateTiming, "update_timing");
-  registerTclCmd(TclWriteSDF, "write_sdf");
-  registerTclCmd(TclReportTiming, "report_timing");
-  registerTclCmd(TclCreateClock, "create_clock");
-  registerTclCmd(TclSetPropagatedClock, "set_propagated_clock");
-  registerTclCmd(TclGetPorts, "get_ports");
-  registerTclCmd(TclGetClocks, "get_clocks");
   registerTclCmd(TclExtractLib, "extract_lib");
   registerTclCmd(TclDestroySTA, "destroy_sta");
   return EXIT_SUCCESS;
