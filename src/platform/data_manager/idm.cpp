@@ -50,6 +50,10 @@ bool DataManager::init(string config_path)
     return false;
   }
 
+  if (!initLef(std::vector<std::string>{_config.get_tech_lef_path()}, true)) {
+    return false;
+  }
+
   if (!initLef(_config.get_lef_paths())) {
     return false;
   }
