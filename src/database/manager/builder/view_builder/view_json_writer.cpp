@@ -845,9 +845,11 @@ bool ViewJsonWriter::writeRegularWires()
             registerSpatialEntry("regular_wires", storedPath("regular_wires.json"), entry_id, bbox, layers);
           }
         }
-        if (segment->is_rect()) {
+        if (segment->is_rect() && segment->get_delta_rect() != nullptr) {
           const int layer_id = layerId(segment->get_layer());
-          const ViewRect bbox = toViewRect(segment->get_delta_rect());
+          /// the delta rect is an offset from the start point
+          const IdbRect segment_rect = segment->get_segment_rect();
+          const ViewRect bbox = toViewRect(segment_rect);
           ViewJson item;
           item["id"] = id++;
           item["net_id"] = regularNetId(net);
@@ -855,7 +857,7 @@ bool ViewJsonWriter::writeRegularWires()
           item["segment_index"] = segment_index;
           item["kind"] = "patch";
           item["layer_id"] = layer_id;
-          item["rect"] = toRectJson(segment->get_delta_rect());
+          item["rect"] = toRectJson(segment_rect);
           item["bbox"] = toRectJson(bbox);
           item["layers"] = ViewJson::array({layer_id});
           json["data"].push_back(item);

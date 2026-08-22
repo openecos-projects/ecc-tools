@@ -23,5 +23,4 @@ target_include_directories(izh_metal_inserter
     PUBLIC
     ${IZH_MODULE}/metal_inserter/mi_data_manager
     ${IZH_MODULE}/metal_inserter
-    ${HOME_THIRDPARTY}/json
 )
