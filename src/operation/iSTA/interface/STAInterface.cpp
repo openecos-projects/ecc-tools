@@ -31,6 +31,8 @@
 #include "PowerPropagator.hpp"
 #include "PowerReporter.hpp"
 #include "SDFWriter.hpp"
+#include "SdcCommand.hpp"
+#include "SdcCommands.hpp"
 #include "STAHeader.hpp"
 #include "TCModel.hpp"
 #include "TimingAnalyzer.hpp"
@@ -88,6 +90,21 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   DataManager::initInst();
   STADM.input(config_map);
   DelayCalculator::initInst();
+  SdcCommand::initInst({
+      {"set_case_analysis", sdc::executeTclCommand<sdc::TclSetCaseAnalysis>},
+      {"set_input_delay", sdc::executeTclCommand<sdc::TclSetInputDelay>},
+      {"set_output_delay", sdc::executeTclCommand<sdc::TclSetOutputDelay>},
+      {"set_input_transition", sdc::executeTclCommand<sdc::TclSetInputTransition>},
+      {"set_load", sdc::executeTclCommand<sdc::TclSetLoad>},
+      {"set_clock_uncertainty", sdc::executeTclCommand<sdc::TclSetClockUncertainty>},
+      {"get_clock", sdc::executeTclCommand<sdc::TclGetClocks>},
+      {"get_clocks", sdc::executeTclCommand<sdc::TclGetClocks>},
+      {"get_port", sdc::executeTclCommand<sdc::TclGetPorts>},
+      {"get_ports", sdc::executeTclCommand<sdc::TclGetPorts>},
+      {"create_clock", sdc::executeTclCommand<sdc::TclCreateClock>},
+      {"set_propagated_clock", sdc::executeTclCommand<sdc::TclSetPropagatedClock>},
+  });
+  STADM.readConstraint();
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -180,6 +197,7 @@ void STAInterface::destroySTA()
   STADC.destroy();
   DelayCalculator::destroyInst();
   STADM.output();
+  SdcCommand::destroyInst();
   DataManager::destroyInst();
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());

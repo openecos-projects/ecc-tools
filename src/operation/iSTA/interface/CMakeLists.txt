@@ -5,6 +5,7 @@ add_library(ista_interface
 target_link_libraries(ista_interface
     PRIVATE
     ista_source
+    ista_sdc_command
     idm
     liberty
     spef
