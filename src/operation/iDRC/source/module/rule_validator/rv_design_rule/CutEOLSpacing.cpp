@@ -120,18 +120,17 @@ PlanarRect getBoundingRect(const PlanarRect& first, const PlanarRect& second)
                     std::max(first.get_ur_x(), second.get_ur_x()), std::max(first.get_ur_y(), second.get_ur_y()));
 }
 
-bool isRegularOneCutToNetlessObsPair(const CutData& cut_data, const CutData& overlap_cut_data)
+bool isRegularToNetlessObsPair(const CutData& cut_data, const CutData& overlap_cut_data)
 {
-  return cut_data.source_type == ids::Shape::SourceType::kRegularWire && cut_data.net_idx != -1 && cut_data.via_cut_count == 1
-         && overlap_cut_data.source_type == ids::Shape::SourceType::kInstanceObs && overlap_cut_data.net_idx == -1
-         && overlap_cut_data.via_cut_count == 0;
+  return cut_data.source_type == ids::Shape::SourceType::kRegularWire && cut_data.net_idx != -1
+         && overlap_cut_data.source_type == ids::Shape::SourceType::kInstanceObs && overlap_cut_data.net_idx == -1;
 }
 
-bool isRegularOneCutTwoNetPair(const CutData& cut_data, const CutData& overlap_cut_data)
+bool isRegularTwoNetPair(const CutData& cut_data, const CutData& overlap_cut_data)
 {
   return cut_data.source_type == ids::Shape::SourceType::kRegularWire
          && overlap_cut_data.source_type == ids::Shape::SourceType::kRegularWire && cut_data.net_idx != -1 && overlap_cut_data.net_idx != -1
-         && cut_data.net_idx != overlap_cut_data.net_idx && cut_data.via_cut_count == 1 && overlap_cut_data.via_cut_count == 1;
+         && cut_data.net_idx != overlap_cut_data.net_idx;
 }
 
 bool hasLongNetlessRoutingEnv(const std::map<int32_t, bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>>& routing_net_env_rtrees,
@@ -487,7 +486,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
           auto is_pa160_netless_obs_no_check_candidate = [&](const CutData& overlap_cut_data, const PlanarRect& env_cut_rect,
                                                              const PlanarRect& search_rect) {
             if (has_check_overlap || has_other_overlap || cut_layer_idx != 1 || violation_routing_layer_idx != 0
-                || !isRegularOneCutToNetlessObsPair(cut_data, overlap_cut_data)) {
+                || !isRegularToNetlessObsPair(cut_data, overlap_cut_data)) {
               return false;
             }
             if (DRCUTIL.isOpenOverlap(search_rect, env_cut_rect) || DRCUTIL.getEuclideanDistance(cut_rect, env_cut_rect) >= eol_spacing) {
@@ -517,7 +516,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
           auto is_pa160_regular_wide_no_check_candidate = [&](const CutData& overlap_cut_data, const PlanarRect& env_cut_rect,
                                                               const PlanarRect& search_rect) {
             if (has_check_overlap || has_other_overlap || cut_layer_idx != 2 || violation_routing_layer_idx != 1 || !has_wide_span || is_eol
-                || routing_rect.getYSpan() <= routing_rect.getWidth() || !isRegularOneCutTwoNetPair(cut_data, overlap_cut_data)
+                || routing_rect.getYSpan() <= routing_rect.getWidth() || !isRegularTwoNetPair(cut_data, overlap_cut_data)
                 || DRCUTIL.isOpenOverlap(search_rect, env_cut_rect)
                 || DRCUTIL.getEuclideanDistance(cut_rect, env_cut_rect) >= eol_spacing) {
               return false;
@@ -557,7 +556,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
           auto is_pa160_m1_two_net_eol_window_candidate = [&](const CutData& overlap_cut_data, const PlanarRect& env_cut_rect,
                                                               const PlanarRect& search_rect) {
             if (cut_layer_idx != 1 || violation_routing_layer_idx != 0 || has_wide_span || !is_eol
-                || !isRegularOneCutTwoNetPair(cut_data, overlap_cut_data) || DRCUTIL.isOpenOverlap(search_rect, env_cut_rect)
+                || !isRegularTwoNetPair(cut_data, overlap_cut_data) || DRCUTIL.isOpenOverlap(search_rect, env_cut_rect)
                 || DRCUTIL.getEuclideanDistance(cut_rect, env_cut_rect) >= eol_spacing) {
               return false;
             }
@@ -582,7 +581,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
                                                                  const PlanarRect& search_rect) {
             if (has_check_overlap || has_other_overlap || cut_layer_idx != 1 || violation_routing_layer_idx != 0 || !has_wide_span || is_eol
                 || routing_rect.getYSpan() != routing_rect.getWidth() || ur_span != 0 || ll_span <= 0 || ll_span != other_back_side_span
-                || !isRegularOneCutTwoNetPair(cut_data, overlap_cut_data) || DRCUTIL.isOpenOverlap(search_rect, env_cut_rect)
+                || !isRegularTwoNetPair(cut_data, overlap_cut_data) || DRCUTIL.isOpenOverlap(search_rect, env_cut_rect)
                 || DRCUTIL.getEuclideanDistance(cut_rect, env_cut_rect) >= eol_spacing) {
               return false;
             }

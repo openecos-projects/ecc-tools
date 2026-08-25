@@ -30,24 +30,6 @@
 
 namespace idrc {
 
-namespace {
-
-void setShapeViaProvenance(DRCShape& drc_shape, ids::Shape::SourceType source_type, idb::IdbVia* idb_via, int32_t via_cut_idx,
-                           int32_t via_cut_count)
-{
-  drc_shape.set_source_type(source_type);
-  if (idb_via != nullptr) {
-    drc_shape.set_via_name(idb_via->get_name());
-    if (idb_via->get_instance() != nullptr) {
-      drc_shape.set_via_master_name(idb_via->get_instance()->get_name());
-    }
-  }
-  drc_shape.set_via_cut_idx(via_cut_idx);
-  drc_shape.set_via_cut_count(via_cut_count);
-}
-
-}  // namespace
-
 // public
 
 DRCInterface& DRCInterface::getInst()
@@ -1027,7 +1009,7 @@ std::vector<DRCShape> DRCInterface::buildEnvShapeList()
                                LayerRect(idb_box_top.get_low_x(), idb_box_top.get_low_y(), idb_box_top.get_high_x(), idb_box_top.get_high_y(),
                                          idb_shape_top.get_layer()->get_id()),
                                true);
-            setShapeViaProvenance(drc_shape, ids::Shape::SourceType::kInstancePin, idb_via, -1, 0);
+            drc_shape.set_source_type(ids::Shape::SourceType::kInstancePin);
             env_shape_list.push_back(std::move(drc_shape));
           }
           {
@@ -1038,18 +1020,16 @@ std::vector<DRCShape> DRCInterface::buildEnvShapeList()
                                LayerRect(idb_box_bottom.get_low_x(), idb_box_bottom.get_low_y(), idb_box_bottom.get_high_x(),
                                          idb_box_bottom.get_high_y(), idb_shape_bottom.get_layer()->get_id()),
                                true);
-            setShapeViaProvenance(drc_shape, ids::Shape::SourceType::kInstancePin, idb_via, -1, 0);
+            drc_shape.set_source_type(ids::Shape::SourceType::kInstancePin);
             env_shape_list.push_back(std::move(drc_shape));
           }
           idb::IdbLayerShape idb_shape_cut = idb_via->get_cut_layer_shape();
-          int32_t via_cut_count = static_cast<int32_t>(idb_shape_cut.get_rect_list().size());
-          int32_t via_cut_idx = 0;
           for (idb::IdbRect* idb_rect : idb_shape_cut.get_rect_list()) {
             DRCShape drc_shape(net_idx,
                                LayerRect(idb_rect->get_low_x(), idb_rect->get_low_y(), idb_rect->get_high_x(), idb_rect->get_high_y(),
                                          idb_shape_cut.get_layer()->get_id()),
                                false);
-            setShapeViaProvenance(drc_shape, ids::Shape::SourceType::kInstancePin, idb_via, via_cut_idx++, via_cut_count);
+            drc_shape.set_source_type(ids::Shape::SourceType::kInstancePin);
             env_shape_list.push_back(std::move(drc_shape));
           }
         }
@@ -1180,19 +1160,17 @@ std::vector<DRCShape> DRCInterface::buildResultShapeList()
                                    LayerRect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y(),
                                              layer_shape.get_layer()->get_id()),
                                    true);
-                setShapeViaProvenance(drc_shape, ids::Shape::SourceType::kRegularWire, idb_via, -1, 0);
+                drc_shape.set_source_type(ids::Shape::SourceType::kRegularWire);
                 result_shape_list.push_back(std::move(drc_shape));
               }
             }
             idb::IdbLayerShape cut_layer_shape = idb_via->get_cut_layer_shape();
-            int32_t via_cut_count = static_cast<int32_t>(cut_layer_shape.get_rect_list().size());
-            int32_t via_cut_idx = 0;
             for (idb::IdbRect* rect : cut_layer_shape.get_rect_list()) {
               DRCShape drc_shape(static_cast<int32_t>(idb_net->get_id()),
                                  LayerRect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y(),
                                            cut_layer_shape.get_layer()->get_id()),
                                  false);
-              setShapeViaProvenance(drc_shape, ids::Shape::SourceType::kRegularWire, idb_via, via_cut_idx++, via_cut_count);
+              drc_shape.set_source_type(ids::Shape::SourceType::kRegularWire);
               result_shape_list.push_back(std::move(drc_shape));
             }
           }
@@ -1223,19 +1201,17 @@ std::vector<DRCShape> DRCInterface::buildResultShapeList()
                                  LayerRect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y(),
                                            layer_shape.get_layer()->get_id()),
                                  true);
-              setShapeViaProvenance(drc_shape, ids::Shape::SourceType::kSpecialWire, idb_segment->get_via(), -1, 0);
+              drc_shape.set_source_type(ids::Shape::SourceType::kSpecialWire);
               result_shape_list.push_back(std::move(drc_shape));
             }
           }
           idb::IdbLayerShape cut_layer_shape = idb_segment->get_via()->get_cut_layer_shape();
-          int32_t via_cut_count = static_cast<int32_t>(cut_layer_shape.get_rect_list().size());
-          int32_t via_cut_idx = 0;
           for (idb::IdbRect* rect : cut_layer_shape.get_rect_list()) {
             DRCShape drc_shape(special_net_id,
                                LayerRect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y(),
                                          cut_layer_shape.get_layer()->get_id()),
                                false);
-            setShapeViaProvenance(drc_shape, ids::Shape::SourceType::kSpecialWire, idb_segment->get_via(), via_cut_idx++, via_cut_count);
+            drc_shape.set_source_type(ids::Shape::SourceType::kSpecialWire);
             result_shape_list.push_back(std::move(drc_shape));
           }
         } else {
@@ -1392,10 +1368,6 @@ DRCShape DRCInterface::convertToDRCShape(const ids::Shape& ids_shape)
   drc_shape.set_layer_idx(ids_shape.layer_idx);
   drc_shape.set_is_routing(ids_shape.is_routing);
   drc_shape.set_source_type(ids_shape.source_type);
-  drc_shape.set_via_name(ids_shape.via_name);
-  drc_shape.set_via_master_name(ids_shape.via_master_name);
-  drc_shape.set_via_cut_idx(ids_shape.via_cut_idx);
-  drc_shape.set_via_cut_count(ids_shape.via_cut_count);
   return drc_shape;
 }
 

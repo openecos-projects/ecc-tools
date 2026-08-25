@@ -435,10 +435,6 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
       cut_data.net_idx = drc_shape->get_net_idx();
       cut_data.isEnv = is_env_shape;
       cut_data.source_type = drc_shape->get_source_type();
-      cut_data.via_name = drc_shape->get_via_name();
-      cut_data.via_master_name = drc_shape->get_via_master_name();
-      cut_data.via_cut_idx = drc_shape->get_via_cut_idx();
-      cut_data.via_cut_count = drc_shape->get_via_cut_count();
       layer_data[drc_shape->get_layer_idx()].cut_pool.push_back(cut_data);
       return;
     }
