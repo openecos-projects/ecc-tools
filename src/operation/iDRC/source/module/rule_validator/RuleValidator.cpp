@@ -219,35 +219,25 @@ void RuleValidator::destroyInst()
 }
 
 // function
-std::vector<Violation> RuleValidator::verify(std::vector<DRCShape>& drc_env_shape_list, std::vector<DRCShape>& drc_result_shape_list,
-                                             std::set<ViolationType>& drc_check_type_set, std::vector<DRCShape>& drc_check_region_list)
+std::vector<Violation> RuleValidator::verify(std::vector<DRCShape> drc_env_shape_list, std::vector<DRCShape> drc_result_shape_list,
+                                             std::set<ViolationType> drc_check_type_set, std::vector<DRCShape> drc_check_region_list)
 {
   Monitor monitor;
   DRCLOG.info(Loc::current(), "Starting...");
-  RVModel rv_model = initRVModel(drc_env_shape_list, drc_result_shape_list, drc_check_type_set, drc_check_region_list);
+  RVModel rv_model(std::move(drc_env_shape_list), std::move(drc_result_shape_list), std::move(drc_check_type_set),
+                   std::move(drc_check_region_list));
   setRVComParam(rv_model);
   buildRVClusterList(rv_model);
   verifyRVModel(rv_model);
   buildViolationList(rv_model);
   // debugPlotRVModel(rv_model, "best");
   DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-  return rv_model.get_violation_list();
+  return std::move(rv_model.get_violation_list());
 }
 
 // private
 
 RuleValidator* RuleValidator::_rv_instance = nullptr;
-
-RVModel RuleValidator::initRVModel(std::vector<DRCShape>& drc_env_shape_list, std::vector<DRCShape>& drc_result_shape_list,
-                                   std::set<ViolationType>& drc_check_type_set, std::vector<DRCShape>& drc_check_region_list)
-{
-  RVModel rv_model;
-  rv_model.set_drc_env_shape_list(drc_env_shape_list);
-  rv_model.set_drc_result_shape_list(drc_result_shape_list);
-  rv_model.set_drc_check_type_set(drc_check_type_set);
-  rv_model.set_drc_check_region_list(drc_check_region_list);
-  return rv_model;
-}
 
 void RuleValidator::setRVComParam(RVModel& rv_model)
 {

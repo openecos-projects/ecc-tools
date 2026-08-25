@@ -39,6 +39,7 @@ class RoutingLayer;
 class CutLayer;
 class DRCShape;
 enum class Direction;
+enum class ViolationType;
 }  // namespace idrc
 
 #endif
@@ -94,9 +95,9 @@ class DRCInterface
 #endif
 
 #if 1  // check
-  std::vector<ids::Shape> buildEnvShapeList();
+  std::vector<DRCShape> buildEnvShapeList();
   bool isSkipping(idb::IdbNet* idb_net);
-  std::vector<ids::Shape> buildResultShapeList();
+  std::vector<DRCShape> buildResultShapeList();
   void printSummary(std::map<std::string, std::vector<ids::Violation>>& type_violation_map);
   void outputViolationJson(std::map<std::string, std::vector<ids::Violation>>& type_violation_map);
   void outputViolationFile(std::map<std::string, std::vector<ids::Violation>>& type_violation_map);
@@ -116,6 +117,8 @@ class DRCInterface
   DRCInterface& operator=(const DRCInterface& other) = delete;
   DRCInterface& operator=(DRCInterface&& other) = delete;
   // function
+  std::vector<ids::Violation> getViolationList(std::vector<DRCShape> drc_env_shape_list, std::vector<DRCShape> drc_result_shape_list,
+                                               std::set<ViolationType> drc_check_type_set, std::vector<DRCShape> drc_check_region_list);
 };
 
 }  // namespace idrc

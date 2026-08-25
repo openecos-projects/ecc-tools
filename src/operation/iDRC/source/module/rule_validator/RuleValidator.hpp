@@ -33,8 +33,8 @@ class RuleValidator
   static RuleValidator& getInst();
   static void destroyInst();
   // function
-  std::vector<Violation> verify(std::vector<DRCShape>& drc_env_shape_list, std::vector<DRCShape>& drc_result_shape_list,
-                                std::set<ViolationType>& drc_check_type_set, std::vector<DRCShape>& drc_check_region_list);
+  std::vector<Violation> verify(std::vector<DRCShape> drc_env_shape_list, std::vector<DRCShape> drc_result_shape_list,
+                                std::set<ViolationType> drc_check_type_set, std::vector<DRCShape> drc_check_region_list);
 
  private:
   // self
@@ -47,8 +47,6 @@ class RuleValidator
   RuleValidator& operator=(const RuleValidator& other) = delete;
   RuleValidator& operator=(RuleValidator&& other) = delete;
   // function
-  RVModel initRVModel(std::vector<DRCShape>& drc_env_shape_list, std::vector<DRCShape>& drc_result_shape_list, std::set<ViolationType>& drc_check_type_set,
-                      std::vector<DRCShape>& drc_check_region_list);
   void setRVComParam(RVModel& rv_model);
   void buildRVClusterList(RVModel& rv_model);
   void verifyRVModel(RVModel& rv_model);
