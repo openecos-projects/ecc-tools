@@ -89,28 +89,19 @@ int32_t Utility::getOrientEdgeDistance(PlanarRect& a, PlanarRect& b, Orientation
 
 int32_t Utility::getOrientEnclosure(PlanarRect master, PlanarRect insider, Orientation orient)
 {
-  bool isBeyond = false;
   switch (orient) {
-    case Orientation::kNorth:
-      isBeyond = (insider.get_ur_y() >= master.get_ur_y());
-      break;
-    case Orientation::kWest:
-      isBeyond = (insider.get_ll_x() <= master.get_ll_x());
-      break;
-    case Orientation::kSouth:
-      isBeyond = (insider.get_ll_y() <= master.get_ll_y());
-      break;
     case Orientation::kEast:
-      isBeyond = (insider.get_ur_x() >= master.get_ur_x());
-      break;
+      return master.get_ur_x() - insider.get_ur_x();
+    case Orientation::kSouth:
+      return insider.get_ll_y() - master.get_ll_y();
+    case Orientation::kWest:
+      return insider.get_ll_x() - master.get_ll_x();
+    case Orientation::kNorth:
+      return master.get_ur_y() - insider.get_ur_y();
     default:
-      return -1;
+      DRCLOG.error(Loc::current(), "The orientation is error!");
   }
-
-  if (isBeyond)
-    return 0;
-
-  return getOrientEdgeDistance(master, insider, orient);
+  return 0;
 }
 
 std::vector<Orientation> Utility::getOrientationList(const PlanarCoord& start_coord, const PlanarCoord& end_coord, Orientation point_orientation)

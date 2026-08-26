@@ -548,7 +548,7 @@ void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* d
 void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data)
 {
   NetPrepareContext prepare_context;
-  std::vector<GTLRectInt> env_rect_list = std::move(routing_net.env_rect_list);
+  const std::vector<GTLRectInt>& env_rect_list = routing_net.env_rect_list;
   std::vector<GTLRectInt> result_rect_list = std::move(routing_net.result_rect_list);
   bool has_env = !env_rect_list.empty();
   bool has_result = !result_rect_list.empty();
