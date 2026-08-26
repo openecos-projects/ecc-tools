@@ -111,6 +111,7 @@ auto CollectNetPins(idb::IdbNet* net) -> IdbNetPins
     }
   }
 
+  std::vector<idb::IdbPin*> driver_candidates;
   for (auto* pin : net_pins.all_pins) {
     auto* term = pin == nullptr ? nullptr : pin->get_term();
     if (term == nullptr) {
@@ -118,20 +119,19 @@ auto CollectNetPins(idb::IdbNet* net) -> IdbNetPins
     }
     if (!pin->is_io_pin()
         && (term->get_direction() == idb::IdbConnectDirection::kOutput || term->get_direction() == idb::IdbConnectDirection::kOutputTriState)) {
-      net_pins.driver = pin;
-      break;
+      driver_candidates.push_back(pin);
     }
   }
-  if (net_pins.driver == nullptr) {
+  if (driver_candidates.empty()) {
     for (auto* pin : net_pins.all_pins) {
       auto* term = pin == nullptr ? nullptr : pin->get_term();
       if (term != nullptr && pin->is_io_pin() && term->get_direction() == idb::IdbConnectDirection::kInput) {
-        net_pins.driver = pin;
-        break;
+        driver_candidates.push_back(pin);
       }
     }
   }
 
+  net_pins.driver = driver_candidates.size() == 1U ? driver_candidates.front() : nullptr;
   for (auto* pin : net_pins.all_pins) {
     if (pin != net_pins.driver) {
       net_pins.loads.push_back(pin);
@@ -195,7 +195,7 @@ auto IsClockSinkPin(idb::IdbPin* pin, idb::LibCell* lib_cell) -> bool
   }
   auto* term = pin->get_term();
   auto* lib_port = FindLibPort(lib_cell, pin);
-  if (lib_port != nullptr && lib_port->isClock()) {
+  if (lib_port != nullptr && lib_port->isClock() && lib_cell != nullptr && lib_cell->isSequentialCell() && !lib_cell->isICG()) {
     return true;
   }
   if (pin->is_flip_flop_clk()) {
@@ -307,17 +307,6 @@ auto DominanceForRecord(const ClockTraceRecord& record, const std::string& clock
     return "owned_by_primary_clock";
   }
   return "undetermined";
-}
-
-auto StrongTargetSinkThreshold(std::size_t max_fanout) -> std::size_t
-{
-  constexpr std::size_t min_clock_target_sinks = 4U;
-  return std::max(min_clock_target_sinks, max_fanout);
-}
-
-auto IsStrongClockTarget(const ClockTraceRecord& record, std::size_t sink_threshold) -> bool
-{
-  return record.macro_clock_sinks > 0U || record.sequential_clock_sinks > sink_threshold;
 }
 
 auto ResolveInstPinByLibPort(idb::IdbInstance* inst, idb::LibPort* lib_port) -> idb::IdbPin*

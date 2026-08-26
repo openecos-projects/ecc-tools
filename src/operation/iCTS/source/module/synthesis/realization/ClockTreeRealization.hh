@@ -28,9 +28,10 @@
 #include <string>
 #include <vector>
 
+#include "design/Clock.hh"
+
 namespace icts {
 
-class Clock;
 class Design;
 class Inst;
 class Net;
@@ -42,6 +43,17 @@ struct ClockSinkPartitionOutput
 {
   std::vector<Pin*> macro_sinks;
   std::vector<Pin*> regular_sinks;
+};
+
+struct ClockSynthesisFrontier
+{
+  bool has_traced_topology = false;
+  std::vector<Pin*> top_level_traced_inputs;
+  std::vector<Pin*> uncovered_terminal_loads;
+  std::vector<Pin*> pins;
+
+  auto hasTracedTopology() const -> bool { return has_traced_topology; }
+  auto isFullyCoveredTracedTopology() const -> bool { return has_traced_topology && uncovered_terminal_loads.empty(); }
 };
 
 struct NetConnectionInput
@@ -102,6 +114,7 @@ struct InsertedObjectCommitInput
   std::vector<std::unique_ptr<Inst>>* inserted_insts = nullptr;
   std::vector<std::unique_ptr<Pin>>* inserted_pins = nullptr;
   std::vector<std::unique_ptr<Net>>* inserted_nets = nullptr;
+  std::vector<ClockPropagationArc>* propagation_arcs = nullptr;
 };
 
 class ClockTreeRealization
@@ -110,12 +123,13 @@ class ClockTreeRealization
   ClockTreeRealization() = delete;
 
   static auto partitionClockSinks(const std::vector<Pin*>& sinks) -> ClockSinkPartitionOutput;
+  static auto deriveSynthesisFrontier(const Clock& clock) -> ClockSynthesisFrontier;
   static auto makeSinkDomainPrefix(const Clock& clock, std::size_t clock_index, SinkDomainKind sink_domain) -> std::string;
   static auto addRootBufferForSinkDomain(const SinkDomainRootBufferSelectionInput& input) -> SinkDomainRootBufferOutput;
   static auto addRootBufferForSinkDomain(const SinkDomainRootBufferInput& input) -> SinkDomainRootBufferOutput;
   static auto reconnectNet(const NetConnectionInput& input) -> void;
   static auto connectSinkDomainDownstreamNet(const SinkDomainDownstreamNetInput& input) -> Net*;
-  static auto restoreClockSourceNetToClockLoads(Clock& clock) -> void;
+  static auto restoreClockSourceNetToSynthesisFrontier(Clock& clock) -> ClockSynthesisFrontier;
   static auto reuseClockSourceNetAsSourceToRootBuffers(const SourceToRootNetReuseInput& input) -> Net*;
   static auto commitInsertedObjects(const InsertedObjectCommitInput& input) -> bool;
 };

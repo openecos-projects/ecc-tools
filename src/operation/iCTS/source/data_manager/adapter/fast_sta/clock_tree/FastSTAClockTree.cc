@@ -59,9 +59,14 @@ auto makeNodeKind(const Clock& clock, const Pin* pin) -> FastStaNodeKind
   if (pin == clock.get_clock_source()) {
     return FastStaNodeKind::kSource;
   }
-  const auto* inst = pin != nullptr ? pin->get_inst() : nullptr;
-  if (inst != nullptr && inst->is_clock_propagation_cell()) {
-    return pin == inst->findDriverPin() ? FastStaNodeKind::kBufferOutput : FastStaNodeKind::kBufferInput;
+  const auto* arc = clock.findPropagationArc(pin);
+  if (arc != nullptr) {
+    if (pin == arc->input_pin) {
+      return FastStaNodeKind::kBufferInput;
+    }
+    if (pin == arc->output_pin) {
+      return FastStaNodeKind::kBufferOutput;
+    }
   }
   return FastStaNodeKind::kSink;
 }
