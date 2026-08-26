@@ -52,9 +52,7 @@ void DRCInterface::destroyInst()
 void DRCInterface::initDRC(std::map<std::string, std::any> config_map, bool enable_quiet)
 {
   Logger::initInst();
-  if (enable_quiet) {
-    DRCLOG.enableQuiet();
-  }
+  DRCLOG.setQuiet(enable_quiet);
   // clang-format off
   DRCLOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   DRCLOG.info(Loc::current(), "______________________________   _____________________________________   ");
@@ -82,6 +80,9 @@ void DRCInterface::initDRC(std::map<std::string, std::any> config_map, bool enab
 
 void DRCInterface::checkDef()
 {
+  bool origin_quiet = DRCLOG.isQuiet();
+  DRCLOG.disableQuiet();
+
   std::vector<DRCShape> env_shape_list = buildEnvShapeList();
   std::vector<DRCShape> result_shape_list = buildResultShapeList();
   std::vector<ids::Violation> violation_list = getViolationList(std::move(env_shape_list), std::move(result_shape_list), {}, {});
@@ -94,6 +95,8 @@ void DRCInterface::checkDef()
   outputViolationJson(type_violation_map);
   outputViolationFile(type_violation_map);
   outputTofeature(type_violation_map);
+
+  DRCLOG.setQuiet(origin_quiet);
 }
 
 void DRCInterface::destroyDRC()
