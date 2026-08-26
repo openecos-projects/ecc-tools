@@ -17,8 +17,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
+#include <utility>
 
 #include "general_ops.h"
+#include "congestion_metrics.h"
 #include "idm.h"
 #include "init_egr.h"
 #include "init_idb.h"
@@ -702,7 +704,6 @@ int32_t CongestionEval::evalMaxOverflow(string stage, string rt_dir_path, string
 
 float CongestionEval::evalAvgOverflow(string stage, string rt_dir_path, string overflow_type)
 {
-  float avg_overflow = 0.0f;
   std::string file_name;
 
   if (overflow_type == "horizontal") {
@@ -735,50 +736,7 @@ float CongestionEval::evalAvgOverflow(string stage, string rt_dir_path, string o
 
   file.close();
 
-  std::sort(values.begin(), values.end(), std::greater<int32_t>());
-
-  size_t size = values.size();
-  size_t idx_0_5_percent = std::max(size_t(1), static_cast<size_t>(std::ceil(size * 0.005)));
-  size_t idx_1_percent = std::max(size_t(1), static_cast<size_t>(std::ceil(size * 0.01)));
-  size_t idx_2_percent = std::max(size_t(1), static_cast<size_t>(std::ceil(size * 0.02)));
-  size_t idx_5_percent = std::max(size_t(1), static_cast<size_t>(std::ceil(size * 0.05)));
-
-  float sum_05 = 0.0f;
-  float sum_1 = 0.0f;
-  float sum_2 = 0.0f;
-  float sum_5 = 0.0f;
-
-  float weight_05 = 0.4f;
-  float weight_1 = 0.3f;
-  float weight_2 = 0.2f;
-  float weight_5 = 0.1f;
-
-  // 0-0.5%
-  for (size_t i = 0; i < idx_0_5_percent; ++i) {
-    sum_05 += values[i];
-  }
-  sum_1 = sum_05;
-
-  // 0.5%-1%
-  for (size_t i = idx_0_5_percent; i < idx_1_percent; ++i) {
-    sum_1 += values[i];
-  }
-  sum_2 = sum_1;
-
-  // 1%-2%
-  for (size_t i = idx_1_percent; i < idx_2_percent; ++i) {
-    sum_2 += values[i];
-  }
-  sum_5 = sum_2;
-
-  // 2%-5%
-  for (size_t i = idx_2_percent; i < idx_5_percent; ++i) {
-    sum_5 += values[i];
-  }
-
-  avg_overflow = (sum_05 * weight_05 + sum_1 * weight_1 + sum_2 * weight_2 + sum_5 * weight_5) / 4.0;
-
-  return avg_overflow;
+  return weightedAverageOverflow(std::move(values));
 }
 
 float CongestionEval::evalMaxUtilization(string stage, string map_path, string utilization_type, bool use_lut)

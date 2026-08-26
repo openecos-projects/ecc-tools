@@ -53,6 +53,7 @@ void UnionAPI::initIDB()
 
 void UnionAPI::initEGR(bool enable_timing)
 {
+  UNION_EVAL_INIT_EGR_INST->setStage("egr3D");
   UNION_EVAL_INIT_EGR_INST->runEGR(enable_timing);
 }
 

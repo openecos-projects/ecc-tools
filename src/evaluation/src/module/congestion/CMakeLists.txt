@@ -1,5 +1,6 @@
 add_library(eval_congestion_eval
     congestion_eval.cpp
+    congestion_metrics.cpp
 )
 
 target_link_libraries(eval_congestion_eval

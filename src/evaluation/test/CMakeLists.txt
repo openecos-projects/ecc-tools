@@ -9,6 +9,17 @@ target_link_libraries(eval_map_layout_writer_test
 
 add_test(NAME eval_map_layout_writer_test COMMAND eval_map_layout_writer_test)
 
+add_executable(eval_congestion_metrics_test
+    congestion_metrics_test.cpp
+)
+
+target_link_libraries(eval_congestion_metrics_test
+    PRIVATE
+        eval_congestion_eval
+)
+
+add_test(NAME eval_congestion_metrics_test COMMAND eval_congestion_metrics_test)
+
 add_executable(eval_map_layout_reference_replay
     map_layout_reference_replay.cpp
 )
