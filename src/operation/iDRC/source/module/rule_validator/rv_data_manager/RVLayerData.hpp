@@ -89,7 +89,6 @@ struct BoundaryData
   int32_t edge_length = 0;
   bool isConvex = false;
   bool isHole = false;
-  bool isEnv = false;
 };
 
 struct PolygonData
@@ -105,7 +104,10 @@ struct PolygonData
 
 struct RVRoutingNet
 {
-  GTLPolySetInt polyset;  // env + result;
+  // Source rectangles retain env/result provenance until isEnv is prepared.
+  GTLPolySetInt polyset;
+  std::vector<GTLRectInt> env_rect_list;
+  std::vector<GTLRectInt> result_rect_list;
   int32_t polygon_begin = 0;
   int32_t polygon_count = 0;
   int32_t max_rect_begin = 0;

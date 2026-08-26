@@ -21,6 +21,7 @@
 #include "DataManager.hpp"
 #include "GDSPlotter.hpp"
 #include "IdbEnum.h"
+#include "IdbViaMaster.h"
 #include "Monitor.hpp"
 #include "ParallelRunLengthSpacingRule.hpp"
 #include "RuleValidator.hpp"
@@ -909,6 +910,15 @@ void DRCInterface::output()
 
 #if 1  // check
 
+namespace {
+
+size_t getViaRectCount(idb::IdbVia* idb_via);
+void appendPinViaShapeList(std::vector<DRCShape>& shape_list, idb::IdbVia* idb_via, int32_t net_idx);
+void appendWireViaShapeList(std::vector<DRCShape>& shape_list, idb::IdbVia* idb_via, int32_t net_idx,
+                            ids::Shape::SourceType source_type);
+
+}  // namespace
+
 std::vector<DRCShape> DRCInterface::buildEnvShapeList()
 {
   std::vector<DRCShape> env_shape_list;
@@ -956,7 +966,7 @@ std::vector<DRCShape> DRCInterface::buildEnvShapeList()
         }
         for (idb::IdbVia* idb_via : idb_pin->get_via_list()) {
           total_env_shape_num += 2;
-          total_env_shape_num += idb_via->get_cut_layer_shape().get_rect_list().size();
+          total_env_shape_num += idb_via->get_instance()->get_cut_layer_shape()->get_rect_list_num();
         }
       }
     }
@@ -1001,37 +1011,7 @@ std::vector<DRCShape> DRCInterface::buildEnvShapeList()
           }
         }
         for (idb::IdbVia* idb_via : idb_pin->get_via_list()) {
-          {
-            idb::IdbLayerShape idb_shape_top = idb_via->get_top_layer_shape();
-            idb::IdbRect idb_box_top = idb_shape_top.get_bounding_box();
-
-            DRCShape drc_shape(net_idx,
-                               LayerRect(idb_box_top.get_low_x(), idb_box_top.get_low_y(), idb_box_top.get_high_x(), idb_box_top.get_high_y(),
-                                         idb_shape_top.get_layer()->get_id()),
-                               true);
-            drc_shape.set_source_type(ids::Shape::SourceType::kInstancePin);
-            env_shape_list.push_back(std::move(drc_shape));
-          }
-          {
-            idb::IdbLayerShape idb_shape_bottom = idb_via->get_bottom_layer_shape();
-            idb::IdbRect idb_box_bottom = idb_shape_bottom.get_bounding_box();
-
-            DRCShape drc_shape(net_idx,
-                               LayerRect(idb_box_bottom.get_low_x(), idb_box_bottom.get_low_y(), idb_box_bottom.get_high_x(),
-                                         idb_box_bottom.get_high_y(), idb_shape_bottom.get_layer()->get_id()),
-                               true);
-            drc_shape.set_source_type(ids::Shape::SourceType::kInstancePin);
-            env_shape_list.push_back(std::move(drc_shape));
-          }
-          idb::IdbLayerShape idb_shape_cut = idb_via->get_cut_layer_shape();
-          for (idb::IdbRect* idb_rect : idb_shape_cut.get_rect_list()) {
-            DRCShape drc_shape(net_idx,
-                               LayerRect(idb_rect->get_low_x(), idb_rect->get_low_y(), idb_rect->get_high_x(), idb_rect->get_high_y(),
-                                         idb_shape_cut.get_layer()->get_id()),
-                               false);
-            drc_shape.set_source_type(ids::Shape::SourceType::kInstancePin);
-            env_shape_list.push_back(std::move(drc_shape));
-          }
+          appendPinViaShapeList(env_shape_list, idb_via, net_idx);
         }
       }
     }
@@ -1112,9 +1092,7 @@ std::vector<DRCShape> DRCInterface::buildResultShapeList()
           }
           if (idb_segment->is_via()) {
             for (idb::IdbVia* idb_via : idb_segment->get_via_list()) {
-              total_result_shape_num += idb_via->get_top_layer_shape().get_rect_list().size();
-              total_result_shape_num += idb_via->get_bottom_layer_shape().get_rect_list().size();
-              total_result_shape_num += idb_via->get_cut_layer_shape().get_rect_list().size();
+              total_result_shape_num += getViaRectCount(idb_via);
             }
           }
           if (idb_segment->is_rect()) {
@@ -1128,9 +1106,7 @@ std::vector<DRCShape> DRCInterface::buildResultShapeList()
       for (idb::IdbSpecialWire* idb_wire : idb_net->get_wire_list()->get_wire_list()) {
         for (idb::IdbSpecialWireSegment* idb_segment : idb_wire->get_segment_list()) {
           if (idb_segment->is_via()) {
-            total_result_shape_num += idb_segment->get_via()->get_top_layer_shape().get_rect_list().size();
-            total_result_shape_num += idb_segment->get_via()->get_bottom_layer_shape().get_rect_list().size();
-            total_result_shape_num += idb_segment->get_via()->get_cut_layer_shape().get_rect_list().size();
+            total_result_shape_num += getViaRectCount(idb_segment->get_via());
           } else {
             total_result_shape_num += 1;
           }
@@ -1154,25 +1130,8 @@ std::vector<DRCShape> DRCInterface::buildResultShapeList()
         }
         if (idb_segment->is_via()) {
           for (idb::IdbVia* idb_via : idb_segment->get_via_list()) {
-            for (idb::IdbLayerShape layer_shape : {idb_via->get_top_layer_shape(), idb_via->get_bottom_layer_shape()}) {
-              for (idb::IdbRect* rect : layer_shape.get_rect_list()) {
-                DRCShape drc_shape(static_cast<int32_t>(idb_net->get_id()),
-                                   LayerRect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y(),
-                                             layer_shape.get_layer()->get_id()),
-                                   true);
-                drc_shape.set_source_type(ids::Shape::SourceType::kRegularWire);
-                result_shape_list.push_back(std::move(drc_shape));
-              }
-            }
-            idb::IdbLayerShape cut_layer_shape = idb_via->get_cut_layer_shape();
-            for (idb::IdbRect* rect : cut_layer_shape.get_rect_list()) {
-              DRCShape drc_shape(static_cast<int32_t>(idb_net->get_id()),
-                                 LayerRect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y(),
-                                           cut_layer_shape.get_layer()->get_id()),
-                                 false);
-              drc_shape.set_source_type(ids::Shape::SourceType::kRegularWire);
-              result_shape_list.push_back(std::move(drc_shape));
-            }
+            appendWireViaShapeList(result_shape_list, idb_via, static_cast<int32_t>(idb_net->get_id()),
+                                   ids::Shape::SourceType::kRegularWire);
           }
         }
         if (idb_segment->is_rect()) {
@@ -1195,25 +1154,7 @@ std::vector<DRCShape> DRCInterface::buildResultShapeList()
     for (idb::IdbSpecialWire* idb_wire : idb_net->get_wire_list()->get_wire_list()) {
       for (idb::IdbSpecialWireSegment* idb_segment : idb_wire->get_segment_list()) {
         if (idb_segment->is_via()) {
-          for (idb::IdbLayerShape layer_shape : {idb_segment->get_via()->get_top_layer_shape(), idb_segment->get_via()->get_bottom_layer_shape()}) {
-            for (idb::IdbRect* rect : layer_shape.get_rect_list()) {
-              DRCShape drc_shape(special_net_id,
-                                 LayerRect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y(),
-                                           layer_shape.get_layer()->get_id()),
-                                 true);
-              drc_shape.set_source_type(ids::Shape::SourceType::kSpecialWire);
-              result_shape_list.push_back(std::move(drc_shape));
-            }
-          }
-          idb::IdbLayerShape cut_layer_shape = idb_segment->get_via()->get_cut_layer_shape();
-          for (idb::IdbRect* rect : cut_layer_shape.get_rect_list()) {
-            DRCShape drc_shape(special_net_id,
-                               LayerRect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y(),
-                                         cut_layer_shape.get_layer()->get_id()),
-                               false);
-            drc_shape.set_source_type(ids::Shape::SourceType::kSpecialWire);
-            result_shape_list.push_back(std::move(drc_shape));
-          }
+          appendWireViaShapeList(result_shape_list, idb_segment->get_via(), special_net_id, ids::Shape::SourceType::kSpecialWire);
         } else {
           idb::IdbRect* idb_rect = idb_segment->get_bounding_box();
           DRCShape drc_shape(special_net_id,
@@ -1370,6 +1311,64 @@ DRCShape DRCInterface::convertToDRCShape(const ids::Shape& ids_shape)
   drc_shape.set_source_type(ids_shape.source_type);
   return drc_shape;
 }
+
+namespace {
+
+void appendLayerShapeRects(std::vector<DRCShape>& shape_list, idb::IdbLayerShape* layer_shape, int32_t net_idx, int32_t offset_x,
+                           int32_t offset_y, bool is_routing, ids::Shape::SourceType source_type)
+{
+  for (idb::IdbRect* rect : layer_shape->get_rect_list()) {
+    DRCShape& drc_shape = shape_list.emplace_back(
+        net_idx,
+        LayerRect(rect->get_low_x() + offset_x, rect->get_low_y() + offset_y, rect->get_high_x() + offset_x,
+                  rect->get_high_y() + offset_y, layer_shape->get_layer()->get_id()),
+        is_routing);
+    drc_shape.set_source_type(source_type);
+  }
+}
+
+void appendLayerShapeBoundingBox(std::vector<DRCShape>& shape_list, idb::IdbLayerShape* layer_shape, int32_t net_idx, int32_t offset_x,
+                                 int32_t offset_y, ids::Shape::SourceType source_type)
+{
+  idb::IdbRect rect = layer_shape->get_bounding_box();
+  DRCShape& drc_shape = shape_list.emplace_back(
+      net_idx,
+      LayerRect(rect.get_low_x() + offset_x, rect.get_low_y() + offset_y, rect.get_high_x() + offset_x, rect.get_high_y() + offset_y,
+                layer_shape->get_layer()->get_id()),
+      true);
+  drc_shape.set_source_type(source_type);
+}
+
+size_t getViaRectCount(idb::IdbVia* idb_via)
+{
+  idb::IdbViaMaster* via_master = idb_via->get_instance();
+  return via_master->get_top_layer_shape()->get_rect_list_num() + via_master->get_bottom_layer_shape()->get_rect_list_num()
+         + via_master->get_cut_layer_shape()->get_rect_list_num();
+}
+
+void appendPinViaShapeList(std::vector<DRCShape>& shape_list, idb::IdbVia* idb_via, int32_t net_idx)
+{
+  idb::IdbViaMaster* via_master = idb_via->get_instance();
+  idb::IdbCoordinate<int32_t>* offset = idb_via->get_coordinate();
+  appendLayerShapeBoundingBox(shape_list, via_master->get_top_layer_shape(), net_idx, offset->get_x(), offset->get_y(),
+                              ids::Shape::SourceType::kInstancePin);
+  appendLayerShapeBoundingBox(shape_list, via_master->get_bottom_layer_shape(), net_idx, offset->get_x(), offset->get_y(),
+                              ids::Shape::SourceType::kInstancePin);
+  appendLayerShapeRects(shape_list, via_master->get_cut_layer_shape(), net_idx, offset->get_x(), offset->get_y(), false,
+                        ids::Shape::SourceType::kInstancePin);
+}
+
+void appendWireViaShapeList(std::vector<DRCShape>& shape_list, idb::IdbVia* idb_via, int32_t net_idx,
+                            ids::Shape::SourceType source_type)
+{
+  idb::IdbViaMaster* via_master = idb_via->get_instance();
+  idb::IdbCoordinate<int32_t>* offset = idb_via->get_coordinate();
+  appendLayerShapeRects(shape_list, via_master->get_top_layer_shape(), net_idx, offset->get_x(), offset->get_y(), true, source_type);
+  appendLayerShapeRects(shape_list, via_master->get_bottom_layer_shape(), net_idx, offset->get_x(), offset->get_y(), true, source_type);
+  appendLayerShapeRects(shape_list, via_master->get_cut_layer_shape(), net_idx, offset->get_x(), offset->get_y(), false, source_type);
+}
+
+}  // namespace
 
 #endif
 
