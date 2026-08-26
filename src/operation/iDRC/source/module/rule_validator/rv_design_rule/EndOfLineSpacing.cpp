@@ -363,7 +363,6 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
 
   //  rules
   std::vector<RoutingLayer>& routing_layer_list = DRCDM.getDatabase().get_routing_layer_list();
-  const std::map<int32_t, std::vector<int32_t>>& routing_to_adjacent_cut_map = DRCDM.getDatabase().get_routing_to_adjacent_cut_map();
   std::map<int32_t, LayerEolRuleProfile> layer_rule_profile_map;
   std::map<PlanarRect, std::vector<Violation>, CmpPlanarRectByXASC> edge_violation_map;
   std::map<int32_t, int32_t> layer_rule_max_width;
@@ -420,13 +419,11 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
       std::vector<CutData> env_cut_list;
       {
         if (layer_rule_profile.need_cut_shape) {
-          auto cut_layer_it = routing_to_adjacent_cut_map.find(routing_layer_idx);
-          if (cut_layer_it != routing_to_adjacent_cut_map.end() && !cut_layer_it->second.empty()) {
-            int32_t cut_layer_idx = *std::min_element(cut_layer_it->second.begin(), cut_layer_it->second.end());
-            auto cut_layer_data_it = layer_data.find(cut_layer_idx);
-            if (cut_layer_data_it != layer_data.end()) {
-              cut_layer_data_it->second.queryCuts(DRCUTIL.convertToGTLRectInt(eol_rect), std::back_inserter(env_cut_list));
-            }
+          const std::vector<int32_t>& cut_layer_idx_list = DRCDM.getAdjacentCutLayerIdxList(routing_layer_idx);
+          int32_t cut_layer_idx = *std::min_element(cut_layer_idx_list.begin(), cut_layer_idx_list.end());
+          auto cut_layer_data_it = layer_data.find(cut_layer_idx);
+          if (cut_layer_data_it != layer_data.end()) {
+            cut_layer_data_it->second.queryCuts(DRCUTIL.convertToGTLRectInt(eol_rect), std::back_inserter(env_cut_list));
           }
         }
 

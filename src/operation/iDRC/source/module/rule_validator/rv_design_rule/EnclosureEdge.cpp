@@ -60,7 +60,6 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
 {
   const auto orientations = {Orientation::kEast, Orientation::kSouth, Orientation::kWest, Orientation::kNorth};
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
-  std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
   const auto& layer_data = rv_cluster.get_layer_data();
 
   std::map<int32_t, std::vector<EnclosureEdgeRule>> cut_layer_sorted_rule_map;
@@ -74,12 +73,11 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
     if (cut_layer_data.cut_pool.empty()) {
       continue;
     }
-    auto routing_layer_it = cut_to_adjacent_routing_map.find(cut_layer_idx);
-    if (routing_layer_it == cut_to_adjacent_routing_map.end() || routing_layer_it->second.size() < 2) {
+    const std::vector<int32_t>& routing_layer_idx_list = DRCDM.getAdjacentRoutingLayerIdxList(cut_layer_idx);
+    if (routing_layer_idx_list.size() < 2) {
       continue;
     }
 
-    const std::vector<int32_t>& routing_layer_idx_list = routing_layer_it->second;
     int32_t above_routing_layer_idx = *std::max_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
     int32_t below_routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
 
@@ -275,8 +273,8 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
     if (cut_layer_data.cut_pool.empty()) {
       continue;
     }
-    auto routing_layer_it = cut_to_adjacent_routing_map.find(cut_layer_idx);
-    if (routing_layer_it == cut_to_adjacent_routing_map.end() || routing_layer_it->second.size() < 2) {
+    const std::vector<int32_t>& routing_layer_idx_list = DRCDM.getAdjacentRoutingLayerIdxList(cut_layer_idx);
+    if (routing_layer_idx_list.size() < 2) {
       continue;
     }
 
@@ -285,7 +283,6 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
       continue;
     }
 
-    const std::vector<int32_t>& routing_layer_idx_list = routing_layer_it->second;
     int32_t above_routing_layer_idx = *std::max_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
     int32_t below_routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
 

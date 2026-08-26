@@ -56,6 +56,10 @@ std::vector<Violation> RuleValidator::verify(std::vector<DRCShape> drc_env_shape
 {
   Monitor monitor;
   DRCLOG.info(Loc::current(), "Starting...");
+  if (drc_env_shape_list.empty() && drc_result_shape_list.empty()) {
+    DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+    return {};
+  }
   RVModel rv_model(std::move(drc_env_shape_list), std::move(drc_result_shape_list), std::move(drc_check_type_set), std::move(drc_check_region_list));
   setRVComParam(rv_model);
   buildRVClusterList(rv_model);
@@ -186,8 +190,6 @@ void RuleValidator::verifyRVModel(RVModel& rv_model)
 
 void RuleValidator::buildRVCluster(RVCluster& rv_cluster)
 {
-  std::map<int32_t, std::vector<int32_t>>& routing_to_adjacent_cut_map = DRCDM.getDatabase().get_routing_to_adjacent_cut_map();
-
   std::vector<DRCShape>* drc_check_region_list = rv_cluster.get_drc_check_region_list();
   int32_t expand_size = rv_cluster.get_rv_com_param()->get_expand_size();
 
@@ -200,7 +202,7 @@ void RuleValidator::buildRVCluster(RVCluster& rv_cluster)
       {
         int32_t layer_idx = drc_check_region.get_layer_idx();
         type_layer_idx_map[true].insert({layer_idx - 1, layer_idx, layer_idx + 1});
-        std::vector<int32_t>& cut_layer_idx_list = routing_to_adjacent_cut_map[layer_idx];
+        const std::vector<int32_t>& cut_layer_idx_list = DRCDM.getAdjacentCutLayerIdxList(layer_idx);
         type_layer_idx_map[false].insert(cut_layer_idx_list.begin(), cut_layer_idx_list.end());
       }
       for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
