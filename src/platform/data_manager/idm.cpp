@@ -31,7 +31,32 @@
 #include "idm.h"
 
 #include <cassert>
+#include <stdexcept>
+#include <unordered_set>
 namespace idm {
+
+namespace {
+
+void commitPlacement(IdbInstance* instance, int32_t x, int32_t y, IdbOrient orient)
+{
+  instance->set_orient(orient, false);
+  instance->set_coodinate(x, y, false);
+  instance->set_status(IdbPlacementStatus::kPlaced);
+  instance->set_bounding_box();
+  for (auto* pin : instance->get_pin_list()->get_pin_list()) {
+    auto* term = pin->get_term();
+    if (term == nullptr || term->get_port_number() <= 0) {
+      continue;
+    }
+    pin->set_average_coordinate(x + term->get_average_position().get_x(), y + term->get_average_position().get_y());
+    pin->set_bounding_box();
+    pin->set_grid_coordinate();
+  }
+  instance->set_halo_coodinate();
+  instance->set_obs_box_list();
+}
+
+}  // namespace
 
 DataManager* DataManager::_instance = nullptr;
 
@@ -188,22 +213,7 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
     } else {
       orient = inst->get_orient();
     }
-    inst->set_orient(orient, false);
-    inst->set_coodinate(static_cast<int32_t>(xx), static_cast<int32_t>(yy), false);
-    inst->set_status(IdbPlacementStatus::kPlaced);
-    inst->set_bounding_box();
-    for (auto* pin : inst->get_pin_list()->get_pin_list()) {
-      auto* term = pin->get_term();
-      if (term == nullptr || term->get_port_number() <= 0) {
-        continue;
-      }
-      pin->set_average_coordinate(static_cast<int32_t>(xx) + term->get_average_position().get_x(),
-                                  static_cast<int32_t>(yy) + term->get_average_position().get_y());
-      pin->set_bounding_box();
-      pin->set_grid_coordinate();
-    }
-    inst->set_halo_coodinate();
-    inst->set_obs_box_list();
+    commitPlacement(inst, static_cast<int32_t>(xx), static_cast<int32_t>(yy), orient);
     i++;
     // flag = true;
   }
@@ -214,6 +224,42 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
 
   return;
 }
+
+std::size_t DataManager::write_selected_placement_back(const std::vector<InstancePlacementUpdate>& updates)
+{
+  auto* design = get_idb_design();
+  if (design == nullptr || design->get_instance_list() == nullptr) {
+    throw std::runtime_error("Cannot write selected placement without an active iDB design");
+  }
+
+  std::unordered_set<std::string> names;
+  std::vector<IdbInstance*> instances;
+  instances.reserve(updates.size());
+  for (const auto& update : updates) {
+    if (!names.insert(update.instance_name).second) {
+      throw std::invalid_argument("Selected placement contains duplicate instance " + update.instance_name);
+    }
+    auto* instance = design->get_instance_list()->find_instance(update.instance_name);
+    if (instance == nullptr) {
+      throw std::runtime_error("Selected placement instance no longer exists: " + update.instance_name);
+    }
+    if (instance != update.expected_instance) {
+      throw std::runtime_error("Selected placement no longer refers to the same instance: " + update.instance_name);
+    }
+    auto* cell_master = instance->get_cell_master();
+    if (cell_master == nullptr || !cell_master->is_block()) {
+      throw std::runtime_error("Selected placement instance is no longer a hard macro: " + update.instance_name);
+    }
+    instances.push_back(instance);
+  }
+
+  for (std::size_t index = 0; index < updates.size(); ++index) {
+    const auto& update = updates[index];
+    commitPlacement(instances[index], update.x, update.y, instances[index]->get_orient());
+  }
+  return updates.size();
+}
+
 bool DataManager::readDef(string path)
 {
   if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
