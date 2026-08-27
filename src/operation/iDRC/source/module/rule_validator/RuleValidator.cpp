@@ -256,8 +256,9 @@ void RuleValidator::buildViolationList(RVCluster& rv_cluster)
 namespace {
 
 void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* drc_shape, bool is_env_shape);
-void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data);
-void buildLayerSpatialIndexes(RVLayerData& rv_layer_data);
+void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data,
+                       std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs);
+void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs);
 
 }  // namespace
 
@@ -275,10 +276,17 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
   // Each layer owns flat geometry pools and the indexes that refer to them.
   for (auto& layer_entry : layer_data) {
     RVLayerData& rv_layer_data = layer_entry.second;
-    for (auto& [net_idx, routing_net] : rv_layer_data.nets) {
-      prepareRoutingNet(net_idx, routing_net, rv_layer_data);
+    size_t env_rect_count = 0;
+    for (const auto& [net_idx, routing_net] : rv_layer_data.nets) {
+      (void) net_idx;
+      env_rect_count += routing_net.env_rect_list.size();
     }
-    buildLayerSpatialIndexes(rv_layer_data);
+    std::vector<std::pair<GTLRectInt, int32_t>> env_rect_rtree_inputs;
+    env_rect_rtree_inputs.reserve(env_rect_count);
+    for (auto& [net_idx, routing_net] : rv_layer_data.nets) {
+      prepareRoutingNet(net_idx, routing_net, rv_layer_data, env_rect_rtree_inputs);
+    }
+    buildLayerSpatialIndexes(rv_layer_data, env_rect_rtree_inputs);
   }
 }
 
@@ -537,7 +545,6 @@ void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* d
   }
 
   RVRoutingNet& routing_net = rv_layer_data.nets[drc_shape->get_net_idx()];
-  routing_net.polyset += gtl_rect;
   if (is_env_shape) {
     routing_net.env_rect_list.push_back(gtl_rect);
   } else {
@@ -545,25 +552,31 @@ void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* d
   }
 }
 
-void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data)
+void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data,
+                       std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs)
 {
   NetPrepareContext prepare_context;
-  const std::vector<GTLRectInt>& env_rect_list = routing_net.env_rect_list;
+  std::vector<GTLRectInt> env_rect_list = std::move(routing_net.env_rect_list);
   std::vector<GTLRectInt> result_rect_list = std::move(routing_net.result_rect_list);
   bool has_env = !env_rect_list.empty();
   bool has_result = !result_rect_list.empty();
 
-  // result - env equals (env union result) - env without copying combined.
+  routing_net.polyset.insert(env_rect_list.begin(), env_rect_list.end());
+  routing_net.polyset.insert(result_rect_list.begin(), result_rect_list.end());
+
+  GTLPolySetInt env_polyset;
+  if (has_env) {
+    env_polyset.insert(env_rect_list.begin(), env_rect_list.end());
+    std::vector<GTLRectInt> env_max_rect_list;
+    gtl::get_max_rectangles(env_max_rect_list, env_polyset);
+    for (const GTLRectInt& env_max_rect : env_max_rect_list) {
+      env_rect_rtree_inputs.emplace_back(env_max_rect, net_idx);
+    }
+  }
+
+  // result - env equals (env union result) - env without rebuilding result.
   if (has_env && has_result) {
-    GTLPolySetInt env_polyset;
-    GTLPolySetInt delta_polyset;
-    for (const GTLRectInt& gtl_rect : env_rect_list) {
-      env_polyset += gtl_rect;
-    }
-    for (const GTLRectInt& gtl_rect : result_rect_list) {
-      delta_polyset += gtl_rect;
-    }
-    delta_polyset -= env_polyset;
+    GTLPolySetInt delta_polyset = routing_net.polyset - env_polyset;
     prepare_context.has_delta_geometry = !gtl::empty(delta_polyset);
     if (prepare_context.has_delta_geometry) {
       std::vector<GTLRectInt> delta_rect_list;
@@ -584,10 +597,10 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
     rv_layer_data.polygon_pool.push_back(
         {net_idx, static_cast<int32_t>(rv_layer_data.max_rect_pool.size()), 0, static_cast<int32_t>(rv_layer_data.boundary_pool.size()), 0});
     PolygonData& polygon_data = rv_layer_data.polygon_pool.back();
-    polygon_data.hole_poly = hole_poly;
-
+    polygon_data.hole_poly = std::move(hole_poly);
+    GTLHolePolyInt& polygon_hole_poly = polygon_data.hole_poly;
     std::vector<GTLRectInt> rect_list;
-    gtl::get_max_rectangles(rect_list, hole_poly);
+    gtl::get_max_rectangles(rect_list, polygon_hole_poly);
     // A polygon is env only when it is nonempty and every max rectangle decomposed from it is env.
     bool is_polygon_env = has_env && !rect_list.empty();
     for (const GTLRectInt& gtl_rect : rect_list) {
@@ -610,8 +623,8 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
     polygon_data.max_rect_count = static_cast<int32_t>(rv_layer_data.max_rect_pool.size()) - polygon_data.max_rect_begin;
     polygon_data.isEnv = is_polygon_env;
 
-    collectBoundaryEdges(hole_poly, false, polygon_id, rv_layer_data.boundary_pool);
-    for (auto iter = hole_poly.begin_holes(); iter != hole_poly.end_holes(); iter++) {
+    collectBoundaryEdges(polygon_hole_poly, false, polygon_id, rv_layer_data.boundary_pool);
+    for (auto iter = polygon_hole_poly.begin_holes(); iter != polygon_hole_poly.end_holes(); iter++) {
       GTLPolyInt gtl_poly = *iter;
       GTLHolePolyInt check_hole_poly;
       check_hole_poly.set(gtl_poly.begin(), gtl_poly.end());
@@ -625,7 +638,7 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
   routing_net.boundary_count = static_cast<int32_t>(rv_layer_data.boundary_pool.size()) - routing_net.boundary_begin;
 }
 
-void buildLayerSpatialIndexes(RVLayerData& rv_layer_data)
+void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs)
 {
   // Pool IDs are final here, so index inputs can be allocated exactly once.
   std::vector<IndexedRect> rect_inputs;
@@ -641,6 +654,7 @@ void buildLayerSpatialIndexes(RVLayerData& rv_layer_data)
   }
 
   rv_layer_data.rect_rtrees = decltype(rv_layer_data.rect_rtrees)(rect_inputs);
+  rv_layer_data.env_rect_rtree = decltype(rv_layer_data.env_rect_rtree)(env_rect_rtree_inputs);
   rv_layer_data.boundary_rtrees = decltype(rv_layer_data.boundary_rtrees)(boundary_inputs);
   rv_layer_data.cut_rtrees = decltype(rv_layer_data.cut_rtrees)(rv_layer_data.cut_pool);
 }

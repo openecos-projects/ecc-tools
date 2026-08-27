@@ -124,6 +124,7 @@ struct RVLayerData
   std::vector<MaxRectData> max_rect_pool;
   std::vector<BoundaryData> boundary_pool;
   bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> rect_rtrees;
+  bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> env_rect_rtree;
   bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> boundary_rtrees;
   bgi::rtree<CutData, bgi::quadratic<16>, CutDataIndexable> cut_rtrees;
 
@@ -184,6 +185,12 @@ struct RVLayerData
   void queryMaxRects(const GTLRectInt& query_rect, OutputIt out) const
   {
     rect_rtrees.query(bgi::intersects(query_rect), out);
+  }
+
+  template <typename OutputIt>
+  void queryEnvRects(const GTLRectInt& query_rect, OutputIt out) const
+  {
+    env_rect_rtree.query(bgi::intersects(query_rect), out);
   }
 
   template <typename OutputIt>

@@ -64,7 +64,6 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
 
   std::map<int32_t, std::vector<EnclosureEdgeRule>> cut_layer_sorted_rule_map;
   std::map<int32_t, std::vector<int32_t>> layer_width_ranges;
-  std::map<int32_t, bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>> routing_env_rtree_map;
   std::map<std::pair<int32_t, int32_t>, bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>> layer_width_rtrees;
   std::map<int32_t, std::vector<std::map<PlanarRect, std::vector<ConvexCandidate>, CmpPlanarRectByXASC>>> layer_polygon_convex_candidates;
 
@@ -100,22 +99,6 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
     width_ranges.erase(std::remove_if(width_ranges.begin(), width_ranges.end(), [](int32_t width) { return width <= 0; }), width_ranges.end());
     std::sort(width_ranges.begin(), width_ranges.end(), std::greater<int32_t>());
     width_ranges.erase(std::unique(width_ranges.begin(), width_ranges.end()), width_ranges.end());
-  }
-
-  // preprocess: index original env rects without polygon merging.
-  for (const auto& [routing_layer_idx, rv_layer_data] : layer_data) {
-    std::vector<std::pair<GTLRectInt, int32_t>> env_rtree_inputs;
-    for (const auto& [net_idx, routing_net] : rv_layer_data.nets) {
-      for (const GTLRectInt& env_gtl_rect : routing_net.env_rect_list) {
-        if (isValidRect(DRCUTIL.convertToPlanarRect(env_gtl_rect))) {
-          env_rtree_inputs.emplace_back(env_gtl_rect, net_idx);
-        }
-      }
-    }
-    if (!env_rtree_inputs.empty()) {
-      routing_env_rtree_map.emplace(routing_layer_idx,
-                                    bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>(env_rtree_inputs));
-    }
   }
 
   // preprocess: build polygon convex candidates once, reuse during convex checks.
@@ -474,7 +457,6 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
               PlanarRect curr_par_rect = DRCUTIL.getEnlargedPartRect(routing_rect, curr_boundary.orient, convex_rule.convex_par_within);
               PlanarRect adj_par_rect = DRCUTIL.getEnlargedPartRect(routing_rect, adj_boundary.orient, convex_rule.convex_par_within);
 
-              auto env_rtree_it = routing_env_rtree_map.find(routing_layer_idx);
               std::set<int32_t> curr_par_net_idx_set;
               std::set<int32_t> adj_par_net_idx_set;
               bool has_same_net_adj_rect = false;
@@ -500,16 +482,14 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
                     = DRCUTIL.isOpenOverlap(env_routing_rect, curr_par_rect) && DRCUTIL.getParallelLength(env_routing_rect, cut_rect) > 0;
                 if (hit_curr_rect) {
                   int32_t max_env_width = 0;
-                  if (env_rtree_it != routing_env_rtree_map.end()) {
-                    std::vector<std::pair<GTLRectInt, int32_t>> env_rect_net_pair_list;
-                    env_rtree_it->second.query(bgi::intersects(env_gtl_rect), std::back_inserter(env_rect_net_pair_list));
-                    for (const auto& [original_env_gtl_rect, original_env_net_idx] : env_rect_net_pair_list) {
-                      (void) original_env_net_idx;
-                      PlanarRect env_rect = DRCUTIL.convertToPlanarRect(original_env_gtl_rect);
-                      if (DRCUTIL.isOpenOverlap(env_rect, env_routing_rect)
-                          && env_rect.getRectDirection() == env_routing_rect.getRectDirection()) {
-                        max_env_width = std::max(max_env_width, env_rect.getWidth());
-                      }
+                  std::vector<std::pair<GTLRectInt, int32_t>> env_rect_net_pair_list;
+                  rv_layer_data.queryEnvRects(env_gtl_rect, std::back_inserter(env_rect_net_pair_list));
+                  for (const auto& [env_gtl_rect, env_net_idx] : env_rect_net_pair_list) {
+                    (void) env_net_idx;
+                    PlanarRect env_rect = DRCUTIL.convertToPlanarRect(env_gtl_rect);
+                    if (DRCUTIL.isOpenOverlap(env_rect, env_routing_rect)
+                        && env_rect.getRectDirection() == env_routing_rect.getRectDirection()) {
+                      max_env_width = std::max(max_env_width, env_rect.getWidth());
                     }
                   }
                   if (env_routing_rect.getWidth() > max_env_width) {

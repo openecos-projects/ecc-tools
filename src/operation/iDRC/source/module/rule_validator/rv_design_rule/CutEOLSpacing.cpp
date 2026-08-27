@@ -133,16 +133,10 @@ bool isRegularTwoNetPair(const CutData& cut_data, const CutData& overlap_cut_dat
          && cut_data.net_idx != overlap_cut_data.net_idx;
 }
 
-bool hasLongNetlessRoutingEnv(const std::map<int32_t, bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>>& routing_net_env_rtrees,
-                              int32_t routing_layer_idx, const PlanarRect& env_cut_rect, int32_t min_length)
+bool hasLongNetlessRoutingEnv(const RVLayerData& routing_layer_data, const PlanarRect& env_cut_rect, int32_t min_length)
 {
-  auto env_rtree_it = routing_net_env_rtrees.find(routing_layer_idx);
-  if (env_rtree_it == routing_net_env_rtrees.end()) {
-    return false;
-  }
-
   std::vector<std::pair<GTLRectInt, int32_t>> env_rect_list;
-  env_rtree_it->second.query(bgi::intersects(DRCUTIL.convertToGTLRectInt(env_cut_rect)), std::back_inserter(env_rect_list));
+  routing_layer_data.queryEnvRects(DRCUTIL.convertToGTLRectInt(env_cut_rect), std::back_inserter(env_rect_list));
   for (const auto& [gtl_env_rect, env_net_idx] : env_rect_list) {
     if (env_net_idx != -1) {
       continue;
@@ -184,7 +178,6 @@ bool isGlobalEolBoundary(const RVLayerData& rv_layer_data, int32_t boundary_id)
 void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
 {
   const auto orientations = {Orientation::kEast, Orientation::kSouth, Orientation::kWest, Orientation::kNorth};
-  using RoutingEnvRTree = bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>;
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
   const auto& layer_data = rv_cluster.get_layer_data();
   std::set<std::array<int32_t, 8>> cut_eol_violation_key_set;
@@ -212,29 +205,6 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
     violation.set_required_size(required_size);
     rv_cluster.get_violation_list().push_back(violation);
   };
-
-  std::map<int32_t, RoutingEnvRTree> routing_net_env_rtrees;
-  {
-    std::map<int32_t, std::map<int32_t, GTLPolySetInt>> routing_net_env_polysets;
-    for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
-      if (!drc_shape->get_is_routing()) {
-        continue;
-      }
-      routing_net_env_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
-    }
-
-    for (const auto& [layer_idx, net_polyset_map] : routing_net_env_polysets) {
-      std::vector<std::pair<GTLRectInt, int32_t>> rtree_inputs;
-      for (const auto& [net_idx, poly_set] : net_polyset_map) {
-        std::vector<GTLRectInt> rects;
-        gtl::get_max_rectangles(rects, poly_set);
-        for (const GTLRectInt& rect : rects) {
-          rtree_inputs.emplace_back(rect, net_idx);
-        }
-      }
-      routing_net_env_rtrees[layer_idx] = RoutingEnvRTree(rtree_inputs);
-    }
-  }
 
   // build global eol map, (layer_idx, eol_edge, length)
   std::map<int32_t, std::map<int32_t, std::map<PlanarRect, int32_t, CmpPlanarRectByXASC>>> layer_net_eol_edge_map;
@@ -661,7 +631,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
                 }
                 if (checking_orient == check_orient) {
                   has_long_netless_routing_env
-                      = hasLongNetlessRoutingEnv(routing_net_env_rtrees, routing_layer_idx, env_cut_rect, backward_ext + 2 * eol_prl_spacing);
+                      = hasLongNetlessRoutingEnv(routing_layer_data, env_cut_rect, backward_ext + 2 * eol_prl_spacing);
                   if (has_wide_span || !is_eol || !has_long_netless_routing_env) {
                     continue;
                   }
@@ -729,10 +699,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
               // 如果只使用env可以有相同的span length 和相同的 env rect
               {
                 std::vector<std::pair<GTLRectInt, int32_t>> window_overlap_rect_list;
-                auto env_rtree_it = routing_net_env_rtrees.find(routing_layer_idx);
-                if (env_rtree_it != routing_net_env_rtrees.end()) {
-                  env_rtree_it->second.query(bgi::intersects(DRCUTIL.convertToGTLRectInt(violation_rect)), std::back_inserter(window_overlap_rect_list));
-                }
+                routing_layer_data.queryEnvRects(DRCUTIL.convertToGTLRectInt(violation_rect), std::back_inserter(window_overlap_rect_list));
                 bool has_check_edge = false;
                 for (const auto& [gtl_env_rect, env_routing_net_idx] : window_overlap_rect_list) {
                   (void) env_routing_net_idx;
