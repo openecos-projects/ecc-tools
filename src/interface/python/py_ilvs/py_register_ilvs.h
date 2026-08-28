@@ -14,41 +14,21 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "LVSInterface.hpp"
-#include "tcl_ilvs.h"
-#include "tcl_util.h"
+#pragma once
 
-#include "utility/logger/Logger.hpp"
-namespace tcl {
+#include <pybind11/pybind11.h>
 
-namespace {
+#include "py_ilvs.h"
 
-constexpr const char* kPath = "-path";
+namespace python_interface {
 
-}  // namespace
+namespace py = pybind11;
 
-TclWriteLVSDef::TclWriteLVSDef(const char* cmd_name) : TclCmd(cmd_name)
+void register_ilvs(py::module& m)
 {
-  addOption(new TclStringOption(kPath, 1, nullptr));
+  m.def("init_lvs", init_lvs, py::arg("temp_directory_path") = "", py::arg("thread_number") = 128);
+  m.def("run_lvs", run_lvs);
+  m.def("destroy_lvs", destroy_lvs);
 }
 
-unsigned TclWriteLVSDef::check()
-{
-  TclOption* path_option = getOptionOrArg(kPath);
-  if (path_option == nullptr || path_option->getStringVal() == nullptr) {
-    ECCLOG.warn(ecc::Loc::current(), "Please specify the iLVS DEF snapshot path by: write_lvs_def -path <file>.");
-    return 0;
-  }
-  return 1;
-}
-
-unsigned TclWriteLVSDef::exec()
-{
-  if (!check()) {
-    return 0;
-  }
-  LVSI.writeDef(getOptionOrArg(kPath)->getStringVal());
-  return 1;
-}
-
-}  // namespace tcl
+}  // namespace python_interface

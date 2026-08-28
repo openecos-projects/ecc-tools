@@ -14,41 +14,14 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "LVSInterface.hpp"
-#include "tcl_ilvs.h"
-#include "tcl_util.h"
+#pragma once
 
-#include "utility/logger/Logger.hpp"
-namespace tcl {
+#include <string>
 
-namespace {
+namespace python_interface {
 
-constexpr const char* kPath = "-path";
+bool init_lvs(const std::string& temp_directory_path, const int& thread_number);
+bool run_lvs();
+bool destroy_lvs();
 
-}  // namespace
-
-TclWriteLVSNetlist::TclWriteLVSNetlist(const char* cmd_name) : TclCmd(cmd_name)
-{
-  addOption(new TclStringOption(kPath, 1, nullptr));
-}
-
-unsigned TclWriteLVSNetlist::check()
-{
-  TclOption* path_option = getOptionOrArg(kPath);
-  if (path_option == nullptr || path_option->getStringVal() == nullptr) {
-    ECCLOG.warn(ecc::Loc::current(), "Please specify the iLVS netlist snapshot path by: write_lvs_netlist -path <file>.");
-    return 0;
-  }
-  return 1;
-}
-
-unsigned TclWriteLVSNetlist::exec()
-{
-  if (!check()) {
-    return 0;
-  }
-  LVSI.writeNetlist(getOptionOrArg(kPath)->getStringVal());
-  return 1;
-}
-
-}  // namespace tcl
+}  // namespace python_interface

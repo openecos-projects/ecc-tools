@@ -14,29 +14,15 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "STAInterface.hpp"
-#include "tcl_ista_util.hpp"
-#include "tcl_sta.h"
+#pragma once
 
-namespace tcl {
+#include <string>
+#include <vector>
 
-TclSetPropagatedClock::TclSetPropagatedClock(const char* cmd_name) : TclCmd(cmd_name)
-{
-  addOption(new TclStringListOption("clocks", 1));
-}
+#include "Database.hpp"
+namespace ista::sdc {
 
-unsigned TclSetPropagatedClock::exec()
-{
-  TclOption* clock_option = getOptionOrArg("clocks");
-  if (!clock_option->is_set_val()) {
-    setTclError("set_propagated_clock requires a clock collection");
-    return 0;
-  }
-  if (std::string error_message; !STAI.setPropagatedClock(clock_option->getStringList(), error_message)) {
-    setTclError(error_message);
-    return 0;
-  }
-  return 1;
-}
+std::vector<std::string> resolveObjectList(Database& database, const std::vector<std::string>& object_list);
+TimingPortConstraint& getPortConstraint(Database& database, const std::string& port_name);
 
-}  // namespace tcl
+}  // namespace ista::sdc

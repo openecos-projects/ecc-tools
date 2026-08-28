@@ -63,7 +63,7 @@ class CTSAPI
   static auto report(const std::string& save_dir) -> CTSStatus;
 
   // Lifecycle API
-  static auto resetAPI() -> void;
+  static auto destroyCTS() -> CTSStatus;
   static auto init(const std::string& config_file, const std::string& work_dir = "") -> CTSStatus;
   static auto lastStatus() -> CTSStatus;
 

@@ -14,31 +14,19 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "STAInterface.hpp"
-#include "tcl_ista_util.hpp"
-#include "tcl_sta.h"
+/**
+ * @file CTSProcessExitTest.cc
+ * @author Dawn Li (dawnli619215645@gmail.com)
+ * @date 2026-08-10
+ * @brief Process-exit fallback test for CTS static RAII owners.
+ */
 
-namespace tcl {
+#include "Logger.hh"
+#include "data_manager/DataManager.hh"
 
-TclGetPorts::TclGetPorts(const char* cmd_name) : TclCmd(cmd_name)
+auto main() -> int
 {
-  addOption(new TclStringListOption("ports", 1));
+  icts::Logger::initInst();
+  icts::DataManager::initInst();
+  return CTSDM.getDesign().makeInst("process_exit_owned_inst") == nullptr ? 1 : 0;
 }
-
-unsigned TclGetPorts::exec()
-{
-  TclOption* port_option = getOptionOrArg("ports");
-  if (!port_option->is_set_val()) {
-    setTclError("get_ports requires a port list");
-    return 0;
-  }
-  std::vector<std::string> resolved_port_list;
-  if (std::string error_message; !STAI.getPorts(port_option->getStringList(), resolved_port_list, error_message)) {
-    setTclError(error_message);
-    return 0;
-  }
-  setResult(resolved_port_list);
-  return 1;
-}
-
-}  // namespace tcl

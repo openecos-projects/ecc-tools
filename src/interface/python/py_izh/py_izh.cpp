@@ -54,4 +54,18 @@ bool insert_filler(const std::string& config)
   return true;
 }
 
+bool insert_metal(const std::string& config)
+{
+  std::map<std::string, std::any> config_map;
+
+  bool pass = false;
+  pass = !pass ? initZHConfigMapByJSON(config, config_map) : pass;
+  if (!pass) {
+    return false;
+  }
+
+  ZHI.insertMetal(config_map);
+  return true;
+}
+
 }  // namespace python_interface

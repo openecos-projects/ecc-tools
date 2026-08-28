@@ -1453,8 +1453,24 @@ int32_t DefRead::parse_pdn_wire(defiNet* def_net, IdbSpecialWireList* wire_list)
             break;
           case DEFIPATH_VIADATA:
             break;
-          case DEFIPATH_RECT:
+          case DEFIPATH_RECT: {
+            int32_t ll_x;
+            int32_t ll_y;
+            int32_t ur_x;
+            int32_t ur_y;
+            def_path->getViaRect(&ll_x, &ll_y, &ur_x, &ur_y);
+            segment->set_is_rect(true);
+            IdbCoordinate<int32_t>* point_end = segment->get_point(segment->get_point_num() - 1);
+            if (point_end != nullptr) {
+              /// path RECT coordinates are offsets from the preceding path point,
+              /// while a special wire segment stores its rect in absolute coordinates
+              segment->set_delta_rect(point_end->get_x() + ll_x, point_end->get_y() + ll_y, point_end->get_x() + ur_x,
+                                      point_end->get_y() + ur_y);
+            } else {
+              segment->set_delta_rect(ll_x, ll_y, ur_x, ur_y);
+            }
             break;
+          }
           case DEFIPATH_VIRTUALPOINT:
             break;
           case DEFIPATH_MASK:
@@ -2272,6 +2288,10 @@ int32_t DefRead::parse_fill(defiFill* def_fill)
     if (via == nullptr) {
       via = via_list_lef->find_via(def_fill->viaName());
     }
+    if (via == nullptr) {
+      ECCLOG.warn(ecc::Loc::current(), "Error : can not find the fill via = ", def_fill->viaName());
+      return kDbFail;
+    }
     IdbVia* via_new = via->clone();
     IdbFillVia* fill_via = fill_list->add_fill_via(via_new);
     if (via_new != nullptr) {
@@ -2319,9 +2339,6 @@ int32_t DefRead::parse_bus_bit_chars(const char* bus_bit_chars_str)
   bus_bit_chars->setLeftDelimiter(bus_bit_chars_str[0]);
   bus_bit_chars->setRightDelimter(bus_bit_chars_str[1]);
 
-  if (design->get_bus_bit_chars() != nullptr) {
-    delete design->get_bus_bit_chars();
-  }
   design->set_bus_bit_chars(bus_bit_chars);
   return kDbSuccess;
 }

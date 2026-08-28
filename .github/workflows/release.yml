@@ -6,9 +6,17 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag to release (e.g., v0.1.0-alpha.9)'
+        description: 'Tag to release (e.g., v0.1.0-alpha.11)'
         required: true
-        default: 'v0.1.0-alpha.9'
+        default: 'v0.1.0-alpha.11'
+      publish_target:
+        description: 'Artifacts to publish'
+        required: true
+        default: 'cnb-only'
+        type: choice
+        options:
+          - cnb-only
+          - all
 
 permissions:
   contents: write
@@ -38,6 +46,7 @@ jobs:
 
   release:
     name: Create Release
+    if: github.event_name != 'workflow_dispatch' || inputs.publish_target == 'all'
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -100,3 +109,24 @@ jobs:
             --title "ecc-tools ${{ steps.version.outputs.full_tag }}" \
             --notes-file release-notes.md \
             dist/wheel/repaired/*.whl
+
+  cnb-publish:
+    name: Publish Wheel to CNB
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ecc-tools-wheel
+          path: dist/wheel/repaired
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Publish wheel to CNB
+        run: uv publish --no-attestations dist/wheel/repaired/*.whl
+        env:
+          UV_PUBLISH_URL: https://pypi.cnb.cool/ecoslab/ecos-eda/-/packages/simple
+          UV_PUBLISH_USERNAME: cnb
+          UV_PUBLISH_PASSWORD: ${{ secrets.CNB_PYPI_TOKEN }}

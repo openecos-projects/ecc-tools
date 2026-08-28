@@ -84,6 +84,7 @@ void LayerAssigner::clearRoutingEdgeDemand()
       for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
         for (int32_t y = 0; y < routing_edge_map.get_y_size(); y++) {
           routing_edge_map[x][y].set_demand(0);
+          routing_edge_map[x][y].get_demand_net_idx_list().clear();
         }
       }
     }
@@ -784,6 +785,16 @@ void LayerAssigner::updateRoutingTreeToGraph(LAModel& la_model, const RoutingSeg
       }
       if (change_type == ChangeType::kDel && routing_edge.get_demand() <= 0) {
         RTLOG.error(Loc::current(), "The routing edge demand is error!");
+      }
+      std::vector<int32_t>& demand_net_idx_list = routing_edge.get_demand_net_idx_list();
+      if (change_type == ChangeType::kAdd) {
+        demand_net_idx_list.push_back(curr_net_idx);
+      } else {
+        auto iter = std::find(demand_net_idx_list.begin(), demand_net_idx_list.end(), curr_net_idx);
+        if (iter == demand_net_idx_list.end()) {
+          RTLOG.error(Loc::current(), "The routing edge demand net is error!");
+        }
+        demand_net_idx_list.erase(iter);
       }
       routing_edge.set_demand(routing_edge.get_demand() + delta);
     }

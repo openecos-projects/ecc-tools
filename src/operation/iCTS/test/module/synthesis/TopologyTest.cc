@@ -41,6 +41,7 @@
 #include "data_manager/design/Pin.hh"
 #include "data_manager/io/Wrapper.hh"
 #include "data_manager/spatial/Point.hh"
+#include "module/synthesis/realization/ClockTreeRealization.hh"
 #include "module/synthesis/topology/SourceTrunkStage.hh"
 #include "module/synthesis/topology/Topology.hh"
 #include "module/synthesis/topology/trunk/SourceTrunk.hh"
@@ -189,24 +190,20 @@ TEST(TopologyTest, BuildFailurePreservesBorrowedMembership)
 {
   const ScopedConfigReset scoped_config_reset;
   icts::Clock invalid_clock("clk", "clk_net");
-  auto* stale_inst = makeDesignInst("cts_buf_0", "BUF_X1", icts::InstType::kBuffer, icts::Point<int>(0, 0));
   auto* stale_net = makeDesignNet("cts_net_0");
   icts::Net invalid_root_net("invalid_root_net");
 
-  invalid_clock.add_inst(stale_inst);
   invalid_clock.add_net(stale_net);
-  ASSERT_EQ(invalid_clock.get_insts().size(), 1U);
+  ASSERT_TRUE(invalid_clock.get_insts().empty());
   ASSERT_EQ(invalid_clock.get_nets().size(), 1U);
 
   const auto result = BuildTopologyForRootNet(invalid_root_net);
 
   EXPECT_FALSE(result.summary.success);
   EXPECT_FALSE(result.summary.failure_reason.empty());
-  ASSERT_EQ(invalid_clock.get_insts().size(), 1U);
+  ASSERT_TRUE(invalid_clock.get_insts().empty());
   ASSERT_EQ(invalid_clock.get_nets().size(), 1U);
-  EXPECT_EQ(invalid_clock.get_insts().front(), stale_inst);
   EXPECT_EQ(invalid_clock.get_nets().front(), stale_net);
-  EXPECT_EQ(CTSDM.getDesign().findInst("cts_buf_0"), stale_inst);
   EXPECT_EQ(CTSDM.getDesign().findNet("cts_net_0"), stale_net);
 }
 
@@ -250,11 +247,17 @@ TEST(TopologyTest, DesignOwnsFinalObjectsAndClockKeepsMembershipOnly)
   auto* output_pin = makeDesignPin(inst, "Y", icts::PinType::kOut, inst->get_location());
   ASSERT_NE(input_pin, nullptr);
   ASSERT_NE(output_pin, nullptr);
-  inst->insertDriverPin(output_pin);
+  inst->add_pin(output_pin);
 
   auto* net = makeDesignNet("cts_net_0", output_pin, std::vector<icts::Pin*>{input_pin});
   ASSERT_NE(net, nullptr);
-  clock.add_inst(inst);
+  ASSERT_TRUE(clock
+                  .addPropagationArc({.inst = inst,
+                                      .input_pin = input_pin,
+                                      .output_pin = output_pin,
+                                      .kind = icts::ClockPropagationKind::kBuffer,
+                                      .origin = icts::ClockPropagationOrigin::kSynthesized})
+                  .ok());
   clock.add_net(net);
 
   ASSERT_EQ(clock.get_insts().size(), 1U);
@@ -279,20 +282,99 @@ TEST(TopologyTest, DesignOwnsFinalObjectsAndClockKeepsMembershipOnly)
   EXPECT_TRUE(CTSDM.getDesign().get_nets().empty());
 }
 
-TEST(TopologyTest, InstInsertDriverPinHandlesEmptyPinList)
+TEST(TopologyTest, InsertedObjectCommitRequiresProducerOwnedPropagationPayload)
+{
+  const ScopedConfigReset scoped_config_reset;
+  icts::Clock clock("clk", "clk_net");
+  std::vector<std::unique_ptr<icts::Inst>> inserted_insts;
+  std::vector<std::unique_ptr<icts::Pin>> inserted_pins;
+  std::vector<std::unique_ptr<icts::Net>> inserted_nets;
+  std::vector<icts::ClockPropagationArc> propagation_arcs;
+
+  auto inst = std::make_unique<icts::Inst>("cts_buf", "BUF_X1", icts::InstType::kBuffer, icts::Point<int>(10, 20));
+  auto* inst_ptr = inst.get();
+  auto input_pin = std::make_unique<icts::Pin>("A", icts::PinType::kIn, inst_ptr->get_location(), inst_ptr, nullptr, false);
+  auto* input_pin_ptr = input_pin.get();
+  auto output_pin = std::make_unique<icts::Pin>("Y", icts::PinType::kOut, inst_ptr->get_location(), inst_ptr, nullptr, false);
+  auto* output_pin_ptr = output_pin.get();
+  inst_ptr->add_pin(input_pin_ptr);
+  inst_ptr->add_pin(output_pin_ptr);
+  inserted_insts.push_back(std::move(inst));
+  inserted_pins.push_back(std::move(input_pin));
+  inserted_pins.push_back(std::move(output_pin));
+
+  const auto commit = [&]() -> bool {
+    return icts::ClockTreeRealization::commitInsertedObjects(icts::InsertedObjectCommitInput{
+        .design = &CTSDM.getDesign(),
+        .clock = &clock,
+        .inserted_insts = &inserted_insts,
+        .inserted_pins = &inserted_pins,
+        .inserted_nets = &inserted_nets,
+        .propagation_arcs = &propagation_arcs,
+    });
+  };
+
+  EXPECT_FALSE(commit());
+  EXPECT_EQ(inserted_insts.size(), 1U);
+  EXPECT_EQ(inserted_pins.size(), 2U);
+  EXPECT_EQ(CTSDM.getDesign().findInst("cts_buf"), nullptr);
+  EXPECT_TRUE(clock.get_propagation_arcs().empty());
+
+  propagation_arcs.push_back(icts::ClockPropagationArc{
+      .inst = inst_ptr,
+      .input_pin = input_pin_ptr,
+      .output_pin = output_pin_ptr,
+      .kind = icts::ClockPropagationKind::kBuffer,
+      .origin = icts::ClockPropagationOrigin::kSynthesized,
+      .path_buffer_weight = 1,
+  });
+
+  inst_ptr->set_type(icts::InstType::kFlipFlop);
+  EXPECT_FALSE(commit());
+  EXPECT_EQ(inserted_insts.size(), 1U);
+  EXPECT_EQ(inserted_pins.size(), 2U);
+  EXPECT_EQ(propagation_arcs.size(), 1U);
+  EXPECT_EQ(CTSDM.getDesign().findInst("cts_buf"), nullptr);
+  EXPECT_EQ(CTSDM.getDesign().findPin("cts_buf/A"), nullptr);
+  EXPECT_EQ(CTSDM.getDesign().findPin("cts_buf/Y"), nullptr);
+  EXPECT_TRUE(clock.get_propagation_arcs().empty());
+
+  inst_ptr->set_type(icts::InstType::kBuffer);
+  input_pin_ptr->set_type(icts::PinType::kOut);
+  EXPECT_FALSE(commit());
+  EXPECT_EQ(inserted_insts.size(), 1U);
+  EXPECT_EQ(inserted_pins.size(), 2U);
+  EXPECT_EQ(propagation_arcs.size(), 1U);
+  EXPECT_EQ(CTSDM.getDesign().findInst("cts_buf"), nullptr);
+  EXPECT_EQ(CTSDM.getDesign().findPin("cts_buf/A"), nullptr);
+  EXPECT_EQ(CTSDM.getDesign().findPin("cts_buf/Y"), nullptr);
+  EXPECT_TRUE(clock.get_propagation_arcs().empty());
+
+  input_pin_ptr->set_type(icts::PinType::kIn);
+  ASSERT_TRUE(commit());
+  EXPECT_TRUE(inserted_insts.empty());
+  EXPECT_TRUE(inserted_pins.empty());
+  EXPECT_TRUE(propagation_arcs.empty());
+  ASSERT_EQ(clock.get_propagation_arcs().size(), 1U);
+  EXPECT_EQ(clock.get_propagation_arcs().front().inst, CTSDM.getDesign().findInst("cts_buf"));
+  EXPECT_EQ(clock.get_propagation_arcs().front().input_pin, CTSDM.getDesign().findPin("cts_buf/A"));
+  EXPECT_EQ(clock.get_propagation_arcs().front().output_pin, CTSDM.getDesign().findPin("cts_buf/Y"));
+}
+
+TEST(TopologyTest, InstPinMembershipIsUniqueAndOrderIndependent)
 {
   icts::Inst inst("cts_buf_0", "BUF_X1", icts::InstType::kBuffer, icts::Point<int>(0, 0));
   icts::Pin driver_pin("Y", icts::PinType::kOut);
 
-  inst.insertDriverPin(&driver_pin);
+  inst.add_pin(&driver_pin);
 
   ASSERT_EQ(inst.get_pins().size(), 1U);
-  EXPECT_EQ(inst.findDriverPin(), &driver_pin);
+  EXPECT_EQ(inst.get_pins().front(), &driver_pin);
 
-  inst.insertDriverPin(&driver_pin);
+  inst.add_pin(&driver_pin);
 
   ASSERT_EQ(inst.get_pins().size(), 1U);
-  EXPECT_EQ(inst.findDriverPin(), &driver_pin);
+  EXPECT_EQ(inst.get_pins().front(), &driver_pin);
 }
 
 TEST(TopologyTest, EnableSinkClusteringDefaultsTrueAndParsesConfiguredValues)

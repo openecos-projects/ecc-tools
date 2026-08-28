@@ -212,16 +212,52 @@ auto OtherInputsAreControlCandidates(idb::IdbInstance* inst, idb::IdbPin* clock_
   return has_other_input;
 }
 
-auto AddOutputTransition(std::vector<TraceTransition>& transitions, idb::IdbPin* output_pin, const std::string& reason) -> void
+auto AddOutputTransition(std::vector<TraceTransition>& transitions, idb::IdbPin* input_pin, idb::IdbPin* output_pin, const std::string& reason,
+                         std::optional<ClockTracePropagationKind> propagation_kind = std::nullopt) -> void
 {
   if (output_pin == nullptr || output_pin->get_net() == nullptr) {
     return;
   }
-  transitions.push_back({
-      output_pin->get_net(),
-      PinDisplayName(output_pin) + "->" + output_pin->get_net()->get_net_name(),
-      reason,
-  });
+  TraceTransition transition{
+      .net = output_pin->get_net(),
+      .path_step = PinDisplayName(output_pin) + "->" + output_pin->get_net()->get_net_name(),
+      .reason = reason,
+      .propagation_step = std::nullopt,
+  };
+  auto* inst = input_pin == nullptr ? nullptr : input_pin->get_instance();
+  if (propagation_kind.has_value() && inst != nullptr && output_pin->get_instance() == inst && input_pin->get_net() != nullptr) {
+    transition.propagation_step = ClockTracePropagationStep{
+        .clock_name = {},
+        .inst_name = inst->get_name(),
+        .input_pin_name = TermName(input_pin),
+        .output_pin_name = TermName(output_pin),
+        .input_net_name = input_pin->get_net()->get_net_name(),
+        .output_net_name = output_pin->get_net()->get_net_name(),
+        .kind = *propagation_kind,
+        .ownership_reason = "liberty_buffer_transition",
+    };
+  }
+  transitions.push_back(std::move(transition));
+}
+
+auto MakeTraceRecord(const std::string& clock_name, const std::string& net_name, const std::string& status, const std::string& target_kind,
+                     std::size_t sequential_clock_sinks, std::size_t macro_clock_sinks, const std::string& trace_path, const std::string& reason)
+    -> ClockTraceRecord
+{
+  return ClockTraceRecord{
+      .clock_name = clock_name,
+      .net_name = net_name,
+      .status = status,
+      .target_kind = target_kind,
+      .sequential_clock_sinks = sequential_clock_sinks,
+      .macro_clock_sinks = macro_clock_sinks,
+      .trace_path = trace_path,
+      .reason = reason,
+      .clock_kind = "unknown",
+      .master_clock_name = "n/a",
+      .dominance = "undetermined",
+      .propagation_steps = {},
+  };
 }
 
 auto CollectSafeTransitions(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* net, const CaseConstraintSet& case_constraints)
@@ -247,7 +283,8 @@ auto CollectSafeTransitions(const SdcLibertyCellLookup& liberty_cell_lookup, idb
         auto* input_pin = ResolveInstPinByLibPort(inst, input_port);
         auto* output_pin = ResolveInstPinByLibPort(inst, output_port);
         if (input_pin == load_pin) {
-          AddOutputTransition(transitions, output_pin, lib_cell->isBuffer() ? "buffer" : "inverter");
+          AddOutputTransition(transitions, load_pin, output_pin, lib_cell->isBuffer() ? "buffer" : "inverter",
+                              lib_cell->isBuffer() ? ClockTracePropagationKind::kBuffer : ClockTracePropagationKind::kInverter);
         }
       }
       continue;
@@ -259,7 +296,7 @@ auto CollectSafeTransitions(const SdcLibertyCellLookup& liberty_cell_lookup, idb
       auto* term = load_pin->get_term();
       if (is_clock_gate_clock_pin || (term != nullptr && term->get_type() == idb::IdbConnectType::kClock)) {
         for (auto* output_pin : CollectOutputPins(inst)) {
-          AddOutputTransition(transitions, output_pin, "clock_gate");
+          AddOutputTransition(transitions, load_pin, output_pin, "clock_gate");
         }
       }
       continue;
@@ -294,9 +331,9 @@ auto CollectSafeTransitions(const SdcLibertyCellLookup& liberty_cell_lookup, idb
         } else if (control_candidate_gate) {
           reason = "comb_output_direct_clock_sinks";
         }
-        AddOutputTransition(transitions, output_pin, reason);
+        AddOutputTransition(transitions, load_pin, output_pin, reason);
       } else if (output_net->is_clock() && constrained_gate) {
-        AddOutputTransition(transitions, output_pin, "case_constrained_clock_net");
+        AddOutputTransition(transitions, load_pin, output_pin, "case_constrained_clock_net");
       }
     }
   }
@@ -446,7 +483,7 @@ auto TraceClock(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbDesign*
 {
   std::vector<ClockTraceRecord> records;
   if (clock.is_virtual || clock.targets.empty()) {
-    records.push_back({clock.clock_name, "", "skipped", "virtual_clock", 0U, 0U, "", "no_netlist_source"});
+    records.push_back(MakeTraceRecord(clock.clock_name, "", "skipped", "virtual_clock", 0U, 0U, "", "no_netlist_source"));
     return records;
   }
 
@@ -455,14 +492,15 @@ auto TraceClock(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbDesign*
     auto resolved_nets = ResolveRefNets(idb_design, target);
     seed_nets.insert(seed_nets.end(), resolved_nets.begin(), resolved_nets.end());
     if (resolved_nets.empty()) {
-      records.push_back({clock.clock_name, target.pattern, "rejected", ObjectKindName(target.kind), 0U, 0U, target.pattern, "unresolved_sdc_object"});
+      records.push_back(
+          MakeTraceRecord(clock.clock_name, target.pattern, "rejected", ObjectKindName(target.kind), 0U, 0U, target.pattern, "unresolved_sdc_object"));
     }
   }
   std::ranges::sort(seed_nets);
   const auto unique_seed_nets = std::ranges::unique(seed_nets);
   seed_nets.erase(unique_seed_nets.begin(), unique_seed_nets.end());
   if (seed_nets.empty()) {
-    records.push_back({clock.clock_name, "", "rejected", "sdc_source", 0U, 0U, "", "no_resolved_seed_net"});
+    records.push_back(MakeTraceRecord(clock.clock_name, "", "rejected", "sdc_source", 0U, 0U, "", "no_resolved_seed_net"));
     return records;
   }
 
@@ -471,7 +509,7 @@ auto TraceClock(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbDesign*
   visited.reserve(1024U);
   for (auto* seed_net : seed_nets) {
     if (seed_net != nullptr) {
-      queue.push_back({seed_net, seed_net->get_net_name(), 0U});
+      queue.push_back({seed_net, seed_net->get_net_name(), 0U, {}});
     }
   }
 
@@ -482,25 +520,32 @@ auto TraceClock(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbDesign*
       continue;
     }
     if (visited.size() > kTraceNetVisitLimit) {
-      records.push_back({clock.clock_name, NetName(node.net), "rejected", "trace_limit", 0U, 0U, node.path, "trace_net_visit_limit"});
+      records.push_back(MakeTraceRecord(clock.clock_name, NetName(node.net), "rejected", "trace_limit", 0U, 0U, node.path, "trace_net_visit_limit"));
       break;
     }
 
     if (const auto boundary_iter = generated_boundary_owner_by_net.find(node.net);
         boundary_iter != generated_boundary_owner_by_net.end() && boundary_iter->second != clock.clock_name) {
-      records.push_back({clock.clock_name, NetName(node.net), "trace_stop", "generated_clock_boundary", 0U, 0U, node.path, boundary_iter->second});
+      records.push_back(
+          MakeTraceRecord(clock.clock_name, NetName(node.net), "trace_stop", "generated_clock_boundary", 0U, 0U, node.path, boundary_iter->second));
       continue;
     }
 
     const auto stats = CountDirectClockSinks(liberty_cell_lookup, node.net);
     if (IsClockTarget(stats)) {
-      records.push_back({clock.clock_name, node.net->get_net_name(), "accepted", TargetKind(stats), stats.sequential_clock_sinks, stats.macro_clock_sinks,
-                         node.path, "sdc_reachable_clock_sink_net"});
+      auto accepted = MakeTraceRecord(clock.clock_name, node.net->get_net_name(), "accepted", TargetKind(stats), stats.sequential_clock_sinks,
+                                      stats.macro_clock_sinks, node.path, "sdc_reachable_clock_sink_net");
+      accepted.propagation_steps = node.propagation_steps;
+      for (auto& step : accepted.propagation_steps) {
+        step.clock_name = clock.clock_name;
+        step.ownership_reason = "sdc_reachable_owned_transition";
+      }
+      records.push_back(std::move(accepted));
     }
 
     if (node.depth >= kTraceDepthLimit) {
-      records.push_back({clock.clock_name, NetName(node.net), "trace_stop", "depth_limit", stats.sequential_clock_sinks, stats.macro_clock_sinks, node.path,
-                         "trace_depth_limit"});
+      records.push_back(MakeTraceRecord(clock.clock_name, NetName(node.net), "trace_stop", "depth_limit", stats.sequential_clock_sinks, stats.macro_clock_sinks,
+                                        node.path, "trace_depth_limit"));
       continue;
     }
 
@@ -508,13 +553,23 @@ auto TraceClock(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbDesign*
       if (transition.net == nullptr || visited.contains(transition.net)) {
         continue;
       }
+      if (!transition.propagation_step.has_value()) {
+        records.push_back(MakeTraceRecord(clock.clock_name, transition.net->get_net_name(), "trace_stop", transition.reason, 0U, 0U, node.path,
+                                          "non_propagation_clock_boundary"));
+        continue;
+      }
       auto next_path = node.path;
       if (!next_path.empty()) {
         next_path += " -> ";
       }
       next_path += transition.path_step;
-      queue.push_back({transition.net, std::move(next_path), node.depth + 1U});
-      records.push_back({clock.clock_name, transition.net->get_net_name(), "trace_through", transition.reason, 0U, 0U, node.path, transition.reason});
+      auto next_steps = node.propagation_steps;
+      if (transition.propagation_step.has_value()) {
+        next_steps.push_back(*transition.propagation_step);
+      }
+      queue.push_back({transition.net, std::move(next_path), node.depth + 1U, std::move(next_steps)});
+      records.push_back(
+          MakeTraceRecord(clock.clock_name, transition.net->get_net_name(), "trace_through", transition.reason, 0U, 0U, node.path, transition.reason));
     }
   }
   return records;

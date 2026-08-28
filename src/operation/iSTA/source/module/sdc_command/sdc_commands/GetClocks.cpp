@@ -14,31 +14,43 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "STAInterface.hpp"
-#include "tcl_ista_util.hpp"
-#include "tcl_sta.h"
+#include "DataManager.hpp"
+#include "Logger.hpp"
+#include "SdcCommands.hpp"
 
-namespace tcl {
+namespace ista::sdc {
 
-TclGetClocks::TclGetClocks(const char* cmd_name) : TclCmd(cmd_name)
+TclGetClocks::TclGetClocks(const char* cmd_name, ClientData client_data) : SdcTclCmd(cmd_name, client_data)
 {
-  addOption(new TclStringListOption("clocks", 1));
+  addOption(new ecc::TclStringListOption("clocks", 1));
 }
 
 unsigned TclGetClocks::exec()
 {
-  TclOption* clock_option = getOptionOrArg("clocks");
+  ecc::TclOption* clock_option = getOptionOrArg("clocks");
   if (!clock_option->is_set_val()) {
     setTclError("get_clocks requires a clock list");
     return 0;
   }
-  std::vector<std::string> resolved_clock_list;
-  if (std::string error_message; !STAI.getClocks(clock_option->getStringList(), resolved_clock_list, error_message)) {
-    setTclError(error_message);
+  const std::vector<std::string> clock_name_list = clock_option->getStringList();
+  if (clock_name_list.empty()) {
+    setTclError("get_clocks requires at least one clock name");
     return 0;
   }
-  setResult(resolved_clock_list);
+
+  auto& clock_map = STADM.getDatabase().get_timing_constraint().get_clock_map();
+  std::vector<std::string> resolved_clocks;
+  resolved_clocks.reserve(clock_name_list.size());
+  for (const std::string& clock_name : clock_name_list) {
+    if (!clock_map.contains(clock_name)) {
+      STALOG.error(Loc::current(), "clock '", clock_name, "' does not exist");
+      setTclError("clock does not exist");
+      return 0;
+    }
+    resolved_clocks.push_back(clock_name);
+  }
+  setResult(std::move(resolved_clocks));
   return 1;
 }
 
-}  // namespace tcl
+}  // namespace ista::sdc

@@ -190,9 +190,10 @@ std::map<std::string, TimingPathState>& TimingAnalyzer::getPathStateMap(TimingPo
 }
 
 TimingPathState& TimingAnalyzer::getPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type, TransType trans_type,
-                                                std::string& start_point)
+                                               std::string& start_point)
 {
-  return timing_point.get_path_state_map()[analysis_type][source_type][trans_type][start_point];
+  std::string path_state_tag{getClockName(start_point)};
+  return timing_point.get_path_state_map()[analysis_type][source_type][trans_type][path_state_tag];
 }
 
 TimingPathState* TimingAnalyzer::getWorstPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type)
@@ -352,9 +353,9 @@ double TimingAnalyzer::getEndPointRequired(std::string& start_point, std::string
     std::string common_pin_name;
     double cppr = getClockReconvergencePessimism(start_point, end_point, analysis_type, common_pin_name);
     if (analysis_type == AnalysisType::kMin) {
-      return roundTime(getEndPointCaptureTime(end_point, analysis_type) + check_time - cppr);
+      return roundTime(getEndPointCaptureTime(end_point, analysis_type) + check_time - cppr + getClockUncertainty(end_point, analysis_type));
     }
-    return roundTime(getEndPointCaptureTime(end_point, analysis_type) - check_time + cppr);
+    return roundTime(getEndPointCaptureTime(end_point, analysis_type) - check_time + cppr - getClockUncertainty(end_point, analysis_type));
   }
   return default_required_time;
 }
@@ -395,6 +396,17 @@ std::string_view TimingAnalyzer::getClockName(std::string& pin_name)
   return "clk";
 }
 
+double TimingAnalyzer::getClockUncertainty(std::string& pin_name, AnalysisType analysis_type)
+{
+  Database& database = STADM.getDatabase();
+  auto& clock_map = database.get_timing_constraint().get_clock_map();
+  auto clock_it = clock_map.find(std::string(getClockName(pin_name)));
+  if (clock_it == clock_map.end()) {
+    return 0.0;
+  }
+  return analysis_type == AnalysisType::kMin ? clock_it->second.get_hold_uncertainty() : clock_it->second.get_setup_uncertainty();
+}
+
 TimingClock* TimingAnalyzer::getStartPointClock(std::string& start_point)
 {
   Database& database = STADM.getDatabase();
@@ -427,9 +439,9 @@ double TimingAnalyzer::getEndPointRequired(TimingPathState& end_path_state, std:
     std::string common_pin_name;
     double cppr = getClockReconvergencePessimism(end_path_state, end_point, analysis_type, common_pin_name);
     if (analysis_type == AnalysisType::kMin) {
-      return roundTime(getEndPointCaptureTime(end_point, analysis_type) + check_time - cppr);
+      return roundTime(getEndPointCaptureTime(end_point, analysis_type) + check_time - cppr + getClockUncertainty(end_point, analysis_type));
     }
-    return roundTime(getEndPointCaptureTime(end_point, analysis_type) - check_time + cppr);
+    return roundTime(getEndPointCaptureTime(end_point, analysis_type) - check_time + cppr - getClockUncertainty(end_point, analysis_type));
   }
   return default_required_time;
 }
@@ -1133,15 +1145,15 @@ bool TimingAnalyzer::updateDiversionPathState(std::string& pin_name, AnalysisTyp
 {
   Database& database = STADM.getDatabase();
   TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
-  std::string& start_point = source_path_state.get_start_point();
+  const std::string& path_state_tag = source_path_state.get_clock_name();
   std::map<std::string, TimingPathState>& path_state_map = getPathStateMap(timing_point, analysis_type, source_type, trans_type);
-  if (path_state_map.count(start_point) > 0 && !isBetterArrival(arrival, path_state_map[start_point].get_arrival(), analysis_type)) {
+  if (path_state_map.count(path_state_tag) > 0 && !isBetterArrival(arrival, path_state_map[path_state_tag].get_arrival(), analysis_type)) {
     return false;
   }
-  TimingPathState& path_state = path_state_map[start_point];
+  TimingPathState& path_state = path_state_map[path_state_tag];
   path_state.set_arrival(arrival);
   path_state.set_slew(getDataSlew(timing_point, analysis_type, trans_type));
-  path_state.set_start_point(start_point);
+  path_state.set_start_point(source_path_state.get_start_point());
   path_state.set_predecessor(predecessor);
   path_state.set_predecessor_arc_idx(predecessor_arc_idx);
   path_state.set_predecessor_arc_delay(predecessor_arc_delay);

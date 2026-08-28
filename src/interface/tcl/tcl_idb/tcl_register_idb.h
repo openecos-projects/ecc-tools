@@ -40,6 +40,7 @@ int registerCmdDB()
   registerTclCmd(CmdInitLef, "lef_init");
   registerTclCmd(CmdInitDef, "def_init");
   registerTclCmd(CmdInitVerilog, "verilog_init");
+  registerTclCmd(CmdLvsInitVerilog, "lvs_verilog_init");
   registerTclCmd(CmdInitLib, "lib_init");
   registerTclCmd(CmdInitSdc, "sdc_init");
   registerTclCmd(CmdInitSpef, "spef_init");

@@ -96,8 +96,10 @@ void DRCInterface::checkDef()
   bool origin_quiet = DRCLOG.isQuiet();
   DRCLOG.disableQuiet();
 
+  std::set<size_t> obs_shape_idx_set;
+  std::vector<ids::Shape> env_shape_list = buildEnvShapeList(obs_shape_idx_set);
   std::map<std::string, std::vector<ids::Violation>> type_violation_map;
-  for (ids::Violation& ids_violation : getViolationList(buildEnvShapeList(), buildResultShapeList(), {}, {})) {
+  for (ids::Violation& ids_violation : getViolationList(env_shape_list, buildResultShapeList(), {}, {}, obs_shape_idx_set)) {
     type_violation_map[ids_violation.violation_type].push_back(ids_violation);
   }
   printSummary(type_violation_map);
@@ -151,15 +153,27 @@ std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids
                                                            const std::set<std::string>& ids_check_type_set,
                                                            const std::vector<ids::Shape>& ids_check_region_list)
 {
+  return getViolationList(ids_env_shape_list, ids_result_shape_list, ids_check_type_set, ids_check_region_list, {});
+}
+
+std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids::Shape>& ids_env_shape_list,
+                                                           const std::vector<ids::Shape>& ids_result_shape_list,
+                                                           const std::set<std::string>& ids_check_type_set,
+                                                           const std::vector<ids::Shape>& ids_check_region_list,
+                                                           const std::set<size_t>& obs_shape_idx_set)
+{
   std::vector<DRCShape> drc_env_shape_list;
   drc_env_shape_list.reserve(ids_env_shape_list.size());
-  for (const ids::Shape& ids_env_shape : ids_env_shape_list) {
-    drc_env_shape_list.push_back(convertToDRCShape(ids_env_shape));
+  for (size_t i = 0; i < ids_env_shape_list.size(); i++) {
+    drc_env_shape_list.push_back(convertToDRCShape(ids_env_shape_list[i]));
+    drc_env_shape_list.back().set_is_obs(obs_shape_idx_set.count(i) > 0);
   }
   std::vector<DRCShape> drc_result_shape_list;
   drc_result_shape_list.reserve(ids_result_shape_list.size());
+  const int32_t regular_net_num = static_cast<int32_t>(dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list().size());
   for (const ids::Shape& ids_result_shape : ids_result_shape_list) {
     drc_result_shape_list.push_back(convertToDRCShape(ids_result_shape));
+    drc_result_shape_list.back().set_is_special_net(ids_result_shape.net_idx >= regular_net_num);
   }
   std::set<ViolationType> drc_check_type_set;
   for (std::string ids_check_type : ids_check_type_set) {
@@ -911,41 +925,39 @@ void DRCInterface::output()
 
 std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
 {
+  std::set<size_t> obs_shape_idx_set;
+  return buildEnvShapeList(obs_shape_idx_set);
+}
+
+std::vector<ids::Shape> DRCInterface::buildEnvShapeList(std::set<size_t>& obs_shape_idx_set)
+{
+  obs_shape_idx_set.clear();
   std::vector<ids::Shape> env_shape_list;
   auto monitor = Monitor::create();
   DRCLOG.info(Loc::current(), "Starting...");
 
-  std::vector<idb::IdbInstance*>& idb_instance_list = dmInst->get_idb_def_service()->get_design()->get_instance_list()->get_instance_list();
-  std::vector<idb::IdbNet*>& idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list();
-  std::vector<idb::IdbSpecialNet*>& idb_special_net_list = dmInst->get_idb_def_service()->get_design()->get_special_net_list()->get_net_list();
-  std::vector<idb::IdbPin*>& idb_io_pin_list = dmInst->get_idb_def_service()->get_design()->get_io_pin_list()->get_pin_list();
-  std::vector<idb::IdbBlockage*> idb_blockage_list = dmInst->get_idb_def_service()->get_design()->get_blockage_list()->get_blockage_list();
-  idb::IdbDesign* idb_design = dmInst->get_idb_def_service()->get_design();
-  std::map<idb::IdbPin*, int32_t> special_pin_net_idx_map;
+  auto* idb_design = dmInst->get_idb_def_service()->get_design();
+  std::vector<idb::IdbInstance*>& idb_instance_list = idb_design->get_instance_list()->get_instance_list();
+  std::vector<idb::IdbNet*>& idb_net_list = idb_design->get_net_list()->get_net_list();
+  std::vector<idb::IdbSpecialNet*>& idb_special_net_list = idb_design->get_special_net_list()->get_net_list();
+  std::vector<idb::IdbPin*>& idb_io_pin_list = idb_design->get_io_pin_list()->get_pin_list();
+  std::vector<idb::IdbBlockage*> idb_blockage_list = idb_design->get_blockage_list()->get_blockage_list();
   std::map<idb::IdbSpecialNet*, int32_t> special_net_idx_map;
   int32_t regular_net_num = static_cast<int32_t>(idb_net_list.size());
   for (size_t i = 0; i < idb_special_net_list.size(); ++i) {
-    int32_t special_net_id = regular_net_num + static_cast<int32_t>(i);
-    special_net_idx_map[idb_special_net_list[i]] = special_net_id;
-    for (idb::IdbPin* idb_pin : idb_special_net_list[i]->get_instance_pin_list()->get_pin_list()) {
-      special_pin_net_idx_map[idb_pin] = special_net_id;
-    }
-    for (idb::IdbPin* idb_pin : idb_special_net_list[i]->get_io_pins()->get_pin_list()) {
-      special_pin_net_idx_map[idb_pin] = special_net_id;
-    }
+    special_net_idx_map[idb_special_net_list[i]] = regular_net_num + static_cast<int32_t>(i);
   }
   auto get_pin_net_idx = [&](idb::IdbPin* idb_pin) {
-    auto it = special_pin_net_idx_map.find(idb_pin);
-    if (it != special_pin_net_idx_map.end()) {
-      return it->second;
+    if (idb_pin == nullptr) {
+      return -1;
     }
-    if (!idb_pin->is_io_pin()) {
-      idb::IdbSpecialNet* special_net = idb_design->findSpecialNetForInstancePin(idb_pin);
-      auto special_it = special_net_idx_map.find(special_net);
-      if (special_it != special_net_idx_map.end()) {
-        return special_it->second;
-      }
+    idb::IdbSpecialNet* special_net = idb_pin->is_io_pin() ? idb_pin->get_special_net()
+                                                            : idb_design->findSpecialNetForInstancePin(idb_pin);
+    auto special_net_it = special_net_idx_map.find(special_net);
+    if (special_net_it != special_net_idx_map.end()) {
+      return special_net_it->second;
     }
+
     if (!isSkipping(idb_pin->get_net())) {
       return static_cast<int32_t>(idb_pin->get_net()->get_id());
     }
@@ -1018,6 +1030,9 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
           ids_shape.ur_y = rect->get_high_y();
           ids_shape.layer_idx = obs_box->get_layer()->get_id();
           ids_shape.is_routing = obs_box->get_layer()->is_routing();
+          if (ids_shape.is_routing) {
+            obs_shape_idx_set.insert(env_shape_list.size());
+          }
           env_shape_list.push_back(ids_shape);
         }
       }

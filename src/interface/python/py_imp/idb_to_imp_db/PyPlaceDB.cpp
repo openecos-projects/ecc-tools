@@ -5,9 +5,11 @@
 #include <boost/polygon/polygon.hpp>
 #include <cassert>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -56,6 +58,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. idb_design address is ", db->get_idb_design());
   num_routing_grids_x = numRoutingGridsX;
   num_routing_grids_y = numRoutingGridsY;
+  _db = db;
+  _design = db->get_idb_design();
   using namespace idb;
   namespace gtl = boost::polygon;
   using namespace gtl::operators;
@@ -69,16 +73,20 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     throw std::runtime_error("PyPlaceDB timing initialization is disabled in this ecc_py build");
   }
 
-  double total_fixed_node_area = 0;  // compute total area of fixed cells, which is an upper bound
-  // collect boxes for fixed cells and put in a polygon set to remove overlap later
+  double total_fixed_node_area = 0;  // sum of fixed body and synthetic obstacle rectangles
+  // Collect the rectangles used by DreamPlace and the corresponding unioned geometry
+  // separately.  Fixed instances retain their body rectangle for pin/write-back
+  // identity, while halos and blockages become pin-less synthetic terminals.
   std::vector<gtl::rectangle_data<coordinate_type>> fixed_boxes;
+  std::vector<gtl::rectangle_data<coordinate_type>> fixed_body_boxes;
+  std::vector<gtl::rectangle_data<coordinate_type>> fixed_halo_boxes;
   // record original node to new node mapping
   int inst_num = db_deisgn->get_instance_list()->get_num();
   std::map<std::string, index_type> mNode2PyNondeID;
   std::map<std::string, index_type> mNode2idbID;
   std::vector<IdbInstance*> inst_resort_list = db_deisgn->get_instance_list()->get_instance_list();
   std::stable_sort(inst_resort_list.begin(), inst_resort_list.end(),
-                   [](IdbInstance* a, IdbInstance* b) { return a->is_fixed() < b->is_fixed(); });
+                   [](IdbInstance* a, IdbInstance* b) { return isPlacementFixed(a) < isPlacementFixed(b); });
   for (IdbInstance* node : inst_resort_list) {
     mNode2idbID[node->get_name()] = node->get_id();
   }
@@ -133,7 +141,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     return Box(lx, ly, lx + width, ly + height);
   };
   // general add a node
-  auto addNode = [&](std::string orient_str, std::string const& name, Box const& box, bool isFixed) {
+  auto addNode = [&](std::string orient_str, std::string const& name, Box const& box, bool isFixed, bool is_hard_macro,
+                     bool is_macro_writeback_candidate, IdbInstance* instance) {
     // this id may be different from node id
     int id = node_names.size();
     node_name2id_map[pybind11::str(name)] = id;
@@ -144,6 +153,11 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     node_orient.append(pybind11::str(orient_str));
     node_size_x.append(box.width());
     node_size_y.append(box.height());
+    _node_is_hard_macro.push_back(is_hard_macro);
+    _macro_writeback_candidate.push_back(is_macro_writeback_candidate);
+    if (is_macro_writeback_candidate) {
+      _macro_writeback_candidates.push_back({id, name, instance});
+    }
     // map new node to original index
     if (mNode2idbID.count(name)) {
       node2orig_node_map.append(mNode2idbID[name]);
@@ -157,13 +171,17 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
   };
   num_terminals = 0;  // regard only fixed macros as macros, placement blockages are ignored
-  PolygonSet fixed_node_ps;
   for (int i = 0; i < inst_num; ++i) {
     IdbInstance* node = inst_resort_list.at(i);
-    if (node->get_cell_master()->is_block()) {
+    auto* cell_master = node->get_cell_master();
+    const bool is_hard_macro = cell_master != nullptr && cell_master->is_block();
+    const auto status = node->get_status();
+    const bool is_macro_writeback_candidate
+        = is_hard_macro && (status == IdbPlacementStatus::kNone || status == IdbPlacementStatus::kUnplaced);
+    if (is_hard_macro) {
       ECCLOG.info(ecc::Loc::current(), "Node ", node->get_name(), " is a block.");
     }
-    if (node->get_status() != IdbPlacementStatus::kFixed) {
+    if (!isPlacementFixed(node)) {
       Box box_tmp = buildInstanceBox(node);
       if (node->get_halo()) {
         // Jiaqi: add halo for fixed cells
@@ -176,33 +194,39 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
                      node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
                      node->get_halo()->get_extend_top(), ").");
       }
-      addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, false);
+      addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, false, is_hard_macro,
+              is_macro_writeback_candidate, node);
     }
     else
     {
-      Box box_tmp = buildInstanceBox(node);
+      Box body_box = buildInstanceBox(node);
+      Box halo_box = body_box;
       if (node->get_halo()) {
-        // Jiaqi: add halo for fixed cells
-        // ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed cell with halo.");
-        box_tmp.xl -= node->get_halo()->get_extend_lef();
-        box_tmp.yl -= node->get_halo()->get_extend_bottom();
-        box_tmp.xh += node->get_halo()->get_extend_right();
-        box_tmp.yh += node->get_halo()->get_extend_top();
+        halo_box.xl -= node->get_halo()->get_extend_lef();
+        halo_box.yl -= node->get_halo()->get_extend_bottom();
+        halo_box.xh += node->get_halo()->get_extend_right();
+        halo_box.yh += node->get_halo()->get_extend_top();
         ECCLOG.info(ecc::Loc::current(), "Macro instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(),
                      ", ", node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
                      node->get_halo()->get_extend_top(), ").");
       }
-      addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, true);
+      // Keep the real instance as a body-only terminal.  Its halo is added to
+      // the unioned obstacle set below so overlapping halos cannot be counted
+      // multiple times as independent fixed nodes.
+      addNode(IdbOrientToString(node->get_orient()), node->get_name(), body_box, true, is_hard_macro,
+              is_macro_writeback_candidate, node);
       if (node->get_cell_master()->is_io_cell()) {
         ECCLOG.info(ecc::Loc::current(), "Fixed IO instance ", node->get_name(), ", coordinate (",
                      node->get_coordinate()->get_x(), ", ", node->get_coordinate()->get_y(), ", ",
                      node->get_bounding_box()->get_high_x(), ", ", node->get_bounding_box()->get_high_y(), ").");
       }
       num_terminals += 1;
-      // compute upper bound of total fixed cell area
-      total_fixed_node_area += 1LL * node->get_cell_master()->get_height() * node->get_cell_master()->get_width();
+      total_fixed_node_area += body_box.area();
 
-      fixed_node_ps += gtl::rectangle_data<coordinate_type>(box_tmp.xl, box_tmp.yl, box_tmp.xh, box_tmp.yh);
+      fixed_body_boxes.emplace_back(body_box.xl, body_box.yl, body_box.xh, body_box.yh);
+      if (node->get_halo()) {
+        fixed_halo_boxes.emplace_back(halo_box.xl, halo_box.yl, halo_box.xh, halo_box.yh);
+      }
     }
   }
 
@@ -250,18 +274,25 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
   }
 #endif
-  blockage_ps_list -= fixed_node_ps;  // remove overlap with fixed cells
+  // Union all hard obstacles before decomposition.  Subtract only the fixed
+  // body union: halo area outside the body must remain unavailable, while any
+  // overlap between halos, blockages, and bodies is represented exactly once.
+  PolygonSet fixed_body_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
+  PolygonSet fixed_halo_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
+  PolygonSet obstacle_ps = blockage_ps_list;
+  obstacle_ps += fixed_halo_ps;
+  obstacle_ps -= fixed_body_ps;
   int ext_blockage_num = 0;
 
   std::vector<gtl::rectangle_data<coordinate_type>> vRect;
-  blockage_ps_list.get_rectangles(vRect);
+  obstacle_ps.get_rectangles(vRect);
   for (auto const& rect : vRect) {
     Box box(gtl::xl(rect), gtl::yl(rect), gtl::xh(rect), gtl::yh(rect));
     int id = node_names.size();
     string block_name = "blockage" + std::to_string(id);
     ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed blockage ", block_name, ", (", box.xl, ", ", box.yl, ", ",
                  box.xh, ", ", box.yh, ").");
-    addNode("R0", block_name, box, true);
+    addNode("R0", block_name, box, true, false, false, nullptr);
     total_fixed_node_area += 1LL * box.area();
   }
   num_terminals += vRect.size();
@@ -283,7 +314,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       ly = io_pin->get_location()->get_y();
     }
     Box box_tmp(lx, ly, lx + 1, ly + 1);
-    addNode("R0", io_pin->get_pin_name(), box_tmp, false);
+    addNode("R0", io_pin->get_pin_name(), box_tmp, false, false, false, nullptr);
     ECCLOG.info(ecc::Loc::current(), "IO pin ", io_pin->get_pin_name(), ", coordinate (", lx, ", ", ly, ").");
     num_terminal_NIs += 1;
   }
@@ -291,19 +322,27 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   ECCLOG.info(ecc::Loc::current(), "num_terminals ", num_terminals, ", num_place_blockages ", ext_blockage_num,
                ", num_terminal_NIs ", num_terminal_NIs, ".");
   num_nodes = inst_num + ext_blockage_num + num_terminal_NIs;  // db.nodes().size() + num_terminals - db.numFixed() - db.numPlaceBlockages()
-  // this is different from simply summing up the area of all fixed nodes
-  double total_fixed_node_overlap_area = 0;
-  // compute total area uniquely
+  // Compute the exact fixed/obstacle area inside the core from the same union
+  // represented by the terminal rectangles above.
   PolygonSet ps(gtl::HORIZONTAL, fixed_boxes.begin(), fixed_boxes.end());
   // critical to make sure only overlap with the die area is computed
   IdbRect* core_rect = db->get_idb_layout()->get_core()->get_bounding_box();
-  ps &= gtl::rectangle_data<coordinate_type>(core_rect->get_low_x(), core_rect->get_low_y(), core_rect->get_high_x(),
-                                             core_rect->get_high_y());
-  total_fixed_node_overlap_area = gtl::area(ps);
+  auto core_box = gtl::rectangle_data<coordinate_type>(core_rect->get_low_x(), core_rect->get_low_y(), core_rect->get_high_x(),
+                                                       core_rect->get_high_y());
+  ps &= core_box;
+  double total_fixed_geometry_area = gtl::area(ps);
+  total_space_area = core_rect->get_area() - total_fixed_geometry_area;
 
-  // the total overlap area should not exceed the upper bound;
-  // current estimation may exceed if there are many overlapping fixed cells or boxes
-  total_space_area = core_rect->get_area() - std::min(total_fixed_node_overlap_area, total_fixed_node_area);
+  PolygonSet body_core_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
+  body_core_ps &= core_box;
+  PolygonSet halo_core_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
+  halo_core_ps &= core_box;
+  PolygonSet residual_obstacle_core_ps(gtl::HORIZONTAL, vRect.begin(), vRect.end());
+  residual_obstacle_core_ps &= core_box;
+  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB fixed geometry: body_union_area ", gtl::area(body_core_ps),
+               ", halo_union_area ", gtl::area(halo_core_ps), ", residual_obstacle_area ",
+               gtl::area(residual_obstacle_core_ps), ", terminal_union_area ", total_fixed_geometry_area,
+               ", terminal_area_sum ", total_fixed_node_area, ", synthetic_rectangles ", ext_blockage_num, ".");
   int count = 0;
   for (int i = 0; i < mNode2PyNondeID.size() - num_terminal_NIs - ext_blockage_num; ++i) {
     auto node_name = node_names[i].cast<std::string>();
@@ -373,7 +412,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       assert(mNet2ID.count(pin->get_net()->get_net_name()));
       pin2net_map.append(mNet2ID[pin->get_net()->get_net_name()]);
 
-      if (node->get_status() != IdbPlacementStatus::kFixed /*&& node.status() != PlaceStatusEnum::DUMMY_FIXED*/) {
+      if (!isPlacementFixed(node) /*&& node.status() != PlaceStatusEnum::DUMMY_FIXED*/) {
         num_movable_pins += 1;
       }
     }
@@ -485,7 +524,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       for (IdbInstance* inst : region->get_instance_list()) {
         // FIXME:
         index_type node_id = mNode2PyNondeID[inst->get_name()];
-        if (inst->get_status() != IdbPlacementStatus::kFixed)  // ignore fixed cells
+        if (!isPlacementFixed(inst))  // ignore fixed cells
         {
           vNode2FenceRegion.at(node_id) = region_id;
         }
@@ -513,6 +552,45 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set end.");
 
 #endif
+}
+
+std::size_t PyPlaceDB::writeMacroPlacementBack(
+    const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
+    const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y)
+{
+  const auto x = movable_x.request();
+  const auto y = movable_y.request();
+  const auto num_movable_nodes = static_cast<pybind11::ssize_t>(num_nodes - num_terminals - num_terminal_NIs);
+  if (x.ndim != 1 || y.ndim != 1 || x.size != y.size || x.size != num_movable_nodes) {
+    throw std::invalid_argument("Macro placement writeback requires equal one-dimensional arrays for every movable node");
+  }
+  if (_db == nullptr || _design == nullptr || _db->get_idb_design() != _design) {
+    throw std::runtime_error("Macro placement snapshot no longer matches the active iDB design");
+  }
+
+  const auto* node_x = static_cast<const float*>(x.ptr);
+  const auto* node_y = static_cast<const float*>(y.ptr);
+  std::vector<idm::InstancePlacementUpdate> updates;
+  updates.reserve(_macro_writeback_candidates.size());
+  for (const auto& candidate : _macro_writeback_candidates) {
+    if (candidate.node_id < 0 || candidate.node_id >= num_movable_nodes) {
+      throw std::runtime_error("Frozen macro candidate is outside the movable node range");
+    }
+    const float candidate_x = node_x[candidate.node_id];
+    const float candidate_y = node_y[candidate.node_id];
+    const double checked_x = static_cast<double>(candidate_x);
+    const double checked_y = static_cast<double>(candidate_y);
+    if (!std::isfinite(candidate_x) || !std::isfinite(candidate_y)
+        || checked_x < static_cast<double>(std::numeric_limits<int32_t>::lowest())
+        || checked_x > static_cast<double>(std::numeric_limits<int32_t>::max())
+        || checked_y < static_cast<double>(std::numeric_limits<int32_t>::lowest())
+        || checked_y > static_cast<double>(std::numeric_limits<int32_t>::max())) {
+      throw std::invalid_argument("Macro placement writeback coordinates must be finite int32-compatible values");
+    }
+    updates.push_back(
+        {candidate.instance_name, candidate.instance, static_cast<int32_t>(candidate_x), static_cast<int32_t>(candidate_y)});
+  }
+  return _db->write_selected_placement_back(updates);
 }
 
 }  // namespace python_interface

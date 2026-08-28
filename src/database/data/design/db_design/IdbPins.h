@@ -163,6 +163,7 @@ class IdbPins
   // Operate
   void remove_pin(IdbPin* pin_remove);
   bool erase_pin_ref(IdbPin* pin_remove);
+  void clear_pin_refs();
   bool delete_pin(IdbPin* pin_remove);
   int32_t getIOPortWidth();
   void checkPins();

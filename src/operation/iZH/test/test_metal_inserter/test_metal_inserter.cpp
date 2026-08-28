@@ -13,43 +13,55 @@
 // MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include <cassert>
-
-#include "MIFillShape.hpp"
-#include "MILayerRule.hpp"
+#include "MIComParam.hpp"
+#include "MIDensityWindow.hpp"
+#include "MILayer.hpp"
 #include "MIModel.hpp"
 #include "MIRect.hpp"
 #include "MetalInserter.hpp"
 
 int main()
 {
-  izh::MIRect rect(0, 0, 4, 2);
-  assert(rect.isValid());
-  assert(rect.isIntersect(izh::MIRect(3, 0, 5, 2)));
-  assert(!rect.isIntersect(izh::MIRect(4, 0, 6, 2)));
+  izh::MIRect rect(0, 0, 10, 4);
+  if (!rect.is_valid() || !rect.is_intersect(izh::MIRect(9, 0, 11, 4)) || rect.is_intersect(izh::MIRect(10, 0, 12, 4))
+      || rect.get_area() != 40.0) {
+    return 1;
+  }
 
-  izh::MIFillShape fill_shape(2, 1);
-  assert(fill_shape.isValid());
-  izh::MILayerRule layer_rule;
-  layer_rule.set_layer_name("M1");
-  layer_rule.set_fill_shape_list({fill_shape});
-  layer_rule.set_space_to_fill(1);
-  layer_rule.set_space_to_non_fill(2);
+  izh::MIComParam mi_com_param(100.0, 50.0, 0.10, 0.80);
+  mi_com_param.set_min_fill_layer("MET1");
+  mi_com_param.set_max_fill_layer("MET5");
+  if (mi_com_param.get_density_window_size_micron() != 100.0 || mi_com_param.get_density_window_step_micron() != 50.0
+      || mi_com_param.get_min_density() != 0.10 || mi_com_param.get_max_density() != 0.80
+      || mi_com_param.get_min_fill_layer() != "MET1" || mi_com_param.get_max_fill_layer() != "MET5") {
+    return 1;
+  }
+
+  izh::MIDensityWindow density_window(izh::MIRect(0, 0, 10, 10), 20.0);
+  density_window.add_metal_area(5.0);
+  if (density_window.get_density() != 0.25) {
+    return 1;
+  }
+
+  izh::MILayer mi_layer;
+  mi_layer.set_layer_name("M1");
+  mi_layer.set_density_window_x_num(2);
+  mi_layer.set_density_window_y_num(3);
+  mi_layer.set_density_window_list({density_window});
+  if (mi_layer.get_layer_name() != "M1" || mi_layer.get_density_window_idx(1, 2) != 5
+      || mi_layer.get_density_window_list().size() != 1) {
+    return 1;
+  }
 
   izh::MIModel mi_model;
-  mi_model.set_rule_file_path("metal_fill.json");
-  mi_model.set_fill_area(rect);
-  mi_model.set_layer_rule_list({layer_rule});
-  mi_model.set_reset_fill(true);
-  assert(mi_model.get_rule_file_path() == "metal_fill.json");
-  assert(mi_model.get_fill_area().isValid());
-  assert(mi_model.get_layer_rule_list().size() == 1);
-  assert(mi_model.get_reset_fill());
+  mi_model.set_mi_com_param(mi_com_param);
+  mi_model.set_die(rect);
+  mi_model.set_mi_layer_list({mi_layer});
   if (mi_model.get_inserted_metal_num() != 0) {
     return 1;
   }
   mi_model.set_inserted_metal_num(2);
-  mi_model.addInsertedMetalNum();
+  mi_model.add_inserted_metal_num();
   if (mi_model.get_inserted_metal_num() != 3) {
     return 1;
   }

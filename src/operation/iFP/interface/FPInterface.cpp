@@ -166,8 +166,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.die_margin_top_micron = -1.0;
   config.die_margin_bottom_micron = -1.0;
   config.io_pin_layer_name_list.clear();
-  config.io_pin_width_micron = -1.0;
-  config.io_pin_depth_micron = -1.0;
   config.pg_connect_list.clear();
   config.pg_rail_list.clear();
   config.pg_stripe_list.clear();
@@ -225,8 +223,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   for (nlohmann::json& layer_name_json : io_placer_json["io_layer_list"]) {
     config.io_pin_layer_name_list.push_back(layer_name_json.get<std::string>());
   }
-  config.io_pin_width_micron = io_placer_json["width_micron"].get<double>();
-  config.io_pin_depth_micron = io_placer_json["depth_micron"].get<double>();
 
   nlohmann::json& phy_placer_json = config_json["phy_placer"];
   nlohmann::json& well_tap_json = phy_placer_json["well_tap"];
@@ -367,6 +363,7 @@ void FPInterface::wrapRoutingLayerList()
     routing_layer.set_order(idb_routing_layer->get_order());
     routing_layer.set_pitch_x(idb_routing_layer->get_pitch_x());
     routing_layer.set_pitch_y(idb_routing_layer->get_pitch_y());
+    routing_layer.set_min_width(idb_routing_layer->get_min_width());
     routing_layer.set_prefer_track_offset(idb_routing_layer->get_offset_prefer());
     routing_layer.set_spacing(idb_routing_layer->get_spacing(0));
     routing_layer.set_prefer_direction(idb_routing_layer->is_horizontal() ? Direction::kHorizontal : Direction::kVertical);

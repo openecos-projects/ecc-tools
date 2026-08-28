@@ -14,18 +14,38 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "tcl_sta.h"
+#include "py_ilvs.h"
 
-namespace tcl {
+#include <any>
+#include <map>
 
-TclRemoveWireLoadModel::TclRemoveWireLoadModel(const char* cmd_name) : TclCmd(cmd_name)
+#include "LVSInterface.hpp"
+
+namespace python_interface {
+
+bool init_lvs(const std::string& temp_directory_path, const int& thread_number)
 {
+  std::map<std::string, std::any> config_map;
+  if (temp_directory_path != "") {
+    config_map.insert(std::make_pair("-temp_directory_path", temp_directory_path));
+  }
+
+  config_map.insert(std::make_pair("-thread_number", thread_number));
+
+  LVSI.initLVS(config_map);
+  return true;
 }
 
-unsigned TclRemoveWireLoadModel::exec()
+bool run_lvs()
 {
-  // Wire-load models are not modeled by iSTA yet.
-  return check();
+  LVSI.runLVS();
+  return true;
 }
 
-}  // namespace tcl
+bool destroy_lvs()
+{
+  LVSI.destroyLVS();
+  return true;
+}
+
+}  // namespace python_interface

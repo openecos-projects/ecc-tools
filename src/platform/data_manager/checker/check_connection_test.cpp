@@ -14,29 +14,29 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "STAInterface.hpp"
-#include "tcl_ista_util.hpp"
-#include "tcl_sta.h"
+#include "checker/check_connection.h"
 
-namespace tcl {
+#include <cassert>
 
-TclWriteSDF::TclWriteSDF(const char* cmd_name) : TclCmd(cmd_name)
+int main()
 {
-  addOption(new TclStringOption("file", 1));
-}
+  idm::NetGraph graph;
+  graph.set_id(0);
 
-unsigned TclWriteSDF::exec()
-{
-  TclOption* file_option = getOptionOrArg("file");
-  if (!file_option->is_set_val()) {
-    setTclError("write_sdf requires an output file path");
-    return 0;
-  }
-  if (std::string error_message; !STAI.writeSDF(file_option->getStringVal(), error_message)) {
-    setTclError(error_message);
-    return 0;
-  }
-  return 1;
-}
+  graph.add_vertex(42);
+  assert(graph.get_vertex_num() == 1);
+  assert(graph.get_edge_num() == 0);
+  assert(!graph.has_ring());
 
-}  // namespace tcl
+  graph.add_edge(42, 100);
+  graph.add_edge(100, 7);
+  assert(graph.get_vertex_num() == 3);
+  assert(graph.get_edge_num() == 2);
+  assert(!graph.has_ring());
+
+  graph.add_edge(7, 42);
+  assert(graph.get_edge_num() == 3);
+  assert(graph.has_ring());
+
+  return 0;
+}

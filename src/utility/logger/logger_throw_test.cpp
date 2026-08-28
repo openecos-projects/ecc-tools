@@ -5,38 +5,41 @@
 //
 // iEDA is licensed under Mulan PSL v2.
 // You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of the Mulan PSL v2 at:
+// You may obtain a copy of Mulan PSL v2 at:
 // http://license.coscl.org.cn/MulanPSL2
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
+#include <cassert>
+#include <cstdlib>
+#include <cstring>
+#include <stdexcept>
+#include <string>
 
-#include "ZHHeader.hpp"
+#include "utility/logger/Logger.hpp"
 
-namespace izh {
-
-class MIFillShape
+int main()
 {
- public:
-  MIFillShape() = default;
-  MIFillShape(int32_t width, int32_t height) : _width(width), _height(height) {}
-  ~MIFillShape() = default;
-  // getter
-  int32_t get_width() const { return _width; }
-  int32_t get_height() const { return _height; }
-  // setter
-  void set_width(int32_t width) { _width = width; }
-  void set_height(int32_t height) { _height = height; }
-  // function
-  bool isValid() const { return _width > 0 && _height > 0; }
+  setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1);
 
- private:
-  int32_t _width = 0;
-  int32_t _height = 0;
-};
+  ecc::Logger& logger = ecc::Logger::getInst();
 
-}  // namespace izh
+  // info/warn must not throw in throw-on-error mode.
+  logger.info(ecc::Loc::current(), "info message should not throw");
+  logger.warn(ecc::Loc::current(), "warn message should not throw");
+
+  bool threw = false;
+  try {
+    logger.error(ecc::Loc::current(), "boom", 42);
+  } catch (const std::runtime_error& e) {
+    threw = true;
+    assert(std::strcmp(e.what(), "boom42") == 0);
+  }
+  assert(threw);
+
+  return 0;
+}

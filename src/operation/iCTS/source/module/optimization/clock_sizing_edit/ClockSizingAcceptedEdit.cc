@@ -31,6 +31,7 @@
 #include <vector>
 
 #include "Logger.hh"
+#include "design/Clock.hh"
 #include "design/ClockLayout.hh"
 #include "design/Design.hh"
 #include "design/Inst.hh"
@@ -42,26 +43,26 @@ namespace icts::clock_sizing_optimization {
 
 namespace {
 
-auto FindSingleBufferInputPin(Inst* inst) -> Pin*
+auto FindPropagationArc(const Design& design, const Inst* inst) -> const ClockPropagationArc*
 {
   if (inst == nullptr) {
     return nullptr;
   }
-  const auto* driver_pin = inst->findDriverPin();
-  for (auto* pin : inst->get_pins()) {
-    if (pin == nullptr || pin == driver_pin) {
+  const ClockPropagationArc* resolved = nullptr;
+  for (const auto* clock : design.get_clocks()) {
+    if (clock == nullptr) {
       continue;
     }
-    if (pin->get_type() == PinType::kIn || pin->get_type() == PinType::kClock) {
-      return pin;
+    const auto* arc = clock->findPropagationArc(inst);
+    if (arc == nullptr) {
+      continue;
     }
-  }
-  for (auto* pin : inst->get_pins()) {
-    if (pin != nullptr && pin != driver_pin) {
-      return pin;
+    if (resolved != nullptr) {
+      return nullptr;
     }
+    resolved = arc;
   }
-  return nullptr;
+  return resolved;
 }
 
 auto CanRenamePin(Design& design, Pin* pin, const std::string& local_name) -> bool
@@ -138,11 +139,12 @@ auto ApplyClockSizingAcceptedEdits(Design& design, Wrapper& wrapper, const std::
 
   for (const auto& [inst_name, final_master] : final_master_by_inst) {
     auto* inst = design.findInst(inst_name);
-    auto* input_pin = FindSingleBufferInputPin(inst);
-    auto* output_pin = inst == nullptr ? nullptr : inst->findDriverPin();
+    const auto* propagation_arc = FindPropagationArc(design, inst);
+    auto* input_pin = propagation_arc == nullptr ? nullptr : propagation_arc->input_pin;
+    auto* output_pin = propagation_arc == nullptr ? nullptr : propagation_arc->output_pin;
     const auto ports = ResolveBufferPorts(wrapper, final_master);
-    if (inst == nullptr || input_pin == nullptr || output_pin == nullptr || !ports.has_value() || !CanRenamePin(design, input_pin, ports->first)
-        || !CanRenamePin(design, output_pin, ports->second)) {
+    if (inst == nullptr || propagation_arc == nullptr || propagation_arc->kind != ClockPropagationKind::kBuffer || input_pin == nullptr || output_pin == nullptr
+        || !ports.has_value() || !CanRenamePin(design, input_pin, ports->first) || !CanRenamePin(design, output_pin, ports->second)) {
       CTSLOG.warn(Loc::current(), "Optimization: cannot apply final master \"", final_master, "\" to buffer inst \"", inst_name,
                   "\" because its pin pair cannot be updated.");
       return false;
@@ -151,8 +153,9 @@ auto ApplyClockSizingAcceptedEdits(Design& design, Wrapper& wrapper, const std::
 
   for (const auto& [inst_name, final_master] : final_master_by_inst) {
     auto* inst = design.findInst(inst_name);
-    auto* input_pin = FindSingleBufferInputPin(inst);
-    auto* output_pin = inst->findDriverPin();
+    const auto* propagation_arc = FindPropagationArc(design, inst);
+    auto* input_pin = propagation_arc == nullptr ? nullptr : propagation_arc->input_pin;
+    auto* output_pin = propagation_arc == nullptr ? nullptr : propagation_arc->output_pin;
     const auto ports = ResolveBufferPorts(wrapper, final_master);
     if (!ports.has_value()) {
       return false;
@@ -171,7 +174,6 @@ auto ApplyClockSizingAcceptedEdits(Design& design, Wrapper& wrapper, const std::
     inst->set_type(InstType::kBuffer);
     input_pin->set_type(PinType::kIn);
     output_pin->set_type(PinType::kOut);
-    inst->insertDriverPin(output_pin);
     UpdateClockLayoutInstMaster(clock_layout, inst->get_name(), final_master);
   }
   return true;

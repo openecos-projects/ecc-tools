@@ -158,20 +158,29 @@ auto instTypeName(const Inst& inst) -> std::string
   return "Others";
 }
 
-auto calcInstInputPinCapPf(Wrapper& wrapper, const Inst& inst) -> std::optional<double>
+struct InputPinCapResolution
 {
-  double total_cap_pf = 0.0;
-  for (const auto* pin : inst.get_pins()) {
-    if (pin == nullptr || pin->get_inst() != &inst) {
-      continue;
-    }
-    const auto pin_cap_pf = wrapper.queryPinCapacitance(pin);
-    if (!pin_cap_pf.has_value()) {
-      return std::nullopt;
-    }
-    total_cap_pf += *pin_cap_pf;
+  ClockCellMetricStatus status;
+  std::optional<double> capacitance_pf = std::nullopt;
+};
+
+auto resolveExactInputPinCapPf(Wrapper& wrapper, const Inst& inst, const ClockPropagationArc* propagation_arc) -> InputPinCapResolution
+{
+  if (propagation_arc == nullptr) {
+    return {.status = {.issue = ClockCellMetricIssue::kMissingPropagationArc}};
   }
-  return total_cap_pf;
+  if (propagation_arc->inst != &inst) {
+    return {.status = {.issue = ClockCellMetricIssue::kPropagationInstMismatch}};
+  }
+  const auto* input_pin = propagation_arc->input_pin;
+  if (input_pin == nullptr || input_pin->get_inst() != &inst) {
+    return {.status = {.issue = ClockCellMetricIssue::kPropagationInputPinMismatch}};
+  }
+  const auto capacitance_pf = wrapper.queryPinCapacitance(input_pin);
+  if (!capacitance_pf.has_value()) {
+    return {.status = {.issue = ClockCellMetricIssue::kInputPinCapacitanceUnavailable}};
+  }
+  return {.status = {}, .capacitance_pf = capacitance_pf};
 }
 
 }  // namespace
@@ -228,27 +237,55 @@ auto ClassifyClockNet(const Clock& clock, const Net* net) -> ClockNetRole
       continue;
     }
     const auto* inst = load->get_inst();
-    if (containsClockLoad(clock, load) || inst == nullptr || !inst->is_clock_propagation_cell()) {
+    if (containsClockLoad(clock, load) || inst == nullptr || clock.findPropagationArc(inst) == nullptr) {
       return ClockNetRole::kLeaf;
     }
   }
   return ClockNetRole::kTrunk;
 }
 
-auto AccumulateInstStatistics(Wrapper& wrapper, const Inst& inst, Qor& statistics) -> bool
+auto ClockCellMetricIssueName(ClockCellMetricIssue issue) -> const char*
+{
+  switch (issue) {
+    case ClockCellMetricIssue::kNone:
+      return "none";
+    case ClockCellMetricIssue::kMissingPropagationArc:
+      return "missing_propagation_arc";
+    case ClockCellMetricIssue::kPropagationInstMismatch:
+      return "propagation_inst_mismatch";
+    case ClockCellMetricIssue::kPropagationInputPinMismatch:
+      return "propagation_input_pin_mismatch";
+    case ClockCellMetricIssue::kCellMasterUnavailable:
+      return "cell_master_unavailable";
+    case ClockCellMetricIssue::kCellAreaUnavailable:
+      return "cell_area_unavailable";
+    case ClockCellMetricIssue::kInputPinCapacitanceUnavailable:
+      return "input_pin_capacitance_unavailable";
+  }
+  return "unknown_clock_cell_metric_issue";
+}
+
+auto AccumulateInstStatistics(Wrapper& wrapper, const Inst& inst, const ClockPropagationArc* propagation_arc, Qor& statistics) -> ClockCellMetricStatus
 {
   if (!inst.is_buffer()) {
-    return true;
+    return {};
   }
+
+  const auto input_cap_resolution = resolveExactInputPinCapPf(wrapper, inst, propagation_arc);
 
   const auto& cell_master = inst.get_cell_master();
   if (cell_master.empty()) {
-    return true;
+    if (input_cap_resolution.status.issue == ClockCellMetricIssue::kMissingPropagationArc
+        || input_cap_resolution.status.issue == ClockCellMetricIssue::kPropagationInstMismatch
+        || input_cap_resolution.status.issue == ClockCellMetricIssue::kPropagationInputPinMismatch) {
+      return input_cap_resolution.status;
+    }
+    return {.issue = ClockCellMetricIssue::kCellMasterUnavailable};
   }
 
   const std::string cell_type = instTypeName(inst);
   const auto area_um2 = wrapper.queryCellAreaUm2(cell_master);
-  const auto cap_pf = calcInstInputPinCapPf(wrapper, inst);
+  const auto cap_pf = input_cap_resolution.capacitance_pf;
 
   auto [cell_stat_iter, inserted_cell_stat] = statistics.cell_stats.try_emplace(cell_type);
   auto& cell_stat = cell_stat_iter->second;
@@ -280,7 +317,13 @@ auto AccumulateInstStatistics(Wrapper& wrapper, const Inst& inst, Qor& statistic
   } else {
     lib_dist.total_area_um2 = std::nullopt;
   }
-  return area_um2.has_value() && cap_pf.has_value();
+  if (!input_cap_resolution.status.ok()) {
+    return input_cap_resolution.status;
+  }
+  if (!area_um2.has_value()) {
+    return {.issue = ClockCellMetricIssue::kCellAreaUnavailable};
+  }
+  return {};
 }
 
 auto MeasureClockNet(const ClockNetMeasurementInput& input) -> std::optional<ClockNetMeasurement>
