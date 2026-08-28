@@ -14,7 +14,9 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include <algorithm>
 #include <boost/pending/disjoint_sets.hpp>
+#include <cstdint>
 
 #include "DataManager.hpp"
 #include "Orientation.hpp"
@@ -28,22 +30,10 @@ namespace idrc {
 
 namespace {
 
-struct EolSpacingCandidate
-{
-  GTLRectInt rect;
-  int32_t boundary_id = -1;
-};
-
 int32_t queryNetIdxByRect(const RVLayerData& rv_layer_data, const PlanarRect& query_rect);
-int32_t getBoundaryMinThickness(const RVLayerData& rv_layer_data, std::vector<int32_t>& boundary_min_thickness_cache, int32_t boundary_id);
 void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& source_layer_data);
-void collectEolBoundaries(const RVLayerData& merged_layer_data, int32_t max_eol_width,
-                         std::vector<int32_t>& eol_boundary_id_list);
-bool getPolygonBoundingBox(const RVLayerData& rv_layer_data, const PolygonData& polygon_data, GTLRectInt& bounding_box);
-bool polygonsHaveClosedOverlap(const RVLayerData& rv_layer_data, int32_t first_polygon_id, int32_t second_polygon_id);
-bool hasRectInside(const RVLayerData& rv_layer_data, const PlanarRect& target_rect);
-bool hasRectInsideCached(const RVLayerData& rv_layer_data, const PlanarRect& target_rect,
-                         std::map<PlanarRect, bool, CmpPlanarRectByXASC>& contains_cache);
+void collectEolBoundaries(const RVLayerData& merged_layer_data, int32_t max_eol_width, std::vector<int32_t>& eol_boundary_id_list);
+bool hasRectInsideCached(const RVLayerData& rv_layer_data, const PlanarRect& target_rect, std::map<PlanarRect, bool, CmpPlanarRectByXASC>& contains_cache);
 
 }  // namespace
 
@@ -59,6 +49,18 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
     }
     const auto& end_of_line_spacing_rule_list = routing_layer_list[routing_layer_idx].get_end_of_line_spacing_rule_list();
     if (end_of_line_spacing_rule_list.empty()) {
+      continue;
+    }
+
+    // Environment-only layers cannot produce a retained violation.
+    bool has_result_shape = false;
+    for (const MaxRectData& max_rect_data : rv_layer_data.max_rect_pool) {
+      if (!max_rect_data.isEnv) {
+        has_result_shape = true;
+        break;
+      }
+    }
+    if (!has_result_shape) {
       continue;
     }
 
@@ -78,6 +80,16 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
       }
     }
 
+    const RVLayerData* cut_layer_data = nullptr;
+    if (need_cut_shape) {
+      const std::vector<int32_t>& cut_layer_idx_list = DRCDM.getAdjacentCutLayerIdxList(routing_layer_idx);
+      int32_t cut_layer_idx = *std::min_element(cut_layer_idx_list.begin(), cut_layer_idx_list.end());
+      auto cut_layer_data_it = layer_data.find(cut_layer_idx);
+      if (cut_layer_data_it != layer_data.end()) {
+        cut_layer_data = &cut_layer_data_it->second;
+      }
+    }
+
     RVLayerData merged_layer_data;
     buildLayerComponentData(merged_layer_data, rv_layer_data);
     std::vector<int32_t> eol_boundary_id_list;
@@ -90,7 +102,13 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
     for (int32_t boundary_id : eol_boundary_id_list) {
       is_eol_boundary[boundary_id] = 1;
     }
-    std::vector<int32_t> boundary_min_thickness_cache(merged_layer_data.boundary_pool.size(), -1);
+    // Environment containment is stable for the layer and shared by all EOL edges.
+    std::map<PlanarRect, bool, CmpPlanarRectByXASC> env_rect_inside_cache;
+    // Reuse edge-local query buffers to avoid repeated allocation.
+    std::vector<std::pair<PlanarRect, int32_t>> candidate_list;
+    std::vector<std::pair<GTLRectInt, int32_t>> query_rect_list;
+    std::vector<std::pair<GTLRectInt, int32_t>> routing_poly_list;
+    std::vector<CutData> cut_list;
 
     std::set<Violation, CmpViolation> violation_set;
     // Check each EOL edge with the aggregated layer rule limits.
@@ -99,28 +117,18 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
       const auto& pre_boundary = merged_layer_data.getPrevBoundary(eol_boundary_id);
       const auto& post_boundary = merged_layer_data.getNextBoundary(eol_boundary_id);
       PlanarRect eol_edge_rect = DRCUTIL.convertToPlanarRect(eol_boundary.edge);
-      // Cache candidate containment checks reused by the rules of this edge.
-      std::map<PlanarRect, bool, CmpPlanarRectByXASC> env_containment_cache;
-      const bool eol_edge_inside_env = hasRectInside(rv_layer_data, eol_edge_rect);
 
       Direction direction = DRCUTIL.getDirection(eol_boundary.begin_coord, eol_boundary.end_coord);
       PlanarRect eol_rect = DRCUTIL.getBoundingBox({pre_boundary.begin_coord, pre_boundary.end_coord, post_boundary.begin_coord, post_boundary.end_coord});
 
+      // candidate.first is the edge rect; candidate.second is the boundary ID (-1 for a max-rect edge).
+      candidate_list.clear();
+      query_rect_list.clear();
+      cut_list.clear();
+
       // Build the candidate rectangles checked against this EOL edge.
-      std::vector<EolSpacingCandidate> env_checking_candidate_list;
-
-      // enclosed cut rects
-      std::vector<CutData> env_cut_list;
       {
-        if (need_cut_shape) {
-          const std::vector<int32_t>& cut_layer_idx_list = DRCDM.getAdjacentCutLayerIdxList(routing_layer_idx);
-          int32_t cut_layer_idx = *std::min_element(cut_layer_idx_list.begin(), cut_layer_idx_list.end());
-          auto cut_layer_data_it = layer_data.find(cut_layer_idx);
-          if (cut_layer_data_it != layer_data.end()) {
-            cut_layer_data_it->second.queryCuts(DRCUTIL.convertToGTLRectInt(eol_rect), std::back_inserter(env_cut_list));
-          }
-        }
-
+        // Query boundary and max-rect candidates in the maximum rule-group range.
         PlanarRect max_check_rect = eol_edge_rect;
         max_check_rect = DRCUTIL.getEnlargedPartRect(max_check_rect, eol_boundary.orient, std::max(max_eol_spacing, max_ete_spacing));
 
@@ -130,53 +138,62 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
           max_check_rect = DRCUTIL.getEnlargedRect(max_check_rect, 0, max_eol_within);
         }
         Orientation oppo_orient = DRCUTIL.getOppositeOrientation(eol_boundary.orient);
-        std::vector<std::pair<GTLRectInt, int32_t>> env_rects;
-        merged_layer_data.queryBoundaries(DRCUTIL.convertToGTLRectInt(max_check_rect), std::back_inserter(env_rects));
-        std::vector<std::pair<GTLRectInt, int32_t>> env_max_rects;
-        merged_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(max_check_rect), std::back_inserter(env_max_rects));
+        merged_layer_data.queryBoundaries(DRCUTIL.convertToGTLRectInt(max_check_rect), std::back_inserter(query_rect_list));
 
-        std::vector<EolSpacingCandidate> temp_checking_candidate_list;
-        for (const auto& [gtl_rect, idx] : env_max_rects) {
-          PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
-          if (DRCUTIL.isOpenOverlap(rect, max_check_rect)) {
-            PlanarRect rect_edge = DRCUTIL.getRect(rect.getOrientEdge(oppo_orient));
-            temp_checking_candidate_list.push_back({DRCUTIL.convertToGTLRectInt(rect_edge), -1});
-          }
-        }
-
-        for (const auto& [gtl_rect, idx] : env_rects) {
+        for (const auto& [gtl_rect, idx] : query_rect_list) {
           PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
           if (DRCUTIL.isOpenOverlap(rect, max_check_rect)) {
             if (eol_boundary.orient == DRCUTIL.getOppositeOrientation(merged_layer_data.getBoundary(idx).orient)) {
-              env_checking_candidate_list.push_back({gtl_rect, idx});
+              candidate_list.push_back({rect, idx});
             }
           }
         }
 
-        env_checking_candidate_list.reserve(env_checking_candidate_list.size() + temp_checking_candidate_list.size());
-        std::vector<PlanarRect> env_checking_rect_list;
-        env_checking_rect_list.reserve(env_checking_candidate_list.size() + temp_checking_candidate_list.size());
-        for (const EolSpacingCandidate& candidate : env_checking_candidate_list) {
-          env_checking_rect_list.emplace_back(DRCUTIL.convertToPlanarRect(candidate.rect));
-        }
-        for (const EolSpacingCandidate& candidate : temp_checking_candidate_list) {
-          PlanarRect temp_rect = DRCUTIL.convertToPlanarRect(candidate.rect);
+        // Reuse the query buffer after all boundary candidates have been consumed.
+        query_rect_list.clear();
+        merged_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(max_check_rect), std::back_inserter(query_rect_list));
+        for (const auto& [gtl_rect, idx] : query_rect_list) {
+          PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
+          if (!DRCUTIL.isOpenOverlap(rect, max_check_rect)) {
+            continue;
+          }
+          PlanarRect rect_edge = DRCUTIL.getRect(rect.getOrientEdge(oppo_orient));
           bool has_overlap = false;
-          for (const auto& env_rect : env_checking_rect_list) {
-            if (DRCUTIL.isClosedOverlap(temp_rect, env_rect)) {
+          for (const auto& candidate : candidate_list) {
+            if (DRCUTIL.isClosedOverlap(rect_edge, candidate.first)) {
               has_overlap = true;
               break;
             }
           }
           if (!has_overlap) {
-            env_checking_candidate_list.push_back(candidate);
-            env_checking_rect_list.emplace_back(temp_rect);
+            candidate_list.push_back({rect_edge, -1});
           }
         }
       }
 
-      if (env_checking_candidate_list.empty()) {
+      if (candidate_list.empty()) {
         continue;
+      }
+
+      const bool eol_edge_inside_env = hasRectInsideCached(rv_layer_data, eol_edge_rect, env_rect_inside_cache);
+      size_t valid_candidate_count = 0;
+      for (const auto& candidate : candidate_list) {
+        if (DRCUTIL.isClosedOverlap(candidate.first, eol_rect)) {
+          continue;
+        }
+        if (eol_edge_inside_env && hasRectInsideCached(rv_layer_data, candidate.first, env_rect_inside_cache)) {
+          continue;
+        }
+        candidate_list[valid_candidate_count++] = candidate;
+      }
+      candidate_list.resize(valid_candidate_count);
+      if (candidate_list.empty()) {
+        continue;
+      }
+
+      // Collect cut shapes only for edges that still have a metal candidate.
+      if (cut_layer_data != nullptr) {
+        cut_layer_data->queryCuts(DRCUTIL.convertToGTLRectInt(eol_rect), std::back_inserter(cut_list));
       }
       int32_t eol_net_idx = queryNetIdxByRect(rv_layer_data, eol_edge_rect);
 
@@ -184,12 +201,12 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
         if (eol_boundary.edge_length >= eol_rule.eol_width) {
           continue;
         }
-        if (eol_rule.has_enclose_cut && env_cut_list.empty()) {
+        if (eol_rule.has_enclose_cut && cut_list.empty()) {
           continue;
         }
         bool pre_length_ok = pre_boundary.edge_length >= eol_rule.min_length;
         bool post_length_ok = post_boundary.edge_length >= eol_rule.min_length;
-        if (eol_rule.has_par && !eol_rule.has_same_metal) {
+        if (eol_rule.has_par) {
           if (eol_rule.has_two_edges) {
             if (!pre_length_ok || !post_length_ok) {
               continue;
@@ -202,40 +219,58 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
           continue;
         }
 
-        for (const EolSpacingCandidate& candidate : env_checking_candidate_list) {
-          PlanarRect env_rect = DRCUTIL.convertToPlanarRect(candidate.rect);
-          if (DRCUTIL.isClosedOverlap(env_rect, eol_rect)) {
+        PlanarRect eol_check_rect = DRCUTIL.getEnlargedPartRect(eol_edge_rect, eol_boundary.orient, eol_rule.eol_spacing);
+        PlanarRect ete_check_rect = eol_check_rect;
+        if (eol_rule.has_ete) {
+          ete_check_rect = DRCUTIL.getEnlargedPartRect(eol_edge_rect, eol_boundary.orient, eol_rule.ete_spacing);
+        }
+        if (direction == Direction::kHorizontal) {
+          eol_check_rect = DRCUTIL.getEnlargedRect(eol_check_rect, eol_rule.eol_within, 0);
+          if (eol_rule.has_ete) {
+            ete_check_rect = DRCUTIL.getEnlargedRect(ete_check_rect, eol_rule.eol_within, 0);
+          }
+        } else {
+          eol_check_rect = DRCUTIL.getEnlargedRect(eol_check_rect, 0, eol_rule.eol_within);
+          if (eol_rule.has_ete) {
+            ete_check_rect = DRCUTIL.getEnlargedRect(ete_check_rect, 0, eol_rule.eol_within);
+          }
+        }
+
+        for (const auto& candidate : candidate_list) {
+          const PlanarRect& env_rect = candidate.first;
+          bool is_ete = candidate.second >= 0 && is_eol_boundary[candidate.second] && eol_rule.has_ete
+                        && merged_layer_data.getBoundary(candidate.second).edge_length < eol_rule.eol_width;
+          const PlanarRect& check_rect = is_ete ? ete_check_rect : eol_check_rect;
+          if (!DRCUTIL.isOpenOverlap(check_rect, env_rect) && !eol_rule.has_same_metal) {
             continue;
           }
 
-          bool is_ete = false;
-          if (candidate.boundary_id >= 0 && candidate.boundary_id < static_cast<int32_t>(is_eol_boundary.size())
-              && is_eol_boundary[candidate.boundary_id]) {
-            const BoundaryData& env_boundary = merged_layer_data.getBoundary(candidate.boundary_id);
-            if (env_boundary.edge_length < eol_rule.eol_width && eol_rule.has_ete) {
-              is_ete = true;
-            }
-          }
-          PlanarRect check_rect = DRCUTIL.getEnlargedPartRect(eol_edge_rect, eol_boundary.orient, is_ete ? eol_rule.ete_spacing : eol_rule.eol_spacing);
-          if (direction == Direction::kHorizontal) {
-            check_rect = DRCUTIL.getEnlargedRect(check_rect, eol_rule.eol_within, 0);
-          } else {
-            check_rect = DRCUTIL.getEnlargedRect(check_rect, 0, eol_rule.eol_within);
-          }
-          if (!DRCUTIL.isOpenOverlap(check_rect, env_rect) && !eol_rule.has_same_metal) {
+          int32_t req_size = is_ete ? eol_rule.ete_spacing : eol_rule.eol_spacing;
+          if (DRCUTIL.getEuclideanDistance(eol_edge_rect, env_rect) >= req_size) {
             continue;
+          }
+
+          if (eol_rule.has_enclose_cut) {
+            bool is_pass_cut = false;
+            for (const CutData& cut_data : cut_list) {
+              PlanarRect cut_rect = DRCUTIL.convertToPlanarRect(cut_data.rect);
+              if ((DRCUTIL.getEuclideanDistance(cut_rect, eol_edge_rect) < eol_rule.enclosed_dist)
+                  && (DRCUTIL.getEuclideanDistance(cut_rect, env_rect)) < eol_rule.cut_to_metal_spacing) {
+                is_pass_cut = true;
+                break;
+              }
+            }
+            if (!is_pass_cut) {
+              continue;
+            }
           }
 
           bool pre_par = false, post_par = false;
           int32_t pre_par_idx = -1, post_par_idx = -1;
           if (eol_rule.has_par) {
-            int32_t par_spacing = 0;
+            int32_t par_spacing = eol_rule.par_spacing;
             if (eol_rule.has_subtrace_eol_width) {
-              int32_t width = std::min(getBoundaryMinThickness(merged_layer_data, boundary_min_thickness_cache, eol_boundary.prev_boundary_id),
-                                       getBoundaryMinThickness(merged_layer_data, boundary_min_thickness_cache, eol_boundary.next_boundary_id));
-              par_spacing = std::max(par_spacing, eol_rule.par_spacing - width);
-            } else {
-              par_spacing = std::max(par_spacing, eol_rule.par_spacing);
+              par_spacing = std::max(0, par_spacing - eol_boundary.edge_length);
             }
 
             PlanarRect pre_rect = DRCUTIL.getRect({pre_boundary.end_coord, pre_boundary.end_coord});
@@ -262,12 +297,12 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
                 DRCLOG.error(Loc::current(), "The orientation is error!");
             }
 
-            // par left and right neighbors
-            std::vector<std::pair<GTLRectInt, int32_t>> env_routing_poly_list;
-            merged_layer_data.queryBoundaries(DRCUTIL.convertToGTLRectInt(pre_rect), std::back_inserter(env_routing_poly_list));
-            merged_layer_data.queryBoundaries(DRCUTIL.convertToGTLRectInt(post_rect), std::back_inserter(env_routing_poly_list));
+            // Check parallel neighbors on both sides of the EOL edge.
+            routing_poly_list.clear();
+            merged_layer_data.queryBoundaries(DRCUTIL.convertToGTLRectInt(pre_rect), std::back_inserter(routing_poly_list));
+            merged_layer_data.queryBoundaries(DRCUTIL.convertToGTLRectInt(post_rect), std::back_inserter(routing_poly_list));
 
-            for (auto& [par_gtl_rect, par_id] : env_routing_poly_list) {
+            for (auto& [par_gtl_rect, par_id] : routing_poly_list) {
               PlanarRect par_rect = DRCUTIL.convertToPlanarRect(par_gtl_rect);
               if (DRCUTIL.isClosedOverlap(par_rect, eol_rect)) {
                 continue;
@@ -319,28 +354,7 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
             }
           }
 
-          if (eol_rule.has_enclose_cut) {
-            bool is_pass_cut = false;
-            for (const CutData& cut_data : env_cut_list) {
-              PlanarRect cut_rect = DRCUTIL.convertToPlanarRect(cut_data.rect);
-              if ((DRCUTIL.getEuclideanDistance(cut_rect, eol_edge_rect) < eol_rule.enclosed_dist)
-                  && (DRCUTIL.getEuclideanDistance(cut_rect, env_rect)) < eol_rule.cut_to_metal_spacing) {
-                is_pass_cut = true;
-              }
-            }
-            if (!is_pass_cut) {
-              continue;
-            }
-          }
-
-          if (eol_edge_inside_env && hasRectInsideCached(rv_layer_data, env_rect, env_containment_cache)) {
-            continue;
-          }
           PlanarRect spacing_rect = DRCUTIL.getSpacingRect(eol_rect, env_rect);
-          int32_t req_size = is_ete ? eol_rule.ete_spacing : eol_rule.eol_spacing;
-          if (DRCUTIL.getEuclideanDistance(eol_edge_rect, env_rect) >= req_size) {
-            continue;
-          }
           std::set<int32_t> net_list{eol_net_idx, queryNetIdxByRect(rv_layer_data, env_rect)};
 
           Violation violation;
@@ -355,7 +369,7 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
       }
     }
 
-    // Keep the largest required size for the same rectangle.
+    // Keep the largest requirement for equal markers and remove contained markers.
     for (const Violation& violation : violation_set) {
       bool is_redundant = false;
       for (const Violation& other_violation : violation_set) {
@@ -378,6 +392,8 @@ void RuleValidator::verifyEndOfLineSpacing(RVCluster& rv_cluster)
 
 namespace {
 
+// Layer component construction.
+
 Orientation getBoundaryOrient(Rotation rotation, bool is_hole, const PlanarCoord& begin_coord, const PlanarCoord& end_coord)
 {
   Orientation travel_orient = DRCUTIL.getOrientation(begin_coord, end_coord);
@@ -388,56 +404,46 @@ Orientation getBoundaryOrient(Rotation rotation, bool is_hole, const PlanarCoord
   return metal_on_left ? DRCUTIL.getCWOrientation(travel_orient) : DRCUTIL.getCCWOrientation(travel_orient);
 }
 
-int32_t queryNetIdxByRect(const RVLayerData& rv_layer_data, const PlanarRect& query_rect)
+bool getPolygonBoundingBox(const RVLayerData& rv_layer_data, const PolygonData& polygon_data, GTLRectInt& bounding_box)
 {
-  std::vector<std::pair<GTLRectInt, int32_t>> rect_max_rect_pair_list;
-  rv_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(query_rect), std::back_inserter(rect_max_rect_pair_list));
-  return rect_max_rect_pair_list.empty() ? -1 : rv_layer_data.getNetIdxByMaxRectId(rect_max_rect_pair_list.front().second);
+  const std::span<const MaxRectData> max_rects = rv_layer_data.getMaxRects(polygon_data);
+  if (max_rects.empty()) {
+    return false;
+  }
+
+  int32_t x_min = gtl::xl(max_rects.front().rect);
+  int32_t y_min = gtl::yl(max_rects.front().rect);
+  int32_t x_max = gtl::xh(max_rects.front().rect);
+  int32_t y_max = gtl::yh(max_rects.front().rect);
+  for (const MaxRectData& max_rect : max_rects.subspan(1)) {
+    x_min = std::min(x_min, gtl::xl(max_rect.rect));
+    y_min = std::min(y_min, gtl::yl(max_rect.rect));
+    x_max = std::max(x_max, gtl::xh(max_rect.rect));
+    y_max = std::max(y_max, gtl::yh(max_rect.rect));
+  }
+  bounding_box = GTLRectInt(x_min, y_min, x_max, y_max);
+  return true;
 }
 
-int32_t calcBoundaryMinThickness(const RVLayerData& rv_layer_data, int32_t boundary_id)
+bool polygonsHaveClosedOverlap(const RVLayerData& rv_layer_data, int32_t first_polygon_id, int32_t second_polygon_id)
 {
-  const BoundaryData& boundary = rv_layer_data.getBoundary(boundary_id);
-  Segment<PlanarCoord> boundary_seg(boundary.begin_coord, boundary.end_coord);
-  Direction boundary_dir = DRCUTIL.getDirection(boundary.begin_coord, boundary.end_coord);
-
-  std::vector<std::pair<GTLRectInt, int32_t>> rect_hits;
-  rv_layer_data.queryMaxRects(boundary.edge, std::back_inserter(rect_hits));
-
-  int32_t min_thickness = INT32_MAX;
-  for (const auto& [gtl_rect, max_rect_id] : rect_hits) {
-    const MaxRectData& max_rect_data = rv_layer_data.getMaxRect(max_rect_id);
-    if (max_rect_data.polygon_id != boundary.polygon_id) {
-      continue;
+  const PolygonData& first_polygon = rv_layer_data.getPolygon(first_polygon_id);
+  const PolygonData& second_polygon = rv_layer_data.getPolygon(second_polygon_id);
+  for (const MaxRectData& first_max_rect : rv_layer_data.getMaxRects(first_polygon)) {
+    const PlanarRect first_rect = DRCUTIL.convertToPlanarRect(first_max_rect.rect);
+    for (const MaxRectData& second_max_rect : rv_layer_data.getMaxRects(second_polygon)) {
+      if (DRCUTIL.isClosedOverlap(first_rect, DRCUTIL.convertToPlanarRect(second_max_rect.rect))) {
+        return true;
+      }
     }
-
-    PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
-    if (DRCUTIL.getTouchedEdgeOrient(rect, boundary_seg) != boundary.orient) {
-      continue;
-    }
-
-    int32_t thickness = (boundary_dir == Direction::kHorizontal) ? rect.getYSpan() : rect.getXSpan();
-    min_thickness = std::min(min_thickness, thickness);
   }
-  return min_thickness == INT32_MAX ? 0 : min_thickness;
-}
-
-int32_t getBoundaryMinThickness(const RVLayerData& rv_layer_data, std::vector<int32_t>& boundary_min_thickness_cache, int32_t boundary_id)
-{
-  if (boundary_id < 0 || boundary_id >= static_cast<int32_t>(boundary_min_thickness_cache.size())) {
-    return 0;
-  }
-
-  int32_t& cached_thickness = boundary_min_thickness_cache[boundary_id];
-  if (cached_thickness == -1) {
-    cached_thickness = calcBoundaryMinThickness(rv_layer_data, boundary_id);
-  }
-  return cached_thickness;
+  return false;
 }
 
 void appendBoundaryEdges(RVLayerData& rv_layer_data, GTLHolePolyInt& check_hole_poly, bool is_hole, int32_t polygon_id,
                          std::vector<std::pair<GTLRectInt, int32_t>>& boundary_rtree_inputs)
 {
+  // Normalize the GTL ring to one open coordinate cycle.
   int32_t coord_size = static_cast<int32_t>(check_hole_poly.size());
   std::vector<PlanarCoord> coord_list;
   coord_list.reserve(coord_size);
@@ -452,6 +458,7 @@ void appendBoundaryEdges(RVLayerData& rv_layer_data, GTLHolePolyInt& check_hole_
     return;
   }
 
+  // Classify the corner reached by each boundary edge.
   Rotation rotation = DRCUTIL.getRotation(check_hole_poly);
   std::vector<bool> convex_corner_list(coord_size, false);
   if (coord_size >= 3) {
@@ -464,11 +471,12 @@ void appendBoundaryEdges(RVLayerData& rv_layer_data, GTLHolePolyInt& check_hole_
     }
   }
 
+  // Append boundary records before linking their ring neighbors.
   std::vector<int32_t> ring_boundary_id_list;
   ring_boundary_id_list.reserve(coord_size);
   for (int32_t i = 0; i < coord_size; i++) {
-    PlanarCoord& pre_coord = coord_list[DRCUTIL.getRingIdx(i - 1, coord_size)];
-    PlanarCoord& curr_coord = coord_list[i];
+    const PlanarCoord& pre_coord = coord_list[DRCUTIL.getRingIdx(i - 1, coord_size)];
+    const PlanarCoord& curr_coord = coord_list[i];
     if (pre_coord == curr_coord) {
       continue;
     }
@@ -500,9 +508,8 @@ void appendBoundaryEdges(RVLayerData& rv_layer_data, GTLHolePolyInt& check_hole_
   }
 }
 
-void appendPreparedPolygon(const RVLayerData& source_layer_data, int32_t source_polygon_id, int32_t output_net_id,
-                           RVLayerData& merged_layer_data, std::vector<std::pair<GTLRectInt, int32_t>>& rect_rtree_inputs,
-                           std::vector<std::pair<GTLRectInt, int32_t>>& boundary_rtree_inputs)
+void appendIsolatedPolygon(const RVLayerData& source_layer_data, int32_t source_polygon_id, int32_t output_net_id, RVLayerData& merged_layer_data,
+                           std::vector<std::pair<GTLRectInt, int32_t>>& rect_rtree_inputs, std::vector<std::pair<GTLRectInt, int32_t>>& boundary_rtree_inputs)
 {
   // An isolated prepared polygon is unchanged by the layer-wide union. Copy
   // its materialized pools and only remap IDs into the EOL layer data.
@@ -552,9 +559,8 @@ void appendPreparedPolygon(const RVLayerData& source_layer_data, int32_t source_
   routing_net.boundary_count = output_polygon.boundary_count;
 }
 
-void appendMergedPolyset(RVLayerData& merged_layer_data, const GTLPolySetInt& merged_layer_polyset, int32_t& next_net_id,
-                         std::vector<std::pair<GTLRectInt, int32_t>>& rect_rtree_inputs,
-                         std::vector<std::pair<GTLRectInt, int32_t>>& boundary_rtree_inputs)
+void appendMergedComponent(RVLayerData& merged_layer_data, const GTLPolySetInt& merged_layer_polyset, int32_t& next_net_id,
+                           std::vector<std::pair<GTLRectInt, int32_t>>& rect_rtree_inputs, std::vector<std::pair<GTLRectInt, int32_t>>& boundary_rtree_inputs)
 {
   // This path is used only for components containing touching polygons.
   std::vector<GTLHolePolyInt> gtl_hole_poly_list;
@@ -601,6 +607,7 @@ void appendMergedPolyset(RVLayerData& merged_layer_data, const GTLPolySetInt& me
 
 void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& source_layer_data)
 {
+  // Rebuild pools and indexes after grouping touching polygons into components.
   merged_layer_data.nets.clear();
   merged_layer_data.polygon_pool.clear();
   merged_layer_data.max_rect_pool.clear();
@@ -610,8 +617,11 @@ void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& 
   merged_layer_data.boundary_pool.reserve(source_layer_data.boundary_pool.size());
 
   std::vector<std::pair<GTLRectInt, int32_t>> rect_rtree_inputs;
+  rect_rtree_inputs.reserve(source_layer_data.max_rect_pool.size());
   std::vector<std::pair<GTLRectInt, int32_t>> boundary_rtree_inputs;
+  boundary_rtree_inputs.reserve(source_layer_data.boundary_pool.size());
 
+  // Build a polygon-level index for connected-component discovery.
   using PolygonRTree = bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>;
   std::vector<std::pair<GTLRectInt, int32_t>> polygon_rtree_inputs;
   polygon_rtree_inputs.reserve(source_layer_data.polygon_pool.size());
@@ -640,23 +650,34 @@ void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& 
       if (overlap_polygon_id <= polygon_id) {
         continue;
       }
+      if (polygon_components.find_set(polygon_id) == polygon_components.find_set(overlap_polygon_id)) {
+        continue;
+      }
       if (polygonsHaveClosedOverlap(source_layer_data, polygon_id, overlap_polygon_id)) {
         polygon_components.union_set(polygon_id, overlap_polygon_id);
       }
     }
   }
 
-  std::map<int32_t, std::vector<int32_t>> component_polygon_map;
+  std::vector<std::vector<int32_t>> component_polygon_list(source_layer_data.polygon_pool.size());
+  std::vector<int32_t> component_root_list;
+  component_root_list.reserve(source_layer_data.polygon_pool.size());
   for (int32_t polygon_id = 0; polygon_id < static_cast<int32_t>(source_layer_data.polygon_pool.size()); ++polygon_id) {
-    component_polygon_map[polygon_components.find_set(polygon_id)].push_back(polygon_id);
+    int32_t component_root = polygon_components.find_set(polygon_id);
+    if (component_polygon_list[component_root].empty()) {
+      component_root_list.push_back(component_root);
+    }
+    component_polygon_list[component_root].push_back(polygon_id);
   }
+  // Preserve deterministic component IDs after replacing the ordered map.
+  std::sort(component_root_list.begin(), component_root_list.end());
 
+  // Copy isolated polygons directly and union only multi-polygon components.
   int32_t next_net_id = 0;
-  for (const auto& component_entry : component_polygon_map) {
-    const std::vector<int32_t>& polygon_id_list = component_entry.second;
+  for (int32_t component_root : component_root_list) {
+    const std::vector<int32_t>& polygon_id_list = component_polygon_list[component_root];
     if (polygon_id_list.size() == 1) {
-      appendPreparedPolygon(source_layer_data, polygon_id_list.front(), next_net_id++, merged_layer_data, rect_rtree_inputs,
-                            boundary_rtree_inputs);
+      appendIsolatedPolygon(source_layer_data, polygon_id_list.front(), next_net_id++, merged_layer_data, rect_rtree_inputs, boundary_rtree_inputs);
       continue;
     }
 
@@ -664,48 +685,15 @@ void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& 
     for (int32_t polygon_id : polygon_id_list) {
       component_polyset += source_layer_data.getPolygon(polygon_id).hole_poly;
     }
-    appendMergedPolyset(merged_layer_data, component_polyset, next_net_id, rect_rtree_inputs, boundary_rtree_inputs);
+    appendMergedComponent(merged_layer_data, component_polyset, next_net_id, rect_rtree_inputs, boundary_rtree_inputs);
   }
 
+  // Pool IDs are stable now, so both spatial indexes can be bulk-built.
   merged_layer_data.rect_rtrees = decltype(merged_layer_data.rect_rtrees)(rect_rtree_inputs);
   merged_layer_data.boundary_rtrees = decltype(merged_layer_data.boundary_rtrees)(boundary_rtree_inputs);
 }
 
-bool getPolygonBoundingBox(const RVLayerData& rv_layer_data, const PolygonData& polygon_data, GTLRectInt& bounding_box)
-{
-  const std::span<const MaxRectData> max_rects = rv_layer_data.getMaxRects(polygon_data);
-  if (max_rects.empty()) {
-    return false;
-  }
-
-  int32_t x_min = gtl::xl(max_rects.front().rect);
-  int32_t y_min = gtl::yl(max_rects.front().rect);
-  int32_t x_max = gtl::xh(max_rects.front().rect);
-  int32_t y_max = gtl::yh(max_rects.front().rect);
-  for (const MaxRectData& max_rect : max_rects.subspan(1)) {
-    x_min = std::min(x_min, gtl::xl(max_rect.rect));
-    y_min = std::min(y_min, gtl::yl(max_rect.rect));
-    x_max = std::max(x_max, gtl::xh(max_rect.rect));
-    y_max = std::max(y_max, gtl::yh(max_rect.rect));
-  }
-  bounding_box = GTLRectInt(x_min, y_min, x_max, y_max);
-  return true;
-}
-
-bool polygonsHaveClosedOverlap(const RVLayerData& rv_layer_data, int32_t first_polygon_id, int32_t second_polygon_id)
-{
-  const PolygonData& first_polygon = rv_layer_data.getPolygon(first_polygon_id);
-  const PolygonData& second_polygon = rv_layer_data.getPolygon(second_polygon_id);
-  for (const MaxRectData& first_max_rect : rv_layer_data.getMaxRects(first_polygon)) {
-    const PlanarRect first_rect = DRCUTIL.convertToPlanarRect(first_max_rect.rect);
-    for (const MaxRectData& second_max_rect : rv_layer_data.getMaxRects(second_polygon)) {
-      if (DRCUTIL.isClosedOverlap(first_rect, DRCUTIL.convertToPlanarRect(second_max_rect.rect))) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
+// EOL boundary collection.
 
 bool isEolBoundary(const RVLayerData& rv_layer_data, int32_t boundary_id)
 {
@@ -732,57 +720,60 @@ bool isEolBoundary(const RVLayerData& rv_layer_data, int32_t boundary_id)
     end_probe = PlanarRect(x, y_max + 1, x, y_max + 2);
   }
 
-  std::vector<std::pair<GTLRectInt, int32_t>> overlap_list;
-  rv_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(start_probe), std::back_inserter(overlap_list));
-  if (!overlap_list.empty()) {
-    return false;
+  // Query both endpoint probes in one traversal, then keep their checks
+  // separate so a hit at either endpoint preserves the EOL corner semantics.
+  PlanarRect probe_box = DRCUTIL.getBoundingBox({start_probe, end_probe});
+  GTLRectInt query_box = DRCUTIL.convertToGTLRectInt(probe_box);
+  bool end_probe_hit = false;
+  for (auto iter = rv_layer_data.rect_rtrees.qbegin(bgi::intersects(query_box)); iter != rv_layer_data.rect_rtrees.qend(); ++iter) {
+    const auto& [gtl_rect, max_rect_id] = *iter;
+    (void) max_rect_id;
+    PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
+    if (DRCUTIL.isClosedOverlap(rect, start_probe)) {
+      return false;
+    }
+    if (DRCUTIL.isClosedOverlap(rect, end_probe)) {
+      end_probe_hit = true;
+    }
   }
-  rv_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(end_probe), std::back_inserter(overlap_list));
-  return overlap_list.empty();
+  return !end_probe_hit;
 }
 
-void collectEolBoundaries(const RVLayerData& merged_layer_data, int32_t max_eol_width,
-                          std::vector<int32_t>& eol_boundary_id_list)
+void collectEolBoundaries(const RVLayerData& merged_layer_data, int32_t max_eol_width, std::vector<int32_t>& eol_boundary_id_list)
 {
-  for (const auto& net_entry : merged_layer_data.nets) {
-    const RVRoutingNet& routing_net = net_entry.second;
-    for (const PolygonData& polygon_data : merged_layer_data.getPolygons(routing_net)) {
-      std::span<const BoundaryData> polygon_boundaries = merged_layer_data.getBoundaries(polygon_data);
-      if (polygon_boundaries.empty()) {
+  // Boundaries for each polygon are stored contiguously and each edge is
+  // appended exactly once. No ring walk or visited set is needed here.
+  for (const PolygonData& polygon_data : merged_layer_data.polygon_pool) {
+    const int32_t boundary_begin = polygon_data.boundary_begin;
+    const int32_t boundary_end = boundary_begin + polygon_data.boundary_count;
+    for (int32_t boundary_id = boundary_begin; boundary_id < boundary_end; ++boundary_id) {
+      const BoundaryData& boundary = merged_layer_data.getBoundary(boundary_id);
+      if (boundary.edge_length >= max_eol_width || !boundary.isConvex) {
         continue;
       }
-
-      std::vector<bool> visited_ring_boundary(static_cast<size_t>(polygon_data.boundary_count), false);
-      for (const BoundaryData& seed_boundary : polygon_boundaries) {
-        int32_t seed_boundary_id = merged_layer_data.getBoundaryId(seed_boundary);
-        int32_t seed_local_idx = seed_boundary_id - polygon_data.boundary_begin;
-        if (visited_ring_boundary[seed_local_idx]) {
-          continue;
-        }
-
-        int32_t curr_boundary_id = seed_boundary_id;
-        do {
-          int32_t local_idx = curr_boundary_id - polygon_data.boundary_begin;
-          if (local_idx < 0 || polygon_data.boundary_count <= local_idx || visited_ring_boundary[local_idx]) {
-            break;
-          }
-          visited_ring_boundary[local_idx] = true;
-
-          const BoundaryData& curr_boundary = merged_layer_data.getBoundary(curr_boundary_id);
-          if (curr_boundary.edge_length < max_eol_width && isEolBoundary(merged_layer_data, curr_boundary_id)) {
-            eol_boundary_id_list.push_back(curr_boundary_id);
-          }
-          curr_boundary_id = curr_boundary.next_boundary_id;
-        } while (curr_boundary_id != seed_boundary_id);
+      if (isEolBoundary(merged_layer_data, boundary_id)) {
+        eol_boundary_id_list.push_back(boundary_id);
       }
     }
   }
 }
 
+// Per-edge queries and caches.
+
+int32_t queryNetIdxByRect(const RVLayerData& rv_layer_data, const PlanarRect& query_rect)
+{
+  GTLRectInt gtl_query_rect = DRCUTIL.convertToGTLRectInt(query_rect);
+  auto iter = rv_layer_data.rect_rtrees.qbegin(bgi::intersects(gtl_query_rect));
+  if (iter == rv_layer_data.rect_rtrees.qend()) {
+    return -1;
+  }
+  return rv_layer_data.getNetIdxByMaxRectId(iter->second);
+}
+
 bool hasRectInside(const RVLayerData& rv_layer_data, const PlanarRect& target_rect)
 {
   GTLRectInt query_box = DRCUTIL.convertToGTLRectInt(target_rect);
-  std::vector<std::pair<GTLRectInt, int32_t>> env_rect_list;
+  std::vector<GTLRectInt> env_rect_list;
   // Keep the query lazy so a direct hit returns without allocating a result list.
   for (auto iter = rv_layer_data.env_rect_rtree.qbegin(bgi::intersects(query_box)); iter != rv_layer_data.env_rect_rtree.qend(); ++iter) {
     const auto& [gtl_rect, net_idx] = *iter;
@@ -790,7 +781,7 @@ bool hasRectInside(const RVLayerData& rv_layer_data, const PlanarRect& target_re
     if (DRCUTIL.isInside(DRCUTIL.convertToPlanarRect(gtl_rect), target_rect)) {
       return true;
     }
-    env_rect_list.push_back(*iter);
+    env_rect_list.push_back(gtl_rect);
   }
 
   if (env_rect_list.size() < 2) {
@@ -799,15 +790,8 @@ bool hasRectInside(const RVLayerData& rv_layer_data, const PlanarRect& target_re
 
   // The prepared index is per net. Merge only rectangles touching this target
   // to recover the layer-wide environment semantics without building a global union.
-  std::vector<GTLRectInt> local_rect_list;
-  local_rect_list.reserve(env_rect_list.size());
-  for (const auto& [gtl_rect, net_idx] : env_rect_list) {
-    (void) net_idx;
-    local_rect_list.push_back(gtl_rect);
-  }
-
   GTLPolySetInt local_env_polyset;
-  local_env_polyset.insert(local_rect_list.begin(), local_rect_list.end());
+  local_env_polyset.insert(env_rect_list.begin(), env_rect_list.end());
   std::vector<GTLRectInt> local_max_rect_list;
   gtl::get_max_rectangles(local_max_rect_list, local_env_polyset);
   for (const GTLRectInt& local_max_rect : local_max_rect_list) {
@@ -818,8 +802,7 @@ bool hasRectInside(const RVLayerData& rv_layer_data, const PlanarRect& target_re
   return false;
 }
 
-bool hasRectInsideCached(const RVLayerData& rv_layer_data, const PlanarRect& target_rect,
-                         std::map<PlanarRect, bool, CmpPlanarRectByXASC>& contains_cache)
+bool hasRectInsideCached(const RVLayerData& rv_layer_data, const PlanarRect& target_rect, std::map<PlanarRect, bool, CmpPlanarRectByXASC>& contains_cache)
 {
   auto [iter, inserted] = contains_cache.try_emplace(target_rect, false);
   if (inserted) {
