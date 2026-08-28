@@ -15,13 +15,18 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "RuleValidator.hpp"
-#include "Utility.hpp"
+
+#include <array>
+#include <set>
 
 namespace idrc {
 
 namespace {
 
 bool isGlobalEolBoundary(const RVLayerData& rv_layer_data, int32_t boundary_id);
+void addCutEolViolation(std::set<std::array<int32_t, 8>>& violation_key_set, RVCluster& rv_cluster,
+                        int32_t violation_routing_layer_idx, const PlanarRect& violation_rect, int32_t required_size,
+                        int32_t cut_net_idx, int32_t env_net_idx);
 
 }  // namespace
 
@@ -30,6 +35,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
   const auto orientations = {Orientation::kEast, Orientation::kSouth, Orientation::kWest, Orientation::kNorth};
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
   const auto& layer_data = rv_cluster.get_layer_data();
+  std::set<std::array<int32_t, 8>> cut_eol_violation_key_set;
 
   // Build global EOL edges only for polygons reached by active cuts.
   std::map<int32_t, std::map<int32_t, std::map<PlanarRect, int32_t, CmpPlanarRectByXASC>>> layer_net_eol_edge_map;
@@ -61,7 +67,6 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
     int32_t span_length = cut_eol_spacing_rule.span_length;
     int32_t abs_eol_prl = std::abs(eol_prl);
     int32_t cut_search_spacing = std::max({eol_spacing, eol_prl_spacing, abs_eol_prl});
-    // cache for polygon eol calculate
     std::vector<int32_t>& polygon_checked_eol_width_list = layer_polygon_checked_eol_width_map[routing_layer_idx];
     if (polygon_checked_eol_width_list.empty()) {
       polygon_checked_eol_width_list.assign(routing_layer_data.polygon_pool.size(), -1);
@@ -85,7 +90,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
       overlap_cut_list.reserve(cut_hit_list.size());
       for (const CutData& overlap_cut_data : cut_hit_list) {
         PlanarRect env_cut_rect = DRCUTIL.convertToPlanarRect(overlap_cut_data.rect);
-        if (cut_rect == env_cut_rect) {
+        if (cut_rect == env_cut_rect || (cut_net_idx == -1 && overlap_cut_data.net_idx == -1)) {
           continue;
         }
         bool within_eol_spacing = DRCUTIL.getEuclideanDistance(cut_rect, env_cut_rect) < eol_spacing;
@@ -130,15 +135,13 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
         checked_eol_width = eol_width;
       }
 
-      // get preliminary orinet-overhang
       std::map<Orientation, int32_t> orient_overhang_map
           = {{Orientation::kEast, 0}, {Orientation::kSouth, 0}, {Orientation::kWest, 0}, {Orientation::kNorth, 0}};
       for (const auto& [gtl_rect, max_rect_id] : overlaped_rect) {
         (void) max_rect_id;
         PlanarRect span_rect = DRCUTIL.convertToPlanarRect(gtl_rect);
-        if (!DRCUTIL.isOpenOverlap(span_rect, cut_rect)) {
+        if (!DRCUTIL.isOpenOverlap(span_rect, cut_rect))
           continue;
-        }
 
         for (auto orient : orientations) {
           if (DRCUTIL.isInside(span_rect, DRCUTIL.getRect(cut_rect.getOrientEdge(orient)))) {
@@ -147,8 +150,6 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
           }
         }
       }
-
-      // which check-ortho(small overhang-equal overhang) pairs need to check
       std::vector<std::pair<Orientation, Orientation>> check_ortho_orients;
       for (auto check_orient : orientations) {
         if (orient_overhang_map[check_orient] >= smaller_overhang) {
@@ -161,6 +162,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
           }
         }
       }
+
       if (check_ortho_orients.empty()) {
         continue;
       }
@@ -175,7 +177,6 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
             continue;
           }
 
-          // recheck specific overhang
           std::map<Orientation, int32_t> routing_rect_overhangs;
           for (auto orient : orientations) {
             routing_rect_overhangs[orient] = DRCUTIL.getOrientEdgeDistance(routing_rect, cut_rect, orient);
@@ -188,8 +189,10 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
           int32_t ll_span = 0, ur_span = 0;
           std::vector<std::pair<GTLRectInt, int32_t>> rect_overlap_bg_list;
           routing_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(routing_rect), std::back_inserter(rect_overlap_bg_list));
+          GTLPolySetInt all_neighboors;
           for (const auto& [gtl_overlap_env, overlap_max_rect_id] : rect_overlap_bg_list) {
             (void) overlap_max_rect_id;
+            all_neighboors += gtl_overlap_env;
             PlanarRect overlap_env = DRCUTIL.convertToPlanarRect(gtl_overlap_env);
             if (!DRCUTIL.isOpenOverlap(overlap_env, cut_rect)) {
               continue;
@@ -207,12 +210,16 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
           }
 
           // has_wide_span 或者 eol， 进一步检查
+          int32_t other_back_side_span;
+          if (ortho_orient == Orientation::kWest || ortho_orient == Orientation::kSouth) {
+            other_back_side_span = ur_span;
+          } else {
+            other_back_side_span = ll_span;
+          }
+          // if (back_side_span + routing_rect.getWidth() >= span_length) { continue; }
           bool has_ll_span = (ll_span + routing_rect.getWidth()) >= span_length;
           bool has_ur_span = (ur_span + routing_rect.getWidth() >= span_length);
           bool has_wide_span = has_ll_span || has_ur_span;
-          bool use_ur_span = (direction == Direction::kVertical && ortho_orient == Orientation::kEast)
-                             || (direction == Direction::kHorizontal && ortho_orient == Orientation::kNorth);
-          bool has_ortho_span = use_ur_span ? has_ur_span : has_ll_span;
           bool is_eol = false;
           if (DRCUTIL.exist(layer_net_eol_edge_map[routing_layer_idx][routing_net_idx], check_edge)) {
             if (layer_net_eol_edge_map[routing_layer_idx][routing_net_idx][check_edge] < eol_width) {
@@ -223,8 +230,8 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
             continue;
           }
 
-          int32_t ll_ext = side_ext;
-          int32_t ur_ext = side_ext;
+          int32_t ll_ext = has_ll_span ? span_length : side_ext;
+          int32_t ur_ext = has_ur_span ? span_length : side_ext;
 
           PlanarRect back_side, other_back_side;
 
@@ -251,49 +258,100 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
             other_back_side = ur_rect;
           }
 
-          std::vector<std::pair<GTLRectInt, int32_t>> boundary_hit_list;
-          routing_layer_data.queryBoundaries(DRCUTIL.convertToGTLRectInt(back_side), std::back_inserter(boundary_hit_list));
-          bool has_check_overlap = false;
-          PlanarRect check_overlap_rect;
-          Orientation opposite_check_orient = DRCUTIL.getOppositeOrientation(ortho_orient);
-          for (const auto& [gtl_boundary, boundary_id] : boundary_hit_list) {
-            if (routing_layer_data.getBoundary(boundary_id).orient != opposite_check_orient) {
-              continue;
+          std::vector<std::pair<GTLRectInt, int32_t>> window_overlap_rect_list;
+          routing_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(back_side), std::back_inserter(window_overlap_rect_list));
+          GTLPolySetInt neighbor_shape;
+          neighbor_shape += DRCUTIL.convertToGTLRectInt(back_side);
+          neighbor_shape -= all_neighboors;
+
+          for (const auto& [gtl_rect_window, env_max_rect_id] : window_overlap_rect_list) {
+            if (DRCUTIL.isClosedOverlap(DRCUTIL.convertToPlanarRect(gtl_rect_window), routing_rect)) {
+              neighbor_shape -= gtl_rect_window;
             }
-            PlanarRect boundary_rect = DRCUTIL.convertToPlanarRect(gtl_boundary);
-            if (DRCUTIL.isOpenOverlap(back_side, boundary_rect)) {
-              has_check_overlap = true;
-              check_overlap_rect = boundary_rect;
+          }
+          std::vector<GTLPolyInt> non_overlap_polygons;
+          neighbor_shape.get(non_overlap_polygons);
+          PlanarRect empty_region;
+          for (auto& polygon : non_overlap_polygons) {
+            GTLRectInt empty_gtl_rect;
+            gtl::extents(empty_gtl_rect, polygon);
+            if (DRCUTIL.isClosedOverlap(check_edge, DRCUTIL.convertToPlanarRect(empty_gtl_rect))) {
+              empty_region = DRCUTIL.convertToPlanarRect(empty_gtl_rect);
               break;
             }
+          }
+          empty_region = DRCUTIL.getOverlap(empty_region, back_side);
+
+          bool has_check_overlap = false;
+          PlanarRect check_overlap_rect;
+          for (const auto& [gtl_env_rect, env_max_rect_id] : window_overlap_rect_list) {
+            (void) env_max_rect_id;
+            PlanarRect env_rect = DRCUTIL.convertToPlanarRect(gtl_env_rect);
+            if (DRCUTIL.isClosedOverlap(routing_rect, env_rect)) {
+              continue;
+            }
+            if (DRCUTIL.isOpenOverlap(empty_region, env_rect)) {
+              has_check_overlap = true;
+              check_overlap_rect = env_rect;
+              break;
+            }
+          }
+
+          std::vector<std::pair<GTLRectInt, int32_t>> other_window_overlap_rect_list;
+          bool has_other_overlap = false;
+          PlanarRect other_enlarge_rect = DRCUTIL.getEnlargedRect(routing_rect, DRCUTIL.getOppositeOrientation(ortho_orient), other_back_side_span);
+          if (has_check_overlap) {
+            routing_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(other_back_side), std::back_inserter(other_window_overlap_rect_list));
+            for (const auto& [gtl_env_rect, env_max_rect_id] : other_window_overlap_rect_list) {
+              (void) env_max_rect_id;
+              PlanarRect env_rect = DRCUTIL.convertToPlanarRect(gtl_env_rect);
+              if (DRCUTIL.isClosedOverlap(env_rect, other_enlarge_rect)) {
+                continue;
+              }
+              if (DRCUTIL.isOpenOverlap(other_back_side, env_rect)) {
+                has_other_overlap = true;
+                break;
+              }
+            }
+          }
+
+          std::vector<Orientation> checking_orient_list = {DRCUTIL.getOppositeOrientation(check_orient), DRCUTIL.getOppositeOrientation(ortho_orient)};
+          if (!has_wide_span && is_eol) {
+            checking_orient_list.push_back(check_orient);
           }
           if (!has_check_overlap) {
             continue;
           }
-
-          std::vector<std::pair<GTLRectInt, int32_t>> other_boundary_hit_list;
-          routing_layer_data.queryBoundaries(DRCUTIL.convertToGTLRectInt(other_back_side), std::back_inserter(other_boundary_hit_list));
-          bool has_other_overlap = false;
-          for (const auto& [gtl_boundary, boundary_id] : other_boundary_hit_list) {
-            if (routing_layer_data.getBoundary(boundary_id).orient != ortho_orient) {
-              continue;
-            }
-            if (DRCUTIL.isOpenOverlap(other_back_side, DRCUTIL.convertToPlanarRect(gtl_boundary))) {
-              has_other_overlap = true;
-              break;
-            }
-          }
-          if (has_other_overlap && !has_ortho_span) {
+          if (has_other_overlap) {
             continue;
           }
-
-          std::vector<Orientation> checking_orient_list = {DRCUTIL.getOppositeOrientation(check_orient), DRCUTIL.getOppositeOrientation(ortho_orient)};
           for (auto checking_orient : checking_orient_list) {
             for (const CutData& overlap_cut_data : overlap_cut_list) {
               int32_t env_net_idx = overlap_cut_data.net_idx;
+              bool is_netless_env_cut = overlap_cut_data.net_idx == -1;
               PlanarRect env_cut_rect = DRCUTIL.convertToPlanarRect(overlap_cut_data.rect);
               if (cut_rect == env_cut_rect) {
                 continue;
+              }
+              if (checking_orient == check_orient && !is_netless_env_cut) {
+                continue;
+              }
+              if (is_netless_env_cut) {
+                if (checking_orient == check_orient) {
+                  if (has_wide_span || !is_eol) {
+                    continue;
+                  }
+                } else if (checking_orient == DRCUTIL.getOppositeOrientation(check_orient)) {
+                  if (routing_rect_overhangs[checking_orient] < cut_rect.getWidth()) {
+                    continue;
+                  }
+                } else {
+                  continue;
+                }
+                if (checking_orient == check_orient
+                    && routing_rect_overhangs[DRCUTIL.getOppositeOrientation(checking_orient)] >= smaller_overhang) {
+                  continue;
+                }
               }
               PlanarRect rect = DRCUTIL.getRect(cut_rect.getOrientEdge(checking_orient));
               PlanarRect orient_rect = rect;
@@ -321,7 +379,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
                   continue;
                 }
               }
-              bool use_project_distance = DRCUTIL.isClosedOverlap(rect, env_cut_rect);
+              bool use_project_distance = DRCUTIL.isOpenOverlap(rect, env_cut_rect);
               int32_t required_size = use_project_distance ? eol_prl_spacing : eol_spacing;
 
               if (use_project_distance) {
@@ -354,8 +412,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
                   PlanarRect env_rect = DRCUTIL.convertToPlanarRect(gtl_env_rect);
                   if (DRCUTIL.isClosedOverlap(routing_rect, env_rect)) {
                     for (auto env_orient : orientations) {
-                      PlanarRect env_edge = DRCUTIL.getRect(env_rect.getOrientEdge(env_orient));
-                      if (DRCUTIL.isClosedOverlap(check_edge, env_edge) && DRCUTIL.getParallelLength(check_edge, env_edge) > 0) {
+                      if (check_edge == DRCUTIL.getRect(env_rect.getOrientEdge(env_orient))) {
                         has_check_edge = true;
                         break;
                       }
@@ -377,14 +434,8 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
                   }
                 }
               }
-              Violation violation;
-              violation.set_violation_type(ViolationType::kCutEOLSpacing);
-              violation.set_is_routing(true);
-              violation.set_violation_net_set({cut_net_idx, env_net_idx});
-              violation.set_layer_idx(violation_routing_layer_idx);
-              violation.set_rect(violation_rect);
-              violation.set_required_size(required_size);
-              rv_cluster.get_violation_list().push_back(violation);
+              addCutEolViolation(cut_eol_violation_key_set, rv_cluster, violation_routing_layer_idx, violation_rect, required_size,
+                                 cut_net_idx, env_net_idx);
             }
           }
         }
@@ -417,6 +468,33 @@ bool isGlobalEolBoundary(const RVLayerData& rv_layer_data, int32_t boundary_id)
     }
   }
   return true;
+}
+
+void addCutEolViolation(std::set<std::array<int32_t, 8>>& violation_key_set, RVCluster& rv_cluster,
+                        int32_t violation_routing_layer_idx, const PlanarRect& violation_rect, int32_t required_size,
+                        int32_t cut_net_idx, int32_t env_net_idx)
+{
+  std::array<int32_t, 8> violation_key = {violation_routing_layer_idx,
+                                          violation_rect.get_ll_x(),
+                                          violation_rect.get_ll_y(),
+                                          violation_rect.get_ur_x(),
+                                          violation_rect.get_ur_y(),
+                                          required_size,
+                                          std::min(cut_net_idx, env_net_idx),
+                                          std::max(cut_net_idx, env_net_idx)};
+  if (violation_key_set.contains(violation_key)) {
+    return;
+  }
+  violation_key_set.insert(violation_key);
+
+  Violation violation;
+  violation.set_violation_type(ViolationType::kCutEOLSpacing);
+  violation.set_is_routing(true);
+  violation.set_violation_net_set({cut_net_idx, env_net_idx});
+  violation.set_layer_idx(violation_routing_layer_idx);
+  violation.set_rect(violation_rect);
+  violation.set_required_size(required_size);
+  rv_cluster.get_violation_list().push_back(violation);
 }
 
 }  // namespace
