@@ -418,15 +418,6 @@ void RuleValidator::buildViolationList(RVModel& rv_model)
   violation_list.erase(std::unique(violation_list.begin(), violation_list.end()), violation_list.end());
 }
 
-#if 1  // aux
-
-int32_t RuleValidator::getIdx(int32_t idx, int32_t coord_size)
-{
-  return (idx + coord_size) % coord_size;
-}
-
-#endif
-
 namespace {
 
 using IndexedRect = std::pair<GTLRectInt, int32_t>;
@@ -440,38 +431,6 @@ struct NetPrepareContext
   std::vector<GTLRectInt> delta_overlap_list;
 };
 
-Orientation rotateLeft(Orientation orient)
-{
-  switch (orient) {
-    case Orientation::kEast:
-      return Orientation::kNorth;
-    case Orientation::kNorth:
-      return Orientation::kWest;
-    case Orientation::kWest:
-      return Orientation::kSouth;
-    case Orientation::kSouth:
-      return Orientation::kEast;
-    default:
-      return Orientation::kNone;
-  }
-}
-
-Orientation rotateRight(Orientation orient)
-{
-  switch (orient) {
-    case Orientation::kEast:
-      return Orientation::kSouth;
-    case Orientation::kSouth:
-      return Orientation::kWest;
-    case Orientation::kWest:
-      return Orientation::kNorth;
-    case Orientation::kNorth:
-      return Orientation::kEast;
-    default:
-      return Orientation::kNone;
-  }
-}
-
 Orientation getBoundaryOrient(Rotation rotation, bool is_hole, const PlanarCoord& begin_coord, const PlanarCoord& end_coord)
 {
   Orientation travel_orient = DRCUTIL.getOrientation(begin_coord, end_coord);
@@ -479,7 +438,7 @@ Orientation getBoundaryOrient(Rotation rotation, bool is_hole, const PlanarCoord
   if (is_hole) {
     metal_on_left = !metal_on_left;
   }
-  return metal_on_left ? rotateRight(travel_orient) : rotateLeft(travel_orient);
+  return metal_on_left ? DRCUTIL.getCWOrientation(travel_orient) : DRCUTIL.getCCWOrientation(travel_orient);
 }
 
 void collectBoundaryEdges(GTLHolePolyInt& check_hole_poly, bool is_hole, int32_t polygon_id, std::vector<BoundaryData>& boundary_pool)

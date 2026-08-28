@@ -47,7 +47,7 @@ void RuleValidator::verifyEnclosureParallel(RVCluster& rv_cluster)
             return;
           }
           for (int32_t i = 0; i < coord_size; i++) {
-            if (convex_corner_list[getIdx(i - 1, coord_size)] && convex_corner_list[i]) {
+            if (convex_corner_list[DRCUTIL.getRingIdx(i - 1, coord_size)] && convex_corner_list[i]) {
               eol_edge_idx_set.insert(i);
             }
           }
@@ -157,7 +157,7 @@ void RuleValidator::verifyEnclosureParallel(RVCluster& rv_cluster)
             if (edge_idx == -1) {
               continue;
             }
-            Segment<PlanarCoord> curr_segment = edge_list[getIdx(edge_idx, coord_size)];
+            Segment<PlanarCoord> curr_segment = edge_list[DRCUTIL.getRingIdx(edge_idx, coord_size)];
             if (DRCUTIL.exist(processed_segment_set, curr_segment)) {
               continue;
             }
@@ -172,8 +172,8 @@ void RuleValidator::verifyEnclosureParallel(RVCluster& rv_cluster)
             int32_t pre_segment_length;
             int32_t post_segment_length;
             {
-              Segment<PlanarCoord> pre_segment = edge_list[getIdx(edge_idx - 1, coord_size)];
-              Segment<PlanarCoord> post_segment = edge_list[getIdx(edge_idx + 1, coord_size)];
+              Segment<PlanarCoord> pre_segment = edge_list[DRCUTIL.getRingIdx(edge_idx - 1, coord_size)];
+              Segment<PlanarCoord> post_segment = edge_list[DRCUTIL.getRingIdx(edge_idx + 1, coord_size)];
               pre_segment_length = DRCUTIL.getManhattanDistance(pre_segment.get_first(), pre_segment.get_second());
               post_segment_length = DRCUTIL.getManhattanDistance(post_segment.get_first(), post_segment.get_second());
             }

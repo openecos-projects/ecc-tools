@@ -166,6 +166,38 @@ Orientation Utility::getOppositeOrientation(Orientation orientation)
   return opposite_orientation;
 }
 
+Orientation Utility::getCWOrientation(Orientation orientation)
+{
+  switch (orientation) {
+    case Orientation::kEast:
+      return Orientation::kSouth;
+    case Orientation::kSouth:
+      return Orientation::kWest;
+    case Orientation::kWest:
+      return Orientation::kNorth;
+    case Orientation::kNorth:
+      return Orientation::kEast;
+    default:
+      return Orientation::kNone;
+  }
+}
+
+Orientation Utility::getCCWOrientation(Orientation orientation)
+{
+  switch (orientation) {
+    case Orientation::kEast:
+      return Orientation::kNorth;
+    case Orientation::kNorth:
+      return Orientation::kWest;
+    case Orientation::kWest:
+      return Orientation::kSouth;
+    case Orientation::kSouth:
+      return Orientation::kEast;
+    default:
+      return Orientation::kNone;
+  }
+}
+
 std::vector<Orientation> Utility::getOrthogonalOrientationList(Orientation orientation)
 {
   std::vector<Orientation> orientation_list;
@@ -1123,6 +1155,11 @@ std::vector<PlanarRect> Utility::getOverlap(std::vector<PlanarRect> a_rect_list,
   std::sort(overlap_rect_list.begin(), overlap_rect_list.end(), CmpPlanarRectByXASC());
   overlap_rect_list.erase(std::unique(overlap_rect_list.begin(), overlap_rect_list.end()), overlap_rect_list.end());
   return overlap_rect_list;
+}
+
+int32_t Utility::getRingIdx(int32_t idx, int32_t size)
+{
+  return (idx + size) % size;
 }
 
 int32_t Utility::getFirstDigit(int32_t n)

@@ -126,9 +126,9 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
 
         auto& polygon_convex_candidates = polygon_convex_candidate_list[polygon_id];
         for (int32_t i = 0; i < coord_size; i++) {
-          const BoundaryData& pre_boundary = boundary_list[getIdx(i - 1, coord_size)];
+          const BoundaryData& pre_boundary = boundary_list[DRCUTIL.getRingIdx(i - 1, coord_size)];
           const BoundaryData& curr_boundary = boundary_list[i];
-          const BoundaryData& post_boundary = boundary_list[getIdx(i + 1, coord_size)];
+          const BoundaryData& post_boundary = boundary_list[DRCUTIL.getRingIdx(i + 1, coord_size)];
           if (!(pre_boundary.isConvex && curr_boundary.isConvex && post_boundary.isConvex)) {
             continue;
           }
@@ -142,7 +142,7 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
           if (inserted) {
             candidate_it->second.reserve(2);
           }
-          const BoundaryData& post_post_boundary = boundary_list[getIdx(i + 2, coord_size)];
+          const BoundaryData& post_post_boundary = boundary_list[DRCUTIL.getRingIdx(i + 2, coord_size)];
           candidate_it->second.push_back({rv_layer_data.getBoundaryId(curr_boundary), rv_layer_data.getBoundaryId(pre_boundary),
                                           DRCUTIL.getManhattanDistance(curr_boundary.end_coord, post_boundary.end_coord)});
           candidate_it->second.push_back({rv_layer_data.getBoundaryId(post_boundary), rv_layer_data.getBoundaryId(post_post_boundary),
