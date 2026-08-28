@@ -524,7 +524,7 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
   routing_net.polyset.insert(result_rect_list.begin(), result_rect_list.end());
 
   GTLPolySetInt env_polyset;
-  if (has_env) {
+  if (has_env && has_result) {
     env_polyset.insert(env_rect_list.begin(), env_rect_list.end());
     std::vector<GTLRectInt> env_max_rect_list;
     gtl::get_max_rectangles(env_max_rect_list, env_polyset);
@@ -559,7 +559,12 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
     polygon_data.hole_poly = std::move(hole_poly);
     GTLHolePolyInt& polygon_hole_poly = polygon_data.hole_poly;
     std::vector<GTLRectInt> rect_list;
-    gtl::get_max_rectangles(rect_list, polygon_hole_poly);
+    if (polygon_hole_poly.size() == 4 && polygon_hole_poly.begin_holes() == polygon_hole_poly.end_holes()) {
+      rect_list.emplace_back();
+      gtl::extents(rect_list.back(), polygon_hole_poly);
+    } else {
+      gtl::get_max_rectangles(rect_list, polygon_hole_poly);
+    }
     // A polygon is env only when it is nonempty and every max rectangle decomposed from it is env.
     bool is_polygon_env = has_env && !rect_list.empty();
     for (const GTLRectInt& gtl_rect : rect_list) {
@@ -577,6 +582,9 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
         }
       }
       rv_layer_data.max_rect_pool.push_back({gtl_rect, polygon_id, is_env});
+      if (has_env && !has_result) {
+        env_rect_rtree_inputs.emplace_back(gtl_rect, net_idx);
+      }
       is_polygon_env = is_polygon_env && is_env;
     }
     polygon_data.max_rect_count = static_cast<int32_t>(rv_layer_data.max_rect_pool.size()) - polygon_data.max_rect_begin;

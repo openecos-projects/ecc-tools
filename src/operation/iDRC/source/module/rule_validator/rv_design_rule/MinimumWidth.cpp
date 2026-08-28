@@ -25,12 +25,12 @@ void RuleValidator::verifyMinimumWidth(RVCluster& rv_cluster)
   const auto& layer_data = rv_cluster.get_layer_data();
 
   for (const auto& [routing_layer_idx, rv_layer_data] : layer_data) {
-    int32_t min_width = routing_layer_list[routing_layer_idx].get_minimum_width_rule().min_width;
+    const int32_t min_width = routing_layer_list[routing_layer_idx].get_minimum_width_rule().min_width;
     for (const auto& [net_idx, routing_net] : rv_layer_data.nets) {
       if (net_idx == -1) {
         continue;
       }
-      GTLPolySetInt violation_gtl_poly_set;
+      std::vector<GTLRectInt> violation_rect_list;
       for (const PolygonData& polygon_data : rv_layer_data.getPolygons(routing_net)) {
         if (polygon_data.isEnv) {
           continue;
@@ -50,10 +50,12 @@ void RuleValidator::verifyMinimumWidth(RVCluster& rv_cluster)
             if (min_width <= span) {
               continue;
             }
-            violation_gtl_poly_set += gtl_rect;
+            violation_rect_list.push_back(gtl_rect);
           }
         }
       }
+      GTLPolySetInt violation_gtl_poly_set;
+      violation_gtl_poly_set.insert(violation_rect_list.begin(), violation_rect_list.end());
       std::vector<GTLRectInt> gtl_rect_list;
       gtl::get_max_rectangles(gtl_rect_list, violation_gtl_poly_set);
       for (GTLRectInt& gtl_rect : gtl_rect_list) {

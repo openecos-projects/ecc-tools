@@ -18,49 +18,82 @@
 
 namespace idrc {
 
+namespace {
+
+bool isGridAligned(const GTLPointInt& point, int32_t manufacture_grid);
+void appendOffGridViolation(RVCluster& rv_cluster, const GTLPointInt& begin_point, const GTLPointInt& end_point,
+                            int32_t net_idx, int32_t routing_layer_idx, int32_t manufacture_grid);
+
+}  // namespace
+
 void RuleValidator::verifyOffGridOrWrongWay(RVCluster& rv_cluster)
 {
-  int32_t manufacture_grid = DRCDM.getDatabase().get_off_grid_or_wrong_way_rule().manufacture_grid;
+  const int32_t manufacture_grid = DRCDM.getDatabase().get_off_grid_or_wrong_way_rule().manufacture_grid;
 
   std::map<int32_t, std::map<int32_t, GTLPolySetInt>> routing_net_gtl_poly_set_map;
+  std::map<int32_t, int32_t> cut_routing_layer_map;
   for (DRCShape* drc_shape : rv_cluster.get_drc_result_shape_list()) {
     int32_t routing_layer_idx = -1;
     if (!drc_shape->get_is_routing()) {
-      const std::vector<int32_t>& routing_layer_idx_list = DRCDM.getAdjacentRoutingLayerIdxList(drc_shape->get_layer_idx());
-      routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
+      const int32_t cut_layer_idx = drc_shape->get_layer_idx();
+      auto cut_layer_iter = cut_routing_layer_map.find(cut_layer_idx);
+      if (cut_layer_iter == cut_routing_layer_map.end()) {
+        const std::vector<int32_t>& routing_layer_idx_list = DRCDM.getAdjacentRoutingLayerIdxList(cut_layer_idx);
+        const int32_t adjacent_routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
+        cut_layer_iter = cut_routing_layer_map.emplace(cut_layer_idx, adjacent_routing_layer_idx).first;
+      }
+      routing_layer_idx = cut_layer_iter->second;
     } else {
       routing_layer_idx = drc_shape->get_layer_idx();
     }
     routing_net_gtl_poly_set_map[routing_layer_idx][drc_shape->get_net_idx()] += DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
   }
-  for (auto& [routing_layer_idx, net_gtl_poly_set_map] : routing_net_gtl_poly_set_map) {
-    for (auto& [net_idx, gtl_poly_set] : net_gtl_poly_set_map) {
+  for (const auto& [routing_layer_idx, net_gtl_poly_set_map] : routing_net_gtl_poly_set_map) {
+    for (const auto& [net_idx, gtl_poly_set] : net_gtl_poly_set_map) {
       std::vector<GTLPolyInt> gtl_poly_list;
       gtl_poly_set.get_polygons(gtl_poly_list);
-      for (GTLPolyInt& gtl_poly : gtl_poly_list) {
-        std::vector<PlanarCoord> coord_list;
-        for (const GTLPointInt& gtl_point : gtl_poly) {
-          coord_list.emplace_back(gtl_point.x(), gtl_point.y());
+      for (const GTLPolyInt& gtl_poly : gtl_poly_list) {
+        auto point_iter = gtl_poly.begin();
+        const GTLPointInt first_point = *point_iter;
+        GTLPointInt previous_point = first_point;
+        for (++point_iter; point_iter != gtl_poly.end(); ++point_iter) {
+          const GTLPointInt current_point = *point_iter;
+          appendOffGridViolation(rv_cluster, previous_point, current_point, net_idx, routing_layer_idx, manufacture_grid);
+          previous_point = current_point;
         }
-        coord_list.push_back(coord_list.front());
-        for (size_t i = 1; i < coord_list.size(); i++) {
-          PlanarRect rect = DRCUTIL.getRect(coord_list[i - 1], coord_list[i]);
-          if (rect.get_ll_x() % manufacture_grid == 0 && rect.get_ll_y() % manufacture_grid == 0 && rect.get_ur_x() % manufacture_grid == 0
-              && rect.get_ur_y() % manufacture_grid == 0) {
-            continue;
-          }
-          Violation violation;
-          violation.set_violation_type(ViolationType::kOffGridOrWrongWay);
-          violation.set_is_routing(true);
-          violation.set_violation_net_set({net_idx});
-          violation.set_required_size(0);
-          violation.set_layer_idx(routing_layer_idx);
-          violation.set_rect(rect);
-          rv_cluster.get_violation_list().push_back(violation);
-        }
+        appendOffGridViolation(rv_cluster, previous_point, first_point, net_idx, routing_layer_idx, manufacture_grid);
       }
     }
   }
 }
+
+namespace {
+
+bool isGridAligned(const GTLPointInt& point, int32_t manufacture_grid)
+{
+  return point.x() % manufacture_grid == 0 && point.y() % manufacture_grid == 0;
+}
+
+void appendOffGridViolation(RVCluster& rv_cluster, const GTLPointInt& begin_point, const GTLPointInt& end_point,
+                            int32_t net_idx, int32_t routing_layer_idx, int32_t manufacture_grid)
+{
+  // A segment is grid-aligned iff both endpoints are grid-aligned.
+  if (isGridAligned(begin_point, manufacture_grid) && isGridAligned(end_point, manufacture_grid)) {
+    return;
+  }
+
+  PlanarRect rect(std::min(begin_point.x(), end_point.x()), std::min(begin_point.y(), end_point.y()),
+                  std::max(begin_point.x(), end_point.x()), std::max(begin_point.y(), end_point.y()));
+  Violation violation;
+  violation.set_violation_type(ViolationType::kOffGridOrWrongWay);
+  violation.set_is_routing(true);
+  violation.set_violation_net_set({net_idx});
+  violation.set_required_size(0);
+  violation.set_layer_idx(routing_layer_idx);
+  violation.set_rect(rect);
+  rv_cluster.get_violation_list().push_back(std::move(violation));
+}
+
+}  // namespace
 
 }  // namespace idrc
