@@ -21,27 +21,13 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #include <mutex>
 #include <string>
-
-#include "json.hpp"
-using json = nlohmann::json;
+#include <vector>
 
 using std::string;
 using std::vector;
 
 namespace iplf {
 #define flowConfigInst PLFConfig::getInstance()
-
-struct ConfigPath
-{
-  string idb_path;
-  string ifp_path;
-  string ipl_path;
-  string irt_path;
-  string idrc_path;
-  string icts_path;
-  string ito_path;
-  string ipnp_path;
-};
 
 struct EnvironmentInfo
 {
@@ -70,17 +56,6 @@ class PLFConfig
   }
 
   /// getter
-  string get_path() { return _path; }
-
-  string get_idb_path() { return _config_path.idb_path; }
-  string get_ifp_path() { return _config_path.ifp_path; }
-  string get_ipl_path() { return _config_path.ipl_path; }
-  string get_icts_path() { return _config_path.icts_path; }
-  string get_irt_path() { return _config_path.irt_path; }
-  string get_idrc_path() { return _config_path.idrc_path; }
-  string get_ito_path() { return _config_path.ito_path; }
-  string get_ipnp_path() { return _config_path.ipnp_path; }
-
   FlowStatus& get_status() { return _status; }
   string get_status_stage() { return _status.stage; }
   double get_status_runtime() { return _status.runtime; }
@@ -103,15 +78,10 @@ class PLFConfig
   void set_env_info_user(string value) { _env_info.user = value; }
   void set_env_info_system(string value) { _env_info.system = value; }
 
-  /// opreator
-  bool initConfig(string path = "");
-
  private:
   static PLFConfig* _instance;
   // static std::mutex _mutex;
 
-  string _path = "";
-  ConfigPath _config_path;
   FlowStatus _status;
   EnvironmentInfo _env_info;
 

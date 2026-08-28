@@ -21,42 +21,8 @@
 
 #include "flow_config.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <iostream>
-
-#include "json_parser.h"
-// #include "flow.h"
-
 namespace iplf {
 PLFConfig* PLFConfig::_instance = nullptr;
 //   std::mutex PLFConfig::_mutex;
-
-bool PLFConfig::initConfig(string path)
-{
-  _path = path;
-
-  std::ifstream& config_stream = ecc::getInputFileStream(_path);
-
-  {
-    nlohmann::json json;
-    config_stream >> json;
-
-    /// read config path
-    _config_path.idb_path = ecc::getJsonData(json, {"ConfigPath", "idb_path"});
-    _config_path.ifp_path = ecc::getJsonData(json, {"ConfigPath", "ifp_path"});
-    _config_path.ipl_path = ecc::getJsonData(json, {"ConfigPath", "ipl_path"});
-    _config_path.icts_path = ecc::getJsonData(json, {"ConfigPath", "icts_path"});
-    _config_path.irt_path = ecc::getJsonData(json, {"ConfigPath", "irt_path"});
-    _config_path.idrc_path = ecc::getJsonData(json, {"ConfigPath", "idrc_path"});
-    _config_path.ito_path = ecc::getJsonData(json, {"ConfigPath", "ito_path"});
-    _config_path.ipnp_path = ecc::getJsonData(json, {"ConfigPath", "ipnp_path"});
-  }
-
-  ecc::closeFileStream(config_stream);
-
-  return true;
-}
 
 }  // namespace iplf
