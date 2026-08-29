@@ -876,9 +876,7 @@ int32_t DefRead::componentsCallback(defrCallbackType_e type, defiComponent* def_
     return kDbFail;
   }
 
-  def_reader->parse_component(def_component);
-
-  return kDbSuccess;
+  return def_reader->parse_component(def_component);
 }
 
 int32_t DefRead::parse_component(defiComponent* def_component)
