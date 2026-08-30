@@ -8,6 +8,7 @@
 #ifndef _DREAMPLACE_PLACE_IO_PYPLACEDB_H
 #define _DREAMPLACE_PLACE_IO_PYPLACEDB_H
 
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
 #include "IdbEnum.h"
@@ -125,9 +126,29 @@ struct PyPlaceDB
     set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta);
   }
 
+  const std::vector<bool>& getNodeIsHardMacro() const { return _node_is_hard_macro; }
+  const std::vector<bool>& getMacroWritebackCandidate() const { return _macro_writeback_candidate; }
+  std::size_t writeMacroPlacementBack(
+      const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
+      const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y);
+
   void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta);
   void init_routability(idm::DataManager* db, std::vector<IdbInstance*> inst_resort_list);
   std::vector<std::vector<float>> getCongestionMap(string method = "max", string stage = "egr3D", string resolve_congestion = "low");
+
+ private:
+  struct MacroWritebackCandidate
+  {
+    index_type node_id;
+    std::string instance_name;
+    idb::IdbInstance* instance;
+  };
+
+  idm::DataManager* _db = nullptr;
+  idb::IdbDesign* _design = nullptr;
+  std::vector<bool> _node_is_hard_macro;
+  std::vector<bool> _macro_writeback_candidate;
+  std::vector<MacroWritebackCandidate> _macro_writeback_candidates;
 };
 
 }  // namespace python_interface

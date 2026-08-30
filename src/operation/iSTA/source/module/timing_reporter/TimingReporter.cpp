@@ -93,57 +93,14 @@ std::string stableTimingPathId(const std::string& value)
   return stream.str();
 }
 
-std::string normalizeTimingReportOption(std::string value)
-{
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-  std::replace(value.begin(), value.end(), '-', '_');
-  return value;
-}
-
 std::vector<DelayType> getReportDelayTypeList()
 {
-  const std::string delay_type = normalizeTimingReportOption(STADM.getConfig().timing_report_delay_type);
-  if (delay_type == "max" || delay_type == "setup" || delay_type.empty()) {
-    return {DelayType::kMax};
-  }
-  if (delay_type == "min" || delay_type == "hold") {
-    return {DelayType::kMin};
-  }
-  if (delay_type == "max_min" || delay_type == "min_max" || delay_type == "all") {
-    return {DelayType::kMax, DelayType::kMin};
-  }
-
-  STALOG.warn(Loc::current(), "Unrecognized timing report delay_type='", STADM.getConfig().timing_report_delay_type,
-              "', use default 'max'.");
-  return {DelayType::kMax};
+  return {DelayType::kMax, DelayType::kMin};
 }
 
 std::vector<StartEndType> getReportStartEndTypeList()
 {
-  const std::string start_end_type = normalizeTimingReportOption(STADM.getConfig().timing_report_start_end_type);
-  if (start_end_type.empty() || start_end_type == "all" || start_end_type == "none") {
-    return {StartEndType::kNone};
-  }
-  if (start_end_type == "all_separate" || start_end_type == "separate") {
-    return {StartEndType::kInToOut, StartEndType::kInToReg, StartEndType::kRegToOut, StartEndType::kRegToReg};
-  }
-  if (start_end_type == "in_to_out" || start_end_type == "in2out") {
-    return {StartEndType::kInToOut};
-  }
-  if (start_end_type == "in_to_reg" || start_end_type == "in2reg") {
-    return {StartEndType::kInToReg};
-  }
-  if (start_end_type == "reg_to_out" || start_end_type == "reg2out") {
-    return {StartEndType::kRegToOut};
-  }
-  if (start_end_type == "reg_to_reg" || start_end_type == "reg2reg") {
-    return {StartEndType::kRegToReg};
-  }
-
-  STALOG.warn(Loc::current(), "Unrecognized timing report start_end_type='",
-              STADM.getConfig().timing_report_start_end_type, "', use default 'all'.");
-  return {StartEndType::kNone};
+  return {StartEndType::kInToOut, StartEndType::kInToReg, StartEndType::kRegToOut, StartEndType::kRegToReg};
 }
 
 bool hasImplicitReportSlackLesserThan()

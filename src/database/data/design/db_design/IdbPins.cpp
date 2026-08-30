@@ -85,9 +85,14 @@ IdbPin::~IdbPin()
 
 IdbTerm* IdbPin::set_term(IdbTerm* term)
 {
+  if (_b_new_term && _io_term != nullptr && _io_term != term) {
+    delete _io_term;
+  }
   if (term == nullptr) {
     term = new IdbTerm();
     _b_new_term = true;
+  } else if (term != _io_term) {
+    _b_new_term = false;
   }
 
   _io_term = term;
@@ -693,15 +698,6 @@ IdbPin* IdbPins::add_pin_ref_unique(IdbPin* pin)
     return nullptr;
   }
 
-  if (_pin_ref_index != nullptr) {
-    const auto [it, inserted] = _pin_ref_index->insert(pin);
-    if (!inserted) {
-      return *it;
-    }
-    _pin_list.emplace_back(pin);
-    return pin;
-  }
-
   IdbPin* existed_pin = find_pin(pin);
   if (existed_pin != nullptr) {
     return existed_pin;
@@ -742,7 +738,7 @@ void IdbPins::checkPins()
     auto pin = *it;
     std::string name = pin->get_pin_name();
     if (pin->get_instance() != nullptr) {
-      name = pin->get_instance()->get_name() + name;
+      name = pin->get_instance()->get_name() + "/" + name;
     }
     pin_name_set.insert(name);
     /// if has same instance+pin

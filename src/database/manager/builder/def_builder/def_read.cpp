@@ -2288,6 +2288,10 @@ int32_t DefRead::parse_fill(defiFill* def_fill)
     if (via == nullptr) {
       via = via_list_lef->find_via(def_fill->viaName());
     }
+    if (via == nullptr) {
+      ECCLOG.warn(ecc::Loc::current(), "Error : can not find the fill via = ", def_fill->viaName());
+      return kDbFail;
+    }
     IdbVia* via_new = via->clone();
     IdbFillVia* fill_via = fill_list->add_fill_via(via_new);
     if (via_new != nullptr) {
@@ -2335,9 +2339,6 @@ int32_t DefRead::parse_bus_bit_chars(const char* bus_bit_chars_str)
   bus_bit_chars->setLeftDelimiter(bus_bit_chars_str[0]);
   bus_bit_chars->setRightDelimter(bus_bit_chars_str[1]);
 
-  if (design->get_bus_bit_chars() != nullptr) {
-    delete design->get_bus_bit_chars();
-  }
   design->set_bus_bit_chars(bus_bit_chars);
   return kDbSuccess;
 }
