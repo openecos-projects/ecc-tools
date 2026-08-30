@@ -85,8 +85,11 @@ void IdbViaMasterRulePattern::parse_pattern_array(vector<pair<string, string>>& 
       strs.push_back(str);
     }
   }
-  for (size_t i = 0; i < strs.size(); i += 2) {
+  for (size_t i = 0; i + 1 < strs.size(); i += 2) {
     pattern_array.push_back(std::make_pair(strs[i], strs[i + 1]));
+  }
+  if (strs.size() % 2 != 0) {
+    ECCLOG.warn(ecc::Loc::current(), "Error : malformed via pattern.");
   }
 }
 
@@ -109,6 +112,10 @@ void IdbViaMasterRulePattern::parse_pattern_row_value(size_t row_index, string v
     char char_value = value.at(str_index);
     /// repeat value
     if (repeat_flag == char_value) {
+      if (str_index + 2 >= value.length()) {
+        ECCLOG.warn(ecc::Loc::current(), "Error : malformed via pattern repeat value.");
+        return;
+      }
       /// get number
       str_index++;
       char char_number = value.at(str_index);
@@ -151,7 +158,16 @@ bool IdbViaMasterRulePattern::save_pattern_value(char value, int row_index, int&
  */
 int IdbViaMasterRulePattern::hexString2Int(string hex_string)
 {
-  return std::stoi(hex_string, nullptr, 16);
+  try {
+    size_t parsed = 0;
+    int value = std::stoi(hex_string, &parsed, 16);
+    if (parsed != hex_string.size()) {
+      return 0;
+    }
+    return value;
+  } catch (const std::exception&) {
+    return 0;
+  }
 }
 /**
  * @Brief : get bit value in index
@@ -407,8 +423,25 @@ IdbViaMaster* IdbViaMaster::clone()
   master_new->_is_default = _is_default;
   master_new->_type = _type;
   master_new->_resistance = _resistance;
-  master_new->_master_generate = _master_generate->clone();
-  master_new->_master_fixed_list = _master_fixed_list;
+  master_new->_num_cut_rows = _num_cut_rows;
+  master_new->_num_cut_cols = _num_cut_cols;
+  if (_master_generate != nullptr) {
+    delete master_new->_master_generate;
+    master_new->_master_generate = _master_generate->clone();
+  }
+  for (auto* master_fixed : _master_fixed_list) {
+    if (master_fixed == nullptr || master_fixed->get_layer_shape() == nullptr) {
+      continue;
+    }
+    auto* fixed_new = new IdbViaMasterFixed();
+    fixed_new->set_layer(master_fixed->get_layer());
+    for (auto* rect : master_fixed->get_rect_list()) {
+      if (rect != nullptr) {
+        fixed_new->add_rect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+      }
+    }
+    master_new->_master_fixed_list.emplace_back(fixed_new);
+  }
   master_new->_cut_rect->set_rect(_cut_rect);
 
   return master_new;
@@ -599,6 +632,7 @@ IdbViaMasterList::IdbViaMasterList()
 
 IdbViaMasterList::~IdbViaMasterList()
 {
+  reset();
 }
 
 IdbViaMaster* IdbViaMasterList::find_via_master(string name)
@@ -644,6 +678,15 @@ IdbViaMaster* IdbViaMasterList::add_via_master(string name)
   }
 
   return pMaster;
+}
+
+void IdbViaMasterList::reset()
+{
+  for (auto* via_master : _via_master_list) {
+    delete via_master;
+  }
+  _via_master_list.clear();
+  _num_master = 0;
 }
 
 }  // namespace idb

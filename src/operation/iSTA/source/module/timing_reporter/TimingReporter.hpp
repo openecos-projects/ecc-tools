@@ -108,6 +108,7 @@ class TimingReporter
   void outputTimingSummaryLine(std::ofstream* report_file, std::string label, double value, std::size_t label_width);
   std::string getClockName(TimingPath& timing_path);
   double getClockPeriod(std::string& clock_name);
+  double getClockUncertainty(std::string& clock_name, DelayType delay_type);
   double getInputDelay(TimingPath& timing_path, DelayType delay_type);
   std::string getStartClockPin(TimingPath& timing_path);
   void outputTimingPoint(std::ofstream* report_file, TimingPath& timing_path, TimingPathPoint& path_point, bool is_first_point,

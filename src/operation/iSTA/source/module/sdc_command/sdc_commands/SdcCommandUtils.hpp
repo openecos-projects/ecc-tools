@@ -14,31 +14,15 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "STAInterface.hpp"
-#include "tcl_ista_util.hpp"
-#include "tcl_sta.h"
+#pragma once
 
-namespace tcl {
+#include <string>
+#include <vector>
 
-TclGetPorts::TclGetPorts(const char* cmd_name) : TclCmd(cmd_name)
-{
-  addOption(new TclStringListOption("ports", 1));
-}
+#include "Database.hpp"
+namespace ista::sdc {
 
-unsigned TclGetPorts::exec()
-{
-  TclOption* port_option = getOptionOrArg("ports");
-  if (!port_option->is_set_val()) {
-    setTclError("get_ports requires a port list");
-    return 0;
-  }
-  std::vector<std::string> resolved_port_list;
-  if (std::string error_message; !STAI.getPorts(port_option->getStringList(), resolved_port_list, error_message)) {
-    setTclError(error_message);
-    return 0;
-  }
-  setResult(resolved_port_list);
-  return 1;
-}
+std::vector<std::string> resolveObjectList(Database& database, const std::vector<std::string>& object_list);
+TimingPortConstraint& getPortConstraint(Database& database, const std::string& port_name);
 
-}  // namespace tcl
+}  // namespace ista::sdc

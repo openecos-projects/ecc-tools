@@ -353,9 +353,9 @@ double TimingAnalyzer::getEndPointRequired(std::string& start_point, std::string
     std::string common_pin_name;
     double cppr = getClockReconvergencePessimism(start_point, end_point, analysis_type, common_pin_name);
     if (analysis_type == AnalysisType::kMin) {
-      return roundTime(getEndPointCaptureTime(end_point, analysis_type) + check_time - cppr);
+      return roundTime(getEndPointCaptureTime(end_point, analysis_type) + check_time - cppr + getClockUncertainty(end_point, analysis_type));
     }
-    return roundTime(getEndPointCaptureTime(end_point, analysis_type) - check_time + cppr);
+    return roundTime(getEndPointCaptureTime(end_point, analysis_type) - check_time + cppr - getClockUncertainty(end_point, analysis_type));
   }
   return default_required_time;
 }
@@ -396,6 +396,17 @@ std::string_view TimingAnalyzer::getClockName(std::string& pin_name)
   return "clk";
 }
 
+double TimingAnalyzer::getClockUncertainty(std::string& pin_name, AnalysisType analysis_type)
+{
+  Database& database = STADM.getDatabase();
+  auto& clock_map = database.get_timing_constraint().get_clock_map();
+  auto clock_it = clock_map.find(std::string(getClockName(pin_name)));
+  if (clock_it == clock_map.end()) {
+    return 0.0;
+  }
+  return analysis_type == AnalysisType::kMin ? clock_it->second.get_hold_uncertainty() : clock_it->second.get_setup_uncertainty();
+}
+
 TimingClock* TimingAnalyzer::getStartPointClock(std::string& start_point)
 {
   Database& database = STADM.getDatabase();
@@ -428,9 +439,9 @@ double TimingAnalyzer::getEndPointRequired(TimingPathState& end_path_state, std:
     std::string common_pin_name;
     double cppr = getClockReconvergencePessimism(end_path_state, end_point, analysis_type, common_pin_name);
     if (analysis_type == AnalysisType::kMin) {
-      return roundTime(getEndPointCaptureTime(end_point, analysis_type) + check_time - cppr);
+      return roundTime(getEndPointCaptureTime(end_point, analysis_type) + check_time - cppr + getClockUncertainty(end_point, analysis_type));
     }
-    return roundTime(getEndPointCaptureTime(end_point, analysis_type) - check_time + cppr);
+    return roundTime(getEndPointCaptureTime(end_point, analysis_type) - check_time + cppr - getClockUncertainty(end_point, analysis_type));
   }
   return default_required_time;
 }

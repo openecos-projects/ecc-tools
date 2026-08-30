@@ -1241,7 +1241,11 @@ Rect32 rect_from_regular_segment(idb::IdbRegularWireSegment* segment)
   }
 
   if (segment->is_rect()) {
-    return rect_from_delta_rect(segment->get_delta_rect(), segment->get_point_start());
+    if (segment->get_delta_rect() == nullptr) {
+      return Rect32{};
+    }
+    idb::IdbRect rect = segment->get_segment_rect();
+    return rect_from_idb(rect);
   }
 
   if (segment->is_wire() && segment->get_layer() != nullptr) {

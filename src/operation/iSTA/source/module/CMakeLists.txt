@@ -9,6 +9,7 @@ add_subdirectory(${ISTA_MODULE}/timing_characterizer)
 add_subdirectory(${ISTA_MODULE}/timing_reporter)
 add_subdirectory(${ISTA_MODULE}/power_reporter)
 add_subdirectory(${ISTA_MODULE}/sdf_writer)
+add_subdirectory(${ISTA_MODULE}/sdc_command)
 
 add_library(ista_module INTERFACE)
 
@@ -25,4 +26,5 @@ target_link_libraries(ista_module
     ista_timing_reporter
     ista_power_reporter
     ista_sdf_writer
+    ista_sdc_command
 )

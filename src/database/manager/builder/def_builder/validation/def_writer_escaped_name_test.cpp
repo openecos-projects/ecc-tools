@@ -25,6 +25,24 @@ void require(bool condition, const std::string& message)
   }
 }
 
+void testBusNameParsing()
+{
+  const idb::IdbBusBitChars bit_chars;
+  const auto valid = idb::IdbBus::parseBusName("data[12]", bit_chars);
+  require(valid.has_value() && valid->first == "data" && valid->second == 12, "valid bus bit must be parsed");
+
+  require(!idb::IdbBus::parseBusName(R"(hierarchy\[0\].wdata_i\[0\])", bit_chars).has_value(),
+          "escaped delimiters must remain a literal identifier");
+  require(!idb::IdbBus::parseBusName("data[]", bit_chars).has_value(), "empty bus index must be rejected");
+  require(!idb::IdbBus::parseBusName("data[ctrl]", bit_chars).has_value(), "non-numeric bus index must be rejected");
+  require(!idb::IdbBus::parseBusName("data[-1]", bit_chars).has_value(), "negative bus index must be rejected");
+  require(!idb::IdbBus::parseBusName("data[4294967296]", bit_chars).has_value(), "out-of-range bus index must be rejected");
+
+  idb::IdbBus bus;
+  bus.updateRange(12);
+  require(bus.get_left() == 12 && bus.get_right() == 12, "first bus index must initialize both range bounds");
+}
+
 std::string readFile(const std::filesystem::path& path)
 {
   std::ifstream stream(path);
@@ -81,6 +99,7 @@ void testEscapedNamesAreSerializedAsLiteralDefIdentifiers()
 int main()
 {
   try {
+    testBusNameParsing();
     testEscapedNamesAreSerializedAsLiteralDefIdentifiers();
   } catch (const std::exception& error) {
     std::cout << error.what() << '\n';

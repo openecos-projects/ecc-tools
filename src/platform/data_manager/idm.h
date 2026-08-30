@@ -53,6 +53,14 @@ using namespace idb;
 
 namespace idm {
 
+struct InstancePlacementUpdate
+{
+  std::string instance_name;
+  IdbInstance* expected_instance;
+  int32_t x;
+  int32_t y;
+};
+
 class DataManager
 {
  public:
@@ -239,6 +247,7 @@ class DataManager
   bool isOnIOSite(int32_t llx, int32_t lly, int32_t urx, int32_t ury, IdbOrient orient);
   bool checkInstPlacer(int32_t llx, int32_t lly, int32_t urx, int32_t ury, IdbOrient orient);
   void write_placement_back(const float* x, const float* y, int len);
+  std::size_t write_selected_placement_back(const std::vector<InstancePlacementUpdate>& updates);
   std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int> isAllNetConnected();
   bool isNetConnected(std::string net_name);
   bool isNetConnected(IdbNet* net);

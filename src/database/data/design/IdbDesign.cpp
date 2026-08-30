@@ -132,6 +132,10 @@ IdbDesign::IdbDesign(IdbLayout* layout)
 
 IdbDesign::~IdbDesign()
 {
+  if (_units != nullptr) {
+    delete _units;
+    _units = nullptr;
+  }
   if (_instance_list != nullptr) {
     delete _instance_list;
     _instance_list = nullptr;
@@ -1264,7 +1268,7 @@ bool IdbDesign::writeConnectivitySnapshot(const std::string& path, bool check_fl
 
 bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point_list, IdbLayer* layer)
 {
-  if (point_list.size() < _POINT_MAX_ || layer == nullptr) {
+  if (point_list.size() < _POINT_MAX_ || layer == nullptr || _layout == nullptr || _io_pin_list == nullptr || _special_net_list == nullptr) {
     return false;
   }
 
@@ -1317,6 +1321,9 @@ bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point
 
 bool IdbDesign::connectPowerStripe(vector<IdbCoordinate<int32_t>*>& point_list, string net_name, string layer_name)
 {
+  if (_special_net_list == nullptr) {
+    return false;
+  }
   return _special_net_list->addPowerStripe(point_list, net_name, layer_name);
 }
 

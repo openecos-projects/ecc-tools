@@ -14,18 +14,32 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "tcl_sta.h"
+#include <cassert>
+#include <cstdlib>
+#include <cstring>
+#include <stdexcept>
+#include <string>
 
-namespace tcl {
+#include "utility/logger/Logger.hpp"
 
-TclRemoveWireLoadModel::TclRemoveWireLoadModel(const char* cmd_name) : TclCmd(cmd_name)
+int main()
 {
-}
+  setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1);
 
-unsigned TclRemoveWireLoadModel::exec()
-{
-  // Wire-load models are not modeled by iSTA yet.
-  return check();
-}
+  ecc::Logger& logger = ecc::Logger::getInst();
 
-}  // namespace tcl
+  // info/warn must not throw in throw-on-error mode.
+  logger.info(ecc::Loc::current(), "info message should not throw");
+  logger.warn(ecc::Loc::current(), "warn message should not throw");
+
+  bool threw = false;
+  try {
+    logger.error(ecc::Loc::current(), "boom", 42);
+  } catch (const std::runtime_error& e) {
+    threw = true;
+    assert(std::strcmp(e.what(), "boom42") == 0);
+  }
+  assert(threw);
+
+  return 0;
+}

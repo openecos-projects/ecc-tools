@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <limits>
 #include <ranges>
 #include <unordered_map>
 #include <utility>
@@ -119,20 +120,149 @@ auto FindSegmentCandidateFrontierSet(const std::unordered_map<unsigned, SegmentC
   return it == entry_sets.end() ? nullptr : &it->second;
 }
 
+struct StagedSegmentCandidate
+{
+  const SegmentChar* upstream = nullptr;
+  const SegmentChar* downstream = nullptr;
+  SegmentChar composed;
+  PatternCompositionState composition_state;
+  std::size_t ordinal = 0U;
+};
+
+auto BuildStagedSegmentStateKey(const StagedSegmentCandidate& candidate) -> SegmentFrontierStateKey
+{
+  return SegmentFrontierStateKey{
+      .input_slew_idx = candidate.composed.get_input_slew_idx(),
+      .driven_cap_idx = candidate.composed.get_driven_cap_idx(),
+      .output_slew_idx = candidate.composed.get_output_slew_idx(),
+      .load_cap_idx = candidate.composed.get_load_cap_idx(),
+      .source_boundary_net_switch_power_w = candidate.composed.get_source_boundary_net_switch_power(),
+      .terminal_semantic = candidate.composition_state.terminal_semantic,
+      .monotonic_boundary_state = candidate.composition_state.monotonic_boundary_state,
+      .source_exposed_load_count = candidate.composition_state.source_exposed_load_count,
+  };
+}
+
+auto StagedSegmentCandidateDominates(const StagedSegmentCandidate& lhs, const StagedSegmentCandidate& rhs) -> bool
+{
+  const bool not_worse = lhs.composed.get_delay() <= rhs.composed.get_delay() && lhs.composed.get_power() <= rhs.composed.get_power();
+  if (!not_worse) {
+    return false;
+  }
+  if (lhs.composed.get_delay() < rhs.composed.get_delay() || lhs.composed.get_power() < rhs.composed.get_power()) {
+    return true;
+  }
+  return lhs.ordinal < rhs.ordinal;
+}
+
+struct SegmentFrontierJoinInput
+{
+  const std::vector<SegmentChar>* upstream = nullptr;
+  const std::vector<SegmentChar>* downstream = nullptr;
+};
+
+struct SegmentFrontierCompositionBuild
+{
+  std::vector<SegmentChar> entries;
+  unsigned next_pattern_id = 0U;
+  std::size_t join_attempt_count = 0U;
+  bool join_budget_exceeded = false;
+};
+
+auto ComposeSegmentCandidateFrontierEntriesAcrossInputs(const std::vector<SegmentFrontierJoinInput>& join_inputs, BufferPatternLibrary& pattern_library,
+                                                        unsigned start_pattern_id, std::size_t maximum_join_attempts) -> SegmentFrontierCompositionBuild
+{
+  SegmentPatternLibraryCombiner combiner(pattern_library, start_pattern_id);
+  std::unordered_map<SegmentFrontierStateKey, std::size_t, SegmentFrontierStateKeyHash> group_to_index;
+  std::vector<std::vector<StagedSegmentCandidate>> staged_groups;
+  std::size_t ordinal = 0U;
+  std::size_t join_attempt_count = 0U;
+
+  for (const auto& join_input : join_inputs) {
+    if (join_input.upstream == nullptr || join_input.downstream == nullptr || join_input.upstream->empty() || join_input.downstream->empty()) {
+      continue;
+    }
+    const auto& upstream = *join_input.upstream;
+    const auto& downstream = *join_input.downstream;
+    std::unordered_map<unsigned, std::vector<std::size_t>> downstream_by_key;
+    downstream_by_key.reserve(downstream.size());
+    for (std::size_t index = 0U; index < downstream.size(); ++index) {
+      downstream_by_key[SegmentTraits::buildKey(downstream[index])].push_back(index);
+    }
+
+    for (const auto& upstream_entry : upstream) {
+      const auto downstream_iter = downstream_by_key.find(SegmentTraits::probeKey(upstream_entry));
+      if (downstream_iter == downstream_by_key.end()) {
+        continue;
+      }
+      for (const auto downstream_index : downstream_iter->second) {
+        if (join_attempt_count >= maximum_join_attempts) {
+          return SegmentFrontierCompositionBuild{
+              .entries = {},
+              .next_pattern_id = combiner.get_next_id(),
+              .join_attempt_count = join_attempt_count,
+              .join_budget_exceeded = true,
+          };
+        }
+        ++join_attempt_count;
+        const auto& downstream_entry = downstream[downstream_index];
+        if (!combiner.canCompose(upstream_entry.get_pattern_id(), downstream_entry.get_pattern_id())) {
+          continue;
+        }
+
+        StagedSegmentCandidate candidate{
+            .upstream = &upstream_entry,
+            .downstream = &downstream_entry,
+            .composed = SegmentChar::compose(upstream_entry, downstream_entry, PatternId::segment(0U)),
+            .composition_state = combiner.composeState(upstream_entry.get_pattern_id(), downstream_entry.get_pattern_id()),
+            .ordinal = ordinal++,
+        };
+        const auto group_key = BuildStagedSegmentStateKey(candidate);
+        auto [group_iter, inserted] = group_to_index.emplace(group_key, staged_groups.size());
+        if (inserted) {
+          staged_groups.emplace_back();
+        }
+        auto& frontier = staged_groups[group_iter->second];
+        if (std::ranges::any_of(frontier,
+                                [&](const StagedSegmentCandidate& existing) -> bool { return StagedSegmentCandidateDominates(existing, candidate); })) {
+          continue;
+        }
+        const auto removed = std::ranges::remove_if(
+            frontier, [&](const StagedSegmentCandidate& existing) -> bool { return StagedSegmentCandidateDominates(candidate, existing); });
+        frontier.erase(removed.begin(), removed.end());
+        frontier.push_back(std::move(candidate));
+      }
+    }
+  }
+
+  std::vector<SegmentChar> frontier_entries;
+  std::size_t survivor_count = 0U;
+  for (const auto& group : staged_groups) {
+    survivor_count += group.size();
+  }
+  frontier_entries.reserve(survivor_count);
+  for (const auto& group : staged_groups) {
+    for (const auto& survivor : group) {
+      const auto merged_pattern_id = combiner.combine(survivor.upstream->get_pattern_id(), survivor.downstream->get_pattern_id());
+      frontier_entries.push_back(SegmentChar::compose(*survivor.upstream, *survivor.downstream, merged_pattern_id));
+    }
+  }
+  SortSegmentFrontierEntries(frontier_entries);
+  return SegmentFrontierCompositionBuild{
+      .entries = std::move(frontier_entries),
+      .next_pattern_id = combiner.get_next_id(),
+      .join_attempt_count = join_attempt_count,
+      .join_budget_exceeded = false,
+  };
+}
+
 auto ComposeSegmentCandidateFrontierEntries(const std::vector<SegmentChar>& upstream, const std::vector<SegmentChar>& downstream,
                                             BufferPatternLibrary& pattern_library, unsigned start_pattern_id) -> std::pair<std::vector<SegmentChar>, unsigned>
 {
-  if (upstream.empty() || downstream.empty()) {
-    return {{}, start_pattern_id};
-  }
-
-  SegmentPatternLibraryCombiner combiner(pattern_library, start_pattern_id);
-  auto pruner = MakeSegmentStateFrontierPruner(
-      [&](const SegmentChar& entry) -> PatternCompositionState { return pattern_library.getCompositionState(entry.get_pattern_id()); });
-  std::vector<SegmentChar> frontier_entries;
-  detail::HashJoinConcat<SegmentChar, SegmentTraits>(upstream, downstream, combiner, frontier_entries, &pruner);
-  SortSegmentFrontierEntries(frontier_entries);
-  return {std::move(frontier_entries), combiner.get_next_id()};
+  auto build = ComposeSegmentCandidateFrontierEntriesAcrossInputs(
+      std::vector<SegmentFrontierJoinInput>{SegmentFrontierJoinInput{.upstream = &upstream, .downstream = &downstream}}, pattern_library, start_pattern_id,
+      std::numeric_limits<std::size_t>::max());
+  return {std::move(build.entries), build.next_pattern_id};
 }
 
 auto ComposeSegmentCandidateFrontierSet(const SegmentCandidateFrontierSet& upstream, const SegmentCandidateFrontierSet& downstream,

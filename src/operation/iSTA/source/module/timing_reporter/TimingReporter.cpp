@@ -93,57 +93,14 @@ std::string stableTimingPathId(const std::string& value)
   return stream.str();
 }
 
-std::string normalizeTimingReportOption(std::string value)
-{
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-  std::replace(value.begin(), value.end(), '-', '_');
-  return value;
-}
-
 std::vector<DelayType> getReportDelayTypeList()
 {
-  const std::string delay_type = normalizeTimingReportOption(STADM.getConfig().timing_report_delay_type);
-  if (delay_type == "max" || delay_type == "setup" || delay_type.empty()) {
-    return {DelayType::kMax};
-  }
-  if (delay_type == "min" || delay_type == "hold") {
-    return {DelayType::kMin};
-  }
-  if (delay_type == "max_min" || delay_type == "min_max" || delay_type == "all") {
-    return {DelayType::kMax, DelayType::kMin};
-  }
-
-  STALOG.warn(Loc::current(), "Unrecognized timing report delay_type='", STADM.getConfig().timing_report_delay_type,
-              "', use default 'max'.");
-  return {DelayType::kMax};
+  return {DelayType::kMax, DelayType::kMin};
 }
 
 std::vector<StartEndType> getReportStartEndTypeList()
 {
-  const std::string start_end_type = normalizeTimingReportOption(STADM.getConfig().timing_report_start_end_type);
-  if (start_end_type.empty() || start_end_type == "all" || start_end_type == "none") {
-    return {StartEndType::kNone};
-  }
-  if (start_end_type == "all_separate" || start_end_type == "separate") {
-    return {StartEndType::kInToOut, StartEndType::kInToReg, StartEndType::kRegToOut, StartEndType::kRegToReg};
-  }
-  if (start_end_type == "in_to_out" || start_end_type == "in2out") {
-    return {StartEndType::kInToOut};
-  }
-  if (start_end_type == "in_to_reg" || start_end_type == "in2reg") {
-    return {StartEndType::kInToReg};
-  }
-  if (start_end_type == "reg_to_out" || start_end_type == "reg2out") {
-    return {StartEndType::kRegToOut};
-  }
-  if (start_end_type == "reg_to_reg" || start_end_type == "reg2reg") {
-    return {StartEndType::kRegToReg};
-  }
-
-  STALOG.warn(Loc::current(), "Unrecognized timing report start_end_type='",
-              STADM.getConfig().timing_report_start_end_type, "', use default 'all'.");
-  return {StartEndType::kNone};
+  return {StartEndType::kInToOut, StartEndType::kInToReg, StartEndType::kRegToOut, StartEndType::kRegToReg};
 }
 
 bool hasImplicitReportSlackLesserThan()
@@ -1305,6 +1262,17 @@ double TimingReporter::getClockPeriod(std::string& clock_name)
   return 0.0;
 }
 
+double TimingReporter::getClockUncertainty(std::string& clock_name, DelayType delay_type)
+{
+  Database& database = STADM.getDatabase();
+  auto& clock_map = database.get_timing_constraint().get_clock_map();
+  auto clock_it = clock_map.find(clock_name);
+  if (clock_it == clock_map.end()) {
+    return 0.0;
+  }
+  return delay_type == DelayType::kMin ? clock_it->second.get_hold_uncertainty() : clock_it->second.get_setup_uncertainty();
+}
+
 double TimingReporter::getInputDelay(TimingPath& timing_path, DelayType delay_type)
 {
   Database& database = STADM.getDatabase();
@@ -1400,6 +1368,15 @@ void TimingReporter::outputRequiredClockInfo(std::ofstream* report_file, TimingP
   outputTimingLine(report_file, "clock reconvergence pessimism", timing_path.get_clock_reconvergence_pessimism(), capture_time, true, "", label_width);
   if (!timing_path.get_capture_clock_pin().empty()) {
     outputTimingLine(report_file, getPinLabel(timing_path.get_capture_clock_pin()), 0.0, capture_time, false, "r", label_width);
+  }
+  double uncertainty = getClockUncertainty(clock_name, delay_type);
+  if (uncertainty > STA_ERROR) {
+    double signed_uncertainty = delay_type == DelayType::kMax ? -uncertainty : uncertainty;
+    double required_before_check = timing_path.get_required_time();
+    if (std::fabs(timing_path.get_check_time()) > STA_ERROR) {
+      required_before_check -= delay_type == DelayType::kMax ? -timing_path.get_check_time() : timing_path.get_check_time();
+    }
+    outputTimingLine(report_file, "clock uncertainty", signed_uncertainty, required_before_check, true, "", label_width);
   }
   if (std::fabs(timing_path.get_check_time()) > STA_ERROR) {
     double check_time = timing_path.get_check_time();
