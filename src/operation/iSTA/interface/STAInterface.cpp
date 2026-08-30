@@ -262,8 +262,6 @@ void STAInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   if (!STADM.getConfig().is_path_report_number_specified && STADM.getConfig().endpoint_path_report_number > 1) {
     STADM.getConfig().path_report_number = STADM.getConfig().endpoint_path_report_number;
   }
-  STADM.getConfig().timing_report_delay_type = STAUTIL.getConfigValue<std::string>(config_map, "-delay_type", "max");
-  STADM.getConfig().timing_report_start_end_type = STAUTIL.getConfigValue<std::string>(config_map, "-start_end_type", "all");
   STADM.getConfig().has_timing_report_slack_lesser_than = STAUTIL.exist(config_map, std::string("-slack_lesser_than"));
   if (STADM.getConfig().has_timing_report_slack_lesser_than) {
     STADM.getConfig().timing_report_slack_lesser_than = std::any_cast<double>(config_map["-slack_lesser_than"]);

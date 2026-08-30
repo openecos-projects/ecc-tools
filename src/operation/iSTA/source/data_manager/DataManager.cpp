@@ -335,10 +335,6 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.path_report_number);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "endpoint_path_report_number");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.endpoint_path_report_number);
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_report_delay_type");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_report_delay_type);
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_report_start_end_type");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_report_start_end_type);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "has_timing_report_slack_lesser_than");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.has_timing_report_slack_lesser_than);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_report_slack_lesser_than");
