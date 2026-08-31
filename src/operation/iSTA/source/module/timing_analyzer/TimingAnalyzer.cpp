@@ -335,7 +335,7 @@ double TimingAnalyzer::getEndPointRequired(std::string& start_point, std::string
   if (pin.get_is_port()) {
     std::map<std::string, TimingPortConstraint>& port_constraint_map = database.get_timing_constraint().get_port_constraint_map();
     if (analysis_type == AnalysisType::kMin && port_constraint_map.count(end_point) > 0 && port_constraint_map[end_point].get_has_output_delay_min()) {
-      return port_constraint_map[end_point].get_output_delay_min();
+      return getEndPointCaptureTime(end_point, analysis_type) - port_constraint_map[end_point].get_output_delay_min();
     }
     if (port_constraint_map.count(end_point) > 0 && port_constraint_map[end_point].get_has_output_delay_max()) {
       return getEndPointCaptureTime(end_point, analysis_type) - port_constraint_map[end_point].get_output_delay_max();
@@ -348,7 +348,6 @@ double TimingAnalyzer::getEndPointRequired(std::string& start_point, std::string
   Instance& instance = database.get_instance_map()[pin.get_instance_name()];
   TimingCheckArc* timing_check_arc = getEndPointCheckArc(end_point, analysis_type);
   if (instance.get_is_sequential() && timing_check_arc != nullptr && isMatchCheckTransType(*timing_check_arc, data_trans_type)) {
-    const auto& clock_name = getClockName(end_point);
     double check_time = getEndPointCheckTime(end_point, *timing_check_arc, analysis_type, data_trans_type, data_slew);
     std::string common_pin_name;
     double cppr = getClockReconvergencePessimism(start_point, end_point, analysis_type, common_pin_name);
