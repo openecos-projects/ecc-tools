@@ -1115,7 +1115,7 @@ std::size_t TimingReporter::getTimingLineLabelWidth(TimingPath& timing_path, Del
   std::size_t label_width = 35;
   std::string clock_name = getClockName(timing_path);
   updateTimingLineLabelWidth(label_width, STAUTIL.getString("clock ", clock_name, " (rise edge)"));
-  updateTimingLineLabelWidth(label_width, "clock network delay (propagated)");
+  updateTimingLineLabelWidth(label_width, getClockNetworkDelayLabel(timing_path));
 
   std::string start_clock_pin = getStartClockPin(timing_path);
   if (!start_clock_pin.empty() && start_clock_pin != timing_path.get_start_point()) {
@@ -1166,7 +1166,7 @@ bool TimingReporter::shouldOutputTimingPoint(TimingPath& timing_path, TimingPath
   return pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout;
 }
 
-void TimingReporter::updateTimingLineLabelWidth(std::size_t& label_width, std::string label)
+void TimingReporter::updateTimingLineLabelWidth(std::size_t& label_width, std::string_view label)
 {
   label_width = std::max(label_width, label.length());
 }
@@ -1185,12 +1185,12 @@ void TimingReporter::outputLaunchClockInfo(std::ofstream* report_file, TimingPat
   double launch_time = timing_path.get_launch_time();
   double launch_clock_network_delay = timing_path.get_launch_clock_network_delay();
   double launch_clock_edge = isClockSourceStartPoint(timing_path.get_start_point()) ? launch_time : 0.0;
-  outputTimingLine(report_file, STAUTIL.getString("clock ", clock_name, " (", getLaunchClockEdgeText(timing_path, delay_type), " edge)"),
-                   launch_clock_edge, launch_clock_edge, true, "", label_width);
+  outputTimingLine(report_file, STAUTIL.getString("clock ", clock_name, " (", getLaunchClockEdgeText(timing_path, delay_type), " edge)"), launch_clock_edge,
+                   launch_clock_edge, true, "", label_width);
   if (isClockSourceStartPoint(timing_path.get_start_point())) {
     outputTimingLine(report_file, "clock source latency", 0.0, launch_time, true, "", label_width);
   } else {
-    outputTimingLine(report_file, "clock network delay (propagated)", launch_clock_network_delay, launch_time, true, "", label_width);
+    outputTimingLine(report_file, getClockNetworkDelayLabel(timing_path), launch_clock_network_delay, launch_time, true, "", label_width);
   }
 
   std::string start_clock_pin = getStartClockPin(timing_path);
@@ -1216,7 +1216,7 @@ std::string TimingReporter::getLaunchClockEdgeText(TimingPath& timing_path, Dela
   return GetTransTypeName()(TransType::kRise);
 }
 
-void TimingReporter::outputTimingLine(std::ofstream* report_file, std::string label, double incr, double path, bool has_incr, std::string transition,
+void TimingReporter::outputTimingLine(std::ofstream* report_file, std::string_view label, double incr, double path, bool has_incr, std::string transition,
                                       std::size_t label_width)
 {
   if (has_incr) {
@@ -1247,6 +1247,18 @@ std::string TimingReporter::getClockName(TimingPath& timing_path)
     return clock_map.begin()->first;
   }
   return "clk";
+}
+
+std::string_view TimingReporter::getClockNetworkDelayLabel(TimingPath& timing_path)
+{
+  Database& database = STADM.getDatabase();
+  std::string clock_name = getClockName(timing_path);
+  const auto& clock_map = database.get_timing_constraint().get_clock_map();
+  auto clock_it = clock_map.find(clock_name);
+  const bool is_propagated = clock_it != clock_map.end() && clock_it->second.get_is_propagated();
+  constexpr std::string_view ideal{"clock network delay (ideal)"};
+  constexpr std::string_view propagated{"clock network delay (propagated)"};
+  return is_propagated ? propagated : ideal;
 }
 
 double TimingReporter::getClockPeriod(std::string& clock_name)
@@ -1363,7 +1375,7 @@ void TimingReporter::outputRequiredClockInfo(std::ofstream* report_file, TimingP
   double clock_edge = delay_type == DelayType::kMin ? 0.0 : getClockPeriod(clock_name);
   double capture_clock_network_delay = timing_path.get_capture_clock_network_delay();
   outputTimingLine(report_file, STAUTIL.getString("clock ", clock_name, " (rise edge)"), clock_edge, clock_edge, true, "", label_width);
-  outputTimingLine(report_file, "clock network delay (propagated)", capture_clock_network_delay, clock_edge + capture_clock_network_delay, true, "",
+  outputTimingLine(report_file, getClockNetworkDelayLabel(timing_path), capture_clock_network_delay, clock_edge + capture_clock_network_delay, true, "",
                    label_width);
   outputTimingLine(report_file, "clock reconvergence pessimism", timing_path.get_clock_reconvergence_pessimism(), capture_time, true, "", label_width);
   if (!timing_path.get_capture_clock_pin().empty()) {
