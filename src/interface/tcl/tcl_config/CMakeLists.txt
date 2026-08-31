@@ -7,7 +7,6 @@ add_library(tcl_config
 target_link_libraries(tcl_config
     PUBLIC
         tcl
-        flow
         tool_manager
         ecc_logger
 )
@@ -15,4 +14,5 @@ target_link_libraries(tcl_config
 target_include_directories(tcl_config
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${HOME_INTERFACE}/tcl
 )

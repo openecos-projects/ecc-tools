@@ -20,7 +20,6 @@ add_library(idm
 target_link_libraries(idm
     PUBLIC
     IdbBuilder
-    flow
     liberty
     spef
     vcd
@@ -34,9 +33,6 @@ target_include_directories(idm
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/config
         ${CMAKE_CURRENT_SOURCE_DIR}/checker
-
-        ${HOME_PLATFORM}/flow
-        ${HOME_PLATFORM}/flow/config
 
         ${HOME_PLATFORM}/tool_manager
 
