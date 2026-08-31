@@ -22,20 +22,6 @@ namespace tcl {
 
 #if 1  // zh
 
-class TclZHFixFanout : public TclCmd
-{
- public:
-  explicit TclZHFixFanout(const char* cmd_name);
-  ~TclZHFixFanout() override = default;
-
-  unsigned check() override { return 1; };
-
-  unsigned exec() override;
-
- private:
-  std::vector<std::pair<std::string, ValueType>> _config_list;
-};
-
 class TclZHInsertFiller : public TclCmd
 {
  public:
