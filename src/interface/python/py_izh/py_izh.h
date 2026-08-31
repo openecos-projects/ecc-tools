@@ -20,7 +20,6 @@
 
 namespace python_interface {
 
-bool fix_fanout(const std::string& config);
 bool insert_filler(const std::string& config);
 bool insert_metal(const std::string& config);
 
