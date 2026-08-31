@@ -14,6 +14,7 @@ target_link_libraries(tcl_geometry
 target_include_directories(tcl_geometry
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${HOME_INTERFACE}/tcl
         ${HOME_DATABASE}/data/geometry
         ${HOME_DATABASE}/manager/builder/geometry_builder
         ${HOME_PLATFORM}/data_manager

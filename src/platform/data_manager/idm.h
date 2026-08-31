@@ -78,6 +78,10 @@ class DataManager
   DataConfig& get_config() { return _config; };
   IdbBuilder* get_idb_builder() { return _idb_builder; }
   void set_idb_builder(IdbBuilder* idb_builder) { _idb_builder = idb_builder; }
+  const DefReadError* get_last_def_read_error() const
+  {
+    return _idb_builder == nullptr ? nullptr : _idb_builder->get_last_def_read_error();
+  }
   IdbDefService* get_idb_def_service() { return _idb_def_service; }
   IdbDefService* get_idb_verilog_service() { return _idb_verilog_service; }
   void set_idb_def_service(IdbDefService* idb_def_service) { _idb_def_service = idb_def_service; }
