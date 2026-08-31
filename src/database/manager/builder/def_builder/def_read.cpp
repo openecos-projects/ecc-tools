@@ -67,15 +67,57 @@ bool DefRead::check_type(defrCallbackType_e type)
   }
 }
 
+void DefRead::parserErrorCallback(defiUserData data, const char* message)
+{
+  auto* def_reader = static_cast<DefRead*>(data);
+  if (def_reader != nullptr) {
+    def_reader->recordError("parser", message, kDbFail, defrLongLineNumber());
+  }
+}
+
+int32_t DefRead::recordCallbackResult(std::string_view stage, int32_t status)
+{
+  if (status != kDbSuccess) {
+    recordError(stage, "DEF callback returned a failure status.", status, defrLongLineNumber());
+  }
+
+  return status;
+}
+
+void DefRead::resetError(const char* file)
+{
+  _last_error.reset();
+  _file_path = file;
+}
+
+void DefRead::recordError(std::string_view stage, const char* message, int32_t status, int64_t line_number)
+{
+  if (_last_error) {
+    return;
+  }
+
+  _last_error = DefReadError{_file_path, line_number, std::string(stage), message == nullptr ? "Unknown DEF read error." : message, status};
+}
+
+void DefRead::logError() const
+{
+  if (const auto* error = get_last_error()) {
+    ECCLOG.warn(ecc::Loc::current(), "DEF read failed: file=", error->file_path, ", line=", error->line_number,
+                ", stage=", error->stage, ", status=", error->status, ", message=", error->message);
+  }
+}
+
 bool DefRead::createDb(const char* file)
 {
   if (std::string_view(file).find(".gz") != std::string_view::npos) {
     return createDbGzip(file);
   } else {
+    resetError(file);
     FILE* f = fopen(file, "r");
 
     if (f == NULL) {
-      ECCLOG.warn(ecc::Loc::current(), "Open def file failed...");
+      recordError("file", "Open DEF file failed.", kDbFail, 0);
+      logError();
       return false;
     }
 
@@ -83,6 +125,7 @@ bool DefRead::createDb(const char* file)
     defrReset();
 
     defrInitSession();
+    defrSetContextLogFunction(parserErrorCallback);
     defrSetVersionStrCbk(versionCallback);
     defrSetDesignCbk(designCallback);
     defrSetBusBitCbk(busBitCharsCallBack);
@@ -132,9 +175,8 @@ bool DefRead::createDb(const char* file)
     // void* userData = (void*) 0x01020304;
 
     int res = defrRead(f, file, (defiUserData) this, /* case sensitive */ 1);
-
-    if (res != 0) {
-      return false;
+    if (res != 0 && get_last_error() == nullptr) {
+      recordError("parser", "DEF parser returned a failure status.", res, defrLongLineNumber());
     }
 
     (void) defrUnsetCallbacks();
@@ -244,10 +286,16 @@ bool DefRead::createDb(const char* file)
     defrUnsetViaExtCbk();
     defrUnsetViaStartCbk();
     defrUnsetViaEndCbk();
+    defrSetContextLogFunction(nullptr);
 
     defrClear();
 
     fclose(f);
+
+    if (res != 0) {
+      logError();
+      return false;
+    }
 
     return true;
   }
@@ -255,10 +303,12 @@ bool DefRead::createDb(const char* file)
 
 bool DefRead::createDbGzip(const char* gzip_file)
 {
+  resetError(gzip_file);
   defGZFile f = defrGZipOpen(gzip_file, "r");
 
   if (f == NULL) {
-    ECCLOG.warn(ecc::Loc::current(), "Open def file failed...");
+    recordError("file", "Open gzip DEF file failed.", kDbFail, 0);
+    logError();
     return false;
   }
 
@@ -266,6 +316,7 @@ bool DefRead::createDbGzip(const char* gzip_file)
   defrReset();
 
   defrInitSession();
+  defrSetContextLogFunction(parserErrorCallback);
   defrSetGZipReadFunction();
   defrSetVersionStrCbk(versionCallback);
   defrSetDesignCbk(designCallback);
@@ -316,9 +367,8 @@ bool DefRead::createDbGzip(const char* gzip_file)
   // void* userData = (void*) 0x01020304;
 
   int res = defrReadGZip(f, gzip_file, (defiUserData) this);
-
-  if (res != 0) {
-    return false;
+  if (res != 0 && get_last_error() == nullptr) {
+    recordError("parser", "DEF parser returned a failure status.", res, defrLongLineNumber());
   }
 
   (void) defrUnsetCallbacks();
@@ -428,10 +478,16 @@ bool DefRead::createDbGzip(const char* gzip_file)
   defrUnsetViaExtCbk();
   defrUnsetViaStartCbk();
   defrUnsetViaEndCbk();
+  defrSetContextLogFunction(nullptr);
 
   defrClear();
 
   defrGZipClose(f);
+
+  if (res != 0) {
+    logError();
+    return false;
+  }
 
   return true;
 }
@@ -666,9 +722,7 @@ int32_t DefRead::unitsCallback(defrCallbackType_e type, double d, defiUserData d
     return kDbFail;
   }
 
-  def_reader->parse_units(d);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("units", def_reader->parse_units(d));
 }
 
 int32_t DefRead::parse_units(double microns)
@@ -701,9 +755,7 @@ int32_t DefRead::dieAreaCallback(defrCallbackType_e type, defiBox* def_box, defi
     return kDbFail;
   }
 
-  def_reader->parse_die(def_box);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("die area", def_reader->parse_die(def_box));
 }
 
 int32_t DefRead::parse_die(defiBox* def_box)
@@ -741,9 +793,7 @@ int32_t DefRead::trackGridCallback(defrCallbackType_e type, defiTrack* def_track
     return kDbFail;
   }
 
-  def_reader->parse_track_grid(def_track);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("track grid", def_reader->parse_track_grid(def_track));
 }
 
 int32_t DefRead::parse_track_grid(defiTrack* def_track)
@@ -799,9 +849,7 @@ int32_t DefRead::rowCallback(defrCallbackType_e type, defiRow* def_row, defiUser
     return kDbFail;
   }
 
-  def_reader->parse_row(def_row);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("row", def_reader->parse_row(def_row));
 }
 
 int32_t DefRead::parse_row(defiRow* def_row)
@@ -876,7 +924,7 @@ int32_t DefRead::componentsCallback(defrCallbackType_e type, defiComponent* def_
     return kDbFail;
   }
 
-  return def_reader->parse_component(def_component);
+  return def_reader->recordCallbackResult("component", def_reader->parse_component(def_component));
 }
 
 int32_t DefRead::parse_component(defiComponent* def_component)
@@ -1015,9 +1063,7 @@ int32_t DefRead::netCallback(defrCallbackType_e type, defiNet* def_net, defiUser
     return kDbFail;
   }
 
-  def_reader->parse_net(def_net);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("net", def_reader->parse_net(def_net));
 }
 
 int32_t DefRead::parse_net(defiNet* def_net)
@@ -1269,9 +1315,7 @@ int32_t DefRead::specialNetCallback(defrCallbackType_e type, defiNet* def_net, d
     return kDbFail;
   }
 
-  def_reader->parse_special_net(def_net);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("special net", def_reader->parse_special_net(def_net));
 }
 
 int32_t DefRead::parse_special_net(defiNet* def_net)
@@ -1571,9 +1615,7 @@ int32_t DefRead::pinCallback(defrCallbackType_e type, defiPin* def_pin, defiUser
     return kDbFail;
   }
 
-  def_reader->parse_pin(def_pin);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("pin", def_reader->parse_pin(def_pin));
 }
 /**
  * @brief Parse IO pins, create each IO Term in IdbPin
@@ -1804,9 +1846,7 @@ int32_t DefRead::viaCallback(defrCallbackType_e type, defiVia* def_via, defiUser
     return kDbFail;
   }
 
-  def_reader->parse_via(def_via);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("via", def_reader->parse_via(def_via));
 }
 
 int32_t DefRead::parse_via(defiVia* def_via)
@@ -1969,9 +2009,7 @@ int32_t DefRead::blockageCallback(defrCallbackType_e type, defiBlockage* def_blo
     return kDbFail;
   }
 
-  def_reader->parse_blockage(def_blockage);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("blockage", def_reader->parse_blockage(def_blockage));
 }
 
 int32_t DefRead::parse_blockage(defiBlockage* def_blockage)
@@ -2066,9 +2104,7 @@ int32_t DefRead::gcellGridCallback(defrCallbackType_e type, defiGcellGrid* def_g
     return kDbFail;
   }
 
-  def_reader->parse_gcell_grid(def_grid);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("gcell grid", def_reader->parse_gcell_grid(def_grid));
 }
 
 int32_t DefRead::parse_gcell_grid(defiGcellGrid* def_grid)
@@ -2107,9 +2143,7 @@ int32_t DefRead::regionCallback(defrCallbackType_e type, defiRegion* def_region,
     return kDbFail;
   }
 
-  def_reader->parse_region(def_region);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("region", def_reader->parse_region(def_region));
 }
 
 int32_t DefRead::parse_region(defiRegion* def_region)
@@ -2149,9 +2183,7 @@ int32_t DefRead::slotsCallback(defrCallbackType_e type, defiSlot* def_slot, defi
     return kDbFail;
   }
 
-  def_reader->parse_slot(def_slot);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("slot", def_reader->parse_slot(def_slot));
 }
 
 int32_t DefRead::parse_slot(defiSlot* def_slot)
@@ -2190,9 +2222,7 @@ int32_t DefRead::groupCallback(defrCallbackType_e type, defiGroup* def_group, de
     return kDbFail;
   }
 
-  def_reader->parse_group(def_group);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("group", def_reader->parse_group(def_group));
 }
 
 int32_t DefRead::parse_group(defiGroup* def_group)
@@ -2250,9 +2280,7 @@ int32_t DefRead::fillCallback(defrCallbackType_e type, defiFill* def_fill, defiU
     return kDbFail;
   }
 
-  def_reader->parse_fill(def_fill);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("fill", def_reader->parse_fill(def_fill));
 }
 
 int32_t DefRead::parse_fill(defiFill* def_fill)
@@ -2325,9 +2353,7 @@ int32_t DefRead::busBitCharsCallBack(defrCallbackType_e c, const char* bus_bit_c
     ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : BusBitChars] ...");
     return kDbFail;
   }
-  int32_t parse_status = def_reader->parse_bus_bit_chars(bus_bit_chars_str);
-
-  return parse_status;
+  return def_reader->recordCallbackResult("bus bit characters", def_reader->parse_bus_bit_chars(bus_bit_chars_str));
 }
 
 int32_t DefRead::parse_bus_bit_chars(const char* bus_bit_chars_str)
