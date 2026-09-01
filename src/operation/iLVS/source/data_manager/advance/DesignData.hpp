@@ -42,10 +42,7 @@ class DesignData
   const std::map<std::string, Net>& get_net_map() const { return _net_map; }
   // setter
   void set_design_name(const std::string& design_name) { _design_name = design_name; }
-  void set_io_terminal_name_list(const std::vector<std::string>& io_terminal_name_list)
-  {
-    _io_terminal_name_list = io_terminal_name_list;
-  }
+  void set_io_terminal_name_list(const std::vector<std::string>& io_terminal_name_list) { _io_terminal_name_list = io_terminal_name_list; }
   // function
   void normalize()
   {

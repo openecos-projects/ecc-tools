@@ -14,11 +14,9 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include <cmath>
-#include <set>
-
 #include "DataManager.hpp"
 #include "Logger.hpp"
+#include "STAHeader.hpp"
 #include "SdcCommands.hpp"
 
 namespace ista::sdc {

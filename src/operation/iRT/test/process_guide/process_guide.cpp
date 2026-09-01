@@ -1,4 +1,3 @@
-#include "utility/logger/Logger.hpp"
 #include <cassert>
 #include <fstream>
 #include <iostream>
@@ -9,6 +8,7 @@
 #include "Guide.hpp"
 #include "Net.hpp"
 #include "Util.hpp"
+#include "utility/logger/Logger.hpp"
 
 void readGuide(const std::string& guide_file_path, std::vector<Net>& net_list)
 {

@@ -156,9 +156,8 @@ void PowerReporter::outputPowerGroup(std::ofstream* power_report_file, PowerGrou
                        << getPowerTableString(power_value.get_internal_power(), false) << std::setw(18)
                        << getPowerTableString(power_value.get_switching_power(), false) << std::setw(18)
                        << getPowerTableString(power_value.get_leakage_power(), true) << std::setw(18)
-                       << getPowerTableString(power_value.get_total_power(), false) << "  (" << std::setw(7) << std::fixed
-                       << std::setprecision(2) << getPercentage(power_value.get_total_power(), total_power) << "%)" << getPowerGroupAttribute(power_group_type)
-                       << "\n";
+                       << getPowerTableString(power_value.get_total_power(), false) << "  (" << std::setw(7) << std::fixed << std::setprecision(2)
+                       << getPercentage(power_value.get_total_power(), total_power) << "%)" << getPowerGroupAttribute(power_group_type) << "\n";
 }
 
 void PowerReporter::outputPowerAttribute(std::ofstream* power_report_file)
