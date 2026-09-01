@@ -18,8 +18,8 @@
 
 #include "Logger.hpp"
 #include "Monitor.hpp"
-#include "SdcCommand.hpp"
 #include "STAInterface.hpp"
+#include "SdcCommand.hpp"
 #include "Utility.hpp"
 
 namespace ista {
@@ -320,7 +320,6 @@ void DataManager::readConstraint()
     }
   }
 }
-
 
 void DataManager::printConfig()
 {

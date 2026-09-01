@@ -29,10 +29,7 @@ class SWModel
   // getter
   std::map<std::string, std::vector<Arc*>>& get_instance_cell_arc_map() { return _instance_cell_arc_map; }
   // setter
-  void set_instance_cell_arc_map(const std::map<std::string, std::vector<Arc*>>& instance_cell_arc_map)
-  {
-    _instance_cell_arc_map = instance_cell_arc_map;
-  }
+  void set_instance_cell_arc_map(const std::map<std::string, std::vector<Arc*>>& instance_cell_arc_map) { _instance_cell_arc_map = instance_cell_arc_map; }
   // function
 
  private:

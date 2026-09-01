@@ -73,22 +73,10 @@ class TimingCell
   void set_is_macro(const bool is_macro) { _is_macro = is_macro; }
   void set_has_clear_arc(const bool has_clear_arc) { _has_clear_arc = has_clear_arc; }
   void set_has_preset_arc(const bool has_preset_arc) { _has_preset_arc = has_preset_arc; }
-  void set_slew_lower_threshold_pct_rise(const double slew_lower_threshold_pct_rise)
-  {
-    _slew_lower_threshold_pct_rise = slew_lower_threshold_pct_rise;
-  }
-  void set_slew_upper_threshold_pct_rise(const double slew_upper_threshold_pct_rise)
-  {
-    _slew_upper_threshold_pct_rise = slew_upper_threshold_pct_rise;
-  }
-  void set_slew_lower_threshold_pct_fall(const double slew_lower_threshold_pct_fall)
-  {
-    _slew_lower_threshold_pct_fall = slew_lower_threshold_pct_fall;
-  }
-  void set_slew_upper_threshold_pct_fall(const double slew_upper_threshold_pct_fall)
-  {
-    _slew_upper_threshold_pct_fall = slew_upper_threshold_pct_fall;
-  }
+  void set_slew_lower_threshold_pct_rise(const double slew_lower_threshold_pct_rise) { _slew_lower_threshold_pct_rise = slew_lower_threshold_pct_rise; }
+  void set_slew_upper_threshold_pct_rise(const double slew_upper_threshold_pct_rise) { _slew_upper_threshold_pct_rise = slew_upper_threshold_pct_rise; }
+  void set_slew_lower_threshold_pct_fall(const double slew_lower_threshold_pct_fall) { _slew_lower_threshold_pct_fall = slew_lower_threshold_pct_fall; }
+  void set_slew_upper_threshold_pct_fall(const double slew_upper_threshold_pct_fall) { _slew_upper_threshold_pct_fall = slew_upper_threshold_pct_fall; }
   void set_input_threshold_pct_rise(const double input_threshold_pct_rise) { _input_threshold_pct_rise = input_threshold_pct_rise; }
   void set_output_threshold_pct_rise(const double output_threshold_pct_rise) { _output_threshold_pct_rise = output_threshold_pct_rise; }
   void set_input_threshold_pct_fall(const double input_threshold_pct_fall) { _input_threshold_pct_fall = input_threshold_pct_fall; }

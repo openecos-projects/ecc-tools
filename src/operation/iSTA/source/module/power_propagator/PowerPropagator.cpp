@@ -216,8 +216,7 @@ double PowerPropagator::getMinimumSlew(std::map<AnalysisType, std::map<TransType
 {
   double minimum_slew = std::numeric_limits<double>::infinity();
   for (AnalysisType analysis_type : {AnalysisType::kMax, AnalysisType::kMin}) {
-    if (slew_map.count(analysis_type) == 0 || slew_map[analysis_type].count(TransType::kRise) == 0
-        || slew_map[analysis_type].count(TransType::kFall) == 0) {
+    if (slew_map.count(analysis_type) == 0 || slew_map[analysis_type].count(TransType::kRise) == 0 || slew_map[analysis_type].count(TransType::kFall) == 0) {
       continue;
     }
     double average_slew = (slew_map[analysis_type][TransType::kRise] + slew_map[analysis_type][TransType::kFall]) / 2.0;
@@ -370,8 +369,7 @@ void PowerPropagator::propagateOutputActivity(std::string& pin_name)
 {
   Database& database = STADM.getDatabase();
   Pin& pin = database.get_pin_map()[pin_name];
-  if (database.get_instance_map().count(pin.get_instance_name()) > 0
-      && database.get_instance_map()[pin.get_instance_name()].get_is_sequential()) {
+  if (database.get_instance_map().count(pin.get_instance_name()) > 0 && database.get_instance_map()[pin.get_instance_name()].get_is_sequential()) {
     return;
   }
   PowerActivity activity = getOutputActivity(pin_name);
@@ -414,8 +412,8 @@ PowerActivity PowerPropagator::getOutputActivity(std::string& pin_name)
 
 void PowerPropagator::limitDataTransitionDensity(std::string& pin_name, PowerActivity& activity)
 {
-  if (!activity.get_is_valid() || activity.get_origin() == PowerActivityOrigin::kClock
-      || activity.get_origin() == PowerActivityOrigin::kVcd || activity.get_origin() == PowerActivityOrigin::kConstant) {
+  if (!activity.get_is_valid() || activity.get_origin() == PowerActivityOrigin::kClock || activity.get_origin() == PowerActivityOrigin::kVcd
+      || activity.get_origin() == PowerActivityOrigin::kConstant) {
     return;
   }
 

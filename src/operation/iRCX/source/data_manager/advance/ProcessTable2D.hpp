@@ -49,8 +49,7 @@ class ProcessTable2D
     if (!low_low_value.has_value()) {
       return std::nullopt;
     }
-    if (row_idx_range.get_lower_idx() == row_idx_range.get_upper_idx()
-        && column_idx_range.get_lower_idx() == column_idx_range.get_upper_idx()) {
+    if (row_idx_range.get_lower_idx() == row_idx_range.get_upper_idx() && column_idx_range.get_lower_idx() == column_idx_range.get_upper_idx()) {
       return low_low_value;
     }
 
@@ -115,8 +114,7 @@ class ProcessTable2D
   }
   std::optional<double> get_value(int32_t row_idx, int32_t column_idx) const
   {
-    if (row_idx < 0 || row_idx >= static_cast<int32_t>(_row_list.size()) || column_idx < 0
-        || column_idx >= static_cast<int32_t>(_column_list.size())) {
+    if (row_idx < 0 || row_idx >= static_cast<int32_t>(_row_list.size()) || column_idx < 0 || column_idx >= static_cast<int32_t>(_column_list.size())) {
       return std::nullopt;
     }
     int32_t value_idx = row_idx * static_cast<int32_t>(_column_list.size()) + column_idx;

@@ -16,11 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
-#include <cstdlib>
-#include <stdexcept>
-
-#include "LogLevel.hpp"
 #include "LVSHeader.hpp"
+#include "LogLevel.hpp"
 
 namespace ilvs {
 

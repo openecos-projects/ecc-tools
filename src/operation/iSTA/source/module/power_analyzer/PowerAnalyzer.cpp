@@ -177,16 +177,14 @@ double PowerAnalyzer::getInputTimingPowerArcPower(Instance& instance, TimingPowe
   }
   double internal_power = 0.0;
   for (TransType trans_type : {TransType::kRise, TransType::kFall}) {
-    double transition_density = trans_type == TransType::kRise ? sink_activity.get_rise_transition_density()
-                                                                 : sink_activity.get_fall_transition_density();
+    double transition_density = trans_type == TransType::kRise ? sink_activity.get_rise_transition_density() : sink_activity.get_fall_transition_density();
     double energy = getTimingPowerArcEnergy(instance, timing_power_arc, trans_type);
     internal_power += energy * transition_density * condition_probability * 1E-3;
   }
   return internal_power;
 }
 
-double PowerAnalyzer::getInputTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc,
-                                                                  PAInstanceModel& pa_instance_model)
+double PowerAnalyzer::getInputTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model)
 {
   Database& database = STADM.getDatabase();
   if (database.get_timing_library().get_cell_map().count(instance.get_cell_name()) == 0) {
@@ -202,8 +200,7 @@ double PowerAnalyzer::getInputTimingPowerArcConditionProbability(Instance& insta
     TimingCellPort& timing_cell_port = port_pair.second;
     std::string output_port_name = port_pair.first;
     if (!timing_cell_port.get_is_output() || !timing_power_arc.get_when_expression().get_has_port(output_port_name)
-        || timing_cell_port.get_function_expression().get_is_empty()
-        || !timing_cell_port.get_function_expression().get_has_port(input_port_name)) {
+        || timing_cell_port.get_function_expression().get_is_empty() || !timing_cell_port.get_function_expression().get_has_port(input_port_name)) {
       continue;
     }
     return getSensitivityProbability(timing_cell_port.get_function_expression(), input_port_name, instance, pa_instance_model);
@@ -227,16 +224,14 @@ double PowerAnalyzer::getOutputTimingPowerArcPower(Instance& instance, TimingPow
   }
   double internal_power = 0.0;
   for (TransType trans_type : {TransType::kRise, TransType::kFall}) {
-    double transition_density = trans_type == TransType::kRise ? sink_activity.get_rise_transition_density()
-                                                                 : sink_activity.get_fall_transition_density();
+    double transition_density = trans_type == TransType::kRise ? sink_activity.get_rise_transition_density() : sink_activity.get_fall_transition_density();
     double energy = getTimingPowerArcEnergy(instance, timing_power_arc, trans_type);
     internal_power += energy * transition_density * timing_power_arc_weight / timing_power_arc_weight_sum * 1E-3;
   }
   return internal_power;
 }
 
-double PowerAnalyzer::getOutputTimingPowerArcWeight(Instance& instance, TimingPowerArc& timing_power_arc,
-                                                     PAInstanceModel& pa_instance_model)
+double PowerAnalyzer::getOutputTimingPowerArcWeight(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model)
 {
   std::map<TimingPowerArc*, double>& timing_power_arc_weight_map = pa_instance_model.get_output_timing_power_arc_weight_map();
   auto timing_power_arc_weight = timing_power_arc_weight_map.find(&timing_power_arc);
@@ -254,8 +249,7 @@ double PowerAnalyzer::getOutputTimingPowerArcWeight(Instance& instance, TimingPo
   return weight;
 }
 
-double PowerAnalyzer::getOutputTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc,
-                                                                   PAInstanceModel& pa_instance_model)
+double PowerAnalyzer::getOutputTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model)
 {
   Database& database = STADM.getDatabase();
   if (database.get_timing_library().get_cell_map().count(instance.get_cell_name()) == 0) {
@@ -267,10 +261,8 @@ double PowerAnalyzer::getOutputTimingPowerArcConditionProbability(Instance& inst
     return 0.0;
   }
   TimingCellPort& output_port = output_port_iter->second;
-  if (!output_port.get_function_expression().get_is_empty()
-      && output_port.get_function_expression().get_has_port(timing_power_arc.get_source_port())) {
-    return getSensitivityProbability(output_port.get_function_expression(), timing_power_arc.get_source_port(), instance,
-                                     pa_instance_model);
+  if (!output_port.get_function_expression().get_is_empty() && output_port.get_function_expression().get_has_port(timing_power_arc.get_source_port())) {
+    return getSensitivityProbability(output_port.get_function_expression(), timing_power_arc.get_source_port(), instance, pa_instance_model);
   }
   if (!timing_power_arc.get_when_expression().get_is_empty()) {
     return getTimingPowerArcConditionProbability(instance, timing_power_arc, pa_instance_model);
@@ -280,8 +272,7 @@ double PowerAnalyzer::getOutputTimingPowerArcConditionProbability(Instance& inst
 
 double PowerAnalyzer::getOutputTimingPowerArcWeightSum(TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model)
 {
-  PAInstanceModel::OutputTimingPowerArcGroup timing_power_arc_group
-      = std::make_pair(timing_power_arc.get_sink_port(), timing_power_arc.get_related_pg_port());
+  PAInstanceModel::OutputTimingPowerArcGroup timing_power_arc_group = std::make_pair(timing_power_arc.get_sink_port(), timing_power_arc.get_related_pg_port());
   std::map<PAInstanceModel::OutputTimingPowerArcGroup, double>& timing_power_arc_weight_sum_map
       = pa_instance_model.get_output_timing_power_arc_weight_sum_map();
   auto timing_power_arc_weight_sum = timing_power_arc_weight_sum_map.find(timing_power_arc_group);
@@ -324,8 +315,7 @@ TimingArcSense PowerAnalyzer::getTimingPowerArcSense(Instance& instance, TimingP
   }
   TimingCell& timing_cell = database.get_timing_library().get_cell_map()[instance.get_cell_name()];
   for (TimingCellArc& timing_cell_arc : timing_cell.get_cell_arc_list()) {
-    if (timing_cell_arc.get_source_port() != timing_power_arc.get_source_port()
-        || timing_cell_arc.get_sink_port() != timing_power_arc.get_sink_port()) {
+    if (timing_cell_arc.get_source_port() != timing_power_arc.get_source_port() || timing_cell_arc.get_sink_port() != timing_power_arc.get_sink_port()) {
       continue;
     }
     for (TimingArc& timing_arc : timing_cell_arc.get_timing_arc_list()) {
@@ -346,8 +336,7 @@ double PowerAnalyzer::getTimingPowerArcOutputLoad(Instance& instance, TimingPowe
   return STADC.getPowerOutputLoad(output_pin_name, AnalysisType::kMax, trans_type);
 }
 
-double PowerAnalyzer::getTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc,
-                                                             PAInstanceModel& pa_instance_model)
+double PowerAnalyzer::getTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model)
 {
   if (timing_power_arc.get_when_expression().get_is_empty()) {
     return 1.0;
@@ -355,8 +344,7 @@ double PowerAnalyzer::getTimingPowerArcConditionProbability(Instance& instance, 
   return getLogicExpressionStaticProbability(timing_power_arc.get_when_expression(), instance, pa_instance_model);
 }
 
-double PowerAnalyzer::getLogicExpressionStaticProbability(LogicExpression& logic_expression, Instance& instance,
-                                                          PAInstanceModel& pa_instance_model)
+double PowerAnalyzer::getLogicExpressionStaticProbability(LogicExpression& logic_expression, Instance& instance, PAInstanceModel& pa_instance_model)
 {
   std::map<LogicExpression*, PowerActivity>& logic_expression_activity_map = pa_instance_model.get_logic_expression_activity_map();
   auto logic_expression_activity = logic_expression_activity_map.find(&logic_expression);
@@ -371,12 +359,11 @@ double PowerAnalyzer::getLogicExpressionStaticProbability(LogicExpression& logic
   return activity.get_is_valid() ? activity.get_static_probability() : 0.0;
 }
 
-double PowerAnalyzer::getSensitivityProbability(LogicExpression& logic_expression, const std::string& port_name,
-                                                Instance& instance, PAInstanceModel& pa_instance_model)
+double PowerAnalyzer::getSensitivityProbability(LogicExpression& logic_expression, const std::string& port_name, Instance& instance,
+                                                PAInstanceModel& pa_instance_model)
 {
   PAInstanceModel::SensitivityProbabilityKey sensitivity_probability_key = std::make_pair(&logic_expression, port_name);
-  std::map<PAInstanceModel::SensitivityProbabilityKey, double>& sensitivity_probability_map
-      = pa_instance_model.get_sensitivity_probability_map();
+  std::map<PAInstanceModel::SensitivityProbabilityKey, double>& sensitivity_probability_map = pa_instance_model.get_sensitivity_probability_map();
   auto sensitivity_probability = sensitivity_probability_map.find(sensitivity_probability_key);
   if (sensitivity_probability != sensitivity_probability_map.end()) {
     return sensitivity_probability->second;
@@ -432,14 +419,13 @@ void PowerAnalyzer::analyzeLeakagePower(Instance& instance, PowerValue& power_va
       leakage_summary.add_unconditional_leakage_power(timing_leakage_power.get_leakage_power());
     } else {
       leakage_summary.add_conditional_leakage_power(timing_leakage_power.get_leakage_power(),
-                                                     getLeakageConditionProbability(instance, timing_leakage_power, pa_instance_model));
+                                                    getLeakageConditionProbability(instance, timing_leakage_power, pa_instance_model));
     }
   }
   power_value.add_leakage_power(leakage_summary.get_leakage_power(timing_cell.get_cell_leakage_power()));
 }
 
-double PowerAnalyzer::getLeakageConditionProbability(Instance& instance, TimingLeakagePower& timing_leakage_power,
-                                                      PAInstanceModel& pa_instance_model)
+double PowerAnalyzer::getLeakageConditionProbability(Instance& instance, TimingLeakagePower& timing_leakage_power, PAInstanceModel& pa_instance_model)
 {
   return getLogicExpressionStaticProbability(timing_leakage_power.get_when_expression(), instance, pa_instance_model);
 }

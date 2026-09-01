@@ -16,10 +16,7 @@
 // ***************************************************************************************
 #include "SdcCommand.hpp"
 
-#include <algorithm>
-#include <fstream>
-#include <iterator>
-#include <string>
+#include "STAHeader.hpp"
 
 namespace ista {
 
