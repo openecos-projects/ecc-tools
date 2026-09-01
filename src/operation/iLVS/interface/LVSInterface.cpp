@@ -429,7 +429,8 @@ void LVSInterface::wrapNetRoutingData(idb::IdbDesign* design, DefData& def_data)
               for (idb::IdbVia* via : segment->get_via_list()) {
                 wrapRoutingDataVia(via, net_routing_data);
               }
-            } else if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && (segment->is_wire() || segment->is_rect())) {
+            }
+            if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && (segment->is_wire() || segment->is_rect())) {
               net_routing_data.get_wire_routing_shape_list().push_back(wrapRoutingDataShape(segment->get_layer(), getPhysicalSegmentRect(segment)));
             }
           }
