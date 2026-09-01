@@ -51,8 +51,7 @@ class EntityChecker
   std::vector<std::string> getComparedIONameList(const DesignData& design_data);
   bool isPowerGroundIO(const DesignData& design_data, const std::string& io_terminal_name);
   void checkIO(ECModel& ec_model);
-  std::vector<std::string> getDifference(const std::vector<std::string>& first_name_list,
-                                         const std::vector<std::string>& second_name_list);
+  std::vector<std::string> getDifference(const std::vector<std::string>& first_name_list, const std::vector<std::string>& second_name_list);
   void checkInstance(ECModel& ec_model);
   void checkNet(ECModel& ec_model);
   void updateSummary(ECModel& ec_model);

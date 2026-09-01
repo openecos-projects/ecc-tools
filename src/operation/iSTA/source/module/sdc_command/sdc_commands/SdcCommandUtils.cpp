@@ -16,7 +16,7 @@
 // ***************************************************************************************
 #include "SdcCommandUtils.hpp"
 
-#include <algorithm>
+#include "STAHeader.hpp"
 
 namespace ista::sdc {
 

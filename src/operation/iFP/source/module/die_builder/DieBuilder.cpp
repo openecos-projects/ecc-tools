@@ -111,8 +111,7 @@ void DieBuilder::buildFloorplan()
     die_width_micron = (margin_left + core_width + margin_right) / static_cast<double>(micron_dbu);
     die_height_micron = (margin_bottom + core_height + margin_top) / static_cast<double>(micron_dbu);
     buildDie(0.0, 0.0, die_width_micron, die_height_micron);
-    buildCore(config.die_margin_left_micron, config.die_margin_bottom_micron,
-              (margin_left + core_width) / static_cast<double>(micron_dbu),
+    buildCore(config.die_margin_left_micron, config.die_margin_bottom_micron, (margin_left + core_width) / static_cast<double>(micron_dbu),
               (margin_bottom + core_height) / static_cast<double>(micron_dbu), config.die_site_name);
     return;
   } else if (config.die_mode == DieMode::kDieSize) {
@@ -123,9 +122,8 @@ void DieBuilder::buildFloorplan()
   }
 
   buildDie(0.0, 0.0, die_width_micron, die_height_micron);
-  buildCore(config.die_margin_left_micron, config.die_margin_bottom_micron,
-            die_width_micron - config.die_margin_right_micron, die_height_micron - config.die_margin_top_micron,
-            config.die_site_name);
+  buildCore(config.die_margin_left_micron, config.die_margin_bottom_micron, die_width_micron - config.die_margin_right_micron,
+            die_height_micron - config.die_margin_top_micron, config.die_site_name);
 }
 
 void DieBuilder::buildDie(double die_lx, double die_ly, double die_ux, double die_uy)

@@ -194,8 +194,7 @@ void FPInterface::debugInputMacro(std::map<std::string, std::any> config_map)
       continue;
     }
     if (idb_instance->get_cell_master() == nullptr || !idb_instance->get_cell_master()->is_block()) {
-      FPLOG.warn(Loc::current(), "Skip non-block macro '", instance_name, "' from line ", line_num, " in '", macro_place_file_path,
-                 "'.");
+      FPLOG.warn(Loc::current(), "Skip non-block macro '", instance_name, "' from line ", line_num, " in '", macro_place_file_path, "'.");
       ++skipped_macro_num;
       continue;
     }
@@ -203,8 +202,7 @@ void FPInterface::debugInputMacro(std::map<std::string, std::any> config_map)
     int32_t x = FPUTIL.transMicronToDBU(x_micron, micron_dbu);
     int32_t y = FPUTIL.transMicronToDBU(y_micron, micron_dbu);
     if (!dmInst->placeInst(instance_name, x, y, orient_name, "", "", "fixed", false)) {
-      FPLOG.warn(Loc::current(), "Failed to place macro '", instance_name, "' from line ", line_num, " in '", macro_place_file_path,
-                 "'.");
+      FPLOG.warn(Loc::current(), "Failed to place macro '", instance_name, "' from line ", line_num, " in '", macro_place_file_path, "'.");
       ++skipped_macro_num;
       continue;
     }
@@ -969,8 +967,7 @@ void FPInterface::outputMacroRouteHalo()
     idb::IdbLayer* top_layer = cell_master->get_top_layer();
     for (idb::IdbLayerShape* obs_shape : idb_instance->get_obs_box_list()) {
       idb::IdbLayer* obs_layer = obs_shape == nullptr ? nullptr : obs_shape->get_layer();
-      if (obs_layer != nullptr && obs_layer->is_routing()
-          && (top_layer == nullptr || top_layer->get_order() < obs_layer->get_order())) {
+      if (obs_layer != nullptr && obs_layer->is_routing() && (top_layer == nullptr || top_layer->get_order() < obs_layer->get_order())) {
         top_layer = obs_layer;
       }
     }

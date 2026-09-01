@@ -297,8 +297,7 @@ double EMIRInterface::getGeneratedViaResistance(idb::IdbViaMaster* idb_via_maste
     idb::IdbLayerShape* bottom_layer_shape = technology_via_master->get_bottom_layer_shape();
     idb::IdbLayerShape* cut_layer_shape = technology_via_master->get_cut_layer_shape();
     idb::IdbLayerShape* top_layer_shape = technology_via_master->get_top_layer_shape();
-    if (bottom_layer_shape->get_layer() != bottom_layer || cut_layer_shape->get_layer() != cut_layer
-        || top_layer_shape->get_layer() != top_layer) {
+    if (bottom_layer_shape->get_layer() != bottom_layer || cut_layer_shape->get_layer() != cut_layer || top_layer_shape->get_layer() != top_layer) {
       continue;
     }
     if (resistance_per_cut == 0.0) {
