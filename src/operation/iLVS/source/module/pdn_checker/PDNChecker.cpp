@@ -120,8 +120,8 @@ void PDNChecker::addSupplyViaLayerOrder(std::set<int32_t>& layer_order_set, cons
   }
 
   PhysicalGraph& physical_graph = LVSDM.getDatabase().get_def_data().get_physical_graph();
-  std::set<std::string>& net_name_set =
-      connect_type == ConnectType::kPower ? physical_graph.get_power_net_name_set() : physical_graph.get_ground_net_name_set();
+  std::set<std::string>& net_name_set
+      = connect_type == ConnectType::kPower ? physical_graph.get_power_net_name_set() : physical_graph.get_ground_net_name_set();
   for (const std::string& net_name : net_name_set) {
     std::map<std::string, NetRoutingGraph>::iterator routing_graph_iter = physical_graph.get_net_routing_graph_map().find(net_name);
     if (routing_graph_iter == physical_graph.get_net_routing_graph_map().end()) {
@@ -130,8 +130,7 @@ void PDNChecker::addSupplyViaLayerOrder(std::set<int32_t>& layer_order_set, cons
     NetRoutingGraph& routing_graph = routing_graph_iter->second;
     std::vector<RoutingShape>& routing_shape_list = routing_graph.get_routing_shape_list();
     for (std::pair<int32_t, int32_t>& via_shape_idx_pair : routing_graph.get_via_shape_idx_pair_list()) {
-      if (!isValidRoutingShapeIdx(via_shape_idx_pair.first, routing_shape_list)
-          || !isValidRoutingShapeIdx(via_shape_idx_pair.second, routing_shape_list)) {
+      if (!isValidRoutingShapeIdx(via_shape_idx_pair.first, routing_shape_list) || !isValidRoutingShapeIdx(via_shape_idx_pair.second, routing_shape_list)) {
         continue;
       }
       layer_order_set.insert(routing_shape_list[via_shape_idx_pair.first].get_layer_order());
@@ -148,20 +147,18 @@ bool PDNChecker::isPowerGround(const ConnectType connect_type)
 void PDNChecker::addCenterSupplyPoint(std::vector<SupplyPoint>& supply_point_list, const int32_t center_x, const int32_t center_y,
                                       const int32_t top_layer_order, const int32_t second_top_layer_order)
 {
-  SupplyPoint power_supply_point =
-      getCenterSupplyPoint(ConnectType::kPower, center_x, center_y, top_layer_order, second_top_layer_order);
+  SupplyPoint power_supply_point = getCenterSupplyPoint(ConnectType::kPower, center_x, center_y, top_layer_order, second_top_layer_order);
   if (power_supply_point.get_component_id() >= 0) {
     supply_point_list.push_back(std::move(power_supply_point));
   }
-  SupplyPoint ground_supply_point =
-      getCenterSupplyPoint(ConnectType::kGround, center_x, center_y, top_layer_order, second_top_layer_order);
+  SupplyPoint ground_supply_point = getCenterSupplyPoint(ConnectType::kGround, center_x, center_y, top_layer_order, second_top_layer_order);
   if (ground_supply_point.get_component_id() >= 0) {
     supply_point_list.push_back(std::move(ground_supply_point));
   }
 }
 
-SupplyPoint PDNChecker::getCenterSupplyPoint(const ConnectType connect_type, const int32_t center_x, const int32_t center_y,
-                                             const int32_t top_layer_order, const int32_t second_top_layer_order)
+SupplyPoint PDNChecker::getCenterSupplyPoint(const ConnectType connect_type, const int32_t center_x, const int32_t center_y, const int32_t top_layer_order,
+                                             const int32_t second_top_layer_order)
 {
   SupplyPoint supply_point;
   if (!isPowerGround(connect_type)) {
@@ -169,8 +166,8 @@ SupplyPoint PDNChecker::getCenterSupplyPoint(const ConnectType connect_type, con
   }
 
   PhysicalGraph& physical_graph = LVSDM.getDatabase().get_def_data().get_physical_graph();
-  std::set<std::string>& net_name_set =
-      connect_type == ConnectType::kPower ? physical_graph.get_power_net_name_set() : physical_graph.get_ground_net_name_set();
+  std::set<std::string>& net_name_set
+      = connect_type == ConnectType::kPower ? physical_graph.get_power_net_name_set() : physical_graph.get_ground_net_name_set();
   bool has_supply_point = false;
   int64_t shortest_distance = 0;
   for (const std::string& net_name : net_name_set) {
@@ -178,8 +175,7 @@ SupplyPoint PDNChecker::getCenterSupplyPoint(const ConnectType connect_type, con
     if (routing_graph_iter == physical_graph.get_net_routing_graph_map().end()) {
       continue;
     }
-    std::map<std::string, std::vector<int32_t>>::iterator component_id_list_iter =
-        physical_graph.get_net_routing_shape_component_id_list_map().find(net_name);
+    std::map<std::string, std::vector<int32_t>>::iterator component_id_list_iter = physical_graph.get_net_routing_shape_component_id_list_map().find(net_name);
     if (component_id_list_iter == physical_graph.get_net_routing_shape_component_id_list_map().end()) {
       continue;
     }
@@ -187,8 +183,7 @@ SupplyPoint PDNChecker::getCenterSupplyPoint(const ConnectType connect_type, con
     std::vector<RoutingShape>& routing_shape_list = routing_graph.get_routing_shape_list();
     std::vector<int32_t>& component_id_list = component_id_list_iter->second;
     for (std::pair<int32_t, int32_t>& via_shape_idx_pair : routing_graph.get_via_shape_idx_pair_list()) {
-      int32_t top_routing_shape_idx =
-          getTopRoutingShapeIdx(routing_graph, via_shape_idx_pair, top_layer_order, second_top_layer_order);
+      int32_t top_routing_shape_idx = getTopRoutingShapeIdx(routing_graph, via_shape_idx_pair, top_layer_order, second_top_layer_order);
       if (top_routing_shape_idx < 0 || top_routing_shape_idx >= static_cast<int32_t>(component_id_list.size())) {
         continue;
       }
@@ -197,8 +192,7 @@ SupplyPoint PDNChecker::getCenterSupplyPoint(const ConnectType connect_type, con
         continue;
       }
       int64_t distance = getShapeCenterDistance(routing_shape_list[top_routing_shape_idx].get_shape(), center_x, center_y);
-      if (!has_supply_point || distance < shortest_distance
-          || (distance == shortest_distance && component_id < supply_point.get_component_id())) {
+      if (!has_supply_point || distance < shortest_distance || (distance == shortest_distance && component_id < supply_point.get_component_id())) {
         supply_point.set_component_id(component_id);
         supply_point.set_connect_type(connect_type);
         shortest_distance = distance;
@@ -209,26 +203,22 @@ SupplyPoint PDNChecker::getCenterSupplyPoint(const ConnectType connect_type, con
   return supply_point;
 }
 
-int32_t PDNChecker::getTopRoutingShapeIdx(const NetRoutingGraph& routing_graph,
-                                          const std::pair<int32_t, int32_t>& via_shape_idx_pair,
+int32_t PDNChecker::getTopRoutingShapeIdx(const NetRoutingGraph& routing_graph, const std::pair<int32_t, int32_t>& via_shape_idx_pair,
                                           const int32_t top_layer_order, const int32_t second_top_layer_order)
 {
   const std::vector<RoutingShape>& routing_shape_list = routing_graph.get_routing_shape_list();
   int32_t first_routing_shape_idx = via_shape_idx_pair.first;
   int32_t second_routing_shape_idx = via_shape_idx_pair.second;
-  if (!isValidRoutingShapeIdx(first_routing_shape_idx, routing_shape_list)
-      || !isValidRoutingShapeIdx(second_routing_shape_idx, routing_shape_list)) {
+  if (!isValidRoutingShapeIdx(first_routing_shape_idx, routing_shape_list) || !isValidRoutingShapeIdx(second_routing_shape_idx, routing_shape_list)) {
     return -1;
   }
 
   const RoutingShape& first_routing_shape = routing_shape_list[first_routing_shape_idx];
   const RoutingShape& second_routing_shape = routing_shape_list[second_routing_shape_idx];
-  if (first_routing_shape.get_layer_order() == top_layer_order
-      && second_routing_shape.get_layer_order() == second_top_layer_order) {
+  if (first_routing_shape.get_layer_order() == top_layer_order && second_routing_shape.get_layer_order() == second_top_layer_order) {
     return first_routing_shape_idx;
   }
-  if (second_routing_shape.get_layer_order() == top_layer_order
-      && first_routing_shape.get_layer_order() == second_top_layer_order) {
+  if (second_routing_shape.get_layer_order() == top_layer_order && first_routing_shape.get_layer_order() == second_top_layer_order) {
     return second_routing_shape_idx;
   }
   return -1;
@@ -256,9 +246,8 @@ void PDNChecker::checkSupplyConnectivity(PCModel& pc_model, const ConnectType co
     return;
   }
   PhysicalGraph& physical_graph = LVSDM.getDatabase().get_def_data().get_physical_graph();
-  std::map<std::string, std::string>& instance_pin_net_map = connect_type == ConnectType::kPower
-                                                                 ? physical_graph.get_power_instance_pin_net_map()
-                                                                 : physical_graph.get_ground_instance_pin_net_map();
+  std::map<std::string, std::string>& instance_pin_net_map
+      = connect_type == ConnectType::kPower ? physical_graph.get_power_instance_pin_net_map() : physical_graph.get_ground_instance_pin_net_map();
   if (instance_pin_net_map.empty()) {
     return;
   }
@@ -285,8 +274,7 @@ void PDNChecker::checkSupplyConnectivity(PCModel& pc_model, const ConnectType co
   std::map<std::pair<std::string, int32_t>, std::vector<std::string>> disconnected_terminal_map;
   for (auto& [terminal_name, net_name] : instance_pin_net_map) {
     std::map<std::string, int32_t>::iterator component_iter = physical_graph.get_terminal_component_map().find(terminal_name);
-    if (component_iter != physical_graph.get_terminal_component_map().end()
-        && LVSUTIL.exist(supply_component_id_set, component_iter->second)) {
+    if (component_iter != physical_graph.get_terminal_component_map().end() && LVSUTIL.exist(supply_component_id_set, component_iter->second)) {
       continue;
     }
     int32_t component_id = -1;

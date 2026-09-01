@@ -18,6 +18,7 @@
 
 #include "Arc.hpp"
 #include "Instance.hpp"
+#include "InstancePower.hpp"
 #include "Net.hpp"
 #include "ParasiticLibrary.hpp"
 #include "Pin.hpp"
@@ -29,7 +30,6 @@
 #include "TimingLibrary.hpp"
 #include "TimingPathGroup.hpp"
 #include "TimingPoint.hpp"
-#include "InstancePower.hpp"
 
 namespace ista {
 

@@ -47,14 +47,8 @@ class TopoPool
   OffsetRange get_net_edge_range(int32_t net_idx) { return _net_edge_range_list[net_idx]; }
   // setter
   // function
-  int32_t get_node_idx(int32_t net_idx, int32_t local_node_idx)
-  {
-    return _net_node_range_list[net_idx].get_offset() + local_node_idx;
-  }
-  int32_t get_edge_idx(int32_t net_idx, int32_t local_edge_idx)
-  {
-    return _net_edge_range_list[net_idx].get_offset() + local_edge_idx;
-  }
+  int32_t get_node_idx(int32_t net_idx, int32_t local_node_idx) { return _net_node_range_list[net_idx].get_offset() + local_node_idx; }
+  int32_t get_edge_idx(int32_t net_idx, int32_t local_edge_idx) { return _net_edge_range_list[net_idx].get_offset() + local_edge_idx; }
   void reserve(int32_t net_count, int32_t node_count, int32_t edge_count)
   {
     _net_node_range_list.reserve(net_count);
