@@ -41,7 +41,7 @@
 
 namespace idb {
 
-bool Lib::_silent_output = false;
+std::atomic_bool Lib::_silent_output = false;
 
 namespace {
 

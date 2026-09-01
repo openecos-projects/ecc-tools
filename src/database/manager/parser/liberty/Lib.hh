@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <optional>
@@ -1863,13 +1864,13 @@ class Lib
   Lib() = default;
   ~Lib() = default;
 
-  static void setSilentOutput(bool silent_output) { _silent_output = silent_output; }
-  static bool isSilentOutput() { return _silent_output; }
+  static void setSilentOutput(bool silent_output) { _silent_output.store(silent_output, std::memory_order_relaxed); }
+  static bool isSilentOutput() { return _silent_output.load(std::memory_order_relaxed); }
 
   LibertyReader loadLibertyWithCppParser(const char* file_name);
 
  private:
-  static bool _silent_output;
+  static std::atomic_bool _silent_output;
 
   FORBIDDEN_COPY(Lib);
 };

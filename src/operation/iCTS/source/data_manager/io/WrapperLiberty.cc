@@ -22,6 +22,7 @@
  */
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <initializer_list>
 #include <limits>
@@ -38,6 +39,7 @@
 #include "IdbUnits.h"
 #include "LibParserCpp.hh"
 #include "Logger.hh"
+#include "Monitor.hh"
 #include "Type.hh"
 #include "Wrapper.hh"
 #include "config/Config.hh"
@@ -404,39 +406,51 @@ auto Wrapper::loadLibertyIfNeeded() const -> void
   if (_liberty_loaded) {
     return;
   }
-  _liberty_loaded = true;
-  _lib_libraries.clear();
   _lib_cell_by_master.clear();
+  _liberty_generation.reset();
 
   auto& lib_paths = dmInst->get_config().get_lib_paths();
   if (lib_paths.empty()) {
+    _liberty_loaded = true;
     CTSLOG.warn(Loc::current(), "Wrapper: no Liberty files are configured; Liberty-backed CTS queries will return empty values.");
     return;
   }
 
-  for (const auto& lib_path : lib_paths) {
-    idb::Lib lib;
-    auto reader = lib.loadLibertyWithCppParser(lib_path.c_str());
-    if (reader.linkLib() == 0U) {
-      CTSLOG.error(Loc::current(), "Wrapper: failed to link Liberty file ", lib_path, ".");
+  auto generation = dmInst->get_liberty_generation();
+  if (generation == nullptr || generation->get_paths() != lib_paths) {
+    if (!dmInst->readLib(lib_paths)) {
+      CTSLOG.warn(Loc::current(), "Wrapper: central Liberty generation load failed; Liberty-backed CTS queries will return empty values.");
+      return;
     }
-    auto* library_builder = reader.get_library_builder();
-    if (library_builder == nullptr) {
-      CTSLOG.error(Loc::current(), "Wrapper: Liberty library builder is null for ", lib_path, ".");
-    }
-    auto library = library_builder->takeLib();
+    generation = dmInst->get_liberty_generation();
+  }
+  if (generation == nullptr) {
+    _liberty_loaded = true;
+    CTSLOG.warn(Loc::current(), "Wrapper: central Liberty generation is unavailable; Liberty-backed CTS queries will return empty values.");
+    return;
+  }
+
+  Monitor index_monitor;
+  const auto index_start = std::chrono::steady_clock::now();
+  size_t cell_count = 0U;
+  for (const auto& library : generation->get_libraries()) {
     if (library == nullptr) {
-      CTSLOG.error(Loc::current(), "Wrapper: Liberty library is null for ", lib_path, ".");
+      continue;
     }
     for (const auto& cell : library->get_cells()) {
       if (cell == nullptr) {
         continue;
       }
       _lib_cell_by_master[cell->get_cell_name()] = cell.get();
+      ++cell_count;
     }
-    _lib_libraries.push_back(std::move(library));
   }
-  CTSLOG.info(Loc::current(), "Wrapper: loaded ", _lib_libraries.size(), " Liberty file(s) for CTS queries.");
+  _liberty_generation = std::move(generation);
+  _liberty_loaded = true;
+  const double index_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - index_start).count();
+  CTSLOG.info(Loc::current(), "Wrapper: indexed central Liberty generation: libraries=", _liberty_generation->get_libraries().size(),
+              ", configured_workers=", _liberty_generation->get_configured_workers(), ", active_workers=", _liberty_generation->get_active_workers(),
+              ", cells=", cell_count, ", index_seconds=", index_seconds, index_monitor.getStatsInfo());
 }
 
 auto Wrapper::findLibertyCell(const std::string& cell_master) const -> idb::LibCell*

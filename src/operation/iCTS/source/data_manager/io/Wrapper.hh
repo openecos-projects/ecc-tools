@@ -46,6 +46,10 @@ class LibCell;
 class LibLibrary;
 }  // namespace idb
 
+namespace idm {
+class RawLibertyGeneration;
+}  // namespace idm
+
 namespace icts {
 
 class Clock;
@@ -220,7 +224,7 @@ class Wrapper
   idb::IdbDesign* _idb_design = nullptr;
   idb::IdbLayout* _idb_layout = nullptr;
   mutable bool _liberty_loaded = false;
-  mutable std::vector<std::unique_ptr<idb::LibLibrary>> _lib_libraries;
+  mutable std::shared_ptr<const idm::RawLibertyGeneration> _liberty_generation;
   mutable std::unordered_map<std::string, idb::LibCell*> _lib_cell_by_master;
 
   std::unordered_map<Inst*, idb::IdbInstance*> _cts2idb_inst_map;

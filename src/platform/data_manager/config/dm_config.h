@@ -23,13 +23,14 @@
  * @Creat Date : 2022-04-15
  *
  */
-#include "utility/logger/Logger.hpp"
+#include <cstdint>
 #include <iostream>
 #include <map>
 #include <string>
 #include <vector>
 
 #include "json.hpp"
+#include "utility/logger/Logger.hpp"
 using json = nlohmann::json;
 
 using std::string;
@@ -67,6 +68,7 @@ class DataConfig
   string& get_output_path() { return _output_path; }
   string get_output_path_for_idb() { return _output_path + "/idb.def"; }
   vector<string>& get_lib_paths() { return _lib_paths; }
+  int32_t get_thread_number() const { return _thread_number; }
   string& get_sdc_path() { return _sdc_path; }
   string& get_spef_path() { return _spef_path; }
   string& get_vcd_path() { return _vcd_path; }
@@ -110,6 +112,15 @@ class DataConfig
       ECCLOG.info(ecc::Loc::current(), "[Data config set] lib = ", lib);
     }
   }
+  void set_thread_number(int32_t thread_number)
+  {
+    if (thread_number <= 0) {
+      ECCLOG.warn(ecc::Loc::current(), "[Data config set] non-positive Liberty thread number ", thread_number, " normalized to 1");
+      thread_number = 1;
+    }
+    _thread_number = thread_number;
+    ECCLOG.info(ecc::Loc::current(), "[Data config set] Liberty thread number = ", _thread_number);
+  }
   void set_sdc_path(const string sdc_path)
   {
     _sdc_path = sdc_path;
@@ -151,6 +162,7 @@ class DataConfig
   string _verilog_path;
   string _output_path;
   vector<string> _lib_paths;
+  int32_t _thread_number = 4;
   string _sdc_path;
   string _spef_path;
   string _vcd_path;

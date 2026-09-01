@@ -41,6 +41,57 @@
 #include <vector>
 
 namespace idb {
+
+LibertyReader::LibertyReader(const char* file_name) : _file_name(file_name == nullptr ? "" : file_name)
+{
+}
+
+LibertyReader::~LibertyReader()
+{
+  if (_lib_file != nullptr) {
+    liberty_free_lib_group(_lib_file);
+    _lib_file = nullptr;
+  }
+}
+
+LibertyReader::LibertyReader(LibertyReader&& other) noexcept
+    : _lib_file(std::exchange(other._lib_file, nullptr)),
+      _build_cells(std::move(other._build_cells)),
+      _file_name(std::move(other._file_name)),
+      _library_builder(std::move(other._library_builder))
+{
+}
+
+LibertyReader& LibertyReader::operator=(LibertyReader&& rhs) noexcept
+{
+  if (this == &rhs) {
+    return *this;
+  }
+  if (_lib_file != nullptr) {
+    liberty_free_lib_group(_lib_file);
+  }
+  _lib_file = std::exchange(rhs._lib_file, nullptr);
+  _build_cells = std::move(rhs._build_cells);
+  _file_name = std::move(rhs._file_name);
+  _library_builder = std::move(rhs._library_builder);
+  return *this;
+}
+
+void LibertyReader::set_library_builder(LibBuilder* library_builder)
+{
+  _library_builder.reset(library_builder);
+}
+
+std::unique_ptr<LibLibrary> LibertyReader::takeLib()
+{
+  if (_library_builder == nullptr) {
+    return nullptr;
+  }
+  auto library = _library_builder->takeLib();
+  _library_builder.reset();
+  return library;
+}
+
 namespace {
 
 double getRawFloatValue(const liberty_ast::LibValue* value) {
@@ -2052,23 +2103,36 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
 }
 
 unsigned LibertyReader::readLib() {
-  ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name);
+  if (!Lib::isSilentOutput()) {
+    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name);
+  }
 
-  auto* driver = new liberty_ast::LibertyDriver();
+  if (_lib_file != nullptr) {
+    liberty_free_lib_group(_lib_file);
+    _lib_file = nullptr;
+  }
+  _library_builder.reset();
+
+  auto driver = std::make_unique<liberty_ast::LibertyDriver>();
   if (!driver->parse(_file_name.c_str())) {
-    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
-    delete driver;
+    if (!Lib::isSilentOutput()) {
+      ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
+    }
     return 0;
   }
 
-  _lib_file = driver;
+  _lib_file = driver.release();
 
   if (!_lib_file) {
-    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
+    if (!Lib::isSilentOutput()) {
+      ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
+    }
     return 0;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " success.");
+  if (!Lib::isSilentOutput()) {
+    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " success.");
+  }
   return 1;
 }
 
@@ -2085,7 +2149,12 @@ unsigned LibertyReader::linkLib() {
     auto* driver = reinterpret_cast<liberty_ast::LibertyDriver*>(_lib_file);
     auto* lib_group = driver ? driver->getParseResult() : nullptr;
     if (!lib_group) {
-      ECCLOG.error(ecc::Loc::current(), "parsed liberty root group is null: ", _file_name);
+      liberty_free_lib_group(_lib_file);
+      _lib_file = nullptr;
+      if (!Lib::isSilentOutput()) {
+        ECCLOG.warn(ecc::Loc::current(), "parsed liberty root group is null: ", _file_name);
+      }
+      return 0;
     }
     unsigned result = visitGroup(lib_group);
     liberty_free_lib_group(_lib_file);
@@ -2097,7 +2166,9 @@ unsigned LibertyReader::linkLib() {
     return result;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " failed.");
+  if (!Lib::isSilentOutput()) {
+    ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " failed.");
+  }
   return 0;
 }
 

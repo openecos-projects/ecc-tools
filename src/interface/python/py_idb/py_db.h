@@ -18,6 +18,8 @@
 
 #include <pybind11/pybind11.h>
 
+#include <cstdint>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -30,7 +32,7 @@ bool initLef(const std::vector<std::string>& lef_paths);
 bool initDef(const std::string& def_path);
 bool initVerilog(const std::string& verilog_path, const std::string& top_module);
 bool initLvsVerilog(const std::string& verilog_path, const std::string& top_module);
-bool initLib(const std::vector<std::string>& lib_paths);
+bool initLib(const std::vector<std::string>& lib_paths, std::optional<int32_t> thread_number = std::nullopt);
 bool initSdc(const std::string& sdc_path);
 bool initSpef(const std::string& spef_path);
 bool initVcd(const std::string& vcd_path);

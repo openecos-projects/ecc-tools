@@ -29,6 +29,7 @@ target_link_libraries(
   icts_source_data_manager_adapter_sdc
   icts_source_data_manager_design
   icts_source_toolkit_logger
+  icts_source_toolkit_monitor
   liberty
 )
 

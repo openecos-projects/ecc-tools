@@ -1,3 +1,5 @@
+find_package(Threads REQUIRED)
+
 add_library(idm
     idm.cpp
     idm_init.cpp
@@ -27,6 +29,8 @@ target_link_libraries(idm
     # file_manager_drc
     tool_manager
     ecc_logger
+    PRIVATE
+    Threads::Threads
     )
 
 target_include_directories(idm
@@ -71,4 +75,19 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME check_connection_graph_test COMMAND check_connection_graph_test)
+
+    add_executable(liberty_generation_test
+        liberty_generation_test.cpp
+    )
+
+    target_link_libraries(liberty_generation_test
+        PRIVATE
+        idm
+    )
+
+    set_target_properties(liberty_generation_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+
+    add_test(NAME liberty_generation_test COMMAND liberty_generation_test)
 endif()

@@ -69,12 +69,17 @@ LibertyDriver::LibertyDriver()
 
 LibertyDriver::~LibertyDriver()
 {
-    // The parse-result tree is owned by the driver: every child is held via
-    // unique_ptr inside LibGroup, so deleting the root releases the whole
-    // AST. Without this, each parsed liberty file leaks its entire tree
-    // (~hundreds of MB per library) whenever the driver is freed.
+    clearParseState();
+}
+
+void LibertyDriver::clearParseState() noexcept
+{
     delete _result;
     _result = nullptr;
+    while (!_group_stack.empty()) {
+        delete _group_stack.top();
+        _group_stack.pop();
+    }
 }
 
 void LibertyDriver::reportError(const YYLTYPE& loc, const std::string& msg)
@@ -96,6 +101,7 @@ void LibertyDriver::setParseResult(LibNode* node)
 
 bool LibertyDriver::parse(const char* filename)
 {
+    clearParseState();
     _filename = filename;
     std::ifstream ifs(filename, std::ios::binary);
     if (!ifs) {
@@ -121,22 +127,39 @@ bool LibertyDriver::parse(const char* filename)
     }
     LibertyScanner scanner;
     scanner.setInputBuffer(buffer.data(), buffer.size());
-    return parseScanner(scanner);
+    try {
+        const bool success = parseScanner(scanner);
+        if (!success) {
+            clearParseState();
+        }
+        return success;
+    } catch (...) {
+        clearParseState();
+        throw;
+    }
 }
 
 bool LibertyDriver::parse(std::istream& is, const char* filename)
 {
+    clearParseState();
     _filename = filename;
-    
+
     LibertyScanner scanner;
     scanner.setInput(&is);
-    return parseScanner(scanner);
+    try {
+        const bool success = parseScanner(scanner);
+        if (!success) {
+            clearParseState();
+        }
+        return success;
+    } catch (...) {
+        clearParseState();
+        throw;
+    }
 }
 
 bool LibertyDriver::parseScanner(LibertyScanner& scanner)
 {
-    _result = nullptr;
-    
     YYSTYPE yylval;
     YYLTYPE yylloc;
     yylloc.filename = &_filename;
@@ -420,7 +443,8 @@ LibValue* LibertyDriver::parseValue(LibertyScanner& scanner)
 void LibertyDriver::beginGroup(const char* type, LibValueList* params, int line, const char* filename)
 {
     auto group = std::make_unique<LibGroup>(type, std::unique_ptr<LibValueList>(params), filename, line);
-    _group_stack.push(group.release());
+    _group_stack.push(group.get());
+    group.release();
 }
 
 LibGroup* LibertyDriver::endGroup()
