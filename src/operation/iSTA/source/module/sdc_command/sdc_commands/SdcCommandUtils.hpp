@@ -16,10 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
-#include <string>
-#include <vector>
-
 #include "Database.hpp"
+#include "STAHeader.hpp"
 namespace ista::sdc {
 
 std::vector<std::string> resolveObjectList(Database& database, const std::vector<std::string>& object_list);

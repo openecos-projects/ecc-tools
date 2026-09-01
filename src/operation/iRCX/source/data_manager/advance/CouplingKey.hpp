@@ -30,10 +30,7 @@ class CouplingKey
     _second_edge_idx = std::max(first_edge_idx, second_edge_idx);
   }
   ~CouplingKey() = default;
-  bool operator==(const CouplingKey& other) const
-  {
-    return _first_edge_idx == other._first_edge_idx && _second_edge_idx == other._second_edge_idx;
-  }
+  bool operator==(const CouplingKey& other) const { return _first_edge_idx == other._first_edge_idx && _second_edge_idx == other._second_edge_idx; }
   // getter
   int32_t get_first_edge_idx() const { return _first_edge_idx; }
   int32_t get_second_edge_idx() const { return _second_edge_idx; }

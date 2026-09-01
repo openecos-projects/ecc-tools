@@ -39,10 +39,7 @@ class NetRoutingGraph
   const std::map<std::string, std::vector<int32_t>>& get_terminal_shape_idx_map() const { return _terminal_shape_idx_map; }
   // setter
   void set_driver_terminal_name(const std::string& driver_terminal_name) { _driver_terminal_name = driver_terminal_name; }
-  void set_terminal_routing_shape_num(int32_t terminal_routing_shape_num)
-  {
-    _terminal_routing_shape_num = terminal_routing_shape_num;
-  }
+  void set_terminal_routing_shape_num(int32_t terminal_routing_shape_num) { _terminal_routing_shape_num = terminal_routing_shape_num; }
 
  private:
   std::string _driver_terminal_name;

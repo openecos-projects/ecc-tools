@@ -16,9 +16,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include <cstdlib>
-#include <stdexcept>
-
 #include "DRCHeader.hpp"
 #include "LogLevel.hpp"
 
