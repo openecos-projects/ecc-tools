@@ -87,8 +87,7 @@ class EnvPixelGrid
     int32_t x_end_idx = getXIdxByCoord(x_end_coord);
     int32_t y_end_idx = getYIdxByCoord(y_end_coord);
 
-    if (!isXIdxValid(x_start_idx) || !isYIdxValid(y_start_idx) || !isXIdxValid(x_end_idx)
-        || !isYIdxValid(y_end_idx)) {
+    if (!isXIdxValid(x_start_idx) || !isYIdxValid(y_start_idx) || !isXIdxValid(x_end_idx) || !isYIdxValid(y_end_idx)) {
       return;
     }
 
@@ -132,8 +131,7 @@ class EnvPixelGrid
   }
 
  private:
-  std::vector<EnvPixelOverlap> collectConductorRuns(int32_t start_coord, int32_t end_coord, int32_t fixed_idx,
-                                                     bool is_horizontal) const
+  std::vector<EnvPixelOverlap> collectConductorRuns(int32_t start_coord, int32_t end_coord, int32_t fixed_idx, bool is_horizontal) const
   {
     std::vector<EnvPixelOverlap> pixel_overlap_list;
     if (start_coord >= end_coord) {
@@ -168,25 +166,23 @@ class EnvPixelGrid
     return pixel_overlap_list;
   }
 
-  void appendConductorRun(std::vector<EnvPixelOverlap>& pixel_overlap_list, int32_t start_coord, int32_t end_coord,
-                          bool is_horizontal, int32_t start_idx, int32_t end_idx_exclusive) const
+  void appendConductorRun(std::vector<EnvPixelOverlap>& pixel_overlap_list, int32_t start_coord, int32_t end_coord, bool is_horizontal, int32_t start_idx,
+                          int32_t end_idx_exclusive) const
   {
     if (end_idx_exclusive <= start_idx) {
       return;
     }
 
-    int32_t overlap_start_coord
-        = RCXUTIL.getIntervalMidpoint(getAxisCoordByIdx(start_idx, is_horizontal), getAxisCoordByIdx(start_idx + 1, is_horizontal));
-    int32_t overlap_end_coord = RCXUTIL.getIntervalMidpoint(getAxisCoordByIdx(end_idx_exclusive - 1, is_horizontal),
-                                                                    getAxisCoordByIdx(end_idx_exclusive, is_horizontal));
+    int32_t overlap_start_coord = RCXUTIL.getIntervalMidpoint(getAxisCoordByIdx(start_idx, is_horizontal), getAxisCoordByIdx(start_idx + 1, is_horizontal));
+    int32_t overlap_end_coord
+        = RCXUTIL.getIntervalMidpoint(getAxisCoordByIdx(end_idx_exclusive - 1, is_horizontal), getAxisCoordByIdx(end_idx_exclusive, is_horizontal));
     EnvPixelOverlap pixel_overlap = clipPixelOverlap(overlap_start_coord, overlap_end_coord, start_coord, end_coord);
     if (!pixel_overlap.empty()) {
       pixel_overlap_list.push_back(pixel_overlap);
     }
   }
 
-  EnvPixelOverlap clipPixelOverlap(int32_t overlap_start_coord, int32_t overlap_end_coord, int32_t start_coord,
-                                   int32_t end_coord) const
+  EnvPixelOverlap clipPixelOverlap(int32_t overlap_start_coord, int32_t overlap_end_coord, int32_t start_coord, int32_t end_coord) const
   {
     EnvPixelOverlap pixel_overlap;
     pixel_overlap.set_start_coord(std::max(overlap_start_coord, start_coord));
@@ -202,18 +198,9 @@ class EnvPixelGrid
     return is_horizontal ? _pixel_is_conductor_map[axis_idx][fixed_idx] : _pixel_is_conductor_map[fixed_idx][axis_idx];
   }
 
-  int32_t getAxisIdxByCoord(int32_t coord, bool is_horizontal) const
-  {
-    return is_horizontal ? getXIdxByCoord(coord) : getYIdxByCoord(coord);
-  }
-  int32_t getAxisCoordByIdx(int32_t idx, bool is_horizontal) const
-  {
-    return is_horizontal ? getXCoordByIdx(idx) : getYCoordByIdx(idx);
-  }
-  bool isAxisIdxValid(int32_t axis_idx, bool is_horizontal) const
-  {
-    return is_horizontal ? isXIdxValid(axis_idx) : isYIdxValid(axis_idx);
-  }
+  int32_t getAxisIdxByCoord(int32_t coord, bool is_horizontal) const { return is_horizontal ? getXIdxByCoord(coord) : getYIdxByCoord(coord); }
+  int32_t getAxisCoordByIdx(int32_t idx, bool is_horizontal) const { return is_horizontal ? getXCoordByIdx(idx) : getYCoordByIdx(idx); }
+  bool isAxisIdxValid(int32_t axis_idx, bool is_horizontal) const { return is_horizontal ? isXIdxValid(axis_idx) : isYIdxValid(axis_idx); }
 
   bool isXIdxValid(int32_t x_idx) const { return 0 <= x_idx && x_idx < _x_count; }
   bool isYIdxValid(int32_t y_idx) const { return 0 <= y_idx && y_idx < _y_count; }
@@ -227,7 +214,6 @@ class EnvPixelGrid
   int32_t _y_count = -1;
   int32_t _x_step = -1;
   int32_t _y_step = -1;
-
 };
 
 }  // namespace ircx

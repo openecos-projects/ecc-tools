@@ -20,9 +20,7 @@
  */
 #pragma once
 
-#include <cmath>
-#include <optional>
-
+#include "RCXHeader.hpp"
 #include "Types.hh"
 
 namespace ircx {
@@ -31,31 +29,23 @@ namespace math {
 
 inline constexpr F64 kEpsilon = 1e-12;
 
-inline auto roundToSignificantDigitsImpl(F64 value,
-                                         int digits,
-                                         F64 epsilon) -> F64
+inline auto roundToSignificantDigitsImpl(F64 value, int digits, F64 epsilon) -> F64
 {
   if (std::abs(value) <= epsilon || !std::isfinite(value)) {
     return value;
   }
 
-  const F64 scale = std::pow(
-      10.0,
-      static_cast<F64>(digits - 1) - std::floor(std::log10(std::abs(value))));
+  const F64 scale = std::pow(10.0, static_cast<F64>(digits - 1) - std::floor(std::log10(std::abs(value))));
   return std::round(value * scale) / scale;
 }
 
-inline auto roundToSignificantDigitsHalfEvenImpl(F64 value,
-                                                 int digits,
-                                                 F64 epsilon) -> F64
+inline auto roundToSignificantDigitsHalfEvenImpl(F64 value, int digits, F64 epsilon) -> F64
 {
   if (std::abs(value) <= epsilon || !std::isfinite(value)) {
     return value;
   }
 
-  const F64 scale = std::pow(
-      10.0,
-      static_cast<F64>(digits - 1) - std::floor(std::log10(std::abs(value))));
+  const F64 scale = std::pow(10.0, static_cast<F64>(digits - 1) - std::floor(std::log10(std::abs(value))));
   const F64 scaled_value = value * scale;
   const F64 lower = std::floor(scaled_value);
   const F64 fraction = scaled_value - lower;
@@ -65,8 +55,7 @@ inline auto roundToSignificantDigitsHalfEvenImpl(F64 value,
   return std::round(scaled_value) / scale;
 }
 
-inline auto absoluteRelativeDelta(F64 test,
-                                  F64 reference) -> std::optional<F64>
+inline auto absoluteRelativeDelta(F64 test, F64 reference) -> std::optional<F64>
 {
   if (std::abs(reference) <= kEpsilon) {
     return std::nullopt;
@@ -74,35 +63,28 @@ inline auto absoluteRelativeDelta(F64 test,
   return (test - reference) / reference;
 }
 
-inline auto roundToSignificantDigits(F64 value,
-                                     int digits = 6) -> F64
+inline auto roundToSignificantDigits(F64 value, int digits = 6) -> F64
 {
   return roundToSignificantDigitsImpl(value, digits, kEpsilon);
 }
 
-inline auto roundToSignificantDigitsHalfEven(F64 value,
-                                             int digits = 6) -> F64
+inline auto roundToSignificantDigitsHalfEven(F64 value, int digits = 6) -> F64
 {
   return roundToSignificantDigitsHalfEvenImpl(value, digits, kEpsilon);
 }
 
-inline auto capacitanceRelativeDelta(F64 test,
-                                     F64 reference) -> std::optional<F64>
+inline auto capacitanceRelativeDelta(F64 test, F64 reference) -> std::optional<F64>
 {
   return absoluteRelativeDelta(roundToSignificantDigits(test), roundToSignificantDigits(reference));
 }
 
-inline auto couplingRelativeDelta(F64 test,
-                                  F64 reference,
-                                  F64 denominator) -> std::optional<F64>
+inline auto couplingRelativeDelta(F64 test, F64 reference, F64 denominator) -> std::optional<F64>
 {
   const F64 rounded_denominator = roundToSignificantDigits(denominator);
   if (std::abs(rounded_denominator) <= kEpsilon) {
     return std::nullopt;
   }
-  return (roundToSignificantDigitsHalfEven(test)
-          - roundToSignificantDigitsHalfEven(reference))
-         / rounded_denominator;
+  return (roundToSignificantDigitsHalfEven(test) - roundToSignificantDigitsHalfEven(reference)) / rounded_denominator;
 }
 
 }  // namespace math

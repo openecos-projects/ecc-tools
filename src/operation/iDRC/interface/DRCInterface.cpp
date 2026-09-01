@@ -30,7 +30,6 @@
 #include "feature_manager.h"
 #include "file_drc.h"
 #include "idm.h"
-
 #include "utility/logger/Logger.hpp"
 namespace idrc {
 
@@ -159,8 +158,7 @@ std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids
 std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids::Shape>& ids_env_shape_list,
                                                            const std::vector<ids::Shape>& ids_result_shape_list,
                                                            const std::set<std::string>& ids_check_type_set,
-                                                           const std::vector<ids::Shape>& ids_check_region_list,
-                                                           const std::set<size_t>& obs_shape_idx_set)
+                                                           const std::vector<ids::Shape>& ids_check_region_list, const std::set<size_t>& obs_shape_idx_set)
 {
   std::vector<DRCShape> drc_env_shape_list;
   drc_env_shape_list.reserve(ids_env_shape_list.size());
@@ -951,8 +949,7 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList(std::set<size_t>& obs_sh
     if (idb_pin == nullptr) {
       return -1;
     }
-    idb::IdbSpecialNet* special_net = idb_pin->is_io_pin() ? idb_pin->get_special_net()
-                                                            : idb_design->findSpecialNetForInstancePin(idb_pin);
+    idb::IdbSpecialNet* special_net = idb_pin->is_io_pin() ? idb_pin->get_special_net() : idb_design->findSpecialNetForInstancePin(idb_pin);
     auto special_net_it = special_net_idx_map.find(special_net);
     if (special_net_it != special_net_idx_map.end()) {
       return special_net_it->second;
@@ -963,9 +960,8 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList(std::set<size_t>& obs_sh
     }
     return -1;
   };
-  auto should_skip_instance_shape = [](idb::IdbInstance* idb_instance) {
-    return idb_instance->is_unplaced() || idb_instance->get_status() == idb::IdbPlacementStatus::kNone;
-  };
+  auto should_skip_instance_shape
+      = [](idb::IdbInstance* idb_instance) { return idb_instance->is_unplaced() || idb_instance->get_status() == idb::IdbPlacementStatus::kNone; };
 
   size_t total_env_shape_num = 0;
   {

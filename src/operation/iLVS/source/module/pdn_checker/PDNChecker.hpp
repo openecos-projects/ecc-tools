@@ -55,12 +55,11 @@ class PDNChecker
   bool getSupplyRoutingLayerOrder(int32_t& top_layer_order, int32_t& second_top_layer_order);
   void addSupplyViaLayerOrder(std::set<int32_t>& layer_order_set, ConnectType connect_type);
   bool isPowerGround(ConnectType connect_type);
-  void addCenterSupplyPoint(std::vector<SupplyPoint>& supply_point_list, int32_t center_x, int32_t center_y,
-                            int32_t top_layer_order, int32_t second_top_layer_order);
-  SupplyPoint getCenterSupplyPoint(ConnectType connect_type, int32_t center_x, int32_t center_y, int32_t top_layer_order,
-                                   int32_t second_top_layer_order);
-  int32_t getTopRoutingShapeIdx(const NetRoutingGraph& routing_graph, const std::pair<int32_t, int32_t>& via_shape_idx_pair,
-                                int32_t top_layer_order, int32_t second_top_layer_order);
+  void addCenterSupplyPoint(std::vector<SupplyPoint>& supply_point_list, int32_t center_x, int32_t center_y, int32_t top_layer_order,
+                            int32_t second_top_layer_order);
+  SupplyPoint getCenterSupplyPoint(ConnectType connect_type, int32_t center_x, int32_t center_y, int32_t top_layer_order, int32_t second_top_layer_order);
+  int32_t getTopRoutingShapeIdx(const NetRoutingGraph& routing_graph, const std::pair<int32_t, int32_t>& via_shape_idx_pair, int32_t top_layer_order,
+                                int32_t second_top_layer_order);
   bool isValidRoutingShapeIdx(int32_t routing_shape_idx, const std::vector<RoutingShape>& routing_shape_list);
   int64_t getShapeCenterDistance(const Shape& shape, int32_t point_x, int32_t point_y);
   void checkSupplyConnectivity(PCModel& pc_model, ConnectType connect_type);

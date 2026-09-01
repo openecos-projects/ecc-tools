@@ -75,7 +75,7 @@ struct GetPowerGroupTypeList
 {
   std::vector<PowerGroupType> operator()() const
   {
-    return {PowerGroupType::kIOPad, PowerGroupType::kMemory, PowerGroupType::kBlackBox, PowerGroupType::kClockNetwork,
+    return {PowerGroupType::kIOPad,    PowerGroupType::kMemory,     PowerGroupType::kBlackBox,     PowerGroupType::kClockNetwork,
             PowerGroupType::kRegister, PowerGroupType::kSequential, PowerGroupType::kCombinational};
   }
 };

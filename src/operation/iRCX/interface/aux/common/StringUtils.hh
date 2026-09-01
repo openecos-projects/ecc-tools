@@ -16,11 +16,10 @@
 // ***************************************************************************************
 #pragma once
 
-#include <charconv>
-
+#include "Logger.hpp"
+#include "RCXHeader.hpp"
 #include "Types.hh"
 #include "Utility.hpp"
-#include "Logger.hpp"
 
 namespace ircx::string {
 
@@ -81,9 +80,7 @@ inline bool contains(std::string_view value, std::string_view pattern)
 
 inline std::string toLower(std::string value)
 {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-    return static_cast<char>(std::tolower(character));
-  });
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
   return value;
 }
 

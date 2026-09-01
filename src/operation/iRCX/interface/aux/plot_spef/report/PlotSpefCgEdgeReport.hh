@@ -20,9 +20,7 @@
  */
 #pragma once
 
-#include <string>
-#include <vector>
-
+#include "RCXHeader.hpp"
 #include "Types.hh"
 
 namespace ircx::plot_spef {
@@ -43,8 +41,7 @@ auto collectCoupledEdgeRows(const Model& model) -> std::vector<EdgeRow>;
 class CgEdgeReport
 {
  public:
-  auto write(const Model& model,
-             const Config& config) const -> bool;
+  auto write(const Model& model, const Config& config) const -> bool;
 };
 
 }  // namespace ircx::plot_spef

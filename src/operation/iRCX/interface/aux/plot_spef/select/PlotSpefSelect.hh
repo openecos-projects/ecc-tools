@@ -20,8 +20,7 @@
  */
 #pragma once
 
-#include <string>
-
+#include "RCXHeader.hpp"
 #include "model/PlotSpefVisibility.hh"
 
 namespace spef {
@@ -33,12 +32,8 @@ namespace ircx::plot_spef {
 struct Config;
 struct Model;
 
-auto makeVisibleObjects(const Model& model,
-                        const spef::Exchange& exchange,
-                        const Config& config) -> Visibility;
+auto makeVisibleObjects(const Model& model, const spef::Exchange& exchange, const Config& config) -> Visibility;
 
-auto makeEdgeVisibleObjects(const Model& model,
-                            const spef::Exchange& exchange,
-                            const Config& config) -> Visibility;
+auto makeEdgeVisibleObjects(const Model& model, const spef::Exchange& exchange, const Config& config) -> Visibility;
 
 }  // namespace ircx::plot_spef

@@ -68,6 +68,7 @@
 #include <vector>
 
 #include "../../../database/interaction/Boost.hpp"
+#include "json.hpp"
 #include "libfort/fort.hpp"
 
 #define DRC_ERROR 1E-5
