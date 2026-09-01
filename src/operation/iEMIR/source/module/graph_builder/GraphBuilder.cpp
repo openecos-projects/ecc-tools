@@ -116,11 +116,10 @@ void GraphBuilder::buildWireNodeList(PowerGraph& power_graph, PowerNet& power_ne
   }
 }
 
-void GraphBuilder::buildWireEndpointNode(PowerGraph& power_graph, PowerWireSegment& power_wire_segment, std::size_t segment_idx,
-                                         GBModel& gb_model)
+void GraphBuilder::buildWireEndpointNode(PowerGraph& power_graph, PowerWireSegment& power_wire_segment, std::size_t segment_idx, GBModel& gb_model)
 {
-  std::size_t first_node_id = getPowerNode(power_graph, power_wire_segment.get_layer_idx(), power_wire_segment.get_first_x(),
-                                           power_wire_segment.get_first_y(), PowerNodeType::kWire);
+  std::size_t first_node_id
+      = getPowerNode(power_graph, power_wire_segment.get_layer_idx(), power_wire_segment.get_first_x(), power_wire_segment.get_first_y(), PowerNodeType::kWire);
   std::size_t second_node_id = getPowerNode(power_graph, power_wire_segment.get_layer_idx(), power_wire_segment.get_second_x(),
                                             power_wire_segment.get_second_y(), PowerNodeType::kWire);
   appendWireNodeId(gb_model, segment_idx, first_node_id);
@@ -156,17 +155,15 @@ void GraphBuilder::buildWireIntersectionNodeList(PowerGraph& power_graph, PowerN
 {
   std::vector<PowerWireSegment>& power_wire_segment_list = power_net.get_wire_segment_list();
   for (std::size_t first_segment_idx = 0; first_segment_idx < power_wire_segment_list.size(); first_segment_idx++) {
-    for (std::size_t second_segment_idx = first_segment_idx + 1; second_segment_idx < power_wire_segment_list.size();
-         second_segment_idx++) {
-      buildWireIntersectionNode(power_graph, power_wire_segment_list[first_segment_idx], power_wire_segment_list[second_segment_idx],
-                                first_segment_idx, second_segment_idx, gb_model);
+    for (std::size_t second_segment_idx = first_segment_idx + 1; second_segment_idx < power_wire_segment_list.size(); second_segment_idx++) {
+      buildWireIntersectionNode(power_graph, power_wire_segment_list[first_segment_idx], power_wire_segment_list[second_segment_idx], first_segment_idx,
+                                second_segment_idx, gb_model);
     }
   }
 }
 
-void GraphBuilder::buildWireIntersectionNode(PowerGraph& power_graph, PowerWireSegment& first_power_wire_segment,
-                                             PowerWireSegment& second_power_wire_segment, std::size_t first_segment_idx,
-                                             std::size_t second_segment_idx, GBModel& gb_model)
+void GraphBuilder::buildWireIntersectionNode(PowerGraph& power_graph, PowerWireSegment& first_power_wire_segment, PowerWireSegment& second_power_wire_segment,
+                                             std::size_t first_segment_idx, std::size_t second_segment_idx, GBModel& gb_model)
 {
   if (first_power_wire_segment.get_layer_idx() != second_power_wire_segment.get_layer_idx()) {
     return;
@@ -184,13 +181,11 @@ void GraphBuilder::buildWireIntersectionNode(PowerGraph& power_graph, PowerWireS
   if (!getWireIntersectionCoordinate(first_power_wire_segment, second_power_wire_segment, x, y)) {
     return;
   }
-  appendWireCoordinateNode(power_graph, first_power_wire_segment, second_power_wire_segment, first_segment_idx, second_segment_idx, x, y,
-                           gb_model);
+  appendWireCoordinateNode(power_graph, first_power_wire_segment, second_power_wire_segment, first_segment_idx, second_segment_idx, x, y, gb_model);
 }
 
-void GraphBuilder::appendWireCoordinateNode(PowerGraph& power_graph, PowerWireSegment& first_power_wire_segment,
-                                            PowerWireSegment& second_power_wire_segment, std::size_t first_segment_idx,
-                                            std::size_t second_segment_idx, int32_t x, int32_t y, GBModel& gb_model)
+void GraphBuilder::appendWireCoordinateNode(PowerGraph& power_graph, PowerWireSegment& first_power_wire_segment, PowerWireSegment& second_power_wire_segment,
+                                            std::size_t first_segment_idx, std::size_t second_segment_idx, int32_t x, int32_t y, GBModel& gb_model)
 {
   if (!isOnWireSegment(first_power_wire_segment, x, y) || !isOnWireSegment(second_power_wire_segment, x, y)) {
     return;
@@ -200,8 +195,8 @@ void GraphBuilder::appendWireCoordinateNode(PowerGraph& power_graph, PowerWireSe
   appendWireNodeId(gb_model, second_segment_idx, node_id);
 }
 
-bool GraphBuilder::getWireIntersectionCoordinate(PowerWireSegment& first_power_wire_segment, PowerWireSegment& second_power_wire_segment,
-                                                  int32_t& x, int32_t& y)
+bool GraphBuilder::getWireIntersectionCoordinate(PowerWireSegment& first_power_wire_segment, PowerWireSegment& second_power_wire_segment, int32_t& x,
+                                                 int32_t& y)
 {
   bool first_is_horizontal = first_power_wire_segment.get_first_y() == first_power_wire_segment.get_second_y();
   bool first_is_vertical = first_power_wire_segment.get_first_x() == first_power_wire_segment.get_second_x();
@@ -227,8 +222,8 @@ bool GraphBuilder::getWireIntersectionCoordinate(PowerWireSegment& first_power_w
   int32_t second_max_x = std::max(second_power_wire_segment.get_first_x(), second_power_wire_segment.get_second_x());
   int32_t second_min_y = std::min(second_power_wire_segment.get_first_y(), second_power_wire_segment.get_second_y());
   int32_t second_max_y = std::max(second_power_wire_segment.get_first_y(), second_power_wire_segment.get_second_y());
-  return first_min_x <= x && x <= first_max_x && first_min_y <= y && y <= first_max_y && second_min_x <= x && x <= second_max_x
-         && second_min_y <= y && y <= second_max_y;
+  return first_min_x <= x && x <= first_max_x && first_min_y <= y && y <= first_max_y && second_min_x <= x && x <= second_max_x && second_min_y <= y
+         && y <= second_max_y;
 }
 
 void GraphBuilder::appendWireNodeId(GBModel& gb_model, std::size_t segment_idx, std::size_t node_id)
@@ -242,10 +237,8 @@ void GraphBuilder::appendWireNodeId(GBModel& gb_model, std::size_t segment_idx, 
 void GraphBuilder::buildViaNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model)
 {
   for (PowerVia& power_via : power_net.get_via_list()) {
-    std::size_t bottom_node_id =
-        getPowerNode(power_graph, power_via.get_bottom_layer_idx(), power_via.get_x(), power_via.get_y(), PowerNodeType::kVia);
-    std::size_t top_node_id =
-        getPowerNode(power_graph, power_via.get_top_layer_idx(), power_via.get_x(), power_via.get_y(), PowerNodeType::kVia);
+    std::size_t bottom_node_id = getPowerNode(power_graph, power_via.get_bottom_layer_idx(), power_via.get_x(), power_via.get_y(), PowerNodeType::kVia);
+    std::size_t top_node_id = getPowerNode(power_graph, power_via.get_top_layer_idx(), power_via.get_x(), power_via.get_y(), PowerNodeType::kVia);
     for (std::size_t segment_idx = 0; segment_idx < power_net.get_wire_segment_list().size(); segment_idx++) {
       PowerWireSegment& power_wire_segment = power_net.get_wire_segment_list()[segment_idx];
       if (power_wire_segment.get_layer_idx() == power_via.get_bottom_layer_idx()
@@ -340,18 +333,15 @@ void GraphBuilder::buildWireEdgeList(PowerGraph& power_graph, PowerNet& power_ne
     PowerWireSegment& power_wire_segment = power_wire_segment_list[segment_idx];
     std::vector<std::size_t>& node_id_list = gb_model.get_segment_node_id_list_map()[segment_idx];
     bool is_horizontal = power_wire_segment.get_first_y() == power_wire_segment.get_second_y();
-    std::sort(node_id_list.begin(), node_id_list.end(),
-              [&power_graph, is_horizontal](std::size_t first_node_id, std::size_t second_node_id) {
-                PowerNode& first_power_node = power_graph.get_node_list()[first_node_id];
-                PowerNode& second_power_node = power_graph.get_node_list()[second_node_id];
-                return is_horizontal ? first_power_node.get_x() < second_power_node.get_x()
-                                     : first_power_node.get_y() < second_power_node.get_y();
-              });
+    std::sort(node_id_list.begin(), node_id_list.end(), [&power_graph, is_horizontal](std::size_t first_node_id, std::size_t second_node_id) {
+      PowerNode& first_power_node = power_graph.get_node_list()[first_node_id];
+      PowerNode& second_power_node = power_graph.get_node_list()[second_node_id];
+      return is_horizontal ? first_power_node.get_x() < second_power_node.get_x() : first_power_node.get_y() < second_power_node.get_y();
+    });
     for (std::size_t node_idx = 1; node_idx < node_id_list.size(); node_idx++) {
       PowerNode& first_power_node = power_graph.get_node_list()[node_id_list[node_idx - 1]];
       PowerNode& second_power_node = power_graph.get_node_list()[node_id_list[node_idx]];
-      int32_t length = std::abs(first_power_node.get_x() - second_power_node.get_x())
-                       + std::abs(first_power_node.get_y() - second_power_node.get_y());
+      int32_t length = std::abs(first_power_node.get_x() - second_power_node.get_x()) + std::abs(first_power_node.get_y() - second_power_node.get_y());
       if (length == 0) {
         continue;
       }
@@ -359,8 +349,8 @@ void GraphBuilder::buildWireEdgeList(PowerGraph& power_graph, PowerNet& power_ne
         EMIRLOG.error(Loc::current(), "The power wire resistance data is invalid!");
       }
       double resistance = power_wire_segment.get_resistance_per_square() * static_cast<double>(length) / power_wire_segment.get_width();
-      addPowerEdge(power_graph, PowerEdgeType::kWire, first_power_node.get_node_id(), second_power_node.get_node_id(),
-                   power_wire_segment.get_layer_idx(), power_wire_segment.get_width(), length, resistance);
+      addPowerEdge(power_graph, PowerEdgeType::kWire, first_power_node.get_node_id(), second_power_node.get_node_id(), power_wire_segment.get_layer_idx(),
+                   power_wire_segment.get_width(), length, resistance);
     }
   }
 }
@@ -368,20 +358,17 @@ void GraphBuilder::buildWireEdgeList(PowerGraph& power_graph, PowerNet& power_ne
 void GraphBuilder::buildViaEdgeList(PowerGraph& power_graph, PowerNet& power_net)
 {
   for (PowerVia& power_via : power_net.get_via_list()) {
-    std::size_t bottom_node_id =
-        getPowerNode(power_graph, power_via.get_bottom_layer_idx(), power_via.get_x(), power_via.get_y(), PowerNodeType::kVia);
-    std::size_t top_node_id =
-        getPowerNode(power_graph, power_via.get_top_layer_idx(), power_via.get_x(), power_via.get_y(), PowerNodeType::kVia);
+    std::size_t bottom_node_id = getPowerNode(power_graph, power_via.get_bottom_layer_idx(), power_via.get_x(), power_via.get_y(), PowerNodeType::kVia);
+    std::size_t top_node_id = getPowerNode(power_graph, power_via.get_top_layer_idx(), power_via.get_x(), power_via.get_y(), PowerNodeType::kVia);
     if (power_via.get_resistance() <= 0.0) {
       EMIRLOG.error(Loc::current(), "The power via resistance data is invalid!");
     }
-    addPowerEdge(power_graph, PowerEdgeType::kVia, bottom_node_id, top_node_id, power_via.get_bottom_layer_idx(), 0, 0,
-                 power_via.get_resistance());
+    addPowerEdge(power_graph, PowerEdgeType::kVia, bottom_node_id, top_node_id, power_via.get_bottom_layer_idx(), 0, 0, power_via.get_resistance());
   }
 }
 
-void GraphBuilder::addPowerEdge(PowerGraph& power_graph, PowerEdgeType power_edge_type, std::size_t first_node_id,
-                                std::size_t second_node_id, int32_t layer_idx, int32_t width, int32_t length, double resistance)
+void GraphBuilder::addPowerEdge(PowerGraph& power_graph, PowerEdgeType power_edge_type, std::size_t first_node_id, std::size_t second_node_id,
+                                int32_t layer_idx, int32_t width, int32_t length, double resistance)
 {
   if (first_node_id == second_node_id) {
     return;

@@ -55,8 +55,7 @@ class SDFDelay
       }
       return;
     }
-    if ((analysis_type == AnalysisType::kMin && delay < **target_delay)
-        || (analysis_type == AnalysisType::kMax && delay > **target_delay)) {
+    if ((analysis_type == AnalysisType::kMin && delay < **target_delay) || (analysis_type == AnalysisType::kMax && delay > **target_delay)) {
       *target_delay = delay;
     }
   }

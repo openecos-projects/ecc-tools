@@ -35,18 +35,12 @@ class PAInstanceModel
   // getter
   std::map<std::string, PowerActivity>& get_port_activity_map() { return _port_activity_map; }
   std::map<TimingPowerArc*, double>& get_output_timing_power_arc_weight_map() { return _output_timing_power_arc_weight_map; }
-  std::map<OutputTimingPowerArcGroup, double>& get_output_timing_power_arc_weight_sum_map()
-  {
-    return _output_timing_power_arc_weight_sum_map;
-  }
+  std::map<OutputTimingPowerArcGroup, double>& get_output_timing_power_arc_weight_sum_map() { return _output_timing_power_arc_weight_sum_map; }
   std::map<LogicExpression*, PowerActivity>& get_logic_expression_activity_map() { return _logic_expression_activity_map; }
   std::map<SensitivityProbabilityKey, double>& get_sensitivity_probability_map() { return _sensitivity_probability_map; }
   bool get_is_port_activity_map_built() const { return _is_port_activity_map_built; }
   // setter
-  void set_is_port_activity_map_built(const bool is_port_activity_map_built)
-  {
-    _is_port_activity_map_built = is_port_activity_map_built;
-  }
+  void set_is_port_activity_map_built(const bool is_port_activity_map_built) { _is_port_activity_map_built = is_port_activity_map_built; }
   // function
 
  private:

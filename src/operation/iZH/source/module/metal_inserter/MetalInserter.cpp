@@ -93,8 +93,7 @@ void MetalInserter::setMIComParam(MIModel& mi_model, std::map<std::string, std::
 void MetalInserter::initDatabaseInfo(MIModel& mi_model)
 {
   idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
-  if (idb_layout == nullptr || idb_layout->get_units() == nullptr || idb_layout->get_die() == nullptr
-      || idb_layout->get_die()->get_bounding_box() == nullptr) {
+  if (idb_layout == nullptr || idb_layout->get_units() == nullptr || idb_layout->get_die() == nullptr || idb_layout->get_die()->get_bounding_box() == nullptr) {
     ZHLOG.error(Loc::current(), "The idb layout data is incomplete!");
   }
 
@@ -131,8 +130,7 @@ void MetalInserter::initMILayerList(MIModel& mi_model)
   int32_t min_fill_layer_idx = getRoutingLayerIdx(idb_routing_layer_list, mi_com_param.get_min_fill_layer());
   int32_t max_fill_layer_idx = getRoutingLayerIdx(idb_routing_layer_list, mi_com_param.get_max_fill_layer());
   if (min_fill_layer_idx < 0 || max_fill_layer_idx < 0 || min_fill_layer_idx > max_fill_layer_idx) {
-    ZHLOG.error(Loc::current(), "The metal fill layer range is invalid: ", mi_com_param.get_min_fill_layer(), " to ",
-                mi_com_param.get_max_fill_layer());
+    ZHLOG.error(Loc::current(), "The metal fill layer range is invalid: ", mi_com_param.get_min_fill_layer(), " to ", mi_com_param.get_max_fill_layer());
   }
 
   std::vector<MILayer> mi_layer_list;
@@ -160,8 +158,7 @@ int32_t MetalInserter::getRoutingLayerIdx(const std::vector<idb::IdbLayer*>& idb
   return -1;
 }
 
-MILayer MetalInserter::initMILayer(idb::IdbLayerRouting* idb_routing_layer,
-                                   const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list)
+MILayer MetalInserter::initMILayer(idb::IdbLayerRouting* idb_routing_layer, const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list)
 {
   MILayer mi_layer;
   mi_layer.set_layer_name(idb_routing_layer->get_name());
@@ -185,8 +182,7 @@ MILayer MetalInserter::initMILayer(idb::IdbLayerRouting* idb_routing_layer,
   return mi_layer;
 }
 
-int32_t MetalInserter::getGeometryLayerIdx(const std::string& layer_name,
-                                            const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list)
+int32_t MetalInserter::getGeometryLayerIdx(const std::string& layer_name, const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list)
 {
   for (const ecc::geometry::GeometryLayerMetadata& geometry_layer : geometry_layer_list) {
     if (geometry_layer.name == layer_name) {
@@ -272,16 +268,14 @@ void MetalInserter::buildLayerMetalFill(MIModel& mi_model, ecc::geometry::Geomet
   buildDensityWindowList(mi_model, geometry_store, mi_layer);
   buildLayerFill(mi_model, geometry_store, mi_layer);
 
-  ZHLOG.info(Loc::current(), "Completed metal fill: ", mi_layer.get_layer_name(), " inserted_metal_num: ",
-             mi_layer.get_inserted_metal_num(), " ", monitor.getStatsInfo());
+  ZHLOG.info(Loc::current(), "Completed metal fill: ", mi_layer.get_layer_name(), " inserted_metal_num: ", mi_layer.get_inserted_metal_num(), " ",
+             monitor.getStatsInfo());
 }
 
 void MetalInserter::buildDensityWindowList(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer)
 {
-  int32_t density_window_size = static_cast<int32_t>(
-      std::llround(mi_model.get_mi_com_param().get_density_window_size_micron() * mi_model.get_micron_dbu()));
-  int32_t density_window_step = static_cast<int32_t>(
-      std::llround(mi_model.get_mi_com_param().get_density_window_step_micron() * mi_model.get_micron_dbu()));
+  int32_t density_window_size = static_cast<int32_t>(std::llround(mi_model.get_mi_com_param().get_density_window_size_micron() * mi_model.get_micron_dbu()));
+  int32_t density_window_step = static_cast<int32_t>(std::llround(mi_model.get_mi_com_param().get_density_window_step_micron() * mi_model.get_micron_dbu()));
   if (density_window_size <= 0 || density_window_step <= 0) {
     ZHLOG.error(Loc::current(), "The metal density window is invalid!");
   }
@@ -306,9 +300,8 @@ void MetalInserter::buildDensityWindowList(MIModel& mi_model, ecc::geometry::Geo
 double MetalInserter::getMetalArea(ecc::geometry::GeometryStore& geometry_store, int32_t geometry_layer_idx, const MIRect& rect)
 {
   std::vector<MIRect> metal_rect_list;
-  std::vector<ecc::geometry::ShapeId> shape_id_list =
-      geometry_store.query_intersect(static_cast<ecc::geometry::LayerId>(geometry_layer_idx),
-                                     ecc::geometry::Rect32{rect.get_ll_x(), rect.get_ll_y(), rect.get_ur_x(), rect.get_ur_y()});
+  std::vector<ecc::geometry::ShapeId> shape_id_list = geometry_store.query_intersect(
+      static_cast<ecc::geometry::LayerId>(geometry_layer_idx), ecc::geometry::Rect32{rect.get_ll_x(), rect.get_ll_y(), rect.get_ur_x(), rect.get_ur_y()});
   for (ecc::geometry::ShapeId shape_id : shape_id_list) {
     if (!isMetalShape(geometry_store.owner_of(shape_id).type)) {
       continue;
@@ -330,9 +323,8 @@ bool MetalInserter::isMetalShape(ecc::geometry::OwnerType owner_type)
 {
   return owner_type == ecc::geometry::OwnerType::kNetWireSegment || owner_type == ecc::geometry::OwnerType::kSpecialWireSegment
          || owner_type == ecc::geometry::OwnerType::kVia || owner_type == ecc::geometry::OwnerType::kPinPortShape
-         || owner_type == ecc::geometry::OwnerType::kFill
-         || owner_type == ecc::geometry::OwnerType::kObs || owner_type == ecc::geometry::OwnerType::kInstancePinPortShape
-         || owner_type == ecc::geometry::OwnerType::kIoPinPortShape;
+         || owner_type == ecc::geometry::OwnerType::kFill || owner_type == ecc::geometry::OwnerType::kObs
+         || owner_type == ecc::geometry::OwnerType::kInstancePinPortShape || owner_type == ecc::geometry::OwnerType::kIoPinPortShape;
 }
 
 double MetalInserter::getUnionArea(const std::vector<MIRect>& rect_list)
@@ -415,8 +407,8 @@ int32_t MetalInserter::getFirstTrackCoord(int32_t coordinate, int32_t track_star
   return track_start + getCeilDiv(coordinate - track_start, track_pitch) * track_pitch;
 }
 
-std::vector<MIRect> MetalInserter::getFillRectList(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store,
-                                                    MILayer& mi_layer, const MIRect& fill_region_rect, int32_t track_coord)
+std::vector<MIRect> MetalInserter::getFillRectList(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer,
+                                                   const MIRect& fill_region_rect, int32_t track_coord)
 {
   MIRect fill_rect = getFillRect(mi_model, mi_layer, fill_region_rect, track_coord);
   if (!fill_rect.is_valid()) {
@@ -427,8 +419,7 @@ std::vector<MIRect> MetalInserter::getFillRectList(MIModel& mi_model, ecc::geome
   std::sort(blocked_coord_interval_list.begin(), blocked_coord_interval_list.end());
   std::vector<std::pair<int32_t, int32_t>> merged_blocked_coord_interval_list;
   for (const std::pair<int32_t, int32_t>& blocked_coord_interval : blocked_coord_interval_list) {
-    if (merged_blocked_coord_interval_list.empty()
-        || merged_blocked_coord_interval_list.back().second < blocked_coord_interval.first) {
+    if (merged_blocked_coord_interval_list.empty() || merged_blocked_coord_interval_list.back().second < blocked_coord_interval.first) {
       merged_blocked_coord_interval_list.push_back(blocked_coord_interval);
     } else {
       merged_blocked_coord_interval_list.back().second = std::max(merged_blocked_coord_interval_list.back().second, blocked_coord_interval.second);
@@ -464,13 +455,13 @@ std::vector<MIRect> MetalInserter::getFillRectList(MIModel& mi_model, ecc::geome
   return uniform_fill_rect_list;
 }
 
-std::vector<std::pair<int32_t, int32_t>> MetalInserter::getBlockedCoordIntervalList(ecc::geometry::GeometryStore& geometry_store,
-                                                                                      MILayer& mi_layer, const MIRect& fill_rect)
+std::vector<std::pair<int32_t, int32_t>> MetalInserter::getBlockedCoordIntervalList(ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer,
+                                                                                    const MIRect& fill_rect)
 {
   MIRect query_rect = fill_rect.get_expand_rect(mi_layer.get_max_spacing());
-  std::vector<ecc::geometry::ShapeId> shape_id_list =
-      geometry_store.query_intersect(static_cast<ecc::geometry::LayerId>(mi_layer.get_geometry_layer_idx()),
-                                     ecc::geometry::Rect32{query_rect.get_ll_x(), query_rect.get_ll_y(), query_rect.get_ur_x(), query_rect.get_ur_y()});
+  std::vector<ecc::geometry::ShapeId> shape_id_list
+      = geometry_store.query_intersect(static_cast<ecc::geometry::LayerId>(mi_layer.get_geometry_layer_idx()),
+                                       ecc::geometry::Rect32{query_rect.get_ll_x(), query_rect.get_ll_y(), query_rect.get_ur_x(), query_rect.get_ur_y()});
   std::vector<std::pair<int32_t, int32_t>> blocked_coord_interval_list;
   for (ecc::geometry::ShapeId shape_id : shape_id_list) {
     if (isIgnoredShape(geometry_store.owner_of(shape_id).type)) {
@@ -483,8 +474,7 @@ std::vector<std::pair<int32_t, int32_t>> MetalInserter::getBlockedCoordIntervalL
     MIRect occupied_rect(shape_record->bbox.lx, shape_record->bbox.ly, shape_record->bbox.hx, shape_record->bbox.hy);
     int32_t required_spacing = getRequiredSpacing(mi_layer, fill_rect, occupied_rect);
     if (mi_layer.get_is_horizontal()) {
-      if (occupied_rect.get_ur_y() + required_spacing <= fill_rect.get_ll_y()
-          || fill_rect.get_ur_y() + required_spacing <= occupied_rect.get_ll_y()) {
+      if (occupied_rect.get_ur_y() + required_spacing <= fill_rect.get_ll_y() || fill_rect.get_ur_y() + required_spacing <= occupied_rect.get_ll_y()) {
         continue;
       }
       int32_t begin_coord = std::max(fill_rect.get_ll_x(), occupied_rect.get_ll_x() - required_spacing);
@@ -493,8 +483,7 @@ std::vector<std::pair<int32_t, int32_t>> MetalInserter::getBlockedCoordIntervalL
         blocked_coord_interval_list.emplace_back(begin_coord, end_coord);
       }
     } else {
-      if (occupied_rect.get_ur_x() + required_spacing <= fill_rect.get_ll_x()
-          || fill_rect.get_ur_x() + required_spacing <= occupied_rect.get_ll_x()) {
+      if (occupied_rect.get_ur_x() + required_spacing <= fill_rect.get_ll_x() || fill_rect.get_ur_x() + required_spacing <= occupied_rect.get_ll_x()) {
         continue;
       }
       int32_t begin_coord = std::max(fill_rect.get_ll_y(), occupied_rect.get_ll_y() - required_spacing);
@@ -516,8 +505,8 @@ MIRect MetalInserter::getFillRect(MIModel& mi_model, MILayer& mi_layer, const MI
     fill_rect = MIRect(getAlignUp(fill_region_rect.get_ll_x(), mi_model.get_manufacture_grid()), track_coord - lower_half_width,
                        getAlignDown(fill_region_rect.get_ur_x(), mi_model.get_manufacture_grid()), track_coord + upper_half_width);
   } else {
-    fill_rect = MIRect(track_coord - lower_half_width, getAlignUp(fill_region_rect.get_ll_y(), mi_model.get_manufacture_grid()),
-                       track_coord + upper_half_width, getAlignDown(fill_region_rect.get_ur_y(), mi_model.get_manufacture_grid()));
+    fill_rect = MIRect(track_coord - lower_half_width, getAlignUp(fill_region_rect.get_ll_y(), mi_model.get_manufacture_grid()), track_coord + upper_half_width,
+                       getAlignDown(fill_region_rect.get_ur_y(), mi_model.get_manufacture_grid()));
   }
   if (!fill_rect.is_valid() || std::max(fill_rect.get_width(), fill_rect.get_height()) < mi_layer.get_min_wire_length()) {
     return MIRect();
@@ -530,10 +519,10 @@ std::vector<MIRect> MetalInserter::getUniformFillRectList(MIModel& mi_model, MIL
   int32_t manufacture_grid = mi_model.get_manufacture_grid();
   int32_t fill_length = getAlignUp(mi_layer.get_min_wire_length(), manufacture_grid);
   int32_t fill_spacing = getAlignUp(getFillSpacing(mi_layer, mi_layer.get_wire_width()), manufacture_grid);
-  int32_t begin_coord = mi_layer.get_is_horizontal() ? getAlignUp(free_fill_rect.get_ll_x(), manufacture_grid)
-                                                      : getAlignUp(free_fill_rect.get_ll_y(), manufacture_grid);
-  int32_t end_coord = mi_layer.get_is_horizontal() ? getAlignDown(free_fill_rect.get_ur_x(), manufacture_grid)
-                                                    : getAlignDown(free_fill_rect.get_ur_y(), manufacture_grid);
+  int32_t begin_coord
+      = mi_layer.get_is_horizontal() ? getAlignUp(free_fill_rect.get_ll_x(), manufacture_grid) : getAlignUp(free_fill_rect.get_ll_y(), manufacture_grid);
+  int32_t end_coord
+      = mi_layer.get_is_horizontal() ? getAlignDown(free_fill_rect.get_ur_x(), manufacture_grid) : getAlignDown(free_fill_rect.get_ur_y(), manufacture_grid);
   int32_t available_length = end_coord - begin_coord;
   int32_t fill_num = (available_length + fill_spacing) / (fill_length + fill_spacing);
   if (fill_num <= 0) {
@@ -583,16 +572,14 @@ int32_t MetalInserter::getAlignDown(int32_t coordinate, int32_t grid)
 
 bool MetalInserter::isIgnoredShape(ecc::geometry::OwnerType owner_type)
 {
-  return owner_type == ecc::geometry::OwnerType::kDie || owner_type == ecc::geometry::OwnerType::kCore
-         || owner_type == ecc::geometry::OwnerType::kRow || owner_type == ecc::geometry::OwnerType::kTrackGrid
-         || owner_type == ecc::geometry::OwnerType::kGCellGrid;
+  return owner_type == ecc::geometry::OwnerType::kDie || owner_type == ecc::geometry::OwnerType::kCore || owner_type == ecc::geometry::OwnerType::kRow
+         || owner_type == ecc::geometry::OwnerType::kTrackGrid || owner_type == ecc::geometry::OwnerType::kGCellGrid;
 }
 
 int32_t MetalInserter::getRequiredSpacing(MILayer& mi_layer, const MIRect& first_rect, const MIRect& second_rect)
 {
   idb::IdbLayerRouting* idb_routing_layer = getRoutingLayer(mi_layer.get_layer_name());
-  int32_t wire_width = std::max(std::min(first_rect.get_width(), first_rect.get_height()),
-                                std::min(second_rect.get_width(), second_rect.get_height()));
+  int32_t wire_width = std::max(std::min(first_rect.get_width(), first_rect.get_height()), std::min(second_rect.get_width(), second_rect.get_height()));
   int32_t default_spacing = getDefaultSpacing(idb_routing_layer, wire_width);
   int32_t prl_spacing = getPRLSpacing(idb_routing_layer, wire_width, getParallelLength(first_rect, second_rect));
   return std::max(default_spacing, prl_spacing);
@@ -625,8 +612,8 @@ int32_t MetalInserter::getDefaultSpacing(idb::IdbLayerRouting* idb_routing_layer
     }
     if (spacing->get_spacing_type() == idb::IdbLayerSpacingType::kSpacingDefault) {
       default_spacing = std::max(default_spacing, spacing->get_min_spacing());
-    } else if (spacing->get_spacing_type() == idb::IdbLayerSpacingType::kSpacingRange
-               && spacing->get_min_width() <= wire_width && wire_width <= spacing->get_max_width()) {
+    } else if (spacing->get_spacing_type() == idb::IdbLayerSpacingType::kSpacingRange && spacing->get_min_width() <= wire_width
+               && wire_width <= spacing->get_max_width()) {
       default_spacing = std::max(default_spacing, spacing->get_min_spacing());
     }
   }
@@ -651,10 +638,8 @@ int32_t MetalInserter::getParallelLength(const MIRect& first_rect, const MIRect&
 
 std::vector<int32_t> MetalInserter::getAffectedDensityWindowIdxList(MIModel& mi_model, MILayer& mi_layer, const MIRect& rect)
 {
-  int32_t density_window_size = static_cast<int32_t>(
-      std::llround(mi_model.get_mi_com_param().get_density_window_size_micron() * mi_model.get_micron_dbu()));
-  int32_t density_window_step = static_cast<int32_t>(
-      std::llround(mi_model.get_mi_com_param().get_density_window_step_micron() * mi_model.get_micron_dbu()));
+  int32_t density_window_size = static_cast<int32_t>(std::llround(mi_model.get_mi_com_param().get_density_window_size_micron() * mi_model.get_micron_dbu()));
+  int32_t density_window_step = static_cast<int32_t>(std::llround(mi_model.get_mi_com_param().get_density_window_step_micron() * mi_model.get_micron_dbu()));
   const MIRect& die = mi_model.get_die();
   int32_t x_delta = rect.get_ll_x() - die.get_ll_x() - density_window_size;
   int32_t y_delta = rect.get_ll_y() - die.get_ll_y() - density_window_size;
@@ -719,10 +704,8 @@ void MetalInserter::writeMetalFill(MIModel& mi_model)
 void MetalInserter::printResult(MIModel& mi_model)
 {
   ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(0), "ZH insertMetal");
-  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "density_window_size_micron: ",
-             mi_model.get_mi_com_param().get_density_window_size_micron());
-  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "density_window_step_micron: ",
-             mi_model.get_mi_com_param().get_density_window_step_micron());
+  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "density_window_size_micron: ", mi_model.get_mi_com_param().get_density_window_size_micron());
+  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "density_window_step_micron: ", mi_model.get_mi_com_param().get_density_window_step_micron());
   ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "min_fill_layer: ", mi_model.get_mi_com_param().get_min_fill_layer());
   ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "max_fill_layer: ", mi_model.get_mi_com_param().get_max_fill_layer());
   ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), "inserted_metal_num: ", mi_model.get_inserted_metal_num());
@@ -743,8 +726,8 @@ void MetalInserter::printLayerResult(MIModel& mi_model, MILayer& mi_layer)
     min_density = std::min(min_density, density_window.get_density());
     max_density = std::max(max_density, density_window.get_density());
   }
-  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), mi_layer.get_layer_name(), " inserted_metal_num: ",
-             mi_layer.get_inserted_metal_num(), " window_min_density: ", min_density, " window_max_density: ", max_density);
+  ZHLOG.info(Loc::current(), ZHUTIL.getSpaceByTabNum(1), mi_layer.get_layer_name(), " inserted_metal_num: ", mi_layer.get_inserted_metal_num(),
+             " window_min_density: ", min_density, " window_max_density: ", max_density);
 }
 
 #endif

@@ -115,18 +115,14 @@ TBTopo TopoBuilder::buildNetTopo(Net& net)
     appendNodeIfAbsent(net, node_list, node_key_to_idx_map, consumed_pin_name_set, segment.get_layer_idx(), segment.get_end_point());
   }
   for (Via& via : net.get_via_list()) {
-    appendNodeIfAbsent(net, node_list, node_key_to_idx_map, consumed_pin_name_set, via.get_top_layer_shape().get_layer_idx(),
-                       via.get_point());
-    appendNodeIfAbsent(net, node_list, node_key_to_idx_map, consumed_pin_name_set, via.get_bottom_layer_shape().get_layer_idx(),
-                       via.get_point());
+    appendNodeIfAbsent(net, node_list, node_key_to_idx_map, consumed_pin_name_set, via.get_top_layer_shape().get_layer_idx(), via.get_point());
+    appendNodeIfAbsent(net, node_list, node_key_to_idx_map, consumed_pin_name_set, via.get_bottom_layer_shape().get_layer_idx(), via.get_point());
   }
 
   for (Segment& segment : net.get_segment_list()) {
     int32_t layer_idx = segment.get_layer_idx();
-    int32_t start_node_idx
-        = node_key_to_idx_map[TBNodeKey(layer_idx, RCXUTIL.x(segment.get_start_point()), RCXUTIL.y(segment.get_start_point()))];
-    int32_t end_node_idx
-        = node_key_to_idx_map[TBNodeKey(layer_idx, RCXUTIL.x(segment.get_end_point()), RCXUTIL.y(segment.get_end_point()))];
+    int32_t start_node_idx = node_key_to_idx_map[TBNodeKey(layer_idx, RCXUTIL.x(segment.get_start_point()), RCXUTIL.y(segment.get_start_point()))];
+    int32_t end_node_idx = node_key_to_idx_map[TBNodeKey(layer_idx, RCXUTIL.x(segment.get_end_point()), RCXUTIL.y(segment.get_end_point()))];
     mergeNodeShape(node_list, start_node_idx, getSegmentEndpointShape(segment, segment.get_start_point()));
     mergeNodeShape(node_list, end_node_idx, getSegmentEndpointShape(segment, segment.get_end_point()));
 
@@ -149,8 +145,7 @@ TBTopo TopoBuilder::buildNetTopo(Net& net)
     int32_t top_layer_idx = via.get_top_layer_shape().get_layer_idx();
     int32_t bottom_layer_idx = via.get_bottom_layer_shape().get_layer_idx();
     int32_t top_node_idx = node_key_to_idx_map[TBNodeKey(top_layer_idx, RCXUTIL.x(via.get_point()), RCXUTIL.y(via.get_point()))];
-    int32_t bottom_node_idx
-        = node_key_to_idx_map[TBNodeKey(bottom_layer_idx, RCXUTIL.x(via.get_point()), RCXUTIL.y(via.get_point()))];
+    int32_t bottom_node_idx = node_key_to_idx_map[TBNodeKey(bottom_layer_idx, RCXUTIL.x(via.get_point()), RCXUTIL.y(via.get_point()))];
     mergeNodeShape(node_list, top_node_idx, via.get_top_layer_shape().get_shape());
     mergeNodeShape(node_list, bottom_node_idx, via.get_bottom_layer_shape().get_shape());
 

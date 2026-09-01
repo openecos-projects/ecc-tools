@@ -28,12 +28,12 @@ class Config
   ~Config() = default;
   /////////////////////////////////////////////
   // **********        RCX        ********** //
-  std::string config_file_path;      // required
-  int32_t thread_number;             // required
+  std::string config_file_path;       // required
+  int32_t thread_number;              // required
   std::string output_directory_path;  // optional
-  bool report_geometry;              // optional
-  std::string mapping_file_path;     // required
-  std::vector<Corner> corner_list;   // required
+  bool report_geometry;               // optional
+  std::string mapping_file_path;      // required
+  std::vector<Corner> corner_list;    // required
   /////////////////////////////////////////////
   // **********        RCX        ********** //
   std::string temp_directory_path;  // building

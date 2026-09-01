@@ -27,9 +27,9 @@ class Config
   ~Config() = default;
   /////////////////////////////////////////////
   // **********        STA        ********** //
-  std::string temp_directory_path;  // required
-  int32_t thread_number;            // optional
-  int32_t path_report_number = 1;   // optional, report_timing -max_paths
+  std::string temp_directory_path;          // required
+  int32_t thread_number;                    // optional
+  int32_t path_report_number = 1;           // optional, report_timing -max_paths
   int32_t endpoint_path_report_number = 1;  // optional, report_timing -nworst
   int32_t output_timing_reports = 1;
   int32_t output_timing_features = 1;

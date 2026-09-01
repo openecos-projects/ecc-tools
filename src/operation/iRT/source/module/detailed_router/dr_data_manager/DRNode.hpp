@@ -16,11 +16,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include <algorithm>
-#include <bit>
-#include <boost/container/vector.hpp>
-#include <limits>
-
 #include "Direction.hpp"
 #include "LayerCoord.hpp"
 #include "Orientation.hpp"

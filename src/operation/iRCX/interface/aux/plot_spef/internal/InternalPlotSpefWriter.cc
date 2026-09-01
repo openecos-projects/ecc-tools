@@ -20,27 +20,19 @@
  */
 #include "internal/InternalPlotSpefWriter.hh"
 
-#include <algorithm>
-#include <cmath>
-#include <limits>
-#include <span>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
 #include "Geometry.hh"
 #include "LayerTable.hh"
 #include "LayoutData.hh"
+#include "Logger.hpp"
 #include "PathUtils.hh"
 #include "RCTable.hh"
 #include "RCXData.hh"
+#include "RCXHeader.hpp"
 #include "SpefContext.hh"
 #include "StringUtils.hh"
 #include "TopoPool.hh"
 #include "config/PlotSpefConfig.hh"
 #include "gds/PlotSpefGdsWriter.hh"
-#include "Logger.hpp"
 #include "lyp/PlotSpefLypWriter.hh"
 #include "model/PlotSpefModel.hh"
 #include "model/PlotSpefVisibility.hh"
@@ -73,42 +65,30 @@ auto buildNameMaps(const SpefContext& spef_context) -> NameMaps
   return maps;
 }
 
-auto nodeSpefName(const TopoNode& node,
-                  const LayoutData& layout,
-                  const NameMaps& maps) -> std::string
+auto nodeSpefName(const TopoNode& node, const LayoutData& layout, const NameMaps& maps) -> std::string
 {
   if (node.is_pin_node()) {
     const std::string& full_name = node.get_pin_name();
     const Size colon_pos = full_name.find(':');
     if (colon_pos == std::string::npos) {
       const auto it = maps.port_name_to_id.find(full_name);
-      return it == maps.port_name_to_id.end()
-                 ? full_name
-                 : "*" + std::to_string(it->second);
+      return it == maps.port_name_to_id.end() ? full_name : "*" + std::to_string(it->second);
     }
 
     const std::string inst_name = full_name.substr(0, colon_pos);
     const std::string pin_name = full_name.substr(colon_pos + 1);
     const auto it = maps.inst_name_to_id.find(inst_name);
-    return it == maps.inst_name_to_id.end()
-               ? full_name
-               : "*" + std::to_string(it->second) + ":" + pin_name;
+    return it == maps.inst_name_to_id.end() ? full_name : "*" + std::to_string(it->second) + ":" + pin_name;
   }
 
   const Size net_id = node.get_net_id();
-  const std::string net_name = net_id < layout.net_vec.size()
-                                   ? layout.net_vec[net_id].name
-                                   : "net" + std::to_string(net_id);
+  const std::string net_name = net_id < layout.net_vec.size() ? layout.net_vec[net_id].name : "net" + std::to_string(net_id);
   const auto it = maps.net_name_to_id.find(net_name);
-  const std::string net_prefix = it == maps.net_name_to_id.end()
-                                     ? "*" + net_name
-                                     : "*" + std::to_string(it->second);
+  const std::string net_prefix = it == maps.net_name_to_id.end() ? "*" + net_name : "*" + std::to_string(it->second);
   return net_prefix + ":" + std::to_string(node.get_id() + 1);
 }
 
-auto buildNodeNames(const TopoPool& topo,
-                    const LayoutData& layout,
-                    const SpefContext& spef_context) -> std::vector<std::string>
+auto buildNodeNames(const TopoPool& topo, const LayoutData& layout, const SpefContext& spef_context) -> std::vector<std::string>
 {
   const NameMaps maps = buildNameMaps(spef_context);
   const auto& nodes = topo.get_node_pool();
@@ -130,12 +110,7 @@ auto layerToInt(Size layer_id) -> int
 class CoordScaler
 {
  public:
-  CoordScaler(Dbu source_dbu,
-              int target_dbu)
-      : source_dbu_(std::max<Dbu>(source_dbu, 1)),
-        target_dbu_(target_dbu > 0 ? target_dbu : kDefaultPlotDbu)
-  {
-  }
+  CoordScaler(Dbu source_dbu, int target_dbu) : source_dbu_(std::max<Dbu>(source_dbu, 1)), target_dbu_(target_dbu > 0 ? target_dbu : kDefaultPlotDbu) {}
 
   auto dbu() const -> int { return target_dbu_; }
 
@@ -145,16 +120,11 @@ class CoordScaler
       return static_cast<int>(value);
     }
 
-    const auto scaled = std::llround(
-        static_cast<F64>(value) * static_cast<F64>(target_dbu_)
-        / static_cast<F64>(source_dbu_));
+    const auto scaled = std::llround(static_cast<F64>(value) * static_cast<F64>(target_dbu_) / static_cast<F64>(source_dbu_));
     return clampToInt(scaled);
   }
 
-  auto micron(Dbu value) const -> F64
-  {
-    return static_cast<F64>(value) / static_cast<F64>(source_dbu_);
-  }
+  auto micron(Dbu value) const -> F64 { return static_cast<F64>(value) / static_cast<F64>(source_dbu_); }
 
  private:
   static auto clampToInt(long long value) -> int
@@ -172,30 +142,23 @@ class CoordScaler
   int target_dbu_{kDefaultPlotDbu};
 };
 
-auto hasBox(int llx,
-            int lly,
-            int urx,
-            int ury) -> bool
+auto hasBox(int llx, int lly, int urx, int ury) -> bool
 {
   return llx != urx && lly != ury;
 }
 
-auto endpointName(Size node_idx,
-                  const std::vector<std::string>& node_names) -> std::string
+auto endpointName(Size node_idx, const std::vector<std::string>& node_names) -> std::string
 {
   return node_idx < node_names.size() ? node_names[node_idx] : std::string{};
 }
 
-auto edgeEndpointName(const TopoEdge& edge,
-                      const std::vector<std::string>& node_names) -> std::string
+auto edgeEndpointName(const TopoEdge& edge, const std::vector<std::string>& node_names) -> std::string
 {
   std::string name = endpointName(edge.get_u(), node_names);
   return name.empty() ? endpointName(edge.get_v(), node_names) : name;
 }
 
-auto buildNode(const TopoNode& topo_node,
-               const CoordScaler& scaler,
-               const std::string& name) -> plot_spef::Node
+auto buildNode(const TopoNode& topo_node, const CoordScaler& scaler, const std::string& name) -> plot_spef::Node
 {
   plot_spef::Node node;
   node.name = name;
@@ -213,11 +176,8 @@ auto buildNode(const TopoNode& topo_node,
   return node;
 }
 
-auto buildResistor(const TopoEdge& edge,
-                   Size edge_idx,
-                   F64 resistance,
-                   const CoordScaler& scaler,
-                   const std::vector<std::string>& node_names) -> plot_spef::Resistor
+auto buildResistor(const TopoEdge& edge, Size edge_idx, F64 resistance, const CoordScaler& scaler, const std::vector<std::string>& node_names)
+    -> plot_spef::Resistor
 {
   plot_spef::Resistor resistor;
   resistor.node1 = endpointName(edge.get_u(), node_names);
@@ -242,30 +202,20 @@ auto buildResistor(const TopoEdge& edge,
   return resistor;
 }
 
-auto addNodeIndex(plot_spef::Model& model,
-                  Size net_index) -> void
+auto addNodeIndex(plot_spef::Model& model, Size net_index) -> void
 {
   auto& net = model.nets[net_index];
   for (Size node_index = 0; node_index < net.nodes.size(); ++node_index) {
-    model.node_refs_by_name[net.nodes[node_index].name] = plot_spef::NodeRef{
-        .net_index = net_index,
-        .node_index = node_index,
-        .valid = true};
+    model.node_refs_by_name[net.nodes[node_index].name] = plot_spef::NodeRef{.net_index = net_index, .node_index = node_index, .valid = true};
   }
 }
 
 auto makeEdgeRef(const TopoEdge& edge) -> plot_spef::EdgeRef
 {
-  return plot_spef::EdgeRef{
-      .net_index = edge.get_net_id(),
-      .resistor_index = edge.get_id(),
-      .valid = true};
+  return plot_spef::EdgeRef{.net_index = edge.get_net_id(), .resistor_index = edge.get_id(), .valid = true};
 }
 
-auto addGroundCaps(plot_spef::Net& net,
-                   Size model_net_index,
-                   std::span<const F64> gcap_pool,
-                   std::span<const TopoEdge> edges,
+auto addGroundCaps(plot_spef::Net& net, Size model_net_index, std::span<const F64> gcap_pool, std::span<const TopoEdge> edges,
                    const std::vector<std::string>& node_names) -> void
 {
   net.ground_caps.reserve(gcap_pool.size());
@@ -274,13 +224,9 @@ auto addGroundCaps(plot_spef::Net& net,
     if (cap_ff <= 0.0) {
       continue;
     }
-    net.ground_caps.push_back(plot_spef::Capacitor{
-        .node1 = edgeEndpointName(edges[edge_idx], node_names),
-        .value = cap_ff,
-        .edge1 = plot_spef::EdgeRef{
-            .net_index = model_net_index,
-            .resistor_index = edge_idx,
-            .valid = true}});
+    net.ground_caps.push_back(plot_spef::Capacitor{.node1 = edgeEndpointName(edges[edge_idx], node_names),
+                                                   .value = cap_ff,
+                                                   .edge1 = plot_spef::EdgeRef{.net_index = model_net_index, .resistor_index = edge_idx, .valid = true}});
   }
 }
 
@@ -293,11 +239,9 @@ auto buildLayerNames(const LayerTable& layer_table) -> std::unordered_map<int, s
   return layer_names;
 }
 
-auto cornerName(const RCXData::CornerData& corner,
-                Size corner_idx) -> std::string
+auto cornerName(const RCXData::CornerData& corner, Size corner_idx) -> std::string
 {
-  if (corner.process_corner.has_value()
-      && !corner.process_corner->get_technology().empty()) {
+  if (corner.process_corner.has_value() && !corner.process_corner->get_technology().empty()) {
     return corner.process_corner->get_technology();
   }
   if (!corner.name.empty()) {
@@ -309,8 +253,7 @@ auto cornerName(const RCXData::CornerData& corner,
 class DirectModelBuilder
 {
  public:
-  DirectModelBuilder(const RCXData& data,
-                     const plot_spef::Config& config)
+  DirectModelBuilder(const RCXData& data, const plot_spef::Config& config)
       : data_(data),
         config_(config),
         layout_(data.get_layout()),
@@ -324,8 +267,7 @@ class DirectModelBuilder
   auto build(Size corner_idx) const -> plot_spef::Model
   {
     plot_spef::Model model;
-    model.design_name = layout_.design_name + "_"
-                        + cornerName(data_.get_corner_data()[corner_idx], corner_idx);
+    model.design_name = layout_.design_name + "_" + cornerName(data_.get_corner_data()[corner_idx], corner_idx);
     model.vendor_name = "ECOS";
     model.program_name = "iRCX";
     model.cap_unit = "FF";
@@ -345,14 +287,10 @@ class DirectModelBuilder
     return model;
   }
 
-  auto makeVisibility(const plot_spef::Model& model) const -> plot_spef::Visibility
-  {
-    return makeScopeVisibility(model);
-  }
+  auto makeVisibility(const plot_spef::Model& model) const -> plot_spef::Visibility { return makeScopeVisibility(model); }
 
  private:
-  auto buildNet(Size corner_idx,
-                Size net_idx) const -> plot_spef::Net
+  auto buildNet(Size corner_idx, Size net_idx) const -> plot_spef::Net
   {
     plot_spef::Net net;
     net.name = layout_.net_vec[net_idx].name;
@@ -372,8 +310,7 @@ class DirectModelBuilder
     net.resistors.reserve(edges.size());
     for (Size edge_idx = 0; edge_idx < edges.size(); ++edge_idx) {
       const F64 resistance = edge_idx < res_pool.size() ? res_pool[edge_idx] : 0.0;
-      net.resistors.push_back(
-          buildResistor(edges[edge_idx], edge_idx, resistance, scaler_, node_names_));
+      net.resistors.push_back(buildResistor(edges[edge_idx], edge_idx, resistance, scaler_, node_names_));
     }
 
     if (config_.plotGroundCap()) {
@@ -383,8 +320,7 @@ class DirectModelBuilder
     return net;
   }
 
-  auto appendCouplingCaps(plot_spef::Model& model,
-                          Size corner_idx) const -> void
+  auto appendCouplingCaps(plot_spef::Model& model, Size corner_idx) const -> void
   {
     if (!config_.plotCouplingCap() && !config_.hasNetFilter()) {
       return;
@@ -409,8 +345,7 @@ class DirectModelBuilder
 
       const TopoEdge& edge_a = edge_pool[edge_a_idx];
       const TopoEdge& edge_b = edge_pool[edge_b_idx];
-      if (edge_a.get_net_id() >= model.nets.size()
-          || edge_b.get_net_id() >= model.nets.size()) {
+      if (edge_a.get_net_id() >= model.nets.size() || edge_b.get_net_id() >= model.nets.size()) {
         continue;
       }
 
@@ -419,20 +354,12 @@ class DirectModelBuilder
       const std::string node_a = edgeEndpointName(edge_a, node_names_);
       const std::string node_b = edgeEndpointName(edge_b, node_names_);
 
-      model.nets[edge_a.get_net_id()].coupling_caps.push_back(plot_spef::Capacitor{
-          .node1 = node_a,
-          .node2 = node_b,
-          .value = cap_ff,
-          .edge1 = ref_a,
-          .edge2 = ref_b});
+      model.nets[edge_a.get_net_id()].coupling_caps.push_back(
+          plot_spef::Capacitor{.node1 = node_a, .node2 = node_b, .value = cap_ff, .edge1 = ref_a, .edge2 = ref_b});
 
       if (edge_b.get_net_id() != edge_a.get_net_id()) {
-        model.nets[edge_b.get_net_id()].coupling_caps.push_back(plot_spef::Capacitor{
-            .node1 = node_b,
-            .node2 = node_a,
-            .value = cap_ff,
-            .edge1 = ref_b,
-            .edge2 = ref_a});
+        model.nets[edge_b.get_net_id()].coupling_caps.push_back(
+            plot_spef::Capacitor{.node1 = node_b, .node2 = node_a, .value = cap_ff, .edge1 = ref_b, .edge2 = ref_a});
       }
     }
   }
@@ -477,9 +404,7 @@ class DirectModelBuilder
     return visibility;
   }
 
-  static auto showEdge(const plot_spef::Model& model,
-                       plot_spef::Visibility& visibility,
-                       const plot_spef::EdgeRef& edge_ref) -> void
+  static auto showEdge(const plot_spef::Model& model, plot_spef::Visibility& visibility, const plot_spef::EdgeRef& edge_ref) -> void
   {
     if (!edge_ref.valid || edge_ref.net_index >= model.nets.size()) {
       return;
@@ -501,14 +426,10 @@ class DirectModelBuilder
     showNode(model, visibility, resistor.node2);
   }
 
-  static auto showNode(const plot_spef::Model& model,
-                       plot_spef::Visibility& visibility,
-                       const std::string& node_name) -> void
+  static auto showNode(const plot_spef::Model& model, plot_spef::Visibility& visibility, const std::string& node_name) -> void
   {
     const auto node_it = model.node_refs_by_name.find(node_name);
-    if (node_it == model.node_refs_by_name.end()
-        || !node_it->second.valid
-        || node_it->second.net_index >= visibility.nets.size()) {
+    if (node_it == model.node_refs_by_name.end() || !node_it->second.valid || node_it->second.net_index >= visibility.nets.size()) {
       return;
     }
     auto& net_visibility = visibility.nets[node_it->second.net_index];
@@ -525,15 +446,12 @@ class DirectModelBuilder
   CoordScaler scaler_;
 };
 
-auto makePlotSpefConfig(const plot_spef::Config& rcx_config,
-                        const LayoutData& layout) -> plot_spef::Config
+auto makePlotSpefConfig(const plot_spef::Config& rcx_config, const LayoutData& layout) -> plot_spef::Config
 {
   plot_spef::Config config;
   config.output_dir = rcx_config.output_dir;
   config.net_name = rcx_config.net_name;
-  config.dbu = rcx_config.dbu > 0
-                   ? rcx_config.dbu
-                   : (layout.dbu_per_micron > 0 ? layout.dbu_per_micron : kDefaultPlotDbu);
+  config.dbu = rcx_config.dbu > 0 ? rcx_config.dbu : (layout.dbu_per_micron > 0 ? layout.dbu_per_micron : kDefaultPlotDbu);
   config.cores = rcx_config.cores > 0 ? rcx_config.cores : 1;
   config.output_resistance = rcx_config.output_resistance;
   config.output_coupling_cap = rcx_config.output_coupling_cap;
@@ -543,8 +461,7 @@ auto makePlotSpefConfig(const plot_spef::Config& rcx_config,
 
 }  // namespace
 
-auto writeInternalPlotSpef(const RCXData& data,
-                           const plot_spef::Config& config) -> bool
+auto writeInternalPlotSpef(const RCXData& data, const plot_spef::Config& config) -> bool
 {
   if (!config.spef_file.empty()) {
     return true;
@@ -554,9 +471,7 @@ auto writeInternalPlotSpef(const RCXData& data,
     RCXLOG.warn(Loc::current(), "plot_spef failed: process corners not loaded.");
     return false;
   }
-  if (data.get_layout().get_regular_net_count() == 0
-      || data.get_topo_pool().get_node_pool().empty()
-      || data.get_rc_table().get_corner_num() == 0
+  if (data.get_layout().get_regular_net_count() == 0 || data.get_topo_pool().get_node_pool().empty() || data.get_rc_table().get_corner_num() == 0
       || data.get_rc_table().get_net_num() == 0) {
     RCXLOG.warn(Loc::current(), "plot_spef failed: internal iRCX data is not available.");
     return false;

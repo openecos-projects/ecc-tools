@@ -71,23 +71,21 @@ class SDFWriter
   bool hasSDFTimingCheck(Instance& instance);
   void outputSDFCellDelay(std::ofstream* sdf_file, Instance& instance);
   void outputSDFGraphCellArc(std::ofstream* sdf_file, Arc& arc);
-  void mergeSDFCellArcDelay(SDFCellArcDelayMap& cell_arc_delay_map, TimingArc& timing_arc, TransType input_trans_type,
-                            SDFDelay& sdf_delay);
+  void mergeSDFCellArcDelay(SDFCellArcDelayMap& cell_arc_delay_map, TimingArc& timing_arc, TransType input_trans_type, SDFDelay& sdf_delay);
   void mergeSDFDelay(SDFDelay& target_delay, SDFDelay& source_delay);
   void outputSDFCellArcDelayMap(std::ofstream* sdf_file, std::string& source_port_name, std::string& sink_port_name, SDFCellArcDelayMap& cell_arc_delay_map);
   void outputSDFOnlyCellArcList(std::ofstream* sdf_file, Instance& instance);
   void outputSDFOnlyCellArc(std::ofstream* sdf_file, Instance& instance, TimingCellArc& timing_cell_arc);
-  void outputSDFCellArc(std::ofstream* sdf_file, std::string& source_port_name, std::string& sink_port_name, std::string& condition,
-                        TransType input_trans_type, SDFDelay& sdf_delay);
+  void outputSDFCellArc(std::ofstream* sdf_file, std::string& source_port_name, std::string& sink_port_name, std::string& condition, TransType input_trans_type,
+                        SDFDelay& sdf_delay);
   void outputSDFTimingCheckList(std::ofstream* sdf_file, Instance& instance);
   void outputSDFTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc);
   void outputSDFEdgeTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc,
-                                 TransType data_trans_type);
-  void outputSDFWidthTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc,
-                                  TransType trans_type);
+                                TransType data_trans_type);
+  void outputSDFWidthTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc, TransType trans_type);
   void outputSDFPeriodTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc);
-  void adjustSDFHoldTimingCheckDelay(Instance& instance, TimingCheckArc& hold_timing_check_arc, TimingArc& hold_timing_arc,
-                                     TransType data_trans_type, double& minimum_hold_delay, double& maximum_hold_delay);
+  void adjustSDFHoldTimingCheckDelay(Instance& instance, TimingCheckArc& hold_timing_check_arc, TimingArc& hold_timing_arc, TransType data_trans_type,
+                                     double& minimum_hold_delay, double& maximum_hold_delay);
   TimingCheckArc* findSDFSetupTimingCheck(TimingCell& timing_cell, TimingCheckArc& hold_timing_check_arc);
   TimingArc* findSDFSetupTimingArc(TimingCheckArc& setup_timing_check_arc, TimingArc& hold_timing_arc, TransType data_trans_type);
   TimingCell* getTimingCell(Instance& instance);
@@ -95,15 +93,13 @@ class SDFWriter
   bool isSDFTimingCheck(Instance& instance, TimingCheckArc& timing_check_arc);
   SDFDelay getSDFArcDelay(Arc& arc, TransType input_trans_type = TransType::kNone);
   SDFDelay getSDFTimingArcDelay(Arc& arc, TimingArc& timing_arc, TransType input_trans_type = TransType::kNone);
-  SDFDelay getSDFTimingCellArcDelay(TimingCellArc& timing_cell_arc, TimingArc& timing_arc,
-                                    TransType input_trans_type = TransType::kNone);
+  SDFDelay getSDFTimingCellArcDelay(TimingCellArc& timing_cell_arc, TimingArc& timing_arc, TransType input_trans_type = TransType::kNone);
   void updateSDFDelay(SDFDelay& sdf_delay, std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>& delay_map,
                       TransType input_trans_type = TransType::kNone);
   bool hasSDFDelay(SDFDelay& sdf_delay);
-  double getSDFTimingCheckDelay(Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc,
-                                AnalysisType analysis_type, TransType data_trans_type);
-  double getSDFTimingCheckSlew(Instance& instance, TimingCheckArc& timing_check_arc, AnalysisType analysis_type,
-                               TransType data_trans_type);
+  double getSDFTimingCheckDelay(Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc, AnalysisType analysis_type,
+                                TransType data_trans_type);
+  double getSDFTimingCheckSlew(Instance& instance, TimingCheckArc& timing_check_arc, AnalysisType analysis_type, TransType data_trans_type);
   double getSDFSlew(std::string& pin_name, AnalysisType analysis_type, TransType trans_type);
   AnalysisType getCaptureAnalysisType(AnalysisType analysis_type);
   std::string getSDFTimingCheckName(TimingCheckType timing_check_type);

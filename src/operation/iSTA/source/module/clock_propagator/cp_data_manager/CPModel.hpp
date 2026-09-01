@@ -17,10 +17,6 @@
 
 #include "STAHeader.hpp"
 
-#include <string_view>
-#include <string>
-#include <vector>
-
 namespace ista {
 
 class CPClock
@@ -37,7 +33,6 @@ class CPClock
   [[nodiscard]] const std::vector<std::string>& get_source_list() const { return _source_list; }
   [[nodiscard]] bool get_is_propagated() const { return _is_propagated; }
   [[nodiscard]] const std::vector<std::string>& get_clock_point_list() const { return _clock_point_list; }
-
 
   void set_clock_name(const std::string& clock_name) { _clock_name = clock_name; }
   void set_is_propagated(bool is_propagated) { _is_propagated = is_propagated; }

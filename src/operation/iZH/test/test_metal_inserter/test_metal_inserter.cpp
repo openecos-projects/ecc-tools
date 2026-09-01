@@ -23,17 +23,15 @@
 int main()
 {
   izh::MIRect rect(0, 0, 10, 4);
-  if (!rect.is_valid() || !rect.is_intersect(izh::MIRect(9, 0, 11, 4)) || rect.is_intersect(izh::MIRect(10, 0, 12, 4))
-      || rect.get_area() != 40.0) {
+  if (!rect.is_valid() || !rect.is_intersect(izh::MIRect(9, 0, 11, 4)) || rect.is_intersect(izh::MIRect(10, 0, 12, 4)) || rect.get_area() != 40.0) {
     return 1;
   }
 
   izh::MIComParam mi_com_param(100.0, 50.0, 0.10, 0.80);
   mi_com_param.set_min_fill_layer("MET1");
   mi_com_param.set_max_fill_layer("MET5");
-  if (mi_com_param.get_density_window_size_micron() != 100.0 || mi_com_param.get_density_window_step_micron() != 50.0
-      || mi_com_param.get_min_density() != 0.10 || mi_com_param.get_max_density() != 0.80
-      || mi_com_param.get_min_fill_layer() != "MET1" || mi_com_param.get_max_fill_layer() != "MET5") {
+  if (mi_com_param.get_density_window_size_micron() != 100.0 || mi_com_param.get_density_window_step_micron() != 50.0 || mi_com_param.get_min_density() != 0.10
+      || mi_com_param.get_max_density() != 0.80 || mi_com_param.get_min_fill_layer() != "MET1" || mi_com_param.get_max_fill_layer() != "MET5") {
     return 1;
   }
 
@@ -48,8 +46,7 @@ int main()
   mi_layer.set_density_window_x_num(2);
   mi_layer.set_density_window_y_num(3);
   mi_layer.set_density_window_list({density_window});
-  if (mi_layer.get_layer_name() != "M1" || mi_layer.get_density_window_idx(1, 2) != 5
-      || mi_layer.get_density_window_list().size() != 1) {
+  if (mi_layer.get_layer_name() != "M1" || mi_layer.get_density_window_idx(1, 2) != 5 || mi_layer.get_density_window_list().size() != 1) {
     return 1;
   }
 
