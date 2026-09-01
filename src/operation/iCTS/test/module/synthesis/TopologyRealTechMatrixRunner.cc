@@ -58,6 +58,21 @@
 namespace icts_test::synthesis_realtech_smoke {
 namespace {
 
+auto FindUniqueOutputPin(const icts::Inst* inst) -> icts::Pin*
+{
+  icts::Pin* output = nullptr;
+  for (auto* pin : inst->get_pins()) {
+    if (pin == nullptr || pin->get_type() != icts::PinType::kOut) {
+      continue;
+    }
+    if (output != nullptr) {
+      return nullptr;
+    }
+    output = pin;
+  }
+  return output;
+}
+
 namespace design_realtech = data_manager::realtech;
 namespace characterization_realtech = characterization::realtech;
 
@@ -290,7 +305,7 @@ auto CollectReachableNets(const icts::Pin* root_pin) -> std::vector<const icts::
       if (load_pin == nullptr || load_pin->get_inst() == nullptr || !load_pin->get_inst()->is_buffer()) {
         continue;
       }
-      pending_pins.push(load_pin->get_inst()->findDriverPin());
+      pending_pins.push(FindUniqueOutputPin(load_pin->get_inst()));
     }
   }
   return nets;
@@ -324,7 +339,7 @@ auto CalcTopologyTimingSummary(const icts::Topology::Build& result, const std::v
 
       auto* load_inst = load_pin == nullptr ? nullptr : load_pin->get_inst();
       if (load_inst != nullptr && load_inst->is_buffer()) {
-        if (auto* output_pin = load_inst->findDriverPin(); output_pin != nullptr) {
+        if (auto* output_pin = FindUniqueOutputPin(load_inst); output_pin != nullptr) {
           arrival_by_pin[output_pin] = arrival_by_pin[load_pin];
           wirelength_by_pin[output_pin] = wirelength_by_pin[load_pin];
         }

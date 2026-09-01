@@ -48,7 +48,7 @@ IdbUnits::IdbUnits()
 
 void IdbUnits::print()
 {
-  ECCLOG.info(ecc::Loc::current(), "nanoseconds = ", _nanoseconds, " picofarads = ", _picofarads, " ohms = ", " milliwatts = ", _milliwatts, " milliamps = ", _milliamps, " volts = ", _volts, " micron_dbu = ", _micron_dbu, " megahertz = ", _megahertz);
+  ECCLOG.info(ecc::Loc::current(), "nanoseconds = ", _nanoseconds, " picofarads = ", _picofarads, " ohms = ", _ohms, " milliwatts = ", _milliwatts, " milliamps = ", _milliamps, " volts = ", _volts, " micron_dbu = ", _micron_dbu, " megahertz = ", _megahertz);
 }
 
 }  // namespace idb

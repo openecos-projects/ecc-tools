@@ -72,6 +72,7 @@ class SourceTrunkSegment
     std::vector<std::unique_ptr<Inst>> inserted_insts;
     std::vector<std::unique_ptr<Pin>> inserted_pins;
     std::vector<std::unique_ptr<Net>> inserted_nets;
+    std::vector<ClockPropagationArc> propagation_arcs;
     std::vector<HTree::InsertedInstLevel> inserted_inst_levels;
     std::vector<HTree::InsertedNetLevel> inserted_net_levels;
   };
@@ -84,6 +85,13 @@ class SourceTrunkSegment
     std::string boundary_relaxation_reason;
     std::size_t strict_candidate_count = 0U;
     std::size_t relaxed_candidate_count = 0U;
+    std::size_t label_visited_length_count = 0U;
+    std::size_t label_visited_state_count = 0U;
+    std::size_t label_generated_count = 0U;
+    std::size_t label_retained_count = 0U;
+    std::size_t label_final_candidate_count = 0U;
+    std::size_t label_final_pareto_count = 0U;
+    std::size_t label_selected_primitive_count = 0U;
     double length_um = 0.0;
     unsigned length_idx = 0U;
     unsigned required_load_cap_idx = 0U;

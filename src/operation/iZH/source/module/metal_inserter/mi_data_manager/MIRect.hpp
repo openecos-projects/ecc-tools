@@ -37,13 +37,19 @@ class MIRect
   void set_ll_y(int32_t ll_y) { _ll_y = ll_y; }
   void set_ur_x(int32_t ur_x) { _ur_x = ur_x; }
   void set_ur_y(int32_t ur_y) { _ur_y = ur_y; }
+  double get_area() const { return static_cast<double>(get_width()) * static_cast<double>(get_height()); }
   // function
-  bool isValid() const { return _ll_x < _ur_x && _ll_y < _ur_y; }
-  bool isIntersect(const MIRect& rect) const
+  bool is_valid() const { return _ll_x < _ur_x && _ll_y < _ur_y; }
+  bool is_intersect(const MIRect& rect) const
   {
     return _ll_x < rect.get_ur_x() && rect.get_ll_x() < _ur_x && _ll_y < rect.get_ur_y() && rect.get_ll_y() < _ur_y;
   }
-  MIRect getExpandRect(int32_t spacing) const { return MIRect(_ll_x - spacing, _ll_y - spacing, _ur_x + spacing, _ur_y + spacing); }
+  MIRect get_intersect_rect(const MIRect& rect) const
+  {
+    return MIRect(std::max(_ll_x, rect.get_ll_x()), std::max(_ll_y, rect.get_ll_y()), std::min(_ur_x, rect.get_ur_x()),
+                  std::min(_ur_y, rect.get_ur_y()));
+  }
+  MIRect get_expand_rect(int32_t spacing) const { return MIRect(_ll_x - spacing, _ll_y - spacing, _ur_x + spacing, _ur_y + spacing); }
 
  private:
   int32_t _ll_x = 0;

@@ -85,6 +85,7 @@ class ClockDistribution
   ClockDistribution() = delete;
 
   static auto partitionSinkDomains(const Clock& clock) -> ClockDistributionPartition;
+  static auto partitionSinkDomains(const std::vector<Pin*>& sinks) -> ClockDistributionPartition;
   static auto prepare(const ClockDistributionInput& input) -> std::optional<ClockDistributionContext>;
 };
 

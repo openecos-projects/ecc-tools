@@ -107,7 +107,7 @@ void MacroPlacer::checkMacroInCore()
         && core.get_ll_y() <= macro_rect.get_ll_y() && macro_rect.get_ur_y() <= core.get_ur_y()) {
       continue;
     }
-    FPLOG.warn(Loc::current(), "The macro '", instance.get_name(), "' is placed outside core!");
+    FPLOG.error(Loc::current(), "The macro '", instance.get_name(), "' is placed outside core!");
   }
 }
 
