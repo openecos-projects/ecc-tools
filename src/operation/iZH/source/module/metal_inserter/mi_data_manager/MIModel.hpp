@@ -15,7 +15,8 @@
 // ***************************************************************************************
 #pragma once
 
-#include "MILayerRule.hpp"
+#include "MIComParam.hpp"
+#include "MILayer.hpp"
 #include "MIRect.hpp"
 
 namespace izh {
@@ -26,30 +27,33 @@ class MIModel
   MIModel() = default;
   ~MIModel() = default;
   // getter
-  std::string& get_rule_file_path() { return _rule_file_path; }
-  MIRect& get_fill_area() { return _fill_area; }
-  std::vector<MILayerRule>& get_layer_rule_list() { return _layer_rule_list; }
-  bool get_reset_fill() const { return _reset_fill; }
+  MIComParam& get_mi_com_param() { return _mi_com_param; }
+  MIRect& get_die() { return _die; }
+  int32_t get_micron_dbu() const { return _micron_dbu; }
+  int32_t get_manufacture_grid() const { return _manufacture_grid; }
+  std::vector<MILayer>& get_mi_layer_list() { return _mi_layer_list; }
   int32_t get_inserted_metal_num() const { return _inserted_metal_num; }
   // const getter
-  const std::string& get_rule_file_path() const { return _rule_file_path; }
-  const MIRect& get_fill_area() const { return _fill_area; }
-  const std::vector<MILayerRule>& get_layer_rule_list() const { return _layer_rule_list; }
+  const MIComParam& get_mi_com_param() const { return _mi_com_param; }
+  const MIRect& get_die() const { return _die; }
+  const std::vector<MILayer>& get_mi_layer_list() const { return _mi_layer_list; }
   // setter
-  void set_rule_file_path(const std::string& rule_file_path) { _rule_file_path = rule_file_path; }
-  void set_fill_area(const MIRect& fill_area) { _fill_area = fill_area; }
-  void set_layer_rule_list(const std::vector<MILayerRule>& layer_rule_list) { _layer_rule_list = layer_rule_list; }
-  void set_reset_fill(bool reset_fill) { _reset_fill = reset_fill; }
+  void set_mi_com_param(const MIComParam& mi_com_param) { _mi_com_param = mi_com_param; }
+  void set_die(const MIRect& die) { _die = die; }
+  void set_micron_dbu(int32_t micron_dbu) { _micron_dbu = micron_dbu; }
+  void set_manufacture_grid(int32_t manufacture_grid) { _manufacture_grid = manufacture_grid; }
+  void set_mi_layer_list(const std::vector<MILayer>& mi_layer_list) { _mi_layer_list = mi_layer_list; }
   void set_inserted_metal_num(int32_t inserted_metal_num) { _inserted_metal_num = inserted_metal_num; }
   // function
-  void addInsertedMetalNum() { ++_inserted_metal_num; }
-  void addInsertedMetalNum(int32_t inserted_metal_num) { _inserted_metal_num += inserted_metal_num; }
+  void add_inserted_metal_num() { ++_inserted_metal_num; }
+  void add_inserted_metal_num(int32_t inserted_metal_num) { _inserted_metal_num += inserted_metal_num; }
 
  private:
-  std::string _rule_file_path;
-  MIRect _fill_area;
-  std::vector<MILayerRule> _layer_rule_list;
-  bool _reset_fill = false;
+  MIComParam _mi_com_param;
+  MIRect _die;
+  int32_t _micron_dbu = 0;
+  int32_t _manufacture_grid = 0;
+  std::vector<MILayer> _mi_layer_list;
   int32_t _inserted_metal_num = 0;
 };
 

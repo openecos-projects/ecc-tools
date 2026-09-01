@@ -68,6 +68,7 @@ struct TraceNode
   idb::IdbNet* net = nullptr;
   std::string path;
   std::size_t depth = 0U;
+  std::vector<ClockTracePropagationStep> propagation_steps;
 };
 
 struct TraceTransition
@@ -75,6 +76,7 @@ struct TraceTransition
   idb::IdbNet* net = nullptr;
   std::string path_step;
   std::string reason;
+  std::optional<ClockTracePropagationStep> propagation_step;
 };
 
 struct CaseConstraintSet
@@ -109,8 +111,6 @@ auto TargetKind(const ClockSinkStats& stats) -> std::string;
 auto ClockKindName(const SdcClockDecl& clock) -> std::string;
 auto MasterClockName(const SdcClockDecl& clock) -> std::string;
 auto DominanceForRecord(const ClockTraceRecord& record, const std::string& clock_kind) -> std::string;
-auto StrongTargetSinkThreshold(std::size_t max_fanout) -> std::size_t;
-auto IsStrongClockTarget(const ClockTraceRecord& record, std::size_t sink_threshold) -> bool;
 auto ResolveInstPinByLibPort(idb::IdbInstance* inst, idb::LibPort* lib_port) -> idb::IdbPin*;
 auto BuildPreclusteredSinkAnchor(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* leaf_net) -> std::optional<ClockTracePreclusteredSinkAnchor>;
 

@@ -5,6 +5,14 @@ message(STATUS "############## iSTA: START CMAKE ##############")
 
 set(CMAKE_CXX_STANDARD 20)
 
+if (CMAKE_VERSION VERSION_GREATER_EQUAL 3.17)
+    set(CMAKE_DEFAULT_BUILD_TYPE Release)
+else ()
+    if (NOT CMAKE_BUILD_TYPE)
+        set(CMAKE_BUILD_TYPE Release)
+    endif ()
+endif ()
+
 # add_compile_options("-Wconversion")
 # add_compile_options("-fsanitize=address")
 # link_libraries("-fsanitize=address")

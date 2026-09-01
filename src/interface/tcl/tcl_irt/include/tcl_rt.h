@@ -96,20 +96,6 @@ class TclRTCleanDef : public TclCmd
   std::vector<std::pair<std::string, ValueType>> _config_list;
 };
 
-class TclRTFixFanout : public TclCmd
-{
- public:
-  explicit TclRTFixFanout(const char* cmd_name);
-  ~TclRTFixFanout() override = default;
-
-  unsigned check() override { return 1; };
-
-  unsigned exec() override;
-
- private:
-  std::vector<std::pair<std::string, ValueType>> _config_list;
-};
-
 #endif
 
 }  // namespace tcl

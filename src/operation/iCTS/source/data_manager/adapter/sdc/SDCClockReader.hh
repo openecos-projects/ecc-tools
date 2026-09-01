@@ -88,6 +88,24 @@ struct SdcClockData
   std::vector<std::string> diagnostics;
 };
 
+enum class ClockTracePropagationKind
+{
+  kBuffer,
+  kInverter,
+};
+
+struct ClockTracePropagationStep
+{
+  std::string clock_name;
+  std::string inst_name;
+  std::string input_pin_name;
+  std::string output_pin_name;
+  std::string input_net_name;
+  std::string output_net_name;
+  ClockTracePropagationKind kind = ClockTracePropagationKind::kBuffer;
+  std::string ownership_reason;
+};
+
 struct ClockTraceRecord
 {
   std::string clock_name;
@@ -101,6 +119,7 @@ struct ClockTraceRecord
   std::string clock_kind = "unknown";
   std::string master_clock_name = "n/a";
   std::string dominance = "undetermined";
+  std::vector<ClockTracePropagationStep> propagation_steps;
 };
 
 struct ClockTracePreclusteredSinkAnchor
@@ -118,6 +137,8 @@ struct ClockTraceClockTarget
   std::string clock_net_name;
   bool preclustered_sink_reuse = false;
   std::vector<ClockTracePreclusteredSinkAnchor> preclustered_sink_anchors;
+  std::vector<std::string> terminal_net_names;
+  std::vector<ClockTracePropagationStep> propagation_steps;
 };
 
 struct ClockTraceOutput
@@ -131,10 +152,20 @@ struct ClockTraceSummary
   std::vector<ClockTraceRecord> unowned_clock_like_records;
 };
 
+enum class ClockTraceBuildStatusCode
+{
+  kOk,
+  kAmbiguousOwnership,
+};
+
 struct ClockTraceBuild
 {
   ClockTraceOutput output;
   ClockTraceSummary summary;
+  ClockTraceBuildStatusCode status = ClockTraceBuildStatusCode::kOk;
+  std::string message;
+
+  [[nodiscard]] auto ok() const -> bool { return status == ClockTraceBuildStatusCode::kOk; }
 };
 
 struct SdcClockTraceInput

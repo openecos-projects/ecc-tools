@@ -74,6 +74,7 @@ class TimingAnalyzer
   double getEndPointRequired(std::string& start_point, std::string& end_point, double default_required_time, AnalysisType analysis_type,
                              TransType data_trans_type, double data_slew);
   std::string_view getClockName(std::string& pin_name);
+  double getClockUncertainty(std::string& pin_name, AnalysisType analysis_type);
   TimingClock* getStartPointClock(std::string& start_point);
   double getEndPointRequired(TimingPathState& end_path_state, std::string& end_point, double default_required_time,
                              AnalysisType analysis_type);

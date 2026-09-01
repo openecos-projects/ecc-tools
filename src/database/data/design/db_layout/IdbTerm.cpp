@@ -268,6 +268,9 @@ IdbLayer* IdbTerm::get_top_layer()
   IdbLayer* layer = nullptr;
   for (IdbPort* port : _port_list) {
     IdbLayer* layer_top = port->get_top_layer();
+    if (layer_top == nullptr) {
+      continue;
+    }
     if (layer == nullptr) {
       layer = layer_top;
     } else {
