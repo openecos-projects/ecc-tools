@@ -198,9 +198,13 @@ auto logDesignDistribution(const Design& design) -> void
     }
     total_sinks += clock->get_loads().size();
     const auto sequential_sinks = sink_type_counts[InstType::kFlipFlop] + sink_type_counts[InstType::kLatch];
+    const auto physical_propagation_boundaries = static_cast<std::size_t>(std::ranges::count_if(clock->get_loads(), [clock](const Pin* load) -> bool {
+      const auto* inst = load == nullptr ? nullptr : load->get_inst();
+      return inst != nullptr && (inst->is_buffer() || inst->is_inverter()) && clock->findPropagationArc(inst) == nullptr;
+    }));
     const auto boundary_sinks = sink_type_counts[InstType::kClockGate] + sink_type_counts[InstType::kMux] + sink_type_counts[InstType::kClockLogic]
-                                + sink_type_counts[InstType::kBoundaryLoad];
-    const auto propagation_sinks = sink_type_counts[InstType::kBuffer] + sink_type_counts[InstType::kInverter];
+                                + sink_type_counts[InstType::kBoundaryLoad] + physical_propagation_boundaries;
+    const auto propagation_sinks = clock->get_propagation_arcs().size();
     distribution_rows.push_back({clock->get_clock_name(), clock->get_clock_net_name(), ToLogTableCell(clock->get_clock_period_ns()),
                                  clock->get_clock_period_source(), ToLogTableCell(clock->get_nets().size()), ToLogTableCell(clock->get_insts().size()),
                                  ToLogTableCell(clock->get_loads().size()), ToLogTableCell(sequential_sinks),
@@ -245,12 +249,25 @@ void DataManager::destroyInst()
 
 auto DataManager::okStatus(std::string message) -> DataManagerStatus
 {
-  return DataManagerStatus{.code = DataManagerStatusCode::kOk, .message = std::move(message), .diagnostics = {}};
+  return DataManagerStatus{.code = DataManagerStatusCode::kOk, .message = std::move(message), .diagnostics = {}, .graph_issues = {}};
 }
 
 auto DataManager::failureStatus(DataManagerStatusCode code, std::string message) -> DataManagerStatus
 {
-  return DataManagerStatus{.code = code, .message = std::move(message), .diagnostics = {}};
+  return DataManagerStatus{.code = code, .message = std::move(message), .diagnostics = {}, .graph_issues = {}};
+}
+
+auto DataManager::makeClockGraphFailureStatus(DataManagerStatusCode code, std::string message, const ClockDAG& clock_dag) -> DataManagerStatus
+{
+  DataManagerStatus status{.code = code, .message = std::move(message), .diagnostics = {}, .graph_issues = clock_dag.get_issues()};
+  status.diagnostics.reserve(status.graph_issues.size());
+  for (const auto& issue : status.graph_issues) {
+    status.diagnostics.push_back(FormatClockGraphIssue(issue));
+  }
+  if (!status.diagnostics.empty()) {
+    status.message += ": " + status.diagnostics.front();
+  }
+  return status;
 }
 
 auto DataManager::input(const DataManagerInput& input_data) -> DataManagerStatus
@@ -295,7 +312,8 @@ auto DataManager::input(const DataManagerInput& input_data) -> DataManagerStatus
   logRuntimeConfiguration(_config, _wrapper, input_data.config_file);
 
   auto status = readClockData();
-  status.diagnostics = _config.get_warnings();
+  const auto& config_warnings = _config.get_warnings();
+  status.diagnostics.insert(status.diagnostics.end(), config_warnings.begin(), config_warnings.end());
   if (!status.ok()) {
     (*_design).reset();
     _wrapper.clearCtsBindings();
@@ -333,6 +351,10 @@ auto DataManager::readClockData() -> DataManagerStatus
         .max_fanout = _config.get_max_fanout(),
     });
     logClockTraceSummary(sdc_clock_data, trace);
+    if (!trace.ok()) {
+      CTSLOG.warn(Loc::current(), "CTS data input rejected SDC clock ownership: ", trace.message);
+      return failureStatus(DataManagerStatusCode::kExternalDataError, trace.message);
+    }
     clock_targets = trace.output.clock_targets;
     std::set<std::string> accepted_clock_names;
     for (const auto& target : clock_targets) {
@@ -350,6 +372,10 @@ auto DataManager::readClockData() -> DataManagerStatus
 
   if (!clock_targets.empty() && !_wrapper.readTraceClockTargets(*_design, clock_targets)) {
     return failureStatus(DataManagerStatusCode::kExternalDataError, "clock_materialization_failed");
+  }
+
+  if (!_design->rebuildClockDAG()) {
+    return makeClockGraphFailureStatus(DataManagerStatusCode::kExternalDataError, "clock_input_graph_invalid", _design->get_clock_dag());
   }
 
   for (auto* clock : _design->get_clocks()) {
@@ -370,14 +396,14 @@ auto DataManager::readClockData() -> DataManagerStatus
 
 auto DataManager::commitSynthesis(std::unique_ptr<Design> design, ClockLayout clock_layout, const SynthesisTraceSummary& summary) -> DataManagerStatus
 {
-  if (_state != CTSRunState::kInputReady) {
-    return failureStatus(DataManagerStatusCode::kInvalidState, "synthesis commit requires input-ready state.");
+  if (_state != CTSRunState::kInputReady && _state != CTSRunState::kSynthesisCommitted) {
+    return failureStatus(DataManagerStatusCode::kInvalidState, "synthesis commit requires input-ready or synthesis-committed state.");
   }
   if (design == nullptr || summary.outcome == SynthesisOutcome::kFailed || (summary.outcome == SynthesisOutcome::kFinished && !summary.success)) {
     return failureStatus(DataManagerStatusCode::kCommitError, "synthesis result is not committable.");
   }
   if (summary.outcome == SynthesisOutcome::kFinished && !design->rebuildClockDAG()) {
-    return failureStatus(DataManagerStatusCode::kCommitError, "synthesis result is not a valid clock DAG.");
+    return makeClockGraphFailureStatus(DataManagerStatusCode::kCommitError, "synthesis result is not a valid clock DAG", design->get_clock_dag());
   }
   replaceCommittedDesign(std::move(design));
   _clock_layout = std::move(clock_layout);
@@ -391,8 +417,11 @@ auto DataManager::commitOptimization(std::unique_ptr<Design> design, ClockLayout
   if (_state != CTSRunState::kSynthesisCommitted) {
     return failureStatus(DataManagerStatusCode::kInvalidState, "optimization commit requires synthesized state.");
   }
-  if (design == nullptr || !summary.success || !design->rebuildClockDAG()) {
+  if (design == nullptr || !summary.success) {
     return failureStatus(DataManagerStatusCode::kCommitError, "optimization result is not committable.");
+  }
+  if (!design->rebuildClockDAG()) {
+    return makeClockGraphFailureStatus(DataManagerStatusCode::kCommitError, "optimization result is not a valid clock DAG", design->get_clock_dag());
   }
   replaceCommittedDesign(std::move(design));
   _clock_layout = std::move(clock_layout);

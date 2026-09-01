@@ -1,6 +1,7 @@
 add_library(
   icts_source_module_synthesis_topology_trunk
   ${ICTS_MODULE_SYNTHESIS_TOPOLOGY_TRUNK}/SourceTrunk.cc
+  ${ICTS_MODULE_SYNTHESIS_TOPOLOGY_TRUNK}/SourceTrunkLabelSolver.cc
   ${ICTS_MODULE_SYNTHESIS_TOPOLOGY_TRUNK}/SourceTrunkSegment.cc
 )
 

@@ -47,11 +47,6 @@ TclInitSTA::TclInitSTA(const char* cmd_name) : TclCmd(cmd_name)
   // compatibility aliases
   _config_list.push_back(std::make_pair("-max_path", ValueType::kInt));
   _config_list.push_back(std::make_pair("-path_report_number", ValueType::kInt));
-  // std::string delay_type;            // optional, max|min|max_min
-  _config_list.push_back(std::make_pair("-delay_type", ValueType::kString));
-  // std::string start_end_type;        // optional, all|reg_to_reg|reg_to_out|in_to_reg|in_to_out
-  _config_list.push_back(std::make_pair("-start_end_type", ValueType::kString));
-
   TclUtil::addOption(this, _config_list);
 }
 

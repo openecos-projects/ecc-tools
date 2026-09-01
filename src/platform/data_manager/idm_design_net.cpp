@@ -33,7 +33,7 @@
 
 namespace idm {
 /**
- * @Brief : calculate total wire length for all net list
+ * @Brief : calculate the maximum load count across all nets
  * @return int64_t
  */
 uint64_t DataManager::maxFanout()

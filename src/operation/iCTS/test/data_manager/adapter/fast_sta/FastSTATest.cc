@@ -43,6 +43,7 @@
 #include "clock_sizing/FastSTAClockSizingEdit.hh"
 #include "clock_state/FastSTABuilder.hh"
 #include "clock_state/FastSTAClockState.hh"
+#include "clock_tree/FastSTAClockTree.hh"
 #include "data_manager/DataManager.hh"
 #include "data_manager/config/Config.hh"
 #include "design/Clock.hh"
@@ -418,6 +419,8 @@ auto MakeOpenStaAlignmentPathContext() -> icts::FastStaClockContext
       MakeNode(icts::FastStaNodeKind::kSink, "sink", "", "sink", "", {}, 0.0, 2U, {}),
   };
   context.node_id_by_name = {{"clk", 0U}, {"u_buf/A", 1U}, {"u_buf/Y", 2U}, {"u_leaf/A", 3U}, {"u_leaf/Y", 4U}, {"sink", 5U}};
+  context.buffer_input_node_id_by_inst = {{"u_buf", 1U}, {"u_leaf", 3U}};
+  context.buffer_output_node_id_by_inst = {{"u_buf", 2U}, {"u_leaf", 4U}};
   context.nets = {
       MakeNet("clk", 0U, {1U}, 3.0),
       MakeNet("leaf", 2U, {3U}, 3.0,
@@ -454,34 +457,34 @@ TEST(FastSTATest, LibertyTableRejectsMalformedShape)
 
 TEST(FastSTATest, ClockContextBuildDoesNotRequireBufferModelForNonPropagationSink)
 {
-  icts::Wrapper wrapper;
   icts::Clock clock("clk", "clk_net");
   clock.set_clock_period_ns(10.0);
   icts::Inst sink_inst("u_sink", "DFFQX1H7L", icts::InstType::kFlipFlop, icts::Point<int>(100, 200));
   icts::Pin sink_pin("CK", icts::PinType::kClock, icts::Point<int>(100, 200), &sink_inst);
   sink_inst.add_pin(&sink_pin);
-  clock.add_inst(&sink_inst);
+  clock.add_load(&sink_pin);
 
-  const auto build = icts::FastStaBuilder::buildClockContext(
-      icts::FastStaEnvironment{
-          .wrapper = &wrapper,
-          .dbu_per_um = 1000,
-          .routing_layer = 1,
-          .root_input_slew_ns = 0.1,
-          .max_cap_pf = 1.0,
-          .max_sink_tran_ns = 1.0,
-      },
-      icts::FastStaClockBuildInput{.clock = &clock});
-
-  if (!build.context.has_value()) {
-    ADD_FAILURE() << build.failure_reason;
-    return;
-  }
-  const auto& context = build.context.value();
+  const auto context = icts::FastStaClockTree::buildFromClock(clock);
   ASSERT_EQ(context.nodes.size(), 1U);
   EXPECT_EQ(context.nodes.front().kind, icts::FastStaNodeKind::kSink);
   EXPECT_EQ(context.nodes.front().cell_master, "DFFQX1H7L");
   EXPECT_TRUE(context.liberty_cell_by_master.empty());
+}
+
+TEST(FastSTATest, PhysicalBufferBoundaryWithoutClockArcRemainsSinkNode)
+{
+  icts::Clock clock("clk", "clk_net");
+  clock.set_clock_period_ns(10.0);
+  icts::Inst boundary_inst("u_boundary", "BUF_X1", icts::InstType::kBuffer, icts::Point<int>(100, 200));
+  icts::Pin boundary_input("A", icts::PinType::kIn, icts::Point<int>(100, 200), &boundary_inst);
+  boundary_inst.add_pin(&boundary_input);
+  clock.add_load(&boundary_input);
+
+  const auto context = icts::FastStaClockTree::buildFromClock(clock);
+  ASSERT_EQ(context.nodes.size(), 1U);
+  EXPECT_EQ(context.nodes.front().kind, icts::FastStaNodeKind::kSink);
+  EXPECT_TRUE(context.buffer_input_node_id_by_inst.empty());
+  EXPECT_TRUE(context.buffer_output_node_id_by_inst.empty());
 }
 
 TEST(FastSTATest, DmpDriverTimingProducesCeffAndLoadSlew)
@@ -782,33 +785,29 @@ TEST(FastSTATest, BatchIncrementalMasterChangeAndRestoreMatchFullRecompute)
   EXPECT_TRUE(TimingStatesMatch(incremental_context, original_context));
 }
 
-TEST(FastSTATest, MissingBufferPairIndexesUseValidatedFallback)
+TEST(FastSTATest, MissingBufferPairIndexesFailClosedWithoutNameRecovery)
 {
-  auto incremental_context = MakeTwoLevelContext();
-  incremental_context.buffer_input_node_id_by_inst.clear();
-  incremental_context.buffer_output_node_id_by_inst.clear();
-  ASSERT_TRUE(icts::FastStaTiming::update(incremental_context));
-
-  auto full_context = incremental_context;
+  auto context = MakeTwoLevelContext();
+  context.buffer_input_node_id_by_inst.clear();
+  context.buffer_output_node_id_by_inst.clear();
+  std::vector<std::string> original_masters;
+  original_masters.reserve(context.nodes.size());
+  for (const auto& node : context.nodes) {
+    original_masters.push_back(node.cell_master);
+  }
   const std::vector<icts::FastStaBufferMasterChange> changes{
       {.node_id = 2U, .cell_master = "BUF_X2"},
       {.node_id = 3U, .cell_master = "BUF_X2"},
   };
 
-  const auto dirty_region = icts::FastStaIncremental::changeBufferMastersIncremental(incremental_context, changes);
-  if (!dirty_region.has_value()) {
-    ADD_FAILURE() << "Expected missing buffer-pair indexes to use the validated fallback.";
-    return;
+  EXPECT_FALSE(icts::FastStaTiming::update(context));
+  EXPECT_FALSE(icts::FastStaPower::update(context));
+  EXPECT_FALSE(icts::FastStaIncremental::validateBufferMasterChanges(context, changes));
+  EXPECT_FALSE(icts::FastStaIncremental::changeBufferMastersIncremental(context, changes).has_value());
+  ASSERT_EQ(context.nodes.size(), original_masters.size());
+  for (std::size_t node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+    EXPECT_EQ(context.nodes.at(node_id).cell_master, original_masters.at(node_id));
   }
-  ASSERT_TRUE(icts::FastStaTiming::updateRegion(incremental_context, *dirty_region));
-  ASSERT_TRUE(icts::FastStaIncremental::changeBufferMasters(full_context, changes));
-  ASSERT_TRUE(icts::FastStaTiming::update(full_context));
-  EXPECT_TRUE(TimingStatesMatch(incremental_context, full_context));
-
-  ASSERT_TRUE(icts::FastStaPower::update(incremental_context));
-  ASSERT_TRUE(icts::FastStaPower::update(full_context));
-  EXPECT_NEAR(incremental_context.power.total_power_w, full_context.power.total_power_w, 1e-18);
-  EXPECT_NEAR(incremental_context.power.area_um2, full_context.power.area_um2, 1e-12);
 }
 
 TEST(FastSTATest, BatchPrevalidationRejectsWholeChangeWithoutMutation)

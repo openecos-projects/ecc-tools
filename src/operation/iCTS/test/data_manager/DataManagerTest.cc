@@ -28,6 +28,7 @@
 #include <string>
 
 #include "data_manager/DataManager.hh"
+#include "module/synthesis/Synthesis.hh"
 
 namespace icts_test {
 namespace {
@@ -84,12 +85,21 @@ TEST(DataManagerTest, RejectsOutOfOrderStageCommitWithoutMutatingDesign)
   ASSERT_NE(candidate, nullptr);
   ASSERT_NE(candidate->makeInst("candidate_buffer"), nullptr);
 
-  const auto status = CTSDM.commitSynthesis(std::move(candidate), icts::ClockLayout{}, icts::SynthesisTraceSummary{});
+  icts::SynthesisTraceSummary candidate_summary;
+  candidate_summary.success = true;
+  candidate_summary.outcome = icts::SynthesisOutcome::kFinished;
+  icts::DataManagerStatus status;
+  const auto returned_summary = icts::CommitSynthesisCandidate(CTSDM, std::move(candidate), icts::ClockLayout{}, std::move(candidate_summary), status);
 
   EXPECT_EQ(status.code, icts::DataManagerStatusCode::kInvalidState);
+  EXPECT_FALSE(returned_summary.success);
+  EXPECT_EQ(returned_summary.outcome, icts::SynthesisOutcome::kFailed);
+  EXPECT_EQ(returned_summary.commit_status, "rejected");
+  EXPECT_EQ(returned_summary.failure_reason, status.message);
   EXPECT_EQ(CTSDM.getState(), icts::CTSRunState::kEmpty);
   EXPECT_NE(CTSDM.getDesign().findInst("committed_buffer"), nullptr);
   EXPECT_EQ(CTSDM.getDesign().findInst("candidate_buffer"), nullptr);
+  EXPECT_EQ(CTSDM.getSynthesisSummary().commit_status, "not_attempted");
 }
 
 TEST(DataManagerTest, DerivesSingleLogPathFromWorkDirectory)

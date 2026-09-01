@@ -350,7 +350,10 @@ int LefRead::parse_units(lefiUnits* lef_units)
     return kDbFail;
   }
   IdbLayout* layout = _lef_service->get_layout();
-  if (layout->get_units() != nullptr) {
+  IdbUnits* units = layout->get_units();
+  // IdbLayout eagerly allocates its units, so only a positive micron DBU
+  // proves units were actually parsed from an earlier LEF/DEF.
+  if (units != nullptr && units->get_micron_dbu() > 0) {
     ECCLOG.info(ecc::Loc::current(), "Tech Units has been init, ignore this lef units...");
     return kDbSuccess;
   }

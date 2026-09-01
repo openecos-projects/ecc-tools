@@ -94,6 +94,7 @@ void IdbVia::set_instance(IdbViaMaster* instance)
     _master_instance = nullptr;
   }
   _master_instance = instance;
+  _b_master_clone = false;
   if (_master_instance != nullptr && !_master_instance->get_name().empty()) {
     _name = _master_instance->get_name();
   }
@@ -144,7 +145,13 @@ void IdbVia::set_coordinate(IdbCoordinate<int32_t>* point)
 
 IdbLayerShape IdbVia::get_bottom_layer_shape()
 {
+  if (_master_instance == nullptr || _coordinate == nullptr) {
+    return IdbLayerShape();
+  }
   IdbLayerShape* layer_shape = _master_instance->get_bottom_layer_shape();
+  if (layer_shape == nullptr) {
+    return IdbLayerShape();
+  }
 
   IdbLayerShape via_shape;
   layer_shape->clone(via_shape);
@@ -161,7 +168,13 @@ IdbRect IdbVia::get_bottom_bounding_box()
 
 IdbLayerShape IdbVia::get_top_layer_shape()
 {
+  if (_master_instance == nullptr || _coordinate == nullptr) {
+    return IdbLayerShape();
+  }
   IdbLayerShape* layer_shape = _master_instance->get_top_layer_shape();
+  if (layer_shape == nullptr) {
+    return IdbLayerShape();
+  }
 
   IdbLayerShape via_shape;
   layer_shape->clone(via_shape);
@@ -178,7 +191,13 @@ IdbRect IdbVia::get_top_bounding_box()
 
 IdbLayerShape IdbVia::get_cut_layer_shape()
 {
+  if (_master_instance == nullptr || _coordinate == nullptr) {
+    return IdbLayerShape();
+  }
   IdbLayerShape* layer_shape = _master_instance->get_cut_layer_shape();
+  if (layer_shape == nullptr) {
+    return IdbLayerShape();
+  }
 
   IdbLayerShape via_shape;
   layer_shape->clone(via_shape);
@@ -195,12 +214,15 @@ IdbRect IdbVia::get_cut_bounding_box()
 
 bool IdbVia::isIntersection(IdbRect rect, IdbLayer* layer)
 {
+  if (layer == nullptr || _master_instance == nullptr) {
+    return false;
+  }
   IdbLayerShape layer_bootom = get_bottom_layer_shape();
-  if (layer->compareLayer(layer_bootom.get_layer()) && rect.isIntersection(layer_bootom.get_bounding_box())) {
+  if (layer_bootom.get_layer() != nullptr && layer->compareLayer(layer_bootom.get_layer()) && rect.isIntersection(layer_bootom.get_bounding_box())) {
     return true;
   }
   IdbLayerShape layer_top = get_top_layer_shape();
-  if (layer->compareLayer(layer_top.get_layer()) && rect.isIntersection(layer_top.get_bounding_box())) {
+  if (layer_top.get_layer() != nullptr && layer->compareLayer(layer_top.get_layer()) && rect.isIntersection(layer_top.get_bounding_box())) {
     return true;
   }
 
