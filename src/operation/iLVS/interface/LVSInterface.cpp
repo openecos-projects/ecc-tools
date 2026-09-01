@@ -16,13 +16,10 @@
 // ***************************************************************************************
 #include "LVSInterface.hpp"
 
-#include <algorithm>
-#include <cstdint>
-#include <map>
-#include <unordered_set>
-#include <utility>
-#include <vector>
-
+#include "ConnectType.hpp"
+#include "DataManager.hpp"
+#include "DefRoutingData.hpp"
+#include "EntityChecker.hpp"
 #include "IdbDesign.h"
 #include "IdbDie.h"
 #include "IdbInstance.h"
@@ -31,12 +28,9 @@
 #include "IdbPins.h"
 #include "IdbSpecialNet.h"
 #include "IdbVias.h"
-#include "DataManager.hpp"
-#include "ConnectType.hpp"
-#include "DefRoutingData.hpp"
-#include "EntityChecker.hpp"
-#include "Logger.hpp"
+#include "LVSHeader.hpp"
 #include "LVSReporter.hpp"
+#include "Logger.hpp"
 #include "Monitor.hpp"
 #include "NetRoutingData.hpp"
 #include "PDNChecker.hpp"
@@ -182,8 +176,7 @@ void LVSInterface::wrapDatabase()
     LVSLOG.error(Loc::current(), "Direct iLVS IDB views must both contain a design name.");
   }
   if (netlist_data.get_design_name() != def_data.get_design_name()) {
-    LVSLOG.error(Loc::current(), "Direct iLVS IDB design names differ: netlist='", netlist_data.get_design_name(), "' def='",
-                 def_data.get_design_name(), "'.");
+    LVSLOG.error(Loc::current(), "Direct iLVS IDB design names differ: netlist='", netlist_data.get_design_name(), "' def='", def_data.get_design_name(), "'.");
   }
 
   Database& database = LVSDM.getDatabase();
@@ -193,8 +186,8 @@ void LVSInterface::wrapDatabase()
     LVSLOG.info(Loc::current(), "Using the temporary shared DEF IDB design for both netlist and DEF views.");
   }
   LVSLOG.info(Loc::current(), "Wrapped direct iLVS IDB views: netlist_nets=", database.get_netlist_data().get_net_map().size(),
-              " def_nets=", database.get_def_data().get_net_map().size(), " def_routing_nets=",
-              database.get_def_data().get_def_routing_data().get_net_routing_data_map().size(), ".");
+              " def_nets=", database.get_def_data().get_net_map().size(),
+              " def_routing_nets=", database.get_def_data().get_def_routing_data().get_net_routing_data_map().size(), ".");
 }
 
 NetlistData LVSInterface::wrapNetlistData(idb::IdbDesign* design)
@@ -364,8 +357,7 @@ void LVSInterface::wrapPowerGroundTerminal(idb::IdbDesign* design, DesignData& d
   }
 }
 
-void LVSInterface::wrapPowerGroundPin(idb::IdbPin* pin, DesignData& design_data, const ConnectType connect_type,
-                                       std::unordered_set<idb::IdbPin*>& pin_set)
+void LVSInterface::wrapPowerGroundPin(idb::IdbPin* pin, DesignData& design_data, const ConnectType connect_type, std::unordered_set<idb::IdbPin*>& pin_set)
 {
   if (pin == nullptr || !pin_set.insert(pin).second) {
     return;
@@ -440,8 +432,7 @@ void LVSInterface::wrapNetRoutingData(idb::IdbDesign* design, DefData& def_data)
   }
 }
 
-void LVSInterface::wrapRoutingDataPin(const std::string& net_name, idb::IdbPin* pin, const bool is_power_net,
-                                      const bool is_ground_net, DefData& def_data)
+void LVSInterface::wrapRoutingDataPin(const std::string& net_name, idb::IdbPin* pin, const bool is_power_net, const bool is_ground_net, DefData& def_data)
 {
   if (pin == nullptr) {
     return;
@@ -480,8 +471,7 @@ void LVSInterface::wrapRoutingDataPin(const std::string& net_name, idb::IdbPin* 
     }
   }
   if (!terminal_routing_shape_list.empty()) {
-    def_routing_data.get_net_routing_data_map()[net_name].get_terminal_routing_shape_map()[terminal_name] =
-        std::move(terminal_routing_shape_list);
+    def_routing_data.get_net_routing_data_map()[net_name].get_terminal_routing_shape_map()[terminal_name] = std::move(terminal_routing_shape_list);
   }
 }
 
@@ -574,13 +564,10 @@ void LVSInterface::wrapSpecialNetRoutingData(idb::IdbDesign* design, DefData& de
             if (segment->is_via()) {
               wrapRoutingDataVia(segment->get_via(), net_routing_data);
             } else if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && segment->is_line()) {
-              net_routing_data.get_wire_routing_shape_list().push_back(
-                  wrapRoutingDataShape(segment->get_layer(),
-                                       idb::IdbRect(segment->get_point_start(), segment->get_point_second(), segment->get_route_width())));
-            } else if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && segment->is_rect()
-                       && segment->get_delta_rect() != nullptr) {
-              net_routing_data.get_wire_routing_shape_list().push_back(
-                  wrapRoutingDataShape(segment->get_layer(), *segment->get_delta_rect()));
+              net_routing_data.get_wire_routing_shape_list().push_back(wrapRoutingDataShape(
+                  segment->get_layer(), idb::IdbRect(segment->get_point_start(), segment->get_point_second(), segment->get_route_width())));
+            } else if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && segment->is_rect() && segment->get_delta_rect() != nullptr) {
+              net_routing_data.get_wire_routing_shape_list().push_back(wrapRoutingDataShape(segment->get_layer(), *segment->get_delta_rect()));
             }
           }
         }

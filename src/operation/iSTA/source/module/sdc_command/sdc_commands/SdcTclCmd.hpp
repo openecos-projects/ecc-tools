@@ -16,9 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
-#include <string>
-#include <vector>
-
+#include "STAHeader.hpp"
 #include "ScriptEngine.hh"
 
 namespace ista::sdc {
