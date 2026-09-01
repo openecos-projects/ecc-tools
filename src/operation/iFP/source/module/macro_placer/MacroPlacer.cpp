@@ -103,8 +103,8 @@ void MacroPlacer::checkMacroInCore()
       continue;
     }
     PlanarRect& macro_rect = instance.get_bounding_rect();
-    if (core.get_ll_x() <= macro_rect.get_ll_x() && macro_rect.get_ur_x() <= core.get_ur_x()
-        && core.get_ll_y() <= macro_rect.get_ll_y() && macro_rect.get_ur_y() <= core.get_ur_y()) {
+    if (core.get_ll_x() <= macro_rect.get_ll_x() && macro_rect.get_ur_x() <= core.get_ur_x() && core.get_ll_y() <= macro_rect.get_ll_y()
+        && macro_rect.get_ur_y() <= core.get_ur_y()) {
       continue;
     }
     FPLOG.error(Loc::current(), "The macro '", instance.get_name(), "' is placed outside core!");
@@ -191,10 +191,8 @@ std::vector<std::pair<int32_t, int32_t>> MacroPlacer::getRowBlockageIntervalList
       continue;
     }
     int32_t site_origin_x = row.get_site_origin_x();
-    int32_t start_x
-        = std::max(row.get_ll_x(), site_origin_x + FPUTIL.alignDown(placement_halo_rect.get_ll_x() - site_origin_x, site.get_width()));
-    int32_t end_x
-        = std::min(row.get_ur_x(), site_origin_x + FPUTIL.alignUp(placement_halo_rect.get_ur_x() - site_origin_x, site.get_width()));
+    int32_t start_x = std::max(row.get_ll_x(), site_origin_x + FPUTIL.alignDown(placement_halo_rect.get_ll_x() - site_origin_x, site.get_width()));
+    int32_t end_x = std::min(row.get_ur_x(), site_origin_x + FPUTIL.alignUp(placement_halo_rect.get_ur_x() - site_origin_x, site.get_width()));
     if (start_x < end_x) {
       blockage_interval_list.emplace_back(start_x, end_x);
     }

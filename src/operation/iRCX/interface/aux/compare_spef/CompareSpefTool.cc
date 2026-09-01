@@ -20,9 +20,9 @@
  */
 #include "CompareSpefTool.hh"
 
+#include "Logger.hpp"
 #include "compare/Comparator.hh"
 #include "config/CompareSpefConfig.hh"
-#include "Logger.hpp"
 #include "reader/SpefReader.hh"
 #include "report/ReportWriter.hh"
 

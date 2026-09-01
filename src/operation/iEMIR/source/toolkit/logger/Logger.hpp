@@ -16,11 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
-#include <cstdlib>
-#include <stdexcept>
-
-#include "LogLevel.hpp"
 #include "EMIRHeader.hpp"
+#include "LogLevel.hpp"
 
 namespace iemir {
 

@@ -22,7 +22,6 @@
 #include "Orientation.hpp"
 #include "PlanarRect.hpp"
 #include "Rotation.hpp"
-#include "json.hpp"
 
 namespace idrc {
 

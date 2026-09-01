@@ -1,10 +1,6 @@
 #pragma once
 
-#include <cstdint>
-#include <map>
-#include <span>
-#include <vector>
-
+#include "DRCHeader.hpp"
 #include "PlanarRect.hpp"
 
 namespace boost::geometry::traits {

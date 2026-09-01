@@ -253,8 +253,7 @@ bool GraphBuilder::isFloatingInoutPin(Pin& pin)
   return pin.get_net_name().empty() && inferInoutPinDirectionByTimingCell(pin) == PinDirection::kNone;
 }
 
-PinDirection GraphBuilder::inferInoutPinDirection(const std::string& pin_name, Pin& pin,
-                                                  std::map<std::string, PinDirection>& inout_pin_direction_map)
+PinDirection GraphBuilder::inferInoutPinDirection(const std::string& pin_name, Pin& pin, std::map<std::string, PinDirection>& inout_pin_direction_map)
 {
   PinDirection timing_cell_direction = inferInoutPinDirectionByTimingCell(pin);
   if (timing_cell_direction != PinDirection::kNone) {
@@ -356,8 +355,7 @@ PinDirection GraphBuilder::inferInoutPinDirectionByNet(Pin& pin, std::map<std::s
   }
   if (driver_pin_num > 1) {
     std::vector<std::string> driver_pin_list = getDriverPinList(*net, inout_pin_direction_map);
-    STALOG.error(Loc::current(), "The net has multiple driver pins: net=", net->get_net_name(),
-                 " drivers=", getPinNameListString(driver_pin_list));
+    STALOG.error(Loc::current(), "The net has multiple driver pins: net=", net->get_net_name(), " drivers=", getPinNameListString(driver_pin_list));
   }
   return PinDirection::kNone;
 }
@@ -470,8 +468,7 @@ void GraphBuilder::makeNetDriverLoad(Net& net)
   }
 
   if (net.get_driver_pin_list().size() > 1) {
-    STALOG.error(Loc::current(), "The net has multiple driver pins: net=", net.get_net_name(),
-                 " drivers=", getPinNameListString(net.get_driver_pin_list()));
+    STALOG.error(Loc::current(), "The net has multiple driver pins: net=", net.get_net_name(), " drivers=", getPinNameListString(net.get_driver_pin_list()));
   }
 }
 
@@ -544,8 +541,7 @@ bool GraphBuilder::shouldDisableNetArc(const std::string& source_pin, const std:
     return false;
   }
   TimingCell& source_cell = timing_cell_map[source_instance.get_cell_name()];
-  return source_cell.get_is_sequential() && !source_cell.get_is_clock_gating() && !source_cell.get_is_macro()
-         && sink_pin == sink_instance.get_clock_pin_name();
+  return source_cell.get_is_sequential() && !source_cell.get_is_clock_gating() && !source_cell.get_is_macro() && sink_pin == sink_instance.get_clock_pin_name();
 }
 
 bool GraphBuilder::isDisableArc(Arc& arc)
@@ -689,8 +685,7 @@ std::size_t GraphBuilder::breakLoopArcFromStart()
   return disabled_loop_num;
 }
 
-bool GraphBuilder::traverseDataPath(std::string& pin_name, bool is_forward, std::map<std::string, GBColorType>& color_map,
-                                    std::size_t& disabled_loop_num)
+bool GraphBuilder::traverseDataPath(std::string& pin_name, bool is_forward, std::map<std::string, GBColorType>& color_map, std::size_t& disabled_loop_num)
 {
   Database& database = STADM.getDatabase();
   if (stopTraverse(pin_name, is_forward) || isBlack(color_map, pin_name)) {
@@ -701,8 +696,7 @@ bool GraphBuilder::traverseDataPath(std::string& pin_name, bool is_forward, std:
   }
 
   color_map[pin_name] = GBColorType::kGray;
-  std::vector<std::size_t>& arc_idx_list
-      = is_forward ? database.get_outgoing_arc_list_map()[pin_name] : database.get_incoming_arc_list_map()[pin_name];
+  std::vector<std::size_t>& arc_idx_list = is_forward ? database.get_outgoing_arc_list_map()[pin_name] : database.get_incoming_arc_list_map()[pin_name];
   for (std::size_t arc_idx : arc_idx_list) {
     Arc& arc = database.get_arc_list()[arc_idx];
     if (isDisableArc(arc)) {
@@ -787,8 +781,7 @@ std::size_t GraphBuilder::breakLoopArcFromFloating()
   return disabled_loop_num;
 }
 
-void GraphBuilder::traverseFloatingDataPath(std::string& pin_name, std::map<std::string, GBColorType>& color_map,
-                                            std::size_t& disabled_loop_num)
+void GraphBuilder::traverseFloatingDataPath(std::string& pin_name, std::map<std::string, GBColorType>& color_map, std::size_t& disabled_loop_num)
 {
   if (isBlack(color_map, pin_name)) {
     return;

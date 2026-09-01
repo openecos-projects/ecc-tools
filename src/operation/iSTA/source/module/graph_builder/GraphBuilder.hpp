@@ -49,9 +49,8 @@ class GraphBuilder
   bool buildLibraryCellArcs(Instance& instance);
   std::string getInstancePinName(Instance& instance, std::string& port_name);
   void addCellArc(Instance& instance, TimingCellArc& timing_cell_arc);
-  void addArc(const std::string& source_pin, const std::string& sink_pin, ArcType type, const std::string& owner_name,
-              const std::string& library_source_port, const std::string& library_sink_port, bool is_clock_arc, bool is_disable_arc,
-              TimingCellArc* timing_cell_arc);
+  void addArc(const std::string& source_pin, const std::string& sink_pin, ArcType type, const std::string& owner_name, const std::string& library_source_port,
+              const std::string& library_sink_port, bool is_clock_arc, bool is_disable_arc, TimingCellArc* timing_cell_arc);
   std::vector<std::string> collectInputPins(Instance& instance);
   bool isInputLike(PinDirection direction);
   std::vector<std::string> collectOutputPins(Instance& instance);
@@ -59,8 +58,7 @@ class GraphBuilder
   void buildInoutPinDirectionByGraph();
   std::map<std::string, PinDirection> makeInoutPinDirectionMap();
   bool isFloatingInoutPin(Pin& pin);
-  PinDirection inferInoutPinDirection(const std::string& pin_name, Pin& pin,
-                                      std::map<std::string, PinDirection>& inout_pin_direction_map);
+  PinDirection inferInoutPinDirection(const std::string& pin_name, Pin& pin, std::map<std::string, PinDirection>& inout_pin_direction_map);
   PinDirection inferInoutPinDirectionByTimingCell(Pin& pin);
   TimingCellPort* getTimingCellPort(Pin& pin);
   PinDirection inferInoutPinDirectionByTimingGraph(const std::string& pin_name);
@@ -98,16 +96,14 @@ class GraphBuilder
   void appendUnique(std::vector<std::string>& list, const std::string& value);
   void breakLoopArcList();
   std::size_t breakLoopArcFromStart();
-  bool traverseDataPath(std::string& pin_name, bool is_forward, std::map<std::string, GBColorType>& color_map,
-                        std::size_t& disabled_loop_num);
+  bool traverseDataPath(std::string& pin_name, bool is_forward, std::map<std::string, GBColorType>& color_map, std::size_t& disabled_loop_num);
   bool stopTraverse(std::string& pin_name, bool is_forward);
   bool isBlack(std::map<std::string, GBColorType>& color_map, std::string& pin_name);
   bool isGray(std::map<std::string, GBColorType>& color_map, std::string& pin_name);
   bool disableLoopArc(Arc& arc);
   std::size_t breakLoopArcFromEnd();
   std::size_t breakLoopArcFromFloating();
-  void traverseFloatingDataPath(std::string& pin_name, std::map<std::string, GBColorType>& color_map,
-                                std::size_t& disabled_loop_num);
+  void traverseFloatingDataPath(std::string& pin_name, std::map<std::string, GBColorType>& color_map, std::size_t& disabled_loop_num);
   void buildTimingOrder();
   std::map<std::string, std::size_t> makeIndegreeMap();
   void pushRootPinList(std::map<std::string, std::size_t>& indegree_map, std::queue<std::string>& pin_queue);

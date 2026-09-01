@@ -34,15 +34,9 @@ class TAModel
   double get_total_negative_slack() { return _total_negative_slack; }
   std::string& get_worst_end_point() { return _worst_end_point; }
   // setter
-  void set_timing_path_group_map(const std::map<std::string, TimingPathGroup>& timing_path_group_map)
-  {
-    _timing_path_group_map = timing_path_group_map;
-  }
+  void set_timing_path_group_map(const std::map<std::string, TimingPathGroup>& timing_path_group_map) { _timing_path_group_map = timing_path_group_map; }
   void set_checked_end_point_num(const std::size_t checked_end_point_num) { _checked_end_point_num = checked_end_point_num; }
-  void set_unconstrained_end_point_num(const std::size_t unconstrained_end_point_num)
-  {
-    _unconstrained_end_point_num = unconstrained_end_point_num;
-  }
+  void set_unconstrained_end_point_num(const std::size_t unconstrained_end_point_num) { _unconstrained_end_point_num = unconstrained_end_point_num; }
   void set_violating_end_point_num(const std::size_t violating_end_point_num) { _violating_end_point_num = violating_end_point_num; }
   void set_worst_slack(const double worst_slack) { _worst_slack = worst_slack; }
   void set_total_negative_slack(const double total_negative_slack) { _total_negative_slack = total_negative_slack; }

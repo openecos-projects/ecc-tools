@@ -52,10 +52,8 @@ class TimingReporter
   void outputPathGroupList(std::ofstream* report_file, DelayType delay_type, StartEndType start_end_type);
   void outputReportFooter(std::ofstream* report_file);
   std::vector<std::pair<std::string, TimingPath*>> getReportTimingPathList(DelayType delay_type, StartEndType start_end_type);
-  std::vector<std::pair<std::string, TimingPath*>> getSortedReportTimingPathList(DelayType delay_type,
-                                                                                 StartEndType start_end_type);
-  std::vector<TimingPath*> getSortedTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type,
-                                                   StartEndType start_end_type);
+  std::vector<std::pair<std::string, TimingPath*>> getSortedReportTimingPathList(DelayType delay_type, StartEndType start_end_type);
+  std::vector<TimingPath*> getSortedTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type, StartEndType start_end_type);
   std::vector<TimingPath*> getEndpointWorstTimingPathList(std::vector<TimingPath*>& timing_path_list);
   bool isMatchReportSlack(TimingPath& timing_path);
   void outputQorSummaryReport();
@@ -63,8 +61,7 @@ class TimingReporter
   std::string getQorSummaryJsonFilePath();
   void outputTimingPathsJson();
   std::string getTimingPathsJsonFilePath();
-  void outputTimingPathJson(std::ofstream* json_file, TimingPath& timing_path, std::string& path_group_name,
-                            DelayType delay_type);
+  void outputTimingPathJson(std::ofstream* json_file, TimingPath& timing_path, std::string& path_group_name, DelayType delay_type);
   std::string getTimingPathId(TimingPath& timing_path, std::string& path_group_name, DelayType delay_type);
   std::vector<TimingPath*> getQorTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type);
   std::vector<std::string> getQorSortedGroupList(std::map<std::string, double>& value_map);
@@ -112,8 +109,7 @@ class TimingReporter
   double getClockUncertainty(std::string& clock_name, DelayType delay_type);
   double getInputDelay(TimingPath& timing_path, DelayType delay_type);
   std::string getStartClockPin(TimingPath& timing_path);
-  void outputTimingPoint(std::ofstream* report_file, TimingPath& timing_path, TimingPathPoint& path_point, bool is_first_point,
-                         std::size_t label_width);
+  void outputTimingPoint(std::ofstream* report_file, TimingPath& timing_path, TimingPathPoint& path_point, bool is_first_point, std::size_t label_width);
   std::string getNumberString(double value);
   std::string getPointLabel(TimingPathPoint& path_point);
   std::string getPTPinName(std::string& pin_name);

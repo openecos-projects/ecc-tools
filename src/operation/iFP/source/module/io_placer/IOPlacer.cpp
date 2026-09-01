@@ -111,14 +111,14 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
   int32_t horizontal_offset = getTrackOffset(horizontal_layer_name);
   int32_t vertical_offset = getTrackOffset(vertical_layer_name);
 
-  placeIOPinsOnEdge(IOEdgeType::kLeft, io_pin_list, io_pin_idx, edge_pin_num, horizontal_layer_name, horizontal_width,
-                    horizontal_depth, vertical_pitch, horizontal_offset, horizontal_pitch);
-  placeIOPinsOnEdge(IOEdgeType::kRight, io_pin_list, io_pin_idx, edge_pin_num, horizontal_layer_name, horizontal_width,
-                    horizontal_depth, vertical_pitch, horizontal_offset, horizontal_pitch);
-  placeIOPinsOnEdge(IOEdgeType::kBottom, io_pin_list, io_pin_idx, edge_pin_num, vertical_layer_name, vertical_width,
-                    vertical_depth, horizontal_pitch, vertical_offset, vertical_pitch);
-  placeIOPinsOnEdge(IOEdgeType::kTop, io_pin_list, io_pin_idx, edge_pin_num, vertical_layer_name, vertical_width,
-                    vertical_depth, horizontal_pitch, vertical_offset, vertical_pitch);
+  placeIOPinsOnEdge(IOEdgeType::kLeft, io_pin_list, io_pin_idx, edge_pin_num, horizontal_layer_name, horizontal_width, horizontal_depth, vertical_pitch,
+                    horizontal_offset, horizontal_pitch);
+  placeIOPinsOnEdge(IOEdgeType::kRight, io_pin_list, io_pin_idx, edge_pin_num, horizontal_layer_name, horizontal_width, horizontal_depth, vertical_pitch,
+                    horizontal_offset, horizontal_pitch);
+  placeIOPinsOnEdge(IOEdgeType::kBottom, io_pin_list, io_pin_idx, edge_pin_num, vertical_layer_name, vertical_width, vertical_depth, horizontal_pitch,
+                    vertical_offset, vertical_pitch);
+  placeIOPinsOnEdge(IOEdgeType::kTop, io_pin_list, io_pin_idx, edge_pin_num, vertical_layer_name, vertical_width, vertical_depth, horizontal_pitch,
+                    vertical_offset, vertical_pitch);
 }
 
 int32_t IOPlacer::getLayerMinWidth(std::string layer_name)
@@ -157,9 +157,8 @@ int32_t IOPlacer::getTrackOffset(std::string layer_name)
   return std::max(database.get_routing_layer_list()[iter->second].get_prefer_track_offset(), 0);
 }
 
-void IOPlacer::placeIOPinsOnEdge(IOEdgeType edge_type, std::vector<IOPin>& io_pin_list, int32_t& io_pin_idx, int32_t edge_pin_num,
-                                 std::string layer_name, int32_t width, int32_t depth, int32_t access_pitch, int32_t track_offset,
-                                 int32_t track_pitch)
+void IOPlacer::placeIOPinsOnEdge(IOEdgeType edge_type, std::vector<IOPin>& io_pin_list, int32_t& io_pin_idx, int32_t edge_pin_num, std::string layer_name,
+                                 int32_t width, int32_t depth, int32_t access_pitch, int32_t track_offset, int32_t track_pitch)
 {
   Die& die = FPDM.getDatabase().get_die();
   Core& core = FPDM.getDatabase().get_core();
@@ -172,22 +171,22 @@ void IOPlacer::placeIOPinsOnEdge(IOEdgeType edge_type, std::vector<IOPin>& io_pi
     switch (edge_type) {
       case IOEdgeType::kLeft:
         x = die.get_ll_x() + depth / 2;
-        y = getAlongCoord(core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), width, access_pitch, side_pin_num,
-                          side_pin_idx, track_offset, track_pitch);
+        y = getAlongCoord(core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), width, access_pitch, side_pin_num, side_pin_idx, track_offset,
+                          track_pitch);
         break;
       case IOEdgeType::kRight:
         x = die.get_ur_x() - depth / 2;
-        y = getAlongCoord(core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), width, access_pitch, side_pin_num,
-                          side_pin_idx, track_offset, track_pitch);
+        y = getAlongCoord(core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), width, access_pitch, side_pin_num, side_pin_idx, track_offset,
+                          track_pitch);
         break;
       case IOEdgeType::kBottom:
-        x = getAlongCoord(core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), width, access_pitch, side_pin_num,
-                          side_pin_idx, track_offset, track_pitch);
+        x = getAlongCoord(core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), width, access_pitch, side_pin_num, side_pin_idx, track_offset,
+                          track_pitch);
         y = die.get_ll_y() + depth / 2;
         break;
       case IOEdgeType::kTop:
-        x = getAlongCoord(core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), width, access_pitch, side_pin_num,
-                          side_pin_idx, track_offset, track_pitch);
+        x = getAlongCoord(core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), width, access_pitch, side_pin_num, side_pin_idx, track_offset,
+                          track_pitch);
         y = die.get_ur_y() - depth / 2;
         break;
       default:
@@ -197,17 +196,13 @@ void IOPlacer::placeIOPinsOnEdge(IOEdgeType edge_type, std::vector<IOPin>& io_pi
   }
 }
 
-int32_t IOPlacer::getAlongCoord(int32_t range_low, int32_t range_high, int32_t die_low, int32_t die_high, int32_t pin_span,
-                                int32_t access_pitch, int32_t side_pin_num, int32_t pin_idx, int32_t track_offset, int32_t track_pitch)
+int32_t IOPlacer::getAlongCoord(int32_t range_low, int32_t range_high, int32_t die_low, int32_t die_high, int32_t pin_span, int32_t access_pitch,
+                                int32_t side_pin_num, int32_t pin_idx, int32_t track_offset, int32_t track_pitch)
 {
   int32_t legal_low = std::max(range_low, die_low + access_pitch);
   int32_t legal_high = std::min(range_high, die_high - access_pitch);
-  auto align_up = [track_offset, track_pitch](int32_t value) {
-    return track_offset + FPUTIL.alignUp(value - track_offset, track_pitch);
-  };
-  auto align_down = [track_offset, track_pitch](int32_t value) {
-    return track_offset + FPUTIL.alignDown(value - track_offset, track_pitch);
-  };
+  auto align_up = [track_offset, track_pitch](int32_t value) { return track_offset + FPUTIL.alignUp(value - track_offset, track_pitch); };
+  auto align_down = [track_offset, track_pitch](int32_t value) { return track_offset + FPUTIL.alignDown(value - track_offset, track_pitch); };
   int32_t start = align_up(legal_low + pin_span / 2);
   int32_t end = align_down(legal_high - pin_span / 2);
 
