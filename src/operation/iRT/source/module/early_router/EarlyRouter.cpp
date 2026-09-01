@@ -59,7 +59,10 @@ void EarlyRouter::route(std::map<std::string, std::any> config_map)
   RTLOG.info(Loc::current(), "Starting...");
   ERModel er_model = initERModel();
   setERComParam(er_model, config_map);
-  outputGCellCSV(er_model);
+  int32_t output_inter_result = RTDM.getConfig().output_inter_result;
+  if (output_inter_result) {
+    outputGCellCSV(er_model);
+  }
   // debugPlotERModel(er_model, "dm");
   initAccessPointList(er_model);
   buildConflictList(er_model);
@@ -68,34 +71,33 @@ void EarlyRouter::route(std::map<std::string, std::any> config_map)
   uploadAccessPatch(er_model);
   printAccessSummary(er_model);
   // debugPlotERModel(er_model, "pa");
+  initLayerEdgeMap(er_model);
   buildSupplySchedule(er_model);
   analyzeSupply(er_model);
-  buildIgnoreNet(er_model);
-  analyzeDemandUnit(er_model);
   printSupplySummary(er_model);
   // debugPlotERModel(er_model, "sa");
   if (er_model.get_er_com_param().get_stage() >= ERStage::kEgr2D) {
-    buildPlanarNodeMap(er_model);
-    buildPlanarNodeNeighbor(er_model);
-    buildPlanarOrientSupply(er_model);
+    buildPlanarEdgeMap(er_model);
     generateTopology(er_model);
-    outputPlanarSupplyCSV(er_model);
-    outputPlanarGuide(er_model);
-    outputPlanarNetCSV(er_model);
-    outputPlanarOverflowCSV(er_model);
+    checkEdgeDemand(er_model, true);
+    if (output_inter_result) {
+      outputPlanarSupplyCSV(er_model);
+      outputPlanarGuide(er_model);
+      outputPlanarOverflowCSV(er_model);
+    }
     printPlanarSummary(er_model);
     // debugPlotERModel(er_model, "tg");
   }
   if (er_model.get_er_com_param().get_stage() >= ERStage::kEgr3D) {
-    buildLayerNodeMap(er_model);
-    buildLayerNodeNeighbor(er_model);
-    buildLayerOrientSupply(er_model);
+    clearLayerEdgeDemand(er_model);
     buildPlaneTree(er_model);
     assignLayer(er_model);
-    outputLayerSupplyCSV(er_model);
-    outputLayerGuide(er_model);
-    outputLayerNetCSV(er_model);
-    outputLayerOverflowCSV(er_model);
+    checkEdgeDemand(er_model, false);
+    if (output_inter_result) {
+      outputLayerSupplyCSV(er_model);
+      outputLayerGuide(er_model);
+      outputLayerOverflowCSV(er_model);
+    }
     printLayerSummary(er_model);
     // debugPlotERModel(er_model, "la");
   }
@@ -137,15 +139,29 @@ EarlyRouter* EarlyRouter::_er_instance = nullptr;
 ERModel EarlyRouter::initERModel()
 {
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
 
   ERModel er_model;
   er_model.set_er_net_list(convertToERNetList(net_list));
-  er_model.get_ert_gcell_map().init(gcell_map.get_x_size(), gcell_map.get_y_size());
   er_model.get_net_global_result_map() = RTDM.getDatabase().get_net_global_result_map();
   er_model.get_net_detailed_result_map() = RTDM.getDatabase().get_net_detailed_result_map();
   er_model.get_net_detailed_patch_map() = RTDM.getDatabase().get_net_detailed_patch_map();
   return er_model;
+}
+
+void EarlyRouter::initLayerEdgeMap(ERModel& er_model)
+{
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+  std::vector<GridMap<EREdge>>& layer_h_edge_map = er_model.get_layer_h_edge_map();
+  std::vector<GridMap<EREdge>>& layer_v_edge_map = er_model.get_layer_v_edge_map();
+
+  layer_h_edge_map.resize(routing_layer_list.size());
+  layer_v_edge_map.resize(routing_layer_list.size());
+#pragma omp parallel for
+  for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(routing_layer_list.size()); layer_idx++) {
+    layer_h_edge_map[layer_idx].init(std::max(0, gcell_map.get_x_size() - 1), gcell_map.get_y_size());
+    layer_v_edge_map[layer_idx].init(gcell_map.get_x_size(), std::max(0, gcell_map.get_y_size() - 1));
+  }
 }
 
 std::vector<ERNet> EarlyRouter::convertToERNetList(std::vector<Net>& net_list)
@@ -184,10 +200,6 @@ void EarlyRouter::setERComParam(ERModel& er_model, std::map<std::string, std::an
     RTLOG.error(Loc::current(), "Invalid value for '-resolve_congestion': '" + resolve_congestion + "'. Valid options are: 'low', 'high'.");
   }
   int32_t max_candidate_point_num = 10;
-  int32_t supply_reduction = 0;
-  double boundary_wire_unit = 1;
-  double internal_wire_unit = 1;
-  double internal_via_unit = 1;
   int32_t topo_spilt_length = 10;
   int32_t expand_step_num = 5;
   int32_t expand_step_length = 2;
@@ -198,19 +210,13 @@ void EarlyRouter::setERComParam(ERModel& er_model, std::map<std::string, std::an
   int32_t schedule_interval = 3;
 
   /**
-   * stage, resolve_congestion, max_candidate_point_num, supply_reduction, boundary_wire_unit, internal_wire_unit, internal_via_unit, topo_spilt_length,
-   * expand_step_num, expand_step_length, via_unit, overflow_unit, schedule_interval
+   * stage, resolve_congestion, max_candidate_point_num, topo_spilt_length, expand_step_num, expand_step_length, via_unit, overflow_unit, schedule_interval
    */
-  ERComParam er_com_param(GetERStageByName()(stage_string), resolve_congestion, max_candidate_point_num, supply_reduction, boundary_wire_unit,
-                          internal_wire_unit, internal_via_unit, topo_spilt_length, expand_step_num, expand_step_length, via_unit, overflow_unit,
-                          schedule_interval);
+  ERComParam er_com_param(GetERStageByName()(stage_string), resolve_congestion, max_candidate_point_num, topo_spilt_length, expand_step_num, expand_step_length,
+                          via_unit, overflow_unit, schedule_interval);
   RTLOG.info(Loc::current(), "stage: ", GetERStageName()(er_com_param.get_stage()));
   RTLOG.info(Loc::current(), "resolve_congestion: ", er_com_param.get_resolve_congestion());
   RTLOG.info(Loc::current(), "max_candidate_point_num: ", er_com_param.get_max_candidate_point_num());
-  RTLOG.info(Loc::current(), "supply_reduction: ", er_com_param.get_supply_reduction());
-  RTLOG.info(Loc::current(), "boundary_wire_unit: ", er_com_param.get_boundary_wire_unit());
-  RTLOG.info(Loc::current(), "internal_wire_unit: ", er_com_param.get_internal_wire_unit());
-  RTLOG.info(Loc::current(), "internal_via_unit: ", er_com_param.get_internal_via_unit());
   RTLOG.info(Loc::current(), "topo_spilt_length: ", er_com_param.get_topo_spilt_length());
   RTLOG.info(Loc::current(), "expand_step_num: ", er_com_param.get_expand_step_num());
   RTLOG.info(Loc::current(), "expand_step_length: ", er_com_param.get_expand_step_length());
@@ -822,13 +828,14 @@ void EarlyRouter::analyzeSupply(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
-  int32_t supply_reduction = er_model.get_er_com_param().get_supply_reduction();
+  std::vector<GridMap<EREdge>>& layer_h_edge_map = er_model.get_layer_h_edge_map();
+  std::vector<GridMap<EREdge>>& layer_v_edge_map = er_model.get_layer_v_edge_map();
 
-  GridMap<std::map<int32_t, std::vector<LayerRect>>> detailed_env_map;
-  detailed_env_map.init(ert_gcell_map.get_x_size(), ert_gcell_map.get_y_size());
+  using DetailedRTree = bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>>;
+  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+  std::vector<std::vector<std::pair<int32_t, PlanarRect>>> layer_detailed_shape_list(routing_layer_list.size());
+  std::vector<std::vector<std::pair<BGRectInt, int32_t>>> layer_rtree_value_list(routing_layer_list.size());
   Die& die = RTDM.getDatabase().get_die();
-  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
   int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
   for (auto& [net_idx, segment_list] : er_model.get_net_detailed_result_map()) {
     for (Segment<LayerCoord>& segment : segment_list) {
@@ -836,33 +843,35 @@ void EarlyRouter::analyzeSupply(ERModel& er_model)
         if (!net_shape.get_is_routing()) {
           continue;
         }
-        PlanarRect real_rect = RTUTIL.getEnlargedRect(net_shape, detection_distance);
+        PlanarRect real_rect = net_shape;
         if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
           continue;
         }
-        PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(real_rect, die.get_real_rect()), gcell_axis);
-        for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-          for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-            detailed_env_map[x][y][net_shape.get_layer_idx()].push_back(net_shape);
-          }
-        }
+        int32_t layer_idx = net_shape.get_layer_idx();
+        std::vector<std::pair<int32_t, PlanarRect>>& detailed_shape_list = layer_detailed_shape_list[layer_idx];
+        layer_rtree_value_list[layer_idx].emplace_back(RTUTIL.convertToBGRectInt(real_rect), static_cast<int32_t>(detailed_shape_list.size()));
+        detailed_shape_list.emplace_back(net_idx, real_rect);
       }
     }
   }
   for (auto& [net_idx, patch_list] : er_model.get_net_detailed_patch_map()) {
     for (EXTLayerRect& patch : patch_list) {
-      PlanarRect real_rect = RTUTIL.getEnlargedRect(patch.get_real_rect(), detection_distance);
+      PlanarRect real_rect = patch.get_real_rect();
       if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
         continue;
       }
-      PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(real_rect, die.get_real_rect()), gcell_axis);
-      for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-        for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-          detailed_env_map[x][y][patch.get_layer_idx()].push_back(patch.getRealLayerRect());
-        }
-      }
+      int32_t layer_idx = patch.get_layer_idx();
+      std::vector<std::pair<int32_t, PlanarRect>>& detailed_shape_list = layer_detailed_shape_list[layer_idx];
+      layer_rtree_value_list[layer_idx].emplace_back(RTUTIL.convertToBGRectInt(real_rect), static_cast<int32_t>(detailed_shape_list.size()));
+      detailed_shape_list.emplace_back(net_idx, real_rect);
     }
   }
+  std::vector<DetailedRTree> layer_rtree_list(routing_layer_list.size());
+#pragma omp parallel for
+  for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(routing_layer_list.size()); layer_idx++) {
+    layer_rtree_list[layer_idx] = DetailedRTree(layer_rtree_value_list[layer_idx].begin(), layer_rtree_value_list[layer_idx].end());
+  }
+  std::vector<std::vector<std::pair<BGRectInt, int32_t>>>().swap(layer_rtree_value_list);
 
   size_t total_pair_num = 0;
   for (std::vector<std::pair<LayerCoord, LayerCoord>>& grid_pair_list : er_model.get_grid_pair_list_list()) {
@@ -878,55 +887,45 @@ void EarlyRouter::analyzeSupply(ERModel& er_model)
       LayerCoord second_coord = grid_pair.second;
       EXTLayerRect search_rect = getSearchRect(first_coord, second_coord);
 
-      std::map<Orientation, int32_t>& first_orient_supply_map
-          = ert_gcell_map[first_coord.get_x()][first_coord.get_y()].get_routing_orient_supply_map()[search_rect.get_layer_idx()];
-      std::map<Orientation, int32_t>& second_orient_supply_map
-          = ert_gcell_map[second_coord.get_x()][second_coord.get_y()].get_routing_orient_supply_map()[search_rect.get_layer_idx()];
-
-      Orientation first_orientation = RTUTIL.getOrientation(first_coord, second_coord);
-      Orientation second_orientation = RTUTIL.getOppositeOrientation(first_orientation);
+      bool is_horizontal = RTUTIL.isHorizontal(first_coord, second_coord);
+      int32_t edge_x = std::min(first_coord.get_x(), second_coord.get_x());
+      int32_t edge_y = std::min(first_coord.get_y(), second_coord.get_y());
+      GridMap<EREdge>& edge_map = is_horizontal ? layer_h_edge_map[first_coord.get_layer_idx()] : layer_v_edge_map[first_coord.get_layer_idx()];
+      if (!edge_map.isInside(edge_x, edge_y)) {
+        RTLOG.error(Loc::current(), "The routing edge is outside the map!");
+      }
+      EREdge& routing_edge = edge_map[edge_x][edge_y];
+      std::set<int32_t>& ignore_net_set = routing_edge.get_ignore_net_set();
 
       std::vector<PlanarRect> obs_rect_list;
       {
-        for (auto& [is_routing, layer_net_fixed_rect_map] : RTDM.getTypeLayerNetFixedRectMap(search_rect)) {
-          if (!is_routing) {
-            continue;
-          }
-          for (auto& [layer_idx, net_fixed_rect_map] : layer_net_fixed_rect_map) {
-            if (search_rect.get_layer_idx() != layer_idx) {
-              continue;
-            }
-            for (auto& [net_idx, fixed_rect_set] : net_fixed_rect_map) {
-              for (EXTLayerRect* fixed_rect : fixed_rect_set) {
-                obs_rect_list.push_back(fixed_rect->get_real_rect());
-              }
-            }
+        for (auto& [net_idx, fixed_rect_set] : RTDM.getNetFixedRectMap(true, search_rect)) {
+          for (EXTLayerRect* fixed_rect : fixed_rect_set) {
+            obs_rect_list.push_back(fixed_rect->get_real_rect());
           }
         }
-        for (int32_t x = search_rect.get_grid_ll_x(); x <= search_rect.get_grid_ur_x(); x++) {
-          for (int32_t y = search_rect.get_grid_ll_y(); y <= search_rect.get_grid_ur_y(); y++) {
-            auto detailed_env_iter = detailed_env_map[x][y].find(search_rect.get_layer_idx());
-            if (detailed_env_iter != detailed_env_map[x][y].end()) {
-              for (LayerRect& detailed_shape : detailed_env_iter->second) {
-                obs_rect_list.push_back(detailed_shape);
-              }
-            }
+
+        PlanarRect query_real_rect = RTUTIL.getEnlargedRect(search_rect.get_real_rect(), detection_distance);
+        std::vector<std::pair<BGRectInt, int32_t>> rtree_value_list;
+        layer_rtree_list[search_rect.get_layer_idx()].query(bgi::intersects(RTUTIL.convertToBGRectInt(query_real_rect)), std::back_inserter(rtree_value_list));
+        for (auto& [rect, shape_idx] : rtree_value_list) {
+          auto& [net_idx, detailed_shape] = layer_detailed_shape_list[search_rect.get_layer_idx()][shape_idx];
+          obs_rect_list.push_back(detailed_shape);
+          if (RTUTIL.isOpenOverlap(search_rect.get_real_rect(), detailed_shape)) {
+            ignore_net_set.insert(net_idx);
           }
         }
       }
       std::vector<LayerRect> wire_list = getCrossingWireList(search_rect);
-      int32_t max_supply = std::max(0, static_cast<int32_t>(wire_list.size()) - supply_reduction);
-
       int32_t supply = 0;
       for (LayerRect& wire : wire_list) {
         if (isAccess(wire, obs_rect_list)) {
           supply++;
         }
       }
-      if (supply > 0) {
-        first_orient_supply_map[first_orientation] = std::min(supply, max_supply);
-        second_orient_supply_map[second_orientation] = std::min(supply, max_supply);
-      }
+      supply = std::min(supply, static_cast<int32_t>(wire_list.size()) - static_cast<int32_t>(ignore_net_set.size()));
+      supply = std::max(0, supply);
+      routing_edge.set_supply(static_cast<int32_t>(supply * 0.9));
     }
     analyzed_pair_num += grid_pair_list.size();
     RTLOG.info(Loc::current(), "Analyzed ", analyzed_pair_num, "/", total_pair_num, "(", RTUTIL.getPercentage(analyzed_pair_num, total_pair_num),
@@ -934,6 +933,96 @@ void EarlyRouter::analyzeSupply(ERModel& er_model)
   }
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void EarlyRouter::buildPlanarEdgeMap(ERModel& er_model)
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  GridMap<EREdge>& planar_h_edge_map = er_model.get_planar_h_edge_map();
+  GridMap<EREdge>& planar_v_edge_map = er_model.get_planar_v_edge_map();
+  std::vector<GridMap<EREdge>>& layer_h_edge_map = er_model.get_layer_h_edge_map();
+  std::vector<GridMap<EREdge>>& layer_v_edge_map = er_model.get_layer_v_edge_map();
+
+  planar_h_edge_map.init(std::max(0, gcell_map.get_x_size() - 1), gcell_map.get_y_size());
+  planar_v_edge_map.init(gcell_map.get_x_size(), std::max(0, gcell_map.get_y_size() - 1));
+  for (GridMap<EREdge>* planar_edge_map : {&planar_h_edge_map, &planar_v_edge_map}) {
+    std::vector<GridMap<EREdge>>& layer_edge_map_list = planar_edge_map == &planar_h_edge_map ? layer_h_edge_map : layer_v_edge_map;
+    for (GridMap<EREdge>& layer_edge_map : layer_edge_map_list) {
+#pragma omp parallel for
+      for (int32_t x = 0; x < layer_edge_map.get_x_size(); x++) {
+        for (int32_t y = 0; y < layer_edge_map.get_y_size(); y++) {
+          EREdge& planar_edge = (*planar_edge_map)[x][y];
+          EREdge& layer_edge = layer_edge_map[x][y];
+          planar_edge.set_supply(planar_edge.get_supply() + layer_edge.get_supply());
+          planar_edge.get_ignore_net_set().insert(layer_edge.get_ignore_net_set().begin(), layer_edge.get_ignore_net_set().end());
+        }
+      }
+    }
+  }
+
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void EarlyRouter::clearLayerEdgeDemand(ERModel& er_model)
+{
+  for (std::vector<GridMap<EREdge>>* layer_edge_map_list : {&er_model.get_layer_h_edge_map(), &er_model.get_layer_v_edge_map()}) {
+#pragma omp parallel for
+    for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_edge_map_list->size()); layer_idx++) {
+      GridMap<EREdge>& edge_map = (*layer_edge_map_list)[layer_idx];
+      for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
+        for (int32_t y = 0; y < edge_map.get_y_size(); y++) {
+          edge_map[x][y].set_demand(0);
+          edge_map[x][y].get_demand_net_idx_list().clear();
+        }
+      }
+    }
+  }
+}
+
+void EarlyRouter::checkEdgeDemand(ERModel& er_model, bool is_planar)
+{
+  std::vector<GridMap<EREdge>*> edge_map_list;
+  if (is_planar) {
+    edge_map_list = {&er_model.get_planar_h_edge_map(), &er_model.get_planar_v_edge_map()};
+  } else {
+    for (GridMap<EREdge>& edge_map : er_model.get_layer_h_edge_map()) {
+      edge_map_list.push_back(&edge_map);
+    }
+    for (GridMap<EREdge>& edge_map : er_model.get_layer_v_edge_map()) {
+      edge_map_list.push_back(&edge_map);
+    }
+  }
+
+  int32_t net_num = static_cast<int32_t>(er_model.get_er_net_list().size());
+  for (GridMap<EREdge>* edge_map : edge_map_list) {
+    for (int32_t x = 0; x < edge_map->get_x_size(); x++) {
+      for (int32_t y = 0; y < edge_map->get_y_size(); y++) {
+        EREdge& edge = (*edge_map)[x][y];
+        std::vector<int32_t>& demand_net_idx_list = edge.get_demand_net_idx_list();
+        std::set<int32_t> demand_net_idx_set(demand_net_idx_list.begin(), demand_net_idx_list.end());
+        if (edge.get_supply() < 0) {
+          RTLOG.error(Loc::current(), "The Edge supply is negative!");
+        }
+        if (edge.get_demand() < 0 || edge.get_demand() != static_cast<int32_t>(demand_net_idx_list.size())) {
+          RTLOG.error(Loc::current(), "The Edge demand is inconsistent!");
+        }
+        if (demand_net_idx_set.size() != demand_net_idx_list.size()) {
+          RTLOG.error(Loc::current(), "The Edge demand net is duplicated!");
+        }
+        for (int32_t net_idx : demand_net_idx_list) {
+          if (net_idx < 0 || net_num <= net_idx) {
+            RTLOG.error(Loc::current(), "The Edge demand net index is invalid!");
+          }
+          if (RTUTIL.exist(edge.get_ignore_net_set(), net_idx)) {
+            RTLOG.error(Loc::current(), "The ignored net consumes Edge demand!");
+          }
+        }
+      }
+    }
+  }
 }
 
 EXTLayerRect EarlyRouter::getSearchRect(LayerCoord& first_coord, LayerCoord& second_coord)
@@ -1011,196 +1100,6 @@ bool EarlyRouter::isAccess(LayerRect& wire, std::vector<PlanarRect>& obs_rect_li
     }
   }
   return true;
-}
-
-void EarlyRouter::buildIgnoreNet(ERModel& er_model)
-{
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
-  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
-  int32_t bottom_routing_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
-  int32_t top_routing_layer_idx = RTDM.getConfig().top_routing_layer_idx;
-
-  GridMap<std::map<int32_t, std::set<int32_t>>> detailed_net_map;
-  detailed_net_map.init(gcell_map.get_x_size(), gcell_map.get_y_size());
-  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
-  Die& die = RTDM.getDatabase().get_die();
-  for (auto& [net_idx, segment_list] : er_model.get_net_detailed_result_map()) {
-    for (Segment<LayerCoord>& segment : segment_list) {
-      for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, segment)) {
-        if (!net_shape.get_is_routing() || !RTUTIL.hasRegularRect(net_shape.get_rect(), die.get_real_rect())) {
-          continue;
-        }
-        PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(net_shape.get_rect(), die.get_real_rect()), gcell_axis);
-        for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-          for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-            if (RTUTIL.isClosedOverlap(gcell_map[x][y], net_shape.get_rect())) {
-              detailed_net_map[x][y][net_shape.get_layer_idx()].insert(net_idx);
-            }
-          }
-        }
-      }
-    }
-  }
-  for (auto& [net_idx, patch_list] : er_model.get_net_detailed_patch_map()) {
-    for (EXTLayerRect& patch : patch_list) {
-      if (!RTUTIL.hasRegularRect(patch.get_real_rect(), die.get_real_rect())) {
-        continue;
-      }
-      PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(patch.get_real_rect(), die.get_real_rect()), gcell_axis);
-      for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-        for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-          if (RTUTIL.isClosedOverlap(gcell_map[x][y], patch.get_real_rect())) {
-            detailed_net_map[x][y][patch.get_layer_idx()].insert(net_idx);
-          }
-        }
-      }
-    }
-  }
-  for (auto& [layer_idx, fixed_rect_rtree] : RTDM.getDatabase().get_type_layer_fixed_rect_rtree_map()[true]) {
-    for (const auto& [rect, net_fixed_rect] : fixed_rect_rtree) {
-      auto [net_idx, fixed_rect] = net_fixed_rect;
-      if (net_idx == -1) {
-        continue;
-      }
-      if (!RTUTIL.hasRegularRect(fixed_rect->get_real_rect(), die.get_real_rect())) {
-        continue;
-      }
-      PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(fixed_rect->get_real_rect(), die.get_real_rect()), gcell_axis);
-      for (int32_t x = grid_rect.get_ll_x(); x <= grid_rect.get_ur_x(); x++) {
-        for (int32_t y = grid_rect.get_ll_y(); y <= grid_rect.get_ur_y(); y++) {
-          if (RTUTIL.isClosedOverlap(gcell_map[x][y], fixed_rect->get_real_rect())) {
-            detailed_net_map[x][y][layer_idx].insert(net_idx);
-          }
-        }
-      }
-    }
-  }
-  for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
-      std::map<int32_t, std::map<int32_t, std::set<Orientation>>> routing_ignore_net_orient_map;
-      for (auto& [layer_idx, net_set] : detailed_net_map[x][y]) {
-        for (int32_t net_idx : net_set) {
-          routing_ignore_net_orient_map[layer_idx][net_idx] = {};
-        }
-      }
-      for (auto& [routing_layer_idx, ignore_net_orient_map] : routing_ignore_net_orient_map) {
-        std::set<Orientation> ignore_orient_set;
-        ignore_orient_set.insert(Orientation::kAbove);
-        ignore_orient_set.insert(Orientation::kBelow);
-        if (bottom_routing_layer_idx <= routing_layer_idx && routing_layer_idx <= top_routing_layer_idx) {
-          if (routing_layer_list[routing_layer_idx].isPreferH()) {
-            ignore_orient_set.insert(Orientation::kWest);
-            ignore_orient_set.insert(Orientation::kEast);
-          } else {
-            ignore_orient_set.insert(Orientation::kSouth);
-            ignore_orient_set.insert(Orientation::kNorth);
-          }
-        }
-        for (auto& [net_idx, orient_set] : ignore_net_orient_map) {
-          orient_set = ignore_orient_set;
-        }
-      }
-      ert_gcell_map[x][y].set_routing_ignore_net_orient_map(routing_ignore_net_orient_map);
-    }
-  }
-}
-
-void EarlyRouter::analyzeDemandUnit(ERModel& er_model)
-{
-  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
-  double boundary_wire_unit = er_model.get_er_com_param().get_boundary_wire_unit();
-  double internal_wire_unit = er_model.get_er_com_param().get_internal_wire_unit();
-  double internal_via_unit = er_model.get_er_com_param().get_internal_via_unit();
-
-  for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < ert_gcell_map.get_y_size(); y++) {
-      ERTGCell& ert_gcell = ert_gcell_map[x][y];
-      ert_gcell.set_boundary_wire_unit(boundary_wire_unit);
-      ert_gcell.set_internal_wire_unit(internal_wire_unit);
-      ert_gcell.set_internal_via_unit(internal_via_unit);
-    }
-  }
-}
-
-void EarlyRouter::buildPlanarNodeMap(ERModel& er_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
-  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
-  GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
-  planar_node_map.init(gcell_map.get_x_size(), gcell_map.get_y_size());
-#pragma omp parallel for collapse(2)
-  for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
-      ERNode& er_node = planar_node_map[x][y];
-      er_node.set_coord(x, y);
-      er_node.set_boundary_wire_unit(ert_gcell_map[x][y].get_boundary_wire_unit());
-      er_node.set_internal_wire_unit(ert_gcell_map[x][y].get_internal_wire_unit());
-      er_node.set_internal_via_unit(ert_gcell_map[x][y].get_internal_via_unit());
-      for (auto& [routing_layer_idx, ignore_net_orient_map] : ert_gcell_map[x][y].get_routing_ignore_net_orient_map()) {
-        for (auto& [net_idx, orient_set] : ignore_net_orient_map) {
-          er_node.get_ignore_net_orient_map()[net_idx].insert(orient_set.begin(), orient_set.end());
-        }
-      }
-    }
-  }
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void EarlyRouter::buildPlanarNodeNeighbor(ERModel& er_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
-
-  GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
-#pragma omp parallel for collapse(2)
-  for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
-      std::map<Orientation, ERNode*>& neighbor_node_map = planar_node_map[x][y].get_neighbor_node_map();
-      if (x != 0) {
-        neighbor_node_map[Orientation::kWest] = &planar_node_map[x - 1][y];
-      }
-      if (x != (planar_node_map.get_x_size() - 1)) {
-        neighbor_node_map[Orientation::kEast] = &planar_node_map[x + 1][y];
-      }
-      if (y != 0) {
-        neighbor_node_map[Orientation::kSouth] = &planar_node_map[x][y - 1];
-      }
-      if (y != (planar_node_map.get_y_size() - 1)) {
-        neighbor_node_map[Orientation::kNorth] = &planar_node_map[x][y + 1];
-      }
-    }
-  }
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void EarlyRouter::buildPlanarOrientSupply(ERModel& er_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
-  GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
-
-#pragma omp parallel for collapse(2)
-  for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < ert_gcell_map.get_y_size(); y++) {
-      std::map<Orientation, int32_t> planar_orient_supply_map;
-      for (auto& [layer_idx, orient_supply_map] : ert_gcell_map[x][y].get_routing_orient_supply_map()) {
-        for (auto& [orient, supply] : orient_supply_map) {
-          planar_orient_supply_map[orient] += supply;
-        }
-      }
-      planar_node_map[x][y].set_orient_supply_map(planar_orient_supply_map);
-    }
-  }
-
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void EarlyRouter::generateTopology(ERModel& er_model)
@@ -1694,39 +1593,74 @@ std::vector<std::vector<Segment<PlanarCoord>>> EarlyRouter::getRoutingSegmentLis
   return routing_segment_list_list;
 }
 
+std::vector<EREdge*> EarlyRouter::getPlanarEdgeList(ERModel& er_model, const PlanarCoord& first_coord, const PlanarCoord& second_coord)
+{
+  if (first_coord == second_coord) {
+    return {};
+  }
+  if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
+    RTLOG.error(Loc::current(), "The planar segment is oblique!");
+  }
+
+  bool is_horizontal = RTUTIL.isHorizontal(first_coord, second_coord);
+  int32_t first_x = std::min(first_coord.get_x(), second_coord.get_x());
+  int32_t second_x = std::max(first_coord.get_x(), second_coord.get_x());
+  int32_t first_y = std::min(first_coord.get_y(), second_coord.get_y());
+  int32_t second_y = std::max(first_coord.get_y(), second_coord.get_y());
+  int32_t first_idx = is_horizontal ? first_x : first_y;
+  int32_t second_idx = is_horizontal ? second_x : second_y;
+  GridMap<EREdge>& edge_map = is_horizontal ? er_model.get_planar_h_edge_map() : er_model.get_planar_v_edge_map();
+
+  std::vector<EREdge*> edge_list;
+  edge_list.reserve(second_idx - first_idx);
+  for (int32_t idx = first_idx; idx < second_idx; idx++) {
+    int32_t edge_x = is_horizontal ? idx : first_x;
+    int32_t edge_y = is_horizontal ? first_y : idx;
+    if (!edge_map.isInside(edge_x, edge_y)) {
+      RTLOG.error(Loc::current(), "The planar routing edge is outside the map!");
+    }
+    edge_list.push_back(&edge_map[edge_x][edge_y]);
+  }
+  return edge_list;
+}
+
+double EarlyRouter::getEdgeCost(EREdge& edge, int32_t net_idx, double overflow_unit, bool& is_blocked)
+{
+  if (edge.get_ignore_net_set().contains(net_idx)) {
+    return 0;
+  }
+  if (edge.get_supply() <= 0) {
+    is_blocked = true;
+    return 1e12;
+  }
+
+  int32_t demand = edge.get_demand() + 1;
+  if (demand > edge.get_supply()) {
+    is_blocked = true;
+    return overflow_unit * std::pow(demand - edge.get_supply() + 1, 4);
+  }
+  return overflow_unit * std::pow(demand / 1.0 / edge.get_supply(), 4);
+}
+
 void EarlyRouter::updateERCandidate(ERModel& er_model, ERCandidate& er_candidate)
 {
   double overflow_unit = er_model.get_er_com_param().get_overflow_unit();
-  GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
   int32_t curr_net_idx = er_model.get_curr_er_task()->get_net_idx();
 
   int32_t total_wire_length = 0;
   bool is_path_blocked = false;
   double total_overflow_cost = 0;
+  std::unordered_set<EREdge*> candidate_edge_set;
   for (Segment<PlanarCoord>& coord_segment : er_candidate.get_routing_segment_list()) {
     PlanarCoord& first_coord = coord_segment.get_first();
     PlanarCoord& second_coord = coord_segment.get_second();
-    if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
-      RTLOG.error(Loc::current(), "The direction is error!");
-    }
     total_wire_length += RTUTIL.getManhattanDistance(first_coord, second_coord);
-
-    int32_t first_x = first_coord.get_x();
-    int32_t second_x = second_coord.get_x();
-    int32_t first_y = first_coord.get_y();
-    int32_t second_y = second_coord.get_y();
-    RTUTIL.swapByASC(first_x, second_x);
-    RTUTIL.swapByASC(first_y, second_y);
-    Direction direction = RTUTIL.getDirection(first_coord, second_coord);
-    for (int32_t x = first_x; x <= second_x; x++) {
-      for (int32_t y = first_y; y <= second_y; y++) {
-        double overflow_cost = planar_node_map[x][y].getOverflowCost(curr_net_idx, direction, overflow_unit);
-        if (overflow_cost > 1) {
-          is_path_blocked = true;
-        }
-        total_overflow_cost += overflow_cost;
-      }
+    for (EREdge* edge : getPlanarEdgeList(er_model, first_coord, second_coord)) {
+      candidate_edge_set.insert(edge);
     }
+  }
+  for (EREdge* edge : candidate_edge_set) {
+    total_overflow_cost += getEdgeCost(*edge, curr_net_idx, overflow_unit, is_path_blocked);
   }
   er_candidate.set_total_wire_length(total_wire_length);
   er_candidate.set_is_path_blocked(is_path_blocked);
@@ -1757,113 +1691,6 @@ void EarlyRouter::uploadPlanarNetResult(ERModel& er_model, MTree<PlanarCoord>& c
 void EarlyRouter::resetSinglePlanarTask(ERModel& er_model)
 {
   er_model.set_curr_er_task(nullptr);
-}
-
-void EarlyRouter::buildLayerNodeMap(ERModel& er_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
-  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-
-  std::vector<GridMap<ERNode>>& layer_node_map = er_model.get_layer_node_map();
-  layer_node_map.resize(routing_layer_list.size());
-#pragma omp parallel for
-  for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_node_map.size()); layer_idx++) {
-    GridMap<ERNode>& er_node_map = layer_node_map[layer_idx];
-    er_node_map.init(gcell_map.get_x_size(), gcell_map.get_y_size());
-    for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
-      for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
-        ERNode& er_node = er_node_map[x][y];
-        er_node.set_coord(x, y);
-        er_node.set_layer_idx(layer_idx);
-        er_node.set_boundary_wire_unit(ert_gcell_map[x][y].get_boundary_wire_unit());
-        er_node.set_internal_wire_unit(ert_gcell_map[x][y].get_internal_wire_unit());
-        er_node.set_internal_via_unit(ert_gcell_map[x][y].get_internal_via_unit());
-        if (RTUTIL.exist(ert_gcell_map[x][y].get_routing_ignore_net_orient_map(), layer_idx)) {
-          er_node.set_ignore_net_orient_map(ert_gcell_map[x][y].get_routing_ignore_net_orient_map()[layer_idx]);
-        }
-      }
-    }
-  }
-
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void EarlyRouter::buildLayerNodeNeighbor(ERModel& er_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
-  int32_t bottom_routing_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
-  int32_t top_routing_layer_idx = RTDM.getConfig().top_routing_layer_idx;
-
-  std::vector<GridMap<ERNode>>& layer_node_map = er_model.get_layer_node_map();
-
-#pragma omp parallel for
-  for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_node_map.size()); layer_idx++) {
-    bool routing_h = routing_layer_list[layer_idx].isPreferH();
-    bool routing_v = !routing_h;
-    if (layer_idx < bottom_routing_layer_idx || top_routing_layer_idx < layer_idx) {
-      routing_h = false;
-      routing_v = false;
-    }
-    GridMap<ERNode>& er_node_map = layer_node_map[layer_idx];
-    for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
-      for (int32_t y = 0; y < gcell_map.get_y_size(); y++) {
-        std::map<Orientation, ERNode*>& neighbor_node_map = er_node_map[x][y].get_neighbor_node_map();
-        if (routing_h) {
-          if (x != 0) {
-            neighbor_node_map[Orientation::kWest] = &er_node_map[x - 1][y];
-          }
-          if (x != (er_node_map.get_x_size() - 1)) {
-            neighbor_node_map[Orientation::kEast] = &er_node_map[x + 1][y];
-          }
-        }
-        if (routing_v) {
-          if (y != 0) {
-            neighbor_node_map[Orientation::kSouth] = &er_node_map[x][y - 1];
-          }
-          if (y != (er_node_map.get_y_size() - 1)) {
-            neighbor_node_map[Orientation::kNorth] = &er_node_map[x][y + 1];
-          }
-        }
-        if (layer_idx != 0) {
-          neighbor_node_map[Orientation::kBelow] = &layer_node_map[layer_idx - 1][x][y];
-        }
-        if (layer_idx != static_cast<int32_t>(layer_node_map.size()) - 1) {
-          neighbor_node_map[Orientation::kAbove] = &layer_node_map[layer_idx + 1][x][y];
-        }
-      }
-    }
-  }
-
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void EarlyRouter::buildLayerOrientSupply(ERModel& er_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
-
-  std::vector<GridMap<ERNode>>& layer_node_map = er_model.get_layer_node_map();
-
-#pragma omp parallel for collapse(2)
-  for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < ert_gcell_map.get_y_size(); y++) {
-      for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_node_map.size()); layer_idx++) {
-        layer_node_map[layer_idx][x][y].set_orient_supply_map(ert_gcell_map[x][y].get_routing_orient_supply_map()[layer_idx]);
-      }
-    }
-  }
-
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void EarlyRouter::buildPlaneTree(ERModel& er_model)
@@ -1927,7 +1754,6 @@ void EarlyRouter::assignERTask(ERModel& er_model, ERNet* er_task)
 {
   initSingleTask(er_model, er_task);
   if (needRouting(er_model)) {
-    spiltPlaneTree(er_model);
     buildPillarTree(er_model);
     assignPillarTree(er_model);
     buildLayerTree(er_model, er_task);
@@ -1943,70 +1769,6 @@ void EarlyRouter::initSingleTask(ERModel& er_model, ERNet* er_task)
 bool EarlyRouter::needRouting(ERModel& er_model)
 {
   return (er_model.get_curr_er_task()->get_planar_tree().get_root() != nullptr);
-}
-
-void EarlyRouter::spiltPlaneTree(ERModel& er_model)
-{
-  TNode<LayerCoord>* planar_tree_root = er_model.get_curr_er_task()->get_planar_tree().get_root();
-  std::queue<TNode<LayerCoord>*> planar_queue = RTUTIL.initQueue(planar_tree_root);
-  while (!planar_queue.empty()) {
-    TNode<LayerCoord>* planar_node = RTUTIL.getFrontAndPop(planar_queue);
-    std::vector<TNode<LayerCoord>*> child_list = planar_node->get_child_list();
-    for (size_t i = 0; i < child_list.size(); i++) {
-      int32_t length = RTUTIL.getManhattanDistance(planar_node->value().get_planar_coord(), child_list[i]->value().get_planar_coord());
-      if (length <= 1) {
-        continue;
-      }
-      insertMidPoint(er_model, planar_node, child_list[i]);
-    }
-    RTUTIL.addListToQueue(planar_queue, child_list);
-  }
-}
-
-void EarlyRouter::insertMidPoint(ERModel& er_model, TNode<LayerCoord>* planar_node, TNode<LayerCoord>* child_node)
-{
-  PlanarCoord& parent_coord = planar_node->value().get_planar_coord();
-  PlanarCoord& child_coord = child_node->value().get_planar_coord();
-  if (RTUTIL.isProximal(parent_coord, child_coord)) {
-    return;
-  }
-  std::vector<PlanarCoord> mid_coord_list;
-  int32_t x1 = parent_coord.get_x();
-  int32_t x2 = child_coord.get_x();
-  int32_t y1 = parent_coord.get_y();
-  int32_t y2 = child_coord.get_y();
-  if (RTUTIL.isHorizontal(parent_coord, child_coord)) {
-    RTUTIL.swapByASC(x1, x2);
-    for (int32_t x = x1 + 1; x < x2; x += 1) {
-      mid_coord_list.emplace_back(x, y1);
-    }
-    if (parent_coord.get_x() > child_coord.get_x()) {
-      for (size_t i = 0, j = mid_coord_list.size() - 1; i < j; i++, j--) {
-        std::swap(mid_coord_list[i], mid_coord_list[j]);
-      }
-    }
-  } else if (RTUTIL.isVertical(parent_coord, child_coord)) {
-    RTUTIL.swapByASC(y1, y2);
-    for (int32_t y = y1 + 1; y < y2; y += 1) {
-      mid_coord_list.emplace_back(x1, y);
-    }
-    if (parent_coord.get_y() > child_coord.get_y()) {
-      for (size_t i = 0, j = mid_coord_list.size() - 1; i < j; i++, j--) {
-        std::swap(mid_coord_list[i], mid_coord_list[j]);
-      }
-    }
-  } else {
-    RTLOG.error(Loc::current(), "The segment is oblique!");
-  }
-  planar_node->delChild(child_node);
-  TNode<LayerCoord>* curr_node = planar_node;
-  for (size_t i = 0; i < mid_coord_list.size(); i++) {
-    LayerCoord mid_coord(mid_coord_list[i], 0);
-    TNode<LayerCoord>* mid_node = new TNode<LayerCoord>(mid_coord);
-    curr_node->addChild(mid_node);
-    curr_node = mid_node;
-  }
-  curr_node->addChild(child_node);
 }
 
 void EarlyRouter::buildPillarTree(ERModel& er_model)
@@ -2033,30 +1795,170 @@ ERPillar EarlyRouter::convertERPillar(PlanarCoord& planar_coord, std::map<Planar
 
 void EarlyRouter::assignPillarTree(ERModel& er_model)
 {
-  assignForward(er_model);
-  assignBackward(er_model);
+  buildSubtreeCost(er_model);
+  selectPillarLayer(er_model);
 }
 
-void EarlyRouter::assignForward(ERModel& er_model)
+void EarlyRouter::buildSubtreeCost(ERModel& er_model)
 {
   TNode<ERPillar>* pillar_tree_root = er_model.get_curr_er_task()->get_pillar_tree().get_root();
 
-  ERPackage er_package(pillar_tree_root, pillar_tree_root);
-  for (int32_t candidate_layer_idx : getCandidateLayerList(er_model, er_package)) {
-    std::set<int32_t>& pin_layer_idx_set = pillar_tree_root->value().get_pin_layer_idx_set();
-    LALayerCost layer_cost;
-    layer_cost.set_parent_layer_idx(candidate_layer_idx);
-    layer_cost.set_layer_idx(candidate_layer_idx);
-    layer_cost.set_history_cost(getFullViaCost(er_model, pin_layer_idx_set, candidate_layer_idx));
-    pillar_tree_root->value().get_layer_cost_list().push_back(std::move(layer_cost));
-  }
+  std::map<TNode<ERPillar>*, std::vector<int32_t>> candidate_layer_idx_list_map;
   std::queue<TNode<ERPillar>*> pillar_node_queue = RTUTIL.initQueue(pillar_tree_root);
   while (!pillar_node_queue.empty()) {
     TNode<ERPillar>* parent_pillar_node = RTUTIL.getFrontAndPop(pillar_node_queue);
-    std::vector<TNode<ERPillar>*>& child_list = parent_pillar_node->get_child_list();
+    for (TNode<ERPillar>* child_node : parent_pillar_node->get_child_list()) {
+      ERPackage er_package(parent_pillar_node, child_node);
+      std::vector<int32_t> candidate_layer_idx_list = getCandidateLayerList(er_model, er_package);
+      if (candidate_layer_idx_list.empty()) {
+        RTLOG.error(Loc::current(), "The candidate layer list is empty!");
+      }
+      candidate_layer_idx_list_map.emplace(child_node, std::move(candidate_layer_idx_list));
+    }
+    RTUTIL.addListToQueue(pillar_node_queue, parent_pillar_node->get_child_list());
+  }
+
+  std::vector<std::vector<TNode<ERPillar>*>> level_list = RTUTIL.getLevelOrder(er_model.get_curr_er_task()->get_pillar_tree());
+  const std::vector<int32_t> root_incoming_layer_idx_list{-1};
+  for (int32_t i = static_cast<int32_t>(level_list.size()) - 1; i >= 0; i--) {
+    for (TNode<ERPillar>* pillar_node : level_list[i]) {
+      ERPillar& pillar = pillar_node->value();
+      std::vector<ERLayerCost>& layer_cost_list = pillar.get_layer_cost_list();
+      layer_cost_list.clear();
+
+      const std::vector<int32_t>& incoming_layer_idx_list
+          = pillar_node == pillar_tree_root ? root_incoming_layer_idx_list : candidate_layer_idx_list_map.at(pillar_node);
+      layer_cost_list.reserve(incoming_layer_idx_list.size());
+
+      std::vector<TNode<ERPillar>*>& child_list = pillar_node->get_child_list();
+      std::vector<std::vector<double>> child_base_cost_list_list;
+      child_base_cost_list_list.reserve(child_list.size());
+      std::set<int32_t> child_boundary_layer_idx_set;
+      for (TNode<ERPillar>* child_node : child_list) {
+        ERPackage er_package(pillar_node, child_node);
+        const std::vector<int32_t>& child_candidate_layer_idx_list = candidate_layer_idx_list_map.at(child_node);
+        std::vector<ERLayerCost>& child_layer_cost_list = child_node->value().get_layer_cost_list();
+        std::vector<double> child_base_cost_list;
+        child_base_cost_list.reserve(child_candidate_layer_idx_list.size());
+        for (size_t candidate_idx = 0; candidate_idx < child_candidate_layer_idx_list.size(); candidate_idx++) {
+          int32_t layer_idx = child_candidate_layer_idx_list[candidate_idx];
+          child_boundary_layer_idx_set.insert(layer_idx);
+          if (candidate_idx >= child_layer_cost_list.size() || child_layer_cost_list[candidate_idx].get_layer_idx() != layer_idx) {
+            RTLOG.error(Loc::current(), "The child layer cost is not found!");
+          }
+          double subtree_cost = child_layer_cost_list[candidate_idx].get_subtree_cost();
+          child_base_cost_list.push_back(getSegmentCost(er_model, er_package, layer_idx) + subtree_cost);
+        }
+        child_base_cost_list_list.push_back(std::move(child_base_cost_list));
+      }
+
+      for (int32_t incoming_layer_idx : incoming_layer_idx_list) {
+        std::set<int32_t> base_layer_idx_set = pillar.get_pin_layer_idx_set();
+        std::set<int32_t> boundary_layer_idx_set = child_boundary_layer_idx_set;
+        if (incoming_layer_idx != -1) {
+          base_layer_idx_set.insert(incoming_layer_idx);
+          boundary_layer_idx_set.insert(incoming_layer_idx);
+        }
+
+        double min_cost = DBL_MAX;
+        std::vector<int32_t> best_child_layer_idx_list;
+        if (pillar_node->isLeafNode()) {
+          min_cost = getPillarViaCost(er_model, base_layer_idx_set);
+        } else {
+          boundary_layer_idx_set.insert(base_layer_idx_set.begin(), base_layer_idx_set.end());
+          std::vector<int32_t> boundary_layer_idx_list(boundary_layer_idx_set.begin(), boundary_layer_idx_set.end());
+          for (size_t low_idx = 0; low_idx < boundary_layer_idx_list.size(); low_idx++) {
+            for (size_t high_idx = low_idx; high_idx < boundary_layer_idx_list.size(); high_idx++) {
+              int32_t low_layer_idx = boundary_layer_idx_list[low_idx];
+              int32_t high_layer_idx = boundary_layer_idx_list[high_idx];
+              if (!base_layer_idx_set.empty() && (low_layer_idx > *base_layer_idx_set.begin() || high_layer_idx < *base_layer_idx_set.rbegin())) {
+                continue;
+              }
+
+              double curr_cost = er_model.get_er_com_param().get_via_unit() * (high_layer_idx - low_layer_idx);
+              std::vector<int32_t> curr_child_layer_idx_list;
+              curr_child_layer_idx_list.reserve(child_list.size());
+              bool is_valid = true;
+              for (size_t child_idx = 0; child_idx < child_list.size(); child_idx++) {
+                const std::vector<int32_t>& child_candidate_layer_idx_list = candidate_layer_idx_list_map.at(child_list[child_idx]);
+                double child_min_cost = DBL_MAX;
+                int32_t best_child_layer_idx = -1;
+                for (size_t candidate_idx = 0; candidate_idx < child_candidate_layer_idx_list.size(); candidate_idx++) {
+                  int32_t child_layer_idx = child_candidate_layer_idx_list[candidate_idx];
+                  if (child_layer_idx < low_layer_idx || high_layer_idx < child_layer_idx) {
+                    continue;
+                  }
+                  double child_cost = child_base_cost_list_list[child_idx][candidate_idx];
+                  if (child_cost < child_min_cost || (child_cost == child_min_cost && child_layer_idx < best_child_layer_idx)) {
+                    child_min_cost = child_cost;
+                    best_child_layer_idx = child_layer_idx;
+                  }
+                }
+                if (child_min_cost == DBL_MAX) {
+                  is_valid = false;
+                  break;
+                }
+                curr_cost += child_min_cost;
+                curr_child_layer_idx_list.push_back(best_child_layer_idx);
+              }
+              if (!is_valid) {
+                continue;
+              }
+              if (curr_cost < min_cost || (curr_cost == min_cost && curr_child_layer_idx_list < best_child_layer_idx_list)) {
+                min_cost = curr_cost;
+                best_child_layer_idx_list = std::move(curr_child_layer_idx_list);
+              }
+            }
+          }
+        }
+        if (min_cost == DBL_MAX) {
+          RTLOG.error(Loc::current(), "The min subtree cost is wrong!");
+        }
+
+        ERLayerCost layer_cost;
+        layer_cost.set_layer_idx(incoming_layer_idx);
+        layer_cost.set_subtree_cost(min_cost);
+        layer_cost.set_child_layer_idx_list(best_child_layer_idx_list);
+        layer_cost_list.push_back(std::move(layer_cost));
+      }
+    }
+  }
+}
+
+double EarlyRouter::getPillarViaCost(ERModel& er_model, const std::set<int32_t>& layer_idx_set)
+{
+  if (layer_idx_set.empty()) {
+    return 0;
+  }
+  return er_model.get_er_com_param().get_via_unit() * (*layer_idx_set.rbegin() - *layer_idx_set.begin());
+}
+
+void EarlyRouter::selectPillarLayer(ERModel& er_model)
+{
+  TNode<ERPillar>* pillar_tree_root = er_model.get_curr_er_task()->get_pillar_tree().get_root();
+  pillar_tree_root->value().set_layer_idx(-1);
+
+  std::queue<TNode<ERPillar>*> pillar_node_queue = RTUTIL.initQueue(pillar_tree_root);
+  while (!pillar_node_queue.empty()) {
+    TNode<ERPillar>* pillar_node = RTUTIL.getFrontAndPop(pillar_node_queue);
+    ERLayerCost* selected_layer_cost = nullptr;
+    for (ERLayerCost& layer_cost : pillar_node->value().get_layer_cost_list()) {
+      if (layer_cost.get_layer_idx() == pillar_node->value().get_layer_idx()) {
+        selected_layer_cost = &layer_cost;
+        break;
+      }
+    }
+    if (selected_layer_cost == nullptr) {
+      RTLOG.error(Loc::current(), "The selected layer cost is not found!");
+    }
+
+    std::vector<TNode<ERPillar>*>& child_list = pillar_node->get_child_list();
+    std::vector<int32_t>& child_layer_idx_list = selected_layer_cost->get_child_layer_idx_list();
+    if (child_list.size() != child_layer_idx_list.size()) {
+      RTLOG.error(Loc::current(), "The child layer count is wrong!");
+    }
     for (size_t i = 0; i < child_list.size(); i++) {
-      ERPackage er_package(parent_pillar_node, child_list[i]);
-      buildLayerCost(er_model, er_package);
+      child_list[i]->value().set_layer_idx(child_layer_idx_list[i]);
     }
     RTUTIL.addListToQueue(pillar_node_queue, child_list);
   }
@@ -2084,183 +1986,53 @@ std::vector<int32_t> EarlyRouter::getCandidateLayerList(ERModel& er_model, ERPac
   return candidate_layer_idx_list;
 }
 
-double EarlyRouter::getFullViaCost(ERModel& er_model, std::set<int32_t>& layer_idx_set, int32_t candidate_layer_idx)
+std::vector<EREdge*> EarlyRouter::getLayerEdgeList(ERModel& er_model, int32_t layer_idx, const PlanarCoord& first_coord, const PlanarCoord& second_coord)
 {
-  double via_unit = er_model.get_er_com_param().get_via_unit();
-
-  int32_t via_num = 0;
-  if (layer_idx_set.size() > 0) {
-    std::set<int32_t> layer_idx_set_temp = layer_idx_set;
-    layer_idx_set_temp.insert(candidate_layer_idx);
-    via_num = std::abs(*layer_idx_set_temp.begin() - *layer_idx_set_temp.rbegin());
+  if (first_coord == second_coord) {
+    return {};
   }
-  return (via_unit * via_num);
-}
-
-void EarlyRouter::buildLayerCost(ERModel& er_model, ERPackage& er_package)
-{
-  std::vector<LALayerCost>& layer_cost_list = er_package.getChildPillar().get_layer_cost_list();
-
-  for (int32_t candidate_layer_idx : getCandidateLayerList(er_model, er_package)) {
-    std::pair<int32_t, double> parent_pillar_cost_pair = getParentPillarCost(er_model, er_package, candidate_layer_idx);
-    double segment_cost = getSegmentCost(er_model, er_package, candidate_layer_idx);
-    double child_pillar_cost = getChildPillarCost(er_model, er_package, candidate_layer_idx);
-
-    LALayerCost layer_cost;
-    layer_cost.set_parent_layer_idx(parent_pillar_cost_pair.first);
-    layer_cost.set_layer_idx(candidate_layer_idx);
-    layer_cost.set_history_cost(parent_pillar_cost_pair.second + segment_cost + child_pillar_cost);
-    layer_cost_list.push_back(std::move(layer_cost));
+  if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
+    RTLOG.error(Loc::current(), "The layer segment is oblique!");
   }
-}
+  if (layer_idx < 0 || static_cast<int32_t>(er_model.get_layer_h_edge_map().size()) <= layer_idx) {
+    RTLOG.error(Loc::current(), "The routing layer is outside the Edge map!");
+  }
 
-std::pair<int32_t, double> EarlyRouter::getParentPillarCost(ERModel& er_model, ERPackage& er_package, int32_t candidate_layer_idx)
-{
-  ERPillar& parent_pillar = er_package.getParentPillar();
+  bool is_horizontal = RTUTIL.isHorizontal(first_coord, second_coord);
+  int32_t first_x = std::min(first_coord.get_x(), second_coord.get_x());
+  int32_t second_x = std::max(first_coord.get_x(), second_coord.get_x());
+  int32_t first_y = std::min(first_coord.get_y(), second_coord.get_y());
+  int32_t second_y = std::max(first_coord.get_y(), second_coord.get_y());
+  int32_t first_idx = is_horizontal ? first_x : first_y;
+  int32_t second_idx = is_horizontal ? second_x : second_y;
+  GridMap<EREdge>& edge_map = is_horizontal ? er_model.get_layer_h_edge_map()[layer_idx] : er_model.get_layer_v_edge_map()[layer_idx];
 
-  std::pair<int32_t, double> layer_cost_pair;
-  double min_cost = DBL_MAX;
-  for (LALayerCost& layer_cost : parent_pillar.get_layer_cost_list()) {
-    std::set<int32_t> layer_idx_set_temp = parent_pillar.get_pin_layer_idx_set();
-    layer_idx_set_temp.insert(layer_cost.get_layer_idx());
-    double curr_cost = layer_cost.get_history_cost() + getExtraViaCost(er_model, layer_idx_set_temp, candidate_layer_idx);
-
-    if (curr_cost < min_cost) {
-      min_cost = curr_cost;
-      layer_cost_pair.first = layer_cost.get_layer_idx();
-      layer_cost_pair.second = curr_cost;
-    } else if (curr_cost == min_cost) {
-      layer_cost_pair.first = std::min(layer_cost_pair.first, layer_cost.get_layer_idx());
+  std::vector<EREdge*> edge_list;
+  edge_list.reserve(second_idx - first_idx);
+  for (int32_t idx = first_idx; idx < second_idx; idx++) {
+    int32_t edge_x = is_horizontal ? idx : first_x;
+    int32_t edge_y = is_horizontal ? first_y : idx;
+    if (!edge_map.isInside(edge_x, edge_y)) {
+      RTLOG.error(Loc::current(), "The layer routing Edge is outside the map!");
     }
+    edge_list.push_back(&edge_map[edge_x][edge_y]);
   }
-  if (min_cost == DBL_MAX) {
-    RTLOG.error(Loc::current(), "The min cost is wrong!");
-  }
-  return layer_cost_pair;
-}
-
-double EarlyRouter::getExtraViaCost(ERModel& er_model, std::set<int32_t>& layer_idx_set, int32_t candidate_layer_idx)
-{
-  double via_unit = er_model.get_er_com_param().get_via_unit();
-
-  int32_t via_num = 0;
-  if (layer_idx_set.size() > 0) {
-    int32_t begin_layer_idx = *layer_idx_set.begin();
-    int32_t end_layer_idx = *layer_idx_set.rbegin();
-    if (candidate_layer_idx < begin_layer_idx) {
-      via_num = std::abs(candidate_layer_idx - begin_layer_idx);
-    } else if (end_layer_idx < candidate_layer_idx) {
-      via_num = std::abs(candidate_layer_idx - end_layer_idx);
-    } else {
-      via_num = 0;
-    }
-  }
-  return (via_unit * via_num);
+  return edge_list;
 }
 
 double EarlyRouter::getSegmentCost(ERModel& er_model, ERPackage& er_package, int32_t candidate_layer_idx)
 {
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  std::vector<GridMap<ERNode>>& layer_node_map = er_model.get_layer_node_map();
   double overflow_unit = er_model.get_er_com_param().get_overflow_unit();
-
-  Direction prefer_direction = routing_layer_list[candidate_layer_idx].get_prefer_direction();
-
+  int32_t net_idx = er_model.get_curr_er_task()->get_net_idx();
   PlanarCoord first_coord = er_package.getParentPillar().get_planar_coord();
   PlanarCoord second_coord = er_package.getChildPillar().get_planar_coord();
-  int32_t first_x = first_coord.get_x();
-  int32_t first_y = first_coord.get_y();
-  int32_t second_x = second_coord.get_x();
-  int32_t second_y = second_coord.get_y();
-  RTUTIL.swapByASC(first_x, second_x);
-  RTUTIL.swapByASC(first_y, second_y);
 
-  double node_cost = 0;
-  for (int32_t x = first_x; x <= second_x; x++) {
-    for (int32_t y = first_y; y <= second_y; y++) {
-      node_cost += layer_node_map[candidate_layer_idx][x][y].getOverflowCost(er_model.get_curr_er_task()->get_net_idx(), prefer_direction, overflow_unit);
-    }
+  double edge_cost = 0;
+  bool is_blocked = false;
+  for (EREdge* edge : getLayerEdgeList(er_model, candidate_layer_idx, first_coord, second_coord)) {
+    edge_cost += getEdgeCost(*edge, net_idx, overflow_unit, is_blocked);
   }
-  return node_cost;
-}
-
-double EarlyRouter::getChildPillarCost(ERModel& er_model, ERPackage& er_package, int32_t candidate_layer_idx)
-{
-  ERPillar& child_pillar = er_package.getChildPillar();
-  return getFullViaCost(er_model, child_pillar.get_pin_layer_idx_set(), candidate_layer_idx);
-}
-
-void EarlyRouter::assignBackward(ERModel& er_model)
-{
-  std::vector<std::vector<TNode<ERPillar>*>> level_list = RTUTIL.getLevelOrder(er_model.get_curr_er_task()->get_pillar_tree());
-  if (level_list.empty()) {
-    return;
-  }
-  for (int32_t i = static_cast<int32_t>(level_list.size() - 1); i >= 0; i--) {
-    for (size_t j = 0; j < level_list[i].size(); j++) {
-      int32_t best_layer_idx;
-      if (level_list[i][j]->isLeafNode()) {
-        best_layer_idx = getBestLayerBySelf(level_list[i][j]);
-      } else {
-        best_layer_idx = getBestLayerByChild(level_list[i][j]);
-      }
-      level_list[i][j]->value().set_layer_idx(best_layer_idx);
-    }
-  }
-}
-
-int32_t EarlyRouter::getBestLayerBySelf(TNode<ERPillar>* pillar_node)
-{
-  std::vector<LALayerCost>& layer_cost_list = pillar_node->value().get_layer_cost_list();
-
-  double min_cost = DBL_MAX;
-  int32_t best_layer_idx = layer_cost_list.front().get_layer_idx();
-  for (LALayerCost& layer_cost : layer_cost_list) {
-    double cost = layer_cost.get_history_cost();
-    if (cost < min_cost) {
-      min_cost = cost;
-      best_layer_idx = layer_cost.get_layer_idx();
-    } else if (cost == min_cost) {
-      best_layer_idx = std::min(best_layer_idx, layer_cost.get_layer_idx());
-    }
-  }
-  if (min_cost == DBL_MAX) {
-    RTLOG.error(Loc::current(), "The min cost is wrong!");
-  }
-  return best_layer_idx;
-}
-
-int32_t EarlyRouter::getBestLayerByChild(TNode<ERPillar>* parent_pillar_node)
-{
-  std::set<int32_t> candidate_layer_idx_set;
-  for (TNode<ERPillar>* child_node : parent_pillar_node->get_child_list()) {
-    for (LALayerCost& layer_cost : child_node->value().get_layer_cost_list()) {
-      if (layer_cost.get_layer_idx() == child_node->value().get_layer_idx()) {
-        candidate_layer_idx_set.insert(layer_cost.get_parent_layer_idx());
-      }
-    }
-  }
-  double min_cost = DBL_MAX;
-  int32_t best_layer_idx = INT_MAX;
-  for (int32_t candidate_layer_idx : candidate_layer_idx_set) {
-    for (LALayerCost& layer_cost : parent_pillar_node->value().get_layer_cost_list()) {
-      if (layer_cost.get_layer_idx() != candidate_layer_idx) {
-        continue;
-      }
-      double curr_cost = layer_cost.get_history_cost();
-      if (curr_cost < min_cost) {
-        min_cost = curr_cost;
-        best_layer_idx = candidate_layer_idx;
-      } else if (curr_cost == min_cost) {
-        best_layer_idx = std::min(best_layer_idx, candidate_layer_idx);
-      }
-      break;
-    }
-  }
-  if (min_cost == DBL_MAX) {
-    RTLOG.error(Loc::current(), "The min cost is wrong!");
-  }
-  return best_layer_idx;
+  return edge_cost;
 }
 
 void EarlyRouter::buildLayerTree(ERModel& er_model, ERNet* er_task)
@@ -2275,18 +2047,32 @@ std::vector<Segment<LayerCoord>> EarlyRouter::getLayerRoutingSegmentList(ERModel
 {
   std::vector<Segment<LayerCoord>> routing_segment_list;
 
-  std::queue<TNode<ERPillar>*> pillar_node_queue = RTUTIL.initQueue(er_model.get_curr_er_task()->get_pillar_tree().get_root());
+  TNode<ERPillar>* pillar_tree_root = er_model.get_curr_er_task()->get_pillar_tree().get_root();
+  std::queue<TNode<ERPillar>*> pillar_node_queue = RTUTIL.initQueue(pillar_tree_root);
   while (!pillar_node_queue.empty()) {
     TNode<ERPillar>* parent_pillar_node = RTUTIL.getFrontAndPop(pillar_node_queue);
     std::vector<TNode<ERPillar>*>& child_list = parent_pillar_node->get_child_list();
     {
-      std::set<int32_t> layer_idx_set = parent_pillar_node->value().get_pin_layer_idx_set();
-      layer_idx_set.insert(parent_pillar_node->value().get_layer_idx());
-      for (TNode<ERPillar>* child_node : child_list) {
-        layer_idx_set.insert(child_node->value().get_layer_idx());
+      int32_t bottom_layer_idx = std::numeric_limits<int32_t>::max();
+      int32_t top_layer_idx = std::numeric_limits<int32_t>::min();
+      for (int32_t layer_idx : parent_pillar_node->value().get_pin_layer_idx_set()) {
+        bottom_layer_idx = std::min(bottom_layer_idx, layer_idx);
+        top_layer_idx = std::max(top_layer_idx, layer_idx);
       }
-      routing_segment_list.emplace_back(LayerCoord(parent_pillar_node->value().get_planar_coord(), *layer_idx_set.begin()),
-                                        LayerCoord(parent_pillar_node->value().get_planar_coord(), *layer_idx_set.rbegin()));
+      if (parent_pillar_node != pillar_tree_root) {
+        int32_t layer_idx = parent_pillar_node->value().get_layer_idx();
+        bottom_layer_idx = std::min(bottom_layer_idx, layer_idx);
+        top_layer_idx = std::max(top_layer_idx, layer_idx);
+      }
+      for (TNode<ERPillar>* child_node : child_list) {
+        int32_t layer_idx = child_node->value().get_layer_idx();
+        bottom_layer_idx = std::min(bottom_layer_idx, layer_idx);
+        top_layer_idx = std::max(top_layer_idx, layer_idx);
+      }
+      if (bottom_layer_idx <= top_layer_idx) {
+        routing_segment_list.emplace_back(LayerCoord(parent_pillar_node->value().get_planar_coord(), bottom_layer_idx),
+                                          LayerCoord(parent_pillar_node->value().get_planar_coord(), top_layer_idx));
+      }
     }
     for (TNode<ERPillar>* child_node : child_list) {
       routing_segment_list.emplace_back(LayerCoord(parent_pillar_node->value().get_planar_coord(), child_node->value().get_layer_idx()),
@@ -2853,25 +2639,22 @@ void EarlyRouter::outputPlanarSupplyCSV(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
+  GridMap<EREdge>& planar_h_edge_map = er_model.get_planar_h_edge_map();
+  GridMap<EREdge>& planar_v_edge_map = er_model.get_planar_v_edge_map();
   std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
 
-  std::ofstream* supply_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "supply_map_planar.csv"));
-  for (int32_t y = ert_gcell_map.get_y_size() - 1; y >= 0; y--) {
-    for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
-      int32_t total_supply = 0;
-      for (RoutingLayer& routing_layer : routing_layer_list) {
-        for (auto& [orient, supply] : ert_gcell_map[x][y].get_routing_orient_supply_map()[routing_layer.get_layer_idx()]) {
-          // boundary_supply + internal_supply
-          total_supply += (2 * supply);
-        }
+  for (std::pair<std::string, GridMap<EREdge>*> edge_map_pair :
+       {std::make_pair("h_supply_map.csv", &planar_h_edge_map), std::make_pair("v_supply_map.csv", &planar_v_edge_map)}) {
+    GridMap<EREdge>& edge_map = *edge_map_pair.second;
+    std::ofstream* supply_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, edge_map_pair.first));
+    for (int32_t y = edge_map.get_y_size() - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
+        RTUTIL.pushStream(supply_csv_file, edge_map[x][y].get_supply(), ",");
       }
-      RTUTIL.pushStream(supply_csv_file, total_supply, ",");
+      RTUTIL.pushStream(supply_csv_file, "\n");
     }
-    RTUTIL.pushStream(supply_csv_file, "\n");
+    RTUTIL.closeFileStream(supply_csv_file);
   }
-  RTUTIL.closeFileStream(supply_csv_file);
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -2952,41 +2735,27 @@ void EarlyRouter::outputPlanarGuide(ERModel& er_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void EarlyRouter::outputPlanarNetCSV(ERModel& er_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
-
-  std::ofstream* net_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "net_map_planar.csv"));
-  GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
-  for (int32_t y = planar_node_map.get_y_size() - 1; y >= 0; y--) {
-    for (int32_t x = 0; x < planar_node_map.get_x_size(); x++) {
-      RTUTIL.pushStream(net_csv_file, planar_node_map[x][y].getDemand(), ",");
-    }
-    RTUTIL.pushStream(net_csv_file, "\n");
-  }
-  RTUTIL.closeFileStream(net_csv_file);
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
 void EarlyRouter::outputPlanarOverflowCSV(ERModel& er_model)
 {
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
+  GridMap<EREdge>& planar_h_edge_map = er_model.get_planar_h_edge_map();
+  GridMap<EREdge>& planar_v_edge_map = er_model.get_planar_v_edge_map();
   std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
 
-  std::ofstream* overflow_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "overflow_map_planar.csv"));
-  GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
-  for (int32_t y = planar_node_map.get_y_size() - 1; y >= 0; y--) {
-    for (int32_t x = 0; x < planar_node_map.get_x_size(); x++) {
-      RTUTIL.pushStream(overflow_csv_file, planar_node_map[x][y].getOverflow(), ",");
+  for (std::pair<std::string, GridMap<EREdge>*> edge_map_pair :
+       {std::make_pair("h_overflow_map.csv", &planar_h_edge_map), std::make_pair("v_overflow_map.csv", &planar_v_edge_map)}) {
+    GridMap<EREdge>& edge_map = *edge_map_pair.second;
+    std::ofstream* overflow_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, edge_map_pair.first));
+    for (int32_t y = edge_map.get_y_size() - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
+        RTUTIL.pushStream(overflow_csv_file, edge_map[x][y].get_overflow(), ",");
+      }
+      RTUTIL.pushStream(overflow_csv_file, "\n");
     }
-    RTUTIL.pushStream(overflow_csv_file, "\n");
+    RTUTIL.closeFileStream(overflow_csv_file);
   }
-  RTUTIL.closeFileStream(overflow_csv_file);
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -2996,20 +2765,18 @@ void EarlyRouter::outputLayerSupplyCSV(ERModel& er_model)
   RTLOG.info(Loc::current(), "Starting...");
 
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
+  std::vector<GridMap<EREdge>>& layer_h_edge_map = er_model.get_layer_h_edge_map();
+  std::vector<GridMap<EREdge>>& layer_v_edge_map = er_model.get_layer_v_edge_map();
   std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
 
   for (RoutingLayer& routing_layer : routing_layer_list) {
+    int32_t layer_idx = routing_layer.get_layer_idx();
+    GridMap<EREdge>& edge_map = routing_layer.isPreferH() ? layer_h_edge_map[layer_idx] : layer_v_edge_map[layer_idx];
     std::ofstream* supply_csv_file
         = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "supply_map_", routing_layer.get_layer_name(), ".csv"));
-    for (int32_t y = ert_gcell_map.get_y_size() - 1; y >= 0; y--) {
-      for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
-        int32_t total_supply = 0;
-        for (auto& [orient, supply] : ert_gcell_map[x][y].get_routing_orient_supply_map()[routing_layer.get_layer_idx()]) {
-          // boundary_supply + internal_supply
-          total_supply += (2 * supply);
-        }
-        RTUTIL.pushStream(supply_csv_file, total_supply, ",");
+    for (int32_t y = edge_map.get_y_size() - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
+        RTUTIL.pushStream(supply_csv_file, edge_map[x][y].get_supply(), ",");
       }
       RTUTIL.pushStream(supply_csv_file, "\n");
     }
@@ -3095,46 +2862,25 @@ void EarlyRouter::outputLayerGuide(ERModel& er_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void EarlyRouter::outputLayerNetCSV(ERModel& er_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
-
-  std::vector<GridMap<ERNode>>& layer_node_map = er_model.get_layer_node_map();
-  for (RoutingLayer& routing_layer : routing_layer_list) {
-    std::ofstream* net_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "net_map_", routing_layer.get_layer_name(), ".csv"));
-    GridMap<ERNode>& er_node_map = layer_node_map[routing_layer.get_layer_idx()];
-    for (int32_t y = er_node_map.get_y_size() - 1; y >= 0; y--) {
-      for (int32_t x = 0; x < er_node_map.get_x_size(); x++) {
-        RTUTIL.pushStream(net_csv_file, er_node_map[x][y].getDemand(), ",");
-      }
-      RTUTIL.pushStream(net_csv_file, "\n");
-    }
-    RTUTIL.closeFileStream(net_csv_file);
-  }
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
 void EarlyRouter::outputLayerOverflowCSV(ERModel& er_model)
 {
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+  std::vector<GridMap<EREdge>>& layer_h_edge_map = er_model.get_layer_h_edge_map();
+  std::vector<GridMap<EREdge>>& layer_v_edge_map = er_model.get_layer_v_edge_map();
   std::string& er_temp_directory_path = RTDM.getConfig().er_temp_directory_path;
 
-  std::vector<GridMap<ERNode>>& layer_node_map = er_model.get_layer_node_map();
   for (RoutingLayer& routing_layer : routing_layer_list) {
+    int32_t layer_idx = routing_layer.get_layer_idx();
+    GridMap<EREdge>& edge_map = routing_layer.isPreferH() ? layer_h_edge_map[layer_idx] : layer_v_edge_map[layer_idx];
     std::ofstream* overflow_csv_file
         = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "overflow_map_", routing_layer.get_layer_name(), ".csv"));
 
-    GridMap<ERNode>& er_node_map = layer_node_map[routing_layer.get_layer_idx()];
-    for (int32_t y = er_node_map.get_y_size() - 1; y >= 0; y--) {
-      for (int32_t x = 0; x < er_node_map.get_x_size(); x++) {
-        RTUTIL.pushStream(overflow_csv_file, er_node_map[x][y].getOverflow(), ",");
+    for (int32_t y = edge_map.get_y_size() - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
+        RTUTIL.pushStream(overflow_csv_file, edge_map[x][y].get_overflow(), ",");
       }
       RTUTIL.pushStream(overflow_csv_file, "\n");
     }
@@ -3147,98 +2893,72 @@ void EarlyRouter::outputLayerOverflowCSV(ERModel& er_model)
 
 #if 1  // update env
 
+void EarlyRouter::updateEdgeDemand(EREdge& edge, int32_t net_idx, ChangeType change_type, std::unordered_set<EREdge*>& edge_set)
+{
+  int32_t delta = 0;
+  if (change_type == ChangeType::kAdd) {
+    delta = 1;
+  } else if (change_type == ChangeType::kDel) {
+    delta = -1;
+  } else {
+    RTLOG.error(Loc::current(), "The change type is error!");
+  }
+  bool is_changed = delta > 0 ? edge_set.insert(&edge).second : edge_set.erase(&edge) > 0;
+  if (!is_changed) {
+    return;
+  }
+  if (edge.get_ignore_net_set().contains(net_idx)) {
+    return;
+  }
+  if (delta < 0 && edge.get_demand() <= 0) {
+    RTLOG.error(Loc::current(), "The routing edge demand is error!");
+  }
+  std::vector<int32_t>& demand_net_idx_list = edge.get_demand_net_idx_list();
+  if (delta > 0) {
+    demand_net_idx_list.push_back(net_idx);
+  } else {
+    auto iter = std::find(demand_net_idx_list.begin(), demand_net_idx_list.end(), net_idx);
+    if (iter == demand_net_idx_list.end()) {
+      RTLOG.error(Loc::current(), "The routing edge demand net is error!");
+    }
+    demand_net_idx_list.erase(iter);
+  }
+  edge.set_demand(edge.get_demand() + delta);
+}
+
 void EarlyRouter::updateDemandToGraph(ERModel& er_model, ChangeType change_type, MTree<PlanarCoord>& coord_tree)
 {
-  int32_t curr_net_idx = er_model.get_curr_er_task()->get_net_idx();
+  ERNet* curr_er_task = er_model.get_curr_er_task();
+  int32_t curr_net_idx = curr_er_task->get_net_idx();
+  std::unordered_set<EREdge*>& edge_set = curr_er_task->get_planar_edge_set();
 
-  std::vector<Segment<PlanarCoord>> routing_segment_list;
   for (Segment<TNode<PlanarCoord>*>& coord_segment : RTUTIL.getSegListByTree(coord_tree)) {
-    routing_segment_list.emplace_back(coord_segment.get_first()->value(), coord_segment.get_second()->value());
-  }
-  std::map<PlanarCoord, std::set<Orientation>, CmpPlanarCoordByXASC> usage_map;
-  for (Segment<PlanarCoord>& coord_segment : routing_segment_list) {
-    PlanarCoord& first_coord = coord_segment.get_first();
-    PlanarCoord& second_coord = coord_segment.get_second();
-
-    Orientation orientation = RTUTIL.getOrientation(first_coord, second_coord);
-    if (orientation == Orientation::kNone || orientation == Orientation::kOblique) {
-      RTLOG.error(Loc::current(), "The orientation is error!");
+    PlanarCoord& first_coord = coord_segment.get_first()->value();
+    PlanarCoord& second_coord = coord_segment.get_second()->value();
+    for (EREdge* edge : getPlanarEdgeList(er_model, first_coord, second_coord)) {
+      updateEdgeDemand(*edge, curr_net_idx, change_type, edge_set);
     }
-    Orientation opposite_orientation = RTUTIL.getOppositeOrientation(orientation);
-
-    int32_t first_x = first_coord.get_x();
-    int32_t first_y = first_coord.get_y();
-    int32_t second_x = second_coord.get_x();
-    int32_t second_y = second_coord.get_y();
-    RTUTIL.swapByASC(first_x, second_x);
-    RTUTIL.swapByASC(first_y, second_y);
-
-    for (int32_t x = first_x; x <= second_x; x++) {
-      for (int32_t y = first_y; y <= second_y; y++) {
-        PlanarCoord coord(x, y);
-        if (coord != first_coord) {
-          usage_map[coord].insert(opposite_orientation);
-        }
-        if (coord != second_coord) {
-          usage_map[coord].insert(orientation);
-        }
-      }
-    }
-  }
-  GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
-  for (auto& [usage_coord, orientation_list] : usage_map) {
-    ERNode& er_node = planar_node_map[usage_coord.get_x()][usage_coord.get_y()];
-    er_node.updateDemand(curr_net_idx, orientation_list, change_type);
   }
 }
 
 void EarlyRouter::updateDemandToGraph(ERModel& er_model, ChangeType change_type, MTree<LayerCoord>& coord_tree)
 {
-  int32_t curr_net_idx = er_model.get_curr_er_task()->get_net_idx();
+  ERNet* curr_er_task = er_model.get_curr_er_task();
+  int32_t curr_net_idx = curr_er_task->get_net_idx();
+  std::unordered_set<EREdge*>& edge_set = curr_er_task->get_layer_edge_set();
 
-  std::vector<Segment<LayerCoord>> routing_segment_list;
   for (Segment<TNode<LayerCoord>*>& coord_segment : RTUTIL.getSegListByTree(coord_tree)) {
-    routing_segment_list.emplace_back(coord_segment.get_first()->value(), coord_segment.get_second()->value());
-  }
-  std::map<LayerCoord, std::set<Orientation>, CmpLayerCoordByXASC> usage_map;
-  for (Segment<LayerCoord>& coord_segment : routing_segment_list) {
-    LayerCoord& first_coord = coord_segment.get_first();
-    LayerCoord& second_coord = coord_segment.get_second();
-
-    Orientation orientation = RTUTIL.getOrientation(first_coord, second_coord);
-    if (orientation == Orientation::kNone || orientation == Orientation::kOblique) {
-      RTLOG.error(Loc::current(), "The orientation is error!");
-    }
-    Orientation opposite_orientation = RTUTIL.getOppositeOrientation(orientation);
-
-    int32_t first_x = first_coord.get_x();
-    int32_t first_y = first_coord.get_y();
-    int32_t first_layer_idx = first_coord.get_layer_idx();
-    int32_t second_x = second_coord.get_x();
-    int32_t second_y = second_coord.get_y();
-    int32_t second_layer_idx = second_coord.get_layer_idx();
-    RTUTIL.swapByASC(first_x, second_x);
-    RTUTIL.swapByASC(first_y, second_y);
-    RTUTIL.swapByASC(first_layer_idx, second_layer_idx);
-
-    for (int32_t x = first_x; x <= second_x; x++) {
-      for (int32_t y = first_y; y <= second_y; y++) {
-        for (int32_t layer_idx = first_layer_idx; layer_idx <= second_layer_idx; layer_idx++) {
-          LayerCoord coord(x, y, layer_idx);
-          if (coord != first_coord) {
-            usage_map[coord].insert(opposite_orientation);
-          }
-          if (coord != second_coord) {
-            usage_map[coord].insert(orientation);
-          }
-        }
+    LayerCoord& first_coord = coord_segment.get_first()->value();
+    LayerCoord& second_coord = coord_segment.get_second()->value();
+    if (first_coord.get_layer_idx() != second_coord.get_layer_idx()) {
+      if (first_coord.get_planar_coord() != second_coord.get_planar_coord()) {
+        RTLOG.error(Loc::current(), "The via segment changes planar coordinates!");
       }
+      continue;
     }
-  }
-  std::vector<GridMap<ERNode>>& layer_node_map = er_model.get_layer_node_map();
-  for (auto& [usage_coord, orientation_list] : usage_map) {
-    ERNode& er_node = layer_node_map[usage_coord.get_layer_idx()][usage_coord.get_x()][usage_coord.get_y()];
-    er_node.updateDemand(curr_net_idx, orientation_list, change_type);
+    for (EREdge* edge : getLayerEdgeList(er_model, first_coord.get_layer_idx(), first_coord.get_planar_coord(), second_coord.get_planar_coord())) {
+      updateEdgeDemand(*edge, curr_net_idx, change_type, edge_set);
+    }
   }
 }
 
@@ -3277,19 +2997,21 @@ void EarlyRouter::printAccessSummary(ERModel& er_model)
 
 void EarlyRouter::printSupplySummary(ERModel& er_model)
 {
-  GridMap<ERTGCell>& ert_gcell_map = er_model.get_ert_gcell_map();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+  std::vector<GridMap<EREdge>>& layer_h_edge_map = er_model.get_layer_h_edge_map();
+  std::vector<GridMap<EREdge>>& layer_v_edge_map = er_model.get_layer_v_edge_map();
 
   std::map<int32_t, int32_t> routing_supply_map;
   int32_t total_supply = 0;
 
-  for (int32_t x = 0; x < ert_gcell_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < ert_gcell_map.get_y_size(); y++) {
-      for (auto& [routing_layer_idx, orient_supply_map] : ert_gcell_map[x][y].get_routing_orient_supply_map()) {
-        for (auto& [orient, supply] : orient_supply_map) {
-          // boundary_supply + internal_supply
-          routing_supply_map[routing_layer_idx] += (2 * supply);
-          total_supply += (2 * supply);
+  for (RoutingLayer& routing_layer : routing_layer_list) {
+    int32_t layer_idx = routing_layer.get_layer_idx();
+    for (GridMap<EREdge>* edge_map : {&layer_h_edge_map[layer_idx], &layer_v_edge_map[layer_idx]}) {
+      for (int32_t x = 0; x < edge_map->get_x_size(); x++) {
+        for (int32_t y = 0; y < edge_map->get_y_size(); y++) {
+          int32_t supply = (*edge_map)[x][y].get_supply();
+          routing_supply_map[layer_idx] += supply;
+          total_supply += supply;
         }
       }
     }
@@ -3319,14 +3041,12 @@ void EarlyRouter::printPlanarSummary(ERModel& er_model)
   double total_overflow = 0;
   double total_wire_length = 0;
 
-  GridMap<ERNode>& planar_node_map = er_model.get_planar_node_map();
-
-  for (int32_t x = 0; x < planar_node_map.get_x_size(); x++) {
-    for (int32_t y = 0; y < planar_node_map.get_y_size(); y++) {
-      double node_demand = planar_node_map[x][y].getDemand();
-      double node_overflow = planar_node_map[x][y].getOverflow();
-      total_demand += node_demand;
-      total_overflow += node_overflow;
+  for (GridMap<EREdge>* edge_map : {&er_model.get_planar_h_edge_map(), &er_model.get_planar_v_edge_map()}) {
+    for (int32_t x = 0; x < edge_map->get_x_size(); x++) {
+      for (int32_t y = 0; y < edge_map->get_y_size(); y++) {
+        total_demand += (*edge_map)[x][y].get_demand();
+        total_overflow += (*edge_map)[x][y].get_overflow();
+      }
     }
   }
   for (auto& [net_idx, segment_set] : er_model.get_net_global_result_map()) {
@@ -3356,6 +3076,14 @@ void EarlyRouter::printPlanarSummary(ERModel& er_model)
     summary_table << fort::header << "total_wire_length" << total_wire_length << fort::endr;
   }
   RTUTIL.printTableList({summary_table});
+  if (RTDM.getConfig().output_inter_result) {
+    std::ofstream* summary_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(RTDM.getConfig().er_temp_directory_path, "route_summary.csv"));
+    RTUTIL.pushStream(summary_csv_file, "metric,value\n");
+    RTUTIL.pushStream(summary_csv_file, "total_overflow,", total_overflow, "\n");
+    RTUTIL.pushStream(summary_csv_file, "total_wire_length,", total_wire_length, "\n");
+    RTUTIL.pushStream(summary_csv_file, "total_via_num,0\n");
+    RTUTIL.closeFileStream(summary_csv_file);
+  }
 }
 
 void EarlyRouter::printLayerSummary(ERModel& er_model)
@@ -3375,18 +3103,20 @@ void EarlyRouter::printLayerSummary(ERModel& er_model)
   std::map<int32_t, int32_t> cut_via_num_map;
   int32_t total_via_num = 0;
 
-  std::vector<GridMap<ERNode>>& layer_node_map = er_model.get_layer_node_map();
+  std::vector<GridMap<EREdge>>& layer_h_edge_map = er_model.get_layer_h_edge_map();
+  std::vector<GridMap<EREdge>>& layer_v_edge_map = er_model.get_layer_v_edge_map();
 
-  for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_node_map.size()); layer_idx++) {
-    GridMap<ERNode>& er_node_map = layer_node_map[layer_idx];
-    for (int32_t x = 0; x < er_node_map.get_x_size(); x++) {
-      for (int32_t y = 0; y < er_node_map.get_y_size(); y++) {
-        double node_demand = er_node_map[x][y].getDemand();
-        double node_overflow = er_node_map[x][y].getOverflow();
-        routing_demand_map[layer_idx] += node_demand;
-        total_demand += node_demand;
-        routing_overflow_map[layer_idx] += node_overflow;
-        total_overflow += node_overflow;
+  for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_h_edge_map.size()); layer_idx++) {
+    for (GridMap<EREdge>* edge_map : {&layer_h_edge_map[layer_idx], &layer_v_edge_map[layer_idx]}) {
+      for (int32_t x = 0; x < edge_map->get_x_size(); x++) {
+        for (int32_t y = 0; y < edge_map->get_y_size(); y++) {
+          int32_t demand = (*edge_map)[x][y].get_demand();
+          int32_t overflow = (*edge_map)[x][y].get_overflow();
+          routing_demand_map[layer_idx] += demand;
+          total_demand += demand;
+          routing_overflow_map[layer_idx] += overflow;
+          total_overflow += overflow;
+        }
       }
     }
   }
@@ -3463,6 +3193,14 @@ void EarlyRouter::printLayerSummary(ERModel& er_model)
     cut_via_num_map_table << fort::header << "Total" << total_via_num << RTUTIL.getPercentage(total_via_num, total_via_num) << fort::endr;
   }
   RTUTIL.printTableList({routing_demand_map_table, routing_overflow_map_table, routing_wire_length_map_table, cut_via_num_map_table});
+  if (RTDM.getConfig().output_inter_result) {
+    std::ofstream* summary_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(RTDM.getConfig().er_temp_directory_path, "route_summary.csv"));
+    RTUTIL.pushStream(summary_csv_file, "metric,value\n");
+    RTUTIL.pushStream(summary_csv_file, "total_overflow,", total_overflow, "\n");
+    RTUTIL.pushStream(summary_csv_file, "total_wire_length,", total_wire_length, "\n");
+    RTUTIL.pushStream(summary_csv_file, "total_via_num,", total_via_num, "\n");
+    RTUTIL.closeFileStream(summary_csv_file);
+  }
 }
 
 void EarlyRouter::printTrackSummary(ERModel& er_model)

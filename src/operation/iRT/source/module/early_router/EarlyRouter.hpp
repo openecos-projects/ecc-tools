@@ -51,6 +51,7 @@ class EarlyRouter
   EarlyRouter& operator=(EarlyRouter&& other) = delete;
   // function
   ERModel initERModel();
+  void initLayerEdgeMap(ERModel& er_model);
   std::vector<ERNet> convertToERNetList(std::vector<Net>& net_list);
   ERNet convertToERNet(Net& net);
   void setERComParam(ERModel& er_model, std::map<std::string, std::any> config_map);
@@ -70,11 +71,9 @@ class EarlyRouter
   EXTLayerRect getSearchRect(LayerCoord& first_coord, LayerCoord& second_coord);
   std::vector<LayerRect> getCrossingWireList(EXTLayerRect& search_rect);
   bool isAccess(LayerRect& wire, std::vector<PlanarRect>& obs_rect_list);
-  void buildIgnoreNet(ERModel& er_model);
-  void analyzeDemandUnit(ERModel& er_model);
-  void buildPlanarNodeMap(ERModel& er_model);
-  void buildPlanarNodeNeighbor(ERModel& er_model);
-  void buildPlanarOrientSupply(ERModel& er_model);
+  void buildPlanarEdgeMap(ERModel& er_model);
+  void clearLayerEdgeDemand(ERModel& er_model);
+  void checkEdgeDemand(ERModel& er_model, bool is_planar);
   void generateTopology(ERModel& er_model);
   void generateERTask(ERModel& er_model, ERNet* er_task);
   void initSinglePlanarTask(ERModel& er_model, ERNet* er_task);
@@ -88,34 +87,26 @@ class EarlyRouter
   std::vector<std::vector<Segment<PlanarCoord>>> getRoutingSegmentListByUPattern(ERModel& er_model, Segment<PlanarCoord>& planar_topo);
   std::vector<std::vector<Segment<PlanarCoord>>> getRoutingSegmentListByInner3Bends(ERModel& er_model, Segment<PlanarCoord>& planar_topo);
   std::vector<std::vector<Segment<PlanarCoord>>> getRoutingSegmentListByOuter3Bends(ERModel& er_model, Segment<PlanarCoord>& planar_topo);
+  std::vector<EREdge*> getPlanarEdgeList(ERModel& er_model, const PlanarCoord& first_coord, const PlanarCoord& second_coord);
+  double getEdgeCost(EREdge& edge, int32_t net_idx, double overflow_unit, bool& is_blocked);
   void updateERCandidate(ERModel& er_model, ERCandidate& er_candidate);
   MTree<PlanarCoord> getCoordTree(ERModel& er_model, std::vector<Segment<PlanarCoord>>& routing_segment_list);
   void uploadPlanarNetResult(ERModel& er_model, MTree<PlanarCoord>& coord_tree);
   void resetSinglePlanarTask(ERModel& er_model);
-  void buildLayerNodeMap(ERModel& er_model);
-  void buildLayerNodeNeighbor(ERModel& er_model);
-  void buildLayerOrientSupply(ERModel& er_model);
   void buildPlaneTree(ERModel& er_model);
   void assignLayer(ERModel& er_model);
   void assignERTask(ERModel& er_model, ERNet* er_task);
   void initSingleTask(ERModel& er_model, ERNet* er_task);
   bool needRouting(ERModel& er_model);
-  void spiltPlaneTree(ERModel& er_model);
-  void insertMidPoint(ERModel& er_model, TNode<LayerCoord>* planar_node, TNode<LayerCoord>* child_node);
   void buildPillarTree(ERModel& er_model);
   ERPillar convertERPillar(PlanarCoord& planar_coord, std::map<PlanarCoord, std::set<int32_t>, CmpPlanarCoordByXASC>& coord_pin_layer_map);
   void assignPillarTree(ERModel& er_model);
-  void assignForward(ERModel& er_model);
+  void buildSubtreeCost(ERModel& er_model);
+  double getPillarViaCost(ERModel& er_model, const std::set<int32_t>& layer_idx_set);
+  void selectPillarLayer(ERModel& er_model);
   std::vector<int32_t> getCandidateLayerList(ERModel& er_model, ERPackage& er_package);
-  double getFullViaCost(ERModel& er_model, std::set<int32_t>& layer_idx_set, int32_t candidate_layer_idx);
-  void buildLayerCost(ERModel& er_model, ERPackage& er_package);
-  std::pair<int32_t, double> getParentPillarCost(ERModel& er_model, ERPackage& er_package, int32_t candidate_layer_idx);
-  double getExtraViaCost(ERModel& er_model, std::set<int32_t>& layer_idx_set, int32_t candidate_layer_idx);
+  std::vector<EREdge*> getLayerEdgeList(ERModel& er_model, int32_t layer_idx, const PlanarCoord& first_coord, const PlanarCoord& second_coord);
   double getSegmentCost(ERModel& er_model, ERPackage& er_package, int32_t candidate_layer_idx);
-  double getChildPillarCost(ERModel& er_model, ERPackage& er_package, int32_t candidate_layer_idx);
-  void assignBackward(ERModel& er_model);
-  int32_t getBestLayerBySelf(TNode<ERPillar>* pillar_node);
-  int32_t getBestLayerByChild(TNode<ERPillar>* parent_pillar_node);
   void buildLayerTree(ERModel& er_model, ERNet* er_task);
   std::vector<Segment<LayerCoord>> getLayerRoutingSegmentList(ERModel& er_model);
   MTree<LayerCoord> getCoordTree(ERModel& er_model, std::vector<Segment<LayerCoord>>& routing_segment_list);
@@ -139,15 +130,14 @@ class EarlyRouter
   void outputGCellCSV(ERModel& er_model);
   void outputPlanarSupplyCSV(ERModel& er_model);
   void outputPlanarGuide(ERModel& er_model);
-  void outputPlanarNetCSV(ERModel& er_model);
   void outputPlanarOverflowCSV(ERModel& er_model);
   void outputLayerSupplyCSV(ERModel& er_model);
   void outputLayerGuide(ERModel& er_model);
-  void outputLayerNetCSV(ERModel& er_model);
   void outputLayerOverflowCSV(ERModel& er_model);
 #endif
 
 #if 1  // update env
+  void updateEdgeDemand(EREdge& edge, int32_t net_idx, ChangeType change_type, std::unordered_set<EREdge*>& edge_set);
   void updateDemandToGraph(ERModel& er_model, ChangeType change_type, MTree<PlanarCoord>& coord_tree);
   void updateDemandToGraph(ERModel& er_model, ChangeType change_type, MTree<LayerCoord>& coord_tree);
 #endif

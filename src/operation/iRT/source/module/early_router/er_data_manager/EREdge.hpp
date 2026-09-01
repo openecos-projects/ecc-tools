@@ -16,32 +16,31 @@
 // ***************************************************************************************
 #pragma once
 
-#include "ERLayerCost.hpp"
-#include "PlanarCoord.hpp"
+#include "RTHeader.hpp"
 
 namespace irt {
 
-class ERPillar
+class EREdge
 {
  public:
-  ERPillar() = default;
-  ~ERPillar() = default;
+  EREdge() = default;
+  ~EREdge() = default;
   // getter
-  PlanarCoord& get_planar_coord() { return _planar_coord; }
-  std::set<int32_t>& get_pin_layer_idx_set() { return _pin_layer_idx_set; }
-  std::vector<ERLayerCost>& get_layer_cost_list() { return _layer_cost_list; }
-  int32_t get_layer_idx() const { return _layer_idx; }
+  int32_t get_supply() const { return _supply; }
+  int32_t get_demand() const { return _demand; }
+  std::vector<int32_t>& get_demand_net_idx_list() { return _demand_net_idx_list; }
+  std::set<int32_t>& get_ignore_net_set() { return _ignore_net_set; }
+  int32_t get_overflow() const { return std::max(0, _demand - _supply); }
   // setter
-  void set_planar_coord(const PlanarCoord& planar_coord) { _planar_coord = planar_coord; }
-  void set_pin_layer_idx_set(const std::set<int32_t>& pin_layer_idx_set) { _pin_layer_idx_set = pin_layer_idx_set; }
-  void set_layer_cost_list(const std::vector<ERLayerCost>& layer_cost_list) { _layer_cost_list = layer_cost_list; }
-  void set_layer_idx(const int32_t layer_idx) { _layer_idx = layer_idx; }
-  // function
+  void set_supply(const int32_t supply) { _supply = supply; }
+  void set_demand(const int32_t demand) { _demand = demand; }
+  void set_ignore_net_set(const std::set<int32_t>& ignore_net_set) { _ignore_net_set = ignore_net_set; }
 
  private:
-  PlanarCoord _planar_coord;
-  std::set<int32_t> _pin_layer_idx_set;
-  std::vector<ERLayerCost> _layer_cost_list;
-  int32_t _layer_idx = -1;
+  int32_t _supply = 0;
+  int32_t _demand = 0;
+  std::vector<int32_t> _demand_net_idx_list;
+  std::set<int32_t> _ignore_net_set;
 };
+
 }  // namespace irt

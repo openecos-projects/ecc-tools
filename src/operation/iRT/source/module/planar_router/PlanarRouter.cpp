@@ -139,6 +139,7 @@ void PlanarRouter::generate()
   printSummary(pr_model);
   outputGuide(pr_model);
   outputNetCSV(pr_model);
+  outputOverflowCSV(pr_model);
   // outputUsageCSV(pr_model);
   // outputCongestionCostCSV(pr_model);
   RTDM.getDatabase().get_net_global_result_map() = std::move(pr_model.get_net_global_result_map());
@@ -1691,6 +1692,32 @@ void PlanarRouter::outputNetCSV(PRModel& pr_model)
       RTUTIL.pushStream(net_csv_file, "\n");
     }
     RTUTIL.closeFileStream(net_csv_file);
+  }
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void PlanarRouter::outputOverflowCSV(PRModel& pr_model)
+{
+  std::string& pr_temp_directory_path = RTDM.getConfig().pr_temp_directory_path;
+  int32_t output_inter_result = RTDM.getConfig().output_inter_result;
+  if (!output_inter_result) {
+    return;
+  }
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  for (std::pair<std::string, GridMap<RoutingEdge>*> edge_map_pair :
+       {std::make_pair("h_overflow_map.csv", &RTDM.getDatabase().get_planar_routing_h_edge_map()),
+        std::make_pair("v_overflow_map.csv", &RTDM.getDatabase().get_planar_routing_v_edge_map())}) {
+    std::ofstream* overflow_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(pr_temp_directory_path, edge_map_pair.first));
+    GridMap<RoutingEdge>& routing_edge_map = *edge_map_pair.second;
+    for (int32_t y = routing_edge_map.get_y_size() - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
+        RTUTIL.pushStream(overflow_csv_file, routing_edge_map[x][y].get_overflow(), ",");
+      }
+      RTUTIL.pushStream(overflow_csv_file, "\n");
+    }
+    RTUTIL.closeFileStream(overflow_csv_file);
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
