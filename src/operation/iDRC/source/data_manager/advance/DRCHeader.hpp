@@ -38,6 +38,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
 #include <experimental/source_location>
 #include <filesystem>
@@ -53,7 +54,9 @@
 #include <queue>
 #include <regex>
 #include <set>
+#include <span>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -62,6 +65,7 @@
 #include <unordered_set>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "../../../database/interaction/Boost.hpp"
 #include "libfort/fort.hpp"
