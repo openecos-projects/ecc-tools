@@ -47,6 +47,7 @@ struct HTreeSelectedSolution
   HTreeSelectionEngine engine = HTreeSelectionEngine::kDiscrete;
   CandidateBuildEvaluation evaluation;
   DepthSummary summary;
+  SinkLoadRegionLegalitySummary sink_load_region_legality;
   RootDriverCompensationStats compensation_stats;
   RootDriverCompensationDetail compensation_detail;
   std::string root_driver_clock_period_source;

@@ -58,13 +58,6 @@ auto normalizeBufferInputNodeId(const FastStaClockContext& context, FastStaNodeI
         return indexed->second;
       }
     }
-    return kInvalidFastStaNodeId;
-  }
-  for (FastStaNodeId candidate_id = 0U; candidate_id < context.nodes.size(); ++candidate_id) {
-    const auto& candidate = context.nodes.at(candidate_id);
-    if (candidate.kind == FastStaNodeKind::kBufferInput && candidate.inst_name == node.inst_name) {
-      return candidate_id;
-    }
   }
   return kInvalidFastStaNodeId;
 }
@@ -87,13 +80,6 @@ auto normalizeBufferOutputNodeId(const FastStaClockContext& context, FastStaNode
       if (output_node.kind == FastStaNodeKind::kBufferOutput && output_node.inst_name == node.inst_name) {
         return indexed->second;
       }
-    }
-    return kInvalidFastStaNodeId;
-  }
-  for (FastStaNodeId candidate_id = 0U; candidate_id < context.nodes.size(); ++candidate_id) {
-    const auto& candidate = context.nodes.at(candidate_id);
-    if (candidate.kind == FastStaNodeKind::kBufferOutput && candidate.inst_name == node.inst_name) {
-      return candidate_id;
     }
   }
   return kInvalidFastStaNodeId;

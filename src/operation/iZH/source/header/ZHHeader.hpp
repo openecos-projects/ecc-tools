@@ -59,6 +59,7 @@
 #include <unordered_set>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "../../../database/interaction/Boost.hpp"
 #include "libfort/fort.hpp"

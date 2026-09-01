@@ -194,12 +194,12 @@ bool NetWireEditAdapter::move_regular_segment(idb::IdbDesign& design, OwnerRef o
   committed_bbox = translate_rect(current_bbox, dx, dy);
 
   if (segment->is_rect()) {
-    auto* rect = segment->get_delta_rect();
-    if (rect == nullptr) {
+    /// the delta rect is an offset from the start point, so move the anchor and keep the offset
+    if (segment->get_delta_rect() == nullptr || segment->get_point_start() == nullptr) {
       return false;
     }
 
-    rect->set_rect(committed_bbox.lx, committed_bbox.ly, committed_bbox.hx, committed_bbox.hy);
+    translate_points(segment->get_point_list(), dx, dy);
     return true;
   }
 
@@ -229,11 +229,14 @@ bool NetWireEditAdapter::resize_regular_segment(idb::IdbDesign& design, OwnerRef
   requested_bbox = normalize(requested_bbox);
   if (segment->is_rect()) {
     auto* rect = segment->get_delta_rect();
-    if (rect == nullptr) {
+    auto* point_start = segment->get_point_start();
+    if (rect == nullptr || point_start == nullptr) {
       return false;
     }
 
-    rect->set_rect(requested_bbox.lx, requested_bbox.ly, requested_bbox.hx, requested_bbox.hy);
+    /// store the resize result as an offset from the start point
+    rect->set_rect(requested_bbox.lx - point_start->get_x(), requested_bbox.ly - point_start->get_y(),
+                   requested_bbox.hx - point_start->get_x(), requested_bbox.hy - point_start->get_y());
     committed_bbox = requested_bbox;
     if (auto* net = find_regular_net(design, owner.owner_id); net != nullptr) {
       net->set_bounding_box();

@@ -601,15 +601,8 @@ Shape LVSInterface::wrapShape(const int32_t layer_idx, idb::IdbRect idb_rect)
 
 idb::IdbRect LVSInterface::getPhysicalSegmentRect(idb::IdbRegularWireSegment* idb_segment)
 {
-  idb::IdbRect rect = idb_segment->get_segment_rect();
-  if (!idb_segment->is_rect()) {
-    return rect;
-  }
-  // DEF path RECT coordinates are offsets from the preceding path point.
-  if (idb::IdbCoordinate<int32_t>* point = idb_segment->get_point_start(); point != nullptr) {
-    rect.moveByStep(point->get_x(), point->get_y());
-  }
-  return rect;
+  // DEF path RECT coordinates are offsets from the preceding path point, resolved by get_segment_rect().
+  return idb_segment->get_segment_rect();
 }
 
 std::string LVSInterface::getTerminalName(idb::IdbPin* pin)

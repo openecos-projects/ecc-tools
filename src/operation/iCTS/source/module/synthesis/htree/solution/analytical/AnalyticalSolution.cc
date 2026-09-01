@@ -106,6 +106,7 @@ auto SelectAnalyticalHTreeSolution(HTreeSynthesisState& state) -> HTreeSelection
         .engine = htree::HTreeSelectionEngine::kAnalytical,
         .evaluation = selected_evaluation,
         .summary = selected_summary,
+        .sink_load_region_legality = analytical_attempt.selected_sink_load_region_legality,
         .compensation_stats = analytical_exploration.summary.root_driver_compensation_stats,
         .compensation_detail = analytical_attempt.selected_compensation_detail,
         .root_driver_clock_period_source = state.root_driver_clock_period_source,

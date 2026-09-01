@@ -208,9 +208,16 @@ IdbLayerRouting::IdbLayerRouting()
   _direction = IdbLayerDirection::kNone;
   _wire_extension = -1;
   _thickness = -1;
+  _height = -1;
   _resistance = -1;
   _capacitance = -1;
+  _edge_capacitance = -1;
   _area = -1;
+  _min_density = -1;
+  _max_density = -1;
+  _density_check_length = -1;
+  _density_check_width = -1;
+  _density_check_step = -1;
   _min_cut_num = -1;
   _min_cut_width = -1;
 
@@ -328,11 +335,8 @@ static IdbLayerSpacingTable* convertSpacingList(IdbLayerSpacingList* spacinglist
   parallel->set_parallel_length(0, 0);
   auto spacings = spacinglist->get_spacing_list();
   std::sort(spacings.begin(), spacings.end(), [](IdbLayerSpacing* la, IdbLayerSpacing* lb) {
-    if (la->isDefault()) {
-      return true;
-    }
-    if (lb->isDefault()) {
-      return false;
+    if (la->isDefault() != lb->isDefault()) {
+      return la->isDefault();
     }
     return la->get_min_width() < lb->get_min_width();
   });
