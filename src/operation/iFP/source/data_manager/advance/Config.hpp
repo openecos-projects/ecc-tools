@@ -19,8 +19,8 @@
 #include "DieMode.hpp"
 #include "FPHeader.hpp"
 #include "PGGlobalConnect.hpp"
-#include "PGRail.hpp"
 #include "PGLayerPair.hpp"
+#include "PGRail.hpp"
 #include "PGStripe.hpp"
 
 namespace ifp {
@@ -32,34 +32,34 @@ class Config
   ~Config() = default;
   /////////////////////////////////////////////
   // **********        FP         ********** //
-  std::string temp_directory_path;                  // required
-  int32_t thread_number;                            // optional
-  double macro_placement_halo;                      // optional
-  double macro_routing_halo;                        // optional
-  DieMode die_mode;                                 // optional
-  std::string die_site_name;                        // optional
-  double die_aspect_ratio;                          // optional
-  double die_utilization;                           // optional
-  double die_width_micron;                          // optional
-  double die_height_micron;                         // optional
-  double die_margin_left_micron;                    // optional
-  double die_margin_right_micron;                   // optional
-  double die_margin_top_micron;                     // optional
-  double die_margin_bottom_micron;                  // optional
-  std::vector<std::string> io_pin_layer_name_list;  // optional
-  std::vector<PGGlobalConnect> pg_connect_list;     // optional
-  std::vector<PGRail> pg_rail_list;                 // optional
-  std::vector<PGStripe> pg_stripe_list;             // optional
-  std::vector<PGLayerPair> pg_layer_pair_list;      // optional
-  std::string tapcell_name;                         // optional
-  double tap_distance_micron;                       // optional
-  std::string left_endcap_name;                     // optional
-  std::string right_endcap_name;                    // optional
-  std::vector<std::string> top_endcap_name_list;    // optional
-  std::vector<std::string> bottom_endcap_name_list; // optional
-  std::vector<std::string> top_boundary_tap_name_list;    // optional
-  std::vector<std::string> bottom_boundary_tap_name_list; // optional
-  double boundary_tap_rule_micron;                        // optional
+  std::string temp_directory_path;                         // required
+  int32_t thread_number;                                   // optional
+  double macro_placement_halo;                             // optional
+  double macro_routing_halo;                               // optional
+  DieMode die_mode;                                        // optional
+  std::string die_site_name;                               // optional
+  double die_aspect_ratio;                                 // optional
+  double die_utilization;                                  // optional
+  double die_width_micron;                                 // optional
+  double die_height_micron;                                // optional
+  double die_margin_left_micron;                           // optional
+  double die_margin_right_micron;                          // optional
+  double die_margin_top_micron;                            // optional
+  double die_margin_bottom_micron;                         // optional
+  std::vector<std::string> io_pin_layer_name_list;         // optional
+  std::vector<PGGlobalConnect> pg_connect_list;            // optional
+  std::vector<PGRail> pg_rail_list;                        // optional
+  std::vector<PGStripe> pg_stripe_list;                    // optional
+  std::vector<PGLayerPair> pg_layer_pair_list;             // optional
+  std::string tapcell_name;                                // optional
+  double tap_distance_micron;                              // optional
+  std::string left_endcap_name;                            // optional
+  std::string right_endcap_name;                           // optional
+  std::vector<std::string> top_endcap_name_list;           // optional
+  std::vector<std::string> bottom_endcap_name_list;        // optional
+  std::vector<std::string> top_boundary_tap_name_list;     // optional
+  std::vector<std::string> bottom_boundary_tap_name_list;  // optional
+  double boundary_tap_rule_micron;                         // optional
   /////////////////////////////////////////////
   // **********        FP         ********** //
   std::string log_file_path;  // building

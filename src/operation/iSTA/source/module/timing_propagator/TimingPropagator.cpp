@@ -79,7 +79,6 @@ void TimingPropagator::propagate()
 
 TimingPropagator* TimingPropagator::_tp_instance = nullptr;
 
-
 bool TimingPropagator::isDisableArc(Arc& arc)
 {
   return arc.get_is_disable_arc() || arc.get_is_loop_disable();
@@ -149,8 +148,7 @@ double TimingPropagator::getClockArrival(std::string& pin_name, AnalysisType ana
 
 double TimingPropagator::getClockArrival(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type)
 {
-  if (timing_point.get_clock_arrival_map().count(analysis_type) == 0
-      || timing_point.get_clock_arrival_map()[analysis_type].count(trans_type) == 0) {
+  if (timing_point.get_clock_arrival_map().count(analysis_type) == 0 || timing_point.get_clock_arrival_map()[analysis_type].count(trans_type) == 0) {
     return 0.0;
   }
   return timing_point.get_clock_arrival_map()[analysis_type][trans_type];
@@ -214,10 +212,8 @@ void TimingPropagator::seedDataSlew(std::string& start_point, AnalysisType analy
 {
   Database& database = STADM.getDatabase();
   TimingPoint& timing_point = database.get_timing_point_map()[start_point];
-  if (isSequentialClockPin(start_point)
-      && hasIncomingPhysicalSlewArc(start_point)
-      && (timing_point.get_clock_slew_map().count(analysis_type) == 0
-          || timing_point.get_clock_slew_map()[analysis_type].count(trans_type) == 0)) {
+  if (isSequentialClockPin(start_point) && hasIncomingPhysicalSlewArc(start_point)
+      && (timing_point.get_clock_slew_map().count(analysis_type) == 0 || timing_point.get_clock_slew_map()[analysis_type].count(trans_type) == 0)) {
     // A propagated divider or gated-clock path will provide the physical slew
     // through this net arc. Seeding zero here would win min-slew selection.
     return;
@@ -253,8 +249,8 @@ void TimingPropagator::propagateDataSlewDelayArc(std::size_t arc_idx, AnalysisTy
   }
 }
 
-void TimingPropagator::updateDataSlewDelay(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
-                                           TransType input_trans_type, TransType output_trans_type)
+void TimingPropagator::updateDataSlewDelay(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type, TransType input_trans_type,
+                                           TransType output_trans_type)
 {
   double input_slew = getDataSlew(source_point, analysis_type, input_trans_type);
   DCTask dc_task;
@@ -449,7 +445,6 @@ double TimingPropagator::getStartPointSlew(std::string& start_point, AnalysisTyp
   }
   return 0.0;
 }
-
 
 double TimingPropagator::getStartPointLaunchTime(std::string& start_point, AnalysisType analysis_type)
 {
@@ -682,8 +677,7 @@ void TimingPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisType a
   propagatePathStateArc(arc_idx, analysis_type, source_type, TransType::kFall);
 }
 
-void TimingPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisType analysis_type, PathSourceType source_type,
-                                             TransType input_trans_type)
+void TimingPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisType analysis_type, PathSourceType source_type, TransType input_trans_type)
 {
   Database& database = STADM.getDatabase();
   if (isDisableArc(database.get_arc_list()[arc_idx])) {
@@ -694,8 +688,8 @@ void TimingPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisType a
   }
 }
 
-void TimingPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisType analysis_type, PathSourceType source_type,
-                                             TransType input_trans_type, TransType output_trans_type)
+void TimingPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisType analysis_type, PathSourceType source_type, TransType input_trans_type,
+                                             TransType output_trans_type)
 {
   Database& database = STADM.getDatabase();
   Arc& arc = database.get_arc_list()[arc_idx];
@@ -772,7 +766,6 @@ double TimingPropagator::getArcDelay(Arc& arc, AnalysisType analysis_type, Trans
   }
   return getArcDelay(arc, analysis_type, input_trans_type);
 }
-
 
 bool TimingPropagator::hasPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type)
 {
