@@ -61,6 +61,7 @@ class IdbPropertyCutSpacing
   {
     _status = CutSpacingStatus::kNone;
     _center_to_center = false;
+    _cut_spacing = -1;
   }
   ~IdbPropertyCutSpacing() = default;
 
@@ -98,7 +99,7 @@ class IdbRuleCutSpacingList
   vector<IdbPropertyCutSpacing*>& get_spacing_list() { return _spacing_list; }
   IdbPropertyCutSpacing* get_spacing(int i)
   {
-    if (i > 0 && i < (int) _spacing_list.size()) {
+    if (i >= 0 && i < (int) _spacing_list.size()) {
       return _spacing_list[i];
     }
 

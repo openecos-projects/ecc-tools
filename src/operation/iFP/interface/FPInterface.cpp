@@ -19,15 +19,16 @@
 #include "DataManager.hpp"
 #include "DieBuilder.hpp"
 #include "IOPlacer.hpp"
+#include "IdbHalo.h"
+#include "IdbTerm.h"
+#include "IdbViaMaster.h"
+#include "IdbVias.h"
 #include "Logger.hpp"
 #include "MacroPlacer.hpp"
 #include "Monitor.hpp"
 #include "PDNGenerator.hpp"
 #include "PhyPlacer.hpp"
 #include "Utility.hpp"
-#include "IdbTerm.h"
-#include "IdbViaMaster.h"
-#include "IdbVias.h"
 #include "idm.h"
 
 namespace ifp {
@@ -133,6 +134,88 @@ void FPInterface::destroyFP()
 
 #endif
 
+#if 1  // debug iFP
+
+void FPInterface::debugInputMacro(std::map<std::string, std::any> config_map)
+{
+  std::string macro_place_file_path = FPUTIL.getConfigValue<std::string>(config_map, "-path", "");
+  if (macro_place_file_path.empty()) {
+    FPLOG.error(Loc::current(), "The macro placement file path is empty!");
+    return;
+  }
+
+  idb::IdbDesign* idb_design = dmInst->get_idb_design();
+  idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
+  if (idb_design == nullptr || idb_layout == nullptr) {
+    FPLOG.error(Loc::current(), "Failed to get the IDB design or layout!");
+    return;
+  }
+
+  int32_t micron_dbu = idb_design->get_units() == nullptr ? 0 : idb_design->get_units()->get_micron_dbu();
+  if (micron_dbu <= 0 && idb_layout->get_units() != nullptr) {
+    micron_dbu = idb_layout->get_units()->get_micron_dbu();
+  }
+  if (micron_dbu <= 0) {
+    FPLOG.error(Loc::current(), "Failed to get a valid micron DBU from IDB!");
+    return;
+  }
+
+  std::ifstream macro_place_file(macro_place_file_path);
+  if (!macro_place_file.is_open()) {
+    FPLOG.error(Loc::current(), "Failed to open macro placement file '", macro_place_file_path, "'!");
+    return;
+  }
+
+  int32_t placed_macro_num = 0;
+  int32_t skipped_macro_num = 0;
+  int32_t line_num = 0;
+  std::string line;
+  while (std::getline(macro_place_file, line)) {
+    ++line_num;
+    if (line.empty() || line[0] == '#') {
+      continue;
+    }
+
+    std::istringstream line_stream(line);
+    std::string instance_name;
+    double x_micron = 0.0;
+    double y_micron = 0.0;
+    std::string orient_name;
+    if (!(line_stream >> instance_name >> x_micron >> y_micron >> orient_name)) {
+      FPLOG.warn(Loc::current(), "Skip malformed macro placement at line ", line_num, " in '", macro_place_file_path, "'.");
+      ++skipped_macro_num;
+      continue;
+    }
+
+    idb::IdbInstance* idb_instance = idb_design->get_instance_list()->find_instance(instance_name);
+    if (idb_instance == nullptr) {
+      FPLOG.warn(Loc::current(), "Skip unknown macro '", instance_name, "' from line ", line_num, " in '", macro_place_file_path, "'.");
+      ++skipped_macro_num;
+      continue;
+    }
+    if (idb_instance->get_cell_master() == nullptr || !idb_instance->get_cell_master()->is_block()) {
+      FPLOG.warn(Loc::current(), "Skip non-block macro '", instance_name, "' from line ", line_num, " in '", macro_place_file_path,
+                 "'.");
+      ++skipped_macro_num;
+      continue;
+    }
+
+    int32_t x = FPUTIL.transMicronToDBU(x_micron, micron_dbu);
+    int32_t y = FPUTIL.transMicronToDBU(y_micron, micron_dbu);
+    if (!dmInst->placeInst(instance_name, x, y, orient_name, "", "", "fixed", false)) {
+      FPLOG.warn(Loc::current(), "Failed to place macro '", instance_name, "' from line ", line_num, " in '", macro_place_file_path,
+                 "'.");
+      ++skipped_macro_num;
+      continue;
+    }
+    ++placed_macro_num;
+  }
+
+  FPLOG.info(Loc::current(), "Placed ", placed_macro_num, " macros from '", macro_place_file_path, "'; skipped ", skipped_macro_num, ".");
+}
+
+#endif
+
 #endif
 
 #if 1  // FP调用外部的API
@@ -152,7 +235,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   Config& config = FPDM.getConfig();
   config.temp_directory_path = "./fp_temp_directory";
   config.thread_number = 128;
-  config.macro_place_file_path = "";
   config.macro_placement_halo = -1.0;
   config.macro_routing_halo = -1.0;
   config.die_mode = DieMode::kNone;
@@ -191,13 +273,10 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   std::filesystem::path config_directory_path = config_file_path.parent_path();
 
   nlohmann::json& ifp_json = config_json["ifp"];
-  config.temp_directory_path
-      = FPUTIL.getAbsolutePath(config_directory_path, ifp_json["temp_directory_path"].get<std::string>());
+  config.temp_directory_path = FPUTIL.getAbsolutePath(config_directory_path, ifp_json["temp_directory_path"].get<std::string>());
   config.thread_number = std::max(ifp_json["thread_number"].get<int32_t>(), 1);
 
   nlohmann::json& macro_placer_json = config_json["macro_placer"];
-  config.macro_place_file_path
-      = FPUTIL.getAbsolutePath(config_directory_path, macro_placer_json["macro_location_path"].get<std::string>());
   config.macro_placement_halo = macro_placer_json["macro_placement_halo"].get<double>();
   config.macro_routing_halo = macro_placer_json["macro_routing_halo"].get<double>();
 
@@ -290,7 +369,6 @@ void FPInterface::wrapDatabase()
   wrapRoutingLayerList();
   wrapInstanceList();
   wrapNetList();
-  wrapMacroPlacement();
   wrapIOPinList();
 }
 
@@ -509,141 +587,6 @@ void FPInterface::wrapNetList()
   }
 }
 
-void FPInterface::wrapMacroPlacement()
-{
-  if (FPDM.getConfig().macro_place_file_path.empty()) {
-    return;
-  }
-
-  std::ifstream* macro_place_file = FPUTIL.getInputFileStream(FPDM.getConfig().macro_place_file_path);
-  std::string line;
-  while (std::getline(*macro_place_file, line)) {
-    if (line.empty() || line[0] == '#') {
-      continue;
-    }
-
-    std::istringstream line_stream(line);
-    std::string instance_name;
-    double x_micron = -1.0;
-    double y_micron = -1.0;
-    std::string orient_name;
-    line_stream >> instance_name >> x_micron >> y_micron >> orient_name;
-    for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
-      if (!instance.get_macro() || instance.get_name() != instance_name) {
-        continue;
-      }
-      wrapMacroPlacement(instance, x_micron, y_micron, GetPlacementOrientationByName()(orient_name));
-      break;
-    }
-  }
-  FPUTIL.closeFileStream(macro_place_file);
-}
-
-void FPInterface::wrapMacroPlacement(Instance& instance, double x_micron, double y_micron, PlacementOrientation orient)
-{
-  int32_t x = FPUTIL.transMicronToDBU(x_micron, FPDM.getDatabase().get_micron_dbu());
-  int32_t y = FPUTIL.transMicronToDBU(y_micron, FPDM.getDatabase().get_micron_dbu());
-  int32_t bounding_width = instance.get_width();
-  int32_t bounding_height = instance.get_height();
-  if (orient == PlacementOrientation::kW || orient == PlacementOrientation::kE || orient == PlacementOrientation::kFE
-      || orient == PlacementOrientation::kFW) {
-    std::swap(bounding_width, bounding_height);
-  }
-
-  instance.set_coord(x, y);
-  instance.set_orient(orient);
-  instance.set_bounding_rect(x, y, x + bounding_width, y + bounding_height);
-  for (InstancePinShape& pin_shape : instance.get_pin_shape_list()) {
-    int32_t ll_x = pin_shape.get_ll_x();
-    int32_t ll_y = pin_shape.get_ll_y();
-    int32_t ur_x = pin_shape.get_ur_x();
-    int32_t ur_y = pin_shape.get_ur_y();
-    int32_t transformed_ll_x = ll_x;
-    int32_t transformed_ll_y = ll_y;
-    int32_t transformed_ur_x = ur_x;
-    int32_t transformed_ur_y = ur_y;
-    switch (orient) {
-      case PlacementOrientation::kW:
-        transformed_ll_x = instance.get_height() - ur_y;
-        transformed_ll_y = ll_x;
-        transformed_ur_x = instance.get_height() - ll_y;
-        transformed_ur_y = ur_x;
-        break;
-      case PlacementOrientation::kS:
-        transformed_ll_x = instance.get_width() - ur_x;
-        transformed_ll_y = instance.get_height() - ur_y;
-        transformed_ur_x = instance.get_width() - ll_x;
-        transformed_ur_y = instance.get_height() - ll_y;
-        break;
-      case PlacementOrientation::kE:
-        transformed_ll_x = ll_y;
-        transformed_ll_y = instance.get_width() - ur_x;
-        transformed_ur_x = ur_y;
-        transformed_ur_y = instance.get_width() - ll_x;
-        break;
-      case PlacementOrientation::kFN:
-        transformed_ll_x = instance.get_width() - ur_x;
-        transformed_ur_x = instance.get_width() - ll_x;
-        break;
-      case PlacementOrientation::kFE:
-        transformed_ll_x = instance.get_height() - ur_y;
-        transformed_ll_y = instance.get_width() - ur_x;
-        transformed_ur_x = instance.get_height() - ll_y;
-        transformed_ur_y = instance.get_width() - ll_x;
-        break;
-      case PlacementOrientation::kFS:
-        transformed_ll_y = instance.get_height() - ur_y;
-        transformed_ur_y = instance.get_height() - ll_y;
-        break;
-      case PlacementOrientation::kFW:
-        transformed_ll_x = ll_y;
-        transformed_ll_y = ll_x;
-        transformed_ur_x = ur_y;
-        transformed_ur_y = ur_x;
-        break;
-      default:
-        break;
-    }
-    pin_shape.set_rect(x + transformed_ll_x, y + transformed_ll_y, x + transformed_ur_x, y + transformed_ur_y);
-  }
-  instance.set_fixed(true);
-  instance.set_cover(false);
-  instance.set_placed(true);
-  instance.set_placement_updated(true);
-  wrapMacroNetPinList(instance);
-}
-
-void FPInterface::wrapMacroNetPinList(Instance& instance)
-{
-  for (Net& net : FPDM.getDatabase().get_net_list()) {
-    for (NetPin& net_pin : net.get_net_pin_list()) {
-      if (net_pin.get_io() || net_pin.get_instance_name() != instance.get_name()) {
-        continue;
-      }
-      int32_t ll_x = INT32_MAX;
-      int32_t ll_y = INT32_MAX;
-      int32_t ur_x = INT32_MIN;
-      int32_t ur_y = INT32_MIN;
-      bool pin_shape_exist = false;
-      for (InstancePinShape& pin_shape : instance.get_pin_shape_list()) {
-        if (pin_shape.get_pin_name() != net_pin.get_pin_name()) {
-          continue;
-        }
-        ll_x = std::min(ll_x, pin_shape.get_ll_x());
-        ll_y = std::min(ll_y, pin_shape.get_ll_y());
-        ur_x = std::max(ur_x, pin_shape.get_ur_x());
-        ur_y = std::max(ur_y, pin_shape.get_ur_y());
-        pin_shape_exist = true;
-      }
-      if (!pin_shape_exist) {
-        continue;
-      }
-      net_pin.set_coord((ll_x + ur_x) / 2, (ll_y + ur_y) / 2);
-      net_pin.set_placed(true);
-    }
-  }
-}
-
 void FPInterface::wrapIOPinList()
 {
   std::vector<IOPin>& io_pin_list = FPDM.getDatabase().get_io_pin_list();
@@ -690,6 +633,8 @@ void FPInterface::output()
   outputIOPinList();
   outputIOInstancePlacement();
   outputMacroPlacement();
+  outputMacroHalo();
+  outputMacroRouteHalo();
   outputNewInstanceList();
   outputPGSegmentList();
 }
@@ -941,6 +886,109 @@ void FPInterface::outputMacroPlacement()
   }
 }
 
+void FPInterface::outputMacroHalo()
+{
+  idb::IdbInstanceList* idb_instance_list = dmInst->get_idb_design()->get_instance_list();
+  for (const Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (!instance.get_macro() || !instance.get_placed()) {
+      continue;
+    }
+
+    const PlanarRect& macro_rect = instance.get_bounding_rect();
+    const PlanarRect& halo_rect = instance.get_placement_halo_rect();
+    int32_t extend_left = macro_rect.get_ll_x() - halo_rect.get_ll_x();
+    int32_t extend_bottom = macro_rect.get_ll_y() - halo_rect.get_ll_y();
+    int32_t extend_right = halo_rect.get_ur_x() - macro_rect.get_ur_x();
+    int32_t extend_top = halo_rect.get_ur_y() - macro_rect.get_ur_y();
+    if (extend_left < 0 || extend_bottom < 0 || extend_right < 0 || extend_top < 0) {
+      FPLOG.error(Loc::current(), "The placement halo of macro '", instance.get_name(), "' does not enclose the macro!");
+      continue;
+    }
+
+    idb::IdbInstance* idb_instance = idb_instance_list->find_instance(instance.get_name());
+    if (idb_instance == nullptr) {
+      FPLOG.error(Loc::current(), "Failed to find macro '", instance.get_name(), "' in IDB when outputting its placement halo!");
+      continue;
+    }
+
+    idb::IdbHalo* idb_halo = idb_instance->get_halo();
+    if (idb_halo == nullptr) {
+      idb_halo = idb_instance->set_halo();
+    }
+    idb_halo->set_soft(false);
+    idb_halo->set_extend_lef(extend_left);
+    idb_halo->set_extend_bottom(extend_bottom);
+    idb_halo->set_extend_right(extend_right);
+    idb_halo->set_extend_top(extend_top);
+    idb_instance->set_halo_coodinate();
+  }
+}
+
+void FPInterface::outputMacroRouteHalo()
+{
+  Config& config = FPDM.getConfig();
+  if (config.macro_routing_halo < 0) {
+    return;
+  }
+
+  idb::IdbLayers* idb_layer_list = dmInst->get_idb_layout()->get_layers();
+  idb::IdbLayer* bottom_layer = idb_layer_list->get_bottom_routing_layer();
+  if (bottom_layer == nullptr) {
+    FPLOG.error(Loc::current(), "Failed to determine the bottom routing layer for macro route halos!");
+    return;
+  }
+
+  idb::IdbInstanceList* idb_instance_list = dmInst->get_idb_design()->get_instance_list();
+  for (const Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (!instance.get_macro() || !instance.get_placed()) {
+      continue;
+    }
+
+    const PlanarRect& macro_rect = instance.get_bounding_rect();
+    const PlanarRect& halo_rect = instance.get_routing_halo_rect();
+    int32_t extend_left = macro_rect.get_ll_x() - halo_rect.get_ll_x();
+    int32_t extend_bottom = macro_rect.get_ll_y() - halo_rect.get_ll_y();
+    int32_t extend_right = halo_rect.get_ur_x() - macro_rect.get_ur_x();
+    int32_t extend_top = halo_rect.get_ur_y() - macro_rect.get_ur_y();
+    if (extend_left < 0 || extend_left != extend_bottom || extend_left != extend_right || extend_left != extend_top) {
+      FPLOG.error(Loc::current(), "The routing halo of macro '", instance.get_name(), "' is invalid or asymmetric!");
+      continue;
+    }
+
+    idb::IdbInstance* idb_instance = idb_instance_list->find_instance(instance.get_name());
+    if (idb_instance == nullptr) {
+      FPLOG.error(Loc::current(), "Failed to find macro '", instance.get_name(), "' in IDB when outputting its route halo!");
+      continue;
+    }
+
+    idb::IdbCellMaster* cell_master = idb_instance->get_cell_master();
+    if (cell_master == nullptr) {
+      FPLOG.error(Loc::current(), "The macro '", instance.get_name(), "' has no cell master when outputting its route halo!");
+      continue;
+    }
+    idb::IdbLayer* top_layer = cell_master->get_top_layer();
+    for (idb::IdbLayerShape* obs_shape : idb_instance->get_obs_box_list()) {
+      idb::IdbLayer* obs_layer = obs_shape == nullptr ? nullptr : obs_shape->get_layer();
+      if (obs_layer != nullptr && obs_layer->is_routing()
+          && (top_layer == nullptr || top_layer->get_order() < obs_layer->get_order())) {
+        top_layer = obs_layer;
+      }
+    }
+    if (top_layer == nullptr || !top_layer->is_routing() || top_layer->get_order() < bottom_layer->get_order()) {
+      FPLOG.error(Loc::current(), "Failed to determine a valid top routing layer for macro '", instance.get_name(), "'!");
+      continue;
+    }
+
+    idb::IdbRouteHalo* idb_route_halo = idb_instance->get_route_halo();
+    if (idb_route_halo == nullptr) {
+      idb_route_halo = idb_instance->set_route_halo();
+    }
+    idb_route_halo->set_route_distance(extend_left);
+    idb_route_halo->set_layer_bottom(bottom_layer);
+    idb_route_halo->set_layer_top(top_layer);
+  }
+}
+
 void FPInterface::outputNewInstanceList()
 {
   for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
@@ -951,8 +999,8 @@ void FPInterface::outputNewInstanceList()
     if (orient == idb::IdbOrient::kNone) {
       orient = idb::IdbOrient::kN_R0;
     }
-    dmInst->createInstance(instance.get_name(), instance.get_master_name(), instance.get_x(), instance.get_y(), orient,
-                           idb::IdbInstanceType::kDist, idb::IdbPlacementStatus::kFixed);
+    dmInst->createInstance(instance.get_name(), instance.get_master_name(), instance.get_x(), instance.get_y(), orient, idb::IdbInstanceType::kDist,
+                           idb::IdbPlacementStatus::kFixed);
     instance.set_new_instance(false);
   }
 }
@@ -993,8 +1041,7 @@ void FPInterface::outputPGSegmentList()
     idb_segment->set_layer_as_new();
     idb_segment->set_layer(idb_layer);
     idb_segment->set_route_width(pg_segment.get_width());
-    idb_segment->set_shape_type(pg_segment.get_type() == PGSegmentType::kFollowPin ? idb::IdbWireShapeType::kFollowPin
-                                                                                   : idb::IdbWireShapeType::kStripe);
+    idb_segment->set_shape_type(pg_segment.get_type() == PGSegmentType::kFollowPin ? idb::IdbWireShapeType::kFollowPin : idb::IdbWireShapeType::kStripe);
     idb_segment->add_point(pg_segment.get_start_x(), pg_segment.get_start_y());
     idb_segment->add_point(pg_segment.get_end_x(), pg_segment.get_end_y());
     idb_segment->set_bounding_box();
@@ -1039,25 +1086,23 @@ void FPInterface::adjustPGLineSegmentListByViaEnclosure()
       }
       idb::IdbLayerShape idb_bottom_layer_shape = idb_via->get_bottom_layer_shape();
       idb::IdbRect idb_bottom_enclosure = idb_bottom_layer_shape.get_bounding_box();
-      adjustLineSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment,
-          idb_bottom_layer_shape.get_layer()->get_name(),
+      adjustLineSegmentListByViaEnclosure(
+          pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, idb_bottom_layer_shape.get_layer()->get_name(),
           pg_segment.get_start_x() + idb_bottom_enclosure.get_low_x(), pg_segment.get_start_y() + idb_bottom_enclosure.get_low_y(),
           pg_segment.get_start_x() + idb_bottom_enclosure.get_high_x(), pg_segment.get_start_y() + idb_bottom_enclosure.get_high_y());
 
       idb::IdbLayerShape idb_top_layer_shape = idb_via->get_top_layer_shape();
       idb::IdbRect idb_top_enclosure = idb_top_layer_shape.get_bounding_box();
-      adjustLineSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment,
-          idb_top_layer_shape.get_layer()->get_name(),
-          pg_segment.get_start_x() + idb_top_enclosure.get_low_x(), pg_segment.get_start_y() + idb_top_enclosure.get_low_y(),
-          pg_segment.get_start_x() + idb_top_enclosure.get_high_x(), pg_segment.get_start_y() + idb_top_enclosure.get_high_y());
+      adjustLineSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, idb_top_layer_shape.get_layer()->get_name(),
+                                          pg_segment.get_start_x() + idb_top_enclosure.get_low_x(), pg_segment.get_start_y() + idb_top_enclosure.get_low_y(),
+                                          pg_segment.get_start_x() + idb_top_enclosure.get_high_x(), pg_segment.get_start_y() + idb_top_enclosure.get_high_y());
     }
   }
 }
 
 idb::IdbVia* FPInterface::getIDBVia(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment)
 {
-  std::string via_name
-      = idb_cut_layer->get_name() + "_" + std::to_string(pg_segment.get_via_width()) + "x" + std::to_string(pg_segment.get_via_height());
+  std::string via_name = idb_cut_layer->get_name() + "_" + std::to_string(pg_segment.get_via_width()) + "x" + std::to_string(pg_segment.get_via_height());
   idb::IdbVia* idb_via = dmInst->get_idb_design()->get_via_list()->find_via(via_name);
   if (idb_via == nullptr) {
     idb_via = buildIDBVia(via_name, idb_cut_layer, pg_segment);
@@ -1187,18 +1232,16 @@ std::pair<int32_t, int32_t> FPInterface::getIDBViaRowCol(idb::IdbLayerCut* idb_c
 }
 
 void FPInterface::adjustLineSegmentListByViaEnclosure(
-    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map,
-    PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
-    int32_t enclosure_ur_y)
+    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map, PGSegment& pg_segment,
+    std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y)
 {
-  adjustStripeSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, layer_name, enclosure_ll_x,
-                                        enclosure_ll_y, enclosure_ur_x, enclosure_ur_y);
+  adjustStripeSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, layer_name, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x,
+                                        enclosure_ur_y);
 }
 
 bool FPInterface::adjustStripeSegmentListByViaEnclosure(
-    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_line_segment_list_map,
-    PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
-    int32_t enclosure_ur_y)
+    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_line_segment_list_map, PGSegment& pg_segment,
+    std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y)
 {
   std::string pg_net_layer_key = FPUTIL.getString(pg_segment.get_net_name(), "|", layer_name);
   std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>::iterator pg_net_layer_map_iter
@@ -1209,28 +1252,26 @@ bool FPInterface::adjustStripeSegmentListByViaEnclosure(
 
   bool covered = false;
   std::map<int32_t, std::vector<PGSegment*>>& coord_to_line_segment_list_map = pg_net_layer_map_iter->second;
-  std::map<int32_t, std::vector<PGSegment*>>::iterator x_coord_iter
-      = coord_to_line_segment_list_map.find(pg_segment.get_start_x());
+  std::map<int32_t, std::vector<PGSegment*>>::iterator x_coord_iter = coord_to_line_segment_list_map.find(pg_segment.get_start_x());
   if (x_coord_iter != coord_to_line_segment_list_map.end()) {
     covered = adjustLineSegmentByViaEnclosure(x_coord_iter->second, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x, enclosure_ur_y);
   }
-  std::map<int32_t, std::vector<PGSegment*>>::iterator y_coord_iter
-      = coord_to_line_segment_list_map.find(pg_segment.get_start_y());
+  std::map<int32_t, std::vector<PGSegment*>>::iterator y_coord_iter = coord_to_line_segment_list_map.find(pg_segment.get_start_y());
   if (y_coord_iter != coord_to_line_segment_list_map.end()) {
     covered = adjustLineSegmentByViaEnclosure(y_coord_iter->second, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x, enclosure_ur_y) || covered;
   }
   return covered;
 }
 
-bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_segment_list, int32_t enclosure_ll_x,
-                                                   int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y)
+bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_segment_list, int32_t enclosure_ll_x, int32_t enclosure_ll_y,
+                                                  int32_t enclosure_ur_x, int32_t enclosure_ur_y)
 {
   bool covered = false;
   for (PGSegment* line_segment : line_segment_list) {
     int32_t half_width = line_segment->get_width() / 2;
     if (line_segment->is_vertical()) {
-      if (enclosure_ll_x < line_segment->get_ll_x() || line_segment->get_ur_x() < enclosure_ur_x
-          || line_segment->get_ur_y() < enclosure_ll_y || enclosure_ur_y < line_segment->get_ll_y()) {
+      if (enclosure_ll_x < line_segment->get_ll_x() || line_segment->get_ur_x() < enclosure_ur_x || line_segment->get_ur_y() < enclosure_ll_y
+          || enclosure_ur_y < line_segment->get_ll_y()) {
         continue;
       }
       if (line_segment->get_start_y() <= line_segment->get_end_y()) {
@@ -1250,8 +1291,8 @@ bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_
       }
       covered = (enclosure_ll_y >= line_segment->get_ll_y() && line_segment->get_ur_y() >= enclosure_ur_y) || covered;
     } else if (line_segment->is_horizontal()) {
-      if (enclosure_ll_y < line_segment->get_ll_y() || line_segment->get_ur_y() < enclosure_ur_y
-          || line_segment->get_ur_x() < enclosure_ll_x || enclosure_ur_x < line_segment->get_ll_x()) {
+      if (enclosure_ll_y < line_segment->get_ll_y() || line_segment->get_ur_y() < enclosure_ur_y || line_segment->get_ur_x() < enclosure_ll_x
+          || enclosure_ur_x < line_segment->get_ll_x()) {
         continue;
       }
       if (line_segment->get_start_x() <= line_segment->get_end_x()) {

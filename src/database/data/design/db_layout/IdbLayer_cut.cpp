@@ -66,6 +66,8 @@ IdbLayerCutEnclosure::~IdbLayerCutEnclosure()
 IdbLayerCutArraySpacing::IdbLayerCutArraySpacing()
 {
   _cut_spacing = -1;
+  _is_long_array = false;
+  _num_array_cut = 0;
 }
 
 IdbLayerCutArraySpacing::~IdbLayerCutArraySpacing()
@@ -76,7 +78,7 @@ IdbLayerCutArraySpacing::~IdbLayerCutArraySpacing()
 
 bool IdbLayerCutArraySpacing::set_array_value(int32_t index, int32_t array_cut, int32_t array_spacing)
 {
-  if ((static_cast<int>(_array_cut_list.size()) >= index) && (index >= 0)) {
+  if ((static_cast<int>(_array_cut_list.size()) > index) && (index >= 0)) {
     IdbArrayCut array_cut_new;
     array_cut_new._array_cut = array_cut;
     array_cut_new._array_spacing = array_spacing;

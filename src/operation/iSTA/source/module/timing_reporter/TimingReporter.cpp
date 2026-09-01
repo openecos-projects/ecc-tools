@@ -93,57 +93,14 @@ std::string stableTimingPathId(const std::string& value)
   return stream.str();
 }
 
-std::string normalizeTimingReportOption(std::string value)
-{
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-  std::replace(value.begin(), value.end(), '-', '_');
-  return value;
-}
-
 std::vector<DelayType> getReportDelayTypeList()
 {
-  const std::string delay_type = normalizeTimingReportOption(STADM.getConfig().timing_report_delay_type);
-  if (delay_type == "max" || delay_type == "setup" || delay_type.empty()) {
-    return {DelayType::kMax};
-  }
-  if (delay_type == "min" || delay_type == "hold") {
-    return {DelayType::kMin};
-  }
-  if (delay_type == "max_min" || delay_type == "min_max" || delay_type == "all") {
-    return {DelayType::kMax, DelayType::kMin};
-  }
-
-  STALOG.warn(Loc::current(), "Unrecognized timing report delay_type='", STADM.getConfig().timing_report_delay_type,
-              "', use default 'max'.");
-  return {DelayType::kMax};
+  return {DelayType::kMax, DelayType::kMin};
 }
 
 std::vector<StartEndType> getReportStartEndTypeList()
 {
-  const std::string start_end_type = normalizeTimingReportOption(STADM.getConfig().timing_report_start_end_type);
-  if (start_end_type.empty() || start_end_type == "all" || start_end_type == "none") {
-    return {StartEndType::kNone};
-  }
-  if (start_end_type == "all_separate" || start_end_type == "separate") {
-    return {StartEndType::kInToOut, StartEndType::kInToReg, StartEndType::kRegToOut, StartEndType::kRegToReg};
-  }
-  if (start_end_type == "in_to_out" || start_end_type == "in2out") {
-    return {StartEndType::kInToOut};
-  }
-  if (start_end_type == "in_to_reg" || start_end_type == "in2reg") {
-    return {StartEndType::kInToReg};
-  }
-  if (start_end_type == "reg_to_out" || start_end_type == "reg2out") {
-    return {StartEndType::kRegToOut};
-  }
-  if (start_end_type == "reg_to_reg" || start_end_type == "reg2reg") {
-    return {StartEndType::kRegToReg};
-  }
-
-  STALOG.warn(Loc::current(), "Unrecognized timing report start_end_type='",
-              STADM.getConfig().timing_report_start_end_type, "', use default 'all'.");
-  return {StartEndType::kNone};
+  return {StartEndType::kInToOut, StartEndType::kInToReg, StartEndType::kRegToOut, StartEndType::kRegToReg};
 }
 
 bool hasImplicitReportSlackLesserThan()
@@ -1158,7 +1115,7 @@ std::size_t TimingReporter::getTimingLineLabelWidth(TimingPath& timing_path, Del
   std::size_t label_width = 35;
   std::string clock_name = getClockName(timing_path);
   updateTimingLineLabelWidth(label_width, STAUTIL.getString("clock ", clock_name, " (rise edge)"));
-  updateTimingLineLabelWidth(label_width, "clock network delay (propagated)");
+  updateTimingLineLabelWidth(label_width, getClockNetworkDelayLabel(timing_path));
 
   std::string start_clock_pin = getStartClockPin(timing_path);
   if (!start_clock_pin.empty() && start_clock_pin != timing_path.get_start_point()) {
@@ -1209,7 +1166,7 @@ bool TimingReporter::shouldOutputTimingPoint(TimingPath& timing_path, TimingPath
   return pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout;
 }
 
-void TimingReporter::updateTimingLineLabelWidth(std::size_t& label_width, std::string label)
+void TimingReporter::updateTimingLineLabelWidth(std::size_t& label_width, std::string_view label)
 {
   label_width = std::max(label_width, label.length());
 }
@@ -1228,12 +1185,12 @@ void TimingReporter::outputLaunchClockInfo(std::ofstream* report_file, TimingPat
   double launch_time = timing_path.get_launch_time();
   double launch_clock_network_delay = timing_path.get_launch_clock_network_delay();
   double launch_clock_edge = isClockSourceStartPoint(timing_path.get_start_point()) ? launch_time : 0.0;
-  outputTimingLine(report_file, STAUTIL.getString("clock ", clock_name, " (", getLaunchClockEdgeText(timing_path, delay_type), " edge)"),
-                   launch_clock_edge, launch_clock_edge, true, "", label_width);
+  outputTimingLine(report_file, STAUTIL.getString("clock ", clock_name, " (", getLaunchClockEdgeText(timing_path, delay_type), " edge)"), launch_clock_edge,
+                   launch_clock_edge, true, "", label_width);
   if (isClockSourceStartPoint(timing_path.get_start_point())) {
     outputTimingLine(report_file, "clock source latency", 0.0, launch_time, true, "", label_width);
   } else {
-    outputTimingLine(report_file, "clock network delay (propagated)", launch_clock_network_delay, launch_time, true, "", label_width);
+    outputTimingLine(report_file, getClockNetworkDelayLabel(timing_path), launch_clock_network_delay, launch_time, true, "", label_width);
   }
 
   std::string start_clock_pin = getStartClockPin(timing_path);
@@ -1259,7 +1216,7 @@ std::string TimingReporter::getLaunchClockEdgeText(TimingPath& timing_path, Dela
   return GetTransTypeName()(TransType::kRise);
 }
 
-void TimingReporter::outputTimingLine(std::ofstream* report_file, std::string label, double incr, double path, bool has_incr, std::string transition,
+void TimingReporter::outputTimingLine(std::ofstream* report_file, std::string_view label, double incr, double path, bool has_incr, std::string transition,
                                       std::size_t label_width)
 {
   if (has_incr) {
@@ -1292,6 +1249,18 @@ std::string TimingReporter::getClockName(TimingPath& timing_path)
   return "clk";
 }
 
+std::string_view TimingReporter::getClockNetworkDelayLabel(TimingPath& timing_path)
+{
+  Database& database = STADM.getDatabase();
+  std::string clock_name = getClockName(timing_path);
+  const auto& clock_map = database.get_timing_constraint().get_clock_map();
+  auto clock_it = clock_map.find(clock_name);
+  const bool is_propagated = clock_it != clock_map.end() && clock_it->second.get_is_propagated();
+  constexpr std::string_view ideal{"clock network delay (ideal)"};
+  constexpr std::string_view propagated{"clock network delay (propagated)"};
+  return is_propagated ? propagated : ideal;
+}
+
 double TimingReporter::getClockPeriod(std::string& clock_name)
 {
   Database& database = STADM.getDatabase();
@@ -1303,6 +1272,17 @@ double TimingReporter::getClockPeriod(std::string& clock_name)
     return clock_map.begin()->second.get_period();
   }
   return 0.0;
+}
+
+double TimingReporter::getClockUncertainty(std::string& clock_name, DelayType delay_type)
+{
+  Database& database = STADM.getDatabase();
+  auto& clock_map = database.get_timing_constraint().get_clock_map();
+  auto clock_it = clock_map.find(clock_name);
+  if (clock_it == clock_map.end()) {
+    return 0.0;
+  }
+  return delay_type == DelayType::kMin ? clock_it->second.get_hold_uncertainty() : clock_it->second.get_setup_uncertainty();
 }
 
 double TimingReporter::getInputDelay(TimingPath& timing_path, DelayType delay_type)
@@ -1395,11 +1375,20 @@ void TimingReporter::outputRequiredClockInfo(std::ofstream* report_file, TimingP
   double clock_edge = delay_type == DelayType::kMin ? 0.0 : getClockPeriod(clock_name);
   double capture_clock_network_delay = timing_path.get_capture_clock_network_delay();
   outputTimingLine(report_file, STAUTIL.getString("clock ", clock_name, " (rise edge)"), clock_edge, clock_edge, true, "", label_width);
-  outputTimingLine(report_file, "clock network delay (propagated)", capture_clock_network_delay, clock_edge + capture_clock_network_delay, true, "",
+  outputTimingLine(report_file, getClockNetworkDelayLabel(timing_path), capture_clock_network_delay, clock_edge + capture_clock_network_delay, true, "",
                    label_width);
   outputTimingLine(report_file, "clock reconvergence pessimism", timing_path.get_clock_reconvergence_pessimism(), capture_time, true, "", label_width);
   if (!timing_path.get_capture_clock_pin().empty()) {
     outputTimingLine(report_file, getPinLabel(timing_path.get_capture_clock_pin()), 0.0, capture_time, false, "r", label_width);
+  }
+  double uncertainty = getClockUncertainty(clock_name, delay_type);
+  if (uncertainty > STA_ERROR) {
+    double signed_uncertainty = delay_type == DelayType::kMax ? -uncertainty : uncertainty;
+    double required_before_check = timing_path.get_required_time();
+    if (std::fabs(timing_path.get_check_time()) > STA_ERROR) {
+      required_before_check -= delay_type == DelayType::kMax ? -timing_path.get_check_time() : timing_path.get_check_time();
+    }
+    outputTimingLine(report_file, "clock uncertainty", signed_uncertainty, required_before_check, true, "", label_width);
   }
   if (std::fabs(timing_path.get_check_time()) > STA_ERROR) {
     double check_time = timing_path.get_check_time();

@@ -25,7 +25,6 @@
 
 #include <ostream>
 #include <string>
-#include <unordered_map>
 #include <utility>
 
 #include "FastSTABuilder.hh"
@@ -98,8 +97,37 @@ auto makeClockGraphProfile(const FastStaClockContext& context) -> FastStaClockGr
   return profile;
 }
 
-auto makeClockTreeTopology(const FastStaClockContext& context) -> FastStaClockTreeTopology
+auto hasCompleteBufferPairIndexes(const FastStaClockContext& context) -> bool
 {
+  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+    const auto& node = context.nodes.at(node_id);
+    if (node.kind != FastStaNodeKind::kBufferInput && node.kind != FastStaNodeKind::kBufferOutput) {
+      continue;
+    }
+    const auto& index = node.kind == FastStaNodeKind::kBufferInput ? context.buffer_input_node_id_by_inst : context.buffer_output_node_id_by_inst;
+    const auto indexed = index.find(node.inst_name);
+    if (node.inst_name.empty() || indexed == index.end() || indexed->second != node_id) {
+      return false;
+    }
+    const auto& peer_index = node.kind == FastStaNodeKind::kBufferInput ? context.buffer_output_node_id_by_inst : context.buffer_input_node_id_by_inst;
+    const auto peer = peer_index.find(node.inst_name);
+    if (peer == peer_index.end() || peer->second >= context.nodes.size()) {
+      return false;
+    }
+    const auto& peer_node = context.nodes.at(peer->second);
+    const auto expected_peer_kind = node.kind == FastStaNodeKind::kBufferInput ? FastStaNodeKind::kBufferOutput : FastStaNodeKind::kBufferInput;
+    if (peer_node.kind != expected_peer_kind || peer_node.inst_name != node.inst_name) {
+      return false;
+    }
+  }
+  return true;
+}
+
+auto makeClockTreeTopology(const FastStaClockContext& context) -> std::optional<FastStaClockTreeTopology>
+{
+  if (!hasCompleteBufferPairIndexes(context)) {
+    return std::nullopt;
+  }
   FastStaClockTreeTopology topology;
   topology.source_node_id = context.source_node_id;
   topology.parent_by_node.assign(context.nodes.size(), kInvalidFastStaNodeId);
@@ -111,13 +139,6 @@ auto makeClockTreeTopology(const FastStaClockContext& context) -> FastStaClockTr
         if (node.kind == FastStaNodeKind::kBufferInput && node.inst_name == inst_name) {
           return indexed->second;
         }
-      }
-      return kInvalidFastStaNodeId;
-    }
-    for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-      const auto& node = context.nodes.at(node_id);
-      if (node.kind == FastStaNodeKind::kBufferInput && node.inst_name == inst_name) {
-        return node_id;
       }
     }
     return kInvalidFastStaNodeId;
@@ -374,6 +395,9 @@ auto FastSTA::collectClockSizingBuffers(FastStaClockId clock_id) const -> std::v
   std::vector<FastStaClockSizingBuffer> buffers;
   const auto* context = queryClockContext(clock_id);
   if (context == nullptr) {
+    return buffers;
+  }
+  if (!hasCompleteBufferPairIndexes(*context)) {
     return buffers;
   }
   buffers.reserve(context->nodes.size());

@@ -42,7 +42,6 @@
 #include "IdbTrackGrid.h"
 #include "feature_parser.h"
 #include "feature_summary.h"
-#include "flow_config.h"
 #include "idm.h"
 #include "iomanip"
 #include "json_parser.h"
@@ -56,12 +55,8 @@ json FeatureParser::buildSummaryInfo()
   auto& db_summary = _summary->get_db();
 
   node["eda_tool"] = db_summary.info.eda_tool;
-  node["eda_version"] = db_summary.info.eda_version;
   node["design_name"] = db_summary.info.design_name;
   node["design_version"] = db_summary.info.design_version;
-  node["flow_stage"] = db_summary.info.flow_stage;
-  node["flow_runtime"] = db_summary.info.flow_runtime;
-  node["flow_memory"] = db_summary.info.flow_memory;
 
   return node;
 }

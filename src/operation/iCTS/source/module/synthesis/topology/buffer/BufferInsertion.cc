@@ -146,9 +146,17 @@ auto CreateBufferInstance(Topology::Build& result, const std::string& inst_name,
   result.output.inserted_pins.push_back(std::move(output_pin));
 
   inst_ptr->add_pin(input_pin_ptr);
-  inst_ptr->insertDriverPin(output_pin_ptr);
+  inst_ptr->add_pin(output_pin_ptr);
 
   result.output.inserted_insts.push_back(std::move(inst));
+  result.output.propagation_arcs.push_back(ClockPropagationArc{
+      .inst = inst_ptr,
+      .input_pin = input_pin_ptr,
+      .output_pin = output_pin_ptr,
+      .kind = ClockPropagationKind::kBuffer,
+      .origin = ClockPropagationOrigin::kSynthesized,
+      .path_buffer_weight = 1,
+  });
   return BufferCreation{
       .inst = inst_ptr,
       .input_pin = input_pin_ptr,

@@ -32,7 +32,6 @@ namespace tcl {
 
 int registerConfig()
 {
-  registerTclCmd(CmdFlowInitConfig, "flow_init");
   registerTclCmd(CmdDbConfigSetting, "db_init");
 
   return EXIT_SUCCESS;

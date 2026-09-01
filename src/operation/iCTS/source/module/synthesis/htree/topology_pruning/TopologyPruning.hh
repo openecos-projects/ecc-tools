@@ -64,6 +64,8 @@ struct CandidateBuildEvaluation
   std::size_t split_group_count = 0U;
   std::size_t split_extra_buffer_count = 0U;
   unsigned split_local_depth = 0U;
+  bool split_triggered_by_fanout = false;
+  bool split_triggered_by_capacitance = false;
   std::optional<HTreeTopologyChar> best_char = std::nullopt;
   bool used_boundary_relaxation = false;
   std::optional<double> boundary_relaxation_score = std::nullopt;
@@ -85,6 +87,8 @@ struct CandidateCharRef
   std::size_t split_group_count = 0U;
   std::size_t split_extra_buffer_count = 0U;
   unsigned split_local_depth = 0U;
+  bool split_triggered_by_fanout = false;
+  bool split_triggered_by_capacitance = false;
 };
 
 struct CandidateCharRefFilterOutput
