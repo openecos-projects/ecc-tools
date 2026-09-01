@@ -10,33 +10,31 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
-#include <iostream>
-#include <string>
-
-#include "ScriptEngine.hh"
-#include "tcl_definition.h"
+#include "FPInterface.hpp"
+#include "tcl_fp.h"
 #include "tcl_util.h"
-
-using ecc::TclCmd;
 
 namespace tcl {
 
-class CmdFlowConfig : public TclCmd {
-  public:
-   explicit CmdFlowConfig(const char* cmd_name);
-   ~CmdFlowConfig() override = default;
+TclDebugInputMacro::TclDebugInputMacro(const char* cmd_name) : TclCmd(cmd_name)
+{
+  _config_list.push_back(std::make_pair("-path", ValueType::kString));
 
-    unsigned check() override { return 1; };
-    unsigned exec() override;
+  TclUtil::addOption(this, _config_list);
+}
 
-  private:
-   std::vector<std::pair<std::string, ValueType>> _config_list;
-  
-};
+unsigned TclDebugInputMacro::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
+  FPI.debugInputMacro(config_map);
+  return 1;
+}
 
 }  // namespace tcl

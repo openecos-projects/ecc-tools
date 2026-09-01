@@ -59,6 +59,10 @@ class FPInterface
   void destroyFP();
 #endif
 
+#if 1  // debug iFP
+  void debugInputMacro(std::map<std::string, std::any> config_map);
+#endif
+
 #endif
 
 #if 1  // FP调用外部的API
@@ -82,9 +86,6 @@ class FPInterface
   void wrapUnplacedMacroPinShapeList(idb::IdbInstance* idb_instance, Instance& instance);
   PlacementOrientation wrapPlacementOrientation(idb::IdbOrient idb_orient);
   void wrapNetList();
-  void wrapMacroPlacement();
-  void wrapMacroPlacement(Instance& instance, double x_micron, double y_micron, PlacementOrientation orient);
-  void wrapMacroNetPinList(Instance& instance);
   void wrapIOPinList();
 #endif
 
@@ -101,6 +102,8 @@ class FPInterface
   void outputIOPinList();
   void outputIOInstancePlacement();
   void outputMacroPlacement();
+  void outputMacroHalo();
+  void outputMacroRouteHalo();
   void outputNewInstanceList();
   void outputPGSegmentList();
   void adjustPGLineSegmentListByViaEnclosure();
