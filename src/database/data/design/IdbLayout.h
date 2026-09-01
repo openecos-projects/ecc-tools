@@ -33,6 +33,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -77,20 +78,99 @@ class IdbLayout
 
   // setter
   void set_manufacture_grid(int32_t value) { _manufacture_grid = value; }
-  void set_die(IdbDie* die) { _die = die; }
-  void set_units(IdbUnits* units) { _units = units; }
-  void set_layer(IdbLayers* layers) { _layers = layers; }
-  void set_sites(IdbSites* sites) { _sites = sites; }
-  void set_rows(IdbRows* rows) { _rows = rows; }
-  void set_gcell_grid_list(IdbGCellGridList* gcell_grid_list) { _gcell_grid_list = gcell_grid_list; }
-  void set_track_grid_list(IdbTrackGridList* track_grid_list) { _track_grid_list = track_grid_list; }
+  void set_die(IdbDie* die)
+  {
+    if (_die != die) {
+      delete _die;
+      _die = die;
+    }
+  }
+  void set_units(IdbUnits* units)
+  {
+    if (_units != units) {
+      delete _units;
+    }
+    _units = units == nullptr ? new IdbUnits() : units;
+  }
+  void set_layer(IdbLayers* layers)
+  {
+    if (_layers != layers) {
+      delete _layers;
+      _layers = layers;
+    }
+  }
+  void set_sites(IdbSites* sites)
+  {
+    if (_sites != sites) {
+      delete _sites;
+      _sites = sites;
+    }
+  }
+  void set_rows(IdbRows* rows)
+  {
+    if (_rows != rows) {
+      delete _rows;
+      _rows = rows;
+    }
+  }
+  void set_gcell_grid_list(IdbGCellGridList* gcell_grid_list)
+  {
+    if (_gcell_grid_list != gcell_grid_list) {
+      delete _gcell_grid_list;
+      _gcell_grid_list = gcell_grid_list;
+    }
+  }
+  void set_track_grid_list(IdbTrackGridList* track_grid_list)
+  {
+    if (_track_grid_list != track_grid_list) {
+      delete _track_grid_list;
+      _track_grid_list = track_grid_list;
+    }
+  }
   // void set_macros(IdbMacros* macros){_macros = macros;}
-  void set_cell_master_list(IdbCellMasterList* master_list) { _cell_master_list = master_list; }
-  void set_via_list(IdbVias* via_list) { _via_list = via_list; }
-  void set_via_rule_list(IdbViaRuleList* via_rule_list) { _via_rule_list = via_rule_list; }
-  void set_max_via_stack(IdbMaxViaStack* max_via_stack) { _max_via_stack = max_via_stack; }
+  void set_cell_master_list(IdbCellMasterList* master_list)
+  {
+    if (_cell_master_list != master_list) {
+      delete _cell_master_list;
+      _cell_master_list = master_list;
+    }
+  }
+  void set_via_list(IdbVias* via_list)
+  {
+    if (_via_list != via_list) {
+      delete _via_list;
+      _via_list = via_list;
+    }
+  }
+  void set_via_rule_list(IdbViaRuleList* via_rule_list)
+  {
+    if (_via_rule_list != via_rule_list) {
+      delete _via_rule_list;
+      _via_rule_list = via_rule_list;
+    }
+  }
+  void set_max_via_stack(IdbMaxViaStack* max_via_stack)
+  {
+    if (_max_via_stack != max_via_stack) {
+      delete _max_via_stack;
+      _max_via_stack = max_via_stack;
+    }
+  }
   // operator
-  int32_t transAreaDB(double value) { return std::round(std::pow(_units->get_micron_dbu(), 2) * value); }
+  int32_t transAreaDB(double value)
+  {
+    const double area = std::round(std::pow(_units->get_micron_dbu(), 2) * value);
+    if (!std::isfinite(area)) {
+      return area < 0 ? std::numeric_limits<int32_t>::min() : std::numeric_limits<int32_t>::max();
+    }
+    if (area > std::numeric_limits<int32_t>::max()) {
+      return std::numeric_limits<int32_t>::max();
+    }
+    if (area < std::numeric_limits<int32_t>::min()) {
+      return std::numeric_limits<int32_t>::min();
+    }
+    return static_cast<int32_t>(area);
+  }
   int32_t transUnitDB(double value) { return std::round(_units->get_micron_dbu() * value); }      // get (class IdbUnits -> (int32) _micron_dbu) * value
   void initDie(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y);
   IdbRow* createRow(std::string row_name, std::string site_name, int32_t orig_x, int32_t orig_y, IdbOrient site_orient, int32_t num_x,

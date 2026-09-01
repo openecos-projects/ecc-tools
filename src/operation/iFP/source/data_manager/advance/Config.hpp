@@ -34,7 +34,6 @@ class Config
   // **********        FP         ********** //
   std::string temp_directory_path;                  // required
   int32_t thread_number;                            // optional
-  std::string macro_place_file_path;                // optional
   double macro_placement_halo;                      // optional
   double macro_routing_halo;                        // optional
   DieMode die_mode;                                 // optional

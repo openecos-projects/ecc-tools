@@ -223,50 +223,44 @@ auto createInsertedBuffer(Design& design, Clock& clock, const std::string& inst_
     return false;
   }
 
-  buffer = design.makeInst(inst_name);
-  if (buffer == nullptr) {
-    CTSLOG.warn(Loc::current(), "ClockTreeRealization: failed to create root-buffer inst \"", inst_name, "\".");
-    return false;
-  }
-  buffer->set_name(inst_name);
-  buffer->set_cell_master(cell_master);
-  buffer->set_type(InstType::kBuffer);
-  buffer->set_location(location);
-  buffer->set_pins({});
+  auto buffer_owner = std::make_unique<Inst>(inst_name, cell_master, InstType::kBuffer, location);
+  auto* buffer_ptr = buffer_owner.get();
+  auto input_pin_owner = std::make_unique<Pin>(input_pin_name, PinType::kIn, location, buffer_ptr, nullptr, false);
+  auto* input_pin_ptr = input_pin_owner.get();
+  auto output_pin_owner = std::make_unique<Pin>(output_pin_name, PinType::kOut, location, buffer_ptr, nullptr, false);
+  auto* output_pin_ptr = output_pin_owner.get();
+  buffer_ptr->add_pin(input_pin_ptr);
+  buffer_ptr->add_pin(output_pin_ptr);
 
-  input_pin = design.makePin(input_pin_name);
-  if (input_pin == nullptr) {
-    CTSLOG.warn(Loc::current(), "ClockTreeRealization: failed to create root-buffer input pin \"", input_pin_name, "\".");
+  std::vector<std::unique_ptr<Inst>> inserted_insts;
+  inserted_insts.push_back(std::move(buffer_owner));
+  std::vector<std::unique_ptr<Pin>> inserted_pins;
+  inserted_pins.push_back(std::move(input_pin_owner));
+  inserted_pins.push_back(std::move(output_pin_owner));
+  std::vector<std::unique_ptr<Net>> inserted_nets;
+  std::vector<ClockPropagationArc> propagation_arcs;
+  propagation_arcs.push_back(ClockPropagationArc{
+      .inst = buffer_ptr,
+      .input_pin = input_pin_ptr,
+      .output_pin = output_pin_ptr,
+      .kind = ClockPropagationKind::kBuffer,
+      .origin = ClockPropagationOrigin::kSynthesized,
+      .path_buffer_weight = 1,
+  });
+  if (!ClockTreeRealization::commitInsertedObjects(InsertedObjectCommitInput{
+          .design = &design,
+          .clock = &clock,
+          .inserted_insts = &inserted_insts,
+          .inserted_pins = &inserted_pins,
+          .inserted_nets = &inserted_nets,
+          .propagation_arcs = &propagation_arcs,
+      })) {
+    CTSLOG.warn(Loc::current(), "ClockTreeRealization: failed to commit root-buffer propagation for \"", inst_name, "\".");
     return false;
   }
-  input_pin->set_name(input_pin_name);
-  input_pin->set_type(PinType::kIn);
-  input_pin->set_location(location);
-  input_pin->set_inst(buffer);
-  input_pin->set_net(nullptr);
-  input_pin->set_io(false);
-  buffer->add_pin(input_pin);
-  if (!design.indexPin(input_pin)) {
-    return false;
-  }
-
-  output_pin = design.makePin(output_pin_name);
-  if (output_pin == nullptr) {
-    CTSLOG.warn(Loc::current(), "ClockTreeRealization: failed to create root-buffer output pin \"", output_pin_name, "\".");
-    return false;
-  }
-  output_pin->set_name(output_pin_name);
-  output_pin->set_type(PinType::kOut);
-  output_pin->set_location(location);
-  output_pin->set_inst(buffer);
-  output_pin->set_net(nullptr);
-  output_pin->set_io(false);
-  buffer->insertDriverPin(output_pin);
-  if (!design.indexPin(output_pin)) {
-    return false;
-  }
-
-  clock.add_inst(buffer);
+  buffer = buffer_ptr;
+  input_pin = input_pin_ptr;
+  output_pin = output_pin_ptr;
   return true;
 }
 
@@ -316,6 +310,47 @@ auto ClockTreeRealization::partitionClockSinks(const std::vector<Pin*>& sinks) -
     }
   }
   return output;
+}
+
+auto ClockTreeRealization::deriveSynthesisFrontier(const Clock& clock) -> ClockSynthesisFrontier
+{
+  ClockSynthesisFrontier frontier;
+  std::unordered_set<const Pin*> traced_outputs;
+  for (const auto& arc : clock.get_propagation_arcs()) {
+    if (arc.origin != ClockPropagationOrigin::kTracedInput) {
+      continue;
+    }
+    frontier.has_traced_topology = true;
+    if (arc.output_pin != nullptr) {
+      traced_outputs.insert(arc.output_pin);
+    }
+  }
+
+  const auto is_driven_by_traced_output = [&traced_outputs](const Pin* pin) -> bool {
+    const auto* net = pin == nullptr ? nullptr : pin->get_net();
+    return net != nullptr && traced_outputs.contains(net->get_driver());
+  };
+  for (const auto& arc : clock.get_propagation_arcs()) {
+    if (arc.origin == ClockPropagationOrigin::kTracedInput && arc.input_pin != nullptr && !is_driven_by_traced_output(arc.input_pin)) {
+      frontier.top_level_traced_inputs.push_back(arc.input_pin);
+    }
+  }
+  for (auto* terminal_load : clock.get_loads()) {
+    if (terminal_load != nullptr && !is_driven_by_traced_output(terminal_load)) {
+      frontier.uncovered_terminal_loads.push_back(terminal_load);
+    }
+  }
+
+  const auto pin_less = [](const Pin* lhs, const Pin* rhs) -> bool { return Design::getPinFullName(lhs) < Design::getPinFullName(rhs); };
+  std::ranges::sort(frontier.top_level_traced_inputs, pin_less);
+  std::ranges::sort(frontier.uncovered_terminal_loads, pin_less);
+  frontier.pins.reserve(frontier.top_level_traced_inputs.size() + frontier.uncovered_terminal_loads.size());
+  frontier.pins.insert(frontier.pins.end(), frontier.top_level_traced_inputs.begin(), frontier.top_level_traced_inputs.end());
+  frontier.pins.insert(frontier.pins.end(), frontier.uncovered_terminal_loads.begin(), frontier.uncovered_terminal_loads.end());
+  std::ranges::sort(frontier.pins, pin_less);
+  const auto duplicate_pins = std::ranges::unique(frontier.pins);
+  frontier.pins.erase(duplicate_pins.begin(), duplicate_pins.end());
+  return frontier;
 }
 
 auto ClockTreeRealization::makeSinkDomainPrefix(const Clock& clock, std::size_t clock_index, SinkDomainKind sink_domain) -> std::string
@@ -417,8 +452,9 @@ auto ClockTreeRealization::connectSinkDomainDownstreamNet(const SinkDomainDownst
   return createInsertedNet(*input.design, *input.clock, input.domain_prefix + "_downstream_net", input.root_output, input.sinks);
 }
 
-auto ClockTreeRealization::restoreClockSourceNetToClockLoads(Clock& clock) -> void
+auto ClockTreeRealization::restoreClockSourceNetToSynthesisFrontier(Clock& clock) -> ClockSynthesisFrontier
 {
+  auto frontier = deriveSynthesisFrontier(clock);
   auto* clock_source = clock.get_clock_source();
   auto* clock_source_net = clock.get_clock_source_net();
   if (clock_source_net == nullptr && clock_source != nullptr) {
@@ -429,9 +465,10 @@ auto ClockTreeRealization::restoreClockSourceNetToClockLoads(Clock& clock) -> vo
     reconnectNet(NetConnectionInput{
         .net = clock_source_net,
         .driver = clock_source,
-        .loads = clock.get_loads(),
+        .loads = frontier.pins,
     });
   }
+  return frontier;
 }
 
 auto ClockTreeRealization::reuseClockSourceNetAsSourceToRootBuffers(const SourceToRootNetReuseInput& input) -> Net*
@@ -473,18 +510,37 @@ auto ClockTreeRealization::commitInsertedObjects(const InsertedObjectCommitInput
   if (input.inserted_nets == nullptr) {
     CTSLOG.error(Loc::current(), "ClockTreeRealization: inserted-object commit net payload is null.");
   }
+  if (input.propagation_arcs == nullptr) {
+    CTSLOG.error(Loc::current(), "ClockTreeRealization: inserted-object commit propagation-arc payload is null.");
+  }
+  if (input.design == nullptr || input.clock == nullptr || input.inserted_insts == nullptr || input.inserted_pins == nullptr || input.inserted_nets == nullptr
+      || input.propagation_arcs == nullptr) {
+    return false;
+  }
   auto& design = *input.design;
   auto& clock = *input.clock;
   auto& inserted_insts = *input.inserted_insts;
   auto& inserted_pins = *input.inserted_pins;
   auto& inserted_nets = *input.inserted_nets;
+  auto& propagation_arcs = *input.propagation_arcs;
 
   std::unordered_set<std::string> inst_names;
+  std::unordered_set<const Inst*> inserted_inst_objects;
   for (const auto& inst : inserted_insts) {
     if (inst == nullptr) {
-      continue;
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject inserted-object commit because the inst payload contains null ownership.");
+      return false;
     }
-    if (!inst_names.insert(inst->get_name()).second) {
+    if (inst->get_name().empty()) {
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject inserted-object commit because an algorithm inst name is empty.");
+      return false;
+    }
+    if (!inst->is_buffer() && !inst->is_inverter()) {
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject algorithm inst \"", inst->get_name(),
+                  "\" because this propagation-only commit boundary does not accept non-propagation objects.");
+      return false;
+    }
+    if (!inserted_inst_objects.insert(inst.get()).second || !inst_names.insert(inst->get_name()).second) {
       CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject committing duplicate algorithm inst \"", inst->get_name(), "\".");
       return false;
     }
@@ -496,9 +552,19 @@ auto ClockTreeRealization::commitInsertedObjects(const InsertedObjectCommitInput
   }
 
   std::unordered_set<std::string> pin_full_names;
+  std::unordered_set<const Pin*> inserted_pin_objects;
   for (const auto& pin : inserted_pins) {
     if (pin == nullptr) {
-      continue;
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject inserted-object commit because the pin payload contains null ownership.");
+      return false;
+    }
+    if (!inserted_pin_objects.insert(pin.get()).second) {
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject inserted-object commit because algorithm pin ownership is duplicated.");
+      return false;
+    }
+    if (!inserted_inst_objects.contains(pin->get_inst())) {
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject inserted-object commit because an algorithm pin is not owned by an inserted inst.");
+      return false;
     }
     const auto pin_full_name = Design::getPinFullName(pin.get());
     if (pin_full_name.empty()) {
@@ -517,10 +583,51 @@ auto ClockTreeRealization::commitInsertedObjects(const InsertedObjectCommitInput
     }
   }
 
+  if (propagation_arcs.size() != inserted_inst_objects.size()) {
+    CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject inserted-object commit because explicit synthesized propagation count ", propagation_arcs.size(),
+                " does not match inserted inst count ", inserted_inst_objects.size(), ".");
+    return false;
+  }
+  std::unordered_set<const Inst*> propagation_insts;
+  std::unordered_set<const Pin*> propagation_pins;
+  for (const auto& arc : propagation_arcs) {
+    if (arc.origin != ClockPropagationOrigin::kSynthesized || !inserted_inst_objects.contains(arc.inst) || !inserted_pin_objects.contains(arc.input_pin)
+        || !inserted_pin_objects.contains(arc.output_pin)) {
+      CTSLOG.warn(Loc::current(),
+                  "ClockTreeRealization: reject inserted-object commit because a synthesized propagation record does not own its exact inst/pins.");
+      return false;
+    }
+    if (!propagation_insts.insert(arc.inst).second || !propagation_pins.insert(arc.input_pin).second || !propagation_pins.insert(arc.output_pin).second) {
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject inserted-object commit because synthesized propagation ownership is duplicated.");
+      return false;
+    }
+    const auto propagation_status = clock.validatePropagationArc(arc);
+    if (!propagation_status.ok()) {
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject synthesized propagation before commit: ", propagation_status.message, ".");
+      return false;
+    }
+  }
+  if (propagation_insts.size() != inserted_inst_objects.size() || propagation_pins.size() != inserted_pin_objects.size()) {
+    CTSLOG.warn(Loc::current(),
+                "ClockTreeRealization: reject inserted-object commit because every propagation-only inst and pin must have one exact synthesized arc.");
+    return false;
+  }
+
+  std::unordered_set<const Pin*> known_pin_objects = inserted_pin_objects;
+  for (const auto* pin : design.get_pins()) {
+    if (pin != nullptr) {
+      known_pin_objects.insert(pin);
+    }
+  }
   std::unordered_set<std::string> net_names;
   for (const auto& net : inserted_nets) {
     if (net == nullptr) {
-      continue;
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject inserted-object commit because the net payload contains null ownership.");
+      return false;
+    }
+    if (net->get_name().empty()) {
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject inserted-object commit because an algorithm net name is empty.");
+      return false;
     }
     if (!net_names.insert(net->get_name()).second) {
       CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject committing duplicate algorithm net \"", net->get_name(), "\".");
@@ -530,6 +637,20 @@ auto ClockTreeRealization::commitInsertedObjects(const InsertedObjectCommitInput
       CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject committing algorithm net \"", net->get_name(),
                   "\" because a final net with the same name already exists.");
       return false;
+    }
+    auto* driver = net->get_driver();
+    if (driver == nullptr || !known_pin_objects.contains(driver) || driver->get_net() != net.get()) {
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject algorithm net \"", net->get_name(),
+                  "\" because its driver is missing, foreign, or inconsistently connected.");
+      return false;
+    }
+    std::unordered_set<const Pin*> net_loads;
+    for (auto* load : net->get_loads()) {
+      if (load == nullptr || !known_pin_objects.contains(load) || load->get_net() != net.get() || !net_loads.insert(load).second) {
+        CTSLOG.warn(Loc::current(), "ClockTreeRealization: reject algorithm net \"", net->get_name(),
+                    "\" because a load is null, foreign, duplicated, or inconsistently connected.");
+        return false;
+      }
     }
   }
 
@@ -542,7 +663,6 @@ auto ClockTreeRealization::commitInsertedObjects(const InsertedObjectCommitInput
       CTSLOG.warn(Loc::current(), "ClockTreeRealization: failed to commit algorithm inst.");
       return false;
     }
-    clock.add_inst(committed_inst);
   }
   inserted_insts.clear();
 
@@ -569,6 +689,15 @@ auto ClockTreeRealization::commitInsertedObjects(const InsertedObjectCommitInput
     clock.add_net(committed_net);
   }
   inserted_nets.clear();
+  for (const auto& arc : propagation_arcs) {
+    const auto status = clock.addPropagationArc(arc);
+    if (!status.ok()) {
+      CTSLOG.warn(Loc::current(), "ClockTreeRealization: failed to register propagation for committed inst \"",
+                  (arc.inst == nullptr ? std::string{} : arc.inst->get_name()), "\": ", status.message, ".");
+      return false;
+    }
+  }
+  propagation_arcs.clear();
   return true;
 }
 

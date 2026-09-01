@@ -37,6 +37,24 @@
 
 namespace icts::htree {
 
+struct SegmentPatternCompositionKey
+{
+  PatternId upstream;
+  PatternId downstream;
+
+  auto operator==(const SegmentPatternCompositionKey& rhs) const -> bool = default;
+};
+
+struct SegmentPatternCompositionKeyHash
+{
+  auto operator()(const SegmentPatternCompositionKey& key) const -> std::size_t
+  {
+    std::size_t seed = std::hash<PatternId>{}(key.upstream);
+    seed ^= std::hash<PatternId>{}(key.downstream) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+    return seed;
+  }
+};
+
 struct BufferPatternLibrary
 {
   explicit BufferPatternLibrary(Wrapper& wrapper) : _strength_table(wrapper) {}
@@ -77,6 +95,20 @@ struct BufferPatternLibrary
 
   auto getTerminalSemantic(PatternId pattern_id) const -> TerminalSemantic { return getCompositionState(pattern_id).terminal_semantic; }
 
+  auto findComposedPatternId(PatternId upstream, PatternId downstream) const -> std::optional<PatternId>
+  {
+    const auto it = _composition_cache.find(SegmentPatternCompositionKey{.upstream = upstream, .downstream = downstream});
+    return it == _composition_cache.end() ? std::nullopt : std::optional<PatternId>(it->second);
+  }
+
+  auto recordComposedPattern(PatternId upstream, PatternId downstream, PatternId merged) -> void
+  {
+    _composition_cache.emplace(SegmentPatternCompositionKey{.upstream = upstream, .downstream = downstream}, merged);
+    ++_composition_registration_count;
+  }
+
+  auto compositionRegistrationCount() const -> std::size_t { return _composition_registration_count; }
+
   auto retainOnly(const std::vector<PatternId>& retained_pattern_ids) -> void
   {
     std::unordered_set<PatternId> retained;
@@ -103,6 +135,9 @@ struct BufferPatternLibrary
       }
     }
 
+    std::erase_if(_composition_cache, [&](const auto& entry) -> bool {
+      return !retained.contains(entry.first.upstream) || !retained.contains(entry.first.downstream) || !retained.contains(entry.second);
+    });
     patterns = std::move(retained_patterns);
     composition_states = std::move(retained_composition_states);
   }
@@ -172,6 +207,8 @@ struct BufferPatternLibrary
  private:
   BufferStrengthTable _strength_table;
   std::string _last_failure_reason;
+  std::unordered_map<SegmentPatternCompositionKey, PatternId, SegmentPatternCompositionKeyHash> _composition_cache;
+  std::size_t _composition_registration_count = 0U;
 };
 
 class SegmentPatternLibraryCombiner
@@ -189,8 +226,23 @@ class SegmentPatternLibraryCombiner
     return BufferingPattern::canConcatMonotonic(*upstream_pattern, *downstream_pattern);
   }
 
+  auto composeState(PatternId upstream, PatternId downstream) const -> PatternCompositionState
+  {
+    const auto upstream_state = _library->getCompositionState(upstream);
+    const auto downstream_state = _library->getCompositionState(downstream);
+    return PatternCompositionState{
+        .terminal_semantic = downstream_state.terminal_semantic,
+        .monotonic_boundary_state = MonotonicBoundaryState::compose(upstream_state.monotonic_boundary_state, downstream_state.monotonic_boundary_state),
+        .source_exposed_load_count = upstream_state.source_exposed_load_count,
+    };
+  }
+
   auto combine(PatternId upstream, PatternId downstream) const -> PatternId
   {
+    if (const auto cached = _library->findComposedPatternId(upstream, downstream); cached.has_value()) {
+      return *cached;
+    }
+
     const auto* upstream_pattern = _library->find(upstream);
     const auto* downstream_pattern = _library->find(downstream);
     if (upstream_pattern == nullptr || downstream_pattern == nullptr) {
@@ -207,6 +259,7 @@ class SegmentPatternLibraryCombiner
                                         merged_pattern.get_monotonic_boundary_state()))) {
       CTSLOG.error(Loc::current(), "HTree: composed segment pattern lost a validated buffer-strength rank: ", _library->getLastFailureReason());
     }
+    _library->recordComposedPattern(upstream, downstream, merged_pattern_id);
     return merged_pattern_id;
   }
 

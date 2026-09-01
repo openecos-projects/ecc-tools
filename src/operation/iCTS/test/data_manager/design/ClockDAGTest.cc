@@ -23,6 +23,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -38,6 +39,7 @@
 #include "data_manager/io/Wrapper.hh"
 #include "data_manager/spatial/Point.hh"
 #include "module/evaluation/qor/QOREvaluation.hh"
+#include "module/synthesis/realization/ClockTreeRealization.hh"
 
 namespace icts_test {
 namespace {
@@ -95,11 +97,7 @@ auto makePin(const std::string& name, icts::PinType type, icts::Inst* inst, cons
   pin->set_location(location);
   pin->set_io(false);
   if (inst != nullptr) {
-    if (type == icts::PinType::kOut) {
-      inst->insertDriverPin(pin);
-    } else {
-      inst->add_pin(pin);
-    }
+    inst->add_pin(pin);
   }
   (void) CTSDM.getDesign().indexPin(pin);
   return pin;
@@ -142,6 +140,19 @@ auto makeBuffer(const std::string& name, int x) -> BufferPins
   return BufferPins{.inst = inst, .input = input, .output = output};
 }
 
+auto addBufferArc(icts::Clock* clock, const BufferPins& buffer, icts::ClockPropagationOrigin origin = icts::ClockPropagationOrigin::kSynthesized) -> void
+{
+  ASSERT_NE(clock, nullptr);
+  ASSERT_TRUE(clock
+                  ->addPropagationArc({.inst = buffer.inst,
+                                       .input_pin = buffer.input,
+                                       .output_pin = buffer.output,
+                                       .kind = icts::ClockPropagationKind::kBuffer,
+                                       .origin = origin,
+                                       .path_buffer_weight = 1})
+                  .ok());
+}
+
 auto makeSink(const std::string& name, icts::InstType type, int x) -> icts::Pin*
 {
   auto* inst = makeInst(name, type, icts::Point<int>(x, 0));
@@ -156,7 +167,7 @@ TEST(DesignIndexTest, RemoveClockMembershipObjectsErasesRecordedInstAndNetNames)
   auto buffer = makeBuffer("buffer_to_remove", 10);
   auto* sink = makeSink("sink", icts::InstType::kFlipFlop, 20);
   auto* removed_net = connectNet("net_to_remove", buffer.output, {sink});
-  clock_pins.clock->add_inst(buffer.inst);
+  addBufferArc(clock_pins.clock, buffer);
   clock_pins.clock->add_net(removed_net);
   clock_pins.clock->add_load(sink);
 
@@ -170,6 +181,103 @@ TEST(DesignIndexTest, RemoveClockMembershipObjectsErasesRecordedInstAndNetNames)
   EXPECT_EQ(design.findInst("renamed_buffer_to_remove"), nullptr);
   EXPECT_EQ(design.findNet("net_to_remove"), nullptr);
   EXPECT_EQ(design.findNet("renamed_net_to_remove"), nullptr);
+}
+
+TEST(DesignIndexTest, RemovingOneClocksSynthesizedNetClearsEveryCrossClockBorrowedReference)
+{
+  const ScopedDesignReset scoped_design_reset;
+
+  auto clock_a = makeClock("clock_a", "clock_a_source_net");
+  auto clock_b = makeClock("clock_b", "clock_b_original_source_net");
+  auto buffer = makeBuffer("clock_a_synthesized_buffer", 10);
+  auto* sink_a = makeSink("clock_a_sink", icts::InstType::kFlipFlop, 20);
+  auto* sink_b = makeSink("clock_b_sink", icts::InstType::kFlipFlop, 30);
+
+  connectNet("clock_a_source_net", clock_a.source, {buffer.input});
+  auto* shared_net = connectNet("clock_a_synthesized_shared_net", buffer.output, {sink_a, sink_b});
+  clock_a.clock->set_clock_source_net(clock_a.source_net);
+  addBufferArc(clock_a.clock, buffer);
+  clock_a.clock->add_net(shared_net);
+  clock_a.clock->add_load(sink_a);
+
+  clock_b.clock->set_clock_source(buffer.output);
+  clock_b.clock->set_clock_source_net(shared_net);
+  clock_b.clock->add_net(shared_net);
+  clock_b.clock->add_load(sink_b);
+  ASSERT_TRUE(CTSDM.getDesign().rebuildClockDAG());
+
+  CTSDM.getDesign().removeClockSynthesizedObjects(*clock_a.clock);
+
+  EXPECT_EQ(CTSDM.getDesign().findInst("clock_a_synthesized_buffer"), nullptr);
+  EXPECT_EQ(CTSDM.getDesign().findNet("clock_a_synthesized_shared_net"), nullptr);
+  EXPECT_TRUE(clock_a.clock->get_propagation_arcs().empty());
+  EXPECT_TRUE(clock_a.clock->get_insts().empty());
+  EXPECT_TRUE(clock_a.clock->get_nets().empty());
+  EXPECT_TRUE(clock_a.clock->get_loads().empty());
+  EXPECT_EQ(clock_b.clock->get_clock_source(), nullptr);
+  EXPECT_EQ(clock_b.clock->get_clock_source_net(), nullptr);
+  EXPECT_TRUE(clock_b.clock->get_nets().empty());
+  EXPECT_TRUE(clock_b.clock->get_loads().empty());
+  EXPECT_EQ(sink_a->get_net(), nullptr);
+  EXPECT_EQ(sink_b->get_net(), nullptr);
+}
+
+TEST(ClockDAGTest, NestedBranchedTracedTopologyUsesOnlyDeterministicTopLevelAndUncoveredFrontier)
+{
+  const ScopedDesignReset scoped_design_reset;
+
+  auto clock_pins = makeClock("clk", "clk_net");
+  auto top_buffer = makeBuffer("top_buffer", 10);
+  auto nested_buffer_a = makeBuffer("nested_buffer_a", 20);
+  auto nested_buffer_b = makeBuffer("nested_buffer_b", 30);
+  auto* top_sink = makeSink("top_sink", icts::InstType::kFlipFlop, 40);
+  auto* nested_sink_a = makeSink("nested_sink_a", icts::InstType::kFlipFlop, 50);
+  auto* nested_sink_b = makeSink("nested_sink_b", icts::InstType::kFlipFlop, 60);
+  auto* uncovered_sink = makeSink("aaa_uncovered_sink", icts::InstType::kFlipFlop, 70);
+
+  connectNet("clk_net", clock_pins.source, {top_buffer.input, uncovered_sink});
+  auto* branched_net = connectNet("traced_branched_net", top_buffer.output, {nested_buffer_b.input, top_sink, nested_buffer_a.input});
+  auto* leaf_net_a = connectNet("traced_leaf_a", nested_buffer_a.output, {nested_sink_a});
+  auto* leaf_net_b = connectNet("traced_leaf_b", nested_buffer_b.output, {nested_sink_b});
+  clock_pins.clock->set_clock_source_net(clock_pins.source_net);
+  addBufferArc(clock_pins.clock, nested_buffer_b, icts::ClockPropagationOrigin::kTracedInput);
+  addBufferArc(clock_pins.clock, top_buffer, icts::ClockPropagationOrigin::kTracedInput);
+  addBufferArc(clock_pins.clock, nested_buffer_a, icts::ClockPropagationOrigin::kTracedInput);
+  clock_pins.clock->add_net(branched_net);
+  clock_pins.clock->add_net(leaf_net_a);
+  clock_pins.clock->add_net(leaf_net_b);
+  clock_pins.clock->add_load(nested_sink_b);
+  clock_pins.clock->add_load(top_sink);
+  clock_pins.clock->add_load(uncovered_sink);
+  clock_pins.clock->add_load(nested_sink_a);
+
+  const auto frontier = icts::ClockTreeRealization::deriveSynthesisFrontier(*clock_pins.clock);
+  ASSERT_TRUE(frontier.hasTracedTopology());
+  ASSERT_EQ(frontier.top_level_traced_inputs, std::vector<icts::Pin*>({top_buffer.input}));
+  ASSERT_EQ(frontier.uncovered_terminal_loads, std::vector<icts::Pin*>({uncovered_sink}));
+  ASSERT_EQ(frontier.pins.size(), 2U);
+  EXPECT_EQ(icts::Design::getPinFullName(frontier.pins.at(0)), "aaa_uncovered_sink/CLK");
+  EXPECT_EQ(icts::Design::getPinFullName(frontier.pins.at(1)), "top_buffer/A");
+  EXPECT_EQ(std::ranges::find(clock_pins.clock->get_loads(), top_buffer.input), clock_pins.clock->get_loads().end());
+  EXPECT_EQ(std::ranges::find(frontier.pins, nested_buffer_a.input), frontier.pins.end());
+  EXPECT_EQ(std::ranges::find(frontier.pins, nested_buffer_b.input), frontier.pins.end());
+
+  const auto frontier_partition = icts::ClockTreeRealization::partitionClockSinks(frontier.pins);
+  EXPECT_TRUE(frontier_partition.macro_sinks.empty());
+  EXPECT_EQ(frontier_partition.regular_sinks, frontier.pins);
+  const auto restored_frontier = icts::ClockTreeRealization::restoreClockSourceNetToSynthesisFrontier(*clock_pins.clock);
+  EXPECT_EQ(restored_frontier.pins, frontier.pins);
+  EXPECT_EQ(clock_pins.source_net->get_loads(), frontier.pins);
+  EXPECT_EQ(branched_net->get_loads().size(), 3U);
+  EXPECT_EQ(leaf_net_a->get_loads(), std::vector<icts::Pin*>({nested_sink_a}));
+  EXPECT_EQ(leaf_net_b->get_loads(), std::vector<icts::Pin*>({nested_sink_b}));
+
+  ASSERT_TRUE(CTSDM.getDesign().rebuildClockDAG());
+  const auto stats = CTSDM.getDesign().get_clock_dag().pathBufferStats(clock_pins.clock);
+  EXPECT_TRUE(stats.available);
+  EXPECT_EQ(stats.min_buffer_count, 0);
+  EXPECT_EQ(stats.max_buffer_count, 2);
+  EXPECT_EQ(stats.ff_sink_terminal_count, 4U);
 }
 
 TEST(DesignIndexTest, ClockIdentityIndexTracksMakeClearResetAndClone)
@@ -224,9 +332,9 @@ TEST(ClockDAGTest, BranchPathsReportSourceToFlipFlopBufferDepths)
   auto* two_deep_mid_net = connectNet("two_deep_mid_net", buf_two_a.output, {buf_two_b.input});
   auto* two_deep_leaf_net = connectNet("two_deep_leaf_net", buf_two_b.output, {ff_two});
 
-  clock_pins.clock->add_inst(buf_one.inst);
-  clock_pins.clock->add_inst(buf_two_a.inst);
-  clock_pins.clock->add_inst(buf_two_b.inst);
+  addBufferArc(clock_pins.clock, buf_one);
+  addBufferArc(clock_pins.clock, buf_two_a);
+  addBufferArc(clock_pins.clock, buf_two_b);
   clock_pins.clock->add_net(one_deep_net);
   clock_pins.clock->add_net(two_deep_mid_net);
   clock_pins.clock->add_net(two_deep_leaf_net);
@@ -259,6 +367,53 @@ TEST(ClockDAGTest, DirectSourceToFlipFlopPathReportsZeroBuffers)
   EXPECT_EQ(stats.max_buffer_count, 0);
 }
 
+TEST(ClockDAGTest, LargeStarUsesLinearWorkAccountingAndDeterministicReadyOrder)
+{
+  const ScopedDesignReset scoped_design_reset;
+  constexpr std::size_t sink_count = 13850U;
+
+  auto clock_pins = makeClock("large_star", "large_star_net");
+  std::vector<icts::Pin*> sinks;
+  sinks.reserve(sink_count);
+  for (std::size_t index = 0U; index < sink_count; ++index) {
+    sinks.push_back(makeSink("star_ff_" + std::to_string(index), icts::InstType::kFlipFlop, static_cast<int>(index + 1U)));
+    clock_pins.clock->add_load(sinks.back());
+  }
+  connectNet("large_star_net", clock_pins.source, sinks);
+  clock_pins.clock->set_clock_source_net(clock_pins.source_net);
+
+  ASSERT_TRUE(CTSDM.getDesign().rebuildClockDAG());
+  const auto* first_graph = CTSDM.getDesign().get_clock_dag().graphForClock(clock_pins.clock);
+  ASSERT_NE(first_graph, nullptr);
+  EXPECT_EQ(first_graph->build_work.ready_push_count, sink_count + 1U);
+  EXPECT_EQ(first_graph->build_work.ready_pop_count, sink_count + 1U);
+  EXPECT_EQ(first_graph->build_work.arc_relaxation_count, sink_count);
+  const auto first_topological_pins = CTSDM.getDesign().get_clock_dag().topologicalPins(clock_pins.clock);
+  ASSERT_EQ(first_topological_pins.size(), sink_count + 1U);
+
+  auto reversed_sinks = sinks;
+  std::ranges::reverse(reversed_sinks);
+  clock_pins.source_net->set_loads(reversed_sinks);
+  ASSERT_TRUE(CTSDM.getDesign().rebuildClockDAG());
+  const auto* second_graph = CTSDM.getDesign().get_clock_dag().graphForClock(clock_pins.clock);
+  ASSERT_NE(second_graph, nullptr);
+  EXPECT_EQ(second_graph->build_work.ready_push_count, sink_count + 1U);
+  EXPECT_EQ(second_graph->build_work.ready_pop_count, sink_count + 1U);
+  EXPECT_EQ(second_graph->build_work.arc_relaxation_count, sink_count);
+  const auto second_topological_pins = CTSDM.getDesign().get_clock_dag().topologicalPins(clock_pins.clock);
+  ASSERT_EQ(second_topological_pins.size(), first_topological_pins.size());
+  for (std::size_t index = 0U; index < first_topological_pins.size(); ++index) {
+    EXPECT_EQ(icts::Design::getPinFullName(second_topological_pins.at(index)), icts::Design::getPinFullName(first_topological_pins.at(index)));
+  }
+
+  const auto stats = CTSDM.getDesign().get_clock_dag().pathBufferStats(clock_pins.clock);
+  EXPECT_TRUE(stats.available);
+  EXPECT_EQ(stats.ff_sink_terminal_count, sink_count);
+  EXPECT_EQ(stats.terminal_probe_count, sink_count);
+  EXPECT_EQ(stats.min_buffer_count, 0);
+  EXPECT_EQ(stats.max_buffer_count, 0);
+}
+
 TEST(ClockDAGTest, BoundaryLoadDoesNotRequireBufferInputArc)
 {
   const ScopedDesignReset scoped_design_reset;
@@ -280,23 +435,151 @@ TEST(ClockDAGTest, BoundaryLoadDoesNotRequireBufferInputArc)
   EXPECT_EQ(stats.ff_sink_terminal_count, 1U);
 }
 
-TEST(ClockDAGTest, MalformedTrueBufferInvalidatesTopology)
+TEST(ClockDAGTest, PhysicalBufferWithoutOwnedArcIsTerminalBoundary)
 {
   const ScopedDesignReset scoped_design_reset;
 
   auto clock_pins = makeClock("clk", "clk_net");
   auto* buffer_inst = makeInst("malformed_buffer", icts::InstType::kBuffer, icts::Point<int>(10, 0));
-  auto* buffer_output = makePin("Y", icts::PinType::kOut, buffer_inst, buffer_inst->get_location());
-  auto* latch_sink = makeSink("latch_sink", icts::InstType::kLatch, 20);
-  connectNet("clk_net", clock_pins.source, {buffer_output});
+  auto* buffer_input = makePin("A", icts::PinType::kIn, buffer_inst, buffer_inst->get_location());
+  connectNet("clk_net", clock_pins.source, {buffer_input});
   clock_pins.clock->set_clock_source_net(clock_pins.source_net);
-  auto* leaf_net = connectNet("leaf_net", buffer_output, {latch_sink});
-  clock_pins.clock->add_inst(buffer_inst);
+  clock_pins.clock->add_load(buffer_input);
+
+  ASSERT_TRUE(CTSDM.getDesign().rebuildClockDAG());
+  EXPECT_EQ(clock_pins.clock->get_propagation_arcs().size(), 0U);
+  const auto reachable = CTSDM.getDesign().get_clock_dag().reachablePins(clock_pins.clock);
+  EXPECT_NE(std::ranges::find(reachable, buffer_input), reachable.end());
+}
+
+TEST(ClockDAGTest, IncompletePropagationArcIsRejectedAtOwningBoundary)
+{
+  const ScopedDesignReset scoped_design_reset;
+  auto clock_pins = makeClock("clk", "clk_net");
+  auto buffer = makeBuffer("malformed_buffer", 10);
+  const auto status = clock_pins.clock->addPropagationArc({.inst = buffer.inst, .input_pin = buffer.input, .output_pin = nullptr});
+  EXPECT_EQ(status.code, icts::ClockPropagationMutationCode::kIncomplete);
+  EXPECT_TRUE(clock_pins.clock->get_propagation_arcs().empty());
+}
+
+TEST(ClockDAGTest, AmbiguousInOutPropagationDirectionIsRejectedAtOwningBoundary)
+{
+  const ScopedDesignReset scoped_design_reset;
+  auto clock_pins = makeClock("clk", "clk_net");
+  auto buffer = makeBuffer("ambiguous_buffer", 10);
+  buffer.input->set_type(icts::PinType::kInOut);
+
+  const auto status = clock_pins.clock->addPropagationArc({.inst = buffer.inst,
+                                                           .input_pin = buffer.input,
+                                                           .output_pin = buffer.output,
+                                                           .kind = icts::ClockPropagationKind::kBuffer,
+                                                           .origin = icts::ClockPropagationOrigin::kSynthesized,
+                                                           .path_buffer_weight = 1});
+
+  EXPECT_EQ(status.code, icts::ClockPropagationMutationCode::kInvalidPinDirection);
+  EXPECT_EQ(status.message, "invalid_clock_propagation_pin_direction");
+  EXPECT_TRUE(clock_pins.clock->get_propagation_arcs().empty());
+}
+
+TEST(ClockDAGTest, CloneRemapsAndPinRemovalClearsOwnedPropagationArc)
+{
+  const ScopedDesignReset scoped_design_reset;
+  auto clock_pins = makeClock("clk", "clk_net");
+  auto buffer = makeBuffer("owned_buffer", 10);
+  auto* sink = makeSink("sink", icts::InstType::kFlipFlop, 20);
+  connectNet("clk_net", clock_pins.source, {buffer.input});
+  auto* leaf_net = connectNet("leaf_net", buffer.output, {sink});
+  addBufferArc(clock_pins.clock, buffer);
   clock_pins.clock->add_net(leaf_net);
-  clock_pins.clock->add_load(latch_sink);
+  clock_pins.clock->add_load(sink);
+
+  auto cloned = CTSDM.getDesign().clone();
+  auto* cloned_clock = cloned->findClock("clk", "clk_net");
+  ASSERT_NE(cloned_clock, nullptr);
+  ASSERT_EQ(cloned_clock->get_propagation_arcs().size(), 1U);
+  const auto& cloned_arc = cloned_clock->get_propagation_arcs().front();
+  EXPECT_NE(cloned_arc.inst, buffer.inst);
+  EXPECT_NE(cloned_arc.input_pin, buffer.input);
+  EXPECT_NE(cloned_arc.output_pin, buffer.output);
+  EXPECT_EQ(cloned_arc.inst->get_name(), buffer.inst->get_name());
+  EXPECT_EQ(cloned_arc.origin, icts::ClockPropagationOrigin::kSynthesized);
+
+  clock_pins.clock->removePropagationArcsFor(buffer.input);
+  EXPECT_TRUE(clock_pins.clock->get_propagation_arcs().empty());
+  EXPECT_TRUE(clock_pins.clock->get_insts().empty());
+}
+
+TEST(ClockDAGTest, DesignRemovalAndTopologyClearInvalidateEveryBorrowedClockReference)
+{
+  const ScopedDesignReset scoped_design_reset;
+  auto& design = CTSDM.getDesign();
+  auto clock_pins = makeClock("clk", "clk_net");
+  auto buffer = makeBuffer("owned_buffer", 10);
+  auto* sink = makeSink("sink", icts::InstType::kFlipFlop, 20);
+  connectNet("clk_net", clock_pins.source, {buffer.input});
+  auto* leaf_net = connectNet("leaf_net", buffer.output, {sink});
+  addBufferArc(clock_pins.clock, buffer);
+  clock_pins.clock->add_net(leaf_net);
+  clock_pins.clock->add_load(sink);
+  ASSERT_TRUE(design.rebuildClockDAG());
+
+  design.removeClockMembershipObjects(*clock_pins.clock);
+  EXPECT_EQ(design.findInst("owned_buffer"), nullptr);
+  EXPECT_EQ(design.findNet("leaf_net"), nullptr);
+  EXPECT_TRUE(clock_pins.clock->get_propagation_arcs().empty());
+  EXPECT_TRUE(clock_pins.clock->get_insts().empty());
+  EXPECT_TRUE(clock_pins.clock->get_nets().empty());
+  EXPECT_TRUE(clock_pins.clock->get_loads().empty());
+  EXPECT_TRUE(design.rebuildClockDAG());
+
+  design.clearTopologyObjects();
+  EXPECT_EQ(clock_pins.clock->get_clock_source(), nullptr);
+  EXPECT_EQ(clock_pins.clock->get_clock_source_net(), nullptr);
+  EXPECT_TRUE(clock_pins.clock->get_propagation_arcs().empty());
+  EXPECT_TRUE(clock_pins.clock->get_insts().empty());
+  EXPECT_TRUE(clock_pins.clock->get_nets().empty());
+  EXPECT_TRUE(clock_pins.clock->get_loads().empty());
+}
+
+TEST(ClockDAGTest, TypedIssueCarriesDeterministicPhysicalKindEvidence)
+{
+  const ScopedDesignReset scoped_design_reset;
+  auto clock_pins = makeClock("clk", "clk_net");
+  auto buffer = makeBuffer("kind_mismatch", 10);
+  auto* sink = makeSink("sink", icts::InstType::kFlipFlop, 20);
+  connectNet("clk_net", clock_pins.source, {buffer.input});
+  auto* leaf_net = connectNet("leaf_net", buffer.output, {sink});
+  addBufferArc(clock_pins.clock, buffer);
+  clock_pins.clock->add_net(leaf_net);
+  clock_pins.clock->add_load(sink);
+  buffer.inst->set_type(icts::InstType::kInverter);
 
   EXPECT_FALSE(CTSDM.getDesign().rebuildClockDAG());
-  EXPECT_NE(CTSDM.getDesign().get_clock_dag().get_status().find("clock_cell_input_pin_is_null"), std::string::npos);
+  const auto& issues = CTSDM.getDesign().get_clock_dag().get_issues();
+  ASSERT_FALSE(issues.empty());
+  EXPECT_EQ(issues.front().code, icts::ClockGraphIssueCode::kPhysicalKindMismatch);
+  EXPECT_EQ(issues.front().clock_name, "clk");
+  EXPECT_EQ(issues.front().inst_name, "kind_mismatch");
+  EXPECT_EQ(issues.front().input_pin_name, "kind_mismatch/A");
+  EXPECT_EQ(issues.front().output_pin_name, "kind_mismatch/Y");
+  EXPECT_EQ(issues.front().propagation_kind, "buffer");
+  EXPECT_EQ(issues.front().propagation_origin, "synthesized");
+  EXPECT_EQ(issues.front().expected, "buffer");
+  EXPECT_EQ(issues.front().observed, "inverter");
+  EXPECT_EQ(issues.front().invariant, "physical_kind_mismatch");
+
+  const auto status = icts::DataManager::makeClockGraphFailureStatus(icts::DataManagerStatusCode::kCommitError, "candidate graph rejected",
+                                                                     CTSDM.getDesign().get_clock_dag());
+  EXPECT_EQ(status.code, icts::DataManagerStatusCode::kCommitError);
+  ASSERT_FALSE(status.graph_issues.empty());
+  EXPECT_EQ(status.graph_issues.front().code, icts::ClockGraphIssueCode::kPhysicalKindMismatch);
+  EXPECT_EQ(status.graph_issues.front().inst_name, "kind_mismatch");
+  EXPECT_EQ(status.graph_issues.front().propagation_origin, "synthesized");
+  ASSERT_FALSE(status.diagnostics.empty());
+  EXPECT_NE(status.message.find("physical_kind_mismatch"), std::string::npos);
+  EXPECT_NE(status.message.find("propagation_origin=synthesized"), std::string::npos);
+  EXPECT_NE(status.message.find("expected=buffer"), std::string::npos);
+  EXPECT_NE(status.message.find("observed=inverter"), std::string::npos);
 }
 
 TEST(ClockDAGTest, NoFlipFlopTerminalIsUnavailableAndDoesNotReuseTotalBufferCount)
@@ -310,7 +593,7 @@ TEST(ClockDAGTest, NoFlipFlopTerminalIsUnavailableAndDoesNotReuseTotalBufferCoun
   clock_pins.clock->set_clock_source_net(clock_pins.source_net);
   auto* leaf_net = connectNet("macro_leaf_net", buffer.output, {macro_sink});
 
-  clock_pins.clock->add_inst(buffer.inst);
+  addBufferArc(clock_pins.clock, buffer);
   clock_pins.clock->add_net(leaf_net);
   clock_pins.clock->add_load(macro_sink);
 
@@ -331,7 +614,7 @@ TEST(ClockDAGTest, CycleInvalidatesTopologyAndPathStats)
   connectNet("clk_net", clock_pins.source, {buffer.input});
   clock_pins.clock->set_clock_source_net(clock_pins.source_net);
   auto* loop_net = connectNet("loop_net", buffer.output, {buffer.input});
-  clock_pins.clock->add_inst(buffer.inst);
+  addBufferArc(clock_pins.clock, buffer);
   clock_pins.clock->add_net(loop_net);
 
   EXPECT_FALSE(CTSDM.getDesign().rebuildClockDAG());
@@ -359,8 +642,8 @@ TEST(ClockDAGTest, MultiClockQueriesRemainIsolated)
   clock_two.clock->set_clock_source_net(clock_two.source_net);
   auto* mid_net = connectNet("clk_two_mid_net", buf_a.output, {buf_b.input});
   auto* leaf_net = connectNet("clk_two_leaf_net", buf_b.output, {ff_two});
-  clock_two.clock->add_inst(buf_a.inst);
-  clock_two.clock->add_inst(buf_b.inst);
+  addBufferArc(clock_two.clock, buf_a);
+  addBufferArc(clock_two.clock, buf_b);
   clock_two.clock->add_net(mid_net);
   clock_two.clock->add_net(leaf_net);
   clock_two.clock->add_load(ff_two);
@@ -394,9 +677,9 @@ TEST(ClockDAGTest, QorEvaluationPathDepthFieldsUseSourceToFlipFlopDAGStats)
   auto* two_deep_mid_net = connectNet("qor_two_deep_mid_net", buf_two_a.output, {buf_two_b.input});
   auto* two_deep_leaf_net = connectNet("qor_two_deep_leaf_net", buf_two_b.output, {ff_two});
 
-  clock_pins.clock->add_inst(buf_one.inst);
-  clock_pins.clock->add_inst(buf_two_a.inst);
-  clock_pins.clock->add_inst(buf_two_b.inst);
+  addBufferArc(clock_pins.clock, buf_one);
+  addBufferArc(clock_pins.clock, buf_two_a);
+  addBufferArc(clock_pins.clock, buf_two_b);
   clock_pins.clock->add_net(one_deep_net);
   clock_pins.clock->add_net(two_deep_mid_net);
   clock_pins.clock->add_net(two_deep_leaf_net);
@@ -433,7 +716,7 @@ TEST(ClockDAGTest, QorEvaluationNoFlipFlopPathDepthIsUnavailableZeroNotTotalBuff
   clock_pins.clock->set_clock_source_net(clock_pins.source_net);
   auto* leaf_net = connectNet("qor_macro_leaf_net", buffer.output, {macro_sink});
 
-  clock_pins.clock->add_inst(buffer.inst);
+  addBufferArc(clock_pins.clock, buffer);
   clock_pins.clock->add_net(leaf_net);
   clock_pins.clock->add_load(macro_sink);
 

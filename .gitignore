@@ -49,3 +49,7 @@ src/third_party/mt-kahypar/
 result
 .ccache
 test
+!src/operation/iCTS/test/
+!src/operation/iCTS/test/data_manager/adapter/sdc/
+!src/operation/iCTS/test/data_manager/adapter/sdc/CMakeLists.txt
+!src/operation/iCTS/test/data_manager/adapter/sdc/ClockTraceTest.cc

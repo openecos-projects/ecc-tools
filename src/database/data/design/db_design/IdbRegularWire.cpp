@@ -139,7 +139,18 @@ IdbCoordinate<int32_t>* IdbRegularWireSegment::get_point_end()
 idb::IdbRect IdbRegularWireSegment::get_segment_rect()
 {
   if (is_rect()) {
-    return get_delta_rect();
+    /// the delta rect is an offset from the start point
+    if (get_delta_rect() == nullptr) {
+      return IdbRect();
+    }
+
+    IdbRect rect(get_delta_rect());
+    IdbCoordinate<int32_t>* point_start = get_point_start();
+    if (point_start != nullptr) {
+      rect.moveByStep(point_start->get_x(), point_start->get_y());
+    }
+
+    return rect;
   } else {
     int32_t routing_width = dynamic_cast<IdbLayerRouting*>(_layer)->get_width();
     IdbCoordinate<int32_t>* point_1 = get_point_start();
@@ -208,6 +219,7 @@ vector<IdbVia*> IdbRegularWireSegment::take_via_list()
 
 void IdbRegularWireSegment::set_delta_rect(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y)
 {
+  delete _delta_rect;
   _delta_rect = new IdbRect(ll_x, ll_y, ur_x, ur_y);
 }
 
@@ -284,8 +296,9 @@ bool IdbRegularWireSegment::isIntersection(IdbLayerShape* layer_shape)
       return false;
     }
 
+    IdbRect segment_rect = get_segment_rect();
     for (auto rect : layer_shape->get_rect_list()) {
-      if (_delta_rect->isIntersection(rect)) {
+      if (segment_rect.isIntersection(rect)) {
         return true;
       }
     }
@@ -420,7 +433,8 @@ bool IdbRegularWireSegment::isConnectWireToDeltaRect(IdbRegularWireSegment* segm
 
   IdbRect this_rect(get_point_start(), get_point_second(), layer->get_width());
 
-  return this_rect.isIntersection(segment->get_delta_rect());
+  IdbRect segment_rect = segment->get_segment_rect();
+  return this_rect.isIntersection(&segment_rect);
 }
 
 bool IdbRegularWireSegment::isConnectWireToVia(IdbRegularWireSegment* segment)
@@ -532,8 +546,9 @@ bool IdbRegularWireSegment::isConnectRectToVia(IdbRegularWireSegment* segment)
     }
 
     /// check connection
+    IdbRect this_rect = get_segment_rect();
     for (auto seg_rect : connect_seg_shape->get_rect_list()) {
-      if (_delta_rect->isIntersection(seg_rect)) {
+      if (this_rect.isIntersection(seg_rect)) {
         return true;
       }
     }
@@ -553,7 +568,9 @@ bool IdbRegularWireSegment::isConnectRectToRect(IdbRegularWireSegment* segment)
     return false;
   }
 
-  return _delta_rect->isIntersection(segment->get_delta_rect());
+  IdbRect this_rect = get_segment_rect();
+  IdbRect segment_rect = segment->get_segment_rect();
+  return this_rect.isIntersection(&segment_rect);
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -660,6 +677,11 @@ IdbRegularWireList::IdbRegularWireList()
 }
 
 IdbRegularWireList::~IdbRegularWireList()
+{
+  clear();
+}
+
+void IdbRegularWireList::reset()
 {
   clear();
 }

@@ -1,7 +1,7 @@
 add_library(
   icts_source_data_manager_design
+  ${ICTS_DATA_MANAGER_DESIGN}/Clock.cc
   ${ICTS_DATA_MANAGER_DESIGN}/ClockDAG.cc
-  ${ICTS_DATA_MANAGER_DESIGN}/ClockNetwork.cc
   ${ICTS_DATA_MANAGER_DESIGN}/ClockLayout.cc
   ${ICTS_DATA_MANAGER_DESIGN}/Design.cc
 )

@@ -22,9 +22,10 @@ namespace tcl {
 
 TclZHInsertMetal::TclZHInsertMetal(const char* cmd_name) : TclCmd(cmd_name)
 {
-  _config_list.push_back(std::make_pair("-rules", ValueType::kString));
-  _config_list.push_back(std::make_pair("-area", ValueType::kIntList));
-  _config_list.push_back(std::make_pair("-reset_fill", ValueType::kInt));
+  // std::string min_fill_layer;  // optional
+  _config_list.push_back(std::make_pair("-min_fill_layer", ValueType::kString));
+  // std::string max_fill_layer;  // optional
+  _config_list.push_back(std::make_pair("-max_fill_layer", ValueType::kString));
 
   TclUtil::addOption(this, _config_list);
 }

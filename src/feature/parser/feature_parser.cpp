@@ -35,7 +35,6 @@
 #include "feature_parser.h"
 
 #include "feature_summary.h"
-#include "flow_config.h"
 #include "idm.h"
 #include "json_parser.h"
 
@@ -106,7 +105,6 @@ bool FeatureParser::buildTools(std::string json_path, std::string step)
                                                                        {"legalization", [this, step]() { return buildSummaryPL(step); }},
                                                                        {"filler", [this, step]() { return buildSummaryPL(step); }},
                                                                        {"CTS", [this]() { return buildSummaryCTS(); }},
-                                                                       {"fixFanout", [this]() { return buildSummaryNetOpt(); }},
                                                                        {"optDrv", [this, step]() { return buildSummaryTO(step); }},
                                                                        {"optHold", [this, step]() { return buildSummaryTO(step); }},
                                                                        {"optSetup", [this, step]() { return buildSummaryTO(step); }},
