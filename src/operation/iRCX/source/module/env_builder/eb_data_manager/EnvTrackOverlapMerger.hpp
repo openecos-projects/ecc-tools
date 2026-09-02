@@ -48,10 +48,7 @@ class EnvTrackOverlapMerger
   }
 
  private:
-  EnvTrackOverlap makeEmptyTrackOverlap(int32_t start_coord, int32_t end_coord) const
-  {
-    return EnvTrackOverlap(start_coord, end_coord, INT32_MAX, nullptr);
-  }
+  EnvTrackOverlap makeEmptyTrackOverlap(int32_t start_coord, int32_t end_coord) const { return EnvTrackOverlap(start_coord, end_coord, INT32_MAX, nullptr); }
 
   void appendTrackOverlap(std::vector<EnvTrackOverlap>& track_overlap_list, const EnvTrackOverlap& track_overlap) const
   {
@@ -60,8 +57,7 @@ class EnvTrackOverlapMerger
     }
 
     if (!track_overlap_list.empty() && track_overlap_list.back().get_end_coord() == track_overlap.get_start_coord()
-        && track_overlap_list.back().get_edge() == track_overlap.get_edge()
-        && track_overlap_list.back().get_spacing() == track_overlap.get_spacing()) {
+        && track_overlap_list.back().get_edge() == track_overlap.get_edge() && track_overlap_list.back().get_spacing() == track_overlap.get_spacing()) {
       track_overlap_list.back().set_end_coord(track_overlap.get_end_coord());
       return;
     }
@@ -149,8 +145,7 @@ class EnvTrackOverlapMerger
 
     if (!edge_env_interval_list.empty() && edge_env_interval_list.back().get_end_coord() == start_coord
         && edge_env_interval_list.back().get_lower_adjacent_edge() == lower_adjacent_edge
-        && edge_env_interval_list.back().get_upper_adjacent_edge() == upper_adjacent_edge
-        && edge_env_interval_list.back().get_lower_spacing() == lower_spacing
+        && edge_env_interval_list.back().get_upper_adjacent_edge() == upper_adjacent_edge && edge_env_interval_list.back().get_lower_spacing() == lower_spacing
         && edge_env_interval_list.back().get_upper_spacing() == upper_spacing) {
       edge_env_interval_list.back().set_end_coord(end_coord);
       return;
@@ -166,8 +161,7 @@ class EnvTrackOverlapMerger
     edge_env_interval_list.push_back(edge_env_interval);
   }
 
-  void mergeTrackOverlapList(const std::vector<EnvTrackOverlap>& lower_track_overlap_list,
-                             const std::vector<EnvTrackOverlap>& upper_track_overlap_list,
+  void mergeTrackOverlapList(const std::vector<EnvTrackOverlap>& lower_track_overlap_list, const std::vector<EnvTrackOverlap>& upper_track_overlap_list,
                              std::vector<EdgeEnvInterval>& edge_env_interval_list) const
   {
     edge_env_interval_list.clear();
@@ -180,14 +174,14 @@ class EnvTrackOverlapMerger
 
     while (lower_overlap_idx < static_cast<int32_t>(lower_track_overlap_list.size())
            && upper_overlap_idx < static_cast<int32_t>(upper_track_overlap_list.size())) {
-      int32_t overlap_start_coord = std::max(lower_track_overlap_list[lower_overlap_idx].get_start_coord(),
-                                                   upper_track_overlap_list[upper_overlap_idx].get_start_coord());
-      int32_t overlap_end_coord = std::min(lower_track_overlap_list[lower_overlap_idx].get_end_coord(),
-                                                 upper_track_overlap_list[upper_overlap_idx].get_end_coord());
+      int32_t overlap_start_coord
+          = std::max(lower_track_overlap_list[lower_overlap_idx].get_start_coord(), upper_track_overlap_list[upper_overlap_idx].get_start_coord());
+      int32_t overlap_end_coord
+          = std::min(lower_track_overlap_list[lower_overlap_idx].get_end_coord(), upper_track_overlap_list[upper_overlap_idx].get_end_coord());
 
       if (overlap_start_coord < overlap_end_coord) {
-        appendEdgeEnvInterval(edge_env_interval_list, overlap_start_coord, overlap_end_coord,
-                              lower_track_overlap_list[lower_overlap_idx], upper_track_overlap_list[upper_overlap_idx]);
+        appendEdgeEnvInterval(edge_env_interval_list, overlap_start_coord, overlap_end_coord, lower_track_overlap_list[lower_overlap_idx],
+                              upper_track_overlap_list[upper_overlap_idx]);
       }
 
       if (lower_track_overlap_list[lower_overlap_idx].get_end_coord() == overlap_end_coord) {

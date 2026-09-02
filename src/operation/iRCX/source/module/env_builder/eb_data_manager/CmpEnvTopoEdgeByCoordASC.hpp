@@ -48,7 +48,6 @@ class CmpEnvTopoEdgeByCoordASC
     }
     return lhs->get_edge_idx() < rhs->get_edge_idx();
   }
-
 };
 
 }  // namespace ircx

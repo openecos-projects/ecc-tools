@@ -16,8 +16,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include <functional>
-
 #include "PlanarCoord.hpp"
 #include "PlanarRect.hpp"
 #include "RTHeader.hpp"

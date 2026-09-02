@@ -14,9 +14,8 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include <cmath>
-
 #include "DataManager.hpp"
+#include "STAHeader.hpp"
 #include "SdcCommandUtils.hpp"
 #include "SdcCommands.hpp"
 

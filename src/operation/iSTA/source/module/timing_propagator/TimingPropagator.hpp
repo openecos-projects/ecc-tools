@@ -60,8 +60,8 @@ class TimingPropagator
   void seedDataSlew(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
   void propagateDataSlewDelayArc(std::size_t arc_idx);
   void propagateDataSlewDelayArc(std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
-  void updateDataSlewDelay(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
-                           TransType input_trans_type, TransType output_trans_type);
+  void updateDataSlewDelay(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type, TransType input_trans_type,
+                           TransType output_trans_type);
   void updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay);
   void updateDataSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type, double data_slew);
   bool hasDataSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type);

@@ -16,10 +16,9 @@
 // ***************************************************************************************
 #include "LayerAssigner.hpp"
 
-#include <algorithm>
-
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
+#include "RTHeader.hpp"
 #include "RTInterface.hpp"
 #include "Utility.hpp"
 

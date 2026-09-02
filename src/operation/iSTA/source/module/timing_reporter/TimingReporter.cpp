@@ -19,9 +19,8 @@
 #include "DataManager.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
+#include "STAHeader.hpp"
 #include "Utility.hpp"
-
-#include <cstdint>
 
 namespace ista {
 
@@ -201,8 +200,7 @@ void TimingReporter::outputReportHeader(std::ofstream* report_file, DelayType de
   (*report_file) << "****************************************\n";
   (*report_file) << "Design : " << database.get_design_name() << "\n";
   (*report_file) << "DelayType : " << GetDelayTypeName()(delay_type) << "\n";
-  (*report_file) << "StartEndType : "
-                 << (start_end_type == StartEndType::kNone ? "all" : GetStartEndTypeName()(start_end_type)) << "\n";
+  (*report_file) << "StartEndType : " << (start_end_type == StartEndType::kNone ? "all" : GetStartEndTypeName()(start_end_type)) << "\n";
   (*report_file) << "SlackLesserThan : ";
   if (STADM.getConfig().has_timing_report_slack_lesser_than) {
     (*report_file) << getNumberString(STADM.getConfig().timing_report_slack_lesser_than);
@@ -242,8 +240,7 @@ void TimingReporter::outputReportFooter(std::ofstream* report_file)
   (*report_file) << "1\n";
 }
 
-std::vector<std::pair<std::string, TimingPath*>> TimingReporter::getReportTimingPathList(DelayType delay_type,
-                                                                                        StartEndType start_end_type)
+std::vector<std::pair<std::string, TimingPath*>> TimingReporter::getReportTimingPathList(DelayType delay_type, StartEndType start_end_type)
 {
   int32_t path_report_number = STADM.getConfig().path_report_number;
   std::vector<std::pair<std::string, TimingPath*>> sorted_timing_path_list = getSortedReportTimingPathList(delay_type, start_end_type);
@@ -257,8 +254,7 @@ std::vector<std::pair<std::string, TimingPath*>> TimingReporter::getReportTiming
   return report_timing_path_list;
 }
 
-std::vector<std::pair<std::string, TimingPath*>> TimingReporter::getSortedReportTimingPathList(DelayType delay_type,
-                                                                                               StartEndType start_end_type)
+std::vector<std::pair<std::string, TimingPath*>> TimingReporter::getSortedReportTimingPathList(DelayType delay_type, StartEndType start_end_type)
 {
   Database& database = STADM.getDatabase();
   std::vector<std::pair<std::string, TimingPath*>> timing_path_list;
@@ -266,8 +262,7 @@ std::vector<std::pair<std::string, TimingPath*>> TimingReporter::getSortedReport
     std::string& group_name = timing_path_group.get_group_name();
     for (auto& [end_point, timing_path_end] : timing_path_group.get_timing_path_end_map()) {
       for (TimingPath& timing_path : timing_path_end.get_timing_path_list()) {
-        if (isMatchAnalysisType(timing_path, delay_type) && isMatchStartEndType(timing_path, start_end_type)
-            && isMatchReportSlack(timing_path)) {
+        if (isMatchAnalysisType(timing_path, delay_type) && isMatchStartEndType(timing_path, start_end_type) && isMatchReportSlack(timing_path)) {
           timing_path_list.emplace_back(group_name, &timing_path);
         }
       }
@@ -301,8 +296,7 @@ std::vector<std::pair<std::string, TimingPath*>> TimingReporter::getSortedReport
   return endpoint_limited_timing_path_list;
 }
 
-std::vector<TimingPath*> TimingReporter::getSortedTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type,
-                                                                 StartEndType start_end_type)
+std::vector<TimingPath*> TimingReporter::getSortedTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type, StartEndType start_end_type)
 {
   std::vector<TimingPath*> timing_path_list;
   for (auto& [end_point, timing_path_end] : timing_path_group.get_timing_path_end_map()) {
@@ -536,8 +530,7 @@ void TimingReporter::outputQorSummaryReport()
       (*json_file) << ",\"nvp\":" << total_hold_nvp << "}";
     }
     (*json_file) << "},\n  \"design_statistics\": {\"cap\":0,\"fanout\":0,\"tran\":0,\"tdrc\":0,\"cella\":" << cell_area
-                 << ",\"bufs\":null,\"leafs_k\":" << leaf_cell_k
-                 << ",\"tnets_k\":null,\"ctbuf\":null,\"regs\":null}\n}\n";
+                 << ",\"bufs\":null,\"leafs_k\":" << leaf_cell_k << ",\"tnets_k\":null,\"ctbuf\":null,\"regs\":null}\n}\n";
     STAUTIL.closeFileStream(json_file);
   };
 
@@ -557,16 +550,15 @@ void TimingReporter::outputQorSummaryReport()
     }
     return;
   }
-  (*report_file) << std::left << std::setw(max_group_length) << "Path Group" << std::right << std::setw(11) << "WNS" << std::setw(11) << "TNS"
-                 << std::setw(8) << "NVP" << std::setw(10) << "FREQ" << "    " << std::setw(8) << "WNS(H)" << std::setw(11) << "TNS(H)"
-                 << std::setw(8) << "NVP(H)" << "\n";
+  (*report_file) << std::left << std::setw(max_group_length) << "Path Group" << std::right << std::setw(11) << "WNS" << std::setw(11) << "TNS" << std::setw(8)
+                 << "NVP" << std::setw(10) << "FREQ" << "    " << std::setw(8) << "WNS(H)" << std::setw(11) << "TNS(H)" << std::setw(8) << "NVP(H)" << "\n";
   (*report_file) << bar << "\n";
 
   std::set<std::string> printed_group_set;
   for (std::string& group_name : setup_group_list) {
-    (*report_file) << std::left << std::setw(max_group_length) << group_name << std::right << " "
-                   << getQorDoubleString(setup_wns_map[group_name], 10, 3) << " " << getQorDoubleString(setup_tns_map[group_name], 10, 1) << " "
-                   << getQorIntString(setup_nvp_map[group_name], 7) << " " << getQorFrequencyString(setup_frequency_map[group_name]) << " ";
+    (*report_file) << std::left << std::setw(max_group_length) << group_name << std::right << " " << getQorDoubleString(setup_wns_map[group_name], 10, 3) << " "
+                   << getQorDoubleString(setup_tns_map[group_name], 10, 1) << " " << getQorIntString(setup_nvp_map[group_name], 7) << " "
+                   << getQorFrequencyString(setup_frequency_map[group_name]) << " ";
     if (hold_wns_map.count(group_name) > 0) {
       (*report_file) << getQorDoubleString(hold_wns_map[group_name], 10, 3) << " " << getQorDoubleString(hold_tns_map[group_name], 10, 1) << " "
                      << getQorIntString(hold_nvp_map[group_name], 7);
@@ -581,25 +573,24 @@ void TimingReporter::outputQorSummaryReport()
     if (printed_group_set.count(group_name) > 0) {
       continue;
     }
-    (*report_file) << std::left << std::setw(max_group_length) << group_name << std::right << " " << getQorNilString(10) << " "
-                   << getQorNilString(10) << " " << getQorNilString(7) << " " << getQorNilString(10) << " "
-                   << getQorDoubleString(hold_wns_map[group_name], 10, 3) << " " << getQorDoubleString(hold_tns_map[group_name], 10, 1) << " "
-                   << getQorIntString(hold_nvp_map[group_name], 7) << "\n";
+    (*report_file) << std::left << std::setw(max_group_length) << group_name << std::right << " " << getQorNilString(10) << " " << getQorNilString(10) << " "
+                   << getQorNilString(7) << " " << getQorNilString(10) << " " << getQorDoubleString(hold_wns_map[group_name], 10, 3) << " "
+                   << getQorDoubleString(hold_tns_map[group_name], 10, 1) << " " << getQorIntString(hold_nvp_map[group_name], 7) << "\n";
   }
 
   (*report_file) << bar << "\n";
   (*report_file) << std::left << std::setw(max_group_length) << "Summary" << std::right << " " << worst_setup_wns << " "
-                 << getQorDoubleString(total_setup_tns, 10, 1) << " " << getQorIntString(total_setup_nvp, 7) << " " << worst_frequency << " "
-                 << worst_hold_wns << " " << getQorDoubleString(total_hold_tns, 10, 1) << " " << getQorIntString(total_hold_nvp, 7) << "\n";
+                 << getQorDoubleString(total_setup_tns, 10, 1) << " " << getQorIntString(total_setup_nvp, 7) << " " << worst_frequency << " " << worst_hold_wns
+                 << " " << getQorDoubleString(total_hold_tns, 10, 1) << " " << getQorIntString(total_hold_nvp, 7) << "\n";
   (*report_file) << bar << "\n";
   int32_t drc_column_width = std::max(7, max_group_length - 13);
-  (*report_file) << std::setw(7) << "CAP" << std::setw(8) << "FANOUT" << std::setw(8) << "TRAN" << std::setw(drc_column_width + 1) << "TDRC"
-                 << std::setw(11) << "CELLA" << std::setw(8) << "BUFS" << std::setw(10) << "LEAFS" << std::setw(12) << "TNETS"
-                 << std::setw(11) << "CTBUF" << std::setw(8) << "REGS" << "\n";
+  (*report_file) << std::setw(7) << "CAP" << std::setw(8) << "FANOUT" << std::setw(8) << "TRAN" << std::setw(drc_column_width + 1) << "TDRC" << std::setw(11)
+                 << "CELLA" << std::setw(8) << "BUFS" << std::setw(10) << "LEAFS" << std::setw(12) << "TNETS" << std::setw(11) << "CTBUF" << std::setw(8)
+                 << "REGS" << "\n";
   (*report_file) << bar << "\n";
-  (*report_file) << std::setw(7) << 0 << std::setw(8) << 0 << std::setw(8) << 0 << std::setw(drc_column_width + 1) << 0 << std::setw(11)
-                 << cell_area << getQorNilString(7) << "K" << getQorKString(leaf_cell_k, 10)
-                 << getQorNilString(11) << "K" << getQorNilString(11) << getQorNilString(8) << "\n";
+  (*report_file) << std::setw(7) << 0 << std::setw(8) << 0 << std::setw(8) << 0 << std::setw(drc_column_width + 1) << 0 << std::setw(11) << cell_area
+                 << getQorNilString(7) << "K" << getQorKString(leaf_cell_k, 10) << getQorNilString(11) << "K" << getQorNilString(11) << getQorNilString(8)
+                 << "\n";
   (*report_file) << bar << "\n";
   (*report_file) << "\n";
   (*report_file) << "NVP    - No. of Violating Paths\n";
@@ -630,8 +621,7 @@ void TimingReporter::outputTimingPathsJson()
   const int32_t path_limit = std::max(STADM.getConfig().timing_path_limit, 0);
   const std::string corner = STADM.getConfig().timing_corner.empty() ? "unknown" : STADM.getConfig().timing_corner;
 
-  (*json_file) << "{\n  \"schema_version\": 1,\n  \"corner\": \"" << escapeJsonString(corner)
-               << "\",\n  \"path_limit\": " << path_limit << ",\n  \"paths\": [";
+  (*json_file) << "{\n  \"schema_version\": 1,\n  \"corner\": \"" << escapeJsonString(corner) << "\",\n  \"path_limit\": " << path_limit << ",\n  \"paths\": [";
   bool first_path = true;
   for (DelayType delay_type : {DelayType::kMax, DelayType::kMin}) {
     std::vector<std::pair<std::string, TimingPath*>> timing_paths;
@@ -680,19 +670,15 @@ std::string TimingReporter::getTimingPathsJsonFilePath()
   return STAUTIL.getString(STADM.getConfig().tr_temp_directory_path, "timing_paths.json");
 }
 
-void TimingReporter::outputTimingPathJson(std::ofstream* json_file, TimingPath& timing_path, std::string& path_group_name,
-                                          DelayType delay_type)
+void TimingReporter::outputTimingPathJson(std::ofstream* json_file, TimingPath& timing_path, std::string& path_group_name, DelayType delay_type)
 {
   const std::string analysis_type = delay_type == DelayType::kMax ? "setup" : "hold";
   const std::string clock_name = getClockName(timing_path);
   const std::string check_type = GetTimingCheckTypeName()(timing_path.get_check_type());
-  (*json_file) << "{\"path_id\":\"" << escapeJsonString(getTimingPathId(timing_path, path_group_name, delay_type))
-               << "\",\"analysis_type\":\"" << analysis_type << "\",\"path_group\":\""
-               << escapeJsonString(path_group_name) << "\",\"start_point\":\""
-               << escapeJsonString(timing_path.get_start_point()) << "\",\"end_point\":\""
-               << escapeJsonString(timing_path.get_end_point()) << "\",\"launch_clock\":\""
-               << escapeJsonString(clock_name) << "\",\"capture_clock\":\"" << escapeJsonString(clock_name)
-               << "\",\"check_type\":\"" << escapeJsonString(check_type) << "\",\"slack_ns\":";
+  (*json_file) << "{\"path_id\":\"" << escapeJsonString(getTimingPathId(timing_path, path_group_name, delay_type)) << "\",\"analysis_type\":\"" << analysis_type
+               << "\",\"path_group\":\"" << escapeJsonString(path_group_name) << "\",\"start_point\":\"" << escapeJsonString(timing_path.get_start_point())
+               << "\",\"end_point\":\"" << escapeJsonString(timing_path.get_end_point()) << "\",\"launch_clock\":\"" << escapeJsonString(clock_name)
+               << "\",\"capture_clock\":\"" << escapeJsonString(clock_name) << "\",\"check_type\":\"" << escapeJsonString(check_type) << "\",\"slack_ns\":";
   outputJsonNumber(json_file, timing_path.get_slack());
   (*json_file) << ",\"arrival_ns\":";
   outputJsonNumber(json_file, timing_path.get_path_delay());
@@ -716,15 +702,13 @@ void TimingReporter::outputTimingPathJson(std::ofstream* json_file, TimingPath& 
     } else {
       kind += "_arc";
     }
-    (*json_file) << "{\"kind\":\"" << kind << "\",\"pin\":\""
-                 << escapeJsonString(path_point.get_pin_name()) << "\",\"instance\":\""
-                 << escapeJsonString(path_point.get_instance_name()) << "\",\"cell\":\""
-                 << escapeJsonString(path_point.get_cell_name()) << "\",\"incremental_delay_ns\":";
+    (*json_file) << "{\"kind\":\"" << kind << "\",\"pin\":\"" << escapeJsonString(path_point.get_pin_name()) << "\",\"instance\":\""
+                 << escapeJsonString(path_point.get_instance_name()) << "\",\"cell\":\"" << escapeJsonString(path_point.get_cell_name())
+                 << "\",\"incremental_delay_ns\":";
     outputJsonNumber(json_file, path_point.get_arc_delay());
     (*json_file) << ",\"arrival_ns\":";
     outputJsonNumber(json_file, path_point.get_arrival());
-    (*json_file) << ",\"transition\":\""
-                 << GetTransTypeName()(path_point.get_trans_type()) << "\"}";
+    (*json_file) << ",\"transition\":\"" << GetTransTypeName()(path_point.get_trans_type()) << "\"}";
     first_stage = false;
   }
   (*json_file) << "]}";
@@ -735,9 +719,8 @@ std::string TimingReporter::getTimingPathId(TimingPath& timing_path, std::string
   const std::string analysis_type = delay_type == DelayType::kMax ? "setup" : "hold";
   const std::string corner = STADM.getConfig().timing_corner.empty() ? "unknown" : STADM.getConfig().timing_corner;
   const std::string clock_name = getClockName(timing_path);
-  return stableTimingPathId(
-      STAUTIL.getString(corner, "|", analysis_type, "|", path_group_name, "|", timing_path.get_start_point(), "|",
-                         timing_path.get_end_point(), "|", clock_name, "|", clock_name));
+  return stableTimingPathId(STAUTIL.getString(corner, "|", analysis_type, "|", path_group_name, "|", timing_path.get_start_point(), "|",
+                                              timing_path.get_end_point(), "|", clock_name, "|", clock_name));
 }
 
 std::vector<TimingPath*> TimingReporter::getQorTimingPathList(TimingPathGroup& timing_path_group, DelayType delay_type)
@@ -931,16 +914,14 @@ bool TimingReporter::isClockSourceStartPoint(std::string& pin_name)
   return false;
 }
 
-void TimingReporter::outputTimingPath(std::ofstream* report_file, TimingPath& timing_path, std::string& path_group_name,
-                                      DelayType delay_type)
+void TimingReporter::outputTimingPath(std::ofstream* report_file, TimingPath& timing_path, std::string& path_group_name, DelayType delay_type)
 {
   outputTimingPathHeader(report_file, timing_path, path_group_name, delay_type);
   std::size_t label_width = outputTimingPointList(report_file, timing_path, delay_type);
   outputTimingPathSummary(report_file, timing_path, label_width);
 }
 
-void TimingReporter::outputTimingPathHeader(std::ofstream* report_file, TimingPath& timing_path, std::string& path_group_name,
-                                            DelayType delay_type)
+void TimingReporter::outputTimingPathHeader(std::ofstream* report_file, TimingPath& timing_path, std::string& path_group_name, DelayType delay_type)
 {
   outputStartEndPoint(report_file, "Startpoint", getStartPointText(timing_path));
   outputStartEndPoint(report_file, "Endpoint", getEndPointText(timing_path));
@@ -1177,8 +1158,7 @@ void TimingReporter::outputTimingPointHeader(std::ofstream* report_file, std::si
                  << "\n";
 }
 
-void TimingReporter::outputLaunchClockInfo(std::ofstream* report_file, TimingPath& timing_path, DelayType delay_type,
-                                           std::size_t label_width)
+void TimingReporter::outputLaunchClockInfo(std::ofstream* report_file, TimingPath& timing_path, DelayType delay_type, std::size_t label_width)
 {
   Database& database = STADM.getDatabase();
   std::string clock_name = getClockName(timing_path);
@@ -1312,8 +1292,8 @@ std::string TimingReporter::getStartClockPin(TimingPath& timing_path)
   return database.get_instance_map()[start_pin.get_instance_name()].get_clock_pin_name();
 }
 
-void TimingReporter::outputTimingPoint(std::ofstream* report_file, TimingPath& timing_path, TimingPathPoint& path_point,
-                                       bool is_first_point, std::size_t label_width)
+void TimingReporter::outputTimingPoint(std::ofstream* report_file, TimingPath& timing_path, TimingPathPoint& path_point, bool is_first_point,
+                                       std::size_t label_width)
 {
   Database& database = STADM.getDatabase();
   double arc_delay = path_point.get_arc_delay();
@@ -1366,8 +1346,7 @@ std::string TimingReporter::getPTCellName(TimingPathPoint& path_point)
   return path_point.get_cell_name();
 }
 
-void TimingReporter::outputRequiredClockInfo(std::ofstream* report_file, TimingPath& timing_path, DelayType delay_type,
-                                             std::size_t label_width)
+void TimingReporter::outputRequiredClockInfo(std::ofstream* report_file, TimingPath& timing_path, DelayType delay_type, std::size_t label_width)
 {
   Database& database = STADM.getDatabase();
   std::string clock_name = getClockName(timing_path);

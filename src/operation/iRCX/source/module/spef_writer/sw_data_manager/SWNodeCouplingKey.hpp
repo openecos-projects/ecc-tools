@@ -23,10 +23,7 @@ class SWNodeCouplingKey
 {
  public:
   SWNodeCouplingKey() = default;
-  SWNodeCouplingKey(int32_t local_node_idx, const std::string& peer_node_name)
-      : _local_node_idx(local_node_idx), _peer_node_name(peer_node_name)
-  {
-  }
+  SWNodeCouplingKey(int32_t local_node_idx, const std::string& peer_node_name) : _local_node_idx(local_node_idx), _peer_node_name(peer_node_name) {}
   ~SWNodeCouplingKey() = default;
   // getter
   int32_t get_local_node_idx() const { return _local_node_idx; }

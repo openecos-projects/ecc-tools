@@ -53,14 +53,11 @@ class GraphBuilder
   void buildWireEndpointNode(PowerGraph& power_graph, PowerWireSegment& power_wire_segment, std::size_t segment_idx, GBModel& gb_model);
   std::size_t getPowerNode(PowerGraph& power_graph, int32_t layer_idx, int32_t x, int32_t y, PowerNodeType power_node_type);
   void buildWireIntersectionNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model);
-  void buildWireIntersectionNode(PowerGraph& power_graph, PowerWireSegment& first_power_wire_segment,
-                                 PowerWireSegment& second_power_wire_segment, std::size_t first_segment_idx,
-                                 std::size_t second_segment_idx, GBModel& gb_model);
-  void appendWireCoordinateNode(PowerGraph& power_graph, PowerWireSegment& first_power_wire_segment,
-                                PowerWireSegment& second_power_wire_segment, std::size_t first_segment_idx,
-                                std::size_t second_segment_idx, int32_t x, int32_t y, GBModel& gb_model);
-  bool getWireIntersectionCoordinate(PowerWireSegment& first_power_wire_segment, PowerWireSegment& second_power_wire_segment,
-                                     int32_t& x, int32_t& y);
+  void buildWireIntersectionNode(PowerGraph& power_graph, PowerWireSegment& first_power_wire_segment, PowerWireSegment& second_power_wire_segment,
+                                 std::size_t first_segment_idx, std::size_t second_segment_idx, GBModel& gb_model);
+  void appendWireCoordinateNode(PowerGraph& power_graph, PowerWireSegment& first_power_wire_segment, PowerWireSegment& second_power_wire_segment,
+                                std::size_t first_segment_idx, std::size_t second_segment_idx, int32_t x, int32_t y, GBModel& gb_model);
+  bool getWireIntersectionCoordinate(PowerWireSegment& first_power_wire_segment, PowerWireSegment& second_power_wire_segment, int32_t& x, int32_t& y);
   void appendWireNodeId(GBModel& gb_model, std::size_t segment_idx, std::size_t node_id);
   void buildViaNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model);
   void buildPinNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model);
@@ -70,8 +67,8 @@ class GraphBuilder
   bool isOnWireSegment(PowerWireSegment& power_wire_segment, PowerNode& power_node);
   void buildWireEdgeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model);
   void buildViaEdgeList(PowerGraph& power_graph, PowerNet& power_net);
-  void addPowerEdge(PowerGraph& power_graph, PowerEdgeType power_edge_type, std::size_t first_node_id, std::size_t second_node_id,
-                    int32_t layer_idx, int32_t width, int32_t length, double resistance);
+  void addPowerEdge(PowerGraph& power_graph, PowerEdgeType power_edge_type, std::size_t first_node_id, std::size_t second_node_id, int32_t layer_idx,
+                    int32_t width, int32_t length, double resistance);
   void checkPowerGraphConnectivity(PowerGraph& power_graph);
 };
 

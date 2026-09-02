@@ -24,9 +24,7 @@ class EnvPixelOverlap
 {
  public:
   EnvPixelOverlap() = default;
-  EnvPixelOverlap(int32_t start_coord, int32_t end_coord) : _start_coord(start_coord), _end_coord(end_coord)
-  {
-  }
+  EnvPixelOverlap(int32_t start_coord, int32_t end_coord) : _start_coord(start_coord), _end_coord(end_coord) {}
   ~EnvPixelOverlap() = default;
   // getter
   int32_t get_start_coord() const { return _start_coord; }

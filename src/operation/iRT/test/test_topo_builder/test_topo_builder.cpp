@@ -34,7 +34,6 @@
 
 #include "Logger.hpp"
 #include "TOPOBuilder.hpp"
-
 #include "utility/logger/Logger.hpp"
 
 namespace {
@@ -209,8 +208,7 @@ CanonicalTopo canonicalizeTopo(const std::vector<Segment<PlanarCoord>>& topo_lis
 bool isSameStat(const irt::TBRefineStat& first, const irt::TBRefineStat& second)
 {
   return first.shifted_edge_num == second.shifted_edge_num && first.refined_steiner_num == second.refined_steiner_num
-         && first.attempted_congestion_flute == second.attempted_congestion_flute
-         && first.used_congestion_flute == second.used_congestion_flute
+         && first.attempted_congestion_flute == second.attempted_congestion_flute && first.used_congestion_flute == second.used_congestion_flute
          && first.attempted_steiner_refine == second.attempted_steiner_refine && first.used_steiner_refine == second.used_steiner_refine
          && first.used_terminal_mst == second.used_terminal_mst;
 }
@@ -224,8 +222,7 @@ bool isTopoValid(const std::vector<PlanarCoord>& terminal_list, const std::vecto
   std::set<CoordKey> coord_set;
   std::set<EdgeKey> edge_set;
   auto is_inside = [&](const PlanarCoord& coord) {
-    return region.get_ll_x() <= coord.get_x() && coord.get_x() <= region.get_ur_x() && region.get_ll_y() <= coord.get_y()
-           && coord.get_y() <= region.get_ur_y();
+    return region.get_ll_x() <= coord.get_x() && coord.get_x() <= region.get_ur_x() && region.get_ll_y() <= coord.get_y() && coord.get_y() <= region.get_ur_y();
   };
   for (const Segment<PlanarCoord>& topo : topo_list) {
     if (topo.get_first() == topo.get_second() || !is_inside(topo.get_first()) || !is_inside(topo.get_second())) {
@@ -304,8 +301,7 @@ bool containsCoord(const std::vector<Segment<PlanarCoord>>& topo_list, const Pla
 
 bool isInsideRect(const PlanarRect& rect, const PlanarCoord& coord)
 {
-  return rect.get_ll_x() <= coord.get_x() && coord.get_x() <= rect.get_ur_x() && rect.get_ll_y() <= coord.get_y()
-         && coord.get_y() <= rect.get_ur_y();
+  return rect.get_ll_x() <= coord.get_x() && coord.get_x() <= rect.get_ur_x() && rect.get_ll_y() <= coord.get_y() && coord.get_y() <= rect.get_ur_y();
 }
 
 bool isSameTopo(const std::vector<Segment<PlanarCoord>>& first, const std::vector<Segment<PlanarCoord>>& second)
@@ -425,8 +421,7 @@ GridCostMap getHighDegreeCostMap()
   return cost_map;
 }
 
-std::vector<PlanarCoord> getSteinerCoordList(const std::vector<PlanarCoord>& terminal_list,
-                                             const std::vector<Segment<PlanarCoord>>& topo_list)
+std::vector<PlanarCoord> getSteinerCoordList(const std::vector<PlanarCoord>& terminal_list, const std::vector<Segment<PlanarCoord>>& topo_list)
 {
   std::set<CoordKey> terminal_set;
   for (const PlanarCoord& terminal : terminal_list) {
@@ -528,8 +523,7 @@ bool checkCongestionFluteGuard()
 
   bool passed = true;
   passed = check(!low_degree_topo.empty() && !low_degree_stat.attempted_congestion_flute, "two-pin net skips congestion FLUTE") && passed;
-  passed = check(uniform_stat.attempted_congestion_flute && !uniform_stat.used_congestion_flute,
-                 "uniform cost rejects equal congestion FLUTE candidate")
+  passed = check(uniform_stat.attempted_congestion_flute && !uniform_stat.used_congestion_flute, "uniform cost rejects equal congestion FLUTE candidate")
            && passed;
   passed = check(isSameTopo(uniform_topo, getBaseFluteTopoList()), "uniform congestion FLUTE keeps baseline topology") && passed;
   for (const PlanarCoord& terminal : getBaseTerminalList()) {
@@ -555,9 +549,7 @@ bool checkCongestionFluteCostGuard()
   passed = check(stat.attempted_congestion_flute, "costed four-pin net attempts congestion FLUTE") && passed;
   passed = check(stat.used_congestion_flute, "lower-cost congestion FLUTE candidate is selected") && passed;
   passed = check(getTopoCost(congestion, query) < getTopoCost(normal, query), "selected congestion FLUTE lowers topology cost") && passed;
-  passed = check(isSameTopo(congestion, RTTB.getPlanarTopoList(makeTask(getBaseTerminalList(), query, true))),
-                 "congestion FLUTE is deterministic")
-           && passed;
+  passed = check(isSameTopo(congestion, RTTB.getPlanarTopoList(makeTask(getBaseTerminalList(), query, true))), "congestion FLUTE is deterministic") && passed;
   return passed;
 }
 
@@ -568,8 +560,7 @@ bool checkCongestionFluteQueryBound()
     query_num++;
     return static_cast<double>(getDistance(first, second));
   };
-  std::vector<PlanarCoord> terminal_list
-      = {PlanarCoord(0, 0), PlanarCoord(0, 200), PlanarCoord(200, 0), PlanarCoord(200, 200)};
+  std::vector<PlanarCoord> terminal_list = {PlanarCoord(0, 0), PlanarCoord(0, 200), PlanarCoord(200, 0), PlanarCoord(200, 200)};
   RTTB.getPlanarTopoList(makeTask(terminal_list, query, true));
   return check(query_num <= 30000, "congestion FLUTE bounds bbox cost queries");
 }
@@ -581,8 +572,7 @@ bool checkAlignedSegmentQueryOnce()
     query_num++;
     return static_cast<double>(getDistance(first, second));
   };
-  std::vector<Segment<PlanarCoord>> topo_list
-      = RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 7)}, query));
+  std::vector<Segment<PlanarCoord>> topo_list = RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 7)}, query));
 
   bool passed = true;
   passed = check(topo_list.size() == 1, "aligned two-pin net keeps one topology edge") && passed;
@@ -613,16 +603,14 @@ irt::TBSegmentCostQuery getBlockedCoordQuery(const PlanarCoord& blocked_coord, b
     if (first.get_y() == second.get_y() && first.get_y() == blocked_coord.get_y()) {
       int32_t ll_x = std::min(first.get_x(), second.get_x());
       int32_t ur_x = std::max(first.get_x(), second.get_x());
-      if ((ll_x <= blocked_coord.get_x() - 1 && blocked_coord.get_x() <= ur_x)
-          || (ll_x <= blocked_coord.get_x() && blocked_coord.get_x() + 1 <= ur_x)) {
+      if ((ll_x <= blocked_coord.get_x() - 1 && blocked_coord.get_x() <= ur_x) || (ll_x <= blocked_coord.get_x() && blocked_coord.get_x() + 1 <= ur_x)) {
         return kInf;
       }
     }
     if (first.get_x() == second.get_x() && first.get_x() == blocked_coord.get_x()) {
       int32_t ll_y = std::min(first.get_y(), second.get_y());
       int32_t ur_y = std::max(first.get_y(), second.get_y());
-      if ((ll_y <= blocked_coord.get_y() - 1 && blocked_coord.get_y() <= ur_y)
-          || (ll_y <= blocked_coord.get_y() && blocked_coord.get_y() + 1 <= ur_y)) {
+      if ((ll_y <= blocked_coord.get_y() - 1 && blocked_coord.get_y() <= ur_y) || (ll_y <= blocked_coord.get_y() && blocked_coord.get_y() + 1 <= ur_y)) {
         return kInf;
       }
     }
@@ -633,8 +621,7 @@ irt::TBSegmentCostQuery getBlockedCoordQuery(const PlanarCoord& blocked_coord, b
 GridCostMap getMacroRingCostMap(const PlanarRect& macro, int32_t ring_width, double ring_cost)
 {
   const PlanarRect region(0, 0, 49, 49);
-  const PlanarRect expanded_macro(macro.get_ll_x() - ring_width, macro.get_ll_y() - ring_width, macro.get_ur_x() + ring_width,
-                                  macro.get_ur_y() + ring_width);
+  const PlanarRect expanded_macro(macro.get_ll_x() - ring_width, macro.get_ll_y() - ring_width, macro.get_ur_x() + ring_width, macro.get_ur_y() + ring_width);
   GridCostMap cost_map(region);
   auto getEdgeCost = [&](const PlanarCoord& first, const PlanarCoord& second) {
     if (isInsideRect(macro, first) || isInsideRect(macro, second)) {
@@ -669,16 +656,14 @@ bool checkCongestionFluteInfHandling()
 
   irt::TBSegmentCostQuery fully_blocked_query = getBlockedCoordQuery({}, true);
   irt::TBRefineStat fully_blocked_stat;
-  std::vector<Segment<PlanarCoord>> fully_blocked_topo
-      = RTTB.getPlanarTopoList(makeTask(terminal_list, fully_blocked_query, true), fully_blocked_stat);
+  std::vector<Segment<PlanarCoord>> fully_blocked_topo = RTTB.getPlanarTopoList(makeTask(terminal_list, fully_blocked_query, true), fully_blocked_stat);
 
   bool passed = true;
   passed = check(partial_stat.attempted_congestion_flute, "partial INF still attempts congestion FLUTE") && passed;
   for (const PlanarCoord& terminal : terminal_list) {
     passed = check(containsCoord(partial_topo, terminal), "partial INF congestion FLUTE keeps terminal") && passed;
   }
-  passed = check(fully_blocked_stat.attempted_congestion_flute && !fully_blocked_stat.used_congestion_flute,
-                 "fully blocked bbox rejects congestion FLUTE")
+  passed = check(fully_blocked_stat.attempted_congestion_flute && !fully_blocked_stat.used_congestion_flute, "fully blocked bbox rejects congestion FLUTE")
            && passed;
   passed = check(fully_blocked_stat.used_terminal_mst, "fully blocked bbox uses terminal MST fallback") && passed;
   passed = check(fully_blocked_topo.size() == terminal_list.size() - 1, "fully blocked fallback builds a tree") && passed;
@@ -716,8 +701,7 @@ bool checkThreePinCongestionAvoidsMacro()
            && passed;
   passed = check(std::isfinite(getTopoCost(topo_list, query)), "three-pin congestion topology has finite cost") && passed;
   passed = check(!containsCoord(topo_list, raw_steiner), "three-pin congestion topology leaves blocked coordinate") && passed;
-  passed = check(std::ranges::none_of(getSteinerCoordList(terminal_list, topo_list),
-                                     [&](const PlanarCoord& steiner) { return isInsideRect(macro, steiner); }),
+  passed = check(std::ranges::none_of(getSteinerCoordList(terminal_list, topo_list), [&](const PlanarCoord& steiner) { return isInsideRect(macro, steiner); }),
                  "three-pin congestion topology keeps Steiner outside full-layer macro")
            && passed;
   for (const PlanarCoord& terminal : terminal_list) {
@@ -748,8 +732,7 @@ bool checkThreePinCongestionOutsidePinBBox()
 
   bool passed = true;
   passed = check(stat.attempted_congestion_flute && stat.used_congestion_flute, "three-pin congestion searches outside pin bbox") && passed;
-  passed = check(!stat.attempted_steiner_refine && !stat.used_terminal_mst, "outside-bbox three-pin congestion avoids fallback")
-           && passed;
+  passed = check(!stat.attempted_steiner_refine && !stat.used_terminal_mst, "outside-bbox three-pin congestion avoids fallback") && passed;
   passed = check(std::isfinite(getTopoCost(topo_list, query)), "outside-bbox three-pin topology has finite cost") && passed;
   passed = check(std::ranges::any_of(steiner_list, [](const PlanarCoord& steiner) { return steiner.get_y() < 10; }),
                  "three-pin congestion places Steiner outside pin bbox")
@@ -832,9 +815,9 @@ bool checkHighDegreeSteinerRefine()
 
   bool passed = true;
   passed = check(raw_steiner_list.size() >= 2, "high-degree case has multiple raw Steiner coordinates") && passed;
-  passed = check(stat.attempted_steiner_refine && stat.used_steiner_refine && stat.refined_steiner_num > 0,
-                 "high-degree blocked topology uses Steiner refinement")
-           && passed;
+  passed
+      = check(stat.attempted_steiner_refine && stat.used_steiner_refine && stat.refined_steiner_num > 0, "high-degree blocked topology uses Steiner refinement")
+        && passed;
   passed = check(!stat.used_terminal_mst, "finite high-degree refinement avoids terminal MST") && passed;
   for (const PlanarCoord& raw_steiner : raw_steiner_list) {
     passed = check(!containsCoord(refined_topo, raw_steiner), "high-degree refinement leaves blocked Steiner coordinate") && passed;
@@ -892,9 +875,8 @@ bool checkPartialLayerMacroKeepsSteiner()
   }
   passed = check(canonicalizeTopo(selected_topo) == canonicalizeTopo(baseline_topo), "partial-layer macro keeps FLUTE topology") && passed;
   passed = check(containsCoord(selected_topo, steiner), "partial-layer macro keeps Steiner coordinate") && passed;
-  passed = check(stat.shifted_edge_num == 0 && stat.refined_steiner_num == 0 && !stat.used_terminal_mst,
-                 "partial-layer macro does not refine Steiner")
-           && passed;
+  passed
+      = check(stat.shifted_edge_num == 0 && stat.refined_steiner_num == 0 && !stat.used_terminal_mst, "partial-layer macro does not refine Steiner") && passed;
   passed = check(std::isfinite(getTopoCost(selected_topo, query)), "partial-layer macro topology has finite cost") && passed;
   passed = check(isTopoValid(terminal_list, selected_topo, region), "partial-layer macro topology is valid") && passed;
   return passed;
@@ -925,13 +907,12 @@ bool checkFullLayerMacroCongestionRing()
   passed = check(!std::isfinite(getTopoCost(raw_topo, query)), "full-layer macro blocks raw FLUTE topology") && passed;
   passed = check(stat.attempted_congestion_flute, "full-layer macro ring attempts congestion FLUTE") && passed;
   passed = check(stat.used_congestion_flute || stat.shifted_edge_num > 0, "full-layer macro ring selects a cost-driven topology") && passed;
-  passed = check(!stat.attempted_steiner_refine && !stat.used_terminal_mst, "full-layer macro ring avoids fallback")
-           && passed;
+  passed = check(!stat.attempted_steiner_refine && !stat.used_terminal_mst, "full-layer macro ring avoids fallback") && passed;
   passed = check(std::isfinite(getTopoCost(selected_topo, query)), "full-layer macro ring topology has finite cost") && passed;
   passed = check(canonicalizeTopo(selected_topo) != canonicalizeTopo(raw_topo), "full-layer macro ring changes raw topology") && passed;
   passed = check(std::isfinite(getTopoCost(selected_topo, strict_avoid_query)), "selected topology can avoid macro congestion ring") && passed;
   passed = check(std::ranges::none_of(getSteinerCoordList(terminal_list, selected_topo),
-                                     [&](const PlanarCoord& steiner) { return isInsideRect(expanded_macro, steiner); }),
+                                      [&](const PlanarCoord& steiner) { return isInsideRect(expanded_macro, steiner); }),
                  "selected Steiner coordinates avoid macro congestion ring")
            && passed;
   passed = check(isTopoValid(terminal_list, selected_topo, region), "full-layer macro ring topology is valid") && passed;
@@ -1002,18 +983,9 @@ bool checkSteinerUsageClassification()
 {
   PlotCase plot_case;
   plot_case.terminal_list = {PlanarCoord(0, 0), PlanarCoord(4, 4)};
-  plot_case.topo_layer_list = {{"raw",
-                                {{PlanarCoord(0, 0), PlanarCoord(2, 2)},
-                                 {PlanarCoord(2, 2), PlanarCoord(3, 3)},
-                                 {PlanarCoord(3, 3), PlanarCoord(4, 4)}},
-                                "",
-                                true},
-                               {"selected",
-                                {{PlanarCoord(0, 0), PlanarCoord(2, 2)},
-                                 {PlanarCoord(2, 2), PlanarCoord(1, 1)},
-                                 {PlanarCoord(1, 1), PlanarCoord(4, 4)}},
-                                "",
-                                false}};
+  plot_case.topo_layer_list
+      = {{"raw", {{PlanarCoord(0, 0), PlanarCoord(2, 2)}, {PlanarCoord(2, 2), PlanarCoord(3, 3)}, {PlanarCoord(3, 3), PlanarCoord(4, 4)}}, "", true},
+         {"selected", {{PlanarCoord(0, 0), PlanarCoord(2, 2)}, {PlanarCoord(2, 2), PlanarCoord(1, 1)}, {PlanarCoord(1, 1), PlanarCoord(4, 4)}}, "", false}};
   PlotSteinerUsage usage = getPlotSteinerUsage(plot_case);
   return check(usage.used_set == std::set<CoordKey>{{1, 1}, {2, 2}} && usage.unused_set == std::set<CoordKey>{{3, 3}},
                "plot distinguishes used and unused Steiner coordinates");
@@ -1044,12 +1016,24 @@ std::string escapeXml(const std::string& text)
   escaped.reserve(text.size());
   for (char ch : text) {
     switch (ch) {
-      case '&': escaped += "&amp;"; break;
-      case '<': escaped += "&lt;"; break;
-      case '>': escaped += "&gt;"; break;
-      case '"': escaped += "&quot;"; break;
-      case '\'': escaped += "&apos;"; break;
-      default: escaped += ch; break;
+      case '&':
+        escaped += "&amp;";
+        break;
+      case '<':
+        escaped += "&lt;";
+        break;
+      case '>':
+        escaped += "&gt;";
+        break;
+      case '"':
+        escaped += "&quot;";
+        break;
+      case '\'':
+        escaped += "&apos;";
+        break;
+      default:
+        escaped += ch;
+        break;
     }
   }
   return escaped;
@@ -1135,8 +1119,8 @@ PlotTransform getPlotTransform(const PlanarRect& region)
           .ur_y = region.get_ur_y()};
 }
 
-void appendPolyline(std::ostream& stream, const std::vector<PlanarCoord>& coord_list, const PlotTransform& transform, const std::string& color,
-                    double width, bool dashed)
+void appendPolyline(std::ostream& stream, const std::vector<PlanarCoord>& coord_list, const PlotTransform& transform, const std::string& color, double width,
+                    bool dashed)
 {
   if (coord_list.size() <= 1) {
     return;
@@ -1145,8 +1129,7 @@ void appendPolyline(std::ostream& stream, const std::vector<PlanarCoord>& coord_
   for (const PlanarCoord& coord : coord_list) {
     stream << transform.getX(coord.get_x()) << "," << transform.getY(coord.get_y()) << " ";
   }
-  stream << "\" fill=\"none\" stroke=\"" << color << "\" stroke-width=\"" << width
-         << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\"";
+  stream << "\" fill=\"none\" stroke=\"" << color << "\" stroke-width=\"" << width << "\" stroke-linecap=\"round\" stroke-linejoin=\"round\"";
   if (dashed) {
     stream << " stroke-dasharray=\"8 6\"";
   }
@@ -1171,21 +1154,19 @@ bool writePlotSvg(const std::filesystem::path& plot_dir, const PlotCase& plot_ca
   stream << std::fixed << std::setprecision(2);
   stream << "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1000 760\" role=\"img\">\n"
          << "<rect width=\"1000\" height=\"760\" fill=\"#ffffff\"/>\n"
-         << "<text x=\"500\" y=\"34\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"22\" font-weight=\"600\">"
-         << escapeXml(plot_case.title) << "</text>\n"
-         << "<text x=\"500\" y=\"60\" text-anchor=\"middle\" font-family=\"monospace\" font-size=\"13\" fill=\"#374151\">"
-         << escapeXml(plot_case.summary) << "</text>\n";
+         << "<text x=\"500\" y=\"34\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"22\" font-weight=\"600\">" << escapeXml(plot_case.title)
+         << "</text>\n"
+         << "<text x=\"500\" y=\"60\" text-anchor=\"middle\" font-family=\"monospace\" font-size=\"13\" fill=\"#374151\">" << escapeXml(plot_case.summary)
+         << "</text>\n";
 
   if ((region.get_ur_x() - region.get_ll_x()) <= 100 && (region.get_ur_y() - region.get_ll_y()) <= 100) {
     for (int32_t x = region.get_ll_x(); x <= region.get_ur_x(); x++) {
-      stream << "<line x1=\"" << transform.getX(x) << "\" y1=\"" << transform.getY(region.get_ll_y()) << "\" x2=\""
-             << transform.getX(x) << "\" y2=\"" << transform.getY(region.get_ur_y())
-             << "\" stroke=\"#e5e7eb\" stroke-width=\"0.7\"/>\n";
+      stream << "<line x1=\"" << transform.getX(x) << "\" y1=\"" << transform.getY(region.get_ll_y()) << "\" x2=\"" << transform.getX(x) << "\" y2=\""
+             << transform.getY(region.get_ur_y()) << "\" stroke=\"#e5e7eb\" stroke-width=\"0.7\"/>\n";
     }
     for (int32_t y = region.get_ll_y(); y <= region.get_ur_y(); y++) {
-      stream << "<line x1=\"" << transform.getX(region.get_ll_x()) << "\" y1=\"" << transform.getY(y) << "\" x2=\""
-             << transform.getX(region.get_ur_x()) << "\" y2=\"" << transform.getY(y)
-             << "\" stroke=\"#e5e7eb\" stroke-width=\"0.7\"/>\n";
+      stream << "<line x1=\"" << transform.getX(region.get_ll_x()) << "\" y1=\"" << transform.getY(y) << "\" x2=\"" << transform.getX(region.get_ur_x())
+             << "\" y2=\"" << transform.getY(y) << "\" stroke=\"#e5e7eb\" stroke-width=\"0.7\"/>\n";
     }
   }
 
@@ -1193,8 +1174,8 @@ bool writePlotSvg(const std::filesystem::path& plot_dir, const PlotCase& plot_ca
     bool is_inf = !std::isfinite(edge.cost);
     stream << "<line x1=\"" << transform.getX(edge.first.get_x()) << "\" y1=\"" << transform.getY(edge.first.get_y()) << "\" x2=\""
            << transform.getX(edge.second.get_x()) << "\" y2=\"" << transform.getY(edge.second.get_y()) << "\" stroke=\""
-           << getCostColor(edge.cost, min_cost, max_cost) << "\" stroke-width=\"" << (is_inf ? 4.0 : 2.2)
-           << "\" stroke-opacity=\"" << (is_inf ? 0.85 : 0.32) << "\"/>\n";
+           << getCostColor(edge.cost, min_cost, max_cost) << "\" stroke-width=\"" << (is_inf ? 4.0 : 2.2) << "\" stroke-opacity=\"" << (is_inf ? 0.85 : 0.32)
+           << "\"/>\n";
   }
 
   for (const PlanarRect& macro : plot_case.macro_rect_list) {
@@ -1228,49 +1209,45 @@ bool writePlotSvg(const std::filesystem::path& plot_dir, const PlotCase& plot_ca
   for (const PlotMarker& marker : plot_case.marker_list) {
     double x = transform.getX(marker.coord.get_x());
     double y = transform.getY(marker.coord.get_y());
-    stream << "<line x1=\"" << x - 7 << "\" y1=\"" << y - 7 << "\" x2=\"" << x + 7 << "\" y2=\"" << y + 7
-           << "\" stroke=\"" << marker.color << "\" stroke-width=\"3\"/>\n"
-           << "<line x1=\"" << x - 7 << "\" y1=\"" << y + 7 << "\" x2=\"" << x + 7 << "\" y2=\"" << y - 7
-           << "\" stroke=\"" << marker.color << "\" stroke-width=\"3\"/>\n"
-           << "<text x=\"" << x + 10 << "\" y=\"" << y - 10 << "\" font-family=\"sans-serif\" font-size=\"12\" fill=\""
-           << marker.color << "\">" << escapeXml(marker.label) << "</text>\n";
+    stream << "<line x1=\"" << x - 7 << "\" y1=\"" << y - 7 << "\" x2=\"" << x + 7 << "\" y2=\"" << y + 7 << "\" stroke=\"" << marker.color
+           << "\" stroke-width=\"3\"/>\n"
+           << "<line x1=\"" << x - 7 << "\" y1=\"" << y + 7 << "\" x2=\"" << x + 7 << "\" y2=\"" << y - 7 << "\" stroke=\"" << marker.color
+           << "\" stroke-width=\"3\"/>\n"
+           << "<text x=\"" << x + 10 << "\" y=\"" << y - 10 << "\" font-family=\"sans-serif\" font-size=\"12\" fill=\"" << marker.color << "\">"
+           << escapeXml(marker.label) << "</text>\n";
   }
 
   double legend_x = 80;
   double legend_y = 690;
   for (const PlotTopoLayer& layer : plot_case.topo_layer_list) {
-    stream << "<line x1=\"" << legend_x << "\" y1=\"" << legend_y << "\" x2=\"" << legend_x + 34 << "\" y2=\"" << legend_y
-           << "\" stroke=\"" << layer.color << "\" stroke-width=\"4\"";
+    stream << "<line x1=\"" << legend_x << "\" y1=\"" << legend_y << "\" x2=\"" << legend_x + 34 << "\" y2=\"" << legend_y << "\" stroke=\"" << layer.color
+           << "\" stroke-width=\"4\"";
     if (layer.dashed) {
       stream << " stroke-dasharray=\"8 6\"";
     }
-    stream << "/>\n<text x=\"" << legend_x + 42 << "\" y=\"" << legend_y + 4
-           << "\" font-family=\"sans-serif\" font-size=\"13\" fill=\"#111827\">" << escapeXml(layer.name) << "</text>\n";
+    stream << "/>\n<text x=\"" << legend_x + 42 << "\" y=\"" << legend_y + 4 << "\" font-family=\"sans-serif\" font-size=\"13\" fill=\"#111827\">"
+           << escapeXml(layer.name) << "</text>\n";
     legend_x += 180;
   }
   stream << "<circle cx=\"" << legend_x << "\" cy=\"" << legend_y << "\" r=\"5\" fill=\"#111827\"/>\n"
-         << "<text x=\"" << legend_x + 12 << "\" y=\"" << legend_y + 4
-         << "\" font-family=\"sans-serif\" font-size=\"13\">terminal</text>\n";
+         << "<text x=\"" << legend_x + 12 << "\" y=\"" << legend_y + 4 << "\" font-family=\"sans-serif\" font-size=\"13\">terminal</text>\n";
   legend_x += 130;
   stream << "<rect x=\"" << legend_x - 4.5 << "\" y=\"" << legend_y - 4.5
          << "\" width=\"9\" height=\"9\" fill=\"#ffffff\" stroke=\"#111827\" stroke-width=\"2\"/>\n"
-         << "<text x=\"" << legend_x + 12 << "\" y=\"" << legend_y + 4
-         << "\" font-family=\"sans-serif\" font-size=\"13\">used Steiner</text>\n";
+         << "<text x=\"" << legend_x + 12 << "\" y=\"" << legend_y + 4 << "\" font-family=\"sans-serif\" font-size=\"13\">used Steiner</text>\n";
   legend_x += 160;
   stream << "<circle cx=\"" << legend_x << "\" cy=\"" << legend_y
          << "\" r=\"5\" fill=\"#ffffff\" stroke=\"#9ca3af\" stroke-width=\"2\" stroke-dasharray=\"3 2\"/>\n"
-         << "<text x=\"" << legend_x + 12 << "\" y=\"" << legend_y + 4
-         << "\" font-family=\"sans-serif\" font-size=\"13\">unused Steiner</text>\n";
+         << "<text x=\"" << legend_x + 12 << "\" y=\"" << legend_y + 4 << "\" font-family=\"sans-serif\" font-size=\"13\">unused Steiner</text>\n";
   if (!plot_case.macro_rect_list.empty()) {
     legend_x = 80;
     legend_y = 724;
     stream << "<rect x=\"" << legend_x - 7 << "\" y=\"" << legend_y - 5
            << "\" width=\"14\" height=\"10\" fill=\"#6b7280\" fill-opacity=\"0.12\" stroke=\"#4b5563\" stroke-width=\"2\"/>\n"
-           << "<text x=\"" << legend_x + 12 << "\" y=\"" << legend_y + 4
-           << "\" font-family=\"sans-serif\" font-size=\"13\">" << escapeXml(plot_case.macro_label) << "</text>\n";
+           << "<text x=\"" << legend_x + 12 << "\" y=\"" << legend_y + 4 << "\" font-family=\"sans-serif\" font-size=\"13\">"
+           << escapeXml(plot_case.macro_label) << "</text>\n";
   }
-  stream << "<text x=\"" << (plot_case.macro_rect_list.empty() ? 80 : 260)
-         << "\" y=\"728\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#4b5563\">"
+  stream << "<text x=\"" << (plot_case.macro_rect_list.empty() ? 80 : 260) << "\" y=\"728\" font-family=\"sans-serif\" font-size=\"12\" fill=\"#4b5563\">"
          << "Edge heatmap: blue=low cost, red=high cost, dark red=INF. Lines connect abstract topology endpoints directly."
          << "</text>\n</svg>\n";
   if (!stream) {
@@ -1295,14 +1272,14 @@ bool generatePlots(const std::filesystem::path& plot_dir)
   std::vector<PlotCase> plot_case_list;
 
   std::vector<Segment<PlanarCoord>> baseline = RTTB.getPlanarTopoList(makeTask(base_terminal_list));
-  plot_case_list.push_back({.file_name = "01_baseline.svg",
-                            .title = "Baseline FLUTE",
-                            .summary = "wire_length=" + std::to_string(getWireLength(baseline)) + ", estimated_cost="
-                                       + formatCost(getTopoCost(baseline, wire_query)),
-                            .region = region,
-                            .terminal_list = base_terminal_list,
-                            .topo_layer_list = {{"baseline", baseline, "#6b7280", false}},
-                            .cost_query = wire_query});
+  plot_case_list.push_back(
+      {.file_name = "01_baseline.svg",
+       .title = "Baseline FLUTE",
+       .summary = "wire_length=" + std::to_string(getWireLength(baseline)) + ", estimated_cost=" + formatCost(getTopoCost(baseline, wire_query)),
+       .region = region,
+       .terminal_list = base_terminal_list,
+       .topo_layer_list = {{"baseline", baseline, "#6b7280", false}},
+       .cost_query = wire_query});
 
   irt::TBSegmentCostQuery shift_query = [](const PlanarCoord& first, const PlanarCoord& second) {
     double cost = getDistance(first, second);
@@ -1316,8 +1293,7 @@ bool generatePlots(const std::filesystem::path& plot_dir)
   plot_case_list.push_back({.file_name = "02_cost_shift.svg",
                             .title = "Cost-driven Steiner shift",
                             .summary = "baseline_cost=" + formatCost(getTopoCost(baseline, shift_query)) + ", refined_cost="
-                                       + formatCost(getTopoCost(shifted, shift_query)) + ", shifted_edges="
-                                       + std::to_string(shift_stat.shifted_edge_num),
+                                       + formatCost(getTopoCost(shifted, shift_query)) + ", shifted_edges=" + std::to_string(shift_stat.shifted_edge_num),
                             .region = region,
                             .terminal_list = base_terminal_list,
                             .topo_layer_list = {{"baseline", baseline, "#6b7280", true}, {"refined", shifted, "#2563eb", false}},
@@ -1332,14 +1308,13 @@ bool generatePlots(const std::filesystem::path& plot_dir)
   };
   std::vector<Segment<PlanarCoord>> normal = RTTB.getPlanarTopoList(makeTask(base_terminal_list, congestion_query));
   irt::TBRefineStat congestion_stat;
-  std::vector<Segment<PlanarCoord>> congestion
-      = RTTB.getPlanarTopoList(makeTask(base_terminal_list, congestion_query, true), congestion_stat);
+  std::vector<Segment<PlanarCoord>> congestion = RTTB.getPlanarTopoList(makeTask(base_terminal_list, congestion_query, true), congestion_stat);
   plot_case_list.push_back({.file_name = "03_congestion_flute.svg",
                             .title = "Normal vs congestion FLUTE",
-                            .summary = "normal_cost=" + formatCost(getTopoCost(normal, congestion_query)) + ", congestion_cost="
-                                       + formatCost(getTopoCost(congestion, congestion_query)) + ", attempted="
-                                       + std::to_string(congestion_stat.attempted_congestion_flute) + ", used="
-                                       + std::to_string(congestion_stat.used_congestion_flute),
+                            .summary = "normal_cost=" + formatCost(getTopoCost(normal, congestion_query))
+                                       + ", congestion_cost=" + formatCost(getTopoCost(congestion, congestion_query))
+                                       + ", attempted=" + std::to_string(congestion_stat.attempted_congestion_flute)
+                                       + ", used=" + std::to_string(congestion_stat.used_congestion_flute),
                             .region = region,
                             .terminal_list = base_terminal_list,
                             .topo_layer_list = {{"normal", normal, "#6b7280", true}, {"congestion", congestion, "#16a34a", false}},
@@ -1349,17 +1324,15 @@ bool generatePlots(const std::filesystem::path& plot_dir)
   irt::TBSegmentCostQuery blocked_query = getBlockedCoordQuery(blocked_coord, false);
   std::vector<Segment<PlanarCoord>> blocked_normal = RTTB.getPlanarTopoList(makeTask(base_terminal_list, blocked_query));
   irt::TBRefineStat blocked_stat;
-  std::vector<Segment<PlanarCoord>> blocked_congestion
-      = RTTB.getPlanarTopoList(makeTask(base_terminal_list, blocked_query, true), blocked_stat);
+  std::vector<Segment<PlanarCoord>> blocked_congestion = RTTB.getPlanarTopoList(makeTask(base_terminal_list, blocked_query, true), blocked_stat);
   plot_case_list.push_back({.file_name = "04_inf_handling.svg",
                             .title = "INF edge handling",
-                            .summary = "normal_cost=" + formatCost(getTopoCost(blocked_normal, blocked_query)) + ", selected_cost="
-                                       + formatCost(getTopoCost(blocked_congestion, blocked_query)) + ", congestion_used="
-                                       + std::to_string(blocked_stat.used_congestion_flute),
+                            .summary = "normal_cost=" + formatCost(getTopoCost(blocked_normal, blocked_query))
+                                       + ", selected_cost=" + formatCost(getTopoCost(blocked_congestion, blocked_query))
+                                       + ", congestion_used=" + std::to_string(blocked_stat.used_congestion_flute),
                             .region = region,
                             .terminal_list = base_terminal_list,
-                            .topo_layer_list = {{"normal", blocked_normal, "#6b7280", true},
-                                                {"selected", blocked_congestion, "#16a34a", false}},
+                            .topo_layer_list = {{"normal", blocked_normal, "#6b7280", true}, {"selected", blocked_congestion, "#16a34a", false}},
                             .marker_list = {{blocked_coord, "blocked coordinate", "#dc2626"}},
                             .cost_query = blocked_query});
 
@@ -1369,54 +1342,48 @@ bool generatePlots(const std::filesystem::path& plot_dir)
   std::vector<Segment<PlanarCoord>> raw_three_pin_topo = RTTB.getPlanarTopoList(makeTask(three_pin_terminal_list));
   irt::TBSegmentCostQuery three_pin_query = getBlockedMacroCostMap(three_pin_macro).getQuery();
   irt::TBRefineStat three_pin_stat;
-  std::vector<Segment<PlanarCoord>> congestion_topo
-      = RTTB.getPlanarTopoList(makeTask(three_pin_terminal_list, three_pin_query, true), three_pin_stat);
-  plot_case_list.push_back({.file_name = "05_three_pin_congestion.svg",
-                            .title = "Three-pin congestion FLUTE",
-                            .summary = "attempted=" + std::to_string(three_pin_stat.attempted_congestion_flute) + ", used="
-                                       + std::to_string(three_pin_stat.used_congestion_flute) + ", cost="
-                                       + formatCost(getTopoCost(congestion_topo, three_pin_query)) + ", mst="
-                                       + std::to_string(three_pin_stat.used_terminal_mst),
-                            .region = PlanarRect(0, 0, 24, 24),
-                            .terminal_list = three_pin_terminal_list,
-                            .macro_rect_list = {three_pin_macro},
-                            .macro_label = "full-layer macro",
-                            .topo_layer_list = {{"raw", raw_three_pin_topo, "#6b7280", true}, {"congestion", congestion_topo, "#2563eb", false}},
-                            .marker_list = {{raw_steiner, "raw blocked Steiner", "#dc2626"}},
-                            .cost_query = three_pin_query});
+  std::vector<Segment<PlanarCoord>> congestion_topo = RTTB.getPlanarTopoList(makeTask(three_pin_terminal_list, three_pin_query, true), three_pin_stat);
+  plot_case_list.push_back(
+      {.file_name = "05_three_pin_congestion.svg",
+       .title = "Three-pin congestion FLUTE",
+       .summary = "attempted=" + std::to_string(three_pin_stat.attempted_congestion_flute) + ", used=" + std::to_string(three_pin_stat.used_congestion_flute)
+                  + ", cost=" + formatCost(getTopoCost(congestion_topo, three_pin_query)) + ", mst=" + std::to_string(three_pin_stat.used_terminal_mst),
+       .region = PlanarRect(0, 0, 24, 24),
+       .terminal_list = three_pin_terminal_list,
+       .macro_rect_list = {three_pin_macro},
+       .macro_label = "full-layer macro",
+       .topo_layer_list = {{"raw", raw_three_pin_topo, "#6b7280", true}, {"congestion", congestion_topo, "#2563eb", false}},
+       .marker_list = {{raw_steiner, "raw blocked Steiner", "#dc2626"}},
+       .cost_query = three_pin_query});
 
   std::vector<PlanarCoord> hotspot_terminal_list = getMultiHotspotTerminalList();
   irt::TBSegmentCostQuery hotspot_query = getMultiHotspotCostMap().getQuery();
   std::vector<Segment<PlanarCoord>> hotspot_normal = RTTB.getPlanarTopoList(makeTask(hotspot_terminal_list, hotspot_query));
   irt::TBRefineStat hotspot_stat;
-  std::vector<Segment<PlanarCoord>> hotspot_congestion
-      = RTTB.getPlanarTopoList(makeTask(hotspot_terminal_list, hotspot_query, true), hotspot_stat);
+  std::vector<Segment<PlanarCoord>> hotspot_congestion = RTTB.getPlanarTopoList(makeTask(hotspot_terminal_list, hotspot_query, true), hotspot_stat);
   plot_case_list.push_back({.file_name = "06_multi_hotspot.svg",
                             .title = "Multi-hotspot topology competition",
-                            .summary = "normal_cost=" + formatCost(getTopoCost(hotspot_normal, hotspot_query)) + ", selected_cost="
-                                       + formatCost(getTopoCost(hotspot_congestion, hotspot_query)) + ", congestion_used="
-                                       + std::to_string(hotspot_stat.used_congestion_flute),
+                            .summary = "normal_cost=" + formatCost(getTopoCost(hotspot_normal, hotspot_query))
+                                       + ", selected_cost=" + formatCost(getTopoCost(hotspot_congestion, hotspot_query))
+                                       + ", congestion_used=" + std::to_string(hotspot_stat.used_congestion_flute),
                             .region = region,
                             .terminal_list = hotspot_terminal_list,
-                            .topo_layer_list = {{"normal", hotspot_normal, "#6b7280", true},
-                                                {"congestion", hotspot_congestion, "#16a34a", false}},
+                            .topo_layer_list = {{"normal", hotspot_normal, "#6b7280", true}, {"congestion", hotspot_congestion, "#16a34a", false}},
                             .cost_query = hotspot_query});
 
   std::vector<PlanarCoord> corridor_terminal_list = getCorridorTerminalList();
   irt::TBSegmentCostQuery corridor_query = getCorridorCostMap().getQuery();
   std::vector<Segment<PlanarCoord>> corridor_normal = RTTB.getPlanarTopoList(makeTask(corridor_terminal_list, corridor_query));
   irt::TBRefineStat corridor_stat;
-  std::vector<Segment<PlanarCoord>> corridor_selected
-      = RTTB.getPlanarTopoList(makeTask(corridor_terminal_list, corridor_query, true), corridor_stat);
+  std::vector<Segment<PlanarCoord>> corridor_selected = RTTB.getPlanarTopoList(makeTask(corridor_terminal_list, corridor_query, true), corridor_stat);
   plot_case_list.push_back({.file_name = "07_finite_corridor.svg",
                             .title = "Finite corridors through INF field",
-                            .summary = "normal_cost=" + formatCost(getTopoCost(corridor_normal, corridor_query)) + ", selected_cost="
-                                       + formatCost(getTopoCost(corridor_selected, corridor_query)) + ", congestion_used="
-                                       + std::to_string(corridor_stat.used_congestion_flute),
+                            .summary = "normal_cost=" + formatCost(getTopoCost(corridor_normal, corridor_query))
+                                       + ", selected_cost=" + formatCost(getTopoCost(corridor_selected, corridor_query))
+                                       + ", congestion_used=" + std::to_string(corridor_stat.used_congestion_flute),
                             .region = region,
                             .terminal_list = corridor_terminal_list,
-                            .topo_layer_list = {{"normal", corridor_normal, "#6b7280", true},
-                                                {"selected", corridor_selected, "#16a34a", false}},
+                            .topo_layer_list = {{"normal", corridor_normal, "#6b7280", true}, {"selected", corridor_selected, "#16a34a", false}},
                             .cost_query = corridor_query});
 
   std::vector<PlanarCoord> refine_terminal_list
@@ -1430,47 +1397,42 @@ bool generatePlots(const std::filesystem::path& plot_dir)
   for (const PlanarCoord& steiner : multi_raw_steiner_list) {
     refine_marker_list.push_back({steiner, "blocked Steiner", "#dc2626"});
   }
-  plot_case_list.push_back({.file_name = "08_high_degree_refine.svg",
-                            .title = "High-degree Steiner refinement",
-                            .summary = "attempted=" + std::to_string(refine_stat.attempted_steiner_refine) + ", used="
-                                       + std::to_string(refine_stat.used_steiner_refine) + ", refined="
-                                       + std::to_string(refine_stat.refined_steiner_num) + ", cost="
-                                       + formatCost(getTopoCost(refined_topo, refine_query)),
-                            .region = region,
-                            .terminal_list = refine_terminal_list,
-                            .topo_layer_list = {{"raw", refine_raw, "#6b7280", true}, {"refined", refined_topo, "#2563eb", false}},
-                            .marker_list = std::move(refine_marker_list),
-                            .cost_query = refine_query});
+  plot_case_list.push_back(
+      {.file_name = "08_high_degree_refine.svg",
+       .title = "High-degree Steiner refinement",
+       .summary = "attempted=" + std::to_string(refine_stat.attempted_steiner_refine) + ", used=" + std::to_string(refine_stat.used_steiner_refine)
+                  + ", refined=" + std::to_string(refine_stat.refined_steiner_num) + ", cost=" + formatCost(getTopoCost(refined_topo, refine_query)),
+       .region = region,
+       .terminal_list = refine_terminal_list,
+       .topo_layer_list = {{"raw", refine_raw, "#6b7280", true}, {"refined", refined_topo, "#2563eb", false}},
+       .marker_list = std::move(refine_marker_list),
+       .cost_query = refine_query});
 
   std::vector<PlanarCoord> stress_terminal_list = getHighDegreeTerminalList();
   irt::TBSegmentCostQuery stress_query = getHighDegreeCostMap().getQuery();
   std::vector<Segment<PlanarCoord>> stress_normal = RTTB.getPlanarTopoList(makeTask(stress_terminal_list, stress_query));
   irt::TBRefineStat stress_stat;
-  std::vector<Segment<PlanarCoord>> stress_congestion
-      = RTTB.getPlanarTopoList(makeTask(stress_terminal_list, stress_query, true), stress_stat);
-  plot_case_list.push_back({.file_name = "09_high_degree_stress.svg",
-                            .title = "High-degree deterministic stress",
-                            .summary = "pins=" + std::to_string(stress_terminal_list.size()) + ", cost="
-                                       + formatCost(getTopoCost(stress_congestion, stress_query)) + ", shifted="
-                                       + std::to_string(stress_stat.shifted_edge_num) + ", congestion_used="
-                                       + std::to_string(stress_stat.used_congestion_flute),
-                            .region = region,
-                            .terminal_list = stress_terminal_list,
-                            .topo_layer_list = {{"normal", stress_normal, "#6b7280", true},
-                                                {"selected", stress_congestion, "#7c3aed", false}},
-                            .cost_query = stress_query});
+  std::vector<Segment<PlanarCoord>> stress_congestion = RTTB.getPlanarTopoList(makeTask(stress_terminal_list, stress_query, true), stress_stat);
+  plot_case_list.push_back(
+      {.file_name = "09_high_degree_stress.svg",
+       .title = "High-degree deterministic stress",
+       .summary = "pins=" + std::to_string(stress_terminal_list.size()) + ", cost=" + formatCost(getTopoCost(stress_congestion, stress_query))
+                  + ", shifted=" + std::to_string(stress_stat.shifted_edge_num) + ", congestion_used=" + std::to_string(stress_stat.used_congestion_flute),
+       .region = region,
+       .terminal_list = stress_terminal_list,
+       .topo_layer_list = {{"normal", stress_normal, "#6b7280", true}, {"selected", stress_congestion, "#7c3aed", false}},
+       .cost_query = stress_query});
 
   PlanarRect partial_macro(18, 20, 36, 36);
   PlanarCoord macro_steiner(30, 30);
   irt::TBSegmentCostQuery partial_macro_query = GridCostMap(region).getQuery();
   irt::TBRefineStat partial_macro_stat;
-  std::vector<Segment<PlanarCoord>> partial_macro_topo
-      = RTTB.getPlanarTopoList(makeTask(base_terminal_list, partial_macro_query), partial_macro_stat);
+  std::vector<Segment<PlanarCoord>> partial_macro_topo = RTTB.getPlanarTopoList(makeTask(base_terminal_list, partial_macro_query), partial_macro_stat);
   plot_case_list.push_back({.file_name = "10_partial_layer_macro.svg",
                             .title = "Partial-layer macro keeps Steiner",
                             .summary = "steiner=(" + std::to_string(macro_steiner.get_x()) + "," + std::to_string(macro_steiner.get_y())
-                                       + "), finite_escape=1, shifted=" + std::to_string(partial_macro_stat.shifted_edge_num) + ", refined="
-                                       + std::to_string(partial_macro_stat.refined_steiner_num),
+                                       + "), finite_escape=1, shifted=" + std::to_string(partial_macro_stat.shifted_edge_num)
+                                       + ", refined=" + std::to_string(partial_macro_stat.refined_steiner_num),
                             .region = region,
                             .terminal_list = base_terminal_list,
                             .macro_rect_list = {partial_macro},
@@ -1482,22 +1444,20 @@ bool generatePlots(const std::filesystem::path& plot_dir)
   PlanarCoord blocked_macro_steiner(30, 30);
   irt::TBSegmentCostQuery macro_ring_query = getMacroRingCostMap(full_layer_macro, 2, 50).getQuery();
   irt::TBRefineStat macro_ring_stat;
-  std::vector<Segment<PlanarCoord>> macro_ring_topo
-      = RTTB.getPlanarTopoList(makeTask(base_terminal_list, macro_ring_query, true), macro_ring_stat);
-  plot_case_list.push_back({.file_name = "11_full_layer_macro_ring.svg",
-                            .title = "Full-layer macro with congestion ring",
-                            .summary = "attempted=" + std::to_string(macro_ring_stat.attempted_congestion_flute) + ", used="
-                                       + std::to_string(macro_ring_stat.used_congestion_flute) + ", shifted="
-                                       + std::to_string(macro_ring_stat.shifted_edge_num) + ", cost="
-                                       + formatCost(getTopoCost(macro_ring_topo, macro_ring_query)) + ", refined="
-                                       + std::to_string(macro_ring_stat.refined_steiner_num),
-                            .region = region,
-                            .terminal_list = base_terminal_list,
-                            .macro_rect_list = {full_layer_macro},
-                            .macro_label = "full-layer macro",
-                            .topo_layer_list = {{"raw", baseline, "#6b7280", true}, {"selected", macro_ring_topo, "#0f766e", false}},
-                            .marker_list = {{blocked_macro_steiner, "raw blocked Steiner", "#dc2626"}},
-                            .cost_query = macro_ring_query});
+  std::vector<Segment<PlanarCoord>> macro_ring_topo = RTTB.getPlanarTopoList(makeTask(base_terminal_list, macro_ring_query, true), macro_ring_stat);
+  plot_case_list.push_back(
+      {.file_name = "11_full_layer_macro_ring.svg",
+       .title = "Full-layer macro with congestion ring",
+       .summary = "attempted=" + std::to_string(macro_ring_stat.attempted_congestion_flute) + ", used=" + std::to_string(macro_ring_stat.used_congestion_flute)
+                  + ", shifted=" + std::to_string(macro_ring_stat.shifted_edge_num) + ", cost=" + formatCost(getTopoCost(macro_ring_topo, macro_ring_query))
+                  + ", refined=" + std::to_string(macro_ring_stat.refined_steiner_num),
+       .region = region,
+       .terminal_list = base_terminal_list,
+       .macro_rect_list = {full_layer_macro},
+       .macro_label = "full-layer macro",
+       .topo_layer_list = {{"raw", baseline, "#6b7280", true}, {"selected", macro_ring_topo, "#0f766e", false}},
+       .marker_list = {{blocked_macro_steiner, "raw blocked Steiner", "#dc2626"}},
+       .cost_query = macro_ring_query});
 
   bool generated = true;
   for (const PlotCase& plot_case : plot_case_list) {

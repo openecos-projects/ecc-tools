@@ -23,8 +23,8 @@
 #include "Net.hpp"
 #include "RCXHeader.hpp"
 #include "SPEFNameMap.hpp"
-#include "SWNodeCouplingKey.hpp"
 #include "SWModel.hpp"
+#include "SWNodeCouplingKey.hpp"
 #include "TopoEdge.hpp"
 #include "TopoNode.hpp"
 
@@ -64,14 +64,12 @@ class SPEFWriter
   char getSPEFDirection(Direction direction);
   void writeLayerMap(SWModel& sw_model, std::ofstream& spef_file_stream);
   void writeDNetList(SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map, int32_t corner_idx);
-  void writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map, int32_t corner_idx,
-                 int32_t net_idx);
+  void writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map, int32_t corner_idx, int32_t net_idx);
   void getNearestNodePair(TopoEdge& self_edge, TopoEdge& other_edge, int32_t& self_node_idx, int32_t& other_node_idx);
   std::string getNodeSPEFName(SPEFNameMap& spef_name_map, TopoNode& node);
   Direction getPinDirection(Net& net, const std::string& pin_name);
   void writeNodeGeometry(SWModel& sw_model, std::ofstream& spef_file_stream, TopoNode& node, double micron_per_dbu);
-  void writeResGeometry(SWModel& sw_model, std::ofstream& spef_file_stream, int32_t corner_idx, TopoEdge& edge,
-                        double micron_per_dbu);
+  void writeResGeometry(SWModel& sw_model, std::ofstream& spef_file_stream, int32_t corner_idx, TopoEdge& edge, double micron_per_dbu);
   int32_t getReportLayerLevel(SWModel& sw_model, int32_t design_layer_idx);
 };
 

@@ -54,10 +54,8 @@ class MetalInserter
   void initDatabaseInfo(MIModel& mi_model);
   void initMILayerList(MIModel& mi_model);
   int32_t getRoutingLayerIdx(const std::vector<idb::IdbLayer*>& idb_routing_layer_list, const std::string& layer_name);
-  MILayer initMILayer(idb::IdbLayerRouting* idb_routing_layer,
-                      const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list);
-  int32_t getGeometryLayerIdx(const std::string& layer_name,
-                              const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list);
+  MILayer initMILayer(idb::IdbLayerRouting* idb_routing_layer, const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list);
+  int32_t getGeometryLayerIdx(const std::string& layer_name, const std::vector<ecc::geometry::GeometryLayerMetadata>& geometry_layer_list);
   int32_t getMinArea(idb::IdbLayerRouting* idb_routing_layer);
   int32_t getCeilDiv(int32_t dividend, int32_t divisor);
   int32_t getMaxSpacing(idb::IdbLayerRouting* idb_routing_layer);
@@ -77,10 +75,10 @@ class MetalInserter
   std::vector<int32_t> getTrackCoordList(MILayer& mi_layer, const MIRect& rect);
   int32_t getTrackStep(MILayer& mi_layer);
   int32_t getFirstTrackCoord(int32_t coordinate, int32_t track_start, int32_t track_pitch);
-  std::vector<MIRect> getFillRectList(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer,
-                                      const MIRect& fill_region_rect, int32_t track_coord);
-  std::vector<std::pair<int32_t, int32_t>> getBlockedCoordIntervalList(ecc::geometry::GeometryStore& geometry_store,
-                                                                        MILayer& mi_layer, const MIRect& fill_rect);
+  std::vector<MIRect> getFillRectList(MIModel& mi_model, ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer, const MIRect& fill_region_rect,
+                                      int32_t track_coord);
+  std::vector<std::pair<int32_t, int32_t>> getBlockedCoordIntervalList(ecc::geometry::GeometryStore& geometry_store, MILayer& mi_layer,
+                                                                       const MIRect& fill_rect);
   MIRect getFillRect(MIModel& mi_model, MILayer& mi_layer, const MIRect& fill_region_rect, int32_t track_coord);
   std::vector<MIRect> getUniformFillRectList(MIModel& mi_model, MILayer& mi_layer, const MIRect& free_fill_rect);
   int32_t getFillSpacing(MILayer& mi_layer, int32_t parallel_length);
