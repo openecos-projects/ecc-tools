@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include "AccessPoint.hpp"
 #include "ConnectType.hpp"
 #include "LayerCoord.hpp"
 #include "LayerRect.hpp"
@@ -38,6 +39,7 @@ class PATask
   std::vector<PAGroup>& get_pa_group_list() { return _pa_group_list; }
   PlanarRect& get_bounding_box() { return _bounding_box; }
   int32_t get_routed_times() { return _routed_times; }
+  AccessPoint* get_selected_access_point() { return _selected_access_point; }
   // const getter
   const int32_t get_net_idx() const { return _net_idx; }
   const ConnectType& get_connect_type() const { return _connect_type; }
@@ -51,6 +53,7 @@ class PATask
   void set_pa_group_list(const std::vector<PAGroup>& pa_group_list) { _pa_group_list = pa_group_list; }
   void set_bounding_box(const PlanarRect& bounding_box) { _bounding_box = bounding_box; }
   void set_routed_times(const int32_t routed_times) { _routed_times = routed_times; }
+  void set_selected_access_point(AccessPoint* selected_access_point) { _selected_access_point = selected_access_point; }
   // function
   void addRoutedTimes() { ++_routed_times; }
 
@@ -62,6 +65,7 @@ class PATask
   std::vector<PAGroup> _pa_group_list;
   PlanarRect _bounding_box;
   int32_t _routed_times = 0;
+  AccessPoint* _selected_access_point = nullptr;
 };
 
 struct CmpPATask
