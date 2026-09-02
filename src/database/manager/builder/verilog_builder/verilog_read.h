@@ -88,6 +88,7 @@ class VerilogRead
   IdbDefService* _def_service = nullptr;
   VerilogReader* _verilog_reader = nullptr;
   ParsedVerilogModule* _top_module = nullptr;
+  std::string _input_file;
 };
 
 }  // namespace idb

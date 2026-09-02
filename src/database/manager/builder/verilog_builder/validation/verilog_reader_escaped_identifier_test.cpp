@@ -65,12 +65,36 @@ void testEscapedConcatIdentifiersRemainDistinctScalarNets()
   }
 }
 
+void testMissingMasterFailsDesignRead()
+{
+  const auto verilog_path = std::filesystem::temp_directory_path() / "verilog_reader_missing_master_test.v";
+  {
+    std::ofstream stream(verilog_path);
+    require(stream.good(), "failed to create missing-master Verilog file");
+    stream << "module top;\n"
+           << "  MISSING_MASTER missing_instance ();\n"
+           << "endmodule\n";
+  }
+
+  idb::IdbLayout layout;
+  idb::IdbDefService service(&layout);
+  idb::VerilogRead reader(&service);
+  require(!reader.createDb(verilog_path.string(), "top"), "Verilog reader must fail for a missing master");
+
+  idb::IdbLayout auto_layout;
+  idb::IdbDefService auto_service(&auto_layout);
+  idb::VerilogRead auto_reader(&auto_service);
+  require(!auto_reader.createDbAutoTop(verilog_path.string()), "auto-top Verilog reader must fail for a missing master");
+  std::filesystem::remove(verilog_path);
+}
+
 }  // namespace
 
 int main()
 {
   try {
     testEscapedConcatIdentifiersRemainDistinctScalarNets();
+    testMissingMasterFailsDesignRead();
   } catch (const std::exception& error) {
     std::cout << error.what() << '\n';
     return 1;

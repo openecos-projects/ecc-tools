@@ -292,7 +292,7 @@ bool DefRead::createDb(const char* file)
 
     fclose(f);
 
-    if (res != 0) {
+    if (res != 0 || get_last_error() != nullptr) {
       logError();
       return false;
     }
@@ -484,7 +484,7 @@ bool DefRead::createDbGzip(const char* gzip_file)
 
   defrGZipClose(f);
 
-  if (res != 0) {
+  if (res != 0 || get_last_error() != nullptr) {
     logError();
     return false;
   }
@@ -940,15 +940,16 @@ int32_t DefRead::parse_component(defiComponent* def_component)
   IdbRegionList* region_list = design->get_region_list();
   IdbCellMasterList* master_list = layout->get_cell_master_list();
 
+  std::string inst_name = def_component->id();
   if (nullptr == _cur_cell_master || _cur_cell_master->get_name() != def_component->name()) {
     _cur_cell_master = master_list->find_cell_master(def_component->name());
   }
   if (_cur_cell_master == nullptr) {
-    ECCLOG.warn(ecc::Loc::current(), "Error can not find Cell Master : ", def_component->name());
+    ECCLOG.warn(ecc::Loc::current(), "PDK master not found: input=", _file_path, ", instance=", inst_name,
+                ", master=", def_component->name());
     return kDbFail;
   }
 
-  std::string inst_name = def_component->id();
   std::string new_inst_name = inst_name;
   std::erase(new_inst_name, '\\');
 

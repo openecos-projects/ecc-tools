@@ -13,6 +13,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <zlib.h>
 
 namespace {
 
@@ -23,25 +24,20 @@ void require(bool condition, const std::string& message)
   }
 }
 
-void testComponentFailureIsReported()
-{
-  const auto def_path = std::filesystem::temp_directory_path() / "def_reader_error_test.def";
-  {
-    std::ofstream def_file(def_path);
-    def_file << "VERSION 5.8 ;\n"
-             << "DESIGN def_reader_error_test ;\n"
-             << "UNITS DISTANCE MICRONS 1000 ;\n"
-             << "COMPONENTS 1 ;\n"
-             << "- missing_instance MISSING_MASTER ;\n"
-             << "END COMPONENTS\n"
-             << "END DESIGN\n";
-  }
+const std::string kMissingMasterDef = "VERSION 5.8 ;\n"
+                                      "DESIGN def_reader_error_test ;\n"
+                                      "UNITS DISTANCE MICRONS 1000 ;\n"
+                                      "COMPONENTS 1 ;\n"
+                                      "- missing_instance MISSING_MASTER ;\n"
+                                      "END COMPONENTS\n"
+                                      "END DESIGN\n";
 
+void requireMissingMasterFailure(const std::filesystem::path& def_path)
+{
   idb::IdbLayout layout;
   idb::IdbDefService service(&layout);
   idb::DefRead reader(&service);
   const bool parsed = reader.createDb(def_path.c_str());
-  std::filesystem::remove(def_path);
 
   require(!parsed, "DEF reader must fail when a component master is missing");
   const auto* error = reader.get_last_error();
@@ -53,12 +49,38 @@ void testComponentFailureIsReported()
   require(!error->message.empty(), "error report must include a failure message");
 }
 
+void testComponentFailureIsReported()
+{
+  const auto def_path = std::filesystem::temp_directory_path() / "def_reader_error_test.def";
+  {
+    std::ofstream def_file(def_path);
+    def_file << kMissingMasterDef;
+  }
+
+  requireMissingMasterFailure(def_path);
+  std::filesystem::remove(def_path);
+}
+
+void testGzipComponentFailureIsReported()
+{
+  const auto def_path = std::filesystem::temp_directory_path() / "def_reader_error_test.def.gz";
+  gzFile def_file = gzopen(def_path.c_str(), "wb");
+  require(def_file != nullptr, "failed to create gzip DEF input");
+  require(gzwrite(def_file, kMissingMasterDef.data(), kMissingMasterDef.size()) == static_cast<int>(kMissingMasterDef.size()),
+          "failed to write gzip DEF input");
+  require(gzclose(def_file) == Z_OK, "failed to close gzip DEF input");
+
+  requireMissingMasterFailure(def_path);
+  std::filesystem::remove(def_path);
+}
+
 }  // namespace
 
 int main()
 {
   try {
     testComponentFailureIsReported();
+    testGzipComponentFailureIsReported();
   } catch (const std::exception& error) {
     std::cout << error.what() << '\n';
     return 1;
