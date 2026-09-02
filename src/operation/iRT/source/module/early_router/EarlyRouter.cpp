@@ -26,6 +26,48 @@
 
 namespace irt {
 
+namespace {
+
+int32_t getReportedOverflow(const GridMap<EREdge>& edge_map, int32_t x, int32_t y)
+{
+  constexpr int32_t raw_overflow_threshold = 2;
+  constexpr int32_t hotspot_neighbor_overflow_threshold = 6;
+  if (edge_map.empty()) {
+    return 0;
+  }
+  if (!edge_map.isInside(x, y)) {
+    RTLOG.error(Loc::current(), "The overflow edge coordinate is outside the map!");
+  }
+
+  int32_t overflow = edge_map[x][y].get_overflow();
+  if (overflow >= raw_overflow_threshold) {
+    return overflow;
+  }
+  if (overflow == 0) {
+    return 0;
+  }
+
+  int32_t hotspot_neighbor_overflow = 0;
+  for (int32_t offset_x = -1; offset_x <= 1; offset_x++) {
+    for (int32_t offset_y = -1; offset_y <= 1; offset_y++) {
+      if (offset_x == 0 && offset_y == 0) {
+        continue;
+      }
+      int32_t neighbor_x = x + offset_x;
+      int32_t neighbor_y = y + offset_y;
+      if (edge_map.isInside(neighbor_x, neighbor_y)) {
+        hotspot_neighbor_overflow += edge_map[neighbor_x][neighbor_y].get_overflow();
+        if (hotspot_neighbor_overflow >= hotspot_neighbor_overflow_threshold) {
+          return overflow;
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+}  // namespace
+
 // public
 
 void EarlyRouter::initInst()
@@ -1187,32 +1229,39 @@ std::vector<Segment<PlanarCoord>> EarlyRouter::getPlanarRoutingSegmentList(ERMod
   for (int32_t candidate_idx = 0; candidate_idx < candidate_num; candidate_idx++) {
     updateERCandidate(er_model, er_candidate_list[candidate_idx]);
   }
-  std::map<int32_t, ERCandidate*> topo_candidate_map;
+  int32_t topo_num = 0;
+  for (const ERCandidate& er_candidate : er_candidate_list) {
+    topo_num = std::max(topo_num, er_candidate.get_topo_idx() + 1);
+  }
+  std::vector<ERCandidate*> topo_candidate_list(topo_num, nullptr);
   for (ERCandidate& er_candidate : er_candidate_list) {
     int32_t topo_idx = er_candidate.get_topo_idx();
-    if (!RTUTIL.exist(topo_candidate_map, topo_idx)) {
-      topo_candidate_map[topo_idx] = &er_candidate;
+    if (topo_candidate_list[topo_idx] == nullptr) {
+      topo_candidate_list[topo_idx] = &er_candidate;
       continue;
     }
-    ERCandidate* current_best = topo_candidate_map[topo_idx];
+    ERCandidate* current_best = topo_candidate_list[topo_idx];
     if (!er_candidate.get_is_path_blocked() && current_best->get_is_path_blocked()) {
-      topo_candidate_map[topo_idx] = &er_candidate;
+      topo_candidate_list[topo_idx] = &er_candidate;
     } else if (!er_candidate.get_is_path_blocked() && !current_best->get_is_path_blocked()) {
       if (er_candidate.get_total_wire_length() < current_best->get_total_wire_length()) {
-        topo_candidate_map[topo_idx] = &er_candidate;
+        topo_candidate_list[topo_idx] = &er_candidate;
       } else if (er_candidate.get_total_wire_length() == current_best->get_total_wire_length()) {
         if (er_candidate.get_total_corner_num() < current_best->get_total_corner_num()) {
-          topo_candidate_map[topo_idx] = &er_candidate;
+          topo_candidate_list[topo_idx] = &er_candidate;
         }
       }
     } else if (er_candidate.get_is_path_blocked() && current_best->get_is_path_blocked()) {
       if (er_candidate.get_total_overflow_cost() < current_best->get_total_overflow_cost()) {
-        topo_candidate_map[topo_idx] = &er_candidate;
+        topo_candidate_list[topo_idx] = &er_candidate;
       }
     }
   }
   std::vector<Segment<PlanarCoord>> routing_segment_list;
-  for (auto& [topo_idx, min_candidate] : topo_candidate_map) {
+  for (ERCandidate* min_candidate : topo_candidate_list) {
+    if (min_candidate == nullptr) {
+      continue;
+    }
     for (Segment<PlanarCoord>& routing_segment : min_candidate->get_routing_segment_list()) {
       routing_segment_list.push_back(routing_segment);
     }
@@ -1686,11 +1735,34 @@ void EarlyRouter::updateERCandidate(ERModel& er_model, ERCandidate& er_candidate
   double total_overflow_cost = 0;
   std::unordered_set<EREdge*> candidate_edge_set;
   for (Segment<PlanarCoord>& coord_segment : er_candidate.get_routing_segment_list()) {
-    PlanarCoord& first_coord = coord_segment.get_first();
-    PlanarCoord& second_coord = coord_segment.get_second();
-    total_wire_length += RTUTIL.getManhattanDistance(first_coord, second_coord);
-    for (EREdge* edge : getPlanarEdgeList(er_model, first_coord, second_coord)) {
-      candidate_edge_set.insert(edge);
+    total_wire_length += RTUTIL.getManhattanDistance(coord_segment.get_first(), coord_segment.get_second());
+  }
+  candidate_edge_set.reserve(total_wire_length);
+  for (Segment<PlanarCoord>& coord_segment : er_candidate.get_routing_segment_list()) {
+    const PlanarCoord& first_coord = coord_segment.get_first();
+    const PlanarCoord& second_coord = coord_segment.get_second();
+    if (first_coord == second_coord) {
+      continue;
+    }
+    if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
+      RTLOG.error(Loc::current(), "The planar segment is oblique!");
+    }
+
+    bool is_horizontal = RTUTIL.isHorizontal(first_coord, second_coord);
+    int32_t first_x = std::min(first_coord.get_x(), second_coord.get_x());
+    int32_t second_x = std::max(first_coord.get_x(), second_coord.get_x());
+    int32_t first_y = std::min(first_coord.get_y(), second_coord.get_y());
+    int32_t second_y = std::max(first_coord.get_y(), second_coord.get_y());
+    int32_t first_idx = is_horizontal ? first_x : first_y;
+    int32_t second_idx = is_horizontal ? second_x : second_y;
+    GridMap<EREdge>& edge_map = is_horizontal ? er_model.get_planar_h_edge_map() : er_model.get_planar_v_edge_map();
+    for (int32_t idx = first_idx; idx < second_idx; idx++) {
+      int32_t edge_x = is_horizontal ? idx : first_x;
+      int32_t edge_y = is_horizontal ? first_y : idx;
+      if (!edge_map.isInside(edge_x, edge_y)) {
+        RTLOG.error(Loc::current(), "The planar routing edge is outside the map!");
+      }
+      candidate_edge_set.insert(&edge_map[edge_x][edge_y]);
     }
   }
   for (EREdge* edge : candidate_edge_set) {
@@ -2063,8 +2135,31 @@ double EarlyRouter::getSegmentCost(ERModel& er_model, ERPackage& er_package, int
 
   double edge_cost = 0;
   bool is_blocked = false;
-  for (EREdge* edge : getLayerEdgeList(er_model, candidate_layer_idx, first_coord, second_coord)) {
-    edge_cost += getEdgeCost(*edge, net_idx, overflow_unit, is_blocked);
+  if (first_coord == second_coord) {
+    return edge_cost;
+  }
+  if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
+    RTLOG.error(Loc::current(), "The layer segment is oblique!");
+  }
+  if (candidate_layer_idx < 0 || static_cast<int32_t>(er_model.get_layer_h_edge_map().size()) <= candidate_layer_idx) {
+    RTLOG.error(Loc::current(), "The routing layer is outside the Edge map!");
+  }
+
+  bool is_horizontal = RTUTIL.isHorizontal(first_coord, second_coord);
+  int32_t first_x = std::min(first_coord.get_x(), second_coord.get_x());
+  int32_t second_x = std::max(first_coord.get_x(), second_coord.get_x());
+  int32_t first_y = std::min(first_coord.get_y(), second_coord.get_y());
+  int32_t second_y = std::max(first_coord.get_y(), second_coord.get_y());
+  int32_t first_idx = is_horizontal ? first_x : first_y;
+  int32_t second_idx = is_horizontal ? second_x : second_y;
+  GridMap<EREdge>& edge_map = is_horizontal ? er_model.get_layer_h_edge_map()[candidate_layer_idx] : er_model.get_layer_v_edge_map()[candidate_layer_idx];
+  for (int32_t idx = first_idx; idx < second_idx; idx++) {
+    int32_t edge_x = is_horizontal ? idx : first_x;
+    int32_t edge_y = is_horizontal ? first_y : idx;
+    if (!edge_map.isInside(edge_x, edge_y)) {
+      RTLOG.error(Loc::current(), "The layer routing Edge is outside the map!");
+    }
+    edge_cost += getEdgeCost(edge_map[edge_x][edge_y], net_idx, overflow_unit, is_blocked);
   }
   return edge_cost;
 }
@@ -2784,7 +2879,7 @@ void EarlyRouter::outputPlanarOverflowCSV(ERModel& er_model)
     std::ofstream* overflow_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, edge_map_pair.first));
     for (int32_t y = edge_map.get_y_size() - 1; y >= 0; y--) {
       for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
-        RTUTIL.pushStream(overflow_csv_file, edge_map[x][y].get_overflow(), ",");
+        RTUTIL.pushStream(overflow_csv_file, getReportedOverflow(edge_map, x, y), ",");
       }
       RTUTIL.pushStream(overflow_csv_file, "\n");
     }
@@ -2914,7 +3009,7 @@ void EarlyRouter::outputLayerOverflowCSV(ERModel& er_model)
 
     for (int32_t y = edge_map.get_y_size() - 1; y >= 0; y--) {
       for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
-        RTUTIL.pushStream(overflow_csv_file, edge_map[x][y].get_overflow(), ",");
+        RTUTIL.pushStream(overflow_csv_file, getReportedOverflow(edge_map, x, y), ",");
       }
       RTUTIL.pushStream(overflow_csv_file, "\n");
     }
@@ -3079,7 +3174,7 @@ void EarlyRouter::printPlanarSummary(ERModel& er_model)
     for (int32_t x = 0; x < edge_map->get_x_size(); x++) {
       for (int32_t y = 0; y < edge_map->get_y_size(); y++) {
         total_demand += (*edge_map)[x][y].get_demand();
-        total_overflow += (*edge_map)[x][y].get_overflow();
+        total_overflow += getReportedOverflow(*edge_map, x, y);
       }
     }
   }
@@ -3145,7 +3240,7 @@ void EarlyRouter::printLayerSummary(ERModel& er_model)
       for (int32_t x = 0; x < edge_map->get_x_size(); x++) {
         for (int32_t y = 0; y < edge_map->get_y_size(); y++) {
           int32_t demand = (*edge_map)[x][y].get_demand();
-          int32_t overflow = (*edge_map)[x][y].get_overflow();
+          int32_t overflow = getReportedOverflow(*edge_map, x, y);
           routing_demand_map[layer_idx] += demand;
           total_demand += demand;
           routing_overflow_map[layer_idx] += overflow;

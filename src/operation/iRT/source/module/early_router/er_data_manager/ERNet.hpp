@@ -49,7 +49,9 @@ class ERNet
   void set_er_pin_list(const std::vector<ERPin>& er_pin_list) { _er_pin_list = er_pin_list; }
   void set_bounding_box(const BoundingBox& bounding_box) { _bounding_box = bounding_box; }
   void set_planar_tree(const MTree<LayerCoord>& planar_tree) { _planar_tree = planar_tree; }
+  void set_planar_tree(MTree<LayerCoord>&& planar_tree) { _planar_tree = std::move(planar_tree); }
   void set_pillar_tree(const MTree<ERPillar>& pillar_tree) { _pillar_tree = pillar_tree; }
+  void set_pillar_tree(MTree<ERPillar>&& pillar_tree) { _pillar_tree = std::move(pillar_tree); }
   // function
 
  private:
