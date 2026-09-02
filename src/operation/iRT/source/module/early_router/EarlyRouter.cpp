@@ -235,38 +235,48 @@ void EarlyRouter::initAccessPointList(ERModel& er_model)
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
 
   std::vector<ERNet>& er_net_list = er_model.get_er_net_list();
-  std::vector<ERModel::AccessPointRTree::value_type> value_list;
-
+  int32_t net_num = static_cast<int32_t>(er_net_list.size());
+  std::vector<std::vector<ERModel::AccessPointRTree::value_type>> net_value_list_list(net_num);
+  std::vector<ERPin*> er_pin_list;
   for (ERNet& er_net : er_net_list) {
     for (ERPin& er_pin : er_net.get_er_pin_list()) {
-      std::vector<std::pair<int32_t, std::vector<EXTLayerRect>>> routing_pin_shape_list;
-      {
-        std::map<int32_t, std::vector<EXTLayerRect>> routing_pin_shape_map;
-        for (EXTLayerRect& routing_shape : er_pin.get_routing_shape_list()) {
-          routing_pin_shape_map[routing_shape.get_layer_idx()].emplace_back(routing_shape);
-        }
-        for (auto& [routing_layer_idx, pin_shape_list] : routing_pin_shape_map) {
-          routing_pin_shape_list.emplace_back(routing_layer_idx, pin_shape_list);
-        }
-        if (er_pin.get_is_core()) {
-          std::sort(
-              routing_pin_shape_list.begin(), routing_pin_shape_list.end(),
-              [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a, const std::pair<int32_t, std::vector<EXTLayerRect>>& b) { return a.first > b.first; });
-        } else {
-          std::sort(routing_pin_shape_list.begin(), routing_pin_shape_list.end(),
-                    [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a, const std::pair<int32_t, std::vector<EXTLayerRect>>& b) {
-                      return (a.first % 2 != 0 && b.first % 2 == 0) || (a.first % 2 == b.first % 2 && a.first > b.first);
-                    });
-        }
+      er_pin_list.push_back(&er_pin);
+    }
+  }
+#pragma omp parallel for
+  for (int32_t pin_list_idx = 0; pin_list_idx < static_cast<int32_t>(er_pin_list.size()); pin_list_idx++) {
+    ERPin& er_pin = *er_pin_list[pin_list_idx];
+    std::vector<std::pair<int32_t, std::vector<EXTLayerRect>>> routing_pin_shape_list;
+    {
+      std::map<int32_t, std::vector<EXTLayerRect>> routing_pin_shape_map;
+      for (EXTLayerRect& routing_shape : er_pin.get_routing_shape_list()) {
+        routing_pin_shape_map[routing_shape.get_layer_idx()].emplace_back(routing_shape);
       }
-      if (routing_pin_shape_list.empty()) {
-        RTLOG.error(Loc::current(), "The routing_pin_shape_list is empty!");
+      for (auto& [routing_layer_idx, pin_shape_list] : routing_pin_shape_map) {
+        routing_pin_shape_list.emplace_back(routing_layer_idx, pin_shape_list);
       }
-      for (LayerCoord access_coord : getAccessCoordList(er_model, routing_pin_shape_list.front().second)) {
-        er_pin.get_access_point_list().emplace_back(er_pin.get_pin_idx(), access_coord);
+      if (er_pin.get_is_core()) {
+        std::sort(
+            routing_pin_shape_list.begin(), routing_pin_shape_list.end(),
+            [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a, const std::pair<int32_t, std::vector<EXTLayerRect>>& b) { return a.first > b.first; });
+      } else {
+        std::sort(routing_pin_shape_list.begin(), routing_pin_shape_list.end(),
+                  [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a, const std::pair<int32_t, std::vector<EXTLayerRect>>& b) {
+                    return (a.first % 2 != 0 && b.first % 2 == 0) || (a.first % 2 == b.first % 2 && a.first > b.first);
+                  });
       }
     }
+    if (routing_pin_shape_list.empty()) {
+      RTLOG.error(Loc::current(), "The routing_pin_shape_list is empty!");
+    }
+    for (LayerCoord access_coord : getAccessCoordList(er_model, routing_pin_shape_list.front().second)) {
+      er_pin.get_access_point_list().emplace_back(er_pin.get_pin_idx(), access_coord);
+    }
+  }
 
+#pragma omp parallel for
+  for (int32_t net_idx = 0; net_idx < net_num; net_idx++) {
+    ERNet& er_net = er_net_list[net_idx];
     std::vector<PlanarCoord> coord_list;
     for (ERPin& er_pin : er_net.get_er_pin_list()) {
       for (AccessPoint& access_point : er_pin.get_access_point_list()) {
@@ -276,14 +286,25 @@ void EarlyRouter::initAccessPointList(ERModel& er_model)
     BoundingBox& bounding_box = er_net.get_bounding_box();
     bounding_box.set_real_rect(RTUTIL.getBoundingBox(coord_list));
     bounding_box.set_grid_rect(RTUTIL.getOpenGCellGridRect(bounding_box.get_real_rect(), gcell_axis));
+    std::vector<ERModel::AccessPointRTree::value_type>& net_value_list = net_value_list_list[net_idx];
     for (ERPin& er_pin : er_net.get_er_pin_list()) {
       for (AccessPoint& access_point : er_pin.get_access_point_list()) {
         access_point.set_grid_coord(RTUTIL.getGCellGridCoordByBBox(access_point.get_real_coord(), gcell_axis, bounding_box));
-        value_list.emplace_back(RTUTIL.convertToBGRectInt(PlanarRect(access_point.get_real_coord(), access_point.get_real_coord())),
-                                std::make_pair(er_net.get_net_idx(), &access_point));
+        net_value_list.emplace_back(RTUTIL.convertToBGRectInt(PlanarRect(access_point.get_real_coord(), access_point.get_real_coord())),
+                                    std::make_pair(er_net.get_net_idx(), &access_point));
       }
     }
   }
+  size_t value_num = 0;
+  for (std::vector<ERModel::AccessPointRTree::value_type>& net_value_list : net_value_list_list) {
+    value_num += net_value_list.size();
+  }
+  std::vector<ERModel::AccessPointRTree::value_type> value_list;
+  value_list.reserve(value_num);
+  for (std::vector<ERModel::AccessPointRTree::value_type>& net_value_list : net_value_list_list) {
+    value_list.insert(value_list.end(), net_value_list.begin(), net_value_list.end());
+  }
+  net_value_list_list.clear();
   er_model.get_access_point_rtree() = ERModel::AccessPointRTree(value_list);
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -293,7 +314,7 @@ std::vector<LayerCoord> EarlyRouter::getAccessCoordList(ERModel& er_model, std::
   Die& die = RTDM.getDatabase().get_die();
   int32_t manufacture_grid = RTDM.getDatabase().get_manufacture_grid();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  std::map<int32_t, PlanarRect>& layer_enclosure_map = RTDM.getDatabase().get_layer_enclosure_map();
+  const std::map<int32_t, PlanarRect>& layer_enclosure_map = RTDM.getDatabase().get_layer_enclosure_map();
 
   int32_t curr_layer_idx;
   {
@@ -312,7 +333,7 @@ std::vector<LayerCoord> EarlyRouter::getAccessCoordList(ERModel& er_model, std::
     }
     std::vector<PlanarRect> shrinked_rect_list;
     {
-      PlanarRect& enclosure = layer_enclosure_map[curr_layer_idx];
+      const PlanarRect& enclosure = layer_enclosure_map.at(curr_layer_idx);
       int32_t enclosure_half_x_span = enclosure.getXSpan() / 2;
       int32_t enclosure_half_y_span = enclosure.getYSpan() / 2;
       int32_t half_min_width = routing_layer_list[curr_layer_idx].get_min_width() / 2;
@@ -1148,10 +1169,23 @@ void EarlyRouter::initSinglePlanarTask(ERModel& er_model, ERNet* er_task)
 
 std::vector<Segment<PlanarCoord>> EarlyRouter::getPlanarRoutingSegmentList(ERModel& er_model)
 {
+  constexpr int64_t edge_visit_num_per_thread = 8192;
+  int32_t max_thread_num = std::max(1, std::min(RTDM.getConfig().thread_number, 16));
+
   std::vector<ERCandidate> er_candidate_list = getERCandidateList(er_model);
-#pragma omp parallel for
+  int32_t candidate_num = static_cast<int32_t>(er_candidate_list.size());
+  int64_t edge_visit_num = 0;
   for (ERCandidate& er_candidate : er_candidate_list) {
-    updateERCandidate(er_model, er_candidate);
+    for (Segment<PlanarCoord>& segment : er_candidate.get_routing_segment_list()) {
+      edge_visit_num += RTUTIL.getManhattanDistance(segment.get_first(), segment.get_second());
+    }
+  }
+  int32_t thread_num
+      = std::max(1, std::min({candidate_num, max_thread_num, static_cast<int32_t>(std::max<int64_t>(1, edge_visit_num / edge_visit_num_per_thread))}));
+
+#pragma omp parallel for if (thread_num > 1) num_threads(thread_num) schedule(guided, 8)
+  for (int32_t candidate_idx = 0; candidate_idx < candidate_num; candidate_idx++) {
+    updateERCandidate(er_model, er_candidate_list[candidate_idx]);
   }
   std::map<int32_t, ERCandidate*> topo_candidate_map;
   for (ERCandidate& er_candidate : er_candidate_list) {
