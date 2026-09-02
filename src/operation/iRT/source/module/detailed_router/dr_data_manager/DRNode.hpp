@@ -21,6 +21,7 @@
 #include "Orientation.hpp"
 #include "RTHeader.hpp"
 #include "Utility.hpp"
+#include "ViaMasterIdx.hpp"
 
 namespace irt {
 
@@ -122,11 +123,13 @@ class DRNode : public LayerCoord
   // single path
   DRNodeState& get_state() { return _state; }
   DRNode* get_parent_node() const { return _parent_node; }
+  ViaMasterIdx& get_parent_via_master_idx() { return _parent_via_master_idx; }
   double get_known_cost() const { return _known_cost; }
   double get_estimated_cost() const { return _estimated_cost; }
   int32_t get_open_queue_idx() const { return _open_queue_idx; }
   void set_state(DRNodeState state) { _state = state; }
   void set_parent_node(DRNode* parent_node) { _parent_node = parent_node; }
+  void set_parent_via_master_idx(const ViaMasterIdx& parent_via_master_idx) { _parent_via_master_idx = parent_via_master_idx; }
   void set_known_cost(const double known_cost) { _known_cost = known_cost; }
   void set_estimated_cost(const double estimated_cost) { _estimated_cost = estimated_cost; }
   void set_open_queue_idx(int32_t open_queue_idx) { _open_queue_idx = open_queue_idx; }
@@ -201,6 +204,7 @@ class DRNode : public LayerCoord
 #if 1  // astar
   int32_t _open_queue_idx = -1;
   DRNode* _parent_node = nullptr;
+  ViaMasterIdx _parent_via_master_idx;
   double _known_cost = 0.0;  // include curr
   double _estimated_cost = 0.0;
 #endif

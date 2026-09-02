@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include "AccessPoint.hpp"
 #include "LayerCoord.hpp"
 #include "LayerRect.hpp"
 #include "OpenQueue.hpp"
@@ -116,6 +117,7 @@ class PABox
   std::vector<PANode*>& get_path_node_list() { return _path_node_list; }
   std::vector<PANode*>& get_single_task_visited_node_list() { return _single_task_visited_node_list; }
   std::vector<Segment<LayerCoord>>& get_routing_segment_list() { return _routing_segment_list; }
+  std::map<PANode*, AccessPoint*>& get_source_node_access_point_map() { return _source_node_access_point_map; }
   void set_curr_route_task(PATask* curr_route_task) { _curr_route_task = curr_route_task; }
   void set_start_node_list_list(const std::vector<std::vector<PANode*>>& start_node_list_list) { _start_node_list_list = start_node_list_list; }
   void set_end_node_list_list(const std::vector<std::vector<PANode*>>& end_node_list_list) { _end_node_list_list = end_node_list_list; }
@@ -186,6 +188,7 @@ class PABox
   std::vector<PANode*> _path_node_list;
   std::vector<PANode*> _single_task_visited_node_list;
   std::vector<Segment<LayerCoord>> _routing_segment_list;
+  std::map<PANode*, AccessPoint*> _source_node_access_point_map;
   // single path
   OpenQueue<PANode> _open_queue;
   std::vector<PANode*> _single_path_visited_node_list;

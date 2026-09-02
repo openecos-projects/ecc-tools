@@ -67,13 +67,12 @@ class DetailedRouter
   std::set<DRBoxId, CmpDRBoxId> getDRBoxIdSet(DRModel& dr_model, PlanarRect real_rect);
   void routeDRBoxMap(DRModel& dr_model);
   void freeDRBoxMap(DRModel& dr_model);
-  void buildStageRepairInfo(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list, std::vector<std::set<int32_t>>& stage_violation_net_set_list,
-                            std::vector<std::vector<LayerRect>>& stage_repair_region_list_list);
-  void initDRBox(DRModel& dr_model, DRBox& dr_box, const std::set<int32_t>& violation_net_set, const std::vector<LayerRect>& repair_region_list);
+  void buildStageViolationNetSetList(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list,
+                                     std::vector<std::set<int32_t>>& stage_violation_net_set_list);
+  void initDRBox(DRModel& dr_model, DRBox& dr_box, const std::set<int32_t>& violation_net_set);
   void updateRouteViolation(DRModel& dr_model, std::vector<std::vector<Violation>>& stage_violation_list_list);
   void buildFixedRect(DRBox& dr_box);
   void buildAccessPoint(DRBox& dr_box);
-  void buildGlobalResult(DRBox& dr_box);
   void buildNetEnvironment(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   void buildDirtyNetEnvironment(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   void addNetResultToEnvironment(DRModel& dr_model, GridMap<bool>& active_box_map, GridMap<omp_lock_t>& environment_lock_map, int32_t net_idx,
@@ -81,9 +80,11 @@ class DetailedRouter
   void addNetPatchToEnvironment(DRModel& dr_model, GridMap<bool>& active_box_map, GridMap<omp_lock_t>& environment_lock_map, int32_t net_idx,
                                 EXTLayerRect& patch);
   void initDRTaskList(DRModel& dr_model, DRBox& dr_box, const std::set<int32_t>& violation_net_set);
+  void buildRefineTaskList(DRModel& dr_model, DRBox& dr_box);
   void buildNetTaskList(DRModel& dr_model, DRBox& dr_box, int32_t net_idx);
   void buildRouteViolation(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   bool needRouting(DRBox& dr_box);
+  bool needRefine(DRBox& dr_box);
   void buildBoxTrackAxis(DRBox& dr_box);
   void buildLayerNodeMap(DRBox& dr_box);
   void buildLayerShadowMap(DRBox& dr_box);
@@ -97,16 +98,20 @@ class DetailedRouter
                    std::vector<EXTLayerRect>& patch_list);
   std::vector<DRTask*> resetDRNetResult(DRBox& dr_box, int32_t net_idx);
   void routeDRNet(DRBox& dr_box, int32_t net_idx);
-  void routeDRRegionalRepair(DRBox& dr_box);
+  double getNetResultCost(DRBox& dr_box, int32_t net_idx);
+  bool hasUncoveredBoxAccessPoint(DRBox& dr_box, int32_t net_idx);
+  bool coverBoxAccessPoints(DRBox& dr_box, int32_t net_idx, const std::vector<Segment<LayerCoord>>& old_result_list);
+  void appendRepairedNetsToRefine(DRBox& dr_box);
+  int32_t countNetBoxViolation(DRBox& dr_box, int32_t net_idx);
+  bool refineCleanNets(DRBox& dr_box);
   void routeDRTask(DRBox& dr_box, DRTask* dr_task);
   void initSingleRouteTask(DRBox& dr_box, DRTask* dr_task);
-  std::vector<LayerCoord> getGuideCoordList(DRBox& dr_box, DRTask* dr_task, std::vector<Segment<LayerCoord>>& global_segment_list);
-  void buildGuidePenaltyMap(DRBox& dr_box, DRTask* dr_task);
   bool isConnectedAllEnd(DRBox& dr_box);
   void routeSinglePath(DRBox& dr_box);
   void initPathHead(DRBox& dr_box);
   bool searchEnded(DRBox& dr_box);
   void expandSearching(DRBox& dr_box);
+  ViaMasterIdx getEdgeViaMasterIdx(DRBox& dr_box, DRNode* first_node, DRNode* second_node);
   void resetPathHead(DRBox& dr_box);
   void updatePathResult(DRBox& dr_box);
   std::vector<Segment<LayerCoord>> getRoutingSegmentListByNode(DRNode* node);
@@ -122,7 +127,6 @@ class DetailedRouter
   double getNodeCost(DRBox& dr_box, DRNode* curr_node, Orientation orientation);
   double getKnownWireCost(DRBox& dr_box, DRNode* start_node, DRNode* end_node);
   double getKnownViaCost(DRBox& dr_box, DRNode* start_node, DRNode* end_node);
-  double getKnownGuideCost(DRBox& dr_box, DRNode* start_node, DRNode* end_node, double edge_base_cost);
   double getKnownBendCost(DRBox& dr_box, DRNode* start_node, DRNode* end_node);
   double getKnownSelfCost(DRBox& dr_box, DRNode* start_node, DRNode* end_node);
   double getEstimateCostToEnd(DRBox& dr_box, DRNode* curr_node);

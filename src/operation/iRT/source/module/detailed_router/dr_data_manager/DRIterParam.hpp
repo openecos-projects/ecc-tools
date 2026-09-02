@@ -22,15 +22,14 @@ class DRIterParam
 {
  public:
   DRIterParam() = default;
-  DRIterParam(double prefer_wire_unit, double non_prefer_wire_unit, double bend_unit, double via_unit, double guide_ratio, int32_t size, int32_t offset,
+  DRIterParam(double prefer_wire_unit, double non_prefer_wire_unit, double bend_unit, double via_unit, int32_t size, int32_t offset,
               int32_t schedule_interval, double fixed_rect_unit, double routed_rect_unit, double violation_unit, int32_t max_routed_times,
-              int32_t max_candidate_patch_num)
+              int32_t max_candidate_patch_num, int32_t refine_net_num)
   {
     _prefer_wire_unit = prefer_wire_unit;
     _non_prefer_wire_unit = non_prefer_wire_unit;
     _bend_unit = bend_unit;
     _via_unit = via_unit;
-    _guide_ratio = guide_ratio;
     _size = size;
     _offset = offset;
     _schedule_interval = schedule_interval;
@@ -39,6 +38,7 @@ class DRIterParam
     _violation_unit = violation_unit;
     _max_routed_times = max_routed_times;
     _max_candidate_patch_num = max_candidate_patch_num;
+    _refine_net_num = refine_net_num;
   }
   ~DRIterParam() = default;
   // getter
@@ -46,7 +46,6 @@ class DRIterParam
   double get_non_prefer_wire_unit() const { return _non_prefer_wire_unit; }
   double get_bend_unit() const { return _bend_unit; }
   double get_via_unit() const { return _via_unit; }
-  double get_guide_ratio() const { return _guide_ratio; }
   int32_t get_size() const { return _size; }
   int32_t get_offset() const { return _offset; }
   int32_t get_schedule_interval() const { return _schedule_interval; }
@@ -55,14 +54,12 @@ class DRIterParam
   double get_violation_unit() const { return _violation_unit; }
   int32_t get_max_routed_times() const { return _max_routed_times; }
   int32_t get_max_candidate_patch_num() const { return _max_candidate_patch_num; }
-  int32_t get_regional_repair_violation_threshold() const { return _regional_repair_violation_threshold; }
-  bool get_regional_repair() const { return _regional_repair; }
+  int32_t get_refine_net_num() const { return _refine_net_num; }
   // setter
   void set_prefer_wire_unit(const double prefer_wire_unit) { _prefer_wire_unit = prefer_wire_unit; }
   void set_non_prefer_wire_unit(const double non_prefer_wire_unit) { _non_prefer_wire_unit = non_prefer_wire_unit; }
   void set_bend_unit(const double bend_unit) { _bend_unit = bend_unit; }
   void set_via_unit(const double via_unit) { _via_unit = via_unit; }
-  void set_guide_ratio(const double guide_ratio) { _guide_ratio = guide_ratio; }
   void set_size(const int32_t size) { _size = size; }
   void set_offset(const int32_t offset) { _offset = offset; }
   void set_schedule_interval(const int32_t schedule_interval) { _schedule_interval = schedule_interval; }
@@ -71,18 +68,13 @@ class DRIterParam
   void set_violation_unit(const double violation_unit) { _violation_unit = violation_unit; }
   void set_max_routed_times(const int32_t max_routed_times) { _max_routed_times = max_routed_times; }
   void set_max_candidate_patch_num(const int32_t max_candidate_patch_num) { _max_candidate_patch_num = max_candidate_patch_num; }
-  void set_regional_repair_violation_threshold(const int32_t regional_repair_violation_threshold)
-  {
-    _regional_repair_violation_threshold = regional_repair_violation_threshold;
-  }
-  void set_regional_repair(const bool regional_repair) { _regional_repair = regional_repair; }
+  void set_refine_net_num(const int32_t refine_net_num) { _refine_net_num = refine_net_num; }
 
  private:
   double _prefer_wire_unit = 0;
   double _non_prefer_wire_unit = 0;
   double _bend_unit = 0;
   double _via_unit = 0;
-  double _guide_ratio = 0;
   int32_t _size = -1;
   int32_t _offset = -1;
   int32_t _schedule_interval = -1;
@@ -91,8 +83,7 @@ class DRIterParam
   double _violation_unit = 0;
   int32_t _max_routed_times = 0;
   int32_t _max_candidate_patch_num = 0;
-  int32_t _regional_repair_violation_threshold = 100;
-  bool _regional_repair = false;
+  int32_t _refine_net_num = 0;
 };
 
 }  // namespace irt
