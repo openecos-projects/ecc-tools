@@ -152,11 +152,13 @@ class PinAccessor
   void resetSinglePatchTask(PABox& pa_box);
   void updateRouteViolationList(PABox& pa_box);
   std::vector<Violation> getRouteViolationList(PABox& pa_box, bool ap_via_only);
+  int32_t getViolationWeight(ViolationType violation_type);
+  int32_t getViolationScore(const std::vector<Violation>& violation_list);
   LayerCoord getAccessCoord(PATask* pa_task);
   bool isAPViaSegment(const Segment<LayerCoord>& segment, const LayerCoord& access_coord);
   void updateAccessPoint(PABox& pa_box);
   void updateBestResult(PABox& pa_box);
-  void updateTaskSchedule(PABox& pa_box, std::vector<PATask*>& routing_task_list);
+  void updateTaskSchedule(PABox& pa_box, std::vector<PATask*>& routing_task_list, int32_t routing_rounds);
   void selectBestResult(PABox& pa_box);
   void freePABox(PABox& pa_box);
   void updatePAModel(PAModel& pa_model);

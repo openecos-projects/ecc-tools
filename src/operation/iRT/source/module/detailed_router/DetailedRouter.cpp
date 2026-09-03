@@ -131,9 +131,9 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
   std::vector<DRIterParam> dr_iter_param_list;
   // clang-format off
   dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 0, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10, 0);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 4, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10, 0);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 8, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10, 0);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 0, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 9, 10, 0);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 4, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10, 32);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 8, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10, 32);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 0, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 9, 10, 32);
   dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 4, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 9, 10, 0);
   dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 8, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 9, 10, 0);
   dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 0, 3, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 18, 10, 0);
