@@ -1,3 +1,4 @@
+## overview
 initPAModel:初始化pa_net
 setPAComParam:设置参数
 initAccessPointList:用boost得到pinshape上的合法区域并生成ap
@@ -6,6 +7,7 @@ routePAModel:迭代PAModel
     initRoutingState:初始化布线状态
     setPAIterParam:设置参数
     initPABoxMap:构建PABox框架,里面主要数据为空
+    buildPinOwner:在本轮开始时为每个pin确定并冻结唯一的owner box
     resetRoutingState:重置布线状态
     buildBoxSchedule:构建Box布线的调度表
     routePABoxMap:
@@ -26,6 +28,41 @@ routePAModel:迭代PAModel
             updateTaskSchedule:通过Violation得到新的布线调度
         selectBestResult:选择box的最优结果上传
         freePABox:析构
-    uploadViolation:将整个版图结果进行检查并更新PAModel中的violation
+    updateViolation:根据dirty region进行增量DRC，必要时切换为full DRC，并更新PAModel中的violation
+    updatePAModel:将各owner box中的result/patch回写PAModel
     updateBestResult:更新PAModel中的最优结果
 uploadAccessPoint:将最终AP写入Database中的Pin并重建RTree
+
+
+## violation
+- splitPAResult:
+    将result/patch按照所属的pin选择的具体ap点所在的位置进行完全划分，第一轮没有ap点也没有result/patch。
+
+- 对有间隔的每一批次box list
+    构建env：将所有result/patch都扩大一定distance，并放到会重叠的那些active box中作为env result/patch
+    对这一批中每个box分别buildAP, initTask：把扩大一个distance内的ap都放到box中，去掉not inside的，对每个pin构建task
+    构建violation：把违例按照中点放到box中
+
+- 在route的过程中：
+    每个box进行violation检查时都把包括env的所有相关net都放进去，这样可以保证当前box处理不了的即相邻box内的shape产生，但根据中点却被分到当前box的那些违例可以被检出并保留，下一次迭代后由于box offset它将不在边界，可以正常修复。
+
+## dirty region
+
+- dirty来源：
+    routePABoxMap中，只要box本轮需要route，或者分配到了已有violation，就将该box标记为dirty。
+    即使box因为没有可布任务而没有实际route，只要它仍拥有violation，也必须进入dirty DRC，避免已有违例从PAModel中消失。
+
+- dirty范围：
+    updateViolation在所有box完成本轮route后统一构建dirty_box_map。
+    每个dirty源box的完整real_rect扩大detection_distance，覆盖到的所有PABox共同组成dirty region。
+    扩大范围用于覆盖box边界两侧可能互相产生DRC的几何。
+
+- 增量DRC：
+    dirty box比例小于25%时，只检查dirty_box_id_list。
+    buildPAEnvironment(..., true)将所有与dirty box邻近的result/patch加入对应box的env，其中几何查询范围扩大detection_distance。
+    每个dirty box的check_region是该box在所有routing layer上的real_rect；参与检查的net包括pin shape、result和patch涉及的全部net。
+    DRC结果按照violation中点归属于唯一box，只保留owner等于当前checking box的结果，最后通过set去重并更新PAModel。
+
+- full DRC：
+    dirty box数量达到全部box的25%时，直接对当前完整PA几何执行full DRC，避免大量局部检查。
+    增量和full模式都分别执行普通result/patch检查与AP via检查，并合并去重结果。

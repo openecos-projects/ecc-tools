@@ -77,6 +77,7 @@ class PinAccessor
   void initRoutingState(PAModel& pa_model);
   void setPAIterParam(PAModel& pa_model, int32_t iter, PAIterParam& pa_iter_param);
   void initPABoxMap(PAModel& pa_model);
+  void buildPinOwner(PAModel& pa_model);
   PABoxId getPABoxId(PAModel& pa_model, const PlanarCoord& coord);
   std::set<PABoxId, CmpPABoxId> getPABoxIdSet(PAModel& pa_model, PlanarRect real_rect);
   void resetRoutingState(PAModel& pa_model);
