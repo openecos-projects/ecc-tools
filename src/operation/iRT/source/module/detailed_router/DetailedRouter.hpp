@@ -111,7 +111,7 @@ class DetailedRouter
   void initPathHead(DRBox& dr_box);
   bool searchEnded(DRBox& dr_box);
   void expandSearching(DRBox& dr_box);
-  ViaMasterIdx getEdgeViaMasterIdx(DRBox& dr_box, DRNode* first_node, DRNode* second_node);
+  bool isViaEdgeAllowedByAP(DRBox& dr_box, DRNode* first_node, DRNode* second_node, ViaMasterIdx& via_master_idx);
   void resetPathHead(DRBox& dr_box);
   void updatePathResult(DRBox& dr_box);
   std::vector<Segment<LayerCoord>> getRoutingSegmentListByNode(DRNode* node);

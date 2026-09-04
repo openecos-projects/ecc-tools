@@ -131,9 +131,9 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
   std::vector<DRIterParam> dr_iter_param_list;
   // clang-format off
   dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 0, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10, 0);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 4, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10, 32);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 8, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10, 32);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 0, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 9, 10, 32);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 4, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10, 0);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 8, 3, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10, 0);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 0, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 9, 10, 0);
   dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 4, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 9, 10, 0);
   dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 8, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 9, 10, 0);
   dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 12, 0, 3, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 18, 10, 0);
@@ -460,8 +460,36 @@ bool isViaMasterIdxValid(const ViaMasterIdx& via_master_idx, int32_t below_layer
          && via_idx < static_cast<int32_t>(layer_via_master_list[below_layer_idx].size());
 }
 
+bool hasSameUndirectedEndpoints(const Segment<LayerCoord>& segment, const LayerCoord& first, const LayerCoord& second)
+{
+  return (segment.get_first() == first && segment.get_second() == second) || (segment.get_first() == second && segment.get_second() == first);
+}
+
+ViaMasterIdx getRequiredAPViaMasterIdx(int32_t net_idx, AccessPoint& access_point)
+{
+  const std::vector<ViaMasterIdx>& candidate_via_list = access_point.get_candidate_via_list();
+  if (candidate_via_list.empty()) {
+    return ViaMasterIdx();
+  }
+  if (candidate_via_list.size() != 1) {
+    RTLOG.error(Loc::current(), "The access point via master is not unique! net_idx: ", net_idx, ", pin_idx: ", access_point.get_pin_idx());
+  }
+  const ViaMasterIdx& via_master_idx = candidate_via_list.front();
+  int32_t below_layer_idx = via_master_idx.get_below_layer_idx();
+  if (!isViaMasterIdxValid(via_master_idx, below_layer_idx)) {
+    RTLOG.error(Loc::current(), "The access point has an invalid via master index! net_idx: ", net_idx, ", pin_idx: ", access_point.get_pin_idx(),
+                ", below_layer_idx: ", below_layer_idx, ", via_idx: ", via_master_idx.get_via_idx());
+  }
+  int32_t access_layer_idx = access_point.get_layer_idx();
+  if (access_layer_idx != below_layer_idx && access_layer_idx != below_layer_idx + 1) {
+    RTLOG.error(Loc::current(), "The access point via master is not adjacent to the access layer! net_idx: ", net_idx,
+                ", pin_idx: ", access_point.get_pin_idx(), ", access_layer_idx: ", access_layer_idx, ", below_layer_idx: ", below_layer_idx);
+  }
+  return via_master_idx;
+}
+
 void resolveResultViaMasterIdx(int32_t net_idx, std::vector<DRPin>& dr_pin_list, std::vector<Segment<LayerCoord>>& indexed_via_segment_list,
-                               Segment<LayerCoord>& via_segment, int32_t& unresolved_ap_via_num, int32_t& legacy_default_via_num)
+                               Segment<LayerCoord>& via_segment, int32_t& legacy_default_via_num)
 {
   if (via_segment.get_first().get_planar_coord() != via_segment.get_second().get_planar_coord()
       || std::abs(via_segment.get_first().get_layer_idx() - via_segment.get_second().get_layer_idx()) != 1) {
@@ -469,9 +497,7 @@ void resolveResultViaMasterIdx(int32_t net_idx, std::vector<DRPin>& dr_pin_list,
   }
   int32_t below_layer_idx = std::min(via_segment.get_first().get_layer_idx(), via_segment.get_second().get_layer_idx());
   for (Segment<LayerCoord>& indexed_via_segment : indexed_via_segment_list) {
-    bool same_via = (via_segment.get_first() == indexed_via_segment.get_first() && via_segment.get_second() == indexed_via_segment.get_second())
-                    || (via_segment.get_first() == indexed_via_segment.get_second() && via_segment.get_second() == indexed_via_segment.get_first());
-    if (!same_via) {
+    if (!hasSameUndirectedEndpoints(via_segment, indexed_via_segment.get_first(), indexed_via_segment.get_second())) {
       continue;
     }
     if (via_segment.hasValidViaMaster() && via_segment.get_via_master_idx() != indexed_via_segment.get_via_master_idx()) {
@@ -479,33 +505,32 @@ void resolveResultViaMasterIdx(int32_t net_idx, std::vector<DRPin>& dr_pin_list,
     }
     via_segment.set_via_master_idx(indexed_via_segment.get_via_master_idx());
   }
-  if (via_segment.hasValidViaMaster()) {
-    return;
-  }
-
-  std::vector<ViaMasterIdx> candidate_via_list;
+  ViaMasterIdx required_via_master_idx;
   for (DRPin& dr_pin : dr_pin_list) {
     AccessPoint& access_point = dr_pin.get_access_point();
     LayerCoord access_point_coord = access_point.getRealLayerCoord();
     if (access_point_coord != via_segment.get_first() && access_point_coord != via_segment.get_second()) {
       continue;
     }
-    for (const ViaMasterIdx& candidate_via_master_idx : access_point.get_candidate_via_list()) {
-      if (!isViaMasterIdxValid(candidate_via_master_idx, candidate_via_master_idx.get_below_layer_idx())) {
-        RTLOG.error(Loc::current(), "The access point has an invalid via master candidate during result update! net_idx: ", net_idx,
-                    ", below_layer_idx: ", candidate_via_master_idx.get_below_layer_idx(), ", via_idx: ", candidate_via_master_idx.get_via_idx());
-      }
-      if (candidate_via_master_idx.get_below_layer_idx() == below_layer_idx && !RTUTIL.exist(candidate_via_list, candidate_via_master_idx)) {
-        candidate_via_list.push_back(candidate_via_master_idx);
-      }
+    ViaMasterIdx access_via_master_idx = getRequiredAPViaMasterIdx(net_idx, access_point);
+    if (!access_via_master_idx.isValid() || access_via_master_idx.get_below_layer_idx() != below_layer_idx) {
+      continue;
     }
+    if (required_via_master_idx.isValid() && required_via_master_idx != access_via_master_idx) {
+      RTLOG.error(Loc::current(), "The detailed result via has conflicting access point constraints! net_idx: ", net_idx,
+                  ", below_layer_idx: ", below_layer_idx);
+    }
+    required_via_master_idx = access_via_master_idx;
   }
-  if (candidate_via_list.size() == 1) {
-    via_segment.set_via_master_idx(candidate_via_list.front());
+  if (via_segment.hasValidViaMaster()) {
+    if (required_via_master_idx.isValid() && via_segment.get_via_master_idx() != required_via_master_idx) {
+      RTLOG.error(Loc::current(), "The detailed result violates the access point via master constraint! net_idx: ", net_idx,
+                  ", below_layer_idx: ", below_layer_idx);
+    }
     return;
   }
-  if (!candidate_via_list.empty()) {
-    unresolved_ap_via_num++;
+  if (required_via_master_idx.isValid()) {
+    via_segment.set_via_master_idx(required_via_master_idx);
     return;
   }
 
@@ -515,6 +540,28 @@ void resolveResultViaMasterIdx(int32_t net_idx, std::vector<DRPin>& dr_pin_list,
   }
   via_segment.set_via_master_idx(layer_via_master_list[below_layer_idx].front().get_via_master_idx());
   legacy_default_via_num++;
+}
+
+void checkAPViaMasterConstraint(int32_t net_idx, std::vector<DRPin>& dr_pin_list, std::vector<Segment<LayerCoord>>& detailed_result_list)
+{
+  for (DRPin& dr_pin : dr_pin_list) {
+    AccessPoint& access_point = dr_pin.get_access_point();
+    ViaMasterIdx required_via_master_idx = getRequiredAPViaMasterIdx(net_idx, access_point);
+    if (!required_via_master_idx.isValid()) {
+      continue;
+    }
+    LayerCoord access_coord = access_point.getRealLayerCoord();
+    for (Segment<LayerCoord>& segment : detailed_result_list) {
+      if (segment.get_first().get_layer_idx() == segment.get_second().get_layer_idx()
+          || (segment.get_first() != access_coord && segment.get_second() != access_coord)) {
+        continue;
+      }
+      if (!segment.hasValidViaMaster() || segment.get_via_master_idx() != required_via_master_idx) {
+        RTLOG.error(Loc::current(), "The access point via does not use the required via master! net_idx: ", net_idx,
+                    ", pin_idx: ", access_point.get_pin_idx(), ", below_layer_idx: ", required_via_master_idx.get_below_layer_idx());
+      }
+    }
+  }
 }
 
 }  // namespace
@@ -769,6 +816,9 @@ void DetailedRouter::initDRTaskList(DRModel& dr_model, DRBox& dr_box, const std:
     for (auto& [net_idx, patch_list] : dr_box.get_net_task_detailed_patch_map()) {
       net_idx_set.insert(net_idx);
     }
+    for (auto& [net_idx, access_point_set] : dr_box.get_net_access_point_map()) {
+      net_idx_set.insert(net_idx);
+    }
   } else {
     for (int32_t net_idx : violation_net_set) {
       if (dr_box.get_net_task_detailed_result_map().contains(net_idx) || dr_box.get_net_task_detailed_patch_map().contains(net_idx)) {
@@ -924,8 +974,8 @@ void DetailedRouter::buildNetTaskList(DRModel& dr_model, DRBox& dr_box, int32_t 
     patch_entity_idx_list.push_back(connectivity.addEntity({LayerRect(patch.get_real_rect(), patch.get_layer_idx())}));
   }
 
-  connectivity.build();
   std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC> gcell_entity_idx_map;
+  auto access_iter = dr_box.get_net_access_point_map().find(net_idx);
   if (dr_box.get_initial_routing()) {
     // 初始布线结果按 gcell 切分，同一 gcell 内的实体需要恢复连通关系。
     ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
@@ -942,6 +992,17 @@ void DetailedRouter::buildNetTaskList(DRModel& dr_model, DRBox& dr_box, int32_t 
                               RTUTIL.getGCellGridLB(midpoint.get_y(), gcell_axis.get_y_grid_list()));
       gcell_entity_idx_map[gcell_coord].push_back(patch_entity_idx_list[i]);
     }
+    if (access_iter != dr_box.get_net_access_point_map().end()) {
+      for (AccessPoint* access_point : access_iter->second) {
+        PlanarCoord& gcell_coord = access_point->get_grid_coord();
+        if (RTUTIL.isInside(dr_box.get_box_rect().get_grid_rect(), gcell_coord) && gcell_entity_idx_map[gcell_coord].empty()) {
+          gcell_entity_idx_map[gcell_coord].push_back(connectivity.addEntity({}));
+        }
+      }
+    }
+  }
+  connectivity.build();
+  if (dr_box.get_initial_routing()) {
     for (auto& [gcell_coord, entity_idx_list] : gcell_entity_idx_map) {
       for (size_t i = 1; i < entity_idx_list.size(); i++) {
         connectivity.merge(entity_idx_list.front(), entity_idx_list[i]);
@@ -950,7 +1011,6 @@ void DetailedRouter::buildNetTaskList(DRModel& dr_model, DRBox& dr_box, int32_t 
   }
   std::map<int32_t, std::vector<DRGroup>> root_group_list_map;
 
-  auto access_iter = dr_box.get_net_access_point_map().find(net_idx);
   if (access_iter != dr_box.get_net_access_point_map().end()) {
     // 初始布线通过 gcell 关联 pin；后续迭代直接按形状包含关系关联。
     std::map<std::pair<int32_t, int32_t>, DRGroup> root_pin_group_map;
@@ -1069,7 +1129,18 @@ void DetailedRouter::buildNetTaskList(DRModel& dr_model, DRBox& dr_box, int32_t 
     }
   }
   for (auto& [root, group_list] : root_group_list_map) {
-    root_component_map[root].group_list = std::move(group_list);
+    DRTaskComponent& component = root_component_map[root];
+    component.group_list = std::move(group_list);
+    if (component.stable_key.empty()) {
+      for (DRGroup& group : component.group_list) {
+        for (auto& [coord, direction_set] : group.get_coord_direction_map()) {
+          std::vector<int32_t> key = {coord.get_layer_idx(), coord.get_x(), coord.get_y(), coord.get_x(), coord.get_y()};
+          if (component.stable_key.empty() || key < component.stable_key) {
+            component.stable_key = std::move(key);
+          }
+        }
+      }
+    }
   }
   for (size_t i = 0; i < result_list.size(); i++) {
     int32_t root = connectivity.getRoot(segment_entity_idx_list[i]);
@@ -1697,24 +1768,17 @@ bool DetailedRouter::coverBoxAccessPoints(DRBox& dr_box, int32_t net_idx, const 
       continue;
     }
 
-    ViaMasterIdx required_via_master_idx;
-    if (access_point->get_candidate_via_list().size() == 1) {
-      required_via_master_idx = access_point->get_candidate_via_list().front();
-      if (!isViaMasterIdxValid(required_via_master_idx, required_via_master_idx.get_below_layer_idx())) {
-        RTLOG.error(Loc::current(), "The access point has an invalid unique via master candidate!");
-      }
-    }
+    ViaMasterIdx required_via_master_idx = getRequiredAPViaMasterIdx(net_idx, *access_point);
     bool new_covered = false;
     for (Segment<LayerCoord>& segment : result_iter->second) {
       if (!RTUTIL.isInside(segment, coord)) {
         continue;
       }
-      if (!required_via_master_idx.isValid()) {
+      if (segment.get_first().get_layer_idx() == segment.get_second().get_layer_idx() || !required_via_master_idx.isValid()) {
         new_covered = true;
         break;
       }
-      if (segment.get_first().get_layer_idx() != segment.get_second().get_layer_idx() && segment.hasValidViaMaster()
-          && segment.get_via_master_idx() == required_via_master_idx) {
+      if (segment.hasValidViaMaster() && segment.get_via_master_idx() == required_via_master_idx) {
         new_covered = true;
         break;
       }
@@ -1823,6 +1887,12 @@ int32_t DetailedRouter::countNetBoxViolation(DRBox& dr_box, int32_t net_idx)
 
 bool DetailedRouter::refineCleanNets(DRBox& dr_box)
 {
+  if (dr_box.get_refine_net_list().empty()) {
+    return false;
+  }
+  // Model violations are assigned to one box, while refine evaluates the complete local box state.
+  dr_box.get_route_violation_list() = getRouteViolationList(dr_box);
+
   std::set<int32_t> task_net_set;
   for (DRTask* dr_task : dr_box.get_dr_task_list()) {
     task_net_set.insert(dr_task->get_net_idx());
@@ -2047,7 +2117,9 @@ void DetailedRouter::expandSearching(DRBox& dr_box)
     }
     ViaMasterIdx parent_via_master_idx;
     if (orientation == Orientation::kAbove || orientation == Orientation::kBelow) {
-      parent_via_master_idx = getEdgeViaMasterIdx(dr_box, path_head_node, neighbor_node);
+      if (!isViaEdgeAllowedByAP(dr_box, path_head_node, neighbor_node, parent_via_master_idx)) {
+        continue;
+      }
     }
     double known_cost = getKnownCost(dr_box, path_head_node, neighbor_node, orientation);
     if (neighbor_node->isOpen() && known_cost < neighbor_node->get_known_cost()) {
@@ -2065,34 +2137,37 @@ void DetailedRouter::expandSearching(DRBox& dr_box)
   }
 }
 
-ViaMasterIdx DetailedRouter::getEdgeViaMasterIdx(DRBox& dr_box, DRNode* first_node, DRNode* second_node)
+bool DetailedRouter::isViaEdgeAllowedByAP(DRBox& dr_box, DRNode* first_node, DRNode* second_node, ViaMasterIdx& via_master_idx)
 {
+  via_master_idx = ViaMasterIdx();
+  int32_t net_idx = dr_box.get_curr_route_task()->get_net_idx();
   int32_t below_layer_idx = std::min(first_node->get_layer_idx(), second_node->get_layer_idx());
-  std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
-  if (below_layer_idx < 0 || below_layer_idx >= static_cast<int32_t>(layer_via_master_list.size())) {
+  if (first_node->get_layer_idx() == second_node->get_layer_idx()) {
+    RTLOG.error(Loc::current(), "The edge is not a via edge!");
+  }
+  if (below_layer_idx < 0 || below_layer_idx >= static_cast<int32_t>(RTDM.getDatabase().get_layer_via_master_list().size())) {
     RTLOG.error(Loc::current(), "The via edge has an invalid below layer! layer_idx: ", below_layer_idx);
   }
 
-  std::vector<ViaMasterIdx> candidate_via_list;
   for (DRNode* dr_node : {first_node, second_node}) {
     auto source_iter = dr_box.get_source_node_access_point_map().find(dr_node);
     if (source_iter == dr_box.get_source_node_access_point_map().end()) {
       continue;
     }
-    for (const ViaMasterIdx& via_master_idx : source_iter->second->get_candidate_via_list()) {
-      if (via_master_idx.get_below_layer_idx() != below_layer_idx) {
-        continue;
-      }
-      if (!isViaMasterIdxValid(via_master_idx, below_layer_idx)) {
-        RTLOG.error(Loc::current(), "The access point has an invalid via master index! below_layer_idx: ", below_layer_idx,
-                    ", via_idx: ", via_master_idx.get_via_idx());
-      }
-      if (!RTUTIL.exist(candidate_via_list, via_master_idx)) {
-        candidate_via_list.push_back(via_master_idx);
-      }
+    ViaMasterIdx required_via_master_idx = getRequiredAPViaMasterIdx(net_idx, *source_iter->second);
+    if (!required_via_master_idx.isValid()) {
+      continue;
     }
+    if (required_via_master_idx.get_below_layer_idx() != below_layer_idx) {
+      return false;
+    }
+    if (via_master_idx.isValid() && via_master_idx != required_via_master_idx) {
+      RTLOG.error(Loc::current(), "The via edge has conflicting access point via master constraints! net_idx: ", net_idx,
+                  ", below_layer_idx: ", below_layer_idx);
+    }
+    via_master_idx = required_via_master_idx;
   }
-  return candidate_via_list.size() == 1 ? candidate_via_list.front() : ViaMasterIdx();
+  return true;
 }
 
 void DetailedRouter::resetPathHead(DRBox& dr_box)
@@ -2267,9 +2342,7 @@ std::vector<Segment<LayerCoord>> DetailedRouter::getRoutingSegmentList(DRBox& dr
     for (int32_t layer_idx = below_layer_idx; layer_idx < above_layer_idx; layer_idx++) {
       Segment<LayerCoord> unit_via_segment(LayerCoord(first.get_planar_coord(), layer_idx), LayerCoord(first.get_planar_coord(), layer_idx + 1));
       for (Segment<LayerCoord>& via_segment : via_segment_list) {
-        bool same_via = (unit_via_segment.get_first() == via_segment.get_first() && unit_via_segment.get_second() == via_segment.get_second())
-                        || (unit_via_segment.get_first() == via_segment.get_second() && unit_via_segment.get_second() == via_segment.get_first());
-        if (!same_via || !via_segment.hasValidViaMaster()) {
+        if (!hasSameUndirectedEndpoints(unit_via_segment, via_segment.get_first(), via_segment.get_second()) || !via_segment.hasValidViaMaster()) {
           continue;
         }
         if (unit_via_segment.hasValidViaMaster() && unit_via_segment.get_via_master_idx() != via_segment.get_via_master_idx()) {
@@ -3261,7 +3334,6 @@ void DetailedRouter::updateNetResult(DRModel& dr_model)
       net_result_list.emplace_back(net_idx, &segment_list);
     }
   }
-  std::vector<int32_t> unresolved_ap_via_num_list(net_result_list.size(), 0);
   std::vector<int32_t> legacy_default_via_num_list(net_result_list.size(), 0);
 #pragma omp parallel for schedule(dynamic, 1)
   for (int32_t result_idx = 0; result_idx < static_cast<int32_t>(net_result_list.size()); result_idx++) {
@@ -3293,7 +3365,6 @@ void DetailedRouter::updateNetResult(DRModel& dr_model)
     }
     MTree<LayerCoord> coord_tree = RTUTIL.getTreeByFullFlow(candidate_root_coord_list, detailed_result_list, key_coord_pin_map);
     std::vector<Segment<LayerCoord>> new_detailed_result_list;
-    int32_t unresolved_ap_via_num = 0;
     int32_t legacy_default_via_num = 0;
     for (Segment<TNode<LayerCoord>*>& coord_segment : RTUTIL.getSegListByTree(coord_tree)) {
       LayerCoord first = coord_segment.get_first()->value();
@@ -3306,19 +3377,15 @@ void DetailedRouter::updateNetResult(DRModel& dr_model)
       int32_t above_layer_idx = std::max(first.get_layer_idx(), second.get_layer_idx());
       for (int32_t layer_idx = below_layer_idx; layer_idx < above_layer_idx; layer_idx++) {
         Segment<LayerCoord> unit_via_segment(LayerCoord(first.get_planar_coord(), layer_idx), LayerCoord(first.get_planar_coord(), layer_idx + 1));
-        resolveResultViaMasterIdx(net_idx, dr_pin_list, via_segment_list, unit_via_segment, unresolved_ap_via_num, legacy_default_via_num);
+        resolveResultViaMasterIdx(net_idx, dr_pin_list, via_segment_list, unit_via_segment, legacy_default_via_num);
         new_detailed_result_list.push_back(unit_via_segment);
       }
     }
     detailed_result_list = std::move(new_detailed_result_list);
-    unresolved_ap_via_num_list[result_idx] = unresolved_ap_via_num;
+    checkAPViaMasterConstraint(net_idx, dr_pin_list, detailed_result_list);
     legacy_default_via_num_list[result_idx] = legacy_default_via_num;
   }
-  int32_t unresolved_ap_via_num = std::accumulate(unresolved_ap_via_num_list.begin(), unresolved_ap_via_num_list.end(), 0);
   int32_t legacy_default_via_num = std::accumulate(legacy_default_via_num_list.begin(), legacy_default_via_num_list.end(), 0);
-  if (unresolved_ap_via_num > 0) {
-    RTLOG.warn(Loc::current(), "Kept ", unresolved_ap_via_num, " AP-constrained vias unresolved after DR result reconstruction!");
-  }
   if (legacy_default_via_num > 0) {
     RTLOG.warn(Loc::current(), "Materialized ", legacy_default_via_num, " legacy vias with the default via master!");
   }
