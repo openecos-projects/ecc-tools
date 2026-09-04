@@ -141,7 +141,7 @@ class DetailedRouter
   std::vector<PlanarRect> getViolationOverlapRect(DRBox& dr_box, Violation& violation);
   void addViolationToShadow(DRBox& dr_box);
   void patchSingleViolation(DRBox& dr_box);
-  std::vector<DRPatch> getCandidatePatchList(DRBox& dr_box);
+  std::vector<DRPatch> getCandidatePatchList(DRBox& dr_box, int32_t raw_candidate_limit);
   bool getSolvedStatus(DRBox& dr_box, std::vector<Violation>& origin_patch_violation_list, std::vector<Violation>& curr_patch_violation_list);
   void resetSingleViolation(DRBox& dr_box);
   void clearViolationShadow(DRBox& dr_box);
