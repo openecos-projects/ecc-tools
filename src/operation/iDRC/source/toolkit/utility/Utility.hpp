@@ -62,6 +62,10 @@ class Utility
 
   static Orientation getOppositeOrientation(Orientation orientation);
 
+  static Orientation getCWOrientation(Orientation orientation);
+
+  static Orientation getCCWOrientation(Orientation orientation);
+
   static std::vector<Orientation> getOrthogonalOrientationList(Orientation orientation);
 
   // 获取 rect 某个角点向内部的两个方向
@@ -309,6 +313,8 @@ class Utility
 #endif
 
 #if 1  // std数据结构工具函数
+
+  static int32_t getRingIdx(int32_t idx, int32_t size);
 
   template <typename Key, typename Value>
   static Value getValueByAny(std::map<Key, std::any>& map, const Key& key, const Value& default_value)
