@@ -16,12 +16,29 @@
 // ***************************************************************************************
 #include "IOPlacer.hpp"
 
+#include <algorithm>
+#include <cstdint>
+#include <tuple>
+#include <vector>
+
 #include "DataManager.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Utility.hpp"
 
 namespace ifp {
+
+namespace {
+
+struct PinSlot
+{
+  int64_t cost = 0;
+  int32_t edge_order = 0;
+  IOEdgeType edge_type = IOEdgeType::kNone;
+  int32_t coord = 0;
+};
+
+}  // namespace
 
 // public
 
@@ -106,19 +123,84 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
 
   std::vector<IOPin>& io_pin_list = database.get_io_pin_list();
   int32_t io_pin_num = static_cast<int32_t>(io_pin_list.size());
-  int32_t edge_pin_num = io_pin_num % 4 == 0 ? io_pin_num / 4 : io_pin_num / 4 + 1;
-  int32_t io_pin_idx = 0;
+  if (io_pin_num == 0) {
+    return;
+  }
+
   int32_t horizontal_offset = getTrackOffset(horizontal_layer_name);
   int32_t vertical_offset = getTrackOffset(vertical_layer_name);
+  Die& die = database.get_die();
+  Core& core = database.get_core();
 
-  placeIOPinsOnEdge(IOEdgeType::kLeft, io_pin_list, io_pin_idx, edge_pin_num, horizontal_layer_name, horizontal_width, horizontal_depth, vertical_pitch,
-                    horizontal_offset, horizontal_pitch);
-  placeIOPinsOnEdge(IOEdgeType::kRight, io_pin_list, io_pin_idx, edge_pin_num, horizontal_layer_name, horizontal_width, horizontal_depth, vertical_pitch,
-                    horizontal_offset, horizontal_pitch);
-  placeIOPinsOnEdge(IOEdgeType::kBottom, io_pin_list, io_pin_idx, edge_pin_num, vertical_layer_name, vertical_width, vertical_depth, horizontal_pitch,
-                    vertical_offset, vertical_pitch);
-  placeIOPinsOnEdge(IOEdgeType::kTop, io_pin_list, io_pin_idx, edge_pin_num, vertical_layer_name, vertical_width, vertical_depth, horizontal_pitch,
-                    vertical_offset, vertical_pitch);
+  auto build_slots = [&](int32_t spacing_multiplier) {
+    std::vector<PinSlot> slot_list;
+    auto add_edge_slots = [&](IOEdgeType edge_type, int32_t edge_order, int32_t range_low, int32_t range_high, int32_t die_low,
+                              int32_t die_high, int32_t pin_span, int32_t access_pitch, int32_t track_offset, int32_t track_pitch,
+                              int32_t perpendicular_span) {
+      int32_t legal_low = std::max(range_low, die_low + access_pitch);
+      int32_t legal_high = std::min(range_high, die_high - access_pitch);
+      int32_t start = track_offset + FPUTIL.alignUp(legal_low + pin_span / 2 - track_offset, track_pitch);
+      int32_t end = track_offset + FPUTIL.alignDown(legal_high - pin_span / 2 - track_offset, track_pitch);
+      if (start > end) {
+        return;
+      }
+
+      int64_t center2 = static_cast<int64_t>(die_low) + die_high;
+      int32_t anchor = track_offset + FPUTIL.alignNearest(static_cast<int32_t>(center2 / 2) - track_offset, track_pitch);
+      anchor = std::max(start, std::min(end, anchor));
+      int32_t spacing = spacing_multiplier * track_pitch;
+      while (anchor - spacing >= start) {
+        anchor -= spacing;
+      }
+
+      for (int64_t coord = anchor; coord <= end; coord += spacing) {
+        slot_list.push_back(
+            {static_cast<int64_t>(perpendicular_span) + std::abs(2 * coord - center2), edge_order, edge_type, static_cast<int32_t>(coord)});
+      }
+    };
+
+    add_edge_slots(IOEdgeType::kLeft, 0, core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), horizontal_width,
+                   vertical_pitch, horizontal_offset, horizontal_pitch, die.get_width());
+    add_edge_slots(IOEdgeType::kRight, 1, core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), horizontal_width,
+                   vertical_pitch, horizontal_offset, horizontal_pitch, die.get_width());
+    add_edge_slots(IOEdgeType::kBottom, 2, core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), vertical_width,
+                   horizontal_pitch, vertical_offset, vertical_pitch, die.get_height());
+    add_edge_slots(IOEdgeType::kTop, 3, core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), vertical_width,
+                   horizontal_pitch, vertical_offset, vertical_pitch, die.get_height());
+    std::sort(slot_list.begin(), slot_list.end(), [](const PinSlot& lhs, const PinSlot& rhs) {
+      return std::tie(lhs.cost, lhs.edge_order, lhs.coord) < std::tie(rhs.cost, rhs.edge_order, rhs.coord);
+    });
+    return slot_list;
+  };
+
+  int32_t spacing_multiplier = 2;
+  std::vector<PinSlot> slot_list = build_slots(spacing_multiplier);
+  if (slot_list.size() < io_pin_list.size()) {
+    spacing_multiplier = 1;
+    slot_list = build_slots(spacing_multiplier);
+  }
+  if (slot_list.size() < io_pin_list.size()) {
+    FPLOG.error(Loc::current(), "IO pins exceed the total legal edge capacity at the minimum track pitch spacing.");
+    return;
+  }
+
+  slot_list.resize(io_pin_list.size());
+  std::sort(slot_list.begin(), slot_list.end(), [](const PinSlot& lhs, const PinSlot& rhs) {
+    return std::tie(lhs.edge_order, lhs.coord) < std::tie(rhs.edge_order, rhs.coord);
+  });
+
+  for (size_t pin_idx = 0; pin_idx < io_pin_list.size(); ++pin_idx) {
+    const PinSlot& slot = slot_list[pin_idx];
+    bool vertical_edge = slot.edge_type == IOEdgeType::kLeft || slot.edge_type == IOEdgeType::kRight;
+    int32_t x = vertical_edge ? (slot.edge_type == IOEdgeType::kLeft ? die.get_ll_x() + horizontal_depth / 2
+                                                                    : die.get_ur_x() - horizontal_depth / 2)
+                              : slot.coord;
+    int32_t y = vertical_edge ? slot.coord
+                              : (slot.edge_type == IOEdgeType::kBottom ? die.get_ll_y() + vertical_depth / 2
+                                                                       : die.get_ur_y() - vertical_depth / 2);
+    addIOPinPort(io_pin_list[pin_idx], slot.edge_type, x, y, vertical_edge ? horizontal_width : vertical_width,
+                 vertical_edge ? horizontal_depth : vertical_depth, vertical_edge ? horizontal_layer_name : vertical_layer_name);
+  }
 }
 
 int32_t IOPlacer::getLayerMinWidth(std::string layer_name)
