@@ -230,9 +230,8 @@ void setShiftCoord(PlanarCoord& coord, bool is_horizontal, int32_t value)
   }
 }
 
-bool shiftBestSteinerEdge(const TBTask& task, Flute::Tree& tree)
+bool shiftBestSteinerEdge(const TBTask& task, Flute::Tree& tree, const NeighborList& neighbor_list)
 {
-  NeighborList neighbor_list = getNeighborList(tree);
   TBSteinerShift best_shift;
 
   std::set<std::pair<int32_t, int32_t>> visited_edge_set;
@@ -403,8 +402,8 @@ std::vector<PlanarCoord> getSteinerCandidateList(const TBTask& task, const Flute
 
 void refineSteinerByCost(const TBTask& task, Flute::Tree& tree, TBRefineStat& stat)
 {
+  NeighborList neighbor_list = getNeighborList(tree);
   for (int32_t pass = 0; pass < kMaxRefinePassNum; pass++) {
-    NeighborList neighbor_list = getNeighborList(tree);
     std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC> coord_branch_map;
     for (int32_t branch_idx = tree.deg; branch_idx < getBranchNum(tree); branch_idx++) {
       coord_branch_map[getBranchCoord(tree, branch_idx)].push_back(branch_idx);
@@ -445,7 +444,8 @@ void refineFluteTree(const TBTask& task, Flute::Tree& tree, TBRefineStat& stat, 
     return;
   }
   int32_t max_shift_num = kMaxSteinerShiftNum;
-  while (stat.shifted_edge_num < max_shift_num && shiftBestSteinerEdge(task, tree)) {
+  NeighborList neighbor_list = getNeighborList(tree);
+  while (stat.shifted_edge_num < max_shift_num && shiftBestSteinerEdge(task, tree, neighbor_list)) {
     stat.shifted_edge_num++;
   }
   if (enable_steiner_refine && task.is_congestion_driven()) {
@@ -958,6 +958,12 @@ std::vector<Segment<PlanarCoord>> TOPOBuilder::getPlanarTopoList(const TBTask& t
   const std::vector<PlanarCoord>& coord_list = task.get_planar_coord_list();
   if (coord_list.size() <= 1) {
     return {};
+  }
+  if (coord_list.size() == 2) {
+    if (coord_list.front() == coord_list.back()) {
+      return {};
+    }
+    return {Segment<PlanarCoord>(coord_list.front(), coord_list.back())};
   }
 
   bool attempted_congestion_flute = task.is_congestion_driven() && coord_list.size() >= 3 && task.has_segment_cost_query();

@@ -131,7 +131,8 @@ class PlanarRouter
   // routing edge
   PREdgeCost getRoutingEdgeCost(int32_t supply, int32_t demand);
   PREdgeCost getRoutingEdgeCost(const RoutingEdge& routing_edge);
-  double getTopologyEdgeCost(PRModel& pr_model, RoutingEdge& routing_edge);
+  double getTopologyEdgeCost(RoutingEdge& routing_edge, int32_t net_idx, double overflow_unit,
+                             const std::unordered_set<RoutingEdge*>& routing_edge_set);
   double getTopologySegmentCost(PRModel& pr_model, const PlanarCoord& first_coord, const PlanarCoord& second_coord);
   void updateRoutingEdgeToGraph(RoutingEdge& routing_edge, PREdgeCost& edge_cost, int32_t curr_net_idx, ChangeType change_type,
                                 std::unordered_set<RoutingEdge*>& routing_edge_set);

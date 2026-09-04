@@ -574,31 +574,26 @@ bool checkCongestionFluteQueryBound()
   return check(query_num <= 30000, "congestion FLUTE bounds bbox cost queries");
 }
 
-bool checkAlignedSegmentQueryOnce()
+bool checkTwoPinFastPath()
 {
   int64_t query_num = 0;
   irt::TBSegmentCostQuery query = [&query_num](const PlanarCoord& first, const PlanarCoord& second) {
     query_num++;
     return static_cast<double>(getDistance(first, second));
   };
-  std::vector<Segment<PlanarCoord>> topo_list
+  std::vector<Segment<PlanarCoord>> aligned_topo
       = RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 7)}, query));
+  std::vector<Segment<PlanarCoord>> oblique_topo
+      = RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 29)}, query));
 
   bool passed = true;
-  passed = check(topo_list.size() == 1, "aligned two-pin net keeps one topology edge") && passed;
-  passed = check(query_num == 1, "aligned topology edge queries segment cost once") && passed;
+  passed = check(aligned_topo.size() == 1, "aligned two-pin net keeps one topology edge") && passed;
+  passed = check(oblique_topo.size() == 1 && oblique_topo.front().get_first() == PlanarCoord(3, 7)
+                     && oblique_topo.front().get_second() == PlanarCoord(31, 29),
+                 "oblique two-pin net keeps its direct topology edge")
+           && passed;
+  passed = check(query_num == 0, "two-pin topology bypasses segment cost query") && passed;
   return passed;
-}
-
-bool checkInfCostPruning()
-{
-  int64_t query_num = 0;
-  irt::TBSegmentCostQuery query = [&query_num](const PlanarCoord&, const PlanarCoord&) {
-    query_num++;
-    return kInf;
-  };
-  RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 29)}, query));
-  return check(query_num == 2, "blocked L-patterns stop after their first segment");
 }
 
 irt::TBSegmentCostQuery getBlockedCoordQuery(const PlanarCoord& blocked_coord, bool block_all)
@@ -1536,8 +1531,7 @@ int main(int argc, char* argv[])
   passed = checkCongestionFluteGuard() && passed;
   passed = checkCongestionFluteCostGuard() && passed;
   passed = checkCongestionFluteQueryBound() && passed;
-  passed = checkAlignedSegmentQueryOnce() && passed;
-  passed = checkInfCostPruning() && passed;
+  passed = checkTwoPinFastPath() && passed;
   passed = checkCongestionFluteInfHandling() && passed;
   passed = checkThreePinCongestionAvoidsMacro() && passed;
   passed = checkThreePinCongestionOutsidePinBBox() && passed;
