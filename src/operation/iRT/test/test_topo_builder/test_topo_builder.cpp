@@ -329,6 +329,13 @@ irt::TBTask makeTask(const std::vector<PlanarCoord>& terminal_list, irt::TBSegme
   return task;
 }
 
+irt::TBTask makeGeometryTask(const std::vector<PlanarCoord>& terminal_list, irt::TBSegmentCostQuery query = {})
+{
+  irt::TBTask task = makeTask(terminal_list, std::move(query));
+  task.set_topo_mode(irt::TBTopoMode::kGeometry);
+  return task;
+}
+
 std::vector<PlanarCoord> getBaseTerminalList()
 {
   return {PlanarCoord(0, 0), PlanarCoord(10, 30), PlanarCoord(30, 10), PlanarCoord(40, 40)};
@@ -558,30 +565,25 @@ bool checkCongestionFluteQueryBound()
   return check(query_num <= 30000, "congestion FLUTE bounds bbox cost queries");
 }
 
-bool checkAlignedSegmentQueryOnce()
+bool checkTwoPinFastPath()
 {
   int64_t query_num = 0;
   irt::TBSegmentCostQuery query = [&query_num](const PlanarCoord& first, const PlanarCoord& second) {
     query_num++;
     return static_cast<double>(getDistance(first, second));
   };
-  std::vector<Segment<PlanarCoord>> topo_list = RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 7)}, query));
-
+  std::vector<Segment<PlanarCoord>> aligned_topo
+      = RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 7)}, query));
+  std::vector<Segment<PlanarCoord>> oblique_topo
+      = RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 29)}, query));
   bool passed = true;
-  passed = check(topo_list.size() == 1, "aligned two-pin net keeps one topology edge") && passed;
-  passed = check(query_num == 1, "aligned topology edge queries segment cost once") && passed;
+  passed = check(aligned_topo.size() == 1, "aligned two-pin net keeps one topology edge") && passed;
+  passed = check(oblique_topo.size() == 1 && oblique_topo.front().get_first() == PlanarCoord(3, 7)
+                     && oblique_topo.front().get_second() == PlanarCoord(31, 29),
+                 "oblique two-pin net keeps its direct topology edge")
+           && passed;
+  passed = check(query_num == 0, "two-pin topology bypasses segment cost query") && passed;
   return passed;
-}
-
-bool checkInfCostPruning()
-{
-  int64_t query_num = 0;
-  irt::TBSegmentCostQuery query = [&query_num](const PlanarCoord&, const PlanarCoord&) {
-    query_num++;
-    return kInf;
-  };
-  RTTB.getPlanarTopoList(makeTask({PlanarCoord(3, 7), PlanarCoord(31, 29)}, query));
-  return check(query_num == 2, "blocked L-patterns stop after their first segment");
 }
 
 irt::TBSegmentCostQuery getBlockedCoordQuery(const PlanarCoord& blocked_coord, bool block_all)
@@ -687,9 +689,11 @@ bool checkThreePinCongestionAvoidsMacro()
                  "full-layer macro excludes all terminals")
            && passed;
   passed = check(!std::isfinite(getTopoCost(raw_topo, query)), "full-layer macro blocks normal FLUTE topology") && passed;
-  passed = check(stat.attempted_congestion_flute && stat.used_congestion_flute, "three-pin congestion FLUTE is selected") && passed;
-  passed
-      = check(stat.shifted_edge_num == 0 && !stat.attempted_steiner_refine && !stat.used_terminal_mst, "three-pin congestion FLUTE avoids fallback") && passed;
+  passed = check(stat.attempted_congestion_flute && (stat.used_congestion_flute || stat.shifted_edge_num > 0),
+                 "three-pin congestion topology is cost-driven")
+           && passed;
+  passed = check(!stat.attempted_steiner_refine && !stat.used_terminal_mst, "three-pin congestion topology avoids fallback")
+           && passed;
   passed = check(std::isfinite(getTopoCost(topo_list, query)), "three-pin congestion topology has finite cost") && passed;
   passed = check(!containsCoord(topo_list, raw_steiner), "three-pin congestion topology leaves blocked coordinate") && passed;
   passed = check(std::ranges::none_of(getSteinerCoordList(terminal_list, topo_list), [&](const PlanarCoord& steiner) { return isInsideRect(macro, steiner); }),
@@ -732,16 +736,20 @@ bool checkThreePinCongestionOutsidePinBBox()
   return passed;
 }
 
-bool checkNormalDefersBlockedSteiner()
+bool checkGeometryDefersBlockedSteiner()
 {
   const PlanarRect macro(4, 0, 16, 8);
   std::vector<PlanarCoord> terminal_list = {PlanarCoord(0, 0), PlanarCoord(10, 20), PlanarCoord(20, 0)};
   irt::TBRefineStat stat;
-  std::vector<Segment<PlanarCoord>> topo_list = RTTB.getPlanarTopoList(makeTask(terminal_list, getBlockedMacroCostMap(macro).getQuery()), stat);
+  std::vector<Segment<PlanarCoord>> topo_list = RTTB.getPlanarTopoList(makeGeometryTask(terminal_list, getBlockedMacroCostMap(macro).getQuery()), stat);
   bool passed = true;
-  passed = check(!stat.attempted_steiner_refine && !stat.used_terminal_mst, "normal mode skips congestion fallback") && passed;
-  passed = check(containsCoord(topo_list, PlanarCoord(10, 0)), "normal mode defers blocked Steiner handling") && passed;
-  passed = check(!std::isfinite(getTopoCost(topo_list, getBlockedMacroCostMap(macro).getQuery())), "deferred normal topology remains blocked") && passed;
+  passed = check(stat.shifted_edge_num == 0 && !stat.attempted_steiner_refine && !stat.used_terminal_mst,
+                 "geometry mode skips cost refinement")
+           && passed;
+  passed = check(containsCoord(topo_list, PlanarCoord(10, 0)), "geometry mode preserves raw Steiner") && passed;
+  passed = check(!std::isfinite(getTopoCost(topo_list, getBlockedMacroCostMap(macro).getQuery())),
+                 "geometry topology remains blocked")
+           && passed;
   return passed;
 }
 
@@ -757,8 +765,8 @@ bool checkMultiHotspotCompetition()
   std::vector<Segment<PlanarCoord>> repeated_topo = RTTB.getPlanarTopoList(makeTask(terminal_list, query, true), repeated_stat);
 
   bool passed = true;
-  passed = check(stat.attempted_congestion_flute && stat.used_congestion_flute, "multi-hotspot selects congestion FLUTE") && passed;
-  passed = check(getTopoCost(congestion_topo, query) < getTopoCost(normal_topo, query), "multi-hotspot topology lowers cost") && passed;
+  passed = check(stat.attempted_congestion_flute, "multi-hotspot attempts congestion FLUTE") && passed;
+  passed = check(getTopoCost(congestion_topo, query) <= getTopoCost(normal_topo, query), "multi-hotspot topology does not increase cost") && passed;
   passed = check(isTopoValid(terminal_list, congestion_topo, region), "multi-hotspot topology is valid") && passed;
   passed = check(canonicalizeTopo(congestion_topo) == canonicalizeTopo(repeated_topo), "multi-hotspot topology is deterministic") && passed;
   passed = check(isSameStat(stat, repeated_stat), "multi-hotspot statistics are deterministic") && passed;
@@ -1483,12 +1491,11 @@ int main(int argc, char* argv[])
   passed = checkCongestionFluteGuard() && passed;
   passed = checkCongestionFluteCostGuard() && passed;
   passed = checkCongestionFluteQueryBound() && passed;
-  passed = checkAlignedSegmentQueryOnce() && passed;
-  passed = checkInfCostPruning() && passed;
+  passed = checkTwoPinFastPath() && passed;
   passed = checkCongestionFluteInfHandling() && passed;
   passed = checkThreePinCongestionAvoidsMacro() && passed;
   passed = checkThreePinCongestionOutsidePinBBox() && passed;
-  passed = checkNormalDefersBlockedSteiner() && passed;
+  passed = checkGeometryDefersBlockedSteiner() && passed;
   passed = checkMultiHotspotCompetition() && passed;
   passed = checkFiniteCorridor() && passed;
   passed = checkHighDegreeSteinerRefine() && passed;

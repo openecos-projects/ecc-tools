@@ -51,4 +51,4 @@ A* route
 output
     summary: planar edge usage/overflow + 最终 global result wire length
     guide / net json: 最终 NetGlobalResultMap
-    net csv / overflow csv: planar routing edge map
+    net csv / overflow csv: 分离的平面H/V routing edge map
