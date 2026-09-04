@@ -2825,8 +2825,6 @@ void DetailedRouter::patchSingleViolation(DRBox& dr_box)
   int32_t max_candidate_patch_num = dr_box.get_dr_iter_param()->get_max_candidate_patch_num();
   std::vector<int32_t> raw_candidate_limit_list = {max_candidate_patch_num, 4 * max_candidate_patch_num, 8 * max_candidate_patch_num, -1};
   std::vector<Violation> origin_patch_violation_list;
-  EXTLayerRect best_patch;
-  bool has_best_patch = false;
   bool curr_is_solved = false;
   bool origin_patch_violation_inited = false;
   for (int32_t raw_candidate_limit : raw_candidate_limit_list) {
@@ -2834,8 +2832,6 @@ void DetailedRouter::patchSingleViolation(DRBox& dr_box)
     if (dr_patch_list.empty()) {
       continue;
     }
-    best_patch = dr_patch_list.front().get_patch();
-    has_best_patch = true;
     if (!origin_patch_violation_inited) {
       origin_patch_violation_list = getPatchViolationList(dr_box, {}, {check_region});
       origin_patch_violation_inited = true;
@@ -2857,11 +2853,52 @@ void DetailedRouter::patchSingleViolation(DRBox& dr_box)
       break;
     }
   }
-  if (!curr_is_solved && has_best_patch) {
-    routing_patch_list.push_back(best_patch);
-  }
   tried_fix_violation_set.insert(dr_box.get_curr_patch_violation());
 }
+
+namespace {
+
+bool enlargePatchToMinArea(const GTLPolyInt& gtl_poly, int32_t min_area, int32_t manufacture_grid, const PlanarRect& die_rect,
+                           Orientation orientation, PlanarRect& patch_rect)
+{
+  int64_t poly_area = static_cast<int64_t>(gtl::area(gtl_poly));
+  while (true) {
+    int64_t patch_area = static_cast<int64_t>(patch_rect.getXSpan()) * patch_rect.getYSpan();
+    int64_t overlap_area = static_cast<int64_t>(gtl::area(gtl_poly & RTUTIL.convertToGTLRectInt(patch_rect)));
+    int64_t curr_area = poly_area + patch_area - overlap_area;
+    if (min_area <= curr_area) {
+      return RTUTIL.isInside(die_rect, patch_rect);
+    }
+
+    int32_t cross_span = 0;
+    if (orientation == Orientation::kEast || orientation == Orientation::kWest) {
+      cross_span = patch_rect.getYSpan();
+    } else if (orientation == Orientation::kNorth || orientation == Orientation::kSouth) {
+      cross_span = patch_rect.getXSpan();
+    } else {
+      RTLOG.error(Loc::current(), "The patch orientation is invalid!");
+    }
+    int64_t missing_area = min_area - curr_area;
+    int32_t grow_span = static_cast<int32_t>((missing_area + cross_span - 1) / cross_span);
+    while (grow_span % manufacture_grid != 0) {
+      grow_span++;
+    }
+    if (orientation == Orientation::kEast) {
+      patch_rect.set_ur_x(patch_rect.get_ur_x() + grow_span);
+    } else if (orientation == Orientation::kWest) {
+      patch_rect.set_ll_x(patch_rect.get_ll_x() - grow_span);
+    } else if (orientation == Orientation::kNorth) {
+      patch_rect.set_ur_y(patch_rect.get_ur_y() + grow_span);
+    } else if (orientation == Orientation::kSouth) {
+      patch_rect.set_ll_y(patch_rect.get_ll_y() - grow_span);
+    }
+    if (!RTUTIL.isInside(die_rect, patch_rect)) {
+      return false;
+    }
+  }
+}
+
+}  // namespace
 
 std::vector<DRPatch> DetailedRouter::getCandidatePatchList(DRBox& dr_box, int32_t raw_candidate_limit)
 {
@@ -2949,6 +2986,33 @@ std::vector<DRPatch> DetailedRouter::getCandidatePatchList(DRBox& dr_box, int32_
         }
       }
     }
+    if (raw_candidate_limit == -1) {
+      int32_t compact_span = 2 * wire_width;
+      int32_t h_start_x = h_cutting_rect.get_ll_x() - compact_span + manufacture_grid;
+      int32_t h_end_x = h_cutting_rect.get_ur_x() - manufacture_grid;
+      for (int32_t x = h_start_x; x <= h_end_x; x += manufacture_grid) {
+        PlanarRect north_rect(x, h_cutting_rect.get_ur_y() - wire_width, x + compact_span, h_cutting_rect.get_ur_y());
+        if (enlargePatchToMinArea(gtl_poly, min_area, manufacture_grid, die.get_real_rect(), Orientation::kNorth, north_rect)) {
+          dr_patch_list.emplace_back(north_rect, violation_layer_idx);
+        }
+        PlanarRect south_rect(x, h_cutting_rect.get_ll_y(), x + compact_span, h_cutting_rect.get_ll_y() + wire_width);
+        if (enlargePatchToMinArea(gtl_poly, min_area, manufacture_grid, die.get_real_rect(), Orientation::kSouth, south_rect)) {
+          dr_patch_list.emplace_back(south_rect, violation_layer_idx);
+        }
+      }
+      int32_t v_start_y = v_cutting_rect.get_ll_y() - compact_span + manufacture_grid;
+      int32_t v_end_y = v_cutting_rect.get_ur_y() - manufacture_grid;
+      for (int32_t y = v_start_y; y <= v_end_y; y += manufacture_grid) {
+        PlanarRect east_rect(v_cutting_rect.get_ur_x() - wire_width, y, v_cutting_rect.get_ur_x(), y + compact_span);
+        if (enlargePatchToMinArea(gtl_poly, min_area, manufacture_grid, die.get_real_rect(), Orientation::kEast, east_rect)) {
+          dr_patch_list.emplace_back(east_rect, violation_layer_idx);
+        }
+        PlanarRect west_rect(v_cutting_rect.get_ll_x(), y, v_cutting_rect.get_ll_x() + wire_width, y + compact_span);
+        if (enlargePatchToMinArea(gtl_poly, min_area, manufacture_grid, die.get_real_rect(), Orientation::kWest, west_rect)) {
+          dr_patch_list.emplace_back(west_rect, violation_layer_idx);
+        }
+      }
+    }
     if (0 < raw_candidate_limit && raw_candidate_limit < static_cast<int32_t>(dr_patch_list.size())) {
       std::vector<DRPatch> sampled_patch_list;
       sampled_patch_list.reserve(raw_candidate_limit);
@@ -2987,6 +3051,11 @@ std::vector<DRPatch> DetailedRouter::getCandidatePatchList(DRBox& dr_box, int32_
   }
   std::vector<DRPatch> candidate_patch_list;
   {
+    auto cmp_dr_patch = [&layer_direction](DRPatch& a, DRPatch& b) { return CmpDRPatch()(a, b, layer_direction); };
+    if (raw_candidate_limit == -1) {
+      std::ranges::sort(dr_patch_list, cmp_dr_patch);
+      return dr_patch_list;
+    }
     std::vector<DRPatch> dr_patch_list_temp;
     for (DRPatch& dr_patch : dr_patch_list) {
       if (dr_patch.getTotalCost() > 0) {
@@ -2994,7 +3063,6 @@ std::vector<DRPatch> DetailedRouter::getCandidatePatchList(DRBox& dr_box, int32_
       }
       dr_patch_list_temp.push_back(dr_patch);
     }
-    auto cmp_dr_patch = [&layer_direction](DRPatch& a, DRPatch& b) { return CmpDRPatch()(a, b, layer_direction); };
     if (dr_patch_list_temp.empty()) {
       dr_patch_list_temp.push_back(*std::ranges::min_element(dr_patch_list, cmp_dr_patch));
     } else {
@@ -3015,14 +3083,19 @@ std::vector<DRPatch> DetailedRouter::getCandidatePatchList(DRBox& dr_box, int32_
   return candidate_patch_list;
 }
 
-bool DetailedRouter::getSolvedStatus(DRBox& dr_box, std::vector<Violation>& origin_patch_violation_list, std::vector<Violation>& curr_patch_violation_list)
+bool DetailedRouter::getSolvedStatus(DRBox& dr_box, std::vector<Violation>& origin_patch_violation_list,
+                                     std::vector<Violation>& curr_patch_violation_list)
 {
-  std::map<ViolationType, std::pair<int32_t, int32_t>> env_type_origin_curr_map;
+  if (curr_patch_violation_list.empty()) {
+    return true;
+  }
   std::map<ViolationType, std::pair<int32_t, int32_t>> valid_type_origin_curr_map;
   std::map<ViolationType, std::pair<int32_t, int32_t>> within_net_map;
+  std::set<Violation, CmpViolation> origin_env_violation_set;
+  std::set<Violation, CmpViolation> curr_env_violation_set;
   for (Violation& origin_violation : origin_patch_violation_list) {
     if (!isValidPatchViolation(dr_box, origin_violation)) {
-      env_type_origin_curr_map[origin_violation.get_violation_type()].first++;
+      origin_env_violation_set.insert(origin_violation);
     } else {
       valid_type_origin_curr_map[origin_violation.get_violation_type()].first++;
     }
@@ -3032,7 +3105,7 @@ bool DetailedRouter::getSolvedStatus(DRBox& dr_box, std::vector<Violation>& orig
   }
   for (Violation& curr_violation : curr_patch_violation_list) {
     if (!isValidPatchViolation(dr_box, curr_violation)) {
-      env_type_origin_curr_map[curr_violation.get_violation_type()].second++;
+      curr_env_violation_set.insert(curr_violation);
     } else {
       valid_type_origin_curr_map[curr_violation.get_violation_type()].second++;
     }
@@ -3040,13 +3113,8 @@ bool DetailedRouter::getSolvedStatus(DRBox& dr_box, std::vector<Violation>& orig
       within_net_map[curr_violation.get_violation_type()].second++;
     }
   }
-  bool curr_is_solved = true;
-  for (auto& [violation_type, origin_curr] : env_type_origin_curr_map) {
-    if (!curr_is_solved) {
-      break;
-    }
-    curr_is_solved = origin_curr.second <= origin_curr.first;
-  }
+  bool curr_is_solved = std::includes(origin_env_violation_set.begin(), origin_env_violation_set.end(), curr_env_violation_set.begin(),
+                                      curr_env_violation_set.end(), CmpViolation());
   for (auto& [violation_type, origin_curr] : valid_type_origin_curr_map) {
     if (!curr_is_solved) {
       break;
