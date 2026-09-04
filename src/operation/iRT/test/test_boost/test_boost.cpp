@@ -1,10 +1,11 @@
-#include "utility/logger/Logger.hpp"
 #include <boost/geometry.hpp>
 #include <boost/polygon/polygon.hpp>
 #include <cassert>
 #include <fstream>
 #include <sstream>
 #include <vector>
+
+#include "utility/logger/Logger.hpp"
 
 using int32_t = int32_t;
 #define RT_ERROR 1E-5

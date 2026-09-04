@@ -42,7 +42,7 @@ class IdbBus
     kBusIo
   };
   IdbBus() = default;
-  IdbBus(std::string name, unsigned left, unsigned right) : _bus_name(std::move(name)), _left(left), _right(right) {};
+  IdbBus(std::string name, unsigned left, unsigned right) : _bus_name(std::move(name)), _left(left), _right(right), _has_range(true) {};
   ~IdbBus() = default;
   IdbBus(IdbBus&& other) = default;
   IdbBus& operator=(IdbBus&& other) = default;
@@ -96,6 +96,7 @@ class IdbBus
   unsigned _left{0};
   // lower bound
   unsigned _right{0};
+  bool _has_range{false};
 
   kBusType _bus_type{kBusNet};
   std::vector<IdbPin*> _pins;

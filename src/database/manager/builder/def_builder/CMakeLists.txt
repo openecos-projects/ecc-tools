@@ -24,9 +24,17 @@ target_include_directories(def_builder
 target_link_libraries(def_builder PRIVATE def defzlib geometry_db ecc_logger)
 
 if(BUILD_TESTING)
+  find_package(ZLIB REQUIRED)
+
   add_executable(def_writer_escaped_name_test
       validation/def_writer_escaped_name_test.cpp
   )
   target_link_libraries(def_writer_escaped_name_test PRIVATE def_builder def_service idb ecc_logger)
   add_test(NAME def_writer_escaped_name_test COMMAND def_writer_escaped_name_test)
+
+  add_executable(def_reader_error_test
+      validation/def_reader_error_test.cpp
+  )
+  target_link_libraries(def_reader_error_test PRIVATE def_builder def_service idb ecc_logger ZLIB::ZLIB)
+  add_test(NAME def_reader_error_test COMMAND def_reader_error_test)
 endif()

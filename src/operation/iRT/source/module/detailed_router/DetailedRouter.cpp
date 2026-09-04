@@ -1330,8 +1330,8 @@ void DetailedRouter::exemptPinShape(DRModel& dr_model, DRBox& dr_box)
             bool within_shape = false;
             if (rtree_iter != routing_fixed_rect_rtree_map.end()) {
               PlanarRect query_rect(dr_node.get_planar_coord(), dr_node.get_planar_coord());
-              for (auto query_iter = rtree_iter->second.qbegin(bgi::intersects(RTUTIL.convertToBGRectInt(query_rect)));
-                   query_iter != rtree_iter->second.qend(); query_iter++) {
+              for (auto query_iter = rtree_iter->second.qbegin(bgi::intersects(RTUTIL.convertToBGRectInt(query_rect))); query_iter != rtree_iter->second.qend();
+                   query_iter++) {
                 if (query_iter->second.first == dr_net_idx) {
                   continue;
                 }

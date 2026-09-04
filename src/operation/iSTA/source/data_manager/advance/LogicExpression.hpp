@@ -94,8 +94,7 @@ class LogicExpression
     int32_t difference_node_idx = bdd_model.get_boolean_difference(root_node_idx, port_variable_idx);
     bool is_valid = true;
     std::map<int32_t, double> static_probability_map;
-    double sensitivity_probability
-        = get_bdd_static_probability(bdd_model, difference_node_idx, port_activity_map, static_probability_map, is_valid);
+    double sensitivity_probability = get_bdd_static_probability(bdd_model, difference_node_idx, port_activity_map, static_probability_map, is_valid);
     return is_valid ? sensitivity_probability : 0.0;
   }
 
@@ -202,8 +201,8 @@ class LogicExpression
       if (node_variable_idx == variable_idx) {
         difference_node_idx = get_xor_node(low_node_idx, high_node_idx);
       } else {
-        difference_node_idx = get_unique_node(node_variable_idx, get_boolean_difference(low_node_idx, variable_idx),
-                                              get_boolean_difference(high_node_idx, variable_idx));
+        difference_node_idx
+            = get_unique_node(node_variable_idx, get_boolean_difference(low_node_idx, variable_idx), get_boolean_difference(high_node_idx, variable_idx));
       }
       _boolean_difference_map[std::make_pair(node_idx, variable_idx)] = difference_node_idx;
       return difference_node_idx;
@@ -226,16 +225,12 @@ class LogicExpression
       }
 
       int32_t variable_idx = std::min(get_node_variable_idx(left_node_idx), get_node_variable_idx(right_node_idx));
-      int32_t left_low_node_idx = get_node_variable_idx(left_node_idx) == variable_idx ? _node_list[left_node_idx].get_low_node_idx()
-                                                                                         : left_node_idx;
-      int32_t left_high_node_idx = get_node_variable_idx(left_node_idx) == variable_idx ? _node_list[left_node_idx].get_high_node_idx()
-                                                                                          : left_node_idx;
-      int32_t right_low_node_idx = get_node_variable_idx(right_node_idx) == variable_idx ? _node_list[right_node_idx].get_low_node_idx()
-                                                                                           : right_node_idx;
-      int32_t right_high_node_idx = get_node_variable_idx(right_node_idx) == variable_idx ? _node_list[right_node_idx].get_high_node_idx()
-                                                                                            : right_node_idx;
+      int32_t left_low_node_idx = get_node_variable_idx(left_node_idx) == variable_idx ? _node_list[left_node_idx].get_low_node_idx() : left_node_idx;
+      int32_t left_high_node_idx = get_node_variable_idx(left_node_idx) == variable_idx ? _node_list[left_node_idx].get_high_node_idx() : left_node_idx;
+      int32_t right_low_node_idx = get_node_variable_idx(right_node_idx) == variable_idx ? _node_list[right_node_idx].get_low_node_idx() : right_node_idx;
+      int32_t right_high_node_idx = get_node_variable_idx(right_node_idx) == variable_idx ? _node_list[right_node_idx].get_high_node_idx() : right_node_idx;
       int32_t binary_node_idx = get_unique_node(variable_idx, get_binary_node(operation_type, left_low_node_idx, right_low_node_idx),
-                                               get_binary_node(operation_type, left_high_node_idx, right_high_node_idx));
+                                                get_binary_node(operation_type, left_high_node_idx, right_high_node_idx));
       _binary_node_map[key] = binary_node_idx;
       return binary_node_idx;
     }
@@ -340,8 +335,7 @@ class LogicExpression
     return true;
   }
 
-  double get_bdd_static_probability(BddModel& bdd_model, const int32_t node_idx,
-                                    std::map<std::string, PowerActivity>& port_activity_map,
+  double get_bdd_static_probability(BddModel& bdd_model, const int32_t node_idx, std::map<std::string, PowerActivity>& port_activity_map,
                                     std::map<int32_t, double>& static_probability_map, bool& is_valid)
   {
     if (node_idx == 0) {
@@ -364,14 +358,12 @@ class LogicExpression
 
     double static_probability = port_activity.get_static_probability();
     if (static_probability <= STA_ERROR) {
-      double probability
-          = get_bdd_static_probability(bdd_model, node.get_low_node_idx(), port_activity_map, static_probability_map, is_valid);
+      double probability = get_bdd_static_probability(bdd_model, node.get_low_node_idx(), port_activity_map, static_probability_map, is_valid);
       static_probability_map[node_idx] = probability;
       return probability;
     }
     if (static_probability >= 1.0 - STA_ERROR) {
-      double high_probability
-          = get_bdd_static_probability(bdd_model, node.get_high_node_idx(), port_activity_map, static_probability_map, is_valid);
+      double high_probability = get_bdd_static_probability(bdd_model, node.get_high_node_idx(), port_activity_map, static_probability_map, is_valid);
       static_probability_map[node_idx] = high_probability;
       return high_probability;
     }
@@ -379,8 +371,7 @@ class LogicExpression
     if (!is_valid) {
       return 0.0;
     }
-    double high_probability
-        = get_bdd_static_probability(bdd_model, node.get_high_node_idx(), port_activity_map, static_probability_map, is_valid);
+    double high_probability = get_bdd_static_probability(bdd_model, node.get_high_node_idx(), port_activity_map, static_probability_map, is_valid);
     if (!is_valid) {
       return 0.0;
     }
@@ -389,8 +380,7 @@ class LogicExpression
     return probability;
   }
 
-  double get_bdd_transition_density(BddModel& bdd_model, const int32_t root_node_idx,
-                                    std::map<std::string, PowerActivity>& port_activity_map,
+  double get_bdd_transition_density(BddModel& bdd_model, const int32_t root_node_idx, std::map<std::string, PowerActivity>& port_activity_map,
                                     std::map<int32_t, double>& static_probability_map, bool& is_valid)
   {
     double transition_density = 0.0;
@@ -501,18 +491,16 @@ class LogicExpression
   {
     double left_probability = left_activity.get_static_probability();
     double right_probability = right_activity.get_static_probability();
-    double transition_density = left_activity.get_transition_density() * (1.0 - right_probability)
-                                + right_activity.get_transition_density() * (1.0 - left_probability);
-    return get_binary_activity(transition_density, left_probability + right_probability - left_probability * right_probability,
-                               left_activity, right_activity);
+    double transition_density
+        = left_activity.get_transition_density() * (1.0 - right_probability) + right_activity.get_transition_density() * (1.0 - left_probability);
+    return get_binary_activity(transition_density, left_probability + right_probability - left_probability * right_probability, left_activity, right_activity);
   }
 
   PowerActivity get_and_activity(PowerActivity& left_activity, PowerActivity& right_activity)
   {
     double left_probability = left_activity.get_static_probability();
     double right_probability = right_activity.get_static_probability();
-    double transition_density
-        = left_activity.get_transition_density() * right_probability + right_activity.get_transition_density() * left_probability;
+    double transition_density = left_activity.get_transition_density() * right_probability + right_activity.get_transition_density() * left_probability;
     return get_binary_activity(transition_density, left_probability * right_probability, left_activity, right_activity);
   }
 

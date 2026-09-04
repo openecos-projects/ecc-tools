@@ -234,7 +234,13 @@ auto AssertNoSingleLoadExternalLeafBuffer(const icts::htree::DiagnosticBuild& re
       continue;
     }
 
-    const auto* output_pin = inst->findDriverPin();
+    const icts::Pin* output_pin = nullptr;
+    for (const auto* pin : inst->get_pins()) {
+      if (pin != nullptr && pin->get_type() == icts::PinType::kOut) {
+        ASSERT_EQ(output_pin, nullptr);
+        output_pin = pin;
+      }
+    }
     ASSERT_NE(output_pin, nullptr);
     const auto* output_net = output_pin->get_net();
     if (output_net == nullptr || output_net->get_loads().size() != 1U || output_net->get_loads().front() == nullptr) {

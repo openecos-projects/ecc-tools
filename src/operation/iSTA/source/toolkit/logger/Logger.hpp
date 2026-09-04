@@ -69,9 +69,15 @@ class Logger
   template <typename T, typename... Args>
   [[noreturn]] void error(Loc location, const T& value, const Args&... args)
   {
+    std::string message = getString(value, args...);
     printLog(LogLevel::kError, location, value, args...);
+    // Hosts embedding ecc-tools (the Python module) set ECC_LOGGER_THROW_ON_ERROR
+    // so that errors surface as exceptions instead of terminating the host process.
+    if (std::getenv("ECC_LOGGER_THROW_ON_ERROR") != nullptr) {
+      throw std::runtime_error(message);
+    }
     closeLogFileStream();
-    exit(0);
+    std::exit(EXIT_FAILURE);
   }
 
  private:
@@ -162,7 +168,7 @@ class Logger
      * stream << args[0] << args[1], ...
      * use void to suppress unused-value warning for fold expression
      */
-    (void)(stream << ... << args);
+    (void) (stream << ... << args);
   }
 
   std::string getTimestamp()

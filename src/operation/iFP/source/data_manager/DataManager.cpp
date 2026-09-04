@@ -123,8 +123,7 @@ void DataManager::buildRoutingLayerNameToIdxMap()
 {
   std::map<std::string, int32_t>& routing_layer_name_to_idx_map = _database.get_routing_layer_name_to_idx_map();
   routing_layer_name_to_idx_map.clear();
-  for (int32_t routing_layer_idx = 0; routing_layer_idx < static_cast<int32_t>(_database.get_routing_layer_list().size());
-       routing_layer_idx++) {
+  for (int32_t routing_layer_idx = 0; routing_layer_idx < static_cast<int32_t>(_database.get_routing_layer_list().size()); routing_layer_idx++) {
     routing_layer_name_to_idx_map[_database.get_routing_layer_list()[routing_layer_idx].get_name()] = routing_layer_idx;
   }
 }
@@ -162,20 +161,16 @@ void DataManager::printConfig()
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "thread_number");
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), _config.thread_number);
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "macro_placer");
-  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "location_path: ", _config.macro_place_file_path,
-             ", placement_halo: ", _config.macro_placement_halo, ", routing_halo: ", _config.macro_routing_halo);
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "placement_halo: ", _config.macro_placement_halo, ", routing_halo: ", _config.macro_routing_halo);
 
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "die");
-  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "site: ", _config.die_site_name,
-             ", mode: ", GetDieModeName()(_config.die_mode), ", margin: {l: ", _config.die_margin_left_micron,
-             ", r: ", _config.die_margin_right_micron, ", t: ", _config.die_margin_top_micron,
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "site: ", _config.die_site_name, ", mode: ", GetDieModeName()(_config.die_mode),
+             ", margin: {l: ", _config.die_margin_left_micron, ", r: ", _config.die_margin_right_micron, ", t: ", _config.die_margin_top_micron,
              ", b: ", _config.die_margin_bottom_micron, "}");
   if (_config.die_mode == DieMode::kDieUtil) {
-    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "aspect_ratio: ", _config.die_aspect_ratio,
-               ", utilization: ", _config.die_utilization);
+    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "aspect_ratio: ", _config.die_aspect_ratio, ", utilization: ", _config.die_utilization);
   } else if (_config.die_mode == DieMode::kDieSize) {
-    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "width: ", _config.die_width_micron,
-               ", height: ", _config.die_height_micron);
+    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "width: ", _config.die_width_micron, ", height: ", _config.die_height_micron);
   }
 
   std::string io_layer_name_string = "{";
@@ -216,20 +211,16 @@ void DataManager::printConfig()
   }
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "pdn_mesh");
   for (PGRail& pg_rail : _config.pg_rail_list) {
-    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "rail: ", pg_rail.get_layer_name(),
-               ", rail_width: ", pg_rail.get_width_micron());
+    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "rail: ", pg_rail.get_layer_name(), ", rail_width: ", pg_rail.get_width_micron());
   }
   for (PGStripe& pg_stripe : _config.pg_stripe_list) {
-    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "stripe: ", pg_stripe.get_layer_name(),
-               ", width: ", pg_stripe.get_width_micron(), ", pitch: ", pg_stripe.get_pitch_micron(),
-               ", offset: ", pg_stripe.get_offset_micron());
+    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "stripe: ", pg_stripe.get_layer_name(), ", width: ", pg_stripe.get_width_micron(),
+               ", pitch: ", pg_stripe.get_pitch_micron(), ", offset: ", pg_stripe.get_offset_micron());
   }
 
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "phy_insert");
-  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "well_tap: ", _config.tapcell_name,
-             ", interval: ", _config.tap_distance_micron);
-  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "side_endcap: {left: ", _config.left_endcap_name,
-             ", right: ", _config.right_endcap_name, "}");
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "well_tap: ", _config.tapcell_name, ", interval: ", _config.tap_distance_micron);
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "side_endcap: {left: ", _config.left_endcap_name, ", right: ", _config.right_endcap_name, "}");
   std::string top_endcap_name_string = "{";
   for (int32_t endcap_idx = 0; endcap_idx < static_cast<int32_t>(_config.top_endcap_name_list.size()); endcap_idx++) {
     if (endcap_idx != 0) {
@@ -246,8 +237,7 @@ void DataManager::printConfig()
     bottom_endcap_name_string += _config.bottom_endcap_name_list[endcap_idx];
   }
   bottom_endcap_name_string += "}";
-  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "edge_endcap: {top: ", top_endcap_name_string,
-             ", bottom: ", bottom_endcap_name_string, "}");
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "edge_endcap: {top: ", top_endcap_name_string, ", bottom: ", bottom_endcap_name_string, "}");
   std::string top_boundary_tap_name_string = "{";
   for (int32_t tap_idx = 0; tap_idx < static_cast<int32_t>(_config.top_boundary_tap_name_list.size()); tap_idx++) {
     if (tap_idx != 0) {
@@ -264,8 +254,8 @@ void DataManager::printConfig()
     bottom_boundary_tap_name_string += _config.bottom_boundary_tap_name_list[tap_idx];
   }
   bottom_boundary_tap_name_string += "}";
-  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "boundary_tap: {top: ", top_boundary_tap_name_string,
-             ", bottom: ", bottom_boundary_tap_name_string, ", rule: ", _config.boundary_tap_rule_micron, "}");
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "boundary_tap: {top: ", top_boundary_tap_name_string, ", bottom: ", bottom_boundary_tap_name_string,
+             ", rule: ", _config.boundary_tap_rule_micron, "}");
 
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(0), "FP_CONFIG_BUILD");
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "log_file_path");

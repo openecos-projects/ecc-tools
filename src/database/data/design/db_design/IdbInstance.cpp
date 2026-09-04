@@ -63,7 +63,11 @@ IdbInstance::IdbInstance()
 
 IdbInstance::~IdbInstance()
 {
-  _pin_list->reset();
+  if (_pin_list != nullptr) {
+    _pin_list->reset();
+    delete _pin_list;
+    _pin_list = nullptr;
+  }
 
   if (_coordinate) {
     delete _coordinate;
@@ -200,9 +204,11 @@ int IdbInstance::get_connected_pin_number()
 
 IdbHalo* IdbInstance::set_halo(IdbHalo* halo)
 {
-  if (halo != nullptr) {
+  if (_halo != halo) {
+    delete _halo;
     _halo = halo;
-  } else {
+  }
+  if (_halo == nullptr) {
     _halo = new IdbHalo();
   }
   return _halo;
@@ -210,9 +216,11 @@ IdbHalo* IdbInstance::set_halo(IdbHalo* halo)
 
 IdbRouteHalo* IdbInstance::set_route_halo(IdbRouteHalo* route_halo)
 {
-  if (route_halo != nullptr) {
+  if (_route_halo != route_halo) {
+    delete _route_halo;
     _route_halo = route_halo;
-  } else {
+  }
+  if (_route_halo == nullptr) {
     _route_halo = new IdbRouteHalo();
   }
   return _route_halo;
@@ -598,6 +606,7 @@ bool IdbInstanceList::remove_instance(string name)
     auto net = pin->get_net();
     if (net != nullptr) {
       net->remove_pin(pin);
+      net->erase_instance_ref(*it);
     }
   }
 

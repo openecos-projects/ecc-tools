@@ -32,15 +32,13 @@
 #include "IdbEnum.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 
 using namespace std;
 
 namespace idb {
-
-IdbEnum* IdbEnum::_instance = nullptr;
-std::mutex IdbEnum::_mutex;
 
 IdbEnum::IdbEnum()
 {
@@ -54,6 +52,12 @@ IdbEnum::IdbEnum()
 
 IdbEnum::~IdbEnum()
 {
+  delete _property_map;
+  delete _site_property;
+  delete _term_property;
+  delete _layer_property;
+  delete _cell_property;
+  delete _region_property;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -165,7 +169,8 @@ IdbSiteProperty::IdbSiteProperty()
 
 IdbSiteClass IdbSiteProperty::get_class_type(string class_name)
 {
-  std::transform(class_name.begin(), class_name.end(), class_name.begin(), ::toupper);
+  std::transform(class_name.begin(), class_name.end(), class_name.begin(),
+                 [](unsigned char character) { return static_cast<char>(std::toupper(character)); });
   auto result = std::find_if(_site_class_list.begin(), _site_class_list.end(),
                              [class_name](const auto& iter) { return iter.second == class_name; });
 
@@ -263,7 +268,7 @@ std::string IdbEnum::get_orient_type_str(IdbOrient type)
       return "MY90";
       break;
     default:
-      return "R0";
+      return "";
       break;
   }
 }

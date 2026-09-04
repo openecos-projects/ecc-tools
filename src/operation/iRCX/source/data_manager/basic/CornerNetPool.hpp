@@ -45,10 +45,7 @@ class CornerNetPool
   T& get_item(CornerNetIdx corner_net_idx) { return _item_list[get_item_idx(corner_net_idx)]; }
 
  private:
-  int32_t get_item_idx(CornerNetIdx corner_net_idx) const
-  {
-    return corner_net_idx.get_corner_idx() * _net_num + corner_net_idx.get_net_idx();
-  }
+  int32_t get_item_idx(CornerNetIdx corner_net_idx) const { return corner_net_idx.get_corner_idx() * _net_num + corner_net_idx.get_net_idx(); }
 
   int32_t _corner_num = 0;
   int32_t _net_num = 0;

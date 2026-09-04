@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "Point.hh"
+#include "design/Clock.hh"
 #include "design/Inst.hh"
 #include "design/Net.hh"
 #include "design/Pin.hh"
@@ -39,7 +40,6 @@
 namespace icts {
 
 class CharacterizationLibrary;
-class Clock;
 class Config;
 class Design;
 class DomainStatusRecorder;
@@ -117,6 +117,7 @@ class Topology
     std::vector<std::unique_ptr<Inst>> inserted_insts;
     std::vector<std::unique_ptr<Pin>> inserted_pins;
     std::vector<std::unique_ptr<Net>> inserted_nets;
+    std::vector<ClockPropagationArc> propagation_arcs;
     std::vector<HTree::InsertedInstLevel> inserted_inst_levels;
     std::vector<HTree::InsertedNetLevel> inserted_net_levels;
   };
@@ -153,7 +154,6 @@ class Topology
   using Config = TopologyConfig;
 
   static auto build(const Input& input, const Config& config) -> Build;
-  static auto resetClockTopology(Clock& clock) -> void;
   static auto resetClockTopology(Design& design, Clock& clock) -> void;
   static auto formClock(const ClockTopologyInput& input) -> bool;
 };

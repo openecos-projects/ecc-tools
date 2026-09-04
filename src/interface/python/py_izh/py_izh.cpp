@@ -26,20 +26,6 @@ namespace python_interface {
 
 bool initZHConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 
-bool fix_fanout(const std::string& config)
-{
-  std::map<std::string, std::any> config_map;
-
-  bool pass = false;
-  pass = !pass ? initZHConfigMapByJSON(config, config_map) : pass;
-  if (!pass) {
-    return false;
-  }
-
-  ZHI.fixFanout(config_map);
-  return true;
-}
-
 bool insert_filler(const std::string& config)
 {
   std::map<std::string, std::any> config_map;
@@ -51,6 +37,20 @@ bool insert_filler(const std::string& config)
   }
 
   ZHI.insertFiller(config_map);
+  return true;
+}
+
+bool insert_metal(const std::string& config)
+{
+  std::map<std::string, std::any> config_map;
+
+  bool pass = false;
+  pass = !pass ? initZHConfigMapByJSON(config, config_map) : pass;
+  if (!pass) {
+    return false;
+  }
+
+  ZHI.insertMetal(config_map);
   return true;
 }
 

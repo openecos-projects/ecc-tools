@@ -70,9 +70,15 @@ class Logger
   template <typename T, typename... Args>
   void error(Loc location, const T& value, const Args&... args)
   {
+    std::string message = getString(value, args...);
     printLog(LogLevel::kError, location, value, args...);
+    // Hosts embedding ecc-tools (the Python module) set ECC_LOGGER_THROW_ON_ERROR
+    // so that errors surface as exceptions instead of terminating the host process.
+    if (std::getenv("ECC_LOGGER_THROW_ON_ERROR") != nullptr) {
+      throw std::runtime_error(message);
+    }
     closeLogFileStream();
-    exit(0);
+    std::exit(EXIT_FAILURE);
   }
 
  private:
@@ -122,9 +128,8 @@ class Logger
       std::string::size_type pos = file_name.find_last_of('/') + 1;
       file_name = file_name.substr(pos, file_name.length() - pos);
     }
-    std::string prefix
-        = getString("[RCX ", getTimestamp(), " ",
-                    getCompressedBase62(static_cast<size_t>(std::stoul(getString(std::this_thread::get_id())))), " ", file_name, " ");
+    std::string prefix = getString("[RCX ", getTimestamp(), " ", getCompressedBase62(static_cast<size_t>(std::stoul(getString(std::this_thread::get_id())))),
+                                   " ", file_name, " ");
     std::string suffix = getString(" ", location.function_name());
     std::string message = getString(value, args...);
 

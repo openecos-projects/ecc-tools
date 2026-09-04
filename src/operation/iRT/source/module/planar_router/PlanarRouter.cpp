@@ -16,15 +16,9 @@
 // ***************************************************************************************
 #include "PlanarRouter.hpp"
 
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <limits>
-#include <unordered_map>
-#include <utility>
-
 #include "GDSPlotter.hpp"
 #include "PRCandidate.hpp"
+#include "RTHeader.hpp"
 #include "RTInterface.hpp"
 #include "TBTask.hpp"
 #include "TOPOBuilder.hpp"
@@ -69,14 +63,13 @@ class PRTopologyCostCache
     if (first.get_x() != second.get_x() && first.get_y() != second.get_y()) {
       return std::numeric_limits<double>::infinity();
     }
-    int64_t span = std::abs(static_cast<int64_t>(first.get_x()) - second.get_x())
-                   + std::abs(static_cast<int64_t>(first.get_y()) - second.get_y());
+    int64_t span = std::abs(static_cast<int64_t>(first.get_x()) - second.get_x()) + std::abs(static_cast<int64_t>(first.get_y()) - second.get_y());
     if (span == 1) {
       return _cost_query(first, second);
     }
 
-    PRSegmentKey key{std::min(first.get_x(), second.get_x()), std::min(first.get_y(), second.get_y()),
-                     std::max(first.get_x(), second.get_x()), std::max(first.get_y(), second.get_y())};
+    PRSegmentKey key{std::min(first.get_x(), second.get_x()), std::min(first.get_y(), second.get_y()), std::max(first.get_x(), second.get_x()),
+                     std::max(first.get_y(), second.get_y())};
     if (auto iter = _segment_cost_map.find(key); iter != _segment_cost_map.end()) {
       return iter->second;
     }
@@ -139,6 +132,7 @@ void PlanarRouter::generate()
   printSummary(pr_model);
   outputGuide(pr_model);
   outputNetCSV(pr_model);
+  outputOverflowCSV(pr_model);
   // outputUsageCSV(pr_model);
   // outputCongestionCostCSV(pr_model);
   RTDM.getDatabase().get_net_global_result_map() = std::move(pr_model.get_net_global_result_map());
@@ -749,8 +743,9 @@ void PlanarRouter::splitLongPlanarTopoList(PRModel& pr_model, std::vector<Segmen
       PlanarCoord ideal_coord(std::round(first_coord.get_x() + ((second_coord.get_x() - first_coord.get_x()) * i / static_cast<double>(piece_num))),
                               std::round(first_coord.get_y() + ((second_coord.get_y() - first_coord.get_y()) * i / static_cast<double>(piece_num))));
       bool has_escape = false;
-      for (const PlanarCoord& neighbor : {PlanarCoord(ideal_coord.get_x() - 1, ideal_coord.get_y()), PlanarCoord(ideal_coord.get_x() + 1, ideal_coord.get_y()),
-                                          PlanarCoord(ideal_coord.get_x(), ideal_coord.get_y() - 1), PlanarCoord(ideal_coord.get_x(), ideal_coord.get_y() + 1)}) {
+      for (const PlanarCoord& neighbor :
+           {PlanarCoord(ideal_coord.get_x() - 1, ideal_coord.get_y()), PlanarCoord(ideal_coord.get_x() + 1, ideal_coord.get_y()),
+            PlanarCoord(ideal_coord.get_x(), ideal_coord.get_y() - 1), PlanarCoord(ideal_coord.get_x(), ideal_coord.get_y() + 1)}) {
         if (std::isfinite(getTopologySegmentCost(pr_model, ideal_coord, neighbor))) {
           has_escape = true;
           break;
@@ -896,8 +891,7 @@ bool PlanarRouter::shouldUseCongestionFlute(PRModel& pr_model, size_t unique_pin
       continue;
     }
     int32_t supply = routing_edge->get_supply();
-    if (supply <= 0 || routing_edge->get_demand() / static_cast<double>(supply) >= 0.8
-        || routing_edge->get_congestion_cost() >= history_threshold) {
+    if (supply <= 0 || routing_edge->get_demand() / static_cast<double>(supply) >= 0.8 || routing_edge->get_congestion_cost() >= history_threshold) {
       return true;
     }
   }
@@ -1704,6 +1698,32 @@ void PlanarRouter::outputNetCSV(PRModel& pr_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
+void PlanarRouter::outputOverflowCSV(PRModel& pr_model)
+{
+  std::string& pr_temp_directory_path = RTDM.getConfig().pr_temp_directory_path;
+  int32_t output_inter_result = RTDM.getConfig().output_inter_result;
+  if (!output_inter_result) {
+    return;
+  }
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  for (std::pair<std::string, GridMap<RoutingEdge>*> edge_map_pair :
+       {std::make_pair("h_overflow_map.csv", &RTDM.getDatabase().get_planar_routing_h_edge_map()),
+        std::make_pair("v_overflow_map.csv", &RTDM.getDatabase().get_planar_routing_v_edge_map())}) {
+    std::ofstream* overflow_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(pr_temp_directory_path, edge_map_pair.first));
+    GridMap<RoutingEdge>& routing_edge_map = *edge_map_pair.second;
+    for (int32_t y = routing_edge_map.get_y_size() - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
+        RTUTIL.pushStream(overflow_csv_file, routing_edge_map[x][y].get_overflow(), ",");
+      }
+      RTUTIL.pushStream(overflow_csv_file, "\n");
+    }
+    RTUTIL.closeFileStream(overflow_csv_file);
+  }
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
 void PlanarRouter::outputUsageCSV(PRModel& pr_model)
 {
   std::string& pr_temp_directory_path = RTDM.getConfig().pr_temp_directory_path;
@@ -1793,8 +1813,9 @@ void PlanarRouter::debugPlotPRModel(PRModel& pr_model, std::string flag)
           PlanarRect second_real_rect = RTUTIL.getRealRectByGCell(second_grid_coord, gcell_axis);
           PlanarCoord first_coord = first_real_rect.getMidPoint();
           PlanarCoord second_coord = second_real_rect.getMidPoint();
-          PlanarRect edge_rect = edge_map_pair.second ? PlanarRect(first_coord.get_x(), first_real_rect.get_ll_y(), second_coord.get_x(), first_real_rect.get_ur_y())
-                                                       : PlanarRect(first_real_rect.get_ll_x(), first_coord.get_y(), first_real_rect.get_ur_x(), second_coord.get_y());
+          PlanarRect edge_rect = edge_map_pair.second
+                                     ? PlanarRect(first_coord.get_x(), first_real_rect.get_ll_y(), second_coord.get_x(), first_real_rect.get_ur_y())
+                                     : PlanarRect(first_real_rect.get_ll_x(), first_coord.get_y(), first_real_rect.get_ur_x(), second_coord.get_y());
 
           GPBoundary gp_boundary;
           gp_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(0));
@@ -1802,7 +1823,7 @@ void PlanarRouter::debugPlotPRModel(PRModel& pr_model, std::string flag)
           gp_boundary.set_rect(edge_rect);
           edge_axis_struct.push(gp_boundary);
         }
-    }
+      }
       gp_gds.addStruct(edge_axis_struct);
     }
   }
@@ -1882,11 +1903,12 @@ void PlanarRouter::debugPlotPRModel(PRModel& pr_model, std::string flag)
           PlanarRect second_real_rect = RTUTIL.getRealRectByGCell(second_grid_coord, gcell_axis);
           PlanarCoord first_coord = first_real_rect.getMidPoint();
           PlanarCoord second_coord = second_real_rect.getMidPoint();
-          PlanarRect edge_rect = edge_map_pair.second ? PlanarRect(first_coord.get_x(), first_real_rect.get_ll_y(), second_coord.get_x(), first_real_rect.get_ur_y())
-                                                       : PlanarRect(first_real_rect.get_ll_x(), first_coord.get_y(), first_real_rect.get_ur_x(), second_coord.get_y());
+          PlanarRect edge_rect = edge_map_pair.second
+                                     ? PlanarRect(first_coord.get_x(), first_real_rect.get_ll_y(), second_coord.get_x(), first_real_rect.get_ur_y())
+                                     : PlanarRect(first_real_rect.get_ll_x(), first_coord.get_y(), first_real_rect.get_ur_x(), second_coord.get_y());
 
           int32_t info_data_type = static_cast<int32_t>(edge_map_pair.second ? GPDataType::kHEdgeInfo : GPDataType::kVEdgeInfo);
-        GPBoundary gp_boundary;
+          GPBoundary gp_boundary;
           gp_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(0));
           gp_boundary.set_data_type(info_data_type);
           gp_boundary.set_rect(edge_rect);
@@ -1921,8 +1943,8 @@ void PlanarRouter::debugPlotPRModel(PRModel& pr_model, std::string flag)
             gp_text.set_presentation(GPTextPresentation::kLeftMiddle);
             routing_edge_struct.push(gp_text);
           }
+        }
       }
-    }
       gp_gds.addStruct(routing_edge_struct);
     }
   }

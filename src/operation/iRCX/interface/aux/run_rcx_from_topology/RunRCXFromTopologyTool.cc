@@ -15,17 +15,15 @@
 // ***************************************************************************************
 #include "RunRCXFromTopologyTool.hh"
 
-#include <utility>
-#include <vector>
-
 #include "DataManager.hpp"
 #include "LayoutData.hpp"
+#include "Logger.hpp"
 #include "Patch.hpp"
+#include "RCXHeader.hpp"
 #include "Segment.hpp"
 #include "TopoEdge.hpp"
 #include "TopoPool.hpp"
 #include "config/RunRCXFromTopologyConfig.hh"
-#include "Logger.hpp"
 #include "topology/SpefTopologyBuilder.hh"
 
 namespace ircx::run_rcx_from_topology {

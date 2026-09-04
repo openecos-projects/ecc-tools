@@ -20,7 +20,7 @@
  */
 #pragma once
 
-#include <string>
+#include "RCXHeader.hpp"
 
 namespace ircx {
 
