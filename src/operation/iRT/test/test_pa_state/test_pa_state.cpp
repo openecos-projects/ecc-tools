@@ -3,6 +3,7 @@
 #include <stdexcept>
 
 #include "PABox.hpp"
+#include "PAPatch.hpp"
 
 namespace {
 
@@ -101,6 +102,9 @@ void testShadowContributions()
   shadow.addRoutedRect(7, rect);
   shadow.addRoutedRect(7, rect);
   shadow.addRoutedRect(8, rect);
+  require(shadow.get_routed_rect_rtree().size() == 2, "Repeated contributions must share one index entry");
+  require(shadow.getRoutedRectCost(9, rect, 10) == 20, "Shadow cost must count unique net/rectangle entries");
+  require(shadow.getRoutedRectCost(7, rect, 10) == 10, "A shadow must not block its own net");
   shadow.delRoutedRect(7, rect);
   require(shadow.get_net_routed_rect_map().at(7).at(rect) == 1, "Removing one shadow erased another task's contribution");
   shadow.delRoutedRect(7, rect);
@@ -108,6 +112,179 @@ void testShadowContributions()
   require(shadow.get_net_routed_rect_map().at(8).at(rect) == 1, "Removing one net changed another net's shadow");
   shadow.delRoutedRect(8, rect);
   require(shadow.get_net_routed_rect_map().empty(), "Balanced updates left shadow contributions behind");
+  require(shadow.get_routed_rect_rtree().empty(), "Balanced updates left stale spatial entries");
+}
+
+using ShadowRectMap = std::map<int32_t, std::map<irt::PlanarRect, int32_t, irt::CmpPlanarRectByXASC>>;
+
+double getReferenceCost(const ShadowRectMap& rect_map, int32_t net_idx, const irt::PlanarRect& query, double unit)
+{
+  double cost = 0;
+  for (const auto& [other_net_idx, rect_counts] : rect_map) {
+    if (other_net_idx == net_idx) {
+      continue;
+    }
+    for (const auto& [rect, count] : rect_counts) {
+      if (count > 0 && irt::Utility::isOpenOverlap(query, rect)) {
+        cost += unit;
+      }
+    }
+  }
+  return cost;
+}
+
+void testShadowBoundaries()
+{
+  irt::PAShadow shadow;
+  irt::PlanarRect rect(0, 0, 10, 10);
+  shadow.addFixedRect(-1, rect);
+  shadow.addFixedRect(-1, rect);
+  shadow.addFixedRect(7, rect);
+  shadow.buildFixedRectRTree();
+  shadow.addRoutedRect(7, rect);
+  shadow.addViolation(rect);
+  shadow.addViolation(rect);
+  require(shadow.get_fixed_rect_rtree().size() == 2, "Fixed shadows were not deduplicated by net and rectangle");
+  require(shadow.getFixedRectCost(7, rect, 3) == 3, "Fixed shadows lost the same-net exemption or obstacle");
+  require(shadow.getFixedRectCost(8, rect, 3) == 6, "Fixed shadows merged different nets");
+  require(shadow.getViolationCost(rect, 5) == 5, "Duplicate violation rectangles were charged twice");
+  for (const irt::PlanarRect& query : {irt::PlanarRect(10, 2, 15, 8), irt::PlanarRect(10, 10, 15, 15), irt::PlanarRect(20, 20, 30, 30)}) {
+    require(shadow.getFixedRectCost(8, query, 3) == 0, "Touching or disjoint fixed shadows were charged");
+    require(shadow.getRoutedRectCost(8, query, 3) == 0, "Touching or disjoint routed shadows were charged");
+    require(shadow.getViolationCost(query, 5) == 0, "Touching or disjoint violations were charged");
+  }
+  for (const irt::PlanarRect& query : {irt::PlanarRect(9, 2, 15, 8), irt::PlanarRect(5, 2, 5, 8), irt::PlanarRect(5, 5, 5, 5)}) {
+    require(shadow.getRoutedRectCost(8, query, 3) == 3, "Interior overlap semantics changed");
+  }
+  shadow.clearViolation();
+  require(shadow.getViolationCost(rect, 5) == 0, "Clearing violations left stale costs");
+  irt::PAShadow empty;
+  empty.buildFixedRectRTree();
+  require(empty.getFixedRectCost(8, rect, 3) == 0 && empty.getRoutedRectCost(8, rect, 3) == 0, "An empty index has a nonzero cost");
+}
+
+void testRandomShadowQueries()
+{
+  std::mt19937 generator(20260907);
+  irt::PAShadow shadow;
+  ShadowRectMap fixed_rect_map;
+  ShadowRectMap routed_rect_map;
+  std::vector<irt::PlanarRect> rect_list;
+  for (int32_t i = 0; i < 256; i++) {
+    int32_t x = static_cast<int32_t>(generator() % 200) - 100;
+    int32_t y = static_cast<int32_t>(generator() % 200) - 100;
+    rect_list.emplace_back(x, y, x + static_cast<int32_t>(generator() % 40), y + static_cast<int32_t>(generator() % 40));
+    int32_t net_idx = static_cast<int32_t>(generator() % 9) - 1;
+    shadow.addFixedRect(net_idx, rect_list.back());
+    shadow.addFixedRect(net_idx, rect_list.back());
+    fixed_rect_map[net_idx][rect_list.back()] += 2;
+  }
+  shadow.buildFixedRectRTree();
+  for (int32_t i = 0; i < 20000; i++) {
+    const irt::PlanarRect& rect = rect_list[generator() % rect_list.size()];
+    int32_t net_idx = generator() % 8;
+    int32_t& count = routed_rect_map[net_idx][rect];
+    if (count == 0 || generator() % 2 == 0) {
+      count++;
+      shadow.addRoutedRect(net_idx, rect);
+    } else {
+      count--;
+      shadow.delRoutedRect(net_idx, rect);
+    }
+    for (int32_t query_idx = 0; query_idx < 4; query_idx++) {
+      const irt::PlanarRect& query = rect_list[generator() % rect_list.size()];
+      int32_t query_net_idx = generator() % 8;
+      require(shadow.getFixedRectCost(query_net_idx, query, 0.125) == getReferenceCost(fixed_rect_map, query_net_idx, query, 0.125),
+              "Indexed fixed cost differs from full scanning");
+      require(shadow.getRoutedRectCost(query_net_idx, query, 3.5) == getReferenceCost(routed_rect_map, query_net_idx, query, 3.5),
+              "Indexed routed cost differs from full scanning after updates");
+    }
+  }
+  std::vector<irt::PAPatch> indexed_patch_list;
+  std::vector<irt::PAPatch> reference_patch_list;
+  irt::Direction direction = irt::Direction::kHorizontal;
+  for (const irt::PlanarRect& rect : rect_list) {
+    irt::PAPatch patch(rect, 0);
+    patch.set_direction(rect.getRectDirection(direction));
+    patch.set_fixed_rect_cost(shadow.getFixedRectCost(0, rect, 10));
+    patch.set_routed_rect_cost(shadow.getRoutedRectCost(0, rect, 2));
+    indexed_patch_list.push_back(patch);
+    patch.set_fixed_rect_cost(getReferenceCost(fixed_rect_map, 0, rect, 10));
+    patch.set_routed_rect_cost(getReferenceCost(routed_rect_map, 0, rect, 2));
+    reference_patch_list.push_back(patch);
+  }
+  auto cmp_patch = [&direction](const irt::PAPatch& a, const irt::PAPatch& b) { return irt::CmpPAPatch()(a, b, direction); };
+  std::ranges::sort(indexed_patch_list, cmp_patch);
+  std::ranges::sort(reference_patch_list, cmp_patch);
+  for (size_t i = 0; i < indexed_patch_list.size(); i++) {
+    require(indexed_patch_list[i].get_patch().get_real_rect() == reference_patch_list[i].get_patch().get_real_rect(), "Indexed costs changed candidate order");
+  }
+  for (const auto& [net_idx, rect_counts] : routed_rect_map) {
+    for (const auto& [rect, count] : rect_counts) {
+      for (int32_t i = 0; i < count; i++) {
+        shadow.delRoutedRect(net_idx, rect);
+      }
+    }
+  }
+  require(shadow.get_routed_rect_rtree().empty() && shadow.get_net_routed_rect_map().empty(), "Random balanced updates left stale entries");
+}
+
+void benchmarkShadow()
+{
+  using Clock = std::chrono::steady_clock;
+  for (int32_t rect_num : {16, 128, 1024, 4096}) {
+    std::vector<irt::PlanarRect> rect_list;
+    for (int32_t i = 0; i < rect_num; i++) {
+      int32_t x = i % 64 * 32;
+      int32_t y = i / 64 * 32;
+      rect_list.emplace_back(x, y, x + 12, y + 12);
+    }
+    auto begin = Clock::now();
+    irt::PAShadow shadow;
+    for (int32_t i = 0; i < rect_num; i++) {
+      shadow.addFixedRect(i % 8, rect_list[i]);
+      shadow.addRoutedRect(i % 8, rect_list[i]);
+    }
+    shadow.buildFixedRectRTree();
+    auto indexed_built = Clock::now();
+    double indexed_cost = 0;
+    for (int32_t i = 0; i < 4096; i++) {
+      indexed_cost += shadow.getFixedRectCost(0, rect_list[i % rect_num], 1);
+      indexed_cost += shadow.getRoutedRectCost(0, rect_list[i % rect_num], 1);
+    }
+    auto indexed_queried = Clock::now();
+    for (int32_t i = 0; i < rect_num; i++) {
+      shadow.delRoutedRect(i % 8, rect_list[i]);
+      shadow.addRoutedRect(i % 8, rect_list[i]);
+    }
+    auto indexed_updated = Clock::now();
+    ShadowRectMap fixed_rect_map;
+    ShadowRectMap routed_rect_map;
+    for (int32_t i = 0; i < rect_num; i++) {
+      fixed_rect_map[i % 8][rect_list[i]]++;
+      routed_rect_map[i % 8][rect_list[i]]++;
+    }
+    auto reference_built = Clock::now();
+    double reference_cost = 0;
+    for (int32_t i = 0; i < 4096; i++) {
+      reference_cost += getReferenceCost(fixed_rect_map, 0, rect_list[i % rect_num], 1);
+      reference_cost += getReferenceCost(routed_rect_map, 0, rect_list[i % rect_num], 1);
+    }
+    auto reference_queried = Clock::now();
+    for (int32_t i = 0; i < rect_num; i++) {
+      routed_rect_map[i % 8].erase(rect_list[i]);
+      routed_rect_map[i % 8][rect_list[i]]++;
+    }
+    auto reference_updated = Clock::now();
+    require(indexed_cost == reference_cost && indexed_cost > 0, "Shadow benchmark cost mismatch");
+    require(shadow.get_net_routed_rect_map() == routed_rect_map, "Shadow benchmark update mismatch");
+    std::cout << "rects=" << rect_num << " indexed_us(build/query/update)=" << std::chrono::duration<double, std::micro>(indexed_built - begin).count() << '/'
+              << std::chrono::duration<double, std::micro>(indexed_queried - indexed_built).count() << '/'
+              << std::chrono::duration<double, std::micro>(indexed_updated - indexed_queried).count()
+              << " scan_us(build/query/update)=" << std::chrono::duration<double, std::micro>(reference_built - indexed_updated).count() << '/'
+              << std::chrono::duration<double, std::micro>(reference_queried - reference_built).count() << '/'
+              << std::chrono::duration<double, std::micro>(reference_updated - reference_queried).count() << '\n';
+  }
 }
 
 void testWorkspaceReset()
@@ -133,14 +310,21 @@ void testWorkspaceReset()
 
 }  // namespace
 
-int main()
+int main(int argc, char** argv)
 {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--benchmark") {
+      benchmarkShadow();
+      return 0;
+    }
+    require(argc == 1, "Expected no arguments or --benchmark");
     testResultSnapshot();
     testWorkspaceReset();
     testNodeContributions();
     testRandomNodeContributions();
     testShadowContributions();
+    testShadowBoundaries();
+    testRandomShadowQueries();
     std::cout << "PA state tests passed\n";
     return 0;
   } catch (const std::exception& exception) {

@@ -185,10 +185,29 @@ void testEnvironmentUpdates(irt::PinAccessor& accessor)
   accessor.buildLayerNodeMap(box);
   accessor.buildLayerShadowMap(box);
   accessor.buildPANodeNeighbor(box);
+  irt::PAIterParam param;
+  param.set_fixed_rect_unit(3);
+  param.set_routed_rect_unit(5);
+  param.set_violation_unit(7);
+  box.set_pa_iter_param(&param);
+  irt::EXTLayerRect fixed_rect = makeRect(40);
+  fixed_rect.set_layer_idx(1);
+  box.get_type_layer_net_fixed_rect_map()[true][1][-1].insert(&fixed_rect);
+  accessor.buildBoxEnvironment(box);
+  irt::EXTLayerRect fixed_query = makeRect(40);
+  require(accessor.getFixedRectCost(box, 8, fixed_query) == 0, "Fixed shadow lookup crossed routing layers");
+  fixed_query.set_layer_idx(1);
+  require(accessor.getFixedRectCost(box, 8, fixed_query) == 6, "Fixed shadow lookup lost a PRL/EOL shape or its weight");
   irt::EXTLayerRect patch0 = makeRect(10);
   irt::EXTLayerRect patch1 = makeRect(15);
   accessor.updateRoutedRectToEnvironment(box, irt::ChangeType::kAdd, 7, patch0, true);
   accessor.updateRoutedRectToEnvironment(box, irt::ChangeType::kAdd, 7, patch1, true);
+  double routed_cost = accessor.getRoutedRectCost(box, 8, patch0);
+  require(routed_cost > 0 && accessor.getRoutedRectCost(box, 7, patch0) == 0, "Routed shadow lookup lost occupancy or same-net exemption");
+  box.get_layer_shadow_map()[0].addViolation(patch0.get_real_rect());
+  require(accessor.getViolationCost(box, patch0) == 7, "Violation shadow lookup lost its weight");
+  accessor.clearViolationShadow(box);
+  require(accessor.getViolationCost(box, patch0) == 0, "Violation shadow lookup retained a cleared violation");
   std::vector<irt::PANode::OrientNetCountMap> node_counts;
   size_t occupied_num = 0;
   for (auto& node_map : box.get_layer_node_map()) {
@@ -202,7 +221,9 @@ void testEnvironmentUpdates(irt::PinAccessor& accessor)
   require(occupied_num > 0, "Environment projection did not touch any graph nodes");
   auto shadow_counts = box.get_layer_shadow_map()[0].get_net_routed_rect_map();
   accessor.updateRoutedRectToEnvironment(box, irt::ChangeType::kAdd, 7, patch0, true);
+  require(accessor.getRoutedRectCost(box, 8, patch0) == routed_cost, "Repeated projection was charged twice");
   accessor.updateRoutedRectToEnvironment(box, irt::ChangeType::kDel, 7, patch0, true);
+  require(accessor.getRoutedRectCost(box, 8, patch0) == routed_cost, "Removing a repeated projection lost its cost");
   size_t node_idx = 0;
   for (auto& node_map : box.get_layer_node_map()) {
     for (int32_t x = 0; x < node_map.get_x_size(); x++) {
@@ -222,6 +243,8 @@ void testEnvironmentUpdates(irt::PinAccessor& accessor)
     }
   }
   require(box.get_layer_shadow_map()[0].get_net_routed_rect_map().empty(), "Shadow projection left stale contributions");
+  require(box.get_layer_shadow_map()[0].get_routed_rect_rtree().empty(), "Shadow projection left stale index entries");
+  require(accessor.getRoutedRectCost(box, 8, patch0) == 0, "Balanced projection updates left a nonzero cost");
 }
 
 }  // namespace

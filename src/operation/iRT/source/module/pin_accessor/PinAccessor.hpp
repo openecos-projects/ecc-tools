@@ -208,7 +208,7 @@ class PinAccessor
 #if 1  // get env
   double getFixedRectCost(PABox& pa_box, int32_t net_idx, EXTLayerRect& patch);
   double getRoutedRectCost(PABox& pa_box, int32_t net_idx, EXTLayerRect& patch);
-  double getViolationCost(PABox& pa_box, int32_t net_idx, EXTLayerRect& patch);
+  double getViolationCost(PABox& pa_box, EXTLayerRect& patch);
 #endif
 
 #if 1  // exhibit

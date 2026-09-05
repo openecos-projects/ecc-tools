@@ -9,7 +9,6 @@ endif()
 add_library(irt_pin_accessor
     ## module pin_accessor
     ${IRT_MODULE}/pin_accessor/PinAccessor.cpp
-    ${IRT_MODULE}/pin_accessor/PinAccessorDRC.cpp
 )
 
 target_link_libraries(irt_pin_accessor

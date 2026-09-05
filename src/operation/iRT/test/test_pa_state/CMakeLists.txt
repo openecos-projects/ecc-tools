@@ -1,5 +1,7 @@
 add_executable(test_pa_state EXCLUDE_FROM_ALL test_pa_state.cpp)
 target_link_libraries(test_pa_state PRIVATE irt_pin_accessor)
+# Exercise the inline shadow index and its optional benchmark with production-like optimization.
+target_compile_options(test_pa_state PRIVATE -O3)
 
 add_executable(test_pa_drc EXCLUDE_FROM_ALL test_pa_drc.cpp)
 target_link_libraries(test_pa_drc PRIVATE irt_pin_accessor)
