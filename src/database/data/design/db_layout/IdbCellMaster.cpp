@@ -279,6 +279,23 @@ void IdbCellMasterList::reset_cell_master()
   _number = 0;
 }
 
+void IdbCellMasterList::set_name_index_mode(NameIndexMode mode)
+{
+  if (_name_index_mode == mode) {
+    return;
+  }
+
+  _master_map.clear();
+  _name_index_mode = mode;
+  if (_name_index_mode == NameIndexMode::kEnabled) {
+    for (auto* cell_master : _master_List) {
+      if (cell_master != nullptr) {
+        _master_map.emplace(cell_master->get_name(), cell_master);
+      }
+    }
+  }
+}
+
 IdbCellMaster* IdbCellMasterList::set_cell_master(string name)
 {
   IdbCellMaster* cell_master = find_cell_master(name);
@@ -287,7 +304,9 @@ IdbCellMaster* IdbCellMasterList::set_cell_master(string name)
     cell_master->set_name(name);
     _number++;
     _master_List.emplace_back(cell_master);
-    _master_map[name] = cell_master;
+    if (_name_index_mode == NameIndexMode::kEnabled) {
+      _master_map[name] = cell_master;
+    }
   }
 
   return cell_master;
@@ -295,9 +314,18 @@ IdbCellMaster* IdbCellMasterList::set_cell_master(string name)
 
 IdbCellMaster* IdbCellMasterList::find_cell_master(const string& src_name)
 {
-  auto cellMasterIt = _master_map.find(src_name);
-  if (cellMasterIt != _master_map.end()) {
-    return cellMasterIt->second;
+  if (_name_index_mode == NameIndexMode::kEnabled) {
+    auto cellMasterIt = _master_map.find(src_name);
+    if (cellMasterIt != _master_map.end()) {
+      return cellMasterIt->second;
+    }
+    return nullptr;
+  }
+
+  for (auto* cell_master : _master_List) {
+    if (cell_master != nullptr && cell_master->get_name() == src_name) {
+      return cell_master;
+    }
   }
   return nullptr;
 }

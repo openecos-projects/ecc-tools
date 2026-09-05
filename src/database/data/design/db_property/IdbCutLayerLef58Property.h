@@ -105,24 +105,55 @@ class Lef58Cutclass
 class Lef58Enclosure
 {
  public:
+  enum class Direction : uint8_t
+  {
+    kNone,
+    kAbove,
+    kBelow,
+  };
+
   [[nodiscard]] const std::string& get_class_name() const { return _class_name; }
+  [[nodiscard]] Direction get_direction() const { return _direction; }
   [[nodiscard]] std::optional<int32_t> get_overhang1() const { return _overhang1; }
   [[nodiscard]] std::optional<int32_t> get_overhang2() const { return _overhang2; }
   [[nodiscard]] std::optional<int32_t> get_end_overhang1() const { return _end_overhang1; }
   [[nodiscard]] std::optional<int32_t> get_side_overhang2() const { return _side_overhang2; }
+  [[nodiscard]] std::optional<int32_t> get_min_width() const { return _min_width; }
+  [[nodiscard]] bool is_include_abutted() const { return _include_abutted; }
+  [[nodiscard]] std::optional<int32_t> get_cut_within() const { return _cut_within; }
+  [[nodiscard]] const std::string& get_except_extra_cut_type() const { return _except_extra_cut_type; }
+  [[nodiscard]] std::optional<int32_t> get_min_length() const { return _min_length; }
+  [[nodiscard]] std::optional<int32_t> get_redundant_cut_within() const { return _redundant_cut_within; }
 
   void set_class_name(std::string&& name) { _class_name = std::move(name); }
+  void set_direction(const std::string& direction)
+  {
+    _direction = direction == "ABOVE" ? Direction::kAbove : direction == "BELOW" ? Direction::kBelow : Direction::kNone;
+  }
   void set_overhang1(int32_t overhang1) { _overhang1 = overhang1; }
   void set_overhang2(int32_t overhang2) { _overhang2 = overhang2; }
   void set_end_overhang1(int32_t overhang1) { _end_overhang1 = overhang1; }
   void set_side_overhang2(int32_t overhang2) { _side_overhang2 = overhang2; }
+  void set_min_width(int32_t value) { _min_width = value; }
+  void set_include_abutted(bool value = true) { _include_abutted = value; }
+  void set_cut_within(int32_t value) { _cut_within = value; }
+  void set_except_extra_cut_type(std::string value) { _except_extra_cut_type = std::move(value); }
+  void set_min_length(int32_t value) { _min_length = value; }
+  void set_redundant_cut_within(int32_t value) { _redundant_cut_within = value; }
 
  private:
   std::string _class_name;
+  Direction _direction = Direction::kNone;
   std::optional<int32_t> _overhang1;
   std::optional<int32_t> _overhang2;
   std::optional<int32_t> _end_overhang1;
   std::optional<int32_t> _side_overhang2;
+  std::optional<int32_t> _min_width;
+  bool _include_abutted = false;
+  std::optional<int32_t> _cut_within;
+  std::string _except_extra_cut_type;
+  std::optional<int32_t> _min_length;
+  std::optional<int32_t> _redundant_cut_within;
 };
 
 /*
@@ -410,36 +441,66 @@ class Lef58EolSpacing
 class Lef58SpacingTable
 {
  public:
+  class ClassPair
+  {
+   public:
+    ClassPair(std::string from, std::string to) : _from(std::move(from)), _to(std::move(to)) {}
+    [[nodiscard]] const std::string& get_from() const { return _from; }
+    [[nodiscard]] const std::string& get_to() const { return _to; }
+
+   private:
+    std::string _from;
+    std::string _to;
+  };
   class Layer
   {
    public:
     [[nodiscard]] const std::string& get_second_layer_name() const { return _second_layer_name; }
+    [[nodiscard]] bool is_nostack() const { return _nostack; }
+    [[nodiscard]] const std::vector<ClassPair>& get_prl_for_aligned_cut() const { return _prl_for_aligned_cut; }
     void set_second_layer_name(std::string&& name) { _second_layer_name = std::move(name); }
+    void set_nostack(bool value) { _nostack = value; }
+    void add_prl_for_aligned_cut(ClassPair pair) { _prl_for_aligned_cut.push_back(std::move(pair)); }
 
    private:
     std::string _second_layer_name;
+    bool _nostack{false};
+    std::vector<ClassPair> _prl_for_aligned_cut;
   };
   class Prl
   {
    public:
+    struct Entry
+    {
+      std::string from;
+      std::string to;
+      int32_t prl{0};
+    };
     [[nodiscard]] int32_t get_prl() const { return _prl; }
     [[nodiscard]] bool is_maxxy() const { return _maxxy; }
+    [[nodiscard]] const std::string& get_direction() const { return _direction; }
+    [[nodiscard]] const std::vector<Entry>& get_entries() const { return _entries; }
     void set_prl(int32_t prl) { _prl = prl; }
     void set_maxxy(bool maxxy) { _maxxy = maxxy; }
+    void set_direction(std::string direction) { _direction = std::move(direction); }
+    void add_entry(Entry entry) { _entries.push_back(std::move(entry)); }
 
    private:
     int32_t _prl{0};
     bool _maxxy{false};
+    std::string _direction;
+    std::vector<Entry> _entries;
   };
   class ClassName
   {
    public:
     [[nodiscard]] const std::string& get_class_name() const { return _class_name; }
+    [[nodiscard]] const std::string& get_edge() const { return _edge; }
     void set_class_name(std::string&& name) { _class_name = std::move(name); }
-    explicit ClassName(std::string&& name) :_class_name(std::move(name)) {}
+    ClassName(std::string name, std::string edge = {}) : _class_name(std::move(name)), _edge(std::move(edge)) {}
    private:
     std::string _class_name;
-    // TODO([SIDE|END])
+    std::string _edge;
   };
   class CutSpacing
   {
@@ -472,11 +533,20 @@ class Lef58SpacingTable
 
   [[nodiscard]] std::optional<Layer> get_second_layer() const { return _layer; }
   [[nodiscard]] std::optional<Prl> get_prl() const { return _prl; }
+  [[nodiscard]] std::optional<int32_t> get_default_spacing() const { return _default_spacing; }
+  [[nodiscard]] bool is_same_mask() const { return _same_mask; }
+  [[nodiscard]] const std::string& get_same_kind() const { return _same_kind; }
   [[nodiscard]] const CutClass& get_cutclass() const { return _cut_class; }
   void set_layer(Layer&& layer) { _layer = std::move(layer); }
   void set_prl(const Prl& prl){_prl = prl;}
+  void set_default_spacing(int32_t spacing) { _default_spacing = spacing; }
+  void set_same_mask(bool value) { _same_mask = value; }
+  void set_same_kind(std::string value) { _same_kind = std::move(value); }
   void set_cutclass(CutClass&& cut_class){_cut_class = std::move(cut_class);}
  private:
+  std::optional<int32_t> _default_spacing;
+  bool _same_mask{false};
+  std::string _same_kind;
   std::optional<Layer> _layer;
   std::optional<Prl> _prl;
   CutClass _cut_class;

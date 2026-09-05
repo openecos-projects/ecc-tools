@@ -24,23 +24,13 @@
 
 #pragma once
 
-#include "utility/logger/Logger.hpp"
-#include <boost/spirit/include/qi.hpp>
+#include "layer_property_parser.h"
 #include <string>
 
 namespace idb::masterslicelayer_property {
-namespace qi = boost::spirit::qi;
-
 template <typename Iterator>
 bool parse_lef58_type(Iterator beg, Iterator end, std::string& type)
 {
-  const static qi::rule<Iterator, std::string(), qi::ascii::space_type> value_string = qi::lexeme[+(qi::char_ - qi::char_(" ;\n"))];
-  const static qi::rule<Iterator, std::string(), qi::ascii::space_type> type_rule = qi::lit("TYPE") >> value_string >> qi::lit(";");
-  bool ok = qi::phrase_parse(beg, end, type_rule, qi::ascii::space, type);
-  if (not ok || beg != end) {
-    ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
-    return false;
-  }
-  return true;
+  return layer_property::parse_lef58_type(beg, end, type);
 }
 }  // namespace idb::masterslicelayer_property

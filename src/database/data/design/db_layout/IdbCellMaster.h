@@ -138,17 +138,25 @@ class IdbCellMaster
 class IdbCellMasterList
 {
  public:
+  enum class NameIndexMode : uint8_t
+  {
+    kDisabled,
+    kEnabled
+  };
+
   IdbCellMasterList();
   ~IdbCellMasterList();
 
   // getter
   vector<IdbCellMaster*>& get_cell_master() { return _master_List; }
   int32_t get_cell_master_num() { return _master_List.size(); }
+  NameIndexMode get_name_index_mode() const { return _name_index_mode; }
 
   // setter
   void reset_cell_master();
   IdbCellMaster* set_cell_master(string name);
   void set_number(uint32_t number) { _number = number; }
+  void set_name_index_mode(NameIndexMode mode);
 
   // operator
   IdbCellMaster* find_cell_master(const string& src_name);
@@ -160,5 +168,6 @@ class IdbCellMasterList
   uint32_t _number;
   std::map<string, IdbCellMaster*> _master_map;
   vector<IdbCellMaster*> _master_List;
+  NameIndexMode _name_index_mode = NameIndexMode::kEnabled;
 };
 }  // namespace idb

@@ -50,6 +50,7 @@ struct lef58_enclosure
   std::optional<double> _end_overhang1;
   std::optional<double> _side_overhang2;
   std::optional<double> _min_width;
+  std::string _include_abutted;
   std::optional<double> _cut_winthin;
   std::string _except_extracut_type;
   std::optional<double> _min_length;
@@ -65,6 +66,12 @@ struct lef58_enclosureedge_width
   std::optional<double> _cut_within;
   std::string _except_two_edges;
   std::optional<double> _except_within;
+};
+
+struct lef58_spacingtable_orthogonal_item
+{
+  double _within = 0.0;
+  double _spacing = 0.0;
 };
 struct lef58_enclosureedge_convexcorners
 {
@@ -128,17 +135,29 @@ struct lef58_eolspacing
   double _backward_ext;
   double _span_length;
 };
+struct lef58_spacingtable_classpair
+{
+  std::string _from;
+  std::string _to;
+};
 struct lef58_spacingtable_layer
 {
   std::string _second_layername;
-  // ...
+  std::string _nostack;
+  std::vector<lef58_spacingtable_classpair> _prl_for_aligned_cut;
+};
+struct lef58_spacingtable_prl_entry
+{
+  std::string _from;
+  std::string _to;
+  double _prl;
 };
 struct lef58_spacingtable_prl
 {
   double _prl;
   std::string _direction;  // HORIZONTAL | VERTICAL
   std::string _maxxy;
-  // ...
+  std::vector<lef58_spacingtable_prl_entry> _entries;
 };
 struct lef58_spacingtable_classname
 {
@@ -162,6 +181,9 @@ struct lef58_spacingtable_cutclass
 };
 struct lef58_spacingtable
 {
+  std::optional<double> _default_spacing;
+  std::string _same_mask;
+  std::string _same_kind;  // SAMENET | SAMEMETAL | SAMEVIA
   std::optional<lef58_spacingtable_layer> _layer;
   std::optional<lef58_spacingtable_prl> _prl;
   lef58_spacingtable_cutclass _cutclass;
@@ -179,8 +201,8 @@ BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_enclosure,
                           (std::string, _classname)(std::string, _direction)(std::optional<double>,
                                                                              _overhang1)(std::optional<double>,
                                                                                          _overhang2)(std::optional<double>, _end_overhang1)(
-                              std::optional<double>, _side_overhang2)(std::optional<double>, _min_width)(std::optional<double>,
-                                                                                                         _cut_winthin)(
+                              std::optional<double>, _side_overhang2)(std::optional<double>, _min_width)(std::string,
+                                                                                                         _include_abutted)(std::optional<double>, _cut_winthin)(
                               std::string, _except_extracut_type)(std::optional<double>, _min_length)(std::optional<double>, _cut_within))
 
 BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_enclosureedge_width,
@@ -188,6 +210,7 @@ BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_enclosureedge_width,
                               std::optional<double>, _cut_within)(std::string, _except_two_edges)(std::optional<double>, _except_within)
 
 )
+BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_spacingtable_orthogonal_item, (double, _within)(double, _spacing))
 BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_enclosureedge_convexcorners,
                           (double, _convex_length)(double, _adjacent_length)(double, _par_within)(double, _length))
 using width_convex_vairant
@@ -216,9 +239,18 @@ BOOST_FUSION_ADAPT_STRUCT(
     (double, _cut_spacing1)(double, _cut_spacing2)(std::string, _classname1)(to_class_vector, _to_classes)(double, _eol_width)(
         double, _prl)(double, _smaller_overhang)(double, _equal_overhang)(double, _side_ext)(double, _backward_ext)(double, _span_length))
 
-BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_spacingtable_layer, (std::string, _second_layername))
+BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_spacingtable_classpair, (std::string, _from)(std::string, _to))
 
-BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_spacingtable_prl, (double, _prl)(std::string, _direction)(std::string, _maxxy))
+BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_spacingtable_layer,
+                          (std::string, _second_layername)(std::string, _nostack)(
+                              std::vector<idb::cutlayer_property::lef58_spacingtable_classpair>, _prl_for_aligned_cut))
+
+BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_spacingtable_prl_entry,
+                          (std::string, _from)(std::string, _to)(double, _prl))
+
+BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_spacingtable_prl,
+                          (double, _prl)(std::string, _direction)(std::string, _maxxy)(
+                              std::vector<idb::cutlayer_property::lef58_spacingtable_prl_entry>, _entries))
 
 BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_spacingtable_classname, (std::string, _classname)(std::string, _edge))
 
@@ -234,6 +266,7 @@ BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_spacingtable_cutclass,
                            _classname1)(std::vector<idb::cutlayer_property::lef58_spacingtable_cutspacings>, _cuts))
 
 BOOST_FUSION_ADAPT_STRUCT(idb::cutlayer_property::lef58_spacingtable,
-                          (std::optional<idb::cutlayer_property::lef58_spacingtable_layer>,
+                          (std::optional<double>, _default_spacing)(std::string, _same_mask)(std::string, _same_kind)(
+                              std::optional<idb::cutlayer_property::lef58_spacingtable_layer>,
                            _layer)(std::optional<idb::cutlayer_property::lef58_spacingtable_prl>,
                                    _prl)(idb::cutlayer_property::lef58_spacingtable_cutclass, _cutclass))

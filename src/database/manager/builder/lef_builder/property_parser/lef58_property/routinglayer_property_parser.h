@@ -36,6 +36,12 @@ namespace idb::routinglayer_property {
   template<typename Iterator>
   bool parse_lef58_minstep(Iterator beg, Iterator end, std::vector<lef58_minstep>& minsteps);
 
+  template<typename Iterator>
+  bool parse_lef58_widthtable(Iterator beg, Iterator end, std::vector<lef58_widthtable>& widthtables);
+
+  template<typename Iterator>
+  bool parse_lef58_spacingtable_prl(Iterator beg, Iterator end, lef58_spacingtable_prl& spacingtable);
+
 }  // namespace idb::routinglayer_property
 
 namespace idb::routinglayer_property {
@@ -83,6 +89,7 @@ namespace idb::routinglayer_property {
     const static qi::rule<Iterator, lef58_cornerspacing(), space_type> corner_spacing_rule =
         lit("CORNERSPACING")
         >> (qi::string("CONVEXCORNER") | qi::string("CONCAVECORNER"))
+        >> -qi::string("CORNERTOCORNER")
         >> -(lit("EXCEPTEOL") >> double_)
         >> +width_spacing_rule
         >> lit(";");
@@ -115,6 +122,16 @@ namespace idb::routinglayer_property {
       ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
       return false;
     }
+    for (const auto& cut : cuts) {
+      const bool has_num_cuts = cut._num_cuts.has_value();
+      const bool has_cutclasses = !cut._cuts.empty();
+      const bool has_complete_length = cut._length.has_value() && cut._length_within.has_value();
+      const bool has_partial_length = cut._length.has_value() || cut._length_within.has_value();
+      if (has_num_cuts == has_cutclasses || (has_partial_length && !has_complete_length)) {
+        std::cout << "Parse LEF58_MINIMUMCUT semantic validation failed" << std::endl;
+        return false;
+      }
+    }
     return true;
   }
 
@@ -126,6 +143,7 @@ namespace idb::routinglayer_property {
         >> -(qi::string("INSIDECORNER") | qi::string("OUTSIDECORNER") | qi::string("STEP"))
         >> -(lit("LENGTHSUM") >> double_ )
         >> -(lit("MAXEDGES") >> int_ )
+        >> -qi::string("EXCEPTRECTANGLE")
         >> -lit("MINADJACENTLENGTH") >> -double_ >> -double_
         >> -qi::string("CONVEXCORNER") >> -(lit("EXCEPTWITHIN")>> double_)
         >> -qi::string("CONCAVECORNER")
@@ -241,6 +259,59 @@ namespace idb::routinglayer_property {
     if (!ok || beg != end) {
       ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
       return false;
+    }
+    return true;
+  }
+  template<typename Iterator>
+  bool parse_lef58_spacingtable_prl(Iterator beg, Iterator end, lef58_spacingtable_prl& spacingtable) {
+    const static qi::rule<Iterator, double_pair(), space_type> double_pair_rule = double_ >> double_;
+    const static qi::rule<Iterator, double_pair(), space_type> except_within_rule =
+      lit("EXCEPTWITHIN") >> double_pair_rule;
+    const static qi::rule<Iterator, lef58_spacingtable_prl_width(), space_type> width_rule =
+      lit("WIDTH") >> double_ >> -except_within_rule >> +double_;
+    const static qi::rule<Iterator, lef58_spacingtable_prl_influence(), space_type> influence_item_rule =
+      lit("WIDTH") >> double_ >> lit("WITHIN") >> double_ >> lit("SPACING") >> double_;
+    const static qi::rule<Iterator, std::vector<lef58_spacingtable_prl_influence>(), space_type> influence_rule =
+      lit("SPACINGTABLE") >> lit("INFLUENCE") >> +influence_item_rule >> lit(";");
+    const static qi::rule<Iterator, lef58_spacingtable_prl(), space_type> prl_rule =
+      lit("SPACINGTABLE") >> lit("PARALLELRUNLENGTH")
+      >> -qi::string("WRONGDIRECTION") >> -qi::string("SAMEMASK")
+      >> -(lit("EXCEPTEOL") >> double_)
+      >> +double_ >> +width_rule >> -influence_rule >> lit(";");
+
+    bool ok = qi::phrase_parse(beg, end, prl_rule, space, spacingtable);
+    if (!ok || beg != end) {
+      ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+      return false;
+    }
+    if (spacingtable._parallel_run_lengths.empty() || spacingtable._widths.empty()) {
+      ECCLOG.warn(ecc::Loc::current(), "Parse LEF58_SPACINGTABLE PARALLELRUNLENGTH semantic validation failed");
+      return false;
+    }
+    for (const auto& width : spacingtable._widths) {
+      if (width._spacings.size() != spacingtable._parallel_run_lengths.size()) {
+        ECCLOG.warn(ecc::Loc::current(), "Parse LEF58_SPACINGTABLE PARALLELRUNLENGTH semantic validation failed");
+        return false;
+      }
+    }
+    return true;
+  }
+
+  template<typename Iterator>
+  bool parse_lef58_widthtable(Iterator beg, Iterator end, std::vector<lef58_widthtable>& widthtables) {
+    const static qi::rule<Iterator, lef58_widthtable(), space_type> widthtable_rule =
+      lit("WIDTHTABLE") >> +double_ >> -qi::string("WRONGDIRECTION") >> -qi::string("ORTHOGONAL");
+
+    bool ok = qi::phrase_parse(beg, end, widthtable_rule % lit(";") >> -lit(";"), space, widthtables);
+    if (!ok || beg != end) {
+      ECCLOG.warn(ecc::Loc::current(), "Parse \"", std::string(beg, end), "\" failed");
+      return false;
+    }
+    for (const auto& widthtable : widthtables) {
+      if (widthtable._widths.empty()) {
+        ECCLOG.warn(ecc::Loc::current(), "Parse LEF58_WIDTHTABLE semantic validation failed");
+        return false;
+      }
     }
     return true;
   }

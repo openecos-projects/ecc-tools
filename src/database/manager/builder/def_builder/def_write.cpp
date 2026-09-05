@@ -522,25 +522,32 @@ int32_t DefWrite::write_via()
         writestr(" + PATTERN %s \n", master_generate->get_patttern()->get_pattern_string().c_str());
       }
 
-      writestr(" ;\n");
-    } else {
-      writestr("- %s \n", via->get_name().c_str());
+      // Preserve generated-VIA placement metadata.  Zero is the DEF default,
+      // so omit fields that carry no non-default information.
+      if (master_generate->get_original_offset_x() != 0 || master_generate->get_original_offset_y() != 0) {
+        writestr(" + ORIGIN %d %d \n", master_generate->get_original_offset_x(), master_generate->get_original_offset_y());
+      }
+      if (master_generate->get_offset_bottom_x() != 0 || master_generate->get_offset_bottom_y() != 0
+          || master_generate->get_offset_top_x() != 0 || master_generate->get_offset_top_y() != 0) {
+        writestr(" + OFFSET %d %d %d %d \n", master_generate->get_offset_bottom_x(), master_generate->get_offset_bottom_y(),
+                 master_generate->get_offset_top_x(), master_generate->get_offset_top_y());
+      }
 
+      writestr(" ;\n");
+    } else if (via_master->is_fix()) {
+      writestr("- %s\n", via->get_name().c_str());
       for (IdbViaMasterFixed* master_fixed : via_master->get_master_fixed_list()) {
         if (master_fixed == nullptr || master_fixed->get_layer() == nullptr) {
           continue;
         }
-
         for (IdbRect* rect : master_fixed->get_rect_list()) {
           if (rect == nullptr) {
             continue;
           }
-
-          writestr("  + RECT %s ( %d %d ) ( %d %d )\n", master_fixed->get_layer()->get_name().c_str(), rect->get_low_x(),
+          writestr(" + RECT %s ( %d %d ) ( %d %d )\n", master_fixed->get_layer()->get_name().c_str(), rect->get_low_x(),
                    rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
         }
       }
-
       writestr(" ;\n");
     }
   }

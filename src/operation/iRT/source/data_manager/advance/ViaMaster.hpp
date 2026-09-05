@@ -38,6 +38,7 @@ class ViaMaster
   std::vector<PlanarRect>& get_cut_shape_list() { return _cut_shape_list; }
   int32_t get_cut_layer_idx() const { return _cut_layer_idx; }
   // const getter
+  const std::string& get_via_name() const { return _via_name; }
   const LayerRect& get_above_enclosure() const { return _above_enclosure; }
   const LayerRect& get_below_enclosure() const { return _below_enclosure; }
   // setter
@@ -153,6 +154,16 @@ struct CmpViaMaster
         } else {
           sort_status = SortStatus::kEqual;
         }
+      }
+    }
+    // Deterministic tie-break for geometrically equivalent via masters. The
+    // adapter source order is not stable across iDB and EnTT.
+    if (sort_status == SortStatus::kEqual) {
+      if (a.get_via_name() < b.get_via_name()) {
+        return true;
+      }
+      if (a.get_via_name() > b.get_via_name()) {
+        return false;
       }
     }
     if (sort_status == SortStatus::kTrue) {

@@ -19,14 +19,25 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "db_property/IdbCutLayerLef58Property.h"
 #include "lef58_property/cutlayer_property_parser.h"
+#include "lef58_property/layer_property_parser.h"
 #include "property_parser/lef58_property/cutlayer_property.h"
 
 namespace idb {
 bool CutLayerParser::parse(const std::string& name, const std::string& value, IdbLayerCut* data)
 {
+  if (name == "LEF58_TYPE") {
+    return parse_lef58_type(value, data);
+  }
+  if (name == "LEF58_BACKSIDE") {
+    return parse_lef58_backside(value, data);
+  }
+  if (name == "LEF58_SPACINGTABLE") {
+    return parse_lef58_spacingtable_orthogonal(value, data);
+  }
   if (name == "LEF58_CUTCLASS") {
     return parse_lef58_cutclass(value, data);
   }
@@ -42,9 +53,6 @@ bool CutLayerParser::parse(const std::string& name, const std::string& value, Id
   if (name == "LEF58_EOLSPACING") {
     return parse_lef58_eolspacing(value, data);
   }
-  if (name == "LEF58_SPACINGTABLE") {
-    return parse_lef58_spacingtable(value, data);
-  }
   ECCLOG.warn(ecc::Loc::current(), "Unhandled PROPERTY: ", name, " \"", value, "\"");
   return false;
 }
@@ -57,6 +65,56 @@ bool CutLayerParser::parse(const std::string& name, const std::string& value, Id
  */
 
 namespace idb {
+bool CutLayerParser::parse_lef58_type(const std::string& value, IdbLayerCut* data)
+{
+  std::string type;
+  const bool parse_ok = layer_property::parse_lef58_type(value.begin(), value.end(), type);
+  if (!parse_ok) {
+    return false;
+  }
+  data->set_lef58_type(std::move(type));
+  return true;
+}
+
+bool CutLayerParser::parse_lef58_backside(const std::string& value, IdbLayerCut* data)
+{
+  const bool parse_ok = layer_property::parse_lef58_backside(value.begin(), value.end());
+  if (!parse_ok) {
+    return false;
+  }
+  data->set_lef58_backside(true);
+  return true;
+}
+
+bool CutLayerParser::parse_lef58_spacingtable_orthogonal(const std::string& value, IdbLayerCut* data)
+{
+  std::size_t begin = 0;
+  while (begin < value.size()) {
+    const auto end = value.find(';', begin);
+    if (end == std::string::npos) {
+      return false;
+    }
+    const auto clause = value.substr(begin, end - begin + 1);
+    if (clause.find("SPACINGTABLE ORTHOGONAL") != std::string::npos) {
+      std::vector<cutlayer_property::lef58_spacingtable_orthogonal_item> parsed;
+      if (!cutlayer_property::parse_lef58_spacingtable_orthogonal(clause.begin(), clause.end(), parsed)) {
+        return false;
+      }
+      IdbCutOrthogonalSpacingTable table{.lef58_property = true};
+      table.items.reserve(parsed.size());
+      for (const auto& item : parsed) {
+        table.items.push_back(
+            IdbCutOrthogonalSpacingTableItem{.within = transUnitDB(item._within), .spacing = transUnitDB(item._spacing)});
+      }
+      data->add_orthogonal_spacing_table(std::move(table));
+    } else if (clause.find("SPACINGTABLE") != std::string::npos && !parse_lef58_spacingtable(clause, data)) {
+      return false;
+    }
+    begin = end + 1;
+  }
+  return true;
+}
+
 bool CutLayerParser::parse_lef58_cutclass(const std::string& value, IdbLayerCut* data)
 {
   std::vector<cutlayer_property::lef58_cutclass> vec;
@@ -91,6 +149,7 @@ bool CutLayerParser::parse_lef58_enclosure(const std::string& value, IdbLayerCut
   for (auto& item : vec) {
     auto enclosure = std::make_shared<cutlayer::Lef58Enclosure> ();
     enclosure->set_class_name(std::move(item._classname));
+    enclosure->set_direction(item._direction);
     if (item._overhang1 && item._overhang2) {
       enclosure->set_overhang1(this->transUnitDB(item._overhang1.value()));
       enclosure->set_overhang2(this->transUnitDB(item._overhang2.value()));
@@ -98,6 +157,20 @@ bool CutLayerParser::parse_lef58_enclosure(const std::string& value, IdbLayerCut
     if (item._end_overhang1 && item._side_overhang2) {
       enclosure->set_end_overhang1(this->transUnitDB(item._end_overhang1.value()));
       enclosure->set_side_overhang2(this->transUnitDB(item._side_overhang2.value()));
+    }
+    if (item._min_width) {
+      enclosure->set_min_width(this->transUnitDB(*item._min_width));
+    }
+    enclosure->set_include_abutted(!item._include_abutted.empty());
+    if (item._cut_winthin) {
+      enclosure->set_cut_within(this->transUnitDB(*item._cut_winthin));
+      enclosure->set_except_extra_cut_type(item._except_extracut_type);
+    }
+    if (item._min_length) {
+      enclosure->set_min_length(this->transUnitDB(*item._min_length));
+    }
+    if (item._cut_within) {
+      enclosure->set_redundant_cut_within(this->transUnitDB(*item._cut_within));
     }
     data->add_lef58_enclosure(std::move(enclosure));
   }
@@ -232,25 +305,42 @@ bool CutLayerParser::parse_lef58_spacingtable(const std::string& value, IdbLayer
   }
   // dispose data
   auto spacing_tbl = std::make_shared<cutlayer::Lef58SpacingTable>();
+  if (spacingtable._default_spacing) {
+    spacing_tbl->set_default_spacing(transUnitDB(*spacingtable._default_spacing));
+  }
+  spacing_tbl->set_same_mask(!spacingtable._same_mask.empty());
+  spacing_tbl->set_same_kind(std::move(spacingtable._same_kind));
   if (spacingtable._layer) {
     cutlayer::Lef58SpacingTable::Layer layer;
     layer.set_second_layer_name(std::move(spacingtable._layer->_second_layername));
+    layer.set_nostack(!spacingtable._layer->_nostack.empty());
+    for (auto& pair : spacingtable._layer->_prl_for_aligned_cut) {
+      layer.add_prl_for_aligned_cut(
+          cutlayer::Lef58SpacingTable::ClassPair(std::move(pair._from), std::move(pair._to)));
+    }
     spacing_tbl->set_layer(std::move(layer));
   }
   if (spacingtable._prl) {
     cutlayer::Lef58SpacingTable::Prl prl;
     prl.set_prl(transUnitDB(spacingtable._prl->_prl));
     prl.set_maxxy(!spacingtable._prl->_maxxy.empty());
+    prl.set_direction(std::move(spacingtable._prl->_direction));
+    for (auto& entry : spacingtable._prl->_entries) {
+      prl.add_entry(cutlayer::Lef58SpacingTable::Prl::Entry{
+          .from = std::move(entry._from), .to = std::move(entry._to), .prl = transUnitDB(entry._prl)});
+    }
     spacing_tbl->set_prl(prl);
   }
 
   {
     cutlayer::Lef58SpacingTable::CutClass cutclass;
     for (auto& classname1 : spacingtable._cutclass._classname1) {
-      cutclass.add_class_name1(cutlayer::Lef58SpacingTable::ClassName(std::move(classname1._classname)));
+      cutclass.add_class_name1(
+          cutlayer::Lef58SpacingTable::ClassName(std::move(classname1._classname), std::move(classname1._edge)));
     }
     for (auto& cut_row : spacingtable._cutclass._cuts) {
-      cutclass.add_class_name2(cutlayer::Lef58SpacingTable::ClassName(std::move(cut_row._classname2._classname)));
+      cutclass.add_class_name2(cutlayer::Lef58SpacingTable::ClassName(std::move(cut_row._classname2._classname),
+                                                                      std::move(cut_row._classname2._edge)));
       std::vector<cutlayer::Lef58SpacingTable::CutSpacing> cutspacing_row;
       for (auto& cut : cut_row._cutspacings) {
         std::optional<int32_t> cut_spacing1;

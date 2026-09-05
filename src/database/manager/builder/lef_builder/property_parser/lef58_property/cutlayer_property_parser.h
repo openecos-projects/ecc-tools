@@ -38,6 +38,9 @@ template <typename Iterator>
 bool parse_lef58_enclosureedge(Iterator beg, Iterator end, std::vector<lef58_enclosureedge>& vec);
 
 template <typename Iterator>
+bool parse_lef58_spacingtable_orthogonal(Iterator beg, Iterator end, std::vector<lef58_spacingtable_orthogonal_item>& items);
+
+template <typename Iterator>
 bool parse_lef58_eolenclosure(Iterator beg, Iterator end, lef58_eolenclosure& eol_enclosure);
 
 template <typename Iterator>
@@ -77,8 +80,9 @@ bool parse_lef58_enclosure(Iterator beg, Iterator end, std::vector<lef58_enclosu
   const static qi::rule<Iterator, double(), space_type> redundantcut_rule = lit("REDUNDANTCUT") >> double_;
   static qi::rule<Iterator, lef58_enclosure(), space_type> enclosure_rule
       = lit("ENCLOSURE") >> -class_name_rule >> (-direction_rule) >> -double_ >> -double_ >> -(lit("END") >> double_)
-        >> -(lit("SIDE") >> double_) >> -(lit("EXCEPTEXTRACUT") >> double_ >> -(qi::string("PRL") | qi::string("NOSHAREDEDGE")))
-        >> -width_rule >> -length_rule >> -redundantcut_rule >> lit(";");
+        >> -(lit("SIDE") >> double_) >> -width_rule >> -qi::string("INCLUDEABUTTED")
+        >> -(lit("EXCEPTEXTRACUT") >> double_) >> -(qi::string("PRL") | qi::string("NOSHAREDEDGE")) >> -length_rule
+        >> -redundantcut_rule >> lit(";");
 
   bool ok = qi::phrase_parse(beg, end, (enclosure_rule % qi::eps), space, vec);
   if (!ok || beg != end) {
@@ -110,6 +114,21 @@ bool parse_lef58_enclosureedge(Iterator beg, Iterator end, std::vector<lef58_enc
   bool ok = qi::phrase_parse(beg, end, rule % qi::eps, space, vec);
   if (!ok || beg != end) {
     ECCLOG.warn(ecc::Loc::current(), "Parse property \n\"", std::string(beg, end), "\"\n failed");
+    return false;
+  }
+  return true;
+}
+
+template <typename Iterator>
+bool parse_lef58_spacingtable_orthogonal(Iterator beg, Iterator end, std::vector<lef58_spacingtable_orthogonal_item>& items)
+{
+  const static qi::rule<Iterator, lef58_spacingtable_orthogonal_item(), space_type> item_rule
+      = lit("WITHIN") >> double_ >> lit("SPACING") >> double_;
+  const static qi::rule<Iterator, std::vector<lef58_spacingtable_orthogonal_item>(), space_type> table_rule
+      = lit("SPACINGTABLE") >> lit("ORTHOGONAL") >> +item_rule >> lit(";");
+  const bool ok = qi::phrase_parse(beg, end, table_rule, space, items);
+  if (!ok || beg != end) {
+    ECCLOG.warn(ecc::Loc::current(), "Parse property \"", std::string(beg, end), "\" failed");
     return false;
   }
   return true;
@@ -160,9 +179,14 @@ template <typename Iterator>
 bool parse_lef58_spacingtable(Iterator beg, Iterator end, lef58_spacingtable& spacingtable)
 {
   const static qi::rule<Iterator, std::string(), ascii::space_type> value_string = lexeme[+(char_ - char_(" ;\n"))];
-  const static qi::rule<Iterator, cutlayer_property::lef58_spacingtable_layer(), space_type> layer_rule = lit("LAYER") >> value_string;
+  const static qi::rule<Iterator, lef58_spacingtable_classpair(), space_type> classpair_rule
+      = value_string >> lit("TO") >> value_string;
+  const static qi::rule<Iterator, cutlayer_property::lef58_spacingtable_layer(), space_type> layer_rule
+      = lit("LAYER") >> value_string >> -qi::string("NOSTACK") >> -(lit("PRLFORALIGNEDCUT") >> +classpair_rule);
+  const static qi::rule<Iterator, lef58_spacingtable_prl_entry(), space_type> prl_entry_rule
+      = value_string >> lit("TO") >> value_string >> double_;
   const static qi::rule<Iterator, lef58_spacingtable_prl(), space_type> prl_rule
-      = lit("PRL") >> double_ >> -(qi::string("HORIZONTAL") | qi::string("VERTICAL")) >> -qi::string("MAXXY");
+      = lit("PRL") >> double_ >> -(qi::string("HORIZONTAL") | qi::string("VERTICAL")) >> -qi::string("MAXXY") >> *prl_entry_rule;
   const static qi::rule<Iterator, lef58_spacingtable_classname()> classname_rule
       = (+qi::alnum) >> -(*lit(' ') >> *lit('\t') >> (qi::string("END") | qi::string("SIDE")));
   const static qi::rule<Iterator, cutlayer_property::lef58_spacingtable_cutspacing(), space_type> cutspacing_rule
@@ -172,7 +196,9 @@ bool parse_lef58_spacingtable(Iterator beg, Iterator end, lef58_spacingtable& sp
   const static qi::rule<Iterator, lef58_spacingtable_cutclass(), space_type> cutclass_rule
       = lit("CUTCLASS") >> lexeme[(classname_rule) % +char_("\t ")] >> (cutspacings_rule % qi::eps);
   const static qi::rule<Iterator, lef58_spacingtable(), space_type> spacingtable_rule
-      = lit("SPACINGTABLE") >> -layer_rule >> -prl_rule >> cutclass_rule >> lit(";");
+      = lit("SPACINGTABLE") >> -(lit("DEFAULT") >> double_) >> -qi::string("SAMEMASK")
+        >> -(qi::string("SAMENET") | qi::string("SAMEMETAL") | qi::string("SAMEVIA")) >> -layer_rule >> -prl_rule
+        >> cutclass_rule >> lit(";");
 
   bool ok = qi::phrase_parse(beg, end, spacingtable_rule, space, spacingtable);
   if (!ok || beg != end) {

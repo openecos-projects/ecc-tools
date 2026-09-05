@@ -27,6 +27,10 @@ class RoutingLayerParser : public PropertyBaseParser<IdbLayerRouting>
   bool parse(const std::string& name, const std::string& value, IdbLayerRouting* data) override;
 
  private:
+  bool parse_lef58_type(const std::string& value, IdbLayerRouting* data);
+  bool parse_lef58_backside(const std::string& value, IdbLayerRouting* data);
+  bool parse_lef58_rectonly(const std::string& value, IdbLayerRouting* data);
+  bool parse_lef58_rightwayongridonly(const std::string& value, IdbLayerRouting* data);
   bool parse_lef58_area(const std::string& value, IdbLayerRouting* data);
   bool parse_lef58_conerfillspacing(const std::string& value, IdbLayerRouting* data);
   bool parse_lef58_cornerspacing(const std::string& value, IdbLayerRouting* data);
@@ -34,8 +38,10 @@ class RoutingLayerParser : public PropertyBaseParser<IdbLayerRouting>
   bool parse_lef58_minstep(const std::string& value, IdbLayerRouting* data);
   bool parse_lef58_spacing(const std::string& value, IdbLayerRouting* data);
   bool parse_lef58_spacingtable(const std::string& value, IdbLayerRouting* data);
+  bool parse_lef58_widthtable(const std::string& value, IdbLayerRouting* data);
 
   bool parse_lef58_spacingtable_jogtojog(const std::string& value, IdbLayerRouting* data);
+  bool parse_lef58_spacingtable_prl(const std::string& value, IdbLayerRouting* data);
   bool parse_lef58_spacing_eol(const std::string& value, IdbLayerRouting* data);
   bool parse_lef58_spacing_notchlength(const std::string& value, IdbLayerRouting* data);
 };

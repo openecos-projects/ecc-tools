@@ -45,7 +45,7 @@ class IdbRegion;
 class IdbGroup
 {
  public:
-  IdbGroup(std::string group_name);
+  IdbGroup(std::string group_name = "");
   ~IdbGroup();
 
   // getter

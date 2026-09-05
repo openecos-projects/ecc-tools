@@ -199,6 +199,11 @@ IdbLayerRouting::IdbLayerRouting()
   _width = -1;
   _min_width = -1;
   _max_width = -1;
+  _diag_width = -1;
+  _diag_spacing = -1;
+  _protrusion_width_1 = -1;
+  _protrusion_length = -1;
+  _protrusion_width_2 = -1;
   _pitch.type = IdbLayerOrientType::kNone;
   _pitch.orient_x = -1;
   _pitch.orient_y = -1;
@@ -209,6 +214,9 @@ IdbLayerRouting::IdbLayerRouting()
   _wire_extension = -1;
   _thickness = -1;
   _height = -1;
+  _shrinkage = -1;
+  _cap_multiplier = -1;
+  _fill_active_spacing = -1;
   _resistance = -1;
   _capacitance = -1;
   _edge_capacitance = -1;
@@ -367,6 +375,16 @@ std::shared_ptr<IdbLayerSpacingTable> IdbLayerRouting ::get_spacing_table_from_s
 void IdbLayerRouting ::set_parallel_spacing_table(std::shared_ptr<IdbParallelSpacingTable> ptbl)
 {
   _spacing_table->set_parallel(std::move(ptbl));
+}
+
+void IdbLayerRouting::set_influence_spacing_table(std::shared_ptr<IdbInfluenceSpacingTable> table)
+{
+  _spacing_table->set_influence(std::move(table));
+}
+
+void IdbLayerRouting::set_two_widths_spacing_table(std::shared_ptr<IdbTwoWidthsSpacingTable> table)
+{
+  _spacing_table->set_two_widths(std::move(table));
 }
 
 }  // namespace idb

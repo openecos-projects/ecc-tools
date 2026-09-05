@@ -346,4 +346,35 @@ int32_t IdbParallelSpacingTable::get_spacing(int32_t width, int32_t parallel_len
   return _spacing.at(iwidth).at(ilength);
 }
 
+size_t IdbTwoWidthsSpacingTable::find_width_index(int32_t width, int32_t parallel_length) const
+{
+  if (_widths.empty()) {
+    return 0;
+  }
+
+  auto pos = std::lower_bound(_widths.begin(), _widths.end(), width, [](const WidthEntry& entry, int32_t target_width) {
+    return entry.width < target_width;
+  });
+  if (pos != _widths.begin()) {
+    --pos;
+  }
+
+  auto index = static_cast<ssize_t>(std::distance(_widths.begin(), pos));
+  for (; index >= 0; --index) {
+    const auto& entry = _widths.at(index);
+    if (!entry.has_prl || parallel_length >= entry.prl) {
+      return static_cast<size_t>(index);
+    }
+  }
+  return 0;
+}
+
+int32_t IdbTwoWidthsSpacingTable::get_spacing(int32_t width1, int32_t width2, int32_t parallel_length) const
+{
+  const auto safe_prl = std::max(0, parallel_length);
+  const auto row_index = find_width_index(width1, safe_prl);
+  const auto column_index = find_width_index(width2, safe_prl);
+  return _spacing.at(row_index).at(column_index);
+}
+
 }  // namespace idb

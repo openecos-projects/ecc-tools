@@ -44,11 +44,11 @@ class IdbMaxViaStack : public IdbObject
   ~IdbMaxViaStack() = default;
 
   // getter
-  bool is_no_single() { return _no_single; }
-  bool is_range() { return _layer_top_name != "" && _layer_bottom_name != ""; }
-  uint32_t get_stacked_via_num() { return _stacked_via_num; }
-  std::string get_layer_top() { return _layer_top_name; }
-  std::string get_layer_bottom() { return _layer_bottom_name; }
+  bool is_no_single() const { return _no_single; }
+  bool is_range() const { return _layer_top_name != "" && _layer_bottom_name != ""; }
+  uint32_t get_stacked_via_num() const { return _stacked_via_num; }
+  const std::string& get_layer_top() const { return _layer_top_name; }
+  const std::string& get_layer_bottom() const { return _layer_bottom_name; }
 
   // setter
   void set_no_single(bool no_single) { _no_single = no_single; }

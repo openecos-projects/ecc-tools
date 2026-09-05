@@ -33,6 +33,7 @@ class Net
   // getter
   int32_t get_net_idx() const { return _net_idx; }
   std::string& get_net_name() { return _net_name; }
+  const std::string& get_net_name() const { return _net_name; }
   ConnectType get_connect_type() const { return _connect_type; }
   std::vector<Pin>& get_pin_list() { return _pin_list; }
   BoundingBox& get_bounding_box() { return _bounding_box; }

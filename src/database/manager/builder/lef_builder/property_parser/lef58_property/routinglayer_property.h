@@ -26,6 +26,7 @@
 #include <boost/spirit/include/qi.hpp>
 #include <boost/variant/variant.hpp>
 #include <optional>
+#include <vector>
 
 // #include "../property_parser.h"
 
@@ -92,6 +93,7 @@ struct lef58_minstep
   std::string _type;
   std::optional<double> _max_length;
   std::optional<int> _max_edges;
+  std::string _except_rectangle;
 
   std::optional<double> _min_adj_length;
   std::optional<double> _min_adj_length2;
@@ -246,11 +248,41 @@ struct lef58_cornerspacing_width
 struct lef58_cornerspacing 
 {
   std::string _corner_type;
+  std::string _corner_to_corner;
   std::optional<double> _except_eol;
   std::vector<lef58_cornerspacing_width> _width_spacings;
 };
 
+struct lef58_spacingtable_prl_width
+{
+  double _width;
+  std::optional<double_pair> _except_within;
+  std::vector<double> _spacings;
+};
 
+struct lef58_spacingtable_prl_influence
+{
+  double _width;
+  double _within;
+  double _spacing;
+};
+
+struct lef58_spacingtable_prl
+{
+  std::string _wrong_direction;
+  std::string _same_mask;
+  std::optional<double> _except_eol_width;
+  std::vector<double> _parallel_run_lengths;
+  std::vector<lef58_spacingtable_prl_width> _widths;
+  std::optional<std::vector<lef58_spacingtable_prl_influence>> _influences;
+};
+
+struct lef58_widthtable
+{
+  std::vector<double> _widths;
+  std::string _wrong_direction;
+  std::string _orthogonal;
+};
 
 }  // namespace idb::routinglayer_property
 
@@ -280,10 +312,9 @@ BOOST_FUSION_ADAPT_STRUCT(idb::routinglayer_property::lef58_minimumcut,
 BOOST_FUSION_ADAPT_STRUCT(
     idb::routinglayer_property::lef58_minstep,
     (double, _min_step_length)(std::string, _type)(std::optional<double>, _max_length)(std::optional<int>, _max_edges)(
-        std::optional<double>, _min_adj_length)(std::optional<double>, _min_adj_length2)(std::string, _convex_corner)(std::optional<double>,
-                                                                                                                      _except_within)(
-        std::string, _concave_corner)(std::string, _three_concave_corners)(std::optional<double>, _center_width)(std::optional<double>,
-                                                                                                                 _min_between_length)(
+        std::string, _except_rectangle)(std::optional<double>, _min_adj_length)(std::optional<double>, _min_adj_length2)(
+        std::string, _convex_corner)(std::optional<double>, _except_within)(std::string, _concave_corner)(
+        std::string, _three_concave_corners)(std::optional<double>, _center_width)(std::optional<double>, _min_between_length)(
         std::string, _except_same_corners)(std::optional<double>, _no_adjacent_eol)(std::optional<double>, _except_adjacent_length)(
         std::optional<double>, _min_adjacent_length)(std::string, _concavecorners)(std::optional<double>, _no_between_eol))
 
@@ -344,5 +375,19 @@ BOOST_FUSION_ADAPT_STRUCT(idb::routinglayer_property::lef58_spacingtable_jogtojo
                               std::vector<idb::routinglayer_property::lef58_spacingtable_jogtojog_width>, _width))
 BOOST_FUSION_ADAPT_STRUCT(idb::routinglayer_property::lef58_cornerspacing_width, (double, _width)(double, _spacing))
 BOOST_FUSION_ADAPT_STRUCT(idb::routinglayer_property::lef58_cornerspacing,
-                          (std::string, _corner_type)(std::optional<double>, _except_eol)(
+                          (std::string, _corner_type)(std::string, _corner_to_corner)(std::optional<double>, _except_eol)(
                               std::vector<idb::routinglayer_property::lef58_cornerspacing_width>, _width_spacings))
+
+BOOST_FUSION_ADAPT_STRUCT(idb::routinglayer_property::lef58_spacingtable_prl_width,
+                          (double, _width)(std::optional<idb::routinglayer_property::double_pair>, _except_within)(
+                              std::vector<double>, _spacings))
+BOOST_FUSION_ADAPT_STRUCT(idb::routinglayer_property::lef58_spacingtable_prl_influence,
+                          (double, _width)(double, _within)(double, _spacing))
+BOOST_FUSION_ADAPT_STRUCT(idb::routinglayer_property::lef58_spacingtable_prl,
+                          (std::string, _wrong_direction)(std::string, _same_mask)(
+                              std::optional<double>, _except_eol_width)(std::vector<double>, _parallel_run_lengths)(
+                              std::vector<idb::routinglayer_property::lef58_spacingtable_prl_width>, _widths)(
+                              std::optional<std::vector<idb::routinglayer_property::lef58_spacingtable_prl_influence>>, _influences))
+
+BOOST_FUSION_ADAPT_STRUCT(idb::routinglayer_property::lef58_widthtable,
+                          (std::vector<double>, _widths)(std::string, _wrong_direction)(std::string, _orthogonal))

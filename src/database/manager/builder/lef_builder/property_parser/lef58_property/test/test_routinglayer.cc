@@ -16,9 +16,45 @@
 // ***************************************************************************************
 #include <gtest/gtest.h>
 
+#include "../layer_property_parser.h"
 #include "../routinglayer_property_parser.h"
 
 using namespace idb::routinglayer_property;
+
+TEST(LayerPropertyTest, LEF58CommonLayerMetadata) {
+  std::string type;
+  std::string type_str = "TYPE POLYROUTING ;";
+  EXPECT_TRUE(idb::layer_property::parse_lef58_type(type_str.begin(), type_str.end(), type));
+  EXPECT_EQ(type, "POLYROUTING");
+
+  std::string backside = "BACKSIDE ;";
+  EXPECT_TRUE(idb::layer_property::parse_lef58_backside(backside.begin(), backside.end()));
+
+  bool except_non_core_pins = false;
+  std::string rectonly = "RECTONLY EXCEPTNONCOREPINS ;";
+  EXPECT_TRUE(idb::layer_property::parse_lef58_rectonly(rectonly.begin(), rectonly.end(), except_non_core_pins));
+  EXPECT_TRUE(except_non_core_pins);
+  rectonly = "RECTONLY ;";
+  EXPECT_TRUE(idb::layer_property::parse_lef58_rectonly(rectonly.begin(), rectonly.end(), except_non_core_pins));
+  EXPECT_FALSE(except_non_core_pins);
+
+  bool check_mask = false;
+  std::string rightway = "RIGHTWAYONGRIDONLY CHECKMASK ;";
+  EXPECT_TRUE(idb::layer_property::parse_lef58_rightwayongridonly(rightway.begin(), rightway.end(), check_mask));
+  EXPECT_TRUE(check_mask);
+  rightway = "RIGHTWAYONGRIDONLY ;";
+  EXPECT_TRUE(idb::layer_property::parse_lef58_rightwayongridonly(rightway.begin(), rightway.end(), check_mask));
+  EXPECT_FALSE(check_mask);
+}
+
+TEST(LayerPropertyTest, LEF58CommonLayerMetadataRejectsMalformedRules) {
+  bool flag = false;
+  std::string missing_semicolon = "RECTONLY EXCEPTNONCOREPINS";
+  EXPECT_FALSE(idb::layer_property::parse_lef58_rectonly(missing_semicolon.begin(), missing_semicolon.end(), flag));
+
+  std::string extra_token = "BACKSIDE CHECKMASK ;";
+  EXPECT_FALSE(idb::layer_property::parse_lef58_backside(extra_token.begin(), extra_token.end()));
+}
 
 TEST(RoutingLayerTest, LEF58AREAcase1) {
   std::vector<lef58_area> areas;
@@ -136,11 +172,12 @@ TEST(RoutingLayerTest, LEF58MINIMUNCUT) {
     MINIMUMCUT CUTCLASS VSINGLECUT 2 CUTCLASS VDOUBLECUT 1 WIDTH 1.000000 FROMBELOW LENGTH 1.000000 WITHIN 4.001000 ;
     MINIMUMCUT CUTCLASS VSINGLECUT 2 CUTCLASS VDOUBLECUT 1 WIDTH 1.500000 FROMBELOW LENGTH 5.000000 WITHIN 10.001000 ;
     MINIMUMCUT 2 WIDTH 1.800000 FROMABOVE ;
-    MINIMUMCUT 2 WIDTH 3.000000 FROMABOVE LENGTH 10.000000 WITHIN 5.001000 ;)";
+    MINIMUMCUT 2 WIDTH 3.000000 FROMABOVE LENGTH 10.000000 WITHIN 5.001000 ;
+    MINIMUMCUT 2 WIDTH 0.090000 WITHIN 0.050000 FROMABOVE AREA 2.000000 ;)";
 
   bool ok = parse_lef58_minimumcut(str.begin(), str.end(), cuts);
   EXPECT_TRUE(ok);
-  EXPECT_EQ(cuts.size(),7);
+  EXPECT_EQ(cuts.size(),8);
   auto& cut0 = cuts[0];
   EXPECT_EQ(cut0._cuts.size(), 2);
   EXPECT_EQ(cut0._cuts[0]._class_name, "VSINGLECUT");
@@ -169,6 +206,28 @@ TEST(RoutingLayerTest, LEF58MINIMUNCUT) {
   EXPECT_EQ(cut6._direction,"FROMABOVE");
   EXPECT_EQ(cut6._length,10);
   EXPECT_EQ(cut6._length_within,5.001);
+
+  auto& cut7 = cuts[7];
+  EXPECT_EQ(cut7._num_cuts, 2);
+  EXPECT_EQ(cut7._width, 0.09);
+  EXPECT_EQ(cut7._cut_distance, 0.05);
+  EXPECT_EQ(cut7._area, 2.0);
+  EXPECT_FALSE(cut7._area_within);
+}
+
+TEST(RoutingLayerTest, LEF58MINIMUNCUTRejectsMalformedRules) {
+  std::vector<lef58_minimumcut> cuts;
+
+  std::string no_cut_count = "MINIMUMCUT WIDTH 1.000000 ;";
+  EXPECT_FALSE(parse_lef58_minimumcut(no_cut_count.begin(), no_cut_count.end(), cuts));
+
+  cuts.clear();
+  std::string mixed_cut_count = "MINIMUMCUT 2 CUTCLASS VIA_A 1 WIDTH 1.000000 ;";
+  EXPECT_FALSE(parse_lef58_minimumcut(mixed_cut_count.begin(), mixed_cut_count.end(), cuts));
+
+  cuts.clear();
+  std::string missing_length_within = "MINIMUMCUT 2 WIDTH 1.000000 LENGTH 2.000000 ;";
+  EXPECT_FALSE(parse_lef58_minimumcut(missing_length_within.begin(), missing_length_within.end(), cuts));
 }
 
 TEST(RoutingLayerTest, LEF58MINSTEP) {
@@ -316,4 +375,71 @@ TEST(RoutingLayerTest, LEF58SPACINGTABLEJOGTOJOG){
   EXPECT_EQ(spacingtable._width[4]._par_within, 0.5);
   EXPECT_EQ(spacingtable._width[4]._long_jog_spacing, 0.3);
 
+}
+
+TEST(RoutingLayerTest, LEF58SPACINGTABLEPARALLELRUNLENGTH){
+  lef58_spacingtable_prl spacingtable;
+  std::string str = R"(
+       SPACINGTABLE PARALLELRUNLENGTH WRONGDIRECTION SAMEMASK EXCEPTEOL 0.06
+       0.00 0.50
+       WIDTH 0.10 0.11 0.13
+       WIDTH 0.20 EXCEPTWITHIN 0.08 0.16 0.15 0.19
+       SPACINGTABLE INFLUENCE
+       WIDTH 0.30 WITHIN 0.40 SPACING 0.17 ; ;)";
+
+  bool ok = parse_lef58_spacingtable_prl(str.begin(), str.end(), spacingtable);
+
+  EXPECT_TRUE(ok);
+  EXPECT_EQ(spacingtable._wrong_direction, "WRONGDIRECTION");
+  EXPECT_EQ(spacingtable._same_mask, "SAMEMASK");
+  EXPECT_EQ(spacingtable._except_eol_width, 0.06);
+  EXPECT_EQ(spacingtable._parallel_run_lengths.size(), 2);
+  EXPECT_EQ(spacingtable._parallel_run_lengths[1], 0.50);
+  EXPECT_EQ(spacingtable._widths.size(), 2);
+  EXPECT_EQ(spacingtable._widths[1]._width, 0.20);
+  EXPECT_TRUE(spacingtable._widths[1]._except_within);
+  EXPECT_EQ(spacingtable._widths[1]._except_within->first, 0.08);
+  EXPECT_EQ(spacingtable._widths[1]._except_within->second, 0.16);
+  EXPECT_EQ(spacingtable._widths[1]._spacings[1], 0.19);
+  EXPECT_TRUE(spacingtable._influences);
+  EXPECT_EQ(spacingtable._influences->size(), 1);
+  EXPECT_EQ(spacingtable._influences->front()._spacing, 0.17);
+}
+
+TEST(RoutingLayerTest, LEF58SPACINGTABLEPARALLELRUNLENGTHRejectsMalformedRules){
+  lef58_spacingtable_prl spacingtable;
+  std::string ragged_table = R"(
+       SPACINGTABLE PARALLELRUNLENGTH 0.00 0.50
+       WIDTH 0.10 0.11
+       WIDTH 0.20 0.15 0.19 ;)";
+
+  EXPECT_FALSE(parse_lef58_spacingtable_prl(ragged_table.begin(), ragged_table.end(), spacingtable));
+}
+
+TEST(RoutingLayerTest, LEF58WIDTHTABLE){
+  std::vector<lef58_widthtable> widthtables;
+  std::string str = R"(
+       WIDTHTABLE 0.10 0.15 0.20 ORTHOGONAL ;
+       WIDTHTABLE 0.12 0.16 WRONGDIRECTION ;)";
+
+  bool ok = parse_lef58_widthtable(str.begin(), str.end(), widthtables);
+
+  EXPECT_TRUE(ok);
+  EXPECT_EQ(widthtables.size(), 2);
+  EXPECT_EQ(widthtables[0]._widths.size(), 3);
+  EXPECT_DOUBLE_EQ(widthtables[0]._widths[0], 0.10);
+  EXPECT_DOUBLE_EQ(widthtables[0]._widths[2], 0.20);
+  EXPECT_TRUE(widthtables[0]._wrong_direction.empty());
+  EXPECT_EQ(widthtables[0]._orthogonal, "ORTHOGONAL");
+  EXPECT_EQ(widthtables[1]._widths.size(), 2);
+  EXPECT_DOUBLE_EQ(widthtables[1]._widths[0], 0.12);
+  EXPECT_EQ(widthtables[1]._wrong_direction, "WRONGDIRECTION");
+  EXPECT_TRUE(widthtables[1]._orthogonal.empty());
+}
+
+TEST(RoutingLayerTest, LEF58WIDTHTABLERejectsMalformedRules){
+  std::vector<lef58_widthtable> widthtables;
+  std::string missing_width = "WIDTHTABLE ORTHOGONAL ;";
+
+  EXPECT_FALSE(parse_lef58_widthtable(missing_width.begin(), missing_width.end(), widthtables));
 }

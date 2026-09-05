@@ -28,6 +28,9 @@ class CutLayerParser : public PropertyBaseParser<IdbLayerCut>
   bool parse(const std::string& name, const std::string& value, IdbLayerCut* data) override;
 
  private:
+  bool parse_lef58_type(const std::string& value, IdbLayerCut* data);
+  bool parse_lef58_backside(const std::string& value, IdbLayerCut* data);
+  bool parse_lef58_spacingtable_orthogonal(const std::string& value, IdbLayerCut* data);
   bool parse_lef58_cutclass(const std::string& value, IdbLayerCut* data);
   bool parse_lef58_enclosure(const std::string& value, IdbLayerCut* data);
   bool parse_lef58_enclosureedge(const std::string& value, IdbLayerCut* data);

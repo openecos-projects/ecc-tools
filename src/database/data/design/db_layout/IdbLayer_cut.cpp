@@ -30,6 +30,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #include <algorithm>
+#include <cstddef>
 
 #include "IdbLayer.h"
 #include "IdbPropertyCutSpacing.h"
@@ -55,6 +56,10 @@ IdbLayerCutEnclosure::IdbLayerCutEnclosure()
 {
   _overhang_1 = -1;
   _overhang_2 = -1;
+  _min_width = -1;
+  _cut_within = -1;
+  _min_length = -1;
+  _side = Side::kNone;
 }
 
 IdbLayerCutEnclosure::~IdbLayerCutEnclosure()
@@ -65,8 +70,9 @@ IdbLayerCutEnclosure::~IdbLayerCutEnclosure()
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 IdbLayerCutArraySpacing::IdbLayerCutArraySpacing()
 {
-  _cut_spacing = -1;
   _is_long_array = false;
+  _via_width = -1;
+  _cut_spacing = -1;
   _num_array_cut = 0;
 }
 
@@ -78,7 +84,7 @@ IdbLayerCutArraySpacing::~IdbLayerCutArraySpacing()
 
 bool IdbLayerCutArraySpacing::set_array_value(int32_t index, int32_t array_cut, int32_t array_spacing)
 {
-  if ((static_cast<int>(_array_cut_list.size()) > index) && (index >= 0)) {
+  if ((index >= 0) && (static_cast<std::size_t>(index) < _array_cut_list.size())) {
     IdbArrayCut array_cut_new;
     array_cut_new._array_cut = array_cut;
     array_cut_new._array_spacing = array_spacing;
@@ -109,6 +115,7 @@ bool IdbLayerCutArraySpacing::set_array_value(int32_t index, int32_t array_cut, 
 IdbLayerCut::IdbLayerCut()
 {
   _width = -1;
+  _resistance_per_cut = -1;
   // _spacing          = -1;
   _enclosure_below = new IdbLayerCutEnclosure();
   _enclosure_above = new IdbLayerCutEnclosure();

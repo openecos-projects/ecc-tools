@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <cmath>
 #include <sstream>
+#include <utility>
 
 #include "IdbLayer.h"
 #include "IdbLayerShape.h"
@@ -50,6 +51,48 @@ using std::string;
 using std::vector;
 
 namespace idb {
+
+namespace {
+
+IdbRoutingCurrentDensity::Type make_current_density_type(const char* type)
+{
+  if (type == nullptr) {
+    return IdbRoutingCurrentDensity::Type::kUnknown;
+  }
+
+  const std::string type_text(type);
+  if (type_text == "PEAK") {
+    return IdbRoutingCurrentDensity::Type::kPeak;
+  }
+  if (type_text == "AVERAGE") {
+    return IdbRoutingCurrentDensity::Type::kAverage;
+  }
+  if (type_text == "RMS") {
+    return IdbRoutingCurrentDensity::Type::kRms;
+  }
+  return IdbRoutingCurrentDensity::Type::kUnknown;
+}
+
+IdbCutCurrentDensity::Type make_cut_current_density_type(const char* type)
+{
+  if (type == nullptr) {
+    return IdbCutCurrentDensity::Type::kUnknown;
+  }
+
+  const std::string type_text(type);
+  if (type_text == "PEAK") {
+    return IdbCutCurrentDensity::Type::kPeak;
+  }
+  if (type_text == "AVERAGE") {
+    return IdbCutCurrentDensity::Type::kAverage;
+  }
+  if (type_text == "RMS") {
+    return IdbCutCurrentDensity::Type::kRms;
+  }
+  return IdbCutCurrentDensity::Type::kUnknown;
+}
+
+}  // namespace
 
 LefRead::LefRead(IdbLefService* lef_service)
 {
@@ -493,6 +536,38 @@ int LefRead::parse_layer_cut(lefiLayer* lef_layer, IdbLayerCut* layer_cut)
     layer_cut->set_width(transUnitDB(lef_layer->width()));
   }
 
+  if (lef_layer->hasResistancePerCut()) {
+    layer_cut->set_resistance_per_cut(lef_layer->resistancePerCut());
+  }
+
+  auto import_current_density = [this, layer_cut](lefiLayerDensity* source, IdbCutCurrentDensity::Kind kind) {
+    if (source == nullptr) {
+      return;
+    }
+
+    IdbCutCurrentDensity density(kind, make_cut_current_density_type(source->type()));
+    for (int i = 0; i < source->numFrequency(); ++i) {
+      density.add_frequency(source->frequency(i));
+    }
+    for (int i = 0; i < source->numCutareas(); ++i) {
+      density.add_cut_area(transAreaDB(source->cutArea(i)));
+    }
+    for (int i = 0; i < source->numTableEntries(); ++i) {
+      density.add_table_entry(source->tableEntry(i));
+    }
+    if (!density.has_table()) {
+      density.set_scalar(source->oneEntry());
+    }
+
+    layer_cut->add_current_density(std::move(density));
+  };
+  for (int i = 0; i < lef_layer->numAccurrentDensity(); ++i) {
+    import_current_density(lef_layer->accurrent(i), IdbCutCurrentDensity::Kind::kAc);
+  }
+  for (int i = 0; i < lef_layer->numDccurrentDensity(); ++i) {
+    import_current_density(lef_layer->dccurrent(i), IdbCutCurrentDensity::Kind::kDc);
+  }
+
   // spacing
   int num_spacing = lef_layer->numSpacing();
   for (int i = 0; i < num_spacing; ++i) {
@@ -504,23 +579,44 @@ int LefRead::parse_layer_cut(lefiLayer* lef_layer, IdbLayerCut* layer_cut)
       spacing->set_adjacent_cuts(IdbLayerCutSpacing::AdjacentCuts(adj_cuts, transUnitDB(cut_within)));
     }
     spacing->set_has_same_net(lef_layer->hasSpacingSamenet(i));
+    spacing->set_center_to_center(lef_layer->hasSpacingCenterToCenter(i));
+    spacing->set_same_net_pg_only(lef_layer->hasSpacingSamenetPGonly(i));
+    if (lef_layer->hasSpacingName(i)) {
+      spacing->set_second_layer_name(lef_layer->spacingName(i));
+    }
+    spacing->set_stack(lef_layer->hasSpacingLayerStack(i));
+    spacing->set_except_same_pg_net(lef_layer->hasSpacingAdjacentExcept(i));
+    spacing->set_parallel_overlap(lef_layer->hasSpacingParallelOverlap(i));
+    if (lef_layer->hasSpacingArea(i)) {
+      spacing->set_cut_area(transAreaDB(lef_layer->spacingArea(i)));
+    }
     layer_cut->add_spacing(spacing);
   }
 
   for (int i = 0; i < lef_layer->numEnclosure(); i++) {
-    //!<------------tbd-------------------
+    IdbLayerCutEnclosure enclosure;
+    enclosure.set_overhang_1(transUnitDB(lef_layer->enclosureOverhang1(i)));
+    enclosure.set_overhang_2(transUnitDB(lef_layer->enclosureOverhang2(i)));
+    if (lef_layer->hasEnclosureWidth(i)) {
+      enclosure.set_min_width(transUnitDB(lef_layer->enclosureMinWidth(i)));
+    }
+    if (lef_layer->hasEnclosureExceptExtraCut(i)) {
+      enclosure.set_cut_within(transUnitDB(lef_layer->enclosureExceptExtraCut(i)));
+    }
+    if (lef_layer->hasEnclosureMinLength(i)) {
+      enclosure.set_min_length(transUnitDB(lef_layer->enclosureMinLength(i)));
+    }
     if (lef_layer->hasEnclosureRule(i)) {
       string enclosure_name = lef_layer->enclosureRule(i);
       if (enclosure_name.compare("ABOVE") == 0) {
-        IdbLayerCutEnclosure* enclosure = layer_cut->get_enclosure_above();
-        enclosure->set_overhang_1(transUnitDB(lef_layer->enclosureOverhang1(i)));
-        enclosure->set_overhang_2(transUnitDB(lef_layer->enclosureOverhang2(i)));
+        enclosure.set_side(IdbLayerCutEnclosure::Side::kAbove);
+        *layer_cut->get_enclosure_above() = enclosure;
       } else if (enclosure_name.compare("BELOW") == 0) {
-        IdbLayerCutEnclosure* enclosure = layer_cut->get_enclosure_below();
-        enclosure->set_overhang_1(transUnitDB(lef_layer->enclosureOverhang1(i)));
-        enclosure->set_overhang_1(transUnitDB(lef_layer->enclosureOverhang2(i)));
+        enclosure.set_side(IdbLayerCutEnclosure::Side::kBelow);
+        *layer_cut->get_enclosure_below() = enclosure;
       }
     }
+    layer_cut->add_enclosure_rule(std::move(enclosure));
   }
 
   // array spacing
@@ -529,12 +625,28 @@ int LefRead::parse_layer_cut(lefiLayer* lef_layer, IdbLayerCut* layer_cut)
     if (lef_layer->hasLongArray()) {
       array_spacing->set_long_array(true);
     }
+    if (lef_layer->hasViaWidth()) {
+      array_spacing->set_via_width(transUnitDB(lef_layer->viaWidth()));
+    }
 
     array_spacing->set_cut_spacing(transUnitDB(lef_layer->cutSpacing()));
     array_spacing->set_array_cut_num(lef_layer->numArrayCuts());
 
     for (int i = 0; i < lef_layer->numArrayCuts(); ++i) {
       array_spacing->set_array_value(i, lef_layer->arrayCuts(i), transUnitDB(lef_layer->arraySpacing(i)));
+    }
+  }
+
+  if (lef_layer->hasSpacingTableOrtho()) {
+    const auto* source_table = lef_layer->orthogonal();
+    if (source_table != nullptr) {
+      IdbCutOrthogonalSpacingTable table;
+      table.items.reserve(static_cast<std::size_t>(source_table->numOrthogonal()));
+      for (int i = 0; i < source_table->numOrthogonal(); ++i) {
+        table.items.push_back(IdbCutOrthogonalSpacingTableItem{.within = transUnitDB(source_table->cutWithin(i)),
+                                                               .spacing = transUnitDB(source_table->orthoSpacing(i))});
+      }
+      layer_cut->add_orthogonal_spacing_table(std::move(table));
     }
   }
 
@@ -575,6 +687,14 @@ int LefRead::parse_layer_routing(lefiLayer* lef_layer, IdbLayerRouting* layer_ro
   // max width
   if (lef_layer->hasMaxwidth()) {
     layer_routing->set_max_width(transUnitDB(lef_layer->maxwidth()));
+  }
+
+  if (lef_layer->hasDiagWidth()) {
+    layer_routing->set_diag_width(transUnitDB(lef_layer->diagWidth()));
+  }
+
+  if (lef_layer->hasDiagSpacing()) {
+    layer_routing->set_diag_spacing(transUnitDB(lef_layer->diagSpacing()));
   }
 
   // direction
@@ -645,6 +765,21 @@ int LefRead::parse_layer_routing(lefiLayer* lef_layer, IdbLayerRouting* layer_ro
     layer_routing->set_height(transUnitDB(lef_layer->height()));
   }
 
+  // shrinkage
+  if (lef_layer->hasShrinkage()) {
+    layer_routing->set_shrinkage(transUnitDB(lef_layer->shrinkage()));
+  }
+
+  // cap multiplier
+  if (lef_layer->hasCapMultiplier()) {
+    layer_routing->set_cap_multiplier(lef_layer->capMultiplier());
+  }
+
+  // fill active spacing
+  if (lef_layer->hasFillActiveSpacing()) {
+    layer_routing->set_fill_active_spacing(transUnitDB(lef_layer->fillActiveSpacing()));
+  }
+
   // resistance
   if (lef_layer->hasResistance()) {
     layer_routing->set_resistance(lef_layer->resistance());
@@ -658,6 +793,34 @@ int LefRead::parse_layer_routing(lefiLayer* lef_layer, IdbLayerRouting* layer_ro
   // edge capacitance
   if (lef_layer->hasEdgeCap()) {
     layer_routing->set_edge_capacitance(lef_layer->edgeCap());
+  }
+
+  auto import_current_density = [this, layer_routing](lefiLayerDensity* source, IdbRoutingCurrentDensity::Kind kind) {
+    if (source == nullptr) {
+      return;
+    }
+
+    IdbRoutingCurrentDensity density(kind, make_current_density_type(source->type()));
+    for (int i = 0; i < source->numFrequency(); ++i) {
+      density.add_frequency(source->frequency(i));
+    }
+    for (int i = 0; i < source->numWidths(); ++i) {
+      density.add_width(transUnitDB(source->width(i)));
+    }
+    for (int i = 0; i < source->numTableEntries(); ++i) {
+      density.add_table_entry(source->tableEntry(i));
+    }
+    if (!density.has_table()) {
+      density.set_scalar(source->oneEntry());
+    }
+
+    layer_routing->add_current_density(std::move(density));
+  };
+  for (int i = 0; i < lef_layer->numAccurrentDensity(); ++i) {
+    import_current_density(lef_layer->accurrent(i), IdbRoutingCurrentDensity::Kind::kAc);
+  }
+  for (int i = 0; i < lef_layer->numDccurrentDensity(); ++i) {
+    import_current_density(lef_layer->dccurrent(i), IdbRoutingCurrentDensity::Kind::kDc);
   }
 
   // spacing
@@ -717,8 +880,48 @@ int LefRead::parse_layer_routing(lefiLayer* lef_layer, IdbLayerRouting* layer_ro
           }
         }
         layer_routing->set_parallel_spacing_table(parallel);
+      } else if (i_spacingtbl->isInfluence()) {
+        auto* i_influence = i_spacingtbl->influence();
+        if (i_influence == nullptr) {
+          continue;
+        }
+
+        auto influence = std::make_shared<IdbInfluenceSpacingTable>();
+        for (int j = 0; j < i_influence->numInfluenceEntry(); ++j) {
+          influence->add_entry(transUnitDB(i_influence->width(j)),
+                               transUnitDB(i_influence->distance(j)),
+                               transUnitDB(i_influence->spacing(j)));
+        }
+        layer_routing->set_influence_spacing_table(influence);
+      } else {
+        auto* i_two_widths = i_spacingtbl->twoWidths();
+        if (i_two_widths == nullptr) {
+          continue;
+        }
+
+        const int num_width = i_two_widths->numWidth();
+        auto two_widths = std::make_shared<IdbTwoWidthsSpacingTable>(num_width);
+        for (int j = 0; j < num_width; ++j) {
+          two_widths->set_width(j, transUnitDB(i_two_widths->width(j)));
+          if (i_two_widths->hasWidthPRL(j)) {
+            two_widths->set_width_prl(j, transUnitDB(i_two_widths->widthPRL(j)));
+          }
+        }
+        for (int row = 0; row < num_width; ++row) {
+          const int num_spacing = i_two_widths->numWidthSpacing(row);
+          for (int column = 0; column < num_width && column < num_spacing; ++column) {
+            two_widths->set_spacing(row, column, transUnitDB(i_two_widths->widthSpacing(row, column)));
+          }
+        }
+        layer_routing->set_two_widths_spacing_table(two_widths);
       }
     }
+  }
+
+  if (lef_layer->hasProtrusion()) {
+    layer_routing->set_protrusion_width(transUnitDB(lef_layer->protrusionWidth1()),
+                                        transUnitDB(lef_layer->protrusionLength()),
+                                        transUnitDB(lef_layer->protrusionWidth2()));
   }
 
   if (lef_layer->hasArea()) {
@@ -766,17 +969,33 @@ int LefRead::parse_layer_routing(lefiLayer* lef_layer, IdbLayerRouting* layer_ro
 
   // DENSITYCHECKWINDOW
   if (lef_layer->hasDensityCheckWindow()) {
-    layer_routing->set_density_check_length(lef_layer->densityCheckWindowLength());
-    layer_routing->set_density_check_width(lef_layer->densityCheckWindowWidth());
+    layer_routing->set_density_check_length(transUnitDB(lef_layer->densityCheckWindowLength()));
+    layer_routing->set_density_check_width(transUnitDB(lef_layer->densityCheckWindowWidth()));
   }
   // DENSITYCHECKSTEP
   if (lef_layer->hasDensityCheckStep()) {
-    layer_routing->set_density_check_step(lef_layer->densityCheckStep());
+    layer_routing->set_density_check_step(transUnitDB(lef_layer->densityCheckStep()));
   }
 
   // MINIMUMCUT
-  // layer_routing->set_min_cut_num(lef_layer->numMinimumcut() ));
-  // layer_routing->set_min_cut_width(lef_layer->numMinimu)
+  for (int i = 0; i < lef_layer->numMinimumcut(); ++i) {
+    IdbLayerMinimumCut minimum_cut(lef_layer->minimumcut(i), transUnitDB(lef_layer->minimumcutWidth(i)));
+    if (lef_layer->hasMinimumcutWithin(i)) {
+      minimum_cut.set_within_cut_distance(transUnitDB(lef_layer->minimumcutWithin(i)));
+    }
+    if (lef_layer->hasMinimumcutConnection(i)) {
+      std::string connection = lef_layer->minimumcutConnection(i);
+      if (connection == "FROMABOVE") {
+        minimum_cut.set_orient(IdbLayerMinimumCut::Orient::kFromAbove);
+      } else if (connection == "FROMBELOW") {
+        minimum_cut.set_orient(IdbLayerMinimumCut::Orient::kFromBelow);
+      }
+    }
+    if (lef_layer->hasMinimumcutNumCuts(i)) {
+      minimum_cut.set_length(transUnitDB(lef_layer->minimumcutLength(i)), transUnitDB(lef_layer->minimumcutDistance(i)));
+    }
+    layer_routing->add_minimum_cut(std::move(minimum_cut));
+  }
 
   for (int i = 0; i < lef_layer->numProps(); i++) {
     RoutingLayerParser routing_layer_parser(_lef_service);
