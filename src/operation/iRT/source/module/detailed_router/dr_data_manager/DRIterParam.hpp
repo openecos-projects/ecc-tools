@@ -22,9 +22,8 @@ class DRIterParam
 {
  public:
   DRIterParam() = default;
-  DRIterParam(double prefer_wire_unit, double non_prefer_wire_unit, double bend_unit, double via_unit, int32_t size, int32_t offset,
-              int32_t schedule_interval, double fixed_rect_unit, double routed_rect_unit, double violation_unit, int32_t max_routed_times,
-              int32_t max_candidate_patch_num, int32_t refine_net_num)
+  DRIterParam(double prefer_wire_unit, double non_prefer_wire_unit, double bend_unit, double via_unit, int32_t size, int32_t offset, int32_t schedule_interval,
+              double fixed_rect_unit, double routed_rect_unit, double violation_unit, int32_t max_routed_times, int32_t max_candidate_patch_num)
   {
     _prefer_wire_unit = prefer_wire_unit;
     _non_prefer_wire_unit = non_prefer_wire_unit;
@@ -38,7 +37,6 @@ class DRIterParam
     _violation_unit = violation_unit;
     _max_routed_times = max_routed_times;
     _max_candidate_patch_num = max_candidate_patch_num;
-    _refine_net_num = refine_net_num;
   }
   ~DRIterParam() = default;
   // getter
@@ -54,7 +52,6 @@ class DRIterParam
   double get_violation_unit() const { return _violation_unit; }
   int32_t get_max_routed_times() const { return _max_routed_times; }
   int32_t get_max_candidate_patch_num() const { return _max_candidate_patch_num; }
-  int32_t get_refine_net_num() const { return _refine_net_num; }
   // setter
   void set_prefer_wire_unit(const double prefer_wire_unit) { _prefer_wire_unit = prefer_wire_unit; }
   void set_non_prefer_wire_unit(const double non_prefer_wire_unit) { _non_prefer_wire_unit = non_prefer_wire_unit; }
@@ -68,7 +65,6 @@ class DRIterParam
   void set_violation_unit(const double violation_unit) { _violation_unit = violation_unit; }
   void set_max_routed_times(const int32_t max_routed_times) { _max_routed_times = max_routed_times; }
   void set_max_candidate_patch_num(const int32_t max_candidate_patch_num) { _max_candidate_patch_num = max_candidate_patch_num; }
-  void set_refine_net_num(const int32_t refine_net_num) { _refine_net_num = refine_net_num; }
 
  private:
   double _prefer_wire_unit = 0;
@@ -83,7 +79,6 @@ class DRIterParam
   double _violation_unit = 0;
   int32_t _max_routed_times = 0;
   int32_t _max_candidate_patch_num = 0;
-  int32_t _refine_net_num = 0;
 };
 
 }  // namespace irt

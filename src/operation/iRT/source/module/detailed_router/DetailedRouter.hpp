@@ -80,11 +80,9 @@ class DetailedRouter
   void addNetPatchToEnvironment(DRModel& dr_model, GridMap<bool>& active_box_map, GridMap<omp_lock_t>& environment_lock_map, int32_t net_idx,
                                 EXTLayerRect& patch);
   void initDRTaskList(DRModel& dr_model, DRBox& dr_box, const std::set<int32_t>& violation_net_set);
-  void buildRefineTaskList(DRModel& dr_model, DRBox& dr_box);
   void buildNetTaskList(DRModel& dr_model, DRBox& dr_box, int32_t net_idx);
   void buildRouteViolation(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   bool needRouting(DRBox& dr_box);
-  bool needRefine(DRBox& dr_box);
   void buildBoxTrackAxis(DRBox& dr_box);
   void buildLayerNodeMap(DRBox& dr_box);
   void buildLayerShadowMap(DRBox& dr_box);
@@ -98,12 +96,6 @@ class DetailedRouter
                    std::vector<EXTLayerRect>& patch_list);
   std::vector<DRTask*> resetDRNetResult(DRBox& dr_box, int32_t net_idx);
   void routeDRNet(DRBox& dr_box, int32_t net_idx);
-  double getNetResultCost(DRBox& dr_box, int32_t net_idx);
-  bool hasUncoveredBoxAccessPoint(DRBox& dr_box, int32_t net_idx);
-  bool coverBoxAccessPoints(DRBox& dr_box, int32_t net_idx, const std::vector<Segment<LayerCoord>>& old_result_list);
-  void appendRepairedNetsToRefine(DRBox& dr_box);
-  int32_t countNetBoxViolation(DRBox& dr_box, int32_t net_idx);
-  bool refineCleanNets(DRBox& dr_box);
   void routeDRTask(DRBox& dr_box, DRTask* dr_task);
   void initSingleRouteTask(DRBox& dr_box, DRTask* dr_task);
   bool isConnectedAllEnd(DRBox& dr_box);

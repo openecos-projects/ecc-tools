@@ -10,7 +10,6 @@ routeDRModel:迭代DRModel
         buildNetEnvironment:从DRModel和非活动Box的最新value结果构建当前schedule的只读指针环境
         buildAccessPoint:从RTDM借用Box覆盖范围内的AccessPoint指针,不复制或修改候选viaMaster
         initDRTaskList:通过DRConnectivity从Box自有result、patch value构建Box拥有的DRTask
-        buildRefineTaskList:按上一offset边界选择refine候选;必要时复用initDRTaskList的任务构建路径补齐refine-only task
         buildRouteViolation:将DRModel中与任务相关的violation转移到Box
         buildFixedRect:从RTDM借用与Box覆盖的fixed_rect指针
         buildBoxTrackAxis:构建Box内的track_axis
@@ -25,7 +24,6 @@ routeDRModel:迭代DRModel
             updateRouteViolationList:检查并保存Box局部Violation
             updateBestResult:更新最优结果
             updateTaskSchedule:通过Violation得到新的布线调度
-            refineCleanNets:在Box内串行重布干净线网;接受改善结果,否则恢复result、patch、component、计数和Violation快照
         selectBestResult:选择Box的最优结果并保存在Box内
         freeDRBox:释放DRTask并清空借用指针和graph/scratch;保留task result、patch value等待汇总
     updateDRModel:将所有Box拥有的task result、patch value移动回DRModel后清空Box owner map

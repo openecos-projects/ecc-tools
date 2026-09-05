@@ -42,7 +42,6 @@ class DRBox
   DRIterParam* get_dr_iter_param() { return _dr_iter_param; }
   bool get_initial_routing() const { return _initial_routing; }
   bool get_dirty() const { return _dirty; }
-  bool get_refine_routing() const { return _refine_routing; }
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& get_type_layer_net_fixed_rect_map() { return _type_layer_net_fixed_rect_map; }
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& get_net_access_point_map() { return _net_access_point_map; }
   std::map<int32_t, std::vector<Segment<LayerCoord>*>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
@@ -51,7 +50,6 @@ class DRBox
   std::map<int32_t, std::vector<EXTLayerRect>>& get_net_task_detailed_patch_map() { return _net_task_detailed_patch_map; }
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_net_component_result_map() { return _net_component_result_map; }
   std::map<int32_t, int32_t>& get_net_routed_times_map() { return _net_routed_times_map; }
-  std::vector<int32_t>& get_refine_net_list() { return _refine_net_list; }
   std::vector<DRTask*>& get_dr_task_list() { return _dr_task_list; }
   std::vector<Violation>& get_route_violation_list() { return _route_violation_list; }
   ScaleAxis& get_box_track_axis() { return _box_track_axis; }
@@ -68,7 +66,6 @@ class DRBox
   void set_dr_iter_param(DRIterParam* dr_iter_param) { _dr_iter_param = dr_iter_param; }
   void set_initial_routing(const bool initial_routing) { _initial_routing = initial_routing; }
   void set_dirty(const bool dirty) { _dirty = dirty; }
-  void set_refine_routing(const bool refine_routing) { _refine_routing = refine_routing; }
   void set_type_layer_net_fixed_rect_map(const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& type_layer_net_fixed_rect_map)
   {
     _type_layer_net_fixed_rect_map = type_layer_net_fixed_rect_map;
@@ -161,7 +158,6 @@ class DRBox
   DRIterParam* _dr_iter_param = nullptr;
   bool _initial_routing = true;
   bool _dirty = false;
-  bool _refine_routing = false;
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> _type_layer_net_fixed_rect_map;
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> _net_access_point_map;
   std::map<int32_t, std::vector<Segment<LayerCoord>*>> _net_detailed_result_map;
@@ -170,7 +166,6 @@ class DRBox
   std::map<int32_t, std::vector<EXTLayerRect>> _net_task_detailed_patch_map;
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_component_result_map;
   std::map<int32_t, int32_t> _net_routed_times_map;
-  std::vector<int32_t> _refine_net_list;
   std::vector<DRTask*> _dr_task_list;
   std::vector<Violation> _route_violation_list;
   ScaleAxis _box_track_axis;
