@@ -33,6 +33,8 @@ namespace irt {
 
 #define RTPA (irt::PinAccessor::getInst())
 
+class DETask;
+
 struct PALegalShape
 {
   LayerRect shape;
@@ -140,12 +142,14 @@ class PinAccessor
   void patchPATask(PABox& pa_box, PATask* pa_task);
   void initSinglePatchTask(PABox& pa_box, PATask* pa_task);
   std::vector<Violation> getPatchViolationList(PABox& pa_box, const std::set<ViolationType>& check_type_set, const std::vector<LayerRect>& check_region_list);
-  bool searchViolation(PABox& pa_box);
+  DETask buildPatchDETask(PABox& pa_box, const std::set<ViolationType>& check_type_set, const std::vector<LayerRect>& check_region_list);
+  bool searchViolation(PABox& pa_box, GTLPolyInt& patch_poly);
   bool isValidPatchViolation(PABox& pa_box, Violation& violation);
-  std::vector<PlanarRect> getViolationOverlapRect(PABox& pa_box, Violation& violation);
+  GTLPolyInt getViolationOverlapPoly(PABox& pa_box, Violation& violation);
   void addViolationToShadow(PABox& pa_box);
-  void patchSingleViolation(PABox& pa_box);
-  std::vector<PAPatch> getCandidatePatchList(PABox& pa_box);
+  void patchSingleViolation(PABox& pa_box, const GTLPolyInt& patch_poly);
+  std::vector<PAPatch> getCandidatePatchList(PABox& pa_box, const GTLPolyInt& patch_poly);
+  std::vector<PAPatch> selectCandidatePatchList(PABox& pa_box, std::vector<PAPatch>& pa_patch_list);
   bool getSolvedStatus(PABox& pa_box, std::vector<Violation>& origin_patch_violation_list, std::vector<Violation>& curr_patch_violation_list);
   void resetSingleViolation(PABox& pa_box);
   void clearViolationShadow(PABox& pa_box);

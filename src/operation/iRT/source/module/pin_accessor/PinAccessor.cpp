@@ -1214,6 +1214,8 @@ void PinAccessor::routePABoxMap(PAModel& pa_model)
         // debugPlotPABox(pa_box, "before");
         routePABox(pa_box);
         // debugPlotPABox(pa_box, "after");
+      } else {
+        updateBestResult(pa_box);
       }
       selectBestResult(pa_box);
       stage_violation_list_list[i] = std::move(pa_box.get_route_violation_list());
@@ -1763,6 +1765,9 @@ void PinAccessor::exemptPinShape(PAModel& pa_model, PABox& pa_box)
 void PinAccessor::routePABox(PABox& pa_box)
 {
   std::vector<PATask*> routing_task_list = initTaskSchedule(pa_box);
+  if (routing_task_list.empty()) {
+    updateBestResult(pa_box);
+  }
   int32_t routing_rounds = 0;
   while (!routing_task_list.empty()) {
     for (PATask* routing_task : routing_task_list) {
@@ -2561,9 +2566,10 @@ double PinAccessor::getEstimateViaCost(PABox& pa_box, PANode* start_node, PANode
 void PinAccessor::patchPATask(PABox& pa_box, PATask* pa_task)
 {
   initSinglePatchTask(pa_box, pa_task);
-  while (searchViolation(pa_box)) {
+  GTLPolyInt patch_poly;
+  while (searchViolation(pa_box, patch_poly)) {
     addViolationToShadow(pa_box);
-    patchSingleViolation(pa_box);
+    patchSingleViolation(pa_box, patch_poly);
     resetSingleViolation(pa_box);
     clearViolationShadow(pa_box);
   }
@@ -2610,6 +2616,13 @@ bool overlapCheckRegion(int32_t layer_idx, const PlanarRect& real_rect, const st
 
 std::vector<Violation> PinAccessor::getPatchViolationList(PABox& pa_box, const std::set<ViolationType>& check_type_set,
                                                           const std::vector<LayerRect>& check_region_list)
+{
+  DETask de_task = buildPatchDETask(pa_box, check_type_set, check_region_list);
+  return RTDE.getViolationList(de_task);
+}
+
+DETask PinAccessor::buildPatchDETask(PABox& pa_box, const std::set<ViolationType>& check_type_set,
+                                    const std::vector<LayerRect>& check_region_list)
 {
   std::string top_name = RTUTIL.getString("pa_box_", pa_box.get_pa_box_id().get_x(), "_", pa_box.get_pa_box_id().get_y());
   std::vector<std::pair<EXTLayerRect*, bool>> env_shape_list;
@@ -2714,10 +2727,10 @@ std::vector<Violation> PinAccessor::getPatchViolationList(PABox& pa_box, const s
   de_task.set_need_checked_net_set(need_checked_net_set);
   de_task.set_check_type_set(check_type_set);
   de_task.set_check_region_list(check_region_list);
-  return RTDE.getViolationList(de_task);
+  return de_task;
 }
 
-bool PinAccessor::searchViolation(PABox& pa_box)
+bool PinAccessor::searchViolation(PABox& pa_box, GTLPolyInt& patch_poly)
 {
   for (Violation& violation : pa_box.get_patch_violation_list()) {
     if (!isValidPatchViolation(pa_box, violation)) {
@@ -2730,7 +2743,8 @@ bool PinAccessor::searchViolation(PABox& pa_box)
     if (pa_box.get_curr_patch_task()->get_net_idx() != net_idx) {
       continue;
     }
-    if (getViolationOverlapRect(pa_box, violation).empty()) {
+    patch_poly = getViolationOverlapPoly(pa_box, violation);
+    if (patch_poly.size() == 0) {
       continue;
     }
     pa_box.set_curr_patch_violation(violation);
@@ -2753,7 +2767,7 @@ bool PinAccessor::isValidPatchViolation(PABox& pa_box, Violation& violation)
   return is_valid;
 }
 
-std::vector<PlanarRect> PinAccessor::getViolationOverlapRect(PABox& pa_box, Violation& violation)
+GTLPolyInt PinAccessor::getViolationOverlapPoly(PABox& pa_box, Violation& violation)
 {
   int32_t curr_net_idx = pa_box.get_curr_patch_task()->get_net_idx();
   int32_t curr_pin_idx = pa_box.get_curr_patch_task()->get_pa_pin()->get_pin_idx();
@@ -2811,14 +2825,7 @@ std::vector<PlanarRect> PinAccessor::getViolationOverlapRect(PABox& pa_box, Viol
       }
     }
   }
-  std::vector<GTLRectInt> gtl_rect_list;
-  gtl::get_max_rectangles(gtl_rect_list, best_gtl_poly);
-  std::vector<PlanarRect> overlap_rect_list;
-  overlap_rect_list.reserve(gtl_rect_list.size());
-  for (GTLRectInt& gtl_rect : gtl_rect_list) {
-    overlap_rect_list.push_back(RTUTIL.convertToPlanarRect(gtl_rect));
-  }
-  return overlap_rect_list;
+  return best_gtl_poly;
 }
 
 void PinAccessor::addViolationToShadow(PABox& pa_box)
@@ -2831,7 +2838,7 @@ void PinAccessor::addViolationToShadow(PABox& pa_box)
   }
 }
 
-void PinAccessor::patchSingleViolation(PABox& pa_box)
+void PinAccessor::patchSingleViolation(PABox& pa_box, const GTLPolyInt& patch_poly)
 {
   std::vector<EXTLayerRect>& routing_patch_list = pa_box.get_routing_patch_list();
   std::set<Violation, CmpViolation>& tried_fix_violation_set = pa_box.get_tried_fix_violation_set();
@@ -2839,19 +2846,25 @@ void PinAccessor::patchSingleViolation(PABox& pa_box)
   int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
   LayerRect check_region(RTUTIL.getEnlargedRect(violation_rect.get_rect(), detection_distance), violation_rect.get_layer_idx());
 
-  std::vector<PAPatch> pa_patch_list = getCandidatePatchList(pa_box);
+  std::vector<PAPatch> pa_patch_list = getCandidatePatchList(pa_box, patch_poly);
   if (pa_patch_list.size() == 1) {
     routing_patch_list.push_back(pa_patch_list.front().get_patch());
   } else if (pa_patch_list.size() >= 2) {
-    std::vector<Violation> origin_patch_violation_list = getPatchViolationList(pa_box, {}, {check_region});
+    DETask de_task = buildPatchDETask(pa_box, {}, {check_region});
+    std::vector<Violation> origin_patch_violation_list = RTDE.getViolationList(de_task);
+    std::vector<EXTLayerRect*>& check_patch_list = de_task.get_net_patch_map()[pa_box.get_curr_patch_task()->get_net_idx()];
 
     bool curr_is_solved = false;
     for (PAPatch& pa_patch : pa_patch_list) {
-      std::vector<Violation> curr_patch_violation_list;
-      {
-        routing_patch_list.push_back(pa_patch.get_patch());
-        curr_patch_violation_list = getPatchViolationList(pa_box, {}, {check_region});
-        routing_patch_list.pop_back();
+      // Keep accepted-patch storage stable while the reusable DRC input refers to it.
+      EXTLayerRect& patch = pa_patch.get_patch();
+      bool check_patch = overlapCheckRegion(patch.get_layer_idx(), patch.get_real_rect(), de_task.get_check_region_list());
+      if (check_patch) {
+        check_patch_list.push_back(&patch);
+      }
+      std::vector<Violation> curr_patch_violation_list = RTDE.getViolationList(de_task);
+      if (check_patch) {
+        check_patch_list.pop_back();
       }
       curr_is_solved = getSolvedStatus(pa_box, origin_patch_violation_list, curr_patch_violation_list);
       if (curr_is_solved) {
@@ -2866,13 +2879,16 @@ void PinAccessor::patchSingleViolation(PABox& pa_box)
   tried_fix_violation_set.insert(pa_box.get_curr_patch_violation());
 }
 
-std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box)
+std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box, const GTLPolyInt& patch_poly)
 {
   int32_t manufacture_grid = RTDM.getDatabase().get_manufacture_grid();
   Die& die = RTDM.getDatabase().get_die();
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   int32_t max_candidate_patch_num = pa_box.get_pa_iter_param()->get_max_candidate_patch_num();
+  if (max_candidate_patch_num <= 0) {
+    RTLOG.error(Loc::current(), "The max_candidate_patch_num must be positive!");
+  }
 
   int32_t curr_net_idx = pa_box.get_curr_patch_task()->get_net_idx();
   Violation& curr_patch_violation = pa_box.get_curr_patch_violation();
@@ -2883,23 +2899,13 @@ std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box)
   int32_t min_area = routing_layer.get_min_area();
   int32_t wire_width = routing_layer.get_min_width();
 
-  GTLPolyInt gtl_poly;
-  {
-    GTLPolySetInt gtl_poly_set;
-    for (PlanarRect& overlap_rect : getViolationOverlapRect(pa_box, curr_patch_violation)) {
-      gtl_poly_set += RTUTIL.convertToGTLRectInt(overlap_rect);
-    }
-    std::vector<GTLPolyInt> gtl_poly_list;
-    gtl_poly_set.get_polygons(gtl_poly_list);
-    gtl_poly = gtl_poly_list.front();
-    if (min_area <= static_cast<int32_t>(gtl::area(gtl_poly))) {
-      return {};
-    }
+  if (min_area <= static_cast<int32_t>(gtl::area(patch_poly))) {
+    return {};
   }
   std::vector<GTLRectInt> h_gtl_rect_list;
   PlanarRect h_cutting_rect;
   {
-    gtl::get_rectangles(h_gtl_rect_list, gtl_poly, gtl::HORIZONTAL);
+    gtl::get_rectangles(h_gtl_rect_list, patch_poly, gtl::HORIZONTAL);
     GTLRectInt best_gtl_rect;
     int32_t max_x_span = 0;
     for (GTLRectInt& gtl_rect : h_gtl_rect_list) {
@@ -2914,7 +2920,7 @@ std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box)
   PlanarRect v_cutting_rect;
   {
     std::vector<GTLRectInt> gtl_rect_list;
-    gtl::get_rectangles(gtl_rect_list, gtl_poly, gtl::VERTICAL);
+    gtl::get_rectangles(gtl_rect_list, patch_poly, gtl::VERTICAL);
     GTLRectInt best_gtl_rect;
     int32_t max_y_span = 0;
     for (GTLRectInt& gtl_rect : gtl_rect_list) {
@@ -2927,6 +2933,7 @@ std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box)
     v_cutting_rect = RTUTIL.convertToPlanarRect(best_gtl_rect);
   }
   std::vector<PAPatch> pa_patch_list;
+  std::set<PlanarRect, CmpPlanarRectByXASC> patch_rect_set;
   {
     auto h_wire_length = static_cast<int32_t>(std::ceil((min_area - v_cutting_rect.getArea()) / wire_width) + v_cutting_rect.getXSpan());
     while (h_wire_length % manufacture_grid != 0) {
@@ -2963,13 +2970,13 @@ std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box)
             continue;
           }
           PlanarRect h_real_rect = RTUTIL.getEnlargedRect(PlanarCoord(h_start_x + (i * manufacture_grid), y), 0, 0, h_wire_length, wire_width);
-          if (RTUTIL.isInside(die.get_real_rect(), h_real_rect)) {
+          if (RTUTIL.isInside(die.get_real_rect(), h_real_rect) && patch_rect_set.insert(h_real_rect).second) {
             pa_patch_list.emplace_back(h_real_rect, violation_layer_idx);
           }
         }
         if (is_initial_sample && (h_position_num - 1) % sample_step != 0) {
           PlanarRect h_real_rect = RTUTIL.getEnlargedRect(PlanarCoord(v_cutting_rect.get_ll_x(), y), 0, 0, h_wire_length, wire_width);
-          if (RTUTIL.isInside(die.get_real_rect(), h_real_rect)) {
+          if (RTUTIL.isInside(die.get_real_rect(), h_real_rect) && patch_rect_set.insert(h_real_rect).second) {
             pa_patch_list.emplace_back(h_real_rect, violation_layer_idx);
           }
         }
@@ -2980,13 +2987,13 @@ std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box)
             continue;
           }
           PlanarRect v_real_rect = RTUTIL.getEnlargedRect(PlanarCoord(x, v_start_y + (i * manufacture_grid)), 0, 0, wire_width, v_wire_length);
-          if (RTUTIL.isInside(die.get_real_rect(), v_real_rect)) {
+          if (RTUTIL.isInside(die.get_real_rect(), v_real_rect) && patch_rect_set.insert(v_real_rect).second) {
             pa_patch_list.emplace_back(v_real_rect, violation_layer_idx);
           }
         }
         if (is_initial_sample && (v_position_num - 1) % sample_step != 0) {
           PlanarRect v_real_rect = RTUTIL.getEnlargedRect(PlanarCoord(x, h_cutting_rect.get_ll_y()), 0, 0, wire_width, v_wire_length);
-          if (RTUTIL.isInside(die.get_real_rect(), v_real_rect)) {
+          if (RTUTIL.isInside(die.get_real_rect(), v_real_rect) && patch_rect_set.insert(v_real_rect).second) {
             pa_patch_list.emplace_back(v_real_rect, violation_layer_idx);
           }
         }
@@ -3021,32 +3028,39 @@ std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box)
       RTLOG.error(Loc::current(), "The pa_patch_list is empty!");
     }
   }
+  return selectCandidatePatchList(pa_box, pa_patch_list);
+}
+
+std::vector<PAPatch> PinAccessor::selectCandidatePatchList(PABox& pa_box, std::vector<PAPatch>& pa_patch_list)
+{
+  int32_t layer_idx = pa_box.get_curr_patch_violation().get_violation_shape().get_layer_idx();
+  Direction layer_direction = RTDM.getDatabase().get_routing_layer_list()[layer_idx].get_prefer_direction();
+  int32_t max_candidate_patch_num = pa_box.get_pa_iter_param()->get_max_candidate_patch_num();
+  std::vector<PAPatch> zero_cost_patch_list;
+  zero_cost_patch_list.reserve(pa_patch_list.size());
+  for (PAPatch& pa_patch : pa_patch_list) {
+    if (pa_patch.getTotalCost() == 0) {
+      zero_cost_patch_list.push_back(pa_patch);
+    }
+  }
+  auto cmp_pa_patch = [&layer_direction](const PAPatch& a, const PAPatch& b) { return CmpPAPatch()(a, b, layer_direction); };
+  if (zero_cost_patch_list.empty()) {
+    return {*std::ranges::min_element(pa_patch_list, cmp_pa_patch)};
+  }
+  std::ranges::sort(zero_cost_patch_list, cmp_pa_patch);
+  int32_t patch_size = static_cast<int32_t>(zero_cost_patch_list.size());
+  if (patch_size <= max_candidate_patch_num) {
+    return zero_cost_patch_list;
+  }
+  if (max_candidate_patch_num == 1) {
+    return {zero_cost_patch_list.front()};
+  }
+  // Keep both ends and exactly the requested number of distinct, evenly spaced ranks.
   std::vector<PAPatch> candidate_patch_list;
-  {
-    std::vector<PAPatch> pa_patch_list_temp;
-    for (PAPatch& pa_patch : pa_patch_list) {
-      if (pa_patch.getTotalCost() > 0) {
-        continue;
-      }
-      pa_patch_list_temp.push_back(pa_patch);
-    }
-    auto cmp_pa_patch = [&layer_direction](PAPatch& a, PAPatch& b) { return CmpPAPatch()(a, b, layer_direction); };
-    if (pa_patch_list_temp.empty()) {
-      pa_patch_list_temp.push_back(*std::ranges::min_element(pa_patch_list, cmp_pa_patch));
-    } else {
-      std::ranges::sort(pa_patch_list_temp, cmp_pa_patch);
-    }
-    auto patch_size = static_cast<int32_t>(pa_patch_list_temp.size());
-    if (patch_size <= max_candidate_patch_num) {
-      candidate_patch_list = pa_patch_list_temp;
-    } else {
-      int32_t candidate_step = (patch_size - 2) / (max_candidate_patch_num - 2);
-      candidate_patch_list.push_back(pa_patch_list_temp.front());
-      for (int32_t i = candidate_step; i < (patch_size - candidate_step); i += candidate_step) {
-        candidate_patch_list.push_back(pa_patch_list_temp[i]);
-      }
-      candidate_patch_list.push_back(pa_patch_list_temp.back());
-    }
+  candidate_patch_list.reserve(max_candidate_patch_num);
+  for (int32_t i = 0; i < max_candidate_patch_num; i++) {
+    int32_t candidate_idx = static_cast<int32_t>(static_cast<int64_t>(i) * (patch_size - 1) / (max_candidate_patch_num - 1));
+    candidate_patch_list.push_back(zero_cost_patch_list[candidate_idx]);
   }
   return candidate_patch_list;
 }
@@ -3406,7 +3420,6 @@ void PinAccessor::updateTaskSchedule(PABox& pa_box, std::vector<PATask*>& routin
 
 void PinAccessor::selectBestResult(PABox& pa_box)
 {
-  updateBestResult(pa_box);
   pa_box.get_net_task_tmp_result_map() = std::move(pa_box.get_best_net_task_tmp_result_map());
   pa_box.get_net_task_tmp_patch_map() = std::move(pa_box.get_best_net_task_tmp_patch_map());
   pa_box.get_route_violation_list() = std::move(pa_box.get_best_route_violation_list());
