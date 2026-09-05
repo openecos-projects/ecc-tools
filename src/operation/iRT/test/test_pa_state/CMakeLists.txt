@@ -8,3 +8,7 @@ target_link_libraries(test_pa_drc PRIVATE irt_pin_accessor)
 # Test private input builders without changing the production interface or running the DRC engine.
 target_compile_options(test_pa_drc PRIVATE -fno-access-control)
 target_link_options(test_pa_drc PRIVATE -Wl,--wrap=_ZN3irt9DRCEngine16getViolationListERNS_6DETaskE)
+
+add_executable(test_pa_candidates EXCLUDE_FROM_ALL test_pa_candidates.cpp)
+target_link_libraries(test_pa_candidates PRIVATE irt_pin_accessor)
+target_compile_options(test_pa_candidates PRIVATE -fno-access-control)

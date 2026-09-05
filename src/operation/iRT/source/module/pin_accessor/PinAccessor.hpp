@@ -42,6 +42,20 @@ struct PALegalShape
   ViaMasterIdx via_master_idx;
 };
 
+struct PACandidateAccessPoint
+{
+  LayerCoord coord;
+  int32_t track_num = 0;
+};
+
+struct CmpPACandidateAccessPoint
+{
+  bool operator()(const PACandidateAccessPoint& a, const PACandidateAccessPoint& b) const
+  {
+    return a.track_num != b.track_num ? a.track_num > b.track_num : CmpLayerCoordByXASC()(a.coord, b.coord);
+  }
+};
+
 class PinAccessor
 {
  public:
@@ -72,6 +86,16 @@ class PinAccessor
   std::vector<PALegalShape> getPlanarLegalShapeList(PAModel& pa_model, int32_t curr_net_idx, PAPin* pa_pin, std::vector<EXTLayerRect>& pin_shape_list,
                                                     ViaMaster* via_master);
   std::vector<AccessPoint> getAccessPointList(PAModel& pa_model, int32_t pin_idx, std::vector<PALegalShape>& legal_shape_list);
+  std::vector<int32_t> getCandidateAxisCoordList(int32_t ll, int32_t ur, int32_t manufacture_grid, const std::vector<int32_t>& track_list);
+  std::vector<PACandidateAccessPoint> getRankedAccessPointList(const std::map<LayerCoord, int32_t, CmpLayerCoordByXASC>& coord_track_num_map);
+  std::vector<AccessPoint> selectViaAccessPointList(
+      int32_t pin_idx, int32_t ap_per_via_master, double violation_unit,
+      const std::map<std::pair<int32_t, int32_t>, std::map<LayerCoord, int32_t, CmpLayerCoordByXASC>>& via_coord_track_num_map);
+  std::vector<AccessPoint> selectPlanarAccessPointList(int32_t pin_idx, int32_t max_candidate_point_num, double violation_unit,
+                                                       const std::map<LayerCoord, int32_t, CmpLayerCoordByXASC>& coord_track_num_map);
+  double getAccessPointInitCost(int32_t track_num, double violation_unit);
+  int32_t getTargetLayerIdx(bool is_core, int32_t curr_layer_idx);
+  void buildPinTargetCoordList(PAPin& pa_pin);
   std::vector<ViaMaster*> getSelectedViaMasterList(PAModel& pa_model, int32_t routing_layer_idx);
   PlanarRect getViaEnclosure(ViaMaster& via_master, int32_t routing_layer_idx);
   void uniformSampleCoordList(std::vector<LayerCoord>& layer_coord_list, int32_t max_candidate_point_num);
