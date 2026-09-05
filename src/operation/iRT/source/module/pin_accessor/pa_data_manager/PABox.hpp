@@ -32,6 +32,39 @@
 
 namespace irt {
 
+struct PAFixedShape
+{
+  int32_t net_idx = -1;
+  EXTLayerRect* rect = nullptr;
+  bool is_routing = false;
+};
+
+class PAFixedGeometry
+{
+ public:
+  using RectRTree = bgi::rtree<std::pair<BGRectInt, size_t>, bgi::quadratic<16>>;
+  // getter
+  bool get_built() const { return _built; }
+  const std::vector<PAFixedShape>& get_shape_list() const
+  {
+    if (!_built) {
+      RTLOG.error(Loc::current(), "The fixed PA geometry has not been built!");
+    }
+    return _shape_list;
+  }
+  const std::vector<int32_t>& get_net_idx_list() const { return _net_idx_list; }
+  // function
+  void build(const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& fixed_rect_map);
+  std::vector<size_t> query(const std::vector<LayerRect>& region_list) const;
+
+ private:
+  bool _built = false;
+  // Original, unexpanded geometry in source order. Rectangles remain owned by DataManager.
+  std::vector<PAFixedShape> _shape_list;
+  std::vector<int32_t> _net_idx_list;
+  std::map<int32_t, RectRTree> _layer_rect_rtree_map;
+};
+
 class PABox
 {
  public:
@@ -43,7 +76,7 @@ class PABox
   PAIterParam* get_pa_iter_param() { return _pa_iter_param; }
   bool get_initial_routing() const { return _initial_routing; }
   bool get_dirty() const { return _dirty; }
-  std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& get_type_layer_net_fixed_rect_map() { return _type_layer_net_fixed_rect_map; }
+  PAFixedGeometry& get_fixed_geometry() { return _fixed_geometry; }
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& get_net_access_point_map() { return _net_access_point_map; }
   std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>>& get_net_pin_env_result_map() { return _net_pin_env_result_map; }
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_net_pin_own_result_map() { return _net_pin_own_result_map; }
@@ -65,10 +98,6 @@ class PABox
   void set_pa_iter_param(PAIterParam* pa_iter_param) { _pa_iter_param = pa_iter_param; }
   void set_initial_routing(const bool initial_routing) { _initial_routing = initial_routing; }
   void set_dirty(const bool dirty) { _dirty = dirty; }
-  void set_type_layer_net_fixed_rect_map(const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& type_layer_net_fixed_rect_map)
-  {
-    _type_layer_net_fixed_rect_map = type_layer_net_fixed_rect_map;
-  }
   void set_net_access_point_map(const std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& net_access_point_map)
   {
     _net_access_point_map = net_access_point_map;
@@ -92,7 +121,7 @@ class PABox
   PAIterParam* _pa_iter_param = nullptr;
   bool _initial_routing = true;
   bool _dirty = false;
-  std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> _type_layer_net_fixed_rect_map;
+  PAFixedGeometry _fixed_geometry;
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> _net_access_point_map;
   std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>> _net_pin_env_result_map;
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_pin_own_result_map;

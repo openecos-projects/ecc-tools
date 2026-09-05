@@ -145,6 +145,7 @@ class PinAccessor
   bool overlapCheckRegion(int32_t layer_idx, const PlanarRect& real_rect, const std::vector<LayerRect>& check_region_list);
   void addFixedRectToDETask(DETask& de_task, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
   void buildFixedDETask(DETask& de_task, const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& fixed_rect_map);
+  void buildFixedDETask(DETask& de_task, const PAFixedGeometry& fixed_geometry);
   void addResultToDETask(DETask& de_task, int32_t net_idx, Segment<LayerCoord>* segment);
   void addPatchToDETask(DETask& de_task, int32_t net_idx, EXTLayerRect* patch);
   void buildCheckedNetSet(DETask& de_task);

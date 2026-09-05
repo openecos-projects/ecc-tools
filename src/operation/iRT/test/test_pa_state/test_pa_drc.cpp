@@ -1,5 +1,6 @@
 #include <array>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 
 #include "DRCEngine.hpp"
@@ -25,6 +26,116 @@ irt::EXTLayerRect makeRect(int32_t x)
   return rect;
 }
 
+using FixedRectMap = std::map<bool, std::map<int32_t, std::map<int32_t, std::set<irt::EXTLayerRect*>>>>;
+
+void checkFixedInput(irt::PinAccessor& accessor, const FixedRectMap& rect_map, const irt::PAFixedGeometry& geometry,
+                     const std::vector<irt::LayerRect>& region_list)
+{
+  irt::DETask scanned;
+  irt::DETask indexed;
+  scanned.set_check_region_list(region_list);
+  indexed.set_check_region_list(region_list);
+  accessor.buildFixedDETask(scanned, rect_map);
+  accessor.buildFixedDETask(indexed, geometry);
+  require(indexed.get_env_shape_list() == scanned.get_env_shape_list(), "Indexed fixed obstacles differ from the ordered scan");
+  require(indexed.get_net_pin_shape_map() == scanned.get_net_pin_shape_map(), "Indexed fixed pin shapes differ from the ordered scan");
+  accessor.buildCheckedNetSet(scanned);
+  accessor.buildCheckedNetSet(indexed);
+  require(indexed.get_need_checked_net_set() == scanned.get_need_checked_net_set(), "Fixed geometry lost an empty checked net");
+}
+
+void testFixedGeometry(irt::PinAccessor& accessor)
+{
+  irt::PABox box;
+  irt::PAFixedGeometry& geometry = box.get_fixed_geometry();
+  FixedRectMap rect_map;
+  std::mt19937 random(37);
+  std::vector<irt::EXTLayerRect> rect_list(768);
+  for (size_t i = 0; i < rect_list.size(); i++) {
+    auto& rect = rect_list[i];
+    int32_t x = static_cast<int32_t>(random() % 500) - 250;
+    int32_t y = static_cast<int32_t>(random() % 500) - 250;
+    rect.set_real_rect(irt::PlanarRect(x, y, x + static_cast<int32_t>(random() % 30), y + static_cast<int32_t>(random() % 30)));
+    rect.set_layer_idx(i % 3);
+    rect_map[i % 2 == 0][rect.get_layer_idx()][static_cast<int32_t>(i % 11) - 1].insert(&rect);
+  }
+  rect_list[0].set_real_rect(irt::PlanarRect(0, 0, 10, 10));
+  rect_map[false][0][-1].insert(&rect_list[0]);
+  rect_map[true][0][20].insert(&rect_list[0]);
+  rect_map[true][0][30];
+  rect_map[false][7][31];
+  geometry.build(rect_map);
+  require(geometry.get_built(), "Fixed geometry did not publish its built state");
+  require(geometry.get_shape_list().size() == rect_list.size() + 2, "Fixed geometry merged distinct source entries");
+  require(geometry.query({}).size() == geometry.get_shape_list().size(), "An unrestricted query omitted fixed geometry");
+  checkFixedInput(accessor, rect_map, geometry, {});
+  checkFixedInput(accessor, rect_map, geometry, {irt::LayerRect(10, 10, 10, 10, 0)});
+  checkFixedInput(accessor, rect_map, geometry, {irt::LayerRect(10, 0, 11, 10, 0), irt::LayerRect(0, 0, 10, 10, 0)});
+  checkFixedInput(accessor, rect_map, geometry, {irt::LayerRect(-1000, -1000, 1000, 1000, 9)});
+  for (int32_t i = 0; i < 4000; i++) {
+    std::vector<irt::LayerRect> region_list;
+    for (int32_t j = 0; j <= i % 3; j++) {
+      int32_t x = static_cast<int32_t>(random() % 600) - 300;
+      int32_t y = static_cast<int32_t>(random() % 600) - 300;
+      region_list.emplace_back(x, y, x + static_cast<int32_t>(random() % 80), y + static_cast<int32_t>(random() % 80), random() % 5);
+    }
+    if (i % 2 == 0) {
+      region_list.push_back(region_list.front());
+    }
+    checkFixedInput(accessor, rect_map, geometry, region_list);
+  }
+  irt::PAFixedGeometry copied = geometry;
+  checkFixedInput(accessor, rect_map, copied, {irt::LayerRect(0, 0, 10, 10, 0)});
+  accessor.freePABox(box);
+  require(!geometry.get_built(), "Freeing the box retained its geometry view");
+  geometry.build({});
+  checkFixedInput(accessor, {}, geometry, {});
+  require(geometry.query({irt::LayerRect(0, 0, 10, 10, 0)}).empty(), "Rebuilding an empty box retained old geometry");
+}
+
+void testFixedGeometryErrors()
+{
+  bool had_throw_policy = std::getenv("ECC_LOGGER_THROW_ON_ERROR") != nullptr;
+  if (!had_throw_policy) {
+    require(setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1) == 0, "Cannot enable logger exceptions for rejection tests");
+  }
+  const std::array<const char*, 5> expected_messages = {"has not been built", "has already been built", "Invalid fixed PA geometry on layer",
+                                                        "Invalid fixed PA geometry on layer", "Invalid fixed PA geometry query region"};
+  for (size_t test_idx = 0; test_idx < expected_messages.size(); test_idx++) {
+    irt::PAFixedGeometry geometry;
+    auto rect = makeRect(0);
+    bool rejected = false;
+    try {
+      switch (test_idx) {
+        case 0:
+          geometry.query({});
+          break;
+        case 1:
+          geometry.build({});
+          geometry.build({});
+          break;
+        case 2:
+          geometry.build({{true, {{1, {{-1, {&rect}}}}}}});
+          break;
+        case 3:
+          rect.set_real_rect(irt::PlanarRect(10, 0, 0, 10));
+          geometry.build({{true, {{0, {{-1, {&rect}}}}}}});
+          break;
+        case 4:
+          geometry.build({});
+          geometry.query({irt::LayerRect(10, 0, 0, 10, 0)});
+          break;
+      }
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find(expected_messages[test_idx]) != std::string::npos;
+    }
+    require(rejected, "Invalid fixed geometry state was not rejected with the expected error");
+  }
+  if (!had_throw_policy) {
+    require(unsetenv("ECC_LOGGER_THROW_ON_ERROR") == 0, "Cannot restore logger error policy");
+  }
+}
+
 void checkSharedEnvironment()
 {
   require(checked_task_list.size() == 2, "Both route views must be checked");
@@ -47,8 +158,7 @@ void testBoxViews(irt::PinAccessor& accessor)
   irt::EXTLayerRect obstacle = makeRect(0);
   irt::EXTLayerRect pin_shape = makeRect(20);
   irt::EXTLayerRect env_patch = makeRect(40);
-  box.get_type_layer_net_fixed_rect_map()[true][0][-1].insert(&obstacle);
-  box.get_type_layer_net_fixed_rect_map()[true][0][2].insert(&pin_shape);
+  box.get_fixed_geometry().build({{true, {{0, {{-1, {&obstacle}}, {2, {&pin_shape}}}}}}});
   irt::Segment<irt::LayerCoord> env_segment(irt::LayerCoord(30, 0, 0), irt::LayerCoord(30, 0, 1));
   box.get_net_pin_env_result_map()[1][0].insert(&env_segment);
   box.get_net_pin_env_patch_map()[3][0].insert(&env_patch);
@@ -158,8 +268,7 @@ void testPatchInput(irt::PinAccessor& accessor)
   irt::EXTLayerRect obstacle = makeRect(0);
   irt::EXTLayerRect pin_shape = makeRect(40);
   irt::EXTLayerRect env_patch = makeRect(40);
-  box.get_type_layer_net_fixed_rect_map()[true][0][-1].insert(&obstacle);
-  box.get_type_layer_net_fixed_rect_map()[true][0][2].insert(&pin_shape);
+  box.get_fixed_geometry().build({{true, {{0, {{-1, {&obstacle}}, {2, {&pin_shape}}}}}}});
   box.get_net_pin_env_patch_map()[3][0].insert(&env_patch);
   box.get_curr_result().get_task_result_list()[0].get_patch_list().push_back(makeRect(40));
   box.get_curr_result().get_task_result_list()[1].get_patch_list().push_back(makeRect(0));
@@ -174,6 +283,38 @@ void testPatchInput(irt::PinAccessor& accessor)
           "Patch check did not replace the current task's old patches");
   require(de_task.get_need_checked_net_set() == std::set<int32_t>({0, 2, 3}), "Patch checked-net set changed");
   require(de_task.get_check_type_set() == std::set<irt::ViolationType>({irt::ViolationType::kMinimumArea}), "Patch rule selection changed");
+  box.get_patch_state().get_routing_patch_list()[0] = makeRect(40);
+  box.get_curr_result().get_task_result_list()[1].get_patch_list()[0] = makeRect(40);
+  de_task = accessor.buildPatchDETask(box, {irt::ViolationType::kMinimumArea}, {irt::LayerRect(-5, -5, 15, 15, 0)});
+  require(de_task.get_net_patch_map().at(0).empty(), "The immutable fixed view cached a mutable task patch");
+}
+
+void testFixedOverlapPoly(irt::PinAccessor& accessor)
+{
+  irt::PABox box;
+  irt::PAPin pin;
+  pin.set_pin_idx(0);
+  box.get_pa_task_list().resize(1);
+  irt::PATask& task = box.get_pa_task_list()[0];
+  task.set_net_idx(7);
+  task.set_task_idx(0);
+  task.set_pa_pin(&pin);
+  box.get_curr_result().get_task_result_list().resize(1);
+  box.get_patch_state().set_curr_patch_task(&task);
+  auto pin_rect = makeRect(0);
+  auto other_net_rect = makeRect(5);
+  auto cut_rect = makeRect(7);
+  auto other_layer_rect = makeRect(9);
+  other_layer_rect.set_layer_idx(1);
+  box.get_fixed_geometry().build(
+      {{false, {{0, {{7, {&cut_rect}}}}}}, {true, {{0, {{7, {&pin_rect}}, {8, {&other_net_rect}}}}, {1, {{7, {&other_layer_rect}}}}}}});
+  irt::Violation violation;
+  violation.set_violation_shape(makeRect(5));
+  auto poly = accessor.getViolationOverlapPoly(box, violation);
+  require(gtl::area(poly) == 100, "Overlap polygon included a different net, layer, or cut shape");
+  violation.set_violation_shape(makeRect(11));
+  poly = accessor.getViolationOverlapPoly(box, violation);
+  require(gtl::area(poly) == 0, "Raw fixed geometry was expanded like a cost shadow");
 }
 
 void testEnvironmentUpdates(irt::PinAccessor& accessor)
@@ -210,7 +351,7 @@ void testEnvironmentUpdates(irt::PinAccessor& accessor)
   box.set_pa_iter_param(&param);
   irt::EXTLayerRect fixed_rect = makeRect(40);
   fixed_rect.set_layer_idx(1);
-  box.get_type_layer_net_fixed_rect_map()[true][1][-1].insert(&fixed_rect);
+  box.get_fixed_geometry().build({{true, {{1, {{-1, {&fixed_rect}}}}}}});
   accessor.buildBoxEnvironment(box);
   irt::EXTLayerRect fixed_query = makeRect(40);
   require(accessor.getFixedRectCost(box, 8, fixed_query) == 0, "Fixed shadow lookup crossed routing layers");
@@ -440,9 +581,12 @@ int main()
   irt::DRCEngine::initInst();
   try {
     irt::PinAccessor accessor;
+    testFixedGeometry(accessor);
+    testFixedGeometryErrors();
     testBoxViews(accessor);
     testModelViews(accessor);
     testPatchInput(accessor);
+    testFixedOverlapPoly(accessor);
     testEnvironmentUpdates(accessor);
     testPathOutcome(accessor);
     testTaskIdentity(accessor);

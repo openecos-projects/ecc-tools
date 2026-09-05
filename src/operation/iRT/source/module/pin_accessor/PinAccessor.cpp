@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #include "PinAccessor.hpp"
 
+#include <numeric>
+
 #include "DRCEngine.hpp"
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
@@ -1237,7 +1239,77 @@ void PinAccessor::freePABoxMap(PAModel& pa_model)
 
 void PinAccessor::buildFixedRect(PABox& pa_box)
 {
-  pa_box.set_type_layer_net_fixed_rect_map(RTDM.getTypeLayerNetFixedRectMap(pa_box.get_box_rect()));
+  pa_box.get_fixed_geometry().build(RTDM.getTypeLayerNetFixedRectMap(pa_box.get_box_rect()));
+}
+
+void PAFixedGeometry::build(const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& fixed_rect_map)
+{
+  if (_built) {
+    RTLOG.error(Loc::current(), "The fixed PA geometry has already been built!");
+  }
+  size_t shape_num = 0;
+  for (const auto& [is_routing, layer_net_rect_map] : fixed_rect_map) {
+    for (const auto& [layer_idx, net_rect_map] : layer_net_rect_map) {
+      for (const auto& [net_idx, rect_set] : net_rect_map) {
+        shape_num += rect_set.size();
+        if (net_idx != -1) {
+          _net_idx_list.push_back(net_idx);
+        }
+      }
+    }
+  }
+  std::ranges::sort(_net_idx_list);
+  _net_idx_list.erase(std::unique(_net_idx_list.begin(), _net_idx_list.end()), _net_idx_list.end());
+  _shape_list.reserve(shape_num);
+  std::map<int32_t, std::vector<RectRTree::value_type>> layer_value_map;
+  for (const auto& [is_routing, layer_net_rect_map] : fixed_rect_map) {
+    for (const auto& [layer_idx, net_rect_map] : layer_net_rect_map) {
+      auto& value_list = layer_value_map[layer_idx];
+      for (const auto& [net_idx, rect_set] : net_rect_map) {
+        for (EXTLayerRect* rect : rect_set) {
+          if (rect == nullptr || rect->get_layer_idx() != layer_idx || rect->get_real_rect().isIncorrect()) {
+            RTLOG.error(Loc::current(), "Invalid fixed PA geometry on layer ", layer_idx);
+          }
+          value_list.emplace_back(Utility::convertToBGRectInt(rect->get_real_rect()), _shape_list.size());
+          _shape_list.push_back({net_idx, rect, is_routing});
+        }
+      }
+    }
+  }
+  for (const auto& [layer_idx, value_list] : layer_value_map) {
+    _layer_rect_rtree_map.emplace(layer_idx, RectRTree(value_list.begin(), value_list.end()));
+  }
+  _built = true;
+}
+
+std::vector<size_t> PAFixedGeometry::query(const std::vector<LayerRect>& region_list) const
+{
+  if (!_built) {
+    RTLOG.error(Loc::current(), "The fixed PA geometry has not been built!");
+  }
+  std::vector<size_t> shape_idx_list;
+  if (region_list.empty()) {
+    shape_idx_list.resize(_shape_list.size());
+    std::iota(shape_idx_list.begin(), shape_idx_list.end(), size_t{0});
+    return shape_idx_list;
+  }
+  for (const LayerRect& region : region_list) {
+    if (region.isIncorrect()) {
+      RTLOG.error(Loc::current(), "Invalid fixed PA geometry query region!");
+    }
+    auto layer_iter = _layer_rect_rtree_map.find(region.get_layer_idx());
+    if (layer_iter == _layer_rect_rtree_map.end()) {
+      continue;
+    }
+    const RectRTree& rtree = layer_iter->second;
+    for (auto iter = rtree.qbegin(bgi::intersects(Utility::convertToBGRectInt(region))); iter != rtree.qend(); ++iter) {
+      shape_idx_list.push_back(iter->second);
+    }
+  }
+  // A region union must not duplicate shapes or expose R-tree traversal order to DRC.
+  std::ranges::sort(shape_idx_list);
+  shape_idx_list.erase(std::unique(shape_idx_list.begin(), shape_idx_list.end()), shape_idx_list.end());
+  return shape_idx_list;
 }
 
 void PinAccessor::buildAccessPoint(PAModel& pa_model, PABox& pa_box)
@@ -1610,14 +1682,8 @@ void PinAccessor::buildPANodeNeighbor(PABox& pa_box)
 
 void PinAccessor::buildBoxEnvironment(PABox& pa_box)
 {
-  for (auto& [is_routing, layer_net_fixed_rect_map] : pa_box.get_type_layer_net_fixed_rect_map()) {
-    for (auto& [layer_idx, net_fixed_rect_map] : layer_net_fixed_rect_map) {
-      for (auto& [net_idx, fixed_rect_set] : net_fixed_rect_map) {
-        for (const auto& fixed_rect : fixed_rect_set) {
-          updateFixedRectToEnvironment(pa_box, ChangeType::kAdd, net_idx, fixed_rect, is_routing);
-        }
-      }
-    }
+  for (const PAFixedShape& shape : pa_box.get_fixed_geometry().get_shape_list()) {
+    updateFixedRectToEnvironment(pa_box, ChangeType::kAdd, shape.net_idx, shape.rect, shape.is_routing);
   }
   for (auto& [net_idx, pin_access_result_map] : pa_box.get_net_pin_env_result_map()) {
     for (auto& [pin_idx, segment_set] : pin_access_result_map) {
@@ -2369,20 +2435,11 @@ double PinAccessor::getViaMasterCost(PABox& pa_box, int32_t net_idx, const Segme
     }
   }
   double cost = 0;
-  for (auto& [is_routing, layer_net_fixed_rect_map] : pa_box.get_type_layer_net_fixed_rect_map()) {
-    if (!is_routing) {
+  for (const PAFixedShape& shape : pa_box.get_fixed_geometry().get_shape_list()) {
+    if (!shape.is_routing || shape.net_idx == net_idx) {
       continue;
     }
-    for (auto& [layer_idx, net_fixed_rect_map] : layer_net_fixed_rect_map) {
-      for (auto& [fixed_net_idx, fixed_rect_set] : net_fixed_rect_map) {
-        if (fixed_net_idx == net_idx) {
-          continue;
-        }
-        for (EXTLayerRect* fixed_rect : fixed_rect_set) {
-          cost += getViaShapeCost(query_shape_list, is_routing, layer_idx, fixed_rect->get_real_rect());
-        }
-      }
-    }
+    cost += getViaShapeCost(query_shape_list, shape.is_routing, shape.rect->get_layer_idx(), shape.rect->get_real_rect());
   }
   for (auto& [other_net_idx, pin_result_map] : pa_box.get_net_pin_env_result_map()) {
     if (other_net_idx == net_idx) {
@@ -2598,9 +2655,11 @@ GTLPolyInt PinAccessor::getViolationOverlapPoly(PABox& pa_box, Violation& violat
 
   GTLPolySetInt gtl_poly_set;
   {
-    for (EXTLayerRect* fixed_rect : pa_box.get_type_layer_net_fixed_rect_map()[true][violation_layer_idx][curr_net_idx]) {
-      if (RTUTIL.isClosedOverlap(violation_real_rect, fixed_rect->get_real_rect())) {
-        gtl_poly_set += RTUTIL.convertToGTLRectInt(fixed_rect->get_real_rect());
+    const PAFixedGeometry& fixed_geometry = pa_box.get_fixed_geometry();
+    for (size_t shape_idx : fixed_geometry.query({violation_shape.getRealLayerRect()})) {
+      const PAFixedShape& shape = fixed_geometry.get_shape_list()[shape_idx];
+      if (shape.is_routing && shape.net_idx == curr_net_idx) {
+        gtl_poly_set += RTUTIL.convertToGTLRectInt(shape.rect->get_real_rect());
       }
     }
     for (Segment<LayerCoord>* segment : pa_box.get_net_pin_env_result_map()[curr_net_idx][curr_pin_idx]) {
@@ -3140,7 +3199,7 @@ void PinAccessor::freePABox(PABox& pa_box)
   std::vector<PATask>().swap(pa_box.get_pa_task_list());
   std::vector<int32_t>().swap(pa_box.get_task_order_list());
 
-  pa_box.get_type_layer_net_fixed_rect_map().clear();
+  pa_box.get_fixed_geometry() = PAFixedGeometry();
   pa_box.get_net_access_point_map().clear();
   pa_box.get_net_pin_env_result_map().clear();
   pa_box.get_net_pin_env_patch_map().clear();
@@ -3898,6 +3957,21 @@ void PinAccessor::buildFixedDETask(DETask& de_task, const std::map<bool, std::ma
   }
 }
 
+void PinAccessor::buildFixedDETask(DETask& de_task, const PAFixedGeometry& fixed_geometry)
+{
+  std::vector<size_t> shape_idx_list = fixed_geometry.query(de_task.get_check_region_list());
+  // Preserve checked nets even when none of their shapes overlap the local region.
+  for (int32_t net_idx : fixed_geometry.get_net_idx_list()) {
+    de_task.get_net_pin_shape_map().try_emplace(net_idx);
+  }
+  const auto& shape_list = fixed_geometry.get_shape_list();
+  for (size_t shape_idx : shape_idx_list) {
+    const PAFixedShape& shape = shape_list[shape_idx];
+    auto& checked_shape_list = shape.net_idx == -1 ? de_task.get_env_shape_list() : de_task.get_net_pin_shape_map()[shape.net_idx];
+    checked_shape_list.emplace_back(shape.rect, shape.is_routing);
+  }
+}
+
 void PinAccessor::addResultToDETask(DETask& de_task, int32_t net_idx, Segment<LayerCoord>* segment)
 {
   std::vector<Segment<LayerCoord>*>& result_list = de_task.get_net_result_map()[net_idx];
@@ -3949,7 +4023,7 @@ DETask PinAccessor::buildPatchDETask(PABox& pa_box, const std::set<ViolationType
   de_task.set_top_name(RTUTIL.getString("pa_box_", pa_box.get_pa_box_id().get_x(), "_", pa_box.get_pa_box_id().get_y()));
   de_task.set_check_type_set(check_type_set);
   de_task.set_check_region_list(check_region_list);
-  buildFixedDETask(de_task, pa_box.get_type_layer_net_fixed_rect_map());
+  buildFixedDETask(de_task, pa_box.get_fixed_geometry());
   for (auto& [net_idx, pin_result_map] : pa_box.get_net_pin_env_result_map()) {
     for (auto& [pin_idx, segment_set] : pin_result_map) {
       de_task.get_net_result_map().try_emplace(net_idx);
@@ -4011,7 +4085,7 @@ std::vector<Violation> PinAccessor::getRouteViolationList(PABox& pa_box)
   DETask route_task;
   DETask ap_via_task;
   route_task.set_top_name(RTUTIL.getString("pa_box_", pa_box.get_pa_box_id().get_x(), "_", pa_box.get_pa_box_id().get_y()));
-  buildFixedDETask(route_task, pa_box.get_type_layer_net_fixed_rect_map());
+  buildFixedDETask(route_task, pa_box.get_fixed_geometry());
   buildCheckedNetSet(route_task);
   for (PATask& pa_task : pa_box.get_pa_task_list()) {
     route_task.get_need_checked_net_set().insert(pa_task.get_net_idx());
@@ -4708,23 +4782,18 @@ void PinAccessor::debugPlotPABox(PABox& pa_box, std::string flag)
   }
 
   // fixed_rect
-  for (auto& [is_routing, layer_net_rect_map] : pa_box.get_type_layer_net_fixed_rect_map()) {
-    for (auto& [layer_idx, net_rect_map] : layer_net_rect_map) {
-      for (auto& [net_idx, rect_set] : net_rect_map) {
-        GPStruct fixed_rect_struct(RTUTIL.getString("fixed_rect(net_", net_idx, ")"));
-        for (EXTLayerRect* rect : rect_set) {
-          GPBoundary gp_boundary;
-          gp_boundary.set_data_type(static_cast<int32_t>(GPDataType::kShape));
-          gp_boundary.set_rect(rect->get_real_rect());
-          if (is_routing) {
-            gp_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(layer_idx));
-          } else {
-            gp_boundary.set_layer_idx(RTGP.getGDSIdxByCut(layer_idx));
-          }
-          fixed_rect_struct.push(gp_boundary);
-        }
-        gp_gds.addStruct(fixed_rect_struct);
-      }
+  {
+    std::map<int32_t, GPStruct> net_fixed_rect_struct_map;
+    for (const PAFixedShape& shape : pa_box.get_fixed_geometry().get_shape_list()) {
+      auto [iter, inserted] = net_fixed_rect_struct_map.try_emplace(shape.net_idx, RTUTIL.getString("fixed_rect(net_", shape.net_idx, ")"));
+      GPBoundary gp_boundary;
+      gp_boundary.set_data_type(static_cast<int32_t>(GPDataType::kShape));
+      gp_boundary.set_rect(shape.rect->get_real_rect());
+      gp_boundary.set_layer_idx(shape.is_routing ? RTGP.getGDSIdxByRouting(shape.rect->get_layer_idx()) : RTGP.getGDSIdxByCut(shape.rect->get_layer_idx()));
+      iter->second.push(gp_boundary);
+    }
+    for (auto& [net_idx, fixed_rect_struct] : net_fixed_rect_struct_map) {
+      gp_gds.addStruct(fixed_rect_struct);
     }
   }
 
