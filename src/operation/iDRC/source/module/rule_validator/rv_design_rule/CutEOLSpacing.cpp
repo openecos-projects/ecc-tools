@@ -55,47 +55,13 @@ bool isGlobalEolBoundary(const RVLayerData& rv_layer_data, int32_t boundary_id)
 void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
 {
   const auto orientations = {Orientation::kEast, Orientation::kSouth, Orientation::kWest, Orientation::kNorth};
-  using RoutingEnvRTree = bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>;
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
   std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
   const auto& layer_data = rv_cluster.get_layer_data();
 
-  std::map<int32_t, RoutingEnvRTree> routing_net_env_rtrees;
-  {
-    std::map<int32_t, std::map<int32_t, GTLPolySetInt>> routing_net_env_polysets;
-    for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
-      if (!drc_shape->get_is_routing()) {
-        continue;
-      }
-      routing_net_env_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
-    }
-
-    for (const auto& [layer_idx, net_polyset_map] : routing_net_env_polysets) {
-      std::vector<std::pair<GTLRectInt, int32_t>> rtree_inputs;
-      for (const auto& [net_idx, poly_set] : net_polyset_map) {
-        std::vector<GTLRectInt> rects;
-        gtl::get_max_rectangles(rects, poly_set);
-        for (const GTLRectInt& rect : rects) {
-          rtree_inputs.emplace_back(rect, net_idx);
-        }
-      }
-      routing_net_env_rtrees[layer_idx] = RoutingEnvRTree(rtree_inputs);
-    }
-  }
-
-  // build global eol map, (layer_idx, eol_edge, length)
+  // Build EOL edges only for polygons reached by active cuts.
   std::map<int32_t, std::map<int32_t, std::map<PlanarRect, int32_t, CmpPlanarRectByXASC>>> layer_net_eol_edge_map;
-  for (const auto& [routing_layer_idx, rv_layer_data] : layer_data) {
-    for (const auto& [net_idx, routing_net] : rv_layer_data.nets) {
-      for (const BoundaryData& boundary_data : rv_layer_data.getBoundaries(routing_net)) {
-        int32_t boundary_id = rv_layer_data.getBoundaryId(boundary_data);
-        if (!isGlobalEolBoundary(rv_layer_data, boundary_id)) {
-          continue;
-        }
-        layer_net_eol_edge_map[routing_layer_idx][net_idx][DRCUTIL.convertToPlanarRect(boundary_data.edge)] = boundary_data.edge_length;
-      }
-    }
-  }
+  std::map<int32_t, std::vector<int32_t>> layer_polygon_checked_eol_width_map;
 
   for (const auto& [cut_layer_idx, cut_layer_data] : layer_data) {
     if (cut_layer_data.cut_pool.empty()) {
@@ -108,11 +74,28 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
     }
 
     int32_t routing_layer_idx = *std::max_element(routing_layer_it->second.begin(), routing_layer_it->second.end());
+    int32_t violation_routing_layer_idx = *std::min_element(routing_layer_it->second.begin(), routing_layer_it->second.end());
     auto routing_layer_data_it = layer_data.find(routing_layer_idx);
     if (routing_layer_data_it == layer_data.end()) {
       continue;
     }
     const RVLayerData& routing_layer_data = routing_layer_data_it->second;
+
+    CutEOLSpacingRule& cut_eol_spacing_rule = cut_layer_list[cut_layer_idx].get_cut_eol_spacing_rule();
+    int32_t eol_spacing = cut_eol_spacing_rule.eol_spacing;
+    int32_t eol_prl = cut_eol_spacing_rule.eol_prl;
+    int32_t eol_prl_spacing = cut_eol_spacing_rule.eol_prl_spacing;
+    int32_t eol_width = cut_eol_spacing_rule.eol_width;
+    int32_t smaller_overhang = cut_eol_spacing_rule.smaller_overhang;
+    int32_t equal_overhang = cut_eol_spacing_rule.equal_overhang;
+    int32_t side_ext = cut_eol_spacing_rule.side_ext;
+    int32_t backward_ext = cut_eol_spacing_rule.backward_ext;
+    int32_t span_length = cut_eol_spacing_rule.span_length;
+    int32_t abs_eol_prl = std::abs(eol_prl);
+    std::vector<int32_t>& polygon_checked_eol_width_list = layer_polygon_checked_eol_width_map[routing_layer_idx];
+    if (polygon_checked_eol_width_list.empty()) {
+      polygon_checked_eol_width_list.assign(routing_layer_data.polygon_pool.size(), -1);
+    }
 
     for (const CutData& cut_data : cut_layer_data.getCuts()) {
       if (!isTrackableCut(cut_data)) {
@@ -121,20 +104,50 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
 
       int32_t cut_net_idx = cut_data.net_idx;
       PlanarRect cut_rect = DRCUTIL.convertToPlanarRect(cut_data.rect);
-      // for each via, get overlaped metal
-      CutLayer& cut_layer = cut_layer_list[cut_layer_idx];
-      int32_t eol_spacing = cut_layer.get_cut_eol_spacing_rule().eol_spacing;
-      int32_t eol_prl = cut_layer.get_cut_eol_spacing_rule().eol_prl;
-      int32_t eol_prl_spacing = cut_layer.get_cut_eol_spacing_rule().eol_prl_spacing;
-      int32_t eol_width = cut_layer.get_cut_eol_spacing_rule().eol_width;
-      int32_t smaller_overhang = cut_layer.get_cut_eol_spacing_rule().smaller_overhang;
-      int32_t equal_overhang = cut_layer.get_cut_eol_spacing_rule().equal_overhang;
-      int32_t side_ext = cut_layer.get_cut_eol_spacing_rule().side_ext;
-      int32_t backward_ext = cut_layer.get_cut_eol_spacing_rule().backward_ext;
-      int32_t span_length = cut_layer.get_cut_eol_spacing_rule().span_length;
 
+      std::vector<CutData> cut_hit_list;
+      cut_layer_data.queryCuts(DRCUTIL.convertToGTLRectInt(DRCUTIL.getEnlargedRect(cut_rect, eol_prl_spacing)),
+                               std::back_inserter(cut_hit_list));
+      std::vector<CutData> overlap_cut_list;
+      overlap_cut_list.reserve(cut_hit_list.size());
+      for (const CutData& overlap_cut_data : cut_hit_list) {
+        if (!isTrackableCut(overlap_cut_data) || cut_rect == DRCUTIL.convertToPlanarRect(overlap_cut_data.rect)) {
+          continue;
+        }
+        overlap_cut_list.push_back(overlap_cut_data);
+      }
+      if (overlap_cut_list.empty()) {
+        continue;
+      }
+
+      // for each via, get overlaped metal
       std::vector<std::pair<GTLRectInt, int32_t>> overlaped_rect;
       routing_layer_data.queryMaxRects(cut_data.rect, std::back_inserter(overlaped_rect));
+
+      for (const auto& [gtl_rect, max_rect_id] : overlaped_rect) {
+        if (!DRCUTIL.isOpenOverlap(DRCUTIL.convertToPlanarRect(gtl_rect), cut_rect)) {
+          continue;
+        }
+        int32_t polygon_id = routing_layer_data.getMaxRect(max_rect_id).polygon_id;
+        int32_t& checked_eol_width = polygon_checked_eol_width_list[polygon_id];
+        if (checked_eol_width >= eol_width) {
+          continue;
+        }
+
+        const PolygonData& polygon_data = routing_layer_data.getPolygon(polygon_id);
+        for (const BoundaryData& boundary_data : routing_layer_data.getBoundaries(polygon_data)) {
+          if (boundary_data.edge_length < checked_eol_width || boundary_data.edge_length >= eol_width) {
+            continue;
+          }
+          int32_t boundary_id = routing_layer_data.getBoundaryId(boundary_data);
+          if (!isGlobalEolBoundary(routing_layer_data, boundary_id)) {
+            continue;
+          }
+          layer_net_eol_edge_map[routing_layer_idx][polygon_data.net_id][DRCUTIL.convertToPlanarRect(boundary_data.edge)]
+              = boundary_data.edge_length;
+        }
+        checked_eol_width = eol_width;
+      }
 
       std::map<Orientation, int32_t> orient_overhang_map
           = {{Orientation::kEast, 0}, {Orientation::kSouth, 0}, {Orientation::kWest, 0}, {Orientation::kNorth, 0}};
@@ -326,25 +339,17 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
             continue;
           }
 
-          std::vector<CutData> overlap_cut_list;
-          cut_layer_data.queryCuts(DRCUTIL.convertToGTLRectInt(DRCUTIL.getEnlargedRect(cut_rect, eol_prl_spacing)), std::back_inserter(overlap_cut_list));
           for (auto checking_orient : {DRCUTIL.getOppositeOrientation(check_orient), DRCUTIL.getOppositeOrientation(ortho_orient)}) {
             for (const CutData& overlap_cut_data : overlap_cut_list) {
-              if (!isTrackableCut(overlap_cut_data)) {
-                continue;
-              }
               int32_t env_net_idx = overlap_cut_data.net_idx;
               PlanarRect env_cut_rect = DRCUTIL.convertToPlanarRect(overlap_cut_data.rect);
-              if (cut_rect == env_cut_rect) {
-                continue;
-              }
               PlanarRect rect = DRCUTIL.getRect(cut_rect.getOrientEdge(checking_orient));
               PlanarRect orient_rect = rect;
               if (checking_orient == Orientation::kNorth || checking_orient == Orientation::kSouth) {
-                rect = DRCUTIL.getEnlargedRect(rect, std::abs(eol_prl), 0);
+                rect = DRCUTIL.getEnlargedRect(rect, abs_eol_prl, 0);
                 rect = DRCUTIL.getEnlargedPartRect(rect, checking_orient, eol_prl_spacing);
               } else {
-                rect = DRCUTIL.getEnlargedRect(rect, 0, std::abs(eol_prl));
+                rect = DRCUTIL.getEnlargedRect(rect, 0, abs_eol_prl);
                 rect = DRCUTIL.getEnlargedPartRect(rect, checking_orient, eol_prl_spacing);
               }
               if (checking_orient == Orientation::kEast) {
@@ -374,11 +379,6 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
               }
 
               // VIAx的违例输出Mx
-              int32_t violation_routing_layer_idx = -1;
-              {
-                std::vector<int32_t>& routing_layer_idx_list = cut_to_adjacent_routing_map[cut_layer_idx];
-                violation_routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
-              }
               PlanarRect violation_rect;
               if (DRCUTIL.isClosedOverlap(cut_rect, env_cut_rect)) {
                 violation_rect = DRCUTIL.getOverlap(cut_rect, env_cut_rect);
@@ -390,10 +390,7 @@ void RuleValidator::verifyCutEOLSpacing(RVCluster& rv_cluster)
               // 如果只使用env可以有相同的span length 和相同的 env rect
               {
                 std::vector<std::pair<GTLRectInt, int32_t>> window_overlap_rect_list;
-                auto env_rtree_it = routing_net_env_rtrees.find(routing_layer_idx);
-                if (env_rtree_it != routing_net_env_rtrees.end()) {
-                  env_rtree_it->second.query(bgi::intersects(DRCUTIL.convertToGTLRectInt(violation_rect)), std::back_inserter(window_overlap_rect_list));
-                }
+                routing_layer_data.queryEnvRects(DRCUTIL.convertToGTLRectInt(violation_rect), std::back_inserter(window_overlap_rect_list));
                 bool has_check_edge = false;
                 for (const auto& [gtl_env_rect, env_routing_net_idx] : window_overlap_rect_list) {
                   (void) env_routing_net_idx;

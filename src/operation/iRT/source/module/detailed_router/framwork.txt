@@ -7,34 +7,28 @@ routeDRModel:迭代DRModel
     buildBoxSchedule:构建Box布线的调度表
     splitNetResult:分割线网结果并将result、patch直接分配给对应Box
     routeDRBoxMap:
-        buildFixedRect:将GCellmap中的fix_rect(与此Box覆盖)以指针的方式拷贝到Box内,不需要对GCellmap删除或添加
-        buildNetEnvironment:从DRModel和各Box的最新结果构建当前schedule的只读环境
-        initDRTaskList:构建DRTask
+        buildNetEnvironment:从DRModel和非活动Box的最新value结果构建当前schedule的只读指针环境
+        buildAccessPoint:从RTDM借用Box覆盖范围内的AccessPoint指针,不复制或修改候选viaMaster
+        initDRTaskList:通过DRConnectivity从Box自有result、patch value构建Box拥有的DRTask
         buildRouteViolation:将DRModel中与任务相关的violation转移到Box
+        buildFixedRect:从RTDM借用与Box覆盖的fixed_rect指针
         buildBoxTrackAxis:构建Box内的track_axis
         buildLayerNodeMap:构建Box的Graph,只有节点,其他信息后续构建
+        buildLayerShadowMap:构建Box内shadow框架
         buildDRNodeNeighbor:将所有节点连接
-        buildOrientNetMap:构建Graph的cost,环境从Box中得到
+        buildOrientNetMap/buildNetShadowMap:将借用环境和Box自有任务结果加入Box局部graph/shadow
         exemptPinShape:排除掉pin_shape上的障碍cost
         routeDRBox:
             initTaskSchedule:初始化task布线调度表
-            routeDRTask:给task布线,在此函数末尾,布线结果从graph中删除,再加入新的结果
-            updateViolationList:首先得到Violation存到Box下面,然后Violation结果从graph中删除,再加入新的结果
+            routeDRTask:给task布线,删除该component的旧graph状态后加入新的value结果
+            updateRouteViolationList:检查并保存Box局部Violation
             updateBestResult:更新最优结果
             updateTaskSchedule:通过Violation得到新的布线调度
         selectBestResult:选择Box的最优结果并保存在Box内
-        freeDRBox:析构
-    updateDRModel:将所有Box的结果汇总回DRModel
-    updateNetResult:在DRModel内进行结果去环优化
+        freeDRBox:释放DRTask并清空借用指针和graph/scratch;保留task result、patch value等待汇总
+    updateDRModel:将所有Box拥有的task result、patch value移动回DRModel后清空Box owner map
+    updateNetResult:在DRModel内进行结果去环优化;保留合法viaMaster索引,AP歧义保持未决,旧结果在受限边界使用默认via
     updateNetPatch:在DRModel内删除无效patch
     updateViolation:检查DRModel中的整个版图结果
     updateBestResult:更新DRModel中的最优结果
 selectBestResult:选择最优结果、补充final patch并统一上传RTDM
-
-
-
-
-
-
-
-

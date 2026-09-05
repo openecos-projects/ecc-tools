@@ -55,8 +55,8 @@ class RVCluster
   RVComParam* _rv_com_param = nullptr;
   std::vector<DRCShape*> _drc_env_shape_list;
   std::vector<DRCShape*> _drc_result_shape_list;
-  std::set<ViolationType>* _drc_check_type_set;
-  std::vector<DRCShape>* _drc_check_region_list;
+  std::set<ViolationType>* _drc_check_type_set = nullptr;
+  std::vector<DRCShape>* _drc_check_region_list = nullptr;
   std::vector<Violation> _violation_list;
   std::map<int32_t, RVLayerData> _layer_data;
 };

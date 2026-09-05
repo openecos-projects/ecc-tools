@@ -60,26 +60,23 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
 {
   const auto orientations = {Orientation::kEast, Orientation::kSouth, Orientation::kWest, Orientation::kNorth};
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
-  std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
   const auto& layer_data = rv_cluster.get_layer_data();
 
   std::map<int32_t, std::vector<EnclosureEdgeRule>> cut_layer_sorted_rule_map;
   std::map<int32_t, std::vector<int32_t>> layer_width_ranges;
-  std::map<int32_t, bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>> routing_env_rtree_map;
   std::map<std::pair<int32_t, int32_t>, bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>> layer_width_rtrees;
-  std::map<int32_t, std::map<int32_t, std::map<PlanarRect, std::vector<ConvexCandidate>, CmpPlanarRectByXASC>>> layer_polygon_convex_candidates;
+  std::map<int32_t, std::vector<std::map<PlanarRect, std::vector<ConvexCandidate>, CmpPlanarRectByXASC>>> layer_polygon_convex_candidates;
 
   // preprocess: sort rules and collect width ranges by routing layer.
   for (const auto& [cut_layer_idx, cut_layer_data] : layer_data) {
     if (cut_layer_data.cut_pool.empty()) {
       continue;
     }
-    auto routing_layer_it = cut_to_adjacent_routing_map.find(cut_layer_idx);
-    if (routing_layer_it == cut_to_adjacent_routing_map.end() || routing_layer_it->second.size() < 2) {
+    const std::vector<int32_t>& routing_layer_idx_list = DRCDM.getAdjacentRoutingLayerIdxList(cut_layer_idx);
+    if (routing_layer_idx_list.size() < 2) {
       continue;
     }
 
-    const std::vector<int32_t>& routing_layer_idx_list = routing_layer_it->second;
     int32_t above_routing_layer_idx = *std::max_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
     int32_t below_routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
 
@@ -104,77 +101,52 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
     width_ranges.erase(std::unique(width_ranges.begin(), width_ranges.end()), width_ranges.end());
   }
 
-  // preprocess: build env-only maxRect rtree for convex env filtering.
-  {
-    std::map<int32_t, std::map<int32_t, GTLPolySetInt>> routing_net_env_poly_set_map;
-    for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
-      if (!drc_shape->get_is_routing()) {
-        continue;
-      }
-      PlanarRect rect = drc_shape->get_rect();
-      routing_net_env_poly_set_map[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += DRCUTIL.convertToGTLRectInt(rect);
-    }
-    for (auto& [routing_layer_idx, net_gtl_poly_set_map] : routing_net_env_poly_set_map) {
-      for (auto& [net_idx, gtl_poly_set] : net_gtl_poly_set_map) {
-        std::vector<GTLRectInt> gtl_rect_list;
-        gtl::get_max_rectangles(gtl_rect_list, gtl_poly_set);
-        for (const GTLRectInt& gtl_rect : gtl_rect_list) {
-          if (!isValidRect(DRCUTIL.convertToPlanarRect(gtl_rect))) {
-            continue;
-          }
-          routing_env_rtree_map[routing_layer_idx].insert({gtl_rect, net_idx});
-        }
-      }
-    }
-  }
-
   // preprocess: build polygon convex candidates once, reuse during convex checks.
   for (const auto& [routing_layer_idx, rv_layer_data] : layer_data) {
+    if (rv_layer_data.polygon_pool.empty()) {
+      continue;
+    }
+    auto& polygon_convex_candidate_list = layer_polygon_convex_candidates[routing_layer_idx];
+    polygon_convex_candidate_list.resize(rv_layer_data.polygon_pool.size());
     for (const auto& [net_idx, routing_net] : rv_layer_data.nets) {
       (void) net_idx;
       for (const PolygonData& polygon_data : rv_layer_data.getPolygons(routing_net)) {
         int32_t polygon_id = rv_layer_data.getPolygonId(polygon_data);
-        std::vector<int32_t> outer_boundary_ids;
-        for (const BoundaryData& boundary_data : rv_layer_data.getBoundaries(polygon_data)) {
+        std::span<const BoundaryData> boundary_list = rv_layer_data.getBoundaries(polygon_data);
+        int32_t coord_size = 0;
+        for (const BoundaryData& boundary_data : boundary_list) {
           if (boundary_data.isHole) {
             break;
           }
-          outer_boundary_ids.push_back(rv_layer_data.getBoundaryId(boundary_data));
+          coord_size++;
         }
-
-        int32_t coord_size = static_cast<int32_t>(outer_boundary_ids.size());
         if (coord_size < 6) {
           continue;
         }
 
-        std::vector<PlanarCoord> coord_list;
-        std::vector<bool> convex_corner_list;
-        coord_list.reserve(coord_size);
-        convex_corner_list.reserve(coord_size);
-        for (int32_t boundary_id : outer_boundary_ids) {
-          const BoundaryData& boundary_data = rv_layer_data.getBoundary(boundary_id);
-          coord_list.push_back(boundary_data.end_coord);
-          convex_corner_list.push_back(boundary_data.isConvex);
-        }
-
-        auto& polygon_convex_candidates = layer_polygon_convex_candidates[routing_layer_idx][polygon_id];
+        auto& polygon_convex_candidates = polygon_convex_candidate_list[polygon_id];
         for (int32_t i = 0; i < coord_size; i++) {
-          if (!(convex_corner_list[getIdx(i - 1, coord_size)] && convex_corner_list[getIdx(i, coord_size)] && convex_corner_list[getIdx(i + 1, coord_size)])) {
+          const BoundaryData& pre_boundary = boundary_list[DRCUTIL.getRingIdx(i - 1, coord_size)];
+          const BoundaryData& curr_boundary = boundary_list[i];
+          const BoundaryData& post_boundary = boundary_list[DRCUTIL.getRingIdx(i + 1, coord_size)];
+          if (!(pre_boundary.isConvex && curr_boundary.isConvex && post_boundary.isConvex)) {
             continue;
           }
 
-          PlanarCoord& pre_coord = coord_list[getIdx(i - 1, coord_size)];
-          PlanarCoord& curr_coord = coord_list[i];
-          PlanarCoord& post_coord = coord_list[getIdx(i + 1, coord_size)];
-          PlanarRect enc_rect = DRCUTIL.getRect(pre_coord, post_coord);
+          PlanarRect enc_rect = DRCUTIL.getRect(pre_boundary.end_coord, post_boundary.end_coord);
           if (!isValidRect(enc_rect)) {
             continue;
           }
 
-          polygon_convex_candidates[enc_rect].push_back(
-              {outer_boundary_ids[getIdx(i, coord_size)], outer_boundary_ids[getIdx(i - 1, coord_size)], DRCUTIL.getManhattanDistance(curr_coord, post_coord)});
-          polygon_convex_candidates[enc_rect].push_back({outer_boundary_ids[getIdx(i + 1, coord_size)], outer_boundary_ids[getIdx(i + 2, coord_size)],
-                                                         DRCUTIL.getManhattanDistance(curr_coord, pre_coord)});
+          auto [candidate_it, inserted] = polygon_convex_candidates.try_emplace(enc_rect);
+          if (inserted) {
+            candidate_it->second.reserve(2);
+          }
+          const BoundaryData& post_post_boundary = boundary_list[DRCUTIL.getRingIdx(i + 2, coord_size)];
+          candidate_it->second.push_back({rv_layer_data.getBoundaryId(curr_boundary), rv_layer_data.getBoundaryId(pre_boundary),
+                                          DRCUTIL.getManhattanDistance(curr_boundary.end_coord, post_boundary.end_coord)});
+          candidate_it->second.push_back({rv_layer_data.getBoundaryId(post_boundary), rv_layer_data.getBoundaryId(post_post_boundary),
+                                          DRCUTIL.getManhattanDistance(curr_boundary.end_coord, pre_boundary.end_coord)});
         }
       }
     }
@@ -192,6 +164,7 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
 
     const RVLayerData& rv_layer_data = layer_it->second;
     int32_t min_width = width_ranges.back();
+    std::map<int32_t, std::vector<std::pair<GTLRectInt, int32_t>>> width_rtree_input_map;
     for (const auto& [net_idx, routing_net] : rv_layer_data.nets) {
       GTLPolySetInt filtered_polyset;
       for (const MaxRectData& max_rect_data : rv_layer_data.getMaxRects(routing_net)) {
@@ -228,7 +201,11 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
           if (!isValidRect(rect)) {
             continue;
           }
-          if (rect.getWidth() >= last_width) {
+          int32_t rect_width = rect.getWidth();
+          if (rect_width < width) {
+            continue;
+          }
+          if (rect_width >= last_width) {
             checked_rect_list.push_back(gtl_rect);
           } else {
             dut_rect_list.push_back(gtl_rect);
@@ -237,7 +214,7 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
 
         GTLPolySetInt checked_poly_set;
         checked_poly_set.insert(checked_rect_list.begin(), checked_rect_list.end());
-        auto& width_rtree = layer_width_rtrees[{layer_idx, width}];
+        auto& width_rtree_inputs = width_rtree_input_map[width];
         for (const GTLRectInt& dut_rect : dut_rect_list) {
           GTLPolySetInt dut_poly_set;
           dut_poly_set = dut_poly_set + dut_rect - checked_poly_set;
@@ -258,15 +235,23 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
                 has_insert_rect = true;
               }
             }
-            if (!has_insert_rect || !isValidRect(DRCUTIL.convertToPlanarRect(insert_rect))) {
+            if (!has_insert_rect) {
               continue;
             }
-            width_rtree.insert({insert_rect, net_idx});
+            PlanarRect insert_planar_rect = DRCUTIL.convertToPlanarRect(insert_rect);
+            if (!isValidRect(insert_planar_rect) || insert_planar_rect.getWidth() < width) {
+              continue;
+            }
+            width_rtree_inputs.emplace_back(insert_rect, net_idx);
           }
         }
 
         last_width = width;
       }
+    }
+    for (const auto& [width, width_rtree_inputs] : width_rtree_input_map) {
+      layer_width_rtrees.emplace(std::make_pair(layer_idx, width),
+                                 bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>(width_rtree_inputs));
     }
   }
 
@@ -275,8 +260,8 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
     if (cut_layer_data.cut_pool.empty()) {
       continue;
     }
-    auto routing_layer_it = cut_to_adjacent_routing_map.find(cut_layer_idx);
-    if (routing_layer_it == cut_to_adjacent_routing_map.end() || routing_layer_it->second.size() < 2) {
+    const std::vector<int32_t>& routing_layer_idx_list = DRCDM.getAdjacentRoutingLayerIdxList(cut_layer_idx);
+    if (routing_layer_idx_list.size() < 2) {
       continue;
     }
 
@@ -285,7 +270,6 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
       continue;
     }
 
-    const std::vector<int32_t>& routing_layer_idx_list = routing_layer_it->second;
     int32_t above_routing_layer_idx = *std::max_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
     int32_t below_routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
 
@@ -318,7 +302,7 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
             continue;
           }
           for (Orientation orient : orientations) {
-            orient_overhang_map[orient] = std::max(orient_overhang_map[orient], DRCUTIL.getOrientEdgeDistance(cut_rect, routing_rect, orient));
+            orient_overhang_map[orient] = std::max(orient_overhang_map[orient], DRCUTIL.getOrientEnclosure(routing_rect, cut_rect, orient));
           }
         }
 
@@ -352,18 +336,28 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
               continue;
             }
             const GTLPolySetInt& poly_set = net_it->second.polyset;
+
+            bool need_neighbor_check = false;
+            for (Orientation orient : orientations) {
+              int32_t orient_enclosure = std::max(orient_overhang_map[orient], DRCUTIL.getOrientEnclosure(wide_rect, cut_rect, orient));
+              if (orient_enclosure < curr_rule.overhang) {
+                need_neighbor_check = true;
+                break;
+              }
+            }
+            if (!need_neighbor_check) {
+              continue;
+            }
+
             std::map<Orientation, PlanarRect> orient_extension_rects = buildOrientExtensionRects(wide_rect, curr_rule.par_within);
+            std::vector<std::pair<GTLRectInt, int32_t>> neighbor_rect_max_pair_list;
+            PlanarRect check_rect = DRCUTIL.getEnlargedRect(wide_rect, curr_rule.par_within);
+            rv_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(check_rect), std::back_inserter(neighbor_rect_max_pair_list));
 
             for (Orientation orient : orientations) {
               int32_t orient_enclosure = std::max(orient_overhang_map[orient], DRCUTIL.getOrientEnclosure(wide_rect, cut_rect, orient));
               if (orient_enclosure >= curr_rule.overhang) {
                 continue;
-              }
-
-              std::vector<std::pair<GTLRectInt, int32_t>> neighbor_rect_max_pair_list;
-              {
-                PlanarRect check_rect = DRCUTIL.getEnlargedRect(wide_rect, curr_rule.par_within);
-                rv_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(check_rect), std::back_inserter(neighbor_rect_max_pair_list));
               }
 
               Orientation oppo_orient = DRCUTIL.getOppositeOrientation(orient);
@@ -430,12 +424,9 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
           if (layer_convex_it == layer_polygon_convex_candidates.end()) {
             continue;
           }
-          auto polygon_convex_it = layer_convex_it->second.find(polygon_id);
-          if (polygon_convex_it == layer_convex_it->second.end()) {
-            continue;
-          }
-          auto rect_convex_it = polygon_convex_it->second.find(routing_rect);
-          if (rect_convex_it == polygon_convex_it->second.end()) {
+          const auto& polygon_convex_candidates = layer_convex_it->second[polygon_id];
+          auto rect_convex_it = polygon_convex_candidates.find(routing_rect);
+          if (rect_convex_it == polygon_convex_candidates.end()) {
             continue;
           }
 
@@ -466,35 +457,9 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
               PlanarRect curr_par_rect = DRCUTIL.getEnlargedPartRect(routing_rect, curr_boundary.orient, convex_rule.convex_par_within);
               PlanarRect adj_par_rect = DRCUTIL.getEnlargedPartRect(routing_rect, adj_boundary.orient, convex_rule.convex_par_within);
 
-              int32_t max_env_width = 0;
-              std::set<int32_t> env_curr_set;
-              std::set<int32_t> env_adj_set;
-              auto env_rtree_it = routing_env_rtree_map.find(routing_layer_idx);
-              if (env_rtree_it != routing_env_rtree_map.end()) {
-                std::vector<std::pair<GTLRectInt, int32_t>> env_only_rect_net_pair_list;
-                PlanarRect check_rect = DRCUTIL.getEnlargedRect(routing_rect, convex_rule.convex_par_within);
-                env_rtree_it->second.query(bgi::intersects(DRCUTIL.convertToGTLRectInt(check_rect)), std::back_inserter(env_only_rect_net_pair_list));
-                for (const auto& [env_only_gtl_rect, env_only_net_idx] : env_only_rect_net_pair_list) {
-                  PlanarRect env_only_rect = DRCUTIL.convertToPlanarRect(env_only_gtl_rect);
-                  if (!isValidRect(env_only_rect) || DRCUTIL.isClosedOverlap(routing_rect, env_only_rect)) {
-                    continue;
-                  }
-
-                  if (DRCUTIL.isOpenOverlap(env_only_rect, curr_par_rect) && DRCUTIL.getParallelLength(env_only_rect, cut_rect) > 0) {
-                    env_curr_set.insert(env_only_net_idx);
-                    max_env_width = std::max(max_env_width, env_only_rect.getWidth());
-                  }
-                  if (DRCUTIL.isOpenOverlap(env_only_rect, adj_par_rect) && DRCUTIL.getParallelLength(env_only_rect, cut_rect) > 0) {
-                    env_adj_set.insert(env_only_net_idx);
-                  }
-                }
-              }
-              if (env_curr_set.empty() || env_adj_set.empty()) {
-                max_env_width = 0;
-              }
-
               std::set<int32_t> curr_par_net_idx_set;
               std::set<int32_t> adj_par_net_idx_set;
+              bool has_same_net_adj_rect = false;
               std::vector<std::pair<GTLRectInt, int32_t>> env_rect_max_pair_list;
               {
                 PlanarRect check_rect = DRCUTIL.getEnlargedRect(routing_rect, convex_rule.convex_par_within);
@@ -502,21 +467,41 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
               }
               for (const auto& [env_gtl_rect, env_max_rect_id] : env_rect_max_pair_list) {
                 PlanarRect env_routing_rect = DRCUTIL.convertToPlanarRect(env_gtl_rect);
-                if (!isValidRect(env_routing_rect) || DRCUTIL.isClosedOverlap(cut_rect, env_routing_rect)) {
+                if (!isValidRect(env_routing_rect) || DRCUTIL.isClosedOverlap(routing_rect, env_routing_rect)) {
                   continue;
                 }
 
                 int32_t env_net_idx = rv_layer_data.getNetIdxByMaxRectId(env_max_rect_id);
-                if (DRCUTIL.isOpenOverlap(env_routing_rect, curr_par_rect) && DRCUTIL.getParallelLength(env_routing_rect, cut_rect) > 0
-                    && env_routing_rect.getWidth() > max_env_width) {
-                  curr_par_net_idx_set.insert(env_net_idx);
+                bool hit_adj_rect
+                    = DRCUTIL.isOpenOverlap(env_routing_rect, adj_par_rect) && DRCUTIL.getParallelLength(env_routing_rect, cut_rect) > 0;
+                if (hit_adj_rect && cut_data.net_idx != -1 && env_net_idx == cut_data.net_idx) {
+                  has_same_net_adj_rect = true;
+                  break;
                 }
-                if (DRCUTIL.isOpenOverlap(env_routing_rect, adj_par_rect) && DRCUTIL.getParallelLength(env_routing_rect, cut_rect) > 0) {
+                bool hit_curr_rect
+                    = DRCUTIL.isOpenOverlap(env_routing_rect, curr_par_rect) && DRCUTIL.getParallelLength(env_routing_rect, cut_rect) > 0;
+                if (hit_curr_rect) {
+                  int32_t max_env_width = 0;
+                  std::vector<std::pair<GTLRectInt, int32_t>> env_rect_net_pair_list;
+                  rv_layer_data.queryEnvRects(env_gtl_rect, std::back_inserter(env_rect_net_pair_list));
+                  for (const auto& [env_gtl_rect, env_net_idx] : env_rect_net_pair_list) {
+                    (void) env_net_idx;
+                    PlanarRect env_rect = DRCUTIL.convertToPlanarRect(env_gtl_rect);
+                    if (DRCUTIL.isOpenOverlap(env_rect, env_routing_rect)
+                        && env_rect.getRectDirection() == env_routing_rect.getRectDirection()) {
+                      max_env_width = std::max(max_env_width, env_rect.getWidth());
+                    }
+                  }
+                  if (env_routing_rect.getWidth() > max_env_width) {
+                    curr_par_net_idx_set.insert(env_net_idx);
+                  }
+                }
+                if (hit_adj_rect) {
                   adj_par_net_idx_set.insert(env_net_idx);
                 }
               }
 
-              if (curr_par_net_idx_set.empty() || adj_par_net_idx_set.empty()) {
+              if (has_same_net_adj_rect || curr_par_net_idx_set.empty() || adj_par_net_idx_set.empty()) {
                 continue;
               }
 
