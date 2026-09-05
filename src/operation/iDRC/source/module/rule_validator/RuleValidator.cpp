@@ -54,10 +54,10 @@ void RuleValidator::destroyInst()
 std::vector<Violation> RuleValidator::verify(std::vector<DRCShape> drc_env_shape_list, std::vector<DRCShape> drc_result_shape_list,
                                              std::set<ViolationType> drc_check_type_set, std::vector<DRCShape> drc_check_region_list)
 {
-  Monitor monitor;
+  auto monitor = Monitor::create();
   DRCLOG.info(Loc::current(), "Starting...");
   if (drc_env_shape_list.empty() && drc_result_shape_list.empty()) {
-    DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+    DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
     return {};
   }
   RVModel rv_model(std::move(drc_env_shape_list), std::move(drc_result_shape_list), std::move(drc_check_type_set), std::move(drc_check_region_list));
@@ -66,7 +66,7 @@ std::vector<Violation> RuleValidator::verify(std::vector<DRCShape> drc_env_shape
   verifyRVModel(rv_model);
   buildViolationList(rv_model);
   // debugPlotRVModel(rv_model, "best");
-  DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+  DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
   return std::move(rv_model.get_violation_list());
 }
 
@@ -192,7 +192,7 @@ void RuleValidator::buildRVClusterList(RVModel& rv_model)
 
 void RuleValidator::verifyRVModel(RVModel& rv_model)
 {
-  Monitor monitor;
+  auto monitor = Monitor::create();
   DRCLOG.info(Loc::current(), "Starting...");
 #pragma omp parallel for schedule(dynamic)
   for (RVCluster& rv_cluster : rv_model.get_rv_cluster_list()) {
@@ -201,7 +201,7 @@ void RuleValidator::verifyRVModel(RVModel& rv_model)
       buildViolationList(rv_cluster);
     }
   }
-  DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+  DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
 }
 
 void RuleValidator::buildRVCluster(RVCluster& rv_cluster)
@@ -277,7 +277,7 @@ using MetalShortObsPolysetMap = std::map<int32_t, GTLPolySetInt>;
 void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* drc_shape, bool is_env_shape);
 void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, DRCShape* drc_shape);
 void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data,
-                       std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs);
+                       std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs, bool need_polygon_only);
 void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs);
 void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortNetPolysetMap& metal_polysets,
                                    MetalShortObsPolysetMap& obs_polysets);
@@ -286,17 +286,24 @@ void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data
 
 void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
 {
+  const std::set<ViolationType>& check_type_set = *rv_cluster.get_drc_check_type_set();
+  const bool need_polygon_only = check_type_set.size() == 1 && check_type_set.contains(ViolationType::kMinimumArea);
+  const bool need_metal_short = needVerifying(rv_cluster, ViolationType::kMetalShort);
   std::map<int32_t, RVLayerData>& layer_data = rv_cluster.get_layer_data();
   layer_data.clear();
   MetalShortNetPolysetMap metal_short_metal_polysets;
   MetalShortObsPolysetMap metal_short_obs_polysets;
   for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
     addShapeToLayerData(layer_data, drc_shape, true);
-    addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, drc_shape);
+    if (need_metal_short) {
+      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, drc_shape);
+    }
   }
   for (DRCShape* drc_shape : rv_cluster.get_drc_result_shape_list()) {
     addShapeToLayerData(layer_data, drc_shape, false);
-    addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, drc_shape);
+    if (need_metal_short) {
+      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, drc_shape);
+    }
   }
 
   // Each layer owns flat geometry pools and the indexes that refer to them.
@@ -310,10 +317,14 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
     std::vector<std::pair<GTLRectInt, int32_t>> env_rect_rtree_inputs;
     env_rect_rtree_inputs.reserve(env_rect_count);
     for (auto& [net_idx, routing_net] : rv_layer_data.nets) {
-      prepareRoutingNet(net_idx, routing_net, rv_layer_data, env_rect_rtree_inputs);
+      prepareRoutingNet(net_idx, routing_net, rv_layer_data, env_rect_rtree_inputs, need_polygon_only);
     }
-    buildLayerSpatialIndexes(rv_layer_data, env_rect_rtree_inputs);
-    buildMetalShortSpatialIndexes(layer_entry.first, rv_layer_data, metal_short_metal_polysets, metal_short_obs_polysets);
+    if (!need_polygon_only) {
+      buildLayerSpatialIndexes(rv_layer_data, env_rect_rtree_inputs);
+    }
+    if (need_metal_short) {
+      buildMetalShortSpatialIndexes(layer_entry.first, rv_layer_data, metal_short_metal_polysets, metal_short_obs_polysets);
+    }
   }
 }
 
@@ -563,7 +574,7 @@ void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShor
 }
 
 void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data,
-                       std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs)
+                       std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs, bool need_polygon_only)
 {
   NetPrepareContext prepare_context;
   std::vector<GTLRectInt> env_rect_list = std::move(routing_net.env_rect_list);
@@ -577,6 +588,8 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
   GTLPolySetInt env_polyset;
   if (has_env && has_result) {
     env_polyset.insert(env_rect_list.begin(), env_rect_list.end());
+  }
+  if (has_env && has_result && !need_polygon_only) {
     std::vector<GTLRectInt> env_max_rect_list;
     gtl::get_max_rectangles(env_max_rect_list, env_polyset);
     for (const GTLRectInt& env_max_rect : env_max_rect_list) {
@@ -585,7 +598,7 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
   }
 
   // result - env equals (env union result) - env without rebuilding result.
-  if (has_env && has_result) {
+  if (has_env && has_result && !need_polygon_only) {
     GTLPolySetInt delta_polyset = routing_net.polyset - env_polyset;
     prepare_context.has_delta_geometry = !gtl::empty(delta_polyset);
     if (prepare_context.has_delta_geometry) {
@@ -609,6 +622,15 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
     PolygonData& polygon_data = rv_layer_data.polygon_pool.back();
     polygon_data.hole_poly = std::move(hole_poly);
     GTLHolePolyInt& polygon_hole_poly = polygon_data.hole_poly;
+    if (need_polygon_only) {
+      // MinimumArea needs whole-polygon provenance, not rectangle or boundary indexes.
+      polygon_data.isEnv = has_env;
+      if (has_env && has_result) {
+        GTLPolySetInt delta_polyset = polygon_hole_poly - env_polyset;
+        polygon_data.isEnv = gtl::empty(delta_polyset);
+      }
+      continue;
+    }
     std::vector<GTLRectInt> rect_list;
     if (polygon_hole_poly.size() == 4 && polygon_hole_poly.begin_holes() == polygon_hole_poly.end_holes()) {
       rect_list.emplace_back();
