@@ -106,14 +106,14 @@ class PinAccessor
   void buildBoxEnvironment(PABox& pa_box);
   void exemptPinShape(PAModel& pa_model, PABox& pa_box);
   void routePABox(PABox& pa_box);
-  std::vector<PATask*> initTaskSchedule(PABox& pa_box);
+  std::vector<int32_t> initTaskSchedule(PABox& pa_box);
   void removeTaskResultFromEnvironment(PABox& pa_box, PATask* pa_task);
   void routePATask(PABox& pa_box, PATask* pa_task);
   void initSingleRouteTask(PABox& pa_box, PATask* pa_task);
   bool isConnectedAllEnd(PABox& pa_box);
-  void routeSinglePath(PABox& pa_box);
+  [[nodiscard]] bool routeSinglePath(PABox& pa_box);
   void initPathHead(PABox& pa_box);
-  bool searchEnded(PABox& pa_box);
+  bool reachEnd(PABox& pa_box);
   void expandSearching(PABox& pa_box);
   void resetPathHead(PABox& pa_box);
   void updatePathResult(PABox& pa_box);
@@ -170,7 +170,7 @@ class PinAccessor
   bool isAPViaSegment(const Segment<LayerCoord>& segment, const LayerCoord& access_coord);
   void updateAccessPoint(PABox& pa_box);
   void updateBestResult(PABox& pa_box);
-  void updateTaskSchedule(PABox& pa_box, std::vector<PATask*>& routing_task_list, int32_t routing_rounds);
+  void updateTaskSchedule(PABox& pa_box, std::vector<int32_t>& routing_task_list, int32_t routing_rounds);
   void selectBestResult(PABox& pa_box);
   void freePABox(PABox& pa_box);
   void updatePAModel(PAModel& pa_model);

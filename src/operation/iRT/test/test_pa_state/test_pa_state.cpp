@@ -45,20 +45,41 @@ void testResultSnapshot()
   box.get_best_result().set_valid(true);
   require(box.get_best_result().get_valid(), "An empty result is still a valid snapshot");
 
-  irt::PAPin pin;
-  box.get_curr_result().get_net_task_result_map()[7][0].emplace_back(irt::LayerCoord(0, 0, 0), irt::LayerCoord(10, 0, 0));
-  box.get_curr_result().get_net_task_patch_map()[7][0].emplace_back();
-  box.get_curr_result().get_pin_access_point_map()[&pin] = irt::AccessPoint(0, irt::LayerCoord(0, 0, 0));
+  box.get_curr_result().get_task_result_list().resize(1);
+  box.get_curr_result().get_task_result_list()[0].get_segment_list().emplace_back(irt::LayerCoord(0, 0, 0), irt::LayerCoord(10, 0, 0));
+  box.get_curr_result().get_task_result_list()[0].get_patch_list().emplace_back();
+  box.get_curr_result().get_task_result_list()[0].set_access_point(irt::AccessPoint(0, irt::LayerCoord(0, 0, 0)));
   box.get_curr_result().get_route_violation_list().emplace_back();
   box.get_best_result() = box.get_curr_result();
   box.get_best_result().set_valid(true);
   box.get_curr_result() = irt::PABoxResult();
-  require(box.get_best_result().get_net_task_result_map().at(7).at(0).size() == 1, "Snapshot aliases the current segments");
+  require(box.get_best_result().get_task_result_list().at(0).get_segment_list().size() == 1, "Snapshot aliases the current segments");
   box.get_curr_result() = std::move(box.get_best_result());
-  require(box.get_curr_result().get_net_task_patch_map().at(7).at(0).size() == 1, "Restoring a result lost its patch");
-  require(box.get_curr_result().get_pin_access_point_map().size() == 1, "Restoring a result lost its access point");
+  require(box.get_curr_result().get_task_result_list().at(0).get_patch_list().size() == 1, "Restoring a result lost its patch");
+  require(box.get_curr_result().get_task_result_list().at(0).get_access_point().getRealLayerCoord() == irt::LayerCoord(0, 0, 0),
+          "Restoring a result lost its access point");
   require(box.get_curr_result().get_route_violation_list().size() == 1, "Restoring a result lost its violations");
-  require(box.get_best_result().get_net_task_result_map().empty(), "Restoring a result copied instead of moving its segments");
+  require(box.get_best_result().get_task_result_list().empty(), "Restoring a result copied instead of moving its segments");
+}
+
+void testTaskSortKey()
+{
+  irt::PATask task0;
+  irt::PATask task1;
+  std::vector<irt::PAGroup> groups(2);
+  groups[0].get_coord_list() = {irt::LayerCoord(20, 0, 1), irt::LayerCoord(0, 0, 0)};
+  groups[1].get_coord_list() = {irt::LayerCoord(10, 0, 1)};
+  task0.set_pa_group_list(groups);
+  std::vector<irt::LayerCoord> sorted_coords = {irt::LayerCoord(0, 0, 0), irt::LayerCoord(10, 0, 1), irt::LayerCoord(20, 0, 1)};
+  require(task0.get_sort_coord_list() == sorted_coords, "Task sort key does not match canonical coordinates");
+  std::reverse(groups[0].get_coord_list().begin(), groups[0].get_coord_list().end());
+  task1.set_pa_group_list(groups);
+  require(!irt::CmpPATask()(&task0, &task1) && !irt::CmpPATask()(&task1, &task0), "Group coordinate order changed task priority");
+  groups[1].get_coord_list()[0].set_x(5);
+  task1.set_pa_group_list(groups);
+  require(irt::CmpPATask()(&task1, &task0), "Replacing task groups did not refresh the cached sort key");
+  task1.set_pa_group_list({});
+  require(task1.get_sort_coord_list().empty(), "Replacing task groups retained old coordinates");
 }
 
 void testRandomNodeContributions()
@@ -319,6 +340,7 @@ int main(int argc, char** argv)
     }
     require(argc == 1, "Expected no arguments or --benchmark");
     testResultSnapshot();
+    testTaskSortKey();
     testWorkspaceReset();
     testNodeContributions();
     testRandomNodeContributions();

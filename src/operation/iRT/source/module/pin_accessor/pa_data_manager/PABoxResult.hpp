@@ -17,11 +17,24 @@
 #pragma once
 
 #include "AccessPoint.hpp"
-#include "PAPin.hpp"
 #include "Segment.hpp"
 #include "Violation.hpp"
 
 namespace irt {
+
+class PATaskResult
+{
+ public:
+  std::vector<Segment<LayerCoord>>& get_segment_list() { return _segment_list; }
+  std::vector<EXTLayerRect>& get_patch_list() { return _patch_list; }
+  AccessPoint& get_access_point() { return _access_point; }
+  void set_access_point(const AccessPoint& access_point) { _access_point = access_point; }
+
+ private:
+  std::vector<Segment<LayerCoord>> _segment_list;
+  std::vector<EXTLayerRect> _patch_list;
+  AccessPoint _access_point;
+};
 
 class PABoxResult
 {
@@ -34,18 +47,14 @@ class PABoxResult
   ~PABoxResult() = default;
   // getter
   bool get_valid() const { return _valid; }
-  std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_net_task_result_map() { return _net_task_result_map; }
-  std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>>& get_net_task_patch_map() { return _net_task_patch_map; }
-  std::map<PAPin*, AccessPoint>& get_pin_access_point_map() { return _pin_access_point_map; }
+  std::vector<PATaskResult>& get_task_result_list() { return _task_result_list; }
   std::vector<Violation>& get_route_violation_list() { return _route_violation_list; }
   // setter
   void set_valid(bool valid) { _valid = valid; }
 
  private:
   bool _valid = false;
-  std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_task_result_map;
-  std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>> _net_task_patch_map;
-  std::map<PAPin*, AccessPoint> _pin_access_point_map;
+  std::vector<PATaskResult> _task_result_list;
   std::vector<Violation> _route_violation_list;
 };
 

@@ -49,7 +49,8 @@ class PABox
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_net_pin_own_result_map() { return _net_pin_own_result_map; }
   std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>& get_net_pin_env_patch_map() { return _net_pin_env_patch_map; }
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>>& get_net_pin_own_patch_map() { return _net_pin_own_patch_map; }
-  std::vector<PATask*>& get_pa_task_list() { return _pa_task_list; }
+  std::vector<PATask>& get_pa_task_list() { return _pa_task_list; }
+  std::vector<int32_t>& get_task_order_list() { return _task_order_list; }
   ScaleAxis& get_box_track_axis() { return _box_track_axis; }
   std::vector<GridMap<PANode>>& get_layer_node_map() { return _layer_node_map; }
   std::vector<PAShadow>& get_layer_shadow_map() { return _layer_shadow_map; }
@@ -80,7 +81,6 @@ class PABox
   {
     _net_pin_env_patch_map = net_pin_env_patch_map;
   }
-  void set_pa_task_list(const std::vector<PATask*>& pa_task_list) { _pa_task_list = pa_task_list; }
   void set_box_track_axis(const ScaleAxis& box_track_axis) { _box_track_axis = box_track_axis; }
   void set_layer_node_map(const std::vector<GridMap<PANode>>& layer_node_map) { _layer_node_map = layer_node_map; }
   void set_layer_shadow_map(const std::vector<PAShadow>& layer_shadow_map) { _layer_shadow_map = layer_shadow_map; }
@@ -98,7 +98,9 @@ class PABox
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_pin_own_result_map;
   std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>> _net_pin_env_patch_map;
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>> _net_pin_own_patch_map;
-  std::vector<PATask*> _pa_task_list;
+  // Indexed by task_idx; storage is frozen before routing publishes task pointers.
+  std::vector<PATask> _pa_task_list;
+  std::vector<int32_t> _task_order_list;
   ScaleAxis _box_track_axis;
   std::vector<GridMap<PANode>> _layer_node_map;
   std::vector<PAShadow> _layer_shadow_map;
