@@ -175,11 +175,11 @@ void PinAccessor::initAccessPointList(PAModel& pa_model, bool enable_via_candida
     pa_pin->get_target_coord_list().clear();
     access_point_list.clear();
     if (pa_pin->get_is_core() && enable_via_candidates) {
-      std::vector<PALegalShape> legal_shape_list = getLegalShapeList(pa_model, net_pin_pair.first, pa_pin, selected_via_master_list_map);
+      std::vector<PALegalShape> legal_shape_list = getLegalShapeList(net_pin_pair.first, *pa_pin, selected_via_master_list_map);
       access_point_list = getAccessPointList(pa_model, pa_pin->get_pin_idx(), legal_shape_list);
     }
     if (access_point_list.empty()) {
-      std::vector<PALegalShape> legal_shape_list = getLegalShapeList(pa_model, net_pin_pair.first, pa_pin, empty_via_master_list_map);
+      std::vector<PALegalShape> legal_shape_list = getLegalShapeList(net_pin_pair.first, *pa_pin, empty_via_master_list_map);
       access_point_list = getAccessPointList(pa_model, pa_pin->get_pin_idx(), legal_shape_list);
     }
     if (access_point_list.empty()) {
@@ -207,19 +207,19 @@ void PinAccessor::initAccessPointList(PAModel& pa_model, bool enable_via_candida
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-std::vector<PALegalShape> PinAccessor::getLegalShapeList(PAModel& pa_model, int32_t net_idx, PAPin* pa_pin,
+std::vector<PALegalShape> PinAccessor::getLegalShapeList(int32_t net_idx, PAPin& pa_pin,
                                                          const std::map<int32_t, std::vector<ViaMaster*>>& selected_via_master_list_map)
 {
   std::vector<std::pair<int32_t, std::vector<EXTLayerRect>>> routing_pin_shape_list;
   {
     std::map<int32_t, std::vector<EXTLayerRect>> routing_pin_shape_map;
-    for (EXTLayerRect& routing_shape : pa_pin->get_routing_shape_list()) {
+    for (EXTLayerRect& routing_shape : pa_pin.get_routing_shape_list()) {
       routing_pin_shape_map[routing_shape.get_layer_idx()].emplace_back(routing_shape);
     }
     for (auto& [routing_layer_idx, pin_shape_list] : routing_pin_shape_map) {
-      routing_pin_shape_list.emplace_back(routing_layer_idx, pin_shape_list);
+      routing_pin_shape_list.emplace_back(routing_layer_idx, std::move(pin_shape_list));
     }
-    if (pa_pin->get_is_core()) {
+    if (pa_pin.get_is_core()) {
       std::ranges::sort(routing_pin_shape_list, [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a,
                                                    const std::pair<int32_t, std::vector<EXTLayerRect>>& b) { return a.first > b.first; });
     } else {
@@ -232,16 +232,14 @@ std::vector<PALegalShape> PinAccessor::getLegalShapeList(PAModel& pa_model, int3
   std::vector<PALegalShape> legal_shape_list;
   for (auto& [routing_layer_idx, pin_shape_list] : routing_pin_shape_list) {
     if (selected_via_master_list_map.empty()) {
-      for (PALegalShape& legal_shape : getPlanarLegalShapeList(pa_model, net_idx, pa_pin, pin_shape_list, nullptr)) {
-        legal_shape_list.push_back(legal_shape);
-      }
+      legal_shape_list = getPlanarLegalShapeList(net_idx, pin_shape_list, nullptr);
     } else {
       auto iter = selected_via_master_list_map.find(routing_layer_idx);
       if (iter == selected_via_master_list_map.end()) {
         continue;
       }
       for (ViaMaster* via_master : iter->second) {
-        for (PALegalShape& legal_shape : getPlanarLegalShapeList(pa_model, net_idx, pa_pin, pin_shape_list, via_master)) {
+        for (PALegalShape& legal_shape : getPlanarLegalShapeList(net_idx, pin_shape_list, via_master)) {
           legal_shape_list.push_back(legal_shape);
         }
       }
@@ -253,14 +251,14 @@ std::vector<PALegalShape> PinAccessor::getLegalShapeList(PAModel& pa_model, int3
   if (!legal_shape_list.empty() || !selected_via_master_list_map.empty()) {
     return legal_shape_list;
   }
-  for (EXTLayerRect& routing_shape : pa_pin->get_routing_shape_list()) {
+  // Only the default AP pass falls back to the original pin shapes.
+  for (EXTLayerRect& routing_shape : pa_pin.get_routing_shape_list()) {
     legal_shape_list.push_back({routing_shape.getRealLayerRect(), ViaMasterIdx()});
   }
   return legal_shape_list;
 }
 
-std::vector<PALegalShape> PinAccessor::getPlanarLegalShapeList(PAModel& pa_model, int32_t curr_net_idx, PAPin* pa_pin,
-                                                               std::vector<EXTLayerRect>& pin_shape_list, ViaMaster* via_master)
+std::vector<PALegalShape> PinAccessor::getPlanarLegalShapeList(int32_t curr_net_idx, const std::vector<EXTLayerRect>& pin_shape_list, ViaMaster* via_master)
 {
   if (pin_shape_list.empty()) {
     RTLOG.error(Loc::current(), "The pin_shape_list is empty!");
@@ -270,29 +268,23 @@ std::vector<PALegalShape> PinAccessor::getPlanarLegalShapeList(PAModel& pa_model
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::map<int32_t, PlanarRect>& layer_enclosure_map = RTDM.getDatabase().get_layer_enclosure_map();
 
-  int32_t curr_layer_idx;
-  {
-    for (EXTLayerRect& pin_shape : pin_shape_list) {
-      if (pin_shape_list.front().get_layer_idx() != pin_shape.get_layer_idx()) {
-        RTLOG.error(Loc::current(), "The pin_shape_list is not on the same layer!");
-      }
-    }
-    curr_layer_idx = pin_shape_list.front().get_layer_idx();
-  }
+  int32_t curr_layer_idx = pin_shape_list.front().get_layer_idx();
   if (curr_layer_idx < 0 || curr_layer_idx >= static_cast<int32_t>(routing_layer_list.size())) {
     RTLOG.error(Loc::current(), "The pin layer index is out of range: ", curr_layer_idx);
     return {};
   }
   std::vector<PlanarRect> origin_pin_shape_list;
-  {
-    for (EXTLayerRect& pin_shape : pin_shape_list) {
-      origin_pin_shape_list.push_back(pin_shape.get_real_rect());
+  origin_pin_shape_list.reserve(pin_shape_list.size());
+  for (const EXTLayerRect& pin_shape : pin_shape_list) {
+    if (curr_layer_idx != pin_shape.get_layer_idx()) {
+      RTLOG.error(Loc::current(), "The pin_shape_list is not on the same layer!");
     }
+    origin_pin_shape_list.push_back(pin_shape.get_real_rect());
   }
-  // 当前层缩小后的结果
+  // Shrink by the larger of the wire half-width and the selected enclosure.
   std::vector<EXTLayerRect> shrinked_rect_list;
   {
-    PlanarRect enclosure = (via_master == nullptr ? layer_enclosure_map[curr_layer_idx] : getViaEnclosure(*via_master, curr_layer_idx));
+    PlanarRect enclosure = (via_master == nullptr ? layer_enclosure_map.at(curr_layer_idx) : getViaEnclosure(*via_master, curr_layer_idx));
     int32_t enclosure_half_x_span = enclosure.getXSpan() / 2;
     int32_t enclosure_half_y_span = enclosure.getYSpan() / 2;
     int32_t half_min_width = routing_layer_list[curr_layer_idx].get_min_width() / 2;
@@ -307,13 +299,39 @@ std::vector<PALegalShape> PinAccessor::getPlanarLegalShapeList(PAModel& pa_model
       shrinked_rect_list.push_back(shrinked_rect);
     }
   }
-  /**
-   * 要被剪裁的obstacle的集合
-   * 排序按照 本层 上层
-   * 如果不是最顶层就往上取一层
-   * 是最顶层就往下取一层
-   */
-  std::vector<int32_t> obs_layer_idx_list;
+  std::array<int32_t, 2> obs_layer_idx_list = getAccessObstacleLayerList(curr_layer_idx, via_master);
+  std::vector<PlanarRect> legal_rect_list;
+  legal_rect_list.reserve(shrinked_rect_list.size());
+  for (const EXTLayerRect& shrinked_rect : shrinked_rect_list) {
+    legal_rect_list.push_back(shrinked_rect.get_real_rect());
+  }
+  for (int32_t obs_layer_idx : obs_layer_idx_list) {
+    std::vector<PlanarRect> obs_shape_list = getAccessObstacleList(curr_net_idx, curr_layer_idx, obs_layer_idx, shrinked_rect_list, via_master);
+    if (obs_shape_list.empty()) {
+      continue;
+    }
+    std::vector<PlanarRect> cut_rect_list = RTUTIL.getClosedCuttingRectListByBoost(legal_rect_list, obs_shape_list);
+    if (cut_rect_list.empty()) {
+      // Preserve the last nonempty candidates; obstacle clipping is not a DRC certificate.
+      break;
+    }
+    legal_rect_list = std::move(cut_rect_list);
+  }
+  ViaMasterIdx via_master_idx = (via_master == nullptr ? ViaMasterIdx() : via_master->get_via_master_idx());
+  std::vector<PALegalShape> legal_shape_list;
+  for (PlanarRect& legal_rect : RTUTIL.mergeRectListByBoost(legal_rect_list, Direction::kVertical)) {
+    legal_shape_list.push_back({LayerRect(legal_rect, curr_layer_idx), via_master_idx});
+  }
+  for (PlanarRect& legal_rect : RTUTIL.mergeRectListByBoost(legal_rect_list, Direction::kHorizontal)) {
+    legal_shape_list.push_back({LayerRect(legal_rect, curr_layer_idx), via_master_idx});
+  }
+  return legal_shape_list;
+}
+
+std::array<int32_t, 2> PinAccessor::getAccessObstacleLayerList(int32_t curr_layer_idx, ViaMaster* via_master)
+{
+  int32_t layer_num = static_cast<int32_t>(RTDM.getDatabase().get_routing_layer_list().size());
+  std::array<int32_t, 2> obs_layer_idx_list;
   if (via_master != nullptr) {
     int32_t below_layer_idx = via_master->get_below_enclosure().get_layer_idx();
     int32_t above_layer_idx = via_master->get_above_enclosure().get_layer_idx();
@@ -325,92 +343,55 @@ std::vector<PALegalShape> PinAccessor::getPlanarLegalShapeList(PAModel& pa_model
       RTLOG.error(Loc::current(), "The via master is not adjacent to the pin layer!");
       return {};
     }
-  } else if (curr_layer_idx < (static_cast<int32_t>(routing_layer_list.size()) - 1)) {
+  } else if (curr_layer_idx < layer_num - 1) {
     obs_layer_idx_list = {curr_layer_idx, curr_layer_idx + 1};
   } else {
     obs_layer_idx_list = {curr_layer_idx, curr_layer_idx - 1};
   }
-  std::vector<std::vector<PlanarRect>> routing_obs_shape_list_list;
   for (int32_t obs_layer_idx : obs_layer_idx_list) {
-    if (obs_layer_idx < 0 || obs_layer_idx >= static_cast<int32_t>(routing_layer_list.size())) {
+    if (obs_layer_idx < 0 || obs_layer_idx >= layer_num) {
       RTLOG.error(Loc::current(), "The obstacle layer index is out of range: ", obs_layer_idx);
       return {};
     }
-    RoutingLayer& routing_layer = routing_layer_list[obs_layer_idx];
-    PlanarRect enclosure = (via_master == nullptr ? layer_enclosure_map[obs_layer_idx] : getViaEnclosure(*via_master, obs_layer_idx));
-    int32_t enclosure_half_x_span = enclosure.getXSpan() / 2;
-    int32_t enclosure_half_y_span = enclosure.getYSpan() / 2;
+  }
+  return obs_layer_idx_list;
+}
 
-    std::vector<PlanarRect> routing_obs_shape_list;
-    for (EXTLayerRect& shrinked_rect : shrinked_rect_list) {
-      for (auto& [is_routing, layer_net_fixed_rect_map] : RTDM.getTypeLayerNetFixedRectMap(shrinked_rect)) {
-        if (!is_routing) {
-          continue;
-        }
-        for (auto& [layer_idx, net_fixed_rect_map] : layer_net_fixed_rect_map) {
-          if (obs_layer_idx != layer_idx) {
-            continue;
-          }
-          for (auto& [net_idx, fixed_rect_set] : net_fixed_rect_map) {
-            if (net_idx == curr_net_idx) {
-              continue;
-            }
-            for (EXTLayerRect* fixed_rect : fixed_rect_set) {
-              // x_spacing y_spacing
-              std::vector<std::pair<int32_t, int32_t>> spacing_pair_list;
-              {
-                // 剪裁pin_shape只会在routing层
-                // prl
-                int32_t prl_spacing = routing_layer.getPRLSpacing(fixed_rect->get_real_rect());
-                spacing_pair_list.emplace_back(prl_spacing, prl_spacing);
-                if (layer_idx != curr_layer_idx) {
-                  // eol
-                  if (routing_layer.isPreferH()) {
-                    spacing_pair_list.emplace_back(routing_layer.get_eol_spacing(), routing_layer.get_eol_within());
-                  } else {
-                    spacing_pair_list.emplace_back(routing_layer.get_eol_within(), routing_layer.get_eol_spacing());
-                  }
-                }
-              }
-              for (auto& [x_spacing, y_spacing] : spacing_pair_list) {
-                int32_t enlarged_x_size = x_spacing + enclosure_half_x_span;
-                int32_t enlarged_y_size = y_spacing + enclosure_half_y_span;
-                PlanarRect enlarged_rect
-                    = RTUTIL.getEnlargedRect(fixed_rect->get_real_rect(), enlarged_x_size, enlarged_y_size, enlarged_x_size, enlarged_y_size);
-                if (RTUTIL.isOpenOverlap(shrinked_rect.get_real_rect(), enlarged_rect)) {
-                  routing_obs_shape_list.push_back(enlarged_rect);
-                }
-              }
-            }
+std::vector<PlanarRect> PinAccessor::getAccessObstacleList(int32_t curr_net_idx, int32_t curr_layer_idx, int32_t obs_layer_idx,
+                                                           const std::vector<EXTLayerRect>& shrinked_rect_list, ViaMaster* via_master)
+{
+  RoutingLayer& routing_layer = RTDM.getDatabase().get_routing_layer_list()[obs_layer_idx];
+  PlanarRect enclosure = (via_master == nullptr ? RTDM.getDatabase().get_layer_enclosure_map().at(obs_layer_idx) : getViaEnclosure(*via_master, obs_layer_idx));
+  int32_t enclosure_half_x_span = enclosure.getXSpan() / 2;
+  int32_t enclosure_half_y_span = enclosure.getYSpan() / 2;
+  std::pair<int32_t, int32_t> eol_spacing(routing_layer.get_eol_spacing(), routing_layer.get_eol_within());
+  if (!routing_layer.isPreferH()) {
+    std::swap(eol_spacing.first, eol_spacing.second);
+  }
+  std::vector<PlanarRect> obs_shape_list;
+  for (const EXTLayerRect& shrinked_rect : shrinked_rect_list) {
+    EXTLayerRect query_rect = shrinked_rect;
+    query_rect.set_layer_idx(obs_layer_idx);
+    for (auto& [net_idx, fixed_rect_set] : RTDM.getNetFixedRectMap(true, query_rect)) {
+      if (net_idx == curr_net_idx) {
+        continue;
+      }
+      for (EXTLayerRect* fixed_rect : fixed_rect_set) {
+        int32_t prl_spacing = routing_layer.getPRLSpacing(fixed_rect->get_real_rect());
+        std::array<std::pair<int32_t, int32_t>, 2> spacing_pair_list = {{{prl_spacing, prl_spacing}, eol_spacing}};
+        size_t spacing_num = obs_layer_idx == curr_layer_idx ? 1 : 2;
+        for (size_t i = 0; i < spacing_num; i++) {
+          int32_t enlarged_x_size = spacing_pair_list[i].first + enclosure_half_x_span;
+          int32_t enlarged_y_size = spacing_pair_list[i].second + enclosure_half_y_span;
+          PlanarRect enlarged_rect = RTUTIL.getEnlargedRect(fixed_rect->get_real_rect(), enlarged_x_size, enlarged_y_size, enlarged_x_size, enlarged_y_size);
+          if (RTUTIL.isOpenOverlap(shrinked_rect.get_real_rect(), enlarged_rect)) {
+            obs_shape_list.push_back(enlarged_rect);
           }
         }
       }
     }
-    if (!routing_obs_shape_list.empty()) {
-      routing_obs_shape_list_list.push_back(routing_obs_shape_list);
-    }
   }
-  std::vector<PlanarRect> legal_rect_list;
-  for (EXTLayerRect& shrinked_rect : shrinked_rect_list) {
-    legal_rect_list.push_back(shrinked_rect.get_real_rect());
-  }
-  for (std::vector<PlanarRect>& routing_obs_shape_list : routing_obs_shape_list_list) {
-    std::vector<PlanarRect> legal_rect_list_temp = RTUTIL.getClosedCuttingRectListByBoost(legal_rect_list, routing_obs_shape_list);
-    if (!legal_rect_list_temp.empty()) {
-      legal_rect_list = legal_rect_list_temp;
-    } else {
-      break;
-    }
-  }
-  ViaMasterIdx via_master_idx = (via_master == nullptr ? ViaMasterIdx() : via_master->get_via_master_idx());
-  std::vector<PALegalShape> legal_shape_list;
-  for (PlanarRect& legal_rect : RTUTIL.mergeRectListByBoost(legal_rect_list, Direction::kVertical)) {
-    legal_shape_list.push_back({LayerRect(legal_rect, curr_layer_idx), via_master_idx});
-  }
-  for (PlanarRect& legal_rect : RTUTIL.mergeRectListByBoost(legal_rect_list, Direction::kHorizontal)) {
-    legal_shape_list.push_back({LayerRect(legal_rect, curr_layer_idx), via_master_idx});
-  }
-  return legal_shape_list;
+  return obs_shape_list;
 }
 
 std::vector<AccessPoint> PinAccessor::getAccessPointList(PAModel& pa_model, int32_t pin_idx, std::vector<PALegalShape>& legal_shape_list)

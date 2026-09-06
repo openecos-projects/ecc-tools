@@ -81,10 +81,11 @@ class PinAccessor
   PANet convertToPANet(Net& net);
   void setPAComParam(PAModel& pa_model);
   void initAccessPointList(PAModel& pa_model, bool enable_via_candidates);
-  std::vector<PALegalShape> getLegalShapeList(PAModel& pa_model, int32_t net_idx, PAPin* pa_pin,
-                                              const std::map<int32_t, std::vector<ViaMaster*>>& selected_via_master_list_map);
-  std::vector<PALegalShape> getPlanarLegalShapeList(PAModel& pa_model, int32_t curr_net_idx, PAPin* pa_pin, std::vector<EXTLayerRect>& pin_shape_list,
-                                                    ViaMaster* via_master);
+  std::vector<PALegalShape> getLegalShapeList(int32_t net_idx, PAPin& pa_pin, const std::map<int32_t, std::vector<ViaMaster*>>& selected_via_master_list_map);
+  std::vector<PALegalShape> getPlanarLegalShapeList(int32_t curr_net_idx, const std::vector<EXTLayerRect>& pin_shape_list, ViaMaster* via_master);
+  std::array<int32_t, 2> getAccessObstacleLayerList(int32_t curr_layer_idx, ViaMaster* via_master);
+  std::vector<PlanarRect> getAccessObstacleList(int32_t curr_net_idx, int32_t curr_layer_idx, int32_t obs_layer_idx,
+                                                const std::vector<EXTLayerRect>& shrinked_rect_list, ViaMaster* via_master);
   std::vector<AccessPoint> getAccessPointList(PAModel& pa_model, int32_t pin_idx, std::vector<PALegalShape>& legal_shape_list);
   std::vector<int32_t> getCandidateAxisCoordList(int32_t ll, int32_t ur, int32_t manufacture_grid, const std::vector<int32_t>& track_list);
   std::vector<PACandidateAccessPoint> getRankedAccessPointList(const std::map<LayerCoord, int32_t, CmpLayerCoordByXASC>& coord_track_num_map);

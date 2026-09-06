@@ -165,6 +165,150 @@ void testTargets(irt::PinAccessor& accessor)
   }
 }
 
+irt::EXTLayerRect makeLegalRect(const irt::LayerRect& shape)
+{
+  irt::EXTLayerRect rect;
+  rect.set_real_rect(shape.get_rect());
+  rect.set_layer_idx(shape.get_layer_idx());
+  return rect;
+}
+
+void initLegalDatabase()
+{
+  auto& database = irt::DataManager::getInst().getDatabase();
+  database.get_die().set_real_rect(irt::PlanarRect(0, 0, 600, 600));
+  database.set_detection_distance(30);
+  std::vector<int32_t> coords;
+  for (int32_t coord = 0; coord <= 600; coord += 60) {
+    coords.push_back(coord);
+  }
+  database.get_gcell_axis().set_x_grid_list(irt::Utility::makeScaleGridList(coords));
+  database.get_gcell_axis().set_y_grid_list(irt::Utility::makeScaleGridList(coords));
+  for (int32_t layer_idx = 0; layer_idx < 3; layer_idx++) {
+    auto& layer = database.get_routing_layer_list()[layer_idx];
+    layer.set_prefer_direction(layer_idx == 1 ? irt::Direction::kVertical : irt::Direction::kHorizontal);
+    layer.set_eol_spacing(6 + layer_idx);
+    layer.set_eol_within(3);
+    layer.get_prl_spacing_table().get_width_list() = {0, 20};
+    layer.get_prl_spacing_table().get_width_parallel_length_map().init(2, 1, 4 + layer_idx);
+    layer.get_prl_spacing_table().get_width_parallel_length_map()[1][0] += 3;
+    database.get_layer_enclosure_map()[layer_idx] = irt::PlanarRect(-2, -2, 2, 2);
+  }
+  for (int32_t layer_idx = 0; layer_idx < 2; layer_idx++) {
+    for (int32_t via_idx = 0; via_idx < 3; via_idx++) {
+      auto& via = database.get_layer_via_master_list()[layer_idx][via_idx];
+      via.set_below_enclosure(irt::LayerRect(-2 - via_idx, -3, 2 + via_idx, 3, layer_idx));
+      via.set_above_enclosure(irt::LayerRect(-3, -4 - via_idx, 3, 4 + via_idx, layer_idx + 1));
+    }
+  }
+}
+
+uint64_t testLegalShapes(irt::PinAccessor& accessor, int32_t& rejected_num)
+{
+  initLegalDatabase();
+  auto& database = irt::DataManager::getInst().getDatabase();
+  auto& trees = database.get_type_layer_fixed_rect_rtree_map();
+  std::vector<irt::EXTLayerRect> fixed_shapes(60);
+  std::mt19937 random(97);
+  uint64_t signature = UINT64_C(14695981039346656037);
+  rejected_num = 0;
+  for (int32_t case_idx = 0; case_idx < 600; case_idx++) {
+    trees = {};
+    for (size_t i = 0; i < fixed_shapes.size(); i++) {
+      int32_t x = 50 + random() % 470;
+      int32_t y = 50 + random() % 470;
+      int32_t width = 1 + random() % 70;
+      int32_t height = 1 + random() % 70;
+      fixed_shapes[i] = makeLegalRect(irt::LayerRect(x, y, x + width, y + height, i % 3));
+      bool is_routing = i % 4 != 0;
+      int32_t net_idx = static_cast<int32_t>(i % 4) - 1;
+      trees[is_routing][i % 3].insert({irt::Utility::convertToBGRectInt(fixed_shapes[i].get_real_rect()), {net_idx, &fixed_shapes[i]}});
+    }
+    irt::PAPin pin;
+    pin.set_is_core(case_idx % 2 == 0);
+    for (int32_t i = 0; i <= case_idx % 4; i++) {
+      int32_t x = 100 + random() % 350;
+      int32_t y = 100 + random() % 350;
+      int32_t width = 1 + random() % 90;
+      int32_t height = 1 + random() % 90;
+      int32_t layer_idx = random() % 3;
+      auto shape = makeLegalRect(irt::LayerRect(x, y, x + width, y + height, layer_idx));
+      pin.get_routing_shape_list().push_back(shape);
+      if (case_idx % 7 == 0) {
+        pin.get_routing_shape_list().push_back(shape);
+      }
+    }
+    std::map<int32_t, std::vector<irt::ViaMaster*>> selected;
+    if (case_idx % 3 != 0) {
+      for (auto& masters : database.get_layer_via_master_list()) {
+        for (auto& via : masters) {
+          if (case_idx % 3 == 1 && via.get_via_master_idx().get_via_idx() != 0) {
+            continue;
+          }
+          selected[via.get_below_enclosure().get_layer_idx()].push_back(&via);
+          selected[via.get_above_enclosure().get_layer_idx()].push_back(&via);
+        }
+      }
+    }
+    appendSignature(signature, case_idx);
+    std::vector<irt::PALegalShape> shapes;
+    try {
+      shapes = accessor.getLegalShapeList(0, pin, selected);
+    } catch (const std::runtime_error& error) {
+      // The shared Boost clipping utility rejects some valid integer inputs on precision loss.
+      std::string message(error.what());
+      require(message == "Exceeding the error range of a double!" || message == "The segment is oblique!", "Unexpected legal-geometry rejection");
+      std::cout << "Rejected legal geometry case: " << case_idx << '\n';
+      appendSignature(signature, -1);
+      rejected_num++;
+      continue;
+    }
+    appendSignature(signature, shapes.size());
+    for (const auto& shape : shapes) {
+      appendSignature(signature, shape.shape.get_layer_idx());
+      appendSignature(signature, shape.shape.get_ll_x());
+      appendSignature(signature, shape.shape.get_ll_y());
+      appendSignature(signature, shape.shape.get_ur_x());
+      appendSignature(signature, shape.shape.get_ur_y());
+      appendSignature(signature, shape.via_master_idx.get_below_layer_idx());
+      appendSignature(signature, shape.via_master_idx.get_via_idx());
+    }
+  }
+  trees = {};
+  return signature;
+}
+
+void testLegalBoundaries(irt::PinAccessor& accessor)
+{
+  auto& database = irt::DataManager::getInst().getDatabase();
+  auto& trees = database.get_type_layer_fixed_rect_rtree_map();
+  irt::PAPin pin;
+  auto thin_shape = makeLegalRect(irt::LayerRect(100, 100, 102, 102, 0));
+  pin.get_routing_shape_list() = {thin_shape};
+  auto shapes = accessor.getLegalShapeList(0, pin, {});
+  require(shapes.size() == 1 && shapes[0].shape == thin_shape.getRealLayerRect(), "Default candidates lost original-shape fallback");
+  std::map<int32_t, std::vector<irt::ViaMaster*>> selected = {{0, {&database.get_layer_via_master_list()[0][0]}}};
+  require(accessor.getLegalShapeList(0, pin, selected).empty(), "Via candidates silently used the planar fallback");
+
+  pin.get_routing_shape_list() = {makeLegalRect(irt::LayerRect(200, 200, 230, 230, 0))};
+  auto unobstructed = accessor.getLegalShapeList(0, pin, {});
+  auto obstacle = makeLegalRect(irt::LayerRect(50, 50, 550, 550, 0));
+  trees[true][0].insert({irt::Utility::convertToBGRectInt(obstacle.get_real_rect()), {-1, &obstacle}});
+  shapes = accessor.getLegalShapeList(0, pin, {});
+  require(shapes.size() == unobstructed.size(), "Fully blocked candidates lost best-effort geometry");
+  for (size_t i = 0; i < shapes.size(); i++) {
+    require(shapes[i].shape == unobstructed[i].shape, "Fully blocked candidates changed the last nonempty geometry");
+  }
+  trees = {};
+  for (int32_t layer_idx = 1; layer_idx < 3; layer_idx++) {
+    pin.get_routing_shape_list().push_back(makeLegalRect(irt::LayerRect(200, 200, 230, 230, layer_idx)));
+  }
+  pin.set_is_core(false);
+  require(accessor.getLegalShapeList(0, pin, {}).front().shape.get_layer_idx() == 1, "Noncore layer priority changed");
+  pin.set_is_core(true);
+  require(accessor.getLegalShapeList(0, pin, {}).front().shape.get_layer_idx() == 2, "Core layer priority changed");
+}
+
 }  // namespace
 
 int main()
@@ -179,6 +323,20 @@ int main()
     std::cout << "PA candidate signature: " << signature << '\n';
     // Recorded against e70f14fc3 before restructuring candidate enumeration and selection.
     require(signature == UINT64_C(16264380958811896310), "Candidate ordering, cost, sampling, or via selection changed");
+    bool had_throw_policy = std::getenv("ECC_LOGGER_THROW_ON_ERROR") != nullptr;
+    if (!had_throw_policy) {
+      require(setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1) == 0, "Cannot enable logger exceptions for geometry rejection tests");
+    }
+    int32_t rejected_num = 0;
+    uint64_t legal_signature = testLegalShapes(accessor, rejected_num);
+    if (!had_throw_policy) {
+      require(unsetenv("ECC_LOGGER_THROW_ON_ERROR") == 0, "Cannot restore logger error policy");
+    }
+    std::cout << "PA legal geometry signature: " << legal_signature << ", rejected: " << rejected_num << '\n';
+    // Recorded against a18f572df before narrowing queries and restructuring the geometry pipeline.
+    require(legal_signature == UINT64_C(14584988952947507999) && rejected_num == 2,
+            "Legal geometry ordering, enclosure, obstacle policy, or precision rejection changed");
+    testLegalBoundaries(accessor);
     irt::DataManager::destroyInst();
     irt::Utility::destroyInst();
     std::cout << "PA candidate tests passed\n";
