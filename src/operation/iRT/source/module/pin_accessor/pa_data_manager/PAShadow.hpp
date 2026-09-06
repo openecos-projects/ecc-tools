@@ -33,7 +33,6 @@ class PAShadow
   const RectRTree& get_fixed_rect_rtree() const { return _fixed_rect_rtree; }
   const RectRTree& get_routed_rect_rtree() const { return _routed_rect_rtree; }
   const std::map<int32_t, std::map<PlanarRect, int32_t, CmpPlanarRectByXASC>>& get_net_routed_rect_map() const { return _net_routed_rect_map; }
-  const std::set<PlanarRect, CmpPlanarRectByXASC>& get_violation_set() const { return _violation_set; }
   // function
   void addFixedRect(int32_t net_idx, const PlanarRect& rect)
   {
@@ -88,8 +87,6 @@ class PAShadow
       _net_routed_rect_map.erase(net_iter);
     }
   }
-  void addViolation(const PlanarRect& rect) { _violation_set.insert(rect); }
-  void clearViolation() { _violation_set.clear(); }
   double getFixedRectCost(int32_t net_idx, const PlanarRect& rect, double unit) const
   {
     if (!_fixed_rect_built) {
@@ -98,16 +95,6 @@ class PAShadow
     return getRectCost(_fixed_rect_rtree, net_idx, rect, unit);
   }
   double getRoutedRectCost(int32_t net_idx, const PlanarRect& rect, double unit) const { return getRectCost(_routed_rect_rtree, net_idx, rect, unit); }
-  double getViolationCost(const PlanarRect& rect, double unit) const
-  {
-    double cost = 0;
-    for (const PlanarRect& violation : _violation_set) {
-      if (Utility::isOpenOverlap(rect, violation)) {
-        cost += unit;
-      }
-    }
-    return cost;
-  }
 
  private:
   // Fixed input is collected once and released after bulk construction. Routed entries track live contributions.
@@ -116,7 +103,6 @@ class PAShadow
   RectRTree _fixed_rect_rtree;
   RectRTree _routed_rect_rtree;
   std::map<int32_t, std::map<PlanarRect, int32_t, CmpPlanarRectByXASC>> _net_routed_rect_map;
-  std::set<PlanarRect, CmpPlanarRectByXASC> _violation_set;
 
   double getRectCost(const RectRTree& rtree, int32_t net_idx, const PlanarRect& rect, double unit) const
   {

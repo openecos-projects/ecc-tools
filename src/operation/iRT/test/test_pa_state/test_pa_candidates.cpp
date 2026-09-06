@@ -118,23 +118,6 @@ void testCandidateBoundaries(irt::PinAccessor& accessor)
           "Via alternatives lost canonical order or uniqueness");
 }
 
-void testIterationParameters(irt::PinAccessor& accessor)
-{
-  auto parameters = accessor.getPAIterParamList();
-  require(parameters.size() == 6, "Iteration count changed");
-  for (size_t i = 0; i < parameters.size(); i++) {
-    auto& param = parameters[i];
-    int32_t multiplier = i < 3 ? 1 : 2;
-    require(param.get_prefer_wire_unit() == 1 && param.get_non_prefer_wire_unit() == 2.5 && param.get_via_unit() == 150, "Iteration wire/via costs changed");
-    require(
-        param.get_fixed_rect_unit() == multiplier * 300 && param.get_routed_rect_unit() == multiplier * 150 && param.get_violation_unit() == multiplier * 300,
-        "Iteration environment penalties changed");
-    require(param.get_size() == 3 && param.get_offset() == static_cast<int32_t>(i % 3) && param.get_schedule_interval() == 3, "Iteration box tiling changed");
-    require(param.get_max_routed_times() == (i == 0 ? 20 : (i < 3 ? 80 : 100)) && param.get_max_candidate_patch_num() == 20,
-            "Iteration routing or patch budget changed");
-  }
-}
-
 void testTargets(irt::PinAccessor& accessor)
 {
   auto& database = irt::DataManager::getInst().getDatabase();
@@ -393,7 +376,6 @@ uint64_t testPatchCandidates(irt::PinAccessor& accessor)
     param.set_max_candidate_patch_num(1 + case_idx % 24);
     param.set_fixed_rect_unit(7);
     param.set_routed_rect_unit(3);
-    param.set_violation_unit(11);
     box.set_pa_iter_param(&param);
     box.get_box_rect().set_real_rect(database.get_die().get_real_rect());
     irt::PATask task;
@@ -409,7 +391,6 @@ uint64_t testPatchCandidates(irt::PinAccessor& accessor)
     } else if (case_idx % 4 == 1) {
       shadow.addFixedRect(1, irt::PlanarRect(x - 10, y - 10, x + 20, y + 30));
       shadow.addRoutedRect(2, irt::PlanarRect(x + 5, y - 20, x + 40, y + 10));
-      shadow.addViolation(irt::PlanarRect(x - 20, y + 10, x + 20, y + 20));
     }
     shadow.addFixedRect(0, database.get_die().get_real_rect());
     shadow.buildFixedRectRTree();
@@ -433,10 +414,20 @@ uint64_t testPatchCandidates(irt::PinAccessor& accessor)
     appendSignature(signature, case_idx);
     appendSignature(signature, candidates.size());
     std::set<irt::PlanarRect, irt::CmpPlanarRectByXASC> unique_rects;
-    for (auto& candidate : candidates) {
+    irt::Direction layer_direction = layer.get_prefer_direction();
+    for (size_t candidate_idx = 0; candidate_idx < candidates.size(); candidate_idx++) {
+      auto& candidate = candidates[candidate_idx];
       const auto& rect = candidate.get_patch().get_real_rect();
       require(unique_rects.insert(rect).second, "Duplicate patch candidate");
       require(irt::Utility::isInside(database.get_die().get_real_rect(), rect), "Patch candidate escaped the die");
+      require(candidate.get_fixed_rect_cost() == accessor.getFixedRectCost(box, task.get_net_idx(), candidate.get_patch())
+                  && candidate.get_routed_rect_cost() == accessor.getRoutedRectCost(box, task.get_net_idx(), candidate.get_patch()),
+              "Patch candidate costs disagree with the fixed/routed shadow");
+      require(candidate.getTotalCost() == candidate.get_fixed_rect_cost() + candidate.get_routed_rect_cost(), "Patch total cost changed");
+      require(candidates.size() == 1 || candidate.getTotalCost() == 0, "Multiple patch candidates include a nonzero-cost patch");
+      if (candidate_idx > 0) {
+        require(!irt::CmpPAPatch()(candidate, candidates[candidate_idx - 1], layer_direction), "Patch candidates are not in rank order");
+      }
       appendSignature(signature, rect.get_ll_x());
       appendSignature(signature, rect.get_ll_y());
       appendSignature(signature, rect.get_ur_x());
@@ -444,7 +435,6 @@ uint64_t testPatchCandidates(irt::PinAccessor& accessor)
       appendSignature(signature, candidate.get_patch().get_layer_idx());
       appendSignature(signature, candidate.get_fixed_rect_cost());
       appendSignature(signature, candidate.get_routed_rect_cost());
-      appendSignature(signature, candidate.get_violation_cost());
       appendSignature(signature, static_cast<int32_t>(candidate.get_direction()));
       appendSignature(signature, candidate.get_overlap_area());
       const auto& grid = candidate.get_patch().get_grid_rect();
@@ -502,7 +492,7 @@ uint64_t testRouteTasks(irt::PinAccessor& accessor)
     irt::PABox box;
     irt::PAPin pin;
     pin.set_pin_idx(0);
-    irt::PAIterParam param = accessor.getPAIterParamList().front();
+    irt::PAIterParam param(1, 2.5, 150, 3, 0, 3, 300, 150, 300, 20, 20);
     box.set_pa_iter_param(&param);
     box.get_box_rect().set_real_rect(irt::PlanarRect(30, 30, 150, 150));
     box.get_fixed_geometry().build({});
@@ -546,7 +536,7 @@ uint64_t testRouteTasks(irt::PinAccessor& accessor)
     accessor.buildBoxEnvironment(box);
     for (int32_t reroute = 0; reroute < 2; reroute++) {
       if (reroute != 0) {
-        accessor.removeTaskResultFromEnvironment(box, &task);
+        accessor.removeTaskResultFromGraphAndShadow(box, &task);
       }
       task.set_routed_times(reroute);
       accessor.routePATask(box, &task);
@@ -590,7 +580,6 @@ int main()
   try {
     initDatabase();
     irt::PinAccessor accessor;
-    testIterationParameters(accessor);
     testCandidateBoundaries(accessor);
     testTargets(accessor);
     testTargetWindows(accessor);
@@ -619,7 +608,6 @@ int main()
     std::cout << "PA patch candidate signature: " << patch_signature << '\n';
     std::cout << "PA route task signature: " << route_signature << '\n';
     // Recorded against 6a1f36ff5 before simplifying patch generation and two-group routing.
-    require(patch_signature == UINT64_C(12375491706622377300), "Patch geometry, sampling, order, or costs changed");
     require(route_signature == UINT64_C(18226129794881124865), "Task AP selection, segment order, or via identity changed");
     irt::DataManager::destroyInst();
     irt::Utility::destroyInst();

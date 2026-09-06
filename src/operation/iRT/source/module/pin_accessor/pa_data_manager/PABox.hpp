@@ -82,6 +82,7 @@ class PABox
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_net_pin_own_result_map() { return _net_pin_own_result_map; }
   std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>& get_net_pin_env_patch_map() { return _net_pin_env_patch_map; }
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>>& get_net_pin_own_patch_map() { return _net_pin_own_patch_map; }
+  std::vector<Violation>& get_route_violation_list() { return _route_violation_list; }
   std::vector<PATask>& get_pa_task_list() { return _pa_task_list; }
   std::vector<int32_t>& get_task_order_list() { return _task_order_list; }
   ScaleAxis& get_box_track_axis() { return _box_track_axis; }
@@ -130,6 +131,7 @@ class PABox
   // Persistent between stages; tasked pins move to curr_result on import and back on publication.
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_pin_own_result_map;
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>> _net_pin_own_patch_map;
+  std::vector<Violation> _route_violation_list;
   // Indexed by task_idx; storage is frozen before routing publishes task pointers.
   std::vector<PATask> _pa_task_list;
   std::vector<int32_t> _task_order_list;

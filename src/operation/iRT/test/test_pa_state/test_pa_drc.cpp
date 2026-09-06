@@ -371,10 +371,6 @@ void testEnvironmentUpdates(irt::PinAccessor& accessor)
   accessor.updateRoutedRectToEnvironment(box, irt::ChangeType::kAdd, 7, patch1, true);
   double routed_cost = accessor.getRoutedRectCost(box, 8, patch0);
   require(routed_cost > 0 && accessor.getRoutedRectCost(box, 7, patch0) == 0, "Routed shadow lookup lost occupancy or same-net exemption");
-  box.get_layer_shadow_map()[0].addViolation(patch0.get_real_rect());
-  require(accessor.getViolationCost(box, patch0) == 7, "Violation shadow lookup lost its weight");
-  accessor.clearViolationShadow(box);
-  require(accessor.getViolationCost(box, patch0) == 0, "Violation shadow lookup retained a cleared violation");
   std::vector<irt::PANode::OrientNetCountMap> node_counts;
   size_t occupied_num = 0;
   for (auto& node_map : box.get_layer_node_map()) {
@@ -587,11 +583,19 @@ void testTaskResultFlow(irt::PinAccessor& accessor)
   require(box.get_net_pin_env_patch_map().at(1).at(2).contains(&box.get_net_pin_own_patch_map().at(1).at(2)[0]), "Untasked patch is absent from environment");
   box.get_task_order_list() = {1, 0};
   accessor.routePABox(box);
-  require(box.get_best_result().get_valid(), "An unchanged noninitial box did not snapshot its imported result");
+  require(!box.get_best_result().get_valid(), "An empty routing schedule created an unnecessary snapshot");
+  require(box.get_curr_result().get_task_result_list()[0].get_segment_list().data() == old_segments,
+          "An empty routing schedule replaced the imported result");
+  accessor.updateBestResult(box);
   box.get_curr_result().get_task_result_list()[0].get_segment_list().clear();
   box.get_curr_result().get_task_result_list()[0].get_patch_list().clear();
   box.get_curr_result().get_task_result_list()[0].set_access_point(irt::AccessPoint());
   accessor.selectBestResult(box);
+  require(!box.get_best_result().get_valid() && box.get_curr_result().get_task_result_list()[0].get_segment_list().size() == 1,
+          "Best result selection did not restore the current result and consume the snapshot");
+  require(box.get_net_pin_own_result_map().at(1).size() == 1 && box.get_net_pin_own_patch_map().at(1).size() == 1,
+          "Best result selection published task results before the explicit publication phase");
+  accessor.uploadPABoxResult(box);
   for (int32_t i = 0; i < 3; i++) {
     require(box.get_net_pin_own_result_map().at(1).at(i)[0].get_via_master_idx() == irt::ViaMasterIdx(0, i),
             "Best result restoration changed pin/via ownership");
@@ -779,17 +783,50 @@ void testBoxPublicationFlow(irt::PinAccessor& accessor)
   box.get_task_order_list() = {0};
   box.get_curr_result().get_task_result_list().resize(1);
   auto& result = box.get_curr_result().get_task_result_list()[0];
+  result.get_segment_list().emplace_back(irt::LayerCoord(10, 10, 0), irt::LayerCoord(20, 10, 0));
   result.get_patch_list() = {makeRect(10)};
   result.set_access_point(irt::AccessPoint(2, irt::LayerCoord(10, 10, 0)));
-  require(accessor.routePABox(model, box).empty(), "Unchanged box acquired a violation");
+  const auto* imported_segment_data = result.get_segment_list().data();
+  const auto* imported_patch_data = result.get_patch_list().data();
+  accessor.routePABox(model, box);
+  require(box.get_route_violation_list().empty(), "Unchanged box acquired a violation");
   require(!box.get_dirty() && box.get_pa_task_list().empty() && box.get_curr_result().get_task_result_list().empty(),
           "Unchanged box was marked dirty or retained temporary task state");
   require(box.get_net_pin_own_patch_map().at(1).at(2).size() == 1 && pin.get_access_point().getRealLayerCoord() == irt::LayerCoord(10, 10, 0),
           "Box publication lost its imported result or access point");
+  require(box.get_net_pin_own_result_map().at(1).at(2).data() == imported_segment_data
+              && box.get_net_pin_own_patch_map().at(1).at(2).data() == imported_patch_data,
+          "Publishing an unchanged box copied its imported geometry");
   auto violation = makePatchViolation(10, irt::ViolationType::kMinimumArea, {1});
   box.get_curr_result().get_route_violation_list() = {violation};
-  require(accessor.routePABox(model, box) == std::vector<irt::Violation>({violation}) && box.get_dirty(),
+  const auto* imported_violation_data = box.get_curr_result().get_route_violation_list().data();
+  accessor.routePABox(model, box);
+  require(box.get_route_violation_list() == std::vector<irt::Violation>({violation}) && box.get_dirty(),
           "A taskless box lost its violation or dirty status during publication");
+  require(box.get_route_violation_list().data() == imported_violation_data, "Publishing a taskless box copied its violations");
+  require(box.get_curr_result().get_route_violation_list().empty(), "Box publication retained temporary violations");
+}
+
+void testBoxViolationPublication(irt::PinAccessor& accessor)
+{
+  irt::PAModel model;
+  model.get_pa_box_map().init(3, 1);
+  auto existing_violation = makePatchViolation(10, irt::ViolationType::kMinimumArea, {1});
+  auto routed_violation = makePatchViolation(20, irt::ViolationType::kMinimumArea, {2});
+  auto inactive_violation = makePatchViolation(30, irt::ViolationType::kMinimumArea, {3});
+  model.get_route_violation_list() = {existing_violation};
+  model.get_pa_box_map()[0][0].get_route_violation_list() = {existing_violation, routed_violation};
+  model.get_pa_box_map()[1][0].get_route_violation_list() = {inactive_violation};
+  model.get_pa_box_map()[2][0].get_route_violation_list() = {routed_violation};
+
+  accessor.updateRouteViolation(model, {irt::PABoxId(2, 0), irt::PABoxId(0, 0)});
+  std::set<irt::Violation, irt::CmpViolation> expected_violation_set = {existing_violation, routed_violation};
+  require(model.get_route_violation_list() == std::vector<irt::Violation>(expected_violation_set.begin(), expected_violation_set.end()),
+          "Box violation publication lost existing violations, retained duplicates or included an inactive box");
+  require(model.get_pa_box_map()[0][0].get_route_violation_list().empty() && model.get_pa_box_map()[2][0].get_route_violation_list().empty(),
+          "Box violation publication retained consumed violations");
+  require(model.get_pa_box_map()[1][0].get_route_violation_list() == std::vector<irt::Violation>({inactive_violation}),
+          "Box violation publication consumed an inactive box");
 }
 
 }  // namespace
@@ -828,6 +865,7 @@ int main()
     testPatchImprovement(accessor);
     testPatchSelection(accessor);
     testBoxPublicationFlow(accessor);
+    testBoxViolationPublication(accessor);
     irt::DRCEngine::destroyInst();
     irt::DataManager::destroyInst();
     irt::Utility::destroyInst();

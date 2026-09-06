@@ -163,22 +163,16 @@ void testShadowBoundaries()
   shadow.addFixedRect(7, rect);
   shadow.buildFixedRectRTree();
   shadow.addRoutedRect(7, rect);
-  shadow.addViolation(rect);
-  shadow.addViolation(rect);
   require(shadow.get_fixed_rect_rtree().size() == 2, "Fixed shadows were not deduplicated by net and rectangle");
   require(shadow.getFixedRectCost(7, rect, 3) == 3, "Fixed shadows lost the same-net exemption or obstacle");
   require(shadow.getFixedRectCost(8, rect, 3) == 6, "Fixed shadows merged different nets");
-  require(shadow.getViolationCost(rect, 5) == 5, "Duplicate violation rectangles were charged twice");
   for (const irt::PlanarRect& query : {irt::PlanarRect(10, 2, 15, 8), irt::PlanarRect(10, 10, 15, 15), irt::PlanarRect(20, 20, 30, 30)}) {
     require(shadow.getFixedRectCost(8, query, 3) == 0, "Touching or disjoint fixed shadows were charged");
     require(shadow.getRoutedRectCost(8, query, 3) == 0, "Touching or disjoint routed shadows were charged");
-    require(shadow.getViolationCost(query, 5) == 0, "Touching or disjoint violations were charged");
   }
   for (const irt::PlanarRect& query : {irt::PlanarRect(9, 2, 15, 8), irt::PlanarRect(5, 2, 5, 8), irt::PlanarRect(5, 5, 5, 5)}) {
     require(shadow.getRoutedRectCost(8, query, 3) == 3, "Interior overlap semantics changed");
   }
-  shadow.clearViolation();
-  require(shadow.getViolationCost(rect, 5) == 0, "Clearing violations left stale costs");
   irt::PAShadow empty;
   empty.buildFixedRectRTree();
   require(empty.getFixedRectCost(8, rect, 3) == 0 && empty.getRoutedRectCost(8, rect, 3) == 0, "An empty index has a nonzero cost");

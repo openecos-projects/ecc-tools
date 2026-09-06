@@ -93,7 +93,8 @@ class PinAccessor
   void routePAModel(PAModel& pa_model);
   void routePAIteration(PAModel& pa_model);
   void routePABoxMap(PAModel& pa_model);
-  std::vector<Violation> routePABox(PAModel& pa_model, PABox& pa_box);
+  void routePABoxList(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list);
+  void routePABox(PAModel& pa_model, PABox& pa_box);
   void routePABox(PABox& pa_box);
   void routePATask(PABox& pa_box, PATask* pa_task);
   void patchPATask(PABox& pa_box, PATask* pa_task);
@@ -128,7 +129,6 @@ class PinAccessor
   void buildAccessPointRTree(PAModel& pa_model);
 
   // Iteration setup and stage environment.
-  std::vector<PAIterParam> getPAIterParamList();
   void setPAIterParam(PAModel& pa_model, int32_t iter, PAIterParam& pa_iter_param);
   void initPABoxMap(PAModel& pa_model);
   void buildPinOwner(PAModel& pa_model);
@@ -147,7 +147,7 @@ class PinAccessor
   void initPATaskList(PAModel& pa_model, PABox& pa_box);
   void initPATaskResult(PABox& pa_box);
   void buildRouteViolation(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list);
-  void updateRouteViolation(PAModel& pa_model, std::vector<std::vector<Violation>>& stage_violation_list_list);
+  void updateRouteViolation(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list);
 
   // Box graph and task routing.
   bool needRouting(PABox& pa_box);
@@ -158,7 +158,7 @@ class PinAccessor
   void buildBoxEnvironment(PABox& pa_box);
   void exemptPinShape(PAModel& pa_model, PABox& pa_box);
   std::vector<int32_t> initTaskSchedule(PABox& pa_box);
-  void removeTaskResultFromEnvironment(PABox& pa_box, PATask* pa_task);
+  void removeTaskResultFromGraphAndShadow(PABox& pa_box, PATask* pa_task);
   void initSingleRouteTask(PABox& pa_box, PATask* pa_task);
   [[nodiscard]] bool routeSinglePath(PABox& pa_box);
   void initPathHead(PABox& pa_box);
@@ -186,14 +186,12 @@ class PinAccessor
   double getEstimateCostToEnd(PABox& pa_box, PANode* curr_node);
   double getEstimateCost(PABox& pa_box, PANode* start_node, PANode* end_node);
   double getEstimateWireCost(PABox& pa_box, PANode* start_node, PANode* end_node);
-  double getEstimateViaCost(PABox& pa_box, PANode* start_node, PANode* end_node);
 
   // Patch generation, selection and publication.
   void initSinglePatchTask(PABox& pa_box, PATask* pa_task);
   bool searchViolation(PABox& pa_box, GTLPolyInt& patch_poly);
   bool isBoxMinAreaViolation(PABox& pa_box, const Violation& violation);
   GTLPolyInt getViolationOverlapPoly(PABox& pa_box, Violation& violation);
-  void addViolationToShadow(PABox& pa_box);
   void patchSingleViolation(PABox& pa_box, const GTLPolyInt& patch_poly);
   PAPatchSelection selectPatch(PABox& pa_box, std::vector<PAPatch>& candidate_patch_list);
   std::vector<PAPatch> getCandidatePatchList(PABox& pa_box, const GTLPolyInt& patch_poly);
@@ -202,7 +200,6 @@ class PinAccessor
   std::vector<PAPatch> selectCandidatePatchList(PABox& pa_box, std::vector<PAPatch>& pa_patch_list);
   bool isPatchImprovement(PABox& pa_box, const std::vector<Violation>& origin_patch_violation_list, const std::vector<Violation>& curr_patch_violation_list);
   void resetSingleViolation(PABox& pa_box);
-  void clearViolationShadow(PABox& pa_box);
   void updateTaskPatch(PABox& pa_box);
   void resetSinglePatchTask(PABox& pa_box);
 
@@ -217,6 +214,7 @@ class PinAccessor
   void updateBestResult(PABox& pa_box);
   void updateTaskSchedule(PABox& pa_box, std::vector<int32_t>& routing_task_list, int32_t routing_rounds);
   void selectBestResult(PABox& pa_box);
+  void uploadPABoxResult(PABox& pa_box);
   void freePABox(PABox& pa_box);
   void updatePAModel(PAModel& pa_model);
   int32_t getRouteViolationNum(PAModel& pa_model);
@@ -245,9 +243,7 @@ class PinAccessor
 
   // Environment projection.
   void updateFixedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
-  void updateFixedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, LayerRect& real_rect, bool is_routing);
   void updateFixedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>* segment);
-  void updateRoutedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, LayerRect& real_rect, bool is_routing);
   void updateRoutedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>& segment);
   void updateRoutedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect& routed_rect, bool is_routing);
   void addRouteViolationToGraph(PABox& pa_box, Violation& violation);
@@ -257,14 +253,11 @@ class PinAccessor
   void updateCutNetShapeToGraph(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
   void updateNodeNetToGraph(PANode& pa_node, ChangeType change_type, int32_t net_idx, Orientation orientation, bool is_fixed);
   void updateNetShapeToShadow(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
-  void addPatchViolationToShadow(PABox& pa_box, Violation& violation);
-  std::vector<PlanarRect> getShadowShape(PABox& pa_box, NetShape& net_shape);
   std::vector<PlanarRect> getRoutingShadowShapeList(PABox& pa_box, NetShape& net_shape);
 
   // Environment costs.
   double getFixedRectCost(PABox& pa_box, int32_t net_idx, EXTLayerRect& patch);
   double getRoutedRectCost(PABox& pa_box, int32_t net_idx, EXTLayerRect& patch);
-  double getViolationCost(PABox& pa_box, EXTLayerRect& patch);
 
   // Summary and output.
   void updateSummary(PAModel& pa_model);
