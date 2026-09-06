@@ -97,6 +97,180 @@ void PinAccessor::access()
 
 PinAccessor* PinAccessor::_pa_instance = nullptr;
 
+// Model, stage, box and task flow.
+
+void PinAccessor::routePAModel(PAModel& pa_model)
+{
+  std::vector<PAIterParam> pa_iter_param_list = getPAIterParamList();
+  pa_model.set_initial_routing(true);
+  for (int32_t i = 0, iter = 1; i < static_cast<int32_t>(pa_iter_param_list.size()); i++, iter++) {
+    Monitor iter_monitor;
+    RTLOG.info(Loc::current(), "***** Begin iteration ", iter, "/", pa_iter_param_list.size(), "(", RTUTIL.getPercentage(iter, pa_iter_param_list.size()),
+               ") *****");
+    // debugPlotPAModel(pa_model, "before");
+    setPAIterParam(pa_model, iter, pa_iter_param_list[i]);
+    routePAIteration(pa_model);
+    RTLOG.info(Loc::current(), "***** End Iteration ", iter, "/", pa_iter_param_list.size(), "(", RTUTIL.getPercentage(iter, pa_iter_param_list.size()), ")",
+               iter_monitor.getStatsInfo(), "*****");
+    if (stopIteration(pa_model, pa_iter_param_list)) {
+      break;
+    }
+    // Candidate APs are refreshed only after the first iteration has fully
+    // released its PA boxes and before the next iteration rebuilds them.
+    if (iter == 1 && i + 1 < static_cast<int32_t>(pa_iter_param_list.size())) {
+      initAccessPointList(pa_model, true);
+      buildAccessPointRTree(pa_model);
+    }
+  }
+  selectBestResult(pa_model);
+}
+
+void PinAccessor::routePAIteration(PAModel& pa_model)
+{
+  initPABoxMap(pa_model);
+  buildPinOwner(pa_model);
+  // Boxes capture the initial-routing flag before subsequent iterations clear it.
+  pa_model.set_initial_routing(false);
+  buildBoxSchedule(pa_model);
+  splitPAResult(pa_model);
+  // debugPlotPAModel(pa_model, "middle");
+  routePABoxMap(pa_model);
+  updateViolation(pa_model);
+  updatePAModel(pa_model);
+  freePABoxMap(pa_model);
+  updateBestResult(pa_model);
+  // debugPlotPAModel(pa_model, "after");
+  updateSummary(pa_model);
+  printSummary(pa_model);
+  outputNetCSV(pa_model);
+  outputViolationCSV(pa_model);
+}
+
+void PinAccessor::routePABoxMap(PAModel& pa_model)
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  GridMap<PABox>& pa_box_map = pa_model.get_pa_box_map();
+
+  size_t total_box_num = 0;
+  for (std::vector<PABoxId>& pa_box_id_list : pa_model.get_pa_box_id_list_list()) {
+    total_box_num += pa_box_id_list.size();
+  }
+
+  size_t routed_box_num = 0;
+  for (std::vector<PABoxId>& pa_box_id_list : pa_model.get_pa_box_id_list_list()) {
+    Monitor stage_monitor;
+
+    buildPAEnvironment(pa_model, pa_box_id_list, false);
+#pragma omp parallel for schedule(dynamic, 1)
+    for (size_t i = 0; i < pa_box_id_list.size(); i++) {
+      PABoxId& pa_box_id = pa_box_id_list[i];
+      PABox& pa_box = pa_box_map[pa_box_id.get_x()][pa_box_id.get_y()];
+      buildAccessPoint(pa_model, pa_box);
+      initPATaskList(pa_model, pa_box);
+      initPATaskResult(pa_box);
+    }
+    buildRouteViolation(pa_model, pa_box_id_list);
+
+    std::vector<std::vector<Violation>> stage_violation_list_list(pa_box_id_list.size());
+#pragma omp parallel for schedule(dynamic, 1)
+    for (size_t i = 0; i < pa_box_id_list.size(); i++) {
+      PABoxId& pa_box_id = pa_box_id_list[i];
+      PABox& pa_box = pa_box_map[pa_box_id.get_x()][pa_box_id.get_y()];
+      stage_violation_list_list[i] = routePABox(pa_model, pa_box);
+    }
+    updateRouteViolation(pa_model, stage_violation_list_list);
+    routed_box_num += pa_box_id_list.size();
+    RTLOG.info(Loc::current(), "Routed ", routed_box_num, "/", total_box_num, "(", RTUTIL.getPercentage(routed_box_num, total_box_num), ") boxes with ",
+               getRouteViolationNum(pa_model), " violations", stage_monitor.getStatsInfo());
+  }
+
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+std::vector<Violation> PinAccessor::routePABox(PAModel& pa_model, PABox& pa_box)
+{
+  bool need_route = needRouting(pa_box);
+  if (need_route || !pa_box.get_curr_result().get_route_violation_list().empty()) {
+    pa_box.set_dirty(true);
+  }
+  if (need_route) {
+    buildFixedRect(pa_box);
+    buildBoxTrackAxis(pa_box);
+    buildLayerNodeMap(pa_box);
+    buildLayerShadowMap(pa_box);
+    buildPANodeNeighbor(pa_box);
+    buildBoxEnvironment(pa_box);
+    exemptPinShape(pa_model, pa_box);
+    // debugCheckPABox(pa_box);
+    // debugPlotPABox(pa_box, "before");
+    routePABox(pa_box);
+    // debugPlotPABox(pa_box, "after");
+  } else {
+    updateBestResult(pa_box);
+  }
+  selectBestResult(pa_box);
+  std::vector<Violation> violation_list = std::move(pa_box.get_curr_result().get_route_violation_list());
+  freePABox(pa_box);
+  return violation_list;
+}
+
+void PinAccessor::routePABox(PABox& pa_box)
+{
+  std::vector<int32_t> routing_task_list = initTaskSchedule(pa_box);
+  if (routing_task_list.empty()) {
+    updateBestResult(pa_box);
+  }
+  int32_t routing_rounds = 0;
+  while (!routing_task_list.empty()) {
+    for (int32_t task_idx : routing_task_list) {
+      PATask* routing_task = &pa_box.get_pa_task_list()[task_idx];
+      removeTaskResultFromEnvironment(pa_box, routing_task);
+      routePATask(pa_box, routing_task);
+      patchPATask(pa_box, routing_task);
+      routing_task->addRoutedTimes();
+    }
+    updateRouteViolationList(pa_box);
+    updateAccessPoint(pa_box);
+    updateBestResult(pa_box);
+    updateTaskSchedule(pa_box, routing_task_list, routing_rounds);
+    routing_rounds++;
+  }
+}
+
+void PinAccessor::routePATask(PABox& pa_box, PATask* pa_task)
+{
+  initSingleRouteTask(pa_box, pa_task);
+  while (!isConnectedAllEnd(pa_box)) {
+    if (!routeSinglePath(pa_box)) {
+      RTLOG.error(Loc::current(), "No PA path in box (", pa_box.get_pa_box_id().get_x(), ",", pa_box.get_pa_box_id().get_y(), "), net ", pa_task->get_net_idx(),
+                  ", pin ", pa_task->get_pa_pin()->get_pin_idx(), ", task ", pa_task->get_task_idx(), "!");
+    }
+    updatePathResult(pa_box);
+    resetStartAndEnd(pa_box);
+    resetSinglePath(pa_box);
+  }
+  updateTaskResult(pa_box);
+  resetSingleRouteTask(pa_box);
+}
+
+void PinAccessor::patchPATask(PABox& pa_box, PATask* pa_task)
+{
+  initSinglePatchTask(pa_box, pa_task);
+  GTLPolyInt patch_poly;
+  while (searchViolation(pa_box, patch_poly)) {
+    addViolationToShadow(pa_box);
+    patchSingleViolation(pa_box, patch_poly);
+    resetSingleViolation(pa_box);
+    clearViolationShadow(pa_box);
+  }
+  updateTaskPatch(pa_box);
+  resetSinglePatchTask(pa_box);
+}
+
+// Model and candidate preparation.
+
 PAModel PinAccessor::initPAModel()
 {
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
@@ -784,7 +958,7 @@ void PinAccessor::buildAccessPointRTree(PAModel& pa_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void PinAccessor::routePAModel(PAModel& pa_model)
+std::vector<PAIterParam> PinAccessor::getPAIterParamList()
 {
   int32_t cost_unit = RTDM.getOnlyPitch();
   double prefer_wire_unit = 1;
@@ -806,47 +980,7 @@ void PinAccessor::routePAModel(PAModel& pa_model)
   pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 1, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 100, 20);
   pa_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, via_unit, 3, 2, 3, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 100, 20);
   // clang-format on
-  initRoutingState(pa_model);
-  for (int32_t i = 0, iter = 1; i < static_cast<int32_t>(pa_iter_param_list.size()); i++, iter++) {
-    Monitor iter_monitor;
-    RTLOG.info(Loc::current(), "***** Begin iteration ", iter, "/", pa_iter_param_list.size(), "(", RTUTIL.getPercentage(iter, pa_iter_param_list.size()),
-               ") *****");
-    // debugPlotPAModel(pa_model, "before");
-    setPAIterParam(pa_model, iter, pa_iter_param_list[i]);
-    initPABoxMap(pa_model);
-    buildPinOwner(pa_model);
-    resetRoutingState(pa_model);
-    buildBoxSchedule(pa_model);
-    splitPAResult(pa_model);
-    // debugPlotPAModel(pa_model, "middle");
-    routePABoxMap(pa_model);
-    updateViolation(pa_model);
-    updatePAModel(pa_model);
-    freePABoxMap(pa_model);
-    updateBestResult(pa_model);
-    // debugPlotPAModel(pa_model, "after");
-    updateSummary(pa_model);
-    printSummary(pa_model);
-    outputNetCSV(pa_model);
-    outputViolationCSV(pa_model);
-    RTLOG.info(Loc::current(), "***** End Iteration ", iter, "/", pa_iter_param_list.size(), "(", RTUTIL.getPercentage(iter, pa_iter_param_list.size()), ")",
-               iter_monitor.getStatsInfo(), "*****");
-    if (stopIteration(pa_model, pa_iter_param_list)) {
-      break;
-    }
-    // Candidate APs are refreshed only after the first iteration has fully
-    // released its PA boxes and before the next iteration rebuilds them.
-    if (iter == 1 && i + 1 < static_cast<int32_t>(pa_iter_param_list.size())) {
-      initAccessPointList(pa_model, true);
-      buildAccessPointRTree(pa_model);
-    }
-  }
-  selectBestResult(pa_model);
-}
-
-void PinAccessor::initRoutingState(PAModel& pa_model)
-{
-  pa_model.set_initial_routing(true);
+  return pa_iter_param_list;
 }
 
 void PinAccessor::setPAIterParam(PAModel& pa_model, int32_t iter, PAIterParam& pa_iter_param)
@@ -995,11 +1129,6 @@ std::set<PABoxId, CmpPABoxId> PinAccessor::getPABoxIdSet(PAModel& pa_model, Plan
   return pa_box_id_set;
 }
 
-void PinAccessor::resetRoutingState(PAModel& pa_model)
-{
-  pa_model.set_initial_routing(false);
-}
-
 void PinAccessor::buildBoxSchedule(PAModel& pa_model)
 {
   GridMap<PABox>& pa_box_map = pa_model.get_pa_box_map();
@@ -1118,70 +1247,6 @@ void PinAccessor::addPAPatchToEnvironment(PAModel& pa_model, GridMap<bool>& acti
     pa_box_map[pa_box_id.get_x()][pa_box_id.get_y()].get_net_pin_env_patch_map()[net_idx][pin_idx].insert(&patch);
     omp_unset_lock(&environment_lock_map[pa_box_id.get_x()][pa_box_id.get_y()]);
   }
-}
-
-void PinAccessor::routePABoxMap(PAModel& pa_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  GridMap<PABox>& pa_box_map = pa_model.get_pa_box_map();
-
-  size_t total_box_num = 0;
-  for (std::vector<PABoxId>& pa_box_id_list : pa_model.get_pa_box_id_list_list()) {
-    total_box_num += pa_box_id_list.size();
-  }
-
-  size_t routed_box_num = 0;
-  for (std::vector<PABoxId>& pa_box_id_list : pa_model.get_pa_box_id_list_list()) {
-    Monitor stage_monitor;
-
-    buildPAEnvironment(pa_model, pa_box_id_list, false);
-#pragma omp parallel for schedule(dynamic, 1)
-    for (size_t i = 0; i < pa_box_id_list.size(); i++) {
-      PABoxId& pa_box_id = pa_box_id_list[i];
-      PABox& pa_box = pa_box_map[pa_box_id.get_x()][pa_box_id.get_y()];
-      buildAccessPoint(pa_model, pa_box);
-      initPATaskList(pa_model, pa_box);
-      initPATaskResult(pa_box);
-    }
-    buildRouteViolation(pa_model, pa_box_id_list);
-
-    std::vector<std::vector<Violation>> stage_violation_list_list(pa_box_id_list.size());
-#pragma omp parallel for schedule(dynamic, 1)
-    for (size_t i = 0; i < pa_box_id_list.size(); i++) {
-      PABoxId& pa_box_id = pa_box_id_list[i];
-      PABox& pa_box = pa_box_map[pa_box_id.get_x()][pa_box_id.get_y()];
-      bool need_route = needRouting(pa_box);
-      if (need_route || !pa_box.get_curr_result().get_route_violation_list().empty()) {
-        pa_box.set_dirty(true);
-      }
-      if (need_route) {
-        buildFixedRect(pa_box);
-        buildBoxTrackAxis(pa_box);
-        buildLayerNodeMap(pa_box);
-        buildLayerShadowMap(pa_box);
-        buildPANodeNeighbor(pa_box);
-        buildBoxEnvironment(pa_box);
-        exemptPinShape(pa_model, pa_box);
-        // debugCheckPABox(pa_box);
-        // debugPlotPABox(pa_box, "before");
-        routePABox(pa_box);
-        // debugPlotPABox(pa_box, "after");
-      } else {
-        updateBestResult(pa_box);
-      }
-      selectBestResult(pa_box);
-      stage_violation_list_list[i] = std::move(pa_box.get_curr_result().get_route_violation_list());
-      freePABox(pa_box);
-    }
-    updateRouteViolation(pa_model, stage_violation_list_list);
-    routed_box_num += pa_box_id_list.size();
-    RTLOG.info(Loc::current(), "Routed ", routed_box_num, "/", total_box_num, "(", RTUTIL.getPercentage(routed_box_num, total_box_num), ") boxes with ",
-               getRouteViolationNum(pa_model), " violations", stage_monitor.getStatsInfo());
-  }
-
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void PinAccessor::freePABoxMap(PAModel& pa_model)
@@ -1742,29 +1807,6 @@ void PinAccessor::exemptPinShape(PAModel& pa_model, PABox& pa_box)
   }
 }
 
-void PinAccessor::routePABox(PABox& pa_box)
-{
-  std::vector<int32_t> routing_task_list = initTaskSchedule(pa_box);
-  if (routing_task_list.empty()) {
-    updateBestResult(pa_box);
-  }
-  int32_t routing_rounds = 0;
-  while (!routing_task_list.empty()) {
-    for (int32_t task_idx : routing_task_list) {
-      PATask* routing_task = &pa_box.get_pa_task_list()[task_idx];
-      removeTaskResultFromEnvironment(pa_box, routing_task);
-      routePATask(pa_box, routing_task);
-      patchPATask(pa_box, routing_task);
-      routing_task->addRoutedTimes();
-    }
-    updateRouteViolationList(pa_box);
-    updateAccessPoint(pa_box);
-    updateBestResult(pa_box);
-    updateTaskSchedule(pa_box, routing_task_list, routing_rounds);
-    routing_rounds++;
-  }
-}
-
 std::vector<int32_t> PinAccessor::initTaskSchedule(PABox& pa_box)
 {
   bool initial_routing = pa_box.get_initial_routing();
@@ -1791,22 +1833,6 @@ void PinAccessor::removeTaskResultFromEnvironment(PABox& pa_box, PATask* pa_task
   for (EXTLayerRect& routing_patch : routing_patch_list) {
     updateRoutedRectToEnvironment(pa_box, ChangeType::kDel, curr_net_idx, routing_patch, true);
   }
-}
-
-void PinAccessor::routePATask(PABox& pa_box, PATask* pa_task)
-{
-  initSingleRouteTask(pa_box, pa_task);
-  while (!isConnectedAllEnd(pa_box)) {
-    if (!routeSinglePath(pa_box)) {
-      RTLOG.error(Loc::current(), "No PA path in box (", pa_box.get_pa_box_id().get_x(), ",", pa_box.get_pa_box_id().get_y(), "), net ", pa_task->get_net_idx(),
-                  ", pin ", pa_task->get_pa_pin()->get_pin_idx(), ", task ", pa_task->get_task_idx(), "!");
-    }
-    updatePathResult(pa_box);
-    resetStartAndEnd(pa_box);
-    resetSinglePath(pa_box);
-  }
-  updateTaskResult(pa_box);
-  resetSingleRouteTask(pa_box);
 }
 
 void PinAccessor::initSingleRouteTask(PABox& pa_box, PATask* pa_task)
@@ -2509,20 +2535,6 @@ double PinAccessor::getEstimateViaCost(PABox& pa_box, PANode* start_node, PANode
   return via_cost;
 }
 
-void PinAccessor::patchPATask(PABox& pa_box, PATask* pa_task)
-{
-  initSinglePatchTask(pa_box, pa_task);
-  GTLPolyInt patch_poly;
-  while (searchViolation(pa_box, patch_poly)) {
-    addViolationToShadow(pa_box);
-    patchSingleViolation(pa_box, patch_poly);
-    resetSingleViolation(pa_box);
-    clearViolationShadow(pa_box);
-  }
-  updateTaskPatch(pa_box);
-  resetSinglePatchTask(pa_box);
-}
-
 void PinAccessor::initSinglePatchTask(PABox& pa_box, PATask* pa_task)
 {
   // single task only checks relevant shapes
@@ -2549,7 +2561,7 @@ void PinAccessor::initSinglePatchTask(PABox& pa_box, PATask* pa_task)
 bool PinAccessor::searchViolation(PABox& pa_box, GTLPolyInt& patch_poly)
 {
   for (Violation& violation : pa_box.get_patch_state().get_patch_violation_list()) {
-    if (!isValidPatchViolation(pa_box, violation)) {
+    if (!isBoxMinAreaViolation(pa_box, violation)) {
       continue;
     }
     if (RTUTIL.exist(pa_box.get_patch_state().get_tried_fix_violation_set(), violation)) {
@@ -2569,18 +2581,11 @@ bool PinAccessor::searchViolation(PABox& pa_box, GTLPolyInt& patch_poly)
   return false;
 }
 
-bool PinAccessor::isValidPatchViolation(PABox& pa_box, Violation& violation)
+bool PinAccessor::isBoxMinAreaViolation(PABox& pa_box, const Violation& violation)
 {
-  PlanarRect& box_real_rect = pa_box.get_box_rect().get_real_rect();
-
-  bool is_valid = true;
-  if (!RTUTIL.isOpenOverlap(box_real_rect, violation.get_violation_shape().get_real_rect())) {
-    is_valid = false;
-  }
-  if (violation.get_violation_type() != ViolationType::kMinimumArea) {
-    is_valid = false;
-  }
-  return is_valid;
+  // Geometry eligibility only; searchViolation separately selects the current task net.
+  return violation.get_violation_type() == ViolationType::kMinimumArea
+         && RTUTIL.isOpenOverlap(pa_box.get_box_rect().get_real_rect(), violation.get_violation_shape().get_real_rect());
 }
 
 GTLPolyInt PinAccessor::getViolationOverlapPoly(PABox& pa_box, Violation& violation)
@@ -2670,43 +2675,45 @@ void PinAccessor::addViolationToShadow(PABox& pa_box)
 
 void PinAccessor::patchSingleViolation(PABox& pa_box, const GTLPolyInt& patch_poly)
 {
-  std::vector<EXTLayerRect>& routing_patch_list = pa_box.get_patch_state().get_routing_patch_list();
-  std::set<Violation, CmpViolation>& tried_fix_violation_set = pa_box.get_patch_state().get_tried_fix_violation_set();
+  std::vector<PAPatch> candidate_patch_list = getCandidatePatchList(pa_box, patch_poly);
+  PAPatchSelection selection = selectPatch(pa_box, candidate_patch_list);
+  if (selection.type != PAPatchSelectionType::kNone) {
+    pa_box.get_patch_state().get_routing_patch_list().push_back(candidate_patch_list[selection.candidate_idx].get_patch());
+  }
+  pa_box.get_patch_state().get_tried_fix_violation_set().insert(pa_box.get_patch_state().get_curr_patch_violation());
+}
+
+PAPatchSelection PinAccessor::selectPatch(PABox& pa_box, std::vector<PAPatch>& candidate_patch_list)
+{
+  if (candidate_patch_list.empty()) {
+    return {};
+  }
+  if (candidate_patch_list.size() == 1) {
+    return {PAPatchSelectionType::kSingleCandidate, 0};
+  }
   LayerRect violation_rect = pa_box.get_patch_state().get_curr_patch_violation().get_violation_shape().getRealLayerRect();
   int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
   LayerRect check_region(RTUTIL.getEnlargedRect(violation_rect.get_rect(), detection_distance), violation_rect.get_layer_idx());
-
-  std::vector<PAPatch> pa_patch_list = getCandidatePatchList(pa_box, patch_poly);
-  if (pa_patch_list.size() == 1) {
-    routing_patch_list.push_back(pa_patch_list.front().get_patch());
-  } else if (pa_patch_list.size() >= 2) {
-    DETask de_task = buildPatchDETask(pa_box, {}, {check_region});
-    std::vector<Violation> origin_patch_violation_list = RTDE.getViolationList(de_task);
-    std::vector<EXTLayerRect*>& check_patch_list = de_task.get_net_patch_map()[pa_box.get_patch_state().get_curr_patch_task()->get_net_idx()];
-
-    bool curr_is_solved = false;
-    for (PAPatch& pa_patch : pa_patch_list) {
-      // Keep accepted-patch storage stable while the reusable DRC input refers to it.
-      EXTLayerRect& patch = pa_patch.get_patch();
-      bool check_patch = overlapCheckRegion(patch.get_layer_idx(), patch.get_real_rect(), de_task.get_check_region_list());
-      if (check_patch) {
-        check_patch_list.push_back(&patch);
-      }
-      std::vector<Violation> curr_patch_violation_list = RTDE.getViolationList(de_task);
-      if (check_patch) {
-        check_patch_list.pop_back();
-      }
-      curr_is_solved = getSolvedStatus(pa_box, origin_patch_violation_list, curr_patch_violation_list);
-      if (curr_is_solved) {
-        routing_patch_list.push_back(pa_patch.get_patch());
-        break;
-      }
+  DETask de_task = buildPatchDETask(pa_box, {}, {check_region});
+  std::vector<Violation> origin_patch_violation_list = RTDE.getViolationList(de_task);
+  std::vector<EXTLayerRect*>& check_patch_list = de_task.get_net_patch_map()[pa_box.get_patch_state().get_curr_patch_task()->get_net_idx()];
+  // Selection never changes accepted-patch storage while the reusable DRC input borrows it.
+  for (size_t i = 0; i < candidate_patch_list.size(); i++) {
+    EXTLayerRect& patch = candidate_patch_list[i].get_patch();
+    bool check_patch = overlapCheckRegion(patch.get_layer_idx(), patch.get_real_rect(), de_task.get_check_region_list());
+    if (check_patch) {
+      check_patch_list.push_back(&patch);
     }
-    if (!curr_is_solved) {
-      routing_patch_list.push_back(pa_patch_list.front().get_patch());
+    std::vector<Violation> curr_patch_violation_list = RTDE.getViolationList(de_task);
+    if (check_patch) {
+      check_patch_list.pop_back();
+    }
+    if (isPatchImprovement(pa_box, origin_patch_violation_list, curr_patch_violation_list)) {
+      return {PAPatchSelectionType::kImproved, static_cast<int32_t>(i)};
     }
   }
-  tried_fix_violation_set.insert(pa_box.get_patch_state().get_curr_patch_violation());
+  // Existing best-effort policy: retain the highest-ranked candidate even without DRC improvement.
+  return {PAPatchSelectionType::kBestEffort, 0};
 }
 
 std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box, const GTLPolyInt& patch_poly)
@@ -2895,51 +2902,48 @@ std::vector<PAPatch> PinAccessor::selectCandidatePatchList(PABox& pa_box, std::v
   return candidate_patch_list;
 }
 
-bool PinAccessor::getSolvedStatus(PABox& pa_box, std::vector<Violation>& origin_patch_violation_list, std::vector<Violation>& curr_patch_violation_list)
+bool PinAccessor::isPatchImprovement(PABox& pa_box, const std::vector<Violation>& origin_patch_violation_list,
+                                     const std::vector<Violation>& curr_patch_violation_list)
 {
   std::map<ViolationType, std::pair<int32_t, int32_t>> env_type_origin_curr_map;
   std::map<ViolationType, std::pair<int32_t, int32_t>> valid_type_origin_curr_map;
-  std::map<ViolationType, std::pair<int32_t, int32_t>> within_net_map;
-  for (Violation& origin_violation : origin_patch_violation_list) {
-    if (!isValidPatchViolation(pa_box, origin_violation)) {
+  std::map<ViolationType, std::pair<int32_t, int32_t>> inter_net_origin_curr_map;
+  for (const Violation& origin_violation : origin_patch_violation_list) {
+    if (!isBoxMinAreaViolation(pa_box, origin_violation)) {
       env_type_origin_curr_map[origin_violation.get_violation_type()].first++;
     } else {
       valid_type_origin_curr_map[origin_violation.get_violation_type()].first++;
     }
     if (origin_violation.get_violation_net_set().size() > 1) {
-      within_net_map[origin_violation.get_violation_type()].first++;
+      inter_net_origin_curr_map[origin_violation.get_violation_type()].first++;
     }
   }
-  for (Violation& curr_violation : curr_patch_violation_list) {
-    if (!isValidPatchViolation(pa_box, curr_violation)) {
+  for (const Violation& curr_violation : curr_patch_violation_list) {
+    if (!isBoxMinAreaViolation(pa_box, curr_violation)) {
       env_type_origin_curr_map[curr_violation.get_violation_type()].second++;
     } else {
       valid_type_origin_curr_map[curr_violation.get_violation_type()].second++;
     }
     if (curr_violation.get_violation_net_set().size() > 1) {
-      within_net_map[curr_violation.get_violation_type()].second++;
+      inter_net_origin_curr_map[curr_violation.get_violation_type()].second++;
     }
   }
-  bool curr_is_solved = true;
-  for (auto& [violation_type, origin_curr] : env_type_origin_curr_map) {
-    if (!curr_is_solved) {
-      break;
+  for (const auto& [violation_type, origin_curr] : env_type_origin_curr_map) {
+    if (origin_curr.second > origin_curr.first) {
+      return false;
     }
-    curr_is_solved = origin_curr.second <= origin_curr.first;
   }
-  for (auto& [violation_type, origin_curr] : valid_type_origin_curr_map) {
-    if (!curr_is_solved) {
-      break;
+  for (const auto& [violation_type, origin_curr] : valid_type_origin_curr_map) {
+    if (origin_curr.second >= origin_curr.first) {
+      return false;
     }
-    curr_is_solved = origin_curr.second < origin_curr.first;
   }
-  for (auto& [violation_type, origin_curr] : within_net_map) {
-    if (!curr_is_solved) {
-      break;
+  for (const auto& [violation_type, origin_curr] : inter_net_origin_curr_map) {
+    if (origin_curr.second > origin_curr.first) {
+      return false;
     }
-    curr_is_solved = origin_curr.second <= origin_curr.first;
   }
-  return curr_is_solved;
+  return true;
 }
 
 void PinAccessor::resetSingleViolation(PABox& pa_box)
@@ -3403,7 +3407,7 @@ void PinAccessor::uploadViolation(PAModel& pa_model)
   }
 }
 
-#if 1  // update env
+// Environment projection.
 
 void PinAccessor::updateFixedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing)
 {
@@ -3845,9 +3849,7 @@ std::vector<PlanarRect> PinAccessor::getRoutingShadowShapeList(PABox& pa_box, Ne
   return shadow_shape_list;
 }
 
-#endif
-
-#if 1  // get env
+// Environment costs.
 
 double PinAccessor::getFixedRectCost(PABox& pa_box, int32_t net_idx, EXTLayerRect& patch)
 {
@@ -3867,9 +3869,7 @@ double PinAccessor::getViolationCost(PABox& pa_box, EXTLayerRect& patch)
   return pa_box.get_layer_shadow_map()[patch.get_layer_idx()].getViolationCost(patch.get_real_rect(), violation_unit);
 }
 
-#endif
-
-#if 1  // DRC input and checks
+// DRC input and checks.
 
 bool PinAccessor::overlapCheckRegion(int32_t layer_idx, const PlanarRect& real_rect, const std::vector<LayerRect>& check_region_list)
 {
@@ -4180,9 +4180,7 @@ std::vector<Violation> PinAccessor::getDirtyRouteViolationList(PAModel& pa_model
   return owned_violation_list;
 }
 
-#endif
-
-#if 1  // exhibit
+// Summary and output.
 
 void PinAccessor::updateSummary(PAModel& pa_model)
 {
@@ -4426,9 +4424,7 @@ void PinAccessor::outputViolationCSV(PAModel& pa_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-#endif
-
-#if 1  // debug
+// Debugging.
 
 void PinAccessor::debugPlotPAModel(PAModel& pa_model, std::string flag)
 {
@@ -5120,7 +5116,5 @@ void PinAccessor::debugPlotPABox(PABox& pa_box, std::string flag)
       = RTUTIL.getString(pa_temp_directory_path, flag, "_pa_box_", pa_box.get_pa_box_id().get_x(), "_", pa_box.get_pa_box_id().get_y(), ".gds");
   RTGP.plot(gp_gds, gds_file_path);
 }
-
-#endif
 
 }  // namespace irt

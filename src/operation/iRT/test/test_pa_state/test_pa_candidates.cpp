@@ -118,6 +118,23 @@ void testCandidateBoundaries(irt::PinAccessor& accessor)
           "Via alternatives lost canonical order or uniqueness");
 }
 
+void testIterationParameters(irt::PinAccessor& accessor)
+{
+  auto parameters = accessor.getPAIterParamList();
+  require(parameters.size() == 6, "Iteration count changed");
+  for (size_t i = 0; i < parameters.size(); i++) {
+    auto& param = parameters[i];
+    int32_t multiplier = i < 3 ? 1 : 2;
+    require(param.get_prefer_wire_unit() == 1 && param.get_non_prefer_wire_unit() == 2.5 && param.get_via_unit() == 150, "Iteration wire/via costs changed");
+    require(
+        param.get_fixed_rect_unit() == multiplier * 300 && param.get_routed_rect_unit() == multiplier * 150 && param.get_violation_unit() == multiplier * 300,
+        "Iteration environment penalties changed");
+    require(param.get_size() == 3 && param.get_offset() == static_cast<int32_t>(i % 3) && param.get_schedule_interval() == 3, "Iteration box tiling changed");
+    require(param.get_max_routed_times() == (i == 0 ? 20 : (i < 3 ? 80 : 100)) && param.get_max_candidate_patch_num() == 20,
+            "Iteration routing or patch budget changed");
+  }
+}
+
 void testTargets(irt::PinAccessor& accessor)
 {
   auto& database = irt::DataManager::getInst().getDatabase();
@@ -317,6 +334,7 @@ int main()
   try {
     initDatabase();
     irt::PinAccessor accessor;
+    testIterationParameters(accessor);
     testCandidateBoundaries(accessor);
     testTargets(accessor);
     uint64_t signature = testCandidates(accessor);

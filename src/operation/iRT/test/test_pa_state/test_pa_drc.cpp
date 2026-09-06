@@ -1,4 +1,5 @@
 #include <array>
+#include <deque>
 #include <iostream>
 #include <random>
 #include <stdexcept>
@@ -10,6 +11,7 @@ namespace {
 
 std::vector<irt::DETask> checked_task_list;
 std::vector<const void*> env_storage_list;
+std::deque<std::vector<irt::Violation>> violation_response_list;
 
 void require(bool condition, const char* message)
 {
@@ -631,12 +633,134 @@ void testViaEnvironmentOwnership(irt::PinAccessor& accessor)
   require(accessor.getViaMasterCost(box, 0, segment) == 153, "Current task results are absent from via cost");
 }
 
+irt::Violation makePatchViolation(int32_t x, irt::ViolationType type, const std::set<int32_t>& nets)
+{
+  irt::Violation violation;
+  violation.set_violation_shape(makeRect(x));
+  violation.set_violation_type(type);
+  violation.set_violation_net_set(nets);
+  return violation;
+}
+
+void testPatchImprovement(irt::PinAccessor& accessor)
+{
+  irt::PABox box;
+  box.get_box_rect().set_real_rect(irt::PlanarRect(0, 0, 100, 100));
+  auto area = makePatchViolation(10, irt::ViolationType::kMinimumArea, {0});
+  auto other_net_area = makePatchViolation(20, irt::ViolationType::kMinimumArea, {1});
+  auto outside = makePatchViolation(200, irt::ViolationType::kMinimumArea, {0});
+  auto shorting = makePatchViolation(10, irt::ViolationType::kMetalShort, {0, 1});
+  auto spacing = makePatchViolation(10, irt::ViolationType::kParallelRunLengthSpacing, {0, 1});
+  auto inter_net_area = makePatchViolation(10, irt::ViolationType::kMinimumArea, {0, 1});
+  require(accessor.isBoxMinAreaViolation(box, other_net_area), "Box minimum-area eligibility unexpectedly filters by net");
+  require(!accessor.isBoxMinAreaViolation(box, outside) && !accessor.isBoxMinAreaViolation(box, shorting), "Patch eligibility changed");
+  require(accessor.isPatchImprovement(box, {}, {}), "Empty comparison changed");
+  require(accessor.isPatchImprovement(box, {area}, {}), "Solved minimum-area violation was rejected");
+  require(!accessor.isPatchImprovement(box, {area}, {area}), "Unchanged minimum-area violation was accepted");
+  require(accessor.isPatchImprovement(box, {area, other_net_area}, {other_net_area}), "Partial area improvement was mistaken for requiring full resolution");
+  require(!accessor.isPatchImprovement(box, {area}, {outside}), "A new environment violation was accepted");
+  require(!accessor.isPatchImprovement(box, {area}, {shorting}), "A new rule violation was accepted");
+  require(accessor.isPatchImprovement(box, {area, shorting}, {shorting}), "Unchanged environment violation blocked area improvement");
+  require(!accessor.isPatchImprovement(box, {area, shorting}, {spacing}), "Environment counts were compared across rule types");
+  require(!accessor.isPatchImprovement(box, {area, other_net_area}, {inter_net_area}), "A new inter-net violation was accepted");
+  require(accessor.isPatchImprovement(box, {area, inter_net_area}, {inter_net_area}), "Unchanged inter-net count blocked area improvement");
+  require(!accessor.isPatchImprovement(box, {}, {area}), "A new minimum-area violation was accepted");
+}
+
+void testPatchSelection(irt::PinAccessor& accessor)
+{
+  irt::DataManager::getInst().getDatabase().set_detection_distance(20);
+  irt::PABox box;
+  box.get_box_rect().set_real_rect(irt::PlanarRect(0, 0, 100, 100));
+  box.get_fixed_geometry().build({});
+  box.get_pa_task_list().resize(1);
+  box.get_pa_task_list()[0].set_net_idx(0);
+  box.get_pa_task_list()[0].set_task_idx(0);
+  box.get_curr_result().get_task_result_list().resize(1);
+  box.get_patch_state().set_curr_patch_task(&box.get_pa_task_list()[0]);
+  auto area = makePatchViolation(10, irt::ViolationType::kMinimumArea, {0});
+  box.get_patch_state().set_curr_patch_violation(area);
+  box.get_patch_state().get_routing_patch_list() = {makeRect(10)};
+  auto* accepted_storage = box.get_patch_state().get_routing_patch_list().data();
+  checked_task_list.clear();
+  env_storage_list.clear();
+  std::vector<irt::PAPatch> candidates;
+  auto selection = accessor.selectPatch(box, candidates);
+  require(selection.type == irt::PAPatchSelectionType::kNone && selection.candidate_idx == -1, "Empty candidate selection changed");
+  candidates.emplace_back(makeRect(10).get_real_rect(), 0);
+  selection = accessor.selectPatch(box, candidates);
+  require(selection.type == irt::PAPatchSelectionType::kSingleCandidate && selection.candidate_idx == 0 && checked_task_list.empty(),
+          "Single-candidate policy unexpectedly invokes DRC");
+  candidates.emplace_back(makeRect(20).get_real_rect(), 0);
+  for (int32_t scenario = 0; scenario < 3; scenario++) {
+    checked_task_list.clear();
+    env_storage_list.clear();
+    candidates[0].get_patch() = makeRect(scenario == 2 ? 200 : 10);
+    violation_response_list = {{area}, {area}, scenario == 1 ? std::vector<irt::Violation>{area} : std::vector<irt::Violation>{}};
+    selection = accessor.selectPatch(box, candidates);
+    require(violation_response_list.empty() && checked_task_list.size() == 3, "Patch selection changed the check sequence");
+    require(selection.type == (scenario == 1 ? irt::PAPatchSelectionType::kBestEffort : irt::PAPatchSelectionType::kImproved)
+                && selection.candidate_idx == (scenario == 1 ? 0 : 1),
+            "Patch selection lost first-improvement or best-effort policy");
+    require(box.get_patch_state().get_routing_patch_list().size() == 1 && box.get_patch_state().get_routing_patch_list().data() == accepted_storage,
+            "Selection mutated accepted-patch storage while DRC borrowed it");
+    const auto& origin = checked_task_list[0].get_net_patch_map().at(0);
+    const auto& first = checked_task_list[1].get_net_patch_map().at(0);
+    const auto& second = checked_task_list[2].get_net_patch_map().at(0);
+    require(origin == std::vector<irt::EXTLayerRect*>({accepted_storage}), "Origin check contains a candidate");
+    require(first.size() == (scenario == 2 ? 1 : 2), "Candidate spatial filtering changed");
+    require(second == std::vector<irt::EXTLayerRect*>({accepted_storage, &candidates[1].get_patch()}), "A rejected candidate leaked into the next check");
+  }
+  checked_task_list.clear();
+  env_storage_list.clear();
+  violation_response_list = {{area}, {}};
+  candidates[0].get_patch() = makeRect(10);
+  selection = accessor.selectPatch(box, candidates);
+  require(selection.type == irt::PAPatchSelectionType::kImproved && selection.candidate_idx == 0 && violation_response_list.empty()
+              && checked_task_list.size() == 2,
+          "First improvement did not stop checking later candidates");
+  checked_task_list.clear();
+  env_storage_list.clear();
+}
+
+void testBoxPublicationFlow(irt::PinAccessor& accessor)
+{
+  irt::PAModel model;
+  irt::PAPin pin;
+  pin.set_pin_idx(2);
+  irt::PABox box;
+  box.set_initial_routing(false);
+  box.get_pa_task_list().resize(1);
+  box.get_pa_task_list()[0].set_net_idx(1);
+  box.get_pa_task_list()[0].set_task_idx(0);
+  box.get_pa_task_list()[0].set_pa_pin(&pin);
+  box.get_task_order_list() = {0};
+  box.get_curr_result().get_task_result_list().resize(1);
+  auto& result = box.get_curr_result().get_task_result_list()[0];
+  result.get_patch_list() = {makeRect(10)};
+  result.set_access_point(irt::AccessPoint(2, irt::LayerCoord(10, 10, 0)));
+  require(accessor.routePABox(model, box).empty(), "Unchanged box acquired a violation");
+  require(!box.get_dirty() && box.get_pa_task_list().empty() && box.get_curr_result().get_task_result_list().empty(),
+          "Unchanged box was marked dirty or retained temporary task state");
+  require(box.get_net_pin_own_patch_map().at(1).at(2).size() == 1 && pin.get_access_point().getRealLayerCoord() == irt::LayerCoord(10, 10, 0),
+          "Box publication lost its imported result or access point");
+  auto violation = makePatchViolation(10, irt::ViolationType::kMinimumArea, {1});
+  box.get_curr_result().get_route_violation_list() = {violation};
+  require(accessor.routePABox(model, box) == std::vector<irt::Violation>({violation}) && box.get_dirty(),
+          "A taskless box lost its violation or dirty status during publication");
+}
+
 }  // namespace
 
 extern "C" std::vector<irt::Violation> __wrap__ZN3irt9DRCEngine16getViolationListERNS_6DETaskE(irt::DRCEngine*, irt::DETask& de_task)
 {
   env_storage_list.push_back(de_task.get_env_shape_list().data());
   checked_task_list.push_back(de_task);
+  if (!violation_response_list.empty()) {
+    auto violations = std::move(violation_response_list.front());
+    violation_response_list.pop_front();
+    return violations;
+  }
   return {};
 }
 
@@ -658,6 +782,9 @@ int main()
     testTaskResultFlow(accessor);
     testEmptyModelSnapshot(accessor);
     testViaEnvironmentOwnership(accessor);
+    testPatchImprovement(accessor);
+    testPatchSelection(accessor);
+    testBoxPublicationFlow(accessor);
     irt::DRCEngine::destroyInst();
     irt::DataManager::destroyInst();
     irt::Utility::destroyInst();
