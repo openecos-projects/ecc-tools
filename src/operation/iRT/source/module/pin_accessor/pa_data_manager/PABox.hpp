@@ -123,9 +123,12 @@ class PABox
   bool _dirty = false;
   PAFixedGeometry _fixed_geometry;
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> _net_access_point_map;
+  // Borrowed, read-only during box solving: neighbors plus untasked local owner results.
+  // Owning vectors are frozen until the stage barrier. Active task results are never borrowed here.
   std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>> _net_pin_env_result_map;
-  std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_pin_own_result_map;
   std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>> _net_pin_env_patch_map;
+  // Persistent between stages; tasked pins move to curr_result on import and back on publication.
+  std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_pin_own_result_map;
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>> _net_pin_own_patch_map;
   // Indexed by task_idx; storage is frozen before routing publishes task pointers.
   std::vector<PATask> _pa_task_list;

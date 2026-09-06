@@ -315,6 +315,12 @@ void testFixedOverlapPoly(irt::PinAccessor& accessor)
   violation.set_violation_shape(makeRect(11));
   poly = accessor.getViolationOverlapPoly(box, violation);
   require(gtl::area(poly) == 0, "Raw fixed geometry was expanded like a cost shadow");
+  require(box.get_net_pin_env_result_map().empty() && box.get_net_pin_env_patch_map().empty(), "Reading an absent pin mutated the environment");
+  box.get_net_pin_env_result_map()[7][1];
+  box.get_net_pin_env_patch_map()[7][1];
+  accessor.getViolationOverlapPoly(box, violation);
+  require(box.get_net_pin_env_result_map().at(7).size() == 1 && box.get_net_pin_env_patch_map().at(7).size() == 1,
+          "Reading an absent pin inserted an empty environment row");
 }
 
 void testEnvironmentUpdates(irt::PinAccessor& accessor)
@@ -526,6 +532,9 @@ void testTaskResultFlow(irt::PinAccessor& accessor)
   box.get_net_access_point_map()[1].insert(&neighbor_pin.get_access_point());
   const auto* old_segments = box.get_net_pin_own_result_map()[1][0].data();
   accessor.initPATaskList(model, box);
+  require(box.get_curr_result().get_task_result_list().empty() && box.get_net_pin_own_result_map().at(1).size() == 3,
+          "Task definition imported owner results before its explicit import phase");
+  accessor.initPATaskResult(box);
   require(box.get_pa_task_list().size() == 2 && box.get_curr_result().get_task_result_list().size() == 2, "Task and result table sizes disagree");
   require(box.get_curr_result().get_task_result_list()[0].get_segment_list().data() == old_segments, "Importing owner results copied segment storage");
   require(box.get_net_pin_own_result_map().at(1).size() == 1 && box.get_net_pin_own_result_map().at(1).contains(2), "Untasked owner result was lost");
@@ -566,6 +575,62 @@ void testEmptyModelSnapshot(irt::PinAccessor& accessor)
   require(model.get_best_route_violation_list().empty(), "A worse result replaced a valid empty best result");
 }
 
+void testViaEnvironmentOwnership(irt::PinAccessor& accessor)
+{
+  auto& database = irt::DataManager::getInst().getDatabase();
+  database.get_layer_via_master_list().resize(1);
+  database.get_layer_via_master_list()[0].resize(1);
+  auto& via = database.get_layer_via_master_list()[0][0];
+  via.set_via_master_idx(0, 0);
+  via.set_below_enclosure(irt::LayerRect(-2, -2, 2, 2, 0));
+  via.set_above_enclosure(irt::LayerRect(-2, -2, 2, 2, 1));
+  via.set_cut_layer_idx(0);
+  via.get_cut_shape_list() = {irt::PlanarRect(-1, -1, 1, 1)};
+  irt::Segment<irt::LayerCoord> segment(irt::LayerCoord(10, 10, 0), irt::LayerCoord(10, 10, 1));
+  segment.set_via_master_idx(irt::ViaMasterIdx(0, 0));
+  irt::EXTLayerRect patch;
+  patch.set_real_rect(irt::PlanarRect(8, 8, 12, 12));
+  patch.set_layer_idx(0);
+  irt::PAModel model;
+  model.get_pa_net_list().resize(2);
+  auto& net = model.get_pa_net_list()[0];
+  net.set_net_idx(0);
+  net.get_pa_pin_list().resize(1);
+  auto& pin = net.get_pa_pin_list()[0];
+  pin.set_pin_idx(0);
+  pin.set_owner_pa_box_id(irt::PABoxId(0, 0));
+  pin.set_access_point(irt::AccessPoint(0, irt::LayerCoord(10, 10, 0)));
+  pin.get_target_coord_list().emplace_back(10, 10, 1);
+  irt::PABox box;
+  box.set_pa_box_id(irt::PABoxId(0, 0));
+  box.get_box_rect().set_real_rect(irt::PlanarRect(0, 0, 100, 100));
+  box.get_net_access_point_map()[0].insert(&pin.get_access_point());
+  box.get_net_pin_own_result_map()[1][0] = {segment};
+  box.get_net_pin_own_patch_map()[1][0] = {patch};
+  box.get_fixed_geometry().build({});
+  accessor.initPATaskList(model, box);
+  accessor.initPATaskResult(box);
+  require(box.get_net_pin_env_result_map().at(1).at(0).contains(&box.get_net_pin_own_result_map().at(1).at(0)[0]),
+          "Untasked owner segment is missing from the environment");
+  // Two 4x4 enclosures and one 4x4 patch contribute area + 1 each; cuts do not contribute.
+  require(accessor.getViaMasterCost(box, 0, segment) == 51, "Untasked owner geometry was charged more than once");
+  auto neighbor_segment = segment;
+  auto neighbor_patch = patch;
+  box.get_net_pin_env_result_map()[2][0].insert(&neighbor_segment);
+  box.get_net_pin_env_patch_map()[2][0].insert(&neighbor_patch);
+  require(accessor.getViaMasterCost(box, 0, segment) == 102, "Distinct coincident neighbor geometry was merged");
+  box.get_net_pin_env_result_map()[0][1].insert(&segment);
+  box.get_net_pin_env_patch_map()[0][1].insert(&patch);
+  require(accessor.getViaMasterCost(box, 0, segment) == 102, "Same-net environment changed via cost");
+  box.get_pa_task_list().resize(2);
+  box.get_pa_task_list()[1].set_task_idx(1);
+  box.get_pa_task_list()[1].set_net_idx(3);
+  box.get_curr_result().get_task_result_list().resize(2);
+  box.get_curr_result().get_task_result_list()[1].get_segment_list() = {segment};
+  box.get_curr_result().get_task_result_list()[1].get_patch_list() = {patch};
+  require(accessor.getViaMasterCost(box, 0, segment) == 153, "Current task results are absent from via cost");
+}
+
 }  // namespace
 
 extern "C" std::vector<irt::Violation> __wrap__ZN3irt9DRCEngine16getViolationListERNS_6DETaskE(irt::DRCEngine*, irt::DETask& de_task)
@@ -592,6 +657,7 @@ int main()
     testTaskIdentity(accessor);
     testTaskResultFlow(accessor);
     testEmptyModelSnapshot(accessor);
+    testViaEnvironmentOwnership(accessor);
     irt::DRCEngine::destroyInst();
     irt::DataManager::destroyInst();
     irt::Utility::destroyInst();

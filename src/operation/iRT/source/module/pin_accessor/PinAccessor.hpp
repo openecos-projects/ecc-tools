@@ -121,6 +121,7 @@ class PinAccessor
   void buildFixedRect(PABox& pa_box);
   void buildAccessPoint(PAModel& pa_model, PABox& pa_box);
   void initPATaskList(PAModel& pa_model, PABox& pa_box);
+  void initPATaskResult(PABox& pa_box);
   void buildRouteViolation(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list);
   void updateRouteViolation(PAModel& pa_model, std::vector<std::vector<Violation>>& stage_violation_list_list);
   bool needRouting(PABox& pa_box);

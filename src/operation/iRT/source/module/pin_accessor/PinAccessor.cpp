@@ -611,7 +611,7 @@ void PinAccessor::buildPinTargetCoordList(PAPin& pa_pin)
     std::vector<int32_t> y_list = RTUTIL.getScaleList(region.get_ll_y(), region.get_ur_y(), layer.getYTrackGridList());
     for (int32_t x : x_list) {
       for (int32_t y : y_list) {
-        target_coord_set.emplace(x, y, target_layer_idx);
+        target_coord_set.insert(LayerCoord(x, y, target_layer_idx));
       }
     }
   }
@@ -1143,6 +1143,7 @@ void PinAccessor::routePABoxMap(PAModel& pa_model)
       PABox& pa_box = pa_box_map[pa_box_id.get_x()][pa_box_id.get_y()];
       buildAccessPoint(pa_model, pa_box);
       initPATaskList(pa_model, pa_box);
+      initPATaskResult(pa_box);
     }
     buildRouteViolation(pa_model, pa_box_id_list);
 
@@ -1286,9 +1287,6 @@ void PinAccessor::initPATaskList(PAModel& pa_model, PABox& pa_box)
 
   EXTPlanarRect& box_rect = pa_box.get_box_rect();
   PlanarRect& box_real_rect = box_rect.get_real_rect();
-  std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& net_pin_own_result_map = pa_box.get_net_pin_own_result_map();
-  std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>>& net_pin_own_patch_map = pa_box.get_net_pin_own_patch_map();
-
   std::map<int32_t, std::map<int32_t, std::set<AccessPoint*>>> net_pin_access_point_map;
   {
     for (auto& [net_idx, access_point_set] : pa_box.get_net_access_point_map()) {
@@ -1356,6 +1354,17 @@ void PinAccessor::initPATaskList(PAModel& pa_model, PABox& pa_box)
     }
   }
   std::ranges::sort(task_order_list, [&pa_task_list](int32_t a, int32_t b) { return CmpPATask()(&pa_task_list[a], &pa_task_list[b]); });
+}
+
+void PinAccessor::initPATaskResult(PABox& pa_box)
+{
+  auto& pa_task_list = pa_box.get_pa_task_list();
+  auto& task_result_list = pa_box.get_curr_result().get_task_result_list();
+  auto& net_pin_own_result_map = pa_box.get_net_pin_own_result_map();
+  auto& net_pin_own_patch_map = pa_box.get_net_pin_own_patch_map();
+  if (!task_result_list.empty()) {
+    RTLOG.error(Loc::current(), "The PA task results must be empty before import!");
+  }
   task_result_list.resize(pa_task_list.size());
   {
     // Transfer only tasked pins. Untasked owner results remain available as fixed environment.
@@ -2404,17 +2413,6 @@ double PinAccessor::getViaMasterCost(PABox& pa_box, int32_t net_idx, const Segme
       }
     }
   }
-  for (auto& [other_net_idx, pin_result_map] : pa_box.get_net_pin_own_result_map()) {
-    if (other_net_idx == net_idx) {
-      continue;
-    }
-    for (auto& [pin_idx, segment_list] : pin_result_map) {
-      (void) pin_idx;
-      for (Segment<LayerCoord>& segment : segment_list) {
-        cost += getViaResultCost(query_shape_list, other_net_idx, segment);
-      }
-    }
-  }
   for (PATask& pa_task : pa_box.get_pa_task_list()) {
     int32_t other_net_idx = pa_task.get_net_idx();
     if (other_net_idx == net_idx) {
@@ -2432,17 +2430,6 @@ double PinAccessor::getViaMasterCost(PABox& pa_box, int32_t net_idx, const Segme
       (void) pin_idx;
       for (EXTLayerRect* patch : patch_set) {
         cost += getViaShapeCost(query_shape_list, true, patch->get_layer_idx(), patch->get_real_rect());
-      }
-    }
-  }
-  for (auto& [other_net_idx, pin_patch_map] : pa_box.get_net_pin_own_patch_map()) {
-    if (other_net_idx == net_idx) {
-      continue;
-    }
-    for (auto& [pin_idx, patch_list] : pin_patch_map) {
-      (void) pin_idx;
-      for (EXTLayerRect& patch : patch_list) {
-        cost += getViaShapeCost(query_shape_list, true, patch.get_layer_idx(), patch.get_real_rect());
       }
     }
   }
@@ -2614,13 +2601,18 @@ GTLPolyInt PinAccessor::getViolationOverlapPoly(PABox& pa_box, Violation& violat
         gtl_poly_set += RTUTIL.convertToGTLRectInt(shape.rect->get_real_rect());
       }
     }
-    for (Segment<LayerCoord>* segment : pa_box.get_net_pin_env_result_map()[curr_net_idx][curr_pin_idx]) {
-      for (NetShape& net_shape : RTDM.getNetDetailedShapeList(curr_net_idx, *segment)) {
-        if (!net_shape.get_is_routing()) {
-          continue;
-        }
-        if (violation_layer_idx == net_shape.get_layer_idx() && RTUTIL.isClosedOverlap(violation_real_rect, net_shape.get_rect())) {
-          gtl_poly_set += RTUTIL.convertToGTLRectInt(net_shape.get_rect());
+    const auto& env_result_map = pa_box.get_net_pin_env_result_map();
+    auto result_net_iter = env_result_map.find(curr_net_idx);
+    if (result_net_iter != env_result_map.end()) {
+      auto pin_iter = result_net_iter->second.find(curr_pin_idx);
+      if (pin_iter != result_net_iter->second.end()) {
+        for (Segment<LayerCoord>* segment : pin_iter->second) {
+          for (NetShape& net_shape : RTDM.getNetDetailedShapeList(curr_net_idx, *segment)) {
+            if (net_shape.get_is_routing() && violation_layer_idx == net_shape.get_layer_idx()
+                && RTUTIL.isClosedOverlap(violation_real_rect, net_shape.get_rect())) {
+              gtl_poly_set += RTUTIL.convertToGTLRectInt(net_shape.get_rect());
+            }
+          }
         }
       }
     }
@@ -2634,9 +2626,16 @@ GTLPolyInt PinAccessor::getViolationOverlapPoly(PABox& pa_box, Violation& violat
         }
       }
     }
-    for (EXTLayerRect* patch : pa_box.get_net_pin_env_patch_map()[curr_net_idx][curr_pin_idx]) {
-      if (violation_layer_idx == patch->get_layer_idx() && RTUTIL.isClosedOverlap(violation_real_rect, patch->get_real_rect())) {
-        gtl_poly_set += RTUTIL.convertToGTLRectInt(patch->get_real_rect());
+    const auto& env_patch_map = pa_box.get_net_pin_env_patch_map();
+    auto patch_net_iter = env_patch_map.find(curr_net_idx);
+    if (patch_net_iter != env_patch_map.end()) {
+      auto pin_iter = patch_net_iter->second.find(curr_pin_idx);
+      if (pin_iter != patch_net_iter->second.end()) {
+        for (EXTLayerRect* patch : pin_iter->second) {
+          if (violation_layer_idx == patch->get_layer_idx() && RTUTIL.isClosedOverlap(violation_real_rect, patch->get_real_rect())) {
+            gtl_poly_set += RTUTIL.convertToGTLRectInt(patch->get_real_rect());
+          }
+        }
       }
     }
   }
