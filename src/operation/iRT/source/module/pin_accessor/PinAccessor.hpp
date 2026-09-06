@@ -160,16 +160,14 @@ class PinAccessor
   std::vector<int32_t> initTaskSchedule(PABox& pa_box);
   void removeTaskResultFromEnvironment(PABox& pa_box, PATask* pa_task);
   void initSingleRouteTask(PABox& pa_box, PATask* pa_task);
-  bool isConnectedAllEnd(PABox& pa_box);
   [[nodiscard]] bool routeSinglePath(PABox& pa_box);
   void initPathHead(PABox& pa_box);
   bool reachEnd(PABox& pa_box);
   void expandSearching(PABox& pa_box);
   void resetPathHead(PABox& pa_box);
-  void updatePathResult(PABox& pa_box);
   std::vector<Segment<LayerCoord>> getRoutingSegmentListByNode(PANode* node);
   void updateSegmentViaMaster(Segment<LayerCoord>& segment);
-  void resetStartAndEnd(PABox& pa_box);
+  void selectAccessPoint(PABox& pa_box);
   void resetSinglePath(PABox& pa_box);
   void updateTaskResult(PABox& pa_box);
   std::vector<Segment<LayerCoord>> getRoutingSegmentList(PABox& pa_box);

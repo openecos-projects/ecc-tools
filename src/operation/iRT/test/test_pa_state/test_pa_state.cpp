@@ -314,12 +314,17 @@ void testWorkspaceReset()
   irt::PATask task;
   irt::PANode node;
   box.get_route_state().set_curr_route_task(&task);
+  box.get_route_state().get_source_node_list().push_back(&node);
+  box.get_route_state().get_target_node_list().push_back(&node);
+  box.get_route_state().set_path_head_node(&node);
   box.get_route_state().get_open_queue().push(&node);
   box.get_route_state().get_open_queue().release();
   require(node.get_open_queue_idx() == -1, "Releasing a queue left a stale node index");
   box.get_route_state() = irt::PARouteState();
   require(box.get_route_state().get_curr_route_task() == nullptr, "Route state retained a task");
-  require(box.get_route_state().get_end_node_list_idx() == -1, "Route state retained an end index");
+  require(box.get_route_state().get_source_node_list().empty() && box.get_route_state().get_target_node_list().empty()
+              && box.get_route_state().get_path_head_node() == nullptr,
+          "Route state retained its source, target, or reached endpoint");
   box.get_patch_state().set_curr_patch_task(&task);
   box.get_patch_state().get_routing_patch_list().emplace_back();
   box.get_patch_state().get_tried_fix_violation_set().emplace();

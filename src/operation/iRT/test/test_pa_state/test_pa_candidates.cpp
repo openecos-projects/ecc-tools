@@ -567,6 +567,7 @@ uint64_t testRouteTasks(irt::PinAccessor& accessor)
         appendSignature(signature, segment.get_via_master_idx().get_via_idx());
       }
       require(box.get_route_state().get_curr_route_task() == nullptr && box.get_route_state().get_open_queue().top() == nullptr, "Routing retained active state");
+      require(box.get_route_state().get_source_node_list().empty() && box.get_route_state().get_target_node_list().empty(), "Routing retained task endpoints");
       for (auto& nodes : box.get_layer_node_map()) {
         for (int32_t x = 0; x < nodes.get_x_size(); x++) {
           for (int32_t y = 0; y < nodes.get_y_size(); y++) {

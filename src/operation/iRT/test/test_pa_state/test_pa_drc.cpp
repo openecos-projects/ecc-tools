@@ -430,11 +430,11 @@ void testPathOutcome(irt::PinAccessor& accessor)
   param.set_non_prefer_wire_unit(2);
   box.set_pa_iter_param(&param);
   box.get_route_state().set_curr_route_task(&task);
-  box.get_route_state().get_start_node_list_list() = {{&start}};
-  box.get_route_state().get_end_node_list_list() = {{&end}};
-  box.get_route_state().set_end_node_list_idx(0);
+  box.get_route_state().get_source_node_list() = {&start};
+  box.get_route_state().get_target_node_list() = {&end};
+  box.get_route_state().set_path_head_node(&end);
   require(!accessor.routeSinglePath(box), "An unreachable target was reported as connected");
-  require(box.get_route_state().get_path_head_node() == nullptr && box.get_route_state().get_end_node_list_idx() == -1,
+  require(box.get_route_state().get_path_head_node() == nullptr && !accessor.reachEnd(box),
           "Exhausted search retained a successful endpoint");
   accessor.resetSinglePath(box);
   require(start.isNone() && start.get_open_queue_idx() == -1, "Failed search left stale node state");
@@ -442,17 +442,59 @@ void testPathOutcome(irt::PinAccessor& accessor)
   start.setNeighborNode(irt::Orientation::kEast, &end);
   end.setNeighborNode(irt::Orientation::kWest, &start);
   require(accessor.routeSinglePath(box), "A connected target was not reached");
-  require(box.get_route_state().get_path_head_node() == &end && box.get_route_state().get_end_node_list_idx() == 0,
+  require(box.get_route_state().get_path_head_node() == &end && accessor.reachEnd(box),
           "Successful search did not publish its endpoint");
   auto segments = accessor.getRoutingSegmentListByNode(&end);
   require(segments.size() == 1, "Successful search lost its segment");
   accessor.resetSinglePath(box);
 
-  box.get_route_state().get_end_node_list_list() = {{&start}};
+  box.get_route_state().get_target_node_list() = {&start};
   require(accessor.routeSinglePath(box), "A coincident source and target was not reached");
   require(accessor.getRoutingSegmentListByNode(&start).empty(), "A coincident source and target produced a segment");
   accessor.resetSinglePath(box);
   box.get_route_state().get_open_queue().release();
+}
+
+void testRouteTaskContract(irt::PinAccessor& accessor)
+{
+  bool had_throw_policy = std::getenv("ECC_LOGGER_THROW_ON_ERROR") != nullptr;
+  if (!had_throw_policy) {
+    require(setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1) == 0, "Cannot enable route contract exceptions");
+  }
+  for (int32_t case_idx = 0; case_idx < 7; case_idx++) {
+    irt::PABox box;
+    irt::PATask task;
+    std::vector<irt::PAGroup> groups(case_idx < 3 ? case_idx : 2);
+    if (case_idx == 2) {
+      groups.resize(3);
+    }
+    for (size_t i = 0; i < groups.size(); i++) {
+      groups[i].set_is_target(i != 0);
+      groups[i].get_coord_list().emplace_back(10, 10, 0);
+    }
+    if (case_idx == 3) {
+      groups.front().set_is_target(true);
+    } else if (case_idx == 4) {
+      groups.back().set_is_target(false);
+    } else if (case_idx == 5) {
+      groups.front().get_coord_list().clear();
+    } else if (case_idx == 6) {
+      groups.back().get_coord_list().clear();
+    }
+    task.set_pa_group_list(std::move(groups));
+    bool rejected = false;
+    try {
+      accessor.initSingleRouteTask(box, &task);
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find("one nonempty source group and one nonempty target group") != std::string::npos;
+    }
+    require(rejected, "Invalid PA source/target contract was not rejected at the routing boundary");
+    require(box.get_route_state().get_curr_route_task() == nullptr && box.get_net_access_point_map().empty(),
+            "Rejecting an invalid task mutated routing state or environment");
+  }
+  if (!had_throw_policy) {
+    require(unsetenv("ECC_LOGGER_THROW_ON_ERROR") == 0, "Cannot restore route contract exception policy");
+  }
 }
 
 void testTaskIdentity(irt::PinAccessor& accessor)
@@ -778,6 +820,7 @@ int main()
     testFixedOverlapPoly(accessor);
     testEnvironmentUpdates(accessor);
     testPathOutcome(accessor);
+    testRouteTaskContract(accessor);
     testTaskIdentity(accessor);
     testTaskResultFlow(accessor);
     testEmptyModelSnapshot(accessor);

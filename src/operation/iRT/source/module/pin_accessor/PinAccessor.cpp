@@ -242,15 +242,13 @@ void PinAccessor::routePABox(PABox& pa_box)
 void PinAccessor::routePATask(PABox& pa_box, PATask* pa_task)
 {
   initSingleRouteTask(pa_box, pa_task);
-  while (!isConnectedAllEnd(pa_box)) {
-    if (!routeSinglePath(pa_box)) {
-      RTLOG.error(Loc::current(), "No PA path in box (", pa_box.get_pa_box_id().get_x(), ",", pa_box.get_pa_box_id().get_y(), "), net ", pa_task->get_net_idx(),
-                  ", pin ", pa_task->get_pa_pin()->get_pin_idx(), ", task ", pa_task->get_task_idx(), "!");
-    }
-    updatePathResult(pa_box);
-    resetStartAndEnd(pa_box);
-    resetSinglePath(pa_box);
+  if (!routeSinglePath(pa_box)) {
+    RTLOG.error(Loc::current(), "No PA path in box (", pa_box.get_pa_box_id().get_x(), ",", pa_box.get_pa_box_id().get_y(), "), net ", pa_task->get_net_idx(),
+                ", pin ", pa_task->get_pa_pin()->get_pin_idx(), ", task ", pa_task->get_task_idx(), "!");
   }
+  pa_box.get_route_state().get_routing_segment_list() = getRoutingSegmentListByNode(pa_box.get_route_state().get_path_head_node());
+  selectAccessPoint(pa_box);
+  resetSinglePath(pa_box);
   updateTaskResult(pa_box);
   resetSingleRouteTask(pa_box);
 }
@@ -1856,6 +1854,11 @@ void PinAccessor::removeTaskResultFromEnvironment(PABox& pa_box, PATask* pa_task
 
 void PinAccessor::initSingleRouteTask(PABox& pa_box, PATask* pa_task)
 {
+  const std::vector<PAGroup>& pa_group_list = pa_task->get_pa_group_list();
+  if (pa_group_list.size() != 2 || pa_group_list.front().get_is_target() || !pa_group_list.back().get_is_target()
+      || pa_group_list.front().get_coord_list().empty() || pa_group_list.back().get_coord_list().empty()) {
+    RTLOG.error(Loc::current(), "The PA task must contain one nonempty source group and one nonempty target group!");
+  }
   ScaleAxis& box_track_axis = pa_box.get_box_track_axis();
   std::vector<GridMap<PANode>>& layer_node_map = pa_box.get_layer_node_map();
   std::map<LayerCoord, AccessPoint*, CmpLayerCoordByXASC> source_access_point_map;
@@ -1866,50 +1869,34 @@ void PinAccessor::initSingleRouteTask(PABox& pa_box, PATask* pa_task)
   }
 
   // single task
-  pa_box.get_route_state().set_curr_route_task(pa_task);
+  PARouteState& route_state = pa_box.get_route_state();
+  route_state.set_curr_route_task(pa_task);
   pa_task->set_selected_access_point(nullptr);
-  pa_box.get_route_state().get_source_node_access_point_map().clear();
-  {
-    std::vector<std::vector<PANode*>> node_list_list;
-    const std::vector<PAGroup>& pa_group_list = pa_task->get_pa_group_list();
-    for (const PAGroup& pa_group : pa_group_list) {
-      std::vector<PANode*> node_list;
-      for (const LayerCoord& coord : pa_group.get_coord_list()) {
-        if (!RTUTIL.existTrackGrid(coord, box_track_axis)) {
-          RTLOG.error(Loc::current(), "The coord can not find grid!");
-        }
-        PlanarCoord grid_coord = RTUTIL.getTrackGrid(coord, box_track_axis);
-        PANode& pa_node = layer_node_map[coord.get_layer_idx()][grid_coord.get_x()][grid_coord.get_y()];
-        node_list.push_back(&pa_node);
-        if (!pa_group.get_is_target()) {
-          auto access_iter = source_access_point_map.find(coord);
-          if (access_iter != source_access_point_map.end()) {
-            pa_box.get_route_state().get_source_node_access_point_map().emplace(&pa_node, access_iter->second);
-          }
-        }
+  route_state.get_source_node_access_point_map().clear();
+  for (const PAGroup& pa_group : pa_group_list) {
+    auto& node_list = pa_group.get_is_target() ? route_state.get_target_node_list() : route_state.get_source_node_list();
+    node_list.clear();
+    node_list.reserve(pa_group.get_coord_list().size());
+    for (const LayerCoord& coord : pa_group.get_coord_list()) {
+      if (!RTUTIL.existTrackGrid(coord, box_track_axis)) {
+        RTLOG.error(Loc::current(), "The coord can not find grid!");
       }
-      node_list_list.push_back(node_list);
-    }
-    for (size_t i = 0; i < node_list_list.size(); i++) {
-      if (i == 0) {
-        pa_box.get_route_state().get_start_node_list_list().push_back(node_list_list[i]);
-      } else {
-        pa_box.get_route_state().get_end_node_list_list().push_back(node_list_list[i]);
+      PlanarCoord grid_coord = RTUTIL.getTrackGrid(coord, box_track_axis);
+      PANode& pa_node = layer_node_map[coord.get_layer_idx()][grid_coord.get_x()][grid_coord.get_y()];
+      node_list.push_back(&pa_node);
+      if (!pa_group.get_is_target()) {
+        auto access_iter = source_access_point_map.find(coord);
+        if (access_iter != source_access_point_map.end()) {
+          route_state.get_source_node_access_point_map().emplace(&pa_node, access_iter->second);
+        }
       }
     }
   }
-  pa_box.get_route_state().get_path_node_list().clear();
-  pa_box.get_route_state().get_routing_segment_list().clear();
-}
-
-bool PinAccessor::isConnectedAllEnd(PABox& pa_box)
-{
-  return pa_box.get_route_state().get_end_node_list_list().empty();
+  route_state.get_routing_segment_list().clear();
 }
 
 bool PinAccessor::routeSinglePath(PABox& pa_box)
 {
-  pa_box.get_route_state().set_end_node_list_idx(-1);
   initPathHead(pa_box);
   while (pa_box.get_route_state().get_path_head_node() != nullptr) {
     if (reachEnd(pa_box)) {
@@ -1923,39 +1910,19 @@ bool PinAccessor::routeSinglePath(PABox& pa_box)
 
 void PinAccessor::initPathHead(PABox& pa_box)
 {
-  std::vector<std::vector<PANode*>>& start_node_list_list = pa_box.get_route_state().get_start_node_list_list();
-  std::vector<PANode*>& path_node_list = pa_box.get_route_state().get_path_node_list();
-
-  for (std::vector<PANode*>& start_node_list : start_node_list_list) {
-    for (PANode* start_node : start_node_list) {
-      auto access_point_iter = pa_box.get_route_state().get_source_node_access_point_map().find(start_node);
-      start_node->set_known_cost(
-          access_point_iter == pa_box.get_route_state().get_source_node_access_point_map().end() ? 0 : access_point_iter->second->get_init_cost());
-      start_node->set_estimated_cost(getEstimateCostToEnd(pa_box, start_node));
-      pushToOpenList(pa_box, start_node);
-    }
-  }
-  for (PANode* path_node : path_node_list) {
-    path_node->set_estimated_cost(getEstimateCostToEnd(pa_box, path_node));
-    pushToOpenList(pa_box, path_node);
+  const auto& source_access_point_map = pa_box.get_route_state().get_source_node_access_point_map();
+  for (PANode* source_node : pa_box.get_route_state().get_source_node_list()) {
+    auto access_point_iter = source_access_point_map.find(source_node);
+    source_node->set_known_cost(access_point_iter == source_access_point_map.end() ? 0 : access_point_iter->second->get_init_cost());
+    source_node->set_estimated_cost(getEstimateCostToEnd(pa_box, source_node));
+    pushToOpenList(pa_box, source_node);
   }
   resetPathHead(pa_box);
 }
 
 bool PinAccessor::reachEnd(PABox& pa_box)
 {
-  std::vector<std::vector<PANode*>>& end_node_list_list = pa_box.get_route_state().get_end_node_list_list();
-  PANode* path_head_node = pa_box.get_route_state().get_path_head_node();
-
-  for (size_t i = 0; i < end_node_list_list.size(); i++) {
-    for (PANode* end_node : end_node_list_list[i]) {
-      if (path_head_node == end_node) {
-        pa_box.get_route_state().set_end_node_list_idx(static_cast<int32_t>(i));
-        return true;
-      }
-    }
-  }
-  return false;
+  return RTUTIL.exist(pa_box.get_route_state().get_target_node_list(), pa_box.get_route_state().get_path_head_node());
 }
 
 void PinAccessor::expandSearching(PABox& pa_box)
@@ -2008,13 +1975,6 @@ void PinAccessor::expandSearching(PABox& pa_box)
 void PinAccessor::resetPathHead(PABox& pa_box)
 {
   pa_box.get_route_state().set_path_head_node(popFromOpenList(pa_box));
-}
-
-void PinAccessor::updatePathResult(PABox& pa_box)
-{
-  for (Segment<LayerCoord>& routing_segment : getRoutingSegmentListByNode(pa_box.get_route_state().get_path_head_node())) {
-    pa_box.get_route_state().get_routing_segment_list().push_back(routing_segment);
-  }
 }
 
 std::vector<Segment<LayerCoord>> PinAccessor::getRoutingSegmentListByNode(PANode* node)
@@ -2099,41 +2059,19 @@ void PinAccessor::updateSegmentViaMaster(Segment<LayerCoord>& segment)
   RTLOG.error(Loc::current(), "The via segment has no via master index!");
 }
 
-void PinAccessor::resetStartAndEnd(PABox& pa_box)
+void PinAccessor::selectAccessPoint(PABox& pa_box)
 {
-  std::vector<std::vector<PANode*>>& start_node_list_list = pa_box.get_route_state().get_start_node_list_list();
-  std::vector<std::vector<PANode*>>& end_node_list_list = pa_box.get_route_state().get_end_node_list_list();
-  std::vector<PANode*>& path_node_list = pa_box.get_route_state().get_path_node_list();
-  PANode* path_head_node = pa_box.get_route_state().get_path_head_node();
-  int32_t end_node_list_idx = pa_box.get_route_state().get_end_node_list_idx();
-
-  // 对于抵达的终点pin,只保留到达的node
-  end_node_list_list[end_node_list_idx].clear();
-  end_node_list_list[end_node_list_idx].push_back(path_head_node);
-
-  PANode* path_node = path_head_node->get_parent_node();
-  if (path_node == nullptr) {
-    // 起点和终点重合
-    path_node = path_head_node;
-  } else {
-    // 起点和终点不重合
-    while (path_node->get_parent_node() != nullptr) {
-      path_node_list.push_back(path_node);
-      path_node = path_node->get_parent_node();
-    }
+  PARouteState& route_state = pa_box.get_route_state();
+  PANode* source_node = route_state.get_path_head_node();
+  while (source_node->get_parent_node() != nullptr) {
+    source_node = source_node->get_parent_node();
   }
-  if (start_node_list_list.size() == 1) {
-    auto access_point_iter = pa_box.get_route_state().get_source_node_access_point_map().find(path_node);
-    if (access_point_iter == pa_box.get_route_state().get_source_node_access_point_map().end()) {
-      RTLOG.error(Loc::current(), "The PA path does not start from an access point!");
-      return;
-    }
-    pa_box.get_route_state().get_curr_route_task()->set_selected_access_point(access_point_iter->second);
-    start_node_list_list.front().clear();
-    start_node_list_list.front().push_back(path_node);
+  auto access_point_iter = route_state.get_source_node_access_point_map().find(source_node);
+  if (access_point_iter == route_state.get_source_node_access_point_map().end()) {
+    RTLOG.error(Loc::current(), "The PA path does not start from an access point!");
+    return;
   }
-  start_node_list_list.push_back(end_node_list_list[end_node_list_idx]);
-  end_node_list_list.erase(end_node_list_list.begin() + end_node_list_idx);
+  route_state.get_curr_route_task()->set_selected_access_point(access_point_iter->second);
 }
 
 void PinAccessor::resetSinglePath(PABox& pa_box)
@@ -2150,7 +2088,6 @@ void PinAccessor::resetSinglePath(PABox& pa_box)
   single_path_visited_node_list.clear();
 
   pa_box.get_route_state().set_path_head_node(nullptr);
-  pa_box.get_route_state().set_end_node_list_idx(-1);
 }
 
 void PinAccessor::updateTaskResult(PABox& pa_box)
@@ -2235,9 +2172,8 @@ std::vector<Segment<LayerCoord>> PinAccessor::getRoutingSegmentList(PABox& pa_bo
 void PinAccessor::resetSingleRouteTask(PABox& pa_box)
 {
   pa_box.get_route_state().set_curr_route_task(nullptr);
-  pa_box.get_route_state().get_start_node_list_list().clear();
-  pa_box.get_route_state().get_end_node_list_list().clear();
-  pa_box.get_route_state().get_path_node_list().clear();
+  pa_box.get_route_state().get_source_node_list().clear();
+  pa_box.get_route_state().get_target_node_list().clear();
   pa_box.get_route_state().get_routing_segment_list().clear();
   pa_box.get_route_state().get_source_node_access_point_map().clear();
 }
@@ -2332,12 +2268,7 @@ double PinAccessor::getKnownSelfCost(PABox& pa_box, PANode* start_node, PANode* 
   if (start_node->get_layer_idx() == end_node->get_layer_idx()) {
     RoutingLayer& routing_layer = routing_layer_list[start_node->get_layer_idx()];
     if (routing_layer.get_prefer_direction() != RTUTIL.getDirection(*start_node, *end_node)) {
-      for (std::vector<PANode*>& end_node_list : pa_box.get_route_state().get_end_node_list_list()) {
-        if (RTUTIL.exist(end_node_list, end_node)) {
-          nonprefer_and_segment_end = true;
-          break;
-        }
-      }
+      nonprefer_and_segment_end = RTUTIL.exist(pa_box.get_route_state().get_target_node_list(), end_node);
       if (!nonprefer_and_segment_end) {
         return 0;
       }
@@ -2510,16 +2441,12 @@ double PinAccessor::getViaResultCost(std::vector<NetShape>& query_shape_list, in
 
 double PinAccessor::getEstimateCostToEnd(PABox& pa_box, PANode* curr_node)
 {
-  std::vector<std::vector<PANode*>>& end_node_list_list = pa_box.get_route_state().get_end_node_list_list();
-
   double estimate_cost = DBL_MAX;
-  for (std::vector<PANode*>& end_node_list : end_node_list_list) {
-    for (PANode* end_node : end_node_list) {
-      if (end_node->isClose()) {
-        continue;
-      }
-      estimate_cost = std::min(estimate_cost, getEstimateCost(pa_box, curr_node, end_node));
+  for (PANode* target_node : pa_box.get_route_state().get_target_node_list()) {
+    if (target_node->isClose()) {
+      continue;
     }
+    estimate_cost = std::min(estimate_cost, getEstimateCost(pa_box, curr_node, target_node));
   }
   return estimate_cost;
 }
