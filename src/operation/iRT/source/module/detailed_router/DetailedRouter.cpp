@@ -786,22 +786,20 @@ void DetailedRouter::addNetPatchToEnvironment(DRModel& dr_model, GridMap<bool>& 
 
 void DetailedRouter::initDRTaskList(DRModel& dr_model, DRBox& dr_box, const std::set<int32_t>& violation_net_set)
 {
+  if (!dr_box.get_initial_routing() && violation_net_set.empty()) {
+    return;
+  }
+  // New conflicts during repair must be able to schedule their other local nets.
   std::set<int32_t> net_idx_set;
+  for (auto& [net_idx, segment_list] : dr_box.get_net_task_detailed_result_map()) {
+    net_idx_set.insert(net_idx);
+  }
+  for (auto& [net_idx, patch_list] : dr_box.get_net_task_detailed_patch_map()) {
+    net_idx_set.insert(net_idx);
+  }
   if (dr_box.get_initial_routing()) {
-    for (auto& [net_idx, segment_list] : dr_box.get_net_task_detailed_result_map()) {
-      net_idx_set.insert(net_idx);
-    }
-    for (auto& [net_idx, patch_list] : dr_box.get_net_task_detailed_patch_map()) {
-      net_idx_set.insert(net_idx);
-    }
     for (auto& [net_idx, access_point_set] : dr_box.get_net_access_point_map()) {
       net_idx_set.insert(net_idx);
-    }
-  } else {
-    for (int32_t net_idx : violation_net_set) {
-      if (dr_box.get_net_task_detailed_result_map().contains(net_idx) || dr_box.get_net_task_detailed_patch_map().contains(net_idx)) {
-        net_idx_set.insert(net_idx);
-      }
     }
   }
   for (int32_t net_idx : net_idx_set) {
