@@ -456,7 +456,7 @@ std::vector<PALegalShape> PinAccessor::getPlanarLegalShapeList(int32_t curr_net_
     origin_pin_shape_list.push_back(pin_shape.get_real_rect());
   }
   // Shrink by the larger of the wire half-width and the selected enclosure.
-  std::vector<EXTLayerRect> shrinked_rect_list;
+  std::vector<PlanarRect> shrinked_rect_list;
   {
     PlanarRect enclosure = (via_master == nullptr ? layer_enclosure_map.at(curr_layer_idx) : getViaEnclosure(*via_master, curr_layer_idx));
     int32_t enclosure_half_x_span = enclosure.getXSpan() / 2;
@@ -464,21 +464,14 @@ std::vector<PALegalShape> PinAccessor::getPlanarLegalShapeList(int32_t curr_net_
     int32_t half_min_width = routing_layer_list[curr_layer_idx].get_min_width() / 2;
     int32_t shrinked_x_size = std::max(half_min_width, enclosure_half_x_span);
     int32_t shrinked_y_size = std::max(half_min_width, enclosure_half_y_span);
-    for (PlanarRect& real_rect :
-         RTUTIL.getClosedShrinkedRectListByBoost(origin_pin_shape_list, shrinked_x_size, shrinked_y_size, shrinked_x_size, shrinked_y_size)) {
-      EXTLayerRect shrinked_rect;
-      shrinked_rect.set_real_rect(real_rect);
-      shrinked_rect.set_grid_rect(RTUTIL.getClosedGCellGridRect(shrinked_rect.get_real_rect(), gcell_axis));
-      shrinked_rect.set_layer_idx(curr_layer_idx);
-      shrinked_rect_list.push_back(shrinked_rect);
+    shrinked_rect_list = RTUTIL.getClosedShrinkedRectListByBoost(origin_pin_shape_list, shrinked_x_size, shrinked_y_size, shrinked_x_size, shrinked_y_size);
+    for (const PlanarRect& real_rect : shrinked_rect_list) {
+      // Keep the existing axis/border validation; obstacle queries only consume real coordinates.
+      RTUTIL.getClosedGCellGridRect(real_rect, gcell_axis);
     }
   }
   std::array<int32_t, 2> obs_layer_idx_list = getAccessObstacleLayerList(curr_layer_idx, via_master);
-  std::vector<PlanarRect> legal_rect_list;
-  legal_rect_list.reserve(shrinked_rect_list.size());
-  for (const EXTLayerRect& shrinked_rect : shrinked_rect_list) {
-    legal_rect_list.push_back(shrinked_rect.get_real_rect());
-  }
+  std::vector<PlanarRect> legal_rect_list = shrinked_rect_list;
   for (int32_t obs_layer_idx : obs_layer_idx_list) {
     std::vector<PlanarRect> obs_shape_list = getAccessObstacleList(curr_net_idx, curr_layer_idx, obs_layer_idx, shrinked_rect_list, via_master);
     if (obs_shape_list.empty()) {
@@ -532,7 +525,7 @@ std::array<int32_t, 2> PinAccessor::getAccessObstacleLayerList(int32_t curr_laye
 }
 
 std::vector<PlanarRect> PinAccessor::getAccessObstacleList(int32_t curr_net_idx, int32_t curr_layer_idx, int32_t obs_layer_idx,
-                                                           const std::vector<EXTLayerRect>& shrinked_rect_list, ViaMaster* via_master)
+                                                           const std::vector<PlanarRect>& shrinked_rect_list, ViaMaster* via_master)
 {
   RoutingLayer& routing_layer = RTDM.getDatabase().get_routing_layer_list()[obs_layer_idx];
   PlanarRect enclosure = (via_master == nullptr ? RTDM.getDatabase().get_layer_enclosure_map().at(obs_layer_idx) : getViaEnclosure(*via_master, obs_layer_idx));
@@ -543,8 +536,9 @@ std::vector<PlanarRect> PinAccessor::getAccessObstacleList(int32_t curr_net_idx,
     std::swap(eol_spacing.first, eol_spacing.second);
   }
   std::vector<PlanarRect> obs_shape_list;
-  for (const EXTLayerRect& shrinked_rect : shrinked_rect_list) {
-    EXTLayerRect query_rect = shrinked_rect;
+  for (const PlanarRect& shrinked_rect : shrinked_rect_list) {
+    EXTLayerRect query_rect;
+    query_rect.set_real_rect(shrinked_rect);
     query_rect.set_layer_idx(obs_layer_idx);
     for (auto& [net_idx, fixed_rect_set] : RTDM.getNetFixedRectMap(true, query_rect)) {
       if (net_idx == curr_net_idx) {
@@ -558,7 +552,7 @@ std::vector<PlanarRect> PinAccessor::getAccessObstacleList(int32_t curr_net_idx,
           int32_t enlarged_x_size = spacing_pair_list[i].first + enclosure_half_x_span;
           int32_t enlarged_y_size = spacing_pair_list[i].second + enclosure_half_y_span;
           PlanarRect enlarged_rect = RTUTIL.getEnlargedRect(fixed_rect->get_real_rect(), enlarged_x_size, enlarged_y_size, enlarged_x_size, enlarged_y_size);
-          if (RTUTIL.isOpenOverlap(shrinked_rect.get_real_rect(), enlarged_rect)) {
+          if (RTUTIL.isOpenOverlap(shrinked_rect, enlarged_rect)) {
             obs_shape_list.push_back(enlarged_rect);
           }
         }
@@ -1905,7 +1899,6 @@ void PinAccessor::initSingleRouteTask(PABox& pa_box, PATask* pa_task)
     }
   }
   pa_box.get_route_state().get_path_node_list().clear();
-  pa_box.get_route_state().get_single_task_visited_node_list().clear();
   pa_box.get_route_state().get_routing_segment_list().clear();
 }
 
@@ -2245,7 +2238,6 @@ void PinAccessor::resetSingleRouteTask(PABox& pa_box)
   pa_box.get_route_state().get_start_node_list_list().clear();
   pa_box.get_route_state().get_end_node_list_list().clear();
   pa_box.get_route_state().get_path_node_list().clear();
-  pa_box.get_route_state().get_single_task_visited_node_list().clear();
   pa_box.get_route_state().get_routing_segment_list().clear();
   pa_box.get_route_state().get_source_node_access_point_map().clear();
 }
@@ -2255,12 +2247,10 @@ void PinAccessor::resetSingleRouteTask(PABox& pa_box)
 void PinAccessor::pushToOpenList(PABox& pa_box, PANode* curr_node)
 {
   OpenQueue<PANode>& open_queue = pa_box.get_route_state().get_open_queue();
-  std::vector<PANode*>& single_task_visited_node_list = pa_box.get_route_state().get_single_task_visited_node_list();
   std::vector<PANode*>& single_path_visited_node_list = pa_box.get_route_state().get_single_path_visited_node_list();
 
   open_queue.push(curr_node);
   curr_node->set_state(PANodeState::kOpen);
-  single_task_visited_node_list.push_back(curr_node);
   single_path_visited_node_list.push_back(curr_node);
 }
 
@@ -2745,19 +2735,16 @@ std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box, const GTL
 {
   int32_t manufacture_grid = RTDM.getDatabase().get_manufacture_grid();
   Die& die = RTDM.getDatabase().get_die();
-  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   int32_t max_candidate_patch_num = pa_box.get_pa_iter_param()->get_max_candidate_patch_num();
   if (max_candidate_patch_num <= 0) {
     RTLOG.error(Loc::current(), "The max_candidate_patch_num must be positive!");
   }
 
-  int32_t curr_net_idx = pa_box.get_patch_state().get_curr_patch_task()->get_net_idx();
   Violation& curr_patch_violation = pa_box.get_patch_state().get_curr_patch_violation();
   int32_t violation_layer_idx = curr_patch_violation.get_violation_shape().get_layer_idx();
 
   RoutingLayer& routing_layer = routing_layer_list[violation_layer_idx];
-  Direction layer_direction = routing_layer.get_prefer_direction();
   int32_t min_area = routing_layer.get_min_area();
   int32_t wire_width = routing_layer.get_min_width();
 
@@ -2822,39 +2809,20 @@ std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box, const GTL
     // 首轮覆盖区间首尾，后续每次减半只补充上一轮区间的中点。
     for (int32_t sample_step = initial_sample_step; sample_step >= 1; sample_step /= 2) {
       bool is_initial_sample = (sample_step == initial_sample_step);
-      int32_t sample_begin = is_initial_sample ? 0 : sample_step;
-      int32_t sample_interval = is_initial_sample ? sample_step : sample_step * 2;
       size_t patch_begin_idx = pa_patch_list.size();
-
+      std::vector<int32_t> h_x_list = getPatchSampleCoordList(h_start_x, v_cutting_rect.get_ll_x(), manufacture_grid, sample_step, is_initial_sample);
       for (int32_t y : {h_cutting_rect.get_ll_y(), v_cutting_rect.get_ll_y(), v_cutting_rect.get_ur_y() - wire_width}) {
-        for (int32_t i = sample_begin; i < h_position_num; i += sample_interval) {
-          if (!is_initial_sample && i == h_position_num - 1) {
-            continue;
-          }
-          PlanarRect h_real_rect = RTUTIL.getEnlargedRect(PlanarCoord(h_start_x + (i * manufacture_grid), y), 0, 0, h_wire_length, wire_width);
-          if (RTUTIL.isInside(die.get_real_rect(), h_real_rect) && patch_rect_set.insert(h_real_rect).second) {
-            pa_patch_list.emplace_back(h_real_rect, violation_layer_idx);
-          }
-        }
-        if (is_initial_sample && (h_position_num - 1) % sample_step != 0) {
-          PlanarRect h_real_rect = RTUTIL.getEnlargedRect(PlanarCoord(v_cutting_rect.get_ll_x(), y), 0, 0, h_wire_length, wire_width);
+        for (int32_t x : h_x_list) {
+          PlanarRect h_real_rect = RTUTIL.getEnlargedRect(PlanarCoord(x, y), 0, 0, h_wire_length, wire_width);
           if (RTUTIL.isInside(die.get_real_rect(), h_real_rect) && patch_rect_set.insert(h_real_rect).second) {
             pa_patch_list.emplace_back(h_real_rect, violation_layer_idx);
           }
         }
       }
+      std::vector<int32_t> v_y_list = getPatchSampleCoordList(v_start_y, h_cutting_rect.get_ll_y(), manufacture_grid, sample_step, is_initial_sample);
       for (int32_t x : {v_cutting_rect.get_ll_x(), h_cutting_rect.get_ll_x(), h_cutting_rect.get_ur_x() - wire_width}) {
-        for (int32_t i = sample_begin; i < v_position_num; i += sample_interval) {
-          if (!is_initial_sample && i == v_position_num - 1) {
-            continue;
-          }
-          PlanarRect v_real_rect = RTUTIL.getEnlargedRect(PlanarCoord(x, v_start_y + (i * manufacture_grid)), 0, 0, wire_width, v_wire_length);
-          if (RTUTIL.isInside(die.get_real_rect(), v_real_rect) && patch_rect_set.insert(v_real_rect).second) {
-            pa_patch_list.emplace_back(v_real_rect, violation_layer_idx);
-          }
-        }
-        if (is_initial_sample && (v_position_num - 1) % sample_step != 0) {
-          PlanarRect v_real_rect = RTUTIL.getEnlargedRect(PlanarCoord(x, h_cutting_rect.get_ll_y()), 0, 0, wire_width, v_wire_length);
+        for (int32_t y : v_y_list) {
+          PlanarRect v_real_rect = RTUTIL.getEnlargedRect(PlanarCoord(x, y), 0, 0, wire_width, v_wire_length);
           if (RTUTIL.isInside(die.get_real_rect(), v_real_rect) && patch_rect_set.insert(v_real_rect).second) {
             pa_patch_list.emplace_back(v_real_rect, violation_layer_idx);
           }
@@ -2862,22 +2830,7 @@ std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box, const GTL
       }
       for (size_t i = patch_begin_idx; i < pa_patch_list.size(); i++) {
         PAPatch& pa_patch = pa_patch_list[i];
-        EXTLayerRect& patch = pa_patch.get_patch();
-        PlanarRect& patch_rect = patch.get_real_rect();
-        patch.set_grid_rect(RTUTIL.getClosedGCellGridRect(patch_rect, gcell_axis));
-        pa_patch.set_fixed_rect_cost(getFixedRectCost(pa_box, curr_net_idx, patch));
-        pa_patch.set_routed_rect_cost(getRoutedRectCost(pa_box, curr_net_idx, patch));
-        pa_patch.set_violation_cost(getViolationCost(pa_box, patch));
-        pa_patch.set_direction(patch_rect.getRectDirection(layer_direction));
-        int64_t overlap_area = 0;
-        for (GTLRectInt& gtl_rect : h_gtl_rect_list) {
-          int32_t x_span = std::min(gtl::xh(gtl_rect), patch_rect.get_ur_x()) - std::max(gtl::xl(gtl_rect), patch_rect.get_ll_x());
-          int32_t y_span = std::min(gtl::yh(gtl_rect), patch_rect.get_ur_y()) - std::max(gtl::yl(gtl_rect), patch_rect.get_ll_y());
-          if (x_span > 0 && y_span > 0) {
-            overlap_area += static_cast<int64_t>(x_span) * y_span;
-          }
-        }
-        pa_patch.set_overlap_area(static_cast<int32_t>(overlap_area));
+        updatePatchCost(pa_box, pa_patch, h_gtl_rect_list);
         if (pa_patch.getTotalCost() == 0) {
           zero_cost_patch_num++;
         }
@@ -2891,6 +2844,48 @@ std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box, const GTL
     }
   }
   return selectCandidatePatchList(pa_box, pa_patch_list);
+}
+
+std::vector<int32_t> PinAccessor::getPatchSampleCoordList(int32_t start_coord, int32_t end_coord, int32_t manufacture_grid, int32_t sample_step,
+                                                        bool is_initial_sample)
+{
+  int32_t position_num = (end_coord - start_coord) / manufacture_grid + 1;
+  int32_t sample_begin = is_initial_sample ? 0 : sample_step;
+  int32_t sample_interval = is_initial_sample ? sample_step : sample_step * 2;
+  std::vector<int32_t> coord_list;
+  for (int32_t i = sample_begin; i < position_num; i += sample_interval) {
+    if (!is_initial_sample && i == position_num - 1) {
+      continue;
+    }
+    coord_list.push_back(start_coord + i * manufacture_grid);
+  }
+  if (is_initial_sample && (position_num - 1) % sample_step != 0) {
+    // Preserve the exact cutting edge for the extra endpoint, even when it is off grid.
+    coord_list.push_back(end_coord);
+  }
+  return coord_list;
+}
+
+void PinAccessor::updatePatchCost(PABox& pa_box, PAPatch& pa_patch, const std::vector<GTLRectInt>& poly_rect_list)
+{
+  int32_t curr_net_idx = pa_box.get_patch_state().get_curr_patch_task()->get_net_idx();
+  EXTLayerRect& patch = pa_patch.get_patch();
+  PlanarRect& patch_rect = patch.get_real_rect();
+  Direction layer_direction = RTDM.getDatabase().get_routing_layer_list()[patch.get_layer_idx()].get_prefer_direction();
+  patch.set_grid_rect(RTUTIL.getClosedGCellGridRect(patch_rect, RTDM.getDatabase().get_gcell_axis()));
+  pa_patch.set_fixed_rect_cost(getFixedRectCost(pa_box, curr_net_idx, patch));
+  pa_patch.set_routed_rect_cost(getRoutedRectCost(pa_box, curr_net_idx, patch));
+  pa_patch.set_violation_cost(getViolationCost(pa_box, patch));
+  pa_patch.set_direction(patch_rect.getRectDirection(layer_direction));
+  int64_t overlap_area = 0;
+  for (const GTLRectInt& gtl_rect : poly_rect_list) {
+    int32_t x_span = std::min(gtl::xh(gtl_rect), patch_rect.get_ur_x()) - std::max(gtl::xl(gtl_rect), patch_rect.get_ll_x());
+    int32_t y_span = std::min(gtl::yh(gtl_rect), patch_rect.get_ur_y()) - std::max(gtl::yl(gtl_rect), patch_rect.get_ll_y());
+    if (x_span > 0 && y_span > 0) {
+      overlap_area += static_cast<int64_t>(x_span) * y_span;
+    }
+  }
+  pa_patch.set_overlap_area(static_cast<int32_t>(overlap_area));
 }
 
 std::vector<PAPatch> PinAccessor::selectCandidatePatchList(PABox& pa_box, std::vector<PAPatch>& pa_patch_list)
@@ -2930,41 +2925,45 @@ std::vector<PAPatch> PinAccessor::selectCandidatePatchList(PABox& pa_box, std::v
 bool PinAccessor::isPatchImprovement(PABox& pa_box, const std::vector<Violation>& origin_patch_violation_list,
                                      const std::vector<Violation>& curr_patch_violation_list)
 {
-  std::map<ViolationType, std::pair<int32_t, int32_t>> env_type_origin_curr_map;
-  std::map<ViolationType, std::pair<int32_t, int32_t>> valid_type_origin_curr_map;
-  std::map<ViolationType, std::pair<int32_t, int32_t>> inter_net_origin_curr_map;
+  struct ViolationCount
+  {
+    int32_t origin_num = 0;
+    int32_t curr_num = 0;
+  };
+  ViolationCount min_area_count;
+  std::map<ViolationType, ViolationCount> env_type_count_map;
+  std::map<ViolationType, ViolationCount> inter_net_type_count_map;
   for (const Violation& origin_violation : origin_patch_violation_list) {
-    if (!isBoxMinAreaViolation(pa_box, origin_violation)) {
-      env_type_origin_curr_map[origin_violation.get_violation_type()].first++;
+    if (isBoxMinAreaViolation(pa_box, origin_violation)) {
+      min_area_count.origin_num++;
     } else {
-      valid_type_origin_curr_map[origin_violation.get_violation_type()].first++;
+      env_type_count_map[origin_violation.get_violation_type()].origin_num++;
     }
     if (origin_violation.get_violation_net_set().size() > 1) {
-      inter_net_origin_curr_map[origin_violation.get_violation_type()].first++;
+      inter_net_type_count_map[origin_violation.get_violation_type()].origin_num++;
     }
   }
   for (const Violation& curr_violation : curr_patch_violation_list) {
-    if (!isBoxMinAreaViolation(pa_box, curr_violation)) {
-      env_type_origin_curr_map[curr_violation.get_violation_type()].second++;
+    if (isBoxMinAreaViolation(pa_box, curr_violation)) {
+      min_area_count.curr_num++;
     } else {
-      valid_type_origin_curr_map[curr_violation.get_violation_type()].second++;
+      env_type_count_map[curr_violation.get_violation_type()].curr_num++;
     }
     if (curr_violation.get_violation_net_set().size() > 1) {
-      inter_net_origin_curr_map[curr_violation.get_violation_type()].second++;
+      inter_net_type_count_map[curr_violation.get_violation_type()].curr_num++;
     }
   }
-  for (const auto& [violation_type, origin_curr] : env_type_origin_curr_map) {
-    if (origin_curr.second > origin_curr.first) {
+  for (const auto& [violation_type, count] : env_type_count_map) {
+    if (count.curr_num > count.origin_num) {
       return false;
     }
   }
-  for (const auto& [violation_type, origin_curr] : valid_type_origin_curr_map) {
-    if (origin_curr.second >= origin_curr.first) {
-      return false;
-    }
+  // With no eligible minimum-area violations on either side, only non-regression is required.
+  if ((min_area_count.origin_num > 0 || min_area_count.curr_num > 0) && min_area_count.curr_num >= min_area_count.origin_num) {
+    return false;
   }
-  for (const auto& [violation_type, origin_curr] : inter_net_origin_curr_map) {
-    if (origin_curr.second > origin_curr.first) {
+  for (const auto& [violation_type, count] : inter_net_type_count_map) {
+    if (count.curr_num > count.origin_num) {
       return false;
     }
   }

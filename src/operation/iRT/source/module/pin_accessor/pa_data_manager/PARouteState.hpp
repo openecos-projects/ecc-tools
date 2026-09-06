@@ -36,17 +36,12 @@ class PARouteState
   std::vector<std::vector<PANode*>>& get_start_node_list_list() { return _start_node_list_list; }
   std::vector<std::vector<PANode*>>& get_end_node_list_list() { return _end_node_list_list; }
   std::vector<PANode*>& get_path_node_list() { return _path_node_list; }
-  std::vector<PANode*>& get_single_task_visited_node_list() { return _single_task_visited_node_list; }
   std::vector<Segment<LayerCoord>>& get_routing_segment_list() { return _routing_segment_list; }
   std::map<PANode*, AccessPoint*>& get_source_node_access_point_map() { return _source_node_access_point_map; }
   void set_curr_route_task(PATask* curr_route_task) { _curr_route_task = curr_route_task; }
   void set_start_node_list_list(const std::vector<std::vector<PANode*>>& start_node_list_list) { _start_node_list_list = start_node_list_list; }
   void set_end_node_list_list(const std::vector<std::vector<PANode*>>& end_node_list_list) { _end_node_list_list = end_node_list_list; }
   void set_path_node_list(const std::vector<PANode*>& path_node_list) { _path_node_list = path_node_list; }
-  void set_single_task_visited_node_list(const std::vector<PANode*>& single_task_visited_node_list)
-  {
-    _single_task_visited_node_list = single_task_visited_node_list;
-  }
   void set_routing_segment_list(const std::vector<Segment<LayerCoord>>& routing_segment_list) { _routing_segment_list = routing_segment_list; }
   // single path
   OpenQueue<PANode>& get_open_queue() { return _open_queue; }
@@ -67,7 +62,6 @@ class PARouteState
   std::vector<std::vector<PANode*>> _start_node_list_list;
   std::vector<std::vector<PANode*>> _end_node_list_list;
   std::vector<PANode*> _path_node_list;
-  std::vector<PANode*> _single_task_visited_node_list;
   std::vector<Segment<LayerCoord>> _routing_segment_list;
   std::map<PANode*, AccessPoint*> _source_node_access_point_map;
   // single path

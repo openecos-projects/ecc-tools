@@ -108,7 +108,7 @@ class PinAccessor
   std::vector<PALegalShape> getPlanarLegalShapeList(int32_t curr_net_idx, const std::vector<EXTLayerRect>& pin_shape_list, ViaMaster* via_master);
   std::array<int32_t, 2> getAccessObstacleLayerList(int32_t curr_layer_idx, ViaMaster* via_master);
   std::vector<PlanarRect> getAccessObstacleList(int32_t curr_net_idx, int32_t curr_layer_idx, int32_t obs_layer_idx,
-                                                const std::vector<EXTLayerRect>& shrinked_rect_list, ViaMaster* via_master);
+                                                const std::vector<PlanarRect>& shrinked_rect_list, ViaMaster* via_master);
   std::vector<AccessPoint> getAccessPointList(PAModel& pa_model, int32_t pin_idx, std::vector<PALegalShape>& legal_shape_list);
   std::vector<int32_t> getCandidateAxisCoordList(int32_t ll, int32_t ur, int32_t manufacture_grid, const std::vector<int32_t>& track_list);
   std::vector<PACandidateAccessPoint> getRankedAccessPointList(const std::map<LayerCoord, int32_t, CmpLayerCoordByXASC>& coord_track_num_map);
@@ -199,6 +199,8 @@ class PinAccessor
   void patchSingleViolation(PABox& pa_box, const GTLPolyInt& patch_poly);
   PAPatchSelection selectPatch(PABox& pa_box, std::vector<PAPatch>& candidate_patch_list);
   std::vector<PAPatch> getCandidatePatchList(PABox& pa_box, const GTLPolyInt& patch_poly);
+  std::vector<int32_t> getPatchSampleCoordList(int32_t start_coord, int32_t end_coord, int32_t manufacture_grid, int32_t sample_step, bool is_initial_sample);
+  void updatePatchCost(PABox& pa_box, PAPatch& pa_patch, const std::vector<GTLRectInt>& poly_rect_list);
   std::vector<PAPatch> selectCandidatePatchList(PABox& pa_box, std::vector<PAPatch>& pa_patch_list);
   bool isPatchImprovement(PABox& pa_box, const std::vector<Violation>& origin_patch_violation_list, const std::vector<Violation>& curr_patch_violation_list);
   void resetSingleViolation(PABox& pa_box);
