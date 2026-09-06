@@ -120,6 +120,8 @@ class PinAccessor
   double getAccessPointInitCost(int32_t track_num, double violation_unit);
   int32_t getTargetLayerIdx(bool is_core, int32_t curr_layer_idx);
   void buildPinTargetCoordList(PAPin& pa_pin);
+  void buildLayerTargetCoordList(RoutingLayer& source_layer, int32_t target_layer_idx, const std::vector<PlanarRect>& region_list,
+                                 std::vector<LayerCoord>& target_coord_list);
   std::vector<ViaMaster*> getSelectedViaMasterList(PAModel& pa_model, int32_t routing_layer_idx);
   PlanarRect getViaEnclosure(ViaMaster& via_master, int32_t routing_layer_idx);
   void uniformSampleCoordList(std::vector<LayerCoord>& layer_coord_list, int32_t max_candidate_point_num);

@@ -766,30 +766,55 @@ void PinAccessor::buildPinTargetCoordList(PAPin& pa_pin)
 {
   int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
   auto& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  auto& target_coord_list = pa_pin.get_target_coord_list();
-  target_coord_list.clear();
-  // AP search windows overlap heavily; keep only unique coordinates while enumerating.
-  std::set<LayerCoord, CmpLayerCoordByXASC> target_coord_set;
+  std::map<int32_t, std::vector<PlanarRect>> layer_region_map;
   for (AccessPoint& access_point : pa_pin.get_access_point_list()) {
     int32_t curr_layer_idx = access_point.get_layer_idx();
     if (curr_layer_idx < 0 || curr_layer_idx >= static_cast<int32_t>(routing_layer_list.size())) {
       RTLOG.error(Loc::current(), "Invalid PA source layer ", curr_layer_idx, " for pin ", pa_pin.get_pin_idx());
     }
-    int32_t target_layer_idx = getTargetLayerIdx(pa_pin.get_is_core(), curr_layer_idx);
+    layer_region_map[curr_layer_idx].push_back(RTUTIL.getEnlargedRect(access_point.get_real_coord(), detection_distance));
+  }
+  std::vector<LayerCoord> target_coord_list;
+  for (const auto& [source_layer_idx, region_list] : layer_region_map) {
+    int32_t target_layer_idx = getTargetLayerIdx(pa_pin.get_is_core(), source_layer_idx);
     if (target_layer_idx < 0 || target_layer_idx >= static_cast<int32_t>(routing_layer_list.size())) {
       RTLOG.error(Loc::current(), "Invalid PA target layer ", target_layer_idx, " for pin ", pa_pin.get_pin_idx());
     }
-    PlanarRect region = RTUTIL.getEnlargedRect(access_point.get_real_coord(), detection_distance);
-    RoutingLayer& layer = routing_layer_list[curr_layer_idx];
-    std::vector<int32_t> x_list = RTUTIL.getScaleList(region.get_ll_x(), region.get_ur_x(), layer.getXTrackGridList());
-    std::vector<int32_t> y_list = RTUTIL.getScaleList(region.get_ll_y(), region.get_ur_y(), layer.getYTrackGridList());
-    for (int32_t x : x_list) {
-      for (int32_t y : y_list) {
-        target_coord_set.insert(LayerCoord(x, y, target_layer_idx));
+    buildLayerTargetCoordList(routing_layer_list[source_layer_idx], target_layer_idx, region_list, target_coord_list);
+  }
+  // Each source layer is ordered and unique; different source layers may share a target layer.
+  if (layer_region_map.size() > 1) {
+    std::ranges::sort(target_coord_list, CmpLayerCoordByXASC());
+    target_coord_list.erase(std::unique(target_coord_list.begin(), target_coord_list.end()), target_coord_list.end());
+  }
+  pa_pin.get_target_coord_list().assign(target_coord_list.begin(), target_coord_list.end());
+}
+
+void PinAccessor::buildLayerTargetCoordList(RoutingLayer& source_layer, int32_t target_layer_idx, const std::vector<PlanarRect>& region_list,
+                                            std::vector<LayerCoord>& target_coord_list)
+{
+  // Union overlapping AP windows before expanding their Cartesian products.
+  std::map<int32_t, std::vector<std::pair<int32_t, int32_t>>> x_y_range_map;
+  for (const PlanarRect& region : region_list) {
+    int32_t ll_y = region.get_ll_y();
+    int32_t ur_y = region.get_ur_y();
+    RTUTIL.swapByASC(ll_y, ur_y);
+    for (int32_t x : RTUTIL.getScaleList(region.get_ll_x(), region.get_ur_x(), source_layer.getXTrackGridList())) {
+      x_y_range_map[x].emplace_back(ll_y, ur_y);
+    }
+  }
+  for (auto& [x, y_range_list] : x_y_range_map) {
+    std::ranges::sort(y_range_list);
+    for (size_t i = 0; i < y_range_list.size();) {
+      auto [ll_y, ur_y] = y_range_list[i++];
+      while (i < y_range_list.size() && y_range_list[i].first <= ur_y) {
+        ur_y = std::max(ur_y, y_range_list[i++].second);
+      }
+      for (int32_t y : RTUTIL.getScaleList(ll_y, ur_y, source_layer.getYTrackGridList())) {
+        target_coord_list.emplace_back(x, y, target_layer_idx);
       }
     }
   }
-  target_coord_list.assign(target_coord_set.begin(), target_coord_set.end());
 }
 
 std::vector<ViaMaster*> PinAccessor::getSelectedViaMasterList(PAModel& pa_model, int32_t routing_layer_idx)

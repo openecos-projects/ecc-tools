@@ -182,6 +182,57 @@ void testTargets(irt::PinAccessor& accessor)
   }
 }
 
+void testTargetWindows(irt::PinAccessor& accessor)
+{
+  auto& database = irt::DataManager::getInst().getDatabase();
+  auto& config = irt::DataManager::getInst().getConfig();
+  auto saved_axis = database.get_routing_layer_list()[1].get_track_axis();
+  std::vector<int32_t> shifted_x;
+  std::vector<int32_t> shifted_y;
+  for (int32_t coord = -300; coord <= 300; coord += 30) {
+    shifted_x.push_back(coord + 10);
+    shifted_y.push_back(coord + 15);
+  }
+  database.get_routing_layer_list()[1].get_track_axis().set_x_grid_list(irt::Utility::makeScaleGridList(shifted_x));
+  database.get_routing_layer_list()[1].get_track_axis().set_y_grid_list(irt::Utility::makeScaleGridList(shifted_y));
+  const int32_t expected_layer[2][3][3] = {{{0, 1, 1}, {0, 1, 2}, {1, 1, 2}}, {{1, 0, 0}, {1, 2, 1}, {2, 2, 1}}};
+  const std::array<std::pair<int32_t, int32_t>, 3> bounds = {{{0, 1}, {0, 2}, {1, 2}}};
+  std::mt19937 random(101);
+  for (int32_t case_idx = 0; case_idx < 600; case_idx++) {
+    int32_t core = case_idx % 2;
+    size_t bound_idx = case_idx % bounds.size();
+    config.bottom_routing_layer_idx = bounds[bound_idx].first;
+    config.top_routing_layer_idx = bounds[bound_idx].second;
+    int32_t distance = case_idx % 121;
+    database.set_detection_distance(distance);
+    irt::PAPin pin;
+    pin.set_is_core(core != 0);
+    std::set<irt::LayerCoord, irt::CmpLayerCoordByXASC> expected;
+    for (int32_t i = 0; i < case_idx % 41; i++) {
+      int32_t x = static_cast<int32_t>(random() % 480) - 240;
+      int32_t y = static_cast<int32_t>(random() % 480) - 240;
+      int32_t layer_idx = random() % 3;
+      pin.get_access_point_list().emplace_back(0, irt::LayerCoord(x, y, layer_idx));
+      if (i % 3 == 0) {
+        pin.get_access_point_list().push_back(pin.get_access_point_list().back());
+      }
+      auto region = irt::Utility::getEnlargedRect(irt::PlanarCoord(x, y), distance);
+      auto& layer = database.get_routing_layer_list()[layer_idx];
+      for (int32_t target_x : irt::Utility::getScaleList(region.get_ll_x(), region.get_ur_x(), layer.getXTrackGridList())) {
+        for (int32_t target_y : irt::Utility::getScaleList(region.get_ll_y(), region.get_ur_y(), layer.getYTrackGridList())) {
+          expected.emplace(target_x, target_y, expected_layer[core][bound_idx][layer_idx]);
+        }
+      }
+    }
+    accessor.buildPinTargetCoordList(pin);
+    require(pin.get_target_coord_list() == std::vector<irt::LayerCoord>(expected.begin(), expected.end()), "Merged target windows differ from AP scans");
+    pin.get_access_point_list().clear();
+    accessor.buildPinTargetCoordList(pin);
+    require(pin.get_target_coord_list().empty(), "Empty AP refresh retained target coordinates");
+  }
+  database.get_routing_layer_list()[1].get_track_axis() = saved_axis;
+}
+
 irt::EXTLayerRect makeLegalRect(const irt::LayerRect& shape)
 {
   irt::EXTLayerRect rect;
@@ -337,6 +388,7 @@ int main()
     testIterationParameters(accessor);
     testCandidateBoundaries(accessor);
     testTargets(accessor);
+    testTargetWindows(accessor);
     uint64_t signature = testCandidates(accessor);
     std::cout << "PA candidate signature: " << signature << '\n';
     // Recorded against e70f14fc3 before restructuring candidate enumeration and selection.
