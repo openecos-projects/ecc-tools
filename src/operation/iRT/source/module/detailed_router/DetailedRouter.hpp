@@ -33,6 +33,8 @@ namespace irt {
 
 #define RTDR (irt::DetailedRouter::getInst())
 
+class DRShadow;
+
 class DetailedRouter
 {
  public:
@@ -94,7 +96,7 @@ class DetailedRouter
   std::vector<int32_t> initTaskSchedule(DRBox& dr_box);
   void updateGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, std::vector<Segment<LayerCoord>>& segment_list,
                    std::vector<EXTLayerRect>& patch_list);
-  std::vector<DRTask*> resetDRNetResult(DRBox& dr_box, int32_t net_idx);
+  void resetDRNetResult(DRBox& dr_box, int32_t net_idx, const std::vector<DRTask*>& net_task_list);
   void routeDRNet(DRBox& dr_box, int32_t net_idx);
   void routeDRTask(DRBox& dr_box, DRTask* dr_task);
   void initSingleRouteTask(DRBox& dr_box, DRTask* dr_task);
@@ -174,21 +176,22 @@ class DetailedRouter
   void updateRoutingNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
   void updateCutNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
   void updateNodeNetToGraph(DRNode& dr_node, ChangeType change_type, int32_t net_idx, Orientation orientation, bool is_fixed);
-  void updateFixedRectToShadow(DRBox& dr_box, ChangeType change_type, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
-  void updateFixedRectToShadow(DRBox& dr_box, ChangeType change_type, int32_t net_idx, LayerRect& real_rect, bool is_routing);
-  void updateFixedRectToShadow(DRBox& dr_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>* segment);
+  void addFixedRectToShadow(DRBox& dr_box, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
+  void addFixedRectToShadow(DRBox& dr_box, int32_t net_idx, LayerRect& real_rect, bool is_routing);
+  void addFixedRectToShadow(DRBox& dr_box, int32_t net_idx, Segment<LayerCoord>* segment);
+  void updateRoutedRectToShadow(DRShadow& dr_shadow, ChangeType change_type, int32_t net_idx, const PlanarRect& shadow_shape);
   void updateRoutedRectToShadow(DRBox& dr_box, ChangeType change_type, int32_t net_idx, LayerRect& real_rect, bool is_routing);
   void updateRoutedRectToShadow(DRBox& dr_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>& segment);
   void updateRoutedRectToShadow(DRBox& dr_box, ChangeType change_type, int32_t net_idx, EXTLayerRect& routed_rect, bool is_routing);
   void addPatchViolationToShadow(DRBox& dr_box, Violation& violation);
-  std::vector<PlanarRect> getShadowShape(DRBox& dr_box, NetShape& net_shape);
-  std::vector<PlanarRect> getRoutingShadowShapeList(DRBox& dr_box, NetShape& net_shape);
+  std::vector<PlanarRect> getShadowShape(const NetShape& net_shape);
+  std::vector<PlanarRect> getRoutingShadowShapeList(const NetShape& net_shape);
 #endif
 
 #if 1  // get env
   double getFixedRectCost(DRBox& dr_box, int32_t net_idx, EXTLayerRect& patch);
   double getRoutedRectCost(DRBox& dr_box, int32_t net_idx, EXTLayerRect& patch);
-  double getViolationCost(DRBox& dr_box, int32_t net_idx, EXTLayerRect& patch);
+  double getViolationCost(DRBox& dr_box, EXTLayerRect& patch);
 #endif
 
 #if 1  // exhibit
