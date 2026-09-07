@@ -167,11 +167,10 @@ Via 选择保留默认 master、AP 候选限制和随重跑次数轮换的 tie �
 patchSingleViolation
   -> getCandidatePatchList：普通 W 线宽，渐进采样、去重、评分和筛选
   -> selectPatch
-       普通唯一候选：直接接受
-       普通多候选：按顺序 DRC 对比，接受第一个改善候选
+       普通候选（包括唯一候选）：按顺序 DRC 对比，接受第一个改善候选
        普通无候选或全部不改善：getCompactPatchList，生成 2W 横向跨度的宽候选
-       合并后仅一个候选：直接接受；否则只检查新增宽候选
-       全部不改善：从两阶段筛选后候选的合集中选排序最优者
+       只检查新增宽候选，包括唯一宽候选
+       全部不改善：不添加 patch，保留违例供后续重布处理
   -> 保存接受结果，标记已尝试
 任务结束：updateTaskPatch -> patch_state.resetTask
 ```
@@ -183,22 +182,20 @@ PA/DR 共用 data_manager/advance 中 PatchGeometry 的切割矩形选择、采�
 两阶段均对新增候选评分，零代价候选足够或到最细采样时停止；宽候选在筛选前排除已保留普通候选的重复矩形。
 `selectCandidatePatchList` 优先零代价候选并控制数量，没有零代价候选时只保留评分最优者。
 `updatePatchCost` 计算 fixed/routed cost、方向和重叠面积；排序依次比较 fixed、routed、层方向、重叠面积及几何坐标。
-零代价不等于 DRC 已通过。普通阶段唯一候选或已找到改善候选时，不再生成宽候选。
+零代价不等于 DRC 已通过。普通阶段找到改善候选时，不再生成宽候选；唯一候选同样需要检查。
 
 | selectPatch 结果 | 当前含义 |
 | --- | --- |
-| kNone | 多边形面积已经足够，不添加 patch |
-| kSingleCandidate | 当前完整可选集合仅一个候选，直接接受，不执行候选 DRC |
+| kNone | 多边形面积已经足够，或两阶段候选均不改善，不添加 patch；未解决的违例保留供后续重布处理 |
 | kImproved | 按普通、宽候选阶段顺序找到第一个满足改善条件的候选 |
-| kBestEffort | 两阶段均不改善，仍从候选合集中选择排序最优者，不偏向最后生成的宽候选 |
 
-普通阶段已有多个失败候选时，宽阶段只有一个新候选不构成“唯一候选”，仍须检查。
+候选数量不影响接受条件；所有普通和宽候选都必须通过 DRC 改善判定。
 真实缺面积但普通、宽阶段均无候选时立即报错；不把它当作合法 kNone 或静默修复成功。
 参数中的 grid、wire_width、max_candidate_patch_num 必须为正。
 
 PA/DR 的 isPatchImprovement 统一按类型计数：其他环境违例和跨 net 违例分别不能增加；
 存在 box 内 minimum-area 违例时其数量必须严格减少，两边都没有时只要求不恶化。
-该谓词用于优先接受，不约束唯一候选直通和最终 best-effort；不能宣称接受结果一定 DRC 无恶化。
+该谓词约束所有候选的接受，不允许唯一候选或最终最优候选绕过检查；它按类型比较数量，不要求环境违例集合子集。
 
 `buildPatchDETask` 负责输入，`getPatchViolationList` 负责执行。候选选择按需建立一次 DETask 和基线，供两个阶段复用。
 只在 DETask 内临时 push/pop 候选指针；选择期间不修改已接受工作区，宽候选追加扩容前已弹出普通候选指针。

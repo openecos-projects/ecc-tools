@@ -39,9 +39,7 @@ class DRShadow;
 enum class DRPatchSelectionType
 {
   kNone,
-  kSingleCandidate,
-  kImproved,
-  kBestEffort
+  kImproved
 };
 
 struct DRPatchSelection

@@ -187,15 +187,15 @@ AP via 约束检查两个端点；已指定的候选必须唯一、层号合法�
 ```text
 initSinglePatchTask：按当前 net 几何窗口查询 minimum-area 违例
   -> searchViolation：有效、未尝试、属于当前 net，并取得重叠多边形
-  -> patchSingleViolation：普通候选 -> 宽候选 -> 最终 best-effort
+  -> patchSingleViolation：检查普通候选 -> 检查宽候选 -> 未改善则保留违例
   -> resetSingleViolation
 重复搜索后：updateTaskPatch -> patch_state.resetTask
 ```
 
-候选生成、评分、筛选和接受流程与 PA 对齐，不再使用 M、4M、8M、-1 多轮限额。
+候选生成、评分和筛选流程与 PA 对齐，不再使用 M、4M、8M、-1 多轮限额；DR 只接受通过 DRC 改善判定的候选。
 `getViolationOverlapPoly` 直接传递最大重叠多边形，不再经过最大矩形列表后重新组装；几何取数仍覆盖当前 net 的 owner/env。
 `getCandidatePatchList` 用普通 W 线宽候选，采用 PA 的渐进采样、矩形去重和新增候选评分。
-`getCompactPatchList` 只在普通无候选或多候选全部不改善时运行，生成横向跨度 2W 的 North/South/East/West 候选。
+`getCompactPatchList` 只在普通无候选或候选全部不改善时运行，生成横向跨度 2W 的 North/South/East/West 候选。
 宽候选沿扩展方向增长，按制造网格对齐到并集面积满足 min_area，不能超出 die；同样渐进采样，并在筛选前排除普通候选重复项。
 PatchGeometry 位于 data_manager/advance，仅共用切割矩形选择、采样坐标、面积扩展，不持有模块结果或访问 RTDM。
 普通采样保留 PA 首轮精确切割端点的行为，不额外吸附到全局网格。
@@ -207,16 +207,15 @@ grid、wire_width、max_candidate_patch_num 必须为正。DRPatch、DRShadow �
 | selectPatch 情况 | 当前行为 |
 | --- | --- |
 | 多边形面积已足够 | kNone，不添加 patch |
-| 普通阶段唯一候选 | kSingleCandidate，直接接受，不生成宽候选、不检查候选 DRC |
-| 普通多候选中有改善 | kImproved，接受第一个改善候选，不生成宽候选 |
-| 普通无候选或全部不改善 | 尝试宽候选，合并后唯一则直通，否则只检查新增宽候选 |
-| 两阶段全部不改善 | kBestEffort，从筛选后的普通和宽候选合集中选择排序最优者 |
+| 普通候选中有改善，包括唯一候选 | kImproved，接受第一个改善候选，不生成宽候选 |
+| 普通无候选或全部不改善 | 尝试宽候选，只检查新增宽候选，包括唯一宽候选 |
+| 两阶段全部不改善 | kNone，不添加 patch，保留违例供后续重布处理 |
 | 真实缺面积且两阶段均无候选 | 立即报错，不静默跳过 |
 
-已有多个普通失败候选时，一个新宽候选不能走唯一候选直通。零代价只是预筛，不代表真实 DRC 通过。
+候选数量不影响接受条件；零代价只是预筛，不代表真实 DRC 通过。
 isBoxMinAreaViolation 与 PA 同名、同语义：minimum-area 且与 box 开重叠，当前 net 由 searchViolation 单独选择。
 `isPatchImprovement` 改为 PA 的按类型计数规则：其他环境及跨 net 违例不能增加，有效 minimum-area 在存在时必须减少。
-不再要求环境违例集合子集；唯一候选和最终 best-effort 可绕过改善条件，这是经确认的策略放宽，不保证接受结果不恶化。
+不再要求环境违例集合子集；所有候选都必须满足改善条件，不允许唯一候选或最终最优候选绕过检查。
 
 `buildPatchDETask` 从原 getPatchViolationList 抽出，保留 fixed、owner/env 索引取数、对象顺序和 checked nets；后者只负责执行。
 Patch DRC 用工作区已接受 patch 替代当前 net 的本地旧 patch，仍保留借用环境 patch。

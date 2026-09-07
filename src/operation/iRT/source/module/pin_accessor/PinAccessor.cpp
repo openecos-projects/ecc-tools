@@ -2562,9 +2562,6 @@ PAPatchSelection PinAccessor::selectPatch(PABox& pa_box, const GTLPolyInt& patch
       std::vector<PAPatch> compact_patch_list = getCompactPatchList(pa_box, patch_poly, candidate_patch_list);
       candidate_patch_list.insert(candidate_patch_list.end(), compact_patch_list.begin(), compact_patch_list.end());
     }
-    if (candidate_patch_list.size() == 1) {
-      return {PAPatchSelectionType::kSingleCandidate, 0};
-    }
     if (patch_begin_idx == candidate_patch_list.size()) {
       continue;
     }
@@ -2596,11 +2593,8 @@ PAPatchSelection PinAccessor::selectPatch(PABox& pa_box, const GTLPolyInt& patch
     RTLOG.error(Loc::current(), "No ordinary or compact patch candidate for net ", pa_box.get_patch_state().get_curr_patch_task()->get_net_idx(), " on layer ",
                 layer_idx, "!");
   }
-  Direction layer_direction = routing_layer.get_prefer_direction();
-  auto cmp_pa_patch
-      = [&layer_direction](const PAPatch& first_patch, const PAPatch& second_patch) { return CmpPAPatch()(first_patch, second_patch, layer_direction); };
-  auto best_iter = std::ranges::min_element(candidate_patch_list, cmp_pa_patch);
-  return {PAPatchSelectionType::kBestEffort, static_cast<int32_t>(std::distance(candidate_patch_list.begin(), best_iter))};
+  // Keep the violation for rerouting when no candidate passes the DRC improvement check.
+  return {};
 }
 
 std::vector<PAPatch> PinAccessor::getCandidatePatchList(PABox& pa_box, const GTLPolyInt& patch_poly)

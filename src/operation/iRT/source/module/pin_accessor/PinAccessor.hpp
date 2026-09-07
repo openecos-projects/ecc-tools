@@ -59,9 +59,7 @@ struct CmpPACandidateAccessPoint
 enum class PAPatchSelectionType
 {
   kNone,
-  kSingleCandidate,
-  kImproved,
-  kBestEffort
+  kImproved
 };
 
 struct PAPatchSelection
