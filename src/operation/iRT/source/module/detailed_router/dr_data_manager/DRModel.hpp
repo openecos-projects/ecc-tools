@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include "DRBox.hpp"
 #include "DRBoxId.hpp"
 #include "DRIterParam.hpp"
 #include "DRNet.hpp"
