@@ -91,7 +91,6 @@ class PinAccessor
   PinAccessor& operator=(PinAccessor&& other) = delete;
   // Model, stage, box and task flow.
   void routePAModel(PAModel& pa_model);
-  void routePAIteration(PAModel& pa_model);
   void routePABoxMap(PAModel& pa_model);
   void routePABoxList(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list);
   void routePABox(PAModel& pa_model, PABox& pa_box);
@@ -158,7 +157,7 @@ class PinAccessor
   void buildBoxEnvironment(PABox& pa_box);
   void exemptPinShape(PAModel& pa_model, PABox& pa_box);
   std::vector<int32_t> initTaskSchedule(PABox& pa_box);
-  void removeTaskResultFromGraphAndShadow(PABox& pa_box, PATask* pa_task);
+  void removeTaskResult(PABox& pa_box, PATask* pa_task);
   void initSingleRouteTask(PABox& pa_box, PATask* pa_task);
   [[nodiscard]] bool routeSinglePath(PABox& pa_box);
   void initPathHead(PABox& pa_box);
@@ -267,7 +266,6 @@ class PinAccessor
 
   // Debugging.
   void debugPlotPAModel(PAModel& pa_model, std::string flag);
-  void debugCheckPABox(PABox& pa_box);
   void debugPlotPABox(PABox& pa_box, std::string flag);
 };
 
