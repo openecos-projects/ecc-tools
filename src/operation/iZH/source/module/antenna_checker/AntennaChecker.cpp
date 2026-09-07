@@ -716,6 +716,19 @@ class AntennaCheckerImpl
   int get_violation_count() const { return static_cast<int>(_violations.size()); }
   const std::vector<Violation>& get_violations() const { return _violations; }
 
+  RunStats get_run_stats() const
+  {
+    RunStats stats;
+    stats.signal_net_cnt = _signal_net_cnt;
+    stats.pins_with_gate_area = _pins_with_gate_area.load(std::memory_order_relaxed);
+    stats.pins_missing_antenna_info = _pins_missing_antenna_info.load(std::memory_order_relaxed);
+    stats.comps_without_gate = _comps_without_gate.load(std::memory_order_relaxed);
+    stats.conductors_out_of_range = _conductors_out_of_range.load(std::memory_order_relaxed);
+    stats.skipped_segments = _skipped_segments.load(std::memory_order_relaxed);
+    stats.partial_areas_dropped = _partial_areas_dropped.load(std::memory_order_relaxed);
+    return stats;
+  }
+
  private:
   double getMicrons(int64_t dbu_value) const
   {
@@ -1890,19 +1903,6 @@ class AntennaCheckerImpl
         comps_by_root[root].clear();
       }
     }
-  }
-
-  RunStats get_run_stats() const
-  {
-    RunStats stats;
-    stats.signal_net_cnt = _signal_net_cnt;
-    stats.pins_with_gate_area = _pins_with_gate_area.load(std::memory_order_relaxed);
-    stats.pins_missing_antenna_info = _pins_missing_antenna_info.load(std::memory_order_relaxed);
-    stats.comps_without_gate = _comps_without_gate.load(std::memory_order_relaxed);
-    stats.conductors_out_of_range = _conductors_out_of_range.load(std::memory_order_relaxed);
-    stats.skipped_segments = _skipped_segments.load(std::memory_order_relaxed);
-    stats.partial_areas_dropped = _partial_areas_dropped.load(std::memory_order_relaxed);
-    return stats;
   }
 
   idb::IdbDesign* _design = nullptr;
