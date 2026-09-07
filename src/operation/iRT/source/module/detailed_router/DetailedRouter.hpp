@@ -85,8 +85,6 @@ class DetailedRouter
   void routeDRBoxList(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   void routeDRBox(DRModel& dr_model, DRBox& dr_box);
   void freeDRBoxMap(DRModel& dr_model);
-  void buildStageViolationFlagList(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list, std::vector<bool>& stage_violation_flag_list);
-  void initDRBox(DRModel& dr_model, DRBox& dr_box, bool has_violation);
   void updateRouteViolation(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   void buildFixedRect(DRBox& dr_box);
   void buildAccessPoint(DRBox& dr_box);
@@ -96,7 +94,7 @@ class DetailedRouter
                                  Segment<LayerCoord>& segment);
   void addNetPatchToEnvironment(DRModel& dr_model, GridMap<bool>& active_box_map, GridMap<omp_lock_t>& environment_lock_map, int32_t net_idx,
                                 EXTLayerRect& patch);
-  void initDRTaskList(DRModel& dr_model, DRBox& dr_box, bool has_violation);
+  void initDRTaskList(DRModel& dr_model, DRBox& dr_box);
   void buildNetTaskList(DRModel& dr_model, DRBox& dr_box, int32_t net_idx);
   void buildRouteViolation(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   bool needRouting(DRBox& dr_box);
@@ -218,7 +216,6 @@ class DetailedRouter
 
 #if 1  // debug
   void debugPlotDRModel(DRModel& dr_model, std::string flag);
-  void debugCheckDRBox(DRBox& dr_box);
   void debugPlotDRBox(DRBox& dr_box, std::string flag);
 #endif
 };

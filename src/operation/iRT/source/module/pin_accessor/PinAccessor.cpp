@@ -1100,10 +1100,18 @@ std::set<PABoxId, CmpPABoxId> PinAccessor::getPABoxIdSet(PAModel& pa_model, Plan
   if (!RTUTIL.hasRegularRect(real_rect, die.get_real_rect())) {
     return {};
   }
-  PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(RTUTIL.getRegularRect(real_rect, die.get_real_rect()), RTDM.getDatabase().get_gcell_axis());
+  real_rect = RTUTIL.getRegularRect(real_rect, die.get_real_rect());
+  PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(real_rect, RTDM.getDatabase().get_gcell_axis());
+  std::vector<int32_t>& x_box_idx_list = pa_model.get_gcell_x_box_idx_list();
+  std::vector<int32_t>& y_box_idx_list = pa_model.get_gcell_y_box_idx_list();
+  int32_t ll_x = x_box_idx_list[grid_rect.get_ll_x()];
+  int32_t ll_y = y_box_idx_list[grid_rect.get_ll_y()];
+  int32_t ur_x = x_box_idx_list[grid_rect.get_ur_x()];
+  int32_t ur_y = y_box_idx_list[grid_rect.get_ur_y()];
+
   std::set<PABoxId, CmpPABoxId> pa_box_id_set;
-  for (int32_t x = pa_model.get_gcell_x_box_idx_list()[grid_rect.get_ll_x()]; x <= pa_model.get_gcell_x_box_idx_list()[grid_rect.get_ur_x()]; x++) {
-    for (int32_t y = pa_model.get_gcell_y_box_idx_list()[grid_rect.get_ll_y()]; y <= pa_model.get_gcell_y_box_idx_list()[grid_rect.get_ur_y()]; y++) {
+  for (int32_t x = ll_x; x <= ur_x; x++) {
+    for (int32_t y = ll_y; y <= ur_y; y++) {
       pa_box_id_set.emplace(x, y);
     }
   }

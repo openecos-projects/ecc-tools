@@ -10,7 +10,7 @@ DR 使用 PA 已确定的 AP 及 via 约束，不负责重新生成或选择 PA 
 | --- | --- | --- |
 | 迭代、切分与调度 | routeDRModel、initDRBoxMap、splitNetResult、routeDRBoxMap、routeDRBoxList | DRModel、DRBoxId、DRIterParam |
 | Box 生命周期 | routeDRBox(model, box)、routeDRBox(box)、freeDRBox | DRBox、待归并的 box 违例列表 |
-| 环境与违例分配 | buildNetEnvironment、buildDirtyNetEnvironment、buildStageViolationFlagList、buildRouteViolation | DRBox 的借用指针表、stage 任务预筛标记 |
+| 环境与违例分配 | buildNetEnvironment、buildDirtyNetEnvironment、buildRouteViolation | DRBox 的借用指针表、中点 owner 违例列表 |
 | 连通分量与任务 | initDRTaskList、buildNetTaskList | DRConnectivity、DRTaskComponent、DRTask、DRGroup |
 | 图搜索与 via 约束 | routeDRNet、routeDRTask、expandSearching、getRoutingSegmentList | DRRouteState、DRNode、AccessPoint |
 | Patch 生成与接受 | patchDRTask、getCandidatePatchList、getCompactPatchList、selectPatch、isPatchImprovement、updateTaskPatch | DRPatchState、DRPatch、DRPatchSelection |
@@ -26,26 +26,24 @@ route
     对每组 DRIterParam：
       setDRIterParam -> initDRBoxMap -> resetRoutingState
       buildBoxSchedule -> splitNetResult
-      routeDRBoxMap：逐 stage 求解，最后内部调用 updateDRModel
+      routeDRBoxMap：逐 stage 求解
+      updateDRModel：汇总 box 结果
       updateNetResult -> updateNetPatch -> updateViolation -> freeDRBoxMap
       patchFinalMinArea -> updateBestResult(model) -> summary / CSV
       stopIteration：违例清零可提前结束
-    selectBestResult(model)
-      恢复 model 最优结果 -> patchFinalMinArea
-      summary / CSV -> uploadDRModel
+    selectBestResult(model) -> uploadDRModel
 ```
 
 ### Stage 与并行边界
 
-`routeDRBoxMap` 负责 stage 调度、进度日志和最后的 model 汇总；
+`routeDRBoxMap` 负责 stage 调度和进度日志，model 汇总由外层调用 `updateDRModel` 完成；
 `routeDRBoxList` 负责一个 stage 的环境、任务准备、并行求解及违例归并。
 
 ```text
 routeDRBoxList：
-buildNetEnvironment -> buildStageViolationFlagList
-  -> parallel：initDRBox = buildAccessPoint + initDRTaskList
+buildNetEnvironment -> buildRouteViolation：按中点 owner 将违例从 model 分配给 active box
+  -> parallel：buildAccessPoint -> initDRTaskList
   -> barrier
-buildRouteViolation：将匹配任务的违例从 model 分配给 box
   -> parallel：routeDRBox(model, box)
        needRouting 时：标记 dirty，buildFixedRect -> buildDRBoxGraph
                       -> exemptPinShape -> routeDRBox(box)
@@ -61,11 +59,11 @@ updateRouteViolation：按 stage box ID 顺序收集 box 违例，合并后释�
 `routeDRBox(model, box)` 不直接修改 model 的违例列表，也不跳过无需路由 box 的最优结果选择和清理。
 worker 只写自己的 box 违例列表，不再返回或转存到额外的 stage 列表；归并及列表释放均在 barrier 之后。
 
-`stage_violation_flag_list` 每个 active box 只保存一个布尔标记：是否受到包含 net 信息的违例影响。
-它仅用于修复阶段决定是否构建任务，不用于限制任务 net 集合；进入任务构造后仍处理全部本地 owner nets。
-预筛保留原有扩张区域和 box 枚举，空 violation-net-set 不置位，第一轮不收集标记；初始布线仍不受此标记限制。
-标记在第一个并行区之前串行写入，并行任务初始化期间只读；不能把对 vector<bool> 不同元素的写入直接并行化。
-`buildRouteViolation` 仍在任务初始化 barrier 之后，按实际 task 判断违例可交给哪个 box，不采用 PA 的 midpoint 分配规则。
+`buildRouteViolation` 在任务初始化之前串行执行，与 PA 一样按违例中点确定唯一 owner。
+owner 不在当前 stage 时，违例保留在 model；在当前 stage 时，直接移动到对应 box，不按相关 task net 改派。
+修复阶段的 `initDRTaskList` 根据本 box 的违例列表是否为空决定是否构建任务；初始布线不受此限制。
+进入任务构造后仍处理全部本地 owner nets，允许新冲突调度其他本地 net。
+中点 owner 没有可修复任务时不转交邻近 box，未解决的违例通过 stage 归并保留。
 
 普通 `buildNetEnvironment` 从非 active box 的最新 owner 结果收集环境，
 不是从此时已被切分清空的 model 结果表读取。扫描可以并行，写入同一目标 box 时加锁。
@@ -276,13 +274,11 @@ PAFixedGeometry 的 net_idx_list 用于保留其空 pin 项契约，DR 没有照
 
 ## 8. 违例、Dirty DRC 与最优结果
 
-违例有两种不同的分配语义：
+Stage 分配与 Dirty DRC 使用统一的中点 owner 规则：
 
-- Stage 求解的 `buildRouteViolation` 使用扩大 detection_distance 的修复区域，
-  将违例交给第一个空间匹配且拥有相关 task net 的 active box；未分配的仍留在 model。
-  任务 net 集合按需用 optional 缓存，不能将已构建的空集合误作未初始化。
-- Dirty DRC 的 `getViolationOwnerBoxId` 使用违例中点和 gcell 下边界确定唯一归属，
-  同时用于保留未重查区域的旧违例和筛选新违例，不能与 stage 的首个匹配规则混用。
+- `getViolationOwnerBoxId` 使用违例中点和 gcell 下边界确定唯一归属。
+- Stage 求解的 `buildRouteViolation` 只向当前 active owner 分配违例，其余仍留在 model。
+- Dirty DRC 使用同一 owner 规则保留未重查区域的旧违例和筛选新违例。
 
 Box 重布后的违例先按“违例矩形扩大 OnlyPitch 后与 box 开重叠”保留，用于本地调度。
 `updateViolation` 将 dirty box 的完整区域扩大 detection_distance，得到实际重查 box 集合：
