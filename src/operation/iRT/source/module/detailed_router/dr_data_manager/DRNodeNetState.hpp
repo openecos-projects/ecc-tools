@@ -88,4 +88,4 @@ class DRNodeNetState
   OrientNetList _orient_net_list;
 };
 
-}
+}  // namespace irt

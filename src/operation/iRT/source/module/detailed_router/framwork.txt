@@ -13,7 +13,7 @@ DR 使用 PA 已确定的 AP 及 via 约束，不负责重新生成或选择 PA 
 | 环境与违例分配 | buildNetEnvironment、buildDirtyNetEnvironment、buildRouteViolation | DRBox 的借用指针表、中点 owner 违例列表 |
 | 连通分量与任务 | initDRTaskList、buildNetTaskList | DRConnectivity、DRTaskComponent、DRTask、DRGroup |
 | 图搜索与 via 约束 | routeDRNet、routeDRTask、expandSearching、getRoutingSegmentList | DRRouteState、DRNode、AccessPoint |
-| Patch 生成与接受 | patchDRTask、getCandidatePatchList、getCompactPatchList、selectPatch、isPatchImprovement、updateTaskPatch | DRPatchState、DRPatch、DRPatchSelection |
+| Patch 生成与接受 | patchDRTask、getCandidatePatchList、getCompactPatchList、selectPatch、isPatchImprovement、updateTaskPatch | DRPatchState、DRPatch、std::optional<int32_t> 候选下标 |
 | 几何投影与 DRC 输入 | buildFixedRect、buildDRBoxGraph、buildDRShapeIndex、getRouteViolationList、getPatchViolationList | DRFixedGeometry、DRNodeNetState、DRShadow、DRShapeIndex、DETask |
 | 快照、汇总与发布 | updateBestResult、selectBestResult、updateDRModel、uploadDRModel、freeDRBox | DRBoxResult、DRModelResult |
 

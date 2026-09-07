@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <optional>
+
 #include "ChangeType.hpp"
 #include "Config.hpp"
 #include "DRBoxId.hpp"
@@ -35,18 +37,6 @@ namespace irt {
 
 class DETask;
 class DRShadow;
-
-enum class DRPatchSelectionType
-{
-  kNone,
-  kImproved
-};
-
-struct DRPatchSelection
-{
-  DRPatchSelectionType type = DRPatchSelectionType::kNone;
-  int32_t candidate_idx = -1;
-};
 
 class DetailedRouter
 {
@@ -145,7 +135,7 @@ class DetailedRouter
   bool isBoxMinAreaViolation(DRBox& dr_box, const Violation& violation);
   GTLPolyInt getViolationOverlapPoly(DRBox& dr_box, Violation& violation);
   void patchSingleViolation(DRBox& dr_box, const GTLPolyInt& patch_poly);
-  DRPatchSelection selectPatch(DRBox& dr_box, const GTLPolyInt& patch_poly, std::vector<DRPatch>& candidate_patch_list);
+  std::optional<int32_t> selectPatch(DRBox& dr_box, const GTLPolyInt& patch_poly, std::vector<DRPatch>& candidate_patch_list);
   std::vector<DRPatch> getCandidatePatchList(DRBox& dr_box, const GTLPolyInt& patch_poly);
   std::vector<DRPatch> getCompactPatchList(DRBox& dr_box, const GTLPolyInt& patch_poly, const std::vector<DRPatch>& candidate_patch_list);
   void updatePatchCost(DRBox& dr_box, DRPatch& dr_patch, const std::vector<GTLRectInt>& poly_rect_list);

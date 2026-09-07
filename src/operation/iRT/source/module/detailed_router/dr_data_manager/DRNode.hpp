@@ -164,21 +164,6 @@ class DRNode : public LayerCoord
 };
 
 #if 1  // astar
-struct CmpDRNodeCost
-{
-  bool operator()(DRNode* a, DRNode* b)
-  {
-    if (RTUTIL.equalDoubleByError(a->getTotalCost(), b->getTotalCost(), RT_ERROR)) {
-      if (RTUTIL.equalDoubleByError(a->get_estimated_cost(), b->get_estimated_cost(), RT_ERROR)) {
-        return a->get_neighbor_node_num() < b->get_neighbor_node_num();
-      } else {
-        return a->get_estimated_cost() > b->get_estimated_cost();
-      }
-    } else {
-      return a->getTotalCost() > b->getTotalCost();
-    }
-  }
-};
 #endif
 
 }  // namespace irt

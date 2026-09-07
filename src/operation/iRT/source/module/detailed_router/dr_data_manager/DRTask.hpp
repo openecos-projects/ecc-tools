@@ -80,77 +80,32 @@ class DRTask
 
 struct CmpDRTask
 {
-  bool operator()(const DRTask* a, const DRTask* b) const
+  bool operator()(const DRTask* first_task, const DRTask* second_task) const
   {
-    SortStatus sort_status = SortStatus::kEqual;
     // 时钟线网优先
-    if (sort_status == SortStatus::kEqual) {
-      ConnectType a_connect_type = a->get_connect_type();
-      ConnectType b_connect_type = b->get_connect_type();
-      if (a_connect_type == ConnectType::kClock && b_connect_type != ConnectType::kClock) {
-        sort_status = SortStatus::kTrue;
-      } else if (a_connect_type != ConnectType::kClock && b_connect_type == ConnectType::kClock) {
-        sort_status = SortStatus::kFalse;
-      } else {
-        sort_status = SortStatus::kEqual;
-      }
+    bool first_clock = first_task->get_connect_type() == ConnectType::kClock;
+    bool second_clock = second_task->get_connect_type() == ConnectType::kClock;
+    if (first_clock != second_clock) {
+      return first_clock;
     }
     // BoundingBox 大小升序
-    if (sort_status == SortStatus::kEqual) {
-      double a_routing_area = a->get_bounding_box().getArea();
-      double b_routing_area = b->get_bounding_box().getArea();
-      if (a_routing_area < b_routing_area) {
-        sort_status = SortStatus::kTrue;
-      } else if (a_routing_area == b_routing_area) {
-        sort_status = SortStatus::kEqual;
-      } else {
-        sort_status = SortStatus::kFalse;
-      }
+    double first_routing_area = first_task->get_bounding_box().getArea();
+    double second_routing_area = second_task->get_bounding_box().getArea();
+    if (first_routing_area != second_routing_area) {
+      return first_routing_area < second_routing_area;
     }
     // PinNum 降序
-    if (sort_status == SortStatus::kEqual) {
-      int32_t a_pin_num = static_cast<int32_t>(a->get_dr_group_list().size());
-      int32_t b_pin_num = static_cast<int32_t>(b->get_dr_group_list().size());
-      if (a_pin_num > b_pin_num) {
-        sort_status = SortStatus::kTrue;
-      } else if (a_pin_num == b_pin_num) {
-        sort_status = SortStatus::kEqual;
-      } else {
-        sort_status = SortStatus::kFalse;
-      }
+    int32_t first_pin_num = static_cast<int32_t>(first_task->get_dr_group_list().size());
+    int32_t second_pin_num = static_cast<int32_t>(second_task->get_dr_group_list().size());
+    if (first_pin_num != second_pin_num) {
+      return first_pin_num > second_pin_num;
     }
 
-    if (sort_status == SortStatus::kEqual) {
-      int32_t a_net_idx = a->get_net_idx();
-      int32_t b_net_idx = b->get_net_idx();
-      if (a_net_idx < b_net_idx) {
-        sort_status = SortStatus::kTrue;
-      } else if (a_net_idx == b_net_idx) {
-        sort_status = SortStatus::kEqual;
-      } else {
-        sort_status = SortStatus::kFalse;
-      }
+    if (first_task->get_net_idx() != second_task->get_net_idx()) {
+      return first_task->get_net_idx() < second_task->get_net_idx();
     }
 
-    if (sort_status == SortStatus::kEqual) {
-      const std::vector<LayerCoord>& a_coord_list = a->get_sort_coord_list();
-      const std::vector<LayerCoord>& b_coord_list = b->get_sort_coord_list();
-
-      if (std::ranges::lexicographical_compare(a_coord_list, b_coord_list, CmpLayerCoordByLayerASC())) {
-        sort_status = SortStatus::kTrue;
-      } else if (a_coord_list == b_coord_list) {
-        sort_status = SortStatus::kEqual;
-      } else {
-        sort_status = SortStatus::kFalse;
-      }
-    }
-
-    if (sort_status == SortStatus::kTrue) {
-      return true;
-    } else if (sort_status == SortStatus::kFalse) {
-      return false;
-    }
-    return false;
+    return std::ranges::lexicographical_compare(first_task->get_sort_coord_list(), second_task->get_sort_coord_list(), CmpLayerCoordByLayerASC());
   }
 };
 

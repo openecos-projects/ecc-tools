@@ -52,19 +52,6 @@ class DRIterParam
   double get_violation_unit() const { return _violation_unit; }
   int32_t get_max_routed_times() const { return _max_routed_times; }
   int32_t get_max_candidate_patch_num() const { return _max_candidate_patch_num; }
-  // setter
-  void set_prefer_wire_unit(const double prefer_wire_unit) { _prefer_wire_unit = prefer_wire_unit; }
-  void set_non_prefer_wire_unit(const double non_prefer_wire_unit) { _non_prefer_wire_unit = non_prefer_wire_unit; }
-  void set_bend_unit(const double bend_unit) { _bend_unit = bend_unit; }
-  void set_via_unit(const double via_unit) { _via_unit = via_unit; }
-  void set_size(const int32_t size) { _size = size; }
-  void set_offset(const int32_t offset) { _offset = offset; }
-  void set_schedule_interval(const int32_t schedule_interval) { _schedule_interval = schedule_interval; }
-  void set_fixed_rect_unit(const double fixed_rect_unit) { _fixed_rect_unit = fixed_rect_unit; }
-  void set_routed_rect_unit(const double routed_rect_unit) { _routed_rect_unit = routed_rect_unit; }
-  void set_violation_unit(const double violation_unit) { _violation_unit = violation_unit; }
-  void set_max_routed_times(const int32_t max_routed_times) { _max_routed_times = max_routed_times; }
-  void set_max_candidate_patch_num(const int32_t max_candidate_patch_num) { _max_candidate_patch_num = max_candidate_patch_num; }
 
  private:
   double _prefer_wire_unit = 0;

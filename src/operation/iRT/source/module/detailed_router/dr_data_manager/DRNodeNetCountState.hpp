@@ -111,4 +111,4 @@ class DRNodeNetCountState
   boost::container::vector<OrientNetCount> _orient_net_count_list;
 };
 
-}
+}  // namespace irt

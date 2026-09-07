@@ -26,4 +26,4 @@ class DRModelResult
   std::vector<Violation> _route_violation_list;
 };
 
-}
+}  // namespace irt
