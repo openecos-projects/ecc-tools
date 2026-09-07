@@ -66,10 +66,7 @@ class TimingPath
   void set_capture_time(const double capture_time) { _capture_time = capture_time; }
   void set_launch_clock_network_delay(const double launch_clock_network_delay) { _launch_clock_network_delay = launch_clock_network_delay; }
   void set_capture_clock_network_delay(const double capture_clock_network_delay) { _capture_clock_network_delay = capture_clock_network_delay; }
-  void set_clock_reconvergence_pessimism(const double clock_reconvergence_pessimism)
-  {
-    _clock_reconvergence_pessimism = clock_reconvergence_pessimism;
-  }
+  void set_clock_reconvergence_pessimism(const double clock_reconvergence_pessimism) { _clock_reconvergence_pessimism = clock_reconvergence_pessimism; }
   void set_setup_time(const double setup_time) { _setup_time = setup_time; }
   void set_check_time(const double check_time) { _check_time = check_time; }
   void set_level(const int32_t level) { _level = level; }

@@ -52,6 +52,16 @@ Rect32 rect_from_idb(idb::IdbRect& rect)
   return Rect32{rect.get_low_x(), rect.get_low_y(), rect.get_high_x(), rect.get_high_y()};
 }
 
+Rect32 rect_from_delta_rect(idb::IdbRect* delta_rect, idb::IdbCoordinate<int32_t>* origin)
+{
+  if (delta_rect == nullptr || origin == nullptr) {
+    return Rect32{};
+  }
+
+  return Rect32{origin->get_x() + delta_rect->get_low_x(), origin->get_y() + delta_rect->get_low_y(),
+                origin->get_x() + delta_rect->get_high_x(), origin->get_y() + delta_rect->get_high_y()};
+}
+
 LayerId layer_id_from_idb(idb::IdbLayer* layer)
 {
   if (layer == nullptr) {
@@ -861,13 +871,18 @@ uint64_t emit_gcell_grid_lines(GeometryStore& store, idb::IdbGCellGrid* gcell_gr
   return shape_count;
 }
 
-uint64_t emit_layer_shape_rects(GeometryStore& store, idb::IdbLayerShape& layer_shape, OwnerRef owner)
+uint64_t emit_layer_shape_rects(GeometryStore& store, idb::IdbLayerShape& layer_shape, OwnerRef owner,
+                                uint32_t path3_prefix)
 {
+  if (layer_shape.get_layer() == nullptr) {
+    return 0;
+  }
+
   uint64_t shape_count = 0;
   uint32_t rect_index = 0;
   for (auto* rect : layer_shape.get_rect_list()) {
     OwnerRef rect_owner = owner;
-    rect_owner.path3 = rect_index++;
+    rect_owner.path3 = path3_prefix + rect_index++;
     if (emit_rect_if_present(store, layer_id_from_idb(layer_shape.get_layer()), rect_from_idb(rect), rect_owner) != 0) {
       ++shape_count;
     }
@@ -876,33 +891,40 @@ uint64_t emit_layer_shape_rects(GeometryStore& store, idb::IdbLayerShape& layer_
   return shape_count;
 }
 
-uint64_t emit_via_cut_shapes(GeometryStore& store, idb::IdbVia* via, OwnerRef owner)
+uint64_t emit_via_shapes(GeometryStore& store, idb::IdbVia* via, OwnerRef owner)
 {
-  if (via == nullptr) {
-    return 0;
-  }
-
-  if (via->get_instance() == nullptr || via->get_instance()->get_cut_layer_shape() == nullptr) {
+  if (via == nullptr || via->get_instance() == nullptr) {
     return 0;
   }
 
   owner = with_via_local_name(store, via, owner);
+  idb::IdbLayerShape bottom_shape = via->get_bottom_layer_shape();
   idb::IdbLayerShape cut_shape = via->get_cut_layer_shape();
-  return emit_layer_shape_rects(store, cut_shape, owner);
+  idb::IdbLayerShape top_shape = via->get_top_layer_shape();
+  return emit_layer_shape_rects(store, bottom_shape, owner, 0U)
+         + emit_layer_shape_rects(store, cut_shape, owner, 1U << 30U)
+         + emit_layer_shape_rects(store, top_shape, owner, 2U << 30U);
 }
 
-uint64_t emit_via_cut_shapes_at(GeometryStore& store, idb::IdbVia* via, idb::IdbCoordinate<int32_t>* origin, OwnerRef owner)
+uint64_t emit_via_shapes_at(GeometryStore& store, idb::IdbVia* via, idb::IdbCoordinate<int32_t>* origin, OwnerRef owner)
 {
-  if (via == nullptr || origin == nullptr || via->get_instance() == nullptr
-      || via->get_instance()->get_cut_layer_shape() == nullptr) {
+  if (via == nullptr || origin == nullptr || via->get_instance() == nullptr) {
     return 0;
   }
 
   owner = with_via_local_name(store, via, owner);
+  idb::IdbLayerShape bottom_shape;
+  via->get_instance()->get_bottom_layer_shape()->clone(bottom_shape);
+  bottom_shape.moveToLocation(origin);
   idb::IdbLayerShape cut_shape;
   via->get_instance()->get_cut_layer_shape()->clone(cut_shape);
   cut_shape.moveToLocation(origin);
-  return emit_layer_shape_rects(store, cut_shape, owner);
+  idb::IdbLayerShape top_shape;
+  via->get_instance()->get_top_layer_shape()->clone(top_shape);
+  top_shape.moveToLocation(origin);
+  return emit_layer_shape_rects(store, bottom_shape, owner, 0U)
+         + emit_layer_shape_rects(store, cut_shape, owner, 1U << 30U)
+         + emit_layer_shape_rects(store, top_shape, owner, 2U << 30U);
 }
 
 ShapeId find_shape_by_owner_path(const GeometryStore& store, OwnerType type, OwnerId owner_id, uint32_t path0, uint32_t path1,
@@ -1155,12 +1177,17 @@ void reconcile_rect_shape(GeometryStore& store, OwnerType type, OwnerId owner_id
 }
 
 void reconcile_layer_shape_rects(GeometryStore& store, idb::IdbLayerShape& layer_shape, OwnerRef owner,
-                                 std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
+                                 uint32_t path3_prefix, std::unordered_set<ShapeId>& seen_shape_ids,
+                                 GeometrySyncResult& result)
 {
+  if (layer_shape.get_layer() == nullptr) {
+    return;
+  }
+
   uint32_t rect_index = 0;
   for (auto* rect : layer_shape.get_rect_list()) {
     OwnerRef rect_owner = owner;
-    rect_owner.path3 = rect_index++;
+    rect_owner.path3 = path3_prefix + rect_index++;
     const Rect32 bbox = rect_from_idb(rect);
     if (is_non_empty(bbox)) {
       reconcile_rect_shape(store, rect_owner.type, rect_owner.owner_id, layer_id_from_idb(layer_shape.get_layer()), bbox, rect_owner,
@@ -1169,31 +1196,42 @@ void reconcile_layer_shape_rects(GeometryStore& store, idb::IdbLayerShape& layer
   }
 }
 
-void reconcile_via_cut_shapes(GeometryStore& store, idb::IdbVia* via, OwnerRef owner,
-                              std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
+void reconcile_via_shapes(GeometryStore& store, idb::IdbVia* via, OwnerRef owner,
+                          std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
 {
-  if (via == nullptr || via->get_instance() == nullptr || via->get_instance()->get_cut_layer_shape() == nullptr) {
+  if (via == nullptr || via->get_instance() == nullptr) {
     return;
   }
 
   owner = with_via_local_name(store, via, owner);
+  idb::IdbLayerShape bottom_shape = via->get_bottom_layer_shape();
   idb::IdbLayerShape cut_shape = via->get_cut_layer_shape();
-  reconcile_layer_shape_rects(store, cut_shape, owner, seen_shape_ids, result);
+  idb::IdbLayerShape top_shape = via->get_top_layer_shape();
+  reconcile_layer_shape_rects(store, bottom_shape, owner, 0U, seen_shape_ids, result);
+  reconcile_layer_shape_rects(store, cut_shape, owner, 1U << 30U, seen_shape_ids, result);
+  reconcile_layer_shape_rects(store, top_shape, owner, 2U << 30U, seen_shape_ids, result);
 }
 
-void reconcile_via_cut_shapes_at(GeometryStore& store, idb::IdbVia* via, idb::IdbCoordinate<int32_t>* origin, OwnerRef owner,
-                                 std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
+void reconcile_via_shapes_at(GeometryStore& store, idb::IdbVia* via, idb::IdbCoordinate<int32_t>* origin, OwnerRef owner,
+                             std::unordered_set<ShapeId>& seen_shape_ids, GeometrySyncResult& result)
 {
-  if (via == nullptr || origin == nullptr || via->get_instance() == nullptr
-      || via->get_instance()->get_cut_layer_shape() == nullptr) {
+  if (via == nullptr || origin == nullptr || via->get_instance() == nullptr) {
     return;
   }
 
   owner = with_via_local_name(store, via, owner);
+  idb::IdbLayerShape bottom_shape;
+  via->get_instance()->get_bottom_layer_shape()->clone(bottom_shape);
+  bottom_shape.moveToLocation(origin);
   idb::IdbLayerShape cut_shape;
   via->get_instance()->get_cut_layer_shape()->clone(cut_shape);
   cut_shape.moveToLocation(origin);
-  reconcile_layer_shape_rects(store, cut_shape, owner, seen_shape_ids, result);
+  idb::IdbLayerShape top_shape;
+  via->get_instance()->get_top_layer_shape()->clone(top_shape);
+  top_shape.moveToLocation(origin);
+  reconcile_layer_shape_rects(store, bottom_shape, owner, 0U, seen_shape_ids, result);
+  reconcile_layer_shape_rects(store, cut_shape, owner, 1U << 30U, seen_shape_ids, result);
+  reconcile_layer_shape_rects(store, top_shape, owner, 2U << 30U, seen_shape_ids, result);
 }
 
 Rect32 rect_from_regular_segment(idb::IdbRegularWireSegment* segment)
@@ -1203,7 +1241,11 @@ Rect32 rect_from_regular_segment(idb::IdbRegularWireSegment* segment)
   }
 
   if (segment->is_rect()) {
-    return rect_from_idb(segment->get_delta_rect());
+    if (segment->get_delta_rect() == nullptr) {
+      return Rect32{};
+    }
+    idb::IdbRect rect = segment->get_segment_rect();
+    return rect_from_idb(rect);
   }
 
   if (segment->is_wire() && segment->get_layer() != nullptr) {
@@ -1310,7 +1352,7 @@ PinPortShapeCounts emit_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, 
     owner.path0 = path0;
     owner.path1 = path1;
     owner.path2 = via_index++;
-    counts.via_shape_count += emit_via_cut_shapes(store, via, owner);
+    counts.via_shape_count += emit_via_shapes(store, via, owner);
   }
 
   return counts;
@@ -1359,7 +1401,7 @@ void reconcile_pin_port_shapes(GeometryStore& store, idb::IdbPin* pin, OwnerType
     owner.path0 = path0;
     owner.path1 = path1;
     owner.path2 = via_index++;
-    reconcile_via_cut_shapes(store, via, owner, seen_via_shape_ids, result);
+    reconcile_via_shapes(store, via, owner, seen_via_shape_ids, result);
   }
 }
 
@@ -1577,7 +1619,7 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
               via_owner.path0 = wire_index;
               via_owner.path1 = current_segment_index;
               via_owner.path2 = via_index++;
-              result.via_shape_count += emit_via_cut_shapes(store, via, via_owner);
+              result.via_shape_count += emit_via_shapes(store, via, via_owner);
             }
           }
         }
@@ -1631,7 +1673,7 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
             via_owner.path0 = wire_index;
             via_owner.path1 = current_segment_index;
             via_owner.path2 = 0;
-            result.via_shape_count += emit_via_cut_shapes(store, segment->get_via(), via_owner);
+            result.via_shape_count += emit_via_shapes(store, segment->get_via(), via_owner);
           }
         }
 
@@ -1696,7 +1738,7 @@ GeometryBuildResult GeometryBuilder::rebuild_from_design(idb::IdbDesign& design,
           owner.owner_id = fill_index;
           owner.path0 = coordinate_index++;
 
-          result.fill_shape_count += emit_via_cut_shapes_at(store, fill->get_via()->get_via(), coordinate, owner);
+          result.fill_shape_count += emit_via_shapes_at(store, fill->get_via()->get_via(), coordinate, owner);
         }
       }
 
@@ -2178,7 +2220,7 @@ GeometrySyncResult GeometryBuilder::sync_net(idb::IdbDesign& design, idb::IdbNet
             via_owner.path0 = wire_index;
             via_owner.path1 = current_segment_index;
             via_owner.path2 = via_index++;
-            reconcile_via_cut_shapes(store, via, via_owner, seen_via_shape_ids, result);
+            reconcile_via_shapes(store, via, via_owner, seen_via_shape_ids, result);
           }
         }
       }
@@ -2260,7 +2302,7 @@ GeometrySyncResult GeometryBuilder::sync_special_net(idb::IdbDesign& design, idb
           via_owner.path0 = wire_index;
           via_owner.path1 = current_segment_index;
           via_owner.path2 = 0;
-          reconcile_via_cut_shapes(store, segment->get_via(), via_owner, seen_via_shape_ids, result);
+          reconcile_via_shapes(store, segment->get_via(), via_owner, seen_via_shape_ids, result);
         }
       }
 
@@ -2429,7 +2471,7 @@ GeometrySyncResult GeometryBuilder::sync_fill(idb::IdbDesign& design, idb::IdbFi
       owner.owner_id = owner_id;
       owner.path0 = coordinate_index++;
 
-      reconcile_via_cut_shapes_at(store, fill.get_via()->get_via(), coordinate, owner, seen_shape_ids, result);
+      reconcile_via_shapes_at(store, fill.get_via()->get_via(), coordinate, owner, seen_shape_ids, result);
     }
   }
 

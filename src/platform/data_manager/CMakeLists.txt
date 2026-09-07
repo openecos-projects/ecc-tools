@@ -20,7 +20,6 @@ add_library(idm
 target_link_libraries(idm
     PUBLIC
     IdbBuilder
-    flow
     liberty
     spef
     vcd
@@ -34,9 +33,6 @@ target_include_directories(idm
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/config
         ${CMAKE_CURRENT_SOURCE_DIR}/checker
-
-        ${HOME_PLATFORM}/flow
-        ${HOME_PLATFORM}/flow/config
 
         ${HOME_PLATFORM}/tool_manager
 
@@ -55,3 +51,20 @@ target_include_directories(idm
         ${HOME_OPERATION}
 
 )
+
+if(BUILD_TESTING)
+    add_executable(check_connection_graph_test
+        checker/check_connection_test.cpp
+    )
+
+    target_include_directories(check_connection_graph_test
+        PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_target_properties(check_connection_graph_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    )
+
+    add_test(NAME check_connection_graph_test COMMAND check_connection_graph_test)
+endif()

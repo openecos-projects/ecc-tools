@@ -29,7 +29,6 @@
 #include "ScaleAxis.hpp"
 #include "ScaleGrid.hpp"
 #include "Segment.hpp"
-#include "json.hpp"
 
 namespace irt {
 

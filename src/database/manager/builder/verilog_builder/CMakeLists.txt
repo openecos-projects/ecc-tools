@@ -27,3 +27,11 @@ target_link_libraries(verilog_builder
     PUBLIC
         ZLIB::ZLIB
 )
+
+if(BUILD_TESTING)
+  add_executable(verilog_reader_escaped_identifier_test
+      validation/verilog_reader_escaped_identifier_test.cpp
+  )
+  target_link_libraries(verilog_reader_escaped_identifier_test PRIVATE verilog_builder def_service idb ecc_logger)
+  add_test(NAME verilog_reader_escaped_identifier_test COMMAND verilog_reader_escaped_identifier_test)
+endif()

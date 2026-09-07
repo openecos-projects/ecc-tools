@@ -24,6 +24,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,47 @@ namespace icts {
 class Inst;
 class Net;
 class Pin;
+
+enum class ClockPropagationKind
+{
+  kBuffer,
+  kInverter,
+};
+
+enum class ClockPropagationOrigin
+{
+  kTracedInput,
+  kSynthesized,
+};
+
+struct ClockPropagationArc
+{
+  Inst* inst = nullptr;
+  Pin* input_pin = nullptr;
+  Pin* output_pin = nullptr;
+  ClockPropagationKind kind = ClockPropagationKind::kBuffer;
+  ClockPropagationOrigin origin = ClockPropagationOrigin::kSynthesized;
+  int32_t path_buffer_weight = 1;
+};
+
+enum class ClockPropagationMutationCode
+{
+  kOk,
+  kIncomplete,
+  kPinInstMismatch,
+  kInvalidPinDirection,
+  kPhysicalKindMismatch,
+  kDuplicateInst,
+  kDuplicatePin,
+};
+
+struct ClockPropagationMutationStatus
+{
+  ClockPropagationMutationCode code = ClockPropagationMutationCode::kOk;
+  std::string message;
+
+  auto ok() const -> bool { return code == ClockPropagationMutationCode::kOk; }
+};
 
 class Clock
 {
@@ -49,6 +91,9 @@ class Clock
   auto get_loads() const -> const std::vector<Pin*>& { return _loads; }
   auto get_insts() const -> const std::vector<Inst*>& { return _insts; }
   auto get_nets() const -> const std::vector<Net*>& { return _nets; }
+  auto get_propagation_arcs() const -> const std::vector<ClockPropagationArc>& { return _propagation_arcs; }
+  auto findPropagationArc(const Inst* inst) const -> const ClockPropagationArc*;
+  auto findPropagationArc(const Pin* pin) const -> const ClockPropagationArc*;
   auto is_preclustered_sink_reuse() const -> bool { return _preclustered_sink_reuse; }
   auto get_preclustered_anchor_input_net_names() const -> const std::vector<std::string>& { return _preclustered_anchor_input_net_names; }
 
@@ -63,12 +108,23 @@ class Clock
 
   // Membership helpers.
   auto add_load(Pin* load) -> void { appendUnique(_loads, load); }
+  auto remove_load(const Pin* load) -> void { std::erase(_loads, load); }
   auto set_loads(const std::vector<Pin*>& loads) -> void { _loads = loads; }
   auto clear_loads() -> void { _loads.clear(); }
-  auto add_inst(Inst* inst) -> void { appendUnique(_insts, inst); }
   auto add_net(Net* net) -> void { appendUnique(_nets, net); }
+  auto remove_net(const Net* net) -> void { std::erase(_nets, net); }
+  auto validatePropagationArc(const ClockPropagationArc& arc) const -> ClockPropagationMutationStatus;
+  auto addPropagationArc(const ClockPropagationArc& arc) -> ClockPropagationMutationStatus;
+  auto removePropagationArcsFor(const Inst* inst) -> void;
+  auto removePropagationArcsFor(const Pin* pin) -> void;
+  auto clearPropagationArcs() -> void
+  {
+    _propagation_arcs.clear();
+    _insts.clear();
+  }
   auto clearMembership() -> void
   {
+    _propagation_arcs.clear();
     _insts.clear();
     _nets.clear();
   }
@@ -100,6 +156,7 @@ class Clock
   std::vector<Pin*> _loads;
   std::vector<Inst*> _insts;
   std::vector<Net*> _nets;
+  std::vector<ClockPropagationArc> _propagation_arcs;
   bool _preclustered_sink_reuse = false;
   std::vector<std::string> _preclustered_anchor_input_net_names;
 };

@@ -54,8 +54,7 @@ class ResExtractor
   void extractResistance();
   void extractCornerResistance(int32_t corner_idx);
   void extractNetResistance(int32_t corner_idx, int32_t net_idx);
-  double extractWireResistance(CornerData& corner_data, ProcessConductor& conductor, TopoEdge& edge,
-                                std::span<EdgeEtchInterval> edge_interval_list);
+  double extractWireResistance(CornerData& corner_data, ProcessConductor& conductor, TopoEdge& edge, std::span<EdgeEtchInterval> edge_interval_list);
   double extractViaResistance(CornerData& corner_data, ProcessVia& via, TopoEdge& edge);
   double getTmprFactor(double tmpr, double nominal_tmpr, double tmpr_coefficient1, double tmpr_coefficient2);
   ProcessVia* getProcessVia(CornerData& corner_data, int32_t design_layer_idx);

@@ -51,22 +51,26 @@ bool DataManager::isOnDieBoundary(IdbInstance* io_cell)
 
   switch (io_cell_orient) {
     case IdbOrient::kS_R180:
+    case IdbOrient::kFS_MX:
       if (io_cell_ury == die_ury) {
         return true;
       }
       break;
     case IdbOrient::kN_R0:
+    case IdbOrient::kFN_MY:
       if (io_cell_lly == die_lly) {
         return true;
       }
       break;
 
     case IdbOrient::kE_R270:
+    case IdbOrient::kFE_MY90:
       if (io_cell_llx == die_llx) {
         return true;
       }
       break;
     case IdbOrient::kW_R90:
+    case IdbOrient::kFW_MX90:
       if (io_cell_urx == die_urx) {
         return true;
       }
@@ -89,23 +93,27 @@ bool DataManager::isOnDieBoundary(int32_t io_cell_llx, int32_t io_cell_lly, int3
 
   switch (io_cell_orient) {
     case IdbOrient::kS_R180:
-      if (io_cell_ury <= die_ury) {
+    case IdbOrient::kFS_MX:
+      if (io_cell_ury == die_ury) {
         return true;
       }
       break;
     case IdbOrient::kN_R0:
-      if (io_cell_lly >= die_lly) {
+    case IdbOrient::kFN_MY:
+      if (io_cell_lly == die_lly) {
         return true;
       }
       break;
 
     case IdbOrient::kE_R270:
-      if (io_cell_llx >= die_llx) {
+    case IdbOrient::kFE_MY90:
+      if (io_cell_llx == die_llx) {
         return true;
       }
       break;
     case IdbOrient::kW_R90:
-      if (io_cell_urx <= die_urx) {
+    case IdbOrient::kFW_MX90:
+      if (io_cell_urx == die_urx) {
         return true;
       }
       break;
@@ -129,7 +137,11 @@ bool DataManager::isOnIOSite(int32_t llx, int32_t lly, int32_t urx, int32_t ury,
   int32_t x_offset = corner_site->get_width();
   int32_t y_offset = corner_site->get_height();
   int32_t site_width = iocell_site->get_width();
-  // int32_t site_height = iocell_site->get_height();
+  int32_t site_height = iocell_site->get_height();
+
+  if (site_width <= 0 || site_height <= 0) {
+    return false;
+  }
 
   auto idb_die = _layout->get_die();
   auto bounding_box = idb_die->get_bounding_box();
@@ -139,13 +151,13 @@ bool DataManager::isOnIOSite(int32_t llx, int32_t lly, int32_t urx, int32_t ury,
   int32_t x_start = die_llx + x_offset;
   int32_t y_start = die_lly + y_offset;
 
-  if (orient == IdbOrient::kE_R270 || orient == IdbOrient::kW_R90) {
+  if (orient == IdbOrient::kE_R270 || orient == IdbOrient::kW_R90 || orient == IdbOrient::kFE_MY90 || orient == IdbOrient::kFW_MX90) {
     int32_t y_to_bottom = lly - y_start;
-    if (y_to_bottom % site_width != 0) {
+    if (y_to_bottom % site_height != 0) {
       ECCLOG.warn(ecc::Loc::current(), "IO cell does not match IO site.");
       return false;
     }
-  } else if (orient == IdbOrient::kN_R0 || orient == IdbOrient::kS_R180) {
+  } else if (orient == IdbOrient::kN_R0 || orient == IdbOrient::kS_R180 || orient == IdbOrient::kFN_MY || orient == IdbOrient::kFS_MX) {
     int32_t x_to_left = llx - x_start;
     if (x_to_left % site_width != 0) {
       ECCLOG.warn(ecc::Loc::current(), "IO cell does not match IO site.");

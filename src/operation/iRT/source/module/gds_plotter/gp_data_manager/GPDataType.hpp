@@ -38,7 +38,11 @@ enum class GPDataType
   kAxis,
   kOverflow,
   kRouteViolation,
-  kPatchViolation
+  kPatchViolation,
+  kHEdgeAxis,
+  kVEdgeAxis,
+  kHEdgeInfo,
+  kVEdgeInfo
 };
 
 struct GetGPDataTypeName
@@ -94,6 +98,18 @@ struct GetGPDataTypeName
         break;
       case GPDataType::kPatchViolation:
         data_type_name = "patch_violation";
+        break;
+      case GPDataType::kHEdgeAxis:
+        data_type_name = "h_edge_axis";
+        break;
+      case GPDataType::kVEdgeAxis:
+        data_type_name = "v_edge_axis";
+        break;
+      case GPDataType::kHEdgeInfo:
+        data_type_name = "h_edge_info";
+        break;
+      case GPDataType::kVEdgeInfo:
+        data_type_name = "v_edge_info";
         break;
       default:
         RTLOG.error(Loc::current(), "Unrecognized type!");

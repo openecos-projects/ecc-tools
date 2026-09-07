@@ -36,6 +36,7 @@ class TimingCellArc
   bool get_is_timing_graph_arc() const { return _is_timing_graph_arc; }
   bool get_is_clock_arc() const { return _is_clock_arc; }
   bool get_is_disable_arc() const { return _is_disable_arc; }
+  bool get_is_clear_preset_arc() const { return _is_clear_preset_arc; }
   // setter
   void set_source_port(const std::string& source_port) { _source_port = source_port; }
   void set_sink_port(const std::string& sink_port) { _sink_port = sink_port; }
@@ -46,6 +47,7 @@ class TimingCellArc
   void set_is_timing_graph_arc(const bool is_timing_graph_arc) { _is_timing_graph_arc = is_timing_graph_arc; }
   void set_is_clock_arc(const bool is_clock_arc) { _is_clock_arc = is_clock_arc; }
   void set_is_disable_arc(const bool is_disable_arc) { _is_disable_arc = is_disable_arc; }
+  void set_is_clear_preset_arc(const bool is_clear_preset_arc) { _is_clear_preset_arc = is_clear_preset_arc; }
   // function
 
  private:
@@ -58,6 +60,7 @@ class TimingCellArc
   bool _is_timing_graph_arc = true;
   bool _is_clock_arc = false;
   bool _is_disable_arc = false;
+  bool _is_clear_preset_arc = false;
 };
 
 }  // namespace ista

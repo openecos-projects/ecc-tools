@@ -20,8 +20,8 @@
  */
 #include "config/PlotSpefConfig.hh"
 
-#include "PathUtils.hh"
 #include "Logger.hpp"
+#include "PathUtils.hh"
 
 namespace ircx::plot_spef {
 

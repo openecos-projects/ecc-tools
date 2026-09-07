@@ -15,8 +15,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include <boost/container/small_vector.hpp>
-
 #include "PlanarCoord.hpp"
 #include "RTHeader.hpp"
 #include "Segment.hpp"

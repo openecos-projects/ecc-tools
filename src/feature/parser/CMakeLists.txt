@@ -25,7 +25,6 @@ target_link_libraries(feature_parser
     PRIVATE
         idb
         feature_db
-        flow_config
         idm
         # irt_interface
         # ipl-source

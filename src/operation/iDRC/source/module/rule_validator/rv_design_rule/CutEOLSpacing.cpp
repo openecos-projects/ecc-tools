@@ -14,7 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include <set>
+#include "DRCHeader.hpp"
 #include "RuleValidator.hpp"
 
 namespace idrc {

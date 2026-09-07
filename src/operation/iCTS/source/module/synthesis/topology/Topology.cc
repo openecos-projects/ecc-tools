@@ -95,10 +95,10 @@ auto makeLogContext(const Clock& clock, const std::string& sink_domain, const st
   };
 }
 
-auto clearClockCtsMembership(Design& design, Clock& clock) -> void
+auto clearClockSynthesizedMembership(Design& design, Clock& clock) -> void
 {
-  design.removeClockMembershipObjects(clock);
-  clock.clearMembership();
+  (void) ClockTreeRealization::restoreClockSourceNetToSynthesisFrontier(clock);
+  design.removeClockSynthesizedObjects(clock);
 }
 
 auto collectRootInputs(const std::vector<ClockDistributionContext>& sink_domains) -> std::vector<Pin*>
@@ -184,6 +184,7 @@ class ClockTopologySynthesis
             .inserted_insts = &synthesis_build.output.inserted_insts,
             .inserted_pins = &synthesis_build.output.inserted_pins,
             .inserted_nets = &synthesis_build.output.inserted_nets,
+            .propagation_arcs = &synthesis_build.output.propagation_arcs,
         })) {
       ClockTreeRealization::reconnectNet(NetConnectionInput{
           .net = context.downstream_net,
@@ -295,6 +296,7 @@ class ClockTopologySynthesis
             .inserted_insts = &source_trunk_build.output.inserted_insts,
             .inserted_pins = &source_trunk_build.output.inserted_pins,
             .inserted_nets = &source_trunk_build.output.inserted_nets,
+            .propagation_arcs = &source_trunk_build.output.propagation_arcs,
         })) {
       _status_recorder->append(*_clock, DomainStatus::kFailed, source_trunk_domain, _valid_sinks, root_inputs.size(), "failed to commit source trunk objects");
       CTSLOG.warn(Loc::current(), "Topology: clock \"", _clock->get_clock_name(), "\" source trunk formation failed while committing inserted objects.");
@@ -329,16 +331,9 @@ auto Topology::build(const Input& input, const Config& config) -> Build
   return topology::BuildSinkTree(input, config);
 }
 
-auto Topology::resetClockTopology(Clock& clock) -> void
-{
-  ClockTreeRealization::restoreClockSourceNetToClockLoads(clock);
-  clock.clearMembership();
-}
-
 auto Topology::resetClockTopology(Design& design, Clock& clock) -> void
 {
-  ClockTreeRealization::restoreClockSourceNetToClockLoads(clock);
-  clearClockCtsMembership(design, clock);
+  clearClockSynthesizedMembership(design, clock);
 }
 
 auto Topology::formClock(const ClockTopologyInput& input) -> bool

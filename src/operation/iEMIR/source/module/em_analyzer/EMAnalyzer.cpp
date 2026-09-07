@@ -92,8 +92,7 @@ void EMAnalyzer::analyzePowerEdgeList(PowerGraph& power_graph, EAModel& ea_model
 
 void EMAnalyzer::analyzePowerEdge(PowerGraph& power_graph, PowerEdge& power_edge, EAModel& ea_model)
 {
-  if (power_edge.get_first_node_id() >= power_graph.get_node_list().size()
-      || power_edge.get_second_node_id() >= power_graph.get_node_list().size()) {
+  if (power_edge.get_first_node_id() >= power_graph.get_node_list().size() || power_edge.get_second_node_id() >= power_graph.get_node_list().size()) {
     EMIRLOG.error(Loc::current(), "The power edge node is invalid!");
   }
   if (power_edge.get_resistance() <= EMIR_ERROR) {

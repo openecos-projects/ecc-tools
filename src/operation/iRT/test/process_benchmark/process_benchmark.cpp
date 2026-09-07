@@ -1,9 +1,10 @@
-#include "utility/logger/Logger.hpp"
 #include <cmath>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
+
+#include "utility/logger/Logger.hpp"
 
 class SingleCore
 {

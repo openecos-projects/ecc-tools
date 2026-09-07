@@ -24,12 +24,14 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "Point.hh"
 #include "synthesis/htree/HTree.hh"
 
 namespace icts {
 class Design;
+class Pin;
 class Wrapper;
 }  // namespace icts
 
@@ -37,10 +39,22 @@ namespace icts::htree {
 
 struct BufferPatternLibrary;
 struct DiagnosticBuild;
+struct SinkLoadRegionLegalitySummary;
+struct SinkLoadRegionSplitPlan;
 
+enum class SplitPlanMaterializationDecision
+{
+  kPassThrough,
+  kMaterialize,
+  kMismatch,
+};
+
+auto ClassifySplitPlanMaterialization(const SinkLoadRegionSplitPlan& plan, const std::vector<Pin*>& terminal_loads, const Point<int>& upstream_anchor)
+    -> SplitPlanMaterializationDecision;
 auto InterpolateManhattanPoint(const Point<int>& source, const Point<int>& sink, double normalized_position) -> Point<int>;
 auto ValidateRootDriverSizing(icts::Design& design, Wrapper& wrapper, const HTree::Build& result, const std::string& cell_master) -> bool;
 auto ApplyRootDriverSizing(icts::Design& design, Wrapper& wrapper, htree::DiagnosticBuild& result, const std::string& cell_master) -> bool;
-auto BuildEmbedding(Wrapper& wrapper, htree::DiagnosticBuild& result, const BufferPatternLibrary& segment_pattern_library, const HTree::Config& config) -> void;
+auto BuildEmbedding(Wrapper& wrapper, htree::DiagnosticBuild& result, const BufferPatternLibrary& segment_pattern_library,
+                    const SinkLoadRegionLegalitySummary& sink_load_region_legality) -> void;
 
 }  // namespace icts::htree

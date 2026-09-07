@@ -57,6 +57,7 @@ void MacroPlacer::place()
 
   MPComParam mp_com_param;
   setMPComParam(mp_com_param);
+  checkMacroPlacement();
   checkMacroInCore();
   buildMacroPlacementHalo(mp_com_param);
   buildMacroRoutingHalo(mp_com_param);
@@ -73,6 +74,27 @@ void MacroPlacer::setMPComParam(MPComParam& mp_com_param)
   FPLOG.info(Loc::current(), "routing_halo_micron: ", mp_com_param.get_routing_halo_micron());
 }
 
+void MacroPlacer::checkMacroPlacement()
+{
+  std::string unplaced_macro_name_list;
+  int32_t unplaced_macro_num = 0;
+  for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (!instance.get_macro() || instance.get_placed()) {
+      continue;
+    }
+    if (!unplaced_macro_name_list.empty()) {
+      unplaced_macro_name_list += ", ";
+    }
+    unplaced_macro_name_list += instance.get_name();
+    unplaced_macro_num++;
+  }
+
+  if (unplaced_macro_num > 0) {
+    FPLOG.error(Loc::current(), "Found ", unplaced_macro_num, " unplaced macro(s): ", unplaced_macro_name_list,
+                ". Please place all macros before running iFP!");
+  }
+}
+
 void MacroPlacer::checkMacroInCore()
 {
   Core& core = FPDM.getDatabase().get_core();
@@ -81,11 +103,11 @@ void MacroPlacer::checkMacroInCore()
       continue;
     }
     PlanarRect& macro_rect = instance.get_bounding_rect();
-    if (core.get_ll_x() <= macro_rect.get_ll_x() && macro_rect.get_ur_x() <= core.get_ur_x()
-        && core.get_ll_y() <= macro_rect.get_ll_y() && macro_rect.get_ur_y() <= core.get_ur_y()) {
+    if (core.get_ll_x() <= macro_rect.get_ll_x() && macro_rect.get_ur_x() <= core.get_ur_x() && core.get_ll_y() <= macro_rect.get_ll_y()
+        && macro_rect.get_ur_y() <= core.get_ur_y()) {
       continue;
     }
-    FPLOG.warn(Loc::current(), "The macro '", instance.get_name(), "' is placed outside core!");
+    FPLOG.error(Loc::current(), "The macro '", instance.get_name(), "' is placed outside core!");
   }
 }
 
@@ -169,10 +191,8 @@ std::vector<std::pair<int32_t, int32_t>> MacroPlacer::getRowBlockageIntervalList
       continue;
     }
     int32_t site_origin_x = row.get_site_origin_x();
-    int32_t start_x
-        = std::max(row.get_ll_x(), site_origin_x + FPUTIL.alignDown(placement_halo_rect.get_ll_x() - site_origin_x, site.get_width()));
-    int32_t end_x
-        = std::min(row.get_ur_x(), site_origin_x + FPUTIL.alignUp(placement_halo_rect.get_ur_x() - site_origin_x, site.get_width()));
+    int32_t start_x = std::max(row.get_ll_x(), site_origin_x + FPUTIL.alignDown(placement_halo_rect.get_ll_x() - site_origin_x, site.get_width()));
+    int32_t end_x = std::min(row.get_ur_x(), site_origin_x + FPUTIL.alignUp(placement_halo_rect.get_ur_x() - site_origin_x, site.get_width()));
     if (start_x < end_x) {
       blockage_interval_list.emplace_back(start_x, end_x);
     }

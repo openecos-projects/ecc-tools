@@ -58,6 +58,10 @@ IdbObs::IdbObs()
 
 IdbObs::~IdbObs()
 {
+  for (auto* obs_layer : _obs_layer_list) {
+    delete obs_layer;
+  }
+  _obs_layer_list.clear();
 }
 
 IdbObsLayer* IdbObs::add_obs_layer(IdbObsLayer* obs_layer)

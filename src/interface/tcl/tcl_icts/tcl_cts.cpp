@@ -98,4 +98,18 @@ unsigned CmdCTSReport::exec()
 
   return 0;
 }
+
+CmdCTSDestroy::CmdCTSDestroy(const char* cmd_name) : TclCmd(cmd_name)
+{
+}
+
+unsigned CmdCTSDestroy::check()
+{
+  return 1U;
+}
+
+unsigned CmdCTSDestroy::exec()
+{
+  return CTS_API_INST.destroyCTS().ok() ? 1U : 0U;
+}
 }  // namespace tcl

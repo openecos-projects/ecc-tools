@@ -763,6 +763,14 @@ CppVerilogID* ParserContext::makeSliceId(std::string base_name, int range_from, 
 CppVerilogID* ParserContext::makeIdFromName(std::string name)
 {
   name = stripOuterSpace(name);
+
+  // An escaped Verilog identifier is one lexical token, including any '[' or
+  // ']' characters it contains. For example, "\\foo[0] " names the scalar
+  // identifier "foo[0]"; it is not an indexed reference to "foo".
+  if (!name.empty() && name.front() == '\\') {
+    return makeId(name);
+  }
+
   std::string base;
   int from = 0;
   int to = 0;

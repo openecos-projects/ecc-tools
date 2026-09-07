@@ -216,8 +216,7 @@ double PowerPropagator::getMinimumSlew(std::map<AnalysisType, std::map<TransType
 {
   double minimum_slew = std::numeric_limits<double>::infinity();
   for (AnalysisType analysis_type : {AnalysisType::kMax, AnalysisType::kMin}) {
-    if (slew_map.count(analysis_type) == 0 || slew_map[analysis_type].count(TransType::kRise) == 0
-        || slew_map[analysis_type].count(TransType::kFall) == 0) {
+    if (slew_map.count(analysis_type) == 0 || slew_map[analysis_type].count(TransType::kRise) == 0 || slew_map[analysis_type].count(TransType::kFall) == 0) {
       continue;
     }
     double average_slew = (slew_map[analysis_type][TransType::kRise] + slew_map[analysis_type][TransType::kFall]) / 2.0;
@@ -370,8 +369,7 @@ void PowerPropagator::propagateOutputActivity(std::string& pin_name)
 {
   Database& database = STADM.getDatabase();
   Pin& pin = database.get_pin_map()[pin_name];
-  if (database.get_instance_map().count(pin.get_instance_name()) > 0
-      && database.get_instance_map()[pin.get_instance_name()].get_is_sequential()) {
+  if (database.get_instance_map().count(pin.get_instance_name()) > 0 && database.get_instance_map()[pin.get_instance_name()].get_is_sequential()) {
     return;
   }
   PowerActivity activity = getOutputActivity(pin_name);
@@ -403,10 +401,64 @@ PowerActivity PowerPropagator::getOutputActivity(std::string& pin_name)
     std::map<std::string, PowerActivity> input_activity_map = getInputActivityMap(instance);
     PowerActivity activity = timing_cell_port.get_function_expression().evaluate_activity(input_activity_map);
     if (activity.get_is_valid()) {
+      limitDataTransitionDensity(pin_name, activity);
       return normalizeConstantActivity(activity);
     }
   }
-  return getFallbackInputActivity(pin_name);
+  PowerActivity activity = getFallbackInputActivity(pin_name);
+  limitDataTransitionDensity(pin_name, activity);
+  return activity;
+}
+
+void PowerPropagator::limitDataTransitionDensity(std::string& pin_name, PowerActivity& activity)
+{
+  if (!activity.get_is_valid() || activity.get_origin() == PowerActivityOrigin::kClock || activity.get_origin() == PowerActivityOrigin::kVcd
+      || activity.get_origin() == PowerActivityOrigin::kConstant) {
+    return;
+  }
+
+  Database& database = STADM.getDatabase();
+  if (database.get_timing_point_map().count(pin_name) > 0 && database.get_timing_point_map()[pin_name].get_is_clock_point()) {
+    return;
+  }
+
+  double minimum_clock_period = getMinimumClockPeriod();
+  if (minimum_clock_period <= STA_ERROR) {
+    return;
+  }
+
+  double probability = activity.get_static_probability();
+  double default_transition_density = 0.1 / minimum_clock_period;
+  double probability_limited_transition_density = 2.0 * probability * (1.0 - probability) / minimum_clock_period;
+  double maximum_transition_density = std::min(default_transition_density, probability_limited_transition_density);
+  double transition_density = activity.get_transition_density();
+  if (maximum_transition_density <= STA_ERROR) {
+    activity.set_transition_density(0.0);
+    return;
+  }
+  if (transition_density <= maximum_transition_density) {
+    return;
+  }
+
+  double density_scale = maximum_transition_density / transition_density;
+  activity.set_rise_transition_density(activity.get_rise_transition_density() * density_scale);
+  activity.set_fall_transition_density(activity.get_fall_transition_density() * density_scale);
+}
+
+double PowerPropagator::getMinimumClockPeriod()
+{
+  Database& database = STADM.getDatabase();
+  double minimum_clock_period = 0.0;
+  for (std::pair<const std::string, TimingClock>& clock_pair : database.get_timing_constraint().get_clock_map()) {
+    double period = clock_pair.second.get_period();
+    if (period <= STA_ERROR) {
+      continue;
+    }
+    if (minimum_clock_period <= STA_ERROR || period < minimum_clock_period) {
+      minimum_clock_period = period;
+    }
+  }
+  return minimum_clock_period;
 }
 
 PowerActivity PowerPropagator::normalizeConstantActivity(PowerActivity activity)
@@ -489,9 +541,10 @@ PowerActivity PowerPropagator::getSequentialOutputActivity(Instance& instance)
   }
   PowerActivity output_activity = data_activity;
   PowerActivity clock_activity = getPinActivity(instance.get_clock_pin_name());
-  if (clock_activity.get_is_valid() && data_activity.get_transition_density() > clock_activity.get_transition_density() / 2.0) {
+  double active_clock_transition_density = clock_activity.get_transition_density() / 2.0;
+  if (clock_activity.get_is_valid() && data_activity.get_transition_density() > active_clock_transition_density) {
     double probability = data_activity.get_static_probability();
-    output_activity.set_transition_density(2.0 * probability * (1.0 - probability) * clock_activity.get_transition_density());
+    output_activity.set_transition_density(2.0 * probability * (1.0 - probability) * active_clock_transition_density);
   }
   output_activity.set_origin(PowerActivityOrigin::kSequential);
   output_activity.set_is_valid(true);

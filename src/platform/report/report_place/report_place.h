@@ -17,7 +17,7 @@
 #pragma once
 
 // #include "utility/logger/Logger.hpp"
-#include <boost/gil/extension/io/bmp.hpp>
+// #include <boost/gil/extension/io/bmp.hpp>
 #include <boost/gil/typedefs.hpp>
 
 #include "IdbInstance.h"

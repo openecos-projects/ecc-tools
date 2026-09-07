@@ -20,12 +20,7 @@
  */
 #include "reader/SpefReader.hh"
 
-#include <cctype>
-#include <cstdlib>
-#include <optional>
-#include <unordered_map>
-#include <utility>
-
+#include "RCXHeader.hpp"
 #include "SpefParser.hh"
 #include "utils/SpefUnit.hh"
 
@@ -52,16 +47,13 @@ auto directionName(spef::ConnectionDirection direction) -> std::string
 
 auto nameMapIndex(const std::string& name) -> std::optional<Size>
 {
-  if (name.size() < 2
-      || name.front() != '*'
-      || !std::isdigit(static_cast<unsigned char>(name[1]))) {
+  if (name.size() < 2 || name.front() != '*' || !std::isdigit(static_cast<unsigned char>(name[1]))) {
     return std::nullopt;
   }
 
   const Size begin = 1;
   const Size colon = name.find(':', begin);
-  return static_cast<Size>(
-      std::strtoull(name.substr(begin, colon - begin).c_str(), nullptr, 10));
+  return static_cast<Size>(std::strtoull(name.substr(begin, colon - begin).c_str(), nullptr, 10));
 }
 
 }  // namespace
@@ -69,10 +61,7 @@ auto nameMapIndex(const std::string& name) -> std::optional<Size>
 class NameExpander
 {
  public:
-  explicit NameExpander(const spef::Exchange& exchange) : _exchange(exchange)
-  {
-    _expanded_base_names.reserve(exchange.index_to_name_map.size());
-  }
+  explicit NameExpander(const spef::Exchange& exchange) : _exchange(exchange) { _expanded_base_names.reserve(exchange.index_to_name_map.size()); }
 
   auto expand(const std::string& name) -> std::string
   {
@@ -82,8 +71,7 @@ class NameExpander
 
     const Size begin = 1;
     const Size colon = name.find(':', begin);
-    const Size index = static_cast<Size>(
-        std::strtoull(name.substr(begin, colon - begin).c_str(), nullptr, 10));
+    const Size index = static_cast<Size>(std::strtoull(name.substr(begin, colon - begin).c_str(), nullptr, 10));
     const std::string* base_name = get_expanded_base_name(index);
     if (base_name == nullptr) {
       return name;
@@ -102,9 +90,7 @@ class NameExpander
  private:
   static auto startsWithNameIndex(const std::string& name) -> bool
   {
-    return name.size() >= 2
-           && name.front() == '*'
-           && std::isdigit(static_cast<unsigned char>(name[1]));
+    return name.size() >= 2 && name.front() == '*' && std::isdigit(static_cast<unsigned char>(name[1]));
   }
 
   auto get_expanded_base_name(Size index) -> const std::string*
@@ -158,8 +144,7 @@ void SpefReader::buildNetCouplingCaps(Data& data) const
   }
 }
 
-auto SpefReader::read(const std::string& path,
-                      Data& data) const -> bool
+auto SpefReader::read(const std::string& path, Data& data) const -> bool
 {
   spef::SpefReader reader;
   if (!reader.read(path)) {
@@ -228,8 +213,7 @@ auto SpefReader::read(const std::string& path,
       } else {
         std::string node2 = name_expander.expand(cap.node2);
         data.index.rememberNodeNet(node1, net.name);
-        net.node_coupling_caps[NodePair::ordered(std::move(node1), std::move(node2))]
-            += cap.res_or_cap * cap_scale;
+        net.node_coupling_caps[NodePair::ordered(std::move(node1), std::move(node2))] += cap.res_or_cap * cap_scale;
       }
     }
 
@@ -241,10 +225,7 @@ auto SpefReader::read(const std::string& path,
       std::string node2 = name_expander.expand(res.node2);
       data.index.rememberNodeNet(node1, net.name);
       data.index.rememberNodeNet(node2, net.name);
-      net.resistors.push_back(Resistor{
-          std::move(node1),
-          std::move(node2),
-          res.res_or_cap * res_scale});
+      net.resistors.push_back(Resistor{std::move(node1), std::move(node2), res.res_or_cap * res_scale});
     }
 
     data.addOrAssignNet(std::move(net));

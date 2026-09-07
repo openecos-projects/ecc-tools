@@ -115,7 +115,7 @@ auto FinalizeSelectedHTreeSolution(HTreeSynthesisState& state, const HTreeSelect
     return false;
   }
 
-  BuildEmbedding(wrapper, result, segment_pattern_library, config);
+  BuildEmbedding(wrapper, result, segment_pattern_library, selected_solution.sink_load_region_legality);
   result.summary.success = result.summary.failure_reason.empty() && result.output.best_char.has_value() && result.output.best_pattern.has_value()
                            && result.output.root_output_pin != nullptr && result.output.root_net != nullptr;
   if (result.summary.success && config.enable_root_driver_sizing) {
@@ -148,6 +148,11 @@ auto FinalizeSelectedHTreeSolution(HTreeSynthesisState& state, const HTreeSelect
                   {"Feasible Solutions", ToLogTableCell(selected_summary.feasible_solution_count)},
                   {"Feasible Frontier Entries", ToLogTableCell(selected_summary.feasible_frontier_entry_count)},
                   {"Final Frontier", ToLogTableCell(selected_summary.final_frontier_count)},
+                  {"Split Groups Planned", ToLogTableCell(selected_summary.split_group_count)},
+                  {"Split Extra Buffers Planned", ToLogTableCell(selected_summary.split_extra_buffer_count)},
+                  {"Split Local Depth", ToLogTableCell(selected_summary.split_local_depth)},
+                  {"Split Triggered By Fanout", ToLogTableCell(selected_summary.split_triggered_by_fanout)},
+                  {"Split Triggered By Capacitance", ToLogTableCell(selected_summary.split_triggered_by_capacitance)},
                   {"Delay (ns)", ToLogTableCell(result.output.best_char->get_delay())},
                   {"Power (W)", ToLogTableCell(result.output.best_char->get_power())},
                   {"Boundary Relaxed", ToLogTableCell(result.summary.used_boundary_relaxation)}});

@@ -29,6 +29,7 @@ bool initTechLef(const std::string& techlef_path);
 bool initLef(const std::vector<std::string>& lef_paths);
 bool initDef(const std::string& def_path);
 bool initVerilog(const std::string& verilog_path, const std::string& top_module);
+bool initLvsVerilog(const std::string& verilog_path, const std::string& top_module);
 bool initLib(const std::vector<std::string>& lib_paths);
 bool initSdc(const std::string& sdc_path);
 bool initSpef(const std::string& spef_path);

@@ -144,6 +144,7 @@ void IdbBuilder::log()
 
 IdbDefService* IdbBuilder::buildDef(string file)
 {
+  _last_def_read_error.reset();
   if (_def_service != nullptr) {
     delete _def_service;
     _def_service = nullptr;
@@ -161,7 +162,12 @@ IdbDefService* IdbBuilder::buildDef(string file)
 
   std::shared_ptr<DefRead> def_read = std::make_shared<DefRead>(_def_service);
   if (const auto ret = def_read->createDb(file.c_str()); !ret) {
-    ECCLOG.error(ecc::Loc::current(), "Def file read failed...");
+    if (const auto* error = def_read->get_last_error()) {
+      _last_def_read_error = *error;
+    }
+    delete _def_service;
+    _def_service = nullptr;
+    return nullptr;
   }
 
   buildNet();
@@ -173,6 +179,7 @@ IdbDefService* IdbBuilder::buildDef(string file)
 
 IdbDefService* IdbBuilder::buildDefGzip(string gzip_file)
 {
+  _last_def_read_error.reset();
   if (_def_service != nullptr) {
     delete _def_service;
     _def_service = nullptr;
@@ -190,7 +197,12 @@ IdbDefService* IdbBuilder::buildDefGzip(string gzip_file)
 
   std::shared_ptr<DefRead> def_read = std::make_shared<DefRead>(_def_service);
   if (const auto ret = def_read->createDbGzip(gzip_file.c_str()); !ret) {
-    ECCLOG.error(ecc::Loc::current(), "Def file read failed...");
+    if (const auto* error = def_read->get_last_error()) {
+      _last_def_read_error = *error;
+    }
+    delete _def_service;
+    _def_service = nullptr;
+    return nullptr;
   }
 
   buildNet();
@@ -263,6 +275,30 @@ IdbDefService* IdbBuilder::buildVerilog(string file, std::string top_module_name
   return _def_service;
 }
 
+IdbDefService* IdbBuilder::addVerilog(string file, std::string top_module_name)
+{
+  IdbLayout* layout = _lef_service->get_layout();
+  auto def_service = new IdbDefService(layout);
+
+  if (IdbDefServiceResult::kServiceFailed == def_service->VerilogFileInit(file.c_str())) {
+    ECCLOG.warn(ecc::Loc::current(), "Read Verilog file failed...");
+    delete def_service;
+    return nullptr;
+  } else {
+    ECCLOG.info(ecc::Loc::current(), "Read Verilog file success : ", file);
+  }
+
+  std::shared_ptr<VerilogRead> verilog_read = std::make_shared<VerilogRead>(def_service);
+  const bool parsed = top_module_name.empty() ? verilog_read->createDbAutoTop(file) : verilog_read->createDb(file, top_module_name);
+  if (!parsed) {
+    ECCLOG.warn(ecc::Loc::current(), "Read Verilog file failed: ", file);
+    delete def_service;
+    return nullptr;
+  }
+
+  return def_service;
+}
+
 void IdbBuilder::updateDefUnit(){
   IdbLayout* layout = _def_service->get_layout();
   IdbDesign* design = _def_service->get_design();
@@ -298,6 +334,7 @@ void IdbBuilder::updateDefUnit(){
 
 IdbDefService* IdbBuilder::buildDefFloorplan(string file)
 {
+  _last_def_read_error.reset();
   if (_def_service != nullptr) {
     delete _def_service;
     _def_service = nullptr;
@@ -314,7 +351,14 @@ IdbDefService* IdbBuilder::buildDefFloorplan(string file)
   }
 
   std::shared_ptr<DefRead> def_read = std::make_shared<DefRead>(_def_service);
-  def_read->createFloorplanDb(file.c_str());
+  if (const auto ret = def_read->createFloorplanDb(file.c_str()); !ret) {
+    if (const auto* error = def_read->get_last_error()) {
+      _last_def_read_error = *error;
+    }
+    delete _def_service;
+    _def_service = nullptr;
+    return nullptr;
+  }
   //   def_read->createDb(file.c_str());
 
   return _def_service;

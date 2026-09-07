@@ -25,11 +25,19 @@
 
 #include <chrono>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
 
 namespace icts {
+
+struct MemoryReleaseStats
+{
+  bool supported = false;
+  double rss_before_mb = 0.0;
+  double rss_after_mb = 0.0;
+};
 
 class Utility final
 {
@@ -37,6 +45,8 @@ class Utility final
   Utility() = delete;
 
   static auto getElapsedSeconds(std::chrono::steady_clock::time_point start_time) -> double;
+  static auto currentRssMb() -> std::optional<double>;
+  static auto releaseMemory() -> MemoryReleaseStats;
 
   template <typename... Args>
   static auto getString(Args&&... args) -> std::string

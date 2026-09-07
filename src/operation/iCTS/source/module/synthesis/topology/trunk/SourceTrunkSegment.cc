@@ -34,6 +34,7 @@
 
 #include "BufferingPattern.hh"
 #include "Inst.hh"
+#include "LogTable.hh"
 #include "Logger.hh"
 #include "Net.hh"
 #include "PatternId.hh"
@@ -49,9 +50,7 @@
 #include "synthesis/htree/constraint/Constraint.hh"
 #include "synthesis/htree/embedding/BufferPortTable.hh"
 #include "synthesis/htree/embedding/Embedding.hh"
-#include "synthesis/htree/segment_pruning/SegmentFrontierCatalog.hh"
-#include "synthesis/htree/segment_pruning/SegmentPatternLibrary.hh"
-#include "synthesis/htree/segment_pruning/SegmentPruning.hh"
+#include "synthesis/topology/trunk/SourceTrunkLabelSolver.hh"
 
 namespace icts {
 namespace {
@@ -121,8 +120,16 @@ auto CreateBufferInstance(SourceTrunkSegment::Build& result, const std::string& 
   result.output.inserted_pins.push_back(std::move(output_pin));
 
   inst_ptr->add_pin(input_pin_ptr);
-  inst_ptr->insertDriverPin(output_pin_ptr);
+  inst_ptr->add_pin(output_pin_ptr);
   result.output.inserted_insts.push_back(std::move(inst));
+  result.output.propagation_arcs.push_back(ClockPropagationArc{
+      .inst = inst_ptr,
+      .input_pin = input_pin_ptr,
+      .output_pin = output_pin_ptr,
+      .kind = ClockPropagationKind::kBuffer,
+      .origin = ClockPropagationOrigin::kSynthesized,
+      .path_buffer_weight = 1,
+  });
 
   return {input_pin_ptr, output_pin_ptr};
 }
@@ -355,9 +362,73 @@ auto SourceTrunkSegment::build(const Input& input, const Config& config) -> Buil
     return result;
   }
 
+  const std::vector<double> requested_lengths_um{result.summary.length_um};
+  CharacterizationLibrary direct_char_library;
+  const auto direct_ensure = direct_char_library.ensure(input.characterization_input, ConfigureCharConfig(input.characterization_config, requested_lengths_um));
+  std::string direct_failure_reason = direct_ensure.failure_reason;
+  if (direct_ensure.success) {
+    const auto& direct_builder = direct_char_library.getCharBuilder();
+    const unsigned direct_length_idx = direct_builder.get_length_lattice().coveringIndex(result.summary.length_um);
+    const unsigned direct_required_load_cap_idx = htree::CoveringBoundaryIndex(input.required_load_cap_pf, direct_builder.get_cap_lattice()).value_or(0U);
+    const unsigned direct_source_drive_cap_idx = htree::CoveringBoundaryIndex(input.source_drive_cap_pf, direct_builder.get_cap_lattice()).value_or(0U);
+    std::optional<unsigned> direct_min_input_slew_idx = std::nullopt;
+    if (config.min_input_slew_ns.has_value()) {
+      direct_min_input_slew_idx = htree::CoveringBoundaryIndex(*config.min_input_slew_ns, direct_builder.get_slew_lattice());
+    }
+
+    if (direct_length_idx == 0U || direct_required_load_cap_idx == 0U || direct_source_drive_cap_idx == 0U
+        || direct_required_load_cap_idx > direct_builder.get_cap_steps()) {
+      direct_failure_reason = "direct_characterization_boundary_indices_unavailable";
+    } else {
+      auto direct_strict_entries
+          = FilterSegmentEntries(direct_builder.get_segment_chars(), direct_required_load_cap_idx, direct_source_drive_cap_idx, direct_min_input_slew_idx);
+      auto direct_best_char = SelectBestSegmentEntry(direct_strict_entries);
+      std::vector<SegmentChar> direct_relaxed_entries;
+      bool direct_used_boundary_relaxation = false;
+      if (!direct_best_char.has_value() && direct_min_input_slew_idx.has_value()) {
+        direct_relaxed_entries
+            = FilterSegmentEntries(direct_builder.get_segment_chars(), direct_required_load_cap_idx, direct_source_drive_cap_idx, std::nullopt);
+        direct_best_char = SelectBestSegmentEntry(direct_relaxed_entries);
+        direct_used_boundary_relaxation = direct_best_char.has_value();
+      }
+
+      EmitLogTable(Loc::current(), "Source Trunk Direct Characterization", {"Metric", "Value"},
+                   {{"Length (um)", ToLogTableCell(result.summary.length_um)},
+                    {"Length Unit (um)", ToLogTableCell(direct_builder.get_wirelength_unit_um())},
+                    {"Length Index", ToLogTableCell(direct_length_idx)},
+                    {"Segment Characters", ToLogTableCell(direct_builder.get_segment_chars().size())},
+                    {"Strict Candidates", ToLogTableCell(direct_strict_entries.size())},
+                    {"Relaxed Candidates", ToLogTableCell(direct_relaxed_entries.size())},
+                    {"Status", direct_best_char.has_value() ? "finished" : "no_legal_candidate"}});
+      if (direct_best_char.has_value()) {
+        const auto direct_pattern_iter = std::ranges::find_if(direct_builder.get_buffering_patterns(), [&](const BufferingPattern& pattern) -> bool {
+          return pattern.get_pattern_id() == direct_best_char->get_pattern_id();
+        });
+        if (direct_pattern_iter == direct_builder.get_buffering_patterns().end()) {
+          result.summary.failure_reason = "missing_direct_characterization_pattern";
+          return result;
+        }
+
+        result.summary.length_idx = direct_length_idx;
+        result.summary.required_load_cap_idx = direct_required_load_cap_idx;
+        result.summary.source_drive_cap_idx = direct_source_drive_cap_idx;
+        result.summary.min_input_slew_idx = direct_min_input_slew_idx;
+        result.summary.strict_candidate_count = direct_strict_entries.size();
+        result.summary.relaxed_candidate_count = direct_relaxed_entries.size();
+        result.summary.used_boundary_relaxation = direct_used_boundary_relaxation;
+        result.summary.boundary_relaxation_reason = direct_used_boundary_relaxation ? "dropped_soft_input_slew_boundary" : "";
+        result.output.best_char = *direct_best_char;
+        result.summary.success = BuildSourceTrunkSegmentObjects(result, source_net, source, sink, *direct_pattern_iter, input);
+        return result;
+      }
+      direct_failure_reason = "direct_characterization_no_legal_candidate";
+    }
+  }
+  CTSLOG.warn(Loc::current(), "SourceTrunkSegment: direct target-length characterization unavailable; using label-DP fallback: ",
+              direct_failure_reason.empty() ? "unknown_direct_characterization_failure" : direct_failure_reason);
+
   CharacterizationLibrary local_char_library;
   auto* char_library = input.characterization_library == nullptr ? &local_char_library : input.characterization_library;
-  const std::vector<double> requested_lengths_um{result.summary.length_um};
   if (!char_library->isReady()) {
     const auto ensure_result = char_library->ensure(input.characterization_input, ConfigureCharConfig(input.characterization_config, requested_lengths_um));
     if (!ensure_result.success) {
@@ -387,47 +458,56 @@ auto SourceTrunkSegment::build(const Input& input, const Config& config) -> Buil
     return result;
   }
 
-  htree::BufferPatternLibrary pattern_library(*input.wrapper);
-  htree::SegmentFrontierCatalog segment_frontier_catalog;
-  const std::vector<SegmentChar>* all_frontier_entries = nullptr;
-  for (const auto& pattern : char_builder.get_buffering_patterns()) {
-    pattern_library.add(pattern);
-  }
-  const htree::RequiredSegmentFrontiers required_segment_frontiers{
-      .required_length_indices = {result.summary.length_idx},
-      .required_kinds = htree::SegmentFrontierKindSet::allOnly(),
-  };
-  segment_frontier_catalog = htree::SynthesizeSegmentFrontiers(char_builder.get_segment_chars(), pattern_library, required_segment_frontiers);
-  all_frontier_entries = segment_frontier_catalog.find(result.summary.length_idx, htree::SegmentFrontierKind::kAll);
-  if (all_frontier_entries == nullptr || all_frontier_entries->empty()) {
-    result.summary.failure_reason = "missing_required_segment_frontier";
-    return result;
-  }
-
-  auto strict_entries = FilterSegmentEntries(*all_frontier_entries, result.summary.required_load_cap_idx, result.summary.source_drive_cap_idx,
-                                             result.summary.min_input_slew_idx);
-  result.summary.strict_candidate_count = strict_entries.size();
-  result.output.best_char = SelectBestSegmentEntry(strict_entries);
-  if (!result.output.best_char.has_value() && result.summary.min_input_slew_idx.has_value()) {
-    auto relaxed_entries = FilterSegmentEntries(*all_frontier_entries, result.summary.required_load_cap_idx, result.summary.source_drive_cap_idx, std::nullopt);
-    result.summary.relaxed_candidate_count = relaxed_entries.size();
-    result.output.best_char = SelectBestSegmentEntry(relaxed_entries);
-    if (result.output.best_char.has_value()) {
+  auto label_build = source_trunk::SolveLabels(source_trunk::LabelSolverInput{
+      .primitive_chars = &char_builder.get_segment_chars(),
+      .primitive_patterns = &char_builder.get_buffering_patterns(),
+      .target_length_idx = result.summary.length_idx,
+      .required_load_cap_idx = result.summary.required_load_cap_idx,
+      .source_drive_cap_idx = result.summary.source_drive_cap_idx,
+      .min_input_slew_idx = result.summary.min_input_slew_idx,
+  });
+  result.summary.strict_candidate_count = label_build.summary.final_candidate_count;
+  if (!label_build.ok() && label_build.status == source_trunk::LabelSolverStatus::kNoLegalPath && result.summary.min_input_slew_idx.has_value()) {
+    label_build = source_trunk::SolveLabels(source_trunk::LabelSolverInput{
+        .primitive_chars = &char_builder.get_segment_chars(),
+        .primitive_patterns = &char_builder.get_buffering_patterns(),
+        .target_length_idx = result.summary.length_idx,
+        .required_load_cap_idx = result.summary.required_load_cap_idx,
+        .source_drive_cap_idx = result.summary.source_drive_cap_idx,
+        .min_input_slew_idx = std::nullopt,
+    });
+    result.summary.relaxed_candidate_count = label_build.summary.final_candidate_count;
+    if (label_build.ok()) {
       result.summary.used_boundary_relaxation = true;
       result.summary.boundary_relaxation_reason = "dropped_soft_input_slew_boundary";
     }
   }
-  if (!result.output.best_char.has_value()) {
-    result.summary.failure_reason = "no_hard_boundary_legal_segment_candidate";
+
+  result.summary.label_visited_length_count = label_build.summary.visited_length_count;
+  result.summary.label_visited_state_count = label_build.summary.visited_state_count;
+  result.summary.label_generated_count = label_build.summary.generated_label_count;
+  result.summary.label_retained_count = label_build.summary.retained_label_count;
+  result.summary.label_final_candidate_count = label_build.summary.final_candidate_count;
+  result.summary.label_final_pareto_count = label_build.summary.final_pareto_count;
+  result.summary.label_selected_primitive_count = label_build.summary.selected_primitive_count;
+  EmitLogTable(Loc::current(), "Source Trunk Label DP", {"Metric", "Value"},
+               {{"Target Length Index", ToLogTableCell(result.summary.length_idx)},
+                {"Visited Lengths", ToLogTableCell(result.summary.label_visited_length_count)},
+                {"Visited States", ToLogTableCell(result.summary.label_visited_state_count)},
+                {"Generated Labels", ToLogTableCell(result.summary.label_generated_count)},
+                {"Retained Labels", ToLogTableCell(result.summary.label_retained_count)},
+                {"Final Candidates", ToLogTableCell(result.summary.label_final_candidate_count)},
+                {"Final Pareto", ToLogTableCell(result.summary.label_final_pareto_count)},
+                {"Selected Primitives", ToLogTableCell(result.summary.label_selected_primitive_count)},
+                {"Status", label_build.ok() ? "finished" : "failed"},
+                {"Failure Reason", label_build.failure_reason.empty() ? "n/a" : label_build.failure_reason}});
+  if (!label_build.ok() || !label_build.best_char.has_value() || !label_build.best_pattern.has_value()) {
+    result.summary.failure_reason = label_build.failure_reason.empty() ? "source_trunk_label_no_legal_path" : label_build.failure_reason;
     return result;
   }
 
-  const auto* selected_pattern = pattern_library.find(result.output.best_char->get_pattern_id());
-  if (selected_pattern == nullptr) {
-    result.summary.failure_reason = "missing_selected_segment_pattern";
-    return result;
-  }
-  result.summary.success = BuildSourceTrunkSegmentObjects(result, source_net, source, sink, *selected_pattern, input);
+  result.output.best_char = *label_build.best_char;
+  result.summary.success = BuildSourceTrunkSegmentObjects(result, source_net, source, sink, *label_build.best_pattern, input);
   return result;
 }
 

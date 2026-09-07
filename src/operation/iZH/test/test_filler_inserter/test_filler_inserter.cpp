@@ -26,9 +26,8 @@ int main()
   fi_row.blockSiteRange(4, 5);
   fi_row.buildAvailableSegmentList();
   std::vector<izh::FISegment>& available_segment_list = fi_row.get_available_segment_list();
-  if (available_segment_list.size() != 2 || available_segment_list[0].get_begin_site_idx() != 2
-      || available_segment_list[0].get_end_site_idx() != 3 || available_segment_list[1].get_begin_site_idx() != 6
-      || available_segment_list[1].get_end_site_idx() != 7) {
+  if (available_segment_list.size() != 2 || available_segment_list[0].get_begin_site_idx() != 2 || available_segment_list[0].get_end_site_idx() != 3
+      || available_segment_list[1].get_begin_site_idx() != 6 || available_segment_list[1].get_end_site_idx() != 7) {
     return 1;
   }
 

@@ -33,7 +33,7 @@
 
 namespace idm {
 /**
- * @Brief : calculate total wire length for all net list
+ * @Brief : calculate the maximum load count across all nets
  * @return int64_t
  */
 uint64_t DataManager::maxFanout()
@@ -231,14 +231,7 @@ bool DataManager::disconnectNet(IdbNet* net)
     return false;
   }
 
-  std::vector<IdbPin*> pin_list;
-  auto& io_pins = net->get_io_pins()->get_pin_list();
-  auto& inst_pins = net->get_instance_pin_list()->get_pin_list();
-  pin_list.insert(pin_list.end(), io_pins.begin(), io_pins.end());
-  pin_list.insert(pin_list.end(), inst_pins.begin(), inst_pins.end());
-  for (auto* pin : pin_list) {
-    _design->disconnectPinFromNet(pin);
-  }
+  _design->disconnectAllPinsFromNet(net);
 
   return true;
 }

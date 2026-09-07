@@ -20,12 +20,7 @@
  */
 #pragma once
 
-#include <functional>
-#include <optional>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
+#include "RCXHeader.hpp"
 #include "Types.hh"
 
 namespace ircx {
@@ -36,8 +31,7 @@ struct NodePair
   std::string first;
   std::string second;
 
-  static auto ordered(std::string node1,
-                      std::string node2) -> NodePair
+  static auto ordered(std::string node1, std::string node2) -> NodePair
   {
     if (node2 < node1) {
       std::swap(node1, node2);
@@ -45,8 +39,7 @@ struct NodePair
     return NodePair{std::move(node1), std::move(node2)};
   }
 
-  friend auto operator<(const NodePair& lhs,
-                        const NodePair& rhs) -> bool
+  friend auto operator<(const NodePair& lhs, const NodePair& rhs) -> bool
   {
     if (lhs.first != rhs.first) {
       return lhs.first < rhs.first;
@@ -54,10 +47,7 @@ struct NodePair
     return lhs.second < rhs.second;
   }
 
-  friend auto operator==(const NodePair& lhs, const NodePair& rhs) -> bool
-  {
-    return lhs.first == rhs.first && lhs.second == rhs.second;
-  }
+  friend auto operator==(const NodePair& lhs, const NodePair& rhs) -> bool { return lhs.first == rhs.first && lhs.second == rhs.second; }
 };
 
 struct NodePairHash
@@ -66,11 +56,7 @@ struct NodePairHash
   {
     const Size first_hash = std::hash<std::string>{}(pair.first);
     const Size second_hash = std::hash<std::string>{}(pair.second);
-    return first_hash
-           ^ (second_hash
-              + 0x9e3779b97f4a7c15ULL
-              + (first_hash << 6)
-              + (first_hash >> 2));
+    return first_hash ^ (second_hash + 0x9e3779b97f4a7c15ULL + (first_hash << 6) + (first_hash >> 2));
   }
 };
 
@@ -123,25 +109,20 @@ struct DataIndex
     node_to_net.reserve(net_count * 4);
   }
 
-  void rememberNodeNet(const std::string& node_name,
-                       const std::string& net_name)
+  void rememberNodeNet(const std::string& node_name, const std::string& net_name)
   {
     if (!node_name.empty() && !net_name.empty()) {
       node_to_net.try_emplace(node_name, net_name);
     }
   }
 
-  void registerNet(const std::string& net_name,
-                   Size net_index)
+  void registerNet(const std::string& net_name, Size net_index)
   {
     net_order.try_emplace(net_name, net_order.size());
     net_by_name[net_name] = net_index;
   }
 
-  auto containsNet(const std::string& net_name) const -> bool
-  {
-    return net_by_name.contains(net_name);
-  }
+  auto containsNet(const std::string& net_name) const -> bool { return net_by_name.contains(net_name); }
 
   auto orderOf(const std::string& net_name) const -> Size
   {
@@ -191,8 +172,7 @@ struct CouplingCapStore
     index_by_pair.reserve(count);
   }
 
-  void add(NodePair pair,
-           F64 capacitance)
+  void add(NodePair pair, F64 capacitance)
   {
     const auto [it, inserted] = index_by_pair.emplace(pair, entries.size());
     if (inserted) {

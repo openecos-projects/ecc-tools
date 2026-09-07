@@ -119,6 +119,7 @@ auto collectIdbClockNetPins(idb::IdbNet* idb_net) -> IdbClockNetPins
     }
   }
 
+  std::vector<idb::IdbPin*> driver_candidates;
   for (auto* idb_pin : all_pins) {
     auto* idb_term = idb_pin == nullptr ? nullptr : idb_pin->get_term();
     if (idb_term == nullptr) {
@@ -126,34 +127,29 @@ auto collectIdbClockNetPins(idb::IdbNet* idb_net) -> IdbClockNetPins
     }
     if (!idb_pin->is_io_pin()
         && (idb_term->get_direction() == idb::IdbConnectDirection::kOutput || idb_term->get_direction() == idb::IdbConnectDirection::kOutputTriState)) {
-      net_pins.driver = idb_pin;
-      break;
+      driver_candidates.push_back(idb_pin);
     }
   }
 
-  if (net_pins.driver == nullptr) {
+  if (driver_candidates.empty()) {
     for (auto* idb_pin : all_pins) {
       auto* idb_term = idb_pin == nullptr ? nullptr : idb_pin->get_term();
       if (idb_term != nullptr && idb_pin->is_io_pin() && idb_term->get_direction() == idb::IdbConnectDirection::kInput) {
-        net_pins.driver = idb_pin;
-        break;
+        driver_candidates.push_back(idb_pin);
       }
     }
   }
 
-  if (net_pins.driver == nullptr) {
+  if (driver_candidates.empty()) {
     for (auto* idb_pin : all_pins) {
       auto* idb_term = idb_pin == nullptr ? nullptr : idb_pin->get_term();
       if (idb_term != nullptr && idb_pin->is_io_pin() && idb_term->get_direction() == idb::IdbConnectDirection::kInOut) {
-        net_pins.driver = idb_pin;
-        break;
+        driver_candidates.push_back(idb_pin);
       }
     }
   }
 
-  if (net_pins.driver == nullptr && !all_pins.empty()) {
-    net_pins.driver = all_pins.front();
-  }
+  net_pins.driver = driver_candidates.size() == 1U ? driver_candidates.front() : nullptr;
 
   for (auto* idb_pin : all_pins) {
     if (idb_pin != net_pins.driver) {
@@ -606,6 +602,8 @@ class Wrapper::CtsClockReader
       Clock* clock = nullptr;
       if (clock_target.preclustered_sink_reuse) {
         clock = buildPreclusteredClockFromTraceTarget(clock_target, idb_net);
+      } else if (!clock_target.terminal_net_names.empty() || !clock_target.propagation_steps.empty()) {
+        clock = buildTracedClockFromTraceTarget(clock_target, idb_net);
       } else {
         clock = buildClockFromIdbNet(clock_target.clock_name, clock_target.clock_net_name, idb_net);
       }
@@ -723,11 +721,7 @@ class Wrapper::CtsClockReader
       }
 
       if (cts_inst != nullptr) {
-        if (idb_pin == idb_net_pins.driver) {
-          cts_inst->insertDriverPin(cts_pin);
-        } else {
-          cts_inst->add_pin(cts_pin);
-        }
+        cts_inst->add_pin(cts_pin);
       }
       if (idb_pin == idb_net_pins.driver) {
         clock->set_clock_source(cts_pin);
@@ -738,6 +732,153 @@ class Wrapper::CtsClockReader
     }
     clock->set_loads(cts_loads);
     cts_net->set_loads(cts_loads);
+    return clock;
+  }
+
+  auto buildTracedClockFromTraceTarget(const ClockTraceClockTarget& clock_target, idb::IdbNet* source_idb_net) -> Clock*
+  {
+    if (source_idb_net == nullptr || clock_target.terminal_net_names.empty()) {
+      return nullptr;
+    }
+
+    auto* clock = _design->makeClock(clock_target.clock_name, clock_target.clock_net_name);
+    if (clock == nullptr) {
+      return nullptr;
+    }
+    clock->set_clock_source(nullptr);
+    clock->set_clock_source_net(nullptr);
+    clock->set_preclustered_sink_reuse(false);
+    clock->clear_preclustered_anchor_input_net_names();
+    clock->clear_loads();
+    clock->clearMembership();
+
+    auto* idb_design = findIdbDesign();
+    auto* idb_net_list = idb_design == nullptr ? nullptr : idb_design->get_net_list();
+    if (idb_net_list == nullptr) {
+      return nullptr;
+    }
+    std::unordered_map<std::string, Net*> cts_net_by_name;
+    auto materialize_net = [&](const std::string& net_name) -> Net* {
+      if (const auto iter = cts_net_by_name.find(net_name); iter != cts_net_by_name.end()) {
+        return iter->second;
+      }
+      auto* idb_net = idb_net_list->find_net(net_name);
+      auto* cts_net = buildNetFromIdbNet(idb_net);
+      if (cts_net != nullptr) {
+        cts_net->set_driver(nullptr);
+        cts_net->set_loads({});
+        cts_net_by_name.emplace(net_name, cts_net);
+      }
+      return cts_net;
+    };
+    auto materialize_pin = [&](idb::IdbPin* idb_pin) -> Pin* {
+      if (idb_pin == nullptr) {
+        return nullptr;
+      }
+      Inst* cts_inst = nullptr;
+      if (auto* idb_inst = idb_pin->get_instance(); idb_inst != nullptr) {
+        cts_inst = buildInstFromIdbInst(idb_inst);
+        if (cts_inst == nullptr) {
+          return nullptr;
+        }
+      } else if (!idb_pin->is_io_pin()) {
+        return nullptr;
+      }
+      auto* cts_pin = buildOrFindPinFromIdbPin(idb_pin, cts_inst);
+      if (cts_pin != nullptr && cts_inst != nullptr) {
+        cts_inst->add_pin(cts_pin);
+      }
+      return cts_pin;
+    };
+
+    auto* source_cts_net = materialize_net(source_idb_net->get_net_name());
+    const auto source_pins = collectIdbClockNetPins(source_idb_net);
+    auto* source_pin = materialize_pin(source_pins.driver);
+    if (source_cts_net == nullptr || source_pin == nullptr) {
+      return nullptr;
+    }
+    source_pin->set_net(source_cts_net);
+    source_cts_net->set_driver(source_pin);
+    clock->set_clock_source(source_pin);
+    clock->set_clock_source_net(source_cts_net);
+
+    std::unordered_set<Pin*> explicit_inputs;
+    for (const auto& step : clock_target.propagation_steps) {
+      auto* idb_inst = findIdbInstOrError(clock_target.clock_name, step.inst_name);
+      auto* input_idb_pin = findIdbInstPinOrError(clock_target.clock_name, idb_inst, step.input_pin_name);
+      auto* output_idb_pin = findIdbInstPinOrError(clock_target.clock_name, idb_inst, step.output_pin_name);
+      if ((!step.clock_name.empty() && step.clock_name != clock_target.clock_name) || idb_inst == nullptr || input_idb_pin == nullptr
+          || output_idb_pin == nullptr || input_idb_pin->get_net() == nullptr || output_idb_pin->get_net() == nullptr
+          || input_idb_pin->get_net()->get_net_name() != step.input_net_name || output_idb_pin->get_net()->get_net_name() != step.output_net_name) {
+        CTSLOG.warn(Loc::current(), "CTS clock read failed for clock \"", clock_target.clock_name,
+                    "\": propagation trace evidence no longer matches iDB for inst \"", step.inst_name, "\".");
+        return nullptr;
+      }
+      auto* input_net = materialize_net(step.input_net_name);
+      auto* output_net = materialize_net(step.output_net_name);
+      auto* input_pin = materialize_pin(input_idb_pin);
+      auto* output_pin = materialize_pin(output_idb_pin);
+      auto* cts_inst = _design->findInst(step.inst_name);
+      if (input_net == nullptr || output_net == nullptr || input_pin == nullptr || output_pin == nullptr || cts_inst == nullptr) {
+        return nullptr;
+      }
+      input_pin->set_net(input_net);
+      output_pin->set_net(output_net);
+      input_net->add_load(input_pin);
+      if (output_net->get_driver() != nullptr && output_net->get_driver() != output_pin) {
+        return nullptr;
+      }
+      output_net->set_driver(output_pin);
+      explicit_inputs.insert(input_pin);
+      if (input_net != source_cts_net) {
+        clock->add_net(input_net);
+      }
+      if (output_net != source_cts_net) {
+        clock->add_net(output_net);
+      }
+      const auto kind = step.kind == ClockTracePropagationKind::kBuffer ? ClockPropagationKind::kBuffer : ClockPropagationKind::kInverter;
+      const auto arc_status = clock->addPropagationArc({.inst = cts_inst,
+                                                        .input_pin = input_pin,
+                                                        .output_pin = output_pin,
+                                                        .kind = kind,
+                                                        .origin = ClockPropagationOrigin::kTracedInput,
+                                                        .path_buffer_weight = 1});
+      if (!arc_status.ok()) {
+        CTSLOG.warn(Loc::current(), "CTS clock read failed for clock \"", clock_target.clock_name, "\": ", arc_status.message, ".");
+        return nullptr;
+      }
+    }
+
+    std::vector<Pin*> terminal_loads;
+    for (const auto& terminal_net_name : clock_target.terminal_net_names) {
+      auto* idb_net = idb_net_list->find_net(terminal_net_name);
+      auto* cts_net = materialize_net(terminal_net_name);
+      if (idb_net == nullptr || cts_net == nullptr) {
+        return nullptr;
+      }
+      const auto pins = collectIdbClockNetPins(idb_net);
+      auto* driver = materialize_pin(pins.driver);
+      if (driver == nullptr || (cts_net->get_driver() != nullptr && cts_net->get_driver() != driver)) {
+        return nullptr;
+      }
+      driver->set_net(cts_net);
+      cts_net->set_driver(driver);
+      for (auto* idb_load : pins.loads) {
+        auto* load = materialize_pin(idb_load);
+        if (load == nullptr) {
+          return nullptr;
+        }
+        load->set_net(cts_net);
+        cts_net->add_load(load);
+        if (!explicit_inputs.contains(load)) {
+          terminal_loads.push_back(load);
+        }
+      }
+      if (cts_net != source_cts_net) {
+        clock->add_net(cts_net);
+      }
+    }
+    clock->set_loads(terminal_loads);
     return clock;
   }
 
@@ -787,7 +928,7 @@ class Wrapper::CtsClockReader
     }
     source_pin->set_net(cts_net);
     if (source_cts_inst != nullptr) {
-      source_cts_inst->insertDriverPin(source_pin);
+      source_cts_inst->add_pin(source_pin);
     }
     clock->set_clock_source(source_pin);
     cts_net->set_driver(source_pin);
@@ -817,7 +958,7 @@ class Wrapper::CtsClockReader
       }
       output_pin->set_net(nullptr);
       input_pin->set_net(cts_net);
-      cts_inst->insertDriverPin(output_pin);
+      cts_inst->add_pin(output_pin);
       cts_inst->add_pin(input_pin);
       cts_loads.push_back(input_pin);
       clock->add_preclustered_anchor_input_net_name(anchor.input_net_name);

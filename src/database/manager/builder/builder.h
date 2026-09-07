@@ -38,6 +38,7 @@
 #include <iostream>
 #include <list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -69,7 +70,8 @@ class IdbBuilder
   IdbDefService* buildDef(string file);
   IdbDefService* buildDefGzip(string gzip_file);
   IdbLefService* buildLef(vector<string>& files, bool b_techfile = false);
-  IdbDefService* buildVerilog(string file, std::string top_module_name = "asic_top");
+  IdbDefService* buildVerilog(string file, std::string top_module_name = "");
+  IdbDefService* addVerilog(string file, std::string top_module_name = "");
 
   IdbDefService* buildDefFloorplan(string file);
 
@@ -96,6 +98,7 @@ class IdbBuilder
 
   IdbLefService* get_lef_service() { return _lef_service; }
   IdbDefService* get_def_service() { return _def_service; }
+  const DefReadError* get_last_def_read_error() const { return _last_def_read_error ? &*_last_def_read_error : nullptr; }
   //   IdbDataService* get_data_service() { return _data_service.get(); }
 
   /// operator
@@ -136,6 +139,7 @@ class IdbBuilder
  private:
   IdbDefService* _def_service = nullptr;
   IdbLefService* _lef_service = nullptr;
+  std::optional<DefReadError> _last_def_read_error;
   //   std::shared_ptr<IdbDataService> _data_service;
 
   void checkNetPins();

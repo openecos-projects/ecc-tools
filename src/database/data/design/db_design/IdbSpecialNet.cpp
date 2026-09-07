@@ -377,13 +377,15 @@ IdbSpecialNetEdgeSegmenArray* IdbSpecialNetList::add_edge_segment_array(IdbSpeci
 
 IdbSpecialNetEdgeSegmenArray* IdbSpecialNetList::add_edge_segment_array_for_layer(IdbLayerRouting* layer)
 {
+  if (layer == nullptr) {
+    return nullptr;
+  }
   IdbSpecialNetEdgeSegmenArray* pSegment = find_edge_segment_array_by_layer(layer);
   if (pSegment == nullptr) {
     pSegment = new IdbSpecialNetEdgeSegmenArray();
     pSegment->set_layer(layer);
+    _edge_segment_list.emplace_back(pSegment);
   }
-
-  _edge_segment_list.emplace_back(pSegment);
 
   return pSegment;
 }

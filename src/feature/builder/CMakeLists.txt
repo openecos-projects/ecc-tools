@@ -19,7 +19,6 @@ target_link_libraries(feature_builder
     PRIVATE
         feature_db
         idb
-        flow_config
         idm
         irt_interface
         icts_interface

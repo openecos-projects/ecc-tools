@@ -20,8 +20,7 @@
  */
 #pragma once
 
-#include <unordered_set>
-
+#include "RCXHeader.hpp"
 #include "config/CompareSpefConfig.hh"
 #include "data/CompareSpefData.hh"
 

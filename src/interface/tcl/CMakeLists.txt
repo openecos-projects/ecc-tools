@@ -22,7 +22,6 @@ add_library(ecc_tcl ${SRC})
 
 target_link_libraries(ecc_tcl
     PUBLIC
-        flow
         tool_manager
         tcl
         tcl_config
@@ -49,7 +48,6 @@ target_include_directories(ecc_tcl
 
     ${CMAKE_CURRENT_SOURCE_DIR}/tcl_engine
 
-    ${HOME_PLATFORM}/flow
     ${HOME_PLATFORM}/data_manager
     ${HOME_PLATFORM}/tool_manager
 )

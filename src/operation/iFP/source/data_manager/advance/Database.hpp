@@ -93,10 +93,7 @@ class Database
   void set_new_track_list(const std::vector<Track>& new_track_list) { _new_track_list = new_track_list; }
   void set_new_row_list(const std::vector<Row>& new_row_list) { _new_row_list = new_row_list; }
   void set_instance_list(const std::vector<Instance>& instance_list) { _instance_list = instance_list; }
-  void set_instance_name_to_idx_map(const std::map<std::string, int32_t>& instance_name_to_idx_map)
-  {
-    _instance_name_to_idx_map = instance_name_to_idx_map;
-  }
+  void set_instance_name_to_idx_map(const std::map<std::string, int32_t>& instance_name_to_idx_map) { _instance_name_to_idx_map = instance_name_to_idx_map; }
   void set_cell_master_map(const std::map<std::string, CellMaster>& cell_master_map) { _cell_master_map = cell_master_map; }
   void set_routing_layer_list(const std::vector<RoutingLayer>& routing_layer_list) { _routing_layer_list = routing_layer_list; }
   void set_routing_layer_name_to_idx_map(const std::map<std::string, int32_t>& routing_layer_name_to_idx_map)
@@ -105,15 +102,9 @@ class Database
   }
   void set_net_list(const std::vector<Net>& net_list) { _net_list = net_list; }
   void set_io_pin_list(const std::vector<IOPin>& io_pin_list) { _io_pin_list = io_pin_list; }
-  void set_io_pin_name_to_idx_map(const std::map<std::string, int32_t>& io_pin_name_to_idx_map)
-  {
-    _io_pin_name_to_idx_map = io_pin_name_to_idx_map;
-  }
+  void set_io_pin_name_to_idx_map(const std::map<std::string, int32_t>& io_pin_name_to_idx_map) { _io_pin_name_to_idx_map = io_pin_name_to_idx_map; }
   void set_pg_net_list(const std::vector<PGNet>& pg_net_list) { _pg_net_list = pg_net_list; }
-  void set_pg_net_name_to_idx_map(const std::map<std::string, int32_t>& pg_net_name_to_idx_map)
-  {
-    _pg_net_name_to_idx_map = pg_net_name_to_idx_map;
-  }
+  void set_pg_net_name_to_idx_map(const std::map<std::string, int32_t>& pg_net_name_to_idx_map) { _pg_net_name_to_idx_map = pg_net_name_to_idx_map; }
   void set_pg_segment_list(const std::vector<PGSegment>& pg_segment_list) { _pg_segment_list = pg_segment_list; }
   void set_row_list(const std::vector<Row>& row_list) { _row_list = row_list; }
   void set_die_updated(bool die_updated) { _die_updated = die_updated; }

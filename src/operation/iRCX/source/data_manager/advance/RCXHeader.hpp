@@ -29,12 +29,15 @@
 #include <algorithm>
 #include <any>
 #include <array>
+#include <atomic>
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
 #include <boost/polygon/gtl.hpp>
 #include <cassert>
 #include <cctype>
+#include <cerrno>
 #include <cfloat>
+#include <charconv>
 #include <chrono>
 #include <climits>
 #include <cmath>
@@ -56,6 +59,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <ostream>
 #include <queue>
@@ -63,6 +67,7 @@
 #include <set>
 #include <span>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>

@@ -16,8 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
-#include "Logger.hpp"
 #include "LVSHeader.hpp"
+#include "Logger.hpp"
 
 namespace ilvs {
 
@@ -91,10 +91,7 @@ class Utility
     return digit_string;
   }
   static std::string getIOName(const std::string& pin_name) { return "PIN/" + pin_name; }
-  static std::string getInstancePinName(const std::string& instance_name, const std::string& pin_name)
-  {
-    return instance_name + "/" + pin_name;
-  }
+  static std::string getInstancePinName(const std::string& instance_name, const std::string& pin_name) { return instance_name + "/" + pin_name; }
   static bool isIOName(const std::string& terminal_name) { return terminal_name.rfind("PIN/", 0) == 0; }
   static std::string getIOPinName(const std::string& terminal_name)
   {

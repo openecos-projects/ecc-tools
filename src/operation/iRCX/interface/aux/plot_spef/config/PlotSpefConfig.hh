@@ -41,10 +41,7 @@ struct Config
   auto hasNetFilter() const -> bool { return !net_name.empty(); }
   auto hasEdgeFilter() const -> bool { return !edge_name.empty(); }
   auto hasEdgeGdsOutput() const -> bool { return output_edge_gds || hasEdgeFilter(); }
-  auto hasOutputFilter() const -> bool
-  {
-    return output_resistance || output_coupling_cap || output_ground_cap;
-  }
+  auto hasOutputFilter() const -> bool { return output_resistance || output_coupling_cap || output_ground_cap; }
   auto plotResistance() const -> bool { return !hasOutputFilter() || output_resistance; }
   auto plotCouplingCap() const -> bool { return !hasOutputFilter() || output_coupling_cap; }
   auto plotGroundCap() const -> bool { return !hasOutputFilter() || output_ground_cap; }

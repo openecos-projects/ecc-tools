@@ -44,8 +44,7 @@ IdbLayout::IdbLayout()
   _manufacture_grid = -1;
   _die = new IdbDie();
   _core = new IdbCore();
-  // _units            = new IdbUnits();
-  _units = nullptr;
+  _units = new IdbUnits();
   _layers = new IdbLayers();
   _sites = new IdbSites();
   _rows = new IdbRows();
@@ -104,6 +103,10 @@ IdbLayout::~IdbLayout()
     delete _via_rule_list;
     _via_rule_list = nullptr;
   }
+  if (_max_via_stack != nullptr) {
+    delete _max_via_stack;
+    _max_via_stack = nullptr;
+  }
 }
 
 IdbCore* IdbLayout::get_core()
@@ -127,7 +130,12 @@ IdbCore* IdbLayout::get_core()
       max_x = std::max(max_x, row_rect->get_high_x());
       max_y = std::max(max_y, row_rect->get_high_y());
     }
-    _core->set_bounding_box(min_x, min_y, max_x, max_y);
+    if (min_x != INT_MAX) {
+      _core->set_bounding_box(min_x, min_y, max_x, max_y);
+    } else {
+      auto* die_bbox = _die->get_bounding_box();
+      _core->set_bounding_box(die_bbox->get_low_x(), die_bbox->get_low_y(), die_bbox->get_high_x(), die_bbox->get_high_y());
+    }
   } else {
     auto* die_bbox = _die->get_bounding_box();
     _core->set_bounding_box(die_bbox->get_low_x(), die_bbox->get_low_y(), die_bbox->get_high_x(), die_bbox->get_high_y());

@@ -73,8 +73,8 @@ bool IdbDie::set_bounding_box()
 {
   int32_t llx = INT32_MAX;
   int32_t lly = INT32_MAX;
-  int32_t urx = 0;
-  int32_t ury = 0;
+  int32_t urx = INT32_MIN;
+  int32_t ury = INT32_MIN;
 
   for (auto pt : _points) {
     llx = std::min(llx, pt->get_x());

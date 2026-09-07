@@ -28,6 +28,7 @@
 #include <ostream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -184,14 +185,28 @@ auto Design::clone() const -> std::unique_ptr<Design>
         cloned_clock->add_load(load_iter->second);
       }
     }
-    for (const auto* inst : clock->get_insts()) {
-      if (const auto inst_iter = inst_map.find(inst); inst_iter != inst_map.end()) {
-        cloned_clock->add_inst(inst_iter->second);
-      }
-    }
     for (const auto* net : clock->get_nets()) {
       if (const auto net_iter = net_map.find(net); net_iter != net_map.end()) {
         cloned_clock->add_net(net_iter->second);
+      }
+    }
+    for (const auto& arc : clock->get_propagation_arcs()) {
+      const auto inst_iter = inst_map.find(arc.inst);
+      const auto input_iter = pin_map.find(arc.input_pin);
+      const auto output_iter = pin_map.find(arc.output_pin);
+      if (inst_iter == inst_map.end() || input_iter == pin_map.end() || output_iter == pin_map.end()) {
+        CTSLOG.error(Loc::current(), "Design: failed to clone a clock propagation arc for clock \"", clock->get_clock_name(), "\".");
+      }
+      const auto status = cloned_clock->addPropagationArc(ClockPropagationArc{
+          .inst = inst_iter->second,
+          .input_pin = input_iter->second,
+          .output_pin = output_iter->second,
+          .kind = arc.kind,
+          .origin = arc.origin,
+          .path_buffer_weight = arc.path_buffer_weight,
+      });
+      if (!status.ok()) {
+        CTSLOG.error(Loc::current(), "Design: failed to clone a clock propagation arc for clock \"", clock->get_clock_name(), "\": ", status.message, ".");
       }
     }
     cloned_clock->set_preclustered_sink_reuse(clock->is_preclustered_sink_reuse());
@@ -468,6 +483,16 @@ auto Design::commitNet(std::unique_ptr<Net> net) -> Net*
 
 auto Design::clearTopologyObjects() -> void
 {
+  for (auto* clock : get_clocks()) {
+    if (clock == nullptr) {
+      continue;
+    }
+    clock->set_clock_source(nullptr);
+    clock->set_clock_source_net(nullptr);
+    clock->clear_loads();
+    clock->clearMembership();
+    clock->clear_preclustered_anchor_input_net_names();
+  }
   _insts.clear();
   _pins.clear();
   _nets.clear();
@@ -507,6 +532,16 @@ auto Design::removePin(Pin* pin) -> void
     std::erase(pins, pin);
   }
 
+  for (auto* clock : get_clocks()) {
+    if (clock != nullptr) {
+      if (clock->get_clock_source() == pin) {
+        clock->set_clock_source(nullptr);
+      }
+      clock->remove_load(pin);
+      clock->removePropagationArcsFor(pin);
+    }
+  }
+
   const auto full_name_iter = _pin_full_name_by_pin.find(pin);
   if (full_name_iter != _pin_full_name_by_pin.end()) {
     const auto pin_iter = _pin_by_full_name.find(full_name_iter->second);
@@ -525,6 +560,11 @@ auto Design::removeInst(Inst* inst) -> void
     return;
   }
 
+  for (auto* clock : get_clocks()) {
+    if (clock != nullptr) {
+      clock->removePropagationArcsFor(inst);
+    }
+  }
   auto pins = inst->get_pins();
   for (auto* pin : pins) {
     removePin(pin);
@@ -540,10 +580,32 @@ auto Design::removeNet(Net* net) -> void
     return;
   }
 
-  if (auto* driver = net->get_driver(); driver != nullptr && driver->get_net() == net) {
+  auto* driver = net->get_driver();
+  const auto loads = net->get_loads();
+  const bool driver_still_connected = driver != nullptr && driver->get_net() == net;
+  for (auto* clock : get_clocks()) {
+    if (clock == nullptr) {
+      continue;
+    }
+    if (clock->get_clock_source_net() == net) {
+      clock->set_clock_source_net(nullptr);
+    }
+    clock->remove_net(net);
+    if (driver_still_connected) {
+      clock->removePropagationArcsFor(driver);
+    }
+    for (auto* load : loads) {
+      if (load != nullptr && load->get_net() == net) {
+        clock->remove_load(load);
+        clock->removePropagationArcsFor(load);
+      }
+    }
+  }
+
+  if (driver != nullptr && driver->get_net() == net) {
     driver->set_net(nullptr);
   }
-  for (auto* load : net->get_loads()) {
+  for (auto* load : loads) {
     if (load != nullptr && load->get_net() == net) {
       load->set_net(nullptr);
     }
@@ -555,15 +617,49 @@ auto Design::removeNet(Net* net) -> void
 
 auto Design::removeClockMembershipObjects(Clock& clock) -> void
 {
+  const auto clock_insts = clock.get_insts();
+  const auto clock_nets = clock.get_nets();
+  clock.clearPropagationArcs();
   const auto* clock_source_net = clock.get_clock_source_net();
-  for (auto* net : clock.get_nets()) {
+  for (auto* net : clock_nets) {
     if (net == clock_source_net) {
       continue;
     }
     removeNet(net);
   }
 
-  for (auto* inst : clock.get_insts()) {
+  for (auto* inst : clock_insts) {
+    removeInst(inst);
+  }
+  _clock_dag.invalidate("clock_topology_changed");
+}
+
+auto Design::removeClockSynthesizedObjects(Clock& clock) -> void
+{
+  std::unordered_set<const Pin*> synthesized_outputs;
+  std::vector<Inst*> synthesized_insts;
+  for (const auto& arc : clock.get_propagation_arcs()) {
+    if (arc.origin != ClockPropagationOrigin::kSynthesized) {
+      continue;
+    }
+    if (arc.output_pin != nullptr) {
+      synthesized_outputs.insert(arc.output_pin);
+    }
+    if (arc.inst != nullptr) {
+      synthesized_insts.push_back(arc.inst);
+    }
+  }
+
+  std::vector<Net*> synthesized_nets;
+  for (auto* net : clock.get_nets()) {
+    if (net != nullptr && synthesized_outputs.contains(net->get_driver())) {
+      synthesized_nets.push_back(net);
+    }
+  }
+  for (auto* net : synthesized_nets) {
+    removeNet(net);
+  }
+  for (auto* inst : synthesized_insts) {
     removeInst(inst);
   }
   _clock_dag.invalidate("clock_topology_changed");

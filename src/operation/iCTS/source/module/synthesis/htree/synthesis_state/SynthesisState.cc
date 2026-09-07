@@ -224,12 +224,14 @@ auto AssembleHTreeSynthesisState(const HTree::Input& input, const HTree::Config&
       .has_max_cap = config.has_max_cap,
       .max_cap_pf = config.has_max_cap ? config.max_cap_pf : std::numeric_limits<double>::infinity(),
       .clock_route_segment_rc = char_builder.get_clock_route_segment_rc(),
+      .sink_pin_cap_pf_by_pin = {},
   };
   const auto& characterization_buffer_cells = char_builder.get_characterization_buffer_cells();
   if (!characterization_buffer_cells.empty()) {
     // Buffers are sorted by drive strength; the smallest one realizes split
     // remediation sub-buffers for over-fanout sink-load boundary groups.
     state.sink_load_region_input.split_buffer_input_cap_pf = characterization_buffer_cells.front().input_cap_pf;
+    state.sink_load_region_input.split_buffer_available = true;
     state.result.diagnostics.split_buffer_cell_master = characterization_buffer_cells.front().cell_master;
   }
   state.result.diagnostics.analytical_mode_enabled = config.enable_analytical_solver;

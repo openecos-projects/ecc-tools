@@ -16,8 +16,6 @@
 // ***************************************************************************************
 #include "PinAccessor.hpp"
 
-#include <algorithm>
-
 #include "DRCEngine.hpp"
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
@@ -27,6 +25,7 @@
 #include "PAIterParam.hpp"
 #include "PANet.hpp"
 #include "PANode.hpp"
+#include "RTHeader.hpp"
 #include "RTInterface.hpp"
 
 namespace irt {
@@ -986,8 +985,8 @@ void PinAccessor::initPATaskList(PAModel& pa_model, PABox& pa_box)
           auto rtree_iter = routing_fixed_rect_rtree_map.find(coord.get_layer_idx());
           if (rtree_iter != routing_fixed_rect_rtree_map.end()) {
             PlanarRect query_rect = RTUTIL.getEnlargedRect(coord.get_planar_coord(), enlarged_size);
-            for (auto query_iter = rtree_iter->second.qbegin(bgi::intersects(RTUTIL.convertToBGRectInt(query_rect)));
-                 query_iter != rtree_iter->second.qend(); query_iter++) {
+            for (auto query_iter = rtree_iter->second.qbegin(bgi::intersects(RTUTIL.convertToBGRectInt(query_rect))); query_iter != rtree_iter->second.qend();
+                 query_iter++) {
               if (query_iter->second.first != pa_net->get_net_idx()) {
                 within_shape = true;
                 break;
@@ -1491,8 +1490,8 @@ void PinAccessor::exemptPinShape(PAModel& pa_model, PABox& pa_box)
             bool within_shape = false;
             if (rtree_iter != routing_fixed_rect_rtree_map.end()) {
               PlanarRect query_rect(pa_node.get_planar_coord(), pa_node.get_planar_coord());
-              for (auto query_iter = rtree_iter->second.qbegin(bgi::intersects(RTUTIL.convertToBGRectInt(query_rect)));
-                   query_iter != rtree_iter->second.qend(); query_iter++) {
+              for (auto query_iter = rtree_iter->second.qbegin(bgi::intersects(RTUTIL.convertToBGRectInt(query_rect))); query_iter != rtree_iter->second.qend();
+                   query_iter++) {
                 if (query_iter->second.first == pa_net_idx) {
                   continue;
                 }

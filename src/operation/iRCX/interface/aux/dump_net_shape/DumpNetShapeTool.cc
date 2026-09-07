@@ -15,29 +15,21 @@
 // ***************************************************************************************
 #include "DumpNetShapeTool.hh"
 
-#include <algorithm>
-#include <array>
-#include <fstream>
-#include <map>
-#include <set>
-#include <string>
-#include <utility>
-#include <vector>
-
 #include "DataManager.hpp"
 #include "Direction.hpp"
 #include "Geometry.hh"
 #include "LayerShape.hpp"
 #include "LayerTable.hpp"
 #include "LayoutData.hpp"
+#include "Logger.hpp"
 #include "Net.hpp"
 #include "Patch.hpp"
 #include "Pin.hpp"
+#include "RCXHeader.hpp"
 #include "RoutingLayer.hpp"
 #include "Segment.hpp"
 #include "Utility.hpp"
 #include "Via.hpp"
-#include "Logger.hpp"
 
 namespace ircx::dump_net_shape {
 
@@ -114,10 +106,7 @@ bool getIsCutLayer(int32_t layer_idx, const std::set<int32_t>& cut_layer_idx_set
   return cut_layer_idx_set.find(layer_idx) != cut_layer_idx_set.end();
 }
 
-void collectLayerShape(LayerShape& layer_shape,
-                       std::set<int32_t>& layer_idx_set,
-                       std::set<int32_t>& cut_layer_idx_set,
-                       bool is_cut_layer)
+void collectLayerShape(LayerShape& layer_shape, std::set<int32_t>& layer_idx_set, std::set<int32_t>& cut_layer_idx_set, bool is_cut_layer)
 {
   int32_t layer_idx = layer_shape.get_layer_idx();
   if (!getIsValidLayerIdx(layer_idx)) {
@@ -129,9 +118,7 @@ void collectLayerShape(LayerShape& layer_shape,
   }
 }
 
-void collectNetLayerList(Net& net,
-                         std::set<int32_t>& layer_idx_set,
-                         std::set<int32_t>& cut_layer_idx_set,
+void collectNetLayerList(Net& net, std::set<int32_t>& layer_idx_set, std::set<int32_t>& cut_layer_idx_set,
                          std::map<std::pair<int32_t, int32_t>, int32_t>& routing_pair_to_cut_layer_idx_map)
 {
   for (Segment& segment : net.get_segment_list()) {
@@ -156,8 +143,7 @@ void collectNetLayerList(Net& net,
     int32_t top_layer_idx = top_layer_shape.get_layer_idx();
     int32_t cut_layer_idx = cut_layer_shape.get_layer_idx();
     if (getIsValidLayerIdx(bottom_layer_idx) && getIsValidLayerIdx(top_layer_idx) && getIsValidLayerIdx(cut_layer_idx)) {
-      routing_pair_to_cut_layer_idx_map[{std::min(bottom_layer_idx, top_layer_idx), std::max(bottom_layer_idx, top_layer_idx)}]
-          = cut_layer_idx;
+      routing_pair_to_cut_layer_idx_map[{std::min(bottom_layer_idx, top_layer_idx), std::max(bottom_layer_idx, top_layer_idx)}] = cut_layer_idx;
     }
   }
   for (Pin& pin : net.get_pin_list()) {
@@ -185,9 +171,7 @@ LayerCatalog buildLayerCatalog(LayoutData& layout_data)
   std::sort(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
 
   int32_t first_cut_layer_idx = routing_layer_idx_list.empty() ? -1 : routing_layer_idx_list.back() + 1;
-  for (int32_t routing_layer_list_idx = 0;
-       routing_layer_list_idx + 1 < static_cast<int32_t>(routing_layer_idx_list.size());
-       ++routing_layer_list_idx) {
+  for (int32_t routing_layer_list_idx = 0; routing_layer_list_idx + 1 < static_cast<int32_t>(routing_layer_idx_list.size()); ++routing_layer_list_idx) {
     int32_t lower_routing_layer_idx = routing_layer_idx_list[routing_layer_list_idx];
     int32_t upper_routing_layer_idx = routing_layer_idx_list[routing_layer_list_idx + 1];
     std::pair<int32_t, int32_t> routing_layer_pair = {lower_routing_layer_idx, upper_routing_layer_idx};
@@ -200,9 +184,7 @@ LayerCatalog buildLayerCatalog(LayoutData& layout_data)
   }
 
   std::set<int32_t> emitted_layer_idx_set;
-  for (int32_t routing_layer_list_idx = 0;
-       routing_layer_list_idx < static_cast<int32_t>(routing_layer_idx_list.size());
-       ++routing_layer_list_idx) {
+  for (int32_t routing_layer_list_idx = 0; routing_layer_list_idx < static_cast<int32_t>(routing_layer_idx_list.size()); ++routing_layer_list_idx) {
     int32_t routing_layer_idx = routing_layer_idx_list[routing_layer_list_idx];
     if (emitted_layer_idx_set.insert(routing_layer_idx).second) {
       layer_catalog.layer_idx_list.push_back(routing_layer_idx);
@@ -210,8 +192,7 @@ LayerCatalog buildLayerCatalog(LayoutData& layout_data)
     if (routing_layer_list_idx + 1 >= static_cast<int32_t>(routing_layer_idx_list.size())) {
       continue;
     }
-    std::pair<int32_t, int32_t> routing_layer_pair = {
-        routing_layer_idx, routing_layer_idx_list[routing_layer_list_idx + 1]};
+    std::pair<int32_t, int32_t> routing_layer_pair = {routing_layer_idx, routing_layer_idx_list[routing_layer_list_idx + 1]};
     std::map<std::pair<int32_t, int32_t>, int32_t>::iterator cut_layer_it = routing_pair_to_cut_layer_idx_map.find(routing_layer_pair);
     if (cut_layer_it != routing_pair_to_cut_layer_idx_map.end() && emitted_layer_idx_set.insert(cut_layer_it->second).second) {
       layer_catalog.layer_idx_list.push_back(cut_layer_it->second);
@@ -276,11 +257,7 @@ void writeHeader(std::ostream& stream, LayoutData& layout_data, LayerTable& laye
   }
 }
 
-void writeViaLayerShape(std::ostream& stream,
-                        int32_t via_idx,
-                        int32_t shape_idx,
-                        ShapeCode shape_code,
-                        LayerShape& layer_shape)
+void writeViaLayerShape(std::ostream& stream, int32_t via_idx, int32_t shape_idx, ShapeCode shape_code, LayerShape& layer_shape)
 {
   stream << "VS " << via_idx << ' ' << shape_idx << ' ' << getShapeCodeName(shape_code) << ' ';
   writeLayerIdx(stream, layer_shape.get_layer_idx());
@@ -334,8 +311,7 @@ void writeNetShapeList(std::ostream& stream, Net& net, LayerCatalog& layer_catal
     stream << '\n';
     for (int32_t layer_shape_idx = 0; layer_shape_idx < static_cast<int32_t>(pin.get_layer_shape_list().size()); ++layer_shape_idx) {
       LayerShape& layer_shape = pin.get_layer_shape_list()[layer_shape_idx];
-      ShapeCode shape_code = getIsCutLayer(layer_shape.get_layer_idx(), layer_catalog.cut_layer_idx_set) ? ShapeCode::kPinCut
-                                                                                                           : ShapeCode::kPinNonCut;
+      ShapeCode shape_code = getIsCutLayer(layer_shape.get_layer_idx(), layer_catalog.cut_layer_idx_set) ? ShapeCode::kPinCut : ShapeCode::kPinNonCut;
       stream << "PS " << pin_idx << ' ' << layer_shape_idx << ' ' << getShapeCodeName(shape_code) << ' ';
       writeLayerIdx(stream, layer_shape.get_layer_idx());
       stream << ' ';
@@ -349,8 +325,8 @@ void writeNet(std::ostream& stream, Net& net, LayerCatalog& layer_catalog)
 {
   stream << "NET " << net.get_net_idx() << ' ';
   writeQuoted(stream, net.get_net_name());
-  stream << " regular " << net.get_segment_list().size() << ' ' << net.get_patch_list().size() << ' ' << net.get_via_list().size()
-         << ' ' << net.get_pin_list().size() << '\n';
+  stream << " regular " << net.get_segment_list().size() << ' ' << net.get_patch_list().size() << ' ' << net.get_via_list().size() << ' '
+         << net.get_pin_list().size() << '\n';
   writeNetShapeList(stream, net, layer_catalog);
   stream << "END_NET\n";
 }

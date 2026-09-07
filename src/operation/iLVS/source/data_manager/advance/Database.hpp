@@ -38,14 +38,8 @@ class Database
   const DefData& get_def_data() const { return _def_data; }
   const Summary& get_summary() const { return _summary; }
   // setter
-  void set_netlist_data(NetlistData netlist_data)
-  {
-    _netlist_data = std::move(netlist_data);
-  }
-  void set_def_data(DefData def_data)
-  {
-    _def_data = std::move(def_data);
-  }
+  void set_netlist_data(NetlistData netlist_data) { _netlist_data = std::move(netlist_data); }
+  void set_def_data(DefData def_data) { _def_data = std::move(def_data); }
   // function
   void reset()
   {

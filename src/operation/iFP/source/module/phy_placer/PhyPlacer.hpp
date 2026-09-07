@@ -55,24 +55,19 @@ class PhyPlacer
 
   void buildPPBoundaryRegionList(PPModel& pp_model);
   void addCorePPBoundaryRegion(PPModel& pp_model);
-  void addPPBoundaryRegion(PPModel& pp_model, PPRegion& pp_region, int32_t start_coord, int32_t end_coord,
-                           PPBoundaryType boundary_type);
+  void addPPBoundaryRegion(PPModel& pp_model, PPRegion& pp_region, int32_t start_coord, int32_t end_coord, PPBoundaryType boundary_type);
   void addMacroPPBoundaryRegion(PPModel& pp_model);
-  void addMacroPPBoundaryRegionInRow(PPModel& pp_model, Row& row, PlanarRect& placement_halo_rect,
-                                     PPBoundaryType boundary_type);
+  void addMacroPPBoundaryRegionInRow(PPModel& pp_model, Row& row, PlanarRect& placement_halo_rect, PPBoundaryType boundary_type);
 
   void insertSideEndcap(PPModel& pp_model, int32_t& endcap_idx);
   int32_t getCellMasterWidthByOrient(CellMaster& cell_master, PlacementOrientation orient);
-  void addPhyCell(PPModel& pp_model, PPRegion& pp_region, std::string instance_name, std::string cell_master_name,
-                  int32_t x_coord);
+  void addPhyCell(PPModel& pp_model, PPRegion& pp_region, std::string instance_name, std::string cell_master_name, int32_t x_coord);
   bool isPhyCellOnSite(PPRegion& pp_region, CellMaster& cell_master, int32_t x_coord);
 
   void insertWellTap(PPModel& pp_model, int32_t tap_distance, int32_t& tapcell_idx);
-  void insertWellTapInRegion(PPModel& pp_model, PPRegion& pp_region, int32_t tap_distance, int32_t tap_offset,
-                             int32_t& tapcell_idx);
+  void insertWellTapInRegion(PPModel& pp_model, PPRegion& pp_region, int32_t tap_distance, int32_t tap_offset, int32_t& tapcell_idx);
   void insertBoundaryWellTap(PPModel& pp_model, int32_t tap_distance, int32_t& tapcell_idx);
-  int32_t getAvailableCellCoord(PPModel& pp_model, PPRegion& pp_region, int32_t start_coord, int32_t end_coord,
-                                CellMaster& cell_master);
+  int32_t getAvailableCellCoord(PPModel& pp_model, PPRegion& pp_region, int32_t start_coord, int32_t end_coord, CellMaster& cell_master);
   bool isCellAvailable(PPModel& pp_model, int32_t start_coord, int32_t end_coord, int32_t y_coord);
 
   void insertBoundaryTap(PPModel& pp_model, int32_t boundary_tap_rule, int32_t& boundary_tap_idx);

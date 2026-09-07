@@ -16,9 +16,9 @@
 // ***************************************************************************************
 #pragma once
 
+#include "CmpEnvTopoEdgeByCoordASC.hpp"
 #include "EnvOverlapWidenContext.hpp"
 #include "EnvSearchContext.hpp"
-#include "CmpEnvTopoEdgeByCoordASC.hpp"
 #include "EnvTrackOverlap.hpp"
 #include "LineSegment.hpp"
 #include "RCXHeader.hpp"
@@ -138,13 +138,11 @@ class EnvTrackIdx
     if (edge == nullptr) {
       return false;
     }
-    return (search_context.get_track_direction_step() > 0)
-               ? (edge->get_line_segment().get_coord() > search_context.get_track_coord())
-               : (edge->get_line_segment().get_coord() < search_context.get_track_coord());
+    return (search_context.get_track_direction_step() > 0) ? (edge->get_line_segment().get_coord() > search_context.get_track_coord())
+                                                           : (edge->get_line_segment().get_coord() < search_context.get_track_coord());
   }
 
-  EnvTrackOverlap applyWidenAndClip(const EnvTrackOverlap& track_overlap, int32_t track_idx,
-                                    const EnvSearchContext& search_context) const
+  EnvTrackOverlap applyWidenAndClip(const EnvTrackOverlap& track_overlap, int32_t track_idx, const EnvSearchContext& search_context) const
   {
     EnvTrackOverlap widened_track_overlap = track_overlap;
 
@@ -214,8 +212,7 @@ class EnvTrackIdx
     return false;
   }
 
-  std::vector<EnvTrackOverlap> getEdgeOverlapList(int32_t track_idx, TopoEdge* edge,
-                                                  const std::vector<IntervalRange<int32_t>>& remaining_interval_list,
+  std::vector<EnvTrackOverlap> getEdgeOverlapList(int32_t track_idx, TopoEdge* edge, const std::vector<IntervalRange<int32_t>>& remaining_interval_list,
                                                   const EnvSearchContext& search_context) const
   {
     std::vector<EnvTrackOverlap> edge_overlap_list;
@@ -256,8 +253,8 @@ class EnvTrackIdx
     return edge_overlap_list;
   }
 
-  void searchWithinTrack(int32_t track_idx, std::vector<IntervalRange<int32_t>> remaining_interval_list,
-                         std::vector<EnvTrackOverlap>& track_overlap_list, const EnvSearchContext& search_context) const
+  void searchWithinTrack(int32_t track_idx, std::vector<IntervalRange<int32_t>> remaining_interval_list, std::vector<EnvTrackOverlap>& track_overlap_list,
+                         const EnvSearchContext& search_context) const
   {
     if (!isTrackIdxValid(track_idx) || remaining_interval_list.empty()) {
       return;
@@ -304,8 +301,7 @@ class EnvTrackIdx
 
     std::vector<IntervalRange<int32_t>> next_remaining_interval_list = remaining_interval_list;
     for (const EnvTrackOverlap& track_overlap : edge_overlap_list) {
-      next_remaining_interval_list
-          = RCXUTIL.subtractInterval(next_remaining_interval_list, track_overlap.get_start_coord(), track_overlap.get_end_coord());
+      next_remaining_interval_list = RCXUTIL.subtractInterval(next_remaining_interval_list, track_overlap.get_start_coord(), track_overlap.get_end_coord());
       if (next_remaining_interval_list.empty()) {
         break;
       }
@@ -314,9 +310,8 @@ class EnvTrackIdx
   }
 
   std::vector<IntervalRange<int32_t>> searchAcrossTracks(int32_t track_idx, int32_t remaining_track_num,
-                                                        std::vector<IntervalRange<int32_t>> remaining_interval_list,
-                                                        std::vector<EnvTrackOverlap>& track_overlap_list,
-                                                        const EnvSearchContext& search_context) const
+                                                         std::vector<IntervalRange<int32_t>> remaining_interval_list,
+                                                         std::vector<EnvTrackOverlap>& track_overlap_list, const EnvSearchContext& search_context) const
   {
     if (remaining_track_num <= 0 || remaining_interval_list.empty()) {
       return remaining_interval_list;
@@ -335,15 +330,14 @@ class EnvTrackIdx
       }
 
       track_overlap_list.push_back(track_overlap);
-      remaining_interval_list
-          = RCXUTIL.subtractInterval(remaining_interval_list, track_overlap.get_start_coord(), track_overlap.get_end_coord());
+      remaining_interval_list = RCXUTIL.subtractInterval(remaining_interval_list, track_overlap.get_start_coord(), track_overlap.get_end_coord());
       if (remaining_interval_list.empty()) {
         return remaining_interval_list;
       }
     }
 
-    return searchAcrossTracks(track_idx + search_context.get_track_direction_step(), remaining_track_num - 1,
-                              remaining_interval_list, track_overlap_list, search_context);
+    return searchAcrossTracks(track_idx + search_context.get_track_direction_step(), remaining_track_num - 1, remaining_interval_list, track_overlap_list,
+                              search_context);
   }
 
  private:

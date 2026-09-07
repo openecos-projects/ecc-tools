@@ -14,8 +14,8 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "DefData.hpp"
 #include "DataManager.hpp"
+#include "DefData.hpp"
 #include "IdbDesign.h"
 #include "IdbLayout.h"
 #include "LVSHeader.hpp"

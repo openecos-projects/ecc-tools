@@ -131,6 +131,22 @@ TEST(WirelengthGridTest, CoverageOnlyLengthsExtendRangeWithoutDirectEnumeration)
   EXPECT_EQ(indices, expected_sparse);
 }
 
+TEST(WirelengthGridTest, SingleTargetAutoModeUsesOneDirectCharacterizationPoint)
+{
+  icts::CharBuilder::Config config;
+  config.wirelength_iterations = 3U;
+  const std::vector<double> requests = {2340.174};
+
+  const auto plan = icts::htree::ResolveCharacterizationGridPlan(config, requests);
+  const auto indices = icts::htree::ResolveDirectCharacterizationLengthIndices(requests, plan);
+
+  ASSERT_TRUE(plan.adapted);
+  EXPECT_NEAR(plan.wirelength_unit_um, requests.front(), requests.front() * kRelTol);
+  EXPECT_EQ(plan.required_covering_iterations, 1U);
+  EXPECT_EQ(plan.wirelength_iterations, 1U);
+  EXPECT_EQ(indices, (std::vector<unsigned>{1U}));
+}
+
 TEST(WirelengthGridTest, SparseDirectIndicesWhenFullyCovered)
 {
   icts::CharBuilder::Config config;

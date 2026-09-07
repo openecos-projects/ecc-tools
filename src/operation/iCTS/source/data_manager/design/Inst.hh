@@ -73,7 +73,6 @@ class Inst
 
   auto get_pins() const -> const std::vector<Pin*>& { return _pins; }
   auto get_pins() -> std::vector<Pin*>& { return _pins; }
-  auto findDriverPin() const -> Pin* { return _pins.empty() ? nullptr : _pins.front(); }
   auto set_pins(const std::vector<Pin*>& pins) -> void { _pins = pins; }
   auto add_pin(Pin* pin) -> void
   {
@@ -82,18 +81,6 @@ class Inst
     }
     _pins.push_back(pin);
   }
-  auto insertDriverPin(Pin* pin) -> void
-  {
-    if (pin == nullptr) {
-      return;
-    }
-    if (!_pins.empty() && _pins.front() == pin) {
-      return;
-    }
-    std::erase(_pins, pin);
-    _pins.insert(_pins.begin(), pin);
-  }
-
   // Boolean functions
   auto is_buffer() const -> bool { return _type == InstType::kBuffer; }
   auto is_flipflop() const -> bool { return _type == InstType::kFlipFlop; }
@@ -104,7 +91,6 @@ class Inst
   auto is_clock_logic() const -> bool { return _type == InstType::kClockLogic; }
   auto is_boundary_load() const -> bool { return _type == InstType::kBoundaryLoad; }
   auto is_macro_block() const -> bool { return _type == InstType::kMacroBlock; }
-  auto is_clock_propagation_cell() const -> bool { return is_buffer() || is_inverter(); }
   auto is_sequential_sink() const -> bool { return is_flipflop() || is_latch(); }
   auto is_clock_boundary() const -> bool { return is_clock_gate() || is_mux() || is_clock_logic() || is_boundary_load(); }
 

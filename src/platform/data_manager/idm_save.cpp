@@ -101,6 +101,7 @@ void DataManager::saveVerilog(string verilog_path, std::set<std::string>&& exclu
 {
   if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
     ECCLOG.warn(ecc::Loc::current(), "idb_builder error.");
+    return;
   }
   return _idb_builder->saveVerilog(verilog_path, exclude_cell_names, is_add_space_for_escape_name);
 }

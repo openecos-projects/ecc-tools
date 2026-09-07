@@ -36,10 +36,7 @@ class NetRoutingData
   const std::string& get_driver_terminal_name() const { return _driver_terminal_name; }
   const std::vector<RoutingShape>& get_wire_routing_shape_list() const { return _wire_routing_shape_list; }
   const std::vector<RoutingVia>& get_routing_via_list() const { return _routing_via_list; }
-  const std::map<std::string, std::vector<RoutingShape>>& get_terminal_routing_shape_map() const
-  {
-    return _terminal_routing_shape_map;
-  }
+  const std::map<std::string, std::vector<RoutingShape>>& get_terminal_routing_shape_map() const { return _terminal_routing_shape_map; }
   // setter
   void set_driver_terminal_name(const std::string& driver_terminal_name) { _driver_terminal_name = driver_terminal_name; }
 

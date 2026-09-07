@@ -37,6 +37,7 @@ class Config;
 class Inst;
 class Net;
 class Wrapper;
+struct ClockPropagationArc;
 
 namespace qor_evaluation {
 
@@ -62,11 +63,30 @@ struct ClockNetMeasurementInput
   ClockNetRole role = ClockNetRole::kTrunk;
 };
 
+enum class ClockCellMetricIssue
+{
+  kNone,
+  kMissingPropagationArc,
+  kPropagationInstMismatch,
+  kPropagationInputPinMismatch,
+  kCellMasterUnavailable,
+  kCellAreaUnavailable,
+  kInputPinCapacitanceUnavailable,
+};
+
+struct ClockCellMetricStatus
+{
+  ClockCellMetricIssue issue = ClockCellMetricIssue::kNone;
+
+  auto ok() const -> bool { return issue == ClockCellMetricIssue::kNone; }
+};
+
 auto ClearStatistics(Qor& statistics) -> void;
 auto ClearSummary(QorSummary& summary) -> void;
 auto AppendPathDepthStats(const ClockDAG::PathBufferStats& path_stats, QorSummary& summary) -> void;
 auto ClassifyClockNet(const Clock& clock, const Net* net) -> ClockNetRole;
-auto AccumulateInstStatistics(Wrapper& wrapper, const Inst& inst, Qor& statistics) -> bool;
+auto ClockCellMetricIssueName(ClockCellMetricIssue issue) -> const char*;
+auto AccumulateInstStatistics(Wrapper& wrapper, const Inst& inst, const ClockPropagationArc* propagation_arc, Qor& statistics) -> ClockCellMetricStatus;
 auto MeasureClockNet(const ClockNetMeasurementInput& input) -> std::optional<ClockNetMeasurement>;
 auto AppendClockNetStatistics(const std::vector<ClockNetMeasurement>& measurements, int32_t dbu_per_um, QorSummary& summary, Qor& statistics) -> void;
 }  // namespace qor_evaluation

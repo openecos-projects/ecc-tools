@@ -20,22 +20,16 @@
  */
 #include "report/PlotSpefCgEdgeReport.hh"
 
-#include <algorithm>
-#include <fstream>
-#include <string>
-#include <unordered_map>
-#include <vector>
-
-#include "config/PlotSpefConfig.hh"
 #include "Logger.hpp"
-#include "model/PlotSpefModel.hh"
 #include "PathUtils.hh"
+#include "RCXHeader.hpp"
+#include "config/PlotSpefConfig.hh"
+#include "model/PlotSpefModel.hh"
 
 namespace ircx::plot_spef {
 namespace {
 
-auto findEdge(const Model& model,
-              const EdgeRef& ref) -> const Resistor*
+auto findEdge(const Model& model, const EdgeRef& ref) -> const Resistor*
 {
   if (!ref.valid || ref.net_index >= model.nets.size()) {
     return nullptr;
@@ -61,8 +55,7 @@ auto csvText(const std::string& text) -> std::string
   return result;
 }
 
-auto edgeKey(const Model& model,
-             const EdgeRef& ref) -> std::string
+auto edgeKey(const Model& model, const EdgeRef& ref) -> std::string
 {
   const Resistor* edge = findEdge(model, ref);
   if (edge == nullptr || ref.net_index >= model.nets.size()) {
@@ -71,10 +64,7 @@ auto edgeKey(const Model& model,
   return model.nets[ref.net_index].name + ":" + std::to_string(edge->index);
 }
 
-auto addEdgeRow(const Model& model,
-                const EdgeRef& ref,
-                std::unordered_map<std::string, Size>& index_by_key,
-                std::vector<EdgeRow>& rows) -> void
+auto addEdgeRow(const Model& model, const EdgeRef& ref, std::unordered_map<std::string, Size>& index_by_key, std::vector<EdgeRow>& rows) -> void
 {
   const Resistor* edge = findEdge(model, ref);
   if (edge == nullptr || ref.net_index >= model.nets.size()) {
@@ -88,23 +78,18 @@ auto addEdgeRow(const Model& model,
   }
   const bool inserted = index_by_key.emplace(key, rows.size()).second;
   if (inserted) {
-    rows.push_back(EdgeRow{
-        .net_name = edge_net.name,
-        .res_index = edge->index});
+    rows.push_back(EdgeRow{.net_name = edge_net.name, .res_index = edge->index});
   }
 }
 
 auto sortRows(std::vector<EdgeRow>& rows) -> void
 {
-  std::sort(
-      rows.begin(),
-      rows.end(),
-      [](const EdgeRow& lhs, const EdgeRow& rhs) {
-        if (lhs.net_name != rhs.net_name) {
-          return lhs.net_name < rhs.net_name;
-        }
-        return lhs.res_index < rhs.res_index;
-      });
+  std::sort(rows.begin(), rows.end(), [](const EdgeRow& lhs, const EdgeRow& rhs) {
+    if (lhs.net_name != rhs.net_name) {
+      return lhs.net_name < rhs.net_name;
+    }
+    return lhs.res_index < rhs.res_index;
+  });
 }
 
 }  // namespace
@@ -138,8 +123,7 @@ auto collectCoupledEdgeRows(const Model& model) -> std::vector<EdgeRow>
   return rows;
 }
 
-auto CgEdgeReport::write(const Model& model,
-                         const Config& config) const -> bool
+auto CgEdgeReport::write(const Model& model, const Config& config) const -> bool
 {
   const auto report_file = path::fileUnderDir(config.output_dir, "cg_edges", ".csv");
   std::ofstream out(report_file);
@@ -150,8 +134,7 @@ auto CgEdgeReport::write(const Model& model,
 
   out << "net,index\n";
   for (const auto& row : collectCgEdgeRows(model)) {
-    out << csvText(row.net_name) << ','
-        << row.res_index << '\n';
+    out << csvText(row.net_name) << ',' << row.res_index << '\n';
   }
 
   RCXLOG.info(Loc::current(), "plot_spef wrote CG edge report to ", report_file.string());

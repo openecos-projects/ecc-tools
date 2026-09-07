@@ -32,6 +32,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #include <cmath>
+#include <cstddef>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -105,18 +106,90 @@ class IdbDesign
   // setter
   void set_version(std::string version) { _version = version; }
   void set_design_name(std::string name) { _design_name = name; }
-  void set_units(IdbUnits* units) { _units = units; }
-  void set_instance_list(IdbInstanceList* instance_list) { _instance_list = instance_list; }
-  void set_io_pin_list(IdbPins* pin_list) { _io_pin_list = pin_list; }
-  void set_net_list(IdbNetList* net_list) { _net_list = net_list; }
-  void set_via_list(IdbVias* via_list) { _via_list = via_list; }
-  void set_blockage_list(IdbBlockageList* blockage_list) { _blockage_list = blockage_list; }
-  void set_region_list(IdbRegionList* region_list) { _region_list = region_list; }
-  void set_slot_list(IdbSlotList* slot_list) { _slot_list = slot_list; }
-  void set_group_list(IdbGroupList* group_list) { _group_list = group_list; }
-  void set_special_net_list(IdbSpecialNetList* net_list) { _special_net_list = net_list; }
-  void set_fill_list(IdbFillList* fill_list) { _fill_list = fill_list; }
-  void set_bus_bit_chars(IdbBusBitChars* busbit_chars) { _bus_bit_chars = busbit_chars; }
+  void set_units(IdbUnits* units)
+  {
+    if (_units != units) {
+      delete _units;
+    }
+    _units = units == nullptr ? new IdbUnits() : units;
+  }
+  void set_instance_list(IdbInstanceList* instance_list)
+  {
+    if (_instance_list != instance_list) {
+      delete _instance_list;
+      _instance_list = instance_list;
+    }
+  }
+  void set_io_pin_list(IdbPins* pin_list)
+  {
+    if (_io_pin_list != pin_list) {
+      delete _io_pin_list;
+      _io_pin_list = pin_list;
+    }
+  }
+  void set_net_list(IdbNetList* net_list)
+  {
+    if (_net_list != net_list) {
+      delete _net_list;
+      _net_list = net_list;
+    }
+  }
+  void set_via_list(IdbVias* via_list)
+  {
+    if (_via_list != via_list) {
+      delete _via_list;
+      _via_list = via_list;
+    }
+  }
+  void set_blockage_list(IdbBlockageList* blockage_list)
+  {
+    if (_blockage_list != blockage_list) {
+      delete _blockage_list;
+      _blockage_list = blockage_list;
+    }
+  }
+  void set_region_list(IdbRegionList* region_list)
+  {
+    if (_region_list != region_list) {
+      delete _region_list;
+      _region_list = region_list;
+    }
+  }
+  void set_slot_list(IdbSlotList* slot_list)
+  {
+    if (_slot_list != slot_list) {
+      delete _slot_list;
+      _slot_list = slot_list;
+    }
+  }
+  void set_group_list(IdbGroupList* group_list)
+  {
+    if (_group_list != group_list) {
+      delete _group_list;
+      _group_list = group_list;
+    }
+  }
+  void set_special_net_list(IdbSpecialNetList* net_list)
+  {
+    if (_special_net_list != net_list) {
+      delete _special_net_list;
+      _special_net_list = net_list;
+    }
+  }
+  void set_fill_list(IdbFillList* fill_list)
+  {
+    if (_fill_list != fill_list) {
+      delete _fill_list;
+      _fill_list = fill_list;
+    }
+  }
+  void set_bus_bit_chars(IdbBusBitChars* busbit_chars)
+  {
+    if (_bus_bit_chars != busbit_chars) {
+      delete _bus_bit_chars;
+      _bus_bit_chars = busbit_chars;
+    }
+  }
 
   // operator
   int32_t transUnitDB(double value) { return std::round(_units->get_micron_dbu() * value); }
@@ -144,6 +217,7 @@ class IdbDesign
   bool connectIoPinToNet(const std::string& io_pin_name, const std::string& net_name);
   bool connectInstancePinToNet(const std::string& inst_name, const std::string& pin_name, const std::string& net_name);
   bool disconnectPinFromNet(IdbPin* pin);
+  std::size_t disconnectAllPinsFromNet(IdbNet* net);
   bool removeNetSafe(const std::string& net_name);
   bool renameNet(IdbNet* net, const std::string& new_name);
   bool mergeNetInto(const std::string& target_net_name, const std::string& source_net_name, bool move_wires = true);

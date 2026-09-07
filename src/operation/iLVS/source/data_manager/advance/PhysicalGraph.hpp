@@ -32,10 +32,7 @@ class PhysicalGraph
   std::map<int32_t, std::vector<Shape>>& get_component_shape_map() { return _component_shape_map; }
   std::map<std::string, int32_t>& get_terminal_component_map() { return _terminal_component_map; }
   std::map<std::string, NetRoutingGraph>& get_net_routing_graph_map() { return _net_routing_graph_map; }
-  std::map<std::string, std::vector<int32_t>>& get_net_routing_shape_component_id_list_map()
-  {
-    return _net_routing_shape_component_id_list_map;
-  }
+  std::map<std::string, std::vector<int32_t>>& get_net_routing_shape_component_id_list_map() { return _net_routing_shape_component_id_list_map; }
   std::set<std::string>& get_power_net_name_set() { return _power_net_name_set; }
   std::set<std::string>& get_ground_net_name_set() { return _ground_net_name_set; }
   std::map<std::string, std::string>& get_power_instance_pin_net_map() { return _power_instance_pin_net_map; }
@@ -45,10 +42,7 @@ class PhysicalGraph
   const std::map<int32_t, std::vector<Shape>>& get_component_shape_map() const { return _component_shape_map; }
   const std::map<std::string, int32_t>& get_terminal_component_map() const { return _terminal_component_map; }
   const std::map<std::string, NetRoutingGraph>& get_net_routing_graph_map() const { return _net_routing_graph_map; }
-  const std::map<std::string, std::vector<int32_t>>& get_net_routing_shape_component_id_list_map() const
-  {
-    return _net_routing_shape_component_id_list_map;
-  }
+  const std::map<std::string, std::vector<int32_t>>& get_net_routing_shape_component_id_list_map() const { return _net_routing_shape_component_id_list_map; }
   const std::set<std::string>& get_power_net_name_set() const { return _power_net_name_set; }
   const std::set<std::string>& get_ground_net_name_set() const { return _ground_net_name_set; }
   const std::map<std::string, std::string>& get_power_instance_pin_net_map() const { return _power_instance_pin_net_map; }

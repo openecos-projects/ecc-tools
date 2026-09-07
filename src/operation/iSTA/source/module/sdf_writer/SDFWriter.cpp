@@ -51,10 +51,15 @@ void SDFWriter::destroyInst()
 
 void SDFWriter::write()
 {
+  write(getSDFFilePath());
+}
+
+void SDFWriter::write(const std::string_view file_path)
+{
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
-  outputSDF();
+  outputSDF(file_path);
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -63,10 +68,9 @@ void SDFWriter::write()
 
 SDFWriter* SDFWriter::_sw_instance = nullptr;
 
-void SDFWriter::outputSDF()
+void SDFWriter::outputSDF(const std::string_view file_path)
 {
-  std::string sdf_file_path = getSDFFilePath();
-  std::ofstream* sdf_file = STAUTIL.getOutputFileStream(sdf_file_path);
+  std::ofstream* sdf_file = STAUTIL.getOutputFileStream(file_path);
   outputSDFHeader(sdf_file);
   outputSDFInterconnect(sdf_file);
   outputSDFCellList(sdf_file);
@@ -125,7 +129,7 @@ void SDFWriter::outputSDFInterconnect(std::ofstream* sdf_file)
   (*sdf_file) << "  (DELAY\n";
   (*sdf_file) << "   (ABSOLUTE\n";
   for (Arc& arc : database.get_arc_list()) {
-    if (arc.get_type() != ArcType::kNet || arc.get_is_disable_arc()) {
+    if (arc.get_type() != ArcType::kNet || arc.get_is_disable_arc() || isSDFOutputOnlyCellArc(arc)) {
       continue;
     }
     outputSDFInterconnectArc(sdf_file, arc);
@@ -150,6 +154,36 @@ void SDFWriter::outputSDFInterconnectArc(std::ofstream* sdf_file, Arc& arc)
   (*sdf_file) << "    (INTERCONNECT " << source_pin_name << " " << sink_pin_name << " ";
   outputSDFDelay(sdf_file, sdf_delay);
   (*sdf_file) << ")\n";
+}
+
+bool SDFWriter::isSDFOutputOnlyCellArc(Arc& arc)
+{
+  Database& database = STADM.getDatabase();
+  auto source_pin_it = database.get_pin_map().find(arc.get_source_pin());
+  if (source_pin_it == database.get_pin_map().end() || source_pin_it->second.get_is_port()) {
+    return false;
+  }
+  auto instance_it = database.get_instance_map().find(source_pin_it->second.get_instance_name());
+  if (instance_it == database.get_instance_map().end()) {
+    return false;
+  }
+
+  bool has_output_pin = false;
+  for (std::string& pin_name : instance_it->second.get_pin_name_list()) {
+    auto pin_it = database.get_pin_map().find(pin_name);
+    if (pin_it == database.get_pin_map().end()) {
+      continue;
+    }
+
+    const PinDirection direction = pin_it->second.get_direction();
+    if (direction == PinDirection::kInput || direction == PinDirection::kInout) {
+      return false;
+    }
+    if (direction == PinDirection::kOutput) {
+      has_output_pin = true;
+    }
+  }
+  return has_output_pin;
 }
 
 void SDFWriter::outputSDFCellList(std::ofstream* sdf_file)
@@ -273,8 +307,7 @@ void SDFWriter::outputSDFGraphCellArc(std::ofstream* sdf_file, Arc& arc)
   outputSDFCellArcDelayMap(sdf_file, source_port_name, sink_port_name, cell_arc_delay_map);
 }
 
-void SDFWriter::mergeSDFCellArcDelay(SDFCellArcDelayMap& cell_arc_delay_map, TimingArc& timing_arc, TransType input_trans_type,
-                                     SDFDelay& sdf_delay)
+void SDFWriter::mergeSDFCellArcDelay(SDFCellArcDelayMap& cell_arc_delay_map, TimingArc& timing_arc, TransType input_trans_type, SDFDelay& sdf_delay)
 {
   if (!hasSDFDelay(sdf_delay)) {
     return;
@@ -317,7 +350,8 @@ void SDFWriter::outputSDFOnlyCellArcList(std::ofstream* sdf_file, Instance& inst
     return;
   }
   for (TimingCellArc& timing_cell_arc : timing_cell->get_cell_arc_list()) {
-    if (timing_cell_arc.get_is_timing_graph_arc() || timing_cell_arc.get_is_disable_arc() || !isSDFCellArc(instance, timing_cell_arc)) {
+    if (timing_cell_arc.get_is_timing_graph_arc() || timing_cell_arc.get_is_clear_preset_arc() || timing_cell_arc.get_is_disable_arc()
+        || !isSDFCellArc(instance, timing_cell_arc)) {
       continue;
     }
     outputSDFOnlyCellArc(sdf_file, instance, timing_cell_arc);
@@ -435,7 +469,7 @@ void SDFWriter::outputSDFTimingCheck(std::ofstream* sdf_file, Instance& instance
 }
 
 void SDFWriter::outputSDFEdgeTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc,
-                                          TransType data_trans_type)
+                                         TransType data_trans_type)
 {
   Database& database = STADM.getDatabase();
   std::string timing_check_name = getSDFTimingCheckName(timing_check_arc.get_check_type());
@@ -481,7 +515,7 @@ void SDFWriter::outputSDFEdgeTimingCheck(std::ofstream* sdf_file, Instance& inst
 }
 
 void SDFWriter::outputSDFWidthTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc,
-                                           TransType trans_type)
+                                          TransType trans_type)
 {
   Database& database = STADM.getDatabase();
   std::string pin_name = STAUTIL.getString(instance.get_instance_name(), ":", timing_check_arc.get_data_port());
@@ -490,16 +524,29 @@ void SDFWriter::outputSDFWidthTimingCheck(std::ofstream* sdf_file, Instance& ins
   }
   std::string port_name = getSDFPortName(database.get_pin_map()[pin_name]);
   std::string edge_name = getSDFEdgeName(trans_type);
+  std::string condition = getSDFCondition(timing_arc);
   double min_delay = getSDFTimingCheckDelay(instance, timing_check_arc, timing_arc, AnalysisType::kMin, trans_type);
   double max_delay = getSDFTimingCheckDelay(instance, timing_check_arc, timing_arc, AnalysisType::kMax, trans_type);
+  // Keep the WIDTH SDF triple ordered when the constraint table reverses the
+  // numeric order of the analysis corners.
+  if (min_delay > max_delay) {
+    std::swap(min_delay, max_delay);
+  }
 
-  (*sdf_file) << "    (WIDTH (" << edge_name << " " << port_name << ") ";
+  (*sdf_file) << "    (WIDTH ";
+  if (!condition.empty()) {
+    (*sdf_file) << "(COND " << condition << " ";
+  }
+  (*sdf_file) << "(" << edge_name << " " << port_name << ")";
+  if (!condition.empty()) {
+    (*sdf_file) << ")";
+  }
+  (*sdf_file) << " ";
   outputSDFTriple(sdf_file, min_delay, max_delay);
   (*sdf_file) << ")\n";
 }
 
-void SDFWriter::outputSDFPeriodTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc,
-                                            TimingArc& timing_arc)
+void SDFWriter::outputSDFPeriodTimingCheck(std::ofstream* sdf_file, Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc)
 {
   Database& database = STADM.getDatabase();
   std::string pin_name = STAUTIL.getString(instance.get_instance_name(), ":", timing_check_arc.get_data_port());
@@ -515,8 +562,8 @@ void SDFWriter::outputSDFPeriodTimingCheck(std::ofstream* sdf_file, Instance& in
   (*sdf_file) << ")\n";
 }
 
-void SDFWriter::adjustSDFHoldTimingCheckDelay(Instance& instance, TimingCheckArc& hold_timing_check_arc, TimingArc& hold_timing_arc,
-                                               TransType data_trans_type, double& minimum_hold_delay, double& maximum_hold_delay)
+void SDFWriter::adjustSDFHoldTimingCheckDelay(Instance& instance, TimingCheckArc& hold_timing_check_arc, TimingArc& hold_timing_arc, TransType data_trans_type,
+                                              double& minimum_hold_delay, double& maximum_hold_delay)
 {
   if (hold_timing_check_arc.get_check_type() != TimingCheckType::kHold) {
     return;
@@ -538,10 +585,8 @@ void SDFWriter::adjustSDFHoldTimingCheckDelay(Instance& instance, TimingCheckArc
     setup_timing_arc = &default_setup_timing_arc;
   }
 
-  double minimum_setup_delay
-      = getSDFTimingCheckDelay(instance, *setup_timing_check_arc, *setup_timing_arc, AnalysisType::kMin, data_trans_type);
-  double maximum_setup_delay
-      = getSDFTimingCheckDelay(instance, *setup_timing_check_arc, *setup_timing_arc, AnalysisType::kMax, data_trans_type);
+  double minimum_setup_delay = getSDFTimingCheckDelay(instance, *setup_timing_check_arc, *setup_timing_arc, AnalysisType::kMin, data_trans_type);
+  double maximum_setup_delay = getSDFTimingCheckDelay(instance, *setup_timing_check_arc, *setup_timing_arc, AnalysisType::kMax, data_trans_type);
   if (minimum_setup_delay > maximum_setup_delay) {
     std::swap(minimum_setup_delay, maximum_setup_delay);
   }
@@ -558,8 +603,7 @@ TimingCheckArc* SDFWriter::findSDFSetupTimingCheck(TimingCell& timing_cell, Timi
     if (timing_check_arc.get_check_type() != TimingCheckType::kSetup) {
       continue;
     }
-    if (timing_check_arc.get_data_port() == hold_timing_check_arc.get_data_port()
-        && timing_check_arc.get_clock_port() == hold_timing_check_arc.get_clock_port()
+    if (timing_check_arc.get_data_port() == hold_timing_check_arc.get_data_port() && timing_check_arc.get_clock_port() == hold_timing_check_arc.get_clock_port()
         && timing_check_arc.get_clock_trans_type() == hold_timing_check_arc.get_clock_trans_type()) {
       return &timing_check_arc;
     }
@@ -567,12 +611,10 @@ TimingCheckArc* SDFWriter::findSDFSetupTimingCheck(TimingCell& timing_cell, Timi
   return nullptr;
 }
 
-TimingArc* SDFWriter::findSDFSetupTimingArc(TimingCheckArc& setup_timing_check_arc, TimingArc& hold_timing_arc,
-                                             TransType data_trans_type)
+TimingArc* SDFWriter::findSDFSetupTimingArc(TimingCheckArc& setup_timing_check_arc, TimingArc& hold_timing_arc, TransType data_trans_type)
 {
   for (TimingArc& timing_arc : setup_timing_check_arc.get_timing_arc_list()) {
-    if (timing_arc.get_sdf_cond() != hold_timing_arc.get_sdf_cond()
-        || timing_arc.get_check_trans_type() != hold_timing_arc.get_check_trans_type()) {
+    if (timing_arc.get_sdf_cond() != hold_timing_arc.get_sdf_cond() || timing_arc.get_check_trans_type() != hold_timing_arc.get_check_trans_type()) {
       continue;
     }
     if (timing_arc.get_check_table_map().empty()) {
@@ -692,8 +734,8 @@ bool SDFWriter::hasSDFDelay(SDFDelay& sdf_delay)
   return sdf_delay.get_rise_min_delay() || sdf_delay.get_rise_max_delay() || sdf_delay.get_fall_min_delay() || sdf_delay.get_fall_max_delay();
 }
 
-double SDFWriter::getSDFTimingCheckDelay(Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc,
-                                          AnalysisType analysis_type, TransType data_trans_type)
+double SDFWriter::getSDFTimingCheckDelay(Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc, AnalysisType analysis_type,
+                                         TransType data_trans_type)
 {
   if (timing_arc.get_check_table_map().count(data_trans_type) == 0) {
     return timing_check_arc.get_check_time();
@@ -702,12 +744,11 @@ double SDFWriter::getSDFTimingCheckDelay(Instance& instance, TimingCheckArc& tim
   double data_slew = getSDFSlew(data_pin_name, analysis_type, data_trans_type);
   double clock_slew = getSDFTimingCheckSlew(instance, timing_check_arc, analysis_type, data_trans_type);
   double delay = timing_arc.get_check_table_map()[data_trans_type].findValue(clock_slew * timing_arc.get_time_unit_scale(),
-                                                                              data_slew * timing_arc.get_time_unit_scale());
+                                                                             data_slew * timing_arc.get_time_unit_scale());
   return delay / timing_arc.get_time_unit_scale();
 }
 
-double SDFWriter::getSDFTimingCheckSlew(Instance& instance, TimingCheckArc& timing_check_arc, AnalysisType analysis_type,
-                                        TransType data_trans_type)
+double SDFWriter::getSDFTimingCheckSlew(Instance& instance, TimingCheckArc& timing_check_arc, AnalysisType analysis_type, TransType data_trans_type)
 {
   if (timing_check_arc.get_check_type() == TimingCheckType::kWidth || timing_check_arc.get_check_type() == TimingCheckType::kPeriod) {
     std::string pin_name = STAUTIL.getString(instance.get_instance_name(), ":", timing_check_arc.get_data_port());

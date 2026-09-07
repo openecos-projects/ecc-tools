@@ -4,6 +4,7 @@ icts_add_test_executable(
     ${ICTS_TEST}/data_manager/DataManagerTest.cc
 )
 
+add_subdirectory(lifecycle)
 add_subdirectory(adapter)
 add_subdirectory(config)
 add_subdirectory(design)

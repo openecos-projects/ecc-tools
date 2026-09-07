@@ -23,6 +23,8 @@
  */
 #include "IdbBus.h"
 
+#include <limits>
+
 #include <cctype>
 #include <iostream>
 #include <optional>
@@ -37,18 +39,24 @@ namespace idb {
 
 std::optional<IdbBus> IdbBus::parseBusObj(const std::string& name_str, const IdbBusBitChars* bus_bit_chars)
 {
+  if (bus_bit_chars == nullptr) {
+    return std::nullopt;
+  }
   auto name_index = parseBusName(name_str, *bus_bit_chars);
   if (not name_index) {
     return std::nullopt;
   }
-  IdbBus bus_obj;
-  bus_obj.set_name(name_index->first);
-  bus_obj.updateRange(name_index->second);
-  return bus_obj;
+  return IdbBus(name_index->first, name_index->second, name_index->second);
 }
 
 void IdbBus::updateRange(unsigned index)
 {
+  if (!_has_range) {
+    _left = index;
+    _right = index;
+    _has_range = true;
+    return;
+  }
   _right = std::min(_right, index);
   _left = std::max(_left, index);
 }
@@ -154,29 +162,49 @@ std::optional<std::pair<std::string, unsigned>> IdbBus::parseBusName(std::string
    * parse state:
    *  read [bus_index], skip escaped busbitchars \[\]
    */
-  if (!name_str.empty() && name_str.back() != bus_bit_chars.getRightDelimiter()) {
+  if (name_str.empty() || name_str.back() != bus_bit_chars.getRightDelimiter()) {
     return std::nullopt;
   }
-  int index = 0;
-
-  size_t start_pos = name_str.find_last_of(bus_bit_chars.getLeftDelimiter());
-  if (start_pos != std::string::npos) {
-    size_t end_pos = name_str.find_last_of(bus_bit_chars.getRightDelimiter());
-    if (end_pos != std::string::npos && end_pos > start_pos) {
-      std::string extracted_str = name_str.substr(start_pos + 1, end_pos - start_pos - 1);
-
-      try {
-        index = std::stoi(extracted_str);
-      } catch (const std::invalid_argument& e) {
-        ECCLOG.warn(ecc::Loc::current(), "Error: Invalid number format.");
-      } catch (const std::out_of_range& e) {
-        ECCLOG.warn(ecc::Loc::current(), "Error: Number out of range.");
-      }
-
-      name_str.erase(start_pos, end_pos - start_pos + 1);
+  const size_t end_pos = name_str.size() - 1;
+  size_t start_pos = std::string::npos;
+  bool escaped = false;
+  for (size_t i = 0; i < end_pos; ++i) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (name_str[i] == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (name_str[i] == bus_bit_chars.getLeftDelimiter()) {
+      start_pos = i;
     }
   }
+  if (start_pos == std::string::npos || start_pos == 0) {
+    return std::nullopt;
+  }
 
+  const std::string index_str = name_str.substr(start_pos + 1, end_pos - start_pos - 1);
+  if (index_str.empty()
+      || !std::all_of(index_str.begin(), index_str.end(), [](unsigned char character) { return std::isdigit(character) != 0; })) {
+    return std::nullopt;
+  }
+  unsigned index = 0;
+  try {
+    size_t parsed = 0;
+    const unsigned long value = std::stoul(index_str, &parsed);
+    if (parsed != index_str.size() || value > std::numeric_limits<unsigned>::max()) {
+      return std::nullopt;
+    }
+    index = static_cast<unsigned>(value);
+  } catch (const std::invalid_argument&) {
+    return std::nullopt;
+  } catch (const std::out_of_range&) {
+    return std::nullopt;
+  }
+
+  name_str.erase(start_pos);
   return std::pair<std::string, unsigned>{name_str, index};
 }
 void IdbBusList::addOrUpdate(const std::pair<std::string, unsigned>& info, const std::function<void(IdbBus&)>& setter)

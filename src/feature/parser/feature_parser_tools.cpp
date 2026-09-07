@@ -300,39 +300,6 @@ json FeatureParser::buildSummaryCTS()
   return json_cts;
 }
 
-json FeatureParser::buildSummaryNetOpt()
-{
-  json json_netopt;
-
-  NetOptSummary& summary = _summary->get_summary_ino();
-
-  json json_clock_timings;
-  for (int i = 0; i < (int) summary.clock_timings.size(); ++i) {
-    NOClockTimingCmp clock_timing = summary.clock_timings[i];
-
-    json_clock_timings[i]["clock_name"] = clock_timing.clock_name;
-    json_clock_timings[i]["origin_setup_tns"] = clock_timing.origin.setup_tns;
-    json_clock_timings[i]["origin_setup_wns"] = clock_timing.origin.setup_wns;
-    json_clock_timings[i]["origin_hold_tns"] = clock_timing.origin.hold_tns;
-    json_clock_timings[i]["origin_hold_wns"] = clock_timing.origin.hold_wns;
-    json_clock_timings[i]["origin_suggest_freq"] = clock_timing.origin.suggest_freq;
-    json_clock_timings[i]["opt_setup_tns"] = clock_timing.opt.setup_tns;
-    json_clock_timings[i]["opt_setup_wns"] = clock_timing.opt.setup_wns;
-    json_clock_timings[i]["opt_hold_tns"] = clock_timing.opt.hold_tns;
-    json_clock_timings[i]["opt_hold_wns"] = clock_timing.opt.hold_wns;
-    json_clock_timings[i]["opt_suggest_freq"] = clock_timing.opt.suggest_freq;
-    json_clock_timings[i]["delta_setup_tns"] = clock_timing.delta.setup_tns;
-    json_clock_timings[i]["delta_setup_wns"] = clock_timing.delta.setup_wns;
-    json_clock_timings[i]["delta_hold_tns"] = clock_timing.delta.hold_tns;
-    json_clock_timings[i]["delta_hold_wns"] = clock_timing.delta.hold_wns;
-    json_clock_timings[i]["delta_suggest_freq"] = clock_timing.delta.suggest_freq;
-  }
-
-  json_netopt["clocks_timing"] = json_clock_timings;
-
-  return json_netopt;
-}
-
 json FeatureParser::buildSummaryTO(std::string step)
 {
   auto step_summary = [](std::string step, FeatureSummary* summary) {

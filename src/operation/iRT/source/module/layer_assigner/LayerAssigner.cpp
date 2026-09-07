@@ -16,10 +16,9 @@
 // ***************************************************************************************
 #include "LayerAssigner.hpp"
 
-#include <algorithm>
-
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
+#include "RTHeader.hpp"
 #include "RTInterface.hpp"
 #include "Utility.hpp"
 
@@ -69,6 +68,7 @@ void LayerAssigner::assign()
   outputGuide(la_model);
   outputNetCSV(la_model);
   outputOverflowCSV(la_model);
+  outputSummaryCSV(la_model);
   RTDM.getDatabase().get_net_global_result_map() = std::move(la_model.get_net_global_result_map());
   RTDM.rebuildGlobalResultRTree();
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -84,6 +84,7 @@ void LayerAssigner::clearRoutingEdgeDemand()
       for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
         for (int32_t y = 0; y < routing_edge_map.get_y_size(); y++) {
           routing_edge_map[x][y].set_demand(0);
+          routing_edge_map[x][y].get_demand_net_idx_list().clear();
         }
       }
     }
@@ -785,6 +786,16 @@ void LayerAssigner::updateRoutingTreeToGraph(LAModel& la_model, const RoutingSeg
       if (change_type == ChangeType::kDel && routing_edge.get_demand() <= 0) {
         RTLOG.error(Loc::current(), "The routing edge demand is error!");
       }
+      std::vector<int32_t>& demand_net_idx_list = routing_edge.get_demand_net_idx_list();
+      if (change_type == ChangeType::kAdd) {
+        demand_net_idx_list.push_back(curr_net_idx);
+      } else {
+        auto iter = std::find(demand_net_idx_list.begin(), demand_net_idx_list.end(), curr_net_idx);
+        if (iter == demand_net_idx_list.end()) {
+          RTLOG.error(Loc::current(), "The routing edge demand net is error!");
+        }
+        demand_net_idx_list.erase(iter);
+      }
       routing_edge.set_demand(routing_edge.get_demand() + delta);
     }
   }
@@ -1108,6 +1119,21 @@ void LayerAssigner::outputOverflowCSV(LAModel& la_model)
     RTUTIL.closeFileStream(overflow_csv_file);
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void LayerAssigner::outputSummaryCSV(LAModel& la_model)
+{
+  int32_t output_inter_result = RTDM.getConfig().output_inter_result;
+  if (!output_inter_result) {
+    return;
+  }
+  Summary& summary = RTDM.getDatabase().get_summary();
+  std::ofstream* summary_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(RTDM.getConfig().la_temp_directory_path, "route_summary.csv"));
+  RTUTIL.pushStream(summary_csv_file, "metric,value\n");
+  RTUTIL.pushStream(summary_csv_file, "total_overflow,", summary.la_summary.total_overflow, "\n");
+  RTUTIL.pushStream(summary_csv_file, "total_wire_length,", summary.la_summary.total_wire_length, "\n");
+  RTUTIL.pushStream(summary_csv_file, "total_via_num,", summary.la_summary.total_via_num, "\n");
+  RTUTIL.closeFileStream(summary_csv_file);
 }
 
 // debug

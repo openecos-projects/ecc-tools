@@ -20,9 +20,7 @@
  */
 #pragma once
 
-#include <unordered_map>
-#include <vector>
-
+#include "RCXHeader.hpp"
 #include "Types.hh"
 
 namespace ircx::plot_spef {
@@ -81,11 +79,7 @@ inline auto resistorWidth(const Resistor& resistor) -> F64
 
 inline auto isWireResistor(const Resistor& resistor) -> bool
 {
-  return resistor.has_layer
-         && resistor.layer >= 1
-         && resistor.layer <= 10
-         && resistorLength(resistor) > 1e-12
-         && resistorWidth(resistor) < 1.0;
+  return resistor.has_layer && resistor.layer >= 1 && resistor.layer <= 10 && resistorLength(resistor) > 1e-12 && resistorWidth(resistor) < 1.0;
 }
 
 struct EdgeRef
@@ -105,8 +99,7 @@ inline auto edgeRefTieValue(const EdgeRef& ref) -> Size
   return ref.net_index * 1000000U + ref.resistor_index;
 }
 
-inline auto nodeEdgeVoteKey(const std::string& node,
-                            const EdgeRef& ref) -> std::string
+inline auto nodeEdgeVoteKey(const std::string& node, const EdgeRef& ref) -> std::string
 {
   return node + "\n" + edgeRefKey(ref);
 }
@@ -130,22 +123,16 @@ struct Net
   std::vector<Capacitor> ground_caps;
 };
 
-inline auto findNode(Net& net,
-                     const std::string& name) -> Node*
+inline auto findNode(Net& net, const std::string& name) -> Node*
 {
   const auto it = net.node_index_by_name.find(name);
-  return it == net.node_index_by_name.end() || it->second >= net.nodes.size()
-             ? nullptr
-             : &net.nodes[it->second];
+  return it == net.node_index_by_name.end() || it->second >= net.nodes.size() ? nullptr : &net.nodes[it->second];
 }
 
-inline auto findNode(const Net& net,
-                     const std::string& name) -> const Node*
+inline auto findNode(const Net& net, const std::string& name) -> const Node*
 {
   const auto it = net.node_index_by_name.find(name);
-  return it == net.node_index_by_name.end() || it->second >= net.nodes.size()
-             ? nullptr
-             : &net.nodes[it->second];
+  return it == net.node_index_by_name.end() || it->second >= net.nodes.size() ? nullptr : &net.nodes[it->second];
 }
 
 struct Model
@@ -161,34 +148,24 @@ struct Model
   std::unordered_map<int, std::string> layer_names;
 };
 
-inline auto findNode(Model& model,
-                     const std::string& name) -> Node*
+inline auto findNode(Model& model, const std::string& name) -> Node*
 {
   const auto it = model.node_refs_by_name.find(name);
-  if (it == model.node_refs_by_name.end()
-      || !it->second.valid
-      || it->second.net_index >= model.nets.size()) {
+  if (it == model.node_refs_by_name.end() || !it->second.valid || it->second.net_index >= model.nets.size()) {
     return nullptr;
   }
   auto& net = model.nets[it->second.net_index];
-  return it->second.node_index >= net.nodes.size()
-             ? nullptr
-             : &net.nodes[it->second.node_index];
+  return it->second.node_index >= net.nodes.size() ? nullptr : &net.nodes[it->second.node_index];
 }
 
-inline auto findNode(const Model& model,
-                     const std::string& name) -> const Node*
+inline auto findNode(const Model& model, const std::string& name) -> const Node*
 {
   const auto it = model.node_refs_by_name.find(name);
-  if (it == model.node_refs_by_name.end()
-      || !it->second.valid
-      || it->second.net_index >= model.nets.size()) {
+  if (it == model.node_refs_by_name.end() || !it->second.valid || it->second.net_index >= model.nets.size()) {
     return nullptr;
   }
   const auto& net = model.nets[it->second.net_index];
-  return it->second.node_index >= net.nodes.size()
-             ? nullptr
-             : &net.nodes[it->second.node_index];
+  return it->second.node_index >= net.nodes.size() ? nullptr : &net.nodes[it->second.node_index];
 }
 
 }  // namespace ircx::plot_spef

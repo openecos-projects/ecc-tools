@@ -8,11 +8,11 @@ target_link_libraries(tcl_flow
     PUBLIC
         tool_manager
         tcl
-        flow
         tcl_util
 )
 
 target_include_directories(tcl_flow
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${HOME_INTERFACE}/tcl
 )

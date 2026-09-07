@@ -21,7 +21,6 @@
 #include <string>
 
 #include "RTInterface.hpp"
-#include "flow_config.h"
 namespace python_interface {
 
 bool initConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
@@ -53,8 +52,6 @@ bool runRT()
 
 bool initRT(std::string& config, std::map<std::string, std::string>& config_dict)
 {
-  iplf::flowConfigInst->set_status_stage("iRT - Routing");
-
   std::map<std::string, std::any> config_map;
 
   bool pass = false;

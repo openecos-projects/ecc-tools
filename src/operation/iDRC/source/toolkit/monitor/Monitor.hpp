@@ -16,8 +16,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include <optional>
-
 #include "DRCHeader.hpp"
 
 namespace idrc {

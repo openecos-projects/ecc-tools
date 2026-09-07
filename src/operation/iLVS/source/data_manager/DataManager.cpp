@@ -212,8 +212,7 @@ void DataManager::buildPhysicalGraph()
   std::set<std::string>& ground_net_name_set = physical_graph.get_ground_net_name_set();
   for (auto& [net_name, routing_graph] : physical_graph.get_net_routing_graph_map()) {
     bool build_terminal_shape = LVSUTIL.exist(power_net_name_set, net_name) || LVSUTIL.exist(ground_net_name_set, net_name);
-    if (!build_terminal_shape && routing_graph.get_terminal_routing_shape_num()
-                                     >= static_cast<int32_t>(routing_graph.get_routing_shape_list().size())) {
+    if (!build_terminal_shape && routing_graph.get_terminal_routing_shape_num() >= static_cast<int32_t>(routing_graph.get_routing_shape_list().size())) {
       continue;
     }
     buildPhysicalGraphNode(physical_graph_build_data, net_name, routing_graph, build_terminal_shape);
@@ -223,8 +222,8 @@ void DataManager::buildPhysicalGraph()
   LVSLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void DataManager::buildPhysicalGraphNode(PhysicalGraphBuildData& physical_graph_build_data, const std::string& net_name,
-                                         const NetRoutingGraph& routing_graph, bool build_terminal_shape)
+void DataManager::buildPhysicalGraphNode(PhysicalGraphBuildData& physical_graph_build_data, const std::string& net_name, const NetRoutingGraph& routing_graph,
+                                         bool build_terminal_shape)
 {
   PhysicalGraph& physical_graph = _database.get_def_data().get_physical_graph();
   const std::vector<RoutingShape>& routing_shape_list = routing_graph.get_routing_shape_list();
@@ -290,8 +289,7 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
   PhysicalGraph& physical_graph = _database.get_def_data().get_physical_graph();
   std::vector<PhysicalGraphBuildNode>& graph_node_list = physical_graph_build_data.get_graph_node_list();
   std::vector<std::pair<int32_t, int32_t>>& via_node_pair_list = physical_graph_build_data.get_via_node_pair_list();
-  std::map<std::string, std::vector<PhysicalGraphBuildTerminal>>& net_terminal_build_data_map =
-      physical_graph_build_data.get_net_terminal_build_data_map();
+  std::map<std::string, std::vector<PhysicalGraphBuildTerminal>>& net_terminal_build_data_map = physical_graph_build_data.get_net_terminal_build_data_map();
 
   DisjointSet graph(static_cast<int32_t>(graph_node_list.size()));
   std::map<int32_t, std::vector<int32_t>> layer_node_idx_map;
@@ -316,8 +314,8 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
     LVSLOG.info(Loc::current(), "Querying layer ", layer_idx, " routing connectivity.");
     for (int32_t node_idx : node_idx_list) {
       Shape& node_shape = graph_node_list[node_idx].get_shape();
-      for (bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>>::const_query_iterator query_iter =
-               bg_rtree.qbegin(bgi::intersects(convertToBGRectInt(node_shape)));
+      for (bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>>::const_query_iterator query_iter
+           = bg_rtree.qbegin(bgi::intersects(convertToBGRectInt(node_shape)));
            query_iter != bg_rtree.qend(); ++query_iter) {
         const std::pair<BGRectInt, int32_t>& candidate_rect_node_pair = *query_iter;
         int32_t active_node_idx = candidate_rect_node_pair.second;
@@ -369,8 +367,8 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
     PhysicalGraphBuildNode& graph_node = graph_node_list[node_idx];
     int32_t node_component_id = component_id_map[graph.find(node_idx)];
     physical_graph.get_component_shape_map()[node_component_id].push_back(graph_node.get_shape());
-    std::map<std::string, std::vector<int32_t>>::iterator component_id_list_iter =
-        physical_graph.get_net_routing_shape_component_id_list_map().find(graph_node.get_net_name());
+    std::map<std::string, std::vector<int32_t>>::iterator component_id_list_iter
+        = physical_graph.get_net_routing_shape_component_id_list_map().find(graph_node.get_net_name());
     if (component_id_list_iter == physical_graph.get_net_routing_shape_component_id_list_map().end()) {
       continue;
     }

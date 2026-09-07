@@ -24,6 +24,13 @@
 
 namespace idm {
 
+CheckNet::~CheckNet()
+{
+  for (auto* node : _node_list) {
+    delete node;
+  }
+}
+
 bool CheckNodePin::isIntersection(CheckNode* node_dst)
 {
   if (node_dst->is_seg()) {
@@ -134,25 +141,28 @@ void CheckNet::buildGraphBFS(NetGraph& graph, CheckNode* check_node)
   std::vector<CheckNode*> connected_node_list;
   /// find connected vetex
   for (size_t i = 0; i < _node_list.size(); i++) {
-    if (_node_list[i]->is_visited() || check_node == _node_list[i]) {
+    if (check_node == _node_list[i]) {
       continue;
     }
 
     if (isIntersection(check_node, _node_list[i])) {
-      /// set as visted
-      _node_list[i]->set_graph_id(graph.get_id());
-      check_node->set_graph_id(graph.get_id());
+      if (!_node_list[i]->is_visited()) {
+        _node_list[i]->set_graph_id(graph.get_id());
+        graph.add_vertex(_node_list[i]->get_id());
+        connected_node_list.push_back(_node_list[i]);
+      }
 
-      /// add to graph
-      graph.add_vertex(i);
+      if (_node_list[i]->get_graph_id() != graph.get_id()) {
+        continue;
+      }
+
+      /// Add every physical intersection once so ring checks use the real graph.
       graph.add_edge(check_node->get_id(), _node_list[i]->get_id());
 
       /// add pin to graph
       if (_node_list[i]->is_pin()) {
         graph.addConnectedPin(i);
       }
-
-      connected_node_list.push_back(_node_list[i]);
     }
   }
 

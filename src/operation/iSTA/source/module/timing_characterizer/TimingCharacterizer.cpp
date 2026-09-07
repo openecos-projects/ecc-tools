@@ -229,8 +229,8 @@ void TimingCharacterizer::buildTCCheckArcList(TCLib& tc_lib, AnalysisType analys
   }
 }
 
-void TimingCharacterizer::buildTCCheckArc(TCLib& tc_lib, std::string& source_port, std::string& sink_port, std::string& timing_type,
-                                           double rise_constraint, double fall_constraint, bool has_rise_constraint, bool has_fall_constraint)
+void TimingCharacterizer::buildTCCheckArc(TCLib& tc_lib, std::string& source_port, std::string& sink_port, std::string& timing_type, double rise_constraint,
+                                          double fall_constraint, bool has_rise_constraint, bool has_fall_constraint)
 {
   if (source_port.empty() || sink_port.empty() || timing_type.empty() || (!has_rise_constraint && !has_fall_constraint)) {
     return;
@@ -369,8 +369,8 @@ double TimingCharacterizer::getWorseDelay(double current_delay, double delay, bo
   return std::max(current_delay, delay);
 }
 
-void TimingCharacterizer::buildTCDelayArc(TCLib& tc_lib, std::string& source_port, std::string& sink_port, std::string& timing_type,
-                                           std::string& timing_sense, double rise_delay, double fall_delay, bool has_rise_delay, bool has_fall_delay)
+void TimingCharacterizer::buildTCDelayArc(TCLib& tc_lib, std::string& source_port, std::string& sink_port, std::string& timing_type, std::string& timing_sense,
+                                          double rise_delay, double fall_delay, bool has_rise_delay, bool has_fall_delay)
 {
   if (source_port.empty() || sink_port.empty() || timing_type.empty() || (!has_rise_delay && !has_fall_delay)) {
     return;

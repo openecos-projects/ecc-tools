@@ -68,12 +68,14 @@ auto EmitDepthCandidateSummary(const HTree::LogContext& context, const std::vect
                     ToLogTableCell(summary.candidate_solution_count), ToLogTableCell(summary.candidate_frontier_entry_count),
                     ToLogTableCell(summary.feasible_solution_count), ToLogTableCell(summary.feasible_frontier_entry_count),
                     ToLogTableCell(summary.final_frontier_count), ToLogTableCell(summary.split_group_count), ToLogTableCell(summary.split_extra_buffer_count),
-                    ToLogTableCell(summary.split_local_depth), ToLogTableCell(summary.used_boundary_relaxation), ToLogTableCell(summary.selected_delay_ns),
-                    ToLogTableCell(summary.selected_power_w), summary.failure_reason.empty() ? "n/a" : summary.failure_reason});
+                    ToLogTableCell(summary.split_local_depth), ToLogTableCell(summary.split_triggered_by_fanout),
+                    ToLogTableCell(summary.split_triggered_by_capacitance), ToLogTableCell(summary.used_boundary_relaxation),
+                    ToLogTableCell(summary.selected_delay_ns), ToLogTableCell(summary.selected_power_w),
+                    summary.failure_reason.empty() ? "n/a" : summary.failure_reason});
   }
   EmitLogTable(Loc::current(), "HTree Depth Candidate Summary",
                {"Depth", "Leaves", "Status", "Explicit", "Candidates", "Candidate Front", "Feasible", "Feasible Front", "Final Front", "Split Groups",
-                "Extra Buffers", "Local Depth", "Relaxed", "Delay (ns)", "Power (W)", "Failure"},
+                "Extra Buffers", "Local Depth", "Fanout Trigger", "Cap Trigger", "Relaxed", "Delay (ns)", "Power (W)", "Failure"},
                rows);
   EmitLogTable(Loc::current(), "HTree Candidate Scope", {"Property", "Value"},
                {{"Clock", context.clock_name}, {"Net", context.clock_net_name}, {"Sink Domain", context.sink_domain}, {"Stage", context.stage}});
@@ -152,6 +154,8 @@ auto SelectDiscreteHTreeSolution(HTreeSynthesisState& state) -> HTreeSelectionBu
   selected_summary.split_group_count = selected_ref->split_group_count;
   selected_summary.split_extra_buffer_count = selected_ref->split_extra_buffer_count;
   selected_summary.split_local_depth = selected_ref->split_local_depth;
+  selected_summary.split_triggered_by_fanout = selected_ref->split_triggered_by_fanout;
+  selected_summary.split_triggered_by_capacitance = selected_ref->split_triggered_by_capacitance;
   const auto selected_sink_load_region_legality
       = htree::ResolveSinkLoadRegionLegality(result.output.topology, selected_ref->entry->get_pattern_id(), selected_evaluation.topology_pattern_library,
                                              segment_pattern_library, exploration.output.sink_load_region_legality_context);
@@ -191,6 +195,7 @@ auto SelectDiscreteHTreeSolution(HTreeSynthesisState& state) -> HTreeSelectionBu
       .engine = htree::HTreeSelectionEngine::kDiscrete,
       .evaluation = selected_evaluation,
       .summary = selected_summary,
+      .sink_load_region_legality = selected_sink_load_region_legality,
       .compensation_stats = exploration.summary.root_driver_compensation_stats,
       .compensation_detail = selected_compensation_detail,
       .root_driver_clock_period_source = state.root_driver_clock_period_source,

@@ -474,14 +474,8 @@ class IdbEnum
 
   static IdbEnum* GetInstance()
   {
-    if (_instance == nullptr) {
-      _mutex.lock();
-      if (_instance == nullptr) {
-        _instance = new IdbEnum();
-      }
-      _mutex.unlock();
-    }
-    return _instance;
+    static IdbEnum instance;
+    return &instance;
   }
 
   IdbInstancePropertyMap* get_instance_property() { return _property_map; }
@@ -495,9 +489,6 @@ class IdbEnum
   IdbEnum();
   IdbEnum(IdbEnum& other) = delete;
   void operator=(const IdbEnum&) = delete;
-
-  static IdbEnum* _instance;
-  static std::mutex _mutex;
 
   IdbInstancePropertyMap* _property_map;
   IdbSiteProperty* _site_property;

@@ -1,0 +1,29 @@
+add_library(ista_sdc_command
+    ${ISTA_MODULE}/sdc_command/SdcCommand.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/SdcTclCmd.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/SdcCommandUtils.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/CreateClock.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/GetClocks.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/GetPorts.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/SetCaseAnalysis.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/SetInputDelay.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/SetOutputDelay.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/SetInputTransition.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/SetLoad.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/SetClockUncertainty.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/SetPropagatedClock.cpp
+)
+
+target_link_libraries(ista_sdc_command
+    PUBLIC
+        tcl
+    PRIVATE
+        ista_data_manager
+)
+
+target_include_directories(ista_sdc_command
+    PUBLIC
+        ${ISTA_MODULE}/sdc_command
+        ${ISTA_MODULE}/sdc_command/sdc_commands
+        ${ISTA_TOOLKIT}/utility
+)

@@ -104,7 +104,6 @@ scripts/design/sky130_gcd/script
 ├── DB_script                           # Data process flow scripts
 │   ├── db_init_lef.tcl                 # Initialize lef
 │   ├── db_init_lib_drv.tcl             # Initialize lib only for flow of drv 
-│   ├── db_init_lib_fixfanout.tcl       # Initialize lib only for flow of fix fanout
 │   ├── db_init_lib_hold.tcl            # Initialize lib only for flow of optimize hold
 │   ├── db_init_lib_setup.tcl           # Initialize lib only for flow of optimize setup
 │   ├── db_init_lib.tcl                 # Initialize lib for common flow
@@ -133,8 +132,6 @@ scripts/design/sky130_gcd/script
 │   └── run_iFP.tcl                     # Run Floorplan
 ├── iGUI_script                         # GUI flow scipts
 │   └── run_iGUI.tcl                    # Run GUI
-├── iNO_script                          # NO(Netlist Optimization) flow scipts
-│   └── run_iNO_fix_fanout.tcl          # Run Fix Fanout
 ├── iPL_script                          # Placement flow scripts
 │   ├── run_iPL_eval.tcl                # Report congestion statistics and wire legnth for Placement result
 │   ├── run_iPL_filler.tcl              # Run standard cell filler
@@ -175,7 +172,6 @@ First, the process environment path must be configured. To facilitate the search
 | Set TechLef Path                      | set TECH_LEF_PATH xxx                    | set TECH_LEF_PATH "./lef/sky130_fd_sc_hs.tlef"                    |
 | Set Lef Path                          | set LEF_PATH xxx                         | set LEF_PATH./lef/sky130_ef_io__com_bus_slice_10um.lef           |
 | Set Lib Path                          | set LIB_PATH xxx                         | set LIB_PATH./lib/sky130_dummy_io.lib                            |
-| Set Fix Fanout Lib Path               | set LIB_PATH_FIXFANOUT xxx               | set LIB_PATH_FIXFANOUT./lib/sky130_dummy_io.lib                  |
 | Set Fix DRV Violation Lib Path        | set LIB_PATH_DRV xxx                     | set LIB_PATH_DRV./lib/sky130_dummy_io.lib                        |
 | Set Fix Hold Violation Lib Path       | set LIB_PATH_HOLD xxx                    | set LIB_PATH_HOLD./lib/sky130_dummy_io.lib                       |
 | Set Fix Setup Violation Lib Path      | set LIB_PATH_SETUP xxx                   | set LIB_PATH_SETUP./lib/sky130_dummy_io.lib                      |
@@ -740,8 +736,7 @@ The full process is automatically run, and the input and output of the front and
 | Flow                               | Script                                                           | Config                                    | Design Input                       | Design Output                                                               | Report                                                                                                      |
 | :--------------------------------- | :--------------------------------------------------------------- | :---------------------------------------- | :--------------------------------- | :-------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------- |
 | Floorplan                          |./iEDA -script./script/iFP_script/run_iFP.tcl                   |                                           |./result/verilog/gcd.v             |./result/iFP_result.def `<br>`./result/iFP_result.v                       |./result/report/fp_db.rpt                                                                                   |
-| Netlist Optimization (Fix Fanout)  |./iEDA -script./script/iNO_script/run_iNO_fix_fanout.tcl        |./iEDA_config/cts_default_config.json     |./result/iFP_result.def            |./result/iTO_fix_fanout_result.def `<br>`./result/iTO_fix_fanout_result.v |./result/report/fixfanout_db.rpt                                                                            |
-| Placement                          |./iEDA -script./script/iPL_script/run_iPL.tcl                   |./iEDA_config/pl_default_config.json      |./result/iTO_fix_fanout_result.def |./result/iPL_result.def `<br>`./result/iPL_result.v                       |./result/report/pl_db.rpt                                                                                   |
+| Placement                          |./iEDA -script./script/iPL_script/run_iPL.tcl                   |./iEDA_config/pl_default_config.json      |./result/iFP_result.def            |./result/iPL_result.def `<br>`./result/iPL_result.v                       |./result/report/pl_db.rpt                                                                                   |
 | Placement Result Evaluation (Wire Length and Congestion)  |./iEDA -script./script/iPL_script/run_iPL_eval.tcl              |                                           |./result/iPL_result.def            |                                                                             |./result/report/eval/iPL_result_wirelength.rpt `<br>`./result/report/eval/iPL_result_congestion.rpt       |
 | Clock Tree Synthesis (CTS)          |./iEDA -script./script/iCTS_script/run_iCTS.tcl                 |./iEDA_config/cts_default_config.json     |./result/iPL_result.def            |./result/iCTS_result.def `<br>`./result/iCTS_result.v                     |./result/report/cts_db.rpt                                                                                  |
 | CTS Result Evaluation (Wire Length) |./iEDA -script./script/iCTS_script/run_iCTS_eval.tcl            |                                           |./result/iCTS_result.def           |                                                                             |./result/report/eval/iCTS_result_wirelength.rpt                                                             |
@@ -808,80 +803,6 @@ PDN
 
 <div align=center> <img src="/res/images/tools/platform/pic/gui/gui_floorplan_pdn.png" style="zoom:50%;" /> </div>
 
-#### Netlist Optimization (Fix Fanout)
-
-**Execution Script** `<br>`
-
-```bash
-./iEDA -script./script/iNO_script/run_iNO_fix_fanout.tcl 
-```
-
-**Parameter Configuration** `<br>`
-The path of the parameter configuration is in./iEDA_config/no_default_config_fixfanout.json, as follows
-
-```json
-{
-    "file_path": {
-        "design_work_space": "./result/no",
-        "sdc_file": "",
-        "lib_files": "",
-        "lef_files": "",
-        "def_file": "",
-        "output_def": "",
-        "report_file": "./result/no/report.txt"
-    },
-    "insert_buffer": "sky130_fd_sc_hs__buf_8",
-    "max_fanout": 30
-}
-```
-
-The definitions of configurable Parameters are as follows
-
-| Parameter Name            | Default Value                 | Description                                 |
-| :------------------------ | :---------------------------- | :------------------------------------------ |
-| design_work_space         |./result/no                   | Set the working area path for the Fix Fanout running process |
-| sdc_file                  |                               | Invalid parameter, to be deleted later      |
-| lib_files                 |                               | Invalid parameter, to be deleted later      |
-| lef_files                 |                               | Invalid parameter, to be deleted later      |
-| def_file                  |                               | Invalid parameter, to be deleted later      |
-| output_def                |                               | Invalid parameter, to be deleted later      |
-| report_file               |./result/no/report.txt        | The report generated during the Fix Fanout process |
-| insert_buffer             | sky130_fd_sc_hs__buf_8        | Set the name of the inserted buffer          |
-| max_fanout                | 30                            | The maximum Fanout count                    |
-
-**Input** `<br>`
-
--./result/iFP_result.def
-
-**Output** `<br>`
-
--./result/iTO_fix_fanout_result.def
--./result/iTO_fix_fanout_result.v
-
-**Evaluation and Report** `<br>`
-
--./result/report/fixfanout_db.rpt
-
-**GUI** `<br>`
-step 1: Modify the input design def of the script./script/iGUI_script/run_iGUI.tcl to./result/iTO_fix_fanout_result.def
-
-```
-#===========================================================
-##   read def
-#===========================================================
-def_init -path./result/iTO_fix_fanout_result.def
-```
-
-step 2: Execute the iEDA GUI script
-
-```bash
-./iEDA_gui -script./script/iGUI_script/run_iGUI.tcl 
-```
-
-step 3: View the GUI
-
-<div align=center> <img src="/res/images/tools/platform/pic/gui/gui_fixfanout.png" style="zoom:50%;" /> </div>
-
 #### Placement
 
 **Execution Script** `<br>`
@@ -945,7 +866,7 @@ Refer to iEDA_config/pl_default_config.json:
 
 **Input** `<br>`
 ```
--./result/iTO_fix_fanout_result.def
+-./result/iFP_result.def
 ```
 
 **Output** `<br>`

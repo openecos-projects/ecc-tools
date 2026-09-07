@@ -29,9 +29,12 @@
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/properties.hpp>
 #include <boost/property_map/property_map.hpp>
+#include <algorithm>
 #include <iostream>
 #include <set>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace idb {
@@ -71,8 +74,8 @@ class CheckNode
   NodeType get_type() { return _type; }
   bool is_pin() { return _type == NodeType::kPin ? true : false; }
   bool is_seg() { return _type == NodeType::kSegment ? true : false; }
-  int16_t get_id() { return _id; }
-  int16_t get_graph_id() { return _graph_id; }
+  int get_id() { return _id; }
+  int get_graph_id() { return _graph_id; }
   bool is_visited() { return _graph_id == -1 ? false : true; }
 
   /// setter
@@ -83,8 +86,8 @@ class CheckNode
   virtual bool isIntersection(CheckNode* node_dst) = 0;
 
  private:
-  int16_t _graph_id = -1;
-  int16_t _id = -1;
+  int _graph_id = -1;
+  int _id = -1;
   NodeType _type = NodeType::kNone;
 };
 
@@ -154,14 +157,30 @@ class NetGraph
   void set_id(int graph_id) { _graph_id = graph_id; }
 
   /// operator
-  void add_vertex(int vertex) { _graph.added_vertex(vertex); }
-  void add_edge(int vertex_1, int vertex_2) { boost::add_edge(vertex_1, vertex_2, _graph); }
+  void add_vertex(int vertex)
+  {
+    if (_vertex_map.find(vertex) == _vertex_map.end()) {
+      _vertex_map.emplace(vertex, boost::add_vertex(_graph));
+    }
+  }
+  void add_edge(int vertex_1, int vertex_2)
+  {
+    add_vertex(vertex_1);
+    add_vertex(vertex_2);
+
+    const auto edge = std::minmax(vertex_1, vertex_2);
+    if (_edge_set.emplace(edge).second) {
+      boost::add_edge(_vertex_map.at(vertex_1), _vertex_map.at(vertex_2), _graph);
+    }
+  }
   int num_edge() { return boost::num_edges(_graph); }
 
   void addConnectedPin(int pin_index) { _connected_pins.emplace(pin_index); }
 
  private:
   std::set<int> _connected_pins;  /// connected pin index list in this graph
+  std::set<std::pair<int, int>> _edge_set;
+  std::unordered_map<int, Vertex> _vertex_map;
   BglGraph _graph;
   int _graph_id = -1;
 };
@@ -170,7 +189,10 @@ class CheckNet
 {
  public:
   CheckNet(IdbNet* net) { wrapNet(net); }
-  ~CheckNet() = default;
+  ~CheckNet();
+
+  CheckNet(const CheckNet&) = delete;
+  CheckNet& operator=(const CheckNet&) = delete;
 
   CheckInfo checkNetConnection();
   CheckInfo isAllPinConnected();

@@ -65,10 +65,10 @@ class Lef58Cutclass
 
  private:
   std::string _class_name;
-  int32_t _via_width;
+  int32_t _via_width{0};
   std::optional<int32_t> _via_length;
   std::optional<int32_t> _num_cut;
-  Orient _orient;
+  Orient _orient{kNone};
 };
 
 /*
@@ -170,10 +170,10 @@ class Lef58EnclosureEdge
     void set_length(int32_t length) { _length = length; }
 
    private:
-    int32_t _convex_length;
-    int32_t _adjacent_length;
-    int32_t _par_within;
-    int32_t _length;
+    int32_t _convex_length{0};
+    int32_t _adjacent_length{0};
+    int32_t _par_within{0};
+    int32_t _length{0};
   };
 
   // getter
@@ -216,15 +216,15 @@ class Lef58EnclosureEdge
 
  private:
   std::string _class_name;
-  Direction _direction;
-  int32_t _overhang;
+  Direction _direction{kNone};
+  int32_t _overhang{0};
   std::optional<int32_t> _min_width;
   std::optional<int32_t> _max_width;
   std::optional<int32_t> _par_length;
   std::optional<int32_t> _par_within;
-  bool _except_extracut;
+  bool _except_extracut{false};
   std::optional<int32_t> _cut_within;
-  bool _except_two_edges;
+  bool _except_two_edges{false};
   std::optional<int32_t> _except_within;
   std::optional<ConvexCorners> _convex_corners;
 };
@@ -260,8 +260,8 @@ class Lef58EolEnclosure
     void set_forward_ext(int32_t forward_ext) { _forward_ext = forward_ext; }
 
    private:
-    int32_t _backward_ext;
-    int32_t _forward_ext;
+    int32_t _backward_ext{0};
+    int32_t _forward_ext{0};
   };
 
   // getter & setter
@@ -325,20 +325,20 @@ class Lef58EolEnclosure
   void set_all_sides(bool all_sides) { _all_sides = all_sides; }
 
  private:
-  int32_t _eol_width;
+  int32_t _eol_width{0};
   std::optional<int32_t> _min_eol_width;
-  EdgeDirection _edge_direction;  // VERTICAL | HORIZONTAL
-  bool _equal_rect_width;
+  EdgeDirection _edge_direction{EdgeDirection::kNone};  // VERTICAL | HORIZONTAL
+  bool _equal_rect_width{false};
   std::string _class_name;
-  Direction _direction;  // ABOVE | BELOW
+  Direction _direction{Direction::kNone};  // ABOVE | BELOW
 
-  ApplicationType _application_type;  // LONGEDGEONLY | SHORTEDGEONLY
-  int32_t _overhang;
+  ApplicationType _application_type{ApplicationType::kNone};  // LONGEDGEONLY | SHORTEDGEONLY
+  int32_t _overhang{0};
   std::optional<int32_t> _extract_overhang;
   std::optional<int32_t> _par_space;
   std::optional<Extension> _extension;
   std::optional<int32_t> _min_length;
-  bool _all_sides;
+  bool _all_sides{false};
 };
 
 /*
@@ -365,8 +365,8 @@ class Lef58EolSpacing
 
    private:
     std::string _class_name;
-    int32_t _cut_spacing1;
-    int32_t _cut_spacing2;
+    int32_t _cut_spacing1{0};
+    int32_t _cut_spacing2{0};
   };
 
   [[nodiscard]] int32_t get_cut_spacing1() const { return _cut_spacing1; }
@@ -394,17 +394,17 @@ class Lef58EolSpacing
   void set_span_length(int32_t span_length) { _span_length = span_length; }
 
  private:
-  int32_t _cut_spacing1;
-  int32_t _cut_spacing2;
+  int32_t _cut_spacing1{0};
+  int32_t _cut_spacing2{0};
   std::string _class_name1;
   std::vector<ToClass> _to_classes;
-  int32_t _eol_width;
-  int32_t _prl;
-  int32_t _small_overhang;
-  int32_t _equal_overhang;
-  int32_t _side_ext;
-  int32_t _backward_ext;
-  int32_t _span_length;
+  int32_t _eol_width{0};
+  int32_t _prl{0};
+  int32_t _small_overhang{0};
+  int32_t _equal_overhang{0};
+  int32_t _side_ext{0};
+  int32_t _backward_ext{0};
+  int32_t _span_length{0};
 };
 
 class Lef58SpacingTable
@@ -428,8 +428,8 @@ class Lef58SpacingTable
     void set_maxxy(bool maxxy) { _maxxy = maxxy; }
 
    private:
-    int32_t _prl;
-    bool _maxxy;
+    int32_t _prl{0};
+    bool _maxxy{false};
   };
   class ClassName
   {

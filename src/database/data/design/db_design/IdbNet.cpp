@@ -191,6 +191,12 @@ vector<IdbPin*> IdbNet::get_load_pins()
 
 IdbRect* IdbNet::get_bounding_box()
 {
+  set_bounding_box();
+  return IdbObject::get_bounding_box();
+}
+
+bool IdbNet::set_bounding_box()
+{
   int32_t min_lx = INT32_MAX;
   int32_t min_ly = INT32_MAX;
   int32_t max_ux = INT32_MIN;
@@ -208,19 +214,10 @@ IdbRect* IdbNet::get_bounding_box()
     max_ux = std::max(max_ux, idb_load_pin->get_average_coordinate()->get_x());
     max_uy = std::max(max_uy, idb_load_pin->get_average_coordinate()->get_y());
   }
-  return new IdbRect(min_lx, min_ly, max_ux, max_uy);
-}
-
-bool IdbNet::set_bounding_box()
-{
-  // IdbRect* rect = get_bounding_box();
-
-  // int32_t ll_x = _average_coordinate->get_x() - _io_term->get_bounding_box()->get_width()/2;
-  // int32_t ll_y = _average_coordinate->get_y() - _io_term->get_bounding_box()->get_height()/2;
-  // int32_t ur_x = _average_coordinate->get_x() + _io_term->get_bounding_box()->get_width()/2;
-  // int32_t ur_y = _average_coordinate->get_y() + _io_term->get_bounding_box()->get_height()/2;
-  //  rect->set_rect(ll_x, ll_y, ur_x, ur_y);
-  return false;
+  if (min_lx == INT32_MAX) {
+    return IdbObject::set_bounding_box(0, 0, 0, 0);
+  }
+  return IdbObject::set_bounding_box(min_lx, min_ly, max_ux, max_uy);
 }
 
 bool IdbNet::has_io_pin(IdbPin* io_pin)
@@ -345,7 +342,15 @@ void IdbNet::mergeWireSegments()
     }
 
     if (keep_via) {
-      segment->clearPoints();
+      if (!segment->get_via_list().empty()) {
+        auto* coordinate = segment->get_via_list().front()->get_coordinate();
+        if (coordinate != nullptr) {
+          const int32_t x = coordinate->get_x();
+          const int32_t y = coordinate->get_y();
+          segment->clearPoints();
+          segment->add_point(x, y);
+        }
+      }
       return nullptr;
     }
 
@@ -355,6 +360,12 @@ void IdbNet::mergeWireSegments()
     via_seg->set_layer(segment->get_layer());
     via_seg->set_via_list(segment->take_via_list());
     via_seg->set_is_via(true);
+    if (!via_seg->get_via_list().empty()) {
+      auto* coordinate = via_seg->get_via_list().front()->get_coordinate();
+      if (coordinate != nullptr) {
+        via_seg->add_point(coordinate->get_x(), coordinate->get_y());
+      }
+    }
     segment->set_is_via(false);
     return via_seg;
   };
@@ -439,18 +450,18 @@ void IdbNet::mergeWireSegments()
       continue;
     }
     for (auto* segment : wire->get_segment_list()) {
-      if (segment == nullptr || segment->get_layer() == nullptr || !segment->is_wire()) {
+      if (segment == nullptr || segment->get_layer() == nullptr || segment->get_point_number() != _POINT_MAX_) {
         continue;
       }
 
       auto& layer_data = layer_map[segment->get_layer()->get_order()];
       auto* point_start = segment->get_point_start();
-      auto* point_end = segment->get_point_end();
-      if (point_start == nullptr || point_end == nullptr) {
+      auto* point_second = segment->get_point_second();
+      if (point_start == nullptr || point_second == nullptr) {
         continue;
       }
 
-      if (point_start->get_y() == point_end->get_y()) {
+      if (point_start->get_y() == point_second->get_y()) {
         layer_data.horizontal_map[point_start->get_y()].emplace_back(segment);
       } else {
         layer_data.vertical_map[point_start->get_x()].emplace_back(segment);
@@ -665,11 +676,13 @@ bool IdbNetList::checkConnection()
 
 uint64_t IdbNetList::maxFanout()
 {
-  uint64_t net_len = 0;
+  uint64_t max_fanout = 0;
   for (auto net : _net_list) {
-    net_len += net->wireLength();
+    if (net != nullptr) {
+      max_fanout = std::max(max_fanout, static_cast<uint64_t>(net->get_load_pins().size()));
+    }
   }
-  return net_len;
+  return max_fanout;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

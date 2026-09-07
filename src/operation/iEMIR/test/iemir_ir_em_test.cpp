@@ -100,8 +100,8 @@ int main()
   EMIREA.analyze();
   iemir::EMAnalyzer::destroyInst();
 
-  bool is_pass = checkPowerGraph(EMIRDM.getDatabase().get_power_graph_map()["VDD"], 0.0)
-                 && checkPowerGraph(EMIRDM.getDatabase().get_power_graph_map()["VSS"], 1.0);
+  bool is_pass
+      = checkPowerGraph(EMIRDM.getDatabase().get_power_graph_map()["VDD"], 0.0) && checkPowerGraph(EMIRDM.getDatabase().get_power_graph_map()["VSS"], 1.0);
   std::filesystem::path report_directory_path = std::filesystem::temp_directory_path() / "iemir_ir_em_test";
   std::filesystem::remove_all(report_directory_path);
   std::filesystem::create_directories(report_directory_path);

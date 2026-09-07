@@ -47,6 +47,7 @@ namespace htree {
 
 struct BufferPatternLibrary;
 struct TopologyPatternLibrary;
+struct SinkLoadRegionSplitPlan;
 
 struct CapDistributionStats
 {
@@ -93,7 +94,6 @@ enum class SinkLoadRegionViolation
   kEmptyLoadGroup,
   kPinCapUnavailable,
   kFanout,
-  kPinCapLowerBound,
   kRoutingFailed,
   kCapacitance,
 };
@@ -112,6 +112,9 @@ struct SinkLoadRegionLegalitySummary
   std::size_t split_group_count = 0U;
   std::size_t split_extra_buffer_count = 0U;
   unsigned split_local_depth = 0U;
+  bool split_triggered_by_fanout = false;
+  bool split_triggered_by_capacitance = false;
+  std::vector<SinkLoadRegionSplitPlan> split_plans;
 };
 
 struct SinkLoadRegionLegalityInput
@@ -123,6 +126,10 @@ struct SinkLoadRegionLegalityInput
   ClockRouteSegmentRc clock_route_segment_rc;
   // Smallest characterization buffer; drives split remediation cost estimates.
   double split_buffer_input_cap_pf = 0.0;
+  bool split_buffer_available = false;
+  unsigned max_split_depth = 16U;
+  std::size_t max_split_buffer_count = 4096U;
+  std::unordered_map<const Pin*, double> sink_pin_cap_pf_by_pin;
 };
 
 struct SinkLoadRegionLegalityContext
@@ -145,6 +152,8 @@ struct SinkLoadRegionEntryFilterSummary
   std::size_t max_split_group_count = 0U;
   std::size_t max_split_extra_buffer_count = 0U;
   unsigned max_split_local_depth = 0U;
+  bool any_split_triggered_by_fanout = false;
+  bool any_split_triggered_by_capacitance = false;
 };
 
 struct SinkLoadRegionEntryFilterBuild
@@ -153,11 +162,11 @@ struct SinkLoadRegionEntryFilterBuild
   SinkLoadRegionEntryFilterSummary summary;
 };
 
-// Local split remediation for a boundary group that exceeds max_fanout. The
-// boundary driver fans out to up to max_fanout local buffers; each local buffer
-// either drives a legal sink subgroup or another compact local split. This
-// models a legal local branch tree without changing the global H-tree
-// fanout/cap contract.
+// Local split remediation for a boundary group that exceeds fanout or
+// capacitance legality. The boundary driver fans out to local buffers; each
+// local buffer either drives a legal sink subgroup or another compact local
+// split. This models a legal local branch tree without changing the global
+// H-tree fanout/cap contract.
 struct SinkLoadRegionSplitNode
 {
   std::vector<Pin*> loads;
@@ -165,9 +174,31 @@ struct SinkLoadRegionSplitNode
   std::vector<SinkLoadRegionSplitNode> children;
 };
 
+enum class SinkLoadRegionRecoveryFailure
+{
+  kNone,
+  kEmptyLoadGroup,
+  kPinCapUnavailable,
+  kSingleLoadCapacitance,
+  kNoBufferCandidate,
+  kNoProgress,
+  kDepthLimit,
+  kBufferLimit,
+  kRoutingFailed,
+};
+
 struct SinkLoadRegionSplitPlan
 {
+  std::size_t boundary_node_id = std::numeric_limits<std::size_t>::max();
+  Point<int> anchor;
+  std::vector<Pin*> original_loads;
   bool feasible = false;
+  bool required = false;
+  bool triggered_by_fanout = false;
+  bool triggered_by_capacitance = false;
+  SinkLoadRegionRecoveryFailure failure = SinkLoadRegionRecoveryFailure::kNone;
+  std::string failure_reason;
+  double root_cap_pf = 0.0;
   unsigned local_depth = 0U;
   std::size_t buffer_count = 0U;
   std::size_t leaf_group_count = 0U;
@@ -179,6 +210,7 @@ struct SinkLoadRegionSplitPlan
 };
 
 auto SplitSinkLoadRegionGroup(const std::vector<Pin*>& loads, std::size_t max_fanout) -> SinkLoadRegionSplitPlan;
+auto RecoverSinkLoadRegionGroup(const std::vector<Pin*>& loads, const Point<int>& anchor, const SinkLoadRegionLegalityInput& input) -> SinkLoadRegionSplitPlan;
 
 auto ResolveSinkLoadRegionLegality(const Tree& topology, PatternId topology_pattern_id, const TopologyPatternLibrary& topology_library,
                                    const BufferPatternLibrary& segment_pattern_library, SinkLoadRegionLegalityContext& legality_context)

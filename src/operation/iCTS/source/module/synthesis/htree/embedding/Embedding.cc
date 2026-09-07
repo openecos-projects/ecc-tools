@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -57,6 +58,24 @@
 #include "synthesis/htree/segment_pruning/SegmentPatternLibrary.hh"
 
 namespace icts::htree {
+
+auto ClassifySplitPlanMaterialization(const SinkLoadRegionSplitPlan& plan, const std::vector<Pin*>& terminal_loads, const Point<int>& upstream_anchor)
+    -> SplitPlanMaterializationDecision
+{
+  if (!plan.feasible) {
+    return SplitPlanMaterializationDecision::kMismatch;
+  }
+  if (!plan.required) {
+    return SplitPlanMaterializationDecision::kPassThrough;
+  }
+
+  const bool anchor_matches = plan.anchor.get_x() == upstream_anchor.get_x() && plan.anchor.get_y() == upstream_anchor.get_y();
+  const std::unordered_set<const Pin*> planned_loads(plan.original_loads.begin(), plan.original_loads.end());
+  const bool loads_match = planned_loads.size() == terminal_loads.size()
+                           && std::ranges::all_of(terminal_loads, [&planned_loads](const Pin* load) -> bool { return planned_loads.contains(load); });
+  return anchor_matches && loads_match ? SplitPlanMaterializationDecision::kMaterialize : SplitPlanMaterializationDecision::kMismatch;
+}
+
 namespace {
 
 auto CreateBufferInstance(HTree::Build& result, const std::string& inst_name, const std::string& cell_master, const Point<int>& location,
@@ -74,9 +93,17 @@ auto CreateBufferInstance(HTree::Build& result, const std::string& inst_name, co
   result.output.inserted_pins.push_back(std::move(output_pin));
 
   inst_ptr->add_pin(input_pin_ptr);
-  inst_ptr->insertDriverPin(output_pin_ptr);
+  inst_ptr->add_pin(output_pin_ptr);
 
   result.output.inserted_insts.push_back(std::move(inst));
+  result.output.propagation_arcs.push_back(ClockPropagationArc{
+      .inst = inst_ptr,
+      .input_pin = input_pin_ptr,
+      .output_pin = output_pin_ptr,
+      .kind = ClockPropagationKind::kBuffer,
+      .origin = ClockPropagationOrigin::kSynthesized,
+      .path_buffer_weight = 1,
+  });
 
   return {input_pin_ptr, output_pin_ptr};
 }
@@ -175,28 +202,26 @@ auto CollectBorrowedPointers(const std::vector<std::unique_ptr<T>>& objects) -> 
   return borrowed;
 }
 
-auto FindSingleBufferInputPin(Inst* inst) -> Pin*
+auto FindUniqueTypedPin(Inst* inst, bool output) -> Pin*
 {
   if (inst == nullptr) {
     return nullptr;
   }
-
-  const auto* driver_pin = inst->findDriverPin();
+  Pin* result = nullptr;
   for (auto* pin : inst->get_pins()) {
-    if (pin == nullptr || pin == driver_pin) {
+    if (pin == nullptr) {
       continue;
     }
-    if (pin->get_type() == PinType::kIn || pin->get_type() == PinType::kClock) {
-      return pin;
+    const bool matches = output ? pin->get_type() == PinType::kOut : (pin->get_type() == PinType::kIn || pin->get_type() == PinType::kClock);
+    if (!matches) {
+      continue;
     }
-  }
-
-  for (auto* pin : inst->get_pins()) {
-    if (pin != nullptr && pin != driver_pin) {
-      return pin;
+    if (result != nullptr) {
+      return nullptr;
     }
+    result = pin;
   }
-  return nullptr;
+  return result;
 }
 
 auto IsDesignOwnedPin(Design& design, const Pin* pin) -> bool
@@ -277,18 +302,18 @@ auto ReplaceNetLoad(Net* net, Pin* old_load, Pin* new_load) -> bool
   return true;
 }
 
-auto PruneLeafSingleLoadBuffers(HTree::Build& result) -> std::size_t
+auto PruneLeafSingleLoadBuffers(HTree::Build& result, const std::unordered_set<Inst*>& protected_insts) -> std::size_t
 {
   const auto candidate_insts = CollectBorrowedPointers(result.output.inserted_insts);
   const std::unordered_set<Inst*> inserted_inst_set(candidate_insts.begin(), candidate_insts.end());
   std::size_t pruned_count = 0U;
 
   for (auto* inst : candidate_insts) {
-    if (inst == nullptr || !inst->is_buffer()) {
+    if (inst == nullptr || !inst->is_buffer() || protected_insts.contains(inst)) {
       continue;
     }
 
-    auto* output_pin = inst->findDriverPin();
+    auto* output_pin = FindUniqueTypedPin(inst, true);
     if (output_pin == nullptr) {
       continue;
     }
@@ -303,7 +328,7 @@ auto PruneLeafSingleLoadBuffers(HTree::Build& result) -> std::size_t
       continue;
     }
 
-    auto* input_pin = FindSingleBufferInputPin(inst);
+    auto* input_pin = FindUniqueTypedPin(inst, false);
     if (input_pin == nullptr) {
       continue;
     }
@@ -331,6 +356,7 @@ auto PruneLeafSingleLoadBuffers(HTree::Build& result) -> std::size_t
     EraseInsertedNetLevel(result, output_net);
     EraseOwnedPointer(result.output.inserted_nets, output_net);
     EraseInsertedInstLevel(result, inst);
+    std::erase_if(result.output.propagation_arcs, [inst](const ClockPropagationArc& arc) -> bool { return arc.inst == inst; });
     EraseOwnedPointer(result.output.inserted_insts, inst);
     ++pruned_count;
   }
@@ -356,6 +382,9 @@ auto MaterializeSplitNode(EmbeddingState& context, const SinkLoadRegionSplitNode
 
     auto created_buffer
         = CreateBufferInstance(*context.result, context.nextSplitBufferName(), context.split_buffer_master, current_node->center, ports->first, ports->second);
+    if (created_buffer.first != nullptr && created_buffer.first->get_inst() != nullptr) {
+      context.split_buffer_insts.insert(created_buffer.first->get_inst());
+    }
     RecordInsertedInstLevel(*context.result, created_buffer.first == nullptr ? nullptr : created_buffer.first->get_inst(), topology_level,
                             context.split_sub_buffer_count);
     ++context.split_sub_buffer_count;
@@ -420,26 +449,47 @@ auto MaterializeSplitNode(EmbeddingState& context, const SinkLoadRegionSplitNode
   return root_buffer_it->second.first;
 }
 
-// Realizes local split remediation for an over-fanout terminal load group. The
-// returned pins are the first-level split-buffer inputs driven by the upstream
-// H-tree segment; each split buffer materializes its own legal local branch
-// when needed.
-auto MaterializeSplitSubBuffers(EmbeddingState& context, const std::vector<Pin*>& terminal_loads, int topology_level) -> std::vector<Pin*>
+// Materializes the exact recovery plan accepted during legality. Replanning at
+// this boundary would allow cap/fanout evidence and committed objects to
+// diverge after selection.
+auto MaterializeSplitSubBuffers(EmbeddingState& context, std::size_t boundary_node_id, const std::vector<Pin*>& terminal_loads,
+                                const Point<int>& upstream_anchor, int topology_level) -> std::vector<Pin*>
 {
-  if (context.max_fanout == 0U || terminal_loads.size() <= context.max_fanout || context.split_buffer_master.empty()) {
+  if (context.sink_load_region_legality == nullptr) {
+    context.result->summary.failure_reason = "missing_selected_sink_load_region_legality";
+    return {};
+  }
+  const SinkLoadRegionSplitPlan* selected_plan = nullptr;
+  for (const auto& plan : context.sink_load_region_legality->split_plans) {
+    if (plan.boundary_node_id != boundary_node_id) {
+      continue;
+    }
+    if (selected_plan != nullptr) {
+      context.result->summary.failure_reason = "duplicate_selected_sink_load_region_plan";
+      return {};
+    }
+    selected_plan = &plan;
+  }
+  if (selected_plan == nullptr) {
     return terminal_loads;
   }
-
-  const auto split_plan = SplitSinkLoadRegionGroup(terminal_loads, context.max_fanout);
-  if (!split_plan.feasible) {
-    CTSLOG.warn(Loc::current(), "HTree: terminal load group of ", terminal_loads.size(), " exceeds max fanout ", context.max_fanout,
-                " and cannot be split; keeping the over-fanout net.");
-    return terminal_loads;
+  switch (ClassifySplitPlanMaterialization(*selected_plan, terminal_loads, upstream_anchor)) {
+    case SplitPlanMaterializationDecision::kPassThrough:
+      return terminal_loads;
+    case SplitPlanMaterializationDecision::kMismatch:
+      context.result->summary.failure_reason = "selected_sink_load_region_plan_mismatch";
+      return {};
+    case SplitPlanMaterializationDecision::kMaterialize:
+      break;
+  }
+  if (context.split_buffer_master.empty()) {
+    context.result->summary.failure_reason = "selected_sink_load_region_plan_missing_buffer_master";
+    return {};
   }
 
   std::vector<Pin*> upstream_loads;
-  upstream_loads.reserve(split_plan.children.size());
-  for (const auto& child : split_plan.children) {
+  upstream_loads.reserve(selected_plan->children.size());
+  for (const auto& child : selected_plan->children) {
     upstream_loads.push_back(MaterializeSplitNode(context, child, topology_level));
   }
   return upstream_loads;
@@ -490,7 +540,11 @@ auto BuildSegmentObjectsAndGetEntryLoads(EmbeddingState& context, const TreeNode
               topology_level);
   }
 
-  const auto net_terminal_loads = MaterializeSplitSubBuffers(context, terminal_loads, topology_level);
+  const auto net_terminal_loads
+      = MaterializeSplitSubBuffers(context, child_node.get_id(), terminal_loads, segment_buffers.back().second->get_location(), topology_level);
+  if (net_terminal_loads.empty()) {
+    return {};
+  }
   CreateNet(*context.result, context.nextNetName(), segment_buffers.back().second, net_terminal_loads, topology_level);
   return std::vector<Pin*>{segment_buffers.front().first};
 }
@@ -522,7 +576,7 @@ auto ValidateRootDriverSizing(Design& design, Wrapper& wrapper, const HTree::Bui
   }
 
   auto* output_pin = result.output.root_output_pin;
-  auto* input_pin = FindSingleBufferInputPin(result.output.root_inst);
+  auto* input_pin = FindUniqueTypedPin(result.output.root_inst, false);
   if (output_pin == nullptr || output_pin->get_inst() != result.output.root_inst || input_pin == nullptr) {
     CTSLOG.warn(Loc::current(), "HTree: cannot apply selected root driver master ", cell_master,
                 " because the input root net driver inst does not expose a complete buffer pin pair.");
@@ -551,7 +605,7 @@ auto ApplyRootDriverSizing(Design& design, Wrapper& wrapper, htree::DiagnosticBu
   }
 
   auto* output_pin = result.output.root_output_pin;
-  auto* input_pin = FindSingleBufferInputPin(result.output.root_inst);
+  auto* input_pin = FindUniqueTypedPin(result.output.root_inst, false);
   const auto ports = ResolveBufferPorts(wrapper, cell_master);
   if (output_pin == nullptr || output_pin->get_inst() != result.output.root_inst || input_pin == nullptr || !ports.has_value()) {
     return false;
@@ -573,16 +627,21 @@ auto ApplyRootDriverSizing(Design& design, Wrapper& wrapper, htree::DiagnosticBu
   result.output.root_inst->set_type(InstType::kBuffer);
   input_pin->set_type(PinType::kIn);
   output_pin->set_type(PinType::kOut);
-  result.output.root_inst->insertDriverPin(output_pin);
+  result.output.root_inst->add_pin(output_pin);
   result.output.root_input_pin = input_pin;
   result.output.root_output_pin = output_pin;
   result.diagnostics.selected_root_driver_cell_master = result.output.root_inst->get_cell_master();
   return true;
 }
 
-auto BuildEmbedding(Wrapper& wrapper, htree::DiagnosticBuild& result, const BufferPatternLibrary& segment_pattern_library, const HTree::Config& config) -> void
+auto BuildEmbedding(Wrapper& wrapper, htree::DiagnosticBuild& result, const BufferPatternLibrary& segment_pattern_library,
+                    const SinkLoadRegionLegalitySummary& sink_load_region_legality) -> void
 {
   if (!result.output.best_pattern.has_value()) {
+    return;
+  }
+  if (!sink_load_region_legality.legal) {
+    result.summary.failure_reason = "selected_sink_load_region_legality_invalid";
     return;
   }
 
@@ -621,14 +680,15 @@ auto BuildEmbedding(Wrapper& wrapper, htree::DiagnosticBuild& result, const Buff
     CTSLOG.error(Loc::current(), "HTree: input root net driver pin is missing during embedding construction.");
   }
   result.output.root_inst = result.output.root_output_pin->get_inst();
-  result.output.root_input_pin = FindSingleBufferInputPin(result.output.root_inst);
+  result.output.root_input_pin = FindUniqueTypedPin(result.output.root_inst, false);
 
   EmbeddingState context{
       .result = &result,
       .port_table = &port_table,
       .object_name_prefix = result.diagnostics.object_name_prefix,
-      .max_fanout = config.max_fanout,
+      .sink_load_region_legality = &sink_load_region_legality,
       .split_buffer_master = result.diagnostics.split_buffer_cell_master,
+      .split_buffer_insts = {},
   };
 
   std::unordered_map<std::size_t, std::vector<Pin*>> entry_loads_by_node;
@@ -685,9 +745,19 @@ auto BuildEmbedding(Wrapper& wrapper, htree::DiagnosticBuild& result, const Buff
   if (root_entry_loads.empty()) {
     CTSLOG.error(Loc::current(), "HTree: root entry loads are empty during embedding construction.");
   }
-  root_entry_loads = MaterializeSplitSubBuffers(context, root_entry_loads, 0);
+  root_entry_loads = MaterializeSplitSubBuffers(context, root_node->get_id(), root_entry_loads, result.output.root_output_pin->get_location(), 0);
+  if (root_entry_loads.empty()) {
+    return;
+  }
   ConnectNet(result.output.root_net, result.output.root_output_pin, root_entry_loads);
-  result.diagnostics.pruned_leaf_single_load_buffers = PruneLeafSingleLoadBuffers(result);
+  const auto planned_split_buffer_count
+      = std::accumulate(sink_load_region_legality.split_plans.begin(), sink_load_region_legality.split_plans.end(), std::size_t{0U},
+                        [](std::size_t count, const SinkLoadRegionSplitPlan& plan) -> std::size_t { return count + (plan.required ? plan.buffer_count : 0U); });
+  if (context.split_sub_buffer_count != planned_split_buffer_count || context.split_buffer_insts.size() != planned_split_buffer_count) {
+    result.summary.failure_reason = "sink_load_region_plan_materialization_count_mismatch";
+    return;
+  }
+  result.diagnostics.pruned_leaf_single_load_buffers = PruneLeafSingleLoadBuffers(result, context.split_buffer_insts);
   result.diagnostics.embedded_split_sub_buffer_count = context.split_sub_buffer_count;
 }
 

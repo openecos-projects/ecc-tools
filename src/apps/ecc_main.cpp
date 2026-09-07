@@ -30,10 +30,8 @@
 #include <iostream>
 #include <string>
 
-#include "../platform/flow/flow.h"
+#include "tcl_main.h"
 #include "utility/logger/Logger.hpp"
-
-using namespace iplf;
 
 int main(int argc, char** argv)
 {
@@ -67,7 +65,7 @@ int main(int argc, char** argv)
     ECCLOG.info(ecc::Loc::current(), "Git version: ", ECC_GIT_VERSION);
   }
 
-  plfInst->runTcl(argc, argv);
+  tcl::tcl_start(argc, argv);
 
   ecc::Logger::destroyInst();
 

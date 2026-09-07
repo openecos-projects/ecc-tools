@@ -152,13 +152,12 @@ class STAInterface
   void wrapTimingCellPower(TimingCell& timing_cell, idb::LibCell* lib_cell);
   void wrapTimingCellLeakagePower(TimingCell& timing_cell, idb::LibCell* lib_cell);
   TimingPowerArc wrapTimingPowerArc(idb::LibPowerArc* lib_power_arc);
-  TimingPowerArc wrapTimingPortPowerArc(idb::LibInternalPowerInfo* internal_power_info, std::string& port_name,
-                                        idb::LibLibrary* lib_library);
+  TimingPowerArc wrapTimingPortPowerArc(idb::LibInternalPowerInfo* internal_power_info, std::string& port_name, idb::LibLibrary* lib_library);
   void wrapTimingPowerArcTable(TimingPowerArc& timing_power_arc, idb::LibTableModel* power_table_model);
   TimingLeakagePower wrapTimingLeakagePower(idb::LibLeakagePower* lib_leakage_power);
   LogicExpression wrapLogicExpression(std::string& expression_string);
   void wrapLogicExpressionTermList(LogicExpression& logic_expression, LibertyExpr* liberty_expr);
-  LogicOperationType wrapLogicOperationType(const int32_t liberty_expr_op);
+  LogicOperationType wrapLogicOperationType(int32_t liberty_expr_op);
   void wrapTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* lib_arc_set);
   bool isSDFDelayArc(idb::LibArc* lib_arc);
   bool isSDFCheckArc(idb::LibArc* lib_arc);
@@ -221,7 +220,6 @@ class STAInterface
   ~STAInterface() = default;
   STAInterface& operator=(const STAInterface& other) = delete;
   STAInterface& operator=(STAInterface&& other) = delete;
-  // function
 };
 
 }  // namespace ista

@@ -53,11 +53,9 @@ void setJsonValue(std::map<std::string, std::any>& config_map, const std::string
 void flattenJson(std::map<std::string, std::any>& config_map, const nlohmann::json& json)
 {
   for (const auto& item : json.items()) {
-    if (item.value().is_object()) {
-      flattenJson(config_map, item.value());
-    } else {
-      setJsonValue(config_map, "-" + item.key(), item.value());
-    }
+    const std::string& raw_key = item.key();
+    const std::string map_key = (!raw_key.empty() && raw_key.front() == '-') ? raw_key : "-" + raw_key;
+    setJsonValue(config_map, map_key, item.value());
   }
 }
 

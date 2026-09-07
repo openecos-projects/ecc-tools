@@ -29,9 +29,7 @@ struct Visibility;
 class LypWriter
 {
  public:
-  auto write(const Model& model,
-             const Visibility& visibility,
-             const Config& config) const -> bool;
+  auto write(const Model& model, const Visibility& visibility, const Config& config) const -> bool;
 };
 
 }  // namespace ircx::plot_spef

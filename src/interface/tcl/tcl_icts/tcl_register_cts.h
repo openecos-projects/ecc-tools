@@ -31,10 +31,12 @@
 using namespace ecc;
 namespace tcl {
 
-int registerCmdCTS() {
+int registerCmdCTS()
+{
   registerTclCmd(CmdCTSAutoRun, "run_cts");
   registerTclCmd(CmdCTSReport, "cts_report");
   registerTclCmd(CmdCTSConfig, "cts_config");
+  registerTclCmd(CmdCTSDestroy, "destroy_cts");
 
   return EXIT_SUCCESS;
 }

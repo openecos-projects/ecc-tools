@@ -16,9 +16,6 @@
 // ***************************************************************************************
 #include "RTInterface.hpp"
 
-#include <unordered_map>
-#include <utility>
-
 #include "DRCEngine.hpp"
 #include "DRCInterface.hpp"
 #include "DetailedRouter.hpp"
@@ -28,6 +25,7 @@
 #include "Monitor.hpp"
 #include "PinAccessor.hpp"
 #include "PlanarRouter.hpp"
+#include "RTHeader.hpp"
 #include "SupplyAnalyzer.hpp"
 #include "TOPOBuilder.hpp"
 #include "TrackAssigner.hpp"
@@ -281,68 +279,6 @@ void RTInterface::cleanDef()
   //////////////////////////////////////////
 
 #endif
-}
-
-void RTInterface::fixFanout(std::map<std::string, std::any> config_map)
-{
-  std::string buffer_name = RTUTIL.getConfigValue<std::string>(config_map, "-buffer_name", "buffer_name");
-  auto* idb_design = dmInst->get_idb_def_service()->get_design();
-  idb::IdbNetList* idb_net_list = idb_design->get_net_list();
-
-  size_t max_fanout = 32;
-  while (true) {
-    std::set<idb::IdbNet*> origin_net_set;
-    for (idb::IdbNet* idb_net : idb_net_list->get_net_list()) {
-      if (idb_net->get_load_pins().size() > max_fanout) {
-        origin_net_set.insert(idb_net);
-      }
-    }
-    if (origin_net_set.empty()) {
-      break;
-    }
-    size_t begin_net_num = idb_net_list->get_num();
-    for (idb::IdbNet* origin_net : origin_net_set) {
-      // 解开所有的pin
-      std::vector<idb::IdbPin*> load_pin_list = origin_net->get_load_pins();
-      for (idb::IdbPin* load_pin : load_pin_list) {
-        idb_design->disconnectPinFromNet(load_pin);
-      }
-      std::vector<std::vector<idb::IdbPin*>> load_pin_list_list;
-      for (size_t i = 0; i < load_pin_list.size(); i += max_fanout) {
-        size_t end = std::min(i + max_fanout, load_pin_list.size());
-        load_pin_list_list.emplace_back(load_pin_list.begin() + i, load_pin_list.begin() + end);
-      }
-      for (std::vector<idb::IdbPin*>& load_pin_list : load_pin_list_list) {
-        static size_t new_idx = 0;
-        // 生成net
-        idb::IdbNet* new_net = idb_design->createOrFindNet(idb_design->makeUniqueNetName(RTUTIL.getString("rt_fanout_net_", new_idx++)),
-                                                           idb::IdbConnectType::kSignal, idb::IdbCreatePolicy::kErrorIfExists);
-        // 生成buf
-        idb::IdbInstance* new_buf = idb_design->createInstance(idb_design->makeUniqueInstanceName(RTUTIL.getString("rt_fanout_buf_", new_idx++)), buffer_name,
-                                                               idb::IdbInstanceType::kTiming, idb::IdbPlacementStatus::kNone, idb::IdbOrient::kNone, 0, 0,
-                                                               idb::IdbCreatePolicy::kErrorIfExists);
-        if (new_net == nullptr || new_buf == nullptr) {
-          RTLOG.error(Loc::current(), "new_net == nullptr || new_buf == nullptr!");
-        }
-        // 连接buf
-        for (idb::IdbPin* buf_pin : new_buf->get_pin_list()->get_pin_list()) {
-          if (buf_pin->get_term()->get_type() == idb::IdbConnectType::kPower || buf_pin->get_term()->get_type() == idb::IdbConnectType::kGround) {
-            continue;
-          }
-          if (buf_pin->get_term()->get_direction() == idb::IdbConnectDirection::kInput) {
-            idb_design->connectPinToNet(buf_pin, origin_net);
-          } else if (buf_pin->get_term()->get_direction() == idb::IdbConnectDirection::kOutput) {
-            idb_design->connectPinToNet(buf_pin, new_net);
-          }
-        }
-        // 连接pin
-        for (idb::IdbPin* load_pin : load_pin_list) {
-          idb_design->connectPinToNet(load_pin, new_net);
-        }
-      }
-    }
-    RTLOG.info(Loc::current(), "Fixed ", origin_net_set.size(), " nets!( +", idb_net_list->get_num() - begin_net_num, " nets )");
-  }
 }
 
 #endif

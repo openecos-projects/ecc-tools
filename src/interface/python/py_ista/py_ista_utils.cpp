@@ -81,14 +81,6 @@ bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std
   if (!value.empty()) {
     config_map.insert(std::make_pair("-path_report_number", std::stoi(value)));
   }
-  value = ecc::getJsonData(json, {"STA", "-delay_type"});
-  if (!value.empty()) {
-    config_map.insert(std::make_pair("-delay_type", value));
-  }
-  value = ecc::getJsonData(json, {"STA", "-start_end_type"});
-  if (!value.empty()) {
-    config_map.insert(std::make_pair("-start_end_type", value));
-  }
   return true;
 }
 
@@ -129,12 +121,6 @@ void initStaConfigMapByDict(std::map<std::string, std::string>& config_dict, std
   }
   if (config_dict.count("-path_report_number") > 0 && !config_dict["-path_report_number"].empty()) {
     config_map["-path_report_number"] = std::stoi(config_dict["-path_report_number"]);
-  }
-  if (config_dict.count("-delay_type") > 0 && !config_dict["-delay_type"].empty()) {
-    config_map["-delay_type"] = config_dict["-delay_type"];
-  }
-  if (config_dict.count("-start_end_type") > 0 && !config_dict["-start_end_type"].empty()) {
-    config_map["-start_end_type"] = config_dict["-start_end_type"];
   }
 }
 

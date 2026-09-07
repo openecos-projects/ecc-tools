@@ -42,6 +42,8 @@ class DCTask
   TransType& get_input_trans_type() { return _input_trans_type; }
   TransType& get_output_trans_type() { return _output_trans_type; }
   double get_input_slew() { return _input_slew; }
+  double get_output_slew_input_slew() { return _output_slew_input_slew; }
+  bool get_has_output_slew_input_slew() { return _has_output_slew_input_slew; }
   TransType& get_clock_trans_type() { return _clock_trans_type; }
   TransType& get_data_trans_type() { return _data_trans_type; }
   double get_clock_slew() { return _clock_slew; }
@@ -58,6 +60,11 @@ class DCTask
   void set_input_trans_type(const TransType& input_trans_type) { _input_trans_type = input_trans_type; }
   void set_output_trans_type(const TransType& output_trans_type) { _output_trans_type = output_trans_type; }
   void set_input_slew(const double input_slew) { _input_slew = input_slew; }
+  void set_output_slew_input_slew(const double input_slew)
+  {
+    _output_slew_input_slew = input_slew;
+    _has_output_slew_input_slew = true;
+  }
   void set_clock_trans_type(const TransType& clock_trans_type) { _clock_trans_type = clock_trans_type; }
   void set_data_trans_type(const TransType& data_trans_type) { _data_trans_type = data_trans_type; }
   void set_clock_slew(const double clock_slew) { _clock_slew = clock_slew; }
@@ -76,6 +83,9 @@ class DCTask
   TransType _input_trans_type = TransType::kNone;
   TransType _output_trans_type = TransType::kNone;
   double _input_slew = 0.0;
+  // A sequential C2Q arc can use a different slew for delay and transition lookup.
+  double _output_slew_input_slew = 0.0;
+  bool _has_output_slew_input_slew = false;
   TransType _clock_trans_type = TransType::kNone;
   TransType _data_trans_type = TransType::kNone;
   double _clock_slew = 0.0;

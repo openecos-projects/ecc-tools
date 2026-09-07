@@ -31,6 +31,8 @@ class TimingClock
   double get_period() const { return _period; }
   double get_rise_edge() const { return _rise_edge; }
   double get_fall_edge() const { return _fall_edge; }
+  double get_setup_uncertainty() const { return _setup_uncertainty; }
+  double get_hold_uncertainty() const { return _hold_uncertainty; }
   bool get_is_propagated() const { return _is_propagated; }
   // setter
   void set_clock_name(const std::string& clock_name) { _clock_name = clock_name; }
@@ -38,6 +40,8 @@ class TimingClock
   void set_period(const double period) { _period = period; }
   void set_rise_edge(const double rise_edge) { _rise_edge = rise_edge; }
   void set_fall_edge(const double fall_edge) { _fall_edge = fall_edge; }
+  void set_setup_uncertainty(const double uncertainty) { _setup_uncertainty = uncertainty; }
+  void set_hold_uncertainty(const double uncertainty) { _hold_uncertainty = uncertainty; }
   void set_is_propagated(const bool is_propagated) { _is_propagated = is_propagated; }
   // function
 
@@ -47,6 +51,8 @@ class TimingClock
   double _period = 0.0;
   double _rise_edge = 0.0;
   double _fall_edge = 0.0;
+  double _setup_uncertainty = 0.0;
+  double _hold_uncertainty = 0.0;
   bool _is_propagated = false;
 };
 

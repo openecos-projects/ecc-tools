@@ -83,6 +83,9 @@ IdbLayer* IdbCellMaster::get_top_layer()
   IdbLayer* layer = nullptr;
   for (IdbTerm* term : _term_list) {
     IdbLayer* top_layer = term->get_top_layer();
+    if (top_layer == nullptr) {
+      continue;
+    }
     if (layer == nullptr) {
       layer = top_layer;
     } else {
@@ -167,13 +170,13 @@ void IdbCellMaster::set_type_core_filler()
     _core_filler = false;
   } else {
     /// A filler can only have Power and Ground pins
+    _core_filler = true;
     for (IdbTerm* term : _term_list) {
       if (term->get_type() != IdbConnectType::kPower && term->get_type() != IdbConnectType::kGround) {
         _core_filler = false;
+        break;
       }
     }
-
-    _core_filler = true;
   }
 }
 
@@ -258,6 +261,7 @@ IdbCellMasterList::IdbCellMasterList()
 
 IdbCellMasterList::~IdbCellMasterList()
 {
+  reset_cell_master();
 }
 
 void IdbCellMasterList::reset_cell_master()
@@ -311,7 +315,7 @@ vector<IdbCellMaster*> IdbCellMasterList::getCoreFillers(vector<string> name_lis
   } else {
     for (string name : name_list) {
       IdbCellMaster* cell_master = find_cell_master(name);
-      if (cell_master != nullptr || cell_master->is_core_filler()) {
+      if (cell_master != nullptr && cell_master->is_core_filler()) {
         cell_master->set_type_core_filler();
         cell_master_list.push_back(cell_master);
       } else {

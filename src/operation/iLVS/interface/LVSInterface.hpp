@@ -86,12 +86,10 @@ class LVSInterface
   void wrapNetList(idb::IdbDesign* idb_design, DesignData& design_data);
   void wrapNetPinList(idb::IdbPins* idb_pin_list, Net& net, DesignData& design_data);
   void wrapPowerGroundTerminal(idb::IdbDesign* idb_design, DesignData& design_data);
-  void wrapPowerGroundPin(idb::IdbPin* idb_pin, DesignData& design_data, ConnectType connect_type,
-                          std::unordered_set<idb::IdbPin*>& idb_pin_set);
+  void wrapPowerGroundPin(idb::IdbPin* idb_pin, DesignData& design_data, ConnectType connect_type, std::unordered_set<idb::IdbPin*>& idb_pin_set);
   void wrapDefRoutingData(idb::IdbDesign* idb_design, DefData& def_data);
   void wrapNetRoutingData(idb::IdbDesign* idb_design, DefData& def_data);
-  void wrapRoutingDataPin(const std::string& net_name, idb::IdbPin* idb_pin, bool is_power_net, bool is_ground_net,
-                          DefData& def_data);
+  void wrapRoutingDataPin(const std::string& net_name, idb::IdbPin* idb_pin, bool is_power_net, bool is_ground_net, DefData& def_data);
   RoutingShape wrapRoutingDataShape(idb::IdbLayer* idb_layer, const idb::IdbRect& idb_rect);
   void wrapRoutingDataVia(idb::IdbVia* idb_via, NetRoutingData& net_routing_data);
   void wrapSpecialNetRoutingData(idb::IdbDesign* idb_design, DefData& def_data);

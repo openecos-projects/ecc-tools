@@ -96,7 +96,7 @@ void PyPlaceDB::init_routability(idm::DataManager* db, std::vector<IdbInstance*>
     // else if (macro.className() != "DREAMPlace.PlaceBlockage") // fixed cells are special cases, skip placement blockages (looks like
     // ISPD2015 benchmarks do not process placement blockages)
 
-    if (node->get_status() == IdbPlacementStatus::kFixed) {
+    if (isPlacementFixed(node)) {
       // Macro const& macro = db.macro(db.macroId(node));
       // ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed cell.");
       for (auto obs : node->get_cell_master()->get_obs_list()) {

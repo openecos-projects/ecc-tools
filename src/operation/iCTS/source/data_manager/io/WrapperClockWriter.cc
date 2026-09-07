@@ -20,6 +20,7 @@
  * @date 2026-05-19
  * @brief Clock-tree materialization helpers for the iCTS iDB wrapper.
  */
+#include <algorithm>
 #include <ostream>
 #include <set>
 #include <string>
@@ -83,18 +84,7 @@ auto DetachIdbNetPins(idb::IdbDesign* idb_design, idb::IdbNet* idb_net) -> void
   if (idb_design == nullptr || idb_net == nullptr) {
     return;
   }
-  std::vector<idb::IdbPin*> pins;
-  if (idb_net->get_io_pins() != nullptr) {
-    const auto& io_pins = idb_net->get_io_pins()->get_pin_list();
-    pins.insert(pins.end(), io_pins.begin(), io_pins.end());
-  }
-  if (idb_net->get_instance_pin_list() != nullptr) {
-    const auto& inst_pins = idb_net->get_instance_pin_list()->get_pin_list();
-    pins.insert(pins.end(), inst_pins.begin(), inst_pins.end());
-  }
-  for (auto* pin : pins) {
-    idb_design->disconnectPinFromNet(pin);
-  }
+  idb_design->disconnectAllPinsFromNet(idb_net);
 }
 
 auto FindIdbInstPinByCtsPinName(idb::IdbInstance* idb_inst, const std::string& pin_name) -> idb::IdbPin*
@@ -174,6 +164,14 @@ class Wrapper::CtsClockIdbWriter
 
     result.success = true;
     result.idb_clock_tree_restored = false;
+    auto* idb_inst_list = _wrapper->_idb_design->get_instance_list();
+    auto* idb_net_list = _wrapper->_idb_design->get_net_list();
+    result.inserted_inst_count = static_cast<std::size_t>(std::ranges::count_if(scope.clock_tree_inst_names, [&](const std::string& inst_name) -> bool {
+      return !restore_data.inst_names.contains(inst_name) && idb_inst_list->find_instance(inst_name) != nullptr;
+    }));
+    result.inserted_net_count = static_cast<std::size_t>(std::ranges::count_if(scope.touched_net_names, [&](const std::string& net_name) -> bool {
+      return !restore_data.net_names.contains(net_name) && idb_net_list->find_net(net_name) != nullptr;
+    }));
     return result;
   }
 

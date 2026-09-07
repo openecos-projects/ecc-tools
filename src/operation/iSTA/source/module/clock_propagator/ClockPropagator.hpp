@@ -47,23 +47,24 @@ class ClockPropagator
   void buildClockSourceList(CPModel& cp_model);
   void initTimingPointList();
   void markClockPointList(CPModel& cp_model);
-  void markClockPoint(std::string& clock_source);
+  void markClockPoint(CPClock& clock);
   void propagateClockArrival(CPModel& cp_model);
-  void seedClockArrival(std::string& clock_source);
-  void propagateClockSlewDelay();
-  void propagateClockSlewDelayArc(std::size_t arc_idx, AnalysisType analysis_type);
-  void propagateClockSlewDelayArc(std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
-  void updateClockSlewDelay(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
-                            TransType input_trans_type, TransType output_trans_type);
-  void propagateClockArrivalArc(std::size_t arc_idx, AnalysisType analysis_type);
-  void propagateClockArrivalArc(std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
-  void updateClockPathState(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
-                            TransType input_trans_type, TransType output_trans_type);
+  void seedPhysicalClockState(CPClock& clock);
+  void updateEffectiveClockState(CPClock& clock);
+  void propagateClockSlewDelay(CPClock& clock);
+  void propagateClockSlewDelayArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type);
+  void propagateClockSlewDelayArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
+  void updateClockSlewDelay(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type, TransType input_trans_type,
+                            TransType output_trans_type);
+  void propagateClockArrivalArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type);
+  void propagateClockArrivalArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
+  void updateClockPathState(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type, TransType input_trans_type,
+                            TransType output_trans_type);
   bool hasClockArrival(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type);
   double getClockArrival(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type);
   void updateClockArrival(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type, double clock_arrival);
-  void updateClockPredecessor(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type, TransType predecessor_trans_type,
-                              Arc& arc, double arc_delay);
+  void updateClockPredecessor(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type, TransType predecessor_trans_type, Arc& arc,
+                              double arc_delay);
   bool shouldStopClockPropagation(std::string& pin_name);
   void updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay);
   bool isBetterDelay(double candidate_delay, double current_delay, AnalysisType analysis_type);
@@ -74,6 +75,14 @@ class ClockPropagator
   double getArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type);
   bool isBetterArrival(double candidate_arrival, double current_arrival, AnalysisType analysis_type);
   bool isFinite(double value);
+  static bool is_clock_tree_overlap(const TimingPoint& timing_point, const CPClock& clock)
+  {
+    if (timing_point.get_clock_name().empty())
+      return false;
+    if (timing_point.get_clock_name() == clock.get_clock_name())
+      return false;
+    return true;
+  }
 };
 
 }  // namespace ista

@@ -20,10 +20,7 @@
  */
 #pragma once
 
-#include <algorithm>
-#include <cctype>
-#include <utility>
-
+#include "RCXHeader.hpp"
 #include "StringUtils.hh"
 #include "Types.hh"
 
@@ -33,8 +30,7 @@ namespace spef_unit {
 
 inline auto uppercase(std::string text) -> std::string
 {
-  std::transform(text.begin(), text.end(), text.begin(),
-                 [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
+  std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) { return static_cast<char>(std::toupper(ch)); });
   return text;
 }
 

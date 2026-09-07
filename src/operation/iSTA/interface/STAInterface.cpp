@@ -16,10 +16,15 @@
 // ***************************************************************************************
 #include "STAInterface.hpp"
 
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
+#include "ClockPropagator.hpp"
 #include "DataManager.hpp"
 #include "DelayCalculator.hpp"
-#include "ClockPropagator.hpp"
 #include "GraphBuilder.hpp"
+#include "Lib.hh"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PowerAnalyzer.hpp"
@@ -27,15 +32,16 @@
 #include "PowerReporter.hpp"
 #include "SDFWriter.hpp"
 #include "STAHeader.hpp"
+#include "SdcCommand.hpp"
+#include "SdcCommands.hpp"
 #include "TCModel.hpp"
-#include "TimingCharacterizer.hpp"
 #include "TimingAnalyzer.hpp"
+#include "TimingCharacterizer.hpp"
 #include "TimingPropagator.hpp"
 #include "TimingReporter.hpp"
 #include "Utility.hpp"
 #include "VcdParser.hh"
 #include "idm.h"
-#include "Lib.hh"
 #include "spef/SpefParser.hh"
 
 namespace ista {
@@ -84,6 +90,21 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   DataManager::initInst();
   STADM.input(config_map);
   DelayCalculator::initInst();
+  SdcCommand::initInst({
+      {"set_case_analysis", sdc::executeTclCommand<sdc::TclSetCaseAnalysis>},
+      {"set_input_delay", sdc::executeTclCommand<sdc::TclSetInputDelay>},
+      {"set_output_delay", sdc::executeTclCommand<sdc::TclSetOutputDelay>},
+      {"set_input_transition", sdc::executeTclCommand<sdc::TclSetInputTransition>},
+      {"set_load", sdc::executeTclCommand<sdc::TclSetLoad>},
+      {"set_clock_uncertainty", sdc::executeTclCommand<sdc::TclSetClockUncertainty>},
+      {"get_clock", sdc::executeTclCommand<sdc::TclGetClocks>},
+      {"get_clocks", sdc::executeTclCommand<sdc::TclGetClocks>},
+      {"get_port", sdc::executeTclCommand<sdc::TclGetPorts>},
+      {"get_ports", sdc::executeTclCommand<sdc::TclGetPorts>},
+      {"create_clock", sdc::executeTclCommand<sdc::TclCreateClock>},
+      {"set_propagated_clock", sdc::executeTclCommand<sdc::TclSetPropagatedClock>},
+  });
+  STADM.readConstraint();
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -173,8 +194,10 @@ void STAInterface::destroySTA()
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
+  STADC.destroy();
   DelayCalculator::destroyInst();
   STADM.output();
+  SdcCommand::destroyInst();
   DataManager::destroyInst();
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -190,6 +213,14 @@ void STAInterface::destroySTA()
   STALOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   // clang-format on
   Logger::destroyInst();
+
+#ifdef __GLIBC__
+  // Every STA object (liberty trees, wrapped netlist, timing graph, report
+  // buffers, ...) has been deleted above, but glibc keeps the freed pages
+  // mapped in its arenas, so repeated in-process STA sessions keep inflating
+  // the process RSS. Hand every freeable heap page back to the OS here.
+  malloc_trim(0);
+#endif
 }
 
 #endif
@@ -218,8 +249,8 @@ void STAInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   STADM.getConfig().timing_path_limit = STAUTIL.getConfigValue<int32_t>(config_map, "-timing_path_limit", 20);
   STADM.getConfig().timing_corner = STAUTIL.getConfigValue<std::string>(config_map, "-timing_corner", "");
   STADM.getConfig().is_path_report_number_specified = STAUTIL.exist(config_map, std::string("-max_paths"))
-                                                       || STAUTIL.exist(config_map, std::string("-max_path"))
-                                                       || STAUTIL.exist(config_map, std::string("-path_report_number"));
+                                                      || STAUTIL.exist(config_map, std::string("-max_path"))
+                                                      || STAUTIL.exist(config_map, std::string("-path_report_number"));
   STADM.getConfig().path_report_number = STAUTIL.getConfigValue<int32_t>(config_map, "-max_paths", 1);
   if (STAUTIL.exist(config_map, std::string("-max_path"))) {
     STADM.getConfig().path_report_number = std::any_cast<int32_t>(config_map["-max_path"]);
@@ -231,8 +262,6 @@ void STAInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   if (!STADM.getConfig().is_path_report_number_specified && STADM.getConfig().endpoint_path_report_number > 1) {
     STADM.getConfig().path_report_number = STADM.getConfig().endpoint_path_report_number;
   }
-  STADM.getConfig().timing_report_delay_type = STAUTIL.getConfigValue<std::string>(config_map, "-delay_type", "max");
-  STADM.getConfig().timing_report_start_end_type = STAUTIL.getConfigValue<std::string>(config_map, "-start_end_type", "all");
   STADM.getConfig().has_timing_report_slack_lesser_than = STAUTIL.exist(config_map, std::string("-slack_lesser_than"));
   if (STADM.getConfig().has_timing_report_slack_lesser_than) {
     STADM.getConfig().timing_report_slack_lesser_than = std::any_cast<double>(config_map["-slack_lesser_than"]);
@@ -683,7 +712,6 @@ void STAInterface::wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib
   timing_cell.get_port_map()[timing_cell_port.get_port_name()] = timing_cell_port;
 }
 
-
 void STAInterface::wrapTimingCellPower(TimingCell& timing_cell, idb::LibCell* lib_cell)
 {
   idb::LibLibrary* lib_library = lib_cell->get_owner_lib();
@@ -723,8 +751,7 @@ TimingPowerArc STAInterface::wrapTimingPowerArc(idb::LibPowerArc* lib_power_arc)
   return timing_power_arc;
 }
 
-TimingPowerArc STAInterface::wrapTimingPortPowerArc(idb::LibInternalPowerInfo* internal_power_info, std::string& port_name,
-                                                     idb::LibLibrary* lib_library)
+TimingPowerArc STAInterface::wrapTimingPortPowerArc(idb::LibInternalPowerInfo* internal_power_info, std::string& port_name, idb::LibLibrary* lib_library)
 {
   TimingPowerArc timing_power_arc;
   timing_power_arc.set_sink_port(port_name);
@@ -835,6 +862,7 @@ void STAInterface::wrapTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* li
   if (isSDFDelayArc(lib_arc)) {
     TimingCellArc timing_cell_arc = wrapDelayArc(lib_arc_set);
     timing_cell_arc.set_is_timing_graph_arc(lib_arc->isDelayArc());
+    timing_cell_arc.set_is_clear_preset_arc(lib_arc->isClearPresetArc());
     timing_cell.get_cell_arc_list().push_back(timing_cell_arc);
     if (lib_arc->isClearPresetArc()) {
       wrapClearPresetArc(timing_cell, lib_arc);
@@ -1023,8 +1051,7 @@ TimingTableVariableType STAInterface::wrapTimingTableVariableType(idb::LibTable*
   if (*variable == idb::LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION) {
     return TimingTableVariableType::kConstrainedTransition;
   }
-  if (*variable == idb::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION
-      || *variable == idb::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION
+  if (*variable == idb::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION || *variable == idb::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION
       || *variable == idb::LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME) {
     return TimingTableVariableType::kInputTransition;
   }
@@ -1446,8 +1473,7 @@ std::unique_ptr<idb::LibArc> STAInterface::makeLibArc(std::string& source_port, 
 
 std::unique_ptr<idb::LibTable> STAInterface::makeLibScalarTable(int32_t table_type, TCScalarTable& tc_scalar_table)
 {
-  std::unique_ptr<idb::LibTable> lib_table
-      = std::make_unique<idb::LibTable>(static_cast<idb::LibTable::TableType>(table_type), nullptr);
+  std::unique_ptr<idb::LibTable> lib_table = std::make_unique<idb::LibTable>(static_cast<idb::LibTable::TableType>(table_type), nullptr);
   lib_table->addTableValue(std::make_unique<idb::LibFloatValue>(tc_scalar_table.get_value()));
   return lib_table;
 }

@@ -4,6 +4,7 @@ icts_add_test_executable(
   icts_test_module_synthesis_htree
   SOURCES
     ${ICTS_TEST}/module/synthesis/htree/HTreeTest.cc
+    ${ICTS_TEST}/module/synthesis/htree/EmbeddingTest.cc
     ${ICTS_TEST}/module/synthesis/htree/SinkLoadRegionSplitTest.cc
     ${ICTS_TEST}/module/synthesis/htree/WirelengthGridTest.cc
   LIBS
