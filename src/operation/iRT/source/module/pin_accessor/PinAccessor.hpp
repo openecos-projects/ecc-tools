@@ -167,10 +167,8 @@ class PinAccessor
   std::vector<Segment<LayerCoord>> getRoutingSegmentListByNode(PANode* node);
   void updateSegmentViaMaster(Segment<LayerCoord>& segment);
   void selectAccessPoint(PABox& pa_box);
-  void resetSinglePath(PABox& pa_box);
   void updateTaskResult(PABox& pa_box);
   std::vector<Segment<LayerCoord>> getRoutingSegmentList(PABox& pa_box);
-  void resetSingleRouteTask(PABox& pa_box);
   void pushToOpenList(PABox& pa_box, PANode* curr_node);
   PANode* popFromOpenList(PABox& pa_box);
   double getKnownCost(PABox& pa_box, PANode* start_node, PANode* end_node);
@@ -192,15 +190,14 @@ class PinAccessor
   bool isBoxMinAreaViolation(PABox& pa_box, const Violation& violation);
   GTLPolyInt getViolationOverlapPoly(PABox& pa_box, Violation& violation);
   void patchSingleViolation(PABox& pa_box, const GTLPolyInt& patch_poly);
-  PAPatchSelection selectPatch(PABox& pa_box, std::vector<PAPatch>& candidate_patch_list);
+  PAPatchSelection selectPatch(PABox& pa_box, const GTLPolyInt& patch_poly, std::vector<PAPatch>& candidate_patch_list);
   std::vector<PAPatch> getCandidatePatchList(PABox& pa_box, const GTLPolyInt& patch_poly);
-  std::vector<int32_t> getPatchSampleCoordList(int32_t start_coord, int32_t end_coord, int32_t manufacture_grid, int32_t sample_step, bool is_initial_sample);
+  std::vector<PAPatch> getCompactPatchList(PABox& pa_box, const GTLPolyInt& patch_poly, const std::vector<PAPatch>& candidate_patch_list);
   void updatePatchCost(PABox& pa_box, PAPatch& pa_patch, const std::vector<GTLRectInt>& poly_rect_list);
   std::vector<PAPatch> selectCandidatePatchList(PABox& pa_box, std::vector<PAPatch>& pa_patch_list);
   bool isPatchImprovement(PABox& pa_box, const std::vector<Violation>& origin_patch_violation_list, const std::vector<Violation>& curr_patch_violation_list);
   void resetSingleViolation(PABox& pa_box);
   void updateTaskPatch(PABox& pa_box);
-  void resetSinglePatchTask(PABox& pa_box);
 
   // Results, convergence and publication.
   void updateRouteViolationList(PABox& pa_box);
@@ -249,10 +246,13 @@ class PinAccessor
   void addRouteViolationToGraph(PABox& pa_box, LayerRect& searched_rect, std::vector<Segment<LayerCoord>>& overlap_segment_list);
   void updateNetShapeToGraph(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
   void updateRoutingNetShapeToGraph(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
+  void updatePlanarRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, int32_t layer_idx, const PlanarRect& rect, bool is_fixed);
+  void updateViaRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, int32_t layer_idx, const PlanarRect& rect, bool is_fixed);
   void updateCutNetShapeToGraph(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
   void updateNodeNetToGraph(PANode& pa_node, ChangeType change_type, int32_t net_idx, Orientation orientation, bool is_fixed);
   void updateNetShapeToShadow(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
-  std::vector<PlanarRect> getRoutingShadowShapeList(PABox& pa_box, NetShape& net_shape);
+  std::vector<PlanarRect> getRoutingShadowShapeList(const NetShape& net_shape);
+  std::array<std::pair<int32_t, int32_t>, 2> getRoutingSpacingPairList(const NetShape& net_shape);
 
   // Environment costs.
   double getFixedRectCost(PABox& pa_box, int32_t net_idx, EXTLayerRect& patch);

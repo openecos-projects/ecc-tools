@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include "DRNodeNetCountState.hpp"
 #include "DRNodeNetState.hpp"
 #include "Direction.hpp"
 #include "LayerCoord.hpp"
@@ -157,7 +158,7 @@ class DRNode : public LayerCoord
   // obstacle & pin_shape state
   DRNodeNetState _fixed_rect_net_state;
   // net_result state
-  DRNodeNetState _routed_rect_net_state;
+  DRNodeNetCountState _routed_rect_net_state;
   // violation
   std::array<int32_t, 6> _violation_number_list{};
 };

@@ -38,17 +38,40 @@ class PARouteState
   std::vector<Segment<LayerCoord>>& get_routing_segment_list() { return _routing_segment_list; }
   std::map<PANode*, AccessPoint*>& get_source_node_access_point_map() { return _source_node_access_point_map; }
   void set_curr_route_task(PATask* curr_route_task) { _curr_route_task = curr_route_task; }
-  void set_routing_segment_list(const std::vector<Segment<LayerCoord>>& routing_segment_list) { _routing_segment_list = routing_segment_list; }
   // single path
   OpenQueue<PANode>& get_open_queue() { return _open_queue; }
   std::vector<PANode*>& get_single_path_visited_node_list() { return _single_path_visited_node_list; }
   PANode* get_path_head_node() { return _path_head_node; }
-  void set_open_queue(const OpenQueue<PANode>& open_queue) { _open_queue = open_queue; }
-  void set_single_path_visited_node_list(const std::vector<PANode*>& single_path_visited_node_list)
-  {
-    _single_path_visited_node_list = single_path_visited_node_list;
-  }
   void set_path_head_node(PANode* path_head_node) { _path_head_node = path_head_node; }
+
+  void resetPath()
+  {
+    get_open_queue().clear();
+    std::vector<PANode*>& single_path_visited_node_list = get_single_path_visited_node_list();
+    for (PANode* visited_node : single_path_visited_node_list) {
+      visited_node->set_state(PANodeState::kNone);
+      visited_node->set_parent_node(nullptr);
+      visited_node->set_parent_via_master_idx(ViaMasterIdx());
+      visited_node->set_known_cost(0);
+      visited_node->set_estimated_cost(0);
+    }
+    single_path_visited_node_list.clear();
+
+    set_path_head_node(nullptr);
+  }
+  void resetTask()
+  {
+    set_curr_route_task(nullptr);
+    get_source_node_list().clear();
+    get_target_node_list().clear();
+    get_routing_segment_list().clear();
+    get_source_node_access_point_map().clear();
+  }
+  void release()
+  {
+    get_open_queue().release();
+    *this = PARouteState();
+  }
 
  private:
   // single task

@@ -12,7 +12,7 @@ PA 从 Database 读取 pin 几何、障碍、层轨道和 via 规则，为 pin �
 | 迭代、分块与归属 | routePAModel、buildPinOwner、buildBoxSchedule、splitPAResult | PAModel、PABoxId |
 | 环境与任务导入 | buildPAEnvironment、initPATaskList、initPATaskResult | PABox、PATask、PATaskResult |
 | 图搜索、via 与 AP 选择 | routePATask、expandSearching、selectAccessPoint、getRoutingSegmentList | PARouteState、PANode |
-| Patch 生成与选择 | patchPATask、getCandidatePatchList、selectPatch、isPatchImprovement | PAPatchState、PAPatch、PAPatchSelection |
+| Patch 生成与选择 | patchPATask、getCandidatePatchList、getCompactPatchList、selectPatch、isPatchImprovement | PAPatchState、PAPatch、PAPatchSelection |
 | DRC 范围与输入 | buildPatchDETask、getRouteViolationList、getDirtyRouteViolationList、getFullRouteViolationList | DETask、PAFixedGeometry |
 | 结果快照、发布与清理 | updateBestResult、selectBestResult、uploadPABoxResult、updatePAModel、freePABox | PABoxResult、PAModel |
 
@@ -87,7 +87,7 @@ uploadPABoxResult -> freePABox
 | PABox.curr_result | 按 task_idx 索引的当前 AP/线段/patch，以及 box 违例 |
 | PABox.route_violation_list | box 求解结束后待汇总的违例；并行期间各 box 独立持有，stage barrier 后归并到 model 并释放 |
 | PABox.best_result | 与当前结果分离的完整快照；valid 标记区分未保存与合法空结果 |
-| PARouteState / PAPatchState | 单任务搜索或补丁的工作区，不是最终结果所有者 |
+| PARouteState / PAPatchState | 单任务搜索或补丁的工作区，自管理 reset/release，不是最终结果所有者 |
 
 线段与 patch 的主数据流相同：
 
@@ -107,6 +107,13 @@ PAModel result maps
 没有创建 task 的本地结果仍留在 owner 表，并作为 env 提供给求解器。
 因此扫描 env 和 live task 已经覆盖求解环境，不能再把 owner 全表重复加入代价或 DRC。
 env 的容器去重基于指针身份，不应擅自合并不同来源的重合几何。
+
+Router 决定清理时点，State 实现自身清理：`PARouteState::resetPath` 复位队列和已访问节点，
+`resetTask` 清理单任务状态；`PAPatchState::resetTask` 清理 patch 任务状态。
+这些 reset 保留可复用存储，不负责发布结果或更新 graph/shadow。
+`freePABox` 在原 OpenQueue 释放位置调用 `PARouteState::release`：先释放队列，再重置 route state，随后才销毁 task/node。
+route state 的其余临时存储也在此处提前释放，不再等到清理函数末尾；owner 结果和其他清理操作的相对顺序不变。
+patch state 仍在末尾调用 `release`。`release` 不调用需要访问 visited nodes 的 `resetPath`。
 
 ## 4. 候选几何与目标坐标
 
@@ -136,9 +143,9 @@ initSingleRouteTask
   -> routeSinglePath：多源搜索，到达任意 target 即成功
   -> getRoutingSegmentListByNode：提取带 via 身份的父链
   -> selectAccessPoint：回溯父链起点，选定原始 AP 对象
-  -> resetSinglePath：清理队列与节点搜索状态
+  -> route_state.resetPath：清理队列与节点搜索状态
   -> updateTaskResult：树重建、恢复 via 身份、发布线段并投影环境
-  -> resetSingleRouteTask
+  -> route_state.resetTask
 ```
 
 PARouteState 只保存扁平 source/target 列表、source-node/AP 映射、当前任务、
@@ -153,29 +160,50 @@ Via 选择保留默认 master、AP 候选限制和随重跑次数轮换的 tie �
 
 ## 6. Patch 生成与接受策略
 
-`searchViolation` 选择当前 task net 的 box 内 minimum-area 违例，再求重叠多边形。
+`searchViolation` 选择当前 task net 的 box 内 minimum-area 违例，并直接传递重叠多边形。
+待修列表在 initSinglePatchTask 时取得，处理过程中不整体刷新；tried 集合避免反复处理同一条违例。
 
-候选流程为：选切割矩形 -> 计算横纵长度 -> 分轮采样 -> 去重 -> 打分 -> 排序与限额。
-`getPatchSampleCoordList` 共用首轮端点、后续中点采样规则，横纵矩形公式仍显式保留。
-首轮补充端点使用精确切割边界，即使它与枚举网格不对齐也保持原行为。
-`updatePatchCost` 统一计算 fixed/routed cost、方向和重叠面积。
-Patch 初始化仅查询 minimum-area 违例；shadow 不保存违例惩罚区域，候选 DRC 判优仍检查其他违例是否增加。
-每轮只给新增 patch 打分，零代价候选足够后停止细化，避免先完整枚举再丢弃。
+```text
+patchSingleViolation
+  -> getCandidatePatchList：普通 W 线宽，渐进采样、去重、评分和筛选
+  -> selectPatch
+       普通唯一候选：直接接受
+       普通多候选：按顺序 DRC 对比，接受第一个改善候选
+       普通无候选或全部不改善：getCompactPatchList，生成 2W 横向跨度的宽候选
+       合并后仅一个候选：直接接受；否则只检查新增宽候选
+       全部不改善：从两阶段筛选后候选的合集中选排序最优者
+  -> 保存接受结果，标记已尝试
+任务结束：updateTaskPatch -> patch_state.resetTask
+```
 
-| selectPatch 的情况 | 当前行为 |
+PA/DR 共用 data_manager/advance 中 PatchGeometry 的切割矩形选择、采样坐标和宽候选面积扩展；该工具不依赖 RTDM、Box 或 Task。
+普通横纵矩形公式保持 PA 的方式，渐进采样首轮覆盖端点，后续只补中点。
+首轮额外端点仍取精确切割边界，不另行吸附到全局网格；宽候选增长量按 manufacture_grid 对齐。
+宽候选 North/South 的 X 跨度为 2W，East/West 的 Y 跨度为 2W，沿扩展方向增长到并集面积满足 min_area，且不得越过 die。
+两阶段均对新增候选评分，零代价候选足够或到最细采样时停止；宽候选在筛选前排除已保留普通候选的重复矩形。
+`selectCandidatePatchList` 优先零代价候选并控制数量，没有零代价候选时只保留评分最优者。
+`updatePatchCost` 计算 fixed/routed cost、方向和重叠面积；排序依次比较 fixed、routed、层方向、重叠面积及几何坐标。
+零代价不等于 DRC 已通过。普通阶段唯一候选或已找到改善候选时，不再生成宽候选。
+
+| selectPatch 结果 | 当前含义 |
 | --- | --- |
-| 无候选 | kNone，不追加 patch |
-| 只有一个候选 | kSingleCandidate，直接选择，不调用候选 DRC |
-| 多个候选且有改善 | kImproved，选择排序中首个改善候选 |
-| 多个候选均未改善 | kBestEffort，保留排序第一的候选 |
+| kNone | 多边形面积已经足够，不添加 patch |
+| kSingleCandidate | 当前完整可选集合仅一个候选，直接接受，不执行候选 DRC |
+| kImproved | 按普通、宽候选阶段顺序找到第一个满足改善条件的候选 |
+| kBestEffort | 两阶段均不改善，仍从候选合集中选择排序最优者，不偏向最后生成的宽候选 |
 
-判优要求其他环境违例和跨 net 违例按规则类型分别不增加，box 内 minimum-area 数量严格减少。
-但原、新两边都没有 box 内 minimum-area 时，不要求凭空产生一次严格减少。
-“按类型不增加”不能改成总数不增加，也不要求一次解决全部 minimum-area。
+普通阶段已有多个失败候选时，宽阶段只有一个新候选不构成“唯一候选”，仍须检查。
+真实缺面积但普通、宽阶段均无候选时立即报错；不把它当作合法 kNone 或静默修复成功。
+参数中的 grid、wire_width、max_candidate_patch_num 必须为正。
 
-候选检查复用 DETask：只临时 push/pop 当前候选指针，不修改已接受 patch 向量。
-已接受向量可能被 DETask 借用，选择过程中扩容会使指针失效。
-当前 task 的旧 patch 在 patch DRC 中被工作区内已接受 patch 替代，不能同时检查两份。
+PA/DR 的 isPatchImprovement 统一按类型计数：其他环境违例和跨 net 违例分别不能增加；
+存在 box 内 minimum-area 违例时其数量必须严格减少，两边都没有时只要求不恶化。
+该谓词用于优先接受，不约束唯一候选直通和最终 best-effort；不能宣称接受结果一定 DRC 无恶化。
+
+`buildPatchDETask` 负责输入，`getPatchViolationList` 负责执行。候选选择按需建立一次 DETask 和基线，供两个阶段复用。
+只在 DETask 内临时 push/pop 候选指针；选择期间不修改已接受工作区，宽候选追加扩容前已弹出普通候选指针。
+当前 task 的旧 patch 在 patch DRC 中被工作区已接受 patch 替代；其他 task/env 输入和 checked nets 不变。
+选中后才写入工作区，全部违例处理后才发布到当前 task 结果并更新 graph/shadow。
 
 ## 7. 空间索引与 DRC 视图
 
@@ -188,8 +216,17 @@ Patch 初始化仅查询 minimum-area 违例；shadow 不保存违例惩罚区�
 
 PAFixedGeometry 的多窗口查询要先按来源下标排序、去重，不能暴露 RTree 遍历顺序。
 其 net 列表还用于保留“当前窗口内没有 shape 的 checked net”。
-PAShadow 的 fixed index 一次批量构建；routed index 保存贡献计数以支持平衡增删；
+PAShadow 的 fixed index 一次批量构建；与 DR 一致，fixed 代价查询在未构建时报错，已构建的空索引合法；routed index 保存贡献计数以支持平衡增删；
 同 net 免罚和重合但不同来源的几何语义不能混淆。
+
+`getRoutingSpacingPairList` 与 DR 使用相同的接口形式，按 PRL、EOL 顺序返回两个 x/y spacing 对。
+`getRoutingShadowShapeList(const NetShape&)` 与 DR 同名同签名，只读取几何，不依赖 box。
+Graph 与 shadow 共用此处规则计算，保留各自的 wire/enclosure 膨胀、贴边减一和投影路径；不共享整套投影实现。
+`updateRoutingNetShapeToGraph` 负责按 wire/enclosure 和 PRL/EOL 构造膨胀矩形，
+分别交给 `updatePlanarRectToGraph` / `updateViaRectToGraph`；两者保留原 TrackGridOrientation 的网格、方向遍历顺序和双端点更新。
+不能照搬 DR 的 East/North 或内部 track 遍历，因为重复命中的贡献次数可能不同。
+两个模块没有相互依赖，routed 节点均按 orientation/net 记录贡献；计数只控制成员存续，不放大代价。
+PA 使用 map，DR 使用 DRNodeNetCountState 的内联单 net / 动态多 net 存储；fixed 仍使用集合语义，不随 routed 改成计数。
 
 Route DRC 有完整 result/patch 与 AP-via-only 两种视图。
 两者共享固定几何，但 AP-via-only 不含其他结果与 patch，并跳过 single-net violation。
@@ -217,12 +254,14 @@ AP、线段、patch 与对应违例要一起恢复，不能只回退线段。
 只修改 PA 时优先保持 PinAccessor.cpp 内现有阶段边界，不新建通用框架或额外实现文件。
 改变输入范围、排序、采样、代价、停止条件或 ownership 都可能改变输出，不能只检查能否编译。
 
-| 改动范围 | 首选回归 |
+| 改动范围 | 验证重点 |
 | --- | --- |
-| AP、target、裁剪、patch 采样 | test_pa_candidates |
-| route 工作区、队列、shadow | test_pa_state，加 test_pa_candidates 的完整路由签名 |
-| DRC 输入、task 所有权、重跑、patch 选择 | test_pa_drc |
-| 任务流程、并行边界、发布或跨迭代行为 | 上述三项及指定完整设计对比 |
+| AP、target、裁剪、patch 采样 | 候选内容、顺序与几何边界 |
+| route 工作区、队列、shadow | reset/release 时机、队列状态与贡献增删配对 |
+| DRC 输入、task 所有权、重跑、patch 选择 | checked nets、借用指针有效期、结果发布与接受条件 |
+| 任务流程、并行边界、发布或跨迭代行为 | 指定完整设计的输出与违例对比 |
+
+不保留独立 PA/DR state 测试目录；需要运行验证时先确认安排，使用指定设计与脚本，不并发运行测试。
 
 ## 10. 维护检查清单
 

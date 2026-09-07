@@ -33,7 +33,6 @@ class DRShadow
   // getter
   const RectRTree& get_fixed_rect_rtree() const { return _fixed_rect_rtree; }
   const NetRectMap& get_net_routed_rect_map() const { return _net_routed_rect_map; }
-  const std::set<PlanarRect, CmpPlanarRectByXASC>& get_violation_set() const { return _violation_set; }
   // function
   void addFixedRect(int32_t net_idx, const PlanarRect& rect)
   {
@@ -93,43 +92,21 @@ class DRShadow
       _net_routed_rect_map.erase(net_iter);
     }
   }
-  void addViolation(const PlanarRect& rect)
+  double getFixedRectCost(int32_t net_idx, const PlanarRect& rect, double unit) const
   {
-    if (rect.isIncorrect()) {
-      RTLOG.error(Loc::current(), "Cannot insert an invalid DR violation shadow!");
-      return;
+    if (!_fixed_rect_built) {
+      RTLOG.error(Loc::current(), "The fixed DR shadow index has not been built!");
     }
-    if (_violation_set.insert(rect).second) {
-      _violation_rtree.insert({Utility::convertToBGRectInt(rect), -1});
-    }
+    return getRectCost(_fixed_rect_rtree, net_idx, rect, unit);
   }
-  void clearViolation()
-  {
-    _violation_set.clear();
-    _violation_rtree.clear();
-  }
-  double getFixedRectCost(int32_t net_idx, const PlanarRect& rect, double unit) const { return getRectCost(_fixed_rect_rtree, net_idx, rect, unit); }
   double getRoutedRectCost(int32_t net_idx, const PlanarRect& rect, double unit) const { return getRectCost(_routed_rect_rtree, net_idx, rect, unit); }
-  double getViolationCost(const PlanarRect& rect, double unit) const
-  {
-    double cost = 0;
-    for (auto iter = _violation_rtree.qbegin(bgi::intersects(Utility::convertToBGRectInt(rect))); iter != _violation_rtree.qend(); ++iter) {
-      BGRectInt bg_rect = iter->first;
-      if (Utility::isOpenOverlap(rect, Utility::convertToPlanarRect(bg_rect))) {
-        cost += unit;
-      }
-    }
-    return cost;
-  }
 
  private:
   bool _fixed_rect_built = false;
   std::vector<std::pair<int32_t, PlanarRect>> _fixed_rect_list;
   RectRTree _fixed_rect_rtree;
   RectRTree _routed_rect_rtree;
-  RectRTree _violation_rtree;
   NetRectMap _net_routed_rect_map;
-  std::set<PlanarRect, CmpPlanarRectByXASC> _violation_set;
 
   double getRectCost(const RectRTree& rtree, int32_t net_idx, const PlanarRect& rect, double unit) const
   {

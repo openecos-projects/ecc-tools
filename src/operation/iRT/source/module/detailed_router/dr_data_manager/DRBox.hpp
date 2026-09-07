@@ -18,6 +18,7 @@
 
 #include "AccessPoint.hpp"
 #include "DRBoxId.hpp"
+#include "DRBoxResult.hpp"
 #include "DRIterParam.hpp"
 #include "DRNode.hpp"
 #include "DRPatchState.hpp"
@@ -67,6 +68,8 @@ class DRBox
   DRBox() = default;
   ~DRBox() = default;
   // getter
+  DRBoxResult& get_curr_result() { return _curr_result; }
+  DRBoxResult& get_best_result() { return _best_result; }
   EXTPlanarRect& get_box_rect() { return _box_rect; }
   DRBoxId& get_dr_box_id() { return _dr_box_id; }
   DRIterParam* get_dr_iter_param() { return _dr_iter_param; }
@@ -74,23 +77,18 @@ class DRBox
   bool get_dirty() const { return _dirty; }
   DRFixedGeometry& get_fixed_geometry() { return _fixed_geometry; }
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& get_net_access_point_map() { return _net_access_point_map; }
-  std::map<int32_t, std::vector<Segment<LayerCoord>*>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
-  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_task_detailed_result_map() { return _net_task_detailed_result_map; }
-  std::map<int32_t, std::vector<EXTLayerRect*>>& get_net_detailed_patch_map() { return _net_detailed_patch_map; }
-  std::map<int32_t, std::vector<EXTLayerRect>>& get_net_task_detailed_patch_map() { return _net_task_detailed_patch_map; }
+  std::map<int32_t, std::vector<Segment<LayerCoord>*>>& get_net_env_result_map() { return _net_env_result_map; }
+  std::map<int32_t, std::vector<EXTLayerRect*>>& get_net_env_patch_map() { return _net_env_patch_map; }
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_net_component_result_map() { return _net_component_result_map; }
   std::map<int32_t, int32_t>& get_net_routed_times_map() { return _net_routed_times_map; }
-  std::vector<DRTask*>& get_dr_task_list() { return _dr_task_list; }
-  std::vector<Violation>& get_route_violation_list() { return _route_violation_list; }
+  std::vector<DRTask>& get_dr_task_list() { return _dr_task_list; }
+  std::vector<int32_t>& get_task_order_list() { return _task_order_list; }
   ScaleAxis& get_box_track_axis() { return _box_track_axis; }
   std::vector<GridMap<DRNode>>& get_layer_node_map() { return _layer_node_map; }
   std::vector<DRShadow>& get_layer_shadow_map() { return _layer_shadow_map; }
   DRShapeIndex& get_env_shape_index() { return _env_shape_index; }
   DRShapeIndex& get_routed_shape_index() { return _routed_shape_index; }
   std::map<int32_t, std::pair<std::set<int32_t>, std::set<int32_t>>>& get_layer_axis_map() { return _layer_axis_map; }
-  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_best_net_task_detailed_result_map() { return _best_net_task_detailed_result_map; }
-  std::map<int32_t, std::vector<EXTLayerRect>>& get_best_net_task_detailed_patch_map() { return _best_net_task_detailed_patch_map; }
-  std::vector<Violation>& get_best_route_violation_list() { return _best_route_violation_list; }
 
   // setter
   void set_box_rect(const EXTPlanarRect& box_rect) { _box_rect = box_rect; }
@@ -102,69 +100,40 @@ class DRBox
   {
     _net_access_point_map = net_access_point_map;
   }
-  void set_net_detailed_result_map(const std::map<int32_t, std::vector<Segment<LayerCoord>*>>& net_detailed_result_map)
-  {
-    _net_detailed_result_map = net_detailed_result_map;
-  }
-  void set_net_task_detailed_result_map(const std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_task_detailed_result_map)
-  {
-    _net_task_detailed_result_map = net_task_detailed_result_map;
-  }
-  void set_net_detailed_patch_map(const std::map<int32_t, std::vector<EXTLayerRect*>>& net_detailed_patch_map)
-  {
-    _net_detailed_patch_map = net_detailed_patch_map;
-  }
-  void set_net_task_detailed_patch_map(const std::map<int32_t, std::vector<EXTLayerRect>>& net_task_detailed_patch_map)
-  {
-    _net_task_detailed_patch_map = net_task_detailed_patch_map;
-  }
-  void set_dr_task_list(const std::vector<DRTask*>& dr_task_list) { _dr_task_list = dr_task_list; }
-  void set_route_violation_list(const std::vector<Violation>& route_violation_list) { _route_violation_list = route_violation_list; }
+  void set_net_env_result_map(const std::map<int32_t, std::vector<Segment<LayerCoord>*>>& net_env_result_map) { _net_env_result_map = net_env_result_map; }
+  void set_net_env_patch_map(const std::map<int32_t, std::vector<EXTLayerRect*>>& net_env_patch_map) { _net_env_patch_map = net_env_patch_map; }
   void set_box_track_axis(const ScaleAxis& box_track_axis) { _box_track_axis = box_track_axis; }
   void set_layer_node_map(const std::vector<GridMap<DRNode>>& layer_node_map) { _layer_node_map = layer_node_map; }
   void set_layer_shadow_map(const std::vector<DRShadow>& layer_shadow_map) { _layer_shadow_map = layer_shadow_map; }
   void set_layer_axis_map(const std::map<int32_t, std::pair<std::set<int32_t>, std::set<int32_t>>>& layer_axis_map) { _layer_axis_map = layer_axis_map; }
-  void set_best_net_task_detailed_result_map(const std::map<int32_t, std::vector<Segment<LayerCoord>>>& best_net_task_detailed_result_map)
-  {
-    _best_net_task_detailed_result_map = best_net_task_detailed_result_map;
-  }
-  void set_best_net_task_detailed_patch_map(const std::map<int32_t, std::vector<EXTLayerRect>>& best_net_task_detailed_patch_map)
-  {
-    _best_net_task_detailed_patch_map = best_net_task_detailed_patch_map;
-  }
-  void set_best_route_violation_list(const std::vector<Violation>& best_route_violation_list) { _best_route_violation_list = best_route_violation_list; }
   // function
   DRRouteState& get_route_state() { return _route_state; }
   DRPatchState& get_patch_state() { return _patch_state; }
 
  private:
+  DRBoxResult _curr_result;
+  DRBoxResult _best_result;
   EXTPlanarRect _box_rect;
   DRBoxId _dr_box_id;
   DRIterParam* _dr_iter_param = nullptr;
   bool _initial_routing = true;
   bool _dirty = false;
-  // Iteration results owned by this box and transferred to DRModel after all schedules complete.
-  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_task_detailed_result_map;
-  std::map<int32_t, std::vector<EXTLayerRect>> _net_task_detailed_patch_map;
   // Environment references are borrowed from RTDM and inactive boxes for one schedule.
   DRFixedGeometry _fixed_geometry;
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> _net_access_point_map;
-  std::map<int32_t, std::vector<Segment<LayerCoord>*>> _net_detailed_result_map;
-  std::map<int32_t, std::vector<EXTLayerRect*>> _net_detailed_patch_map;
+  std::map<int32_t, std::vector<Segment<LayerCoord>*>> _net_env_result_map;
+  std::map<int32_t, std::vector<EXTLayerRect*>> _net_env_patch_map;
   // Task, graph and best-result workspace is released by freeDRBox.
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _net_component_result_map;
   std::map<int32_t, int32_t> _net_routed_times_map;
-  std::vector<DRTask*> _dr_task_list;
-  std::vector<Violation> _route_violation_list;
+  std::vector<DRTask> _dr_task_list;
+  std::vector<int32_t> _task_order_list;
   ScaleAxis _box_track_axis;
   std::vector<GridMap<DRNode>> _layer_node_map;
   std::vector<DRShadow> _layer_shadow_map;
   DRShapeIndex _env_shape_index;
   DRShapeIndex _routed_shape_index;
   std::map<int32_t, std::pair<std::set<int32_t>, std::set<int32_t>>> _layer_axis_map;
-  std::map<int32_t, std::vector<Segment<LayerCoord>>> _best_net_task_detailed_result_map;
-  std::map<int32_t, std::vector<EXTLayerRect>> _best_net_task_detailed_patch_map;
-  std::vector<Violation> _best_route_violation_list;
   DRRouteState _route_state;
   DRPatchState _patch_state;
 };

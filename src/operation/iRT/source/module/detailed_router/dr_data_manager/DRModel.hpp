@@ -19,6 +19,7 @@
 #include "DRBox.hpp"
 #include "DRBoxId.hpp"
 #include "DRIterParam.hpp"
+#include "DRModelResult.hpp"
 #include "DRNet.hpp"
 #include "GridMap.hpp"
 
@@ -30,6 +31,8 @@ class DRModel
   DRModel() = default;
   ~DRModel() = default;
   // getter
+  DRModelResult& get_curr_result() { return _curr_result; }
+  DRModelResult& get_best_result() { return _best_result; }
   std::vector<DRNet>& get_dr_net_list() { return _dr_net_list; }
   bool get_initial_routing() const { return _initial_routing; }
   int32_t get_iter() const { return _iter; }
@@ -38,12 +41,6 @@ class DRModel
   std::vector<std::vector<DRBoxId>>& get_dr_box_id_list_list() { return _dr_box_id_list_list; }
   std::vector<int32_t>& get_gcell_x_box_idx_list() { return _gcell_x_box_idx_list; }
   std::vector<int32_t>& get_gcell_y_box_idx_list() { return _gcell_y_box_idx_list; }
-  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
-  std::map<int32_t, std::vector<EXTLayerRect>>& get_net_detailed_patch_map() { return _net_detailed_patch_map; }
-  std::vector<Violation>& get_route_violation_list() { return _route_violation_list; }
-  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_best_net_detailed_result_map() { return _best_net_detailed_result_map; }
-  std::map<int32_t, std::vector<EXTLayerRect>>& get_best_net_detailed_patch_map() { return _best_net_detailed_patch_map; }
-  std::vector<Violation>& get_best_route_violation_list() { return _best_route_violation_list; }
   // setter
   void set_dr_net_list(const std::vector<DRNet>& dr_net_list) { _dr_net_list = dr_net_list; }
   void set_initial_routing(const bool initial_routing) { _initial_routing = initial_routing; }
@@ -53,26 +50,10 @@ class DRModel
   void set_dr_box_id_list_list(const std::vector<std::vector<DRBoxId>>& dr_box_id_list_list) { _dr_box_id_list_list = dr_box_id_list_list; }
   void set_gcell_x_box_idx_list(const std::vector<int32_t>& gcell_x_box_idx_list) { _gcell_x_box_idx_list = gcell_x_box_idx_list; }
   void set_gcell_y_box_idx_list(const std::vector<int32_t>& gcell_y_box_idx_list) { _gcell_y_box_idx_list = gcell_y_box_idx_list; }
-  void set_net_detailed_result_map(const std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_detailed_result_map)
-  {
-    _net_detailed_result_map = net_detailed_result_map;
-  }
-  void set_net_detailed_patch_map(const std::map<int32_t, std::vector<EXTLayerRect>>& net_detailed_patch_map)
-  {
-    _net_detailed_patch_map = net_detailed_patch_map;
-  }
-  void set_route_violation_list(const std::vector<Violation>& route_violation_list) { _route_violation_list = route_violation_list; }
-  void set_best_net_detailed_result_map(const std::map<int32_t, std::vector<Segment<LayerCoord>>>& best_net_detailed_result_map)
-  {
-    _best_net_detailed_result_map = best_net_detailed_result_map;
-  }
-  void set_best_net_detailed_patch_map(const std::map<int32_t, std::vector<EXTLayerRect>>& best_net_detailed_patch_map)
-  {
-    _best_net_detailed_patch_map = best_net_detailed_patch_map;
-  }
-  void set_best_route_violation_list(const std::vector<Violation>& best_route_violation_list) { _best_route_violation_list = best_route_violation_list; }
 
  private:
+  DRModelResult _curr_result;
+  DRModelResult _best_result;
   std::vector<DRNet> _dr_net_list;
   bool _initial_routing = true;
   int32_t _iter = -1;
@@ -81,12 +62,6 @@ class DRModel
   std::vector<std::vector<DRBoxId>> _dr_box_id_list_list;
   std::vector<int32_t> _gcell_x_box_idx_list;
   std::vector<int32_t> _gcell_y_box_idx_list;
-  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_detailed_result_map;
-  std::map<int32_t, std::vector<EXTLayerRect>> _net_detailed_patch_map;
-  std::vector<Violation> _route_violation_list;
-  std::map<int32_t, std::vector<Segment<LayerCoord>>> _best_net_detailed_result_map;
-  std::map<int32_t, std::vector<EXTLayerRect>> _best_net_detailed_patch_map;
-  std::vector<Violation> _best_route_violation_list;
 };
 
 }  // namespace irt
