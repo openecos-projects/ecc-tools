@@ -59,7 +59,7 @@ class IdbLayer
 {
  public:
   IdbLayer();
-  virtual ~IdbLayer() = default;
+  virtual ~IdbLayer();
 
   // getter
   const string& get_name() const { return _name; };
@@ -373,6 +373,13 @@ class IdbLayerAntennaProps
   bool get_antenna_cum_routing_plus_cut() const { return _cum_routing_plus_cut; }
   void set_antenna_cum_routing_plus_cut(bool v) { _cum_routing_plus_cut = v; }
 
+  // Cut Area factor
+  bool has_antenna_cut_area_factor() const { return _has_cut_area_factor; }
+  double get_antenna_cut_area_factor() const { return _cut_area_factor; }
+  void set_antenna_cut_area_factor(double v) { _has_cut_area_factor = true; _cut_area_factor = v; }
+  bool get_antenna_cut_area_factor_diffuse_only() const { return _cut_area_factor_diffuse_only; }
+  void set_antenna_cut_area_factor_diffuse_only(bool v) { _cut_area_factor_diffuse_only = v; }
+
   // PWL versions
   bool has_antenna_diff_area_ratio_pwl() const { return _has_diff_area_ratio_pwl; }
   const std::vector<std::pair<double, double>>& get_antenna_diff_area_ratio_pwl() const { return _diff_area_ratio_pwl; }
@@ -416,6 +423,9 @@ class IdbLayerAntennaProps
   
   bool _cum_routing_plus_cut = false;
 
+  bool _has_cut_area_factor = false; double _cut_area_factor = 1.0;
+  bool _cut_area_factor_diffuse_only = false;
+
   bool _has_diff_area_ratio_pwl = false; std::vector<std::pair<double, double>> _diff_area_ratio_pwl;
   bool _has_cum_diff_area_ratio_pwl = false; std::vector<std::pair<double, double>> _cum_diff_area_ratio_pwl;
   bool _has_diff_side_area_ratio_pwl = false; std::vector<std::pair<double, double>> _diff_side_area_ratio_pwl;
@@ -423,12 +433,129 @@ class IdbLayerAntennaProps
   bool _has_area_diff_reduce_pwl = false; std::vector<std::pair<double, double>> _area_diff_reduce_pwl;
 };
 
+class IdbLayerAntennaRegistry
+{
+ public:
+  static IdbLayerAntennaProps* get_or_create(const IdbLayer* layer);
+  static const IdbLayerAntennaProps* get(const IdbLayer* layer);
+  static void set_masterslice_thickness(const IdbLayer* layer, int32_t thickness);
+  static int32_t get_masterslice_thickness(const IdbLayer* layer);
+  static void remove(const IdbLayer* layer);
+  static void clear();
+
+ private:
+  static std::map<const IdbLayer*, IdbLayerAntennaProps> _props_map;
+  static std::map<const IdbLayer*, int32_t> _ms_thickness_map;
+};
+
+#define IDB_LAYER_ANTENNA_PROPS_FORWARD \
+  IdbLayerAntennaProps* antenna_props() { return IdbLayerAntennaRegistry::get_or_create(this); } \
+  const IdbLayerAntennaProps* antenna_props() const { return IdbLayerAntennaRegistry::get(this); } \
+  \
+  bool has_antenna_area_ratio() const { auto p = antenna_props(); return p && p->has_antenna_area_ratio(); } \
+  double get_antenna_area_ratio() const { auto p = antenna_props(); return p ? p->get_antenna_area_ratio() : 0.0; } \
+  void set_antenna_area_ratio(double v) { antenna_props()->set_antenna_area_ratio(v); } \
+  \
+  bool has_antenna_cum_area_ratio() const { auto p = antenna_props(); return p && p->has_antenna_cum_area_ratio(); } \
+  double get_antenna_cum_area_ratio() const { auto p = antenna_props(); return p ? p->get_antenna_cum_area_ratio() : 0.0; } \
+  void set_antenna_cum_area_ratio(double v) { antenna_props()->set_antenna_cum_area_ratio(v); } \
+  \
+  bool has_antenna_area_factor() const { auto p = antenna_props(); return p && p->has_antenna_area_factor(); } \
+  double get_antenna_area_factor() const { auto p = antenna_props(); return p ? p->get_antenna_area_factor() : 1.0; } \
+  void set_antenna_area_factor(double v) { antenna_props()->set_antenna_area_factor(v); } \
+  bool get_antenna_area_factor_diffuse_only() const { auto p = antenna_props(); return p && p->get_antenna_area_factor_diffuse_only(); } \
+  void set_antenna_area_factor_diffuse_only(bool v) { antenna_props()->set_antenna_area_factor_diffuse_only(v); } \
+  \
+  bool has_antenna_side_area_ratio() const { auto p = antenna_props(); return p && p->has_antenna_side_area_ratio(); } \
+  double get_antenna_side_area_ratio() const { auto p = antenna_props(); return p ? p->get_antenna_side_area_ratio() : 0.0; } \
+  void set_antenna_side_area_ratio(double v) { antenna_props()->set_antenna_side_area_ratio(v); } \
+  \
+  bool has_antenna_cum_side_area_ratio() const { auto p = antenna_props(); return p && p->has_antenna_cum_side_area_ratio(); } \
+  double get_antenna_cum_side_area_ratio() const { auto p = antenna_props(); return p ? p->get_antenna_cum_side_area_ratio() : 0.0; } \
+  void set_antenna_cum_side_area_ratio(double v) { antenna_props()->set_antenna_cum_side_area_ratio(v); } \
+  \
+  bool has_antenna_side_area_factor() const { auto p = antenna_props(); return p && p->has_antenna_side_area_factor(); } \
+  double get_antenna_side_area_factor() const { auto p = antenna_props(); return p ? p->get_antenna_side_area_factor() : 1.0; } \
+  void set_antenna_side_area_factor(double v) { antenna_props()->set_antenna_side_area_factor(v); } \
+  bool get_antenna_side_area_factor_diffuse_only() const { auto p = antenna_props(); return p && p->get_antenna_side_area_factor_diffuse_only(); } \
+  void set_antenna_side_area_factor_diffuse_only(bool v) { antenna_props()->set_antenna_side_area_factor_diffuse_only(v); } \
+  \
+  bool has_antenna_gate_plus_diff() const { auto p = antenna_props(); return p && p->has_antenna_gate_plus_diff(); } \
+  double get_antenna_gate_plus_diff() const { auto p = antenna_props(); return p ? p->get_antenna_gate_plus_diff() : 0.0; } \
+  void set_antenna_gate_plus_diff(double v) { antenna_props()->set_antenna_gate_plus_diff(v); } \
+  \
+  bool has_antenna_area_minus_diff() const { auto p = antenna_props(); return p && p->has_antenna_area_minus_diff(); } \
+  double get_antenna_area_minus_diff() const { auto p = antenna_props(); return p ? p->get_antenna_area_minus_diff() : 0.0; } \
+  void set_antenna_area_minus_diff(double v) { antenna_props()->set_antenna_area_minus_diff(v); } \
+  \
+  bool has_antenna_diff_area_ratio() const { auto p = antenna_props(); return p && p->has_antenna_diff_area_ratio(); } \
+  double get_antenna_diff_area_ratio() const { auto p = antenna_props(); return p ? p->get_antenna_diff_area_ratio() : 0.0; } \
+  void set_antenna_diff_area_ratio(double v) { antenna_props()->set_antenna_diff_area_ratio(v); } \
+  \
+  bool has_antenna_cum_diff_area_ratio() const { auto p = antenna_props(); return p && p->has_antenna_cum_diff_area_ratio(); } \
+  double get_antenna_cum_diff_area_ratio() const { auto p = antenna_props(); return p ? p->get_antenna_cum_diff_area_ratio() : 0.0; } \
+  void set_antenna_cum_diff_area_ratio(double v) { antenna_props()->set_antenna_cum_diff_area_ratio(v); } \
+  \
+  bool has_antenna_diff_side_area_ratio() const { auto p = antenna_props(); return p && p->has_antenna_diff_side_area_ratio(); } \
+  double get_antenna_diff_side_area_ratio() const { auto p = antenna_props(); return p ? p->get_antenna_diff_side_area_ratio() : 0.0; } \
+  void set_antenna_diff_side_area_ratio(double v) { antenna_props()->set_antenna_diff_side_area_ratio(v); } \
+  \
+  bool has_antenna_cum_diff_side_area_ratio() const { auto p = antenna_props(); return p && p->has_antenna_cum_diff_side_area_ratio(); } \
+  double get_antenna_cum_diff_side_area_ratio() const { auto p = antenna_props(); return p ? p->get_antenna_cum_diff_side_area_ratio() : 0.0; } \
+  void set_antenna_cum_diff_side_area_ratio(double v) { antenna_props()->set_antenna_cum_diff_side_area_ratio(v); } \
+  \
+  bool get_antenna_cum_routing_plus_cut() const { auto p = antenna_props(); return p && p->get_antenna_cum_routing_plus_cut(); } \
+  void set_antenna_cum_routing_plus_cut(bool v) { antenna_props()->set_antenna_cum_routing_plus_cut(v); } \
+  \
+  bool has_antenna_cut_area_factor() const { auto p = antenna_props(); return p && p->has_antenna_cut_area_factor(); } \
+  double get_antenna_cut_area_factor() const { auto p = antenna_props(); return p ? p->get_antenna_cut_area_factor() : 1.0; } \
+  void set_antenna_cut_area_factor(double v) { antenna_props()->set_antenna_cut_area_factor(v); } \
+  bool get_antenna_cut_area_factor_diffuse_only() const { auto p = antenna_props(); return p && p->get_antenna_cut_area_factor_diffuse_only(); } \
+  void set_antenna_cut_area_factor_diffuse_only(bool v) { antenna_props()->set_antenna_cut_area_factor_diffuse_only(v); } \
+  \
+  bool has_antenna_diff_area_ratio_pwl() const { auto p = antenna_props(); return p && p->has_antenna_diff_area_ratio_pwl(); } \
+  const std::vector<std::pair<double, double>>& get_antenna_diff_area_ratio_pwl() const { \
+    static const std::vector<std::pair<double, double>> empty_pwl; \
+    auto p = antenna_props(); return p ? p->get_antenna_diff_area_ratio_pwl() : empty_pwl; \
+  } \
+  void set_antenna_diff_area_ratio_pwl(const std::vector<std::pair<double, double>>& v) { antenna_props()->set_antenna_diff_area_ratio_pwl(v); } \
+  \
+  bool has_antenna_cum_diff_area_ratio_pwl() const { auto p = antenna_props(); return p && p->has_antenna_cum_diff_area_ratio_pwl(); } \
+  const std::vector<std::pair<double, double>>& get_antenna_cum_diff_area_ratio_pwl() const { \
+    static const std::vector<std::pair<double, double>> empty_pwl; \
+    auto p = antenna_props(); return p ? p->get_antenna_cum_diff_area_ratio_pwl() : empty_pwl; \
+  } \
+  void set_antenna_cum_diff_area_ratio_pwl(const std::vector<std::pair<double, double>>& v) { antenna_props()->set_antenna_cum_diff_area_ratio_pwl(v); } \
+  \
+  bool has_antenna_diff_side_area_ratio_pwl() const { auto p = antenna_props(); return p && p->has_antenna_diff_side_area_ratio_pwl(); } \
+  const std::vector<std::pair<double, double>>& get_antenna_diff_side_area_ratio_pwl() const { \
+    static const std::vector<std::pair<double, double>> empty_pwl; \
+    auto p = antenna_props(); return p ? p->get_antenna_diff_side_area_ratio_pwl() : empty_pwl; \
+  } \
+  void set_antenna_diff_side_area_ratio_pwl(const std::vector<std::pair<double, double>>& v) { antenna_props()->set_antenna_diff_side_area_ratio_pwl(v); } \
+  \
+  bool has_antenna_cum_diff_side_area_ratio_pwl() const { auto p = antenna_props(); return p && p->has_antenna_cum_diff_side_area_ratio_pwl(); } \
+  const std::vector<std::pair<double, double>>& get_antenna_cum_diff_side_area_ratio_pwl() const { \
+    static const std::vector<std::pair<double, double>> empty_pwl; \
+    auto p = antenna_props(); return p ? p->get_antenna_cum_diff_side_area_ratio_pwl() : empty_pwl; \
+  } \
+  void set_antenna_cum_diff_side_area_ratio_pwl(const std::vector<std::pair<double, double>>& v) { antenna_props()->set_antenna_cum_diff_side_area_ratio_pwl(v); } \
+  \
+  bool has_antenna_area_diff_reduce_pwl() const { auto p = antenna_props(); return p && p->has_antenna_area_diff_reduce_pwl(); } \
+  const std::vector<std::pair<double, double>>& get_antenna_area_diff_reduce_pwl() const { \
+    static const std::vector<std::pair<double, double>> empty_pwl; \
+    auto p = antenna_props(); return p ? p->get_antenna_area_diff_reduce_pwl() : empty_pwl; \
+  } \
+  void set_antenna_area_diff_reduce_pwl(const std::vector<std::pair<double, double>>& v) { antenna_props()->set_antenna_area_diff_reduce_pwl(v); }
+
 // Direction, Rect, Pitch, OffSet, Width, Space, TrackGrid, res, cap, WireExtension, Thickness,
-class IdbLayerRouting : public IdbLayer, public IdbLayerAntennaProps
+class IdbLayerRouting : public IdbLayer
 {
  public:
   IdbLayerRouting();
   virtual ~IdbLayerRouting();
+
+  IDB_LAYER_ANTENNA_PROPS_FORWARD
 
   // getter
   const int32_t get_width() const { return _width; }
@@ -715,11 +842,13 @@ class IdbLayerCutSpacing
   bool _has_same_net;
 };
 
-class IdbLayerCut : public IdbLayer, public IdbLayerAntennaProps
+class IdbLayerCut : public IdbLayer
 {
  public:
   IdbLayerCut();
   virtual ~IdbLayerCut();
+
+  IDB_LAYER_ANTENNA_PROPS_FORWARD
   // getter
   const int32_t get_width() const { return _width; }
   std::vector<IdbLayerCutSpacing*> get_spacings() { return _spacings; }
@@ -791,20 +920,21 @@ class IdbLayerCut : public IdbLayer, public IdbLayerAntennaProps
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class IdbLayerMasterslice : public IdbLayer, public IdbLayerAntennaProps
+class IdbLayerMasterslice : public IdbLayer
 {
  public:
-  IdbLayerMasterslice() : _thickness(0) { set_type(IdbLayerType::kLayerMasterslice); }
+  IdbLayerMasterslice() { set_type(IdbLayerType::kLayerMasterslice); }
   virtual ~IdbLayerMasterslice() = default;
   [[nodiscard]] const std::string& get_lef58_type() const { return _lef58_type; };
   void set_lef58_type(const std::string&& type) { _lef58_type = type; };
 
-  const int32_t get_thickness() const { return _thickness; }
-  void set_thickness(int32_t thickness) { _thickness = thickness; }
+  const int32_t get_thickness() const { return IdbLayerAntennaRegistry::get_masterslice_thickness(this); }
+  void set_thickness(int32_t thickness) { IdbLayerAntennaRegistry::set_masterslice_thickness(this, thickness); }
+
+  IDB_LAYER_ANTENNA_PROPS_FORWARD
 
  private:
   std::string _lef58_type;
-  int32_t _thickness = 0;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

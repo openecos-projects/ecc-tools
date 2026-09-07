@@ -628,7 +628,7 @@ int LefRead::parse_layer_cut(lefiLayer* lef_layer, IdbLayerCut* layer_cut)
     cutlayer_parser.parse(lef_layer->propName(i), lef_layer->propValue(i), layer_cut);
   }
 
-  parse_antenna_model(lef_layer, layer_cut);
+  parse_antenna_model(lef_layer, layer_cut->antenna_props());
 
   return kDbSuccess;
 }
@@ -870,7 +870,7 @@ int LefRead::parse_layer_routing(lefiLayer* lef_layer, IdbLayerRouting* layer_ro
     routing_layer_parser.parse(lef_layer->propName(i), lef_layer->propValue(i), layer_routing);
   }
 
-  parse_antenna_model(lef_layer, layer_routing);
+  parse_antenna_model(lef_layer, layer_routing->antenna_props());
 
   return kDbSuccess;
 }
@@ -887,7 +887,7 @@ int LefRead::parse_layer_masterslice(lefiLayer* lef_layer, IdbLayerMasterslice* 
     MastersliceLayerParser masterslice_parser(_lef_service);
     masterslice_parser.parse(lef_layer->propName(i), lef_layer->propValue(i), layer_master);
   }
-  parse_antenna_model(lef_layer, layer_master);
+  parse_antenna_model(lef_layer, layer_master->antenna_props());
   return kDbSuccess;
 }
 
