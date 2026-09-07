@@ -373,13 +373,6 @@ class IdbLayerAntennaProps
   bool get_antenna_cum_routing_plus_cut() const { return _cum_routing_plus_cut; }
   void set_antenna_cum_routing_plus_cut(bool v) { _cum_routing_plus_cut = v; }
 
-  // Cut Area factor
-  bool has_antenna_cut_area_factor() const { return _has_cut_area_factor; }
-  double get_antenna_cut_area_factor() const { return _cut_area_factor; }
-  void set_antenna_cut_area_factor(double v) { _has_cut_area_factor = true; _cut_area_factor = v; }
-  bool get_antenna_cut_area_factor_diffuse_only() const { return _cut_area_factor_diffuse_only; }
-  void set_antenna_cut_area_factor_diffuse_only(bool v) { _cut_area_factor_diffuse_only = v; }
-
   // PWL versions
   bool has_antenna_diff_area_ratio_pwl() const { return _has_diff_area_ratio_pwl; }
   const std::vector<std::pair<double, double>>& get_antenna_diff_area_ratio_pwl() const { return _diff_area_ratio_pwl; }
@@ -396,6 +389,11 @@ class IdbLayerAntennaProps
   bool has_antenna_cum_diff_side_area_ratio_pwl() const { return _has_cum_diff_side_area_ratio_pwl; }
   const std::vector<std::pair<double, double>>& get_antenna_cum_diff_side_area_ratio_pwl() const { return _cum_diff_side_area_ratio_pwl; }
   void set_antenna_cum_diff_side_area_ratio_pwl(const std::vector<std::pair<double, double>>& v) { _has_cum_diff_side_area_ratio_pwl = true; _cum_diff_side_area_ratio_pwl = v; }
+
+  // ANTENNAAREADIFFREDUCEPWL
+  bool has_antenna_area_diff_reduce_pwl() const { return _has_area_diff_reduce_pwl; }
+  const std::vector<std::pair<double, double>>& get_antenna_area_diff_reduce_pwl() const { return _area_diff_reduce_pwl; }
+  void set_antenna_area_diff_reduce_pwl(const std::vector<std::pair<double, double>>& v) { _has_area_diff_reduce_pwl = true; _area_diff_reduce_pwl = v; }
 
  private:
   bool _has_area_ratio = false; double _area_ratio = 0.0;
@@ -418,13 +416,11 @@ class IdbLayerAntennaProps
   
   bool _cum_routing_plus_cut = false;
 
-  bool _has_cut_area_factor = false; double _cut_area_factor = 1.0;
-  bool _cut_area_factor_diffuse_only = false;
-
   bool _has_diff_area_ratio_pwl = false; std::vector<std::pair<double, double>> _diff_area_ratio_pwl;
   bool _has_cum_diff_area_ratio_pwl = false; std::vector<std::pair<double, double>> _cum_diff_area_ratio_pwl;
   bool _has_diff_side_area_ratio_pwl = false; std::vector<std::pair<double, double>> _diff_side_area_ratio_pwl;
   bool _has_cum_diff_side_area_ratio_pwl = false; std::vector<std::pair<double, double>> _cum_diff_side_area_ratio_pwl;
+  bool _has_area_diff_reduce_pwl = false; std::vector<std::pair<double, double>> _area_diff_reduce_pwl;
 };
 
 // Direction, Rect, Pitch, OffSet, Width, Space, TrackGrid, res, cap, WireExtension, Thickness,
@@ -795,16 +791,20 @@ class IdbLayerCut : public IdbLayer, public IdbLayerAntennaProps
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-class IdbLayerMasterslice : public IdbLayer
+class IdbLayerMasterslice : public IdbLayer, public IdbLayerAntennaProps
 {
  public:
-  IdbLayerMasterslice() { set_type(IdbLayerType::kLayerMasterslice); }
+  IdbLayerMasterslice() : _thickness(0) { set_type(IdbLayerType::kLayerMasterslice); }
   virtual ~IdbLayerMasterslice() = default;
   [[nodiscard]] const std::string& get_lef58_type() const { return _lef58_type; };
   void set_lef58_type(const std::string&& type) { _lef58_type = type; };
 
+  const int32_t get_thickness() const { return _thickness; }
+  void set_thickness(int32_t thickness) { _thickness = thickness; }
+
  private:
   std::string _lef58_type;
+  int32_t _thickness = 0;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

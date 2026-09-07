@@ -56,6 +56,17 @@ struct Violation
   double hy = 0.0;
 };
 
+struct RunStats
+{
+  int64_t signal_net_cnt = 0;
+  int64_t pins_with_gate_area = 0;
+  int64_t pins_missing_antenna_info = 0;
+  int64_t comps_without_gate = 0;
+  int64_t conductors_out_of_range = 0;
+  int64_t skipped_segments = 0;
+  int64_t partial_areas_dropped = 0;
+};
+
 #define ZHAC (izh::AntennaChecker::getInst())
 
 class AntennaChecker
@@ -76,12 +87,16 @@ class AntennaChecker
     _violation_num = static_cast<int>(_violations.size());
   }
 
+  const RunStats& get_run_stats() const { return _run_stats; }
+  void set_run_stats(const RunStats& stats) { _run_stats = stats; }
+
  private:
   // self
   static AntennaChecker* _ac_instance;
 
   int _violation_num = 0;
   std::vector<Violation> _violations;
+  RunStats _run_stats;
 
   AntennaChecker() = default;
   AntennaChecker(const AntennaChecker& other) = delete;

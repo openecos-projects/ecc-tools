@@ -24,14 +24,6 @@ namespace izh {
 
 // public
 
-ZHInterface& ZHInterface::getInst()
-{
-  if (_zh_interface_instance == nullptr) {
-    _zh_interface_instance = new ZHInterface();
-  }
-  return *_zh_interface_instance;
-}
-
 void ZHInterface::destroyInst()
 {
   if (_zh_interface_instance != nullptr) {
@@ -72,6 +64,8 @@ void ZHInterface::checkAntenna(std::map<std::string, std::any> config_map)
       case izh::ViolationType::kAntennaDiffCsr: return "kAntennaDiffCsr";
       case izh::ViolationType::kAntennaCutPar: return "kAntennaCutPar";
       case izh::ViolationType::kAntennaCutCar: return "kAntennaCutCar";
+      case izh::ViolationType::kAntennaDiffCutPar: return "kAntennaDiffCutPar";
+      case izh::ViolationType::kAntennaDiffCutCar: return "kAntennaDiffCutCar";
       default: return "Unknown";
     }
   };
@@ -93,6 +87,15 @@ void ZHInterface::checkAntenna(std::map<std::string, std::any> config_map)
     av.hy = v.hy;
     _antenna_violations.push_back(std::move(av));
   }
+
+  const auto& stats = ZHAC.get_run_stats();
+  _antenna_run_stats.signal_net_cnt = stats.signal_net_cnt;
+  _antenna_run_stats.pins_with_gate_area = stats.pins_with_gate_area;
+  _antenna_run_stats.pins_missing_antenna_info = stats.pins_missing_antenna_info;
+  _antenna_run_stats.comps_without_gate = stats.comps_without_gate;
+  _antenna_run_stats.conductors_out_of_range = stats.conductors_out_of_range;
+  _antenna_run_stats.skipped_segments = stats.skipped_segments;
+  _antenna_run_stats.partial_areas_dropped = stats.partial_areas_dropped;
 
   AntennaChecker::destroyInst();
 }

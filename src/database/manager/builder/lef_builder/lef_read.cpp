@@ -482,60 +482,88 @@ int LefRead::parse_layer(lefiLayer* lef_layer)
   return kDbSuccess;
 }
 
+static lefiAntennaModel* select_antenna_model(lefiLayer* lef_layer) {
+  const int num_models = lef_layer->numAntennaModel();
+  if (num_models <= 0) {
+    return nullptr;
+  }
+
+  for (int j = 0; j < num_models; ++j) {
+    lefiAntennaModel* model = lef_layer->antennaModel(j);
+    if (model != nullptr && model->antennaOxide() != nullptr && std::string(model->antennaOxide()) == "OXIDE1") {
+      return model;
+    }
+  }
+
+  return lef_layer->antennaModel(0);
+}
+
 static void parse_antenna_model(lefiLayer* lef_layer, IdbLayerAntennaProps* dest) {
   if (!lef_layer || !dest) return;
-  
-  for (int j = 0; j < lef_layer->numAntennaModel(); ++j) {
-    lefiAntennaModel* am = lef_layer->antennaModel(j);
-    if (am->hasAntennaAreaRatio()) dest->set_antenna_area_ratio(am->antennaAreaRatio());
-    if (am->hasAntennaCumAreaRatio()) dest->set_antenna_cum_area_ratio(am->antennaCumAreaRatio());
-    if (am->hasAntennaAreaFactor()) {
-      dest->set_antenna_area_factor(am->antennaAreaFactor());
-      dest->set_antenna_area_factor_diffuse_only(am->hasAntennaAreaFactorDUO());
-    }
-    if (am->hasAntennaSideAreaRatio()) dest->set_antenna_side_area_ratio(am->antennaSideAreaRatio());
-    if (am->hasAntennaCumSideAreaRatio()) dest->set_antenna_cum_side_area_ratio(am->antennaCumSideAreaRatio());
-    if (am->hasAntennaSideAreaFactor()) {
-      dest->set_antenna_side_area_factor(am->antennaSideAreaFactor());
-      dest->set_antenna_side_area_factor_diffuse_only(am->hasAntennaSideAreaFactorDUO());
-    }
-    if (am->hasAntennaGatePlusDiff()) dest->set_antenna_gate_plus_diff(am->antennaGatePlusDiff());
-    if (am->hasAntennaAreaMinusDiff()) dest->set_antenna_area_minus_diff(am->antennaAreaMinusDiff());
-    
-    if (am->hasAntennaDiffAreaRatio()) dest->set_antenna_diff_area_ratio(am->antennaDiffAreaRatio());
-    if (am->hasAntennaCumDiffAreaRatio()) dest->set_antenna_cum_diff_area_ratio(am->antennaCumDiffAreaRatio());
-    if (am->hasAntennaDiffSideAreaRatio()) dest->set_antenna_diff_side_area_ratio(am->antennaDiffSideAreaRatio());
-    if (am->hasAntennaCumDiffSideAreaRatio()) dest->set_antenna_cum_diff_side_area_ratio(am->antennaCumDiffSideAreaRatio());
-    
-    if (am->hasAntennaCumRoutingPlusCut()) dest->set_antenna_cum_routing_plus_cut(true);
-    
-    auto parse_pwl = [](lefiAntennaPWL* pwl, std::vector<std::pair<double, double>>& out) {
-      if (!pwl) return;
-      for (int k = 0; k < pwl->numPWL(); ++k) {
-        out.push_back({pwl->PWLdiffusion(k), pwl->PWLratio(k)});
-      }
-    };
 
-    if (am->hasAntennaDiffAreaRatioPWL()) {
-      std::vector<std::pair<double, double>> pwl;
-      parse_pwl(am->antennaDiffAreaRatioPWL(), pwl);
-      dest->set_antenna_diff_area_ratio_pwl(pwl);
+  lefiAntennaModel* am = select_antenna_model(lef_layer);
+  if (am == nullptr) return;
+
+  if (lef_layer->numAntennaModel() > 1) {
+    ECCLOG.warn(ecc::Loc::current(), "[idb warning] Layer ", lef_layer->name(), " declares ", lef_layer->numAntennaModel(),
+                " ANTENNAMODEL sets, only ", (am->antennaOxide() != nullptr ? am->antennaOxide() : "OXIDE1"),
+                " is stored; the antenna limits of the other oxides are ignored.");
+  }
+
+  if (am->hasAntennaAreaRatio()) dest->set_antenna_area_ratio(am->antennaAreaRatio());
+  if (am->hasAntennaCumAreaRatio()) dest->set_antenna_cum_area_ratio(am->antennaCumAreaRatio());
+  if (am->hasAntennaAreaFactor()) {
+    dest->set_antenna_area_factor(am->antennaAreaFactor());
+    dest->set_antenna_area_factor_diffuse_only(am->hasAntennaAreaFactorDUO());
+  }
+  if (am->hasAntennaSideAreaRatio()) dest->set_antenna_side_area_ratio(am->antennaSideAreaRatio());
+  if (am->hasAntennaCumSideAreaRatio()) dest->set_antenna_cum_side_area_ratio(am->antennaCumSideAreaRatio());
+  if (am->hasAntennaSideAreaFactor()) {
+    dest->set_antenna_side_area_factor(am->antennaSideAreaFactor());
+    dest->set_antenna_side_area_factor_diffuse_only(am->hasAntennaSideAreaFactorDUO());
+  }
+  if (am->hasAntennaGatePlusDiff()) dest->set_antenna_gate_plus_diff(am->antennaGatePlusDiff());
+  if (am->hasAntennaAreaMinusDiff()) dest->set_antenna_area_minus_diff(am->antennaAreaMinusDiff());
+
+  if (am->hasAntennaDiffAreaRatio()) dest->set_antenna_diff_area_ratio(am->antennaDiffAreaRatio());
+  if (am->hasAntennaCumDiffAreaRatio()) dest->set_antenna_cum_diff_area_ratio(am->antennaCumDiffAreaRatio());
+  if (am->hasAntennaDiffSideAreaRatio()) dest->set_antenna_diff_side_area_ratio(am->antennaDiffSideAreaRatio());
+  if (am->hasAntennaCumDiffSideAreaRatio()) dest->set_antenna_cum_diff_side_area_ratio(am->antennaCumDiffSideAreaRatio());
+
+  if (am->hasAntennaCumRoutingPlusCut()) dest->set_antenna_cum_routing_plus_cut(true);
+
+  auto parse_pwl = [](lefiAntennaPWL* pwl, std::vector<std::pair<double, double>>& out) {
+    if (!pwl) return;
+    for (int k = 0; k < pwl->numPWL(); ++k) {
+      out.push_back({pwl->PWLdiffusion(k), pwl->PWLratio(k)});
     }
-    if (am->hasAntennaCumDiffAreaRatioPWL()) {
-      std::vector<std::pair<double, double>> pwl;
-      parse_pwl(am->antennaCumDiffAreaRatioPWL(), pwl);
-      dest->set_antenna_cum_diff_area_ratio_pwl(pwl);
-    }
-    if (am->hasAntennaDiffSideAreaRatioPWL()) {
-      std::vector<std::pair<double, double>> pwl;
-      parse_pwl(am->antennaDiffSideAreaRatioPWL(), pwl);
-      dest->set_antenna_diff_side_area_ratio_pwl(pwl);
-    }
-    if (am->hasAntennaCumDiffSideAreaRatioPWL()) {
-      std::vector<std::pair<double, double>> pwl;
-      parse_pwl(am->antennaCumDiffSideAreaRatioPWL(), pwl);
-      dest->set_antenna_cum_diff_side_area_ratio_pwl(pwl);
-    }
+    std::sort(out.begin(), out.end());
+  };
+
+  if (am->hasAntennaDiffAreaRatioPWL()) {
+    std::vector<std::pair<double, double>> pwl;
+    parse_pwl(am->antennaDiffAreaRatioPWL(), pwl);
+    dest->set_antenna_diff_area_ratio_pwl(pwl);
+  }
+  if (am->hasAntennaCumDiffAreaRatioPWL()) {
+    std::vector<std::pair<double, double>> pwl;
+    parse_pwl(am->antennaCumDiffAreaRatioPWL(), pwl);
+    dest->set_antenna_cum_diff_area_ratio_pwl(pwl);
+  }
+  if (am->hasAntennaDiffSideAreaRatioPWL()) {
+    std::vector<std::pair<double, double>> pwl;
+    parse_pwl(am->antennaDiffSideAreaRatioPWL(), pwl);
+    dest->set_antenna_diff_side_area_ratio_pwl(pwl);
+  }
+  if (am->hasAntennaCumDiffSideAreaRatioPWL()) {
+    std::vector<std::pair<double, double>> pwl;
+    parse_pwl(am->antennaCumDiffSideAreaRatioPWL(), pwl);
+    dest->set_antenna_cum_diff_side_area_ratio_pwl(pwl);
+  }
+  if (am->hasAntennaAreaDiffReducePWL()) {
+    std::vector<std::pair<double, double>> pwl;
+    parse_pwl(am->antennaAreaDiffReducePWL(), pwl);
+    dest->set_antenna_area_diff_reduce_pwl(pwl);
   }
 }
 
@@ -852,10 +880,14 @@ int LefRead::parse_layer_masterslice(lefiLayer* lef_layer, IdbLayerMasterslice* 
   if (lef_layer == nullptr || layer_master == nullptr) {
     return kDbFail;
   }
+  if (lef_layer->hasThickness()) {
+    layer_master->set_thickness(transUnitDB(lef_layer->thickness()));
+  }
   for (int i = 0; i < lef_layer->numProps(); i++) {
     MastersliceLayerParser masterslice_parser(_lef_service);
     masterslice_parser.parse(lef_layer->propName(i), lef_layer->propValue(i), layer_master);
   }
+  parse_antenna_model(lef_layer, layer_master);
   return kDbSuccess;
 }
 
@@ -1075,13 +1107,25 @@ int LefRead::parse_pin(lefiPin* lef_pin)
   double gate_area = 0.0;
   bool has_gate = false;
   if (lef_pin->hasAntennaModel()) {
+    lefiPinAntennaModel* gate_model = nullptr;
     for (int m = 0; m < lef_pin->numAntennaModel(); ++m) {
       lefiPinAntennaModel* am = lef_pin->antennaModel(m);
-      if (am && am->hasAntennaGateArea()) {
-        for (int i = 0; i < am->numAntennaGateArea(); ++i) {
-          gate_area += am->antennaGateArea(i);
-          has_gate = true;
-        }
+      if (am == nullptr) {
+        continue;
+      }
+      if (am->antennaOxide() != nullptr && std::string(am->antennaOxide()) == "OXIDE1") {
+        gate_model = am;
+        break;
+      }
+      if (gate_model == nullptr) {
+        gate_model = am;
+      }
+    }
+
+    if (gate_model != nullptr && gate_model->hasAntennaGateArea()) {
+      for (int i = 0; i < gate_model->numAntennaGateArea(); ++i) {
+        gate_area += gate_model->antennaGateArea(i);
+        has_gate = true;
       }
     }
   }
@@ -1100,6 +1144,25 @@ int LefRead::parse_pin(lefiPin* lef_pin)
   }
   if (has_diff) {
     term->set_antenna_diff_area(diff_area);
+  }
+
+  for (int i = 0; i < lef_pin->numAntennaPartialMetalArea(); ++i) {
+    const char* l = lef_pin->antennaPartialMetalAreaLayer(i);
+    if (l != nullptr) {
+      term->add_antenna_partial_metal_area(l, lef_pin->antennaPartialMetalArea(i));
+    }
+  }
+  for (int i = 0; i < lef_pin->numAntennaPartialMetalSideArea(); ++i) {
+    const char* l = lef_pin->antennaPartialMetalSideAreaLayer(i);
+    if (l != nullptr) {
+      term->add_antenna_partial_metal_side_area(l, lef_pin->antennaPartialMetalSideArea(i));
+    }
+  }
+  for (int i = 0; i < lef_pin->numAntennaPartialCutArea(); ++i) {
+    const char* l = lef_pin->antennaPartialCutAreaLayer(i);
+    if (l != nullptr) {
+      term->add_antenna_partial_cut_area(l, lef_pin->antennaPartialCutArea(i));
+    }
   }
 
 

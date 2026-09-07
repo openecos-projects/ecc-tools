@@ -34,7 +34,7 @@
 #include <tuple>
 #include <vector>
 
-#include "../../../basic/geometry/boost_definition.h"
+#include "boost_definition.h"
 #include "IdbDesign.h"
 #include "IdbLayer.h"
 #include "IdbLayout.h"
@@ -94,7 +94,11 @@ ThresholdPick pickThreshold(double plain_ratio, double diff_ratio, const std::ve
   const bool has_plain = (plain_ratio >= 0.0);
 
   const bool diff_active = diff_connected || (diff_area > kEps);
-  const bool use_diff = has_diff && (diff_active || !has_plain);
+  bool use_diff = has_diff && (diff_active || !has_plain);
+
+  if (use_diff && !diff_pwl.empty() && diff_area <= kEps && has_plain) {
+    use_diff = false;
+  }
 
   if (use_diff) {
     double threshold = !diff_pwl.empty() ? evalPwl(diff_pwl, diff_area, diff_ratio) : diff_ratio;
@@ -122,6 +126,9 @@ struct GraphNode
   bool is_conductor = false;
   bool is_routing = false;
   bool is_cut = false;
+  bool is_side = false;
+
+  double declared_area = 0.0;
 
   double gate_area = 0.0;
   double diff_area = 0.0;
@@ -138,11 +145,9 @@ struct UFNode
   double gate_area = 0.0;
   double diff_area = 0.0;
   bool diff_connected = false;
-
-  // Worst-case cumulative ratios (CAR/CSR).
-  double worst_car_area = 0.0;
-  double worst_car_side = 0.0;
-  double worst_car_cut = 0.0;
+  double cum_area_num = 0.0;
+  double cum_side_num = 0.0;
+  double cum_cut_num = 0.0;
 };
 
 struct UnionFind
@@ -161,9 +166,9 @@ struct UnionFind
       d[i].diff_area = nodes[i].diff_area;
       d[i].diff_connected = nodes[i].provides_diff || (nodes[i].diff_area > kEps);
 
-      d[i].worst_car_area = 0.0;
-      d[i].worst_car_side = 0.0;
-      d[i].worst_car_cut = 0.0;
+      d[i].cum_area_num = 0.0;
+      d[i].cum_side_num = 0.0;
+      d[i].cum_cut_num = 0.0;
     }
   }
 
@@ -200,9 +205,9 @@ struct UnionFind
     d[ri].diff_area += d[rj].diff_area;
     d[ri].diff_connected = d[ri].diff_connected || d[rj].diff_connected;
 
-    d[ri].worst_car_area = std::max(d[ri].worst_car_area, d[rj].worst_car_area);
-    d[ri].worst_car_side = std::max(d[ri].worst_car_side, d[rj].worst_car_side);
-    d[ri].worst_car_cut = std::max(d[ri].worst_car_cut, d[rj].worst_car_cut);
+    d[ri].cum_area_num += d[rj].cum_area_num;
+    d[ri].cum_side_num += d[rj].cum_side_num;
+    d[ri].cum_cut_num += d[rj].cum_cut_num;
   }
 };
 
@@ -244,17 +249,11 @@ struct AntennaRule
 
   std::vector<std::pair<double, double>> diff_area_ratio_pwl;
   std::vector<std::pair<double, double>> cum_diff_area_ratio_pwl;
-
   std::vector<std::pair<double, double>> diff_side_area_ratio_pwl;
   std::vector<std::pair<double, double>> cum_diff_side_area_ratio_pwl;
-
   std::vector<std::pair<double, double>> area_diff_reduce_pwl;
-  std::vector<std::pair<double, double>> side_area_diff_reduce_pwl;
 
   bool cum_routing_plus_cut = false;
-
-  double cut_area_factor = -1.0;
-  bool cut_area_factor_diffuse_only = false;
 };
 
 class SegmentTree
@@ -609,6 +608,12 @@ void unionAreaPerimeter(const std::vector<idb::IdbRect>& rects, int micron_dbu, 
   finalize(area, perimeter);
 }
 
+void unionArea(const std::vector<idb::IdbRect>& rects, int micron_dbu, double& area_um)
+{
+  double unused_perimeter_um = 0.0;
+  unionAreaPerimeter(rects, micron_dbu, area_um, unused_perimeter_um);
+}
+
 class AntennaCheckerImpl
 {
  public:
@@ -624,7 +629,14 @@ class AntennaCheckerImpl
 
   void run()
   {
+    _signal_net_cnt = 0;
     _violations.clear();
+    _pins_missing_antenna_info.store(0, std::memory_order_relaxed);
+    _pins_with_gate_area.store(0, std::memory_order_relaxed);
+    _comps_without_gate.store(0, std::memory_order_relaxed);
+    _skipped_segments.store(0, std::memory_order_relaxed);
+    _conductors_out_of_range.store(0, std::memory_order_relaxed);
+    _partial_areas_dropped.store(0, std::memory_order_relaxed);
 
     if (!_design || !_design->get_layout()) {
       return;
@@ -649,6 +661,8 @@ class AntennaCheckerImpl
       }
     }
 
+    _signal_net_cnt = static_cast<int64_t>(signal_nets.size());
+
     const int nthreads = std::max(1u, std::thread::hardware_concurrency());
     std::vector<std::vector<Violation>> local_violations(nthreads);
 
@@ -672,13 +686,30 @@ class AntennaCheckerImpl
                  " instance pins have no antenna gate/diffusion area annotation; affected nets may be under-checked");
     }
 
+    if (!signal_nets.empty() && _pins_with_gate_area.load() == 0) {
+      ZHLOG.warn(Loc::current(), "No instance pin in ", signal_nets.size(),
+                 " signal nets provided ANTENNAGATEAREA, so no antenna ratio could be evaluated. "
+                 "A zero violation count here means the check did not run, not that the design is clean.");
+    }
+
     if (_comps_without_gate.load() > 0) {
-      ZHLOG.info(Loc::current(), _comps_without_gate.load(),
-                 " conductor components had no connected gate state at their layer event (ignored for damage accumulation)");
+      ZHLOG.warn(Loc::current(), _comps_without_gate.load(),
+                 " conductor components had no connected gate state at their layer event and were excluded "
+                 "from damage accumulation");
+    }
+
+    if (_conductors_out_of_range.load() > 0) {
+      ZHLOG.warn(Loc::current(), _conductors_out_of_range.load(),
+                 " pin shapes or wire segments had a layer order outside the technology range and were skipped");
     }
 
     if (_skipped_segments.load() > 0) {
       ZHLOG.warn(Loc::current(), _skipped_segments.load(), " segments were neither wire nor via and were skipped");
+    }
+
+    if (_partial_areas_dropped.load() > 0) {
+      ZHLOG.warn(Loc::current(), _partial_areas_dropped.load(),
+                 " pin partial antenna area annotations referenced invalid/unknown layers and were dropped");
     }
   }
 
@@ -726,13 +757,7 @@ class AntennaCheckerImpl
 
     _max_layer_order = 0;
 
-    for (idb::IdbLayer* layer : layers->get_routing_layers()) {
-      if (layer) {
-        _max_layer_order = std::max(_max_layer_order, static_cast<int>(layer->get_order()));
-      }
-    }
-
-    for (idb::IdbLayer* layer : layers->get_cut_layers()) {
+    for (idb::IdbLayer* layer : layers->get_layers()) {
       if (layer) {
         _max_layer_order = std::max(_max_layer_order, static_cast<int>(layer->get_order()));
       }
@@ -763,6 +788,7 @@ class AntennaCheckerImpl
       has_any_rule |= routing->has_antenna_cum_diff_area_ratio_pwl();
       has_any_rule |= routing->has_antenna_diff_side_area_ratio_pwl();
       has_any_rule |= routing->has_antenna_cum_diff_side_area_ratio_pwl();
+      has_any_rule |= routing->has_antenna_area_diff_reduce_pwl();
       has_any_rule |= routing->get_antenna_cum_routing_plus_cut();
 
       if (!has_any_rule) {
@@ -832,6 +858,9 @@ class AntennaCheckerImpl
       if (routing->has_antenna_cum_diff_side_area_ratio_pwl()) {
         rule.cum_diff_side_area_ratio_pwl = routing->get_antenna_cum_diff_side_area_ratio_pwl();
       }
+      if (routing->has_antenna_area_diff_reduce_pwl()) {
+        rule.area_diff_reduce_pwl = routing->get_antenna_area_diff_reduce_pwl();
+      }
 
       _rules.push_back(rule);
     }
@@ -845,15 +874,16 @@ class AntennaCheckerImpl
 
       bool has_any_rule = false;
 
-      has_any_rule |= cut->has_antenna_cut_area_factor();
       has_any_rule |= cut->has_antenna_area_ratio();
       has_any_rule |= cut->has_antenna_cum_area_ratio();
+      has_any_rule |= cut->has_antenna_area_factor();
       has_any_rule |= cut->has_antenna_diff_area_ratio();
       has_any_rule |= cut->has_antenna_cum_diff_area_ratio();
       has_any_rule |= cut->has_antenna_gate_plus_diff();
       has_any_rule |= cut->has_antenna_area_minus_diff();
       has_any_rule |= cut->has_antenna_diff_area_ratio_pwl();
       has_any_rule |= cut->has_antenna_cum_diff_area_ratio_pwl();
+      has_any_rule |= cut->has_antenna_area_diff_reduce_pwl();
       has_any_rule |= cut->get_antenna_cum_routing_plus_cut();
 
       if (!has_any_rule) {
@@ -865,13 +895,10 @@ class AntennaCheckerImpl
       rule.layer_order = static_cast<int>(cut->get_order());
       rule.is_routing = false;
 
-      if (cut->has_antenna_cut_area_factor()) {
-        rule.cut_area_factor = cut->get_antenna_cut_area_factor();
-      } else {
-        rule.cut_area_factor = 1.0;
+      if (cut->has_antenna_area_factor()) {
+        rule.area_factor = cut->get_antenna_area_factor();
       }
-
-      rule.cut_area_factor_diffuse_only = cut->get_antenna_cut_area_factor_diffuse_only();
+      rule.area_factor_diffuse_only = cut->get_antenna_area_factor_diffuse_only();
 
       if (cut->has_antenna_area_ratio()) {
         rule.area_ratio = cut->get_antenna_area_ratio();
@@ -900,6 +927,111 @@ class AntennaCheckerImpl
       if (cut->has_antenna_cum_diff_area_ratio_pwl()) {
         rule.cum_diff_area_ratio_pwl = cut->get_antenna_cum_diff_area_ratio_pwl();
       }
+      if (cut->has_antenna_area_diff_reduce_pwl()) {
+        rule.area_diff_reduce_pwl = cut->get_antenna_area_diff_reduce_pwl();
+      }
+
+      _rules.push_back(rule);
+    }
+
+    // Masterslice (POLY) layers
+    for (idb::IdbLayer* layer : layers->get_layers()) {
+      idb::IdbLayerMasterslice* ms = dynamic_cast<idb::IdbLayerMasterslice*>(layer);
+      if (ms == nullptr) {
+        continue;
+      }
+
+      bool has_any_rule = false;
+
+      has_any_rule |= ms->has_antenna_area_ratio();
+      has_any_rule |= ms->has_antenna_cum_area_ratio();
+      has_any_rule |= ms->has_antenna_area_factor();
+      has_any_rule |= ms->has_antenna_side_area_ratio();
+      has_any_rule |= ms->has_antenna_cum_side_area_ratio();
+      has_any_rule |= ms->has_antenna_side_area_factor();
+      has_any_rule |= ms->has_antenna_gate_plus_diff();
+      has_any_rule |= ms->has_antenna_area_minus_diff();
+      has_any_rule |= ms->has_antenna_diff_area_ratio();
+      has_any_rule |= ms->has_antenna_cum_diff_area_ratio();
+      has_any_rule |= ms->has_antenna_diff_side_area_ratio();
+      has_any_rule |= ms->has_antenna_cum_diff_side_area_ratio();
+      has_any_rule |= ms->has_antenna_diff_area_ratio_pwl();
+      has_any_rule |= ms->has_antenna_cum_diff_area_ratio_pwl();
+      has_any_rule |= ms->has_antenna_diff_side_area_ratio_pwl();
+      has_any_rule |= ms->has_antenna_cum_diff_side_area_ratio_pwl();
+      has_any_rule |= ms->has_antenna_area_diff_reduce_pwl();
+      has_any_rule |= ms->get_antenna_cum_routing_plus_cut();
+
+      if (!has_any_rule) {
+        continue;
+      }
+
+      AntennaRule rule;
+      rule.layer_name = ms->get_name();
+      rule.layer_order = static_cast<int>(ms->get_order());
+      rule.is_routing = true;
+      rule.thickness_um = getMicrons(static_cast<int64_t>(ms->get_thickness()));
+
+      if (ms->has_antenna_area_ratio()) {
+        rule.area_ratio = ms->get_antenna_area_ratio();
+      }
+      if (ms->has_antenna_cum_area_ratio()) {
+        rule.cum_area_ratio = ms->get_antenna_cum_area_ratio();
+      }
+      if (ms->has_antenna_area_factor()) {
+        rule.area_factor = ms->get_antenna_area_factor();
+      }
+
+      rule.area_factor_diffuse_only = ms->get_antenna_area_factor_diffuse_only();
+
+      if (ms->has_antenna_side_area_ratio()) {
+        rule.side_area_ratio = ms->get_antenna_side_area_ratio();
+      }
+      if (ms->has_antenna_cum_side_area_ratio()) {
+        rule.cum_side_area_ratio = ms->get_antenna_cum_side_area_ratio();
+      }
+      if (ms->has_antenna_side_area_factor()) {
+        rule.side_area_factor = ms->get_antenna_side_area_factor();
+      }
+
+      rule.side_area_factor_diffuse_only = ms->get_antenna_side_area_factor_diffuse_only();
+
+      if (ms->has_antenna_gate_plus_diff()) {
+        rule.gate_plus_diff = ms->get_antenna_gate_plus_diff();
+      }
+      if (ms->has_antenna_area_minus_diff()) {
+        rule.area_minus_diff = ms->get_antenna_area_minus_diff();
+      }
+      if (ms->has_antenna_diff_area_ratio()) {
+        rule.diff_area_ratio = ms->get_antenna_diff_area_ratio();
+      }
+      if (ms->has_antenna_cum_diff_area_ratio()) {
+        rule.cum_diff_area_ratio = ms->get_antenna_cum_diff_area_ratio();
+      }
+      if (ms->has_antenna_diff_side_area_ratio()) {
+        rule.diff_side_area_ratio = ms->get_antenna_diff_side_area_ratio();
+      }
+      if (ms->has_antenna_cum_diff_side_area_ratio()) {
+        rule.cum_diff_side_area_ratio = ms->get_antenna_cum_diff_side_area_ratio();
+      }
+
+      rule.cum_routing_plus_cut = ms->get_antenna_cum_routing_plus_cut();
+
+      if (ms->has_antenna_diff_area_ratio_pwl()) {
+        rule.diff_area_ratio_pwl = ms->get_antenna_diff_area_ratio_pwl();
+      }
+      if (ms->has_antenna_cum_diff_area_ratio_pwl()) {
+        rule.cum_diff_area_ratio_pwl = ms->get_antenna_cum_diff_area_ratio_pwl();
+      }
+      if (ms->has_antenna_diff_side_area_ratio_pwl()) {
+        rule.diff_side_area_ratio_pwl = ms->get_antenna_diff_side_area_ratio_pwl();
+      }
+      if (ms->has_antenna_cum_diff_side_area_ratio_pwl()) {
+        rule.cum_diff_side_area_ratio_pwl = ms->get_antenna_cum_diff_side_area_ratio_pwl();
+      }
+      if (ms->has_antenna_area_diff_reduce_pwl()) {
+        rule.area_diff_reduce_pwl = ms->get_antenna_area_diff_reduce_pwl();
+      }
 
       _rules.push_back(rule);
     }
@@ -910,10 +1042,12 @@ class AntennaCheckerImpl
 
     _rule_map.resize(static_cast<size_t>(_max_layer_order) + 1);
     _thickness_by_order.assign(static_cast<size_t>(_max_layer_order) + 1, 0.0);
+    _conductive_order.assign(static_cast<size_t>(_max_layer_order) + 1, false);
 
     for (const auto& rule : _rules) {
       if (rule.layer_order >= 0 && static_cast<size_t>(rule.layer_order) < _rule_map.size()) {
         _rule_map[rule.layer_order].push_back(&rule);
+        _conductive_order[rule.layer_order] = true;
 
         if (rule.is_routing && rule.thickness_um > 0.0 && _thickness_by_order[rule.layer_order] <= 0.0) {
           _thickness_by_order[rule.layer_order] = rule.thickness_um;
@@ -942,6 +1076,9 @@ class AntennaCheckerImpl
 
     if (term->has_antenna_gate_area()) {
       gate_area = term->get_antenna_gate_area();
+      if (instance_pin) {
+        _pins_with_gate_area.fetch_add(1, std::memory_order_relaxed);
+      }
     }
 
     if (term->has_antenna_diff_area()) {
@@ -1055,155 +1192,162 @@ class AntennaCheckerImpl
       return static_cast<int>(nodes.size()) - 1;
     };
 
-    // 1. Instance pins
+    auto isRoutingLike = [&](idb::IdbLayer* layer, int order) -> bool {
+      if (layer == nullptr) {
+        return false;
+      }
+      if (layer->is_routing()) {
+        return true;
+      }
+      if (layer->get_type() == idb::IdbLayerType::kLayerMasterslice && order >= 0 &&
+          static_cast<size_t>(order) < _conductive_order.size() && _conductive_order[order]) {
+        return true;
+      }
+      return false;
+    };
+
+    auto createVirtualConductorNode = [&](int order, double area, bool is_routing, bool is_side, bool is_cut) -> int {
+      GraphNode n;
+      n.id = static_cast<int>(nodes.size());
+      n.time = order;
+      n.is_conductor = true;
+      n.is_routing = is_routing;
+      n.is_side = is_side;
+      n.is_cut = is_cut;
+      n.declared_area = area;
+
+      max_time = std::max(max_time, order);
+      nodes.push_back(std::move(n));
+      return static_cast<int>(nodes.size()) - 1;
+    };
+
+    auto processPin = [&](idb::IdbPin* pin, bool instance_pin) {
+      if (pin == nullptr) {
+        return;
+      }
+
+      double gate_area = 0.0;
+      double diff_area = 0.0;
+      bool provides_diff = false;
+
+      readPinAntennaInfo(pin, instance_pin, gate_area, diff_area, provides_diff);
+      int gate_node = createGateNode(gate_area, diff_area, provides_diff);
+
+      struct PinShape
+      {
+        int order = -1;
+        bool routing = false;
+        bool cut = false;
+        idb::IdbRect rect;
+      };
+
+      std::vector<PinShape> pin_shapes;
+
+      for (idb::IdbLayerShape* shape : pin->get_port_box_list()) {
+        if (shape == nullptr || shape->get_layer() == nullptr) {
+          continue;
+        }
+
+        idb::IdbLayer* layer = shape->get_layer();
+        int order = static_cast<int>(layer->get_order());
+
+        if (order < 0 || order > _max_layer_order) {
+          _conductors_out_of_range.fetch_add(1, std::memory_order_relaxed);
+          continue;
+        }
+
+        bool routing = isRoutingLike(layer, order);
+        bool cut = layer->is_cut();
+
+        for (idb::IdbRect* r : shape->get_rect_list()) {
+          if (r != nullptr) {
+            pin_shapes.push_back({order, routing, cut, *r});
+          }
+        }
+      }
+
+      int first_shape_node = -1;
+
+      if (!pin_shapes.empty()) {
+        std::sort(pin_shapes.begin(), pin_shapes.end(), [](const PinShape& a, const PinShape& b) {
+          return a.order < b.order;
+        });
+
+        size_t i = 0;
+        while (i < pin_shapes.size()) {
+          int order = pin_shapes[i].order;
+
+          bool routing = false;
+          bool cut = false;
+          std::vector<idb::IdbRect> rects;
+
+          while (i < pin_shapes.size() && pin_shapes[i].order == order) {
+            routing = routing || pin_shapes[i].routing;
+            cut = cut || pin_shapes[i].cut;
+            rects.push_back(pin_shapes[i].rect);
+            ++i;
+          }
+
+          int shape_node = createConductorNode(order, routing, cut, rects);
+
+          if (shape_node >= 0 && first_shape_node < 0) {
+            first_shape_node = shape_node;
+          }
+
+          if (gate_node >= 0 && shape_node >= 0) {
+            addEdge(gate_node, shape_node, order);
+          }
+        }
+      }
+
+      idb::IdbTerm* term = pin->get_term();
+      if (term != nullptr && (term->has_antenna_partial_metal_area() ||
+                              term->has_antenna_partial_metal_side_area() ||
+                              term->has_antenna_partial_cut_area())) {
+        int anchor = (gate_node >= 0) ? gate_node : first_shape_node;
+
+        idb::IdbLayers* layers = (_design && _design->get_layout()) ? _design->get_layout()->get_layers() : nullptr;
+
+        auto addPartialArea = [&](const std::string& layer_name, double area, bool is_routing, bool is_side, bool is_cut) {
+          if (anchor < 0 || layers == nullptr) {
+            _partial_areas_dropped.fetch_add(1, std::memory_order_relaxed);
+            return;
+          }
+
+          int order = layers->get_layer_order(layer_name);
+          if (order < 0 || order > _max_layer_order) {
+            _partial_areas_dropped.fetch_add(1, std::memory_order_relaxed);
+            return;
+          }
+
+          int vnode = createVirtualConductorNode(order, area, is_routing, is_side, is_cut);
+          addEdge(anchor, vnode, order);
+        };
+
+        for (const auto& [layer_name, area] : term->get_antenna_partial_metal_area()) {
+          addPartialArea(layer_name, area, true, false, false);
+        }
+        for (const auto& [layer_name, area] : term->get_antenna_partial_metal_side_area()) {
+          addPartialArea(layer_name, area, false, true, false);
+        }
+        for (const auto& [layer_name, area] : term->get_antenna_partial_cut_area()) {
+          addPartialArea(layer_name, area, false, false, true);
+        }
+      }
+    };
+
     if (net->get_instance_pin_list() != nullptr) {
       for (idb::IdbPin* pin : net->get_instance_pin_list()->get_pin_list()) {
-        if (pin == nullptr) {
-          continue;
-        }
-
-        double gate_area = 0.0;
-        double diff_area = 0.0;
-        bool provides_diff = false;
-
-        readPinAntennaInfo(pin, true, gate_area, diff_area, provides_diff);
-        int gate_node = createGateNode(gate_area, diff_area, provides_diff);
-
-        struct PinShape
-        {
-          int order = -1;
-          bool routing = false;
-          bool cut = false;
-          idb::IdbRect rect;
-        };
-
-        std::vector<PinShape> pin_shapes;
-
-        for (idb::IdbLayerShape* shape : pin->get_port_box_list()) {
-          if (shape == nullptr || shape->get_layer() == nullptr) {
-            continue;
-          }
-
-          idb::IdbLayer* layer = shape->get_layer();
-          int order = static_cast<int>(layer->get_order());
-
-          if (order < 0 || order > _max_layer_order) {
-            ZHLOG.warn(Loc::current(), "Skipping instance pin shape with suspicious layer_order=", order, " net=", net_name);
-            continue;
-          }
-
-          for (idb::IdbRect* r : shape->get_rect_list()) {
-            if (r != nullptr) {
-              pin_shapes.push_back({order, layer->is_routing(), layer->is_cut(), *r});
-            }
-          }
-        }
-
-        if (!pin_shapes.empty()) {
-          std::sort(pin_shapes.begin(), pin_shapes.end(), [](const PinShape& a, const PinShape& b) {
-            return a.order < b.order;
-          });
-
-          size_t i = 0;
-          while (i < pin_shapes.size()) {
-            int order = pin_shapes[i].order;
-
-            bool routing = false;
-            bool cut = false;
-            std::vector<idb::IdbRect> rects;
-
-            while (i < pin_shapes.size() && pin_shapes[i].order == order) {
-              routing = routing || pin_shapes[i].routing;
-              cut = cut || pin_shapes[i].cut;
-              rects.push_back(pin_shapes[i].rect);
-              ++i;
-            }
-
-            int shape_node = createConductorNode(order, routing, cut, rects);
-
-            if (gate_node >= 0 && shape_node >= 0) {
-              addEdge(gate_node, shape_node, order);
-            }
-          }
-        }
+        processPin(pin, true);
       }
     }
 
-    // 2. IO pins
     if (net->get_io_pins() != nullptr) {
       for (idb::IdbPin* pin : net->get_io_pins()->get_pin_list()) {
-        if (pin == nullptr) {
-          continue;
-        }
-
-        double gate_area = 0.0;
-        double diff_area = 0.0;
-        bool provides_diff = false;
-
-        readPinAntennaInfo(pin, false, gate_area, diff_area, provides_diff);
-        int gate_node = createGateNode(gate_area, diff_area, provides_diff);
-
-        struct PinShape
-        {
-          int order = -1;
-          bool routing = false;
-          bool cut = false;
-          idb::IdbRect rect;
-        };
-
-        std::vector<PinShape> pin_shapes;
-
-        for (idb::IdbLayerShape* shape : pin->get_port_box_list()) {
-          if (shape == nullptr || shape->get_layer() == nullptr) {
-            continue;
-          }
-
-          idb::IdbLayer* layer = shape->get_layer();
-          int order = static_cast<int>(layer->get_order());
-
-          if (order < 0 || order > _max_layer_order) {
-            ZHLOG.warn(Loc::current(), "Skipping IO pin shape with suspicious layer_order=", order, " net=", net_name);
-            continue;
-          }
-
-          for (idb::IdbRect* r : shape->get_rect_list()) {
-            if (r != nullptr) {
-              pin_shapes.push_back({order, layer->is_routing(), layer->is_cut(), *r});
-            }
-          }
-        }
-
-        if (!pin_shapes.empty()) {
-          std::sort(pin_shapes.begin(), pin_shapes.end(), [](const PinShape& a, const PinShape& b) {
-            return a.order < b.order;
-          });
-
-          size_t i = 0;
-          while (i < pin_shapes.size()) {
-            int order = pin_shapes[i].order;
-
-            bool routing = false;
-            bool cut = false;
-            std::vector<idb::IdbRect> rects;
-
-            while (i < pin_shapes.size() && pin_shapes[i].order == order) {
-              routing = routing || pin_shapes[i].routing;
-              cut = cut || pin_shapes[i].cut;
-              rects.push_back(pin_shapes[i].rect);
-              ++i;
-            }
-
-            int shape_node = createConductorNode(order, routing, cut, rects);
-
-            if (gate_node >= 0 && shape_node >= 0) {
-              addEdge(gate_node, shape_node, order);
-            }
-          }
-        }
+        processPin(pin, false);
       }
     }
 
-    // 3. Routing wires and vias
     if (net->get_wire_list() != nullptr) {
       for (idb::IdbRegularWire* wire : net->get_wire_list()->get_wire_list()) {
         if (wire == nullptr) {
@@ -1218,15 +1362,19 @@ class AntennaCheckerImpl
           if (seg->is_wire()) {
             idb::IdbLayer* layer = seg->get_layer();
 
-            if (layer != nullptr && layer->is_routing()) {
+            if (layer != nullptr) {
               int order = static_cast<int>(layer->get_order());
 
-              if (order < 0 || order > _max_layer_order) {
-                ZHLOG.warn(Loc::current(), "Skipping wire segment with suspicious layer_order=", order, " net=", net_name);
+              if (isRoutingLike(layer, order)) {
+                if (order < 0 || order > _max_layer_order) {
+                  _conductors_out_of_range.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                  std::vector<idb::IdbRect> rects;
+                  rects.push_back(seg->get_segment_rect());
+                  createConductorNode(order, true, false, rects);
+                }
               } else {
-                std::vector<idb::IdbRect> rects;
-                rects.push_back(seg->get_segment_rect());
-                createConductorNode(order, true, false, rects);
+                _skipped_segments.fetch_add(1, std::memory_order_relaxed);
               }
             } else {
               _skipped_segments.fetch_add(1, std::memory_order_relaxed);
@@ -1472,6 +1620,18 @@ class AntennaCheckerImpl
 
       if (routing_rule == nullptr && cut_rule == nullptr) {
         for (int root : active_roots) {
+          UFNode& root_data = uf.d[root];
+          for (int u : comps_by_root[root]) {
+            if (nodes[u].is_conductor && nodes[u].declared_area > 0.0) {
+              if (nodes[u].is_cut) {
+                root_data.cum_cut_num += nodes[u].declared_area;
+              } else if (nodes[u].is_side) {
+                root_data.cum_side_num += nodes[u].declared_area;
+              } else if (nodes[u].is_routing) {
+                root_data.cum_area_num += nodes[u].declared_area;
+              }
+            }
+          }
           comps_by_root[root].clear();
         }
         continue;
@@ -1503,9 +1663,23 @@ class AntennaCheckerImpl
           has_bbox = true;
         };
 
+        double declared_routing_area = 0.0;
+        double declared_side_area = 0.0;
+        double declared_cut_area = 0.0;
+
         for (int u : comp_nodes) {
           if (!nodes[u].is_conductor) {
             continue;
+          }
+
+          if (nodes[u].declared_area > 0.0) {
+            if (nodes[u].is_cut) {
+              declared_cut_area += nodes[u].declared_area;
+            } else if (nodes[u].is_side) {
+              declared_side_area += nodes[u].declared_area;
+            } else if (nodes[u].is_routing) {
+              declared_routing_area += nodes[u].declared_area;
+            }
           }
 
           for (const auto& s : nodes[u].shapes) {
@@ -1523,8 +1697,38 @@ class AntennaCheckerImpl
           }
         }
 
-        const bool has_routing = !routing_rects.empty();
-        const bool has_cut = !cut_rects.empty();
+        if (routing_rule == nullptr) {
+          root_data.cum_area_num += declared_routing_area;
+          root_data.cum_side_num += declared_side_area;
+        }
+        if (cut_rule == nullptr) {
+          root_data.cum_cut_num += declared_cut_area;
+        }
+
+        double cut_area_um = declared_cut_area;
+        if (!cut_rects.empty()) {
+          double physical_cut_area_um = 0.0;
+          unionArea(cut_rects, _micron_dbu, physical_cut_area_um);
+          cut_area_um += physical_cut_area_um;
+        }
+
+        double metal_area_um = declared_routing_area;
+        double side_area_um = declared_side_area;
+        if (!routing_rects.empty()) {
+          double physical_metal_area_um = 0.0;
+          double physical_metal_perimeter_um = 0.0;
+          unionAreaPerimeter(routing_rects, _micron_dbu, physical_metal_area_um, physical_metal_perimeter_um);
+          metal_area_um += physical_metal_area_um;
+
+          double thickness_um = routing_rule ? routing_rule->thickness_um : 0.0;
+          if (thickness_um <= 0.0 && static_cast<size_t>(T) < _thickness_by_order.size()) {
+            thickness_um = _thickness_by_order[T];
+          }
+          side_area_um += physical_metal_perimeter_um * thickness_um;
+        }
+
+        const bool has_routing = (metal_area_um > kEps || side_area_um > kEps);
+        const bool has_cut = (cut_area_um > kEps);
 
         if (!has_routing && !has_cut) {
           comps_by_root[root].clear();
@@ -1538,6 +1742,15 @@ class AntennaCheckerImpl
         }
 
         const bool diff_active = root_data.diff_connected || (root_data.diff_area > kEps);
+
+        if (!has_bbox) {
+          for (int u : comp_nodes) {
+            if (has_bbox) break;
+            for (const auto& s : nodes[u].shapes) {
+              addRectToBBox(s.rect);
+            }
+          }
+        }
 
         auto emit = [&](const std::string& layer_name, ViolationType type, double ratio, double threshold) {
           if (ratio > threshold) {
@@ -1561,11 +1774,6 @@ class AntennaCheckerImpl
 
         // Cut layer PAR/CAR
         if (has_cut && cut_rule != nullptr) {
-          double cut_area_um = 0.0;
-          double cut_perimeter_um = 0.0;
-
-          unionAreaPerimeter(cut_rects, _micron_dbu, cut_area_um, cut_perimeter_um);
-
           if (cut_area_um > kEps) {
             const double gate_plus_diff_factor = (cut_rule->gate_plus_diff >= 0.0) ? cut_rule->gate_plus_diff : 0.0;
             const double eff_gate = root_data.gate_area + gate_plus_diff_factor * root_data.diff_area;
@@ -1578,15 +1786,16 @@ class AntennaCheckerImpl
                 return 1.0;
               };
 
-              const double cut_scale = factor(cut_rule->cut_area_factor, cut_rule->cut_area_factor_diffuse_only);
+              const double cut_scale = factor(cut_rule->area_factor, cut_rule->area_factor_diffuse_only);
               const double reduce_factor = evalPwl(cut_rule->area_diff_reduce_pwl, root_data.diff_area, 1.0);
               const double minus_diff = (cut_rule->area_minus_diff >= 0.0) ? cut_rule->area_minus_diff * root_data.diff_area : 0.0;
 
-              const double par_cut_raw = ((cut_scale * cut_area_um) * reduce_factor - minus_diff) / eff_gate;
-              const double par_cut_check = std::max(0.0, par_cut_raw);
+              const double par_cut_num = (cut_scale * cut_area_um) * reduce_factor - minus_diff;
+              const double par_cut_check = std::max(0.0, par_cut_num / eff_gate);
 
-              const double prev_cut = cut_rule->cum_routing_plus_cut ? root_data.worst_car_area : root_data.worst_car_cut;
-              root_data.worst_car_cut = std::max(0.0, prev_cut + par_cut_raw);
+              const double prev_cut_num = cut_rule->cum_routing_plus_cut ? root_data.cum_area_num : root_data.cum_cut_num;
+              root_data.cum_cut_num = std::max(0.0, prev_cut_num + par_cut_num);
+              const double cut_car = root_data.cum_cut_num / eff_gate;
 
               ThresholdPick p = pickThreshold(cut_rule->area_ratio, cut_rule->diff_area_ratio, cut_rule->diff_area_ratio_pwl,
                                               root_data.diff_area, root_data.diff_connected);
@@ -1600,8 +1809,8 @@ class AntennaCheckerImpl
                                 root_data.diff_area, root_data.diff_connected);
 
               if (p.available) {
-                emit(cut_rule->layer_name, p.is_diff ? ViolationType::kAntennaDiffCutCar : ViolationType::kAntennaCutCar,
-                     root_data.worst_car_cut, p.threshold);
+                emit(cut_rule->layer_name, p.is_diff ? ViolationType::kAntennaDiffCutCar : ViolationType::kAntennaCutCar, cut_car,
+                     p.threshold);
               }
             } else {
               _comps_without_gate.fetch_add(1, std::memory_order_relaxed);
@@ -1611,18 +1820,6 @@ class AntennaCheckerImpl
 
         // Routing layer PAR/CAR/PSR/CSR
         if (has_routing && routing_rule != nullptr) {
-          double metal_area_um = 0.0;
-          double metal_perimeter_um = 0.0;
-
-          unionAreaPerimeter(routing_rects, _micron_dbu, metal_area_um, metal_perimeter_um);
-
-          double thickness_um = routing_rule->thickness_um;
-          if (thickness_um <= 0.0 && static_cast<size_t>(T) < _thickness_by_order.size()) {
-            thickness_um = _thickness_by_order[T];
-          }
-
-          const double side_area_um = metal_perimeter_um * thickness_um;
-
           if (metal_area_um > kEps || side_area_um > kEps) {
             const double gate_plus_diff_factor = (routing_rule->gate_plus_diff >= 0.0) ? routing_rule->gate_plus_diff : 0.0;
             const double eff_gate = root_data.gate_area + gate_plus_diff_factor * root_data.diff_area;
@@ -1639,19 +1836,21 @@ class AntennaCheckerImpl
               const double side_scale = factor(routing_rule->side_area_factor, routing_rule->side_area_factor_diffuse_only);
 
               const double area_reduce = evalPwl(routing_rule->area_diff_reduce_pwl, root_data.diff_area, 1.0);
-              const double side_reduce = evalPwl(routing_rule->side_area_diff_reduce_pwl, root_data.diff_area, 1.0);
 
               const double minus_diff = (routing_rule->area_minus_diff >= 0.0) ? routing_rule->area_minus_diff * root_data.diff_area : 0.0;
 
-              const double par_area_raw = ((area_scale * metal_area_um) * area_reduce - minus_diff) / eff_gate;
-              const double par_side_raw = ((side_scale * side_area_um) * side_reduce) / eff_gate;
+              const double par_area_num = (area_scale * metal_area_um) * area_reduce - minus_diff;
+              const double par_side_num = side_scale * side_area_um;
 
-              const double par_area_check = std::max(0.0, par_area_raw);
-              const double par_side_check = std::max(0.0, par_side_raw);
+              const double par_area_check = std::max(0.0, par_area_num / eff_gate);
+              const double par_side_check = std::max(0.0, par_side_num / eff_gate);
 
-              const double prev_area = routing_rule->cum_routing_plus_cut ? root_data.worst_car_cut : root_data.worst_car_area;
-              root_data.worst_car_area = std::max(0.0, prev_area + par_area_raw);
-              root_data.worst_car_side = std::max(0.0, root_data.worst_car_side + par_side_raw);
+              const double prev_area_num = routing_rule->cum_routing_plus_cut ? root_data.cum_cut_num : root_data.cum_area_num;
+              root_data.cum_area_num = std::max(0.0, prev_area_num + par_area_num);
+              root_data.cum_side_num = std::max(0.0, root_data.cum_side_num + par_side_num);
+
+              const double car = root_data.cum_area_num / eff_gate;
+              const double csr = root_data.cum_side_num / eff_gate;
 
               ThresholdPick p = pickThreshold(routing_rule->area_ratio, routing_rule->diff_area_ratio, routing_rule->diff_area_ratio_pwl,
                                               root_data.diff_area, root_data.diff_connected);
@@ -1665,8 +1864,7 @@ class AntennaCheckerImpl
                                 root_data.diff_area, root_data.diff_connected);
 
               if (p.available) {
-                emit(routing_rule->layer_name, p.is_diff ? ViolationType::kAntennaDiffCar : ViolationType::kAntennaCar,
-                     root_data.worst_car_area, p.threshold);
+                emit(routing_rule->layer_name, p.is_diff ? ViolationType::kAntennaDiffCar : ViolationType::kAntennaCar, car, p.threshold);
               }
 
               p = pickThreshold(routing_rule->side_area_ratio, routing_rule->diff_side_area_ratio, routing_rule->diff_side_area_ratio_pwl,
@@ -1681,8 +1879,7 @@ class AntennaCheckerImpl
                                 routing_rule->cum_diff_side_area_ratio_pwl, root_data.diff_area, root_data.diff_connected);
 
               if (p.available) {
-                emit(routing_rule->layer_name, p.is_diff ? ViolationType::kAntennaDiffCsr : ViolationType::kAntennaCsr,
-                     root_data.worst_car_side, p.threshold);
+                emit(routing_rule->layer_name, p.is_diff ? ViolationType::kAntennaDiffCsr : ViolationType::kAntennaCsr, csr, p.threshold);
               }
             } else {
               _comps_without_gate.fetch_add(1, std::memory_order_relaxed);
@@ -1695,20 +1892,38 @@ class AntennaCheckerImpl
     }
   }
 
+  RunStats get_run_stats() const
+  {
+    RunStats stats;
+    stats.signal_net_cnt = _signal_net_cnt;
+    stats.pins_with_gate_area = _pins_with_gate_area.load(std::memory_order_relaxed);
+    stats.pins_missing_antenna_info = _pins_missing_antenna_info.load(std::memory_order_relaxed);
+    stats.comps_without_gate = _comps_without_gate.load(std::memory_order_relaxed);
+    stats.conductors_out_of_range = _conductors_out_of_range.load(std::memory_order_relaxed);
+    stats.skipped_segments = _skipped_segments.load(std::memory_order_relaxed);
+    stats.partial_areas_dropped = _partial_areas_dropped.load(std::memory_order_relaxed);
+    return stats;
+  }
+
   idb::IdbDesign* _design = nullptr;
   int _micron_dbu = 1000;
 
   std::vector<AntennaRule> _rules;
   std::vector<std::vector<const AntennaRule*>> _rule_map;
   std::vector<double> _thickness_by_order;
+  std::vector<bool> _conductive_order;
 
   std::vector<Violation> _violations;
 
   int _max_layer_order = 200;
+  int64_t _signal_net_cnt = 0;
 
   std::atomic<int64_t> _pins_missing_antenna_info{0};
+  std::atomic<int64_t> _pins_with_gate_area{0};
   std::atomic<int64_t> _comps_without_gate{0};
   std::atomic<int64_t> _skipped_segments{0};
+  std::atomic<int64_t> _conductors_out_of_range{0};
+  std::atomic<int64_t> _partial_areas_dropped{0};
 };
 
 }  // namespace
@@ -1789,6 +2004,7 @@ ACModel AntennaChecker::initACModel(std::map<std::string, std::any>& config_map)
   checker.run();
 
   this->set_violations(checker.get_violations());
+  this->set_run_stats(checker.get_run_stats());
 
   ZHLOG.info(Loc::current(), "violation count: ", checker.get_violation_count());
 
