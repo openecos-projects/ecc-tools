@@ -37,6 +37,8 @@ class DRModel
   bool get_initial_routing() const { return _initial_routing; }
   int32_t get_iter() const { return _iter; }
   DRIterParam& get_dr_iter_param() { return _dr_iter_param; }
+  DRIterParam& get_previous_dr_iter_param() { return _previous_dr_iter_param; }
+  bool get_refine_enabled() const { return _refine_enabled; }
   GridMap<DRBox>& get_dr_box_map() { return _dr_box_map; }
   std::vector<std::vector<DRBoxId>>& get_dr_box_id_list_list() { return _dr_box_id_list_list; }
   std::vector<int32_t>& get_gcell_x_box_idx_list() { return _gcell_x_box_idx_list; }
@@ -46,6 +48,8 @@ class DRModel
   void set_initial_routing(const bool initial_routing) { _initial_routing = initial_routing; }
   void set_iter(const int32_t iter) { _iter = iter; }
   void set_dr_iter_param(const DRIterParam& dr_iter_param) { _dr_iter_param = dr_iter_param; }
+  void set_previous_dr_iter_param(const DRIterParam& dr_iter_param) { _previous_dr_iter_param = dr_iter_param; }
+  void set_refine_enabled(bool refine_enabled) { _refine_enabled = refine_enabled; }
   void set_dr_box_map(const GridMap<DRBox>& dr_box_map) { _dr_box_map = dr_box_map; }
   void set_dr_box_id_list_list(const std::vector<std::vector<DRBoxId>>& dr_box_id_list_list) { _dr_box_id_list_list = dr_box_id_list_list; }
   void set_gcell_x_box_idx_list(const std::vector<int32_t>& gcell_x_box_idx_list) { _gcell_x_box_idx_list = gcell_x_box_idx_list; }
@@ -58,6 +62,8 @@ class DRModel
   bool _initial_routing = true;
   int32_t _iter = -1;
   DRIterParam _dr_iter_param;
+  DRIterParam _previous_dr_iter_param;
+  bool _refine_enabled = false;
   GridMap<DRBox> _dr_box_map;
   std::vector<std::vector<DRBoxId>> _dr_box_id_list_list;
   std::vector<int32_t> _gcell_x_box_idx_list;

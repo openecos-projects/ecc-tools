@@ -86,6 +86,17 @@ class DetailedRouter
   void buildNetTaskList(DRModel& dr_model, DRBox& dr_box, int32_t net_idx);
   void buildRouteViolation(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   bool needRouting(DRBox& dr_box);
+  void buildRefineTaskList(DRModel& dr_model, DRBox& dr_box);
+  void selectRefineNetList(DRBox& dr_box);
+  void refineCleanNets(DRBox& dr_box);
+  bool hasCoveredOutsideBoxAccessPoint(DRBox& dr_box, int32_t net_idx);
+  bool coverRefineTerminals(DRBox& dr_box, int32_t net_idx, std::vector<Segment<LayerCoord>>& old_result_list,
+                            const std::vector<EXTLayerRect>& old_patch_list);
+  bool hasNetBoxViolation(DRBox& dr_box, int32_t net_idx, const std::vector<Violation>& violation_list);
+  double getNetResultCost(const std::vector<Segment<LayerCoord>>& result_list, const std::vector<EXTLayerRect>& patch_list,
+                          const DRIterParam& dr_iter_param);
+  double getResultCost(const std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_result_map,
+                       const std::map<int32_t, std::vector<EXTLayerRect>>& net_patch_map, const DRIterParam& dr_iter_param);
   void buildDRBoxGraph(DRBox& dr_box);
   void buildBoxTrackAxis(DRBox& dr_box);
   void buildLayerNodeMap(DRBox& dr_box);
@@ -147,6 +158,7 @@ class DetailedRouter
   void buildFixedDETask(DETask& de_task, const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& type_layer_net_fixed_rect_map);
   void buildFixedDETask(DETask& de_task, const DRFixedGeometry& fixed_geometry);
   std::vector<Violation> getRouteViolationList(DRBox& dr_box);
+  std::vector<Violation> getBoxRouteViolationList(DRBox& dr_box);
   void updateBestResult(DRBox& dr_box);
   void updateTaskSchedule(DRBox& dr_box, std::vector<int32_t>& routing_net_list);
   void selectBestResult(DRBox& dr_box);

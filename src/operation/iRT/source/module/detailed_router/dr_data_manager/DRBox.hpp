@@ -75,6 +75,9 @@ class DRBox
   DRIterParam* get_dr_iter_param() { return _dr_iter_param; }
   bool get_initial_routing() const { return _initial_routing; }
   bool get_dirty() const { return _dirty; }
+  bool get_refine_enabled() const { return _refine_enabled; }
+  bool get_refine_routing() const { return _refine_routing; }
+  std::vector<int32_t>& get_refine_net_list() { return _refine_net_list; }
   DRFixedGeometry& get_fixed_geometry() { return _fixed_geometry; }
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& get_net_access_point_map() { return _net_access_point_map; }
   std::map<int32_t, std::vector<Segment<LayerCoord>*>>& get_net_env_result_map() { return _net_env_result_map; }
@@ -96,6 +99,8 @@ class DRBox
   void set_dr_iter_param(DRIterParam* dr_iter_param) { _dr_iter_param = dr_iter_param; }
   void set_initial_routing(const bool initial_routing) { _initial_routing = initial_routing; }
   void set_dirty(const bool dirty) { _dirty = dirty; }
+  void set_refine_enabled(bool refine_enabled) { _refine_enabled = refine_enabled; }
+  void set_refine_routing(bool refine_routing) { _refine_routing = refine_routing; }
   void set_net_access_point_map(const std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>>& net_access_point_map)
   {
     _net_access_point_map = net_access_point_map;
@@ -118,6 +123,9 @@ class DRBox
   DRIterParam* _dr_iter_param = nullptr;
   bool _initial_routing = true;
   bool _dirty = false;
+  bool _refine_enabled = false;
+  bool _refine_routing = false;
+  std::vector<int32_t> _refine_net_list;
   // Environment references are borrowed from RTDM and inactive boxes for one schedule.
   DRFixedGeometry _fixed_geometry;
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> _net_access_point_map;
