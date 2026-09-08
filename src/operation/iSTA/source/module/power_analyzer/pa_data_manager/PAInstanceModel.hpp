@@ -18,6 +18,7 @@
 
 #include "PowerActivity.hpp"
 #include "STAHeader.hpp"
+#include "TransType.hpp"
 
 namespace ista {
 
@@ -27,7 +28,7 @@ class TimingPowerArc;
 class PAInstanceModel
 {
  public:
-  using OutputTimingPowerArcGroup = std::pair<std::string, std::string>;
+  using OutputTimingPowerArcGroup = std::tuple<std::string, std::string, TransType>;
   using SensitivityProbabilityKey = std::pair<LogicExpression*, std::string>;
 
   PAInstanceModel() = default;

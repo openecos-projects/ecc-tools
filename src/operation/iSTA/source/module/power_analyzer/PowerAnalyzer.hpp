@@ -58,7 +58,7 @@ class PowerAnalyzer
   double getOutputTimingPowerArcPower(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model);
   double getOutputTimingPowerArcWeight(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model);
   double getOutputTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model);
-  double getOutputTimingPowerArcWeightSum(TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model);
+  double getOutputTimingPowerArcWeightSum(TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model, TransType trans_type);
   double getTimingPowerArcEnergy(Instance& instance, TimingPowerArc& timing_power_arc, TransType trans_type);
   double getTimingPowerArcInputSlew(Instance& instance, TimingPowerArc& timing_power_arc, TransType trans_type);
   TimingArcSense getTimingPowerArcSense(Instance& instance, TimingPowerArc& timing_power_arc);
