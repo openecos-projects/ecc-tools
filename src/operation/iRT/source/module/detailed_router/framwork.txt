@@ -81,9 +81,13 @@ initTaskSchedule
   -> 有待重布 net 则重复
 ```
 
-首次布线按 net_idx 升序调度。后续根据违例顺序、task 中 net 的首次出现顺序和重布次数限制选 net。
-`updateTaskSchedule` 只对 task_order_list 稳定分组，把不需重布的 task 索引放在前面、需重布的放在后面，保留组内顺序。
-不能把稳定分组改成普通 partition，也不能把首次布线和修复的排序策略合并。
+每轮待重布 net 全部完成后统一检查 box 内所有 task nets，再更新 best result；不能用单 net 的局部违例列表替换 box 结果。
+首次布线按 net_idx 升序调度。新建修复 box 尚无本地布线历史，以 task 中 net 首次出现顺序初始化。
+box 内独立维护 net_route_order_list，按当前几何最近一次布线时间从早到晚排列：未重布 net 保留在前，本轮重布 net 按实际执行顺序放到后面。
+每个 violation 只选择该顺序中最早的本地 task net 作为 aggressor；只重布去重后的 aggressors，保留它们的历史相对顺序。
+aggressor 达到重布次数上限时不改选 victim；只有一个本地 task net 的违例选择该 net。无本地 task 的环境 net 不入队。
+`updateTaskSchedule` 对 task_order_list 稳定分组，将 aggressor 对应的 task 放在前面，组内顺序不变。
+task 的调度优先级与真实布线历史分开维护，不能用分组后的 task 顺序反推几何生成先后。
 
 ## 3. 数据与所有权
 

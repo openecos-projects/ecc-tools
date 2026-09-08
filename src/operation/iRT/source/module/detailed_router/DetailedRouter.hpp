@@ -108,7 +108,7 @@ class DetailedRouter
   void updateNetShapeIndex(DRBox& dr_box, int32_t net_idx);
   void exemptPinShape(DRModel& dr_model, DRBox& dr_box);
   void routeDRBox(DRBox& dr_box);
-  std::vector<int32_t> initTaskSchedule(DRBox& dr_box);
+  std::vector<int32_t> initTaskSchedule(DRBox& dr_box, std::vector<int32_t>& net_route_order_list);
   void updateGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, std::vector<Segment<LayerCoord>>& segment_list,
                    std::vector<EXTLayerRect>& patch_list);
   void resetDRNetResult(DRBox& dr_box, int32_t net_idx, const std::vector<DRTask*>& net_task_list);
@@ -160,7 +160,7 @@ class DetailedRouter
   std::vector<Violation> getRouteViolationList(DRBox& dr_box);
   std::vector<Violation> getBoxRouteViolationList(DRBox& dr_box);
   void updateBestResult(DRBox& dr_box);
-  void updateTaskSchedule(DRBox& dr_box, std::vector<int32_t>& routing_net_list);
+  void updateTaskSchedule(DRBox& dr_box, const std::vector<int32_t>& net_route_order_list, std::vector<int32_t>& routing_net_list);
   void selectBestResult(DRBox& dr_box);
   void freeDRBox(DRBox& dr_box);
   void updateDRModel(DRModel& dr_model);

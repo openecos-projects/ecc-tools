@@ -1913,32 +1913,49 @@ void DetailedRouter::exemptPinShape(DRModel& dr_model, DRBox& dr_box)
 
 void DetailedRouter::routeDRBox(DRBox& dr_box)
 {
-  std::vector<int32_t> routing_net_list = initTaskSchedule(dr_box);
+  std::vector<int32_t> net_route_order_list;
+  std::vector<int32_t> routing_net_list = initTaskSchedule(dr_box, net_route_order_list);
   while (!routing_net_list.empty()) {
     for (int32_t net_idx : routing_net_list) {
       routeDRNet(dr_box, net_idx);
     }
+    // Untouched routes predate this batch; record the actual order independently of task priority.
+    std::set<int32_t> routing_net_set(routing_net_list.begin(), routing_net_list.end());
+    std::vector<int32_t> next_net_route_order_list;
+    next_net_route_order_list.reserve(net_route_order_list.size());
+    for (int32_t net_idx : net_route_order_list) {
+      if (!RTUTIL.exist(routing_net_set, net_idx)) {
+        next_net_route_order_list.push_back(net_idx);
+      }
+    }
+    next_net_route_order_list.insert(next_net_route_order_list.end(), routing_net_list.begin(), routing_net_list.end());
+    net_route_order_list.swap(next_net_route_order_list);
     updateRouteViolationList(dr_box);
     updateBestResult(dr_box);
-    updateTaskSchedule(dr_box, routing_net_list);
+    updateTaskSchedule(dr_box, net_route_order_list, routing_net_list);
   }
   if (!dr_box.get_initial_routing() && dr_box.get_dr_iter_param()->get_refine_net_num() > 0) {
     refineCleanNets(dr_box);
   }
 }
 
-std::vector<int32_t> DetailedRouter::initTaskSchedule(DRBox& dr_box)
+std::vector<int32_t> DetailedRouter::initTaskSchedule(DRBox& dr_box, std::vector<int32_t>& net_route_order_list)
 {
+  net_route_order_list.clear();
+  std::set<int32_t> visited_net_set;
+  for (int32_t task_idx : dr_box.get_task_order_list()) {
+    int32_t net_idx = dr_box.get_dr_task_list()[task_idx].get_net_idx();
+    if (visited_net_set.insert(net_idx).second) {
+      net_route_order_list.push_back(net_idx);
+    }
+  }
   std::vector<int32_t> routing_net_list;
   if (dr_box.get_initial_routing()) {
-    std::set<int32_t> net_idx_set;
-    for (int32_t task_idx : dr_box.get_task_order_list()) {
-      DRTask* dr_task = &dr_box.get_dr_task_list()[task_idx];
-      net_idx_set.insert(dr_task->get_net_idx());
-    }
-    routing_net_list.assign(net_idx_set.begin(), net_idx_set.end());
+    std::ranges::sort(net_route_order_list);
+    routing_net_list = net_route_order_list;
   } else {
-    updateTaskSchedule(dr_box, routing_net_list);
+    // A newly built repair box has no local routing history yet; seed it from task order.
+    updateTaskSchedule(dr_box, net_route_order_list, routing_net_list);
   }
   return routing_net_list;
 }
@@ -3217,17 +3234,10 @@ void DetailedRouter::updateBestResult(DRBox& dr_box)
   best_result.set_valid(true);
 }
 
-void DetailedRouter::updateTaskSchedule(DRBox& dr_box, std::vector<int32_t>& routing_net_list)
+void DetailedRouter::updateTaskSchedule(DRBox& dr_box, const std::vector<int32_t>& net_route_order_list,
+                                        std::vector<int32_t>& routing_net_list)
 {
   int32_t max_routed_times = dr_box.get_dr_iter_param()->get_max_routed_times();
-  std::vector<int32_t> task_net_list;
-  std::set<int32_t> visited_task_net_set;
-  for (int32_t task_idx : dr_box.get_task_order_list()) {
-    DRTask* dr_task = &dr_box.get_dr_task_list()[task_idx];
-    if (visited_task_net_set.insert(dr_task->get_net_idx()).second) {
-      task_net_list.push_back(dr_task->get_net_idx());
-    }
-  }
   std::set<int32_t> routing_net_set;
   routing_net_list.clear();
   for (Violation& violation : dr_box.get_curr_result().get_route_violation_list()) {
@@ -3235,21 +3245,28 @@ void DetailedRouter::updateTaskSchedule(DRBox& dr_box, std::vector<int32_t>& rou
     if (!RTUTIL.isOpenOverlap(dr_box.get_box_rect().get_real_rect(), RTUTIL.getEnlargedRect(violation_shape.get_real_rect(), RTDM.getOnlyPitch()))) {
       continue;
     }
-    for (int32_t net_idx : task_net_list) {
-      if (!RTUTIL.exist(violation.get_violation_net_set(), net_idx) || RTUTIL.exist(routing_net_set, net_idx)) {
+    // Only nets with local tasks appear in this order. Select one earliest aggressor per violation.
+    for (int32_t net_idx : net_route_order_list) {
+      if (!RTUTIL.exist(violation.get_violation_net_set(), net_idx)) {
         continue;
       }
       if (dr_box.get_net_routed_times_map()[net_idx] < max_routed_times) {
         routing_net_set.insert(net_idx);
-        routing_net_list.push_back(net_idx);
       }
+      // An already selected or exhausted aggressor must not cause its victim to be selected instead.
+      break;
+    }
+  }
+  for (int32_t net_idx : net_route_order_list) {
+    if (RTUTIL.exist(routing_net_set, net_idx)) {
+      routing_net_list.push_back(net_idx);
     }
   }
 
   std::vector<DRTask>& dr_task_list = dr_box.get_dr_task_list();
   std::vector<int32_t>& task_order_list = dr_box.get_task_order_list();
   std::stable_partition(task_order_list.begin(), task_order_list.end(),
-                        [&dr_task_list, &routing_net_set](int32_t task_idx) { return !RTUTIL.exist(routing_net_set, dr_task_list[task_idx].get_net_idx()); });
+                        [&dr_task_list, &routing_net_set](int32_t task_idx) { return RTUTIL.exist(routing_net_set, dr_task_list[task_idx].get_net_idx()); });
 }
 
 void DetailedRouter::selectBestResult(DRBox& dr_box)
