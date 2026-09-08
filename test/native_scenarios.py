@@ -2,6 +2,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from textwrap import dedent
 from typing import Any
 
 from ecc_tools_bin import ecc_py
@@ -55,6 +56,58 @@ def def_verify(manifest: dict[str, Any]) -> dict[str, Path]:
     _setup(manifest)
     _read_design(manifest)
     return {}
+
+
+def pyplacedb_rows(manifest: dict[str, Any]) -> dict[str, Path]:
+    _setup(manifest)
+    design_def = Path(manifest["work_dir"]) / "cut_rows.def"
+    design_def.write_text(
+        dedent(
+            """
+            VERSION 5.8 ;
+            DESIGN cut_rows ;
+            UNITS DISTANCE MICRONS 1000 ;
+            DIEAREA ( 0 0 ) ( 10000 2800 ) ;
+            ROW BOTTOM_LEFT core7 0 0 N DO 20 BY 1 STEP 200 0 ;
+            ROW BOTTOM_RIGHT core7 6000 0 N DO 20 BY 1 STEP 200 0 ;
+            ROW TOP core7 0 1400 FS DO 50 BY 1 STEP 200 0 ;
+            COMPONENTS 1 ;
+            - movable ADDFX1H7R + UNPLACED ;
+            END COMPONENTS
+            PINS 0 ;
+            END PINS
+            NETS 0 ;
+            END NETS
+            END DESIGN
+            """
+        ),
+        encoding="utf-8",
+    )
+    _require(ecc_py.def_init(str(design_def)), "def_init")
+    place_db = ecc_py.pydb(ecc_py.get_dmInst(), 2, 2, False, False)  # noqa: FBT003
+    blockages = [
+        [
+            place_db.node_x[node_id],
+            place_db.node_y[node_id],
+            place_db.node_size_x[node_id],
+            place_db.node_size_y[node_id],
+        ]
+        for node_id, name in enumerate(place_db.node_names)
+        if name.startswith("blockage")
+    ]
+    summary = _output(manifest, "pyplacedb_rows.json")
+    summary.write_text(
+        json.dumps(
+            {
+                "blockages": blockages,
+                "num_terminals": place_db.num_terminals,
+                "rows": list(place_db.rows),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return {"summary": summary}
 
 
 def verilog_round_trip(manifest: dict[str, Any]) -> dict[str, Path]:
@@ -275,6 +328,7 @@ SCENARIOS = {
     "floorplan": floorplan,
     "harden": harden,
     "lvs": lvs,
+    "pyplacedb_rows": pyplacedb_rows,
     "rcx": rcx,
     "routing": routing,
     "sta": sta,
