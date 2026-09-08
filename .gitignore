@@ -59,6 +59,7 @@ test/**
 !test/support.py
 !test/data/
 !test/data/test_python_io.py
+!test/data/test_pyplacedb_rows.py
 !test/operations/
 !test/operations/test_python_operations.py
 !test/fixtures/
