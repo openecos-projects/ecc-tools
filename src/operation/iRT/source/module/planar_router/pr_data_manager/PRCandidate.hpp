@@ -42,34 +42,19 @@ class PRCandidate
   ~PRCandidate() = default;
   // getter
   RoutingSegmentList& get_routing_segment_list() { return _routing_segment_list; }
-  int32_t get_total_corner_num() const { return _total_corner_num; }
-  int32_t get_total_wire_length() const { return _total_wire_length; }
-  bool get_is_path_blocked() const { return _is_path_blocked; }
-  bool get_is_overflow() const { return _is_overflow; }
-  double get_total_cost() const { return _total_cost; }
-  int32_t get_saturation_edge_num() const { return _saturation_edge_num; }
-  int32_t get_hotspot_edge_num() const { return _hotspot_edge_num; }
+  int32_t get_total_corner_num() const { return _candidate_cost.total_corner_num; }
+  int32_t get_total_wire_length() const { return _candidate_cost.total_wire_length; }
+  bool get_is_path_blocked() const { return _candidate_cost.is_path_blocked; }
+  bool get_is_overflow() const { return _candidate_cost.is_overflow; }
+  double get_total_cost() const { return _candidate_cost.total_cost; }
+  int32_t get_saturation_edge_num() const { return _candidate_cost.saturation_edge_num; }
+  int32_t get_hotspot_edge_num() const { return _candidate_cost.hotspot_edge_num; }
   // setter
-  void set_candidate_cost(const PRCandidateCost& candidate_cost)
-  {
-    _total_corner_num = candidate_cost.total_corner_num;
-    _total_wire_length = candidate_cost.total_wire_length;
-    _is_path_blocked = candidate_cost.is_path_blocked;
-    _is_overflow = candidate_cost.is_overflow;
-    _total_cost = candidate_cost.total_cost;
-    _saturation_edge_num = candidate_cost.saturation_edge_num;
-    _hotspot_edge_num = candidate_cost.hotspot_edge_num;
-  }
+  void set_candidate_cost(const PRCandidateCost& candidate_cost) { _candidate_cost = candidate_cost; }
 
  private:
   RoutingSegmentList _routing_segment_list;
-  int32_t _total_corner_num = 0;
-  int32_t _total_wire_length = 0;
-  bool _is_path_blocked = false;
-  bool _is_overflow = false;
-  double _total_cost = 0.0;
-  int32_t _saturation_edge_num = 0;
-  int32_t _hotspot_edge_num = 0;
+  PRCandidateCost _candidate_cost;
 };
 
 }  // namespace irt

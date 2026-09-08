@@ -51,11 +51,27 @@ enum class PRTopoMode
   kCongestion
 };
 
-struct PROverflowTask
+struct PRRouteParam
+{
+  const char* route_name;
+  PRRouteMode pr_route_mode;
+  PRTopoMode pr_topo_mode;
+  bool is_partial_rip_up = false;
+};
+
+struct PRPartialRoute
 {
   std::vector<Segment<PlanarCoord>> kept_segment_list;
   std::vector<Segment<PlanarCoord>> rip_up_segment_list;
   std::vector<Segment<PlanarCoord>> planar_topo_list;
+};
+
+struct PRAStarTask
+{
+  PlanarCoord start_coord;
+  PlanarCoord end_coord;
+  PlanarRect owned_rect;
+  bool has_owned_rect = false;
 };
 
 struct PRAStarState
@@ -90,11 +106,9 @@ struct CmpPRAStarQueueNode
 struct PRAStarWorkspace
 {
   PlanarRect workspace_rect;
-  PlanarRect owned_rect;
   int32_t x_size = 0;
   int32_t y_size = 0;
   uint64_t search_stamp = 0;
-  bool has_owned_rect = false;
   std::vector<PRAStarState> state_list;
   std::vector<PRAStarQueueNode> open_heap;
 };
@@ -120,8 +134,6 @@ class PlanarRouter
 
   // initialization
   PRModel initPRModel();
-  std::vector<PRNet> convertToPRNetList(std::vector<Net>& net_list);
-  PRNet convertToPRNet(Net& net);
   void setPRComParam(PRModel& pr_model);
   void initPRTaskList(PRModel& pr_model);
   void buildPlanarRoutingEdgeMap();
@@ -130,55 +142,61 @@ class PlanarRouter
   // routing edge
   PREdgeCost getRoutingEdgeCost(int32_t supply, int32_t demand);
   PREdgeCost getRoutingEdgeCost(const RoutingEdge& routing_edge);
-  double getTopologyEdgeCost(RoutingEdge& routing_edge, int32_t net_idx, double overflow_unit,
-                             const std::unordered_set<RoutingEdge*>& routing_edge_set);
-  double getTopologySegmentCost(PRModel& pr_model, const PlanarCoord& first_coord, const PlanarCoord& second_coord);
+  double getTopologyEdgeCost(RoutingEdge& routing_edge, int32_t net_idx, double overflow_unit, const std::unordered_set<RoutingEdge*>& routing_edge_set);
+  double getTopologySegmentCost(double overflow_unit, const PRNet& pr_net, const PlanarCoord& first_coord, const PlanarCoord& second_coord);
   void updateRoutingEdgeToGraph(RoutingEdge& routing_edge, PREdgeCost& edge_cost, int32_t curr_net_idx, ChangeType change_type,
                                 std::unordered_set<RoutingEdge*>& routing_edge_set);
-  void updateRoutingSegmentListToGraph(PRModel& pr_model, std::span<const Segment<PlanarCoord>> routing_segment_list, ChangeType change_type,
-                                       std::unordered_set<RoutingEdge*>& routing_edge_set);
+  void updateRoutingSegmentListToGraph(PRNet& pr_net, std::span<const Segment<PlanarCoord>> routing_segment_list, ChangeType change_type);
 
   // routing flow
   void runRouteFlow(PRModel& pr_model);
-  void routePRNetList(PRModel& pr_model, const std::vector<PRNet*>& pr_net_list, const char* route_mode, PRRouteMode pr_route_mode, PRTopoMode pr_topo_mode,
-                      bool is_partial_rip_up = false, int32_t rip_up_guard = 0);
-  void routePRNet(PRModel& pr_model, PRNet* pr_net, PRRouteMode pr_route_mode, PRTopoMode pr_topo_mode, bool is_partial_rip_up, int32_t rip_up_guard);
-  void splitLongPlanarTopoList(PRModel& pr_model, std::vector<Segment<PlanarCoord>>& planar_topo_list);
-  bool routePlanarTopoList(PRModel& pr_model, std::vector<Segment<PlanarCoord>>& planar_topo_list, PRRouteMode pr_route_mode,
+  void routePRNetList(PRModel& pr_model, const std::vector<PRNet*>& pr_net_list, const PRRouteParam& pr_route_param);
+  void routePRNet(PRModel& pr_model, PRNet& pr_net, const PRRouteParam& pr_route_param);
+  void splitLongPlanarTopoList(const PRComParam& pr_com_param, PRNet& pr_net, std::vector<Segment<PlanarCoord>>& planar_topo_list);
+  bool routePlanarTopoList(PRModel& pr_model, PRNet& pr_net, std::vector<Segment<PlanarCoord>>& planar_topo_list, PRRouteMode pr_route_mode,
                            std::vector<Segment<PlanarCoord>>& routing_segment_list);
   void updateCongestion(PRModel& pr_model);
   std::vector<PRNet*> getOverflowPRNetList(PRModel& pr_model);
-  PROverflowTask getOverflowTask(PRModel& pr_model, int32_t rip_up_guard);
-  bool isBetterCandidate(PRModel& pr_model, const PRCandidate& candidate, const PRCandidate& best_candidate);
-  std::vector<PRCandidate> getPRCandidateListByTopo(PRModel& pr_model, Segment<PlanarCoord>& planar_topo, PRRouteMode pr_route_mode);
-  bool shouldUseCongestionFlute(PRModel& pr_model, size_t unique_pin_num);
-  std::vector<Segment<PlanarCoord>> getPlanarTopoList(PRModel& pr_model, PRTopoMode pr_topo_mode);
+  PRPartialRoute getPartialRoute(PRNet& pr_net);
+  void expandRipUpGuard(const std::vector<Segment<PlanarCoord>>& unit_segment_list,
+                        const std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC>& coord_edge_idx_map,
+                        std::vector<int32_t>& rip_up_distance_list);
+  std::vector<Segment<PlanarCoord>> getOverflowPlanarTopoList(PRNet& pr_net, const std::vector<Segment<PlanarCoord>>& unit_segment_list,
+                                                              const std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC>& coord_edge_idx_map,
+                                                              const std::vector<int32_t>& rip_up_distance_list);
+  bool shouldUseCongestionFlute(double overflow_unit, const PRNet& pr_net, size_t unique_pin_num);
+  std::vector<Segment<PlanarCoord>> getPlanarTopoList(double overflow_unit, PRNet& pr_net, PRTopoMode pr_topo_mode);
 
   // A* route
-  std::vector<Segment<PlanarCoord>> getRoutingSegmentListByAStar(PRModel& pr_model, const Segment<PlanarCoord>& planar_topo,
+  std::vector<Segment<PlanarCoord>> getRoutingSegmentListByAStar(const PRComParam& pr_com_param, const PRNet& pr_net, const Segment<PlanarCoord>& planar_topo,
                                                                  const std::vector<Segment<PlanarCoord>>& routed_segment_list);
+  PRAStarTask initPRAStarTask(const Segment<PlanarCoord>& planar_topo, const std::vector<Segment<PlanarCoord>>& routed_segment_list);
   bool prepareAStarWorkspace(const PlanarRect& workspace_rect, PRAStarWorkspace& workspace);
   int32_t getAStarStateIndex(const PRAStarWorkspace& workspace, const PlanarCoord& coord, bool is_horizontal);
   PlanarCoord getAStarStateCoord(const PRAStarWorkspace& workspace, int32_t state_idx);
   PRAStarState& getAStarState(PRAStarWorkspace& workspace, int32_t state_idx);
-  int32_t getAStarEstimatedCost(const PRAStarWorkspace& workspace, const PlanarCoord& coord, const PlanarCoord& end_coord, bool has_owned_edge);
-  bool searchRoutingSegmentByAStar(PRModel& pr_model, const PlanarCoord& start_coord, const PlanarCoord& end_coord, PRAStarWorkspace& workspace,
+  int32_t getAStarEstimatedCost(const PRAStarTask& astar_task, const PlanarCoord& coord, bool has_owned_edge);
+  bool searchRoutingSegmentByAStar(const PRComParam& pr_com_param, const PRNet& pr_net, const PRAStarTask& astar_task, PRAStarWorkspace& workspace,
                                    std::vector<Segment<PlanarCoord>>& routing_segment_list);
   PlanarRect getAStarBaseRect(const Segment<PlanarCoord>& planar_topo);
   std::vector<Segment<PlanarCoord>> getRoutingSegmentListByCoordList(const std::vector<PlanarCoord>& coord_list);
 
   // pattern route
+  void getRoutingSegmentListByPattern(const PRComParam& pr_com_param, const PRNet& pr_net, Segment<PlanarCoord>& planar_topo, PRRouteMode pr_route_mode,
+                                      std::vector<Segment<PlanarCoord>>& routing_segment_list);
+  bool isBetterCandidate(double corner_weight, const PRCandidate& candidate, const PRCandidate& best_candidate);
+  std::vector<PRCandidate> getPRCandidateListByTopo(int32_t expand_step_num, Segment<PlanarCoord>& planar_topo, PRRouteMode pr_route_mode);
   void addPRCandidate(std::vector<PRCandidate>& pr_candidate_list, Segment<PlanarCoord>& planar_topo, std::initializer_list<PlanarCoord> inflection_list);
   void addPRCandidateListByStraight(std::vector<PRCandidate>& pr_candidate_list, Segment<PlanarCoord>& planar_topo);
   void addPRCandidateListByLPattern(std::vector<PRCandidate>& pr_candidate_list, Segment<PlanarCoord>& planar_topo);
   void addPRCandidateListByZPattern(std::vector<PRCandidate>& pr_candidate_list, Segment<PlanarCoord>& planar_topo);
-  void addPRCandidateListByUPattern(std::vector<PRCandidate>& pr_candidate_list, PRModel& pr_model, Segment<PlanarCoord>& planar_topo);
+  void addPRCandidateListByUPattern(std::vector<PRCandidate>& pr_candidate_list, int32_t expand_step_num, Segment<PlanarCoord>& planar_topo);
   void addPRCandidateListByInner3Bends(std::vector<PRCandidate>& pr_candidate_list, Segment<PlanarCoord>& planar_topo);
-  void addPRCandidateListByOuter3Bends(std::vector<PRCandidate>& pr_candidate_list, PRModel& pr_model, Segment<PlanarCoord>& planar_topo);
-  void updatePRCandidate(PRModel& pr_model, PRCandidate& pr_candidate);
+  void addPRCandidateListByOuter3Bends(std::vector<PRCandidate>& pr_candidate_list, int32_t expand_step_num, Segment<PlanarCoord>& planar_topo);
+  void updatePRCandidate(double overflow_unit, const PRNet& pr_net, PRCandidate& pr_candidate);
 
   // result
-  MTree<PlanarCoord> getCoordTree(PRModel& pr_model, std::vector<Segment<PlanarCoord>>& routing_segment_list);
+  MTree<PlanarCoord> getCoordTree(PRNet& pr_net, std::vector<Segment<PlanarCoord>>& routing_segment_list);
   void uploadNetList(PRModel& pr_model, const std::vector<PRNet*>& pr_net_list);
 
   // exhibit
@@ -191,7 +209,7 @@ class PlanarRouter
   void outputCongestionCostCSV(PRModel& pr_model);
 
   // debug
-  void debugPlotPRModel(PRModel& pr_model, std::string flag);
+  void debugPlotPRModel(std::string flag);
 
   // data
   PRAStarWorkspace _astar_workspace;

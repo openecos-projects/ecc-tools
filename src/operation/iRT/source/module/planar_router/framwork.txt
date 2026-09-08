@@ -6,6 +6,12 @@ generate
     runRouteFlow
     updateSummary / output: 在最终 global result 上统计和输出
 
+数据生命周期
+    PRModel: 持有网络列表、全网任务顺序、公共参数和最终汇总结果
+    PRRouteParam: 描述当前阶段的路由模式、拓扑模式、局部拆线策略和日志名称
+    PRNet: 持有网络基础信息、已提交线路和实时边占用；成功提交前不修改已提交线路
+    PRPartialRoute、A* task/workspace: 分别服务局部拆线和搜索算法，不保存重复的单网旧结果
+
 runRouteFlow
     1. 所有 net 做 initial LZ pattern route
     2. updateCongestion
@@ -13,20 +19,24 @@ runRouteFlow
     4. updateCongestion
     5. overflow net 做 All pattern route
     6. updateCongestion
-    7. overflow net 做三轮 A*：第一轮局部 rip-up guard=1，后两轮全网 rip-up
-    8. 每轮 A* 后 updateCongestion
+    7. 最多五轮 A*：每轮先确定 overflow net 列表，为空则结束；第一轮尝试局部 rip-up guard=1，其余轮全网 rip-up
+    8. 每轮 A* 后 updateCongestion，再将 search margin 和 overflow unit 加倍
     9. 迭代结束后，将各 PRNet 的最终 planar segment 一次性写入 NetGlobalResultMap
 
 routePRNet
-    局部模式：getOverflowTask 生成 kept segment、rip-up segment 和两端 anchor topo
-    全网模式或局部拓扑不满足两端 anchor：删除全部旧 segment，并由 TopoBuilder 生成 topo
+    流程层统一传递 PRModel，当前 PRNet 显式传入；准备、拆线、试布、清理、提交或恢复都在本函数内完成
+    只读引用 PRNet 中的旧线路；拓扑和工作线路使用局部变量，不再复制旧结果
+    局部模式：getPartialRoute 生成 kept segment、rip-up segment 和两端 anchor topo；无待拆段则返回
+    合法局部任务：工作线路从 kept segment 开始，删除 rip-up segment 的图占用
+    全网模式或局部拓扑不满足两端 anchor：先由 TopoBuilder 生成 topo，再删除全部旧 segment 的图占用
     routePlanarTopoList: 逐条 topo edge 选择 route candidate，并立即更新 planar edge demand
         kLZPattern: 生成 straight/L/Z candidate，全部参与比较
-        kAllPattern: 长度 50~100 的斜 topo 拆为两段，更长的拆为三段；split point 尽量避开 macro，再增加 inner/outer 3-bend 和 U candidate
+        kAllPattern: 按 topo_spilt_length 拆分长斜 topo，保留分割点可达性和最小段长检查，再增加 inner/outer 3-bend 和 U candidate
         kAStar: 生成 A* route
         candidate 优先级: 无 fixed-shape blocked > 无 overflow > 更低 score
-    getCoordTree: 将 kept segment 和新 route 合并为无环树
-    统一清理临时 demand，成功时提交新 tree，失败时恢复全部旧 segment
+    getCoordTree: 路由成功后将 kept segment 和新 route 合并为无环树
+    依次清理旧线路和工作线路对应的当前占用；成功时加入新 tree 占用并替换 PRNet 线路，失败时恢复旧线路占用
+    单网结束后，PRNet 的已提交线路与实时边占用重新一致
 
 planar edge demand
     每条 segment 展开为 unit edge
