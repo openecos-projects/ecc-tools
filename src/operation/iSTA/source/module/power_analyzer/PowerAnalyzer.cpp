@@ -89,14 +89,23 @@ void PowerAnalyzer::analyzePower(PAModel& pa_model)
   Database& database = STADM.getDatabase();
   database.get_instance_power_map().clear();
   for (std::string& instance_name : pa_model.get_instance_name_list()) {
-    InstancePower instance_power = analyzeInstancePower(instance_name);
+    PAInstanceModel pa_instance_model;
+    InstancePower instance_power = analyzeInstancePower(instance_name, pa_instance_model);
     database.get_instance_power_map()[instance_name] = instance_power;
     pa_model.get_group_power_map()[instance_power.get_power_group_type()].add_power_value(instance_power.get_power_value());
+    if (instance_power.get_power_group_type() == PowerGroupType::kRegister) {
+      // Split the report groups only; retain the whole cell's power for
+      // instance exports and downstream current injection. PTPX User Guide,
+      // Table 9-1: register clock-pin internal power belongs to clock_network.
+      double clock_power = pa_instance_model.get_clock_pin_internal_power();
+      pa_model.get_group_power_map()[PowerGroupType::kRegister].add_internal_power(-clock_power);
+      pa_model.get_group_power_map()[PowerGroupType::kClockNetwork].add_internal_power(clock_power);
+    }
   }
   updatePowerSummary(pa_model);
 }
 
-InstancePower PowerAnalyzer::analyzeInstancePower(std::string& instance_name)
+InstancePower PowerAnalyzer::analyzeInstancePower(std::string& instance_name, PAInstanceModel& pa_instance_model)
 {
   Database& database = STADM.getDatabase();
   InstancePower instance_power;
@@ -104,7 +113,6 @@ InstancePower PowerAnalyzer::analyzeInstancePower(std::string& instance_name)
     return instance_power;
   }
   Instance& instance = database.get_instance_map()[instance_name];
-  PAInstanceModel pa_instance_model;
   instance_power.set_instance_id(instance.get_instance_id());
   instance_power.set_instance_name(instance.get_instance_name());
   instance_power.set_power_group_type(getPowerGroupType(instance));
@@ -131,7 +139,13 @@ void PowerAnalyzer::analyzeInternalPower(Instance& instance, PowerValue& power_v
   TimingCell& timing_cell = database.get_timing_library().get_cell_map()[instance.get_cell_name()];
   buildOutputTimingPowerArcWeightMap(instance, timing_cell, pa_instance_model);
   for (TimingPowerArc& timing_power_arc : timing_cell.get_power_arc_list()) {
-    power_value.add_internal_power(getTimingPowerArcPower(instance, timing_power_arc, pa_instance_model));
+    double internal_power = getTimingPowerArcPower(instance, timing_power_arc, pa_instance_model);
+    power_value.add_internal_power(internal_power);
+    // An output arc related to CK still belongs to the output pin. Only
+    // internal energy attached to a clock input is moved to clock_network.
+    if (isActiveClockPin(instance, timing_power_arc.get_sink_port())) {
+      pa_instance_model.add_clock_pin_internal_power(internal_power);
+    }
   }
 }
 
@@ -546,9 +560,30 @@ PowerGroupType PowerAnalyzer::getPowerGroupType(Instance& instance)
     return PowerGroupType::kClockNetwork;
   }
   if (timing_cell.get_is_sequential_for_power()) {
-    return PowerGroupType::kRegister;
+    for (auto& [port_name, port] : timing_cell.get_port_map()) {
+      if (isActiveClockPin(instance, port_name)) return PowerGroupType::kRegister;
+    }
+    return PowerGroupType::kSequential;
   }
   return PowerGroupType::kCombinational;
+}
+
+bool PowerAnalyzer::isActiveClockPin(Instance& instance, const std::string& port_name)
+{
+  auto& database = STADM.getDatabase();
+  auto cell = database.get_timing_library().get_cell_map().find(instance.get_cell_name());
+  if (cell == database.get_timing_library().get_cell_map().end()) return false;
+  auto port = cell->second.get_port_map().find(port_name);
+  if (port == cell->second.get_port_map().end() || !port->second.get_is_input()) return false;
+  bool is_clock = port->second.get_is_clock();
+  std::string clock_port_name = port_name;
+  // Explicit state functions also identify clocks in libraries without
+  // clock:true or timing checks (including latch enables).
+  for (auto& sequential : cell->second.get_sequentials()) {
+    is_clock = is_clock || sequential.clock.get_has_port(clock_port_name);
+  }
+  auto point = database.get_timing_point_map().find(instance.get_instance_name() + ":" + port_name);
+  return is_clock && point != database.get_timing_point_map().end() && point->second.get_is_clock_point();
 }
 
 bool PowerAnalyzer::isClockNetwork(Instance& instance)

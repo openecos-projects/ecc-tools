@@ -48,7 +48,7 @@ class PowerAnalyzer
   PAModel initPAModel();
   void buildInstanceNameList(PAModel& pa_model);
   void analyzePower(PAModel& pa_model);
-  InstancePower analyzeInstancePower(std::string& instance_name);
+  InstancePower analyzeInstancePower(std::string& instance_name, PAInstanceModel& pa_instance_model);
   PowerValue getInstancePowerValue(Instance& instance, PAInstanceModel& pa_instance_model);
   void analyzeInternalPower(Instance& instance, PowerValue& power_value, PAInstanceModel& pa_instance_model);
   void buildOutputTimingPowerArcWeightMap(Instance& instance, TimingCell& timing_cell, PAInstanceModel& pa_instance_model);
@@ -76,6 +76,7 @@ class PowerAnalyzer
   double getInstanceVoltage(Instance& instance);
   PowerGroupType getPowerGroupType(Instance& instance);
   bool isClockNetwork(Instance& instance);
+  bool isActiveClockPin(Instance& instance, const std::string& port_name);
   void updatePowerSummary(PAModel& pa_model);
 };
 
