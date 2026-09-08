@@ -52,6 +52,17 @@ def def_round_trip(manifest: dict[str, Any]) -> dict[str, Path]:
     return {"def": output}
 
 
+def placement_map(manifest: dict[str, Any]) -> dict[str, Path]:
+    _setup(manifest)
+    _read_design(manifest)
+    feature_dir = _output(manifest, "feature")
+    _require(ecc_py.db_init(feature_path=str(feature_dir)), "db_init feature_path")
+    output = feature_dir / "placement.json"
+    _require(ecc_py.feature_pl_eval(str(output), 5), "feature_pl_eval")
+    _require_file(output)
+    return {"feature": output}
+
+
 def def_verify(manifest: dict[str, Any]) -> dict[str, Path]:
     _setup(manifest)
     _read_design(manifest)
@@ -328,6 +339,7 @@ SCENARIOS = {
     "floorplan": floorplan,
     "harden": harden,
     "lvs": lvs,
+    "placement_map": placement_map,
     "pyplacedb_rows": pyplacedb_rows,
     "rcx": rcx,
     "routing": routing,

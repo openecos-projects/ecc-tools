@@ -71,9 +71,9 @@ void InitEGR::runEGR(bool enable_timing)
   if (_thread_number_override_set && _thread_number_override > 0) {
     config_map.insert({"-thread_number", _thread_number_override});
   }
-  if (_output_inter_result_override_set) {
-    config_map.insert({"-output_inter_result", _output_inter_result_override});
-  }
+  // Evaluation consumes the router's guide and CSV maps, even when the
+  // standalone router defaults to not writing intermediate results.
+  config_map.insert({"-output_inter_result", _output_inter_result_override});
   if (use_timing) {
     config_map.insert({"-enable_timing", 1});
   }
