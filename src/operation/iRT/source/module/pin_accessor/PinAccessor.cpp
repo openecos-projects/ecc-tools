@@ -3693,8 +3693,8 @@ std::vector<PlanarRect> PinAccessor::getRoutingShadowShapeList(const NetShape& n
     int32_t enlarged_x_size = x_spacing;
     int32_t enlarged_y_size = y_spacing;
     // 贴合的也不算违例
-    enlarged_x_size -= 1;
-    enlarged_y_size -= 1;
+    enlarged_x_size = std::max(enlarged_x_size - 1, 0);
+    enlarged_y_size = std::max(enlarged_y_size - 1, 0);
     shadow_shape_list.push_back(RTUTIL.getEnlargedRect(net_shape.get_rect(), enlarged_x_size, enlarged_y_size, enlarged_x_size, enlarged_y_size));
   }
   return shadow_shape_list;
