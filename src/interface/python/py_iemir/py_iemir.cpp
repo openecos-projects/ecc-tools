@@ -11,30 +11,42 @@
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 // MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
-//
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "FPInterface.hpp"
-#include "tcl_fp.h"
-#include "tcl_util.h"
+#include "py_iemir.h"
 
-namespace tcl {
+#include <any>
+#include <map>
 
-TclDebugInputMacro::TclDebugInputMacro(const char* cmd_name) : TclCmd(cmd_name)
+#include "EMIRInterface.hpp"
+
+namespace python_interface {
+
+bool init_emir(const std::string& temp_directory_path, const std::string& instance_power_file_path, const int& thread_number)
 {
-  _config_list.push_back(std::make_pair("-path", ValueType::kString));
-
-  TclUtil::addOption(this, _config_list);
-}
-
-unsigned TclDebugInputMacro::exec()
-{
-  if (!check()) {
-    return 0;
+  std::map<std::string, std::any> config_map;
+  if (!temp_directory_path.empty()) {
+    config_map.insert(std::make_pair("-temp_directory_path", temp_directory_path));
   }
-  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
-  FPI.debugInputMacro(config_map);
-  return 1;
+  if (!instance_power_file_path.empty()) {
+    config_map.insert(std::make_pair("-instance_power_file_path", instance_power_file_path));
+  }
+  config_map.insert(std::make_pair("-thread_number", thread_number));
+
+  EMIRI.initEMIR(config_map);
+  return true;
 }
 
-}  // namespace tcl
+bool run_emir()
+{
+  EMIRI.runEMIR();
+  return true;
+}
+
+bool destroy_emir()
+{
+  EMIRI.destroyEMIR();
+  return true;
+}
+
+}  // namespace python_interface

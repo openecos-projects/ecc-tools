@@ -1,3 +1,4 @@
+add_subdirectory(evaluation)
 add_subdirectory(database)
 add_subdirectory(parser)
 add_subdirectory(builder)
