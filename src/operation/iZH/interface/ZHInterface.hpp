@@ -16,7 +16,6 @@
 // ***************************************************************************************
 #pragma once
 #include <string>
-#include <vector>
 
 #include <any>
 #include <cstdint>
@@ -84,33 +83,12 @@ class ZHInterface
   void insertFiller(std::map<std::string, std::any> config_map);
   void insertMetal(std::map<std::string, std::any> config_map);
   void checkAntenna(std::map<std::string, std::any> config_map);
-  struct AntennaViolation {
-    std::string net_name;
-    std::string layer_name;
-    std::string type;
-    double ratio = 0.0;
-    double threshold = 0.0;
-    double lx = 0.0, ly = 0.0, hx = 0.0, hy = 0.0;
-  };
-  struct AntennaRunStats {
-    int64_t signal_net_cnt = 0;
-    int64_t pins_with_gate_area = 0;
-    int64_t pins_missing_antenna_info = 0;
-    int64_t comps_without_gate = 0;
-    int64_t conductors_out_of_range = 0;
-    int64_t skipped_segments = 0;
-    int64_t partial_areas_dropped = 0;
-  };
-  const std::vector<AntennaViolation>& getAntennaViolations() const { return _antenna_violations; }
-  const AntennaRunStats& getAntennaRunStats() const { return _antenna_run_stats; }
 #endif
 
 #endif
 
  private:
   static ZHInterface* _zh_interface_instance;
-  std::vector<AntennaViolation> _antenna_violations;
-  AntennaRunStats _antenna_run_stats;
 
   ZHInterface() = default;
   ZHInterface(const ZHInterface& other) = delete;

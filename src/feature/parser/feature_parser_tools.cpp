@@ -30,17 +30,9 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#include <map>
-
 #include "feature_irt.h"
 #include "feature_parser.h"
 #include "feature_summary.h"
-
-#if __has_include("ZHInterface.hpp")
-#include "ZHInterface.hpp"
-#else
-#include "../../operation/iZH/interface/ZHInterface.hpp"
-#endif
 
 namespace ecc_feature {
 
@@ -403,42 +395,4 @@ json FeatureParser::buildSummaryDRC()
   return summary_drc;
 }
   
-json FeatureParser::buildSummaryAntenna()
-{
-  json summary_antenna;
-  const auto& violations = ZHI.getAntennaViolations();
-  const auto& stats = ZHI.getAntennaRunStats();
-
-  summary_antenna["violation_cnt"] = violations.size();
-
-  std::map<std::string, int64_t> count_by_type;
-  std::map<std::string, int64_t> count_by_layer;
-  for (const auto& v : violations) {
-    count_by_type[v.type]++;
-    count_by_layer[v.layer_name]++;
-  }
-
-  summary_antenna["violation_cnt_by_type"] = json::object();
-  for (const auto& [type, count] : count_by_type) {
-    summary_antenna["violation_cnt_by_type"][type] = count;
-  }
-
-  summary_antenna["violation_cnt_by_layer"] = json::object();
-  for (const auto& [layer, count] : count_by_layer) {
-    summary_antenna["violation_cnt_by_layer"][layer] = count;
-  }
-
-  json checked;
-  checked["signal_net_cnt"] = stats.signal_net_cnt;
-  checked["pins_with_gate_area"] = stats.pins_with_gate_area;
-  checked["pins_missing_antenna_info"] = stats.pins_missing_antenna_info;
-  checked["comps_without_gate"] = stats.comps_without_gate;
-  checked["conductors_out_of_range"] = stats.conductors_out_of_range;
-  checked["skipped_segments"] = stats.skipped_segments;
-  checked["partial_areas_dropped"] = stats.partial_areas_dropped;
-  summary_antenna["checked"] = checked;
-
-  return summary_antenna;
-}
-
 }  // namespace ecc_feature

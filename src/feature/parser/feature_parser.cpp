@@ -110,13 +110,17 @@ bool FeatureParser::buildTools(std::string json_path, std::string step)
                                                                        {"optSetup", [this, step]() { return buildSummaryTO(step); }},
                                                                        {"sta", [this]() { return buildSummarySTA(); }},
                                                                        {"drc", [this]() { return buildSummaryDRC(); }},
-                                                                       {"antenna", [this]() { return buildSummaryAntenna(); }},
                                                                        {"route", [this]() { return buildSummaryRT(); }}};
+
+  const auto builder_it = stepToBuilder.find(step);
+  if (builder_it == stepToBuilder.end()) {
+    return false;
+  }
 
   std::ofstream& file_stream = ecc::getOutputFileStream(json_path);
   json root;
 
-  root[step] = stepToBuilder[step]();
+  root[step] = builder_it->second();
 
   file_stream << std::setw(4) << root;
 

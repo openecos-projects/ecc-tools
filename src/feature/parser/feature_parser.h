@@ -96,7 +96,6 @@ class FeatureParser
   json buildSummaryRT();
   json buildSummarySTA();
   json buildSummaryDRC();
-  json buildSummaryAntenna();
 
   json buildSummaryWirelength();
   json buildSummaryDensity();

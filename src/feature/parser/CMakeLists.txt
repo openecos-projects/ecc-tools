@@ -19,7 +19,6 @@ target_include_directories(feature_parser
         ${HOME_UTILITY}/json
 
         ${HOME_DATABASE}/interaction
-        ${HOME_OPERATION}/iZH/interface
 )
 
 target_link_libraries(feature_parser
