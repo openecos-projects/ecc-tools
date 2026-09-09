@@ -1,68 +1,270 @@
-## overview
-initPAModel:初始化pa_net
-setPAComParam:设置参数
-initAccessPointList:用boost得到pinshape上的合法区域并生成ap
-buildAccessPointRTree:在PAModel中构建候选AP临时索引
-routePAModel:迭代PAModel
-    initRoutingState:初始化布线状态
-    setPAIterParam:设置参数
-    initPABoxMap:构建PABox框架,里面主要数据为空
-    buildPinOwner:在本轮开始时为每个pin确定并冻结唯一的owner box
-    resetRoutingState:重置布线状态
-    buildBoxSchedule:构建Box布线的调度表
-    routePABoxMap:
-        buildFixedRect:从Database RTree查询与Box覆盖的fixed_rect
-        buildAccessPoint:从PAModel临时RTree查询与Box邻近的候选AP
-        initPATaskList:构建PATask并分配属于Box的AccessPoint
-        buildRouteViolation:从PAModel构建Box内的violation_list
-        buildBoxTrackAxis:构建Box内的track_axis
-        buildLayerNodeMap:构建Box的Graph,只有节点,其他信息后续构建
-        buildPANodeNeighbor:将所有节点连接
-        buildOrientNetMap:构建Graph的cost,fix_rect从Box中得到,在pa阶段net_pin_access_result为布线结果
-        exemptPinShape:排除掉pin_shape上的障碍cost
-        routePABox:
-            initTaskSchedule:初始化task布线调度表
-            routePATask:给task布线,在此函数末尾,布线结果从graph中删除,再加入新的结果
-            updateViolationList:首先得到Violation存到Box下面,然后Violation结果从graph中删除,再加入新的结果
-            updateBestResult:更新最优结果
-            updateTaskSchedule:通过Violation得到新的布线调度
-        selectBestResult:选择box的最优结果上传
-        freePABox:析构
-    updateViolation:根据dirty region进行增量DRC，必要时切换为full DRC，并更新PAModel中的violation
-    updatePAModel:将各owner box中的result/patch回写PAModel
-    updateBestResult:更新PAModel中的最优结果
-uploadAccessPoint:将最终AP写入Database中的Pin并重建RTree
+# PinAccessor 维护说明
 
+## 1. 模块边界与阅读入口
 
-## violation
-- splitPAResult:
-    将result/patch按照所属的pin选择的具体ap点所在的位置进行完全划分，第一轮没有ap点也没有result/patch。
+PA 从 Database 读取 pin 几何、障碍、层轨道和 via 规则，为 pin 选择 AP，
+生成从 AP 到 target 的接入线段及 minimum-area patch，并输出最终违例。
+它不负责整条 net 的详细布线，也不以候选区域的几何裁剪代替完整 DRC。
 
-- 对有间隔的每一批次box list
-    构建env：将所有result/patch都扩大一定distance，并放到会重叠的那些active box中作为env result/patch
-    对这一批中每个box分别buildAP, initTask：把扩大一个distance内的ap都放到box中，去掉not inside的，对每个pin构建task
-    构建violation：把违例按照中点放到box中
+| 维护主题 | 主要入口 | 主要数据 |
+| --- | --- | --- |
+| 候选 AP、目标坐标 | initAccessPointList、getLegalShapeList、getAccessPointList、buildPinTargetCoordList | PAPin、PALegalShape、AccessPoint |
+| 迭代、分块与归属 | routePAModel、buildPinOwner、buildBoxSchedule、splitPAResult | PAModel、PABoxId |
+| 环境与任务导入 | buildPAEnvironment、initPATaskList、initPATaskResult | PABox、PATask、PATaskResult |
+| 图搜索、via 与 AP 选择 | routePATask、expandSearching、selectAccessPoint、getRoutingSegmentList | PARouteState、PANode |
+| Patch 生成与选择 | patchPATask、getCandidatePatchList、getCompactPatchList、selectPatch、isPatchImprovement | PAPatchState、PAPatch、PAPatchSelection |
+| DRC 范围与输入 | buildPatchDETask、getRouteViolationList、getDirtyRouteViolationList、getFullRouteViolationList | DETask、PAFixedGeometry |
+| 结果快照、发布与清理 | updateBestResult、selectBestResult、uploadPABoxResult、updatePAModel、freePABox | PABoxResult、PAModel |
 
-- 在route的过程中：
-    每个box进行violation检查时都把包括env的所有相关net都放进去，这样可以保证当前box处理不了的即相邻box内的shape产生，但根据中点却被分到当前box的那些违例可以被检出并保留，下一次迭代后由于box offset它将不在边界，可以正常修复。
+## 2. 整体运行流程
 
-## dirty region
+```text
+access
+  initPAModel -> setPAComParam
+  initAccessPointList(false) -> buildAccessPointRTree
+  routePAModel
+    对每组 PAIterParam：
+      setPAIterParam
+      initPABoxMap -> buildPinOwner -> 清除 model 的 initial_routing
+      buildBoxSchedule -> splitPAResult -> routePABoxMap
+      updateViolation -> updatePAModel -> freePABoxMap
+      updateBestResult -> summary / CSV
+    违例清零可提前结束
+    首轮结束但还需下一轮时：刷新带 via 候选的 AP，再重建 AP RTree
+    selectBestResult(model)
+  uploadAccessPoint -> uploadAccessResult -> uploadAccessPatch -> uploadViolation
+```
 
-- dirty来源：
-    routePABoxMap中，只要box本轮需要route，或者分配到了已有violation，就将该box标记为dirty。
-    即使box因为没有可布任务而没有实际route，只要它仍拥有violation，也必须进入dirty DRC，避免已有违例从PAModel中消失。
+每次迭代重新划分 box，改变 offset 后重新确定 pin owner。
 
-- dirty范围：
-    updateViolation在所有box完成本轮route后统一构建dirty_box_map。
-    每个dirty源box的完整real_rect扩大detection_distance，覆盖到的所有PABox共同组成dirty region。
-    扩大范围用于覆盖box边界两侧可能互相产生DRC的几何。
+### Stage 与并行边界
 
-- 增量DRC：
-    dirty box比例小于25%时，只检查dirty_box_id_list。
-    buildPAEnvironment(..., true)将所有与dirty box邻近的result/patch加入对应box的env，其中几何查询范围扩大detection_distance。
-    每个dirty box的check_region是该box在所有routing layer上的real_rect；参与检查的net包括pin shape、result和patch涉及的全部net。
-    DRC结果按照violation中点归属于唯一box，只保留owner等于当前checking box的结果，最后通过set去重并更新PAModel。
+`routePABoxMap` 负责批次调度和进度统计，`routePABoxList` 负责单个 stage 的完整处理流程：
 
-- full DRC：
-    dirty box数量达到全部box的25%时，直接对当前完整PA几何执行full DRC，避免大量局部检查。
-    增量和full模式都分别执行普通result/patch检查与AP via检查，并合并去重结果。
+```text
+buildPAEnvironment(..., false)
+  -> buildRouteViolation
+  -> parallel：buildAccessPoint + initPATaskList + initPATaskResult
+  -> barrier
+  -> parallel：routePABox(model, box)，违例移入各自的 PABox.route_violation_list，释放工作区
+  -> barrier
+updateRouteViolation(model, box_id_list)：按 box ID 汇总去重，释放 box 违例列表 -> 下一 stage
+```
+
+Stage 按间隔挑选 active box。环境构建可并行扫描 owner，但写入同一目标 box 时加锁。
+求解阶段每个 worker 只修改自己的 box、task 和本 box 所拥有 pin 的 AP。
+本 stage 的 active owner 不作为其他 active box 的环境来源。
+
+### Box 与 Task
+
+`routePABox(model, box)` 管生命周期，`routePABox(box)` 管重跑循环。
+前者按需构建 fixed geometry、track axis、node graph、shadow 和环境投影，
+后者按 task schedule 执行下列顺序：
+
+```text
+removeTaskResult
+  -> routePATask -> patchPATask -> addRoutedTimes
+完成本轮任务后：
+updateRouteViolationList -> updateAccessPoint -> updateBestResult -> updateTaskSchedule
+重跑循环结束后：
+实际执行过布线轮次 -> selectBestResult(box)，仅恢复最佳快照到 curr_result
+统一返回生命周期流程：
+uploadPABoxResult -> freePABox
+```
+
+`selectBestResult(box)` 只恢复最佳快照；`uploadPABoxResult` 将当前线段、patch 移回 owner 表、AP 写回 pin，并移出待汇总违例。
+
+## 3. 数据与所有权
+
+| 数据 | 含义与生命周期 |
+| --- | --- |
+| PAModel | 本次 PA 的 net/pin、候选 AP 索引、迭代参数、跨迭代结果与最优快照 |
+| PAPin.access_point_list | 候选集合；AP RTree 和 box 借用其元素地址，迭代求解期间不得扩容、排序或重建 |
+| PAPin.access_point | 当前选中的 AP；与候选集合是不同对象，不能把候选集刷新当成结果发布 |
+| PABox.net_pin_own_* | box 持有的线段与 patch 向量；跨 stage 保留，按 pin 唯一归属 |
+| PABox.net_pin_env_* | 邻居结果及本地未创建 task 的 owner 结果的借用指针；求解期间只读 |
+| PATask | 稳定 task_idx、net/pin 身份、两组坐标、调度属性、当前选中 AP 指针 |
+| PABox.curr_result | 按 task_idx 索引的当前 AP/线段/patch，以及 box 违例 |
+| PABox.route_violation_list | box 求解结束后待汇总的违例；并行期间各 box 独立持有，stage barrier 后归并到 model 并释放 |
+| PABox.best_result | 与当前结果分离的完整快照；valid 标记区分未保存与合法空结果 |
+| PARouteState / PAPatchState | 单任务搜索或补丁的工作区，自管理 reset/release，不是最终结果所有者 |
+
+线段与 patch 的主数据流相同：
+
+```text
+PAModel result maps
+  -- splitPAResult / move --> PABox owner maps
+  -- initPATaskResult / move tasked pins --> curr_result[task_idx]
+  -- 实际布线时 updateBestResult / copy --> best_result
+  -- selectBestResult / move --> curr_result
+  -- uploadPABoxResult / move --> PABox owner maps
+  -- updatePAModel / move --> PAModel result maps
+```
+
+无需布线时，从导入后的 curr_result 直接进入 uploadPABoxResult，不经过 best_result。
+
+`initPATaskList` 只定义任务，`initPATaskResult` 才移动 owner 结果。
+没有创建 task 的本地结果仍留在 owner 表，并作为 env 提供给求解器。
+因此扫描 env 和 live task 已经覆盖求解环境，不能再把 owner 全表重复加入代价或 DRC。
+env 的容器去重基于指针身份，不应擅自合并不同来源的重合几何。
+
+Router 决定清理时点，State 实现自身清理：`PARouteState::resetPath` 复位队列和已访问节点，
+`resetTask` 清理单任务状态；`PAPatchState::resetTask` 清理 patch 任务状态。
+这些 reset 保留可复用存储，不负责发布结果或更新 graph/shadow。
+`freePABox` 在原 OpenQueue 释放位置调用 `PARouteState::release`：先释放队列，再重置 route state，随后才销毁 task/node。
+route state 的其余临时存储也在此处提前释放，不再等到清理函数末尾；owner 结果和其他清理操作的相对顺序不变。
+patch state 仍在末尾调用 `release`。`release` 不调用需要访问 visited nodes 的 `resetPath`。
+
+## 4. 候选几何与目标坐标
+
+候选准备分为层选择、收缩与障碍裁剪、AP 枚举与选择、target 生成四步。
+
+- Core pin 按层号降序尝试；非 core pin 优先奇数层，同类再按层号降序。
+- 收缩尺寸取 wire 半宽与 via enclosure 半尺寸的较大值。
+- 障碍查询按指定层顺序执行；两次查询都使用原始收缩窗口，不用中途裁剪后的窗口。
+- 裁剪若得到空集合，保留上一份非空候选并停止继续裁剪。
+- 默认 AP 模式允许退回原始 pin shape；指定 via 模式本身不做这个退回。
+- Via 模式生成不到 AP 时，initAccessPointList 再尝试默认模式；最终仍为空则报错。
+
+`buildPinTargetCoordList` 按 source layer 收集 AP 窗口，
+`buildLayerTargetCoordList` 先按 x 合并 y 区间，再枚举 source layer 的 track 坐标，
+将坐标放到 `getTargetLayerIdx` 确定的目标层。
+后者向结果列表追加，不负责清空；不同 source layer 还可能映射到同一 target layer，
+所以外层保留跨层去重。最终复制到 pin 的紧凑向量，避免永久持有中间容器的过大容量。
+
+## 5. 单任务路由契约
+
+每个生产 task 恰有两个非空 PAGroup：front 是 source AP，back 是 target。
+`initSingleRouteTask` 在修改工作区前检查数量、角色和非空条件。
+多个 source/target 坐标表示可选端点，不表示必须逐一连接所有坐标。
+
+```text
+initSingleRouteTask
+  -> routeSinglePath：多源搜索，到达任意 target 即成功
+  -> getRoutingSegmentListByNode：提取带 via 身份的父链
+  -> selectAccessPoint：回溯父链起点，选定原始 AP 对象
+  -> route_state.resetPath：清理队列与节点搜索状态
+  -> updateTaskResult：树重建、恢复 via 身份、发布线段并投影环境
+  -> route_state.resetTask
+```
+
+PARouteState 只保存扁平 source/target 列表、source-node/AP 映射、当前任务、
+临时线段、open queue、当前 path head 和一份 visited 列表。
+
+不可达由 routeSinglePath 返回 false，routePATask 报出 box/net/pin/task 后停止；
+不能伪装成空路径成功。起点与终点重合则是合法成功，线段集合可以为空。
+不能在 AP 回溯和线段提取前清理 parent 指针。
+
+Via 选择保留默认 master、AP 候选限制和随重跑次数轮换的 tie 策略。
+树重建会丢失 via master 标识，因此 getRoutingSegmentList 显式保存、恢复并检查这些标识。
+
+## 6. Patch 生成与接受策略
+
+`searchViolation` 选择当前 task net 的 box 内 minimum-area 违例，并直接传递重叠多边形。
+待修列表在 initSinglePatchTask 时取得，处理过程中不整体刷新；tried 集合避免反复处理同一条违例。
+
+```text
+patchSingleViolation
+  -> getCandidatePatchList：普通 W 线宽，渐进采样、去重、评分和筛选
+  -> selectPatch
+       普通候选（包括唯一候选）：按顺序 DRC 对比，接受第一个改善候选
+       普通无候选或全部不改善：getCompactPatchList，生成 2W 横向跨度的宽候选
+       只检查新增宽候选，包括唯一宽候选
+       全部不改善：不添加 patch，保留违例供后续重布处理
+  -> 保存接受结果，标记已尝试
+任务结束：updateTaskPatch -> patch_state.resetTask
+```
+
+PA/DR 共用 data_manager/advance 中 PatchGeometry 的切割矩形选择、采样坐标和宽候选面积扩展；该工具不依赖 RTDM、Box 或 Task。
+普通横纵矩形公式保持 PA 的方式，渐进采样首轮覆盖端点，后续只补中点。
+首轮额外端点仍取精确切割边界，不另行吸附到全局网格；宽候选增长量按 manufacture_grid 对齐。
+宽候选 North/South 的 X 跨度为 2W，East/West 的 Y 跨度为 2W，沿扩展方向增长到并集面积满足 min_area，且不得越过 die。
+两阶段均对新增候选评分，零代价候选足够或到最细采样时停止；宽候选在筛选前排除已保留普通候选的重复矩形。
+`selectCandidatePatchList` 优先零代价候选并控制数量，没有零代价候选时只保留评分最优者。
+`updatePatchCost` 计算 fixed/routed cost、方向和重叠面积；排序依次比较 fixed、routed、层方向、重叠面积及几何坐标。
+零代价不等于 DRC 已通过。普通阶段找到改善候选时，不再生成宽候选；唯一候选同样需要检查。
+
+| selectPatch 结果 | 当前含义 |
+| --- | --- |
+| kNone | 多边形面积已经足够，或两阶段候选均不改善，不添加 patch；未解决的违例保留供后续重布处理 |
+| kImproved | 按普通、宽候选阶段顺序找到第一个满足改善条件的候选 |
+
+候选数量不影响接受条件；所有普通和宽候选都必须通过 DRC 改善判定。
+真实缺面积但普通、宽阶段均无候选时立即报错；不把它当作合法 kNone 或静默修复成功。
+参数中的 grid、wire_width、max_candidate_patch_num 必须为正。
+
+PA/DR 的 isPatchImprovement 统一按类型计数：其他环境违例和跨 net 违例分别不能增加；
+存在 box 内 minimum-area 违例时其数量必须严格减少，两边都没有时只要求不恶化。
+该谓词约束所有候选的接受，不允许唯一候选或最终最优候选绕过检查；它按类型比较数量，不要求环境违例集合子集。
+
+`buildPatchDETask` 负责输入，`getPatchViolationList` 负责执行。候选选择按需建立一次 DETask 和基线，供两个阶段复用。
+只在 DETask 内临时 push/pop 候选指针；选择期间不修改已接受工作区，宽候选追加扩容前已弹出普通候选指针。
+当前 task 的旧 patch 在 patch DRC 中被工作区已接受 patch 替代；其他 task/env 输入和 checked nets 不变。
+选中后才写入工作区，全部违例处理后才发布到当前 task 结果并更新 graph/shadow。
+
+## 7. 空间索引与 DRC 视图
+
+| 数据结构 | 存储内容 | 用途与限制 |
+| --- | --- | --- |
+| PAModel.AccessPointRTree | 候选 AP 坐标和指针 | 邻近 box 获取候选；候选存储需保持稳定 |
+| PAFixedGeometry | 原始、未膨胀矩形及来源顺序，按层 RTree 索引 | DRC 输入与原始几何重叠查询；对象仍归 DataManager 所有 |
+| PAShadow | 按规则膨胀的代价几何 | Patch 代价查询；不能作为原始 DRC 几何 |
+| PANode graph | 轨道节点、邻接、方向占用与代价 | 搜索及重跑；不是矩形几何数据库 |
+
+PAFixedGeometry 的多窗口查询要先按来源下标排序、去重，不能暴露 RTree 遍历顺序。
+其 net 列表还用于保留“当前窗口内没有 shape 的 checked net”。
+PAShadow 的 fixed index 一次批量构建；与 DR 一致，fixed 代价查询在未构建时报错，已构建的空索引合法；routed index 保存贡献计数以支持平衡增删；
+同 net 免罚和重合但不同来源的几何语义不能混淆。
+
+`getRoutingSpacingPairList` 与 DR 使用相同的接口形式，按 PRL、EOL 顺序返回两个 x/y spacing 对。
+`getRoutingShadowShapeList(const NetShape&)` 与 DR 同名同签名，只读取几何，不依赖 box。
+Graph 与 shadow 共用此处规则计算，保留各自的 wire/enclosure 膨胀、贴边减一和投影路径；不共享整套投影实现。
+`updateRoutingNetShapeToGraph` 负责按 wire/enclosure 和 PRL/EOL 构造膨胀矩形，
+分别交给 `updatePlanarRectToGraph` / `updateViaRectToGraph`；两者保留原 TrackGridOrientation 的网格、方向遍历顺序和双端点更新。
+不能照搬 DR 的 East/North 或内部 track 遍历，因为重复命中的贡献次数可能不同。
+两个模块没有相互依赖，routed 节点均按 orientation/net 记录贡献；计数只控制成员存续，不放大代价。
+PA 使用 map，DR 使用 DRNodeNetCountState 的内联单 net / 动态多 net 存储；fixed 仍使用集合语义，不随 routed 改成计数。
+
+Route DRC 有完整 result/patch 与 AP-via-only 两种视图。
+两者共享固定几何，但 AP-via-only 不含其他结果与 patch，并跳过 single-net violation。
+Box、dirty、full 三种入口对 checked net 的范围不同，不能用一个无差别全量合并器代替。
+DETask 内存在指针借用，因此必须在调用完成前保持底层对象及向量地址有效。
+
+## 8. 违例、Dirty DRC 与最优结果
+
+违例按其矩形中点归属于唯一 box；边界违例不应因为当前 box 没有可布 task 而丢失。
+需要 route 的 box，或拥有已有违例的 box，都标记 dirty。
+本轮所有 stage 完成后，用 dirty box 的完整 real_rect 扩大 detection_distance，
+得到需要重查的 box 集合。
+
+- Dirty 比例小于 25%：buildPAEnvironment(..., true) 收集包括 active owner 的当前结果，
+  在每个 dirty box 的各 routing layer 原始 box 区域检查，只保留属于该 box 的违例。
+- Dirty 比例达到 25%：直接检查当前完整 owner 几何，避免大量重复局部检查。
+- 两种模式均保留普通 route 与 AP via 检查，并对归并结果去重。
+
+Box 和 model 的最优结果按 getViolationScore 比较；相同分数允许后来的结果替换。
+空违例列表可以是最优有效结果，必须用 valid 标记而不是 empty 判断是否已有快照。
+AP、线段、patch 与对应违例要一起恢复，不能只回退线段。
+
+## 9. 修改与验证
+
+只修改 PA 时优先保持 PinAccessor.cpp 内现有阶段边界，不新建通用框架或额外实现文件。
+改变输入范围、排序、采样、代价、停止条件或 ownership 都可能改变输出，不能只检查能否编译。
+
+| 改动范围 | 验证重点 |
+| --- | --- |
+| AP、target、裁剪、patch 采样 | 候选内容、顺序与几何边界 |
+| route 工作区、队列、shadow | reset/release 时机、队列状态与贡献增删配对 |
+| DRC 输入、task 所有权、重跑、patch 选择 | checked nets、借用指针有效期、结果发布与接受条件 |
+| 任务流程、并行边界、发布或跨迭代行为 | 指定完整设计的输出与违例对比 |
+
+不保留独立 PA/DR state 测试目录；需要运行验证时先确认安排，使用指定设计与脚本，不并发运行测试。
+
+## 10. 维护检查清单
+
+1. 新状态是否有明确读取方、唯一所有者和清理时机？能否由现有数据直接表达？
+2. task_idx 是否仍稳定？是否只重排 task_order_list？
+3. 新查询使用原始几何还是膨胀代价几何？net/layer、开闭重叠边界是否相同？
+4. 同一结果是否经 owner、env、live task 多条路径重复计入？
+5. 修改容器时是否仍有人借用元素指针？是否跨越 stage barrier？
+6. 拆函数是否真正揭示策略或复用相同语义，而不只是搬走嵌套代码？

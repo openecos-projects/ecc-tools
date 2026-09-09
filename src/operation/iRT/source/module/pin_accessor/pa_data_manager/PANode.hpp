@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <boost/container/flat_map.hpp>
+
 #include "Direction.hpp"
 #include "LayerCoord.hpp"
 #include "Orientation.hpp"
@@ -38,6 +40,7 @@ class PANode : public LayerCoord
 {
  public:
   using OrientNetSet = boost::container::flat_set<std::pair<Orientation, int32_t>>;
+  using OrientNetCountMap = boost::container::flat_map<std::pair<Orientation, int32_t>, int32_t>;
 
   static constexpr std::array<Orientation, 6> kOrientationList
       = {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth, Orientation::kAbove, Orientation::kBelow};
@@ -46,7 +49,7 @@ class PANode : public LayerCoord
   ~PANode() = default;
   // getter
   const OrientNetSet& get_orient_fixed_rect_set() const { return _orient_fixed_rect_set; }
-  const OrientNetSet& get_orient_routed_rect_set() const { return _orient_routed_rect_set; }
+  const OrientNetCountMap& get_orient_routed_rect_map() const { return _orient_routed_rect_map; }
   int32_t get_neighbor_node_num() const { return _neighbor_node_num; }
   int32_t getViolationNumber(Orientation orientation) const { return _orient_violation_number_list[getOrientationIdx(orientation)]; }
   // function
@@ -88,9 +91,40 @@ class PANode : public LayerCoord
     return cost;
   }
   void addFixedRectNet(Orientation orientation, int32_t net_idx) { addOrientNet(_orient_fixed_rect_set, _fixed_rect_net_state, orientation, net_idx); }
-  void addRoutedRectNet(Orientation orientation, int32_t net_idx) { addOrientNet(_orient_routed_rect_set, _routed_rect_net_state, orientation, net_idx); }
+  void addRoutedRectNet(Orientation orientation, int32_t net_idx)
+  {
+    auto [iter, inserted] = _orient_routed_rect_map.emplace(std::make_pair(orientation, net_idx), 1);
+    if (!inserted) {
+      iter->second++;
+      return;
+    }
+    int32_t& net_state = _routed_rect_net_state[getOrientationIdx(orientation)];
+    net_state = (net_state == kNoOrientNetIdx) ? net_idx : kManyOrientNetIdx;
+  }
   void delFixedRectNet(Orientation orientation, int32_t net_idx) { delOrientNet(_orient_fixed_rect_set, _fixed_rect_net_state, orientation, net_idx); }
-  void delRoutedRectNet(Orientation orientation, int32_t net_idx) { delOrientNet(_orient_routed_rect_set, _routed_rect_net_state, orientation, net_idx); }
+  void delRoutedRectNet(Orientation orientation, int32_t net_idx)
+  {
+    auto iter = _orient_routed_rect_map.find({orientation, net_idx});
+    if (iter == _orient_routed_rect_map.end()) {
+      RTLOG.error(Loc::current(), "The PA node has no routed contribution to remove!");
+    }
+    if (--iter->second > 0) {
+      return;
+    }
+    _orient_routed_rect_map.erase(iter);
+    int32_t& net_state = _routed_rect_net_state[getOrientationIdx(orientation)];
+    if (net_state != kManyOrientNetIdx) {
+      net_state = kNoOrientNetIdx;
+      return;
+    }
+    iter = _orient_routed_rect_map.lower_bound({orientation, std::numeric_limits<int32_t>::min()});
+    if (iter == _orient_routed_rect_map.end() || iter->first.first != orientation) {
+      net_state = kNoOrientNetIdx;
+      return;
+    }
+    auto next_iter = std::next(iter);
+    net_state = (next_iter == _orient_routed_rect_map.end() || next_iter->first.first != orientation) ? iter->first.second : kManyOrientNetIdx;
+  }
   bool hasFixedRectOrient(Orientation orientation) const { return _fixed_rect_net_state[getOrientationIdx(orientation)] != kNoOrientNetIdx; }
 #if 1  // astar
   // single path
@@ -119,6 +153,9 @@ class PANode : public LayerCoord
   static constexpr size_t getOrientationIdx(Orientation orientation) { return static_cast<size_t>(orientation) - 1; }
   static void addOrientNet(OrientNetSet& orient_net_set, std::array<int32_t, 6>& orient_net_state_list, Orientation orientation, int32_t net_idx)
   {
+    if (orient_net_state_list[getOrientationIdx(orientation)] == net_idx) {
+      return;
+    }
     if (!orient_net_set.insert({orientation, net_idx}).second) {
       return;
     }
@@ -160,7 +197,8 @@ class PANode : public LayerCoord
   OrientNetSet _orient_fixed_rect_set;
   std::array<int32_t, 6> _fixed_rect_net_state = {kNoOrientNetIdx, kNoOrientNetIdx, kNoOrientNetIdx, kNoOrientNetIdx, kNoOrientNetIdx, kNoOrientNetIdx};
   // net_result
-  OrientNetSet _orient_routed_rect_set;
+  // Dynamic shape contributions must survive removal of overlapping shapes of the same net.
+  OrientNetCountMap _orient_routed_rect_map;
   std::array<int32_t, 6> _routed_rect_net_state = {kNoOrientNetIdx, kNoOrientNetIdx, kNoOrientNetIdx, kNoOrientNetIdx, kNoOrientNetIdx, kNoOrientNetIdx};
   // violation
   std::array<int32_t, 6> _orient_violation_number_list{};

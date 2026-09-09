@@ -30,13 +30,16 @@ class PATask
 {
  public:
   PATask() = default;
+  PATask(const PATask&) = default;
+  PATask(PATask&&) = default;
+  PATask& operator=(const PATask&) = default;
+  PATask& operator=(PATask&&) = default;
   ~PATask() = default;
   // getter
   int32_t get_net_idx() { return _net_idx; }
   int32_t get_task_idx() { return _task_idx; }
   PAPin* get_pa_pin() { return _pa_pin; }
   ConnectType& get_connect_type() { return _connect_type; }
-  std::vector<PAGroup>& get_pa_group_list() { return _pa_group_list; }
   PlanarRect& get_bounding_box() { return _bounding_box; }
   int32_t get_routed_times() { return _routed_times; }
   AccessPoint* get_selected_access_point() { return _selected_access_point; }
@@ -44,13 +47,28 @@ class PATask
   const int32_t get_net_idx() const { return _net_idx; }
   const ConnectType& get_connect_type() const { return _connect_type; }
   const std::vector<PAGroup>& get_pa_group_list() const { return _pa_group_list; }
+  const std::vector<LayerCoord>& get_sort_coord_list() const { return _sort_coord_list; }
   const PlanarRect& get_bounding_box() const { return _bounding_box; }
   // setter
   void set_net_idx(const int32_t net_idx) { _net_idx = net_idx; }
   void set_task_idx(const int32_t task_idx) { _task_idx = task_idx; }
   void set_pa_pin(PAPin* pa_pin) { _pa_pin = pa_pin; }
   void set_connect_type(const ConnectType& connect_type) { _connect_type = connect_type; }
-  void set_pa_group_list(const std::vector<PAGroup>& pa_group_list) { _pa_group_list = pa_group_list; }
+  void set_pa_group_list(std::vector<PAGroup> pa_group_list)
+  {
+    _pa_group_list = std::move(pa_group_list);
+    _sort_coord_list.clear();
+    size_t coord_num = 0;
+    for (const PAGroup& pa_group : _pa_group_list) {
+      coord_num += pa_group.get_coord_list().size();
+    }
+    _sort_coord_list.reserve(coord_num);
+    for (const PAGroup& pa_group : _pa_group_list) {
+      const auto& coord_list = pa_group.get_coord_list();
+      _sort_coord_list.insert(_sort_coord_list.end(), coord_list.begin(), coord_list.end());
+    }
+    std::sort(_sort_coord_list.begin(), _sort_coord_list.end(), CmpLayerCoordByLayerASC());
+  }
   void set_bounding_box(const PlanarRect& bounding_box) { _bounding_box = bounding_box; }
   void set_routed_times(const int32_t routed_times) { _routed_times = routed_times; }
   void set_selected_access_point(AccessPoint* selected_access_point) { _selected_access_point = selected_access_point; }
@@ -63,6 +81,7 @@ class PATask
   PAPin* _pa_pin = nullptr;
   ConnectType _connect_type = ConnectType::kNone;
   std::vector<PAGroup> _pa_group_list;
+  std::vector<LayerCoord> _sort_coord_list;
   PlanarRect _bounding_box;
   int32_t _routed_times = 0;
   AccessPoint* _selected_access_point = nullptr;
@@ -123,20 +142,8 @@ struct CmpPATask
     }
 
     if (sort_status == SortStatus::kEqual) {
-      std::vector<LayerCoord> a_coord_list;
-      std::vector<LayerCoord> b_coord_list;
-      for (const PAGroup& pa_group : a->get_pa_group_list()) {
-        for (const LayerCoord& coord : pa_group.get_coord_list()) {
-          a_coord_list.push_back(coord);
-        }
-      }
-      for (const PAGroup& pa_group : b->get_pa_group_list()) {
-        for (const LayerCoord& coord : pa_group.get_coord_list()) {
-          b_coord_list.push_back(coord);
-        }
-      }
-      std::sort(a_coord_list.begin(), a_coord_list.end(), CmpLayerCoordByLayerASC());
-      std::sort(b_coord_list.begin(), b_coord_list.end(), CmpLayerCoordByLayerASC());
+      const std::vector<LayerCoord>& a_coord_list = a->get_sort_coord_list();
+      const std::vector<LayerCoord>& b_coord_list = b->get_sort_coord_list();
 
       if (std::lexicographical_compare(a_coord_list.begin(), a_coord_list.end(), b_coord_list.begin(), b_coord_list.end(), CmpLayerCoordByLayerASC())) {
         sort_status = SortStatus::kTrue;
