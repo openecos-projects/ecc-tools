@@ -180,17 +180,23 @@ IdbTerm::IdbTerm()
 
 IdbTerm::~IdbTerm()
 {
+  clear_port_list();
+
+  if (_bouding_box != nullptr) {
+    delete _bouding_box;
+    _bouding_box = nullptr;
+  }
+}
+
+void IdbTerm::clear_port_list()
+{
   for (IdbPort* port : _port_list) {
     if (port) {
       delete port;
       port = nullptr;
     }
   }
-
-  if (_bouding_box != nullptr) {
-    delete _bouding_box;
-    _bouding_box = nullptr;
-  }
+  _port_list.clear();
 }
 
 void IdbTerm::set_direction(string direction)

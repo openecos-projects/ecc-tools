@@ -33,15 +33,16 @@ bool init_drc(const std::string& temp_directory_path, const int& thread_number)
   return true;
 }
 
-bool run_drc(const std::string&, const std::string&)
+bool check_def()
 {
-  DRCI.runDRC();
+  DRCI.checkDef();
   return true;
 }
 
-bool save_drc(const std::string& path)
+bool destroy_drc()
 {
-  return DRCI.saveDRC(path);
+  DRCI.destroyDRC();
+  return true;
 }
 
 }  // namespace python_interface

@@ -245,6 +245,7 @@ class IdbTerm
   void set_bounding_box(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y) { _bouding_box->set_rect(ll_x, ll_y, ur_x, ur_y); }
 
   IdbPort* add_port(IdbPort* port = nullptr);
+  void clear_port_list();
 
   void set_has_port(bool value) { _has_port = value; }
   void set_cell_master(IdbCellMaster* cell_master) { _cell_master = cell_master; }
