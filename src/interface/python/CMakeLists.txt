@@ -5,6 +5,12 @@ SET(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 # DEFINE PYTHON MODULE & CMAKE TARGET
 pybind11_add_module(ecc_py python_moodule.cc)
 
+# Build EccDB before the wheel install step. This is a build-order dependency,
+# not a link dependency from the Python module to the EccDB shared library.
+if(TARGET eccdb_api)
+    add_dependencies(ecc_py eccdb_api)
+endif()
+
 # ecc_py statically incorporates a large part of the native ECC stack.  Leaving
 # those implementation symbols in the module's dynamic symbol table lets later
 # Python extensions resolve against ECC's private C++ implementation instead of

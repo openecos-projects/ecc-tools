@@ -310,7 +310,25 @@ void RTInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   /////////////////////////////////////////////
 }
 
+void RTInterface::setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* tech,
+                                  eccdb::LibraryStore* library)
+{
+  _design = design;
+  _tech = tech;
+  _library = library;
+  DRCI.setDesignSource(design, tech, library);
+}
+
 void RTInterface::wrapDatabase()
+{
+  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
+    wrapDatabaseFromEnTT();
+  } else {
+    wrapDatabaseFromIdb();
+  }
+}
+
+void RTInterface::wrapDatabaseFromIdb()
 {
   wrapDBInfo();
   wrapMicronDBU();
@@ -1032,6 +1050,35 @@ void RTInterface::wrapNetList()
     net.set_net_name(valid_idb_net->get_net_name());
     net.set_connect_type(getRTConnectTypeByDB(valid_idb_net->get_connect_type()));
     wrapPinList(net, valid_idb_net);
+    bool has_shape = false;
+    BoundingBox bbox;
+    for (auto& pin : net.get_pin_list()) {
+      for (const auto& shape : pin.get_routing_shape_list()) {
+        if (!has_shape) {
+          bbox.set_real_rect(shape.get_real_rect());
+          has_shape = true;
+        } else {
+          bbox.set_real_ll_x(std::min(bbox.get_real_ll_x(), shape.get_real_ll_x()));
+          bbox.set_real_ll_y(std::min(bbox.get_real_ll_y(), shape.get_real_ll_y()));
+          bbox.set_real_ur_x(std::max(bbox.get_real_ur_x(), shape.get_real_ur_x()));
+          bbox.set_real_ur_y(std::max(bbox.get_real_ur_y(), shape.get_real_ur_y()));
+        }
+      }
+      for (const auto& shape : pin.get_cut_shape_list()) {
+        if (!has_shape) {
+          bbox.set_real_rect(shape.get_real_rect());
+          has_shape = true;
+        } else {
+          bbox.set_real_ll_x(std::min(bbox.get_real_ll_x(), shape.get_real_ll_x()));
+          bbox.set_real_ll_y(std::min(bbox.get_real_ll_y(), shape.get_real_ll_y()));
+          bbox.set_real_ur_x(std::max(bbox.get_real_ur_x(), shape.get_real_ur_x()));
+          bbox.set_real_ur_y(std::max(bbox.get_real_ur_y(), shape.get_real_ur_y()));
+        }
+      }
+    }
+    if (has_shape) {
+      net.set_bounding_box(bbox);
+    }
     wrapDrivenPin(net, valid_idb_net);
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -1304,6 +1351,10 @@ void RTInterface::output()
 
 void RTInterface::outputTrackGrid()
 {
+  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
+    outputTrackGridToEnTT();
+    return;
+  }
   idb::IdbLayers* idb_layer_list = dmInst->get_idb_def_service()->get_layout()->get_layers();
   idb::IdbTrackGridList* idb_track_grid_list = dmInst->get_idb_def_service()->get_layout()->get_track_grid_list();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
@@ -1349,6 +1400,10 @@ void RTInterface::outputTrackGrid()
 
 void RTInterface::outputGCellGrid()
 {
+  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
+    outputGCellGridToEnTT();
+    return;
+  }
   idb::IdbGCellGridList* idb_gcell_grid_list = dmInst->get_idb_lef_service()->get_layout()->get_gcell_grid_list();
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
 
@@ -1374,6 +1429,10 @@ void RTInterface::outputGCellGrid()
 
 void RTInterface::outputNetList()
 {
+  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
+    outputNetListToEnTT();
+    return;
+  }
   Die& die = RTDM.getDatabase().get_die();
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
 
@@ -1636,6 +1695,7 @@ void RTInterface::initIDRC()
   std::map<std::string, std::any> config_map;
   config_map.insert({"-temp_directory_path", RTUTIL.getString(temp_directory_path, "other_tools/idrc/")});
   config_map.insert({"-thread_number", thread_number});
+  DRCI.setDesignSource(_design, _tech, _library);
   DRCI.initDRC(config_map, true);
 }
 

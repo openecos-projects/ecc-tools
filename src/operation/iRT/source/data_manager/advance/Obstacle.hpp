@@ -27,6 +27,12 @@ class Obstacle : public EXTLayerRect
 {
  public:
   Obstacle() = default;
+  Obstacle(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, int32_t layer_idx)
+  {
+    set_real_ll(ll_x, ll_y);
+    set_real_ur(ur_x, ur_y);
+    set_layer_idx(layer_idx);
+  }
   ~Obstacle() = default;
   // getter
 

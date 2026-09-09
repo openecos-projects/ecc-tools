@@ -38,6 +38,12 @@ enum class IdbConnectType : uint8_t;
 class IdbRegularWireSegment;
 }  // namespace idb
 
+namespace eccdb {
+class DesignStore;
+class TechStore;
+class LibraryStore;
+}  // namespace eccdb
+
 namespace irt {
 class RoutingLayer;
 class CutLayer;
@@ -55,6 +61,7 @@ class EXTLayerRect;
 class TAPanel;
 class PlanarCoord;
 enum class MacroPinEdge;
+class Database;
 }  // namespace irt
 
 namespace ecc_feature {
@@ -91,9 +98,14 @@ class RTInterface
 #if 1  // TopData
 
 #if 1  // input
+  void setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* tech,
+                       eccdb::LibraryStore* library);
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
+  void wrapDatabaseFromIdb();
+  void wrapDatabaseFromEnTT();
+  std::string compareWrappedDatabase(Database& left, Database& right);
   void wrapDBInfo();
   void wrapMicronDBU();
   void wrapManufactureGrid();
@@ -123,6 +135,9 @@ class RTInterface
   void outputTrackGrid();
   void outputGCellGrid();
   void outputNetList();
+  void outputTrackGridToEnTT();
+  void outputGCellGridToEnTT();
+  void outputNetListToEnTT();
   void outputSummary();
 #endif
 
@@ -156,6 +171,9 @@ class RTInterface
 
  private:
   static RTInterface* _rt_interface_instance;
+  eccdb::DesignStore* _design = nullptr;
+  eccdb::TechStore* _tech = nullptr;
+  eccdb::LibraryStore* _library = nullptr;
 
   RTInterface() = default;
   RTInterface(const RTInterface& other) = delete;
