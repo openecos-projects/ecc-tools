@@ -30,7 +30,9 @@ using PlanarTopo = std::vector<Segment<PlanarCoord>>;
 using NeighborList = std::vector<std::vector<int32_t>>;
 
 constexpr double kCostEpsilon = 1e-9;
+constexpr double kMinWarpStretch = 0.5;
 constexpr double kMaxWarpStretch = 8.0;
+constexpr double kHotspotWeight = 0.25;
 constexpr int64_t kWarpScale = 100;
 constexpr int32_t kMaxAxisSampleNum = 64;
 constexpr int32_t kMaxThreePinAxisNum = 32;
@@ -38,6 +40,7 @@ constexpr int32_t kMaxThreePinCandidateNum = 4096;
 constexpr int32_t kThreePinExtraRadius = 2;
 constexpr int32_t kMaxRefineAxisNum = 8;
 constexpr int32_t kMaxRefinePassNum = 2;
+constexpr int32_t kMaxSteinerShiftNum = 32;
 
 enum class TBAxis
 {
@@ -48,14 +51,15 @@ enum class TBAxis
 struct TBGapCostStat
 {
   long double finite_cost_sum = 0;
+  double max_finite_cost = 0;
   int64_t edge_num = 0;
+  int64_t finite_edge_num = 0;
   int64_t inf_edge_num = 0;
 };
 
 struct TBAxisCostStat
 {
   std::vector<TBGapCostStat> gap_stat_list;
-  double min_positive_cost = std::numeric_limits<double>::infinity();
 };
 
 struct TBTopoCandidate
@@ -217,16 +221,25 @@ void setShiftCoord(PlanarCoord& coord, bool is_horizontal, int32_t value)
   }
 }
 
-bool shiftBestSteinerEdge(const TBTask& task, Flute::Tree& tree)
+bool shiftBestSteinerEdge(const TBTask& task, Flute::Tree& tree, const NeighborList& neighbor_list)
 {
-  NeighborList neighbor_list = getNeighborList(tree);
   TBSteinerShift best_shift;
 
-  for (int32_t first_idx = tree.deg; first_idx < getBranchNum(tree); first_idx++) {
+  std::set<std::pair<int32_t, int32_t>> visited_edge_set;
+  for (int32_t first_idx = 0; first_idx < getBranchNum(tree); first_idx++) {
     int32_t second_idx = tree.branch[first_idx].n;
-    if (second_idx < tree.deg || second_idx == first_idx) {
+    if (second_idx < 0 || getBranchNum(tree) <= second_idx || second_idx == first_idx) {
       continue;
     }
+    int32_t edge_first_idx = std::min(first_idx, second_idx);
+    int32_t edge_second_idx = std::max(first_idx, second_idx);
+    if (!visited_edge_set.emplace(edge_first_idx, edge_second_idx).second
+        || (first_idx < tree.deg && second_idx < tree.deg)) {
+      continue;
+    }
+    bool first_is_steiner = first_idx >= tree.deg;
+    bool second_is_steiner = second_idx >= tree.deg;
+    int32_t movable_idx = first_is_steiner ? first_idx : second_idx;
     PlanarCoord first_coord = getBranchCoord(tree, first_idx);
     PlanarCoord second_coord = getBranchCoord(tree, second_idx);
     bool is_horizontal = first_coord.get_y() == second_coord.get_y() && first_coord.get_x() != second_coord.get_x();
@@ -235,17 +248,25 @@ bool shiftBestSteinerEdge(const TBTask& task, Flute::Tree& tree)
       continue;
     }
 
-    auto [first_lower, first_upper] = getBranchShiftRange(tree, neighbor_list, first_idx, is_horizontal);
-    auto [second_lower, second_upper] = getBranchShiftRange(tree, neighbor_list, second_idx, is_horizontal);
-    int32_t lower = std::max(first_lower, second_lower);
-    int32_t upper = std::min(first_upper, second_upper);
+    auto [lower, upper] = getBranchShiftRange(tree, neighbor_list, movable_idx, is_horizontal);
+    if (first_is_steiner && second_is_steiner) {
+      auto [second_lower, second_upper] = getBranchShiftRange(tree, neighbor_list, second_idx, is_horizontal);
+      lower = std::max(lower, second_lower);
+      upper = std::min(upper, second_upper);
+    }
     double current_cost = getIncidentEdgeCost(task, tree, neighbor_list, first_idx, second_idx, first_coord, second_coord);
     for (int32_t value = lower; value <= upper; value++) {
       PlanarCoord candidate_first = first_coord;
       PlanarCoord candidate_second = second_coord;
-      setShiftCoord(candidate_first, is_horizontal, value);
-      setShiftCoord(candidate_second, is_horizontal, value);
-      if (candidate_first == first_coord || !isInsideSearchRegion(task, candidate_first) || !isInsideSearchRegion(task, candidate_second)) {
+      if (first_is_steiner) {
+        setShiftCoord(candidate_first, is_horizontal, value);
+      }
+      if (second_is_steiner) {
+        setShiftCoord(candidate_second, is_horizontal, value);
+      }
+      PlanarCoord movable_coord = first_is_steiner ? candidate_first : candidate_second;
+      PlanarCoord current_movable_coord = first_is_steiner ? first_coord : second_coord;
+      if (movable_coord == current_movable_coord || !isInsideSearchRegion(task, movable_coord)) {
         continue;
       }
       double candidate_cost = getIncidentEdgeCost(task, tree, neighbor_list, first_idx, second_idx, candidate_first, candidate_second);
@@ -372,8 +393,8 @@ std::vector<PlanarCoord> getSteinerCandidateList(const TBTask& task, const Flute
 
 void refineSteinerByCost(const TBTask& task, Flute::Tree& tree, TBRefineStat& stat)
 {
+  NeighborList neighbor_list = getNeighborList(tree);
   for (int32_t pass = 0; pass < kMaxRefinePassNum; pass++) {
-    NeighborList neighbor_list = getNeighborList(tree);
     std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC> coord_branch_map;
     for (int32_t branch_idx = tree.deg; branch_idx < getBranchNum(tree); branch_idx++) {
       coord_branch_map[getBranchCoord(tree, branch_idx)].push_back(branch_idx);
@@ -410,14 +431,15 @@ void refineSteinerByCost(const TBTask& task, Flute::Tree& tree, TBRefineStat& st
 
 void refineFluteTree(const TBTask& task, Flute::Tree& tree, TBRefineStat& stat, bool enable_steiner_refine)
 {
-  if (!task.has_segment_cost_query()) {
+  if (!task.has_segment_cost_query() || !task.is_cost_refine_enabled()) {
     return;
   }
-  int32_t max_shift_num = std::max(0, 2 * (tree.deg - 2));
-  while (stat.shifted_edge_num < max_shift_num && shiftBestSteinerEdge(task, tree)) {
+  int32_t max_shift_num = kMaxSteinerShiftNum;
+  NeighborList neighbor_list = getNeighborList(tree);
+  while (stat.shifted_edge_num < max_shift_num && shiftBestSteinerEdge(task, tree, neighbor_list)) {
     stat.shifted_edge_num++;
   }
-  if (enable_steiner_refine) {
+  if (enable_steiner_refine && task.is_congestion_driven()) {
     refineSteinerByCost(task, tree, stat);
   }
 }
@@ -437,14 +459,40 @@ std::vector<int32_t> getUniqueAxisList(const std::vector<PlanarCoord>& coord_lis
 std::vector<int32_t> getSampleCoordList(const std::vector<int32_t>& axis)
 {
   int64_t span = static_cast<int64_t>(axis.back()) - axis.front();
-  int32_t sample_num = static_cast<int32_t>(std::min<int64_t>(span + 1, kMaxAxisSampleNum));
-  std::vector<int32_t> sample_list;
-  sample_list.reserve(sample_num);
-  for (int32_t sample_idx = 0; sample_idx < sample_num; sample_idx++) {
-    int64_t offset = sample_num == 1 ? 0 : span * sample_idx / (sample_num - 1);
-    sample_list.push_back(static_cast<int32_t>(axis.front() + offset));
+  if (span + 1 <= kMaxAxisSampleNum) {
+    std::vector<int32_t> sample_list;
+    sample_list.reserve(span + 1);
+    for (int64_t coord = axis.front(); coord <= axis.back(); coord++) {
+      sample_list.push_back(static_cast<int32_t>(coord));
+    }
+    return sample_list;
   }
-  return sample_list;
+  std::set<int32_t> sample_set;
+  for (int32_t coord : axis) {
+    for (int32_t offset : {-1, 0, 1}) {
+      int64_t sample = static_cast<int64_t>(coord) + offset;
+      if (axis.front() <= sample && sample <= axis.back()) {
+        sample_set.insert(static_cast<int32_t>(sample));
+      }
+    }
+  }
+  if (sample_set.size() > kMaxAxisSampleNum) {
+    std::vector<int32_t> mandatory_list(sample_set.begin(), sample_set.end());
+    sample_set.clear();
+    for (int32_t sample_idx = 0; sample_idx < kMaxAxisSampleNum; sample_idx++) {
+      size_t index = mandatory_list.size() == 1
+                         ? 0
+                         : static_cast<size_t>(sample_idx) * (mandatory_list.size() - 1) / (kMaxAxisSampleNum - 1);
+      sample_set.insert(mandatory_list[index]);
+    }
+    return {sample_set.begin(), sample_set.end()};
+  }
+  int32_t sample_num = std::max(0, kMaxAxisSampleNum - static_cast<int32_t>(sample_set.size()));
+  for (int32_t sample_idx = 0; sample_idx < sample_num; sample_idx++) {
+    int64_t offset = sample_num == 1 ? span / 2 : span * sample_idx / (sample_num - 1);
+    sample_set.insert(static_cast<int32_t>(axis.front() + offset));
+  }
+  return {sample_set.begin(), sample_set.end()};
 }
 
 TBAxisCostStat getAxisCostStat(const TBTask& task, const std::vector<int32_t>& axis, const std::vector<int32_t>& orth_axis, TBAxis direction)
@@ -472,16 +520,48 @@ TBAxisCostStat getAxisCostStat(const TBTask& task, const std::vector<int32_t>& a
           continue;
         }
         gap_stat.finite_cost_sum += cost;
-        if (cost > kCostEpsilon) {
-          stat.min_positive_cost = std::min(stat.min_positive_cost, cost);
-        }
+        gap_stat.max_finite_cost = std::max(gap_stat.max_finite_cost, cost);
+        gap_stat.finite_edge_num++;
       }
     }
   }
   return stat;
 }
 
-bool buildWarpedAxis(const std::vector<int32_t>& raw_axis, const TBAxisCostStat& cost_stat, double reference_cost, std::vector<Flute::DTYPE>& warped_axis)
+double getGapDensity(const TBGapCostStat& gap_stat, double reference_cost)
+{
+  if (gap_stat.edge_num == 0 || gap_stat.finite_edge_num == 0) {
+    return std::numeric_limits<double>::infinity();
+  }
+  double mean_cost = gap_stat.finite_cost_sum / gap_stat.finite_edge_num;
+  double blocked_ratio = gap_stat.inf_edge_num / static_cast<double>(gap_stat.edge_num);
+  return mean_cost + kHotspotWeight * gap_stat.max_finite_cost + blocked_ratio * reference_cost * kMaxWarpStretch;
+}
+
+double getReferenceCost(const TBAxisCostStat& x_stat, const TBAxisCostStat& y_stat)
+{
+  std::vector<double> cost_list;
+  for (const TBAxisCostStat* stat : {&x_stat, &y_stat}) {
+    for (const TBGapCostStat& gap_stat : stat->gap_stat_list) {
+      if (gap_stat.finite_edge_num == 0) {
+        continue;
+      }
+      double cost = gap_stat.finite_cost_sum / gap_stat.finite_edge_num + kHotspotWeight * gap_stat.max_finite_cost;
+      if (cost > kCostEpsilon) {
+        cost_list.push_back(cost);
+      }
+    }
+  }
+  if (cost_list.empty()) {
+    return std::numeric_limits<double>::infinity();
+  }
+  auto middle = cost_list.begin() + cost_list.size() / 2;
+  std::ranges::nth_element(cost_list, middle);
+  return *middle;
+}
+
+bool buildWarpedAxis(const std::vector<int32_t>& raw_axis, const TBAxisCostStat& cost_stat, double reference_cost,
+                     std::vector<Flute::DTYPE>& warped_axis)
 {
   if (raw_axis.empty()) {
     return false;
@@ -490,8 +570,11 @@ bool buildWarpedAxis(const std::vector<int32_t>& raw_axis, const TBAxisCostStat&
   constexpr int64_t max_warp_coord = std::numeric_limits<Flute::DTYPE>::max() / 4;
   for (size_t gap_idx = 0; gap_idx + 1 < raw_axis.size(); gap_idx++) {
     const TBGapCostStat& gap_stat = cost_stat.gap_stat_list[gap_idx];
-    long double density = (gap_stat.finite_cost_sum + gap_stat.inf_edge_num * reference_cost * kMaxWarpStretch) / gap_stat.edge_num;
-    long double stretch = std::clamp(density / reference_cost, static_cast<long double>(1), static_cast<long double>(kMaxWarpStretch));
+    double density = getGapDensity(gap_stat, reference_cost);
+    if (!std::isfinite(density)) {
+      return false;
+    }
+    double stretch = std::clamp(density / reference_cost, kMinWarpStretch, kMaxWarpStretch);
     int64_t axis_delta = static_cast<int64_t>(raw_axis[gap_idx + 1]) - raw_axis[gap_idx];
     long double raw_delta = static_cast<long double>(axis_delta) * kWarpScale * stretch;
     if (!std::isfinite(raw_delta) || raw_delta > max_warp_coord - warped_axis[gap_idx]) {
@@ -781,7 +864,7 @@ std::optional<TBTopoCandidate> buildWarpedCongestionCandidate(const TBTask& task
   }
   TBAxisCostStat x_cost_stat = getAxisCostStat(task, raw_x_axis, raw_y_axis, TBAxis::kX);
   TBAxisCostStat y_cost_stat = getAxisCostStat(task, raw_y_axis, raw_x_axis, TBAxis::kY);
-  double reference_cost = std::min(x_cost_stat.min_positive_cost, y_cost_stat.min_positive_cost);
+  double reference_cost = getReferenceCost(x_cost_stat, y_cost_stat);
   if (!std::isfinite(reference_cost)) {
     return std::nullopt;
   }
@@ -861,6 +944,12 @@ std::vector<Segment<PlanarCoord>> TOPOBuilder::getPlanarTopoList(const TBTask& t
   const std::vector<PlanarCoord>& coord_list = task.get_planar_coord_list();
   if (coord_list.size() <= 1) {
     return {};
+  }
+  if (coord_list.size() == 2) {
+    if (coord_list.front() == coord_list.back()) {
+      return {};
+    }
+    return {Segment<PlanarCoord>(coord_list.front(), coord_list.back())};
   }
 
   bool attempted_congestion_flute = task.is_congestion_driven() && coord_list.size() >= 3 && task.has_segment_cost_query();

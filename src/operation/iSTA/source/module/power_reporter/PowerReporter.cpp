@@ -16,9 +16,12 @@
 #include "PowerReporter.hpp"
 
 #include "DataManager.hpp"
+#include "DelayCalculator.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Utility.hpp"
+
+#include <cstdlib>
 
 namespace ista {
 
@@ -57,6 +60,54 @@ void PowerReporter::report()
   PRModel pr_model = initPRModel();
   outputPowerReport(pr_model);
   outputInstancePower(pr_model);
+
+  // Optional detailed reports for comparing power and activity independently.
+  if (const char* diagnostics = std::getenv("ISTA_POWER_DIAGNOSTICS"); diagnostics && std::string(diagnostics) == "1") {
+    Database& database = STADM.getDatabase();
+    auto write_name = [](std::ostream& out, const std::string& name) -> std::ostream& {
+      out << '"';
+      for (char character : name) {
+        if (character == '"') out << '"';
+        out << character;
+      }
+      return out << '"';
+    };
+    std::ofstream cells(STADM.getConfig().pr_temp_directory_path + "instance_power.csv");
+    cells << "instance,internal_w,switching_w,leakage_w\n" << std::setprecision(17);
+    for (auto& [name, instance] : database.get_instance_power_map()) {
+      auto& value = instance.get_power_value();
+      write_name(cells, name) << ',' << value.get_internal_power() << ',' << value.get_switching_power() << ','
+            << value.get_leakage_power() << '\n';
+    }
+    std::ofstream pins(STADM.getConfig().pr_temp_directory_path + "pin_activity.csv");
+    pins << "pin,probability,density_per_ns,rise_slew_ns,fall_slew_ns,rise_load_pf,fall_load_pf\n" << std::setprecision(17);
+    for (auto& [name, activity] : database.get_power_activity_map()) {
+      std::string pin_name = name;
+      double rise_slew = 0.0, fall_slew = 0.0;
+      auto point = database.get_timing_point_map().find(name);
+      if (point != database.get_timing_point_map().end()) {
+        auto read_slew = [&](auto& map) {
+          auto max_slew = map.find(AnalysisType::kMax);
+          if (max_slew != map.end()) {
+            auto rise = max_slew->second.find(TransType::kRise);
+            auto fall = max_slew->second.find(TransType::kFall);
+            if (rise != max_slew->second.end()) rise_slew = rise->second;
+            if (fall != max_slew->second.end()) fall_slew = fall->second;
+          }
+        };
+        if (point->second.get_is_clock_point()) {
+          read_slew(point->second.get_data_slew_map());
+          read_slew(point->second.get_clock_slew_map());
+        } else {
+          read_slew(point->second.get_clock_slew_map());
+          read_slew(point->second.get_data_slew_map());
+        }
+      }
+      write_name(pins, name) << ',' << activity.get_static_probability() << ',' << activity.get_transition_density() << ','
+           << rise_slew << ',' << fall_slew << ',' << STADC.getPowerOutputLoad(pin_name, AnalysisType::kMax, TransType::kRise) << ','
+           << STADC.getPowerOutputLoad(pin_name, AnalysisType::kMax, TransType::kFall) << '\n';
+    }
+  }
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

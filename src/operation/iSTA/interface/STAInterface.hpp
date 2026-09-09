@@ -149,13 +149,15 @@ class STAInterface
   TimingTimeUnit wrapTimingTimeUnit(idb::LibLibrary* lib_library);
   void wrapTimingCell(idb::LibCell* lib_cell);
   void wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib_port);
+  void wrapTimingCellSequential(TimingCell& timing_cell, const idb::LibCell* lib_cell);
   void wrapTimingCellPower(TimingCell& timing_cell, idb::LibCell* lib_cell);
   void wrapTimingCellLeakagePower(TimingCell& timing_cell, idb::LibCell* lib_cell);
+  void wrapTimingCellPowerConditions(TimingCell& timing_cell);
   TimingPowerArc wrapTimingPowerArc(idb::LibPowerArc* lib_power_arc);
   TimingPowerArc wrapTimingPortPowerArc(idb::LibInternalPowerInfo* internal_power_info, std::string& port_name, idb::LibLibrary* lib_library);
   void wrapTimingPowerArcTable(TimingPowerArc& timing_power_arc, idb::LibTableModel* power_table_model);
   TimingLeakagePower wrapTimingLeakagePower(idb::LibLeakagePower* lib_leakage_power);
-  LogicExpression wrapLogicExpression(std::string& expression_string);
+  LogicExpression wrapLogicExpression(const std::string& expression_string);
   void wrapLogicExpressionTermList(LogicExpression& logic_expression, LibertyExpr* liberty_expr);
   LogicOperationType wrapLogicOperationType(int32_t liberty_expr_op);
   void wrapTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* lib_arc_set);

@@ -1760,7 +1760,8 @@ LibCell::LibCell(LibCell&& other) noexcept
     : _cell_name(std::move(other._cell_name)),
       _cell_ports(std::move(other._cell_ports)),
       _cell_arcs(std::move(other._cell_arcs)),
-      _cell_power_arcs(std::move(other._cell_power_arcs))
+      _cell_power_arcs(std::move(other._cell_power_arcs)),
+      _sequentials(std::move(other._sequentials))
 {
 }
 
@@ -1771,6 +1772,7 @@ LibCell& LibCell::operator=(LibCell&& rhs) noexcept
     _cell_ports = std::move(rhs._cell_ports);
     _cell_arcs = std::move(rhs._cell_arcs);
     _cell_power_arcs = std::move(rhs._cell_power_arcs);
+    _sequentials = std::move(rhs._sequentials);
   }
 
   return *this;

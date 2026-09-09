@@ -245,6 +245,19 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     blockage_ps_list += ps;
   }
   auto core = db->get_idb_layout()->get_core();
+  IdbRect* core_rect = core->get_bounding_box();
+  auto core_box = gtl::rectangle_data<coordinate_type>(core_rect->get_low_x(), core_rect->get_low_y(), core_rect->get_high_x(),
+                                                       core_rect->get_high_y());
+  PolygonSet row_ps;
+  for (IdbRow* idb_row : db->get_idb_layout()->get_rows()->get_row_list()) {
+    IdbRect* row_rect = idb_row->get_bounding_box();
+    row_ps.insert(
+        gtl::rectangle_data<coordinate_type>(row_rect->get_low_x(), row_rect->get_low_y(), row_rect->get_high_x(), row_rect->get_high_y()));
+  }
+  row_ps &= core_box;
+  PolygonSet no_row_ps;
+  no_row_ps.insert(core_box);
+  no_row_ps -= row_ps;
   row_height = db->get_idb_layout()->get_rows()->get_row_height();
   auto second_routing_layer = db->get_idb_layout()->get_layers()->get_routing_layers().at(1);
   assert(second_routing_layer->get_name().find("2") != std::string::npos);
@@ -274,13 +287,15 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
   }
 #endif
-  // Union all hard obstacles before decomposition.  Subtract only the fixed
-  // body union: halo area outside the body must remain unavailable, while any
-  // overlap between halos, blockages, and bodies is represented exactly once.
+  // Union all hard obstacles before decomposition.  Areas inside the core
+  // without placement rows are unavailable even when the DEF has no explicit
+  // HALO or placement blockage.  Subtract fixed bodies because they are
+  // already represented by their real instance terminals.
   PolygonSet fixed_body_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
   PolygonSet fixed_halo_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
   PolygonSet obstacle_ps = blockage_ps_list;
   obstacle_ps += fixed_halo_ps;
+  obstacle_ps += no_row_ps;
   obstacle_ps -= fixed_body_ps;
   int ext_blockage_num = 0;
 
@@ -326,9 +341,6 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   // represented by the terminal rectangles above.
   PolygonSet ps(gtl::HORIZONTAL, fixed_boxes.begin(), fixed_boxes.end());
   // critical to make sure only overlap with the die area is computed
-  IdbRect* core_rect = db->get_idb_layout()->get_core()->get_bounding_box();
-  auto core_box = gtl::rectangle_data<coordinate_type>(core_rect->get_low_x(), core_rect->get_low_y(), core_rect->get_high_x(),
-                                                       core_rect->get_high_y());
   ps &= core_box;
   double total_fixed_geometry_area = gtl::area(ps);
   total_space_area = core_rect->get_area() - total_fixed_geometry_area;
@@ -339,10 +351,10 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   halo_core_ps &= core_box;
   PolygonSet residual_obstacle_core_ps(gtl::HORIZONTAL, vRect.begin(), vRect.end());
   residual_obstacle_core_ps &= core_box;
-  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB fixed geometry: body_union_area ", gtl::area(body_core_ps),
-               ", halo_union_area ", gtl::area(halo_core_ps), ", residual_obstacle_area ",
-               gtl::area(residual_obstacle_core_ps), ", terminal_union_area ", total_fixed_geometry_area,
-               ", terminal_area_sum ", total_fixed_node_area, ", synthetic_rectangles ", ext_blockage_num, ".");
+  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB fixed geometry: body_union_area ", gtl::area(body_core_ps), ", halo_union_area ",
+              gtl::area(halo_core_ps), ", no_row_area ", gtl::area(no_row_ps), ", residual_obstacle_area ",
+              gtl::area(residual_obstacle_core_ps), ", terminal_union_area ", total_fixed_geometry_area, ", terminal_area_sum ",
+              total_fixed_node_area, ", synthetic_rectangles ", ext_blockage_num, ".");
   int count = 0;
   for (int i = 0; i < mNode2PyNondeID.size() - num_terminal_NIs - ext_blockage_num; ++i) {
     auto node_name = node_names[i].cast<std::string>();

@@ -736,6 +736,9 @@ float CongestionEval::evalAvgOverflow(string stage, string rt_dir_path, string o
 
   file.close();
 
+  if (values.empty()) {
+    return -1;
+  }
   std::sort(values.begin(), values.end(), std::greater<int32_t>());
 
   size_t size = values.size();
