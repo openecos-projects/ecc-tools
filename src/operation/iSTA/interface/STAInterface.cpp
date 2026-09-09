@@ -660,6 +660,8 @@ void STAInterface::wrapTimingCell(idb::LibCell* lib_cell)
   timing_cell.set_area(lib_cell->get_cell_area());
   timing_cell.set_nom_voltage(lib_library->get_nom_voltage());
   timing_cell.set_cell_leakage_power(lib_cell->get_cell_leakage_power() * 1E-3);
+  // Timing uses check arcs to establish register clock/data pins. Importing
+  // state functions for power must not change that timing classification.
   timing_cell.set_is_sequential(lib_cell->isSequentialCell());
   timing_cell.set_is_clock_gating(lib_cell->isICG());
   timing_cell.set_is_macro(lib_cell->isMacroCell());
@@ -677,8 +679,10 @@ void STAInterface::wrapTimingCell(idb::LibCell* lib_cell)
     wrapTimingCellPort(timing_cell, lib_port.get());
   }
 
+  wrapTimingCellSequential(timing_cell, lib_cell);
   wrapTimingCellPower(timing_cell, lib_cell);
   wrapTimingCellLeakagePower(timing_cell, lib_cell);
+  wrapTimingCellPowerConditions(timing_cell);
 
   for (std::unique_ptr<idb::LibArcSet>& lib_arc_set : lib_cell->get_cell_arcs()) {
     wrapTimingCellArc(timing_cell, lib_arc_set.get());
@@ -712,6 +716,27 @@ void STAInterface::wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib
   timing_cell.get_port_map()[timing_cell_port.get_port_name()] = timing_cell_port;
 }
 
+void STAInterface::wrapTimingCellSequential(TimingCell& timing_cell, const idb::LibCell* lib_cell)
+{
+  for (const idb::LibSequential& lib_sequential : lib_cell->get_sequentials()) {
+    const std::vector<std::string>& state_variables = lib_sequential.state_variables;
+    if (state_variables.empty()) {
+      continue;
+    }
+    TimingSequential timing_sequential;
+    timing_sequential.state_port = state_variables.front();
+    if (state_variables.size() > 1) {
+      timing_sequential.inverted_state_port = state_variables[1];
+    }
+    timing_sequential.is_latch = lib_sequential.is_latch;
+    timing_sequential.data = wrapLogicExpression(lib_sequential.get_attribute(timing_sequential.is_latch ? "data_in" : "next_state"));
+    timing_sequential.clock = wrapLogicExpression(lib_sequential.get_attribute(timing_sequential.is_latch ? "enable" : "clocked_on"));
+    timing_sequential.clear = wrapLogicExpression(lib_sequential.get_attribute("clear"));
+    timing_sequential.preset = wrapLogicExpression(lib_sequential.get_attribute("preset"));
+    timing_cell.get_sequentials().push_back(std::move(timing_sequential));
+  }
+}
+
 void STAInterface::wrapTimingCellPower(TimingCell& timing_cell, idb::LibCell* lib_cell)
 {
   idb::LibLibrary* lib_library = lib_cell->get_owner_lib();
@@ -735,6 +760,30 @@ void STAInterface::wrapTimingCellLeakagePower(TimingCell& timing_cell, idb::LibC
   }
 }
 
+void STAInterface::wrapTimingCellPowerConditions(TimingCell& timing_cell)
+{
+  timing_cell.resolveDefaultPowerArcConditions();
+  if (timing_cell.get_is_sequential_for_power()) {
+    return;
+  }
+  // Liberty may include outputs in a state condition (e.g. A & Y on a
+  // buffer). Substitute their functions so the BDD preserves correlation.
+  std::map<std::string, LogicExpression> output_functions;
+  for (auto& [port_name, timing_cell_port] : timing_cell.get_port_map()) {
+    if (timing_cell_port.get_is_output() && !timing_cell_port.get_function_expression().get_is_empty()) {
+      output_functions[port_name] = timing_cell_port.get_function_expression();
+    }
+  }
+  for (TimingPowerArc& timing_power_arc : timing_cell.get_power_arc_list()) {
+    if (timing_power_arc.get_source_port().empty()) {
+      timing_power_arc.get_when_expression().substitute_ports(output_functions);
+    }
+  }
+  for (TimingLeakagePower& timing_leakage_power : timing_cell.get_leakage_power_list()) {
+    timing_leakage_power.get_when_expression().substitute_ports(output_functions);
+  }
+}
+
 TimingPowerArc STAInterface::wrapTimingPowerArc(idb::LibPowerArc* lib_power_arc)
 {
   idb::LibInternalPowerInfo* internal_power_info = lib_power_arc->get_internal_power_info().get();
@@ -745,6 +794,34 @@ TimingPowerArc STAInterface::wrapTimingPowerArc(idb::LibPowerArc* lib_power_arc)
   timing_power_arc.set_related_pg_port(internal_power_info->get_related_pg_port());
   std::string when_string = internal_power_info->get_when();
   timing_power_arc.set_when_expression(wrapLogicExpression(when_string));
+  // Match the conditional timing arc, since XOR/mux paths can change sense
+  // with their side inputs. Clock-to-Q tables always use the active clock edge.
+  idb::LibArc* matched_arc = nullptr;
+  for (std::unique_ptr<idb::LibArcSet>& lib_arc_set : lib_power_arc->get_owner_cell()->get_cell_arcs()) {
+    for (std::unique_ptr<idb::LibArc>& lib_arc : lib_arc_set->get_arcs()) {
+      if (timing_power_arc.get_source_port() != lib_arc->get_src_port() || timing_power_arc.get_sink_port() != lib_arc->get_snk_port()) {
+        continue;
+      }
+      if (matched_arc == nullptr || lib_arc->get_when() == when_string) {
+        matched_arc = lib_arc.get();
+      }
+      if (lib_arc->get_when() == when_string) {
+        break;
+      }
+    }
+    if (matched_arc != nullptr && matched_arc->get_when() == when_string) {
+      break;
+    }
+  }
+  if (matched_arc != nullptr) {
+    timing_power_arc.set_source_sense(wrapTimingArcSense(matched_arc));
+    timing_power_arc.set_source_transition(wrapTriggerTransType(matched_arc));
+    if (matched_arc->get_timing_type() == idb::LibArc::TimingType::kClear) {
+      timing_power_arc.set_sink_transition(TransType::kFall);
+    } else if (matched_arc->get_timing_type() == idb::LibArc::TimingType::kPreset) {
+      timing_power_arc.set_sink_transition(TransType::kRise);
+    }
+  }
   timing_power_arc.set_time_unit_scale(wrapLibTimeUnitScale(lib_library));
   timing_power_arc.set_cap_unit_scale(wrapLibCapUnitScale(lib_library));
   wrapTimingPowerArcTable(timing_power_arc, internal_power_info->get_power_table_model());
@@ -789,7 +866,7 @@ TimingLeakagePower STAInterface::wrapTimingLeakagePower(idb::LibLeakagePower* li
   return timing_leakage_power;
 }
 
-LogicExpression STAInterface::wrapLogicExpression(std::string& expression_string)
+LogicExpression STAInterface::wrapLogicExpression(const std::string& expression_string)
 {
   LogicExpression logic_expression;
   if (expression_string.empty()) {
