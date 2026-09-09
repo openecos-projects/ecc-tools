@@ -346,20 +346,6 @@ class CmdValidateIdb : public TclCmd
   // private data
 };
 
-class CmdWriteSocJson : public TclCmd
-{
- public:
-  explicit CmdWriteSocJson(const char* cmd_name);
-  ~CmdWriteSocJson() override = default;
-
-  unsigned check() override;
-  unsigned exec() override;
-
- private:
-  // private function
-  // private data
-};
-
 class CmdWriteAbstractLef : public TclCmd
 {
  public:

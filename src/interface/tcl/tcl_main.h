@@ -27,7 +27,6 @@
 #include <thread>
 
 #include "UserShell.hh"
-#include "tool_manager.h"
 #include "tcl_register.h"
 
 namespace tcl {
