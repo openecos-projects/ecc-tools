@@ -28,6 +28,9 @@ namespace irt {
 
 namespace {
 
+constexpr double kSteinerShiftUsageThreshold = 0.8;
+constexpr double kSteinerShiftHistoryRatio = 0.64;
+
 struct PRSegmentKey
 {
   int32_t ll_x;
@@ -876,7 +879,7 @@ std::vector<PRCandidate> PlanarRouter::getPRCandidateListByTopo(PRModel& pr_mode
   return pr_candidate_list;
 }
 
-bool PlanarRouter::shouldUseCongestionFlute(PRModel& pr_model, size_t unique_pin_num)
+bool PlanarRouter::shouldRefineTopology(PRModel& pr_model, size_t unique_pin_num)
 {
   if (unique_pin_num < 3) {
     return false;
@@ -885,13 +888,14 @@ bool PlanarRouter::shouldUseCongestionFlute(PRModel& pr_model, size_t unique_pin
   if (curr_net->get_routing_edge_set().empty()) {
     return true;
   }
-  double history_threshold = 0.64 * pr_model.get_pr_com_param().get_overflow_unit();
+  double history_threshold = kSteinerShiftHistoryRatio * pr_model.get_pr_com_param().get_overflow_unit();
   for (RoutingEdge* routing_edge : curr_net->get_routing_edge_set()) {
     if (routing_edge->get_ignore_net_set().contains(curr_net->get_net_idx())) {
       continue;
     }
     int32_t supply = routing_edge->get_supply();
-    if (supply <= 0 || routing_edge->get_demand() / static_cast<double>(supply) >= 0.8 || routing_edge->get_congestion_cost() >= history_threshold) {
+    if (supply <= 0 || routing_edge->get_demand() / static_cast<double>(supply) >= kSteinerShiftUsageThreshold
+        || routing_edge->get_congestion_cost() >= history_threshold) {
       return true;
     }
   }
@@ -912,9 +916,9 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(PRModel& pr_mo
   tb_task.set_planar_coord_list(planar_coord_list);
   GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   tb_task.set_planar_search_region(PlanarRect(0, 0, gcell_map.get_x_size() - 1, gcell_map.get_y_size() - 1));
-  bool congestion_driven = pr_topo_mode == PRTopoMode::kCongestion && shouldUseCongestionFlute(pr_model, planar_coord_list.size());
-  tb_task.set_topo_mode(congestion_driven ? TBTopoMode::kCongestion : TBTopoMode::kGeometry);
-  if (!congestion_driven) {
+  bool refine_topology = pr_topo_mode == PRTopoMode::kCongestion && shouldRefineTopology(pr_model, planar_coord_list.size());
+  tb_task.set_topo_mode(refine_topology ? TBTopoMode::kCongestion : TBTopoMode::kGeometry);
+  if (!refine_topology) {
     return RTTB.getPlanarTopoList(tb_task);
   }
 
@@ -923,6 +927,66 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(PRModel& pr_mo
   PRTopologyCostCache topology_cost_cache(std::move(segment_cost_query));
   tb_task.set_segment_cost_query(
       [&topology_cost_cache](const PlanarCoord& first, const PlanarCoord& second) { return topology_cost_cache.getCost(first, second); });
+
+  GridMap<RoutingEdge>& routing_h_edge_map = RTDM.getDatabase().get_planar_routing_h_edge_map();
+  GridMap<RoutingEdge>& routing_v_edge_map = RTDM.getDatabase().get_planar_routing_v_edge_map();
+  PRNet* curr_net = pr_model.get_curr_pr_task();
+  int32_t net_idx = curr_net->get_net_idx();
+  double overflow_unit = pr_model.get_pr_com_param().get_overflow_unit();
+  const std::unordered_set<RoutingEdge*>& routing_edge_set = curr_net->get_routing_edge_set();
+  std::unordered_map<PRSegmentKey, bool, PRSegmentKeyHash> shift_hot_cache;
+  shift_hot_cache.reserve(64);
+  auto is_hot_edge = [&routing_edge_set, net_idx, overflow_unit](RoutingEdge& edge) {
+    if (edge.get_ignore_net_set().contains(net_idx)) {
+      return false;
+    }
+    int32_t effective_demand = std::max(0, edge.get_demand() - routing_edge_set.contains(&edge));
+    return edge.get_supply() <= 0 || effective_demand / static_cast<double>(edge.get_supply()) >= kSteinerShiftUsageThreshold
+           || edge.get_congestion_cost() >= kSteinerShiftHistoryRatio * overflow_unit;
+  };
+  auto is_hot_segment = [&routing_h_edge_map, &routing_v_edge_map, &shift_hot_cache, &is_hot_edge](const PlanarCoord& first,
+                                                                                                   const PlanarCoord& second) {
+    if (first == second || !RTUTIL.isRightAngled(first, second)) {
+      return false;
+    }
+    PRSegmentKey key{std::min(first.get_x(), second.get_x()), std::min(first.get_y(), second.get_y()), std::max(first.get_x(), second.get_x()),
+                     std::max(first.get_y(), second.get_y())};
+    if (auto iter = shift_hot_cache.find(key); iter != shift_hot_cache.end()) {
+      return iter->second;
+    }
+    bool is_hot = false;
+    if (RTUTIL.isHorizontal(first, second)) {
+      if (key.ll_x < 0 || key.ur_x > routing_h_edge_map.get_x_size() || key.ll_y < 0 || key.ll_y >= routing_h_edge_map.get_y_size()) {
+        return false;
+      }
+      for (int32_t x = key.ll_x; x < key.ur_x; x++) {
+        if (is_hot_edge(routing_h_edge_map[x][key.ll_y])) {
+          is_hot = true;
+          break;
+        }
+      }
+    } else {
+      if (key.ll_x < 0 || key.ll_x >= routing_v_edge_map.get_x_size() || key.ll_y < 0 || key.ur_y > routing_v_edge_map.get_y_size()) {
+        return false;
+      }
+      for (int32_t y = key.ll_y; y < key.ur_y; y++) {
+        if (is_hot_edge(routing_v_edge_map[key.ll_x][y])) {
+          is_hot = true;
+          break;
+        }
+      }
+    }
+    shift_hot_cache.emplace(key, is_hot);
+    return is_hot;
+  };
+  tb_task.set_shift_edge_filter([&is_hot_segment](const PlanarCoord& first, const PlanarCoord& second) {
+    if (first.get_x() == second.get_x() || first.get_y() == second.get_y()) {
+      return is_hot_segment(first, second);
+    }
+    PlanarCoord x_bend(second.get_x(), first.get_y());
+    PlanarCoord y_bend(first.get_x(), second.get_y());
+    return is_hot_segment(first, x_bend) || is_hot_segment(x_bend, second) || is_hot_segment(first, y_bend) || is_hot_segment(y_bend, second);
+  });
   return RTTB.getPlanarTopoList(tb_task);
 }
 

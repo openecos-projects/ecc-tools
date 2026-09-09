@@ -151,7 +151,7 @@ class PlanarRouter
   PROverflowTask getOverflowTask(PRModel& pr_model, int32_t rip_up_guard);
   bool isBetterCandidate(PRModel& pr_model, const PRCandidate& candidate, const PRCandidate& best_candidate);
   std::vector<PRCandidate> getPRCandidateListByTopo(PRModel& pr_model, Segment<PlanarCoord>& planar_topo, PRRouteMode pr_route_mode);
-  bool shouldUseCongestionFlute(PRModel& pr_model, size_t unique_pin_num);
+  bool shouldRefineTopology(PRModel& pr_model, size_t unique_pin_num);
   std::vector<Segment<PlanarCoord>> getPlanarTopoList(PRModel& pr_model, PRTopoMode pr_topo_mode);
 
   // A* route
