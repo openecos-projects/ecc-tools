@@ -14,6 +14,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "PowerPropagator.hpp"
+#include "PowerVectorSimulator.hpp"
 
 #include "DataManager.hpp"
 #include "Logger.hpp"
@@ -120,11 +121,19 @@ void PowerPropagator::buildSequentialInstanceNameList(PPModel& pp_model)
   Database& database = STADM.getDatabase();
   std::vector<std::string> sequential_instance_name_list;
   for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
-    if (instance_pair.second.get_is_sequential()) {
+    if (isSequentialForPower(instance_pair.second)) {
       sequential_instance_name_list.push_back(instance_pair.first);
     }
   }
   pp_model.set_sequential_instance_name_list(sequential_instance_name_list);
+}
+
+bool PowerPropagator::isSequentialForPower(Instance& instance)
+{
+  if (instance.get_is_sequential()) return true;
+  auto& cells = STADM.getDatabase().get_timing_library().get_cell_map();
+  auto cell = cells.find(instance.get_cell_name());
+  return cell != cells.end() && cell->second.get_is_sequential_for_power();
 }
 
 void PowerPropagator::propagateActivity(PPModel& pp_model)
@@ -133,7 +142,12 @@ void PowerPropagator::propagateActivity(PPModel& pp_model)
   seedVcdActivity();
   seedCaseAnalysisActivity();
   seedActivity(pp_model);
-  propagateCombinationalActivity();
+  if (STADM.getDatabase().get_vcd_activity_map().empty()) {
+    if (simulateVectorlessActivity(STADM.getDatabase(), pp_model.get_minimum_clock_period())) return;
+    STALOG.info(Loc::current(), "Vector simulation unavailable for this design; using analytical activity.");
+  }
+  seedSequentialStateActivity(pp_model);
+  propagateCombinationalActivity(pp_model);
   propagateSequentialActivity(pp_model);
 }
 
@@ -287,6 +301,19 @@ void PowerPropagator::seedActivity(PPModel& pp_model)
       setPinActivity(pin_name, activity);
     }
   }
+  // Undriven nets are also activity roots. Without a default annotation their
+  // loads have no activity at all, dropping clock-pin power and invalidating
+  // every state-dependent table involving such a pin.
+  Database& database = STADM.getDatabase();
+  for (auto& [net_name, net] : database.get_net_map()) {
+    if (!net.get_driver_pin_list().empty() || !net.get_driver_pin().empty()) {
+      continue;
+    }
+    for (std::string& pin_name : net.get_load_pin_list()) {
+      PowerActivity activity = getInputActivity(pp_model);
+      setPinActivity(pin_name, activity);
+    }
+  }
 }
 
 PowerActivity PowerPropagator::getSeedActivity(std::string& pin_name, PPModel& pp_model)
@@ -308,36 +335,39 @@ PowerActivity PowerPropagator::getClockActivity(std::string& pin_name)
     if (!STAUTIL.exist(timing_clock.get_source_list(), pin_name) || timing_clock.get_period() <= STA_ERROR) {
       continue;
     }
-    double duty = (timing_clock.get_fall_edge() - timing_clock.get_rise_edge()) / timing_clock.get_period();
-    if (duty <= STA_ERROR || duty >= 1.0 - STA_ERROR) {
-      duty = 0.5;
-    }
-    PowerActivity activity;
-    activity.set_transition_density(2.0 / timing_clock.get_period());
-    activity.set_static_probability(duty);
-    activity.set_origin(PowerActivityOrigin::kClock);
-    activity.set_is_valid(true);
-    return activity;
+    return _activity_model.getClockActivity(timing_clock);
   }
   return PowerActivity();
 }
 
 PowerActivity PowerPropagator::getInputActivity(PPModel& pp_model)
 {
-  PowerActivity activity;
-  activity.set_transition_density(0.1 / pp_model.get_minimum_clock_period());
-  activity.set_static_probability(0.5);
-  activity.set_origin(PowerActivityOrigin::kInput);
-  activity.set_is_valid(true);
-  return activity;
+  return _activity_model.getDefaultInputActivity(pp_model.get_minimum_clock_period());
 }
 
-void PowerPropagator::propagateCombinationalActivity()
+void PowerPropagator::seedSequentialStateActivity(PPModel& pp_model)
+{
+  Database& database = STADM.getDatabase();
+  for (std::string& instance_name : pp_model.get_sequential_instance_name_list()) {
+    if (database.get_instance_map().count(instance_name) == 0) {
+      continue;
+    }
+    Instance& instance = database.get_instance_map()[instance_name];
+    if (instance.get_output_pin_name().empty()) {
+      continue;
+    }
+    std::string output_pin_name = instance.get_output_pin_name();
+    PowerActivity activity = _activity_model.getInitialSequentialOutputActivity();
+    setPinActivity(output_pin_name, activity);
+  }
+}
+
+void PowerPropagator::propagateCombinationalActivity(PPModel& pp_model)
 {
   Database& database = STADM.getDatabase();
   for (std::string& pin_name : database.get_timing_order_list()) {
     if (isOutputPin(pin_name)) {
-      propagateOutputActivity(pin_name);
+      propagateOutputActivity(pin_name, pp_model);
     }
     for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
       Arc& arc = database.get_arc_list()[arc_idx];
@@ -365,20 +395,21 @@ PowerActivity PowerPropagator::getPropagatedActivity(PowerActivity source_activi
   return source_activity;
 }
 
-void PowerPropagator::propagateOutputActivity(std::string& pin_name)
+void PowerPropagator::propagateOutputActivity(std::string& pin_name, PPModel& pp_model)
 {
   Database& database = STADM.getDatabase();
   Pin& pin = database.get_pin_map()[pin_name];
-  if (database.get_instance_map().count(pin.get_instance_name()) > 0 && database.get_instance_map()[pin.get_instance_name()].get_is_sequential()) {
+  if (database.get_instance_map().count(pin.get_instance_name()) > 0
+      && isSequentialForPower(database.get_instance_map()[pin.get_instance_name()])) {
     return;
   }
-  PowerActivity activity = getOutputActivity(pin_name);
+  PowerActivity activity = getOutputActivity(pin_name, pp_model);
   if (activity.get_is_valid()) {
     setPinActivity(pin_name, activity);
   }
 }
 
-PowerActivity PowerPropagator::getOutputActivity(std::string& pin_name)
+PowerActivity PowerPropagator::getOutputActivity(std::string& pin_name, PPModel& pp_model)
 {
   Database& database = STADM.getDatabase();
   if (database.get_pin_map().count(pin_name) == 0) {
@@ -401,64 +432,96 @@ PowerActivity PowerPropagator::getOutputActivity(std::string& pin_name)
     std::map<std::string, PowerActivity> input_activity_map = getInputActivityMap(instance);
     PowerActivity activity = timing_cell_port.get_function_expression().evaluate_activity(input_activity_map);
     if (activity.get_is_valid()) {
-      limitDataTransitionDensity(pin_name, activity);
+      _activity_model.limitDataActivity(database, pin_name, activity, pp_model.get_minimum_clock_period());
       return normalizeConstantActivity(activity);
     }
   }
+  if (isClockGateOutputPin(pin_name, instance)) {
+    PowerActivity activity = getClockGateOutputActivity(pin_name, instance);
+    if (activity.get_is_valid()) {
+      return activity;
+    }
+  }
   PowerActivity activity = getFallbackInputActivity(pin_name);
-  limitDataTransitionDensity(pin_name, activity);
+  _activity_model.limitDataActivity(database, pin_name, activity, pp_model.get_minimum_clock_period());
   return activity;
 }
 
-void PowerPropagator::limitDataTransitionDensity(std::string& pin_name, PowerActivity& activity)
-{
-  if (!activity.get_is_valid() || activity.get_origin() == PowerActivityOrigin::kClock || activity.get_origin() == PowerActivityOrigin::kVcd
-      || activity.get_origin() == PowerActivityOrigin::kConstant) {
-    return;
-  }
-
-  Database& database = STADM.getDatabase();
-  if (database.get_timing_point_map().count(pin_name) > 0 && database.get_timing_point_map()[pin_name].get_is_clock_point()) {
-    return;
-  }
-
-  double minimum_clock_period = getMinimumClockPeriod();
-  if (minimum_clock_period <= STA_ERROR) {
-    return;
-  }
-
-  double probability = activity.get_static_probability();
-  double default_transition_density = 0.1 / minimum_clock_period;
-  double probability_limited_transition_density = 2.0 * probability * (1.0 - probability) / minimum_clock_period;
-  double maximum_transition_density = std::min(default_transition_density, probability_limited_transition_density);
-  double transition_density = activity.get_transition_density();
-  if (maximum_transition_density <= STA_ERROR) {
-    activity.set_transition_density(0.0);
-    return;
-  }
-  if (transition_density <= maximum_transition_density) {
-    return;
-  }
-
-  double density_scale = maximum_transition_density / transition_density;
-  activity.set_rise_transition_density(activity.get_rise_transition_density() * density_scale);
-  activity.set_fall_transition_density(activity.get_fall_transition_density() * density_scale);
-}
-
-double PowerPropagator::getMinimumClockPeriod()
+PowerActivity PowerPropagator::getClockGateOutputActivity(std::string& pin_name, Instance& instance)
 {
   Database& database = STADM.getDatabase();
-  double minimum_clock_period = 0.0;
-  for (std::pair<const std::string, TimingClock>& clock_pair : database.get_timing_constraint().get_clock_map()) {
-    double period = clock_pair.second.get_period();
-    if (period <= STA_ERROR) {
+  if (database.get_timing_library().get_cell_map().count(instance.get_cell_name()) == 0) {
+    return PowerActivity();
+  }
+
+  TimingCell& timing_cell = database.get_timing_library().get_cell_map()[instance.get_cell_name()];
+  PowerActivity clock_activity;
+  std::string clock_pin_name;
+  for (auto& [port_name, timing_cell_port] : timing_cell.get_port_map()) {
+    std::string candidate_pin_name = instance.get_instance_name() + ":" + port_name;
+    if (!isClockGateClockPin(candidate_pin_name, timing_cell_port)) {
       continue;
     }
-    if (minimum_clock_period <= STA_ERROR || period < minimum_clock_period) {
-      minimum_clock_period = period;
+    PowerActivity candidate_activity = getPinActivity(candidate_pin_name);
+    if (candidate_activity.get_is_valid()
+        && (!clock_activity.get_is_valid() || candidate_activity.get_transition_density() > clock_activity.get_transition_density())) {
+      clock_activity = candidate_activity;
+      clock_pin_name = candidate_pin_name;
     }
   }
-  return minimum_clock_period;
+  if (!clock_activity.get_is_valid()) {
+    return PowerActivity();
+  }
+
+  PowerActivity enable_activity = getClockGateEnableActivity(instance, clock_pin_name, pin_name);
+  return _activity_model.getClockGateOutputActivity(clock_activity, enable_activity);
+}
+
+PowerActivity PowerPropagator::getClockGateEnableActivity(Instance& instance, std::string& clock_pin_name,
+                                                          std::string& output_pin_name)
+{
+  PowerActivity enable_activity;
+  Database& database = STADM.getDatabase();
+  for (std::string& pin_name : instance.get_pin_name_list()) {
+    if (pin_name == clock_pin_name || pin_name == output_pin_name || database.get_pin_map().count(pin_name) == 0) {
+      continue;
+    }
+    Pin& pin = database.get_pin_map()[pin_name];
+    if (pin.get_direction() != PinDirection::kInput && pin.get_direction() != PinDirection::kInout) {
+      continue;
+    }
+    if (database.get_timing_point_map().count(pin_name) > 0 && database.get_timing_point_map()[pin_name].get_is_clock_point()) {
+      continue;
+    }
+    PowerActivity candidate_activity = getPinActivity(pin_name);
+    if (candidate_activity.get_is_valid()
+        && (!enable_activity.get_is_valid() || candidate_activity.get_static_probability() > enable_activity.get_static_probability())) {
+      enable_activity = candidate_activity;
+    }
+  }
+  return enable_activity;
+}
+
+bool PowerPropagator::isClockGateOutputPin(std::string& pin_name, Instance& instance)
+{
+  if (!instance.get_is_clock_gating()) {
+    return false;
+  }
+  Database& database = STADM.getDatabase();
+  if (database.get_pin_map().count(pin_name) == 0) {
+    return false;
+  }
+  Pin& pin = database.get_pin_map()[pin_name];
+  return pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout;
+}
+
+bool PowerPropagator::isClockGateClockPin(std::string& pin_name, TimingCellPort& timing_cell_port)
+{
+  if (timing_cell_port.get_is_clock()) {
+    return true;
+  }
+  Database& database = STADM.getDatabase();
+  return database.get_timing_point_map().count(pin_name) > 0 && database.get_timing_point_map()[pin_name].get_is_clock_point();
 }
 
 PowerActivity PowerPropagator::normalizeConstantActivity(PowerActivity activity)
@@ -529,7 +592,7 @@ void PowerPropagator::propagateSequentialActivity(PPModel& pp_model)
     if (!has_activity_change) {
       break;
     }
-    propagateCombinationalActivity();
+    propagateCombinationalActivity(pp_model);
   }
 }
 
@@ -541,11 +604,7 @@ PowerActivity PowerPropagator::getSequentialOutputActivity(Instance& instance)
   }
   PowerActivity output_activity = data_activity;
   PowerActivity clock_activity = getPinActivity(instance.get_clock_pin_name());
-  double active_clock_transition_density = clock_activity.get_transition_density() / 2.0;
-  if (clock_activity.get_is_valid() && data_activity.get_transition_density() > active_clock_transition_density) {
-    double probability = data_activity.get_static_probability();
-    output_activity.set_transition_density(2.0 * probability * (1.0 - probability) * active_clock_transition_density);
-  }
+  _activity_model.limitSequentialOutputActivity(output_activity, data_activity, clock_activity);
   output_activity.set_origin(PowerActivityOrigin::kSequential);
   output_activity.set_is_valid(true);
   return normalizeConstantActivity(output_activity);

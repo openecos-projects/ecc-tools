@@ -1157,6 +1157,50 @@ unsigned LibertyReader::visitCell(LibertyGroupStmt* group) {
 }
 
 /**
+ * @brief Preserve ff/latch state definitions without changing cell timing data.
+ *
+ * @param group
+ * @return unsigned
+ */
+unsigned LibertyReader::visitSequential(LibertyGroupStmt* group) {
+  LibBuilder* lib_builder = get_library_builder();
+  LibCell* lib_cell = lib_builder->get_cell();
+  LibSequential sequential;
+  sequential.is_latch = isEqual(group->group_name, "latch");
+  void* parameter;
+  FOREACH_LIBERTY_VEC_ELEM(&group->attri_values, void, parameter) {
+    // Ignore an unsupported definition as a whole; do not shift state names.
+    if (!liberty_is_string_value(parameter)) {
+      return 1;
+    }
+    auto* value = liberty_convert_string_value(parameter);
+    sequential.state_variables.emplace_back(value->value);
+    liberty_free_string_value(value);
+    if (sequential.state_variables.back().empty()) {
+      return 1;
+    }
+  }
+  if (sequential.state_variables.empty()) {
+    return 1;
+  }
+  void* statement;
+  FOREACH_LIBERTY_VEC_ELEM(&group->stmts, void, statement) {
+    if (liberty_is_simple_attri_stmt(statement)) {
+      auto* attr = liberty_convert_simple_attribute_stmt(statement);
+      void* attri_value = const_cast<void*>(attr->attri_value);
+      if (liberty_is_string_value(attri_value)) {
+        auto* value = liberty_convert_string_value(attri_value);
+        sequential.attributes[attr->attri_name] = value->value;
+        liberty_free_string_value(value);
+      }
+      liberty_free_simple_attribute_stmt(attr);
+    }
+  }
+  lib_cell->addSequential(std::move(sequential));
+  return 1;
+}
+
+/**
  * @brief Visit leakage power.
  *
  * @param group
@@ -1550,6 +1594,8 @@ unsigned LibertyReader::visitGroup(LibertyGroupStmt* group) {
     is_ok = visitOutputCurrentTemplate(group);
   } else if (isEqual(group_name, "cell")) {
     is_ok = visitCell(group);
+  } else if (isEqual(group_name, "ff") || isEqual(group_name, "latch")) {
+    is_ok = visitSequential(group);
   } else if (isEqual(group_name, "leakage_power")) {
     is_ok = visitLeakagePower(group);
   } else if (isEqual(group_name, "bus") || isEqual(group_name, "bundle")) {
@@ -1698,6 +1744,36 @@ unsigned LibertyReader::visitCell(liberty_ast::LibGroup* group) {
   lib_builder->set_obj(nullptr);
 
   return is_ok;
+}
+
+unsigned LibertyReader::visitSequential(liberty_ast::LibGroup* group) {
+  LibBuilder* lib_builder = get_library_builder();
+  LibCell* lib_cell = lib_builder->get_cell();
+  LibSequential sequential;
+  sequential.is_latch = isEqual(group->getGroupType(), "latch");
+  if (auto* parameters = group->getParams()) {
+    for (auto& parameter : *parameters) {
+      // Ignore an unsupported definition as a whole; do not shift state names.
+      if (!parameter || !parameter->isString() || getRawStringValue(parameter.get())[0] == '\0') {
+        return 1;
+      }
+      sequential.state_variables.emplace_back(getRawStringValue(parameter.get()));
+    }
+  }
+  if (sequential.state_variables.empty()) {
+    return 1;
+  }
+  for (auto* statement : group->getStatements()) {
+    if (statement->isSimpleAttr()) {
+      auto* attr = static_cast<liberty_ast::LibSimpleAttribute*>(statement);
+      auto* value = attr->getFirstValue();
+      if (value && value->isString()) {
+        sequential.attributes[attr->getName()] = getRawStringValue(value);
+      }
+    }
+  }
+  lib_cell->addSequential(std::move(sequential));
+  return 1;
 }
 
 unsigned LibertyReader::visitLeakagePower(liberty_ast::LibGroup* group) {
@@ -2022,6 +2098,8 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
     is_ok = visitOutputCurrentTemplate(group);
   } else if (isEqual(group_name, "cell")) {
     is_ok = visitCell(group);
+  } else if (isEqual(group_name, "ff") || isEqual(group_name, "latch")) {
+    is_ok = visitSequential(group);
   } else if (isEqual(group_name, "leakage_power")) {
     is_ok = visitLeakagePower(group);
   } else if (isEqual(group_name, "bus") || isEqual(group_name, "bundle")) {
