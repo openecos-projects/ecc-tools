@@ -179,12 +179,12 @@ This is not the flat wrapper layout. Create a combined root containing both layo
 
 ## 6. Standalone EccDB differential build
 
-Example for the current workspace:
+Example layout; replace `/path/to/workspace` with your source/data parent directory:
 
 ```bash
-export ECCDB_SRC=/home/zhuxu1/workspace/ecc-tools-eccdbv1
-export ECCDB_DATA=/home/zhuxu1/workspace/ecc-tools
-export OPENROAD_ROOT=/home/zhuxu1/workspace/OpenROAD
+export ECCDB_SRC=/path/to/workspace/ecc-tools
+export ECCDB_DATA=/path/to/workspace
+export OPENROAD_ROOT=/path/to/workspace/OpenROAD
 export ECCDB_DIFF_BUILD="$ECCDB_SRC/build/eccdb-differential"
 
 cmake -S "$ECCDB_SRC/src/database/eccdb" -B "$ECCDB_DIFF_BUILD" -G Ninja \
@@ -232,13 +232,15 @@ ctest --test-dir "$ECCDB_DIFF_BUILD" \
   --output-on-failure --parallel 128 --label-regex eccdb_differential
 ```
 
-Large DEF cases are opt-in:
+Large OpenROAD DEF cases are opt-in:
 
 ```bash
 export ECCDB_RUN_LARGE_DEF_TESTS=1
 ctest --test-dir "$ECCDB_DIFF_BUILD" \
   --output-on-failure --parallel 128 --label-regex eccdb_differential
 ```
+
+The C++ environment switch only gates large OpenROAD DEF cases; ISPD19 `test10_team12` is not gated by it. The runner explicitly excludes that case unless `--large` is supplied, whereas the raw CTest commands above select it. These C++ switches check whether a variable exists: use `unset` to disable them, not `export ...=0`.
 
 ## 7. Running groups and individual cases
 
@@ -277,7 +279,7 @@ The fast OpenROAD routed-DEF group contains:
 Wrapper tests require the full ecc-tools build and are not produced by the standalone EccDB build:
 
 ```bash
-export ECCDB_SRC=/home/zhuxu1/workspace/ecc-tools-eccdbv1
+export ECCDB_SRC=/path/to/workspace/ecc-tools
 export ECC_TOOLS_BUILD="$ECCDB_SRC/build/ecc-tools"
 
 cmake -S "$ECCDB_SRC" -B "$ECC_TOOLS_BUILD" -G Ninja \
@@ -292,8 +294,8 @@ Keep the project's normal toolchain, package-manager, or dependency options when
 The binaries normally appear under repository `bin/`:
 
 ```bash
-export ECCDB_ISPD18_ROOT=/home/zhuxu1/workspace/ecc-tools/reference/ispd2018
-export ECCDB_ISPD19_ROOT=/home/zhuxu1/workspace/ecc-tools/reference/ispd2019
+export ECCDB_ISPD18_ROOT=/path/to/workspace/reference/ispd2018
+export ECCDB_ISPD19_ROOT=/path/to/workspace/reference/ispd2019
 export ECCDB_RT_THREAD_NUMBER=128
 
 "$ECCDB_SRC/bin/irt_adapter_differential_test" --gtest_list_tests
@@ -337,8 +339,10 @@ These cases are not marked GTest `DISABLED_` or expected-failure tests. A comple
 ```bash
 ECCDB_RT_THREAD_NUMBER=128 \
   "$ECCDB_SRC/bin/irt_adapter_differential_test" \
-  --gtest_filter='*Ispd19Sample3'
+  --gtest_filter='IspdUnder100k/*/Ispd19Sample3'
 ```
+
+Run each routed case in a fresh process to avoid hanging when routing workers fork after wrapper tests. Use `run_tests.sh test route` for the full routed group; the runner starts a process per case. The filter above selects only the routed case, excluding the similarly named wrapper case.
 
 ## 9. Binary fixed-point tests
 

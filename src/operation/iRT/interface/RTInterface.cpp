@@ -1050,35 +1050,6 @@ void RTInterface::wrapNetList()
     net.set_net_name(valid_idb_net->get_net_name());
     net.set_connect_type(getRTConnectTypeByDB(valid_idb_net->get_connect_type()));
     wrapPinList(net, valid_idb_net);
-    bool has_shape = false;
-    BoundingBox bbox;
-    for (auto& pin : net.get_pin_list()) {
-      for (const auto& shape : pin.get_routing_shape_list()) {
-        if (!has_shape) {
-          bbox.set_real_rect(shape.get_real_rect());
-          has_shape = true;
-        } else {
-          bbox.set_real_ll_x(std::min(bbox.get_real_ll_x(), shape.get_real_ll_x()));
-          bbox.set_real_ll_y(std::min(bbox.get_real_ll_y(), shape.get_real_ll_y()));
-          bbox.set_real_ur_x(std::max(bbox.get_real_ur_x(), shape.get_real_ur_x()));
-          bbox.set_real_ur_y(std::max(bbox.get_real_ur_y(), shape.get_real_ur_y()));
-        }
-      }
-      for (const auto& shape : pin.get_cut_shape_list()) {
-        if (!has_shape) {
-          bbox.set_real_rect(shape.get_real_rect());
-          has_shape = true;
-        } else {
-          bbox.set_real_ll_x(std::min(bbox.get_real_ll_x(), shape.get_real_ll_x()));
-          bbox.set_real_ll_y(std::min(bbox.get_real_ll_y(), shape.get_real_ll_y()));
-          bbox.set_real_ur_x(std::max(bbox.get_real_ur_x(), shape.get_real_ur_x()));
-          bbox.set_real_ur_y(std::max(bbox.get_real_ur_y(), shape.get_real_ur_y()));
-        }
-      }
-    }
-    if (has_shape) {
-      net.set_bounding_box(bbox);
-    }
     wrapDrivenPin(net, valid_idb_net);
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());

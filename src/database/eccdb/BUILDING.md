@@ -3,7 +3,7 @@
 The eccdb directory can be configured without building the complete
 ecc-tools application.
 
-Public API guides: [English](doc/API_Usage.en.md) | [简体中文](doc/API_Usage.zh-CN.md)
+Experimental API notes: [English](doc/Experimental_API_Usage.en.md) | [简体中文](doc/Experimental_API_Usage.zh-CN.md)
 
 Differential testing guides: [English](doc/Differential_Testing.en.md) | [简体中文](doc/Differential_Testing.zh-CN.md)
 
@@ -47,9 +47,11 @@ optional, and tests that require unavailable external corpora are skipped.
 Every standalone configure emits `compile_commands.json` in its build
 directory for clangd.
 
-## Installable C++ API
+## Experimental installable C++ API
 
-Build and install the public API with direct LEF/DEF support:
+The public API is an exploratory prototype, not a stable SDK or ABI. The following commands exercise the current build/install targets; API, package exports, and compatibility rules may change. See the [integration plan](doc/Integration_Plan.en.md) for unfinished integration work.
+
+Build and install the prototype with direct LEF/DEF support:
 
 ```bash
 cmake -S src/database/eccdb -B build/eccdb-api -G Ninja \
@@ -81,7 +83,7 @@ eccdb::Config config{
 auto database = eccdb::Database::open(config);
 ```
 
-The stable API uses database-owned entities and explicit value snapshots:
+The current prototype uses database-owned entities and explicit value snapshots:
 
 ```cpp
 eccdb::NetId net = database.findNetId("clk");
@@ -92,7 +94,7 @@ if (data) {
 }
 
 // Optional C++ convenience handle. It is non-owning and must not outlive the
-// Database; the ID remains the stable identity used for storage and bindings.
+// Database; the ID identifies an entity only within its owning database.
 eccdb::NetRef net_ref = database.net(net);
 net_ref.setUse(eccdb::SignalUse::kClock);
 ```

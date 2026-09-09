@@ -1,9 +1,21 @@
 # ECCDB Benchmark
 
-This benchmark measures the runtime and memory cost of the data that a future
-iRT-facing EnTTDB API is expected to expose. It is intentionally independent
-of the iRT implementation and does not measure iDB-to-EnTT conversion,
-correctness, checksums, or semantic diffs.
+[简体中文：完整性能测试指南](../doc/Benchmark.zh-CN.md)
+
+Three executables measure database access (`eccdb_benchmark`), iRT input
+materialization (`irt_input_benchmark`), and EccDB binary persistence
+(`eccdb_binary_archive_benchmark`). These are performance workloads, not a
+replacement for semantic differential tests or an end-to-end routing benchmark.
+
+The unified runner configures dependencies and runs all three workloads:
+
+```bash
+src/database/eccdb/doc/run_tests.sh benchmark --case ispd19_test8 --repeat 3
+```
+
+It runs iDB and EccDB in separate, serial processes and writes raw JSONL and
+median/min/max CSV results to a unique directory. See the
+[runner guide](../doc/Test_Runner.zh-CN.md) for configuration.
 
 ## Build
 
@@ -12,15 +24,15 @@ normal (non-`BUILD_IDB_CORE_ONLY`) build:
 
 ```bash
 cmake -S . -B build/eccdb-benchmark \
-  -DECCDB_BUILD_BENCHMARKS=ON \
-  -DECCDB_BUILD_TESTS=OFF \
-  -DBUILD_GUI=OFF -DBUILD_PYTHON=OFF
-cmake --build build/eccdb-benchmark --target eccdb_benchmark -j2
+  -DCMAKE_BUILD_TYPE=Release \
+  -DECCDB_BUILD_BENCHMARKS=ON -DECCDB_BUILD_TESTS=OFF
+cmake --build build/eccdb-benchmark --parallel 2 --target \
+  eccdb_benchmark irt_input_benchmark eccdb_binary_archive_benchmark
 ```
 
 The resulting executable is `bin/eccdb_benchmark`.
 
-The same configuration also builds
+The target list above also builds
 `bin/eccdb_binary_archive_benchmark`. It measures the current EnTTDB
 text-import and binary-persistence path without running the query workloads.
 
@@ -30,8 +42,8 @@ Each invocation appends one JSON object per measurement to `--output`:
 
 ```bash
 ./bin/eccdb_benchmark \
-  --lef reference/ispd2019/ispd19_test1/ispd19_test1.input.lef \
-  --def reference/ispd2019/ispd19_test1/ispd19_test1.input.def \
+  --lef /path/to/workspace/reference/ispd2019/ispd19_test1/ispd19_test1.input.lef \
+  --def /path/to/workspace/reference/ispd2019/ispd19_test1/ispd19_test1.input.def \
   --source entt --writes 256 \
   --output results/ispd19-test1-entt.jsonl
 ```
@@ -96,28 +108,38 @@ normalizes the wrap time by that workload.
 
 ## Metrics
 
-Every JSONL record contains elapsed nanoseconds, input/output bytes, record,
-edge, and shape counts, derived throughput, RSS delta/after, peak RSS, and
-allocator bytes. `ok` reports whether a writer produced a non-empty output
-file; it is an execution-status flag, not a correctness benchmark. In
-particular, a failed writer must not be compared as if its partial output were
-valid.
+The schemas differ between executables. Timed records report elapsed
+nanoseconds and memory in KiB; workload-specific fields include input/output
+bytes, record/edge/shape counts and throughput. `restored_counts` is not a timed
+record. The general benchmark's `ok` is an execution-status flag, not a semantic
+correctness check; also check process exit status and non-empty writer outputs.
+
+RSS after iRT wrapping includes both the source database and iRT data. Peak RSS
+includes earlier operations in the same process. Binary reload immediately
+following export is a filesystem-cache workload. Matching operation names do
+not imply matching work: compare counters before computing speedup ratios.
+
+The runner CSV contains `case,source,operation,samples,median_seconds,
+min_seconds,max_seconds,median_rss_mib`; its RSS median uses end-of-operation
+RSS, not peak RSS. The runner uses input DEF files and `--writes 256`.
+Use the executables directly for custom routed DEF or different write counts.
 
 ## ISPD2019 data
 
-`reference/ispd2019/ispd19_test1` through `ispd19_test10` provide input LEF/DEF
-files suitable for scaling runs. The checked-in `sample*` cases additionally
+Download external corpora using the [source guide](../doc/Data_Sources.zh-CN.md).
+The `ispd19_test1` through `ispd19_test10` input LEF/DEF files are suitable for
+scaling runs. The downloaded `sample*` cases additionally
 provide `solution.good.def` and `solution.bad.def`; these are useful routed
 DEF inputs for route-geometry workloads. The test cases generally do not ship
 solution DEF files, so pass any separately obtained routed DEF explicitly via
 `--def` rather than silently substituting an input DEF.
 
-For example, the checked-in routed sample can be measured with:
+For example, a downloaded routed sample can be measured with:
 
 ```bash
 ./bin/eccdb_benchmark \
-  --lef reference/ispd2019/ispd19_sample/ispd19_sample.input.lef \
-  --def reference/ispd2019/ispd19_sample/ispd19_sample.solution.good.def \
+  --lef /path/to/workspace/reference/ispd2019/ispd19_sample/ispd19_sample.input.lef \
+  --def /path/to/workspace/reference/ispd2019/ispd19_sample/ispd19_sample.solution.good.def \
   --source entt --writes 0 --output results/ispd19-sample-routed.jsonl
 ```
 
@@ -133,8 +155,8 @@ cmake --build build/eccdb-benchmark \
   --target eccdb_binary_archive_benchmark -j2
 
 ./bin/eccdb_binary_archive_benchmark \
-  --lef reference/ispd2019/ispd19_test10/ispd19_test10.input.lef \
-  --def reference/ispd2019/ispd19_test10/ispd19_test10.input.def \
+  --lef /path/to/workspace/reference/ispd2019/ispd19_test10/ispd19_test10.input.lef \
+  --def /path/to/workspace/reference/ispd2019/ispd19_test10/ispd19_test10.input.def \
   --archive-dir src/database/eccdb/benchmarks/results/ispd19-test10-input-binary \
   --output src/database/eccdb/benchmarks/results/ispd19-test10-input-binary.jsonl
 ```
@@ -144,3 +166,19 @@ Both the archive directory and JSONL output are under the benchmark `results/`
 directory, which is ignored by Git. Restored entity and routing counts are
 checked against the text-imported database before a successful result is
 written.
+
+
+Unlike the two other executables, the binary benchmark truncates its `--output`
+JSONL file. Use a unique path per invocation. To load existing archives and
+export DEF in a fresh process:
+
+```bash
+./bin/eccdb_binary_archive_benchmark \
+  --source-archive-dir /path/to/archives \
+  --def-export /path/to/results/restored.def \
+  --output /path/to/results/binary-to-def.jsonl
+```
+
+Choose exactly one input mode (`--lef` plus `--def`, or
+`--source-archive-dir`) and one output mode (`--archive-dir` or `--def-export`).
+There is no standalone iDRC benchmark target in this group.

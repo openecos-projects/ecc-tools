@@ -4,11 +4,13 @@ English version: [Architecture.en.md](Architecture.en.md)
 
 本文件描述当前 `src/database/eccdb` 的实际分层、数据所有权和公共 API 语义。它是当前实现的架构说明，不把尚未完成的目标设计误写成现有能力。
 
+> 公共 API 层目前是实验性尝试，不承诺 API/ABI 稳定或跨版本兼容。下述分层描述当前实现，不代表接口设计已经定型；用法见 [实验性 API 说明](Experimental_API_Usage.zh-CN.md)。
+
 ## 1. 总体分层
 
-稳定的 EccDB 当前可以划分为五层：
+当前 EccDB 实现可以划分为五层：
 
-1. **公共 API 层**：`include/eccdb` 中的 `Database`、`Config`、强类型 ID、Data 值和 Ref 句柄。
+1. **实验性公共 API 层**：`include/eccdb` 中的 `Database`、`Config`、强类型 ID、Data 值和 Ref 句柄。
 2. **API 实现层**：`api` 和 `api/internal`，负责 Facade、PImpl 状态和公共类型与内部类型的转换。
 3. **存储层**：`storage`，包含 EnTT Registry、组件、索引、GeometryPool 和 DesignRoutingPool。
 4. **格式 IO 层**：`io/lef`、`io/def`、`io/idb`、`io/binary`，把外部格式物化为存储对象，或从存储对象导出。
@@ -27,18 +29,19 @@ flowchart TB
   stores --> design["storage/design\nDesignStore"]
   stores --> geometry["storage/geometry\nGeometryPool"]
   design --> routing["DesignRoutingPool\ncompact route arrays"]
-  io["io/lef · io/def · io/idb · io/binary\nimport / export"] --> api
+  internal --> io["io/lef · io/def · io/idb · io/binary\nimport / export"]
+  io --> stores
   tests["tests\nunit / IO / differential / memory"] --> public
-  benchmarks["benchmarks"] --> internal
+  benchmarks["benchmarks"] --> stores
 ```
 
-图中只保留当前 EccDB 的真实边界，没有把外部渲染器、布线器或 DRC 工具画成 EccDB 的运行时组件。它们不属于稳定 EccDB API 的一部分。
+图中只保留当前 EccDB 的真实边界，没有把外部渲染器、布线器或 DRC 工具画成 EccDB 的运行时组件。它们不属于当前实验性 EccDB API 的一部分。
 
 ## 2. 目录与职责
 
 | 目录 | 当前职责 | 是否公共接口 |
 | --- | --- | --- |
-| `include/eccdb` | 稳定的 C++ 头文件、配置、ID、Data、Ref | 是，安装时只安装这一组头文件 |
+| `include/eccdb` | 实验性 C++ 头文件、配置、ID、Data、Ref | 是，安装时只安装这一组头文件 |
 | `api` | `Database` 的实现、CRUD 委托、异常/诊断处理 | 否，链接到 `eccdb_api` |
 | `api/internal` | `DatabaseState` PImpl 和 `StorageConversions` | 否；不是第二套公共对象模型 |
 | `storage/common` | `EnttId`、内部几何类型等共享实现 | 否 |
@@ -49,7 +52,7 @@ flowchart TB
 | `io/lef`、`io/def` | SI2 LEF/DEF parser、importer、exporter | 否 |
 | `io/idb` | legacy iDB 的 LEF 转换适配 | 否 |
 | `io/binary` | 三域 binary archive、schema 和 payload | 否 |
-| 外部工具集成 | 不属于稳定 EccDB 主架构；不在本图中展开 | 否 |
+| 外部工具集成 | 不属于EccDB 核心存储/IO 边界；不在本图中展开 | 否 |
 | `tests` | 单元、IO、差分、适配器、内存测试 | 否 |
 | `benchmarks` | binary、EccDB 和输入数据性能测试 | 否 |
 
@@ -61,7 +64,7 @@ flowchart TB
 
 ### 3.2 `LibraryStore`
 
-`LibraryStore` 拥有 Library registry 和 Library geometry pool，并借用 `TechRegistry`，因为 macro pin、port、obstruction 等几何引用技术层和 Via master。这个借用关系意味着 LibraryStore 不能脱离所属 TechStore 独立移动或销毁。
+`LibraryStore` 拥有 Library registry 和 Library geometry pool，并借用 `TechRegistry`，因为 macro pin、port、obstruction 等几何引用技术层和 Via master。TechRegistry 必须比借用它的 LibraryStore 活得更久；销毁时应先释放依赖它们的 DesignStore，再释放 LibraryStore，最后释放 TechStore。
 
 ### 3.3 `DesignStore`
 
@@ -121,11 +124,11 @@ if (value) {
 }
 ```
 
-这使未来的 FFI、序列化和异步任务可以拿到不依赖 EnTT 地址的拥有数据。代价是复制；高频 C++ 路径应使用 Ref 或内部 range，而不是在循环中反复物化大型 snapshot。
+这使未来的 FFI、序列化和异步任务可以拿到不依赖 EnTT 地址的拥有数据。代价是复制；Ref 的 `data()`、`routingData()` 同样返回快照，并不自动实现零复制。应按实际访问方式测量成本；内部 range 不属于实验性公共接口。
 
 ### 5.3 Ref 和借用生命周期
 
-`NetRef`、`WireRef` 等按值返回，但它们不是堆对象，也不拥有实体。它们内部保存数据库状态指针和 ID，因此：
+`NetRef`、`WireRef` 等按值返回，不要求单独进行堆分配，也不拥有实体。它们内部保存数据库状态指针和 ID，因此：
 
 - Ref 不能比所属 `Database` 活得更久；
 - `string_view`、span 和由 pool 返回的 range 不能跨越可能改变底层存储的 mutation；
@@ -168,7 +171,7 @@ binary 文件按三个 registry 域独立保存，header 会校验 magic、格�
 
 ## 8. 外部集成边界
 
-稳定 EccDB 主库只负责数据库、LEF/DEF/binary IO 和自身测试。外部工具集成是否存在、如何构建，由更大的工程配置决定，不应被理解为 EccDB 内置能力。
+EccDB 核心存储/IO只负责数据库、LEF/DEF/binary IO 和自身测试。外部工具集成是否存在、如何构建，由更大的工程配置决定，不应被理解为 EccDB 内置能力。
 
 - EccDB 外部调用方应该使用 `#include <eccdb/eccdb.h>` 和 `eccdb::Database`；
 - 外部集成代码只能在适配边界内使用 Store，不应把 Store 头文件传播到安装 API；
@@ -196,7 +199,7 @@ binary 文件按三个 registry 域独立保存，header 会校验 magic、格�
 推荐的演进顺序是：
 
 ```text
-公共 API 语义稳定
+先验证并稳定实验性公共 API 语义
   -> 收紧可变 Store/Registry 的传播
   -> 为工具增加受限 Editor/DTO contract
   -> 补齐 Tech/Library 查询 API

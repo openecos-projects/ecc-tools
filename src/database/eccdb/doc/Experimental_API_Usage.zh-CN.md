@@ -1,21 +1,24 @@
-# EccDB C++ API 使用指南
+# EccDB 实验性 C++ API 使用说明
 
-English version: [API_Usage.en.md](API_Usage.en.md)
+English version: [Experimental_API_Usage.en.md](Experimental_API_Usage.en.md)
+
+> **状态：实验性尝试。** 当前接口用于探索和验证公共访问边界，不是已定型的 SDK。类型、函数、错误语义、安装导出和 ABI 均可能发生不兼容调整；本文只描述当前原型，不承诺源码或二进制兼容。集成前请固定源码版本，并参考 [集成计划](Integration_Plan.zh-CN.md)。
 
 ## 1. API 定位
 
-EccDB 公共 API 是底层 EnTT Registry、连续 Pool 和各类 Storage 之上的稳定访问层。外部程序只需包含 `eccdb` 公共头文件，不需要了解 EnTT 实体、内部组件或 Storage 的拆分方式。
+EccDB 公共 API 是底层 EnTT Registry、连续 Pool 和各类 Storage 之上的实验性访问层。外部程序只需包含 `eccdb` 公共头文件，不需要了解 EnTT 实体、内部组件或 Storage 的拆分方式。
 
-当前第一版公共 API 提供：
+当前原型提供：
 
 - 使用 LEF/DEF 或 EccDB binary 打开数据库；
-- Net、Special Net、Instance、Instance Pin、IO Pin、Wire 和 DEF design VIA 的查询与增删改；
+- Net、Special Net、Instance、IO Pin、Wire 和 DEF design VIA 的查询与增删改；
+- Instance Pin 的查询与连接操作；其创建/删除随 Instance 管理，没有独立的 Pin CRUD；
 - Pin 与 Net 的连接关系操作；
 - Wire path、路径点、VIA placement 和矩形扩展的值类型；
 - DEF 和 binary 导出；
 - 可选的 C++ `Ref` 便利句柄。
 
-当前尚未提供完整的 technology/library 公共查询与编辑 API。因此，从零创建 Instance、Wire 或 design VIA 时所需的 `CellMasterId`、`RoutingLayerId`、`LayerId`、`TechViaId` 等通常来自已经导入的数据库对象。第一版主要面向“导入现有 LEF/DEF 或 binary，然后查询和编辑设计”的工作流。
+当前尚未提供完整的 technology/library 公共查询与编辑 API。因此，从零创建 Instance、Wire 或 design VIA 时所需的 `CellMasterId`、`RoutingLayerId`、`LayerId`、`TechViaId` 等通常来自已经导入的数据库对象。当前原型主要面向“导入现有 LEF/DEF 或 binary，然后查询和编辑设计”的工作流。
 
 ## 2. 引入与链接
 
@@ -25,7 +28,7 @@ EccDB 公共 API 是底层 EnTT Registry、连续 Pool 和各类 Storage 之上�
 #include <eccdb/eccdb.h>
 ```
 
-安装后的 CMake 项目使用：
+当前实现提供以下实验性 CMake 导出目标；这不是稳定安装/ABI 契约。外部项目需通过 `CMAKE_PREFIX_PATH` 指向安装前缀：
 
 ```cmake
 find_package(EccDB CONFIG REQUIRED)
@@ -81,7 +84,7 @@ eccdb::Config config{
 auto database = eccdb::Database::open(config);
 ```
 
-Technology、Library 和 Design 使用三份 binary 文件，因为它们是相互关联但独立的存储域。
+Technology、Library 和 Design 使用三份 binary 文件，因为它们是相互关联但独立的存储域。`binary_cache` 会在成功读入文本后写出快照，不会自动检测并复用已有缓存。
 
 ### 3.3 Binary 输入
 
@@ -97,13 +100,17 @@ auto database = eccdb::Database::open({
 });
 ```
 
+Binary 输入不能同时指定 `binary_cache`，也不能把 `runtime.polygon_mode` 设置为 `kRectangularized` 来覆盖存档中的模式；当前实现会抛出 `std::invalid_argument`。存档的格式/schema 版本检查不代表跨版本兼容承诺。
+
+下文代码为操作片段，假定已有成功打开的 `database`；示例名称需要按输入数据调整。使用 `std::move`、输出和异常时分别包含 `<utility>`、`<iostream>`、`<stdexcept>`。
+
 ## 4. ID、Data 和 Ref
 
 公共 API 有三类核心类型：
 
 | 类型 | 示例 | 语义 |
 | --- | --- | --- |
-| 强类型 ID | `NetId`、`WireId`、`InstanceId` | 数据库中实体的身份；可复制、比较、hash 和长期保存 |
+| 强类型 ID | `NetId`、`WireId`、`InstanceId` | 数据库中实体的身份；可复制、比较和 hash；仅在所属数据库及实体存活期间有效 |
 | Data 值 | `NetData`、`InstanceData`、`WireRoutingData` | 拥有内容的独立快照；修改副本不会自动写回数据库 |
 | Ref 句柄 | `NetRef`、`WireRef`、`InstanceRef` | `DatabaseState* + ID` 组成的非 owning C++ 便利入口 |
 
@@ -122,10 +129,12 @@ if (data) {
 显式调用 `updateNet` 后才写回：
 
 ```cpp
-database.updateNet(net_id, *data);
+if (data) {
+  database.updateNet(net_id, *data);
+}
 ```
 
-所有 ID 都只属于创建它的那一个 `Database`。不要把数据库 A 的 `NetId` 传给数据库 B。实体删除或 Database 销毁后，对应 ID 失效。
+所有 ID 都只属于创建它的那一个 `Database`。不要把数据库 A 的 `NetId` 传给数据库 B。实体删除或 Database 销毁后，对应 ID 失效。 `if (id)` 只检查 ID 是否为非空哨兵值，不验证实体是否仍存在；实体删除不会改写调用方保存的 ID。请用原数据库的 `contains(id)` 检查有效性，ID 本身不携带数据库身份校验。
 
 ## 5. Net CRUD
 
@@ -166,7 +175,9 @@ auto signal_data = *database.netData(signal);
 signal_data.weight = 10;
 database.updateNet(signal, std::move(signal_data));
 
-bool removed = database.destroyNet(signal);
+// 删除独立的临时 net，保留 signal 供下文连接示例使用。
+auto temporary = database.createNet({.name = "temporary_net"});
+bool removed = database.destroyNet(temporary);
 ```
 
 如果 Net 仍连接 Pin 或拥有 Wire，`destroyNet()` 返回 `false`，不会破坏引用关系。
@@ -195,6 +206,9 @@ auto pin_data = database.instancePinData(input);
 创建 Instance 时，底层会根据 `CellMasterId` 对应 master 的 terminals 自动物化 Instance Pins：
 
 ```cpp
+if (!instance_data) {
+  throw std::runtime_error("example instance u1 was not found");
+}
 eccdb::CellMasterId master = instance_data->master;
 
 eccdb::InstanceId created = database.createInstance({
@@ -215,6 +229,9 @@ eccdb::IoPinId io_pin = database.createIoPin({
     .use = eccdb::SignalUse::kSignal,
 });
 
+if (!database.contains(input) || !database.contains(signal)) {
+  throw std::runtime_error("example pin or net was not found");
+}
 database.connect(io_pin, signal);
 database.connect(input, signal);
 
@@ -292,8 +309,10 @@ eccdb::WireId wire = database.createWire(
 auto metadata = database.wireMetadata(wire);
 auto routing_data = database.wireRoutingData(wire);
 
-routing_data->paths.front().width = 120;
-database.updateWire(wire, *metadata, std::move(*routing_data));
+if (metadata && routing_data && !routing_data->paths.empty()) {
+  routing_data->paths.front().width = 120;
+  database.updateWire(wire, *metadata, std::move(*routing_data));
+}
 
 for (eccdb::WireId id : database.wireIds(ground)) {
   auto wire_data = database.wireRoutingData(id);
@@ -318,7 +337,7 @@ if (net) {
 }
 ```
 
-Ref 本身通常只是一个指针加一个 ID，在栈上按值返回，不需要 `new` 或 `delete`。它不拥有 Database，不能比 Database 活得更久。跨语言绑定和长期缓存应优先保存强类型 ID，而不是 Ref。
+Ref 本身通常只是一个指针加一个 ID，按值返回，不需要 `new` 或 `delete`。它不拥有 Database，不能比 Database 活得更久。需要缓存引用时，可在同一数据库生命周期内保存强类型 ID，而不是 Ref；这不代表 ID 可以跨数据库、重新打开文件或跨版本直接复用。
 
 `name()` 返回的 `std::string_view` 是短生命周期借用；重命名、更新对应对象或销毁 Database 后不能继续使用旧 view。
 
@@ -343,7 +362,7 @@ for (const eccdb::ImportDiagnostic& diagnostic : database.diagnostics()) {
 ## 10. 错误、生命周期和并发约束
 
 - 查询不存在的 ID 时，`contains()` 返回 `false`，Data 查询返回 `std::nullopt`，Ref 查询返回空句柄。
-- 非法创建或更新通常抛出 `std::invalid_argument`；使用失效 Ref 会抛出 `std::out_of_range`。
+- 非法创建或更新通常抛出 `std::invalid_argument`；在所属数据库状态仍存活时，访问空 Ref 或已删除实体的受检方法会抛出 `std::out_of_range`。数据库销毁后的 Ref 已悬空，任何访问（包括有效性检查）都不能依赖异常保护。
 - `destroy*()` 返回 `false` 通常表示对象不存在或仍被其他对象引用。
 - ID 只在所属 Database 内有意义；当前 ID 本身不携带 Database cookie。
 - Ref 和 view 都不拥有底层数据，Database 销毁后立即失效。
@@ -355,6 +374,7 @@ for (const eccdb::ImportDiagnostic& diagnostic : database.diagnostics()) {
 | 头文件 | 内容 |
 | --- | --- |
 | `eccdb/eccdb.h` | 推荐统一入口 |
+| `eccdb/db.h` | 转发到统一入口的兼容头 |
 | `eccdb/Config.h` | 输入、运行选项和 binary 文件配置 |
 | `eccdb/Types.h` | 强类型 ID、基础几何和枚举 |
 | `eccdb/DesignData.h` | Net、Instance 和 Pin 快照类型 |

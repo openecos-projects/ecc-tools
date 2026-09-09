@@ -2,6 +2,8 @@
 
 [English](Differential_Testing.en.md) | 简体中文
 
+推荐先使用 [测试脚本与配置说明](Test_Runner.zh-CN.md)：`./run_tests.sh doctor` 检查数据，`./run_tests.sh test diff` 配置、构建并运行。
+
 本文说明 EccDB 当前有哪些差分测试、各自比较什么、如何配置构建环境、需要准备哪些 LEF/DEF 语料，以及怎样判断一次测试是否完整通过。
 
 ## 1. 什么是差分测试
@@ -84,9 +86,11 @@ OpenROAD/bazel-bin/src/odb/
 └── _odb.so
 ```
 
-也可以使用独立的 `odbtcl`，但 Python 路径是当前工作区已经验证的配置。
+也可以使用独立的 `odbtcl`，本文的自动化脚本使用 Python oracle 路径。
 
 ## 4. 所需数据及目录结构
+
+下载入口、固定版本及 `test10.tgz` 的 Google Drive 地址见 [测试数据来源](Data_Sources.zh-CN.md)。
 
 ### 4.1 Ecc-tools PDK LEF
 
@@ -180,12 +184,12 @@ ECCDB_ISPD19_ROOT/
 
 ## 6. 独立 EccDB 差分构建
 
-以下示例适用于当前工作区：
+以下使用示例工作目录，请按实际源码和数据位置调整：
 
 ```bash
-export ECCDB_SRC=/home/zhuxu1/workspace/ecc-tools-eccdbv1
-export ECCDB_DATA=/home/zhuxu1/workspace/ecc-tools
-export OPENROAD_ROOT=/home/zhuxu1/workspace/OpenROAD
+export ECCDB_SRC=/path/to/workspace/ecc-tools
+export ECCDB_DATA=/path/to/workspace
+export OPENROAD_ROOT=/path/to/workspace/OpenROAD
 export ECCDB_DIFF_BUILD="$ECCDB_SRC/build/eccdb-differential"
 
 cmake -S "$ECCDB_SRC/src/database/eccdb" -B "$ECCDB_DIFF_BUILD" -G Ninja \
@@ -238,7 +242,9 @@ ctest --test-dir "$ECCDB_DIFF_BUILD" \
   --output-on-failure --parallel 128 --label-regex eccdb_differential
 ```
 
-默认不启用超大 DEF。确认完整数据和内存后再运行：
+注意：现有 C++ 仅对 OpenROAD 大 DEF 检查环境开关，ISPD19 `test10_team12` 不受此开关控制。脚本默认显式排除它，`--large` 才纳入；直接运行上面的原始 CTest 命令会选中它。开关只判断变量是否存在，禁用应 `unset`，不要 `export ...=0`。
+
+确认完整数据和内存后再运行大 DEF：
 
 ```bash
 export ECCDB_RUN_LARGE_DEF_TESTS=1
@@ -283,7 +289,7 @@ OpenROAD routed DEF 的快速组包括：
 Wrapper 测试依赖完整 ecc-tools 根工程，不能由 EccDB 独立构建产生。使用已完成依赖配置的根工程构建目录：
 
 ```bash
-export ECCDB_SRC=/home/zhuxu1/workspace/ecc-tools-eccdbv1
+export ECCDB_SRC=/path/to/workspace/ecc-tools
 export ECC_TOOLS_BUILD="$ECCDB_SRC/build/ecc-tools"
 
 cmake -S "$ECCDB_SRC" -B "$ECC_TOOLS_BUILD" -G Ninja \
@@ -298,8 +304,8 @@ cmake --build "$ECC_TOOLS_BUILD" \
 测试二进制通常生成在仓库的 `bin/`。先列出测试，再运行：
 
 ```bash
-export ECCDB_ISPD18_ROOT=/home/zhuxu1/workspace/ecc-tools/reference/ispd2018
-export ECCDB_ISPD19_ROOT=/home/zhuxu1/workspace/ecc-tools/reference/ispd2019
+export ECCDB_ISPD18_ROOT=/path/to/workspace/reference/ispd2018
+export ECCDB_ISPD19_ROOT=/path/to/workspace/reference/ispd2019
 export ECCDB_RT_THREAD_NUMBER=128
 
 "$ECCDB_SRC/bin/irt_adapter_differential_test" --gtest_list_tests
@@ -323,6 +329,8 @@ ECCDB_KEEP_TEMP=1 ECCDB_RT_THREAD_NUMBER=128 \
 
 iRT/iDRC 测试在 CTest 中标记了 `RUN_SERIAL TRUE`。原因是工具内部存在全局接口和共享状态。可以给 iRT、iDRC 分别开 tmux session，但不要在同一个测试二进制中并发启动多个 case。`ECCDB_RT_THREAD_NUMBER=128` 指的是单个 iRT case 内部的布线并行度，不是同时运行 128 个 case。
 
+路由用例建议通过 `run_tests.sh test route` 逐 case 新进程运行。不要在同一进程混跑 wrapper 与路由：当前版本曾在 wrapper 初始化线程后再 `fork` 时停滞。wrapper 阶段仅比较导入数据；net 包围盒在路由后快照中比较实际/网格坐标。
+
 ### 8.1 已知的 ISPD iRT 失败
 
 截至 2026-08-27 的 128 线程受控诊断，确认有 **4 个 ISPD case 在 iRT 布线阶段本身失败**：
@@ -343,8 +351,10 @@ iRT/iDRC 测试在 CTest 中标记了 `RUN_SERIAL TRUE`。原因是工具内部�
 ```bash
 ECCDB_RT_THREAD_NUMBER=128 \
   "$ECCDB_SRC/bin/irt_adapter_differential_test" \
-  --gtest_filter='*Ispd19Sample3'
+  --gtest_filter='IspdUnder100k/*/Ispd19Sample3'
 ```
+
+路由测试应逐 case 使用新进程，避免先运行 wrapper 测试再 fork 路由 worker 时卡住。完整路由组可使用 `run_tests.sh test route`；脚本会逐项启动进程。上面的过滤器只匹配路由用例，不包含同名 wrapper 用例。
 
 ## 9. Binary 固定点测试
 

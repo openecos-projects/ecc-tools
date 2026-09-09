@@ -2400,12 +2400,9 @@ std::string RTInterface::compareWrappedDatabase(Database& left, Database& right)
     if (lhs.get_connect_type() != rhs.get_connect_type()) {
       return fail("net " + lhs.get_net_name() + " connect_type differs");
     }
-    if (lhs.get_bounding_box().get_real_ll_x() != rhs.get_bounding_box().get_real_ll_x()
-        || lhs.get_bounding_box().get_real_ll_y() != rhs.get_bounding_box().get_real_ll_y()
-        || lhs.get_bounding_box().get_real_ur_x() != rhs.get_bounding_box().get_real_ur_x()
-        || lhs.get_bounding_box().get_real_ur_y() != rhs.get_bounding_box().get_real_ur_y()) {
-      return fail("net " + lhs.get_net_name() + " bounding_box differs");
-    }
+    // Compare imported inputs here. Legacy iDB leaves the net bounding box
+    // unset at wrap time; PinAccessor recomputes it from access points for both
+    // sources. The routed differential snapshot checks that derived state.
     std::vector<Pin>& left_pins = lhs.get_pin_list();
     std::vector<Pin>& right_pins = rhs.get_pin_list();
     std::sort(left_pins.begin(), left_pins.end(), [](Pin& a, Pin& b) { return a.get_pin_name() < b.get_pin_name(); });

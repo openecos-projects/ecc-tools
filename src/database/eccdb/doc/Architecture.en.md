@@ -4,9 +4,11 @@ Chinese version: [Architecture.zh-CN.md](Architecture.zh-CN.md)
 
 This document describes the implementation that currently exists under `src/database/eccdb`: its layers, ownership rules, and public API semantics. Planned work is called out explicitly instead of being presented as an existing capability.
 
+> The public API is an experimental attempt with no API/ABI stability or cross-version compatibility promise. These layers describe the current implementation, not a finalized interface design; see the [experimental API notes](Experimental_API_Usage.en.md).
+
 ## 1. Overall layering
 
-The stable EccDB core currently has five practical layers:
+The current EccDB implementation currently has five practical layers:
 
 1. **Public API**: `Database`, `Config`, strong ID types, Data values, and Ref handles under `include/eccdb`.
 2. **API implementation**: `api` and `api/internal`, which implement the Facade, own the PImpl state, and convert public values to internal types.
@@ -27,18 +29,19 @@ flowchart TB
   stores --> design["storage/design\nDesignStore"]
   stores --> geometry["storage/geometry\nGeometryPool"]
   design --> routing["DesignRoutingPool\ncompact route arrays"]
-  io["io/lef · io/def · io/idb · io/binary\nimport / export"] --> api
+  internal --> io["io/lef · io/def · io/idb · io/binary\nimport / export"]
+  io --> stores
   tests["tests\nunit / IO / differential / memory"] --> public
-  benchmarks["benchmarks"] --> internal
+  benchmarks["benchmarks"] --> stores
 ```
 
-The diagram keeps only the current EccDB boundary. It deliberately does not present an external renderer, router, or DRC tool as an EccDB runtime component. Those tools are outside the stable EccDB API.
+The diagram keeps only the current EccDB boundary. It deliberately does not present an external renderer, router, or DRC tool as an EccDB runtime component. Those tools are outside the experimental EccDB API.
 
 ## 2. Directory responsibilities
 
 | Directory | Current responsibility | Public interface |
 | --- | --- | --- |
-| `include/eccdb` | Installed C++ headers for configuration, IDs, Data, and Ref | Yes |
+| `include/eccdb` | Experimental installed C++ headers for configuration, IDs, Data, and Ref | Yes |
 | `api` | `Database` implementation, CRUD delegation, diagnostics, and output | No; linked by `eccdb_api` |
 | `api/internal` | `DatabaseState` PImpl and `StorageConversions` | No; not a second public object model |
 | `storage/common` | Shared internal `EnttId` and geometry types | No |
@@ -49,7 +52,7 @@ The diagram keeps only the current EccDB boundary. It deliberately does not pres
 | `io/lef`, `io/def` | SI2 parser sequences, importers, and exporters | No |
 | `io/idb` | Legacy iDB LEF conversion adapter | No |
 | `io/binary` | Three-domain binary archives, schemas, and payloads | No |
-| External tool integration | Outside the stable EccDB architecture; intentionally omitted from this diagram | No |
+| External tool integration | Outside the EccDB core storage/IO boundary; intentionally omitted from this diagram | No |
 | `tests` | Unit, IO, differential, adapter, and memory tests | No |
 | `benchmarks` | Binary, EccDB, and input-data benchmarks | No |
 
@@ -61,7 +64,7 @@ The diagram keeps only the current EccDB boundary. It deliberately does not pres
 
 ### 3.2 `LibraryStore`
 
-`LibraryStore` owns a Library registry and a library geometry pool. It borrows the `TechRegistry` because macro pins, ports, and obstructions refer to technology layers and Via masters. Consequently, a LibraryStore cannot be moved or destroyed independently of its TechStore.
+`LibraryStore` owns a Library registry and a library geometry pool. It borrows the `TechRegistry` because macro pins, ports, and obstructions refer to technology layers and Via masters. The borrowed TechRegistry must outlive LibraryStore. Release dependent DesignStores first, then LibraryStore, then TechStore.
 
 ### 3.3 `DesignStore`
 
@@ -121,11 +124,11 @@ if (value) {
 }
 ```
 
-This will be suitable for future FFI, serialization, and asynchronous work because the result does not depend on an EnTT address. The tradeoff is copying; hot C++ loops should use Ref or internal ranges instead of repeatedly materializing large snapshots.
+This will be suitable for future FFI, serialization, and asynchronous work because the result does not depend on an EnTT address. The tradeoff is copying. Ref methods such as `data()` and `routingData()` also return snapshots; a Ref does not automatically provide zero-copy access. Measure the actual access pattern; internal ranges are not part of the experimental public interface.
 
 ### 5.3 Refs and borrowed lifetime
 
-`NetRef` and `WireRef` are returned by value, but they are not heap objects and do not own entities. They contain a database-state pointer and an ID. Therefore:
+`NetRef` and `WireRef` are returned by value, require no separate heap allocation and do not own entities. They contain a database-state pointer and an ID. Therefore:
 
 - a Ref must not outlive its `Database`;
 - `string_view`, spans, and pool ranges must not cross a mutation that may reallocate or rewrite the underlying storage;
@@ -168,7 +171,7 @@ Binary archives are split by registry domain. Their headers validate magic, form
 
 ## 8. External integration boundary
 
-The stable EccDB library owns the database, LEF/DEF/binary IO, and its own tests. Whether external-tool integration exists and how it is built belongs to the larger project configuration; it is not an EccDB built-in capability.
+The EccDB core storage/IO implementation owns the database, LEF/DEF/binary IO, and its own tests. Whether external-tool integration exists and how it is built belongs to the larger project configuration; it is not an EccDB built-in capability.
 
 - external clients should use `#include <eccdb/eccdb.h>` and `eccdb::Database`;
 - external integration code may use Stores only within its adapter boundary, but Store headers should not leak into the installed API;

@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 
 #include <gtest/gtest.h>
+#include <gtest/gtest-spi.h>
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <any>
+#include <array>
 #include <cerrno>
 #include <cstdint>
 #include <filesystem>
@@ -626,6 +628,8 @@ using RoutedViolationKey = std::tuple<int32_t, int32_t, int32_t, int32_t, int32_
 
 struct RoutedSnapshot
 {
+  // Real and grid bounds, keyed by net name rather than source-specific index.
+  std::map<std::string, std::array<int32_t, 8>> net_bounding_boxes;
   std::vector<RoutedSegmentKey> segments;
   std::vector<RoutedPatchKey> patches;
   std::vector<RoutedViolationKey> violations;
@@ -647,6 +651,12 @@ RoutedSnapshot captureRoutedSnapshot()
   auto& database = RTDM.getDatabase();
   auto& die = database.get_die();
   auto& nets = database.get_net_list();
+  for (auto& net : nets) {
+    auto& bbox = net.get_bounding_box();
+    snapshot.net_bounding_boxes.emplace(net.get_net_name(), std::array<int32_t, 8>{
+        bbox.get_real_ll_x(), bbox.get_real_ll_y(), bbox.get_real_ur_x(), bbox.get_real_ur_y(),
+        bbox.get_grid_ll_x(), bbox.get_grid_ll_y(), bbox.get_grid_ur_x(), bbox.get_grid_ur_y()});
+  }
   auto netName = [&nets](int32_t net_idx) {
     if (net_idx >= 0 && net_idx < static_cast<int32_t>(nets.size())) {
       return nets[net_idx].get_net_name();
@@ -760,6 +770,7 @@ RoutedSnapshot runEnttRoutingOnce(const std::filesystem::path& lef, const std::f
 
 void expectRoutedSnapshotsEqual(const RoutedSnapshot& expected, const RoutedSnapshot& actual)
 {
+  EXPECT_EQ(expected.net_bounding_boxes, actual.net_bounding_boxes);
   EXPECT_EQ(expected.segments, actual.segments);
   EXPECT_EQ(expected.patches, actual.patches);
   EXPECT_EQ(expected.violations, actual.violations);
@@ -989,6 +1000,13 @@ BuiltOrderSnapshot runEnttBuildOnce(const std::filesystem::path& lef, const std:
 void writeRoutedSnapshot(const std::filesystem::path& path, const RoutedSnapshot& snapshot)
 {
   std::ostringstream output;
+  for (const auto& [net, bounds] : snapshot.net_bounding_boxes) {
+    output << "net_bbox\t" << net;
+    for (const auto coordinate : bounds) {
+      output << '\t' << coordinate;
+    }
+    output << '\n';
+  }
   for (const auto& [net, x1, y1, layer1, x2, y2, layer2] : snapshot.segments) {
     output << "segment\t" << net << '\t' << x1 << '\t' << y1 << '\t' << layer1 << '\t' << x2 << '\t' << y2 << '\t' << layer2 << '\n';
   }
@@ -1045,7 +1063,14 @@ RoutedSnapshot readRoutedSnapshot(const std::filesystem::path& path)
         throw std::runtime_error("malformed routed snapshot record in " + path.string());
       }
     };
-    if (fields[0] == "segment") {
+    if (fields[0] == "net_bbox") {
+      requireSize(10);
+      std::array<int32_t, 8> bounds;
+      for (size_t i = 0; i < bounds.size(); ++i) {
+        bounds[i] = std::stoi(fields[i + 2]);
+      }
+      snapshot.net_bounding_boxes.emplace(fields[1], bounds);
+    } else if (fields[0] == "segment") {
       requireSize(8);
       snapshot.segments.emplace_back(fields[1], std::stoi(fields[2]), std::stoi(fields[3]), std::stoi(fields[4]), std::stoi(fields[5]),
                                      std::stoi(fields[6]), std::stoi(fields[7]));
@@ -1275,6 +1300,33 @@ TEST(SelfCheck, TwoIdbWrapsMatch)
   Database right = wrapCurrentSource();
   expectWrappedEqual(left, right);
   dmInst->reset();
+
+  ASSERT_FALSE(right.get_net_list().empty());
+  auto& net = right.get_net_list().front();
+  // A derived cache difference is not an imported geometry difference.
+  net.get_bounding_box().set_real_rect(PlanarRect(-10, -20, 30, 40));
+  EXPECT_TRUE(RTI.compareWrappedDatabase(left, right).empty());
+  ASSERT_FALSE(net.get_pin_list().empty());
+  auto& shapes = net.get_pin_list().front().get_routing_shape_list();
+  ASSERT_FALSE(shapes.empty());
+  shapes.front().set_real_ll_x(shapes.front().get_real_ll_x() + 1);
+  EXPECT_NE(RTI.compareWrappedDatabase(left, right).find("routing_shapes"), std::string::npos);
+}
+
+TEST(SelfCheck, RoutedBoundingBoxesSurviveSnapshotAndDetectDifferences)
+{
+  TemporaryWorkspace workspace;
+  RoutedSnapshot expected;
+  expected.net_bounding_boxes["signal"] = {-10, -20, 30, 40, 1, 2, 3, 4};
+  const auto path = workspace.path("bounds.snapshot");
+  writeRoutedSnapshot(path, expected);
+  auto actual = readRoutedSnapshot(path);
+  expectRoutedSnapshotsEqual(expected, actual);
+  actual.net_bounding_boxes.at("signal")[0] += 1;
+  EXPECT_NONFATAL_FAILURE(expectRoutedSnapshotsEqual(expected, actual), "net_bounding_boxes");
+  actual = expected;
+  actual.net_bounding_boxes.at("signal")[4] += 1;
+  EXPECT_NONFATAL_FAILURE(expectRoutedSnapshotsEqual(expected, actual), "net_bounding_boxes");
 }
 
 TEST(Writeback, NativeEnttMatchesLegacyIdbDefAndRoundTrips)

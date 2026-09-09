@@ -1,21 +1,24 @@
-# EccDB C++ API Usage Guide
+# EccDB Experimental C++ API Usage Notes
 
-Chinese version: [API_Usage.zh-CN.md](API_Usage.zh-CN.md)
+Chinese version: [Experimental_API_Usage.zh-CN.md](Experimental_API_Usage.zh-CN.md)
+
+> **Status: experimental attempt.** This interface explores the public access boundary; it is not a finalized SDK. Types, functions, error semantics, installation/export rules, and ABI may change incompatibly. These notes describe the current prototype without source or binary compatibility promises. Pin a source revision when integrating; see the [integration plan](Integration_Plan.en.md).
 
 ## 1. API Scope
 
-The EccDB public API is the stable access layer above the internal EnTT registries, contiguous pools, and storage classes. External programs only include public `eccdb` headers and do not need to understand EnTT entities, internal components, or how storage is partitioned.
+The EccDB public API is an experimental access layer above the internal EnTT registries, contiguous pools, and storage classes. External programs only include public `eccdb` headers and do not need to understand EnTT entities, internal components, or how storage is partitioned.
 
-The first public API version currently provides:
+The current prototype provides:
 
 - opening a database from LEF/DEF or EccDB binary archives;
-- query and CRUD operations for nets, special nets, instances, instance pins, IO pins, wires, and DEF design vias;
+- query and CRUD operations for nets, special nets, instances, IO pins, wires, and DEF design vias;
+- instance-pin queries and connectivity operations; pins are created/deleted with their instance, with no independent pin CRUD API;
 - pin-to-net connectivity operations;
 - value types for wire paths, points, via placements, and rectangle extensions;
 - DEF and binary export;
 - optional C++ `Ref` convenience handles.
 
-Complete public technology and library query/edit APIs are not available yet. Therefore, the `CellMasterId`, `RoutingLayerId`, `LayerId`, and `TechViaId` values required to create instances, wires, or design vias from scratch normally come from objects in an already imported database. The primary first-version workflow is to import existing LEF/DEF or binary data and then query and edit the design.
+Complete public technology and library query/edit APIs are not available yet. Therefore, the `CellMasterId`, `RoutingLayerId`, `LayerId`, and `TechViaId` values required to create instances, wires, or design vias from scratch normally come from objects in an already imported database. The primary prototype workflow is to import existing LEF/DEF or binary data and then query and edit the design.
 
 ## 2. Include and Link
 
@@ -25,7 +28,7 @@ Use the aggregate public header:
 #include <eccdb/eccdb.h>
 ```
 
-Consume an installed package from CMake with:
+The implementation provides the following experimental CMake export, not a stable installation/ABI contract. Set `CMAKE_PREFIX_PATH` to the installation prefix in a consuming project:
 
 ```cmake
 find_package(EccDB CONFIG REQUIRED)
@@ -81,7 +84,7 @@ eccdb::Config config{
 auto database = eccdb::Database::open(config);
 ```
 
-Technology, library, and design use three binary files because they are related but independent storage domains.
+Technology, library, and design use three binary files because they are related but independent storage domains. `binary_cache` writes a snapshot after successful text import; it does not detect and reuse an existing cache automatically.
 
 ### 3.3 Binary input
 
@@ -97,13 +100,17 @@ auto database = eccdb::Database::open({
 });
 ```
 
+Binary input cannot also specify `binary_cache`, or set `runtime.polygon_mode` to `kRectangularized` to override the archived mode; either request currently throws `std::invalid_argument`. Archive format/schema checks are not a cross-version compatibility promise.
+
+The following operation fragments assume a successfully opened `database`. Adjust example object names to match the input. Include `<utility>`, `<iostream>`, and `<stdexcept>` when using moves, output, and exceptions.
+
 ## 4. IDs, Data, and Refs
 
 The public API has three central type categories:
 
 | Type | Examples | Semantics |
 | --- | --- | --- |
-| Typed ID | `NetId`, `WireId`, `InstanceId` | Identity of a database entity; copyable, comparable, hashable, and suitable for long-term storage |
+| Typed ID | `NetId`, `WireId`, `InstanceId` | Identity of a database entity; copyable, comparable, and hashable; valid only while its database and entity remain alive |
 | Data value | `NetData`, `InstanceData`, `WireRoutingData` | An owning detached snapshot; modifying it does not automatically update the database |
 | Ref handle | `NetRef`, `WireRef`, `InstanceRef` | A non-owning C++ convenience object containing `DatabaseState* + ID` |
 
@@ -122,10 +129,12 @@ if (data) {
 Write the snapshot back explicitly:
 
 ```cpp
-database.updateNet(net_id, *data);
+if (data) {
+  database.updateNet(net_id, *data);
+}
 ```
 
-Every ID belongs to exactly one `Database`. Do not pass a `NetId` from database A to database B. An ID becomes invalid when its entity is destroyed or its owning Database is destroyed.
+Every ID belongs to exactly one `Database`. Do not pass a `NetId` from database A to database B. An ID becomes invalid when its entity is destroyed or its owning Database is destroyed. `if (id)` only checks for a non-sentinel value, not whether the entity still exists; deleting an entity does not rewrite IDs saved by callers. Use `contains(id)` on the originating database to check existence. IDs do not carry a database identity check.
 
 ## 5. Net CRUD
 
@@ -166,7 +175,9 @@ auto signal_data = *database.netData(signal);
 signal_data.weight = 10;
 database.updateNet(signal, std::move(signal_data));
 
-bool removed = database.destroyNet(signal);
+// Delete a separate temporary net; retain signal for the connectivity example.
+auto temporary = database.createNet({.name = "temporary_net"});
+bool removed = database.destroyNet(temporary);
 ```
 
 If a net still has connected pins or owns wires, `destroyNet()` returns `false` and preserves all relationships.
@@ -195,6 +206,9 @@ auto pin_data = database.instancePinData(input);
 Creating an instance automatically materializes its instance pins from the terminals of the referenced `CellMasterId`:
 
 ```cpp
+if (!instance_data) {
+  throw std::runtime_error("example instance u1 was not found");
+}
 eccdb::CellMasterId master = instance_data->master;
 
 eccdb::InstanceId created = database.createInstance({
@@ -215,6 +229,9 @@ eccdb::IoPinId io_pin = database.createIoPin({
     .use = eccdb::SignalUse::kSignal,
 });
 
+if (!database.contains(input) || !database.contains(signal)) {
+  throw std::runtime_error("example pin or net was not found");
+}
 database.connect(io_pin, signal);
 database.connect(input, signal);
 
@@ -292,8 +309,10 @@ eccdb::WireId wire = database.createWire(
 auto metadata = database.wireMetadata(wire);
 auto routing_data = database.wireRoutingData(wire);
 
-routing_data->paths.front().width = 120;
-database.updateWire(wire, *metadata, std::move(*routing_data));
+if (metadata && routing_data && !routing_data->paths.empty()) {
+  routing_data->paths.front().width = 120;
+  database.updateWire(wire, *metadata, std::move(*routing_data));
+}
 
 for (eccdb::WireId id : database.wireIds(ground)) {
   auto wire_data = database.wireRoutingData(id);
@@ -318,7 +337,7 @@ if (net) {
 }
 ```
 
-A Ref is normally just a pointer and an ID returned by value on the stack. It does not require `new` or `delete`, does not own the Database, and must not outlive it. Cross-language bindings and long-lived caches should store typed IDs instead of Refs.
+A Ref is normally just a pointer and an ID returned by value. It does not require `new` or `delete`, does not own the Database, and must not outlive it. Caches may store typed IDs within the same database lifetime. This does not permit reusing IDs across databases, reopened files, or versions.
 
 The `std::string_view` returned by `name()` is a short-lived borrow. Do not use an old view after renaming or updating the object, or after destroying the Database.
 
@@ -343,7 +362,7 @@ for (const eccdb::ImportDiagnostic& diagnostic : database.diagnostics()) {
 ## 10. Errors, Lifetimes, and Concurrency
 
 - For a missing ID, `contains()` returns `false`, Data queries return `std::nullopt`, and Ref queries return an empty handle.
-- Invalid create or update operations normally throw `std::invalid_argument`. Using an invalid Ref throws `std::out_of_range`.
+- Invalid create or update operations normally throw `std::invalid_argument`. While its database state is still alive, checked accessors on an empty Ref or deleted entity throw `std::out_of_range`. After database destruction a Ref is dangling; no access, including a validity check, is protected by this exception behavior.
 - A `destroy*()` result of `false` normally means the object does not exist or is still referenced.
 - IDs are meaningful only within their owning Database. An ID does not currently carry a Database cookie.
 - Refs and views do not own storage and become invalid when the Database is destroyed.
@@ -355,6 +374,7 @@ for (const eccdb::ImportDiagnostic& diagnostic : database.diagnostics()) {
 | Header | Contents |
 | --- | --- |
 | `eccdb/eccdb.h` | Recommended aggregate entry point |
+| `eccdb/db.h` | Compatibility header forwarding to the aggregate entry point |
 | `eccdb/Config.h` | Input, runtime options, and binary file configuration |
 | `eccdb/Types.h` | Typed IDs, basic geometry, and enums |
 | `eccdb/DesignData.h` | Net, instance, and pin snapshots |
