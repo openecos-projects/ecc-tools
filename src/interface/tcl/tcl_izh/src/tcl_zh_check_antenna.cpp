@@ -14,56 +14,25 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
-
+#include "ZHInterface.hpp"
 #include "tcl_util.h"
+#include "tcl_zh.h"
 
 namespace tcl {
 
-#if 1  // zh
-
-class TclZHInsertFiller : public TclCmd
+TclZHCheckAntenna::TclZHCheckAntenna(const char* cmd_name) : TclCmd(cmd_name)
 {
- public:
-  explicit TclZHInsertFiller(const char* cmd_name);
-  ~TclZHInsertFiller() override = default;
+  TclUtil::addOption(this, _config_list);
+}
 
-  unsigned check() override { return 1; };
-
-  unsigned exec() override;
-
- private:
-  std::vector<std::pair<std::string, ValueType>> _config_list;
-};
-
-class TclZHCheckAntenna : public TclCmd
+unsigned TclZHCheckAntenna::exec()
 {
- public:
-  explicit TclZHCheckAntenna(const char* cmd_name);
-  ~TclZHCheckAntenna() override = default;
-
-  unsigned check() override { return 1; };
-
-  unsigned exec() override;
-
- private:
-  std::vector<std::pair<std::string, ValueType>> _config_list;
-};
-
-class TclZHInsertMetal : public TclCmd
-{
- public:
-  explicit TclZHInsertMetal(const char* cmd_name);
-  ~TclZHInsertMetal() override = default;
-
-  unsigned check() override { return 1; };
-
-  unsigned exec() override;
-
- private:
-  std::vector<std::pair<std::string, ValueType>> _config_list;
-};
-
-#endif
+  if (!check()) {
+    return 0;
+  }
+  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
+  ZHI.checkAntenna(config_map);
+  return 1;
+}
 
 }  // namespace tcl
