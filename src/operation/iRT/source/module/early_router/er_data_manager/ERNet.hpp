@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include "EREdge.hpp"
 #include "ERPillar.hpp"
 #include "ERPin.hpp"
 #include "Net.hpp"
@@ -35,6 +36,8 @@ class ERNet
   BoundingBox& get_bounding_box() { return _bounding_box; }
   MTree<LayerCoord>& get_planar_tree() { return _planar_tree; }
   MTree<ERPillar>& get_pillar_tree() { return _pillar_tree; }
+  std::unordered_set<EREdge*>& get_planar_edge_set() { return _planar_edge_set; }
+  std::unordered_set<EREdge*>& get_layer_edge_set() { return _layer_edge_set; }
   // const getter
   const ConnectType& get_connect_type() const { return _connect_type; }
   const std::vector<ERPin>& get_er_pin_list() const { return _er_pin_list; }
@@ -46,7 +49,9 @@ class ERNet
   void set_er_pin_list(const std::vector<ERPin>& er_pin_list) { _er_pin_list = er_pin_list; }
   void set_bounding_box(const BoundingBox& bounding_box) { _bounding_box = bounding_box; }
   void set_planar_tree(const MTree<LayerCoord>& planar_tree) { _planar_tree = planar_tree; }
+  void set_planar_tree(MTree<LayerCoord>&& planar_tree) { _planar_tree = std::move(planar_tree); }
   void set_pillar_tree(const MTree<ERPillar>& pillar_tree) { _pillar_tree = pillar_tree; }
+  void set_pillar_tree(MTree<ERPillar>&& pillar_tree) { _pillar_tree = std::move(pillar_tree); }
   // function
 
  private:
@@ -57,6 +62,8 @@ class ERNet
   BoundingBox _bounding_box;
   MTree<LayerCoord> _planar_tree;
   MTree<ERPillar> _pillar_tree;
+  std::unordered_set<EREdge*> _planar_edge_set;
+  std::unordered_set<EREdge*> _layer_edge_set;
 };
 
 struct CmpERNet
