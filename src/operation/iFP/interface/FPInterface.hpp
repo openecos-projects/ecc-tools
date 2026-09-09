@@ -55,12 +55,9 @@ class FPInterface
 
 #if 1  // iFP
   void initFP(std::map<std::string, std::any> config_map);
+  void runSimpleFP();
   void runFP();
   void destroyFP();
-#endif
-
-#if 1  // debug iFP
-  void debugInputMacro(std::map<std::string, std::any> config_map);
 #endif
 
 #endif
@@ -135,6 +132,7 @@ class FPInterface
   FPInterface& operator=(const FPInterface& other) = delete;
   FPInterface& operator=(FPInterface&& other) = delete;
   // function
+  void inputMacroPlacement(const std::string& macro_place_file_path);
 };
 
 }  // namespace ifp
