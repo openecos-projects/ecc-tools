@@ -1017,6 +1017,68 @@ END LIBRARY
   EXPECT_EQ(trimmed.mask, 1u);
 }
 
+TEST_F(LefTechImporterTest, OwnParserPreservesMultipleWidthTableRulesAndOriginalProperty)
+{
+  const auto lef = writeLef("own-width-tables", R"LEF(
+VERSION 5.8 ;
+UNITS DATABASE MICRONS 1000 ; END UNITS
+PROPERTYDEFINITIONS
+  LAYER LEF58_WIDTHTABLE STRING ;
+END PROPERTYDEFINITIONS
+LAYER M1
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.20 ;
+  WIDTH 0.10 ;
+  PROPERTY LEF58_WIDTHTABLE "WIDTHTABLE 0.10 0.20 WRONGDIRECTION ; WIDTHTABLE 0.30 0.40 ORTHOGONAL ;" ;
+END M1
+END LIBRARY
+)LEF");
+  TechStore database;
+  LefTechImporter importer(database);
+  ASSERT_NO_THROW(importer.import(lef));
+  const auto layer = database.findLayer("M1");
+  const auto rules = database.routingLayerStorage().lef58WidthTableRules(TechRoutingLayerId{layer.entity()});
+  ASSERT_EQ(rules.size(), 2u);
+  const auto& first = database.routingLayerStorage().rule(rules[0]);
+  const auto& second = database.routingLayerStorage().rule(rules[1]);
+  EXPECT_EQ(first.widths, (std::vector<int32_t>{100, 200}));
+  EXPECT_EQ(second.widths, (std::vector<int32_t>{300, 400}));
+  EXPECT_EQ(first.flags, TechRoutingLef58WidthTableRuleFlag::kWrongDirection);
+  EXPECT_EQ(second.flags, TechRoutingLef58WidthTableRuleFlag::kOrthogonal);
+  const auto& properties = database.layerProperties(layer);
+  ASSERT_EQ(properties.size(), 1u);
+  EXPECT_EQ(properties[0].name, "LEF58_WIDTHTABLE");
+  EXPECT_EQ(properties[0].value,
+            "WIDTHTABLE 0.10 0.20 WRONGDIRECTION ; WIDTHTABLE 0.30 0.40 ORTHOGONAL ;");
+}
+
+TEST_F(LefTechImporterTest, OwnParserRejectsTrailingInputWithoutCommittingPartialRules)
+{
+  const auto lef = writeLef("own-invalid-width-tables", R"LEF(
+VERSION 5.8 ;
+UNITS DATABASE MICRONS 1000 ; END UNITS
+PROPERTYDEFINITIONS
+  LAYER LEF58_WIDTHTABLE STRING ;
+END PROPERTYDEFINITIONS
+LAYER M1
+  TYPE ROUTING ;
+  DIRECTION HORIZONTAL ;
+  PITCH 0.20 ;
+  WIDTH 0.10 ;
+  PROPERTY LEF58_WIDTHTABLE "WIDTHTABLE 0.10 0.20 ; WIDTHTABLE ;" ;
+END M1
+END LIBRARY
+)LEF");
+  TechStore database;
+  LefTechImporter importer(database);
+  EXPECT_THROW(importer.import(lef), std::runtime_error);
+  EXPECT_EQ(layerCount(database), 0u);
+  EXPECT_TRUE(database.layerSequence().empty());
+  EXPECT_FALSE(database.globalStorage().hasUnits());
+  EXPECT_EQ(database.techRegistry().registry().storage<TechEntity>().free_list(), 1u);
+}
+
 TEST_F(LefTechImporterTest, DirectlyImportsSky130TechnologyLef)
 {
   const auto lef = std::filesystem::path(ECC_TOOLS_SOURCE_DIR) / "scripts/foundry/sky130/lef/sky130_fd_sc_hd.tlef";

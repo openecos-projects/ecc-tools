@@ -20,17 +20,12 @@ if(TARGET lef)
     detail/LefTechObjects.cpp
   )
   eccdb_storage_target(eccdb_lef_import)
-  target_include_directories(eccdb_lef_import
-    PRIVATE
-      "${ECCDB_ECC_TOOLS_ROOT}/src"
-      "${ECCDB_ECC_TOOLS_ROOT}/src/database/manager/builder/lef_builder"
-  )
+
   target_link_libraries(eccdb_lef_import
     PUBLIC
       eccdb_library
       eccdb_tech_database
     PRIVATE
-      ecc_logger
       lef
   )
 endif()

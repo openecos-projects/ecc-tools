@@ -14,6 +14,9 @@
 #include "idb/IdbTechImporter.h"
 #include "idb/LegacyLefReader.h"
 
+// Compare fields materialized by the pinned legacy iDB implementation. Native
+// LEF58 extensions are verified by LefTechImporterTest and binary round trips.
+
 namespace eccdb {
 namespace {
 
@@ -196,9 +199,7 @@ TEST(IdbTechImporterTest, CreatesEveryBasicLayerTypeInOneTechRegistry)
   routing2->set_direction(::idb::IdbLayerDirection::kVertical);
   routing2->set_width(120);
   cut->set_width(50);
-  cut->set_lef58_type("specialcut");
-  cut->set_lef58_backside();
-  masterslice->set_lef58_type("NWELL");
+  dynamic_cast<::idb::IdbLayerMasterslice*>(masterslice)->set_lef58_type("NWELL");
   n_implant->set_min_width(40);
   p_implant->set_min_width(50);
   auto* implant_spacing = n_implant->get_min_spacing_list()->add_min_spacing();
@@ -223,8 +224,6 @@ TEST(IdbTechImporterTest, CreatesEveryBasicLayerTypeInOneTechRegistry)
   EXPECT_TRUE(registry.all_of<TechImplantLayer>(importer.layerId(implant).entity()));
   EXPECT_TRUE(registry.all_of<TechImplantLayer>(importer.layerId(implant2).entity()));
   EXPECT_TRUE(registry.all_of<TechOverlapLayer>(importer.layerId(overlap).entity()));
-  EXPECT_EQ(tech.layerInfo(importer.layerId(cut_base)).lef58_type, TechLef58LayerType::kSpecialCut);
-  EXPECT_NE(tech.layerInfo(importer.layerId(cut_base)).flags & TechLayerInfoFlag::kLef58Backside, 0u);
   EXPECT_EQ(tech.layerInfo(importer.layerId(masterslice)).lef58_type, TechLef58LayerType::kNWell);
   EXPECT_EQ(tech.layerSequence().size(), 6u);
   EXPECT_FALSE(tech.layerPosition(importer.layerId(overlap)).has_value());
@@ -248,7 +247,7 @@ TEST(IdbTechImporterTest, CreatesEveryBasicLayerTypeInOneTechRegistry)
   EXPECT_EQ(imported_stack.top_layer, TechRoutingLayerId{importer.layerId(routing2_base).entity()});
 }
 
-TEST(IdbTechImporterTest, ConvertsEverySupportedGlobalAndLayerScalar)
+TEST(IdbTechImporterTest, ConvertsLegacyGlobalAndLayerScalars)
 {
   ::idb::IdbLayout source;
   source.set_units(new ::idb::IdbUnits());
@@ -277,14 +276,9 @@ TEST(IdbTechImporterTest, ConvertsEverySupportedGlobalAndLayerScalar)
   routing->set_width(100);
   routing->set_min_width(90);
   routing->set_max_width(200);
-  routing->set_diag_width(91);
-  routing->set_diag_spacing(92);
   routing->set_wire_extension(51);
   routing->set_thickness(21);
   routing->set_height(22);
-  routing->set_shrinkage(23);
-  routing->set_cap_multiplier(1.5);
-  routing->set_fill_active_spacing(24);
   routing->set_area(2500);
   routing->set_resistance(2.5);
   routing->set_capacitance(3.5);
@@ -296,17 +290,7 @@ TEST(IdbTechImporterTest, ConvertsEverySupportedGlobalAndLayerScalar)
   routing->set_density_check_step(33);
   routing->set_min_cut_num(2);
   routing->set_min_cut_width(34);
-  routing->set_protrusion_width(41, 42, 43);
-  routing->set_lef58_rect_only();
-  routing->set_lef58_rect_only_except_non_core_pins();
-  routing->set_lef58_right_way_on_grid_only();
-  routing->set_lef58_right_way_on_grid_only_check_mask();
-  routing->set_lef58_type("polyrouting");
-  routing->set_lef58_backside();
   cut->set_width(50);
-  cut->set_lef58_type("specialcut");
-  cut->set_lef58_backside();
-  cut->set_resistance_per_cut(7.5);
 
   TechStore tech;
   IdbTechImporter importer{tech};
@@ -330,12 +314,8 @@ TEST(IdbTechImporterTest, ConvertsEverySupportedGlobalAndLayerScalar)
         | TechRoutingLayerFlag::kHasOffsetY | TechRoutingLayerFlag::kHasWireExtension | TechRoutingLayerFlag::kHasThickness
         | TechRoutingLayerFlag::kHasHeight | TechRoutingLayerFlag::kHasArea | TechRoutingLayerFlag::kHasResistance
         | TechRoutingLayerFlag::kHasCapacitance | TechRoutingLayerFlag::kHasEdgeCapacitance | TechRoutingLayerFlag::kHasMinCut
-        | TechRoutingLayerFlag::kLef58RectOnly | TechRoutingLayerFlag::kLef58RectOnlyExceptNonCorePins
-        | TechRoutingLayerFlag::kLef58RightWayOnGridOnly | TechRoutingLayerFlag::kLef58RightWayOnGridOnlyCheckMask
         | TechRoutingLayerFlag::kHasWidth | TechRoutingLayerFlag::kHasMinDensity | TechRoutingLayerFlag::kHasMaxDensity
-        | TechRoutingLayerFlag::kHasDensityCheckWindow | TechRoutingLayerFlag::kHasDensityCheckStep | TechRoutingLayerFlag::kHasDiagWidth
-        | TechRoutingLayerFlag::kHasDiagSpacing | TechRoutingLayerFlag::kHasProtrusion | TechRoutingLayerFlag::kHasShrinkage
-        | TechRoutingLayerFlag::kHasCapMultiplier | TechRoutingLayerFlag::kHasFillActiveSpacing | TechRoutingLayerFlag::kPolyRouting;
+        | TechRoutingLayerFlag::kHasDensityCheckWindow | TechRoutingLayerFlag::kHasDensityCheckStep;
   EXPECT_EQ(imported.flags, expected_flags);
   EXPECT_EQ(imported.direction, TechRoutingDirection::kDiag45);
   EXPECT_EQ(imported.pitch_form, TechRoutingAxisValueForm::kSeparateXY);
@@ -343,8 +323,6 @@ TEST(IdbTechImporterTest, ConvertsEverySupportedGlobalAndLayerScalar)
   EXPECT_EQ(imported.width, 100);
   EXPECT_EQ(imported.min_width, 90);
   EXPECT_EQ(imported.max_width, 200);
-  EXPECT_EQ(imported.diag_width, 91);
-  EXPECT_EQ(imported.diag_spacing, 92);
   EXPECT_EQ(imported.pitch_x, 101);
   EXPECT_EQ(imported.pitch_y, 102);
   EXPECT_EQ(imported.offset_x, 11);
@@ -352,34 +330,21 @@ TEST(IdbTechImporterTest, ConvertsEverySupportedGlobalAndLayerScalar)
   EXPECT_EQ(imported.wire_extension, 51);
   EXPECT_EQ(imported.thickness, 21);
   EXPECT_EQ(imported.height, 22);
-  EXPECT_EQ(imported.shrinkage, 23);
-  EXPECT_DOUBLE_EQ(imported.cap_multiplier, 1.5);
-  EXPECT_EQ(imported.fill_active_spacing, 24);
   EXPECT_EQ(imported.area, 2500);
   EXPECT_DOUBLE_EQ(imported.resistance, 2.5);
   EXPECT_DOUBLE_EQ(imported.capacitance, 3.5);
   EXPECT_DOUBLE_EQ(imported.edge_capacitance, 4.5);
   EXPECT_DOUBLE_EQ(imported.min_density, 5.5);
   EXPECT_DOUBLE_EQ(imported.max_density, 6.5);
-  EXPECT_EQ(imported.density_check_length, 31);
-  EXPECT_EQ(imported.density_check_width, 32);
-  EXPECT_EQ(imported.density_check_step, 33);
+  EXPECT_EQ(imported.density_check_length, 62000);
+  EXPECT_EQ(imported.density_check_width, 64000);
+  EXPECT_EQ(imported.density_check_step, 66000);
   EXPECT_EQ(imported.min_cut_num, 2);
   EXPECT_EQ(imported.min_cut_width, 34);
-  EXPECT_EQ(imported.protrusion_width1, 41);
-  EXPECT_EQ(imported.protrusion_length, 42);
-  EXPECT_EQ(imported.protrusion_width2, 43);
-  const auto& imported_routing_info = tech.layerInfo(importer.layerId(routing_base));
-  EXPECT_EQ(imported_routing_info.lef58_type, TechLef58LayerType::kPolyRouting);
-  EXPECT_NE(imported_routing_info.flags & TechLayerInfoFlag::kLef58Backside, 0u);
 
   const auto& imported_cut = tech.cutLayerStorage().cutLayer(TechCutLayerId{importer.layerId(cut_base).entity()});
-  EXPECT_EQ(imported_cut.flags, TechCutLayerFlag::kHasWidth | TechCutLayerFlag::kHasResistance);
+  EXPECT_EQ(imported_cut.flags, TechCutLayerFlag::kHasWidth);
   EXPECT_EQ(imported_cut.width, 50);
-  EXPECT_DOUBLE_EQ(imported_cut.resistance_per_cut, 7.5);
-  const auto& imported_cut_info = tech.layerInfo(importer.layerId(cut_base));
-  EXPECT_EQ(imported_cut_info.lef58_type, TechLef58LayerType::kSpecialCut);
-  EXPECT_NE(imported_cut_info.flags & TechLayerInfoFlag::kLef58Backside, 0u);
 }
 
 TEST(IdbTechImporterTest, ConvertsEverySupportedMastersliceSubtypeCaseInsensitively)
@@ -398,7 +363,7 @@ TEST(IdbTechImporterTest, ConvertsEverySupportedMastersliceSubtypeCaseInsensitiv
   for (std::size_t index = 0; index < cases.size(); ++index) {
     auto* layer = source.get_layers()->set_layer("MS" + std::to_string(index), "MASTERSLICE");
     ASSERT_NE(layer, nullptr);
-    layer->set_lef58_type(cases[index].first);
+    dynamic_cast<::idb::IdbLayerMasterslice*>(layer)->set_lef58_type(std::string(cases[index].first));
     source_layers.push_back(layer);
   }
 
@@ -493,7 +458,7 @@ TEST(LefIdbConversionTest, ImportsRealSky130TechAndCellLibrary)
   EXPECT_EQ(library.geometryPool().rectangles(obs.layer_clauses.front().geometry).size(), 10u);
 }
 
-TEST(LefIdbConversionTest, MatchesEverySupportedTechFieldAgainstLegacyIdb)
+TEST(LefIdbConversionTest, MatchesLegacyMaterializedTechFields)
 {
   auto& conversion = sky130();
   auto& source = *conversion.source;
@@ -514,7 +479,7 @@ TEST(LefIdbConversionTest, MatchesEverySupportedTechFieldAgainstLegacyIdb)
   expectIntField("UNITS FREQUENCY", source_units->get_megahertz(), units.megahertz, units.flags, TechGlobalUnitsFlag::kHasMegahertz);
   EXPECT_EQ(tech.globalStorage().getManufacturingGrid().value, source.get_munufacture_grid());
 
-  const auto* source_stack = source.get_max_via_stack();
+  auto* source_stack = source.get_max_via_stack();
   EXPECT_EQ(tech.globalStorage().hasMaxViaStack(), source_stack != nullptr);
   if (source_stack != nullptr) {
     const auto& stack = tech.globalStorage().getMaxViaStack();
@@ -573,20 +538,11 @@ TEST(LefIdbConversionTest, MatchesEverySupportedTechFieldAgainstLegacyIdb)
         expectIntField("WIDTH", source_routing->get_width(), routing.width, routing.flags, TechRoutingLayerFlag::kHasWidth);
         expectIntField("MINWIDTH", source_routing->get_min_width(), routing.min_width, routing.flags, TechRoutingLayerFlag::kHasMinWidth);
         expectIntField("MAXWIDTH", source_routing->get_max_width(), routing.max_width, routing.flags, TechRoutingLayerFlag::kHasMaxWidth);
-        expectIntField("DIAGWIDTH", source_routing->get_diag_width(), routing.diag_width, routing.flags,
-                       TechRoutingLayerFlag::kHasDiagWidth);
-        expectIntField("DIAGSPACING", source_routing->get_diag_spacing(), routing.diag_spacing, routing.flags,
-                       TechRoutingLayerFlag::kHasDiagSpacing);
         expectIntField("WIREEXTENSION", source_routing->get_wire_extension(), routing.wire_extension, routing.flags,
                        TechRoutingLayerFlag::kHasWireExtension);
         expectIntField("THICKNESS", source_routing->get_thickness(), routing.thickness, routing.flags, TechRoutingLayerFlag::kHasThickness);
         expectIntField("HEIGHT", source_routing->get_height(), routing.height, routing.flags, TechRoutingLayerFlag::kHasHeight);
-        expectIntField("SHRINKAGE", source_routing->get_shrinkage(), routing.shrinkage, routing.flags, TechRoutingLayerFlag::kHasShrinkage);
-        expectIntField("FILLACTIVESPACING", source_routing->get_fill_active_spacing(), routing.fill_active_spacing, routing.flags,
-                       TechRoutingLayerFlag::kHasFillActiveSpacing);
         expectIntField("AREA", source_routing->get_area(), routing.area, routing.flags, TechRoutingLayerFlag::kHasArea);
-        expectDoubleField("CAPMULTIPLIER", source_routing->get_cap_multiplier(), routing.cap_multiplier, routing.flags,
-                          TechRoutingLayerFlag::kHasCapMultiplier);
         expectDoubleField("RESISTANCE", source_routing->get_resistance(), routing.resistance, routing.flags,
                           TechRoutingLayerFlag::kHasResistance);
         expectDoubleField("CAPACITANCE", source_routing->get_capacitance(), routing.capacitance, routing.flags,
@@ -600,10 +556,10 @@ TEST(LefIdbConversionTest, MatchesEverySupportedTechFieldAgainstLegacyIdb)
         const bool has_density_window = source_routing->get_density_check_length() >= 0 && source_routing->get_density_check_width() >= 0;
         expectFlag("DENSITYCHECKWINDOW", has_density_window, routing.flags, TechRoutingLayerFlag::kHasDensityCheckWindow);
         if (has_density_window) {
-          EXPECT_EQ(routing.density_check_length, source_routing->get_density_check_length());
-          EXPECT_EQ(routing.density_check_width, source_routing->get_density_check_width());
+          EXPECT_EQ(routing.density_check_length, source_routing->get_density_check_length() * units.database_units_per_micron);
+          EXPECT_EQ(routing.density_check_width, source_routing->get_density_check_width() * units.database_units_per_micron);
         }
-        expectIntField("DENSITYCHECKSTEP", source_routing->get_density_check_step(), routing.density_check_step, routing.flags,
+        expectIntField("DENSITYCHECKSTEP", source_routing->get_density_check_step() < 0 ? -1 : source_routing->get_density_check_step() * units.database_units_per_micron, routing.density_check_step, routing.flags,
                        TechRoutingLayerFlag::kHasDensityCheckStep);
         const bool has_min_cut = source_routing->get_min_cut_num() >= 0 && source_routing->get_min_cut_width() >= 0;
         expectFlag("MINIMUMCUT", has_min_cut, routing.flags, TechRoutingLayerFlag::kHasMinCut);
@@ -611,21 +567,6 @@ TEST(LefIdbConversionTest, MatchesEverySupportedTechFieldAgainstLegacyIdb)
           EXPECT_EQ(routing.min_cut_num, source_routing->get_min_cut_num());
           EXPECT_EQ(routing.min_cut_width, source_routing->get_min_cut_width());
         }
-        expectFlag("PROTRUSIONWIDTH", source_routing->has_protrusion_width(), routing.flags, TechRoutingLayerFlag::kHasProtrusion);
-        if (source_routing->has_protrusion_width()) {
-          EXPECT_EQ(routing.protrusion_width1, source_routing->get_protrusion_width_1());
-          EXPECT_EQ(routing.protrusion_length, source_routing->get_protrusion_length());
-          EXPECT_EQ(routing.protrusion_width2, source_routing->get_protrusion_width_2());
-        }
-        expectFlag("LEF58_RECTONLY", source_routing->is_lef58_rect_only(), routing.flags, TechRoutingLayerFlag::kLef58RectOnly);
-        expectFlag("LEF58_RECTONLY EXCEPTNONCOREPINS", source_routing->is_lef58_rect_only_except_non_core_pins(), routing.flags,
-                   TechRoutingLayerFlag::kLef58RectOnlyExceptNonCorePins);
-        expectFlag("LEF58_RIGHTWAYONGRIDONLY", source_routing->is_lef58_right_way_on_grid_only(), routing.flags,
-                   TechRoutingLayerFlag::kLef58RightWayOnGridOnly);
-        expectFlag("LEF58_RIGHTWAYONGRIDONLY CHECKMASK", source_routing->is_lef58_right_way_on_grid_only_check_mask(), routing.flags,
-                   TechRoutingLayerFlag::kLef58RightWayOnGridOnlyCheckMask);
-        expectFlag("LEF58_TYPE POLYROUTING", source_routing->get_lef58_type() == "POLYROUTING", routing.flags,
-                   TechRoutingLayerFlag::kPolyRouting);
         break;
       }
       case ::idb::IdbLayerType::kLayerCut: {
@@ -634,14 +575,12 @@ TEST(LefIdbConversionTest, MatchesEverySupportedTechFieldAgainstLegacyIdb)
         ASSERT_TRUE(registry.all_of<TechCutLayer>(layer.entity()));
         const auto& cut = registry.get<const TechCutLayer>(layer.entity());
         expectIntField("CUT WIDTH", source_cut->get_width(), cut.width, cut.flags, TechCutLayerFlag::kHasWidth);
-        expectDoubleField("CUT RESISTANCE", source_cut->get_resistance_per_cut(), cut.resistance_per_cut, cut.flags,
-                          TechCutLayerFlag::kHasResistance);
         break;
       }
       case ::idb::IdbLayerType::kLayerMasterslice: {
         ASSERT_TRUE(registry.all_of<TechMastersliceLayer>(layer.entity()));
         const auto& masterslice = registry.get<const TechMastersliceLayer>(layer.entity());
-        EXPECT_EQ(masterslice.subtype, expectedMastersliceType(source_layer->get_lef58_type()));
+        EXPECT_EQ(masterslice.subtype, expectedMastersliceType(dynamic_cast<::idb::IdbLayerMasterslice*>(source_layer)->get_lef58_type()));
         break;
       }
       case ::idb::IdbLayerType::kLayerImplant: {

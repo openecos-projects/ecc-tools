@@ -6,10 +6,17 @@ else()
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
-add_library(idrc_interface
+set(_idrc_interface_sources
     ${IDRC_INTERFACE}/DRCInterface.cpp
-    ${PROJECT_SOURCE_DIR}/src/database/eccdb/adapters/idrc/DRCInterfaceEnTT.cpp
 )
+
+if(TARGET eccdb_design)
+    list(APPEND _idrc_interface_sources
+        ${PROJECT_SOURCE_DIR}/src/database/eccdb/adapters/idrc/DRCInterfaceEnTT.cpp
+    )
+endif()
+
+add_library(idrc_interface ${_idrc_interface_sources})
 
 target_link_libraries(idrc_interface
     PRIVATE

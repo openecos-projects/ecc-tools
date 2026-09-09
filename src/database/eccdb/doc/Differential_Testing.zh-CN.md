@@ -37,6 +37,34 @@
 
 DEF 结构快照当前比较 component 数量以及 global、row、track grid、gcell grid、instance、instance pin、IO pin、design VIA、NDR、regular/special net、region、group、blockage 和 fill。路由比较还会逐 net 检查 wire/path primitive、point/via/rectangle 附加信息和展开后的几何。LEF 差分按名称定位 technology layer、VIA/VIA rule、NDR、site、macro、term、port 和 obstruction，再比较已物化字段与几何。
 
+### 原生 parser 与 legacy iDB 的边界
+
+原生读入链路是 `SI2 lefr/defr → EccDB importer → EccDB Storage`，不经过 iDB 对象。
+LEF58 字符串的临时语法类型和解析器归 EccDB 自己所有，位于
+[`io/lef/detail/parser`](../io/lef/detail/parser/README.md)；解析后再换算 DBU、检查并提交规则。
+`io/idb` 是独立的旧对象转换路径，不是原生 LEF/DEF importer 的前置步骤。
+
+legacy 差分只检查旧 iDB 实际物化的交集，不能作为 EccDB 全字段覆盖的证明：
+
+| 字段/规则 | 旧 iDB 的实际行为 | 当前验证方式 |
+| --- | --- | --- |
+| VIA、VIARULE、NDR、layer/library 核心字段和矩形 | 有对应对象 | 保留转换与路径差分 |
+| Routing/Cut 的 TYPE、BACKSIDE，RECTONLY、RIGHTWAYONGRIDONLY 等扩展 | 没有相应字段；MASTERSLICE TYPE 除外 | 原生 importer/exporter、binary 测试 |
+| 电流密度、WIDTHTABLE、INFLUENCE、TWOWIDTHS、ORTHOGONAL、LEF58 PRL table | 没有相应物化 | 原生测试；不要求 adapter 生成不存在的旧对象 |
+| AREA、MINSTEP、EOL、CUT spacing/enclosure 的扩展限定符 | 只保留部分限定符 | 按旧 getter 对应字段比较；原生测试保留扩展断言 |
+| 原生 MINIMUMCUT | 旧 `lef_read.cpp` 的读取被注释；内存对象仍有 count/width 标量 | 文件路径不声称覆盖；adapter 仍转换调用方手动设置的标量 |
+| 原生 ENCLOSURE | 只保留最后的 ABOVE；无方向规则丢失；BELOW 重复写 overhang1，overhang2 未设置 | 比较最后的 ABOVE；不伪造丢失值 |
+| DENSITYCHECKWINDOW / DENSITYCHECKSTEP | 保存整数微米，而不是 DBU | adapter 换算为 DBU；小数精度已丢失，不能恢复 |
+| LEF58 MINIMUMCUT AREA | 旧 parser 错用了长度单位换算 | adapter 补一次 DBU 因子；不保证恢复旧 parser 已损失的精度 |
+
+全语料测试还独立核对旧 iDB 源对象中 LEF58 规则与 adapter 输出的数量，避免因为 adapter 漏规则而产生空集合“通过”。
+这些检查仍有边界：不验证 iDB 没有保存的字段，也不代表完整 LEF/DEF 5.8 语法覆盖。
+
+可通过以下配置单独验证原生 importer 不依赖旧 iDB：
+`-DECCDB_STANDALONE_LEF_DEF=ON -DECCDB_STANDALONE_LEGACY_IDB=OFF`。
+运行 legacy 差分时再把后一个选项设为 `ON`。
+
+
 ## 3. 构建依赖
 
 独立 EccDB 差分构建需要：

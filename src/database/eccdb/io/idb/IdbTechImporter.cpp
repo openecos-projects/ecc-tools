@@ -193,21 +193,6 @@ CutDirection cutDirection(const std::string& source)
   return CutDirection::kUnknown;
 }
 
-TechRoutingMinStepType routingLef58MinStepType(::idb::routinglayer::Lef58MinStep::Type source)
-{
-  switch (source) {
-    case ::idb::routinglayer::Lef58MinStep::Type::kInsideCorner:
-      return TechRoutingMinStepType::kInsideCorner;
-    case ::idb::routinglayer::Lef58MinStep::Type::kOutsideCorner:
-      return TechRoutingMinStepType::kOutsideCorner;
-    case ::idb::routinglayer::Lef58MinStep::Type::kStep:
-      return TechRoutingMinStepType::kStep;
-    case ::idb::routinglayer::Lef58MinStep::Type::kNone:
-      return TechRoutingMinStepType::kNone;
-  }
-  return TechRoutingMinStepType::kNone;
-}
-
 TechRoutingMinimumCutOrient routingLef58MinimumCutOrient(::idb::routinglayer::Lef58MinimumCut::Orient source)
 {
   switch (source) {
@@ -304,7 +289,7 @@ TechGlobalUnits importUnits(const ::idb::IdbUnits& source)
   return target;
 }
 
-TechRoutingLayer importRoutingLayer(::idb::IdbLayerRouting& source)
+TechRoutingLayer importRoutingLayer(::idb::IdbLayerRouting& source, int32_t dbu)
 {
   TechRoutingLayer target;
   target.direction = routingDirection(source.get_direction());
@@ -322,14 +307,6 @@ TechRoutingLayer importRoutingLayer(::idb::IdbLayerRouting& source)
   if (source.get_max_width() >= 0) {
     target.flags |= TechRoutingLayerFlag::kHasMaxWidth;
     target.max_width = source.get_max_width();
-  }
-  if (source.get_diag_width() >= 0) {
-    target.flags |= TechRoutingLayerFlag::kHasDiagWidth;
-    target.diag_width = source.get_diag_width();
-  }
-  if (source.get_diag_spacing() >= 0) {
-    target.flags |= TechRoutingLayerFlag::kHasDiagSpacing;
-    target.diag_spacing = source.get_diag_spacing();
   }
   if (target.pitch_form != TechRoutingAxisValueForm::kNone) {
     target.pitch_x = source.get_pitch_x();
@@ -357,18 +334,6 @@ TechRoutingLayer importRoutingLayer(::idb::IdbLayerRouting& source)
     target.flags |= TechRoutingLayerFlag::kHasHeight;
     target.height = source.get_height();
   }
-  if (source.get_shrinkage() >= 0) {
-    target.flags |= TechRoutingLayerFlag::kHasShrinkage;
-    target.shrinkage = source.get_shrinkage();
-  }
-  if (source.get_cap_multiplier() >= 0.0) {
-    target.flags |= TechRoutingLayerFlag::kHasCapMultiplier;
-    target.cap_multiplier = source.get_cap_multiplier();
-  }
-  if (source.get_fill_active_spacing() >= 0) {
-    target.flags |= TechRoutingLayerFlag::kHasFillActiveSpacing;
-    target.fill_active_spacing = source.get_fill_active_spacing();
-  }
   if (source.get_area() >= 0) {
     target.flags |= TechRoutingLayerFlag::kHasArea;
     target.area = source.get_area();
@@ -393,40 +358,20 @@ TechRoutingLayer importRoutingLayer(::idb::IdbLayerRouting& source)
     target.flags |= TechRoutingLayerFlag::kHasMaxDensity;
     target.max_density = source.get_max_density();
   }
+  // Legacy lef_read stores density dimensions as integer microns, unlike other lengths.
   if (source.get_density_check_length() >= 0 && source.get_density_check_width() >= 0) {
     target.flags |= TechRoutingLayerFlag::kHasDensityCheckWindow;
-    target.density_check_length = source.get_density_check_length();
-    target.density_check_width = source.get_density_check_width();
+    target.density_check_length = checkedCoordinate(int64_t{source.get_density_check_length()} * dbu, "legacy density check DBU");
+    target.density_check_width = checkedCoordinate(int64_t{source.get_density_check_width()} * dbu, "legacy density check DBU");
   }
   if (source.get_density_check_step() >= 0) {
     target.flags |= TechRoutingLayerFlag::kHasDensityCheckStep;
-    target.density_check_step = source.get_density_check_step();
+    target.density_check_step = checkedCoordinate(int64_t{source.get_density_check_step()} * dbu, "legacy density check DBU");
   }
   if (source.get_min_cut_num() >= 0 && source.get_min_cut_width() >= 0) {
     target.flags |= TechRoutingLayerFlag::kHasMinCut;
     target.min_cut_num = source.get_min_cut_num();
     target.min_cut_width = source.get_min_cut_width();
-  }
-  if (source.has_protrusion_width()) {
-    target.flags |= TechRoutingLayerFlag::kHasProtrusion;
-    target.protrusion_width1 = source.get_protrusion_width_1();
-    target.protrusion_length = source.get_protrusion_length();
-    target.protrusion_width2 = source.get_protrusion_width_2();
-  }
-  if (source.is_lef58_rect_only()) {
-    target.flags |= TechRoutingLayerFlag::kLef58RectOnly;
-  }
-  if (source.is_lef58_rect_only_except_non_core_pins()) {
-    target.flags |= TechRoutingLayerFlag::kLef58RectOnlyExceptNonCorePins;
-  }
-  if (source.is_lef58_right_way_on_grid_only()) {
-    target.flags |= TechRoutingLayerFlag::kLef58RightWayOnGridOnly;
-  }
-  if (source.is_lef58_right_way_on_grid_only_check_mask()) {
-    target.flags |= TechRoutingLayerFlag::kLef58RightWayOnGridOnlyCheckMask;
-  }
-  if (upper(source.get_lef58_type()) == "POLYROUTING") {
-    target.flags |= TechRoutingLayerFlag::kPolyRouting;
   }
   return target;
 }
@@ -437,10 +382,6 @@ TechCutLayer importCutLayer(::idb::IdbLayerCut& source)
   if (source.get_width() >= 0) {
     target.flags |= TechCutLayerFlag::kHasWidth;
     target.width = source.get_width();
-  }
-  if (source.get_resistance_per_cut() >= 0.0) {
-    target.flags |= TechCutLayerFlag::kHasResistance;
-    target.resistance_per_cut = source.get_resistance_per_cut();
   }
   return target;
 }
@@ -460,50 +401,7 @@ TechRoutingMinStepType routingMinStepType(::idb::IdbMinStep::Type source)
   return TechRoutingMinStepType::kNone;
 }
 
-TechRoutingMinimumCutOrient routingMinimumCutOrient(::idb::IdbLayerMinimumCut::Orient source)
-{
-  switch (source) {
-    case ::idb::IdbLayerMinimumCut::Orient::kFromAbove:
-      return TechRoutingMinimumCutOrient::kFromAbove;
-    case ::idb::IdbLayerMinimumCut::Orient::kFromBelow:
-      return TechRoutingMinimumCutOrient::kFromBelow;
-    case ::idb::IdbLayerMinimumCut::Orient::kNone:
-      return TechRoutingMinimumCutOrient::kNone;
-  }
-  return TechRoutingMinimumCutOrient::kNone;
-}
-
-TechRoutingCurrentDensityType routingCurrentDensityType(::idb::IdbRoutingCurrentDensity::Type source)
-{
-  switch (source) {
-    case ::idb::IdbRoutingCurrentDensity::Type::kPeak:
-      return TechRoutingCurrentDensityType::kPeak;
-    case ::idb::IdbRoutingCurrentDensity::Type::kAverage:
-      return TechRoutingCurrentDensityType::kAverage;
-    case ::idb::IdbRoutingCurrentDensity::Type::kRms:
-      return TechRoutingCurrentDensityType::kRms;
-    case ::idb::IdbRoutingCurrentDensity::Type::kUnknown:
-      return TechRoutingCurrentDensityType::kUnknown;
-  }
-  return TechRoutingCurrentDensityType::kUnknown;
-}
-
-TechCutCurrentDensityType cutCurrentDensityType(::idb::IdbCutCurrentDensity::Type source)
-{
-  switch (source) {
-    case ::idb::IdbCutCurrentDensity::Type::kPeak:
-      return TechCutCurrentDensityType::kPeak;
-    case ::idb::IdbCutCurrentDensity::Type::kAverage:
-      return TechCutCurrentDensityType::kAverage;
-    case ::idb::IdbCutCurrentDensity::Type::kRms:
-      return TechCutCurrentDensityType::kRms;
-    case ::idb::IdbCutCurrentDensity::Type::kUnknown:
-      return TechCutCurrentDensityType::kUnknown;
-  }
-  return TechCutCurrentDensityType::kUnknown;
-}
-
-void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId owner, ::idb::IdbLayerRouting& source)
+void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId owner, ::idb::IdbLayerRouting& source, int32_t dbu)
 {
   for (const auto* source_rule : source.get_spacing_list()->get_spacing_list()) {
     if (source_rule == nullptr) {
@@ -536,14 +434,6 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
   for (const auto& source_rule : source.get_lef58_area()) {
     if (source_rule == nullptr) continue;
     TechRoutingLef58AreaRule rule{.min_area = source_rule->get_min_area()};
-    if (const auto value = source_rule->get_mask()) {
-      rule.flags |= TechRoutingLef58AreaRuleFlag::kHasMask;
-      rule.mask = *value;
-    }
-    if (const auto value = source_rule->get_except_min_width()) {
-      rule.flags |= TechRoutingLef58AreaRuleFlag::kHasExceptMinWidth;
-      rule.except_min_width = *value;
-    }
     if (const auto value = source_rule->get_except_edge_length(); value != nullptr) {
       rule.flags |= TechRoutingLef58AreaRuleFlag::kHasExceptEdgeLength;
       rule.except_max_edge_length = value->get_max_edge_length();
@@ -554,24 +444,6 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
     }
     for (const auto& size : source_rule->get_except_min_size()) {
       rule.except_min_sizes.push_back({.min_width = size.get_min_width(), .min_length = size.get_min_length()});
-    }
-    if (const auto value = source_rule->get_except_step()) {
-      rule.flags |= TechRoutingLef58AreaRuleFlag::kHasExceptStep;
-      rule.except_step_x = value->get_step_x();
-      rule.except_step_y = value->get_step_y();
-    }
-    if (const auto value = source_rule->get_rect_width()) {
-      rule.flags |= TechRoutingLef58AreaRuleFlag::kHasRectWidth;
-      rule.rect_width = *value;
-    }
-    if (source_rule->is_except_rectangle()) rule.flags |= TechRoutingLef58AreaRuleFlag::kExceptRectangle;
-    if (!source_rule->get_trim_layer().empty()) {
-      rule.flags |= TechRoutingLef58AreaRuleFlag::kHasTrimLayer;
-      rule.trim_layer_name = source_rule->get_trim_layer();
-    }
-    if (const auto value = source_rule->get_overlap()) {
-      rule.flags |= TechRoutingLef58AreaRuleFlag::kHasOverlap;
-      rule.overlap = *value;
     }
     static_cast<void>(storage.addLef58AreaRule(owner, std::move(rule)));
   }
@@ -595,9 +467,6 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
     if (source_rule->get_except_eol()) {
       rule.flags |= TechRoutingLef58CornerSpacingRuleFlag::kHasExceptEol;
       rule.except_eol = *source_rule->get_except_eol();
-    }
-    if (source_rule->is_corner_to_corner()) {
-      rule.flags |= TechRoutingLef58CornerSpacingRuleFlag::kCornerToCorner;
     }
     for (const auto& item : source_rule->get_width_spacing_list()) {
       rule.width_spacings.push_back({.width = item.get_width(), .spacing = item.get_spacing()});
@@ -630,7 +499,9 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
     }
     if (const auto value = source_rule->get_area()) {
       rule.flags |= TechRoutingLef58MinimumCutRuleFlag::kHasArea;
-      rule.area = value->get_area();
+      // The legacy property parser incorrectly uses transUnitDB for AREA.
+      // Restore squared DBU here; precision already lost by iDB cannot be recovered.
+      rule.area = int64_t{value->get_area()} * dbu;
       if (const auto distance = value->get_within_distance()) {
         rule.flags |= TechRoutingLef58MinimumCutRuleFlag::kHasAreaWithinDistance;
         rule.area_within_distance = *distance;
@@ -643,70 +514,21 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
 
   for (const auto& source_rule : source.get_lef58_min_step()) {
     if (source_rule == nullptr) continue;
-    TechRoutingLef58MinStepRule rule{.type = routingLef58MinStepType(source_rule->get_type()),
-                                     .min_step_length = source_rule->get_min_step_length()};
-    if (source_rule->get_type() != ::idb::routinglayer::Lef58MinStep::Type::kNone) {
-      rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasType;
-    }
-    if (const auto value = source_rule->get_max_length_sum()) {
-      rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasMaxLengthSum;
-      rule.max_length_sum = *value;
-    }
+    TechRoutingLef58MinStepRule rule{.min_step_length = source_rule->get_min_step_length()};
     if (const auto value = source_rule->get_max_edges()) {
       rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasMaxEdges;
       rule.max_edges = static_cast<uint32_t>(*value);
     }
-    if (source_rule->is_except_rectangle()) rule.flags |= TechRoutingLef58MinStepRuleFlag::kExceptRectangle;
     if (const auto value = source_rule->get_min_adjacent_length()) {
       rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasMinAdjacentLength;
       rule.min_adjacent_length = value->get_min_adj_length();
-      if (const auto second = value->get_min_adj_length2()) {
-        rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasSecondMinAdjacentLength;
-        rule.min_adjacent_length2 = *second;
-      }
       if (value->is_convex_corner()) rule.flags |= TechRoutingLef58MinStepRuleFlag::kConvexCorner;
-      if (value->is_concave_corner()) rule.flags |= TechRoutingLef58MinStepRuleFlag::kConcaveCorner;
       if (const auto within = value->get_except_within()) {
         rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasExceptWithin;
         rule.except_within = *within;
       }
     }
-    if (source_rule->has_three_concave_corners()) rule.flags |= TechRoutingLef58MinStepRuleFlag::kThreeConcaveCorners;
-    if (const auto value = source_rule->get_center_width()) {
-      rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasCenterWidth;
-      rule.center_width = *value;
-    }
-    if (const auto value = source_rule->get_min_between_length()) {
-      rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasMinBetweenLength;
-      rule.min_between_length = *value;
-    }
-    if (source_rule->is_except_same_corners()) rule.flags |= TechRoutingLef58MinStepRuleFlag::kExceptSameCorners;
-    if (const auto value = source_rule->get_no_adjacent_eol_width()) {
-      rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasNoAdjacentEol;
-      rule.no_adjacent_eol_width = *value;
-    }
-    if (const auto value = source_rule->get_except_adjacent_length()) {
-      rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasExceptAdjacentLength;
-      rule.except_adjacent_length = *value;
-    }
-    if (const auto value = source_rule->get_followup_min_adjacent_length()) {
-      rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasFollowupMinAdjacentLength;
-      rule.followup_min_adjacent_length = *value;
-    }
-    if (source_rule->has_concave_corners()) rule.flags |= TechRoutingLef58MinStepRuleFlag::kConcaveCorners;
-    if (const auto value = source_rule->get_no_between_eol_width()) {
-      rule.flags |= TechRoutingLef58MinStepRuleFlag::kHasNoBetweenEol;
-      rule.no_between_eol_width = *value;
-    }
     static_cast<void>(storage.addLef58MinStepRule(owner, std::move(rule)));
-  }
-
-  for (const auto& source_rule : source.get_lef58_width_table()) {
-    if (source_rule == nullptr) continue;
-    TechRoutingLef58WidthTableRule rule{.widths = source_rule->get_widths()};
-    if (source_rule->is_wrong_direction()) rule.flags |= TechRoutingLef58WidthTableRuleFlag::kWrongDirection;
-    if (source_rule->is_orthogonal()) rule.flags |= TechRoutingLef58WidthTableRuleFlag::kOrthogonal;
-    static_cast<void>(storage.addLef58WidthTableRule(owner, std::move(rule)));
   }
 
   if (const auto source_rule = source.get_lef58_spacing_notchlength(); source_rule != nullptr) {
@@ -722,54 +544,9 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
   for (const auto& source_rule : source.get_lef58_spacing_eol_list()) {
     if (source_rule == nullptr) continue;
     TechRoutingLef58SpacingEolRule rule{.eol_space = source_rule->get_eol_space(), .eol_width = source_rule->get_eol_width()};
-    if (source_rule->is_exact_width()) rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kExactWidth;
-    if (const auto value = source_rule->get_wrong_dir_space()) {
-      rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasWrongDirSpace;
-      rule.wrong_dir_space = *value;
-    }
-    if (const auto value = source_rule->get_opposite_width()) {
-      rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasOppositeWidth;
-      rule.opposite_width = *value;
-    }
     if (const auto value = source_rule->get_eol_within()) {
       rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasEolWithin;
       rule.eol_within = *value;
-    }
-    if (const auto value = source_rule->get_wrong_dir_within()) {
-      rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasWrongDirWithin;
-      rule.wrong_dir_within = *value;
-    }
-    if (source_rule->is_same_mask()) rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kSameMask;
-    if (const auto value = source_rule->get_except_exact_width()) {
-      rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasExceptExactWidth;
-      rule.except_exact_width1 = value->get_width1();
-      rule.except_exact_width2 = value->get_width2();
-    }
-    if (const auto value = source_rule->get_fill_concave_corner_width()) {
-      rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasFillConcaveCorner;
-      rule.fill_concave_corner_width = *value;
-    }
-    if (const auto value = source_rule->get_with_cut()) {
-      rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasWithCut;
-      if (!value->get_cutclass().empty()) {
-        rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasWithCutClass;
-        rule.with_cut_class_name = value->get_cutclass();
-      }
-      if (value->is_above()) rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kWithCutAbove;
-      rule.with_cut_space = value->get_with_cut_space();
-      if (const auto width = value->get_enclosure_end_width()) {
-        rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasEnclosureEndWidth;
-        rule.enclosure_end_width = *width;
-      }
-      if (const auto within = value->get_enclosure_end_within()) {
-        rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasEnclosureEndWithin;
-        rule.enclosure_end_within = *within;
-      }
-    }
-    if (const auto value = source_rule->get_end_prl_spacing()) {
-      rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasEndPrlSpacing;
-      rule.end_prl_space = value->get_end_prl_space();
-      rule.end_prl = value->get_end_prl();
     }
     if (const auto value = source_rule->get_end_to_end()) {
       rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasEndToEnd;
@@ -807,7 +584,6 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
       }
       if (value->is_two_sides()) rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kTwoSides;
     }
-    if (source_rule->is_equal_rect_width()) rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kEqualRectWidth;
     if (const auto value = source_rule->get_parallel_edge()) {
       rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasParallelEdge;
       rule.parallel_space = value->get_par_space();
@@ -837,25 +613,6 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
       rule.cut_to_metal_spacing = value->get_cut_to_metal_space();
       if (value->is_all_cuts()) rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kAllCuts;
     }
-    if (const auto value = source_rule->get_to_concave_corner()) {
-      rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasToConcaveCorner;
-      if (const auto length = value->get_min_length()) {
-        rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasToConcaveCornerMinLength;
-        rule.to_concave_corner_min_length = *length;
-      }
-      if (const auto length = value->get_min_adj_length1()) {
-        rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasToConcaveCornerMinAdjacentLength;
-        rule.to_concave_corner_min_adjacent_length1 = *length;
-      }
-      if (const auto length = value->get_min_adj_length2()) {
-        rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasToConcaveCornerTwoMinAdjacentLengths;
-        rule.to_concave_corner_min_adjacent_length2 = *length;
-      }
-    }
-    if (const auto value = source_rule->get_notch_length()) {
-      rule.flags |= TechRoutingLef58SpacingEolRuleFlag::kHasToNotchLength;
-      rule.notch_length = *value;
-    }
     static_cast<void>(storage.addLef58SpacingEolRule(owner, std::move(rule)));
   }
 
@@ -884,20 +641,12 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
     static_cast<void>(storage.addMinStepRule(owner, rule));
   }
 
-  for (const auto& source_rule : source.get_minimum_cut_list()) {
-    TechRoutingMinimumCutRule rule{.num_cuts = source_rule.get_num_cuts(),
-                                   .width = source_rule.get_width(),
-                                   .orient = routingMinimumCutOrient(source_rule.get_orient())};
-    if (source_rule.has_within_cut_distance()) {
-      rule.flags |= TechRoutingMinimumCutRuleFlag::kHasWithinCutDistance;
-      rule.within_cut_distance = source_rule.get_within_cut_distance();
-    }
-    if (source_rule.has_length()) {
-      rule.flags |= TechRoutingMinimumCutRuleFlag::kHasLength;
-      rule.length = source_rule.get_length();
-      rule.length_distance = source_rule.get_length_distance();
-    }
-    static_cast<void>(storage.addMinimumCutRule(owner, rule));
+  // Legacy iDB exposes only a count/width pair; lef_read does not populate it.
+  // Preserve it when supplied by an in-memory iDB caller.
+  if (source.get_min_cut_num() > 0 && source.get_min_cut_width() >= 0) {
+    static_cast<void>(storage.addMinimumCutRule(
+        owner, TechRoutingMinimumCutRule{.num_cuts = source.get_min_cut_num(),
+                                         .width = source.get_min_cut_width()}));
   }
 
   if (const auto tables = source.get_spacing_table(); tables != nullptr) {
@@ -910,52 +659,6 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
       }
       static_cast<void>(storage.addPrlSpacingTableRule(owner, std::move(table)));
     }
-    if (const auto source_table = tables->get_influence(); source_table != nullptr) {
-      TechRoutingInfluenceSpacingTableRule table;
-      table.entries.reserve(source_table->get_entry_list().size());
-      for (const auto& entry : source_table->get_entry_list()) {
-        table.entries.push_back(
-            TechRoutingInfluenceSpacingTableEntry{.width = entry.width, .within = entry.within, .spacing = entry.spacing});
-      }
-      static_cast<void>(storage.addInfluenceSpacingTableRule(owner, std::move(table)));
-    }
-    if (const auto source_table = tables->get_two_widths(); source_table != nullptr) {
-      TechRoutingTwoWidthsSpacingTableRule table;
-      table.widths.reserve(source_table->get_width_list().size());
-      for (const auto& source_width : source_table->get_width_list()) {
-        table.widths.push_back(
-            TechRoutingTwoWidthsSpacingTableWidth{.width = source_width.width, .has_prl = source_width.has_prl, .prl = source_width.prl});
-      }
-      for (const auto& row : source_table->get_spacing_table()) {
-        table.cells.insert(table.cells.end(), row.begin(), row.end());
-      }
-      static_cast<void>(storage.addTwoWidthsSpacingTableRule(owner, std::move(table)));
-    }
-  }
-
-  for (const auto& source_table : source.get_lef58_spacingtable_prl()) {
-    if (source_table == nullptr) continue;
-    TechRoutingPrlSpacingTableRule table;
-    if (source_table->is_wrong_direction()) table.flags |= TechRoutingPrlSpacingTableRuleFlag::kWrongDirection;
-    if (source_table->is_same_mask()) table.flags |= TechRoutingPrlSpacingTableRuleFlag::kSameMask;
-    if (const auto eol_width = source_table->get_except_eol_width()) {
-      table.flags |= TechRoutingPrlSpacingTableRuleFlag::kExceptEol | TechRoutingPrlSpacingTableRuleFlag::kHasEolWidth;
-      table.eol_width = *eol_width;
-    }
-    table.parallel_run_lengths = source_table->get_parallel_run_lengths();
-    for (uint32_t index = 0; index < source_table->get_widths().size(); ++index) {
-      const auto& width = source_table->get_widths()[index];
-      table.widths.push_back(width.get_width());
-      table.cells.insert(table.cells.end(), width.get_spacings().begin(), width.get_spacings().end());
-      if (const auto except = width.get_except_within())
-        table.except_withins.push_back({.width_index = index, .low = except->first, .high = except->second});
-    }
-    for (const auto& influence : source_table->get_influences()) {
-      table.influences.push_back({.width = influence.get_width(),
-                                  .within = influence.get_within(),
-                                  .spacing = influence.get_spacing()});
-    }
-    static_cast<void>(storage.addPrlSpacingTableRule(owner, std::move(table)));
   }
 
   if (const auto source_table = source.get_lef58_spacingtable_jogtojog(); source_table != nullptr) {
@@ -971,20 +674,6 @@ void importRoutingRules(TechRoutingLayerStorage& storage, TechRoutingLayerId own
     static_cast<void>(storage.addLef58SpacingTableJogToJogRule(owner, std::move(rule)));
   }
 
-  for (const auto& source_rule : source.get_current_density_list()) {
-    TechRoutingCurrentDensityRule rule{.signal = source_rule.get_kind() == ::idb::IdbRoutingCurrentDensity::Kind::kAc
-                                                     ? TechRoutingCurrentDensitySignal::kAc
-                                                     : TechRoutingCurrentDensitySignal::kDc,
-                                       .type = routingCurrentDensityType(source_rule.get_type()),
-                                       .scalar = source_rule.get_scalar(),
-                                       .frequencies = source_rule.get_frequency_list(),
-                                       .widths = source_rule.get_width_list(),
-                                       .table_entries = source_rule.get_table_entries()};
-    if (source_rule.has_scalar()) {
-      rule.flags |= TechRoutingCurrentDensityRuleFlag::kHasScalar;
-    }
-    static_cast<void>(storage.addCurrentDensityRule(owner, std::move(rule)));
-  }
 }
 
 void importCutRules(TechCutLayerStorage& storage, TechCutLayerId owner, ::idb::IdbLayerCut& source)
@@ -997,29 +686,6 @@ void importCutRules(TechCutLayerStorage& storage, TechCutLayerId owner, ::idb::I
     if (source_rule->get_has_same_net()) {
       rule.flags |= TechCutSpacingRuleFlag::kSameNet;
     }
-    if (source_rule->is_center_to_center()) {
-      rule.flags |= TechCutSpacingRuleFlag::kCenterToCenter;
-    }
-    if (source_rule->is_same_net_pg_only()) {
-      rule.flags |= TechCutSpacingRuleFlag::kSameNetPgOnly;
-    }
-    if (!source_rule->get_second_layer_name().empty()) {
-      rule.flags |= TechCutSpacingRuleFlag::kHasSecondLayer;
-      rule.second_layer_name = source_rule->get_second_layer_name();
-    }
-    if (source_rule->is_stack()) {
-      rule.flags |= TechCutSpacingRuleFlag::kStack;
-    }
-    if (source_rule->is_except_same_pg_net()) {
-      rule.flags |= TechCutSpacingRuleFlag::kExceptSamePgNet;
-    }
-    if (source_rule->is_parallel_overlap()) {
-      rule.flags |= TechCutSpacingRuleFlag::kParallelOverlap;
-    }
-    if (source_rule->get_cut_area() >= 0) {
-      rule.flags |= TechCutSpacingRuleFlag::kHasCutArea;
-      rule.cut_area = source_rule->get_cut_area();
-    }
     if (const auto adjacent = source_rule->get_adjacent_cuts(); adjacent) {
       rule.flags |= TechCutSpacingRuleFlag::kHasAdjacentCuts;
       rule.adjacent_cut_count = static_cast<uint32_t>(adjacent->get_adjacent_cuts());
@@ -1030,37 +696,13 @@ void importCutRules(TechCutLayerStorage& storage, TechCutLayerId owner, ::idb::I
 
   const auto import_enclosure = [&](const ::idb::IdbLayerCutEnclosure* source_rule, CutLayerSide side) {
     if (source_rule != nullptr && source_rule->get_overhang_1() >= 0 && source_rule->get_overhang_2() >= 0) {
-      TechCutEnclosureRule rule{
-          .side = side, .overhang1 = source_rule->get_overhang_1(), .overhang2 = source_rule->get_overhang_2()};
-      if (source_rule->get_min_width() >= 0) {
-        rule.flags |= TechCutEnclosureRuleFlag::kHasMinWidth;
-        rule.min_width = source_rule->get_min_width();
-      }
-      if (source_rule->get_cut_within() >= 0) {
-        rule.flags |= TechCutEnclosureRuleFlag::kExceptExtraCut | TechCutEnclosureRuleFlag::kHasCutWithin;
-        rule.cut_within = source_rule->get_cut_within();
-      }
-      if (source_rule->get_min_length() >= 0) {
-        rule.flags |= TechCutEnclosureRuleFlag::kHasMinLength;
-        rule.min_length = source_rule->get_min_length();
-      }
-      static_cast<void>(storage.addEnclosureRule(owner, rule));
+      static_cast<void>(storage.addEnclosureRule(
+          owner, TechCutEnclosureRule{.side = side, .overhang1 = source_rule->get_overhang_1(),
+                                      .overhang2 = source_rule->get_overhang_2()}));
     }
   };
-  if (source.get_enclosure_rules().empty()) {
-    import_enclosure(source.get_enclosure_below(), CutLayerSide::kBelow);
-    import_enclosure(source.get_enclosure_above(), CutLayerSide::kAbove);
-  } else {
-    for (const auto& source_rule : source.get_enclosure_rules()) {
-      CutLayerSide side = CutLayerSide::kUnknown;
-      if (source_rule.get_side() == ::idb::IdbLayerCutEnclosure::Side::kAbove) {
-        side = CutLayerSide::kAbove;
-      } else if (source_rule.get_side() == ::idb::IdbLayerCutEnclosure::Side::kBelow) {
-        side = CutLayerSide::kBelow;
-      }
-      import_enclosure(&source_rule, side);
-    }
-  }
+  import_enclosure(source.get_enclosure_below(), CutLayerSide::kBelow);
+  import_enclosure(source.get_enclosure_above(), CutLayerSide::kAbove);
 
   if (auto* source_rule = source.get_array_spacing();
       source_rule != nullptr && source_rule->get_cut_spacing() >= 0 && source_rule->get_array_cut_number() > 0) {
@@ -1068,28 +710,12 @@ void importCutRules(TechCutLayerStorage& storage, TechCutLayerId owner, ::idb::I
     if (source_rule->is_long_array()) {
       rule.flags |= TechCutArraySpacingRuleFlag::kLongArray;
     }
-    if (source_rule->get_via_width() >= 0) {
-      rule.flags |= TechCutArraySpacingRuleFlag::kHasViaWidth;
-      rule.via_width = source_rule->get_via_width();
-    }
     rule.items.reserve(source_rule->get_array_cut_list().size());
     for (const auto& source_item : source_rule->get_array_cut_list()) {
       rule.items.push_back(
           TechCutArraySpacingItem{.array_cut_count = static_cast<uint32_t>(source_item._array_cut), .spacing = source_item._array_spacing});
     }
     static_cast<void>(storage.setArraySpacingRule(owner, std::move(rule)));
-  }
-
-  for (const auto& source_table : source.get_orthogonal_spacing_tables()) {
-    TechCutOrthogonalSpacingTableRule rule;
-    if (source_table.lef58_property) {
-      rule.flags |= TechCutOrthogonalSpacingTableRuleFlag::kLef58Property;
-    }
-    rule.items.reserve(source_table.items.size());
-    for (const auto& item : source_table.items) {
-      rule.items.push_back(TechCutOrthogonalSpacingTableItem{.within = item.within, .spacing = item.spacing});
-    }
-    static_cast<void>(storage.addOrthogonalSpacingTableRule(owner, std::move(rule)));
   }
 
   for (const auto& source_rule : source.get_lef58_cutclass_list()) {
@@ -1112,13 +738,7 @@ void importCutRules(TechCutLayerStorage& storage, TechCutLayerId owner, ::idb::I
     if (source_rule == nullptr) {
       continue;
     }
-    CutLayerSide side = CutLayerSide::kUnknown;
-    if (source_rule->get_direction() == ::idb::cutlayer::Lef58Enclosure::Direction::kAbove) {
-      side = CutLayerSide::kAbove;
-    } else if (source_rule->get_direction() == ::idb::cutlayer::Lef58Enclosure::Direction::kBelow) {
-      side = CutLayerSide::kBelow;
-    }
-    TechCutLef58EnclosureRule rule{.cutclass_name = source_rule->get_class_name(), .side = side};
+    TechCutLef58EnclosureRule rule{.cutclass_name = source_rule->get_class_name()};
     if (source_rule->get_overhang1()) {
       rule.flags |= TechCutLef58EnclosureRuleFlag::kHasOverhang1;
       rule.overhang1 = *source_rule->get_overhang1();
@@ -1134,30 +754,6 @@ void importCutRules(TechCutLayerStorage& storage, TechCutLayerId owner, ::idb::I
     if (source_rule->get_side_overhang2()) {
       rule.flags |= TechCutLef58EnclosureRuleFlag::kHasSideOverhang2;
       rule.side_overhang2 = *source_rule->get_side_overhang2();
-    }
-    if (source_rule->get_min_width()) {
-      rule.flags |= TechCutLef58EnclosureRuleFlag::kHasMinWidth;
-      rule.min_width = *source_rule->get_min_width();
-    }
-    if (source_rule->is_include_abutted()) {
-      rule.flags |= TechCutLef58EnclosureRuleFlag::kIncludeAbutted;
-    }
-    if (source_rule->get_cut_within()) {
-      rule.flags |= TechCutLef58EnclosureRuleFlag::kExceptExtraCut | TechCutLef58EnclosureRuleFlag::kHasCutWithin;
-      rule.cut_within = *source_rule->get_cut_within();
-      if (source_rule->get_except_extra_cut_type() == "PRL") {
-        rule.flags |= TechCutLef58EnclosureRuleFlag::kPrl;
-      } else if (source_rule->get_except_extra_cut_type() == "NOSHAREDEDGE") {
-        rule.flags |= TechCutLef58EnclosureRuleFlag::kNoSharedEdge;
-      }
-    }
-    if (source_rule->get_min_length()) {
-      rule.flags |= TechCutLef58EnclosureRuleFlag::kHasMinLength;
-      rule.min_length = *source_rule->get_min_length();
-    }
-    if (source_rule->get_redundant_cut_within()) {
-      rule.flags |= TechCutLef58EnclosureRuleFlag::kHasRedundantCut;
-      rule.redundant_cut_within = *source_rule->get_redundant_cut_within();
     }
     static_cast<void>(storage.addLef58EnclosureRule(owner, std::move(rule)));
   }
@@ -1260,41 +856,27 @@ void importCutRules(TechCutLayerStorage& storage, TechCutLayerId owner, ::idb::I
       continue;
     }
     TechCutLef58SpacingTableRule rule;
-    if (const auto default_spacing = source_table->get_default_spacing()) {
-      rule.flags |= TechCutLef58SpacingTableRuleFlag::kHasDefault;
-      rule.default_spacing = *default_spacing;
-    }
-    if (source_table->is_same_mask()) rule.flags |= TechCutLef58SpacingTableRuleFlag::kSameMask;
-    if (source_table->get_same_kind() == "SAMENET") rule.flags |= TechCutLef58SpacingTableRuleFlag::kSameNet;
-    if (source_table->get_same_kind() == "SAMEMETAL") rule.flags |= TechCutLef58SpacingTableRuleFlag::kSameMetal;
-    if (source_table->get_same_kind() == "SAMEVIA") rule.flags |= TechCutLef58SpacingTableRuleFlag::kSameVia;
     if (const auto second_layer = source_table->get_second_layer()) {
       rule.flags |= TechCutLef58SpacingTableRuleFlag::kHasSecondLayer;
       rule.second_layer_name = second_layer->get_second_layer_name();
-      if (second_layer->is_nostack()) rule.flags |= TechCutLef58SpacingTableRuleFlag::kNoStack;
-      if (!second_layer->get_prl_for_aligned_cut().empty())
-        rule.flags |= TechCutLef58SpacingTableRuleFlag::kPrlForAlignedCut;
-      for (const auto& pair : second_layer->get_prl_for_aligned_cut())
-        rule.prl_for_aligned_cut.push_back({.from = pair.get_from(), .to = pair.get_to()});
+
     }
     if (const auto prl = source_table->get_prl()) {
       rule.flags |= TechCutLef58SpacingTableRuleFlag::kHasPrl;
       rule.prl = prl->get_prl();
-      rule.prl_direction = cutDirection(prl->get_direction());
       if (prl->is_maxxy()) {
         rule.flags |= TechCutLef58SpacingTableRuleFlag::kMaxXY;
       }
-      for (const auto& entry : prl->get_entries())
-        rule.prl_entries.push_back({.from = entry.from, .to = entry.to, .prl = entry.prl});
+
     }
     const auto& cutclass = source_table->get_cutclass();
     for (const auto& name : cutclass.get_class_name1_list()) {
       rule.cutclass1_names.push_back(name.get_class_name());
-      rule.cutclass1_edges.push_back(cutClassEdge(name.get_edge()));
+      rule.cutclass1_edges.push_back(cutClassEdge(""));
     }
     for (const auto& name : cutclass.get_class_name2_list()) {
       rule.cutclass2_names.push_back(name.get_class_name());
-      rule.cutclass2_edges.push_back(cutClassEdge(name.get_edge()));
+      rule.cutclass2_edges.push_back(cutClassEdge(""));
     }
     for (std::size_t row = 0; row < rule.cutclass2_names.size(); ++row) {
       for (std::size_t column = 0; column < rule.cutclass1_names.size(); ++column) {
@@ -1314,21 +896,6 @@ void importCutRules(TechCutLayerStorage& storage, TechCutLayerId owner, ::idb::I
     static_cast<void>(storage.addLef58SpacingTableRule(owner, std::move(rule)));
   }
 
-  for (const auto& source_rule : source.get_current_density_list()) {
-    TechCutCurrentDensityRule rule{.signal = source_rule.get_kind() == ::idb::IdbCutCurrentDensity::Kind::kAc
-                                                 ? TechCutCurrentDensitySignal::kAc
-                                                 : TechCutCurrentDensitySignal::kDc,
-                                   .type = cutCurrentDensityType(source_rule.get_type()),
-                                   .scalar = source_rule.get_scalar(),
-                                   .frequencies = source_rule.get_frequency_list(),
-                                   .table_entries = source_rule.get_table_entries()};
-    const auto& source_cut_areas = source_rule.get_cut_area_list();
-    rule.cut_areas.assign(source_cut_areas.begin(), source_cut_areas.end());
-    if (source_rule.has_scalar()) {
-      rule.flags |= TechCutCurrentDensityRuleFlag::kHasScalar;
-    }
-    static_cast<void>(storage.addCurrentDensityRule(owner, std::move(rule)));
-  }
 }
 
 }  // namespace
@@ -1352,10 +919,7 @@ void IdbTechImporter::import(::idb::IdbLayout& source)
       continue;
     }
 
-    TechLayerInfo info{.name = layer->get_name(), .lef58_type = lef58LayerType(layer->get_lef58_type())};
-    if (layer->is_lef58_backside()) {
-      info.flags |= TechLayerInfoFlag::kLef58Backside;
-    }
+    TechLayerInfo info{.name = layer->get_name()};
     TechLayerId imported;
     switch (layer->get_type()) {
       case ::idb::IdbLayerType::kLayerRouting: {
@@ -1363,7 +927,7 @@ void IdbTechImporter::import(::idb::IdbLayout& source)
         if (routing == nullptr) {
           throw std::runtime_error("legacy ROUTING layer has an invalid dynamic type");
         }
-        const auto id = _database.createRoutingLayer(info, importRoutingLayer(*routing));
+        const auto id = _database.createRoutingLayer(info, importRoutingLayer(*routing, _database.globalStorage().getUnits().database_units_per_micron));
         imported = TechLayerId{id.entity()};
         break;
       }
@@ -1391,7 +955,10 @@ void IdbTechImporter::import(::idb::IdbLayout& source)
         break;
       }
       case ::idb::IdbLayerType::kLayerMasterslice: {
-        const auto id = _database.createMastersliceLayer(info, TechMastersliceLayer{.subtype = mastersliceType(layer->get_lef58_type())});
+        const auto* masterslice = dynamic_cast<::idb::IdbLayerMasterslice*>(layer);
+        if (masterslice == nullptr) throw std::runtime_error("legacy MASTERSLICE layer has an invalid dynamic type");
+        info.lef58_type = lef58LayerType(masterslice->get_lef58_type());
+        const auto id = _database.createMastersliceLayer(info, TechMastersliceLayer{.subtype = mastersliceType(masterslice->get_lef58_type())});
         imported = TechLayerId{id.entity()};
         break;
       }
@@ -1413,7 +980,7 @@ void IdbTechImporter::import(::idb::IdbLayout& source)
     }
     if (layer->get_type() == ::idb::IdbLayerType::kLayerRouting) {
       importRoutingRules(_database.routingLayerStorage(), TechRoutingLayerId{layerId(layer).entity()},
-                         *dynamic_cast<::idb::IdbLayerRouting*>(layer));
+                         *dynamic_cast<::idb::IdbLayerRouting*>(layer), _database.globalStorage().getUnits().database_units_per_micron);
     } else if (layer->get_type() == ::idb::IdbLayerType::kLayerCut) {
       importCutRules(_database.cutLayerStorage(), TechCutLayerId{layerId(layer).entity()}, *dynamic_cast<::idb::IdbLayerCut*>(layer));
     } else if (layer->get_type() == ::idb::IdbLayerType::kLayerImplant) {

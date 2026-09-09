@@ -37,6 +37,33 @@ Memory benchmarks and memory comparisons are resource tests, not correctness dif
 
 The current DEF structural snapshot compares component counts plus global, row, track-grid, gcell-grid, instance, instance-pin, IO-pin, design-VIA, NDR, regular/special-net, region, group, blockage, and fill data. Routing comparison also checks wire/path primitives, point/via/rectangle extras, and expanded geometry per net. LEF differentials locate technology layers, VIA/VIA rules, NDRs, sites, macros, terms, ports, and obstructions by name and compare their modeled fields and geometry.
 
+### Native parsers and the legacy iDB boundary
+
+The native input path is `SI2 lefr/defr → EccDB importer → EccDB Storage`; it does not pass through iDB objects.
+Transient LEF58 syntax values and parsers are owned by EccDB in
+[`io/lef/detail/parser`](../io/lef/detail/parser/README.md). The importer then converts units, validates and commits rules.
+`io/idb` is a separate adapter for existing legacy objects.
+
+Legacy differentials cover the intersection actually materialized by the old iDB reader, not every EccDB field:
+
+| Fields / rules | Legacy behavior | Verification |
+| --- | --- | --- |
+| VIA, VIARULE, NDR, core layer/library fields and rectangles | Represented as objects | Keep conversion and path differentials |
+| Routing/Cut TYPE, BACKSIDE, RECTONLY, RIGHTWAYONGRIDONLY and related extensions | No corresponding fields, except MASTERSLICE TYPE | Native importer/exporter and binary tests |
+| Current density, WIDTHTABLE, INFLUENCE, TWOWIDTHS, ORTHOGONAL, LEF58 PRL tables | Not materialized | Native tests; the adapter cannot invent missing source objects |
+| Extended AREA, MINSTEP, EOL and CUT spacing/enclosure qualifiers | Only a subset is retained | Compare fields exposed by legacy getters; keep native extension assertions |
+| Native MINIMUMCUT | Reading is commented out in legacy lef_read; an in-memory count/width pair still exists | No file-path parity claim; adapter preserves manually populated scalars |
+| Native ENCLOSURE | Last ABOVE only; unqualified rules dropped; BELOW writes overhang1 twice and leaves overhang2 unset | Compare last ABOVE; do not reconstruct missing values |
+| DENSITYCHECKWINDOW / DENSITYCHECKSTEP | Integer microns instead of DBU | Adapter converts to DBU; lost fractional precision cannot be recovered |
+| LEF58 MINIMUMCUT AREA | Legacy parser applies length scaling | Adapter applies the missing DBU factor; earlier precision loss remains |
+
+The full-corpus test also checks LEF58 rule counts against the original iDB objects so that adapter omissions cannot pass as empty comparisons.
+These checks do not validate fields absent from iDB or establish complete LEF/DEF 5.8 grammar coverage.
+
+Build with `-DECCDB_STANDALONE_LEF_DEF=ON -DECCDB_STANDALONE_LEGACY_IDB=OFF` to verify native importer independence.
+Enable the latter option only when building legacy comparisons.
+
+
 ## 3. Build dependencies
 
 The standalone EccDB differential build requires:

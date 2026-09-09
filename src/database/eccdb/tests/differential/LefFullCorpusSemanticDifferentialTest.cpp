@@ -79,12 +79,10 @@ void expectRoutingLayer(const TechRoutingLayer& direct, const TechRoutingLayer& 
       = TechRoutingLayerFlag::kHasMaxWidth | TechRoutingLayerFlag::kHasPitchY | TechRoutingLayerFlag::kHasOffsetY
         | TechRoutingLayerFlag::kHasWireExtension | TechRoutingLayerFlag::kHasThickness | TechRoutingLayerFlag::kHasHeight
         | TechRoutingLayerFlag::kHasArea | TechRoutingLayerFlag::kHasResistance | TechRoutingLayerFlag::kHasCapacitance
-        | TechRoutingLayerFlag::kHasEdgeCapacitance | TechRoutingLayerFlag::kLef58RectOnly
-        | TechRoutingLayerFlag::kLef58RectOnlyExceptNonCorePins | TechRoutingLayerFlag::kLef58RightWayOnGridOnly
-        | TechRoutingLayerFlag::kLef58RightWayOnGridOnlyCheckMask | TechRoutingLayerFlag::kHasWidth | TechRoutingLayerFlag::kHasMinDensity
+        | TechRoutingLayerFlag::kHasEdgeCapacitance
+        | TechRoutingLayerFlag::kHasWidth | TechRoutingLayerFlag::kHasMinDensity
         | TechRoutingLayerFlag::kHasMaxDensity | TechRoutingLayerFlag::kHasDensityCheckWindow | TechRoutingLayerFlag::kHasDensityCheckStep
-        | TechRoutingLayerFlag::kHasDiagWidth | TechRoutingLayerFlag::kHasDiagSpacing | TechRoutingLayerFlag::kHasProtrusion
-        | TechRoutingLayerFlag::kHasShrinkage | TechRoutingLayerFlag::kHasCapMultiplier | TechRoutingLayerFlag::kHasFillActiveSpacing
+
         | TechRoutingLayerFlag::kPolyRouting;
   EXPECT_EQ(direct.flags & kCommonFlags, adapted.flags & kCommonFlags);
   EXPECT_EQ(direct.direction, adapted.direction);
@@ -111,16 +109,11 @@ void expectRoutingLayer(const TechRoutingLayer& direct, const TechRoutingLayer& 
     EXPECT_EQ(adapted.min_width, direct.width);
   }
   EXPECT_EQ(direct.max_width, adapted.max_width);
-  EXPECT_EQ(direct.diag_width, adapted.diag_width);
-  EXPECT_EQ(direct.diag_spacing, adapted.diag_spacing);
   EXPECT_EQ(direct.pitch_x, adapted.pitch_x);
   EXPECT_EQ(direct.pitch_y, adapted.pitch_y);
   EXPECT_EQ(direct.wire_extension, adapted.wire_extension);
   EXPECT_EQ(direct.thickness, adapted.thickness);
   EXPECT_EQ(direct.height, adapted.height);
-  EXPECT_EQ(direct.shrinkage, adapted.shrinkage);
-  EXPECT_DOUBLE_EQ(direct.cap_multiplier, adapted.cap_multiplier);
-  EXPECT_EQ(direct.fill_active_spacing, adapted.fill_active_spacing);
   EXPECT_EQ(direct.area, adapted.area);
   EXPECT_DOUBLE_EQ(direct.resistance, adapted.resistance);
   EXPECT_DOUBLE_EQ(direct.capacitance, adapted.capacitance);
@@ -130,9 +123,6 @@ void expectRoutingLayer(const TechRoutingLayer& direct, const TechRoutingLayer& 
   EXPECT_EQ(direct.density_check_length, adapted.density_check_length);
   EXPECT_EQ(direct.density_check_width, adapted.density_check_width);
   EXPECT_EQ(direct.density_check_step, adapted.density_check_step);
-  EXPECT_EQ(direct.protrusion_width1, adapted.protrusion_width1);
-  EXPECT_EQ(direct.protrusion_length, adapted.protrusion_length);
-  EXPECT_EQ(direct.protrusion_width2, adapted.protrusion_width2);
 }
 
 void expectRoutingRules(const TechStore& direct, TechRoutingLayerId direct_layer, const TechStore& adapted,
@@ -183,11 +173,9 @@ void expectRoutingRules(const TechStore& direct, TechRoutingLayerId direct_layer
   for (std::size_t index = 0; index < adapted_lef58_areas.size(); ++index) {
     const auto& lhs = direct_storage.rule(direct_lef58_areas[index]);
     const auto& rhs = adapted_storage.rule(adapted_lef58_areas[index]);
-    EXPECT_EQ(std::tie(lhs.flags, lhs.min_area, lhs.mask, lhs.except_min_width, lhs.except_min_edge_length,
-                       lhs.except_max_edge_length, lhs.except_step_x, lhs.except_step_y, lhs.rect_width, lhs.trim_layer_name, lhs.overlap),
-              std::tie(rhs.flags, rhs.min_area, rhs.mask, rhs.except_min_width, rhs.except_min_edge_length,
-                       rhs.except_max_edge_length, rhs.except_step_x, rhs.except_step_y, rhs.rect_width, rhs.trim_layer_name, rhs.overlap))
-        << index;
+    constexpr auto common_flags = TechRoutingLef58AreaRuleFlag::kHasExceptEdgeLength | TechRoutingLef58AreaRuleFlag::kHasExceptMinEdgeLength;
+    EXPECT_EQ(lhs.flags & common_flags, rhs.flags) << index;
+    EXPECT_EQ(std::tie(lhs.min_area, lhs.except_min_edge_length, lhs.except_max_edge_length), std::tie(rhs.min_area, rhs.except_min_edge_length, rhs.except_max_edge_length)) << index;
     ASSERT_EQ(lhs.except_min_sizes.size(), rhs.except_min_sizes.size()) << index;
     for (std::size_t item = 0; item < lhs.except_min_sizes.size(); ++item) {
       EXPECT_EQ(std::tie(lhs.except_min_sizes[item].min_width, lhs.except_min_sizes[item].min_length),
@@ -209,11 +197,11 @@ void expectRoutingRules(const TechStore& direct, TechRoutingLayerId direct_layer
 
   const auto direct_corners = direct_storage.lef58CornerSpacingRules(direct_layer);
   const auto adapted_corners = adapted_storage.lef58CornerSpacingRules(adapted_layer);
-  ASSERT_EQ(direct_corners.size(), adapted_corners.size());
-  for (std::size_t rule_index = 0; rule_index < direct_corners.size(); ++rule_index) {
+  ASSERT_GE(direct_corners.size(), adapted_corners.size());
+  for (std::size_t rule_index = 0; rule_index < adapted_corners.size(); ++rule_index) {
     const auto& lhs = direct_storage.rule(direct_corners[rule_index]);
     const auto& rhs = adapted_storage.rule(adapted_corners[rule_index]);
-    EXPECT_EQ(lhs.flags, rhs.flags) << rule_index;
+    EXPECT_EQ(lhs.flags & (TechRoutingLef58CornerSpacingRuleFlag::kHasExceptEol), rhs.flags) << rule_index;
     EXPECT_EQ(lhs.type, rhs.type) << rule_index;
     EXPECT_EQ(lhs.except_eol, rhs.except_eol) << rule_index;
     ASSERT_EQ(lhs.width_spacings.size(), rhs.width_spacings.size()) << rule_index;
@@ -248,26 +236,12 @@ void expectRoutingRules(const TechStore& direct, TechRoutingLayerId direct_layer
   for (std::size_t index = 0; index < adapted_lef58_steps.size(); ++index) {
     const auto& lhs = direct_storage.rule(direct_lef58_steps[index]);
     const auto& rhs = adapted_storage.rule(adapted_lef58_steps[index]);
-    EXPECT_EQ(std::tie(lhs.flags, lhs.type, lhs.min_step_length, lhs.max_length_sum, lhs.max_edges, lhs.min_adjacent_length,
-                       lhs.min_adjacent_length2, lhs.except_within, lhs.center_width, lhs.min_between_length,
-                       lhs.no_adjacent_eol_width, lhs.except_adjacent_length, lhs.followup_min_adjacent_length,
-                       lhs.no_between_eol_width),
-              std::tie(rhs.flags, rhs.type, rhs.min_step_length, rhs.max_length_sum, rhs.max_edges, rhs.min_adjacent_length,
-                       rhs.min_adjacent_length2, rhs.except_within, rhs.center_width, rhs.min_between_length,
-                       rhs.no_adjacent_eol_width, rhs.except_adjacent_length, rhs.followup_min_adjacent_length,
-                       rhs.no_between_eol_width))
-        << index;
+    constexpr auto common_flags = TechRoutingLef58MinStepRuleFlag::kHasMaxEdges | TechRoutingLef58MinStepRuleFlag::kHasMinAdjacentLength | TechRoutingLef58MinStepRuleFlag::kConvexCorner | TechRoutingLef58MinStepRuleFlag::kHasExceptWithin;
+    EXPECT_EQ(lhs.flags & common_flags, rhs.flags) << index;
+    EXPECT_EQ(std::tie(lhs.min_step_length, lhs.max_edges, lhs.min_adjacent_length, lhs.except_within), std::tie(rhs.min_step_length, rhs.max_edges, rhs.min_adjacent_length, rhs.except_within)) << index;
   }
 
-  const auto direct_width_tables = direct_storage.lef58WidthTableRules(direct_layer);
-  const auto adapted_width_tables = adapted_storage.lef58WidthTableRules(adapted_layer);
-  ASSERT_GE(direct_width_tables.size(), adapted_width_tables.size());
-  for (std::size_t index = 0; index < adapted_width_tables.size(); ++index) {
-    const auto& lhs = direct_storage.rule(direct_width_tables[index]);
-    const auto& rhs = adapted_storage.rule(adapted_width_tables[index]);
-    EXPECT_EQ(lhs.flags, rhs.flags) << index;
-    EXPECT_EQ(lhs.widths, rhs.widths) << index;
-  }
+  // width_tables: legacy iDB does not materialize these rules; native importer tests cover them.
 
   const auto direct_lef58_notches = direct_storage.lef58SpacingNotchLengthRules(direct_layer);
   const auto adapted_lef58_notches = adapted_storage.lef58SpacingNotchLengthRules(adapted_layer);
@@ -286,23 +260,9 @@ void expectRoutingRules(const TechStore& direct, TechRoutingLayerId direct_layer
   for (std::size_t index = 0; index < adapted_lef58_eol.size(); ++index) {
     const auto& lhs = direct_storage.rule(direct_lef58_eol[index]);
     const auto& rhs = adapted_storage.rule(adapted_lef58_eol[index]);
-    EXPECT_EQ(std::tie(lhs.flags, lhs.eol_space, lhs.eol_width, lhs.wrong_dir_space, lhs.opposite_width, lhs.eol_within,
-                       lhs.wrong_dir_within, lhs.except_exact_width1, lhs.except_exact_width2, lhs.fill_concave_corner_width,
-                       lhs.with_cut_class_name, lhs.with_cut_space, lhs.enclosure_end_width, lhs.enclosure_end_within,
-                       lhs.end_prl_space, lhs.end_prl, lhs.end_to_end_space, lhs.one_cut_space, lhs.two_cut_space, lhs.extension,
-                       lhs.wrong_dir_extension, lhs.other_end_width, lhs.adjacent_max_length, lhs.adjacent_min_length,
-                       lhs.parallel_space, lhs.parallel_within, lhs.parallel_run_length, lhs.parallel_min_length,
-                       lhs.enclose_cut_side, lhs.enclose_distance, lhs.cut_to_metal_spacing, lhs.to_concave_corner_min_length,
-                       lhs.to_concave_corner_min_adjacent_length1, lhs.to_concave_corner_min_adjacent_length2, lhs.notch_length),
-              std::tie(rhs.flags, rhs.eol_space, rhs.eol_width, rhs.wrong_dir_space, rhs.opposite_width, rhs.eol_within,
-                       rhs.wrong_dir_within, rhs.except_exact_width1, rhs.except_exact_width2, rhs.fill_concave_corner_width,
-                       rhs.with_cut_class_name, rhs.with_cut_space, rhs.enclosure_end_width, rhs.enclosure_end_within,
-                       rhs.end_prl_space, rhs.end_prl, rhs.end_to_end_space, rhs.one_cut_space, rhs.two_cut_space, rhs.extension,
-                       rhs.wrong_dir_extension, rhs.other_end_width, rhs.adjacent_max_length, rhs.adjacent_min_length,
-                       rhs.parallel_space, rhs.parallel_within, rhs.parallel_run_length, rhs.parallel_min_length,
-                       rhs.enclose_cut_side, rhs.enclose_distance, rhs.cut_to_metal_spacing, rhs.to_concave_corner_min_length,
-                       rhs.to_concave_corner_min_adjacent_length1, rhs.to_concave_corner_min_adjacent_length2, rhs.notch_length))
-        << index;
+    constexpr auto common_flags = TechRoutingLef58SpacingEolRuleFlag::kHasEolWithin | TechRoutingLef58SpacingEolRuleFlag::kHasEndToEnd | TechRoutingLef58SpacingEolRuleFlag::kHasOneCutSpace | TechRoutingLef58SpacingEolRuleFlag::kHasTwoCutSpace | TechRoutingLef58SpacingEolRuleFlag::kHasExtension | TechRoutingLef58SpacingEolRuleFlag::kHasWrongDirExtension | TechRoutingLef58SpacingEolRuleFlag::kHasOtherEndWidth | TechRoutingLef58SpacingEolRuleFlag::kHasAdjacentEdgeLength | TechRoutingLef58SpacingEolRuleFlag::kHasAdjacentMaxLength | TechRoutingLef58SpacingEolRuleFlag::kHasAdjacentMinLength | TechRoutingLef58SpacingEolRuleFlag::kTwoSides | TechRoutingLef58SpacingEolRuleFlag::kHasParallelEdge | TechRoutingLef58SpacingEolRuleFlag::kSubtractEolWidth | TechRoutingLef58SpacingEolRuleFlag::kHasParallelRunLength | TechRoutingLef58SpacingEolRuleFlag::kHasParallelMinLength | TechRoutingLef58SpacingEolRuleFlag::kTwoEdges | TechRoutingLef58SpacingEolRuleFlag::kSameMetal | TechRoutingLef58SpacingEolRuleFlag::kNonEolCornerOnly | TechRoutingLef58SpacingEolRuleFlag::kParallelSameMask | TechRoutingLef58SpacingEolRuleFlag::kHasEncloseCut | TechRoutingLef58SpacingEolRuleFlag::kAllCuts;
+    EXPECT_EQ(lhs.flags & common_flags, rhs.flags) << index;
+    EXPECT_EQ(std::tie(lhs.eol_space, lhs.eol_width, lhs.eol_within, lhs.end_to_end_space, lhs.one_cut_space, lhs.two_cut_space, lhs.extension, lhs.wrong_dir_extension, lhs.other_end_width, lhs.adjacent_max_length, lhs.adjacent_min_length, lhs.parallel_space, lhs.parallel_within, lhs.parallel_run_length, lhs.parallel_min_length, lhs.enclose_cut_side, lhs.enclose_distance, lhs.cut_to_metal_spacing), std::tie(rhs.eol_space, rhs.eol_width, rhs.eol_within, rhs.end_to_end_space, rhs.one_cut_space, rhs.two_cut_space, rhs.extension, rhs.wrong_dir_extension, rhs.other_end_width, rhs.adjacent_max_length, rhs.adjacent_min_length, rhs.parallel_space, rhs.parallel_within, rhs.parallel_run_length, rhs.parallel_min_length, rhs.enclose_cut_side, rhs.enclose_distance, rhs.cut_to_metal_spacing)) << index;
   }
 
   const auto direct_areas = direct_storage.minEncloseAreaRules(direct_layer);
@@ -328,20 +288,10 @@ void expectRoutingRules(const TechStore& direct, TechRoutingLayerId direct_layer
     EXPECT_EQ(lhs.type, rhs.type) << index;
   }
 
-  const auto direct_cuts = direct_storage.minimumCutRules(direct_layer);
   const auto adapted_cuts = adapted_storage.minimumCutRules(adapted_layer);
-  ASSERT_EQ(direct_cuts.size(), adapted_cuts.size());
-  for (std::size_t index = 0; index < direct_cuts.size(); ++index) {
-    const auto& lhs = direct_storage.rule(direct_cuts[index]);
-    const auto& rhs = adapted_storage.rule(adapted_cuts[index]);
-    EXPECT_EQ(lhs.flags, rhs.flags) << index;
-    EXPECT_EQ(lhs.num_cuts, rhs.num_cuts) << index;
-    EXPECT_EQ(lhs.width, rhs.width) << index;
-    EXPECT_EQ(lhs.within_cut_distance, rhs.within_cut_distance) << index;
-    EXPECT_EQ(lhs.orient, rhs.orient) << index;
-    EXPECT_EQ(lhs.length, rhs.length) << index;
-    EXPECT_EQ(lhs.length_distance, rhs.length_distance) << index;
-  }
+  // Legacy lef_read comments out native MINIMUMCUT parsing altogether.
+  // The adapter still supports the scalar pair for in-memory iDB callers.
+  EXPECT_TRUE(adapted_cuts.empty());
   const auto& adapted_component = adapted_storage.routingLayer(adapted_layer);
   if ((adapted_component.flags & TechRoutingLayerFlag::kHasMinCut) != 0u) {
     ASSERT_FALSE(adapted_cuts.empty());
@@ -352,8 +302,9 @@ void expectRoutingRules(const TechStore& direct, TechRoutingLayerId direct_layer
 
   const auto direct_prl = direct_storage.prlSpacingTableRules(direct_layer);
   const auto adapted_prl = adapted_storage.prlSpacingTableRules(adapted_layer);
-  ASSERT_EQ(direct_prl.size(), adapted_prl.size());
-  for (std::size_t index = 0; index < direct_prl.size(); ++index) {
+  // This collection also contains LEF58 PRL tables, which legacy iDB drops.
+  ASSERT_GE(direct_prl.size(), adapted_prl.size());
+  for (std::size_t index = 0; index < adapted_prl.size(); ++index) {
     const auto& lhs = direct_storage.rule(direct_prl[index]);
     const auto& rhs = adapted_storage.rule(adapted_prl[index]);
     EXPECT_EQ(lhs.flags, rhs.flags) << index;
@@ -393,49 +344,12 @@ void expectRoutingRules(const TechStore& direct, TechRoutingLayerId direct_layer
     }
   }
 
-  const auto direct_influence = direct_storage.influenceSpacingTableRules(direct_layer);
-  const auto adapted_influence = adapted_storage.influenceSpacingTableRules(adapted_layer);
-  ASSERT_EQ(direct_influence.size(), adapted_influence.size());
-  for (std::size_t rule_index = 0; rule_index < direct_influence.size(); ++rule_index) {
-    const auto& lhs = direct_storage.rule(direct_influence[rule_index]).entries;
-    const auto& rhs = adapted_storage.rule(adapted_influence[rule_index]).entries;
-    ASSERT_EQ(lhs.size(), rhs.size()) << rule_index;
-    for (std::size_t index = 0; index < lhs.size(); ++index) {
-      EXPECT_EQ(lhs[index].width, rhs[index].width) << rule_index << ':' << index;
-      EXPECT_EQ(lhs[index].within, rhs[index].within) << rule_index << ':' << index;
-      EXPECT_EQ(lhs[index].spacing, rhs[index].spacing) << rule_index << ':' << index;
-    }
-  }
+  // influence: legacy iDB does not materialize these rules; native importer tests cover them.
 
-  const auto direct_two_widths = direct_storage.twoWidthsSpacingTableRules(direct_layer);
-  const auto adapted_two_widths = adapted_storage.twoWidthsSpacingTableRules(adapted_layer);
-  ASSERT_EQ(direct_two_widths.size(), adapted_two_widths.size());
-  for (std::size_t rule_index = 0; rule_index < direct_two_widths.size(); ++rule_index) {
-    const auto& lhs = direct_storage.rule(direct_two_widths[rule_index]);
-    const auto& rhs = adapted_storage.rule(adapted_two_widths[rule_index]);
-    ASSERT_EQ(lhs.widths.size(), rhs.widths.size()) << rule_index;
-    for (std::size_t index = 0; index < lhs.widths.size(); ++index) {
-      EXPECT_EQ(lhs.widths[index].width, rhs.widths[index].width) << rule_index << ':' << index;
-      EXPECT_EQ(lhs.widths[index].has_prl, rhs.widths[index].has_prl) << rule_index << ':' << index;
-      EXPECT_EQ(lhs.widths[index].prl, rhs.widths[index].prl) << rule_index << ':' << index;
-    }
-    EXPECT_EQ(lhs.cells, rhs.cells) << rule_index;
-  }
+  // two_widths: legacy iDB does not materialize these rules; native importer tests cover them.
 
-  const auto direct_density = direct_storage.currentDensityRules(direct_layer);
-  const auto adapted_density = adapted_storage.currentDensityRules(adapted_layer);
-  ASSERT_EQ(direct_density.size(), adapted_density.size());
-  for (std::size_t index = 0; index < direct_density.size(); ++index) {
-    const auto& lhs = direct_storage.rule(direct_density[index]);
-    const auto& rhs = adapted_storage.rule(adapted_density[index]);
-    EXPECT_EQ(lhs.signal, rhs.signal) << index;
-    EXPECT_EQ(lhs.type, rhs.type) << index;
-    EXPECT_EQ(lhs.flags, rhs.flags) << index;
-    EXPECT_DOUBLE_EQ(lhs.scalar, rhs.scalar) << index;
-    EXPECT_EQ(lhs.frequencies, rhs.frequencies) << index;
-    EXPECT_EQ(lhs.widths, rhs.widths) << index;
-    EXPECT_EQ(lhs.table_entries, rhs.table_entries) << index;
-  }
+  // density: legacy iDB does not materialize these rules; native importer tests cover them.
+
 }
 
 void expectCutRules(const TechStore& direct, TechCutLayerId direct_layer, const TechStore& adapted, TechCutLayerId adapted_layer)
@@ -449,27 +363,28 @@ void expectCutRules(const TechStore& direct, TechCutLayerId direct_layer, const 
   for (std::size_t index = 0; index < direct_spacing.size(); ++index) {
     const auto& lhs = direct_storage.spacingRule(direct_spacing[index]);
     const auto& rhs = adapted_storage.spacingRule(adapted_spacing[index]);
-    EXPECT_EQ(lhs.flags, rhs.flags) << index;
+    EXPECT_EQ(lhs.flags & (TechCutSpacingRuleFlag::kSameNet | TechCutSpacingRuleFlag::kHasAdjacentCuts), rhs.flags) << index;
     EXPECT_EQ(lhs.spacing, rhs.spacing) << index;
     EXPECT_EQ(lhs.adjacent_cut_count, rhs.adjacent_cut_count) << index;
     EXPECT_EQ(lhs.adjacent_cut_within, rhs.adjacent_cut_within) << index;
-    EXPECT_EQ(lhs.second_layer_name, rhs.second_layer_name) << index;
-    EXPECT_EQ(lhs.cut_area, rhs.cut_area) << index;
   }
 
   const auto direct_enclosures = direct_storage.enclosureRules(direct_layer);
   const auto adapted_enclosures = adapted_storage.enclosureRules(adapted_layer);
-  ASSERT_EQ(direct_enclosures.size(), adapted_enclosures.size());
-  for (std::size_t index = 0; index < direct_enclosures.size(); ++index) {
-    const auto& lhs = direct_storage.enclosureRule(direct_enclosures[index]);
-    const auto& rhs = adapted_storage.enclosureRule(adapted_enclosures[index]);
-    EXPECT_EQ(lhs.flags, rhs.flags) << index;
-    EXPECT_EQ(lhs.side, rhs.side) << index;
-    EXPECT_EQ(lhs.overhang1, rhs.overhang1) << index;
-    EXPECT_EQ(lhs.overhang2, rhs.overhang2) << index;
-    EXPECT_EQ(lhs.min_width, rhs.min_width) << index;
-    EXPECT_EQ(lhs.cut_within, rhs.cut_within) << index;
-    EXPECT_EQ(lhs.min_length, rhs.min_length) << index;
+  // lef_read keeps only the last ABOVE rule. Unqualified enclosure is dropped;
+  // its BELOW setter overwrites overhang1 and leaves overhang2 unset.
+  // Those lost values cannot be reconstructed by the adapter.
+  const TechCutEnclosureRule* last_above = nullptr;
+  for (const auto id : direct_enclosures) {
+    const auto& rule = direct_storage.enclosureRule(id);
+    if (rule.side == CutLayerSide::kAbove) last_above = &rule;
+  }
+  ASSERT_EQ(adapted_enclosures.size(), last_above ? 1u : 0u);
+  if (last_above) {
+    const auto& rhs = adapted_storage.enclosureRule(adapted_enclosures.front());
+    EXPECT_EQ(last_above->side, rhs.side);
+    EXPECT_EQ(last_above->overhang1, rhs.overhang1);
+    EXPECT_EQ(last_above->overhang2, rhs.overhang2);
   }
 
   const auto direct_array_id = direct_storage.arraySpacingRule(direct_layer);
@@ -478,8 +393,7 @@ void expectCutRules(const TechStore& direct, TechCutLayerId direct_layer, const 
   if (direct_array_id) {
     const auto& lhs = direct_storage.arraySpacingRule(direct_array_id);
     const auto& rhs = adapted_storage.arraySpacingRule(adapted_array_id);
-    EXPECT_EQ(lhs.flags, rhs.flags);
-    EXPECT_EQ(lhs.via_width, rhs.via_width);
+    EXPECT_EQ(lhs.flags & (TechCutArraySpacingRuleFlag::kLongArray), rhs.flags);
     EXPECT_EQ(lhs.cut_spacing, rhs.cut_spacing);
     ASSERT_EQ(lhs.items.size(), rhs.items.size());
     for (std::size_t index = 0; index < lhs.items.size(); ++index) {
@@ -488,19 +402,7 @@ void expectCutRules(const TechStore& direct, TechCutLayerId direct_layer, const 
     }
   }
 
-  const auto direct_orthogonal = direct_storage.orthogonalSpacingTableRules(direct_layer);
-  const auto adapted_orthogonal = adapted_storage.orthogonalSpacingTableRules(adapted_layer);
-  ASSERT_EQ(direct_orthogonal.size(), adapted_orthogonal.size());
-  for (std::size_t rule_index = 0; rule_index < direct_orthogonal.size(); ++rule_index) {
-    const auto& lhs = direct_storage.orthogonalSpacingTableRule(direct_orthogonal[rule_index]);
-    const auto& rhs = adapted_storage.orthogonalSpacingTableRule(adapted_orthogonal[rule_index]);
-    EXPECT_EQ(lhs.flags, rhs.flags) << rule_index;
-    ASSERT_EQ(lhs.items.size(), rhs.items.size()) << rule_index;
-    for (std::size_t index = 0; index < lhs.items.size(); ++index) {
-      EXPECT_EQ(lhs.items[index].within, rhs.items[index].within) << rule_index << ':' << index;
-      EXPECT_EQ(lhs.items[index].spacing, rhs.items[index].spacing) << rule_index << ':' << index;
-    }
-  }
+  // orthogonal: legacy iDB does not materialize these rules; native importer tests cover them.
 
   const auto direct_cutclasses = direct_storage.lef58CutClassRules(direct_layer);
   const auto adapted_cutclasses = adapted_storage.lef58CutClassRules(adapted_layer);
@@ -515,21 +417,16 @@ void expectCutRules(const TechStore& direct, TechCutLayerId direct_layer, const 
 
   const auto direct_lef58_enclosures = direct_storage.lef58EnclosureRules(direct_layer);
   const auto adapted_lef58_enclosures = adapted_storage.lef58EnclosureRules(adapted_layer);
-  ASSERT_EQ(direct_lef58_enclosures.size(), adapted_lef58_enclosures.size());
-  for (std::size_t index = 0; index < direct_lef58_enclosures.size(); ++index) {
+  ASSERT_GE(direct_lef58_enclosures.size(), adapted_lef58_enclosures.size());
+  for (std::size_t index = 0; index < adapted_lef58_enclosures.size(); ++index) {
     const auto& lhs = direct_storage.lef58EnclosureRule(direct_lef58_enclosures[index]);
     const auto& rhs = adapted_storage.lef58EnclosureRule(adapted_lef58_enclosures[index]);
-    EXPECT_EQ(lhs.flags, rhs.flags) << index;
+    EXPECT_EQ(lhs.flags & (TechCutLef58EnclosureRuleFlag::kHasOverhang1 | TechCutLef58EnclosureRuleFlag::kHasOverhang2 | TechCutLef58EnclosureRuleFlag::kHasEndOverhang1 | TechCutLef58EnclosureRuleFlag::kHasSideOverhang2), rhs.flags) << index;
     EXPECT_EQ(lhs.cutclass_name, rhs.cutclass_name) << index;
-    EXPECT_EQ(lhs.side, rhs.side) << index;
     EXPECT_EQ(lhs.overhang1, rhs.overhang1) << index;
     EXPECT_EQ(lhs.overhang2, rhs.overhang2) << index;
     EXPECT_EQ(lhs.end_overhang1, rhs.end_overhang1) << index;
     EXPECT_EQ(lhs.side_overhang2, rhs.side_overhang2) << index;
-    EXPECT_EQ(lhs.min_width, rhs.min_width) << index;
-    EXPECT_EQ(lhs.cut_within, rhs.cut_within) << index;
-    EXPECT_EQ(lhs.min_length, rhs.min_length) << index;
-    EXPECT_EQ(lhs.redundant_cut_within, rhs.redundant_cut_within) << index;
   }
 
   const auto direct_enclosure_edges = direct_storage.lef58EnclosureEdgeRules(direct_layer);
@@ -583,30 +480,15 @@ void expectCutRules(const TechStore& direct, TechCutLayerId direct_layer, const 
 
   const auto direct_lef58_tables = direct_storage.lef58SpacingTableRules(direct_layer);
   const auto adapted_lef58_tables = adapted_storage.lef58SpacingTableRules(adapted_layer);
-  ASSERT_EQ(direct_lef58_tables.size(), adapted_lef58_tables.size());
-  for (std::size_t index = 0; index < direct_lef58_tables.size(); ++index) {
+  ASSERT_GE(direct_lef58_tables.size(), adapted_lef58_tables.size());
+  for (std::size_t index = 0; index < adapted_lef58_tables.size(); ++index) {
     const auto& lhs = direct_storage.lef58SpacingTableRule(direct_lef58_tables[index]);
     const auto& rhs = adapted_storage.lef58SpacingTableRule(adapted_lef58_tables[index]);
-    EXPECT_EQ(lhs.flags, rhs.flags) << index;
-    EXPECT_EQ(lhs.default_spacing, rhs.default_spacing) << index;
+    EXPECT_EQ(lhs.flags & (TechCutLef58SpacingTableRuleFlag::kHasSecondLayer | TechCutLef58SpacingTableRuleFlag::kHasPrl | TechCutLef58SpacingTableRuleFlag::kMaxXY), rhs.flags) << index;
     EXPECT_EQ(lhs.second_layer_name, rhs.second_layer_name) << index;
     EXPECT_EQ(lhs.prl, rhs.prl) << index;
-    EXPECT_EQ(lhs.prl_direction, rhs.prl_direction) << index;
     EXPECT_EQ(lhs.cutclass1_names, rhs.cutclass1_names) << index;
     EXPECT_EQ(lhs.cutclass2_names, rhs.cutclass2_names) << index;
-    EXPECT_EQ(lhs.cutclass1_edges, rhs.cutclass1_edges) << index;
-    EXPECT_EQ(lhs.cutclass2_edges, rhs.cutclass2_edges) << index;
-    ASSERT_EQ(lhs.prl_for_aligned_cut.size(), rhs.prl_for_aligned_cut.size()) << index;
-    for (std::size_t pair = 0; pair < lhs.prl_for_aligned_cut.size(); ++pair) {
-      EXPECT_EQ(lhs.prl_for_aligned_cut[pair].from, rhs.prl_for_aligned_cut[pair].from) << index << ':' << pair;
-      EXPECT_EQ(lhs.prl_for_aligned_cut[pair].to, rhs.prl_for_aligned_cut[pair].to) << index << ':' << pair;
-    }
-    ASSERT_EQ(lhs.prl_entries.size(), rhs.prl_entries.size()) << index;
-    for (std::size_t entry = 0; entry < lhs.prl_entries.size(); ++entry) {
-      EXPECT_EQ(lhs.prl_entries[entry].from, rhs.prl_entries[entry].from) << index << ':' << entry;
-      EXPECT_EQ(lhs.prl_entries[entry].to, rhs.prl_entries[entry].to) << index << ':' << entry;
-      EXPECT_EQ(lhs.prl_entries[entry].prl, rhs.prl_entries[entry].prl) << index << ':' << entry;
-    }
     ASSERT_EQ(lhs.cells.size(), rhs.cells.size()) << index;
     for (std::size_t cell = 0; cell < lhs.cells.size(); ++cell) {
       EXPECT_EQ(lhs.cells[cell].has_cut_spacing1, rhs.cells[cell].has_cut_spacing1) << index << ':' << cell;
@@ -616,20 +498,8 @@ void expectCutRules(const TechStore& direct, TechCutLayerId direct_layer, const 
     }
   }
 
-  const auto direct_density = direct_storage.currentDensityRules(direct_layer);
-  const auto adapted_density = adapted_storage.currentDensityRules(adapted_layer);
-  ASSERT_EQ(direct_density.size(), adapted_density.size());
-  for (std::size_t index = 0; index < direct_density.size(); ++index) {
-    const auto& lhs = direct_storage.currentDensityRule(direct_density[index]);
-    const auto& rhs = adapted_storage.currentDensityRule(adapted_density[index]);
-    EXPECT_EQ(lhs.signal, rhs.signal) << index;
-    EXPECT_EQ(lhs.type, rhs.type) << index;
-    EXPECT_EQ(lhs.flags, rhs.flags) << index;
-    EXPECT_DOUBLE_EQ(lhs.scalar, rhs.scalar) << index;
-    EXPECT_EQ(lhs.frequencies, rhs.frequencies) << index;
-    EXPECT_EQ(lhs.cut_areas, rhs.cut_areas) << index;
-    EXPECT_EQ(lhs.table_entries, rhs.table_entries) << index;
-  }
+  // density: legacy iDB does not materialize these rules; native importer tests cover them.
+
 }
 
 void expectGlobals(const TechStore& direct, const TechStore& adapted)
@@ -698,8 +568,10 @@ void expectTechnologyCommonSubset(const TechStore& direct, const TechStore& adap
     const auto direct_layer = direct.findLayer(adapted_info.name);
     ASSERT_TRUE(direct_layer);
     EXPECT_EQ(direct.layerInfo(direct_layer).name, adapted_info.name);
-    EXPECT_EQ(direct.layerInfo(direct_layer).flags, adapted_info.flags);
-    EXPECT_EQ(direct.layerInfo(direct_layer).lef58_type, adapted_info.lef58_type);
+    // Only MASTERSLICE has a legacy TYPE model. BACKSIDE is native-only.
+    if (layerKind(adapted, adapted_layer) == LayerKind::kMasterslice) {
+      EXPECT_EQ(direct.layerInfo(direct_layer).lef58_type, adapted_info.lef58_type);
+    }
     ASSERT_EQ(layerKind(direct, direct_layer), layerKind(adapted, adapted_layer));
 
     switch (layerKind(adapted, adapted_layer)) {
@@ -715,9 +587,8 @@ void expectTechnologyCommonSubset(const TechStore& direct, const TechStore& adap
         const auto adapted_id = TechCutLayerId{adapted_layer.entity()};
         const auto& lhs = direct.cutLayerStorage().cutLayer(direct_id);
         const auto& rhs = adapted.cutLayerStorage().cutLayer(adapted_id);
-        EXPECT_EQ(lhs.flags, rhs.flags);
+        EXPECT_EQ(lhs.flags & TechCutLayerFlag::kHasWidth, rhs.flags & TechCutLayerFlag::kHasWidth);
         EXPECT_EQ(lhs.width, rhs.width);
-        EXPECT_DOUBLE_EQ(lhs.resistance_per_cut, rhs.resistance_per_cut);
         expectCutRules(direct, direct_id, adapted, adapted_id);
         break;
       }
@@ -1123,6 +994,44 @@ void requireCorpusFiles(const lef_test::LefPdkDomain& domain)
   }
 }
 
+// Check the source side independently: a missing adapter rule must not make
+// the shared-subset comparison vacuously pass.
+void expectLegacyRuleCounts(::idb::IdbLayout& legacy, const TechStore& adapted)
+{
+  const auto nonnull = [](const auto& values) {
+    return static_cast<size_t>(std::count_if(values.begin(), values.end(), [](const auto& value) { return value != nullptr; }));
+  };
+  for (auto* layer : legacy.get_layers()->get_layers()) {
+    ASSERT_NE(layer, nullptr);
+    SCOPED_TRACE(layer->get_name());
+    const auto id = adapted.findLayer(layer->get_name());
+    ASSERT_TRUE(id);
+    if (auto* routing = dynamic_cast<::idb::IdbLayerRouting*>(layer)) {
+      const auto owner = TechRoutingLayerId{id.entity()};
+      const auto& storage = adapted.routingLayerStorage();
+      EXPECT_EQ(storage.lef58AreaRules(owner).size(), nonnull(routing->get_lef58_area()));
+      EXPECT_EQ(storage.lef58CornerSpacingRules(owner).size(), nonnull(routing->get_lef58_corner_spacing_list()));
+      EXPECT_EQ(storage.lef58MinimumCutRules(owner).size(), nonnull(routing->get_lef58_minimum_cut()));
+      EXPECT_EQ(storage.lef58MinStepRules(owner).size(), nonnull(routing->get_lef58_min_step()));
+      EXPECT_EQ(storage.lef58SpacingEolRules(owner).size(), nonnull(routing->get_lef58_spacing_eol_list()));
+      EXPECT_EQ(storage.lef58CornerFillSpacingRules(owner).size(), routing->get_lef58_corner_fill_spacing() ? 1u : 0u);
+      EXPECT_EQ(storage.lef58SpacingNotchLengthRules(owner).size(), routing->get_lef58_spacing_notchlength() ? 1u : 0u);
+      EXPECT_EQ(storage.lef58SpacingTableJogToJogRules(owner).size(), routing->get_lef58_spacingtable_jogtojog() ? 1u : 0u);
+      const auto table = routing->get_spacing_table();
+      EXPECT_EQ(storage.prlSpacingTableRules(owner).size(), table && table->get_parallel() ? 1u : 0u);
+    } else if (auto* cut = dynamic_cast<::idb::IdbLayerCut*>(layer)) {
+      const auto owner = TechCutLayerId{id.entity()};
+      const auto& storage = adapted.cutLayerStorage();
+      EXPECT_EQ(storage.lef58CutClassRules(owner).size(), nonnull(cut->get_lef58_cutclass_list()));
+      EXPECT_EQ(storage.lef58EnclosureRules(owner).size(), nonnull(cut->get_lef58_enclosure_list()));
+      EXPECT_EQ(storage.lef58EnclosureEdgeRules(owner).size(), nonnull(cut->get_lef58_enclosure_edge_list()));
+      EXPECT_EQ(storage.lef58SpacingTableRules(owner).size(), nonnull(cut->get_lef58_spacing_table()));
+      EXPECT_EQ(static_cast<bool>(storage.lef58EolEnclosureRule(owner)), cut->get_lef58_eol_enclosure() != nullptr);
+      EXPECT_EQ(static_cast<bool>(storage.lef58EolSpacingRule(owner)), cut->get_lef58_eol_spacing() != nullptr);
+    }
+  }
+}
+
 void compareDomain(const lef_test::LefPdkDomain& domain)
 {
   requireCorpusFiles(domain);
@@ -1159,6 +1068,7 @@ void compareDomain(const lef_test::LefPdkDomain& domain)
   adapted_tech_importer.import(legacy);
   LibraryStore adapted_library{adapted_tech.techRegistry(), LibraryStoreOptions{.geometry = geometry_options}};
   IdbLibraryImporter(adapted_library, adapted_tech_importer).import(legacy);
+  expectLegacyRuleCounts(legacy, adapted_tech);
   expectTechnologyCommonSubset(direct_tech, adapted_tech);
   expectLibrary(legacy, direct_tech, direct_library);
   expectLibrary(legacy, adapted_tech, adapted_library);
@@ -1278,6 +1188,7 @@ TEST(LefFullCorpusSemanticDifferentialTest, MatchesOpenRoadOdbGscl45TechnologyWh
 
   TechStore adapted;
   ASSERT_NO_THROW(IdbTechImporter(adapted).import(*service->get_layout()));
+  expectLegacyRuleCounts(*service->get_layout(), adapted);
   expectTechnologyCommonSubset(direct, adapted);
 }
 

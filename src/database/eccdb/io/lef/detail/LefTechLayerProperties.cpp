@@ -11,9 +11,9 @@
 #include <string_view>
 #include <utility>
 
-#include "property_parser/lef58_property/cutlayer_property_parser.h"
-#include "property_parser/lef58_property/layer_property_parser.h"
-#include "property_parser/lef58_property/routinglayer_property_parser.h"
+#include "lef/detail/parser/CutPropertyParser.h"
+#include "lef/detail/parser/LayerPropertyParser.h"
+#include "lef/detail/parser/RoutingPropertyParser.h"
 #include "tech/TechStore.h"
 #include "tech/cut_layer/storage/CutLayerStorage.h"
 #include "tech/masterslice_layer/storage/MastersliceLayerStorage.h"
@@ -22,9 +22,9 @@
 
 namespace eccdb::lef_detail {
 
-namespace cutlayer_property = idb::cutlayer_property;
-namespace layer_property = idb::layer_property;
-namespace routinglayer_property = idb::routinglayer_property;
+namespace cutlayer_property = grammar::cut;
+namespace layer_property = grammar::layer;
+namespace routinglayer_property = grammar::routing;
 
 namespace {
 

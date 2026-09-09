@@ -34,7 +34,10 @@
 #include <time.h>
 
 #include <iostream>
+#include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "def_service.h"
@@ -51,6 +54,15 @@ using std::vector;
 
 #define CLOCKS_PER_MS 1000
 
+struct DefReadError
+{
+  std::string file_path;
+  int64_t line_number;
+  std::string stage;
+  std::string message;
+  int32_t status;
+};
+
 class DefRead
 {
  public:
@@ -59,6 +71,7 @@ class DefRead
 
   // getter
   IdbDefService* get_service() { return _def_service; }
+  const DefReadError* get_last_error() const { return _last_error ? &*_last_error : nullptr; }
   bool createDb(const char* file);
   bool createDbGzip(const char* gzip_file);
   bool createFloorplanDb(const char* file);
@@ -159,10 +172,19 @@ class DefRead
   }
 
  private:
+  static void parserErrorCallback(defiUserData data, const char* message);
+
+  int32_t recordCallbackResult(std::string_view stage, int32_t status);
+  void resetError(const char* file);
+  void recordError(std::string_view stage, const char* message, int32_t status, int64_t line_number);
+  void logError() const;
+
   IdbDefService* _def_service;
   clock_t _start_time;
   clock_t _end_time;
 
   IdbCellMaster* _cur_cell_master;
+  std::string _file_path;
+  std::optional<DefReadError> _last_error;
 };
 }  // namespace idb

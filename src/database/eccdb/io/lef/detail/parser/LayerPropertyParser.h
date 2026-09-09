@@ -15,18 +15,20 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @file layer_property_parser.h
+ * @file LayerPropertyParser.h
  * @brief Common LEF58 layer property parser helpers.
  */
 
 #pragma once
 
+// EccDB-owned LEF58 syntax. Values are in LEF units; storage conversion and
+// diagnostics belong to LefTechLayerProperties, never to the legacy iDB parser.
+
 #include <boost/spirit/include/qi.hpp>
 
-#include <iostream>
 #include <string>
 
-namespace idb::layer_property {
+namespace eccdb::lef_detail::grammar::layer {
 namespace qi = boost::spirit::qi;
 
 template <typename Iterator>
@@ -36,7 +38,6 @@ bool parse_lef58_type(Iterator beg, Iterator end, std::string& type)
   const static qi::rule<Iterator, std::string(), qi::ascii::space_type> type_rule = qi::lit("TYPE") >> value_string >> qi::lit(";");
   bool ok = qi::phrase_parse(beg, end, type_rule, qi::ascii::space, type);
   if (not ok || beg != end) {
-    std::cout << "Parse \"" << std::string(beg, end) << "\" failed" << std::endl;
     return false;
   }
   return true;
@@ -48,7 +49,6 @@ bool parse_lef58_backside(Iterator beg, Iterator end)
   const static qi::rule<Iterator, qi::ascii::space_type> rule = qi::lit("BACKSIDE") >> qi::lit(";");
   bool ok = qi::phrase_parse(beg, end, rule, qi::ascii::space);
   if (not ok || beg != end) {
-    std::cout << "Parse \"" << std::string(beg, end) << "\" failed" << std::endl;
     return false;
   }
   return true;
@@ -62,7 +62,6 @@ bool parse_lef58_rectonly(Iterator beg, Iterator end, bool& except_non_core_pins
   const static qi::rule<Iterator, bool(), qi::ascii::space_type> rule = qi::lit("RECTONLY") >> except_rule >> qi::lit(";");
   bool ok = qi::phrase_parse(beg, end, rule, qi::ascii::space, except_non_core_pins);
   if (not ok || beg != end) {
-    std::cout << "Parse \"" << std::string(beg, end) << "\" failed" << std::endl;
     return false;
   }
   return true;
@@ -76,10 +75,9 @@ bool parse_lef58_rightwayongridonly(Iterator beg, Iterator end, bool& check_mask
   const static qi::rule<Iterator, bool(), qi::ascii::space_type> rule = qi::lit("RIGHTWAYONGRIDONLY") >> check_mask_rule >> qi::lit(";");
   bool ok = qi::phrase_parse(beg, end, rule, qi::ascii::space, check_mask);
   if (not ok || beg != end) {
-    std::cout << "Parse \"" << std::string(beg, end) << "\" failed" << std::endl;
     return false;
   }
   return true;
 }
 
-}  // namespace idb::layer_property
+}  // namespace eccdb::lef_detail::grammar::layer

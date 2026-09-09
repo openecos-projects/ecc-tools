@@ -6,10 +6,17 @@ else()
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
-add_library(irt_interface
+set(_irt_interface_sources
     ${IRT_INTERFACE}/RTInterface.cpp
-    ${PROJECT_SOURCE_DIR}/src/database/eccdb/adapters/irt/RTInterfaceEnTT.cpp
 )
+
+if(TARGET eccdb_design)
+    list(APPEND _irt_interface_sources
+        ${PROJECT_SOURCE_DIR}/src/database/eccdb/adapters/irt/RTInterfaceEnTT.cpp
+    )
+endif()
+
+add_library(irt_interface ${_irt_interface_sources})
 
 target_link_libraries(irt_interface
     PRIVATE

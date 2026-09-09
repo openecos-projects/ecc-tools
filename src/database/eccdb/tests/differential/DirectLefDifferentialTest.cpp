@@ -86,6 +86,7 @@ class TemporaryLef
 
 void compareSyntheticCutQualifiers()
 {
+  // Compare legacy-materialized qualifiers. Native-only syntax has separate importer tests.
   const TemporaryLef lef(R"LEF(
 VERSION 5.8 ;
 UNITS DATABASE MICRONS 1000 ; END UNITS
@@ -111,12 +112,11 @@ LAYER M1
   DIRECTION HORIZONTAL ;
   PITCH 0.20 ;
   WIDTH 0.10 ;
-  PROPERTY LEF58_AREA "AREA 0.10 MASK 1 EXCEPTMINWIDTH 0.02 EXCEPTMINSIZE 0.03 0.04 ;" ;
+  PROPERTY LEF58_AREA "AREA 0.10 EXCEPTMINSIZE 0.03 0.04 ;" ;
   PROPERTY LEF58_CORNERFILLSPACING "CORNERFILLSPACING 0.05 EDGELENGTH 0.06 0.07 ADJACENTEOL 0.08 ;" ;
-  PROPERTY LEF58_CORNERSPACING "CORNERSPACING CONVEXCORNER CORNERTOCORNER EXCEPTEOL 0.09 WIDTH 0.10 SPACING 0.11 ;" ;
+  PROPERTY LEF58_CORNERSPACING "CORNERSPACING CONVEXCORNER EXCEPTEOL 0.09 WIDTH 0.10 SPACING 0.11 ;" ;
   PROPERTY LEF58_MINIMUMCUT "MINIMUMCUT 2 WIDTH 0.09 WITHIN 0.10 FROMABOVE ;" ;
-  PROPERTY LEF58_MINSTEP "MINSTEP 0.11 INSIDECORNER LENGTHSUM 0.12 MAXEDGES 3 ;" ;
-  PROPERTY LEF58_WIDTHTABLE "WIDTHTABLE 0.10 0.20 WRONGDIRECTION ;" ;
+  PROPERTY LEF58_MINSTEP "MINSTEP 0.11 MAXEDGES 3 ;" ;
   PROPERTY LEF58_SPACING "SPACING 0.13 NOTCHLENGTH 0.14 CONCAVEENDS 0.15 ;" ;
   PROPERTY LEF58_SPACING "SPACING 0.16 ENDOFLINE 0.17 WITHIN 0.18 ;" ;
 END M1
@@ -124,19 +124,16 @@ LAYER V0 TYPE CUT ; WIDTH 0.04 ; END V0
 LAYER V1
   TYPE CUT ;
   WIDTH 0.05 ;
-  SPACING 0.21 CENTERTOCENTER SAMENET AREA 0.02 ;
-  SPACING 0.22 SAMENET PGONLY ;
-  SPACING 0.23 SAMENET LAYER V0 STACK ;
-  SPACING 0.24 ADJACENTCUTS 2 WITHIN 0.25 EXCEPTSAMEPGNET ;
-  SPACING 0.26 PARALLELOVERLAP ;
-  ENCLOSURE 0.01 0.02 LENGTH 0.03 ;
-  ENCLOSURE BELOW 0.04 0.05 WIDTH 0.06 EXCEPTEXTRACUT 0.07 ;
-  ARRAYSPACING WIDTH 0.08 CUTSPACING 0.09 ARRAYCUTS 2 SPACING 0.10 ;
+  SPACING 0.21 SAMENET ;
+  SPACING 0.22 SAMENET ;
+  SPACING 0.23 SAMENET ;
+  SPACING 0.24 ADJACENTCUTS 2 WITHIN 0.25 ;
+  SPACING 0.26 ;
+  ENCLOSURE ABOVE 0.01 0.02 ;
+  ARRAYSPACING CUTSPACING 0.09 ARRAYCUTS 2 SPACING 0.10 ;
   SPACINGTABLE ORTHOGONAL WITHIN 0.30 SPACING 0.20 WITHIN 0.10 SPACING 0.15 ;
-  PROPERTY LEF58_TYPE "TYPE SPECIALCUT ;" ;
-  PROPERTY LEF58_BACKSIDE "BACKSIDE ;" ;
   PROPERTY LEF58_ENCLOSURE
-    "ENCLOSURE CUTCLASS C1 ABOVE 0.11 0.12 WIDTH 0.13 INCLUDEABUTTED EXCEPTEXTRACUT 0.14 NOSHAREDEDGE ;" ;
+    "ENCLOSURE CUTCLASS C1 0.11 0.12 ;" ;
   PROPERTY LEF58_CUTCLASS "CUTCLASS C1 WIDTH 0.05 LENGTH 0.06 CUTS 2 ORIENT HORIZONTAL ;" ;
   PROPERTY LEF58_ENCLOSUREEDGE "ENCLOSUREEDGE CUTCLASS C1 BELOW 0.03 WIDTH 0.04 PARALLEL 0.05 WITHIN 0.06 ;" ;
   PROPERTY LEF58_EOLENCLOSURE "EOLENCLOSURE 0.07 MINEOLWIDTH 0.08 HORIZONTAL CUTCLASS C1 ABOVE 0.09 ;" ;
@@ -144,13 +141,10 @@ LAYER V1
     "EOLSPACING 0.10 0.11 CUTCLASS C1 TO C1 0.12 0.13 ENDWIDTH 0.14 PRL 0.15
      ENCLOSURE 0.16 0.17 EXTENSION 0.18 0.19 SPANLENGTH 0.20 ;" ;
   PROPERTY LEF58_SPACINGTABLE
-    "SPACINGTABLE ORTHOGONAL WITHIN 0.21 SPACING 0.22 WITHIN 0.23 SPACING 0.24 ;
-     SPACINGTABLE DEFAULT 0.12 SAMEMASK SAMENET
-       LAYER V0 NOSTACK PRLFORALIGNEDCUT C1 TO C2 C3 TO C4
-       PRL 0.14 MAXXY C1 TO C2 0.30
-       CUTCLASS C1 SIDE C1 END C2
-       C3 0.10 0.20 0.30 - 0.40 0.50
-       C4 0.60 - 0.70 - 0.80 0.90 ;" ;
+    "SPACINGTABLE LAYER V0 PRL 0.14 MAXXY
+       CUTCLASS C1 C2
+       C3 0.10 0.20 0.30 -
+       C4 0.60 - 0.70 0.80 ;" ;
 END V1
 END LIBRARY
 )LEF");
@@ -219,12 +213,7 @@ END LIBRARY
             std::tie(adapted_step.flags, adapted_step.type, adapted_step.min_step_length, adapted_step.max_length_sum,
                      adapted_step.max_edges));
 
-  const auto direct_widths = direct_routing.lef58WidthTableRules(direct_routing_layer);
-  const auto adapted_widths = adapted_routing.lef58WidthTableRules(adapted_routing_layer);
-  ASSERT_EQ(direct_widths.size(), 1u);
-  ASSERT_EQ(adapted_widths.size(), 1u);
-  EXPECT_EQ(direct_routing.rule(direct_widths.front()).flags, adapted_routing.rule(adapted_widths.front()).flags);
-  EXPECT_EQ(direct_routing.rule(direct_widths.front()).widths, adapted_routing.rule(adapted_widths.front()).widths);
+  // WIDTHTABLE is native-only and is covered by LefTechImporterTest.
 
   const auto direct_notches = direct_routing.lef58SpacingNotchLengthRules(direct_routing_layer);
   const auto adapted_notches = adapted_routing.lef58SpacingNotchLengthRules(adapted_routing_layer);
@@ -248,10 +237,6 @@ END LIBRARY
 
   const auto direct_layer = TechCutLayerId{direct.findLayer("V1").entity()};
   const auto adapted_layer = TechCutLayerId{adapted.findLayer("V1").entity()};
-  EXPECT_EQ(direct.layerInfo(TechLayerId{direct_layer.entity()}).flags, adapted.layerInfo(TechLayerId{adapted_layer.entity()}).flags);
-  EXPECT_EQ(direct.layerInfo(TechLayerId{direct_layer.entity()}).lef58_type,
-            adapted.layerInfo(TechLayerId{adapted_layer.entity()}).lef58_type);
-
   const auto& direct_storage = direct.cutLayerStorage();
   const auto& adapted_storage = adapted.cutLayerStorage();
   const auto direct_spacings = direct_storage.spacingRules(direct_layer);
@@ -282,16 +267,6 @@ END LIBRARY
   ASSERT_TRUE(adapted_array);
   EXPECT_EQ(direct_storage.arraySpacingRule(direct_array).flags, adapted_storage.arraySpacingRule(adapted_array).flags);
   EXPECT_EQ(direct_storage.arraySpacingRule(direct_array).via_width, adapted_storage.arraySpacingRule(adapted_array).via_width);
-
-  const auto direct_orthogonal = direct_storage.orthogonalSpacingTableRules(direct_layer);
-  const auto adapted_orthogonal = adapted_storage.orthogonalSpacingTableRules(adapted_layer);
-  ASSERT_EQ(direct_orthogonal.size(), adapted_orthogonal.size());
-  for (std::size_t index = 0; index < direct_orthogonal.size(); ++index) {
-    EXPECT_EQ(direct_storage.orthogonalSpacingTableRule(direct_orthogonal[index]).flags,
-              adapted_storage.orthogonalSpacingTableRule(adapted_orthogonal[index]).flags);
-    EXPECT_EQ(direct_storage.orthogonalSpacingTableRule(direct_orthogonal[index]).items.size(),
-              adapted_storage.orthogonalSpacingTableRule(adapted_orthogonal[index]).items.size());
-  }
 
   const auto direct_cutclasses = direct_storage.lef58CutClassRules(direct_layer);
   const auto adapted_cutclasses = adapted_storage.lef58CutClassRules(adapted_layer);
@@ -356,20 +331,8 @@ END LIBRARY
   const auto& direct_table = direct_storage.lef58SpacingTableRule(direct_tables.front());
   const auto& adapted_table = adapted_storage.lef58SpacingTableRule(adapted_tables.front());
   EXPECT_EQ(direct_table.flags, adapted_table.flags);
-  EXPECT_EQ(direct_table.flags,
-            TechCutLef58SpacingTableRuleFlag::kHasDefault | TechCutLef58SpacingTableRuleFlag::kSameMask
-                | TechCutLef58SpacingTableRuleFlag::kSameNet | TechCutLef58SpacingTableRuleFlag::kHasSecondLayer
-                | TechCutLef58SpacingTableRuleFlag::kNoStack | TechCutLef58SpacingTableRuleFlag::kPrlForAlignedCut
-                | TechCutLef58SpacingTableRuleFlag::kHasPrl | TechCutLef58SpacingTableRuleFlag::kMaxXY);
-  EXPECT_EQ(direct_table.default_spacing, 120);
   EXPECT_EQ(direct_table.second_layer_name, "V0");
   EXPECT_EQ(direct_table.prl, 140);
-  EXPECT_EQ(direct_table.prl_entries.size(), 1u);
-  EXPECT_EQ(direct_table.prl_for_aligned_cut.size(), 2u);
-  EXPECT_EQ(direct_table.cutclass1_edges,
-            (std::vector<CutClassEdge>{CutClassEdge::kSide, CutClassEdge::kEnd, CutClassEdge::kUnspecified}));
-  EXPECT_EQ(direct_table.cutclass2_edges,
-            (std::vector<CutClassEdge>{CutClassEdge::kUnspecified, CutClassEdge::kUnspecified}));
   EXPECT_EQ(direct_table.default_spacing, adapted_table.default_spacing);
   EXPECT_EQ(direct_table.prl_direction, adapted_table.prl_direction);
   EXPECT_EQ(direct_table.cutclass1_names, adapted_table.cutclass1_names);
@@ -378,7 +341,13 @@ END LIBRARY
   EXPECT_EQ(direct_table.cutclass2_edges, adapted_table.cutclass2_edges);
   ASSERT_EQ(direct_table.prl_for_aligned_cut.size(), adapted_table.prl_for_aligned_cut.size());
   ASSERT_EQ(direct_table.prl_entries.size(), adapted_table.prl_entries.size());
-  EXPECT_EQ(direct_table.cells.size(), adapted_table.cells.size());
+  ASSERT_EQ(direct_table.cells.size(), adapted_table.cells.size());
+  for (size_t index = 0; index < direct_table.cells.size(); ++index) {
+    const auto& lhs = direct_table.cells[index];
+    const auto& rhs = adapted_table.cells[index];
+    EXPECT_EQ(std::tie(lhs.has_cut_spacing1, lhs.has_cut_spacing2, lhs.cut_spacing1, lhs.cut_spacing2),
+              std::tie(rhs.has_cut_spacing1, rhs.has_cut_spacing2, rhs.cut_spacing1, rhs.cut_spacing2));
+  }
 
   const auto direct_lef58 = direct_storage.lef58EnclosureRules(direct_layer);
   const auto adapted_lef58 = adapted_storage.lef58EnclosureRules(adapted_layer);

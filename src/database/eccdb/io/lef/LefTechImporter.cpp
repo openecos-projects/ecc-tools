@@ -31,11 +31,11 @@
 #include "lefiVia.hpp"
 #include "lefiViaRule.hpp"
 #include "lefrReader.hpp"
-#include "property_parser/lef58_property/layer_property_parser.h"
+#include "lef/detail/parser/LayerPropertyParser.h"
 
 namespace eccdb {
 
-namespace layer_property = idb::layer_property;
+namespace layer_property = lef_detail::grammar::layer;
 
 namespace {
 
