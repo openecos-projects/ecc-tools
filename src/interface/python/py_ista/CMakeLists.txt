@@ -4,9 +4,8 @@ add_library(py_ista ${PY_ISTA_SRC})
 
 target_link_libraries(py_ista
     PUBLIC
-        tool_manager
         ista_interface
-        tcl_util
+        tcl
         pybind11::pybind11
         ecc_logger
 )

@@ -6,10 +6,8 @@ add_library(tcl_idb
 
 target_link_libraries(tcl_idb
     PUBLIC
-        tool_manager
         tcl
         idm
-        file_manager_db
         ecc_report
         ecc_logger
 )
