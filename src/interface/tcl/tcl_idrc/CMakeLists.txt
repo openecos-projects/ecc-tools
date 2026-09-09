@@ -6,7 +6,7 @@ add_library(tcl_idrc
 
 target_link_libraries(tcl_idrc
     PUBLIC
-        tcl_util
+        tcl
     PRIVATE
         idrc_interface
         ecc_logger
