@@ -10,31 +10,17 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "tool_manager.h"
+#pragma once
 
-#include "idm.h"
+#include <string>
 
-namespace iplf {
-ToolManager* ToolManager::_instance = nullptr;
+namespace python_interface {
 
-ToolManager::ToolManager()
-{
-}
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/// iDB
-bool ToolManager::idbStart(std::string config_path)
-{
-  return dmInst->init(config_path);
-}
-bool ToolManager::idbSave(std::string name)
-{
-  return dmInst->save(name);
-}
+bool init_emir(const std::string& temp_directory_path, const std::string& instance_power_file_path, const int& thread_number);
+bool run_emir();
+bool destroy_emir();
 
-}  // namespace iplf
+}  // namespace python_interface

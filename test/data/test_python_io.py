@@ -1,4 +1,16 @@
+from ecc_tools_bin import ecc_py
+
 from support import assert_nonempty_file, run_scenario
+
+
+def test_ifp_python_api_matches_tcl_commands():
+    for command in ("init_fp", "run_simple_fp", "run_fp", "destroy_fp"):
+        assert hasattr(ecc_py, command), f"missing Python iFP binding: {command}"
+
+
+def test_iemir_python_api_matches_tcl_commands():
+    for command in ("init_emir", "run_emir", "destroy_emir"):
+        assert hasattr(ecc_py, command), f"missing Python iEMIR binding: {command}"
 
 
 def test_def_round_trip(test_roots):
