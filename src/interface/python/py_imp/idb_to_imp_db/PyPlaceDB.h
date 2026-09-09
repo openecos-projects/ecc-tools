@@ -42,6 +42,9 @@ struct PyPlaceDB
   unsigned int num_nodes;           ///< number of nodes, including terminals and terminal_NIs
   unsigned int num_terminals;       ///< number of terminals, essentially fixed macros
   unsigned int num_terminal_NIs;    ///< number of terminal_NIs, essentially IO pins
+  unsigned int m2_pg_rail_blockage_rects;  ///< raw M2 PG rail rectangles collected before union
+  pybind11::list m2_pg_rail_boxes;          ///< raw M2 PG rail rectangles for legalization and refinement
+  pybind11::list m2_pg_rail_density_boxes;  ///< M2 PG rail boxes after subtracting fixed placement obstacles
   pybind11::dict node_name2id_map;  ///< node name to id map, cell name
   pybind11::list node_names;        ///< 1D array, cell name
   pybind11::list node_x;            ///< 1D array, cell position x
@@ -109,12 +112,15 @@ struct PyPlaceDB
 
   int num_movable_pins;
 
-  PyPlaceDB(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta)
+  PyPlaceDB(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
+            bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true)
   {
-    set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta);
+    set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage,
+        include_m2_pg_rail_density);
   }
 
-  void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta);
+  void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
+           bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true);
   void init_routability(idm::DataManager* db, std::vector<IdbInstance*> inst_resort_list);
   std::vector<std::vector<float>> getCongestionMap(string method = "max", string stage = "egr3D", string resolve_congestion = "low");
 };

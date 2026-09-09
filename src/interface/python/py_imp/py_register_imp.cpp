@@ -32,6 +32,9 @@ void register_imp(pybind11::module& m)
       .def_readwrite("num_nodes", &PyPlaceDB::num_nodes)
       .def_readwrite("num_terminals", &PyPlaceDB::num_terminals)
       .def_readwrite("num_terminal_NIs", &PyPlaceDB::num_terminal_NIs)
+      .def_readwrite("m2_pg_rail_blockage_rects", &PyPlaceDB::m2_pg_rail_blockage_rects)
+      .def_readwrite("m2_pg_rail_boxes", &PyPlaceDB::m2_pg_rail_boxes)
+      .def_readwrite("m2_pg_rail_density_boxes", &PyPlaceDB::m2_pg_rail_density_boxes)
       .def_readwrite("node_name2id_map", &PyPlaceDB::node_name2id_map)
       .def_readwrite("node_names", &PyPlaceDB::node_names)
       .def_readwrite("node_x", &PyPlaceDB::node_x)
@@ -88,9 +91,13 @@ void register_imp(pybind11::module& m)
 
   m.def(
       "pydb",
-      [](idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta) {
-        return PyPlaceDB(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta);
+      [](idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
+         bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density) {
+        return PyPlaceDB(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage,
+                         include_m2_pg_rail_density);
       },
+      py::arg("db"), py::arg("numRoutingGridsX"), py::arg("numRoutingGridsY"), py::arg("with_routability"), py::arg("with_sta"),
+      py::arg("include_m2_pg_rail_blockage") = false, py::arg("include_m2_pg_rail_density") = true,
       "Convert PlaceDB to PyPlaceDB");
 }
 
