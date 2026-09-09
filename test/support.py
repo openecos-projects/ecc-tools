@@ -16,6 +16,8 @@ INPUTS = {
     "floorplan": ("floorplan_in.v.gz",),
     "harden": ("harden_in.def.gz", "harden_in.v.gz"),
     "lvs": ("harden_in.def.gz", "harden_in.v.gz"),
+    "placement_map": ("cts_in.def.gz",),
+    "pyplacedb_rows": (),
     "rcx": ("route_in.def.gz", "route_in.v.gz"),
     "routing": ("route_in.def.gz",),
     "sta": ("route_in.def.gz", "route_in.v.gz"),
