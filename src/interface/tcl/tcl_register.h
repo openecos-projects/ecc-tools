@@ -31,7 +31,6 @@
 #include "tcl_register_cts.h"
 #include "tcl_register_feature.h"
 #include "tcl_register_flow.h"
-#include "tcl_register_geometry.h"
 #include "tcl_register_idb.h"
 #include "tcl_register_idrc.h"
 #include "tcl_register_irt.h"
@@ -85,8 +84,6 @@ int registerCommands()
   registerCmdZH();
 
   registerCmdReport();
-
-  registerCmdGeometry();
   return EXIT_SUCCESS;
 }
 

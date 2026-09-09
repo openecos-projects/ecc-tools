@@ -33,6 +33,7 @@ class IOPlacer
   static void destroyInst();
   // function
   void place();
+  void placeAuto();
 
  private:
   // self
@@ -47,6 +48,8 @@ class IOPlacer
   // function
 
   void placeIOPin();
+  void resetIOPinPlacement();
+  void placeIOPinsFromFile(const std::string& file_path);
   void autoPlacePins(std::vector<std::string>& layer_name_list);
   int32_t getLayerMinWidth(std::string layer_name);
   int32_t getTrackPitch(std::string layer_name);

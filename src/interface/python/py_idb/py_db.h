@@ -51,7 +51,6 @@ bool applyViewJsonEdits(const std::string& edits_path, bool compress = false);
 bool saveData(const std::string& path);
 bool resetData();
 bool loadData(const std::string& path);
-bool writeSocJson(const std::string& path, const std::vector<std::string>& harden_cores = {});
 bool writeAbstractLef(const std::string& output_lef_path);
 
 }  // namespace python_interface
