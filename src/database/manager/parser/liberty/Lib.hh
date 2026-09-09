@@ -1056,6 +1056,25 @@ class LibPowerArcSet
     for (auto p = power_arcs.begin(); p != power_arcs.end() ? power_arc = p->get(), true : false; ++p)
 
 /**
+ * @brief Raw state variables and string attributes of a Liberty ff/latch group.
+ * State variables are internal names, not physical cell pins. Expressions are
+ * kept verbatim for consumers to interpret; they do not classify timing cells.
+ */
+struct LibSequential
+{
+  bool is_latch = false;
+  std::vector<std::string> state_variables;
+  std::map<std::string, std::string> attributes;
+
+  const std::string& get_attribute(const std::string& name) const
+  {
+    static const std::string empty;
+    auto it = attributes.find(name);
+    return it == attributes.end() ? empty : it->second;
+  }
+};
+
+/**
  * @brief The timing cell in the liberty.
  *
  */
@@ -1071,6 +1090,8 @@ class LibCell : public LibObject
   const char* get_cell_name() const { return _cell_name.c_str(); }
   auto& get_cell_arcs() { return _cell_arcs; }
   auto& get_cell_power_arcs() { return _cell_power_arcs; }
+  const std::vector<LibSequential>& get_sequentials() const { return _sequentials; }
+  void addSequential(LibSequential&& sequential) { _sequentials.emplace_back(std::move(sequential)); }
 
   double get_cell_area() const { return _cell_area; }
   void set_cell_area(double cell_area) { _cell_area = cell_area; }
@@ -1161,6 +1182,8 @@ class LibCell : public LibObject
   unsigned _is_dont_use : 1;
   unsigned _is_macro_cell : 1;
   unsigned _reserved : 30;
+
+  std::vector<LibSequential> _sequentials;  //!< Raw ff/latch definitions, independent of timing arcs.
 
   FORBIDDEN_COPY(LibCell);
 };

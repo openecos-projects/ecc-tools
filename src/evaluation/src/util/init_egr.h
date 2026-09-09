@@ -34,7 +34,7 @@ class InitEGR
   void setTopRoutingLayer(const std::string& layer) { _top_layer_override = layer; }
   void setEnableTimingOverride(bool enable) { _enable_timing_override_set = true; _enable_timing_override = enable; }
   void setThreadNumberOverride(int threads) { _thread_number_override_set = true; _thread_number_override = threads; }
-  void setOutputInterResultOverride(int flag) { _output_inter_result_override_set = true; _output_inter_result_override = flag; }
+  void setOutputInterResultOverride(int flag) { _output_inter_result_override = flag; }
   void setStage(const std::string& stage) { _stage_override = stage; }
   void setResolveCongestion(const std::string& level) { _resolve_congestion_override = level; }
 
@@ -55,7 +55,6 @@ class InitEGR
   bool _enable_timing_override = false;
   bool _thread_number_override_set = false;
   int _thread_number_override = 128;
-  bool _output_inter_result_override_set = false;
   int _output_inter_result_override = 1;
   std::string _stage_override = "egr3D";
   std::string _resolve_congestion_override = "low";
