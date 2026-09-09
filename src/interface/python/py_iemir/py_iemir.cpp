@@ -10,38 +10,42 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "py_idrc.h"
+#include "py_iemir.h"
 
-#include "DRCInterface.hpp"
+#include <any>
+#include <map>
+
+#include "EMIRInterface.hpp"
 
 namespace python_interface {
 
-bool init_drc(const std::string& temp_directory_path, const int& thread_number)
+bool init_emir(const std::string& temp_directory_path, const std::string& instance_power_file_path, const int& thread_number)
 {
   std::map<std::string, std::any> config_map;
-  if (temp_directory_path != "") {
+  if (!temp_directory_path.empty()) {
     config_map.insert(std::make_pair("-temp_directory_path", temp_directory_path));
   }
-
+  if (!instance_power_file_path.empty()) {
+    config_map.insert(std::make_pair("-instance_power_file_path", instance_power_file_path));
+  }
   config_map.insert(std::make_pair("-thread_number", thread_number));
 
-  DRCI.initDRC(config_map, false);
+  EMIRI.initEMIR(config_map);
   return true;
 }
 
-bool check_def()
+bool run_emir()
 {
-  DRCI.checkDef();
+  EMIRI.runEMIR();
   return true;
 }
 
-bool destroy_drc()
+bool destroy_emir()
 {
-  DRCI.destroyDRC();
+  EMIRI.destroyEMIR();
   return true;
 }
 
