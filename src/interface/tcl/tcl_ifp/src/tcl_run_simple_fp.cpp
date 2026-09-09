@@ -16,24 +16,19 @@
 // ***************************************************************************************
 #include "FPInterface.hpp"
 #include "tcl_fp.h"
-#include "tcl_util.h"
 
 namespace tcl {
 
-TclDebugInputMacro::TclDebugInputMacro(const char* cmd_name) : TclCmd(cmd_name)
+TclRunSimpleFP::TclRunSimpleFP(const char* cmd_name) : TclCmd(cmd_name)
 {
-  _config_list.push_back(std::make_pair("-path", ValueType::kString));
-
-  TclUtil::addOption(this, _config_list);
 }
 
-unsigned TclDebugInputMacro::exec()
+unsigned TclRunSimpleFP::exec()
 {
   if (!check()) {
     return 0;
   }
-  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
-  FPI.debugInputMacro(config_map);
+  FPI.runSimpleFP();
   return 1;
 }
 
