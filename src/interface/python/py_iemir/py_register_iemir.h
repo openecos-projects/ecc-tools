@@ -10,31 +10,25 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "DRCInterface.hpp"
-#include "tcl_drc.h"
-#include "tcl_util.h"
+#pragma once
 
-namespace tcl {
+#include <pybind11/pybind11.h>
 
-TclDRCCmpViolation::TclDRCCmpViolation(const char* cmd_name) : TclCmd(cmd_name)
+#include "py_iemir.h"
+
+namespace python_interface {
+
+namespace py = pybind11;
+
+void register_iemir(py::module& m)
 {
-  _config_list.push_back(std::make_pair("-ref", ValueType::kString));
-
-  TclUtil::addOption(this, _config_list);
+  m.def("init_emir", init_emir, py::arg("temp_directory_path") = "", py::arg("instance_power_file_path") = "",
+        py::arg("thread_number") = 128);
+  m.def("run_emir", run_emir);
+  m.def("destroy_emir", destroy_emir);
 }
 
-unsigned TclDRCCmpViolation::exec()
-{
-  if (!check()) {
-    return 0;
-  }
-  std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
-  DRCI.cmpViolation(config_map);
-  return 1;
-}
-
-}  // namespace tcl
+}  // namespace python_interface

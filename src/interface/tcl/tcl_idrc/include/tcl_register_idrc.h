@@ -28,11 +28,6 @@ int registerCmdDRC()
   registerTclCmd(TclCheckDef, "check_def");
   registerTclCmd(TclDestroyDRC, "destroy_drc");
   registerTclCmd(TclInitDRC, "init_drc");
-  // aux
-  registerTclCmd(TclDRCCmpViolation, "drc_cmp_violation");
-
-  registerTclCmd(CmdDRCAutoRun, "run_drc");
-  registerTclCmd(CmdDRCSaveDetailFile, "save_drc");
   return EXIT_SUCCESS;
 }
 
