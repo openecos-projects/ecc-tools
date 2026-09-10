@@ -33,9 +33,9 @@ bool init_drc(const std::string& temp_directory_path, const int& thread_number)
   return true;
 }
 
-bool check_def()
+bool run_drc()
 {
-  DRCI.checkDef();
+  DRCI.runDRC();
   return true;
 }
 

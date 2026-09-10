@@ -19,16 +19,16 @@
 
 namespace tcl {
 
-TclCheckDef::TclCheckDef(const char* cmd_name) : TclCmd(cmd_name)
+TclRunDRC::TclRunDRC(const char* cmd_name) : TclCmd(cmd_name)
 {
 }
 
-unsigned TclCheckDef::exec()
+unsigned TclRunDRC::exec()
 {
   if (!check()) {
     return 0;
   }
-  DRCI.checkDef();
+  DRCI.runDRC();
   return 1;
 }
 

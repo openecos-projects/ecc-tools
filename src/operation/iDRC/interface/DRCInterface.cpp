@@ -83,7 +83,7 @@ void DRCInterface::initDRC(std::map<std::string, std::any> config_map, bool enab
   DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
 }
 
-void DRCInterface::checkDef()
+void DRCInterface::runDRC()
 {
   bool origin_quiet = DRCLOG.isQuiet();
   DRCLOG.disableQuiet();
