@@ -31,6 +31,10 @@ class PowerPin
   int32_t get_layer_idx() { return _layer_idx; }
   int32_t get_x() { return _x; }
   int32_t get_y() { return _y; }
+  int32_t get_low_x() { return _low_x; }
+  int32_t get_low_y() { return _low_y; }
+  int32_t get_high_x() { return _high_x; }
+  int32_t get_high_y() { return _high_y; }
   bool get_is_source() { return _is_source; }
   // setter
   void set_instance_id(uint64_t instance_id) { _instance_id = instance_id; }
@@ -38,6 +42,10 @@ class PowerPin
   void set_layer_idx(int32_t layer_idx) { _layer_idx = layer_idx; }
   void set_x(int32_t x) { _x = x; }
   void set_y(int32_t y) { _y = y; }
+  void set_low_x(int32_t low_x) { _low_x = low_x; }
+  void set_low_y(int32_t low_y) { _low_y = low_y; }
+  void set_high_x(int32_t high_x) { _high_x = high_x; }
+  void set_high_y(int32_t high_y) { _high_y = high_y; }
   void set_is_source(bool is_source) { _is_source = is_source; }
   // function
 
@@ -47,6 +55,10 @@ class PowerPin
   int32_t _layer_idx = -1;
   int32_t _x = 0;
   int32_t _y = 0;
+  int32_t _low_x = 0;
+  int32_t _low_y = 0;
+  int32_t _high_x = 0;
+  int32_t _high_y = 0;
   bool _is_source = false;
 };
 

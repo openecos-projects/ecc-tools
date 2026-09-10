@@ -15,10 +15,10 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @project		iDB
- * @file		IdbTerm.h
- * @date		25/05/2021
- * @version		0.1
+ * @project   iDB
+ * @file      IdbTerm.h
+ * @date      25/05/2021
+ * @version   0.1
 * @description
 
 
