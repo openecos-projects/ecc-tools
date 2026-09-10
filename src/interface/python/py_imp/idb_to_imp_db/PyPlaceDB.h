@@ -106,9 +106,7 @@ struct PyPlaceDB
 
   int row_height;
   int site_width;
-  double total_space_area;  ///< total placeable space area excluding fixed cells.
-                            ///< This is not the exact area, because we cannot exclude the overlapping fixed cells
-                            ///< within a bin.
+  double total_space_area;  ///< placeable core area minus the union of fixed bodies and residual obstacles
 
   int num_movable_pins;
 
