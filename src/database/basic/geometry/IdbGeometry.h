@@ -104,20 +104,20 @@ class IdbRect
   ~IdbRect() = default;
 
   // getter
-  int32_t get_low_x() { return _lx; }
-  int32_t get_low_y() { return _ly; }
-  IdbCoordinate<int32_t> get_low_point() { return IdbCoordinate<int32_t>(_lx, _ly); }
-  int32_t get_high_x() { return _hx; }
-  int32_t get_high_y() { return _hy; }
-  IdbCoordinate<int32_t> get_high_point() { return IdbCoordinate<int32_t>(_hx, _hy); }
-  IdbCoordinate<int32_t> get_middle_point() { return IdbCoordinate<int32_t>((_lx + _hx) / 2, (_ly + _hy) / 2); }
-  int32_t get_middle_point_x() { return (_lx + _hx) / 2; }
-  int32_t get_middle_point_y() { return (_ly + _hy) / 2; }
+  int32_t get_low_x() const { return _lx; }
+  int32_t get_low_y() const { return _ly; }
+  IdbCoordinate<int32_t> get_low_point() const { return IdbCoordinate<int32_t>(_lx, _ly); }
+  int32_t get_high_x() const { return _hx; }
+  int32_t get_high_y() const { return _hy; }
+  IdbCoordinate<int32_t> get_high_point() const { return IdbCoordinate<int32_t>(_hx, _hy); }
+  IdbCoordinate<int32_t> get_middle_point() const { return IdbCoordinate<int32_t>((_lx + _hx) / 2, (_ly + _hy) / 2); }
+  int32_t get_middle_point_x() const { return (_lx + _hx) / 2; }
+  int32_t get_middle_point_y() const { return (_ly + _hy) / 2; }
 
-  int32_t get_width() { return std::abs(_hx - _lx); }
-  int32_t get_height() { return std::abs(_hy - _ly); }
-  int32_t get_min_length() { return std::min(get_width(), get_height()); }
-  uint64_t get_area() { return ((uint64_t) get_width()) * ((uint64_t) get_height()); }
+  int32_t get_width() const { return std::abs(_hx - _lx); }
+  int32_t get_height() const { return std::abs(_hy - _ly); }
+  int32_t get_min_length() const { return std::min(get_width(), get_height()); }
+  uint64_t get_area() const { return ((uint64_t) get_width()) * ((uint64_t) get_height()); }
 
   bool is_init() { return (_lx == 0 && _ly == 0 && _hx == 0 && _hy == 0) ? false : true; }
 
