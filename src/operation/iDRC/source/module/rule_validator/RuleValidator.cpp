@@ -16,6 +16,17 @@
 // ***************************************************************************************
 #include "RuleValidator.hpp"
 
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <limits>
+#include <numeric>
+#include <queue>
+#include <set>
+#include <string>
+
 #include "DRCHeader.hpp"
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
@@ -24,6 +35,47 @@
 #include "Utility.hpp"
 
 namespace idrc {
+
+namespace {
+
+bool isDisabledEnvValue(const char* env_value)
+{
+  if (env_value == nullptr) {
+    return false;
+  }
+  std::string value(env_value);
+  return value == "0" || value == "false" || value == "FALSE" || value == "off" || value == "OFF" || value == "no" || value == "NO";
+}
+
+bool isLoadBalanceEnabled()
+{
+  return !isDisabledEnvValue(std::getenv("IDRC_ENABLE_LOAD_BALANCE"));
+}
+
+bool isLoadBalanceProfileEnabled()
+{
+  return !isDisabledEnvValue(std::getenv("IDRC_ENABLE_LOAD_BALANCE_PROFILE"));
+}
+
+int32_t getLoadBalanceProfileThread()
+{
+  const char* env_value = std::getenv("IDRC_LOAD_BALANCE_PROFILE_THREAD");
+  if (env_value == nullptr) {
+    env_value = std::getenv("IDRC_PROFILE_THREAD");
+  }
+  if (env_value == nullptr) {
+    return 8;
+  }
+  int32_t profile_thread = std::atoi(env_value);
+  return profile_thread > 0 ? profile_thread : 8;
+}
+
+bool shouldOutputLoadBalanceProfile()
+{
+  return isLoadBalanceProfileEnabled() && DRCDM.getConfig().thread_number == getLoadBalanceProfileThread();
+}
+
+}  // namespace
 
 // public
 
@@ -63,6 +115,16 @@ std::vector<Violation> RuleValidator::verify(std::vector<DRCShape> drc_env_shape
   RVModel rv_model(std::move(drc_env_shape_list), std::move(drc_result_shape_list), std::move(drc_check_type_set), std::move(drc_check_region_list));
   setRVComParam(rv_model);
   buildRVClusterList(rv_model);
+  if (isLoadBalanceEnabled()) {
+    loadBalance(rv_model, rv_model.get_grid_col_num(), rv_model.get_grid_row_num());
+    if (shouldOutputLoadBalanceProfile()) {
+      exportClusterProfileData(rv_model);
+      reportGroupStatistics(rv_model);
+    }
+  } else {
+    rv_model.set_rv_cluster_group_list({});
+    DRCLOG.info(Loc::current(), "loadBalance disabled by IDRC_ENABLE_LOAD_BALANCE");
+  }
   verifyRVModel(rv_model);
   buildViolationList(rv_model);
   // debugPlotRVModel(rv_model, "best");
@@ -128,6 +190,8 @@ void RuleValidator::buildRVClusterList(RVModel& rv_model)
     offset_y = bounding_box.get_ll_y();
     grid_x_size = bounding_box.getXSpan() / cluster_size + 1;
     grid_y_size = bounding_box.getYSpan() / cluster_size + 1;
+    rv_model.set_grid_col_num(grid_x_size);
+    rv_model.set_grid_row_num(grid_y_size);
   }
   rv_cluster_list.resize(grid_x_size * grid_y_size);
   for (int32_t grid_x = 0; grid_x < grid_x_size; grid_x++) {
@@ -190,17 +254,432 @@ void RuleValidator::buildRVClusterList(RVModel& rv_model)
   }
 }
 
+void RuleValidator::loadBalance(RVModel& rv_model, int32_t grid_col_num, int32_t grid_row_num)
+{
+  std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
+  int32_t cluster_num = static_cast<int32_t>(rv_cluster_list.size());
+  if (cluster_num <= 0 || grid_col_num <= 0 || grid_row_num <= 0) {
+    rv_model.set_rv_cluster_group_list({});
+    DRCLOG.info(Loc::current(), "loadBalance skipped: no clusters");
+    return;
+  }
+
+  std::vector<int32_t> shape_count_list;
+  shape_count_list.reserve(cluster_num);
+  for (RVCluster& rv_cluster : rv_cluster_list) {
+    shape_count_list.push_back(static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size() + rv_cluster.get_drc_result_shape_list().size()));
+  }
+
+  int32_t target_group_num = getTargetGroupNum(cluster_num);
+  std::vector<std::vector<int32_t>> cluster_group_list =
+      buildClusterGroupList(shape_count_list, grid_col_num, grid_row_num, target_group_num);
+  rv_model.set_rv_cluster_group_list(cluster_group_list);
+  DRCLOG.info(Loc::current(), "loadBalance completed: cluster_num=", cluster_num, ", target_group_num=", target_group_num,
+              ", actual_group_num=", static_cast<int32_t>(cluster_group_list.size()));
+}
+
+std::vector<std::vector<int32_t>> RuleValidator::buildClusterGroupList(const std::vector<int32_t>& shape_count_list, int32_t grid_col_num,
+                                                                        int32_t grid_row_num, int32_t target_group_num)
+{
+  int32_t cluster_num = static_cast<int32_t>(shape_count_list.size());
+  if (cluster_num <= 0 || grid_col_num <= 0 || grid_row_num <= 0) {
+    return {};
+  }
+
+  target_group_num = std::max(1, std::min(target_group_num, cluster_num));
+  int64_t total_shape_count = std::accumulate(shape_count_list.begin(), shape_count_list.end(), int64_t{0});
+  double avg_shape_count = static_cast<double>(total_shape_count) / target_group_num;
+  std::vector<std::vector<int32_t>> group_list;
+  std::vector<std::pair<int32_t, int32_t>> group_info_list;
+  group_list.reserve(cluster_num);
+  group_info_list.reserve(cluster_num);
+  for (int32_t cluster_idx = 0; cluster_idx < cluster_num; cluster_idx++) {
+    group_list.push_back({cluster_idx});
+    group_info_list.emplace_back(shape_count_list[cluster_idx], cluster_idx);
+  }
+  mergeToTargetGroupNum(group_list, group_info_list, target_group_num, avg_shape_count, grid_col_num, grid_row_num);
+
+  std::vector<std::vector<int32_t>> cluster_group_list;
+  cluster_group_list.reserve(target_group_num);
+  for (std::vector<int32_t>& group : group_list) {
+    if (!group.empty()) {
+      cluster_group_list.push_back(group);
+    }
+  }
+  return cluster_group_list;
+}
+
+int32_t RuleValidator::getTargetGroupNum(int32_t cluster_num)
+{
+  if (cluster_num <= 0) {
+    return 0;
+  }
+
+  int32_t thread_num = std::max(DRCDM.getConfig().thread_number, 1);
+  int32_t target_group_num = std::max(std::max(1, cluster_num / 4), std::min(cluster_num, thread_num * 16));
+  int32_t power = 1;
+  while (power < target_group_num) {
+    power *= 2;
+  }
+  if (power > 1 && (power - target_group_num) > (target_group_num - power / 2)) {
+    power /= 2;
+  }
+  return std::max(1, std::min(power, cluster_num));
+}
+
+void RuleValidator::mergeToTargetGroupNum(std::vector<std::vector<int32_t>>& group_list,
+                                          std::vector<std::pair<int32_t, int32_t>>& group_info_list, int32_t target_group_num,
+                                          double avg_shape_count, int32_t grid_col_num, int32_t grid_row_num)
+{
+  int32_t group_num = static_cast<int32_t>(group_list.size());
+  target_group_num = std::max(1, std::min(target_group_num, group_num));
+  if (group_num <= target_group_num || grid_col_num <= 0 || grid_row_num <= 0) {
+    return;
+  }
+
+  struct GroupHeapNode
+  {
+    int32_t shape_count = 0;
+    int32_t group_idx = -1;
+    int32_t version = 0;
+  };
+  struct CompareGroupHeapNode
+  {
+    bool operator()(const GroupHeapNode& lhs, const GroupHeapNode& rhs) const
+    {
+      return lhs.shape_count == rhs.shape_count ? lhs.group_idx > rhs.group_idx : lhs.shape_count > rhs.shape_count;
+    }
+  };
+
+  std::vector<int32_t> group_shape_count_list(group_num, 0);
+  for (const auto& group_info : group_info_list) {
+    if (group_info.second >= 0 && group_info.second < group_num) {
+      group_shape_count_list[group_info.second] = group_info.first;
+    }
+  }
+  std::vector<int32_t> cluster_to_group_list(grid_col_num * grid_row_num, -1);
+  std::vector<bool> active_group_list(group_num, false);
+  std::vector<int32_t> group_version_list(group_num, 0);
+  std::priority_queue<GroupHeapNode, std::vector<GroupHeapNode>, CompareGroupHeapNode> group_heap;
+  int32_t active_group_num = 0;
+  for (int32_t group_idx = 0; group_idx < group_num; group_idx++) {
+    active_group_list[group_idx] = true;
+    active_group_num++;
+    group_heap.push({group_shape_count_list[group_idx], group_idx, group_version_list[group_idx]});
+    cluster_to_group_list[group_idx] = group_idx;
+  }
+
+  while (active_group_num > target_group_num && !group_heap.empty()) {
+    GroupHeapNode current_node = group_heap.top();
+    group_heap.pop();
+    int32_t group_idx = current_node.group_idx;
+    if (group_idx < 0 || group_idx >= group_num || !active_group_list[group_idx] || current_node.version != group_version_list[group_idx]) {
+      continue;
+    }
+
+    int32_t best_neighbor_group_idx = -1;
+    double best_deviation = std::numeric_limits<double>::max();
+    int32_t best_neighbor_shape_count = std::numeric_limits<int32_t>::max();
+    for (int32_t cluster_idx : group_list[group_idx]) {
+      for (int32_t neighbor_idx : getNeighborIdxList(cluster_idx, grid_col_num, grid_row_num)) {
+        int32_t neighbor_group_idx = cluster_to_group_list[neighbor_idx];
+        if (neighbor_group_idx < 0 || neighbor_group_idx == group_idx || !active_group_list[neighbor_group_idx]) {
+          continue;
+        }
+        int32_t neighbor_shape_count = group_shape_count_list[neighbor_group_idx];
+        double deviation = std::abs(static_cast<double>(group_shape_count_list[group_idx] + neighbor_shape_count) - avg_shape_count);
+        if (deviation < best_deviation
+            || (deviation == best_deviation
+                && (neighbor_shape_count < best_neighbor_shape_count || neighbor_group_idx < best_neighbor_group_idx))) {
+          best_deviation = deviation;
+          best_neighbor_group_idx = neighbor_group_idx;
+          best_neighbor_shape_count = neighbor_shape_count;
+        }
+      }
+    }
+    if (best_neighbor_group_idx < 0) {
+      continue;
+    }
+
+    group_list[group_idx].insert(group_list[group_idx].end(), group_list[best_neighbor_group_idx].begin(),
+                                 group_list[best_neighbor_group_idx].end());
+    for (int32_t cluster_idx : group_list[best_neighbor_group_idx]) {
+      cluster_to_group_list[cluster_idx] = group_idx;
+    }
+    group_list[best_neighbor_group_idx].clear();
+    active_group_list[best_neighbor_group_idx] = false;
+    active_group_num--;
+    group_shape_count_list[group_idx] += group_shape_count_list[best_neighbor_group_idx];
+    group_shape_count_list[best_neighbor_group_idx] = 0;
+    group_version_list[group_idx]++;
+    group_version_list[best_neighbor_group_idx]++;
+    group_heap.push({group_shape_count_list[group_idx], group_idx, group_version_list[group_idx]});
+  }
+
+  group_info_list.clear();
+  for (int32_t group_idx = 0; group_idx < group_num; group_idx++) {
+    if (active_group_list[group_idx] && !group_list[group_idx].empty()) {
+      group_info_list.emplace_back(group_shape_count_list[group_idx], group_idx);
+    }
+  }
+}
+
+std::vector<int32_t> RuleValidator::getNeighborIdxList(int32_t cluster_idx, int32_t grid_col_num, int32_t grid_row_num)
+{
+  std::vector<int32_t> neighbor_idx_list;
+  if (cluster_idx < 0 || grid_col_num <= 0 || grid_row_num <= 0) {
+    return neighbor_idx_list;
+  }
+
+  int32_t grid_x = cluster_idx % grid_col_num;
+  int32_t grid_y = cluster_idx / grid_col_num;
+  if (grid_y < 0 || grid_y >= grid_row_num) {
+    return neighbor_idx_list;
+  }
+  if (grid_x < grid_col_num - 1) {
+    neighbor_idx_list.push_back(cluster_idx + 1);
+  }
+  if (grid_x > 0) {
+    neighbor_idx_list.push_back(cluster_idx - 1);
+  }
+  if (grid_y < grid_row_num - 1) {
+    neighbor_idx_list.push_back(cluster_idx + grid_col_num);
+  }
+  if (grid_y > 0) {
+    neighbor_idx_list.push_back(cluster_idx - grid_col_num);
+  }
+  return neighbor_idx_list;
+}
+
+int32_t RuleValidator::getUniqueShapeCount(std::vector<int32_t>& cluster_idx_list, std::vector<RVCluster>& rv_cluster_list)
+{
+  std::set<DRCShape*> unique_shape_set;
+  for (int32_t cluster_idx : cluster_idx_list) {
+    if (cluster_idx < 0 || cluster_idx >= static_cast<int32_t>(rv_cluster_list.size())) {
+      continue;
+    }
+    RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
+    unique_shape_set.insert(rv_cluster.get_drc_env_shape_list().begin(), rv_cluster.get_drc_env_shape_list().end());
+    unique_shape_set.insert(rv_cluster.get_drc_result_shape_list().begin(), rv_cluster.get_drc_result_shape_list().end());
+  }
+  return static_cast<int32_t>(unique_shape_set.size());
+}
+
+void RuleValidator::reportGroupStatistics(RVModel& rv_model)
+{
+  std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
+  std::vector<std::vector<int32_t>>& cluster_group_list = rv_model.get_rv_cluster_group_list();
+  if (cluster_group_list.empty()) {
+    return;
+  }
+
+  int64_t total_shape_count = 0;
+  for (RVCluster& rv_cluster : rv_cluster_list) {
+    total_shape_count += static_cast<int64_t>(rv_cluster.get_drc_env_shape_list().size() + rv_cluster.get_drc_result_shape_list().size());
+  }
+  int32_t group_num = static_cast<int32_t>(cluster_group_list.size());
+  double ideal_avg = static_cast<double>(total_shape_count) / group_num;
+  double variance = 0.0;
+  int32_t min_count = std::numeric_limits<int32_t>::max();
+  int32_t max_count = 0;
+  for (const std::vector<int32_t>& cluster_idx_list : cluster_group_list) {
+    int32_t group_shape_count = 0;
+    for (int32_t cluster_idx : cluster_idx_list) {
+      if (cluster_idx >= 0 && cluster_idx < static_cast<int32_t>(rv_cluster_list.size())) {
+        RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
+        group_shape_count += static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size() + rv_cluster.get_drc_result_shape_list().size());
+      }
+    }
+    min_count = std::min(min_count, group_shape_count);
+    max_count = std::max(max_count, group_shape_count);
+    double diff = static_cast<double>(group_shape_count) - ideal_avg;
+    variance += diff * diff;
+  }
+  variance /= group_num;
+  double cv = ideal_avg > 0.0 ? (std::sqrt(variance) / ideal_avg) * 100.0 : 0.0;
+  DRCLOG.info(Loc::current(), "Load Balance Group Statistics: groups=", group_num, ", total_shapes=", total_shape_count,
+              ", min=", min_count, ", max=", max_count, ", cv=", cv, "%");
+}
+
+void RuleValidator::exportClusterProfileData(RVModel& rv_model)
+{
+  const std::string& temp_directory_path = DRCDM.getConfig().rv_temp_directory_path;
+  std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
+  std::vector<std::vector<int32_t>>& cluster_group_list = rv_model.get_rv_cluster_group_list();
+  int32_t grid_col_num = rv_model.get_grid_col_num();
+  int32_t grid_row_num = rv_model.get_grid_row_num();
+  if (rv_cluster_list.empty() || cluster_group_list.empty() || grid_col_num <= 0 || grid_row_num <= 0) {
+    return;
+  }
+
+  int32_t total_cluster_num = grid_col_num * grid_row_num;
+  std::ofstream before_file(temp_directory_path + "cluster_before.csv");
+  if (before_file.is_open()) {
+    before_file << "cluster_idx,grid_x,grid_y,shape_count\n";
+    for (int32_t cluster_idx = 0; cluster_idx < total_cluster_num; cluster_idx++) {
+      int32_t shape_count = 0;
+      if (cluster_idx < static_cast<int32_t>(rv_cluster_list.size())) {
+        RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
+        shape_count = static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size() + rv_cluster.get_drc_result_shape_list().size());
+      }
+      before_file << cluster_idx << "," << cluster_idx % grid_col_num << "," << cluster_idx / grid_col_num << "," << shape_count << "\n";
+    }
+  }
+
+  std::vector<int32_t> cluster_to_group_list(total_cluster_num, -1);
+  std::vector<int32_t> group_shape_count_list(cluster_group_list.size(), 0);
+  for (size_t group_idx = 0; group_idx < cluster_group_list.size(); group_idx++) {
+    std::vector<int32_t>& cluster_idx_list = cluster_group_list[group_idx];
+    for (int32_t cluster_idx : cluster_idx_list) {
+      if (cluster_idx >= 0 && cluster_idx < total_cluster_num) {
+        cluster_to_group_list[cluster_idx] = static_cast<int32_t>(group_idx);
+      }
+    }
+    group_shape_count_list[group_idx] = getUniqueShapeCount(cluster_idx_list, rv_cluster_list);
+  }
+
+  std::ofstream after_file(temp_directory_path + "cluster_after.csv");
+  if (after_file.is_open()) {
+    after_file << "cluster_idx,grid_x,grid_y,group_id,group_shape_count\n";
+    for (int32_t cluster_idx = 0; cluster_idx < total_cluster_num; cluster_idx++) {
+      int32_t group_idx = cluster_to_group_list[cluster_idx];
+      int32_t group_shape_count = group_idx >= 0 ? group_shape_count_list[group_idx] : 0;
+      after_file << cluster_idx << "," << cluster_idx % grid_col_num << "," << cluster_idx / grid_col_num << "," << group_idx << ","
+                 << group_shape_count << "\n";
+    }
+  }
+}
+
 void RuleValidator::verifyRVModel(RVModel& rv_model)
 {
   auto monitor = Monitor::create();
   DRCLOG.info(Loc::current(), "Starting...");
+  std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
+  std::vector<std::vector<int32_t>>& cluster_group_list = rv_model.get_rv_cluster_group_list();
+  bool output_runtime_profile = shouldOutputLoadBalanceProfile();
+  std::vector<double> cluster_runtime_list(output_runtime_profile ? rv_cluster_list.size() : 0, 0.0);
+  std::vector<int32_t> cluster_env_shape_count_list(output_runtime_profile ? rv_cluster_list.size() : 0, 0);
+  std::vector<int32_t> cluster_result_shape_count_list(output_runtime_profile ? rv_cluster_list.size() : 0, 0);
+  auto write_cluster_info = [&]() {
+    if (!output_runtime_profile) {
+      return;
+    }
+    std::ofstream cluster_csv_file(DRCDM.getConfig().rv_temp_directory_path + "cluster_info.csv");
+    if (!cluster_csv_file.is_open()) {
+      DRCLOG.warn(Loc::current(), "Failed to open cluster_info.csv");
+      return;
+    }
+    cluster_csv_file << "cluster_idx,env_shape_count,result_shape_count,runtime_seconds\n";
+    for (size_t cluster_idx = 0; cluster_idx < rv_cluster_list.size(); cluster_idx++) {
+      cluster_csv_file << cluster_idx << "," << cluster_env_shape_count_list[cluster_idx] << ","
+                       << cluster_result_shape_count_list[cluster_idx] << "," << std::fixed << std::setprecision(6)
+                       << cluster_runtime_list[cluster_idx] << "\n";
+    }
+  };
+  auto write_group_info = [&](const std::vector<double>& group_runtime_list) {
+    if (!output_runtime_profile || cluster_group_list.empty()) {
+      return;
+    }
+    std::ofstream group_csv_file(DRCDM.getConfig().rv_temp_directory_path + "group_info.csv");
+    if (!group_csv_file.is_open()) {
+      DRCLOG.warn(Loc::current(), "Failed to open group_info.csv");
+      return;
+    }
+    group_csv_file << "group_idx,cluster_count,shape_count,runtime_seconds\n";
+    for (size_t group_idx = 0; group_idx < cluster_group_list.size(); group_idx++) {
+      int32_t cluster_count = 0;
+      int32_t shape_count = 0;
+      double runtime = group_runtime_list.empty() ? 0.0 : group_runtime_list[group_idx];
+      for (int32_t cluster_idx : cluster_group_list[group_idx]) {
+        if (cluster_idx < 0 || cluster_idx >= static_cast<int32_t>(rv_cluster_list.size())) {
+          continue;
+        }
+        cluster_count++;
+        shape_count += cluster_env_shape_count_list[cluster_idx] + cluster_result_shape_count_list[cluster_idx];
+        if (group_runtime_list.empty()) {
+          runtime += cluster_runtime_list[cluster_idx];
+        }
+      }
+      group_csv_file << group_idx << "," << cluster_count << "," << shape_count << "," << std::fixed << std::setprecision(6) << runtime << "\n";
+    }
+  };
+  bool use_group_scheduling = !cluster_group_list.empty();
+  if (use_group_scheduling && cluster_group_list.size() == rv_cluster_list.size()) {
+    std::vector<bool> visited_cluster_list(rv_cluster_list.size(), false);
+    int32_t visited_cluster_num = 0;
+    for (const std::vector<int32_t>& cluster_idx_list : cluster_group_list) {
+      if (cluster_idx_list.size() != 1) {
+        break;
+      }
+      int32_t cluster_idx = cluster_idx_list.front();
+      if (cluster_idx < 0 || cluster_idx >= static_cast<int32_t>(rv_cluster_list.size()) || visited_cluster_list[cluster_idx]) {
+        break;
+      }
+      visited_cluster_list[cluster_idx] = true;
+      visited_cluster_num++;
+    }
+    if (visited_cluster_num == static_cast<int32_t>(rv_cluster_list.size())) {
+      use_group_scheduling = false;
+      DRCLOG.info(Loc::current(), "loadBalance group scheduling skipped: one cluster per group");
+    }
+  }
+
+  if (use_group_scheduling) {
+    std::vector<double> group_runtime_list(output_runtime_profile ? cluster_group_list.size() : 0, 0.0);
 #pragma omp parallel for schedule(dynamic)
-  for (RVCluster& rv_cluster : rv_model.get_rv_cluster_list()) {
+    for (int32_t group_idx = 0; group_idx < static_cast<int32_t>(cluster_group_list.size()); group_idx++) {
+      std::chrono::high_resolution_clock::time_point group_start_time;
+      if (output_runtime_profile) {
+        group_start_time = std::chrono::high_resolution_clock::now();
+      }
+      for (int32_t cluster_idx : cluster_group_list[group_idx]) {
+        if (cluster_idx < 0 || cluster_idx >= static_cast<int32_t>(rv_cluster_list.size())) {
+          continue;
+        }
+        RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
+        std::chrono::high_resolution_clock::time_point cluster_start_time;
+        if (output_runtime_profile) {
+          cluster_start_time = std::chrono::high_resolution_clock::now();
+        }
+        buildRVCluster(rv_cluster);
+        if (needVerifying(rv_cluster)) {
+          buildViolationList(rv_cluster);
+        }
+        if (output_runtime_profile) {
+          cluster_runtime_list[cluster_idx] = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - cluster_start_time).count();
+          cluster_env_shape_count_list[cluster_idx] = static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size());
+          cluster_result_shape_count_list[cluster_idx] = static_cast<int32_t>(rv_cluster.get_drc_result_shape_list().size());
+        }
+      }
+      if (output_runtime_profile) {
+        group_runtime_list[group_idx] = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - group_start_time).count();
+      }
+    }
+    write_cluster_info();
+    write_group_info(group_runtime_list);
+    DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
+    return;
+  }
+
+#pragma omp parallel for schedule(dynamic)
+  for (size_t cluster_idx = 0; cluster_idx < rv_cluster_list.size(); cluster_idx++) {
+    RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
+    std::chrono::high_resolution_clock::time_point cluster_start_time;
+    if (output_runtime_profile) {
+      cluster_start_time = std::chrono::high_resolution_clock::now();
+    }
     buildRVCluster(rv_cluster);
     if (needVerifying(rv_cluster)) {
       buildViolationList(rv_cluster);
     }
+    if (output_runtime_profile) {
+      cluster_runtime_list[cluster_idx] = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - cluster_start_time).count();
+      cluster_env_shape_count_list[cluster_idx] = static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size());
+      cluster_result_shape_count_list[cluster_idx] = static_cast<int32_t>(rv_cluster.get_drc_result_shape_list().size());
+    }
   }
+  write_cluster_info();
+  write_group_info({});
   DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
 }
 
