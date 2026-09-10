@@ -760,6 +760,43 @@ bool IdbDesign::connectPinToSpecialNet(IdbPin* pin, IdbSpecialNet* net)
   return true;
 }
 
+bool IdbDesign::connectPinsToSpecialNet(const std::vector<IdbPin*>& pins, IdbSpecialNet* net)
+{
+  if (net == nullptr || std::find(pins.begin(), pins.end(), nullptr) != pins.end()) {
+    return false;
+  }
+
+  const auto connected_pins = pins;
+  std::vector<IdbPin*> io_pins;
+  std::vector<IdbPin*> instance_pins;
+  std::vector<IdbInstance*> instances;
+  instance_pins.reserve(pins.size());
+  instances.reserve(pins.size());
+  for (auto* pin : pins) {
+    if (pin->is_io_pin()) {
+      io_pins.emplace_back(pin);
+    } else {
+      instance_pins.emplace_back(pin);
+      if (pin->get_instance() != nullptr) {
+        instances.emplace_back(pin->get_instance());
+      }
+    }
+  }
+  if (!net->get_instance_list()->add_instance_refs(instances)) {
+    return false;
+  }
+  net->get_io_pin_list()->add_pin_refs_unique(io_pins);
+  net->get_instance_pin_list()->add_pin_refs_unique(instance_pins);
+  for (auto* pin : connected_pins) {
+    if (pin->get_special_net() != nullptr && pin->get_special_net() != net) {
+      disconnectPinFromSpecialNet(pin);
+    }
+    pin->set_special_net(net);
+    refreshPinNetName(pin);
+  }
+  return true;
+}
+
 IdbSpecialNet* IdbDesign::findSpecialNetForInstancePin(IdbPin* pin) const
 {
   if (pin == nullptr || pin->is_io_pin()) {

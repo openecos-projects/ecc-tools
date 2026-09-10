@@ -71,6 +71,7 @@ class EMIRInterface
   void wrapDBInfo();
   void wrapInstanceIdSet();
   void wrapPowerNetList();
+  void wrapRedHawkResNetwork();
   void wrapPowerNet(idb::IdbSpecialNet* idb_power_net);
   PowerNetType wrapPowerNetType(idb::IdbConnectType connect_type);
   void wrapPowerWireSegmentList(PowerNet& power_net, idb::IdbSpecialNet* idb_power_net);
