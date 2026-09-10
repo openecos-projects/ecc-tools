@@ -18,7 +18,6 @@
 
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -38,41 +37,14 @@ namespace idrc {
 
 namespace {
 
-bool isDisabledEnvValue(const char* env_value)
-{
-  if (env_value == nullptr) {
-    return false;
-  }
-  std::string value(env_value);
-  return value == "0" || value == "false" || value == "FALSE" || value == "off" || value == "OFF" || value == "no" || value == "NO";
-}
-
-bool isLoadBalanceEnabled()
-{
-  return !isDisabledEnvValue(std::getenv("IDRC_ENABLE_LOAD_BALANCE"));
-}
-
-bool isLoadBalanceProfileEnabled()
-{
-  return !isDisabledEnvValue(std::getenv("IDRC_ENABLE_LOAD_BALANCE_PROFILE"));
-}
-
-int32_t getLoadBalanceProfileThread()
-{
-  const char* env_value = std::getenv("IDRC_LOAD_BALANCE_PROFILE_THREAD");
-  if (env_value == nullptr) {
-    env_value = std::getenv("IDRC_PROFILE_THREAD");
-  }
-  if (env_value == nullptr) {
-    return 8;
-  }
-  int32_t profile_thread = std::atoi(env_value);
-  return profile_thread > 0 ? profile_thread : 8;
-}
+// Change these constants and rebuild ecc_bin to select the LB and profiling paths.
+constexpr bool kEnableLoadBalance = true;
+constexpr bool kEnableLoadBalanceProfile = false;
+constexpr int32_t kLoadBalanceProfileThread = 8;
 
 bool shouldOutputLoadBalanceProfile()
 {
-  return isLoadBalanceProfileEnabled() && DRCDM.getConfig().thread_number == getLoadBalanceProfileThread();
+  return kEnableLoadBalanceProfile && DRCDM.getConfig().thread_number == kLoadBalanceProfileThread;
 }
 
 }  // namespace
@@ -115,7 +87,7 @@ std::vector<Violation> RuleValidator::verify(std::vector<DRCShape> drc_env_shape
   RVModel rv_model(std::move(drc_env_shape_list), std::move(drc_result_shape_list), std::move(drc_check_type_set), std::move(drc_check_region_list));
   setRVComParam(rv_model);
   buildRVClusterList(rv_model);
-  if (isLoadBalanceEnabled()) {
+  if (kEnableLoadBalance) {
     loadBalance(rv_model, rv_model.get_grid_col_num(), rv_model.get_grid_row_num());
     if (shouldOutputLoadBalanceProfile()) {
       exportClusterProfileData(rv_model);
@@ -123,7 +95,7 @@ std::vector<Violation> RuleValidator::verify(std::vector<DRCShape> drc_env_shape
     }
   } else {
     rv_model.set_rv_cluster_group_list({});
-    DRCLOG.info(Loc::current(), "loadBalance disabled by IDRC_ENABLE_LOAD_BALANCE");
+    DRCLOG.info(Loc::current(), "loadBalance disabled by compile-time switch");
   }
   verifyRVModel(rv_model);
   buildViolationList(rv_model);
