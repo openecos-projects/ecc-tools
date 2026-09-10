@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <cstdlib>
+
 #include "DRCHeader.hpp"
 #include "LogLevel.hpp"
 
@@ -42,6 +44,7 @@ class Logger
 
   void openLogFileStream(const std::string& log_file_path)
   {
+    closeLogFileStream();
     _log_file_path = log_file_path;
     _log_file = new std::ofstream(_log_file_path);
   }
@@ -51,6 +54,7 @@ class Logger
     if (_log_file != nullptr) {
       _log_file->close();
       delete _log_file;
+      _log_file = nullptr;
     }
   }
 
@@ -74,7 +78,7 @@ class Logger
   }
 
   template <typename T, typename... Args>
-  void error(Loc location, const T& value, const Args&... args)
+  [[noreturn]] void error(Loc location, const T& value, const Args&... args)
   {
     std::string message = getString(value, args...);
     printLog(LogLevel::kError, location, value, args...);
