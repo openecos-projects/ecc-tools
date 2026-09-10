@@ -24,14 +24,6 @@ namespace izh {
 
 // public
 
-ZHInterface& ZHInterface::getInst()
-{
-  if (_zh_interface_instance == nullptr) {
-    _zh_interface_instance = new ZHInterface();
-  }
-  return *_zh_interface_instance;
-}
-
 void ZHInterface::destroyInst()
 {
   if (_zh_interface_instance != nullptr) {
