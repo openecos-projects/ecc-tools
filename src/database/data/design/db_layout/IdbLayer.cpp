@@ -34,10 +34,66 @@
 
 #include <algorithm>
 #include <cctype>
+#include <mutex>
 
 #include "IdbTrackGrid.h"
 
 namespace idb {
+
+static std::mutex g_antenna_registry_mutex;
+std::map<const IdbLayer*, IdbLayerAntennaProps> IdbLayerAntennaRegistry::_props_map;
+std::map<const IdbLayer*, int32_t> IdbLayerAntennaRegistry::_ms_thickness_map;
+
+IdbLayerAntennaProps* IdbLayerAntennaRegistry::get_or_create(const IdbLayer* layer)
+{
+  if (!layer) return nullptr;
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  return &_props_map[layer];
+}
+
+const IdbLayerAntennaProps* IdbLayerAntennaRegistry::get(const IdbLayer* layer)
+{
+  if (!layer) return nullptr;
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  auto it = _props_map.find(layer);
+  if (it != _props_map.end()) {
+    return &it->second;
+  }
+  return nullptr;
+}
+
+void IdbLayerAntennaRegistry::set_masterslice_thickness(const IdbLayer* layer, int32_t thickness)
+{
+  if (!layer) return;
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  _ms_thickness_map[layer] = thickness;
+}
+
+int32_t IdbLayerAntennaRegistry::get_masterslice_thickness(const IdbLayer* layer)
+{
+  if (!layer) return 0;
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  auto it = _ms_thickness_map.find(layer);
+  if (it != _ms_thickness_map.end()) {
+    return it->second;
+  }
+  return 0;
+}
+
+void IdbLayerAntennaRegistry::remove(const IdbLayer* layer)
+{
+  if (!layer) return;
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  _props_map.erase(layer);
+  _ms_thickness_map.erase(layer);
+}
+
+void IdbLayerAntennaRegistry::clear()
+{
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  _props_map.clear();
+  _ms_thickness_map.clear();
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -75,6 +131,11 @@ IdbLayer::IdbLayer()
   _type = IdbLayerType::kNone;
   _layer_id = 0;
   _layer_order = 0;
+}
+
+IdbLayer::~IdbLayer()
+{
+  IdbLayerAntennaRegistry::remove(this);
 }
 
 void IdbLayer::set_type(string type)
@@ -126,6 +187,7 @@ void IdbLayers::reset_layers()
   }
 
   _layers.clear();
+  IdbLayerAntennaRegistry::clear();
 }
 
 IdbLayer* IdbLayers::set_layer(string layer_name, string type)

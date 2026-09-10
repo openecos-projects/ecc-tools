@@ -430,6 +430,35 @@ class Utility
     return (b > 0 ? static_cast<double>(a) / static_cast<double>(b) : 0.0);
   }
 
+  static double getPWLValue(const std::vector<std::pair<double, double>>& pwl, const double x, const double default_value = 0.0)
+  {
+    if (pwl.empty()) {
+      return default_value;
+    }
+
+    if (x <= pwl.front().first) {
+      return pwl.front().second;
+    }
+
+    if (x >= pwl.back().first) {
+      return pwl.back().second;
+    }
+
+    for (size_t idx = 0; idx + 1 < pwl.size(); ++idx) {
+      if (x >= pwl[idx].first && x <= pwl[idx + 1].first) {
+        const double delta_x = pwl[idx + 1].first - pwl[idx].first;
+        if (equalDoubleByError(delta_x, 0.0, ZH_ERROR)) {
+          return pwl[idx].second;
+        }
+
+        const double interpolation = (x - pwl[idx].first) / delta_x;
+        return pwl[idx].second + interpolation * (pwl[idx + 1].second - pwl[idx].second);
+      }
+    }
+
+    return pwl.back().second;
+  }
+
   template <typename T, typename U>
   static std::string getPercentage(T a, U b)
   {

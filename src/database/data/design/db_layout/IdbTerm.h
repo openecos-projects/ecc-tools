@@ -16,10 +16,10 @@
 // ***************************************************************************************
 #pragma once
 /**
- * @project		iDB
- * @file		IdbTerm.h
- * @date		25/05/2021
- * @version		0.1
+ * @project   iDB
+ * @file    IdbTerm.h
+ * @date    25/05/2021
+ * @version   0.1
  * @description
 
 
@@ -193,6 +193,34 @@ class IdbTerm
   bool is_power();
   bool is_ground();
 
+  bool has_antenna_gate_area() const { return _has_antenna_gate_area; }
+  double get_antenna_gate_area() const { return _antenna_gate_area; }
+  void set_antenna_gate_area(double area)
+  {
+    _has_antenna_gate_area = true;
+    _antenna_gate_area = area;
+  }
+
+  bool has_antenna_diff_area() const { return _has_antenna_diff_area; }
+  double get_antenna_diff_area() const { return _antenna_diff_area; }
+  void set_antenna_diff_area(double area)
+  {
+    _has_antenna_diff_area = true;
+    _antenna_diff_area = area;
+  }
+
+  void add_antenna_partial_metal_area(const string& layer, double area) { _antenna_partial_metal_area[layer] += area; }
+  const map<string, double>& get_antenna_partial_metal_area() const { return _antenna_partial_metal_area; }
+  bool has_antenna_partial_metal_area() const { return !_antenna_partial_metal_area.empty(); }
+
+  void add_antenna_partial_metal_side_area(const string& layer, double area) { _antenna_partial_metal_side_area[layer] += area; }
+  const map<string, double>& get_antenna_partial_metal_side_area() const { return _antenna_partial_metal_side_area; }
+  bool has_antenna_partial_metal_side_area() const { return !_antenna_partial_metal_side_area.empty(); }
+
+  void add_antenna_partial_cut_area(const string& layer, double area) { _antenna_partial_cut_area[layer] += area; }
+  const map<string, double>& get_antenna_partial_cut_area() const { return _antenna_partial_cut_area; }
+  bool has_antenna_partial_cut_area() const { return !_antenna_partial_cut_area.empty(); }
+
   vector<IdbCoordinate<int32_t>*>& get_pa_list() { return _pa_list; }
 
   // setter
@@ -242,6 +270,15 @@ class IdbTerm
   bool _has_port;
   bool _is_special_net;
   bool _is_instance;
+
+  bool _has_antenna_gate_area = false;
+  double _antenna_gate_area = 0.0;
+  bool _has_antenna_diff_area = false;
+  double _antenna_diff_area = 0.0;
+
+  map<string, double> _antenna_partial_metal_area;
+  map<string, double> _antenna_partial_metal_side_area;
+  map<string, double> _antenna_partial_cut_area;
 };
 
 }  // namespace idb
