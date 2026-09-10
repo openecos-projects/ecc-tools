@@ -224,6 +224,7 @@ class IdbDesign
   IdbSpecialNet* createOrFindSpecialNet(const std::string& net_name, IdbConnectType type = IdbConnectType::kNone,
                                         IdbCreatePolicy policy = IdbCreatePolicy::kReturnExisting);
   bool connectPinToSpecialNet(IdbPin* pin, IdbSpecialNet* net);
+  bool connectPinsToSpecialNet(const std::vector<IdbPin*>& pins, IdbSpecialNet* net);
   IdbSpecialNet* findSpecialNetForInstancePin(IdbPin* pin) const;
   int32_t connectInstancePinsToSpecialNet(const std::vector<std::string>& pin_name_list, IdbSpecialNet* net);
   int32_t materializeSpecialNetWildcardPins(IdbSpecialNet* net);
