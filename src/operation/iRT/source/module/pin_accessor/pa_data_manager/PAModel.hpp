@@ -49,6 +49,7 @@ class PAModel
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>>& get_best_net_pin_access_result_map() { return _best_net_pin_access_result_map; }
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>>& get_best_net_pin_access_patch_map() { return _best_net_pin_access_patch_map; }
   std::vector<Violation>& get_best_route_violation_list() { return _best_route_violation_list; }
+  bool get_best_result_valid() const { return _best_result_valid; }
   // setter
   void set_pa_com_param(const PAComParam& pa_com_param) { _pa_com_param = pa_com_param; }
   void set_pa_net_list(const std::vector<PANet>& pa_net_list) { _pa_net_list = pa_net_list; }
@@ -68,6 +69,7 @@ class PAModel
     _best_net_pin_access_patch_map = best_net_pin_access_patch_map;
   }
   void set_best_route_violation_list(const std::vector<Violation>& best_route_violation_list) { _best_route_violation_list = best_route_violation_list; }
+  void set_best_result_valid(bool best_result_valid) { _best_result_valid = best_result_valid; }
 
  private:
   PAComParam _pa_com_param;
@@ -86,6 +88,7 @@ class PAModel
   std::map<int32_t, std::map<int32_t, std::vector<Segment<LayerCoord>>>> _best_net_pin_access_result_map;
   std::map<int32_t, std::map<int32_t, std::vector<EXTLayerRect>>> _best_net_pin_access_patch_map;
   std::vector<Violation> _best_route_violation_list;
+  bool _best_result_valid = false;
 };
 
 }  // namespace irt

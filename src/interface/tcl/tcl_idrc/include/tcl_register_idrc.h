@@ -25,7 +25,7 @@ namespace tcl {
 int registerCmdDRC()
 {
   // drc
-  registerTclCmd(TclCheckDef, "check_def");
+  registerTclCmd(TclRunDRC, "run_drc");
   registerTclCmd(TclDestroyDRC, "destroy_drc");
   registerTclCmd(TclInitDRC, "init_drc");
   return EXIT_SUCCESS;

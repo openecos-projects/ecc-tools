@@ -14,20 +14,22 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#pragma once
+#include "DRCInterface.hpp"
+#include "tcl_drc.h"
 
-#include "RTHeader.hpp"
+namespace tcl {
 
-namespace irt {
-
-class DRComParam
+TclRunDRC::TclRunDRC(const char* cmd_name) : TclCmd(cmd_name)
 {
- public:
-  DRComParam() = default;
-  ~DRComParam() = default;
-  // getter
-  // setter
- private:
-};
+}
 
-}  // namespace irt
+unsigned TclRunDRC::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+  DRCI.runDRC();
+  return 1;
+}
+
+}  // namespace tcl

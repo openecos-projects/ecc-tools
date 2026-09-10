@@ -47,6 +47,8 @@
 
 namespace idb {
 
+constexpr auto kParseProgressInterval = 100000;
+
 DefRead::DefRead(IdbDefService* def_service)
 {
   _def_service = def_service;
@@ -1000,11 +1002,9 @@ int32_t DefRead::parse_component(defiComponent* def_component)
 
   instance->set_coodinate(def_component->placementX(), def_component->placementY());
 
-  if (design->get_instance_list()->get_num() % 1000 == 0) {
-    ECCLOG.info(ecc::Loc::current(), "-");
-    if (design->get_instance_list()->get_num() % 100000 == 0) {
-      ECCLOG.info(ecc::Loc::current(), "");
-    }
+  const auto instance_num = design->get_instance_list()->get_num();
+  if (instance_num > 0 && instance_num % kParseProgressInterval == 0) {
+    ECCLOG.info(ecc::Loc::current(), "Parsed ", instance_num, " components.");
   }
 
   /// clear def_component
@@ -1264,12 +1264,9 @@ int32_t DefRead::parse_net(defiNet* def_net)
     }
   }
 
-  if (design->get_net_list()->get_num() % 1000 == 0) {
-    ECCLOG.info(ecc::Loc::current(), "-");
-
-    if (design->get_net_list()->get_num() % 100000 == 0) {
-      ECCLOG.info(ecc::Loc::current(), "");
-    }
+  const auto net_num = design->get_net_list()->get_num();
+  if (net_num > 0 && net_num % kParseProgressInterval == 0) {
+    ECCLOG.info(ecc::Loc::current(), "Parsed ", net_num, " nets.");
   }
 
   //   ECCLOG.info(ecc::Loc::current(), "Parse net success, net name = ", net->get_net_name());
@@ -1419,12 +1416,9 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
   parse_pdn_wire(def_net, wire_list);
   parse_pdn_rects(def_net, wire_list);
 
-  if (design->get_special_net_list()->get_num() % 1000 == 0) {
-    ECCLOG.info(ecc::Loc::current(), "-");
-
-    if (design->get_special_net_list()->get_num() % 100000 == 0) {
-      ECCLOG.info(ecc::Loc::current(), "");
-    }
+  const auto special_net_num = design->get_special_net_list()->get_num();
+  if (special_net_num > 0 && special_net_num % kParseProgressInterval == 0) {
+    ECCLOG.info(ecc::Loc::current(), "Parsed ", special_net_num, " special nets.");
   }
 
   return kDbSuccess;

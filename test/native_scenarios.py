@@ -245,7 +245,7 @@ def drc(manifest: dict[str, Any]) -> dict[str, Path]:
     _read_design(manifest)
     output_dir = Path(manifest["output_dir"])
     _require(ecc_py.init_drc(str(output_dir), 2), "init_drc")
-    _require(ecc_py.check_def(), "check_def")
+    _require(ecc_py.run_drc(), "run_drc")
     _require(ecc_py.destroy_drc(), "destroy_drc")
     violation_map = output_dir / "violation_map.json"
     output = _output(manifest, "drc.def")
