@@ -39,8 +39,6 @@ class IdbRegularWireSegment;
 namespace izh {
 class RoutingLayer;
 class CutLayer;
-class Violation;
-enum class ViolationType;
 class LayerCoord;
 class LayerRect;
 template <typename T>
