@@ -43,6 +43,19 @@ def _read_design(manifest: dict[str, Any], *, lvs_verilog: bool = False) -> None
         )
 
 
+def antenna(manifest: dict[str, Any]) -> dict[str, Path]:
+    _setup(manifest)
+    _read_design(manifest)
+    output_dir = Path(manifest["output_dir"])
+    report_file = output_dir / "antenna_check.rpt"
+    _require(
+        ecc_py.check_antenna("", str(output_dir)),
+        "check_antenna",
+    )
+    _require_file(report_file)
+    return {"report": report_file}
+
+
 def def_round_trip(manifest: dict[str, Any]) -> dict[str, Path]:
     _setup(manifest)
     _read_design(manifest)
@@ -330,6 +343,7 @@ def _require_file(path: Path) -> None:
 
 
 SCENARIOS = {
+    "antenna": antenna,
     "combined_io": combined_io,
     "cts": cts,
     "def_round_trip": def_round_trip,

@@ -1370,6 +1370,8 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
     net->set_original_net_name(def_net->original());
   }
 
+  std::vector<IdbPin*> connected_pins;
+  connected_pins.reserve(def_net->numConnections());
   for (int i = 0; i < def_net->numConnections(); i++) {
     string io_name = def_net->instance(i);
     std::erase(io_name, '\\');
@@ -1385,7 +1387,7 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
       if (pin == nullptr) {
         ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
       } else {
-        design->connectPinToSpecialNet(pin, net);
+        connected_pins.emplace_back(pin);
       }
     } else {
       IdbInstance* instance = instance_list->find_instance(io_name);
@@ -1396,12 +1398,17 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
         if (pin == nullptr) {
           ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
         } else {
-          design->connectPinToSpecialNet(pin, net);
+          connected_pins.emplace_back(pin);
         }
       } else {
         ECCLOG.warn(ecc::Loc::current(), "Can not find instance in instance list ... instance name = ", io_name);
       }
     }
+  }
+
+  if (!design->connectPinsToSpecialNet(connected_pins, net)) {
+    ECCLOG.warn(ecc::Loc::current(), "Connect Special Net pins failed ... net name = ", def_net->name());
+    return kDbFail;
   }
 
   if (net->has_wildcard_instance_pins() && std::getenv("IDB_MATERIALIZE_SPECIALNET_WILDCARD_PINS") != nullptr) {
