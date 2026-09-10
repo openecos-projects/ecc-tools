@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <any>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cfloat>
 #include <chrono>
@@ -45,8 +46,12 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <list>
+#include <limits>
+#include <map>
 #include <mutex>
+#include <optional>
 #include <ostream>
 #include <queue>
 #include <regex>

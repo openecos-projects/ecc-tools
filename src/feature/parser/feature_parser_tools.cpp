@@ -394,5 +394,5 @@ json FeatureParser::buildSummaryDRC()
 
   return summary_drc;
 }
-
+  
 }  // namespace ecc_feature
