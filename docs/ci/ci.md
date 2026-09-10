@@ -122,7 +122,7 @@ test/native_scenarios.py            子进程:按场景名调用 ecc_py 原生 A
 | `floorplan` | floorplan_in.v | `init_fp`/`run_fp` | DEF 含 `DIEAREA` |
 | `cts` | cts_in.def + v(+lib/sdc) | `run_cts`/`cts_report` | DEF 非空、报告目录有产物 |
 | `routing` | route_in.def | `init_rt`/`run_rt` | DEF 含 `NETS` |
-| `drc` | route_in.def + v | `init_drc`/`check_def`/`destroy_drc` | violation_map.json(JSON list)、DEF |
+| `drc` | route_in.def + v | `init_drc`/`run_drc`/`destroy_drc` | violation_map.json(JSON list)、DEF |
 | `rcx` | route_in.def + v | `init_rcx(pdk="ics55")`/`run_rcx` | DEF 非空、SPEF 含 `*SPEF` |
 | `sta` | route_in.def + v(+typ lib/sdc/spef) | `init_sta`/`run_sta` | `timing_reporter/*.rpt` 非空 |
 | `lvs` | harden_in.def + v(`lvs_verilog_init`) | `init_lvs`/`run_lvs` | ilvs.rpt、ilvs.json、DEF |

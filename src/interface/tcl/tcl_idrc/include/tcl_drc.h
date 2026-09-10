@@ -21,11 +21,11 @@
 
 namespace tcl {
 
-class TclCheckDef : public TclCmd
+class TclRunDRC : public TclCmd
 {
  public:
-  explicit TclCheckDef(const char* cmd_name);
-  ~TclCheckDef() override = default;
+  explicit TclRunDRC(const char* cmd_name);
+  ~TclRunDRC() override = default;
 
   unsigned check() override { return 1; };
 
