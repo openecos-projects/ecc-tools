@@ -81,6 +81,7 @@ class ZHInterface
   void insertFiller(std::map<std::string, std::any> config_map);
   void insertMetal(std::map<std::string, std::any> config_map);
   void checkAntenna(std::map<std::string, std::any> config_map);
+  void checkAndFixAntenna(std::map<std::string, std::any> config_map);
 #endif
 
 #endif

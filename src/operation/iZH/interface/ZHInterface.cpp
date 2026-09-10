@@ -17,6 +17,7 @@
 #include "ZHInterface.hpp"
 
 #include "AntennaChecker.hpp"
+#include "AntennaEngine.hpp"
 #include "FillerInserter.hpp"
 #include "MetalInserter.hpp"
 
@@ -55,6 +56,13 @@ void ZHInterface::checkAntenna(std::map<std::string, std::any> config_map)
   AntennaChecker::initInst();
   ZHAC.check(config_map);
   AntennaChecker::destroyInst();
+}
+
+void ZHInterface::checkAndFixAntenna(std::map<std::string, std::any> config_map)
+{
+  AntennaEngine::initInst();
+  ZHAE.checkAndFix(config_map);
+  AntennaEngine::destroyInst();
 }
 
 #endif

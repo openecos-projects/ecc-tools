@@ -16,6 +16,7 @@
 # ***************************************************************************************
 
 cmake_minimum_required(VERSION 3.11)
+cmake_policy(SET CMP0079 NEW)
 project(ecc)
 
 include(CTest)

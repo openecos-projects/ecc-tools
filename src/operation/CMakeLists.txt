@@ -7,3 +7,7 @@ add_subdirectory(iRCX)
 add_subdirectory(iSTA)
 add_subdirectory(iCTS)
 add_subdirectory(iZH)
+
+if(TARGET irt_early_router AND TARGET izh_interface)
+    target_link_libraries(irt_early_router PUBLIC izh_interface)
+endif()

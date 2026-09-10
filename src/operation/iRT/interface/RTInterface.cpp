@@ -30,6 +30,10 @@
 #include "TOPOBuilder.hpp"
 #include "TrackAssigner.hpp"
 #include "ViolationReporter.hpp"
+#include "IdbNet.h"
+#include "IdbRegularWire.h"
+#include "IdbViaMaster.h"
+#include "Utility.hpp"
 #include "feature_irt.h"
 #include "feature_manager.h"
 #include "idm.h"
@@ -1374,6 +1378,11 @@ void RTInterface::outputGCellGrid()
 
 void RTInterface::outputNetList()
 {
+  materializeDetailedResult();
+}
+
+void RTInterface::materializeDetailedResult()
+{
   Die& die = RTDM.getDatabase().get_die();
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
 
@@ -1419,6 +1428,122 @@ void RTInterface::outputNetList()
       }
     }
   }
+}
+
+void RTInterface::importDetailedResultFromIdb()
+{
+  std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
+  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+  std::map<std::string, int32_t>& routing_layer_name_to_idx_map = RTDM.getDatabase().get_routing_layer_name_to_idx_map();
+  std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
+  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
+
+  std::map<std::string, int32_t> net_name_to_idx;
+  for (int32_t i = 0; i < static_cast<int32_t>(net_list.size()); ++i) {
+    net_name_to_idx[net_list[i].get_net_name()] = i;
+  }
+
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> net_detailed_result_map;
+  std::map<int32_t, std::vector<EXTLayerRect>> net_detailed_patch_map;
+
+  idb::IdbNetList* idb_net_list = dmInst->get_idb_def_service()->get_design()->get_net_list();
+  if (idb_net_list == nullptr) {
+    RTLOG.error(Loc::current(), "The idb net list is empty!");
+  }
+
+  auto layerIdxByName = [&](const std::string& layer_name) -> int32_t {
+    auto it = routing_layer_name_to_idx_map.find(layer_name);
+    if (it != routing_layer_name_to_idx_map.end()) {
+      return it->second;
+    }
+    return -1;
+  };
+
+  for (idb::IdbNet* idb_net : idb_net_list->get_net_list()) {
+    if (idb_net == nullptr || idb_net->get_wire_list() == nullptr) {
+      continue;
+    }
+    auto net_it = net_name_to_idx.find(idb_net->get_net_name());
+    if (net_it == net_name_to_idx.end()) {
+      continue;
+    }
+    int32_t net_idx = net_it->second;
+    for (idb::IdbRegularWire* wire : idb_net->get_wire_list()->get_wire_list()) {
+      if (wire == nullptr) {
+        continue;
+      }
+      for (idb::IdbRegularWireSegment* seg : wire->get_segment_list()) {
+        if (seg == nullptr) {
+          continue;
+        }
+        if (seg->is_via() && !seg->get_via_list().empty()) {
+          idb::IdbVia* via = seg->get_via_list().front();
+          if (via == nullptr || via->get_instance() == nullptr) {
+            continue;
+          }
+          idb::IdbLayerShape* bottom = via->get_instance()->get_bottom_layer_shape();
+          idb::IdbLayerShape* top = via->get_instance()->get_top_layer_shape();
+          if (bottom == nullptr || top == nullptr || bottom->get_layer() == nullptr || top->get_layer() == nullptr) {
+            continue;
+          }
+          int32_t bottom_idx = layerIdxByName(bottom->get_layer()->get_name());
+          int32_t top_idx = layerIdxByName(top->get_layer()->get_name());
+          if (bottom_idx < 0 || top_idx < 0) {
+            continue;
+          }
+          int32_t x = via->get_coordinate() != nullptr ? via->get_coordinate()->get_x() : 0;
+          int32_t y = via->get_coordinate() != nullptr ? via->get_coordinate()->get_y() : 0;
+          if (seg->get_point_start() != nullptr) {
+            x = seg->get_point_start()->get_x();
+            y = seg->get_point_start()->get_y();
+          }
+          Segment<LayerCoord> segment(LayerCoord(x, y, bottom_idx), LayerCoord(x, y, top_idx));
+          int32_t below_idx = std::min(bottom_idx, top_idx);
+          if (below_idx >= 0 && below_idx < static_cast<int32_t>(layer_via_master_list.size())) {
+            std::string via_name = via->get_name();
+            if (via_name.empty() && via->get_instance() != nullptr) {
+              via_name = via->get_instance()->get_name();
+            }
+            for (int32_t via_idx = 0; via_idx < static_cast<int32_t>(layer_via_master_list[below_idx].size()); ++via_idx) {
+              if (layer_via_master_list[below_idx][via_idx].get_via_name() == via_name) {
+                segment.set_via_master_idx(ViaMasterIdx(below_idx, via_idx));
+                break;
+              }
+            }
+          }
+          net_detailed_result_map[net_idx].push_back(segment);
+        } else if (seg->is_rect() && seg->get_layer() != nullptr && seg->get_point_start() != nullptr && seg->get_delta_rect() != nullptr) {
+          int32_t layer_idx = layerIdxByName(seg->get_layer()->get_name());
+          if (layer_idx < 0) {
+            continue;
+          }
+          int32_t x = seg->get_point_start()->get_x();
+          int32_t y = seg->get_point_start()->get_y();
+          int32_t ll_x = x + seg->get_delta_rect()->get_low_x();
+          int32_t ll_y = y + seg->get_delta_rect()->get_low_y();
+          int32_t ur_x = x + seg->get_delta_rect()->get_high_x();
+          int32_t ur_y = y + seg->get_delta_rect()->get_high_y();
+          EXTLayerRect patch;
+          patch.set_real_rect(PlanarRect(ll_x, ll_y, ur_x, ur_y));
+          patch.set_grid_rect(RTUTIL.getClosedGCellGridRect(patch.get_real_rect(), gcell_axis));
+          patch.set_layer_idx(layer_idx);
+          net_detailed_patch_map[net_idx].push_back(patch);
+        } else if (seg->is_wire() && seg->get_layer() != nullptr && seg->get_point_start() != nullptr && seg->get_point_second() != nullptr) {
+          int32_t layer_idx = layerIdxByName(seg->get_layer()->get_name());
+          if (layer_idx < 0) {
+            continue;
+          }
+          LayerCoord first(seg->get_point_start()->get_x(), seg->get_point_start()->get_y(), layer_idx);
+          LayerCoord second(seg->get_point_second()->get_x(), seg->get_point_second()->get_y(), layer_idx);
+          net_detailed_result_map[net_idx].emplace_back(first, second);
+        }
+      }
+    }
+  }
+
+  (void) routing_layer_list;
+  RTDM.getDatabase().get_net_detailed_result_map() = std::move(net_detailed_result_map);
+  RTDM.getDatabase().get_net_detailed_patch_map() = std::move(net_detailed_patch_map);
 }
 
 void RTInterface::outputSummary()

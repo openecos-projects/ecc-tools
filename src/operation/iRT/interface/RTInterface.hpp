@@ -124,6 +124,8 @@ class RTInterface
   void outputGCellGrid();
   void outputNetList();
   void outputSummary();
+  void materializeDetailedResult();
+  void importDetailedResultFromIdb();
 #endif
 
 #if 1  // convert idb

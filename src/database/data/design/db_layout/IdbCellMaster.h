@@ -68,6 +68,7 @@ class IdbCellMaster
   bool is_io_cell() { return is_pad() || is_pad_filler(); }
   bool is_logic();
   bool is_spacer();
+  bool is_antenna_cell();
   string& get_name() { return _name; }
   const bool is_symmetry_x() const { return _symmetry_x; }
   const bool is_symmetry_y() const { return _symmetry_y; }

@@ -1,5 +1,6 @@
 if(BUILD_TESTING)
     add_subdirectory(${IZH_TEST}/test_antenna_checker)
+    add_subdirectory(${IZH_TEST}/test_antenna_fixer)
     add_subdirectory(${IZH_TEST}/test_filler_inserter)
     add_subdirectory(${IZH_TEST}/test_metal_inserter)
 endif()

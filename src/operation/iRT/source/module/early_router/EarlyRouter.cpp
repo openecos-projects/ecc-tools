@@ -23,6 +23,7 @@
 #include "TBTask.hpp"
 #include "TOPOBuilder.hpp"
 #include "Utility.hpp"
+#include "ZHInterface.hpp"
 
 namespace irt {
 
@@ -166,6 +167,9 @@ void EarlyRouter::route(std::map<std::string, std::any> config_map)
     printDetailedSummary(er_model);
     updateNetResult(er_model);
     updateNetPatch(er_model);
+    if (er_model.get_er_com_param().get_enable_antenna_fix()) {
+      checkAndFixAntenna(er_model);
+    }
     // debugPlotERModel(er_model, "dr");
   } else {
     cleanTempResult(er_model);
@@ -256,6 +260,56 @@ void EarlyRouter::setERComParam(ERModel& er_model, std::map<std::string, std::an
    */
   ERComParam er_com_param(GetERStageByName()(stage_string), resolve_congestion, max_candidate_point_num, topo_spilt_length, expand_step_num, expand_step_length,
                           via_unit, overflow_unit, schedule_interval);
+  auto getAnyInt = [&](const std::string& key, int32_t default_value) -> int32_t {
+    auto it = config_map.find(key);
+    if (it == config_map.end()) {
+      return default_value;
+    }
+    if (const int32_t* value = std::any_cast<int32_t>(&it->second)) {
+      return *value;
+    }
+    if (const int* value = std::any_cast<int>(&it->second)) {
+      return *value;
+    }
+    if (const std::string* value = std::any_cast<std::string>(&it->second)) {
+      try {
+        return std::stoi(*value);
+      } catch (...) {
+        return default_value;
+      }
+    }
+    return default_value;
+  };
+  auto getAnyString = [&](const std::string& key, const std::string& default_value) -> std::string {
+    auto it = config_map.find(key);
+    if (it == config_map.end()) {
+      return default_value;
+    }
+    if (const std::string* value = std::any_cast<std::string>(&it->second)) {
+      return *value;
+    }
+    return default_value;
+  };
+  bool enable_antenna_fix = (er_com_param.get_stage() >= ERStage::kEdr);
+  if (config_map.find("-enable_antenna_fix") != config_map.end()) {
+    enable_antenna_fix = getAnyInt("-enable_antenna_fix", 1) != 0;
+  }
+  er_com_param.set_enable_antenna_fix(enable_antenna_fix);
+  if (config_map.find("-antenna_max_iter") != config_map.end()) {
+    er_com_param.set_antenna_max_iter(getAnyInt("-antenna_max_iter", 3));
+  }
+  if (config_map.find("-antenna_diode_cells") != config_map.end()) {
+    er_com_param.set_antenna_diode_cells(getAnyString("-antenna_diode_cells", ""));
+  }
+  if (config_map.find("-antenna_report_dir") != config_map.end()) {
+    er_com_param.set_antenna_report_dir(getAnyString("-antenna_report_dir", ""));
+  }
+  if (config_map.find("-antenna_search_radius") != config_map.end()) {
+    er_com_param.set_antenna_search_radius(getAnyInt("-antenna_search_radius", 0));
+  }
+  if (config_map.find("-antenna_max_jog") != config_map.end()) {
+    er_com_param.set_antenna_max_jog(getAnyInt("-antenna_max_jog", 0));
+  }
   RTLOG.info(Loc::current(), "stage: ", GetERStageName()(er_com_param.get_stage()));
   RTLOG.info(Loc::current(), "resolve_congestion: ", er_com_param.get_resolve_congestion());
   RTLOG.info(Loc::current(), "max_candidate_point_num: ", er_com_param.get_max_candidate_point_num());
@@ -265,6 +319,7 @@ void EarlyRouter::setERComParam(ERModel& er_model, std::map<std::string, std::an
   RTLOG.info(Loc::current(), "via_unit: ", er_com_param.get_via_unit());
   RTLOG.info(Loc::current(), "overflow_unit: ", er_com_param.get_overflow_unit());
   RTLOG.info(Loc::current(), "schedule_interval: ", er_com_param.get_schedule_interval());
+  RTLOG.info(Loc::current(), "enable_antenna_fix: ", er_com_param.get_enable_antenna_fix());
 
   er_model.set_er_com_param(er_com_param);
 }
@@ -2712,6 +2767,43 @@ void EarlyRouter::updateNetPatch(ERModel& er_model)
   RTLOG.info(Loc::current(), "Starting...");
 
   er_model.get_net_detailed_patch_map().clear();
+
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void EarlyRouter::checkAndFixAntenna(ERModel& er_model)
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  RTDM.getDatabase().get_net_detailed_result_map() = er_model.get_net_detailed_result_map();
+  RTDM.getDatabase().get_net_detailed_patch_map() = er_model.get_net_detailed_patch_map();
+  RTI.materializeDetailedResult();
+
+  const ERComParam& param = er_model.get_er_com_param();
+  std::map<std::string, std::any> config_map;
+  config_map["-enable_antenna_fix"] = true;
+  config_map["-antenna_max_iter"] = param.get_antenna_max_iter();
+  if (!param.get_antenna_diode_cells().empty()) {
+    config_map["-antenna_diode_cells"] = param.get_antenna_diode_cells();
+  }
+  std::string report_dir = param.get_antenna_report_dir();
+  if (report_dir.empty()) {
+    report_dir = RTDM.getConfig().er_temp_directory_path;
+  }
+  config_map["report_dir"] = report_dir;
+  config_map["-antenna_report_dir"] = report_dir;
+  if (param.get_antenna_search_radius() > 0) {
+    config_map["-antenna_search_radius"] = param.get_antenna_search_radius();
+  }
+  if (param.get_antenna_max_jog() > 0) {
+    config_map["-antenna_max_jog"] = param.get_antenna_max_jog();
+  }
+
+  ZHI.checkAndFixAntenna(config_map);
+  RTI.importDetailedResultFromIdb();
+  er_model.get_net_detailed_result_map() = RTDM.getDatabase().get_net_detailed_result_map();
+  er_model.get_net_detailed_patch_map() = RTDM.getDatabase().get_net_detailed_patch_map();
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
