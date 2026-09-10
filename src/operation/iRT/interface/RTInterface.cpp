@@ -1401,9 +1401,6 @@ void RTInterface::materializeDetailedResult()
   if (idb_net_list == nullptr) {
     RTLOG.error(Loc::current(), "The idb net list is empty!");
   }
-  for (idb::IdbNet* idb_net : idb_net_list->get_net_list()) {
-    idb_net->clear_wire_list();
-  }
   for (auto& [net_idx, idb_segment_list] : net_idb_segment_map) {
     std::string net_name = net_list[net_idx].get_net_name();
     idb::IdbNet* idb_net = idb_net_list->find_net(net_name);
@@ -1504,11 +1501,16 @@ void RTInterface::importDetailedResultFromIdb()
             if (via_name.empty() && via->get_instance() != nullptr) {
               via_name = via->get_instance()->get_name();
             }
+            bool matched = false;
             for (int32_t via_idx = 0; via_idx < static_cast<int32_t>(layer_via_master_list[below_idx].size()); ++via_idx) {
               if (layer_via_master_list[below_idx][via_idx].get_via_name() == via_name) {
                 segment.set_via_master_idx(ViaMasterIdx(below_idx, via_idx));
+                matched = true;
                 break;
               }
+            }
+            if (!matched && !layer_via_master_list[below_idx].empty()) {
+              segment.set_via_master_idx(layer_via_master_list[below_idx].front().get_via_master_idx());
             }
           }
           net_detailed_result_map[net_idx].push_back(segment);

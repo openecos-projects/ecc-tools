@@ -2738,6 +2738,13 @@ void EarlyRouter::updateNetResult(ERModel& er_model)
 #pragma omp parallel for
     for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(detailed_result_list.size()); net_idx++) {
       std::vector<Segment<LayerCoord>>& routing_segment_list = detailed_result_list[net_idx];
+      std::vector<Segment<LayerCoord>> via_segment_list;
+      for (Segment<LayerCoord>& segment : routing_segment_list) {
+        if (segment.get_first().get_planar_coord() == segment.get_second().get_planar_coord()
+            && std::abs(segment.get_first().get_layer_idx() - segment.get_second().get_layer_idx()) == 1 && segment.hasValidViaMaster()) {
+          via_segment_list.push_back(segment);
+        }
+      }
       std::vector<LayerCoord> candidate_root_coord_list;
       std::map<LayerCoord, std::set<int32_t>, CmpLayerCoordByXASC> key_coord_pin_map;
       std::vector<ERPin>& er_pin_list = er_net_list[net_idx].get_er_pin_list();
@@ -2748,7 +2755,26 @@ void EarlyRouter::updateNetResult(ERModel& er_model)
       }
       MTree<LayerCoord> coord_tree = RTUTIL.getTreeByFullFlow(candidate_root_coord_list, routing_segment_list, key_coord_pin_map);
       for (Segment<TNode<LayerCoord>*>& coord_segment : RTUTIL.getSegListByTree(coord_tree)) {
-        new_detailed_result_list[net_idx].emplace_back(coord_segment.get_first()->value(), coord_segment.get_second()->value());
+        Segment<LayerCoord> new_segment(coord_segment.get_first()->value(), coord_segment.get_second()->value());
+        if (new_segment.get_first().get_planar_coord() == new_segment.get_second().get_planar_coord()
+            && std::abs(new_segment.get_first().get_layer_idx() - new_segment.get_second().get_layer_idx()) == 1) {
+          for (Segment<LayerCoord>& via_segment : via_segment_list) {
+            if ((new_segment.get_first() == via_segment.get_first() && new_segment.get_second() == via_segment.get_second())
+                || (new_segment.get_first() == via_segment.get_second() && new_segment.get_second() == via_segment.get_first())) {
+              new_segment.set_via_master_idx(via_segment.get_via_master_idx());
+              break;
+            }
+          }
+          if (!new_segment.hasValidViaMaster()) {
+            int32_t below_layer_idx = std::min(new_segment.get_first().get_layer_idx(), new_segment.get_second().get_layer_idx());
+            std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
+            if (0 <= below_layer_idx && below_layer_idx < static_cast<int32_t>(layer_via_master_list.size())
+                && !layer_via_master_list[below_layer_idx].empty()) {
+              new_segment.set_via_master_idx(layer_via_master_list[below_layer_idx].front().get_via_master_idx());
+            }
+          }
+        }
+        new_detailed_result_list[net_idx].push_back(new_segment);
       }
     }
     for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(new_detailed_result_list.size()); net_idx++) {

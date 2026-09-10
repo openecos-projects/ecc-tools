@@ -15,6 +15,66 @@
 
 namespace izh {
 
+void WireEnvIndex::insertRect(std::map<int, RTree>& tree_map, int order, int32_t lx, int32_t ly, int32_t hx, int32_t hy, idb::IdbNet* net)
+{
+  if (hx < lx) {
+    std::swap(hx, lx);
+  }
+  if (hy < ly) {
+    std::swap(hy, ly);
+  }
+  BGRectInt box(BGPointInt(lx, ly), BGPointInt(hx, hy));
+  tree_map[order].insert(std::make_pair(box, net));
+}
+
+void WireEnvIndex::insertWire(int layer_order, int32_t lx, int32_t ly, int32_t hx, int32_t hy, idb::IdbNet* net)
+{
+  insertRect(_wire_rtree, layer_order, lx, ly, hx, hy, net);
+}
+
+void WireEnvIndex::insertVia(idb::IdbVia* via, idb::IdbNet* net)
+{
+  if (via == nullptr) {
+    return;
+  }
+  idb::IdbLayerShape cut_shape = via->get_cut_layer_shape();
+  if (cut_shape.get_layer() != nullptr) {
+    int cut_order = static_cast<int>(cut_shape.get_layer()->get_order());
+    for (idb::IdbRect* r : cut_shape.get_rect_list()) {
+      if (r != nullptr) {
+        insertRect(_via_rtree, cut_order, r->get_low_x(), r->get_low_y(), r->get_high_x(), r->get_high_y(), net);
+      }
+    }
+  }
+  idb::IdbLayerShape bottom_shape = via->get_bottom_layer_shape();
+  if (bottom_shape.get_layer() != nullptr) {
+    int order = static_cast<int>(bottom_shape.get_layer()->get_order());
+    for (idb::IdbRect* r : bottom_shape.get_rect_list()) {
+      if (r != nullptr) {
+        insertRect(_wire_rtree, order, r->get_low_x(), r->get_low_y(), r->get_high_x(), r->get_high_y(), net);
+      }
+    }
+  }
+  idb::IdbLayerShape top_shape = via->get_top_layer_shape();
+  if (top_shape.get_layer() != nullptr) {
+    int order = static_cast<int>(top_shape.get_layer()->get_order());
+    for (idb::IdbRect* r : top_shape.get_rect_list()) {
+      if (r != nullptr) {
+        insertRect(_wire_rtree, order, r->get_low_x(), r->get_low_y(), r->get_high_x(), r->get_high_y(), net);
+      }
+    }
+  }
+}
+
+void WireEnvIndex::insertInstance(idb::IdbInstance* inst)
+{
+  if (inst == nullptr || inst->get_bounding_box() == nullptr) {
+    return;
+  }
+  idb::IdbRect* box = inst->get_bounding_box();
+  _inst_rtree.insert(std::make_pair(BGRectInt(BGPointInt(box->get_low_x(), box->get_low_y()), BGPointInt(box->get_high_x(), box->get_high_y())), 0));
+}
+
 void WireEnvIndex::rebuild(idb::IdbDesign* design, const RoutingContext& ctx)
 {
   _wire_rtree.clear();
@@ -23,17 +83,6 @@ void WireEnvIndex::rebuild(idb::IdbDesign* design, const RoutingContext& ctx)
   if (design == nullptr) {
     return;
   }
-
-  auto insertRect = [&](std::map<int, RTree>& tree_map, int order, int32_t lx, int32_t ly, int32_t hx, int32_t hy, idb::IdbNet* net) {
-    if (hx < lx) {
-      std::swap(hx, lx);
-    }
-    if (hy < ly) {
-      std::swap(hy, ly);
-    }
-    BGRectInt box(BGPointInt(lx, ly), BGPointInt(hx, hy));
-    tree_map[order].insert(std::make_pair(box, net));
-  };
 
   if (design->get_net_list() != nullptr) {
     for (idb::IdbNet* net : design->get_net_list()->get_net_list()) {
@@ -62,37 +111,7 @@ void WireEnvIndex::rebuild(idb::IdbDesign* design, const RoutingContext& ctx)
           }
           if (seg->is_via()) {
             for (idb::IdbVia* via : seg->get_via_list()) {
-              if (via == nullptr) {
-                continue;
-              }
-              idb::IdbLayerShape cut_shape = via->get_cut_layer_shape();
-              if (cut_shape.get_layer() == nullptr) {
-                continue;
-              }
-              int cut_order = static_cast<int>(cut_shape.get_layer()->get_order());
-              for (idb::IdbRect* r : cut_shape.get_rect_list()) {
-                if (r != nullptr) {
-                  insertRect(_via_rtree, cut_order, r->get_low_x(), r->get_low_y(), r->get_high_x(), r->get_high_y(), net);
-                }
-              }
-              idb::IdbLayerShape bottom_shape = via->get_bottom_layer_shape();
-              if (bottom_shape.get_layer() != nullptr) {
-                int order = static_cast<int>(bottom_shape.get_layer()->get_order());
-                for (idb::IdbRect* r : bottom_shape.get_rect_list()) {
-                  if (r != nullptr) {
-                    insertRect(_wire_rtree, order, r->get_low_x(), r->get_low_y(), r->get_high_x(), r->get_high_y(), net);
-                  }
-                }
-              }
-              idb::IdbLayerShape top_shape = via->get_top_layer_shape();
-              if (top_shape.get_layer() != nullptr) {
-                int order = static_cast<int>(top_shape.get_layer()->get_order());
-                for (idb::IdbRect* r : top_shape.get_rect_list()) {
-                  if (r != nullptr) {
-                    insertRect(_wire_rtree, order, r->get_low_x(), r->get_low_y(), r->get_high_x(), r->get_high_y(), net);
-                  }
-                }
-              }
+              insertVia(via, net);
             }
           }
         }
@@ -153,7 +172,7 @@ bool WireEnvIndex::hasOverlap(int layer_order, int32_t lx, int32_t ly, int32_t h
   return false;
 }
 
-bool WireEnvIndex::hasViaOverlap(int32_t x, int32_t y, int cut_order, int32_t spacing) const
+bool WireEnvIndex::hasViaOverlap(int32_t x, int32_t y, int cut_order, int32_t spacing, idb::IdbNet* skip_net) const
 {
   auto it = _via_rtree.find(cut_order);
   if (it == _via_rtree.end()) {
@@ -163,7 +182,12 @@ bool WireEnvIndex::hasViaOverlap(int32_t x, int32_t y, int cut_order, int32_t sp
   BGRectInt query(BGPointInt(x - pad, y - pad), BGPointInt(x + pad, y + pad));
   std::vector<Item> hits;
   it->second.query(bgi::intersects(query), std::back_inserter(hits));
-  return !hits.empty();
+  for (const auto& hit : hits) {
+    if (hit.second != skip_net) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool WireEnvIndex::inDie(const RoutingContext& ctx, int32_t x, int32_t y) const
@@ -192,47 +216,48 @@ bool WireEnvIndex::findFreeDiodeSite(const RoutingContext& ctx, int32_t pin_x, i
     return false;
   }
 
-  const RCRow* best_row = nullptr;
-  int32_t best_dy = std::numeric_limits<int32_t>::max();
+  std::vector<const RCRow*> sorted_rows;
+  sorted_rows.reserve(ctx.get_rows().size());
   for (const RCRow& row : ctx.get_rows()) {
-    int32_t dy = std::abs(row.origin_y - pin_y);
-    if (dy < best_dy) {
-      best_dy = dy;
-      best_row = &row;
+    sorted_rows.push_back(&row);
+  }
+  std::sort(sorted_rows.begin(), sorted_rows.end(), [pin_y](const RCRow* a, const RCRow* b) {
+    return std::abs(a->origin_y - pin_y) < std::abs(b->origin_y - pin_y);
+  });
+
+  int32_t max_row_attempts = std::min(static_cast<int32_t>(sorted_rows.size()), 3);
+
+  for (int32_t ri = 0; ri < max_row_attempts; ++ri) {
+    const RCRow* row = sorted_rows[ri];
+    int32_t site_need = (width + row->site_width - 1) / row->site_width;
+    if (site_need <= 0) {
+      site_need = 1;
     }
-  }
-  if (best_row == nullptr) {
-    return false;
-  }
+    int32_t pin_site = (pin_x - row->origin_x) / row->site_width;
+    int32_t max_sites = ctx.get_search_radius() / std::max(row->site_width, 1);
 
-  int32_t site_need = (width + best_row->site_width - 1) / best_row->site_width;
-  if (site_need <= 0) {
-    site_need = 1;
-  }
-  int32_t pin_site = (pin_x - best_row->origin_x) / best_row->site_width;
-  int32_t max_sites = ctx.get_search_radius() / std::max(best_row->site_width, 1);
-
-  for (int32_t d = 0; d <= max_sites; ++d) {
-    for (int32_t sign : {0, 1, -1}) {
-      if (d == 0 && sign != 0) {
-        continue;
+    for (int32_t d = 0; d <= max_sites; ++d) {
+      for (int32_t sign : {0, 1, -1}) {
+        if (d == 0 && sign != 0) {
+          continue;
+        }
+        int32_t site = pin_site + sign * d;
+        if (site < 0 || site + site_need > row->site_count) {
+          continue;
+        }
+        int32_t x = row->origin_x + site * row->site_width;
+        int32_t y = row->origin_y;
+        if (hasInstanceOverlap(x, y, x + width, y + height)) {
+          continue;
+        }
+        if (!inDie(ctx, x, y) || !inDie(ctx, x + width, y + height)) {
+          continue;
+        }
+        out_x = x;
+        out_y = y;
+        out_orient = row->orient;
+        return true;
       }
-      int32_t site = pin_site + sign * d;
-      if (site < 0 || site + site_need > best_row->site_count) {
-        continue;
-      }
-      int32_t x = best_row->origin_x + site * best_row->site_width;
-      int32_t y = best_row->origin_y;
-      if (hasInstanceOverlap(x, y, x + width, y + height)) {
-        continue;
-      }
-      if (!inDie(ctx, x, y) || !inDie(ctx, x + width, y + height)) {
-        continue;
-      }
-      out_x = x;
-      out_y = y;
-      out_orient = best_row->orient;
-      return true;
     }
   }
   return false;

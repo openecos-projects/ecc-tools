@@ -9,6 +9,7 @@
 #include "ACModel.hpp"
 #include "AntennaChecker.hpp"
 #include "AntennaFixer.hpp"
+#include "AntennaRuleEvaluator.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "RoutingContext.hpp"
@@ -186,6 +187,9 @@ AntennaResult AntennaEngine::checkAndFix(std::map<std::string, std::any> config_
   ac_model.get_micron_dbu() = ctx.get_micron_dbu();
   ac_model.get_violation_list() = result.get_violation_list();
   ac_model.set_violation_num(result.get_violation_num());
+  AntennaRuleEvaluator::initLayers(ac_model, design);
+
+  int32_t prev_violation_count = result.get_violation_num();
 
   for (int32_t iter = 1; iter <= param.get_max_iter(); ++iter) {
     AFIterStat stat;
@@ -212,14 +216,7 @@ AntennaResult AntennaEngine::checkAndFix(std::map<std::string, std::any> config_
         if (!v.pin_name.empty() && fixed_pins.count(pin_key) > 0) {
           continue;
         }
-        AFFixKind kind = fixer.classify(v, ctx);
-        bool applied = false;
-        if (kind == AFFixKind::kHopUp) {
-          applied = fixer.applyHopUp(design, net, v, ctx, index, true, stat);
-        }
-        if (!applied) {
-          applied = fixer.applyDiode(design, net, v, ctx, index, stat, result.get_logged_no_antenna_cell());
-        }
+        bool applied = fixer.applySelected(design, net, v, ctx, index, stat, result.get_logged_no_antenna_cell());
         if (applied) {
           touched.insert(net_name);
           if (!v.pin_name.empty()) {
@@ -251,6 +248,11 @@ AntennaResult AntennaEngine::checkAndFix(std::map<std::string, std::any> config_
     if (stat.violation_num == 0) {
       break;
     }
+    if (stat.violation_num >= prev_violation_count) {
+      ZHLOG.info(Loc::current(), "antenna fix iter ", iter, " no progress, stopping");
+      break;
+    }
+    prev_violation_count = stat.violation_num;
   }
 
   writeFixReport(result, param);

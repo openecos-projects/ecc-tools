@@ -18,6 +18,27 @@
 
 namespace izh {
 
+RoutingContext RoutingContext::forTest(std::vector<RCRoutingLayer> routing_layers, std::vector<RCCutLayer> cut_layers,
+                                      std::vector<idb::IdbCellMaster*> diode_masters)
+{
+  RoutingContext ctx;
+  ctx._routing_layers = std::move(routing_layers);
+  ctx._cut_layers = std::move(cut_layers);
+  ctx._diode_masters = std::move(diode_masters);
+  ctx._top_routing_order = -1;
+  for (const auto& rl : ctx._routing_layers) {
+    ctx._top_routing_order = std::max(ctx._top_routing_order, rl.order);
+  }
+  ctx._die_llx = 0;
+  ctx._die_lly = 0;
+  ctx._die_urx = 100000;
+  ctx._die_ury = 100000;
+  ctx._max_jog = 500;
+  ctx._search_radius = 5000;
+  ctx._micron_dbu = 1000;
+  return ctx;
+}
+
 const RCRoutingLayer* RoutingContext::findRoutingByOrder(int order) const
 {
   for (const auto& layer : _routing_layers) {

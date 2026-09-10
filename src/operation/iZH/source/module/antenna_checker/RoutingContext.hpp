@@ -52,6 +52,8 @@ class RoutingContext
 {
  public:
   static RoutingContext build(idb::IdbDesign* design, const AFComParam& param);
+  static RoutingContext forTest(std::vector<RCRoutingLayer> routing_layers, std::vector<RCCutLayer> cut_layers,
+                                std::vector<idb::IdbCellMaster*> diode_masters = {});
 
   idb::IdbDesign* get_design() const { return _design; }
   int get_micron_dbu() const { return _micron_dbu; }

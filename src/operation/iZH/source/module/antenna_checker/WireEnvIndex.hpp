@@ -7,7 +7,9 @@
 
 #include "IdbDesign.h"
 #include "IdbGeometry.h"
+#include "IdbInstance.h"
 #include "IdbNet.h"
+#include "IdbVias.h"
 #include "RoutingContext.hpp"
 #include "ZHHeader.hpp"
 
@@ -17,8 +19,11 @@ class WireEnvIndex
 {
  public:
   void rebuild(idb::IdbDesign* design, const RoutingContext& ctx);
+  void insertWire(int layer_order, int32_t lx, int32_t ly, int32_t hx, int32_t hy, idb::IdbNet* net);
+  void insertVia(idb::IdbVia* via, idb::IdbNet* net);
+  void insertInstance(idb::IdbInstance* inst);
   bool hasOverlap(int layer_order, int32_t lx, int32_t ly, int32_t hx, int32_t hy, idb::IdbNet* skip_net = nullptr) const;
-  bool hasViaOverlap(int32_t x, int32_t y, int cut_order, int32_t spacing) const;
+  bool hasViaOverlap(int32_t x, int32_t y, int cut_order, int32_t spacing, idb::IdbNet* skip_net = nullptr) const;
   bool inDie(const RoutingContext& ctx, int32_t x, int32_t y) const;
   bool hasInstanceOverlap(int32_t lx, int32_t ly, int32_t hx, int32_t hy) const;
   bool findFreeDiodeSite(const RoutingContext& ctx, int32_t pin_x, int32_t pin_y, int32_t width, int32_t height, int32_t& out_x,
@@ -29,6 +34,8 @@ class WireEnvIndex
   using RTree = bgi::rtree<Item, bgi::quadratic<16>>;
   using InstItem = std::pair<BGRectInt, int>;
   using InstRTree = bgi::rtree<InstItem, bgi::quadratic<16>>;
+
+  void insertRect(std::map<int, RTree>& tree_map, int order, int32_t lx, int32_t ly, int32_t hx, int32_t hy, idb::IdbNet* net);
 
   std::map<int, RTree> _wire_rtree;
   std::map<int, RTree> _via_rtree;
