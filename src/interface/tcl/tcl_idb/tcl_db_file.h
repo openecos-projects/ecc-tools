@@ -192,6 +192,15 @@ class CmdSaveDef : public TclCmd
   // private data
 };
 
+class CmdSaveMacroTCL : public TclCmd
+{
+ public:
+  explicit CmdSaveMacroTCL(const char* cmd_name);
+  ~CmdSaveMacroTCL() override = default;
+  unsigned check() override;
+  unsigned exec() override;
+};
+
 class CmdSaveLef : public TclCmd
 {
  public:

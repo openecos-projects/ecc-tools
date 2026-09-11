@@ -58,6 +58,7 @@ class FPInterface
   void runSimpleFP();
   void runFP();
   void destroyFP();
+  void debugInputMacro(std::map<std::string, std::any> config_map);
 #endif
 
 #endif

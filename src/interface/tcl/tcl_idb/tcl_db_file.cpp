@@ -376,6 +376,32 @@ CmdSaveDef::CmdSaveDef(const char* cmd_name) : TclCmd(cmd_name)
   addOption(path);
 }
 
+CmdSaveMacroTCL::CmdSaveMacroTCL(const char* cmd_name) : TclCmd(cmd_name)
+{
+  addOption(new TclStringOption(TCL_PATH, 1));
+}
+
+unsigned CmdSaveMacroTCL::check()
+{
+  auto* path = getOptionOrArg(TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
+  return 1;
+}
+
+unsigned CmdSaveMacroTCL::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+  auto path = getOptionOrArg(TCL_PATH)->getStringVal();
+  if (path == nullptr || !dmInst->saveMacroTCL(path)) {
+    ECCLOG.error(ecc::Loc::current(), "save macro Tcl failed.");
+    return 0;
+  }
+  ECCLOG.info(ecc::Loc::current(), "save macro Tcl success: ", path);
+  return 1;
+}
+
 unsigned CmdSaveDef::check()
 {
   TclOption* option = getOptionOrArg(TCL_NAME);

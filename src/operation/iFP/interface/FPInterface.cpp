@@ -16,6 +16,10 @@
 // ***************************************************************************************
 #include "FPInterface.hpp"
 
+#include <fstream>
+#include <cmath>
+#include <sstream>
+
 #include "DataManager.hpp"
 #include "DieBuilder.hpp"
 #include "IOPlacer.hpp"
@@ -164,6 +168,57 @@ void FPInterface::destroyFP()
   Logger::destroyInst();
 }
 
+void FPInterface::debugInputMacro(std::map<std::string, std::any> config_map)
+{
+  const std::string path = FPUTIL.getConfigValue<std::string>(config_map, "-path", "");
+  if (path.empty()) {
+    FPLOG.error(Loc::current(), "The macro placement file path is empty!");
+    return;
+  }
+  auto* design = dmInst->get_idb_design();
+  auto* layout = dmInst->get_idb_layout();
+  if (design == nullptr || layout == nullptr || design->get_instance_list() == nullptr) {
+    FPLOG.error(Loc::current(), "Failed to get the IDB design or layout!");
+    return;
+  }
+  int32_t dbu = design->get_units() ? design->get_units()->get_micron_dbu() : 0;
+  if (dbu <= 0 && layout->get_units()) {
+    dbu = layout->get_units()->get_micron_dbu();
+  }
+  if (dbu <= 0) {
+    FPLOG.error(Loc::current(), "Failed to get a valid micron DBU from IDB!");
+    return;
+  }
+  std::ifstream input(path);
+  if (!input.is_open()) {
+    FPLOG.error(Loc::current(), "Failed to open macro placement file '", path, "'!");
+    return;
+  }
+  int placed = 0;
+  std::string line;
+  int line_num = 0;
+  while (std::getline(input, line)) {
+    ++line_num;
+    std::istringstream stream(line);
+    std::string name, orient;
+    double x = 0.0, y = 0.0;
+    if (line.empty() || line.find_first_not_of(" \t\r") == std::string::npos || line[0] == '#') continue;
+    if (!(stream >> name >> x >> y >> orient)) {
+      FPLOG.error(Loc::current(), "Malformed macro placement at line ", line_num, " in '", path, "'.");
+    }
+    auto* instance = design->get_instance_list()->find_instance(name);
+    if (instance == nullptr || instance->get_cell_master() == nullptr || !instance->get_cell_master()->is_block()) {
+      FPLOG.error(Loc::current(), "Unknown or non-block macro '", name, "' at line ", line_num, " in '", path, "'.");
+    }
+    if (!dmInst->placeInst(name, static_cast<int32_t>(std::llround(x * dbu)),
+                           static_cast<int32_t>(std::llround(y * dbu)), orient, "", "", "fixed", false)) {
+      FPLOG.error(Loc::current(), "Failed to place macro '", name, "' at line ", line_num, " in '", path, "'.");
+    }
+    ++placed;
+  }
+  FPLOG.info(Loc::current(), "Loaded ", placed, " macro placement(s) from '", path, "'.");
+}
+
 #endif
 
 #endif
@@ -212,6 +267,24 @@ void FPInterface::inputMacroPlacement(const std::string& macro_place_file_path)
     }
 
     std::istringstream line_stream(line);
+    std::string command;
+    line_stream >> command;
+    if (command == "setInstancePlacementStatus") {
+      std::string status, status_value, name_option, status_name, trailing_token;
+      if (!(line_stream >> status >> status_value >> name_option >> status_name)
+          || status != "-status" || status_value != "fixed" || name_option != "-name"
+          || (line_stream >> trailing_token && trailing_token[0] != '#')) {
+        FPLOG.error(Loc::current(), "Malformed placement status at line ", line_num, " in '", macro_place_file_path, "'.");
+      }
+      if (!placed_macro_names.contains(status_name)) {
+        FPLOG.error(Loc::current(), "Placement status refers to macro before placeInstance at line ", line_num, " in '",
+                    macro_place_file_path, "'.");
+      }
+      continue;
+    }
+    if (command != "placeInstance") {
+      FPLOG.error(Loc::current(), "Unsupported command '", command, "' at line ", line_num, " in '", macro_place_file_path, "'.");
+    }
     std::string instance_name;
     std::string orient_name;
     std::string trailing_token;
@@ -239,7 +312,15 @@ void FPInterface::inputMacroPlacement(const std::string& macro_place_file_path)
       FPLOG.error(Loc::current(), "Duplicate macro '", instance_name, "' at line ", line_num, " in '", macro_place_file_path, "'!");
     }
 
-    PlacementOrientation orient = GetPlacementOrientationByName()(orient_name);
+    static const std::map<std::string, std::string> orient_map = {
+        {"R0", "N"}, {"R90", "W"}, {"R180", "S"}, {"R270", "E"},
+        {"MX", "FS"}, {"MY", "FN"}, {"MX90", "FW"}, {"MY90", "FE"}};
+    auto orient_iter = orient_map.find(orient_name);
+    if (orient_iter == orient_map.end()) {
+      FPLOG.error(Loc::current(), "Unsupported macro orientation '", orient_name, "' at line ", line_num, " in '", macro_place_file_path,
+                  "'!");
+    }
+    PlacementOrientation orient = GetPlacementOrientationByName()(orient_iter->second);
     if (orient == PlacementOrientation::kNone) {
       FPLOG.error(Loc::current(), "Unsupported macro orientation '", orient_name, "' at line ", line_num, " in '", macro_place_file_path,
                   "'!");
