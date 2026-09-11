@@ -106,6 +106,7 @@ struct PyPlaceDB
 
   int row_height;
   int site_width;
+  double total_fixed_node_area;  ///< union area of fixed bodies and residual obstacles inside the core
   double total_space_area;  ///< placeable core area minus the union of fixed bodies and residual obstacles
 
   int num_movable_pins;

@@ -5,6 +5,8 @@ def test_pyplacedb_exposes_m2_pg_rail_geometry_fields():
     assert hasattr(ecc_py.PyPlaceDB, "m2_pg_rail_blockage_rects")
     assert hasattr(ecc_py.PyPlaceDB, "m2_pg_rail_boxes")
     assert hasattr(ecc_py.PyPlaceDB, "m2_pg_rail_density_boxes")
+    assert hasattr(ecc_py.PyPlaceDB, "total_fixed_node_area")
+    assert hasattr(ecc_py.PyPlaceDB, "total_space_area")
 
 
 def test_pydb_keeps_rail_collection_arguments_optional():

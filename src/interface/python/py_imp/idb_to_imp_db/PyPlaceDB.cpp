@@ -72,7 +72,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     throw std::runtime_error("PyPlaceDB timing initialization is disabled in this ecc_py build");
   }
 
-  double total_fixed_node_area = 0;  // sum of fixed body and synthetic obstacle rectangles
+  double total_fixed_terminal_area = 0;  // sum of fixed body and synthetic obstacle rectangles
   // Collect the rectangles used by DreamPlace and the corresponding unioned geometry
   // separately.  Fixed instances retain their body rectangle for pin/write-back
   // identity, while halos and blockages become pin-less synthetic terminals.
@@ -204,7 +204,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
                node->get_coordinate()->get_y(), node->get_bounding_box()->get_high_x(), node->get_bounding_box()->get_high_y());
       }
       num_terminals += 1;
-      total_fixed_node_area += body_box.area();
+      total_fixed_terminal_area += body_box.area();
 
       fixed_body_boxes.emplace_back(body_box.xl, body_box.yl, body_box.xh, body_box.yh);
       if (node->get_halo()) {
@@ -322,7 +322,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     string block_name = "blockage" + std::to_string(id);
     printf("PyPlaceDB detect fixed blockage: %s, (%d, %d, %d, %d)\n", block_name.c_str(), box.xl, box.yl, box.xh, box.yh);
     addNode("R0", block_name, box, true);
-    total_fixed_node_area += 1LL * box.area();
+    total_fixed_terminal_area += 1LL * box.area();
   }
   num_terminals += vRect.size();
   ext_blockage_num += vRect.size();
@@ -355,6 +355,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   PolygonSet ps(gtl::HORIZONTAL, fixed_boxes.begin(), fixed_boxes.end());
   ps &= core_box;
   double total_fixed_geometry_area = gtl::area(ps);
+  total_fixed_node_area = total_fixed_geometry_area;
   total_space_area = core_rect->get_area() - total_fixed_geometry_area;
 
   PolygonSet body_core_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
@@ -367,7 +368,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
          "terminal_union_area %g, terminal_area_sum %g, synthetic_rectangles %d.\n",
          static_cast<double>(gtl::area(body_core_ps)), static_cast<double>(gtl::area(halo_core_ps)),
          static_cast<double>(gtl::area(no_row_ps)), static_cast<double>(gtl::area(residual_obstacle_core_ps)),
-         total_fixed_geometry_area, total_fixed_node_area, ext_blockage_num);
+         total_fixed_geometry_area, total_fixed_terminal_area, ext_blockage_num);
   int count = 0;
   for (int i = 0; i < mNode2PyNondeID.size() - num_terminal_NIs - ext_blockage_num; ++i) {
     auto node_name = node_names[i].cast<std::string>();
