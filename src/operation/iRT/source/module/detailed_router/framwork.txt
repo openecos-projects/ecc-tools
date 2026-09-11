@@ -261,6 +261,31 @@ component 初始化复制原 segment，重布后按保存的 segment 发布与�
 多 net 退回单 net 时必须搬回剩余贡献次数；调试接口仍按需导出成员集合，不把重复贡献画成重复 net。
 PA/DR 的 routed 均为贡献计数，但各自投影循环的命中次数不保证一致，不能直接替换遍历内核。
 
+### 多轮迭代中的 AP 不可达问题记录
+
+现象：在部分设计的 DR 第二轮迭代中，`routeDRBoxMap` 已完成全部 box 后，
+`updateNetResult -> RTUTIL.getTreeByFullFlow` 报告 `The pin idx 1 unreachable!` 和
+`The key points unreachable!`。该问题不是所有用例都出现；复现用例为 t28
+`ysyx_12_new`，问题 net 为 `net_idx=162825`，缺失 AP 为 `pin_idx=1`。
+
+原因：第二轮会把上一轮的整网结果重新按 gcell 切分，再由各 DRBox 局部重布并通过
+`updateDRModel` 汇总。局部 repair 可能删除包含某个 AP 的 component，但该 AP 没有被
+当前 box 的有效 routing segment 覆盖。非初始布线的 `buildNetTaskList` 通过
+`DRConnectivity::getRootSet(AP)` 建立任务；当结果已丢失 AP 时该集合为空，AP 被静默
+排除，不会生成重新连接它的 DRTask。断线结果继续汇总，直到下一次整网建树时才被
+`passCheckingConnectivity` 发现。
+
+解决方案：`DRModel` 保存每轮开始时的完整 `previous_result`。`updateNetResult` 在
+构建 AP 关键点表后检查当前 net 的每个 AP 是否被结果 segment 覆盖；若发现缺失，
+则恢复上一轮 `DRModelResult` 中同一 net 的完整线段，再执行树重建和 via master 恢复。
+这样不会把断线的局部结果继续传播到下一轮或 RTDM，同时保留其它 net 的正常 repair
+结果。回滚源必须是上一轮 DR model 结果，不能使用 RTDM 启动时的初始结果。
+
+验证：使用 `.vscode/launch.json` 当前配置运行 `run_rt_t28.tcl`。第二轮检测到
+`net_idx=162825` 丢失 AP 并恢复上一轮结果；随后 iteration 2 至 iteration 9 均无
+`unreachable`/`key points unreachable`，完整 RT 流程正常结束。后续修改不得删除 AP
+覆盖检查或将回滚源改回数据库初始结果。
+
 | DRC 入口 | 输入与检查范围 |
 | --- | --- |
 | getRouteViolationList(DRBox&) | fixed rect、借用环境和本地 owner 结果；checked net 为 box task 的 net，使用 kRouteHybrid |

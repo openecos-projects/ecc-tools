@@ -32,6 +32,7 @@ class DRModel
   ~DRModel() = default;
   // getter
   DRModelResult& get_curr_result() { return _curr_result; }
+  DRModelResult& get_previous_result() { return _previous_result; }
   DRModelResult& get_best_result() { return _best_result; }
   std::vector<DRNet>& get_dr_net_list() { return _dr_net_list; }
   bool get_initial_routing() const { return _initial_routing; }
@@ -57,6 +58,7 @@ class DRModel
 
  private:
   DRModelResult _curr_result;
+  DRModelResult _previous_result;
   DRModelResult _best_result;
   std::vector<DRNet> _dr_net_list;
   bool _initial_routing = true;
