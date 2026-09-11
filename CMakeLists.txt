@@ -161,8 +161,18 @@ SET(THIRD_PARTY_HOME ${HOME_THIRDPARTY})
 add_definitions("-DBOOST_ALLOW_DEPRECATED_HEADERS")
 add_definitions("-DBOOST_BIND_GLOBAL_PLACEHOLDERS")
 
+find_package(Boost 1.92.0 EXACT CONFIG QUIET)
+if(NOT Boost_FOUND)
+    list(FIND Boost_CONSIDERED_VERSIONS "1.85.0" _boost_1_85_index)
+    if(NOT _boost_1_85_index EQUAL -1)
+        message(FATAL_ERROR "Boost 1.85.0 contains a critical known bug and must not be used. Install Boost 1.92.0 exactly.")
+    endif()
+    message(FATAL_ERROR "Boost 1.92.0 exactly is required.")
+endif()
+
 include_directories(SYSTEM
     ## third party
+    ${Boost_INCLUDE_DIRS}
     ${THIRD_PARTY_HOME}
     ${THIRD_PARTY_HOME}/json
 )
