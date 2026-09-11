@@ -21,6 +21,6 @@
 namespace python_interface {
 
 bool init_drc(const std::string& temp_directory_path, const int& thread_number);
-bool check_def();
+bool run_drc();
 bool destroy_drc();
 }  // namespace python_interface

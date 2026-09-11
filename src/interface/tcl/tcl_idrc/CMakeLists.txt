@@ -1,5 +1,5 @@
 add_library(tcl_idrc
-    ${HOME_INTERFACE}/tcl/tcl_idrc/src/tcl_check_def.cpp
+    ${HOME_INTERFACE}/tcl/tcl_idrc/src/tcl_run_drc.cpp
     ${HOME_INTERFACE}/tcl/tcl_idrc/src/tcl_init_drc.cpp
     ${HOME_INTERFACE}/tcl/tcl_idrc/src/tcl_destroy_drc.cpp
 )
