@@ -156,7 +156,13 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     _node_is_hard_macro.push_back(is_hard_macro);
     _macro_writeback_candidate.push_back(is_macro_writeback_candidate);
     if (is_macro_writeback_candidate) {
-      _macro_writeback_candidates.push_back({id, name, instance->get_id()});
+      // Unplaced macros carry kNone; default them to N/R0 so the placement
+      // written back (and the DEF saved from it) carries an orientation.
+      auto orient = instance->get_orient();
+      if (orient == IdbOrient::kNone) {
+        orient = IdbOrient::kN_R0;
+      }
+      _macro_writeback_candidates.push_back({id, name, instance->get_id(), orient});
     }
     // map new node to original index
     if (mNode2idbID.count(name)) {
@@ -599,8 +605,8 @@ std::size_t PyPlaceDB::writeMacroPlacementBack(
         || checked_y > static_cast<double>(std::numeric_limits<int32_t>::max())) {
       throw std::invalid_argument("Macro placement writeback coordinates must be finite int32-compatible values");
     }
-    updates.push_back(
-        {candidate.instance_name, candidate.instance_id, static_cast<int32_t>(candidate_x), static_cast<int32_t>(candidate_y)});
+    updates.push_back({candidate.instance_name, candidate.instance_id, static_cast<int32_t>(candidate_x),
+                       static_cast<int32_t>(candidate_y), candidate.orient});
   }
   return _db->write_selected_placement_back(updates);
 }
