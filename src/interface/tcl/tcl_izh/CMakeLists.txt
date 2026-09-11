@@ -1,12 +1,12 @@
 add_library(tcl_izh
+    ${HOME_INTERFACE}/tcl/tcl_izh/src/tcl_zh_check_antenna.cpp
     ${HOME_INTERFACE}/tcl/tcl_izh/src/tcl_zh_insert_filler.cpp
     ${HOME_INTERFACE}/tcl/tcl_izh/src/tcl_zh_insert_metal.cpp
 )
 
 target_link_libraries(tcl_izh
     PUBLIC
-    tool_manager
-    tcl_util
+    tcl
     PRIVATE
     izh_interface
 )

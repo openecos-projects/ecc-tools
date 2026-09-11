@@ -36,7 +36,7 @@ def test_drc(test_roots):
     result = run_scenario(test_roots, "drc", timeout=480)
     violation_map = result.output_path("violation_map")
 
-    for name in ("database", "def", "violation_map"):
+    for name in ("def", "violation_map"):
         assert_nonempty_file(result.output_path(name))
     assert isinstance(json.loads(violation_map.read_text(encoding="utf-8")), list)
 
@@ -70,3 +70,9 @@ def test_harden(test_roots):
     for name in ("gds", "lef", "lib"):
         assert_nonempty_file(result.output_path(name))
     assert "MACRO gcd" in result.output_path("lef").read_text(encoding="utf-8")
+
+
+def test_antenna(test_roots):
+    result = run_scenario(test_roots, "antenna", timeout=480)
+
+    assert_nonempty_file(result.output_path("report"))

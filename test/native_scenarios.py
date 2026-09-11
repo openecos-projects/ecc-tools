@@ -43,6 +43,19 @@ def _read_design(manifest: dict[str, Any], *, lvs_verilog: bool = False) -> None
         )
 
 
+def antenna(manifest: dict[str, Any]) -> dict[str, Path]:
+    _setup(manifest)
+    _read_design(manifest)
+    output_dir = Path(manifest["output_dir"])
+    report_file = output_dir / "antenna_check.rpt"
+    _require(
+        ecc_py.check_antenna("", str(output_dir)),
+        "check_antenna",
+    )
+    _require_file(report_file)
+    return {"report": report_file}
+
+
 def def_round_trip(manifest: dict[str, Any]) -> dict[str, Path]:
     _setup(manifest)
     _read_design(manifest)
@@ -202,15 +215,14 @@ def drc(manifest: dict[str, Any]) -> dict[str, Path]:
     _read_design(manifest)
     output_dir = Path(manifest["output_dir"])
     _require(ecc_py.init_drc(str(output_dir), 2), "init_drc")
-    _require(ecc_py.run_drc(manifest["config"]["drc_ecc"]), "run_drc")
-    database = _output(manifest, "drc.bin")
-    ecc_py.save_drc(str(database))
+    _require(ecc_py.run_drc(), "run_drc")
+    _require(ecc_py.destroy_drc(), "destroy_drc")
     violation_map = output_dir / "violation_map.json"
     output = _output(manifest, "drc.def")
     _require(ecc_py.def_save(str(output)), "def_save")
-    for path in (database, violation_map, output):
+    for path in (violation_map, output):
         _require_file(path)
-    return {"database": database, "def": output, "violation_map": violation_map}
+    return {"def": output, "violation_map": violation_map}
 
 
 def rcx(manifest: dict[str, Any]) -> dict[str, Path]:
@@ -331,6 +343,7 @@ def _require_file(path: Path) -> None:
 
 
 SCENARIOS = {
+    "antenna": antenna,
     "combined_io": combined_io,
     "cts": cts,
     "def_round_trip": def_round_trip,

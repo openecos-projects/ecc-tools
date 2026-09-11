@@ -56,7 +56,6 @@ int registerCmdDB()
   registerTclCmd(CmdResetData, "reset_data");
   registerTclCmd(CmdLoadData, "load_data");
   registerTclCmd(CmdValidateIdb, "idb_validate");
-  registerTclCmd(CmdWriteSocJson, "write_soc_json");
   registerTclCmd(CmdWriteAbstractLef, "write_abstract_lef");
   registerTclCmd(CmdSaveGDS, "gds_save");
   registerTclCmd(CmdGenerateMPScript, "aimp_random");

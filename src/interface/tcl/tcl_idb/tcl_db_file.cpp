@@ -17,10 +17,8 @@
 #include "utility/logger/Logger.hpp"
 #include "tcl_db_file.h"
 
-#include "db_fm/file_soc.h"
 #include "idm.h"
 #include "report_manager.h"
-#include "tool_manager.h"
 #include "view_json_io.h"
 namespace tcl {
 
@@ -50,7 +48,7 @@ unsigned CmdInitIdb::exec()
 
   auto data_config = option->getStringVal();
 
-  if (iplf::tmInst->idbStart(data_config)) {
+  if (dmInst->init(data_config)) {
     ECCLOG.info(ecc::Loc::current(), "idb start.");
   }
 
@@ -423,7 +421,7 @@ unsigned CmdSaveDef::exec()
   TclOption* option = getOptionOrArg(TCL_NAME);
   auto name = option->getStringVal();
   if (name != nullptr) {
-    if (iplf::tmInst->idbSave(name)) {
+    if (dmInst->save(name)) {
       ECCLOG.info(ecc::Loc::current(), "idb save success.");
       return 1;
     }
@@ -517,7 +515,7 @@ unsigned CmdSaveNetlist::exec()
   TclOption* option = getOptionOrArg(TCL_NAME);
   auto name = option->getStringVal();
   if (name != nullptr) {
-    if (iplf::tmInst->idbSave(name)) {
+    if (dmInst->save(name)) {
       ECCLOG.info(ecc::Loc::current(), "idb save success.");
       return 1;
     }
@@ -738,54 +736,6 @@ unsigned CmdApplyViewJsonEdits::exec()
   return dmInst->applyViewJsonEdits(str_path, compress) ? 1 : 0;
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-CmdWriteSocJson::CmdWriteSocJson(const char* cmd_name) : TclCmd(cmd_name)
-{
-  auto* path = new TclStringOption(TCL_PATH, 1);
-  addOption(path);
-
-  auto* harden_cores = new TclStringListOption("-harden_cores", 1);
-  addOption(harden_cores);
-}
-
-unsigned CmdWriteSocJson::check()
-{
-  TclOption* path = getOptionOrArg(TCL_PATH);
-  ecc::checkTclOption(path, TCL_PATH);
-
-  TclOption* harden_cores = getOptionOrArg("-harden_cores");
-  ecc::checkTclOption(harden_cores, "-harden_cores");
-
-  return 1;
-}
-
-unsigned CmdWriteSocJson::exec()
-{
-  if (!check()) {
-    return 0;
-  }
-
-  TclOption* path = getOptionOrArg(TCL_PATH);
-  auto* str_path = path->getStringVal();
-  if (str_path == nullptr) {
-    return 0;
-  }
-
-  TclOption* harden_cores = getOptionOrArg("-harden_cores");
-  std::vector<std::string> harden_core_list;
-  if (harden_cores) {
-    harden_core_list = harden_cores->getStringList();
-  }
-
-  idb::JsonSoc soc_file(str_path, harden_core_list);
-  return soc_file.saveFileData() ? 1 : 0;
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 CmdWriteAbstractLef::CmdWriteAbstractLef(const char* cmd_name) : TclCmd(cmd_name)
 {
   auto* path = new TclStringOption(TCL_PATH, 1);

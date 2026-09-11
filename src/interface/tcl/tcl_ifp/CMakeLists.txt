@@ -8,8 +8,7 @@ add_library(tcl_ifp
 
 target_link_libraries(tcl_ifp
     PUBLIC
-    tool_manager
-    tcl_util
+    tcl
     PRIVATE
     ifp_interface
 )
