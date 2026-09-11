@@ -156,7 +156,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     _node_is_hard_macro.push_back(is_hard_macro);
     _macro_writeback_candidate.push_back(is_macro_writeback_candidate);
     if (is_macro_writeback_candidate) {
-      _macro_writeback_candidates.push_back({id, name, instance});
+      _macro_writeback_candidates.push_back({id, name, instance->get_id()});
     }
     // map new node to original index
     if (mNode2idbID.count(name)) {
@@ -600,7 +600,7 @@ std::size_t PyPlaceDB::writeMacroPlacementBack(
       throw std::invalid_argument("Macro placement writeback coordinates must be finite int32-compatible values");
     }
     updates.push_back(
-        {candidate.instance_name, candidate.instance, static_cast<int32_t>(candidate_x), static_cast<int32_t>(candidate_y)});
+        {candidate.instance_name, candidate.instance_id, static_cast<int32_t>(candidate_x), static_cast<int32_t>(candidate_y)});
   }
   return _db->write_selected_placement_back(updates);
 }
