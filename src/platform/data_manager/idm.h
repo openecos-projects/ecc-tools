@@ -59,6 +59,7 @@ struct InstancePlacementUpdate
   uint64_t expected_instance_id;
   int32_t x;
   int32_t y;
+  IdbOrient orient;
 };
 
 class DataManager
