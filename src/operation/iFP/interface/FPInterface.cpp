@@ -225,13 +225,8 @@ void FPInterface::debugInputMacro(std::map<std::string, std::any> config_map)
 
 void FPInterface::inputMacroPlacement(const std::string& macro_place_file_path)
 {
-  Config& config = FPDM.getConfig();
   if (macro_place_file_path.empty()) {
-    if (config.macro_placement_mode == PlacementMode::kAuto) {
-      return;
-    }
-    FPLOG.error(Loc::current(), "Macro placer mode is '", GetPlacementModeName()(config.macro_placement_mode),
-                "', but macro_placer.file_path is empty!");
+    return;
   }
 
   Database& database = FPDM.getDatabase();
@@ -241,10 +236,6 @@ void FPInterface::inputMacroPlacement(const std::string& macro_place_file_path)
     instance_map[instance.get_name()] = &instance;
     macro_num += instance.get_macro() ? 1 : 0;
   }
-  if (config.macro_placement_mode == PlacementMode::kAuto) {
-    FPLOG.info(Loc::current(), "Macro placer auto mode currently uses placement file '", macro_place_file_path, "'.");
-  }
-
   int32_t micron_dbu = database.get_micron_dbu();
   if (micron_dbu <= 0) {
     FPLOG.error(Loc::current(), "Cannot load macro placement with an invalid micron DBU value: ", micron_dbu, ".");
@@ -396,7 +387,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   Config& config = FPDM.getConfig();
   config.temp_directory_path = "./fp_temp_directory";
   config.thread_number = 128;
-  config.macro_placement_mode = PlacementMode::kAuto;
   config.macro_placement_halo = -1.0;
   config.macro_routing_halo = -1.0;
   config.input_macro_path.clear();
@@ -442,7 +432,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.thread_number = std::max(ifp_json["thread_number"].get<int32_t>(), 1);
 
   nlohmann::json& macro_placer_json = config_json["macro_placer"];
-  config.macro_placement_mode = GetPlacementModeByName()(macro_placer_json["mode"].get<std::string>());
   std::string macro_file_path = macro_placer_json.value("file_path", "");
   config.input_macro_path = macro_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, macro_file_path);
   config.macro_placement_halo = macro_placer_json["macro_placement_halo"].get<double>();
