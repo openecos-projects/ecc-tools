@@ -160,7 +160,8 @@ void DRCEngine::filterViolationList(DETask& de_task)
       // net不包含布线net的舍弃
       continue;
     }
-    if (RTUTIL.exist(_ignored_violation_set, violation)) {
+    // Minimum-cut is evaluated on the final routed geometry; do not hide it behind the startup ignore set.
+    if (violation.get_violation_type() != ViolationType::kMinimumCut && RTUTIL.exist(_ignored_violation_set, violation)) {
       // 自带的违例舍弃
       continue;
     }
@@ -251,6 +252,7 @@ std::vector<Violation> DRCEngine::getExpandedViolationList(DETask& de_task, Viol
         layer_routing_list = expandLayer(violation, {-1, 0, +1});
         break;
       case ViolationType::kMinimumCut:
+        layer_routing_list = expandLayer(violation, {0});
         break;
       case ViolationType::kMinimumWidth:
         break;
@@ -345,6 +347,7 @@ std::vector<Violation> DRCEngine::getExpandedViolationList(DETask& de_task, Viol
         layer_routing_list = expandLayer(violation, {0});
         break;
       case ViolationType::kMinimumCut:
+        layer_routing_list = expandLayer(violation, {0});
         break;
       case ViolationType::kMinimumWidth:
         new_real_rect = enlargeRect(new_real_rect, 0);

@@ -168,8 +168,10 @@ class DetailedRouter
   void updateNetResult(DRModel& dr_model);
   void updateNetPatch(DRModel& dr_model);
   void updateViolation(DRModel& dr_model);
+  void selectViaByMinimumCut(DRModel& dr_model);
   DRBoxId getViolationOwnerBoxId(DRModel& dr_model, const Violation& violation);
-  std::vector<Violation> getFullRouteViolationList(DRModel& dr_model);
+  std::vector<Violation> getFullRouteViolationList(DRModel& dr_model, bool check_minimum_cut = false, const PlanarRect* check_rect = nullptr,
+                                                   DETask* reusable_task = nullptr);
   std::vector<Violation> getDirtyRouteViolationList(DRModel& dr_model, DRBox& dr_box);
   void updateBestResult(DRModel& dr_model);
   bool stopIteration(DRModel& dr_model, std::vector<DRIterParam>& dr_iter_param_list);

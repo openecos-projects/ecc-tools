@@ -3820,7 +3820,9 @@ std::vector<Violation> PinAccessor::getPatchViolationList(PABox& pa_box, const s
                                                           const std::vector<LayerRect>& check_region_list)
 {
   DETask de_task = buildPatchDETask(pa_box, check_type_set, check_region_list);
-  return RTDE.getViolationList(de_task);
+  std::vector<Violation> violation_list = RTDE.getViolationList(de_task);
+  std::erase_if(violation_list, [](const Violation& violation) { return violation.get_violation_type() == ViolationType::kMinimumCut; });
+  return violation_list;
 }
 
 DETask PinAccessor::buildPatchDETask(PABox& pa_box, const std::set<ViolationType>& check_type_set, const std::vector<LayerRect>& check_region_list)
@@ -3885,6 +3887,7 @@ std::vector<Violation> PinAccessor::getRouteViolationList(DETask& route_task, DE
   ap_via_task.set_skip_single_net_violation(true);
   std::vector<Violation> ap_violation_list = RTDE.getViolationList(ap_via_task);
   violation_list.insert(violation_list.end(), std::make_move_iterator(ap_violation_list.begin()), std::make_move_iterator(ap_violation_list.end()));
+  std::erase_if(violation_list, [](const Violation& violation) { return violation.get_violation_type() == ViolationType::kMinimumCut; });
   return violation_list;
 }
 

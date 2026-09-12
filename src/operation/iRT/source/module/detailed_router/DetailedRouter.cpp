@@ -173,6 +173,10 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
     }
   }
   selectBestResult(dr_model);
+  Monitor via_selection_monitor;
+  RTLOG.info(Loc::current(), "Starting final minimum-cut via selection...");
+  selectViaByMinimumCut(dr_model);
+  RTLOG.info(Loc::current(), "Completed final minimum-cut via selection", via_selection_monitor.getStatsInfo());
   uploadDRModel(dr_model);
 }
 
@@ -436,6 +440,44 @@ bool overlapCheckRegion(int32_t layer_idx, const PlanarRect& real_rect, const st
     }
   }
   return false;
+}
+
+bool isViaCandidateNoWorse(const std::vector<Violation>& origin_violation_list, const std::vector<Violation>& candidate_violation_list)
+{
+  std::map<ViolationType, size_t> origin_type_num_map;
+  std::map<ViolationType, size_t> candidate_type_num_map;
+  std::map<ViolationType, size_t> origin_inter_net_num_map;
+  std::map<ViolationType, size_t> candidate_inter_net_num_map;
+  for (const Violation& violation : origin_violation_list) {
+    origin_type_num_map[violation.get_violation_type()]++;
+    if (violation.get_violation_net_set().size() > 1) {
+      origin_inter_net_num_map[violation.get_violation_type()]++;
+    }
+  }
+  for (const Violation& violation : candidate_violation_list) {
+    candidate_type_num_map[violation.get_violation_type()]++;
+    if (violation.get_violation_net_set().size() > 1) {
+      candidate_inter_net_num_map[violation.get_violation_type()]++;
+    }
+  }
+  for (const auto& [violation_type, candidate_num] : candidate_type_num_map) {
+    if (candidate_num > origin_type_num_map[violation_type]) {
+      return false;
+    }
+  }
+  for (const auto& [violation_type, candidate_num] : candidate_inter_net_num_map) {
+    if (candidate_num > origin_inter_net_num_map[violation_type]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool isTwoCutViaMaster(ViaMaster& via_master)
+{
+  // The number of rectangles is not a stable cut-count indicator for all LEF via forms.
+  const std::string& via_name = via_master.get_via_name();
+  return via_name.find("_2cut_") != std::string::npos;
 }
 
 bool isViaMasterIdxValid(const ViaMasterIdx& via_master_idx, int32_t below_layer_idx)
@@ -2627,7 +2669,9 @@ std::vector<Violation> DetailedRouter::getPatchViolationList(DRBox& dr_box, cons
                                                              const std::vector<LayerRect>& check_region_list)
 {
   DETask de_task = buildPatchDETask(dr_box, check_type_set, check_region_list);
-  return RTDE.getViolationList(de_task);
+  std::vector<Violation> violation_list = RTDE.getViolationList(de_task);
+  std::erase_if(violation_list, [](const Violation& violation) { return violation.get_violation_type() == ViolationType::kMinimumCut; });
+  return violation_list;
 }
 
 DETask DetailedRouter::buildPatchDETask(DRBox& dr_box, const std::set<ViolationType>& check_type_set, const std::vector<LayerRect>& check_region_list)
@@ -3529,6 +3573,97 @@ void DetailedRouter::updateViolation(DRModel& dr_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
+void DetailedRouter::selectViaByMinimumCut(DRModel& dr_model)
+{
+  DRModelResult& result = dr_model.get_curr_result();
+  const std::vector<Violation> origin_violation_list = getFullRouteViolationList(dr_model, true);
+  size_t minimum_cut_num = 0, net_match_num = 0, layer_match_num = 0, geometry_match_num = 0, replacement_num = 0;
+  for (const Violation& violation : origin_violation_list) {
+    if (violation.get_violation_type() == ViolationType::kMinimumCut) {
+      minimum_cut_num++;
+    }
+  }
+  RTLOG.info(Loc::current(), "Minimum-cut selector violations=", minimum_cut_num);
+  std::map<int32_t, std::vector<ViaMaster*>> two_cut_via_master_map;
+  for (auto& via_master_list : RTDM.getDatabase().get_layer_via_master_list()) {
+    for (ViaMaster& via_master : via_master_list) {
+      if (!isTwoCutViaMaster(via_master)) {
+        continue;
+      }
+      int32_t layer_idx = via_master.get_via_master_idx().get_below_layer_idx();
+      two_cut_via_master_map[layer_idx].push_back(&via_master);
+    }
+  }
+  for (const auto& [layer_idx, via_master_list] : two_cut_via_master_map) {
+    RTLOG.info(Loc::current(), "Minimum-cut 2-cut candidates: layer=", layer_idx, ", count=", via_master_list.size());
+  }
+  std::set<Segment<LayerCoord>*> evaluated_segment_set;
+  for (const Violation& violation : origin_violation_list) {
+    if (violation.get_violation_type() != ViolationType::kMinimumCut || violation.get_violation_net_set().empty()) {
+      continue;
+    }
+    // Minimum-cut violations are reported on the below routing metal layer.
+    int32_t layer_idx = violation.get_violation_shape().get_layer_idx();
+    if (layer_idx < 0 || layer_idx >= static_cast<int32_t>(RTDM.getDatabase().get_layer_via_master_list().size())) {
+      continue;
+    }
+    auto candidate_it = two_cut_via_master_map.find(layer_idx);
+    if (candidate_it == two_cut_via_master_map.end() || candidate_it->second.empty()) {
+      continue;
+    }
+    for (int32_t net_idx : violation.get_violation_net_set()) {
+      net_match_num++;
+      auto result_iter = result.get_net_detailed_result_map().find(net_idx);
+      if (result_iter == result.get_net_detailed_result_map().end()) {
+        continue;
+      }
+      for (Segment<LayerCoord>& segment : result_iter->second) {
+        if (!segment.hasValidViaMaster() || segment.get_via_master_idx().get_below_layer_idx() != layer_idx) {
+          continue;
+        }
+        layer_match_num++;
+        PlanarCoord via_coord(segment.get_first().get_planar_coord());
+        if (!RTUTIL.isInside(violation.get_violation_shape().get_real_rect(), via_coord)) {
+          continue;
+        }
+        if (!evaluated_segment_set.insert(&segment).second) {
+          continue;
+        }
+        geometry_match_num++;
+        ViaMasterIdx origin_via_master_idx = segment.get_via_master_idx();
+        const PlanarRect violation_rect = violation.get_violation_shape().get_real_rect();
+        DETask local_task;
+        std::vector<Violation> baseline_violation_list = getFullRouteViolationList(dr_model, false, &violation_rect, &local_task);
+        size_t baseline_num = baseline_violation_list.size();
+        ViaMaster* selected_via_master = nullptr;
+        size_t selected_num = baseline_num;
+        for (ViaMaster* candidate : candidate_it->second) {
+          if (candidate->get_via_master_idx() == origin_via_master_idx) {
+            continue;
+          }
+          segment.set_via_master_idx(candidate->get_via_master_idx());
+          std::vector<Violation> candidate_violation_list = getFullRouteViolationList(dr_model, false, &violation_rect, &local_task);
+          size_t candidate_num = candidate_violation_list.size();
+          if (isViaCandidateNoWorse(baseline_violation_list, candidate_violation_list)
+              && (selected_via_master == nullptr || candidate_num < selected_num)) {
+            selected_num = candidate_num;
+            selected_via_master = candidate;
+          }
+        }
+        segment.set_via_master_idx(origin_via_master_idx);
+        if (selected_via_master != nullptr && selected_num <= baseline_num) {
+          segment.set_via_master_idx(selected_via_master->get_via_master_idx());
+          replacement_num++;
+          RTLOG.info(Loc::current(), "Minimum-cut via selected: layer=", layer_idx, ", name=", selected_via_master->get_via_name(),
+                     ", violations=", selected_num);
+        }
+      }
+    }
+  }
+  RTLOG.info(Loc::current(), "Minimum-cut selector matches: net=", net_match_num, ", layer_via=", layer_match_num,
+             ", geometry=", geometry_match_num, ", replacements=", replacement_num);
+}
+
 DRBoxId DetailedRouter::getViolationOwnerBoxId(DRModel& dr_model, const Violation& violation)
 {
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
@@ -3538,10 +3673,59 @@ DRBoxId DetailedRouter::getViolationOwnerBoxId(DRModel& dr_model, const Violatio
   return DRBoxId(dr_model.get_gcell_x_box_idx_list()[grid_x], dr_model.get_gcell_y_box_idx_list()[grid_y]);
 }
 
-std::vector<Violation> DetailedRouter::getFullRouteViolationList(DRModel& dr_model)
+std::vector<Violation> DetailedRouter::getFullRouteViolationList(DRModel& dr_model, bool check_minimum_cut, const PlanarRect* check_rect, DETask* reusable_task)
 {
   std::string top_name = RTUTIL.getString("dr_model");
-  DETask de_task;
+  DETask local_task;
+  DETask& de_task = reusable_task == nullptr ? local_task : *reusable_task;
+  if (reusable_task != nullptr && !de_task.get_net_result_map().empty()) {
+    std::vector<Violation> violation_list = RTDE.getViolationList(de_task);
+    std::erase_if(violation_list, [](const Violation& violation) { return violation.get_violation_type() == ViolationType::kMinimumCut; });
+    return violation_list;
+  }
+  if (check_rect != nullptr) {
+    const int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
+    const PlanarRect local_real_rect = RTUTIL.getEnlargedRect(*check_rect, 3 * detection_distance);
+    EXTPlanarRect local_region;
+    local_region.set_real_rect(local_real_rect);
+    local_region.set_grid_rect(RTUTIL.getClosedGCellGridRect(local_real_rect, RTDM.getDatabase().get_gcell_axis()));
+    const auto fixed_map = RTDM.getTypeLayerNetFixedRectMap(local_region);
+    buildFixedDETask(de_task, fixed_map);
+    const PlanarRect result_query_rect = RTUTIL.getEnlargedRect(local_real_rect, detection_distance);
+    for (auto& [net_idx, segment_list] : dr_model.get_curr_result().get_net_detailed_result_map()) {
+      for (Segment<LayerCoord>& segment : segment_list) {
+        bool is_in_local_region = false;
+        for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, segment)) {
+          if (RTUTIL.isClosedOverlap(net_shape.get_rect(), result_query_rect)) {
+            is_in_local_region = true;
+            break;
+          }
+        }
+        if (is_in_local_region) {
+          de_task.get_net_result_map()[net_idx].push_back(&segment);
+        }
+      }
+    }
+    for (auto& [net_idx, patch_list] : dr_model.get_curr_result().get_net_detailed_patch_map()) {
+      for (EXTLayerRect& patch : patch_list) {
+        if (RTUTIL.isClosedOverlap(patch.get_real_rect(), result_query_rect)) {
+          de_task.get_net_patch_map()[net_idx].push_back(&patch);
+        }
+      }
+    }
+    for (DRNet& dr_net : dr_model.get_dr_net_list()) {
+      de_task.get_need_checked_net_set().insert(dr_net.get_net_idx());
+    }
+    for (const RoutingLayer& routing_layer : RTDM.getDatabase().get_routing_layer_list()) {
+      de_task.get_check_region_list().emplace_back(local_real_rect, routing_layer.get_layer_idx());
+    }
+    de_task.set_proc_type(DEProcType::kGet);
+    de_task.set_net_type(DENetType::kRouteHybrid);
+    de_task.set_top_name(top_name);
+    std::vector<Violation> violation_list = RTDE.getViolationList(de_task);
+    std::erase_if(violation_list, [](const Violation& violation) { return violation.get_violation_type() == ViolationType::kMinimumCut; });
+    return violation_list;
+  }
   auto& env_shape_list = de_task.get_env_shape_list();
   auto& net_pin_shape_map = de_task.get_net_pin_shape_map();
   auto& type_layer_fixed_rect_rtree_map = RTDM.getDatabase().get_type_layer_fixed_rect_rtree_map();
@@ -3577,7 +3761,22 @@ std::vector<Violation> DetailedRouter::getFullRouteViolationList(DRModel& dr_mod
   de_task.set_proc_type(DEProcType::kGet);
   de_task.set_net_type(DENetType::kRouteHybrid);
   de_task.set_top_name(top_name);
-  return RTDE.getViolationList(de_task);
+  if (check_rect != nullptr) {
+    PlanarRect local_rect = RTUTIL.getEnlargedRect(*check_rect, 3 * RTDM.getDatabase().get_detection_distance());
+    for (const RoutingLayer& routing_layer : RTDM.getDatabase().get_routing_layer_list()) {
+      de_task.get_check_region_list().emplace_back(local_rect, routing_layer.get_layer_idx());
+    }
+  }
+  if (check_minimum_cut) {
+    de_task.set_check_type_set({ViolationType::kMinimumCut});
+  }
+  std::vector<Violation> violation_list = RTDE.getViolationList(de_task);
+  if (check_minimum_cut) {
+    std::erase_if(violation_list, [](const Violation& violation) { return violation.get_violation_type() != ViolationType::kMinimumCut; });
+  } else {
+    std::erase_if(violation_list, [](const Violation& violation) { return violation.get_violation_type() == ViolationType::kMinimumCut; });
+  }
+  return violation_list;
 }
 
 std::vector<Violation> DetailedRouter::getDirtyRouteViolationList(DRModel& dr_model, DRBox& dr_box)
@@ -3609,6 +3808,9 @@ std::vector<Violation> DetailedRouter::getDirtyRouteViolationList(DRModel& dr_mo
   de_task.set_top_name(top_name);
   std::vector<Violation> owned_violation_list;
   for (Violation& violation : RTDE.getViolationList(de_task)) {
+    if (violation.get_violation_type() == ViolationType::kMinimumCut) {
+      continue;
+    }
     DRBoxId owner_box_id = getViolationOwnerBoxId(dr_model, violation);
     if (owner_box_id == dr_box.get_dr_box_id()) {
       owned_violation_list.push_back(std::move(violation));

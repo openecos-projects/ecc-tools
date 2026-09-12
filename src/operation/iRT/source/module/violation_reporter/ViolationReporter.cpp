@@ -164,7 +164,19 @@ std::vector<Violation> ViolationReporter::getViolationList(VRModel& vr_model)
     de_task.set_net_patch_map(net_patch_map);
     de_task.set_need_checked_net_set(need_checked_net_set);
   }
-  return RTDE.getViolationList(de_task);
+  std::vector<Violation> violation_list = RTDE.getViolationList(de_task);
+  int32_t minimum_cut_num = 0;
+  for (const Violation& violation : violation_list) {
+    if (violation.get_violation_type() != ViolationType::kMinimumCut) {
+      continue;
+    }
+    minimum_cut_num++;
+    const PlanarRect& rect = violation.get_violation_shape().get_real_rect();
+    RTLOG.info(Loc::current(), "VR minimum-cut violation: layer=", violation.get_violation_shape().get_layer_idx(), ", rect=",
+               rect.get_ll_x(), ",", rect.get_ll_y(), "-", rect.get_ur_x(), ",", rect.get_ur_y());
+  }
+  RTLOG.info(Loc::current(), "VR minimum-cut violations=", minimum_cut_num);
+  return violation_list;
 }
 
 #if 1  // exhibit
