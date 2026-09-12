@@ -3597,7 +3597,33 @@ void DetailedRouter::selectViaByMinimumCut(DRModel& dr_model)
   for (const auto& [layer_idx, via_master_list] : two_cut_via_master_map) {
     RTLOG.info(Loc::current(), "Minimum-cut 2-cut candidates: layer=", layer_idx, ", count=", via_master_list.size());
   }
+
+  struct MinimumCutTarget
+  {
+    int32_t layer_idx = -1;
+    Segment<LayerCoord>* segment = nullptr;
+    PlanarRect violation_rect;
+    PlanarRect influence_rect;
+    std::vector<ViaMaster*> candidate_list;
+    ViaMasterIdx origin_via_master_idx;
+  };
+  struct MinimumCutSelection
+  {
+    bool task_ready = false;
+    bool has_selection = false;
+    size_t baseline_num = 0;
+    size_t selected_num = 0;
+    size_t candidate_eval_num = 0;
+    ViaMasterIdx selected_via_master_idx;
+  };
+
+  std::vector<MinimumCutTarget> target_list;
   std::set<Segment<LayerCoord>*> evaluated_segment_set;
+  const int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
+  const int32_t only_pitch = RTDM.getOnlyPitch();
+  // Include the local task expansion, iDRC cluster expansion, and the result query margin.
+  const int64_t influence_expand_value = 4LL * detection_distance + 5LL * only_pitch;
+  const int32_t influence_expand = static_cast<int32_t>(std::min<int64_t>(influence_expand_value, std::numeric_limits<int32_t>::max() / 4));
   for (const Violation& violation : origin_violation_list) {
     if (violation.get_violation_type() != ViolationType::kMinimumCut || violation.get_violation_net_set().empty()) {
       continue;
@@ -3630,38 +3656,149 @@ void DetailedRouter::selectViaByMinimumCut(DRModel& dr_model)
           continue;
         }
         geometry_match_num++;
-        ViaMasterIdx origin_via_master_idx = segment.get_via_master_idx();
-        const PlanarRect violation_rect = violation.get_violation_shape().get_real_rect();
-        DETask local_task;
-        std::vector<Violation> baseline_violation_list = getFullRouteViolationList(dr_model, false, &violation_rect, &local_task);
-        size_t baseline_num = baseline_violation_list.size();
-        ViaMaster* selected_via_master = nullptr;
-        size_t selected_num = baseline_num;
-        for (ViaMaster* candidate : candidate_it->second) {
-          if (candidate->get_via_master_idx() == origin_via_master_idx) {
-            continue;
-          }
-          segment.set_via_master_idx(candidate->get_via_master_idx());
-          std::vector<Violation> candidate_violation_list = getFullRouteViolationList(dr_model, false, &violation_rect, &local_task);
-          size_t candidate_num = candidate_violation_list.size();
-          if (isViaCandidateNoWorse(baseline_violation_list, candidate_violation_list)
-              && (selected_via_master == nullptr || candidate_num < selected_num)) {
-            selected_num = candidate_num;
-            selected_via_master = candidate;
-          }
+        MinimumCutTarget target;
+        target.layer_idx = layer_idx;
+        target.segment = &segment;
+        target.violation_rect = violation.get_violation_shape().get_real_rect();
+        target.influence_rect = RTUTIL.getEnlargedRect(target.violation_rect, influence_expand);
+        target.candidate_list = candidate_it->second;
+        target.origin_via_master_idx = segment.get_via_master_idx();
+        target_list.push_back(std::move(target));
+      }
+    }
+  }
+
+  if (target_list.empty()) {
+    RTLOG.info(Loc::current(), "Minimum-cut selector matches: net=", net_match_num, ", layer_via=", layer_match_num,
+               ", geometry=", geometry_match_num, ", groups=0, replacements=", replacement_num);
+    return;
+  }
+
+  // Build connected components of overlapping influence regions. A component is evaluated
+  // against one immutable route snapshot; only components without overlap run concurrently.
+  std::vector<std::vector<size_t>> target_group_list;
+  std::vector<bool> assigned_target_list(target_list.size(), false);
+  for (size_t start_idx = 0; start_idx < target_list.size(); start_idx++) {
+    if (assigned_target_list[start_idx]) {
+      continue;
+    }
+    std::vector<size_t> pending_target_list;
+    pending_target_list.push_back(start_idx);
+    assigned_target_list[start_idx] = true;
+    target_group_list.emplace_back();
+    std::vector<size_t>& target_group = target_group_list.back();
+    for (size_t pending_idx = 0; pending_idx < pending_target_list.size(); pending_idx++) {
+      size_t target_idx = pending_target_list[pending_idx];
+      target_group.push_back(target_idx);
+      for (size_t next_idx = 0; next_idx < target_list.size(); next_idx++) {
+        if (assigned_target_list[next_idx]) {
+          continue;
         }
-        segment.set_via_master_idx(origin_via_master_idx);
-        if (selected_via_master != nullptr && selected_num <= baseline_num) {
-          segment.set_via_master_idx(selected_via_master->get_via_master_idx());
-          replacement_num++;
-          RTLOG.info(Loc::current(), "Minimum-cut via selected: layer=", layer_idx, ", name=", selected_via_master->get_via_name(),
-                     ", violations=", selected_num);
+        if (RTUTIL.isClosedOverlap(target_list[target_idx].influence_rect, target_list[next_idx].influence_rect)) {
+          assigned_target_list[next_idx] = true;
+          pending_target_list.push_back(next_idx);
         }
       }
     }
   }
+
+  std::vector<MinimumCutSelection> selection_list(target_list.size());
+  const int32_t original_omp_thread_num = omp_get_max_threads();
+  const int32_t max_parallel_group_num = 20;
+  const int32_t parallel_group_num = std::max(1, std::min({static_cast<int32_t>(target_group_list.size()), max_parallel_group_num,
+                                                           std::max(RTDM.getConfig().thread_number, 1), original_omp_thread_num}));
+  RTLOG.info(Loc::current(), "Minimum-cut selector groups=", target_group_list.size(), ", workers=", parallel_group_num,
+             ", targets=", target_list.size());
+
+  // iDRC already parallelizes clusters internally. Restrict nested OpenMP regions to one
+  // thread per worker so independent groups can run concurrently without oversubscription.
+  if (parallel_group_num > 1) {
+    omp_set_num_threads(1);
+  }
+#pragma omp parallel for schedule(dynamic, 1) num_threads(parallel_group_num)
+  for (int32_t group_idx = 0; group_idx < static_cast<int32_t>(target_group_list.size()); group_idx++) {
+    for (size_t target_idx : target_group_list[group_idx]) {
+      const MinimumCutTarget& target = target_list[target_idx];
+      MinimumCutSelection& selection = selection_list[target_idx];
+      Segment<LayerCoord> candidate_segment = *target.segment;
+      DETask local_task;
+      const PlanarRect violation_rect = target.violation_rect;
+      std::vector<Violation> baseline_violation_list = getFullRouteViolationList(dr_model, false, &violation_rect, &local_task);
+      selection.baseline_num = baseline_violation_list.size();
+
+      // The local task normally contains the target segment because its via is inside the
+      // reported violation. Replace only that pointer; all other snapshot shapes stay read-only.
+      bool target_segment_found = false;
+      for (auto& [net_idx, segment_list] : local_task.get_net_result_map()) {
+        (void) net_idx;
+        for (Segment<LayerCoord>*& task_segment : segment_list) {
+          if (task_segment == target.segment) {
+            task_segment = &candidate_segment;
+            target_segment_found = true;
+          }
+        }
+      }
+      if (!target_segment_found) {
+        continue;
+      }
+      selection.task_ready = true;
+
+      ViaMaster* selected_via_master = nullptr;
+      size_t selected_num = selection.baseline_num;
+      for (ViaMaster* candidate : target.candidate_list) {
+        if (candidate->get_via_master_idx() == target.origin_via_master_idx) {
+          continue;
+        }
+        candidate_segment.set_via_master_idx(candidate->get_via_master_idx());
+        std::vector<Violation> candidate_violation_list = getFullRouteViolationList(dr_model, false, &violation_rect, &local_task);
+        selection.candidate_eval_num++;
+        size_t candidate_num = candidate_violation_list.size();
+        if (isViaCandidateNoWorse(baseline_violation_list, candidate_violation_list)
+            && (selected_via_master == nullptr || candidate_num < selected_num)) {
+          selected_num = candidate_num;
+          selected_via_master = candidate;
+          // Zero is the global lower bound for ordinary violations in this local task.
+          if (selected_num == 0) {
+            break;
+          }
+        }
+      }
+      if (selected_via_master != nullptr && selected_num <= selection.baseline_num) {
+        selection.has_selection = true;
+        selection.selected_num = selected_num;
+        selection.selected_via_master_idx = selected_via_master->get_via_master_idx();
+      }
+    }
+  }
+  if (parallel_group_num > 1) {
+    omp_set_num_threads(original_omp_thread_num);
+  }
+
+  size_t candidate_eval_num = 0;
+  size_t task_miss_num = 0;
+  for (size_t target_idx = 0; target_idx < target_list.size(); target_idx++) {
+    const MinimumCutTarget& target = target_list[target_idx];
+    MinimumCutSelection& selection = selection_list[target_idx];
+    candidate_eval_num += selection.candidate_eval_num;
+    if (!selection.task_ready) {
+      task_miss_num++;
+      continue;
+    }
+    if (selection.has_selection) {
+      target.segment->set_via_master_idx(selection.selected_via_master_idx);
+      replacement_num++;
+      int32_t selected_via_idx = selection.selected_via_master_idx.get_via_idx();
+      std::vector<ViaMaster>& via_master_list = RTDM.getDatabase().get_layer_via_master_list()[target.layer_idx];
+      RTLOG.info(Loc::current(), "Minimum-cut via selected: layer=", target.layer_idx, ", name=", via_master_list[selected_via_idx].get_via_name(),
+                 ", violations=", selection.selected_num);
+    }
+  }
+  if (task_miss_num > 0) {
+    RTLOG.error(Loc::current(), "Minimum-cut selector could not build local task for ", task_miss_num, " targets!");
+  }
   RTLOG.info(Loc::current(), "Minimum-cut selector matches: net=", net_match_num, ", layer_via=", layer_match_num,
-             ", geometry=", geometry_match_num, ", replacements=", replacement_num);
+             ", geometry=", geometry_match_num, ", groups=", target_group_list.size(), ", candidate_evals=", candidate_eval_num,
+             ", task_misses=", task_miss_num, ", replacements=", replacement_num);
 }
 
 DRBoxId DetailedRouter::getViolationOwnerBoxId(DRModel& dr_model, const Violation& violation)
