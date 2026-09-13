@@ -35,10 +35,9 @@ class Config
   // **********        FP         ********** //
   std::string temp_directory_path;                         // required
   int32_t thread_number;                                   // optional
-  PlacementMode macro_placement_mode;                      // required
   double macro_placement_halo;                             // optional
   double macro_routing_halo;                               // optional
-  std::string input_macro_path;                            // optional
+  std::string input_macro_path;                            // optional; non-empty loads macro placement file
   DieMode die_mode;                                        // optional
   std::string die_site_name;                               // optional
   double die_aspect_ratio;                                 // optional
