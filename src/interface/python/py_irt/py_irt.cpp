@@ -40,6 +40,9 @@ bool runERT(std::string& config, std::map<std::string, std::string>& config_dict
   if (!pass) {
     return false;
   }
+  for (auto& [key, value] : config_dict) {
+    config_map[key] = value;
+  }
   RTI.runERT(config_map);
   return true;
 }

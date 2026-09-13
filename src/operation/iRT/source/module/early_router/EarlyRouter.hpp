@@ -123,6 +123,7 @@ class EarlyRouter
   void routeERBox(ERModel& er_model, ERBox& er_box);
   void updateNetResult(ERModel& er_model);
   void updateNetPatch(ERModel& er_model);
+  void checkAndFixAntenna(ERModel& er_model);
   void cleanTempResult(ERModel& er_model);
   void uploadERModel(ERModel& er_model);
 
