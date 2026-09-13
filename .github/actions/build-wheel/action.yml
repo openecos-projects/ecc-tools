@@ -7,26 +7,9 @@ runs:
     - name: Install system dependencies
       shell: bash
       run: |
-        install_dnf_packages() {
-          local attempt
-          for attempt in 1 2 3; do
-            if dnf --refresh install -y "$@"; then
-              return 0
-            fi
-
-            if [[ "$attempt" -lt 3 ]]; then
-              echo "dnf install failed on attempt ${attempt}/3; refreshing metadata before retrying"
-              dnf clean all
-              sleep "$((attempt * 10))"
-            fi
-          done
-
-          return 1
-        }
-
-        install_dnf_packages epel-release
+        dnf install -y epel-release
         dnf config-manager --set-enabled crb || true
-        install_dnf_packages \
+        dnf install -y \
           cmake ninja-build pkgconfig patchelf mold lld curl gcc-c++ \
           cairo-devel gflags-devel glog-devel \
           flex flex-devel bison eigen3-devel gtest-devel \
