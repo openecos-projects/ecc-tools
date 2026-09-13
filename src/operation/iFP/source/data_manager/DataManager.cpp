@@ -161,8 +161,8 @@ void DataManager::printConfig()
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "thread_number");
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), _config.thread_number);
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "macro_placer");
-  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "mode: ", GetPlacementModeName()(_config.macro_placement_mode),
-             ", placement_halo: ", _config.macro_placement_halo, ", routing_halo: ", _config.macro_routing_halo);
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "placement_halo: ", _config.macro_placement_halo,
+             ", routing_halo: ", _config.macro_routing_halo);
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "input_path: ", _config.input_macro_path);
 
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "die");
