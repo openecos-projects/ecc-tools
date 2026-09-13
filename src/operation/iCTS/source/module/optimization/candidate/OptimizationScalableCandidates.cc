@@ -124,11 +124,11 @@ auto AccumulateWindowStatsFromChild(ClockSizingTopologyWindowStats& stats, FastS
   stats.max_arrival_by_node.at(node_id) = std::max(stats.max_arrival_by_node.at(node_id), stats.max_arrival_by_node.at(child_id));
 }
 
-auto BuildTopologyWindowStats(const FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingBuffer>& buffers,
+auto BuildTopologyWindowStats(const FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingBuffer>& buffers,
                               const ClockSizingTopologyIndex& topology, const ClockSizingArrivalWindow& window) -> ClockSizingTopologyWindowStats
 {
   ClockSizingTopologyWindowStats stats;
-  const auto graph_profile = fast_sta.queryClockGraphProfile(clock_id);
+  const auto graph_profile = fast_sta.queryGraphProfile(context_id);
   if (!graph_profile.has_value()) {
     return stats;
   }
@@ -144,7 +144,7 @@ auto BuildTopologyWindowStats(const FastSTA& fast_sta, FastStaClockId clock_id, 
 
   const auto post_order = CollectTopologyPostOrder(topology);
   std::unordered_map<FastStaNodeId, double> arrival_by_sink;
-  for (const auto& sink_arrival : fast_sta.collectClockSinkArrivals(clock_id)) {
+  for (const auto& sink_arrival : fast_sta.collectClockSinkArrivals(context_id)) {
     arrival_by_sink[sink_arrival.node_id] = sink_arrival.arrival_ns;
   }
   for (const auto node_id : post_order) {
@@ -408,14 +408,14 @@ auto NormalizedBatchScore(const ScoredClockSizingBatch& candidate) -> double
 
 }  // namespace
 
-auto GenerateScalableClockSizingEditBatches(const FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingBuffer>& buffers,
+auto GenerateScalableClockSizingEditBatches(const FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingBuffer>& buffers,
                                             const ClockSizingTopologyIndex& topology, const ClockSizingTimingState& current, double target_skew_ns)
     -> std::vector<ScoredClockSizingBatch>
 {
   std::vector<ScoredClockSizingBatch> candidates;
   std::unordered_set<std::string> seen;
   const auto window = MakeArrivalWindow(current, target_skew_ns);
-  const auto stats = BuildTopologyWindowStats(fast_sta, clock_id, buffers, topology, window);
+  const auto stats = BuildTopologyWindowStats(fast_sta, context_id, buffers, topology, window);
   const auto scored_edit_collection = CollectScoredClockSizingEdits(buffers, stats);
   const auto& scored_edits = scored_edit_collection.edits;
 

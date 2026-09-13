@@ -23,8 +23,12 @@
 
 #pragma once
 
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "adapter/fast_sta/FastSTA.hh"
@@ -106,6 +110,16 @@ class DataManager final
   auto getClockLayout() -> ClockLayout& { return _clock_layout; }
   auto getClockLayout() const -> const ClockLayout& { return _clock_layout; }
 
+  auto getClockTimingContext(std::string_view clock_name) const -> std::optional<FastStaContextId>;
+  auto getClockTimingContext(std::string_view clock_name, std::string_view clock_net_name) const -> std::optional<FastStaContextId>;
+  auto getUnclockedTimingContext() const -> std::optional<FastStaContextId> { return _timing_contexts.unclocked; }
+  auto beginOptimizationTiming(const Design& design, const ClockLayout& clock_layout) -> DataManagerStatus;
+  auto updateOptimizationTiming(const std::vector<FastStaInstanceMasterChange>& changes) -> DataManagerStatus;
+  auto buildClockSizingContext(const Design& design, const ClockLayout& clock_layout, std::size_t clock_index) -> FastStaBuildResult;
+  auto getOptimizationTimingContext(std::string_view clock_name) const -> std::optional<FastStaContextId>;
+  auto getOptimizationTimingContext(std::string_view clock_name, std::string_view clock_net_name) const -> std::optional<FastStaContextId>;
+  void discardOptimizationTiming();
+
   auto commitSynthesis(std::unique_ptr<Design> design, ClockLayout clock_layout, const SynthesisTraceSummary& summary) -> DataManagerStatus;
   auto commitOptimization(std::unique_ptr<Design> design, ClockLayout clock_layout, const OptimizationSummary& summary) -> DataManagerStatus;
   auto commitInstantiation(const InstantiationSummary& summary) -> DataManagerStatus;
@@ -130,8 +144,21 @@ class DataManager final
 
   ~DataManager() = default;
 
+  struct TimingContextSet
+  {
+    std::map<std::pair<std::string, std::string>, FastStaContextId> clocks;
+    std::optional<FastStaContextId> unclocked;
+  };
+
   auto readClockData() -> DataManagerStatus;
-  auto replaceCommittedDesign(std::unique_ptr<Design> design) -> void;
+  auto initializeTiming() -> DataManagerStatus;
+  auto buildTimingContexts(const Design& design, const ClockLayout& clock_layout, bool require_power, TimingContextSet& contexts) -> DataManagerStatus;
+  auto synchronizeTimingContexts(const Design& design, const ClockLayout& clock_layout, TimingContextSet& contexts) -> DataManagerStatus;
+  auto timingContextsMatchDesign(const TimingContextSet& contexts, const Design& design, const ClockLayout& layout) const -> bool;
+  auto pendingTimingContextsValid(bool require_power) const -> bool;
+  auto releaseTimingContexts(TimingContextSet& contexts) -> void;
+  static auto findTimingContext(const TimingContextSet& contexts, std::string_view clock_name) -> std::optional<FastStaContextId>;
+  auto replaceCommittedDesign(std::unique_ptr<Design> design, ClockLayout clock_layout, TimingContextSet contexts) -> void;
   static auto okStatus(std::string message) -> DataManagerStatus;
   static auto failureStatus(DataManagerStatusCode code, std::string message) -> DataManagerStatus;
   static std::unique_ptr<DataManager> _instance;
@@ -140,6 +167,10 @@ class DataManager final
   std::unique_ptr<Design> _design;
   Wrapper _wrapper;
   FastSTA _fast_sta;
+  SdcClockData _timing_constraints;
+  std::optional<WrapperTimingGraph> _timing_graph;
+  TimingContextSet _timing_contexts;
+  TimingContextSet _optimization_timing_contexts;
   ClockLayout _clock_layout;
   SynthesisTraceSummary _synthesis_summary;
   OptimizationSummary _optimization_summary;

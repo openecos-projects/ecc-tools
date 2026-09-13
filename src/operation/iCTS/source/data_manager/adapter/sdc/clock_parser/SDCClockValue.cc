@@ -21,10 +21,14 @@
  * @brief SDC clock value and expression helper implementation.
  */
 
+#include <fnmatch.h>
+
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <string>
@@ -33,7 +37,6 @@
 #include <vector>
 
 #include "SDCClockParser.hh"
-#include "SDCClockReader.hh"
 
 namespace icts::sdc_reader {
 
@@ -49,7 +52,7 @@ auto Trim(const std::string& text) -> std::string
 
 auto IsOption(const std::string& text) -> bool
 {
-  return text.size() > 1U && text.front() == '-';
+  return text.size() > 1U && text.front() == '-' && std::isalpha(static_cast<unsigned char>(text[1])) != 0;
 }
 
 auto JoinStrings(const std::vector<std::string>& values) -> std::string
@@ -67,13 +70,54 @@ auto JoinStrings(const std::vector<std::string>& values) -> std::string
 auto SplitListText(const std::string& text) -> std::vector<std::string>
 {
   std::vector<std::string> values;
-  std::istringstream stream(text);
-  std::string value;
-  while (stream >> value) {
-    values.push_back(value);
-  }
-  if (values.empty() && !text.empty()) {
-    values.push_back(text);
+  std::size_t index = 0U;
+  while (index < text.size()) {
+    while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) != 0) {
+      ++index;
+    }
+    if (index == text.size()) {
+      break;
+    }
+    const bool braced = text[index] == '{';
+    const bool quoted = text[index] == '"';
+    int depth = braced ? 1 : 0;
+    if (braced || quoted) {
+      ++index;
+    }
+    bool closed = !braced && !quoted;
+    std::string value;
+    while (index < text.size()) {
+      const char ch = text[index++];
+      if (ch == '\\' && index < text.size()) {
+        const char escaped = text[index++];
+        // Preserve glob escapes in braced lists; escaped whitespace groups a
+        // single unbraced list element without becoming a second selector.
+        if (braced && escaped != '\n') {
+          value += '\\';
+        }
+        value += escaped == '\n' ? ' ' : escaped;
+      } else if (braced && ch == '{') {
+        ++depth;
+        value += ch;
+      } else if (braced && ch == '}') {
+        if (--depth == 0) {
+          closed = true;
+          break;
+        }
+        value += ch;
+      } else if (quoted && ch == '"') {
+        closed = true;
+        break;
+      } else if (!braced && !quoted && std::isspace(static_cast<unsigned char>(ch)) != 0) {
+        break;
+      } else {
+        value += ch;
+      }
+    }
+    if (!closed || ((braced || quoted) && index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) == 0)) {
+      return {};
+    }
+    values.emplace_back(std::move(value));
   }
   return values;
 }
@@ -130,10 +174,7 @@ auto MakeObjectValue(SdcObjectKind kind, const std::vector<std::string>& pattern
 
 auto AppendRefsFromValue(std::vector<SdcObjectRef>& refs, const SdcValue& value, SdcObjectKind default_kind) -> void
 {
-  if (!value.objects.empty()) {
-    refs.insert(refs.end(), value.objects.begin(), value.objects.end());
-    return;
-  }
+  refs.insert(refs.end(), value.objects.begin(), value.objects.end());
   for (const auto& text : value.strings) {
     for (const auto& item : SplitListText(text)) {
       refs.emplace_back(SdcObjectRef{default_kind, item, false});
@@ -149,7 +190,7 @@ auto ParseDoubleValue(const std::string& text, double& value) -> bool
   }
   std::istringstream stream(clean_text);
   stream >> value;
-  return !stream.fail() && HasOnlyTrailingSpaces(stream);
+  return !stream.fail() && HasOnlyTrailingSpaces(stream) && std::isfinite(value);
 }
 
 auto ParseIntValue(const std::string& text, int& value) -> bool
@@ -161,7 +202,7 @@ auto ParseIntValue(const std::string& text, int& value) -> bool
   long parsed = 0;
   std::istringstream stream(clean_text);
   stream >> parsed;
-  if (stream.fail() || !HasOnlyTrailingSpaces(stream)) {
+  if (stream.fail() || !HasOnlyTrailingSpaces(stream) || parsed < std::numeric_limits<int>::min() || parsed > std::numeric_limits<int>::max()) {
     return false;
   }
   value = static_cast<int>(parsed);
@@ -183,18 +224,65 @@ auto TimeUnitToNs(const std::string& unit) -> double
     --suffix_pos;
   }
   if (suffix_pos == normalized.size() || suffix_pos == 0U) {
-    return 1.0;
+    return 0.0;
   }
   const auto suffix = normalized.substr(suffix_pos);
   const auto suffix_iter = scale_by_unit.find(suffix);
   if (suffix_iter == scale_by_unit.end()) {
-    return 1.0;
+    return 0.0;
   }
   double numeric_scale = 0.0;
   if (!ParseDoubleValue(normalized.substr(0U, suffix_pos), numeric_scale)) {
-    return 1.0;
+    return 0.0;
   }
   return numeric_scale * suffix_iter->second;
+}
+
+auto CapacitanceUnitToPf(const std::string& unit) -> double
+{
+  const auto normalized = ToLower(Trim(unit));
+  const std::map<std::string, double> scales = {{"ff", 0.001}, {"pf", 1.0}, {"nf", 1000.0}, {"uf", 1000000.0}, {"f", 1.0e12}};
+  std::size_t suffix = normalized.size();
+  while (suffix > 0U && std::isalpha(static_cast<unsigned char>(normalized[suffix - 1U])) != 0) {
+    --suffix;
+  }
+  const auto found = scales.find(normalized.substr(suffix));
+  double scale = 1.0;
+  if (found == scales.end() || (suffix != 0U && !ParseDoubleValue(normalized.substr(0U, suffix), scale))) {
+    return 0.0;
+  }
+  return scale * found->second;
+}
+
+auto SelectBothUnlessOne(const SdcCommandOptions& options, const std::string& first, const std::string& second, bool& selected_first, bool& selected_second)
+    -> void
+{
+  selected_first = options.flags.contains(first) || !options.flags.contains(second);
+  selected_second = options.flags.contains(second) || !options.flags.contains(first);
+}
+
+auto OptionTransition(const SdcCommandOptions& options) -> SdcTransition
+{
+  bool rise = false;
+  bool fall = false;
+  SelectBothUnlessOne(options, "-rise", "-fall", rise, fall);
+  if (rise && fall) {
+    return SdcTransition::kBoth;
+  }
+  return rise ? SdcTransition::kRise : SdcTransition::kFall;
+}
+
+auto SelectorTransition(const std::string& option) -> SdcTransition
+{
+  if (option.starts_with("-rise_")) {
+    return SdcTransition::kRise;
+  }
+  return option.starts_with("-fall_") ? SdcTransition::kFall : SdcTransition::kBoth;
+}
+
+auto ObjectPatternMatches(const std::string& pattern, const std::string& name) -> bool
+{
+  return pattern == name || fnmatch(pattern.c_str(), name.c_str(), 0) == 0;
 }
 
 ArithmeticParser::ArithmeticParser(std::string expression) : _expression(std::move(expression))
@@ -293,7 +381,7 @@ auto ArithmeticParser::parse(double& value) -> bool
     return false;
   }
   value = values.back();
-  return true;
+  return std::isfinite(value);
 }
 
 auto ArithmeticParser::isOperator(char token) -> bool

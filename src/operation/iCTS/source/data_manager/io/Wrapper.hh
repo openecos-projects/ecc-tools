@@ -22,22 +22,26 @@
  */
 
 #pragma once
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "spatial/Point.hh"
+#include "timing/TimingConstraints.hh"
 
 namespace idb {
 class IdbBuilder;
 class IdbDesign;
 class IdbInstance;
 class IdbLayout;
+class IdbLayerRouting;
 class IdbNet;
 class IdbPin;
 template <typename T>
@@ -80,6 +84,208 @@ struct WrapperWriteSummary
   std::size_t inserted_inst_count = 0U;
   std::size_t inserted_net_count = 0U;
   std::string reason;
+};
+
+enum class WrapperRoutingDirection
+{
+  kHorizontal,
+  kVertical
+};
+
+struct WrapperSignalRoutingLayer
+{
+  std::string name;
+  int32_t id = -1;
+  uint32_t order = 0U;
+  WrapperRoutingDirection direction = WrapperRoutingDirection::kHorizontal;
+  int32_t width_dbu = 0;
+  double width_um = 0.0;
+  double sheet_resistance_ohm_per_square = 0.0;
+  double area_capacitance_pf_per_um2 = 0.0;
+  double edge_capacitance_pf_per_um = 0.0;
+  double resistance_ohm_per_um = 0.0;
+  double capacitance_pf_per_um = 0.0;
+};
+
+enum class WrapperSignalRoutingStatus
+{
+  kComplete,
+  kLayoutUnavailable,
+  kAnchorUnavailable,
+  kAnchorNotRouting,
+  kInvalidDbu,
+  kDirectionalLayerUnavailable
+};
+
+struct WrapperSignalRoutingAuthority
+{
+  WrapperSignalRoutingStatus status = WrapperSignalRoutingStatus::kLayoutUnavailable;
+  std::string policy_version = "idb-signal-routing-rc-v1";
+  std::string anchor_name;
+  int32_t anchor_id = -1;
+  uint32_t anchor_order = 0U;
+  std::optional<WrapperSignalRoutingLayer> horizontal;
+  std::optional<WrapperSignalRoutingLayer> vertical;
+  std::string diagnostic;
+
+  [[nodiscard]] auto complete() const -> bool { return status == WrapperSignalRoutingStatus::kComplete && horizontal.has_value() && vertical.has_value(); }
+};
+
+struct WrapperLogicTerminal
+{
+  std::string pin_name;
+  int32_t x_dbu = 0;
+  int32_t y_dbu = 0;
+  bool driver = false;
+};
+
+struct WrapperLogicNetGeometry
+{
+  std::string net_name;
+  bool clock_net = false;
+  std::vector<WrapperLogicTerminal> terminals;
+};
+
+enum class WrapperLogicGeometryStatus
+{
+  kComplete,
+  kDesignUnavailable,
+  kInvalidTerminal,
+  kDriverUnavailable,
+  kMultipleDrivers
+};
+
+struct WrapperLogicGeometryResult
+{
+  WrapperLogicGeometryStatus status = WrapperLogicGeometryStatus::kDesignUnavailable;
+  std::vector<WrapperLogicNetGeometry> nets;
+  std::size_t excluded_clock_net_count = 0U;
+  std::size_t excluded_nonlogic_net_count = 0U;
+  std::size_t excluded_singleton_net_count = 0U;
+  std::string normalization_algorithm_version = "raw-idb-connectivity-v1";
+  std::size_t normalization_repair_count = 0U;
+  std::string normalization_receipt_fingerprint;
+  std::string normalized_membership_fingerprint;
+  std::string diagnostic;
+
+  [[nodiscard]] auto complete() const -> bool { return status == WrapperLogicGeometryStatus::kComplete; }
+};
+
+struct WrapperTimingNode
+{
+  std::string pin_name = "";
+  std::string inst_name = "";
+  std::string cell_master = "";
+  int32_t x_dbu = 0;
+  int32_t y_dbu = 0;
+  double input_cap_pf = 0.0;
+  std::array<std::array<double, 2U>, 2U> input_cap_pf_by_timing{};
+  double max_slew_ns = 0.0;
+  bool input = false;
+  bool output = false;
+  bool top_level = false;
+  std::string port_name = "";
+  std::string logic_function = "";
+  bool clock_pin = false;
+  bool input_cap_profile_available = false;
+  bool slew_limit_from_master = false;
+};
+
+struct WrapperTimingRcSegment
+{
+  int32_t begin_x_dbu = 0;
+  int32_t begin_y_dbu = 0;
+  int32_t end_x_dbu = 0;
+  int32_t end_y_dbu = 0;
+  double resistance_ohm = 0.0;
+  double capacitance_pf = 0.0;
+};
+
+struct WrapperTimingNet
+{
+  std::string net_name = "";
+  std::string driver_pin = "";
+  std::vector<std::string> load_pins;
+  double wire_resistance_ohm = 0.0;
+  double wire_cap_pf = 0.0;
+  int64_t total_wirelength_dbu = 0;
+  std::vector<WrapperTimingRcSegment> rc_segments;
+  bool physically_zero_length = false;
+};
+
+struct WrapperTimingArc
+{
+  std::string inst_name = "";
+  std::string cell_master = "";
+  std::string input_port = "";
+  std::string output_port = "";
+  std::string input_pin = "";
+  std::string output_pin = "";
+  bool positive_unate = false;
+  bool negative_unate = false;
+  bool clock_gate_boundary = false;
+};
+
+enum class WrapperTimingTransition
+{
+  kRise,
+  kFall
+};
+
+struct WrapperTimingLaunch
+{
+  std::string inst_name = "";
+  std::string cell_master = "";
+  std::string clock_port = "";
+  std::string output_port = "";
+  std::string clock_pin = "";
+  std::string output_pin = "";
+  WrapperTimingTransition clock_transition = WrapperTimingTransition::kRise;
+};
+
+enum class WrapperTimingCheckKind
+{
+  kSetup,
+  kHold
+};
+
+struct WrapperTimingCheck
+{
+  std::string inst_name = "";
+  std::string cell_master = "";
+  std::string clock_port = "";
+  std::string data_port = "";
+  std::string clock_pin = "";
+  std::string data_pin = "";
+  WrapperTimingCheckKind kind = WrapperTimingCheckKind::kSetup;
+  WrapperTimingTransition clock_transition = WrapperTimingTransition::kRise;
+  bool clock_gating = false;
+};
+
+enum class WrapperTimingGraphStatus
+{
+  kComplete,
+  kDesignUnavailable,
+  kLibraryUnavailable,
+  kConnectivityInvalid,
+  kUnsupported
+};
+
+struct WrapperTimingGraph
+{
+  WrapperTimingGraphStatus status = WrapperTimingGraphStatus::kDesignUnavailable;
+  std::vector<WrapperTimingNode> nodes;
+  std::vector<WrapperTimingNet> nets;
+  std::vector<WrapperTimingArc> arcs;
+  std::vector<WrapperTimingLaunch> launches;
+  std::vector<WrapperTimingCheck> checks;
+  WrapperSignalRoutingAuthority signal_routing_authority{};
+  std::size_t unsupported_arc_count = 0U;
+  double graph_construction_runtime_s = 0.0;
+  double logic_rc_construction_runtime_s = 0.0;
+  std::string diagnostic = "";
+
+  [[nodiscard]] auto complete() const -> bool { return status == WrapperTimingGraphStatus::kComplete; }
 };
 
 class Wrapper
@@ -146,6 +352,10 @@ class Wrapper
   };
 
   auto queryDbUnit() const -> std::optional<int32_t>;
+  auto querySdcUnits() const -> std::optional<SdcUnits>;
+  auto querySupplyVoltage() const -> std::optional<double>;
+  auto queryLibertyRevision() const -> std::uint64_t;
+  static auto queryParallelWorkerCount() -> std::size_t;
   auto is_design_ready() const -> bool { return _idb_design != nullptr; }
   auto is_layout_ready() const -> bool { return _idb != nullptr && _idb_layout != nullptr; }
   auto queryWireResistance(int routing_layer, double length_um, std::optional<double> wire_width_um = std::nullopt) const -> std::optional<double>;
@@ -157,6 +367,9 @@ class Wrapper
   auto queryRequiredClockTimingWireCapacitanceProfile(int routing_layer, double length_um, std::optional<double> wire_width_um = std::nullopt) const
       -> WireCapacitanceProfile;
   auto queryConfiguredClockRouteSegmentRc(const Config& config) const -> ClockRouteSegmentRc;
+  auto queryConfiguredSignalRoutingAuthority() const -> WrapperSignalRoutingAuthority;
+  auto querySignalRoutingAuthority(std::string_view anchor_name) const -> WrapperSignalRoutingAuthority;
+  static auto deriveSignalRoutingLayer(idb::IdbLayerRouting& layer, int32_t dbu_per_um) -> std::optional<WrapperSignalRoutingLayer>;
   auto queryCellOutPinCapLimit(const std::string& cell_master) const -> std::optional<double>;
   auto queryCellOutPinCapTableAxisMax(const std::string& cell_master) const -> std::optional<double>;
   auto queryClockSourceDriveCapLimit(const ClockSourceDriveCapLimitInput& input) const -> std::optional<double>;
@@ -167,6 +380,7 @@ class Wrapper
   auto queryCellAreaUm2(const std::string& cell_master) const -> std::optional<double>;
   auto queryCharInputPinCap(const std::string& cell_master) const -> std::optional<double>;
   auto queryPinCapacitance(const Pin* pin) const -> std::optional<double>;
+  auto queryPinCapacitance(const Pin* pin, bool early, WrapperTimingTransition transition) const -> std::optional<double>;
   auto queryPinSlewLimit(const PinSlewLimitInput& input) const -> std::optional<double>;
   auto queryPinSlewLimit(const Config& config, const Pin* pin) const -> std::optional<double>;
   auto queryRootDriverCostDirect(const std::string& cell_master, double input_slew_ns, double output_load_pf, double clock_period_ns) const -> RootDriverCost;
@@ -187,6 +401,7 @@ class Wrapper
   auto writeClocks(Design& design, const std::vector<Clock*>& clocks) -> bool;
   auto collectLogicCellGeometries() const -> std::vector<WrapperCellGeometry>;
   auto queryInstGeometry(const std::string& inst_name) const -> std::optional<WrapperCellGeometry>;
+  auto collectTimingGraph() const -> WrapperTimingGraph;
   auto withinCore(int32_t point_x, int32_t point_y) const -> std::optional<bool>;
 
  private:
@@ -224,6 +439,7 @@ class Wrapper
   idb::IdbDesign* _idb_design = nullptr;
   idb::IdbLayout* _idb_layout = nullptr;
   mutable bool _liberty_loaded = false;
+  mutable std::uint64_t _liberty_revision = 0U;
   mutable std::shared_ptr<const idm::RawLibertyGeneration> _liberty_generation;
   mutable std::unordered_map<std::string, idb::LibCell*> _lib_cell_by_master;
 

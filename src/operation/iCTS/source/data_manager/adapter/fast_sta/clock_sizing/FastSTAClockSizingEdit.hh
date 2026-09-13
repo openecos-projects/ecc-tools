@@ -35,6 +35,13 @@ struct FastStaDirtyRegion
   FastStaNodeId start_node_id = kInvalidFastStaNodeId;
   std::vector<FastStaNodeId> node_ids;
   std::vector<FastStaNetId> net_ids;
+  // Only these nets receive a changed pin capacitance when buffer masters are
+  // edited. Downstream nets still belong to net_ids for timing propagation,
+  // but their RC reduction can be reused.
+  std::vector<FastStaNetId> load_update_net_ids;
+  // Multiple roots retain support for one atomic edit spanning independent
+  // clock trees. The scalar root remains the single-tree convenience view.
+  std::vector<FastStaNodeId> start_node_ids;
 };
 
 }  // namespace icts

@@ -5,6 +5,10 @@ add_library(
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockCommands.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockEvaluator.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockValue.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCConstraintOptions.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCPathConstraints.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockConstraints.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCGeneratedClocks.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace/ClockTraceResolver.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace/ClockTracePins.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace/ClockTraceOwnership.cc
@@ -29,6 +33,8 @@ target_include_directories(
 
 target_link_libraries(
   icts_source_data_manager_adapter_sdc
+  PUBLIC
+  icts_source_data_manager_timing
   PRIVATE
   idm
   icts_source_data_manager_config

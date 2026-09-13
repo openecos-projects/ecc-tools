@@ -18,7 +18,7 @@
  * @file FastSTADmpCeff.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-05-18
- * @brief OpenSTA-style DMP effective capacitance and load slew calculation for CTS fast STA.
+ * @brief DMP effective capacitance and load slew calculation for CTS timing.
  */
 
 #include "FastSTADmpCeff.hh"
@@ -45,7 +45,7 @@ using fast_sta_dmp::SlewDerate;
 using fast_sta_dmp::SlewLowerThreshold;
 using fast_sta_dmp::SlewUpperThreshold;
 
-auto vl0(const FastStaDmpDriverResult& state, double t_ns, double p3_per_ns) -> std::pair<double, double>
+auto loadRampIntegral(const FastStaDmpDriverResult& state, double t_ns, double p3_per_ns) -> std::pair<double, double>
 {
   if (state.algorithm == FastStaDmpAlgorithm::kPi) {
     const auto denom1 = state.pole1_per_ns - p3_per_ns;
@@ -53,24 +53,26 @@ auto vl0(const FastStaDmpDriverResult& state, double t_ns, double p3_per_ns) -> 
     if (std::abs(denom1) <= kEpsilon || std::abs(denom2) <= kEpsilon || std::abs(p3_per_ns) <= kEpsilon) {
       return {0.0, 0.0};
     }
-    const auto d1 = state.k0 * (state.k1 - state.k2 / p3_per_ns);
-    const auto d3 = -p3_per_ns * state.k0 * state.k3 / denom1;
-    const auto d4 = -p3_per_ns * state.k0 * state.k4 / denom2;
-    const auto d5 = state.k0 * (state.k2 / p3_per_ns - state.k1 + p3_per_ns * state.k3 / denom1 + p3_per_ns * state.k4 / denom2);
+    const auto d1 = state.waveform_scale * (state.waveform_offset - state.waveform_slope / p3_per_ns);
+    const auto d3 = -p3_per_ns * state.waveform_scale * state.first_pole_weight / denom1;
+    const auto d4 = -p3_per_ns * state.waveform_scale * state.second_pole_weight / denom2;
+    const auto d5 = state.waveform_scale
+                    * (state.waveform_slope / p3_per_ns - state.waveform_offset + p3_per_ns * state.first_pole_weight / denom1
+                       + p3_per_ns * state.second_pole_weight / denom2);
     const auto exp_p1 = DmpExp(-state.pole1_per_ns * t_ns);
     const auto exp_p2 = DmpExp(-state.pole2_per_ns * t_ns);
     const auto exp_p3 = DmpExp(-p3_per_ns * t_ns);
     return {d1 + t_ns + d3 * exp_p1 + d4 * exp_p2 + d5 * exp_p3,
             1.0 - d3 * state.pole1_per_ns * exp_p1 - d4 * state.pole2_per_ns * exp_p2 - d5 * p3_per_ns * exp_p3};
   }
-  if (state.algorithm == FastStaDmpAlgorithm::kZeroC2) {
+  if (state.algorithm == FastStaDmpAlgorithm::kZeroNearCap) {
     const auto denom1 = state.pole1_per_ns - p3_per_ns;
     if (std::abs(denom1) <= kEpsilon || std::abs(p3_per_ns) <= kEpsilon) {
       return {0.0, 0.0};
     }
-    const auto d1 = state.k0 * (state.k1 - state.k2 / p3_per_ns);
-    const auto d3 = -p3_per_ns * state.k0 * state.k3 / denom1;
-    const auto d5 = state.k0 * (state.k2 / p3_per_ns - state.k1 + p3_per_ns * state.k3 / denom1);
+    const auto d1 = state.waveform_scale * (state.waveform_offset - state.waveform_slope / p3_per_ns);
+    const auto d3 = -p3_per_ns * state.waveform_scale * state.first_pole_weight / denom1;
+    const auto d5 = state.waveform_scale * (state.waveform_slope / p3_per_ns - state.waveform_offset + p3_per_ns * state.first_pole_weight / denom1);
     const auto exp_p1 = DmpExp(-state.pole1_per_ns * t_ns);
     const auto exp_p3 = DmpExp(-p3_per_ns * t_ns);
     return {d1 + t_ns + d3 * exp_p1 + d5 * exp_p3, 1.0 - d3 * state.pole1_per_ns * exp_p1 - d5 * p3_per_ns * exp_p3};
@@ -78,49 +80,51 @@ auto vl0(const FastStaDmpDriverResult& state, double t_ns, double p3_per_ns) -> 
   return {0.0, 0.0};
 }
 
-auto vl(const FastStaDmpDriverResult& state, double t_ns, double p3_per_ns) -> std::pair<double, double>
+auto loadRampResponse(const FastStaDmpDriverResult& state, double t_ns, double p3_per_ns) -> std::pair<double, double>
 {
-  const auto t1_ns = t_ns - state.t0_ns;
-  if (t1_ns <= 0.0 || state.dt_ns <= kEpsilon) {
+  const auto t1_ns = t_ns - state.ramp_start_ns;
+  if (t1_ns <= 0.0 || state.ramp_duration_ns <= kEpsilon) {
     return {0.0, 0.0};
   }
-  if (t1_ns <= state.dt_ns) {
-    const auto [value, deriv] = vl0(state, t1_ns, p3_per_ns);
-    return {value / state.dt_ns, deriv / state.dt_ns};
+  if (t1_ns <= state.ramp_duration_ns) {
+    const auto [value, deriv] = loadRampIntegral(state, t1_ns, p3_per_ns);
+    return {value / state.ramp_duration_ns, deriv / state.ramp_duration_ns};
   }
-  const auto [value, deriv] = vl0(state, t1_ns, p3_per_ns);
-  const auto [dt_value, dt_deriv] = vl0(state, t1_ns - state.dt_ns, p3_per_ns);
-  return {(value - dt_value) / state.dt_ns, (deriv - dt_deriv) / state.dt_ns};
+  const auto [value, deriv] = loadRampIntegral(state, t1_ns, p3_per_ns);
+  const auto [dt_value, dt_deriv] = loadRampIntegral(state, t1_ns - state.ramp_duration_ns, p3_per_ns);
+  return {(value - dt_value) / state.ramp_duration_ns, (deriv - dt_deriv) / state.ramp_duration_ns};
 }
 
-auto findVlCrossing(const FastStaDmpDriverResult& state, double p3_per_ns, double threshold, double lower, double upper) -> std::optional<double>
+auto findLoadThresholdTime(const FastStaDmpDriverResult& state, double p3_per_ns, double threshold, double lower, double upper) -> std::optional<double>
 {
   if (upper <= lower) {
-    upper = lower + std::max(state.dt_ns, 1e-6);
+    upper = lower + std::max(state.ramp_duration_ns, 1e-6);
   }
   return FindRoot(
       [&](double t, double& y_value, double& dy_value) -> void {
-        const auto [vl_value, dvl_dt] = vl(state, t, p3_per_ns);
+        const auto [vl_value, dvl_dt] = loadRampResponse(state, t, p3_per_ns);
         y_value = vl_value - threshold;
         dy_value = dvl_dt;
       },
       lower, upper, kThresholdTimeTolerance, kFindRootMaxIter);
 }
 
-auto vlCrossingUpperBound(const FastStaDmpDriverResult& state, double elmore_delay_ns) -> double
+auto loadThresholdUpperBound(const FastStaDmpDriverResult& state, double elmore_delay_ns) -> double
 {
   if (state.algorithm == FastStaDmpAlgorithm::kPi) {
-    return state.t0_ns + state.dt_ns + (state.near_cap_pf + state.far_cap_pf) * (state.rd_ns_per_pf + state.rpi_ns_per_pf) * 2.0 + elmore_delay_ns * 2.0;
+    return state.ramp_start_ns + state.ramp_duration_ns + (state.near_cap_pf + state.far_cap_pf) * (state.rd_ns_per_pf + state.rpi_ns_per_pf) * 2.0
+           + elmore_delay_ns * 2.0;
   }
-  if (state.algorithm == FastStaDmpAlgorithm::kZeroC2) {
-    return state.t0_ns + state.dt_ns + state.far_cap_pf * (state.rd_ns_per_pf + state.rpi_ns_per_pf) * 2.0 + elmore_delay_ns * 2.0;
+  if (state.algorithm == FastStaDmpAlgorithm::kZeroNearCap) {
+    return state.ramp_start_ns + state.ramp_duration_ns + state.far_cap_pf * (state.rd_ns_per_pf + state.rpi_ns_per_pf) * 2.0 + elmore_delay_ns * 2.0;
   }
-  return state.t0_ns + state.dt_ns + elmore_delay_ns * 2.0;
+  return state.ramp_start_ns + state.ramp_duration_ns + elmore_delay_ns * 2.0;
 }
 
 auto applyThresholdAdjust(const FastStaDmpDriverResult& driver_timing, const FastStaLibertyCell* load_cell, double& wire_delay_ns, double& load_slew_ns) -> void
 {
-  if (load_cell == nullptr) {
+  if (load_cell == nullptr
+      || (!driver_timing.driver_library_name.empty() && !load_cell->library_name.empty() && driver_timing.driver_library_name == load_cell->library_name)) {
     return;
   }
   const auto load_vth = InputThreshold(*load_cell, driver_timing.transition);
@@ -145,7 +149,13 @@ auto applyThresholdAdjust(const FastStaDmpDriverResult& driver_timing, const Fas
 auto FastStaDmpCeff::calcDriverTiming(const FastStaLibertyCell& driver_cell, const FastStaPiModel& pi, FastStaTransition transition, double input_slew_ns)
     -> FastStaDmpDriverResult
 {
-  fast_sta_dmp::DmpSolver solver(driver_cell, pi, transition, input_slew_ns);
+  return calcDriverTiming(driver_cell, driver_cell.timing_arc, pi, transition, input_slew_ns);
+}
+
+auto FastStaDmpCeff::calcDriverTiming(const FastStaLibertyCell& driver_cell, const FastStaLibertyArc& timing_arc, const FastStaPiModel& pi,
+                                      FastStaTransition transition, double input_slew_ns) -> FastStaDmpDriverResult
+{
+  fast_sta_dmp::DriverRampSolver solver(driver_cell, timing_arc, pi, transition, input_slew_ns);
   return solver.solve();
 }
 
@@ -158,11 +168,11 @@ auto FastStaDmpCeff::calcLoadDelaySlew(const FastStaDmpDriverResult& driver_timi
 
   if (driver_timing.valid && driver_timing.driver_waveform_valid && elmore_ns > 0.0 && elmore_ns >= std::max(0.0, driver_timing.driver_slew_ns) * 1e-3) {
     const auto p3_per_ns = 1.0 / elmore_ns;
-    const auto upper = vlCrossingUpperBound(driver_timing, elmore_ns);
-    const auto load_delay = findVlCrossing(driver_timing, p3_per_ns, driver_timing.output_threshold, driver_timing.t0_ns, upper);
+    const auto upper = loadThresholdUpperBound(driver_timing, elmore_ns);
+    const auto load_delay = findLoadThresholdTime(driver_timing, p3_per_ns, driver_timing.output_threshold, driver_timing.ramp_start_ns, upper);
     if (load_delay.has_value()) {
-      const auto tl = findVlCrossing(driver_timing, p3_per_ns, driver_timing.slew_lower_threshold, driver_timing.t0_ns, *load_delay);
-      const auto th = findVlCrossing(driver_timing, p3_per_ns, driver_timing.slew_upper_threshold, *load_delay, upper);
+      const auto tl = findLoadThresholdTime(driver_timing, p3_per_ns, driver_timing.slew_lower_threshold, driver_timing.ramp_start_ns, *load_delay);
+      const auto th = findLoadThresholdTime(driver_timing, p3_per_ns, driver_timing.slew_upper_threshold, *load_delay, upper);
       if (tl.has_value() && th.has_value()) {
         wire_delay_ns = *load_delay - driver_timing.driver_waveform_delay_ns;
         load_slew_ns = (*th - *tl) / driver_timing.slew_derate;

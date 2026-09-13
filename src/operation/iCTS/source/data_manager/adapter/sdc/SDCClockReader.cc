@@ -51,7 +51,7 @@ SdcClockReader::SdcClockReader() : SdcClockReader(configuredSdcPath())
 {
 }
 
-SdcClockReader::SdcClockReader(std::string sdc_path) : _sdc_path(std::move(sdc_path))
+SdcClockReader::SdcClockReader(std::string sdc_path, SdcUnits units) : _sdc_path(std::move(sdc_path)), _units(units)
 {
 }
 
@@ -59,19 +59,22 @@ auto SdcClockReader::readClockData() const -> SdcClockData
 {
   SdcClockData data;
   if (_sdc_path.empty()) {
+    data.status = SdcConstraintStatusCode::kFileError;
+    data.issues.push_back({data.status, "read_sdc", "empty_sdc_path"});
+    data.diagnostics.emplace_back("read_sdc:empty_sdc_path");
     CTSLOG.warn(Loc::current(), "SdcClockReader: SDC path is empty; no clock declarations are available.");
     return data;
   }
   if (!std::filesystem::exists(_sdc_path)) {
+    data.status = SdcConstraintStatusCode::kFileError;
+    data.issues.push_back({data.status, "read_sdc", "missing_sdc_file:" + _sdc_path});
+    data.diagnostics.emplace_back("read_sdc:missing_sdc_file:" + _sdc_path);
     CTSLOG.warn(Loc::current(), "SdcClockReader: SDC file does not exist: ", _sdc_path);
     return data;
   }
 
-  data = sdc_reader::SdcSubsetEvaluator().readFile(_sdc_path);
+  data = sdc_reader::SdcSubsetEvaluator(_units).readFile(_sdc_path);
   for (const auto& diagnostic : data.diagnostics) {
-    if (diagnostic.starts_with("ignored_sdc_command:")) {
-      continue;
-    }
     CTSLOG.warn(Loc::current(), "SdcClockReader: ", diagnostic);
   }
   return data;

@@ -342,6 +342,8 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
       current_lib->set_time_unit(TimeUnit::kFS);
     } else if (isEqual(time_unit, "1ps")) {
       current_lib->set_time_unit(TimeUnit::kPS);
+    } else if (isEqual(time_unit, "1ns")) {
+      current_lib->set_time_unit(TimeUnit::kNS);
     }
     liberty_free_string_value(attri_value_handle);
   } else if (is_attri("current_unit")) {
@@ -415,6 +417,15 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     const char* clock_gate_enable_pin = attri_value_handle->value;
     bool clock_gate_enable_pin1 = convert_string_to_bool(clock_gate_enable_pin);
     lib_port->set_clock_gate_enable_pin(clock_gate_enable_pin1);
+    liberty_free_string_value(attri_value_handle);
+  } else if (is_attri("clock_gate_test_pin") || is_attri("clock_gate_out_pin")) {
+    auto* attri_value_handle = liberty_convert_string_value(attri_value);
+    const bool value = convert_string_to_bool(attri_value_handle->value);
+    if (is_attri("clock_gate_test_pin")) {
+      lib_port->set_clock_gate_test_pin(value);
+    } else {
+      lib_port->set_clock_gate_out_pin(value);
+    }
     liberty_free_string_value(attri_value_handle);
   } else if (is_attri("default_fanout_load")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
@@ -764,9 +775,12 @@ unsigned LibertyReader::visitComplexAttri(
   }
 
   if (isEqual(attri_name, "capacitive_load_unit")) {
-    if ((static_cast<int>(liberty_convert_float_value(attri_0)->value) == 1)
+    if ((liberty_convert_float_value(attri_0)->value == 1.0)
         && (isEqual(liberty_convert_string_value(attri_1)->value, "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
+    } else if (liberty_convert_float_value(attri_0)->value == 1.0
+               && isEqual(liberty_convert_string_value(attri_1)->value, "ff")) {
+      the_lib->set_cap_unit(CapacitiveUnit::kFF);
     }
   } else if (isEqual(attri_name, "rise_capacitance_range")) {
     double min_rise_cap = liberty_convert_float_value(attri_0)->value;
@@ -971,9 +985,11 @@ unsigned LibertyReader::visitComplexAttri(
   }
 
   if (isEqual(attri_name, "capacitive_load_unit")) {
-    if ((static_cast<int>(getRawFloatValue(attri_0)) == 1) &&
+    if ((getRawFloatValue(attri_0) == 1.0) &&
         (isEqual(getRawStringValue(attri_1), "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
+    } else if (getRawFloatValue(attri_0) == 1.0 && isEqual(getRawStringValue(attri_1), "ff")) {
+      the_lib->set_cap_unit(CapacitiveUnit::kFF);
     }
   } else if (isEqual(attri_name, "rise_capacitance_range")) {
     double min_rise_cap = getRawFloatValue(attri_0);
@@ -2073,6 +2089,19 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
     is_ok = visitOutputCurrentTemplate(group);
   } else if (isEqual(group_name, "cell")) {
     is_ok = visitCell(group);
+  } else if (isEqual(group_name, "latch")) {
+    auto* cell = get_library_builder()->get_cell();
+    if (cell == nullptr) {
+      return 0;
+    }
+    const auto attribute = [&](const char* name) -> std::string {
+      auto* attr = group->findAttribute(name);
+      auto* value = attr == nullptr ? nullptr : attr->getFirstValue();
+      return value != nullptr && value->isString() ? value->asString() : "";
+    };
+    cell->addLatch(LibLatch{group->getFirstParamName() == nullptr ? "" : group->getFirstParamName(),
+                            group->getSecondParamName() == nullptr ? "" : group->getSecondParamName(),
+                            attribute("data_in"), attribute("enable")});
   } else if (isEqual(group_name, "leakage_power")) {
     is_ok = visitLeakagePower(group);
   } else if (isEqual(group_name, "bus") || isEqual(group_name, "bundle")) {

@@ -35,7 +35,9 @@
 #include "FastSTAClockState.hh"
 #include "FastSTALibertyModel.hh"
 #include "clock_sizing/FastSTAClockSizingEdit.hh"
+#include "io/Wrapper.hh"
 #include "timing/FastSTAClockTiming.hh"
+#include "timing/FastSTAConstraints.hh"
 
 namespace icts {
 namespace {
@@ -60,17 +62,34 @@ auto clockActivityDensity(double clock_period_ns) -> std::optional<double>
   return std::isfinite(clock_period_ns) && clock_period_ns > 0.0 ? std::optional<double>{2.0 / clock_period_ns} : std::nullopt;
 }
 
-auto resolveVoltage(const FastStaClockContext& context) -> std::optional<double>
+auto nodeActivityDensity(const FastStaContext& context, const FastStaNode& node) -> std::optional<double>
 {
-  for (const auto& [_, cell] : context.liberty_cell_by_master) {
-    if (std::isfinite(cell.voltage_v) && cell.voltage_v > 0.0) {
-      return cell.voltage_v;
-    }
+  if (node.domain != FastStaNodeDomain::kClock || node.clock_inactive) {
+    return 0.0;
   }
-  return std::nullopt;
+  return clockActivityDensity(FastStaConstraints::period(context, node.clock_name));
 }
 
-auto findBufferInputNode(const FastStaClockContext& context, const FastStaNode& output_node) -> FastStaNodeId
+auto resolveVoltage(const FastStaContext& context) -> std::optional<double>
+{
+  if (context.wrapper != nullptr) {
+    // A source port can drive only sequential clock pins: no buffer model is
+    // required, but its net switching power still uses the actual library supply.
+    return context.wrapper->querySupplyVoltage();
+  }
+  std::optional<double> voltage;
+  for (const auto& [_, cell] : context.liberty_cell_by_master) {
+    if (std::isfinite(cell.voltage_v) && cell.voltage_v > 0.0) {
+      if (voltage.has_value() && *voltage != cell.voltage_v) {
+        return std::nullopt;
+      }
+      voltage = cell.voltage_v;
+    }
+  }
+  return voltage;
+}
+
+auto findBufferInputNode(const FastStaContext& context, const FastStaNode& output_node) -> FastStaNodeId
 {
   if (const auto indexed = context.buffer_input_node_id_by_inst.find(output_node.inst_name); indexed != context.buffer_input_node_id_by_inst.end()) {
     if (indexed->second < context.nodes.size()) {
@@ -88,7 +107,7 @@ auto calcNetSwitchingPowerW(const FastStaNet& net, double voltage, double activi
   return 0.5 * std::max(0.0, net.load_cap_pf) * 1e-12 * voltage * voltage * activity_density * 1e9;
 }
 
-auto calcBufferPower(FastStaClockContext& context, FastStaNodeId output_node_id, double activity_density) -> bool
+auto calcBufferPower(FastStaContext& context, FastStaNodeId output_node_id, double activity_density) -> bool
 {
   if (output_node_id >= context.nodes.size()) {
     return false;
@@ -97,7 +116,7 @@ auto calcBufferPower(FastStaClockContext& context, FastStaNodeId output_node_id,
   node.area_um2 = 0.0;
   node.leakage_power_w = 0.0;
   node.internal_power_w = 0.0;
-  if (node.kind != FastStaNodeKind::kBufferOutput) {
+  if (node.kind != FastStaNodeKind::kBufferOutput || node.domain != FastStaNodeDomain::kClock) {
     return true;
   }
   const auto cell_iter = context.liberty_cell_by_master.find(node.cell_master);
@@ -105,8 +124,17 @@ auto calcBufferPower(FastStaClockContext& context, FastStaNodeId output_node_id,
     return false;
   }
   const auto& cell = cell_iter->second;
-  if (!std::isfinite(cell.area_um2) || !cell.leakage_power_w.has_value() || !std::isfinite(*cell.leakage_power_w) || *cell.leakage_power_w < 0.0
-      || node.output_net_ids.empty() || node.output_net_ids.front() >= context.nets.size()) {
+  if (!std::isfinite(cell.area_um2) || !cell.leakage_power_w.has_value() || !std::isfinite(*cell.leakage_power_w) || *cell.leakage_power_w < 0.0) {
+    return false;
+  }
+  node.area_um2 = std::max(0.0, cell.area_um2);
+  node.leakage_power_w = *cell.leakage_power_w;
+  if (node.clock_inactive) {
+    // A statically closed gate retains its cell leakage/area but no toggling
+    // output or characterized clock-arc internal energy.
+    return true;
+  }
+  if (node.output_net_ids.empty() || node.output_net_ids.front() >= context.nets.size()) {
     return false;
   }
   const auto input_node_id = findBufferInputNode(context, node);
@@ -118,28 +146,45 @@ auto calcBufferPower(FastStaClockContext& context, FastStaNodeId output_node_id,
   if (!internal_energy_mw_ns.has_value()) {
     return false;
   }
-  node.area_um2 = std::max(0.0, cell.area_um2);
-  node.leakage_power_w = *cell.leakage_power_w;
   node.internal_power_w = *internal_energy_mw_ns * 1e-12 * activity_density * 1e9;
   return std::isfinite(node.internal_power_w);
 }
 
-auto sumPower(const FastStaClockContext& context) -> FastStaPowerSummary
+auto sumPower(const FastStaContext& context) -> FastStaPowerSummary
 {
   FastStaPowerSummary power;
   for (const auto& net : context.nets) {
-    power.switching_power_w += net.switching_power_w;
+    if (net.domain == FastStaNetDomain::kClock) {
+      power.switching_power_w += net.switching_power_w;
+    }
   }
   std::unordered_set<std::string> seen_buffer_insts;
-  seen_buffer_insts.reserve(context.nodes.size());
-  for (const auto& node : context.nodes) {
-    if (node.kind != FastStaNodeKind::kBufferOutput || node.inst_name.empty() || seen_buffer_insts.contains(node.inst_name)) {
-      continue;
+  seen_buffer_insts.reserve(context.owner_clock_scope_available ? context.owned_clock_node_ids.size() : context.nodes.size());
+  const auto add_buffer_power = [&](const FastStaNode& node) -> void {
+    if (node.kind != FastStaNodeKind::kBufferOutput || node.domain != FastStaNodeDomain::kClock || node.inst_name.empty()
+        || seen_buffer_insts.contains(node.inst_name)) {
+      return;
     }
     seen_buffer_insts.insert(node.inst_name);
     power.area_um2 += node.area_um2;
     power.leakage_power_w += node.leakage_power_w;
     power.internal_power_w += node.internal_power_w;
+    const auto model = context.liberty_cell_by_master.find(node.cell_master);
+    if (model != context.liberty_cell_by_master.end() && model->second.clock_gate.has_value()
+        && FastStaConstraints::gateActive(context, node.inst_name, *model->second.clock_gate) == FastStaLogicValue::kUnknown) {
+      ++power.unknown_gate_activity_count;
+    }
+  };
+  if (context.owner_clock_scope_available) {
+    for (const auto node_id : context.owned_clock_node_ids) {
+      if (node_id < context.nodes.size()) {
+        add_buffer_power(context.nodes.at(node_id));
+      }
+    }
+  } else {
+    for (const auto& node : context.nodes) {
+      add_buffer_power(node);
+    }
   }
   power.total_power_w = power.switching_power_w + power.internal_power_w + power.leakage_power_w;
   return power;
@@ -147,23 +192,31 @@ auto sumPower(const FastStaClockContext& context) -> FastStaPowerSummary
 
 }  // namespace
 
-auto FastStaPower::update(FastStaClockContext& context) -> bool
+auto FastStaPower::update(FastStaContext& context) -> bool
 {
   context.power = {};
   context.power_valid = false;
-  if (!context.timing_valid) {
+  if (!context.timing_valid && !context.clock_timing_valid) {
     return false;
   }
-  const auto activity_density = clockActivityDensity(context.clock_period_ns);
   const auto voltage = resolveVoltage(context);
-  if (!activity_density.has_value() || !voltage.has_value()) {
+  if (!voltage.has_value()) {
     return false;
   }
   for (auto& net : context.nets) {
+    net.switching_power_w = 0.0;
+    if (net.domain != FastStaNetDomain::kClock) {
+      continue;
+    }
+    const auto activity_density = nodeActivityDensity(context, context.nodes.at(net.driver_node_id));
+    if (!activity_density.has_value()) {
+      return false;
+    }
     net.switching_power_w = calcNetSwitchingPowerW(net, *voltage, *activity_density);
   }
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-    if (!calcBufferPower(context, node_id, *activity_density)) {
+    const auto activity_density = nodeActivityDensity(context, context.nodes.at(node_id));
+    if (!activity_density.has_value() || !calcBufferPower(context, node_id, *activity_density)) {
       context.power = {};
       return false;
     }
@@ -173,7 +226,7 @@ auto FastStaPower::update(FastStaClockContext& context) -> bool
   return true;
 }
 
-auto FastStaPower::updateRegion(FastStaClockContext& context, const FastStaDirtyRegion& dirty_region) -> bool
+auto FastStaPower::updateRegion(FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> bool
 {
   if (!dirty_region.valid) {
     return false;
@@ -181,25 +234,36 @@ auto FastStaPower::updateRegion(FastStaClockContext& context, const FastStaDirty
   if (!context.power_valid) {
     return update(context);
   }
-  if (!context.timing_valid) {
+  return updatePreparedRegion(context, dirty_region);
+}
+
+auto FastStaPower::updatePreparedRegion(FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> bool
+{
+  if (!context.timing_valid && !context.clock_timing_valid) {
     context.power_valid = false;
     return false;
   }
-  const auto activity_density = clockActivityDensity(context.clock_period_ns);
   const auto voltage = resolveVoltage(context);
-  if (!activity_density.has_value() || !voltage.has_value()) {
+  if (!voltage.has_value()) {
     context.power = {};
     context.power_valid = false;
     return false;
   }
   for (const auto net_id : dirty_region.net_ids) {
     if (net_id < context.nets.size()) {
-      context.nets.at(net_id).switching_power_w = calcNetSwitchingPowerW(context.nets.at(net_id), *voltage, *activity_density);
+      auto& net = context.nets.at(net_id);
+      const auto activity_density = nodeActivityDensity(context, context.nodes.at(net.driver_node_id));
+      if (!activity_density.has_value()) {
+        context.power_valid = false;
+        return false;
+      }
+      net.switching_power_w = net.domain == FastStaNetDomain::kClock ? calcNetSwitchingPowerW(net, *voltage, *activity_density) : 0.0;
     }
   }
   for (const auto node_id : dirty_region.node_ids) {
     if (node_id < context.nodes.size() && context.nodes.at(node_id).kind == FastStaNodeKind::kBufferOutput) {
-      if (!calcBufferPower(context, node_id, *activity_density)) {
+      const auto activity_density = nodeActivityDensity(context, context.nodes.at(node_id));
+      if (!activity_density.has_value() || !calcBufferPower(context, node_id, *activity_density)) {
         context.power = {};
         context.power_valid = false;
         return false;

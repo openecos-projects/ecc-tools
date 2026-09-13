@@ -35,9 +35,9 @@ class FastStaClockTree
  public:
   FastStaClockTree() = delete;
 
-  static auto buildFromClock(const Clock& clock) -> FastStaClockContext;
-  static auto buildFromClockRouteGeometry(const Clock& clock, const FastStaClockRouteGeometry& route_geometry) -> FastStaClockContext;
-  static auto applyRouteGeometry(FastStaClockContext& context, const FastStaClockRouteGeometry& route_geometry) -> void;
+  static auto buildFromClock(const Clock& clock) -> FastStaContext;
+  static auto buildFromClockRouteGeometry(const Clock& clock, const FastStaClockRouteGeometry& route_geometry) -> FastStaContext;
+  static auto applyRouteGeometry(FastStaContext& context, const FastStaClockRouteGeometry& route_geometry) -> void;
 };
 
 }  // namespace icts

@@ -24,6 +24,7 @@
 #include "FastSTAChar.hh"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 #include <ostream>
@@ -64,7 +65,7 @@ auto makePoint(double x_um, int dbu_per_um) -> FastStaPoint
   return FastStaPoint{.x_dbu = static_cast<int>(x_um * static_cast<double>(dbu_per_um)), .y_dbu = 0};
 }
 
-auto appendNode(FastStaClockContext& context, FastStaNode node) -> FastStaNodeId
+auto appendNode(FastStaContext& context, FastStaNode node) -> FastStaNodeId
 {
   const auto node_id = context.nodes.size();
   if ((node.kind == FastStaNodeKind::kBufferInput || node.kind == FastStaNodeKind::kBufferOutput) && node.inst_name.empty()) {
@@ -82,7 +83,7 @@ auto appendNode(FastStaClockContext& context, FastStaNode node) -> FastStaNodeId
   return node_id;
 }
 
-auto appendNet(FastStaClockContext& context, FastStaNet net) -> FastStaNetId
+auto appendNet(FastStaContext& context, FastStaNet net) -> FastStaNetId
 {
   const auto net_id = context.nets.size();
   context.net_id_by_name[net.name] = net_id;
@@ -98,7 +99,7 @@ auto appendNet(FastStaClockContext& context, FastStaNet net) -> FastStaNetId
   return net_id;
 }
 
-auto sourceOutputNodeId(const FastStaClockContext& context) -> FastStaNodeId
+auto sourceOutputNodeId(const FastStaContext& context) -> FastStaNodeId
 {
   if (context.source_node_id >= context.nodes.size()) {
     return kInvalidFastStaNodeId;
@@ -116,7 +117,7 @@ auto sourceOutputNodeId(const FastStaClockContext& context) -> FastStaNodeId
                                                                                                                    : kInvalidFastStaNodeId;
 }
 
-auto sinkNodeId(const FastStaClockContext& context) -> FastStaNodeId
+auto sinkNodeId(const FastStaContext& context) -> FastStaNodeId
 {
   FastStaNodeId sink_node_id = kInvalidFastStaNodeId;
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
@@ -131,7 +132,7 @@ auto sinkNodeId(const FastStaClockContext& context) -> FastStaNodeId
   return sink_node_id;
 }
 
-auto observationNodeId(const FastStaClockContext& context) -> FastStaNodeId
+auto observationNodeId(const FastStaContext& context) -> FastStaNodeId
 {
   const auto sink_node_id = sinkNodeId(context);
   if (sink_node_id >= context.nodes.size()) {
@@ -150,7 +151,7 @@ auto observationNodeId(const FastStaClockContext& context) -> FastStaNodeId
   return sink_node_id;
 }
 
-auto validateCharacterizationTopology(const FastStaClockContext& context) -> std::string
+auto validateCharacterizationTopology(const FastStaContext& context) -> std::string
 {
   if (sourceOutputNodeId(context) >= context.nodes.size()) {
     return "source_buffer_pair_unavailable";
@@ -186,7 +187,7 @@ auto validateCharacterizationTopology(const FastStaClockContext& context) -> std
   return {};
 }
 
-auto sourceBoundaryNetId(const FastStaClockContext& context) -> FastStaNetId
+auto sourceBoundaryNetId(const FastStaContext& context) -> FastStaNetId
 {
   const auto source_output_id = sourceOutputNodeId(context);
   if (source_output_id >= context.nodes.size() || context.nodes.at(source_output_id).output_net_ids.empty()) {
@@ -195,8 +196,8 @@ auto sourceBoundaryNetId(const FastStaClockContext& context) -> FastStaNetId
   return context.nodes.at(source_output_id).output_net_ids.front();
 }
 
-auto makeLinearParasitic(const FastStaClockContext& context, const FastStaNet& net, FastStaNodeId driver_node_id, FastStaNodeId load_node_id,
-                         double wirelength_um) -> FastStaNetParasitic
+auto makeLinearParasitic(const FastStaContext& context, const FastStaNet& net, FastStaNodeId driver_node_id, FastStaNodeId load_node_id, double wirelength_um)
+    -> FastStaNetParasitic
 {
   if (context.wrapper == nullptr) {
     CTSLOG.error(Loc::current(), "FastStaChar: Wrapper is unavailable.");
@@ -213,6 +214,7 @@ auto makeLinearParasitic(const FastStaClockContext& context, const FastStaNet& n
       .wire_cap_pf = wire_cap_pf / 2.0,
       .driver_wire_cap_pf = driver_wire_cap_pf / 2.0,
       .terminal_node_id = driver_node_id,
+      .terminal_node_ids = {driver_node_id},
   });
   parasitic.rc_nodes.push_back(FastStaRcNode{
       .name = net.name + "@load",
@@ -221,6 +223,7 @@ auto makeLinearParasitic(const FastStaClockContext& context, const FastStaNet& n
       .wire_cap_pf = wire_cap_pf / 2.0,
       .driver_wire_cap_pf = driver_wire_cap_pf / 2.0,
       .terminal_node_id = load_node_id,
+      .terminal_node_ids = {load_node_id},
   });
   parasitic.rc_edges.push_back(FastStaRcEdge{
       .from = 0U,
@@ -240,7 +243,7 @@ auto makeLinearParasitic(const FastStaClockContext& context, const FastStaNet& n
   return parasitic;
 }
 
-auto rootTiming(const FastStaClockContext& context) -> FastStaTimingPoint
+auto rootTiming(const FastStaContext& context) -> FastStaTimingPoint
 {
   const auto source_output_id = sourceOutputNodeId(context);
   if (source_output_id >= context.nodes.size()) {
@@ -249,12 +252,12 @@ auto rootTiming(const FastStaClockContext& context) -> FastStaTimingPoint
   return context.nodes.at(source_output_id).timing;
 }
 
-auto isCharacterizedBufferOutput(const FastStaClockContext& context, FastStaNodeId node_id) -> bool
+auto isCharacterizedBufferOutput(const FastStaContext& context, FastStaNodeId node_id) -> bool
 {
   return node_id < context.nodes.size() && node_id != sourceOutputNodeId(context) && context.nodes.at(node_id).kind == FastStaNodeKind::kBufferOutput;
 }
 
-auto selectedBufferInternalPower(const FastStaClockContext& context) -> double
+auto selectedBufferInternalPower(const FastStaContext& context) -> double
 {
   double power_w = 0.0;
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
@@ -265,7 +268,7 @@ auto selectedBufferInternalPower(const FastStaClockContext& context) -> double
   return power_w;
 }
 
-auto selectedBufferLeakagePower(const FastStaClockContext& context) -> double
+auto selectedBufferLeakagePower(const FastStaContext& context) -> double
 {
   double power_w = 0.0;
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
@@ -280,7 +283,7 @@ auto selectedBufferLeakagePower(const FastStaClockContext& context) -> double
 
 auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResult
 {
-  FastStaClockContext context;
+  FastStaContext context;
   if (spec.wrapper == nullptr) {
     CTSLOG.error(Loc::current(), "FastStaChar: Wrapper must be provided.");
   }
@@ -290,6 +293,7 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
   }
   context.clock_name = "cts_char_clk";
   context.wrapper = spec.wrapper;
+  context.liberty_revision = spec.wrapper->queryLibertyRevision();
   context.clock_net_name = "cts_char_net_0";
   context.clock_period_ns = spec.clock_period_ns;
   context.root_input_slew_ns = std::max(0.0, spec.root_input_slew_ns);
@@ -321,6 +325,15 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
                                                     .max_slew_ns = context.liberty_cell_by_master.at(spec.source_cell_master).input_slew_limit_ns,
                                                     .output_net_ids = {},
                                                     .timing = {},
+                                                    .early_timing = {},
+                                                    .late_timing = {},
+                                                    .arrival_seed_early_ns = 0.0,
+                                                    .arrival_seed_late_ns = 0.0,
+                                                    .slew_seed_early_ns = 0.0,
+                                                    .slew_seed_late_ns = 0.0,
+                                                    .clock_arrival_early_ns = 0.0,
+                                                    .clock_arrival_late_ns = 0.0,
+                                                    .domain = FastStaNodeDomain::kClock,
                                                 });
   const auto source_output = appendNode(context, FastStaNode{
                                                      .kind = FastStaNodeKind::kBufferOutput,
@@ -331,6 +344,15 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
                                                      .location = makePoint(0.0, context.dbu_per_um),
                                                      .output_net_ids = {},
                                                      .timing = {},
+                                                     .early_timing = {},
+                                                     .late_timing = {},
+                                                     .arrival_seed_early_ns = 0.0,
+                                                     .arrival_seed_late_ns = 0.0,
+                                                     .slew_seed_early_ns = 0.0,
+                                                     .slew_seed_late_ns = 0.0,
+                                                     .clock_arrival_early_ns = 0.0,
+                                                     .clock_arrival_late_ns = 0.0,
+                                                     .domain = FastStaNodeDomain::kClock,
                                                  });
   context.source_node_id = source_input;
 
@@ -356,6 +378,15 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
                                              .max_slew_ns = context.liberty_cell_by_master.at(cell_master).input_slew_limit_ns,
                                              .output_net_ids = {},
                                              .timing = {},
+                                             .early_timing = {},
+                                             .late_timing = {},
+                                             .arrival_seed_early_ns = 0.0,
+                                             .arrival_seed_late_ns = 0.0,
+                                             .slew_seed_early_ns = 0.0,
+                                             .slew_seed_late_ns = 0.0,
+                                             .clock_arrival_early_ns = 0.0,
+                                             .clock_arrival_late_ns = 0.0,
+                                             .domain = FastStaNodeDomain::kClock,
                                          });
       next_driver_node_id = appendNode(context, FastStaNode{
                                                     .kind = FastStaNodeKind::kBufferOutput,
@@ -366,6 +397,15 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
                                                     .location = makePoint(current_x_um, context.dbu_per_um),
                                                     .output_net_ids = {},
                                                     .timing = {},
+                                                    .early_timing = {},
+                                                    .late_timing = {},
+                                                    .arrival_seed_early_ns = 0.0,
+                                                    .arrival_seed_late_ns = 0.0,
+                                                    .slew_seed_early_ns = 0.0,
+                                                    .slew_seed_late_ns = 0.0,
+                                                    .clock_arrival_early_ns = 0.0,
+                                                    .clock_arrival_late_ns = 0.0,
+                                                    .domain = FastStaNodeDomain::kClock,
                                                 });
     } else {
       load_node_id = appendNode(context, FastStaNode{
@@ -379,6 +419,15 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
                                              .max_slew_ns = context.liberty_cell_by_master.at(spec.sink_cell_master).input_slew_limit_ns,
                                              .output_net_ids = {},
                                              .timing = {},
+                                             .early_timing = {},
+                                             .late_timing = {},
+                                             .arrival_seed_early_ns = 0.0,
+                                             .arrival_seed_late_ns = 0.0,
+                                             .slew_seed_early_ns = 0.0,
+                                             .slew_seed_late_ns = 0.0,
+                                             .clock_arrival_early_ns = 0.0,
+                                             .clock_arrival_late_ns = 0.0,
+                                             .domain = FastStaNodeDomain::kClock,
                                          });
     }
 
@@ -388,9 +437,10 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
                                  .name = net_name,
                                  .driver_node_id = driver_node_id,
                                  .load_node_ids = {load_node_id},
+                                 .load_rc_node_ids = {},
                                  .max_cap_pf = context.liberty_cell_by_master.at(context.nodes.at(driver_node_id).cell_master).output_cap_limit_pf,
                                  .parasitic = {},
-                                 .driver_dmp = {},
+                                 .driver_timing_by_state = {},
                              });
     context.nets.at(net_id).parasitic
         = makeLinearParasitic(context, context.nets.at(net_id), driver_node_id, load_node_id, std::max(0.0, spec.wire_segments_um.at(segment_index)));
@@ -403,15 +453,34 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
     }
   }
 
-  FastStaParasitics::updateNetLoads(context);
+  for (auto& node : context.nodes) {
+    if (node.kind == FastStaNodeKind::kBufferOutput) {
+      continue;
+    }
+    const auto model = context.liberty_cell_by_master.find(node.cell_master);
+    if (model != context.liberty_cell_by_master.end()) {
+      node.input_cap_pf_by_timing = model->second.input_cap_pf_by_timing;
+      node.input_cap_profile_available = model->second.input_cap_profile_available;
+    }
+  }
   if (const auto topology_error = validateCharacterizationTopology(context); !topology_error.empty()) {
     return BuildResult{.failure_reason = std::move(topology_error)};
   }
-  return BuildResult{.context = std::move(context), .failure_reason = {}};
+  if (!FastStaTiming::prepare(context)) {
+    return BuildResult{.failure_reason = "characterization_timing_preparation_failed:" + context.timing_summary.fallback_reason};
+  }
+  return BuildResult{.context = Context{std::move(context)}, .failure_reason = {}};
 }
 
-auto FastStaChar::setLoad(FastStaClockContext& context, double effective_load_pf) -> bool
+auto FastStaChar::setLoad(Context& char_context, double effective_load_pf) -> bool
 {
+  auto& context = char_context._timing;
+  if (!std::isfinite(effective_load_pf) || effective_load_pf < 0.0) {
+    return false;
+  }
+  if (context.liberty_revision != context.wrapper->queryLibertyRevision()) {
+    return false;
+  }
   const auto sink_id = sinkNodeId(context);
   if (sink_id >= context.nodes.size()) {
     return false;
@@ -423,16 +492,32 @@ auto FastStaChar::setLoad(FastStaClockContext& context, double effective_load_pf
   }
   const auto sink_input_cap_pf = sink_cell_iter->second.input_cap_pf;
   context.nodes.at(sink_id).input_cap_pf = sink_input_cap_pf + std::max(0.0, effective_load_pf);
-  FastStaParasitics::updateNetLoads(context);
+  auto& node = context.nodes.at(sink_id);
+  node.input_cap_profile_available = sink_cell_iter->second.input_cap_profile_available;
+  node.input_cap_pf_by_timing = sink_cell_iter->second.input_cap_pf_by_timing;
+  for (auto& analysis : node.input_cap_pf_by_timing) {
+    for (auto& cap : analysis) {
+      cap += effective_load_pf;
+    }
+  }
   context.timing_valid = false;
+  context.clock_timing_valid = false;
   context.power_valid = false;
-  return true;
+  const auto incoming_net_id = node.incoming_net_id;
+  FastStaParasitics::updateNetLoads(context, {incoming_net_id});
+  char_context._load_valid = FastStaParasitics::reduceToPiElmore(context, incoming_net_id);
+  return char_context._load_valid;
 }
 
-auto FastStaChar::runSample(FastStaClockContext& context, double input_slew_ns) -> FastStaCharSampleResult
+auto FastStaChar::runSample(Context& char_context, double input_slew_ns) -> FastStaCharSampleResult
 {
+  auto& context = char_context._timing;
+  if (!char_context._load_valid || !std::isfinite(input_slew_ns) || input_slew_ns < 0.0
+      || context.liberty_revision != context.wrapper->queryLibertyRevision()) {
+    return {};
+  }
   context.root_input_slew_ns = std::max(0.0, input_slew_ns);
-  const auto timing_updated = FastStaTiming::update(context);
+  const auto timing_updated = FastStaTiming::updatePrepared(context);
   if (!timing_updated) {
     return {};
   }

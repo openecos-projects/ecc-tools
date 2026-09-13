@@ -24,306 +24,363 @@
 #include "FastSTATiming.hh"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
-#include <limits>
+#include <optional>
 #include <queue>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "FastSTAClockPropagation.hh"
 #include "FastSTAClockState.hh"
-#include "FastSTADmpCeff.hh"
-#include "FastSTALibertyModel.hh"
+#include "FastSTAConstraints.hh"
+#include "FastSTALogicAnalysis.hh"
 #include "FastSTAParasitics.hh"
-#include "clock_net_parasitic/FastSTAClockNetParasitic.hh"
 #include "clock_sizing/FastSTAClockSizingEdit.hh"
-#include "timing/FastSTAClockTiming.hh"
 
 namespace icts {
+
+using fast_sta::AffectedLogicNodes;
+using fast_sta::AnalyzeLogic;
+using fast_sta::AnalyzeLogicRegion;
+using fast_sta::FillLogicSummary;
+using fast_sta::HasCompleteSinkTiming;
+using fast_sta::HasTimingPropagationState;
+using fast_sta::MakeLogicPreparation;
+using fast_sta::PrepareRegionalClockTiming;
+using fast_sta::PropagateReadyQueue;
+using fast_sta::PublishLogicAnalysis;
+using fast_sta::ResetTiming;
+using fast_sta::SeedClockSources;
+
 namespace {
 
-auto findBufferInputNode(const FastStaClockContext& context, const FastStaNode& output_node) -> FastStaNodeId
+auto propagateTiming(FastStaContext& context, std::queue<FastStaNodeId>& ready_nodes) -> bool
 {
-  if (output_node.inst_name.empty()) {
-    return kInvalidFastStaNodeId;
+  const auto start = std::chrono::steady_clock::now();
+  const auto clock_start = start;
+  const auto unsupported_gate = std::ranges::find_if(context.timing_arcs, [&](const FastStaTimingArc& arc) -> bool {
+    const auto model = context.liberty_cell_by_master.find(arc.cell_master);
+    return arc.clock_gate_boundary && (model == context.liberty_cell_by_master.end() || !model->second.clock_gate.has_value());
+  });
+  if (unsupported_gate != context.timing_arcs.end()) {
+    FastStaTimingSummary summary;
+    summary.status = FastStaTimingStatus::kUnsupported;
+    summary.unsupported_count = 1U;
+    summary.fallback_reason = "clock_gate_control_timing_unavailable";
+    summary.runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    context.timing_relations.clear();
+    context.timing_relation_seeds = {};
+    context.timing_summary = std::move(summary);
+    return false;
   }
-  if (const auto indexed = context.buffer_input_node_id_by_inst.find(output_node.inst_name); indexed != context.buffer_input_node_id_by_inst.end()) {
-    if (indexed->second < context.nodes.size()) {
-      const auto& input_node = context.nodes.at(indexed->second);
-      if (input_node.kind == FastStaNodeKind::kBufferInput && input_node.inst_name == output_node.inst_name) {
-        return indexed->second;
-      }
-    }
+  PropagateReadyQueue(context, ready_nodes, !HasTimingPropagationState(context));
+  FastStaTimingSummary summary;
+  summary.clock_propagation_runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - clock_start).count();
+  if (!HasTimingPropagationState(context)) {
+    summary.status = FastStaTimingStatus::kComplete;
+    summary.runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    context.timing_relations.clear();
+    context.timing_relation_seeds = {};
+    context.timing_summary = std::move(summary);
+    return true;
   }
-  return kInvalidFastStaNodeId;
-}
-
-auto findRcTerminalElmore(const FastStaNetParasitic& parasitic, FastStaNodeId node_id) -> double
-{
-  for (const auto& rc_node : parasitic.rc_nodes) {
-    if (rc_node.terminal_node_id == node_id) {
-      return rc_node.elmore_delay_ns;
-    }
+  auto analysis = AnalyzeLogic(context, {});
+  FillLogicSummary(context, analysis, summary);
+  if (!analysis.complete()) {
+    summary.status = FastStaTimingStatus::kUnsupported;
+    summary.unsupported_count = 1U;
+    summary.fallback_reason = analysis.diagnostic;
+    summary.runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    context.timing_summary = std::move(summary);
+    return false;
   }
-  return 0.0;
-}
-
-auto findLoadLibertyCell(const FastStaClockContext& context, FastStaNodeId node_id) -> const FastStaLibertyCell*
-{
-  if (node_id >= context.nodes.size()) {
-    return nullptr;
-  }
-  const auto& node = context.nodes.at(node_id);
-  if (node.cell_master.empty()) {
-    return nullptr;
-  }
-  const auto iter = context.liberty_cell_by_master.find(node.cell_master);
-  return iter == context.liberty_cell_by_master.end() ? nullptr : &iter->second;
-}
-
-auto propagateBufferOutput(FastStaClockContext& context, FastStaNodeId output_node_id, FastStaNet& net) -> void
-{
-  if (output_node_id >= context.nodes.size()) {
-    return;
-  }
-  auto& output_node = context.nodes.at(output_node_id);
-  if (output_node.kind != FastStaNodeKind::kBufferOutput) {
-    return;
-  }
-
-  const auto input_node_id = findBufferInputNode(context, output_node);
-  if (input_node_id == kInvalidFastStaNodeId || input_node_id >= context.nodes.size()) {
-    return;
-  }
-  const auto& input_node = context.nodes.at(input_node_id);
-  if (!input_node.timing.valid) {
-    return;
-  }
-
-  const auto liberty_iter = context.liberty_cell_by_master.find(output_node.cell_master);
-  if (liberty_iter == context.liberty_cell_by_master.end()) {
-    output_node.timing = {};
-    net.driver_dmp = FastStaDmpDriverResult{};
-    return;
-  }
-
-  const auto& liberty_cell = liberty_iter->second;
-  net.driver_dmp = FastStaDmpCeff::calcDriverTiming(liberty_cell, net.parasitic.driver_pi, FastStaTransition::kRise, input_node.timing.slew_ns);
-  output_node.timing = FastStaTimingPoint{
-      .arrival_ns = input_node.timing.arrival_ns + net.driver_dmp.gate_delay_ns,
-      .slew_ns = net.driver_dmp.driver_slew_ns > 0.0 ? net.driver_dmp.driver_slew_ns : input_node.timing.slew_ns,
-      .valid = net.driver_dmp.valid,
-  };
-}
-
-auto propagateNetLoads(FastStaClockContext& context, FastStaNet& net, std::queue<FastStaNodeId>& ready_nodes) -> void
-{
-  if (net.driver_node_id >= context.nodes.size() || !context.nodes.at(net.driver_node_id).timing.valid) {
-    return;
-  }
-
-  const auto driver_timing = context.nodes.at(net.driver_node_id).timing;
-  for (auto load_node_id : net.load_node_ids) {
-    if (load_node_id >= context.nodes.size()) {
-      continue;
-    }
-    const auto elmore_delay_ns = findRcTerminalElmore(net.parasitic, load_node_id);
-    const auto* load_cell = findLoadLibertyCell(context, load_node_id);
-    auto load_timing = FastStaDmpLoadResult{.valid = true, .wire_delay_ns = 0.0, .load_slew_ns = driver_timing.slew_ns};
-    if (!net.parasitic.rc_nodes.empty()) {
-      if (context.nodes.at(net.driver_node_id).kind == FastStaNodeKind::kSource) {
-        load_timing = FastStaDmpCeff::calcInputPortDelaySlew(driver_timing.slew_ns, elmore_delay_ns, FastStaTransition::kRise, load_cell);
-      } else {
-        if (!net.driver_dmp.valid) {
-          load_timing = {};
-        } else {
-          load_timing = FastStaDmpCeff::calcLoadDelaySlew(net.driver_dmp, elmore_delay_ns, load_cell);
-        }
-      }
-    }
-    auto& load_node = context.nodes.at(load_node_id);
-    load_node.timing = FastStaTimingPoint{
-        .arrival_ns = driver_timing.arrival_ns + load_timing.wire_delay_ns,
-        .slew_ns = std::max(0.0, load_timing.load_slew_ns),
-        .valid = load_timing.valid,
-    };
-    if (load_node.timing.valid) {
-      ready_nodes.push(load_node_id);
-    }
-  }
-}
-
-auto resetTiming(FastStaClockContext& context) -> void
-{
-  for (auto& node : context.nodes) {
-    node.timing = FastStaTimingPoint{};
-  }
-  for (auto& net : context.nets) {
-    net.driver_dmp = FastStaDmpDriverResult{};
-  }
-}
-
-auto resetTiming(FastStaClockContext& context, const FastStaDirtyRegion& dirty_region) -> void
-{
-  for (const auto node_id : dirty_region.node_ids) {
-    if (node_id < context.nodes.size()) {
-      context.nodes.at(node_id).timing = FastStaTimingPoint{};
-    }
-  }
-  for (const auto net_id : dirty_region.net_ids) {
-    if (net_id < context.nets.size()) {
-      context.nets.at(net_id).driver_dmp = FastStaDmpDriverResult{};
-    }
-  }
-}
-
-auto hasCompleteSinkTiming(const FastStaClockContext& context) -> bool
-{
-  bool has_sink = false;
-  for (const auto& node : context.nodes) {
-    if (node.kind != FastStaNodeKind::kSink) {
-      continue;
-    }
-    has_sink = true;
-    if (!node.timing.valid) {
-      return false;
-    }
-  }
-  return has_sink && context.skew.valid;
-}
-
-auto propagateReadyQueue(FastStaClockContext& context, std::queue<FastStaNodeId>& ready_nodes) -> void
-{
-  const auto find_buffer_output = [&](const FastStaNode& input_node) -> FastStaNodeId {
-    if (const auto indexed = context.buffer_output_node_id_by_inst.find(input_node.inst_name); indexed != context.buffer_output_node_id_by_inst.end()) {
-      if (indexed->second < context.nodes.size()) {
-        const auto& output_node = context.nodes.at(indexed->second);
-        if (output_node.kind == FastStaNodeKind::kBufferOutput && output_node.inst_name == input_node.inst_name) {
-          return indexed->second;
-        }
-      }
-    }
-    return kInvalidFastStaNodeId;
-  };
-  std::size_t visited_steps = 0U;
-  const auto max_steps = std::max<std::size_t>(1U, context.nodes.size() + context.nets.size() + 1U) * 4U;
-  while (!ready_nodes.empty() && visited_steps < max_steps) {
-    ++visited_steps;
-    const auto node_id = ready_nodes.front();
-    ready_nodes.pop();
-    if (node_id >= context.nodes.size()) {
-      continue;
-    }
-    auto& node = context.nodes.at(node_id);
-    if (node.kind == FastStaNodeKind::kBufferInput) {
-      const auto output_node_id = find_buffer_output(node);
-      if (output_node_id < context.nodes.size()) {
-        auto& output_node = context.nodes.at(output_node_id);
-        if (!output_node.output_net_ids.empty() && output_node.output_net_ids.front() < context.nets.size()) {
-          propagateBufferOutput(context, output_node_id, context.nets.at(output_node.output_net_ids.front()));
-        } else {
-          output_node.timing = node.timing;
-        }
-        if (output_node.timing.valid) {
-          ready_nodes.push(output_node_id);
-        }
-      }
-      continue;
-    }
-    for (auto net_id : node.output_net_ids) {
-      if (net_id < context.nets.size()) {
-        propagateNetLoads(context, context.nets.at(net_id), ready_nodes);
-      }
-    }
-  }
+  PublishLogicAnalysis(context, std::move(analysis));
+  summary.status = FastStaTimingStatus::kComplete;
+  summary.runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  context.timing_summary = std::move(summary);
+  return true;
 }
 
 }  // namespace
 
-auto FastStaTiming::update(FastStaClockContext& context) -> bool
+auto FastStaTiming::collectAffectedLogicNodes(const FastStaContext& context, const FastStaDirtyRegion& dirty_region)
+    -> std::optional<std::vector<FastStaNodeId>>
 {
-  resetTiming(context);
+  if (!HasTimingPropagationState(context)) {
+    return std::vector<FastStaNodeId>{};
+  }
+  const auto prepared = context.logic_preparation != nullptr ? context.logic_preparation : MakeLogicPreparation(context);
+  if (!prepared->diagnostic.empty()) {
+    return std::nullopt;
+  }
+  const auto affected = AffectedLogicNodes(context, dirty_region, prepared->outgoing);
+  std::vector<FastStaNodeId> nodes;
+  for (FastStaNodeId id = 0U; id < context.nodes.size(); ++id) {
+    if (affected.at(id) && context.nodes.at(id).domain == FastStaNodeDomain::kLogic) {
+      nodes.push_back(id);
+    }
+  }
+  return nodes;
+}
+
+auto FastStaTiming::updateBranch(FastStaContext& context, FastStaNodeId input_node, const FastStaBranchStates& states) -> bool
+{
+  if (input_node >= context.nodes.size()) {
+    return false;
+  }
+  ResetTiming(context);
   FastStaParasitics::updateNetLoads(context);
   for (FastStaNetId net_id = 0U; net_id < context.nets.size(); ++net_id) {
-    (void) FastStaParasitics::reduceToPiElmore(context, net_id);
+    if (!FastStaParasitics::reduceToPiElmore(context, net_id)) {
+      return false;
+    }
   }
-  if (context.source_node_id < context.nodes.size()) {
-    context.nodes.at(context.source_node_id).timing
-        = FastStaTimingPoint{.arrival_ns = 0.0, .slew_ns = std::max(0.0, context.root_input_slew_ns), .valid = true};
+  auto& source = context.nodes.at(input_node);
+  for (std::size_t analysis = 0U; analysis < 2U; ++analysis) {
+    for (std::size_t transition = 0U; transition < 2U; ++transition) {
+      const auto& seed = states.at(analysis).at(transition);
+      if (!seed.valid || !std::isfinite(seed.arrival_ns) || !std::isfinite(seed.slew_ns) || seed.slew_ns < 0.0) {
+        return false;
+      }
+      auto& point = analysis == 0U ? source.early_timing.at(transition) : source.late_timing.at(transition);
+      point = {.arrival_ns = seed.arrival_ns,
+               .slew_ns = seed.slew_ns,
+               .launch_node_id = input_node,
+               .launch_clock_node_id = input_node,
+               .launch_clock_transition = seed.source_transition,
+               .valid = true,
+               .clock_name = context.clock_name,
+               .exception_progress = {}};
+    }
   }
-
-  std::queue<FastStaNodeId> ready_nodes;
-  if (context.source_node_id < context.nodes.size()) {
-    ready_nodes.push(context.source_node_id);
-  }
-
-  propagateReadyQueue(context, ready_nodes);
-
-  context.skew = calcSkew(context);
-  context.timing_valid = hasCompleteSinkTiming(context);
+  source.timing = source.late_timing.front();
+  std::queue<FastStaNodeId> ready;
+  ready.push(input_node);
+  PropagateReadyQueue(context, ready);
+  context.timing_valid = HasCompleteSinkTiming(context);
+  context.clock_timing_valid = context.timing_valid;
   return context.timing_valid;
 }
 
-auto FastStaTiming::updateRegion(FastStaClockContext& context, const FastStaDirtyRegion& dirty_region) -> bool
+auto FastStaTiming::update(FastStaContext& context) -> bool
+{
+  return prepare(context) && updatePrepared(context);
+}
+
+auto FastStaTiming::prepare(FastStaContext& context) -> bool
+{
+  if (const auto failure = FastStaConstraints::prepare(context); failure.has_value()) {
+    context.timing_valid = false;
+    context.clock_timing_valid = false;
+    context.timing_relations.clear();
+    context.timing_summary = {.status = failure->starts_with("unsupported_") ? FastStaTimingStatus::kUnsupported : FastStaTimingStatus::kInvalidInput,
+                              .fallback_reason = *failure};
+    return false;
+  }
+  FastStaParasitics::updateNetLoads(context);
+  for (FastStaNetId net_id = 0U; net_id < context.nets.size(); ++net_id) {
+    if (!FastStaParasitics::reduceToPiElmore(context, net_id)) {
+      ResetTiming(context);
+      context.timing_valid = false;
+      context.clock_timing_valid = false;
+      context.timing_summary.status = FastStaTimingStatus::kInvalidInput;
+      return false;
+    }
+  }
+  context.logic_preparation = MakeLogicPreparation(context);
+  if (!context.logic_preparation->diagnostic.empty()) {
+    context.timing_valid = false;
+    context.clock_timing_valid = false;
+    context.timing_summary = {.status = FastStaTimingStatus::kInvalidInput, .fallback_reason = context.logic_preparation->diagnostic};
+    return false;
+  }
+  return true;
+}
+
+auto FastStaTiming::updatePrepared(FastStaContext& context) -> bool
+{
+  ResetTiming(context);
+  SeedClockSources(context);
+
+  std::queue<FastStaNodeId> ready_nodes;
+  for (const auto source_id : context.clock_source_node_ids) {
+    ready_nodes.push(source_id);
+  }
+
+  const auto unified_timing_valid = propagateTiming(context, ready_nodes);
+  context.skew = calcSkew(context);
+  context.timing_valid = HasCompleteSinkTiming(context) && unified_timing_valid;
+  context.clock_timing_valid = context.timing_valid;
+  context.logic_tags_valid = context.timing_valid;
+  context.timing_summary.updated_clock_node_count
+      = static_cast<std::size_t>(std::ranges::count_if(context.nodes, [](const auto& node) -> bool { return node.domain == FastStaNodeDomain::kClock; }));
+  context.timing_summary.updated_clock_net_count
+      = static_cast<std::size_t>(std::ranges::count_if(context.nets, [](const auto& net) -> bool { return net.domain == FastStaNetDomain::kClock; }));
+  context.timing_summary.max_skew_ns = context.skew.valid ? context.skew.skew_ns : 0.0;
+  return context.timing_valid;
+}
+
+auto FastStaTiming::updateClockTopology(FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> bool
+{
+  if (!dirty_region.valid) {
+    return false;
+  }
+  const auto start = std::chrono::steady_clock::now();
+  context.timing_valid = false;
+  context.clock_timing_valid = false;
+  context.power_valid = false;
+  context.logic_preparation = MakeLogicPreparation(context);
+  if (!context.logic_preparation->diagnostic.empty()) {
+    context.timing_summary = {.status = FastStaTimingStatus::kInvalidInput, .fallback_reason = context.logic_preparation->diagnostic};
+    return false;
+  }
+  FastStaParasitics::updateNetLoads(context, dirty_region.net_ids);
+  for (const auto id : dirty_region.net_ids) {
+    if (!FastStaParasitics::reduceToPiElmore(context, id)) {
+      context.timing_summary = {.status = FastStaTimingStatus::kInvalidInput, .fallback_reason = "clock_topology_rc_reduction_failed"};
+      return false;
+    }
+  }
+  ResetTiming(context, dirty_region);
+  SeedClockSources(context);
+  std::queue<FastStaNodeId> ready;
+  for (const auto source : context.clock_source_node_ids) {
+    ready.push(source);
+  }
+  PropagateReadyQueue(context, ready, !HasTimingPropagationState(context));
+  FastStaTimingSummary summary;
+  summary.clock_propagation_runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  summary.updated_clock_node_count = dirty_region.node_ids.size();
+  summary.updated_clock_net_count = dirty_region.net_ids.size();
+  if (HasTimingPropagationState(context)) {
+    auto analysis = AnalyzeLogicRegion(context, dirty_region);
+    if (!analysis.complete()) {
+      context.timing_summary = {.status = FastStaTimingStatus::kUnsupported, .fallback_reason = analysis.diagnostic};
+      return false;
+    }
+    FillLogicSummary(context, analysis, summary);
+    PublishLogicAnalysis(context, std::move(analysis));
+  } else {
+    context.timing_relations.clear();
+    context.timing_relation_seeds = {};
+    context.logic_tags_valid = true;
+  }
+  context.skew = calcSkew(context);
+  context.timing_valid = HasCompleteSinkTiming(context);
+  context.clock_timing_valid = context.timing_valid;
+  summary.status = context.timing_valid ? FastStaTimingStatus::kComplete : FastStaTimingStatus::kInvalidInput;
+  summary.max_skew_ns = context.skew.valid ? context.skew.skew_ns : 0.0;
+  summary.runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  context.timing_summary = std::move(summary);
+  return context.timing_valid;
+}
+
+auto FastStaTiming::updateRegion(FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> bool
 {
   if (!dirty_region.valid || dirty_region.start_node_id >= context.nodes.size()) {
     return false;
   }
+  const auto full_rebuild = [&](std::string reason) -> bool {
+    const bool rebuilt = update(context);
+    context.timing_summary.used_full_rebuild = true;
+    if (rebuilt || context.timing_summary.fallback_reason.empty()) {
+      context.timing_summary.fallback_reason = std::move(reason);
+    }
+    return rebuilt;
+  };
   if (!context.timing_valid) {
-    return update(context);
+    return full_rebuild("incremental_fallback:timing_state_invalid:v1");
+  }
+  if ((!context.constraints.clocks.empty() || !context.constraints.path_exceptions.empty()) && !context.logic_tags_valid
+      && HasTimingPropagationState(context)) {
+    return full_rebuild("incremental_fallback:logic_tags_unavailable:v1");
   }
 
-  FastStaParasitics::updateNetLoads(context, dirty_region.net_ids);
-  for (const auto net_id : dirty_region.net_ids) {
-    (void) FastStaParasitics::reduceToPiElmore(context, net_id);
-  }
-
-  const auto preserved_start_timing = context.nodes.at(dirty_region.start_node_id).timing;
-  resetTiming(context, dirty_region);
-  context.nodes.at(dirty_region.start_node_id).timing = preserved_start_timing;
-  if (!context.nodes.at(dirty_region.start_node_id).timing.valid) {
-    return update(context);
+  const auto& load_update_net_ids = dirty_region.load_update_net_ids.empty() ? dirty_region.net_ids : dirty_region.load_update_net_ids;
+  FastStaParasitics::updateNetLoads(context, load_update_net_ids);
+  for (const auto net_id : load_update_net_ids) {
+    if (!FastStaParasitics::reduceToPiElmore(context, net_id)) {
+      context.timing_valid = false;
+      context.clock_timing_valid = false;
+      context.timing_summary.status = FastStaTimingStatus::kInvalidInput;
+      return false;
+    }
   }
 
   std::queue<FastStaNodeId> ready_nodes;
-  ready_nodes.push(dirty_region.start_node_id);
-  propagateReadyQueue(context, ready_nodes);
+  if (!PrepareRegionalClockTiming(context, dirty_region, ready_nodes)) {
+    context.timing_valid = false;
+    context.clock_timing_valid = false;
+    context.timing_summary = {.status = FastStaTimingStatus::kInvalidInput, .fallback_reason = "incremental_start_timing_invalid"};
+    return false;
+  }
 
+  const auto timing_start = std::chrono::steady_clock::now();
+  PropagateReadyQueue(context, ready_nodes, !HasTimingPropagationState(context));
+  auto summary = FastStaTimingSummary{.used_full_rebuild = false, .fallback_reason = {}};
+  summary.clock_propagation_runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - timing_start).count();
+  summary.updated_clock_node_count = dirty_region.node_ids.size();
+  summary.updated_clock_net_count = dirty_region.net_ids.size();
+  bool unified_timing_valid = true;
+  if (HasTimingPropagationState(context)) {
+    auto analysis = AnalyzeLogicRegion(context, dirty_region);
+    if (!analysis.complete()) {
+      context.timing_valid = false;
+      context.clock_timing_valid = false;
+      summary.status = FastStaTimingStatus::kUnsupported;
+      summary.fallback_reason = analysis.diagnostic;
+      context.timing_summary = std::move(summary);
+      return false;
+    } else {
+      FillLogicSummary(context, analysis, summary);
+      PublishLogicAnalysis(context, std::move(analysis));
+      summary.status = FastStaTimingStatus::kComplete;
+    }
+  } else {
+    summary.status = FastStaTimingStatus::kComplete;
+    context.timing_relations.clear();
+    context.timing_relation_seeds = {};
+  }
+  summary.runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - timing_start).count();
+  context.timing_summary = std::move(summary);
   context.skew = calcSkew(context);
-  context.timing_valid = hasCompleteSinkTiming(context);
+  context.timing_valid = HasCompleteSinkTiming(context) && unified_timing_valid;
+  context.clock_timing_valid = context.timing_valid;
+  context.timing_summary.max_skew_ns = context.skew.valid ? context.skew.skew_ns : 0.0;
   return context.timing_valid;
 }
 
-auto FastStaTiming::calcSkew(const FastStaClockContext& context) -> FastStaSkewSummary
+auto FastStaTiming::updateClockTrialRegion(FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> bool
 {
-  FastStaSkewSummary summary;
-  summary.min_arrival_ns = std::numeric_limits<double>::infinity();
-  summary.max_arrival_ns = -std::numeric_limits<double>::infinity();
-  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-    const auto& node = context.nodes.at(node_id);
-    if (node.kind != FastStaNodeKind::kSink || !node.timing.valid) {
-      continue;
-    }
-    if (node.timing.arrival_ns < summary.min_arrival_ns) {
-      summary.min_arrival_ns = node.timing.arrival_ns;
-      summary.min_sink_node_id = node_id;
-      summary.min_sink_name = node.name;
-    }
-    if (node.timing.arrival_ns > summary.max_arrival_ns) {
-      summary.max_arrival_ns = node.timing.arrival_ns;
-      summary.max_sink_node_id = node_id;
-      summary.max_sink_name = node.name;
+  if (!(context.timing_valid || context.clock_timing_valid) || !dirty_region.valid || dirty_region.start_node_id >= context.nodes.size()) {
+    return false;
+  }
+  const auto& load_update_net_ids = dirty_region.load_update_net_ids.empty() ? dirty_region.net_ids : dirty_region.load_update_net_ids;
+  FastStaParasitics::updateNetLoads(context, load_update_net_ids);
+  for (const auto net_id : load_update_net_ids) {
+    if (!FastStaParasitics::reduceToPiElmore(context, net_id)) {
+      context.timing_valid = false;
+      context.clock_timing_valid = false;
+      context.timing_summary.status = FastStaTimingStatus::kInvalidInput;
+      return false;
     }
   }
-  summary.valid = summary.min_sink_node_id != kInvalidFastStaNodeId && summary.max_sink_node_id != kInvalidFastStaNodeId;
-  if (summary.valid) {
-    summary.skew_ns = std::max(0.0, summary.max_arrival_ns - summary.min_arrival_ns);
-  } else {
-    summary.min_arrival_ns = 0.0;
-    summary.max_arrival_ns = 0.0;
+
+  std::queue<FastStaNodeId> ready_nodes;
+  if (!PrepareRegionalClockTiming(context, dirty_region, ready_nodes)) {
+    return false;
   }
-  return summary;
+
+  PropagateReadyQueue(context, ready_nodes, true);
+  context.skew = calcSkew(context);
+  context.clock_timing_valid = HasCompleteSinkTiming(context);
+  context.timing_valid = false;
+  context.logic_tags_valid = false;
+  context.power_valid = false;
+  return context.clock_timing_valid;
 }
 
 }  // namespace icts

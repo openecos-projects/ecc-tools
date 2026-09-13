@@ -23,10 +23,12 @@
 
 #pragma once
 
+#include <cstddef>
+#include <limits>
 #include <string>
+#include <vector>
 
 #include "FastSTA.hh"
-#include "liberty/FastSTALibertyModel.hh"
 
 namespace icts {
 
@@ -34,14 +36,36 @@ enum class FastStaDmpAlgorithm
 {
   kCap,
   kPi,
-  kZeroC2
+  kZeroNearCap
 };
 
 struct FastStaTimingPoint
 {
   double arrival_ns = 0.0;
   double slew_ns = 0.0;
+  FastStaNodeId launch_node_id = kInvalidFastStaNodeId;
+  FastStaNodeId launch_clock_node_id = kInvalidFastStaNodeId;
+  FastStaTransition launch_clock_transition = FastStaTransition::kRise;
+  // Physical launch insertion, including a separation-query delta, without event phase.
+  double launch_clock_arrival_ns = 0.0;
+  std::size_t driver_model_index = std::numeric_limits<std::size_t>::max();
+  std::size_t driver_arc_variant_index = std::numeric_limits<std::size_t>::max();
+  double driver_input_slew_ns = 0.0;
+  std::size_t slew_driver_model_index = std::numeric_limits<std::size_t>::max();
+  std::size_t slew_driver_arc_variant_index = std::numeric_limits<std::size_t>::max();
+  double slew_driver_input_slew_ns = 0.0;
+  FastStaNodeId stage_input_node_id = kInvalidFastStaNodeId;
+  FastStaTransition stage_input_transition = FastStaTransition::kRise;
+  double stage_input_arrival_ns = 0.0;
+  double stage_input_slew_ns = 0.0;
+  double stage_delay_ns = 0.0;
+  bool driver_is_launch = false;
+  bool slew_driver_is_launch = false;
   bool valid = false;
+  std::string clock_name = "";
+  FastStaTransition launch_data_transition = FastStaTransition::kRise;
+  // One ordered-through automaton per exception; max() means its -from did not match.
+  std::vector<std::size_t> exception_progress;
 };
 
 struct FastStaDmpDriverResult
@@ -50,13 +74,14 @@ struct FastStaDmpDriverResult
   bool driver_waveform_valid = false;
   FastStaDmpAlgorithm algorithm = FastStaDmpAlgorithm::kCap;
   FastStaTransition transition = FastStaTransition::kRise;
-  std::string driver_cell_master;
+  std::string driver_library_name = "";
+  std::string driver_cell_master = "";
   double ceff_pf = 0.0;
   double gate_delay_ns = 0.0;
   double driver_slew_ns = 0.0;
   double driver_waveform_delay_ns = 0.0;
-  double t0_ns = 0.0;
-  double dt_ns = 0.0;
+  double ramp_start_ns = 0.0;
+  double ramp_duration_ns = 0.0;
   double near_cap_pf = 0.0;
   double far_cap_pf = 0.0;
   double rpi_ns_per_pf = 0.0;
@@ -69,11 +94,11 @@ struct FastStaDmpDriverResult
   double pole1_per_ns = 0.0;
   double pole2_per_ns = 0.0;
   double zero1_per_ns = 0.0;
-  double k0 = 0.0;
-  double k1 = 0.0;
-  double k2 = 0.0;
-  double k3 = 0.0;
-  double k4 = 0.0;
+  double waveform_scale = 0.0;
+  double waveform_offset = 0.0;
+  double waveform_slope = 0.0;
+  double first_pole_weight = 0.0;
+  double second_pole_weight = 0.0;
 };
 
 struct FastStaDmpLoadResult

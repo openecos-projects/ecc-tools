@@ -24,10 +24,13 @@
 #pragma once
 
 #include <cstddef>
+#include <initializer_list>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -35,11 +38,9 @@
 
 namespace icts::sdc_reader {
 
-inline constexpr std::size_t kCommandSubstitutionLimit = 1024U;
-
 struct ParsedWord
 {
-  std::string text;
+  std::string text = "";
   bool braced = false;
 };
 
@@ -47,6 +48,14 @@ struct SdcValue
 {
   std::vector<std::string> strings;
   std::vector<SdcObjectRef> objects;
+};
+
+struct SdcCommandOptions
+{
+  std::unordered_map<std::string, SdcValue> values;
+  std::vector<std::pair<std::string, SdcValue>> ordered_values;
+  std::unordered_set<std::string> flags;
+  std::vector<SdcValue> positional;
 };
 
 class ArithmeticParser
@@ -73,41 +82,57 @@ class ArithmeticParser
 class SdcSubsetEvaluator
 {
  public:
+  explicit SdcSubsetEvaluator(SdcUnits units = {}) : _default_units(units) {}
   auto readFile(const std::string& sdc_path) -> SdcClockData;
+  static auto resolveGeneratedClockData(SdcClockData& data) -> void;
 
  private:
-  static auto splitCommands(const std::string& text) -> std::vector<std::string>;
-  static auto parseWords(const std::string& command) -> std::vector<ParsedWord>;
+  auto splitCommands(const std::string& text) -> std::vector<std::string>;
+  auto parseWords(const std::string& command) -> std::vector<ParsedWord>;
   static auto parseBalanced(const std::string& text, std::size_t open_pos, char open_ch, char close_ch) -> std::pair<std::string, std::size_t>;
   static auto matchingBracketPos(const std::string& text, std::size_t open_pos) -> std::size_t;
-  static auto findInnermostBracket(const std::string& text) -> std::pair<std::size_t, std::size_t>;
   static auto parseVariableName(const std::string& text, std::size_t dollar_pos) -> std::pair<std::string, std::size_t>;
 
   auto substituteVariablesToString(const std::string& text) -> std::string;
-  auto evaluateWord(const ParsedWord& word) -> SdcValue;
-  auto evaluatePlainWord(const ParsedWord& word) -> SdcValue;
-  auto evaluatePlainWords(const std::vector<ParsedWord>& words, std::size_t start_index = 0U) -> std::vector<SdcValue>;
-  auto expandBracketCommandsToString(std::string text) -> std::string;
-  auto evaluateWords(const std::vector<ParsedWord>& words, std::size_t start_index = 0U) -> std::vector<SdcValue>;
   auto evaluateCommand(const std::string& command) -> SdcValue;
-  auto evaluateCommandWithoutCommandSubstitution(const std::string& command) -> SdcValue;
+  auto evaluateCommandArgs(const std::string& command, const std::vector<SdcValue>& args) -> SdcValue;
 
-  auto evaluateSet(const std::vector<ParsedWord>& words) -> SdcValue;
-  auto evaluateSetPlain(const std::vector<ParsedWord>& words) -> SdcValue;
-  auto evaluateExpr(const std::vector<ParsedWord>& words) -> SdcValue;
-  auto evaluateExprPlain(const std::vector<ParsedWord>& words) -> SdcValue;
+  auto evaluateSet(const std::vector<ParsedWord>& words, const std::vector<SdcValue>& args) -> SdcValue;
+  auto evaluateExpr(const std::vector<SdcValue>& args) -> SdcValue;
   auto evaluateSetUnits(const std::vector<SdcValue>& args) -> void;
-  static auto evaluateCollection(SdcObjectKind kind, const std::vector<SdcValue>& args) -> SdcValue;
+  auto evaluateCollection(SdcObjectKind kind, const std::vector<SdcValue>& args) -> SdcValue;
   auto evaluateGetClocks(const std::vector<SdcValue>& args) -> SdcValue;
   auto evaluateAllClocks() -> SdcValue;
   auto evaluateCreateClock(const std::vector<SdcValue>& args) -> SdcValue;
   auto evaluateCreateGeneratedClock(const std::vector<SdcValue>& args) -> SdcValue;
   auto evaluateSetCaseAnalysis(const std::vector<SdcValue>& args) -> void;
+  auto evaluatePathException(const std::string& command, const std::vector<SdcValue>& args, SdcExceptionKind kind) -> void;
+  auto evaluateClockGroups(const std::vector<SdcValue>& args) -> void;
+  auto evaluateClockLatency(const std::vector<SdcValue>& args) -> void;
+  auto evaluateClockUncertainty(const std::vector<SdcValue>& args) -> void;
+  auto evaluateClockTransition(const std::vector<SdcValue>& args) -> void;
+  auto evaluateIODelay(const std::string& command, const std::vector<SdcValue>& args, bool input) -> void;
+  auto evaluateInputTransition(const std::vector<SdcValue>& args) -> void;
+  auto evaluateLoad(const std::vector<SdcValue>& args) -> void;
 
+  auto reportIssue(SdcConstraintStatusCode code, const std::string& command, const std::string& detail) -> void;
+  auto parseOptions(const std::string& command, const std::vector<SdcValue>& args, std::initializer_list<std::string_view> value_options,
+                    std::initializer_list<std::string_view> flag_options, std::initializer_list<std::string_view> repeated_options = {})
+      -> std::optional<SdcCommandOptions>;
+  auto readRefs(const std::string& command, const SdcValue& value, SdcObjectKind default_kind, std::vector<SdcObjectRef>& refs) -> bool;
+  auto readNumber(const std::string& command, const SdcValue& value, double& number) -> bool;
+  auto scaleNumber(const std::string& command, double& number, double scale) -> bool;
+  auto readScalarObjects(const std::string& command, const SdcCommandOptions& options, SdcObjectKind default_kind, double& number,
+                         std::vector<SdcObjectRef>& objects) -> bool;
+  auto readPathSelection(const std::string& command, const SdcCommandOptions& options, SdcPathSelection& path) -> bool;
+  auto resolveGeneratedClocks() -> void;
+  auto storeClock(SdcClockDecl clock) -> void;
+
+  SdcUnits _default_units;
   double _time_unit_ns = 1.0;
+  double _capacitance_unit_pf = 1.0;
   SdcClockData _data;
   std::unordered_map<std::string, SdcValue> _variables;
-  std::map<std::string, double> _clock_period_by_name;
 };
 
 auto Trim(const std::string& text) -> std::string;
@@ -121,6 +146,12 @@ auto AppendRefsFromValue(std::vector<SdcObjectRef>& refs, const SdcValue& value,
 auto ParseDoubleValue(const std::string& text, double& value) -> bool;
 auto ParseIntValue(const std::string& text, int& value) -> bool;
 auto TimeUnitToNs(const std::string& unit) -> double;
+auto CapacitanceUnitToPf(const std::string& unit) -> double;
+auto OptionTransition(const SdcCommandOptions& options) -> SdcTransition;
+auto SelectorTransition(const std::string& option) -> SdcTransition;
+auto SelectBothUnlessOne(const SdcCommandOptions& options, const std::string& first, const std::string& second, bool& selected_first, bool& selected_second)
+    -> void;
+auto ObjectPatternMatches(const std::string& pattern, const std::string& name) -> bool;
 auto PrimarySourceExpression(const SdcClockDecl& clock) -> std::string;
 
 }  // namespace icts::sdc_reader

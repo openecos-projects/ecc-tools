@@ -82,20 +82,15 @@ auto resolvePositiveMax(const std::vector<std::optional<double>>& values) -> std
 
 auto convertLibCapToPf(idb::LibCell* lib_cell, double cap_value) -> double
 {
-  auto* owner_lib = lib_cell != nullptr ? lib_cell->get_owner_lib() : nullptr;
-  if (owner_lib == nullptr) {
-    return cap_value;
-  }
-  return idb::ConvertCapUnit(owner_lib->get_cap_unit(), idb::CapacitiveUnit::kPF, cap_value);
+  (void) lib_cell;
+  // Pin attributes are normalized by LibParserCpp; only table axes stay raw.
+  return cap_value;
 }
 
 auto convertLibTimeToNs(idb::LibCell* lib_cell, double time_value) -> double
 {
-  auto* owner_lib = lib_cell != nullptr ? lib_cell->get_owner_lib() : nullptr;
-  if (owner_lib == nullptr) {
-    return time_value;
-  }
-  return owner_lib->convert_time_unit_to_ns(time_value);
+  (void) lib_cell;
+  return time_value;
 }
 
 auto convertPfLoadToLibUnit(idb::LibCell* lib_cell, double load_pf) -> double
@@ -125,12 +120,14 @@ auto queryLibPortCapacitancePf(idb::LibCell* lib_cell, idb::LibPort* lib_port) -
 
   std::optional<double> cap_value = std::nullopt;
   const auto consider_cap = [&cap_value](std::optional<double> candidate) -> void {
-    if (!candidate.has_value() || !std::isfinite(*candidate) || *candidate <= 0.0) {
+    if (!candidate.has_value() || !std::isfinite(*candidate) || *candidate < 0.0) {
       return;
     }
     cap_value = cap_value.has_value() ? std::optional<double>{std::max(*cap_value, *candidate)} : candidate;
   };
-  consider_cap(lib_port->get_port_cap());
+  if (lib_port->has_port_cap()) {
+    consider_cap(lib_port->get_port_cap());
+  }
   consider_cap(lib_port->get_port_cap(idb::AnalysisMode::kMax, idb::TransType::kRise));
   consider_cap(lib_port->get_port_cap(idb::AnalysisMode::kMax, idb::TransType::kFall));
   consider_cap(lib_port->get_port_cap(idb::AnalysisMode::kMin, idb::TransType::kRise));
@@ -139,7 +136,7 @@ auto queryLibPortCapacitancePf(idb::LibCell* lib_cell, idb::LibPort* lib_port) -
     return std::nullopt;
   }
   const double cap_pf = convertLibCapToPf(lib_cell, *cap_value);
-  return std::isfinite(cap_pf) && cap_pf > 0.0 ? std::optional<double>{cap_pf} : std::nullopt;
+  return std::isfinite(cap_pf) && cap_pf >= 0.0 ? std::optional<double>{cap_pf} : std::nullopt;
 }
 
 auto findBufferArcSet(idb::LibCell* lib_cell) -> std::optional<idb::LibArcSet*>
@@ -214,7 +211,7 @@ auto queryBufferTableAxisMax(idb::LibCell* lib_cell, std::initializer_list<idb::
 
     for (const auto table_type : kCharArcTableTypes) {
       auto* table = delay_model->getTable(static_cast<int>(table_type));
-      if (table == nullptr || table->getAxesSize() == 0U) {
+      if (table == nullptr || table->get_axes().empty()) {
         continue;
       }
 
@@ -224,7 +221,7 @@ auto queryBufferTableAxisMax(idb::LibCell* lib_cell, std::initializer_list<idb::
       }
 
       auto inspect_axis = [&](std::optional<idb::LibLutTableTemplate::Variable> variable, unsigned axis_index) -> void {
-        if (!variable.has_value() || !is_target_variable(*variable) || axis_index >= table->getAxesSize()) {
+        if (!variable.has_value() || !is_target_variable(*variable) || axis_index >= table->get_axes().size()) {
           return;
         }
 
@@ -384,8 +381,8 @@ auto lookupLeakagePowerW(idb::LibCell* lib_cell) -> std::optional<double>
   }
 
   const double default_leakage_power_w = lib_cell->get_cell_leakage_power();
-  if (std::isfinite(default_leakage_power_w) && default_leakage_power_w > 0.0) {
-    return default_leakage_power_w;
+  if (lib_cell->has_cell_leakage_power()) {
+    return std::isfinite(default_leakage_power_w) && default_leakage_power_w >= 0.0 ? std::optional<double>{default_leakage_power_w} : std::nullopt;
   }
 
   double unconditional_leakage_power_w = 0.0;
@@ -401,11 +398,20 @@ auto lookupLeakagePowerW(idb::LibCell* lib_cell) -> std::optional<double>
 
 }  // namespace
 
+auto Wrapper::queryParallelWorkerCount() -> std::size_t
+{
+  return static_cast<std::size_t>(std::max(1, dmInst->get_config().get_thread_number()));
+}
+
 auto Wrapper::loadLibertyIfNeeded() const -> void
 {
-  if (_liberty_loaded) {
+  const auto current_generation = dmInst->get_liberty_generation();
+  const auto& configured_paths = dmInst->get_config().get_lib_paths();
+  if (_liberty_loaded && current_generation == _liberty_generation
+      && (_liberty_generation == nullptr ? configured_paths.empty() : _liberty_generation->get_paths() == configured_paths)) {
     return;
   }
+  ++_liberty_revision;
   _lib_cell_by_master.clear();
   _liberty_generation.reset();
 
@@ -451,6 +457,52 @@ auto Wrapper::loadLibertyIfNeeded() const -> void
   CTSLOG.info(Loc::current(), "Wrapper: indexed central Liberty generation: libraries=", _liberty_generation->get_libraries().size(),
               ", configured_workers=", _liberty_generation->get_configured_workers(), ", active_workers=", _liberty_generation->get_active_workers(),
               ", cells=", cell_count, ", index_seconds=", index_seconds, index_monitor.getStatsInfo());
+}
+
+auto Wrapper::querySdcUnits() const -> std::optional<SdcUnits>
+{
+  loadLibertyIfNeeded();
+  if (_liberty_generation == nullptr) {
+    return std::nullopt;
+  }
+  std::optional<SdcUnits> units;
+  for (const auto& library : _liberty_generation->get_libraries()) {
+    if (library == nullptr || !library->has_cap_unit() || !library->has_time_unit()) {
+      return std::nullopt;
+    }
+    const SdcUnits candidate{.time_unit_ns = library->convert_time_unit_to_ns(1.0),
+                             .capacitance_unit_pf = idb::ConvertCapUnit(library->get_cap_unit(), idb::CapacitiveUnit::kPF, 1.0)};
+    if (!std::isfinite(candidate.time_unit_ns) || candidate.time_unit_ns <= 0.0 || !std::isfinite(candidate.capacitance_unit_pf)
+        || candidate.capacitance_unit_pf <= 0.0
+        || (units.has_value() && (units->time_unit_ns != candidate.time_unit_ns || units->capacitance_unit_pf != candidate.capacitance_unit_pf))) {
+      return std::nullopt;
+    }
+    units = candidate;
+  }
+  return units;
+}
+
+auto Wrapper::queryLibertyRevision() const -> std::uint64_t
+{
+  loadLibertyIfNeeded();
+  return _liberty_revision;
+}
+
+auto Wrapper::querySupplyVoltage() const -> std::optional<double>
+{
+  loadLibertyIfNeeded();
+  if (_liberty_generation == nullptr) {
+    return std::nullopt;
+  }
+  std::optional<double> voltage;
+  for (const auto& library : _liberty_generation->get_libraries()) {
+    if (library == nullptr || !std::isfinite(library->get_nom_voltage()) || library->get_nom_voltage() <= 0.0
+        || (voltage.has_value() && *voltage != library->get_nom_voltage())) {
+      return std::nullopt;
+    }
+    voltage = library->get_nom_voltage();
+  }
+  return voltage;
 }
 
 auto Wrapper::findLibertyCell(const std::string& cell_master) const -> idb::LibCell*
@@ -504,11 +556,6 @@ auto Wrapper::queryClockSourceDriveCapLimit(const ClockSourceDriveCapLimitInput&
     const auto lib_cap_limit_pf = queryLibOutputPinCapLimitPf(lib_cell, clock_source);
     if (lib_cap_limit_pf.has_value()) {
       return lib_cap_limit_pf;
-    }
-
-    const auto table_axis_cap_limit_pf = queryCellOutPinCapTableAxisMax(cell_master);
-    if (table_axis_cap_limit_pf.has_value()) {
-      return table_axis_cap_limit_pf;
     }
 
     return queryConfiguredMaxCapBoundaryPf(input.configured_max_cap_pf, clock_source);
@@ -706,6 +753,26 @@ auto Wrapper::queryPinCapacitance(const Pin* pin) const -> std::optional<double>
     return std::nullopt;
   }
   return queryLibPortCapacitancePf(lib_cell, lib_port);
+}
+
+auto Wrapper::queryPinCapacitance(const Pin* pin, bool early, WrapperTimingTransition transition) const -> std::optional<double>
+{
+  if (pin == nullptr || pin->get_inst() == nullptr) {
+    return std::nullopt;
+  }
+  auto* lib_cell = findLibertyCell(pin->get_inst()->get_cell_master());
+  auto* lib_port = lib_cell == nullptr ? nullptr : lib_cell->get_cell_port_or_port_bus(normalizePortName(pin->get_name()).c_str());
+  if (lib_port == nullptr || lib_port->isInput() == 0U) {
+    return std::nullopt;
+  }
+  const auto analysis = early ? idb::AnalysisMode::kMin : idb::AnalysisMode::kMax;
+  const auto trans_type = transition == WrapperTimingTransition::kRise ? idb::TransType::kRise : idb::TransType::kFall;
+  const auto cap = lib_port->get_port_cap(analysis, trans_type);
+  if (cap.has_value()) {
+    return std::isfinite(*cap) && *cap >= 0.0 ? cap : std::nullopt;
+  }
+  const auto nominal = lib_port->get_port_cap();
+  return lib_port->has_port_cap() && std::isfinite(nominal) && nominal >= 0.0 ? std::optional<double>{nominal} : std::nullopt;
 }
 
 auto Wrapper::queryRootDriverCostDirect(const std::string& cell_master, double input_slew_ns, double output_load_pf, double clock_period_ns) const

@@ -2,6 +2,7 @@ add_library(
   icts_source_data_manager_io
   ${ICTS_DATA_MANAGER_IO}/Wrapper.cc
   ${ICTS_DATA_MANAGER_IO}/WrapperLiberty.cc
+  ${ICTS_DATA_MANAGER_IO}/WrapperLogicTiming.cc
   ${ICTS_DATA_MANAGER_IO}/WrapperRC.cc
   ${ICTS_DATA_MANAGER_IO}/WrapperClockReader.cc
   ${ICTS_DATA_MANAGER_IO}/WrapperClockWriter.cc
@@ -24,6 +25,7 @@ target_link_libraries(
   PUBLIC
   icts_source_data_manager_spatial
   icts_source_data_manager_routing
+  icts_source_data_manager_timing
   PRIVATE
   idm
   icts_source_data_manager_adapter_sdc
@@ -31,6 +33,7 @@ target_link_libraries(
   icts_source_toolkit_logger
   icts_source_toolkit_monitor
   liberty
+  salt
 )
 
 if(DEBUG_ICTS_SOURCE_DATA_MANAGER_IO)

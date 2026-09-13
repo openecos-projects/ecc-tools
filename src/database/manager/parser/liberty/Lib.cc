@@ -238,7 +238,7 @@ LibTable& LibTable::operator=(LibTable&& rhs) noexcept
  * @Brief : get axes or template axes.
  * @return auto&
  */
-absl::InlinedVector<std::unique_ptr<LibAxis>, 64>& LibTable::get_axes()
+absl::InlinedVector<std::unique_ptr<LibAxis>, 4>& LibTable::get_axes()
 {
   if (_axes.empty()) {
     LibLutTableTemplate* table_template = get_table_template();
@@ -880,8 +880,14 @@ LibPort::LibPort(const char* port_name) : _port_name(port_name)
 }
 
 LibPort::LibPort(LibPort&& other) noexcept
-    : _port_name(std::move(other._port_name)), _ower_cell(other._ower_cell), _port_type(other._port_type)
+    : _port_name(std::move(other._port_name)), _ower_cell(other._ower_cell), _port_type(other._port_type),
+      _is_clock_pin(other._is_clock_pin), _clock_gate_clock_pin(other._clock_gate_clock_pin),
+      _clock_gate_enable_pin(other._clock_gate_enable_pin), _clock_gate_test_pin(other._clock_gate_test_pin),
+      _clock_gate_out_pin(other._clock_gate_out_pin), _is_clock(other._is_clock)
 {
+  _port_cap = other._port_cap;
+  _has_port_cap = other._has_port_cap;
+  _port_caps = std::move(other._port_caps);
 }
 
 LibPort& LibPort::operator=(LibPort&& rhs) noexcept
@@ -890,6 +896,15 @@ LibPort& LibPort::operator=(LibPort&& rhs) noexcept
     _port_name = std::move(rhs._port_name);
     _ower_cell = rhs._ower_cell;
     _port_type = rhs._port_type;
+    _is_clock_pin = rhs._is_clock_pin;
+    _clock_gate_clock_pin = rhs._clock_gate_clock_pin;
+    _clock_gate_enable_pin = rhs._clock_gate_enable_pin;
+    _clock_gate_test_pin = rhs._clock_gate_test_pin;
+    _clock_gate_out_pin = rhs._clock_gate_out_pin;
+    _is_clock = rhs._is_clock;
+    _port_cap = rhs._port_cap;
+    _has_port_cap = rhs._has_port_cap;
+    _port_caps = std::move(rhs._port_caps);
   }
 
   return *this;
@@ -1758,6 +1773,11 @@ LibCell::~LibCell()
 
 LibCell::LibCell(LibCell&& other) noexcept
     : _cell_name(std::move(other._cell_name)),
+      _cell_leakage_power(other._cell_leakage_power),
+      _has_cell_leakage_power(other._has_cell_leakage_power),
+      _clock_gating_integrated_cell(std::move(other._clock_gating_integrated_cell)),
+      _is_clock_gating_integrated_cell(other._is_clock_gating_integrated_cell),
+      _latches(std::move(other._latches)),
       _cell_ports(std::move(other._cell_ports)),
       _cell_arcs(std::move(other._cell_arcs)),
       _cell_power_arcs(std::move(other._cell_power_arcs))
@@ -1768,6 +1788,11 @@ LibCell& LibCell::operator=(LibCell&& rhs) noexcept
 {
   if (this != &rhs) {
     _cell_name = std::move(rhs._cell_name);
+    _cell_leakage_power = rhs._cell_leakage_power;
+    _has_cell_leakage_power = rhs._has_cell_leakage_power;
+    _clock_gating_integrated_cell = std::move(rhs._clock_gating_integrated_cell);
+    _is_clock_gating_integrated_cell = rhs._is_clock_gating_integrated_cell;
+    _latches = std::move(rhs._latches);
     _cell_ports = std::move(rhs._cell_ports);
     _cell_arcs = std::move(rhs._cell_arcs);
     _cell_power_arcs = std::move(rhs._cell_power_arcs);
@@ -2030,6 +2055,9 @@ bool LibCell::isSequentialCell()
  */
 bool LibCell::isICG()
 {
+  if (_is_clock_gating_integrated_cell) {
+    return true;
+  }
   bool has_check_arc = false;
   bool has_combinational_clock_to_output_arc = false;
   for (auto& liberty_arc_set : _cell_arcs) {

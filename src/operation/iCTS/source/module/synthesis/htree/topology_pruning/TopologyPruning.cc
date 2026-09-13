@@ -491,7 +491,7 @@ auto FilterSinkLoadRegionCoveredEntries(const std::vector<HTreeTopologyChar>& en
   std::vector<HTreeTopologyChar> filtered_entries;
   filtered_entries.reserve(entries.size());
   for (const auto& entry : entries) {
-    const auto legality = ResolveSinkLoadRegionLegality(topology, entry.get_pattern_id(), topology_pattern_library, segment_pattern_library, legality_context);
+    const auto& legality = ResolveSinkLoadRegionLegality(topology, entry.get_pattern_id(), topology_pattern_library, segment_pattern_library, legality_context);
     if (!legality.legal) {
       continue;
     }
