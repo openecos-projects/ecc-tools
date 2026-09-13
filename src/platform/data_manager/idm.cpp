@@ -243,7 +243,7 @@ std::size_t DataManager::write_selected_placement_back(const std::vector<Instanc
     if (instance == nullptr) {
       throw std::runtime_error("Selected placement instance no longer exists: " + update.instance_name);
     }
-    if (instance != update.expected_instance) {
+    if (instance->get_id() != update.expected_instance_id) {
       throw std::runtime_error("Selected placement no longer refers to the same instance: " + update.instance_name);
     }
     auto* cell_master = instance->get_cell_master();
@@ -255,7 +255,7 @@ std::size_t DataManager::write_selected_placement_back(const std::vector<Instanc
 
   for (std::size_t index = 0; index < updates.size(); ++index) {
     const auto& update = updates[index];
-    commitPlacement(instances[index], update.x, update.y, instances[index]->get_orient());
+    commitPlacement(instances[index], update.x, update.y, update.orient);
   }
   return updates.size();
 }

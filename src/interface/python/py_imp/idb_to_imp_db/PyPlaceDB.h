@@ -141,7 +141,8 @@ struct PyPlaceDB
   {
     index_type node_id;
     std::string instance_name;
-    idb::IdbInstance* instance;
+    uint64_t instance_id;
+    idb::IdbOrient orient;
   };
 
   idm::DataManager* _db = nullptr;

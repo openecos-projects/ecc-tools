@@ -56,9 +56,10 @@ namespace idm {
 struct InstancePlacementUpdate
 {
   std::string instance_name;
-  IdbInstance* expected_instance;
+  uint64_t expected_instance_id;
   int32_t x;
   int32_t y;
+  IdbOrient orient;
 };
 
 class DataManager
