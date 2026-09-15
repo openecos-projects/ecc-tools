@@ -750,11 +750,29 @@ double SDFWriter::getSDFTimingCheckDelay(Instance& instance, TimingCheckArc& tim
     return timing_check_arc.get_check_time();
   }
   std::string data_pin_name = STAUTIL.getString(instance.get_instance_name(), ":", timing_check_arc.get_data_port());
-  double data_slew = getSDFSlew(data_pin_name, analysis_type, data_trans_type);
+  double data_slew = getSDFDataSlew(data_pin_name, analysis_type, data_trans_type);
   double clock_slew = getSDFTimingCheckSlew(instance, timing_check_arc, analysis_type, data_trans_type);
   double delay = timing_arc.get_check_table_map()[data_trans_type].findValue(clock_slew * timing_arc.get_time_unit_scale(),
                                                                              data_slew * timing_arc.get_time_unit_scale());
   return delay / timing_arc.get_time_unit_scale();
+}
+
+double SDFWriter::getSDFDataSlew(std::string& pin_name, AnalysisType analysis_type, TransType trans_type)
+{
+  Database& database = STADM.getDatabase();
+  if (database.get_timing_point_map().count(pin_name) == 0) {
+    return 0.0;
+  }
+  TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
+  if (timing_point.get_data_slew_map().count(analysis_type) > 0 && timing_point.get_data_slew_map()[analysis_type].count(trans_type) > 0) {
+    return timing_point.get_data_slew_map()[analysis_type][trans_type];
+  }
+  // A clock can also drive a data pin. Its ideal reference slew must not
+  // replace the physical waveform used on the data side of a timing check.
+  if (timing_point.get_physical_clock_slew_map().count(analysis_type) > 0 && timing_point.get_physical_clock_slew_map()[analysis_type].count(trans_type) > 0) {
+    return timing_point.get_physical_clock_slew_map()[analysis_type][trans_type];
+  }
+  return 0.0;
 }
 
 double SDFWriter::getSDFTimingCheckSlew(Instance& instance, TimingCheckArc& timing_check_arc, AnalysisType analysis_type, TransType data_trans_type)

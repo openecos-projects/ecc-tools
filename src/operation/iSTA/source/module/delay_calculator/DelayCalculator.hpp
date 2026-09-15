@@ -49,6 +49,7 @@ class DelayCalculator
   std::map<ParasiticArnoldiModelKey, ParasiticArnoldiModel> _parasitic_arnoldi_model_cache;
   std::map<ParasiticArnoldiTimingResultKey, ParasiticArnoldiTimingResult> _parasitic_arnoldi_timing_result_cache;
   std::map<ParasiticArnoldiDriverResultKey, ParasiticArnoldiTimingResult> _parasitic_arnoldi_driver_result_cache;
+  std::map<ParasiticArnoldiDriverResultKey, ParasiticArnoldiTimingResult> _parasitic_input_port_result_cache;
   static constexpr int32_t kStartTimeIndex = 0;
   static constexpr int32_t kTransitionTimeIndex = 1;
   static constexpr int32_t kEffectiveCapacitanceIndex = 2;
@@ -275,13 +276,15 @@ class DelayCalculator
                                    std::vector<std::size_t>& term_point_idx_list);
   void updateParasiticArnoldiProjection(ParasiticArnoldiModel& arnoldi_model, std::vector<double>& basis_list, std::vector<std::size_t>& term_point_idx_list,
                                         std::size_t order_idx);
-  double calcParasiticArnoldiElmore(ParasiticArnoldiModel& arnoldi_model, std::string& sink_node_name);
-  double calcParasiticArnoldiElmore(ParasiticArnoldiModel& arnoldi_model, std::size_t term_idx);
   std::optional<double> calcParasiticArnoldiInputPortDelay(ParasiticNet& parasitic_net, std::string& source_node_name, std::string& sink_node_name,
-                                                           AnalysisType analysis_type, TransType trans_type);
+                                                           AnalysisType analysis_type, TransType trans_type, double input_slew);
+  ParasiticArnoldiTimingResult& getParasiticInputPortResult(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
+                                                            TransType trans_type, double input_slew);
+  ParasiticArnoldiTimingResult calcParasiticInputPortResult(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
+                                                            TransType trans_type, double input_slew);
+  double calcParasiticInputPortCrossing(std::vector<double>& time_constants, std::vector<double>& weights, double ramp, double voltage);
   std::optional<double> calcParasiticArnoldiInputPortSlew(ParasiticNet& parasitic_net, std::string& source_node_name, std::string& sink_node_name,
                                                           AnalysisType analysis_type, TransType trans_type, double input_slew);
-  double getParasiticArnoldiSlewScale(TransType trans_type);
   ParasiticArnoldiPoleResidue calcParasiticArnoldiPoleResidue(ParasiticArnoldiModel& arnoldi_model, double drive_resistance);
   bool solveParasiticArnoldiTridiagonalEigen(std::vector<double>& diagonal_list, std::vector<double>& off_diagonal_list, std::vector<double>& eigenvalue_list,
                                              std::vector<std::vector<double>>& eigenvector_list);
