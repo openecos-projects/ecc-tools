@@ -16,10 +16,6 @@
 // ***************************************************************************************
 #include "RuleValidator.hpp"
 
-#include <chrono>
-#include <cmath>
-#include <fstream>
-#include <iomanip>
 #include <limits>
 #include <numeric>
 #include <queue>
@@ -38,15 +34,8 @@ namespace idrc {
 namespace {
 
 // Change these constants and rebuild ecc_bin to select the LB and profiling paths.
-constexpr bool kEnableLoadBalance = true;
-constexpr bool kEnableLoadBalanceProfile = false;
-constexpr int32_t kLoadBalanceProfileThread = 8;
-
-bool shouldOutputLoadBalanceProfile()
-{
-  return kEnableLoadBalanceProfile && DRCDM.getConfig().thread_number == kLoadBalanceProfileThread;
-}
-
+// constexpr bool kEnableLoadBalance = true;
+constexpr bool kEnableLoadBalance = false;
 }  // namespace
 
 // public
@@ -89,10 +78,6 @@ std::vector<Violation> RuleValidator::verify(std::vector<DRCShape> drc_env_shape
   buildRVClusterList(rv_model);
   if (kEnableLoadBalance) {
     loadBalance(rv_model, rv_model.get_grid_col_num(), rv_model.get_grid_row_num());
-    if (shouldOutputLoadBalanceProfile()) {
-      exportClusterProfileData(rv_model);
-      reportGroupStatistics(rv_model);
-    }
   } else {
     rv_model.set_rv_cluster_group_list({});
     DRCLOG.info(Loc::current(), "loadBalance disabled by compile-time switch");
@@ -423,158 +408,12 @@ std::vector<int32_t> RuleValidator::getNeighborIdxList(int32_t cluster_idx, int3
   return neighbor_idx_list;
 }
 
-int32_t RuleValidator::getUniqueShapeCount(std::vector<int32_t>& cluster_idx_list, std::vector<RVCluster>& rv_cluster_list)
-{
-  std::set<DRCShape*> unique_shape_set;
-  for (int32_t cluster_idx : cluster_idx_list) {
-    if (cluster_idx < 0 || cluster_idx >= static_cast<int32_t>(rv_cluster_list.size())) {
-      continue;
-    }
-    RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
-    unique_shape_set.insert(rv_cluster.get_drc_env_shape_list().begin(), rv_cluster.get_drc_env_shape_list().end());
-    unique_shape_set.insert(rv_cluster.get_drc_result_shape_list().begin(), rv_cluster.get_drc_result_shape_list().end());
-  }
-  return static_cast<int32_t>(unique_shape_set.size());
-}
-
-void RuleValidator::reportGroupStatistics(RVModel& rv_model)
-{
-  std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
-  std::vector<std::vector<int32_t>>& cluster_group_list = rv_model.get_rv_cluster_group_list();
-  if (cluster_group_list.empty()) {
-    return;
-  }
-
-  int64_t total_shape_count = 0;
-  for (RVCluster& rv_cluster : rv_cluster_list) {
-    total_shape_count += static_cast<int64_t>(rv_cluster.get_drc_env_shape_list().size() + rv_cluster.get_drc_result_shape_list().size());
-  }
-  int32_t group_num = static_cast<int32_t>(cluster_group_list.size());
-  double ideal_avg = static_cast<double>(total_shape_count) / group_num;
-  double variance = 0.0;
-  int32_t min_count = std::numeric_limits<int32_t>::max();
-  int32_t max_count = 0;
-  for (const std::vector<int32_t>& cluster_idx_list : cluster_group_list) {
-    int32_t group_shape_count = 0;
-    for (int32_t cluster_idx : cluster_idx_list) {
-      if (cluster_idx >= 0 && cluster_idx < static_cast<int32_t>(rv_cluster_list.size())) {
-        RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
-        group_shape_count += static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size() + rv_cluster.get_drc_result_shape_list().size());
-      }
-    }
-    min_count = std::min(min_count, group_shape_count);
-    max_count = std::max(max_count, group_shape_count);
-    double diff = static_cast<double>(group_shape_count) - ideal_avg;
-    variance += diff * diff;
-  }
-  variance /= group_num;
-  double cv = ideal_avg > 0.0 ? (std::sqrt(variance) / ideal_avg) * 100.0 : 0.0;
-  DRCLOG.info(Loc::current(), "Load Balance Group Statistics: groups=", group_num, ", total_shapes=", total_shape_count,
-              ", min=", min_count, ", max=", max_count, ", cv=", cv, "%");
-}
-
-void RuleValidator::exportClusterProfileData(RVModel& rv_model)
-{
-  const std::string& temp_directory_path = DRCDM.getConfig().rv_temp_directory_path;
-  std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
-  std::vector<std::vector<int32_t>>& cluster_group_list = rv_model.get_rv_cluster_group_list();
-  int32_t grid_col_num = rv_model.get_grid_col_num();
-  int32_t grid_row_num = rv_model.get_grid_row_num();
-  if (rv_cluster_list.empty() || cluster_group_list.empty() || grid_col_num <= 0 || grid_row_num <= 0) {
-    return;
-  }
-
-  int32_t total_cluster_num = grid_col_num * grid_row_num;
-  std::ofstream before_file(temp_directory_path + "cluster_before.csv");
-  if (before_file.is_open()) {
-    before_file << "cluster_idx,grid_x,grid_y,shape_count\n";
-    for (int32_t cluster_idx = 0; cluster_idx < total_cluster_num; cluster_idx++) {
-      int32_t shape_count = 0;
-      if (cluster_idx < static_cast<int32_t>(rv_cluster_list.size())) {
-        RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
-        shape_count = static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size() + rv_cluster.get_drc_result_shape_list().size());
-      }
-      before_file << cluster_idx << "," << cluster_idx % grid_col_num << "," << cluster_idx / grid_col_num << "," << shape_count << "\n";
-    }
-  }
-
-  std::vector<int32_t> cluster_to_group_list(total_cluster_num, -1);
-  std::vector<int32_t> group_shape_count_list(cluster_group_list.size(), 0);
-  for (size_t group_idx = 0; group_idx < cluster_group_list.size(); group_idx++) {
-    std::vector<int32_t>& cluster_idx_list = cluster_group_list[group_idx];
-    for (int32_t cluster_idx : cluster_idx_list) {
-      if (cluster_idx >= 0 && cluster_idx < total_cluster_num) {
-        cluster_to_group_list[cluster_idx] = static_cast<int32_t>(group_idx);
-      }
-    }
-    group_shape_count_list[group_idx] = getUniqueShapeCount(cluster_idx_list, rv_cluster_list);
-  }
-
-  std::ofstream after_file(temp_directory_path + "cluster_after.csv");
-  if (after_file.is_open()) {
-    after_file << "cluster_idx,grid_x,grid_y,group_id,group_shape_count\n";
-    for (int32_t cluster_idx = 0; cluster_idx < total_cluster_num; cluster_idx++) {
-      int32_t group_idx = cluster_to_group_list[cluster_idx];
-      int32_t group_shape_count = group_idx >= 0 ? group_shape_count_list[group_idx] : 0;
-      after_file << cluster_idx << "," << cluster_idx % grid_col_num << "," << cluster_idx / grid_col_num << "," << group_idx << ","
-                 << group_shape_count << "\n";
-    }
-  }
-}
-
 void RuleValidator::verifyRVModel(RVModel& rv_model)
 {
   auto monitor = Monitor::create();
   DRCLOG.info(Loc::current(), "Starting...");
   std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
   std::vector<std::vector<int32_t>>& cluster_group_list = rv_model.get_rv_cluster_group_list();
-  bool output_runtime_profile = shouldOutputLoadBalanceProfile();
-  std::vector<double> cluster_runtime_list(output_runtime_profile ? rv_cluster_list.size() : 0, 0.0);
-  std::vector<int32_t> cluster_env_shape_count_list(output_runtime_profile ? rv_cluster_list.size() : 0, 0);
-  std::vector<int32_t> cluster_result_shape_count_list(output_runtime_profile ? rv_cluster_list.size() : 0, 0);
-  auto write_cluster_info = [&]() {
-    if (!output_runtime_profile) {
-      return;
-    }
-    std::ofstream cluster_csv_file(DRCDM.getConfig().rv_temp_directory_path + "cluster_info.csv");
-    if (!cluster_csv_file.is_open()) {
-      DRCLOG.warn(Loc::current(), "Failed to open cluster_info.csv");
-      return;
-    }
-    cluster_csv_file << "cluster_idx,env_shape_count,result_shape_count,runtime_seconds\n";
-    for (size_t cluster_idx = 0; cluster_idx < rv_cluster_list.size(); cluster_idx++) {
-      cluster_csv_file << cluster_idx << "," << cluster_env_shape_count_list[cluster_idx] << ","
-                       << cluster_result_shape_count_list[cluster_idx] << "," << std::fixed << std::setprecision(6)
-                       << cluster_runtime_list[cluster_idx] << "\n";
-    }
-  };
-  auto write_group_info = [&](const std::vector<double>& group_runtime_list) {
-    if (!output_runtime_profile || cluster_group_list.empty()) {
-      return;
-    }
-    std::ofstream group_csv_file(DRCDM.getConfig().rv_temp_directory_path + "group_info.csv");
-    if (!group_csv_file.is_open()) {
-      DRCLOG.warn(Loc::current(), "Failed to open group_info.csv");
-      return;
-    }
-    group_csv_file << "group_idx,cluster_count,shape_count,runtime_seconds\n";
-    for (size_t group_idx = 0; group_idx < cluster_group_list.size(); group_idx++) {
-      int32_t cluster_count = 0;
-      int32_t shape_count = 0;
-      double runtime = group_runtime_list.empty() ? 0.0 : group_runtime_list[group_idx];
-      for (int32_t cluster_idx : cluster_group_list[group_idx]) {
-        if (cluster_idx < 0 || cluster_idx >= static_cast<int32_t>(rv_cluster_list.size())) {
-          continue;
-        }
-        cluster_count++;
-        shape_count += cluster_env_shape_count_list[cluster_idx] + cluster_result_shape_count_list[cluster_idx];
-        if (group_runtime_list.empty()) {
-          runtime += cluster_runtime_list[cluster_idx];
-        }
-      }
-      group_csv_file << group_idx << "," << cluster_count << "," << shape_count << "," << std::fixed << std::setprecision(6) << runtime << "\n";
-    }
-  };
   bool use_group_scheduling = !cluster_group_list.empty();
   if (use_group_scheduling && cluster_group_list.size() == rv_cluster_list.size()) {
     std::vector<bool> visited_cluster_list(rv_cluster_list.size(), false);
@@ -597,61 +436,31 @@ void RuleValidator::verifyRVModel(RVModel& rv_model)
   }
 
   if (use_group_scheduling) {
-    std::vector<double> group_runtime_list(output_runtime_profile ? cluster_group_list.size() : 0, 0.0);
 #pragma omp parallel for 
     for (int32_t group_idx = 0; group_idx < static_cast<int32_t>(cluster_group_list.size()); group_idx++) {
-      std::chrono::high_resolution_clock::time_point group_start_time;
-      if (output_runtime_profile) {
-        group_start_time = std::chrono::high_resolution_clock::now();
-      }
       for (int32_t cluster_idx : cluster_group_list[group_idx]) {
         if (cluster_idx < 0 || cluster_idx >= static_cast<int32_t>(rv_cluster_list.size())) {
           continue;
         }
         RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
-        std::chrono::high_resolution_clock::time_point cluster_start_time;
-        if (output_runtime_profile) {
-          cluster_start_time = std::chrono::high_resolution_clock::now();
-        }
         buildRVCluster(rv_cluster);
         if (needVerifying(rv_cluster)) {
           buildViolationList(rv_cluster);
         }
-        if (output_runtime_profile) {
-          cluster_runtime_list[cluster_idx] = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - cluster_start_time).count();
-          cluster_env_shape_count_list[cluster_idx] = static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size());
-          cluster_result_shape_count_list[cluster_idx] = static_cast<int32_t>(rv_cluster.get_drc_result_shape_list().size());
-        }
-      }
-      if (output_runtime_profile) {
-        group_runtime_list[group_idx] = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - group_start_time).count();
       }
     }
-    write_cluster_info();
-    write_group_info(group_runtime_list);
     DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
     return;
   }
 
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for 
   for (size_t cluster_idx = 0; cluster_idx < rv_cluster_list.size(); cluster_idx++) {
     RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
-    std::chrono::high_resolution_clock::time_point cluster_start_time;
-    if (output_runtime_profile) {
-      cluster_start_time = std::chrono::high_resolution_clock::now();
-    }
     buildRVCluster(rv_cluster);
     if (needVerifying(rv_cluster)) {
       buildViolationList(rv_cluster);
     }
-    if (output_runtime_profile) {
-      cluster_runtime_list[cluster_idx] = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - cluster_start_time).count();
-      cluster_env_shape_count_list[cluster_idx] = static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size());
-      cluster_result_shape_count_list[cluster_idx] = static_cast<int32_t>(rv_cluster.get_drc_result_shape_list().size());
-    }
   }
-  write_cluster_info();
-  write_group_info({});
   DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
 }
 

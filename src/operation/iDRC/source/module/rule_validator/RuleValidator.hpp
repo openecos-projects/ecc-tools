@@ -56,9 +56,6 @@ class RuleValidator
   void mergeToTargetGroupNum(std::vector<std::vector<int32_t>>& group_list, std::vector<std::pair<int32_t, int32_t>>& group_info_list,
                              int32_t target_group_num, double avg_shape_count, int32_t grid_col_num, int32_t grid_row_num);
   std::vector<int32_t> getNeighborIdxList(int32_t cluster_idx, int32_t grid_col_num, int32_t grid_row_num);
-  int32_t getUniqueShapeCount(std::vector<int32_t>& cluster_idx_list, std::vector<RVCluster>& rv_cluster_list);
-  void reportGroupStatistics(RVModel& rv_model);
-  void exportClusterProfileData(RVModel& rv_model);
   void verifyRVModel(RVModel& rv_model);
   void buildRVCluster(RVCluster& rv_cluster);
   bool needVerifying(RVCluster& rv_cluster);
