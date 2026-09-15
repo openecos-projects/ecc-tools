@@ -51,6 +51,44 @@ auto FindLeafLevelPlan(const icts::HTree::Output& htree_output) -> const icts::H
   return &(*level_it);
 }
 
+auto FindUniqueOutputPin(const icts::Inst* inst) -> const icts::Pin*
+{
+  const icts::Pin* output = nullptr;
+  for (const auto* pin : inst->get_pins()) {
+    if (pin == nullptr || pin->get_type() != icts::PinType::kOut) {
+      continue;
+    }
+    if (output != nullptr) {
+      return nullptr;
+    }
+    output = pin;
+  }
+  return output;
+}
+
+template <typename Output>
+auto AssertExplicitSynthesizedPropagationPayload(const Output& output) -> void
+{
+  ASSERT_EQ(output.propagation_arcs.size(), output.inserted_insts.size());
+  std::unordered_set<const icts::Inst*> inserted_insts;
+  std::unordered_set<const icts::Pin*> inserted_pins;
+  for (const auto& inst : output.inserted_insts) {
+    inserted_insts.insert(inst.get());
+  }
+  for (const auto& pin : output.inserted_pins) {
+    inserted_pins.insert(pin.get());
+  }
+  for (const auto& arc : output.propagation_arcs) {
+    EXPECT_EQ(arc.origin, icts::ClockPropagationOrigin::kSynthesized);
+    EXPECT_TRUE(inserted_insts.contains(arc.inst));
+    EXPECT_TRUE(inserted_pins.contains(arc.input_pin));
+    EXPECT_TRUE(inserted_pins.contains(arc.output_pin));
+    ASSERT_NE(arc.inst, nullptr);
+    EXPECT_EQ(arc.input_pin == nullptr ? nullptr : arc.input_pin->get_inst(), arc.inst);
+    EXPECT_EQ(arc.output_pin == nullptr ? nullptr : arc.output_pin->get_inst(), arc.inst);
+  }
+}
+
 }  // namespace
 
 auto AssertNoSingleLoadExternalLeafBuffer(const icts::HTree::Output& htree_output) -> void
@@ -67,7 +105,7 @@ auto AssertNoSingleLoadExternalLeafBuffer(const icts::HTree::Output& htree_outpu
       continue;
     }
 
-    const auto* output_pin = inst->findDriverPin();
+    const auto* output_pin = FindUniqueOutputPin(inst);
     ASSERT_NE(output_pin, nullptr);
     const auto* output_net = output_pin->get_net();
     if (output_net == nullptr || output_net->get_loads().size() != 1U || output_net->get_loads().front() == nullptr) {
@@ -85,6 +123,7 @@ auto AssertNoSingleLoadExternalLeafBuffer(const icts::HTree::Output& htree_outpu
 auto AssertTopologyHTreePayload(const icts::Topology::Build& result) -> void
 {
   ASSERT_TRUE(result.summary.success);
+  AssertExplicitSynthesizedPropagationPayload(result.output);
   const auto& htree_output = result.output.htree_output;
   ASSERT_FALSE(htree_output.levels.empty());
   ASSERT_TRUE(result.summary.selected_htree_depth.has_value());
@@ -98,6 +137,7 @@ auto AssertTopologyHTreePayload(const icts::Topology::Build& result) -> void
 auto AssertBranchBufferedHTreePayload(const icts::HTree::Output& htree_output) -> void
 {
   ASSERT_FALSE(htree_output.levels.empty());
+  AssertExplicitSynthesizedPropagationPayload(htree_output);
 
   const auto* leaf_level = FindLeafLevelPlan(htree_output);
   ASSERT_NE(leaf_level, nullptr);

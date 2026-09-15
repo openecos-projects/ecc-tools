@@ -29,11 +29,11 @@ class ReportRoute : public ReportBase
   void createSummaryReport();
 
  private:
-  std::shared_ptr<ieda::ReportTable> getDesignStatsTable(int64_t pins_number);
-  std::shared_ptr<ieda::ReportTable> getPinStatsTable(vector<int64_t>& pin_net_count, int64_t nets);
-  std::shared_ptr<ieda::ReportTable> getWireLengthStatsTable(const std::vector<int64_t>& routing_layer_length);
-  std::shared_ptr<ieda::ReportTable> getViaCutStatsTable(const std::vector<int64_t>& via_cut_nums);
-  std::shared_ptr<ieda::ReportTable> getLengthRangeTable(std::vector<int64_t>& lengths, int64_t d);
+  std::shared_ptr<ecc::ReportTable> getDesignStatsTable(int64_t pins_number);
+  std::shared_ptr<ecc::ReportTable> getPinStatsTable(vector<int64_t>& pin_net_count, int64_t nets);
+  std::shared_ptr<ecc::ReportTable> getWireLengthStatsTable(const std::vector<int64_t>& routing_layer_length);
+  std::shared_ptr<ecc::ReportTable> getViaCutStatsTable(const std::vector<int64_t>& via_cut_nums);
+  std::shared_ptr<ecc::ReportTable> getLengthRangeTable(std::vector<int64_t>& lengths, int64_t d);
 };
 
 struct NetStatistics

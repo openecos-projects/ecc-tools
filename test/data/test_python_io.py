@@ -1,0 +1,44 @@
+from ecc_tools_bin import ecc_py
+
+from support import assert_nonempty_file, run_scenario
+
+
+def test_ifp_python_api_matches_tcl_commands():
+    for command in ("init_fp", "run_simple_fp", "run_fp", "destroy_fp"):
+        assert hasattr(ecc_py, command), f"missing Python iFP binding: {command}"
+
+
+def test_iemir_python_api_matches_tcl_commands():
+    for command in ("init_emir", "run_emir", "destroy_emir"):
+        assert hasattr(ecc_py, command), f"missing Python iEMIR binding: {command}"
+
+
+def test_def_round_trip(test_roots):
+    result = run_scenario(test_roots, "def_round_trip", timeout=120)
+    output = result.output_path("def")
+
+    assert_nonempty_file(output)
+    assert "DESIGN gcd" in output.read_text(encoding="utf-8")
+    run_scenario(test_roots, "def_verify", timeout=120, input_overrides={"def": output})
+
+
+def test_verilog_round_trip(test_roots):
+    result = run_scenario(test_roots, "verilog_round_trip", timeout=120)
+    output = result.output_path("verilog")
+
+    assert_nonempty_file(output)
+    assert "module gcd" in output.read_text(encoding="utf-8")
+    run_scenario(
+        test_roots, "verilog_verify", timeout=120, input_overrides={"verilog": output}
+    )
+
+
+def test_def_and_verilog_exports(test_roots):
+    result = run_scenario(test_roots, "combined_io", timeout=120)
+    def_output = result.output_path("def")
+    verilog_output = result.output_path("verilog")
+
+    for path in (def_output, verilog_output, result.output_path("gds")):
+        assert_nonempty_file(path)
+    assert "DESIGN gcd" in def_output.read_text(encoding="utf-8")
+    assert "module gcd" in verilog_output.read_text(encoding="utf-8")

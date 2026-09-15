@@ -14,6 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "utility/logger/Logger.hpp"
 #include "cutlayer_parser.h"
 
 #include <optional>
@@ -44,7 +45,7 @@ bool CutLayerParser::parse(const std::string& name, const std::string& value, Id
   if (name == "LEF58_SPACINGTABLE") {
     return parse_lef58_spacingtable(value, data);
   }
-  std::cout << "Unhandled PROPERTY: " << name << " \"" << value << "\"" << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Unhandled PROPERTY: ", name, " \"", value, "\"");
   return false;
 }
 }  // namespace idb

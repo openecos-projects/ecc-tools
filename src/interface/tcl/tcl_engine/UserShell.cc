@@ -23,7 +23,8 @@
  */
 #include "UserShell.hh"
 
-namespace ieda {
+#include "utility/logger/Logger.hpp"
+namespace ecc {
 
 int UserShell::userMain(const char* file_path)
 {
@@ -34,7 +35,7 @@ int UserShell::userMain(const char* file_path)
   if (file_path) {
     argc = 2;
     if (argv == nullptr) {
-      std::cerr << "fail to malloc memery\n";
+      ECCLOG.warn(ecc::Loc::current(), "fail to malloc memery");
       return EXIT_FAILURE;
     }
     argv[1] = const_cast<char*>(file_path);
@@ -60,9 +61,9 @@ int UserShell::userMain(int argc, char** argv)
 
 void UserShell::displayHelp()
 {
-  std::cerr << "\033[49;32m"
+  ECCLOG.warn(ecc::Loc::current(), "\033[49;32m"
                "Enter \033[1mexit\033[0m\033[49;32m to quit."
-               "\033[0m\n";
+               "\033[0m");
 }
 
 UserShell* UserShell::getShell()
@@ -73,7 +74,7 @@ UserShell* UserShell::getShell()
 
 static int defaultInit()
 {
-  std::cerr << "notice: no user defined initialized function\n";
+  ECCLOG.warn(ecc::Loc::current(), "notice: no user defined initialized function");
   return EXIT_SUCCESS;
 }
 
@@ -83,4 +84,4 @@ void UserShell::set_init_func(int (*callback_func)())
 {
   _user_init = callback_func;
 }
-}  // namespace ieda
+}  // namespace ecc

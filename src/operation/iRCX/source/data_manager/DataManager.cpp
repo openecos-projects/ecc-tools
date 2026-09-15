@@ -310,10 +310,9 @@ void DataManager::buildProcessConductor(CornerData& corner_data, std::vector<std
         conductor.get_tmpr_coefficient1_by_width_table().add_entry(value_list[value_idx], value_list[value_idx + 1]);
         conductor.get_tmpr_coefficient2_by_width_table().add_entry(value_list[value_idx], value_list[value_idx + 2]);
       }
-    } else if (property_name == "RPSQ_VS_WIDTH_AND_SPACING" || property_name == "RHO_VS_WIDTH_AND_SPACING"
-               || property_name == "ETCH_VS_WIDTH_AND_SPACING" || property_name == "THICKNESS_VS_WIDTH_AND_SPACING") {
-      getITFTableValueList(itf_token_list, block_start_idx + 1, block_end_idx, "WIDTHS", "SPACINGS", "VALUES", row_list, column_list,
-                           value_list);
+    } else if (property_name == "RPSQ_VS_WIDTH_AND_SPACING" || property_name == "RHO_VS_WIDTH_AND_SPACING" || property_name == "ETCH_VS_WIDTH_AND_SPACING"
+               || property_name == "THICKNESS_VS_WIDTH_AND_SPACING") {
+      getITFTableValueList(itf_token_list, block_start_idx + 1, block_end_idx, "WIDTHS", "SPACINGS", "VALUES", row_list, column_list, value_list);
       ProcessTable2D table;
       table.set_row_list(row_list);
       table.set_column_list(column_list);
@@ -333,8 +332,7 @@ void DataManager::buildProcessConductor(CornerData& corner_data, std::vector<std
         }
       }
     } else if (property_name == "RHO_VS_SI_WIDTH_AND_THICKNESS") {
-      getITFTableValueList(itf_token_list, block_start_idx + 1, block_end_idx, "THICKNESS", "WIDTH", "VALUES", row_list, column_list,
-                           value_list);
+      getITFTableValueList(itf_token_list, block_start_idx + 1, block_end_idx, "THICKNESS", "WIDTH", "VALUES", row_list, column_list, value_list);
       conductor.get_resistivity_by_width_thickness_table().set_row_list(row_list);
       conductor.get_resistivity_by_width_thickness_table().set_column_list(column_list);
       conductor.get_resistivity_by_width_thickness_table().set_value_list(value_list);
@@ -346,8 +344,7 @@ void DataManager::buildProcessConductor(CornerData& corner_data, std::vector<std
   corner_data.get_process_conductor_list().push_back(std::move(conductor));
 }
 
-void DataManager::buildProcessVia(CornerData& corner_data, std::vector<std::string>& itf_token_list, int32_t start_idx, int32_t end_idx,
-                                  std::string via_name)
+void DataManager::buildProcessVia(CornerData& corner_data, std::vector<std::string>& itf_token_list, int32_t start_idx, int32_t end_idx, std::string via_name)
 {
   ProcessVia via;
   via.set_layer_name(via_name);
@@ -426,8 +423,7 @@ void DataManager::buildProcessVia(CornerData& corner_data, std::vector<std::stri
         via.get_tmpr_coefficient2_by_area_table().add_entry(value_list[value_idx], value_list[value_idx + 2]);
       }
     } else if (property_name == "ETCH_VS_WIDTH_AND_LENGTH") {
-      getITFTableValueList(itf_token_list, block_start_idx + 1, block_end_idx, "WIDTHS", "LENGTHS", "VALUES", row_list, column_list,
-                           value_list);
+      getITFTableValueList(itf_token_list, block_start_idx + 1, block_end_idx, "WIDTHS", "LENGTHS", "VALUES", row_list, column_list, value_list);
       int32_t table_value_num = static_cast<int32_t>(row_list.size()) * static_cast<int32_t>(column_list.size());
       if (table_value_num > 0 && static_cast<int32_t>(value_list.size()) >= 2 * table_value_num) {
         std::vector<double> length_etch_list;
@@ -497,8 +493,7 @@ void DataManager::getITFTokenList(std::string& itf_text, std::vector<std::string
       char_idx++;
       continue;
     }
-    if (current_char == '{' || current_char == '}' || current_char == '=' || current_char == '(' || current_char == ')'
-        || current_char == ',') {
+    if (current_char == '{' || current_char == '}' || current_char == '=' || current_char == '(' || current_char == ')' || current_char == ',') {
       appendITFToken(token, itf_token_list);
       itf_token_list.emplace_back(1, current_char);
       char_idx++;
@@ -580,8 +575,7 @@ bool DataManager::getITFAssignmentString(std::vector<std::string>& itf_token_lis
   return true;
 }
 
-void DataManager::getITFNumberList(std::vector<std::string>& itf_token_list, int32_t start_idx, int32_t end_idx,
-                                   std::vector<double>& number_list)
+void DataManager::getITFNumberList(std::vector<std::string>& itf_token_list, int32_t start_idx, int32_t end_idx, std::vector<double>& number_list)
 {
   number_list.clear();
   for (int32_t token_idx = start_idx; token_idx < end_idx; ++token_idx) {
@@ -604,8 +598,8 @@ ProcessEffectType DataManager::getITFEffectType(std::vector<std::string>& itf_to
 }
 
 void DataManager::getITFTableValueList(std::vector<std::string>& itf_token_list, int32_t start_idx, int32_t end_idx, std::string row_name,
-                                       std::string column_name, std::string value_name, std::vector<double>& row_list,
-                                       std::vector<double>& column_list, std::vector<double>& value_list)
+                                       std::string column_name, std::string value_name, std::vector<double>& row_list, std::vector<double>& column_list,
+                                       std::vector<double>& value_list)
 {
   row_list.clear();
   column_list.clear();

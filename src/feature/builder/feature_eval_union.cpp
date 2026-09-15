@@ -5,6 +5,7 @@
  * @Description:
  */
 
+#include "utility/logger/Logger.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -17,7 +18,7 @@
 #include "union_api.h"
 #include "wirelength_api.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 UnionEvalSummary FeatureBuilder::buildUnionEvalSummary(int32_t grid_size, std::string stage)
 {
@@ -120,7 +121,7 @@ bool FeatureBuilder::destroyEvalTool()
 
 bool FeatureBuilder::buildNetEval(std::string csv_path)
 {
-  std::cout << "Building net evaluation data...\n";
+  ECCLOG.info(ecc::Loc::current(), "Building net evaluation data...");
 
   auto* idb_builder = dmInst->get_idb_builder();
   idb::IdbDesign* idb_design = idb_builder->get_def_service()->get_design();
@@ -190,7 +191,7 @@ bool FeatureBuilder::buildNetEval(std::string csv_path)
     // if (net_power_data["HPWL"].find(net_name) == net_power_data["HPWL"].end()
     //     || net_power_data["FLUTE"].find(net_name) == net_power_data["FLUTE"].end()
     //     || net_power_data["EGR"].find(net_name) == net_power_data["EGR"].end()) {
-    //   std::cerr << "Error: net_name '" << net_name << "' not found in net_power_data.\n";
+    //   ECCLOG.warn(ecc::Loc::current(), "net_name '", net_name, "' is not found in net_power_data.");
     //   std::exit(EXIT_FAILURE);
     // }
 
@@ -221,4 +222,4 @@ bool FeatureBuilder::buildNetEval(std::string csv_path)
   return true;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

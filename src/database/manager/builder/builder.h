@@ -31,12 +31,14 @@
  *
  */
 
+#include "utility/logger/Logger.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 
 #include <iostream>
 #include <list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -68,7 +70,8 @@ class IdbBuilder
   IdbDefService* buildDef(string file);
   IdbDefService* buildDefGzip(string gzip_file);
   IdbLefService* buildLef(vector<string>& files, bool b_techfile = false);
-  IdbDefService* buildVerilog(string file, std::string top_module_name = "asic_top");
+  IdbDefService* buildVerilog(string file, std::string top_module_name = "");
+  IdbDefService* addVerilog(string file, std::string top_module_name = "");
 
   IdbDefService* buildDefFloorplan(string file);
 
@@ -95,6 +98,7 @@ class IdbBuilder
 
   IdbLefService* get_lef_service() { return _lef_service; }
   IdbDefService* get_def_service() { return _def_service; }
+  const DefReadError* get_last_def_read_error() const { return _last_def_read_error ? &*_last_def_read_error : nullptr; }
   //   IdbDataService* get_data_service() { return _data_service.get(); }
 
   /// operator
@@ -114,27 +118,28 @@ class IdbBuilder
     logNumber(mudule, number);
     // logSeperate();
   }
-  void logSeperate() { std::cout << "**************************************************************" << std::endl; }
+  void logSeperate() { ECCLOG.info(ecc::Loc::current(), "**************************************************************"); }
   void logNumber(string mudule, int32_t number = -1)
   {
-    std::cout << mudule;
+    ECCLOG.info(ecc::Loc::current(), mudule);
     if (number != -1) {
-      std::cout << " number : " << number;
+      ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    std::cout << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "");
   }
   void logInfo(string info, int32_t number = -1)
   {
-    std::cout << info;
+    ECCLOG.info(ecc::Loc::current(), info);
     if (number != -1) {
-      std::cout << " number : " << number;
+      ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    std::cout << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "");
   }
 
  private:
   IdbDefService* _def_service = nullptr;
   IdbLefService* _lef_service = nullptr;
+  std::optional<DefReadError> _last_def_read_error;
   //   std::shared_ptr<IdbDataService> _data_service;
 
   void checkNetPins();

@@ -45,7 +45,7 @@ class ReportDRC : public ReportBase
   //   idrc::DrcAPIInst.initDRC();
   //   auto result = idrc::DrcAPIInst.getCheckResult();
   //   std::vector<std::string> header = {"DRC Rule", "Count"};
-  //   auto drc_tbl = std::make_shared<ieda::ReportTable>("DRC Report", header, -1);
+  //   auto drc_tbl = std::make_shared<ecc::ReportTable>("DRC Report", header, -1);
   //   for (auto& [item, count] : result) {
   //     *drc_tbl << item << count << TABLE_ENDLINE;
   //   }
@@ -53,10 +53,10 @@ class ReportDRC : public ReportBase
   // }
   std::string title() override;
 
-  std::shared_ptr<ieda::ReportTable> createDRCTable(std::map<std::string, int>& drc_result);
-  std::shared_ptr<ieda::ReportTable> createConnectivityTable(
+  std::shared_ptr<ecc::ReportTable> createDRCTable(std::map<std::string, int>& drc_result);
+  std::shared_ptr<ecc::ReportTable> createConnectivityTable(
       std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int>& connectivity_result);
-  std::shared_ptr<ieda::ReportTable> createConnectivityDetailTable(
+  std::shared_ptr<ecc::ReportTable> createConnectivityDetailTable(
       std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int>& connectivity_result);
 };
 

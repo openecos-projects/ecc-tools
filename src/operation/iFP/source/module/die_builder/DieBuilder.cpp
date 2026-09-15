@@ -50,6 +50,17 @@ void DieBuilder::destroyInst()
 
 // function
 
+namespace {
+
+bool isDBURepresentable(double micron, int32_t micron_dbu)
+{
+  const double dbu = std::round(micron * static_cast<double>(micron_dbu));
+  return std::isfinite(dbu) && dbu >= static_cast<double>(std::numeric_limits<int32_t>::min())
+         && dbu <= static_cast<double>(std::numeric_limits<int32_t>::max());
+}
+
+}  // namespace
+
 void DieBuilder::build()
 {
   Monitor monitor;
@@ -64,23 +75,109 @@ void DieBuilder::build()
 void DieBuilder::buildFloorplan()
 {
   Config& config = FPDM.getConfig();
-  if (config.layout_core_util > 0.0 && !config.layout_site_name.empty()) {
-    buildAutoFloorplan();
+  double die_width_micron = -1.0;
+  double die_height_micron = -1.0;
+  if (config.die_mode == DieMode::kDieUtil) {
+    Database& database = FPDM.getDatabase();
+    if (config.die_utilization <= 0.0 || config.die_utilization > 1.0) {
+      FPLOG.error(Loc::current(), "Die utilization must be in (0, 1]!");
+      return;
+    }
+    if (config.die_aspect_ratio <= 0.0) {
+      FPLOG.error(Loc::current(), "Die aspect ratio must be greater than 0!");
+      return;
+    }
+    if (database.get_cell_area() <= 0.0) {
+      FPLOG.error(Loc::current(), "Cell area must be greater than 0!");
+      return;
+    }
+    if (database.get_micron_dbu() <= 0) {
+      FPLOG.error(Loc::current(), "Micron DBU must be greater than 0!");
+      return;
+    }
+    if (config.die_margin_left_micron < 0.0 || config.die_margin_right_micron < 0.0 || config.die_margin_top_micron < 0.0
+        || config.die_margin_bottom_micron < 0.0) {
+      FPLOG.error(Loc::current(), "Die margins must not be negative!");
+      return;
+    }
+
+    auto site_iter = database.get_site_map().find(config.die_site_name);
+    if (site_iter == database.get_site_map().end() || site_iter->second.get_width() <= 0 || site_iter->second.get_height() <= 0) {
+      FPLOG.error(Loc::current(), "The site '", config.die_site_name, "' does not exist or has invalid dimensions!");
+      return;
+    }
+
+    int32_t micron_dbu = database.get_micron_dbu();
+    Site& core_site = site_iter->second;
+    double core_area = database.get_cell_area() / config.die_utilization;
+    double core_height_micron = std::sqrt(core_area / config.die_aspect_ratio);
+    double core_width_micron = core_area / core_height_micron;
+    int32_t core_width = FPUTIL.alignUp(static_cast<int32_t>(std::ceil(core_width_micron * micron_dbu)), core_site.get_width());
+    int32_t core_height = FPUTIL.alignUp(static_cast<int32_t>(std::ceil(core_height_micron * micron_dbu)), core_site.get_height());
+    int32_t margin_left = FPUTIL.transMicronToDBU(config.die_margin_left_micron, micron_dbu);
+    int32_t margin_right = FPUTIL.transMicronToDBU(config.die_margin_right_micron, micron_dbu);
+    int32_t margin_top = FPUTIL.transMicronToDBU(config.die_margin_top_micron, micron_dbu);
+    int32_t margin_bottom = FPUTIL.transMicronToDBU(config.die_margin_bottom_micron, micron_dbu);
+
+    die_width_micron = (margin_left + core_width + margin_right) / static_cast<double>(micron_dbu);
+    die_height_micron = (margin_bottom + core_height + margin_top) / static_cast<double>(micron_dbu);
+    buildDie(0.0, 0.0, die_width_micron, die_height_micron);
+    buildCore(config.die_margin_left_micron, config.die_margin_bottom_micron, (margin_left + core_width) / static_cast<double>(micron_dbu),
+              (margin_bottom + core_height) / static_cast<double>(micron_dbu), config.die_site_name);
+    return;
+  } else if (config.die_mode == DieMode::kDieSize) {
+    Database& database = FPDM.getDatabase();
+    const double left = config.die_margin_left_micron;
+    const double right = config.die_margin_right_micron;
+    const double bottom = config.die_margin_bottom_micron;
+    const double top = config.die_margin_top_micron;
+    if (database.get_micron_dbu() <= 0 || !std::isfinite(config.die_width_micron) || !std::isfinite(config.die_height_micron)
+        || config.die_width_micron <= 0.0 || config.die_height_micron <= 0.0 || !std::isfinite(left) || !std::isfinite(right)
+        || !std::isfinite(bottom) || !std::isfinite(top) || left < 0.0 || right < 0.0 || bottom < 0.0 || top < 0.0) {
+      FPLOG.error(Loc::current(), "Die size, margins, and micron DBU must be valid!");
+      return;
+    }
+    if (config.die_width_micron <= left + right || config.die_height_micron <= bottom + top) {
+      FPLOG.error(Loc::current(), "Die size must exceed its margins!");
+      return;
+    }
+
+    auto site_iter = database.get_site_map().find(config.die_site_name);
+    if (site_iter == database.get_site_map().end() || site_iter->second.get_width() <= 0 || site_iter->second.get_height() <= 0) {
+      FPLOG.error(Loc::current(), "The site '", config.die_site_name, "' does not exist or has invalid dimensions!");
+      return;
+    }
+
+    const int32_t micron_dbu = database.get_micron_dbu();
+    if (!isDBURepresentable(config.die_width_micron, micron_dbu) || !isDBURepresentable(config.die_height_micron, micron_dbu)
+        || !isDBURepresentable(left, micron_dbu) || !isDBURepresentable(right, micron_dbu)
+        || !isDBURepresentable(bottom, micron_dbu) || !isDBURepresentable(top, micron_dbu)
+        || !isDBURepresentable(config.die_width_micron - right, micron_dbu)
+        || !isDBURepresentable(config.die_height_micron - top, micron_dbu)) {
+      FPLOG.error(Loc::current(), "Die size is outside the supported DBU range!");
+      return;
+    }
+
+    const Site& site = site_iter->second;
+    const int32_t requested_lx = FPUTIL.transMicronToDBU(left, micron_dbu);
+    const int32_t requested_ly = FPUTIL.transMicronToDBU(bottom, micron_dbu);
+    const int32_t requested_ux = FPUTIL.transMicronToDBU(config.die_width_micron - right, micron_dbu);
+    const int32_t requested_uy = FPUTIL.transMicronToDBU(config.die_height_micron - top, micron_dbu);
+    if (FPUTIL.alignDown(requested_ux - requested_lx, site.get_width()) < site.get_width()
+        || FPUTIL.alignDown(requested_uy - requested_ly, site.get_height()) < site.get_height()) {
+      FPLOG.error(Loc::current(), "Die size leaves less than one site after alignment!");
+      return;
+    }
+
+    die_width_micron = config.die_width_micron;
+    die_height_micron = config.die_height_micron;
+  } else {
+    return;
   }
-}
 
-void DieBuilder::buildAutoFloorplan()
-{
-  Config& config = FPDM.getConfig();
-  double cell_area = FPDM.getDatabase().get_cell_area();
-  double core_area = cell_area / config.layout_core_util;
-  double core_height = std::sqrt(core_area / config.layout_xy_ratio);
-  double core_width = core_area / core_height;
-
-  buildDie(0.0, 0.0, core_width + config.layout_margin_left_micron + config.layout_margin_right_micron,
-           core_height + config.layout_margin_bottom_micron + config.layout_margin_top_micron);
-  buildCore(config.layout_margin_left_micron, config.layout_margin_bottom_micron, config.layout_margin_left_micron + core_width,
-            config.layout_margin_bottom_micron + core_height, config.layout_site_name);
+  buildDie(0.0, 0.0, die_width_micron, die_height_micron);
+  buildCore(config.die_margin_left_micron, config.die_margin_bottom_micron, die_width_micron - config.die_margin_right_micron,
+            die_height_micron - config.die_margin_top_micron, config.die_site_name);
 }
 
 void DieBuilder::buildDie(double die_lx, double die_ly, double die_ux, double die_uy)
@@ -95,14 +192,25 @@ void DieBuilder::buildDie(double die_lx, double die_ly, double die_ux, double di
 void DieBuilder::buildCore(double core_lx, double core_ly, double core_ux, double core_uy, std::string site_name)
 {
   Database& database = FPDM.getDatabase();
-  Site& core_site = database.get_site_map()[site_name];
+  auto site_iter = database.get_site_map().find(site_name);
+  if (site_iter == database.get_site_map().end()) {
+    FPLOG.error(Loc::current(), "The site '", site_name, "' does not exist!");
+    return;
+  }
+  Site& core_site = site_iter->second;
 
   int32_t site_width = core_site.get_width();
   int32_t site_height = core_site.get_height();
-  int32_t core_lx_int = FPUTIL.alignUp(FPUTIL.transMicronToDBU(core_lx, database.get_micron_dbu()), site_width);
-  int32_t core_ly_int = FPUTIL.alignUp(FPUTIL.transMicronToDBU(core_ly, database.get_micron_dbu()), site_height);
-  int32_t core_ux_int = FPUTIL.alignDown(FPUTIL.transMicronToDBU(core_ux, database.get_micron_dbu()), site_width);
-  int32_t core_uy_int = FPUTIL.alignDown(FPUTIL.transMicronToDBU(core_uy, database.get_micron_dbu()), site_height);
+  int32_t requested_lx = FPUTIL.transMicronToDBU(core_lx, database.get_micron_dbu());
+  int32_t requested_ly = FPUTIL.transMicronToDBU(core_ly, database.get_micron_dbu());
+  int32_t requested_ux = FPUTIL.transMicronToDBU(core_ux, database.get_micron_dbu());
+  int32_t requested_uy = FPUTIL.transMicronToDBU(core_uy, database.get_micron_dbu());
+  int32_t core_width = FPUTIL.alignDown(requested_ux - requested_lx, site_width);
+  int32_t core_height = FPUTIL.alignDown(requested_uy - requested_ly, site_height);
+  int32_t core_lx_int = requested_lx;
+  int32_t core_ly_int = requested_ly;
+  int32_t core_ux_int = core_lx_int + core_width;
+  int32_t core_uy_int = core_ly_int + core_height;
 
   Core& core = database.get_core();
   core.set_rect(core_lx_int, core_ly_int, core_ux_int, core_uy_int);

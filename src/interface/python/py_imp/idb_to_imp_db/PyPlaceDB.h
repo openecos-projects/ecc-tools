@@ -8,6 +8,7 @@
 #ifndef _DREAMPLACE_PLACE_IO_PYPLACEDB_H
 #define _DREAMPLACE_PLACE_IO_PYPLACEDB_H
 
+#include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
 #include "IdbEnum.h"
@@ -35,6 +36,19 @@ double intersectArea(Box const& b1, Box const& b2);
 bool isInvailidNet(IdbNet* net);
 
 std::string IdbOrientToString(IdbOrient orient);
+
+inline bool isPlacementFixed(idb::IdbInstance* node)
+{
+  const auto status = node->get_status();
+  if (status == idb::IdbPlacementStatus::kFixed) {
+    return true;
+  }
+
+  auto* cell_master = node->get_cell_master();
+  return cell_master != nullptr && cell_master->is_block()
+         && (status == idb::IdbPlacementStatus::kPlaced || status == idb::IdbPlacementStatus::kCover);
+}
+
 /// database for python
 struct PyPlaceDB
 {
@@ -42,9 +56,9 @@ struct PyPlaceDB
   unsigned int num_nodes;           ///< number of nodes, including terminals and terminal_NIs
   unsigned int num_terminals;       ///< number of terminals, essentially fixed macros
   unsigned int num_terminal_NIs;    ///< number of terminal_NIs, essentially IO pins
-  unsigned int m2_pg_rail_blockage_rects;  ///< raw M2 PG rail rectangles collected before union
-  pybind11::list m2_pg_rail_boxes;          ///< raw M2 PG rail rectangles for legalization and refinement
-  pybind11::list m2_pg_rail_density_boxes;  ///< M2 PG rail boxes after subtracting fixed placement obstacles
+  unsigned int m2_pg_rail_blockage_rects;
+  pybind11::list m2_pg_rail_boxes;
+  pybind11::list m2_pg_rail_density_boxes;
   pybind11::dict node_name2id_map;  ///< node name to id map, cell name
   pybind11::list node_names;        ///< 1D array, cell name
   pybind11::list node_x;            ///< 1D array, cell position x
@@ -96,8 +110,6 @@ struct PyPlaceDB
   pybind11::list unit_vertical_capacities;       /// number of vertical tracks of layers per unit distance
   pybind11::list initial_horizontal_demand_map;  ///< initial routing demand from fixed cells, indexed by (layer, grid x, grid y)
   pybind11::list initial_vertical_demand_map;    ///< initial routing demand from fixed cells, indexed by (layer, grid x, grid y)
-  pybind11::list min_wire_widths;                ///< min wire width for each routing layer
-  pybind11::list min_wire_spacings;              ///< min wire spacing for each routing layer
 
   int xl;
   int yl;
@@ -106,8 +118,10 @@ struct PyPlaceDB
 
   int row_height;
   int site_width;
-  double total_fixed_node_area;  ///< union area of fixed bodies and residual obstacles inside the core
-  double total_space_area;  ///< placeable core area minus the union of fixed bodies and residual obstacles
+  double total_fixed_node_area;
+  double total_space_area;  ///< total placeable space area excluding fixed cells.
+                            ///< This is not the exact area, because we cannot exclude the overlapping fixed cells
+                            ///< within a bin.
 
   int num_movable_pins;
 
@@ -118,10 +132,31 @@ struct PyPlaceDB
         include_m2_pg_rail_density);
   }
 
+  const std::vector<bool>& getNodeIsHardMacro() const { return _node_is_hard_macro; }
+  const std::vector<bool>& getMacroWritebackCandidate() const { return _macro_writeback_candidate; }
+  std::size_t writeMacroPlacementBack(
+      const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
+      const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y);
+
   void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
            bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true);
   void init_routability(idm::DataManager* db, std::vector<IdbInstance*> inst_resort_list);
   std::vector<std::vector<float>> getCongestionMap(string method = "max", string stage = "egr3D", string resolve_congestion = "low");
+
+ private:
+  struct MacroWritebackCandidate
+  {
+    index_type node_id;
+    std::string instance_name;
+    uint64_t instance_id;
+    idb::IdbOrient orient;
+  };
+
+  idm::DataManager* _db = nullptr;
+  idb::IdbDesign* _design = nullptr;
+  std::vector<bool> _node_is_hard_macro;
+  std::vector<bool> _macro_writeback_candidate;
+  std::vector<MacroWritebackCandidate> _macro_writeback_candidates;
 };
 
 }  // namespace python_interface

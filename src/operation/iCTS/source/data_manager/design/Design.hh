@@ -75,6 +75,7 @@ class Design
   auto clearClocks() -> void;
   auto clearTopologyObjects() -> void;
   auto removeClockMembershipObjects(Clock& clock) -> void;
+  auto removeClockSynthesizedObjects(Clock& clock) -> void;
   auto get_clock_dag() const -> const ClockDAG& { return _clock_dag; }
   auto rebuildClockDAG() -> bool;
   auto clearClockDAG() -> void;

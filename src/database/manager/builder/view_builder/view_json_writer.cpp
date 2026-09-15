@@ -6,6 +6,7 @@
 // iEDA is licensed under Mulan PSL v2.
 // ***************************************************************************************
 
+#include "utility/logger/Logger.hpp"
 #include "view_json_writer.h"
 
 #include <algorithm>
@@ -75,7 +76,7 @@ ViewJsonWriter::ViewJsonWriter(IdbDefService* def_service, ViewJsonWriteOptions 
 bool ViewJsonWriter::write(const std::string& output_dir)
 {
   if (_def_service == nullptr || _layout == nullptr || _design == nullptr) {
-    std::cout << "Write view json failed: def service, layout or design is null." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write view json failed: def service, layout or design is null.");
     return false;
   }
 
@@ -98,19 +99,19 @@ bool ViewJsonWriter::prepareOutputDir(const std::filesystem::path& output_dir) c
   std::error_code ec;
   std::filesystem::create_directories(output_dir / "tech", ec);
   if (ec) {
-    std::cout << "Create view json tech directory failed: " << ec.message() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create view json tech directory failed: ", ec.message());
     return false;
   }
 
   std::filesystem::create_directories(output_dir / "design", ec);
   if (ec) {
-    std::cout << "Create view json design directory failed: " << ec.message() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create view json design directory failed: ", ec.message());
     return false;
   }
 
   std::filesystem::create_directories(output_dir / "edits", ec);
   if (ec) {
-    std::cout << "Create view json edits directory failed: " << ec.message() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create view json edits directory failed: ", ec.message());
     return false;
   }
 
@@ -844,9 +845,11 @@ bool ViewJsonWriter::writeRegularWires()
             registerSpatialEntry("regular_wires", storedPath("regular_wires.json"), entry_id, bbox, layers);
           }
         }
-        if (segment->is_rect()) {
+        if (segment->is_rect() && segment->get_delta_rect() != nullptr) {
           const int layer_id = layerId(segment->get_layer());
-          const ViewRect bbox = toViewRect(segment->get_delta_rect());
+          /// the delta rect is an offset from the start point
+          const IdbRect segment_rect = segment->get_segment_rect();
+          const ViewRect bbox = toViewRect(segment_rect);
           ViewJson item;
           item["id"] = id++;
           item["net_id"] = regularNetId(net);
@@ -854,7 +857,7 @@ bool ViewJsonWriter::writeRegularWires()
           item["segment_index"] = segment_index;
           item["kind"] = "patch";
           item["layer_id"] = layer_id;
-          item["rect"] = toRectJson(segment->get_delta_rect());
+          item["rect"] = toRectJson(segment_rect);
           item["bbox"] = toRectJson(bbox);
           item["layers"] = ViewJson::array({layer_id});
           json["data"].push_back(item);
@@ -1268,7 +1271,7 @@ bool ViewJsonWriter::writeSpatialIndex()
 bool ViewJsonWriter::writeEditOverlay()
 {
   ViewJson json;
-  json["schema"] = "ieda.view.edit.v1";
+  json["schema"] = "ecc.view.edit.v1";
   json["kind"] = "layout_edits";
   json["version"] = 1;
   json["base_manifest"] = "../manifest.json";
@@ -1304,14 +1307,14 @@ bool ViewJsonWriter::writeJsonFile(const std::string& relative_path, const ViewJ
   std::error_code ec;
   std::filesystem::create_directories(path.parent_path(), ec);
   if (ec) {
-    std::cout << "Create view json directory failed: " << path.parent_path() << " " << ec.message() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create view json directory failed: ", path.parent_path(), " ", ec.message());
     return false;
   }
 
   std::string error;
   const bool compress = output_relative_path != relative_path;
   if (!writeViewJsonText(path, dumpViewJson(json, _options.format), compress, error)) {
-    std::cout << "Write view json file failed: " << path << " " << error << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write view json file failed: ", path, " ", error);
     return false;
   }
 
@@ -1336,7 +1339,7 @@ bool ViewJsonWriter::validateDenseData(const std::string& relative_path, const V
       continue;
     }
     if (!item["id"].is_number_integer() || item["id"].get<int>() != static_cast<int>(index)) {
-      std::cout << "Write view json failed: " << relative_path << " data[" << index << "].id is not dense." << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Write view json failed: ", relative_path, " data[", index, "].id is not dense.");
       return false;
     }
   }

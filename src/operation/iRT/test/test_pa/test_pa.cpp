@@ -4,6 +4,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "utility/logger/Logger.hpp"
+
 using namespace std;
 
 // Function to find all connected components
@@ -62,9 +64,9 @@ int32_t main()
   // Print the connected components
   for (const auto& component : connectedComponents) {
     for (int32_t node : component) {
-      cout << node << " ";
+      ECCLOG.info(ecc::Loc::current(), node, " ");
     }
-    cout << endl;
+    ECCLOG.info(ecc::Loc::current(), "");
   }
 
   return 0;

@@ -40,7 +40,10 @@ class FastStaIncremental
   FastStaIncremental() = delete;
 
   static auto changeBufferMaster(FastStaClockContext& context, FastStaNodeId node_id, std::string_view cell_master) -> bool;
+  static auto validateBufferMasterChanges(const FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool;
   static auto changeBufferMasters(FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool;
+  static auto changeBufferMastersIncremental(FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes)
+      -> std::optional<FastStaDirtyRegion>;
   static auto changeBufferMasterIncremental(FastStaClockContext& context, FastStaNodeId node_id, std::string_view cell_master)
       -> std::optional<FastStaDirtyRegion>;
 };

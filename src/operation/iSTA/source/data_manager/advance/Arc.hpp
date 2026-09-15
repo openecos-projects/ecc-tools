@@ -44,10 +44,7 @@ class Arc
   std::map<AnalysisType, std::map<TransType, double>>& get_trans_delay_map() { return _trans_delay_map; }
   std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>& get_input_output_delay_map() { return _input_output_delay_map; }
   std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>& get_graph_delay_map() { return _graph_delay_map; }
-  std::map<int32_t, std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>>& get_timing_arc_delay_map()
-  {
-    return _timing_arc_delay_map;
-  }
+  std::map<int32_t, std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>>& get_timing_arc_delay_map() { return _timing_arc_delay_map; }
   std::map<TransType, TransType>& get_trans_type_map() { return _trans_type_map; }
   TimingCellArc* get_timing_cell_arc() { return _timing_cell_arc; }
   bool get_is_clock_arc() const { return _is_clock_arc; }
@@ -73,8 +70,7 @@ class Arc
   {
     _graph_delay_map = graph_delay_map;
   }
-  void set_timing_arc_delay_map(
-      const std::map<int32_t, std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>>& timing_arc_delay_map)
+  void set_timing_arc_delay_map(const std::map<int32_t, std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>>& timing_arc_delay_map)
   {
     _timing_arc_delay_map = timing_arc_delay_map;
     _timing_arc_delay_fallback_key_set.clear();

@@ -20,16 +20,6 @@
  */
 #include "gds/PlotSpefGdsWriter.hh"
 
-#include <algorithm>
-#include <cctype>
-#include <cstdio>
-#include <filesystem>
-#include <memory>
-#include <string_view>
-#include <unordered_map>
-#include <vector>
-
-#include "config/PlotSpefConfig.hh"
 #include "FormatUtils.hh"
 #include "GTWriter.hpp"
 #include "GdsBoundary.hpp"
@@ -38,10 +28,12 @@
 #include "GdsSref.hpp"
 #include "GdsStruct.hpp"
 #include "GdsText.hpp"
+#include "Logger.hpp"
 #include "ParallelUtils.hh"
 #include "PathUtils.hh"
+#include "RCXHeader.hpp"
 #include "StringUtils.hh"
-#include "Logger.hpp"
+#include "config/PlotSpefConfig.hh"
 #include "model/PlotSpefGdsType.hh"
 #include "model/PlotSpefModel.hh"
 #include "model/PlotSpefVisibility.hh"
@@ -96,55 +88,23 @@ struct NetGdsJob
 class VisibilityReader
 {
  public:
-  explicit VisibilityReader(const Visibility& visibility)
-      : visibility_(visibility)
-  {
-  }
+  explicit VisibilityReader(const Visibility& visibility) : visibility_(visibility) {}
 
-  auto netVisible(Size net_index) const -> bool
-  {
-    return visibility_.netVisible(net_index);
-  }
+  auto netVisible(Size net_index) const -> bool { return visibility_.netVisible(net_index); }
 
-  auto netCount() const -> Size
-  {
-    return visibility_.nets.size();
-  }
+  auto netCount() const -> Size { return visibility_.nets.size(); }
 
-  auto netContextOnly(Size net_index) const -> bool
-  {
-    return visibility_.netContextOnly(net_index);
-  }
+  auto netContextOnly(Size net_index) const -> bool { return visibility_.netContextOnly(net_index); }
 
-  auto nodeVisible(Size net_index,
-                   Size node_index) const -> bool
-  {
-    return visibility_.nets[net_index].nodeVisible(node_index);
-  }
+  auto nodeVisible(Size net_index, Size node_index) const -> bool { return visibility_.nets[net_index].nodeVisible(node_index); }
 
-  auto resistorVisible(Size net_index,
-                       Size resistor_index) const -> bool
-  {
-    return visibility_.nets[net_index].resistorVisible(resistor_index);
-  }
+  auto resistorVisible(Size net_index, Size resistor_index) const -> bool { return visibility_.nets[net_index].resistorVisible(resistor_index); }
 
-  auto resistorTarget(Size net_index,
-                      Size resistor_index) const -> bool
-  {
-    return visibility_.nets[net_index].resistorTarget(resistor_index);
-  }
+  auto resistorTarget(Size net_index, Size resistor_index) const -> bool { return visibility_.nets[net_index].resistorTarget(resistor_index); }
 
-  auto couplingCapVisible(Size net_index,
-                          Size cap_index) const -> bool
-  {
-    return visibility_.nets[net_index].couplingCapVisible(cap_index);
-  }
+  auto couplingCapVisible(Size net_index, Size cap_index) const -> bool { return visibility_.nets[net_index].couplingCapVisible(cap_index); }
 
-  auto groundCapVisible(Size net_index,
-                        Size cap_index) const -> bool
-  {
-    return visibility_.nets[net_index].groundCapVisible(cap_index);
-  }
+  auto groundCapVisible(Size net_index, Size cap_index) const -> bool { return visibility_.nets[net_index].groundCapVisible(cap_index); }
 
  private:
   const Visibility& visibility_;
@@ -160,8 +120,7 @@ auto trimUnderscores(std::string text) -> std::string
   return text.substr(first, last - first + 1);
 }
 
-auto filePart(std::string_view value,
-              std::string_view fallback) -> std::string
+auto filePart(std::string_view value, std::string_view fallback) -> std::string
 {
   std::string part = trimUnderscores(string::identifier(value, fallback));
   if (part.empty()) {
@@ -197,8 +156,7 @@ auto edgeGdsStem(const Config& config) -> std::string
   return net_part + "_" + index_part;
 }
 
-auto gdsOutputFile(const Config& config,
-                   const std::string& gds_name) -> std::filesystem::path
+auto gdsOutputFile(const Config& config, const std::string& gds_name) -> std::filesystem::path
 {
   if (!config.hasEdgeFilter()) {
     return path::fileUnderDir(config.output_dir, gds_name, ".gds");
@@ -211,8 +169,7 @@ auto gdsOutputFile(const Config& config,
   return path::fileUnderDir(edge_dir, edgeGdsStem(config), ".gds");
 }
 
-auto findEdge(const Model& model,
-              const EdgeRef& ref) -> const Resistor*
+auto findEdge(const Model& model, const EdgeRef& ref) -> const Resistor*
 {
   if (!ref.valid || ref.net_index >= model.nets.size()) {
     return nullptr;
@@ -224,13 +181,7 @@ auto findEdge(const Model& model,
   return &net.resistors[ref.resistor_index];
 }
 
-auto addBoxBoundary(idb::GdsStruct& gds_net,
-                    int layer,
-                    int data_type,
-                    int llx,
-                    int lly,
-                    int urx,
-                    int ury) -> void
+auto addBoxBoundary(idb::GdsStruct& gds_net, int layer, int data_type, int llx, int lly, int urx, int ury) -> void
 {
   idb::GdsBoundary boundary;
   boundary.layer = layer;
@@ -243,20 +194,14 @@ auto addBoxBoundary(idb::GdsStruct& gds_net,
   gds_net.add_element(boundary);
 }
 
-auto addRect(idb::GdsStruct& gds_net,
-             const Node& node) -> void
+auto addRect(idb::GdsStruct& gds_net, const Node& node) -> void
 {
   if (node.has_box) {
     addBoxBoundary(gds_net, node.layer, kNode, node.llx, node.lly, node.urx, node.ury);
   }
 }
 
-auto addText(idb::GdsStruct& gds_net,
-             int layer,
-             int data_type,
-             int x,
-             int y,
-             const std::string& text,
+auto addText(idb::GdsStruct& gds_net, int layer, int data_type, int x, int y, const std::string& text,
              idb::GdsPresentation presentation = idb::GdsPresentation::kBottomLeft) -> void
 {
   idb::GdsText gds_text;
@@ -268,12 +213,7 @@ auto addText(idb::GdsStruct& gds_net,
   gds_net.add_element(gds_text);
 }
 
-auto addPath(idb::GdsStruct& gds_net,
-             int layer,
-             int data_type,
-             int width,
-             const Node& node1,
-             const Node& node2) -> void
+auto addPath(idb::GdsStruct& gds_net, int layer, int data_type, int width, const Node& node1, const Node& node2) -> void
 {
   if (!node1.has_point || !node2.has_point) {
     return;
@@ -288,12 +228,7 @@ auto addPath(idb::GdsStruct& gds_net,
   gds_net.add_element(path);
 }
 
-auto addPath(idb::GdsStruct& gds_net,
-             int layer,
-             int data_type,
-             int width,
-             const PlotPoint& point1,
-             const PlotPoint& point2) -> void
+auto addPath(idb::GdsStruct& gds_net, int layer, int data_type, int width, const PlotPoint& point1, const PlotPoint& point2) -> void
 {
   if (!point1.valid || !point2.valid) {
     return;
@@ -308,18 +243,14 @@ auto addPath(idb::GdsStruct& gds_net,
   gds_net.add_element(path);
 }
 
-auto addRect(idb::GdsStruct& gds_net,
-             const Resistor& resistor,
-             int layer,
-             int data_type = kEdge) -> void
+auto addRect(idb::GdsStruct& gds_net, const Resistor& resistor, int layer, int data_type = kEdge) -> void
 {
   if (resistor.has_box) {
     addBoxBoundary(gds_net, layer, data_type, resistor.llx, resistor.lly, resistor.urx, resistor.ury);
   }
 }
 
-auto edgeCenter(const Model& model,
-                const Resistor& edge) -> PlotPoint
+auto edgeCenter(const Model& model, const Resistor& edge) -> PlotPoint
 {
   PlotPoint point;
   if (edge.has_layer) {
@@ -347,15 +278,13 @@ auto edgeCenter(const Model& model,
   return point;
 }
 
-auto capEdgeCenter(const Model& model,
-                   const EdgeRef& ref) -> PlotPoint
+auto capEdgeCenter(const Model& model, const EdgeRef& ref) -> PlotPoint
 {
   const Resistor* edge = findEdge(model, ref);
   return edge == nullptr ? PlotPoint{} : edgeCenter(model, *edge);
 }
 
-auto nodePoint(const Model& model,
-               const std::string& node_name) -> PlotPoint
+auto nodePoint(const Model& model, const std::string& node_name) -> PlotPoint
 {
   const Node* node = findNode(model, node_name);
   if (node == nullptr || !node->has_point) {
@@ -364,17 +293,13 @@ auto nodePoint(const Model& model,
   return PlotPoint{.x = node->x, .y = node->y, .layer = node->layer, .valid = true};
 }
 
-auto capPoint(const Model& model,
-              const EdgeRef& edge,
-              const std::string& node_name) -> PlotPoint
+auto capPoint(const Model& model, const EdgeRef& edge, const std::string& node_name) -> PlotPoint
 {
   PlotPoint point = capEdgeCenter(model, edge);
   return point.valid ? point : nodePoint(model, node_name);
 }
 
-auto isVisibleEdge(const Model& model,
-                   const VisibilityReader& visibility,
-                   const EdgeRef& ref) -> bool
+auto isVisibleEdge(const Model& model, const VisibilityReader& visibility, const EdgeRef& ref) -> bool
 {
   if (!ref.valid) {
     return true;
@@ -383,13 +308,10 @@ auto isVisibleEdge(const Model& model,
     return false;
   }
   const auto& net = model.nets[ref.net_index];
-  return visibility.netVisible(ref.net_index)
-         && ref.resistor_index < net.resistors.size()
-         && visibility.resistorVisible(ref.net_index, ref.resistor_index);
+  return visibility.netVisible(ref.net_index) && ref.resistor_index < net.resistors.size() && visibility.resistorVisible(ref.net_index, ref.resistor_index);
 }
 
-auto capEndpointKey(const EdgeRef& edge,
-                    const std::string& node) -> std::string
+auto capEndpointKey(const EdgeRef& edge, const std::string& node) -> std::string
 {
   return edge.valid ? "E:" + edgeRefKey(edge) : "N:" + node;
 }
@@ -411,16 +333,12 @@ auto groundKey(const Capacitor& cap) -> std::string
   return capEndpointKey(cap.edge1, cap.node1);
 }
 
-auto isTargetEdge(const VisibilityReader& visibility,
-                  const EdgeRef& edge) -> bool
+auto isTargetEdge(const VisibilityReader& visibility, const EdgeRef& edge) -> bool
 {
-  return edge.valid
-         && edge.net_index < visibility.netCount()
-         && visibility.resistorTarget(edge.net_index, edge.resistor_index);
+  return edge.valid && edge.net_index < visibility.netCount() && visibility.resistorTarget(edge.net_index, edge.resistor_index);
 }
 
-auto couplingOwnerRank(const VisibilityReader& visibility,
-                       const Capacitor& cap) -> int
+auto couplingOwnerRank(const VisibilityReader& visibility, const Capacitor& cap) -> int
 {
   if (isTargetEdge(visibility, cap.edge1)) {
     return 0;
@@ -431,8 +349,7 @@ auto couplingOwnerRank(const VisibilityReader& visibility,
   return 2;
 }
 
-auto shouldReplaceOwner(const CouplingCapOwner& old_owner,
-                        const CouplingCapOwner& new_owner) -> bool
+auto shouldReplaceOwner(const CouplingCapOwner& old_owner, const CouplingCapOwner& new_owner) -> bool
 {
   if (new_owner.rank != old_owner.rank) {
     return new_owner.rank < old_owner.rank;
@@ -440,8 +357,7 @@ auto shouldReplaceOwner(const CouplingCapOwner& old_owner,
   return new_owner.net_index < old_owner.net_index;
 }
 
-auto collectCouplingCapOwners(const Model& model,
-                              const VisibilityReader& visibility) -> CouplingCapOwners
+auto collectCouplingCapOwners(const Model& model, const VisibilityReader& visibility) -> CouplingCapOwners
 {
   CouplingCapOwners owners;
   for (Size net_index = 0; net_index < model.nets.size(); ++net_index) {
@@ -451,15 +367,12 @@ auto collectCouplingCapOwners(const Model& model,
       if (!visibility.couplingCapVisible(net_index, cap_index)) {
         continue;
       }
-      if (!isVisibleEdge(model, visibility, cap.edge1)
-          || !isVisibleEdge(model, visibility, cap.edge2)) {
+      if (!isVisibleEdge(model, visibility, cap.edge1) || !isVisibleEdge(model, visibility, cap.edge2)) {
         continue;
       }
 
       const std::string key = couplingKey(cap);
-      const CouplingCapOwner new_owner{
-          .net_index = net_index,
-          .rank = couplingOwnerRank(visibility, cap)};
+      const CouplingCapOwner new_owner{.net_index = net_index, .rank = couplingOwnerRank(visibility, cap)};
       const auto [it, inserted] = owners.emplace(key, new_owner);
       if (!inserted && shouldReplaceOwner(it->second, new_owner)) {
         it->second = new_owner;
@@ -469,30 +382,16 @@ auto collectCouplingCapOwners(const Model& model,
   return owners;
 }
 
-auto makeCouplingCapPlot(const VisibilityReader& visibility,
-                         const Capacitor& cap,
-                         const std::string& key) -> CouplingCapPlot
+auto makeCouplingCapPlot(const VisibilityReader& visibility, const Capacitor& cap, const std::string& key) -> CouplingCapPlot
 {
   if (!isTargetEdge(visibility, cap.edge1) && isTargetEdge(visibility, cap.edge2)) {
-    return CouplingCapPlot{
-        .key = key,
-        .edge1 = cap.edge2,
-        .edge2 = cap.edge1,
-        .node1 = cap.node2,
-        .node2 = cap.node1};
+    return CouplingCapPlot{.key = key, .edge1 = cap.edge2, .edge2 = cap.edge1, .node1 = cap.node2, .node2 = cap.node1};
   }
 
-  return CouplingCapPlot{
-      .key = key,
-      .edge1 = cap.edge1,
-      .edge2 = cap.edge2,
-      .node1 = cap.node1,
-      .node2 = cap.node2};
+  return CouplingCapPlot{.key = key, .edge1 = cap.edge1, .edge2 = cap.edge2, .node1 = cap.node1, .node2 = cap.node2};
 }
 
-auto collectGroundCapPlots(const Model& model,
-                           const VisibilityReader& visibility,
-                           Size net_index) -> std::vector<GroundCapPlot>
+auto collectGroundCapPlots(const Model& model, const VisibilityReader& visibility, Size net_index) -> std::vector<GroundCapPlot>
 {
   const auto& net = model.nets[net_index];
   std::unordered_map<std::string, Size> index_by_key;
@@ -512,19 +411,12 @@ auto collectGroundCapPlots(const Model& model,
     }
     plots[it->second].value += cap.value;
   }
-  std::sort(
-      plots.begin(),
-      plots.end(),
-      [](const GroundCapPlot& lhs, const GroundCapPlot& rhs) {
-        return lhs.key < rhs.key;
-      });
+  std::sort(plots.begin(), plots.end(), [](const GroundCapPlot& lhs, const GroundCapPlot& rhs) { return lhs.key < rhs.key; });
   return plots;
 }
 
-auto collectCouplingCapPlots(const Model& model,
-                             const VisibilityReader& visibility,
-                             const CouplingCapOwners& owners,
-                             Size net_index) -> std::vector<CouplingCapPlot>
+auto collectCouplingCapPlots(const Model& model, const VisibilityReader& visibility, const CouplingCapOwners& owners, Size net_index)
+    -> std::vector<CouplingCapPlot>
 {
   const auto& net = model.nets[net_index];
   std::unordered_map<std::string, Size> index_by_key;
@@ -534,8 +426,7 @@ auto collectCouplingCapPlots(const Model& model,
     if (!visibility.couplingCapVisible(net_index, cap_index)) {
       continue;
     }
-    if (!isVisibleEdge(model, visibility, cap.edge1)
-        || !isVisibleEdge(model, visibility, cap.edge2)) {
+    if (!isVisibleEdge(model, visibility, cap.edge1) || !isVisibleEdge(model, visibility, cap.edge2)) {
       continue;
     }
     const std::string key = couplingKey(cap);
@@ -549,17 +440,11 @@ auto collectCouplingCapPlots(const Model& model,
     }
     plots[it->second].value += cap.value;
   }
-  std::sort(
-      plots.begin(),
-      plots.end(),
-      [](const CouplingCapPlot& lhs, const CouplingCapPlot& rhs) {
-        return lhs.key < rhs.key;
-      });
+  std::sort(plots.begin(), plots.end(), [](const CouplingCapPlot& lhs, const CouplingCapPlot& rhs) { return lhs.key < rhs.key; });
   return plots;
 }
 
-auto addTopReference(idb::GdsData& gds_data,
-                     const std::string& name) -> void
+auto addTopReference(idb::GdsData& gds_data, const std::string& name) -> void
 {
   idb::GdsSref sref;
   sref.sname = name;
@@ -567,14 +452,12 @@ auto addTopReference(idb::GdsData& gds_data,
   gds_data.get_top_struct()->add_element(sref);
 }
 
-auto formatCapacitance(F64 value,
-                       const std::string& unit) -> std::string
+auto formatCapacitance(F64 value, const std::string& unit) -> std::string
 {
   return format::withUnit(value, format::unitSymbol(unit), 3);
 }
 
-auto edgeName(const Model& model,
-              const EdgeRef& edge) -> std::string
+auto edgeName(const Model& model, const EdgeRef& edge) -> std::string
 {
   const Resistor* resistor = findEdge(model, edge);
   if (resistor == nullptr || edge.net_index >= model.nets.size()) {
@@ -583,10 +466,7 @@ auto edgeName(const Model& model,
   return model.nets[edge.net_index].name + ":" + std::to_string(resistor->index);
 }
 
-auto capEndpointLabel(const Model& model,
-                      const VisibilityReader& visibility,
-                      const EdgeRef& edge,
-                      const std::string& node_name) -> std::string
+auto capEndpointLabel(const Model& model, const VisibilityReader& visibility, const EdgeRef& edge, const std::string& node_name) -> std::string
 {
   if (isTargetEdge(visibility, edge)) {
     return node_name;
@@ -597,29 +477,21 @@ auto capEndpointLabel(const Model& model,
 
 auto formatResistance(const Resistor& resistor) -> std::string
 {
-  return "RES" + std::to_string(resistor.index)
-         + " R=" + format::significant(resistor.value, 3) + "OHM";
+  return "RES" + std::to_string(resistor.index) + " R=" + format::significant(resistor.value, 3) + "OHM";
 }
 
-auto formatCouplingCap(const Model& model,
-                       const VisibilityReader& visibility,
-                       const CouplingCapPlot& cap) -> std::string
+auto formatCouplingCap(const Model& model, const VisibilityReader& visibility, const CouplingCapPlot& cap) -> std::string
 {
-  return "CC=" + formatCapacitance(cap.value, model.cap_unit)
-         + " " + capEndpointLabel(model, visibility, cap.edge1, cap.node1)
-         + " <-> " + capEndpointLabel(model, visibility, cap.edge2, cap.node2);
+  return "CC=" + formatCapacitance(cap.value, model.cap_unit) + " " + capEndpointLabel(model, visibility, cap.edge1, cap.node1) + " <-> "
+         + capEndpointLabel(model, visibility, cap.edge2, cap.node2);
 }
 
-auto formatGroundCap(const Model& model,
-                     const VisibilityReader& visibility,
-                     const GroundCapPlot& cap) -> std::string
+auto formatGroundCap(const Model& model, const VisibilityReader& visibility, const GroundCapPlot& cap) -> std::string
 {
-  return "CG=" + formatCapacitance(cap.value, model.cap_unit)
-         + " " + capEndpointLabel(model, visibility, cap.edge, cap.node);
+  return "CG=" + formatCapacitance(cap.value, model.cap_unit) + " " + capEndpointLabel(model, visibility, cap.edge, cap.node);
 }
 
-auto collectNetGdsJobs(const Model& model,
-                       const VisibilityReader& visibility) -> std::vector<NetGdsJob>
+auto collectNetGdsJobs(const Model& model, const VisibilityReader& visibility) -> std::vector<NetGdsJob>
 {
   std::unordered_map<std::string, int> struct_name_count;
   struct_name_count.reserve(model.nets.size());
@@ -644,20 +516,12 @@ auto collectNetGdsJobs(const Model& model,
 class NetGdsWriter
 {
  public:
-  NetGdsWriter(const Model& model,
-               const VisibilityReader& visibility,
-               const CouplingCapOwners& coupling_cap_owners,
-               const Config& config)
-      : model_(model),
-        visibility_(visibility),
-        coupling_cap_owners_(coupling_cap_owners),
-        config_(config)
+  NetGdsWriter(const Model& model, const VisibilityReader& visibility, const CouplingCapOwners& coupling_cap_owners, const Config& config)
+      : model_(model), visibility_(visibility), coupling_cap_owners_(coupling_cap_owners), config_(config)
   {
   }
 
-  auto write(idb::GdsStruct& gds_net,
-             Size net_index,
-             const Net& net) const -> void
+  auto write(idb::GdsStruct& gds_net, Size net_index, const Net& net) const -> void
   {
     writeNodes(gds_net, net_index, net);
     writeResistors(gds_net, net_index, net);
@@ -666,9 +530,7 @@ class NetGdsWriter
   }
 
  private:
-  auto writeNodes(idb::GdsStruct& gds_net,
-                  Size net_index,
-                  const Net& net) const -> void
+  auto writeNodes(idb::GdsStruct& gds_net, Size net_index, const Net& net) const -> void
   {
     for (Size node_index = 0; node_index < net.nodes.size(); ++node_index) {
       const auto& node = net.nodes[node_index];
@@ -682,9 +544,7 @@ class NetGdsWriter
     }
   }
 
-  auto writeResistors(idb::GdsStruct& gds_net,
-                      Size net_index,
-                      const Net& net) const -> void
+  auto writeResistors(idb::GdsStruct& gds_net, Size net_index, const Net& net) const -> void
   {
     for (Size resistor_index = 0; resistor_index < net.resistors.size(); ++resistor_index) {
       const auto& resistor = net.resistors[resistor_index];
@@ -711,28 +571,18 @@ class NetGdsWriter
         }
       }
       if (config_.plotResistance()) {
-        addText(
-            gds_net,
-            layer,
-            kTextRes,
-            (node1->x + node2->x) / 2,
-            (node1->y + node2->y) / 2,
-            formatResistance(resistor),
-            idb::GdsPresentation::kTopRight);
+        addText(gds_net, layer, kTextRes, (node1->x + node2->x) / 2, (node1->y + node2->y) / 2, formatResistance(resistor), idb::GdsPresentation::kTopRight);
       }
     }
   }
 
-  auto writeCouplingCaps(idb::GdsStruct& gds_net,
-                         Size net_index) const -> void
+  auto writeCouplingCaps(idb::GdsStruct& gds_net, Size net_index) const -> void
   {
-    if ((visibility_.netContextOnly(net_index) && !config_.hasEdgeFilter())
-        || !config_.plotCouplingCap()) {
+    if ((visibility_.netContextOnly(net_index) && !config_.hasEdgeFilter()) || !config_.plotCouplingCap()) {
       return;
     }
 
-    for (const auto& cap : collectCouplingCapPlots(
-             model_, visibility_, coupling_cap_owners_, net_index)) {
+    for (const auto& cap : collectCouplingCapPlots(model_, visibility_, coupling_cap_owners_, net_index)) {
       const PlotPoint point1 = capPoint(model_, cap.edge1, cap.node1);
       const PlotPoint point2 = capPoint(model_, cap.edge2, cap.node2);
       if (!point1.valid || !point2.valid) {
@@ -741,22 +591,14 @@ class NetGdsWriter
 
       const int layer = point1.layer;
       addPath(gds_net, layer, kCc, kCcWidth, point1, point2);
-      addText(
-          gds_net,
-          layer,
-          kTextCc,
-          (point1.x + point2.x) / 2,
-          (point1.y + point2.y) / 2,
-          formatCouplingCap(model_, visibility_, cap),
-          idb::GdsPresentation::kTopRight);
+      addText(gds_net, layer, kTextCc, (point1.x + point2.x) / 2, (point1.y + point2.y) / 2, formatCouplingCap(model_, visibility_, cap),
+              idb::GdsPresentation::kTopRight);
     }
   }
 
-  auto writeGroundCaps(idb::GdsStruct& gds_net,
-                       Size net_index) const -> void
+  auto writeGroundCaps(idb::GdsStruct& gds_net, Size net_index) const -> void
   {
-    if ((visibility_.netContextOnly(net_index) && !config_.hasEdgeFilter())
-        || !config_.plotGroundCap()) {
+    if ((visibility_.netContextOnly(net_index) && !config_.hasEdgeFilter()) || !config_.plotGroundCap()) {
       return;
     }
 
@@ -765,14 +607,7 @@ class NetGdsWriter
       if (!point.valid) {
         continue;
       }
-      addText(
-          gds_net,
-          point.layer,
-          kTextCg,
-          point.x,
-          point.y,
-          formatGroundCap(model_, visibility_, cap),
-          idb::GdsPresentation::kTopRight);
+      addText(gds_net, point.layer, kTextCg, point.x, point.y, formatGroundCap(model_, visibility_, cap), idb::GdsPresentation::kTopRight);
     }
   }
 
@@ -782,12 +617,8 @@ class NetGdsWriter
   const Config& config_;
 };
 
-auto buildNetGdsStructs(const Model& model,
-                        const VisibilityReader& visibility,
-                        const CouplingCapOwners& coupling_cap_owners,
-                        const Config& config,
-                        const std::vector<NetGdsJob>& jobs)
-    -> std::vector<std::unique_ptr<idb::GdsStruct>>
+auto buildNetGdsStructs(const Model& model, const VisibilityReader& visibility, const CouplingCapOwners& coupling_cap_owners, const Config& config,
+                        const std::vector<NetGdsJob>& jobs) -> std::vector<std::unique_ptr<idb::GdsStruct>>
 {
   // Threads build private structs only. GdsData and the file writer are updated
   // later on the main thread because their ownership model is not thread-safe.
@@ -806,15 +637,12 @@ auto buildNetGdsStructs(const Model& model,
 
 }  // namespace
 
-auto GdsWriter::formatValue(F64 value,
-                            const std::string& unit) -> std::string
+auto GdsWriter::formatValue(F64 value, const std::string& unit) -> std::string
 {
   return formatCapacitance(value, unit);
 }
 
-auto GdsWriter::write(const Model& model,
-                      const Visibility& visibility,
-                      const Config& config) const -> bool
+auto GdsWriter::write(const Model& model, const Visibility& visibility, const Config& config) const -> bool
 {
   const auto gds_name = string::identifier(model.design_name, "plot_spef");
   const auto gds_file = gdsOutputFile(config, gds_name);
@@ -830,8 +658,7 @@ auto GdsWriter::write(const Model& model,
   const VisibilityReader visibility_reader(visibility);
   const CouplingCapOwners coupling_cap_owners = collectCouplingCapOwners(model, visibility_reader);
   const auto jobs = collectNetGdsJobs(model, visibility_reader);
-  auto net_structs = buildNetGdsStructs(
-      model, visibility_reader, coupling_cap_owners, config, jobs);
+  auto net_structs = buildNetGdsStructs(model, visibility_reader, coupling_cap_owners, config, jobs);
 
   idb::GdsiiTextWriter writer;
   if (!writer.init(gds_file.string(), &gds_data)) {

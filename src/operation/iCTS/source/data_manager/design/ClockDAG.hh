@@ -36,6 +36,49 @@ class Clock;
 class Net;
 class Pin;
 
+enum class ClockGraphIssueCode
+{
+  kNullClock,
+  kMissingClockSource,
+  kMissingNet,
+  kMissingNetDriver,
+  kMissingNetLoad,
+  kDuplicateNetMembership,
+  kForeignNetMembership,
+  kDuplicatePinMembership,
+  kForeignPinMembership,
+  kIncompletePropagationArc,
+  kPropagationPinInstMismatch,
+  kInvalidPinDirection,
+  kPhysicalKindMismatch,
+  kAmbiguousCrossClockOwnership,
+  kUnreachableDeclaredSink,
+  kGraphCycle,
+};
+
+struct ClockGraphIssue
+{
+  ClockGraphIssueCode code = ClockGraphIssueCode::kNullClock;
+  std::string clock_name;
+  std::string clock_net_name;
+  std::string object_name;
+  std::string inst_name;
+  std::string cell_master;
+  std::string input_pin_name;
+  std::string output_pin_name;
+  std::string input_net_name;
+  std::string output_net_name;
+  std::string propagation_kind;
+  std::string propagation_origin;
+  std::string expected;
+  std::string observed;
+  std::string invariant;
+  std::string message;
+};
+
+auto ClockGraphIssueCodeName(ClockGraphIssueCode code) -> const char*;
+auto FormatClockGraphIssue(const ClockGraphIssue& issue) -> std::string;
+
 class ClockDAG
 {
  public:
@@ -47,7 +90,15 @@ class ClockDAG
     int32_t min_buffer_count = 0;
     int32_t max_buffer_count = 0;
     std::size_t ff_sink_terminal_count = 0U;
+    std::size_t terminal_probe_count = 0U;
     std::string status = "unavailable";
+  };
+
+  struct BuildWorkStats
+  {
+    std::size_t ready_push_count = 0U;
+    std::size_t ready_pop_count = 0U;
+    std::size_t arc_relaxation_count = 0U;
   };
 
   ClockDAG() = default;
@@ -60,6 +111,8 @@ class ClockDAG
   auto is_built() const -> bool { return _built; }
   auto is_valid() const -> bool { return _built && _valid; }
   auto get_status() const -> const std::string& { return _status; }
+  auto get_issues() const -> const std::vector<ClockGraphIssue>& { return _issues; }
+  auto primaryIssue() const -> const ClockGraphIssue* { return _issues.empty() ? nullptr : &_issues.front(); }
 
   auto hasCycle(const Clock* clock) const -> bool;
   auto topologicalPins(const Clock* clock) const -> std::vector<Pin*>;
@@ -83,12 +136,14 @@ class ClockDAG
     bool valid = true;
     bool has_cycle = false;
     std::string status = "valid";
+    std::vector<ClockGraphIssue> issues;
     std::vector<Pin*> pins;
     std::vector<Net*> nets;
     std::unordered_set<const Pin*> pin_set;
     std::unordered_set<const Net*> net_set;
     std::unordered_map<const Pin*, std::vector<Arc>> outgoing_arcs;
     std::vector<Pin*> topological_pins;
+    BuildWorkStats build_work;
   };
 
   auto graphForClock(const Clock* clock) const -> const ClockGraph*;
@@ -99,6 +154,7 @@ class ClockDAG
   bool _built = false;
   bool _valid = false;
   std::string _status = "not_built";
+  std::vector<ClockGraphIssue> _issues;
   std::vector<const Clock*> _clock_order;
   std::unordered_map<const Clock*, ClockGraph> _graphs_by_clock;
 };

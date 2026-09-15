@@ -140,6 +140,10 @@ class DefWrite
   SaveFormat _font;
   void writestr(const char* strdata, ...);
 
+  std::string format_instance_name(const std::string& name) const;
+  std::string format_io_pin_name(const std::string& name) const;
+  std::string format_net_name(const std::string& name) const;
+
   std::pair<int, int> get_pdn_layer_order_range();
 };
 }  // namespace idb

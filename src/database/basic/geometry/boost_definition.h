@@ -29,7 +29,7 @@
 
 #include "Boost.hpp"
 
-namespace ieda_solver {
+namespace ecc_solver {
 namespace gtl = boost::polygon;
 using namespace boost::polygon::operators;
 typedef int32_t CoordType;
@@ -50,4 +50,4 @@ typedef boost::geometry::model::box<BgPoint> BgRect;
 typedef boost::geometry::model::polygon<BgPoint> BgPolygon;
 typedef boost::geometry::model::multi_polygon<BgPolygon> BgMultiPolygon;
 
-}  // namespace ieda_solver
+}  // namespace ecc_solver

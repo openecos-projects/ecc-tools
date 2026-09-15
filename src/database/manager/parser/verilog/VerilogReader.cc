@@ -39,7 +39,7 @@ namespace idb {
 unsigned VerilogReader::readVerilog(const char* verilog_file_path)
 {
   unsigned is_ok = 1;
-  IEDALOG.info(ieda::Loc::current(), "load verilog file ", verilog_file_path);
+  ECCLOG.info(ecc::Loc::current(), "load verilog file ", verilog_file_path);
   _verilog_file_ptr = verilog_parse_file(verilog_file_path);
 
   if (_verilog_file_ptr) {
@@ -65,7 +65,7 @@ unsigned VerilogReader::readVerilog(const char* verilog_file_path)
  */
 bool VerilogReader::autoTopModule()
 {
-  IEDALOG.info(ieda::Loc::current(), "auto set top module ");
+  ECCLOG.info(ecc::Loc::current(), "auto set top module ");
   if (_verilog_file_ptr == nullptr)
     return false;
   ParsedVerilogFile* verilog_file = verilog_convert_file(_verilog_file_ptr);

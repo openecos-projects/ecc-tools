@@ -29,13 +29,14 @@
 #include "ScriptEngine.hh"
 #include "tcl_definition.h"
 
-using ieda::TclCmd;
-using ieda::TclOption;
-using ieda::TclStringOption;
+using ecc::TclCmd;
+using ecc::TclOption;
+using ecc::TclStringOption;
 
 namespace tcl {
 
-class CmdCTSAutoRun : public TclCmd {
+class CmdCTSAutoRun : public TclCmd
+{
  public:
   explicit CmdCTSAutoRun(const char* cmd_name);
   ~CmdCTSAutoRun() override = default;
@@ -48,7 +49,8 @@ class CmdCTSAutoRun : public TclCmd {
   // private data
 };
 
-class CmdCTSReport : public TclCmd {
+class CmdCTSReport : public TclCmd
+{
  public:
   explicit CmdCTSReport(const char* cmd_name);
   ~CmdCTSReport() override = default;
@@ -59,5 +61,15 @@ class CmdCTSReport : public TclCmd {
  private:
   // private function
   // private data
+};
+
+class CmdCTSDestroy : public TclCmd
+{
+ public:
+  explicit CmdCTSDestroy(const char* cmd_name);
+  ~CmdCTSDestroy() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
 };
 }  // namespace tcl

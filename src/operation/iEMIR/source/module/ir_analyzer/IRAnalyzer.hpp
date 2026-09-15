@@ -46,15 +46,15 @@ class IRAnalyzer
   IRAnalyzer& operator=(const IRAnalyzer& other) = delete;
   IRAnalyzer& operator=(IRAnalyzer&& other) = delete;
   // function
-  void analyzePowerGraphList();
-  void analyzePowerGraph(PowerGraph& power_graph);
+  void analyzePowerGraphList(std::ofstream& diagnostics_file);
+  void analyzePowerGraph(PowerGraph& power_graph, std::ofstream& diagnostics_file);
   IAModel initIAModel(PowerGraph& power_graph);
   void buildSourceVoltage(PowerGraph& power_graph, IAModel& ia_model);
   void buildNodeMatrixIndex(PowerGraph& power_graph, IAModel& ia_model);
   void buildNodeCurrentMap(PowerGraph& power_graph, IAModel& ia_model);
   void buildInstanceNodeCurrent(PowerGraph& power_graph, uint64_t instance_id, InstancePower& instance_power, IAModel& ia_model);
   int32_t getInstancePowerGraphNum(uint64_t instance_id, PowerNetType power_net_type);
-  void solveNodeVoltage(PowerGraph& power_graph, IAModel& ia_model);
+  void solveNodeVoltage(PowerGraph& power_graph, IAModel& ia_model, std::ofstream& diagnostics_file);
   void updatePowerNodeVoltage(PowerGraph& power_graph, IAModel& ia_model, std::vector<double>& node_voltage_list);
 };
 

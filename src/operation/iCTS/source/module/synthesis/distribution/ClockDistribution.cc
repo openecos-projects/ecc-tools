@@ -62,8 +62,13 @@ auto addRootBuffer(const ClockDistributionInput& input, const std::string& domai
 
 auto ClockDistribution::partitionSinkDomains(const Clock& clock) -> ClockDistributionPartition
 {
+  return partitionSinkDomains(clock.get_loads());
+}
+
+auto ClockDistribution::partitionSinkDomains(const std::vector<Pin*>& sinks) -> ClockDistributionPartition
+{
   ClockDistributionPartition partition;
-  auto sink_partition = ClockTreeRealization::partitionClockSinks(clock.get_loads());
+  auto sink_partition = ClockTreeRealization::partitionClockSinks(sinks);
   partition.macro_sinks = std::move(sink_partition.macro_sinks);
   partition.regular_sinks = std::move(sink_partition.regular_sinks);
   partition.valid_sink_count = partition.macro_sinks.size() + partition.regular_sinks.size();

@@ -32,6 +32,8 @@ class TAModel
   TAComParam& get_ta_com_param() { return _ta_com_param; }
   std::vector<std::vector<TAPanel>>& get_layer_panel_list() { return _layer_panel_list; }
   std::vector<std::vector<TAPanelId>>& get_ta_panel_id_list_list() { return _ta_panel_id_list_list; }
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
+  std::map<int32_t, std::vector<EXTLayerRect>>& get_net_detailed_patch_map() { return _net_detailed_patch_map; }
   // setter
   void set_ta_net_list(const std::vector<TANet>& ta_net_list) { _ta_net_list = ta_net_list; }
   void set_ta_com_param(const TAComParam& ta_com_param) { _ta_com_param = ta_com_param; }
@@ -43,6 +45,8 @@ class TAModel
   TAComParam _ta_com_param;
   std::vector<std::vector<TAPanel>> _layer_panel_list;
   std::vector<std::vector<TAPanelId>> _ta_panel_id_list_list;
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_detailed_result_map;
+  std::map<int32_t, std::vector<EXTLayerRect>> _net_detailed_patch_map;
 };
 
 }  // namespace irt

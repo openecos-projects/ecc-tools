@@ -19,7 +19,7 @@
 #include <cstdint>
 #include <string>
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 struct ClockTiming
 {
@@ -31,4 +31,4 @@ struct ClockTiming
   double suggest_freq;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

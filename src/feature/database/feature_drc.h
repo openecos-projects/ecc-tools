@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-namespace ieda_feature {
+namespace ecc_feature {
 /// ###################################################################################///
 ///  summary
 /// ###################################################################################///
@@ -49,4 +49,4 @@ struct DrcMacroDistribution
   std::map<std::string, DrcMacroCount> macro_list;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

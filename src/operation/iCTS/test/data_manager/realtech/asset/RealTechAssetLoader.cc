@@ -75,8 +75,8 @@ constexpr std::array<std::string_view, 2> kFlowScriptRelPaths = {
     "script/iCTS_script/run_iCTS_dev.tcl",
     "script/iCTS_script/run_iCTS.tcl",
 };
-constexpr std::string_view kRunScriptRelPath = "run_iEDA.sh";
-constexpr std::string_view kCtsConfigRelPath = "iEDA_config/cts_default_config.json";
+constexpr std::string_view kRunScriptRelPath = "run_ECC.sh";
+constexpr std::string_view kCtsConfigRelPath = "ECC_config/cts_default_config.json";
 constexpr std::array<std::string_view, 5> kRealTechDefRelPaths = {
     "result/bp_be_top_place.def.gz", "result/bp_be_top_place.def", "result/arm9_place.def.gz", "result/arm9_place.def", "result/iPL_result.def",
 };

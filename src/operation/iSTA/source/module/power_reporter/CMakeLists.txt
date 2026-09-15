@@ -1,11 +1,3 @@
-if(DEBUG_ISTA_POWER_REPORTER)
-    message(STATUS "iSTA: DEBUG_ISTA_POWER_REPORTER")
-    set(CMAKE_BUILD_TYPE "Debug")
-else()
-    message(STATUS "iSTA: RELEASE_ISTA_POWER_REPORTER")
-    set(CMAKE_BUILD_TYPE "Release")
-endif()
-
 add_library(ista_power_reporter
     ${ISTA_MODULE}/power_reporter/PowerReporter.cpp
 )
@@ -13,6 +5,7 @@ add_library(ista_power_reporter
 target_link_libraries(ista_power_reporter
     PUBLIC
     ista_data_manager
+    ista_delay_calculator
     ista_toolkit
 )
 

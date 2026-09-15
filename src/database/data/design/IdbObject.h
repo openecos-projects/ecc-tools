@@ -43,14 +43,21 @@ class IdbObject
  public:
   IdbObject();
   virtual ~IdbObject();
+  IdbObject(const IdbObject&) = delete;
+  IdbObject& operator=(const IdbObject&) = delete;
 
   // getter
   IdbRect* get_bounding_box() { return _bounding_box; }
-  uint64_t& get_id() { return _id; }
+  uint64_t get_id() const { return _id; }
 
   // setter
   bool set_bounding_box(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y);
-  void set_bounding_box(IdbRect* bounding_box) { _bounding_box = bounding_box; }
+  void set_bounding_box(IdbRect* bounding_box)
+  {
+    if (bounding_box != nullptr) {
+      set_bounding_box(*bounding_box);
+    }
+  }
   void set_bounding_box(IdbRect bounding_box);
   void set_id(uint64_t id) { _id = id; }
 

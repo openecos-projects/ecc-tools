@@ -12,7 +12,7 @@
 
 #include "feature_ipw.h"
 #include "feature_ista.h"
-namespace ieda_feature {
+namespace ecc_feature {
 
 // Wirelength
 struct TotalWLSummary
@@ -155,4 +155,4 @@ struct UnionEvalSummary
   TimingEvalSummary timing_eval_summary;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

@@ -16,10 +16,15 @@
 // ***************************************************************************************
 #include "STAInterface.hpp"
 
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
+
+#include "ClockPropagator.hpp"
 #include "DataManager.hpp"
 #include "DelayCalculator.hpp"
-#include "ClockPropagator.hpp"
 #include "GraphBuilder.hpp"
+#include "Lib.hh"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PowerAnalyzer.hpp"
@@ -27,15 +32,16 @@
 #include "PowerReporter.hpp"
 #include "SDFWriter.hpp"
 #include "STAHeader.hpp"
+#include "SdcCommand.hpp"
+#include "SdcCommands.hpp"
 #include "TCModel.hpp"
-#include "TimingCharacterizer.hpp"
 #include "TimingAnalyzer.hpp"
+#include "TimingCharacterizer.hpp"
 #include "TimingPropagator.hpp"
 #include "TimingReporter.hpp"
 #include "Utility.hpp"
 #include "VcdParser.hh"
 #include "idm.h"
-#include "Lib.hh"
 #include "spef/SpefParser.hh"
 
 namespace ista {
@@ -84,6 +90,31 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   DataManager::initInst();
   STADM.input(config_map);
   DelayCalculator::initInst();
+  SdcCommand::initInst({
+      {"current_design", sdc::executeTclCommand<sdc::TclCurrentDesign>},
+      {"remove_from_collection", sdc::executeTclCommand<sdc::TclRemoveFromCollection>},
+      {"set_clock_transition", sdc::executeTclCommand<sdc::TclSetClockTransition>},
+      {"set_max_fanout", sdc::executeTclCommand<sdc::TclSetMaxFanout>},
+      {"set_case_analysis", sdc::executeTclCommand<sdc::TclSetCaseAnalysis>},
+      {"set_input_delay", sdc::executeTclCommand<sdc::TclSetInputDelay>},
+      {"set_output_delay", sdc::executeTclCommand<sdc::TclSetOutputDelay>},
+      {"set_input_transition", sdc::executeTclCommand<sdc::TclSetInputTransition>},
+      {"set_load", sdc::executeTclCommand<sdc::TclSetLoad>},
+      {"set_clock_uncertainty", sdc::executeTclCommand<sdc::TclSetClockUncertainty>},
+      {"get_clock", sdc::executeTclCommand<sdc::TclGetClocks>},
+      {"get_clocks", sdc::executeTclCommand<sdc::TclGetClocks>},
+      {"get_port", sdc::executeTclCommand<sdc::TclGetPorts>},
+      {"get_ports", sdc::executeTclCommand<sdc::TclGetPorts>},
+      {"create_clock", sdc::executeTclCommand<sdc::TclCreateClock>},
+      {"create_generated_clock", sdc::executeTclCommand<sdc::TclCreateGeneratedClock>},
+      {"set_clock_groups", sdc::executeTclCommand<sdc::TclSetClockGroups>},
+      {"set_false_path", sdc::executeTclCommand<sdc::TclSetFalsePath>},
+      {"get_pins", sdc::executeTclCommand<sdc::TclGetPins>},
+      {"all_inputs", sdc::executeTclCommand<sdc::TclAllInputs>},
+      {"all_outputs", sdc::executeTclCommand<sdc::TclAllOutputs>},
+      {"set_propagated_clock", sdc::executeTclCommand<sdc::TclSetPropagatedClock>},
+  });
+  STADM.readConstraint();
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -173,8 +204,10 @@ void STAInterface::destroySTA()
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
+  STADC.destroy();
   DelayCalculator::destroyInst();
   STADM.output();
+  SdcCommand::destroyInst();
   DataManager::destroyInst();
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -190,6 +223,14 @@ void STAInterface::destroySTA()
   STALOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   // clang-format on
   Logger::destroyInst();
+
+#ifdef __GLIBC__
+  // Every STA object (liberty trees, wrapped netlist, timing graph, report
+  // buffers, ...) has been deleted above, but glibc keeps the freed pages
+  // mapped in its arenas, so repeated in-process STA sessions keep inflating
+  // the process RSS. Hand every freeable heap page back to the OS here.
+  malloc_trim(0);
+#endif
 }
 
 #endif
@@ -218,8 +259,8 @@ void STAInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   STADM.getConfig().timing_path_limit = STAUTIL.getConfigValue<int32_t>(config_map, "-timing_path_limit", 20);
   STADM.getConfig().timing_corner = STAUTIL.getConfigValue<std::string>(config_map, "-timing_corner", "");
   STADM.getConfig().is_path_report_number_specified = STAUTIL.exist(config_map, std::string("-max_paths"))
-                                                       || STAUTIL.exist(config_map, std::string("-max_path"))
-                                                       || STAUTIL.exist(config_map, std::string("-path_report_number"));
+                                                      || STAUTIL.exist(config_map, std::string("-max_path"))
+                                                      || STAUTIL.exist(config_map, std::string("-path_report_number"));
   STADM.getConfig().path_report_number = STAUTIL.getConfigValue<int32_t>(config_map, "-max_paths", 1);
   if (STAUTIL.exist(config_map, std::string("-max_path"))) {
     STADM.getConfig().path_report_number = std::any_cast<int32_t>(config_map["-max_path"]);
@@ -231,8 +272,6 @@ void STAInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   if (!STADM.getConfig().is_path_report_number_specified && STADM.getConfig().endpoint_path_report_number > 1) {
     STADM.getConfig().path_report_number = STADM.getConfig().endpoint_path_report_number;
   }
-  STADM.getConfig().timing_report_delay_type = STAUTIL.getConfigValue<std::string>(config_map, "-delay_type", "max");
-  STADM.getConfig().timing_report_start_end_type = STAUTIL.getConfigValue<std::string>(config_map, "-start_end_type", "all");
   STADM.getConfig().has_timing_report_slack_lesser_than = STAUTIL.exist(config_map, std::string("-slack_lesser_than"));
   if (STADM.getConfig().has_timing_report_slack_lesser_than) {
     STADM.getConfig().timing_report_slack_lesser_than = std::any_cast<double>(config_map["-slack_lesser_than"]);
@@ -631,6 +670,8 @@ void STAInterface::wrapTimingCell(idb::LibCell* lib_cell)
   timing_cell.set_area(lib_cell->get_cell_area());
   timing_cell.set_nom_voltage(lib_library->get_nom_voltage());
   timing_cell.set_cell_leakage_power(lib_cell->get_cell_leakage_power() * 1E-3);
+  // Timing uses check arcs to establish register clock/data pins. Importing
+  // state functions for power must not change that timing classification.
   timing_cell.set_is_sequential(lib_cell->isSequentialCell());
   timing_cell.set_is_clock_gating(lib_cell->isICG());
   timing_cell.set_is_macro(lib_cell->isMacroCell());
@@ -647,9 +688,16 @@ void STAInterface::wrapTimingCell(idb::LibCell* lib_cell)
   for (std::unique_ptr<idb::LibPort>& lib_port : lib_cell->get_cell_ports()) {
     wrapTimingCellPort(timing_cell, lib_port.get());
   }
+  for (std::unique_ptr<idb::LibPortBus>& lib_bus : lib_cell->get_cell_buses()) {
+    for (std::unique_ptr<idb::LibPort>& lib_port : lib_bus->get_ports()) {
+      wrapTimingCellPort(timing_cell, lib_port.get());
+    }
+  }
 
+  wrapTimingCellSequential(timing_cell, lib_cell);
   wrapTimingCellPower(timing_cell, lib_cell);
   wrapTimingCellLeakagePower(timing_cell, lib_cell);
+  wrapTimingCellPowerConditions(timing_cell);
 
   for (std::unique_ptr<idb::LibArcSet>& lib_arc_set : lib_cell->get_cell_arcs()) {
     wrapTimingCellArc(timing_cell, lib_arc_set.get());
@@ -665,6 +713,9 @@ void STAInterface::wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib
   timing_cell_port.set_port_name(lib_port->get_port_name());
   timing_cell_port.set_capacitance(lib_port->get_port_cap());
   timing_cell_port.set_drive_resistance(lib_port->driveResistance());
+  idb::LibLibrary* library = lib_port->get_ower_cell()->get_owner_lib();
+  timing_cell_port.set_fanout_load(lib_port->get_fanout_load().value_or(library->get_default_fanout_load().value_or(0.0)));
+  timing_cell_port.set_max_fanout(lib_port->get_max_fanout() ? lib_port->get_max_fanout() : library->get_default_max_fanout());
   for (idb::AnalysisMode analysis_mode : {idb::AnalysisMode::kMax, idb::AnalysisMode::kMin}) {
     for (idb::TransType trans_type : {idb::TransType::kRise, idb::TransType::kFall}) {
       std::optional<double> port_cap = lib_port->get_port_cap(analysis_mode, trans_type);
@@ -683,6 +734,26 @@ void STAInterface::wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib
   timing_cell.get_port_map()[timing_cell_port.get_port_name()] = timing_cell_port;
 }
 
+void STAInterface::wrapTimingCellSequential(TimingCell& timing_cell, const idb::LibCell* lib_cell)
+{
+  for (const idb::LibSequential& lib_sequential : lib_cell->get_sequentials()) {
+    const std::vector<std::string>& state_variables = lib_sequential.state_variables;
+    if (state_variables.empty()) {
+      continue;
+    }
+    TimingSequential timing_sequential;
+    timing_sequential.state_port = state_variables.front();
+    if (state_variables.size() > 1) {
+      timing_sequential.inverted_state_port = state_variables[1];
+    }
+    timing_sequential.is_latch = lib_sequential.is_latch;
+    timing_sequential.data = wrapLogicExpression(lib_sequential.get_attribute(timing_sequential.is_latch ? "data_in" : "next_state"));
+    timing_sequential.clock = wrapLogicExpression(lib_sequential.get_attribute(timing_sequential.is_latch ? "enable" : "clocked_on"));
+    timing_sequential.clear = wrapLogicExpression(lib_sequential.get_attribute("clear"));
+    timing_sequential.preset = wrapLogicExpression(lib_sequential.get_attribute("preset"));
+    timing_cell.get_sequentials().push_back(std::move(timing_sequential));
+  }
+}
 
 void STAInterface::wrapTimingCellPower(TimingCell& timing_cell, idb::LibCell* lib_cell)
 {
@@ -698,12 +769,44 @@ void STAInterface::wrapTimingCellPower(TimingCell& timing_cell, idb::LibCell* li
       timing_cell.get_power_arc_list().push_back(wrapTimingPortPowerArc(internal_power_info.get(), port_name, lib_library));
     }
   }
+  for (std::unique_ptr<idb::LibPortBus>& lib_bus : lib_cell->get_cell_buses()) {
+    for (std::unique_ptr<idb::LibPort>& lib_port : lib_bus->get_ports()) {
+      std::string port_name = lib_port->get_port_name();
+      for (std::unique_ptr<idb::LibInternalPowerInfo>& internal_power_info : lib_port->get_internal_powers()) {
+        timing_cell.get_power_arc_list().push_back(wrapTimingPortPowerArc(internal_power_info.get(), port_name, lib_library));
+      }
+    }
+  }
 }
 
 void STAInterface::wrapTimingCellLeakagePower(TimingCell& timing_cell, idb::LibCell* lib_cell)
 {
   for (std::unique_ptr<idb::LibLeakagePower>& lib_leakage_power : lib_cell->get_leakage_power_list()) {
     timing_cell.get_leakage_power_list().push_back(wrapTimingLeakagePower(lib_leakage_power.get()));
+  }
+}
+
+void STAInterface::wrapTimingCellPowerConditions(TimingCell& timing_cell)
+{
+  timing_cell.resolveDefaultPowerArcConditions();
+  if (timing_cell.get_is_sequential_for_power()) {
+    return;
+  }
+  // Liberty may include outputs in a state condition (e.g. A & Y on a
+  // buffer). Substitute their functions so the BDD preserves correlation.
+  std::map<std::string, LogicExpression> output_functions;
+  for (auto& [port_name, timing_cell_port] : timing_cell.get_port_map()) {
+    if (timing_cell_port.get_is_output() && !timing_cell_port.get_function_expression().get_is_empty()) {
+      output_functions[port_name] = timing_cell_port.get_function_expression();
+    }
+  }
+  for (TimingPowerArc& timing_power_arc : timing_cell.get_power_arc_list()) {
+    if (timing_power_arc.get_source_port().empty()) {
+      timing_power_arc.get_when_expression().substitute_ports(output_functions);
+    }
+  }
+  for (TimingLeakagePower& timing_leakage_power : timing_cell.get_leakage_power_list()) {
+    timing_leakage_power.get_when_expression().substitute_ports(output_functions);
   }
 }
 
@@ -717,14 +820,41 @@ TimingPowerArc STAInterface::wrapTimingPowerArc(idb::LibPowerArc* lib_power_arc)
   timing_power_arc.set_related_pg_port(internal_power_info->get_related_pg_port());
   std::string when_string = internal_power_info->get_when();
   timing_power_arc.set_when_expression(wrapLogicExpression(when_string));
+  // Match the conditional timing arc, since XOR/mux paths can change sense
+  // with their side inputs. Clock-to-Q tables always use the active clock edge.
+  idb::LibArc* matched_arc = nullptr;
+  for (std::unique_ptr<idb::LibArcSet>& lib_arc_set : lib_power_arc->get_owner_cell()->get_cell_arcs()) {
+    for (std::unique_ptr<idb::LibArc>& lib_arc : lib_arc_set->get_arcs()) {
+      if (timing_power_arc.get_source_port() != lib_arc->get_src_port() || timing_power_arc.get_sink_port() != lib_arc->get_snk_port()) {
+        continue;
+      }
+      if (matched_arc == nullptr || lib_arc->get_when() == when_string) {
+        matched_arc = lib_arc.get();
+      }
+      if (lib_arc->get_when() == when_string) {
+        break;
+      }
+    }
+    if (matched_arc != nullptr && matched_arc->get_when() == when_string) {
+      break;
+    }
+  }
+  if (matched_arc != nullptr) {
+    timing_power_arc.set_source_sense(wrapTimingArcSense(matched_arc));
+    timing_power_arc.set_source_transition(wrapTriggerTransType(matched_arc));
+    if (matched_arc->get_timing_type() == idb::LibArc::TimingType::kClear) {
+      timing_power_arc.set_sink_transition(TransType::kFall);
+    } else if (matched_arc->get_timing_type() == idb::LibArc::TimingType::kPreset) {
+      timing_power_arc.set_sink_transition(TransType::kRise);
+    }
+  }
   timing_power_arc.set_time_unit_scale(wrapLibTimeUnitScale(lib_library));
   timing_power_arc.set_cap_unit_scale(wrapLibCapUnitScale(lib_library));
   wrapTimingPowerArcTable(timing_power_arc, internal_power_info->get_power_table_model());
   return timing_power_arc;
 }
 
-TimingPowerArc STAInterface::wrapTimingPortPowerArc(idb::LibInternalPowerInfo* internal_power_info, std::string& port_name,
-                                                     idb::LibLibrary* lib_library)
+TimingPowerArc STAInterface::wrapTimingPortPowerArc(idb::LibInternalPowerInfo* internal_power_info, std::string& port_name, idb::LibLibrary* lib_library)
 {
   TimingPowerArc timing_power_arc;
   timing_power_arc.set_sink_port(port_name);
@@ -762,7 +892,7 @@ TimingLeakagePower STAInterface::wrapTimingLeakagePower(idb::LibLeakagePower* li
   return timing_leakage_power;
 }
 
-LogicExpression STAInterface::wrapLogicExpression(std::string& expression_string)
+LogicExpression STAInterface::wrapLogicExpression(const std::string& expression_string)
 {
   LogicExpression logic_expression;
   if (expression_string.empty()) {
@@ -835,6 +965,7 @@ void STAInterface::wrapTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* li
   if (isSDFDelayArc(lib_arc)) {
     TimingCellArc timing_cell_arc = wrapDelayArc(lib_arc_set);
     timing_cell_arc.set_is_timing_graph_arc(lib_arc->isDelayArc());
+    timing_cell_arc.set_is_clear_preset_arc(lib_arc->isClearPresetArc());
     timing_cell.get_cell_arc_list().push_back(timing_cell_arc);
     if (lib_arc->isClearPresetArc()) {
       wrapClearPresetArc(timing_cell, lib_arc);
@@ -1023,8 +1154,7 @@ TimingTableVariableType STAInterface::wrapTimingTableVariableType(idb::LibTable*
   if (*variable == idb::LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION) {
     return TimingTableVariableType::kConstrainedTransition;
   }
-  if (*variable == idb::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION
-      || *variable == idb::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION
+  if (*variable == idb::LibLutTableTemplate::Variable::INPUT_NET_TRANSITION || *variable == idb::LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION
       || *variable == idb::LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME) {
     return TimingTableVariableType::kInputTransition;
   }
@@ -1446,8 +1576,7 @@ std::unique_ptr<idb::LibArc> STAInterface::makeLibArc(std::string& source_port, 
 
 std::unique_ptr<idb::LibTable> STAInterface::makeLibScalarTable(int32_t table_type, TCScalarTable& tc_scalar_table)
 {
-  std::unique_ptr<idb::LibTable> lib_table
-      = std::make_unique<idb::LibTable>(static_cast<idb::LibTable::TableType>(table_type), nullptr);
+  std::unique_ptr<idb::LibTable> lib_table = std::make_unique<idb::LibTable>(static_cast<idb::LibTable::TableType>(table_type), nullptr);
   lib_table->addTableValue(std::make_unique<idb::LibFloatValue>(tc_scalar_table.get_value()));
   return lib_table;
 }

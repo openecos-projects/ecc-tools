@@ -131,8 +131,8 @@ class Utility
   using PointCoordT = remove_cvref_t<decltype(x(std::declval<const remove_cvref_t<P>&>()))>;
 
   template <class P>
-  using PointDistanceT = decltype(std::abs(x(std::declval<const P&>()) - x(std::declval<const P&>()))
-                                  + std::abs(y(std::declval<const P&>()) - y(std::declval<const P&>())));
+  using PointDistanceT
+      = decltype(std::abs(x(std::declval<const P&>()) - x(std::declval<const P&>())) + std::abs(y(std::declval<const P&>()) - y(std::declval<const P&>())));
 
   template <class P>
   static remove_cvref_t<P> makePoint(PointCoordT<P> x, PointCoordT<P> y)
@@ -561,10 +561,8 @@ class Utility
   template <typename PointT, typename RectT>
   static double pointToRectDistance2(PointT px, PointT py, RectT llx, RectT lly, RectT urx, RectT ury)
   {
-    double clamped_x
-        = std::clamp(static_cast<double>(px), static_cast<double>(std::min(llx, urx)), static_cast<double>(std::max(llx, urx)));
-    double clamped_y
-        = std::clamp(static_cast<double>(py), static_cast<double>(std::min(lly, ury)), static_cast<double>(std::max(lly, ury)));
+    double clamped_x = std::clamp(static_cast<double>(px), static_cast<double>(std::min(llx, urx)), static_cast<double>(std::max(llx, urx)));
+    double clamped_y = std::clamp(static_cast<double>(py), static_cast<double>(std::min(lly, ury)), static_cast<double>(std::max(lly, ury)));
     double dx = static_cast<double>(px) - clamped_x;
     double dy = static_cast<double>(py) - clamped_y;
     return dx * dx + dy * dy;
@@ -693,8 +691,7 @@ class Utility
         continue;
       }
 
-      if (!clipped_interval_list.empty() && clipped_interval_list.back().get_end() == start
-          && mergeable(clipped_interval_list.back(), interval)) {
+      if (!clipped_interval_list.empty() && clipped_interval_list.back().get_end() == start && mergeable(clipped_interval_list.back(), interval)) {
         clipped_interval_list.back().set_end(end);
         continue;
       }

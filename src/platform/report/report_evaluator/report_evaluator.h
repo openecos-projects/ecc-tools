@@ -37,8 +37,8 @@ class ReportEvaluator : public ReportBase
 {
  public:
   explicit ReportEvaluator(const std::string& report_name) : ReportBase(report_name) {}
-  std::shared_ptr<ieda::ReportTable> createWireLengthReport();
-  std::shared_ptr<ieda::ReportTable> createCongestionReport();
+  std::shared_ptr<ecc::ReportTable> createWireLengthReport();
+  std::shared_ptr<ecc::ReportTable> createCongestionReport();
 
  private:
   template <typename NET, typename FUNC>

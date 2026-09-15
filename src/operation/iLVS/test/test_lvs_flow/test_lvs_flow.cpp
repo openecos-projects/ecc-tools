@@ -16,10 +16,10 @@
 // ***************************************************************************************
 #include "DataManager.hpp"
 #include "EntityChecker.hpp"
-#include "Logger.hpp"
 #include "LVSHeader.hpp"
 #include "LVSInterface.hpp"
 #include "LVSReporter.hpp"
+#include "Logger.hpp"
 #include "PDNChecker.hpp"
 #include "RoutingChecker.hpp"
 #include "Utility.hpp"
@@ -43,8 +43,7 @@ ilvs::Shape makeShape(const int32_t layer_idx, const int32_t ll_x, const int32_t
   return shape;
 }
 
-ilvs::RoutingShape makeRoutingShape(const int32_t layer_idx, const int32_t ll_x, const int32_t ll_y, const int32_t ur_x,
-                                    const int32_t ur_y)
+ilvs::RoutingShape makeRoutingShape(const int32_t layer_idx, const int32_t ll_x, const int32_t ll_y, const int32_t ur_x, const int32_t ur_y)
 {
   ilvs::RoutingShape routing_shape;
   routing_shape.set_shape(makeShape(layer_idx, ll_x, ll_y, ur_x, ur_y));
@@ -52,8 +51,8 @@ ilvs::RoutingShape makeRoutingShape(const int32_t layer_idx, const int32_t ll_x,
   return routing_shape;
 }
 
-void addSupplyVia(ilvs::NetRoutingGraph& routing_graph, std::vector<int32_t>& component_id_list, int32_t& routing_shape_idx,
-                  const int32_t component_id, const int32_t ll_x, const int32_t ll_y, const int32_t ur_x, const int32_t ur_y)
+void addSupplyVia(ilvs::NetRoutingGraph& routing_graph, std::vector<int32_t>& component_id_list, int32_t& routing_shape_idx, const int32_t component_id,
+                  const int32_t ll_x, const int32_t ll_y, const int32_t ur_x, const int32_t ur_y)
 {
   routing_graph.get_routing_shape_list().push_back(makeRoutingShape(9, ll_x, ll_y, ur_x, ur_y));
   routing_graph.get_routing_shape_list().push_back(makeRoutingShape(10, ll_x, ll_y, ur_x, ur_y));

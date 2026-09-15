@@ -6,7 +6,6 @@ target_link_libraries(report_basic
     PUBLIC
         report_table
         idm
-        tool_manager
         def_service
 )
 

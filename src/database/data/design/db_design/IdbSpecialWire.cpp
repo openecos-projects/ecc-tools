@@ -29,6 +29,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "utility/logger/Logger.hpp"
 #include "IdbSpecialWire.h"
 
 #include <algorithm>
@@ -66,6 +67,9 @@ IdbSpecialWireSegment::~IdbSpecialWireSegment()
     delete _via;
     _via = nullptr;
   }
+
+  delete _delta_rect;
+  _delta_rect = nullptr;
 }
 
 void IdbSpecialWireSegment::set_shape_type(string type)
@@ -106,6 +110,7 @@ IdbCoordinate<int32_t>* IdbSpecialWireSegment::add_point(int32_t x, int32_t y)
 
 void IdbSpecialWireSegment::set_delta_rect(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y)
 {
+  delete _delta_rect;
   _delta_rect = new IdbRect(ll_x, ll_y, ur_x, ur_y);
 }
 
@@ -146,11 +151,16 @@ bool IdbSpecialWireSegment::set_bounding_box()
   if (is_via() && _via != nullptr) {
     IdbObject::set_bounding_box(_via->get_cut_bounding_box());
     return true;
+  } else if (is_rect() && _delta_rect != nullptr) {
+    /// the delta rect of a special wire segment is in absolute coordinates
+    return IdbObject::set_bounding_box(_delta_rect->get_low_x(), _delta_rect->get_low_y(), _delta_rect->get_high_x(),
+                                       _delta_rect->get_high_y());
   } else {
     if (_point_list.size() >= 2) {
       // ensure there are 2 point in a segment
       //   IdbLayerRouting* routing_layer = dynamic_cast<IdbLayerRouting*>(_layer);
-      int32_t routing_width = _route_width == 0 ? _route_width : _route_width;
+      auto* routing_layer = dynamic_cast<IdbLayerRouting*>(_layer);
+      int32_t routing_width = _route_width > 0 ? _route_width : (routing_layer == nullptr ? 0 : routing_layer->get_width());
 
       IdbCoordinate<int32_t>* point_1 = get_point_start();
       IdbCoordinate<int32_t>* point_2 = get_point_second();
@@ -372,7 +382,7 @@ int32_t IdbSpecialWireSegment::length()
       /// vertical
       return std::abs(pt1->get_y() - pt2->get_y());
     } else {
-      std::cout << "[Idb Error} Net segment error." << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "[Idb Error} Net segment error.");
     }
   }
 
@@ -529,14 +539,16 @@ int32_t IdbSpecialWire::add_segment_list(vector<IdbCoordinate<int32_t>*>& point_
 
 void IdbSpecialWire::removeViaInBoundingBox(IdbRect rect, IdbLayer* layer)
 {
-  int i = 0;
   for (auto segment = _segment_list.begin(); segment != _segment_list.end();) {
-    if ((*segment)->is_via() && (*segment)->get_via()->isIntersection(rect, layer)) {
-      segment = _segment_list.erase(std::begin(_segment_list) + i);
-      std::cout << "Success : remove via = " << (*segment)->get_via()->get_name() << std::endl;
+    auto* wire_segment = *segment;
+    if (wire_segment != nullptr && wire_segment->is_via() && wire_segment->get_via() != nullptr
+        && wire_segment->get_via()->isIntersection(rect, layer)) {
+      const std::string via_name = wire_segment->get_via()->get_name();
+      segment = _segment_list.erase(segment);
+      delete wire_segment;
+      ECCLOG.info(ecc::Loc::current(), "Success : remove via = ", via_name);
     } else {
       ++segment;
-      ++i;
     }
   }
 }
@@ -693,14 +705,12 @@ IdbSpecialWireSegment* IdbSpecialNetEdgeSegment::cutStripe(IdbSpecialNetEdgeSegm
                                                            IdbCoordinate<int32_t>* end)
 {
   ///
-  std::cout << "Segment == " << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Segment == ");
   for (IdbSpecialWireSegment* st : _segment_list) {
-    std::cout << " ( " << st->get_point(0)->get_x() << " , " << st->get_point(0)->get_y() << " ) , ( " << st->get_point(1)->get_x() << " , "
-              << st->get_point(1)->get_y() << " ) " << std::endl;
+    ECCLOG.info(ecc::Loc::current(), " ( ", st->get_point(0)->get_x(), " , ", st->get_point(0)->get_y(), " ) , ( ", st->get_point(1)->get_x(), " , ", st->get_point(1)->get_y(), " ) ");
   }
 
-  std::cout << "_coordinate_x_y = " << _coordinate_x_y << " edge_segment_connected = " << edge_segment_connected->get_coordinate()
-            << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "_coordinate_x_y = ", _coordinate_x_y, " edge_segment_connected = ", edge_segment_connected->get_coordinate());
 
   /// exclude the connected stripe
   if (edge_segment_connected->get_coordinate() != _coordinate_x_y) {
@@ -742,12 +752,11 @@ IdbSpecialWireSegment* IdbSpecialNetEdgeSegment::cutStripe(IdbSpecialNetEdgeSegm
         IdbRect rect_cut(top_point->get_x() - width / 2, bottom_y, top_point->get_x() + width / 2, top_y);
         _wire->removeViaInBoundingBox(rect_cut, segment_cut->get_layer());
 
-        std::cout << "Success : cutStripe. " << std::endl;
+        ECCLOG.info(ecc::Loc::current(), "Success : cutStripe. ");
         ///
-        std::cout << "Segment == " << std::endl;
+        ECCLOG.info(ecc::Loc::current(), "Segment == ");
         for (IdbSpecialWireSegment* st : _segment_list) {
-          std::cout << " ( " << st->get_point(0)->get_x() << " , " << st->get_point(0)->get_y() << " ) , ( " << st->get_point(1)->get_x()
-                    << " , " << st->get_point(1)->get_y() << " ) " << std::endl;
+          ECCLOG.info(ecc::Loc::current(), " ( ", st->get_point(0)->get_x(), " , ", st->get_point(0)->get_y(), " ) , ( ", st->get_point(1)->get_x(), " , ", st->get_point(1)->get_y(), " ) ");
         }
 
         return new_segment;
@@ -784,22 +793,21 @@ IdbSpecialWireSegment* IdbSpecialNetEdgeSegment::cutStripe(IdbSpecialNetEdgeSegm
         IdbRect rect_cut(left_x, right_point->get_y() - width / 2, right_x, right_point->get_y() + width / 2);
         _wire->removeViaInBoundingBox(rect_cut, segment_cut->get_layer());
 
-        std::cout << "Success : cutStripe. " << std::endl;
+        ECCLOG.info(ecc::Loc::current(), "Success : cutStripe. ");
         ///
-        std::cout << "Segment == " << std::endl;
+        ECCLOG.info(ecc::Loc::current(), "Segment == ");
         for (IdbSpecialWireSegment* st : _segment_list) {
-          std::cout << " ( " << st->get_point(0)->get_x() << " , " << st->get_point(0)->get_y() << " ) , ( " << st->get_point(1)->get_x()
-                    << " , " << st->get_point(1)->get_y() << " ) " << std::endl;
+          ECCLOG.info(ecc::Loc::current(), " ( ", st->get_point(0)->get_x(), " , ", st->get_point(0)->get_y(), " ) , ( ", st->get_point(1)->get_x(), " , ", st->get_point(1)->get_y(), " ) ");
         }
 
         return new_segment;
       }
     } else {
-      std::cout << "CutStripe : no intersection. " << std::endl;
+      ECCLOG.info(ecc::Loc::current(), "CutStripe : no intersection. ");
       return nullptr;
     }
   }
-  std::cout << "Same Coordinate. " << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Same Coordinate. ");
 
   return nullptr;
 }
@@ -834,9 +842,8 @@ IdbSpecialWireSegment* IdbSpecialNetEdgeSegment::cutStripe(IdbSpecialNetEdgeSegm
 //       top_point->set_y(bottom_y);
 //       segment_cut->set_bounding_box();
 
-//       std::cout << "Success : cutStripe by ( " << start->get_x() << " , " << start->get_y() << " ) , ( " <<
-//       end->get_x()
-//                 << " , " << end->get_y() << " ) " << std::endl;
+//       ECCLOG.info(ecc::Loc::current(), "Success: cutStripe by (", start->get_x(), ", ", start->get_y(), "), (",
+//                     end->get_x(), ", ", end->get_y(), ").");
 
 //       return true;
 
@@ -863,9 +870,8 @@ IdbSpecialWireSegment* IdbSpecialNetEdgeSegment::cutStripe(IdbSpecialNetEdgeSegm
 //       right_point->set_x(left_x);
 //       segment_cut->set_bounding_box();
 
-//       std::cout << "Success : cutStripe by ( " << start->get_x() << " , " << start->get_y() << " ) , ( " <<
-//       end->get_x()
-//                 << " , " << end->get_y() << " ) " << std::endl;
+//       ECCLOG.info(ecc::Loc::current(), "Success: cutStripe by (", start->get_x(), ", ", start->get_y(), "), (",
+//                     end->get_x(), ", ", end->get_y(), ").");
 
 //       return true;
 //     }
@@ -961,7 +967,7 @@ void IdbSpecialNetEdgeSegmenArray::updateSegmentEdgePoints(IdbSpecialWireSegment
     }
   } else {
     /// error
-    std::cout << "Error : segment type error." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : segment type error.");
   }
 }
 
@@ -996,7 +1002,7 @@ void IdbSpecialNetEdgeSegmenArray::updateSegmentArray(IdbSpecialWireSegment* seg
     vdd_new->set_wire(wire);
   } else {
     /// error
-    std::cout << "Error : segment type error." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : segment type error.");
   }
 }
 
@@ -1059,7 +1065,7 @@ bool IdbSpecialNetEdgeSegmenArray::addSegmentByCoordinateList(vector<IdbCoordina
 {
   int32_t point_size = coordinate_list.size();
   if (point_size < _POINT_MAX_) {
-    std::cout << "Error : size of point list should be larger than 2 to connect stripe." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : size of point list should be larger than 2 to connect stripe.");
     return false;
   }
 
@@ -1098,9 +1104,9 @@ bool IdbSpecialNetEdgeSegmenArray::addSegmentByCoordinateList(vector<IdbCoordina
     return true;
   }
 
-  std::cout << "Error : can not addSegmentByCoordinateList." << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Error : can not addSegmentByCoordinateList.");
   for (IdbCoordinate<int32_t>* point_print : coordinate_list) {
-    std::cout << "coordinate." << point_print->get_x() << "," << point_print->get_y() << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "coordinate.", point_print->get_x(), ",", point_print->get_y());
   }
 
   return false;
@@ -1123,37 +1129,35 @@ void IdbSpecialNetEdgeSegmenArray::cutStripe(IdbSpecialNetEdgeSegment* edge_segm
   //       nullptr != _segment_vss_1->cutStripe(edge_segment_connected, start, end) ||
   //       nullptr != _segment_vss_2->cutStripe(edge_segment_connected, start, end)) {
   //   } else {
-  //     // std::cout << "Info : do not cut stripe. ( " << start->get_x() << " , " << start->get_y() << " ) ( " <<
-  //     // end->get_x()
-  //     //           << " , " << end->get_y() << " )" << std::endl;
+  //     // ECCLOG.info(ecc::Loc::current(), "Do not cut stripe. (", start->get_x(), ", ", start->get_y(), "), (",
+  //     //              end->get_x(), ", ", end->get_y(), ").");
   //   }
   //   edge_segment_connected->cutStripe(start, end);
-  std::cout << "####################################################################" << std::endl;
-  std::cout << "Points  == ";
-  std::cout << " ( " << start->get_x() << " , " << start->get_y() << " ) , ( " << end->get_x() << " , " << end->get_y() << " ) "
-            << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "####################################################################");
+  ECCLOG.info(ecc::Loc::current(), "Points  == ");
+  ECCLOG.info(ecc::Loc::current(), " ( ", start->get_x(), " , ", start->get_y(), " ) , ( ", end->get_x(), " , ", end->get_y(), " ) ");
   IdbSpecialWireSegment* segment = nullptr;
-  std::cout << " VDD 1 ";
+  ECCLOG.info(ecc::Loc::current(), " VDD 1 ");
   if ((segment = _segment_vdd_1->cutStripe(edge_segment_connected, start, end)) != nullptr) {
     _segment_vdd_1->add_segment(segment);
-    std::cout << "success : VDD 1" << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "success : VDD 1");
   }
-  std::cout << " VDD 2 ";
+  ECCLOG.info(ecc::Loc::current(), " VDD 2 ");
   if ((segment = _segment_vdd_2->cutStripe(edge_segment_connected, start, end)) != nullptr) {
     _segment_vdd_2->add_segment(segment);
-    std::cout << "success : VDD 2" << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "success : VDD 2");
   }
-  std::cout << " VSS 1 ";
+  ECCLOG.info(ecc::Loc::current(), " VSS 1 ");
   if ((segment = _segment_vss_1->cutStripe(edge_segment_connected, start, end)) != nullptr) {
     _segment_vss_1->add_segment(segment);
-    std::cout << "success : VSS 1" << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "success : VSS 1");
   }
-  std::cout << " VSS 2 ";
+  ECCLOG.info(ecc::Loc::current(), " VSS 2 ");
   if ((segment = _segment_vss_2->cutStripe(edge_segment_connected, start, end)) != nullptr) {
     _segment_vss_2->add_segment(segment);
-    std::cout << "success : VSS 2" << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "success : VSS 2");
   }
-  std::cout << "####################################################################" << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "####################################################################");
 }
 
 }  // namespace idb

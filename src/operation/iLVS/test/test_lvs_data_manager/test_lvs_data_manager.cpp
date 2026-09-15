@@ -41,8 +41,7 @@ int main()
 
   database.get_netlist_data().normalize();
   assert(database.get_netlist_data().get_io_terminal_name_list() == std::vector<std::string>({"PIN/A", "PIN/B"}));
-  assert(database.get_netlist_data().get_net_map().at("n1").get_terminal_name_list()
-         == std::vector<std::string>({"u1/A", "u2/Z"}));
+  assert(database.get_netlist_data().get_net_map().at("n1").get_terminal_name_list() == std::vector<std::string>({"u1/A", "u2/Z"}));
 
   ilvs::Summary& summary = database.get_summary();
   summary.ec_summary.netlist_io_num = 1;

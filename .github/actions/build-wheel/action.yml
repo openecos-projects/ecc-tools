@@ -10,12 +10,32 @@ runs:
         dnf install -y epel-release
         dnf config-manager --set-enabled crb || true
         dnf install -y \
-          cmake ninja-build pkgconfig patchelf mold lld \
-          boost-devel cairo-devel gflags-devel glog-devel \
+          cmake ninja-build pkgconfig patchelf mold lld curl gcc-c++ \
+          cairo-devel gflags-devel glog-devel \
           flex flex-devel bison eigen3-devel gtest-devel \
           tbb-devel hwloc-devel libcurl-devel libunwind-devel \
           metis-devel gmp-devel tcl-devel \
           unzip zip
+
+    - name: Install Boost 1.92.0
+      shell: bash
+      run: |
+        boost_version="1.92.0"
+        boost_archive="boost-${boost_version}-b2-nodocs.tar.xz"
+        boost_prefix="${GITHUB_WORKSPACE}/.deps/boost-${boost_version}"
+        boost_sha256="ea7b982002cc9dfbe59b0b217b206f470dc75f3de0bb2973d844118934d82411"
+        boost_build_dir="$(mktemp -d)"
+
+        cd "$boost_build_dir"
+        curl --fail --location --retry 3 --output "$boost_archive" \
+          "https://github.com/boostorg/boost/releases/download/boost-${boost_version}/${boost_archive}"
+        echo "${boost_sha256}  ${boost_archive}" | sha256sum --check --status
+        tar -xf "$boost_archive"
+        cd "boost-${boost_version}"
+        ./bootstrap.sh --prefix="$boost_prefix" --with-libraries=system
+        ./b2 -j"$(nproc)" --with-system install
+
+        echo "ECC_BOOST_ROOT=${boost_prefix}" >> "$GITHUB_ENV"
 
     - name: Setup Python 3.11
       shell: bash
@@ -34,16 +54,16 @@ runs:
       uses: actions/cache@v4
       with:
         path: build
-        key: cmake-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
+        key: cmake-${{ runner.os }}-boost-1.92.0-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
         restore-keys: |
-          cmake-${{ runner.os }}-
+          cmake-${{ runner.os }}-boost-1.92.0-
 
     - name: Build repaired wheel
       shell: bash
       env:
         SCCACHE_GHA_ENABLED: "true"
       run: |
-        export CMAKE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
+        export CMAKE_ARGS="-DCMAKE_PREFIX_PATH=${ECC_BOOST_ROOT} -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
         uv sync --no-install-project
         uv build --wheel --no-build-isolation --verbose
         mkdir -p dist/wheel/repaired

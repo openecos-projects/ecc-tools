@@ -16,7 +16,7 @@
 // ***************************************************************************************
 #pragma once
 /**
- * @project		iEDA
+ * @project		ECC
  * @file		feature_parser.h
  * @author		Yell
  * @date		10/08/2023
@@ -46,7 +46,7 @@ class IdbLayout;
 
 using namespace idb;
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 using std::vector;
 
@@ -93,7 +93,6 @@ class FeatureParser
   json buildSummaryPL(std::string step);
   json buildSummaryCTS();
   json buildSummaryTO(std::string step = "");
-  json buildSummaryNetOpt();
   json buildSummaryRT();
   json buildSummarySTA();
   json buildSummaryDRC();
@@ -104,4 +103,4 @@ class FeatureParser
   json buildSummaryTiming();
   json buildSummaryPower();
 };
-}  // namespace ieda_feature
+}  // namespace ecc_feature

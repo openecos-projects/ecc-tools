@@ -30,17 +30,11 @@ class PhysicalGraphBuildData
   // getter
   std::vector<PhysicalGraphBuildNode>& get_graph_node_list() { return _graph_node_list; }
   std::vector<std::pair<int32_t, int32_t>>& get_via_node_pair_list() { return _via_node_pair_list; }
-  std::map<std::string, std::vector<PhysicalGraphBuildTerminal>>& get_net_terminal_build_data_map()
-  {
-    return _net_terminal_build_data_map;
-  }
+  std::map<std::string, std::vector<PhysicalGraphBuildTerminal>>& get_net_terminal_build_data_map() { return _net_terminal_build_data_map; }
   // const getter
   const std::vector<PhysicalGraphBuildNode>& get_graph_node_list() const { return _graph_node_list; }
   const std::vector<std::pair<int32_t, int32_t>>& get_via_node_pair_list() const { return _via_node_pair_list; }
-  const std::map<std::string, std::vector<PhysicalGraphBuildTerminal>>& get_net_terminal_build_data_map() const
-  {
-    return _net_terminal_build_data_map;
-  }
+  const std::map<std::string, std::vector<PhysicalGraphBuildTerminal>>& get_net_terminal_build_data_map() const { return _net_terminal_build_data_map; }
 
  private:
   std::vector<PhysicalGraphBuildNode> _graph_node_list;

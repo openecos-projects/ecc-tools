@@ -258,7 +258,7 @@ def validate_edit_overlay(root: Path, files: dict[str, str], counts: dict[str, i
     edits = load_json(root, relative_path)
     if not isinstance(edits, dict):
         raise ViewJsonError(f"{relative_path}: root is not an object")
-    if edits.get("schema") != "ieda.view.edit.v1":
+    if edits.get("schema") != "ecc.view.edit.v1":
         raise ViewJsonError(f"{relative_path}: unsupported schema")
     if edits.get("kind") != "layout_edits":
         raise ViewJsonError(f"{relative_path}: unsupported kind")
@@ -308,7 +308,7 @@ def validate_edit_overlay(root: Path, files: dict[str, str], counts: dict[str, i
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate an iEDA layout view JSON package.")
+    parser = argparse.ArgumentParser(description="Validate an ECC layout view JSON package.")
     parser.add_argument("output_dir", type=Path, help="view_json_save output directory")
     args = parser.parse_args()
 

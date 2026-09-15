@@ -29,7 +29,7 @@
 #include "ScriptEngine.hh"
 #include "UserShell.hh"
 #include "./tcl_report_pr/tcl_report_place.h"
-using namespace ieda;
+using namespace ecc;
 namespace tcl {
 
 int registerCmdReportDb()

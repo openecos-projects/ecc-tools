@@ -16,78 +16,107 @@
 // ***************************************************************************************
 #pragma once
 
-#include "OpenQueueNode.hpp"
+#include "Utility.hpp"
 
 namespace irt {
 
 template <class T>
-class OpenQueue : private std::priority_queue<OpenQueueNode<T>*, std::vector<OpenQueueNode<T>*>, CmpOpenQueueNodeCost<T>>
+class OpenQueue
 {
  public:
-  using Base = std::priority_queue<OpenQueueNode<T>*, std::vector<OpenQueueNode<T>*>, CmpOpenQueueNodeCost<T>>;
   OpenQueue() = default;
   ~OpenQueue() = default;
 
-  T* top()
-  {
-    while (!Base::empty() && Base::top()->get_state() == OpenQueueNodeState::kDel) {
-      auto del_node = Base::top();
-      Base::pop();
-      delete del_node;
-    }
-    return Base::empty() ? nullptr : Base::top()->get_node();
-  }
+  T* top() { return _heap.empty() ? nullptr : _heap.front(); }
   T* pop()
   {
-    T* node = top();
-    if (!Base::empty()) {
-      auto del_node = Base::top();
-      _node_to_priority_queue_node_map.erase(node);
-      Base::pop();
-      delete del_node;
-      real_size--;
+    if (_heap.empty()) {
+      return nullptr;
     }
+    T* node = _heap.front();
+    node->set_open_queue_idx(-1);
+    if (_heap.size() == 1) {
+      _heap.pop_back();
+      return node;
+    }
+    _heap.front() = _heap.back();
+    _heap.front()->set_open_queue_idx(0);
+    _heap.pop_back();
+    siftDown(0);
     return node;
   }
   void push(T* node)
   {
-    if (_node_to_priority_queue_node_map.find(node) != _node_to_priority_queue_node_map.end()) {
-      _node_to_priority_queue_node_map[node]->set_state(OpenQueueNodeState::kDel);
-      real_size--;
+    int32_t idx = node->get_open_queue_idx();
+    if (idx == -1) {
+      idx = static_cast<int32_t>(_heap.size());
+      _heap.push_back(node);
+      node->set_open_queue_idx(idx);
     }
-    OpenQueueNode<T>* pq_node = new OpenQueueNode<T>(node);
-    _node_to_priority_queue_node_map[node] = pq_node;
-    Base::push(pq_node);
-    real_size++;
-    if (Base::size() > real_size * 10) {
-      restruct();
+    int32_t new_idx = siftUp(idx);
+    if (new_idx == idx) {
+      siftDown(idx);
     }
-  }
-  void restruct()
-  {
-    std::priority_queue<OpenQueueNode<T>*, std::vector<OpenQueueNode<T>*>, CmpOpenQueueNodeCost<T>> temp;
-    for (auto& pq_node : this->c) {
-      if (pq_node->get_state() != OpenQueueNodeState::kDel) {
-        temp.push(pq_node);
-      } else {
-        delete pq_node;
-      }
-    }
-    temp.swap(*this);
   }
   void clear()
   {
-    for (auto& pq_node : this->c) {
-      delete pq_node;
+    for (T* node : _heap) {
+      node->set_open_queue_idx(-1);
     }
-    real_size = 0;
-    std::priority_queue<OpenQueueNode<T>*, std::vector<OpenQueueNode<T>*>, CmpOpenQueueNodeCost<T>>().swap(*this);
-    _node_to_priority_queue_node_map.clear();
+    _heap.clear();
+  }
+  void release()
+  {
+    clear();
+    std::vector<T*>().swap(_heap);
   }
 
  private:
-  long unsigned int real_size = 0;
-  std::map<T*, OpenQueueNode<T>*> _node_to_priority_queue_node_map;
+  static bool higherPriority(T* a, T* b)
+  {
+    if (Utility::equalDoubleByError(a->getTotalCost(), b->getTotalCost(), RT_ERROR)) {
+      if (Utility::equalDoubleByError(a->get_estimated_cost(), b->get_estimated_cost(), RT_ERROR)) {
+        return a->get_neighbor_node_num() > b->get_neighbor_node_num();
+      }
+      return a->get_estimated_cost() < b->get_estimated_cost();
+    }
+    return a->getTotalCost() < b->getTotalCost();
+  }
+  void swapNode(int32_t a, int32_t b)
+  {
+    std::swap(_heap[a], _heap[b]);
+    _heap[a]->set_open_queue_idx(a);
+    _heap[b]->set_open_queue_idx(b);
+  }
+  int32_t siftUp(int32_t idx)
+  {
+    while (idx > 0) {
+      int32_t parent = (idx - 1) / 2;
+      if (!higherPriority(_heap[idx], _heap[parent])) {
+        break;
+      }
+      swapNode(idx, parent);
+      idx = parent;
+    }
+    return idx;
+  }
+  void siftDown(int32_t idx)
+  {
+    int32_t size = static_cast<int32_t>(_heap.size());
+    while (idx * 2 + 1 < size) {
+      int32_t child = idx * 2 + 1;
+      if (child + 1 < size && higherPriority(_heap[child + 1], _heap[child])) {
+        child++;
+      }
+      if (!higherPriority(_heap[child], _heap[idx])) {
+        break;
+      }
+      swapNode(idx, child);
+      idx = child;
+    }
+  }
+
+  std::vector<T*> _heap;
 };
 
 }  // namespace irt

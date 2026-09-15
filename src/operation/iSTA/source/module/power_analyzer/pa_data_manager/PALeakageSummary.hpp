@@ -34,10 +34,7 @@ class PALeakageSummary
   void set_has_unconditional(const bool has_unconditional) { _has_unconditional = has_unconditional; }
   void set_conditional_leakage_power(const double conditional_leakage_power) { _conditional_leakage_power = conditional_leakage_power; }
   void set_conditional_probability(const double conditional_probability) { _conditional_probability = conditional_probability; }
-  void set_unconditional_leakage_power(const double unconditional_leakage_power)
-  {
-    _unconditional_leakage_power = unconditional_leakage_power;
-  }
+  void set_unconditional_leakage_power(const double unconditional_leakage_power) { _unconditional_leakage_power = unconditional_leakage_power; }
   // function
   void add_conditional_leakage_power(const double leakage_power, const double probability)
   {

@@ -18,23 +18,29 @@
 
 #include "CutLayer.hpp"
 #include "Die.hpp"
-#include "GCell.hpp"
 #include "Logger.hpp"
 #include "Macro.hpp"
 #include "Net.hpp"
 #include "Obstacle.hpp"
 #include "RTHeader.hpp"
+#include "RoutingEdge.hpp"
 #include "RoutingLayer.hpp"
 #include "Row.hpp"
 #include "Summary.hpp"
 #include "Utility.hpp"
 #include "ViaMaster.hpp"
+#include "Violation.hpp"
 
 namespace irt {
 
 class Database
 {
  public:
+  using FixedRectRTree = bgi::rtree<std::pair<BGRectInt, std::pair<int32_t, EXTLayerRect*>>, bgi::quadratic<16>>;
+  using AccessPointRTree = bgi::rtree<std::pair<BGRectInt, std::pair<int32_t, AccessPoint*>>, bgi::quadratic<16>>;
+  using GlobalResultRTree = bgi::rtree<std::pair<BGRectInt, std::pair<int32_t, int32_t>>, bgi::quadratic<16>>;
+  using ViolationRTree = bgi::rtree<std::pair<BGRectInt, Violation>, bgi::quadratic<16>>;
+
   Database() = default;
   ~Database() = default;
   // getter
@@ -61,9 +67,19 @@ class Database
   std::vector<Obstacle>& get_cut_obstacle_list() { return _cut_obstacle_list; }
   std::vector<Macro>& get_macro_list() { return _macro_list; }
   std::vector<Net>& get_net_list() { return _net_list; }
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_global_result_map() { return _net_global_result_map; }
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
+  std::map<int32_t, std::vector<EXTLayerRect>>& get_net_detailed_patch_map() { return _net_detailed_patch_map; }
   int32_t get_detection_distance() const { return _detection_distance; }
-  GridMap<GCell>& get_gcell_map() { return _gcell_map; }
-  std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& get_type_layer_net_fixed_rect_map() { return _type_layer_net_fixed_rect_map; }
+  GridMap<PlanarRect>& get_gcell_map() { return _gcell_map; }
+  GridMap<RoutingEdge>& get_planar_routing_h_edge_map() { return _planar_routing_h_edge_map; }
+  GridMap<RoutingEdge>& get_planar_routing_v_edge_map() { return _planar_routing_v_edge_map; }
+  std::vector<GridMap<RoutingEdge>>& get_routing_h_edge_map() { return _routing_h_edge_map; }
+  std::vector<GridMap<RoutingEdge>>& get_routing_v_edge_map() { return _routing_v_edge_map; }
+  std::array<std::map<int32_t, FixedRectRTree>, 2>& get_type_layer_fixed_rect_rtree_map() { return _type_layer_fixed_rect_rtree_map; }
+  AccessPointRTree& get_access_point_rtree() { return _access_point_rtree; }
+  GlobalResultRTree& get_global_result_rtree() { return _global_result_rtree; }
+  ViolationRTree& get_violation_rtree() { return _violation_rtree; }
   Summary& get_summary() { return _summary; }
   // setter
   void set_design_name(const std::string& design_name) { _design_name = design_name; }
@@ -98,9 +114,19 @@ class Database
   std::vector<Obstacle> _cut_obstacle_list;
   std::vector<Macro> _macro_list;
   std::vector<Net> _net_list;
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_global_result_map;
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_detailed_result_map;
+  std::map<int32_t, std::vector<EXTLayerRect>> _net_detailed_patch_map;
   int32_t _detection_distance = -1;
-  GridMap<GCell> _gcell_map;
-  std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> _type_layer_net_fixed_rect_map;
+  GridMap<PlanarRect> _gcell_map;
+  GridMap<RoutingEdge> _planar_routing_h_edge_map;
+  GridMap<RoutingEdge> _planar_routing_v_edge_map;
+  std::vector<GridMap<RoutingEdge>> _routing_h_edge_map;
+  std::vector<GridMap<RoutingEdge>> _routing_v_edge_map;
+  std::array<std::map<int32_t, FixedRectRTree>, 2> _type_layer_fixed_rect_rtree_map;
+  AccessPointRTree _access_point_rtree;
+  GlobalResultRTree _global_result_rtree;
+  ViolationRTree _violation_rtree;
   Summary _summary;
 };
 

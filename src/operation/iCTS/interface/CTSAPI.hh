@@ -27,9 +27,9 @@
 
 #include "CTSStatus.hh"
 
-namespace ieda_feature {
+namespace ecc_feature {
 struct CTSSummary;
-}  // namespace ieda_feature
+}  // namespace ecc_feature
 
 namespace icts {
 
@@ -63,12 +63,12 @@ class CTSAPI
   static auto report(const std::string& save_dir) -> CTSStatus;
 
   // Lifecycle API
-  static auto resetAPI() -> void;
+  static auto destroyCTS() -> CTSStatus;
   static auto init(const std::string& config_file, const std::string& work_dir = "") -> CTSStatus;
   static auto lastStatus() -> CTSStatus;
 
   // Feature API
-  static auto outputSummary() -> ieda_feature::CTSSummary;
+  static auto outputSummary() -> ecc_feature::CTSSummary;
   static auto outputClockTiming() -> std::vector<CTSTimingClock>;
   CTSAPI(const CTSAPI& other) = delete;
   CTSAPI(CTSAPI&& other) = delete;

@@ -6,6 +6,7 @@
 // iEDA is licensed under Mulan PSL v2.
 // ***************************************************************************************
 
+#include "utility/logger/Logger.hpp"
 #include "view_json_edit_apply.h"
 
 #include <algorithm>
@@ -35,7 +36,7 @@ bool requireObject(const ViewJson& json, const std::string& context)
   if (json.is_object()) {
     return true;
   }
-  std::cout << "Apply view json edits failed: " << context << " must be an object." << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " must be an object.");
   return false;
 }
 
@@ -43,7 +44,7 @@ bool readIntField(const ViewJson& json, const std::string& key, int& value, cons
 {
   auto iter = json.find(key);
   if (iter == json.end() || !iter->is_number_integer()) {
-    std::cout << "Apply view json edits failed: " << context << " requires integer field `" << key << "`." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " requires integer field `", key, "`.");
     return false;
   }
   value = iter->get<int>();
@@ -54,7 +55,7 @@ bool readStringField(const ViewJson& json, const std::string& key, std::string& 
 {
   auto iter = json.find(key);
   if (iter == json.end() || !iter->is_string()) {
-    std::cout << "Apply view json edits failed: " << context << " requires string field `" << key << "`." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " requires string field `", key, "`.");
     return false;
   }
   value = iter->get<std::string>();
@@ -68,7 +69,7 @@ bool checkStringFieldValue(const ViewJson& json, const std::string& key, const s
     return false;
   }
   if (value != expected) {
-    std::cout << "Apply view json edits failed: " << context << " field `" << key << "` must be `" << expected << "`." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " field `", key, "` must be `", expected, "`.");
     return false;
   }
   return true;
@@ -83,7 +84,7 @@ bool readOptionalStringField(const ViewJson& json, const std::string& key, std::
     return true;
   }
   if (!iter->is_string()) {
-    std::cout << "Apply view json edits failed: " << context << " field `" << key << "` must be a string." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " field `", key, "` must be a string.");
     return false;
   }
   exists = true;
@@ -95,7 +96,7 @@ bool readPointField(const ViewJson& json, const std::string& key, int32_t& x, in
 {
   auto iter = json.find(key);
   if (iter == json.end() || !iter->is_array() || iter->size() != 2 || !(*iter)[0].is_number_integer() || !(*iter)[1].is_number_integer()) {
-    std::cout << "Apply view json edits failed: " << context << " requires point field `" << key << "` as [x, y]." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " requires point field `", key, "` as [x, y].");
     return false;
   }
   x = (*iter)[0].get<int32_t>();
@@ -148,7 +149,7 @@ bool readOrientValue(const std::string& orient_name, IdbOrient& orient, const st
 {
   orient = parseOrient(orient_name);
   if (orient == IdbOrient::kNone) {
-    std::cout << "Apply view json edits failed: " << context << " has invalid orient `" << orient_name << "`." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " has invalid orient `", orient_name, "`.");
     return false;
   }
   return true;
@@ -159,7 +160,7 @@ bool readStatusValue(const std::string& status_name, IdbPlacementStatus& status,
   const std::string upper_status = toUpper(status_name);
   status = IdbEnum::GetInstance()->get_instance_property()->get_status(upper_status);
   if (status == IdbPlacementStatus::kNone && upper_status != "NONE") {
-    std::cout << "Apply view json edits failed: " << context << " has invalid status `" << status_name << "`." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " has invalid status `", status_name, "`.");
     return false;
   }
   return true;
@@ -248,7 +249,7 @@ bool applyMoveInstance(IdbDesign* design, const ViewJson& edit, const std::strin
   }
   IdbInstance* inst = instanceById(design, inst_id);
   if (inst == nullptr) {
-    std::cout << "Apply view json edits failed: " << context << " references invalid inst_id " << inst_id << "." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " references invalid inst_id ", inst_id, ".");
     return false;
   }
 
@@ -293,7 +294,7 @@ bool applyOrientInstance(IdbDesign* design, const ViewJson& edit, const std::str
   }
   IdbInstance* inst = instanceById(design, inst_id);
   if (inst == nullptr) {
-    std::cout << "Apply view json edits failed: " << context << " references invalid inst_id " << inst_id << "." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " references invalid inst_id ", inst_id, ".");
     return false;
   }
   return applyOrient(inst, orient_name, context, dry_run);
@@ -308,7 +309,7 @@ bool applySetStatus(IdbDesign* design, const ViewJson& edit, const std::string& 
   }
   IdbInstance* inst = instanceById(design, inst_id);
   if (inst == nullptr) {
-    std::cout << "Apply view json edits failed: " << context << " references invalid inst_id " << inst_id << "." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " references invalid inst_id ", inst_id, ".");
     return false;
   }
   return applyStatus(inst, status_name, context, dry_run);
@@ -324,7 +325,7 @@ bool applyMoveIoPin(IdbDesign* design, const ViewJson& edit, const std::string& 
   }
   IdbPin* pin = ioPinById(design, pin_id);
   if (pin == nullptr) {
-    std::cout << "Apply view json edits failed: " << context << " references invalid pin_id " << pin_id << "." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " references invalid pin_id ", pin_id, ".");
     return false;
   }
 
@@ -359,7 +360,7 @@ bool applyOrientIoPin(IdbDesign* design, const ViewJson& edit, const std::string
   }
   IdbPin* pin = ioPinById(design, pin_id);
   if (pin == nullptr) {
-    std::cout << "Apply view json edits failed: " << context << " references invalid pin_id " << pin_id << "." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " references invalid pin_id ", pin_id, ".");
     return false;
   }
   return applyOrient(pin, orient_name, context, dry_run);
@@ -395,7 +396,7 @@ bool processEdit(IdbDesign* design, const ViewJson& edit, const std::string& con
     return true;
   }
 
-  std::cout << "Apply view json edits failed: " << context << " has unsupported op `" << op << "`." << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", context, " has unsupported op `", op, "`.");
   return false;
 }
 
@@ -419,14 +420,14 @@ ViewJsonEditApplier::ViewJsonEditApplier(IdbDefService* def_service) : _def_serv
 bool ViewJsonEditApplier::apply(const std::string& edits_path, bool compressed_hint)
 {
   if (_def_service == nullptr || _def_service->get_design() == nullptr) {
-    std::cout << "Apply view json edits failed: def service or design is null." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: def service or design is null.");
     return false;
   }
 
   std::string content;
   std::string error;
   if (!readViewJsonText(edits_path, compressed_hint, content, error)) {
-    std::cout << "Apply view json edits failed: " << error << "." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: ", error, ".");
     return false;
   }
 
@@ -435,21 +436,21 @@ bool ViewJsonEditApplier::apply(const std::string& edits_path, bool compressed_h
     std::istringstream stream(content);
     stream >> root;
   } catch (const nlohmann::json::exception& error) {
-    std::cout << "Apply view json edits failed: parse " << edits_path << " error: " << error.what() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: parse ", edits_path, " error: ", error.what());
     return false;
   }
 
   if (!requireObject(root, "root")) {
     return false;
   }
-  if (!checkStringFieldValue(root, "schema", "ieda.view.edit.v1", "root")
+  if (!checkStringFieldValue(root, "schema", "ecc.view.edit.v1", "root")
       || !checkStringFieldValue(root, "kind", "layout_edits", "root")) {
     return false;
   }
 
   auto data_iter = root.find("data");
   if (data_iter == root.end() || !data_iter->is_array()) {
-    std::cout << "Apply view json edits failed: `data` must be an array." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Apply view json edits failed: `data` must be an array.");
     return false;
   }
 

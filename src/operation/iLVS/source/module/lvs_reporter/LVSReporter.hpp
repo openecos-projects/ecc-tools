@@ -20,9 +20,9 @@
 #include "ConnectType.hpp"
 #include "DataManager.hpp"
 #include "Database.hpp"
+#include "LRModel.hpp"
 #include "LVSConnectivitySummaryRow.hpp"
 #include "LVSEntitySummaryRow.hpp"
-#include "LRModel.hpp"
 #include "LVSHeader.hpp"
 #include "Monitor.hpp"
 
@@ -55,15 +55,14 @@ class LVSReporter
   std::vector<fort::char_table> getSummaryTableList();
   std::vector<LVSEntitySummaryRow> getEntitySummaryRowList();
   std::vector<LVSConnectivitySummaryRow> getConnectivitySummaryRowList();
-  void addConnectivitySummaryRow(std::vector<LVSConnectivitySummaryRow>& row_list, const std::string& connectivity,
-                                 int64_t open_num, int64_t short_num, int64_t connected_num, int64_t total_num);
+  void addConnectivitySummaryRow(std::vector<LVSConnectivitySummaryRow>& row_list, const std::string& connectivity, int64_t open_num, int64_t short_num,
+                                 int64_t connected_num, int64_t total_num);
   std::string getCountPercentageText(int64_t count, int64_t total_count);
   double getPercentage(int64_t count, int64_t total_count);
   std::set<std::string> getPowerOpenTerminalNameSet(ConnectType connect_type);
   std::set<std::string> getPowerShortTerminalNameSet(ConnectType connect_type);
   std::vector<const Violation*> getViolationList();
-  void outputRPT(const LRModel& lr_model, const std::vector<fort::char_table>& summary_table_list,
-                 const std::vector<const Violation*>& violation_list);
+  void outputRPT(const LRModel& lr_model, const std::vector<fort::char_table>& summary_table_list, const std::vector<const Violation*>& violation_list);
   std::string getJoinedString(const std::vector<int32_t>& value_list);
   std::string getJoinedString(const std::vector<std::string>& value_list);
   void outputJson(const LRModel& lr_model, const std::vector<const Violation*>& violation_list);

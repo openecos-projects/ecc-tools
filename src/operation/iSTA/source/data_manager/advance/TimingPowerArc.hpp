@@ -19,6 +19,7 @@
 #include "LogicExpression.hpp"
 #include "STAHeader.hpp"
 #include "TimingTable.hpp"
+#include "TimingArcSense.hpp"
 #include "TransType.hpp"
 
 namespace ista {
@@ -36,6 +37,9 @@ class TimingPowerArc
   std::map<TransType, TimingTable>& get_energy_table_map() { return _energy_table_map; }
   double get_time_unit_scale() const { return _time_unit_scale; }
   double get_cap_unit_scale() const { return _cap_unit_scale; }
+  TimingArcSense get_source_sense() const { return _source_sense; }
+  TransType get_source_transition() const { return _source_transition; }
+  TransType get_sink_transition() const { return _sink_transition; }
   // setter
   void set_source_port(const std::string& source_port) { _source_port = source_port; }
   void set_sink_port(const std::string& sink_port) { _sink_port = sink_port; }
@@ -44,9 +48,16 @@ class TimingPowerArc
   void set_energy_table_map(const std::map<TransType, TimingTable>& energy_table_map) { _energy_table_map = energy_table_map; }
   void set_time_unit_scale(const double time_unit_scale) { _time_unit_scale = time_unit_scale; }
   void set_cap_unit_scale(const double cap_unit_scale) { _cap_unit_scale = cap_unit_scale; }
+  void set_source_sense(TimingArcSense sense) { _source_sense = sense; }
+  void set_source_transition(TransType transition) { _source_transition = transition; }
+  void set_sink_transition(TransType transition) { _sink_transition = transition; }
   // function
 
  private:
+  // kNone permits both output edges; clear/preset timing arcs permit one.
+  TransType _sink_transition = TransType::kNone;
+  TimingArcSense _source_sense = TimingArcSense::kNone;
+  TransType _source_transition = TransType::kNone;
   std::string _source_port;
   std::string _sink_port;
   std::string _related_pg_port;

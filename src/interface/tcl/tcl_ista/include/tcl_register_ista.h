@@ -18,7 +18,7 @@
 
 #include "tcl_sta.h"
 
-using namespace ieda;
+using namespace ecc;
 
 namespace tcl {
 

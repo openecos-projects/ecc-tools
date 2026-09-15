@@ -15,23 +15,17 @@
 // ***************************************************************************************
 #include "topology/SpefTopologyBuilder.hh"
 
-#include <algorithm>
-#include <optional>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
 #include "Geometry.hh"
 #include "LayerTable.hpp"
 #include "LayoutData.hpp"
+#include "Logger.hpp"
 #include "Net.hpp"
 #include "Pin.hpp"
+#include "RCXHeader.hpp"
 #include "SpefParser.hh"
 #include "TopoEdge.hpp"
 #include "TopoNode.hpp"
 #include "TopoPool.hpp"
-#include "Logger.hpp"
 
 namespace ircx::run_rcx_from_topology::detail {
 
@@ -69,8 +63,7 @@ std::string getNormalizedSpefName(const std::string& name)
 
 GTLPointInt getPoint(const spef::Coord& coord, int32_t dbu_per_micron)
 {
-  return GTLPointInt(static_cast<int32_t>(std::llround(coord.x * dbu_per_micron)),
-                     static_cast<int32_t>(std::llround(coord.y * dbu_per_micron)));
+  return GTLPointInt(static_cast<int32_t>(std::llround(coord.x * dbu_per_micron)), static_cast<int32_t>(std::llround(coord.y * dbu_per_micron)));
 }
 
 GTLPointInt getGeometryCenter(const spef::GeometryAttr& geometry, int32_t dbu_per_micron)
@@ -108,10 +101,7 @@ void expandRangeToWidth(int32_t& lower_coord, int32_t& upper_coord, int32_t widt
   }
 }
 
-GTLRectInt getEdgeRect(const spef::GeometryAttr& geometry,
-                       const GTLPointInt& first_point,
-                       const GTLPointInt& second_point,
-                       int32_t dbu_per_micron)
+GTLRectInt getEdgeRect(const spef::GeometryAttr& geometry, const GTLPointInt& first_point, const GTLPointInt& second_point, int32_t dbu_per_micron)
 {
   int32_t lower_x = static_cast<int32_t>(std::llround(std::min(geometry.ll_coordinate.x, geometry.ur_coordinate.x) * dbu_per_micron));
   int32_t lower_y = static_cast<int32_t>(std::llround(std::min(geometry.ll_coordinate.y, geometry.ur_coordinate.y) * dbu_per_micron));
@@ -154,8 +144,8 @@ GTLRectInt getFallbackEdgeRect(const GTLPointInt& first_point, const GTLPointInt
   }
   if (geom::isHorizontalDominant(first_point, second_point)) {
     int32_t coord_y = geom::y(first_point) + (geom::y(second_point) - geom::y(first_point)) / 2;
-    return geom::makeRect<GTLRectInt>(std::min(geom::x(first_point), geom::x(second_point)), coord_y - 1,
-                                      std::max(geom::x(first_point), geom::x(second_point)), coord_y + 1);
+    return geom::makeRect<GTLRectInt>(std::min(geom::x(first_point), geom::x(second_point)), coord_y - 1, std::max(geom::x(first_point), geom::x(second_point)),
+                                      coord_y + 1);
   }
   int32_t coord_x = geom::x(first_point) + (geom::x(second_point) - geom::x(first_point)) / 2;
   return geom::makeRect<GTLRectInt>(coord_x - 1, std::min(geom::y(first_point), geom::y(second_point)), coord_x + 1,
@@ -186,16 +176,11 @@ std::unordered_map<std::string, std::string> getLayoutPinNameMap(Net& net)
   return normalized_name_to_pin_name_map;
 }
 
-std::optional<int32_t> getLayerIdx(int32_t net_idx,
-                                   const spef::Exchange& exchange,
-                                   LayerTable& layer_table,
-                                   int32_t annotation_layer_idx,
-                                   bool strict)
+std::optional<int32_t> getLayerIdx(int32_t net_idx, const spef::Exchange& exchange, LayerTable& layer_table, int32_t annotation_layer_idx, bool strict)
 {
   std::unordered_map<int, spef::LayerMapEntry>::const_iterator layer_map_it = exchange.layer_map.find(annotation_layer_idx);
   if (layer_map_it != exchange.layer_map.end()) {
-    std::unordered_map<std::string, int32_t>::iterator design_layer_it
-        = layer_table.get_design_name_to_idx_map().find(layer_map_it->second.layer_name);
+    std::unordered_map<std::string, int32_t>::iterator design_layer_it = layer_table.get_design_name_to_idx_map().find(layer_map_it->second.layer_name);
     if (design_layer_it != layer_table.get_design_name_to_idx_map().end()) {
       return design_layer_it->second;
     }
@@ -209,23 +194,17 @@ std::optional<int32_t> getLayerIdx(int32_t net_idx,
     }
     return std::nullopt;
   }
-  std::unordered_map<int32_t, std::string>::iterator design_layer_it
-      = layer_table.get_design_idx_to_name_map().find(annotation_layer_idx);
+  std::unordered_map<int32_t, std::string>::iterator design_layer_it = layer_table.get_design_idx_to_name_map().find(annotation_layer_idx);
   if (design_layer_it != layer_table.get_design_idx_to_name_map().end()) {
     return annotation_layer_idx;
   }
   if (strict) {
-    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: missing layer map for annotation layer ", annotation_layer_idx,
-                ", net_idx=", net_idx, ".");
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: missing layer map for annotation layer ", annotation_layer_idx, ", net_idx=", net_idx, ".");
   }
   return std::nullopt;
 }
 
-std::optional<int32_t> getConnLayerIdx(int32_t net_idx,
-                                       const spef::Exchange& exchange,
-                                       LayerTable& layer_table,
-                                       const spef::ConnEntry& conn,
-                                       bool strict)
+std::optional<int32_t> getConnLayerIdx(int32_t net_idx, const spef::Exchange& exchange, LayerTable& layer_table, const spef::ConnEntry& conn, bool strict)
 {
   if (conn.geometry.has_layer) {
     return getLayerIdx(net_idx, exchange, layer_table, conn.geometry.layer, strict);
@@ -239,12 +218,8 @@ std::optional<int32_t> getConnLayerIdx(int32_t net_idx,
   return std::nullopt;
 }
 
-std::optional<int32_t> getResLayerIdx(int32_t net_idx,
-                                      const spef::Exchange& exchange,
-                                      LayerTable& layer_table,
-                                      const spef::ResCap& res,
-                                      int32_t fallback_layer_idx,
-                                      bool strict)
+std::optional<int32_t> getResLayerIdx(int32_t net_idx, const spef::Exchange& exchange, LayerTable& layer_table, const spef::ResCap& res,
+                                      int32_t fallback_layer_idx, bool strict)
 {
   if (res.geometry.has_layer) {
     return getLayerIdx(net_idx, exchange, layer_table, res.geometry.layer, strict);
@@ -253,8 +228,7 @@ std::optional<int32_t> getResLayerIdx(int32_t net_idx,
     return fallback_layer_idx;
   }
   if (strict) {
-    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: resistor missing layer, net_idx=", net_idx, ", node1=", res.node1,
-                ", node2=", res.node2, ".");
+    RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: resistor missing layer, net_idx=", net_idx, ", node1=", res.node1, ", node2=", res.node2, ".");
   }
   return std::nullopt;
 }
@@ -276,12 +250,8 @@ bool getIsPin(const spef::ConnEntry& conn)
          || conn.conn_direction == spef::ConnectionDirection::kOutput || conn.conn_direction == spef::ConnectionDirection::kInout;
 }
 
-std::optional<NetTopo> buildNetTopo(LayoutData& layout_data,
-                                    LayerTable& layer_table,
-                                    const spef::Exchange& exchange,
-                                    const spef::Net& spef_net,
-                                    int32_t net_idx,
-                                    bool strict)
+std::optional<NetTopo> buildNetTopo(LayoutData& layout_data, LayerTable& layer_table, const spef::Exchange& exchange, const spef::Net& spef_net,
+                                    int32_t net_idx, bool strict)
 {
   NetTopo net_topo;
   net_topo.node_list.reserve(spef_net.conns.size());
@@ -299,8 +269,7 @@ std::optional<NetTopo> buildNetTopo(LayoutData& layout_data,
     std::optional<GTLPointInt> point = getConnPoint(conn, layout_data.get_dbu_per_micron());
     if (!layer_idx.has_value() || !point.has_value()) {
       if (strict) {
-        RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: invalid node geometry, net=", spef_net.name, ", node=", conn.pin_port_name,
-                    ".");
+        RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: invalid node geometry, net=", spef_net.name, ", node=", conn.pin_port_name, ".");
         return std::nullopt;
       }
       continue;
@@ -328,15 +297,13 @@ std::optional<NetTopo> buildNetTopo(LayoutData& layout_data,
     std::unordered_map<std::string, NodeInfo>::iterator second_node_it = node_name_to_info_map.find(second_node_name);
     if (first_node_it == node_name_to_info_map.end() || second_node_it == node_name_to_info_map.end()) {
       if (strict) {
-        RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: resistor endpoint missing from *CONN, net=", spef_net.name,
-                    ", node1=", res.node1, ", node2=", res.node2, ".");
+        RCXLOG.warn(Loc::current(), "run_rcx_from_topology failed: resistor endpoint missing from *CONN, net=", spef_net.name, ", node1=", res.node1,
+                    ", node2=", res.node2, ".");
         return std::nullopt;
       }
       continue;
     }
-    int32_t fallback_layer_idx = first_node_it->second.get_layer_idx() == second_node_it->second.get_layer_idx()
-                                     ? first_node_it->second.get_layer_idx()
-                                     : -1;
+    int32_t fallback_layer_idx = first_node_it->second.get_layer_idx() == second_node_it->second.get_layer_idx() ? first_node_it->second.get_layer_idx() : -1;
     std::optional<int32_t> layer_idx = getResLayerIdx(net_idx, exchange, layer_table, res, fallback_layer_idx, strict);
     if (!layer_idx.has_value()) {
       if (strict) {
@@ -414,8 +381,8 @@ bool SpefTopologyBuilder::build(LayoutData& layout_data, LayerTable& layer_table
   for (const spef::Net& spef_net : exchange->nets) {
     std::unordered_map<std::string, int32_t>::iterator net_idx_it = layout_net_name_to_idx_map.find(detail::getNormalizedSpefName(spef_net.name));
     if (net_idx_it == layout_net_name_to_idx_map.end()) {
-      RCXLOG.warn(Loc::current(), (strict ? "run_rcx_from_topology failed" : "run_rcx_from_topology warning"),
-                  ": net not found in layout, net=", spef_net.name, ".");
+      RCXLOG.warn(Loc::current(), (strict ? "run_rcx_from_topology failed" : "run_rcx_from_topology warning"), ": net not found in layout, net=", spef_net.name,
+                  ".");
       if (strict) {
         return false;
       }

@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "utility/logger/Logger.hpp"
 namespace {
 
 void require(bool condition, const std::string& message)
@@ -99,7 +100,7 @@ int main()
     testGzipRoundTrip();
     testFormatParser();
   } catch (const std::exception& error) {
-    std::cerr << error.what() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), error.what());
     return 1;
   }
   return 0;

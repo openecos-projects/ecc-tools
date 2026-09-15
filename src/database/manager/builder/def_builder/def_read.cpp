@@ -31,6 +31,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "def_read.h"
 
 #include <cstdlib>
@@ -44,10 +45,9 @@
 #include "defiPath.hpp"
 #include "defrReader.hpp"
 
-using std::cout;
-using std::endl;
-
 namespace idb {
+
+constexpr auto kParseProgressInterval = 100000;
 
 DefRead::DefRead(IdbDefService* def_service)
 {
@@ -64,8 +64,48 @@ bool DefRead::check_type(defrCallbackType_e type)
   if (type >= 0 && type <= defrDesignEndCbkType) {
     return true;
   } else {
-    std::cout << "Error defrCallbackType_e = " << type << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error defrCallbackType_e = ", type);
     return false;
+  }
+}
+
+void DefRead::parserErrorCallback(defiUserData data, const char* message)
+{
+  auto* def_reader = static_cast<DefRead*>(data);
+  if (def_reader != nullptr) {
+    def_reader->recordError("parser", message, kDbFail, defrLongLineNumber());
+  }
+}
+
+int32_t DefRead::recordCallbackResult(std::string_view stage, int32_t status)
+{
+  if (status != kDbSuccess) {
+    recordError(stage, "DEF callback returned a failure status.", status, defrLongLineNumber());
+  }
+
+  return status;
+}
+
+void DefRead::resetError(const char* file)
+{
+  _last_error.reset();
+  _file_path = file;
+}
+
+void DefRead::recordError(std::string_view stage, const char* message, int32_t status, int64_t line_number)
+{
+  if (_last_error) {
+    return;
+  }
+
+  _last_error = DefReadError{_file_path, line_number, std::string(stage), message == nullptr ? "Unknown DEF read error." : message, status};
+}
+
+void DefRead::logError() const
+{
+  if (const auto* error = get_last_error()) {
+    ECCLOG.warn(ecc::Loc::current(), "DEF read failed: file=", error->file_path, ", line=", error->line_number,
+                ", stage=", error->stage, ", status=", error->status, ", message=", error->message);
   }
 }
 
@@ -74,10 +114,12 @@ bool DefRead::createDb(const char* file)
   if (std::string_view(file).find(".gz") != std::string_view::npos) {
     return createDbGzip(file);
   } else {
+    resetError(file);
     FILE* f = fopen(file, "r");
 
     if (f == NULL) {
-      std::cerr << "Open def file failed..." << std::endl;
+      recordError("file", "Open DEF file failed.", kDbFail, 0);
+      logError();
       return false;
     }
 
@@ -85,6 +127,7 @@ bool DefRead::createDb(const char* file)
     defrReset();
 
     defrInitSession();
+    defrSetContextLogFunction(parserErrorCallback);
     defrSetVersionStrCbk(versionCallback);
     defrSetDesignCbk(designCallback);
     defrSetBusBitCbk(busBitCharsCallBack);
@@ -134,9 +177,8 @@ bool DefRead::createDb(const char* file)
     // void* userData = (void*) 0x01020304;
 
     int res = defrRead(f, file, (defiUserData) this, /* case sensitive */ 1);
-
-    if (res != 0) {
-      return false;
+    if (res != 0 && get_last_error() == nullptr) {
+      recordError("parser", "DEF parser returned a failure status.", res, defrLongLineNumber());
     }
 
     (void) defrUnsetCallbacks();
@@ -246,10 +288,16 @@ bool DefRead::createDb(const char* file)
     defrUnsetViaExtCbk();
     defrUnsetViaStartCbk();
     defrUnsetViaEndCbk();
+    defrSetContextLogFunction(nullptr);
 
     defrClear();
 
     fclose(f);
+
+    if (res != 0 || get_last_error() != nullptr) {
+      logError();
+      return false;
+    }
 
     return true;
   }
@@ -257,10 +305,12 @@ bool DefRead::createDb(const char* file)
 
 bool DefRead::createDbGzip(const char* gzip_file)
 {
+  resetError(gzip_file);
   defGZFile f = defrGZipOpen(gzip_file, "r");
 
   if (f == NULL) {
-    std::cerr << "Open def file failed..." << std::endl;
+    recordError("file", "Open gzip DEF file failed.", kDbFail, 0);
+    logError();
     return false;
   }
 
@@ -268,6 +318,7 @@ bool DefRead::createDbGzip(const char* gzip_file)
   defrReset();
 
   defrInitSession();
+  defrSetContextLogFunction(parserErrorCallback);
   defrSetGZipReadFunction();
   defrSetVersionStrCbk(versionCallback);
   defrSetDesignCbk(designCallback);
@@ -318,9 +369,8 @@ bool DefRead::createDbGzip(const char* gzip_file)
   // void* userData = (void*) 0x01020304;
 
   int res = defrReadGZip(f, gzip_file, (defiUserData) this);
-
-  if (res != 0) {
-    return false;
+  if (res != 0 && get_last_error() == nullptr) {
+    recordError("parser", "DEF parser returned a failure status.", res, defrLongLineNumber());
   }
 
   (void) defrUnsetCallbacks();
@@ -430,10 +480,16 @@ bool DefRead::createDbGzip(const char* gzip_file)
   defrUnsetViaExtCbk();
   defrUnsetViaStartCbk();
   defrUnsetViaEndCbk();
+  defrSetContextLogFunction(nullptr);
 
   defrClear();
 
   defrGZipClose(f);
+
+  if (res != 0 || get_last_error() != nullptr) {
+    logError();
+    return false;
+  }
 
   return true;
 }
@@ -444,7 +500,7 @@ bool DefRead::createFloorplanDb(const char* file)
 
   FILE* f = fopen(file, "r");
   if (f == NULL) {
-    std::cout << "Open def file failed..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Open def file failed...");
     return false;
   }
 
@@ -622,7 +678,7 @@ int32_t DefRead::versionCallback(defrCallbackType_e type, const char* version, d
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Version] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Version] ...");
     return kDbFail;
   }
 
@@ -643,7 +699,7 @@ int32_t DefRead::designCallback(defrCallbackType_e type, const char* name, defiU
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Design name] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Design name] ...");
     return kDbFail;
   }
 
@@ -664,13 +720,11 @@ int32_t DefRead::unitsCallback(defrCallbackType_e type, double d, defiUserData d
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Units] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Units] ...");
     return kDbFail;
   }
 
-  def_reader->parse_units(d);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("units", def_reader->parse_units(d));
 }
 
 int32_t DefRead::parse_units(double microns)
@@ -680,7 +734,7 @@ int32_t DefRead::parse_units(double microns)
 
   uint32_t lef_microns = layout->get_units()->get_micron_dbu();
   if (microns != lef_microns) {
-    std::cout << "Warning : Def DBU dismatch LEF DBU" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Warning : Def DBU dismatch LEF DBU");
     //   return kDbFail;
   }
 
@@ -693,25 +747,23 @@ int32_t DefRead::parse_units(double microns)
 int32_t DefRead::dieAreaCallback(defrCallbackType_e type, defiBox* def_box, defiUserData data)
 {
   if (def_box == nullptr) {
-    std::cout << "Die Area is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Die Area is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Die Area] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Die Area] ...");
     return kDbFail;
   }
 
-  def_reader->parse_die(def_box);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("die area", def_reader->parse_die(def_box));
 }
 
 int32_t DefRead::parse_die(defiBox* def_box)
 {
   if (def_box == nullptr) {
-    std::cout << "Parse die error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Parse die error...");
 
     return kDbFail;
   }
@@ -733,25 +785,23 @@ int32_t DefRead::parse_die(defiBox* def_box)
 int32_t DefRead::trackGridCallback(defrCallbackType_e type, defiTrack* def_track, defiUserData data)
 {
   if (def_track == nullptr) {
-    std::cout << "Track Grid is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Track Grid is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Track Grid] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Track Grid] ...");
     return kDbFail;
   }
 
-  def_reader->parse_track_grid(def_track);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("track grid", def_reader->parse_track_grid(def_track));
 }
 
 int32_t DefRead::parse_track_grid(defiTrack* def_track)
 {
   if (def_track == nullptr) {
-    std::cout << "Track Grid is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Track Grid is nullPtr...");
     return kDbFail;
   }
 
@@ -781,7 +831,7 @@ int32_t DefRead::parse_track_grid(defiTrack* def_track)
         routing_layer->add_track_grid(track_grid);
       }
     } else {
-      std::cout << "Track Grid Error : no layer exist..." << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Track Grid Error : no layer exist...");
     }
   }
 
@@ -791,25 +841,23 @@ int32_t DefRead::parse_track_grid(defiTrack* def_track)
 int32_t DefRead::rowCallback(defrCallbackType_e type, defiRow* def_row, defiUserData data)
 {
   if (def_row == nullptr) {
-    std::cout << "Row is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Row is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Row] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Row] ...");
     return kDbFail;
   }
 
-  def_reader->parse_row(def_row);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("row", def_reader->parse_row(def_row));
 }
 
 int32_t DefRead::parse_row(defiRow* def_row)
 {
   if (def_row == nullptr) {
-    std::cout << "Row is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Row is nullPtr...");
     return kDbFail;
   }
 
@@ -838,7 +886,7 @@ int32_t DefRead::parse_row(defiRow* def_row)
 
   row->set_bounding_box();
 
-  // std::cout << "Parse row success..." << std::endl;
+  // ECCLOG.info(ecc::Loc::current(), "Parse row success.");
   return kDbSuccess;
 }
 
@@ -846,7 +894,7 @@ int32_t DefRead::componentNumberCallback(defrCallbackType_e type, int def_num, d
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Component] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Component] ...");
     return kDbFail;
   }
 
@@ -868,25 +916,23 @@ int32_t DefRead::parse_component_number(int32_t def_component_num)
 int32_t DefRead::componentsCallback(defrCallbackType_e type, defiComponent* def_component, defiUserData data)
 {
   if (def_component == nullptr) {
-    std::cout << "Component is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Component is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Component] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Component] ...");
     return kDbFail;
   }
 
-  def_reader->parse_component(def_component);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("component", def_reader->parse_component(def_component));
 }
 
 int32_t DefRead::parse_component(defiComponent* def_component)
 {
   if (def_component == nullptr) {
-    std::cout << "Component is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Component is nullPtr...");
     return kDbFail;
   }
 
@@ -896,28 +942,29 @@ int32_t DefRead::parse_component(defiComponent* def_component)
   IdbRegionList* region_list = design->get_region_list();
   IdbCellMasterList* master_list = layout->get_cell_master_list();
 
+  std::string inst_name = def_component->id();
   if (nullptr == _cur_cell_master || _cur_cell_master->get_name() != def_component->name()) {
     _cur_cell_master = master_list->find_cell_master(def_component->name());
   }
   if (_cur_cell_master == nullptr) {
-    std::cout << "Error can not find Cell Master : " << def_component->name() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "PDK master not found: input=", _file_path, ", instance=", inst_name,
+                ", master=", def_component->name());
     return kDbFail;
   }
 
-  std::string inst_name = def_component->id();
   std::string new_inst_name = inst_name;
   std::erase(new_inst_name, '\\');
 
   IdbInstance* instance = design->createInstance(new_inst_name, _cur_cell_master->get_name(), IdbInstanceType::kNone,
                                                  IdbPlacementStatus::kNone, IdbOrient::kNone);
   if (instance == nullptr) {
-    std::cout << "Create Instance Error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create Instance Error...");
     return kDbFail;
   }
   instance->set_status_by_def_enum(def_component->placementStatus());
   instance->set_orient_by_enum(def_component->placementOrient());
-  // printf("def_component %p, instance name %s, placementOrient %d\n", def_component, instance->get_name().c_str(),
-  //        def_component->placementOrient());
+  // ECCLOG.info(ecc::Loc::current(), "def_component ", def_component, ", instance name ", instance->get_name(),
+  //              ", placement orient ", def_component->placementOrient());
   if (def_component->hasSource()) {
     instance->set_type(def_component->source());
   }
@@ -955,11 +1002,9 @@ int32_t DefRead::parse_component(defiComponent* def_component)
 
   instance->set_coodinate(def_component->placementX(), def_component->placementY());
 
-  if (design->get_instance_list()->get_num() % 1000 == 0) {
-    std::cout << "-" << std::flush;
-    if (design->get_instance_list()->get_num() % 100000 == 0) {
-      std::cout << std::endl;
-    }
+  const auto instance_num = design->get_instance_list()->get_num();
+  if (instance_num > 0 && instance_num % kParseProgressInterval == 0) {
+    ECCLOG.info(ecc::Loc::current(), "Parsed ", instance_num, " components.");
   }
 
   /// clear def_component
@@ -973,11 +1018,11 @@ int32_t DefRead::componentEndCallback(defrCallbackType_e type, void*, defiUserDa
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Component] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Component] ...");
     return kDbFail;
   }
 
-  std::cout << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "");
   def_reader->set_end_time(clock());
 
   return kDbSuccess;
@@ -987,7 +1032,7 @@ int32_t DefRead::netBeginCallback(defrCallbackType_e type, int def_num, defiUser
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Net] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Net] ...");
     return kDbFail;
   }
 
@@ -1009,25 +1054,23 @@ int32_t DefRead::parse_net_number(int32_t def_net_num)
 int32_t DefRead::netCallback(defrCallbackType_e type, defiNet* def_net, defiUserData data)
 {
   if (def_net == nullptr) {
-    std::cout << "Net is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Net is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Net] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Net] ...");
     return kDbFail;
   }
 
-  def_reader->parse_net(def_net);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("net", def_reader->parse_net(def_net));
 }
 
 int32_t DefRead::parse_net(defiNet* def_net)
 {
   if (def_net == nullptr) {
-    std::cout << "Net is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Net is nullPtr...");
     return kDbFail;
   }
 
@@ -1046,7 +1089,7 @@ int32_t DefRead::parse_net(defiNet* def_net)
   IdbNet* net = design->createOrFindNet(new_net_name);
 
   if (net == nullptr) {
-    std::cout << "Create Net Error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create Net Error...");
     return kDbFail;
   }
 
@@ -1095,7 +1138,7 @@ int32_t DefRead::parse_net(defiNet* def_net)
       std::erase(pin_name, '\\');
       pin = io_pin_list->find_pin(pin_name);
       if (pin == nullptr) {
-        std::cout << "Can not find Pin in Pin list ... pin name = " << def_net->pin(i) << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
       } else {
         connectPin(pin);
       }
@@ -1106,12 +1149,12 @@ int32_t DefRead::parse_net(defiNet* def_net)
         std::erase(pin_name, '\\');
         pin = instance->get_pin_by_term(pin_name);
         if (pin == nullptr) {
-          std::cout << "Can not find Pin in Pin list ... pin name = " << def_net->pin(i) << std::endl;
+          ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
         } else {
           connectPin(pin);
         }
       } else {
-        std::cout << "Can not find instance in instance list ... instance name = " << io_name << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "Can not find instance in instance list ... instance name = ", io_name);
       }
     }
   }
@@ -1152,7 +1195,7 @@ int32_t DefRead::parse_net(defiNet* def_net)
             }
 
             if (via == nullptr) {
-              std::cout << "Error : can not find the via = " << def_path->getVia() << std::endl;
+              ECCLOG.warn(ecc::Loc::current(), "Error : can not find the via = ", def_path->getVia());
               break;
             }
 
@@ -1221,15 +1264,12 @@ int32_t DefRead::parse_net(defiNet* def_net)
     }
   }
 
-  if (design->get_net_list()->get_num() % 1000 == 0) {
-    std::cout << "-" << std::flush;
-
-    if (design->get_net_list()->get_num() % 100000 == 0) {
-      std::cout << std::endl;
-    }
+  const auto net_num = design->get_net_list()->get_num();
+  if (net_num > 0 && net_num % kParseProgressInterval == 0) {
+    ECCLOG.info(ecc::Loc::current(), "Parsed ", net_num, " nets.");
   }
 
-  //   std::cout << "Parse net success... net name = " << net->get_net_name() << std::endl;
+  //   ECCLOG.info(ecc::Loc::current(), "Parse net success, net name = ", net->get_net_name());
 
   return kDbSuccess;
 }
@@ -1238,11 +1278,11 @@ int32_t DefRead::netEndCallback(defrCallbackType_e type, void*, defiUserData dat
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Net] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Net] ...");
     return kDbFail;
   }
 
-  std::cout << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "");
 
   return kDbSuccess;
 }
@@ -1251,11 +1291,11 @@ int32_t DefRead::specialNetBeginCallback(defrCallbackType_e type, int def_num, d
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Special Net Number] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Special Net Number] ...");
     return kDbFail;
   }
 
-  std::cout << "Begin parse Specialnet." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Begin parse Specialnet.");
 
   return kDbSuccess;
 }
@@ -1263,25 +1303,23 @@ int32_t DefRead::specialNetBeginCallback(defrCallbackType_e type, int def_num, d
 int32_t DefRead::specialNetCallback(defrCallbackType_e type, defiNet* def_net, defiUserData data)
 {
   if (def_net == nullptr) {
-    std::cout << "Special Net is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Special Net is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Special Net] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Special Net] ...");
     return kDbFail;
   }
 
-  def_reader->parse_special_net(def_net);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("special net", def_reader->parse_special_net(def_net));
 }
 
 int32_t DefRead::parse_special_net(defiNet* def_net)
 {
   if (def_net == nullptr) {
-    std::cout << "Special Net is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Special Net is nullPtr...");
     return kDbFail;
   }
 
@@ -1309,7 +1347,7 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
   IdbSpecialNet* net = design->createOrFindSpecialNet(def_net->name());
 
   if (net == nullptr) {
-    std::cout << "Create Net Error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create Net Error...");
     return kDbFail;
   }
 
@@ -1329,6 +1367,8 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
     net->set_original_net_name(def_net->original());
   }
 
+  std::vector<IdbPin*> connected_pins;
+  connected_pins.reserve(def_net->numConnections());
   for (int i = 0; i < def_net->numConnections(); i++) {
     string io_name = def_net->instance(i);
     std::erase(io_name, '\\');
@@ -1342,9 +1382,9 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
       std::erase(pin_name, '\\');
       pin = io_pin_list->find_pin(pin_name);
       if (pin == nullptr) {
-        std::cout << "Can not find Pin in Pin list ... pin name = " << def_net->pin(i) << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
       } else {
-        design->connectPinToSpecialNet(pin, net);
+        connected_pins.emplace_back(pin);
       }
     } else {
       IdbInstance* instance = instance_list->find_instance(io_name);
@@ -1353,14 +1393,19 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
         std::erase(pin_name, '\\');
         pin = instance->get_pin_by_term(pin_name);
         if (pin == nullptr) {
-          std::cout << "Can not find Pin in Pin list ... pin name = " << def_net->pin(i) << std::endl;
+          ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
         } else {
-          design->connectPinToSpecialNet(pin, net);
+          connected_pins.emplace_back(pin);
         }
       } else {
-        std::cout << "Can not find instance in instance list ... instance name = " << io_name << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "Can not find instance in instance list ... instance name = ", io_name);
       }
     }
+  }
+
+  if (!design->connectPinsToSpecialNet(connected_pins, net)) {
+    ECCLOG.warn(ecc::Loc::current(), "Connect Special Net pins failed ... net name = ", def_net->name());
+    return kDbFail;
   }
 
   if (net->has_wildcard_instance_pins() && std::getenv("IDB_MATERIALIZE_SPECIALNET_WILDCARD_PINS") != nullptr) {
@@ -1371,12 +1416,9 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
   parse_pdn_wire(def_net, wire_list);
   parse_pdn_rects(def_net, wire_list);
 
-  if (design->get_special_net_list()->get_num() % 1000 == 0) {
-    std::cout << "-" << std::flush;
-
-    if (design->get_special_net_list()->get_num() % 100000 == 0) {
-      std::cout << std::endl;
-    }
+  const auto special_net_num = design->get_special_net_list()->get_num();
+  if (special_net_num > 0 && special_net_num % kParseProgressInterval == 0) {
+    ECCLOG.info(ecc::Loc::current(), "Parsed ", special_net_num, " special nets.");
   }
 
   return kDbSuccess;
@@ -1455,8 +1497,24 @@ int32_t DefRead::parse_pdn_wire(defiNet* def_net, IdbSpecialWireList* wire_list)
             break;
           case DEFIPATH_VIADATA:
             break;
-          case DEFIPATH_RECT:
+          case DEFIPATH_RECT: {
+            int32_t ll_x;
+            int32_t ll_y;
+            int32_t ur_x;
+            int32_t ur_y;
+            def_path->getViaRect(&ll_x, &ll_y, &ur_x, &ur_y);
+            segment->set_is_rect(true);
+            IdbCoordinate<int32_t>* point_end = segment->get_point(segment->get_point_num() - 1);
+            if (point_end != nullptr) {
+              /// path RECT coordinates are offsets from the preceding path point,
+              /// while a special wire segment stores its rect in absolute coordinates
+              segment->set_delta_rect(point_end->get_x() + ll_x, point_end->get_y() + ll_y, point_end->get_x() + ur_x,
+                                      point_end->get_y() + ur_y);
+            } else {
+              segment->set_delta_rect(ll_x, ll_y, ur_x, ur_y);
+            }
             break;
+          }
           case DEFIPATH_VIRTUALPOINT:
             break;
           case DEFIPATH_MASK:
@@ -1512,13 +1570,13 @@ int32_t DefRead::specialNetEndCallback(defrCallbackType_e type, void*, defiUserD
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Special Net] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Special Net] ...");
     return kDbFail;
   }
 
-  std::cout << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "");
 
-  std::cout << "End parse Specialnet." << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "End parse Specialnet.");
 
   return kDbSuccess;
 }
@@ -1527,7 +1585,7 @@ int32_t DefRead::pinsBeginCallback(defrCallbackType_e type, int def_num, defiUse
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Pin] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Pin] ...");
     return kDbFail;
   }
 
@@ -1549,19 +1607,17 @@ int32_t DefRead::parse_pin_number(int32_t def_pin_num)
 int32_t DefRead::pinCallback(defrCallbackType_e type, defiPin* def_pin, defiUserData data)
 {
   if (def_pin == nullptr) {
-    std::cout << "Pin is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Pin is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Pin] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Pin] ...");
     return kDbFail;
   }
 
-  def_reader->parse_pin(def_pin);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("pin", def_reader->parse_pin(def_pin));
 }
 /**
  * @brief Parse IO pins, create each IO Term in IdbPin
@@ -1570,7 +1626,7 @@ int32_t DefRead::pinCallback(defrCallbackType_e type, defiPin* def_pin, defiUser
 int32_t DefRead::parse_pin(defiPin* def_pin)
 {
   if (def_pin == nullptr) {
-    std::cout << "Pin is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Pin is nullPtr...");
     return kDbFail;
   }
 
@@ -1585,7 +1641,7 @@ int32_t DefRead::parse_pin(defiPin* def_pin)
 
   IdbPin* pin = design->createOrFindIoPin(new_pin_name, IdbCreatePolicy::kErrorIfExists);
   if (pin == nullptr) {
-    std::cout << "Create Pin Error..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Create Pin Error...");
     return kDbFail;
   }
 
@@ -1749,7 +1805,7 @@ int32_t DefRead::pinsEndCallback(defrCallbackType_e type, void*, defiUserData da
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Pin] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Pin] ...");
     return kDbFail;
   }
 
@@ -1760,7 +1816,7 @@ int32_t DefRead::viaBeginCallback(defrCallbackType_e type, int def_num, defiUser
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Via] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Via] ...");
     return kDbFail;
   }
 
@@ -1782,25 +1838,23 @@ int32_t DefRead::parse_via_num(int32_t via_num)
 int32_t DefRead::viaCallback(defrCallbackType_e type, defiVia* def_via, defiUserData data)
 {
   if (def_via == nullptr) {
-    std::cout << "Via is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Via is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Via] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Via] ...");
     return kDbFail;
   }
 
-  def_reader->parse_via(def_via);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("via", def_reader->parse_via(def_via));
 }
 
 int32_t DefRead::parse_via(defiVia* def_via)
 {
   if (def_via == nullptr) {
-    std::cout << "Via is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Via is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // Def
@@ -1947,25 +2001,23 @@ int32_t DefRead::parse_via(defiVia* def_via)
 int32_t DefRead::blockageCallback(defrCallbackType_e type, defiBlockage* def_blockage, defiUserData data)
 {
   if (def_blockage == nullptr) {
-    std::cout << "Blockage is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Blockage is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Blockage] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Blockage] ...");
     return kDbFail;
   }
 
-  def_reader->parse_blockage(def_blockage);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("blockage", def_reader->parse_blockage(def_blockage));
 }
 
 int32_t DefRead::parse_blockage(defiBlockage* def_blockage)
 {
   if (def_blockage == nullptr) {
-    std::cout << "Blockage is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Blockage is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // Def
@@ -2044,25 +2096,23 @@ int32_t DefRead::parse_blockage(defiBlockage* def_blockage)
 int32_t DefRead::gcellGridCallback(defrCallbackType_e type, defiGcellGrid* def_grid, defiUserData data)
 {
   if (def_grid == nullptr) {
-    std::cout << "GCell Grid is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "GCell Grid is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : GCell Grid] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : GCell Grid] ...");
     return kDbFail;
   }
 
-  def_reader->parse_gcell_grid(def_grid);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("gcell grid", def_reader->parse_gcell_grid(def_grid));
 }
 
 int32_t DefRead::parse_gcell_grid(defiGcellGrid* def_grid)
 {
   if (def_grid == nullptr) {
-    std::cout << "GCell Grid is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "GCell Grid is nullPtr...");
     return kDbFail;
   }
 
@@ -2085,25 +2135,23 @@ int32_t DefRead::parse_gcell_grid(defiGcellGrid* def_grid)
 int32_t DefRead::regionCallback(defrCallbackType_e type, defiRegion* def_region, defiUserData data)
 {
   if (def_region == nullptr) {
-    std::cout << "Region is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Region is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Region] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Region] ...");
     return kDbFail;
   }
 
-  def_reader->parse_region(def_region);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("region", def_reader->parse_region(def_region));
 }
 
 int32_t DefRead::parse_region(defiRegion* def_region)
 {
   if (def_region == nullptr) {
-    std::cout << "Region is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Region is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // def
@@ -2127,25 +2175,23 @@ int32_t DefRead::parse_region(defiRegion* def_region)
 int32_t DefRead::slotsCallback(defrCallbackType_e type, defiSlot* def_slot, defiUserData data)
 {
   if (def_slot == nullptr) {
-    std::cout << "Slot is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Slot is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Slot] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Slot] ...");
     return kDbFail;
   }
 
-  def_reader->parse_slot(def_slot);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("slot", def_reader->parse_slot(def_slot));
 }
 
 int32_t DefRead::parse_slot(defiSlot* def_slot)
 {
   if (def_slot == nullptr) {
-    std::cout << "Slot is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Slot is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // def
@@ -2168,25 +2214,23 @@ int32_t DefRead::parse_slot(defiSlot* def_slot)
 int32_t DefRead::groupCallback(defrCallbackType_e type, defiGroup* def_group, defiUserData data)
 {
   if (def_group == nullptr) {
-    std::cout << "Group is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Group is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Group] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Group] ...");
     return kDbFail;
   }
 
-  def_reader->parse_group(def_group);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("group", def_reader->parse_group(def_group));
 }
 
 int32_t DefRead::parse_group(defiGroup* def_group)
 {
   if (def_group == nullptr) {
-    std::cout << "Group is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Group is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // def
@@ -2208,7 +2252,7 @@ int32_t DefRead::fillsCallback(defrCallbackType_e type, int32_t def_num, defiUse
 {
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Fill] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Fill] ...");
     return kDbFail;
   }
 
@@ -2228,25 +2272,23 @@ int32_t DefRead::parse_fill_number(int32_t def_fill_num)
 int32_t DefRead::fillCallback(defrCallbackType_e type, defiFill* def_fill, defiUserData data)
 {
   if (def_fill == nullptr) {
-    std::cout << "Fill is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Fill is nullPtr...");
     return kDbFail;
   }
 
   DefRead* def_reader = (DefRead*) data;
   if (!def_reader->check_type(type)) {
-    std::cout << "Check Type Error [Def : Fill] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Def : Fill] ...");
     return kDbFail;
   }
 
-  def_reader->parse_fill(def_fill);
-
-  return kDbSuccess;
+  return def_reader->recordCallbackResult("fill", def_reader->parse_fill(def_fill));
 }
 
 int32_t DefRead::parse_fill(defiFill* def_fill)
 {
   if (def_fill == nullptr) {
-    std::cout << "Fill is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Fill is nullPtr...");
     return kDbFail;
   }
   IdbDesign* design = _def_service->get_design();  // def
@@ -2274,6 +2316,10 @@ int32_t DefRead::parse_fill(defiFill* def_fill)
     if (via == nullptr) {
       via = via_list_lef->find_via(def_fill->viaName());
     }
+    if (via == nullptr) {
+      ECCLOG.warn(ecc::Loc::current(), "Error : can not find the fill via = ", def_fill->viaName());
+      return kDbFail;
+    }
     IdbVia* via_new = via->clone();
     IdbFillVia* fill_via = fill_list->add_fill_via(via_new);
     if (via_new != nullptr) {
@@ -2292,26 +2338,24 @@ int32_t DefRead::parse_fill(defiFill* def_fill)
 int32_t DefRead::busBitCharsCallBack(defrCallbackType_e c, const char* bus_bit_chars_str, defiUserData data)
 {
   if (c != defrBusBitCbkType) {
-    std::cout << "busBitCharsCB callback type unmatch!" << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "busBitCharsCB callback type unmatch!");
     return kDbFail;
   }
   if (bus_bit_chars_str == nullptr) {
-    std::cout << "BusBitChars is nullptr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "BusBitChars is nullptr...");
     return kDbFail;
   }
   if (strlen(bus_bit_chars_str) != 2) {
-    std::cout << "Unsupported Bus Bit Chars..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Unsupported Bus Bit Chars...");
     return kDbFail;
   }
 
   auto* def_reader = static_cast<DefRead*>(data);
   if (!def_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : BusBitChars] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : BusBitChars] ...");
     return kDbFail;
   }
-  int32_t parse_status = def_reader->parse_bus_bit_chars(bus_bit_chars_str);
-
-  return parse_status;
+  return def_reader->recordCallbackResult("bus bit characters", def_reader->parse_bus_bit_chars(bus_bit_chars_str));
 }
 
 int32_t DefRead::parse_bus_bit_chars(const char* bus_bit_chars_str)
@@ -2321,9 +2365,6 @@ int32_t DefRead::parse_bus_bit_chars(const char* bus_bit_chars_str)
   bus_bit_chars->setLeftDelimiter(bus_bit_chars_str[0]);
   bus_bit_chars->setRightDelimter(bus_bit_chars_str[1]);
 
-  if (design->get_bus_bit_chars() != nullptr) {
-    delete design->get_bus_bit_chars();
-  }
   design->set_bus_bit_chars(bus_bit_chars);
   return kDbSuccess;
 }

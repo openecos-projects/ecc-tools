@@ -32,10 +32,9 @@
 
 #include <map>
 
-#include "flow_config.h"
 #include "idm.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 FeatureBuilder::FeatureBuilder()
 {
@@ -64,12 +63,8 @@ SummaryInfo FeatureBuilder::buildSummaryInfo()
   SummaryInfo info;
 
   info.eda_tool = "ecc";
-  info.eda_version = iplf::flowConfigInst->get_env_info_software_version();
   info.design_name = dmInst->get_idb_design()->get_design_name();
   info.design_version = dmInst->get_idb_design()->get_version();
-  info.flow_stage = iplf::flowConfigInst->get_status_stage();
-  info.flow_runtime = iplf::flowConfigInst->get_status_runtime_string();
-  info.flow_memory = iplf::flowConfigInst->get_status_memmory_string();
 
   return info;
 }
@@ -371,4 +366,4 @@ SummaryPins FeatureBuilder::buildSummaryPins()
   return summary_pins;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

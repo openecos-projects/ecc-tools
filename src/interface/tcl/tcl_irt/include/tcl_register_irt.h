@@ -18,7 +18,7 @@
 
 #include "tcl_rt.h"
 
-using namespace ieda;
+using namespace ecc;
 
 namespace tcl {
 
@@ -31,7 +31,6 @@ int registerCmdRT()
   registerTclCmd(TclDestroyRT, "destroy_rt");
   // aux
   registerTclCmd(TclRTCleanDef, "rt_clean_def");
-  registerTclCmd(TclRTFixFanout, "rt_fix_fanout");
   return EXIT_SUCCESS;
 }
 

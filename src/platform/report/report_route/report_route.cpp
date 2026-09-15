@@ -184,7 +184,7 @@ void ReportRoute::createNetReport(IdbNet* net)
   std::vector<std::string> header
       = {"\nNet Name", "  HPWL\nLength", " Routing\nLayer", "\nLength", " Cut\nLayer", " Via\nCount", "Wire Length\n To HPWL\nLength Ratio",
          "Fan_in",     "Fan_out"};
-  auto net_tbl = std::make_shared<ieda::ReportTable>("Net Information", header, -1);
+  auto net_tbl = std::make_shared<ecc::ReportTable>("Net Information", header, -1);
   *net_tbl << name_slice[0] << formatDouble(net_info.HPWL / dbu) << "Total" << formatDouble(net_info.TotalLength / dbu) << "Total"
            << net_info.TotalVias << formatDouble(ratio) << net_info.FanIn << net_info.FanOut << TABLE_ENDLINE;
 
@@ -200,7 +200,7 @@ void ReportRoute::createNetReport(IdbNet* net)
 
   auto name_slice_v = cutString(net_info.Name, net_info.Vias.size(), NAME_LENGTH * 3 / 2);
   std::vector<std::string> vheader = {"Net Name", "Via-Instance Name", "Count"};
-  auto via_tbl = std::make_shared<ieda::ReportTable>("", vheader, -1);
+  auto via_tbl = std::make_shared<ecc::ReportTable>("", vheader, -1);
   int index = 0;
   for (auto [via, cnt] : net_info.Vias) {
     *via_tbl << name_slice_v[index++] << via << cnt << TABLE_ENDLINE;
@@ -208,13 +208,13 @@ void ReportRoute::createNetReport(IdbNet* net)
   this->add_table(via_tbl);
 }
 
-std::shared_ptr<ieda::ReportTable> ReportRoute::getDesignStatsTable(int64_t pins_number)
+std::shared_ptr<ecc::ReportTable> ReportRoute::getDesignStatsTable(int64_t pins_number)
 {
   auto* design = dmInst->get_idb_design();
   std::stringstream title;
   title << "Statistics for design " << design->get_design_name() << " :";
   std::vector<std::string> header = {"Design Metric", "Count"};
-  auto tbl = std::make_shared<ieda::ReportTable>(title.str().c_str(), header, -1);
+  auto tbl = std::make_shared<ecc::ReportTable>(title.str().c_str(), header, -1);
   *tbl << "Instances" << design->get_instance_list()->get_num() << TABLE_ENDLINE;
   *tbl << "Nets" << design->get_net_list()->get_num() << TABLE_ENDLINE;
   *tbl << "Pins" << pins_number << TABLE_ENDLINE;
@@ -244,10 +244,10 @@ void ReportRoute::createSummaryReport()
   this->add_table(getLengthRangeTable(lengths, 10000));
 }
 
-std::shared_ptr<ieda::ReportTable> ReportRoute::getPinStatsTable(vector<int64_t>& net_pins, int64_t nets)
+std::shared_ptr<ecc::ReportTable> ReportRoute::getPinStatsTable(vector<int64_t>& net_pins, int64_t nets)
 {
   std::vector<std::string> header{"Number Of\nConnected Pins", "Number\nof Pins", "Percentage\nof Nets"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Net Pin Statistics :", header, -1);
+  auto tbl = std::make_shared<ecc::ReportTable>("Net Pin Statistics :", header, -1);
   for (size_t i = 1; i < net_pins.size() - 1; ++i) {
     *tbl << i << net_pins[i] << formatDouble((100.0 * net_pins[i]) / nets) << TABLE_ENDLINE;
   }
@@ -257,12 +257,12 @@ std::shared_ptr<ieda::ReportTable> ReportRoute::getPinStatsTable(vector<int64_t>
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportRoute::getWireLengthStatsTable(const std::vector<int64_t>& routing_layer_length)
+std::shared_ptr<ecc::ReportTable> ReportRoute::getWireLengthStatsTable(const std::vector<int64_t>& routing_layer_length)
 {
   auto routing_layers = dmInst->get_idb_layout()->get_layers()->get_routing_layers();
   int32_t dbu = dmInst->get_idb_layout()->get_units()->get_micron_dbu();
   std::vector<std::string> header{"Layer Name", "Wire Length(dbu)", "Wire Length(um)"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Wire Length Statistics :", header, -1);
+  auto tbl = std::make_shared<ecc::ReportTable>("Wire Length Statistics :", header, -1);
   int64_t total = 0;
   for (size_t i = 0; i < routing_layers.size(); ++i) {
     int64_t layer_len = routing_layer_length[i];
@@ -276,11 +276,11 @@ std::shared_ptr<ieda::ReportTable> ReportRoute::getWireLengthStatsTable(const st
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportRoute::getViaCutStatsTable(const std::vector<int64_t>& via_cut_nums)
+std::shared_ptr<ecc::ReportTable> ReportRoute::getViaCutStatsTable(const std::vector<int64_t>& via_cut_nums)
 {
   auto cutlayers = dmInst->get_idb_layout()->get_layers()->get_cut_layers();
   std::vector<std::string> header{"Via-Cut Name", "Count"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Via Count Statistics :", header, -1);
+  auto tbl = std::make_shared<ecc::ReportTable>("Via Count Statistics :", header, -1);
   int64_t total = 0;
   for (size_t i = 0; i < cutlayers.size(); ++i) {
     int64_t cnt = via_cut_nums[i];
@@ -293,7 +293,7 @@ std::shared_ptr<ieda::ReportTable> ReportRoute::getViaCutStatsTable(const std::v
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportRoute::getLengthRangeTable(std::vector<int64_t>& lengths, int64_t d)
+std::shared_ptr<ecc::ReportTable> ReportRoute::getLengthRangeTable(std::vector<int64_t>& lengths, int64_t d)
 {
   std::sort(lengths.begin(), lengths.end());
 
@@ -302,7 +302,7 @@ std::shared_ptr<ieda::ReportTable> ReportRoute::getLengthRangeTable(std::vector<
   int64_t tail = 0;
   double dbu = dmInst->get_idb_layout()->get_units()->get_micron_dbu();
   std::vector<std::string> header{"Length Range", "Number of Nets\nwith Wire Length"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Net Length Distribution :", header, -1);
+  auto tbl = std::make_shared<ecc::ReportTable>("Net Length Distribution :", header, -1);
   for (size_t i = 0; i < lengths.size(); ++i) {
     if (lengths[i] < cur) {
       distribution.back()++;

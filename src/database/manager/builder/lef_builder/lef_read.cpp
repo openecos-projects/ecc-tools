@@ -15,11 +15,11 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @project		iDB
- * @file		lef_read.cpp
- * @author		Yell
- * @date		25/05/2021
- * @version		0.1
+ * @project   iDB
+ * @file    lef_read.cpp
+ * @author    Yell
+ * @date    25/05/2021
+ * @version   0.1
 * @description
 
 
@@ -31,6 +31,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "lef_read.h"
 
 #include <algorithm>
@@ -65,7 +66,7 @@ bool LefRead::check_type(lefrCallbackType_e type)
   if (type >= 0 && type <= lefrLibraryEndCbkType) {
     return true;
   } else {
-    std::cout << "Error lefrCallbackType_e = " << type << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error lefrCallbackType_e = ", type);
     return false;
   }
 }
@@ -141,7 +142,7 @@ bool LefRead::createDb(const char* file_name)
   FILE* file = fopen(file_name, "r");
 
   if (file == NULL) {
-    std::cout << "Open lef file failed..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Open lef file failed...");
     return false;
   }
 
@@ -163,7 +164,7 @@ int LefRead::manufacturingCB(lefrCallbackType_e c, double lef_num, lefiUserData 
 {
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : Manufacturing Grid] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : Manufacturing Grid] ...");
     return kDbFail;
   }
 
@@ -183,7 +184,7 @@ int LefRead::propDefCB(lefrCallbackType_e c, lefiProp* prop, lefiUserData data)
 {
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : property definition] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : property definition] ...");
     return kDbFail;
   }
 
@@ -247,7 +248,7 @@ int LefRead::maxStackViaCB(lefrCallbackType_e c, lefiMaxStackVia* maxStack, lefi
 {
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : max via stack] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : max via stack] ...");
     return kDbFail;
   }
 
@@ -274,13 +275,13 @@ int LefRead::parse_max_stack_via(lefiMaxStackVia* maxStack)
 int LefRead::siteCB(lefrCallbackType_e c, lefiSite* lef_site, lefiUserData data)
 {
   if (lef_site == nullptr) {
-    std::cout << "Sites is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Sites is nullPtr...");
     return kDbFail;
   }
 
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : Site] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : Site] ...");
     return kDbFail;
   }
 
@@ -291,7 +292,7 @@ int LefRead::siteCB(lefrCallbackType_e c, lefiSite* lef_site, lefiUserData data)
 int LefRead::parse_sites(lefiSite* lef_site)
 {
   if (lef_site == nullptr) {
-    std::cout << "Site is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Site is nullPtr...");
 
     return kDbFail;
   }
@@ -327,13 +328,13 @@ int LefRead::parse_sites(lefiSite* lef_site)
 int LefRead::unitsCB(lefrCallbackType_e c, lefiUnits* lef_unit, lefiUserData data)
 {
   if (lef_unit == nullptr) {
-    std::cout << "Units is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Units is nullPtr...");
     return kDbFail;
   }
 
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : Units] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : Units] ...");
     return kDbFail;
   }
 
@@ -344,13 +345,16 @@ int LefRead::unitsCB(lefrCallbackType_e c, lefiUnits* lef_unit, lefiUserData dat
 int LefRead::parse_units(lefiUnits* lef_units)
 {
   if (lef_units == nullptr) {
-    std::cout << "Units is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Units is nullPtr...");
 
     return kDbFail;
   }
   IdbLayout* layout = _lef_service->get_layout();
-  if (layout->get_units() != nullptr) {
-    std::cout << "Tech Units has been init, ignore this lef units..." << std::endl;
+  IdbUnits* units = layout->get_units();
+  // IdbLayout eagerly allocates its units, so only a positive micron DBU
+  // proves units were actually parsed from an earlier LEF/DEF.
+  if (units != nullptr && units->get_micron_dbu() > 0) {
+    ECCLOG.info(ecc::Loc::current(), "Tech Units has been init, ignore this lef units...");
     return kDbSuccess;
   }
 
@@ -404,13 +408,13 @@ int LefRead::parse_units(lefiUnits* lef_units)
 int LefRead::layerCB(lefrCallbackType_e c, lefiLayer* lef_layer, lefiUserData data)
 {
   if (lef_layer == nullptr) {
-    std::cout << "Layer is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Layer is nullPtr...");
     return kDbFail;
   }
 
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : Layer] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : Layer] ...");
     return kDbFail;
   }
 
@@ -422,7 +426,7 @@ int LefRead::layerCB(lefrCallbackType_e c, lefiLayer* lef_layer, lefiUserData da
 int LefRead::parse_layer(lefiLayer* lef_layer)
 {
   if (lef_layer == nullptr) {
-    std::cout << "Layer is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Layer is nullPtr...");
 
     return kDbFail;
   }
@@ -430,7 +434,7 @@ int LefRead::parse_layer(lefiLayer* lef_layer)
   IdbLayout* layout = _lef_service->get_layout();
   IdbLayers* layers = layout->get_layers();
   if (layers->find_layer(lef_layer->name()) != nullptr) {
-    std::cout << "Warning, layer is exist, name = " << lef_layer->name() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Warning, layer is exist, name = ", lef_layer->name());
     return kDbFail;
   }
 
@@ -442,7 +446,7 @@ int LefRead::parse_layer(lefiLayer* lef_layer)
   }
 
   if (layer == nullptr) {
-    std::cout << "Layer is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Layer is nullPtr...");
     return kDbFail;
   }
 
@@ -474,8 +478,93 @@ int LefRead::parse_layer(lefiLayer* lef_layer)
 
   //   layer->print();
 
-  // std::cout << "Parse Layer success..." << std::endl;
+  // ECCLOG.info(ecc::Loc::current(), "Parse layer success.");
   return kDbSuccess;
+}
+
+static lefiAntennaModel* select_antenna_model(lefiLayer* lef_layer) {
+  const int num_models = lef_layer->numAntennaModel();
+  if (num_models <= 0) {
+    return nullptr;
+  }
+
+  for (int j = 0; j < num_models; ++j) {
+    lefiAntennaModel* model = lef_layer->antennaModel(j);
+    if (model != nullptr && model->antennaOxide() != nullptr && std::string(model->antennaOxide()) == "OXIDE1") {
+      return model;
+    }
+  }
+
+  return lef_layer->antennaModel(0);
+}
+
+static void parse_antenna_model(lefiLayer* lef_layer, IdbLayerAntennaProps* dest) {
+  if (!lef_layer || !dest) return;
+
+  lefiAntennaModel* am = select_antenna_model(lef_layer);
+  if (am == nullptr) return;
+
+  if (lef_layer->numAntennaModel() > 1) {
+    ECCLOG.warn(ecc::Loc::current(), "[idb warning] Layer ", lef_layer->name(), " declares ", lef_layer->numAntennaModel(),
+                " ANTENNAMODEL sets, only ", (am->antennaOxide() != nullptr ? am->antennaOxide() : "OXIDE1"),
+                " is stored; the antenna limits of the other oxides are ignored.");
+  }
+
+  if (am->hasAntennaAreaRatio()) dest->set_antenna_area_ratio(am->antennaAreaRatio());
+  if (am->hasAntennaCumAreaRatio()) dest->set_antenna_cum_area_ratio(am->antennaCumAreaRatio());
+  if (am->hasAntennaAreaFactor()) {
+    dest->set_antenna_area_factor(am->antennaAreaFactor());
+    dest->set_antenna_area_factor_diffuse_only(am->hasAntennaAreaFactorDUO());
+  }
+  if (am->hasAntennaSideAreaRatio()) dest->set_antenna_side_area_ratio(am->antennaSideAreaRatio());
+  if (am->hasAntennaCumSideAreaRatio()) dest->set_antenna_cum_side_area_ratio(am->antennaCumSideAreaRatio());
+  if (am->hasAntennaSideAreaFactor()) {
+    dest->set_antenna_side_area_factor(am->antennaSideAreaFactor());
+    dest->set_antenna_side_area_factor_diffuse_only(am->hasAntennaSideAreaFactorDUO());
+  }
+  if (am->hasAntennaGatePlusDiff()) dest->set_antenna_gate_plus_diff(am->antennaGatePlusDiff());
+  if (am->hasAntennaAreaMinusDiff()) dest->set_antenna_area_minus_diff(am->antennaAreaMinusDiff());
+
+  if (am->hasAntennaDiffAreaRatio()) dest->set_antenna_diff_area_ratio(am->antennaDiffAreaRatio());
+  if (am->hasAntennaCumDiffAreaRatio()) dest->set_antenna_cum_diff_area_ratio(am->antennaCumDiffAreaRatio());
+  if (am->hasAntennaDiffSideAreaRatio()) dest->set_antenna_diff_side_area_ratio(am->antennaDiffSideAreaRatio());
+  if (am->hasAntennaCumDiffSideAreaRatio()) dest->set_antenna_cum_diff_side_area_ratio(am->antennaCumDiffSideAreaRatio());
+
+  if (am->hasAntennaCumRoutingPlusCut()) dest->set_antenna_cum_routing_plus_cut(true);
+
+  auto parse_pwl = [](lefiAntennaPWL* pwl, std::vector<std::pair<double, double>>& out) {
+    if (!pwl) return;
+    for (int k = 0; k < pwl->numPWL(); ++k) {
+      out.push_back({pwl->PWLdiffusion(k), pwl->PWLratio(k)});
+    }
+    std::sort(out.begin(), out.end());
+  };
+
+  if (am->hasAntennaDiffAreaRatioPWL()) {
+    std::vector<std::pair<double, double>> pwl;
+    parse_pwl(am->antennaDiffAreaRatioPWL(), pwl);
+    dest->set_antenna_diff_area_ratio_pwl(pwl);
+  }
+  if (am->hasAntennaCumDiffAreaRatioPWL()) {
+    std::vector<std::pair<double, double>> pwl;
+    parse_pwl(am->antennaCumDiffAreaRatioPWL(), pwl);
+    dest->set_antenna_cum_diff_area_ratio_pwl(pwl);
+  }
+  if (am->hasAntennaDiffSideAreaRatioPWL()) {
+    std::vector<std::pair<double, double>> pwl;
+    parse_pwl(am->antennaDiffSideAreaRatioPWL(), pwl);
+    dest->set_antenna_diff_side_area_ratio_pwl(pwl);
+  }
+  if (am->hasAntennaCumDiffSideAreaRatioPWL()) {
+    std::vector<std::pair<double, double>> pwl;
+    parse_pwl(am->antennaCumDiffSideAreaRatioPWL(), pwl);
+    dest->set_antenna_cum_diff_side_area_ratio_pwl(pwl);
+  }
+  if (am->hasAntennaAreaDiffReducePWL()) {
+    std::vector<std::pair<double, double>> pwl;
+    parse_pwl(am->antennaAreaDiffReducePWL(), pwl);
+    dest->set_antenna_area_diff_reduce_pwl(pwl);
+  }
 }
 
 int LefRead::parse_layer_cut(lefiLayer* lef_layer, IdbLayerCut* layer_cut)
@@ -538,6 +627,8 @@ int LefRead::parse_layer_cut(lefiLayer* lef_layer, IdbLayerCut* layer_cut)
     CutLayerParser cutlayer_parser(_lef_service);
     cutlayer_parser.parse(lef_layer->propName(i), lef_layer->propValue(i), layer_cut);
   }
+
+  parse_antenna_model(lef_layer, layer_cut->antenna_props());
 
   return kDbSuccess;
 }
@@ -779,6 +870,8 @@ int LefRead::parse_layer_routing(lefiLayer* lef_layer, IdbLayerRouting* layer_ro
     routing_layer_parser.parse(lef_layer->propName(i), lef_layer->propValue(i), layer_routing);
   }
 
+  parse_antenna_model(lef_layer, layer_routing->antenna_props());
+
   return kDbSuccess;
 }
 
@@ -787,10 +880,14 @@ int LefRead::parse_layer_masterslice(lefiLayer* lef_layer, IdbLayerMasterslice* 
   if (lef_layer == nullptr || layer_master == nullptr) {
     return kDbFail;
   }
+  if (lef_layer->hasThickness()) {
+    layer_master->set_thickness(transUnitDB(lef_layer->thickness()));
+  }
   for (int i = 0; i < lef_layer->numProps(); i++) {
     MastersliceLayerParser masterslice_parser(_lef_service);
     masterslice_parser.parse(lef_layer->propName(i), lef_layer->propValue(i), layer_master);
   }
+  parse_antenna_model(lef_layer, layer_master->antenna_props());
   return kDbSuccess;
 }
 
@@ -833,13 +930,13 @@ int LefRead::parse_layer_implant(lefiLayer* lef_layer, IdbLayerImplant* layer_im
 int LefRead::macroBeginCB(lefrCallbackType_e c, const char* lef_name, lefiUserData data)
 {
   if (lef_name == nullptr) {
-    // std::cout << "Macro is nullPtr..." << std::endl;
+    // ECCLOG.warn(ecc::Loc::current(), "Macro is null.");
     return kDbFail;
   }
 
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : Macro] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : Macro] ...");
     return kDbFail;
   }
 
@@ -851,7 +948,7 @@ int LefRead::macroBeginCB(lefrCallbackType_e c, const char* lef_name, lefiUserDa
 int LefRead::parse_macro_new(const char* macro_name)
 {
   if (macro_name == nullptr) {
-    // std::cout << "Macro is nullPtr..." << std::endl;
+    // ECCLOG.warn(ecc::Loc::current(), "Macro is null.");
 
     return kDbFail;
   }
@@ -861,7 +958,7 @@ int LefRead::parse_macro_new(const char* macro_name)
 
   if (nullptr != master_list->find_cell_master(macro_name)) {
     _this_cell_master = nullptr;
-    std::cout << "[idb warning] Macro is exist, name = " << macro_name << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "[idb warning] Macro is exist, name = ", macro_name);
     return kDbFail;
   }
 
@@ -875,13 +972,13 @@ int LefRead::parse_macro_new(const char* macro_name)
 int LefRead::macroCB(lefrCallbackType_e c, lefiMacro* lef_macro, lefiUserData data)
 {
   if (lef_macro == nullptr) {
-    // std::cout << "Macro is nullPtr..." << std::endl;
+    // ECCLOG.warn(ecc::Loc::current(), "Macro is null.");
     return kDbFail;
   }
 
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : Macro] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : Macro] ...");
     return kDbFail;
   }
 
@@ -892,7 +989,7 @@ int LefRead::macroCB(lefrCallbackType_e c, lefiMacro* lef_macro, lefiUserData da
 int LefRead::parse_macro(lefiMacro* lef_macro)
 {
   if (lef_macro == nullptr || _this_cell_master == nullptr) {
-    // std::cout << "Macro is nullPtr..." << std::endl;
+    // ECCLOG.warn(ecc::Loc::current(), "Macro is null.");
 
     return kDbFail;
   }
@@ -933,20 +1030,20 @@ int LefRead::parse_macro(lefiMacro* lef_macro)
     }
   }
 
-  // std::cout << "Parse Macro success... Macro name = " << _this_cell_master->get_name() << std::endl;
+  // ECCLOG.info(ecc::Loc::current(), "Parse macro success, macro name = ", _this_cell_master->get_name());
   return kDbSuccess;
 }
 
 int LefRead::macroEndCB(lefrCallbackType_e c, const char* lef_name, lefiUserData data)
 {
   if (lef_name == nullptr) {
-    // std::cout << "Macro is nullPtr..." << std::endl;
+    // ECCLOG.warn(ecc::Loc::current(), "Macro is null.");
     return kDbFail;
   }
 
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : MacroEnd] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : MacroEnd] ...");
     return kDbFail;
   }
 
@@ -967,13 +1064,13 @@ int LefRead::parse_macro_reset(const char* name)
 int LefRead::pinCB(lefrCallbackType_e c, lefiPin* lef_pin, lefiUserData data)
 {
   if (lef_pin == nullptr) {
-    std::cout << "Pin is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Pin is nullPtr...");
     return kDbFail;
   }
 
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : Pin] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : Pin] ...");
     return kDbFail;
   }
 
@@ -984,7 +1081,7 @@ int LefRead::pinCB(lefrCallbackType_e c, lefiPin* lef_pin, lefiUserData data)
 int LefRead::parse_pin(lefiPin* lef_pin)
 {
   if (lef_pin == nullptr || _this_cell_master == nullptr) {
-    // std::cout << "Pin is nullPtr..." << std::endl;
+    // ECCLOG.warn(ecc::Loc::current(), "Pin is null.");
 
     return kDbFail;
   }
@@ -1006,6 +1103,68 @@ int LefRead::parse_pin(lefiPin* lef_pin)
   if (lef_pin->hasShape()) {
     term->set_shape(lef_pin->shape());
   }
+
+  double gate_area = 0.0;
+  bool has_gate = false;
+  if (lef_pin->hasAntennaModel()) {
+    lefiPinAntennaModel* gate_model = nullptr;
+    for (int m = 0; m < lef_pin->numAntennaModel(); ++m) {
+      lefiPinAntennaModel* am = lef_pin->antennaModel(m);
+      if (am == nullptr) {
+        continue;
+      }
+      if (am->antennaOxide() != nullptr && std::string(am->antennaOxide()) == "OXIDE1") {
+        gate_model = am;
+        break;
+      }
+      if (gate_model == nullptr) {
+        gate_model = am;
+      }
+    }
+
+    if (gate_model != nullptr && gate_model->hasAntennaGateArea()) {
+      for (int i = 0; i < gate_model->numAntennaGateArea(); ++i) {
+        gate_area += gate_model->antennaGateArea(i);
+        has_gate = true;
+      }
+    }
+  }
+
+  double diff_area = 0.0;
+  bool has_diff = false;
+  if (lef_pin->hasAntennaDiffArea()) {
+    for (int i = 0; i < lef_pin->numAntennaDiffArea(); ++i) {
+      diff_area += lef_pin->antennaDiffArea(i);
+      has_diff = true;
+    }
+  }
+
+  if (has_gate) {
+    term->set_antenna_gate_area(gate_area);
+  }
+  if (has_diff) {
+    term->set_antenna_diff_area(diff_area);
+  }
+
+  for (int i = 0; i < lef_pin->numAntennaPartialMetalArea(); ++i) {
+    const char* l = lef_pin->antennaPartialMetalAreaLayer(i);
+    if (l != nullptr) {
+      term->add_antenna_partial_metal_area(l, lef_pin->antennaPartialMetalArea(i));
+    }
+  }
+  for (int i = 0; i < lef_pin->numAntennaPartialMetalSideArea(); ++i) {
+    const char* l = lef_pin->antennaPartialMetalSideAreaLayer(i);
+    if (l != nullptr) {
+      term->add_antenna_partial_metal_side_area(l, lef_pin->antennaPartialMetalSideArea(i));
+    }
+  }
+  for (int i = 0; i < lef_pin->numAntennaPartialCutArea(); ++i) {
+    const char* l = lef_pin->antennaPartialCutAreaLayer(i);
+    if (l != nullptr) {
+      term->add_antenna_partial_cut_area(l, lef_pin->antennaPartialCutArea(i));
+    }
+  }
+
 
   // Calculate average coordinate of all the ports
   int32_t coordinate_x = 0;
@@ -1112,7 +1271,7 @@ int LefRead::parse_pin(lefiPin* lef_pin)
           auto* vialist = layout->get_via_list();
           auto* via = vialist->find_via(ivia->name);
           if (via == nullptr) {
-            std::cerr << "Error, cannot find via " << ivia->name << std::endl;
+            ECCLOG.warn(ecc::Loc::current(), "Error, cannot find via ", ivia->name);
           } else {
             auto* macro_via = via->clone();
             macro_via->set_coordinate(transUnitDB(ivia->x), transUnitDB(ivia->y));
@@ -1143,7 +1302,7 @@ int LefRead::parse_pin(lefiPin* lef_pin)
     return kDbSuccess;
   }
 
-  // std::cout << "Parse lef pin success...Pin name = " << lef_pin->name() << std::endl;
+  // ECCLOG.info(ecc::Loc::current(), "Parse LEF pin success, pin name = ", lef_pin->name());
 
   return kDbSuccess;
 }
@@ -1170,13 +1329,13 @@ std::vector<GtlRect> LefRead::polygonToRects(lefiGeomPolygon* polygon)
 int LefRead::obstructionCB(lefrCallbackType_e c, lefiObstruction* lef_obs, lefiUserData data)
 {
   if (lef_obs == nullptr) {
-    std::cout << "Obs is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Obs is nullPtr...");
     return kDbFail;
   }
 
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : Obstruction] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : Obstruction] ...");
     return kDbFail;
   }
 
@@ -1187,7 +1346,7 @@ int LefRead::obstructionCB(lefrCallbackType_e c, lefiObstruction* lef_obs, lefiU
 int LefRead::parse_obs(lefiObstruction* lef_obs)
 {
   if (lef_obs == nullptr || _this_cell_master == nullptr) {
-    // std::cout << "Obstruction is nullPtr..." << std::endl;
+    // ECCLOG.warn(ecc::Loc::current(), "Obstruction is null.");
 
     return kDbFail;
   }
@@ -1238,20 +1397,20 @@ int LefRead::parse_obs(lefiObstruction* lef_obs)
     }
   }
 
-  // std::cout << "Parse lef obs success..." << std::endl;
+  // ECCLOG.info(ecc::Loc::current(), "Parse LEF obstruction success.");
   return kDbSuccess;
 }
 
 int LefRead::viaCB(lefrCallbackType_e c, lefiVia* lef_via, lefiUserData data)
 {
   if (lef_via == nullptr) {
-    std::cout << "Via is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Via is nullPtr...");
     return kDbFail;
   }
 
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : Via] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : Via] ...");
     return kDbFail;
   }
 
@@ -1262,7 +1421,7 @@ int LefRead::viaCB(lefrCallbackType_e c, lefiVia* lef_via, lefiUserData data)
 int LefRead::parse_via(lefiVia* lef_via)
 {
   if (lef_via == nullptr) {
-    std::cout << "Via is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Via is nullPtr...");
 
     return kDbFail;
   }
@@ -1271,7 +1430,7 @@ int LefRead::parse_via(lefiVia* lef_via)
   IdbLayers* layer_list = layout->get_layers();
   IdbVias* via_list = layout->get_via_list();
   if (via_list->find_via(lef_via->name()) != nullptr) {
-    std::cout << "Warning, Via is exist, name = " << lef_via->name() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Warning, Via is exist, name = ", lef_via->name());
     return kDbFail;
   }
 
@@ -1294,7 +1453,7 @@ int LefRead::parse_via(lefiVia* lef_via)
     IdbLayerCut* layer_cut = dynamic_cast<IdbLayerCut*>(layer_list->find_layer(lef_via->cutLayer()));
     IdbLayerRouting* layer_top = dynamic_cast<IdbLayerRouting*>(layer_list->find_layer(lef_via->topMetalLayer()));
     if (via_rule == nullptr || layer_bottom == nullptr || layer_cut == nullptr || layer_top == nullptr) {
-      std::cout << "Via rule data is invalid, name = " << lef_via->name() << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Via rule data is invalid, name = ", lef_via->name());
       return kDbFail;
     }
     master_generate->set_rule_name(lef_via->viaRuleName());
@@ -1397,13 +1556,13 @@ int LefRead::parse_via(lefiVia* lef_via)
 int LefRead::viaRuleCB(lefrCallbackType_e c, lefiViaRule* lef_via_rule, lefiUserData data)
 {
   if (lef_via_rule == nullptr) {
-    std::cout << "Via Rule is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Via Rule is nullPtr...");
     return kDbFail;
   }
 
   LefRead* lef_reader = (LefRead*) data;
   if (!lef_reader->check_type(c)) {
-    std::cout << "Check Type Error [Lef : Via Rule] ..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Check Type Error [Lef : Via Rule] ...");
     return kDbFail;
   }
 
@@ -1414,7 +1573,7 @@ int LefRead::viaRuleCB(lefrCallbackType_e c, lefiViaRule* lef_via_rule, lefiUser
 int LefRead::parse_via_rule(lefiViaRule* lef_via_rule)
 {
   if (lef_via_rule == nullptr) {
-    std::cout << "Via Rule is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Via Rule is nullPtr...");
 
     return kDbFail;
   }
@@ -1485,7 +1644,7 @@ int LefRead::parse_via_rule(lefiViaRule* lef_via_rule)
 int LefRead::nonDefaultCB(lefrCallbackType_e c, lefiNonDefault* def_nd, lefiUserData data)
 {
   if (def_nd == nullptr) {
-    std::cout << "NonDefault Rule is nullPtr..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "NonDefault Rule is nullPtr...");
     return kDbFail;
   }
 

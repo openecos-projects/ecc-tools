@@ -30,6 +30,7 @@
 #include "VerilogParser.hh"
 #include "VerilogScanner.hh"
 
+#include "utility/logger/Logger.hpp"
 namespace idb::verilog {
 
 enum class IdKind
@@ -762,6 +763,14 @@ CppVerilogID* ParserContext::makeSliceId(std::string base_name, int range_from, 
 CppVerilogID* ParserContext::makeIdFromName(std::string name)
 {
   name = stripOuterSpace(name);
+
+  // An escaped Verilog identifier is one lexical token, including any '[' or
+  // ']' characters it contains. For example, "\\foo[0] " names the scalar
+  // identifier "foo[0]"; it is not an indexed reference to "foo".
+  if (!name.empty() && name.front() == '\\') {
+    return makeId(name);
+  }
+
   std::string base;
   int from = 0;
   int to = 0;
@@ -1319,11 +1328,11 @@ void* verilog_parse_file(const char* verilog_path)
 {
   auto context = std::make_unique<idb::verilog::ParserContext>();
   if (!context->parseFile(verilog_path)) {
-    std::cerr << "Parse Verilog failed";
     if (context->errorLine() > 0) {
-      std::cerr << " at line " << context->errorLine();
+      ECCLOG.warn(ecc::Loc::current(), "Parse Verilog failed at line ", context->errorLine(), ": ", context->errorMessage());
+    } else {
+      ECCLOG.warn(ecc::Loc::current(), "Parse Verilog failed: ", context->errorMessage());
     }
-    std::cerr << ": " << context->errorMessage() << std::endl;
     return nullptr;
   }
   return context->releaseFile();

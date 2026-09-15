@@ -22,6 +22,7 @@
  */
 
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -72,6 +73,8 @@ struct WrapperWriteSummary
   std::string failed_clock;
   std::string failed_net;
   bool idb_clock_tree_restored = false;
+  std::size_t inserted_inst_count = 0U;
+  std::size_t inserted_net_count = 0U;
   std::string reason;
 };
 

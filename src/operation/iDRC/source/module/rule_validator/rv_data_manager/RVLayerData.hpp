@@ -5,6 +5,7 @@
 #include <span>
 #include <vector>
 
+#include "../../../../../../database/interaction/RT_DRC/ids.hpp"
 #include "PlanarRect.hpp"
 
 namespace boost::geometry::traits {
@@ -57,6 +58,7 @@ struct CutData
   GTLRectInt rect;
   int32_t net_idx = -1;
   bool isEnv = false;
+  ids::Shape::SourceType source_type = ids::Shape::SourceType::kUnknown;
 
   bool operator==(const CutData& other) const = default;
 };
@@ -87,7 +89,6 @@ struct BoundaryData
   int32_t edge_length = 0;
   bool isConvex = false;
   bool isHole = false;
-  bool isEnv = false;
 };
 
 struct PolygonData
@@ -103,7 +104,10 @@ struct PolygonData
 
 struct RVRoutingNet
 {
-  GTLPolySetInt polyset;  // env + result;
+  // Source rectangles retain env/result provenance until isEnv is prepared.
+  GTLPolySetInt polyset;
+  std::vector<GTLRectInt> env_rect_list;
+  std::vector<GTLRectInt> result_rect_list;
   int32_t polygon_begin = 0;
   int32_t polygon_count = 0;
   int32_t max_rect_begin = 0;
@@ -120,8 +124,11 @@ struct RVLayerData
   std::vector<MaxRectData> max_rect_pool;
   std::vector<BoundaryData> boundary_pool;
   bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> rect_rtrees;
+  bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> env_rect_rtree;
   bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> boundary_rtrees;
   bgi::rtree<CutData, bgi::quadratic<16>, CutDataIndexable> cut_rtrees;
+  bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> metal_short_metal_rtree;
+  bgi::rtree<GTLRectInt, bgi::quadratic<16>> metal_short_obs_rtree;
 
   const CutData& getCut(int32_t cut_id) const { return cut_pool[cut_id]; }
   int32_t getCutId(const CutData& cut_data) const { return static_cast<int32_t>(&cut_data - cut_pool.data()); }
@@ -180,6 +187,24 @@ struct RVLayerData
   void queryMaxRects(const GTLRectInt& query_rect, OutputIt out) const
   {
     rect_rtrees.query(bgi::intersects(query_rect), out);
+  }
+
+  template <typename OutputIt>
+  void queryEnvRects(const GTLRectInt& query_rect, OutputIt out) const
+  {
+    env_rect_rtree.query(bgi::intersects(query_rect), out);
+  }
+
+  template <typename OutputIt>
+  void queryMetalShortMetalRects(const GTLRectInt& query_rect, OutputIt out) const
+  {
+    metal_short_metal_rtree.query(bgi::intersects(query_rect), out);
+  }
+
+  template <typename OutputIt>
+  void queryMetalShortObsRects(const GTLRectInt& query_rect, OutputIt out) const
+  {
+    metal_short_obs_rtree.query(bgi::intersects(query_rect), out);
   }
 
   template <typename OutputIt>

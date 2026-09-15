@@ -29,6 +29,7 @@ bool initTechLef(const std::string& techlef_path);
 bool initLef(const std::vector<std::string>& lef_paths);
 bool initDef(const std::string& def_path);
 bool initVerilog(const std::string& verilog_path, const std::string& top_module);
+bool initLvsVerilog(const std::string& verilog_path, const std::string& top_module);
 bool initLib(const std::vector<std::string>& lib_paths);
 bool initSdc(const std::string& sdc_path);
 bool initSpef(const std::string& spef_path);
@@ -50,7 +51,6 @@ bool applyViewJsonEdits(const std::string& edits_path, bool compress = false);
 bool saveData(const std::string& path);
 bool resetData();
 bool loadData(const std::string& path);
-bool writeSocJson(const std::string& path, const std::vector<std::string>& harden_cores = {});
 bool writeAbstractLef(const std::string& output_lef_path);
 
 }  // namespace python_interface

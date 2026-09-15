@@ -14,6 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "utility/logger/Logger.hpp"
 #include "GTWriter.hpp"
 
 #include <fstream>
@@ -507,12 +508,10 @@ void GdsiiTextWriter::write_xy(GdsElemBase* e) const
   assert(num);
 
   if (min > num)
-    std::cout << "Warn: coordinate total is less than the expected"
-              << ", GdsElemType =" << (int) e->get_elem_type() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Warn: coordinate total is less than the expected", ", GdsElemType =", (int) e->get_elem_type());
 
   if (max < num)
-    std::cout << "Warn: coordinate total is more than the expected"
-              << ", GdsElemType =" << (int) e->get_elem_type() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Warn: coordinate total is more than the expected", ", GdsElemType =", (int) e->get_elem_type());
 
   (*_stream) << "XY ";
   for (auto& xy : e->get_xy().get_coords()) {

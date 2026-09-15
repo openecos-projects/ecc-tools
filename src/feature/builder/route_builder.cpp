@@ -35,7 +35,7 @@
 #include "RTInterface.hpp"
 #include "idm.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 bool RouteDataBuilder::buildRouteData()
 {
@@ -139,4 +139,4 @@ TermPA& RouteDataBuilder::find_cell_term_pa(std::string cell_master_name, std::s
   /// add pa
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

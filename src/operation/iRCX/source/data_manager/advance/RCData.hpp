@@ -16,8 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
-#include "CouplingCapEntry.hpp"
 #include "CornerNetPool.hpp"
+#include "CouplingCapEntry.hpp"
 #include "CouplingKey.hpp"
 #include "CouplingKeyHash.hpp"
 #include "TopoPool.hpp"
@@ -35,10 +35,7 @@ class RCData
   CornerNetPool<std::vector<double>>& get_corner_net_resistance_pool() { return _corner_net_resistance_pool; }
   CornerNetPool<std::vector<double>>& get_corner_net_ground_capacitance_pool() { return _corner_net_ground_capacitance_pool; }
   std::vector<std::vector<CouplingCapEntry>>& get_net_coupling_cap_entry_list() { return _net_coupling_cap_entry_list; }
-  std::unordered_map<CouplingKey, std::vector<double>, CouplingKeyHash>& get_merged_coupling_capacitance_map()
-  {
-    return _merged_coupling_capacitance_map;
-  }
+  std::unordered_map<CouplingKey, std::vector<double>, CouplingKeyHash>& get_merged_coupling_capacitance_map() { return _merged_coupling_capacitance_map; }
   // setter
   void set_corner_num(int32_t corner_num) { _corner_num = corner_num; }
   void set_net_num(int32_t net_num) { _net_num = net_num; }
@@ -54,8 +51,7 @@ class RCData
   {
     _net_coupling_cap_entry_list = net_coupling_cap_entry_list;
   }
-  void set_merged_coupling_capacitance_map(
-      const std::unordered_map<CouplingKey, std::vector<double>, CouplingKeyHash>& merged_coupling_capacitance_map)
+  void set_merged_coupling_capacitance_map(const std::unordered_map<CouplingKey, std::vector<double>, CouplingKeyHash>& merged_coupling_capacitance_map)
   {
     _merged_coupling_capacitance_map = merged_coupling_capacitance_map;
   }
@@ -78,16 +74,12 @@ class RCData
       }
     }
   }
-  std::vector<double>& get_corner_net_resistance_list(CornerNetIdx corner_net_idx)
-  {
-    return _corner_net_resistance_pool.get_item(corner_net_idx);
-  }
+  std::vector<double>& get_corner_net_resistance_list(CornerNetIdx corner_net_idx) { return _corner_net_resistance_pool.get_item(corner_net_idx); }
   std::vector<double>& get_corner_net_ground_capacitance_list(CornerNetIdx corner_net_idx)
   {
     return _corner_net_ground_capacitance_pool.get_item(corner_net_idx);
   }
-  void append_net_coupling_cap_entry(int32_t net_idx, int32_t first_edge_idx, int32_t second_edge_idx, int32_t corner_idx,
-                                     double coupling_capacitance)
+  void append_net_coupling_cap_entry(int32_t net_idx, int32_t first_edge_idx, int32_t second_edge_idx, int32_t corner_idx, double coupling_capacitance)
   {
     _net_coupling_cap_entry_list[net_idx].emplace_back(first_edge_idx, second_edge_idx, corner_idx, coupling_capacitance);
   }
@@ -99,8 +91,7 @@ class RCData
         if (_merged_coupling_capacitance_map.count(coupling_key) == 0) {
           _merged_coupling_capacitance_map[coupling_key].resize(_corner_num, 0.0);
         }
-        _merged_coupling_capacitance_map[coupling_key][coupling_capacitance_entry.get_corner_idx()]
-            += coupling_capacitance_entry.get_coupling_capacitance();
+        _merged_coupling_capacitance_map[coupling_key][coupling_capacitance_entry.get_corner_idx()] += coupling_capacitance_entry.get_coupling_capacitance();
       }
       coupling_cap_entry_list.clear();
     }

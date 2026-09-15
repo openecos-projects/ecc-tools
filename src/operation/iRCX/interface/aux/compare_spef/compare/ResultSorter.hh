@@ -28,9 +28,7 @@ namespace compare_spef {
 class ResultSorter
 {
  public:
-  void sort(Result& result,
-            const Data& test,
-            const Data& reference) const;
+  void sort(Result& result, const Data& test, const Data& reference) const;
 };
 
 }  // namespace compare_spef

@@ -43,6 +43,11 @@ bool DataManager::initLef(vector<string> lef_path, bool b_techlef)
 bool DataManager::initDef(string def_path)
 {
   _idb_def_service = _idb_builder->buildDef(def_path);
+  if (_idb_def_service == nullptr) {
+    _design = nullptr;
+    return false;
+  }
+
   _design = get_idb_design();
 
   /// make original coordinate on (0,0)
@@ -51,7 +56,7 @@ bool DataManager::initDef(string def_path)
     transformByDie();
   }
 
-  return _idb_def_service == nullptr ? false : true;
+  return true;
 }
 
 bool DataManager::initVerilog(string verilog_path, string top_module)

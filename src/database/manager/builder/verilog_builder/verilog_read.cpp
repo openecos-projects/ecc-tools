@@ -77,6 +77,7 @@ void testMakeSingleModule(idb::NetlistReader* nr, string topModuleName) {
 #include <array>
 #include <cassert>
 #include <cerrno>
+#include <charconv>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
@@ -132,7 +133,7 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
 {
   auto temp_file = createTempVerilogFile();
   if (!temp_file) {
-    IEDALOG.warn(ieda::Loc::current(), "Create temporary verilog file failed for ", gzip_file);
+    ECCLOG.warn(ecc::Loc::current(), "Create temporary verilog file failed for ", gzip_file);
     return std::nullopt;
   }
 
@@ -141,7 +142,7 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
   if (gzip_stream == nullptr) {
     close(temp_fd);
     std::filesystem::remove(temp_path);
-    IEDALOG.warn(ieda::Loc::current(), "Open gzip verilog file failed: ", gzip_file);
+    ECCLOG.warn(ecc::Loc::current(), "Open gzip verilog file failed: ", gzip_file);
     return std::nullopt;
   }
 
@@ -151,24 +152,24 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
   while ((read_size = gzread(gzip_stream, buffer.data(), static_cast<unsigned int>(buffer.size()))) > 0) {
     if (!writeAll(temp_fd, buffer.data(), static_cast<size_t>(read_size))) {
       success = false;
-      IEDALOG.warn(ieda::Loc::current(), "Write temporary verilog file failed: ", temp_path);
+      ECCLOG.warn(ecc::Loc::current(), "Write temporary verilog file failed: ", temp_path);
       break;
     }
   }
 
   if (read_size < 0) {
     success = false;
-    IEDALOG.warn(ieda::Loc::current(), "Read gzip verilog file failed: ", gzip_file);
+    ECCLOG.warn(ecc::Loc::current(), "Read gzip verilog file failed: ", gzip_file);
   }
 
   if (gzclose(gzip_stream) != Z_OK) {
     success = false;
-    IEDALOG.warn(ieda::Loc::current(), "Close gzip verilog file failed: ", gzip_file);
+    ECCLOG.warn(ecc::Loc::current(), "Close gzip verilog file failed: ", gzip_file);
   }
 
   if (close(temp_fd) != 0) {
     success = false;
-    IEDALOG.warn(ieda::Loc::current(), "Close temporary verilog file failed: ", temp_path);
+    ECCLOG.warn(ecc::Loc::current(), "Close temporary verilog file failed: ", temp_path);
   }
 
   if (!success) {
@@ -181,18 +182,27 @@ std::optional<std::string> decompressGzipVerilog(const std::string& gzip_file)
 
 std::pair<std::string, std::optional<int>> splitBusName(const char* name)
 {
+  if (name == nullptr) {
+    return {"", std::nullopt};
+  }
+
   std::string_view name_view(name);
   if (!name_view.ends_with("]")) {
     return {std::string(name_view), std::nullopt};
   }
 
-  size_t left_bracket_idx = name_view.find('[');
-  size_t right_bracket_idx = name_view.find(']', left_bracket_idx);
-  if (left_bracket_idx == std::string_view::npos || right_bracket_idx == std::string_view::npos) {
+  const size_t left_bracket_idx = name_view.rfind('[');
+  if (left_bracket_idx == std::string_view::npos || left_bracket_idx + 1 == name_view.size() - 1) {
     return {std::string(name_view), std::nullopt};
   }
 
-  int index = std::atoi(std::string(name_view.substr(left_bracket_idx + 1, right_bracket_idx - left_bracket_idx - 1)).c_str());
+  const auto index_text = name_view.substr(left_bracket_idx + 1, name_view.size() - left_bracket_idx - 2);
+  int index = 0;
+  const auto [parsed_end, error] = std::from_chars(index_text.data(), index_text.data() + index_text.size(), index);
+  if (error != std::errc{} || parsed_end != index_text.data() + index_text.size()) {
+    return {std::string(name_view), std::nullopt};
+  }
+
   return {std::string(name_view.substr(0, left_bracket_idx)), index};
 }
 
@@ -209,6 +219,11 @@ std::string normalizeEscapedName(std::string name)
   std::erase(name, '\\');
   std::erase(name, ' ');
   return name;
+}
+
+bool isEscapedVerilogIdentifier(std::string_view name)
+{
+  return !name.empty() && name.front() == '\\';
 }
 
 class ScopedReadableVerilogFile
@@ -257,6 +272,7 @@ VerilogRead::~VerilogRead()
 
 bool VerilogRead::createDb(std::string file, std::string top_module_name)
 {
+  _input_file = file;
   ScopedReadableVerilogFile verilog_file(file);
   if (!verilog_file.isValid()) {
     return false;
@@ -288,7 +304,9 @@ bool VerilogRead::createDb(std::string file, std::string top_module_name)
 
   build_pins();
   build_nets();
-  build_components();
+  if (build_components() != kVerilogSuccess) {
+    return false;
+  }
   build_assign();
 
   post_process_float_io_pins();
@@ -298,6 +316,7 @@ bool VerilogRead::createDb(std::string file, std::string top_module_name)
 
 bool VerilogRead::createDbAutoTop(std::string file)
 {
+  _input_file = file;
   ScopedReadableVerilogFile verilog_file(file);
   if (!verilog_file.isValid()) {
     return false;
@@ -312,7 +331,7 @@ bool VerilogRead::createDbAutoTop(std::string file)
 
   // auto set top module
   if (!_verilog_reader->autoTopModule()) {
-    std::cerr << "auto top module is wrong!\n";
+    ECCLOG.warn(ecc::Loc::current(), "auto top module is wrong!");
     return false;
   }
   _top_module = _verilog_reader->get_top_module();
@@ -327,7 +346,9 @@ bool VerilogRead::createDbAutoTop(std::string file)
   build_pins();
   build_nets();
   build_assign();
-  build_components();
+  if (build_components() != kVerilogSuccess) {
+    return false;
+  }
 
   return true;
 }
@@ -347,7 +368,7 @@ IdbConnectDirection VerilogRead::netlistToIdb(DclType port_direction) const
   } else if (port_direction == DclType::KInout) {
     return IdbConnectDirection::kInOut;
   } else {
-    std::cout << "not support.";
+    ECCLOG.warn(ecc::Loc::current(), "not support.");
     return IdbConnectDirection::kNone;
   }
 }
@@ -445,7 +466,7 @@ int32_t VerilogRead::build_pins()
         process_dcl_stmt(verilog_convert_dcl(verilog_dcl));
         num++;
         if (num % 1000 == 0) {
-          std::cout << "Processed " << num << " pins..." << std::endl;
+          ECCLOG.info(ecc::Loc::current(), "Processed ", num, " pins...");
         }
       }
     }
@@ -493,6 +514,7 @@ int32_t VerilogRead::build_nets()
     const auto* dcl_name = verilog_dcl->dcl_name;
     if (dcl_type == DclType::KWire) {
       std::string net_name = dcl_name;
+      const bool is_escaped_name = isEscapedVerilogIdentifier(net_name);
 
       if (std::string::npos != net_name.find('\\')) {
         net_name = replace_str(net_name, R"(\\)", "");
@@ -504,7 +526,7 @@ int32_t VerilogRead::build_nets()
       if (!dcl_range.has_value) {
         auto* idb_net = add_wire_net(net_name);
 
-        if (std::string_view(dcl_name).find("\\[") == std::string_view::npos) {
+        if (!is_escaped_name) {
           auto [bus_name, bus_index] = splitBusName(net_name.c_str());
           if (bus_index) {
             if (auto found_pin_bus = idb_design->get_bus_list()->findBus(bus_name); !found_pin_bus) {
@@ -557,7 +579,7 @@ int32_t VerilogRead::build_nets()
         process_dcl_stmt(verilog_convert_dcl(verilog_dcl));
         num++;
         if (num % 1000 == 0) {
-          std::cout << "Processed " << num << " nets..." << std::endl;
+          ECCLOG.info(ecc::Loc::current(), "Processed ", num, " nets...");
         }
       }
     }
@@ -614,7 +636,7 @@ int32_t VerilogRead::build_assign()
           } else if (the_left_idb_net && the_right_idb_net && the_left_idb_net != the_right_idb_net) {
             // assign net = net, need merge two net to one net.
 
-            // std::cout << "merge " << left_net_name << " = " << right_net_name << "\n";
+            // ECCLOG.info(ecc::Loc::current(), "Merge ", left_net_name, " = ", right_net_name);
 
             assert(the_left_idb_net != the_right_idb_net);
             // the remove map to merge net maybe removed, need update the new net.
@@ -633,11 +655,11 @@ int32_t VerilogRead::build_assign()
               // assign net = input_port;
               idb_design->connectPinToNet(the_right_io_pin, the_left_idb_net);
             } else {
-              IEDALOG.warn(ieda::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
+              ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
               bool has_b0 = (right_net_name.find("1'b0") != std::string::npos);
               bool has_b1 = (right_net_name.find("1'b1") != std::string::npos);
               if (has_b0 || has_b1) {
-                IEDALOG.warn(ieda::Loc::current(), "constant net should connect to tie cell.");
+                ECCLOG.warn(ecc::Loc::current(), "constant net should connect to tie cell.");
               }
             }
           } else if (the_right_idb_net) {
@@ -645,7 +667,7 @@ int32_t VerilogRead::build_assign()
                // assign output_port = net;
               idb_design->connectPinToNet(the_left_io_pin, the_right_idb_net);
             } else {
-              IEDALOG.warn(ieda::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
+              ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
             }
           } else if (!the_left_idb_net && !the_right_idb_net && the_right_io_pin) {
             // assign output_port = input_port;
@@ -662,10 +684,10 @@ int32_t VerilogRead::build_assign()
             if (the_left_io_pin && the_left_io_pin->is_io_pin()) {
               idb_design->connectPinToNet(the_left_io_pin, idb_net);
             } else {
-              IEDALOG.warn(ieda::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
+              ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
             }
           } else {
-            IEDALOG.warn(ieda::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
+            ECCLOG.warn(ecc::Loc::current(), "assign ", left_net_name, " = ", right_net_name, " is not processed.");
           }
         };
 
@@ -715,7 +737,7 @@ int32_t VerilogRead::build_assign()
             id_net_name = slice_net_id->base_id;
             base_id_index = slice_net_id->range_base;
           } else {
-            IEDALOG.error(ieda::Loc::current(), "left net id should be id or bus slice id");
+            ECCLOG.error(ecc::Loc::current(), "left net id should be id or bus slice id");
           }
 
           auto verilog_id_concat = verilog_convert_net_concat_expr(concat_net_expr)->verilog_id_concat;
@@ -832,7 +854,7 @@ int32_t VerilogRead::build_assign()
         }
 
       } else {
-        IEDALOG.error(ieda::Loc::current(), "assign declaration's lhs/rhs is not VerilogNetIDExpr class.");
+        ECCLOG.error(ecc::Loc::current(), "assign declaration's lhs/rhs is not VerilogNetIDExpr class.");
       }
     }
   }
@@ -868,6 +890,7 @@ int32_t VerilogRead::build_components()
 
   auto add_pin = [idb_net_list, replace_str, idb_io_pin_list, idb_design](const std::string& raw_name, auto* idb_pin) {
     std::string net_name = raw_name;
+    const bool is_escaped_name = isEscapedVerilogIdentifier(raw_name);
 
     // strip \\\ char.
     if (std::string::npos != raw_name.find('\\')) {
@@ -883,9 +906,9 @@ int32_t VerilogRead::build_components()
         // not bus net name, create common idb net.
         idb_net = idb_design->createOrFindNet(net_name, IdbConnectType::kSignal);
 
-        // judge whether contain bus index name, if bus name contain \\[, should
-        // not treat as bus.
-        if (net_name.find("\\[") == std::string::npos) {
+        // An escaped Verilog identifier may contain literal bus-bit
+        // characters, so it must remain a scalar net after normalization.
+        if (!is_escaped_name) {
           // is bus index net.
           auto [bus_name, bus_index] = splitBusName(net_name.c_str());
           if (bus_index) {
@@ -980,12 +1003,13 @@ int32_t VerilogRead::build_components()
 
       auto* cell_master = idb_master_list->find_cell_master(cell_master_name);
       if (cell_master == nullptr) {
-        IEDALOG.warn(ieda::Loc::current(), "Error : can not find cell master = ", cell_master_name);
-        continue;
+        ECCLOG.warn(ecc::Loc::current(), "PDK master not found: input=", _input_file, ", instance=", inst_name,
+                    ", master=", cell_master_name);
+        return kVerilogFail;
       }
       IdbInstance* idb_instance = idb_design->createInstance(inst_name, cell_master->get_name());
       if (idb_instance == nullptr) {
-        IEDALOG.warn(ieda::Loc::current(), "Error : can not create instance = ", inst_name);
+        ECCLOG.warn(ecc::Loc::current(), "Error : can not create instance = ", inst_name);
         continue;
       }
 
@@ -1095,7 +1119,7 @@ int32_t VerilogRead::build_components()
                 net_name = verilog_convert_slice_id(net_id)->id;
               } else {
                 static int index = 0;
-                generated_net_name = "IEDA_CONST_" + std::to_string(index++);
+                generated_net_name = "ECC_CONST_" + std::to_string(index++);
                 net_name = generated_net_name.c_str();
               }
               add_pin(net_name, idb_pin);
@@ -1158,14 +1182,19 @@ int32_t VerilogRead::build_components()
               net_expr_verilog_id = const_cast<void*>(verilog_convert_constant_expr(verilog_id_net_expr)->verilog_id);
             }
             const char* net_name = nullptr;
+            const char* net_full_name = nullptr;
             if (verilog_is_id(net_expr_verilog_id)) {
               net_name = verilog_convert_id(net_expr_verilog_id)->id;
+              net_full_name = net_name;
             } else if (verilog_is_bus_index_id(net_expr_verilog_id)) {
+              net_full_name = verilog_convert_index_id(net_expr_verilog_id)->id;
               net_name = verilog_convert_index_id(net_expr_verilog_id)->base_id;
             } else {
+              net_full_name = verilog_convert_slice_id(net_expr_verilog_id)->id;
               net_name = verilog_convert_slice_id(net_expr_verilog_id)->base_id;
             }
-            auto net_bus = idb_design->get_bus_list()->findBus(net_name);
+            std::string bus_lookup_name = normalizeEscapedName(net_name);
+            auto net_bus = idb_design->get_bus_list()->findBus(bus_lookup_name);
 
             if (net_bus) {
               // for net bus, we need span the bus.
@@ -1181,7 +1210,7 @@ int32_t VerilogRead::build_components()
               }
 
               for (int j = bus_left; j >= bus_right; --j) {
-                std::string bus_one_net_name = makeIndexedName(net_name, j);
+                std::string bus_one_net_name = makeIndexedName(bus_lookup_name, j);
                 auto* idb_net = idb_net_list->find_net(bus_one_net_name);
                 assert(idb_net);
                 add_pin(bus_one_net_name, idb_pin);
@@ -1193,7 +1222,7 @@ int32_t VerilogRead::build_components()
                 }
               }
             } else {
-              add_pin(net_name, idb_pin);
+              add_pin(net_full_name, idb_pin);
               --i;
               // the next pin add to pin bus.
               if (i >= 0) {
@@ -1206,7 +1235,7 @@ int32_t VerilogRead::build_components()
       }
       num++;
       if (num % 1000 == 0) {
-        std::cout << "Processed " << num << " components..." << std::endl;
+        ECCLOG.info(ecc::Loc::current(), "Processed ", num, " components...");
       }
     }
   }

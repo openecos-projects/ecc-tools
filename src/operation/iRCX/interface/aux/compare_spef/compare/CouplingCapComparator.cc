@@ -20,15 +20,8 @@
  */
 #include "compare/CouplingCapComparator.hh"
 
-#include <omp.h>
-#include <algorithm>
-#include <cmath>
-#include <iterator>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
 #include "ParallelUtils.hh"
+#include "RCXHeader.hpp"
 #include "utils/CompareMath.hh"
 
 namespace ircx {
@@ -50,16 +43,10 @@ class NetMetaIndex
   {
     _meta.reserve(data.nets.size());
     for (const Net& net : data.nets) {
-      _meta.emplace(
-          net.name,
-          NetMeta{
-              .net = &net,
-              .order = data.index.orderOf(net.name),
-              .external = std::any_of(
-                  net.pins.begin(),
-                  net.pins.end(),
-                  [](const Pin& pin) { return pin.is_external; }),
-              .selected = selector.selected(net)});
+      _meta.emplace(net.name, NetMeta{.net = &net,
+                                      .order = data.index.orderOf(net.name),
+                                      .external = std::any_of(net.pins.begin(), net.pins.end(), [](const Pin& pin) { return pin.is_external; }),
+                                      .selected = selector.selected(net)});
     }
   }
 
@@ -85,9 +72,7 @@ class NetMetaIndex
   std::unordered_map<std::string, NetMeta> _meta;
 };
 
-auto makeCcapMismatch(const NetMetaIndex& meta,
-                      const NodePair& key,
-                      F64 capacitance) -> CcapMismatch
+auto makeCcapMismatch(const NetMetaIndex& meta, const NodePair& key, F64 capacitance) -> CcapMismatch
 {
   CcapMismatch mismatch;
   mismatch.nets = key;
@@ -100,25 +85,17 @@ auto makeCcapMismatch(const NetMetaIndex& meta,
   return mismatch;
 }
 
-void appendRows(Result& result,
-                Result&& thread_result)
+void appendRows(Result& result, Result&& thread_result)
 {
-  result.ccap_rows.insert(
-      result.ccap_rows.end(),
-      std::make_move_iterator(thread_result.ccap_rows.begin()),
-      std::make_move_iterator(thread_result.ccap_rows.end()));
-  result.reference_only_couplings.insert(
-      result.reference_only_couplings.end(),
-      std::make_move_iterator(thread_result.reference_only_couplings.begin()),
-      std::make_move_iterator(thread_result.reference_only_couplings.end()));
-  result.test_only_couplings.insert(
-      result.test_only_couplings.end(),
-      std::make_move_iterator(thread_result.test_only_couplings.begin()),
-      std::make_move_iterator(thread_result.test_only_couplings.end()));
+  result.ccap_rows.insert(result.ccap_rows.end(), std::make_move_iterator(thread_result.ccap_rows.begin()),
+                          std::make_move_iterator(thread_result.ccap_rows.end()));
+  result.reference_only_couplings.insert(result.reference_only_couplings.end(), std::make_move_iterator(thread_result.reference_only_couplings.begin()),
+                                         std::make_move_iterator(thread_result.reference_only_couplings.end()));
+  result.test_only_couplings.insert(result.test_only_couplings.end(), std::make_move_iterator(thread_result.test_only_couplings.begin()),
+                                    std::make_move_iterator(thread_result.test_only_couplings.end()));
 }
 
-void reserveRows(Result& result,
-                 const std::vector<Result>& partial_results)
+void reserveRows(Result& result, const std::vector<Result>& partial_results)
 {
   Size ccap_count = result.ccap_rows.size();
   Size reference_only_count = result.reference_only_couplings.size();
@@ -133,12 +110,7 @@ void reserveRows(Result& result,
   result.test_only_couplings.reserve(test_only_count);
 }
 
-void addRow(const Config& config,
-            const NetMetaIndex& reference_meta,
-            const std::string& victim,
-            const std::string& aggressor,
-            F64 reference_cap,
-            F64 test_cap,
+void addRow(const Config& config, const NetMetaIndex& reference_meta, const std::string& victim, const std::string& aggressor, F64 reference_cap, F64 test_cap,
             Result& result)
 {
   const NetMeta* victim_meta = reference_meta.find(victim);
@@ -166,46 +138,31 @@ void addRow(const Config& config,
 
 }  // namespace
 
-CouplingCapComparator::CouplingCapComparator(const Config& config)
-    : _config(config), _net_selector(config)
+CouplingCapComparator::CouplingCapComparator(const Config& config) : _config(config), _net_selector(config)
 {
 }
 
-void CouplingCapComparator::compare(const Data& test,
-                                    const Data& reference,
-                                    Result& result) const
+void CouplingCapComparator::compare(const Data& test, const Data& reference, Result& result) const
 {
   const NetMetaIndex reference_meta(reference, _net_selector);
   const NetMetaIndex test_meta(test, _net_selector);
 
   if (!reference.coupling_caps.empty()) {
-    const int reference_thread_count = parallel::threadCount(
-        reference.coupling_caps.entries.size(),
-        _config.cores);
+    const int reference_thread_count = parallel::threadCount(reference.coupling_caps.entries.size(), _config.cores);
     std::vector<Result> reference_thread_results(reference_thread_count);
 #pragma omp parallel num_threads(reference_thread_count)
     {
       Result local_result;
 #pragma omp for schedule(dynamic, 256) nowait
-      for (I64 entry_index = 0;
-           entry_index < static_cast<I64>(reference.coupling_caps.entries.size());
-           ++entry_index) {
+      for (I64 entry_index = 0; entry_index < static_cast<I64>(reference.coupling_caps.entries.size()); ++entry_index) {
         const auto& entry = reference.coupling_caps.entries[entry_index];
         const auto* test_cap = test.coupling_caps.find(entry.nets);
         if (test_cap == nullptr) {
-          local_result.reference_only_couplings.push_back(
-              makeCcapMismatch(reference_meta, entry.nets, entry.capacitance));
+          local_result.reference_only_couplings.push_back(makeCcapMismatch(reference_meta, entry.nets, entry.capacitance));
           continue;
         }
 
-        addRow(
-            _config,
-            reference_meta,
-            entry.nets.first,
-            entry.nets.second,
-            entry.capacitance,
-            test_cap->capacitance,
-            local_result);
+        addRow(_config, reference_meta, entry.nets.first, entry.nets.second, entry.capacitance, test_cap->capacitance, local_result);
       }
       reference_thread_results[omp_get_thread_num()] = std::move(local_result);
     }
@@ -217,21 +174,16 @@ void CouplingCapComparator::compare(const Data& test,
   }
 
   if (!test.coupling_caps.empty()) {
-    const int test_thread_count = parallel::threadCount(
-        test.coupling_caps.entries.size(),
-        _config.cores);
+    const int test_thread_count = parallel::threadCount(test.coupling_caps.entries.size(), _config.cores);
     std::vector<Result> test_thread_results(test_thread_count);
 #pragma omp parallel num_threads(test_thread_count)
     {
       Result local_result;
 #pragma omp for schedule(dynamic, 256) nowait
-      for (I64 entry_index = 0;
-           entry_index < static_cast<I64>(test.coupling_caps.entries.size());
-           ++entry_index) {
+      for (I64 entry_index = 0; entry_index < static_cast<I64>(test.coupling_caps.entries.size()); ++entry_index) {
         const auto& entry = test.coupling_caps.entries[entry_index];
         if (!reference.coupling_caps.contains(entry.nets)) {
-          local_result.test_only_couplings.push_back(
-              makeCcapMismatch(test_meta, entry.nets, entry.capacitance));
+          local_result.test_only_couplings.push_back(makeCcapMismatch(test_meta, entry.nets, entry.capacitance));
         }
       }
       test_thread_results[omp_get_thread_num()] = std::move(local_result);

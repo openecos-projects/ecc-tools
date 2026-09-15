@@ -17,20 +17,12 @@
 #include "ZHInterface.hpp"
 
 #include "AntennaChecker.hpp"
-#include "FanoutFixer.hpp"
 #include "FillerInserter.hpp"
+#include "MetalInserter.hpp"
 
 namespace izh {
 
 // public
-
-ZHInterface& ZHInterface::getInst()
-{
-  if (_zh_interface_instance == nullptr) {
-    _zh_interface_instance = new ZHInterface();
-  }
-  return *_zh_interface_instance;
-}
 
 void ZHInterface::destroyInst()
 {
@@ -44,18 +36,18 @@ void ZHInterface::destroyInst()
 
 #if 1  // izh
 
-void ZHInterface::fixFanout(std::map<std::string, std::any> config_map)
-{
-  FanoutFixer::initInst();
-  ZHFF.fix(config_map);
-  FanoutFixer::destroyInst();
-}
-
 void ZHInterface::insertFiller(std::map<std::string, std::any> config_map)
 {
   FillerInserter::initInst();
   ZHFI.insert(config_map);
   FillerInserter::destroyInst();
+}
+
+void ZHInterface::insertMetal(std::map<std::string, std::any> config_map)
+{
+  MetalInserter::initInst();
+  ZHMI.insert(config_map);
+  MetalInserter::destroyInst();
 }
 
 void ZHInterface::checkAntenna(std::map<std::string, std::any> config_map)

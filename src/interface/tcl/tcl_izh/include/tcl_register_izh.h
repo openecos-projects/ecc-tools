@@ -18,15 +18,16 @@
 
 #include "tcl_zh.h"
 
-using namespace ieda;
+using namespace ecc;
 
 namespace tcl {
 
 int registerCmdZH()
 {
   // zh
-  registerTclCmd(TclZHFixFanout, "zh_fix_fanout");
   registerTclCmd(TclZHInsertFiller, "zh_insert_filler");
+  registerTclCmd(TclZHCheckAntenna, "zh_check_antenna");
+  registerTclCmd(TclZHInsertMetal, "zh_insert_metal");
   return EXIT_SUCCESS;
 }
 

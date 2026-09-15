@@ -32,6 +32,7 @@
 #include "characterization/HTreeTopologyChar.hh"
 #include "characterization/HTreeTopologyPattern.hh"
 #include "characterization/PatternId.hh"
+#include "design/Clock.hh"
 #include "design/Inst.hh"
 #include "design/Net.hh"
 #include "design/Pin.hh"
@@ -133,6 +134,7 @@ class HTree
     std::vector<std::unique_ptr<Inst>> inserted_insts;
     std::vector<std::unique_ptr<Pin>> inserted_pins;
     std::vector<std::unique_ptr<Net>> inserted_nets;
+    std::vector<ClockPropagationArc> propagation_arcs;
     std::vector<InsertedInstLevel> inserted_inst_levels;
     std::vector<InsertedNetLevel> inserted_net_levels;
 

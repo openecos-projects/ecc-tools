@@ -22,7 +22,7 @@
 
 #include "feature_ipw.h"
 #include "feature_ista.h"
-namespace ieda_feature {
+namespace ecc_feature {
 /// ###################################################################################///
 ///  summary
 /// ###################################################################################///
@@ -163,4 +163,4 @@ struct RouteAnalyseData
   std::map<std::string, CellMasterPA> cell_master_list;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

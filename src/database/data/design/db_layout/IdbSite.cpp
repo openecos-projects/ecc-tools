@@ -82,6 +82,9 @@ IdbSites::IdbSites()
 {
   _site_num = 0;
   _site_list.clear();
+  _io_site = nullptr;
+  _corner_site = nullptr;
+  _core_site = nullptr;
 }
 
 IdbSites::~IdbSites()
@@ -134,6 +137,10 @@ void IdbSites::reset()
     }
   }
   _site_list.clear();
+
+  _io_site = nullptr;
+  _corner_site = nullptr;
+  _core_site = nullptr;
 
   _site_num = 0;
 }

@@ -32,8 +32,7 @@ struct Model;
 class ModelBuilder
 {
  public:
-  auto build(const spef::Exchange& exchange,
-             const Config& config) const -> Model;
+  auto build(const spef::Exchange& exchange, const Config& config) const -> Model;
 };
 
 }  // namespace ircx::plot_spef

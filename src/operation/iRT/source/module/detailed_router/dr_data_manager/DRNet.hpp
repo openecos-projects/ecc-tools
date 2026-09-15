@@ -34,18 +34,15 @@ class DRNet
   DRNet() = default;
   ~DRNet() = default;
   // getter
-  Net* get_origin_net() { return _origin_net; }
   int32_t get_net_idx() const { return _net_idx; }
   ConnectType get_connect_type() const { return _connect_type; }
   std::vector<DRPin>& get_dr_pin_list() { return _dr_pin_list; }
   // setter
-  void set_origin_net(Net* origin_net) { _origin_net = origin_net; }
   void set_net_idx(const int32_t net_idx) { _net_idx = net_idx; }
   void set_connect_type(const ConnectType& connect_type) { _connect_type = connect_type; }
   void set_dr_pin_list(const std::vector<DRPin>& dr_pin_list) { _dr_pin_list = dr_pin_list; }
 
  private:
-  Net* _origin_net = nullptr;
   int32_t _net_idx = -1;
   ConnectType _connect_type = ConnectType::kNone;
   std::vector<DRPin> _dr_pin_list;

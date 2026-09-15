@@ -29,6 +29,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "utility/logger/Logger.hpp"
 #include "IdbDesign.h"
 
 #include <algorithm>
@@ -131,6 +132,10 @@ IdbDesign::IdbDesign(IdbLayout* layout)
 
 IdbDesign::~IdbDesign()
 {
+  if (_units != nullptr) {
+    delete _units;
+    _units = nullptr;
+  }
   if (_instance_list != nullptr) {
     delete _instance_list;
     _instance_list = nullptr;
@@ -529,6 +534,36 @@ bool IdbDesign::disconnectPinFromNet(IdbPin* pin)
   return true;
 }
 
+std::size_t IdbDesign::disconnectAllPinsFromNet(IdbNet* net)
+{
+  if (net == nullptr) {
+    return 0U;
+  }
+
+  std::size_t disconnected_pin_count = 0U;
+  const auto disconnect_pin_refs = [&](IdbPins* pins) {
+    if (pins == nullptr) {
+      return;
+    }
+    for (auto* pin : pins->get_pin_list()) {
+      if (pin == nullptr || pin->get_net() != net) {
+        continue;
+      }
+      pin->remove_net();
+      refreshPinNetName(pin);
+      ++disconnected_pin_count;
+    }
+    pins->clear_pin_refs();
+  };
+
+  disconnect_pin_refs(net->get_io_pins());
+  disconnect_pin_refs(net->get_instance_pin_list());
+  if (net->get_instance_list() != nullptr) {
+    net->get_instance_list()->reset(false);
+  }
+  return disconnected_pin_count;
+}
+
 bool IdbDesign::connectPinToNet(IdbPin* pin, IdbNet* net)
 {
   if (pin == nullptr || net == nullptr) {
@@ -594,14 +629,7 @@ bool IdbDesign::removeNetSafe(const std::string& net_name)
     return false;
   }
 
-  std::vector<IdbPin*> pin_list;
-  auto& io_pins = net->get_io_pins()->get_pin_list();
-  auto& inst_pins = net->get_instance_pin_list()->get_pin_list();
-  pin_list.insert(pin_list.end(), io_pins.begin(), io_pins.end());
-  pin_list.insert(pin_list.end(), inst_pins.begin(), inst_pins.end());
-  for (auto* pin : pin_list) {
-    disconnectPinFromNet(pin);
-  }
+  disconnectAllPinsFromNet(net);
   net->clear_wire_list();
 
   return _net_list->remove_net_only(net_name);
@@ -633,6 +661,7 @@ bool IdbDesign::mergeNetInto(const std::string& target_net_name, const std::stri
   auto& inst_pins = source_net->get_instance_pin_list()->get_pin_list();
   pin_list.insert(pin_list.end(), io_pins.begin(), io_pins.end());
   pin_list.insert(pin_list.end(), inst_pins.begin(), inst_pins.end());
+  disconnectAllPinsFromNet(source_net);
   for (auto* pin : pin_list) {
     connectPinToNet(pin, target_net);
   }
@@ -728,6 +757,43 @@ bool IdbDesign::connectPinToSpecialNet(IdbPin* pin, IdbSpecialNet* net)
   }
   pin->set_special_net(net);
   refreshPinNetName(pin);
+  return true;
+}
+
+bool IdbDesign::connectPinsToSpecialNet(const std::vector<IdbPin*>& pins, IdbSpecialNet* net)
+{
+  if (net == nullptr || std::find(pins.begin(), pins.end(), nullptr) != pins.end()) {
+    return false;
+  }
+
+  const auto connected_pins = pins;
+  std::vector<IdbPin*> io_pins;
+  std::vector<IdbPin*> instance_pins;
+  std::vector<IdbInstance*> instances;
+  instance_pins.reserve(pins.size());
+  instances.reserve(pins.size());
+  for (auto* pin : pins) {
+    if (pin->is_io_pin()) {
+      io_pins.emplace_back(pin);
+    } else {
+      instance_pins.emplace_back(pin);
+      if (pin->get_instance() != nullptr) {
+        instances.emplace_back(pin->get_instance());
+      }
+    }
+  }
+  if (!net->get_instance_list()->add_instance_refs(instances)) {
+    return false;
+  }
+  net->get_io_pin_list()->add_pin_refs_unique(io_pins);
+  net->get_instance_pin_list()->add_pin_refs_unique(instance_pins);
+  for (auto* pin : connected_pins) {
+    if (pin->get_special_net() != nullptr && pin->get_special_net() != net) {
+      disconnectPinFromSpecialNet(pin);
+    }
+    pin->set_special_net(net);
+    refreshPinNetName(pin);
+  }
   return true;
 }
 
@@ -1239,18 +1305,18 @@ bool IdbDesign::writeConnectivitySnapshot(const std::string& path, bool check_fl
 
 bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point_list, IdbLayer* layer)
 {
-  if (point_list.size() < _POINT_MAX_ || layer == nullptr) {
+  if (point_list.size() < _POINT_MAX_ || layer == nullptr || _layout == nullptr || _io_pin_list == nullptr || _special_net_list == nullptr) {
     return false;
   }
 
   /// find the IO pin that covered by the point list
   IdbPin* pin = _io_pin_list->find_pin_by_coordinate_list(point_list, layer);
   if (pin == nullptr) {
-    std::cout << "Error : no IO pin covered by point list." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error : no IO pin covered by point list.");
     for (IdbCoordinate<int32_t>* pt : point_list) {
-      std::cout << " ( " << pt->get_x() << " , " << pt->get_y() << " )";
+      ECCLOG.info(ecc::Loc::current(), " ( ", pt->get_x(), " , ", pt->get_y(), " )");
     }
-    std::cout << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "");
     return false;
   }
 
@@ -1282,7 +1348,7 @@ bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point
       new_coordinate = new IdbCoordinate<int32_t>(end_x, mid_y);
       point_list.insert(point_list.begin() + 2, new_coordinate);
     } else {
-      std::cout << "Error : illegal point list." << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Error : illegal point list.");
       return false;
     }
   }
@@ -1292,6 +1358,9 @@ bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point
 
 bool IdbDesign::connectPowerStripe(vector<IdbCoordinate<int32_t>*>& point_list, string net_name, string layer_name)
 {
+  if (_special_net_list == nullptr) {
+    return false;
+  }
   return _special_net_list->addPowerStripe(point_list, net_name, layer_name);
 }
 

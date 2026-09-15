@@ -115,8 +115,7 @@ std::string getCoordLabel(const std::string& prefix, const PlanarCoord& coord)
   return stream.str();
 }
 
-std::vector<PlanarCoord> getSteinerCoordList(const std::vector<PlanarCoord>& terminal_coord_list,
-                                             const std::vector<Segment<PlanarCoord>>& planar_topo_list)
+std::vector<PlanarCoord> getSteinerCoordList(const std::vector<PlanarCoord>& terminal_coord_list, const std::vector<Segment<PlanarCoord>>& planar_topo_list)
 {
   std::set<PlanarCoord, CmpPlanarCoordByXASC> terminal_coord_set(terminal_coord_list.begin(), terminal_coord_list.end());
   std::set<PlanarCoord, CmpPlanarCoordByXASC> steiner_coord_set;
@@ -139,12 +138,12 @@ void writeGrid(std::ofstream& output_stream, const SvgCanvas& canvas)
   }
   output_stream << "<g data-layer=\"grid\" stroke=\"#E0E0E0\" stroke-width=\"1\">\n";
   for (int32_t x = canvas.min_x; x <= canvas.max_x; x++) {
-    output_stream << "<line x1=\"" << canvas.getX(x) << "\" y1=\"" << canvas.getY(canvas.min_y) << "\" x2=\""
-                  << canvas.getX(x) << "\" y2=\"" << canvas.getY(canvas.max_y) << "\"/>\n";
+    output_stream << "<line x1=\"" << canvas.getX(x) << "\" y1=\"" << canvas.getY(canvas.min_y) << "\" x2=\"" << canvas.getX(x) << "\" y2=\""
+                  << canvas.getY(canvas.max_y) << "\"/>\n";
   }
   for (int32_t y = canvas.min_y; y <= canvas.max_y; y++) {
-    output_stream << "<line x1=\"" << canvas.getX(canvas.min_x) << "\" y1=\"" << canvas.getY(y) << "\" x2=\""
-                  << canvas.getX(canvas.max_x) << "\" y2=\"" << canvas.getY(y) << "\"/>\n";
+    output_stream << "<line x1=\"" << canvas.getX(canvas.min_x) << "\" y1=\"" << canvas.getY(y) << "\" x2=\"" << canvas.getX(canvas.max_x) << "\" y2=\""
+                  << canvas.getY(y) << "\"/>\n";
   }
   output_stream << "</g>\n";
 }
@@ -155,9 +154,8 @@ void writeGridRect(std::ofstream& output_stream, const SvgCanvas& canvas, const 
   double right = planar_rect.get_ur_x() + 0.5;
   double bottom = planar_rect.get_ll_y() - 0.5;
   double top = planar_rect.get_ur_y() + 0.5;
-  output_stream << "<rect x=\"" << canvas.getX(left) << "\" y=\"" << canvas.getY(top) << "\" width=\""
-                << canvas.getX(right) - canvas.getX(left) << "\" height=\"" << canvas.getY(bottom) - canvas.getY(top) << "\" "
-                << style << "/>\n";
+  output_stream << "<rect x=\"" << canvas.getX(left) << "\" y=\"" << canvas.getY(top) << "\" width=\"" << canvas.getX(right) - canvas.getX(left)
+                << "\" height=\"" << canvas.getY(bottom) - canvas.getY(top) << "\" " << style << "/>\n";
 }
 
 void writeTopology(std::ofstream& output_stream, const SvgCanvas& canvas, const std::string& layer_name,
@@ -167,9 +165,8 @@ void writeTopology(std::ofstream& output_stream, const SvgCanvas& canvas, const 
   for (const Segment<PlanarCoord>& planar_topo : planar_topo_list) {
     const PlanarCoord& first_coord = planar_topo.get_first();
     const PlanarCoord& second_coord = planar_topo.get_second();
-    output_stream << "<line x1=\"" << canvas.getX(first_coord.get_x()) << "\" y1=\"" << canvas.getY(first_coord.get_y())
-                  << "\" x2=\"" << canvas.getX(second_coord.get_x()) << "\" y2=\"" << canvas.getY(second_coord.get_y())
-                  << "\"/>\n";
+    output_stream << "<line x1=\"" << canvas.getX(first_coord.get_x()) << "\" y1=\"" << canvas.getY(first_coord.get_y()) << "\" x2=\""
+                  << canvas.getX(second_coord.get_x()) << "\" y2=\"" << canvas.getY(second_coord.get_y()) << "\"/>\n";
   }
   output_stream << "</g>\n";
 }
@@ -180,31 +177,30 @@ void writeTerminals(std::ofstream& output_stream, const SvgCanvas& canvas, const
   for (const PlanarCoord& terminal_coord : terminal_coord_list) {
     double x = canvas.getX(terminal_coord.get_x());
     double y = canvas.getY(terminal_coord.get_y());
-    output_stream << "<circle cx=\"" << x << "\" cy=\"" << y
-                  << "\" r=\"4.5\" fill=\"#2E7D32\" stroke=\"#FFFFFF\" stroke-width=\"1.5\"/>\n";
-    output_stream << "<text x=\"" << x + 6 << "\" y=\"" << y - 6
-                  << "\" fill=\"#1B5E20\" class=\"coord-label\">" << getCoordLabel("T", terminal_coord) << "</text>\n";
+    output_stream << "<circle cx=\"" << x << "\" cy=\"" << y << "\" r=\"4.5\" fill=\"#2E7D32\" stroke=\"#FFFFFF\" stroke-width=\"1.5\"/>\n";
+    output_stream << "<text x=\"" << x + 6 << "\" y=\"" << y - 6 << "\" fill=\"#1B5E20\" class=\"coord-label\">" << getCoordLabel("T", terminal_coord)
+                  << "</text>\n";
   }
   output_stream << "</g>\n";
 }
 
 void writeDiamond(std::ofstream& output_stream, double x, double y, double radius, const std::string& style)
 {
-  output_stream << "<path d=\"M " << x << " " << y - radius << " L " << x + radius << " " << y << " L " << x << " " << y + radius
-                << " L " << x - radius << " " << y << " Z\" " << style << "/>\n";
+  output_stream << "<path d=\"M " << x << " " << y - radius << " L " << x + radius << " " << y << " L " << x << " " << y + radius << " L " << x - radius << " "
+                << y << " Z\" " << style << "/>\n";
 }
 
 void writeSteinerCoords(std::ofstream& output_stream, const SvgCanvas& canvas, const std::string& layer_name,
-                        const std::vector<PlanarCoord>& steiner_coord_list, const std::string& prefix, double radius,
-                        const std::string& style, const std::string& label_color)
+                        const std::vector<PlanarCoord>& steiner_coord_list, const std::string& prefix, double radius, const std::string& style,
+                        const std::string& label_color)
 {
   output_stream << "<g data-layer=\"" << layer_name << "\">\n";
   for (const PlanarCoord& steiner_coord : steiner_coord_list) {
     double x = canvas.getX(steiner_coord.get_x());
     double y = canvas.getY(steiner_coord.get_y());
     writeDiamond(output_stream, x, y, radius, style);
-    output_stream << "<text x=\"" << x + 7 << "\" y=\"" << y + 14 << "\" fill=\"" << label_color
-                  << "\" class=\"coord-label\">" << getCoordLabel(prefix, steiner_coord) << "</text>\n";
+    output_stream << "<text x=\"" << x + 7 << "\" y=\"" << y + 14 << "\" fill=\"" << label_color << "\" class=\"coord-label\">"
+                  << getCoordLabel(prefix, steiner_coord) << "</text>\n";
   }
   output_stream << "</g>\n";
 }
@@ -221,8 +217,7 @@ void writeLegend(std::ofstream& output_stream, const SvgCanvas& canvas)
   output_stream << "<line x1=\"" << legend_x + 10 << "\" y1=\"68\" x2=\"" << legend_x + 26
                 << "\" y2=\"68\" stroke=\"#78909C\" stroke-width=\"2\" stroke-dasharray=\"6 4\"/>\n";
   output_stream << "<text x=\"" << legend_x + 34 << "\" y=\"72\" class=\"legend-text\">Raw FLUTE edge</text>\n";
-  output_stream << "<line x1=\"" << legend_x + 10 << "\" y1=\"88\" x2=\"" << legend_x + 26
-                << "\" y2=\"88\" stroke=\"#1565C0\" stroke-width=\"3\"/>\n";
+  output_stream << "<line x1=\"" << legend_x + 10 << "\" y1=\"88\" x2=\"" << legend_x + 26 << "\" y2=\"88\" stroke=\"#1565C0\" stroke-width=\"3\"/>\n";
   output_stream << "<text x=\"" << legend_x + 34 << "\" y=\"92\" class=\"legend-text\">Legalized edge</text>\n";
   output_stream << "<circle cx=\"" << legend_x + 18 << "\" cy=\"110\" r=\"4\" fill=\"#2E7D32\"/>\n";
   output_stream << "<text x=\"" << legend_x + 34 << "\" y=\"114\" class=\"legend-text\">Terminal</text>\n";
@@ -274,13 +269,12 @@ bool writeTopoSvg(const std::string& file_path, const TopoSvgPlotRequest& reques
   std::vector<PlanarCoord> legal_steiner_coord_list = getSteinerCoordList(request.terminal_coord_list, request.legal_topo_list);
 
   output_stream << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-  output_stream << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << canvas.width << "\" height=\"" << canvas.height
-                << "\" viewBox=\"0 0 " << canvas.width << " " << canvas.height << "\">\n";
+  output_stream << "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" << canvas.width << "\" height=\"" << canvas.height << "\" viewBox=\"0 0 "
+                << canvas.width << " " << canvas.height << "\">\n";
   output_stream << "<style>.coord-label{font-family:monospace;font-size:11px}.legend-title{font-family:monospace;font-size:13px;font-weight:bold}"
                 << ".legend-text{font-family:monospace;font-size:11px}</style>\n";
   output_stream << "<rect data-layer=\"background\" width=\"100%\" height=\"100%\" fill=\"#FFFFFF\"/>\n";
-  output_stream << "<text x=\"12\" y=\"28\" font-family=\"monospace\" font-size=\"16\" font-weight=\"bold\">"
-                << escapeXml(request.title) << "</text>\n";
+  output_stream << "<text x=\"12\" y=\"28\" font-family=\"monospace\" font-size=\"16\" font-weight=\"bold\">" << escapeXml(request.title) << "</text>\n";
   writeGrid(output_stream, canvas);
 
   output_stream << "<g data-layer=\"search-region\">\n";
@@ -294,13 +288,12 @@ bool writeTopoSvg(const std::string& file_path, const TopoSvgPlotRequest& reques
 
   writeTopology(output_stream, canvas, "flute-topology", request.flute_topo_list,
                 "fill=\"none\" stroke=\"#78909C\" stroke-width=\"2\" stroke-dasharray=\"6 4\"");
-  writeTopology(output_stream, canvas, "legal-topology", request.legal_topo_list,
-                "fill=\"none\" stroke=\"#1565C0\" stroke-width=\"3\"");
+  writeTopology(output_stream, canvas, "legal-topology", request.legal_topo_list, "fill=\"none\" stroke=\"#1565C0\" stroke-width=\"3\"");
   writeTerminals(output_stream, canvas, request.terminal_coord_list);
-  writeSteinerCoords(output_stream, canvas, "raw-steiner", flute_steiner_coord_list, "Sraw", 6,
-                     "fill=\"#FFFFFF\" stroke=\"#FB8C00\" stroke-width=\"2\"", "#E65100");
-  writeSteinerCoords(output_stream, canvas, "legal-steiner", legal_steiner_coord_list, "Slegal", 4,
-                     "fill=\"#8E24AA\" stroke=\"#FFFFFF\" stroke-width=\"1\"", "#6A1B9A");
+  writeSteinerCoords(output_stream, canvas, "raw-steiner", flute_steiner_coord_list, "Sraw", 6, "fill=\"#FFFFFF\" stroke=\"#FB8C00\" stroke-width=\"2\"",
+                     "#E65100");
+  writeSteinerCoords(output_stream, canvas, "legal-steiner", legal_steiner_coord_list, "Slegal", 4, "fill=\"#8E24AA\" stroke=\"#FFFFFF\" stroke-width=\"1\"",
+                     "#6A1B9A");
   writeLegend(output_stream, canvas);
   output_stream << "</svg>\n";
 

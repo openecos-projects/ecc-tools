@@ -35,6 +35,7 @@ void register_idb(py::module& m)
   m.def("lef_init", initLef, py::arg("lef_paths"));
   m.def("def_init", initDef, py::arg("def_path"));
   m.def("verilog_init", initVerilog, py::arg("verilog_path"), py::arg("top_module"));
+  m.def("lvs_verilog_init", initLvsVerilog, py::arg("verilog_path"), py::arg("top_module"));
   m.def("lib_init", initLib, py::arg("lib_paths"));
   m.def("sdc_init", initSdc, py::arg("sdc_path"));
   m.def("spef_init", initSpef, py::arg("spef_path"));
@@ -58,7 +59,6 @@ void register_idb(py::module& m)
   m.def("save_data", saveData, py::arg("path"));
   m.def("reset_data", resetData);
   m.def("load_data", loadData, py::arg("path"));
-  m.def("write_soc_json", writeSocJson, py::arg("path"), py::arg("harden_cores") = std::vector<std::string>{});
   m.def("write_abstract_lef", writeAbstractLef, py::arg("output_lef_path"));
 }
 

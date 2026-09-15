@@ -32,9 +32,7 @@ class CouplingCapComparator
  public:
   explicit CouplingCapComparator(const Config& config);
 
-  void compare(const Data& test,
-               const Data& reference,
-               Result& result) const;
+  void compare(const Data& test, const Data& reference, Result& result) const;
 
  private:
   const Config& _config;

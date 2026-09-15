@@ -31,6 +31,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "json_write.h"
 #include <fstream>
 #include <string>
@@ -61,7 +62,7 @@ void set_discard(string option){
   }
   
   // for (const auto& ele : discard) {
-  //     std::cout << ele << std::endl;
+  //     ECCLOG.info(ecc::Loc::current(), ele);
   // }
 }
 
@@ -197,14 +198,14 @@ int32_t Gds2JsonWrite::set_units()
   IdbUnits* def_units = design->get_units();
   IdbUnits* lef_units = design->get_layout()->get_units();
   if (def_units == nullptr && lef_units == nullptr) {
-    std::cout << "Write UNITS failed..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write UNITS failed...");
 
     return kDbFail;
   }
 
   _unit_microns = def_units->get_micron_dbu() > 0 ? def_units->get_micron_dbu() : lef_units->get_micron_dbu();
   if (_unit_microns <= 0) {
-    std::cout << "Write UNITS failed..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write UNITS failed...");
 
     return kDbFail;
   }
@@ -296,7 +297,7 @@ int32_t Gds2JsonWrite::write_die()
   IdbLayout* layout = _def_service->get_layout();
   IdbDie* die = layout->get_die();
   if (die == nullptr) {
-    std::cout << "Write DIE failed..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write DIE failed...");
 
     return kDbFail;
   }
@@ -333,7 +334,7 @@ int32_t Gds2JsonWrite::write_track_grid()
   IdbLayout* layout = _def_service->get_layout();
   IdbTrackGridList* track_grid_list = layout->get_track_grid_list();
   if (track_grid_list == nullptr) {
-    std::cout << "Write Track Grid failed..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write Track Grid failed...");
     return kDbFail;
   }
 
@@ -490,9 +491,8 @@ void Gds2JsonWrite::packSegment(JsonStruct* json_struct, IdbLayerRouting* routin
     ur_y = std::max(point_1->get_y(), point_2->get_y()) + routing_width / 2;
   } else {
     // only support horizontal & vertical direction
-    std::cout << "Error...Regular segment only support horizontal & "
-                 "vertical direction... "
-              << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error...Regular segment only support horizontal & "
+                 "vertical direction... ");
   }
 
   packRect(json_struct, ll_x, ll_y, ur_x, ur_y, routing_layer);
@@ -508,7 +508,7 @@ int32_t Gds2JsonWrite::write_row()
   IdbLayout* layout = _def_service->get_layout();
   IdbRows* rows = layout->get_rows();
   if (rows == nullptr) {
-    std::cout << "Write ROWS failed..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write ROWS failed...");
     return kDbFail;
   }
 
@@ -530,7 +530,7 @@ int32_t Gds2JsonWrite::write_component()
   IdbDesign* design = _def_service->get_design();  // Def
   IdbInstanceList* instance_list = design->get_instance_list();
   if (instance_list == nullptr || instance_list->get_num() == 0) {
-    std::cout << "Write COMPONENTS failed..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write COMPONENTS failed...");
     return kDbFail;
   }
 
@@ -577,7 +577,7 @@ int32_t Gds2JsonWrite::write_component()
 
     x++;
     if (x % 1000 == 0) {
-      std::cout << "Write COMPONENTS. " << x << " / " << max_num << std::endl;
+      ECCLOG.info(ecc::Loc::current(), "Write COMPONENTS. ", x, " / ", max_num);
     }
   }
 
@@ -585,7 +585,7 @@ int32_t Gds2JsonWrite::write_component()
 
   writeStruct();
 
-  std::cout << "Write COMPONENTS success. " << max_num << " / " << max_num << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write COMPONENTS success. ", max_num, " / ", max_num);
 
   return kDbSuccess;
 }
@@ -595,7 +595,7 @@ int32_t Gds2JsonWrite::write_pin()
   IdbDesign* design = _def_service->get_design();
   IdbPins* pin_list = design->get_io_pin_list();
   if (pin_list == nullptr) {
-    std::cout << "Write PINS failed..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write PINS failed...");
     return kDbFail;
   }
 
@@ -619,7 +619,7 @@ int32_t Gds2JsonWrite::write_blockage()
   IdbDesign* design = _def_service->get_design();
   IdbBlockageList* blockage_list = design->get_blockage_list();
   if (blockage_list == nullptr || blockage_list->get_num() == 0) {
-    std::cout << "Write blocakge failed..." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Write blocakge failed...");
     return kDbFail;
   }
 
@@ -650,7 +650,7 @@ int32_t Gds2JsonWrite::write_blockage()
 int32_t Gds2JsonWrite::write_specialnet_wire_segment_points(JsonStruct* json_struct, IdbSpecialWireSegment* segment)
 {
   if (segment->get_point_list().size() < _POINT_MAX_) {
-    std::cout << "Specialnet wire points are less than 2..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "Specialnet wire points are less than 2...");
     return kDbFail;
   }
 
@@ -670,7 +670,7 @@ int32_t Gds2JsonWrite::write_specialnet_wire_segment_points(JsonStruct* json_str
 int32_t Gds2JsonWrite::write_specialnet_wire_segment_via(JsonStruct* json_struct, IdbSpecialWireSegment* segment)
 {
   if (segment->get_point_list().size() <= 0 || segment->get_layer() == nullptr || segment->get_via() == nullptr) {
-    std::cout << "No net wire segment via..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No net wire segment via...");
     return kDbFail;
   }
 
@@ -707,7 +707,7 @@ int32_t Gds2JsonWrite::write_special_net()
 {
   IdbSpecialNetList* special_net_list = _def_service->get_design()->get_special_net_list();
   if (special_net_list == nullptr || special_net_list->get_num() == 0) {
-    std::cout << "No SPECIALNETS..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No SPECIALNETS...");
     return kDbFail;
   }
 
@@ -747,12 +747,12 @@ int32_t Gds2JsonWrite::write_net()
   IdbDesign* design = _def_service->get_design();  // Def
   IdbNetList* net_list = design->get_net_list();
   if (net_list == nullptr) {
-    std::cout << "No NET To Write..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No NET To Write...");
     return kDbFail;
   }
 
   if (net_list->get_num() == 0) {
-    std::cout << "NO NET ..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "NO NET ...");
     return kDbFail;
   }
 
@@ -786,14 +786,14 @@ int32_t Gds2JsonWrite::write_net()
 
     x++;
     if (x % 1000 == 0) {
-      std::cout << "Write NETS. " << x << " / " << max_num << std::endl;
+      ECCLOG.info(ecc::Loc::current(), "Write NETS. ", x, " / ", max_num);
     }
   }
 
   omp_destroy_lock(&lck);
 
   writeStruct();
-  std::cout << "Write NETS success. " << max_num << " / " << max_num << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "Write NETS success. ", max_num, " / ", max_num);
 
   return kDbSuccess;
 }
@@ -826,7 +826,7 @@ int32_t Gds2JsonWrite::write_net_wire_segment(JsonStruct* json_struct, IdbRegula
 int32_t Gds2JsonWrite::write_net_wire_segment_points(JsonStruct* json_struct, IdbRegularWireSegment* segment)
 {
   if (segment->get_point_list().size() < _POINT_MAX_ || segment->get_layer() == nullptr) {
-    // std::cout << "Error net wire point..." << std::endl;
+    // ECCLOG.warn(ecc::Loc::current(), "Net wire point is invalid.");
     return kDbFail;
   }
 
@@ -843,7 +843,7 @@ int32_t Gds2JsonWrite::write_net_wire_segment_points(JsonStruct* json_struct, Id
 int32_t Gds2JsonWrite::write_net_wire_segment_via(JsonStruct* json_struct, IdbRegularWireSegment* segment)
 {
   if (segment->get_point_list().size() <= 0 || segment->get_layer() == nullptr || segment->get_via_list().size() <= 0) {
-    std::cout << "No net wire segment via..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No net wire segment via...");
     return kDbFail;
   }
 
@@ -859,7 +859,7 @@ int32_t Gds2JsonWrite::write_net_wire_segment_via(JsonStruct* json_struct, IdbRe
 int32_t Gds2JsonWrite::write_net_wire_segment_rect(JsonStruct* json_struct, IdbRegularWireSegment* segment)
 {
   if (segment->get_point_list().size() <= 0 || segment->get_layer() == nullptr || segment->get_delta_rect() == nullptr) {
-    std::cout << "No net wire segment rect..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No net wire segment rect...");
     return kDbFail;
   }
 
@@ -867,12 +867,12 @@ int32_t Gds2JsonWrite::write_net_wire_segment_rect(JsonStruct* json_struct, IdbR
   IdbRect* rect_delta = segment->get_delta_rect();
 
   if (coordinate->get_x() < 0 || coordinate->get_y() < 0) {
-    std::cout << "Error...Coordinate error...x = " << coordinate->get_x() << " y = " << coordinate->get_y() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error...Coordinate error...x = ", coordinate->get_x(), " y = ", coordinate->get_y());
   }
 
   IdbLayer* layer = segment->get_layer();
   if (layer == nullptr) {
-    std::cout << "Error...createNetRect : Layer not exist :  " << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error...createNetRect : Layer not exist :  ");
     return kDbFail;
   }
 
@@ -917,7 +917,7 @@ int32_t Gds2JsonWrite::write_fill()
   IdbDesign* design = _def_service->get_design();  // def
   IdbFillList* fill_list = design->get_fill_list();
   if (fill_list == nullptr || fill_list->get_num_fill() == 0) {
-    std::cout << "No FILLS ..." << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "No FILLS ...");
     return kDbFail;
   }
 

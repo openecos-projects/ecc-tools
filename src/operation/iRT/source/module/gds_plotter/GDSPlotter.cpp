@@ -16,16 +16,11 @@
 // ***************************************************************************************
 #include "GDSPlotter.hpp"
 
-#include <cmath>
-#include <cstdint>
-#include <ctime>
-#include <initializer_list>
-#include <limits>
-
 #include "GPDataType.hpp"
 #include "GPLYPLayer.hpp"
 #include "MTree.hpp"
 #include "Monitor.hpp"
+#include "RTHeader.hpp"
 #include "Utility.hpp"
 
 namespace irt {
@@ -42,8 +37,8 @@ constexpr size_t kGDSFileBufferSize = 16 * 1024 * 1024;
 
 const std::string& getInnovusColor(int32_t layer_idx)
 {
-  static const std::vector<std::string> color_list = {"#2f3bff", "#e52b2b", "#41e65a", "#f0ee66", "#8e2631",
-                                                      "#f2b63f", "#c438d0", "#35d4c8", "#8b5a3c", "#f0e85a"};
+  static const std::vector<std::string> color_list
+      = {"#2f3bff", "#e52b2b", "#41e65a", "#f0ee66", "#8e2631", "#f2b63f", "#c438d0", "#35d4c8", "#8b5a3c", "#f0e85a"};
   if (layer_idx < 0) {
     layer_idx = 0;
   }
@@ -334,13 +329,26 @@ void GDSPlotter::buildGraphLypFile()
   std::string routing_pattern = "I5";
   std::string cut_pattern = "I9";
 
-  std::map<GPDataType, bool> routing_data_type_visible_map
-      = {{GPDataType::kNone, false},          {GPDataType::kOpen, false},      {GPDataType::kClose, false},
-         {GPDataType::kInfo, false},          {GPDataType::kNeighbor, false},  {GPDataType::kShadow, false},
-         {GPDataType::kKey, false},           {GPDataType::kGlobalPath, true}, {GPDataType::kDetailedPath, true},
-         {GPDataType::kPatch, true},          {GPDataType::kShape, true},      {GPDataType::kAccessPoint, false},
-         {GPDataType::kAxis, false},          {GPDataType::kOverflow, false},  {GPDataType::kRouteViolation, false},
-         {GPDataType::kPatchViolation, false}};
+  std::map<GPDataType, bool> routing_data_type_visible_map = {{GPDataType::kNone, false},
+                                                              {GPDataType::kOpen, false},
+                                                              {GPDataType::kClose, false},
+                                                              {GPDataType::kInfo, false},
+                                                              {GPDataType::kNeighbor, false},
+                                                              {GPDataType::kShadow, false},
+                                                              {GPDataType::kKey, false},
+                                                              {GPDataType::kGlobalPath, true},
+                                                              {GPDataType::kDetailedPath, true},
+                                                              {GPDataType::kPatch, true},
+                                                              {GPDataType::kShape, true},
+                                                              {GPDataType::kAccessPoint, false},
+                                                              {GPDataType::kAxis, false},
+                                                              {GPDataType::kOverflow, false},
+                                                              {GPDataType::kRouteViolation, false},
+                                                              {GPDataType::kPatchViolation, false},
+                                                              {GPDataType::kHEdgeAxis, false},
+                                                              {GPDataType::kVEdgeAxis, false},
+                                                              {GPDataType::kHEdgeInfo, false},
+                                                              {GPDataType::kVEdgeInfo, false}};
   std::map<GPDataType, bool> cut_data_type_visible_map = {{GPDataType::kGlobalPath, true}, {GPDataType::kDetailedPath, true}, {GPDataType::kShape, true}};
 
   // 0为base_region 最后一个为GCell 中间为cut+routing

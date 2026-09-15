@@ -55,7 +55,7 @@ std::string ReportDesign::title()
   return "";
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDesign::createInstanceTable(const std::string& inst_name)
+std::shared_ptr<ecc::ReportTable> ReportDesign::createInstanceTable(const std::string& inst_name)
 {
   auto* inst_ptr = dmInst->get_idb_design()->get_instance_list()->find_instance(inst_name);
   if (inst_ptr == nullptr) {
@@ -65,13 +65,13 @@ std::shared_ptr<ieda::ReportTable> ReportDesign::createInstanceTable(const std::
   return createInstanceTable(inst_ptr);
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDesign::createInstanceTable(idb::IdbInstance* inst_ptr)
+std::shared_ptr<ecc::ReportTable> ReportDesign::createInstanceTable(idb::IdbInstance* inst_ptr)
 
 {
   assert(inst_ptr);
   auto& inst = *inst_ptr;
   std::vector<std::string> header = {"Property", "Value"};
-  auto tbl = std::make_shared<ieda::ReportTable>("IdbInstance", header, static_cast<int>(ReportDBType::kInstance));
+  auto tbl = std::make_shared<ecc::ReportTable>("IdbInstance", header, static_cast<int>(ReportDBType::kInstance));
   auto& instProperty =* IdbEnum::GetInstance()->get_instance_property();
 
   *tbl << "Name" << inst.get_name() << TABLE_ENDLINE;
@@ -92,11 +92,11 @@ std::shared_ptr<ieda::ReportTable> ReportDesign::createInstanceTable(idb::IdbIns
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDesign::createInstancePinTable(idb::IdbInstance* inst_ptr)
+std::shared_ptr<ecc::ReportTable> ReportDesign::createInstancePinTable(idb::IdbInstance* inst_ptr)
 {
   assert(inst_ptr);
   std::vector<std::string> header = {"Pin Name", "Coordinate", "Type", "Net Name"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Instance pin list", header, static_cast<int>(ReportDBType::kInstancePinList));
+  auto tbl = std::make_shared<ecc::ReportTable>("Instance pin list", header, static_cast<int>(ReportDBType::kInstancePinList));
   for (auto* pin : inst_ptr->get_pin_list()->get_pin_list()) {
     *tbl << pin->get_pin_name() << ReportBase::format("(%d, %d)", pin->get_average_coordinate()->get_x(), pin->get_average_coordinate()->get_y());
     if (pin->is_net_pin()) {
@@ -113,13 +113,13 @@ std::shared_ptr<ieda::ReportTable> ReportDesign::createInstancePinTable(idb::Idb
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDesign::createNetTable(idb::IdbNet* net_ptr)
+std::shared_ptr<ecc::ReportTable> ReportDesign::createNetTable(idb::IdbNet* net_ptr)
 {
   assert(net_ptr);
   auto& net = *net_ptr;
 
   std::vector<std::string> header = {"Property", "Value"};
-  auto tbl = std::make_shared<ieda::ReportTable>("IdbNet", header, static_cast<int>(ReportDBType::kNet));
+  auto tbl = std::make_shared<ecc::ReportTable>("IdbNet", header, static_cast<int>(ReportDBType::kNet));
 
   auto& netEnum = *IdbEnum::GetInstance()->get_connect_property();
   auto fullName = [](IdbPin* pin) -> std::string { return pin ? pin->get_instance()->get_name() + "/" + pin->get_pin_name() : ""; };

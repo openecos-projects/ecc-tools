@@ -34,7 +34,17 @@ class PowerGraph
   std::vector<PowerNode>& get_node_list() { return _node_list; }
   std::vector<PowerEdge>& get_edge_list() { return _edge_list; }
   std::map<uint64_t, std::vector<std::size_t>>& get_instance_node_id_list_map() { return _instance_node_id_list_map; }
+  std::map<std::pair<uint64_t, std::string>, std::vector<std::size_t>>& get_instance_pin_node_id_list_map()
+  {
+    return _instance_pin_node_id_list_map;
+  }
+  std::map<uint64_t, std::map<std::size_t, double>>& get_instance_node_weight_map() { return _instance_node_weight_map; }
+  std::map<std::pair<uint64_t, std::string>, std::map<std::size_t, double>>& get_instance_pin_node_weight_map()
+  {
+    return _instance_pin_node_weight_map;
+  }
   std::vector<std::size_t>& get_source_node_id_list() { return _source_node_id_list; }
+  std::map<std::tuple<int32_t, int32_t, int32_t>, std::size_t>& get_coordinate_node_id_map() { return _coordinate_node_id_map; }
   bool get_is_connected() { return _is_connected; }
   double get_source_voltage() { return _source_voltage; }
   // setter
@@ -50,7 +60,11 @@ class PowerGraph
   std::vector<PowerNode> _node_list;
   std::vector<PowerEdge> _edge_list;
   std::map<uint64_t, std::vector<std::size_t>> _instance_node_id_list_map;
+  std::map<std::pair<uint64_t, std::string>, std::vector<std::size_t>> _instance_pin_node_id_list_map;
+  std::map<uint64_t, std::map<std::size_t, double>> _instance_node_weight_map;
+  std::map<std::pair<uint64_t, std::string>, std::map<std::size_t, double>> _instance_pin_node_weight_map;
   std::vector<std::size_t> _source_node_id_list;
+  std::map<std::tuple<int32_t, int32_t, int32_t>, std::size_t> _coordinate_node_id_map;
   bool _is_connected = false;
   double _source_voltage = 0.0;
 };

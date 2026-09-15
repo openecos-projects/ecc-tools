@@ -27,13 +27,17 @@
         There is a def builder to build data structure from def.
  *
  */
+#include "utility/logger/Logger.hpp"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include <iostream>
+#include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "def_service.h"
@@ -50,6 +54,15 @@ using std::vector;
 
 #define CLOCKS_PER_MS 1000
 
+struct DefReadError
+{
+  std::string file_path;
+  int64_t line_number;
+  std::string stage;
+  std::string message;
+  int32_t status;
+};
+
 class DefRead
 {
  public:
@@ -58,6 +71,7 @@ class DefRead
 
   // getter
   IdbDefService* get_service() { return _def_service; }
+  const DefReadError* get_last_error() const { return _last_error ? &*_last_error : nullptr; }
   bool createDb(const char* file);
   bool createDbGzip(const char* gzip_file);
   bool createFloorplanDb(const char* file);
@@ -139,29 +153,38 @@ class DefRead
     logNumber(mudule, number);
     logSeperate();
   }
-  void logSeperate() { std::cout << "**************************************************************" << std::endl; }
+  void logSeperate() { ECCLOG.info(ecc::Loc::current(), "**************************************************************"); }
   void logNumber(string mudule, int32_t number = -1)
   {
-    std::cout << mudule;
+    ECCLOG.info(ecc::Loc::current(), mudule);
     if (number != -1) {
-      std::cout << " number : " << number;
+      ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    std::cout << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "");
   }
   void logInfo(string info, int32_t number = -1)
   {
-    std::cout << info;
+    ECCLOG.info(ecc::Loc::current(), info);
     if (number != -1) {
-      std::cout << " number : " << number;
+      ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    std::cout << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "");
   }
 
  private:
+  static void parserErrorCallback(defiUserData data, const char* message);
+
+  int32_t recordCallbackResult(std::string_view stage, int32_t status);
+  void resetError(const char* file);
+  void recordError(std::string_view stage, const char* message, int32_t status, int64_t line_number);
+  void logError() const;
+
   IdbDefService* _def_service;
   clock_t _start_time;
   clock_t _end_time;
 
   IdbCellMaster* _cur_cell_master;
+  std::string _file_path;
+  std::optional<DefReadError> _last_error;
 };
 }  // namespace idb

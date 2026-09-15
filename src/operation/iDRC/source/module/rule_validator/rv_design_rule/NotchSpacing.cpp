@@ -81,8 +81,9 @@ void RuleValidator::verifyNotchSpacing(RVCluster& rv_cluster)
 
           for (int32_t i = 0; i < coord_size; i++) {
             if (concave_ends.has_value()) {
-              if (!convex_corner_list[getIdx(i - 1, coord_size)] || convex_corner_list[i] || convex_corner_list[getIdx(i + 1, coord_size)]
-                  || convex_corner_list[getIdx(i + 2, coord_size)] || !convex_corner_list[getIdx(i + 3, coord_size)]) {
+              if (!convex_corner_list[DRCUTIL.getRingIdx(i - 1, coord_size)] || convex_corner_list[i]
+                  || convex_corner_list[DRCUTIL.getRingIdx(i + 1, coord_size)] || convex_corner_list[DRCUTIL.getRingIdx(i + 2, coord_size)]
+                  || !convex_corner_list[DRCUTIL.getRingIdx(i + 3, coord_size)]) {
                 continue;
               }
               /**
@@ -98,8 +99,9 @@ void RuleValidator::verifyNotchSpacing(RVCluster& rv_cluster)
                *
                */
               for (auto [concave_edge_idx, spacing_edge_idx, side_edge_idx] :
-                   {std::tuple(getIdx(i + 2, coord_size), getIdx(i + 1, coord_size), i),
-                    std::tuple(getIdx(i + 1, coord_size), getIdx(i + 2, coord_size), getIdx(i + 3, coord_size))}) {
+                   {std::tuple(DRCUTIL.getRingIdx(i + 2, coord_size), DRCUTIL.getRingIdx(i + 1, coord_size), i),
+                    std::tuple(DRCUTIL.getRingIdx(i + 1, coord_size), DRCUTIL.getRingIdx(i + 2, coord_size),
+                               DRCUTIL.getRingIdx(i + 3, coord_size))}) {
                 if (edge_length_list[concave_edge_idx] < notch_length && edge_length_list[side_edge_idx] >= notch_length
                     && edge_length_list[spacing_edge_idx] < notch_spacing) {
                   Segment<PlanarCoord>& concave_edge = edge_list[concave_edge_idx];
@@ -128,7 +130,7 @@ void RuleValidator::verifyNotchSpacing(RVCluster& rv_cluster)
                 }
               }
             } else {
-              if (convex_corner_list[i] || convex_corner_list[getIdx(i + 1, coord_size)]) {
+              if (convex_corner_list[i] || convex_corner_list[DRCUTIL.getRingIdx(i + 1, coord_size)]) {
                 continue;
               }
               /**
@@ -143,11 +145,13 @@ void RuleValidator::verifyNotchSpacing(RVCluster& rv_cluster)
                *                        i+2                                       i+1(spacing_edge)
                *
                */
-              if ((edge_length_list[i] < notch_length || edge_length_list[getIdx(i + 2, coord_size)] < notch_length)
-                  && (edge_length_list[getIdx(i + 1, coord_size)] < notch_spacing)) {
+              if ((edge_length_list[i] < notch_length || edge_length_list[DRCUTIL.getRingIdx(i + 2, coord_size)] < notch_length)
+                  && (edge_length_list[DRCUTIL.getRingIdx(i + 1, coord_size)] < notch_spacing)) {
                 Segment<PlanarCoord>& short_edge
-                    = edge_length_list[i] < edge_length_list[getIdx(i + 2, coord_size)] ? edge_list[i] : edge_list[getIdx(i + 2, coord_size)];
-                Segment<PlanarCoord>& spacing_edge = edge_list[getIdx(i + 1, coord_size)];
+                    = edge_length_list[i] < edge_length_list[DRCUTIL.getRingIdx(i + 2, coord_size)]
+                          ? edge_list[i]
+                          : edge_list[DRCUTIL.getRingIdx(i + 2, coord_size)];
+                Segment<PlanarCoord>& spacing_edge = edge_list[DRCUTIL.getRingIdx(i + 1, coord_size)];
                 PlanarRect violation_rect
                     = DRCUTIL.getBoundingBox({short_edge.get_first(), short_edge.get_second(), spacing_edge.get_first(), spacing_edge.get_second()});
                 violation_poly_set += DRCUTIL.convertToGTLRectInt(violation_rect);

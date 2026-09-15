@@ -6,10 +6,10 @@ add_library(tcl_ilvs
 
 target_link_libraries(tcl_ilvs
     PUBLIC
-    tool_manager
-    tcl_util
+    tcl
     PRIVATE
     ilvs_interface
+    ecc_logger
 )
 
 target_include_directories(tcl_ilvs

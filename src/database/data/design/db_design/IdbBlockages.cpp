@@ -67,7 +67,7 @@ IdbBlockage::~IdbBlockage()
 
 IdbRect* IdbBlockage::get_rect(size_t index)
 {
-  if ((index > 0) && (index < _rect_list.size())) {
+  if (index < _rect_list.size()) {
     return _rect_list.at(index);
   }
 
@@ -261,6 +261,8 @@ void IdbBlockageList::removeExceptPgNetBlockageList()
         continue;
       }
 
+      it++;
+    } else {
       it++;
     }
   }

@@ -62,6 +62,7 @@ IdbGCellGridList::IdbGCellGridList()
 
 IdbGCellGridList::~IdbGCellGridList()
 {
+  clear();
 }
 
 IdbGCellGrid* IdbGCellGridList::add_gcell_grid(IdbGCellGrid* gcell_grid)

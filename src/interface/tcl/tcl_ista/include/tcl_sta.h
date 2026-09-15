@@ -28,7 +28,7 @@ class TclInitSTA : public TclCmd
   explicit TclInitSTA(const char* cmd_name);
   ~TclInitSTA() override = default;
 
-  unsigned check() override { return 1; };
+  unsigned check() override { return 1; }
 
   unsigned exec() override;
 
@@ -42,7 +42,7 @@ class TclRunSTA : public TclCmd
   explicit TclRunSTA(const char* cmd_name);
   ~TclRunSTA() override = default;
 
-  unsigned check() override { return 1; };
+  unsigned check() override { return 1; }
 
   unsigned exec() override;
 
@@ -56,7 +56,7 @@ class TclExtractLib : public TclCmd
   explicit TclExtractLib(const char* cmd_name);
   ~TclExtractLib() override = default;
 
-  unsigned check() override { return 1; };
+  unsigned check() override { return 1; }
 
   unsigned exec() override;
 
@@ -70,7 +70,7 @@ class TclDestroySTA : public TclCmd
   explicit TclDestroySTA(const char* cmd_name);
   ~TclDestroySTA() override = default;
 
-  unsigned check() override { return 1; };
+  unsigned check() override { return 1; }
 
   unsigned exec() override;
 

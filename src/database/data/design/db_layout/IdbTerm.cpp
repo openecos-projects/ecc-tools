@@ -15,10 +15,10 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @project		iDB
- * @file		IdbTerm.h
- * @date		25/05/2021
- * @version		0.1
+ * @project   iDB
+ * @file      IdbTerm.h
+ * @date      25/05/2021
+ * @version   0.1
 * @description
 
 
@@ -180,17 +180,23 @@ IdbTerm::IdbTerm()
 
 IdbTerm::~IdbTerm()
 {
+  clear_port_list();
+
+  if (_bouding_box != nullptr) {
+    delete _bouding_box;
+    _bouding_box = nullptr;
+  }
+}
+
+void IdbTerm::clear_port_list()
+{
   for (IdbPort* port : _port_list) {
     if (port) {
       delete port;
       port = nullptr;
     }
   }
-
-  if (_bouding_box != nullptr) {
-    delete _bouding_box;
-    _bouding_box = nullptr;
-  }
+  _port_list.clear();
 }
 
 void IdbTerm::set_direction(string direction)
@@ -268,6 +274,9 @@ IdbLayer* IdbTerm::get_top_layer()
   IdbLayer* layer = nullptr;
   for (IdbPort* port : _port_list) {
     IdbLayer* layer_top = port->get_top_layer();
+    if (layer_top == nullptr) {
+      continue;
+    }
     if (layer == nullptr) {
       layer = layer_top;
     } else {

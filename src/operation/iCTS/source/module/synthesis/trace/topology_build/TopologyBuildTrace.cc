@@ -24,6 +24,7 @@
 #include "synthesis/trace/topology_build/TopologyBuildTrace.hh"
 
 #include <cstddef>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -45,6 +46,14 @@ auto absorbOwnedObjects(std::vector<std::unique_ptr<T>>& target, std::vector<std
   source.clear();
 }
 
+template <typename T>
+auto absorbValues(std::vector<T>& target, std::vector<T>& source) -> void
+{
+  target.reserve(target.size() + source.size());
+  target.insert(target.end(), std::make_move_iterator(source.begin()), std::make_move_iterator(source.end()));
+  source.clear();
+}
+
 auto absorbHtreeInsertedObjects(Topology::Build& build, HTree::Output& htree_output) -> void
 {
   build.output.inserted_inst_levels.insert(build.output.inserted_inst_levels.end(), htree_output.inserted_inst_levels.begin(),
@@ -54,6 +63,7 @@ auto absorbHtreeInsertedObjects(Topology::Build& build, HTree::Output& htree_out
   absorbOwnedObjects(build.output.inserted_insts, htree_output.inserted_insts);
   absorbOwnedObjects(build.output.inserted_pins, htree_output.inserted_pins);
   absorbOwnedObjects(build.output.inserted_nets, htree_output.inserted_nets);
+  absorbValues(build.output.propagation_arcs, htree_output.propagation_arcs);
 }
 
 auto absorbHtreeInsertedObjects(SourceTrunkBuild& build, HTree::Output& htree_output) -> void
@@ -65,6 +75,7 @@ auto absorbHtreeInsertedObjects(SourceTrunkBuild& build, HTree::Output& htree_ou
   absorbOwnedObjects(build.output.inserted_insts, htree_output.inserted_insts);
   absorbOwnedObjects(build.output.inserted_pins, htree_output.inserted_pins);
   absorbOwnedObjects(build.output.inserted_nets, htree_output.inserted_nets);
+  absorbValues(build.output.propagation_arcs, htree_output.propagation_arcs);
 }
 
 auto absorbSegmentInsertedObjects(SourceTrunkBuild& build, SourceTrunkSegment::Build& segment_build) -> void
@@ -76,6 +87,7 @@ auto absorbSegmentInsertedObjects(SourceTrunkBuild& build, SourceTrunkSegment::B
   absorbOwnedObjects(build.output.inserted_insts, segment_build.output.inserted_insts);
   absorbOwnedObjects(build.output.inserted_pins, segment_build.output.inserted_pins);
   absorbOwnedObjects(build.output.inserted_nets, segment_build.output.inserted_nets);
+  absorbValues(build.output.propagation_arcs, segment_build.output.propagation_arcs);
 }
 
 auto selectedLeafTopologyLevel(const HTree::Output& htree_output, const std::optional<unsigned>& selected_depth) -> int

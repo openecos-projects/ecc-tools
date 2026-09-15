@@ -14,6 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "utility/logger/Logger.hpp"
 #include "masterslicelayer_parser.h"
 #include "lef58_property/masterslicelayer_property_parser.h"
 
@@ -24,7 +25,7 @@ bool MastersliceLayerParser::parse(const std::string& name, const std::string& v
     if(name == "LEF58_TYPE"){
         return parse_lef58_type(value, data);
     }
-    std::cout << "Unhandled PROPERTY: " << name << " \"" << value << "\"" << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Unhandled PROPERTY: ", name, " \"", value, "\"");
     return false;
 
 }

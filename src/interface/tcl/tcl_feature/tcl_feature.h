@@ -29,10 +29,10 @@
 #include "../tcl_definition.h"
 #include "ScriptEngine.hh"
 
-using ieda::TclCmd;
-using ieda::TclIntOption;
-using ieda::TclOption;
-using ieda::TclStringOption;
+using ecc::TclCmd;
+using ecc::TclIntOption;
+using ecc::TclOption;
+using ecc::TclStringOption;
 
 namespace tcl {
 class CmdFeatureSummary : public TclCmd

@@ -36,17 +36,13 @@
 #include <string>
 #include <vector>
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 struct SummaryInfo
 {
   std::string eda_tool;
-  std::string eda_version;
   std::string design_name;
   std::string design_version;
-  std::string flow_stage;
-  std::string flow_runtime;
-  std::string flow_memory;
 };
 
 struct SummaryLayout
@@ -165,4 +161,4 @@ struct DBSummary
   SummaryPins pins;
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

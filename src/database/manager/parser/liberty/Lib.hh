@@ -66,12 +66,12 @@ class LibObject
   LibObject() = default;
   virtual ~LibObject() = default;
 
-  virtual void addAxis(std::unique_ptr<LibAxis>&& axis) { IEDALOG.error(ieda::Loc::current(), "not support"); }
-  virtual void set_template_variable1(const char*) { IEDALOG.error(ieda::Loc::current(), "not support"); }
-  virtual void set_template_variable2(const char*) { IEDALOG.error(ieda::Loc::current(), "not support"); }
-  virtual void set_template_variable3(const char*) { IEDALOG.error(ieda::Loc::current(), "not support"); }
+  virtual void addAxis(std::unique_ptr<LibAxis>&& axis) { ECCLOG.error(ecc::Loc::current(), "not support"); }
+  virtual void set_template_variable1(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
+  virtual void set_template_variable2(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
+  virtual void set_template_variable3(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
 
-  virtual void set_template_variable4(const char*) { IEDALOG.error(ieda::Loc::current(), "not support"); }
+  virtual void set_template_variable4(const char*) { ECCLOG.error(ecc::Loc::current(), "not support"); }
 
   virtual unsigned isLibertyPortBus() { return 0; }
 
@@ -322,25 +322,25 @@ class LibTableModel : public LibObject
   virtual LibTable* getTable(int index) = 0;
   virtual std::optional<double> gateDelay(TransType trans_type, double slew, double load)
   {
-    IEDALOG.error(ieda::Loc::current(), "not support");
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
   virtual std::optional<double> gateDelaySigma(AnalysisMode mode, TransType trans_type, double slew, double load) { return 0.0; }
   virtual std::optional<double> gateSlew(TransType trans_type, double slew, double load)
   {
-    IEDALOG.error(ieda::Loc::current(), "not support");
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
   virtual std::optional<double> gateSlewSigma(AnalysisMode mode, TransType trans_type, double slew, double load) { return 0.0; }
   virtual std::optional<double> gateCheckConstrain(TransType trans_type, double slew, double load)
   {
-    IEDALOG.error(ieda::Loc::current(), "not support");
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
 
   virtual std::unique_ptr<LibCurrentData> gateOutputCurrent(TransType trans_type, double slew, double load)
   {
-    IEDALOG.error(ieda::Loc::current(), "not support");
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return nullptr;
   }
 
@@ -348,7 +348,7 @@ class LibTableModel : public LibObject
 
   virtual double gatePower(TransType trans_type, double slew, std::optional<double> load)
   {
-    IEDALOG.error(ieda::Loc::current(), "not support");
+    ECCLOG.error(ecc::Loc::current(), "not support");
     return 0.0;
   }
 
@@ -552,6 +552,8 @@ class LibPort : public LibObject
   LibPort(LibPort&& other) noexcept;
   LibPort& operator=(LibPort&& rhs) noexcept;
 
+  void inheritBusAttributes(const LibPort& bus);
+
   const char* get_port_name() { return _port_name.c_str(); }
   void set_ower_cell(LibCell* ower_cell) { _ower_cell = ower_cell; }
   LibCell* get_ower_cell() { return _ower_cell; }
@@ -606,6 +608,8 @@ class LibPort : public LibObject
 
   void set_fanout_load(double fanout_load_val) { _fanout_load = fanout_load_val; }
   auto& get_fanout_load() { return _fanout_load; }
+  void set_max_fanout(double max_fanout) { _max_fanout = max_fanout; }
+  auto& get_max_fanout() { return _max_fanout; }
 
   double driveResistance();
 
@@ -635,6 +639,7 @@ class LibPort : public LibObject
   std::array<std::optional<double>, MODE_SPLIT> _slew_limits{};
 
   std::optional<double> _fanout_load;
+  std::optional<double> _max_fanout;
 
   absl::InlinedVector<std::unique_ptr<LibInternalPowerInfo>, 64> _internal_powers;  //!< The internal power information.
 
@@ -712,11 +717,12 @@ class LibPortBus : public LibPort
   void addlibertyPort(std::unique_ptr<LibPort>&& port) { _ports.push_back(std::move(port)); }
 
   auto getBusSize() { return _bus_type ? _bus_type->get_bit_width() : _ports.size(); }
+  auto& get_ports() { return _ports; }
 
   void set_bus_type(LibType* bus_type) { _bus_type = bus_type; }
   auto* get_bus_type() { return _bus_type; }
 
-  LibPort* operator[](int index) { return _ports.empty() ? this : _ports[index].get(); }
+  LibPort* operator[](int index);
 
  private:
   absl::InlinedVector<std::unique_ptr<LibPort>, 64> _ports;  //!< The bus ports.
@@ -1056,6 +1062,25 @@ class LibPowerArcSet
     for (auto p = power_arcs.begin(); p != power_arcs.end() ? power_arc = p->get(), true : false; ++p)
 
 /**
+ * @brief Raw state variables and string attributes of a Liberty ff/latch group.
+ * State variables are internal names, not physical cell pins. Expressions are
+ * kept verbatim for consumers to interpret; they do not classify timing cells.
+ */
+struct LibSequential
+{
+  bool is_latch = false;
+  std::vector<std::string> state_variables;
+  std::map<std::string, std::string> attributes;
+
+  const std::string& get_attribute(const std::string& name) const
+  {
+    static const std::string empty;
+    auto it = attributes.find(name);
+    return it == attributes.end() ? empty : it->second;
+  }
+};
+
+/**
  * @brief The timing cell in the liberty.
  *
  */
@@ -1071,6 +1096,8 @@ class LibCell : public LibObject
   const char* get_cell_name() const { return _cell_name.c_str(); }
   auto& get_cell_arcs() { return _cell_arcs; }
   auto& get_cell_power_arcs() { return _cell_power_arcs; }
+  const std::vector<LibSequential>& get_sequentials() const { return _sequentials; }
+  void addSequential(LibSequential&& sequential) { _sequentials.emplace_back(std::move(sequential)); }
 
   double get_cell_area() const { return _cell_area; }
   void set_cell_area(double cell_area) { _cell_area = cell_area; }
@@ -1161,6 +1188,8 @@ class LibCell : public LibObject
   unsigned _is_dont_use : 1;
   unsigned _is_macro_cell : 1;
   unsigned _reserved : 30;
+
+  std::vector<LibSequential> _sequentials;  //!< Raw ff/latch definitions, independent of timing arcs.
 
   FORBIDDEN_COPY(LibCell);
 };
@@ -1298,7 +1327,7 @@ class LibLutTableTemplate : public LibObject
 
   void set_template_variable1(const char* template_variable1) override {
     if(!_str2var.contains(template_variable1)){
-      std::cout << "not contain the template variable " <<std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "not contain the template variable ");
     }
     // DLOG_FATAL_IF(!_str2var.contains(template_variable1))
     //     << "not contain the template variable " << template_variable1;
@@ -1727,12 +1756,12 @@ class LibAttrValue
 
   virtual double getFloatValue()
   {
-    IEDALOG.error(ieda::Loc::current(), "This is unknown value.");
+    ECCLOG.error(ecc::Loc::current(), "This is unknown value.");
     return 0.0;
   }
   virtual const char* getStringValue()
   {
-    IEDALOG.error(ieda::Loc::current(), "This is unknown value.");
+    ECCLOG.error(ecc::Loc::current(), "This is unknown value.");
     return nullptr;
   }
 };

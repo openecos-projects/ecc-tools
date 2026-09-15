@@ -72,6 +72,7 @@ void IdbRegion::clear_boundary()
       boudary = nullptr;
     }
   }
+  _boudary_list.clear();
 }
 
 std::vector<IdbInstance*>& IdbRegion::add_instance(IdbInstance* instance)

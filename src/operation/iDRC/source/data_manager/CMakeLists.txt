@@ -13,6 +13,8 @@ add_library(idrc_data_manager
 target_link_libraries(idrc_data_manager
     PUBLIC
     idrc_toolkit
+    PRIVATE
+    idm
 )
 
 target_include_directories(idrc_data_manager

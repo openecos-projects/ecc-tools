@@ -25,7 +25,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <numeric>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -68,6 +67,15 @@ auto makePoint(double x_um, int dbu_per_um) -> FastStaPoint
 auto appendNode(FastStaClockContext& context, FastStaNode node) -> FastStaNodeId
 {
   const auto node_id = context.nodes.size();
+  if ((node.kind == FastStaNodeKind::kBufferInput || node.kind == FastStaNodeKind::kBufferOutput) && node.inst_name.empty()) {
+    CTSLOG.error(Loc::current(), "FastStaChar: buffer node must carry an explicit instance identity.");
+  }
+  if (node.kind == FastStaNodeKind::kBufferInput && !context.buffer_input_node_id_by_inst.emplace(node.inst_name, node_id).second) {
+    CTSLOG.error(Loc::current(), "FastStaChar: duplicate buffer-input identity ", node.inst_name, ".");
+  }
+  if (node.kind == FastStaNodeKind::kBufferOutput && !context.buffer_output_node_id_by_inst.emplace(node.inst_name, node_id).second) {
+    CTSLOG.error(Loc::current(), "FastStaChar: duplicate buffer-output identity ", node.inst_name, ".");
+  }
   context.node_id_by_name[node.name] = node_id;
   context.node_id_by_location[{node.location.x_dbu, node.location.y_dbu}] = node_id;
   context.nodes.push_back(std::move(node));
@@ -92,26 +100,90 @@ auto appendNet(FastStaClockContext& context, FastStaNet net) -> FastStaNetId
 
 auto sourceOutputNodeId(const FastStaClockContext& context) -> FastStaNodeId
 {
-  const auto iter = context.node_id_by_name.find("cts_char_source/Y");
-  return iter == context.node_id_by_name.end() ? kInvalidFastStaNodeId : iter->second;
+  if (context.source_node_id >= context.nodes.size()) {
+    return kInvalidFastStaNodeId;
+  }
+  const auto& source_input = context.nodes.at(context.source_node_id);
+  if (source_input.kind != FastStaNodeKind::kBufferInput || source_input.inst_name.empty()) {
+    return kInvalidFastStaNodeId;
+  }
+  const auto output_iter = context.buffer_output_node_id_by_inst.find(source_input.inst_name);
+  if (output_iter == context.buffer_output_node_id_by_inst.end() || output_iter->second >= context.nodes.size()) {
+    return kInvalidFastStaNodeId;
+  }
+  const auto& source_output = context.nodes.at(output_iter->second);
+  return source_output.kind == FastStaNodeKind::kBufferOutput && source_output.inst_name == source_input.inst_name ? output_iter->second
+                                                                                                                   : kInvalidFastStaNodeId;
 }
 
 auto sinkNodeId(const FastStaClockContext& context) -> FastStaNodeId
 {
-  const auto iter = context.node_id_by_name.find("cts_char_sink/A");
-  return iter == context.node_id_by_name.end() ? kInvalidFastStaNodeId : iter->second;
+  FastStaNodeId sink_node_id = kInvalidFastStaNodeId;
+  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+    if (context.nodes.at(node_id).kind != FastStaNodeKind::kSink) {
+      continue;
+    }
+    if (sink_node_id != kInvalidFastStaNodeId) {
+      return kInvalidFastStaNodeId;
+    }
+    sink_node_id = node_id;
+  }
+  return sink_node_id;
 }
 
 auto observationNodeId(const FastStaClockContext& context) -> FastStaNodeId
 {
-  FastStaNodeId observation_node_id = kInvalidFastStaNodeId;
+  const auto sink_node_id = sinkNodeId(context);
+  if (sink_node_id >= context.nodes.size()) {
+    return kInvalidFastStaNodeId;
+  }
+  const auto incoming_net_id = context.nodes.at(sink_node_id).incoming_net_id;
+  if (incoming_net_id >= context.nets.size()) {
+    return kInvalidFastStaNodeId;
+  }
+  const auto driver_node_id = context.nets.at(incoming_net_id).driver_node_id;
+  const auto source_output_node_id = sourceOutputNodeId(context);
+  if (driver_node_id < context.nodes.size() && driver_node_id != source_output_node_id
+      && context.nodes.at(driver_node_id).kind == FastStaNodeKind::kBufferOutput) {
+    return driver_node_id;
+  }
+  return sink_node_id;
+}
+
+auto validateCharacterizationTopology(const FastStaClockContext& context) -> std::string
+{
+  if (sourceOutputNodeId(context) >= context.nodes.size()) {
+    return "source_buffer_pair_unavailable";
+  }
+  if (sinkNodeId(context) >= context.nodes.size()) {
+    return "unique_sink_node_unavailable";
+  }
+  if (observationNodeId(context) >= context.nodes.size()) {
+    return "observation_node_unavailable";
+  }
+
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
     const auto& node = context.nodes.at(node_id);
-    if (node.kind == FastStaNodeKind::kBufferOutput && node.inst_name.starts_with("cts_char_buf_")) {
-      observation_node_id = node_id;
+    if (node.kind != FastStaNodeKind::kBufferInput && node.kind != FastStaNodeKind::kBufferOutput) {
+      continue;
+    }
+    const auto& own_index = node.kind == FastStaNodeKind::kBufferInput ? context.buffer_input_node_id_by_inst : context.buffer_output_node_id_by_inst;
+    const auto own_iter = own_index.find(node.inst_name);
+    if (node.inst_name.empty() || own_iter == own_index.end() || own_iter->second != node_id) {
+      return "buffer_pair_index_incomplete:" + node.inst_name;
+    }
+    const auto& peer_index = node.kind == FastStaNodeKind::kBufferInput ? context.buffer_output_node_id_by_inst : context.buffer_input_node_id_by_inst;
+    const auto peer_iter = peer_index.find(node.inst_name);
+    if (peer_iter == peer_index.end() || peer_iter->second >= context.nodes.size()) {
+      return "buffer_peer_index_incomplete:" + node.inst_name;
+    }
+    const auto& peer_node = context.nodes.at(peer_iter->second);
+    const auto expected_peer_kind = node.kind == FastStaNodeKind::kBufferInput ? FastStaNodeKind::kBufferOutput : FastStaNodeKind::kBufferInput;
+    if (peer_node.kind != expected_peer_kind || peer_node.inst_name != node.inst_name) {
+      return "buffer_peer_index_invalid:" + node.inst_name;
     }
   }
-  return observation_node_id != kInvalidFastStaNodeId ? observation_node_id : sinkNodeId(context);
+  return {};
 }
 
 auto sourceBoundaryNetId(const FastStaClockContext& context) -> FastStaNetId
@@ -177,21 +249,31 @@ auto rootTiming(const FastStaClockContext& context) -> FastStaTimingPoint
   return context.nodes.at(source_output_id).timing;
 }
 
-auto isCharacterizedBufferOutput(const FastStaNode& node) -> bool
+auto isCharacterizedBufferOutput(const FastStaClockContext& context, FastStaNodeId node_id) -> bool
 {
-  return node.kind == FastStaNodeKind::kBufferOutput && node.inst_name.starts_with("cts_char_buf_");
+  return node_id < context.nodes.size() && node_id != sourceOutputNodeId(context) && context.nodes.at(node_id).kind == FastStaNodeKind::kBufferOutput;
 }
 
 auto selectedBufferInternalPower(const FastStaClockContext& context) -> double
 {
-  return std::accumulate(context.nodes.begin(), context.nodes.end(), 0.0,
-                         [](double sum, const FastStaNode& node) -> double { return isCharacterizedBufferOutput(node) ? sum + node.internal_power_w : sum; });
+  double power_w = 0.0;
+  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+    if (isCharacterizedBufferOutput(context, node_id)) {
+      power_w += context.nodes.at(node_id).internal_power_w;
+    }
+  }
+  return power_w;
 }
 
 auto selectedBufferLeakagePower(const FastStaClockContext& context) -> double
 {
-  return std::accumulate(context.nodes.begin(), context.nodes.end(), 0.0,
-                         [](double sum, const FastStaNode& node) -> double { return isCharacterizedBufferOutput(node) ? sum + node.leakage_power_w : sum; });
+  double power_w = 0.0;
+  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+    if (isCharacterizedBufferOutput(context, node_id)) {
+      power_w += context.nodes.at(node_id).leakage_power_w;
+    }
+  }
+  return power_w;
 }
 
 }  // namespace
@@ -257,6 +339,7 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
   for (std::size_t segment_index = 0U; segment_index < spec.wire_segments_um.size(); ++segment_index) {
     current_x_um += std::max(0.0, spec.wire_segments_um.at(segment_index));
     FastStaNodeId load_node_id = kInvalidFastStaNodeId;
+    FastStaNodeId next_driver_node_id = kInvalidFastStaNodeId;
     if (segment_index < spec.buffer_cell_masters.size()) {
       const auto& cell_master = spec.buffer_cell_masters.at(segment_index);
       const auto input_name = "cts_char_buf_" + std::to_string(segment_index) + "/A";
@@ -274,16 +357,16 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
                                              .output_net_ids = {},
                                              .timing = {},
                                          });
-      (void) appendNode(context, FastStaNode{
-                                     .kind = FastStaNodeKind::kBufferOutput,
-                                     .name = output_name,
-                                     .inst_name = inst_name,
-                                     .pin_name = "Y",
-                                     .cell_master = cell_master,
-                                     .location = makePoint(current_x_um, context.dbu_per_um),
-                                     .output_net_ids = {},
-                                     .timing = {},
-                                 });
+      next_driver_node_id = appendNode(context, FastStaNode{
+                                                    .kind = FastStaNodeKind::kBufferOutput,
+                                                    .name = output_name,
+                                                    .inst_name = inst_name,
+                                                    .pin_name = "Y",
+                                                    .cell_master = cell_master,
+                                                    .location = makePoint(current_x_um, context.dbu_per_um),
+                                                    .output_net_ids = {},
+                                                    .timing = {},
+                                                });
     } else {
       load_node_id = appendNode(context, FastStaNode{
                                              .kind = FastStaNodeKind::kSink,
@@ -313,17 +396,17 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
         = makeLinearParasitic(context, context.nets.at(net_id), driver_node_id, load_node_id, std::max(0.0, spec.wire_segments_um.at(segment_index)));
 
     if (segment_index < spec.buffer_cell_masters.size()) {
-      for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-        if (context.nodes.at(node_id).kind == FastStaNodeKind::kBufferOutput
-            && context.nodes.at(node_id).inst_name == context.nodes.at(load_node_id).inst_name) {
-          driver_node_id = node_id;
-          break;
-        }
+      if (next_driver_node_id >= context.nodes.size()) {
+        return BuildResult{.failure_reason = "buffer_output_node_unavailable:" + context.nodes.at(load_node_id).inst_name};
       }
+      driver_node_id = next_driver_node_id;
     }
   }
 
   FastStaParasitics::updateNetLoads(context);
+  if (const auto topology_error = validateCharacterizationTopology(context); !topology_error.empty()) {
+    return BuildResult{.failure_reason = std::move(topology_error)};
+  }
   return BuildResult{.context = std::move(context), .failure_reason = {}};
 }
 

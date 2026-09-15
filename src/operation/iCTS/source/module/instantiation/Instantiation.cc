@@ -42,12 +42,16 @@ auto Instantiation::run() -> InstantiationSummary
       .design_ready = wrapper.is_design_ready(),
       .success = false,
       .clock_count = design.get_clocks().size(),
+      .inserted_inst_count = 0U,
+      .inserted_net_count = 0U,
       .failure_reason = "n/a",
   };
   WrapperWriteSummary write_summary;
   if (summary.design_ready) {
     write_summary = wrapper.writeClocksDetailed(design, design.get_clocks());
     summary.success = write_summary.success;
+    summary.inserted_inst_count = write_summary.inserted_inst_count;
+    summary.inserted_net_count = write_summary.inserted_net_count;
     if (!summary.success) {
       summary.failure_reason = write_summary.reason.empty() ? "idb_writeback_failed" : write_summary.reason;
     }
@@ -70,6 +74,8 @@ auto Instantiation::run() -> InstantiationSummary
                 {"Clocks", ToLogTableCell(summary.clock_count)},
                 {"Write Success", ToLogTableCell(write_summary.success)},
                 {"iDB Clock Tree Restored", ToLogTableCell(write_summary.idb_clock_tree_restored)},
+                {"Inserted Instances", ToLogTableCell(summary.inserted_inst_count)},
+                {"Inserted Nets", ToLogTableCell(summary.inserted_net_count)},
                 {"Success", ToLogTableCell(summary.success)},
                 {"Failed Clock", write_summary.failed_clock.empty() ? "n/a" : write_summary.failed_clock},
                 {"Failed Net", write_summary.failed_net.empty() ? "n/a" : write_summary.failed_net},

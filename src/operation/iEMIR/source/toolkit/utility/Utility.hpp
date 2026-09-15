@@ -16,8 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
-#include "Logger.hpp"
 #include "EMIRHeader.hpp"
+#include "Logger.hpp"
 
 namespace iemir {
 

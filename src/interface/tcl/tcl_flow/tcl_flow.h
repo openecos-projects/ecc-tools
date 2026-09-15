@@ -29,9 +29,9 @@
 #include "ScriptEngine.hh"
 #include "tcl_definition.h"
 
-using ieda::TclCmd;
-using ieda::TclOption;
-using ieda::TclStringOption;
+using ecc::TclCmd;
+using ecc::TclOption;
+using ecc::TclStringOption;
 
 namespace tcl {
 

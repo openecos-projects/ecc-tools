@@ -68,6 +68,7 @@ struct SourceTrunkOutput
   std::vector<std::unique_ptr<Inst>> inserted_insts;
   std::vector<std::unique_ptr<Pin>> inserted_pins;
   std::vector<std::unique_ptr<Net>> inserted_nets;
+  std::vector<ClockPropagationArc> propagation_arcs;
   std::vector<HTree::InsertedInstLevel> inserted_inst_levels;
   std::vector<HTree::InsertedNetLevel> inserted_net_levels;
 };

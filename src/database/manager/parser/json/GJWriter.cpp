@@ -14,6 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "utility/logger/Logger.hpp"
 #include "GJWriter.hpp"
 #include <unordered_map>
 #include <vector>
@@ -297,7 +298,7 @@ void JsonTextWriter::writeStruct(int i)
   std::string indent2(4*(i+1), ' ');
   std::string indent3(4*(i+2), ' ');
   size_t structListSize = _data->get_struct_list().size();
-    // std::cout<<"struct nums ; "<<structListSize<<std::endl;
+    // ECCLOG.info(ecc::Loc::current(), "Struct num: ", structListSize);
   
   for (size_t k = 0; t < structListSize;) {
     JsonStruct* str = _data->get_struct_list()[t++];
@@ -378,7 +379,7 @@ void JsonTextWriter::write_sref_expension(int i,int num)
   std::string indent3(4*(i+2), ' ');
   size_t structListSize = _data->get_struct_list().size();
 
-    // std::cout<<"struct nums ; "<<structListSize<<std::endl;
+    // ECCLOG.info(ecc::Loc::current(), "Struct num: ", structListSize);
   
     temp_expension=0;
   for (size_t k = 0; t < structListSize;) {
@@ -818,12 +819,10 @@ void JsonTextWriter::write_xy(JsonElemBase* e,int i) const
   assert(num);
 
   if (min > num)
-    std::cout << "Warn: coordinate total is less than the expected"
-              << ", JsonElemType =" << (int) e->get_elem_type() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Warn: coordinate total is less than the expected", ", JsonElemType =", (int) e->get_elem_type());
 
   if (max < num)
-    std::cout << "Warn: coordinate total is more than the expected"
-              << ", JsonElemType =" << (int) e->get_elem_type() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Warn: coordinate total is more than the expected", ", JsonElemType =", (int) e->get_elem_type());
   std::string indent(4*i, ' ');
   (*_stream) <<indent<< "\"path\" : [";
   auto coords = e->get_xy().get_coords();

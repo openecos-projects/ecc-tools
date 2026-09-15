@@ -26,13 +26,11 @@
 #include "ScriptEngine.hh"
 #include "UserShell.hh"
 
-#include "flow.h"
 #include "tcl_flow.h"
 #include "tcl_register_config.h"
 #include "tcl_register_cts.h"
 #include "tcl_register_feature.h"
 #include "tcl_register_flow.h"
-#include "tcl_register_geometry.h"
 #include "tcl_register_idb.h"
 #include "tcl_register_idrc.h"
 #include "tcl_register_irt.h"
@@ -44,7 +42,7 @@
 #include "tcl_register_ircx.h"
 #include "tcl_register_report.h"
 
-using namespace ieda;
+using namespace ecc;
 namespace tcl {
 
 int registerCommands()
@@ -86,8 +84,6 @@ int registerCommands()
   registerCmdZH();
 
   registerCmdReport();
-
-  registerCmdGeometry();
   return EXIT_SUCCESS;
 }
 

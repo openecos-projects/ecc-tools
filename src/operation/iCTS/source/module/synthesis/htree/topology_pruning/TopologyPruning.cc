@@ -546,6 +546,8 @@ auto EvaluateCandidateBuild(const std::vector<HTree::LevelPlan>& levels, const S
     result.split_group_count = feasible_sink_load_region_filter.summary.max_split_group_count;
     result.split_extra_buffer_count = feasible_sink_load_region_filter.summary.max_split_extra_buffer_count;
     result.split_local_depth = feasible_sink_load_region_filter.summary.max_split_local_depth;
+    result.split_triggered_by_fanout = feasible_sink_load_region_filter.summary.any_split_triggered_by_fanout;
+    result.split_triggered_by_capacitance = feasible_sink_load_region_filter.summary.any_split_triggered_by_capacitance;
     if (result.candidate_frontier_entries.empty() && !candidate_sink_load_region_filter.summary.first_failure_reason.empty()) {
       result.failure_reason = candidate_sink_load_region_filter.summary.first_failure_reason;
     }
@@ -561,6 +563,8 @@ auto EvaluateCandidateBuild(const std::vector<HTree::LevelPlan>& levels, const S
     result.split_group_count = feasible_sink_load_region_filter.summary.max_split_group_count;
     result.split_extra_buffer_count = feasible_sink_load_region_filter.summary.max_split_extra_buffer_count;
     result.split_local_depth = feasible_sink_load_region_filter.summary.max_split_local_depth;
+    result.split_triggered_by_fanout = feasible_sink_load_region_filter.summary.any_split_triggered_by_fanout;
+    result.split_triggered_by_capacitance = feasible_sink_load_region_filter.summary.any_split_triggered_by_capacitance;
     if (result.feasible_frontier_entries.empty() && !feasible_sink_load_region_filter.summary.first_failure_reason.empty()) {
       result.failure_reason = feasible_sink_load_region_filter.summary.first_failure_reason;
     }

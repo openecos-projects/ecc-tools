@@ -45,8 +45,8 @@ class LayoutData
   int32_t get_regular_net_num() const { return static_cast<int32_t>(_net_list.size()); }
   bool get_is_empty() const
   {
-    return _net_list.empty() && _special_net.get_segment_list().empty() && _special_net.get_patch_list().empty()
-           && _special_net.get_via_list().empty() && _special_net.get_pin_list().empty();
+    return _net_list.empty() && _special_net.get_segment_list().empty() && _special_net.get_patch_list().empty() && _special_net.get_via_list().empty()
+           && _special_net.get_pin_list().empty();
   }
 
  private:

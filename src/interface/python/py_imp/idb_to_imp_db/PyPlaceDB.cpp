@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <boost/polygon/polygon.hpp>
 #include <cassert>
+#include <cmath>
 #include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -579,6 +581,40 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   printf("PyPlaceDB::set end!!!\n");
 
 #endif
+}
+
+std::size_t PyPlaceDB::writeMacroPlacementBack(
+    const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
+    const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y)
+{
+  const auto x = movable_x.request();
+  const auto y = movable_y.request();
+  const auto num_movable_nodes = static_cast<pybind11::ssize_t>(num_nodes - num_terminals - num_terminal_NIs);
+  if (x.ndim != 1 || y.ndim != 1 || x.size != y.size || x.size != num_movable_nodes) {
+    throw std::invalid_argument("Macro placement writeback requires equal one-dimensional arrays for every movable node");
+  }
+  if (_db == nullptr || _design == nullptr || _db->get_idb_design() != _design) {
+    throw std::runtime_error("Macro placement snapshot no longer matches the active iDB design");
+  }
+  const auto* node_x_ptr = static_cast<const float*>(x.ptr);
+  const auto* node_y_ptr = static_cast<const float*>(y.ptr);
+  std::vector<idm::InstancePlacementUpdate> updates;
+  updates.reserve(_macro_writeback_candidates.size());
+  for (const auto& candidate : _macro_writeback_candidates) {
+    if (candidate.node_id < 0 || candidate.node_id >= num_movable_nodes) {
+      throw std::runtime_error("Frozen macro candidate is outside the movable node range");
+    }
+    const float candidate_x = node_x_ptr[candidate.node_id];
+    const float candidate_y = node_y_ptr[candidate.node_id];
+    if (!std::isfinite(candidate_x) || !std::isfinite(candidate_y)
+        || candidate_x < std::numeric_limits<int32_t>::lowest() || candidate_x > std::numeric_limits<int32_t>::max()
+        || candidate_y < std::numeric_limits<int32_t>::lowest() || candidate_y > std::numeric_limits<int32_t>::max()) {
+      throw std::invalid_argument("Macro placement writeback coordinates must be finite int32-compatible values");
+    }
+    updates.push_back({candidate.instance_name, candidate.instance_id, static_cast<int32_t>(candidate_x),
+                       static_cast<int32_t>(candidate_y), candidate.orient});
+  }
+  return _db->write_selected_placement_back(updates);
 }
 
 }  // namespace python_interface

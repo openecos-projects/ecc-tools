@@ -32,6 +32,7 @@
 #include "IdbInstance.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 using namespace std;
 namespace idb {
@@ -63,7 +64,11 @@ IdbInstance::IdbInstance()
 
 IdbInstance::~IdbInstance()
 {
-  _pin_list->reset();
+  if (_pin_list != nullptr) {
+    _pin_list->reset();
+    delete _pin_list;
+    _pin_list = nullptr;
+  }
 
   if (_coordinate) {
     delete _coordinate;
@@ -200,9 +205,11 @@ int IdbInstance::get_connected_pin_number()
 
 IdbHalo* IdbInstance::set_halo(IdbHalo* halo)
 {
-  if (halo != nullptr) {
+  if (_halo != halo) {
+    delete _halo;
     _halo = halo;
-  } else {
+  }
+  if (_halo == nullptr) {
     _halo = new IdbHalo();
   }
   return _halo;
@@ -210,9 +217,11 @@ IdbHalo* IdbInstance::set_halo(IdbHalo* halo)
 
 IdbRouteHalo* IdbInstance::set_route_halo(IdbRouteHalo* route_halo)
 {
-  if (route_halo != nullptr) {
+  if (_route_halo != route_halo) {
+    delete _route_halo;
     _route_halo = route_halo;
-  } else {
+  }
+  if (_route_halo == nullptr) {
     _route_halo = new IdbRouteHalo();
   }
   return _route_halo;
@@ -257,7 +266,7 @@ void IdbInstance::set_pin_list_coodinate()
           || pin->get_average_coordinate()->get_x() > get_bounding_box()->get_high_x()
           || pin->get_average_coordinate()->get_y() < get_bounding_box()->get_low_y()
           || pin->get_average_coordinate()->get_y() > get_bounding_box()->get_high_y()) {
-        // std::cout << "Error pin coodinate " << std::endl;
+        // ECCLOG.warn(ecc::Loc::current(), "Pin coordinate is outside the instance bounding box.");
       }
     }
   }
@@ -456,6 +465,14 @@ bool IdbInstanceList::contains(IdbInstance* instance)
     return false;
   }
 
+  const auto& name = instance->get_name();
+  if (!name.empty()) {
+    const auto iter = _instance_map.find(name);
+    if (iter != _instance_map.end() && iter->second == instance) {
+      return true;
+    }
+  }
+
   auto iter = std::find(_instance_list.begin(), _instance_list.end(), instance);
   return iter != _instance_list.end();
 }
@@ -537,6 +554,40 @@ bool IdbInstanceList::add_instance_ref(IdbInstance* instance)
   return true;
 }
 
+bool IdbInstanceList::add_instance_refs(const std::vector<IdbInstance*>& instances)
+{
+  std::unordered_set<IdbInstance*> instance_index;
+  instance_index.reserve(_instance_list.size() + instances.size());
+  instance_index.insert(_instance_list.begin(), _instance_list.end());
+  auto instance_map = _instance_map;
+  instance_map.reserve(_instance_map.size() + instances.size());
+  std::vector<IdbInstance*> new_instances;
+  new_instances.reserve(instances.size());
+  for (auto* instance : instances) {
+    if (instance == nullptr) {
+      return false;
+    }
+    if (instance_index.contains(instance)) {
+      continue;
+    }
+    const auto& name = instance->get_name();
+    if (!name.empty()) {
+      const auto [iter, inserted] = instance_map.emplace(name, instance);
+      if (!inserted) {
+        if (iter->second != instance) {
+          return false;
+        }
+        continue;
+      }
+    }
+    new_instances.emplace_back(instance);
+    instance_index.insert(instance);
+  }
+  _instance_list.insert(_instance_list.end(), new_instances.begin(), new_instances.end());
+  _instance_map.swap(instance_map);
+  return true;
+}
+
 bool IdbInstanceList::erase_instance_ref(string name)
 {
   auto map_iter = _instance_map.find(name);
@@ -590,6 +641,7 @@ bool IdbInstanceList::remove_instance(string name)
     auto net = pin->get_net();
     if (net != nullptr) {
       net->remove_pin(pin);
+      net->erase_instance_ref(*it);
     }
   }
 

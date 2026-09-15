@@ -88,7 +88,7 @@ bool IdbRow::set_bounding_box()
   int32_t ll_x = _original_coordinate->get_x();
   int32_t ll_y = _original_coordinate->get_y();
   int32_t ur_x = ll_x + _row_num_x * _step_x;
-  int32_t ur_y = ll_y + _site->get_height();
+  int32_t ur_y = ll_y + std::max(_site->get_height(), _row_num_y * _step_y);
   return IdbObject::set_bounding_box(ll_x, ll_y, ur_x, ur_y);
 }
 

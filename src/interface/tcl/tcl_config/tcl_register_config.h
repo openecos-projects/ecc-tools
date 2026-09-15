@@ -27,12 +27,11 @@
 #include "UserShell.hh"
 #include "tcl_config.h"
 
-using namespace ieda;
+using namespace ecc;
 namespace tcl {
 
 int registerConfig()
 {
-  registerTclCmd(CmdFlowInitConfig, "flow_init");
   registerTclCmd(CmdDbConfigSetting, "db_init");
 
   return EXIT_SUCCESS;

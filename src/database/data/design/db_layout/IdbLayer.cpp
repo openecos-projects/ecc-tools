@@ -29,14 +29,71 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "utility/logger/Logger.hpp"
 #include "IdbLayer.h"
 
 #include <algorithm>
 #include <cctype>
+#include <mutex>
 
 #include "IdbTrackGrid.h"
 
 namespace idb {
+
+static std::mutex g_antenna_registry_mutex;
+std::map<const IdbLayer*, IdbLayerAntennaProps> IdbLayerAntennaRegistry::_props_map;
+std::map<const IdbLayer*, int32_t> IdbLayerAntennaRegistry::_ms_thickness_map;
+
+IdbLayerAntennaProps* IdbLayerAntennaRegistry::get_or_create(const IdbLayer* layer)
+{
+  if (!layer) return nullptr;
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  return &_props_map[layer];
+}
+
+const IdbLayerAntennaProps* IdbLayerAntennaRegistry::get(const IdbLayer* layer)
+{
+  if (!layer) return nullptr;
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  auto it = _props_map.find(layer);
+  if (it != _props_map.end()) {
+    return &it->second;
+  }
+  return nullptr;
+}
+
+void IdbLayerAntennaRegistry::set_masterslice_thickness(const IdbLayer* layer, int32_t thickness)
+{
+  if (!layer) return;
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  _ms_thickness_map[layer] = thickness;
+}
+
+int32_t IdbLayerAntennaRegistry::get_masterslice_thickness(const IdbLayer* layer)
+{
+  if (!layer) return 0;
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  auto it = _ms_thickness_map.find(layer);
+  if (it != _ms_thickness_map.end()) {
+    return it->second;
+  }
+  return 0;
+}
+
+void IdbLayerAntennaRegistry::remove(const IdbLayer* layer)
+{
+  if (!layer) return;
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  _props_map.erase(layer);
+  _ms_thickness_map.erase(layer);
+}
+
+void IdbLayerAntennaRegistry::clear()
+{
+  std::lock_guard<std::mutex> lock(g_antenna_registry_mutex);
+  _props_map.clear();
+  _ms_thickness_map.clear();
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -76,6 +133,11 @@ IdbLayer::IdbLayer()
   _layer_order = 0;
 }
 
+IdbLayer::~IdbLayer()
+{
+  IdbLayerAntennaRegistry::remove(this);
+}
+
 void IdbLayer::set_type(string type)
 {
   _type = IdbEnum::GetInstance()->get_layer_property()->get_type(type);
@@ -83,7 +145,7 @@ void IdbLayer::set_type(string type)
 
 void IdbLayer::print()
 {
-  std::cout << "name =  " << _name << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "name =  ", _name);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -125,6 +187,7 @@ void IdbLayers::reset_layers()
   }
 
   _layers.clear();
+  IdbLayerAntennaRegistry::clear();
 }
 
 IdbLayer* IdbLayers::set_layer(string layer_name, string type)
@@ -171,7 +234,7 @@ IdbLayer* IdbLayers::set_layer(string layer_name, string type)
     _z_order++;
   }
 
-  // std::cout << "Routing layer id = " << _routing_layer_index << std::endl;
+  // ECCLOG.info(ecc::Loc::current(), "Routing layer idx = ", _routing_layer_index);
 
   return layer_find;
 }  // namespace idb
@@ -196,7 +259,7 @@ IdbLayer* IdbLayers::find_layer(const string& src_name, bool new_layer)
   }
 
   //   if (!new_layer) {
-  //     std::cout << "[IdbLayer Error] : can not find layer = " << src_name << std::endl;
+  //     ECCLOG.warn(ecc::Loc::current(), "[IdbLayer Error] : can not find layer = ", src_name);
   //   }
 
   return nullptr;
@@ -272,7 +335,7 @@ IdbLayer* IdbLayers::find_layer_by_order(uint8_t order)
     }
   }
 
-  std::cout << "[IdbLayer Error] : can not find layer with order = " << order << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "[IdbLayer Error] : can not find layer with order = ", order);
 
   return nullptr;
 }
@@ -292,7 +355,7 @@ vector<IdbLayerCut*> IdbLayers::find_cut_layer_list(string layer_name_1, string 
   int32_t order_max = std::max(layer_1->get_order(), layer_2->get_order());
   for (int i = order_min + 1; i < order_max; i++) {
     IdbLayer* layer_find = find_layer_by_order(i);
-    if (layer_find->is_cut()) {
+    if (layer_find != nullptr && layer_find->is_cut()) {
       cut_layer_list.emplace_back(dynamic_cast<IdbLayerCut*>(layer_find));
     }
   }
@@ -336,8 +399,12 @@ int32_t IdbParallelSpacingTable::get_spacing(int32_t width, int32_t parallel_len
     return r;
   };
 
-  ssize_t iwidth = search(_width, width);
-  ssize_t ilength = search(_parallel_run_length, parallel_length);
+  ssize_t iwidth = std::max<ssize_t>(0, search(_width, width));
+  ssize_t ilength = std::max<ssize_t>(0, search(_parallel_run_length, parallel_length));
+  if (static_cast<size_t>(iwidth) >= _spacing.size()
+      || static_cast<size_t>(ilength) >= _spacing.at(iwidth).size()) {
+    return 0;
+  }
   return _spacing.at(iwidth).at(ilength);
 }
 

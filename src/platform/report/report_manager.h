@@ -27,10 +27,12 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #include <fstream>
-#include <iostream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
+
+#include "utility/logger/Logger.hpp"
 
 #define rptInst iplf::ReportManager::getInstance()
 
@@ -46,12 +48,17 @@ public:
     template <typename T>
     ReportOStream &operator<<(T &&obj)
     {
-        (_fs.is_open() ? _fs : std::cout) << obj;
+        if (_fs.is_open()) {
+            _fs << obj;
+        } else {
+            _log_stream << obj;
+        }
         return *this;
     };
 
 private:
     std::fstream _fs;
+    std::stringstream _log_stream;
 };
 
 

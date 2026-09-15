@@ -157,11 +157,11 @@ ShapeId find_shape_by_owner_path(const GeometryStore& store, OwnerType type, Own
 }
 
 ShapeId find_shape_by_owner_path(const GeometryStore& store, OwnerType type, OwnerId owner_id, uint32_t path0, uint32_t path1,
-                                 uint32_t path2)
+                                 uint32_t path2, uint32_t path3)
 {
   for (const ShapeId shape_id : store.query_owner(type, owner_id)) {
     const OwnerRef owner = store.owner_of(shape_id);
-    if (owner.path0 == path0 && owner.path1 == path1 && owner.path2 == path2) {
+    if (owner.path0 == path0 && owner.path1 == path1 && owner.path2 == path2 && owner.path3 == path3) {
       return shape_id;
     }
   }
@@ -1631,11 +1631,11 @@ void test_geometry_builder_syncs_regular_net_vias_incrementally()
   builder.rebuild_from_design(design, layout, store);
 
   const std::vector<ShapeId> initial_via_shapes = store.query_owner_name("n_sync_via");
-  assert(initial_via_shapes.size() == 1);
+  assert(initial_via_shapes.size() == 3);
   const OwnerRef via_owner = store.owner_of(initial_via_shapes[0]);
   assert(via_owner.type == OwnerType::kVia);
 
-  const ShapeId moved_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 0, 0);
+  const ShapeId moved_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 0, 0, 1U << 30U);
   assert(moved_shape != 0);
 
   store.clear_delta_events();
@@ -1653,10 +1653,11 @@ void test_geometry_builder_syncs_regular_net_vias_incrementally()
   const GeometrySyncResult sync = builder.sync_net(design, *net, store);
 
   assert(sync.ok);
-  assert(sync.updated_shape_count == 1);
-  assert(sync.added_shape_count == 1);
+  assert(sync.updated_shape_count == 3);
+  assert(sync.added_shape_count == 3);
   assert(sync.deleted_shape_count == 0);
   assert(sync.missing_shape_count == 0);
+  assert(store.query_owner_name("n_sync_via").size() == 6);
 
   const ShapeRecord* moved_record = store.find_shape(moved_shape);
   assert(moved_record != nullptr);
@@ -1665,7 +1666,7 @@ void test_geometry_builder_syncs_regular_net_vias_incrementally()
   assert(moved_record->bbox.lx == 118);
   assert(moved_record->bbox.hy == 242);
 
-  const ShapeId added_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 1, 0);
+  const ShapeId added_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 1, 0, 1U << 30U);
   assert(added_shape != 0);
   assert(added_shape != moved_shape);
   assert(store.find_shape(added_shape)->bbox.lx == 498);
@@ -1787,11 +1788,11 @@ void test_geometry_builder_syncs_special_net_vias_incrementally()
   builder.rebuild_from_design(design, layout, store);
 
   const std::vector<ShapeId> initial_via_shapes = store.query_owner_name("VSS_SYNC_VIA");
-  assert(initial_via_shapes.size() == 1);
+  assert(initial_via_shapes.size() == 3);
   const OwnerRef via_owner = store.owner_of(initial_via_shapes[0]);
   assert(via_owner.type == OwnerType::kVia);
 
-  const ShapeId moved_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 0, 0);
+  const ShapeId moved_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 0, 0, 1U << 30U);
   assert(moved_shape != 0);
 
   store.clear_delta_events();
@@ -1810,11 +1811,12 @@ void test_geometry_builder_syncs_special_net_vias_incrementally()
   const GeometrySyncResult sync = builder.sync_special_net(design, *special_net, store);
 
   assert(sync.ok);
-  assert(sync.updated_shape_count == 1);
-  assert(sync.added_shape_count == 1);
+  assert(sync.updated_shape_count == 3);
+  assert(sync.added_shape_count == 3);
   assert(sync.deleted_shape_count == 0);
   assert(sync.missing_shape_count == 0);
   assert(store.query_owner(OwnerType::kSpecialWireSegment, 0).empty());
+  assert(store.query_owner_name("VSS_SYNC_VIA").size() == 6);
 
   const ShapeRecord* moved_record = store.find_shape(moved_shape);
   assert(moved_record != nullptr);
@@ -1823,7 +1825,7 @@ void test_geometry_builder_syncs_special_net_vias_incrementally()
   assert(moved_record->bbox.lx == 118);
   assert(moved_record->bbox.hy == 242);
 
-  const ShapeId added_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 1, 0);
+  const ShapeId added_shape = find_shape_by_owner_path(store, OwnerType::kVia, via_owner.owner_id, 0, 1, 0, 1U << 30U);
   assert(added_shape != 0);
   assert(added_shape != moved_shape);
   assert(store.find_shape(added_shape)->bbox.lx == 498);
@@ -2233,6 +2235,54 @@ void test_geometry_builder_rebuilds_def_rect_and_wire_shapes()
   assert(offline_region_shapes[0] == region_shapes[0]);
 }
 
+void test_geometry_builder_rebuilds_and_syncs_regular_net_patch_shape_at_route_origin()
+{
+  idb::IdbLayout layout;
+  idb::IdbDesign design(&layout);
+
+  idb::IdbLayerRouting routing_layer;
+  routing_layer.set_name("M1");
+  routing_layer.set_id(11);
+
+  idb::IdbNet* net = design.get_net_list()->add_net("patch_net");
+  net->set_id(102);
+  idb::IdbRegularWireSegment* patch_segment = net->get_wire_list()->add_wire()->add_segment();
+  patch_segment->set_layer(&routing_layer);
+  patch_segment->set_layer_name("M1");
+  patch_segment->add_point(100, 200);
+  patch_segment->set_is_rect(true);
+  patch_segment->set_delta_rect(0, 0, 20, 10);
+
+  GeometryStore store;
+  GeometryBuilder builder;
+  const GeometryBuildResult rebuild_result = builder.rebuild_from_design(design, layout, store);
+
+  assert(rebuild_result.net_wire_shape_count == 1);
+  const ShapeId patch_shape = find_shape_by_owner_path(store, OwnerType::kNetWireSegment, 102, 0, 0);
+  assert(patch_shape != 0);
+  const ShapeRecord* patch_record = store.find_shape(patch_shape);
+  assert(patch_record != nullptr);
+  assert(patch_record->bbox.lx == 100);
+  assert(patch_record->bbox.ly == 200);
+  assert(patch_record->bbox.hx == 120);
+  assert(patch_record->bbox.hy == 210);
+
+  store.clear_delta_events();
+  patch_segment->get_point_start()->set_xy(300, 400);
+  const GeometrySyncResult sync_result = builder.sync_net(design, *net, store);
+
+  assert(sync_result.ok);
+  assert(sync_result.updated_shape_count == 1);
+  assert(sync_result.added_shape_count == 0);
+  assert(sync_result.deleted_shape_count == 0);
+  const ShapeRecord* updated_patch_record = store.find_shape(patch_shape);
+  assert(updated_patch_record != nullptr);
+  assert(updated_patch_record->bbox.lx == 300);
+  assert(updated_patch_record->bbox.ly == 400);
+  assert(updated_patch_record->bbox.hx == 320);
+  assert(updated_patch_record->bbox.hy == 410);
+}
+
 void test_geometry_builder_rebuilds_wire_vias_and_instance_obs_shapes()
 {
   idb::IdbLayout layout;
@@ -2325,13 +2375,13 @@ void test_geometry_builder_rebuilds_wire_vias_and_instance_obs_shapes()
 
   const std::map<OwnerType, uint64_t> owner_counts = store.count_alive_shapes_by_owner_type();
   assert(owner_counts.contains(OwnerType::kVia));
-  assert(owner_counts.at(OwnerType::kVia) == 3);
+  assert(owner_counts.at(OwnerType::kVia) == 9);
   assert(owner_counts.contains(OwnerType::kObs));
   assert(owner_counts.at(OwnerType::kObs) == 1);
   assert(owner_counts.contains(OwnerType::kFill));
-  assert(owner_counts.at(OwnerType::kFill) == 1);
-  assert(result.via_shape_count == 3);
-  assert(result.fill_shape_count == 1);
+  assert(owner_counts.at(OwnerType::kFill) == 3);
+  assert(result.via_shape_count == 9);
+  assert(result.fill_shape_count == 3);
   assert(result.shape_count >= 6);
 
   const std::vector<ShapeId> regular_via_shapes = store.query_owner_name("n_via");
@@ -2339,48 +2389,106 @@ void test_geometry_builder_rebuilds_wire_vias_and_instance_obs_shapes()
   const std::vector<ShapeId> pin_via_shapes = store.query_owner_name("io_via");
   const std::vector<ShapeId> instance_shapes = store.query_owner_name("u_obs");
 
-  assert(regular_via_shapes.size() == 1);
-  assert(special_via_shapes.size() == 1);
-  assert(pin_via_shapes.size() == 1);
+  assert(regular_via_shapes.size() == 3);
+  assert(special_via_shapes.size() == 3);
+  assert(pin_via_shapes.size() == 3);
   assert(instance_shapes.size() == 2);
 
-  const ShapeRecord* regular_via_record = store.find_shape(regular_via_shapes[0]);
-  const ShapeRecord* special_via_record = store.find_shape(special_via_shapes[0]);
-  const ShapeRecord* pin_via_record = store.find_shape(pin_via_shapes[0]);
+  const OwnerRef regular_via_owner = store.owner_of(regular_via_shapes[0]);
+  const OwnerRef special_via_owner = store.owner_of(special_via_shapes[0]);
+  const OwnerRef pin_via_owner = store.owner_of(pin_via_shapes[0]);
+  const ShapeId regular_via_bottom_shape =
+      find_shape_by_owner_path(store, OwnerType::kVia, regular_via_owner.owner_id, 0, 0, 0, 0);
+  const ShapeId regular_via_cut_shape =
+      find_shape_by_owner_path(store, OwnerType::kVia, regular_via_owner.owner_id, 0, 0, 0, 1U << 30U);
+  const ShapeId regular_via_top_shape =
+      find_shape_by_owner_path(store, OwnerType::kVia, regular_via_owner.owner_id, 0, 0, 0, 2U << 30U);
+  const ShapeId special_via_cut_shape =
+      find_shape_by_owner_path(store, OwnerType::kVia, special_via_owner.owner_id, 0, 0, 0, 1U << 30U);
+  const ShapeId pin_via_cut_shape =
+      find_shape_by_owner_path(store, OwnerType::kVia, pin_via_owner.owner_id, 0, 0, 0, 1U << 30U);
+  const ShapeRecord* regular_via_bottom_record = store.find_shape(regular_via_bottom_shape);
+  const ShapeRecord* regular_via_record = store.find_shape(regular_via_cut_shape);
+  const ShapeRecord* regular_via_top_record = store.find_shape(regular_via_top_shape);
+  const ShapeRecord* special_via_record = store.find_shape(special_via_cut_shape);
+  const ShapeRecord* pin_via_record = store.find_shape(pin_via_cut_shape);
+  assert(regular_via_bottom_shape != 0);
+  assert(regular_via_cut_shape != 0);
+  assert(regular_via_top_shape != 0);
+  assert(special_via_cut_shape != 0);
+  assert(pin_via_cut_shape != 0);
+  assert(regular_via_bottom_record != nullptr);
   assert(regular_via_record != nullptr);
+  assert(regular_via_top_record != nullptr);
   assert(special_via_record != nullptr);
   assert(pin_via_record != nullptr);
+  assert(regular_via_bottom_record->layer_id == 11);
+  assert(regular_via_bottom_record->bbox.lx == 95);
+  assert(regular_via_bottom_record->bbox.hy == 205);
   assert(regular_via_record->layer_id == 12);
   assert(regular_via_record->bbox.lx == 98);
   assert(regular_via_record->bbox.hy == 202);
-  assert(store.owner_of(regular_via_shapes[0]).type == OwnerType::kVia);
-  assert(store.owner_of(regular_via_shapes[0]).name_id != 0);
-  assert(local_name_by_id(store, store.owner_of(regular_via_shapes[0]).name_id)
+  assert(regular_via_top_record->layer_id == 13);
+  assert(regular_via_top_record->bbox.lx == 94);
+  assert(regular_via_top_record->bbox.hy == 206);
+  assert(regular_via_owner.type == OwnerType::kVia);
+  assert(regular_via_owner.name_id != 0);
+  assert(local_name_by_id(store, regular_via_owner.name_id)
          == "via:VIA12 master:VIA12 type:fixed bottom:M1 cut:VIA12 top:M2");
   assert(special_via_record->layer_id == 12);
   assert(special_via_record->bbox.lx == 298);
   assert(special_via_record->bbox.hy == 402);
-  assert(store.owner_of(special_via_shapes[0]).name_id != 0);
-  assert(local_name_by_id(store, store.owner_of(special_via_shapes[0]).name_id)
+  assert(special_via_owner.name_id != 0);
+  assert(local_name_by_id(store, special_via_owner.name_id)
          == "via:VIA12 master:VIA12 type:fixed bottom:M1 cut:VIA12 top:M2");
   assert(pin_via_record->layer_id == 12);
   assert(pin_via_record->bbox.lx == 698);
   assert(pin_via_record->bbox.hy == 802);
-  assert(store.owner_of(pin_via_shapes[0]).type == OwnerType::kVia);
-  assert(store.owner_of(pin_via_shapes[0]).name_id != 0);
-  assert(local_name_by_id(store, store.owner_of(pin_via_shapes[0]).name_id)
+  assert(pin_via_owner.type == OwnerType::kVia);
+  assert(pin_via_owner.name_id != 0);
+  assert(local_name_by_id(store, pin_via_owner.name_id)
          == "via:VIA12 master:VIA12 type:fixed bottom:M1 cut:VIA12 top:M2");
 
   const std::vector<ShapeId> fill_shapes = store.query_owner(OwnerType::kFill, 0);
-  assert(fill_shapes.size() == 1);
-  const ShapeRecord* fill_via_record = store.find_shape(fill_shapes[0]);
+  assert(fill_shapes.size() == 3);
+  const ShapeId fill_via_bottom_shape = find_shape_by_owner_path(store, OwnerType::kFill, 0, 0, 0, 0, 0);
+  const ShapeId fill_via_cut_shape = find_shape_by_owner_path(store, OwnerType::kFill, 0, 0, 0, 0, 1U << 30U);
+  const ShapeId fill_via_top_shape = find_shape_by_owner_path(store, OwnerType::kFill, 0, 0, 0, 0, 2U << 30U);
+  const ShapeRecord* fill_via_bottom_record = store.find_shape(fill_via_bottom_shape);
+  const ShapeRecord* fill_via_record = store.find_shape(fill_via_cut_shape);
+  const ShapeRecord* fill_via_top_record = store.find_shape(fill_via_top_shape);
+  assert(fill_via_bottom_shape != 0);
+  assert(fill_via_cut_shape != 0);
+  assert(fill_via_top_shape != 0);
+  assert(fill_via_bottom_record != nullptr);
   assert(fill_via_record != nullptr);
+  assert(fill_via_top_record != nullptr);
+  assert(fill_via_bottom_record->layer_id == 11);
+  assert(fill_via_bottom_record->bbox.lx == 495);
+  assert(fill_via_bottom_record->bbox.hy == 605);
   assert(fill_via_record->layer_id == 12);
   assert(fill_via_record->bbox.lx == 498);
   assert(fill_via_record->bbox.hy == 602);
-  assert(store.owner_of(fill_shapes[0]).type == OwnerType::kFill);
-  assert(store.owner_of(fill_shapes[0]).path0 == 0);
-  assert(store.owner_of(fill_shapes[0]).name_id != 0);
+  assert(fill_via_top_record->layer_id == 13);
+  assert(fill_via_top_record->bbox.lx == 494);
+  assert(fill_via_top_record->bbox.hy == 606);
+  assert(store.owner_of(fill_via_cut_shape).type == OwnerType::kFill);
+  assert(store.owner_of(fill_via_cut_shape).path0 == 0);
+  assert(store.owner_of(fill_via_cut_shape).name_id != 0);
+
+  store.clear_delta_events();
+  fill_via->get_coordinate_list()[0]->set_xy(520, 620);
+  const GeometrySyncResult fill_sync = builder.sync_fill(design, *design.get_fill_list()->get_fill_list()[0], store);
+  assert(fill_sync.ok);
+  assert(fill_sync.updated_shape_count == 3);
+  assert(fill_sync.added_shape_count == 0);
+  assert(fill_sync.deleted_shape_count == 0);
+  assert(fill_sync.missing_shape_count == 0);
+  const ShapeRecord* updated_fill_via_record = store.find_shape(fill_via_cut_shape);
+  assert(updated_fill_via_record != nullptr);
+  assert(updated_fill_via_record->version == 2);
+  assert(updated_fill_via_record->bbox.lx == 518);
+  assert(updated_fill_via_record->bbox.hy == 622);
 
   const std::vector<ShapeId> obs_shapes = store.query_owner(OwnerType::kObs, 401);
   assert(obs_shapes.size() == 1);
@@ -3915,6 +4023,7 @@ int main()
   test_geometry_builder_syncs_layer_fill_rects_incrementally();
   test_geometry_builder_syncs_io_pin_ports_without_full_rebuild();
   test_geometry_builder_rebuilds_def_rect_and_wire_shapes();
+  test_geometry_builder_rebuilds_and_syncs_regular_net_patch_shape_at_route_origin();
   test_geometry_builder_rebuilds_wire_vias_and_instance_obs_shapes();
   test_geometry_edit_applier_moves_regular_net_wire_segment_back_to_idb();
   test_geometry_edit_applier_resizes_regular_net_wire_segment_back_to_idb();

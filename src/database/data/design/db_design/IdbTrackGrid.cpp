@@ -36,6 +36,7 @@ namespace idb {
 
 IdbTrack::IdbTrack()
 {
+  _start = 0;
   _direction = IdbTrackDirection::kNone;
   _pitch = 0;
   _width = 0;
@@ -47,6 +48,7 @@ IdbTrack::IdbTrack()
 
 IdbTrack::IdbTrack(IdbTrackDirection dir, uint32_t pitch, uint32_t width)
 {
+  _start = 0;
   _direction = dir;
   _pitch = pitch;
   _width = width;

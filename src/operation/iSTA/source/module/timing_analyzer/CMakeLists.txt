@@ -1,11 +1,3 @@
-if(DEBUG_ISTA_TIMING_ANALYZER)
-    message(STATUS "iSTA: DEBUG_ISTA_TIMING_ANALYZER")
-    set(CMAKE_BUILD_TYPE "Debug")
-else()
-    message(STATUS "iSTA: RELEASE_ISTA_TIMING_ANALYZER")
-    set(CMAKE_BUILD_TYPE "Release")
-endif()
-
 add_library(ista_timing_analyzer
     ${ISTA_MODULE}/timing_analyzer/TimingAnalyzer.cpp
 )

@@ -34,7 +34,7 @@
 #include "report_evaluator.h"
 #include "route_builder.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 PlaceSummary FeatureBuilder::buildPLSummary(std::string step)
 {
@@ -57,13 +57,6 @@ CTSSummary FeatureBuilder::buildCTSSummary()
   return summary;
 }
 
-NetOptSummary FeatureBuilder::buildNetOptSummary()
-{
-  NetOptSummary summary;
-
-  return summary;
-}
-
 TimingOptSummary FeatureBuilder::buildTimingOptSummary()
 {
   TimingOptSummary summary;
@@ -78,4 +71,4 @@ bool FeatureBuilder::buildRouteData(RouteAnalyseData* data)
   return route_builder.buildRouteData();
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

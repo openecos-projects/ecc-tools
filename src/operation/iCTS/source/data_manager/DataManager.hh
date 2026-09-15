@@ -52,6 +52,7 @@ struct DataManagerStatus
   DataManagerStatusCode code = DataManagerStatusCode::kOk;
   std::string message;
   std::vector<std::string> diagnostics;
+  std::vector<ClockGraphIssue> graph_issues;
 
   auto ok() const -> bool { return code == DataManagerStatusCode::kOk; }
 };
@@ -117,6 +118,8 @@ class DataManager final
   auto hasCommittedEvaluation() const -> bool;
   auto getCommittedEvaluationState() const -> const EvaluationState*;
 
+  static auto makeClockGraphFailureStatus(DataManagerStatusCode code, std::string message, const ClockDAG& clock_dag) -> DataManagerStatus;
+
   DataManager(const DataManager& other) = delete;
   DataManager(DataManager&& other) = delete;
   auto operator=(const DataManager& other) -> DataManager& = delete;
@@ -131,7 +134,6 @@ class DataManager final
   auto replaceCommittedDesign(std::unique_ptr<Design> design) -> void;
   static auto okStatus(std::string message) -> DataManagerStatus;
   static auto failureStatus(DataManagerStatusCode code, std::string message) -> DataManagerStatus;
-
   static std::unique_ptr<DataManager> _instance;
 
   Config _config;

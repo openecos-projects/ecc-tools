@@ -44,7 +44,6 @@ class DieBuilder
   // function
 
   void buildFloorplan();
-  void buildAutoFloorplan();
   void buildDie(double die_lx, double die_ly, double die_ux, double die_uy);
   void buildCore(double core_lx, double core_ly, double core_ux, double core_uy, std::string site_name);
   void buildRowList();

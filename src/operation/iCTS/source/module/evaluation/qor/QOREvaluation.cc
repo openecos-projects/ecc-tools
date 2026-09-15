@@ -85,7 +85,12 @@ auto QorEvaluation::evaluate(QorEvaluationModel& model) -> void
       const bool is_new_buffer_inst = counted_buffer_insts.insert(inst).second;
       if (is_new_buffer_inst) {
         ++summary.final_clock_buffer_count;
-        cell_statistics_complete = qor_evaluation::AccumulateInstStatistics(wrapper, *inst, statistics) && cell_statistics_complete;
+        const auto metric_status = qor_evaluation::AccumulateInstStatistics(wrapper, *inst, clock->findPropagationArc(inst), statistics);
+        if (!metric_status.ok()) {
+          CTSLOG.warn(Loc::current(), "CTS QoR cell metrics are partial for clock \"", clock->get_clock_name(), "\", inst \"", inst->get_name(),
+                      "\": ", qor_evaluation::ClockCellMetricIssueName(metric_status.issue), ".");
+        }
+        cell_statistics_complete = metric_status.ok() && cell_statistics_complete;
       }
       if (is_new_buffer_inst) {
         const auto area_um2 = wrapper.is_layout_ready() ? wrapper.queryCellAreaUm2(inst->get_cell_master()) : std::nullopt;

@@ -61,7 +61,7 @@ class IdbTrack
   bool is_track_direction_x() { return _direction == IdbTrackDirection::kDirectionX ? true : false; }
   bool is_track_direction_y() { return _direction == IdbTrackDirection::kDirectionY ? true : false; }
   bool is_track_vertical() { return _direction == IdbTrackDirection::kDirectionX ? true : false; }
-  bool is_track_horizontal() { return _direction == IdbTrackDirection::kDirectionX ? true : false; }
+  bool is_track_horizontal() { return _direction == IdbTrackDirection::kDirectionY ? true : false; }
 
   // IdbLayer* get_layer(){return _layer;}
 

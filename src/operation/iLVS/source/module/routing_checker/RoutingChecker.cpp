@@ -96,8 +96,7 @@ void RoutingChecker::checkRouting(RCModel& rc_model)
   }
 }
 
-RoutingCheck RoutingChecker::checkNetRoutingConnectivity(const std::string& net_name, const Net& net,
-                                                         const NetRoutingGraph* routing_graph)
+RoutingCheck RoutingChecker::checkNetRoutingConnectivity(const std::string& net_name, const Net& net, const NetRoutingGraph* routing_graph)
 {
   RoutingCheck routing_check;
   routing_check.set_net_name(net_name);
@@ -133,11 +132,11 @@ RoutingCheck RoutingChecker::checkNetRoutingConnectivity(const std::string& net_
     std::vector<int32_t> active_shape_idx_list;
     for (int32_t shape_idx : shape_idx_list) {
       const Shape& shape = routing_shape_list[shape_idx].get_shape();
-      active_shape_idx_list.erase(
-          std::remove_if(active_shape_idx_list.begin(), active_shape_idx_list.end(), [&routing_shape_list, &shape](const int32_t active_shape_idx) {
-            return routing_shape_list[active_shape_idx].get_shape().get_ur_x() < shape.get_ll_x();
-          }),
-          active_shape_idx_list.end());
+      active_shape_idx_list.erase(std::remove_if(active_shape_idx_list.begin(), active_shape_idx_list.end(),
+                                                 [&routing_shape_list, &shape](const int32_t active_shape_idx) {
+                                                   return routing_shape_list[active_shape_idx].get_shape().get_ur_x() < shape.get_ll_x();
+                                                 }),
+                                  active_shape_idx_list.end());
       for (int32_t active_shape_idx : active_shape_idx_list) {
         if (isIntersected(routing_shape_list[active_shape_idx].get_shape(), shape)) {
           graph.unite(active_shape_idx, shape_idx);
@@ -223,8 +222,7 @@ int32_t RoutingChecker::getTerminalRoot(const NetRoutingGraph& routing_graph, co
 
 void RoutingChecker::checkShort(RCModel& rc_model)
 {
-  std::map<int32_t, std::vector<std::string>>& component_net_name_map =
-      LVSDM.getDatabase().get_def_data().get_physical_graph().get_component_net_name_map();
+  std::map<int32_t, std::vector<std::string>>& component_net_name_map = LVSDM.getDatabase().get_def_data().get_physical_graph().get_component_net_name_map();
   std::vector<int32_t>& short_component_id_list = rc_model.get_short_component_id_list();
   for (auto& [component_id, net_name_list] : component_net_name_map) {
     if (LVSUTIL.getSortedUniqueList(net_name_list).size() > 1) {

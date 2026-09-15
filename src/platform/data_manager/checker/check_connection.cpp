@@ -14,6 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "utility/logger/Logger.hpp"
 #include "check_connection.h"
 
 #include "../idm.h"
@@ -22,6 +23,13 @@
 #include "IdbRegularWire.h"
 
 namespace idm {
+
+CheckNet::~CheckNet()
+{
+  for (auto* node : _node_list) {
+    delete node;
+  }
+}
 
 bool CheckNodePin::isIntersection(CheckNode* node_dst)
 {
@@ -123,8 +131,8 @@ void CheckNet::buildGraph()
 
     index++;
 
-    // std::cout << "[CheckNet Info] Net = " << _net_name << " graph id = " << graph.get_id() << " vertex_num = " << graph.get_vertex_num()
-    //           << " edge_num = " << graph.get_edge_num() << " pin_num = " << graph.get_pin_num() << std::endl;
+    // ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Net = ", _net_name, ", graph_id = ", graph.get_id(),
+    //              ", vertex_num = ", graph.get_vertex_num(), ", edge_num = ", graph.get_edge_num(), ", pin_num = ", graph.get_pin_num());
   }
 }
 
@@ -133,25 +141,28 @@ void CheckNet::buildGraphBFS(NetGraph& graph, CheckNode* check_node)
   std::vector<CheckNode*> connected_node_list;
   /// find connected vetex
   for (size_t i = 0; i < _node_list.size(); i++) {
-    if (_node_list[i]->is_visited() || check_node == _node_list[i]) {
+    if (check_node == _node_list[i]) {
       continue;
     }
 
     if (isIntersection(check_node, _node_list[i])) {
-      /// set as visted
-      _node_list[i]->set_graph_id(graph.get_id());
-      check_node->set_graph_id(graph.get_id());
+      if (!_node_list[i]->is_visited()) {
+        _node_list[i]->set_graph_id(graph.get_id());
+        graph.add_vertex(_node_list[i]->get_id());
+        connected_node_list.push_back(_node_list[i]);
+      }
 
-      /// add to graph
-      graph.add_vertex(i);
+      if (_node_list[i]->get_graph_id() != graph.get_id()) {
+        continue;
+      }
+
+      /// Add every physical intersection once so ring checks use the real graph.
       graph.add_edge(check_node->get_id(), _node_list[i]->get_id());
 
       /// add pin to graph
       if (_node_list[i]->is_pin()) {
         graph.addConnectedPin(i);
       }
-
-      connected_node_list.push_back(_node_list[i]);
     }
   }
 
@@ -190,12 +201,12 @@ CheckInfo CheckNet::isAllPinConnected()
 {
   for (auto net_graph : _graph_list) {
     if (_pin_num >= 0 && _pin_num == net_graph.get_pin_num()) {
-      // std::cout << "[CheckNet Info] Net " << _net_name << " is connected." << std::endl;
+      // ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Net ", _net_name, " is connected.");
       return CheckInfo::kConnected;
     }
   }
 
-  std::cout << "[CheckNet Error] Net " << _net_name << " is disconnected." << std::endl;
+  ECCLOG.warn(ecc::Loc::current(), "[CheckNet Error] Net ", _net_name, " is disconnected.");
   return CheckInfo::kDisconnected;
 }
 
@@ -203,13 +214,12 @@ bool CheckNet::hasRing()
 {
   for (auto net_graph : _graph_list) {
     if (net_graph.has_ring()) {
-      std::cout << "[CheckNet Error] Net " << _net_name << " has ring."
-                << " vertex_num = " << net_graph.get_vertex_num() << " edge_num = " << net_graph.get_edge_num() << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "[CheckNet Error] Net ", _net_name, " has ring.", " vertex_num = ", net_graph.get_vertex_num(), " edge_num = ", net_graph.get_edge_num());
       return true;
     }
   }
 
-  //   std::cout << "[CheckNet Info] Net " << _net_name << " has no ring." << std::endl;
+  //   ECCLOG.info(ecc::Loc::current(), "[CheckNet Info] Net ", _net_name, " has no ring.");
   return false;
 }
 

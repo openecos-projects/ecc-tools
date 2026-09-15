@@ -26,7 +26,7 @@ namespace irt {
 std::string Monitor::getStatsInfo()
 {
   std::string stats_info;
-  stats_info = RTUTIL.getString(" (elapsed = ", getElapsedTime(), ", cpu = ", getCPUTime(), ", mem = ", getUsageMemory(), ") ");
+  stats_info = RTUTIL.getString(" (elapsed = ", getElapsedTime(), ", cpu = ", getCPUTime(), ", mem = ", getUsageMemory(), ", rss = ", getCurrentRSS(), ") ");
   updateStats();
   return stats_info;
 }
@@ -44,6 +44,11 @@ std::string Monitor::getCPUTime()
 std::string Monitor::getUsageMemory()
 {
   return RTUTIL.getString(RTUTIL.formatByTwoDecimalPlaces(getCurrUsageMemory() - _init_usage_memory), "MB");
+}
+
+std::string Monitor::getCurrentRSS()
+{
+  return RTUTIL.getCurrentRSS();
 }
 
 // private

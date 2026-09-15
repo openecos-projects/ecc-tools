@@ -44,11 +44,13 @@
 #include "module/synthesis/htree/HTreeBuildObservation.hh"
 #include "module/synthesis/htree/constraint/Constraint.hh"
 #include "module/synthesis/htree/diagnostic/HTreeDiagnostic.hh"
+#include "module/synthesis/htree/plan/DepthPlan.hh"
 #include "module/synthesis/htree/plan/Plan.hh"
 #include "module/synthesis/htree/segment_pruning/SegmentPruning.hh"
 #include "module/synthesis/htree/topology_pruning/TopologyPruning.hh"
 #include "synthesis/htree/segment_pruning/SegmentFrontierCatalog.hh"
 #include "synthesis/htree/segment_pruning/SegmentPatternLibrary.hh"
+#include "synthesis/topology/trunk/SourceTrunkLabelSolver.hh"
 
 namespace icts_test {
 namespace {
@@ -157,6 +159,165 @@ auto MakeRuntimeHTreeInput(icts::Net& root_net) -> icts::HTree::Input
   input.characterization_input.wrapper = &CTSDM.getWrapper();
   input.characterization_input.fast_sta = &CTSDM.getFastSTA();
   return input;
+}
+
+TEST(HTreeTest, SegmentPatternCombinerInternsRepeatedStructuralPair)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto upstream_id = icts::PatternId::segment(10U);
+  const auto downstream_id = icts::PatternId::segment(20U);
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, upstream_id, {}, {})));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, downstream_id, {}, {})));
+
+  icts::htree::SegmentPatternLibraryCombiner combiner(pattern_library, 100U);
+  const auto first_id = combiner.combine(upstream_id, downstream_id);
+  const auto repeated_id = combiner.combine(upstream_id, downstream_id);
+
+  EXPECT_EQ(first_id, repeated_id);
+  EXPECT_EQ(combiner.get_next_id(), 101U);
+  EXPECT_EQ(pattern_library.patterns.size(), 3U);
+}
+
+TEST(HTreeTest, SegmentPatternCombinerInternsAcrossCombinerInstances)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto upstream_id = icts::PatternId::segment(10U);
+  const auto downstream_id = icts::PatternId::segment(20U);
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, upstream_id, {}, {})));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, downstream_id, {}, {})));
+
+  icts::htree::SegmentPatternLibraryCombiner first_combiner(pattern_library, 100U);
+  const auto first_id = first_combiner.combine(upstream_id, downstream_id);
+  icts::htree::SegmentPatternLibraryCombiner second_combiner(pattern_library, first_combiner.get_next_id());
+  const auto repeated_id = second_combiner.combine(upstream_id, downstream_id);
+
+  EXPECT_EQ(first_id, repeated_id);
+  EXPECT_EQ(second_combiner.get_next_id(), 101U);
+  EXPECT_EQ(pattern_library.patterns.size(), 3U);
+}
+
+TEST(HTreeTest, SegmentPatternCombinerKeepsCompositionDirection)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto upstream_id = icts::PatternId::segment(10U);
+  const auto downstream_id = icts::PatternId::segment(20U);
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, upstream_id, {}, {})));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, downstream_id, {}, {})));
+
+  icts::htree::SegmentPatternLibraryCombiner combiner(pattern_library, 100U);
+  const auto forward_id = combiner.combine(upstream_id, downstream_id);
+  const auto reverse_upstream_id = downstream_id;
+  const auto reverse_downstream_id = upstream_id;
+  const auto reverse_id = combiner.combine(reverse_upstream_id, reverse_downstream_id);
+
+  EXPECT_NE(forward_id, reverse_id);
+  EXPECT_EQ(combiner.get_next_id(), 102U);
+  EXPECT_EQ(pattern_library.patterns.size(), 4U);
+}
+
+TEST(HTreeTest, SegmentPatternCombinerRejectsNonMonotonicPairBeforeRegistration)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto upstream_id = icts::PatternId::segment(10U);
+  const auto downstream_id = icts::PatternId::segment(20U);
+  const icts::MonotonicBoundaryState upstream_state{
+      .source = icts::BoundaryBufferState{.has_buffer = true, .strength_rank = 2U},
+      .sink = icts::BoundaryBufferState{.has_buffer = true, .strength_rank = 1U},
+  };
+  const icts::MonotonicBoundaryState downstream_state{
+      .source = icts::BoundaryBufferState{.has_buffer = true, .strength_rank = 2U},
+      .sink = icts::BoundaryBufferState{.has_buffer = true, .strength_rank = 1U},
+  };
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, upstream_id, {}, {}, false, upstream_state)));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, downstream_id, {}, {}, false, downstream_state)));
+
+  const icts::htree::SegmentPatternLibraryCombiner combiner(pattern_library, 100U);
+  EXPECT_FALSE(combiner.canCompose(upstream_id, downstream_id));
+  EXPECT_EQ(pattern_library.patterns.size(), 2U);
+}
+
+TEST(HTreeTest, SegmentFrontierRegistersOnlySurvivingComposedPattern)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto fast_leaf_id = icts::PatternId::segment(10U);
+  const auto slow_branch_id = icts::PatternId::segment(20U);
+  const auto downstream_id = icts::PatternId::segment(30U);
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, fast_leaf_id, {}, {}, false)));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, slow_branch_id, {}, {}, true)));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, downstream_id, {}, {}, false)));
+
+  const std::vector<icts::SegmentChar> chars{
+      icts::SegmentChar(icts::CharCore(1U, 2U, 1U, 2U, 1.0, 1.0, fast_leaf_id, 0.0), 1U),
+      icts::SegmentChar(icts::CharCore(1U, 2U, 1U, 2U, 2.0, 2.0, slow_branch_id, 0.0), 1U),
+      icts::SegmentChar(icts::CharCore(2U, 3U, 2U, 3U, 1.0, 1.0, downstream_id, 0.0), 1U),
+  };
+
+  const auto catalog = icts::htree::SynthesizeSegmentFrontiers(
+      chars, pattern_library,
+      icts::htree::RequiredSegmentFrontiers{.required_length_indices = {2U}, .required_kinds = icts::htree::SegmentFrontierKindSet::allOnly()});
+  const auto* frontier = catalog.find(2U, icts::htree::SegmentFrontierKind::kAll);
+
+  ASSERT_NE(frontier, nullptr);
+  ASSERT_EQ(frontier->size(), 1U);
+  EXPECT_DOUBLE_EQ(frontier->front().get_delay(), 2.0);
+  EXPECT_DOUBLE_EQ(frontier->front().get_power(), 2.0);
+  EXPECT_EQ(pattern_library.compositionRegistrationCount(), 1U);
+}
+
+TEST(HTreeTest, SourceTrunkLabelSolverBuildsCanonicalLength526Path)
+{
+  const auto primitive_pattern_id = icts::PatternId::segment(1U);
+  const std::vector<icts::BufferingPattern> patterns{
+      icts::BufferingPattern(1U, primitive_pattern_id, {}, {}),
+  };
+  const std::vector<icts::SegmentChar> primitives{
+      icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 0.01, 0.01, primitive_pattern_id, 0.0), 1U),
+  };
+
+  const auto build = icts::source_trunk::SolveLabels(icts::source_trunk::LabelSolverInput{
+      .primitive_chars = &primitives,
+      .primitive_patterns = &patterns,
+      .target_length_idx = 526U,
+      .required_load_cap_idx = 1U,
+      .source_drive_cap_idx = 1U,
+      .min_input_slew_idx = std::nullopt,
+  });
+
+  ASSERT_TRUE(build.ok()) << build.failure_reason;
+  ASSERT_TRUE(build.best_char.has_value());
+  ASSERT_TRUE(build.best_pattern.has_value());
+  const auto best_char = build.best_char.value_or(icts::SegmentChar{});
+  const auto best_pattern = build.best_pattern.value_or(icts::BufferingPattern{});
+  EXPECT_EQ(best_char.get_length_idx(), 526U);
+  EXPECT_EQ(best_pattern.get_length_idx(), 526U);
+  EXPECT_EQ(build.summary.selected_primitive_count, 526U);
+  EXPECT_LE(build.summary.retained_label_count, 526U);
+}
+
+TEST(HTreeTest, SourceTrunkLabelSolverReturnsTypedGeneratedBudgetFailure)
+{
+  const auto primitive_pattern_id = icts::PatternId::segment(1U);
+  const std::vector<icts::BufferingPattern> patterns{
+      icts::BufferingPattern(1U, primitive_pattern_id, {}, {}),
+  };
+  const std::vector<icts::SegmentChar> primitives{
+      icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 0.01, 0.01, primitive_pattern_id, 0.0), 1U),
+  };
+
+  const auto build = icts::source_trunk::SolveLabels(
+      icts::source_trunk::LabelSolverInput{
+          .primitive_chars = &primitives,
+          .primitive_patterns = &patterns,
+          .target_length_idx = 20U,
+          .required_load_cap_idx = 1U,
+          .source_drive_cap_idx = 1U,
+          .min_input_slew_idx = std::nullopt,
+      },
+      icts::source_trunk::LabelSolverConfig{.max_generated_labels = 5U, .max_retained_labels = 100U});
+
+  EXPECT_FALSE(build.ok());
+  EXPECT_EQ(build.status, icts::source_trunk::LabelSolverStatus::kGeneratedLabelBudgetExceeded);
+  EXPECT_EQ(build.failure_reason, "source_trunk_label_generated_budget_exceeded");
 }
 
 TEST(HTreeTest, RequiredSegmentFrontiersBuildOnlyRequiredKinds)
@@ -414,6 +575,36 @@ TEST(HTreeTest, ExplicitDepthCandidateWindowRemainsBounded)
   const auto depth_candidates = icts::htree::ResolveDepthCandidates(4U, icts::HTree::Config{.depth_explore_window = 2U});
 
   EXPECT_EQ(depth_candidates, (std::vector<unsigned>{4U, 3U}));
+}
+
+TEST(HTreeTest, SplitTriggerEvidencePropagatesIntoBoundedCandidateSummaries)
+{
+  icts::htree::DepthCandidateBuild candidate;
+  candidate.leaf_count = 27U;
+  candidate.evaluation.depth = 3U;
+  candidate.evaluation.success = true;
+  candidate.evaluation.split_group_count = 1U;
+  candidate.evaluation.split_extra_buffer_count = 7U;
+  candidate.evaluation.split_local_depth = 2U;
+  candidate.evaluation.split_triggered_by_fanout = false;
+  candidate.evaluation.split_triggered_by_capacitance = true;
+  candidate.evaluation.feasible_frontier_entries.push_back(MakeTopologyChar(1U, 1.0, 1.0));
+
+  std::vector<icts::htree::DepthSummary> summaries;
+  icts::htree::RecordTopologyDepthCandidateBuild(3U, false, candidate, summaries);
+  ASSERT_EQ(summaries.size(), 1U);
+  EXPECT_EQ(summaries.front().split_group_count, 1U);
+  EXPECT_EQ(summaries.front().split_extra_buffer_count, 7U);
+  EXPECT_EQ(summaries.front().split_local_depth, 2U);
+  EXPECT_FALSE(summaries.front().split_triggered_by_fanout);
+  EXPECT_TRUE(summaries.front().split_triggered_by_capacitance);
+
+  std::vector<icts::htree::CandidateCharRef> feasible_refs;
+  std::vector<icts::htree::CandidateCharRef> candidate_refs;
+  icts::htree::AppendGlobalCandidateRefs(0U, candidate.evaluation, feasible_refs, candidate_refs);
+  ASSERT_EQ(feasible_refs.size(), 1U);
+  EXPECT_FALSE(feasible_refs.front().split_triggered_by_fanout);
+  EXPECT_TRUE(feasible_refs.front().split_triggered_by_capacitance);
 }
 
 TEST(HTreeTest, AdaptiveGlobalSelectionChoosesTimingShapeWhenItIsNoMoreComplex)

@@ -22,9 +22,19 @@
 
 #pragma once
 
+#include <memory>
+
 #include "stage/StageSummary.hh"
 
 namespace icts {
+
+class ClockLayout;
+class DataManager;
+class Design;
+struct DataManagerStatus;
+
+auto CommitSynthesisCandidate(DataManager& data_manager, std::unique_ptr<Design> design, ClockLayout clock_layout, SynthesisTraceSummary summary,
+                              DataManagerStatus& commit_status) -> SynthesisTraceSummary;
 
 class Synthesis
 {

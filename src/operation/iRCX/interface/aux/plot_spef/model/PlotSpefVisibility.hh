@@ -20,24 +20,19 @@
  */
 #pragma once
 
-#include <cstdint>
-#include <vector>
-
+#include "RCXHeader.hpp"
 #include "model/PlotSpefModel.hh"
 
 namespace ircx::plot_spef {
 
 using VisibilityFlags = std::vector<std::uint8_t>;
 
-inline auto flagAt(const VisibilityFlags& flags,
-                   Size index) -> bool
+inline auto flagAt(const VisibilityFlags& flags, Size index) -> bool
 {
   return index < flags.size() && flags[index] != 0;
 }
 
-inline auto setFlag(VisibilityFlags& flags,
-                    Size index,
-                    bool value = true) -> void
+inline auto setFlag(VisibilityFlags& flags, Size index, bool value = true) -> void
 {
   if (index < flags.size()) {
     flags[index] = value ? 1 : 0;
@@ -65,31 +60,23 @@ struct Visibility
 {
   std::vector<NetVisibility> nets;
 
-  auto netVisible(Size index) const -> bool
-  {
-    return index < nets.size() && nets[index].visible;
-  }
+  auto netVisible(Size index) const -> bool { return index < nets.size() && nets[index].visible; }
 
-  auto netContextOnly(Size index) const -> bool
-  {
-    return index < nets.size() && nets[index].context_only;
-  }
+  auto netContextOnly(Size index) const -> bool { return index < nets.size() && nets[index].context_only; }
 };
 
-inline auto makeVisibility(const Model& model,
-                           bool visible) -> Visibility
+inline auto makeVisibility(const Model& model, bool visible) -> Visibility
 {
   Visibility visibility;
   visibility.nets.reserve(model.nets.size());
   for (const auto& net : model.nets) {
-    visibility.nets.push_back(NetVisibility{
-        .visible = visible,
-        .context_only = !visible,
-        .nodes = VisibilityFlags(net.nodes.size(), visible ? 1 : 0),
-        .resistors = VisibilityFlags(net.resistors.size(), visible ? 1 : 0),
-        .target_resistors = VisibilityFlags(net.resistors.size(), 0),
-        .coupling_caps = VisibilityFlags(net.coupling_caps.size(), visible ? 1 : 0),
-        .ground_caps = VisibilityFlags(net.ground_caps.size(), visible ? 1 : 0)});
+    visibility.nets.push_back(NetVisibility{.visible = visible,
+                                            .context_only = !visible,
+                                            .nodes = VisibilityFlags(net.nodes.size(), visible ? 1 : 0),
+                                            .resistors = VisibilityFlags(net.resistors.size(), visible ? 1 : 0),
+                                            .target_resistors = VisibilityFlags(net.resistors.size(), 0),
+                                            .coupling_caps = VisibilityFlags(net.coupling_caps.size(), visible ? 1 : 0),
+                                            .ground_caps = VisibilityFlags(net.ground_caps.size(), visible ? 1 : 0)});
   }
   return visibility;
 }

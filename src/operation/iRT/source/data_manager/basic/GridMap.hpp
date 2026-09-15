@@ -197,7 +197,7 @@ inline void GridMap<T>::initDataMap()
     return;
   }
   _data_map = new T*[_x_size];
-  _data_map[0] = new T[_x_size * _y_size];
+  _data_map[0] = new T[static_cast<size_t>(_x_size) * static_cast<size_t>(_y_size)];
   for (int32_t i = 1; i < _x_size; i++) {
     _data_map[i] = _data_map[i - 1] + _y_size;
   }

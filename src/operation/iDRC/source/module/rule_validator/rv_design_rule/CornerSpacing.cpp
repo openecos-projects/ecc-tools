@@ -123,49 +123,20 @@ void RuleValidator::verifyCornerSpacing(RVCluster& rv_cluster)
 
     Rotation rotation = DRCUTIL.getRotation(check_hole_poly);
     auto get_boundary_orient = [is_hole, rotation](const PlanarCoord& begin_coord, const PlanarCoord& end_coord) {
-      auto rotate_left = [](Orientation orient) {
-        switch (orient) {
-          case Orientation::kEast:
-            return Orientation::kNorth;
-          case Orientation::kNorth:
-            return Orientation::kWest;
-          case Orientation::kWest:
-            return Orientation::kSouth;
-          case Orientation::kSouth:
-            return Orientation::kEast;
-          default:
-            return Orientation::kNone;
-        }
-      };
-      auto rotate_right = [](Orientation orient) {
-        switch (orient) {
-          case Orientation::kEast:
-            return Orientation::kSouth;
-          case Orientation::kSouth:
-            return Orientation::kWest;
-          case Orientation::kWest:
-            return Orientation::kNorth;
-          case Orientation::kNorth:
-            return Orientation::kEast;
-          default:
-            return Orientation::kNone;
-        }
-      };
-
       Orientation travel_orient = DRCUTIL.getOrientation(begin_coord, end_coord);
       bool metal_on_left = (rotation == Rotation::kCounterclockwise);
       if (is_hole) {
         metal_on_left = !metal_on_left;
       }
-      return metal_on_left ? rotate_right(travel_orient) : rotate_left(travel_orient);
+      return metal_on_left ? DRCUTIL.getCWOrientation(travel_orient) : DRCUTIL.getCCWOrientation(travel_orient);
     };
 
     std::vector<bool> convex_corner_list(coord_size, false);
     if (coord_size >= 3) {
       for (int32_t i = 0; i < coord_size; i++) {
-        PlanarCoord& pre_coord = coord_list[getIdx(i - 1, coord_size)];
+        PlanarCoord& pre_coord = coord_list[DRCUTIL.getRingIdx(i - 1, coord_size)];
         PlanarCoord& curr_coord = coord_list[i];
-        PlanarCoord& post_coord = coord_list[getIdx(i + 1, coord_size)];
+        PlanarCoord& post_coord = coord_list[DRCUTIL.getRingIdx(i + 1, coord_size)];
         convex_corner_list[i] = is_hole ? DRCUTIL.isConcaveCorner(rotation, pre_coord, curr_coord, post_coord)
                                         : DRCUTIL.isConvexCorner(rotation, pre_coord, curr_coord, post_coord);
       }
@@ -174,7 +145,7 @@ void RuleValidator::verifyCornerSpacing(RVCluster& rv_cluster)
     std::vector<int32_t> ring_boundary_ids;
     ring_boundary_ids.reserve(coord_size);
     for (int32_t i = 0; i < coord_size; i++) {
-      PlanarCoord& pre_coord = coord_list[getIdx(i - 1, coord_size)];
+      PlanarCoord& pre_coord = coord_list[DRCUTIL.getRingIdx(i - 1, coord_size)];
       PlanarCoord& curr_coord = coord_list[i];
       if (pre_coord == curr_coord) {
         continue;
@@ -202,8 +173,8 @@ void RuleValidator::verifyCornerSpacing(RVCluster& rv_cluster)
     }
     for (int32_t i = 0; i < ring_size; i++) {
       BoundaryData& boundary_data = rv_layer_data.boundary_pool[ring_boundary_ids[i]];
-      boundary_data.prev_boundary_id = ring_boundary_ids[getIdx(i - 1, ring_size)];
-      boundary_data.next_boundary_id = ring_boundary_ids[getIdx(i + 1, ring_size)];
+      boundary_data.prev_boundary_id = ring_boundary_ids[DRCUTIL.getRingIdx(i - 1, ring_size)];
+      boundary_data.next_boundary_id = ring_boundary_ids[DRCUTIL.getRingIdx(i + 1, ring_size)];
     }
   };
 

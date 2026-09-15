@@ -86,25 +86,23 @@ void DRCEngine::buildIgnoredViolationSet()
   Die& die = RTDM.getDatabase().get_die();
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
 
-  for (Violation* violation : RTDM.getViolationSet(die)) {
-    RTDM.updateViolationToGCellMap(ChangeType::kDel, violation);
+  for (const Violation& violation : RTDM.getViolationList(die)) {
+    RTDM.updateViolationToRTree(ChangeType::kDel, violation);
   }
   DETask de_task;
   {
     std::string top_name = RTUTIL.getString("ignore_violation");
     std::vector<std::pair<EXTLayerRect*, bool>> env_shape_list;
     std::map<int32_t, std::vector<std::pair<EXTLayerRect*, bool>>> net_pin_shape_map;
-    for (auto& [is_routing, layer_net_fixed_rect_map] : RTDM.getTypeLayerNetFixedRectMap(die)) {
-      for (auto& [layer_idx, net_fixed_rect_map] : layer_net_fixed_rect_map) {
-        for (auto& [net_idx, fixed_rect_set] : net_fixed_rect_map) {
+    auto& type_layer_fixed_rect_rtree_map = RTDM.getDatabase().get_type_layer_fixed_rect_rtree_map();
+    for (bool is_routing : {false, true}) {
+      for (auto& [layer_idx, fixed_rect_rtree] : type_layer_fixed_rect_rtree_map[is_routing]) {
+        for (const auto& [rect, net_fixed_rect] : fixed_rect_rtree) {
+          auto [net_idx, fixed_rect] = net_fixed_rect;
           if (net_idx == -1) {
-            for (auto& fixed_rect : fixed_rect_set) {
-              env_shape_list.emplace_back(fixed_rect, is_routing);
-            }
+            env_shape_list.emplace_back(fixed_rect, is_routing);
           } else {
-            for (auto& fixed_rect : fixed_rect_set) {
-              net_pin_shape_map[net_idx].emplace_back(fixed_rect, is_routing);
-            }
+            net_pin_shape_map[net_idx].emplace_back(fixed_rect, is_routing);
           }
         }
       }
@@ -258,7 +256,7 @@ std::vector<Violation> DRCEngine::getExpandedViolationList(DETask& de_task, Viol
         break;
       case ViolationType::kMinStep:
         new_real_rect = enlargeRect(new_real_rect, 0);
-        layer_routing_list = expandLayer(violation, {-1, 0, +1 });
+        layer_routing_list = expandLayer(violation, {-1, 0, +1});
         break;
       case ViolationType::kNonsufficientMetalOverlap:
         new_real_rect = enlargeRect(new_real_rect, 0);

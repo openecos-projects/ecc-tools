@@ -31,8 +31,12 @@ class IAModel
   std::vector<std::size_t>& get_matrix_idx_to_node_id_list() { return _matrix_idx_to_node_id_list; }
   std::map<std::size_t, double>& get_node_current_map() { return _node_current_map; }
   double get_source_voltage() { return _source_voltage; }
+  double get_pin_mapped_current() { return _pin_mapped_current; }
+  double get_generic_current() { return _generic_current; }
   // setter
   void set_source_voltage(double source_voltage) { _source_voltage = source_voltage; }
+  void add_pin_mapped_current(double current) { _pin_mapped_current += std::abs(current); }
+  void add_generic_current(double current) { _generic_current += std::abs(current); }
   // function
 
  private:
@@ -41,6 +45,8 @@ class IAModel
   std::vector<std::size_t> _matrix_idx_to_node_id_list;
   std::map<std::size_t, double> _node_current_map;
   double _source_voltage = 0.0;
+  double _pin_mapped_current = 0.0;
+  double _generic_current = 0.0;
 };
 
 }  // namespace iemir

@@ -15,7 +15,7 @@
 // ***************************************************************************************
 #pragma once
 
-namespace ieda {
+namespace ecc {
 
 enum class LogLevel
 {
@@ -25,4 +25,4 @@ enum class LogLevel
   kError = 3
 };
 
-}  // namespace ieda
+}  // namespace ecc

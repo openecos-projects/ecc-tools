@@ -31,18 +31,9 @@ class NetEnv
   // setter
   void set_edge_interval_pool(const GroupPool<EdgeEnvInterval>& edge_interval_pool) { _edge_interval_pool = edge_interval_pool; }
   // function
-  void append_edge_interval_list(std::vector<EdgeEnvInterval> edge_interval_list)
-  {
-    _edge_interval_pool.append(std::move(edge_interval_list));
-  }
-  std::span<EdgeEnvInterval> get_edge_interval_list(int32_t edge_idx)
-  {
-    return _edge_interval_pool.get_group_item_list(edge_idx);
-  }
-  std::span<const EdgeEnvInterval> get_edge_interval_list(int32_t edge_idx) const
-  {
-    return _edge_interval_pool.get_group_item_list(edge_idx);
-  }
+  void append_edge_interval_list(std::vector<EdgeEnvInterval> edge_interval_list) { _edge_interval_pool.append(std::move(edge_interval_list)); }
+  std::span<EdgeEnvInterval> get_edge_interval_list(int32_t edge_idx) { return _edge_interval_pool.get_group_item_list(edge_idx); }
+  std::span<const EdgeEnvInterval> get_edge_interval_list(int32_t edge_idx) const { return _edge_interval_pool.get_group_item_list(edge_idx); }
 
  private:
   GroupPool<EdgeEnvInterval> _edge_interval_pool;

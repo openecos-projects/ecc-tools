@@ -20,9 +20,7 @@
  */
 #pragma once
 
-#include <utility>
-#include <vector>
-
+#include "RCXHeader.hpp"
 #include "Types.hh"
 
 namespace ircx {
@@ -65,9 +63,8 @@ class NetConfigReader
  public:
   auto read(Config& config) const -> bool;
 
-private:
-  void addLine(Config& config,
-               std::string_view raw_line) const;
+ private:
+  void addLine(Config& config, std::string_view raw_line) const;
 };
 
 class ConfigValidator

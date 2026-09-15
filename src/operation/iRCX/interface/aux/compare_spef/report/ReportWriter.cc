@@ -20,24 +20,11 @@
  */
 #include "report/ReportWriter.hh"
 
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <cstddef>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <map>
-#include <optional>
-#include <ostream>
-#include <vector>
-#include <omp.h>
-
 #include "FormatUtils.hh"
+#include "Logger.hpp"
 #include "ParallelUtils.hh"
 #include "PathUtils.hh"
-#include "libfort/fort.hpp"
-#include "Logger.hpp"
+#include "RCXHeader.hpp"
 #include "utils/CompareMath.hh"
 
 namespace ircx {
@@ -85,10 +72,7 @@ struct ErrorStats
     bins[bin]++;
   }
 
-  auto mean() const -> F64
-  {
-    return count == 0 ? 0.0 : mean_value;
-  }
+  auto mean() const -> F64 { return count == 0 ? 0.0 : mean_value; }
 
   auto standardDeviation() const -> F64
   {
@@ -115,8 +99,7 @@ auto openReport(const std::filesystem::path& path) -> std::ofstream
   return ofs;
 }
 
-void writeDouble(std::ostream& os,
-                 F64 value)
+void writeDouble(std::ostream& os, F64 value)
 {
   if (std::isfinite(value)) {
     os << value;
@@ -125,8 +108,7 @@ void writeDouble(std::ostream& os,
   }
 }
 
-void writePercent(std::ostream& os,
-                  const std::optional<F64>& value)
+void writePercent(std::ostream& os, const std::optional<F64>& value)
 {
   if (value.has_value()) {
     os << (*value * 100.0);
@@ -136,8 +118,7 @@ void writePercent(std::ostream& os,
 }
 
 template <typename Row>
-void collectPercentErrors(const std::vector<Row>& rows,
-                          ErrorStats& stats)
+void collectPercentErrors(const std::vector<Row>& rows, ErrorStats& stats)
 {
   for (const auto& row : rows) {
     if (row.relative_delta.has_value()) {
@@ -159,36 +140,25 @@ auto collectSummaryErrors(const Result& result) -> SummaryErrors
 class SummaryTableBuilder
 {
  public:
-  auto makeOverviewTable(const Config& config,
-                         const SummaryErrors& errors) const -> fort::char_table
+  auto makeOverviewTable(const Config& config, const SummaryErrors& errors) const -> fort::char_table
   {
     auto table = makePlainTable();
     table << fort::header << "Metric" << "Mean Error" << "Std Error" << "Threshold" << fort::endr;
-    table << "Total cap (C)" << format::percent(errors.tcap.mean())
-          << format::percent(errors.tcap.standardDeviation())
+    table << "Total cap (C)" << format::percent(errors.tcap.mean()) << format::percent(errors.tcap.standardDeviation())
           << "abs = " + format::fixed(config.tcap_threshold) + "fF" << fort::endr;
-    table << "Ground cap (GC)" << format::percent(errors.gcap.mean())
-          << format::percent(errors.gcap.standardDeviation())
+    table << "Ground cap (GC)" << format::percent(errors.gcap.mean()) << format::percent(errors.gcap.standardDeviation())
           << "abs = " + format::fixed(config.ccap_abs_threshold) + "fF" << fort::endr;
-    table << "Coupling cap (CC)" << format::percent(errors.ccap.mean())
-          << format::percent(errors.ccap.standardDeviation())
-          << "abs = " + format::fixed(config.ccap_abs_threshold)
-                 + "fF, rel = " + format::fixed(config.ccap_rel_threshold)
-          << fort::endr;
-    table << "Pin-Pin res (P2P)" << format::percent(errors.p2p.mean())
-          << format::percent(errors.p2p.standardDeviation())
+    table << "Coupling cap (CC)" << format::percent(errors.ccap.mean()) << format::percent(errors.ccap.standardDeviation())
+          << "abs = " + format::fixed(config.ccap_abs_threshold) + "fF, rel = " + format::fixed(config.ccap_rel_threshold) << fort::endr;
+    table << "Pin-Pin res (P2P)" << format::percent(errors.p2p.mean()) << format::percent(errors.p2p.standardDeviation())
           << "abs = " + format::fixed(config.res_threshold) + "Ohm" << fort::endr;
     table.column(0).set_cell_text_align(fort::text_align::left);
     table.column(3).set_cell_text_align(fort::text_align::left);
     return table;
   }
 
-  auto makeDistributionTable(const std::string& title,
-                             const std::string& threshold_label,
-                             F64 threshold,
-                             const std::string& count_label,
-                             const ErrorStats& errors) const
-      -> fort::char_table
+  auto makeDistributionTable(const std::string& title, const std::string& threshold_label, F64 threshold, const std::string& count_label,
+                             const ErrorStats& errors) const -> fort::char_table
   {
     auto table = makePlainTable();
     table << fort::header << title + " Distribution" << "Value" << fort::endr;
@@ -218,9 +188,7 @@ class SummaryTableBuilder
   }
 };
 
-auto writeTcapReport(const std::filesystem::path& output_dir,
-                     const Config& config,
-                     const Result& result) -> bool
+auto writeTcapReport(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
   const auto report_path = output_dir / "tcap.rpt";
   auto ofs = openReport(report_path);
@@ -237,9 +205,7 @@ auto writeTcapReport(const std::filesystem::path& output_dir,
   return true;
 }
 
-auto writeGcapReport(const std::filesystem::path& output_dir,
-                     const Config& config,
-                     const Result& result) -> bool
+auto writeGcapReport(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
   const auto report_path = output_dir / "gcap.rpt";
   auto ofs = openReport(report_path);
@@ -256,9 +222,7 @@ auto writeGcapReport(const std::filesystem::path& output_dir,
   return true;
 }
 
-auto writeCcapReport(const std::filesystem::path& output_dir,
-                     const Config& config,
-                     const Result& result) -> bool
+auto writeCcapReport(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
   const auto report_path = output_dir / "ccap.rpt";
   auto ofs = openReport(report_path);
@@ -266,28 +230,18 @@ auto writeCcapReport(const std::filesystem::path& output_dir,
     RCXLOG.warn(Loc::current(), "compare_spef failed: cannot open report ", report_path);
     return false;
   }
-  ofs << config.test_file << '\t' << config.reference_file
-      << "\t%diff\tVictim\tAggressor\tlumpC_abs\tCC_abs\tCC_rel\n";
+  ofs << config.test_file << '\t' << config.reference_file << "\t%diff\tVictim\tAggressor\tlumpC_abs\tCC_abs\tCC_rel\n";
   for (const auto& row : result.ccap_rows) {
     const F64 cc_abs = std::abs(row.reference);
-    const F64 cc_rel = row.reference_victim_total_cap <= math::kEpsilon
-                           ? 0.0
-                           : cc_abs / row.reference_victim_total_cap;
+    const F64 cc_rel = row.reference_victim_total_cap <= math::kEpsilon ? 0.0 : cc_abs / row.reference_victim_total_cap;
     ofs << row.test << '\t' << row.reference << '\t';
     writePercent(ofs, row.relative_delta);
-    ofs << '\t' << row.victim
-        << '\t' << row.aggressor
-        << '\t' << row.reference_victim_total_cap
-        << '\t' << cc_abs
-        << '\t' << cc_rel
-        << '\n';
+    ofs << '\t' << row.victim << '\t' << row.aggressor << '\t' << row.reference_victim_total_cap << '\t' << cc_abs << '\t' << cc_rel << '\n';
   }
   return true;
 }
 
-auto writeP2PReport(const std::filesystem::path& output_dir,
-                    const Config& config,
-                    const Result& result) -> bool
+auto writeP2PReport(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
   const auto report_path = output_dir / "p2p.rpt";
   auto ofs = openReport(report_path);
@@ -307,8 +261,7 @@ auto writeP2PReport(const std::filesystem::path& output_dir,
   return true;
 }
 
-auto writeMismatchedNets(const std::filesystem::path& output_dir,
-                         const Result& result) -> bool
+auto writeMismatchedNets(const std::filesystem::path& output_dir, const Result& result) -> bool
 {
   const auto report_path = output_dir / "nets.mismatched";
   auto ofs = openReport(report_path);
@@ -329,8 +282,7 @@ auto writeMismatchedNets(const std::filesystem::path& output_dir,
   return true;
 }
 
-auto writeMismatchedCouplings(const std::filesystem::path& output_dir,
-                              const Result& result) -> bool
+auto writeMismatchedCouplings(const std::filesystem::path& output_dir, const Result& result) -> bool
 {
   const auto report_path = output_dir / "coupling_caps.mismatched";
   auto ofs = openReport(report_path);
@@ -339,29 +291,20 @@ auto writeMismatchedCouplings(const std::filesystem::path& output_dir,
     return false;
   }
 
-  ofs << "Total# of coupling caps in reference: "
-      << result.summary.reference_coupling_count
-      << '\n';
+  ofs << "Total# of coupling caps in reference: " << result.summary.reference_coupling_count << '\n';
   ofs << "Total# of coupling caps in test: " << result.summary.test_coupling_count << "\n\n";
   ofs << "# of missing coupling caps: " << result.summary.reference_only_coupling_count << '\n';
   for (const auto& mismatch : result.reference_only_couplings) {
-    ofs << "\tMIT: " << mismatch.report_nets.first
-        << '\t' << mismatch.report_nets.second
-        << '\t' << mismatch.capacitance
-        << '\n';
+    ofs << "\tMIT: " << mismatch.report_nets.first << '\t' << mismatch.report_nets.second << '\t' << mismatch.capacitance << '\n';
   }
   ofs << "\n# of extra coupling caps: " << result.summary.test_only_coupling_count << '\n';
   for (const auto& mismatch : result.test_only_couplings) {
-    ofs << "\tMIG: " << mismatch.report_nets.first
-        << '\t' << mismatch.report_nets.second
-        << '\t' << mismatch.capacitance
-        << '\n';
+    ofs << "\tMIG: " << mismatch.report_nets.first << '\t' << mismatch.report_nets.second << '\t' << mismatch.capacitance << '\n';
   }
   return true;
 }
 
-void writeSummaryHeader(std::ostream& ofs,
-                        const Config& config)
+void writeSummaryHeader(std::ostream& ofs, const Config& config)
 {
   ofs << "\n ##########################################################\n";
   ofs << " #                                                        #\n";
@@ -380,9 +323,7 @@ void writeSummaryHeader(std::ostream& ofs,
   ofs << "=====================================================================\n\n\n";
 }
 
-auto writeSummaryReport(const std::filesystem::path& output_dir,
-                        const Config& config,
-                        const Result& result) -> bool
+auto writeSummaryReport(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
   const auto report_path = output_dir / "summary.rpt";
   auto ofs = openReport(report_path);
@@ -396,37 +337,10 @@ auto writeSummaryReport(const std::filesystem::path& output_dir,
   writeSummaryHeader(ofs, config);
   ofs << "RC Correlation Overview\n";
   ofs << builder.makeOverviewTable(config, errors).to_string() << '\n';
-  ofs << builder.makeDistributionTable(
-                    "TCAP",
-                    "TCAP threshold",
-                    config.tcap_threshold,
-                    "Number of matched nets",
-                    errors.tcap)
-             .to_string()
-      << '\n';
-  ofs << builder.makeDistributionTable(
-                    "GCAP",
-                    "GCAP threshold",
-                    config.ccap_abs_threshold,
-                    "Number of matched nets",
-                    errors.gcap)
-             .to_string()
-      << '\n';
-  ofs << builder.makeDistributionTable(
-                    "CCAP",
-                    "CCAP threshold",
-                    config.ccap_abs_threshold,
-                    "Number of matched CCAP rows",
-                    errors.ccap)
-             .to_string()
-      << '\n';
-  ofs << builder.makeDistributionTable(
-                    "P2P",
-                    "RES threshold",
-                    config.res_threshold,
-                    "Number of matched pin pairs",
-                    errors.p2p)
-             .to_string();
+  ofs << builder.makeDistributionTable("TCAP", "TCAP threshold", config.tcap_threshold, "Number of matched nets", errors.tcap).to_string() << '\n';
+  ofs << builder.makeDistributionTable("GCAP", "GCAP threshold", config.ccap_abs_threshold, "Number of matched nets", errors.gcap).to_string() << '\n';
+  ofs << builder.makeDistributionTable("CCAP", "CCAP threshold", config.ccap_abs_threshold, "Number of matched CCAP rows", errors.ccap).to_string() << '\n';
+  ofs << builder.makeDistributionTable("P2P", "RES threshold", config.res_threshold, "Number of matched pin pairs", errors.p2p).to_string();
   return true;
 }
 
@@ -437,66 +351,45 @@ namespace {
 using ReportTask = bool (*)(const std::filesystem::path&, const Config&, const Result&);
 using SimpleReportTask = bool (*)(const std::filesystem::path&, const Result&);
 
-auto writeTcapTask(const std::filesystem::path& output_dir,
-                   const Config& config,
-                   const Result& result) -> bool
+auto writeTcapTask(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
   return writeTcapReport(output_dir, config, result);
 }
 
-auto writeCcapTask(const std::filesystem::path& output_dir,
-                   const Config& config,
-                   const Result& result) -> bool
+auto writeCcapTask(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
   return writeCcapReport(output_dir, config, result);
 }
 
-auto writeGcapTask(const std::filesystem::path& output_dir,
-                   const Config& config,
-                   const Result& result) -> bool
+auto writeGcapTask(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
   return writeGcapReport(output_dir, config, result);
 }
 
-auto writeP2PTask(const std::filesystem::path& output_dir,
-                  const Config& config,
-                  const Result& result) -> bool
+auto writeP2PTask(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
   return writeP2PReport(output_dir, config, result);
 }
 
-auto writeSummaryTask(const std::filesystem::path& output_dir,
-                      const Config& config,
-                      const Result& result) -> bool
+auto writeSummaryTask(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
   return writeSummaryReport(output_dir, config, result);
 }
 
-auto writeNetsTask(const std::filesystem::path& output_dir,
-                   const Result& result) -> bool
+auto writeNetsTask(const std::filesystem::path& output_dir, const Result& result) -> bool
 {
   return writeMismatchedNets(output_dir, result);
 }
 
-auto writeCouplingsTask(const std::filesystem::path& output_dir,
-                        const Result& result) -> bool
+auto writeCouplingsTask(const std::filesystem::path& output_dir, const Result& result) -> bool
 {
   return writeMismatchedCouplings(output_dir, result);
 }
 
-auto writeReports(const std::filesystem::path& output_dir,
-                  const Config& config,
-                  const Result& result) -> bool
+auto writeReports(const std::filesystem::path& output_dir, const Config& config, const Result& result) -> bool
 {
-  constexpr std::array<ReportTask, 5> report_tasks = {
-      writeTcapTask,
-      writeGcapTask,
-      writeCcapTask,
-      writeP2PTask,
-      writeSummaryTask};
-  constexpr std::array<SimpleReportTask, 2> simple_report_tasks = {
-      writeNetsTask,
-      writeCouplingsTask};
+  constexpr std::array<ReportTask, 5> report_tasks = {writeTcapTask, writeGcapTask, writeCcapTask, writeP2PTask, writeSummaryTask};
+  constexpr std::array<SimpleReportTask, 2> simple_report_tasks = {writeNetsTask, writeCouplingsTask};
 
   std::array<bool, report_tasks.size() + simple_report_tasks.size()> ok;
   ok.fill(false);
@@ -517,8 +410,7 @@ auto writeReports(const std::filesystem::path& output_dir,
 
 }  // namespace
 
-ReportWriter::ReportWriter(const Config& config)
-    : _config(config)
+ReportWriter::ReportWriter(const Config& config) : _config(config)
 {
 }
 

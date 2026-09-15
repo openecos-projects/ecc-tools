@@ -20,17 +20,13 @@
  */
 #include "PlotSpefTool.hh"
 
-#include <atomic>
-#include <cstdint>
-#include <filesystem>
-#include <string>
-
+#include "Logger.hpp"
 #include "ParallelUtils.hh"
+#include "RCXHeader.hpp"
 #include "SpefParser.hh"
 #include "builder/PlotSpefModelBuilder.hh"
 #include "config/PlotSpefConfig.hh"
 #include "gds/PlotSpefGdsWriter.hh"
-#include "Logger.hpp"
 #include "lyp/PlotSpefLypWriter.hh"
 #include "model/PlotSpefModel.hh"
 #include "report/PlotSpefCgEdgeReport.hh"
@@ -62,8 +58,7 @@ auto cleanEdgeGdsDir(const plot_spef::Config& config) -> bool
       RCXLOG.warn(Loc::current(), "plot_spef failed: cannot scan edge GDS directory ", edge_dir.string(), ": ", error_code.message());
       return false;
     }
-    if (!entry.is_regular_file(error_code)
-        || entry.path().extension() != ".gds") {
+    if (!entry.is_regular_file(error_code) || entry.path().extension() != ".gds") {
       error_code.clear();
       continue;
     }
@@ -76,15 +71,12 @@ auto cleanEdgeGdsDir(const plot_spef::Config& config) -> bool
   return true;
 }
 
-auto edgeGdsBatchThreadCount(Size row_count,
-                             const plot_spef::Config& config) -> int
+auto edgeGdsBatchThreadCount(Size row_count, const plot_spef::Config& config) -> int
 {
   return parallel::threadCount(row_count, config.cores);
 }
 
-auto writeEdgeGdsBatch(const plot_spef::Model& model,
-                       const spef::Exchange& exchange,
-                       const plot_spef::Config& config) -> bool
+auto writeEdgeGdsBatch(const plot_spef::Model& model, const spef::Exchange& exchange, const plot_spef::Config& config) -> bool
 {
   const auto rows = plot_spef::collectCoupledEdgeRows(model);
   if (rows.empty()) {
@@ -122,8 +114,7 @@ auto writeEdgeGdsBatch(const plot_spef::Model& model,
     return false;
   }
 
-  RCXLOG.info(Loc::current(), "plot_spef wrote ", rows.size(), " edge GDS files using ", threads, " thread(s) to ", config.output_dir,
-              "/edge_gds");
+  RCXLOG.info(Loc::current(), "plot_spef wrote ", rows.size(), " edge GDS files using ", threads, " thread(s) to ", config.output_dir, "/edge_gds");
   return true;
 }
 

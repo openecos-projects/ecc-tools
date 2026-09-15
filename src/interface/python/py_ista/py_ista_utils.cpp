@@ -33,61 +33,53 @@ bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std
   nlohmann::json json;
   config_file >> json;
 
-  std::string value = ieda::getJsonData(json, {"STA", "-temp_directory_path"});
+  std::string value = ecc::getJsonData(json, {"STA", "-temp_directory_path"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-temp_directory_path", value));
   }
-  value = ieda::getJsonData(json, {"STA", "-thread_number"});
+  value = ecc::getJsonData(json, {"STA", "-thread_number"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-thread_number", std::stoi(value)));
   }
-  value = ieda::getJsonData(json, {"STA", "-output_timing_reports"});
+  value = ecc::getJsonData(json, {"STA", "-output_timing_reports"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-output_timing_reports", std::stoi(value)));
   }
-  value = ieda::getJsonData(json, {"STA", "-output_timing_features"});
+  value = ecc::getJsonData(json, {"STA", "-output_timing_features"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-output_timing_features", std::stoi(value)));
   }
-  value = ieda::getJsonData(json, {"STA", "-timing_path_limit"});
+  value = ecc::getJsonData(json, {"STA", "-timing_path_limit"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-timing_path_limit", std::stoi(value)));
   }
-  value = ieda::getJsonData(json, {"STA", "-timing_corner"});
+  value = ecc::getJsonData(json, {"STA", "-timing_corner"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-timing_corner", value));
   }
-  value = ieda::getJsonData(json, {"STA", "-max_paths"});
+  value = ecc::getJsonData(json, {"STA", "-max_paths"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-max_paths", std::stoi(value)));
   }
-  value = ieda::getJsonData(json, {"STA", "-nworst"});
+  value = ecc::getJsonData(json, {"STA", "-nworst"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-nworst", std::stoi(value)));
   }
-  value = ieda::getJsonData(json, {"STA", "-slack_lesser_than"});
+  value = ecc::getJsonData(json, {"STA", "-slack_lesser_than"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-slack_lesser_than", std::stod(value)));
   }
-  value = ieda::getJsonData(json, {"STA", "-slack_greater_than"});
+  value = ecc::getJsonData(json, {"STA", "-slack_greater_than"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-slack_greater_than", std::stod(value)));
   }
-  value = ieda::getJsonData(json, {"STA", "-max_path"});
+  value = ecc::getJsonData(json, {"STA", "-max_path"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-max_path", std::stoi(value)));
   }
-  value = ieda::getJsonData(json, {"STA", "-path_report_number"});
+  value = ecc::getJsonData(json, {"STA", "-path_report_number"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-path_report_number", std::stoi(value)));
-  }
-  value = ieda::getJsonData(json, {"STA", "-delay_type"});
-  if (!value.empty()) {
-    config_map.insert(std::make_pair("-delay_type", value));
-  }
-  value = ieda::getJsonData(json, {"STA", "-start_end_type"});
-  if (!value.empty()) {
-    config_map.insert(std::make_pair("-start_end_type", value));
   }
   return true;
 }
@@ -129,12 +121,6 @@ void initStaConfigMapByDict(std::map<std::string, std::string>& config_dict, std
   }
   if (config_dict.count("-path_report_number") > 0 && !config_dict["-path_report_number"].empty()) {
     config_map["-path_report_number"] = std::stoi(config_dict["-path_report_number"]);
-  }
-  if (config_dict.count("-delay_type") > 0 && !config_dict["-delay_type"].empty()) {
-    config_map["-delay_type"] = config_dict["-delay_type"];
-  }
-  if (config_dict.count("-start_end_type") > 0 && !config_dict["-start_end_type"].empty()) {
-    config_map["-start_end_type"] = config_dict["-start_end_type"];
   }
 }
 

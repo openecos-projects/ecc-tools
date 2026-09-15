@@ -19,7 +19,7 @@
 #include "feature_builder.h"
 #include "feature_parser.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 FeatureManager* FeatureManager::_instance = nullptr;
 
 FeatureManager::FeatureManager()
@@ -170,11 +170,7 @@ bool FeatureManager::save_timing_eval_summary(std::string path)
 bool FeatureManager::save_tools(std::string path, std::string step)
 {
   FeatureBuilder builder;
-  if (step == "fixFanout") {
-    auto db = builder.buildNetOptSummary();
-
-    _summary->set_ino(db);
-  } else if (step == "place" || step == "legalization" || (step == "filler")) {
+  if (step == "place" || step == "legalization" || (step == "filler")) {
     auto db = builder.buildPLSummary(step);
 
     _summary->set_ipl(db);
@@ -241,4 +237,4 @@ bool FeatureManager::save_cong_map(std::string stage, std::string csv_dir)
   FeatureParser feature_parser;
   return feature_parser.buildCongMap(stage, csv_dir);
 }
-}  // namespace ieda_feature
+}  // namespace ecc_feature

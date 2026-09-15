@@ -27,7 +27,6 @@ namespace ircx {
 
 class RCXData;
 
-auto writeInternalPlotSpef(const RCXData& data,
-                           const plot_spef::Config& config) -> bool;
+auto writeInternalPlotSpef(const RCXData& data, const plot_spef::Config& config) -> bool;
 
 }  // namespace ircx

@@ -70,13 +70,13 @@ ecc_py.destroy_rcx()
 
 ## 运行依赖
 
-该 SDK 不依赖内部 iEDA/iRCX 动态库。glog、gflags、OpenMP/libgomp、libunwind、libcurl、Tcl、TBB、libstdc++、libgcc_s 等运行时依赖由 ecc-tools 的统一构建/运行环境提供。
+该 SDK 不依赖内部 ECC/iRCX 动态库。glog、gflags、OpenMP/libgomp、libunwind、libcurl、Tcl、TBB、libstdc++、libgcc_s 等运行时依赖由 ecc-tools 的统一构建/运行环境提供。
 
 `CMakeLists.txt` 会在配置阶段检查直接依赖是否存在；缺失时会 fail fast。
 
 ## 不能使用的情况
 
-1. 调用方没有初始化 iEDA/idb 设计数据库时，`run`、`report`、`extract` 不能完成抽取。
+1. 调用方没有初始化 ECC/idb 设计数据库时，`run`、`report`、`extract` 不能完成抽取。
 2. 设计工艺、layer 名、routing 数据和内置 ICS55 mapping/corner 不匹配时不能使用。
 3. 需要绝对防反编译时不能使用。当前库不暴露明文 corner 文件，也避免常规 `strings` 直接看到 ITF 内容，但不能防止运行时内存提取或高级逆向。
 4. 不适合同一进程内并发跑多个 extraction job，内部仍有全局单例状态。

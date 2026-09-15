@@ -38,34 +38,23 @@ class DataManager
   void input(std::map<std::string, std::any>& config_map);
   void output();
 
-#if 1  // 更新GCellMap
-  void updateFixedRectToGCellMap(ChangeType change_type, int32_t net_idx, EXTLayerRect* ext_layer_rect, bool is_routing);
-  void updateNetAccessPointToGCellMap(ChangeType change_type, int32_t net_idx, AccessPoint* access_point);
-  void updateNetPinAccessResultToGCellMap(ChangeType change_type, int32_t net_idx, int32_t pin_idx, Segment<LayerCoord>* segment);
-  void updateNetPinAccessPatchToGCellMap(ChangeType change_type, int32_t net_idx, int32_t pin_idx, EXTLayerRect* ext_layer_rect);
-  void updateNetGlobalResultToGCellMap(ChangeType change_type, int32_t net_idx, Segment<LayerCoord>* segment);
-  void updateNetDetailedResultToGCellMap(ChangeType change_type, int32_t net_idx, Segment<LayerCoord>* segment);
-  void updateNetDetailedPatchToGCellMap(ChangeType change_type, int32_t net_idx, EXTLayerRect* ext_layer_rect);
-  void updateViolationToGCellMap(ChangeType change_type, Violation* violation);
+#if 1  // 更新Database
+  void rebuildAccessPointRTree();
+  void rebuildGlobalResultRTree();
+  void updateViolationToRTree(ChangeType change_type, const Violation& violation);
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> getTypeLayerNetFixedRectMap(EXTPlanarRect& region);
+  std::map<int32_t, std::set<EXTLayerRect*>> getNetFixedRectMap(bool is_routing, EXTLayerRect& region);
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> getNetAccessPointMap(EXTPlanarRect& region);
-  std::map<int32_t, std::map<int32_t, std::set<Segment<LayerCoord>*>>> getNetPinAccessResultMap(EXTPlanarRect& region);
-  std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>> getNetPinAccessPatchMap(EXTPlanarRect& region);
-  std::map<int32_t, std::set<Segment<LayerCoord>*>> getNetGlobalResultMap(EXTPlanarRect& region);
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> getNetGlobalResultMap(EXTPlanarRect& region);
   std::map<int32_t, std::set<Segment<LayerCoord>*>> getNetDetailedResultMap(EXTPlanarRect& region);
   std::map<int32_t, std::set<EXTLayerRect*>> getNetDetailedPatchMap(EXTPlanarRect& region);
-  std::set<Violation*, CmpViolation> getViolationSet(EXTPlanarRect& region);
+  std::vector<Violation> getViolationList(EXTPlanarRect& region);
+  std::vector<Violation> getViolationList(EXTLayerRect& region);
 #endif
 
 #if 1  // 获得NetShapeList
-  std::vector<NetShape> getNetGlobalShapeList(int32_t net_idx, std::vector<Segment<LayerCoord>>& segment_list);
   std::vector<NetShape> getNetGlobalShapeList(int32_t net_idx, Segment<LayerCoord>& segment);
-  std::vector<NetShape> getNetGlobalShapeList(int32_t net_idx, MTree<LayerCoord>& coord_tree);
-  std::vector<NetShape> getNetGlobalShapeList(int32_t net_idx, LayerCoord& first_coord, LayerCoord& second_coord);
-  std::vector<NetShape> getNetDetailedShapeList(int32_t net_idx, std::vector<Segment<LayerCoord>>& segment_list);
   std::vector<NetShape> getNetDetailedShapeList(int32_t net_idx, Segment<LayerCoord>& segment);
-  std::vector<NetShape> getNetDetailedShapeList(int32_t net_idx, MTree<LayerCoord>& coord_tree);
-  std::vector<NetShape> getNetDetailedShapeList(int32_t net_idx, LayerCoord& first_coord, LayerCoord& second_coord);
 #endif
 
 #if 1  // 获得唯一的结果
@@ -89,6 +78,9 @@ class DataManager
   ~DataManager() = default;
   DataManager& operator=(const DataManager& other) = delete;
   DataManager& operator=(DataManager&& other) = delete;
+
+  std::vector<NetShape> getNetGlobalShapeList(int32_t net_idx, LayerCoord& first_coord, LayerCoord& second_coord);
+  std::vector<NetShape> getNetDetailedShapeList(int32_t net_idx, LayerCoord& first_coord, LayerCoord& second_coord);
 
 #if 1  // build
   void buildConfig();
@@ -126,8 +118,6 @@ class DataManager
   void buildDetectionDistance();
   void buildGCellMap();
   void initGCellMap();
-  void updateGCellMap();
-  int32_t getBucketIdx(int32_t scale_start, int32_t scale_end, int32_t bucket_start, int32_t bucket_end, int32_t bucket_length);
   void buildFixRectMap();
   void printConfig();
   void printDatabase();
@@ -135,7 +125,7 @@ class DataManager
 #endif
 
 #if 1  // destroy
-  void destroyGCellMap();
+  void destroyDatabaseResult();
 #endif
 };
 

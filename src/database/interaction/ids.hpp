@@ -21,11 +21,11 @@
 #include <string>
 #include <vector>
 
-namespace ieda {
+namespace ecc {
 class Log;
 class Str;
 class Time;
-}  // namespace ieda
+}  // namespace ecc
 namespace icts {
 enum class InstType;
 class Config;

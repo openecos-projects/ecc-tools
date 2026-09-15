@@ -4,7 +4,7 @@
 
 <img src="../../../docs/resources/flow.png" width="100%" alt="iRT-structure" />
 
-Wiring is an important physical implementation task after layout and clock tree synthesis. Its content is to interconnect the modules, standard cells, and input/output interface units distributed in the chip core according to the logical relationship, and optimize to meet various constraint conditions. iRT is a wire router designed for the wiring stage by the iEDA research group, and it integrates global wiring and detailed wiring internally.
+Wiring is an important physical implementation task after layout and clock tree synthesis. Its content is to interconnect the modules, standard cells, and input/output interface units distributed in the chip core according to the logical relationship, and optimize to meet various constraint conditions. iRT is a wire router designed for the wiring stage by the ECC research group, and it integrates global wiring and detailed wiring internally.
 
 ## Software Structure
 

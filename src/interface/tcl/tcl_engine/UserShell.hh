@@ -23,11 +23,12 @@
  */
 
 #pragma once
+#include "utility/logger/Logger.hpp"
 #include <iostream>
 
 #include "ScriptEngine.hh"
 
-namespace ieda {
+namespace ecc {
 /**
  * @brief singleton UserShell
  *
@@ -73,7 +74,7 @@ class UserShell
    */
   static int userMain(int argc, char** argv);
 
-  static void displayHello(const std::string& hello_info) { std::cout << hello_info << std::endl; }
+  static void displayHello(const std::string& hello_info) { ECCLOG.info(ecc::Loc::current(), hello_info); }
 
   /**
    * @brief display how to exit user shell
@@ -89,4 +90,4 @@ class UserShell
   static int (*_user_init)();
 };
 
-}  // namespace ieda
+}  // namespace ecc

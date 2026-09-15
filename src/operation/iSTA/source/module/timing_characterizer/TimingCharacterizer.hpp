@@ -64,8 +64,8 @@ class TimingCharacterizer
   double getCheckConstraint(TimingPath& timing_path, AnalysisType analysis_type);
   void buildTCDelayArcList(TCLib& tc_lib, AnalysisType analysis_type);
   double getWorseDelay(double current_delay, double delay, bool has_delay, AnalysisType analysis_type);
-  void buildTCDelayArc(TCLib& tc_lib, std::string& source_port, std::string& sink_port, std::string& timing_type, std::string& timing_sense,
-                       double rise_delay, double fall_delay, bool has_rise_delay, bool has_fall_delay);
+  void buildTCDelayArc(TCLib& tc_lib, std::string& source_port, std::string& sink_port, std::string& timing_type, std::string& timing_sense, double rise_delay,
+                       double fall_delay, bool has_rise_delay, bool has_fall_delay);
   std::string getDelayArcRelatedPin(TimingPath& timing_path);
   std::string getDelayArcTimingType(TimingPath& timing_path);
   TransType getRegisterClockTransType(TimingPath& timing_path);

@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <string_view>
 
 #include "Logger.hh"
 #include "data_manager/DataManager.hh"
@@ -31,19 +32,30 @@
 namespace icts_test {
 namespace {
 
+void ResetTestState()
+{
+  icts::Logger::initInst();
+  icts::DataManager::initInst();
+  CTSLOG.closeLogFileStream();
+  CTSDM.reset();
+}
+
+void DestroyTestState()
+{
+  icts::DataManager::destroyInst();
+  icts::Logger::destroyInst();
+}
+
+auto IsLifecycleTest(const ::testing::TestInfo& test_info) -> bool
+{
+  return std::string_view(test_info.test_suite_name()) == "CTSAPILifecycleTest";
+}
+
 class DataManagerTestListener final : public ::testing::EmptyTestEventListener
 {
  public:
-  void OnTestStart([[maybe_unused]] const ::testing::TestInfo& test_info) override
-  {
-    CTSLOG.closeLogFileStream();
-    CTSDM.reset();
-  }
-  void OnTestEnd([[maybe_unused]] const ::testing::TestInfo& test_info) override
-  {
-    CTSLOG.closeLogFileStream();
-    CTSDM.reset();
-  }
+  void OnTestStart(const ::testing::TestInfo& test_info) override { IsLifecycleTest(test_info) ? DestroyTestState() : ResetTestState(); }
+  void OnTestEnd(const ::testing::TestInfo& test_info) override { IsLifecycleTest(test_info) ? DestroyTestState() : ResetTestState(); }
 };
 
 }  // namespace
@@ -52,8 +64,6 @@ class DataManagerTestListener final : public ::testing::EmptyTestEventListener
 auto main(int argc, char** argv) -> int
 {
   ::testing::InitGoogleTest(&argc, argv);
-  icts::Logger::initInst();
-  icts::DataManager::initInst();
 
   auto& listeners = ::testing::UnitTest::GetInstance()->listeners();
   auto data_manager_listener = std::make_unique<icts_test::DataManagerTestListener>();
@@ -61,7 +71,6 @@ auto main(int argc, char** argv) -> int
   const int result = RUN_ALL_TESTS();
   (void) listeners.Release(data_manager_listener.get());
 
-  icts::DataManager::destroyInst();
-  icts::Logger::destroyInst();
+  icts_test::DestroyTestState();
   return result;
 }

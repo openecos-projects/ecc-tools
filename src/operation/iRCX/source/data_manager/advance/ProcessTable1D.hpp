@@ -52,9 +52,9 @@ class ProcessTable1D
       return _entry_list.back().get_value();
     }
 
-    std::vector<ProcessTable1DEntry>::const_iterator high_iter = std::lower_bound(
-        _entry_list.begin(), _entry_list.end(), key,
-        [this](const ProcessTable1DEntry& entry, double table_key) { return is_entry_less_than_key(entry, table_key); });
+    std::vector<ProcessTable1DEntry>::const_iterator high_iter
+        = std::lower_bound(_entry_list.begin(), _entry_list.end(), key,
+                           [this](const ProcessTable1DEntry& entry, double table_key) { return is_entry_less_than_key(entry, table_key); });
     if (high_iter == _entry_list.end()) {
       return _entry_list.back().get_value();
     }
@@ -80,9 +80,7 @@ class ProcessTable1D
   void sort_entry_list()
   {
     std::sort(_entry_list.begin(), _entry_list.end(),
-              [this](const ProcessTable1DEntry& first_entry, const ProcessTable1DEntry& second_entry) {
-                return is_entry_less(first_entry, second_entry);
-              });
+              [this](const ProcessTable1DEntry& first_entry, const ProcessTable1DEntry& second_entry) { return is_entry_less(first_entry, second_entry); });
   }
 
   std::vector<ProcessTable1DEntry> _entry_list;

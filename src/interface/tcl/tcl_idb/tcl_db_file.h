@@ -29,12 +29,12 @@
 #include "ScriptEngine.hh"
 #include "tcl_definition.h"
 
-using ieda::TclCmd;
-using ieda::TclIntOption;
-using ieda::TclOption;
-using ieda::TclStringListOption;
-using ieda::TclStringOption;
-using ieda::TclSwitchOption;
+using ecc::TclCmd;
+using ecc::TclIntOption;
+using ecc::TclOption;
+using ecc::TclStringListOption;
+using ecc::TclStringOption;
+using ecc::TclSwitchOption;
 
 namespace tcl {
 
@@ -99,6 +99,20 @@ class CmdInitVerilog : public TclCmd
  public:
   explicit CmdInitVerilog(const char* cmd_name);
   ~CmdInitVerilog() override = default;
+
+  unsigned check() override;
+  unsigned exec() override;
+
+ private:
+  // private function
+  // private data
+};
+
+class CmdLvsInitVerilog : public TclCmd
+{
+ public:
+  explicit CmdLvsInitVerilog(const char* cmd_name);
+  ~CmdLvsInitVerilog() override = default;
 
   unsigned check() override;
   unsigned exec() override;
@@ -176,6 +190,15 @@ class CmdSaveDef : public TclCmd
  private:
   // private function
   // private data
+};
+
+class CmdSaveMacroTCL : public TclCmd
+{
+ public:
+  explicit CmdSaveMacroTCL(const char* cmd_name);
+  ~CmdSaveMacroTCL() override = default;
+  unsigned check() override;
+  unsigned exec() override;
 };
 
 class CmdSaveLef : public TclCmd
@@ -323,20 +346,6 @@ class CmdValidateIdb : public TclCmd
  public:
   explicit CmdValidateIdb(const char* cmd_name);
   ~CmdValidateIdb() override = default;
-
-  unsigned check() override;
-  unsigned exec() override;
-
- private:
-  // private function
-  // private data
-};
-
-class CmdWriteSocJson : public TclCmd
-{
- public:
-  explicit CmdWriteSocJson(const char* cmd_name);
-  ~CmdWriteSocJson() override = default;
 
   unsigned check() override;
   unsigned exec() override;

@@ -14,9 +14,9 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include "utility/logger/Logger.hpp"
 #include "py_db.h"
 
-#include "db_fm/file_soc.h"
 #include "GeometryEditSession.h"
 #include "GeometrySnapshotExporter.h"
 #include <idm.h>
@@ -123,6 +123,12 @@ bool initVerilog(const std::string& verilog_path, const std::string& top_module)
   return dmInst->readVerilog(verilog_path, top_module);
 }
 
+bool initLvsVerilog(const std::string& verilog_path, const std::string& top_module)
+{
+  dmInst->get_config().set_verilog_path(verilog_path);
+  return dmInst->addVerilog(verilog_path, top_module);
+}
+
 bool initLib(const std::vector<std::string>& lib_paths)
 {
   dmInst->get_config().set_lib_paths(lib_paths);
@@ -180,7 +186,7 @@ bool saveViewJson(const std::string& output_dir, const std::string& json_format,
 {
   idb::ViewJsonWriteOptions options;
   if (!idb::parseViewJsonFormat(json_format, options.format)) {
-    std::cout << "Save view json failed: unsupported json_format `" << json_format << "`, expected `pretty` or `compact`." << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Save view json failed: unsupported json_format `", json_format, "`, expected `pretty` or `compact`.");
     return false;
   }
   options.compress = compress;
@@ -295,12 +301,6 @@ bool loadData(const std::string& path)
   // load.
   geometry_edit_session().reset();
   return dmInst->loadData(path);
-}
-
-bool writeSocJson(const std::string& path, const std::vector<std::string>& harden_cores /* = {} */)
-{
-  idb::JsonSoc soc_file(path, harden_cores);
-  return soc_file.saveFileData();
 }
 
 bool writeAbstractLef(const std::string& output_lef_path)

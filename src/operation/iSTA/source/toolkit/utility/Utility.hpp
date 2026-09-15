@@ -16,10 +16,14 @@
 // ***************************************************************************************
 #pragma once
 
+#include "AnalysisType.hpp"
 #include "Logger.hpp"
 #include "STAHeader.hpp"
+#include "TransType.hpp"
 
 namespace ista {
+
+class Database;
 
 #define STAUTIL (ista::Utility::getInst())
 
@@ -30,6 +34,14 @@ class Utility
   static Utility& getInst();
   static void destroyInst();
   // function
+  static std::string getPathStateTag(Database& database, std::string_view start, std::string_view clock);
+  static TransType getLaunchClockTransition(Database& database, std::string_view start);
+  static double getLaunchClockEdge(Database& database, std::string_view start, std::string_view clock);
+  static double getClockEdgeSeparation(double launch_period, double capture_period, double launch_edge, double capture_edge, AnalysisType type);
+  static bool isFalsePath(Database& database, std::string_view start, std::string_view launch_clock, std::string_view end, std::string_view capture_clock,
+                          AnalysisType type);
+  static bool matchesTimingObjects(Database& database, const std::set<std::string>& objects, std::string_view pin_name, std::string_view clock_name,
+                                   bool start);
 
 #if 1  // std数据结构工具函数
 
@@ -171,14 +183,14 @@ class Utility
     return all;
   }
 
-  static std::ifstream* getInputFileStream(std::string file_path) { return getFileStream<std::ifstream>(file_path); }
+  static std::ifstream* getInputFileStream(const std::string_view file_path) { return getFileStream<std::ifstream>(std::string{file_path}); }
 
-  static std::ofstream* getOutputFileStream(std::string file_path) { return getFileStream<std::ofstream>(file_path); }
+  static std::ofstream* getOutputFileStream(const std::string_view file_path) { return getFileStream<std::ofstream>(std::string{file_path}); }
 
   template <typename T>
-  static T* getFileStream(std::string file_path)
+  static T* getFileStream(const std::string_view file_path)
   {
-    T* file = new T(file_path);
+    T* file = new T(std::string{file_path});
     if (!file->is_open()) {
       STALOG.error(Loc::current(), "Failed to open file '", file_path, "'!");
     }

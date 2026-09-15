@@ -20,17 +20,10 @@
  */
 #include "select/PlotSpefSelect.hh"
 
-#include <algorithm>
-#include <cerrno>
-#include <cstdlib>
-#include <optional>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-
+#include "Logger.hpp"
+#include "RCXHeader.hpp"
 #include "SpefParser.hh"
 #include "config/PlotSpefConfig.hh"
-#include "Logger.hpp"
 #include "model/PlotSpefModel.hh"
 #include "model/PlotSpefVisibility.hh"
 
@@ -57,25 +50,17 @@ auto owningNetName(const std::string& node_name) -> std::string
   return delimiter == std::string::npos ? node_name : node_name.substr(0, delimiter);
 }
 
-auto normalizeSpefName(const spef::Exchange& exchange,
-                       const std::string& name) -> std::string
+auto normalizeSpefName(const spef::Exchange& exchange, const std::string& name) -> std::string
 {
   return spef::removeEscapes(spef::stripQuotes(spef::expandName(exchange, name)));
 }
 
-auto sameEdgeRef(const EdgeRef& lhs,
-                 const EdgeRef& rhs) -> bool
+auto sameEdgeRef(const EdgeRef& lhs, const EdgeRef& rhs) -> bool
 {
-  return lhs.valid
-         && rhs.valid
-         && lhs.valid == rhs.valid
-         && lhs.net_index == rhs.net_index
-         && lhs.resistor_index == rhs.resistor_index;
+  return lhs.valid && rhs.valid && lhs.valid == rhs.valid && lhs.net_index == rhs.net_index && lhs.resistor_index == rhs.resistor_index;
 }
 
-auto edgeContainsNode(const Model& model,
-                      const EdgeRef& edge_ref,
-                      const std::string& node_name) -> bool
+auto edgeContainsNode(const Model& model, const EdgeRef& edge_ref, const std::string& node_name) -> bool
 {
   if (!edge_ref.valid || edge_ref.net_index >= model.nets.size()) {
     return false;
@@ -90,10 +75,7 @@ auto edgeContainsNode(const Model& model,
   return resistor.node1 == node_name || resistor.node2 == node_name;
 }
 
-auto capSideTouchesTargetEdge(const Model& model,
-                              const EdgeRef& cap_edge,
-                              const std::string& cap_node,
-                              const EdgeRef& target_edge) -> bool
+auto capSideTouchesTargetEdge(const Model& model, const EdgeRef& cap_edge, const std::string& cap_node, const EdgeRef& target_edge) -> bool
 {
   if (sameEdgeRef(cap_edge, target_edge)) {
     return true;
@@ -102,8 +84,7 @@ auto capSideTouchesTargetEdge(const Model& model,
   return edgeContainsNode(model, target_edge, cap_node);
 }
 
-auto parseSize(std::string_view text,
-               Size& value) -> bool
+auto parseSize(std::string_view text, Size& value) -> bool
 {
   if (text.empty()) {
     return false;
@@ -119,8 +100,7 @@ auto parseSize(std::string_view text,
   return true;
 }
 
-auto parseEdgeName(const spef::Exchange& exchange,
-                   const Config& config) -> std::optional<EdgeName>
+auto parseEdgeName(const spef::Exchange& exchange, const Config& config) -> std::optional<EdgeName>
 {
   const auto delimiter = config.edge_name.rfind(':');
   if (delimiter == std::string::npos || delimiter + 1 >= config.edge_name.size()) {
@@ -148,8 +128,7 @@ auto buildNetMap(const Model& model) -> NetMap
   return net_map;
 }
 
-auto findEdgeRef(const Model& model,
-                 const EdgeName& edge_name) -> EdgeRef
+auto findEdgeRef(const Model& model, const EdgeName& edge_name) -> EdgeRef
 {
   for (Size net_index = 0; net_index < model.nets.size(); ++net_index) {
     const auto& net = model.nets[net_index];
@@ -158,19 +137,14 @@ auto findEdgeRef(const Model& model,
     }
     for (Size resistor_index = 0; resistor_index < net.resistors.size(); ++resistor_index) {
       if (net.resistors[resistor_index].index == edge_name.res_index) {
-        return EdgeRef{
-            .net_index = net_index,
-            .resistor_index = resistor_index,
-            .valid = true};
+        return EdgeRef{.net_index = net_index, .resistor_index = resistor_index, .valid = true};
       }
     }
   }
   return {};
 }
 
-auto showNet(Visibility& visibility,
-             Size net_index,
-             bool context_only = true) -> void
+auto showNet(Visibility& visibility, Size net_index, bool context_only = true) -> void
 {
   if (net_index >= visibility.nets.size()) {
     return;
@@ -180,15 +154,10 @@ auto showNet(Visibility& visibility,
   net_visibility.context_only = net_visibility.context_only && context_only;
 }
 
-auto showNode(const Model& model,
-              Visibility& visibility,
-              NetMap& net_map,
-              const std::string& node_name) -> void
+auto showNode(const Model& model, Visibility& visibility, NetMap& net_map, const std::string& node_name) -> void
 {
   const auto node_it = model.node_refs_by_name.find(node_name);
-  if (node_it != model.node_refs_by_name.end()
-      && node_it->second.valid
-      && node_it->second.net_index < visibility.nets.size()) {
+  if (node_it != model.node_refs_by_name.end() && node_it->second.valid && node_it->second.net_index < visibility.nets.size()) {
     setFlag(visibility.nets[node_it->second.net_index].nodes, node_it->second.node_index);
     showNet(visibility, node_it->second.net_index);
   }
@@ -199,10 +168,7 @@ auto showNode(const Model& model,
   }
 }
 
-auto showEdge(const Model& model,
-              Visibility& visibility,
-              NetMap& net_map,
-              const EdgeRef& edge_ref) -> void
+auto showEdge(const Model& model, Visibility& visibility, NetMap& net_map, const EdgeRef& edge_ref) -> void
 {
   if (!edge_ref.valid || edge_ref.net_index >= model.nets.size()) {
     return;
@@ -210,8 +176,7 @@ auto showEdge(const Model& model,
 
   const auto& net = model.nets[edge_ref.net_index];
   showNet(visibility, edge_ref.net_index);
-  if (edge_ref.resistor_index >= net.resistors.size()
-      || edge_ref.net_index >= visibility.nets.size()) {
+  if (edge_ref.resistor_index >= net.resistors.size() || edge_ref.net_index >= visibility.nets.size()) {
     return;
   }
 
@@ -221,8 +186,7 @@ auto showEdge(const Model& model,
   showNode(model, visibility, net_map, resistor.node2);
 }
 
-auto markEdgeTarget(Visibility& visibility,
-                    const EdgeRef& edge_ref) -> void
+auto markEdgeTarget(Visibility& visibility, const EdgeRef& edge_ref) -> void
 {
   if (!edge_ref.valid || edge_ref.net_index >= visibility.nets.size()) {
     return;
@@ -230,10 +194,7 @@ auto markEdgeTarget(Visibility& visibility,
   setFlag(visibility.nets[edge_ref.net_index].target_resistors, edge_ref.resistor_index);
 }
 
-auto showIncidentEdges(const Model& model,
-                       Visibility& visibility,
-                       NetMap& net_map,
-                       const std::string& node_name) -> void
+auto showIncidentEdges(const Model& model, Visibility& visibility, NetMap& net_map, const std::string& node_name) -> void
 {
   const auto net_it = net_map.find(owningNetName(node_name));
   if (net_it == net_map.end() || net_it->second.net == nullptr) {
@@ -244,23 +205,12 @@ auto showIncidentEdges(const Model& model,
   for (Size resistor_index = 0; resistor_index < net.resistors.size(); ++resistor_index) {
     const auto& resistor = net.resistors[resistor_index];
     if (resistor.node1 == node_name || resistor.node2 == node_name) {
-      showEdge(
-          model,
-          visibility,
-          net_map,
-          EdgeRef{
-              .net_index = net_it->second.index,
-              .resistor_index = resistor_index,
-              .valid = true});
+      showEdge(model, visibility, net_map, EdgeRef{.net_index = net_it->second.index, .resistor_index = resistor_index, .valid = true});
     }
   }
 }
 
-auto showCapEndpoint(const Model& model,
-                     Visibility& visibility,
-                     NetMap& net_map,
-                     const EdgeRef& edge_ref,
-                     const std::string& node_name) -> void
+auto showCapEndpoint(const Model& model, Visibility& visibility, NetMap& net_map, const EdgeRef& edge_ref, const std::string& node_name) -> void
 {
   showNode(model, visibility, net_map, node_name);
   if (edge_ref.valid) {
@@ -270,9 +220,7 @@ auto showCapEndpoint(const Model& model,
   showIncidentEdges(model, visibility, net_map, node_name);
 }
 
-auto showOnlyNet(const Model& model,
-                 Visibility& visibility,
-                 const std::string& target_net) -> bool
+auto showOnlyNet(const Model& model, Visibility& visibility, const std::string& target_net) -> bool
 {
   bool found_target = false;
   for (Size net_index = 0; net_index < model.nets.size(); ++net_index) {
@@ -294,10 +242,7 @@ auto showOnlyNet(const Model& model,
   return found_target;
 }
 
-auto showCoupledNetContext(const Model& model,
-                           Visibility& visibility,
-                           NetMap& net_map,
-                           const std::string& target_net) -> void
+auto showCoupledNetContext(const Model& model, Visibility& visibility, NetMap& net_map, const std::string& target_net) -> void
 {
   for (Size net_index = 0; net_index < model.nets.size(); ++net_index) {
     const auto& net = model.nets[net_index];
@@ -319,9 +264,7 @@ auto showCoupledNetContext(const Model& model,
   }
 }
 
-auto makeNetVisibleObjects(const Model& model,
-                           const spef::Exchange& exchange,
-                           const Config& config) -> Visibility
+auto makeNetVisibleObjects(const Model& model, const spef::Exchange& exchange, const Config& config) -> Visibility
 {
   auto visibility = makeVisibility(model, false);
   const std::string target_net = normalizeSpefName(exchange, config.net_name);
@@ -334,9 +277,7 @@ auto makeNetVisibleObjects(const Model& model,
   return visibility;
 }
 
-auto makeEdgeVisibleObjectsImpl(const Model& model,
-                                const spef::Exchange& exchange,
-                                const Config& config) -> Visibility
+auto makeEdgeVisibleObjectsImpl(const Model& model, const spef::Exchange& exchange, const Config& config) -> Visibility
 {
   auto visibility = makeVisibility(model, false);
   auto edge_name = parseEdgeName(exchange, config);
@@ -373,10 +314,8 @@ auto makeEdgeVisibleObjectsImpl(const Model& model,
 
     for (Size cap_index = 0; cap_index < net.coupling_caps.size(); ++cap_index) {
       const auto& cap = net.coupling_caps[cap_index];
-      const bool side1_is_target = capSideTouchesTargetEdge(
-          model, cap.edge1, cap.node1, target_edge);
-      const bool side2_is_target = capSideTouchesTargetEdge(
-          model, cap.edge2, cap.node2, target_edge);
+      const bool side1_is_target = capSideTouchesTargetEdge(model, cap.edge1, cap.node1, target_edge);
+      const bool side2_is_target = capSideTouchesTargetEdge(model, cap.edge2, cap.node2, target_edge);
       if (!side1_is_target && !side2_is_target) {
         continue;
       }
@@ -385,12 +324,7 @@ auto makeEdgeVisibleObjectsImpl(const Model& model,
         setFlag(visibility.nets[net_index].coupling_caps, cap_index);
         showNet(visibility, net_index);
       }
-      showCapEndpoint(
-          model,
-          visibility,
-          net_map,
-          target_edge,
-          side1_is_target ? cap.node1 : cap.node2);
+      showCapEndpoint(model, visibility, net_map, target_edge, side1_is_target ? cap.node1 : cap.node2);
       if (side1_is_target) {
         showCapEndpoint(model, visibility, net_map, cap.edge2, cap.node2);
       }
@@ -404,9 +338,7 @@ auto makeEdgeVisibleObjectsImpl(const Model& model,
 
 }  // namespace
 
-auto makeVisibleObjects(const Model& model,
-                        const spef::Exchange& exchange,
-                        const Config& config) -> Visibility
+auto makeVisibleObjects(const Model& model, const spef::Exchange& exchange, const Config& config) -> Visibility
 {
   if (config.hasEdgeFilter()) {
     return makeEdgeVisibleObjects(model, exchange, config);
@@ -417,9 +349,7 @@ auto makeVisibleObjects(const Model& model,
   return makeVisibility(model, true);
 }
 
-auto makeEdgeVisibleObjects(const Model& model,
-                            const spef::Exchange& exchange,
-                            const Config& config) -> Visibility
+auto makeEdgeVisibleObjects(const Model& model, const spef::Exchange& exchange, const Config& config) -> Visibility
 {
   return makeEdgeVisibleObjectsImpl(model, exchange, config);
 }

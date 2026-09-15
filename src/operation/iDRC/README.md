@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-iDRC is a design rule check tool in the iEDA toolchain. Currently, it supports design rule checks for each Metal layer and Cut layer under the 28nm process. The main design rule checks implemented include: short circuit violation check, metal minimum spacing check, minimum width check, minimum area check, hole area check, minimum step (MinStep) check, via enclosure related checks, metal minimum end-of-line (EOL) spacing check, metal minimum notch spacing check, metal minimum jog spacing check, metal minimum corner fill spacing check, and Cut layer minimum spacing related checks.
+iDRC is a design rule check tool in the ECC toolchain. Currently, it supports design rule checks for each Metal layer and Cut layer under the 28nm process. The main design rule checks implemented include: short circuit violation check, metal minimum spacing check, minimum width check, minimum area check, hole area check, minimum step (MinStep) check, via enclosure related checks, metal minimum end-of-line (EOL) spacing check, metal minimum notch spacing check, metal minimum jog spacing check, metal minimum corner fill spacing check, and Cut layer minimum spacing related checks.
 
 ## 2. Supported Check Types
 ### Shape Type Rules

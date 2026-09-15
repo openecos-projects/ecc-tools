@@ -35,9 +35,9 @@
 #include "feature_irt.h"
 #include "feature_summary.h"
 #include "../database/interaction/RT_DRC/ids.hpp"
-#define featureInst ieda_feature::FeatureManager::getInstance()
+#define featureInst ecc_feature::FeatureManager::getInstance()
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 class FeatureManager
 {
@@ -85,4 +85,4 @@ class FeatureManager
   ~FeatureManager();
 };
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

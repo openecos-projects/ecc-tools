@@ -16,11 +16,14 @@
 // ***************************************************************************************
 #pragma once
 
+#include "DRNodeNetCountState.hpp"
+#include "DRNodeNetState.hpp"
 #include "Direction.hpp"
 #include "LayerCoord.hpp"
 #include "Orientation.hpp"
 #include "RTHeader.hpp"
 #include "Utility.hpp"
+#include "ViaMasterIdx.hpp"
 
 namespace irt {
 
@@ -36,93 +39,99 @@ enum class DRNodeState
 class DRNode : public LayerCoord
 {
  public:
+  using OrientNetList = DRNodeNetState::OrientNetList;
+
+  static constexpr std::array<Orientation, 6> kOrientationList
+      = {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth, Orientation::kAbove, Orientation::kBelow};
+
   DRNode() = default;
   ~DRNode() = default;
   // getter
-  std::map<Orientation, DRNode*>& get_neighbor_node_map() { return _neighbor_node_map; }
-  std::map<Orientation, std::set<int32_t>>& get_orient_fixed_rect_map() { return _orient_fixed_rect_map; }
-  std::map<Orientation, std::set<int32_t>>& get_orient_routed_rect_map() { return _orient_routed_rect_map; }
-  std::map<Orientation, int32_t>& get_orient_violation_number_map() { return _orient_violation_number_map; }
-  // setter
-  void set_neighbor_node_map(const std::map<Orientation, DRNode*>& neighbor_node_map) { _neighbor_node_map = neighbor_node_map; }
-  void set_orient_fixed_rect_map(const std::map<Orientation, std::set<int32_t>>& orient_fixed_rect_map) { _orient_fixed_rect_map = orient_fixed_rect_map; }
-  void set_orient_routed_rect_map(const std::map<Orientation, std::set<int32_t>>& orient_routed_rect_map) { _orient_routed_rect_map = orient_routed_rect_map; }
-  void set_orient_violation_number_map(const std::map<Orientation, int32_t>& orient_violation_number_map)
-  {
-    _orient_violation_number_map = orient_violation_number_map;
-  }
+  int32_t get_neighbor_node_num() const { return _neighbor_node_num; }
+  OrientNetList get_orient_fixed_rect_list() const { return _fixed_rect_net_state.getOrientNetList(); }
+  OrientNetList get_orient_routed_rect_list() const { return _routed_rect_net_state.getOrientNetList(); }
+  uint8_t get_direction_mask() const { return _direction_mask; }
   // function
-  DRNode* getNeighborNode(Orientation orientation)
+  static bool isNeighborOrientation(Orientation orientation) { return Orientation::kEast <= orientation && orientation <= Orientation::kBelow; }
+  DRNode* getNeighborNode(Orientation orientation) const
   {
-    DRNode* neighbor_node = nullptr;
-    if (RTUTIL.exist(_neighbor_node_map, orientation)) {
-      neighbor_node = _neighbor_node_map[orientation];
-    }
-    return neighbor_node;
+    return isNeighborOrientation(orientation) ? _neighbor_node_list[getOrientationIdx(orientation)] : nullptr;
   }
+  void setNeighborNode(Orientation orientation, DRNode* neighbor_node)
+  {
+    if (!isNeighborOrientation(orientation)) {
+      RTLOG.error(Loc::current(), "The neighbor orientation is invalid!");
+      return;
+    }
+    DRNode*& curr_neighbor_node = _neighbor_node_list[getOrientationIdx(orientation)];
+    if (curr_neighbor_node == nullptr && neighbor_node != nullptr) {
+      _neighbor_node_num++;
+    } else if (curr_neighbor_node != nullptr && neighbor_node == nullptr) {
+      _neighbor_node_num--;
+    }
+    curr_neighbor_node = neighbor_node;
+  }
+  bool hasNeighborNode(Orientation orientation) const { return getNeighborNode(orientation) != nullptr; }
+  void addFixedRectNet(Orientation orientation, int32_t net_idx) { _fixed_rect_net_state.addNet(orientation, net_idx); }
+  void addRoutedRectNet(Orientation orientation, int32_t net_idx) { _routed_rect_net_state.addNet(orientation, net_idx); }
+  void delFixedRectNet(Orientation orientation, int32_t net_idx) { _fixed_rect_net_state.delNet(orientation, net_idx); }
+  void delRoutedRectNet(Orientation orientation, int32_t net_idx) { _routed_rect_net_state.delNet(orientation, net_idx); }
+  bool hasFixedRectOrient(Orientation orientation) const { return _fixed_rect_net_state.hasNet(orientation); }
   double getFixedRectCost(int32_t net_idx, Orientation orientation, double fixed_rect_unit)
   {
-    int32_t fixed_rect_num = 0;
-    if (RTUTIL.exist(_orient_fixed_rect_map, orientation)) {
-      std::set<int32_t>& net_set = _orient_fixed_rect_map[orientation];
-      fixed_rect_num = static_cast<int32_t>(net_set.size());
-      if (RTUTIL.exist(net_set, net_idx)) {
-        fixed_rect_num--;
-      }
-      if (fixed_rect_num < 0) {
-        RTLOG.error(Loc::current(), "The fixed_rect_num < 0!");
-      }
-    }
-    double cost = 0;
-    if (fixed_rect_num > 0) {
-      cost = fixed_rect_unit;
-    }
-    return cost;
+    return _fixed_rect_net_state.getCost(net_idx, orientation, fixed_rect_unit);
   }
   double getRoutedRectCost(int32_t net_idx, Orientation orientation, double routed_rect_unit)
   {
-    int32_t routed_rect_num = 0;
-    if (RTUTIL.exist(_orient_routed_rect_map, orientation)) {
-      std::set<int32_t>& net_set = _orient_routed_rect_map[orientation];
-      routed_rect_num = static_cast<int32_t>(net_set.size());
-      if (RTUTIL.exist(net_set, net_idx)) {
-        routed_rect_num--;
-      }
-      if (routed_rect_num < 0) {
-        RTLOG.error(Loc::current(), "The routed_rect_num < 0!");
-      }
-    }
-    double cost = 0;
-    if (routed_rect_num > 0) {
-      cost = routed_rect_unit;
-    }
-    return cost;
+    return _routed_rect_net_state.getCost(net_idx, orientation, routed_rect_unit);
   }
-  double getViolationCost(Orientation orientation, double violation_unit)
+  double getViolationCost(Orientation orientation, double violation_unit) { return getViolationNumber(orientation) > 0 ? violation_unit : 0; }
+  int32_t getViolationNumber(Orientation orientation) const
   {
-    int32_t violation_num = 0;
-    if (RTUTIL.exist(_orient_violation_number_map, orientation)) {
-      violation_num = _orient_violation_number_map[orientation];
+    return isNeighborOrientation(orientation) ? _violation_number_list[getOrientationIdx(orientation)] : 0;
+  }
+  void addViolationNumber(Orientation orientation)
+  {
+    if (isNeighborOrientation(orientation)) {
+      _violation_number_list[getOrientationIdx(orientation)]++;
     }
-    double cost = 0;
-    if (violation_num > 0) {
-      cost = violation_unit;
+  }
+  bool hasViolation() const
+  {
+    for (int32_t violation_number : _violation_number_list) {
+      if (violation_number > 0) {
+        return true;
+      }
     }
-    return cost;
+    return false;
   }
 #if 1  // astar
   // single task
-  std::set<Direction>& get_direction_set() { return _direction_set; }
-  void set_direction_set(std::set<Direction>& direction_set) { _direction_set = direction_set; }
+  static uint8_t getDirectionMask(Direction direction) { return static_cast<uint8_t>(1U << static_cast<uint8_t>(direction)); }
+  void setDirectionSet(const std::set<Direction>& direction_set)
+  {
+    _direction_mask = 0;
+    for (Direction direction : direction_set) {
+      addDirection(direction);
+    }
+  }
+  void addDirection(Direction direction) { _direction_mask |= getDirectionMask(direction); }
+  bool hasDirection(Direction direction) const { return (_direction_mask & getDirectionMask(direction)) != 0; }
+  bool hasDirection() const { return _direction_mask != 0; }
+  void clearDirection() { _direction_mask = 0; }
   // single path
   DRNodeState& get_state() { return _state; }
   DRNode* get_parent_node() const { return _parent_node; }
+  ViaMasterIdx& get_parent_via_master_idx() { return _parent_via_master_idx; }
   double get_known_cost() const { return _known_cost; }
   double get_estimated_cost() const { return _estimated_cost; }
+  int32_t get_open_queue_idx() const { return _open_queue_idx; }
   void set_state(DRNodeState state) { _state = state; }
   void set_parent_node(DRNode* parent_node) { _parent_node = parent_node; }
+  void set_parent_via_master_idx(const ViaMasterIdx& parent_via_master_idx) { _parent_via_master_idx = parent_via_master_idx; }
   void set_known_cost(const double known_cost) { _known_cost = known_cost; }
   void set_estimated_cost(const double estimated_cost) { _estimated_cost = estimated_cost; }
+  void set_open_queue_idx(int32_t open_queue_idx) { _open_queue_idx = open_queue_idx; }
   // function
   bool isNone() { return _state == DRNodeState::kNone; }
   bool isOpen() { return _state == DRNodeState::kOpen; }
@@ -131,40 +140,30 @@ class DRNode : public LayerCoord
 #endif
 
  private:
-  std::map<Orientation, DRNode*> _neighbor_node_map;
-  // obstacle & pin_shape
-  std::map<Orientation, std::set<int32_t>> _orient_fixed_rect_map;
-  // net_result
-  std::map<Orientation, std::set<int32_t>> _orient_routed_rect_map;
-  // violation
-  std::map<Orientation, int32_t> _orient_violation_number_map;
+  static constexpr size_t getOrientationIdx(Orientation orientation) { return static_cast<size_t>(orientation) - 1; }
+
 #if 1  // astar
-  // single task
-  std::set<Direction> _direction_set;
-  // single path
   DRNodeState _state = DRNodeState::kNone;
+  uint8_t _direction_mask = 0;
+#endif
+  uint8_t _neighbor_node_num = 0;
+#if 1  // astar
+  int32_t _open_queue_idx = -1;
   DRNode* _parent_node = nullptr;
+  ViaMasterIdx _parent_via_master_idx;
   double _known_cost = 0.0;  // include curr
   double _estimated_cost = 0.0;
 #endif
+  std::array<DRNode*, 6> _neighbor_node_list{};
+  // obstacle & pin_shape state
+  DRNodeNetState _fixed_rect_net_state;
+  // net_result state
+  DRNodeNetCountState _routed_rect_net_state;
+  // violation
+  std::array<int32_t, 6> _violation_number_list{};
 };
 
 #if 1  // astar
-struct CmpDRNodeCost
-{
-  bool operator()(DRNode* a, DRNode* b)
-  {
-    if (RTUTIL.equalDoubleByError(a->getTotalCost(), b->getTotalCost(), RT_ERROR)) {
-      if (RTUTIL.equalDoubleByError(a->get_estimated_cost(), b->get_estimated_cost(), RT_ERROR)) {
-        return a->get_neighbor_node_map().size() < b->get_neighbor_node_map().size();
-      } else {
-        return a->get_estimated_cost() > b->get_estimated_cost();
-      }
-    } else {
-      return a->getTotalCost() > b->getTotalCost();
-    }
-  }
-};
 #endif
 
 }  // namespace irt

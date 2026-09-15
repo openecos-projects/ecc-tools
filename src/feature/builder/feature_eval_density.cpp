@@ -8,7 +8,7 @@
 #include "density_api.h"
 #include "feature_builder.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 DensityMapSummary FeatureBuilder::buildDensityEvalSummary(int32_t grid_size)
 {
@@ -33,4 +33,4 @@ DensityMapSummary FeatureBuilder::buildDensityEvalSummary(int32_t grid_size)
   return density_map_summary;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

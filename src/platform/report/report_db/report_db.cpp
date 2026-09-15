@@ -18,7 +18,6 @@
 #include "report_db.h"
 
 #include "ReportTable.hh"
-#include "flow_config.h"
 #include "idm.h"
 
 namespace iplf {
@@ -42,15 +41,7 @@ std::string ReportDB::title()
   //   std::string name = design->get_design_name();
   //   std::string version = design->get_version();
 
-  //   std::vector<std::string> header_list = {"iEDA", flowConfigInst->get_env_info_software_version()};
-  //   auto tbl = std::make_shared<ieda::ReportTable>("Design Info", header_list, static_cast<int>(ReportDBType::kTitle));
-
-  //   *tbl << "Flow Stage" << flowConfigInst->get_status_stage() << TABLE_ENDLINE;
-
-  //   *tbl << TABLE_SKIP << TABLE_SKIP << TABLE_ENDLINE;
-
-  //   *tbl << "Flow Runtime" << flowConfigInst->get_status_runtime_string() << TABLE_ENDLINE;
-  //   *tbl << "Memmory" << flowConfigInst->get_status_memmory_string() << TABLE_ENDLINE;
+  //   auto tbl = std::make_shared<ecc::ReportTable>("Design Info", header_list, static_cast<int>(ReportDBType::kTitle));
 
   //   *tbl << TABLE_SKIP << TABLE_SKIP << TABLE_ENDLINE;
 
@@ -62,10 +53,10 @@ std::string ReportDB::title()
   return ReportBase::title();
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryTable()
+std::shared_ptr<ecc::ReportTable> ReportDB::createSummaryTable()
 {
   std::vector<std::string> header_list = {"Module", "Value"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Summary", header_list, static_cast<int>(ReportDBType::kSummary));
+  auto tbl = std::make_shared<ecc::ReportTable>("Summary", header_list, static_cast<int>(ReportDBType::kSummary));
   auto idb_design = dmInst->get_idb_design();
   auto idb_layout = idb_design->get_layout();
 
@@ -135,10 +126,10 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryTable()
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryInstances()
+std::shared_ptr<ecc::ReportTable> ReportDB::createSummaryInstances()
 {
   std::vector<std::string> header_list = {"Type", "Number", "Number Ratio", "Area", "Area Ratio"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Summary - Instance", header_list, static_cast<int>(ReportDBType::kSummaryInstance));
+  auto tbl = std::make_shared<ecc::ReportTable>("Summary - Instance", header_list, static_cast<int>(ReportDBType::kSummaryInstance));
 
   auto idb_design = dmInst->get_idb_design();
   auto idb_layout = dmInst->get_idb_layout();
@@ -194,10 +185,10 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryInstances()
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryNets()
+std::shared_ptr<ecc::ReportTable> ReportDB::createSummaryNets()
 {
   std::vector<std::string> header_list = {"Net Type", "Number", "Number Ratio", "Length", "Length Ratio"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Summary - Net", header_list, static_cast<int>(ReportDBType::kSummaryNet));
+  auto tbl = std::make_shared<ecc::ReportTable>("Summary - Net", header_list, static_cast<int>(ReportDBType::kSummaryNet));
 
   auto idb_design = dmInst->get_idb_design();
 
@@ -224,7 +215,7 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryNets()
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryLayers()
+std::shared_ptr<ecc::ReportTable> ReportDB::createSummaryLayers()
 {
   std::vector<std::string> header_list = {"Layer",
                                           "Net - Wire Length",
@@ -235,7 +226,7 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryLayers()
                                           "Special Net - Wire Length",
                                           "Special Net - Wire Number",
                                           "Special Net - Via Number"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Summary - Layer", header_list, static_cast<int>(ReportDBType::kSummaryLayer));
+  auto tbl = std::make_shared<ecc::ReportTable>("Summary - Layer", header_list, static_cast<int>(ReportDBType::kSummaryLayer));
 
   auto idb_design = dmInst->get_idb_design();
   auto idb_layout = idb_design->get_layout();
@@ -327,10 +318,10 @@ std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryLayers()
   return tbl;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportDB::createSummaryPins()
+std::shared_ptr<ecc::ReportTable> ReportDB::createSummaryPins()
 {
   std::vector<std::string> header_list = {"Pin Number", "Net Number", "Net Ratio", "Instance Number", "Instance Ratio"};
-  auto tbl = std::make_shared<ieda::ReportTable>("Summary - Pin Distribution", header_list, static_cast<int>(ReportDBType::kSummaryPin));
+  auto tbl = std::make_shared<ecc::ReportTable>("Summary - Pin Distribution", header_list, static_cast<int>(ReportDBType::kSummaryPin));
 
   auto idb_design = dmInst->get_idb_design();
   // auto idb_layout = idb_design->get_layout();

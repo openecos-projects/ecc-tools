@@ -74,6 +74,8 @@ auto RecordTopologyDepthCandidateBuild(unsigned depth, bool used_explicit_target
       .split_group_count = evaluation.split_group_count,
       .split_extra_buffer_count = evaluation.split_extra_buffer_count,
       .split_local_depth = evaluation.split_local_depth,
+      .split_triggered_by_fanout = evaluation.split_triggered_by_fanout,
+      .split_triggered_by_capacitance = evaluation.split_triggered_by_capacitance,
       .used_boundary_relaxation = evaluation.used_boundary_relaxation,
       .selected_power_w = evaluation.best_char.has_value() ? evaluation.best_char->get_power() : 0.0,
       .selected_delay_ns = evaluation.best_char.has_value() ? evaluation.best_char->get_delay() : 0.0,
@@ -90,6 +92,8 @@ auto AppendGlobalCandidateRefs(std::size_t candidate_index, const CandidateBuild
         .split_group_count = evaluation.split_group_count,
         .split_extra_buffer_count = evaluation.split_extra_buffer_count,
         .split_local_depth = evaluation.split_local_depth,
+        .split_triggered_by_fanout = evaluation.split_triggered_by_fanout,
+        .split_triggered_by_capacitance = evaluation.split_triggered_by_capacitance,
     });
   }
   for (const auto& entry : evaluation.candidate_frontier_entries) {
@@ -99,6 +103,8 @@ auto AppendGlobalCandidateRefs(std::size_t candidate_index, const CandidateBuild
         .split_group_count = evaluation.split_group_count,
         .split_extra_buffer_count = evaluation.split_extra_buffer_count,
         .split_local_depth = evaluation.split_local_depth,
+        .split_triggered_by_fanout = evaluation.split_triggered_by_fanout,
+        .split_triggered_by_capacitance = evaluation.split_triggered_by_capacitance,
     });
   }
 }

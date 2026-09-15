@@ -29,7 +29,6 @@
 
 #include "report_basic.h"
 
-#include "flow_config.h"
 #include "idm.h"
 
 namespace iplf {
@@ -37,16 +36,16 @@ namespace iplf {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-bool ReportBase::add_table(std::shared_ptr<ieda::ReportTable> table)
+bool ReportBase::add_table(std::shared_ptr<ecc::ReportTable> table)
 {
   _table_list.push_back(std::move(table));
   return true;
 }
 
-std::shared_ptr<ieda::ReportTable> ReportBase::get_table(int type)
+std::shared_ptr<ecc::ReportTable> ReportBase::get_table(int type)
 {
   auto it = std::find_if(_table_list.begin(), _table_list.end(),
-                         [type](std::shared_ptr<ieda::ReportTable>& rtb) { return rtb->get_type() == type; });
+                         [type](std::shared_ptr<ecc::ReportTable>& rtb) { return rtb->get_type() == type; });
   if (it != _table_list.end()) {
     return *it;
   }
@@ -65,12 +64,8 @@ std::string ReportBase::title()
   std::string name = design->get_design_name();
   std::string version = design->get_version();
 
-  std::vector<std::string> header_list = {"iEDA", flowConfigInst->get_env_info_software_version()};
-  auto tbl = std::make_shared<ieda::ReportTable>("Design Info", header_list, 0);
-
-  *tbl << "Stage" << flowConfigInst->get_status_stage() << TABLE_ENDLINE;
-  *tbl << "Runtime" << flowConfigInst->get_status_runtime_string() << TABLE_ENDLINE;
-  *tbl << "Memmory" << flowConfigInst->get_status_memmory_string() << TABLE_ENDLINE;
+  std::vector<std::string> header_list = {"ECC"};
+  auto tbl = std::make_shared<ecc::ReportTable>("Design Info", header_list, 0);
 
   *tbl << TABLE_SKIP << TABLE_SKIP << TABLE_ENDLINE;
 

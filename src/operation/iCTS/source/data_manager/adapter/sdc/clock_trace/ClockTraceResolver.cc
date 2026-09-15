@@ -62,14 +62,37 @@ auto resolveSingleSeedNet(idb::IdbDesign* idb_design, const SdcClockDecl& clock)
   return seed_nets.size() == 1U ? seed_nets.front() : nullptr;
 }
 
-auto makeDirectClockTarget(const std::string& clock_name, const std::string& net_name) -> ClockTraceClockTarget
+auto makeDirectClockTarget(const std::string& clock_name, const std::string& source_net_name, const std::vector<ClockTraceRecord>& accepted_records)
+    -> ClockTraceClockTarget
 {
-  return ClockTraceClockTarget{
+  ClockTraceClockTarget target{
       .clock_name = clock_name,
-      .clock_net_name = net_name,
+      .clock_net_name = source_net_name,
       .preclustered_sink_reuse = false,
       .preclustered_sink_anchors = {},
+      .terminal_net_names = {},
+      .propagation_steps = {},
   };
+  std::set<std::string> terminal_nets;
+  std::map<std::tuple<std::string, std::string, std::string, std::string, std::string>, ClockTracePropagationStep> steps;
+  for (const auto& record : accepted_records) {
+    terminal_nets.insert(record.net_name);
+    for (const auto& step : record.propagation_steps) {
+      // Every net covered by an owned transition remains a materialization
+      // boundary.  The reader excludes the transition's explicit input pin
+      // from terminal membership, while preserving any other load on that net
+      // (including an input-only BUF/INV boundary).  Publishing only accepted
+      // leaf nets would silently drop those same-clock boundary loads.
+      terminal_nets.insert(step.input_net_name);
+      terminal_nets.insert(step.output_net_name);
+      steps.emplace(std::make_tuple(step.inst_name, step.input_pin_name, step.output_pin_name, step.input_net_name, step.output_net_name), step);
+    }
+  }
+  target.terminal_net_names.assign(terminal_nets.begin(), terminal_nets.end());
+  for (const auto& [_, step] : steps) {
+    target.propagation_steps.push_back(step);
+  }
+  return target;
 }
 
 auto tryBuildPreclusteredClockTarget(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbDesign* idb_design, const SdcClockDecl& clock,
@@ -100,6 +123,8 @@ auto tryBuildPreclusteredClockTarget(const SdcLibertyCellLookup& liberty_cell_lo
       .clock_net_name = source_net->get_net_name(),
       .preclustered_sink_reuse = true,
       .preclustered_sink_anchors = std::move(anchors),
+      .terminal_net_names = {},
+      .propagation_steps = {},
   };
 }
 
@@ -108,6 +133,10 @@ auto tryBuildPreclusteredClockTarget(const SdcLibertyCellLookup& liberty_cell_lo
 auto ClockTraceResolver::resolve(const SdcClockData& clock_data, idb::IdbDesign* idb_design, const SdcLibertyCellLookup& liberty_cell_lookup,
                                  std::size_t max_fanout) -> ClockTraceBuild
 {
+  // Fanout is a synthesis-legality constraint, not SDC ownership evidence.
+  // Keep the public adapter signature stable while deliberately excluding it
+  // from trace classification.
+  static_cast<void>(max_fanout);
   ClockTraceBuild build;
   if (idb_design == nullptr || idb_design->get_net_list() == nullptr) {
     CTSLOG.warn(Loc::current(), "ClockTraceResolver: iDB design or net list is null.");
@@ -132,28 +161,36 @@ auto ClockTraceResolver::resolve(const SdcClockData& clock_data, idb::IdbDesign*
   }
 
   std::map<std::string, std::set<std::string>> accepted_clock_names_by_net;
-  std::map<std::string, bool> has_strong_target_by_clock;
-  const auto sink_threshold = clock_trace::StrongTargetSinkThreshold(max_fanout);
   for (const auto& record : candidate_records) {
     if (record.status == "accepted" && !record.net_name.empty()) {
       accepted_clock_names_by_net[record.net_name].insert(record.clock_name);
-      has_strong_target_by_clock[record.clock_name] = has_strong_target_by_clock[record.clock_name] || clock_trace::IsStrongClockTarget(record, sink_threshold);
     }
   }
 
   std::vector<ClockTraceRecord> resolved_records;
   resolved_records.reserve(candidate_records.size());
   for (auto record : candidate_records) {
-    if (record.status == "accepted" && has_strong_target_by_clock[record.clock_name] && !clock_trace::IsStrongClockTarget(record, sink_threshold)) {
-      record.status = "trace_stop";
-      record.reason = "source_side_clock_sinks_below_target_threshold";
-    }
     if (record.status == "accepted" && accepted_clock_names_by_net[record.net_name].size() > 1U) {
       record.status = "ambiguous";
       record.reason = "target_net_reachable_from_multiple_sdc_clocks";
     }
     clock_trace::AnnotateRecordOwnership(record, clock_view_by_name);
     resolved_records.push_back(std::move(record));
+  }
+  std::ranges::sort(resolved_records, {}, [](const ClockTraceRecord& record) -> auto {
+    return std::tie(record.clock_name, record.net_name, record.status, record.reason, record.trace_path);
+  });
+
+  const bool has_ambiguous_ownership
+      = std::ranges::any_of(resolved_records, [](const ClockTraceRecord& record) -> bool { return record.status == "ambiguous"; });
+  if (has_ambiguous_ownership) {
+    // Ownership is an input-wide contract: publishing even the unaffected
+    // targets would admit a partial SDC interpretation into canonical state.
+    build.status = ClockTraceBuildStatusCode::kAmbiguousOwnership;
+    build.message = "clock_trace_ambiguous_ownership";
+    build.summary.records = std::move(resolved_records);
+    build.summary.unowned_clock_like_records = clock_trace::CollectUnownedClockLikeRecords(liberty_cell_lookup, idb_design, build.summary.records);
+    return build;
   }
 
   std::map<std::string, std::vector<ClockTraceRecord>> accepted_records_by_clock;
@@ -163,24 +200,25 @@ auto ClockTraceResolver::resolve(const SdcClockData& clock_data, idb::IdbDesign*
     }
   }
 
-  std::set<std::pair<std::string, std::string>> emitted_pairs;
   for (const auto& [clock_name, accepted_records] : accepted_records_by_clock) {
     const auto decl_iter = clock_decl_by_name.find(clock_name);
     if (decl_iter != clock_decl_by_name.end()) {
       auto preclustered_target = tryBuildPreclusteredClockTarget(liberty_cell_lookup, idb_design, *decl_iter->second, accepted_records);
       if (preclustered_target.has_value()) {
-        if (emitted_pairs.insert({preclustered_target->clock_name, preclustered_target->clock_net_name}).second) {
-          build.output.clock_targets.push_back(std::move(*preclustered_target));
-        }
+        build.output.clock_targets.push_back(std::move(*preclustered_target));
+        continue;
+      }
+      auto* source_net = resolveSingleSeedNet(idb_design, *decl_iter->second);
+      if (source_net != nullptr) {
+        build.output.clock_targets.push_back(makeDirectClockTarget(clock_name, source_net->get_net_name(), accepted_records));
         continue;
       }
     }
 
-    for (const auto& record : accepted_records) {
-      if (emitted_pairs.insert({record.clock_name, record.net_name}).second) {
-        build.output.clock_targets.push_back(makeDirectClockTarget(record.clock_name, record.net_name));
-      }
-    }
+    // A clock with more than one resolved seed has no unique ownership root.  Keep
+    // its records for diagnostics, but do not manufacture independent clocks from
+    // accepted leaves: that would silently turn an ambiguous input into graph
+    // structure that was never declared by SDC.
   }
 
   build.summary.records = std::move(resolved_records);

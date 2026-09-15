@@ -19,9 +19,9 @@
 #include "report_manager.h"
 namespace tcl {
 
-using ieda::TclOption;
-using ieda::TclStringListOption;
-using ieda::TclStringOption;
+using ecc::TclOption;
+using ecc::TclStringListOption;
+using ecc::TclStringOption;
 
 static const auto PREFIXES = "-prefixes";
 CmdReportPlaceDistro::CmdReportPlaceDistro(const char* cmd_name) : TclCmd(cmd_name)
@@ -42,8 +42,8 @@ static const auto THRESHOLD = "-mincount";
 CmdReportPrefixedInst::CmdReportPrefixedInst(const char* cmd_name) : TclCmd(cmd_name)
 {
   addOption(new TclStringOption("-prefix", 1, EMPTY_STR));
-  addOption(new ieda::TclIntOption("-level", 1, 1));
-  addOption(new ieda::TclIntOption(THRESHOLD, 1, 1));
+  addOption(new ecc::TclIntOption("-level", 1, 1));
+  addOption(new ecc::TclIntOption(THRESHOLD, 1, 1));
 }
 unsigned CmdReportPrefixedInst::exec()
 {

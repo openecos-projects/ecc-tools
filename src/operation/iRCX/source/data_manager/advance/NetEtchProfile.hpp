@@ -31,18 +31,9 @@ class NetEtchProfile
   // setter
   void set_edge_interval_pool(const GroupPool<EdgeEtchInterval>& edge_interval_pool) { _edge_interval_pool = edge_interval_pool; }
   // function
-  void append_edge_interval_list(std::vector<EdgeEtchInterval> edge_interval_list)
-  {
-    _edge_interval_pool.append(std::move(edge_interval_list));
-  }
-  std::span<EdgeEtchInterval> get_edge_interval_list(int32_t edge_idx)
-  {
-    return _edge_interval_pool.get_group_item_list(edge_idx);
-  }
-  std::span<const EdgeEtchInterval> get_edge_interval_list(int32_t edge_idx) const
-  {
-    return _edge_interval_pool.get_group_item_list(edge_idx);
-  }
+  void append_edge_interval_list(std::vector<EdgeEtchInterval> edge_interval_list) { _edge_interval_pool.append(std::move(edge_interval_list)); }
+  std::span<EdgeEtchInterval> get_edge_interval_list(int32_t edge_idx) { return _edge_interval_pool.get_group_item_list(edge_idx); }
+  std::span<const EdgeEtchInterval> get_edge_interval_list(int32_t edge_idx) const { return _edge_interval_pool.get_group_item_list(edge_idx); }
 
  private:
   GroupPool<EdgeEtchInterval> _edge_interval_pool;

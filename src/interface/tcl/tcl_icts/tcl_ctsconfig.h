@@ -22,7 +22,7 @@
 #include "tcl_definition.h"
 #include "tcl_util.h"
 
-using ieda::TclCmd;
+using ecc::TclCmd;
 
 namespace tcl {
 

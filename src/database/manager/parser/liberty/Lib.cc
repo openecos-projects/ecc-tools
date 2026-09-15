@@ -70,7 +70,7 @@ std::pair<std::string, std::optional<int>> splitPortName(const char* port_name)
 bool shouldTraceLibCheckLookup()
 {
   static const bool kEnabled = []() {
-    if (const char* env = std::getenv("IEDA_LIB_CHECK_TRACE"); env && *env) {
+    if (const char* env = std::getenv("ECC_LIB_CHECK_TRACE"); env && *env) {
       return std::strcmp(env, "0") != 0;
     }
     return false;
@@ -81,7 +81,7 @@ bool shouldTraceLibCheckLookup()
 bool libCheckTraceMatchesFilter(const char* cell_name, const char* src_port,
                                 const char* snk_port)
 {
-  const char* filter_env = std::getenv("IEDA_LIB_CHECK_TRACE_FILTER");
+  const char* filter_env = std::getenv("ECC_LIB_CHECK_TRACE_FILTER");
   if (!filter_env || !*filter_env) {
     return true;
   }
@@ -284,7 +284,7 @@ double LibTable::findValue(double slew, double constrain_slew_or_load)
       if (auto variable2 = table_template->get_template_variable2(); variable2) {
         if (*variable2 != LibLutTableTemplate::Variable::TOTAL_OUTPUT_NET_CAPACITANCE
             && *variable2 != LibLutTableTemplate::Variable::CONSTRAINED_PIN_TRANSITION) {
-          IEDALOG.error(ieda::Loc::current(), "Invalid liberty delay table variable.");
+          ECCLOG.error(ecc::Loc::current(), "Invalid liberty delay table variable.");
         }
       }
 
@@ -298,7 +298,7 @@ double LibTable::findValue(double slew, double constrain_slew_or_load)
         if (*variable2 != LibLutTableTemplate::Variable::INPUT_NET_TRANSITION
             && *variable2 != LibLutTableTemplate::Variable::RELATED_PIN_TRANSITION
             && *variable2 != LibLutTableTemplate::Variable::INPUT_TRANSITION_TIME) {
-          IEDALOG.error(ieda::Loc::current(), "Invalid liberty delay table variable.");
+          ECCLOG.error(ecc::Loc::current(), "Invalid liberty delay table variable.");
         }
       }
 
@@ -307,7 +307,7 @@ double LibTable::findValue(double slew, double constrain_slew_or_load)
       break;
 
     default:
-      IEDALOG.error(ieda::Loc::current(), "lut table ", get_file_name(), " ", get_line_no(), " invalid delay lut template variable");
+      ECCLOG.error(ecc::Loc::current(), "lut table ", get_file_name(), " ", get_line_no(), " invalid delay lut template variable");
       break;
   }
 
@@ -321,7 +321,7 @@ double LibTable::findValue(double slew, double constrain_slew_or_load)
     if (!Lib::isSilentOutput() && ((val < min_val) || (val > max_val))) {
       static std::atomic<int32_t> warning_count = 0;
       if (warning_count.fetch_add(1, std::memory_order_relaxed) < 10) {
-        IEDALOG.warn(ieda::Loc::current(), "Warning: val outside table ranges: val = ", val, "; min_val = ", min_val,
+        ECCLOG.warn(ecc::Loc::current(), "Warning: val outside table ranges: val = ", val, "; min_val = ", min_val,
                      "; max_val = ", max_val);
       }
     }
@@ -355,7 +355,7 @@ double LibTable::findValue(double slew, double constrain_slew_or_load)
   auto get_table_value = [this](auto index) -> double {
     auto& table_values = get_table_values();
     if (index >= table_values.size()) {
-      IEDALOG.error(ieda::Loc::current(), "index ", index, " beyond table value size ", table_values.size());
+      ECCLOG.error(ecc::Loc::current(), "index ", index, " beyond table value size ", table_values.size());
     }
     return table_values[index]->getFloatValue();
   };
@@ -491,7 +491,7 @@ std::vector<double> LibVectorTable::getOutputCurrent(std::optional<LibCurrentSim
       ++start_index;
     }
     if (start_index >= axis_size) {
-      IEDALOG.error(ieda::Loc::current(), "start index beyond axis size.");
+      ECCLOG.error(ecc::Loc::current(), "start index beyond axis size.");
     }
     return start_index;
   };
@@ -517,7 +517,7 @@ std::vector<double> LibVectorTable::getOutputCurrent(std::optional<LibCurrentSim
   }
 
   if (simu_info->_num_sim_point != output_currents.size()) {
-    IEDALOG.error(ieda::Loc::current(), "output currents size is not equal sim point num.");
+    ECCLOG.error(ecc::Loc::current(), "output currents size is not equal sim point num.");
   }
 
   return output_currents;
@@ -895,6 +895,23 @@ LibPort& LibPort::operator=(LibPort&& rhs) noexcept
   return *this;
 }
 
+void LibPort::inheritBusAttributes(const LibPort& bus)
+{
+  _port_type = bus._port_type;
+  _is_clock_pin = bus._is_clock_pin;
+  _clock_gate_clock_pin = bus._clock_gate_clock_pin;
+  _clock_gate_enable_pin = bus._clock_gate_enable_pin;
+  _is_clock = bus._is_clock;
+  _func_expr = bus._func_expr;
+  _func_expr_str = bus._func_expr_str;
+  _port_cap = bus._port_cap;
+  _port_caps = bus._port_caps;
+  _cap_limits = bus._cap_limits;
+  _slew_limits = bus._slew_limits;
+  _fanout_load = bus._fanout_load;
+  _max_fanout = bus._max_fanout;
+}
+
 /**
  * @brief Set cap of max/min, rise/fall.
  *
@@ -1065,6 +1082,17 @@ bool LibPort::isSeqDataIn()
 
 LibPortBus::LibPortBus(const char* port_bus_name) : LibPort(port_bus_name)
 {
+}
+
+LibPort* LibPortBus::operator[](int index)
+{
+  std::string port_name = std::string(get_port_name()) + "[" + std::to_string(index) + "]";
+  for (std::unique_ptr<LibPort>& port : _ports) {
+    if (port_name == port->get_port_name()) {
+      return port.get();
+    }
+  }
+  return nullptr;
 }
 
 LibLeakagePower::LibLeakagePower() : _owner_cell(nullptr)
@@ -1277,11 +1305,11 @@ unsigned LibArc::isClockGateCheckArc()
   const char* snk_port_name = this->get_snk_port();
   auto* src_port = _owner_cell->get_cell_port_or_port_bus(src_port_name);
   if (!src_port) {
-    IEDALOG.error(ieda::Loc::current(), "src port ", src_port_name, " is not found.");
+    ECCLOG.error(ecc::Loc::current(), "src port ", src_port_name, " is not found.");
   }
   auto* snk_port = _owner_cell->get_cell_port_or_port_bus(snk_port_name);
   if (!snk_port) {
-    IEDALOG.error(ieda::Loc::current(), "snk port ", snk_port_name, " is not found.");
+    ECCLOG.error(ecc::Loc::current(), "snk port ", snk_port_name, " is not found.");
   }
 
   return (_owner_cell->get_is_clock_gating_integrated_cell() && src_port->get_clock_gate_clock_pin()
@@ -1330,7 +1358,7 @@ double LibArc::getDelayOrConstrainCheckNs(TransType trans_type, double slew, dou
       if (libCheckTraceMatchesFilter(cell_name, src_port, snk_port)) {
         static std::atomic<int32_t> trace_count = 0;
         if (trace_count.fetch_add(1, std::memory_order_relaxed) < 40) {
-          IEDALOG.info(ieda::Loc::current(), "[lib_check_lookup] cell=", cell_name, " arc=", src_port, "->", snk_port,
+          ECCLOG.info(ecc::Loc::current(), "[lib_check_lookup] cell=", cell_name, " arc=", src_port, "->", snk_port,
                        " trans=", (trans_type == TransType::kRise ? "rise" : "fall"), " raw_arg1=", slew, " raw_arg2=",
                        load_or_constrain_slew, " converted_arg1=", arg1, " converted_arg2=", arg2, " liberty_time_unit=",
                        (liberty_time_unit == TimeUnit::kPS ? "ps" : (liberty_time_unit == TimeUnit::kFS ? "fs" : "ns")));
@@ -1404,7 +1432,7 @@ double LibArc::getDelaySigma(AnalysisMode mode, TransType trans_type, double sle
 double LibArc::getSlewNs(TransType trans_type, double slew, double load)
 {
   if (!isDelayArc()) {
-    IEDALOG.error(ieda::Loc::current(), "check arc has not output slew.");
+    ECCLOG.error(ecc::Loc::current(), "check arc has not output slew.");
   }
 
   // set/get time units in liberty
@@ -1445,7 +1473,7 @@ double LibArc::getSlewNs(TransType trans_type, double slew, double load)
 double LibArc::getSlewSigma(AnalysisMode mode, TransType trans_type, double slew, double load)
 {
   if (!isDelayArc()) {
-    IEDALOG.error(ieda::Loc::current(), "check arc has not output slew.");
+    ECCLOG.error(ecc::Loc::current(), "check arc has not output slew.");
   }
 
   // set/get time units in liberty
@@ -1487,7 +1515,7 @@ double LibArc::getSlewSigma(AnalysisMode mode, TransType trans_type, double slew
 std::unique_ptr<LibCurrentData> LibArc::getOutputCurrent(TransType trans_type, double slew, double load)
 {
   if (!isDelayArc()) {
-    IEDALOG.error(ieda::Loc::current(), "check arc has not output current.");
+    ECCLOG.error(ecc::Loc::current(), "check arc has not output current.");
   }
   auto current_data = _table_model->gateOutputCurrent(trans_type, slew, load);
   return current_data;
@@ -1561,7 +1589,7 @@ std::vector<double> LibArcSet::getDelayOrConstrainCheckNs(TransType input_trans_
   std::ranges::sort(values, std::greater<double>());
 
   if (values.empty()) {
-    IEDALOG.error(ieda::Loc::current(), "No arc found for find table value.");
+    ECCLOG.error(ecc::Loc::current(), "No arc found for find table value.");
   }
 
   return values;
@@ -1617,7 +1645,7 @@ std::vector<double> LibArcSet::getSlewNs(TransType input_trans_type, TransType o
   std::ranges::sort(values, std::greater<double>());
 
   if (values.empty()) {
-    IEDALOG.error(ieda::Loc::current(), "No arc found for find table value.");
+    ECCLOG.error(ecc::Loc::current(), "No arc found for find table value.");
   }
 
   return values;
@@ -1760,7 +1788,8 @@ LibCell::LibCell(LibCell&& other) noexcept
     : _cell_name(std::move(other._cell_name)),
       _cell_ports(std::move(other._cell_ports)),
       _cell_arcs(std::move(other._cell_arcs)),
-      _cell_power_arcs(std::move(other._cell_power_arcs))
+      _cell_power_arcs(std::move(other._cell_power_arcs)),
+      _sequentials(std::move(other._sequentials))
 {
 }
 
@@ -1771,6 +1800,7 @@ LibCell& LibCell::operator=(LibCell&& rhs) noexcept
     _cell_ports = std::move(rhs._cell_ports);
     _cell_arcs = std::move(rhs._cell_arcs);
     _cell_power_arcs = std::move(rhs._cell_power_arcs);
+    _sequentials = std::move(rhs._sequentials);
   }
 
   return *this;
@@ -2030,13 +2060,34 @@ bool LibCell::isSequentialCell()
  */
 bool LibCell::isICG()
 {
+  bool has_check_arc = false;
+  bool has_combinational_clock_to_output_arc = false;
   for (auto& liberty_arc_set : _cell_arcs) {
+    if (liberty_arc_set->get_arcs().empty()) {
+      continue;
+    }
     auto& lib_arc = liberty_arc_set->get_arcs().front();
     if (lib_arc->isClockGateCheckArc()) {
       return true;
     }
+
+    has_check_arc = has_check_arc || lib_arc->isCheckArc();
+    LibArc::TimingType timing_type = lib_arc->get_timing_type();
+    bool is_combinational_arc = timing_type == LibArc::TimingType::kCombRise || timing_type == LibArc::TimingType::kCombFall
+                                || timing_type == LibArc::TimingType::kComb;
+    if (!is_combinational_arc) {
+      continue;
+    }
+    LibPort* source_port = get_cell_port_or_port_bus(lib_arc->get_src_port());
+    LibPort* sink_port = get_cell_port_or_port_bus(lib_arc->get_snk_port());
+    has_combinational_clock_to_output_arc = has_combinational_clock_to_output_arc
+                                           || (source_port != nullptr && sink_port != nullptr && source_port->isClock() && sink_port->isOutput());
   }
-  return false;
+
+  // Some libraries omit the clock_gating_integrated_cell and clock_gate_* attributes.
+  // Their ICG cells are still identifiable by a sequential check arc and a combinational
+  // clock-input-to-output arc (for example, CK -> ECK).
+  return has_check_arc && has_combinational_clock_to_output_arc;
 }
 
 /**
@@ -2183,7 +2234,7 @@ LibertyReader Lib::loadLibertyWithCppParser(const char* file_name)
   LibertyReader liberty_reader(file_name);
   unsigned is_success = liberty_reader.readLib();
   if (!is_success) {
-    IEDALOG.error(ieda::Loc::current(), "read lib ", file_name, " failed.");
+    ECCLOG.error(ecc::Loc::current(), "read lib ", file_name, " failed.");
   }
 
   // LOG_INFO << "Load lib " << file_name << " finish.";

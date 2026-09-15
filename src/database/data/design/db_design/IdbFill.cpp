@@ -97,6 +97,10 @@ IdbFillVia::~IdbFillVia()
     delete _via;
     _via = nullptr;
   }
+  for (auto* coordinate : _coordinate_list) {
+    delete coordinate;
+  }
+  _coordinate_list.clear();
 }
 
 IdbCoordinate<int32_t>* IdbFillVia::get_coordinate(size_t index)

@@ -4,7 +4,6 @@ add_library(py_flow ${PY_FLOW_SRC})
 
 target_link_libraries(py_flow
     PUBLIC
-        flow
         pybind11::pybind11
 )
 target_include_directories(py_flow

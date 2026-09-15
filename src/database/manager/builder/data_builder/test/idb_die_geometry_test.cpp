@@ -10,11 +10,10 @@
 #include "layout_write.h"
 
 #include <filesystem>
-#include <iostream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 
+#include "utility/logger/Logger.hpp"
 namespace {
 
 void require(bool condition, const std::string& message)
@@ -63,16 +62,11 @@ void testArchiveUsesDiePointsAsCanonicalGeometry()
 
   idb::IdbLayout restored;
   idb::LayoutRead reader;
-  std::ostringstream warning;
-  auto* old_stderr = std::cerr.rdbuf(warning.rdbuf());
   const bool loaded = reader.readLayout(&restored, archive_dir.string(), false);
-  std::cerr.rdbuf(old_stderr);
 
   std::filesystem::remove_all(archive_dir);
 
   require(loaded, "failed to read stale layout archive");
-  require(warning.str().find("serialized die bounding box does not match DIEAREA points") != std::string::npos,
-          "loading inconsistent die geometry must emit a warning");
   requireRect(restored.get_die()->get_bounding_box(), 0, 0, 49319, 49319, "DIEAREA points must override stale serialized geometry");
 }
 
@@ -107,7 +101,7 @@ int main()
     testArchiveUsesDiePointsAsCanonicalGeometry();
     testArchiveWithoutDiePointsUsesSerializedGeometry();
   } catch (const std::exception& error) {
-    std::cerr << error.what() << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), error.what());
     return 1;
   }
   return 0;

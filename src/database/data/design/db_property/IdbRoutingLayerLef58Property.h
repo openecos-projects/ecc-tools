@@ -38,8 +38,8 @@ class Lef58Area
     void set_min_length(int32_t min_length) { _min_length = min_length; }
 
    private:
-    int32_t _min_width;
-    int32_t _min_length;
+    int32_t _min_width{0};
+    int32_t _min_length{0};
   };
 
   class ExceptEdgeLength
@@ -52,7 +52,7 @@ class Lef58Area
 
    private:
     std::optional<int32_t> _min_edge_length;
-    int32_t _max_edge_length;
+    int32_t _max_edge_length{0};
   };
 
   Lef58Area() = default;
@@ -70,7 +70,7 @@ class Lef58Area
   void add_except_min_size(ExceptMinSize except_min_size) { _except_min_size.push_back(except_min_size); }
 
  private:
-  int32_t _min_area;
+  int32_t _min_area{0};
   std::shared_ptr<ExceptEdgeLength> _except_edge_length;
   std::vector<ExceptMinSize> _except_min_size;
 };
@@ -95,10 +95,10 @@ class Lef58CornerFillSpacing
   void set_eol_width(int32_t eol_width) { _eol_width = eol_width; }
 
  private:
-  int32_t _spacing;
-  int32_t _edge_length1;
-  int32_t _edge_length2;
-  int32_t _eol_width;
+  int32_t _spacing{0};
+  int32_t _edge_length1{0};
+  int32_t _edge_length2{0};
+  int32_t _eol_width{0};
 };
 
 // LEF58_CORNERSPACING
@@ -124,8 +124,8 @@ class Lef58CornerSpacing
     void set_spacing(int32_t spacing) { _spacing = spacing; }
 
    private:
-    int32_t _width;
-    int32_t _spacing;
+    int32_t _width{0};
+    int32_t _spacing{0};
   };
 
   [[nodiscard]] CornerType get_corner_type() const { return _corner_type; }
@@ -168,7 +168,7 @@ class Lef58MinimumCut
 
    private:
     std::string _class_name;
-    int32_t _num_cuts;
+    int32_t _num_cuts{0};
   };
   class Length
   {
@@ -181,8 +181,8 @@ class Lef58MinimumCut
     void set_distance(int32_t distance) { _distance = distance; }
 
    private:
-    int32_t _length;
-    int32_t _distance;
+    int32_t _length{0};
+    int32_t _distance{0};
   };
 
   class Area
@@ -196,7 +196,7 @@ class Lef58MinimumCut
     void set_within_distance(int32_t distance) { _within_distance = distance; }
 
    private:
-    int32_t _area;
+    int32_t _area{0};
     std::optional<int32_t> _within_distance;
   };
   [[nodiscard]] std::optional<int32_t> get_num_cuts() const { return _num_cuts; }
@@ -231,13 +231,13 @@ class Lef58MinimumCut
  private:
   std::optional<int32_t> _num_cuts;
   std::vector<CutClass> _cut_classes;
-  int32_t _width;
+  int32_t _width{0};
   std::optional<int32_t> _within_cut_distance;
-  Orient _orient;
+  Orient _orient{Orient::kNone};
   std::optional<Length> _length;
   std::optional<Area> _area;
-  bool _same_metal_overlap;
-  bool _fully_enclosed;
+  bool _same_metal_overlap{false};
+  bool _fully_enclosed{false};
 };
 
 // LEF58_MINSTEP
@@ -258,7 +258,7 @@ class Lef58MinStep
 
    private:
     int32_t _min_adj_length;
-    bool _convex_corner;
+    bool _convex_corner{false};
     std::optional<int32_t> _except_within;
   };
 
@@ -290,8 +290,8 @@ class Lef58SpacingNotchlength
   void set_concave_ends_side_of_notch_width(int32_t width) { _concave_ends_side_of_notch_width = width; }
 
  private:
-  int32_t _min_spacing;
-  int32_t _min_notch_length;
+  int32_t _min_spacing{0};
+  int32_t _min_notch_length{0};
   std::optional<int32_t> _concave_ends_side_of_notch_width;
 };
 
@@ -323,7 +323,7 @@ class Lef58SpacingEol
     void set_other_end_width(int32_t other_end_width) { _other_end_width = other_end_width; }
 
    private:
-    int32_t _end_to_end_space;
+    int32_t _end_to_end_space{0};
     std::optional<int32_t> _one_cut_space;
     std::optional<int32_t> _two_cut_space;
     std::optional<int32_t> _extionsion;
@@ -345,7 +345,7 @@ class Lef58SpacingEol
     // [MAXLENGTH maxLength | MINLENGTH minLength [TWOSIDES]
     std::optional<int32_t> _max_length;
     std::optional<int32_t> _min_length;
-    bool _two_sides;
+    bool _two_sides{false};
   };
   class ParallelEdge
   {
@@ -371,15 +371,15 @@ class Lef58SpacingEol
     void set_parallel_same_mask(bool parallel_same_mask) { _parallel_same_mask = parallel_same_mask; }
 
    private:
-    int32_t _par_space;
-    bool _subtract_eol_width;
-    int32_t _par_within;
+    int32_t _par_space{0};
+    bool _subtract_eol_width{false};
+    int32_t _par_within{0};
     std::optional<int32_t> _prl;
     std::optional<int32_t> _min_length;
-    bool _two_edges;
-    bool _same_metal;
-    bool _non_eol_corner_only;
-    bool _parallel_same_mask;
+    bool _two_edges{false};
+    bool _same_metal{false};
+    bool _non_eol_corner_only{false};
+    bool _parallel_same_mask{false};
   };
 
   class EncloseCut
@@ -406,10 +406,10 @@ class Lef58SpacingEol
     void set_all_cuts(bool all_cuts) { _all_cuts = all_cuts; }
 
    private:
-    Direction _direction;
-    int32_t _enclose_dist;
-    int32_t _cut_to_metal_space;
-    bool _all_cuts;
+    Direction _direction{Direction::kNone};
+    int32_t _enclose_dist{0};
+    int32_t _cut_to_metal_space{0};
+    bool _all_cuts{false};
   };
 
   [[nodiscard]] int32_t get_eol_space() const { return _eol_space; }
@@ -428,8 +428,8 @@ class Lef58SpacingEol
   void set_enclose_cut(EncloseCut enclose_cut) { _enclose_cut = enclose_cut; }
 
  private:
-  int32_t _eol_space;
-  int32_t _eol_width;
+  int32_t _eol_space{0};
+  int32_t _eol_width{0};
   std::optional<int32_t> _eol_within;
   std::optional<EndToEnd> _end_to_end;
   std::optional<AdjEdgeLength> _adj_edge_length;
@@ -459,10 +459,10 @@ class Lef58SpacingTableJogToJog
     void set_long_jog_spacing(int32_t long_jog_spacing) { _long_jog_spacing = long_jog_spacing; }
 
    private:
-    int32_t _width;
-    int32_t _par_length;
-    int32_t _par_within;
-    int32_t _long_jog_spacing;
+    int32_t _width{0};
+    int32_t _par_length{0};
+    int32_t _par_within{0};
+    int32_t _long_jog_spacing{0};
   };
 
   Lef58SpacingTableJogToJog() = default;
@@ -484,9 +484,9 @@ class Lef58SpacingTableJogToJog
   }
 
  private:
-  int32_t _jog_to_jog_spacing;
-  int32_t _jog_width;
-  int32_t _short_jog_spacing;
+  int32_t _jog_to_jog_spacing{0};
+  int32_t _jog_width{0};
+  int32_t _short_jog_spacing{0};
   std::vector<Width> _width_list;
 };
 }  // namespace idb::routinglayer

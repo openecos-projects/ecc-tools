@@ -55,6 +55,8 @@ struct SynthesisTraceSummary
   bool success = true;
   SynthesisOutcome outcome = SynthesisOutcome::kFinished;
   std::string no_op_reason;
+  std::string failure_reason;
+  std::string commit_status = "not_attempted";
   std::size_t total_clocks = 0U;
   std::size_t successful_clocks = 0U;
   std::size_t skipped_clocks = 0U;
@@ -64,6 +66,8 @@ struct SynthesisTraceSummary
   std::size_t regular_sinks = 0U;
   std::size_t selected_htree_level_count = 0U;
   unsigned selected_htree_depth = 0U;
+  std::size_t inserted_inst_count = 0U;
+  std::size_t inserted_net_count = 0U;
   std::size_t htree_inserted_buffer_count = 0U;
   std::size_t htree_inserted_net_count = 0U;
   std::vector<SynthesisTraceStatusRecord> domain_status;
@@ -99,6 +103,8 @@ struct InstantiationSummary
   bool design_ready = false;
   bool success = false;
   std::size_t clock_count = 0U;
+  std::size_t inserted_inst_count = 0U;
+  std::size_t inserted_net_count = 0U;
   std::string failure_reason = "n/a";
 };
 

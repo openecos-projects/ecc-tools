@@ -27,10 +27,36 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "idm.h"
 
 #include <cassert>
+#include <stdexcept>
+#include <unordered_set>
 namespace idm {
+
+namespace {
+
+void commitPlacement(IdbInstance* instance, int32_t x, int32_t y, IdbOrient orient)
+{
+  instance->set_orient(orient, false);
+  instance->set_coodinate(x, y, false);
+  instance->set_status(IdbPlacementStatus::kPlaced);
+  instance->set_bounding_box();
+  for (auto* pin : instance->get_pin_list()->get_pin_list()) {
+    auto* term = pin->get_term();
+    if (term == nullptr || term->get_port_number() <= 0) {
+      continue;
+    }
+    pin->set_average_coordinate(x + term->get_average_position().get_x(), y + term->get_average_position().get_y());
+    pin->set_bounding_box();
+    pin->set_grid_coordinate();
+  }
+  instance->set_halo_coodinate();
+  instance->set_obs_box_list();
+}
+
+}  // namespace
 
 DataManager* DataManager::_instance = nullptr;
 
@@ -46,6 +72,10 @@ bool DataManager::init(string config_path)
   }
 
   if (!initConfig(config_path)) {
+    return false;
+  }
+
+  if (!initLef(std::vector<std::string>{_config.get_tech_lef_path()}, true)) {
     return false;
   }
 
@@ -68,6 +98,11 @@ void DataManager::reset()
 
 void DataManager::resetData()
 {
+  if(_idb_verilog_service != nullptr){
+    delete _idb_verilog_service;
+    _idb_verilog_service = nullptr;
+  }
+
   delete _idb_builder;
   _idb_builder = nullptr;
 
@@ -119,10 +154,10 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
 {
   // std::vector<ContestParser::Instance*> inst_list;
   int i = 0;
-  printf("write_placement_back start!!! Db address is %p\n", this);
-  printf("write_placement_back start!!! idb_design address is %p\n", this->get_idb_design());
+  ECCLOG.info(ecc::Loc::current(), "write_placement_back start. Db address is ", this);
+  ECCLOG.info(ecc::Loc::current(), "write_placement_back start. idb_design address is ", this->get_idb_design());
   if (x == nullptr || y == nullptr || len <= 0) {
-    std::cout << "WriteBack placement finished!!" << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "WriteBack placement finished!!");
     return;
   }
   auto const& row_list = this->get_idb_layout()->get_rows()->get_row_list();
@@ -178,32 +213,53 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
     } else {
       orient = inst->get_orient();
     }
-    inst->set_orient(orient, false);
-    inst->set_coodinate(static_cast<int32_t>(xx), static_cast<int32_t>(yy), false);
-    inst->set_status(IdbPlacementStatus::kPlaced);
-    inst->set_bounding_box();
-    for (auto* pin : inst->get_pin_list()->get_pin_list()) {
-      auto* term = pin->get_term();
-      if (term == nullptr || term->get_port_number() <= 0) {
-        continue;
-      }
-      pin->set_average_coordinate(static_cast<int32_t>(xx) + term->get_average_position().get_x(),
-                                  static_cast<int32_t>(yy) + term->get_average_position().get_y());
-      pin->set_bounding_box();
-      pin->set_grid_coordinate();
-    }
-    inst->set_halo_coodinate();
-    inst->set_obs_box_list();
+    commitPlacement(inst, static_cast<int32_t>(xx), static_cast<int32_t>(yy), orient);
     i++;
     // flag = true;
   }
   // output hpwl
-  std::cout << "WriteBack placement finished!!" << std::endl;
-  // std::cout << "WriteBack double finished, Current Contest DB Total HPWL : " << contest_db->obtainTotalHPWL() <<
-  // std::endl;
+  ECCLOG.info(ecc::Loc::current(), "WriteBack placement finished!!");
+  // ECCLOG.info(ecc::Loc::current(), "WriteBack double finished, Current Contest DB Total HPWL: ",
+  //              contest_db->obtainTotalHPWL());
 
   return;
 }
+
+std::size_t DataManager::write_selected_placement_back(const std::vector<InstancePlacementUpdate>& updates)
+{
+  auto* design = get_idb_design();
+  if (design == nullptr || design->get_instance_list() == nullptr) {
+    throw std::runtime_error("Cannot write selected placement without an active iDB design");
+  }
+
+  std::unordered_set<std::string> names;
+  std::vector<IdbInstance*> instances;
+  instances.reserve(updates.size());
+  for (const auto& update : updates) {
+    if (!names.insert(update.instance_name).second) {
+      throw std::invalid_argument("Selected placement contains duplicate instance " + update.instance_name);
+    }
+    auto* instance = design->get_instance_list()->find_instance(update.instance_name);
+    if (instance == nullptr) {
+      throw std::runtime_error("Selected placement instance no longer exists: " + update.instance_name);
+    }
+    if (instance->get_id() != update.expected_instance_id) {
+      throw std::runtime_error("Selected placement no longer refers to the same instance: " + update.instance_name);
+    }
+    auto* cell_master = instance->get_cell_master();
+    if (cell_master == nullptr || !cell_master->is_block()) {
+      throw std::runtime_error("Selected placement instance is no longer a hard macro: " + update.instance_name);
+    }
+    instances.push_back(instance);
+  }
+
+  for (std::size_t index = 0; index < updates.size(); ++index) {
+    const auto& update = updates[index];
+    commitPlacement(instances[index], update.x, update.y, update.orient);
+  }
+  return updates.size();
+}
+
 bool DataManager::readDef(string path)
 {
   if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
@@ -226,6 +282,23 @@ bool DataManager::readVerilog(string path, string top_module)
   if (!initVerilog(path, top_module)) {
     return false;
   }
+
+  return true;
+}
+
+bool DataManager::addVerilog(string path, string top_module)
+{
+  if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
+    return false;
+  }
+
+  IdbDefService* verilog_service = _idb_builder->addVerilog(path, top_module);
+  if (verilog_service == nullptr) {
+    return false;
+  }
+
+  delete _idb_verilog_service;
+  _idb_verilog_service = verilog_service;
 
   return true;
 }

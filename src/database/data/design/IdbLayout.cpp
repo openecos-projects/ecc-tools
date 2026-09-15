@@ -29,6 +29,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#include "utility/logger/Logger.hpp"
 #include "IdbLayout.h"
 
 #include <limits.h>
@@ -43,8 +44,7 @@ IdbLayout::IdbLayout()
   _manufacture_grid = -1;
   _die = new IdbDie();
   _core = new IdbCore();
-  // _units            = new IdbUnits();
-  _units = nullptr;
+  _units = new IdbUnits();
   _layers = new IdbLayers();
   _sites = new IdbSites();
   _rows = new IdbRows();
@@ -103,6 +103,10 @@ IdbLayout::~IdbLayout()
     delete _via_rule_list;
     _via_rule_list = nullptr;
   }
+  if (_max_via_stack != nullptr) {
+    delete _max_via_stack;
+    _max_via_stack = nullptr;
+  }
 }
 
 IdbCore* IdbLayout::get_core()
@@ -114,7 +118,7 @@ IdbCore* IdbLayout::get_core()
     int32_t max_y = INT_MIN;
     for (IdbRow* row : _rows->get_row_list()) {
       if (row->get_site() != nullptr && row->get_site()->is_core_site() == false) {
-        std::cout << "Warning: row " << row->get_name() << " " << row->get_site()->get_name() << " site is not core site!" << std::endl;
+        ECCLOG.warn(ecc::Loc::current(), "Warning: row ", row->get_name(), " ", row->get_site()->get_name(), " site is not core site!");
         continue;
       }
       IdbRect* row_rect = row->get_bounding_box();
@@ -126,7 +130,12 @@ IdbCore* IdbLayout::get_core()
       max_x = std::max(max_x, row_rect->get_high_x());
       max_y = std::max(max_y, row_rect->get_high_y());
     }
-    _core->set_bounding_box(min_x, min_y, max_x, max_y);
+    if (min_x != INT_MAX) {
+      _core->set_bounding_box(min_x, min_y, max_x, max_y);
+    } else {
+      auto* die_bbox = _die->get_bounding_box();
+      _core->set_bounding_box(die_bbox->get_low_x(), die_bbox->get_low_y(), die_bbox->get_high_x(), die_bbox->get_high_y());
+    }
   } else {
     auto* die_bbox = _die->get_bounding_box();
     _core->set_bounding_box(die_bbox->get_low_x(), die_bbox->get_low_y(), die_bbox->get_high_x(), die_bbox->get_high_y());

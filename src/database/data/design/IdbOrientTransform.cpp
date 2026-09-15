@@ -30,6 +30,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "IdbOrientTransform.h"
 
 #include <algorithm>
@@ -42,8 +43,8 @@ IdbOrientTransform::~IdbOrientTransform()
 
 bool IdbOrientTransform::transformCoordinate(IdbCoordinate<int32_t>* coordinate_transform)
 {
-  if (coordinate_transform == nullptr) {
-    std::cout << "Error : coordinate is null..." << std::endl;
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    ECCLOG.warn(ecc::Loc::current(), "Error : coordinate is null...");
     return false;
     ;
   }
@@ -94,6 +95,10 @@ bool IdbOrientTransform::transformCoordinate(IdbCoordinate<int32_t>* coordinate_
 
 bool IdbOrientTransform::transformRect(IdbRect* rect)
 {
+  if (rect == nullptr) {
+    ECCLOG.warn(ecc::Loc::current(), "Error : rect is null...");
+    return false;
+  }
   IdbCoordinate<int32_t> ll = rect->get_low_point();
   IdbCoordinate<int32_t> ur = rect->get_high_point();
 
@@ -128,6 +133,9 @@ void IdbOrientTransform::transform_r0(IdbCoordinate<int32_t>* coordinate_transfo
  */
 void IdbOrientTransform::transform_r90(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -139,6 +147,9 @@ void IdbOrientTransform::transform_r90(IdbCoordinate<int32_t>* coordinate_transf
 
 void IdbOrientTransform::transform_r180(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   // set _original as coordinate_transform's origin point
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
@@ -151,6 +162,9 @@ void IdbOrientTransform::transform_r180(IdbCoordinate<int32_t>* coordinate_trans
 
 void IdbOrientTransform::transform_r270(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -162,6 +176,9 @@ void IdbOrientTransform::transform_r270(IdbCoordinate<int32_t>* coordinate_trans
 
 void IdbOrientTransform::transform_my(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -173,6 +190,9 @@ void IdbOrientTransform::transform_my(IdbCoordinate<int32_t>* coordinate_transfo
 
 void IdbOrientTransform::transform_mx(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -184,6 +204,9 @@ void IdbOrientTransform::transform_mx(IdbCoordinate<int32_t>* coordinate_transfo
 
 void IdbOrientTransform::transform_mx90(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -195,6 +218,9 @@ void IdbOrientTransform::transform_mx90(IdbCoordinate<int32_t>* coordinate_trans
 
 void IdbOrientTransform::transform_my90(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -208,8 +234,8 @@ void IdbOrientTransform::transform_my90(IdbCoordinate<int32_t>* coordinate_trans
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 bool IdbOrientTransform::cellMasterCoordinate(IdbCoordinate<int32_t>* coordinate_transform)
 {
-  if (coordinate_transform == nullptr) {
-    std::cout << "Error : coordinate is null..." << std::endl;
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    ECCLOG.warn(ecc::Loc::current(), "Error : coordinate is null...");
     return false;
     ;
   }
@@ -261,6 +287,9 @@ bool IdbOrientTransform::cellMasterCoordinate(IdbCoordinate<int32_t>* coordinate
 // no rotation
 void IdbOrientTransform::cellMaster_r0(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -271,6 +300,9 @@ void IdbOrientTransform::cellMaster_r0(IdbCoordinate<int32_t>* coordinate_transf
  */
 void IdbOrientTransform::cellMaster_r90(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -282,6 +314,9 @@ void IdbOrientTransform::cellMaster_r90(IdbCoordinate<int32_t>* coordinate_trans
 
 void IdbOrientTransform::cellMaster_r180(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -293,6 +328,9 @@ void IdbOrientTransform::cellMaster_r180(IdbCoordinate<int32_t>* coordinate_tran
 
 void IdbOrientTransform::cellMaster_r270(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -304,6 +342,9 @@ void IdbOrientTransform::cellMaster_r270(IdbCoordinate<int32_t>* coordinate_tran
 
 void IdbOrientTransform::cellMaster_my(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -315,6 +356,9 @@ void IdbOrientTransform::cellMaster_my(IdbCoordinate<int32_t>* coordinate_transf
 
 void IdbOrientTransform::cellMaster_mx(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -326,6 +370,9 @@ void IdbOrientTransform::cellMaster_mx(IdbCoordinate<int32_t>* coordinate_transf
 
 void IdbOrientTransform::cellMaster_mx90(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 
@@ -337,6 +384,9 @@ void IdbOrientTransform::cellMaster_mx90(IdbCoordinate<int32_t>* coordinate_tran
 
 void IdbOrientTransform::cellMaster_my90(IdbCoordinate<int32_t>* coordinate_transform)
 {
+  if (coordinate_transform == nullptr || _original == nullptr) {
+    return;
+  }
   int32_t x = coordinate_transform->get_x() - _original->get_x();
   int32_t y = coordinate_transform->get_y() - _original->get_y();
 

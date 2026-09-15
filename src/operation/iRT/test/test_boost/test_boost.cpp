@@ -5,6 +5,8 @@
 #include <sstream>
 #include <vector>
 
+#include "utility/logger/Logger.hpp"
+
 using int32_t = int32_t;
 #define RT_ERROR 1E-5
 
@@ -182,9 +184,9 @@ class RTUtil
       gds_file << "ENDSTR" << std::endl;
       gds_file << "ENDLIB" << std::endl;
       gds_file.close();
-      std::cout << "[Info] Result has been written to '" << gds_file_path << "'!" << std::endl;
+      ECCLOG.info(ecc::Loc::current(), "[Info] Result has been written to '", gds_file_path, "'!");
     } else {
-      std::cout << "[Error] Failed to open gds file '" << gds_file_path << "'!" << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "[Error] Failed to open gds file '", gds_file_path, "'!");
       assert(false);
     }
   }
@@ -234,9 +236,9 @@ class RTUtil
       gds_file << "ENDSTR" << std::endl;
       gds_file << "ENDLIB" << std::endl;
       gds_file.close();
-      std::cout << "[Info] Result has been written to '" << gds_file_path << "'!" << std::endl;
+      ECCLOG.info(ecc::Loc::current(), "[Info] Result has been written to '", gds_file_path, "'!");
     } else {
-      std::cout << "[Error] Failed to open gds file '" << gds_file_path << "'!" << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "[Error] Failed to open gds file '", gds_file_path, "'!");
       assert(false);
     }
   }
@@ -286,9 +288,9 @@ class RTUtil
       gds_file << "ENDSTR" << std::endl;
       gds_file << "ENDLIB" << std::endl;
       gds_file.close();
-      std::cout << "[Info] Result has been written to '" << gds_file_path << "'!" << std::endl;
+      ECCLOG.info(ecc::Loc::current(), "[Info] Result has been written to '", gds_file_path, "'!");
     } else {
-      std::cout << "[Error] Failed to open gds file '" << gds_file_path << "'!" << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "[Error] Failed to open gds file '", gds_file_path, "'!");
       assert(false);
     }
   }
@@ -338,9 +340,9 @@ class RTUtil
       gds_file << "ENDSTR" << std::endl;
       gds_file << "ENDLIB" << std::endl;
       gds_file.close();
-      std::cout << "[Info] Result has been written to '" << gds_file_path << "'!" << std::endl;
+      ECCLOG.info(ecc::Loc::current(), "[Info] Result has been written to '", gds_file_path, "'!");
     } else {
-      std::cout << "[Error] Failed to open gds file '" << gds_file_path << "'!" << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "[Error] Failed to open gds file '", gds_file_path, "'!");
       assert(false);
     }
   }
@@ -635,7 +637,7 @@ class RTUtil
   {
     int32_t integer_scale = std::round(double_scale);
     if (std::abs(double_scale - integer_scale) > RT_ERROR) {
-      std::cout << "Exceeding the error range of a double!" << std::endl;
+      ECCLOG.warn(ecc::Loc::current(), "Exceeding the error range of a double!");
     }
     return integer_scale;
   }
@@ -657,7 +659,7 @@ class RTUtil
         GTLPointInt& pre_coord = gtl_point_list[i - 1];
         GTLPointInt& curr_coord = gtl_point_list[i];
         if (gtl::x(pre_coord) != gtl::x(curr_coord) && gtl::y(pre_coord) != gtl::y(curr_coord)) {
-          std::cout << "The segment is oblique!" << std::endl;
+          ECCLOG.info(ecc::Loc::current(), "The segment is oblique!");
         }
       }
       // 生成poly_90

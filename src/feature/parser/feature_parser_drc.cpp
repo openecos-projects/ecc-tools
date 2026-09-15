@@ -15,7 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @project		iEDA
+ * @project		ECC
  * @file		feature_parser.cpp
  * @author		Yell
  * @date		10/08/2023
@@ -31,18 +31,19 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "utility/logger/Logger.hpp"
 #include "IdbDesign.h"
 #include "IdbInstance.h"
 #include "feature_drc.h"
 #include "feature_parser.h"
 #include "json_parser.h"
 
-namespace ieda_feature {
+namespace ecc_feature {
 
 bool FeatureParser::buildMacroDrc(std::string path, std::string drc_path)
 {
-  std::cout << "path : " << path << std::endl;
-  std::cout << "drc_path : " << drc_path << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "path : ", path);
+  ECCLOG.info(ecc::Loc::current(), "drc_path : ", drc_path);
 
   DrcMacroDistribution macro_drc;
   /// init macro info
@@ -58,12 +59,12 @@ bool FeatureParser::buildMacroDrc(std::string path, std::string drc_path)
     macro_drc.macro_list[macro->get_name()] = drc_macro;
   }
 
-  std::cout << "macro size : " << macro_drc.macro_list.size() << std::endl;
+  ECCLOG.info(ecc::Loc::current(), "macro size : ", macro_drc.macro_list.size());
 
   /// load drc json
   auto json_file = std::ifstream(drc_path);
   if (false == json_file.is_open()) {
-    std::cout << "Error, can't open file : " << drc_path << std::endl;
+    ECCLOG.warn(ecc::Loc::current(), "Error, can't open file : ", drc_path);
     return false;
   }
 
@@ -106,7 +107,7 @@ bool FeatureParser::buildMacroDrc(std::string path, std::string drc_path)
   }
 
   /// save macro drc distribution to json
-  std::ofstream& file_stream = ieda::getOutputFileStream(path);
+  std::ofstream& file_stream = ecc::getOutputFileStream(path);
   json root_output;
 
   int macro_drc_num = 0;
@@ -129,8 +130,7 @@ bool FeatureParser::buildMacroDrc(std::string path, std::string drc_path)
 
     root_output["macro_list"][name] = json_macro;
 
-    std::cout << "macro " << name << " " << macro.drc_num << " " << macro.llx << " " << macro.lly << " " << macro.urx << " " << macro.ury
-              << std::endl;
+    ECCLOG.info(ecc::Loc::current(), "macro ", name, " ", macro.drc_num, " ", macro.llx, " ", macro.lly, " ", macro.urx, " ", macro.ury);
     macro_num++;
     macro_drc_num += macro.drc_num;
   }
@@ -140,9 +140,9 @@ bool FeatureParser::buildMacroDrc(std::string path, std::string drc_path)
 
   /// build route data json
   file_stream << std::setw(4) << root_output;
-  ieda::closeFileStream(file_stream);
+  ecc::closeFileStream(file_stream);
 
   return true;
 }
 
-}  // namespace ieda_feature
+}  // namespace ecc_feature

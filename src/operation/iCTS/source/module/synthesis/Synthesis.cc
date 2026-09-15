@@ -23,9 +23,11 @@
 
 #include "synthesis/Synthesis.hh"
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -41,6 +43,7 @@
 #include "io/Wrapper.hh"
 #include "synthesis/distribution/ClockDistribution.hh"
 #include "synthesis/htree/characterization/library/CharacterizationLibrary.hh"
+#include "synthesis/realization/ClockTreeRealization.hh"
 #include "synthesis/topology/Topology.hh"
 #include "synthesis/topology/layout/ClockLayoutBuilder.hh"
 #include "synthesis/trace/domain_status/DomainStatusRecorder.hh"
@@ -63,6 +66,38 @@ struct ClockSynthesisCounters
   std::size_t hard_macro_sinks = 0U;
   std::size_t regular_sinks = 0U;
 };
+
+struct SynthesizedObjectCounts
+{
+  std::size_t insts = 0U;
+  std::size_t nets = 0U;
+};
+
+auto CountSynthesizedObjects(const Design& design) -> SynthesizedObjectCounts
+{
+  SynthesizedObjectCounts counts;
+  for (const auto* clock : design.get_clocks()) {
+    if (clock == nullptr) {
+      continue;
+    }
+    std::unordered_set<const Pin*> synthesized_outputs;
+    for (const auto& arc : clock->get_propagation_arcs()) {
+      if (arc.origin != ClockPropagationOrigin::kSynthesized) {
+        continue;
+      }
+      ++counts.insts;
+      if (arc.output_pin != nullptr) {
+        synthesized_outputs.insert(arc.output_pin);
+      }
+    }
+    for (const auto* net : clock->get_nets()) {
+      if (net != nullptr && synthesized_outputs.contains(net->get_driver())) {
+        ++counts.nets;
+      }
+    }
+  }
+  return counts;
+}
 
 struct ClockSynthesisRunInput
 {
@@ -226,8 +261,15 @@ auto ClockSynthesisRun::formClockTopology(std::size_t valid_sinks) -> bool
 
 auto ClockSynthesisRun::run() -> ClockSynthesisSummary
 {
-  Topology::resetClockTopology(*_design, *_clock);
   _per_clock_layout.ensureClock(_clock->get_clock_name(), _clock->get_clock_net_name(), _clock_index);
+
+  const auto synthesis_frontier = ClockTreeRealization::deriveSynthesisFrontier(*_clock);
+  if (synthesis_frontier.hasTracedTopology() && !_design->rebuildClockDAG()) {
+    _status_recorder.appendNoDomain(*_clock, DomainStatus::kFailed, _clock->get_loads().size(), _clock->get_loads().size(),
+                                    _design->get_clock_dag().get_status());
+    return ClockSynthesisSummary{.success = false, .skipped = false};
+  }
+  Topology::resetClockTopology(*_design, *_clock);
 
   const auto [clock_source, clock_source_net] = ensureClockSource();
   if (clock_source == nullptr) {
@@ -241,33 +283,74 @@ auto ClockSynthesisRun::run() -> ClockSynthesisSummary
     return ClockSynthesisSummary{.success = false, .skipped = false};
   }
 
-  const auto sink_partition = ClockDistribution::partitionSinkDomains(*_clock);
-  const auto valid_sinks = sink_partition.valid_sink_count;
-  _counters->hard_macro_sinks += sink_partition.macro_sinks.size();
-  _counters->regular_sinks += sink_partition.regular_sinks.size();
-  const auto active_domains = static_cast<unsigned>(!sink_partition.macro_sinks.empty()) + static_cast<unsigned>(!sink_partition.regular_sinks.empty());
-  EmitLogTable(Loc::current(), "CTS Sink Domain Overview", {"Clock", "Net", "Valid Sinks", "Hard Macro", "Regular", "Active Domains", "Preclustered Reuse"},
-               {{_clock->get_clock_name(), _clock->get_clock_net_name(), ToLogTableCell(valid_sinks), ToLogTableCell(sink_partition.macro_sinks.size()),
-                 ToLogTableCell(sink_partition.regular_sinks.size()), ToLogTableCell(active_domains), ToLogTableCell(_clock->is_preclustered_sink_reuse())}});
+  const auto terminal_partition = ClockDistribution::partitionSinkDomains(*_clock);
+  const auto valid_sinks = terminal_partition.valid_sink_count;
+  _counters->hard_macro_sinks += terminal_partition.macro_sinks.size();
+  _counters->regular_sinks += terminal_partition.regular_sinks.size();
+  const auto active_domains = static_cast<unsigned>(!terminal_partition.macro_sinks.empty()) + static_cast<unsigned>(!terminal_partition.regular_sinks.empty());
+  EmitLogTable(Loc::current(), "CTS Sink Domain Overview",
+               {"Clock", "Net", "Valid Sinks", "Hard Macro", "Regular", "Synthesis Frontier", "Active Domains", "Preclustered Reuse"},
+               {{_clock->get_clock_name(), _clock->get_clock_net_name(), ToLogTableCell(valid_sinks), ToLogTableCell(terminal_partition.macro_sinks.size()),
+                 ToLogTableCell(terminal_partition.regular_sinks.size()), ToLogTableCell(synthesis_frontier.pins.size()), ToLogTableCell(active_domains),
+                 ToLogTableCell(_clock->is_preclustered_sink_reuse())}});
   if (valid_sinks == 0U) {
     _status_recorder.appendNoDomain(*_clock, DomainStatus::kSkipped, 0U, 0U, "no valid sinks");
     CTSLOG.warn(Loc::current(), "Synthesis: skip clock \"", _clock->get_clock_name(), "\" because no valid sinks are available.");
     return ClockSynthesisSummary{.success = false, .skipped = true};
   }
-  ClockLayoutBuilder::appendSinkInsts(_per_clock_layout, *_clock, _clock_index, sink_partition.macro_sinks, SinkDomainKind::kHardMacro);
-  ClockLayoutBuilder::appendSinkInsts(_per_clock_layout, *_clock, _clock_index, sink_partition.regular_sinks, SinkDomainKind::kRegular);
+  ClockLayoutBuilder::appendSinkInsts(_per_clock_layout, *_clock, _clock_index, terminal_partition.macro_sinks, SinkDomainKind::kHardMacro);
+  ClockLayoutBuilder::appendSinkInsts(_per_clock_layout, *_clock, _clock_index, terminal_partition.regular_sinks, SinkDomainKind::kRegular);
 
-  _sink_domain_contexts.reserve(2U);
-  if (!prepareSinkDomain(SinkDomainKind::kHardMacro, sink_partition.macro_sinks, valid_sinks)) {
+  if (synthesis_frontier.isFullyCoveredTracedTopology()) {
+    if (!_design->rebuildClockDAG()) {
+      _status_recorder.appendNoDomain(*_clock, DomainStatus::kFailed, valid_sinks, valid_sinks, _design->get_clock_dag().get_status());
+      return ClockSynthesisSummary{.success = false, .skipped = false};
+    }
+    if (!terminal_partition.macro_sinks.empty()) {
+      ++_counters->total_sink_domains;
+      _status_recorder.append(*_clock, DomainStatus::kFinished, SinkDomainKind::kHardMacro, valid_sinks, terminal_partition.macro_sinks.size(),
+                              "traced_input_fully_covered");
+    }
+    if (!terminal_partition.regular_sinks.empty()) {
+      ++_counters->total_sink_domains;
+      _status_recorder.append(*_clock, DomainStatus::kFinished, SinkDomainKind::kRegular, valid_sinks, terminal_partition.regular_sinks.size(),
+                              "traced_input_fully_covered");
+    }
+    ClockLayoutBuilder::merge(*_clock_layout, _per_clock_layout);
+    return ClockSynthesisSummary{.success = true, .skipped = false};
+  }
+
+  const auto frontier_partition = ClockDistribution::partitionSinkDomains(synthesis_frontier.pins);
+  if (frontier_partition.valid_sink_count == 0U) {
+    _status_recorder.appendNoDomain(*_clock, DomainStatus::kFailed, valid_sinks, 0U, "synthesis frontier has no valid loads");
     return ClockSynthesisSummary{.success = false, .skipped = false};
   }
-  if (!prepareSinkDomain(SinkDomainKind::kRegular, sink_partition.regular_sinks, valid_sinks)) {
+
+  _sink_domain_contexts.reserve(2U);
+  if (!prepareSinkDomain(SinkDomainKind::kHardMacro, frontier_partition.macro_sinks, valid_sinks)) {
+    return ClockSynthesisSummary{.success = false, .skipped = false};
+  }
+  if (!prepareSinkDomain(SinkDomainKind::kRegular, frontier_partition.regular_sinks, valid_sinks)) {
     return ClockSynthesisSummary{.success = false, .skipped = false};
   }
   return formClockTopology(valid_sinks) ? ClockSynthesisSummary{.success = true, .skipped = false} : ClockSynthesisSummary{.success = false, .skipped = false};
 }
 
 }  // namespace
+
+auto CommitSynthesisCandidate(DataManager& data_manager, std::unique_ptr<Design> design, ClockLayout clock_layout, SynthesisTraceSummary summary,
+                              DataManagerStatus& commit_status) -> SynthesisTraceSummary
+{
+  summary.commit_status = "committed";
+  commit_status = data_manager.commitSynthesis(std::move(design), std::move(clock_layout), summary);
+  if (!commit_status.ok()) {
+    summary.success = false;
+    summary.outcome = SynthesisOutcome::kFailed;
+    summary.failure_reason = commit_status.message;
+    summary.commit_status = "rejected";
+  }
+  return summary;
+}
 
 auto Synthesis::run() -> SynthesisTraceSummary
 {
@@ -280,7 +363,6 @@ auto Synthesis::run() -> SynthesisTraceSummary
   auto& design = *local_design;
   auto& wrapper = CTSDM.getWrapper();
   auto& fast_sta = CTSDM.getFastSTA();
-
   clock_layout.reset();
   SynthesisTraceSummary summary;
   summary.domain_status.clear();
@@ -366,7 +448,17 @@ auto Synthesis::run() -> SynthesisTraceSummary
   summary.total_sink_domains = synthesis_counters.total_sink_domains;
   summary.hard_macro_sinks = synthesis_counters.hard_macro_sinks;
   summary.regular_sinks = synthesis_counters.regular_sinks;
+  const auto synthesized_object_counts = CountSynthesizedObjects(design);
+  summary.inserted_inst_count = synthesized_object_counts.insts;
+  summary.inserted_net_count = synthesized_object_counts.nets;
   clock_layout.markSynthesisComplete(summary.success);
+
+  DataManagerStatus commit_status;
+  bool commit_attempted = false;
+  if (summary.outcome != SynthesisOutcome::kFailed) {
+    commit_attempted = true;
+    summary = CommitSynthesisCandidate(CTSDM, std::move(local_design), std::move(clock_layout), std::move(summary), commit_status);
+  }
 
   EmitLogTable(Loc::current(), "CTS Clock Tree Synthesis Overview", {"Metric", "Value"},
                {{"Outcome", synthesisOutcomeName(summary.outcome)},
@@ -380,9 +472,13 @@ auto Synthesis::run() -> SynthesisTraceSummary
                 {"Regular Sinks", ToLogTableCell(summary.regular_sinks)},
                 {"Selected HTree Levels", ToLogTableCell(summary.selected_htree_level_count)},
                 {"Selected HTree Depth", ToLogTableCell(summary.selected_htree_depth)},
+                {"Inserted Instances", ToLogTableCell(summary.inserted_inst_count)},
+                {"Inserted Nets", ToLogTableCell(summary.inserted_net_count)},
                 {"Inserted HTree Buffers", ToLogTableCell(summary.htree_inserted_buffer_count)},
                 {"Inserted HTree Nets", ToLogTableCell(summary.htree_inserted_net_count)},
-                {"No-op Reason", summary.no_op_reason.empty() ? "n/a" : summary.no_op_reason}});
+                {"Commit Status", summary.commit_status},
+                {"No-op Reason", summary.no_op_reason.empty() ? "n/a" : summary.no_op_reason},
+                {"Failure Reason", summary.failure_reason.empty() ? "n/a" : summary.failure_reason}});
 
   LogTableRows domain_rows;
   for (const auto& status : summary.domain_status) {
@@ -391,13 +487,20 @@ auto Synthesis::run() -> SynthesisTraceSummary
                            status.detail.empty() ? "n/a" : status.detail});
   }
   EmitLogTable(Loc::current(), "CTS Clock Tree Sink Domains", {"Clock", "Net", "Domain", "Status", "Valid", "Domain Sinks", "Detail"}, domain_rows);
-  if (summary.outcome != SynthesisOutcome::kFailed) {
-    const auto commit_status = CTSDM.commitSynthesis(std::move(local_design), std::move(clock_layout), summary);
-    if (!commit_status.ok()) {
-      summary.success = false;
-      summary.outcome = SynthesisOutcome::kFailed;
-      CTSLOG.warn(Loc::current(), "CTS synthesis commit failed: ", commit_status.message);
+
+  if (commit_attempted && !commit_status.ok()) {
+    LogTableRows issue_rows;
+    constexpr std::size_t max_commit_issues = 8U;
+    for (std::size_t issue_index = 0; issue_index < std::min(max_commit_issues, commit_status.graph_issues.size()); ++issue_index) {
+      const auto& issue = commit_status.graph_issues.at(issue_index);
+      issue_rows.push_back({ClockGraphIssueCodeName(issue.code), issue.clock_name.empty() ? "n/a" : issue.clock_name,
+                            issue.object_name.empty() ? "n/a" : issue.object_name, issue.message.empty() ? "n/a" : issue.message});
     }
+    if (issue_rows.empty()) {
+      issue_rows.push_back({"commit_error", "n/a", "n/a", commit_status.message});
+    }
+    EmitLogTable(Loc::current(), "CTS Synthesis Commit Diagnostics", {"Code", "Clock", "Object", "Detail"}, issue_rows);
+    CTSLOG.warn(Loc::current(), "CTS synthesis commit failed: ", commit_status.message);
   }
   CTSLOG.info(Loc::current(), "Completed CTS synthesis", monitor.getStatsInfo());
   return summary;
