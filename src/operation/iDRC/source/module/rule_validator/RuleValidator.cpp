@@ -598,7 +598,7 @@ void RuleValidator::verifyRVModel(RVModel& rv_model)
 
   if (use_group_scheduling) {
     std::vector<double> group_runtime_list(output_runtime_profile ? cluster_group_list.size() : 0, 0.0);
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for 
     for (int32_t group_idx = 0; group_idx < static_cast<int32_t>(cluster_group_list.size()); group_idx++) {
       std::chrono::high_resolution_clock::time_point group_start_time;
       if (output_runtime_profile) {
