@@ -10,6 +10,7 @@ from typing import Any
 
 INPUTS = {
     "antenna": ("route_in.def.gz", "route_in.v.gz"),
+    "antenna_fix": ("route_in.def.gz",),
     "combined_io": ("route_in.def.gz", "route_in.v.gz"),
     "cts": ("cts_in.def.gz", "cts_in.v.gz"),
     "def_round_trip": ("route_in.def.gz",),

@@ -16,6 +16,7 @@ set(CMAKE_CXX_STANDARD 20)
 ############################ debug source module ############################
 
 # set(DEBUG_IZH_ANTENNA_CHECKER ON)
+# set(DEBUG_IZH_ANTENNA_FIXER ON)
 # set(DEBUG_IZH_FILLER_INSERTER ON)
 # set(DEBUG_IZH_METAL_INSERTER ON)
 

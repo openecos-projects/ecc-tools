@@ -15,6 +15,7 @@
 // ***************************************************************************************
 #include "ACModel.hpp"
 #include "AntennaChecker.hpp"
+#include "AntennaRuleEvaluator.hpp"
 #include "Utility.hpp"
 
 int main()
@@ -34,6 +35,11 @@ int main()
     return 1;
   }
   if (!izh::Utility::equalDoubleByError(izh::Utility::getPWLValue({}, 1.0, 3.0), 3.0, ZH_ERROR)) {
+    return 1;
+  }
+
+  izh::ACThresholdPick pick = izh::AntennaRuleEvaluator::pickThreshold(-1.0, -1.0, pwl, 1.0, true);
+  if (!pick.available || !izh::Utility::equalDoubleByError(pick.threshold, 5.0, ZH_ERROR)) {
     return 1;
   }
 

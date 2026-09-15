@@ -26,6 +26,12 @@ TclRunERT::TclRunERT(const char* cmd_name) : TclCmd(cmd_name)
 {
   _config_list.push_back(std::make_pair("-stage", ValueType::kString));
   _config_list.push_back(std::make_pair("-resolve_congestion", ValueType::kString));
+  _config_list.push_back(std::make_pair("-enable_antenna_fix", ValueType::kInt));
+  _config_list.push_back(std::make_pair("-antenna_max_iter", ValueType::kInt));
+  _config_list.push_back(std::make_pair("-antenna_diode_cells", ValueType::kString));
+  _config_list.push_back(std::make_pair("-antenna_report_dir", ValueType::kString));
+  _config_list.push_back(std::make_pair("-antenna_search_radius", ValueType::kInt));
+  _config_list.push_back(std::make_pair("-antenna_max_jog", ValueType::kInt));
 
   TclUtil::addOption(this, _config_list);
 }

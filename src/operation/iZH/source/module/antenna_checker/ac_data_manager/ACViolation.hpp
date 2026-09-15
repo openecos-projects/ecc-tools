@@ -22,6 +22,13 @@ class ACViolation
   double ly = 0.0;
   double hx = 0.0;
   double hy = 0.0;
+  std::string pin_name;
+  std::string inst_name;
+  int layer_order = -1;
+  double gate_area = 0.0;
+  double diff_area = 0.0;
+  double metal_area = 0.0;
+  double cut_area = 0.0;
 };
 
 }  // namespace izh

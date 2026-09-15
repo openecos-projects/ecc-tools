@@ -5,27 +5,20 @@
 // ***************************************************************************************
 #pragma once
 
-#include "ACShape.hpp"
-#include "ZHHeader.hpp"
+#include "ACModel.hpp"
+#include "ACViolation.hpp"
+#include "IdbDesign.h"
+#include "IdbNet.h"
+#include "IdbPins.h"
 
 namespace izh {
 
-class ACGraphNode
+class AntennaPathAnalyzer
 {
  public:
-  int id = -1;
-  int time = 0;
-  bool is_conductor = false;
-  bool is_routing = false;
-  bool is_cut = false;
-  bool is_side = false;
-  double declared_area = 0.0;
-  double gate_area = 0.0;
-  double diff_area = 0.0;
-  bool provides_diff = false;
-  std::string pin_name;
-  std::string inst_name;
-  std::vector<ACShape> shapes;
+  static void checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::IdbNet* net, std::vector<ACViolation>& out_violations);
+  static void readPinAntennaInfo(ACModel& ac_model, idb::IdbPin* pin, bool instance_pin, double& gate_area, double& diff_area,
+                                 bool& provides_diff);
 };
 
 }  // namespace izh

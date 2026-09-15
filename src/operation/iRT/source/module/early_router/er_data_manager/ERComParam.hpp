@@ -49,6 +49,12 @@ class ERComParam
   double get_via_unit() const { return _via_unit; }
   double get_overflow_unit() const { return _overflow_unit; }
   int32_t get_schedule_interval() const { return _schedule_interval; }
+  bool get_enable_antenna_fix() const { return _enable_antenna_fix; }
+  int32_t get_antenna_max_iter() const { return _antenna_max_iter; }
+  const std::string& get_antenna_diode_cells() const { return _antenna_diode_cells; }
+  const std::string& get_antenna_report_dir() const { return _antenna_report_dir; }
+  int32_t get_antenna_search_radius() const { return _antenna_search_radius; }
+  int32_t get_antenna_max_jog() const { return _antenna_max_jog; }
   // setter
   void set_stage(const ERStage stage) { _stage = stage; }
   void set_resolve_congestion(std::string& resolve_congestion) { _resolve_congestion = resolve_congestion; }
@@ -59,6 +65,12 @@ class ERComParam
   void set_via_unit(const double via_unit) { _via_unit = via_unit; }
   void set_overflow_unit(const double overflow_unit) { _overflow_unit = overflow_unit; }
   void set_schedule_interval(const int32_t schedule_interval) { _schedule_interval = schedule_interval; }
+  void set_enable_antenna_fix(const bool enable_antenna_fix) { _enable_antenna_fix = enable_antenna_fix; }
+  void set_antenna_max_iter(const int32_t antenna_max_iter) { _antenna_max_iter = antenna_max_iter; }
+  void set_antenna_diode_cells(const std::string& antenna_diode_cells) { _antenna_diode_cells = antenna_diode_cells; }
+  void set_antenna_report_dir(const std::string& antenna_report_dir) { _antenna_report_dir = antenna_report_dir; }
+  void set_antenna_search_radius(const int32_t antenna_search_radius) { _antenna_search_radius = antenna_search_radius; }
+  void set_antenna_max_jog(const int32_t antenna_max_jog) { _antenna_max_jog = antenna_max_jog; }
 
  private:
   ERStage _stage = ERStage::kNone;
@@ -70,6 +82,12 @@ class ERComParam
   double _via_unit = 0;
   double _overflow_unit = 0;
   int32_t _schedule_interval = 0;
+  bool _enable_antenna_fix = false;
+  int32_t _antenna_max_iter = 3;
+  std::string _antenna_diode_cells;
+  std::string _antenna_report_dir;
+  int32_t _antenna_search_radius = 0;
+  int32_t _antenna_max_jog = 0;
 };
 
 }  // namespace irt
