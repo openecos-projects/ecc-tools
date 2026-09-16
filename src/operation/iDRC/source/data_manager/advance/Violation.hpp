@@ -27,7 +27,11 @@ class Violation : public LayerRect
 {
  public:
   Violation() = default;
+  Violation(const Violation& other) = default;
+  Violation(Violation&& other) = default;
   ~Violation() = default;
+  Violation& operator=(const Violation& other) = default;
+  Violation& operator=(Violation&& other) = default;
   bool operator==(const Violation& other) const
   {
     return (LayerRect::operator==(other) && _violation_type == other._violation_type && _is_routing == other._is_routing

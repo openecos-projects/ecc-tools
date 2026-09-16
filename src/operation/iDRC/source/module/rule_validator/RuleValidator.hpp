@@ -49,6 +49,7 @@ class RuleValidator
   // function
   void setRVComParam(RVModel& rv_model);
   void buildRVClusterList(RVModel& rv_model);
+  void buildRVGroupClusterList(RVModel& rv_model);
   void loadBalance(RVModel& rv_model, int32_t grid_col_num, int32_t grid_row_num);
   std::vector<std::vector<int32_t>> buildClusterGroupList(const std::vector<int32_t>& shape_count_list, int32_t grid_col_num,
                                                           int32_t grid_row_num, int32_t target_group_num);

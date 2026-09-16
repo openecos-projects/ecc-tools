@@ -16,11 +16,13 @@
 // ***************************************************************************************
 #include "RuleValidator.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <numeric>
 #include <queue>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "DRCHeader.hpp"
 #include "GDSPlotter.hpp"
@@ -36,6 +38,94 @@ namespace {
 // Change these constants and rebuild ecc_bin to select the LB and profiling paths.
 // constexpr bool kEnableLoadBalance = true;
 constexpr bool kEnableLoadBalance = false;
+constexpr int32_t kClusterNumPerGroup = 8;
+constexpr int32_t kGroupNumPerThread = 16;
+
+// Bins each shape into every cluster overlapped by its enlarged rect. Pass 1 counts the
+// (thread, cluster) pair distribution in parallel, then pass 2 scatters shape pointers
+// directly into each cluster's vector at precomputed per-thread offsets. No intermediate
+// pair buffer, no sort, no merge pass; every output slot is written by exactly one thread.
+template <typename GetClusterShapeList>
+void binShapesToClusters(std::vector<DRCShape>& shape_list, std::vector<RVCluster>& rv_cluster_list,
+                         GetClusterShapeList get_cluster_shape_list, int32_t expand_size, int32_t cluster_size, int32_t grid_x_size,
+                         const PlanarRect& bounding_box)
+{
+  if (shape_list.empty()) {
+    return;
+  }
+  const int32_t offset_x = bounding_box.get_ll_x();
+  const int32_t offset_y = bounding_box.get_ll_y();
+  const int32_t bbox_ur_x = bounding_box.get_ur_x();
+  const int32_t bbox_ur_y = bounding_box.get_ur_y();
+  const int32_t cluster_num = static_cast<int32_t>(rv_cluster_list.size());
+  const int64_t shape_num = static_cast<int64_t>(shape_list.size());
+  const int32_t thread_num = std::max(omp_get_max_threads(), 1);
+  // Manual static partitioning so both passes iterate identical (thread, shape range) pairs.
+  const int64_t chunk_size = (shape_num + thread_num - 1) / thread_num;
+
+  // Visits each cluster overlapped by the shape's enlarged rect (inlined
+  // DRCUTIL.getEnlargedRect + isClosedOverlap + getRegularRect against bounding_box).
+  auto for_each_cluster_idx = [&](DRCShape& drc_shape, auto visit) {
+    int32_t ll_x = std::max(drc_shape.get_ll_x() - expand_size, offset_x);
+    int32_t ll_y = std::max(drc_shape.get_ll_y() - expand_size, offset_y);
+    int32_t ur_x = std::min(drc_shape.get_ur_x() + expand_size, bbox_ur_x);
+    int32_t ur_y = std::min(drc_shape.get_ur_y() + expand_size, bbox_ur_y);
+    if (ll_x > ur_x || ll_y > ur_y) {
+      return;
+    }
+    int32_t grid_ll_x = (ll_x - offset_x) / cluster_size;
+    int32_t grid_ll_y = (ll_y - offset_y) / cluster_size;
+    int32_t grid_ur_x = (ur_x - offset_x) / cluster_size;
+    int32_t grid_ur_y = (ur_y - offset_y) / cluster_size;
+    for (int32_t grid_x = grid_ll_x; grid_x <= grid_ur_x; grid_x++) {
+      for (int32_t grid_y = grid_ll_y; grid_y <= grid_ur_y; grid_y++) {
+        int32_t cluster_idx = grid_x + grid_y * grid_x_size;
+        if (cluster_idx < 0 || cluster_num <= cluster_idx) {
+          continue;
+        }
+        visit(cluster_idx);
+      }
+    }
+  };
+
+  std::vector<std::vector<int32_t>> thread_count_lists(thread_num, std::vector<int32_t>(cluster_num, 0));
+#pragma omp parallel
+  {
+    int32_t thread_idx = omp_get_thread_num();
+    std::vector<int32_t>& local_count_list = thread_count_lists[thread_idx];
+    int64_t shape_begin = std::min(shape_num, chunk_size * thread_idx);
+    int64_t shape_end = std::min(shape_num, shape_begin + chunk_size);
+    for (int64_t shape_idx = shape_begin; shape_idx < shape_end; shape_idx++) {
+      for_each_cluster_idx(shape_list[shape_idx], [&](int32_t cluster_idx) { local_count_list[cluster_idx]++; });
+    }
+  }
+
+  // thread_offset_lists[t][c] = write position of thread t's first shape within cluster c.
+  std::vector<std::vector<int64_t>> thread_offset_lists(thread_num, std::vector<int64_t>(cluster_num, 0));
+#pragma omp parallel for schedule(static)
+  for (int32_t cluster_idx = 0; cluster_idx < cluster_num; cluster_idx++) {
+    int64_t offset = 0;
+    for (int32_t thread_idx = 0; thread_idx < thread_num; thread_idx++) {
+      thread_offset_lists[thread_idx][cluster_idx] = offset;
+      offset += thread_count_lists[thread_idx][cluster_idx];
+    }
+    get_cluster_shape_list(rv_cluster_list[cluster_idx]).resize(offset);
+  }
+
+#pragma omp parallel
+  {
+    int32_t thread_idx = omp_get_thread_num();
+    std::vector<int64_t>& local_offset_list = thread_offset_lists[thread_idx];
+    int64_t shape_begin = std::min(shape_num, chunk_size * thread_idx);
+    int64_t shape_end = std::min(shape_num, shape_begin + chunk_size);
+    for (int64_t shape_idx = shape_begin; shape_idx < shape_end; shape_idx++) {
+      DRCShape& drc_shape = shape_list[shape_idx];
+      for_each_cluster_idx(drc_shape, [&](int32_t cluster_idx) {
+        get_cluster_shape_list(rv_cluster_list[cluster_idx])[local_offset_list[cluster_idx]++] = &drc_shape;
+      });
+    }
+  }
+}
 }  // namespace
 
 // public
@@ -75,15 +165,31 @@ std::vector<Violation> RuleValidator::verify(std::vector<DRCShape> drc_env_shape
   }
   RVModel rv_model(std::move(drc_env_shape_list), std::move(drc_result_shape_list), std::move(drc_check_type_set), std::move(drc_check_region_list));
   setRVComParam(rv_model);
+  auto build_cluster_monitor = Monitor::create();
   buildRVClusterList(rv_model);
+  DRCLOG.info(Loc::current(), "Stage buildRVClusterList completed", build_cluster_monitor ? build_cluster_monitor->getStatsInfo() : "");
   if (kEnableLoadBalance) {
+    auto load_balance_monitor = Monitor::create();
     loadBalance(rv_model, rv_model.get_grid_col_num(), rv_model.get_grid_row_num());
+    DRCLOG.info(Loc::current(), "Stage loadBalance completed", load_balance_monitor ? load_balance_monitor->getStatsInfo() : "");
+
+    auto build_group_monitor = Monitor::create();
+    buildRVGroupClusterList(rv_model);
+    DRCLOG.info(Loc::current(), "Stage buildRVGroupClusterList completed", build_group_monitor ? build_group_monitor->getStatsInfo() : "");
   } else {
     rv_model.set_rv_cluster_group_list({});
+    rv_model.set_rv_group_cluster_list({});
     DRCLOG.info(Loc::current(), "loadBalance disabled by compile-time switch");
   }
+
+  auto verify_model_monitor = Monitor::create();
   verifyRVModel(rv_model);
+
+  DRCLOG.info(Loc::current(), "Stage verifyRVModel completed", verify_model_monitor ? verify_model_monitor->getStatsInfo() : "");
+
+  auto build_violation_monitor = Monitor::create();
   buildViolationList(rv_model);
+  DRCLOG.info(Loc::current(), "Stage buildViolationList completed", build_violation_monitor ? build_violation_monitor->getStatsInfo() : "");
   // debugPlotRVModel(rv_model, "best");
   DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
   return std::move(rv_model.get_violation_list());
@@ -122,18 +228,32 @@ void RuleValidator::buildRVClusterList(RVModel& rv_model)
   int32_t grid_y_size = -1;
   {
     if (rv_model.get_drc_check_region_list().empty()) {
-      for (DRCShape& drc_env_shape : rv_model.get_drc_env_shape_list()) {
-        bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), drc_env_shape.get_ll_x()));
-        bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), drc_env_shape.get_ll_y()));
-        bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), drc_env_shape.get_ur_x()));
-        bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), drc_env_shape.get_ur_y()));
+      int32_t bbox_ll_x = INT32_MAX;
+      int32_t bbox_ll_y = INT32_MAX;
+      int32_t bbox_ur_x = INT32_MIN;
+      int32_t bbox_ur_y = INT32_MIN;
+      std::vector<DRCShape>& drc_env_shape_list = rv_model.get_drc_env_shape_list();
+      std::vector<DRCShape>& drc_result_shape_list = rv_model.get_drc_result_shape_list();
+#pragma omp parallel for schedule(static) reduction(min : bbox_ll_x, bbox_ll_y) reduction(max : bbox_ur_x, bbox_ur_y)
+      for (int64_t shape_idx = 0; shape_idx < static_cast<int64_t>(drc_env_shape_list.size()); shape_idx++) {
+        DRCShape& drc_env_shape = drc_env_shape_list[shape_idx];
+        bbox_ll_x = std::min(bbox_ll_x, drc_env_shape.get_ll_x());
+        bbox_ll_y = std::min(bbox_ll_y, drc_env_shape.get_ll_y());
+        bbox_ur_x = std::max(bbox_ur_x, drc_env_shape.get_ur_x());
+        bbox_ur_y = std::max(bbox_ur_y, drc_env_shape.get_ur_y());
       }
-      for (DRCShape& drc_result_shape : rv_model.get_drc_result_shape_list()) {
-        bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), drc_result_shape.get_ll_x()));
-        bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), drc_result_shape.get_ll_y()));
-        bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), drc_result_shape.get_ur_x()));
-        bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), drc_result_shape.get_ur_y()));
+#pragma omp parallel for schedule(static) reduction(min : bbox_ll_x, bbox_ll_y) reduction(max : bbox_ur_x, bbox_ur_y)
+      for (int64_t shape_idx = 0; shape_idx < static_cast<int64_t>(drc_result_shape_list.size()); shape_idx++) {
+        DRCShape& drc_result_shape = drc_result_shape_list[shape_idx];
+        bbox_ll_x = std::min(bbox_ll_x, drc_result_shape.get_ll_x());
+        bbox_ll_y = std::min(bbox_ll_y, drc_result_shape.get_ll_y());
+        bbox_ur_x = std::max(bbox_ur_x, drc_result_shape.get_ur_x());
+        bbox_ur_y = std::max(bbox_ur_y, drc_result_shape.get_ur_y());
       }
+      bounding_box.set_ll_x(bbox_ll_x);
+      bounding_box.set_ll_y(bbox_ll_y);
+      bounding_box.set_ur_x(bbox_ur_x);
+      bounding_box.set_ur_y(bbox_ur_y);
     } else {
       for (DRCShape& check_region : rv_model.get_drc_check_region_list()) {
         PlanarRect region_rect = DRCUTIL.getEnlargedRect(check_region.get_rect(), expand_size);
@@ -160,54 +280,24 @@ void RuleValidator::buildRVClusterList(RVModel& rv_model)
       rv_cluster.set_rv_com_param(&rv_model.get_rv_com_param());
     }
   }
-  for (DRCShape& drc_env_shape : rv_model.get_drc_env_shape_list()) {
-    PlanarRect searched_rect = DRCUTIL.getEnlargedRect(drc_env_shape.get_rect(), expand_size);
-    if (!DRCUTIL.isClosedOverlap(searched_rect, bounding_box)) {
-      continue;
-    }
-    searched_rect = DRCUTIL.getRegularRect(searched_rect, bounding_box);
-    int32_t grid_ll_x = (searched_rect.get_ll_x() - offset_x) / cluster_size;
-    int32_t grid_ll_y = (searched_rect.get_ll_y() - offset_y) / cluster_size;
-    int32_t grid_ur_x = (searched_rect.get_ur_x() - offset_x) / cluster_size;
-    int32_t grid_ur_y = (searched_rect.get_ur_y() - offset_y) / cluster_size;
-    for (int32_t grid_x = grid_ll_x; grid_x <= grid_ur_x; grid_x++) {
-      for (int32_t grid_y = grid_ll_y; grid_y <= grid_ur_y; grid_y++) {
-        int32_t cluster_idx = grid_x + grid_y * grid_x_size;
-        if (static_cast<int32_t>(rv_cluster_list.size()) <= cluster_idx) {
-          DRCLOG.error(Loc::current(), "rv_cluster_list.size() <= cluster_idx!");
-        }
-        rv_cluster_list[cluster_idx].get_drc_env_shape_list().push_back(&drc_env_shape);
-      }
-    }
-  }
-  for (DRCShape& drc_result_shape : rv_model.get_drc_result_shape_list()) {
-    PlanarRect searched_rect = DRCUTIL.getEnlargedRect(drc_result_shape.get_rect(), expand_size);
-    if (!DRCUTIL.isClosedOverlap(searched_rect, bounding_box)) {
-      continue;
-    }
-    searched_rect = DRCUTIL.getRegularRect(searched_rect, bounding_box);
-    int32_t grid_ll_x = (searched_rect.get_ll_x() - offset_x) / cluster_size;
-    int32_t grid_ll_y = (searched_rect.get_ll_y() - offset_y) / cluster_size;
-    int32_t grid_ur_x = (searched_rect.get_ur_x() - offset_x) / cluster_size;
-    int32_t grid_ur_y = (searched_rect.get_ur_y() - offset_y) / cluster_size;
-    for (int32_t grid_x = grid_ll_x; grid_x <= grid_ur_x; grid_x++) {
-      for (int32_t grid_y = grid_ll_y; grid_y <= grid_ur_y; grid_y++) {
-        int32_t cluster_idx = grid_x + grid_y * grid_x_size;
-        if (static_cast<int32_t>(rv_cluster_list.size()) <= cluster_idx) {
-          DRCLOG.error(Loc::current(), "rv_cluster_list.size() <= cluster_idx!");
-        }
-        rv_cluster_list[cluster_idx].get_drc_result_shape_list().push_back(&drc_result_shape);
-      }
-    }
-  }
+  binShapesToClusters(rv_model.get_drc_env_shape_list(), rv_cluster_list,
+                      [](RVCluster& rv_cluster) -> std::vector<DRCShape*>& { return rv_cluster.get_drc_env_shape_list(); }, expand_size,
+                      cluster_size, grid_x_size, bounding_box);
+  binShapesToClusters(rv_model.get_drc_result_shape_list(), rv_cluster_list,
+                      [](RVCluster& rv_cluster) -> std::vector<DRCShape*>& { return rv_cluster.get_drc_result_shape_list(); }, expand_size,
+                      cluster_size, grid_x_size, bounding_box);
   for (RVCluster& rv_cluster : rv_cluster_list) {
     rv_cluster.set_drc_check_type_set(&rv_model.get_drc_check_type_set());
     rv_cluster.set_drc_check_region_list(&rv_model.get_drc_check_region_list());
   }
-  for (DRCShape& drc_result_shape : rv_model.get_drc_result_shape_list()) {
-    if (drc_result_shape.get_net_idx() < 0) {
-      DRCLOG.error(Loc::current(), "The drc_result_shape_list exist idx < 0!");
-    }
+  bool has_negative_net_idx = false;
+  std::vector<DRCShape>& drc_result_shape_list = rv_model.get_drc_result_shape_list();
+#pragma omp parallel for schedule(static) reduction(|| : has_negative_net_idx)
+  for (int64_t shape_idx = 0; shape_idx < static_cast<int64_t>(drc_result_shape_list.size()); shape_idx++) {
+    has_negative_net_idx = has_negative_net_idx || drc_result_shape_list[shape_idx].get_net_idx() < 0;
+  }
+  if (has_negative_net_idx) {
+    DRCLOG.error(Loc::current(), "The drc_result_shape_list exist idx < 0!");
   }
 }
 
@@ -224,7 +314,8 @@ void RuleValidator::loadBalance(RVModel& rv_model, int32_t grid_col_num, int32_t
   std::vector<int32_t> shape_count_list;
   shape_count_list.reserve(cluster_num);
   for (RVCluster& rv_cluster : rv_cluster_list) {
-    shape_count_list.push_back(static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size() + rv_cluster.get_drc_result_shape_list().size()));
+    shape_count_list.push_back(static_cast<int32_t>(rv_cluster.get_drc_env_shape_list().size()
+                                                    + rv_cluster.get_drc_result_shape_list().size()));
   }
 
   int32_t target_group_num = getTargetGroupNum(cluster_num);
@@ -233,6 +324,46 @@ void RuleValidator::loadBalance(RVModel& rv_model, int32_t grid_col_num, int32_t
   rv_model.set_rv_cluster_group_list(cluster_group_list);
   DRCLOG.info(Loc::current(), "loadBalance completed: cluster_num=", cluster_num, ", target_group_num=", target_group_num,
               ", actual_group_num=", static_cast<int32_t>(cluster_group_list.size()));
+}
+
+void RuleValidator::buildRVGroupClusterList(RVModel& rv_model)
+{
+  std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
+  const std::vector<std::vector<int32_t>>& cluster_group_list = rv_model.get_rv_cluster_group_list();
+  std::vector<RVCluster> group_cluster_list(cluster_group_list.size());
+  RVComParam* rv_com_param = &rv_model.get_rv_com_param();
+  std::set<ViolationType>* drc_check_type_set = &rv_model.get_drc_check_type_set();
+  std::vector<DRCShape>* drc_check_region_list = &rv_model.get_drc_check_region_list();
+
+#pragma omp parallel for schedule(dynamic, 1)
+  for (int32_t group_idx = 0; group_idx < static_cast<int32_t>(cluster_group_list.size()); group_idx++) {
+    RVCluster& group_cluster = group_cluster_list[group_idx];
+    group_cluster.set_cluster_idx(group_idx);
+    group_cluster.set_rv_com_param(rv_com_param);
+    group_cluster.set_drc_check_type_set(drc_check_type_set);
+    group_cluster.set_drc_check_region_list(drc_check_region_list);
+
+    std::vector<DRCShape*>& env_shape_list = group_cluster.get_drc_env_shape_list();
+    std::vector<DRCShape*>& result_shape_list = group_cluster.get_drc_result_shape_list();
+    for (int32_t cluster_idx : cluster_group_list[group_idx]) {
+      if (cluster_idx < 0 || cluster_idx >= static_cast<int32_t>(rv_cluster_list.size())) {
+        continue;
+      }
+      RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
+      std::vector<PlanarRect>& group_rect_list = group_cluster.get_cluster_rect_list();
+      group_rect_list.insert(group_rect_list.end(), rv_cluster.get_cluster_rect_list().begin(), rv_cluster.get_cluster_rect_list().end());
+      env_shape_list.insert(env_shape_list.end(), rv_cluster.get_drc_env_shape_list().begin(), rv_cluster.get_drc_env_shape_list().end());
+      result_shape_list.insert(result_shape_list.end(), rv_cluster.get_drc_result_shape_list().begin(), rv_cluster.get_drc_result_shape_list().end());
+    }
+
+    std::sort(env_shape_list.begin(), env_shape_list.end());
+    env_shape_list.erase(std::unique(env_shape_list.begin(), env_shape_list.end()), env_shape_list.end());
+    std::sort(result_shape_list.begin(), result_shape_list.end());
+    result_shape_list.erase(std::unique(result_shape_list.begin(), result_shape_list.end()), result_shape_list.end());
+  }
+
+  DRCLOG.info(Loc::current(), "buildRVGroupClusterList completed: group_num=", static_cast<int32_t>(group_cluster_list.size()));
+  rv_model.set_rv_group_cluster_list(std::move(group_cluster_list));
 }
 
 std::vector<std::vector<int32_t>> RuleValidator::buildClusterGroupList(const std::vector<int32_t>& shape_count_list, int32_t grid_col_num,
@@ -273,15 +404,14 @@ int32_t RuleValidator::getTargetGroupNum(int32_t cluster_num)
   }
 
   int32_t thread_num = std::max(DRCDM.getConfig().thread_number, 1);
-  int32_t target_group_num = std::max(std::max(1, cluster_num / 4), std::min(cluster_num, thread_num * 16));
-  int32_t power = 1;
-  while (power < target_group_num) {
-    power *= 2;
-  }
-  if (power > 1 && (power - target_group_num) > (target_group_num - power / 2)) {
-    power /= 2;
-  }
-  return std::max(1, std::min(power, cluster_num));
+  int32_t effective_thread_num = std::min(thread_num, cluster_num);
+  int64_t group_num_by_cluster =
+      (static_cast<int64_t>(cluster_num) + kClusterNumPerGroup - 1) / kClusterNumPerGroup;
+  int64_t group_num_by_thread = static_cast<int64_t>(effective_thread_num) * kGroupNumPerThread;
+  int64_t target_group_num = std::max(group_num_by_cluster, group_num_by_thread);
+  target_group_num =
+      (target_group_num + effective_thread_num - 1) / effective_thread_num * effective_thread_num;
+  return static_cast<int32_t>(std::min(target_group_num, static_cast<int64_t>(cluster_num)));
 }
 
 void RuleValidator::mergeToTargetGroupNum(std::vector<std::vector<int32_t>>& group_list,
@@ -412,48 +542,22 @@ void RuleValidator::verifyRVModel(RVModel& rv_model)
 {
   auto monitor = Monitor::create();
   DRCLOG.info(Loc::current(), "Starting...");
-  std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
-  std::vector<std::vector<int32_t>>& cluster_group_list = rv_model.get_rv_cluster_group_list();
-  bool use_group_scheduling = !cluster_group_list.empty();
-  if (use_group_scheduling && cluster_group_list.size() == rv_cluster_list.size()) {
-    std::vector<bool> visited_cluster_list(rv_cluster_list.size(), false);
-    int32_t visited_cluster_num = 0;
-    for (const std::vector<int32_t>& cluster_idx_list : cluster_group_list) {
-      if (cluster_idx_list.size() != 1) {
-        break;
-      }
-      int32_t cluster_idx = cluster_idx_list.front();
-      if (cluster_idx < 0 || cluster_idx >= static_cast<int32_t>(rv_cluster_list.size()) || visited_cluster_list[cluster_idx]) {
-        break;
-      }
-      visited_cluster_list[cluster_idx] = true;
-      visited_cluster_num++;
-    }
-    if (visited_cluster_num == static_cast<int32_t>(rv_cluster_list.size())) {
-      use_group_scheduling = false;
-      DRCLOG.info(Loc::current(), "loadBalance group scheduling skipped: one cluster per group");
-    }
-  }
-
-  if (use_group_scheduling) {
-#pragma omp parallel for 
-    for (int32_t group_idx = 0; group_idx < static_cast<int32_t>(cluster_group_list.size()); group_idx++) {
-      for (int32_t cluster_idx : cluster_group_list[group_idx]) {
-        if (cluster_idx < 0 || cluster_idx >= static_cast<int32_t>(rv_cluster_list.size())) {
-          continue;
-        }
-        RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
-        buildRVCluster(rv_cluster);
-        if (needVerifying(rv_cluster)) {
-          buildViolationList(rv_cluster);
-        }
+  std::vector<RVCluster>& group_cluster_list = rv_model.get_rv_group_cluster_list();
+  if (!group_cluster_list.empty()) {
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int32_t group_idx = 0; group_idx < static_cast<int32_t>(group_cluster_list.size()); group_idx++) {
+      RVCluster& group_cluster = group_cluster_list[group_idx];
+      buildRVCluster(group_cluster);
+      if (needVerifying(group_cluster)) {
+        buildViolationList(group_cluster);
       }
     }
     DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
     return;
   }
 
-#pragma omp parallel for 
+  std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
+#pragma omp parallel for schedule(dynamic, 1)
   for (size_t cluster_idx = 0; cluster_idx < rv_cluster_list.size(); cluster_idx++) {
     RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
     buildRVCluster(rv_cluster);
@@ -686,6 +790,7 @@ bool RuleValidator::needVerifying(RVCluster& rv_cluster, ViolationType violation
 void RuleValidator::processRVCluster(RVCluster& rv_cluster)
 {
   std::vector<Violation> new_violation_list;
+  new_violation_list.reserve(rv_cluster.get_violation_list().size());
   for (Violation& violation : rv_cluster.get_violation_list()) {
     bool has_overlap = false;
     for (PlanarRect& cluster_rect : rv_cluster.get_cluster_rect_list()) {
@@ -697,22 +802,61 @@ void RuleValidator::processRVCluster(RVCluster& rv_cluster)
     if (!has_overlap) {
       continue;
     }
-    new_violation_list.push_back(violation);
+    new_violation_list.push_back(std::move(violation));
   }
   std::sort(new_violation_list.begin(), new_violation_list.end(), CmpViolation());
   new_violation_list.erase(std::unique(new_violation_list.begin(), new_violation_list.end()), new_violation_list.end());
-  rv_cluster.set_violation_list(new_violation_list);
+  rv_cluster.get_violation_list() = std::move(new_violation_list);
 }
 
 void RuleValidator::buildViolationList(RVModel& rv_model)
 {
   std::vector<Violation>& violation_list = rv_model.get_violation_list();
-  for (RVCluster& rv_cluster : rv_model.get_rv_cluster_list()) {
-    for (Violation& violation : rv_cluster.get_violation_list()) {
-      violation_list.push_back(violation);
-    }
+  std::vector<RVCluster>& group_cluster_list = rv_model.get_rv_group_cluster_list();
+  std::vector<RVCluster>& cluster_list = group_cluster_list.empty() ? rv_model.get_rv_cluster_list() : group_cluster_list;
+  const int64_t cluster_num = static_cast<int64_t>(cluster_list.size());
+
+  // Gather: move each cluster's violations into one global slot range, no copies.
+  std::vector<int64_t> cluster_offset_list(cluster_num + 1, 0);
+  for (int64_t cluster_idx = 0; cluster_idx < cluster_num; cluster_idx++) {
+    cluster_offset_list[cluster_idx + 1] =
+        cluster_offset_list[cluster_idx] + static_cast<int64_t>(cluster_list[cluster_idx].get_violation_list().size());
   }
-  std::sort(violation_list.begin(), violation_list.end(), CmpViolation());
+  const int64_t total_violation_num = cluster_offset_list[cluster_num];
+  violation_list.resize(total_violation_num);
+#pragma omp parallel for schedule(static)
+  for (int64_t cluster_idx = 0; cluster_idx < cluster_num; cluster_idx++) {
+    std::vector<Violation>& cluster_violation_list = cluster_list[cluster_idx].get_violation_list();
+    std::move(cluster_violation_list.begin(), cluster_violation_list.end(), violation_list.begin() + cluster_offset_list[cluster_idx]);
+  }
+
+  // Sort: parallel chunk sort + merge tree, moving violations instead of copying them.
+  const int32_t thread_num = std::max(omp_get_max_threads(), 1);
+  const int64_t chunk_size = std::max<int64_t>(1, (total_violation_num + thread_num - 1) / thread_num);
+#pragma omp parallel for schedule(static)
+  for (int64_t chunk_begin = 0; chunk_begin < total_violation_num; chunk_begin += chunk_size) {
+    std::sort(violation_list.begin() + chunk_begin, violation_list.begin() + std::min(total_violation_num, chunk_begin + chunk_size),
+              CmpViolation());
+  }
+  std::vector<Violation> merge_buffer(total_violation_num);
+  std::vector<Violation>* merge_src = &violation_list;
+  std::vector<Violation>* merge_dst = &merge_buffer;
+  for (int64_t width = chunk_size; width < total_violation_num; width *= 2) {
+    int64_t merge_num = (total_violation_num + 2 * width - 1) / (2 * width);
+#pragma omp parallel for schedule(static)
+    for (int64_t merge_idx = 0; merge_idx < merge_num; merge_idx++) {
+      int64_t range_begin = merge_idx * 2 * width;
+      int64_t range_mid = std::min(total_violation_num, range_begin + width);
+      int64_t range_end = std::min(total_violation_num, range_mid + width);
+      std::merge(std::make_move_iterator(merge_src->begin() + range_begin), std::make_move_iterator(merge_src->begin() + range_mid),
+                 std::make_move_iterator(merge_src->begin() + range_mid), std::make_move_iterator(merge_src->begin() + range_end),
+                 merge_dst->begin() + range_begin, CmpViolation());
+    }
+    std::swap(merge_src, merge_dst);
+  }
+  if (merge_src != &violation_list) {
+    violation_list.swap(*merge_src);
+  }
   violation_list.erase(std::unique(violation_list.begin(), violation_list.end()), violation_list.end());
 }
 
