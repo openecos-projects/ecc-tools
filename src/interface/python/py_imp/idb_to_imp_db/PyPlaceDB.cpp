@@ -58,6 +58,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   printf("PyPlaceDB::set start!!! idb_design address is %p\n", db->get_idb_design());
   num_routing_grids_x = numRoutingGridsX;
   num_routing_grids_y = numRoutingGridsY;
+  _db = db;
+  _design = db->get_idb_design();
   using namespace idb;
   namespace gtl = boost::polygon;
   using namespace gtl::operators;
@@ -87,7 +89,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   std::map<std::string, index_type> mNode2idbID;
   std::vector<IdbInstance*> inst_resort_list = db_deisgn->get_instance_list()->get_instance_list();
   std::stable_sort(inst_resort_list.begin(), inst_resort_list.end(),
-                   [](IdbInstance* a, IdbInstance* b) { return a->is_fixed() < b->is_fixed(); });
+                   [](IdbInstance* a, IdbInstance* b) { return isPlacementFixed(a) < isPlacementFixed(b); });
   for (IdbInstance* node : inst_resort_list) {
     mNode2idbID[node->get_name()] = node->get_id();
   }
@@ -142,7 +144,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     return Box(lx, ly, lx + width, ly + height);
   };
   // general add a node
-  auto addNode = [&](std::string orient_str, std::string const& name, Box const& box, bool isFixed) {
+  auto addNode = [&](std::string orient_str, std::string const& name, Box const& box, bool isFixed, bool is_hard_macro,
+                     bool is_macro_writeback_candidate, IdbInstance* instance) {
     // this id may be different from node id
     int id = node_names.size();
     node_name2id_map[pybind11::str(name)] = id;
@@ -153,6 +156,16 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     node_orient.append(pybind11::str(orient_str));
     node_size_x.append(box.width());
     node_size_y.append(box.height());
+    _node_is_hard_macro.push_back(is_hard_macro);
+    _macro_writeback_candidate.push_back(is_macro_writeback_candidate);
+    if (is_macro_writeback_candidate) {
+      // Unplaced macros carry kNone; write them back with a valid orientation.
+      auto orient = instance->get_orient();
+      if (orient == IdbOrient::kNone) {
+        orient = IdbOrient::kN_R0;
+      }
+      _macro_writeback_candidates.push_back({id, name, instance->get_id(), orient});
+    }
     // map new node to original index
     if (mNode2idbID.count(name)) {
       node2orig_node_map.append(mNode2idbID[name]);
@@ -168,10 +181,15 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   num_terminals = 0;  // regard only fixed macros as macros, placement blockages are ignored
   for (int i = 0; i < inst_num; ++i) {
     IdbInstance* node = inst_resort_list.at(i);
-    if (node->get_cell_master()->is_block()) {
+    auto* cell_master = node->get_cell_master();
+    const bool is_hard_macro = cell_master != nullptr && cell_master->is_block();
+    const auto status = node->get_status();
+    const bool is_macro_writeback_candidate
+        = is_hard_macro && (status == IdbPlacementStatus::kNone || status == IdbPlacementStatus::kUnplaced);
+    if (is_hard_macro) {
       printf("node %s is a block \n", node->get_name().c_str());
     }
-    if (node->get_status() != IdbPlacementStatus::kFixed) {
+    if (!isPlacementFixed(node)) {
       Box box_tmp = buildInstanceBox(node);
       if (node->get_halo()) {
         // Jiaqi: add halo for fixed cells
@@ -183,7 +201,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
         printf("Instance %s, Halo (%d, %d, %d, %d)\n", node->get_name().c_str(), node->get_halo()->get_extend_lef(),
                node->get_halo()->get_extend_bottom(), node->get_halo()->get_extend_right(), node->get_halo()->get_extend_top());
       }
-      addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, false);
+      addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, false, is_hard_macro,
+              is_macro_writeback_candidate, node);
     }
     else
     {
@@ -200,7 +219,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       // Keep the real instance as a body-only terminal.  Its halo is added to
       // the unioned obstacle set below so overlapping halos cannot be counted
       // multiple times as independent fixed nodes.
-      addNode(IdbOrientToString(node->get_orient()), node->get_name(), body_box, true);
+      addNode(IdbOrientToString(node->get_orient()), node->get_name(), body_box, true, is_hard_macro,
+              is_macro_writeback_candidate, node);
       if (node->get_cell_master()->is_io_cell()) {
         printf("Fixed IO Instance %s, Coordinate (%d, %d, %d, %d)\n", node->get_name().c_str(), node->get_coordinate()->get_x(),
                node->get_coordinate()->get_y(), node->get_bounding_box()->get_high_x(), node->get_bounding_box()->get_high_y());
@@ -323,7 +343,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     int id = node_names.size();
     string block_name = "blockage" + std::to_string(id);
     printf("PyPlaceDB detect fixed blockage: %s, (%d, %d, %d, %d)\n", block_name.c_str(), box.xl, box.yl, box.xh, box.yh);
-    addNode("R0", block_name, box, true);
+    addNode("R0", block_name, box, true, false, false, nullptr);
     total_fixed_terminal_area += 1LL * box.area();
   }
   num_terminals += vRect.size();
@@ -345,7 +365,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       ly = io_pin->get_location()->get_y();
     }
     Box box_tmp(lx, ly, lx + 1, ly + 1);
-    addNode("R0", io_pin->get_pin_name(), box_tmp, false);
+    addNode("R0", io_pin->get_pin_name(), box_tmp, false, false, false, nullptr);
     printf("IO Pin %s, Coordinate (%d, %d)\n", io_pin->get_pin_name().c_str(), lx, ly);
     num_terminal_NIs += 1;
   }
@@ -440,7 +460,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       assert(mNet2ID.count(pin->get_net()->get_net_name()));
       pin2net_map.append(mNet2ID[pin->get_net()->get_net_name()]);
 
-      if (node->get_status() != IdbPlacementStatus::kFixed /*&& node.status() != PlaceStatusEnum::DUMMY_FIXED*/) {
+      if (!isPlacementFixed(node)) {
         num_movable_pins += 1;
       }
     }
@@ -553,7 +573,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       for (IdbInstance* inst : region->get_instance_list()) {
         // FIXME:
         index_type node_id = mNode2PyNondeID[inst->get_name()];
-        if (inst->get_status() != IdbPlacementStatus::kFixed)  // ignore fixed cells
+        if (!isPlacementFixed(inst))  // ignore fixed cells
         {
           vNode2FenceRegion.at(node_id) = region_id;
         }
@@ -606,9 +626,13 @@ std::size_t PyPlaceDB::writeMacroPlacementBack(
     }
     const float candidate_x = node_x_ptr[candidate.node_id];
     const float candidate_y = node_y_ptr[candidate.node_id];
+    const double checked_x = static_cast<double>(candidate_x);
+    const double checked_y = static_cast<double>(candidate_y);
     if (!std::isfinite(candidate_x) || !std::isfinite(candidate_y)
-        || candidate_x < std::numeric_limits<int32_t>::lowest() || candidate_x > std::numeric_limits<int32_t>::max()
-        || candidate_y < std::numeric_limits<int32_t>::lowest() || candidate_y > std::numeric_limits<int32_t>::max()) {
+        || checked_x < static_cast<double>(std::numeric_limits<int32_t>::lowest())
+        || checked_x > static_cast<double>(std::numeric_limits<int32_t>::max())
+        || checked_y < static_cast<double>(std::numeric_limits<int32_t>::lowest())
+        || checked_y > static_cast<double>(std::numeric_limits<int32_t>::max())) {
       throw std::invalid_argument("Macro placement writeback coordinates must be finite int32-compatible values");
     }
     updates.push_back({candidate.instance_name, candidate.instance_id, static_cast<int32_t>(candidate_x),
