@@ -39,8 +39,38 @@ void RuleValidator::verifyMinimumArea(RVCluster& rv_cluster)
   for (const auto& [routing_layer_idx, net_rect_map] : env_layer_net_rect_map) {
     const int32_t min_area = routing_layer_list[routing_layer_idx].get_minimum_area_rule().min_area;
     std::vector<GTLRectInt> env_violation_rtree_inputs;
+    auto layer_data_it = layer_data.find(routing_layer_idx);
     for (const auto& [net_idx, env_rect_list] : net_rect_map) {
       (void) net_idx;
+      // Fast path: when every prepared polygon of the net is env (no result-only area),
+      // union(env + result) == union(env), so prepare's merged polygons are exactly the
+      // env-only merged polygons this loop would rebuild.
+      bool handled_by_prepare = false;
+      if (layer_data_it != layer_data.end()) {
+        const RVLayerData& rv_layer_data = layer_data_it->second;
+        auto net_it = rv_layer_data.nets.find(net_idx);
+        if (net_it != rv_layer_data.nets.end()) {
+          std::span<const PolygonData> polygons = rv_layer_data.getPolygons(net_it->second);
+          bool all_env = !polygons.empty();
+          for (const PolygonData& polygon : polygons) {
+            all_env = all_env && polygon.isEnv;
+          }
+          if (all_env) {
+            for (const PolygonData& polygon : polygons) {
+              if (gtl::area(polygon.hole_poly) >= min_area) {
+                continue;
+              }
+              GTLRectInt bbox;
+              gtl::extents(bbox, polygon.hole_poly);
+              env_violation_rtree_inputs.push_back(bbox);
+            }
+            handled_by_prepare = true;
+          }
+        }
+      }
+      if (handled_by_prepare) {
+        continue;
+      }
       GTLPolySetInt env_polyset;
       env_polyset.insert(env_rect_list.begin(), env_rect_list.end());
       std::vector<GTLPolyInt> gtl_poly_list;

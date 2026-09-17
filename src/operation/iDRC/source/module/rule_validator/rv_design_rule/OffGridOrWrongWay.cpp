@@ -30,7 +30,7 @@ void RuleValidator::verifyOffGridOrWrongWay(RVCluster& rv_cluster)
 {
   const int32_t manufacture_grid = DRCDM.getDatabase().get_off_grid_or_wrong_way_rule().manufacture_grid;
 
-  std::map<int32_t, std::map<int32_t, GTLPolySetInt>> routing_net_gtl_poly_set_map;
+  std::map<int32_t, std::map<int32_t, std::vector<GTLRectInt>>> routing_net_rect_map;
   std::map<int32_t, int32_t> cut_routing_layer_map;
   for (DRCShape* drc_shape : rv_cluster.get_drc_result_shape_list()) {
     int32_t routing_layer_idx = -1;
@@ -46,10 +46,30 @@ void RuleValidator::verifyOffGridOrWrongWay(RVCluster& rv_cluster)
     } else {
       routing_layer_idx = drc_shape->get_layer_idx();
     }
-    routing_net_gtl_poly_set_map[routing_layer_idx][drc_shape->get_net_idx()] += DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
+    routing_net_rect_map[routing_layer_idx][drc_shape->get_net_idx()].push_back(DRCUTIL.convertToGTLRectInt(drc_shape->get_rect()));
   }
-  for (const auto& [routing_layer_idx, net_gtl_poly_set_map] : routing_net_gtl_poly_set_map) {
-    for (const auto& [net_idx, gtl_poly_set] : net_gtl_poly_set_map) {
+  for (const auto& [routing_layer_idx, net_rect_map] : routing_net_rect_map) {
+    for (const auto& [net_idx, rect_list] : net_rect_map) {
+      // The union of grid-aligned rectangles only has grid-aligned vertices, so a net
+      // whose input rectangles are all grid-aligned cannot produce any violation and
+      // the polyset merge is skipped entirely.
+      bool all_grid_aligned = manufacture_grid > 0;
+      if (all_grid_aligned) {
+        for (const GTLRectInt& rect : rect_list) {
+          if (gtl::xl(rect) % manufacture_grid != 0 || gtl::yl(rect) % manufacture_grid != 0 ||
+              gtl::xh(rect) % manufacture_grid != 0 || gtl::yh(rect) % manufacture_grid != 0) {
+            all_grid_aligned = false;
+            break;
+          }
+        }
+      }
+      if (all_grid_aligned) {
+        continue;
+      }
+      GTLPolySetInt gtl_poly_set;
+      for (const GTLRectInt& rect : rect_list) {
+        gtl_poly_set += rect;
+      }
       std::vector<GTLPolyInt> gtl_poly_list;
       gtl_poly_set.get_polygons(gtl_poly_list);
       for (const GTLPolyInt& gtl_poly : gtl_poly_list) {

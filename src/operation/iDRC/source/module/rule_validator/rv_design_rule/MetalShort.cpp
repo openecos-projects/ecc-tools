@@ -21,28 +21,57 @@ namespace idrc {
 void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
 {
   const auto& layer_data = rv_cluster.get_layer_data();
-  std::map<int32_t, std::map<int32_t, GTLPolySetInt>> routing_net_checking_polysets;
+  // Per (layer, net) max rectangles of result-only merged geometry. Nets without env
+  // shapes in this cluster have identical combined and result-only geometry, so the max
+  // rectangles already materialized by prepare are reused; other nets rebuild as before.
+  std::map<int32_t, std::map<int32_t, std::vector<GTLRectInt>>> routing_net_checking_rects;
   std::map<int32_t, std::map<int32_t, bool>> routing_net_is_special;
 
-  // checking polyset keeps the result routing only.
   {
     std::map<int32_t, std::map<int32_t, std::vector<GTLRectInt>>> net_rects_to_merge_checking;
     for (DRCShape* drc_shape : rv_cluster.get_drc_result_shape_list()) {
       if (drc_shape->get_is_routing() && drc_shape->get_net_idx() != -1) {
-        net_rects_to_merge_checking[drc_shape->get_layer_idx()][drc_shape->get_net_idx()].push_back(DRCUTIL.convertToGTLRectInt(drc_shape->get_rect()));
-        routing_net_is_special[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] = drc_shape->get_is_special_net();
+        const int32_t layer_idx = drc_shape->get_layer_idx();
+        const int32_t net_idx = drc_shape->get_net_idx();
+        routing_net_is_special[layer_idx][net_idx] = drc_shape->get_is_special_net();
+        bool reuse_prepared = false;
+        auto layer_it = layer_data.find(layer_idx);
+        if (layer_it != layer_data.end()) {
+          auto net_it = layer_it->second.nets.find(net_idx);
+          reuse_prepared =
+              net_it != layer_it->second.nets.end() && !net_it->second.has_env_shapes && net_it->second.polygon_count > 0;
+        }
+        if (!reuse_prepared) {
+          net_rects_to_merge_checking[layer_idx][net_idx].push_back(DRCUTIL.convertToGTLRectInt(drc_shape->get_rect()));
+        }
       }
     }
     for (auto& [layer_idx, net_map] : net_rects_to_merge_checking) {
-      auto& target_net_map = routing_net_checking_polysets[layer_idx];
       for (auto& [net_idx, rect_vec] : net_map) {
-        target_net_map[net_idx].insert(rect_vec.begin(), rect_vec.end());
+        GTLPolySetInt polyset;
+        polyset.insert(rect_vec.begin(), rect_vec.end());
+        gtl::get_max_rectangles(routing_net_checking_rects[layer_idx][net_idx], polyset);
+      }
+    }
+  }
+  for (const auto& [layer_idx, rv_layer_data] : layer_data) {
+    for (const auto& [net_idx, routing_net] : rv_layer_data.nets) {
+      if (net_idx == -1 || routing_net.has_env_shapes || routing_net.polygon_count <= 0) {
+        continue;
+      }
+      auto special_it = routing_net_is_special.find(layer_idx);
+      if (special_it == routing_net_is_special.end() || special_it->second.count(net_idx) == 0) {
+        continue;
+      }
+      std::vector<GTLRectInt>& rect_list = routing_net_checking_rects[layer_idx][net_idx];
+      for (const MaxRectData& max_rect : rv_layer_data.getMaxRects(routing_net)) {
+        rect_list.push_back(max_rect.rect);
       }
     }
   }
 
   // check rules
-  for (const auto& [routing_layer_idx, net_polyset] : routing_net_checking_polysets) {
+  for (const auto& [routing_layer_idx, net_rects] : routing_net_checking_rects) {
     auto layer_data_it = layer_data.find(routing_layer_idx);
     if (layer_data_it == layer_data.end()) {
       continue;
@@ -51,12 +80,9 @@ void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
     std::vector<Violation> layer_violations;
     std::vector<std::pair<GTLRectInt, int32_t>> overlap_metal_rects;
     std::vector<GTLRectInt> overlap_obs_rects;
-    for (auto& [net_idx, polyset] : net_polyset) {
+    for (auto& [net_idx, rect_list] : net_rects) {
       bool is_special_net = routing_net_is_special[routing_layer_idx][net_idx];
-      std::vector<GTLRectInt> rect_list;
-      gtl::get_max_rectangles(rect_list, polyset);
-
-      for (GTLRectInt& gtl_rect : rect_list) {
+      for (const GTLRectInt& gtl_rect : rect_list) {
         PlanarRect rect = DRCUTIL.convertToPlanarRect(gtl_rect);
 
         overlap_metal_rects.clear();
