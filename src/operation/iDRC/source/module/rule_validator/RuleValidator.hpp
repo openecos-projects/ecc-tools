@@ -48,13 +48,14 @@ class RuleValidator
   RuleValidator& operator=(RuleValidator&& other) = delete;
   // function
   void setRVComParam(RVModel& rv_model);
+  int32_t chooseClusterSize(RVModel& rv_model, int32_t only_pitch, int32_t expand_size);
   void buildRVClusterList(RVModel& rv_model);
   void verifyRVModel(RVModel& rv_model);
   void buildRVCluster(RVCluster& rv_cluster);
   bool needVerifying(RVCluster& rv_cluster);
   void buildViolationList(RVCluster& rv_cluster);
   void prepareRVCluster(RVCluster& rv_cluster);
-  void verifyRVCluster(RVCluster& rv_cluster);
+  void verifyRVCluster(RVCluster& rv_cluster, double* rule_time_list = nullptr);
   void verifyAdjacentCutSpacing(RVCluster& rv_cluster);
   void verifyCornerFillSpacing(RVCluster& rv_cluster);
   void verifyCornerSpacing(RVCluster& rv_cluster);

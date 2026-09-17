@@ -17,6 +17,11 @@
 #include "RuleValidator.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <limits>
 #include <set>
 #include <string>
 #include <utility>
@@ -180,8 +185,26 @@ RuleValidator* RuleValidator::_rv_instance = nullptr;
 void RuleValidator::setRVComParam(RVModel& rv_model)
 {
   int32_t only_pitch = DRCDM.getOnlyPitch();
-  int32_t cluster_size = 100 * only_pitch;
   int32_t expand_size = 5 * only_pitch;
+  int32_t cluster_size = -1;
+  // Experiment hook: ECC_RV_CLUSTER_MULT overrides the cluster size multiplier (in units of only_pitch).
+  if (const char* env = std::getenv("ECC_RV_CLUSTER_MULT")) {
+    int32_t mult = std::atoi(env);
+    if (mult > 0) {
+      cluster_size = mult * only_pitch;
+    }
+  }
+  // Experiment hook: ECC_RV_EXPAND_MULT overrides the halo expand multiplier.
+  if (const char* env = std::getenv("ECC_RV_EXPAND_MULT")) {
+    int32_t mult = std::atoi(env);
+    if (mult > 0) {
+      expand_size = mult * only_pitch;
+    }
+  }
+  if (cluster_size <= 0) {
+    // cluster_size = chooseClusterSize(rv_model, only_pitch, expand_size);
+    cluster_size = 100 * only_pitch;
+  }
   /**
    * cluster_size, expand_size
    */
@@ -191,6 +214,103 @@ void RuleValidator::setRVComParam(RVModel& rv_model)
   DRCLOG.info(Loc::current(), "cluster_size: ", rv_com_param.get_cluster_size());
   DRCLOG.info(Loc::current(), "expand_size: ", rv_com_param.get_expand_size());
   rv_model.set_rv_com_param(rv_com_param);
+}
+
+// Adaptive cluster size selection.
+// Profiling on this PDK shows per-cluster time follows c(m) = a*m + b*m^alpha, where m is the
+// number of (cluster, shape) loads: the linear term covers halo-duplicated geometry work, and
+// the superlinear term (alpha ~= 1.46) comes from rule-level connected-component merging
+// (EndOfLineSpacing / EnclosureEdge), which dominates once a cluster exceeds ~85k loads.
+// With K(s) grid cells and exact total loads M(s), estimated wall time is
+//   T(s) = [a*M(s) + b*K(s)*m_avg(s)^alpha] / p + a*phi*m_avg(s)/2 + c_assign*M(s)/p
+// where the second term is the parallel tail from the largest cluster (max load ~ phi*mean).
+// M(s) is computed exactly from shape bounding boxes in one O(N * candidates) pass.
+int32_t RuleValidator::chooseClusterSize(RVModel& rv_model, int32_t only_pitch, int32_t expand_size)
+{
+  constexpr double kCostPerLoadMs = 3.854e-3;    // a: calibrated linear per-load cost
+  constexpr double kSuperlinearCoef = 3.393e-6;  // b: component-merge term coefficient
+  constexpr double kSuperlinearExp = 1.46;       // alpha: measured onset of superlinearity
+  constexpr double kMaxLoadFactor = 1.5;         // phi: max / mean cluster load
+  constexpr double kAssignCostPerLoadMs = 3.8e-4;  // shape binning cost per load
+  constexpr int32_t kCandidateMultList[] = {25, 50, 100, 200, 400};
+
+  PlanarRect bounding_box(INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN);
+  if (rv_model.get_drc_check_region_list().empty()) {
+    int32_t bbox_ll_x = INT32_MAX, bbox_ll_y = INT32_MAX, bbox_ur_x = INT32_MIN, bbox_ur_y = INT32_MIN;
+    for (auto* shape_list : {&rv_model.get_drc_env_shape_list(), &rv_model.get_drc_result_shape_list()}) {
+#pragma omp parallel for schedule(static) reduction(min : bbox_ll_x, bbox_ll_y) reduction(max : bbox_ur_x, bbox_ur_y)
+      for (int64_t shape_idx = 0; shape_idx < static_cast<int64_t>(shape_list->size()); shape_idx++) {
+        DRCShape& drc_shape = (*shape_list)[shape_idx];
+        bbox_ll_x = std::min(bbox_ll_x, drc_shape.get_ll_x());
+        bbox_ll_y = std::min(bbox_ll_y, drc_shape.get_ll_y());
+        bbox_ur_x = std::max(bbox_ur_x, drc_shape.get_ur_x());
+        bbox_ur_y = std::max(bbox_ur_y, drc_shape.get_ur_y());
+      }
+    }
+    bounding_box = PlanarRect(bbox_ll_x, bbox_ll_y, bbox_ur_x, bbox_ur_y);
+  } else {
+    for (DRCShape& check_region : rv_model.get_drc_check_region_list()) {
+      PlanarRect region_rect = DRCUTIL.getEnlargedRect(check_region.get_rect(), expand_size);
+      bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), region_rect.get_ll_x()));
+      bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), region_rect.get_ll_y()));
+      bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), region_rect.get_ur_x()));
+      bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), region_rect.get_ur_y()));
+    }
+  }
+
+  const int32_t offset_x = bounding_box.get_ll_x();
+  const int32_t offset_y = bounding_box.get_ll_y();
+  const int32_t bbox_ur_x = bounding_box.get_ur_x();
+  const int32_t bbox_ur_y = bounding_box.get_ur_y();
+  const int32_t thread_num = std::max(DRCDM.getConfig().thread_number, 1);
+  constexpr int32_t candidate_num = sizeof(kCandidateMultList) / sizeof(kCandidateMultList[0]);
+
+  // load_num_list[c] = M(s_c): total (cluster, shape) loads at candidate size s_c.
+  int64_t load_num_list[candidate_num] = {};
+  for (auto* shape_list_ptr : {&rv_model.get_drc_env_shape_list(), &rv_model.get_drc_result_shape_list()}) {
+    std::vector<DRCShape>& shape_list = *shape_list_ptr;
+    int64_t local_load_list[candidate_num] = {};
+#pragma omp parallel for schedule(static) reduction(+ : local_load_list[:candidate_num])
+    for (int64_t shape_idx = 0; shape_idx < static_cast<int64_t>(shape_list.size()); shape_idx++) {
+      DRCShape& drc_shape = shape_list[shape_idx];
+      int32_t ll_x = std::max(drc_shape.get_ll_x() - expand_size, offset_x);
+      int32_t ll_y = std::max(drc_shape.get_ll_y() - expand_size, offset_y);
+      int32_t ur_x = std::min(drc_shape.get_ur_x() + expand_size, bbox_ur_x);
+      int32_t ur_y = std::min(drc_shape.get_ur_y() + expand_size, bbox_ur_y);
+      if (ll_x > ur_x || ll_y > ur_y) {
+        continue;
+      }
+      for (int32_t c = 0; c < candidate_num; c++) {
+        int32_t s = kCandidateMultList[c] * only_pitch;
+        local_load_list[c] += (static_cast<int64_t>(ur_x - offset_x) / s - (ll_x - offset_x) / s + 1)
+                              * (static_cast<int64_t>(ur_y - offset_y) / s - (ll_y - offset_y) / s + 1);
+      }
+    }
+    for (int32_t c = 0; c < candidate_num; c++) {
+      load_num_list[c] += local_load_list[c];
+    }
+  }
+
+  int32_t best_cluster_size = kCandidateMultList[0] * only_pitch;
+  double best_time_ms = std::numeric_limits<double>::max();
+  for (int32_t c = 0; c < candidate_num; c++) {
+    int32_t s = kCandidateMultList[c] * only_pitch;
+    int64_t grid_cell_num = (bounding_box.getXSpan() / s + 1) * (bounding_box.getYSpan() / s + 1);
+    double load_num = static_cast<double>(load_num_list[c]);
+    double mean_load = load_num / std::max<int64_t>(grid_cell_num, 1);
+    double work_ms = kCostPerLoadMs * load_num
+                     + kSuperlinearCoef * std::pow(mean_load, kSuperlinearExp) * static_cast<double>(grid_cell_num);
+    double time_ms = work_ms / thread_num + kCostPerLoadMs * kMaxLoadFactor * mean_load / 2.0
+                     + kAssignCostPerLoadMs * load_num / thread_num;
+    DRCLOG.info(Loc::current(), "cluster size candidate ", s, ": loads=", load_num_list[c], ", cells=", grid_cell_num,
+                ", predicted_ms=", time_ms);
+    if (time_ms < best_time_ms) {
+      best_time_ms = time_ms;
+      best_cluster_size = s;
+    }
+  }
+  DRCLOG.info(Loc::current(), "adaptive cluster_size: ", best_cluster_size, " (pitch=", only_pitch, ", threads=", thread_num, ")");
+  return best_cluster_size;
 }
 
 void RuleValidator::buildRVClusterList(RVModel& rv_model)
@@ -282,15 +402,84 @@ void RuleValidator::verifyRVModel(RVModel& rv_model)
   auto monitor = Monitor::create();
   DRCLOG.info(Loc::current(), "Starting...");
   std::vector<RVCluster>& rv_cluster_list = rv_model.get_rv_cluster_list();
+  const char* stats_path = std::getenv("ECC_RV_STATS_PATH");
+  const bool need_stats = stats_path != nullptr;
+  std::vector<std::array<double, 5>> cluster_time_list(need_stats ? rv_cluster_list.size() : 0);
+  constexpr int32_t kRuleNum = 26;
+  std::vector<std::array<double, kRuleNum>> cluster_rule_time_list(need_stats ? rv_cluster_list.size() : 0);
 #pragma omp parallel for schedule(dynamic, 1)
   for (size_t cluster_idx = 0; cluster_idx < rv_cluster_list.size(); cluster_idx++) {
     RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
+    double time_begin = need_stats ? omp_get_wtime() : 0.0;
     buildRVCluster(rv_cluster);
     if (needVerifying(rv_cluster)) {
-      buildViolationList(rv_cluster);
+      if (need_stats) {
+        double prepare_begin = omp_get_wtime();
+        prepareRVCluster(rv_cluster);
+        double verify_begin = omp_get_wtime();
+        verifyRVCluster(rv_cluster, cluster_rule_time_list[cluster_idx].data());
+        double clear_begin = omp_get_wtime();
+        rv_cluster.get_layer_data().clear();
+        double process_begin = omp_get_wtime();
+        processRVCluster(rv_cluster);
+        double time_end = omp_get_wtime();
+        cluster_time_list[cluster_idx] = {time_end - time_begin, verify_begin - prepare_begin, clear_begin - verify_begin,
+                                          process_begin - clear_begin, time_end - process_begin};
+      } else {
+        buildViolationList(rv_cluster);
+      }
+    } else if (need_stats) {
+      cluster_time_list[cluster_idx] = {omp_get_wtime() - time_begin, 0.0, 0.0, 0.0, 0.0};
     }
   }
   DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
+  if (need_stats) {
+    double sum_prepare = 0.0, sum_verify = 0.0, sum_clear = 0.0, sum_process = 0.0;
+    std::ofstream stats_file(stats_path);
+    stats_file << "cluster_idx,ll_x,ll_y,ur_x,ur_y,env_shape_num,result_shape_num,core_env_num,core_result_num,violation_num,"
+                  "time_ms,prepare_ms,verify_ms,clear_ms,process_ms\n";
+    for (size_t cluster_idx = 0; cluster_idx < rv_cluster_list.size(); cluster_idx++) {
+      RVCluster& rv_cluster = rv_cluster_list[cluster_idx];
+      PlanarRect& rect = rv_cluster.get_cluster_rect_list().front();
+      // Core shapes: open-overlap with the (non-enlarged) cluster rect; the rest are halo-only loads.
+      int64_t core_env_num = 0, core_result_num = 0;
+      for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
+        core_env_num += DRCUTIL.isOpenOverlap(rect, drc_shape->get_rect()) ? 1 : 0;
+      }
+      for (DRCShape* drc_shape : rv_cluster.get_drc_result_shape_list()) {
+        core_result_num += DRCUTIL.isOpenOverlap(rect, drc_shape->get_rect()) ? 1 : 0;
+      }
+      auto& times = cluster_time_list[cluster_idx];
+      sum_prepare += times[1];
+      sum_verify += times[2];
+      sum_clear += times[3];
+      sum_process += times[4];
+      stats_file << cluster_idx << ',' << rect.get_ll_x() << ',' << rect.get_ll_y() << ',' << rect.get_ur_x() << ',' << rect.get_ur_y()
+                 << ',' << rv_cluster.get_drc_env_shape_list().size() << ',' << rv_cluster.get_drc_result_shape_list().size() << ','
+                 << core_env_num << ',' << core_result_num << ',' << rv_cluster.get_violation_list().size() << ',' << times[0] * 1000.0
+                 << ',' << times[1] * 1000.0 << ',' << times[2] * 1000.0 << ',' << times[3] * 1000.0 << ',' << times[4] * 1000.0 << '\n';
+    }
+    DRCLOG.info(Loc::current(), "stage sums (s): prepare=", sum_prepare, ", verify=", sum_verify, ", clear=", sum_clear,
+                ", process=", sum_process);
+    static const char* rule_name_list[kRuleNum] = {"AdjacentCutSpacing",   "CornerFillSpacing",  "CornerSpacing",
+                                                   "CutEOLSpacing",        "CutShort",           "DifferentLayerCutSpacing",
+                                                   "Enclosure",            "EnclosureEdge",      "EnclosureParallel",
+                                                   "EndOfLineSpacing",     "FloatingPatch",      "JogToJogSpacing",
+                                                   "MaximumWidth",         "MaxViaStack",        "MetalShort",
+                                                   "MinHole",              "MinimumArea",        "MinimumCut",
+                                                   "MinimumWidth",         "MinStep",            "NonsufficientMetalOverlap",
+                                                   "NotchSpacing",         "OffGridOrWrongWay",  "OutOfDie",
+                                                   "ParallelRunLengthSpacing", "SameLayerCutSpacing"};
+    std::array<double, kRuleNum> rule_sum_list = {};
+    for (auto& cluster_rules : cluster_rule_time_list) {
+      for (int32_t rule_idx = 0; rule_idx < kRuleNum; rule_idx++) {
+        rule_sum_list[rule_idx] += cluster_rules[rule_idx];
+      }
+    }
+    for (int32_t rule_idx = 0; rule_idx < kRuleNum; rule_idx++) {
+      DRCLOG.info(Loc::current(), "rule time (s): ", rule_name_list[rule_idx], " = ", rule_sum_list[rule_idx]);
+    }
+  }
 }
 
 void RuleValidator::buildRVCluster(RVCluster& rv_cluster)
@@ -417,86 +606,45 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
   }
 }
 
-void RuleValidator::verifyRVCluster(RVCluster& rv_cluster)
+void RuleValidator::verifyRVCluster(RVCluster& rv_cluster, double* rule_time_list)
 {
-  if (needVerifying(rv_cluster, ViolationType::kAdjacentCutSpacing)) {
-    verifyAdjacentCutSpacing(rv_cluster);
+#define RV_TIMED_RULE(rule_idx, call)                                \
+  if (needVerifying(rv_cluster, ViolationType::k##call)) {            \
+    if (rule_time_list != nullptr) {                                  \
+      double rule_begin = omp_get_wtime();                            \
+      verify##call(rv_cluster);                                       \
+      rule_time_list[rule_idx] = omp_get_wtime() - rule_begin;        \
+    } else {                                                          \
+      verify##call(rv_cluster);                                       \
+    }                                                                 \
   }
-  if (needVerifying(rv_cluster, ViolationType::kCornerFillSpacing)) {
-    verifyCornerFillSpacing(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kCornerSpacing)) {
-    verifyCornerSpacing(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kCutEOLSpacing)) {
-    verifyCutEOLSpacing(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kCutShort)) {
-    verifyCutShort(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kDifferentLayerCutSpacing)) {
-    verifyDifferentLayerCutSpacing(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kEnclosure)) {
-    verifyEnclosure(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kEnclosureEdge)) {
-    verifyEnclosureEdge(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kEnclosureParallel)) {
-    verifyEnclosureParallel(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kEndOfLineSpacing)) {
-    verifyEndOfLineSpacing(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kFloatingPatch)) {
-    verifyFloatingPatch(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kJogToJogSpacing)) {
-    verifyJogToJogSpacing(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kMaximumWidth)) {
-    verifyMaximumWidth(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kMaxViaStack)) {
-    verifyMaxViaStack(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kMetalShort)) {
-    verifyMetalShort(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kMinHole)) {
-    verifyMinHole(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kMinimumArea)) {
-    verifyMinimumArea(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kMinimumCut)) {
-    verifyMinimumCut(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kMinimumWidth)) {
-    verifyMinimumWidth(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kMinStep)) {
-    verifyMinStep(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kNonsufficientMetalOverlap)) {
-    verifyNonsufficientMetalOverlap(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kNotchSpacing)) {
-    verifyNotchSpacing(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kOffGridOrWrongWay)) {
-    verifyOffGridOrWrongWay(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kOutOfDie)) {
-    verifyOutOfDie(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kParallelRunLengthSpacing)) {
-    verifyParallelRunLengthSpacing(rv_cluster);
-  }
-  if (needVerifying(rv_cluster, ViolationType::kSameLayerCutSpacing)) {
-    verifySameLayerCutSpacing(rv_cluster);
-  }
+  RV_TIMED_RULE(0, AdjacentCutSpacing)
+  RV_TIMED_RULE(1, CornerFillSpacing)
+  RV_TIMED_RULE(2, CornerSpacing)
+  RV_TIMED_RULE(3, CutEOLSpacing)
+  RV_TIMED_RULE(4, CutShort)
+  RV_TIMED_RULE(5, DifferentLayerCutSpacing)
+  RV_TIMED_RULE(6, Enclosure)
+  RV_TIMED_RULE(7, EnclosureEdge)
+  RV_TIMED_RULE(8, EnclosureParallel)
+  RV_TIMED_RULE(9, EndOfLineSpacing)
+  RV_TIMED_RULE(10, FloatingPatch)
+  RV_TIMED_RULE(11, JogToJogSpacing)
+  RV_TIMED_RULE(12, MaximumWidth)
+  RV_TIMED_RULE(13, MaxViaStack)
+  RV_TIMED_RULE(14, MetalShort)
+  RV_TIMED_RULE(15, MinHole)
+  RV_TIMED_RULE(16, MinimumArea)
+  RV_TIMED_RULE(17, MinimumCut)
+  RV_TIMED_RULE(18, MinimumWidth)
+  RV_TIMED_RULE(19, MinStep)
+  RV_TIMED_RULE(20, NonsufficientMetalOverlap)
+  RV_TIMED_RULE(21, NotchSpacing)
+  RV_TIMED_RULE(22, OffGridOrWrongWay)
+  RV_TIMED_RULE(23, OutOfDie)
+  RV_TIMED_RULE(24, ParallelRunLengthSpacing)
+  RV_TIMED_RULE(25, SameLayerCutSpacing)
+#undef RV_TIMED_RULE
 }
 
 bool RuleValidator::needVerifying(RVCluster& rv_cluster, ViolationType violation_type)
