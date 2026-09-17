@@ -1224,8 +1224,7 @@ int32_t DefRead::parse_net(defiNet* def_net)
             int y;
             int ext;
             def_path->getFlushPoint(&x, &y, &ext);
-            //--------------tbd----------------
-            segment->add_point(x, y);
+            segment->add_flush_point(x, y, ext);
 
             break;
           }
@@ -1483,8 +1482,14 @@ int32_t DefRead::parse_pdn_wire(defiNet* def_net, IdbSpecialWireList* wire_list)
             break;
           }
 
-          case DEFIPATH_FLUSHPOINT:
+          case DEFIPATH_FLUSHPOINT: {
+            int32_t x;
+            int32_t y;
+            int32_t ext;
+            def_path->getFlushPoint(&x, &y, &ext);
+            segment->add_flush_point(x, y, ext);
             break;
+          }
           case DEFIPATH_SHAPE: {
             segment->set_shape_type(def_path->getShape());
             break;

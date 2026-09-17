@@ -552,10 +552,34 @@ std::vector<DRCShape> DRCInterface::buildResultShapeList()
     for (idb::IdbRegularWire* idb_wire : idb_net->get_wire_list()->get_wire_list()) {
       for (idb::IdbRegularWireSegment* idb_segment : idb_wire->get_segment_list()) {
         if (idb_segment->get_point_number() >= 2) {
-          PlanarCoord first_coord(idb_segment->get_point_start()->get_x(), idb_segment->get_point_start()->get_y());
-          PlanarCoord second_coord(idb_segment->get_point_second()->get_x(), idb_segment->get_point_second()->get_y());
+          auto* point_start = idb_segment->get_point_start();
+          auto* point_second = idb_segment->get_point_second();
+          PlanarCoord first_coord(point_start->get_x(), point_start->get_y());
+          PlanarCoord second_coord(point_second->get_x(), point_second->get_y());
           int32_t half_width = dynamic_cast<IdbLayerRouting*>(idb_segment->get_layer())->get_width() / 2;
-          PlanarRect rect = DRCUTIL.getEnlargedRect(first_coord, second_coord, half_width);
+          /// a flush point ends the metal exactly ext beyond it, a plain point extends half the width past it
+          int32_t ll_x_offset = half_width;
+          int32_t ur_x_offset = half_width;
+          int32_t ll_y_offset = half_width;
+          int32_t ur_y_offset = half_width;
+          if (point_start->get_y() == point_second->get_y()) {
+            // horizontal: the run direction is x
+            auto lower_end_ext = point_start->get_x() <= point_second->get_x() ? idb_segment->get_point_ext(point_start)
+                                                                               : idb_segment->get_point_ext(point_second);
+            auto upper_end_ext = point_start->get_x() <= point_second->get_x() ? idb_segment->get_point_ext(point_second)
+                                                                               : idb_segment->get_point_ext(point_start);
+            ll_x_offset = lower_end_ext.value_or(half_width);
+            ur_x_offset = upper_end_ext.value_or(half_width);
+          } else {
+            // vertical: the run direction is y
+            auto lower_end_ext = point_start->get_y() <= point_second->get_y() ? idb_segment->get_point_ext(point_start)
+                                                                               : idb_segment->get_point_ext(point_second);
+            auto upper_end_ext = point_start->get_y() <= point_second->get_y() ? idb_segment->get_point_ext(point_second)
+                                                                               : idb_segment->get_point_ext(point_start);
+            ll_y_offset = lower_end_ext.value_or(half_width);
+            ur_y_offset = upper_end_ext.value_or(half_width);
+          }
+          PlanarRect rect = DRCUTIL.getEnlargedRect(first_coord, second_coord, ll_x_offset, ll_y_offset, ur_x_offset, ur_y_offset);
           DRCShape drc_shape(static_cast<int32_t>(idb_net->get_id()), LayerRect(rect, idb_segment->get_layer()->get_id()), true);
           drc_shape.set_source_type(ids::Shape::SourceType::kRegularWire);
           result_shape_list.push_back(std::move(drc_shape));
