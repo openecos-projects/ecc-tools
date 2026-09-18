@@ -18,7 +18,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -203,7 +206,7 @@ void RuleValidator::setRVComParam(RVModel& rv_model)
   }
   if (cluster_size <= 0) {
     // cluster_size = chooseClusterSize(rv_model, only_pitch, expand_size);
-    cluster_size = 100 * only_pitch;
+    cluster_size = 200 * only_pitch;
   }
   /**
    * cluster_size, expand_size
@@ -549,16 +552,77 @@ void RuleValidator::buildViolationList(RVCluster& rv_cluster)
 
 namespace {
 
-using MetalShortNetPolysetMap = std::map<int32_t, std::map<int32_t, GTLPolySetInt>>;
 using MetalShortObsPolysetMap = std::map<int32_t, GTLPolySetInt>;
+using MetalShortObsRectMap = std::map<int32_t, std::vector<GTLRectInt>>;
 
 void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* drc_shape, bool is_env_shape);
-void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, DRCShape* drc_shape);
+void collectMetalShortObsRect(MetalShortObsRectMap& obs_rects, MetalShortObsRectMap& netless_rects, DRCShape* drc_shape);
+void buildMetalShortObsPolysets(MetalShortObsPolysetMap& obs_polysets, MetalShortObsRectMap& obs_rects);
 void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data,
                        std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs, bool need_polygon_only);
 void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs);
-void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortNetPolysetMap& metal_polysets,
-                                   MetalShortObsPolysetMap& obs_polysets);
+void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortObsPolysetMap& obs_polysets,
+                                   MetalShortObsRectMap& netless_rects);
+
+// Phase-level profiling for prepareRVCluster, printed at exit when ECC_PREP_PROF is set.
+struct PrepProf
+{
+  std::atomic<int64_t> net_calls{0};
+  std::atomic<int64_t> in_rects{0};
+  std::atomic<int64_t> out_polygons{0};
+  std::atomic<int64_t> out_max_rects{0};
+  std::atomic<int64_t> out_boundaries{0};
+  std::atomic<int64_t> t_insert_ns{0};   // polyset insert of env+result rects
+  std::atomic<int64_t> t_delta_ns{0};    // env polyset, env maxrects, delta subtract and delta rtree
+  std::atomic<int64_t> t_get_ns{0};      // polyset.get polygon extraction
+  std::atomic<int64_t> t_maxrect_ns{0};  // per-polygon maxrect decomposition + env classification
+  std::atomic<int64_t> t_boundary_ns{0}; // per-polygon boundary edge collection
+  std::atomic<int64_t> t_index_ns{0};    // buildLayerSpatialIndexes
+  std::atomic<int64_t> calls_r1{0};       // net calls with 1 input rect
+  std::atomic<int64_t> calls_r2_5{0};     // 2..5 rects
+  std::atomic<int64_t> calls_r6_20{0};    // 6..20 rects
+  std::atomic<int64_t> calls_r21p{0};     // >20 rects
+  std::atomic<int64_t> calls_delta{0};    // calls taking the env/result delta path
+  std::atomic<int64_t> t_bin_ns{0};       // shape -> layer/net binning loops
+  std::atomic<int64_t> t_msindex_ns{0};   // buildMetalShortSpatialIndexes
+};
+
+PrepProf& prepProf()
+{
+  static PrepProf prof;
+  return prof;
+}
+
+void dumpPrepProf()
+{
+  const PrepProf& p = prepProf();
+  auto ms = [](std::atomic<int64_t> const& v) { return v.load(std::memory_order_relaxed) / 1e6; };
+  std::fprintf(stderr,
+               "[ECC_PREP_PROF] net_calls=%ld in_rects=%ld out_polygons=%ld out_max_rects=%ld out_boundaries=%ld\n"
+               "[ECC_PREP_PROF] ms: insert=%.0f delta=%.0f get=%.0f maxrect=%.0f boundary=%.0f index=%.0f total=%.0f\n",
+               p.net_calls.load(), p.in_rects.load(), p.out_polygons.load(), p.out_max_rects.load(), p.out_boundaries.load(),
+               ms(p.t_insert_ns), ms(p.t_delta_ns), ms(p.t_get_ns), ms(p.t_maxrect_ns), ms(p.t_boundary_ns), ms(p.t_index_ns),
+               ms(p.t_insert_ns) + ms(p.t_delta_ns) + ms(p.t_get_ns) + ms(p.t_maxrect_ns) + ms(p.t_boundary_ns) + ms(p.t_index_ns));
+  std::fprintf(stderr, "[ECC_PREP_PROF] call buckets by in_rects: r1=%ld r2_5=%ld r6_20=%ld r21+=%ld delta_path=%ld\n",
+               p.calls_r1.load(), p.calls_r2_5.load(), p.calls_r6_20.load(), p.calls_r21p.load(), p.calls_delta.load());
+  std::fprintf(stderr, "[ECC_PREP_PROF] ms: binning=%.0f ms_index=%.0f\n", p.t_bin_ns.load() / 1e6, p.t_msindex_ns.load() / 1e6);
+}
+
+void prepProfAdd(std::atomic<int64_t>& counter, std::chrono::steady_clock::time_point begin)
+{
+  auto end = std::chrono::steady_clock::now();
+  counter.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count(), std::memory_order_relaxed);
+}
+
+struct PrepProfReg
+{
+  PrepProfReg()
+  {
+    if (std::getenv("ECC_PREP_PROF") != nullptr) {
+      std::atexit(dumpPrepProf);
+    }
+  }
+};
 
 }  // namespace
 
@@ -569,19 +633,26 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
   const bool need_metal_short = needVerifying(rv_cluster, ViolationType::kMetalShort);
   std::map<int32_t, RVLayerData>& layer_data = rv_cluster.get_layer_data();
   layer_data.clear();
-  MetalShortNetPolysetMap metal_short_metal_polysets;
   MetalShortObsPolysetMap metal_short_obs_polysets;
+  MetalShortObsRectMap metal_short_obs_rects;
+  MetalShortObsRectMap metal_short_netless_rects;
+  auto t_bin = std::chrono::steady_clock::now();
   for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
     addShapeToLayerData(layer_data, drc_shape, true);
     if (need_metal_short) {
-      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, drc_shape);
+      collectMetalShortObsRect(metal_short_obs_rects, metal_short_netless_rects, drc_shape);
     }
   }
   for (DRCShape* drc_shape : rv_cluster.get_drc_result_shape_list()) {
     addShapeToLayerData(layer_data, drc_shape, false);
     if (need_metal_short) {
-      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, drc_shape);
+      collectMetalShortObsRect(metal_short_obs_rects, metal_short_netless_rects, drc_shape);
     }
+  }
+  prepProfAdd(prepProf().t_bin_ns, t_bin);
+  if (need_metal_short) {
+    // One sweepline per layer instead of one boolean union per obs shape.
+    buildMetalShortObsPolysets(metal_short_obs_polysets, metal_short_obs_rects);
   }
 
   // Each layer owns flat geometry pools and the indexes that refer to them.
@@ -601,7 +672,9 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
       buildLayerSpatialIndexes(rv_layer_data, env_rect_rtree_inputs);
     }
     if (need_metal_short) {
-      buildMetalShortSpatialIndexes(layer_entry.first, rv_layer_data, metal_short_metal_polysets, metal_short_obs_polysets);
+      auto t_msi = std::chrono::steady_clock::now();
+      buildMetalShortSpatialIndexes(layer_entry.first, rv_layer_data, metal_short_obs_polysets, metal_short_netless_rects);
+      prepProfAdd(prepProf().t_msindex_ns, t_msi);
     }
   }
 }
@@ -836,31 +909,62 @@ void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* d
   }
 }
 
-void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, DRCShape* drc_shape)
+void collectMetalShortObsRect(MetalShortObsRectMap& obs_rects, MetalShortObsRectMap& netless_rects, DRCShape* drc_shape)
 {
   if (!drc_shape->get_is_routing()) {
     return;
   }
-  GTLRectInt rect = DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
   if (drc_shape->get_is_obs()) {
-    obs_polysets[drc_shape->get_layer_idx()] += rect;
-  } else {
-    metal_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += rect;
+    obs_rects[drc_shape->get_layer_idx()].push_back(DRCUTIL.convertToGTLRectInt(drc_shape->get_rect()));
+  } else if (drc_shape->get_net_idx() == -1) {
+    // Non-obs netless shapes belong to the metal index (net -1) in the original semantics,
+    // but are mixed with obs in nets[-1], so they are collected separately.
+    netless_rects[drc_shape->get_layer_idx()].push_back(DRCUTIL.convertToGTLRectInt(drc_shape->get_rect()));
+  }
+}
+
+void buildMetalShortObsPolysets(MetalShortObsPolysetMap& obs_polysets, MetalShortObsRectMap& obs_rects)
+{
+  // Bulk rectangle insert produces the same merged polyset as sequential `+=`,
+  // but pays the sweepline setup once per layer instead of once per shape.
+  for (auto& [layer_idx, rect_list] : obs_rects) {
+    obs_polysets[layer_idx].insert(rect_list.begin(), rect_list.end());
   }
 }
 
 void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data,
                        std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs, bool need_polygon_only)
 {
+  static PrepProfReg prof_reg;
+  PrepProf& prof = prepProf();
+  auto t_begin = std::chrono::steady_clock::now();
+
   NetPrepareContext prepare_context;
   std::vector<GTLRectInt> env_rect_list = std::move(routing_net.env_rect_list);
   std::vector<GTLRectInt> result_rect_list = std::move(routing_net.result_rect_list);
   bool has_env = !env_rect_list.empty();
   bool has_result = !result_rect_list.empty();
+  prof.net_calls.fetch_add(1, std::memory_order_relaxed);
+  const int64_t in_rect_num = static_cast<int64_t>(env_rect_list.size() + result_rect_list.size());
+  prof.in_rects.fetch_add(in_rect_num, std::memory_order_relaxed);
+  if (in_rect_num == 1) {
+    prof.calls_r1.fetch_add(1, std::memory_order_relaxed);
+  } else if (in_rect_num <= 5) {
+    prof.calls_r2_5.fetch_add(1, std::memory_order_relaxed);
+  } else if (in_rect_num <= 20) {
+    prof.calls_r6_20.fetch_add(1, std::memory_order_relaxed);
+  } else {
+    prof.calls_r21p.fetch_add(1, std::memory_order_relaxed);
+  }
+  if (has_env && has_result && !need_polygon_only) {
+    prof.calls_delta.fetch_add(1, std::memory_order_relaxed);
+  }
 
   routing_net.polyset.insert(env_rect_list.begin(), env_rect_list.end());
   routing_net.polyset.insert(result_rect_list.begin(), result_rect_list.end());
+  prepProfAdd(prof.t_insert_ns, t_begin);
 
+  auto t_delta = std::chrono::steady_clock::now();
   GTLPolySetInt env_polyset;
   if (has_env && has_result) {
     env_polyset.insert(env_rect_list.begin(), env_rect_list.end());
@@ -883,14 +987,18 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
       prepare_context.delta_rect_rtree = RectRTree(delta_rect_list);
     }
   }
+  prepProfAdd(prof.t_delta_ns, t_delta);
 
   // Materialize combined geometry into contiguous layer pools.
   routing_net.polygon_begin = static_cast<int32_t>(rv_layer_data.polygon_pool.size());
   routing_net.max_rect_begin = static_cast<int32_t>(rv_layer_data.max_rect_pool.size());
   routing_net.boundary_begin = static_cast<int32_t>(rv_layer_data.boundary_pool.size());
 
+  auto t_get = std::chrono::steady_clock::now();
   std::vector<GTLHolePolyInt> hole_poly_list;
   routing_net.polyset.get(hole_poly_list);
+  prepProfAdd(prof.t_get_ns, t_get);
+  prof.out_polygons.fetch_add(static_cast<int64_t>(hole_poly_list.size()), std::memory_order_relaxed);
   for (GTLHolePolyInt& hole_poly : hole_poly_list) {
     int32_t polygon_id = static_cast<int32_t>(rv_layer_data.polygon_pool.size());
     rv_layer_data.polygon_pool.push_back(
@@ -907,6 +1015,7 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
       }
       continue;
     }
+    auto t_maxrect = std::chrono::steady_clock::now();
     std::vector<GTLRectInt> rect_list;
     if (polygon_hole_poly.size() == 4 && polygon_hole_poly.begin_holes() == polygon_hole_poly.end_holes()) {
       rect_list.emplace_back();
@@ -938,7 +1047,10 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
     }
     polygon_data.max_rect_count = static_cast<int32_t>(rv_layer_data.max_rect_pool.size()) - polygon_data.max_rect_begin;
     polygon_data.isEnv = is_polygon_env;
+    prepProfAdd(prof.t_maxrect_ns, t_maxrect);
+    prof.out_max_rects.fetch_add(polygon_data.max_rect_count, std::memory_order_relaxed);
 
+    auto t_boundary = std::chrono::steady_clock::now();
     collectBoundaryEdges(polygon_hole_poly, false, polygon_id, rv_layer_data.boundary_pool);
     for (auto iter = polygon_hole_poly.begin_holes(); iter != polygon_hole_poly.end_holes(); iter++) {
       GTLPolyInt gtl_poly = *iter;
@@ -947,6 +1059,8 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
       collectBoundaryEdges(check_hole_poly, true, polygon_id, rv_layer_data.boundary_pool);
     }
     polygon_data.boundary_count = static_cast<int32_t>(rv_layer_data.boundary_pool.size()) - polygon_data.boundary_begin;
+    prepProfAdd(prof.t_boundary_ns, t_boundary);
+    prof.out_boundaries.fetch_add(polygon_data.boundary_count, std::memory_order_relaxed);
   }
 
   routing_net.polygon_count = static_cast<int32_t>(rv_layer_data.polygon_pool.size()) - routing_net.polygon_begin;
@@ -956,6 +1070,7 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
 
 void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs)
 {
+  auto t_begin = std::chrono::steady_clock::now();
   // Pool IDs are final here, so index inputs can be allocated exactly once.
   std::vector<IndexedRect> rect_inputs;
   rect_inputs.reserve(rv_layer_data.max_rect_pool.size());
@@ -973,20 +1088,35 @@ void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std:
   rv_layer_data.env_rect_rtree = decltype(rv_layer_data.env_rect_rtree)(env_rect_rtree_inputs);
   rv_layer_data.boundary_rtrees = decltype(rv_layer_data.boundary_rtrees)(boundary_inputs);
   rv_layer_data.cut_rtrees = decltype(rv_layer_data.cut_rtrees)(rv_layer_data.cut_pool);
+  prepProfAdd(prepProf().t_index_ns, t_begin);
 }
 
-void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortNetPolysetMap& metal_polysets,
-                                   MetalShortObsPolysetMap& obs_polysets)
+void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortObsPolysetMap& obs_polysets,
+                                   MetalShortObsRectMap& netless_rects)
 {
+  // The metal target index equals the per-net max rectangles already materialized by
+  // prepareRoutingNet (same env+result polyset per net); obs (net -1) stays on the obs path.
   std::vector<IndexedRect> metal_rtree_inputs;
-  auto layer_metal_it = metal_polysets.find(layer_idx);
-  if (layer_metal_it != metal_polysets.end()) {
-    for (auto& [net_idx, polyset] : layer_metal_it->second) {
-      std::vector<GTLRectInt> max_rect_list;
-      gtl::get_max_rectangles(max_rect_list, polyset);
-      for (const GTLRectInt& max_rect : max_rect_list) {
-        metal_rtree_inputs.emplace_back(max_rect, net_idx);
+  metal_rtree_inputs.reserve(rv_layer_data.max_rect_pool.size());
+  for (const auto& [net_idx, routing_net] : rv_layer_data.nets) {
+    if (net_idx == -1) {
+      continue;
+    }
+    for (const auto& polygon : rv_layer_data.getPolygons(routing_net)) {
+      for (const MaxRectData& max_rect : rv_layer_data.getMaxRects(polygon)) {
+        metal_rtree_inputs.emplace_back(max_rect.rect, net_idx);
       }
+    }
+  }
+  // Non-obs netless shapes keep the original merged-polyset semantics under net -1.
+  auto netless_it = netless_rects.find(layer_idx);
+  if (netless_it != netless_rects.end()) {
+    GTLPolySetInt netless_polyset;
+    netless_polyset.insert(netless_it->second.begin(), netless_it->second.end());
+    std::vector<GTLRectInt> netless_max_rect_list;
+    gtl::get_max_rectangles(netless_max_rect_list, netless_polyset);
+    for (const GTLRectInt& max_rect : netless_max_rect_list) {
+      metal_rtree_inputs.emplace_back(max_rect, -1);
     }
   }
   rv_layer_data.metal_short_metal_rtree = decltype(rv_layer_data.metal_short_metal_rtree)(metal_rtree_inputs);
