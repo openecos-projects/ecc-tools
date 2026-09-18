@@ -108,6 +108,8 @@ struct RVRoutingNet
   GTLPolySetInt polyset;
   std::vector<GTLRectInt> env_rect_list;
   std::vector<GTLRectInt> result_rect_list;
+  // Recorded by prepareRoutingNet before the rect lists above are moved out.
+  bool has_env_shapes = false;
   int32_t polygon_begin = 0;
   int32_t polygon_count = 0;
   int32_t max_rect_begin = 0;

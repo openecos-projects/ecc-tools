@@ -943,6 +943,7 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
   std::vector<GTLRectInt> env_rect_list = std::move(routing_net.env_rect_list);
   std::vector<GTLRectInt> result_rect_list = std::move(routing_net.result_rect_list);
   bool has_env = !env_rect_list.empty();
+  routing_net.has_env_shapes = has_env;
   bool has_result = !result_rect_list.empty();
   prof.net_calls.fetch_add(1, std::memory_order_relaxed);
   const int64_t in_rect_num = static_cast<int64_t>(env_rect_list.size() + result_rect_list.size());
