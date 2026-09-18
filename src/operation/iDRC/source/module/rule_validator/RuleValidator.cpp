@@ -125,6 +125,112 @@ void binShapesToClusters(std::vector<DRCShape>& shape_list, std::vector<RVCluste
     }
   }
 }
+
+// Diagnostic (ECC_SHAPE_SWEEP): dump the 2D anisotropic load surface M(sx, sy) --
+// total (cluster, shape) loads for rectangular clusters -- split by shape
+// orientation (horizontal- vs vertical-dominant). Pure analysis hook;
+// does not affect partitioning.
+void dumpAnisotropicLoadSurface(RVModel& rv_model, int32_t only_pitch, int32_t expand_size)
+{
+  constexpr int32_t kMultList[] = {50, 100, 200, 400, 800};
+  constexpr int32_t mult_num = sizeof(kMultList) / sizeof(kMultList[0]);
+
+  PlanarRect bounding_box(INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN);
+  if (rv_model.get_drc_check_region_list().empty()) {
+    for (auto* shape_list : {&rv_model.get_drc_env_shape_list(), &rv_model.get_drc_result_shape_list()}) {
+      for (DRCShape& drc_shape : *shape_list) {
+        bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), drc_shape.get_ll_x()));
+        bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), drc_shape.get_ll_y()));
+        bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), drc_shape.get_ur_x()));
+        bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), drc_shape.get_ur_y()));
+      }
+    }
+  } else {
+    for (DRCShape& check_region : rv_model.get_drc_check_region_list()) {
+      PlanarRect region_rect = DRCUTIL.getEnlargedRect(check_region.get_rect(), expand_size);
+      bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), region_rect.get_ll_x()));
+      bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), region_rect.get_ll_y()));
+      bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), region_rect.get_ur_x()));
+      bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), region_rect.get_ur_y()));
+    }
+  }
+  const int32_t offset_x = bounding_box.get_ll_x();
+  const int32_t offset_y = bounding_box.get_ll_y();
+  const int32_t bbox_ur_x = bounding_box.get_ur_x();
+  const int32_t bbox_ur_y = bounding_box.get_ur_y();
+
+  // load[sx_i][sy_j], split by whether the shape's own bbox is x- or y-dominant.
+  int64_t load_h[mult_num][mult_num] = {};
+  int64_t load_v[mult_num][mult_num] = {};
+  for (auto* shape_list_ptr : {&rv_model.get_drc_env_shape_list(), &rv_model.get_drc_result_shape_list()}) {
+    std::vector<DRCShape>& shape_list = *shape_list_ptr;
+#pragma omp parallel
+    {
+      int64_t local_h[mult_num][mult_num] = {};
+      int64_t local_v[mult_num][mult_num] = {};
+#pragma omp for schedule(static) nowait
+      for (int64_t shape_idx = 0; shape_idx < static_cast<int64_t>(shape_list.size()); shape_idx++) {
+        DRCShape& drc_shape = shape_list[shape_idx];
+        int32_t ll_x = std::max(drc_shape.get_ll_x() - expand_size, offset_x);
+        int32_t ll_y = std::max(drc_shape.get_ll_y() - expand_size, offset_y);
+        int32_t ur_x = std::min(drc_shape.get_ur_x() + expand_size, bbox_ur_x);
+        int32_t ur_y = std::min(drc_shape.get_ur_y() + expand_size, bbox_ur_y);
+        if (ll_x > ur_x || ll_y > ur_y) {
+          continue;
+        }
+        int64_t crossings_x[mult_num];
+        int64_t crossings_y[mult_num];
+        for (int32_t i = 0; i < mult_num; i++) {
+          const int32_t s = kMultList[i] * only_pitch;
+          crossings_x[i] = static_cast<int64_t>(ur_x - offset_x) / s - (ll_x - offset_x) / s + 1;
+          crossings_y[i] = static_cast<int64_t>(ur_y - offset_y) / s - (ll_y - offset_y) / s + 1;
+        }
+        int64_t(&local)[mult_num][mult_num] =
+            (drc_shape.getXSpan() >= drc_shape.getYSpan()) ? local_h : local_v;
+        for (int32_t i = 0; i < mult_num; i++) {
+          for (int32_t j = 0; j < mult_num; j++) {
+            local[i][j] += crossings_x[i] * crossings_y[j];
+          }
+        }
+      }
+#pragma omp critical
+      {
+        for (int32_t i = 0; i < mult_num; i++) {
+          for (int32_t j = 0; j < mult_num; j++) {
+            load_h[i][j] += local_h[i][j];
+            load_v[i][j] += local_v[i][j];
+          }
+        }
+      }
+    }
+  }
+
+  auto print_table = [&](const char* title, int64_t (&table)[mult_num][mult_num]) {
+    std::fprintf(stderr, "[ECC_SHAPE_SWEEP] %s (rows=sx mult, cols=sy mult, pitch=%d)\n", title, only_pitch);
+    std::fprintf(stderr, "       ");
+    for (int32_t j = 0; j < mult_num; j++) {
+      std::fprintf(stderr, " %12d", kMultList[j]);
+    }
+    std::fprintf(stderr, "\n");
+    for (int32_t i = 0; i < mult_num; i++) {
+      std::fprintf(stderr, " %5d ", kMultList[i]);
+      for (int32_t j = 0; j < mult_num; j++) {
+        std::fprintf(stderr, " %12ld", table[i][j]);
+      }
+      std::fprintf(stderr, "\n");
+    }
+  };
+  int64_t load_all[mult_num][mult_num];
+  for (int32_t i = 0; i < mult_num; i++) {
+    for (int32_t j = 0; j < mult_num; j++) {
+      load_all[i][j] = load_h[i][j] + load_v[i][j];
+    }
+  }
+  print_table("M(sx,sy) all shapes", load_all);
+  print_table("M(sx,sy) horizontal-dominant shapes", load_h);
+  print_table("M(sx,sy) vertical-dominant shapes", load_v);
+}
+
 }  // namespace
 
 // public
@@ -205,8 +311,16 @@ void RuleValidator::setRVComParam(RVModel& rv_model)
     }
   }
   if (cluster_size <= 0) {
-    // cluster_size = chooseClusterSize(rv_model, only_pitch, expand_size);
-    cluster_size = 200 * only_pitch;
+    // Diagnostic: ECC_SHAPE_SWEEP dumps the anisotropic load surface M(sx, sy) and exits normally.
+    if (std::getenv("ECC_SHAPE_SWEEP") != nullptr) {
+      dumpAnisotropicLoadSurface(rv_model, only_pitch, expand_size);
+    }
+    // Experiment hook: ECC_RV_ADAPTIVE enables the cost-model-driven cluster size choice.
+    if (std::getenv("ECC_RV_ADAPTIVE") != nullptr) {
+      cluster_size = chooseClusterSize(rv_model, only_pitch, expand_size);
+    } else {
+      cluster_size = 200 * only_pitch;
+    }
   }
   /**
    * cluster_size, expand_size
@@ -230,12 +344,18 @@ void RuleValidator::setRVComParam(RVModel& rv_model)
 // M(s) is computed exactly from shape bounding boxes in one O(N * candidates) pass.
 int32_t RuleValidator::chooseClusterSize(RVModel& rv_model, int32_t only_pitch, int32_t expand_size)
 {
-  constexpr double kCostPerLoadMs = 3.854e-3;    // a: calibrated linear per-load cost
-  constexpr double kSuperlinearCoef = 3.393e-6;  // b: component-merge term coefficient
+  double kCostPerLoadMs = 3.854e-3;    // a: calibrated linear per-load cost
+  double kSuperlinearCoef = 3.393e-6;  // b: component-merge term coefficient
   constexpr double kSuperlinearExp = 1.46;       // alpha: measured onset of superlinearity
-  constexpr double kMaxLoadFactor = 1.5;         // phi: max / mean cluster load
-  constexpr double kAssignCostPerLoadMs = 3.8e-4;  // shape binning cost per load
   constexpr int32_t kCandidateMultList[] = {25, 50, 100, 200, 400};
+  // Experiment hook: ECC_RV_COST_A / ECC_RV_COST_B override the calibrated
+  // constants (ms units), e.g. with values recalibrated for another technology.
+  if (const char* env = std::getenv("ECC_RV_COST_A")) {
+    kCostPerLoadMs = std::atof(env);
+  }
+  if (const char* env = std::getenv("ECC_RV_COST_B")) {
+    kSuperlinearCoef = std::atof(env);
+  }
 
   PlanarRect bounding_box(INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN);
   if (rv_model.get_drc_check_region_list().empty()) {
@@ -299,12 +419,15 @@ int32_t RuleValidator::chooseClusterSize(RVModel& rv_model, int32_t only_pitch, 
   for (int32_t c = 0; c < candidate_num; c++) {
     int32_t s = kCandidateMultList[c] * only_pitch;
     int64_t grid_cell_num = (bounding_box.getXSpan() / s + 1) * (bounding_box.getYSpan() / s + 1);
+    // Hard constraint: fewer clusters than threads leaves threads idle.
+    if (grid_cell_num < thread_num) {
+      continue;
+    }
     double load_num = static_cast<double>(load_num_list[c]);
-    double mean_load = load_num / std::max<int64_t>(grid_cell_num, 1);
+    double mean_load = load_num / static_cast<double>(grid_cell_num);
     double work_ms = kCostPerLoadMs * load_num
                      + kSuperlinearCoef * std::pow(mean_load, kSuperlinearExp) * static_cast<double>(grid_cell_num);
-    double time_ms = work_ms / thread_num + kCostPerLoadMs * kMaxLoadFactor * mean_load / 2.0
-                     + kAssignCostPerLoadMs * load_num / thread_num;
+    double time_ms = work_ms / thread_num;
     DRCLOG.info(Loc::current(), "cluster size candidate ", s, ": loads=", load_num_list[c], ", cells=", grid_cell_num,
                 ", predicted_ms=", time_ms);
     if (time_ms < best_time_ms) {
@@ -755,6 +878,139 @@ void RuleValidator::processRVCluster(RVCluster& rv_cluster)
   rv_cluster.get_violation_list() = std::move(new_violation_list);
 }
 
+namespace {
+
+// A cluster cut can split one logical violation window into several fragments,
+// each reported by a different cluster with a slightly different clipped rect,
+// making the final violation list sensitive to the partition. Merge records
+// identical in (violation_type, layer_idx, is_routing, net_set, required_size)
+// whose rects have closed overlap (touching counts) into their bbox union.
+void mergeFragmentedViolations(std::vector<Violation>& violation_list)
+{
+  const int64_t violation_num = static_cast<int64_t>(violation_list.size());
+  std::vector<int32_t> order(violation_num);
+  for (int64_t i = 0; i < violation_num; i++) {
+    order[i] = static_cast<int32_t>(i);
+  }
+  auto key_less = [&violation_list](int32_t a, int32_t b) {
+    Violation& va = violation_list[a];
+    Violation& vb = violation_list[b];
+    if (va.get_violation_type() != vb.get_violation_type()) {
+      return va.get_violation_type() < vb.get_violation_type();
+    }
+    if (va.get_layer_idx() != vb.get_layer_idx()) {
+      return va.get_layer_idx() < vb.get_layer_idx();
+    }
+    if (va.get_is_routing() != vb.get_is_routing()) {
+      return va.get_is_routing() < vb.get_is_routing();
+    }
+    if (va.get_violation_net_set() != vb.get_violation_net_set()) {
+      return va.get_violation_net_set() < vb.get_violation_net_set();
+    }
+    return va.get_required_size() < vb.get_required_size();
+  };
+  std::sort(order.begin(), order.end(), key_less);
+
+  std::vector<bool> merged_away(violation_num, false);
+  int64_t merged_num = 0;
+  int64_t group_begin = 0;
+  while (group_begin < violation_num) {
+    int64_t group_end = group_begin + 1;
+    while (group_end < violation_num && !key_less(order[group_begin], order[group_end])
+           && !key_less(order[group_end], order[group_begin])) {
+      group_end++;
+    }
+    const int64_t group_size = group_end - group_begin;
+    if (group_size >= 2) {
+      // Union-find over group members, sorted by ll_x; x-sweep, closed overlap unions.
+      std::vector<int32_t> member(group_size);
+      for (int64_t i = 0; i < group_size; i++) {
+        member[i] = order[group_begin + i];
+      }
+      std::sort(member.begin(), member.end(), [&violation_list](int32_t a, int32_t b) {
+        return violation_list[a].get_ll_x() < violation_list[b].get_ll_x();
+      });
+      std::vector<int32_t> parent(group_size);
+      for (int64_t i = 0; i < group_size; i++) {
+        parent[i] = static_cast<int32_t>(i);
+      }
+      auto find_set = [&parent](int32_t x) {
+        while (parent[x] != x) {
+          parent[x] = parent[parent[x]];
+          x = parent[x];
+        }
+        return x;
+      };
+      struct ActiveRect {
+        int32_t ll_y;
+        int32_t ur_y;
+        int32_t ur_x;
+        int32_t pos;
+      };
+      std::vector<ActiveRect> active;
+      for (int64_t i = 0; i < group_size; i++) {
+        PlanarRect& rect = violation_list[member[i]].get_rect();
+        active.erase(std::remove_if(active.begin(), active.end(),
+                                    [&rect](const ActiveRect& a) { return a.ur_x < rect.get_ll_x(); }),
+                     active.end());
+        for (ActiveRect& a : active) {
+          if (a.ll_y <= rect.get_ur_y() && rect.get_ll_y() <= a.ur_y) {
+            int32_t root_a = find_set(a.pos);
+            int32_t root_b = find_set(static_cast<int32_t>(i));
+            if (root_a != root_b) {
+              parent[root_a] = root_b;
+            }
+          }
+        }
+        active.push_back({rect.get_ll_y(), rect.get_ur_y(), rect.get_ur_x(), static_cast<int32_t>(i)});
+      }
+      // Bbox union per component; write into the first member, drop the rest.
+      std::vector<int32_t> comp_ll_x(group_size, std::numeric_limits<int32_t>::max());
+      std::vector<int32_t> comp_ll_y(group_size, std::numeric_limits<int32_t>::max());
+      std::vector<int32_t> comp_ur_x(group_size, std::numeric_limits<int32_t>::min());
+      std::vector<int32_t> comp_ur_y(group_size, std::numeric_limits<int32_t>::min());
+      for (int64_t i = 0; i < group_size; i++) {
+        int32_t root = find_set(static_cast<int32_t>(i));
+        PlanarRect& rect = violation_list[member[i]].get_rect();
+        comp_ll_x[root] = std::min(comp_ll_x[root], rect.get_ll_x());
+        comp_ll_y[root] = std::min(comp_ll_y[root], rect.get_ll_y());
+        comp_ur_x[root] = std::max(comp_ur_x[root], rect.get_ur_x());
+        comp_ur_y[root] = std::max(comp_ur_y[root], rect.get_ur_y());
+      }
+      std::vector<bool> comp_written(group_size, false);
+      for (int64_t i = 0; i < group_size; i++) {
+        int32_t root = find_set(static_cast<int32_t>(i));
+        if (!comp_written[root]) {
+          violation_list[member[i]].set_rect(comp_ll_x[root], comp_ll_y[root], comp_ur_x[root], comp_ur_y[root]);
+          comp_written[root] = true;
+        } else {
+          merged_away[member[i]] = true;
+          merged_num++;
+        }
+      }
+    }
+    group_begin = group_end;
+  }
+
+  if (merged_num > 0) {
+    int64_t out = 0;
+    for (int64_t i = 0; i < violation_num; i++) {
+      if (!merged_away[i]) {
+        // Guard against self move-assignment, which would clear the net set.
+        if (out != i) {
+          violation_list[out] = std::move(violation_list[i]);
+        }
+        out++;
+      }
+    }
+    violation_list.resize(out);
+  }
+  std::fprintf(stderr, "[ECC_VIO_MERGE] violations %ld -> %ld (merged %ld fragments)\n", static_cast<long>(violation_num),
+               static_cast<long>(violation_list.size()), static_cast<long>(merged_num));
+}
+
+}  // namespace
+
 void RuleValidator::buildViolationList(RVModel& rv_model)
 {
   std::vector<Violation>& violation_list = rv_model.get_violation_list();
@@ -803,6 +1059,14 @@ void RuleValidator::buildViolationList(RVModel& rv_model)
     violation_list.swap(*merge_src);
   }
   violation_list.erase(std::unique(violation_list.begin(), violation_list.end()), violation_list.end());
+
+  // Merge cross-cluster fragments of one logical violation window, making the
+  // report invariant to the cluster partition. ECC_VIO_MERGE=0 disables
+  // (experiment escape hatch).
+  const char* vio_merge_env = std::getenv("ECC_VIO_MERGE");
+  if (vio_merge_env == nullptr || vio_merge_env[0] != '0') {
+    mergeFragmentedViolations(violation_list);
+  }
 }
 
 namespace {

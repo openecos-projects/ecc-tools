@@ -16,6 +16,9 @@
 // ***************************************************************************************
 #include "RuleValidator.hpp"
 
+#include <algorithm>
+#include <limits>
+
 namespace idrc {
 struct Corner
 {
@@ -91,9 +94,15 @@ void RuleValidator::verifyCornerSpacing(RVCluster& rv_cluster)
   };
 
   auto queryNetIdxByRect = [](const RVLayerData& rv_layer_data, const PlanarRect& query_rect) -> int32_t {
-    std::vector<std::pair<GTLRectInt, int32_t>> rect_max_rect_pair_list;
-    rv_layer_data.queryMaxRects(DRCUTIL.convertToGTLRectInt(query_rect), std::back_inserter(rect_max_rect_pair_list));
-    return rect_max_rect_pair_list.empty() ? -1 : rv_layer_data.getNetIdxByMaxRectId(rect_max_rect_pair_list.front().second);
+    // Canonical pick: the minimum net index among all hits. rtree iteration order
+    // depends on cluster-local insertion order, so taking the first hit would make
+    // net attribution sensitive to the cluster partition.
+    int32_t min_net_idx = std::numeric_limits<int32_t>::max();
+    for (auto iter = rv_layer_data.rect_rtrees.qbegin(bgi::intersects(DRCUTIL.convertToGTLRectInt(query_rect)));
+         iter != rv_layer_data.rect_rtrees.qend(); ++iter) {
+      min_net_idx = std::min(min_net_idx, rv_layer_data.getNetIdxByMaxRectId(iter->second));
+    }
+    return min_net_idx == std::numeric_limits<int32_t>::max() ? -1 : min_net_idx;
   };
 
   std::map<int32_t, GTLPolySetInt> layer_merged_polyset_map;
@@ -459,7 +468,11 @@ void RuleValidator::verifyCornerSpacing(RVCluster& rv_cluster)
             return ra.get_ur_x() > rb.get_ur_x();
           if (ra.get_ll_y() != rb.get_ll_y())
             return ra.get_ll_y() < rb.get_ll_y();
-          return ra.get_ur_y() > rb.get_ur_y();
+          if (ra.get_ur_y() != rb.get_ur_y())
+            return ra.get_ur_y() > rb.get_ur_y();
+          // Tie-break identical rects by net set so the dedup below keeps a
+          // canonical (partition-independent) representative.
+          return a.get_violation_net_set() < b.get_violation_net_set();
         });
 
         std::vector<Violation> results;

@@ -137,6 +137,7 @@ struct RVLayerData
   const PolygonData& getPolygon(int32_t polygon_id) const { return polygon_pool[polygon_id]; }
   int32_t getPolygonId(const PolygonData& polygon_data) const { return static_cast<int32_t>(&polygon_data - polygon_pool.data()); }
   const MaxRectData& getMaxRect(int32_t max_rect_id) const { return max_rect_pool[max_rect_id]; }
+  int32_t getMaxRectId(const MaxRectData& max_rect_data) const { return static_cast<int32_t>(&max_rect_data - max_rect_pool.data()); }
   const BoundaryData& getBoundary(int32_t boundary_id) const { return boundary_pool[boundary_id]; }
   int32_t getBoundaryId(const BoundaryData& boundary_data) const { return static_cast<int32_t>(&boundary_data - boundary_pool.data()); }
   const BoundaryData& getPrevBoundary(int32_t boundary_id) const { return getBoundary(getBoundary(boundary_id).prev_boundary_id); }

@@ -139,7 +139,11 @@ void RuleValidator::verifyMetalShort(RVCluster& rv_cluster)
             return ra.get_ur_x() > rb.get_ur_x();
           if (ra.get_ll_y() != rb.get_ll_y())
             return ra.get_ll_y() < rb.get_ll_y();
-          return ra.get_ur_y() > rb.get_ur_y();
+          if (ra.get_ur_y() != rb.get_ur_y())
+            return ra.get_ur_y() > rb.get_ur_y();
+          // Tie-break identical rects by net set so the dedup below keeps a
+          // canonical (partition-independent) representative.
+          return a.get_violation_net_set() < b.get_violation_net_set();
         });
 
         std::vector<Violation> results;

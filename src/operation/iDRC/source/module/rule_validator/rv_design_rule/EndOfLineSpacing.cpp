@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 #include "DataManager.hpp"
 #include "Orientation.hpp"
@@ -957,11 +958,15 @@ void collectEolBoundaries(const RVLayerData& merged_layer_data, int32_t max_eol_
 int32_t queryNetIdxByRect(const RVLayerData& rv_layer_data, const PlanarRect& query_rect)
 {
   GTLRectInt gtl_query_rect = DRCUTIL.convertToGTLRectInt(query_rect);
-  auto iter = rv_layer_data.rect_rtrees.qbegin(bgi::intersects(gtl_query_rect));
-  if (iter == rv_layer_data.rect_rtrees.qend()) {
-    return -1;
+  // Canonical pick: the minimum net index among all hits. rtree iteration order
+  // depends on cluster-local insertion order, so taking the first hit would make
+  // net attribution sensitive to the cluster partition.
+  int32_t min_net_idx = std::numeric_limits<int32_t>::max();
+  for (auto iter = rv_layer_data.rect_rtrees.qbegin(bgi::intersects(gtl_query_rect)); iter != rv_layer_data.rect_rtrees.qend();
+       ++iter) {
+    min_net_idx = std::min(min_net_idx, rv_layer_data.getNetIdxByMaxRectId(iter->second));
   }
-  return rv_layer_data.getNetIdxByMaxRectId(iter->second);
+  return min_net_idx == std::numeric_limits<int32_t>::max() ? -1 : min_net_idx;
 }
 
 void collectNetIdxByBoundary(const RVLayerData& rv_layer_data, const BoundaryData& merged_boundary, std::set<int32_t>& net_idx_set)
