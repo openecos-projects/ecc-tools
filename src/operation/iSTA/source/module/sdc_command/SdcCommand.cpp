@@ -16,9 +16,42 @@
 // ***************************************************************************************
 #include "SdcCommand.hpp"
 
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
+
+#include <cstdlib>
+#include <filesystem>
+
 #include "STAHeader.hpp"
 
 namespace ista {
+
+namespace {
+
+// The python wheel bundles the matching Tcl script library next to the module
+// (ecc_tools_bin/tcl8.6, installed by tcl_engine/CMakeLists.txt) because the
+// search paths compiled into libtcl only exist on RHEL-like distros (Debian
+// uses /usr/share/tcltk). Returns an empty path for unpackaged builds, where
+// the system paths apply.
+std::filesystem::path findBundledTclLibrary()
+{
+#ifndef _WIN32
+  namespace fs = std::filesystem;
+  Dl_info info;
+  if (dladdr(reinterpret_cast<void*>(&SdcCommand::getInst), &info) == 0 || info.dli_fname == nullptr) {
+    return {};
+  }
+  const fs::path bundled = fs::path(info.dli_fname).parent_path() / "tcl8.6";
+  std::error_code ec;
+  return fs::exists(bundled / "init.tcl", ec) ? bundled : fs::path{};
+#else
+  // No module self-location on Windows; fall back to the system Tcl paths.
+  return {};
+#endif
+}
+
+}  // namespace
 
 void SdcCommand::initInst()
 {
@@ -43,6 +76,14 @@ void SdcCommand::destroyInst()
 SdcCommand::SdcCommand()
 {
   _interp = Tcl_CreateInterp();
+  // An explicit TCL_LIBRARY always wins; only fall back to the bundled
+  // scripts when the user has not chosen a script library themselves.
+  if (std::getenv("TCL_LIBRARY") == nullptr) {
+    const std::filesystem::path bundled_library = findBundledTclLibrary();
+    if (!bundled_library.empty()) {
+      Tcl_SetVar(_interp, "tcl_library", bundled_library.string().c_str(), TCL_GLOBAL_ONLY);
+    }
+  }
   if (Tcl_Init(_interp) != TCL_OK) {
     const std::string message = Tcl_GetStringResult(_interp);
     Tcl_DeleteInterp(_interp);
