@@ -17,7 +17,6 @@
 #include "RuleValidator.hpp"
 
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -25,45 +24,6 @@
 namespace idrc {
 
 namespace {
-
-// Phase-level profiling for verifyEnclosureEdge, enabled by ECC_ENC_PROF.
-struct EncProf
-{
-  std::atomic<int64_t> calls{0};
-  std::atomic<int64_t> t_cand_ns{0};   // convex candidate preprocess
-  std::atomic<int64_t> t_width_ns{0};  // (layer,width) rtree preprocess
-  std::atomic<int64_t> t_check_ns{0};  // per-cut check loop
-};
-
-EncProf& encProf()
-{
-  static EncProf prof;
-  return prof;
-}
-
-void dumpEncProf()
-{
-  const EncProf& p = encProf();
-  auto ms = [](std::atomic<int64_t> const& v) { return v.load(std::memory_order_relaxed) / 1e6; };
-  std::fprintf(stderr, "[ECC_ENC_PROF] calls=%ld ms: cand=%.0f width=%.0f check=%.0f total=%.0f\n", p.calls.load(),
-               ms(p.t_cand_ns), ms(p.t_width_ns), ms(p.t_check_ns), ms(p.t_cand_ns) + ms(p.t_width_ns) + ms(p.t_check_ns));
-}
-
-void encProfAdd(std::atomic<int64_t>& counter, std::chrono::steady_clock::time_point begin)
-{
-  auto end = std::chrono::steady_clock::now();
-  counter.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count(), std::memory_order_relaxed);
-}
-
-struct EncProfReg
-{
-  EncProfReg()
-  {
-    if (std::getenv("ECC_ENC_PROF") != nullptr) {
-      std::atexit(dumpEncProf);
-    }
-  }
-};
 
 struct ConvexCandidate
 {
@@ -103,11 +63,6 @@ std::map<Orientation, PlanarRect> buildOrientExtensionRects(const PlanarRect& re
 
 void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
 {
-  static EncProfReg prof_reg;
-  EncProf& prof = encProf();
-  prof.calls.fetch_add(1, std::memory_order_relaxed);
-  auto t_cand = std::chrono::steady_clock::now();
-
   const auto orientations = {Orientation::kEast, Orientation::kSouth, Orientation::kWest, Orientation::kNorth};
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
   const auto& layer_data = rv_cluster.get_layer_data();
@@ -203,8 +158,6 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
   }
 
   // preprocess: build (layer, width) -> maxRect rtree from LayerData polyset.
-  encProfAdd(prof.t_cand_ns, t_cand);
-  auto t_width = std::chrono::steady_clock::now();
   for (const auto& [layer_idx, width_ranges] : layer_width_ranges) {
     if (width_ranges.empty()) {
       continue;
@@ -308,8 +261,6 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
   }
 
   // check each cut.
-  encProfAdd(prof.t_width_ns, t_width);
-  auto t_check = std::chrono::steady_clock::now();
   for (const auto& [cut_layer_idx, cut_layer_data] : layer_data) {
     if (cut_layer_data.cut_pool.empty()) {
       continue;
@@ -573,7 +524,6 @@ void RuleValidator::verifyEnclosureEdge(RVCluster& rv_cluster)
       }
     }
   }
-  encProfAdd(prof.t_check_ns, t_check);
 }
 
 }  // namespace idrc

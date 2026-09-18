@@ -126,111 +126,6 @@ void binShapesToClusters(std::vector<DRCShape>& shape_list, std::vector<RVCluste
   }
 }
 
-// Diagnostic (ECC_SHAPE_SWEEP): dump the 2D anisotropic load surface M(sx, sy) --
-// total (cluster, shape) loads for rectangular clusters -- split by shape
-// orientation (horizontal- vs vertical-dominant). Pure analysis hook;
-// does not affect partitioning.
-void dumpAnisotropicLoadSurface(RVModel& rv_model, int32_t only_pitch, int32_t expand_size)
-{
-  constexpr int32_t kMultList[] = {50, 100, 200, 400, 800};
-  constexpr int32_t mult_num = sizeof(kMultList) / sizeof(kMultList[0]);
-
-  PlanarRect bounding_box(INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN);
-  if (rv_model.get_drc_check_region_list().empty()) {
-    for (auto* shape_list : {&rv_model.get_drc_env_shape_list(), &rv_model.get_drc_result_shape_list()}) {
-      for (DRCShape& drc_shape : *shape_list) {
-        bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), drc_shape.get_ll_x()));
-        bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), drc_shape.get_ll_y()));
-        bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), drc_shape.get_ur_x()));
-        bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), drc_shape.get_ur_y()));
-      }
-    }
-  } else {
-    for (DRCShape& check_region : rv_model.get_drc_check_region_list()) {
-      PlanarRect region_rect = DRCUTIL.getEnlargedRect(check_region.get_rect(), expand_size);
-      bounding_box.set_ll_x(std::min(bounding_box.get_ll_x(), region_rect.get_ll_x()));
-      bounding_box.set_ll_y(std::min(bounding_box.get_ll_y(), region_rect.get_ll_y()));
-      bounding_box.set_ur_x(std::max(bounding_box.get_ur_x(), region_rect.get_ur_x()));
-      bounding_box.set_ur_y(std::max(bounding_box.get_ur_y(), region_rect.get_ur_y()));
-    }
-  }
-  const int32_t offset_x = bounding_box.get_ll_x();
-  const int32_t offset_y = bounding_box.get_ll_y();
-  const int32_t bbox_ur_x = bounding_box.get_ur_x();
-  const int32_t bbox_ur_y = bounding_box.get_ur_y();
-
-  // load[sx_i][sy_j], split by whether the shape's own bbox is x- or y-dominant.
-  int64_t load_h[mult_num][mult_num] = {};
-  int64_t load_v[mult_num][mult_num] = {};
-  for (auto* shape_list_ptr : {&rv_model.get_drc_env_shape_list(), &rv_model.get_drc_result_shape_list()}) {
-    std::vector<DRCShape>& shape_list = *shape_list_ptr;
-#pragma omp parallel
-    {
-      int64_t local_h[mult_num][mult_num] = {};
-      int64_t local_v[mult_num][mult_num] = {};
-#pragma omp for schedule(static) nowait
-      for (int64_t shape_idx = 0; shape_idx < static_cast<int64_t>(shape_list.size()); shape_idx++) {
-        DRCShape& drc_shape = shape_list[shape_idx];
-        int32_t ll_x = std::max(drc_shape.get_ll_x() - expand_size, offset_x);
-        int32_t ll_y = std::max(drc_shape.get_ll_y() - expand_size, offset_y);
-        int32_t ur_x = std::min(drc_shape.get_ur_x() + expand_size, bbox_ur_x);
-        int32_t ur_y = std::min(drc_shape.get_ur_y() + expand_size, bbox_ur_y);
-        if (ll_x > ur_x || ll_y > ur_y) {
-          continue;
-        }
-        int64_t crossings_x[mult_num];
-        int64_t crossings_y[mult_num];
-        for (int32_t i = 0; i < mult_num; i++) {
-          const int32_t s = kMultList[i] * only_pitch;
-          crossings_x[i] = static_cast<int64_t>(ur_x - offset_x) / s - (ll_x - offset_x) / s + 1;
-          crossings_y[i] = static_cast<int64_t>(ur_y - offset_y) / s - (ll_y - offset_y) / s + 1;
-        }
-        int64_t(&local)[mult_num][mult_num] =
-            (drc_shape.getXSpan() >= drc_shape.getYSpan()) ? local_h : local_v;
-        for (int32_t i = 0; i < mult_num; i++) {
-          for (int32_t j = 0; j < mult_num; j++) {
-            local[i][j] += crossings_x[i] * crossings_y[j];
-          }
-        }
-      }
-#pragma omp critical
-      {
-        for (int32_t i = 0; i < mult_num; i++) {
-          for (int32_t j = 0; j < mult_num; j++) {
-            load_h[i][j] += local_h[i][j];
-            load_v[i][j] += local_v[i][j];
-          }
-        }
-      }
-    }
-  }
-
-  auto print_table = [&](const char* title, int64_t (&table)[mult_num][mult_num]) {
-    std::fprintf(stderr, "[ECC_SHAPE_SWEEP] %s (rows=sx mult, cols=sy mult, pitch=%d)\n", title, only_pitch);
-    std::fprintf(stderr, "       ");
-    for (int32_t j = 0; j < mult_num; j++) {
-      std::fprintf(stderr, " %12d", kMultList[j]);
-    }
-    std::fprintf(stderr, "\n");
-    for (int32_t i = 0; i < mult_num; i++) {
-      std::fprintf(stderr, " %5d ", kMultList[i]);
-      for (int32_t j = 0; j < mult_num; j++) {
-        std::fprintf(stderr, " %12ld", table[i][j]);
-      }
-      std::fprintf(stderr, "\n");
-    }
-  };
-  int64_t load_all[mult_num][mult_num];
-  for (int32_t i = 0; i < mult_num; i++) {
-    for (int32_t j = 0; j < mult_num; j++) {
-      load_all[i][j] = load_h[i][j] + load_v[i][j];
-    }
-  }
-  print_table("M(sx,sy) all shapes", load_all);
-  print_table("M(sx,sy) horizontal-dominant shapes", load_h);
-  print_table("M(sx,sy) vertical-dominant shapes", load_v);
-}
-
 }  // namespace
 
 // public
@@ -311,10 +206,6 @@ void RuleValidator::setRVComParam(RVModel& rv_model)
     }
   }
   if (cluster_size <= 0) {
-    // Diagnostic: ECC_SHAPE_SWEEP dumps the anisotropic load surface M(sx, sy) and exits normally.
-    if (std::getenv("ECC_SHAPE_SWEEP") != nullptr) {
-      dumpAnisotropicLoadSurface(rv_model, only_pitch, expand_size);
-    }
     // Experiment hook: ECC_RV_ADAPTIVE enables the cost-model-driven cluster size choice.
     if (std::getenv("ECC_RV_ADAPTIVE") != nullptr) {
       cluster_size = chooseClusterSize(rv_model, only_pitch, expand_size);
@@ -428,8 +319,6 @@ int32_t RuleValidator::chooseClusterSize(RVModel& rv_model, int32_t only_pitch, 
     double work_ms = kCostPerLoadMs * load_num
                      + kSuperlinearCoef * std::pow(mean_load, kSuperlinearExp) * static_cast<double>(grid_cell_num);
     double time_ms = work_ms / thread_num;
-    DRCLOG.info(Loc::current(), "cluster size candidate ", s, ": loads=", load_num_list[c], ", cells=", grid_cell_num,
-                ", predicted_ms=", time_ms);
     if (time_ms < best_time_ms) {
       best_time_ms = time_ms;
       best_cluster_size = s;
@@ -687,66 +576,6 @@ void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std:
 void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortObsPolysetMap& obs_polysets,
                                    MetalShortObsRectMap& netless_rects);
 
-// Phase-level profiling for prepareRVCluster, printed at exit when ECC_PREP_PROF is set.
-struct PrepProf
-{
-  std::atomic<int64_t> net_calls{0};
-  std::atomic<int64_t> in_rects{0};
-  std::atomic<int64_t> out_polygons{0};
-  std::atomic<int64_t> out_max_rects{0};
-  std::atomic<int64_t> out_boundaries{0};
-  std::atomic<int64_t> t_insert_ns{0};   // polyset insert of env+result rects
-  std::atomic<int64_t> t_delta_ns{0};    // env polyset, env maxrects, delta subtract and delta rtree
-  std::atomic<int64_t> t_get_ns{0};      // polyset.get polygon extraction
-  std::atomic<int64_t> t_maxrect_ns{0};  // per-polygon maxrect decomposition + env classification
-  std::atomic<int64_t> t_boundary_ns{0}; // per-polygon boundary edge collection
-  std::atomic<int64_t> t_index_ns{0};    // buildLayerSpatialIndexes
-  std::atomic<int64_t> calls_r1{0};       // net calls with 1 input rect
-  std::atomic<int64_t> calls_r2_5{0};     // 2..5 rects
-  std::atomic<int64_t> calls_r6_20{0};    // 6..20 rects
-  std::atomic<int64_t> calls_r21p{0};     // >20 rects
-  std::atomic<int64_t> calls_delta{0};    // calls taking the env/result delta path
-  std::atomic<int64_t> t_bin_ns{0};       // shape -> layer/net binning loops
-  std::atomic<int64_t> t_msindex_ns{0};   // buildMetalShortSpatialIndexes
-};
-
-PrepProf& prepProf()
-{
-  static PrepProf prof;
-  return prof;
-}
-
-void dumpPrepProf()
-{
-  const PrepProf& p = prepProf();
-  auto ms = [](std::atomic<int64_t> const& v) { return v.load(std::memory_order_relaxed) / 1e6; };
-  std::fprintf(stderr,
-               "[ECC_PREP_PROF] net_calls=%ld in_rects=%ld out_polygons=%ld out_max_rects=%ld out_boundaries=%ld\n"
-               "[ECC_PREP_PROF] ms: insert=%.0f delta=%.0f get=%.0f maxrect=%.0f boundary=%.0f index=%.0f total=%.0f\n",
-               p.net_calls.load(), p.in_rects.load(), p.out_polygons.load(), p.out_max_rects.load(), p.out_boundaries.load(),
-               ms(p.t_insert_ns), ms(p.t_delta_ns), ms(p.t_get_ns), ms(p.t_maxrect_ns), ms(p.t_boundary_ns), ms(p.t_index_ns),
-               ms(p.t_insert_ns) + ms(p.t_delta_ns) + ms(p.t_get_ns) + ms(p.t_maxrect_ns) + ms(p.t_boundary_ns) + ms(p.t_index_ns));
-  std::fprintf(stderr, "[ECC_PREP_PROF] call buckets by in_rects: r1=%ld r2_5=%ld r6_20=%ld r21+=%ld delta_path=%ld\n",
-               p.calls_r1.load(), p.calls_r2_5.load(), p.calls_r6_20.load(), p.calls_r21p.load(), p.calls_delta.load());
-  std::fprintf(stderr, "[ECC_PREP_PROF] ms: binning=%.0f ms_index=%.0f\n", p.t_bin_ns.load() / 1e6, p.t_msindex_ns.load() / 1e6);
-}
-
-void prepProfAdd(std::atomic<int64_t>& counter, std::chrono::steady_clock::time_point begin)
-{
-  auto end = std::chrono::steady_clock::now();
-  counter.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count(), std::memory_order_relaxed);
-}
-
-struct PrepProfReg
-{
-  PrepProfReg()
-  {
-    if (std::getenv("ECC_PREP_PROF") != nullptr) {
-      std::atexit(dumpPrepProf);
-    }
-  }
-};
-
 }  // namespace
 
 void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
@@ -759,7 +588,6 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
   MetalShortObsPolysetMap metal_short_obs_polysets;
   MetalShortObsRectMap metal_short_obs_rects;
   MetalShortObsRectMap metal_short_netless_rects;
-  auto t_bin = std::chrono::steady_clock::now();
   for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
     addShapeToLayerData(layer_data, drc_shape, true);
     if (need_metal_short) {
@@ -772,7 +600,6 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
       collectMetalShortObsRect(metal_short_obs_rects, metal_short_netless_rects, drc_shape);
     }
   }
-  prepProfAdd(prepProf().t_bin_ns, t_bin);
   if (need_metal_short) {
     // One sweepline per layer instead of one boolean union per obs shape.
     buildMetalShortObsPolysets(metal_short_obs_polysets, metal_short_obs_rects);
@@ -795,9 +622,7 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
       buildLayerSpatialIndexes(rv_layer_data, env_rect_rtree_inputs);
     }
     if (need_metal_short) {
-      auto t_msi = std::chrono::steady_clock::now();
       buildMetalShortSpatialIndexes(layer_entry.first, rv_layer_data, metal_short_obs_polysets, metal_short_netless_rects);
-      prepProfAdd(prepProf().t_msindex_ns, t_msi);
     }
   }
 }
@@ -1005,8 +830,6 @@ void mergeFragmentedViolations(std::vector<Violation>& violation_list)
     }
     violation_list.resize(out);
   }
-  std::fprintf(stderr, "[ECC_VIO_MERGE] violations %ld -> %ld (merged %ld fragments)\n", static_cast<long>(violation_num),
-               static_cast<long>(violation_list.size()), static_cast<long>(merged_num));
 }
 
 }  // namespace
@@ -1199,37 +1022,15 @@ void buildMetalShortObsPolysets(MetalShortObsPolysetMap& obs_polysets, MetalShor
 void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data,
                        std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs, bool need_polygon_only)
 {
-  static PrepProfReg prof_reg;
-  PrepProf& prof = prepProf();
-  auto t_begin = std::chrono::steady_clock::now();
-
   NetPrepareContext prepare_context;
   std::vector<GTLRectInt> env_rect_list = std::move(routing_net.env_rect_list);
   std::vector<GTLRectInt> result_rect_list = std::move(routing_net.result_rect_list);
   bool has_env = !env_rect_list.empty();
   routing_net.has_env_shapes = has_env;
   bool has_result = !result_rect_list.empty();
-  prof.net_calls.fetch_add(1, std::memory_order_relaxed);
-  const int64_t in_rect_num = static_cast<int64_t>(env_rect_list.size() + result_rect_list.size());
-  prof.in_rects.fetch_add(in_rect_num, std::memory_order_relaxed);
-  if (in_rect_num == 1) {
-    prof.calls_r1.fetch_add(1, std::memory_order_relaxed);
-  } else if (in_rect_num <= 5) {
-    prof.calls_r2_5.fetch_add(1, std::memory_order_relaxed);
-  } else if (in_rect_num <= 20) {
-    prof.calls_r6_20.fetch_add(1, std::memory_order_relaxed);
-  } else {
-    prof.calls_r21p.fetch_add(1, std::memory_order_relaxed);
-  }
-  if (has_env && has_result && !need_polygon_only) {
-    prof.calls_delta.fetch_add(1, std::memory_order_relaxed);
-  }
-
   routing_net.polyset.insert(env_rect_list.begin(), env_rect_list.end());
   routing_net.polyset.insert(result_rect_list.begin(), result_rect_list.end());
-  prepProfAdd(prof.t_insert_ns, t_begin);
 
-  auto t_delta = std::chrono::steady_clock::now();
   GTLPolySetInt env_polyset;
   if (has_env && has_result) {
     env_polyset.insert(env_rect_list.begin(), env_rect_list.end());
@@ -1252,18 +1053,13 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
       prepare_context.delta_rect_rtree = RectRTree(delta_rect_list);
     }
   }
-  prepProfAdd(prof.t_delta_ns, t_delta);
-
   // Materialize combined geometry into contiguous layer pools.
   routing_net.polygon_begin = static_cast<int32_t>(rv_layer_data.polygon_pool.size());
   routing_net.max_rect_begin = static_cast<int32_t>(rv_layer_data.max_rect_pool.size());
   routing_net.boundary_begin = static_cast<int32_t>(rv_layer_data.boundary_pool.size());
 
-  auto t_get = std::chrono::steady_clock::now();
   std::vector<GTLHolePolyInt> hole_poly_list;
   routing_net.polyset.get(hole_poly_list);
-  prepProfAdd(prof.t_get_ns, t_get);
-  prof.out_polygons.fetch_add(static_cast<int64_t>(hole_poly_list.size()), std::memory_order_relaxed);
   for (GTLHolePolyInt& hole_poly : hole_poly_list) {
     int32_t polygon_id = static_cast<int32_t>(rv_layer_data.polygon_pool.size());
     rv_layer_data.polygon_pool.push_back(
@@ -1280,7 +1076,6 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
       }
       continue;
     }
-    auto t_maxrect = std::chrono::steady_clock::now();
     std::vector<GTLRectInt> rect_list;
     if (polygon_hole_poly.size() == 4 && polygon_hole_poly.begin_holes() == polygon_hole_poly.end_holes()) {
       rect_list.emplace_back();
@@ -1312,10 +1107,6 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
     }
     polygon_data.max_rect_count = static_cast<int32_t>(rv_layer_data.max_rect_pool.size()) - polygon_data.max_rect_begin;
     polygon_data.isEnv = is_polygon_env;
-    prepProfAdd(prof.t_maxrect_ns, t_maxrect);
-    prof.out_max_rects.fetch_add(polygon_data.max_rect_count, std::memory_order_relaxed);
-
-    auto t_boundary = std::chrono::steady_clock::now();
     collectBoundaryEdges(polygon_hole_poly, false, polygon_id, rv_layer_data.boundary_pool);
     for (auto iter = polygon_hole_poly.begin_holes(); iter != polygon_hole_poly.end_holes(); iter++) {
       GTLPolyInt gtl_poly = *iter;
@@ -1324,8 +1115,6 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
       collectBoundaryEdges(check_hole_poly, true, polygon_id, rv_layer_data.boundary_pool);
     }
     polygon_data.boundary_count = static_cast<int32_t>(rv_layer_data.boundary_pool.size()) - polygon_data.boundary_begin;
-    prepProfAdd(prof.t_boundary_ns, t_boundary);
-    prof.out_boundaries.fetch_add(polygon_data.boundary_count, std::memory_order_relaxed);
   }
 
   routing_net.polygon_count = static_cast<int32_t>(rv_layer_data.polygon_pool.size()) - routing_net.polygon_begin;
@@ -1335,7 +1124,6 @@ void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& 
 
 void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs)
 {
-  auto t_begin = std::chrono::steady_clock::now();
   // Pool IDs are final here, so index inputs can be allocated exactly once.
   std::vector<IndexedRect> rect_inputs;
   rect_inputs.reserve(rv_layer_data.max_rect_pool.size());
@@ -1353,7 +1141,6 @@ void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std:
   rv_layer_data.env_rect_rtree = decltype(rv_layer_data.env_rect_rtree)(env_rect_rtree_inputs);
   rv_layer_data.boundary_rtrees = decltype(rv_layer_data.boundary_rtrees)(boundary_inputs);
   rv_layer_data.cut_rtrees = decltype(rv_layer_data.cut_rtrees)(rv_layer_data.cut_pool);
-  prepProfAdd(prepProf().t_index_ns, t_begin);
 }
 
 void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortObsPolysetMap& obs_polysets,

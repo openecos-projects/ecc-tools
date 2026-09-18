@@ -15,9 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include <algorithm>
-#include <atomic>
 #include <boost/pending/disjoint_sets.hpp>
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -35,73 +33,6 @@ namespace idrc {
 
 namespace {
 
-// Phase-level profiling for buildLayerComponentData, enabled by ECC_EOL_PROF.
-// Accumulators are always updated (a few thousand relaxed fetch_adds per run,
-// negligible); the summary is printed at exit only when the env var is set.
-struct EolProf
-{
-  std::atomic<int64_t> calls{0};
-  std::atomic<int64_t> polygons{0};
-  std::atomic<int64_t> isolated{0};
-  std::atomic<int64_t> multi_comps{0};
-  std::atomic<int64_t> multi_polys{0};
-  std::atomic<int64_t> max_comp_size{0};
-  std::atomic<int64_t> t_index_ns{0};        // polygon bbox + polygon rtree
-  std::atomic<int64_t> t_uf_ns{0};           // union-find discovery
-  std::atomic<int64_t> t_group_ns{0};        // component grouping
-  std::atomic<int64_t> t_isolated_ns{0};     // copy of isolated polygons
-  std::atomic<int64_t> t_union_ns{0};        // polyset union of multi-polygon components
-  std::atomic<int64_t> t_materialize_ns{0};  // get_max_rectangles + boundary edges of merged components
-  std::atomic<int64_t> t_rtree_ns{0};        // final rect/boundary rtree bulk builds
-  std::atomic<int64_t> cand_pairs{0};        // bbox-overlap candidate pairs visited
-  std::atomic<int64_t> pred_calls{0};        // exact polygonsHaveClosedOverlap calls
-  std::atomic<int64_t> t_pred_ns{0};         // time inside polygonsHaveClosedOverlap
-};
-
-EolProf& eolProf()
-{
-  static EolProf prof;
-  return prof;
-}
-
-void dumpEolProf()
-{
-  const EolProf& p = eolProf();
-  auto ms = [](std::atomic<int64_t> const& v) { return v.load(std::memory_order_relaxed) / 1e6; };
-  std::fprintf(stderr,
-               "[ECC_EOL_PROF] calls=%ld polygons=%ld isolated=%ld multi_comps=%ld multi_polys=%ld max_comp_size=%ld\n"
-               "[ECC_EOL_PROF] ms: index=%.0f uf=%.0f group=%.0f isolated=%.0f union=%.0f materialize=%.0f rtree=%.0f total=%.0f\n"
-               "[ECC_EOL_PROF] cand_pairs=%ld pred_calls=%ld pred_ms=%.0f\n",
-               p.calls.load(), p.polygons.load(), p.isolated.load(), p.multi_comps.load(), p.multi_polys.load(),
-               p.max_comp_size.load(), ms(p.t_index_ns), ms(p.t_uf_ns), ms(p.t_group_ns), ms(p.t_isolated_ns), ms(p.t_union_ns),
-               ms(p.t_materialize_ns), ms(p.t_rtree_ns),
-               ms(p.t_index_ns) + ms(p.t_uf_ns) + ms(p.t_group_ns) + ms(p.t_isolated_ns) + ms(p.t_union_ns) + ms(p.t_materialize_ns)
-                   + ms(p.t_rtree_ns),
-               p.cand_pairs.load(), p.pred_calls.load(), ms(p.t_pred_ns));
-}
-
-void profAdd(std::atomic<int64_t>& counter, std::chrono::steady_clock::time_point begin)
-{
-  auto end = std::chrono::steady_clock::now();
-  counter.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count(), std::memory_order_relaxed);
-}
-
-void profMax(std::atomic<int64_t>& counter, int64_t value)
-{
-  int64_t prev = counter.load(std::memory_order_relaxed);
-  while (prev < value && !counter.compare_exchange_weak(prev, value, std::memory_order_relaxed)) {
-  }
-}
-
-struct EolProfReg
-{
-  EolProfReg()
-  {
-    if (std::getenv("ECC_EOL_PROF") != nullptr) {
-      std::atexit(dumpEolProf);
-    }
-  }
-};
 
 int32_t queryNetIdxByRect(const RVLayerData& rv_layer_data, const PlanarRect& query_rect);
 void collectNetIdxByBoundary(const RVLayerData& rv_layer_data, const BoundaryData& merged_boundary, std::set<int32_t>& net_idx_set);
@@ -702,12 +633,6 @@ void appendMergedComponent(RVLayerData& merged_layer_data, const GTLPolySetInt& 
 
 void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& source_layer_data)
 {
-  static EolProfReg prof_reg;
-  EolProf& prof = eolProf();
-  prof.calls.fetch_add(1, std::memory_order_relaxed);
-  prof.polygons.fetch_add(static_cast<int64_t>(source_layer_data.polygon_pool.size()), std::memory_order_relaxed);
-  auto t_begin = std::chrono::steady_clock::now();
-
   // Rebuild pools and indexes after grouping touching polygons into components.
   merged_layer_data.nets.clear();
   merged_layer_data.polygon_pool.clear();
@@ -737,7 +662,6 @@ void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& 
   // closed bbox intersection -- and the exact check below retains closed-overlap
   // semantics, including edge-to-edge contact.
   boost::disjoint_sets_with_storage<> polygon_components(source_layer_data.polygon_pool.size());
-  const bool prof_detail = std::getenv("ECC_EOL_PROF") != nullptr;
   if (std::getenv("ECC_EOL_RTREE") == nullptr) {
     // Connectivity discovery at maxrect granularity. Maxrects exactly cover their
     // polygon as a closed set, so two polygons have closed overlap iff some rect
@@ -762,9 +686,7 @@ void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& 
     }
     std::sort(rect_entries.begin(), rect_entries.end(),
               [](const RectEntry& a, const RectEntry& b) { return a.x_min < b.x_min; });
-    profAdd(prof.t_index_ns, t_begin);
 
-    auto t_uf = std::chrono::steady_clock::now();
     std::vector<RectEntry> active_rects;
     size_t inserts_since_compact = 0;
     for (const RectEntry& entry : rect_entries) {
@@ -776,11 +698,9 @@ void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& 
         if (other.x_max < entry.x_min || other.y_max < entry.y_min) {
           continue;  // expired or vertically below
         }
-        prof.cand_pairs.fetch_add(1, std::memory_order_relaxed);
         if (other.polygon_id == entry.polygon_id) {
           continue;  // rects of the same polygon are trivially connected
         }
-        prof.pred_calls.fetch_add(1, std::memory_order_relaxed);
         polygon_components.union_set(polygon_components.find_set(entry.polygon_id), polygon_components.find_set(other.polygon_id));
       }
       const auto insert_pos = std::upper_bound(active_rects.begin(), active_rects.end(), entry.y_min,
@@ -793,7 +713,6 @@ void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& 
         active_rects.erase(expired_end, active_rects.end());
       }
     }
-    profAdd(prof.t_uf_ns, t_uf);
   } else {
     // Build a polygon-level index for connected-component discovery.
     using PolygonRTree = bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>>;
@@ -803,11 +722,9 @@ void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& 
       polygon_rtree_inputs.emplace_back(polygon_bounding_boxes[polygon_id], polygon_id);
     }
     PolygonRTree polygon_rtree(polygon_rtree_inputs);
-    profAdd(prof.t_index_ns, t_begin);
 
     // Use one bbox query per polygon to find candidates. The exact check below
     // retains closed-overlap semantics, including edge-to-edge contact.
-    auto t_uf = std::chrono::steady_clock::now();
     std::vector<std::pair<GTLRectInt, int32_t>> polygon_overlap_list;
     for (int32_t polygon_id : valid_polygon_ids) {
       polygon_overlap_list.clear();
@@ -817,25 +734,17 @@ void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& 
         if (overlap_polygon_id <= polygon_id) {
           continue;
         }
-        prof.cand_pairs.fetch_add(1, std::memory_order_relaxed);
         if (polygon_components.find_set(polygon_id) == polygon_components.find_set(overlap_polygon_id)) {
           continue;
         }
-        prof.pred_calls.fetch_add(1, std::memory_order_relaxed);
-        const auto t_pred = prof_detail ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
         const bool overlap = polygonsHaveClosedOverlap(source_layer_data, polygon_id, overlap_polygon_id);
-        if (prof_detail) {
-          profAdd(prof.t_pred_ns, t_pred);
-        }
         if (overlap) {
           polygon_components.union_set(polygon_id, overlap_polygon_id);
         }
       }
     }
-    profAdd(prof.t_uf_ns, t_uf);
   }
 
-  auto t_group = std::chrono::steady_clock::now();
   std::vector<std::vector<int32_t>> component_polygon_list(source_layer_data.polygon_pool.size());
   std::vector<int32_t> component_root_list;
   component_root_list.reserve(source_layer_data.polygon_pool.size());
@@ -853,39 +762,26 @@ void buildLayerComponentData(RVLayerData& merged_layer_data, const RVLayerData& 
   std::sort(component_root_list.begin(), component_root_list.end(), [&component_polygon_list](int32_t a, int32_t b) {
     return component_polygon_list[a].front() < component_polygon_list[b].front();
   });
-  profAdd(prof.t_group_ns, t_group);
 
   // Copy isolated polygons directly and union only multi-polygon components.
   int32_t next_net_id = 0;
   for (int32_t component_root : component_root_list) {
     const std::vector<int32_t>& polygon_id_list = component_polygon_list[component_root];
     if (polygon_id_list.size() == 1) {
-      auto t_iso = std::chrono::steady_clock::now();
       appendIsolatedPolygon(source_layer_data, polygon_id_list.front(), next_net_id++, merged_layer_data, rect_rtree_inputs, boundary_rtree_inputs);
-      profAdd(prof.t_isolated_ns, t_iso);
-      prof.isolated.fetch_add(1, std::memory_order_relaxed);
       continue;
     }
 
-    auto t_union = std::chrono::steady_clock::now();
     GTLPolySetInt component_polyset;
     for (int32_t polygon_id : polygon_id_list) {
       component_polyset += source_layer_data.getPolygon(polygon_id).hole_poly;
     }
-    profAdd(prof.t_union_ns, t_union);
-    auto t_mat = std::chrono::steady_clock::now();
     appendMergedComponent(merged_layer_data, component_polyset, next_net_id, rect_rtree_inputs, boundary_rtree_inputs);
-    profAdd(prof.t_materialize_ns, t_mat);
-    prof.multi_comps.fetch_add(1, std::memory_order_relaxed);
-    prof.multi_polys.fetch_add(static_cast<int64_t>(polygon_id_list.size()), std::memory_order_relaxed);
-    profMax(prof.max_comp_size, static_cast<int64_t>(polygon_id_list.size()));
   }
 
   // Pool IDs are stable now, so both spatial indexes can be bulk-built.
-  auto t_rtree = std::chrono::steady_clock::now();
   merged_layer_data.rect_rtrees = decltype(merged_layer_data.rect_rtrees)(rect_rtree_inputs);
   merged_layer_data.boundary_rtrees = decltype(merged_layer_data.boundary_rtrees)(boundary_rtree_inputs);
-  profAdd(prof.t_rtree_ns, t_rtree);
 }
 
 // EOL boundary collection.
