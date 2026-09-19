@@ -31,6 +31,7 @@ target_link_libraries(ista_sdc_command
         tcl
     PRIVATE
         ista_data_manager
+        ${CMAKE_DL_LIBS}
 )
 
 target_include_directories(ista_sdc_command
