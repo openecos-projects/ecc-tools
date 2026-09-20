@@ -123,7 +123,7 @@ class DataManager
   bool saveLef(string lef_path);
   bool saveMacroTCL(string tcl_path);
   void saveVerilog(string verilog_path, std::set<std::string>&& exclude_cell_names = {}, bool is_add_space_for_escape_name = false);
-  bool saveGDSII(string path, bool is_hardened = false);
+  bool saveGDSII(string path, bool is_hardened = false, string layer_map_path = "");
   bool saveJSON(string path, string options);
   bool saveViewJson(string output_dir, ViewJsonWriteOptions options = {});
   bool applyViewJsonEdits(string edits_path, bool compressed_hint = false);

@@ -33,6 +33,8 @@
 
 #include "builder.h"
 
+#include "gds_builder/gds_layer_map.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -414,8 +416,15 @@ void IdbBuilder::saveVerilog(std::string verilog_file_name, std::set<std::string
   writer.writeModule();
 }
 
-bool IdbBuilder::saveGDSII(string file, bool is_hardened /* = false */)
+bool IdbBuilder::saveGDSII(string file, bool is_hardened /* = false */, string layer_map_path /* = "" */)
 {
+  if (!layer_map_path.empty()) {
+    GdsLayerMap layer_map;
+    if (!layer_map.load(layer_map_path)) {
+      ECCLOG.warn(ecc::Loc::current(), "Load GDS layer map failed: ", layer_map.error());
+      return false;
+    }
+  }
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
     ECCLOG.warn(ecc::Loc::current(), "Create GDSII file failed...");
     return false;
@@ -423,9 +432,9 @@ bool IdbBuilder::saveGDSII(string file, bool is_hardened /* = false */)
 
   std::shared_ptr<Def2GdsWrite> gds_write = std::make_shared<Def2GdsWrite>(_def_service);
   if(is_hardened) {
-    return gds_write->writeHardenedDb(file.c_str());
+    return gds_write->writeHardenedDb(file.c_str(), layer_map_path.empty() ? nullptr : layer_map_path.c_str());
   }else{
-    return gds_write->writeDb(file.c_str());
+    return gds_write->writeDb(file.c_str(), layer_map_path.empty() ? nullptr : layer_map_path.c_str());
   }
 }
 

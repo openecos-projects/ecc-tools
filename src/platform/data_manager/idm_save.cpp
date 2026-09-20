@@ -116,12 +116,12 @@ void DataManager::saveVerilog(string verilog_path, std::set<std::string>&& exclu
   return _idb_builder->saveVerilog(verilog_path, exclude_cell_names, is_add_space_for_escape_name);
 }
 
-bool DataManager::saveGDSII(string path, bool is_hardened /* = false */)
+bool DataManager::saveGDSII(string path, bool is_hardened /* = false */, string layer_map_path /* = "" */)
 {
   if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
     return false;
   }
-  return _idb_builder->saveGDSII(path, is_hardened);
+  return _idb_builder->saveGDSII(path, is_hardened, layer_map_path);
 }
 bool DataManager::saveJSON(string path, string options)
 {
