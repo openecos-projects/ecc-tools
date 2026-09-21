@@ -1283,51 +1283,23 @@ void DetailedRouter::buildLayerShadowMap(DRBox& dr_box)
 
 void DetailedRouter::buildDRNodeNeighbor(DRBox& dr_box)
 {
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   int32_t bottom_routing_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
   int32_t top_routing_layer_idx = RTDM.getConfig().top_routing_layer_idx;
 
   std::vector<GridMap<DRNode>>& layer_node_map = dr_box.get_layer_node_map();
-  std::map<int32_t, std::pair<std::set<int32_t>, std::set<int32_t>>>& layer_axis_map = dr_box.get_layer_axis_map();
   for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_node_map.size()); layer_idx++) {
     bool routing_hv = bottom_routing_layer_idx <= layer_idx && layer_idx <= top_routing_layer_idx;
     GridMap<DRNode>& dr_node_map = layer_node_map[layer_idx];
-    std::set<int32_t> neighbor_layer_x_axis_set;
-    std::set<int32_t> neighbor_layer_y_axis_set;
-    if (layer_idx != 0) {
-      neighbor_layer_x_axis_set.insert(layer_axis_map[layer_idx - 1].first.begin(), layer_axis_map[layer_idx - 1].first.end());
-      neighbor_layer_y_axis_set.insert(layer_axis_map[layer_idx - 1].second.begin(), layer_axis_map[layer_idx - 1].second.end());
-    }
-    if (layer_idx != static_cast<int32_t>(layer_node_map.size()) - 1) {
-      neighbor_layer_x_axis_set.insert(layer_axis_map[layer_idx + 1].first.begin(), layer_axis_map[layer_idx + 1].first.end());
-      neighbor_layer_y_axis_set.insert(layer_axis_map[layer_idx + 1].second.begin(), layer_axis_map[layer_idx + 1].second.end());
-    }
-    std::set<int32_t>& curr_axis = (routing_layer_list[layer_idx].isPreferH()) ? layer_axis_map[layer_idx].first : layer_axis_map[layer_idx].second;
-    std::vector<uint8_t> horizontal_track_list(dr_node_map.get_y_size(), false);
-    std::vector<uint8_t> vertical_track_list(dr_node_map.get_x_size(), false);
-    if (routing_hv) {
-      bool prefer_h = routing_layer_list[layer_idx].isPreferH();
-      for (int32_t y = 0; y < dr_node_map.get_y_size(); y++) {
-        int32_t real_y = dr_node_map[0][y].get_y();
-        horizontal_track_list[y] = neighbor_layer_y_axis_set.contains(real_y) || (!prefer_h && curr_axis.contains(real_y));
-      }
-      for (int32_t x = 0; x < dr_node_map.get_x_size(); x++) {
-        int32_t real_x = dr_node_map[x][0].get_x();
-        vertical_track_list[x] = neighbor_layer_x_axis_set.contains(real_x) || (prefer_h && curr_axis.contains(real_x));
-      }
-    }
     for (int32_t x = 0; x < dr_node_map.get_x_size(); x++) {
       for (int32_t y = 0; y < dr_node_map.get_y_size(); y++) {
         DRNode& dr_node = dr_node_map[x][y];
-        if (horizontal_track_list[y]) {
+        if (routing_hv) {
           if (x != 0) {
             dr_node.setNeighborNode(Orientation::kWest, &dr_node_map[x - 1][y]);
           }
           if (x != dr_node_map.get_x_size() - 1) {
             dr_node.setNeighborNode(Orientation::kEast, &dr_node_map[x + 1][y]);
           }
-        }
-        if (vertical_track_list[x]) {
           if (y != 0) {
             dr_node.setNeighborNode(Orientation::kSouth, &dr_node_map[x][y - 1]);
           }
