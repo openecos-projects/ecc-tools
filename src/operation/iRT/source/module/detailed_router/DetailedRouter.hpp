@@ -45,7 +45,7 @@ class DetailedRouter
   static DetailedRouter& getInst();
   static void destroyInst();
   // function
- void route();
+  void route();
 
  private:
   // self
