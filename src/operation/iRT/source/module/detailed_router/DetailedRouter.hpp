@@ -45,7 +45,7 @@ class DetailedRouter
   static DetailedRouter& getInst();
   static void destroyInst();
   // function
-  void route();
+ void route();
 
  private:
   // self
@@ -72,6 +72,7 @@ class DetailedRouter
   void routeDRBoxMap(DRModel& dr_model);
   void routeDRBoxList(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   void routeDRBox(DRModel& dr_model, DRBox& dr_box);
+  void rerouteCleanDRBox(DRModel& dr_model, DRBox& dr_box);
   void freeDRBoxMap(DRModel& dr_model);
   void updateRouteViolation(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   void buildFixedRect(DRBox& dr_box);
@@ -86,17 +87,6 @@ class DetailedRouter
   void buildNetTaskList(DRModel& dr_model, DRBox& dr_box, int32_t net_idx);
   void buildRouteViolation(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   bool needRouting(DRBox& dr_box);
-  void buildRefineTaskList(DRModel& dr_model, DRBox& dr_box);
-  void selectRefineNetList(DRBox& dr_box);
-  void refineCleanNets(DRBox& dr_box);
-  bool hasCoveredOutsideBoxAccessPoint(DRBox& dr_box, int32_t net_idx);
-  bool coverRefineTerminals(DRBox& dr_box, int32_t net_idx, std::vector<Segment<LayerCoord>>& old_result_list,
-                            const std::vector<EXTLayerRect>& old_patch_list);
-  bool hasNetBoxViolation(DRBox& dr_box, int32_t net_idx, const std::vector<Violation>& violation_list);
-  double getNetResultCost(const std::vector<Segment<LayerCoord>>& result_list, const std::vector<EXTLayerRect>& patch_list,
-                          const DRIterParam& dr_iter_param);
-  double getResultCost(const std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_result_map,
-                       const std::map<int32_t, std::vector<EXTLayerRect>>& net_patch_map, const DRIterParam& dr_iter_param);
   void buildDRBoxGraph(DRBox& dr_box);
   void buildBoxTrackAxis(DRBox& dr_box);
   void buildLayerNodeMap(DRBox& dr_box);
@@ -107,7 +97,7 @@ class DetailedRouter
   void buildDRShapeIndex(DRBox& dr_box);
   void updateNetShapeIndex(DRBox& dr_box, int32_t net_idx);
   void exemptPinShape(DRModel& dr_model, DRBox& dr_box);
-  void routeDRBox(DRBox& dr_box);
+  bool routeDRBox(DRBox& dr_box);
   std::vector<int32_t> initTaskSchedule(DRBox& dr_box, std::vector<int32_t>& net_route_order_list);
   void updateGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, std::vector<Segment<LayerCoord>>& segment_list,
                    std::vector<EXTLayerRect>& patch_list);
