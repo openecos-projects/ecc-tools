@@ -27,6 +27,7 @@
 #include "Monitor.hpp"
 #include "PatchGeometry.hpp"
 #include "RTInterface.hpp"
+#include "Utility.hpp"
 
 namespace irt {
 
@@ -729,7 +730,18 @@ std::vector<size_t> DRFixedGeometry::query(const std::vector<LayerRect>& region_
 
 void DetailedRouter::buildAccessPoint(DRBox& dr_box)
 {
-  dr_box.set_net_access_point_map(RTDM.getNetAccessPointMap(dr_box.get_box_rect()));
+  std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> net_access_point_map = RTDM.getNetAccessPointMap(dr_box.get_box_rect());
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
+  if (region_route.get_enable() && region_route.get_is_regional_stage()) {
+    for (auto net_iter = net_access_point_map.begin(); net_iter != net_access_point_map.end();) {
+      if (!region_route.isActiveNet(net_iter->first)) {
+        net_iter = net_access_point_map.erase(net_iter);
+      } else {
+        net_iter++;
+      }
+    }
+  }
+  dr_box.set_net_access_point_map(net_access_point_map);
 }
 
 void DetailedRouter::buildNetEnvironment(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list)
@@ -870,7 +882,11 @@ void DetailedRouter::initDRTaskList(DRModel& dr_model, DRBox& dr_box)
       net_idx_set.insert(net_idx);
     }
   }
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
   for (int32_t net_idx : net_idx_set) {
+    if (!region_route.isActiveNet(net_idx)) {
+      continue;
+    }
     buildNetTaskList(dr_model, dr_box, net_idx);
   }
   std::vector<DRTask>& dr_task_list = dr_box.get_dr_task_list();
@@ -2935,11 +2951,12 @@ void DetailedRouter::updateNetResult(DRModel& dr_model)
   RTLOG.info(Loc::current(), "Starting...");
 
   std::vector<DRNet>& dr_net_list = dr_model.get_dr_net_list();
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_detailed_result_map = dr_model.get_curr_result().get_net_detailed_result_map();
   std::vector<std::pair<int32_t, std::vector<Segment<LayerCoord>>*>> net_result_list;
   net_result_list.reserve(net_detailed_result_map.size());
   for (auto& [net_idx, segment_list] : net_detailed_result_map) {
-    if (segment_list.empty()) {
+    if (segment_list.empty() || !region_route.isActiveNet(net_idx)) {
       continue;
     }
     net_result_list.emplace_back(net_idx, &segment_list);
@@ -3025,7 +3042,11 @@ void DetailedRouter::updateNetPatch(DRModel& dr_model)
   RTLOG.info(Loc::current(), "Starting...");
 
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_detailed_result_map = dr_model.get_curr_result().get_net_detailed_result_map();
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
   for (auto& [net_idx, patch_list] : dr_model.get_curr_result().get_net_detailed_patch_map()) {
+    if (!region_route.isActiveNet(net_idx)) {
+      continue;
+    }
     std::map<int32_t, std::vector<PlanarRect>> layer_routing_rect_map;
     for (Segment<LayerCoord>& segment : net_detailed_result_map[net_idx]) {
       for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, segment)) {
@@ -3088,6 +3109,10 @@ void DetailedRouter::updateViolation(DRModel& dr_model)
     }
   }
   RTLOG.info(Loc::current(), "Checking ", dirty_box_id_list.size(), " dirty boxes from ", routed_box_num, " routed boxes");
+  if (dirty_box_id_list.empty()) {
+    RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+    return;
+  }
 
   size_t total_box_num = static_cast<size_t>(dr_box_map.get_x_size()) * dr_box_map.get_y_size();
   if (dirty_box_id_list.size() * 4 >= total_box_num) {
@@ -3107,6 +3132,9 @@ void DetailedRouter::updateViolation(DRModel& dr_model)
   std::set<Violation, CmpViolation> violation_set;
   for (Violation& violation : dr_model.get_curr_result().get_route_violation_list()) {
     DRBoxId owner_box_id = getViolationOwnerBoxId(dr_model, violation);
+    if (owner_box_id.get_x() < 0 || owner_box_id.get_y() < 0) {
+      RTLOG.error(Loc::current(), "The route violation has no owning detailed routing box!");
+    }
     if (!dirty_box_map[owner_box_id.get_x()][owner_box_id.get_y()]) {
       violation_set.insert(violation);
     }
@@ -3159,8 +3187,11 @@ std::vector<Violation> DetailedRouter::getFullRouteViolationList(DRModel& dr_mod
     }
   }
   std::set<int32_t>& need_checked_net_set = de_task.get_need_checked_net_set();
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
   for (DRNet& dr_net : dr_model.get_dr_net_list()) {
-    need_checked_net_set.insert(dr_net.get_net_idx());
+    if (region_route.isActiveNet(dr_net.get_net_idx())) {
+      need_checked_net_set.insert(dr_net.get_net_idx());
+    }
   }
 
   de_task.set_proc_type(DEProcType::kGet);

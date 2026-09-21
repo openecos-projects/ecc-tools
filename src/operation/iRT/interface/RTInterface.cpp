@@ -24,6 +24,7 @@
 #include "LayerAssigner.hpp"
 #include "Monitor.hpp"
 #include "PinAccessor.hpp"
+#include "PlanarRect.hpp"
 #include "PlanarRouter.hpp"
 #include "RTHeader.hpp"
 #include "SupplyAnalyzer.hpp"
@@ -118,6 +119,67 @@ void RTInterface::runRT()
   PinAccessor::destroyInst();
   RTUTIL.releaseMemory("PinAccessor");
 
+  initRegionRoute();
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
+  if (region_route.get_enable()) {
+    region_route.set_is_regional_stage(true);
+    RTLOG.info(Loc::current(), "Starting selected-net routing flow");
+    runRoutingFlow();
+    region_route.set_is_regional_stage(false);
+    RTLOG.info(Loc::current(), "Starting full-chip routing flow");
+  }
+  runRoutingFlow();
+
+  ViolationReporter::initInst();
+  RTVR.report();
+  ViolationReporter::destroyInst();
+
+  RTTB.destroy();
+  RTGP.destroy();
+  RTDE.destroy();
+
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void RTInterface::initRegionRoute()
+{
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
+  region_route = RegionRoute();
+
+  // Set the regional routing rectangle here before recompiling. std::nullopt disables regional routing.
+  const std::optional<PlanarRect> region_rect;
+  if (!region_rect.has_value()) {
+    return;
+  }
+
+  PlanarRect real_rect = region_rect.value();
+  Die& die = RTDM.getDatabase().get_die();
+  if (real_rect.isIncorrect() || !RTUTIL.isInside(die.get_real_rect(), real_rect)) {
+    RTLOG.error(Loc::current(), "The regional routing rectangle is invalid or outside the die!");
+  }
+
+  std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
+  for (Net& net : net_list) {
+    if (net.get_pin_list().size() < 2) {
+      continue;
+    }
+    for (Pin& pin : net.get_pin_list()) {
+      if (RTUTIL.isInside(real_rect, pin.get_access_point().get_real_coord())) {
+        region_route.get_net_idx_set().insert(net.get_net_idx());
+        break;
+      }
+    }
+  }
+  if (region_route.get_net_idx_set().empty()) {
+    RTLOG.error(Loc::current(), "The regional routing rectangle has no net with at least two pins!");
+  }
+  region_route.set_enable(true);
+  RTLOG.info(Loc::current(), "Enabled regional routing in rect ", real_rect.get_ll_x(), ",", real_rect.get_ll_y(), "-", real_rect.get_ur_x(), ",",
+             real_rect.get_ur_y(), " for ", region_route.get_net_idx_set().size(), " complete nets across the die");
+}
+
+void RTInterface::runRoutingFlow()
+{
   SupplyAnalyzer::initInst();
   RTSA.analyze();
   SupplyAnalyzer::destroyInst();
@@ -144,16 +206,6 @@ void RTInterface::runRT()
   RTDR.route();
   DetailedRouter::destroyInst();
   RTUTIL.releaseMemory("DetailedRouter");
-
-  ViolationReporter::initInst();
-  RTVR.report();
-  ViolationReporter::destroyInst();
-
-  RTTB.destroy();
-  RTGP.destroy();
-  RTDE.destroy();
-
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void RTInterface::destroyRT()
