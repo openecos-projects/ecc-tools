@@ -77,6 +77,12 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   }
 
   double total_fixed_terminal_area = 0;  // sum of fixed body and synthetic obstacle rectangles
+  clock_net_names = pybind11::list();
+  for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
+    if (net->is_clock()) {
+      clock_net_names.append(pybind11::str(net->get_net_name()));
+    }
+  }
   // Collect the rectangles used by DreamPlace and the corresponding unioned geometry
   // separately.  Fixed instances retain their body rectangle for pin/write-back
   // identity, while halos and blockages become pin-less synthetic terminals.

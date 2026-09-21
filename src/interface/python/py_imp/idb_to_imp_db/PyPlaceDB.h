@@ -77,6 +77,7 @@ struct PyPlaceDB
 
   pybind11::dict net_name2id_map;         ///< net name to id map
   pybind11::list net_names;               ///< net name
+  pybind11::list clock_net_names;         ///< clock nets omitted from placement routing data
   pybind11::list net2pin_map;             ///< array of 1D array, each row stores pin id
   pybind11::list flat_net2pin_map;        ///< flatten version of net2pin_map
   pybind11::list flat_net2pin_start_map;  ///< starting index of each net in flat_net2pin_map
