@@ -24,6 +24,7 @@
 #include "synthesis/topology/Topology.hh"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,6 +34,7 @@
 #include "design/Clock.hh"
 #include "design/ClockLayout.hh"
 #include "design/Design.hh"
+#include "design/Inst.hh"
 #include "design/Net.hh"
 #include "design/Pin.hh"
 #include "geometry/Geometry.hh"
@@ -42,6 +44,7 @@
 #include "synthesis/realization/ClockTreeRealization.hh"
 #include "synthesis/topology/SourceTrunkStage.hh"
 #include "synthesis/topology/layout/ClockLayoutBuilder.hh"
+#include "synthesis/topology/buffer/BufferInsertion.hh"
 #include "synthesis/topology/sink/SinkBranch.hh"
 #include "synthesis/topology/trunk/SourceTrunk.hh"
 #include "synthesis/trace/domain_status/DomainStatusRecorder.hh"
@@ -93,6 +96,53 @@ auto makeLogContext(const Clock& clock, const std::string& sink_domain, const st
       .stage = stage,
       .object_name_prefix = object_name_prefix,
   };
+}
+
+struct TrunkSourceStrengthening
+{
+  std::string cell_master;
+  std::string input_pin_name;
+  std::string output_pin_name;
+};
+
+// A clock gate with a weak output stage (e.g. an X1 clock gate) cannot legally
+// drive a long source-to-root trunk: its liberty output-cap limit is below
+// every characterized buffer-chain load, so the trunk label solver finds zero
+// seed labels and reports source_trunk_label_no_legal_path. Strengthening the
+// source with one buffer moves the trunk drive to the buffer, whose output
+// limit covers the chain loads. Pick the strongest configured buffer whose
+// input pin the weak source can still legally drive.
+auto selectTrunkSourceStrengthening(Wrapper& wrapper, const Config& config, const Pin* clock_source) -> std::optional<TrunkSourceStrengthening>
+{
+  const auto source_drive_cap_pf = wrapper.queryClockSourceDriveCapLimit(config, clock_source);
+  if (!source_drive_cap_pf.has_value()) {
+    return std::nullopt;
+  }
+  std::optional<TrunkSourceStrengthening> selection;
+  double best_drive_cap_pf = 0.0;
+  for (const auto& cell_master : config.get_buffer_types()) {
+    const auto ports = wrapper.queryBufferPorts(cell_master);
+    const auto input_cap_pf = wrapper.queryCharInputPinCap(cell_master);
+    if (!ports.has_value() || !input_cap_pf.has_value() || *input_cap_pf >= *source_drive_cap_pf) {
+      continue;
+    }
+    auto drive_cap_pf = wrapper.queryCellOutPinCapLimit(cell_master);
+    if (!drive_cap_pf.has_value()) {
+      drive_cap_pf = wrapper.queryCellOutPinCapTableAxisMax(cell_master);
+    }
+    if (!drive_cap_pf.has_value()) {
+      continue;
+    }
+    if (!selection.has_value() || *drive_cap_pf > best_drive_cap_pf) {
+      selection = TrunkSourceStrengthening{
+          .cell_master = cell_master,
+          .input_pin_name = ports->input,
+          .output_pin_name = ports->output,
+      };
+      best_drive_cap_pf = *drive_cap_pf;
+    }
+  }
+  return selection;
 }
 
 auto clearClockSynthesizedMembership(Design& design, Clock& clock) -> void
@@ -279,6 +329,60 @@ class ClockTopologySynthesis
         .log_context = makeLogContext(*_clock, source_trunk_label, "source_to_root", source_trunk_prefix),
     };
     auto source_trunk_build = topology::BuildSourceTrunkTree(source_trunk_input);
+    // A weak clock-gate source (e.g. an X1 clock gate) may be unable to drive a
+    // long source-to-root trunk within its liberty output-cap limit, leaving
+    // the trunk label solver without any legal seed. Strengthen such a source
+    // once: insert a buffer at the source and rebuild the trunk from the
+    // buffer output, then commit both payloads together.
+    if (!source_trunk_build.summary.success && source_trunk_build.summary.failure_reason == "source_trunk_label_no_legal_path"
+        && clock_source->get_inst() != nullptr) {
+      if (const auto strengthening = selectTrunkSourceStrengthening(*_wrapper, *_config, clock_source); strengthening.has_value()) {
+        topology::SourceNetSideEffectGuard source_side_effects(*clock_source_net, clock_source, root_inputs);
+        auto inst = std::make_unique<Inst>(topology::MakeObjectName(source_trunk_prefix, "root_strengthen_buf"), strengthening->cell_master,
+                                           InstType::kBuffer, clock_source->get_location());
+        auto* inst_ptr = inst.get();
+        auto input_pin = std::make_unique<Pin>(strengthening->input_pin_name, PinType::kIn, clock_source->get_location(), inst_ptr, nullptr, false);
+        auto* input_pin_ptr = input_pin.get();
+        auto output_pin = std::make_unique<Pin>(strengthening->output_pin_name, PinType::kOut, clock_source->get_location(), inst_ptr, nullptr, false);
+        auto* output_pin_ptr = output_pin.get();
+        inst_ptr->add_pin(input_pin_ptr);
+        inst_ptr->add_pin(output_pin_ptr);
+        auto source_side_net = std::make_unique<Net>(topology::MakeObjectName(source_trunk_prefix, "root_strengthen_net"));
+        auto* source_side_net_ptr = source_side_net.get();
+        topology::ConnectNet(topology::TopologyNetConnectionInput{
+            .net = source_side_net_ptr,
+            .driver = clock_source,
+            .sinks = {input_pin_ptr},
+        });
+        topology::ReconnectExistingNet(topology::TopologyNetConnectionInput{
+            .net = clock_source_net,
+            .driver = output_pin_ptr,
+            .sinks = root_inputs,
+        });
+        auto retry_input = source_trunk_input;
+        retry_input.clock_source = output_pin_ptr;
+        auto retry_build = topology::BuildSourceTrunkTree(retry_input);
+        if (retry_build.summary.success) {
+          retry_build.output.inserted_insts.push_back(std::move(inst));
+          retry_build.output.inserted_pins.push_back(std::move(input_pin));
+          retry_build.output.inserted_pins.push_back(std::move(output_pin));
+          retry_build.output.inserted_nets.push_back(std::move(source_side_net));
+          retry_build.output.propagation_arcs.push_back(ClockPropagationArc{
+              .inst = inst_ptr,
+              .input_pin = input_pin_ptr,
+              .output_pin = output_pin_ptr,
+              .kind = ClockPropagationKind::kBuffer,
+              .origin = ClockPropagationOrigin::kSynthesized,
+              .path_buffer_weight = 1,
+          });
+          CTSLOG.warn(Loc::current(), "Topology: clock \"", _clock->get_clock_name(), "\" source trunk strengthened with buffer \"",
+                      inst_ptr->get_name(), "\" (", strengthening->cell_master, ") after weak-source label failure.");
+          source_trunk_build = std::move(retry_build);
+        } else {
+          source_side_effects.restore();
+        }
+      }
+    }
     const auto source_trunk_phase = sourceTrunkSynthesisPhase(source_trunk_build.summary.stage);
     if (!source_trunk_build.summary.success) {
       const auto failure_reason

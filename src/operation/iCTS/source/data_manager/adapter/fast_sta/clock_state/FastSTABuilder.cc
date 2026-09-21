@@ -155,7 +155,9 @@ auto collectSinkPinCaps(const FastStaEnvironment& environment, const Clock& cloc
 {
   auto& wrapper = *environment.wrapper;
   for (auto* pin : clock.get_loads()) {
-    if (pin == nullptr) {
+    // Boundary IO pins own no inst, so neither liberty cap nor slew limit can
+    // be queried; they are off-chip loads and keep the node's default values.
+    if (pin == nullptr || pin->get_inst() == nullptr) {
       continue;
     }
     const auto node_iter = context.node_id_by_name.find(Design::getPinFullName(pin));

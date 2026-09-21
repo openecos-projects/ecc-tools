@@ -56,6 +56,7 @@ struct LabelSolverConfig
 {
   std::size_t max_generated_labels = 50000000U;
   std::size_t max_retained_labels = 30000000U;
+  std::size_t max_labels_per_state = 512U;
 };
 
 struct LabelSolverSummary

@@ -678,6 +678,13 @@ auto ClockDAG::rebuild(const std::vector<Clock*>& clocks) -> bool
       auto declared_loads = clock->get_loads();
       std::ranges::sort(declared_loads, [](const Pin* lhs, const Pin* rhs) -> bool { return PinName(lhs) < PinName(rhs); });
       for (auto* load : declared_loads) {
+        // Boundary IO pins (e.g. clock feedthroughs to top-level output
+        // ports) are declared sinks for bookkeeping only; on-chip tree
+        // synthesis excludes them, so they are legitimately absent from
+        // explicit net membership.
+        if (load != nullptr && load->get_inst() == nullptr) {
+          continue;
+        }
         if (load == nullptr || !graph.pin_set.contains(load)) {
           auto issue = MakeIssue(clock, ClockGraphIssueCode::kForeignPinMembership, "declared clock sink is absent from explicit net membership");
           issue.object_name = PinName(load);

@@ -85,9 +85,18 @@ auto CollectValidLoads(const Net& net) -> std::vector<Pin*>
   std::vector<Pin*> loads;
   loads.reserve(net.get_loads().size());
   for (auto* load : net.get_loads()) {
-    if (load != nullptr) {
-      loads.push_back(load);
+    if (load == nullptr) {
+      continue;
     }
+    // Boundary IO pins (e.g. a clock feedthrough to a top-level output port)
+    // own no inst, so no liberty pin cap can be queried for them; they are
+    // off-chip loads and must not take part in on-chip tree synthesis.
+    if (load->get_inst() == nullptr) {
+      CTSLOG.warn(Loc::current(), "Topology: exclude boundary IO pin \"", Design::getPinFullName(load), "\" from clock-tree loads of net \"", net.get_name(),
+                  "\".");
+      continue;
+    }
+    loads.push_back(load);
   }
   return loads;
 }
