@@ -82,9 +82,9 @@ class LVSInterface
   void wrapInstanceList(idb::IdbDesign* idb_design, DesignData& design_data);
   void wrapInstance(idb::IdbInstance* idb_instance, DesignData& design_data);
   void wrapIOPinList(idb::IdbDesign* idb_design, DesignData& design_data);
-  std::string wrapDesignTerminal(idb::IdbPin* idb_pin, DesignData& design_data);
+  std::string wrapDesignTerminal(idb::IdbPin* idb_pin);
   void wrapNetList(idb::IdbDesign* idb_design, DesignData& design_data);
-  void wrapNetPinList(idb::IdbPins* idb_pin_list, Net& net, DesignData& design_data);
+  void wrapNetPinList(idb::IdbPins* idb_pin_list, Net& net);
   void wrapPowerGroundTerminal(idb::IdbDesign* idb_design, DesignData& design_data);
   void wrapPowerGroundPin(idb::IdbPin* idb_pin, DesignData& design_data, ConnectType connect_type, std::unordered_set<idb::IdbPin*>& idb_pin_set);
   void wrapDefRoutingData(idb::IdbDesign* idb_design, DefData& def_data);
