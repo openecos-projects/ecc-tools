@@ -148,6 +148,13 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
   dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 18, 12, 3, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
   // clang-format on
 
+  std::vector<DRIterParam> repair_iter_param_list;
+  // clang-format off
+  repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 18, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 36, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, bend_unit, via_unit, 54, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  // clang-format on
+
   for (int32_t i = 0, iter = 1; i < static_cast<int32_t>(dr_iter_param_list.size()); i++, iter++) {
     Monitor monitor;
     int32_t iter_num = static_cast<int32_t>(dr_iter_param_list.size());
@@ -182,6 +189,7 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
     }
   }
   selectBestResult(dr_model);
+  repairViolation(dr_model, repair_iter_param_list);
   uploadDRModel(dr_model);
 }
 
@@ -320,15 +328,9 @@ void DetailedRouter::buildBoxSchedule(DRModel& dr_model)
   dr_model.set_dr_box_id_list_list(dr_box_id_list_list);
 }
 
-void DetailedRouter::splitNetResult(DRModel& dr_model)
+void DetailedRouter::splitNetResultByGCell(DRModel& dr_model)
 {
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
-  GridMap<DRBox>& dr_box_map = dr_model.get_dr_box_map();
-
-  // split detailed segment by box, and distribute ownership to box according to midpoint
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_detailed_result_map = dr_model.get_curr_result().get_net_detailed_result_map();
   std::vector<std::vector<Segment<LayerCoord>>*> segment_list_list;
   segment_list_list.reserve(net_detailed_result_map.size());
@@ -378,6 +380,19 @@ void DetailedRouter::splitNetResult(DRModel& dr_model)
     }
     segment_list = std::move(new_segment_list);
   }
+}
+
+void DetailedRouter::splitNetResult(DRModel& dr_model)
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
+  GridMap<DRBox>& dr_box_map = dr_model.get_dr_box_map();
+
+  // Split detailed segments by GCell, then distribute unique ownership according to midpoint.
+  splitNetResultByGCell(dr_model);
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_detailed_result_map = dr_model.get_curr_result().get_net_detailed_result_map();
 
   std::vector<int32_t>& x_box_idx_list = dr_model.get_gcell_x_box_idx_list();
   std::vector<int32_t>& y_box_idx_list = dr_model.get_gcell_y_box_idx_list();
@@ -3259,6 +3274,247 @@ void DetailedRouter::selectBestResult(DRModel& dr_model)
   }
   dr_model.get_curr_result() = std::move(best_result);
   best_result = DRModelResult();
+}
+
+void DetailedRouter::repairViolation(DRModel& dr_model, std::vector<DRIterParam>& repair_iter_param_list)
+{
+  constexpr int32_t max_repair_box_size = 100;
+  int32_t repair_iter_num = static_cast<int32_t>(repair_iter_param_list.size());
+  for (int32_t i = 0, repair_iter = 1; i < repair_iter_num; i++, repair_iter++) {
+    updateViolation(dr_model);
+    int32_t origin_violation_num = getRouteViolationNum(dr_model);
+    if (origin_violation_num == 0) {
+      break;
+    }
+
+    Monitor monitor;
+    RTLOG.info(Loc::current(), "***** Begin violation repair iteration ", repair_iter, "/", repair_iter_num, " *****");
+    dr_model.get_previous_result() = dr_model.get_curr_result();
+    DRIterParam& repair_iter_param = repair_iter_param_list[i];
+    setDRIterParam(dr_model, dr_model.get_iter() + 1, repair_iter_param);
+
+    int32_t expand_size = std::max(1, repair_iter_param.get_size() / 2);
+    std::vector<PlanarRect> repair_box_rect_list = getRepairBoxRectList(dr_model, expand_size);
+    std::vector<PlanarRect> routable_box_rect_list;
+    routable_box_rect_list.reserve(repair_box_rect_list.size());
+    for (const PlanarRect& repair_box_rect : repair_box_rect_list) {
+      int32_t x_size = repair_box_rect.getXSpan() + 1;
+      int32_t y_size = repair_box_rect.getYSpan() + 1;
+      if (x_size > max_repair_box_size || y_size > max_repair_box_size) {
+        RTLOG.warn(Loc::current(), "Skipping violation repair box in iteration ", repair_iter, ": grid_rect=", repair_box_rect.get_ll_x(), ",",
+                   repair_box_rect.get_ll_y(), "-", repair_box_rect.get_ur_x(), ",", repair_box_rect.get_ur_y(), ", size=", x_size, "x", y_size,
+                   " GCells exceeds the limit ", max_repair_box_size);
+        continue;
+      }
+      routable_box_rect_list.push_back(repair_box_rect);
+    }
+    repair_box_rect_list = std::move(routable_box_rect_list);
+    if (repair_box_rect_list.empty()) {
+      RTLOG.warn(Loc::current(), "Skipping violation repair iteration ", repair_iter, " because no box is within the size limit");
+      continue;
+    }
+    RTLOG.info(Loc::current(), "Routing ", repair_box_rect_list.size(), " violation-centered boxes with ", expand_size, " GCells expansion");
+
+    splitNetResultByGCell(dr_model);
+    size_t repaired_box_num = 0;
+    for (size_t box_idx = 0; box_idx < repair_box_rect_list.size(); box_idx++) {
+      Monitor box_monitor;
+      DRBox dr_box;
+      initRepairDRBox(dr_model, dr_box, repair_box_rect_list[box_idx], repair_iter, static_cast<int32_t>(box_idx));
+      splitRepairBoxResult(dr_model, dr_box);
+      buildRepairNetEnvironment(dr_model, dr_box);
+      buildAccessPoint(dr_box);
+      buildRepairRouteViolation(dr_model, dr_box);
+      initDRTaskList(dr_model, dr_box);
+      updateBestResult(dr_box);
+      routeDRBox(dr_model, dr_box);
+      updateRepairDRModel(dr_model, dr_box);
+      repaired_box_num++;
+      RTLOG.info(Loc::current(), "Repaired ", repaired_box_num, "/", repair_box_rect_list.size(), "(",
+                 RTUTIL.getPercentage(repaired_box_num, repair_box_rect_list.size()), ") boxes", box_monitor.getStatsInfo());
+    }
+
+    updateNetResult(dr_model);
+    updateNetPatch(dr_model);
+    updateViolation(dr_model);
+    int32_t curr_violation_num = getRouteViolationNum(dr_model);
+    if (curr_violation_num >= origin_violation_num) {
+      dr_model.get_curr_result() = dr_model.get_previous_result();
+      RTLOG.info(Loc::current(), "Restored the input result because violation repair changed the violation count from ", origin_violation_num, " to ",
+                 curr_violation_num);
+    } else {
+      RTLOG.info(Loc::current(), "Accepted violation repair with violation count reduced from ", origin_violation_num, " to ", curr_violation_num);
+    }
+
+    updateSummary(dr_model);
+    printSummary(dr_model);
+    outputNetCSV(dr_model);
+    outputViolationCSV(dr_model);
+    RTLOG.info(Loc::current(), "***** End violation repair iteration ", repair_iter, "/", repair_iter_num, monitor.getStatsInfo(), " *****");
+  }
+}
+
+std::vector<PlanarRect> DetailedRouter::getRepairBoxRectList(DRModel& dr_model, int32_t expand_size)
+{
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
+  if (gcell_map.empty() || expand_size <= 0) {
+    RTLOG.error(Loc::current(), "The GCell map or repair box expansion is invalid!");
+  }
+
+  std::vector<PlanarRect> repair_box_rect_list;
+  for (Violation& violation : dr_model.get_curr_result().get_route_violation_list()) {
+    PlanarRect grid_rect = RTUTIL.getClosedGCellGridRect(violation.get_violation_shape().get_real_rect(), gcell_axis);
+    grid_rect.set_ll(std::max(0, grid_rect.get_ll_x() - expand_size), std::max(0, grid_rect.get_ll_y() - expand_size));
+    grid_rect.set_ur(std::min(gcell_map.get_x_size() - 1, grid_rect.get_ur_x() + expand_size),
+                     std::min(gcell_map.get_y_size() - 1, grid_rect.get_ur_y() + expand_size));
+    repair_box_rect_list.push_back(grid_rect);
+  }
+  mergeRepairBoxRectList(repair_box_rect_list);
+  return repair_box_rect_list;
+}
+
+void DetailedRouter::mergeRepairBoxRectList(std::vector<PlanarRect>& repair_box_rect_list)
+{
+  bool has_merged = true;
+  while (has_merged) {
+    has_merged = false;
+    for (size_t first_idx = 0; first_idx < repair_box_rect_list.size() && !has_merged; first_idx++) {
+      for (size_t second_idx = first_idx + 1; second_idx < repair_box_rect_list.size(); second_idx++) {
+        PlanarRect& first_rect = repair_box_rect_list[first_idx];
+        PlanarRect& second_rect = repair_box_rect_list[second_idx];
+        int32_t x_spacing = std::max(second_rect.get_ll_x() - first_rect.get_ur_x(), first_rect.get_ll_x() - second_rect.get_ur_x());
+        int32_t y_spacing = std::max(second_rect.get_ll_y() - first_rect.get_ur_y(), first_rect.get_ll_y() - second_rect.get_ur_y());
+        // Adjacent GCell ranges share a real boundary, so merge them to keep midpoint ownership unique.
+        if (x_spacing > 1 || y_spacing > 1) {
+          continue;
+        }
+        first_rect.set_ll(std::min(first_rect.get_ll_x(), second_rect.get_ll_x()), std::min(first_rect.get_ll_y(), second_rect.get_ll_y()));
+        first_rect.set_ur(std::max(first_rect.get_ur_x(), second_rect.get_ur_x()), std::max(first_rect.get_ur_y(), second_rect.get_ur_y()));
+        repair_box_rect_list.erase(repair_box_rect_list.begin() + second_idx);
+        has_merged = true;
+        break;
+      }
+    }
+  }
+  std::ranges::sort(repair_box_rect_list, CmpPlanarRectByXASC());
+}
+
+void DetailedRouter::initRepairDRBox(DRModel& dr_model, DRBox& dr_box, const PlanarRect& grid_rect, int32_t repair_iter, int32_t box_idx)
+{
+  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
+  EXTPlanarRect box_rect;
+  box_rect.set_grid_rect(grid_rect);
+  box_rect.set_real_rect(RTUTIL.getRealRectByGCell(grid_rect, gcell_axis));
+  dr_box.set_box_rect(box_rect);
+  dr_box.set_dr_box_id(DRBoxId(repair_iter, box_idx));
+  dr_box.set_dr_iter_param(&dr_model.get_dr_iter_param());
+  dr_box.set_initial_routing(false);
+  dr_box.set_dirty(false);
+}
+
+void DetailedRouter::splitRepairBoxResult(DRModel& dr_model, DRBox& dr_box)
+{
+  PlanarRect& box_rect = dr_box.get_box_rect().get_real_rect();
+  DRModelResult& model_result = dr_model.get_curr_result();
+  DRBoxResult& box_result = dr_box.get_curr_result();
+
+  for (auto net_iter = model_result.get_net_detailed_result_map().begin(); net_iter != model_result.get_net_detailed_result_map().end();) {
+    auto& [net_idx, segment_list] = *net_iter;
+    std::vector<Segment<LayerCoord>> remaining_segment_list;
+    remaining_segment_list.reserve(segment_list.size());
+    for (Segment<LayerCoord>& segment : segment_list) {
+      LayerCoord& first = segment.get_first();
+      LayerCoord& second = segment.get_second();
+      PlanarCoord midpoint((first.get_x() + second.get_x()) / 2, (first.get_y() + second.get_y()) / 2);
+      if (RTUTIL.isInside(box_rect, midpoint)) {
+        box_result.get_net_own_result_map()[net_idx].push_back(std::move(segment));
+      } else {
+        remaining_segment_list.push_back(std::move(segment));
+      }
+    }
+    if (remaining_segment_list.empty()) {
+      net_iter = model_result.get_net_detailed_result_map().erase(net_iter);
+    } else {
+      segment_list = std::move(remaining_segment_list);
+      net_iter++;
+    }
+  }
+
+  for (auto net_iter = model_result.get_net_detailed_patch_map().begin(); net_iter != model_result.get_net_detailed_patch_map().end();) {
+    auto& [net_idx, patch_list] = *net_iter;
+    std::vector<EXTLayerRect> remaining_patch_list;
+    remaining_patch_list.reserve(patch_list.size());
+    for (EXTLayerRect& patch : patch_list) {
+      if (RTUTIL.isInside(box_rect, patch.get_real_rect().getMidPoint())) {
+        box_result.get_net_own_patch_map()[net_idx].push_back(std::move(patch));
+      } else {
+        remaining_patch_list.push_back(std::move(patch));
+      }
+    }
+    if (remaining_patch_list.empty()) {
+      net_iter = model_result.get_net_detailed_patch_map().erase(net_iter);
+    } else {
+      patch_list = std::move(remaining_patch_list);
+      net_iter++;
+    }
+  }
+}
+
+void DetailedRouter::buildRepairNetEnvironment(DRModel& dr_model, DRBox& dr_box)
+{
+  Die& die = RTDM.getDatabase().get_die();
+  int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
+  PlanarRect query_rect = RTUTIL.getRegularRect(RTUTIL.getEnlargedRect(dr_box.get_box_rect().get_real_rect(), detection_distance), die.get_real_rect());
+
+  for (auto& [net_idx, segment_list] : dr_model.get_curr_result().get_net_detailed_result_map()) {
+    for (Segment<LayerCoord>& segment : segment_list) {
+      bool is_overlapped = false;
+      for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, segment)) {
+        if (RTUTIL.isOpenOverlap(query_rect, net_shape.get_rect())) {
+          is_overlapped = true;
+          break;
+        }
+      }
+      if (is_overlapped) {
+        dr_box.get_net_env_result_map()[net_idx].push_back(&segment);
+      }
+    }
+  }
+  for (auto& [net_idx, patch_list] : dr_model.get_curr_result().get_net_detailed_patch_map()) {
+    for (EXTLayerRect& patch : patch_list) {
+      if (RTUTIL.isOpenOverlap(query_rect, patch.get_real_rect())) {
+        dr_box.get_net_env_patch_map()[net_idx].push_back(&patch);
+      }
+    }
+  }
+}
+
+void DetailedRouter::buildRepairRouteViolation(DRModel& dr_model, DRBox& dr_box)
+{
+  PlanarRect& box_rect = dr_box.get_box_rect().get_real_rect();
+  std::vector<Violation>& box_violation_list = dr_box.get_curr_result().get_route_violation_list();
+  for (Violation& violation : dr_model.get_curr_result().get_route_violation_list()) {
+    if (RTUTIL.isInside(box_rect, violation.get_violation_shape().get_real_rect().getMidPoint())) {
+      box_violation_list.push_back(violation);
+    }
+  }
+}
+
+void DetailedRouter::updateRepairDRModel(DRModel& dr_model, DRBox& dr_box)
+{
+  DRModelResult& model_result = dr_model.get_curr_result();
+  DRBoxResult& box_result = dr_box.get_curr_result();
+  for (auto& [net_idx, segment_list] : box_result.get_net_own_result_map()) {
+    std::vector<Segment<LayerCoord>>& model_segment_list = model_result.get_net_detailed_result_map()[net_idx];
+    model_segment_list.insert(model_segment_list.end(), std::make_move_iterator(segment_list.begin()), std::make_move_iterator(segment_list.end()));
+  }
+  for (auto& [net_idx, patch_list] : box_result.get_net_own_patch_map()) {
+    std::vector<EXTLayerRect>& model_patch_list = model_result.get_net_detailed_patch_map()[net_idx];
+    model_patch_list.insert(model_patch_list.end(), std::make_move_iterator(patch_list.begin()), std::make_move_iterator(patch_list.end()));
+  }
+  box_result.get_net_own_result_map().clear();
+  box_result.get_net_own_patch_map().clear();
 }
 
 void DetailedRouter::patchFinalMinArea(DRModel& dr_model)

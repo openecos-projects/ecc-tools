@@ -67,6 +67,7 @@ class DetailedRouter
   void initDRBoxMap(DRModel& dr_model);
   void resetRoutingState(DRModel& dr_model);
   void buildBoxSchedule(DRModel& dr_model);
+  void splitNetResultByGCell(DRModel& dr_model);
   void splitNetResult(DRModel& dr_model);
   std::set<DRBoxId, CmpDRBoxId> getDRBoxIdSet(DRModel& dr_model, PlanarRect real_rect);
   void routeDRBoxMap(DRModel& dr_model);
@@ -164,6 +165,14 @@ class DetailedRouter
   void updateBestResult(DRModel& dr_model);
   bool stopIteration(DRModel& dr_model, std::vector<DRIterParam>& dr_iter_param_list);
   void selectBestResult(DRModel& dr_model);
+  void repairViolation(DRModel& dr_model, std::vector<DRIterParam>& repair_iter_param_list);
+  std::vector<PlanarRect> getRepairBoxRectList(DRModel& dr_model, int32_t expand_size);
+  void mergeRepairBoxRectList(std::vector<PlanarRect>& repair_box_rect_list);
+  void initRepairDRBox(DRModel& dr_model, DRBox& dr_box, const PlanarRect& grid_rect, int32_t repair_iter, int32_t box_idx);
+  void splitRepairBoxResult(DRModel& dr_model, DRBox& dr_box);
+  void buildRepairNetEnvironment(DRModel& dr_model, DRBox& dr_box);
+  void buildRepairRouteViolation(DRModel& dr_model, DRBox& dr_box);
+  void updateRepairDRModel(DRModel& dr_model, DRBox& dr_box);
   void patchFinalMinArea(DRModel& dr_model);
   void buildFinalPatchBox(DRModel& dr_model, DRBox& dr_box, const std::set<Violation*, CmpViolation>& patch_violation_set);
   void updateFinalPatch(DRBox& dr_box, std::map<int32_t, std::set<LayerRect, CmpLayerRectByXASC>>& uploaded_patch_map,
