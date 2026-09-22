@@ -49,6 +49,7 @@ std::vector<std::string> parseObjectPatterns(const std::string& text, bool regex
 std::vector<std::string> findObjects(Database& database, const std::vector<std::string>& patterns, QueryObjectType type, bool regexp = false);
 std::vector<std::string> findObjects(Database& database, const std::vector<std::string>& patterns, QueryObjectType type, const ObjectQueryOptions& options);
 std::set<std::string> findClocks(Database& database, const std::vector<std::string>& objects);
+std::set<std::string> findClocksFromObjects(Database& database, const std::vector<std::string>& objects);
 std::set<std::string> findExceptionObjects(Database& database, const std::vector<std::string>& objects);
 std::vector<std::string> findClockSources(Database& database, const std::vector<std::string>& objects);
 std::vector<std::string> findObjectsByType(Database& database, const std::vector<std::string>& objects, QueryObjectType type);
