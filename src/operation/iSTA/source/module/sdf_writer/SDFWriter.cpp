@@ -750,7 +750,13 @@ double SDFWriter::getSDFTimingCheckDelay(Instance& instance, TimingCheckArc& tim
     return timing_check_arc.get_check_time();
   }
   std::string data_pin_name = STAUTIL.getString(instance.get_instance_name(), ":", timing_check_arc.get_data_port());
-  double data_slew = getSDFDataSlew(data_pin_name, analysis_type, data_trans_type);
+  // WIDTH/PERIOD are single-endpoint checks. The same clock pin drives both
+  // lookup axes, so keep the historical clock-slew selection for both axes.
+  // Data-waveform priority applies to two-endpoint checks such as SETUP/HOLD.
+  double data_slew = timing_check_arc.get_check_type() == TimingCheckType::kWidth
+                           || timing_check_arc.get_check_type() == TimingCheckType::kPeriod
+                         ? getSDFSlew(data_pin_name, analysis_type, data_trans_type)
+                         : getSDFDataSlew(data_pin_name, analysis_type, data_trans_type);
   double clock_slew = getSDFTimingCheckSlew(instance, timing_check_arc, analysis_type, data_trans_type);
   double delay = timing_arc.get_check_table_map()[data_trans_type].findValue(clock_slew * timing_arc.get_time_unit_scale(),
                                                                              data_slew * timing_arc.get_time_unit_scale());

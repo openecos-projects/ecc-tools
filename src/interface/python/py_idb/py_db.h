@@ -40,7 +40,7 @@ bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_
 bool saveGDSII(const std::string& gds_name, bool is_harden = false);
 bool saveJson(const std::string& path);
 bool saveViewJson(const std::string& output_dir, const std::string& json_format = "pretty", bool compress = false);
-bool saveGeometrySnapshot(const std::string& output_dir);
+bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc = false);
 bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,
                    const std::string& source = "", const std::string& placement_status = "fixed", bool create_if_missing = true);
 bool initializeGeometrySession();

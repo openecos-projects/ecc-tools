@@ -19,8 +19,15 @@
 
 #include "GeometryEditSession.h"
 #include "GeometrySnapshotExporter.h"
+#include "IdbDesign.h"
+#include "IdbNet.h"
+#include "IdbSpecialNet.h"
+#include "feature_manager.h"
 #include <idm.h>
 #include "view_json_io.h"
+
+#include <optional>
+#include <utility>
 
 namespace python_interface {
 namespace {
@@ -193,7 +200,7 @@ bool saveViewJson(const std::string& output_dir, const std::string& json_format,
   return dmInst->saveViewJson(output_dir, options);
 }
 
-bool saveGeometrySnapshot(const std::string& output_dir)
+bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc)
 {
   idb::IdbDesign* design = dmInst->get_idb_design();
   idb::IdbLayout* layout = dmInst->get_idb_layout();
@@ -201,7 +208,36 @@ bool saveGeometrySnapshot(const std::string& output_dir)
     return false;
   }
 
-  return ecc::geometry::export_geometry_snapshot(*design, *layout, output_dir).ok;
+  std::optional<ecc::geometry::GeometryDrcDistribution> drc;
+  if (include_drc) {
+    drc.emplace();
+    const auto& nets = design->get_net_list()->get_net_list();
+    const auto& special_nets = design->get_special_net_list()->get_net_list();
+    for (const auto& [type, layers] : featureInst->get_type_layer_violation_map()) {
+      for (const auto& [layer, violations] : layers) {
+        auto& records = (*drc)[type][layer];
+        records.reserve(violations.size());
+        for (const ids::Violation& violation : violations) {
+          ecc::geometry::GeometryDrcViolation record;
+          record.bbox = {violation.ll_x, violation.ll_y, violation.ur_x, violation.ur_y};
+          record.required_size = violation.required_size;
+          for (int32_t net_idx : violation.violation_net_set) {
+            if (net_idx >= 0 && net_idx < static_cast<int32_t>(nets.size())) {
+              record.nets.push_back(nets[net_idx]->get_net_name());
+            } else {
+              const int32_t special_idx = net_idx - static_cast<int32_t>(nets.size());
+              record.nets.push_back(special_idx >= 0 && special_idx < static_cast<int32_t>(special_nets.size())
+                                        ? special_nets[special_idx]->get_net_name()
+                                        : "obs");
+            }
+          }
+          records.push_back(std::move(record));
+        }
+      }
+    }
+  }
+
+  return ecc::geometry::export_geometry_snapshot(*design, *layout, output_dir, std::move(drc)).ok;
 }
 
 bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,

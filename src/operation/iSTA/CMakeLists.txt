@@ -23,13 +23,11 @@ set(HOME_ISTA ${HOME_OPERATION}/iSTA)
 
 set(ISTA_INTERFACE ${HOME_ISTA}/interface)
 set(ISTA_SOURCE ${HOME_ISTA}/source)
-set(ISTA_TEST ${HOME_ISTA}/test)
 
 ############################ cmake subdirectory ############################
 
 add_subdirectory(${ISTA_INTERFACE})
 add_subdirectory(${ISTA_SOURCE})
-add_subdirectory(${ISTA_TEST})
 
 ########################################################
 

@@ -558,28 +558,39 @@ void Def2GdsWrite::packPin(gdstk::Cell* gds_cell, IdbPin* pin)
 }
 
 void Def2GdsWrite::packSegment(gdstk::Cell* gds_cell, IdbLayerRouting* routing_layer, IdbCoordinate<int32_t>* point_1,
-                               IdbCoordinate<int32_t>* point_2, int32_t width)
+                               IdbCoordinate<int32_t>* point_2, int32_t width, std::optional<int32_t> ext_1, std::optional<int32_t> ext_2)
 {
   if (gds_cell == nullptr || routing_layer == nullptr || point_1 == nullptr || point_2 == nullptr) {
     return;
   }
 
   int32_t routing_width = width > 0 ? width : routing_layer->get_width();
+  int32_t half_width = routing_width / 2;
 
   int32_t ll_x = 0;
   int32_t ll_y = 0;
   int32_t ur_x = 0;
   int32_t ur_y = 0;
   if (point_1->get_y() == point_2->get_y()) {
-    ll_x = std::min(point_1->get_x(), point_2->get_x()) - routing_width / 2;
-    ll_y = std::min(point_1->get_y(), point_2->get_y()) - routing_width / 2;
-    ur_x = std::max(point_1->get_x(), point_2->get_x()) + routing_width / 2;
+    // horizontal: a flush point ends the metal exactly ext beyond it, a plain point extends half the width
+    IdbCoordinate<int32_t>* point_low = point_1->get_x() <= point_2->get_x() ? point_1 : point_2;
+    IdbCoordinate<int32_t>* point_high = point_low == point_1 ? point_2 : point_1;
+    std::optional<int32_t> ext_low = point_low == point_1 ? ext_1 : ext_2;
+    std::optional<int32_t> ext_high = point_high == point_1 ? ext_1 : ext_2;
+    ll_x = point_low->get_x() - ext_low.value_or(half_width);
+    ll_y = std::min(point_1->get_y(), point_2->get_y()) - half_width;
+    ur_x = point_high->get_x() + ext_high.value_or(half_width);
     ur_y = ll_y + routing_width;
   } else if (point_1->get_x() == point_2->get_x()) {
-    ll_x = std::min(point_1->get_x(), point_2->get_x()) - routing_width / 2;
-    ll_y = std::min(point_1->get_y(), point_2->get_y()) - routing_width / 2;
+    // vertical
+    IdbCoordinate<int32_t>* point_low = point_1->get_y() <= point_2->get_y() ? point_1 : point_2;
+    IdbCoordinate<int32_t>* point_high = point_low == point_1 ? point_2 : point_1;
+    std::optional<int32_t> ext_low = point_low == point_1 ? ext_1 : ext_2;
+    std::optional<int32_t> ext_high = point_high == point_1 ? ext_1 : ext_2;
+    ll_x = std::min(point_1->get_x(), point_2->get_x()) - half_width;
+    ll_y = point_low->get_y() - ext_low.value_or(half_width);
     ur_x = ll_x + routing_width;
-    ur_y = std::max(point_1->get_y(), point_2->get_y()) + routing_width / 2;
+    ur_y = point_high->get_y() + ext_high.value_or(half_width);
   } else {
     ECCLOG.warn(ecc::Loc::current(), "Error...Regular segment only support horizontal & vertical direction... ");
     return;
@@ -698,7 +709,8 @@ int32_t Def2GdsWrite::write_specialnet_wire_segment_points(gdstk::Cell* gds_cell
     IdbCoordinate<int32_t>* point_1 = segment->get_point_start();
     IdbCoordinate<int32_t>* point_2 = segment->get_point_second();
 
-    packSegment(gds_cell, routing_layer, point_1, point_2, routing_width);
+    packSegment(gds_cell, routing_layer, point_1, point_2, routing_width, segment->get_point_ext(point_1),
+                segment->get_point_ext(point_2));
   }
 
   return kDbSuccess;
@@ -872,7 +884,7 @@ int32_t Def2GdsWrite::write_net_wire_segment_points(gdstk::Cell* gds_cell, IdbRe
   IdbCoordinate<int32_t>* point_1 = segment->get_point_start();
   IdbCoordinate<int32_t>* point_2 = segment->get_point_second();
 
-  packSegment(gds_cell, routing_layer, point_1, point_2);
+  packSegment(gds_cell, routing_layer, point_1, point_2, -1, segment->get_point_ext(point_1), segment->get_point_ext(point_2));
   return kDbSuccess;
 }
 

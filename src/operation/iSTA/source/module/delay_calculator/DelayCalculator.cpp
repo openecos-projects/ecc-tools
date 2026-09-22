@@ -764,14 +764,24 @@ double DelayCalculator::getOutputPinLoad(std::string& output_pin, AnalysisType a
 double DelayCalculator::getNetOutputLoad(Net& net, AnalysisType analysis_type, TransType output_trans_type)
 {
   Database& database = STADM.getDatabase();
-  if (database.get_parasitic_library().get_net_map().count(net.get_net_name()) > 0) {
-    ParasiticNet& parasitic_net = database.get_parasitic_library().get_net_map()[net.get_net_name()];
-    return getParasiticNetOutputLoad(net, parasitic_net, analysis_type, output_trans_type);
+  auto& net_load_map = database.get_timing_constraint().get_net_load_map();
+  const auto load_constraint = net_load_map.find(net.get_net_name());
+  if (load_constraint != net_load_map.end() && load_constraint->second.has(analysis_type, output_trans_type)) {
+    double output_load = load_constraint->second.get(analysis_type, output_trans_type);
+    for (std::string& load_pin_name : net.get_load_pin_list()) {
+      output_load += getPinCapacitance(load_pin_name, analysis_type, output_trans_type);
+    }
+    return output_load;
   }
 
   double output_load = 0.0;
-  for (std::string& load_pin_name : net.get_load_pin_list()) {
-    output_load += getPinCapacitance(load_pin_name, analysis_type, output_trans_type);
+  if (database.get_parasitic_library().get_net_map().count(net.get_net_name()) > 0) {
+    ParasiticNet& parasitic_net = database.get_parasitic_library().get_net_map()[net.get_net_name()];
+    output_load = getParasiticNetOutputLoad(net, parasitic_net, analysis_type, output_trans_type);
+  } else {
+    for (std::string& load_pin_name : net.get_load_pin_list()) {
+      output_load += getPinCapacitance(load_pin_name, analysis_type, output_trans_type);
+    }
   }
   return output_load;
 }
@@ -794,7 +804,7 @@ double DelayCalculator::getPinCapacitance(std::string& pin_name, AnalysisType an
   if (pin.get_is_port()) {
     std::map<std::string, TimingPortConstraint>& port_constraint_map = database.get_timing_constraint().get_port_constraint_map();
     if (port_constraint_map.count(pin_name) > 0 && port_constraint_map[pin_name].get_has_load()) {
-      return port_constraint_map[pin_name].get_load();
+      return port_constraint_map[pin_name].get_load(analysis_type, trans_type);
     }
     return 0.0;
   }

@@ -76,4 +76,17 @@ class SdcCommand
   std::vector<SdcError> _errors;
 };
 
+namespace sdc {
+
+/**
+ * Register the iSTA Tcl command set used by SDC scripts.
+ *
+ * Tcl language commands such as set, if, foreach and source are installed by
+ * Tcl_Init(). This function only registers commands implemented by iSTA,
+ * including collection helpers, object queries, and timing constraints.
+ */
+void registerSdcCommands(SdcCommand& interpreter);
+
+}  // namespace sdc
+
 }  // namespace ista

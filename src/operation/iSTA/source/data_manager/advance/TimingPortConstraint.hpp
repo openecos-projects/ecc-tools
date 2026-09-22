@@ -29,6 +29,50 @@ enum class TimingInputDriveType
   kDrivingCell
 };
 
+class TimingIoDelay
+{
+ public:
+  [[nodiscard]] const std::string& get_clock_name() const { return _clock_name; }
+  [[nodiscard]] const std::string& get_reference_pin() const { return _reference_pin; }
+  [[nodiscard]] const std::string& get_group_path() const { return _group_path; }
+  [[nodiscard]] AnalysisType get_analysis_type() const { return _analysis_type; }
+  [[nodiscard]] TransType get_trans_type() const { return _trans_type; }
+  [[nodiscard]] TransType get_clock_trans_type() const { return _clock_trans_type; }
+  [[nodiscard]] double get_delay() const { return _delay; }
+  [[nodiscard]] bool get_level_sensitive() const { return _level_sensitive; }
+  [[nodiscard]] bool get_network_latency_included() const { return _network_latency_included; }
+  [[nodiscard]] bool get_source_latency_included() const { return _source_latency_included; }
+
+  void set_clock_name(std::string value) { _clock_name = std::move(value); }
+  void set_reference_pin(std::string value) { _reference_pin = std::move(value); }
+  void set_group_path(std::string value) { _group_path = std::move(value); }
+  void set_analysis_type(AnalysisType value) { _analysis_type = value; }
+  void set_trans_type(TransType value) { _trans_type = value; }
+  void set_clock_trans_type(TransType value) { _clock_trans_type = value; }
+  void set_delay(double value) { _delay = value; }
+  void set_level_sensitive(bool value) { _level_sensitive = value; }
+  void set_network_latency_included(bool value) { _network_latency_included = value; }
+  void set_source_latency_included(bool value) { _source_latency_included = value; }
+
+  [[nodiscard]] bool hasSameSource(const TimingIoDelay& other) const
+  {
+    return _analysis_type == other._analysis_type && _trans_type == other._trans_type && _clock_name == other._clock_name
+           && _clock_trans_type == other._clock_trans_type && _reference_pin == other._reference_pin;
+  }
+
+ private:
+  std::string _clock_name;
+  std::string _reference_pin;
+  std::string _group_path;
+  AnalysisType _analysis_type = AnalysisType::kMax;
+  TransType _trans_type = TransType::kRise;
+  TransType _clock_trans_type = TransType::kRise;
+  double _delay = 0.0;
+  bool _level_sensitive = false;
+  bool _network_latency_included = false;
+  bool _source_latency_included = false;
+};
+
 class TimingDrivingCell
 {
  public:
@@ -106,6 +150,23 @@ class TimingPortConstraint
     return &_driving_cell_map.at(analysis_type).at(trans_type);
   }
   bool get_has_load() const { return _has_load; }
+  const std::vector<TimingIoDelay>& get_input_delay_list() const { return _input_delay_list; }
+  const std::vector<TimingIoDelay>& get_output_delay_list() const { return _output_delay_list; }
+  std::vector<const TimingIoDelay*> get_input_delays(AnalysisType analysis_type, TransType trans_type) const
+  {
+    return getIoDelays(_input_delay_list, analysis_type, trans_type);
+  }
+  std::vector<const TimingIoDelay*> get_output_delays(AnalysisType analysis_type, TransType trans_type) const
+  {
+    return getIoDelays(_output_delay_list, analysis_type, trans_type);
+  }
+  double get_load(AnalysisType analysis_type, TransType trans_type) const
+  {
+    if (!hasLoadValue(_pin_load_map, analysis_type, trans_type) && !hasLoadValue(_wire_load_map, analysis_type, trans_type)) {
+      return _load;
+    }
+    return getLoadValue(_pin_load_map, analysis_type, trans_type) + getLoadValue(_wire_load_map, analysis_type, trans_type);
+  }
   // setter
   void set_port_name(const std::string& port_name) { _port_name = port_name; }
   void set_clock_name(const std::string& clock_name) { _clock_name = clock_name; }
@@ -141,9 +202,107 @@ class TimingPortConstraint
   void set_has_output_delay_min(const bool has_output_delay_min) { _has_output_delay_min = has_output_delay_min; }
   void set_has_input_transition(const bool has_input_transition) { _has_input_transition = has_input_transition; }
   void set_has_load(const bool has_load) { _has_load = has_load; }
+  void set_input_delays(const std::vector<TimingIoDelay>& delays, bool add_delay)
+  {
+    updateIoDelays(_input_delay_list, delays, add_delay);
+    rebuildLegacyIoDelay(true);
+  }
+  void set_output_delays(const std::vector<TimingIoDelay>& delays, bool add_delay)
+  {
+    updateIoDelays(_output_delay_list, delays, add_delay);
+    rebuildLegacyIoDelay(false);
+  }
+  void set_load(AnalysisType analysis_type, TransType trans_type, double load, bool wire_load)
+  {
+    auto& load_map = wire_load ? _wire_load_map : _pin_load_map;
+    load_map[analysis_type][trans_type] = load;
+    _load = load;
+    _has_load = true;
+  }
   // function
 
  private:
+  static std::vector<const TimingIoDelay*> getIoDelays(const std::vector<TimingIoDelay>& delays, AnalysisType analysis_type, TransType trans_type)
+  {
+    std::vector<const TimingIoDelay*> result;
+    for (const TimingIoDelay& delay : delays) {
+      if (delay.get_analysis_type() == analysis_type && delay.get_trans_type() == trans_type) {
+        result.push_back(&delay);
+      }
+    }
+    return result;
+  }
+
+  static void updateIoDelays(std::vector<TimingIoDelay>& current, const std::vector<TimingIoDelay>& incoming, bool add_delay)
+  {
+    if (!add_delay) {
+      std::set<std::pair<AnalysisType, TransType>> replaced;
+      for (const TimingIoDelay& delay : incoming) {
+        replaced.emplace(delay.get_analysis_type(), delay.get_trans_type());
+      }
+      current.erase(std::remove_if(current.begin(), current.end(), [&](const TimingIoDelay& delay) {
+                      return replaced.contains({delay.get_analysis_type(), delay.get_trans_type()});
+                    }),
+                    current.end());
+    }
+
+    for (const TimingIoDelay& delay : incoming) {
+      auto existing = std::find_if(current.begin(), current.end(), [&](const TimingIoDelay& item) { return item.hasSameSource(delay); });
+      if (existing == current.end()) {
+        current.push_back(delay);
+        continue;
+      }
+      if (!add_delay || (delay.get_analysis_type() == AnalysisType::kMax && delay.get_delay() > existing->get_delay())
+          || (delay.get_analysis_type() == AnalysisType::kMin && delay.get_delay() < existing->get_delay())) {
+        *existing = delay;
+      }
+    }
+  }
+
+  void rebuildLegacyIoDelay(bool input)
+  {
+    const std::vector<TimingIoDelay>& delays = input ? _input_delay_list : _output_delay_list;
+    std::optional<double> minimum;
+    std::optional<double> maximum;
+    _clock_name.clear();
+    for (const TimingIoDelay& delay : delays) {
+      if (_clock_name.empty() && !delay.get_clock_name().empty()) {
+        _clock_name = delay.get_clock_name();
+      }
+      std::optional<double>& value = delay.get_analysis_type() == AnalysisType::kMin ? minimum : maximum;
+      if (!value || (delay.get_analysis_type() == AnalysisType::kMin ? delay.get_delay() < *value : delay.get_delay() > *value)) {
+        value = delay.get_delay();
+      }
+    }
+    if (input) {
+      _has_input_delay_min = minimum.has_value();
+      _has_input_delay_max = maximum.has_value();
+      _input_delay_min = minimum.value_or(0.0);
+      _input_delay_max = maximum.value_or(0.0);
+    } else {
+      _has_output_delay_min = minimum.has_value();
+      _has_output_delay_max = maximum.has_value();
+      _output_delay_min = minimum.value_or(0.0);
+      _output_delay_max = maximum.value_or(0.0);
+    }
+  }
+
+  static double getLoadValue(const std::map<AnalysisType, std::map<TransType, double>>& load_map, AnalysisType analysis_type, TransType trans_type)
+  {
+    const auto analysis = load_map.find(analysis_type);
+    if (analysis == load_map.end()) {
+      return 0.0;
+    }
+    const auto transition = analysis->second.find(trans_type);
+    return transition == analysis->second.end() ? 0.0 : transition->second;
+  }
+
+  static bool hasLoadValue(const std::map<AnalysisType, std::map<TransType, double>>& load_map, AnalysisType analysis_type, TransType trans_type)
+  {
+    const auto analysis = load_map.find(analysis_type);
+    return analysis != load_map.end() && analysis->second.contains(trans_type);
+  }
+
   TimingInputDriveType get_input_drive_type(AnalysisType analysis_type, TransType trans_type) const
   {
     const auto analysis_iter = _input_drive_type_map.find(analysis_type);
@@ -166,6 +325,10 @@ class TimingPortConstraint
   std::map<AnalysisType, std::map<TransType, double>> _input_transition_map;
   std::map<AnalysisType, std::map<TransType, TimingInputDriveType>> _input_drive_type_map;
   std::map<AnalysisType, std::map<TransType, TimingDrivingCell>> _driving_cell_map;
+  std::vector<TimingIoDelay> _input_delay_list;
+  std::vector<TimingIoDelay> _output_delay_list;
+  std::map<AnalysisType, std::map<TransType, double>> _pin_load_map;
+  std::map<AnalysisType, std::map<TransType, double>> _wire_load_map;
   double _load = 0.0;
   bool _has_input_delay_max = false;
   bool _has_input_delay_min = false;

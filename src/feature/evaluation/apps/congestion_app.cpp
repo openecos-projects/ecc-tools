@@ -69,9 +69,7 @@ void TestEgrDataStructure()
       for (const auto& value : matrix[i]) {
         ECCLOG.info(ecc::Loc::current(), value, " ");
       }
-      ECCLOG.info(ecc::Loc::current(), "");
     }
-    ECCLOG.info(ecc::Loc::current(), "");
   }
 }
 

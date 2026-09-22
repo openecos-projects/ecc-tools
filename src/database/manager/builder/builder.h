@@ -112,20 +112,20 @@ class IdbBuilder
 
   /// loger
   void log();
-  void logModule(string mudule, int32_t number = -1)
+  void logModule(const std::string& module, int32_t number = -1)
   {
     logSeperate();
-    logNumber(mudule, number);
+    logNumber(module, number);
     // logSeperate();
   }
   void logSeperate() { ECCLOG.info(ecc::Loc::current(), "**************************************************************"); }
-  void logNumber(string mudule, int32_t number = -1)
+  void logNumber(const std::string& module, int32_t number = -1)
   {
-    ECCLOG.info(ecc::Loc::current(), mudule);
-    if (number != -1) {
-      ECCLOG.info(ecc::Loc::current(), " number : ", number);
+    if (number == -1) {
+      ECCLOG.info(ecc::Loc::current(), module);
+    } else {
+      ECCLOG.info(ecc::Loc::current(), module, number);
     }
-    ECCLOG.info(ecc::Loc::current(), "");
   }
   void logInfo(string info, int32_t number = -1)
   {
@@ -133,7 +133,6 @@ class IdbBuilder
     if (number != -1) {
       ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    ECCLOG.info(ecc::Loc::current(), "");
   }
 
  private:
