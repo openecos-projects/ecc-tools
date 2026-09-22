@@ -846,6 +846,12 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(double overflo
   tb_task.set_planar_coord_list(planar_coord_list);
   GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   tb_task.set_planar_search_region(PlanarRect(0, 0, gcell_map.get_x_size() - 1, gcell_map.get_y_size() - 1));
+  tb_task.set_point_legal_query([this](const PlanarCoord& coord) {
+    return std::ranges::none_of(_macro_grid_rect_list, [&](const PlanarRect& macro_rect) {
+      return macro_rect.get_ll_x() <= coord.get_x() && coord.get_x() <= macro_rect.get_ur_x() && macro_rect.get_ll_y() <= coord.get_y()
+             && coord.get_y() <= macro_rect.get_ur_y();
+    });
+  });
   bool refine_topology = pr_topo_mode == PRTopoMode::kCongestion && shouldRefineTopology(overflow_unit, pr_net, planar_coord_list.size());
   tb_task.set_topo_mode(refine_topology ? TBTopoMode::kCongestion : TBTopoMode::kGeometry);
   if (!refine_topology) {
