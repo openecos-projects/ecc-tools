@@ -1022,7 +1022,6 @@ int32_t DefRead::componentEndCallback(defrCallbackType_e type, void*, defiUserDa
     return kDbFail;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "");
   def_reader->set_end_time(clock());
 
   return kDbSuccess;
@@ -1224,8 +1223,7 @@ int32_t DefRead::parse_net(defiNet* def_net)
             int y;
             int ext;
             def_path->getFlushPoint(&x, &y, &ext);
-            //--------------tbd----------------
-            segment->add_point(x, y);
+            segment->add_flush_point(x, y, ext);
 
             break;
           }
@@ -1282,7 +1280,6 @@ int32_t DefRead::netEndCallback(defrCallbackType_e type, void*, defiUserData dat
     return kDbFail;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "");
 
   return kDbSuccess;
 }
@@ -1483,8 +1480,14 @@ int32_t DefRead::parse_pdn_wire(defiNet* def_net, IdbSpecialWireList* wire_list)
             break;
           }
 
-          case DEFIPATH_FLUSHPOINT:
+          case DEFIPATH_FLUSHPOINT: {
+            int32_t x;
+            int32_t y;
+            int32_t ext;
+            def_path->getFlushPoint(&x, &y, &ext);
+            segment->add_flush_point(x, y, ext);
             break;
+          }
           case DEFIPATH_SHAPE: {
             segment->set_shape_type(def_path->getShape());
             break;
@@ -1574,7 +1577,6 @@ int32_t DefRead::specialNetEndCallback(defrCallbackType_e type, void*, defiUserD
     return kDbFail;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "");
 
   ECCLOG.info(ecc::Loc::current(), "End parse Specialnet.");
 

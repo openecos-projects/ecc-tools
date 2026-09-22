@@ -62,6 +62,7 @@ IdbSpecialWireSegment::~IdbSpecialWireSegment()
       point = nullptr;
     }
   }
+  _point_ext_map.clear();
 
   if (_via) {
     delete _via;
@@ -106,6 +107,20 @@ IdbCoordinate<int32_t>* IdbSpecialWireSegment::add_point(int32_t x, int32_t y)
   _point_list.emplace_back(point);
 
   return point;
+}
+
+IdbCoordinate<int32_t>* IdbSpecialWireSegment::add_flush_point(int32_t x, int32_t y, int32_t ext)
+{
+  IdbCoordinate<int32_t>* point = add_point(x, y);
+  _point_ext_map[point] = ext;
+
+  return point;
+}
+
+std::optional<int32_t> IdbSpecialWireSegment::get_point_ext(IdbCoordinate<int32_t>* point)
+{
+  auto iter = _point_ext_map.find(point);
+  return iter == _point_ext_map.end() ? std::nullopt : std::optional<int32_t>(iter->second);
 }
 
 void IdbSpecialWireSegment::set_delta_rect(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y)
@@ -169,21 +184,22 @@ bool IdbSpecialWireSegment::set_bounding_box()
       int32_t ll_y = 0;
       int32_t ur_x = 0;
       int32_t ur_y = 0;
-      int nn = 0;
       if (point_1->get_y() == point_2->get_y()) {
-        // Horizontal
-        ll_x = std::min(point_1->get_x(), point_2->get_x());
+        // Horizontal: an absent ext keeps the legacy flush end at the point, an ext ends the metal exactly ext beyond it
+        IdbCoordinate<int32_t>* point_low = point_1->get_x() <= point_2->get_x() ? point_1 : point_2;
+        IdbCoordinate<int32_t>* point_high = point_low == point_1 ? point_2 : point_1;
+        ll_x = point_low->get_x() - get_point_ext(point_low).value_or(0);
         ll_y = point_1->get_y() - routing_width / 2;
-        ur_x = std::max(point_1->get_x(), point_2->get_x());
+        ur_x = point_high->get_x() + get_point_ext(point_high).value_or(0);
         ur_y = ll_y + routing_width;
-        nn++;
-
       } else {
         // Vertical
+        IdbCoordinate<int32_t>* point_low = point_1->get_y() <= point_2->get_y() ? point_1 : point_2;
+        IdbCoordinate<int32_t>* point_high = point_low == point_1 ? point_2 : point_1;
         ll_x = point_1->get_x() - routing_width / 2;
-        ll_y = std::min(point_1->get_y(), point_2->get_y());
+        ll_y = point_low->get_y() - get_point_ext(point_low).value_or(0);
         ur_x = ll_x + routing_width;
-        ur_y = std::max(point_1->get_y(), point_2->get_y());
+        ur_y = point_high->get_y() + get_point_ext(point_high).value_or(0);
       }
 
       return IdbObject::set_bounding_box(ll_x, ll_y, ur_x, ur_y);

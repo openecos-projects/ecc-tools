@@ -28,5 +28,7 @@ struct MapLayoutCell
 bool writeMapLayoutCsv(const std::string& map_dir, int32_t grid_cols, int32_t grid_rows, int32_t grid_size, int32_t lx, int32_t ly,
                        int32_t ux, int32_t uy);
 bool writeMapLayoutCsv(const std::string& map_dir, const std::vector<MapLayoutCell>& cells);
+// EGR CSV row zero is the highest grid Y, like all other map matrices.
+bool writeEGRLayoutCsv(const std::string& map_dir, const std::string& gcell_info_path, int32_t matrix_cols, int32_t matrix_rows);
 
 }  // namespace ieval

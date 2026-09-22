@@ -1430,6 +1430,10 @@ void TimingReporter::outputRequiredClockInfo(std::ofstream* report_file, TimingP
     outputTimingLine(report_file, getPinLabel(timing_path.get_capture_clock_pin()), 0.0, capture_time, false,
                      GetTransTypeInitial()(timing_path.get_capture_clock_transition()), label_width);
   }
+  if (std::fabs(timing_path.get_required_time_adjustment()) > STA_ERROR) {
+    outputTimingLine(report_file, "path exception adjustment", timing_path.get_required_time_adjustment(),
+                     capture_time + timing_path.get_required_time_adjustment(), true, "", label_width);
+  }
   double uncertainty = getClockUncertainty(clock_name, delay_type);
   if (uncertainty > STA_ERROR) {
     double signed_uncertainty = delay_type == DelayType::kMax ? -uncertainty : uncertainty;

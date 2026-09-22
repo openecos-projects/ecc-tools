@@ -283,9 +283,12 @@ double PowerPropagator::getRelativeChange(double value, double previous_value)
 void PowerPropagator::seedCaseAnalysisActivity()
 {
   Database& database = STADM.getDatabase();
-  for (std::pair<const std::string, bool>& case_pair : database.get_timing_constraint().get_case_analysis_map()) {
+  for (auto& case_pair : database.get_timing_constraint().get_case_analysis_map()) {
+    if (case_pair.second != TimingCaseValue::kZero && case_pair.second != TimingCaseValue::kOne) {
+      continue;
+    }
     PowerActivity activity;
-    activity.set_static_probability(case_pair.second ? 1.0 : 0.0);
+    activity.set_static_probability(case_pair.second == TimingCaseValue::kOne ? 1.0 : 0.0);
     activity.set_origin(PowerActivityOrigin::kConstant);
     activity.set_is_valid(true);
     std::string pin_name = case_pair.first;
