@@ -159,7 +159,8 @@ bool Def2GdsWrite::loadLayerMap(const char* layer_map_path)
   _has_layer_map = layer_map_path != nullptr && layer_map_path[0] != '\0';
   _mapping_error = false;
   if (!_has_layer_map) {
-    return true;
+    ECCLOG.error(ecc::Loc::current(), "GDS layer map is required.");
+    return false;
   }
   if (!_layer_map.load(layer_map_path)) {
     ECCLOG.warn(ecc::Loc::current(), "Load GDS layer map failed: ", _layer_map.error());
@@ -170,15 +171,6 @@ bool Def2GdsWrite::loadLayerMap(const char* layer_map_path)
 
 bool Def2GdsWrite::resolveLayer(IdbLayer* layer, const string& purpose, int32_t& layer_id, int32_t& datatype)
 {
-  if (!_has_layer_map) {
-    if (layer == nullptr) {
-      layer_id = 0;
-    } else {
-      layer_id = layer->get_order();
-    }
-    datatype = 0;
-    return true;
-  }
   if (layer == nullptr) {
     _mapping_error = true;
     ECCLOG.warn(ecc::Loc::current(), "GDS layer map requires a physical layer for purpose ", purpose);
@@ -197,11 +189,6 @@ bool Def2GdsWrite::resolveLayer(IdbLayer* layer, const string& purpose, int32_t&
 
 bool Def2GdsWrite::resolveVirtualLayer(const string& layer_name, const string& purpose, int32_t& layer_id, int32_t& datatype)
 {
-  if (!_has_layer_map) {
-    layer_id = 0;
-    datatype = layer_name == "DIEAREA" ? 2 : 0;
-    return true;
-  }
   GdsLayerMapValue value;
   if (_layer_map.resolve(layer_name, purpose, value)) {
     layer_id = static_cast<int32_t>(value.layer);
@@ -439,7 +426,7 @@ void Def2GdsWrite::packLayerShape(gdstk::Cell* gds_cell, IdbLayerShape* layer_sh
   // pin/obstruction geometry is emitted for routing layers, while cut-layer
   // rectangles embedded in LEFPIN/LEFOBS are intentionally filtered out.
   // Otherwise standard-cell LEF cuts are mistaken for routed VIA shapes.
-  if (_has_layer_map && layer_shape->get_layer() != nullptr && layer_shape->get_layer()->is_cut()
+  if (layer_shape->get_layer() != nullptr && layer_shape->get_layer()->is_cut()
       && (purpose == "LEFPIN" || purpose == "LEFOBS")) {
     return;
   }

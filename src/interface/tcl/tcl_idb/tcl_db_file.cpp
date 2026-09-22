@@ -578,6 +578,12 @@ unsigned CmdSaveGDS::check()
 
   TclOption* layer_map_option = getOptionOrArg("-layer_map");
   ecc::checkTclOption(layer_map_option, "-layer_map");
+  const char* layer_map_path = layer_map_option == nullptr ? nullptr : layer_map_option->getStringVal();
+  if (layer_map_option == nullptr || !layer_map_option->is_set_val() || layer_map_path == nullptr
+      || std::string(layer_map_path).empty()) {
+    ECCLOG.error(ecc::Loc::current(), "gds_save requires -layer_map <path>.");
+    return 0;
+  }
 
   return 1;
 }

@@ -418,12 +418,15 @@ void IdbBuilder::saveVerilog(std::string verilog_file_name, std::set<std::string
 
 bool IdbBuilder::saveGDSII(string file, bool is_hardened /* = false */, string layer_map_path /* = "" */)
 {
-  if (!layer_map_path.empty()) {
-    GdsLayerMap layer_map;
-    if (!layer_map.load(layer_map_path)) {
-      ECCLOG.warn(ecc::Loc::current(), "Load GDS layer map failed: ", layer_map.error());
-      return false;
-    }
+  if (layer_map_path.empty()) {
+    ECCLOG.error(ecc::Loc::current(), "gds_save requires -layer_map <path>.");
+    return false;
+  }
+
+  GdsLayerMap layer_map;
+  if (!layer_map.load(layer_map_path)) {
+    ECCLOG.error(ecc::Loc::current(), "Load GDS layer map failed: ", layer_map.error());
+    return false;
   }
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
     ECCLOG.warn(ecc::Loc::current(), "Create GDSII file failed...");
