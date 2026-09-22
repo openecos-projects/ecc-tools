@@ -676,14 +676,15 @@ void Def2GdsWrite::packPin(gdstk::Cell* gds_cell, IdbPin* pin)
     return;
   }
 
-  if (pin->get_term()->is_port_exist()) {
-    for (auto layer_shape : pin->get_port_box_list()) {
-      packLayerShape(gds_cell, layer_shape, "PIN");
-    }
+  // DEF pins may use the legacy LAYER/PLACED form without a PORT block.
+  // The pin parser still materializes absolute port boxes and vias, so do not
+  // gate their GDS output on IdbTerm::is_port_exist().
+  for (auto layer_shape : pin->get_port_box_list()) {
+    packLayerShape(gds_cell, layer_shape, "PIN");
+  }
 
-    for (auto via : pin->get_via_list()) {
-      packVia(gds_cell, via, "VIA");
-    }
+  for (auto via : pin->get_via_list()) {
+    packVia(gds_cell, via, "VIA");
   }
 }
 
