@@ -309,10 +309,15 @@ void DataManager::readConstraint()
   database.get_timing_constraint().get_clock_map().clear();
   database.get_timing_constraint().get_port_constraint_map().clear();
   database.get_timing_constraint().get_case_analysis_map().clear();
-  database.get_timing_constraint().get_false_path_list().clear();
+  database.get_timing_constraint().get_effective_case_analysis_map().clear();
+  database.get_timing_constraint().get_path_exception_list().clear();
   database.get_timing_constraint().get_clock_group_list().clear();
   database.get_timing_constraint().get_max_fanout().reset();
   database.get_timing_constraint().get_port_max_fanout_map().clear();
+  database.get_timing_constraint().get_net_load_map().clear();
+  database.get_timing_constraint().get_clock_uncertainty_list().clear();
+  database.get_timing_constraint().get_path_break_start_points().clear();
+  database.get_timing_constraint().get_path_break_end_points().clear();
   if (sdc_file_path.empty()) {
     return;
   }

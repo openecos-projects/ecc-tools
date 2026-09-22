@@ -34,22 +34,9 @@ class Utility
   static Utility& getInst();
   static void destroyInst();
   // function
-  static std::vector<int32_t> initFalsePathState(Database& database, std::string_view start, std::string_view clock, TransType start_trans_type,
-                                                 AnalysisType analysis_type);
-  static std::vector<int32_t> advanceFalsePathState(Database& database, const std::vector<int32_t>& state_list, std::string_view pin_name,
-                                                    TransType trans_type);
-  static std::string getPathStateTag(Database& database, std::string_view start, std::string_view clock,
-                                     const std::vector<int32_t>& false_path_state_list);
   static TransType getLaunchClockTransition(Database& database, std::string_view start);
   static double getLaunchClockEdge(Database& database, std::string_view start, std::string_view clock);
   static double getClockEdgeSeparation(double launch_period, double capture_period, double launch_edge, double capture_edge, AnalysisType type);
-  static bool isFalsePath(Database& database, std::string_view start, std::string_view launch_clock, std::string_view end, std::string_view capture_clock,
-                          AnalysisType analysis_type, TransType end_trans_type, TransType capture_clock_trans_type,
-                          const std::vector<int32_t>& false_path_state_list);
-  static bool matchesTimingObjects(Database& database, const std::set<std::string>& objects, std::string_view pin_name, std::string_view clock_name,
-                                   bool start);
-  static bool matchesThroughObjects(Database& database, const std::set<std::string>& objects, std::string_view pin_name);
-
 #if 1  // std数据结构工具函数
 
   template <typename T, typename... Args>

@@ -689,33 +689,41 @@ void Def2GdsWrite::packPin(gdstk::Cell* gds_cell, IdbPin* pin)
 }
 
 void Def2GdsWrite::packSegment(gdstk::Cell* gds_cell, IdbLayerRouting* routing_layer, IdbCoordinate<int32_t>* point_1,
-                               IdbCoordinate<int32_t>* point_2, int32_t width, const string& purpose)
+                               IdbCoordinate<int32_t>* point_2, int32_t width, const string& purpose,
+                               std::optional<int32_t> ext_1, std::optional<int32_t> ext_2)
 {
   if (gds_cell == nullptr || routing_layer == nullptr || point_1 == nullptr || point_2 == nullptr) {
     return;
   }
 
   int32_t routing_width = width > 0 ? width : routing_layer->get_width();
+  const int32_t half_width = routing_width / 2;
 
   int32_t ll_x = 0;
   int32_t ll_y = 0;
   int32_t ur_x = 0;
   int32_t ur_y = 0;
-  // DEF special-net FOLLOWPIN/STRIPE segments use their endpoints as the
-  // physical rectangle limits.  Regular routed NET centerlines still need
-  // the half-width expansion on both ends.
-  const bool expand_endpoints = purpose != "SPNET";
-  const int32_t half_width = routing_width / 2;
+  auto get_endpoint_extension = [&](const std::optional<int32_t>& extension) {
+    return extension.value_or(purpose == "SPNET" ? 0 : half_width);
+  };
   if (point_1->get_y() == point_2->get_y()) {
-    ll_x = std::min(point_1->get_x(), point_2->get_x()) - (expand_endpoints ? half_width : 0);
-    ll_y = std::min(point_1->get_y(), point_2->get_y()) - routing_width / 2;
-    ur_x = std::max(point_1->get_x(), point_2->get_x()) + (expand_endpoints ? half_width : 0);
+    IdbCoordinate<int32_t>* point_low = point_1->get_x() <= point_2->get_x() ? point_1 : point_2;
+    IdbCoordinate<int32_t>* point_high = point_low == point_1 ? point_2 : point_1;
+    std::optional<int32_t> ext_low = point_low == point_1 ? ext_1 : ext_2;
+    std::optional<int32_t> ext_high = point_high == point_1 ? ext_1 : ext_2;
+    ll_x = point_low->get_x() - get_endpoint_extension(ext_low);
+    ll_y = std::min(point_1->get_y(), point_2->get_y()) - half_width;
+    ur_x = point_high->get_x() + get_endpoint_extension(ext_high);
     ur_y = ll_y + routing_width;
   } else if (point_1->get_x() == point_2->get_x()) {
-    ll_x = std::min(point_1->get_x(), point_2->get_x()) - routing_width / 2;
-    ll_y = std::min(point_1->get_y(), point_2->get_y()) - (expand_endpoints ? half_width : 0);
+    IdbCoordinate<int32_t>* point_low = point_1->get_y() <= point_2->get_y() ? point_1 : point_2;
+    IdbCoordinate<int32_t>* point_high = point_low == point_1 ? point_2 : point_1;
+    std::optional<int32_t> ext_low = point_low == point_1 ? ext_1 : ext_2;
+    std::optional<int32_t> ext_high = point_high == point_1 ? ext_1 : ext_2;
+    ll_x = std::min(point_1->get_x(), point_2->get_x()) - half_width;
+    ll_y = point_low->get_y() - get_endpoint_extension(ext_low);
     ur_x = ll_x + routing_width;
-    ur_y = std::max(point_1->get_y(), point_2->get_y()) + (expand_endpoints ? half_width : 0);
+    ur_y = point_high->get_y() + get_endpoint_extension(ext_high);
   } else {
     ECCLOG.warn(ecc::Loc::current(), "Error...Regular segment only support horizontal & vertical direction... ");
     return;
@@ -834,7 +842,8 @@ int32_t Def2GdsWrite::write_specialnet_wire_segment_points(gdstk::Cell* gds_cell
     IdbCoordinate<int32_t>* point_1 = segment->get_point_start();
     IdbCoordinate<int32_t>* point_2 = segment->get_point_second();
 
-    packSegment(gds_cell, routing_layer, point_1, point_2, routing_width, "SPNET");
+    packSegment(gds_cell, routing_layer, point_1, point_2, routing_width, "SPNET", segment->get_point_ext(point_1),
+                segment->get_point_ext(point_2));
   }
 
   return kDbSuccess;
@@ -1007,7 +1016,8 @@ int32_t Def2GdsWrite::write_net_wire_segment_points(gdstk::Cell* gds_cell, IdbRe
   IdbCoordinate<int32_t>* point_1 = segment->get_point_start();
   IdbCoordinate<int32_t>* point_2 = segment->get_point_second();
 
-  packSegment(gds_cell, routing_layer, point_1, point_2, -1, "NET");
+  packSegment(gds_cell, routing_layer, point_1, point_2, -1, "NET", segment->get_point_ext(point_1),
+              segment->get_point_ext(point_2));
   return kDbSuccess;
 }
 

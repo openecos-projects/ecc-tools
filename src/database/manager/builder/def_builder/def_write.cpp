@@ -99,6 +99,16 @@ std::string escapeDefBusBitChars(const std::string& name, const IdbBusBitChars* 
   return escaped_name;
 }
 
+/// Render one routing point "( x y [ext] )"; either coordinate may be "*" for the DEF wildcard.
+std::string format_routing_point(const std::string& x, const std::string& y, const std::optional<int32_t>& ext)
+{
+  std::string point = "( " + x + " " + y;
+  if (ext.has_value()) {
+    point += " " + std::to_string(*ext);
+  }
+  return point + " )";
+}
+
 }  // namespace
 
 /**
@@ -780,17 +790,21 @@ int32_t DefWrite::write_specialnet_wire_segment_points(IdbSpecialWireSegment* se
     shape = "+ SHAPE " + IdbEnum::GetInstance()->get_connect_property()->get_wire_shape_name(segment->get_shape_type());
   }
 
-  if (segment->get_point_start()->get_x() == segment->get_point_second()->get_x()) {
-    writestr(" %s%s %d %s ( %d %d ) ( * %d )\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(), segment->get_route_width(),
-             shape.c_str(), segment->get_point_start()->get_x(), segment->get_point_start()->get_y(), segment->get_point_second()->get_y());
-  } else if (segment->get_point_start()->get_y() == segment->get_point_second()->get_y()) {
-    writestr(" %s%s %d %s ( %d %d ) ( %d * )\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(), segment->get_route_width(),
-             shape.c_str(), segment->get_point_start()->get_x(), segment->get_point_start()->get_y(), segment->get_point_second()->get_x());
+  IdbCoordinate<int32_t>* point_start = segment->get_point_start();
+  IdbCoordinate<int32_t>* point_second = segment->get_point_second();
+  std::string start_point = format_routing_point(std::to_string(point_start->get_x()), std::to_string(point_start->get_y()),
+                                                 segment->get_point_ext(point_start));
+  std::string second_point;
+  if (point_start->get_x() == point_second->get_x()) {
+    second_point = format_routing_point("*", std::to_string(point_second->get_y()), segment->get_point_ext(point_second));
+  } else if (point_start->get_y() == point_second->get_y()) {
+    second_point = format_routing_point(std::to_string(point_second->get_x()), "*", segment->get_point_ext(point_second));
   } else {
-    writestr(" %s%s %d %s ( %d %d ) ( %d %d )\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(),
-             segment->get_route_width(), shape.c_str(), segment->get_point_start()->get_x(), segment->get_point_start()->get_y(),
-             segment->get_point_second()->get_x(), segment->get_point_second()->get_y());
+    second_point
+        = format_routing_point(std::to_string(point_second->get_x()), std::to_string(point_second->get_y()), segment->get_point_ext(point_second));
   }
+  writestr(" %s%s %d %s %s %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(), segment->get_route_width(), shape.c_str(),
+           start_point.c_str(), second_point.c_str());
   return kDbSuccess;
 }
 
@@ -807,19 +821,21 @@ int32_t DefWrite::write_specialnet_wire_segment_via(IdbSpecialWireSegment* segme
   }
 
   if (segment->get_point_list().size() == _POINT_MAX_) {
-    if (segment->get_point_start()->get_x() == segment->get_point_second()->get_x()) {
-      writestr(" %s%s %d %s ( %d %d ) ( * %d ) %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(),
-               segment->get_route_width(), shape.c_str(), segment->get_point_start()->get_x(), segment->get_point_start()->get_y(),
-               segment->get_point_second()->get_y(), segment->get_via()->get_name().c_str());
-    } else if (segment->get_point_start()->get_y() == segment->get_point_second()->get_y()) {
-      writestr(" %s%s %d %s ( %d %d ) ( %d * ) %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(),
-               segment->get_route_width(), shape.c_str(), segment->get_point_start()->get_x(), segment->get_point_start()->get_y(),
-               segment->get_point_second()->get_x(), segment->get_via()->get_name().c_str());
+    IdbCoordinate<int32_t>* point_start = segment->get_point_start();
+    IdbCoordinate<int32_t>* point_second = segment->get_point_second();
+    std::string start_point = format_routing_point(std::to_string(point_start->get_x()), std::to_string(point_start->get_y()),
+                                                   segment->get_point_ext(point_start));
+    std::string second_point;
+    if (point_start->get_x() == point_second->get_x()) {
+      second_point = format_routing_point("*", std::to_string(point_second->get_y()), segment->get_point_ext(point_second));
+    } else if (point_start->get_y() == point_second->get_y()) {
+      second_point = format_routing_point(std::to_string(point_second->get_x()), "*", segment->get_point_ext(point_second));
     } else {
-      writestr(" %s%s %d %s ( %d %d ) ( %d %d ) %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(),
-               segment->get_route_width(), shape.c_str(), segment->get_point_start()->get_x(), segment->get_point_start()->get_y(),
-               segment->get_point_second()->get_x(), segment->get_point_second()->get_y(), segment->get_via()->get_name().c_str());
+      second_point = format_routing_point(std::to_string(point_second->get_x()), std::to_string(point_second->get_y()),
+                                           segment->get_point_ext(point_second));
     }
+    writestr(" %s%s %d %s %s %s %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(), segment->get_route_width(),
+             shape.c_str(), start_point.c_str(), second_point.c_str(), segment->get_via()->get_name().c_str());
   } else {
     writestr(" %s%s %d %s ( %d %d ) %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(), segment->get_route_width(),
              shape.c_str(), segment->get_point_start()->get_x(), segment->get_point_start()->get_y(),
@@ -1033,17 +1049,21 @@ int32_t DefWrite::write_net_wire_segment_points(IdbRegularWireSegment* segment, 
   bool is_virtual = segment->is_virtual(segment->get_point_second());
   const char* virtual_str = is_virtual ? "VIRTUAL " : "";
 
-  if (segment->get_point_start()->get_x() == segment->get_point_second()->get_x()) {
-    writestr("%s %s ( %d %d ) %s( * %d )\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(),
-             segment->get_point_start()->get_x(), segment->get_point_start()->get_y(), virtual_str, segment->get_point_second()->get_y());
-  } else if (segment->get_point_start()->get_y() == segment->get_point_second()->get_y()) {
-    writestr("%s %s ( %d %d ) %s( %d * )\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(),
-             segment->get_point_start()->get_x(), segment->get_point_start()->get_y(), virtual_str, segment->get_point_second()->get_x());
+  IdbCoordinate<int32_t>* point_start = segment->get_point_start();
+  IdbCoordinate<int32_t>* point_second = segment->get_point_second();
+  std::string start_point = format_routing_point(std::to_string(point_start->get_x()), std::to_string(point_start->get_y()),
+                                                 segment->get_point_ext(point_start));
+  std::string second_point;
+  if (point_start->get_x() == point_second->get_x()) {
+    second_point = format_routing_point("*", std::to_string(point_second->get_y()), segment->get_point_ext(point_second));
+  } else if (point_start->get_y() == point_second->get_y()) {
+    second_point = format_routing_point(std::to_string(point_second->get_x()), "*", segment->get_point_ext(point_second));
   } else {
-    writestr("%s %s ( %d %d ) %s( %d %d )\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(),
-             segment->get_point_start()->get_x(), segment->get_point_start()->get_y(), virtual_str, segment->get_point_second()->get_x(),
-             segment->get_point_second()->get_y());
+    second_point
+        = format_routing_point(std::to_string(point_second->get_x()), std::to_string(point_second->get_y()), segment->get_point_ext(point_second));
   }
+  writestr("%s %s %s %s%s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(), start_point.c_str(), virtual_str,
+           second_point.c_str());
   return kDbSuccess;
 }
 
@@ -1055,19 +1075,21 @@ int32_t DefWrite::write_net_wire_segment_via(IdbRegularWireSegment* segment, str
   }
 
   if (segment->get_point_list().size() == _POINT_MAX_) {
-    if (segment->get_point_start()->get_x() == segment->get_point_second()->get_x()) {
-      writestr("%s %s ( %d %d ) ( * %d ) %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(),
-               segment->get_point_start()->get_x(), segment->get_point_start()->get_y(), segment->get_point_second()->get_y(),
-               segment->get_via_list().at(_POINT_START_)->get_name().c_str());
-    } else if (segment->get_point_start()->get_y() == segment->get_point_second()->get_y()) {
-      writestr("%s %s ( %d %d ) ( %d * ) %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(),
-               segment->get_point_start()->get_x(), segment->get_point_start()->get_y(), segment->get_point_second()->get_x(),
-               segment->get_via_list().at(_POINT_START_)->get_name().c_str());
+    IdbCoordinate<int32_t>* point_start = segment->get_point_start();
+    IdbCoordinate<int32_t>* point_second = segment->get_point_second();
+    std::string start_point = format_routing_point(std::to_string(point_start->get_x()), std::to_string(point_start->get_y()),
+                                                   segment->get_point_ext(point_start));
+    std::string second_point;
+    if (point_start->get_x() == point_second->get_x()) {
+      second_point = format_routing_point("*", std::to_string(point_second->get_y()), segment->get_point_ext(point_second));
+    } else if (point_start->get_y() == point_second->get_y()) {
+      second_point = format_routing_point(std::to_string(point_second->get_x()), "*", segment->get_point_ext(point_second));
     } else {
-      writestr("%s %s ( %d %d ) ( %d %d ) %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(),
-               segment->get_point_start()->get_x(), segment->get_point_start()->get_y(), segment->get_point_second()->get_x(),
-               segment->get_point_second()->get_y(), segment->get_via_list().at(0)->get_name().c_str());
+      second_point = format_routing_point(std::to_string(point_second->get_x()), std::to_string(point_second->get_y()),
+                                           segment->get_point_ext(point_second));
     }
+    writestr("%s %s %s %s %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(), start_point.c_str(),
+             second_point.c_str(), segment->get_via_list().at(_POINT_START_)->get_name().c_str());
   } else {
     writestr("%s %s ( %d %d ) %s\n", wire_new_str.c_str(), segment->get_layer()->get_name().c_str(), segment->get_point_start()->get_x(),
              segment->get_point_start()->get_y(), segment->get_via_list().at(_POINT_START_)->get_name().c_str());

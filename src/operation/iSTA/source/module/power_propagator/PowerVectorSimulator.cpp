@@ -257,12 +257,14 @@ bool Simulator::build()
   // Case analysis takes precedence even when it constrains an internal output.
   // Propagate that constant through the implied-activity network as well.
   for (auto& [name, value] : _database.get_timing_constraint().get_case_analysis_map()) {
+    if (value != TimingCaseValue::kZero && value != TimingCaseValue::kOne) continue;
     auto pin = _pin_nodes.find(name);
     if (pin == _pin_nodes.end()) continue;
-    _constants[pin->second] = value;
+    const bool constant = value == TimingCaseValue::kOne;
+    _constants[pin->second] = constant;
     PowerActivity activity;
     activity.set_is_valid(true);
-    activity.set_static_probability(value ? 1.0 : 0.0);
+    activity.set_static_probability(constant ? 1.0 : 0.0);
     activity.set_transition_density(0.0);
     activity.set_origin(PowerActivityOrigin::kConstant);
     root_activity[pin->second] = activity;

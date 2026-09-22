@@ -20,6 +20,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -143,6 +144,7 @@ class Def2GdsWrite
   void packRect(gdstk::Cell* gds_cell, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, int32_t layer_id,
                 int32_t datatype = 0);
   void packSegment(gdstk::Cell* gds_cell, IdbLayerRouting* routing_layer, IdbCoordinate<int32_t>* point_1,
-                   IdbCoordinate<int32_t>* point_2, int32_t width = -1, const string& purpose = "NET");
+                   IdbCoordinate<int32_t>* point_2, int32_t width = -1, const string& purpose = "NET",
+                   std::optional<int32_t> ext_1 = std::nullopt, std::optional<int32_t> ext_2 = std::nullopt);
 };
 }  // namespace idb
