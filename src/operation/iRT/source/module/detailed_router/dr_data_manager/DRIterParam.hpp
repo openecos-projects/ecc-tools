@@ -24,7 +24,7 @@ class DRIterParam
   DRIterParam() = default;
   DRIterParam(double prefer_wire_unit, double non_prefer_wire_unit, double bend_unit, double via_unit, int32_t size, int32_t offset, int32_t schedule_interval,
               double fixed_rect_unit, double routed_rect_unit, double violation_unit, int32_t max_routed_times, int32_t max_candidate_patch_num,
-              int32_t refine_net_num = 0)
+              int32_t refine_net_num = 0, bool all_violation_update = false)
   {
     _prefer_wire_unit = prefer_wire_unit;
     _non_prefer_wire_unit = non_prefer_wire_unit;
@@ -39,6 +39,7 @@ class DRIterParam
     _max_routed_times = max_routed_times;
     _max_candidate_patch_num = max_candidate_patch_num;
     _refine_net_num = refine_net_num;
+    _all_violation_update = all_violation_update;
   }
   ~DRIterParam() = default;
   // getter
@@ -55,6 +56,7 @@ class DRIterParam
   int32_t get_max_routed_times() const { return _max_routed_times; }
   int32_t get_max_candidate_patch_num() const { return _max_candidate_patch_num; }
   int32_t get_refine_net_num() const { return _refine_net_num; }
+  bool get_all_violation_update() const { return _all_violation_update; }
 
  private:
   double _prefer_wire_unit = 0;
@@ -70,6 +72,7 @@ class DRIterParam
   int32_t _max_routed_times = 0;
   int32_t _max_candidate_patch_num = 0;
   int32_t _refine_net_num = 0;
+  bool _all_violation_update = false;
 };
 
 }  // namespace irt

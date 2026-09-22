@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <sstream>
 
 namespace ieval {
 
@@ -59,6 +60,40 @@ bool writeMapLayoutCsv(const std::string& map_dir, int32_t grid_cols, int32_t gr
 
 bool writeMapLayoutCsv(const std::string& map_dir, const std::vector<MapLayoutCell>& cells)
 {
+  return writeCells(map_dir, cells);
+}
+
+bool writeEGRLayoutCsv(const std::string& map_dir, const std::string& gcell_info_path, int32_t matrix_cols, int32_t matrix_rows)
+{
+  if (matrix_cols <= 0 || matrix_rows <= 0) {
+    return false;
+  }
+  std::ifstream gcell_file(gcell_info_path);
+  if (!gcell_file.is_open()) {
+    return false;
+  }
+
+  std::vector<MapLayoutCell> cells;
+  std::string line;
+  while (std::getline(gcell_file, line)) {
+    std::istringstream input(line);
+    std::vector<int32_t> row;
+    std::string value;
+    while (std::getline(input, value, ',')) {
+      if (!value.empty()) {
+        row.push_back(std::stoi(value));
+      }
+    }
+    if (row.size() < 6) {
+      continue;
+    }
+    const int32_t grid_x = row[0];
+    const int32_t grid_y = row[1];
+    if (grid_x < 0 || grid_x >= matrix_cols || grid_y < 0 || grid_y >= matrix_rows) {
+      continue;
+    }
+    cells.push_back({matrix_rows - 1 - grid_y, grid_x, grid_x, grid_y, row[2], row[3], row[4], row[5]});
+  }
   return writeCells(map_dir, cells);
 }
 

@@ -1,6 +1,7 @@
 #include "GeometrySnapshotWriter.h"
 
 #include "GeometrySnapshotSchema.h"
+#include "json.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -19,6 +20,7 @@ namespace {
 
 struct SnapshotManifestPaths
 {
+  std::string drc;
   std::string meta;
   std::string shapes;
   std::string owners;
@@ -67,6 +69,43 @@ bool write_file_bytes(const std::filesystem::path& path, const std::vector<char>
     return static_cast<bool>(file);
   }
   file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  return static_cast<bool>(file);
+}
+
+bool write_drc_file(const std::filesystem::path& path, const GeometryDrcDistribution& distribution)
+{
+  nlohmann::json drc;
+  drc["number"] = 0;
+  drc["distribution"] = nlohmann::json::object();
+  for (const auto& [type, layers] : distribution) {
+    nlohmann::json rule;
+    rule["number"] = 0;
+    rule["layers"] = nlohmann::json::object();
+    for (const auto& [layer_name, violations] : layers) {
+      nlohmann::json layer;
+      layer["number"] = violations.size();
+      layer["list"] = nlohmann::json::array();
+      for (const GeometryDrcViolation& violation : violations) {
+        nlohmann::json entry = {
+            {"llx", violation.bbox.lx}, {"lly", violation.bbox.ly}, {"urx", violation.bbox.hx},
+            {"ury", violation.bbox.hy}, {"net", violation.nets}, {"inst", violation.instances},
+        };
+        if (violation.required_size) {
+          entry["required_size"] = *violation.required_size;
+        }
+        layer["list"].push_back(std::move(entry));
+      }
+      rule["number"] = rule["number"].get<size_t>() + violations.size();
+      rule["layers"][layer_name] = std::move(layer);
+    }
+    drc["number"] = drc["number"].get<size_t>() + rule["number"].get<size_t>();
+    drc["distribution"][type] = std::move(rule);
+  }
+  std::ofstream file(path);
+  if (!file) {
+    return false;
+  }
+  file << nlohmann::json{{"drc", std::move(drc)}}.dump() << '\n';
   return static_cast<bool>(file);
 }
 
@@ -188,6 +227,9 @@ bool write_manifest(const std::filesystem::path& path, const SnapshotWriteResult
   file << "nets=" << paths.nets << '\n';
   file << "buses=" << paths.buses << '\n';
   file << "groups=" << paths.groups << '\n';
+  if (options.drc) {
+    file << "drc=" << paths.drc << '\n';
+  }
   return static_cast<bool>(file);
 }
 
@@ -618,6 +660,9 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   paths.nets = (std::filesystem::path(file_prefix) / "geometry.nets.txt").generic_string();
   paths.buses = (std::filesystem::path(file_prefix) / "geometry.buses.txt").generic_string();
   paths.groups = (std::filesystem::path(file_prefix) / "geometry.groups.txt").generic_string();
+  if (options.drc) {
+    paths.drc = (std::filesystem::path(file_prefix) / "geometry.drc.json").generic_string();
+  }
 
   const bool wrote_layers = write_layer_metadata_file(output_dir / paths.layers, layers);
   const bool wrote_sites = write_site_metadata_file(output_dir / paths.sites, options.sites);
@@ -629,13 +674,18 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   const bool wrote_nets = write_net_metadata_file(output_dir / paths.nets, options.nets);
   const bool wrote_buses = write_bus_metadata_file(output_dir / paths.buses, options.buses);
   const bool wrote_groups = write_group_metadata_file(output_dir / paths.groups, options.groups);
+  const bool wrote_drc = !options.drc || write_drc_file(output_dir / paths.drc, *options.drc);
   result.written_side_file_count +=
       static_cast<uint64_t>(wrote_layers) + static_cast<uint64_t>(wrote_sites) + static_cast<uint64_t>(wrote_masters)
       + static_cast<uint64_t>(wrote_vias) + static_cast<uint64_t>(wrote_grids) + static_cast<uint64_t>(wrote_connectivity)
       + static_cast<uint64_t>(wrote_nets) + static_cast<uint64_t>(wrote_buses) + static_cast<uint64_t>(wrote_groups);
+  if (options.drc && wrote_drc) {
+    ++result.written_side_file_count;
+  }
   const bool wrote_files = wrote_meta && wrote_shapes && wrote_owners && wrote_payload && wrote_names && wrote_name_index
                            && wrote_sidmap && wrote_delta && wrote_view && wrote_layers && wrote_sites && wrote_masters
-                           && wrote_vias && wrote_grids && wrote_connectivity && wrote_nets && wrote_buses && wrote_groups;
+                           && wrote_vias && wrote_grids && wrote_connectivity && wrote_nets && wrote_buses && wrote_groups
+                           && wrote_drc;
   const bool wrote_manifest = wrote_files && publish_manifest(options.output_dir, result, paths, options);
 
   result.ok = wrote_files && wrote_manifest;

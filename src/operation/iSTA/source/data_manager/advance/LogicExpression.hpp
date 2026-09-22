@@ -135,6 +135,32 @@ class LogicExpression
     return is_valid ? sensitivity_probability : 0.0;
   }
 
+  std::optional<bool> evaluate_constant(const std::map<std::string, bool>& port_values)
+  {
+    BddModel bdd_model;
+    int32_t root_node_idx = 0;
+    if (!build_bdd(bdd_model, root_node_idx)) {
+      return std::nullopt;
+    }
+    return evaluate_bdd_constant(bdd_model, root_node_idx, port_values);
+  }
+
+  bool is_sensitive_to(std::string port_name, const std::map<std::string, bool>& port_values)
+  {
+    BddModel bdd_model;
+    int32_t root_node_idx = 0;
+    if (!build_bdd(bdd_model, root_node_idx)) {
+      return true;
+    }
+    const auto variable = bdd_model.get_port_variable_map().find(port_name);
+    if (variable == bdd_model.get_port_variable_map().end()) {
+      return false;
+    }
+    const int32_t difference_node_idx = bdd_model.get_boolean_difference(root_node_idx, variable->second);
+    const std::optional<bool> sensitive = evaluate_bdd_constant(bdd_model, difference_node_idx, port_values);
+    return !sensitive.has_value() || *sensitive;
+  }
+
  private:
   class BddNode
   {
@@ -370,6 +396,22 @@ class LogicExpression
     }
     root_node_idx = node_idx_stack.back();
     return true;
+  }
+
+  std::optional<bool> evaluate_bdd_constant(BddModel& bdd_model, int32_t node_idx, const std::map<std::string, bool>& port_values)
+  {
+    if (node_idx == 0 || node_idx == 1) {
+      return node_idx == 1;
+    }
+    BddNode& node = bdd_model.get_node(node_idx);
+    const std::string& port_name = bdd_model.get_port_name(node.get_variable_idx());
+    const auto value = port_values.find(port_name);
+    if (value != port_values.end()) {
+      return evaluate_bdd_constant(bdd_model, value->second ? node.get_high_node_idx() : node.get_low_node_idx(), port_values);
+    }
+    const std::optional<bool> low = evaluate_bdd_constant(bdd_model, node.get_low_node_idx(), port_values);
+    const std::optional<bool> high = evaluate_bdd_constant(bdd_model, node.get_high_node_idx(), port_values);
+    return low.has_value() && high.has_value() && *low == *high ? low : std::nullopt;
   }
 
   double get_bdd_static_probability(BddModel& bdd_model, const int32_t node_idx, std::map<std::string, PowerActivity>& port_activity_map,
