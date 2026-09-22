@@ -19,6 +19,7 @@
 #include "AccessPoint.hpp"
 #include "DRBoxId.hpp"
 #include "DRBoxResult.hpp"
+#include "DRFixedGeometry.hpp"
 #include "DRIterParam.hpp"
 #include "DRNode.hpp"
 #include "DRPatchState.hpp"
@@ -32,35 +33,6 @@
 #include "Violation.hpp"
 
 namespace irt {
-
-struct DRFixedShape
-{
-  int32_t net_idx = -1;
-  EXTLayerRect* rect = nullptr;
-  bool is_routing = false;
-};
-
-class DRFixedGeometry
-{
- public:
-  using RectRTree = bgi::rtree<std::pair<BGRectInt, size_t>, bgi::quadratic<16>>;
-
-  bool get_built() const { return _built; }
-  const std::vector<DRFixedShape>& get_shape_list() const
-  {
-    if (!_built) {
-      RTLOG.error(Loc::current(), "The fixed DR geometry has not been built!");
-    }
-    return _shape_list;
-  }
-  void build(const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& fixed_rect_map);
-  std::vector<size_t> query(const std::vector<LayerRect>& region_list) const;
-
- private:
-  bool _built = false;
-  std::vector<DRFixedShape> _shape_list;
-  std::map<int32_t, RectRTree> _layer_rect_rtree_map;
-};
 
 class DRBox
 {

@@ -59,13 +59,9 @@ class DetailedRouter
   DetailedRouter& operator=(DetailedRouter&& other) = delete;
   // function
   DRModel initDRModel();
-  std::vector<DRNet> convertToDRNetList(std::vector<Net>& net_list);
-  DRNet convertToDRNet(Net& net);
-  void readDRModel(DRModel& dr_model);
   void routeDRModel(DRModel& dr_model);
   void setDRIterParam(DRModel& dr_model, int32_t iter, DRIterParam& dr_iter_param);
   void initDRBoxMap(DRModel& dr_model);
-  void resetRoutingState(DRModel& dr_model);
   void buildBoxSchedule(DRModel& dr_model);
   void splitNetResultByGCell(DRModel& dr_model);
   void splitNetResult(DRModel& dr_model);
@@ -163,7 +159,7 @@ class DetailedRouter
   std::vector<Violation> getFullRouteViolationList(DRModel& dr_model);
   std::vector<Violation> getDirtyRouteViolationList(DRModel& dr_model, DRBox& dr_box);
   void updateBestResult(DRModel& dr_model);
-  bool stopIteration(DRModel& dr_model, std::vector<DRIterParam>& dr_iter_param_list);
+  bool stopIteration(DRModel& dr_model);
   void selectBestResult(DRModel& dr_model);
   void repairViolation(DRModel& dr_model, std::vector<DRIterParam>& repair_iter_param_list);
   std::vector<PlanarRect> getRepairBoxRectList(DRModel& dr_model, int32_t expand_size);
