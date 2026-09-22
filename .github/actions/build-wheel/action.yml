@@ -70,3 +70,14 @@ runs:
         mkdir -p dist/wheel/repaired
         uv run --no-sync -m auditwheel show dist/*.whl
         uv run --no-sync -m auditwheel repair dist/*.whl -w dist/wheel/repaired
+
+    - name: Verify bundled Tcl script library
+      shell: bash
+      run: |
+        # The embedded SDC Tcl interpreter needs init.tcl; without the bundled
+        # script library Tcl_Init fails on distros without /usr/share/tcl8.6.
+        # Note: no grep -q here — its early exit SIGPIPEs unzip and pipefail
+        # would turn a successful match into a step failure.
+        wheel="$(ls dist/wheel/repaired/*.whl)"
+        unzip -l "$wheel" | grep 'ecc_tools_bin/tcl8.6/init.tcl' \
+          || { echo "::error::repaired wheel is missing ecc_tools_bin/tcl8.6/init.tcl"; exit 1; }

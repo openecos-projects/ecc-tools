@@ -35,6 +35,7 @@ class TimingPath
   std::string& get_end_point() { return _end_point; }
   double get_path_delay() const { return _path_delay; }
   double get_required_time() const { return _required_time; }
+  double get_required_time_adjustment() const { return _required_time_adjustment; }
   double get_slack() const { return _slack; }
   double get_cell_delay() const { return _cell_delay; }
   double get_net_delay() const { return _net_delay; }
@@ -61,6 +62,7 @@ class TimingPath
   void set_end_point(const std::string& end_point) { _end_point = end_point; }
   void set_path_delay(const double path_delay) { _path_delay = path_delay; }
   void set_required_time(const double required_time) { _required_time = required_time; }
+  void set_required_time_adjustment(double adjustment) { _required_time_adjustment = adjustment; }
   void set_slack(const double slack) { _slack = slack; }
   void set_cell_delay(const double cell_delay) { _cell_delay = cell_delay; }
   void set_net_delay(const double net_delay) { _net_delay = net_delay; }
@@ -89,6 +91,7 @@ class TimingPath
   std::string _end_point;
   double _path_delay = 0.0;
   double _required_time = 0.0;
+  double _required_time_adjustment = 0.0;
   double _slack = 0.0;
   double _cell_delay = 0.0;
   double _net_delay = 0.0;

@@ -50,8 +50,10 @@ class TimingAnalyzer
   bool isSequentialClockPin(std::string& pin_name);
   double getClockArrival(std::string& pin_name, AnalysisType analysis_type);
   double getClockArrival(std::string& pin_name, AnalysisType analysis_type, TransType trans_type);
+  double getClockArrival(std::string& pin_name, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
   double getClockArrival(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type);
   double getClockSlew(std::string& pin_name, AnalysisType analysis_type, TransType trans_type);
+  double getClockSlew(std::string& pin_name, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
   double roundTime(double time);
   std::vector<TransType> getOutputTransTypeList(Arc& arc, AnalysisType analysis_type, TransType input_trans_type);
   double getArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type);
@@ -75,28 +77,42 @@ class TimingAnalyzer
   double getEndPointRequired(std::string& start_point, std::string& end_point, double default_required_time, AnalysisType analysis_type,
                              TransType data_trans_type, double data_slew);
   std::string_view getClockName(std::string& pin_name);
+  std::vector<std::string> getEndPointClockNames(std::string& end_point);
+  std::string getCaptureClockName(const TimingPathState& path_state, std::string& end_point);
   double getClockUncertainty(std::string& pin_name, AnalysisType analysis_type);
+  double getClockUncertainty(std::string_view launch_clock, TransType launch_trans_type, std::string_view capture_clock, TransType capture_trans_type,
+                             AnalysisType analysis_type);
   TimingClock* getStartPointClock(std::string& start_point);
   double getEndPointRequired(TimingPathState& end_path_state, std::string& end_point, double default_required_time, AnalysisType analysis_type);
   bool isMatchCheckTransType(TimingCheckArc& timing_check_arc, TransType data_trans_type);
   double getEndPointCheckTime(std::string& end_point, TimingCheckArc& timing_check_arc, AnalysisType analysis_type, TransType data_trans_type,
                               double data_slew);
+  double getEndPointCheckTime(std::string& end_point, TimingCheckArc& timing_check_arc, std::string_view capture_clock, AnalysisType analysis_type,
+                              TransType data_trans_type, double data_slew);
   double calcTimingCheckArcTime(TimingCheckArc& timing_check_arc, AnalysisType analysis_type, TransType clock_trans_type, TransType data_trans_type,
                                 double clock_slew, double data_slew);
   AnalysisType getCaptureAnalysisType(AnalysisType analysis_type);
   TransType getClockTransType(TimingCheckArc& timing_check_arc);
   double getEndPointCaptureTime(std::string& end_point, AnalysisType analysis_type);
   double getEndPointCaptureTime(std::string& start_point, std::string& end_point, AnalysisType analysis_type);
+  double getEndPointCaptureTime(std::string& start_point, std::string& end_point, TransType launch_transition, AnalysisType analysis_type);
+  double getEndPointCaptureTime(std::string& start_point, std::string_view launch_clock, TransType launch_transition, std::string_view capture_clock,
+                                TransType capture_transition, AnalysisType analysis_type);
+  double getClockEdge(std::string_view clock_name, TransType trans_type);
+  std::vector<const TimingIoDelay*> getOutputDelayList(std::string& end_point, AnalysisType analysis_type, TransType trans_type);
+  double getOutputRequiredTime(std::string& start_point, std::string_view launch_clock, TransType launch_trans_type, std::string& end_point,
+                               double default_required_time, AnalysisType analysis_type, TransType data_trans_type);
   double getEndPointClockArrival(std::string& end_point, AnalysisType analysis_type);
   double getEndPointClockArrival(std::string& end_point, AnalysisType analysis_type, TransType trans_type);
+  double getEndPointClockArrival(std::string& end_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
   double getClockReconvergencePessimism(TimingPathState& end_path_state, std::string& end_point, AnalysisType analysis_type, std::string& common_pin_name);
   double getClockReconvergencePessimism(std::string& start_point, std::string& end_point, AnalysisType analysis_type, std::string& common_pin_name);
   TransType getClockTransType(TimingCellArc& timing_cell_arc);
   bool isRegisterStartPoint(std::string& start_point);
   bool hasClockPoint(std::string& pin_name);
-  double getClockReconvergencePessimism(std::pair<std::string, TransType>& launch_crpr_pin, std::string& end_point, AnalysisType analysis_type,
-                                        std::string& common_pin_name);
-  double getClockCommonPathDelayDelta(std::pair<std::string, TransType>& common_pin, AnalysisType analysis_type);
+  double getClockReconvergencePessimism(std::pair<std::string, TransType>& launch_crpr_pin, std::string& end_point, std::string_view launch_clock,
+                                        std::string_view capture_clock, AnalysisType analysis_type, std::string& common_pin_name);
+  double getClockCommonPathDelayDelta(std::pair<std::string, TransType>& common_pin, std::string_view clock_name, AnalysisType analysis_type);
   void shrinkClockPathToCrprPath(std::vector<std::pair<std::string, TransType>>& clock_path);
   bool isLeafClockDriverPin(std::string& pin_name);
   bool isLeafClockBufferDriverPin(std::vector<std::pair<std::string, TransType>>& clock_path);
@@ -106,8 +122,9 @@ class TimingAnalyzer
   bool isLeafClockBufferLoadPin(std::string& pin_name);
   bool shouldShrinkLeafClockBufferLoad(std::string& pin_name);
   double getBufferDriveResistance(std::string& pin_name);
-  std::vector<std::pair<std::string, TransType>> getClockPathPinList(std::string& clock_pin_name, AnalysisType analysis_type, TransType trans_type);
-  double getClockCommonPathArrival(std::pair<std::string, TransType>& common_pin, AnalysisType analysis_type);
+  std::vector<std::pair<std::string, TransType>> getClockPathPinList(std::string& clock_pin_name, std::string_view clock_name,
+                                                                     AnalysisType analysis_type, TransType trans_type);
+  double getClockCommonPathArrival(std::pair<std::string, TransType>& common_pin, std::string_view clock_name, AnalysisType analysis_type);
   TimingCheckArc* getEndPointCheckArc(std::string& end_point, AnalysisType analysis_type);
   bool isMatchCheckType(TimingCheckArc& timing_check_arc, AnalysisType analysis_type);
   double getClockPeriod(std::string_view clock_name);
@@ -133,6 +150,11 @@ class TimingAnalyzer
   double getDataSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type);
   TimingPathState* getWorstSlackPathState(std::string& end_point, AnalysisType analysis_type, PathSourceType source_type);
   double calcPathRequiredTime(std::string& end_point, TimingPathState& end_path_state, AnalysisType analysis_type);
+  double calcPathDelayRequiredTime(std::string& end_point, TimingPathState& end_path_state, AnalysisType analysis_type,
+                                   const TimingException& exception, double normal_required_time);
+  double calcMulticycleRequiredTime(std::string& end_point, TimingPathState& end_path_state, AnalysisType analysis_type,
+                                    const ResolvedTimingExceptions& exceptions, double normal_required_time);
+  double getExceptionClockPeriod(std::string& end_point, TimingPathState& end_path_state, bool use_end_clock);
   double calcPathSlack(TimingPathState& end_path_state, double required_time, AnalysisType analysis_type);
   bool isConstrainedEndPoint(std::string& end_point);
   bool isOutputEndPoint(std::string& end_point);

@@ -35,7 +35,6 @@
 #include "SDFWriter.hpp"
 #include "STAHeader.hpp"
 #include "SdcCommand.hpp"
-#include "SdcCommands.hpp"
 #include "TCModel.hpp"
 #include "TimingAnalyzer.hpp"
 #include "TimingCharacterizer.hpp"
@@ -98,35 +97,8 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   DataManager::initInst();
   STADM.input(config_map);
   DelayCalculator::initInst();
-  SdcCommand::initInst({
-      {"current_design", sdc::executeTclCommand<sdc::TclCurrentDesign>},
-      {"remove_from_collection", sdc::executeTclCommand<sdc::TclRemoveFromCollection>},
-      {"set_clock_transition", sdc::executeTclCommand<sdc::TclSetClockTransition>},
-      {"set_max_fanout", sdc::executeTclCommand<sdc::TclSetMaxFanout>},
-      {"set_case_analysis", sdc::executeTclCommand<sdc::TclSetCaseAnalysis>},
-      {"set_input_delay", sdc::executeTclCommand<sdc::TclSetInputDelay>},
-      {"set_output_delay", sdc::executeTclCommand<sdc::TclSetOutputDelay>},
-      {"set_input_transition", sdc::executeTclCommand<sdc::TclSetInputTransition>},
-      {"set_driving_cell", sdc::executeTclCommand<sdc::TclSetDrivingCell>},
-      {"set_load", sdc::executeTclCommand<sdc::TclSetLoad>},
-      {"set_clock_uncertainty", sdc::executeTclCommand<sdc::TclSetClockUncertainty>},
-      {"get_clock", sdc::executeTclCommand<sdc::TclGetClocks>},
-      {"get_clocks", sdc::executeTclCommand<sdc::TclGetClocks>},
-      {"get_port", sdc::executeTclCommand<sdc::TclGetPorts>},
-      {"get_ports", sdc::executeTclCommand<sdc::TclGetPorts>},
-      {"get_cell", sdc::executeTclCommand<sdc::TclGetCells>},
-      {"get_cells", sdc::executeTclCommand<sdc::TclGetCells>},
-      {"get_net", sdc::executeTclCommand<sdc::TclGetNets>},
-      {"get_nets", sdc::executeTclCommand<sdc::TclGetNets>},
-      {"create_clock", sdc::executeTclCommand<sdc::TclCreateClock>},
-      {"create_generated_clock", sdc::executeTclCommand<sdc::TclCreateGeneratedClock>},
-      {"set_clock_groups", sdc::executeTclCommand<sdc::TclSetClockGroups>},
-      {"set_false_path", sdc::executeTclCommand<sdc::TclSetFalsePath>},
-      {"get_pins", sdc::executeTclCommand<sdc::TclGetPins>},
-      {"all_inputs", sdc::executeTclCommand<sdc::TclAllInputs>},
-      {"all_outputs", sdc::executeTclCommand<sdc::TclAllOutputs>},
-      {"set_propagated_clock", sdc::executeTclCommand<sdc::TclSetPropagatedClock>},
-  });
+  SdcCommand::initInst();
+  sdc::registerSdcCommands(SdcCommand::getInst());
   STADM.readConstraint();
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
