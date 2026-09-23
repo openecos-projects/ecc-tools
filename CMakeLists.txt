@@ -153,7 +153,7 @@ set(HOME_DATABASE ${PROJECT_SOURCE_DIR}/src/database)
 set(HOME_INTERFACE ${PROJECT_SOURCE_DIR}/src/interface)
 set(HOME_OPERATION ${PROJECT_SOURCE_DIR}/src/operation)
 set(HOME_PLATFORM ${PROJECT_SOURCE_DIR}/src/platform)
-set(HOME_EVALUATION ${PROJECT_SOURCE_DIR}/src/evaluation)
+set(HOME_EVALUATION ${PROJECT_SOURCE_DIR}/src/feature/evaluation)
 set(HOME_THIRDPARTY ${PROJECT_SOURCE_DIR}/src/third_party)
 
 SET(THIRD_PARTY_HOME ${HOME_THIRDPARTY})
@@ -161,8 +161,18 @@ SET(THIRD_PARTY_HOME ${HOME_THIRDPARTY})
 add_definitions("-DBOOST_ALLOW_DEPRECATED_HEADERS")
 add_definitions("-DBOOST_BIND_GLOBAL_PLACEHOLDERS")
 
+find_package(Boost 1.91.0 EXACT CONFIG QUIET)
+if(NOT Boost_FOUND)
+    list(FIND Boost_CONSIDERED_VERSIONS "1.85.0" _boost_1_85_index)
+    if(NOT _boost_1_85_index EQUAL -1)
+        message(FATAL_ERROR "Boost 1.85.0 contains a critical known bug and must not be used. Install Boost 1.91.0 exactly.")
+    endif()
+    message(FATAL_ERROR "Boost 1.91.0 exactly is required.")
+endif()
+
 include_directories(SYSTEM
     ## third party
+    ${Boost_INCLUDE_DIRS}
     ${THIRD_PARTY_HOME}
     ${THIRD_PARTY_HOME}/json
 )
@@ -182,7 +192,6 @@ add_subdirectory(src/utility)
 add_subdirectory(src/apps)
 add_subdirectory(src/database)
 add_subdirectory(src/interface)
-add_subdirectory(src/evaluation)
 add_subdirectory(src/operation)
 add_subdirectory(src/platform)
 add_subdirectory(src/feature)

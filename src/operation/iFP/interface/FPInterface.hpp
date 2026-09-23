@@ -55,8 +55,10 @@ class FPInterface
 
 #if 1  // iFP
   void initFP(std::map<std::string, std::any> config_map);
+  void runSimpleFP();
   void runFP();
   void destroyFP();
+  void debugInputMacro(std::map<std::string, std::any> config_map);
 #endif
 
 #endif
@@ -82,9 +84,6 @@ class FPInterface
   void wrapUnplacedMacroPinShapeList(idb::IdbInstance* idb_instance, Instance& instance);
   PlacementOrientation wrapPlacementOrientation(idb::IdbOrient idb_orient);
   void wrapNetList();
-  void wrapMacroPlacement();
-  void wrapMacroPlacement(Instance& instance, double x_micron, double y_micron, PlacementOrientation orient);
-  void wrapMacroNetPinList(Instance& instance);
   void wrapIOPinList();
 #endif
 
@@ -101,22 +100,22 @@ class FPInterface
   void outputIOPinList();
   void outputIOInstancePlacement();
   void outputMacroPlacement();
+  void outputMacroHalo();
+  void outputMacroRouteHalo();
   void outputNewInstanceList();
   void outputPGSegmentList();
   void adjustPGLineSegmentListByViaEnclosure();
   idb::IdbVia* getIDBVia(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
   idb::IdbVia* buildIDBVia(std::string via_name, idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
   std::pair<int32_t, int32_t> getIDBViaRowCol(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
-  void adjustLineSegmentListByViaEnclosure(
-      std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map,
-      PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
-      int32_t enclosure_ur_y);
-  bool adjustStripeSegmentListByViaEnclosure(
-      std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_line_segment_list_map,
-      PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
-      int32_t enclosure_ur_y);
-  bool adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_segment_list, int32_t enclosure_ll_x, int32_t enclosure_ll_y,
-                                        int32_t enclosure_ur_x, int32_t enclosure_ur_y);
+  void adjustLineSegmentListByViaEnclosure(std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map,
+                                           PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y,
+                                           int32_t enclosure_ur_x, int32_t enclosure_ur_y);
+  bool adjustStripeSegmentListByViaEnclosure(std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_line_segment_list_map,
+                                             PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y,
+                                             int32_t enclosure_ur_x, int32_t enclosure_ur_y);
+  bool adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_segment_list, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
+                                       int32_t enclosure_ur_y);
   void outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& pg_segment);
 #endif
 
@@ -134,6 +133,7 @@ class FPInterface
   FPInterface& operator=(const FPInterface& other) = delete;
   FPInterface& operator=(FPInterface&& other) = delete;
   // function
+  void inputMacroPlacement(const std::string& macro_place_file_path);
 };
 
 }  // namespace ifp

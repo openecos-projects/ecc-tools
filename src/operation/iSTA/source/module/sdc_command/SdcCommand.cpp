@@ -16,12 +16,56 @@
 // ***************************************************************************************
 #include "SdcCommand.hpp"
 
-#include <algorithm>
-#include <fstream>
-#include <iterator>
-#include <string>
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
+
+#include <cstdlib>
+#include <filesystem>
+
+#include "STAHeader.hpp"
 
 namespace ista {
+
+namespace {
+
+// The python wheel bundles the matching Tcl script library next to the module
+// (ecc_tools_bin/tcl8.6, installed by tcl_engine/CMakeLists.txt) because the
+// search paths compiled into libtcl only exist on RHEL-like distros (Debian
+// uses /usr/share/tcltk). Returns an empty path for unpackaged builds, where
+// the system paths apply.
+std::filesystem::path getBundledTclLibrary()
+{
+#ifndef _WIN32
+  namespace fs = std::filesystem;
+  Dl_info info;
+  if (dladdr(reinterpret_cast<void*>(&SdcCommand::getInst), &info) == 0 || info.dli_fname == nullptr) {
+    return {};
+  }
+  const fs::path bundled = fs::path(info.dli_fname).parent_path() / "tcl8.6";
+  std::error_code ec;
+  return fs::exists(bundled / "init.tcl", ec) ? bundled : fs::path{};
+#else
+  // No module self-location on Windows; fall back to the system Tcl paths.
+  return {};
+#endif
+}
+
+void setScreenVariables(Tcl_Interp* interp)
+{
+  // The screening SDC uses Tcl globals. Import the documented environment
+  // overrides into the embedded interpreter and clear values left by a
+  // previous in-process STA run.
+  for (const char* name : {"MCU_MHZ", "MCU_VIEW"}) {
+    Tcl_UnsetVar(interp, name, TCL_GLOBAL_ONLY);
+    Tcl_ResetResult(interp);
+    if (const char* value = std::getenv(name); value != nullptr) {
+      Tcl_SetVar(interp, name, value, TCL_GLOBAL_ONLY);
+    }
+  }
+}
+
+}  // namespace
 
 void SdcCommand::initInst()
 {
@@ -46,6 +90,20 @@ void SdcCommand::destroyInst()
 SdcCommand::SdcCommand()
 {
   _interp = Tcl_CreateInterp();
+  // An explicit TCL_LIBRARY always wins; only fall back to the bundled
+  // scripts when the user has not chosen a script library themselves.
+  if (std::getenv("TCL_LIBRARY") == nullptr) {
+    const std::filesystem::path bundled_library = getBundledTclLibrary();
+    if (!bundled_library.empty()) {
+      Tcl_SetVar(_interp, "tcl_library", bundled_library.string().c_str(), TCL_GLOBAL_ONLY);
+    }
+  }
+  if (Tcl_Init(_interp) != TCL_OK) {
+    const std::string message = Tcl_GetStringResult(_interp);
+    Tcl_DeleteInterp(_interp);
+    _interp = nullptr;
+    throw std::runtime_error("failed to initialize SDC Tcl interpreter: " + message);
+  }
 }
 
 SdcCommand::~SdcCommand()
@@ -87,6 +145,7 @@ int SdcCommand::evalScriptFile(const std::string& file_name)
   }
 
   const std::string script((std::istreambuf_iterator<char>(script_file)), std::istreambuf_iterator<char>());
+  setScreenVariables(_interp);
   return evalScript(script);
 }
 
@@ -111,6 +170,15 @@ int SdcCommand::evalScript(const std::string& script)
     Tcl_Parse parse{};
     const char* command_start = script.data() + offset;
     const int parse_result = Tcl_ParseCommand(_interp, command_start, static_cast<int>(script.size() - offset), 0, &parse);
+    if (parse_result != TCL_OK) {
+      const char* error_start = parse.commandStart != nullptr ? parse.commandStart : command_start;
+      const unsigned command_line = line_number + static_cast<unsigned>(std::count(command_start, error_start, '\n'));
+      addError(command_line, Tcl_GetStringResult(_interp));
+      Tcl_ResetResult(_interp);
+      Tcl_FreeParse(&parse);
+      return TCL_ERROR;
+    }
+
     const char* command_end = parse.commandStart + parse.commandSize;
     std::size_t consumed = static_cast<std::size_t>(command_end - command_start);
     if (consumed == 0) {
@@ -118,12 +186,6 @@ int SdcCommand::evalScript(const std::string& script)
     }
 
     const unsigned command_line = line_number + static_cast<unsigned>(std::count(command_start, parse.commandStart, '\n'));
-    if (parse_result != TCL_OK) {
-      addError(command_line, Tcl_GetStringResult(_interp));
-      Tcl_ResetResult(_interp);
-      Tcl_FreeParse(&parse);
-      return TCL_ERROR;
-    }
 
     if (parse.numWords > 0) {
       Tcl_SetErrorLine(_interp, static_cast<int>(command_line));
@@ -131,7 +193,8 @@ int SdcCommand::evalScript(const std::string& script)
       if (command_result != TCL_OK) {
         addError(command_line, Tcl_GetStringResult(_interp));
         Tcl_ResetResult(_interp);
-        result = TCL_ERROR;
+        Tcl_FreeParse(&parse);
+        return TCL_ERROR;
       }
     }
 

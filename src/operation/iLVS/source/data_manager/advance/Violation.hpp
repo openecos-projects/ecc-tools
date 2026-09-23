@@ -49,10 +49,7 @@ class Violation
   void set_net_name(const std::string& net_name) { _net_name = net_name; }
   void set_terminal_name_list(const std::vector<std::string>& terminal_name_list) { _terminal_name_list = terminal_name_list; }
   void set_component_id_list(const std::vector<int32_t>& component_id_list) { _component_id_list = component_id_list; }
-  void set_related_net_name_list(const std::vector<std::string>& related_net_name_list)
-  {
-    _related_net_name_list = related_net_name_list;
-  }
+  void set_related_net_name_list(const std::vector<std::string>& related_net_name_list) { _related_net_name_list = related_net_name_list; }
   void set_instance_name(const std::string& instance_name) { _instance_name = instance_name; }
   void set_driver_terminal_name(const std::string& driver_terminal_name) { _driver_terminal_name = driver_terminal_name; }
   void set_shape_list(const std::vector<Shape>& shape_list) { _shape_list = shape_list; }

@@ -46,6 +46,7 @@ int registerCmdDB()
   registerTclCmd(CmdInitSpef, "spef_init");
   registerTclCmd(CmdInitVcd, "vcd_init");
   registerTclCmd(CmdSaveDef, "def_save");
+  registerTclCmd(CmdSaveMacroTCL, "save_macro_tcl");
   registerTclCmd(CmdSaveLef, "lef_save");
   registerTclCmd(CmdSaveNetlist, "netlist_save");
   registerTclCmd(CmdSaveJSON, "json_save");
@@ -55,7 +56,6 @@ int registerCmdDB()
   registerTclCmd(CmdResetData, "reset_data");
   registerTclCmd(CmdLoadData, "load_data");
   registerTclCmd(CmdValidateIdb, "idb_validate");
-  registerTclCmd(CmdWriteSocJson, "write_soc_json");
   registerTclCmd(CmdWriteAbstractLef, "write_abstract_lef");
   registerTclCmd(CmdSaveGDS, "gds_save");
   registerTclCmd(CmdGenerateMPScript, "aimp_random");

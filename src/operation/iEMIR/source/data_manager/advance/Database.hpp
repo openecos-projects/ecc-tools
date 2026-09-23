@@ -16,10 +16,12 @@
 // ***************************************************************************************
 #pragma once
 
+#include "EMTech.hpp"
 #include "EMIRHeader.hpp"
 #include "InstancePower.hpp"
 #include "PowerGraph.hpp"
 #include "PowerNet.hpp"
+#include "PowerSource.hpp"
 
 namespace iemir {
 
@@ -32,9 +34,12 @@ class Database
   std::string& get_design_name() { return _design_name; }
   int32_t get_micron_dbu() { return _micron_dbu; }
   std::set<uint64_t>& get_instance_id_set() { return _instance_id_set; }
+  std::map<std::string, uint64_t>& get_instance_name_to_id_map() { return _instance_name_to_id_map; }
   std::map<std::string, PowerNet>& get_power_net_map() { return _power_net_map; }
+  std::vector<PowerSource>& get_power_source_list() { return _power_source_list; }
   std::map<uint64_t, InstancePower>& get_instance_power_map() { return _instance_power_map; }
   std::map<std::string, PowerGraph>& get_power_graph_map() { return _power_graph_map; }
+  EMTech& get_em_tech() { return _em_tech; }
   // setter
   void set_design_name(const std::string& design_name) { _design_name = design_name; }
   void set_micron_dbu(int32_t micron_dbu) { _micron_dbu = micron_dbu; }
@@ -44,9 +49,12 @@ class Database
   std::string _design_name;
   int32_t _micron_dbu = 0;
   std::set<uint64_t> _instance_id_set;
+  std::map<std::string, uint64_t> _instance_name_to_id_map;
   std::map<std::string, PowerNet> _power_net_map;
+  std::vector<PowerSource> _power_source_list;
   std::map<uint64_t, InstancePower> _instance_power_map;
   std::map<std::string, PowerGraph> _power_graph_map;
+  EMTech _em_tech;
 };
 
 }  // namespace iemir

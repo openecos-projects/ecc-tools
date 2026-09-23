@@ -34,6 +34,9 @@ class PowerWireSegment
   int32_t get_second_y() { return _second_y; }
   int32_t get_width() { return _width; }
   double get_resistance_per_square() { return _resistance_per_square; }
+  double get_resistance() { return _resistance; }
+  bool get_has_explicit_resistance() { return _has_explicit_resistance; }
+  bool get_is_em_checkable() { return _is_em_checkable; }
   // setter
   void set_layer_idx(int32_t layer_idx) { _layer_idx = layer_idx; }
   void set_layer_name(const std::string& layer_name) { _layer_name = layer_name; }
@@ -43,6 +46,12 @@ class PowerWireSegment
   void set_second_y(int32_t second_y) { _second_y = second_y; }
   void set_width(int32_t width) { _width = width; }
   void set_resistance_per_square(double resistance_per_square) { _resistance_per_square = resistance_per_square; }
+  void set_resistance(double resistance)
+  {
+    _resistance = resistance;
+    _has_explicit_resistance = true;
+  }
+  void set_is_em_checkable(bool is_em_checkable) { _is_em_checkable = is_em_checkable; }
   // function
 
  private:
@@ -54,6 +63,9 @@ class PowerWireSegment
   int32_t _second_y = 0;
   int32_t _width = 0;
   double _resistance_per_square = 0.0;
+  double _resistance = 0.0;
+  bool _has_explicit_resistance = false;
+  bool _is_em_checkable = true;
 };
 
 }  // namespace iemir

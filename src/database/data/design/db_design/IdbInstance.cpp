@@ -32,6 +32,7 @@
 #include "IdbInstance.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 using namespace std;
 namespace idb {
@@ -550,6 +551,40 @@ bool IdbInstanceList::add_instance_ref(IdbInstance* instance)
   }
 
   _instance_list.emplace_back(instance);
+  return true;
+}
+
+bool IdbInstanceList::add_instance_refs(const std::vector<IdbInstance*>& instances)
+{
+  std::unordered_set<IdbInstance*> instance_index;
+  instance_index.reserve(_instance_list.size() + instances.size());
+  instance_index.insert(_instance_list.begin(), _instance_list.end());
+  auto instance_map = _instance_map;
+  instance_map.reserve(_instance_map.size() + instances.size());
+  std::vector<IdbInstance*> new_instances;
+  new_instances.reserve(instances.size());
+  for (auto* instance : instances) {
+    if (instance == nullptr) {
+      return false;
+    }
+    if (instance_index.contains(instance)) {
+      continue;
+    }
+    const auto& name = instance->get_name();
+    if (!name.empty()) {
+      const auto [iter, inserted] = instance_map.emplace(name, instance);
+      if (!inserted) {
+        if (iter->second != instance) {
+          return false;
+        }
+        continue;
+      }
+    }
+    new_instances.emplace_back(instance);
+    instance_index.insert(instance);
+  }
+  _instance_list.insert(_instance_list.end(), new_instances.begin(), new_instances.end());
+  _instance_map.swap(instance_map);
   return true;
 }
 

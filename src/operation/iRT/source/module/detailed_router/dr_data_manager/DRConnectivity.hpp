@@ -31,20 +31,21 @@ class DRConnectivity
   }
   void build()
   {
+    _root_cache.clear();
     _parent_list.resize(_shape_list_list.size());
     for (size_t i = 0; i < _parent_list.size(); i++) {
       _parent_list[i] = static_cast<int32_t>(i);
     }
-    std::map<int32_t, bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>>> layer_rtree_map;
+    _layer_rtree_map.clear();
     for (size_t i = 0; i < _shape_list_list.size(); i++) {
       for (LayerRect& shape : _shape_list_list[i]) {
         BGRectInt rect(BGPointInt(shape.get_ll_x(), shape.get_ll_y()), BGPointInt(shape.get_ur_x(), shape.get_ur_y()));
         std::vector<std::pair<BGRectInt, int32_t>> overlap_list;
-        layer_rtree_map[shape.get_layer_idx()].query(bgi::intersects(rect), std::back_inserter(overlap_list));
+        _layer_rtree_map[shape.get_layer_idx()].query(bgi::intersects(rect), std::back_inserter(overlap_list));
         for (auto& [overlap_rect, entity_idx] : overlap_list) {
           merge(static_cast<int32_t>(i), entity_idx);
         }
-        layer_rtree_map[shape.get_layer_idx()].insert({rect, static_cast<int32_t>(i)});
+        _layer_rtree_map[shape.get_layer_idx()].insert({rect, static_cast<int32_t>(i)});
       }
     }
   }
@@ -71,15 +72,25 @@ class DRConnectivity
   }
   std::set<int32_t> getRootSet(const LayerCoord& coord)
   {
+    auto cache_iter = _root_cache.find(coord);
+    if (cache_iter != _root_cache.end()) {
+      return cache_iter->second;
+    }
     std::set<int32_t> root_set;
-    for (size_t i = 0; i < _shape_list_list.size(); i++) {
-      for (LayerRect& shape : _shape_list_list[i]) {
-        if (coord.get_layer_idx() == shape.get_layer_idx() && RTUTIL.isInside(shape, coord.get_planar_coord())) {
-          root_set.insert(getRoot(static_cast<int32_t>(i)));
-          break;
+    auto layer_iter = _layer_rtree_map.find(coord.get_layer_idx());
+    if (layer_iter != _layer_rtree_map.end()) {
+      BGRectInt query_rect(BGPointInt(coord.get_x(), coord.get_y()), BGPointInt(coord.get_x(), coord.get_y()));
+      for (auto iter = layer_iter->second.qbegin(bgi::intersects(query_rect)); iter != layer_iter->second.qend(); ++iter) {
+        const int32_t entity_idx = iter->second;
+        for (const LayerRect& shape : _shape_list_list[entity_idx]) {
+          if (RTUTIL.isInside(shape, coord.get_planar_coord())) {
+            root_set.insert(getRoot(entity_idx));
+            break;
+          }
         }
       }
     }
+    _root_cache.emplace(coord, root_set);
     return root_set;
   }
   std::vector<std::vector<LayerRect>>& get_shape_list_list() { return _shape_list_list; }
@@ -87,6 +98,8 @@ class DRConnectivity
  private:
   std::vector<std::vector<LayerRect>> _shape_list_list;
   std::vector<int32_t> _parent_list;
+  std::map<int32_t, bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>>> _layer_rtree_map;
+  std::map<LayerCoord, std::set<int32_t>, CmpLayerCoordByXASC> _root_cache;
 };
 
 }  // namespace irt

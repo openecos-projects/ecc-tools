@@ -5,6 +5,7 @@ add_library(ista_power_reporter
 target_link_libraries(ista_power_reporter
     PUBLIC
     ista_data_manager
+    ista_delay_calculator
     ista_toolkit
 )
 

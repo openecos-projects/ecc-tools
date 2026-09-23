@@ -5,11 +5,13 @@ add_library(py_izh ${PY_IZH_SRC})
 target_link_libraries(py_izh
     PUBLIC
         izh_interface
+        tcl
         pybind11::pybind11
-)
+        ecc_logger
 
+)
 target_include_directories(py_izh
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${HOME_THIRDPARTY}/json
+    ${HOME_UTILITY}/json
 )

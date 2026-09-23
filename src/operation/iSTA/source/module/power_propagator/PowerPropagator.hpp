@@ -17,6 +17,7 @@
 
 #include "Database.hpp"
 #include "PPModel.hpp"
+#include "PowerActivityModel.hpp"
 
 namespace ista {
 
@@ -34,6 +35,7 @@ class PowerPropagator
  private:
   // self
   static PowerPropagator* _pp_instance;
+  PowerActivityModel _activity_model;
 
   PowerPropagator() = default;
   PowerPropagator(const PowerPropagator& other) = delete;
@@ -46,6 +48,7 @@ class PowerPropagator
   void buildMinimumClockPeriod(PPModel& pp_model);
   void buildSeedPinList(PPModel& pp_model);
   void buildSequentialInstanceNameList(PPModel& pp_model);
+  bool isSequentialForPower(Instance& instance);
   void propagateActivity(PPModel& pp_model);
   void clearPowerActivity();
   void seedVcdActivity();
@@ -61,12 +64,15 @@ class PowerPropagator
   PowerActivity getSeedActivity(std::string& pin_name, PPModel& pp_model);
   PowerActivity getClockActivity(std::string& pin_name);
   PowerActivity getInputActivity(PPModel& pp_model);
-  void propagateCombinationalActivity();
+  void seedSequentialStateActivity(PPModel& pp_model);
+  void propagateCombinationalActivity(PPModel& pp_model);
   PowerActivity getPropagatedActivity(PowerActivity source_activity);
-  void propagateOutputActivity(std::string& pin_name);
-  PowerActivity getOutputActivity(std::string& pin_name);
-  void limitDataTransitionDensity(std::string& pin_name, PowerActivity& activity);
-  double getMinimumClockPeriod();
+  void propagateOutputActivity(std::string& pin_name, PPModel& pp_model);
+  PowerActivity getOutputActivity(std::string& pin_name, PPModel& pp_model);
+  PowerActivity getClockGateOutputActivity(std::string& pin_name, Instance& instance);
+  PowerActivity getClockGateEnableActivity(Instance& instance, std::string& clock_pin_name, std::string& output_pin_name);
+  bool isClockGateOutputPin(std::string& pin_name, Instance& instance);
+  bool isClockGateClockPin(std::string& pin_name, TimingCellPort& timing_cell_port);
   PowerActivity normalizeConstantActivity(PowerActivity activity);
   std::map<std::string, PowerActivity> getInputActivityMap(Instance& instance);
   PowerActivity getFallbackInputActivity(std::string& pin_name);

@@ -272,6 +272,7 @@ VerilogRead::~VerilogRead()
 
 bool VerilogRead::createDb(std::string file, std::string top_module_name)
 {
+  _input_file = file;
   ScopedReadableVerilogFile verilog_file(file);
   if (!verilog_file.isValid()) {
     return false;
@@ -303,7 +304,9 @@ bool VerilogRead::createDb(std::string file, std::string top_module_name)
 
   build_pins();
   build_nets();
-  build_components();
+  if (build_components() != kVerilogSuccess) {
+    return false;
+  }
   build_assign();
 
   post_process_float_io_pins();
@@ -313,6 +316,7 @@ bool VerilogRead::createDb(std::string file, std::string top_module_name)
 
 bool VerilogRead::createDbAutoTop(std::string file)
 {
+  _input_file = file;
   ScopedReadableVerilogFile verilog_file(file);
   if (!verilog_file.isValid()) {
     return false;
@@ -342,7 +346,9 @@ bool VerilogRead::createDbAutoTop(std::string file)
   build_pins();
   build_nets();
   build_assign();
-  build_components();
+  if (build_components() != kVerilogSuccess) {
+    return false;
+  }
 
   return true;
 }
@@ -997,8 +1003,9 @@ int32_t VerilogRead::build_components()
 
       auto* cell_master = idb_master_list->find_cell_master(cell_master_name);
       if (cell_master == nullptr) {
-        ECCLOG.warn(ecc::Loc::current(), "Error : can not find cell master = ", cell_master_name);
-        continue;
+        ECCLOG.warn(ecc::Loc::current(), "PDK master not found: input=", _input_file, ", instance=", inst_name,
+                    ", master=", cell_master_name);
+        return kVerilogFail;
       }
       IdbInstance* idb_instance = idb_design->createInstance(inst_name, cell_master->get_name());
       if (idb_instance == nullptr) {

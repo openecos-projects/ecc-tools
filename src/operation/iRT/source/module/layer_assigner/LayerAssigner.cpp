@@ -16,10 +16,9 @@
 // ***************************************************************************************
 #include "LayerAssigner.hpp"
 
-#include <algorithm>
-
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
+#include "RTHeader.hpp"
 #include "RTInterface.hpp"
 #include "Utility.hpp"
 
@@ -69,6 +68,7 @@ void LayerAssigner::assign()
   outputGuide(la_model);
   outputNetCSV(la_model);
   outputOverflowCSV(la_model);
+  outputSummaryCSV(la_model);
   RTDM.getDatabase().get_net_global_result_map() = std::move(la_model.get_net_global_result_map());
   RTDM.rebuildGlobalResultRTree();
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -806,11 +806,9 @@ void LayerAssigner::updateRoutingTreeToGraph(LAModel& la_model, const RoutingSeg
 void LayerAssigner::updateSummary(LAModel& la_model)
 {
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
-  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
   GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
   Summary& summary = RTDM.getDatabase().get_summary();
-  int32_t enable_timing = RTDM.getConfig().enable_timing;
 
   std::map<int32_t, double>& routing_demand_map = summary.la_summary.routing_demand_map;
   double& total_demand = summary.la_summary.total_demand;
@@ -820,9 +818,6 @@ void LayerAssigner::updateSummary(LAModel& la_model)
   double& total_wire_length = summary.la_summary.total_wire_length;
   std::map<int32_t, int32_t>& cut_via_num_map = summary.la_summary.cut_via_num_map;
   int32_t& total_via_num = summary.la_summary.total_via_num;
-  std::map<std::string, std::map<std::string, double>>& clock_timing_map = summary.la_summary.clock_timing_map;
-
-  std::vector<LANet>& la_net_list = la_model.get_la_net_list();
 
   routing_demand_map.clear();
   total_demand = 0;
@@ -832,7 +827,6 @@ void LayerAssigner::updateSummary(LAModel& la_model)
   total_wire_length = 0;
   cut_via_num_map.clear();
   total_via_num = 0;
-  clock_timing_map.clear();
 
   std::vector<GridMap<RoutingEdge>>& routing_h_edge_map = RTDM.getDatabase().get_routing_h_edge_map();
   std::vector<GridMap<RoutingEdge>>& routing_v_edge_map = RTDM.getDatabase().get_routing_v_edge_map();
@@ -877,31 +871,6 @@ void LayerAssigner::updateSummary(LAModel& la_model)
       }
     }
   }
-  if (enable_timing) {
-    std::vector<std::map<std::string, std::vector<LayerCoord>>> real_pin_coord_map_list;
-    real_pin_coord_map_list.resize(la_net_list.size());
-    std::vector<std::vector<Segment<LayerCoord>>> routing_segment_list_list;
-    routing_segment_list_list.resize(la_net_list.size());
-    for (LANet& la_net : la_net_list) {
-      for (LAPin& la_pin : la_net.get_la_pin_list()) {
-        LayerCoord layer_coord = la_pin.get_access_point().getGridLayerCoord();
-        real_pin_coord_map_list[la_net.get_net_idx()][la_pin.get_pin_name()].emplace_back(RTUTIL.getRealRectByGCell(layer_coord, gcell_axis).getMidPoint(),
-                                                                                          layer_coord.get_layer_idx());
-      }
-    }
-    for (auto& [net_idx, segment_set] : la_model.get_net_global_result_map()) {
-      for (Segment<LayerCoord>& segment_value : segment_set) {
-        Segment<LayerCoord>* segment = &segment_value;
-        LayerCoord first_layer_coord = segment->get_first();
-        LayerCoord first_real_coord(RTUTIL.getRealRectByGCell(first_layer_coord, gcell_axis).getMidPoint(), first_layer_coord.get_layer_idx());
-        LayerCoord second_layer_coord = segment->get_second();
-        LayerCoord second_real_coord(RTUTIL.getRealRectByGCell(second_layer_coord, gcell_axis).getMidPoint(), second_layer_coord.get_layer_idx());
-
-        routing_segment_list_list[net_idx].emplace_back(first_real_coord, second_real_coord);
-      }
-    }
-    RTI.updateTiming(real_pin_coord_map_list, routing_segment_list_list, clock_timing_map);
-  }
 }
 
 void LayerAssigner::printSummary(LAModel& la_model)
@@ -909,7 +878,6 @@ void LayerAssigner::printSummary(LAModel& la_model)
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::vector<CutLayer>& cut_layer_list = RTDM.getDatabase().get_cut_layer_list();
   Summary& summary = RTDM.getDatabase().get_summary();
-  int32_t enable_timing = RTDM.getConfig().enable_timing;
 
   std::map<int32_t, double>& routing_demand_map = summary.la_summary.routing_demand_map;
   double& total_demand = summary.la_summary.total_demand;
@@ -919,7 +887,6 @@ void LayerAssigner::printSummary(LAModel& la_model)
   double& total_wire_length = summary.la_summary.total_wire_length;
   std::map<int32_t, int32_t>& cut_via_num_map = summary.la_summary.cut_via_num_map;
   int32_t& total_via_num = summary.la_summary.total_via_num;
-  std::map<std::string, std::map<std::string, double>>& clock_timing_map = summary.la_summary.clock_timing_map;
 
   fort::char_table routing_demand_map_table;
   {
@@ -969,19 +936,7 @@ void LayerAssigner::printSummary(LAModel& la_model)
     }
     cut_via_num_map_table << fort::header << "Total" << total_via_num << RTUTIL.getPercentage(total_via_num, total_via_num) << fort::endr;
   }
-  fort::char_table timing_table;
-  timing_table.set_cell_text_align(fort::text_align::right);
-  if (enable_timing) {
-    timing_table << fort::header << "clock_name"
-                 << "tns"
-                 << "wns"
-                 << "freq" << fort::endr;
-    for (auto& [clock_name, timing_map] : clock_timing_map) {
-      timing_table << clock_name << timing_map["TNS"] << timing_map["WNS"] << timing_map["Freq(MHz)"] << fort::endr;
-    }
-  }
   RTUTIL.printTableList({routing_demand_map_table, routing_overflow_map_table, routing_wire_length_map_table, cut_via_num_map_table});
-  RTUTIL.printTableList({timing_table});
 }
 
 void LayerAssigner::outputGuide(LAModel& la_model)
@@ -1119,6 +1074,21 @@ void LayerAssigner::outputOverflowCSV(LAModel& la_model)
     RTUTIL.closeFileStream(overflow_csv_file);
   }
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void LayerAssigner::outputSummaryCSV(LAModel& la_model)
+{
+  int32_t output_inter_result = RTDM.getConfig().output_inter_result;
+  if (!output_inter_result) {
+    return;
+  }
+  Summary& summary = RTDM.getDatabase().get_summary();
+  std::ofstream* summary_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(RTDM.getConfig().la_temp_directory_path, "route_summary.csv"));
+  RTUTIL.pushStream(summary_csv_file, "metric,value\n");
+  RTUTIL.pushStream(summary_csv_file, "total_overflow,", summary.la_summary.total_overflow, "\n");
+  RTUTIL.pushStream(summary_csv_file, "total_wire_length,", summary.la_summary.total_wire_length, "\n");
+  RTUTIL.pushStream(summary_csv_file, "total_via_num,", summary.la_summary.total_via_num, "\n");
+  RTUTIL.closeFileStream(summary_csv_file);
 }
 
 // debug

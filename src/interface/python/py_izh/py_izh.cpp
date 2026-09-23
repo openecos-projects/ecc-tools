@@ -16,36 +16,21 @@
 // ***************************************************************************************
 #include "py_izh.h"
 
-#include <any>
-#include <map>
 #include <string>
 
 #include "ZHInterface.hpp"
 
 namespace python_interface {
 
-bool initZHConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
-
-bool fix_fanout(const std::string& config)
-{
-  std::map<std::string, std::any> config_map;
-
-  bool pass = false;
-  pass = !pass ? initZHConfigMapByJSON(config, config_map) : pass;
-  if (!pass) {
-    return false;
-  }
-
-  ZHI.fixFanout(config_map);
-  return true;
-}
+bool initAntennaConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
+bool initFillerConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
+bool initMetalConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 
 bool insert_filler(const std::string& config)
 {
   std::map<std::string, std::any> config_map;
 
-  bool pass = false;
-  pass = !pass ? initZHConfigMapByJSON(config, config_map) : pass;
+  bool pass = config.empty() ? true : initFillerConfigMapByJSON(config, config_map);
   if (!pass) {
     return false;
   }
@@ -58,13 +43,30 @@ bool insert_metal(const std::string& config)
 {
   std::map<std::string, std::any> config_map;
 
-  bool pass = false;
-  pass = !pass ? initZHConfigMapByJSON(config, config_map) : pass;
+  bool pass = config.empty() ? true : initMetalConfigMapByJSON(config, config_map);
   if (!pass) {
     return false;
   }
 
   ZHI.insertMetal(config_map);
+  return true;
+}
+
+bool check_antenna(const std::string& config, const std::string& report_dir)
+{
+  std::map<std::string, std::any> config_map;
+
+  bool pass = config.empty() ? true : initAntennaConfigMapByJSON(config, config_map);
+  if (!pass) {
+    return false;
+  }
+
+  if (!report_dir.empty()) {
+    config_map["-report_dir"] = report_dir;
+  }
+
+  ZHI.checkAntenna(config_map);
+
   return true;
 }
 

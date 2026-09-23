@@ -18,6 +18,7 @@
 
 #include "Arc.hpp"
 #include "Instance.hpp"
+#include "InstancePower.hpp"
 #include "Net.hpp"
 #include "ParasiticLibrary.hpp"
 #include "Pin.hpp"
@@ -26,10 +27,10 @@
 #include "STAHeader.hpp"
 #include "Summary.hpp"
 #include "TimingConstraint.hpp"
+#include "TimingFanoutCheck.hpp"
 #include "TimingLibrary.hpp"
 #include "TimingPathGroup.hpp"
 #include "TimingPoint.hpp"
-#include "InstancePower.hpp"
 
 namespace ista {
 
@@ -59,6 +60,7 @@ class Database
   ParasiticLibrary& get_parasitic_library() { return _parasitic_library; }
   TimingConstraint& get_timing_constraint() { return _timing_constraint; }
   Summary& get_summary() { return _summary; }
+  std::vector<TimingFanoutCheck>& get_fanout_check_list() { return _fanout_check_list; }
   // setter
   void set_design_name(const std::string& design_name) { _design_name = design_name; }
   // function
@@ -76,6 +78,7 @@ class Database
   std::vector<std::string> _timing_order_list;
   std::map<std::string, TimingPoint> _timing_point_map;
   std::vector<TimingPathGroup> _timing_path_group_list;
+  std::vector<TimingFanoutCheck> _fanout_check_list;
   std::map<std::string, PowerActivity> _vcd_activity_map;
   std::map<std::string, PowerActivity> _power_activity_map;
   std::map<std::string, InstancePower> _instance_power_map;

@@ -28,8 +28,7 @@ class EnvPixelOverlapMerger
 {
  public:
   void merge(int32_t start_coord, int32_t end_coord, const std::vector<EnvLayerPixelOverlapList>& lower_layer_pixel_overlap_list,
-             const std::vector<EnvLayerPixelOverlapList>& upper_layer_pixel_overlap_list,
-             std::vector<CrossLayerOverlap>& cross_layer_overlap_list) const
+             const std::vector<EnvLayerPixelOverlapList>& upper_layer_pixel_overlap_list, std::vector<CrossLayerOverlap>& cross_layer_overlap_list) const
   {
     if (start_coord > end_coord) {
       std::swap(start_coord, end_coord);
@@ -73,7 +72,7 @@ class EnvPixelOverlapMerger
 
     std::vector<int32_t> breakpoint_coord_list;
     breakpoint_coord_list.reserve(2 + countBreakpointNum(normalized_lower_layer_pixel_overlap_list)
-                                      + countBreakpointNum(normalized_upper_layer_pixel_overlap_list));
+                                  + countBreakpointNum(normalized_upper_layer_pixel_overlap_list));
     breakpoint_coord_list.push_back(start_coord);
     breakpoint_coord_list.push_back(end_coord);
 
@@ -96,10 +95,10 @@ class EnvPixelOverlapMerger
         continue;
       }
 
-      int32_t lower_layer_idx = getFirstCoveringLayerIdx(normalized_lower_layer_pixel_overlap_list,
-                                                               lower_pixel_overlap_idx_list, interval_start_coord, interval_end_coord);
-      int32_t upper_layer_idx = getFirstCoveringLayerIdx(normalized_upper_layer_pixel_overlap_list,
-                                                               upper_pixel_overlap_idx_list, interval_start_coord, interval_end_coord);
+      int32_t lower_layer_idx
+          = getFirstCoveringLayerIdx(normalized_lower_layer_pixel_overlap_list, lower_pixel_overlap_idx_list, interval_start_coord, interval_end_coord);
+      int32_t upper_layer_idx
+          = getFirstCoveringLayerIdx(normalized_upper_layer_pixel_overlap_list, upper_pixel_overlap_idx_list, interval_start_coord, interval_end_coord);
 
       appendCrossLayerOverlap(interval_start_coord, interval_end_coord, lower_layer_idx, upper_layer_idx, cross_layer_overlap_list);
     }
@@ -115,8 +114,7 @@ class EnvPixelOverlapMerger
     return breakpoint_num;
   }
 
-  void addBreakpointCoordList(const std::vector<EnvLayerPixelOverlapList>& layer_pixel_overlap_list,
-                              std::vector<int32_t>& breakpoint_coord_list) const
+  void addBreakpointCoordList(const std::vector<EnvLayerPixelOverlapList>& layer_pixel_overlap_list, std::vector<int32_t>& breakpoint_coord_list) const
   {
     for (const EnvLayerPixelOverlapList& layer_pixel_overlap : layer_pixel_overlap_list) {
       for (const EnvPixelOverlap& pixel_overlap : layer_pixel_overlap.get_pixel_overlap_list()) {
@@ -150,8 +148,7 @@ class EnvPixelOverlapMerger
       if (merged_pixel_overlap_list.empty() || merged_pixel_overlap_list.back().get_end_coord() < pixel_overlap.get_start_coord()) {
         merged_pixel_overlap_list.push_back(pixel_overlap);
       } else {
-        merged_pixel_overlap_list.back().set_end_coord(
-            std::max(merged_pixel_overlap_list.back().get_end_coord(), pixel_overlap.get_end_coord()));
+        merged_pixel_overlap_list.back().set_end_coord(std::max(merged_pixel_overlap_list.back().get_end_coord(), pixel_overlap.get_end_coord()));
       }
     }
 
@@ -168,27 +165,23 @@ class EnvPixelOverlapMerger
 
   void advancePixelOverlapIdx(const std::vector<EnvPixelOverlap>& pixel_overlap_list, int32_t& pixel_overlap_idx, int32_t coord) const
   {
-    while (pixel_overlap_idx < static_cast<int32_t>(pixel_overlap_list.size())
-           && pixel_overlap_list[pixel_overlap_idx].get_end_coord() <= coord) {
+    while (pixel_overlap_idx < static_cast<int32_t>(pixel_overlap_list.size()) && pixel_overlap_list[pixel_overlap_idx].get_end_coord() <= coord) {
       ++pixel_overlap_idx;
     }
   }
 
-  bool isCovered(const std::vector<EnvPixelOverlap>& pixel_overlap_list, int32_t pixel_overlap_idx, int32_t start_coord,
-                    int32_t end_coord) const
+  bool isCovered(const std::vector<EnvPixelOverlap>& pixel_overlap_list, int32_t pixel_overlap_idx, int32_t start_coord, int32_t end_coord) const
   {
-    return pixel_overlap_idx < static_cast<int32_t>(pixel_overlap_list.size())
-           && pixel_overlap_list[pixel_overlap_idx].get_start_coord() < end_coord
+    return pixel_overlap_idx < static_cast<int32_t>(pixel_overlap_list.size()) && pixel_overlap_list[pixel_overlap_idx].get_start_coord() < end_coord
            && pixel_overlap_list[pixel_overlap_idx].get_end_coord() > start_coord;
   }
 
-  int32_t getFirstCoveringLayerIdx(const std::vector<EnvLayerPixelOverlapList>& layer_pixel_overlap_list,
-                                   std::vector<int32_t>& pixel_overlap_idx_list, int32_t start_coord, int32_t end_coord) const
+  int32_t getFirstCoveringLayerIdx(const std::vector<EnvLayerPixelOverlapList>& layer_pixel_overlap_list, std::vector<int32_t>& pixel_overlap_idx_list,
+                                   int32_t start_coord, int32_t end_coord) const
   {
     for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(layer_pixel_overlap_list.size()); ++layer_idx) {
       advancePixelOverlapIdx(layer_pixel_overlap_list[layer_idx].get_pixel_overlap_list(), pixel_overlap_idx_list[layer_idx], start_coord);
-      if (isCovered(layer_pixel_overlap_list[layer_idx].get_pixel_overlap_list(), pixel_overlap_idx_list[layer_idx], start_coord,
-                       end_coord)) {
+      if (isCovered(layer_pixel_overlap_list[layer_idx].get_pixel_overlap_list(), pixel_overlap_idx_list[layer_idx], start_coord, end_coord)) {
         return layer_pixel_overlap_list[layer_idx].get_layer_idx();
       }
     }

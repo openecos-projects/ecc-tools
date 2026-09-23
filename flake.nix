@@ -9,7 +9,7 @@
       stdenv,
       zlib,
       tcl,
-      boost,
+      boost191,
       eigen,
       libunwind,
       glog,
@@ -52,7 +52,7 @@
         stdenv.cc.cc.lib
         zlib
         tcl
-        boost
+        boost191
         eigen
         libunwind
         glog
@@ -82,8 +82,22 @@
     };
   in flake-parts.lib.mkFlake { inherit inputs; } {
     systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
-    perSystem = { self', pkgs, system, ... }: {
-      packages.default = pkgs.callPackage ecc-tools-bin {};
+    perSystem = { self', pkgs, system, ... }: let
+      boost191 = pkgs.lib.fix (self:
+        pkgs.callPackage "${pkgs.path}/pkgs/development/libraries/boost/generic.nix" {
+          version = "1.91.0";
+          src = pkgs.fetchurl {
+            urls = [
+              "https://archives.boost.io/release/1.91.0/source/boost_1_91_0.tar.bz2"
+            ];
+            sha256 = "de5e6b0e4913395c6bdfa90537febd9028ea4c0735d2cdb0cd9b45d5f51264f5";
+          };
+          boost-build = pkgs.boost-build.override {
+            useBoost = self;
+          };
+        });
+    in {
+      packages.default = pkgs.callPackage ecc-tools-bin { inherit boost191; };
       devShells.default = pkgs.mkShell.override {
         stdenv = pkgs.ccacheStdenv;
       } {

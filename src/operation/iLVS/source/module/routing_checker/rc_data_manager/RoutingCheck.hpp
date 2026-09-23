@@ -43,10 +43,7 @@ class RoutingCheck
   {
     _disconnected_terminal_name_list = disconnected_terminal_name_list;
   }
-  void set_disconnected_shape_list(const std::vector<Shape>& disconnected_shape_list)
-  {
-    _disconnected_shape_list = disconnected_shape_list;
-  }
+  void set_disconnected_shape_list(const std::vector<Shape>& disconnected_shape_list) { _disconnected_shape_list = disconnected_shape_list; }
 
  private:
   std::string _net_name;

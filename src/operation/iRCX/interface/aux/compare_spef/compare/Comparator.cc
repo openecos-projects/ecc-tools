@@ -20,17 +20,8 @@
  */
 #include "compare/Comparator.hh"
 
-#include <algorithm>
-#include <cmath>
-#include <iterator>
-#include <limits>
-#include <numeric>
-#include <optional>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
 #include "ParallelUtils.hh"
+#include "RCXHeader.hpp"
 #include "utils/CompareMath.hh"
 #include "utils/CompareMode.hh"
 
@@ -45,29 +36,18 @@ struct NetCompareJob
   const Net* test_net = nullptr;
 };
 
-void appendRows(Result& result,
-                Result&& thread_result)
+void appendRows(Result& result, Result&& thread_result)
 {
-  result.tcap_rows.insert(
-      result.tcap_rows.end(),
-      std::make_move_iterator(thread_result.tcap_rows.begin()),
-      std::make_move_iterator(thread_result.tcap_rows.end()));
-  result.gcap_rows.insert(
-      result.gcap_rows.end(),
-      std::make_move_iterator(thread_result.gcap_rows.begin()),
-      std::make_move_iterator(thread_result.gcap_rows.end()));
-  result.p2p_rows.insert(
-      result.p2p_rows.end(),
-      std::make_move_iterator(thread_result.p2p_rows.begin()),
-      std::make_move_iterator(thread_result.p2p_rows.end()));
-  result.reference_only_nets.insert(
-      result.reference_only_nets.end(),
-      std::make_move_iterator(thread_result.reference_only_nets.begin()),
-      std::make_move_iterator(thread_result.reference_only_nets.end()));
+  result.tcap_rows.insert(result.tcap_rows.end(), std::make_move_iterator(thread_result.tcap_rows.begin()),
+                          std::make_move_iterator(thread_result.tcap_rows.end()));
+  result.gcap_rows.insert(result.gcap_rows.end(), std::make_move_iterator(thread_result.gcap_rows.begin()),
+                          std::make_move_iterator(thread_result.gcap_rows.end()));
+  result.p2p_rows.insert(result.p2p_rows.end(), std::make_move_iterator(thread_result.p2p_rows.begin()), std::make_move_iterator(thread_result.p2p_rows.end()));
+  result.reference_only_nets.insert(result.reference_only_nets.end(), std::make_move_iterator(thread_result.reference_only_nets.begin()),
+                                    std::make_move_iterator(thread_result.reference_only_nets.end()));
 }
 
-void reserveRows(Result& result,
-                 const std::vector<Result>& partial_results)
+void reserveRows(Result& result, const std::vector<Result>& partial_results)
 {
   Size tcap_count = result.tcap_rows.size();
   Size gcap_count = result.gcap_rows.size();
@@ -97,9 +77,7 @@ auto hasDisconnectedPinComponents(const Net& net) -> bool
   std::vector<std::pair<Size, Size>> edges;
   edges.reserve(net.resistors.size());
   for (const auto& resistor : net.resistors) {
-    if (resistor.resistance <= math::kEpsilon
-        || resistor.node1.empty()
-        || resistor.node2.empty()) {
+    if (resistor.resistance <= math::kEpsilon || resistor.node1.empty() || resistor.node2.empty()) {
       continue;
     }
     edges.emplace_back(get_node_index(resistor.node1), get_node_index(resistor.node2));
@@ -150,10 +128,7 @@ auto hasDisconnectedPinComponents(const Net& net) -> bool
   }
 
   const int first_component = component[pin_indices.front()];
-  return std::any_of(
-      pin_indices.begin() + 1,
-      pin_indices.end(),
-      [&](Size index) { return component[index] != first_component; });
+  return std::any_of(pin_indices.begin() + 1, pin_indices.end(), [&](Size index) { return component[index] != first_component; });
 }
 
 // Use reference SPEF name-map order for default report orientation. Explicit
@@ -179,23 +154,18 @@ class ReferenceNameMapOrder
 
     const Pin& first_pin = *first_it->second;
     const Pin& second_pin = *second_it->second;
-    if (!first_pin.has_name_map_index
-        || !second_pin.has_name_map_index
-        || first_pin.name_map_index == second_pin.name_map_index) {
+    if (!first_pin.has_name_map_index || !second_pin.has_name_map_index || first_pin.name_map_index == second_pin.name_map_index) {
       return pair;
     }
 
-    return first_pin.name_map_index < second_pin.name_map_index
-               ? pair
-               : NodePair{pair.second, pair.first};
+    return first_pin.name_map_index < second_pin.name_map_index ? pair : NodePair{pair.second, pair.first};
   }
 
  private:
   std::unordered_map<std::string, const Pin*> _pin_by_name;
 };
 
-auto makeNetCompareJobs(const Data& test,
-                        const Data& reference) -> std::vector<NetCompareJob>
+auto makeNetCompareJobs(const Data& test, const Data& reference) -> std::vector<NetCompareJob>
 {
   std::vector<NetCompareJob> jobs;
   jobs.reserve(reference.nets.size());
@@ -212,13 +182,8 @@ auto makeNetCompareJobs(const Data& test,
 class MatchedNetComparator
 {
  public:
-  MatchedNetComparator(
-      const Config& config,
-      const NetSelector& net_selector,
-      const PathPairGenerator& path_pair_generator,
-      const ResistanceSolver& resistance_solver,
-      bool compare_capacitance,
-      bool compare_resistance)
+  MatchedNetComparator(const Config& config, const NetSelector& net_selector, const PathPairGenerator& path_pair_generator,
+                       const ResistanceSolver& resistance_solver, bool compare_capacitance, bool compare_resistance)
       : _config(config),
         _net_selector(net_selector),
         _path_pair_generator(path_pair_generator),
@@ -253,10 +218,7 @@ class MatchedNetComparator
   }
 
  private:
-  void compareMatchedNet(const std::string& net_name,
-                         const Net& reference_net,
-                         const Net& test_net,
-                         Result& result) const
+  void compareMatchedNet(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const
   {
     result.summary.matched_net_count++;
     if (!_net_selector.selected(reference_net)) {
@@ -275,10 +237,7 @@ class MatchedNetComparator
     }
   }
 
-  void addTotalCapRow(const std::string& net_name,
-                      const Net& reference_net,
-                      const Net& test_net,
-                      Result& result) const
+  void addTotalCapRow(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const
   {
     ValueRow row;
     row.net = net_name;
@@ -289,22 +248,14 @@ class MatchedNetComparator
     result.tcap_rows.push_back(std::move(row));
   }
 
-  void addGroundCapRow(const std::string& net_name,
-                       const Net& reference_net,
-                       const Net& test_net,
-                       Result& result) const
+  void addGroundCapRow(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const
   {
     const auto sum_caps = [](const NodeGroundCapMap& caps) {
-      return std::accumulate(
-          caps.begin(),
-          caps.end(),
-          0.0,
-          [](F64 total, const auto& entry) { return total + entry.second; });
+      return std::accumulate(caps.begin(), caps.end(), 0.0, [](F64 total, const auto& entry) { return total + entry.second; });
     };
     const F64 reference_cap = sum_caps(reference_net.node_ground_caps);
     const F64 test_cap = sum_caps(test_net.node_ground_caps);
-    if (std::abs(reference_cap) < _config.ccap_abs_threshold
-        && std::abs(test_cap) < _config.ccap_abs_threshold) {
+    if (std::abs(reference_cap) < _config.ccap_abs_threshold && std::abs(test_cap) < _config.ccap_abs_threshold) {
       return;
     }
 
@@ -317,18 +268,14 @@ class MatchedNetComparator
     result.gcap_rows.push_back(std::move(row));
   }
 
-  void addResistanceRows(const std::string& net_name,
-                         const Net& reference_net,
-                         const Net& test_net,
-                         Result& result) const
+  void addResistanceRows(const std::string& net_name, const Net& reference_net, const Net& test_net, Result& result) const
   {
     if (hasDisconnectedPinComponents(test_net)) {
       return;
     }
 
     const auto pairs = _path_pair_generator.generate(reference_net);
-    const auto reference_resistances =
-        _resistance_solver.equivalentResistances(reference_net, pairs);
+    const auto reference_resistances = _resistance_solver.equivalentResistances(reference_net, pairs);
     std::vector<Size> compared_indices;
     compared_indices.reserve(reference_resistances.size());
     for (Size index = 0; index < reference_resistances.size(); ++index) {
@@ -338,13 +285,9 @@ class MatchedNetComparator
       }
     }
 
-    const auto test_resistances =
-        _resistance_solver.equivalentResistances(test_net, pairs, compared_indices);
-    const bool configured_paths = !_config.from_pin.empty()
-                                  || !_config.to_pin.empty()
-                                  || !_config.from_pins.empty()
-                                  || !_config.to_pins.empty()
-                                  || !_config.from_to_pins.empty();
+    const auto test_resistances = _resistance_solver.equivalentResistances(test_net, pairs, compared_indices);
+    const bool configured_paths
+        = !_config.from_pin.empty() || !_config.to_pin.empty() || !_config.from_pins.empty() || !_config.to_pins.empty() || !_config.from_to_pins.empty();
     const ReferenceNameMapOrder reference_name_map_order(reference_net);
 
     for (Size output_index = 0; output_index < compared_indices.size(); ++output_index) {
@@ -352,9 +295,7 @@ class MatchedNetComparator
       const auto& pair = pairs[index];
       const auto& reference_res = reference_resistances[index];
       const auto& test_res = test_resistances[output_index];
-      const NodePair report_pair = configured_paths
-                                       ? pair
-                                       : reference_name_map_order.reportPair(pair);
+      const NodePair report_pair = configured_paths ? pair : reference_name_map_order.reportPair(pair);
 
       ResistanceRow row;
       row.net = net_name;
@@ -364,12 +305,8 @@ class MatchedNetComparator
       row.reference = *reference_res;
       row.test_valid = test_res.has_value();
       row.test = test_res.value_or(std::numeric_limits<F64>::quiet_NaN());
-      row.delta = test_res.has_value()
-                      ? *test_res - *reference_res
-                      : std::numeric_limits<F64>::quiet_NaN();
-      row.relative_delta = test_res.has_value()
-                               ? math::absoluteRelativeDelta(*test_res, *reference_res)
-                               : std::nullopt;
+      row.delta = test_res.has_value() ? *test_res - *reference_res : std::numeric_limits<F64>::quiet_NaN();
+      row.relative_delta = test_res.has_value() ? math::absoluteRelativeDelta(*test_res, *reference_res) : std::nullopt;
       result.p2p_rows.push_back(std::move(row));
     }
   }
@@ -394,8 +331,7 @@ Comparator::Comparator(const Config& config)
 {
 }
 
-auto Comparator::compare(const Data& test,
-                         const Data& reference) const -> Result
+auto Comparator::compare(const Data& test, const Data& reference) const -> Result
 {
   Result result;
   initializeSummary(test, reference, result);
@@ -408,9 +344,7 @@ auto Comparator::compare(const Data& test,
   return result;
 }
 
-void Comparator::initializeSummary(const Data& test,
-                                   const Data& reference,
-                                   Result& result) const
+void Comparator::initializeSummary(const Data& test, const Data& reference, Result& result) const
 {
   result.summary.reference_net_count = reference.nets.size();
   result.summary.test_net_count = test.nets.size();
@@ -418,26 +352,16 @@ void Comparator::initializeSummary(const Data& test,
   result.summary.test_coupling_count = test.coupling_caps.size();
 }
 
-void Comparator::compareMatchedNets(const Data& test,
-                                    const Data& reference,
-                                    Result& result) const
+void Comparator::compareMatchedNets(const Data& test, const Data& reference, Result& result) const
 {
   const auto jobs = makeNetCompareJobs(test, reference);
-  MatchedNetComparator matched_net_comparator(
-      _config,
-      _net_selector,
-      _path_pair_generator,
-      _resistance_solver,
-      _compare_capacitance,
-      _compare_resistance);
+  MatchedNetComparator matched_net_comparator(_config, _net_selector, _path_pair_generator, _resistance_solver, _compare_capacitance, _compare_resistance);
   Result matched_result = matched_net_comparator.compare(jobs);
   result.summary.matched_net_count += matched_result.summary.matched_net_count;
   appendRows(result, std::move(matched_result));
 }
 
-void Comparator::collectTestOnlyNets(const Data& test,
-                                     const Data& reference,
-                                     Result& result) const
+void Comparator::collectTestOnlyNets(const Data& test, const Data& reference, Result& result) const
 {
   for (const Net& net : test.nets) {
     const std::string& net_name = net.name;
@@ -447,9 +371,7 @@ void Comparator::collectTestOnlyNets(const Data& test,
   }
 }
 
-void Comparator::finishSummary(const Data& test,
-                               const Data& reference,
-                               Result& result) const
+void Comparator::finishSummary(const Data& test, const Data& reference, Result& result) const
 {
   result.summary.reference_only_net_count = result.reference_only_nets.size();
   result.summary.test_only_net_count = result.test_only_nets.size();

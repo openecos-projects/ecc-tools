@@ -97,6 +97,7 @@ class LayerAssigner
   void outputGuide(LAModel& la_model);
   void outputNetCSV(LAModel& la_model);
   void outputOverflowCSV(LAModel& la_model);
+  void outputSummaryCSV(LAModel& la_model);
   // debug
   void debugPlotLAModel(LAModel& la_model, std::string flag);
 };

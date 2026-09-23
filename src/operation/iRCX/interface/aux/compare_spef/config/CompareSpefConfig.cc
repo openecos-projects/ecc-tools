@@ -20,11 +20,9 @@
  */
 #include "config/CompareSpefConfig.hh"
 
-#include <fstream>
-#include <utility>
-
-#include "StringUtils.hh"
 #include "Logger.hpp"
+#include "RCXHeader.hpp"
+#include "StringUtils.hh"
 
 namespace ircx {
 namespace compare_spef {
@@ -48,8 +46,7 @@ auto NetConfigReader::read(Config& config) const -> bool
   return true;
 }
 
-void NetConfigReader::addLine(Config& config,
-                              std::string_view raw_line) const
+void NetConfigReader::addLine(Config& config, std::string_view raw_line) const
 {
   constexpr std::string_view net_prefix = "NET:";
   constexpr std::string_view from_prefix = "FROM_PIN:";
@@ -104,8 +101,9 @@ auto ConfigValidator::validate(const Config& config) const -> bool
     return false;
   }
   if (!config.corner.empty()) {
-    RCXLOG.warn(Loc::current(), "compare_spef -corner is valid only for GPD comparison, "
-                 "which is not supported yet.");
+    RCXLOG.warn(Loc::current(),
+                "compare_spef -corner is valid only for GPD comparison, "
+                "which is not supported yet.");
     return false;
   }
   if (config.compare_delay) {
@@ -116,10 +114,7 @@ auto ConfigValidator::validate(const Config& config) const -> bool
     RCXLOG.warn(Loc::current(), "compare_spef -net cannot be used with -from_pin or -to_pin.");
     return false;
   }
-  if (config.tcap_threshold < 0.0
-      || config.ccap_abs_threshold < 0.0
-      || config.ccap_rel_threshold < 0.0
-      || config.res_threshold < 0.0) {
+  if (config.tcap_threshold < 0.0 || config.ccap_abs_threshold < 0.0 || config.ccap_rel_threshold < 0.0 || config.res_threshold < 0.0) {
     RCXLOG.warn(Loc::current(), "compare_spef thresholds must be non-negative.");
     return false;
   }

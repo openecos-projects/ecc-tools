@@ -20,7 +20,6 @@
 #include "IdbEnum.h"
 #include "IdbNet.h"
 #include "idm.h"
-#include "tool_manager.h"
 
 namespace tcl {
 

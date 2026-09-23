@@ -37,10 +37,7 @@ class RCModel
   // setter
   void set_net_name_list(const std::vector<std::string>& net_name_list) { _net_name_list = net_name_list; }
   void set_routing_check_list(const std::vector<RoutingCheck>& routing_check_list) { _routing_check_list = routing_check_list; }
-  void set_short_component_id_list(const std::vector<int32_t>& short_component_id_list)
-  {
-    _short_component_id_list = short_component_id_list;
-  }
+  void set_short_component_id_list(const std::vector<int32_t>& short_component_id_list) { _short_component_id_list = short_component_id_list; }
 
  private:
   std::vector<std::string> _net_name_list;

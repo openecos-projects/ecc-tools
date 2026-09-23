@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <map>
 #include <memory>
@@ -34,11 +35,9 @@
 #include <utility>
 #include <vector>
 
-#include "Config.hh"
 #include "LibParserCpp.hh"
+#include "Config.hh"
 #include "Type.hh"
-#include "absl/container/btree_map.h"
-#include "absl/container/inlined_vector.h"
 #include "utility/logger/Logger.hpp"
 
 namespace idb {
@@ -170,7 +169,7 @@ class LibTable : public LibObject
 
   LibAxis& getAxis(unsigned int index);
 
-  absl::InlinedVector<std::unique_ptr<LibAxis>, 4>& get_axes();
+  std::vector<std::unique_ptr<LibAxis>>& get_axes();
   auto getAxesSize() { return _axes.size(); }
 
   void addTableValue(std::unique_ptr<LibAttrValue> table_value) { _table_values.emplace_back(std::move(table_value)); }
@@ -195,7 +194,7 @@ class LibTable : public LibObject
   // Liberty LUT templates and tables use zero through three axes in the
   // supported models. Keep arbitrary-axis compatibility through the vector's
   // heap spill path without reserving 64 pointers in every object.
-  absl::InlinedVector<std::unique_ptr<LibAxis>, 4> _axes;
+  std::vector<std::unique_ptr<LibAxis>> _axes;  //!< May be zero, one, two, three axes.
   std::vector<std::unique_ptr<LibAttrValue>> _table_values;  //!< The axis values.
   TableType _table_type;                                     //!< The table type.
 
@@ -556,6 +555,8 @@ class LibPort : public LibObject
   LibPort(LibPort&& other) noexcept;
   LibPort& operator=(LibPort&& rhs) noexcept;
 
+  void inheritBusAttributes(const LibPort& bus);
+
   const char* get_port_name() { return _port_name.c_str(); }
   void set_ower_cell(LibCell* ower_cell) { _ower_cell = ower_cell; }
   LibCell* get_ower_cell() { return _ower_cell; }
@@ -620,6 +621,8 @@ class LibPort : public LibObject
 
   void set_fanout_load(double fanout_load_val) { _fanout_load = fanout_load_val; }
   auto& get_fanout_load() { return _fanout_load; }
+  void set_max_fanout(double max_fanout) { _max_fanout = max_fanout; }
+  auto& get_max_fanout() { return _max_fanout; }
 
   double driveResistance();
 
@@ -652,8 +655,9 @@ class LibPort : public LibObject
   std::array<std::optional<double>, MODE_SPLIT> _slew_limits{};
 
   std::optional<double> _fanout_load;
+  std::optional<double> _max_fanout;
 
-  absl::InlinedVector<std::unique_ptr<LibInternalPowerInfo>, 64> _internal_powers;  //!< The internal power information.
+  std::vector<std::unique_ptr<LibInternalPowerInfo>> _internal_powers;  //!< The internal power information.
 
   FORBIDDEN_COPY(LibPort);
 };
@@ -729,14 +733,15 @@ class LibPortBus : public LibPort
   void addlibertyPort(std::unique_ptr<LibPort>&& port) { _ports.push_back(std::move(port)); }
 
   auto getBusSize() { return _bus_type ? _bus_type->get_bit_width() : _ports.size(); }
+  auto& get_ports() { return _ports; }
 
   void set_bus_type(LibType* bus_type) { _bus_type = bus_type; }
   auto* get_bus_type() { return _bus_type; }
 
-  LibPort* operator[](int index) { return _ports.empty() ? this : _ports[index].get(); }
+  LibPort* operator[](int index);
 
  private:
-  absl::InlinedVector<std::unique_ptr<LibPort>, 64> _ports;  //!< The bus ports.
+  std::vector<std::unique_ptr<LibPort>> _ports;  //!< The bus ports.
   LibType* _bus_type = nullptr;
 
   FORBIDDEN_COPY(LibPortBus);
@@ -942,7 +947,7 @@ class LibArc : public LibObject
 
   std::unique_ptr<LibTableModel> _table_model;  //!< The arc timing model.
 
-  static absl::btree_map<std::string, TimingType> _str_to_type;
+  static std::map<std::string, TimingType> _str_to_type;
 
   unsigned _is_disable_arc = 0;  //!< Forbidden arc.
 
@@ -977,7 +982,7 @@ class LibArcSet
   unsigned isTwoTypeSenseArcSet();
 
  private:
-  absl::InlinedVector<std::unique_ptr<LibArc>, 64> _arcs;
+  std::vector<std::unique_ptr<LibArc>> _arcs;
 
   FORBIDDEN_COPY(LibArcSet);
 };
@@ -1054,7 +1059,7 @@ class LibPowerArcSet
   auto& get_power_arcs() { return _power_arcs; }
 
  private:
-  absl::InlinedVector<std::unique_ptr<LibPowerArc>, 64> _power_arcs;
+  std::vector<std::unique_ptr<LibPowerArc>> _power_arcs;
 
   FORBIDDEN_COPY(LibPowerArcSet);
 };
@@ -1071,6 +1076,25 @@ class LibPowerArcSet
 #define FOREACH_POWER_LIB_ARC(power_arc_set, power_arc)                        \
   if (auto& power_arcs = power_arc_set->get_power_arcs(); !power_arcs.empty()) \
     for (auto p = power_arcs.begin(); p != power_arcs.end() ? power_arc = p->get(), true : false; ++p)
+
+/**
+ * @brief Raw state variables and string attributes of a Liberty ff/latch group.
+ * State variables are internal names, not physical cell pins. Expressions are
+ * kept verbatim for consumers to interpret; they do not classify timing cells.
+ */
+struct LibSequential
+{
+  bool is_latch = false;
+  std::vector<std::string> state_variables;
+  std::map<std::string, std::string> attributes;
+
+  const std::string& get_attribute(const std::string& name) const
+  {
+    static const std::string empty;
+    auto it = attributes.find(name);
+    return it == attributes.end() ? empty : it->second;
+  }
+};
 
 /**
  * @brief The timing cell in the liberty.
@@ -1096,6 +1120,8 @@ class LibCell : public LibObject
   const char* get_cell_name() const { return _cell_name.c_str(); }
   auto& get_cell_arcs() { return _cell_arcs; }
   auto& get_cell_power_arcs() { return _cell_power_arcs; }
+  const std::vector<LibSequential>& get_sequentials() const { return _sequentials; }
+  void addSequential(LibSequential&& sequential) { _sequentials.emplace_back(std::move(sequential)); }
 
   double get_cell_area() const { return _cell_area; }
   void set_cell_area(double cell_area) { _cell_area = cell_area; }
@@ -1195,6 +1221,8 @@ class LibCell : public LibObject
   unsigned _is_dont_use : 1;
   unsigned _is_macro_cell : 1;
   unsigned _reserved : 30;
+
+  std::vector<LibSequential> _sequentials;  //!< Raw ff/latch definitions, independent of timing arcs.
 
   FORBIDDEN_COPY(LibCell);
 };
@@ -1364,7 +1392,7 @@ class LibLutTableTemplate : public LibObject
   std::optional<Variable> _template_variable3;
   std::optional<Variable> _template_variable4;
 
-  absl::InlinedVector<std::unique_ptr<LibAxis>, 4> _axes;
+  std::vector<std::unique_ptr<LibAxis>> _axes;  //!< May be zero, one, two, three axes.
 
   FORBIDDEN_COPY(LibLutTableTemplate);
 };
@@ -1676,15 +1704,15 @@ class LibLibrary : public LibObject
   std::vector<std::unique_ptr<LibCell>> _cells;  //!< The liberty cell, perserve the cell read order.
   std::map<std::string, LibCell*> _str2cell;
 
-  absl::InlinedVector<std::unique_ptr<LibLutTableTemplate>, 64> _lut_templates;  //!< The timing table lut template, preserve the
+  std::vector<std::unique_ptr<LibLutTableTemplate>> _lut_templates;  //!< The timing table lut template, preserve the
                                                                                    //!< template order.
 
   std::map<std::string, LibLutTableTemplate*> _str2template;
 
-  absl::InlinedVector<std::unique_ptr<LibWireLoad>, 64> _wire_loads;  //!< The wire load models.
+  std::vector<std::unique_ptr<LibWireLoad>> _wire_loads;  //!< The wire load models.
   std::map<std::string, LibWireLoad*> _str2wireLoad;
 
-  absl::InlinedVector<std::unique_ptr<LibType>, 64> _types;  //!< The lib type
+  std::vector<std::unique_ptr<LibType>> _types;  //!< The lib type
 
   std::map<std::string, LibType*> _str2type;
 

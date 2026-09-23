@@ -17,15 +17,12 @@
 #pragma once
 
 #if __has_include(<tcl8.6/tcl.h>)
-  #include <tcl8.6/tcl.h>
+#include <tcl8.6/tcl.h>
 #else
-  #include <tcl.h>
+#include <tcl.h>
 #endif
 
-#include <string>
-#include <initializer_list>
-#include <vector>
-
+#include "STAHeader.hpp"
 #include "Singleton.hpp"
 
 namespace ista {
@@ -59,8 +56,7 @@ class SdcCommand
 
   Tcl_Interp* getInterp() const { return _interp; }
 
-  Tcl_Command createCmd(const char* cmd_name, Tcl_ObjCmdProc* proc, ClientData client_data = nullptr,
-                        Tcl_CmdDeleteProc* delete_proc = nullptr);
+  Tcl_Command createCmd(const char* cmd_name, Tcl_ObjCmdProc* proc, ClientData client_data = nullptr, Tcl_CmdDeleteProc* delete_proc = nullptr);
   void registerCommands(std::initializer_list<Command> commands);
 
   int evalScriptFile(const std::string& file_name);
@@ -79,5 +75,18 @@ class SdcCommand
   Tcl_Interp* _interp = nullptr;
   std::vector<SdcError> _errors;
 };
+
+namespace sdc {
+
+/**
+ * Register the iSTA Tcl command set used by SDC scripts.
+ *
+ * Tcl language commands such as set, if, foreach and source are installed by
+ * Tcl_Init(). This function only registers commands implemented by iSTA,
+ * including collection helpers, object queries, and timing constraints.
+ */
+void registerSdcCommands(SdcCommand& interpreter);
+
+}  // namespace sdc
 
 }  // namespace ista

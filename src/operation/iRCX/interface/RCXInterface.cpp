@@ -69,9 +69,8 @@ int32_t RCXInterface::normalizeThreadNumber(const nlohmann::json& config_json)
       return 1;
     }
     if (requested_thread_num > static_cast<std::uint64_t>(safe_thread_limit)) {
-      RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is ", requested_thread_num,
-                  ", but this machine/OpenMP runtime allows ", safe_thread_limit, " safe threads. Using ",
-                  safe_thread_limit, " threads to avoid CPU oversubscription and resource exhaustion.");
+      RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is ", requested_thread_num, ", but this machine/OpenMP runtime allows ", safe_thread_limit,
+                  " safe threads. Using ", safe_thread_limit, " threads to avoid CPU oversubscription and resource exhaustion.");
       return safe_thread_limit;
     }
     return static_cast<int32_t>(requested_thread_num);
@@ -79,14 +78,12 @@ int32_t RCXInterface::normalizeThreadNumber(const nlohmann::json& config_json)
 
   const std::int64_t requested_thread_num = thread_json.get<std::int64_t>();
   if (requested_thread_num < 1) {
-    RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is ", requested_thread_num,
-                ", but it must be positive. Using 1 thread.");
+    RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is ", requested_thread_num, ", but it must be positive. Using 1 thread.");
     return 1;
   }
   if (requested_thread_num > safe_thread_limit) {
-    RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is ", requested_thread_num,
-                ", but this machine/OpenMP runtime allows ", safe_thread_limit, " safe threads. Using ",
-                safe_thread_limit, " threads to avoid CPU oversubscription and resource exhaustion.");
+    RCXLOG.warn(Loc::current(), "RCX config 'thread_num' is ", requested_thread_num, ", but this machine/OpenMP runtime allows ", safe_thread_limit,
+                " safe threads. Using ", safe_thread_limit, " threads to avoid CPU oversubscription and resource exhaustion.");
     return safe_thread_limit;
   }
   return static_cast<int32_t>(requested_thread_num);
@@ -290,8 +287,8 @@ void RCXInterface::plotSpef(std::map<std::string, std::any> config_map)
                         / RCXUTIL.getString(database.get_design_name(), "_", corner_data.get_corner_name(), ".spef"))
                            .string();
   }
-  config.output_dir = RCXUTIL.getConfigValue<std::string>(
-      config_map, "-output_dir", (std::filesystem::path(RCXDM.getConfig().sw_temp_directory_path) / "plot_spef").string());
+  config.output_dir = RCXUTIL.getConfigValue<std::string>(config_map, "-output_dir",
+                                                          (std::filesystem::path(RCXDM.getConfig().sw_temp_directory_path) / "plot_spef").string());
   config.net_name = RCXUTIL.getConfigValue<std::string>(config_map, "-net", "");
   config.dbu = RCXUTIL.getConfigValue<int32_t>(config_map, "-dbu", database.get_layout_data().get_dbu_per_micron());
   config.cores = RCXUTIL.getConfigValue<int32_t>(config_map, "-cores", RCXDM.getConfig().thread_number);
@@ -405,8 +402,7 @@ void RCXInterface::wrapDBInfo()
   idb::IdbDie* idb_die = idb_layout->get_die();
   if (idb_die != nullptr) {
     idb::IdbRect* idb_die_shape = idb_die->get_bounding_box();
-    layout_data.set_die_shape(
-        GTLRectInt(idb_die_shape->get_low_x(), idb_die_shape->get_low_y(), idb_die_shape->get_high_x(), idb_die_shape->get_high_y()));
+    layout_data.set_die_shape(GTLRectInt(idb_die_shape->get_low_x(), idb_die_shape->get_low_y(), idb_die_shape->get_high_x(), idb_die_shape->get_high_y()));
   }
 
   idb::IdbUnits* idb_units = idb_design->get_units();
@@ -578,8 +574,8 @@ void RCXInterface::wrapPin(Net& net, idb::IdbPin* idb_pin, bool is_driver)
       if (idb_rect == nullptr) {
         continue;
       }
-      pin.get_layer_shape_list().emplace_back(
-          layer_idx, GTLRectInt(idb_rect->get_low_x(), idb_rect->get_low_y(), idb_rect->get_high_x(), idb_rect->get_high_y()));
+      pin.get_layer_shape_list().emplace_back(layer_idx,
+                                              GTLRectInt(idb_rect->get_low_x(), idb_rect->get_low_y(), idb_rect->get_high_x(), idb_rect->get_high_y()));
     }
   }
   net.get_pin_list().push_back(std::move(pin));
@@ -595,8 +591,7 @@ std::string RCXInterface::getSPEFName(std::string name)
   spef_name.reserve(name.size());
   for (int32_t name_idx = 0; name_idx < static_cast<int32_t>(name.size()); ++name_idx) {
     char name_char = name[name_idx];
-    if ((name_char == '.' || name_char == '[' || name_char == ']')
-        && (name_idx == 0 || name[name_idx - 1] != '\\')) {
+    if ((name_char == '.' || name_char == '[' || name_char == ']') && (name_idx == 0 || name[name_idx - 1] != '\\')) {
       spef_name.push_back('\\');
     }
     spef_name.push_back(name_char);
@@ -653,9 +648,8 @@ void RCXInterface::wrapPatch(Net& net, idb::IdbRegularWireSegment* idb_segment)
 
   Patch patch;
   patch.set_layer_idx(RCXDM.getDatabase().get_layer_table().get_design_idx(idb_layer->get_name()));
-  patch.set_shape(
-      GTLRectInt(idb_anchor_point->get_x() + idb_delta_shape->get_low_x(), idb_anchor_point->get_y() + idb_delta_shape->get_low_y(),
-                 idb_anchor_point->get_x() + idb_delta_shape->get_high_x(), idb_anchor_point->get_y() + idb_delta_shape->get_high_y()));
+  patch.set_shape(GTLRectInt(idb_anchor_point->get_x() + idb_delta_shape->get_low_x(), idb_anchor_point->get_y() + idb_delta_shape->get_low_y(),
+                             idb_anchor_point->get_x() + idb_delta_shape->get_high_x(), idb_anchor_point->get_y() + idb_delta_shape->get_high_y()));
   net.get_patch_list().push_back(std::move(patch));
 }
 
@@ -675,9 +669,9 @@ void RCXInterface::wrapVia(Net& net, idb::IdbVia* idb_via)
   idb::IdbLayerShape idb_top_layer_shape = idb_via->get_top_layer_shape();
   idb::IdbLayerShape idb_cut_layer_shape = idb_via->get_cut_layer_shape();
   idb::IdbLayerShape idb_bottom_layer_shape = idb_via->get_bottom_layer_shape();
-  if (idb_top_layer_shape.get_layer() == nullptr || idb_cut_layer_shape.get_layer() == nullptr
-      || idb_bottom_layer_shape.get_layer() == nullptr || idb_top_layer_shape.get_rect_list().size() != 1
-      || idb_cut_layer_shape.get_rect_list().size() != 1 || idb_bottom_layer_shape.get_rect_list().size() != 1) {
+  if (idb_top_layer_shape.get_layer() == nullptr || idb_cut_layer_shape.get_layer() == nullptr || idb_bottom_layer_shape.get_layer() == nullptr
+      || idb_top_layer_shape.get_rect_list().size() != 1 || idb_cut_layer_shape.get_rect_list().size() != 1
+      || idb_bottom_layer_shape.get_rect_list().size() != 1) {
     return;
   }
 
@@ -688,15 +682,15 @@ void RCXInterface::wrapVia(Net& net, idb::IdbVia* idb_via)
   idb::IdbRect* idb_top_shape = idb_top_layer_shape.get_rect_list().front();
   idb::IdbRect* idb_cut_shape = idb_cut_layer_shape.get_rect_list().front();
   idb::IdbRect* idb_bottom_shape = idb_bottom_layer_shape.get_rect_list().front();
-  via.set_top_layer_shape(LayerShape(
-      RCXDM.getDatabase().get_layer_table().get_design_idx(idb_top_layer_shape.get_layer()->get_name()),
-      GTLRectInt(idb_top_shape->get_low_x(), idb_top_shape->get_low_y(), idb_top_shape->get_high_x(), idb_top_shape->get_high_y())));
-  via.set_cut_layer_shape(LayerShape(
-      RCXDM.getDatabase().get_layer_table().get_design_idx(idb_cut_layer_shape.get_layer()->get_name()),
-      GTLRectInt(idb_cut_shape->get_low_x(), idb_cut_shape->get_low_y(), idb_cut_shape->get_high_x(), idb_cut_shape->get_high_y())));
-  via.set_bottom_layer_shape(LayerShape(RCXDM.getDatabase().get_layer_table().get_design_idx(idb_bottom_layer_shape.get_layer()->get_name()),
-                                        GTLRectInt(idb_bottom_shape->get_low_x(), idb_bottom_shape->get_low_y(),
-                                                   idb_bottom_shape->get_high_x(), idb_bottom_shape->get_high_y())));
+  via.set_top_layer_shape(
+      LayerShape(RCXDM.getDatabase().get_layer_table().get_design_idx(idb_top_layer_shape.get_layer()->get_name()),
+                 GTLRectInt(idb_top_shape->get_low_x(), idb_top_shape->get_low_y(), idb_top_shape->get_high_x(), idb_top_shape->get_high_y())));
+  via.set_cut_layer_shape(
+      LayerShape(RCXDM.getDatabase().get_layer_table().get_design_idx(idb_cut_layer_shape.get_layer()->get_name()),
+                 GTLRectInt(idb_cut_shape->get_low_x(), idb_cut_shape->get_low_y(), idb_cut_shape->get_high_x(), idb_cut_shape->get_high_y())));
+  via.set_bottom_layer_shape(
+      LayerShape(RCXDM.getDatabase().get_layer_table().get_design_idx(idb_bottom_layer_shape.get_layer()->get_name()),
+                 GTLRectInt(idb_bottom_shape->get_low_x(), idb_bottom_shape->get_low_y(), idb_bottom_shape->get_high_x(), idb_bottom_shape->get_high_y())));
   net.get_via_list().push_back(std::move(via));
 }
 

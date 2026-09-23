@@ -19,6 +19,7 @@
 #include "Database.hpp"
 #include "ERModel.hpp"
 #include "PowerGraph.hpp"
+#include "PowerVia.hpp"
 
 namespace iemir {
 
@@ -48,9 +49,9 @@ class EMIRReporter
   void buildIRReportFilePath(ERModel& er_model);
   void buildEMReportFilePath(ERModel& er_model);
   void outputIRReport(ERModel& er_model);
-  void outputIRDesignInfo(std::ofstream* ir_report_file);
-  void outputIRPowerGraphList(std::ofstream* ir_report_file);
-  void outputIRPowerGraph(std::ofstream* ir_report_file, PowerGraph& power_graph);
+  void outputIRReportFile(const std::string& report_file_path);
+  void outputIRReportHeader(std::ofstream* ir_report_file);
+  void outputIRReportRows(std::ofstream* ir_report_file);
   double getTotalPower(PowerGraph& power_graph);
   double getSupplyVoltage(PowerGraph& power_graph);
   int32_t getInstancePowerGraphNum(uint64_t instance_id, PowerNetType power_net_type);
@@ -60,11 +61,27 @@ class EMIRReporter
   double getAverageIRDrop(PowerGraph& power_graph);
   double getPercentageDrop(PowerGraph& power_graph);
   void outputEMReport(ERModel& er_model);
-  void outputEMDesignInfo(std::ofstream* em_report_file);
-  void outputEMPowerGraphList(std::ofstream* em_report_file);
-  void outputEMPowerGraph(std::ofstream* em_report_file, PowerGraph& power_graph);
+  void outputEMReportFile(const std::string& report_file_path, bool worst_only);
+  void outputEMReportHeader(std::ofstream* em_report_file, bool worst_only);
+  void outputEMReportRows(std::ofstream* em_report_file, bool worst_only);
+  void outputResNetworkReport();
+  void outputResNetworkReportFile(const std::string& report_file_path);
+  void outputResNetworkReportHeader(std::ofstream* res_network_report_file);
+  void outputResNetworkReportRows(std::ofstream* res_network_report_file);
   double getMaxCurrent(PowerGraph& power_graph);
   double getAverageCurrent(PowerGraph& power_graph);
+  std::string buildDesignReportFilePath(const std::string& suffix);
+  PowerVia* getPowerVia(PowerGraph& power_graph, PowerEdge& power_edge);
+  std::pair<double, double> getViaLocation(PowerGraph& power_graph, PowerEdge& power_edge);
+  std::string getLayerName(PowerGraph& power_graph, int32_t layer_idx);
+  std::string getViaName(PowerGraph& power_graph, PowerEdge& power_edge);
+  std::string getViaCutBox(PowerGraph& power_graph, PowerEdge& power_edge);
+  std::string getViaDirection(PowerGraph& power_graph, PowerEdge& power_edge);
+  std::string getWireDirection(PowerGraph& power_graph, PowerEdge& power_edge);
+  double getDBUToMicronRatio();
+  double getMicronValue(int32_t dbu_value);
+  double getIRSeverity(PowerGraph& power_graph, PowerNode& power_node);
+  double getEMRatioPercent(PowerEdge& power_edge);
 };
 
 }  // namespace iemir

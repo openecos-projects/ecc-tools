@@ -34,6 +34,8 @@ TclInitSTA::TclInitSTA(const char* cmd_name) : TclCmd(cmd_name)
   _config_list.push_back(std::make_pair("-output_timing_features", ValueType::kInt));
   // int32_t timing_path_limit;         // optional
   _config_list.push_back(std::make_pair("-timing_path_limit", ValueType::kInt));
+  // int32_t min_slew_degradation;     // optional
+  _config_list.push_back(std::make_pair("-min_slew_degradation", ValueType::kString));
   // std::string timing_corner;         // optional
   _config_list.push_back(std::make_pair("-timing_corner", ValueType::kString));
   // int32_t max_paths;                 // optional
@@ -47,11 +49,6 @@ TclInitSTA::TclInitSTA(const char* cmd_name) : TclCmd(cmd_name)
   // compatibility aliases
   _config_list.push_back(std::make_pair("-max_path", ValueType::kInt));
   _config_list.push_back(std::make_pair("-path_report_number", ValueType::kInt));
-  // std::string delay_type;            // optional, max|min|max_min
-  _config_list.push_back(std::make_pair("-delay_type", ValueType::kString));
-  // std::string start_end_type;        // optional, all|reg_to_reg|reg_to_out|in_to_reg|in_to_out
-  _config_list.push_back(std::make_pair("-start_end_type", ValueType::kString));
-
   TclUtil::addOption(this, _config_list);
 }
 
@@ -61,7 +58,21 @@ unsigned TclInitSTA::exec()
     return 0;
   }
   std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
-  STAI.initSTA(config_map);
+  if (config_map.contains("-min_slew_degradation")) {
+    std::string value = std::any_cast<std::string>(config_map.at("-min_slew_degradation"));
+    if (value != "0" && value != "1") {
+      Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(),
+                       Tcl_NewStringObj("-min_slew_degradation must be 0 or 1", -1));
+      return 0;
+    }
+    config_map["-min_slew_degradation"] = int32_t(value == "1");
+  }
+  try {
+    STAI.initSTA(config_map);
+  } catch (const std::exception& error) {
+    Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(), Tcl_NewStringObj(error.what(), -1));
+    return 0;
+  }
   return 1;
 }
 

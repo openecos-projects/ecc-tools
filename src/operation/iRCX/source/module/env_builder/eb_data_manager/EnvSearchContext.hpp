@@ -24,8 +24,8 @@ namespace ircx {
 class EnvSearchContext
 {
  public:
-  EnvSearchContext(int32_t track_coord, int32_t base_track_idx, int32_t query_start_coord, int32_t query_end_coord,
-                   int32_t track_direction_step, const std::function<int32_t(const EnvOverlapWidenContext&)>& widen_func)
+  EnvSearchContext(int32_t track_coord, int32_t base_track_idx, int32_t query_start_coord, int32_t query_end_coord, int32_t track_direction_step,
+                   const std::function<int32_t(const EnvOverlapWidenContext&)>& widen_func)
       : _track_coord(track_coord),
         _base_track_idx(base_track_idx),
         _query_start_coord(query_start_coord),

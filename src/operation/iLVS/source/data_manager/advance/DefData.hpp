@@ -17,8 +17,8 @@
 #pragma once
 
 #include "DefRoutingData.hpp"
-#include "Die.hpp"
 #include "DesignData.hpp"
+#include "Die.hpp"
 #include "PhysicalGraph.hpp"
 
 namespace ilvs {

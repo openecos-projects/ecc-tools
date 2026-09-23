@@ -56,10 +56,8 @@ typename Utility::RectCoordT<Rect> maxY(const Rect& rect)
 }
 
 template <typename Rect>
-typename Utility::remove_cvref_t<Rect> makeRect(typename Utility::RectCoordT<Rect> lower_x,
-                                                typename Utility::RectCoordT<Rect> lower_y,
-                                                typename Utility::RectCoordT<Rect> upper_x,
-                                                typename Utility::RectCoordT<Rect> upper_y)
+typename Utility::remove_cvref_t<Rect> makeRect(typename Utility::RectCoordT<Rect> lower_x, typename Utility::RectCoordT<Rect> lower_y,
+                                                typename Utility::RectCoordT<Rect> upper_x, typename Utility::RectCoordT<Rect> upper_y)
 {
   return Utility::makeRect<Rect>(lower_x, lower_y, upper_x, upper_y);
 }

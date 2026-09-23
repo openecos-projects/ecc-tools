@@ -35,20 +35,6 @@ using ecc::TclStringOption;
 
 namespace tcl {
 
-class CmdFlowInitConfig : public TclCmd
-{
- public:
-  explicit CmdFlowInitConfig(const char* cmd_name);
-  ~CmdFlowInitConfig() override = default;
-
-  unsigned check() override;
-  unsigned exec() override;
-
- private:
-  // private function
-  // private data
-};
-
 class CmdDbConfigSetting : public TclCmd
 {
  public:

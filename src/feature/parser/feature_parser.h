@@ -93,7 +93,6 @@ class FeatureParser
   json buildSummaryPL(std::string step);
   json buildSummaryCTS();
   json buildSummaryTO(std::string step = "");
-  json buildSummaryNetOpt();
   json buildSummaryRT();
   json buildSummarySTA();
   json buildSummaryDRC();

@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "DelayCalculator.hpp"
 
+#include <Eigen/Eigenvalues>
 #include <Eigen/IterativeLinearSolvers>
 #include <Eigen/SparseCore>
 
@@ -99,6 +100,53 @@ double DelayCalculator::getPowerOutputLoad(std::string& output_pin, AnalysisType
   return getOutputPinLoad(output_pin, analysis_type, output_trans_type);
 }
 
+bool DelayCalculator::calculateDrivingCell(std::string& output_pin, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType output_trans_type,
+                                           double input_transition_rise, double input_transition_fall, DCTimingResult& timing_result)
+{
+  timing_result.set_output_trans_type(output_trans_type);
+  if (timing_cell_arc.get_timing_arc_list().empty()) {
+    timing_result.set_delay(0.0);
+    timing_result.set_slew(output_trans_type == TransType::kRise ? input_transition_rise : input_transition_fall);
+    return true;
+  }
+
+  const double output_load = getOutputPinLoad(output_pin, analysis_type, output_trans_type);
+  bool has_result = false;
+  double selected_delay = 0.0;
+  double selected_slew = 0.0;
+  for (TransType input_trans_type : {TransType::kRise, TransType::kFall}) {
+    const double input_slew = input_trans_type == TransType::kRise ? input_transition_rise : input_transition_fall;
+    for (TimingArc* timing_arc : getCandidateTimingArcList(timing_cell_arc, input_trans_type, output_trans_type)) {
+      const bool has_delay_table = timing_arc->get_delay_table_map().contains(output_trans_type);
+      const bool has_slew_table = timing_arc->get_slew_table_map().contains(output_trans_type);
+      if (!has_delay_table && !has_slew_table) {
+        continue;
+      }
+
+      double load_delay = 0.0;
+      if (has_delay_table) {
+        const double loaded_delay = calcTimingArcDelay(output_pin, *timing_arc, analysis_type, output_trans_type, input_slew, output_load);
+        const double intrinsic_delay = calcTimingArcDelayByLoad(*timing_arc, output_trans_type, input_slew, 0.0);
+        load_delay = loaded_delay - intrinsic_delay;
+      }
+      const double output_slew
+          = has_slew_table ? calcTimingArcSlew(output_pin, *timing_arc, analysis_type, output_trans_type, input_slew, output_load) : input_slew;
+      if (!has_result || (analysis_type == AnalysisType::kMin && load_delay < selected_delay)
+          || (analysis_type == AnalysisType::kMax && load_delay > selected_delay)) {
+        selected_delay = load_delay;
+        selected_slew = output_slew;
+        has_result = true;
+      }
+    }
+  }
+  if (!has_result) {
+    return false;
+  }
+  timing_result.set_delay(selected_delay);
+  timing_result.set_slew(selected_slew);
+  return true;
+}
+
 // private
 
 DelayCalculator* DelayCalculator::_dc_instance = nullptr;
@@ -115,6 +163,7 @@ void DelayCalculator::clearParasiticCache()
   _parasitic_arnoldi_model_cache.clear();
   _parasitic_arnoldi_timing_result_cache.clear();
   _parasitic_arnoldi_driver_result_cache.clear();
+  _parasitic_input_port_result_cache.clear();
 }
 
 void DelayCalculator::initializeArcTiming(DCTask& dc_task)
@@ -188,12 +237,11 @@ void DelayCalculator::calculateArc(DCTask& dc_task)
 
   DCTimingResult timing_result;
   timing_result.set_output_trans_type(dc_task.get_output_trans_type());
-  timing_result.set_delay(calcArcDelay(*arc, dc_task.get_analysis_type(), dc_task.get_input_trans_type(), dc_task.get_output_trans_type(),
-                                       dc_task.get_input_slew()));
-  const double output_slew_input_slew
-      = dc_task.get_has_output_slew_input_slew() ? dc_task.get_output_slew_input_slew() : dc_task.get_input_slew();
-  timing_result.set_slew(calcArcSlew(*arc, dc_task.get_analysis_type(), dc_task.get_input_trans_type(), dc_task.get_output_trans_type(),
-                                     output_slew_input_slew));
+  timing_result.set_delay(
+      calcArcDelay(*arc, dc_task.get_analysis_type(), dc_task.get_input_trans_type(), dc_task.get_output_trans_type(), dc_task.get_input_slew()));
+  const double output_slew_input_slew = dc_task.get_has_output_slew_input_slew() ? dc_task.get_output_slew_input_slew() : dc_task.get_input_slew();
+  timing_result.set_slew(
+      calcArcSlew(*arc, dc_task.get_analysis_type(), dc_task.get_input_trans_type(), dc_task.get_output_trans_type(), output_slew_input_slew));
   dc_task.set_timing_result(timing_result);
   dc_task.set_is_valid(true);
 }
@@ -207,10 +255,10 @@ void DelayCalculator::calculateTimingCellArc(DCTask& dc_task)
 
   DCTimingResult timing_result;
   timing_result.set_output_trans_type(dc_task.get_output_trans_type());
-  timing_result.set_delay(calcTimingCellArcDelay(dc_task.get_output_pin(), *timing_cell_arc, dc_task.get_analysis_type(),
-                                                 dc_task.get_input_trans_type(), dc_task.get_output_trans_type(), dc_task.get_input_slew()));
-  timing_result.set_slew(calcTimingCellArcSlew(dc_task.get_output_pin(), *timing_cell_arc, dc_task.get_analysis_type(),
-                                               dc_task.get_input_trans_type(), dc_task.get_output_trans_type(), dc_task.get_input_slew()));
+  timing_result.set_delay(calcTimingCellArcDelay(dc_task.get_output_pin(), *timing_cell_arc, dc_task.get_analysis_type(), dc_task.get_input_trans_type(),
+                                                 dc_task.get_output_trans_type(), dc_task.get_input_slew()));
+  timing_result.set_slew(calcTimingCellArcSlew(dc_task.get_output_pin(), *timing_cell_arc, dc_task.get_analysis_type(), dc_task.get_input_trans_type(),
+                                               dc_task.get_output_trans_type(), dc_task.get_input_slew()));
   dc_task.set_timing_result(timing_result);
   dc_task.set_is_valid(true);
 }
@@ -223,16 +271,15 @@ void DelayCalculator::calculateTimingCheckArc(DCTask& dc_task)
   }
 
   double check_time = timing_check_arc->get_check_time();
-  std::vector<TimingArc*> candidate_arc_list
-      = getCandidateTimingCheckArcList(*timing_check_arc, dc_task.get_clock_trans_type(), dc_task.get_data_trans_type());
+  std::vector<TimingArc*> candidate_arc_list = getCandidateTimingCheckArcList(*timing_check_arc, dc_task.get_clock_trans_type(), dc_task.get_data_trans_type());
   if (!candidate_arc_list.empty()) {
     std::vector<double> delay_list;
     for (TimingArc* timing_arc : candidate_arc_list) {
       if (timing_arc->get_check_table_map().count(dc_task.get_data_trans_type()) == 0) {
         continue;
       }
-      double delay = timing_arc->get_check_table_map()[dc_task.get_data_trans_type()].findValue(
-          dc_task.get_clock_slew() * timing_arc->get_time_unit_scale(), dc_task.get_data_slew() * timing_arc->get_time_unit_scale());
+      double delay = timing_arc->get_check_table_map()[dc_task.get_data_trans_type()].findValue(dc_task.get_clock_slew() * timing_arc->get_time_unit_scale(),
+                                                                                                dc_task.get_data_slew() * timing_arc->get_time_unit_scale());
       delay_list.push_back(delay / timing_arc->get_time_unit_scale());
     }
     if (!delay_list.empty()) {
@@ -323,8 +370,7 @@ double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_c
   return calcTimingCellArcDelay(arc, timing_cell_arc, analysis_type, TransType::kRise);
 }
 
-double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_cell_arc, AnalysisType analysis_type,
-                                                TransType input_trans_type)
+double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType input_trans_type)
 {
   if (timing_cell_arc.get_timing_arc_list().empty()) {
     arc.get_trans_type_map()[input_trans_type] = input_trans_type;
@@ -359,15 +405,14 @@ double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_c
   return delay_list.front();
 }
 
-double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_cell_arc, AnalysisType analysis_type,
-                                                TransType input_trans_type, TransType output_trans_type)
+double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType input_trans_type,
+                                               TransType output_trans_type)
 {
   return calcTimingCellArcDelay(arc, timing_cell_arc, analysis_type, input_trans_type, output_trans_type, 0.0);
 }
 
-double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_cell_arc, AnalysisType analysis_type,
-                                                TransType input_trans_type, TransType output_trans_type, double input_slew,
-                                                bool is_initialization)
+double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType input_trans_type,
+                                               TransType output_trans_type, double input_slew, bool is_initialization)
 {
   if (timing_cell_arc.get_timing_arc_list().empty()) {
     if (analysis_type == AnalysisType::kMin) {
@@ -398,14 +443,14 @@ double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_c
   return delay_list.front();
 }
 
-void DelayCalculator::updateTimingArcDelay(Arc& arc, TimingArc& timing_arc, AnalysisType analysis_type, TransType input_trans_type,
-                                            TransType output_trans_type, double delay, bool is_initialization)
+void DelayCalculator::updateTimingArcDelay(Arc& arc, TimingArc& timing_arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type,
+                                           double delay, bool is_initialization)
 {
   arc.update_timing_arc_delay(timing_arc.get_arc_idx(), analysis_type, input_trans_type, output_trans_type, delay, is_initialization);
 }
 
-double DelayCalculator::calcTimingCellArcSlew(Arc& arc, TimingCellArc& timing_cell_arc, AnalysisType analysis_type,
-                                               TransType input_trans_type, TransType output_trans_type, double input_slew)
+double DelayCalculator::calcTimingCellArcSlew(Arc& arc, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType input_trans_type,
+                                              TransType output_trans_type, double input_slew)
 {
   if (timing_cell_arc.get_timing_arc_list().empty()) {
     return input_slew;
@@ -434,7 +479,7 @@ double DelayCalculator::calcTimingCellArcSlew(Arc& arc, TimingCellArc& timing_ce
 }
 
 double DelayCalculator::calcTimingCellArcDelay(TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType input_trans_type,
-                                                TransType output_trans_type, double input_slew, double output_load)
+                                               TransType output_trans_type, double input_slew, double output_load)
 {
   if (timing_cell_arc.get_timing_arc_list().empty()) {
     if (analysis_type == AnalysisType::kMin) {
@@ -464,7 +509,7 @@ double DelayCalculator::calcTimingCellArcDelay(TimingCellArc& timing_cell_arc, A
 }
 
 double DelayCalculator::calcTimingCellArcSlew(TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType input_trans_type,
-                                               TransType output_trans_type, double input_slew, double output_load)
+                                              TransType output_trans_type, double input_slew, double output_load)
 {
   if (timing_cell_arc.get_timing_arc_list().empty()) {
     return input_slew;
@@ -537,8 +582,7 @@ std::vector<TimingArc*> DelayCalculator::getCandidateTimingArcList(TimingCellArc
   return candidate_arc_list;
 }
 
-std::vector<TimingArc*> DelayCalculator::getCandidateTimingCheckArcList(TimingCheckArc& timing_check_arc, TransType clock_trans_type,
-                                                                         TransType data_trans_type)
+std::vector<TimingArc*> DelayCalculator::getCandidateTimingCheckArcList(TimingCheckArc& timing_check_arc, TransType clock_trans_type, TransType data_trans_type)
 {
   std::vector<TimingArc*> candidate_arc_list;
   for (TimingArc& timing_arc : timing_check_arc.get_timing_arc_list()) {
@@ -619,15 +663,14 @@ double DelayCalculator::convertOutputLoad(TimingArc& timing_arc, double output_l
 }
 
 double DelayCalculator::calcTimingArcDelay(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type, TransType output_trans_type,
-                                            double input_slew, double output_load)
+                                           double input_slew, double output_load)
 {
   ParasiticArnoldiTimingResult& timing_result
       = getParasiticArnoldiTimingResult(output_pin, timing_arc, analysis_type, output_trans_type, input_slew, output_load);
   if (timing_result.get_is_valid()) {
     return timing_result.get_gate_delay();
   }
-  ParasiticDmpTimingResult& dmp_timing_result
-      = getParasiticDmpTimingResult(output_pin, timing_arc, analysis_type, output_trans_type, input_slew, output_load);
+  ParasiticDmpTimingResult& dmp_timing_result = getParasiticDmpTimingResult(output_pin, timing_arc, analysis_type, output_trans_type, input_slew, output_load);
   if (dmp_timing_result.get_is_valid()) {
     return dmp_timing_result.get_gate_delay();
   }
@@ -635,15 +678,14 @@ double DelayCalculator::calcTimingArcDelay(std::string& output_pin, TimingArc& t
 }
 
 double DelayCalculator::calcTimingArcSlew(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type, TransType output_trans_type,
-                                           double input_slew, double output_load)
+                                          double input_slew, double output_load)
 {
   ParasiticArnoldiTimingResult& timing_result
       = getParasiticArnoldiTimingResult(output_pin, timing_arc, analysis_type, output_trans_type, input_slew, output_load);
   if (timing_result.get_is_valid()) {
     return timing_result.get_driver_slew();
   }
-  ParasiticDmpTimingResult& dmp_timing_result
-      = getParasiticDmpTimingResult(output_pin, timing_arc, analysis_type, output_trans_type, input_slew, output_load);
+  ParasiticDmpTimingResult& dmp_timing_result = getParasiticDmpTimingResult(output_pin, timing_arc, analysis_type, output_trans_type, input_slew, output_load);
   if (dmp_timing_result.get_is_valid()) {
     return dmp_timing_result.get_driver_slew();
   }
@@ -722,14 +764,24 @@ double DelayCalculator::getOutputPinLoad(std::string& output_pin, AnalysisType a
 double DelayCalculator::getNetOutputLoad(Net& net, AnalysisType analysis_type, TransType output_trans_type)
 {
   Database& database = STADM.getDatabase();
-  if (database.get_parasitic_library().get_net_map().count(net.get_net_name()) > 0) {
-    ParasiticNet& parasitic_net = database.get_parasitic_library().get_net_map()[net.get_net_name()];
-    return getParasiticNetOutputLoad(net, parasitic_net, analysis_type, output_trans_type);
+  auto& net_load_map = database.get_timing_constraint().get_net_load_map();
+  const auto load_constraint = net_load_map.find(net.get_net_name());
+  if (load_constraint != net_load_map.end() && load_constraint->second.has(analysis_type, output_trans_type)) {
+    double output_load = load_constraint->second.get(analysis_type, output_trans_type);
+    for (std::string& load_pin_name : net.get_load_pin_list()) {
+      output_load += getPinCapacitance(load_pin_name, analysis_type, output_trans_type);
+    }
+    return output_load;
   }
 
   double output_load = 0.0;
-  for (std::string& load_pin_name : net.get_load_pin_list()) {
-    output_load += getPinCapacitance(load_pin_name, analysis_type, output_trans_type);
+  if (database.get_parasitic_library().get_net_map().count(net.get_net_name()) > 0) {
+    ParasiticNet& parasitic_net = database.get_parasitic_library().get_net_map()[net.get_net_name()];
+    output_load = getParasiticNetOutputLoad(net, parasitic_net, analysis_type, output_trans_type);
+  } else {
+    for (std::string& load_pin_name : net.get_load_pin_list()) {
+      output_load += getPinCapacitance(load_pin_name, analysis_type, output_trans_type);
+    }
   }
   return output_load;
 }
@@ -752,7 +804,7 @@ double DelayCalculator::getPinCapacitance(std::string& pin_name, AnalysisType an
   if (pin.get_is_port()) {
     std::map<std::string, TimingPortConstraint>& port_constraint_map = database.get_timing_constraint().get_port_constraint_map();
     if (port_constraint_map.count(pin_name) > 0 && port_constraint_map[pin_name].get_has_load()) {
-      return port_constraint_map[pin_name].get_load();
+      return port_constraint_map[pin_name].get_load(analysis_type, trans_type);
     }
     return 0.0;
   }
@@ -826,7 +878,8 @@ double DelayCalculator::calcParasiticDelay(Arc& arc, AnalysisType analysis_type,
   if (cached_wire_delay) {
     return *cached_wire_delay;
   }
-  std::optional<double> input_port_delay = calcParasiticArnoldiInputPortDelay(parasitic_net, source_node_name, sink_node_name, analysis_type, trans_type);
+  std::optional<double> input_port_delay
+      = calcParasiticArnoldiInputPortDelay(parasitic_net, source_node_name, sink_node_name, analysis_type, trans_type, input_slew);
   if (input_port_delay) {
     return *input_port_delay;
   }
@@ -866,8 +919,7 @@ double DelayCalculator::getParasiticNodeLoad(ParasiticNet& parasitic_net, std::s
   return node_load;
 }
 
-void DelayCalculator::buildParasiticDelayMap(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
-                                              TransType trans_type)
+void DelayCalculator::buildParasiticDelayMap(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type)
 {
   std::string& net_name = parasitic_net.get_net_name();
   if (_parasitic_delay_map_cache[net_name][analysis_type][trans_type].count(source_node_name) > 0
@@ -901,8 +953,8 @@ void DelayCalculator::buildParasiticDelayMap(ParasiticNet& parasitic_net, std::s
 }
 
 double DelayCalculator::updateParasiticLoadMap(ParasiticNet& parasitic_net, std::string& node_name, std::string& parent_node_name,
-                                                std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map,
-                                                std::set<std::string>& visited_node_set, AnalysisType analysis_type, TransType trans_type)
+                                               std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map,
+                                               std::set<std::string>& visited_node_set, AnalysisType analysis_type, TransType trans_type)
 {
   if (visited_node_set.count(node_name) > 0) {
     return 0.0;
@@ -926,8 +978,8 @@ double DelayCalculator::updateParasiticLoadMap(ParasiticNet& parasitic_net, std:
 }
 
 void DelayCalculator::updateParasiticDelayMap(ParasiticNet& parasitic_net, std::string& node_name, std::string& parent_node_name,
-                                               std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map,
-                                               std::set<std::string>& visited_node_set, AnalysisType analysis_type, TransType trans_type)
+                                              std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map,
+                                              std::set<std::string>& visited_node_set, AnalysisType analysis_type, TransType trans_type)
 {
   if (visited_node_set.count(node_name) > 0) {
     return;
@@ -950,9 +1002,9 @@ void DelayCalculator::updateParasiticDelayMap(ParasiticNet& parasitic_net, std::
 }
 
 double DelayCalculator::updateParasiticLoadDelayMap(ParasiticNet& parasitic_net, std::string& node_name, std::string& parent_node_name,
-                                                     std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map,
-                                                     std::set<std::string>& visited_node_set, AnalysisType analysis_type, TransType trans_type,
-                                                     std::map<std::string, double>& load_delay_map)
+                                                    std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map,
+                                                    std::set<std::string>& visited_node_set, AnalysisType analysis_type, TransType trans_type,
+                                                    std::map<std::string, double>& load_delay_map)
 {
   if (visited_node_set.count(node_name) > 0) {
     return 0.0;
@@ -978,9 +1030,9 @@ double DelayCalculator::updateParasiticLoadDelayMap(ParasiticNet& parasitic_net,
 }
 
 void DelayCalculator::updateParasiticImpulseMap(ParasiticNet& parasitic_net, std::string& node_name, std::string& parent_node_name,
-                                                 std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map,
-                                                 std::set<std::string>& visited_node_set, AnalysisType analysis_type, TransType trans_type,
-                                                 std::map<std::string, double>& load_delay_map, std::map<std::string, double>& beta_map)
+                                                std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map,
+                                                std::set<std::string>& visited_node_set, AnalysisType analysis_type, TransType trans_type,
+                                                std::map<std::string, double>& load_delay_map, std::map<std::string, double>& beta_map)
 {
   if (visited_node_set.count(node_name) > 0) {
     return;
@@ -1014,15 +1066,12 @@ double DelayCalculator::getParasiticTotalLoad(ParasiticNet& parasitic_net, Analy
   return total_load;
 }
 
-void DelayCalculator::buildParasiticResistorMap(ParasiticNet& parasitic_net,
-                                                 std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map)
+void DelayCalculator::buildParasiticResistorMap(ParasiticNet& parasitic_net, std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map)
 {
   resistor_map.clear();
   for (ParasiticResistor& parasitic_resistor : parasitic_net.get_resistor_list()) {
-    resistor_map[parasitic_resistor.get_source_node()].push_back(
-        std::make_pair(parasitic_resistor.get_sink_node(), parasitic_resistor.get_resistance()));
-    resistor_map[parasitic_resistor.get_sink_node()].push_back(
-        std::make_pair(parasitic_resistor.get_source_node(), parasitic_resistor.get_resistance()));
+    resistor_map[parasitic_resistor.get_source_node()].push_back(std::make_pair(parasitic_resistor.get_sink_node(), parasitic_resistor.get_resistance()));
+    resistor_map[parasitic_resistor.get_sink_node()].push_back(std::make_pair(parasitic_resistor.get_source_node(), parasitic_resistor.get_resistance()));
   }
 }
 
@@ -1055,9 +1104,8 @@ std::string DelayCalculator::getPinNameByParasiticNodeName(std::string& node_nam
   return node_name;
 }
 
-ParasiticDmpTimingResult& DelayCalculator::getParasiticDmpTimingResult(std::string& output_pin, TimingArc& timing_arc,
-                                                                       AnalysisType analysis_type, TransType output_trans_type,
-                                                                       double input_slew, double output_load)
+ParasiticDmpTimingResult& DelayCalculator::getParasiticDmpTimingResult(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type,
+                                                                       TransType output_trans_type, double input_slew, double output_load)
 {
   std::string timing_result_key = getParasiticDmpTimingResultKey(output_pin, timing_arc, analysis_type, output_trans_type, input_slew);
   if (_parasitic_dmp_timing_result_cache.count(timing_result_key) == 0) {
@@ -1068,7 +1116,7 @@ ParasiticDmpTimingResult& DelayCalculator::getParasiticDmpTimingResult(std::stri
 }
 
 std::string DelayCalculator::getParasiticDmpTimingResultKey(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type,
-                                                             TransType output_trans_type, double input_slew)
+                                                            TransType output_trans_type, double input_slew)
 {
   std::stringstream key_stream;
   key_stream << output_pin << "|" << reinterpret_cast<std::uintptr_t>(&timing_arc) << "|" << static_cast<int32_t>(analysis_type) << "|"
@@ -1076,9 +1124,8 @@ std::string DelayCalculator::getParasiticDmpTimingResultKey(std::string& output_
   return key_stream.str();
 }
 
-ParasiticDmpTimingResult DelayCalculator::calcParasiticDmpTimingResult(std::string& output_pin, TimingArc& timing_arc,
-                                                                       AnalysisType analysis_type, TransType output_trans_type,
-                                                                       double input_slew, double output_load)
+ParasiticDmpTimingResult DelayCalculator::calcParasiticDmpTimingResult(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type,
+                                                                       TransType output_trans_type, double input_slew, double output_load)
 {
   ParasiticDmpTimingResult timing_result;
   Database& database = STADM.getDatabase();
@@ -1135,8 +1182,8 @@ ParasiticDmpTimingResult DelayCalculator::calcParasiticDmpTimingResult(std::stri
   return timing_result;
 }
 
-bool DelayCalculator::calcParasiticDmpCeff(TimingArc& timing_arc, TransType trans_type, double input_slew, ParasiticDmpModel& dmp_model,
-                                  double& gate_delay, double& driver_slew, double& effective_capacitance)
+bool DelayCalculator::calcParasiticDmpCeff(TimingArc& timing_arc, TransType trans_type, double input_slew, ParasiticDmpModel& dmp_model, double& gate_delay,
+                                           double& driver_slew, double& effective_capacitance)
 {
   if (!initParasiticDmpCeff(timing_arc, trans_type, input_slew, dmp_model)) {
     return false;
@@ -1158,8 +1205,7 @@ bool DelayCalculator::calcParasiticDmpCeff(TimingArc& timing_arc, TransType tran
 
 bool DelayCalculator::initParasiticDmpCeff(TimingArc& timing_arc, TransType trans_type, double input_slew, ParasiticDmpModel& dmp_model)
 {
-  if (!dmp_model.get_is_valid() || timing_arc.get_delay_table_map().count(trans_type) == 0
-      || timing_arc.get_slew_table_map().count(trans_type) == 0) {
+  if (!dmp_model.get_is_valid() || timing_arc.get_delay_table_map().count(trans_type) == 0 || timing_arc.get_slew_table_map().count(trans_type) == 0) {
     return false;
   }
 
@@ -1169,8 +1215,7 @@ bool DelayCalculator::initParasiticDmpCeff(TimingArc& timing_arc, TransType tran
   _driver_capacitance = dmp_model.get_driver_capacitance();
   _pi_resistance = dmp_model.get_pi_resistance();
   _load_capacitance = dmp_model.get_load_capacitance();
-  _threshold = getNormalizedThreshold(trans_type == TransType::kFall ? timing_arc.get_output_threshold_pct_fall()
-                                                                     : timing_arc.get_output_threshold_pct_rise());
+  _threshold = getNormalizedThreshold(trans_type == TransType::kFall ? timing_arc.get_output_threshold_pct_fall() : timing_arc.get_output_threshold_pct_rise());
   _lower_threshold = getNormalizedThreshold(trans_type == TransType::kFall ? timing_arc.get_slew_lower_threshold_pct_fall()
                                                                            : timing_arc.get_slew_lower_threshold_pct_rise());
   _upper_threshold = getNormalizedThreshold(trans_type == TransType::kFall ? timing_arc.get_slew_upper_threshold_pct_fall()
@@ -1187,9 +1232,8 @@ bool DelayCalculator::initParasiticDmpCeff(TimingArc& timing_arc, TransType tran
   for (std::array<double, 3>& row : _jacobian) {
     row.fill(0.0);
   }
-  return std::isfinite(_input_slew) && _driver_capacitance >= 0.0 && _pi_resistance >= 0.0 && _load_capacitance >= 0.0
-         && _threshold > 0.0 && _threshold < 1.0 && _lower_threshold >= 0.0 && _upper_threshold <= 1.0
-         && _upper_threshold > _lower_threshold && _slew_derate > 0.0;
+  return std::isfinite(_input_slew) && _driver_capacitance >= 0.0 && _pi_resistance >= 0.0 && _load_capacitance >= 0.0 && _threshold > 0.0 && _threshold < 1.0
+         && _lower_threshold >= 0.0 && _upper_threshold <= 1.0 && _upper_threshold > _lower_threshold && _slew_derate > 0.0;
 }
 
 double DelayCalculator::getNormalizedThreshold(double threshold)
@@ -1216,16 +1260,13 @@ double DelayCalculator::calcGateResistance()
 
 bool DelayCalculator::getGateDelaySlew(double capacitance, double& gate_delay, double& gate_slew)
 {
-  if (_timing_arc == nullptr || _timing_arc->get_delay_table_map().count(_trans_type) == 0
-      || _timing_arc->get_slew_table_map().count(_trans_type) == 0) {
+  if (_timing_arc == nullptr || _timing_arc->get_delay_table_map().count(_trans_type) == 0 || _timing_arc->get_slew_table_map().count(_trans_type) == 0) {
     return false;
   }
   double converted_slew = _input_slew * _timing_arc->get_time_unit_scale();
   double converted_capacitance = capacitance * _timing_arc->get_cap_unit_scale();
-  gate_delay = _timing_arc->get_delay_table_map()[_trans_type].findValue(converted_slew, converted_capacitance)
-               / _timing_arc->get_time_unit_scale();
-  gate_slew = _timing_arc->get_slew_table_map()[_trans_type].findValue(converted_slew, converted_capacitance)
-              / _timing_arc->get_time_unit_scale();
+  gate_delay = _timing_arc->get_delay_table_map()[_trans_type].findValue(converted_slew, converted_capacitance) / _timing_arc->get_time_unit_scale();
+  gate_slew = _timing_arc->get_slew_table_map()[_trans_type].findValue(converted_slew, converted_capacitance) / _timing_arc->get_time_unit_scale();
   return std::isfinite(gate_delay) && std::isfinite(gate_slew) && gate_slew >= 0.0;
 }
 
@@ -1275,8 +1316,7 @@ bool DelayCalculator::initPi()
   _pi_pole1 = (coefficient + root) / (2.0 * denominator);
   _pi_pole2 = (coefficient - root) / (2.0 * denominator);
   double pole_product = _pi_pole1 * _pi_pole2;
-  if (!(_pi_pole1 > 0.0) || !(_pi_pole2 > 0.0) || !(pole_product > 0.0)
-      || std::abs(_pi_pole2 - _pi_pole1) < kTinyNumber) {
+  if (!(_pi_pole1 > 0.0) || !(_pi_pole2 > 0.0) || !(pole_product > 0.0) || std::abs(_pi_pole2 - _pi_pole1) < kTinyNumber) {
     return false;
   }
 
@@ -1284,13 +1324,12 @@ bool DelayCalculator::initPi()
   _pi_constant1 = (1.0 - _pi_constant2 * (_pi_pole1 + _pi_pole2)) / pole_product;
   _pi_residue2 = (_pi_constant1 * _pi_pole1 + _pi_constant2) / (_pi_pole2 - _pi_pole1);
   _pi_residue1 = -_pi_constant1 - _pi_residue2;
-  double current_zero = (_load_capacitance + _driver_capacitance)
-                        / (_pi_resistance * _load_capacitance * _driver_capacitance);
+  double current_zero = (_load_capacitance + _driver_capacitance) / (_pi_resistance * _load_capacitance * _driver_capacitance);
   _pi_current_constant = current_zero / pole_product;
   _pi_current_residue1 = (current_zero - _pi_pole1) / (_pi_pole1 * (_pi_pole1 - _pi_pole2));
   _pi_current_residue2 = (current_zero - _pi_pole2) / (_pi_pole2 * (_pi_pole2 - _pi_pole1));
-  return std::isfinite(_pi_residue1) && std::isfinite(_pi_residue2) && std::isfinite(_pi_current_constant)
-         && std::isfinite(_pi_current_residue1) && std::isfinite(_pi_current_residue2);
+  return std::isfinite(_pi_residue1) && std::isfinite(_pi_residue2) && std::isfinite(_pi_current_constant) && std::isfinite(_pi_current_residue1)
+         && std::isfinite(_pi_current_residue2);
 }
 
 bool DelayCalculator::calcZeroC2(double& gate_delay, double& driver_slew, double& effective_capacitance)
@@ -1341,8 +1380,7 @@ bool DelayCalculator::findDriverParams(double effective_capacitance)
 
   double threshold_span = _upper_threshold - _lower_threshold;
   double transition_time = measured_slew / threshold_span;
-  double start_time = threshold_delay + std::log(1.0 - _threshold) * _driver_resistance * effective_capacitance
-                      - _threshold * transition_time;
+  double start_time = threshold_delay + std::log(1.0 - _threshold) * _driver_resistance * effective_capacitance - _threshold * transition_time;
   _parameter_list[kTransitionTimeIndex] = transition_time;
   _parameter_list[kStartTimeIndex] = start_time;
   if (!newtonRaphson()) {
@@ -1384,8 +1422,7 @@ bool DelayCalculator::newtonRaphson()
 
     bool is_converged = true;
     for (int32_t index = 0; index < _newton_order; index++) {
-      if (!std::isfinite(_delta_list[index])
-          || std::abs(_delta_list[index]) > std::abs(_parameter_list[index]) * kDriverParameterTolerance) {
+      if (!std::isfinite(_delta_list[index]) || std::abs(_delta_list[index]) > std::abs(_parameter_list[index]) * kDriverParameterTolerance) {
         is_converged = false;
       }
       _parameter_list[index] += _delta_list[index];
@@ -1441,26 +1478,19 @@ bool DelayCalculator::evalPiEqns()
   _jacobian[kCurrentIndex][kStartTimeIndex] = 0.0;
   _jacobian[kCurrentIndex][kTransitionTimeIndex]
       = (-_pi_current_constant * transition_time + _pi_current_residue1 * transition_time * exp_pole1
-         - (2.0 * _pi_current_residue1 / _pi_pole1) * (1.0 - exp_pole1)
-         + _pi_current_residue2 * transition_time * exp_pole2
+         - (2.0 * _pi_current_residue1 / _pi_pole1) * (1.0 - exp_pole1) + _pi_current_residue2 * transition_time * exp_pole2
          - (2.0 * _pi_current_residue2 / _pi_pole2) * (1.0 - exp_pole2)
          + _driver_resistance * effective_capacitance
-               * (transition_time + transition_time * exp_effective
-                  - 2.0 * _driver_resistance * effective_capacitance * (1.0 - exp_effective)))
+               * (transition_time + transition_time * exp_effective - 2.0 * _driver_resistance * effective_capacitance * (1.0 - exp_effective)))
         / (_driver_resistance * transition_time * transition_time * transition_time);
-  _jacobian[kCurrentIndex][kEffectiveCapacitanceIndex]
-      = (2.0 * _driver_resistance * effective_capacitance - transition_time
-         - (2.0 * _driver_resistance * effective_capacitance + transition_time) * exp_effective)
-        / (transition_time * transition_time);
+  _jacobian[kCurrentIndex][kEffectiveCapacitanceIndex] = (2.0 * _driver_resistance * effective_capacitance - transition_time
+                                                          - (2.0 * _driver_resistance * effective_capacitance + transition_time) * exp_effective)
+                                                         / (transition_time * transition_time);
 
-  calcCapacitiveWaveformDerivative(lower_delay, start_time, transition_time, effective_capacitance,
-                                   _jacobian[kLowerVoltageIndex][kStartTimeIndex],
-                                   _jacobian[kLowerVoltageIndex][kTransitionTimeIndex],
-                                   _jacobian[kLowerVoltageIndex][kEffectiveCapacitanceIndex]);
-  calcCapacitiveWaveformDerivative(threshold_delay, start_time, transition_time, effective_capacitance,
-                                   _jacobian[kThresholdVoltageIndex][kStartTimeIndex],
-                                   _jacobian[kThresholdVoltageIndex][kTransitionTimeIndex],
-                                   _jacobian[kThresholdVoltageIndex][kEffectiveCapacitanceIndex]);
+  calcCapacitiveWaveformDerivative(lower_delay, start_time, transition_time, effective_capacitance, _jacobian[kLowerVoltageIndex][kStartTimeIndex],
+                                   _jacobian[kLowerVoltageIndex][kTransitionTimeIndex], _jacobian[kLowerVoltageIndex][kEffectiveCapacitanceIndex]);
+  calcCapacitiveWaveformDerivative(threshold_delay, start_time, transition_time, effective_capacitance, _jacobian[kThresholdVoltageIndex][kStartTimeIndex],
+                                   _jacobian[kThresholdVoltageIndex][kTransitionTimeIndex], _jacobian[kThresholdVoltageIndex][kEffectiveCapacitanceIndex]);
   return std::isfinite(_function_list[kCurrentIndex]) && std::isfinite(_function_list[kThresholdVoltageIndex])
          && std::isfinite(_function_list[kLowerVoltageIndex]);
 }
@@ -1470,14 +1500,12 @@ double DelayCalculator::calcPiCurrentDifference(double transition_time, double e
   double exp_pole1 = calcDmpExp(-_pi_pole1 * effective_capacitance_time);
   double exp_pole2 = calcDmpExp(-_pi_pole2 * effective_capacitance_time);
   double exp_effective = calcDmpExp(-effective_capacitance_time / (_driver_resistance * effective_capacitance));
-  double pi_current = (_pi_current_constant * effective_capacitance_time
-                       + (_pi_current_residue1 / _pi_pole1) * (1.0 - exp_pole1)
+  double pi_current = (_pi_current_constant * effective_capacitance_time + (_pi_current_residue1 / _pi_pole1) * (1.0 - exp_pole1)
                        + (_pi_current_residue2 / _pi_pole2) * (1.0 - exp_pole2))
                       / (_driver_resistance * effective_capacitance_time * transition_time);
-  double effective_current
-      = (_driver_resistance * effective_capacitance * effective_capacitance_time
-         - std::pow(_driver_resistance * effective_capacitance, 2) * (1.0 - exp_effective))
-        / (_driver_resistance * effective_capacitance_time * transition_time);
+  double effective_current = (_driver_resistance * effective_capacitance * effective_capacitance_time
+                              - std::pow(_driver_resistance * effective_capacitance, 2) * (1.0 - exp_effective))
+                             / (_driver_resistance * effective_capacitance_time * transition_time);
   return pi_current - effective_current;
 }
 
@@ -1500,11 +1528,9 @@ bool DelayCalculator::evalOnePoleEqns()
   _function_list[kLowerVoltageIndex] = lower_voltage - _lower_threshold;
 
   double ignored_capacitance_derivative = 0.0;
-  calcCapacitiveWaveformDerivative(lower_delay, start_time, transition_time, _load_capacitance,
-                                   _jacobian[kLowerVoltageIndex][kStartTimeIndex],
+  calcCapacitiveWaveformDerivative(lower_delay, start_time, transition_time, _load_capacitance, _jacobian[kLowerVoltageIndex][kStartTimeIndex],
                                    _jacobian[kLowerVoltageIndex][kTransitionTimeIndex], ignored_capacitance_derivative);
-  calcCapacitiveWaveformDerivative(threshold_delay, start_time, transition_time, _load_capacitance,
-                                   _jacobian[kThresholdVoltageIndex][kStartTimeIndex],
+  calcCapacitiveWaveformDerivative(threshold_delay, start_time, transition_time, _load_capacitance, _jacobian[kThresholdVoltageIndex][kStartTimeIndex],
                                    _jacobian[kThresholdVoltageIndex][kTransitionTimeIndex], ignored_capacitance_derivative);
   return std::isfinite(_function_list[kThresholdVoltageIndex]) && std::isfinite(_function_list[kLowerVoltageIndex]);
 }
@@ -1517,9 +1543,7 @@ void DelayCalculator::calcCapacitiveWaveform(double time, double start_time, dou
   } else if (shifted_time <= transition_time) {
     voltage = calcCapacitiveUnitRamp(shifted_time, capacitance) / transition_time;
   } else {
-    voltage = (calcCapacitiveUnitRamp(shifted_time, capacitance)
-               - calcCapacitiveUnitRamp(shifted_time - transition_time, capacitance))
-              / transition_time;
+    voltage = (calcCapacitiveUnitRamp(shifted_time, capacitance) - calcCapacitiveUnitRamp(shifted_time - transition_time, capacitance)) / transition_time;
   }
 }
 
@@ -1532,9 +1556,8 @@ double DelayCalculator::calcCapacitiveUnitRamp(double time, double capacitance)
   return time - time_constant * (1.0 - calcDmpExp(-time / time_constant));
 }
 
-void DelayCalculator::calcCapacitiveWaveformDerivative(double time, double start_time, double transition_time, double capacitance,
-                                                         double& start_derivative, double& transition_derivative,
-                                                         double& capacitance_derivative)
+void DelayCalculator::calcCapacitiveWaveformDerivative(double time, double start_time, double transition_time, double capacitance, double& start_derivative,
+                                                       double& transition_derivative, double& capacitance_derivative)
 {
   double shifted_time = time - start_time;
   if (shifted_time <= 0.0) {
@@ -1546,16 +1569,15 @@ void DelayCalculator::calcCapacitiveWaveformDerivative(double time, double start
     transition_derivative = -calcCapacitiveUnitRamp(shifted_time, capacitance) / (transition_time * transition_time);
     capacitance_derivative = calcCapacitiveUnitRampCapDerivative(shifted_time, capacitance) / transition_time;
   } else {
-    start_derivative = -(calcCapacitiveUnitRampTimeDerivative(shifted_time, capacitance)
-                         - calcCapacitiveUnitRampTimeDerivative(shifted_time - transition_time, capacitance))
-                       / transition_time;
-    transition_derivative
-        = -(calcCapacitiveUnitRamp(shifted_time, capacitance) + calcCapacitiveUnitRamp(shifted_time - transition_time, capacitance))
-              / (transition_time * transition_time)
-          + calcCapacitiveUnitRampTimeDerivative(shifted_time - transition_time, capacitance) / transition_time;
-    capacitance_derivative = (calcCapacitiveUnitRampCapDerivative(shifted_time, capacitance)
-                              - calcCapacitiveUnitRampCapDerivative(shifted_time - transition_time, capacitance))
-                             / transition_time;
+    start_derivative
+        = -(calcCapacitiveUnitRampTimeDerivative(shifted_time, capacitance) - calcCapacitiveUnitRampTimeDerivative(shifted_time - transition_time, capacitance))
+          / transition_time;
+    transition_derivative = -(calcCapacitiveUnitRamp(shifted_time, capacitance) + calcCapacitiveUnitRamp(shifted_time - transition_time, capacitance))
+                                / (transition_time * transition_time)
+                            + calcCapacitiveUnitRampTimeDerivative(shifted_time - transition_time, capacitance) / transition_time;
+    capacitance_derivative
+        = (calcCapacitiveUnitRampCapDerivative(shifted_time, capacitance) - calcCapacitiveUnitRampCapDerivative(shifted_time - transition_time, capacitance))
+          / transition_time;
   }
 }
 
@@ -1710,9 +1732,8 @@ bool DelayCalculator::findRoot(std::function<void(double, double&, double&)>& fu
   double derivative = 0.0;
   function(root, value, derivative);
   for (int32_t iteration = 0; iteration < kMaxRootIteration; iteration++) {
-    bool use_bisection = derivative == 0.0
-                          || (((root - upper_time) * derivative - value) * ((root - lower_time) * derivative - value) > 0.0)
-                          || std::abs(2.0 * value) > std::abs(previous_delta * derivative);
+    bool use_bisection = derivative == 0.0 || (((root - upper_time) * derivative - value) * ((root - lower_time) * derivative - value) > 0.0)
+                         || std::abs(2.0 * value) > std::abs(previous_delta * derivative);
     if (use_bisection) {
       previous_delta = delta;
       delta = 0.5 * (upper_time - lower_time);
@@ -1779,8 +1800,7 @@ void DelayCalculator::calcPiUnitRamp(double time, double& voltage, double& deriv
   double exp_pole1 = calcDmpExp(-_pi_pole1 * time);
   double exp_pole2 = calcDmpExp(-_pi_pole2 * time);
   voltage = _pi_scale * (_pi_constant1 + _pi_constant2 * time + _pi_residue1 * exp_pole1 + _pi_residue2 * exp_pole2);
-  derivative = _pi_scale
-               * (_pi_constant2 - _pi_residue1 * _pi_pole1 * exp_pole1 - _pi_residue2 * _pi_pole2 * exp_pole2);
+  derivative = _pi_scale * (_pi_constant2 - _pi_residue1 * _pi_pole1 * exp_pole1 - _pi_residue2 * _pi_pole2 * exp_pole2);
 }
 
 void DelayCalculator::calcZeroC2UnitRamp(double time, double& voltage, double& derivative)
@@ -1793,8 +1813,7 @@ void DelayCalculator::calcZeroC2UnitRamp(double time, double& voltage, double& d
 double DelayCalculator::getOutputCrossingUpperBound()
 {
   if (_is_pi) {
-    return _start_time + _transition_time
-           + (_load_capacitance + _driver_capacitance) * (_driver_resistance + _pi_resistance) * 2.0;
+    return _start_time + _transition_time + (_load_capacitance + _driver_capacitance) * (_driver_resistance + _pi_resistance) * 2.0;
   }
   if (_is_zero_c2) {
     return _start_time + _transition_time + _load_capacitance * (_driver_resistance + _pi_resistance) * 2.0;
@@ -1814,25 +1833,23 @@ double DelayCalculator::calcDmpExp(double value)
   return result;
 }
 
-
-void DelayCalculator::cacheParasiticDmpDriverResult(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type,
-                                                     double driver_slew, ParasiticDmpTimingResult& timing_result)
+void DelayCalculator::cacheParasiticDmpDriverResult(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type, double driver_slew,
+                                                    ParasiticDmpTimingResult& timing_result)
 {
   std::string driver_result_key = getParasiticDmpDriverResultKey(output_pin, analysis_type, output_trans_type, driver_slew);
   _parasitic_dmp_driver_result_cache[driver_result_key] = timing_result;
 }
 
 std::string DelayCalculator::getParasiticDmpDriverResultKey(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type,
-                                                             double driver_slew)
+                                                            double driver_slew)
 {
   std::stringstream key_stream;
-  key_stream << output_pin << "|" << static_cast<int32_t>(analysis_type) << "|" << static_cast<int32_t>(output_trans_type) << "|"
-             << std::setprecision(17) << driver_slew;
+  key_stream << output_pin << "|" << static_cast<int32_t>(analysis_type) << "|" << static_cast<int32_t>(output_trans_type) << "|" << std::setprecision(17)
+             << driver_slew;
   return key_stream.str();
 }
 
-std::optional<double> DelayCalculator::getParasiticDmpCachedWireDelay(Arc& arc, AnalysisType analysis_type, TransType trans_type,
-                                                                      double input_slew)
+std::optional<double> DelayCalculator::getParasiticDmpCachedWireDelay(Arc& arc, AnalysisType analysis_type, TransType trans_type, double input_slew)
 {
   if (!std::isfinite(input_slew)) {
     return std::nullopt;
@@ -1850,8 +1867,7 @@ std::optional<double> DelayCalculator::getParasiticDmpCachedWireDelay(Arc& arc, 
   return timing_result.get_wire_delay_map()[sink_pin];
 }
 
-std::optional<double> DelayCalculator::getParasiticDmpCachedLoadSlew(Arc& arc, AnalysisType analysis_type, TransType trans_type,
-                                                                     double input_slew)
+std::optional<double> DelayCalculator::getParasiticDmpCachedLoadSlew(Arc& arc, AnalysisType analysis_type, TransType trans_type, double input_slew)
 {
   if (!std::isfinite(input_slew)) {
     return std::nullopt;
@@ -1869,8 +1885,8 @@ std::optional<double> DelayCalculator::getParasiticDmpCachedLoadSlew(Arc& arc, A
   return timing_result.get_load_slew_map()[sink_pin];
 }
 
-ParasiticDmpModel& DelayCalculator::getParasiticDmpModel(ParasiticNet& parasitic_net, std::string& source_node_name,
-                                                          AnalysisType analysis_type, TransType trans_type)
+ParasiticDmpModel& DelayCalculator::getParasiticDmpModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
+                                                         TransType trans_type)
 {
   std::string dmp_model_key = getParasiticDmpModelKey(parasitic_net, source_node_name, analysis_type, trans_type);
   if (_parasitic_dmp_model_cache.count(dmp_model_key) == 0) {
@@ -1880,7 +1896,7 @@ ParasiticDmpModel& DelayCalculator::getParasiticDmpModel(ParasiticNet& parasitic
 }
 
 std::string DelayCalculator::getParasiticDmpModelKey(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
-                                                      TransType trans_type)
+                                                     TransType trans_type)
 {
   std::stringstream key_stream;
   key_stream << parasitic_net.get_net_name() << "|" << source_node_name << "|" << static_cast<int32_t>(analysis_type) << "|"
@@ -1888,16 +1904,15 @@ std::string DelayCalculator::getParasiticDmpModelKey(ParasiticNet& parasitic_net
   return key_stream.str();
 }
 
-ParasiticDmpModel DelayCalculator::buildParasiticDmpModel(ParasiticNet& parasitic_net, std::string& source_node_name,
-                                                           AnalysisType analysis_type, TransType trans_type)
+ParasiticDmpModel DelayCalculator::buildParasiticDmpModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
+                                                          TransType trans_type)
 {
   ParasiticDmpModel dmp_model;
   std::vector<std::string> node_name_list;
   std::vector<int32_t> parent_idx_list;
   std::vector<double> resistance_list;
   std::vector<double> capacitance_list;
-  initParasiticArnoldiTree(parasitic_net, source_node_name, analysis_type, trans_type, node_name_list, parent_idx_list, resistance_list,
-                           capacitance_list);
+  initParasiticArnoldiTree(parasitic_net, source_node_name, analysis_type, trans_type, node_name_list, parent_idx_list, resistance_list, capacitance_list);
   if (node_name_list.empty()) {
     return dmp_model;
   }
@@ -1910,8 +1925,8 @@ ParasiticDmpModel DelayCalculator::buildParasiticDmpModel(ParasiticNet& parasiti
   return dmp_model;
 }
 
-void DelayCalculator::buildParasiticDmpPiModel(ParasiticDmpModel& dmp_model, std::vector<int32_t>& parent_idx_list,
-                                                std::vector<double>& resistance_list, std::vector<double>& capacitance_list)
+void DelayCalculator::buildParasiticDmpPiModel(ParasiticDmpModel& dmp_model, std::vector<int32_t>& parent_idx_list, std::vector<double>& resistance_list,
+                                               std::vector<double>& capacitance_list)
 {
   if (parent_idx_list.size() != resistance_list.size() || resistance_list.size() != capacitance_list.size() || capacitance_list.empty()) {
     return;
@@ -1951,9 +1966,8 @@ void DelayCalculator::buildParasiticDmpPiModel(ParasiticDmpModel& dmp_model, std
     driver_capacitance = admittance1 - load_capacitance;
     pi_resistance = -admittance3 * admittance3 / (admittance2 * admittance2 * admittance2);
   }
-  if (!std::isfinite(driver_capacitance) || !std::isfinite(pi_resistance) || !std::isfinite(load_capacitance)
-      || driver_capacitance < 0.0 || pi_resistance < 0.0 || load_capacitance < 0.0
-      || driver_capacitance + load_capacitance <= 0.0) {
+  if (!std::isfinite(driver_capacitance) || !std::isfinite(pi_resistance) || !std::isfinite(load_capacitance) || driver_capacitance < 0.0 || pi_resistance < 0.0
+      || load_capacitance < 0.0 || driver_capacitance + load_capacitance <= 0.0) {
     return;
   }
 
@@ -1964,8 +1978,8 @@ void DelayCalculator::buildParasiticDmpPiModel(ParasiticDmpModel& dmp_model, std
 }
 
 void DelayCalculator::buildParasiticDmpLoadModelList(ParasiticDmpModel& dmp_model, std::vector<std::string>& node_name_list,
-                                                      std::vector<int32_t>& parent_idx_list, std::vector<double>& resistance_list,
-                                                      std::vector<double>& capacitance_list, std::string& source_node_name)
+                                                     std::vector<int32_t>& parent_idx_list, std::vector<double>& resistance_list,
+                                                     std::vector<double>& capacitance_list, std::string& source_node_name)
 {
   Database& database = STADM.getDatabase();
   std::vector<std::vector<double>> moment_list(4, std::vector<double>(node_name_list.size(), 0.0));
@@ -1998,8 +2012,7 @@ void DelayCalculator::buildParasiticDmpLoadModelList(ParasiticDmpModel& dmp_mode
     if (database.get_pin_map().count(pin_name) == 0) {
       continue;
     }
-    ParasiticDmpLoadModel load_model
-        = buildParasiticDmpLoadModel(moment_list[1][node_idx], moment_list[2][node_idx], moment_list[3][node_idx]);
+    ParasiticDmpLoadModel load_model = buildParasiticDmpLoadModel(moment_list[1][node_idx], moment_list[2][node_idx], moment_list[3][node_idx]);
     if (load_model.get_is_valid()) {
       dmp_model.get_load_model_map()[node_name] = load_model;
     }
@@ -2019,8 +2032,7 @@ ParasiticDmpLoadModel DelayCalculator::buildParasiticDmpLoadModel(double moment1
   if (pole1 > 0.0 && ratio_denominator != 0.0 && moment2 != 0.0) {
     pole2 = pole1 * (1.0 / moment1 - moment1 / moment2) / ratio_denominator;
   }
-  if (!(pole1 > 0.0) || !(pole2 > 0.0) || pole1 == pole2 || ratio_denominator == 0.0 || !std::isfinite(pole1)
-      || !std::isfinite(pole2)) {
+  if (!(pole1 > 0.0) || !(pole2 > 0.0) || pole1 == pole2 || ratio_denominator == 0.0 || !std::isfinite(pole1) || !std::isfinite(pole2)) {
     pole1 = -1.0 / moment1;
     if (!(pole1 > 0.0) || !std::isfinite(pole1)) {
       return load_model;
@@ -2048,8 +2060,8 @@ ParasiticDmpLoadModel DelayCalculator::buildParasiticDmpLoadModel(double moment1
   return load_model;
 }
 
-bool DelayCalculator::calcParasiticDmpLoadDelay(ParasiticDmpLoadModel& load_model, TimingArc& timing_arc, TransType trans_type,
-                                                 double driver_slew, double& wire_delay, double& load_slew)
+bool DelayCalculator::calcParasiticDmpLoadDelay(ParasiticDmpLoadModel& load_model, TimingArc& timing_arc, TransType trans_type, double driver_slew,
+                                                double& wire_delay, double& load_slew)
 {
   if (!load_model.get_is_valid() || load_model.get_pole_list().empty() || load_model.get_residue_list().empty()) {
     return false;
@@ -2090,15 +2102,15 @@ bool DelayCalculator::calcParasiticDmpLoadDelay(ParasiticDmpLoadModel& load_mode
   if (!(transition_time > 0.0)) {
     return true;
   }
-  double transition_voltage = (transition_time - constant + residue_pole1 * std::exp(-pole1 * transition_time)
-                               + residue_pole2 * std::exp(-pole2 * transition_time))
-                              / transition_time;
-  double threshold_time = calcParasiticDmpLoadTime(threshold, pole1, pole2, residue1, residue2, constant, residue_pole1,
-                                                   residue_pole2, transition_time, transition_voltage);
-  double lower_time = calcParasiticDmpLoadTime(lower_threshold, pole1, pole2, residue1, residue2, constant, residue_pole1,
-                                               residue_pole2, transition_time, transition_voltage);
-  double upper_time = calcParasiticDmpLoadTime(upper_threshold, pole1, pole2, residue1, residue2, constant, residue_pole1,
-                                               residue_pole2, transition_time, transition_voltage);
+  double transition_voltage
+      = (transition_time - constant + residue_pole1 * std::exp(-pole1 * transition_time) + residue_pole2 * std::exp(-pole2 * transition_time))
+        / transition_time;
+  double threshold_time
+      = calcParasiticDmpLoadTime(threshold, pole1, pole2, residue1, residue2, constant, residue_pole1, residue_pole2, transition_time, transition_voltage);
+  double lower_time = calcParasiticDmpLoadTime(lower_threshold, pole1, pole2, residue1, residue2, constant, residue_pole1, residue_pole2, transition_time,
+                                               transition_voltage);
+  double upper_time = calcParasiticDmpLoadTime(upper_threshold, pole1, pole2, residue1, residue2, constant, residue_pole1, residue_pole2, transition_time,
+                                               transition_voltage);
   double dmp_wire_delay = threshold_time - transition_time * threshold;
   double dmp_load_slew = (upper_time - lower_time) / slew_derate;
   if (std::isfinite(dmp_wire_delay) && std::isfinite(dmp_load_slew) && dmp_load_slew >= 0.0) {
@@ -2108,13 +2120,11 @@ bool DelayCalculator::calcParasiticDmpLoadDelay(ParasiticDmpLoadModel& load_mode
   return true;
 }
 
-double DelayCalculator::calcParasiticDmpLoadTime(double threshold, double pole1, double pole2, double residue1, double residue2,
-                                                  double constant, double residue_pole1, double residue_pole2, double transition_time,
-                                                  double transition_voltage)
+double DelayCalculator::calcParasiticDmpLoadTime(double threshold, double pole1, double pole2, double residue1, double residue2, double constant,
+                                                 double residue_pole1, double residue_pole2, double transition_time, double transition_voltage)
 {
   if (transition_voltage < threshold) {
-    double logarithm_argument
-        = residue1 * (std::exp(pole1 * transition_time) - 1.0) / ((1.0 - threshold) * pole1 * pole1 * transition_time);
+    double logarithm_argument = residue1 * (std::exp(pole1 * transition_time) - 1.0) / ((1.0 - threshold) * pole1 * pole1 * transition_time);
     if (!(logarithm_argument > 0.0)) {
       return transition_time * threshold;
     }
@@ -2123,12 +2133,9 @@ double DelayCalculator::calcParasiticDmpLoadTime(double threshold, double pole1,
     double exp_pole2_time = std::exp(-pole2 * time);
     double exp_pole1_delta = std::exp(-pole1 * (time - transition_time));
     double exp_pole2_delta = std::exp(-pole2 * (time - transition_time));
-    double voltage = (transition_time - residue_pole1 * (exp_pole1_delta - exp_pole1_time)
-                      - residue_pole2 * (exp_pole2_delta - exp_pole2_time))
-                     / transition_time;
-    double derivative = (residue1 / pole1 * (exp_pole1_delta - exp_pole1_time)
-                         - residue2 / pole2 * (exp_pole2_delta - exp_pole2_time))
-                        / transition_time;
+    double voltage
+        = (transition_time - residue_pole1 * (exp_pole1_delta - exp_pole1_time) - residue_pole2 * (exp_pole2_delta - exp_pole2_time)) / transition_time;
+    double derivative = (residue1 / pole1 * (exp_pole1_delta - exp_pole1_time) - residue2 / pole2 * (exp_pole2_delta - exp_pole2_time)) / transition_time;
     if (std::abs(derivative) <= STA_ERROR) {
       return time;
     }
@@ -2146,12 +2153,10 @@ double DelayCalculator::calcParasiticDmpLoadTime(double threshold, double pole1,
   return time - (voltage - threshold) / derivative;
 }
 
-ParasiticArnoldiTimingResult& DelayCalculator::getParasiticArnoldiTimingResult(std::string& output_pin, TimingArc& timing_arc,
-                                                                                AnalysisType analysis_type, TransType output_trans_type,
-                                                                                double input_slew, double output_load)
+ParasiticArnoldiTimingResult& DelayCalculator::getParasiticArnoldiTimingResult(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type,
+                                                                               TransType output_trans_type, double input_slew, double output_load)
 {
-  ParasiticArnoldiTimingResultKey timing_result_key
-      = getParasiticArnoldiTimingResultKey(output_pin, timing_arc, analysis_type, output_trans_type, input_slew);
+  ParasiticArnoldiTimingResultKey timing_result_key = getParasiticArnoldiTimingResultKey(output_pin, timing_arc, analysis_type, output_trans_type, input_slew);
   if (_parasitic_arnoldi_timing_result_cache.count(timing_result_key) == 0) {
     _parasitic_arnoldi_timing_result_cache[timing_result_key]
         = calcParasiticArnoldiTimingResult(output_pin, timing_arc, analysis_type, output_trans_type, input_slew, output_load);
@@ -2159,16 +2164,14 @@ ParasiticArnoldiTimingResult& DelayCalculator::getParasiticArnoldiTimingResult(s
   return _parasitic_arnoldi_timing_result_cache[timing_result_key];
 }
 
-ParasiticArnoldiTimingResultKey DelayCalculator::getParasiticArnoldiTimingResultKey(std::string& output_pin, TimingArc& timing_arc,
-                                                                                     AnalysisType analysis_type, TransType output_trans_type,
-                                                                                     double input_slew)
+ParasiticArnoldiTimingResultKey DelayCalculator::getParasiticArnoldiTimingResultKey(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type,
+                                                                                    TransType output_trans_type, double input_slew)
 {
   return std::make_tuple(output_pin, reinterpret_cast<std::uintptr_t>(&timing_arc), analysis_type, output_trans_type, input_slew);
 }
 
-ParasiticArnoldiTimingResult DelayCalculator::calcParasiticArnoldiTimingResult(std::string& output_pin, TimingArc& timing_arc,
-                                                                                AnalysisType analysis_type, TransType output_trans_type,
-                                                                                double input_slew, double output_load)
+ParasiticArnoldiTimingResult DelayCalculator::calcParasiticArnoldiTimingResult(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type,
+                                                                               TransType output_trans_type, double input_slew, double output_load)
 {
   ParasiticArnoldiTimingResult timing_result;
   Database& database = STADM.getDatabase();
@@ -2208,8 +2211,7 @@ ParasiticArnoldiTimingResult DelayCalculator::calcParasiticArnoldiTimingResult(s
   double min_slew_factor = 0.0;
   double x1 = 0.0;
   double y1 = 0.0;
-  calcParasiticArnoldiThreshold(timing_arc, output_trans_type, slew_derate, lower_threshold, upper_threshold, voltage_log, min_slew_factor, x1,
-                                y1);
+  calcParasiticArnoldiThreshold(timing_arc, output_trans_type, slew_derate, lower_threshold, upper_threshold, voltage_log, min_slew_factor, x1, y1);
 
   double drive_resistance
       = calcParasiticArnoldiTableResistance(timing_arc, output_trans_type, input_slew, total_capacitance, voltage_log, slew_derate, delay_resistance);
@@ -2217,8 +2219,8 @@ ParasiticArnoldiTimingResult DelayCalculator::calcParasiticArnoldiTimingResult(s
     drive_resistance = 1.0;
   }
   bool bad_drive_resistance = drive_resistance < delay_resistance;
-  double driver_ramp = calcParasiticArnoldiTableRamp(timing_arc, output_trans_type, input_slew, drive_resistance, total_capacitance,
-                                                     lower_threshold, upper_threshold, voltage_log, slew_derate, min_slew_factor);
+  double driver_ramp = calcParasiticArnoldiTableRamp(timing_arc, output_trans_type, input_slew, drive_resistance, total_capacitance, lower_threshold,
+                                                     upper_threshold, voltage_log, slew_derate, min_slew_factor);
   if (!(driver_ramp > 0.0 && driver_ramp < 100.0)) {
     driver_ramp = 0.5;
   }
@@ -2235,8 +2237,8 @@ ParasiticArnoldiTimingResult DelayCalculator::calcParasiticArnoldiTimingResult(s
       if (!std::isfinite(effective_capacitance) || effective_capacitance < 1E-8) {
         effective_capacitance = total_capacitance;
       }
-      driver_ramp = calcParasiticArnoldiTableRamp(timing_arc, output_trans_type, input_slew, drive_resistance, effective_capacitance,
-                                                  lower_threshold, upper_threshold, voltage_log, slew_derate, min_slew_factor);
+      driver_ramp = calcParasiticArnoldiTableRamp(timing_arc, output_trans_type, input_slew, drive_resistance, effective_capacitance, lower_threshold,
+                                                  upper_threshold, voltage_log, slew_derate, min_slew_factor);
       if (!(driver_ramp > 0.0 && driver_ramp < 100.0)) {
         driver_ramp = 0.5;
       }
@@ -2263,6 +2265,8 @@ ParasiticArnoldiTimingResult DelayCalculator::calcParasiticArnoldiTimingResult(s
   timing_result.set_effective_capacitance(effective_capacitance);
   timing_result.set_gate_delay(delay_list.front());
   timing_result.set_driver_slew(slew_list.front());
+  bool suppress_min_slew = STADM.getConfig().min_slew_degradation == 0 && analysis_type == AnalysisType::kMin
+                           && arnoldi_model.get_pi_resistance() > kMinSlewResistanceThreshold * drive_resistance;
   for (std::size_t term_idx = 0; term_idx < arnoldi_model.get_term_node_list().size(); term_idx++) {
     std::string& term_node_name = arnoldi_model.get_term_node_list()[term_idx];
     double wire_delay = delay_list[term_idx] - delay_list.front();
@@ -2270,6 +2274,13 @@ ParasiticArnoldiTimingResult DelayCalculator::calcParasiticArnoldiTimingResult(s
     std::string pin_name = getPinNameByParasiticNodeName(term_node_name);
     if (term_idx > 0) {
       adjustParasiticLoadThreshold(timing_arc, pin_name, output_trans_type, wire_delay, load_slew);
+      if (suppress_min_slew && isParasiticLoadSlewCompatible(timing_arc, pin_name, output_trans_type)) {
+        // Keep the delay threshold correction from the physical load waveform.
+        // Convert the replacement slew to the receiver library independently.
+        load_slew = slew_list.front();
+        double unused_wire_delay = 0.0;
+        adjustParasiticLoadThreshold(timing_arc, pin_name, output_trans_type, unused_wire_delay, load_slew);
+      }
     }
     timing_result.get_wire_delay_map()[term_node_name] = wire_delay;
     timing_result.get_load_slew_map()[term_node_name] = load_slew;
@@ -2280,20 +2291,38 @@ ParasiticArnoldiTimingResult DelayCalculator::calcParasiticArnoldiTimingResult(s
   return timing_result;
 }
 
-void DelayCalculator::adjustParasiticLoadThreshold(TimingArc& timing_arc, std::string& load_pin, TransType trans_type, double& wire_delay,
-                                                    double& load_slew)
+bool DelayCalculator::isParasiticLoadSlewCompatible(TimingArc& timing_arc, std::string& load_pin, TransType trans_type)
+{
+  // The optional resistance-ratio approximation is limited to matching slew
+  // conventions. Preserve the receiver waveform when a library conversion is
+  // needed; converting the driver slew alone can discard significant RC slew.
+  TimingCell* load_timing_cell = getThresholdTimingCell(load_pin);
+  if (load_timing_cell == nullptr) {
+    return false;
+  }
+  double driver_lower_threshold
+      = trans_type == TransType::kFall ? timing_arc.get_slew_lower_threshold_pct_fall() : timing_arc.get_slew_lower_threshold_pct_rise();
+  double driver_upper_threshold
+      = trans_type == TransType::kFall ? timing_arc.get_slew_upper_threshold_pct_fall() : timing_arc.get_slew_upper_threshold_pct_rise();
+  double load_lower_threshold = getTimingCellSlewLowerThreshold(*load_timing_cell, trans_type);
+  double load_upper_threshold = getTimingCellSlewUpperThreshold(*load_timing_cell, trans_type);
+  return std::abs(getNormalizedThreshold(driver_lower_threshold) - getNormalizedThreshold(load_lower_threshold)) < STA_ERROR
+         && std::abs(getNormalizedThreshold(driver_upper_threshold) - getNormalizedThreshold(load_upper_threshold)) < STA_ERROR
+         && std::abs(timing_arc.get_slew_derate() - load_timing_cell->get_slew_derate_from_library()) < STA_ERROR;
+}
+
+void DelayCalculator::adjustParasiticLoadThreshold(TimingArc& timing_arc, std::string& load_pin, TransType trans_type, double& wire_delay, double& load_slew)
 {
   TimingCell* load_timing_cell = getThresholdTimingCell(load_pin);
   if (load_timing_cell == nullptr || load_timing_cell->get_library_name() == timing_arc.get_library_name()) {
     return;
   }
 
-  double driver_output_threshold = trans_type == TransType::kFall ? timing_arc.get_output_threshold_pct_fall()
-                                                                  : timing_arc.get_output_threshold_pct_rise();
-  double driver_slew_lower_threshold = trans_type == TransType::kFall ? timing_arc.get_slew_lower_threshold_pct_fall()
-                                                                      : timing_arc.get_slew_lower_threshold_pct_rise();
-  double driver_slew_upper_threshold = trans_type == TransType::kFall ? timing_arc.get_slew_upper_threshold_pct_fall()
-                                                                      : timing_arc.get_slew_upper_threshold_pct_rise();
+  double driver_output_threshold = trans_type == TransType::kFall ? timing_arc.get_output_threshold_pct_fall() : timing_arc.get_output_threshold_pct_rise();
+  double driver_slew_lower_threshold
+      = trans_type == TransType::kFall ? timing_arc.get_slew_lower_threshold_pct_fall() : timing_arc.get_slew_lower_threshold_pct_rise();
+  double driver_slew_upper_threshold
+      = trans_type == TransType::kFall ? timing_arc.get_slew_upper_threshold_pct_fall() : timing_arc.get_slew_upper_threshold_pct_rise();
   double driver_slew_derate = timing_arc.get_slew_derate();
   double load_input_threshold = getTimingCellInputThreshold(*load_timing_cell, trans_type);
   double load_slew_lower_threshold = getTimingCellSlewLowerThreshold(*load_timing_cell, trans_type);
@@ -2363,16 +2392,15 @@ double DelayCalculator::getTimingCellInputThreshold(TimingCell& timing_cell, Tra
   return timing_cell.get_input_threshold_pct_rise();
 }
 
-void DelayCalculator::cacheParasiticArnoldiDriverResult(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type,
-                                                        double driver_slew, ParasiticArnoldiTimingResult& timing_result)
+void DelayCalculator::cacheParasiticArnoldiDriverResult(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type, double driver_slew,
+                                                        ParasiticArnoldiTimingResult& timing_result)
 {
-  ParasiticArnoldiDriverResultKey driver_result_key
-      = getParasiticArnoldiDriverResultKey(output_pin, analysis_type, output_trans_type, driver_slew);
+  ParasiticArnoldiDriverResultKey driver_result_key = getParasiticArnoldiDriverResultKey(output_pin, analysis_type, output_trans_type, driver_slew);
   _parasitic_arnoldi_driver_result_cache[driver_result_key] = timing_result;
 }
 
 ParasiticArnoldiDriverResultKey DelayCalculator::getParasiticArnoldiDriverResultKey(std::string& output_pin, AnalysisType analysis_type,
-                                                                                     TransType output_trans_type, double driver_slew)
+                                                                                    TransType output_trans_type, double driver_slew)
 {
   return std::make_tuple(output_pin, analysis_type, output_trans_type, driver_slew);
 }
@@ -2413,8 +2441,8 @@ std::optional<double> DelayCalculator::getParasiticArnoldiCachedLoadSlew(Arc& ar
   return timing_result.get_load_slew_map()[sink_pin];
 }
 
-ParasiticArnoldiModel& DelayCalculator::getParasiticArnoldiModel(ParasiticNet& parasitic_net, std::string& source_node_name,
-                                                                  AnalysisType analysis_type, TransType trans_type)
+ParasiticArnoldiModel& DelayCalculator::getParasiticArnoldiModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
+                                                                 TransType trans_type)
 {
   ParasiticArnoldiModelKey arnoldi_model_key = getParasiticArnoldiModelKey(parasitic_net, source_node_name, analysis_type, trans_type);
   if (_parasitic_arnoldi_model_cache.count(arnoldi_model_key) == 0) {
@@ -2423,14 +2451,14 @@ ParasiticArnoldiModel& DelayCalculator::getParasiticArnoldiModel(ParasiticNet& p
   return _parasitic_arnoldi_model_cache[arnoldi_model_key];
 }
 
-ParasiticArnoldiModelKey DelayCalculator::getParasiticArnoldiModelKey(ParasiticNet& parasitic_net, std::string& source_node_name,
-                                                                       AnalysisType analysis_type, TransType trans_type)
+ParasiticArnoldiModelKey DelayCalculator::getParasiticArnoldiModelKey(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
+                                                                      TransType trans_type)
 {
   return std::make_tuple(parasitic_net.get_net_name(), source_node_name, analysis_type, trans_type);
 }
 
-ParasiticArnoldiModel DelayCalculator::buildParasiticArnoldiModel(ParasiticNet& parasitic_net, std::string& source_node_name,
-                                                                   AnalysisType analysis_type, TransType trans_type)
+ParasiticArnoldiModel DelayCalculator::buildParasiticArnoldiModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
+                                                                  TransType trans_type)
 {
   ParasiticArnoldiModel arnoldi_model;
   std::vector<std::string> node_name_list;
@@ -2460,15 +2488,13 @@ ParasiticArnoldiModel DelayCalculator::buildParasiticArnoldiModel(ParasiticNet& 
     return arnoldi_model;
   }
 
-  updateParasiticArnoldiModel(arnoldi_model, parasitic_net, node_name_list, parent_idx_list, resistance_list, capacitance_list,
-                              term_point_idx_list);
+  updateParasiticArnoldiModel(arnoldi_model, parasitic_net, node_name_list, parent_idx_list, resistance_list, capacitance_list, term_point_idx_list);
   return arnoldi_model;
 }
 
-void DelayCalculator::initParasiticArnoldiTree(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
-                                                TransType trans_type, std::vector<std::string>& node_name_list,
-                                                std::vector<int32_t>& parent_idx_list, std::vector<double>& resistance_list,
-                                                std::vector<double>& capacitance_list)
+void DelayCalculator::initParasiticArnoldiTree(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type,
+                                               std::vector<std::string>& node_name_list, std::vector<int32_t>& parent_idx_list,
+                                               std::vector<double>& resistance_list, std::vector<double>& capacitance_list)
 {
   std::string& net_name = parasitic_net.get_net_name();
   if (_parasitic_resistor_map_cache.count(net_name) == 0) {
@@ -2521,8 +2547,7 @@ void DelayCalculator::initParasiticArnoldiTree(ParasiticNet& parasitic_net, std:
   }
 }
 
-void DelayCalculator::initParasiticArnoldiTerm(ParasiticArnoldiModel& arnoldi_model, std::vector<std::string>& node_name_list,
-                                                std::string& source_node_name)
+void DelayCalculator::initParasiticArnoldiTerm(ParasiticArnoldiModel& arnoldi_model, std::vector<std::string>& node_name_list, std::string& source_node_name)
 {
   Database& database = STADM.getDatabase();
   arnoldi_model.get_term_node_list().push_back(source_node_name);
@@ -2545,10 +2570,9 @@ void DelayCalculator::initParasiticArnoldiTerm(ParasiticArnoldiModel& arnoldi_mo
   }
 }
 
-void DelayCalculator::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_model, ParasiticNet& parasitic_net,
-                                                   std::vector<std::string>& node_name_list, std::vector<int32_t>& parent_idx_list,
-                                                   std::vector<double>& resistance_list, std::vector<double>& capacitance_list,
-                                                   std::vector<std::size_t>& term_point_idx_list)
+void DelayCalculator::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_model, ParasiticNet& parasitic_net, std::vector<std::string>& node_name_list,
+                                                  std::vector<int32_t>& parent_idx_list, std::vector<double>& resistance_list,
+                                                  std::vector<double>& capacitance_list, std::vector<std::size_t>& term_point_idx_list)
 {
   double total_capacitance = 0.0;
   for (double capacitance : capacitance_list) {
@@ -2583,6 +2607,14 @@ void DelayCalculator::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi
   }
 
   bool has_resistance_loop = network_resistance_num + 1 > node_num;
+  // The moment recurrence is valid for trees; loops retain waveform slew.
+  if (!has_resistance_loop && STADM.getConfig().min_slew_degradation == 0) {
+    ParasiticDmpModel pi_model;
+    buildParasiticDmpPiModel(pi_model, parent_idx_list, resistance_list, capacitance_list);
+    if (pi_model.get_is_valid()) {
+      arnoldi_model.set_pi_resistance(pi_model.get_pi_resistance());
+    }
+  }
   Eigen::SparseMatrix<double> conductance_matrix;
   Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower | Eigen::Upper, Eigen::IncompleteCholesky<double>> conductance_solver;
   if (has_resistance_loop) {
@@ -2698,7 +2730,7 @@ void DelayCalculator::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi
 }
 
 void DelayCalculator::updateParasiticArnoldiProjection(ParasiticArnoldiModel& arnoldi_model, std::vector<double>& basis_list,
-                                                        std::vector<std::size_t>& term_point_idx_list, std::size_t order_idx)
+                                                       std::vector<std::size_t>& term_point_idx_list, std::size_t order_idx)
 {
   if (arnoldi_model.get_projection_list().size() <= order_idx) {
     arnoldi_model.get_projection_list().resize(order_idx + 1);
@@ -2709,81 +2741,170 @@ void DelayCalculator::updateParasiticArnoldiProjection(ParasiticArnoldiModel& ar
   }
 }
 
-double DelayCalculator::calcParasiticArnoldiElmore(ParasiticArnoldiModel& arnoldi_model, std::string& sink_node_name)
-{
-  if (arnoldi_model.get_term_index_map().count(sink_node_name) == 0) {
-    return 0.0;
-  }
-  return calcParasiticArnoldiElmore(arnoldi_model, arnoldi_model.get_term_index_map()[sink_node_name]);
-}
-
-double DelayCalculator::calcParasiticArnoldiElmore(ParasiticArnoldiModel& arnoldi_model, std::size_t term_idx)
-{
-  if (!arnoldi_model.get_is_valid() || arnoldi_model.get_order() <= 0 || arnoldi_model.get_diagonal_list().empty()) {
-    return 0.0;
-  }
-  if (arnoldi_model.get_order() == 1 || arnoldi_model.get_projection_list().size() < 2 || arnoldi_model.get_off_diagonal_list().empty()) {
-    return arnoldi_model.get_diagonal_list().front();
-  }
-  if (term_idx >= arnoldi_model.get_projection_list().front().size() || term_idx >= arnoldi_model.get_projection_list()[1].size()
-      || std::abs(arnoldi_model.get_projection_list().front().front()) < STA_ERROR) {
-    return arnoldi_model.get_diagonal_list().front();
-  }
-  return arnoldi_model.get_diagonal_list().front()
-         + arnoldi_model.get_off_diagonal_list().front() * arnoldi_model.get_projection_list()[1][term_idx]
-               / arnoldi_model.get_projection_list().front().front();
-}
-
 std::optional<double> DelayCalculator::calcParasiticArnoldiInputPortDelay(ParasiticNet& parasitic_net, std::string& source_node_name,
-                                                                          std::string& sink_node_name, AnalysisType analysis_type,
-                                                                          TransType trans_type)
+                                                                          std::string& sink_node_name, AnalysisType analysis_type, TransType trans_type,
+                                                                          double input_slew)
 {
   Database& database = STADM.getDatabase();
   std::string source_pin_name = getPinNameByParasiticNodeName(source_node_name);
-  if (database.get_pin_map().count(source_pin_name) == 0 || !database.get_pin_map()[source_pin_name].get_is_port()) {
+  if (!database.get_pin_map().contains(source_pin_name) || !database.get_pin_map().at(source_pin_name).get_is_port()) {
     return std::nullopt;
   }
-  ParasiticArnoldiModel& arnoldi_model = getParasiticArnoldiModel(parasitic_net, source_node_name, analysis_type, trans_type);
-  if (!arnoldi_model.get_is_valid() || arnoldi_model.get_term_index_map().count(sink_node_name) == 0) {
+  ParasiticArnoldiTimingResult& result = getParasiticInputPortResult(parasitic_net, source_node_name, analysis_type, trans_type, input_slew);
+  if (!result.get_is_valid() || !result.get_wire_delay_map().contains(sink_node_name)) {
     return std::nullopt;
   }
-  double elmore = calcParasiticArnoldiElmore(arnoldi_model, sink_node_name);
-  return std::log(2.0) * elmore;
+  return result.get_wire_delay_map().at(sink_node_name);
 }
 
-std::optional<double> DelayCalculator::calcParasiticArnoldiInputPortSlew(ParasiticNet& parasitic_net, std::string& source_node_name,
-                                                                         std::string& sink_node_name, AnalysisType analysis_type,
-                                                                         TransType trans_type, double input_slew)
+ParasiticArnoldiTimingResult& DelayCalculator::getParasiticInputPortResult(ParasiticNet& parasitic_net, std::string& source_node_name,
+                                                                           AnalysisType analysis_type, TransType trans_type, double input_slew)
 {
+  double slew = std::isfinite(input_slew) ? std::abs(input_slew) : 0.0;
+  ParasiticArnoldiDriverResultKey key{source_node_name, analysis_type, trans_type, slew};
+  if (!_parasitic_input_port_result_cache.contains(key)) {
+    _parasitic_input_port_result_cache[key] = calcParasiticInputPortResult(parasitic_net, source_node_name, analysis_type, trans_type, slew);
+  }
+  return _parasitic_input_port_result_cache.at(key);
+}
+
+ParasiticArnoldiTimingResult DelayCalculator::calcParasiticInputPortResult(ParasiticNet& parasitic_net, std::string& source_node_name,
+                                                                           AnalysisType analysis_type, TransType trans_type, double input_slew)
+{
+  ParasiticArnoldiTimingResult result;
   Database& database = STADM.getDatabase();
   std::string source_pin_name = getPinNameByParasiticNodeName(source_node_name);
-  if (database.get_pin_map().count(source_pin_name) == 0 || !database.get_pin_map()[source_pin_name].get_is_port()) {
-    return std::nullopt;
+  if (!database.get_pin_map().contains(source_pin_name) || !database.get_pin_map().at(source_pin_name).get_is_port()) {
+    return result;
   }
-  ParasiticArnoldiModel& arnoldi_model = getParasiticArnoldiModel(parasitic_net, source_node_name, analysis_type, trans_type);
-  if (!arnoldi_model.get_is_valid() || arnoldi_model.get_term_index_map().count(sink_node_name) == 0) {
-    return std::nullopt;
+  ParasiticArnoldiModel& model = getParasiticArnoldiModel(parasitic_net, source_node_name, analysis_type, trans_type);
+  if (!model.get_is_valid() || model.get_order() <= 0) {
+    return result;
   }
-  double elmore = calcParasiticArnoldiElmore(arnoldi_model, sink_node_name);
-  double abs_input_slew = std::abs(input_slew);
-  double output_slew = abs_input_slew + getParasiticArnoldiSlewScale(trans_type) * elmore;
-  if (input_slew < 0.0) {
-    return -output_slew;
+  // The port imposes a voltage waveform. Use zero source resistance and the
+  // reduced RC response, retaining the fast modes lost by an Elmore estimate.
+  int32_t order = model.get_order();
+  Eigen::MatrixXd matrix = Eigen::MatrixXd::Zero(order, order);
+  for (int32_t index = 0; index < order; ++index) {
+    matrix(index, index) = model.get_diagonal_list()[index];
+    if (index + 1 < order) {
+      matrix(index, index + 1) = matrix(index + 1, index) = model.get_off_diagonal_list()[index];
+    }
   }
-  return output_slew;
-}
-
-double DelayCalculator::getParasiticArnoldiSlewScale(TransType trans_type)
-{
-  double slew_derate = 1.0;
-  double lower_threshold = 0.1;
-  double upper_threshold = 0.9;
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(matrix);
+  if (solver.info() != Eigen::Success || !solver.eigenvalues().allFinite()) {
+    return result;
+  }
+  std::vector<double> time_constants(order);
+  double scale = solver.eigenvalues().cwiseAbs().maxCoeff();
+  for (int32_t index = 0; index < order; ++index) {
+    double value = solver.eigenvalues()[index];
+    if (value < -scale * 1E-12) {
+      return result;
+    }
+    time_constants[index] = value > scale * 1E-12 ? value : 0.0;
+  }
+  double derate = 1.0;
+  double lower = 0.1;
+  double upper = 0.9;
   double voltage_log = 0.0;
   double min_slew_factor = 0.0;
   double x1 = 0.0;
   double y1 = 0.0;
-  calcParasiticArnoldiThreshold(trans_type, slew_derate, lower_threshold, upper_threshold, voltage_log, min_slew_factor, x1, y1);
-  return voltage_log / slew_derate;
+  calcParasiticArnoldiThreshold(trans_type, derate, lower, upper, voltage_log, min_slew_factor, x1, y1);
+  TimingLibrary& library = database.get_timing_library();
+  bool is_fall = trans_type == TransType::kFall;
+  double source_threshold = getNormalizedThreshold(is_fall ? library.get_output_threshold_pct_fall() : library.get_output_threshold_pct_rise());
+  double ramp = input_slew * derate / (upper - lower);
+  double source_time = (is_fall ? 1.0 - source_threshold : source_threshold) * ramp;
+  for (std::size_t term_idx = 0; term_idx < model.get_term_node_list().size(); ++term_idx) {
+    std::vector<double> weights(order, 0.0);
+    for (int32_t index = 0; index < order; ++index) {
+      double projection = 0.0;
+      for (int32_t basis = 0; basis < order; ++basis) {
+        projection += solver.eigenvectors()(basis, index) * model.get_projection_list()[basis][term_idx];
+      }
+      weights[index] = model.get_sqrt_total_capacitance() * solver.eigenvectors()(0, index) * projection;
+    }
+    std::string& node = model.get_term_node_list()[term_idx];
+    std::string pin_name = getPinNameByParasiticNodeName(node);
+    TimingCell* load_cell = getThresholdTimingCell(pin_name);
+    double load_threshold = getNormalizedThreshold(is_fall ? library.get_input_threshold_pct_fall() : library.get_input_threshold_pct_rise());
+    double load_lower = lower;
+    double load_upper = upper;
+    double load_derate = derate;
+    if (load_cell != nullptr) {
+      load_threshold = getNormalizedThreshold(getTimingCellInputThreshold(*load_cell, trans_type));
+      load_lower = getNormalizedThreshold(getTimingCellSlewLowerThreshold(*load_cell, trans_type));
+      load_upper = getNormalizedThreshold(getTimingCellSlewUpperThreshold(*load_cell, trans_type));
+      load_derate = load_cell->get_slew_derate_from_library();
+    }
+    if (!(load_threshold > 0.0 && load_threshold < 1.0 && load_lower > 0.0 && load_upper < 1.0 && load_upper > load_lower && load_derate > 0.0
+          && source_threshold > 0.0 && source_threshold < 1.0)) {
+      return ParasiticArnoldiTimingResult();
+    }
+    double middle_time = calcParasiticInputPortCrossing(time_constants, weights, ramp, is_fall ? load_threshold : 1.0 - load_threshold);
+    double early_time = calcParasiticInputPortCrossing(time_constants, weights, ramp, is_fall ? load_upper : 1.0 - load_lower);
+    double late_time = calcParasiticInputPortCrossing(time_constants, weights, ramp, is_fall ? load_lower : 1.0 - load_upper);
+    if (!std::isfinite(middle_time) || !std::isfinite(early_time) || !std::isfinite(late_time) || late_time < early_time) {
+      return ParasiticArnoldiTimingResult();
+    }
+    result.get_wire_delay_map()[node] = term_idx == 0 ? 0.0 : middle_time - source_time;
+    result.get_load_slew_map()[node] = term_idx == 0 ? input_slew : (late_time - early_time) / load_derate;
+    result.get_wire_delay_map()[pin_name] = result.get_wire_delay_map()[node];
+    result.get_load_slew_map()[pin_name] = result.get_load_slew_map()[node];
+  }
+  result.set_is_valid(true);
+  return result;
+}
+
+double DelayCalculator::calcParasiticInputPortCrossing(std::vector<double>& time_constants, std::vector<double>& weights, double ramp, double voltage)
+{
+  // Integrate each exponential step response over the source ramp. Remaining
+  // voltage is the falling waveform, or one minus the rising waveform.
+  double low = 0.0;
+  double high = ramp + 64.0 * *std::max_element(time_constants.begin(), time_constants.end());
+  for (int32_t iteration = 0; iteration < 64; ++iteration) {
+    double time = 0.5 * (low + high);
+    double remaining = 0.0;
+    for (std::size_t index = 0; index < time_constants.size(); ++index) {
+      double tau = time_constants[index];
+      double response = 0.0;
+      if (tau == 0.0) {
+        response = ramp > 0.0 ? std::max(0.0, 1.0 - time / ramp) : 0.0;
+      } else if (ramp == 0.0) {
+        response = std::exp(-time / tau);
+      } else if (time < ramp) {
+        response = 1.0 - time / ramp - tau / ramp * std::expm1(-time / tau);
+      } else {
+        response = -tau / ramp * std::expm1(-ramp / tau) * std::exp(-(time - ramp) / tau);
+      }
+      remaining += weights[index] * response;
+    }
+    if (remaining > voltage) {
+      low = time;
+    } else {
+      high = time;
+    }
+  }
+  return 0.5 * (low + high);
+}
+
+std::optional<double> DelayCalculator::calcParasiticArnoldiInputPortSlew(ParasiticNet& parasitic_net, std::string& source_node_name,
+                                                                         std::string& sink_node_name, AnalysisType analysis_type, TransType trans_type,
+                                                                         double input_slew)
+{
+  Database& database = STADM.getDatabase();
+  std::string source_pin_name = getPinNameByParasiticNodeName(source_node_name);
+  if (!database.get_pin_map().contains(source_pin_name) || !database.get_pin_map().at(source_pin_name).get_is_port()) {
+    return std::nullopt;
+  }
+  ParasiticArnoldiTimingResult& result = getParasiticInputPortResult(parasitic_net, source_node_name, analysis_type, trans_type, input_slew);
+  if (!result.get_is_valid() || !result.get_load_slew_map().contains(sink_node_name)) {
+    return std::nullopt;
+  }
+  double output_slew = result.get_load_slew_map().at(sink_node_name);
+  return input_slew < 0.0 ? -output_slew : output_slew;
 }
 
 ParasiticArnoldiPoleResidue DelayCalculator::calcParasiticArnoldiPoleResidue(ParasiticArnoldiModel& arnoldi_model, double drive_resistance)
@@ -2830,8 +2951,7 @@ ParasiticArnoldiPoleResidue DelayCalculator::calcParasiticArnoldiPoleResidue(Par
 }
 
 bool DelayCalculator::solveParasiticArnoldiTridiagonalEigen(std::vector<double>& diagonal_list, std::vector<double>& off_diagonal_list,
-                                                             std::vector<double>& eigenvalue_list,
-                                                             std::vector<std::vector<double>>& eigenvector_list)
+                                                            std::vector<double>& eigenvalue_list, std::vector<std::vector<double>>& eigenvector_list)
 {
   std::size_t order = diagonal_list.size();
   if (order == 0 || order > 32) {
@@ -2857,8 +2977,7 @@ bool DelayCalculator::solveParasiticArnoldiTridiagonalEigen(std::vector<double>&
       }
       double g = (eigenvalue_list[high_idx - 1] - eigenvalue_list[high_idx]) / (2.0 * diagonal_off_list[high_idx]);
       double r = std::sqrt(1.0 + g * g);
-      g = eigenvalue_list[low_idx] - eigenvalue_list[high_idx]
-          + diagonal_off_list[high_idx] / (g + (g < 0.0 ? -r : r));
+      g = eigenvalue_list[low_idx] - eigenvalue_list[high_idx] + diagonal_off_list[high_idx] / (g + (g < 0.0 ? -r : r));
       double s = 1.0;
       double c = 1.0;
       double p = 0.0;
@@ -2914,7 +3033,7 @@ bool DelayCalculator::solveParasiticArnoldiTridiagonalEigen(std::vector<double>&
 }
 
 void DelayCalculator::calcParasiticArnoldiThreshold(TimingArc& timing_arc, TransType trans_type, double& slew_derate, double& lower_threshold,
-                                                     double& upper_threshold, double& voltage_log, double& min_slew_factor, double& x1, double& y1)
+                                                    double& upper_threshold, double& voltage_log, double& min_slew_factor, double& x1, double& y1)
 {
   slew_derate = timing_arc.get_slew_derate();
   if (trans_type == TransType::kFall) {
@@ -2935,8 +3054,8 @@ void DelayCalculator::calcParasiticArnoldiThreshold(TimingArc& timing_arc, Trans
   calcParasiticArnoldiThresholdFactor(lower_threshold, upper_threshold, min_slew_factor, x1, y1);
 }
 
-void DelayCalculator::calcParasiticArnoldiThreshold(TransType trans_type, double& slew_derate, double& lower_threshold,
-                                                     double& upper_threshold, double& voltage_log, double& min_slew_factor, double& x1, double& y1)
+void DelayCalculator::calcParasiticArnoldiThreshold(TransType trans_type, double& slew_derate, double& lower_threshold, double& upper_threshold,
+                                                    double& voltage_log, double& min_slew_factor, double& x1, double& y1)
 {
   Database& database = STADM.getDatabase();
   TimingLibrary& timing_library = database.get_timing_library();
@@ -2959,8 +3078,7 @@ void DelayCalculator::calcParasiticArnoldiThreshold(TransType trans_type, double
   calcParasiticArnoldiThresholdFactor(lower_threshold, upper_threshold, min_slew_factor, x1, y1);
 }
 
-void DelayCalculator::calcParasiticArnoldiThresholdFactor(double lower_threshold, double upper_threshold, double& min_slew_factor, double& x1,
-                                                           double& y1)
+void DelayCalculator::calcParasiticArnoldiThresholdFactor(double lower_threshold, double upper_threshold, double& min_slew_factor, double& x1, double& y1)
 {
   double upper_log = std::log(1.0 / upper_threshold);
   min_slew_factor = upper_log + calcParasiticArnoldiHInverse((1.0 - upper_threshold) / upper_threshold - upper_log);
@@ -2991,9 +3109,8 @@ double DelayCalculator::calcParasiticArnoldiHInverse(double value)
   return x;
 }
 
-double DelayCalculator::calcParasiticArnoldiTableResistance(TimingArc& timing_arc, TransType output_trans_type, double input_slew,
-                                                             double total_capacitance, double voltage_log, double slew_derate,
-                                                             double delay_resistance)
+double DelayCalculator::calcParasiticArnoldiTableResistance(TimingArc& timing_arc, TransType output_trans_type, double input_slew, double total_capacitance,
+                                                            double voltage_log, double slew_derate, double delay_resistance)
 {
   if (!(total_capacitance > 0.0 && voltage_log > 0.0)) {
     return 0.0;
@@ -3007,9 +3124,9 @@ double DelayCalculator::calcParasiticArnoldiTableResistance(TimingArc& timing_ar
   return drive_resistance;
 }
 
-double DelayCalculator::calcParasiticArnoldiTableRamp(TimingArc& timing_arc, TransType output_trans_type, double input_slew,
-                                                       double drive_resistance, double capacitance, double lower_threshold, double upper_threshold,
-                                                       double voltage_log, double slew_derate, double min_slew_factor)
+double DelayCalculator::calcParasiticArnoldiTableRamp(TimingArc& timing_arc, TransType output_trans_type, double input_slew, double drive_resistance,
+                                                      double capacitance, double lower_threshold, double upper_threshold, double voltage_log,
+                                                      double slew_derate, double min_slew_factor)
 {
   if (!(drive_resistance > 0.0 && capacitance > 0.0 && voltage_log > 0.0)) {
     return 0.0;
@@ -3076,9 +3193,8 @@ void DelayCalculator::solveParasiticArnoldiRampPoint(double pole_ramp, double vo
   derivative = (1.0 - voltage) / (pole_time - (1.0 - voltage) * pole_ramp);
 }
 
-double DelayCalculator::calcParasiticArnoldiEffectiveCapacitance(double driver_ramp, double drive_resistance,
-                                                                  ParasiticArnoldiPoleResidue& pole_residue,
-                                                                  double effective_capacitance_time)
+double DelayCalculator::calcParasiticArnoldiEffectiveCapacitance(double driver_ramp, double drive_resistance, ParasiticArnoldiPoleResidue& pole_residue,
+                                                                 double effective_capacitance_time)
 {
   if (!(drive_resistance > 0.0) || pole_residue.get_residue_list().empty()) {
     return 0.0;
@@ -3111,8 +3227,8 @@ double DelayCalculator::calcParasiticArnoldiEffectiveCapacitance(double driver_r
   return integrated_current / (1.0 - voltage);
 }
 
-void DelayCalculator::solveParasiticArnoldiWaveformTime(double driver_ramp, ParasiticArnoldiPoleResidue& pole_residue, std::size_t term_idx,
-                                                         double voltage, double& waveform_time)
+void DelayCalculator::solveParasiticArnoldiWaveformTime(double driver_ramp, ParasiticArnoldiPoleResidue& pole_residue, std::size_t term_idx, double voltage,
+                                                        double& waveform_time)
 {
   std::vector<double>& pole_list = pole_residue.get_pole_list();
   std::vector<double>& residue_list = pole_residue.get_residue_list()[term_idx];
@@ -3182,8 +3298,8 @@ void DelayCalculator::solveParasiticArnoldiWaveformTime(double driver_ramp, Para
 }
 
 void DelayCalculator::solveParasiticArnoldiWaveformTime(double driver_ramp, ParasiticArnoldiPoleResidue& pole_residue, std::size_t term_idx,
-                                                         double upper_threshold, double& upper_time, double mid_threshold, double& mid_time,
-                                                         double lower_threshold, double& lower_time)
+                                                        double upper_threshold, double& upper_time, double mid_threshold, double& mid_time,
+                                                        double lower_threshold, double& lower_time)
 {
   std::vector<double>& source_pole_list = pole_residue.get_pole_list();
   std::vector<double>& source_residue_list = pole_residue.get_residue_list()[term_idx];
@@ -3406,16 +3522,15 @@ void DelayCalculator::solveParasiticArnoldiWaveformTime(double driver_ramp, Para
     lo_max_voltage = candidate_voltage;
   }
 
-  upper_time = solveParasiticArnoldiBracketedTime(driver_ramp, pole_list, residue_list, upper_threshold, hi_min_time, hi_max_time, hi_min_voltage,
-                                                  hi_max_voltage);
-  mid_time = solveParasiticArnoldiBracketedTime(driver_ramp, pole_list, residue_list, mid_threshold, mid_min_time, mid_max_time, mid_min_voltage,
-                                                mid_max_voltage);
-  lower_time = solveParasiticArnoldiBracketedTime(driver_ramp, pole_list, residue_list, lower_threshold, lo_min_time, lo_max_time, lo_min_voltage,
-                                                  lo_max_voltage);
+  upper_time
+      = solveParasiticArnoldiBracketedTime(driver_ramp, pole_list, residue_list, upper_threshold, hi_min_time, hi_max_time, hi_min_voltage, hi_max_voltage);
+  mid_time
+      = solveParasiticArnoldiBracketedTime(driver_ramp, pole_list, residue_list, mid_threshold, mid_min_time, mid_max_time, mid_min_voltage, mid_max_voltage);
+  lower_time
+      = solveParasiticArnoldiBracketedTime(driver_ramp, pole_list, residue_list, lower_threshold, lo_min_time, lo_max_time, lo_min_voltage, lo_max_voltage);
 }
 
-double DelayCalculator::calcParasiticArnoldiWaveformVoltage(double time, double driver_ramp, std::vector<double>& pole_list,
-                                                            std::vector<double>& residue_list)
+double DelayCalculator::calcParasiticArnoldiWaveformVoltage(double time, double driver_ramp, std::vector<double>& pole_list, std::vector<double>& residue_list)
 {
   double voltage = 0.0;
   for (std::size_t pole_idx = 0; pole_idx < pole_list.size(); pole_idx++) {
@@ -3433,7 +3548,7 @@ double DelayCalculator::calcParasiticArnoldiWaveformVoltage(double time, double 
 }
 
 void DelayCalculator::calcParasiticArnoldiWaveformVoltageAndDerivative(double time, double driver_ramp, std::vector<double>& pole_list,
-                                                                        std::vector<double>& residue_list, double& voltage, double& derivative)
+                                                                       std::vector<double>& residue_list, double& voltage, double& derivative)
 {
   voltage = 0.0;
   derivative = 0.0;
@@ -3456,9 +3571,8 @@ void DelayCalculator::calcParasiticArnoldiWaveformVoltageAndDerivative(double ti
   }
 }
 
-double DelayCalculator::solveParasiticArnoldiBracketedTime(double driver_ramp, std::vector<double>& pole_list,
-                                                            std::vector<double>& residue_list, double voltage, double lower_time,
-                                                            double upper_time, double lower_voltage, double upper_voltage)
+double DelayCalculator::solveParasiticArnoldiBracketedTime(double driver_ramp, std::vector<double>& pole_list, std::vector<double>& residue_list,
+                                                           double voltage, double lower_time, double upper_time, double lower_voltage, double upper_voltage)
 {
   double lower_function = lower_voltage - voltage;
   double upper_function = upper_voltage - voltage;
@@ -3551,8 +3665,8 @@ double DelayCalculator::getParasiticTotalResistance(ParasiticNet& parasitic_net)
   }
   return resistance;
 }
-double DelayCalculator::calcTimingCellArcDelay(std::string& output_pin, TimingCellArc& timing_cell_arc, AnalysisType analysis_type,
-                                                TransType input_trans_type, TransType output_trans_type, double input_slew)
+double DelayCalculator::calcTimingCellArcDelay(std::string& output_pin, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType input_trans_type,
+                                               TransType output_trans_type, double input_slew)
 {
   if (timing_cell_arc.get_timing_arc_list().empty()) {
     if (analysis_type == AnalysisType::kMin) {
@@ -3582,8 +3696,8 @@ double DelayCalculator::calcTimingCellArcDelay(std::string& output_pin, TimingCe
   return delay_list.front();
 }
 
-double DelayCalculator::calcTimingCellArcSlew(std::string& output_pin, TimingCellArc& timing_cell_arc, AnalysisType analysis_type,
-                                               TransType input_trans_type, TransType output_trans_type, double input_slew)
+double DelayCalculator::calcTimingCellArcSlew(std::string& output_pin, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType input_trans_type,
+                                              TransType output_trans_type, double input_slew)
 {
   if (timing_cell_arc.get_timing_arc_list().empty()) {
     return input_slew;
@@ -3609,8 +3723,7 @@ double DelayCalculator::calcTimingCellArcSlew(std::string& output_pin, TimingCel
   }
   return slew_list.front();
 }
-double DelayCalculator::calcArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type,
-                                      double input_slew)
+double DelayCalculator::calcArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double input_slew)
 {
   if (arc.get_type() == ArcType::kNet) {
     return calcNetArcDelay(arc, analysis_type, output_trans_type, input_slew);
@@ -3632,8 +3745,7 @@ double DelayCalculator::calcArcDelay(Arc& arc, AnalysisType analysis_type, Trans
   return arc.get_delay_max();
 }
 
-double DelayCalculator::calcArcSlew(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type,
-                                     double input_slew)
+double DelayCalculator::calcArcSlew(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double input_slew)
 {
   if (arc.get_type() == ArcType::kNet) {
     return calcNetArcSlew(arc, analysis_type, output_trans_type, input_slew);

@@ -116,17 +116,16 @@ void ResExtractor::extractNetResistance(int32_t corner_idx, int32_t net_idx)
   }
 }
 
-double ResExtractor::extractWireResistance(CornerData& corner_data, ProcessConductor& conductor, TopoEdge& edge,
-                                           std::span<EdgeEtchInterval> edge_interval_list)
+double ResExtractor::extractWireResistance(CornerData& corner_data, ProcessConductor& conductor, TopoEdge& edge, std::span<EdgeEtchInterval> edge_interval_list)
 {
   Database& database = RCXDM.getDatabase();
   TopoNode& start_node = database.get_topo_pool().get_node(edge.get_start_node_idx());
   TopoNode& end_node = database.get_topo_pool().get_node(edge.get_end_node_idx());
   double micron_per_dbu = 1 / 1.0 / database.get_layout_data().get_dbu_per_micron();
-  double segment_start = edge.get_line_segment().get_is_horizontal() ? RCXUTIL.x(start_node.get_point()) * micron_per_dbu
-                                                                     : RCXUTIL.y(start_node.get_point()) * micron_per_dbu;
-  double segment_end = edge.get_line_segment().get_is_horizontal() ? RCXUTIL.x(end_node.get_point()) * micron_per_dbu
-                                                                   : RCXUTIL.y(end_node.get_point()) * micron_per_dbu;
+  double segment_start
+      = edge.get_line_segment().get_is_horizontal() ? RCXUTIL.x(start_node.get_point()) * micron_per_dbu : RCXUTIL.y(start_node.get_point()) * micron_per_dbu;
+  double segment_end
+      = edge.get_line_segment().get_is_horizontal() ? RCXUTIL.x(end_node.get_point()) * micron_per_dbu : RCXUTIL.y(end_node.get_point()) * micron_per_dbu;
   if (segment_end < segment_start) {
     std::swap(segment_start, segment_end);
   }
@@ -166,8 +165,7 @@ double ResExtractor::extractWireResistance(CornerData& corner_data, ProcessCondu
     double tmpr_coefficient2 = 0.0;
     conductor.query_tmpr_coefficient(width, tmpr_coefficient1, tmpr_coefficient2);
     double nominal_tmpr = conductor.get_has_nominal_tmpr() ? conductor.get_nominal_tmpr() : corner_data.get_global_tmpr();
-    resistance += base_resistance
-                  * getTmprFactor(corner_data.get_tmpr(), nominal_tmpr, tmpr_coefficient1, tmpr_coefficient2);
+    resistance += base_resistance * getTmprFactor(corner_data.get_tmpr(), nominal_tmpr, tmpr_coefficient1, tmpr_coefficient2);
   }
   return resistance;
 }
@@ -194,8 +192,7 @@ double ResExtractor::extractViaResistance(CornerData& corner_data, ProcessVia& v
   double tmpr_coefficient2 = 0.0;
   via.query_tmpr_coefficient(area, tmpr_coefficient1, tmpr_coefficient2);
   double nominal_tmpr = via.get_has_nominal_tmpr() ? via.get_nominal_tmpr() : corner_data.get_global_tmpr();
-  return base_resistance.value()
-         * getTmprFactor(corner_data.get_tmpr(), nominal_tmpr, tmpr_coefficient1, tmpr_coefficient2);
+  return base_resistance.value() * getTmprFactor(corner_data.get_tmpr(), nominal_tmpr, tmpr_coefficient1, tmpr_coefficient2);
 }
 
 double ResExtractor::getTmprFactor(double tmpr, double nominal_tmpr, double tmpr_coefficient1, double tmpr_coefficient2)

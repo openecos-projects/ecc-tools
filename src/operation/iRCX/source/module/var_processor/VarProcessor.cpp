@@ -103,13 +103,11 @@ void VarProcessor::buildNetEtchProfile(int32_t corner_idx, int32_t net_idx)
           edge_interval.set_width(edge.get_width() * micron_per_dbu);
           if (env_interval.get_lower_adjacent_edge() != nullptr) {
             edge_interval.set_lower_spacing(
-                (env_interval.get_lower_spacing() - edge.get_half_width() - env_interval.get_lower_adjacent_edge()->get_half_width())
-                * micron_per_dbu);
+                (env_interval.get_lower_spacing() - edge.get_half_width() - env_interval.get_lower_adjacent_edge()->get_half_width()) * micron_per_dbu);
           }
           if (env_interval.get_upper_adjacent_edge() != nullptr) {
             edge_interval.set_upper_spacing(
-                (env_interval.get_upper_spacing() - edge.get_half_width() - env_interval.get_upper_adjacent_edge()->get_half_width())
-                * micron_per_dbu);
+                (env_interval.get_upper_spacing() - edge.get_half_width() - env_interval.get_upper_adjacent_edge()->get_half_width()) * micron_per_dbu);
           }
           edge_interval.set_thickness(conductor->get_thickness());
           edge_interval_list.push_back(std::move(edge_interval));

@@ -18,7 +18,6 @@
 
 #include "idm.h"
 #include "report_manager.h"
-#include "tool_manager.h"
 
 namespace tcl {
 

@@ -39,7 +39,6 @@
 #include <string>
 #include <vector>
 
-#include "absl/container/inlined_vector.h"
 #include "utility/logger/Logger.hpp"
 
 namespace ecc {
@@ -600,7 +599,7 @@ class TclCmd
   }
   std::string _cmd_name;
   std::map<std::string, std::unique_ptr<TclOption>> _options;  //!< The tcl option do not need keep order.
-  absl::InlinedVector<TclOption*, 64> _args;  //!< The tcl arg need keep order.
+  std::vector<TclOption*> _args;  //!< The tcl arg need keep order.
 };
 
 /**

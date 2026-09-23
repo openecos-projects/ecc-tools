@@ -45,10 +45,7 @@ class PGNet
   {
     _io_pin_name_to_direction_map = io_pin_name_to_direction_map;
   }
-  void set_instance_pin_name_list(const std::vector<std::string>& instance_pin_name_list)
-  {
-    _instance_pin_name_list = instance_pin_name_list;
-  }
+  void set_instance_pin_name_list(const std::vector<std::string>& instance_pin_name_list) { _instance_pin_name_list = instance_pin_name_list; }
 
   // function
   void add_io_pin(std::string pin_name, IOPinDirection direction) { _io_pin_name_to_direction_map[pin_name] = direction; }

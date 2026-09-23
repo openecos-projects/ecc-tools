@@ -432,6 +432,7 @@ class LibertyReader
   unsigned visitOutputCurrentTemplate(LibertyGroupStmt* group);
   unsigned visitLeakagePower(LibertyGroupStmt* group);
   unsigned visitCell(LibertyGroupStmt* group);
+  unsigned visitSequential(LibertyGroupStmt* group);
   unsigned visitPin(LibertyGroupStmt* group);
   unsigned visitBus(LibertyGroupStmt* group);
   unsigned visitTiming(LibertyGroupStmt* group);
@@ -451,6 +452,9 @@ class LibertyReader
   std::unique_ptr<LibLibrary> takeLib();
 
  private:
+  template <typename Group>
+  unsigned visitPinGroup(Group* group);
+
   const char* getGroupAttriName(LibertyGroupStmt* group);
   unsigned visitStmtInGroup(LibertyGroupStmt* group);
 
@@ -467,6 +471,7 @@ class LibertyReader
   unsigned visitOutputCurrentTemplate(liberty_ast::LibGroup* group);
   unsigned visitLeakagePower(liberty_ast::LibGroup* group);
   unsigned visitCell(liberty_ast::LibGroup* group);
+  unsigned visitSequential(liberty_ast::LibGroup* group);
   unsigned visitPin(liberty_ast::LibGroup* group);
   unsigned visitBus(liberty_ast::LibGroup* group);
   unsigned visitTiming(liberty_ast::LibGroup* group);

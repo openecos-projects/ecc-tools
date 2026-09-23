@@ -35,7 +35,12 @@ class Config
   /////////////////////////////////////////////
   // **********       EMIR        ********** //
   std::string temp_directory_path;
-  std::string instance_power_file_path;
+  std::string ptpx_instance_power_file_path;
+  std::string redhawk_res_network_file_path;
+  std::string ploc_file_path;
+  std::string redhawk_tech_file_path;
+  std::string em_limit_file_path;
+  double em_violation_threshold_percent = 100.0;
   int32_t thread_number;
   /////////////////////////////////////////////
   // **********       EMIR        ********** //

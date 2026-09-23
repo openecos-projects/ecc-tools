@@ -16,9 +16,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include <cstdlib>
-#include <stdexcept>
-
 #include "LogLevel.hpp"
 #include "STAHeader.hpp"
 
@@ -171,7 +168,7 @@ class Logger
      * stream << args[0] << args[1], ...
      * use void to suppress unused-value warning for fold expression
      */
-    (void)(stream << ... << args);
+    (void) (stream << ... << args);
   }
 
   std::string getTimestamp()

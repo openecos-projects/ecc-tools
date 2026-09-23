@@ -31,13 +31,10 @@ struct Visibility;
 class GdsWriter
 {
  public:
-  auto write(const Model& model,
-             const Visibility& visibility,
-             const Config& config) const -> bool;
+  auto write(const Model& model, const Visibility& visibility, const Config& config) const -> bool;
 
  private:
-  static auto formatValue(F64 value,
-                          const std::string& unit) -> std::string;
+  static auto formatValue(F64 value, const std::string& unit) -> std::string;
 };
 
 }  // namespace ircx::plot_spef

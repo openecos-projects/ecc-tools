@@ -80,6 +80,15 @@ class RawLibertyGeneration
   double _elapsed_seconds = 0.0;
 };
 
+struct InstancePlacementUpdate
+{
+  std::string instance_name;
+  uint64_t expected_instance_id;
+  int32_t x;
+  int32_t y;
+  IdbOrient orient;
+};
+
 class DataManager
 {
  public:
@@ -97,6 +106,10 @@ class DataManager
   DataConfig& get_config() { return _config; };
   IdbBuilder* get_idb_builder() { return _idb_builder; }
   void set_idb_builder(IdbBuilder* idb_builder) { _idb_builder = idb_builder; }
+  const DefReadError* get_last_def_read_error() const
+  {
+    return _idb_builder == nullptr ? nullptr : _idb_builder->get_last_def_read_error();
+  }
   IdbDefService* get_idb_def_service() { return _idb_def_service; }
   IdbDefService* get_idb_verilog_service() { return _idb_verilog_service; }
   void set_idb_def_service(IdbDefService* idb_def_service) { _idb_def_service = idb_def_service; }
@@ -266,6 +279,7 @@ class DataManager
   bool isOnIOSite(int32_t llx, int32_t lly, int32_t urx, int32_t ury, IdbOrient orient);
   bool checkInstPlacer(int32_t llx, int32_t lly, int32_t urx, int32_t ury, IdbOrient orient);
   void write_placement_back(const float* x, const float* y, int len);
+  std::size_t write_selected_placement_back(const std::vector<InstancePlacementUpdate>& updates);
   std::tuple<bool, std::vector<std::string>, std::vector<std::string>, int> isAllNetConnected();
   bool isNetConnected(std::string net_name);
   bool isNetConnected(IdbNet* net);

@@ -15,6 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
+#include <string>
 
 #include <any>
 #include <cstdint>
@@ -38,8 +39,6 @@ class IdbRegularWireSegment;
 namespace izh {
 class RoutingLayer;
 class CutLayer;
-class Violation;
-enum class ViolationType;
 class LayerCoord;
 class LayerRect;
 template <typename T>
@@ -67,13 +66,18 @@ namespace izh {
 class ZHInterface
 {
  public:
-  static ZHInterface& getInst();
+  static ZHInterface& getInst()
+  {
+    if (_zh_interface_instance == nullptr) {
+      _zh_interface_instance = new ZHInterface();
+    }
+    return *_zh_interface_instance;
+  }
   static void destroyInst();
 
 #if 1  // 外部调用ZH的API
 
 #if 1  // izh
-  void fixFanout(std::map<std::string, std::any> config_map);
   void insertFiller(std::map<std::string, std::any> config_map);
   void insertMetal(std::map<std::string, std::any> config_map);
   void checkAntenna(std::map<std::string, std::any> config_map);

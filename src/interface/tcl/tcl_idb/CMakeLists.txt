@@ -6,10 +6,8 @@ add_library(tcl_idb
 
 target_link_libraries(tcl_idb
     PUBLIC
-        tool_manager
         tcl
         idm
-        file_manager_db
         ecc_report
         ecc_logger
 )
@@ -17,4 +15,5 @@ target_link_libraries(tcl_idb
 target_include_directories(tcl_idb
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${HOME_INTERFACE}/tcl
 )

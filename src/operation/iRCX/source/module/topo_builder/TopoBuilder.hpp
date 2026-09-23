@@ -22,8 +22,8 @@
 #include "Net.hpp"
 #include "RCXHeader.hpp"
 #include "Segment.hpp"
-#include "TBNodeKey.hpp"
 #include "TBModel.hpp"
+#include "TBNodeKey.hpp"
 #include "TBTopo.hpp"
 #include "TopoNode.hpp"
 

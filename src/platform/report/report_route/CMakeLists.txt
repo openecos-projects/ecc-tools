@@ -7,7 +7,6 @@ target_link_libraries(ecc_report_route
     PUBLIC
         report_basic
         idm
-        tool_manager
         def_service
 )
 

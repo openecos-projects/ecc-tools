@@ -60,8 +60,7 @@ class FillerInserter
   void buildAvailableSegmentList(FIModel& fi_model);
   void addFillerCell(FIModel& fi_model, idb::IdbDesign* idb_design);
   void addFillerToSegment(FIModel& fi_model, FIRow& fi_row, FISegment& fi_segment, idb::IdbDesign* idb_design);
-  idb::IdbInstance* addFillerInstance(FIModel& fi_model, FIRow& fi_row, FIMaster& fi_master, int32_t begin_site_idx,
-                                      idb::IdbDesign* idb_design);
+  idb::IdbInstance* addFillerInstance(FIModel& fi_model, FIRow& fi_row, FIMaster& fi_master, int32_t begin_site_idx, idb::IdbDesign* idb_design);
   int32_t getCeilDiv(int32_t dividend, int32_t divisor);
 };
 

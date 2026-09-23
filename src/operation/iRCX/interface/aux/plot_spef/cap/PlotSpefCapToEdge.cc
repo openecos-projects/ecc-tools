@@ -20,10 +20,7 @@
  */
 #include "cap/PlotSpefCapToEdge.hh"
 
-#include <string>
-#include <unordered_map>
-#include <vector>
-
+#include "RCXHeader.hpp"
 #include "model/PlotSpefModel.hh"
 
 namespace ircx::plot_spef {
@@ -66,12 +63,9 @@ class IncidentEdgeIndex
   std::vector<EdgeCandidate> empty_candidates_;
 };
 
-auto sameEdgeRef(const EdgeRef& lhs,
-                 const EdgeRef& rhs) -> bool
+auto sameEdgeRef(const EdgeRef& lhs, const EdgeRef& rhs) -> bool
 {
-  return lhs.valid == rhs.valid
-         && lhs.net_index == rhs.net_index
-         && lhs.resistor_index == rhs.resistor_index;
+  return lhs.valid == rhs.valid && lhs.net_index == rhs.net_index && lhs.resistor_index == rhs.resistor_index;
 }
 
 auto uniqueEdgeCandidate(const std::vector<EdgeCandidate>& candidates) -> EdgeRef
@@ -95,10 +89,7 @@ auto uniqueEdgeCandidate(const std::vector<EdgeCandidate>& candidates) -> EdgeRe
 class CapToEdge
 {
  public:
-  explicit CapToEdge(const IncidentEdgeIndex& incident_edges)
-      : incident_edges_(incident_edges)
-  {
-  }
+  explicit CapToEdge(const IncidentEdgeIndex& incident_edges) : incident_edges_(incident_edges) {}
 
   auto resolve(Model& model) const -> void
   {
@@ -126,12 +117,8 @@ class CapToEdge
     if (cap.edge1.valid && cap.edge2.valid) {
       return;
     }
-    cap.edge1 = cap.edge1.valid
-                    ? cap.edge1
-                    : uniqueEdgeCandidate(incident_edges_.candidatesFor(cap.node1));
-    cap.edge2 = cap.edge2.valid
-                    ? cap.edge2
-                    : uniqueEdgeCandidate(incident_edges_.candidatesFor(cap.node2));
+    cap.edge1 = cap.edge1.valid ? cap.edge1 : uniqueEdgeCandidate(incident_edges_.candidatesFor(cap.node1));
+    cap.edge2 = cap.edge2.valid ? cap.edge2 : uniqueEdgeCandidate(incident_edges_.candidatesFor(cap.node2));
   }
 
   const IncidentEdgeIndex& incident_edges_;

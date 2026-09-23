@@ -35,6 +35,7 @@ class TimingPath
   std::string& get_end_point() { return _end_point; }
   double get_path_delay() const { return _path_delay; }
   double get_required_time() const { return _required_time; }
+  double get_required_time_adjustment() const { return _required_time_adjustment; }
   double get_slack() const { return _slack; }
   double get_cell_delay() const { return _cell_delay; }
   double get_net_delay() const { return _net_delay; }
@@ -51,6 +52,8 @@ class TimingPath
   TimingCheckType get_check_type() const { return _check_type; }
   TransType get_trans_type() const { return _trans_type; }
   std::string& get_clock_name() { return _clock_name; }
+  std::string& get_capture_clock_name() { return _capture_clock_name; }
+  TransType get_capture_clock_transition() const { return _capture_clock_transition; }
   std::string& get_capture_clock_pin() { return _capture_clock_pin; }
   std::string& get_last_common_pin() { return _last_common_pin; }
   std::vector<TimingPathPoint>& get_point_list() { return _point_list; }
@@ -59,6 +62,7 @@ class TimingPath
   void set_end_point(const std::string& end_point) { _end_point = end_point; }
   void set_path_delay(const double path_delay) { _path_delay = path_delay; }
   void set_required_time(const double required_time) { _required_time = required_time; }
+  void set_required_time_adjustment(double adjustment) { _required_time_adjustment = adjustment; }
   void set_slack(const double slack) { _slack = slack; }
   void set_cell_delay(const double cell_delay) { _cell_delay = cell_delay; }
   void set_net_delay(const double net_delay) { _net_delay = net_delay; }
@@ -66,10 +70,7 @@ class TimingPath
   void set_capture_time(const double capture_time) { _capture_time = capture_time; }
   void set_launch_clock_network_delay(const double launch_clock_network_delay) { _launch_clock_network_delay = launch_clock_network_delay; }
   void set_capture_clock_network_delay(const double capture_clock_network_delay) { _capture_clock_network_delay = capture_clock_network_delay; }
-  void set_clock_reconvergence_pessimism(const double clock_reconvergence_pessimism)
-  {
-    _clock_reconvergence_pessimism = clock_reconvergence_pessimism;
-  }
+  void set_clock_reconvergence_pessimism(const double clock_reconvergence_pessimism) { _clock_reconvergence_pessimism = clock_reconvergence_pessimism; }
   void set_setup_time(const double setup_time) { _setup_time = setup_time; }
   void set_check_time(const double check_time) { _check_time = check_time; }
   void set_level(const int32_t level) { _level = level; }
@@ -78,6 +79,8 @@ class TimingPath
   void set_check_type(const TimingCheckType& check_type) { _check_type = check_type; }
   void set_trans_type(const TransType& trans_type) { _trans_type = trans_type; }
   void set_clock_name(const std::string& clock_name) { _clock_name = clock_name; }
+  void set_capture_clock_name(const std::string_view name) { _capture_clock_name = name; }
+  void set_capture_clock_transition(TransType transition) { _capture_clock_transition = transition; }
   void set_capture_clock_pin(const std::string& capture_clock_pin) { _capture_clock_pin = capture_clock_pin; }
   void set_last_common_pin(const std::string& last_common_pin) { _last_common_pin = last_common_pin; }
   void set_point_list(const std::vector<TimingPathPoint>& point_list) { _point_list = point_list; }
@@ -88,6 +91,7 @@ class TimingPath
   std::string _end_point;
   double _path_delay = 0.0;
   double _required_time = 0.0;
+  double _required_time_adjustment = 0.0;
   double _slack = 0.0;
   double _cell_delay = 0.0;
   double _net_delay = 0.0;
@@ -104,6 +108,8 @@ class TimingPath
   TimingCheckType _check_type = TimingCheckType::kNone;
   TransType _trans_type = TransType::kNone;
   std::string _clock_name;
+  std::string _capture_clock_name;
+  TransType _capture_clock_transition = TransType::kRise;
   std::string _capture_clock_pin;
   std::string _last_common_pin;
   std::vector<TimingPathPoint> _point_list;

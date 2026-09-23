@@ -33,6 +33,7 @@ class IOPlacer
   static void destroyInst();
   // function
   void place();
+  void placeAuto();
 
  private:
   // self
@@ -47,15 +48,17 @@ class IOPlacer
   // function
 
   void placeIOPin();
+  void resetIOPinPlacement();
+  void placeIOPinsFromFile(const std::string& file_path);
   void autoPlacePins(std::vector<std::string>& layer_name_list);
   int32_t getLayerMinWidth(std::string layer_name);
   int32_t getTrackPitch(std::string layer_name);
   int32_t getTrackOffset(std::string layer_name);
-  void placeIOPinsOnEdge(IOEdgeType edge_type, std::vector<IOPin>& io_pin_list, int32_t& io_pin_idx, int32_t edge_pin_num,
-                         std::string layer_name, int32_t width, int32_t depth, int32_t access_pitch, int32_t track_offset,
-                         int32_t track_pitch);
-  int32_t getAlongCoord(int32_t range_low, int32_t range_high, int32_t die_low, int32_t die_high, int32_t pin_span, int32_t access_pitch,
-                        int32_t side_pin_num, int32_t pin_idx, int32_t track_offset, int32_t track_pitch);
+  int32_t calculatePinDepth(IOEdgeType edge_type, int32_t width, const std::string& access_layer_name);
+  void placeIOPinsOnEdge(IOEdgeType edge_type, std::vector<IOPin>& io_pin_list, int32_t& io_pin_idx, int32_t edge_pin_num, std::string layer_name,
+                         int32_t width, const std::string& access_layer_name, int32_t access_pitch, int32_t track_offset, int32_t track_pitch);
+  int32_t getAlongCoord(int32_t range_low, int32_t range_high, int32_t die_low, int32_t die_high, int32_t pin_span, int32_t access_pitch, int32_t side_pin_num,
+                        int32_t pin_idx, int32_t track_offset, int32_t track_pitch);
   void addIOPinPort(IOPin& io_pin, IOEdgeType edge_type, int32_t x, int32_t y, int32_t width, int32_t depth, std::string layer_name);
   void syncPinLocation(IOPin& io_pin, IOPort& io_port, int32_t x, int32_t y);
   void updateNetIOPin(IOPin& io_pin);

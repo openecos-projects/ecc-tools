@@ -38,6 +38,7 @@
 #include <iostream>
 #include <list>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -97,6 +98,7 @@ class IdbBuilder
 
   IdbLefService* get_lef_service() { return _lef_service; }
   IdbDefService* get_def_service() { return _def_service; }
+  const DefReadError* get_last_def_read_error() const { return _last_def_read_error ? &*_last_def_read_error : nullptr; }
   //   IdbDataService* get_data_service() { return _data_service.get(); }
 
   /// operator
@@ -110,20 +112,20 @@ class IdbBuilder
 
   /// loger
   void log();
-  void logModule(string mudule, int32_t number = -1)
+  void logModule(const std::string& module, int32_t number = -1)
   {
     logSeperate();
-    logNumber(mudule, number);
+    logNumber(module, number);
     // logSeperate();
   }
   void logSeperate() { ECCLOG.info(ecc::Loc::current(), "**************************************************************"); }
-  void logNumber(string mudule, int32_t number = -1)
+  void logNumber(const std::string& module, int32_t number = -1)
   {
-    ECCLOG.info(ecc::Loc::current(), mudule);
-    if (number != -1) {
-      ECCLOG.info(ecc::Loc::current(), " number : ", number);
+    if (number == -1) {
+      ECCLOG.info(ecc::Loc::current(), module);
+    } else {
+      ECCLOG.info(ecc::Loc::current(), module, number);
     }
-    ECCLOG.info(ecc::Loc::current(), "");
   }
   void logInfo(string info, int32_t number = -1)
   {
@@ -131,12 +133,12 @@ class IdbBuilder
     if (number != -1) {
       ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    ECCLOG.info(ecc::Loc::current(), "");
   }
 
  private:
   IdbDefService* _def_service = nullptr;
   IdbLefService* _lef_service = nullptr;
+  std::optional<DefReadError> _last_def_read_error;
   //   std::shared_ptr<IdbDataService> _data_service;
 
   void checkNetPins();

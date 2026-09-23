@@ -16,19 +16,27 @@
 // ***************************************************************************************
 #include "py_irt.h"
 
-#include <tcl_util.h>
-
 #include <string>
 
 #include "RTInterface.hpp"
-#include "flow_config.h"
+
 namespace python_interface {
 
-bool initConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
+bool initRTConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
+void initRTConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
+bool initERTConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
+void initERTConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 
-bool destroyRT()
+bool initRT(std::string& config, std::map<std::string, std::string>& config_dict)
 {
-  RTI.destroyRT();
+  std::map<std::string, std::any> config_map;
+
+  bool pass = config.empty() ? true : initRTConfigMapByJSON(config, config_map);
+  if (!pass) {
+    return false;
+  }
+  initRTConfigMapByDict(config_dict, config_map);
+  RTI.initRT(config_map);
   return true;
 }
 
@@ -36,11 +44,11 @@ bool runERT(std::string& config, std::map<std::string, std::string>& config_dict
 {
   std::map<std::string, std::any> config_map;
 
-  bool pass = false;
-  pass = !pass ? initConfigMapByJSON(config, config_map) : pass;
+  bool pass = config.empty() ? true : initERTConfigMapByJSON(config, config_map);
   if (!pass) {
     return false;
   }
+  initERTConfigMapByDict(config_dict, config_map);
   RTI.runERT(config_map);
   return true;
 }
@@ -51,18 +59,9 @@ bool runRT()
   return true;
 }
 
-bool initRT(std::string& config, std::map<std::string, std::string>& config_dict)
+bool destroyRT()
 {
-  iplf::flowConfigInst->set_status_stage("iRT - Routing");
-
-  std::map<std::string, std::any> config_map;
-
-  bool pass = false;
-  pass = !pass ? initConfigMapByJSON(config, config_map) : pass;
-  if (!pass) {
-    return false;
-  }
-  RTI.initRT(config_map);
+  RTI.destroyRT();
   return true;
 }
 

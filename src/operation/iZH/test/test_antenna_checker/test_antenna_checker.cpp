@@ -15,6 +15,7 @@
 // ***************************************************************************************
 #include "ACModel.hpp"
 #include "AntennaChecker.hpp"
+#include "Utility.hpp"
 
 int main()
 {
@@ -25,6 +26,14 @@ int main()
   ac_model.set_violation_num(2);
   ac_model.addViolationNum(3);
   if (ac_model.get_violation_num() != 5) {
+    return 1;
+  }
+
+  const std::vector<std::pair<double, double>> pwl{{0.0, 0.0}, {2.0, 10.0}};
+  if (!izh::Utility::equalDoubleByError(izh::Utility::getPWLValue(pwl, 1.0), 5.0, ZH_ERROR)) {
+    return 1;
+  }
+  if (!izh::Utility::equalDoubleByError(izh::Utility::getPWLValue({}, 1.0, 3.0), 3.0, ZH_ERROR)) {
     return 1;
   }
 

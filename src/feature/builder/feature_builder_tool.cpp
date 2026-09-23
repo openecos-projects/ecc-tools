@@ -57,13 +57,6 @@ CTSSummary FeatureBuilder::buildCTSSummary()
   return summary;
 }
 
-NetOptSummary FeatureBuilder::buildNetOptSummary()
-{
-  NetOptSummary summary;
-
-  return summary;
-}
-
 TimingOptSummary FeatureBuilder::buildTimingOptSummary()
 {
   TimingOptSummary summary;

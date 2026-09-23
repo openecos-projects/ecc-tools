@@ -14,72 +14,62 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "py_izh.h"
-
-#include <algorithm>
-#include <any>
-#include <fstream>
-#include <map>
 #include <string>
-#include <vector>
 
-#include "json.hpp"
+#include "json_parser.h"
+#include "py_izh.h"
 
 namespace python_interface {
 
-namespace {
-
-void setJsonValue(std::map<std::string, std::any>& config_map, const std::string& key, const nlohmann::json& value)
+bool initAntennaConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map)
 {
-  if (value.is_string()) {
-    config_map[key] = value.get<std::string>();
-  } else if (value.is_number_integer()) {
-    config_map[key] = value.get<int>();
-  } else if (value.is_number_float()) {
-    config_map[key] = value.get<double>();
-  } else if (value.is_boolean()) {
-    config_map[key] = value.get<bool>();
-  } else if (value.is_array()) {
-    if (value.empty() || std::all_of(value.begin(), value.end(), [](const nlohmann::json& item) { return item.is_string(); })) {
-      config_map[key] = value.get<std::vector<std::string>>();
-    } else if (std::all_of(value.begin(), value.end(), [](const nlohmann::json& item) { return item.is_number_integer(); })) {
-      config_map[key] = value.get<std::vector<int>>();
-    } else if (std::all_of(value.begin(), value.end(), [](const nlohmann::json& item) { return item.is_number(); })) {
-      config_map[key] = value.get<std::vector<double>>();
-    }
-  }
-}
-
-void flattenJson(std::map<std::string, std::any>& config_map, const nlohmann::json& json)
-{
-  for (const auto& item : json.items()) {
-    const std::string& raw_key = item.key();
-    const std::string map_key = (!raw_key.empty() && raw_key.front() == '-') ? raw_key : "-" + raw_key;
-    setJsonValue(config_map, map_key, item.value());
-  }
-}
-
-}  // namespace
-
-bool initZHConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map)
-{
-  if (config.empty()) {
-    return false;
-  }
-
-  std::ifstream config_file(config);
+  auto config_file = std::ifstream(config);
   if (!config_file.is_open()) {
     return false;
   }
 
   nlohmann::json json;
   config_file >> json;
-  flattenJson(config_map, json);
+  std::string value = ecc::getJsonData(json, {"ZH", "-report_dir"});
+  if (!value.empty()) {
+    config_map["-report_dir"] = value;
+  }
+  return true;
+}
 
-  if (json.contains("insert_buffer")) {
-    setJsonValue(config_map, "-buffer_name", json["insert_buffer"]);
+bool initFillerConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map)
+{
+  auto config_file = std::ifstream(config);
+  if (!config_file.is_open()) {
+    return false;
   }
 
+  nlohmann::json json;
+  config_file >> json;
+  std::string value = ecc::getJsonData(json, {"ZH", "-filler"});
+  if (!value.empty()) {
+    config_map["-filler"] = value;
+  }
+  return true;
+}
+
+bool initMetalConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map)
+{
+  auto config_file = std::ifstream(config);
+  if (!config_file.is_open()) {
+    return false;
+  }
+
+  nlohmann::json json;
+  config_file >> json;
+  std::string value = ecc::getJsonData(json, {"ZH", "-min_fill_layer"});
+  if (!value.empty()) {
+    config_map["-min_fill_layer"] = value;
+  }
+  value = ecc::getJsonData(json, {"ZH", "-max_fill_layer"});
+  if (!value.empty()) {
+    config_map["-max_fill_layer"] = value;
+  }
   return true;
 }
 

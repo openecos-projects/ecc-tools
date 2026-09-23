@@ -355,8 +355,7 @@ void FillerInserter::addFillerToSegment(FIModel& fi_model, FIRow& fi_row, FISegm
   }
 }
 
-idb::IdbInstance* FillerInserter::addFillerInstance(FIModel& fi_model, FIRow& fi_row, FIMaster& fi_master, int32_t begin_site_idx,
-                                                    idb::IdbDesign* idb_design)
+idb::IdbInstance* FillerInserter::addFillerInstance(FIModel& fi_model, FIRow& fi_row, FIMaster& fi_master, int32_t begin_site_idx, idb::IdbDesign* idb_design)
 {
   if (idb_design == nullptr || fi_master.get_master() == nullptr) {
     ZHLOG.error(Loc::current(), "Cannot create filler instance because design or master is null!");
@@ -365,9 +364,8 @@ idb::IdbInstance* FillerInserter::addFillerInstance(FIModel& fi_model, FIRow& fi
   int32_t inst_y = fi_row.get_origin_y();
   idb::IdbOrient inst_orient = fi_row.get_orient() == idb::IdbOrient::kNone ? idb::IdbOrient::kN_R0 : fi_row.get_orient();
   std::string inst_name = idb_design->makeUniqueInstanceName(ZHUTIL.getString(fi_master.get_name(), "_", fi_master.get_inserted_num()));
-  idb::IdbInstance* idb_instance = idb_design->createInstance(inst_name, fi_master.get_name(), idb::IdbInstanceType::kDist,
-                                                              idb::IdbPlacementStatus::kPlaced, inst_orient, inst_x, inst_y,
-                                                              idb::IdbCreatePolicy::kErrorIfExists);
+  idb::IdbInstance* idb_instance = idb_design->createInstance(inst_name, fi_master.get_name(), idb::IdbInstanceType::kDist, idb::IdbPlacementStatus::kPlaced,
+                                                              inst_orient, inst_x, inst_y, idb::IdbCreatePolicy::kErrorIfExists);
   if (idb_instance == nullptr) {
     ZHLOG.error(Loc::current(), "Create filler instance failed: ", inst_name);
   }

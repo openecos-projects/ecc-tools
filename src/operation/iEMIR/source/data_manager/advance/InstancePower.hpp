@@ -33,6 +33,9 @@ class InstancePower
   double get_switching_power() { return _switching_power; }
   double get_leakage_power() { return _leakage_power; }
   double get_total_power() { return _internal_power + _switching_power + _leakage_power; }
+  bool get_has_average_current() { return _has_average_current; }
+  double get_average_current() { return _average_current; }
+  std::map<std::string, double>& get_average_current_by_pin_name_map() { return _average_current_by_pin_name_map; }
   // setter
   void set_instance_id(uint64_t instance_id) { _instance_id = instance_id; }
   void set_power_group_type(uint32_t power_group_type) { _power_group_type = power_group_type; }
@@ -40,6 +43,11 @@ class InstancePower
   void set_internal_power(double internal_power) { _internal_power = internal_power; }
   void set_switching_power(double switching_power) { _switching_power = switching_power; }
   void set_leakage_power(double leakage_power) { _leakage_power = leakage_power; }
+  void set_average_current(double average_current)
+  {
+    _average_current = average_current;
+    _has_average_current = true;
+  }
   // function
 
  private:
@@ -49,6 +57,9 @@ class InstancePower
   double _internal_power = 0.0;
   double _switching_power = 0.0;
   double _leakage_power = 0.0;
+  bool _has_average_current = false;
+  double _average_current = 0.0;
+  std::map<std::string, double> _average_current_by_pin_name_map;
 };
 
 }  // namespace iemir

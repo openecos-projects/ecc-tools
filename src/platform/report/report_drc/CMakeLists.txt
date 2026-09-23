@@ -5,7 +5,6 @@ add_library(ecc_report_drc
 target_link_libraries(ecc_report_drc
     PUBLIC
         report_basic
-        tool_manager
         def_service
         idm
 )

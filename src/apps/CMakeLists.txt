@@ -22,4 +22,4 @@ add_executable(ecc_bin
     ecc_main.cpp
 )
 
-target_link_libraries(ecc_bin flow ecc_logger)
+target_link_libraries(ecc_bin ecc_tcl ecc_logger)

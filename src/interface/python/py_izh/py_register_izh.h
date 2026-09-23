@@ -25,9 +25,9 @@ namespace py = pybind11;
 
 void register_izh(py::module& m)
 {
-  m.def("fix_fanout", fix_fanout, py::arg("config") = "");
   m.def("insert_filler", insert_filler, py::arg("config") = "");
   m.def("insert_metal", insert_metal, py::arg("config") = "");
+  m.def("check_antenna", check_antenna, py::arg("config") = "", py::arg("report_dir") = "");
 }
 
 }  // namespace python_interface

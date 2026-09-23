@@ -22,43 +22,14 @@
  * @Creat Date : 2022-04-15
  *
  */
-#include "utility/logger/Logger.hpp"
 #include "tcl_config.h"
 
 #include <iostream>
 
 #include "dm_config.h"
-#include "flow.h"
 #include "idm.h"
 
 namespace tcl {
-
-CmdFlowInitConfig::CmdFlowInitConfig(const char* cmd_name) : TclCmd(cmd_name)
-{
-  auto* file_name_option = new TclStringOption(TCL_CONFIG, 1, nullptr);
-  addOption(file_name_option);
-}
-
-unsigned CmdFlowInitConfig::check()
-{
-  TclOption* file_name_option = getOptionOrArg(TCL_CONFIG);
-  ecc::checkTclOption(file_name_option, TCL_CONFIG);
-  return 1;
-}
-
-unsigned CmdFlowInitConfig::exec()
-{
-  if (!check()) {
-    return 0;
-  }
-
-  TclOption* option = getOptionOrArg(TCL_CONFIG);
-  auto data_config = option->getStringVal();
-  iplf::plfInst->initFlow(data_config);
-
-  ECCLOG.info(ecc::Loc::current(), "Init Flow Config success.");
-  return 1;
-}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

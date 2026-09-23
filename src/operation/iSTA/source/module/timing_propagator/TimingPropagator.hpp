@@ -15,6 +15,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include "DCTimingResult.hpp"
 #include "Database.hpp"
 #include "TPModel.hpp"
 
@@ -51,8 +52,10 @@ class TimingPropagator
   void buildStartPointList(TPModel& tp_model);
   double getClockArrival(std::string& pin_name, AnalysisType analysis_type);
   double getClockArrival(std::string& pin_name, AnalysisType analysis_type, TransType trans_type);
+  double getClockArrival(std::string& pin_name, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
   double getClockArrival(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type);
   double getClockSlew(std::string& pin_name, AnalysisType analysis_type, TransType trans_type);
+  double getClockSlew(std::string& pin_name, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
   void seedStartPointList(TPModel& tp_model);
   void propagateDataSlewDelay(TPModel& tp_model);
   void seedDataSlewList(TPModel& tp_model);
@@ -60,8 +63,8 @@ class TimingPropagator
   void seedDataSlew(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
   void propagateDataSlewDelayArc(std::size_t arc_idx);
   void propagateDataSlewDelayArc(std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
-  void updateDataSlewDelay(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
-                           TransType input_trans_type, TransType output_trans_type);
+  void updateDataSlewDelay(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type, TransType input_trans_type,
+                           TransType output_trans_type);
   void updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay);
   void updateDataSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type, double data_slew);
   bool hasDataSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type);
@@ -71,18 +74,29 @@ class TimingPropagator
   double roundTime(double time);
   double getStartPointArrival(std::string& start_point, AnalysisType analysis_type);
   double getStartPointArrival(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
+  double getStartPointArrival(std::string& start_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
+  std::vector<const TimingIoDelay*> getInputDelayList(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
+  double getClockEdge(std::string_view clock_name, TransType trans_type);
+  double getInputDelayArrival(const TimingIoDelay& delay);
   bool isClockSourceStartPoint(std::string& start_point);
   TimingClock* getStartPointClock(std::string& start_point);
   double getStartPointClockEdge(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
   double getStartPointSlew(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
+  double getStartPointSlew(std::string& start_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
+  std::optional<DCTimingResult> getDrivingCellTiming(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
   double getStartPointLaunchTime(std::string& start_point, AnalysisType analysis_type);
   double getStartPointLaunchTime(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
+  double getStartPointLaunchTime(std::string& start_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
   std::string getStartPointCrprClockPin(std::string& start_point);
   TransType getStartPointCrprClockTransType(std::string& start_point);
   TransType getClockTransType(TimingCellArc& timing_cell_arc);
   std::string_view getClockName(std::string& pin_name);
+  std::vector<std::string> getStartPointClockNames(std::string& start_point);
   std::string getPathStateStartPoint(std::string& start_point);
   void seedPathState(std::string& start_point, AnalysisType analysis_type);
+  void seedInputPathState(std::string& start_point, AnalysisType analysis_type, TransType trans_type, const TimingIoDelay& delay);
+  void seedPathState(std::string& start_point, AnalysisType analysis_type, TransType trans_type, std::string_view clock_name, double arrival,
+                     double slew, double launch_time, TransType clock_trans_type);
   PathSourceType getStartPointSourceType(std::string& start_point, AnalysisType analysis_type);
   bool hasInputDelay(std::string& start_point, AnalysisType analysis_type);
   bool isInputStartPoint(std::string& start_point);

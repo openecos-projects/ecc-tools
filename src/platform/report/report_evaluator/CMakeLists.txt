@@ -5,7 +5,6 @@ add_library(ecc_report_evaluator
 target_link_libraries(ecc_report_evaluator
     PUBLIC
         report_basic
-        tool_manager
         def_service
         eval_wirelength_api
         eval_congestion_api

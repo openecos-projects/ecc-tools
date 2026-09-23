@@ -16,9 +16,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include <boost/container/flat_set.hpp>
-#include <limits>
-
 #include "Direction.hpp"
 #include "LayerCoord.hpp"
 #include "Orientation.hpp"

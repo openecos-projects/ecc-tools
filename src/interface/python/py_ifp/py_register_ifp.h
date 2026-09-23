@@ -27,6 +27,7 @@ namespace py = pybind11;
 void register_ifp(py::module& m)
 {
   m.def("init_fp", init_fp, py::arg("config"));
+  m.def("run_simple_fp", run_simple_fp);
   m.def("run_fp", run_fp);
   m.def("destroy_fp", destroy_fp);
 }

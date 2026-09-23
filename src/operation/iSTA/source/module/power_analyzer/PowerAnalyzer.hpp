@@ -48,7 +48,7 @@ class PowerAnalyzer
   PAModel initPAModel();
   void buildInstanceNameList(PAModel& pa_model);
   void analyzePower(PAModel& pa_model);
-  InstancePower analyzeInstancePower(std::string& instance_name);
+  InstancePower analyzeInstancePower(std::string& instance_name, PAInstanceModel& pa_instance_model);
   PowerValue getInstancePowerValue(Instance& instance, PAInstanceModel& pa_instance_model);
   void analyzeInternalPower(Instance& instance, PowerValue& power_value, PAInstanceModel& pa_instance_model);
   void buildOutputTimingPowerArcWeightMap(Instance& instance, TimingCell& timing_cell, PAInstanceModel& pa_instance_model);
@@ -57,23 +57,18 @@ class PowerAnalyzer
   double getInputTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model);
   double getOutputTimingPowerArcPower(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model);
   double getOutputTimingPowerArcWeight(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model);
-  double getOutputTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc,
-                                                      PAInstanceModel& pa_instance_model);
-  double getOutputTimingPowerArcWeightSum(TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model);
+  double getOutputTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model);
+  double getOutputTimingPowerArcWeightSum(TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model, TransType trans_type);
   double getTimingPowerArcEnergy(Instance& instance, TimingPowerArc& timing_power_arc, TransType trans_type);
   double getTimingPowerArcInputSlew(Instance& instance, TimingPowerArc& timing_power_arc, TransType trans_type);
   TimingArcSense getTimingPowerArcSense(Instance& instance, TimingPowerArc& timing_power_arc);
   double getTimingPowerArcOutputLoad(Instance& instance, TimingPowerArc& timing_power_arc, TransType trans_type);
-  double getTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc,
-                                                PAInstanceModel& pa_instance_model);
-  double getLogicExpressionStaticProbability(LogicExpression& logic_expression, Instance& instance,
-                                             PAInstanceModel& pa_instance_model);
-  double getSensitivityProbability(LogicExpression& logic_expression, const std::string& port_name, Instance& instance,
-                                   PAInstanceModel& pa_instance_model);
+  double getTimingPowerArcConditionProbability(Instance& instance, TimingPowerArc& timing_power_arc, PAInstanceModel& pa_instance_model);
+  double getLogicExpressionStaticProbability(LogicExpression& logic_expression, Instance& instance, PAInstanceModel& pa_instance_model);
+  double getSensitivityProbability(LogicExpression& logic_expression, const std::string& port_name, Instance& instance, PAInstanceModel& pa_instance_model);
   void analyzeSwitchingPower(Instance& instance, PowerValue& power_value, PAInstanceModel& pa_instance_model);
   void analyzeLeakagePower(Instance& instance, PowerValue& power_value, PAInstanceModel& pa_instance_model);
-  double getLeakageConditionProbability(Instance& instance, TimingLeakagePower& timing_leakage_power,
-                                        PAInstanceModel& pa_instance_model);
+  double getLeakageConditionProbability(Instance& instance, TimingLeakagePower& timing_leakage_power, PAInstanceModel& pa_instance_model);
   PowerActivity getPortActivity(Instance& instance, const std::string& port_name, PAInstanceModel& pa_instance_model);
   std::map<std::string, PowerActivity>& getPortActivityMap(Instance& instance, PAInstanceModel& pa_instance_model);
   PowerActivity getPinActivity(const std::string& pin_name);
@@ -81,6 +76,7 @@ class PowerAnalyzer
   double getInstanceVoltage(Instance& instance);
   PowerGroupType getPowerGroupType(Instance& instance);
   bool isClockNetwork(Instance& instance);
+  bool isActiveClockPin(Instance& instance, const std::string& port_name);
   void updatePowerSummary(PAModel& pa_model);
 };
 

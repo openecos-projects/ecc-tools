@@ -85,14 +85,6 @@ json FeatureParser::buildSummaryRT()
     pr_json["total_demand"] = summary_irt.pr_summary.total_demand;
     pr_json["total_overflow"] = summary_irt.pr_summary.total_overflow;
     pr_json["total_wire_length"] = summary_irt.pr_summary.total_wire_length;
-    for (auto& [clock_name, timing] : summary_irt.pr_summary.clock_timing_map) {
-      pr_json["clock_timing_map"]["clock_name"] = clock_name;
-      pr_json["clock_timing_map"]["timing"] = timing;
-    }
-    for (auto& [type, power] : summary_irt.pr_summary.type_power_map) {
-      pr_json["type_power_map"]["type"] = type;
-      pr_json["type_power_map"]["power"] = power;
-    }
     json_rt["PR"] = pr_json;
   }
 
@@ -115,14 +107,6 @@ json FeatureParser::buildSummaryRT()
       la_json["cut_via_num_map"][std::to_string(cut_layer_idx)] = via_num;
     }
     la_json["total_via_num"] = summary_irt.la_summary.total_via_num;
-    for (auto& [clock_name, timing] : summary_irt.la_summary.clock_timing_map) {
-      la_json["clock_timing_map"]["clock_name"] = clock_name;
-      la_json["clock_timing_map"]["timing"] = timing;
-    }
-    for (auto& [type, power] : summary_irt.la_summary.type_power_map) {
-      la_json["type_power_map"]["type"] = type;
-      la_json["type_power_map"]["power"] = power;
-    }
     json_rt["LA"] = la_json;
   }
 
@@ -148,14 +132,6 @@ json FeatureParser::buildSummaryRT()
         sr_json["cut_via_num_map"][std::to_string(cut_layer_idx)] = via_num;
       }
       sr_json["total_via_num"] = sr_summary.total_via_num;
-      for (auto& [clock_name, timing] : sr_summary.clock_timing_map) {
-        sr_json["clock_timing_map"]["clock_name"] = clock_name;
-        sr_json["clock_timing_map"]["timing"] = timing;
-      }
-      for (auto& [type, power] : sr_summary.type_power_map) {
-        sr_json["type_power_map"]["type"] = type;
-        sr_json["type_power_map"]["power"] = power;
-      }
       sr_json_list.push_back(sr_json);
     }
     json_rt["SR"] = sr_json_list;
@@ -197,14 +173,6 @@ json FeatureParser::buildSummaryRT()
         dr_json["routing_violation_num_map"][std::to_string(routing_layer_idx)] = violation_num;
       }
       dr_json["total_violation_num"] = dr_summary.total_violation_num;
-      for (auto& [clock_name, timing] : dr_summary.clock_timing_map) {
-        dr_json["clock_timing_map"]["clock_name"] = clock_name;
-        dr_json["clock_timing_map"]["timing"] = timing;
-      }
-      for (auto& [type, power] : dr_summary.type_power_map) {
-        dr_json["type_power_map"]["type"] = type;
-        dr_json["type_power_map"]["power"] = power;
-      }
       dr_json_list.push_back(dr_json);
     }
     json_rt["DR"] = dr_json_list;
@@ -233,14 +201,6 @@ json FeatureParser::buildSummaryRT()
       vr_json["among_net_routing_violation_num_map"][std::to_string(routing_layer_idx)] = violation_num;
     }
     vr_json["among_net_total_violation_num"] = summary_irt.vr_summary.among_net_total_violation_num;
-    for (auto& [clock_name, timing] : summary_irt.vr_summary.clock_timing_map) {
-      vr_json["clock_timing_map"]["clock_name"] = clock_name;
-      vr_json["clock_timing_map"]["timing"] = timing;
-    }
-    for (auto& [type, power] : summary_irt.vr_summary.type_power_map) {
-      vr_json["type_power_map"]["type"] = type;
-      vr_json["type_power_map"]["power"] = power;
-    }
     json_rt["VR"] = vr_json;
   }
 
@@ -298,39 +258,6 @@ json FeatureParser::buildSummaryCTS()
   json_cts["total_clock_wirelength"] = summary.total_clock_wirelength;
 
   return json_cts;
-}
-
-json FeatureParser::buildSummaryNetOpt()
-{
-  json json_netopt;
-
-  NetOptSummary& summary = _summary->get_summary_ino();
-
-  json json_clock_timings;
-  for (int i = 0; i < (int) summary.clock_timings.size(); ++i) {
-    NOClockTimingCmp clock_timing = summary.clock_timings[i];
-
-    json_clock_timings[i]["clock_name"] = clock_timing.clock_name;
-    json_clock_timings[i]["origin_setup_tns"] = clock_timing.origin.setup_tns;
-    json_clock_timings[i]["origin_setup_wns"] = clock_timing.origin.setup_wns;
-    json_clock_timings[i]["origin_hold_tns"] = clock_timing.origin.hold_tns;
-    json_clock_timings[i]["origin_hold_wns"] = clock_timing.origin.hold_wns;
-    json_clock_timings[i]["origin_suggest_freq"] = clock_timing.origin.suggest_freq;
-    json_clock_timings[i]["opt_setup_tns"] = clock_timing.opt.setup_tns;
-    json_clock_timings[i]["opt_setup_wns"] = clock_timing.opt.setup_wns;
-    json_clock_timings[i]["opt_hold_tns"] = clock_timing.opt.hold_tns;
-    json_clock_timings[i]["opt_hold_wns"] = clock_timing.opt.hold_wns;
-    json_clock_timings[i]["opt_suggest_freq"] = clock_timing.opt.suggest_freq;
-    json_clock_timings[i]["delta_setup_tns"] = clock_timing.delta.setup_tns;
-    json_clock_timings[i]["delta_setup_wns"] = clock_timing.delta.setup_wns;
-    json_clock_timings[i]["delta_hold_tns"] = clock_timing.delta.hold_tns;
-    json_clock_timings[i]["delta_hold_wns"] = clock_timing.delta.hold_wns;
-    json_clock_timings[i]["delta_suggest_freq"] = clock_timing.delta.suggest_freq;
-  }
-
-  json_netopt["clocks_timing"] = json_clock_timings;
-
-  return json_netopt;
 }
 
 json FeatureParser::buildSummaryTO(std::string step)
@@ -427,5 +354,5 @@ json FeatureParser::buildSummaryDRC()
 
   return summary_drc;
 }
-
+  
 }  // namespace ecc_feature

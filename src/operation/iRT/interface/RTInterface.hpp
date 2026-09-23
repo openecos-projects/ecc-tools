@@ -81,8 +81,6 @@ class RTInterface
   void runERT(std::map<std::string, std::any> config_map);
   void runRT();
   void destroyRT();
-  void cleanDef();
-  void fixFanout(std::map<std::string, std::any> config_map);
 #endif
 
 #endif
@@ -145,12 +143,6 @@ class RTInterface
                                           std::map<int32_t, std::vector<EXTLayerRect*>>& net_patch_map, std::set<ViolationType>& check_type_set,
                                           std::vector<LayerRect>& check_region_list);
   ids::Shape getIDSShape(int32_t net_idx, LayerRect layer_rect, bool is_routing);
-#endif
-
-#if 1  // iSTA
-  void updateTiming(std::vector<std::map<std::string, std::vector<LayerCoord>>>& real_pin_coord_map_list,
-                    std::vector<std::vector<Segment<LayerCoord>>>& routing_segment_list_list,
-                    std::map<std::string, std::map<std::string, double>>& clock_timing);
 #endif
 
 #endif

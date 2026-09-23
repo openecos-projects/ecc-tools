@@ -29,7 +29,6 @@
 
 #include "utility/logger/Logger.hpp"
 #include "idm.h"
-#include "tool_manager.h"
 
 namespace idm {
 /**

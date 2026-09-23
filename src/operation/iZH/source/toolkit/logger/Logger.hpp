@@ -16,9 +16,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include <cstdlib>
-#include <stdexcept>
-
 #include "LogLevel.hpp"
 #include "ZHHeader.hpp"
 

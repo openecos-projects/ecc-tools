@@ -16,10 +16,14 @@
 // ***************************************************************************************
 #pragma once
 
+#include "AnalysisType.hpp"
 #include "Logger.hpp"
 #include "STAHeader.hpp"
+#include "TransType.hpp"
 
 namespace ista {
+
+class Database;
 
 #define STAUTIL (ista::Utility::getInst())
 
@@ -30,7 +34,9 @@ class Utility
   static Utility& getInst();
   static void destroyInst();
   // function
-
+  static TransType getLaunchClockTransition(Database& database, std::string_view start);
+  static double getLaunchClockEdge(Database& database, std::string_view start, std::string_view clock);
+  static double getClockEdgeSeparation(double launch_period, double capture_period, double launch_edge, double capture_edge, AnalysisType type);
 #if 1  // std数据结构工具函数
 
   template <typename T, typename... Args>

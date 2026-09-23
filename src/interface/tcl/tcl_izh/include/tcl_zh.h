@@ -22,11 +22,11 @@ namespace tcl {
 
 #if 1  // zh
 
-class TclZHFixFanout : public TclCmd
+class TclZHInsertFiller : public TclCmd
 {
  public:
-  explicit TclZHFixFanout(const char* cmd_name);
-  ~TclZHFixFanout() override = default;
+  explicit TclZHInsertFiller(const char* cmd_name);
+  ~TclZHInsertFiller() override = default;
 
   unsigned check() override { return 1; };
 
@@ -36,11 +36,11 @@ class TclZHFixFanout : public TclCmd
   std::vector<std::pair<std::string, ValueType>> _config_list;
 };
 
-class TclZHInsertFiller : public TclCmd
+class TclZHCheckAntenna : public TclCmd
 {
  public:
-  explicit TclZHInsertFiller(const char* cmd_name);
-  ~TclZHInsertFiller() override = default;
+  explicit TclZHCheckAntenna(const char* cmd_name);
+  ~TclZHCheckAntenna() override = default;
 
   unsigned check() override { return 1; };
 

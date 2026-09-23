@@ -24,10 +24,9 @@ namespace tcl {
 
 int registerCmdZH()
 {
-  // zh
-  registerTclCmd(TclZHFixFanout, "zh_fix_fanout");
-  registerTclCmd(TclZHInsertFiller, "zh_insert_filler");
-  registerTclCmd(TclZHInsertMetal, "zh_insert_metal");
+  registerTclCmd(TclZHInsertFiller, "insert_filler");
+  registerTclCmd(TclZHCheckAntenna, "check_antenna");
+  registerTclCmd(TclZHInsertMetal, "insert_metal");
   return EXIT_SUCCESS;
 }
 

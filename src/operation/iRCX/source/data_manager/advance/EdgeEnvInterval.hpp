@@ -41,10 +41,7 @@ class EdgeEnvInterval
   void set_upper_spacing(int32_t upper_spacing) { _upper_spacing = upper_spacing; }
   void set_lower_adjacent_edge(TopoEdge* lower_adjacent_edge) { _lower_adjacent_edge = lower_adjacent_edge; }
   void set_upper_adjacent_edge(TopoEdge* upper_adjacent_edge) { _upper_adjacent_edge = upper_adjacent_edge; }
-  void set_cross_layer_overlap_list(const std::vector<CrossLayerOverlap>& cross_layer_overlap_list)
-  {
-    _cross_layer_overlap_list = cross_layer_overlap_list;
-  }
+  void set_cross_layer_overlap_list(const std::vector<CrossLayerOverlap>& cross_layer_overlap_list) { _cross_layer_overlap_list = cross_layer_overlap_list; }
   // function
 
  private:

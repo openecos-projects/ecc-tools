@@ -21,6 +21,7 @@
 namespace python_interface {
 
 bool init_fp(const std::string& config);
+bool run_simple_fp();
 bool run_fp();
 bool destroy_fp();
 

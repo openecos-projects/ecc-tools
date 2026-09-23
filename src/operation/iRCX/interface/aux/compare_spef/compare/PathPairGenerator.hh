@@ -20,8 +20,7 @@
  */
 #pragma once
 
-#include <vector>
-
+#include "RCXHeader.hpp"
 #include "compare/NetSelector.hh"
 #include "config/CompareSpefConfig.hh"
 #include "data/CompareSpefData.hh"

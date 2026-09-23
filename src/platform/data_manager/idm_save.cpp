@@ -29,6 +29,7 @@
 
 #include "utility/logger/Logger.hpp"
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 
 #include "idm.h"
@@ -78,15 +79,24 @@ bool DataManager::saveLef(string lef_path)
 }
 bool DataManager::saveMacroTCL(string tcl_path)
 {
-  std::ofstream out;
-  out.open(tcl_path);
   if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
     return false;
   }
+  if (_design == nullptr || _layout->get_units() == nullptr || tcl_path.empty()) {
+    return false;
+  }
+  std::ofstream out(tcl_path);
+  if (!out.is_open()) {
+    return false;
+  }
+  out << std::fixed << std::setprecision(6);
   std::string status = "fixed";
   auto dbu = _layout->get_units()->get_micron_dbu();
   for (auto& idb_inst : _design->get_instance_list()->get_instance_list()) {
     if (idb_inst->get_cell_master()->is_block()) {
+      if (!idb_inst->is_placed() && !idb_inst->is_fixed()) {
+        continue;
+      }
       out << "placeInstance " << idb_inst->get_name() << " " << 1.* idb_inst->get_coordinate()->get_x() / dbu << " "
           << 1.* idb_inst->get_coordinate()->get_y() / dbu << " " << IdbEnum::GetInstance()->get_orient_type_str(idb_inst->get_orient())
           << std::endl;

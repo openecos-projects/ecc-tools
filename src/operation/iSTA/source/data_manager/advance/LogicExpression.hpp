@@ -33,6 +33,26 @@ class LogicExpression
   // setter
   void set_term_list(const std::vector<LogicExpressionTerm>& term_list) { _term_list = term_list; }
   // function
+  void substitute_ports(std::map<std::string, LogicExpression>& expressions)
+  {
+    std::set<std::string> expanding;
+    std::vector<LogicExpressionTerm> terms;
+    std::function<void(LogicExpression&)> expand = [&](LogicExpression& expression) {
+      for (LogicExpressionTerm& term : expression.get_term_list()) {
+        auto replacement = expressions.find(term.get_port_name());
+        if (term.get_operation_type() == LogicOperationType::kPort && replacement != expressions.end()
+            && expanding.insert(term.get_port_name()).second) {
+          expand(replacement->second);
+          expanding.erase(term.get_port_name());
+        } else {
+          terms.push_back(term);
+        }
+      }
+    };
+    expand(*this);
+    _term_list = std::move(terms);
+  }
+
   bool get_has_port(std::string& port_name)
   {
     for (LogicExpressionTerm& term : _term_list) {
@@ -41,6 +61,17 @@ class LogicExpression
       }
     }
     return false;
+  }
+
+  std::optional<double> evaluate_probability(std::map<std::string, PowerActivity>& port_activity_map)
+  {
+    BddModel bdd_model;
+    int32_t root_node_idx = 0;
+    if (!build_bdd(bdd_model, root_node_idx)) return std::nullopt;
+    bool is_valid = true;
+    std::map<int32_t, double> probabilities;
+    double probability = get_bdd_static_probability(bdd_model, root_node_idx, port_activity_map, probabilities, is_valid);
+    return is_valid ? std::optional<double>(probability) : std::nullopt;
   }
 
   PowerActivity evaluate_activity(std::map<std::string, PowerActivity>& port_activity_map)
@@ -79,7 +110,8 @@ class LogicExpression
     return activity;
   }
 
-  double get_sensitivity_probability(std::string& port_name, std::map<std::string, PowerActivity>& port_activity_map)
+  double get_sensitivity_probability(std::string& port_name, std::map<std::string, PowerActivity>& port_activity_map,
+                                     LogicExpression* condition = nullptr)
   {
     BddModel bdd_model;
     int32_t root_node_idx = 0;
@@ -92,11 +124,41 @@ class LogicExpression
 
     int32_t port_variable_idx = bdd_model.get_port_variable_map()[port_name];
     int32_t difference_node_idx = bdd_model.get_boolean_difference(root_node_idx, port_variable_idx);
+    if (condition && !condition->get_is_empty()) {
+      int32_t condition_node_idx = 0;
+      if (!condition->build_bdd(bdd_model, condition_node_idx)) return 0.0;
+      difference_node_idx = bdd_model.get_and_node(difference_node_idx, condition_node_idx);
+    }
     bool is_valid = true;
     std::map<int32_t, double> static_probability_map;
-    double sensitivity_probability
-        = get_bdd_static_probability(bdd_model, difference_node_idx, port_activity_map, static_probability_map, is_valid);
+    double sensitivity_probability = get_bdd_static_probability(bdd_model, difference_node_idx, port_activity_map, static_probability_map, is_valid);
     return is_valid ? sensitivity_probability : 0.0;
+  }
+
+  std::optional<bool> evaluate_constant(const std::map<std::string, bool>& port_values)
+  {
+    BddModel bdd_model;
+    int32_t root_node_idx = 0;
+    if (!build_bdd(bdd_model, root_node_idx)) {
+      return std::nullopt;
+    }
+    return evaluate_bdd_constant(bdd_model, root_node_idx, port_values);
+  }
+
+  bool is_sensitive_to(std::string port_name, const std::map<std::string, bool>& port_values)
+  {
+    BddModel bdd_model;
+    int32_t root_node_idx = 0;
+    if (!build_bdd(bdd_model, root_node_idx)) {
+      return true;
+    }
+    const auto variable = bdd_model.get_port_variable_map().find(port_name);
+    if (variable == bdd_model.get_port_variable_map().end()) {
+      return false;
+    }
+    const int32_t difference_node_idx = bdd_model.get_boolean_difference(root_node_idx, variable->second);
+    const std::optional<bool> sensitive = evaluate_bdd_constant(bdd_model, difference_node_idx, port_values);
+    return !sensitive.has_value() || *sensitive;
   }
 
  private:
@@ -202,8 +264,8 @@ class LogicExpression
       if (node_variable_idx == variable_idx) {
         difference_node_idx = get_xor_node(low_node_idx, high_node_idx);
       } else {
-        difference_node_idx = get_unique_node(node_variable_idx, get_boolean_difference(low_node_idx, variable_idx),
-                                              get_boolean_difference(high_node_idx, variable_idx));
+        difference_node_idx
+            = get_unique_node(node_variable_idx, get_boolean_difference(low_node_idx, variable_idx), get_boolean_difference(high_node_idx, variable_idx));
       }
       _boolean_difference_map[std::make_pair(node_idx, variable_idx)] = difference_node_idx;
       return difference_node_idx;
@@ -226,16 +288,12 @@ class LogicExpression
       }
 
       int32_t variable_idx = std::min(get_node_variable_idx(left_node_idx), get_node_variable_idx(right_node_idx));
-      int32_t left_low_node_idx = get_node_variable_idx(left_node_idx) == variable_idx ? _node_list[left_node_idx].get_low_node_idx()
-                                                                                         : left_node_idx;
-      int32_t left_high_node_idx = get_node_variable_idx(left_node_idx) == variable_idx ? _node_list[left_node_idx].get_high_node_idx()
-                                                                                          : left_node_idx;
-      int32_t right_low_node_idx = get_node_variable_idx(right_node_idx) == variable_idx ? _node_list[right_node_idx].get_low_node_idx()
-                                                                                           : right_node_idx;
-      int32_t right_high_node_idx = get_node_variable_idx(right_node_idx) == variable_idx ? _node_list[right_node_idx].get_high_node_idx()
-                                                                                            : right_node_idx;
+      int32_t left_low_node_idx = get_node_variable_idx(left_node_idx) == variable_idx ? _node_list[left_node_idx].get_low_node_idx() : left_node_idx;
+      int32_t left_high_node_idx = get_node_variable_idx(left_node_idx) == variable_idx ? _node_list[left_node_idx].get_high_node_idx() : left_node_idx;
+      int32_t right_low_node_idx = get_node_variable_idx(right_node_idx) == variable_idx ? _node_list[right_node_idx].get_low_node_idx() : right_node_idx;
+      int32_t right_high_node_idx = get_node_variable_idx(right_node_idx) == variable_idx ? _node_list[right_node_idx].get_high_node_idx() : right_node_idx;
       int32_t binary_node_idx = get_unique_node(variable_idx, get_binary_node(operation_type, left_low_node_idx, right_low_node_idx),
-                                               get_binary_node(operation_type, left_high_node_idx, right_high_node_idx));
+                                                get_binary_node(operation_type, left_high_node_idx, right_high_node_idx));
       _binary_node_map[key] = binary_node_idx;
       return binary_node_idx;
     }
@@ -340,8 +398,23 @@ class LogicExpression
     return true;
   }
 
-  double get_bdd_static_probability(BddModel& bdd_model, const int32_t node_idx,
-                                    std::map<std::string, PowerActivity>& port_activity_map,
+  std::optional<bool> evaluate_bdd_constant(BddModel& bdd_model, int32_t node_idx, const std::map<std::string, bool>& port_values)
+  {
+    if (node_idx == 0 || node_idx == 1) {
+      return node_idx == 1;
+    }
+    BddNode& node = bdd_model.get_node(node_idx);
+    const std::string& port_name = bdd_model.get_port_name(node.get_variable_idx());
+    const auto value = port_values.find(port_name);
+    if (value != port_values.end()) {
+      return evaluate_bdd_constant(bdd_model, value->second ? node.get_high_node_idx() : node.get_low_node_idx(), port_values);
+    }
+    const std::optional<bool> low = evaluate_bdd_constant(bdd_model, node.get_low_node_idx(), port_values);
+    const std::optional<bool> high = evaluate_bdd_constant(bdd_model, node.get_high_node_idx(), port_values);
+    return low.has_value() && high.has_value() && *low == *high ? low : std::nullopt;
+  }
+
+  double get_bdd_static_probability(BddModel& bdd_model, const int32_t node_idx, std::map<std::string, PowerActivity>& port_activity_map,
                                     std::map<int32_t, double>& static_probability_map, bool& is_valid)
   {
     if (node_idx == 0) {
@@ -364,14 +437,12 @@ class LogicExpression
 
     double static_probability = port_activity.get_static_probability();
     if (static_probability <= STA_ERROR) {
-      double probability
-          = get_bdd_static_probability(bdd_model, node.get_low_node_idx(), port_activity_map, static_probability_map, is_valid);
+      double probability = get_bdd_static_probability(bdd_model, node.get_low_node_idx(), port_activity_map, static_probability_map, is_valid);
       static_probability_map[node_idx] = probability;
       return probability;
     }
     if (static_probability >= 1.0 - STA_ERROR) {
-      double high_probability
-          = get_bdd_static_probability(bdd_model, node.get_high_node_idx(), port_activity_map, static_probability_map, is_valid);
+      double high_probability = get_bdd_static_probability(bdd_model, node.get_high_node_idx(), port_activity_map, static_probability_map, is_valid);
       static_probability_map[node_idx] = high_probability;
       return high_probability;
     }
@@ -379,8 +450,7 @@ class LogicExpression
     if (!is_valid) {
       return 0.0;
     }
-    double high_probability
-        = get_bdd_static_probability(bdd_model, node.get_high_node_idx(), port_activity_map, static_probability_map, is_valid);
+    double high_probability = get_bdd_static_probability(bdd_model, node.get_high_node_idx(), port_activity_map, static_probability_map, is_valid);
     if (!is_valid) {
       return 0.0;
     }
@@ -389,8 +459,7 @@ class LogicExpression
     return probability;
   }
 
-  double get_bdd_transition_density(BddModel& bdd_model, const int32_t root_node_idx,
-                                    std::map<std::string, PowerActivity>& port_activity_map,
+  double get_bdd_transition_density(BddModel& bdd_model, const int32_t root_node_idx, std::map<std::string, PowerActivity>& port_activity_map,
                                     std::map<int32_t, double>& static_probability_map, bool& is_valid)
   {
     double transition_density = 0.0;
@@ -501,18 +570,16 @@ class LogicExpression
   {
     double left_probability = left_activity.get_static_probability();
     double right_probability = right_activity.get_static_probability();
-    double transition_density = left_activity.get_transition_density() * (1.0 - right_probability)
-                                + right_activity.get_transition_density() * (1.0 - left_probability);
-    return get_binary_activity(transition_density, left_probability + right_probability - left_probability * right_probability,
-                               left_activity, right_activity);
+    double transition_density
+        = left_activity.get_transition_density() * (1.0 - right_probability) + right_activity.get_transition_density() * (1.0 - left_probability);
+    return get_binary_activity(transition_density, left_probability + right_probability - left_probability * right_probability, left_activity, right_activity);
   }
 
   PowerActivity get_and_activity(PowerActivity& left_activity, PowerActivity& right_activity)
   {
     double left_probability = left_activity.get_static_probability();
     double right_probability = right_activity.get_static_probability();
-    double transition_density
-        = left_activity.get_transition_density() * right_probability + right_activity.get_transition_density() * left_probability;
+    double transition_density = left_activity.get_transition_density() * right_probability + right_activity.get_transition_density() * left_probability;
     return get_binary_activity(transition_density, left_probability * right_probability, left_activity, right_activity);
   }
 

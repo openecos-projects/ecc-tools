@@ -110,7 +110,6 @@ scripts/design/sky130_gcd/script
 ├── DB_script                           # Data process flow scripts
 │   ├── db_init_lef.tcl                 # initialize lef
 │   ├── db_init_lib_drv.tcl             # initialize lib only for flow of drv 
-│   ├── db_init_lib_fixfanout.tcl       # initialize lib only for flow of fix fanout
 │   ├── db_init_lib_hold.tcl            # initialize lib only for flow of optimize hold
 │   ├── db_init_lib_setup.tcl           # initialize lib only for flow of optimize setup
 │   ├── db_init_lib.tcl                 # initialize lib for common flow
@@ -139,8 +138,6 @@ scripts/design/sky130_gcd/script
 │   └── run_iFP.tcl                     # run Floorplan
 ├── iGUI_script                         # GUI flow scipts
 │   └── run_iGUI.tcl                    # run GUI
-├── iNO_script                          # NO(Netlist Optimization) flow scipts
-│   └── run_iNO_fix_fanout.tcl          # run Fix Fanout
 ├── iPL_script                          # Placement flow scripts
 │   ├── run_iPL_eval.tcl                # report congestion statistics and wire legnth for Placement result
 │   ├── run_iPL_filler.tcl              # run standard cell filler
@@ -181,7 +178,6 @@ scripts/design/sky130_gcd/script
 | 设置 TechLef 路径                 | set TECH_LEF_PATH xxx      | set TECH_LEF_PATH "./lef/sky130_fd_sc_hs.tlef"          |
 | 设置 Lef 路径                     | set LEF_PATH xxx           | set LEF_PATH ./lef/sky130_ef_io__com_bus_slice_10um.lef |
 | 设置 Lib 路径                     | set LIB_PATH xxx           | set LIB_PATH ./lib/sky130_dummy_io.lib                  |
-| 设置 Fix Fanout Lib 路径          | set LIB_PATH_FIXFANOUT xxx | set LIB_PATH_FIXFANOUT ./lib/sky130_dummy_io.lib        |
 | 设置 Fix DRV Violation Lib 路径   | set LIB_PATH_DRV xxx       | set LIB_PATH_DRV ./lib/sky130_dummy_io.lib              |
 | 设置 Fix Hold Violation Lib 路径  | set LIB_PATH_HOLD xxx      | set LIB_PATH_HOLD ./lib/sky130_dummy_io.lib             |
 | 设置 Fix Setup Violation Lib 路径 | set LIB_PATH_SETUP xxx     | set LIB_PATH_SETUP ./lib/sky130_dummy_io.lib            |
@@ -746,8 +742,7 @@ cd <sky130 path>
 | Flow                               | Script                                                           | Config                                    | Design Input                       | Design Output                                                               | Report                                                                                                      |
 | :--------------------------------- | :--------------------------------------------------------------- | :---------------------------------------- | :--------------------------------- | :-------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------- |
 | 布图规划 (Floorpan)                | ./iEDA -script ./script/iFP_script/run_iFP.tcl                   |                                           | ./result/verilog/gcd.v             | ./result/iFP_result.def`<br>` ./result/iFP_result.v                       | ./result/report/fp_db.rpt                                                                                   |
-| 网表优化（Fix Fanout）             | ./iEDA -script ./script/iNO_script/run_iNO_fix_fanout.tcl        | ./iEDA_config/cts_default_config.json     | ./result/iFP_result.def            | ./result/iTO_fix_fanout_result.def`<br>` ./result/iTO_fix_fanout_result.v | ./result/report/fixfanout_db.rpt                                                                            |
-| 布局 (Placement)                   | ./iEDA -script ./script/iPL_script/run_iPL.tcl                   | ./iEDA_config/pl_default_config.json      | ./result/iTO_fix_fanout_result.def | ./result/iPL_result.def`<br>` ./result/iPL_result.v                       | ./result/report/pl_db.rpt                                                                                   |
+| 布局 (Placement)                   | ./iEDA -script ./script/iPL_script/run_iPL.tcl                   | ./iEDA_config/pl_default_config.json      | ./result/iFP_result.def            | ./result/iPL_result.def`<br>` ./result/iPL_result.v                       | ./result/report/pl_db.rpt                                                                                   |
 | 布局结果评估 (评估线长和拥塞)      | ./iEDA -script ./script/iPL_script/run_iPL_eval.tcl              |                                           | ./result/iPL_result.def            |                                                                             | ./result/report/eval/iPL_result_wirelength.rpt`<br>` ./result/report/eval/iPL_result_congestion.rpt       |
 | 时钟树综合 (CTS)                   | ./iEDA -script ./script/iCTS_script/run_iCTS.tcl                 | ./iEDA_config/cts_default_config.json     | ./result/iPL_result.def            | ./result/iCTS_result.def`<br>` ./result/iCTS_result.v                     | ./result/report/cts_db.rpt                                                                                  |
 | 时钟树综合结果评估 (评估线长)      | ./iEDA -script ./script/iCTS_script/run_iCTS_eval.tcl            |                                           | ./result/iCTS_result.def           |                                                                             | ./result/report/eval/iCTS_result_wirelength.rpt                                                             |
@@ -814,80 +809,6 @@ PDN
 
 <div align=center> <img src="pic/gui/gui_floorplan_pdn.png" style="zoom:50%;" /> </div>
 
-#### 网表优化（Fix Fanout）
-
-**执行脚本**`<br>`
-
-```bash
-./iEDA -script ./script/iNO_script/run_iNO_fix_fanout.tcl 
-```
-
-**参数配置**`<br>`
-参数配置的路径在 ./iEDA_config/no_default_config_fixfanout.json，如下所示
-
-```json
-{
-    "file_path": {
-        "design_work_space": "./result/no",
-        "sdc_file": "",
-        "lib_files": "",
-        "lef_files": "",
-        "def_file": "",
-        "output_def": "",
-        "report_file": "./result/no/report.txt"
-    },
-    "insert_buffer": "sky130_fd_sc_hs__buf_8",
-    "max_fanout": 30
-}
-```
-
-可配置参数定义如下
-
-| 参数名            | 默认值                 | 说明                                 |
-| :---------------- | :--------------------- | :----------------------------------- |
-| design_work_space | ./result/no            | 设置 Fix Fanout 运行过程的工作区路径 |
-| sdc_file          |                        | 无效参数，后续删除                   |
-| lib_files         |                        | 无效参数，后续删除                   |
-| lef_files         |                        | 无效参数，后续删除                   |
-| def_file          |                        | 无效参数，后续删除                   |
-| output_def        |                        | 无效参数，后续删除                   |
-| report_file       | ./result/no/report.txt | Fix Fanout 过程中产生的报告          |
-| insert_buffer     | sky130_fd_sc_hs__buf_8 | 设置插入的 buffer 名称               |
-| max_fanout        | 30                     | 最大Fanout数量                       |
-
-**输入**`<br>`
-
-- ./result/iFP_result.def
-
-**输出**`<br>`
-
-- ./result/iTO_fix_fanout_result.def
-- ./result/iTO_fix_fanout_result.v
-
-**评测和报告**`<br>`
-
-- ./result/report/fixfanout_db.rpt
-
-**GUI**`<br>`
-step 1：修改脚本 ./script/iGUI_script/run_iGUI.tcl 的输入设计 def 为 ./result/iTO_fix_fanout_result.def
-
-```
-#===========================================================
-##   read def
-#===========================================================
-def_init -path ./result/iTO_fix_fanout_result.def
-```
-
-step 2: 执行iEDA GUI脚本
-
-```bash
-./iEDA_gui -script ./script/iGUI_script/run_iGUI.tcl 
-```
-
-step 3: 查看GUI
-
-<div align=center> <img src="pic/gui/gui_fixfanout.png" style="zoom:50%;" /> </div>
-
 #### 布局 (Placement)
 
 **执行脚本**`<br>`
@@ -947,7 +868,7 @@ step 3: 查看GUI
 
 **输入**`<br>`
 
-- ./result/iTO_fix_fanout_result.def
+- ./result/iFP_result.def
 
 **输出**`<br>`
 

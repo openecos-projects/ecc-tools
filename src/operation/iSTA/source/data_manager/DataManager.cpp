@@ -18,8 +18,8 @@
 
 #include "Logger.hpp"
 #include "Monitor.hpp"
-#include "SdcCommand.hpp"
 #include "STAInterface.hpp"
+#include "SdcCommand.hpp"
 #include "Utility.hpp"
 
 namespace ista {
@@ -309,6 +309,15 @@ void DataManager::readConstraint()
   database.get_timing_constraint().get_clock_map().clear();
   database.get_timing_constraint().get_port_constraint_map().clear();
   database.get_timing_constraint().get_case_analysis_map().clear();
+  database.get_timing_constraint().get_effective_case_analysis_map().clear();
+  database.get_timing_constraint().get_path_exception_list().clear();
+  database.get_timing_constraint().get_clock_group_list().clear();
+  database.get_timing_constraint().get_max_fanout().reset();
+  database.get_timing_constraint().get_port_max_fanout_map().clear();
+  database.get_timing_constraint().get_net_load_map().clear();
+  database.get_timing_constraint().get_clock_uncertainty_list().clear();
+  database.get_timing_constraint().get_path_break_start_points().clear();
+  database.get_timing_constraint().get_path_break_end_points().clear();
   if (sdc_file_path.empty()) {
     return;
   }
@@ -318,9 +327,9 @@ void DataManager::readConstraint()
     for (const SdcError& error : sdc_command.getErrors()) {
       STALOG.warn(Loc::current(), "SDC command failed in '", sdc_file_path, "' at line ", error.line_number, ": ", error.message);
     }
+    STALOG.error(Loc::current(), "SDC contains invalid or unsupported constraints; timing analysis stopped");
   }
 }
-
 
 void DataManager::printConfig()
 {
@@ -335,10 +344,6 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.path_report_number);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "endpoint_path_report_number");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.endpoint_path_report_number);
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_report_delay_type");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_report_delay_type);
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_report_start_end_type");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_report_start_end_type);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "has_timing_report_slack_lesser_than");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.has_timing_report_slack_lesser_than);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_report_slack_lesser_than");
@@ -351,6 +356,8 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.output_timing_reports);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "output_timing_features");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.output_timing_features);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "min_slew_degradation");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.min_slew_degradation);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_path_limit");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_path_limit);
   // **********        STA        ********** //

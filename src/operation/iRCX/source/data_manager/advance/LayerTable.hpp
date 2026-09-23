@@ -33,14 +33,8 @@ class LayerTable
   std::unordered_map<std::string, std::string>& get_design_name_to_process_name_map() { return _design_name_to_process_name_map; }
   std::unordered_map<std::string, std::string>& get_process_name_to_design_name_map() { return _process_name_to_design_name_map; }
   // setter
-  void set_design_idx_to_name_map(const std::unordered_map<int32_t, std::string>& design_idx_to_name_map)
-  {
-    _design_idx_to_name_map = design_idx_to_name_map;
-  }
-  void set_design_name_to_idx_map(const std::unordered_map<std::string, int32_t>& design_name_to_idx_map)
-  {
-    _design_name_to_idx_map = design_name_to_idx_map;
-  }
+  void set_design_idx_to_name_map(const std::unordered_map<int32_t, std::string>& design_idx_to_name_map) { _design_idx_to_name_map = design_idx_to_name_map; }
+  void set_design_name_to_idx_map(const std::unordered_map<std::string, int32_t>& design_name_to_idx_map) { _design_name_to_idx_map = design_name_to_idx_map; }
   void set_process_idx_to_name_map(const std::unordered_map<int32_t, std::string>& process_idx_to_name_map)
   {
     _process_idx_to_name_map = process_idx_to_name_map;

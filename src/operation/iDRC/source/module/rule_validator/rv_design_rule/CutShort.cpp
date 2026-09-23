@@ -20,7 +20,6 @@ namespace idrc {
 
 void RuleValidator::verifyCutShort(RVCluster& rv_cluster)
 {
-  std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
   const auto& layer_data = rv_cluster.get_layer_data();
 
   for (const auto& [cut_layer_idx, rv_layer_data] : layer_data) {
@@ -30,7 +29,7 @@ void RuleValidator::verifyCutShort(RVCluster& rv_cluster)
     std::vector<Violation> layer_violations;
     int32_t routing_layer_idx = -1;
     {
-      std::vector<int32_t>& routing_layer_idx_list = cut_to_adjacent_routing_map[cut_layer_idx];
+      const std::vector<int32_t>& routing_layer_idx_list = DRCDM.getAdjacentRoutingLayerIdxList(cut_layer_idx);
       routing_layer_idx = *std::min_element(routing_layer_idx_list.begin(), routing_layer_idx_list.end());
     }
 

@@ -37,16 +37,11 @@ class PRModel
   void set_pr_net_list(const std::vector<PRNet>& pr_net_list) { _pr_net_list = pr_net_list; }
   void set_pr_com_param(const PRComParam& pr_com_param) { _pr_com_param = pr_com_param; }
 
-  // single task
-  PRNet* get_curr_pr_task() { return _curr_pr_task; }
-  void set_curr_pr_task(PRNet* curr_pr_task) { _curr_pr_task = curr_pr_task; }
-
  private:
   std::vector<PRNet> _pr_net_list;
   PRComParam _pr_com_param;
   std::vector<PRNet*> _pr_task_list;
   std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_global_result_map;
-  PRNet* _curr_pr_task = nullptr;
 };
 
 }  // namespace irt

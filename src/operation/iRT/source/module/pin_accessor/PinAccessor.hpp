@@ -27,11 +27,46 @@
 #include "PAModel.hpp"
 #include "PANet.hpp"
 #include "PANode.hpp"
+#include "PAPatch.hpp"
 #include "RTHeader.hpp"
 
 namespace irt {
 
 #define RTPA (irt::PinAccessor::getInst())
+
+class DETask;
+
+struct PALegalShape
+{
+  LayerRect shape;
+  ViaMasterIdx via_master_idx;
+};
+
+struct PACandidateAccessPoint
+{
+  LayerCoord coord;
+  int32_t track_num = 0;
+};
+
+struct CmpPACandidateAccessPoint
+{
+  bool operator()(const PACandidateAccessPoint& a, const PACandidateAccessPoint& b) const
+  {
+    return a.track_num != b.track_num ? a.track_num > b.track_num : CmpLayerCoordByXASC()(a.coord, b.coord);
+  }
+};
+
+enum class PAPatchSelectionType
+{
+  kNone,
+  kImproved
+};
+
+struct PAPatchSelection
+{
+  PAPatchSelectionType type = PAPatchSelectionType::kNone;
+  int32_t candidate_idx = -1;
+};
 
 class PinAccessor
 {
@@ -52,27 +87,52 @@ class PinAccessor
   ~PinAccessor() = default;
   PinAccessor& operator=(const PinAccessor& other) = delete;
   PinAccessor& operator=(PinAccessor&& other) = delete;
-  // function
+  // Model, stage, box and task flow.
+  void routePAModel(PAModel& pa_model);
+  void routePABoxMap(PAModel& pa_model);
+  void routePABoxList(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list);
+  void routePABox(PAModel& pa_model, PABox& pa_box);
+  void routePABox(PABox& pa_box);
+  void routePATask(PABox& pa_box, PATask* pa_task);
+  void patchPATask(PABox& pa_box, PATask* pa_task);
+
+  // Model and candidate preparation.
   PAModel initPAModel();
   std::vector<PANet> convertToPANetList(std::vector<Net>& net_list);
   PANet convertToPANet(Net& net);
   void setPAComParam(PAModel& pa_model);
-  void initAccessPointList(PAModel& pa_model);
-  std::vector<LayerRect> getLegalShapeList(PAModel& pa_model, int32_t net_idx, PAPin* pa_pin);
-  std::vector<PlanarRect> getPlanarLegalRectList(PAModel& pa_model, int32_t curr_net_idx, PAPin* pa_pin, std::vector<EXTLayerRect>& pin_shape_list);
-  std::vector<AccessPoint> getAccessPointList(PAModel& pa_model, int32_t pin_idx, std::vector<LayerRect>& legal_shape_list);
-  void uniformSampleCoordList(PAModel& pa_model, std::vector<LayerCoord>& layer_coord_list);
+  void initAccessPointList(PAModel& pa_model, bool enable_via_candidates);
+  std::vector<PALegalShape> getLegalShapeList(int32_t net_idx, PAPin& pa_pin, const std::map<int32_t, std::vector<ViaMaster*>>& selected_via_master_list_map);
+  std::vector<PALegalShape> getPlanarLegalShapeList(int32_t curr_net_idx, const std::vector<EXTLayerRect>& pin_shape_list, ViaMaster* via_master);
+  std::array<int32_t, 2> getAccessObstacleLayerList(int32_t curr_layer_idx, ViaMaster* via_master);
+  std::vector<PlanarRect> getAccessObstacleList(int32_t curr_net_idx, int32_t curr_layer_idx, int32_t obs_layer_idx,
+                                                const std::vector<PlanarRect>& shrinked_rect_list, ViaMaster* via_master);
+  std::vector<AccessPoint> getAccessPointList(PAModel& pa_model, int32_t pin_idx, std::vector<PALegalShape>& legal_shape_list);
+  std::vector<int32_t> getCandidateAxisCoordList(int32_t ll, int32_t ur, int32_t manufacture_grid, const std::vector<int32_t>& track_list);
+  std::vector<PACandidateAccessPoint> getRankedAccessPointList(const std::map<LayerCoord, int32_t, CmpLayerCoordByXASC>& coord_track_num_map);
+  std::vector<AccessPoint> selectViaAccessPointList(
+      int32_t pin_idx, int32_t ap_per_via_master, double violation_unit,
+      const std::map<std::pair<int32_t, int32_t>, std::map<LayerCoord, int32_t, CmpLayerCoordByXASC>>& via_coord_track_num_map);
+  std::vector<AccessPoint> selectPlanarAccessPointList(int32_t pin_idx, int32_t max_candidate_point_num, double violation_unit,
+                                                       const std::map<LayerCoord, int32_t, CmpLayerCoordByXASC>& coord_track_num_map);
+  double getAccessPointInitCost(int32_t track_num, double violation_unit);
+  int32_t getTargetLayerIdx(bool is_core, int32_t curr_layer_idx);
+  void buildPinTargetCoordList(PAPin& pa_pin);
+  void buildLayerTargetCoordList(RoutingLayer& source_layer, int32_t target_layer_idx, const std::vector<PlanarRect>& region_list,
+                                 std::vector<LayerCoord>& target_coord_list);
+  std::vector<ViaMaster*> getSelectedViaMasterList(PAModel& pa_model, int32_t routing_layer_idx);
+  PlanarRect getViaEnclosure(ViaMaster& via_master, int32_t routing_layer_idx);
+  void uniformSampleCoordList(std::vector<LayerCoord>& layer_coord_list, int32_t max_candidate_point_num);
   void buildAccessPointRTree(PAModel& pa_model);
-  void routePAModel(PAModel& pa_model);
-  void initRoutingState(PAModel& pa_model);
+
+  // Iteration setup and stage environment.
   void setPAIterParam(PAModel& pa_model, int32_t iter, PAIterParam& pa_iter_param);
   void initPABoxMap(PAModel& pa_model);
+  void buildPinOwner(PAModel& pa_model);
   PABoxId getPABoxId(PAModel& pa_model, const PlanarCoord& coord);
   std::set<PABoxId, CmpPABoxId> getPABoxIdSet(PAModel& pa_model, PlanarRect real_rect);
-  void resetRoutingState(PAModel& pa_model);
   void buildBoxSchedule(PAModel& pa_model);
   void splitPAResult(PAModel& pa_model);
-  void routePABoxMap(PAModel& pa_model);
   void freePABoxMap(PAModel& pa_model);
   void buildPAEnvironment(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list, bool include_active_box);
   void addPAResultToEnvironment(PAModel& pa_model, GridMap<bool>& active_box_map, GridMap<omp_lock_t>& environment_lock_map, int32_t net_idx, int32_t pin_idx,
@@ -82,34 +142,31 @@ class PinAccessor
   void buildFixedRect(PABox& pa_box);
   void buildAccessPoint(PAModel& pa_model, PABox& pa_box);
   void initPATaskList(PAModel& pa_model, PABox& pa_box);
+  void initPATaskResult(PABox& pa_box);
   void buildRouteViolation(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list);
-  void updateRouteViolation(PAModel& pa_model, std::vector<std::vector<Violation>>& stage_violation_list_list);
+  void updateRouteViolation(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list);
+
+  // Box graph and task routing.
   bool needRouting(PABox& pa_box);
   void buildBoxTrackAxis(PABox& pa_box);
   void buildLayerNodeMap(PABox& pa_box);
   void buildLayerShadowMap(PABox& pa_box);
   void buildPANodeNeighbor(PABox& pa_box);
-  void buildOrientNetMap(PABox& pa_box);
-  void buildNetShadowMap(PABox& pa_box);
+  void buildBoxEnvironment(PABox& pa_box);
   void exemptPinShape(PAModel& pa_model, PABox& pa_box);
-  void routePABox(PABox& pa_box);
-  std::vector<PATask*> initTaskSchedule(PABox& pa_box);
-  void updateGraph(PABox& pa_box, PATask* pa_task);
-  void routePATask(PABox& pa_box, PATask* pa_task);
+  std::vector<int32_t> initTaskSchedule(PABox& pa_box);
+  void removeTaskResult(PABox& pa_box, PATask* pa_task);
   void initSingleRouteTask(PABox& pa_box, PATask* pa_task);
-  bool isConnectedAllEnd(PABox& pa_box);
-  void routeSinglePath(PABox& pa_box);
+  [[nodiscard]] bool routeSinglePath(PABox& pa_box);
   void initPathHead(PABox& pa_box);
-  bool searchEnded(PABox& pa_box);
+  bool reachEnd(PABox& pa_box);
   void expandSearching(PABox& pa_box);
   void resetPathHead(PABox& pa_box);
-  void updatePathResult(PABox& pa_box);
   std::vector<Segment<LayerCoord>> getRoutingSegmentListByNode(PANode* node);
-  void resetStartAndEnd(PABox& pa_box);
-  void resetSinglePath(PABox& pa_box);
+  void updateSegmentViaMaster(Segment<LayerCoord>& segment);
+  void selectAccessPoint(PABox& pa_box);
   void updateTaskResult(PABox& pa_box);
   std::vector<Segment<LayerCoord>> getRoutingSegmentList(PABox& pa_box);
-  void resetSingleRouteTask(PABox& pa_box);
   void pushToOpenList(PABox& pa_box, PANode* curr_node);
   PANode* popFromOpenList(PABox& pa_box);
   double getKnownCost(PABox& pa_box, PANode* start_node, PANode* end_node);
@@ -117,30 +174,41 @@ class PinAccessor
   double getKnownWireCost(PABox& pa_box, PANode* start_node, PANode* end_node);
   double getKnownViaCost(PABox& pa_box, PANode* start_node, PANode* end_node);
   double getKnownSelfCost(PABox& pa_box, PANode* start_node, PANode* end_node);
+  ViaMasterIdx getSelectedViaMasterIdx(PABox& pa_box, AccessPoint& access_point, const LayerCoord& via_coord);
+  double getViaMasterCost(PABox& pa_box, int32_t net_idx, const Segment<LayerCoord>& via_segment);
+  double getViaShapeCost(std::vector<NetShape>& query_shape_list, bool is_routing, int32_t layer_idx, const PlanarRect& rect);
+  double getViaResultCost(std::vector<NetShape>& query_shape_list, int32_t net_idx, Segment<LayerCoord>& segment);
   double getEstimateCostToEnd(PABox& pa_box, PANode* curr_node);
   double getEstimateCost(PABox& pa_box, PANode* start_node, PANode* end_node);
   double getEstimateWireCost(PABox& pa_box, PANode* start_node, PANode* end_node);
-  double getEstimateViaCost(PABox& pa_box, PANode* start_node, PANode* end_node);
-  void patchPATask(PABox& pa_box, PATask* pa_task);
+
+  // Patch generation, selection and publication.
   void initSinglePatchTask(PABox& pa_box, PATask* pa_task);
-  std::vector<Violation> getPatchViolationList(PABox& pa_box, const std::set<ViolationType>& check_type_set, const std::vector<LayerRect>& check_region_list);
-  bool searchViolation(PABox& pa_box);
-  bool isValidPatchViolation(PABox& pa_box, Violation& violation);
-  std::vector<PlanarRect> getViolationOverlapRect(PABox& pa_box, Violation& violation);
-  void addViolationToShadow(PABox& pa_box);
-  void patchSingleViolation(PABox& pa_box);
-  std::vector<PAPatch> getCandidatePatchList(PABox& pa_box);
-  bool getSolvedStatus(PABox& pa_box, std::vector<Violation>& origin_patch_violation_list, std::vector<Violation>& curr_patch_violation_list);
+  bool searchViolation(PABox& pa_box, GTLPolyInt& patch_poly);
+  bool isBoxMinAreaViolation(PABox& pa_box, const Violation& violation);
+  GTLPolyInt getViolationOverlapPoly(PABox& pa_box, Violation& violation);
+  void patchSingleViolation(PABox& pa_box, const GTLPolyInt& patch_poly);
+  PAPatchSelection selectPatch(PABox& pa_box, const GTLPolyInt& patch_poly, std::vector<PAPatch>& candidate_patch_list);
+  std::vector<PAPatch> getCandidatePatchList(PABox& pa_box, const GTLPolyInt& patch_poly);
+  std::vector<PAPatch> getCompactPatchList(PABox& pa_box, const GTLPolyInt& patch_poly, const std::vector<PAPatch>& candidate_patch_list);
+  void updatePatchCost(PABox& pa_box, PAPatch& pa_patch, const std::vector<GTLRectInt>& poly_rect_list);
+  std::vector<PAPatch> selectCandidatePatchList(PABox& pa_box, std::vector<PAPatch>& pa_patch_list);
+  bool isPatchImprovement(PABox& pa_box, const std::vector<Violation>& origin_patch_violation_list, const std::vector<Violation>& curr_patch_violation_list);
   void resetSingleViolation(PABox& pa_box);
-  void clearViolationShadow(PABox& pa_box);
   void updateTaskPatch(PABox& pa_box);
-  void resetSinglePatchTask(PABox& pa_box);
+
+  // Results, convergence and publication.
   void updateRouteViolationList(PABox& pa_box);
   std::vector<Violation> getRouteViolationList(PABox& pa_box);
+  int32_t getViolationWeight(ViolationType violation_type);
+  int32_t getViolationScore(const std::vector<Violation>& violation_list);
+  LayerCoord getAccessCoord(PATask* pa_task);
+  bool isAPViaSegment(const Segment<LayerCoord>& segment, const LayerCoord& access_coord);
   void updateAccessPoint(PABox& pa_box);
   void updateBestResult(PABox& pa_box);
-  void updateTaskSchedule(PABox& pa_box, std::vector<PATask*>& routing_task_list);
+  void updateTaskSchedule(PABox& pa_box, std::vector<int32_t>& routing_task_list, int32_t routing_rounds);
   void selectBestResult(PABox& pa_box);
+  void uploadPABoxResult(PABox& pa_box);
   void freePABox(PABox& pa_box);
   void updatePAModel(PAModel& pa_model);
   int32_t getRouteViolationNum(PAModel& pa_model);
@@ -155,48 +223,48 @@ class PinAccessor
   void uploadAccessPatch(PAModel& pa_model);
   void uploadViolation(PAModel& pa_model);
 
-#if 1  // update env
-  void updateFixedRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
-  void updateFixedRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, LayerRect& real_rect, bool is_routing);
-  void updateFixedRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>* segment);
-  void updateRoutedRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, LayerRect& real_rect, bool is_routing);
-  void updateRoutedRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>& segment);
-  void updateRoutedRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect& routed_rect, bool is_routing);
+  // DRC input and checks.
+  std::vector<Violation> getPatchViolationList(PABox& pa_box, const std::set<ViolationType>& check_type_set, const std::vector<LayerRect>& check_region_list);
+  bool overlapCheckRegion(int32_t layer_idx, const PlanarRect& real_rect, const std::vector<LayerRect>& check_region_list);
+  void addFixedRectToDETask(DETask& de_task, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
+  void buildFixedDETask(DETask& de_task, const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& fixed_rect_map);
+  void buildFixedDETask(DETask& de_task, const PAFixedGeometry& fixed_geometry);
+  void addResultToDETask(DETask& de_task, int32_t net_idx, Segment<LayerCoord>* segment);
+  void addPatchToDETask(DETask& de_task, int32_t net_idx, EXTLayerRect* patch);
+  void buildCheckedNetSet(DETask& de_task);
+  std::vector<Violation> getRouteViolationList(DETask& route_task, DETask& ap_via_task);
+  DETask buildPatchDETask(PABox& pa_box, const std::set<ViolationType>& check_type_set, const std::vector<LayerRect>& check_region_list);
+
+  // Environment projection.
+  void updateFixedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
+  void updateFixedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>* segment);
+  void updateRoutedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>& segment);
+  void updateRoutedRectToEnvironment(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect& routed_rect, bool is_routing);
   void addRouteViolationToGraph(PABox& pa_box, Violation& violation);
   void addRouteViolationToGraph(PABox& pa_box, LayerRect& searched_rect, std::vector<Segment<LayerCoord>>& overlap_segment_list);
   void updateNetShapeToGraph(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
   void updateRoutingNetShapeToGraph(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
+  void updatePlanarRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, int32_t layer_idx, const PlanarRect& rect, bool is_fixed);
+  void updateViaRectToGraph(PABox& pa_box, ChangeType change_type, int32_t net_idx, int32_t layer_idx, const PlanarRect& rect, bool is_fixed);
   void updateCutNetShapeToGraph(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
   void updateNodeNetToGraph(PANode& pa_node, ChangeType change_type, int32_t net_idx, Orientation orientation, bool is_fixed);
-  void updateFixedRectToShadow(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
-  void updateFixedRectToShadow(PABox& pa_box, ChangeType change_type, int32_t net_idx, LayerRect& real_rect, bool is_routing);
-  void updateFixedRectToShadow(PABox& pa_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>* segment);
-  void updateRoutedRectToShadow(PABox& pa_box, ChangeType change_type, int32_t net_idx, LayerRect& real_rect, bool is_routing);
-  void updateRoutedRectToShadow(PABox& pa_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>& segment);
-  void updateRoutedRectToShadow(PABox& pa_box, ChangeType change_type, int32_t net_idx, EXTLayerRect& routed_rect, bool is_routing);
-  void addPatchViolationToShadow(PABox& pa_box, Violation& violation);
-  std::vector<PlanarRect> getShadowShape(PABox& pa_box, NetShape& net_shape);
-  std::vector<PlanarRect> getRoutingShadowShapeList(PABox& pa_box, NetShape& net_shape);
-#endif
+  void updateNetShapeToShadow(PABox& pa_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
+  std::vector<PlanarRect> getRoutingShadowShapeList(const NetShape& net_shape);
+  std::array<std::pair<int32_t, int32_t>, 2> getRoutingSpacingPairList(const NetShape& net_shape);
 
-#if 1  // get env
+  // Environment costs.
   double getFixedRectCost(PABox& pa_box, int32_t net_idx, EXTLayerRect& patch);
   double getRoutedRectCost(PABox& pa_box, int32_t net_idx, EXTLayerRect& patch);
-  double getViolationCost(PABox& pa_box, int32_t net_idx, EXTLayerRect& patch);
-#endif
 
-#if 1  // exhibit
+  // Summary and output.
   void updateSummary(PAModel& pa_model);
   void printSummary(PAModel& pa_model);
   void outputNetCSV(PAModel& pa_model);
   void outputViolationCSV(PAModel& pa_model);
-#endif
 
-#if 1  // debug
+  // Debugging.
   void debugPlotPAModel(PAModel& pa_model, std::string flag);
-  void debugCheckPABox(PABox& pa_box);
   void debugPlotPABox(PABox& pa_box, std::string flag);
-#endif
 };
 
 }  // namespace irt

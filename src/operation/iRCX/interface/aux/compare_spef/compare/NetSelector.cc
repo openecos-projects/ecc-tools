@@ -20,25 +20,20 @@
  */
 #include "compare/NetSelector.hh"
 
-#include <algorithm>
+#include "RCXHeader.hpp"
 
 namespace ircx {
 namespace compare_spef {
 namespace {
 
-auto containsPin(const Net& net,
-                 const std::string& pin_name) -> bool
+auto containsPin(const Net& net, const std::string& pin_name) -> bool
 {
-  return std::any_of(
-      net.pins.begin(),
-      net.pins.end(),
-      [&](const Pin& pin) { return pin.direction != "N" && pin.name == pin_name; });
+  return std::any_of(net.pins.begin(), net.pins.end(), [&](const Pin& pin) { return pin.direction != "N" && pin.name == pin_name; });
 }
 
 }  // namespace
 
-NetSelector::NetSelector(const Config& config)
-    : _config(config), _configured_net_names(configuredNetNames(config))
+NetSelector::NetSelector(const Config& config) : _config(config), _configured_net_names(configuredNetNames(config))
 {
 }
 
@@ -55,11 +50,7 @@ auto NetSelector::selected(const Net& net) const -> bool
 
 auto NetSelector::hasPathFilter() const -> bool
 {
-  return !_config.from_pin.empty()
-         || !_config.to_pin.empty()
-         || !_config.from_pins.empty()
-         || !_config.to_pins.empty()
-         || !_config.from_to_pins.empty();
+  return !_config.from_pin.empty() || !_config.to_pin.empty() || !_config.from_pins.empty() || !_config.to_pins.empty() || !_config.from_to_pins.empty();
 }
 
 auto NetSelector::configuredNetNames(const Config& config) -> std::unordered_set<std::string>

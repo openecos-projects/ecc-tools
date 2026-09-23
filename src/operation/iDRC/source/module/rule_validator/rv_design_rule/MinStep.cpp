@@ -79,7 +79,7 @@ void RuleValidator::verifyMinStep(RVCluster& rv_cluster)
             if (curr_boundary.edge_length < min_step) {
               int32_t small_edge_num = 1;
               for (int32_t j = 1; j < coord_size; ++j) {
-                if (min_step <= rv_layer_data.getBoundary(ring_boundary_id_list[getIdx(i + j, coord_size)]).edge_length) {
+                if (min_step <= rv_layer_data.getBoundary(ring_boundary_id_list[DRCUTIL.getRingIdx(i + j, coord_size)]).edge_length) {
                   break;
                 }
                 small_edge_num++;
@@ -89,7 +89,7 @@ void RuleValidator::verifyMinStep(RVCluster& rv_cluster)
                 int32_t total_steps = small_edge_num + 1;
 
                 for (int32_t step = 0; step < total_steps; step++) {
-                  int32_t idx = getIdx(i - 1 + step, coord_size);
+                  int32_t idx = DRCUTIL.getRingIdx(i - 1 + step, coord_size);
                   violation_rect.set_ll_x(std::min(violation_rect.get_ll_x(), coord_list[idx].get_x()));
                   violation_rect.set_ll_y(std::min(violation_rect.get_ll_y(), coord_list[idx].get_y()));
                   violation_rect.set_ur_x(std::max(violation_rect.get_ur_x(), coord_list[idx].get_x()));
@@ -111,8 +111,8 @@ void RuleValidator::verifyMinStep(RVCluster& rv_cluster)
 
           for (int32_t i = 0; i < coord_size; i++) {
             // case 2
-            int32_t pre_i = getIdx(i - 1, coord_size);
-            int32_t post_i = getIdx(i + 1, coord_size);
+            int32_t pre_i = DRCUTIL.getRingIdx(i - 1, coord_size);
+            int32_t post_i = DRCUTIL.getRingIdx(i + 1, coord_size);
             const BoundaryData& pre_boundary = rv_layer_data.getBoundary(ring_boundary_id_list[pre_i]);
             const BoundaryData& curr_boundary = rv_layer_data.getBoundary(ring_boundary_id_list[i]);
             const BoundaryData& post_boundary = rv_layer_data.getBoundary(ring_boundary_id_list[post_i]);

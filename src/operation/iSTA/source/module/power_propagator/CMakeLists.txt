@@ -1,4 +1,6 @@
 add_library(ista_power_propagator
+    ${ISTA_MODULE}/power_propagator/PowerActivityModel.cpp
+    ${ISTA_MODULE}/power_propagator/PowerVectorSimulator.cpp
     ${ISTA_MODULE}/power_propagator/PowerPropagator.cpp
 )
 

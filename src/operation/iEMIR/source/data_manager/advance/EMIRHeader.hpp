@@ -57,6 +57,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -67,7 +68,7 @@
 #include <variant>
 #include <vector>
 
-#include "libfort/fort.hpp"
 #include "json.hpp"
+#include "libfort/fort.hpp"
 
 #define EMIR_ERROR 1E-6

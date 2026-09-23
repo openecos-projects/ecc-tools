@@ -31,6 +31,7 @@ add_subdirectory(py_flow)
 add_subdirectory(py_icts)
 add_subdirectory(py_idrc)
 add_subdirectory(py_ifp)
+add_subdirectory(py_iemir)
 add_subdirectory(py_ilvs)
 add_subdirectory(py_irt)
 add_subdirectory(py_ircx)
@@ -55,6 +56,7 @@ target_link_libraries(ecc_py
         py_icts
         py_idrc
         py_ifp
+        py_iemir
         py_ilvs
         py_irt
         py_ircx

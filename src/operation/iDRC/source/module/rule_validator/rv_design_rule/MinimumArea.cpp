@@ -25,23 +25,24 @@ void RuleValidator::verifyMinimumArea(RVCluster& rv_cluster)
 
   std::vector<RoutingLayer>& routing_layer_list = DRCDM.getDatabase().get_routing_layer_list();
   const auto& layer_data = rv_cluster.get_layer_data();
-  std::map<int32_t, std::map<int32_t, GTLPolySetInt>> env_layer_net_polyset_map;
+  std::map<int32_t, std::map<int32_t, std::vector<GTLRectInt>>> env_layer_net_rect_map;
   std::map<int32_t, ViolationBBoxRTree> env_violation_rtree_map;
 
   for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
     if (!drc_shape->get_is_routing() || drc_shape->get_net_idx() == -1) {
       continue;
     }
-    env_layer_net_polyset_map[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
+    env_layer_net_rect_map[drc_shape->get_layer_idx()][drc_shape->get_net_idx()].push_back(
+        DRCUTIL.convertToGTLRectInt(drc_shape->get_rect()));
   }
 
-  for (const auto& [routing_layer_idx, net_polyset_map] : env_layer_net_polyset_map) {
-    int32_t min_area = routing_layer_list[routing_layer_idx].get_minimum_area_rule().min_area;
+  for (const auto& [routing_layer_idx, net_rect_map] : env_layer_net_rect_map) {
+    const int32_t min_area = routing_layer_list[routing_layer_idx].get_minimum_area_rule().min_area;
     std::vector<GTLRectInt> env_violation_rtree_inputs;
-    for (const auto& [net_idx, env_polyset] : net_polyset_map) {
-      if (net_idx == -1) {
-        continue;
-      }
+    for (const auto& [net_idx, env_rect_list] : net_rect_map) {
+      (void) net_idx;
+      GTLPolySetInt env_polyset;
+      env_polyset.insert(env_rect_list.begin(), env_rect_list.end());
       std::vector<GTLPolyInt> gtl_poly_list;
       env_polyset.get_polygons(gtl_poly_list);
       for (GTLPolyInt& gtl_poly : gtl_poly_list) {

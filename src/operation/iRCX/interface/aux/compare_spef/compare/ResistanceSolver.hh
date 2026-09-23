@@ -20,9 +20,7 @@
  */
 #pragma once
 
-#include <optional>
-#include <vector>
-
+#include "RCXHeader.hpp"
 #include "data/CompareSpefData.hh"
 
 namespace ircx {
@@ -31,15 +29,9 @@ namespace compare_spef {
 class ResistanceSolver
 {
  public:
-  auto equivalentResistance(const Net& net,
-                            const std::string& from_node,
-                            const std::string& to_node) const -> std::optional<F64>;
-  auto equivalentResistances(const Net& net,
-                             const std::vector<NodePair>& pairs) const
-      -> std::vector<std::optional<F64>>;
-  auto equivalentResistances(const Net& net,
-                             const std::vector<NodePair>& pairs,
-                             const std::vector<Size>& pair_indices) const
+  auto equivalentResistance(const Net& net, const std::string& from_node, const std::string& to_node) const -> std::optional<F64>;
+  auto equivalentResistances(const Net& net, const std::vector<NodePair>& pairs) const -> std::vector<std::optional<F64>>;
+  auto equivalentResistances(const Net& net, const std::vector<NodePair>& pairs, const std::vector<Size>& pair_indices) const
       -> std::vector<std::optional<F64>>;
 };
 

@@ -55,8 +55,10 @@ class DataManager
   void buildConfig();
   void buildDatabase();
   void readInstancePower();
-  void readInstancePowerHeader(std::ifstream* instance_power_file, uint64_t& instance_power_num);
-  void readInstancePowerRecord(std::ifstream* instance_power_file);
+  void readPowerSourceFile();
+  void readEMTech();
+  void readRedHawkTechFile(const std::string& redhawk_tech_file_path);
+  void readEMLimitFile(const std::string& em_limit_file_path);
   void printConfig();
   void printDatabase();
 };

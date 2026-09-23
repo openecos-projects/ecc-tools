@@ -140,9 +140,9 @@ Roadmap -->
 
 ## 贡献指南
 
-Fork 此 iEDA 仓库，修改代码后提交 [Pull Request](https://gitee.com/oscc-project/iEDA/pulls)。
-
-请注意 iEDA 使用的[编程规范][Code-conduct-md]。
+请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，了解分支、提交消息、Pull
+Request、格式检查和验证要求。Pull Request 应提交到 `main` 分支，并使用
+[.github/pull_request_template.md](.github/pull_request_template.md) 模板。
 
 ## **论文引用**
 ```
@@ -186,7 +186,6 @@ organization={IEEE}
 | 子模块         | 来源                                                                                                  | 详细用途                                                          |
 | -------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | flute3         | [FastRoute](https://github.com/The-OpenROAD-Project-Attic/flute3)                                                | 借助flute3来产生rectange steiner tree.                            |
-| abseil-cpp     | [Google abseil](https://github.com/abseil/abseil-cpp.git)                                                | 使用Google的高性能C++容器和算法库提升性能，相比STL会改进程序性能. |
 | json           | [JSON for Modern C++](https://github.com/nlohmann/json)                                                  | Json C++库，用来解析程序Json配置文件.                             |
 | libfort        | [Seleznev Anton libfort](https://github.com/seleznevae/libfort.git)                                      | C/C++ library 产生格式化的 ASCII tables.                          |
 | pegtl          | [PEGTL（Parsing Expression Grammar Template Library）](https://github.com/taocpp/PEGTL/)                 | 使用PEGTL来方便的解析SPEF文件.                                    |

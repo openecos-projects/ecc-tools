@@ -1,40 +1,340 @@
-initDRModel:初始化dr_net并从RTDM读取result、patch、violation
-routeDRModel:迭代DRModel
-    initRoutingState:初始化布线状态
-    setDRIterParam:设置参数
-    initDRBoxMap:构建DRBox框架,里面主要数据为空
-    resetRoutingState:重置布线状态
-    buildBoxSchedule:构建Box布线的调度表
-    splitNetResult:分割线网结果并将result、patch直接分配给对应Box
-    routeDRBoxMap:
-        buildFixedRect:将GCellmap中的fix_rect(与此Box覆盖)以指针的方式拷贝到Box内,不需要对GCellmap删除或添加
-        buildNetEnvironment:从DRModel和各Box的最新结果构建当前schedule的只读环境
-        initDRTaskList:构建DRTask
-        buildRouteViolation:将DRModel中与任务相关的violation转移到Box
-        buildBoxTrackAxis:构建Box内的track_axis
-        buildLayerNodeMap:构建Box的Graph,只有节点,其他信息后续构建
-        buildDRNodeNeighbor:将所有节点连接
-        buildOrientNetMap:构建Graph的cost,环境从Box中得到
-        exemptPinShape:排除掉pin_shape上的障碍cost
-        routeDRBox:
-            initTaskSchedule:初始化task布线调度表
-            routeDRTask:给task布线,在此函数末尾,布线结果从graph中删除,再加入新的结果
-            updateViolationList:首先得到Violation存到Box下面,然后Violation结果从graph中删除,再加入新的结果
-            updateBestResult:更新最优结果
-            updateTaskSchedule:通过Violation得到新的布线调度
-        selectBestResult:选择Box的最优结果并保存在Box内
-        freeDRBox:析构
-    updateDRModel:将所有Box的结果汇总回DRModel
-    updateNetResult:在DRModel内进行结果去环优化
-    updateNetPatch:在DRModel内删除无效patch
-    updateViolation:检查DRModel中的整个版图结果
-    updateBestResult:更新DRModel中的最优结果
-selectBestResult:选择最优结果、补充final patch并统一上传RTDM
+# DetailedRouter 维护说明
 
+## 1. 模块边界与阅读入口
 
+DR 从 Database 读取已有线段、patch、违例以及 pin/AP 信息，按 box 切分结果，
+构建连通分量任务，执行详细布线、重布和 minimum-area 修补，最后统一发布结果。
+DR 使用 PA 已确定的 AP 及 via 约束，不负责重新生成或选择 PA 候选集合。
 
+| 维护主题 | 主要入口 | 主要数据 |
+| --- | --- | --- |
+| 迭代、切分与调度 | routeDRModel、initDRBoxMap、splitNetResult、routeDRBoxMap、routeDRBoxList | DRModel、DRBoxId、DRIterParam |
+| Box 生命周期 | routeDRBox(model, box)、routeDRBox(box)、freeDRBox | DRBox、待归并的 box 违例列表 |
+| 环境与违例分配 | buildNetEnvironment、buildDirtyNetEnvironment、buildRouteViolation | DRBox 的借用指针表、中点 owner 违例列表 |
+| 连通分量与任务 | initDRTaskList、buildNetTaskList | DRConnectivity、DRTaskComponent、DRTask、DRGroup |
+| 图搜索与 via 约束 | routeDRNet、routeDRTask、expandSearching、getRoutingSegmentList | DRRouteState、DRNode、AccessPoint |
+| Patch 生成与接受 | patchDRTask、getCandidatePatchList、getCompactPatchList、selectPatch、isPatchImprovement、updateTaskPatch | DRPatchState、DRPatch、std::optional<int32_t> 候选下标 |
+| 几何投影与 DRC 输入 | buildFixedRect、buildDRBoxGraph、buildDRShapeIndex、getRouteViolationList、getPatchViolationList | DRFixedGeometry、DRNodeNetState、DRShadow、DRShapeIndex、DETask |
+| 快照、汇总与发布 | updateBestResult、selectBestResult、updateDRModel、uploadDRModel、freeDRBox | DRBoxResult、DRModelResult |
 
+## 2. 整体运行流程
 
+```text
+route
+  initDRModel：转换 net/pin，复制 RTDM 当前 result、patch、violation
+  routeDRModel
+    对每组 DRIterParam：
+      setDRIterParam -> initDRBoxMap -> resetRoutingState
+      buildBoxSchedule -> splitNetResult
+      routeDRBoxMap：逐 stage 求解
+      updateDRModel：汇总 box 结果
+      updateNetResult -> updateNetPatch -> updateViolation -> freeDRBoxMap
+      patchFinalMinArea -> updateBestResult(model) -> summary / CSV
+      stopIteration：违例清零可提前结束
+    selectBestResult(model) -> uploadDRModel
+```
 
+### Stage 与并行边界
 
+`routeDRBoxMap` 负责 stage 调度和进度日志，model 汇总由外层调用 `updateDRModel` 完成；
+`routeDRBoxList` 负责一个 stage 的环境、任务准备、并行求解及违例归并。
 
+```text
+routeDRBoxList：
+buildNetEnvironment -> buildRouteViolation：按中点 owner 将违例从 model 分配给 active box
+  -> parallel：buildAccessPoint -> initDRTaskList
+  -> barrier
+  -> parallel：routeDRBox(model, box)
+       needRouting 时：标记 dirty，buildFixedRect -> buildDRBoxGraph
+                      -> exemptPinShape -> routeDRBox(box)
+       始终：selectBestResult(box)
+             -> freeDRBox：释放工作区，保留 box 违例
+  -> barrier
+updateRouteViolation：按 stage box ID 顺序收集 box 违例，合并后释放各 box 列表
+                     与 model 剩余违例按 CmpViolation 去重合并
+  -> 下一 stage
+所有 stage 完成 -> updateDRModel
+```
+
+`routeDRBox(model, box)` 不直接修改 model 的违例列表，也不跳过无需路由 box 的最优结果选择和清理。
+worker 只写自己的 box 违例列表，不再返回或转存到额外的 stage 列表；归并及列表释放均在 barrier 之后。
+
+`buildRouteViolation` 在任务初始化之前串行执行，与 PA 一样按违例中点确定唯一 owner。
+owner 不在当前 stage 时，违例保留在 model；在当前 stage 时，直接移动到对应 box，不按相关 task net 改派。
+修复阶段的 `initDRTaskList` 根据本 box 的违例列表是否为空决定是否构建任务；初始布线不受此限制。
+进入任务构造后仍处理全部本地 owner nets，允许新冲突调度其他本地 net。
+中点 owner 没有可修复任务时不转交邻近 box，未解决的违例通过 stage 归并保留。
+
+普通 `buildNetEnvironment` 从非 active box 的最新 owner 结果收集环境，
+不是从此时已被切分清空的 model 结果表读取。扫描可以并行，写入同一目标 box 时加锁。
+同 stage 的 active box 不互相借用可变 owner 结果；求解 worker 只修改自己的 box 工作区。
+下一 stage 才能把前一 stage 更新后的结果作为环境。不要移除这些 barrier 或跨 stage 缓存借用指针。
+
+### Box 内的重布循环
+
+`routeDRBox(box)` 只负责按 net 调度的重布循环；同一 net 可以有多个 component task：
+
+```text
+initTaskSchedule
+  -> 对每个待重布 net 执行 routeDRNet
+  -> updateRouteViolationList -> updateBestResult(box) -> updateTaskSchedule
+  -> 有待重布 net 则重复
+```
+
+每轮待重布 net 全部完成后统一检查 box 内所有 task nets，再更新 best result；不能用单 net 的局部违例列表替换 box 结果。
+首次布线按 net_idx 升序调度。新建修复 box 尚无本地布线历史，以 task 中 net 首次出现顺序初始化。
+box 内独立维护 net_route_order_list，按当前几何最近一次布线时间从早到晚排列：未重布 net 保留在前，本轮重布 net 按实际执行顺序放到后面。
+每个 violation 只选择该顺序中最早的本地 task net 作为 aggressor；只重布去重后的 aggressors，保留它们的历史相对顺序。
+aggressor 达到重布次数上限时不改选 victim；只有一个本地 task net 的违例选择该 net。无本地 task 的环境 net 不入队。
+`updateTaskSchedule` 对 task_order_list 稳定分组，将 aggressor 对应的 task 放在前面，组内顺序不变。
+task 的调度优先级与真实布线历史分开维护，不能用分组后的 task 顺序反推几何生成先后。
+
+## 3. 数据与所有权
+
+| 数据 | 含义与生命周期 |
+| --- | --- |
+| DRModel | DR net/pin 信息、迭代参数、box 布局；curr_result/best_result 使用 DRModelResult 聚合全局线段、patch、违例 |
+| DRBox.curr_result | DRBoxResult 聚合 net_own_result_map、net_own_patch_map、route_violation_list；无对应 task 的结果也要保留到汇总 |
+| DRBox.net_env_result_map / net_env_patch_map | 环境几何的借用指针，不拥有线段或 patch；不能通过这些指针修改来源 |
+| DRBox.fixed_geometry | 固定几何的只读记录和分层索引；记录借用 RTDM 矩形，不拥有或修改原始几何 |
+| DRBox.net_access_point_map | 从 RTDM 借用的 AP；DR 不重建 AP 存储或修改候选 via 列表 |
+| DRBox.net_component_result_map | 按 net/component 保存的局部线段，用于保留未重布分量和发布 task 新结果 |
+| DRBox.dr_task_list | vector<DRTask> 持有对象；task_idx 是构造时的存储下标，component_idx 是 net 内连通分量身份 |
+| DRBox.task_order_list | task 存储下标的排列；排序、稳定分组及所有有顺序的 task 遍历只使用此列表 |
+| DRBox.curr_result.route_violation_list | box 当前违例；freeDRBox 保留，stage barrier 后由 updateRouteViolation 归并并释放 |
+| DRBox.best_result | 独立 DRBoxResult 最优快照；包含线段、patch、违例和显式 valid，整体保存和恢复 |
+| DRRouteState / DRPatchState | 单任务搜索或修补工作区，不是最终结果所有者 |
+| DRShapeIndex | 环境/本地结果的形状副本和索引记录，只借用 segment/patch；不再保存 fixed rect |
+
+普通迭代的主数据流：
+
+```text
+DRModel.curr_result
+  -- splitNetResult：切分、分配并清空 model 当前表 --> DRBox.curr_result 的 owner maps
+  -- task 求解 / component 汇总 --> DRBox.curr_result
+  -- updateBestResult / copy --> DRBox.best_result，valid = true
+  -- selectBestResult / move --> DRBox.curr_result，消费并重置 best_result
+  -- freeDRBox：保留 curr_result --> 下一 stage 可借用 owner 结果，stage 归并后释放 box 违例
+  -- updateDRModel / move --> DRModel.curr_result，清空 box owner maps
+  -- model 快照选择、最终补面积 --> uploadDRModel / move 到 RTDM
+```
+
+`buildFixedRect` 将 RTDM 返回的临时多层 map 转成 DRFixedGeometry，不在 box 中保留该 map。
+Graph、shadow、box/patch DRC、重叠几何查询和调试都读取这份固定几何视图。
+`freeDRBox` 在释放 route/patch 状态及环境/本地索引后重置 fixed_geometry，保留待汇总的 owner 结果。
+它保留整个 curr_result，不能用默认 DRBoxResult 替换；普通 stage 由 updateRouteViolation 负责释放其中的待归并违例。
+route/patch 工作区和形状索引先释放，随后释放 task_order_list 与值存储 task，再释放 graph；best_result 独立重置。
+final-min-area 路径不向 box 的当前违例列表写入违例，仍按原流程清理工作区并最终释放 box map。
+
+## 4. 连通分量与任务构建
+
+`splitNetResult` 按 gcell 轨道切开同层横纵线段，跨层线段保持原对象信息，
+线段和 patch 依据中点经 `getGCellGridLB` 分配到唯一 owner box。
+边界取值会影响拓扑和归属，不能随意改成另一种 grid 舍入方式。
+
+`buildNetTaskList` 的处理顺序是：
+
+1. 将每条 segment 的 routing 形状和每个 patch 建成 connectivity entity。
+2. 构建几何连通关系；初始布线还合并同一 gcell 的实体，并为必要的 AP 建立空实体。
+3. 按 root/pin 收集 pin group，再追加边界 terminal group。
+4. 按形状生成 stable key；缺少形状 key 时才使用 group 坐标，排序后分配 component_idx。
+5. 保存所有 component 的原始线段；只有 group 数量至少为 2 的 component 才生成 route task。
+
+初始布线按 gcell 关联 AP，并从切分边界生成 terminal；修复阶段按形状包含关系关联 AP，
+跨 box terminal 来自相邻 owner 的实际线段端点。两种来源不同，不能只因循环相似而合并策略。
+修复被触发后，为本地结果 net 构建任务，而不只为最初的违例 net 构建任务，以便重跑时处理新冲突。
+
+DRTask 是一个 net/component 的多 group 任务，不是 PA 的固定 source/target 两组任务。
+没有生成 task 的 component 结果仍属于 box，不能在筛选 task 时顺便删除。
+
+普通任务先完整构造到 vector<DRTask>，再用 iota 建立 task_order_list 并排序；构造期间不能发布任务指针。
+建图、DRC、调度、net 内 component 路由和调试都按 task_order_list 访问，求解期间不扩容、移动或重排 task 值存储。
+RouteState/PatchState 和 routeDRNet 的局部 net_task_list 只借用任务地址，不拥有对象；所有 new/delete 已移除。
+final-patch task 仍按 net 升序构造并登记顺序，可保持 component_idx = -1、空 group 和空排序坐标；不能套普通任务至少两组的要求。
+
+set_dr_group_list 是 group 的唯一修改入口，同时重建 sort_coord_list；外部只读 group 和排序坐标，避免缓存过期。
+排序坐标保留跨 group 的重复项，使用 CmpLayerCoordByLayerASC；比较器不再临时收集或排序坐标。
+原优先级保持 clock、bounding box 面积升序、group 数量降序、net_idx 升序、坐标字典序，不新增 task_idx/component_idx tie-breaker。
+
+## 5. 单任务路由与 via 契约
+
+`routeDRNet` 先移除该 net 的 routed index 引用，删除旧 patch 的 graph/shadow 贡献，
+只删除需要重布的 component 线段贡献。逐 task 布线后汇总所有 component 结果，
+更新 net 索引，再以该 net 的首个 task 调用 `patchDRTask`，最后增加 net 重布次数。
+
+```text
+routeDRTask
+  initSingleRouteTask：首个 group 为 start，其余按原顺序成为 end
+  对尚未连接的 end group：
+    routeSinglePath：从 start 和已有路径节点搜索，返回是否命中 end；失败立即带任务上下文报错
+    updatePathResult -> updateDirectionSet -> resetStartAndEnd -> resetPath
+  updateTaskResult：重建线段、恢复 via 身份、写入 component 并投影 graph/shadow
+  resetTask
+```
+
+每个 group 内的多个节点是可选接入位置，不是必须逐一连接的端点。
+`resetStartAndEnd` 将命中的 end group 收缩为到达节点并加入 start，保留已连路径供下一轮使用。
+`resetPath` 清理队列、parent、via 标识及搜索代价，但保留 task 方向信息；`resetTask` 才清理 task 状态。
+不能在提取父链、更新方向或调整 group 前清理节点。起终点重合时，合法路径可以没有线段。
+
+`routeSinglePath` 与 PA 一样返回 bool：非空 path head 命中 `reachEnd` 才成功，队列耗尽返回 false。
+`reachEnd` 只判断目标命中并记录 end group 下标；DR 仍逐次连接多个 group，不改变搜索与邻居遍历顺序。
+`routeDRTask` 在失败时报告 box/net/component/task，禁止继续提取父链、更新方向或调整 group；不跳过失败任务或返回伪成功。
+
+AP via 约束检查两个端点；已指定的候选必须唯一、层号合法且与 AP 相邻，冲突时保留报错。
+图搜索通过 parent_via_master_idx 保存约束，树重建后仍需恢复并检查 via 身份。
+`updateNetResult` 的 legacy 默认 via 仅用于无法从已有标识或 AP 约束恢复的结果，并记录数量；
+不能把它扩大为绕过 AP 冲突、非法层号或无效 via 索引的通用兜底。
+
+## 6. Patch 生成与接受策略
+
+```text
+initSinglePatchTask：按当前 net 几何窗口查询 minimum-area 违例
+  -> searchViolation：有效、未尝试、属于当前 net，并取得重叠多边形
+  -> patchSingleViolation：检查普通候选 -> 检查宽候选 -> 未改善则保留违例
+  -> resetSingleViolation
+重复搜索后：updateTaskPatch -> patch_state.resetTask
+```
+
+候选生成、评分和筛选流程与 PA 对齐，不再使用 M、4M、8M、-1 多轮限额；DR 只接受通过 DRC 改善判定的候选。
+`getViolationOverlapPoly` 直接传递最大重叠多边形，不再经过最大矩形列表后重新组装；几何取数仍覆盖当前 net 的 owner/env。
+`getCandidatePatchList` 用普通 W 线宽候选，采用 PA 的渐进采样、矩形去重和新增候选评分。
+`getCompactPatchList` 只在普通无候选或候选全部不改善时运行，生成横向跨度 2W 的 North/South/East/West 候选。
+宽候选沿扩展方向增长，按制造网格对齐到并集面积满足 min_area，不能超出 die；同样渐进采样，并在筛选前排除普通候选重复项。
+PatchGeometry 位于 data_manager/advance，仅共用切割矩形选择、采样坐标、面积扩展，不持有模块结果或访问 RTDM。
+普通采样保留 PA 首轮精确切割端点的行为，不额外吸附到全局网格。
+
+`updatePatchCost` 与 PA 同样计算 fixed/routed、方向及重叠面积；比较器依次按 fixed、routed、层方向、重叠面积、几何坐标排序。
+`selectCandidatePatchList` 优先零代价候选并按上限取样，没有零代价候选时保留最优者；上限为 1 或 2 均有定义。
+grid、wire_width、max_candidate_patch_num 必须为正。DRPatch、DRShadow 不再维护 patch violation 代价及其调试绘图，DRNode 的路由违例惩罚不变。
+
+| selectPatch 情况 | 当前行为 |
+| --- | --- |
+| 多边形面积已足够 | kNone，不添加 patch |
+| 普通候选中有改善，包括唯一候选 | kImproved，接受第一个改善候选，不生成宽候选 |
+| 普通无候选或全部不改善 | 尝试宽候选，只检查新增宽候选，包括唯一宽候选 |
+| 两阶段全部不改善 | kNone，不添加 patch，保留违例供后续重布处理 |
+| 真实缺面积且两阶段均无候选 | 立即报错，不静默跳过 |
+
+候选数量不影响接受条件；零代价只是预筛，不代表真实 DRC 通过。
+isBoxMinAreaViolation 与 PA 同名、同语义：minimum-area 且与 box 开重叠，当前 net 由 searchViolation 单独选择。
+`isPatchImprovement` 改为 PA 的按类型计数规则：其他环境及跨 net 违例不能增加，有效 minimum-area 在存在时必须减少。
+不再要求环境违例集合子集；所有候选都必须满足改善条件，不允许唯一候选或最终最优候选绕过检查。
+
+`buildPatchDETask` 从原 getPatchViolationList 抽出，保留 fixed、owner/env 索引取数、对象顺序和 checked nets；后者只负责执行。
+Patch DRC 用工作区已接受 patch 替代当前 net 的本地旧 patch，仍保留借用环境 patch。
+selectPatch 按需构建一次输入和基线；只临时 push/pop 候选指针，不再 push/pop 工作区 patch。
+普通候选指针在宽候选合并扩容前已经弹出，工作区在整个选择期间保持稳定，DETask 不跨正式接受保存。
+待修列表在初始化时取得，不在每次接受后整体刷新；新接受 patch 参与下一条违例的候选 DRC，但任务末尾才投影 graph/shadow。
+`updateTaskPatch` 在 owner patch 向量可能扩容前 removeNet，追加工作区 patch 后重建该 net 索引。
+graph/shadow 只增加本次工作区 patch 的贡献，不重新投影 owner 中已发布的旧 patch；清理时按 owner 列表逐项撤销。
+
+## 7. 图、空间索引与 DRC 视图
+
+| 数据结构 | 存储内容 | 用途与限制 |
+| --- | --- | --- |
+| DRNode graph | 轨道节点、邻接、搜索状态、方向代价 | 搜索与重跑，不是原始几何数据库 |
+| DRNodeNetState | fixed 的每方向 net 集合及摘要；空/单 net 内联，多 net 使用动态明细 | 重复 add 不累加，del 删除整个成员，保留 pin 豁免语义 |
+| DRNodeNetCountState | routed 的每方向 net 摘要与贡献次数；单 net 计数内联，多 net 使用动态明细 | 每次投影 add/del 配对，计数归零才移除成员；缺失 del 报错 |
+| DRShadow | fixed/routed 代价评估使用的膨胀几何 | Patch 占用评分，不能直接用于 DRC 输入；不保存 patch violation 惩罚 |
+| DRFixedGeometry | RTDM 固定矩形指针、net/type、来源顺序及分层 RTree | buildFixedRect 时构建，box 求解期间只读；不混入环境结果 |
+| DRShapeIndex.env_shape_index | 借用环境 segment/patch 的原始形状副本和对象指针 | 建图时批量 build，box 求解期间只读；不再重复索引固定矩形 |
+| DRShapeIndex.routed_shape_index | 本 box owner segment/patch 的原始形状副本和对象指针 | 随 net 重布或 patch 写回更新，修改源向量前必须 removeNet |
+
+`buildDRBoxGraph` 依次建立轨道、节点、shadow、邻接、graph/shadow 投影和精确形状索引。
+DRShadow 与 PAShadow 一致：fixed 代价查询前必须完成 fixed index 构建，未构建立即报错；已构建的空索引合法，routed index 仍动态维护。
+`getRoutingSpacingPairList` 共用 PRL/EOL 间距计算；平面投影处理 East/North 并同步反向端点，
+via 投影处理内部 track 的 Above/Below，cut 投影保留自己的层间 spacing 规则。
+`getRoutingShadowShapeList` 与 PA 同名同签名，只读取 NetShape，保留贴边减一规则和 cut 类型报错；不能将三类几何投影改成无差别矩形更新。
+
+DRFixedGeometry 保留输入 map 的 type/layer/net/set 遍历顺序，查询按来源下标排序去重。
+重复 build、未 build 的求解访问、非法固定矩形或查询窗口会报错；只有调试绘图允许未 build 时不输出固定几何。
+调试仍按 type/layer/net 分组绘制实际形状，不再因查询插入空 map 项而生成空分组。
+DRFixedGeometry 与 DRShapeIndex 都使用原层号和闭区间相交；空窗口列表表示查询全部形状，不表示空结果。
+DRShapeIndex 保留 net 内的 segment/patch 对象顺序：
+多层 via 或重叠窗口可以重复命中同一对象，返回前按 net/对象下标排序去重，保持 net 内原始对象顺序。
+不能暴露 RTree 遍历顺序，也不能按几何相等删除不同来源对象。未 build 查询、重复 build 和删除不一致均保留报错。
+DRNodeNetState 的环境 net 为 -1；fixed 的完整豁免不能改成只减一次贡献。
+DRNodeNetCountState 的计数对应图投影事件，不是去重后的形状数量，也不乘入代价：只有本 net 时为零，存在其他 net 时收取一个 unit。
+`resetDRNetResult` 只撤销待重布 component 的线段和本 net 旧 patch，保留无 task component 的贡献；
+component 初始化复制原 segment，重布后按保存的 segment 发布与撤销，不能在两次投影之间单边合并或去重。
+多 net 退回单 net 时必须搬回剩余贡献次数；调试接口仍按需导出成员集合，不把重复贡献画成重复 net。
+PA/DR 的 routed 均为贡献计数，但各自投影循环的命中次数不保证一致，不能直接替换遍历内核。
+
+| DRC 入口 | 输入与检查范围 |
+| --- | --- |
+| getRouteViolationList(DRBox&) | fixed rect、借用环境和本地 owner 结果；checked net 为 box task 的 net，使用 kRouteHybrid |
+| getFullRouteViolationList(DRModel&) | RTDM 全局 fixed rect 和已汇总的 model 结果；checked net 为所有 DR net，使用 kRouteHybrid |
+| getDirtyRouteViolationList | 从 model 重建的局部环境；checked net 来自环境 result/patch 表，每个 routing layer 使用原始 box 窗口，使用 kRouteHybrid |
+| getPatchViolationList | fixed_geometry、env/routed 索引查询及当前候选；checked net 为 box task 的 net，类型/窗口由调用者指定，使用 kPatchHybrid |
+
+这些路径直接填充 DETask 的指针容器，几何仍归 RTDM/model/box 所有，调用完成前不得移动或释放。
+`buildFixedDETask` 的 fixed_geometry 重载供 box/patch 使用，按 DETask 窗口查询；map 重载保留给 dirty DRC，避免额外建立 RTree。
+两者都将 net_idx == -1 的形状放入环境，其余放入 pin 表；不因固定几何视图引入额外的空 pin map 项或扩大 checked net。
+PAFixedGeometry 的 net_idx_list 用于保留其空 pin 项契约，DR 没有照搬这一元数据。
+拆开索引后仍保持每个 DETask 输入列表内的原对象顺序，以及环境 patch 保留、当前 net 本地 patch 被候选替代的规则。
+全局 RTree 遍历保持原路径，不能用一个无差别全量合并器替代所有入口。
+
+## 8. 违例、Dirty DRC 与最优结果
+
+Stage 分配与 Dirty DRC 使用统一的中点 owner 规则：
+
+- `getViolationOwnerBoxId` 使用违例中点和 gcell 下边界确定唯一归属。
+- Stage 求解的 `buildRouteViolation` 只向当前 active owner 分配违例，其余仍留在 model。
+- Dirty DRC 使用同一 owner 规则保留未重查区域的旧违例和筛选新违例。
+
+Box 重布后的违例先按“违例矩形扩大 OnlyPitch 后与 box 开重叠”保留，用于本地调度。
+`updateViolation` 将 dirty box 的完整区域扩大 detection_distance，得到实际重查 box 集合：
+
+- 没有 box 框架时执行全局 DRC；重查 box 比例达到 25% 时也执行全局 DRC。
+- 低于 25% 时，`buildDirtyNetEnvironment` 从已汇总的 model 结果构建环境，不再读取 box owner 表。
+  各 dirty box 检查后只保留归属于自身的违例，再与未重查区域旧违例去重合并。
+
+Box/model 最优结果都按违例数量比较，同数量允许后来结果替换，线段、patch、违例作为一个 Result 对象保存和恢复。
+best_result.valid 只表示是否保存过有效快照，不从容器是否为空推断；合法空结果、仅 patch 的结果同样参与优劣比较。
+curr_result 是可变结果工作区，其 valid 不作为阶段完成或完整几何的判据；只有 best_result.valid 用于快照判断。
+updateBestResult 复制当前完整结果并标记 best 有效；selectBestResult 仅恢复已保存结果，未保存即恢复会报错，恢复后重置 best。
+routeDRBox(model, box) 在恢复前显式调用 updateBestResult，即使 needRouting 为 false 也保存当前结果；原保存时点与等分替换条件不变。
+恢复 box 结果后不再继续查询旧图/索引，随后清理工作区，当前结果及待归并违例仍保留。
+routeDRModel 负责最终阶段的迭代号推进、恢复、补面积、统计、CSV 与发布，selectBestResult(model) 不再隐式执行这些副作用。
+最终日志的来源函数随职责调整改变，但阶段顺序和传给 final-min-area 的迭代号保持不变。
+
+`patchFinalMinArea` 在普通迭代末尾和恢复 model 最优结果后处理剩余 minimum-area 违例。
+它构建临时 box，共用建图和 patch 流程，按 net/LayerRect 去重后只向 model 追加新 patch，有更新才重查违例。
+此路径不经过 splitNetResult 或 routeDRNet，不能假定普通重布的 owner/environment 初始化已经执行。
+最终 `uploadDRModel` 将结果移动回 RTDM，并替换违例 RTree；box 快照恢复不是全局发布。
+
+## 9. 修改与验证
+
+按上述职责修改现有入口，不为缩短函数而引入通用框架或照搬 PA 数据类型。
+修改任务边界、排序、采样、代价、停止条件、归属或借用范围都可能改变输出，不能只验证编译通过。
+
+| 改动范围 | 应核对的行为 |
+| --- | --- |
+| Connectivity、group、调度 | component 身份、保留的原结果、group/task/net 顺序及每轮违例 |
+| RouteState、图、AP/via | 路径与 via 身份、清理时机、同点路径和不可达边界 |
+| Patch 生成、筛选、判优 | 候选顺序、抽样索引、接受/拒绝序列、试放回滚及最终 patch |
+| 索引与 DRC 输入 | net/layer/对象顺序、空窗口、多窗口去重、边界违例、dirty/full 一致性 |
+| Stage、快照、发布 | 同设计同参数的完整 RT 输出、各轮摘要及导出 DEF 的独立 DRC |
+
+本项目已指定的完整用例为
+`/nfs/share/home/shuyulun/drc_workspace/design/t28/ysyx_0_old/ysyx_0_old.def`，
+流程入口为 `test/run_rt_t28.tcl` 和 `test/run_idrc_t28.tcl`。
+运行前核对脚本实际输入和输出目录；使用包装脚本适配，不覆盖共享设计或默认输出。
+对比时保持相同输入、脚本、100 线程及 M2-M7 配置，比较 DEF/Verilog、DR 迭代摘要和独立 check_def 结果。
+具体已完成的验证及未验证项以 `refactor_dr.md` 为准，不把历史 DRC clean 当作新改动已通过回归。
+
+未明确要求时不运行测试；需要验证时只串行运行一个测试，提取摘要后及时清理产物。
+构建尽量合并，必要时使用 -j32；性能结论需同条件测量，不从删行或单次 wall 波动推断收益。
+
+## 10. 维护检查清单
+
+1. 新状态是否有明确读取方、唯一所有者和清理时机？当前几何究竟在 model、box owner 还是工作区？
+2. 是否保留没有 route task 的 component 结果？是否混淆 component_idx 与 task 列表下标？
+3. 新查询使用原始几何还是膨胀代价几何？net/layer、开闭边界、对象去重和顺序是否一致？
+4. 修改向量前是否移除了索引引用？是否仍有 DETask、其他 box 或搜索状态借用其元素？
+5. 是否跨越 stage barrier 修改环境？是否混淆普通环境来源与 dirty DRC 的 model 来源？
+6. Group、task、候选和同价选择的顺序是否保持？是否把“搜索结束”当成了“路由成功”？
+7. 违例使用的是 stage 分配还是 dirty 唯一归属？是否将未分配或未重查的旧违例丢失？
+8. 快照是否同时恢复线段、patch、违例？最终补面积和 RTDM 发布是否仍在正确阶段？
+9. 拆函数是否揭示了职责或复用相同语义，而不只是移动嵌套逻辑？是否保留报错和调试入口？

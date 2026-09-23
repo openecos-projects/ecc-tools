@@ -22,42 +22,28 @@
 
 namespace idrc {
 
+namespace {
+
+struct OuterRingInfo
+{
+  std::vector<Segment<PlanarCoord>> edge_list;
+  std::set<int32_t> eol_edge_idx_set;
+};
+
+OuterRingInfo buildOuterRingInfo(const RVLayerData& rv_layer_data, const PolygonData& polygon_data);
+
+}  // namespace
+
 void RuleValidator::verifyEnclosureParallel(RVCluster& rv_cluster)
 {
   std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
-  std::map<int32_t, std::vector<int32_t>>& cut_to_adjacent_routing_map = DRCDM.getDatabase().get_cut_to_adjacent_routing_map();
   const auto& layer_data = rv_cluster.get_layer_data();
-  auto build_outer_ring_info
-      = [this](const RVLayerData& rv_layer_data, const PolygonData& polygon_data, int32_t& coord_size, std::vector<Segment<PlanarCoord>>& edge_list,
-               std::vector<int32_t>& edge_length_list, std::set<int32_t>& eol_edge_idx_set) {
-          edge_list.clear();
-          edge_length_list.clear();
-          eol_edge_idx_set.clear();
-
-          std::vector<bool> convex_corner_list;
-          for (const BoundaryData& boundary_data : rv_layer_data.getBoundaries(polygon_data)) {
-            if (boundary_data.isHole) {
-              break;
-            }
-            edge_list.emplace_back(boundary_data.begin_coord, boundary_data.end_coord);
-            edge_length_list.push_back(boundary_data.edge_length);
-            convex_corner_list.push_back(boundary_data.isConvex);
-          }
-          coord_size = static_cast<int32_t>(edge_list.size());
-          if (coord_size < 4) {
-            return;
-          }
-          for (int32_t i = 0; i < coord_size; i++) {
-            if (convex_corner_list[getIdx(i - 1, coord_size)] && convex_corner_list[i]) {
-              eol_edge_idx_set.insert(i);
-            }
-          }
-        };
+  std::map<int32_t, std::map<int32_t, OuterRingInfo>> outer_ring_info_cache;
   for (const auto& [cut_layer_idx, cut_layer_data] : layer_data) {
     if (cut_layer_data.cut_pool.empty()) {
       continue;
     }
-    const std::vector<int32_t>& routing_layer_idx_list = cut_to_adjacent_routing_map[cut_layer_idx];
+    const std::vector<int32_t>& routing_layer_idx_list = DRCDM.getAdjacentRoutingLayerIdxList(cut_layer_idx);
     if (routing_layer_idx_list.size() < 2) {
       continue;
     }
@@ -139,18 +125,20 @@ void RuleValidator::verifyEnclosureParallel(RVCluster& rv_cluster)
           if (!is_contained) {
             continue;
           }
-          int32_t coord_size = 0;
-          std::vector<Segment<PlanarCoord>> edge_list;
-          std::vector<int32_t> edge_length_list;
-          std::set<int32_t> eol_edge_idx_set;
-          build_outer_ring_info(rv_layer_data, polygon_data, coord_size, edge_list, edge_length_list, eol_edge_idx_set);
+          auto& layer_outer_ring_cache = outer_ring_info_cache[routing_layer_idx];
+          auto outer_ring_info_it = layer_outer_ring_cache.find(polygon_id);
+          if (outer_ring_info_it == layer_outer_ring_cache.end()) {
+            outer_ring_info_it = layer_outer_ring_cache.emplace(polygon_id, buildOuterRingInfo(rv_layer_data, polygon_data)).first;
+          }
+          const OuterRingInfo& outer_ring_info = outer_ring_info_it->second;
+          const int32_t coord_size = static_cast<int32_t>(outer_ring_info.edge_list.size());
           if (coord_size < 4) {
             continue;
           }
           for (Orientation& orient : orientation_list) {
             int32_t edge_idx = -1;
-            for (int32_t eol_idx : eol_edge_idx_set) {
-              if (DRCUTIL.isInside(edge_list[eol_idx], routing_rect.getOrientEdge(orient))) {
+            for (int32_t eol_idx : outer_ring_info.eol_edge_idx_set) {
+              if (DRCUTIL.isInside(outer_ring_info.edge_list[eol_idx], routing_rect.getOrientEdge(orient))) {
                 edge_idx = eol_idx;
                 break;
               }
@@ -158,7 +146,7 @@ void RuleValidator::verifyEnclosureParallel(RVCluster& rv_cluster)
             if (edge_idx == -1) {
               continue;
             }
-            Segment<PlanarCoord> curr_segment = edge_list[getIdx(edge_idx, coord_size)];
+            Segment<PlanarCoord> curr_segment = outer_ring_info.edge_list[DRCUTIL.getRingIdx(edge_idx, coord_size)];
             if (DRCUTIL.exist(processed_segment_set, curr_segment)) {
               continue;
             }
@@ -173,8 +161,8 @@ void RuleValidator::verifyEnclosureParallel(RVCluster& rv_cluster)
             int32_t pre_segment_length;
             int32_t post_segment_length;
             {
-              Segment<PlanarCoord> pre_segment = edge_list[getIdx(edge_idx - 1, coord_size)];
-              Segment<PlanarCoord> post_segment = edge_list[getIdx(edge_idx + 1, coord_size)];
+              Segment<PlanarCoord> pre_segment = outer_ring_info.edge_list[DRCUTIL.getRingIdx(edge_idx - 1, coord_size)];
+              Segment<PlanarCoord> post_segment = outer_ring_info.edge_list[DRCUTIL.getRingIdx(edge_idx + 1, coord_size)];
               pre_segment_length = DRCUTIL.getManhattanDistance(pre_segment.get_first(), pre_segment.get_second());
               post_segment_length = DRCUTIL.getManhattanDistance(post_segment.get_first(), post_segment.get_second());
             }
@@ -259,5 +247,33 @@ void RuleValidator::verifyEnclosureParallel(RVCluster& rv_cluster)
     }
   }
 }
+
+namespace {
+
+OuterRingInfo buildOuterRingInfo(const RVLayerData& rv_layer_data, const PolygonData& polygon_data)
+{
+  OuterRingInfo outer_ring_info;
+  std::vector<bool> convex_corner_list;
+  for (const BoundaryData& boundary_data : rv_layer_data.getBoundaries(polygon_data)) {
+    if (boundary_data.isHole) {
+      break;
+    }
+    outer_ring_info.edge_list.emplace_back(boundary_data.begin_coord, boundary_data.end_coord);
+    convex_corner_list.push_back(boundary_data.isConvex);
+  }
+
+  const int32_t coord_size = static_cast<int32_t>(outer_ring_info.edge_list.size());
+  if (coord_size < 4) {
+    return outer_ring_info;
+  }
+  for (int32_t i = 0; i < coord_size; i++) {
+    if (convex_corner_list[DRCUTIL.getRingIdx(i - 1, coord_size)] && convex_corner_list[i]) {
+      outer_ring_info.eol_edge_idx_set.insert(i);
+    }
+  }
+  return outer_ring_info;
+}
+
+}  // namespace
 
 }  // namespace idrc

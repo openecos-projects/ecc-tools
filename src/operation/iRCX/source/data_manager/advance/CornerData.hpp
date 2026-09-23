@@ -43,15 +43,9 @@ class CornerData
   void set_tmpr(double tmpr) { _tmpr = tmpr; }
   void set_global_tmpr(double global_tmpr) { _global_tmpr = global_tmpr; }
   void set_half_node_scale_factor(double half_node_scale_factor) { _half_node_scale_factor = half_node_scale_factor; }
-  void set_process_conductor_list(const std::vector<ProcessConductor>& process_conductor_list)
-  {
-    _process_conductor_list = process_conductor_list;
-  }
+  void set_process_conductor_list(const std::vector<ProcessConductor>& process_conductor_list) { _process_conductor_list = process_conductor_list; }
   void set_process_via_list(const std::vector<ProcessVia>& process_via_list) { _process_via_list = process_via_list; }
-  void set_cap_table_config_list(const std::vector<CapTableConfig>& cap_table_config_list)
-  {
-    _cap_table_config_list = cap_table_config_list;
-  }
+  void set_cap_table_config_list(const std::vector<CapTableConfig>& cap_table_config_list) { _cap_table_config_list = cap_table_config_list; }
   // function
 
  private:

@@ -29,9 +29,6 @@ int registerCmdRT()
   registerTclCmd(TclRunERT, "run_ert");
   registerTclCmd(TclRunRT, "run_rt");
   registerTclCmd(TclDestroyRT, "destroy_rt");
-  // aux
-  registerTclCmd(TclRTCleanDef, "rt_clean_def");
-  registerTclCmd(TclRTFixFanout, "rt_fix_fanout");
   return EXIT_SUCCESS;
 }
 
