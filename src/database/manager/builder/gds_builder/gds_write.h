@@ -59,8 +59,6 @@ class Def2GdsWrite
 
   int32_t set_units();
 
-  int32_t write_version();
-  int32_t write_design();
   int32_t write_die();
   int32_t write_track_grid();
   int32_t write_row();
@@ -103,10 +101,11 @@ class Def2GdsWrite
   bool _mapping_error = false;
 
   gdstk::Cell* createCell(const string& name);
+  bool removeEmptyCell(gdstk::Cell* cell);
   void addReferenceDefault(gdstk::Cell* child);
   void addInstanceReference(gdstk::Cell* child, IdbInstance* instance);
-  void addLabel(gdstk::Cell* gds_cell, const string& text, int32_t x, int32_t y, int32_t layer = 0, int32_t datatype = 0);
   string sanitizeCellName(const string& name);
+  bool createTopCell();
   bool finishWrite(const char* file);
 
   std::pair<int32_t, int32_t> get_pdn_layer_order_range();
