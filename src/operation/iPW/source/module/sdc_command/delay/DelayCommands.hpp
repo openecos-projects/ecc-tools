@@ -11,26 +11,10 @@
 
 namespace ipw::sdc {
 
-class TclSetInputDelay : public SdcTclCmd
-{
- public:
-  TclSetInputDelay(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
-class TclSetOutputDelay : public SdcTclCmd
-{
- public:
-  TclSetOutputDelay(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
 class TclSetInputTransition : public SdcTclCmd
 {
  public:
-  TclSetInputTransition(const char* cmd_name, ClientData client_data);
+  TclSetInputTransition(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -38,7 +22,7 @@ class TclSetInputTransition : public SdcTclCmd
 class TclSetDrivingCell : public SdcTclCmd
 {
  public:
-  TclSetDrivingCell(const char* cmd_name, ClientData client_data);
+  TclSetDrivingCell(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -46,7 +30,7 @@ class TclSetDrivingCell : public SdcTclCmd
 class TclSetLoad : public SdcTclCmd
 {
  public:
-  TclSetLoad(const char* cmd_name, ClientData client_data);
+  TclSetLoad(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };

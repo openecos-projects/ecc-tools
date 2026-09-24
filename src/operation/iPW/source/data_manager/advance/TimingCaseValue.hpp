@@ -10,34 +10,21 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
 
-#include "ParasiticResistor.hpp"
-#include "PWHeader.hpp"
-
 namespace ipw {
 
-class ParasiticNet
+enum class TimingCaseValue
 {
- public:
-  ParasiticNet() = default;
-  ~ParasiticNet() = default;
-  // getter
-  std::string& get_net_name() { return _net_name; }
-  std::map<std::string, double>& get_node_capacitance_map() { return _node_capacitance_map; }
-  std::vector<ParasiticResistor>& get_resistor_list() { return _resistor_list; }
-  // setter
-  void set_net_name(const std::string& net_name) { _net_name = net_name; }
-  // function
-
- private:
-  std::string _net_name;
-  std::map<std::string, double> _node_capacitance_map;
-  std::vector<ParasiticResistor> _resistor_list;
+  kNone,
+  kZero,
+  kOne,
+  kStatic,
+  kRise,
+  kFall
 };
 
 }  // namespace ipw

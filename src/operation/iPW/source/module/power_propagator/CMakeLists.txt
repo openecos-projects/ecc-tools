@@ -1,6 +1,4 @@
 add_library(ipw_power_propagator
-    ${IPW_MODULE}/power_propagator/PowerActivityModel.cpp
-    ${IPW_MODULE}/power_propagator/PowerVectorSimulator.cpp
     ${IPW_MODULE}/power_propagator/PowerPropagator.cpp
 )
 

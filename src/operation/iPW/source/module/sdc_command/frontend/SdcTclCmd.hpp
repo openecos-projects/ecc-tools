@@ -24,7 +24,7 @@ namespace ipw::sdc {
 class SdcTclCmd : public ecc::TclCmd
 {
  public:
-  SdcTclCmd(const char* cmd_name, ClientData client_data);
+  SdcTclCmd(const char* cmd_name);
   ~SdcTclCmd() override = default;
 
   int execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[]);
@@ -33,27 +33,18 @@ class SdcTclCmd : public ecc::TclCmd
   void setOptionValue(ecc::TclOption* option, const char* value);
   void setTclError(std::string error_message) { _error_message = std::move(error_message); }
   void warn(const std::string& message) const;
-  void setResult(std::string result);
   void setResult(std::vector<std::string> result);
-  const std::vector<std::pair<std::string, std::string>>& getOptionValueList() const { return _option_value_list; }
-
-  ClientData getClientData() const { return _client_data; }
-
  private:
   void resetExecutionState();
   void setInterpreterError(Tcl_Interp* interp) const;
 
-  ClientData _client_data = nullptr;
   std::string _error_message;
-  std::string _result;
   std::vector<std::string> _list_result;
-  std::vector<std::pair<std::string, std::string>> _option_value_list;
-  bool _has_result = false;
   bool _has_list_result = false;
 };
 
 template <typename Command>
-int executeTclCommand(ClientData client_data, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
+int executeTclCommand(ClientData, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
 {
   if (objc == 0) {
     Tcl_SetObjResult(interp, Tcl_NewStringObj("empty Tcl command", -1));
@@ -61,7 +52,7 @@ int executeTclCommand(ClientData client_data, Tcl_Interp* interp, int objc, Tcl_
   }
 
   try {
-    Command command(Tcl_GetString(objv[0]), client_data);
+    Command command(Tcl_GetString(objv[0]));
     return command.execute(interp, objc, objv);
   } catch (const std::exception& error) {
     Tcl_SetObjResult(interp, Tcl_NewStringObj(error.what(), -1));

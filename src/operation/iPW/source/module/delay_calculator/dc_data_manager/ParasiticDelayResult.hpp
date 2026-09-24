@@ -10,34 +10,38 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
 
-#include "ParasiticResistor.hpp"
 #include "PWHeader.hpp"
 
 namespace ipw {
 
-class ParasiticNet
+class ParasiticDelayResult
 {
  public:
-  ParasiticNet() = default;
-  ~ParasiticNet() = default;
+  ParasiticDelayResult() = default;
+  ~ParasiticDelayResult() = default;
   // getter
-  std::string& get_net_name() { return _net_name; }
-  std::map<std::string, double>& get_node_capacitance_map() { return _node_capacitance_map; }
-  std::vector<ParasiticResistor>& get_resistor_list() { return _resistor_list; }
+  bool get_is_valid() const { return _is_valid; }
+  double get_gate_delay() const { return _gate_delay; }
+  double get_driver_slew() const { return _driver_slew; }
+  std::map<std::string, double>& get_wire_delay_map() { return _wire_delay_map; }
+  std::map<std::string, double>& get_load_slew_map() { return _load_slew_map; }
   // setter
-  void set_net_name(const std::string& net_name) { _net_name = net_name; }
+  void set_is_valid(bool is_valid) { _is_valid = is_valid; }
+  void set_gate_delay(double gate_delay) { _gate_delay = gate_delay; }
+  void set_driver_slew(double driver_slew) { _driver_slew = driver_slew; }
   // function
 
  private:
-  std::string _net_name;
-  std::map<std::string, double> _node_capacitance_map;
-  std::vector<ParasiticResistor> _resistor_list;
+  bool _is_valid = false;
+  double _gate_delay = 0.0;
+  double _driver_slew = 0.0;
+  std::map<std::string, double> _wire_delay_map;
+  std::map<std::string, double> _load_slew_map;
 };
 
 }  // namespace ipw

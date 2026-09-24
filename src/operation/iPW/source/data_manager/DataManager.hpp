@@ -32,7 +32,6 @@ class DataManager
   // function
   void input(std::map<std::string, std::any>& config_map);
   void output();
-  void readConstraint();
 
   Config& getConfig() { return _config; }
   Database& getDatabase() { return _database; }
@@ -54,11 +53,11 @@ class DataManager
 #if 1  // build
   void buildConfig();
   void buildDatabase();
+  void readConstraint();
   void buildInstanceList();
   void makeInstanceList();
   void buildInstanceTimingInfo();
   void makeInstanceTimingInfo(Instance& instance);
-  TimingCheckArc makeInstanceTimingCheckArc(Instance& instance, TimingCheckArc& timing_check_arc);
   TimingCellArc* findClockToQArc(TimingCell& timing_cell);
   std::string getInstancePinName(Instance& instance, std::string& port_name);
   std::string findOutputPinName(Instance& instance, TimingCell& timing_cell);

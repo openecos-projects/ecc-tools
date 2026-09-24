@@ -59,24 +59,18 @@ struct LibertyExpr;
 namespace ipw {
 class LogicExpression;
 class ParasiticNet;
-class ParasiticNode;
 enum class PinDirection;
 class Net;
 class Pin;
 class TimingArc;
 class TimingCell;
 class TimingCellArc;
-class TimingCheckArc;
 class TimingLeakagePower;
 class TimingPowerArc;
 class TimingTable;
 enum class LogicOperationType;
 enum class TimingArcSense;
-enum class TimingCapacitiveUnit;
-enum class TimingCheckType;
-enum class TimingResistanceUnit;
 enum class TimingTableVariableType;
-enum class TimingTimeUnit;
 enum class TransType;
 }  // namespace ipw
 
@@ -113,7 +107,6 @@ class PWInterface
   void wrapVcdActivity();
   std::string wrapVcdPinName(std::string& vcd_signal_name);
   void wrapDBInfo();
-  void wrapConstraintFilePath();
   void wrapInstanceList();
   void wrapInstance(idb::IdbInstance* idb_instance);
   void wrapInstancePinList(idb::IdbInstance* idb_instance);
@@ -121,7 +114,6 @@ class PWInterface
   bool wrapSignalConnectType(idb::IdbConnectType connect_type);
   std::string wrapInstancePinName(idb::IdbInstance* idb_instance, idb::IdbPin* idb_pin);
   PinDirection wrapPinDirection(idb::IdbConnectDirection idb_direction);
-  void wrapPinCoordinate(Pin& pin, idb::IdbPin* idb_pin);
   void wrapPortList();
   void wrapPortPin(idb::IdbPin* idb_pin);
   std::string wrapPinName(idb::IdbPin* idb_pin);
@@ -133,14 +125,11 @@ class PWInterface
   std::string wrapNetIOPinName(idb::IdbPin* idb_pin);
   std::string wrapNetInstancePinName(idb::IdbPin* idb_pin);
   void wrapNetPinNameList(Net& net, std::string& pin_name);
-  void wrapNetToDatabase(Net& net);
+  void wrapNetToDatabase(const std::string& net_name, Net& net);
   void wrapTimingLibrary();
   void wrapTimingCellMap(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
   void wrapTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
   idb::LibLibrary* wrapReferenceLib(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
-  TimingCapacitiveUnit wrapTimingCapacitiveUnit(idb::LibLibrary* lib_library);
-  TimingResistanceUnit wrapTimingResistanceUnit(idb::LibLibrary* lib_library);
-  TimingTimeUnit wrapTimingTimeUnit(idb::LibLibrary* lib_library);
   void wrapTimingCell(idb::LibCell* lib_cell);
   void wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib_port);
   void wrapTimingCellSequential(TimingCell& timing_cell, const idb::LibCell* lib_cell);
@@ -155,32 +144,24 @@ class PWInterface
   void wrapLogicExpressionTermList(LogicExpression& logic_expression, LibertyExpr* liberty_expr);
   LogicOperationType wrapLogicOperationType(int32_t liberty_expr_op);
   void wrapTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* lib_arc_set);
-  bool isSDFDelayArc(idb::LibArc* lib_arc);
-  bool isSDFCheckArc(idb::LibArc* lib_arc);
+  bool isTimingDelayArc(idb::LibArc* lib_arc);
   TimingCellArc wrapDelayArc(idb::LibArcSet* lib_arc_set);
-  void wrapClearPresetArc(TimingCell& timing_cell, idb::LibArc* lib_arc);
-  TimingCheckArc wrapCheckArc(idb::LibArcSet* lib_arc_set);
   std::vector<TimingArc> wrapTimingArcList(idb::LibArcSet* lib_arc_set);
   TimingArc wrapTimingArc(idb::LibArc* lib_arc);
   void wrapTimingArcTable(TimingArc& timing_arc, idb::LibArc* lib_arc);
   TimingTable wrapTimingTable(idb::LibTable* lib_table);
-  TimingTableVariableType wrapTimingTableVariableType(idb::LibTable* lib_table, bool is_first_variable);
+  TimingTableVariableType wrapTimingTableVariableType(idb::LibTable* lib_table);
   double wrapLibTimeUnitScale(idb::LibLibrary* lib_library);
   double wrapLibCapUnitScale(idb::LibLibrary* lib_library);
   TimingArcSense wrapTimingArcSense(idb::LibArc* lib_arc);
   TransType wrapTriggerTransType(idb::LibArc* lib_arc);
-  TransType wrapCheckTransType(idb::LibArc* lib_arc);
-  TimingCheckType wrapTimingCheckType(idb::LibArc* lib_arc);
-  void wrapTimingCellInfo(TimingCell& timing_cell);
   void wrapParasiticLibrary();
-  void wrapParasiticNet(spef::Net& spef_net);
-  void wrapParasiticConnection(ParasiticNet& parasitic_net, spef::ConnEntry& spef_conn);
-  void wrapParasiticCapacitance(ParasiticNet& parasitic_net, spef::ResCap& spef_cap);
-  void wrapParasiticResistance(ParasiticNet& parasitic_net, spef::ResCap& spef_res);
-  double wrapParasiticCapacitance(double spef_capacitance);
-  double wrapParasiticResistance(double spef_resistance);
   double wrapSpefUnitScale(std::string& spef_unit, std::string& target_unit);
-  ParasiticNode& wrapParasiticNode(ParasiticNet& parasitic_net, const std::string& node_name);
+  void wrapParasiticNet(spef::Net& spef_net, double capacitance_scale, double resistance_scale);
+  void wrapParasiticConnection(ParasiticNet& parasitic_net, spef::ConnEntry& spef_conn);
+  void wrapParasiticResistance(ParasiticNet& parasitic_net, spef::ResCap& spef_res, double resistance_scale);
+  void wrapParasiticCapacitance(ParasiticNet& parasitic_net, spef::ResCap& spef_cap, double capacitance_scale);
+  void wrapParasiticNode(ParasiticNet& parasitic_net, const std::string& node_name);
 #endif
 
 #if 1  // output

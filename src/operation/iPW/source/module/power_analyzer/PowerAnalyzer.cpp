@@ -54,8 +54,7 @@ void PowerAnalyzer::analyze()
   Monitor monitor;
   PWLOG.info(Loc::current(), "Starting...");
 
-  PAModel pa_model = initPAModel();
-  analyzePower(pa_model);
+  analyzePower();
 
   PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -64,57 +63,43 @@ void PowerAnalyzer::analyze()
 
 PowerAnalyzer* PowerAnalyzer::_pa_instance = nullptr;
 
-PAModel PowerAnalyzer::initPAModel()
-{
-  PAModel pa_model;
-  buildInstanceNameList(pa_model);
-  return pa_model;
-}
-
-void PowerAnalyzer::buildInstanceNameList(PAModel& pa_model)
-{
-  Database& database = PWDM.getDatabase();
-  std::vector<std::string> instance_name_list;
-  for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
-    instance_name_list.push_back(instance_pair.first);
-  }
-  pa_model.set_instance_name_list(instance_name_list);
-  for (PowerGroupType power_group_type : GetPowerGroupTypeList()()) {
-    pa_model.get_group_power_map()[power_group_type] = PowerValue();
-  }
-}
-
-void PowerAnalyzer::analyzePower(PAModel& pa_model)
+void PowerAnalyzer::analyzePower()
 {
   Database& database = PWDM.getDatabase();
   database.get_instance_power_map().clear();
-  for (std::string& instance_name : pa_model.get_instance_name_list()) {
+  initPowerSummary();
+  PowerSummary& power_summary = database.get_power_summary();
+  for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
+    const std::string& instance_name = instance_pair.first;
+    Instance& instance = instance_pair.second;
     PAInstanceModel pa_instance_model;
-    InstancePower instance_power = analyzeInstancePower(instance_name, pa_instance_model);
+    InstancePower instance_power = analyzeInstancePower(instance, pa_instance_model);
     database.get_instance_power_map()[instance_name] = instance_power;
-    pa_model.get_group_power_map()[instance_power.get_power_group_type()].add_power_value(instance_power.get_power_value());
+    power_summary.get_group_power_map()[instance_power.get_power_group_type()].add_power_value(instance_power.get_power_value());
+    power_summary.get_total_power_value().add_power_value(instance_power.get_power_value());
     if (instance_power.get_power_group_type() == PowerGroupType::kRegister) {
       // Split the report groups only; retain the whole cell's power for
       // instance exports and downstream current injection. PTPX User Guide,
       // Table 9-1: register clock-pin internal power belongs to clock_network.
       double clock_power = pa_instance_model.get_clock_pin_internal_power();
-      pa_model.get_group_power_map()[PowerGroupType::kRegister].add_internal_power(-clock_power);
-      pa_model.get_group_power_map()[PowerGroupType::kClockNetwork].add_internal_power(clock_power);
+      power_summary.get_group_power_map()[PowerGroupType::kRegister].add_internal_power(-clock_power);
+      power_summary.get_group_power_map()[PowerGroupType::kClockNetwork].add_internal_power(clock_power);
     }
   }
-  updatePowerSummary(pa_model);
 }
 
-InstancePower PowerAnalyzer::analyzeInstancePower(std::string& instance_name, PAInstanceModel& pa_instance_model)
+void PowerAnalyzer::initPowerSummary()
 {
-  Database& database = PWDM.getDatabase();
-  InstancePower instance_power;
-  if (database.get_instance_map().count(instance_name) == 0) {
-    return instance_power;
+  PowerSummary& power_summary = PWDM.getDatabase().get_power_summary();
+  power_summary = PowerSummary();
+  for (PowerGroupType power_group_type : GetPowerGroupTypeList()()) {
+    power_summary.get_group_power_map()[power_group_type] = PowerValue();
   }
-  Instance& instance = database.get_instance_map()[instance_name];
-  instance_power.set_instance_id(instance.get_instance_id());
-  instance_power.set_instance_name(instance.get_instance_name());
+}
+
+InstancePower PowerAnalyzer::analyzeInstancePower(Instance& instance, PAInstanceModel& pa_instance_model)
+{
+  InstancePower instance_power;
   instance_power.set_power_group_type(getPowerGroupType(instance));
   instance_power.set_voltage(getInstanceVoltage(instance));
   instance_power.set_power_value(getInstancePowerValue(instance, pa_instance_model));
@@ -580,7 +565,7 @@ bool PowerAnalyzer::isActiveClockPin(Instance& instance, const std::string& port
   // Explicit state functions also identify clocks in libraries without
   // clock:true or timing checks (including latch enables).
   for (auto& sequential : cell->second.get_sequentials()) {
-    is_clock = is_clock || sequential.clock.get_has_port(clock_port_name);
+    is_clock = is_clock || sequential.get_clock().get_has_port(clock_port_name);
   }
   auto point = database.get_timing_point_map().find(instance.get_instance_name() + ":" + port_name);
   return is_clock && point != database.get_timing_point_map().end() && point->second.get_is_clock_point();
@@ -604,18 +589,6 @@ bool PowerAnalyzer::isClockNetwork(Instance& instance)
     }
   }
   return has_output_pin;
-}
-
-void PowerAnalyzer::updatePowerSummary(PAModel& pa_model)
-{
-  Database& database = PWDM.getDatabase();
-  PowerSummary power_summary;
-  power_summary.set_group_power_map(pa_model.get_group_power_map());
-  for (std::pair<const PowerGroupType, PowerValue>& power_pair : pa_model.get_group_power_map()) {
-    PowerValue power_value = power_pair.second;
-    power_summary.get_total_power_value().add_power_value(power_value);
-  }
-  database.get_power_summary() = power_summary;
 }
 
 }  // namespace ipw

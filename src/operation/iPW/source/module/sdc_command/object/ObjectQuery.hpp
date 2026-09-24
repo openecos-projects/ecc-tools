@@ -29,9 +29,6 @@ enum class QueryObjectType
   kCell,
   kNet,
   kClock,
-  kLibrary,
-  kLibCell,
-  kLibPin,
   kAny
 };
 
@@ -49,12 +46,10 @@ std::vector<std::string> parseObjectPatterns(const std::string& text, bool regex
 std::vector<std::string> findObjects(Database& database, const std::vector<std::string>& patterns, QueryObjectType type, bool regexp = false);
 std::vector<std::string> findObjects(Database& database, const std::vector<std::string>& patterns, QueryObjectType type, const ObjectQueryOptions& options);
 std::set<std::string> findClocks(Database& database, const std::vector<std::string>& objects);
-std::set<std::string> findExceptionObjects(Database& database, const std::vector<std::string>& objects);
 std::vector<std::string> findClockSources(Database& database, const std::vector<std::string>& objects);
-std::vector<std::string> findObjectsByType(Database& database, const std::vector<std::string>& objects, QueryObjectType type);
 
 std::vector<std::string> getPortPinNames(Database& database, const std::vector<std::string>& object_list);
-std::vector<std::string> getFullNames(Database& database, const std::string& object_list);
+std::vector<std::string> getObjectNames(Database& database, const std::string& object_list);
 TimingPortConstraint& getOrCreatePortConstraint(Database& database, const std::string& port_name);
 void addObjectQueryOptions(SdcTclCmd& command, bool hierarchical, bool exact, bool of_objects);
 ObjectQueryOptions getObjectQueryOptions(SdcTclCmd& command);

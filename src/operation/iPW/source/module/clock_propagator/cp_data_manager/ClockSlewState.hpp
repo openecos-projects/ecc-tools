@@ -10,33 +10,37 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // WHETHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
 
+#include "AnalysisType.hpp"
 #include "PWHeader.hpp"
+#include "TransType.hpp"
 
 namespace ipw {
 
-class TimingPoint
+class ClockSlewState
 {
  public:
-  TimingPoint() = default;
-  ~TimingPoint() = default;
+  ClockSlewState() = default;
+  ~ClockSlewState() = default;
   // getter
-  std::map<AnalysisType, std::map<TransType, double>>& get_clock_slew_map() { return _clock_slew_map; }
-  std::map<AnalysisType, std::map<TransType, double>>& get_data_slew_map() { return _data_slew_map; }
-  bool get_is_clock_point() const { return _is_clock_point; }
+  std::map<AnalysisType, std::map<TransType, double>>& get_slew_map() { return _slew_map; }
+  std::map<AnalysisType, std::map<TransType, double>>& get_physical_slew_map() { return _physical_slew_map; }
+  const std::map<AnalysisType, std::map<TransType, double>>& get_physical_slew_map() const { return _physical_slew_map; }
   // setter
-  void set_clock_slew_map(const std::map<AnalysisType, std::map<TransType, double>>& clock_slew_map) { _clock_slew_map = clock_slew_map; }
-  void set_is_clock_point(const bool is_clock_point) { _is_clock_point = is_clock_point; }
+  void set_slew_map(const std::map<AnalysisType, std::map<TransType, double>>& slew_map) { _slew_map = slew_map; }
+  void set_physical_slew_map(const std::map<AnalysisType, std::map<TransType, double>>& physical_slew_map)
+  {
+    _physical_slew_map = physical_slew_map;
+  }
   // function
 
  private:
-  std::map<AnalysisType, std::map<TransType, double>> _clock_slew_map;
-  std::map<AnalysisType, std::map<TransType, double>> _data_slew_map;
-  bool _is_clock_point = false;
+  std::map<AnalysisType, std::map<TransType, double>> _slew_map;
+  std::map<AnalysisType, std::map<TransType, double>> _physical_slew_map;
 };
 
 }  // namespace ipw

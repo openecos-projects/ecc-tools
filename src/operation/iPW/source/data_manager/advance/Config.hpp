@@ -30,6 +30,7 @@ class Config
   std::string temp_directory_path;  // required
   int32_t thread_number;            // optional
   int32_t min_slew_degradation;     // optional
+  std::string sdc_file_path;        // input
   /////////////////////////////////////////////
   // **********        PW        ********** //
   std::string log_file_path;  // building
@@ -41,8 +42,8 @@ class Config
   std::string dc_temp_directory_path;  // building
   // ******** ClockPropagator    ********* //
   std::string cp_temp_directory_path;  // building
-  // ********* TimingPropagator   ********* //
-  std::string tp_temp_directory_path;  // building
+  // ********* SignalPropagator   ********* //
+  std::string sp_temp_directory_path;  // building
   // ********* PowerPropagator    ********* //
   std::string pp_temp_directory_path;  // building
   // ********** PowerAnalyzer    ********* //

@@ -17,7 +17,6 @@
 
 #include "Database.hpp"
 #include "PPModel.hpp"
-#include "PowerActivityModel.hpp"
 
 namespace ipw {
 
@@ -33,9 +32,8 @@ class PowerPropagator
   void propagate();
 
  private:
-  // self
+ // self
   static PowerPropagator* _pp_instance;
-  PowerActivityModel _activity_model;
 
   PowerPropagator() = default;
   PowerPropagator(const PowerPropagator& other) = delete;
@@ -63,13 +61,22 @@ class PowerPropagator
   void seedActivity(PPModel& pp_model);
   PowerActivity getSeedActivity(std::string& pin_name, PPModel& pp_model);
   PowerActivity getClockActivity(std::string& pin_name);
+  PowerActivity getClockActivity(TimingClock& timing_clock);
   PowerActivity getInputActivity(PPModel& pp_model);
+  PowerActivity getDefaultInputActivity(double minimum_clock_period);
+  double getDefaultTransitionDensity(double minimum_clock_period);
   void seedSequentialStateActivity(PPModel& pp_model);
+  PowerActivity getInitialSequentialOutputActivity();
   void propagateCombinationalActivity(PPModel& pp_model);
   PowerActivity getPropagatedActivity(PowerActivity source_activity);
   void propagateOutputActivity(std::string& pin_name, PPModel& pp_model);
   PowerActivity getOutputActivity(std::string& pin_name, PPModel& pp_model);
+  void limitDataActivity(Database& database, std::string& pin_name, PowerActivity& activity, double minimum_clock_period);
+  bool shouldLimitDataActivity(Database& database, std::string& pin_name, PowerActivity& activity);
+  double getProbabilityLimitedTransitionDensity(PowerActivity& activity, double minimum_clock_period);
+  void scaleTransitionDensity(PowerActivity& activity, double maximum_transition_density);
   PowerActivity getClockGateOutputActivity(std::string& pin_name, Instance& instance);
+  PowerActivity getClockGateOutputActivity(PowerActivity& clock_activity, PowerActivity& enable_activity);
   PowerActivity getClockGateEnableActivity(Instance& instance, std::string& clock_pin_name, std::string& output_pin_name);
   bool isClockGateOutputPin(std::string& pin_name, Instance& instance);
   bool isClockGateClockPin(std::string& pin_name, TimingCellPort& timing_cell_port);
@@ -79,9 +86,11 @@ class PowerPropagator
   void propagateNetActivity(Arc& arc);
   void propagateSequentialActivity(PPModel& pp_model);
   PowerActivity getSequentialOutputActivity(Instance& instance);
+  void limitSequentialOutputActivity(PowerActivity& output_activity, PowerActivity& data_activity, PowerActivity& clock_activity);
   PowerActivity getPinActivity(std::string& pin_name);
   bool isOutputPin(std::string& pin_name);
   bool isClockSource(std::string& pin_name);
+  bool simulateVectorlessActivity(double reference_period);
 };
 
 }  // namespace ipw

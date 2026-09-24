@@ -23,70 +23,41 @@
 #endif
 
 #include "PWHeader.hpp"
-#include "Singleton.hpp"
 
 namespace ipw {
-
-struct SdcError
-{
-  unsigned line_number = 0;
-  std::string message;
-};
 
 class SdcCommand
 {
  public:
-  struct Command
-  {
-    const char* name;
-    Tcl_ObjCmdProc* proc;
-    ClientData client_data = nullptr;
-    Tcl_CmdDeleteProc* delete_proc = nullptr;
-  };
-
   static void initInst();
-  static void initInst(std::initializer_list<Command> commands);
   static SdcCommand& getInst();
   static void destroyInst();
-  static bool isInitialized();
-
-  SdcCommand();
-  SdcCommand(std::initializer_list<Command> commands);
-  ~SdcCommand();
 
   Tcl_Interp* getInterp() const { return _interp; }
 
-  Tcl_Command createCmd(const char* cmd_name, Tcl_ObjCmdProc* proc, ClientData client_data = nullptr, Tcl_CmdDeleteProc* delete_proc = nullptr);
-  void registerCommands(std::initializer_list<Command> commands);
+  Tcl_Command createCmd(const char* cmd_name, Tcl_ObjCmdProc* proc);
 
   int evalScriptFile(const std::string& file_name);
-  int evalString(const std::string& command);
 
-  const std::vector<SdcError>& getErrors() const { return _errors; }
-  void clearErrors() { _errors.clear(); }
+  int32_t get_error_line_number() const { return _error_line_number; }
+  std::string& get_error_message() { return _error_message; }
 
  private:
+  // self
+  static SdcCommand* _sdc_command_instance;
+
+  SdcCommand();
   SdcCommand(const SdcCommand&) = delete;
   SdcCommand& operator=(const SdcCommand&) = delete;
+  ~SdcCommand();
 
   int evalScript(const std::string& script);
-  void addError(unsigned line_number, std::string message);
+  void clearError();
+  void setError(int32_t line_number, std::string message);
 
   Tcl_Interp* _interp = nullptr;
-  std::vector<SdcError> _errors;
+  int32_t _error_line_number = 0;
+  std::string _error_message;
 };
-
-namespace sdc {
-
-/**
- * Register the iPW Tcl command set used by SDC scripts.
- *
- * Tcl language commands such as set, if, foreach and source are installed by
- * Tcl_Init(). This function only registers commands implemented by iPW,
- * including collection helpers, object queries, and timing constraints.
- */
-void registerSdcCommands(SdcCommand& interpreter);
-
-}  // namespace sdc
 
 }  // namespace ipw

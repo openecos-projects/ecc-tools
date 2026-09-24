@@ -11,26 +11,10 @@
 
 namespace ipw::sdc {
 
-class TclCurrentDesign : public SdcTclCmd
-{
- public:
-  TclCurrentDesign(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
-class TclRemoveFromCollection : public SdcTclCmd
-{
- public:
-  TclRemoveFromCollection(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
 class TclGetPins : public SdcTclCmd
 {
  public:
-  TclGetPins(const char* cmd_name, ClientData client_data);
+  TclGetPins(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -38,7 +22,7 @@ class TclGetPins : public SdcTclCmd
 class TclGetCells : public SdcTclCmd
 {
  public:
-  TclGetCells(const char* cmd_name, ClientData client_data);
+  TclGetCells(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -46,23 +30,7 @@ class TclGetCells : public SdcTclCmd
 class TclGetNets : public SdcTclCmd
 {
  public:
-  TclGetNets(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
-class TclAllInputs : public SdcTclCmd
-{
- public:
-  TclAllInputs(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
-class TclAllOutputs : public SdcTclCmd
-{
- public:
-  TclAllOutputs(const char* cmd_name, ClientData client_data);
+  TclGetNets(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -70,15 +38,15 @@ class TclAllOutputs : public SdcTclCmd
 class TclAllClocks : public SdcTclCmd
 {
  public:
-  TclAllClocks(const char* cmd_name, ClientData client_data);
+  TclAllClocks(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
 
-class TclGetFullName : public SdcTclCmd
+class TclGetObjectName : public SdcTclCmd
 {
  public:
-  TclGetFullName(const char* cmd_name, ClientData client_data);
+  TclGetObjectName(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -86,7 +54,7 @@ class TclGetFullName : public SdcTclCmd
 class TclGetPorts : public SdcTclCmd
 {
  public:
-  TclGetPorts(const char* cmd_name, ClientData client_data);
+  TclGetPorts(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -94,7 +62,7 @@ class TclGetPorts : public SdcTclCmd
 class TclGetClocks : public SdcTclCmd
 {
  public:
-  TclGetClocks(const char* cmd_name, ClientData client_data);
+  TclGetClocks(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -102,30 +70,38 @@ class TclGetClocks : public SdcTclCmd
 class TclGetGeneratedClocks : public TclGetClocks
 {
  public:
-  TclGetGeneratedClocks(const char* cmd_name, ClientData client_data);
+  TclGetGeneratedClocks(const char* cmd_name);
   unsigned exec() override;
 };
 
-class TclGetLibs : public SdcTclCmd
+class TclCurrentDesign : public SdcTclCmd
 {
  public:
-  TclGetLibs(const char* cmd_name, ClientData client_data);
+  TclCurrentDesign(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
 
-class TclGetLibCells : public SdcTclCmd
+class TclRemoveFromCollection : public SdcTclCmd
 {
  public:
-  TclGetLibCells(const char* cmd_name, ClientData client_data);
+  TclRemoveFromCollection(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
 
-class TclGetLibPins : public SdcTclCmd
+class TclAllInputs : public SdcTclCmd
 {
  public:
-  TclGetLibPins(const char* cmd_name, ClientData client_data);
+  TclAllInputs(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclAllOutputs : public SdcTclCmd
+{
+ public:
+  TclAllOutputs(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };

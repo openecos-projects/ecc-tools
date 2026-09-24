@@ -10,34 +10,37 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
 
-#include "ParasiticResistor.hpp"
 #include "PWHeader.hpp"
 
 namespace ipw {
 
-class ParasiticNet
+class ParasiticArnoldiPoleResidue
 {
  public:
-  ParasiticNet() = default;
-  ~ParasiticNet() = default;
+  ParasiticArnoldiPoleResidue() = default;
+  ~ParasiticArnoldiPoleResidue() = default;
   // getter
-  std::string& get_net_name() { return _net_name; }
-  std::map<std::string, double>& get_node_capacitance_map() { return _node_capacitance_map; }
-  std::vector<ParasiticResistor>& get_resistor_list() { return _resistor_list; }
+  bool get_is_valid() const { return _is_valid; }
+  int32_t get_order() const { return _order; }
+  std::vector<double>& get_pole_list() { return _pole_list; }
+  std::vector<std::vector<double>>& get_residue_list() { return _residue_list; }
   // setter
-  void set_net_name(const std::string& net_name) { _net_name = net_name; }
+  void set_is_valid(const bool is_valid) { _is_valid = is_valid; }
+  void set_order(const int32_t order) { _order = order; }
+  void set_pole_list(const std::vector<double>& pole_list) { _pole_list = pole_list; }
+  void set_residue_list(const std::vector<std::vector<double>>& residue_list) { _residue_list = residue_list; }
   // function
 
  private:
-  std::string _net_name;
-  std::map<std::string, double> _node_capacitance_map;
-  std::vector<ParasiticResistor> _resistor_list;
+  bool _is_valid = false;
+  int32_t _order = 0;
+  std::vector<double> _pole_list;
+  std::vector<std::vector<double>> _residue_list;
 };
 
 }  // namespace ipw

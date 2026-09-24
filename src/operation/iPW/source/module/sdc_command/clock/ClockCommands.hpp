@@ -14,15 +14,7 @@ namespace ipw::sdc {
 class TclSetClockTransition : public SdcTclCmd
 {
  public:
-  TclSetClockTransition(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
-class TclSetClockGroups : public SdcTclCmd
-{
- public:
-  TclSetClockGroups(const char* cmd_name, ClientData client_data);
+  TclSetClockTransition(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -30,15 +22,7 @@ class TclSetClockGroups : public SdcTclCmd
 class TclCreateGeneratedClock : public SdcTclCmd
 {
  public:
-  TclCreateGeneratedClock(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
-class TclSetClockUncertainty : public SdcTclCmd
-{
- public:
-  TclSetClockUncertainty(const char* cmd_name, ClientData client_data);
+  TclCreateGeneratedClock(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -46,7 +30,7 @@ class TclSetClockUncertainty : public SdcTclCmd
 class TclCreateClock : public SdcTclCmd
 {
  public:
-  TclCreateClock(const char* cmd_name, ClientData client_data);
+  TclCreateClock(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
@@ -54,7 +38,7 @@ class TclCreateClock : public SdcTclCmd
 class TclSetPropagatedClock : public SdcTclCmd
 {
  public:
-  TclSetPropagatedClock(const char* cmd_name, ClientData client_data);
+  TclSetPropagatedClock(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };

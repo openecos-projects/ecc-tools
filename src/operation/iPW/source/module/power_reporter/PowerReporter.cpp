@@ -16,12 +16,9 @@
 #include "PowerReporter.hpp"
 
 #include "DataManager.hpp"
-#include "DelayCalculator.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Utility.hpp"
-
-#include <cstdlib>
 
 namespace ipw {
 
@@ -57,57 +54,8 @@ void PowerReporter::report()
   Monitor monitor;
   PWLOG.info(Loc::current(), "Starting...");
 
-  PRModel pr_model = initPRModel();
-  outputPowerReport(pr_model);
-  outputInstancePower(pr_model);
-
-  // Optional detailed reports for comparing power and activity independently.
-  if (const char* diagnostics = std::getenv("IPW_POWER_DIAGNOSTICS"); diagnostics && std::string(diagnostics) == "1") {
-    Database& database = PWDM.getDatabase();
-    auto write_name = [](std::ostream& out, const std::string& name) -> std::ostream& {
-      out << '"';
-      for (char character : name) {
-        if (character == '"') out << '"';
-        out << character;
-      }
-      return out << '"';
-    };
-    std::ofstream cells(PWDM.getConfig().pr_temp_directory_path + "instance_power.csv");
-    cells << "instance,internal_w,switching_w,leakage_w\n" << std::setprecision(17);
-    for (auto& [name, instance] : database.get_instance_power_map()) {
-      auto& value = instance.get_power_value();
-      write_name(cells, name) << ',' << value.get_internal_power() << ',' << value.get_switching_power() << ','
-            << value.get_leakage_power() << '\n';
-    }
-    std::ofstream pins(PWDM.getConfig().pr_temp_directory_path + "pin_activity.csv");
-    pins << "pin,probability,density_per_ns,rise_slew_ns,fall_slew_ns,rise_load_pf,fall_load_pf\n" << std::setprecision(17);
-    for (auto& [name, activity] : database.get_power_activity_map()) {
-      std::string pin_name = name;
-      double rise_slew = 0.0, fall_slew = 0.0;
-      auto point = database.get_timing_point_map().find(name);
-      if (point != database.get_timing_point_map().end()) {
-        auto read_slew = [&](auto& map) {
-          auto max_slew = map.find(AnalysisType::kMax);
-          if (max_slew != map.end()) {
-            auto rise = max_slew->second.find(TransType::kRise);
-            auto fall = max_slew->second.find(TransType::kFall);
-            if (rise != max_slew->second.end()) rise_slew = rise->second;
-            if (fall != max_slew->second.end()) fall_slew = fall->second;
-          }
-        };
-        if (point->second.get_is_clock_point()) {
-          read_slew(point->second.get_data_slew_map());
-          read_slew(point->second.get_clock_slew_map());
-        } else {
-          read_slew(point->second.get_clock_slew_map());
-          read_slew(point->second.get_data_slew_map());
-        }
-      }
-      write_name(pins, name) << ',' << activity.get_static_probability() << ',' << activity.get_transition_density() << ','
-           << rise_slew << ',' << fall_slew << ',' << PWDC.getPowerOutputLoad(pin_name, AnalysisType::kMax, TransType::kRise) << ','
-           << PWDC.getPowerOutputLoad(pin_name, AnalysisType::kMax, TransType::kFall) << '\n';
-    }
-  }
+  outputPowerReport();
+  outputInstancePower();
 
   PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -116,27 +64,9 @@ void PowerReporter::report()
 
 PowerReporter* PowerReporter::_pr_instance = nullptr;
 
-PRModel PowerReporter::initPRModel()
+void PowerReporter::outputPowerReport()
 {
-  PRModel pr_model;
-  buildPowerReportFilePath(pr_model);
-  buildInstancePowerFilePath(pr_model);
-  return pr_model;
-}
-
-void PowerReporter::buildPowerReportFilePath(PRModel& pr_model)
-{
-  pr_model.set_power_report_file_path(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "power.rpt"));
-}
-
-void PowerReporter::buildInstancePowerFilePath(PRModel& pr_model)
-{
-  pr_model.set_instance_power_file_path(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "instance_power.bin"));
-}
-
-void PowerReporter::outputPowerReport(PRModel& pr_model)
-{
-  std::ofstream* power_report_file = PWUTIL.getOutputFileStream(pr_model.get_power_report_file_path());
+  std::ofstream* power_report_file = PWUTIL.getOutputFileStream(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "power.rpt"));
   outputPowerDesignInfo(power_report_file);
   outputPowerUnitInfo(power_report_file);
   outputPowerSummary(power_report_file);
@@ -149,18 +79,7 @@ void PowerReporter::outputPowerDesignInfo(std::ofstream* power_report_file)
 {
   Database& database = PWDM.getDatabase();
   TimingLibrary& timing_library = database.get_timing_library();
-  std::string operating_conditions = timing_library.get_default_operating_conditions();
-  std::string wire_load_model = timing_library.get_default_wire_load();
-  if (operating_conditions.empty()) {
-    operating_conditions = "none";
-  }
-  if (wire_load_model.empty()) {
-    wire_load_model = "ZeroWireload";
-  }
   (*power_report_file) << "Design : " << database.get_design_name() << "\n";
-  (*power_report_file) << "Operating Conditions: " << operating_conditions << "\n";
-  (*power_report_file) << "Analysis Effort : low\n";
-  (*power_report_file) << "Wire Load Model : " << wire_load_model << "\n";
   (*power_report_file) << "Global Operating Voltage = " << std::setprecision(4) << timing_library.get_nom_voltage() << "\n\n";
 }
 
@@ -216,13 +135,13 @@ void PowerReporter::outputPowerAttribute(std::ofstream* power_report_file)
   (*power_report_file) << "\ni - Including register clock pin internal power\n";
 }
 
-void PowerReporter::outputInstancePower(PRModel& pr_model)
+void PowerReporter::outputInstancePower()
 {
   Database& database = PWDM.getDatabase();
-  std::ofstream* instance_power_file = PWUTIL.getOutputFileStream(pr_model.get_instance_power_file_path());
+  std::ofstream* instance_power_file = PWUTIL.getOutputFileStream(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "instance_power.bin"));
   outputInstancePowerHeader(instance_power_file);
   for (std::pair<const std::string, InstancePower>& instance_power_pair : database.get_instance_power_map()) {
-    outputInstancePowerRecord(instance_power_file, instance_power_pair.second);
+    outputInstancePowerRecord(instance_power_file, instance_power_pair.first, instance_power_pair.second);
   }
   PWUTIL.closeFileStream(instance_power_file);
 }
@@ -239,10 +158,10 @@ void PowerReporter::outputInstancePowerHeader(std::ofstream* instance_power_file
   instance_power_file->write(reinterpret_cast<const char*>(&instance_power_num), static_cast<std::streamsize>(sizeof(instance_power_num)));
 }
 
-void PowerReporter::outputInstancePowerRecord(std::ofstream* instance_power_file, InstancePower& instance_power)
+void PowerReporter::outputInstancePowerRecord(std::ofstream* instance_power_file, const std::string& instance_name, InstancePower& instance_power)
 {
   // iEMIR resolves the stable ID against the same IDB design database.
-  uint64_t instance_id = instance_power.get_instance_id();
+  uint64_t instance_id = PWDM.getDatabase().get_instance_map()[instance_name].get_instance_id();
   uint32_t power_group_type = static_cast<uint32_t>(instance_power.get_power_group_type());
   double voltage = instance_power.get_voltage();
   double internal_power = instance_power.get_power_value().get_internal_power();

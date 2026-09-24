@@ -30,9 +30,6 @@ class PowerSummary
   // getter
   std::map<PowerGroupType, PowerValue>& get_group_power_map() { return _group_power_map; }
   PowerValue& get_total_power_value() { return _total_power_value; }
-  // setter
-  void set_group_power_map(const std::map<PowerGroupType, PowerValue>& group_power_map) { _group_power_map = group_power_map; }
-  void set_total_power_value(const PowerValue& total_power_value) { _total_power_value = total_power_value; }
   // function
 
  private:

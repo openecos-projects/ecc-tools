@@ -45,7 +45,6 @@ class TimingPowerArc
   void set_sink_port(const std::string& sink_port) { _sink_port = sink_port; }
   void set_related_pg_port(const std::string& related_pg_port) { _related_pg_port = related_pg_port; }
   void set_when_expression(const LogicExpression& when_expression) { _when_expression = when_expression; }
-  void set_energy_table_map(const std::map<TransType, TimingTable>& energy_table_map) { _energy_table_map = energy_table_map; }
   void set_time_unit_scale(const double time_unit_scale) { _time_unit_scale = time_unit_scale; }
   void set_cap_unit_scale(const double cap_unit_scale) { _cap_unit_scale = cap_unit_scale; }
   void set_source_sense(TimingArcSense sense) { _source_sense = sense; }

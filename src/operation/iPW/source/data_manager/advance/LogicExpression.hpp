@@ -31,7 +31,6 @@ class LogicExpression
   std::vector<LogicExpressionTerm>& get_term_list() { return _term_list; }
   bool get_is_empty() const { return _term_list.empty(); }
   // setter
-  void set_term_list(const std::vector<LogicExpressionTerm>& term_list) { _term_list = term_list; }
   // function
   void substitute_ports(std::map<std::string, LogicExpression>& expressions)
   {

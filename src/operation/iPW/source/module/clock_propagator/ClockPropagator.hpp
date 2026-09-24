@@ -43,40 +43,23 @@ class ClockPropagator
   ClockPropagator& operator=(ClockPropagator&& other) = delete;
   // function
   bool isDisableArc(Arc& arc);
-  CPModel initCPModel();
-  void buildClockSourceList(CPModel& cp_model);
-  void initTimingPointList();
-  void markClockPointList(CPModel& cp_model);
-  void markClockPoint(CPClock& clock);
-  void propagateClockArrival(CPModel& cp_model);
-  void seedPhysicalClockState(CPClock& clock);
-  bool seedGeneratedClockState(CPClock& clock, const TimingClock& definition);
-  bool hasPhysicalClockState(const TimingPoint& timing_point, std::string_view clock_name);
-  void updateEffectiveClockState(CPClock& clock);
-  void propagateClockSlewDelay(CPClock& clock);
-  void propagateClockSlewDelayArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type);
-  void propagateClockSlewDelayArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
-  void updateClockSlewDelay(std::string_view clock_name, Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
-                            TransType input_trans_type, TransType output_trans_type);
-  void propagateClockArrivalArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type);
-  void propagateClockArrivalArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
-  void updateClockPathState(std::string_view clock_name, Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
-                            TransType input_trans_type, TransType output_trans_type);
-  bool hasClockArrival(const TimingPoint& timing_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
-  double getClockArrival(const TimingPoint& timing_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
-  void updateClockArrival(TimingPoint& timing_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type, double clock_arrival);
-  void updateClockPredecessor(TimingPoint& timing_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type,
-                              TransType predecessor_trans_type, Arc& arc, double arc_delay);
+  void initSignalPointList(CPModel& cp_model);
+  void buildClockNameList(std::vector<std::string>& clock_name_list);
+  void markClockPointList(CPModel& cp_model, std::vector<std::string>& clock_name_list);
+  void markClockPoint(CPModel& cp_model, std::string& clock_name);
+  void propagateClockSlew(CPModel& cp_model, std::vector<std::string>& clock_name_list);
+  void seedPhysicalClockSlew(CPModel& cp_model, std::string& clock_name);
+  bool seedGeneratedClockSlew(CPModel& cp_model, std::string& clock_name, const TimingClock& timing_clock);
+  bool hasPhysicalClockSlew(const CPModel& cp_model, std::string_view pin_name, std::string_view clock_name);
+  void updateEffectiveClockSlew(CPModel& cp_model, std::string& clock_name);
+  void propagateClockSlew(CPModel& cp_model, std::string& clock_name);
+  void propagateClockSlewArc(CPModel& cp_model, std::string& clock_name, std::size_t arc_idx, AnalysisType analysis_type);
+  void propagateClockSlewArc(CPModel& cp_model, std::string& clock_name, std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
+  void updateClockSlew(CPModel& cp_model, std::string_view clock_name, Arc& arc, AnalysisType analysis_type, TransType input_trans_type,
+                       TransType output_trans_type);
   bool shouldStopClockPropagation(std::string& pin_name);
-  void updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay);
-  bool isBetterDelay(double candidate_delay, double current_delay, AnalysisType analysis_type);
   bool isBetterSlew(double candidate_slew, double current_slew, AnalysisType analysis_type);
-  double roundTime(double time);
-  std::vector<TransType> getOutputTransTypeList(Arc& arc, AnalysisType analysis_type, TransType input_trans_type);
-  double getArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type);
-  double getArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type);
-  bool isBetterArrival(double candidate_arrival, double current_arrival, AnalysisType analysis_type);
-  bool isFinite(double value);
+  std::vector<TransType> getOutputTransTypeList(Arc& arc, TransType input_trans_type);
 };
 
 }  // namespace ipw

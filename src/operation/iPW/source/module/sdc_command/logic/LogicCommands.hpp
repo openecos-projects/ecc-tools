@@ -14,7 +14,7 @@ namespace ipw::sdc {
 class TclSetCaseAnalysis : public SdcTclCmd
 {
  public:
-  TclSetCaseAnalysis(const char* cmd_name, ClientData client_data);
+  TclSetCaseAnalysis(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };

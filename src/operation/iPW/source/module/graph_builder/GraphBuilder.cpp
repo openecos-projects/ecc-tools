@@ -17,7 +17,6 @@
 #include "GraphBuilder.hpp"
 
 #include "DataManager.hpp"
-#include "DelayCalculator.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Utility.hpp"
@@ -55,25 +54,183 @@ void GraphBuilder::build()
 {
   Monitor monitor;
   PWLOG.info(Loc::current(), "Starting...");
-  buildTimingPointList();
+  buildSignalPointList();
   normalizePinDirectionByTimingCell();
   buildCellArcs();
   buildInoutPinDirectionByGraph();
   buildNetDriverLoadList();
   buildNetArcs();
-  buildStartEndPointList();
+  buildSourcePinList();
   breakLoopArcList();
-  buildTimingOrder();
+  buildSignalOrder();
+  applyCaseAnalysis();
   printLoopInfo();
-  initializeArcTiming();
   PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void GraphBuilder::applyCaseAnalysis()
+{
+  Database& database = PWDM.getDatabase();
+  TimingConstraint& constraint = database.get_timing_constraint();
+  if (constraint.get_case_analysis_map().empty()) {
+    constraint.get_effective_case_analysis_map().clear();
+    for (Arc& arc : database.get_arc_list()) {
+      arc.set_is_case_analysis_disable(false);
+    }
+    return;
+  }
+  constraint.get_effective_case_analysis_map() = constraint.get_case_analysis_map();
+  propagateCaseValue();
+  disableCaseInsensitiveArc();
+}
+
+void GraphBuilder::propagateCaseValue()
+{
+  Database& database = PWDM.getDatabase();
+  TimingConstraint& constraint = database.get_timing_constraint();
+  bool changed = true;
+  for (std::size_t iteration = 0; changed && iteration <= database.get_pin_map().size(); ++iteration) {
+    changed = false;
+    for (auto& [net_name, net] : database.get_net_map()) {
+      const std::optional<TimingCaseValue> value = getNetDriverCaseValue(constraint, net);
+      if (!value.has_value()) {
+        continue;
+      }
+      for (const std::string& load : net.get_load_pin_list()) {
+        changed = updateEffectiveCaseValue(constraint, load, *value) || changed;
+      }
+    }
+
+    for (auto& [instance_name, instance] : database.get_instance_map()) {
+      const auto cell = database.get_timing_library().get_cell_map().find(instance.get_cell_name());
+      if (cell == database.get_timing_library().get_cell_map().end()) {
+        continue;
+      }
+      const std::map<std::string, bool> value_map = getInstanceConstantInputMap(instance);
+      for (auto& [port_name, port] : cell->second.get_port_map()) {
+        if (!port.get_is_output() || port.get_function_expression().get_is_empty()) {
+          continue;
+        }
+        const std::string output_pin = instance_name + ":" + port_name;
+        const std::optional<bool> value = port.get_function_expression().evaluate_constant(value_map);
+        if (value.has_value()) {
+          changed = updateEffectiveCaseValue(constraint, output_pin, *value ? TimingCaseValue::kOne : TimingCaseValue::kZero) || changed;
+        } else if (hasStaticExpressionInput(instance, port.get_function_expression())) {
+          changed = updateEffectiveCaseValue(constraint, output_pin, TimingCaseValue::kStatic) || changed;
+        }
+      }
+    }
+  }
+}
+
+std::optional<TimingCaseValue> GraphBuilder::getNetDriverCaseValue(TimingConstraint& constraint, Net& net)
+{
+  for (const std::string& driver_pin : net.get_driver_pin_list()) {
+    const auto value = constraint.get_effective_case_analysis_map().find(driver_pin);
+    if (value != constraint.get_effective_case_analysis_map().end()) {
+      return value->second;
+    }
+  }
+  return std::nullopt;
+}
+
+std::map<std::string, bool> GraphBuilder::getInstanceConstantInputMap(Instance& instance)
+{
+  Database& database = PWDM.getDatabase();
+  std::map<std::string, bool> value_map;
+  for (const std::string& pin_name : instance.get_pin_name_list()) {
+    const auto pin = database.get_pin_map().find(pin_name);
+    const auto value = database.get_timing_constraint().get_effective_case_analysis_map().find(pin_name);
+    if (pin == database.get_pin_map().end() || value == database.get_timing_constraint().get_effective_case_analysis_map().end()
+        || !isConstantCaseValue(value->second)) {
+      continue;
+    }
+    value_map[pin->second.get_pin_name()] = value->second == TimingCaseValue::kOne;
+  }
+  return value_map;
+}
+
+bool GraphBuilder::hasStaticExpressionInput(Instance& instance, LogicExpression& expression)
+{
+  Database& database = PWDM.getDatabase();
+  for (LogicExpressionTerm& term : expression.get_term_list()) {
+    if (term.get_operation_type() != LogicOperationType::kPort) {
+      continue;
+    }
+    const std::string pin_name = instance.get_instance_name() + ":" + term.get_port_name();
+    const auto value = database.get_timing_constraint().get_effective_case_analysis_map().find(pin_name);
+    if (value == database.get_timing_constraint().get_effective_case_analysis_map().end() || !isStaticCaseValue(value->second)) {
+      return false;
+    }
+  }
+  return !expression.get_is_empty();
+}
+
+bool GraphBuilder::isStaticCaseValue(TimingCaseValue value)
+{
+  return isConstantCaseValue(value) || value == TimingCaseValue::kStatic;
+}
+
+bool GraphBuilder::isConstantCaseValue(TimingCaseValue value)
+{
+  return value == TimingCaseValue::kZero || value == TimingCaseValue::kOne;
+}
+
+bool GraphBuilder::updateEffectiveCaseValue(TimingConstraint& constraint, const std::string& pin_name, TimingCaseValue value)
+{
+  if (constraint.get_case_analysis_map().contains(pin_name)) {
+    return false;
+  }
+  auto& effective_value_map = constraint.get_effective_case_analysis_map();
+  const auto current = effective_value_map.find(pin_name);
+  if (current != effective_value_map.end() && current->second == value) {
+    return false;
+  }
+  if (current != effective_value_map.end() && current->second == TimingCaseValue::kZero) {
+    return false;
+  }
+  effective_value_map[pin_name] = value;
+  return true;
+}
+
+void GraphBuilder::disableCaseInsensitiveArc()
+{
+  Database& database = PWDM.getDatabase();
+  for (Arc& arc : database.get_arc_list()) {
+    arc.set_is_case_analysis_disable(false);
+    const auto source_value = database.get_timing_constraint().get_effective_case_analysis_map().find(arc.get_source_pin());
+    const auto sink_value = database.get_timing_constraint().get_effective_case_analysis_map().find(arc.get_sink_pin());
+    if ((source_value != database.get_timing_constraint().get_effective_case_analysis_map().end() && isStaticCaseValue(source_value->second))
+        || (sink_value != database.get_timing_constraint().get_effective_case_analysis_map().end() && isStaticCaseValue(sink_value->second))) {
+      arc.set_is_case_analysis_disable(true);
+      continue;
+    }
+    if (arc.get_type() != ArcType::kCell) {
+      continue;
+    }
+    const auto instance = database.get_instance_map().find(arc.get_owner_name());
+    if (instance == database.get_instance_map().end()) {
+      continue;
+    }
+    const auto cell = database.get_timing_library().get_cell_map().find(instance->second.get_cell_name());
+    if (cell == database.get_timing_library().get_cell_map().end()) {
+      continue;
+    }
+    const auto output = cell->second.get_port_map().find(arc.get_library_sink_port());
+    if (output == cell->second.get_port_map().end() || output->second.get_function_expression().get_is_empty()) {
+      continue;
+    }
+    if (!output->second.get_function_expression().is_sensitive_to(arc.get_library_source_port(), getInstanceConstantInputMap(instance->second))) {
+      arc.set_is_case_analysis_disable(true);
+    }
+  }
 }
 
 // private
 
 GraphBuilder* GraphBuilder::_gb_instance = nullptr;
 
-void GraphBuilder::buildTimingPointList()
+void GraphBuilder::buildSignalPointList()
 {
   Database& database = PWDM.getDatabase();
   for (std::pair<const std::string, Pin>& pin_pair : database.get_pin_map()) {
@@ -166,7 +323,6 @@ void GraphBuilder::addArc(const std::string& source_pin, const std::string& sink
 {
   Database& database = PWDM.getDatabase();
   Arc arc;
-  arc.set_arc_name(owner_name + ":" + source_pin + "->" + sink_pin);
   arc.set_source_pin(source_pin);
   arc.set_sink_pin(sink_pin);
   arc.set_owner_name(owner_name);
@@ -355,7 +511,7 @@ PinDirection GraphBuilder::inferInoutPinDirectionByNet(Pin& pin, std::map<std::s
   }
   if (driver_pin_num > 1) {
     std::vector<std::string> driver_pin_list = getDriverPinList(*net, inout_pin_direction_map);
-    PWLOG.error(Loc::current(), "The net has multiple driver pins: net=", net->get_net_name(), " drivers=", getPinNameListString(driver_pin_list));
+    PWLOG.error(Loc::current(), "The net has multiple driver pins: net=", pin.get_net_name(), " drivers=", getPinNameListString(driver_pin_list));
   }
   return PinDirection::kNone;
 }
@@ -446,21 +602,19 @@ void GraphBuilder::buildNetDriverLoadList()
 {
   Database& database = PWDM.getDatabase();
   for (std::pair<const std::string, Net>& net_pair : database.get_net_map()) {
-    makeNetDriverLoad(net_pair.second);
+    makeNetDriverLoad(net_pair.first, net_pair.second);
   }
 }
 
-void GraphBuilder::makeNetDriverLoad(Net& net)
+void GraphBuilder::makeNetDriverLoad(const std::string& net_name, Net& net)
 {
   Database& database = PWDM.getDatabase();
-  net.get_driver_pin().clear();
   net.get_driver_pin_list().clear();
   net.get_load_pin_list().clear();
 
   for (std::string& pin_name : net.get_pin_name_list()) {
     Pin& pin = database.get_pin_map()[pin_name];
     if (isDriverPin(pin)) {
-      net.set_driver_pin(pin_name);
       net.get_driver_pin_list().push_back(pin_name);
     } else {
       net.get_load_pin_list().push_back(pin_name);
@@ -468,7 +622,7 @@ void GraphBuilder::makeNetDriverLoad(Net& net)
   }
 
   if (net.get_driver_pin_list().size() > 1) {
-    PWLOG.error(Loc::current(), "The net has multiple driver pins: net=", net.get_net_name(), " drivers=", getPinNameListString(net.get_driver_pin_list()));
+    PWLOG.error(Loc::current(), "The net has multiple driver pins: net=", net_name, " drivers=", getPinNameListString(net.get_driver_pin_list()));
   }
 }
 
@@ -493,14 +647,15 @@ void GraphBuilder::buildNetArcs()
 {
   Database& database = PWDM.getDatabase();
   for (auto& [net_name, net] : database.get_net_map()) {
-    if (net.get_driver_pin().empty()) {
+    if (net.get_driver_pin_list().empty()) {
       continue;
     }
+    std::string& driver_pin = net.get_driver_pin_list().back();
     for (std::string& load_pin : net.get_load_pin_list()) {
-      if (load_pin == net.get_driver_pin()) {
+      if (load_pin == driver_pin) {
         continue;
       }
-      addArc(net.get_driver_pin(), load_pin, ArcType::kNet, net_name);
+      addArc(driver_pin, load_pin, ArcType::kNet, net_name);
     }
   }
 }
@@ -509,7 +664,6 @@ void GraphBuilder::addArc(const std::string& source_pin, const std::string& sink
 {
   Database& database = PWDM.getDatabase();
   Arc arc;
-  arc.set_arc_name(owner_name + ":" + source_pin + "->" + sink_pin);
   arc.set_source_pin(source_pin);
   arc.set_sink_pin(sink_pin);
   arc.set_owner_name(owner_name);
@@ -549,34 +703,32 @@ bool GraphBuilder::isDisableArc(Arc& arc)
   return arc.get_is_disable_arc() || arc.get_is_loop_disable();
 }
 
-void GraphBuilder::buildStartEndPointList()
+void GraphBuilder::buildSourcePinList()
 {
   Database& database = PWDM.getDatabase();
+  database.get_source_pin_list().clear();
   for (auto& [pin_name, pin] : database.get_pin_map()) {
-    if (isStartPoint(pin_name, pin)) {
-      appendUnique(database.get_start_point_list(), pin_name);
-    }
-    if (isEndPoint(pin_name, pin)) {
-      appendUnique(database.get_end_point_list(), pin_name);
+    if (isSourcePin(pin_name, pin)) {
+      appendUnique(database.get_source_pin_list(), pin_name);
     }
   }
 }
 
-bool GraphBuilder::isStartPoint(const std::string& pin_name, Pin& pin)
+bool GraphBuilder::isSourcePin(const std::string& pin_name, Pin& pin)
 {
-  if (isRegisterClockStartPoint(pin_name, pin)) {
+  if (isSequentialClockSource(pin_name, pin)) {
     return true;
   }
   if (isClockPin(pin_name, pin)) {
     return false;
   }
   if (isClockSource(pin_name)) {
-    return isStartPort(pin);
+    return isInputPort(pin);
   }
-  return !hasIncomingArc(pin_name) || isStartPort(pin);
+  return !hasIncomingArc(pin_name) || isInputPort(pin);
 }
 
-bool GraphBuilder::isRegisterClockStartPoint(const std::string& pin_name, Pin& pin)
+bool GraphBuilder::isSequentialClockSource(const std::string& pin_name, Pin& pin)
 {
   Database& database = PWDM.getDatabase();
   if (pin.get_is_port() || database.get_instance_map().count(pin.get_instance_name()) == 0) {
@@ -612,43 +764,9 @@ bool GraphBuilder::hasIncomingArc(const std::string& pin_name)
   return database.get_incoming_arc_list_map().count(pin_name) > 0 && !database.get_incoming_arc_list_map()[pin_name].empty();
 }
 
-bool GraphBuilder::isStartPort(Pin& pin)
+bool GraphBuilder::isInputPort(Pin& pin)
 {
   return pin.get_is_port() && (pin.get_direction() == PinDirection::kInput || pin.get_direction() == PinDirection::kInout);
-}
-
-bool GraphBuilder::isEndPoint(const std::string& pin_name, Pin& pin)
-{
-  if (isClockPin(pin_name, pin) || isClockSource(pin_name)) {
-    return false;
-  }
-  return !hasOutgoingArc(pin_name) || isEndPort(pin) || isTimingCheckEndPoint(pin_name, pin);
-}
-
-bool GraphBuilder::isTimingCheckEndPoint(const std::string& pin_name, Pin& pin)
-{
-  Database& database = PWDM.getDatabase();
-  if (pin.get_is_port() || database.get_instance_map().count(pin.get_instance_name()) == 0) {
-    return false;
-  }
-  Instance& instance = database.get_instance_map()[pin.get_instance_name()];
-  for (TimingCheckArc& timing_check_arc : instance.get_check_arc_list()) {
-    if (timing_check_arc.get_data_port() == pin_name) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool GraphBuilder::hasOutgoingArc(const std::string& pin_name)
-{
-  Database& database = PWDM.getDatabase();
-  return database.get_outgoing_arc_list_map().count(pin_name) > 0 && !database.get_outgoing_arc_list_map()[pin_name].empty();
-}
-
-bool GraphBuilder::isEndPort(Pin& pin)
-{
-  return pin.get_is_port() && (pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout);
 }
 
 void GraphBuilder::appendUnique(std::vector<std::string>& list, const std::string& value)
@@ -660,35 +778,22 @@ void GraphBuilder::appendUnique(std::vector<std::string>& list, const std::strin
 
 void GraphBuilder::breakLoopArcList()
 {
-  std::size_t disabled_loop_num = breakLoopArcFromStart();
-  disabled_loop_num += breakLoopArcFromEnd();
-  disabled_loop_num += breakLoopArcFromFloating();
+  Database& database = PWDM.getDatabase();
+  std::size_t disabled_loop_num = 0;
+  std::map<std::string, GBColorType> color_map;
+  for (std::pair<const std::string, TimingPoint>& timing_pair : database.get_timing_point_map()) {
+    std::string pin_name = timing_pair.first;
+    (void) traverseDataPath(pin_name, color_map, disabled_loop_num);
+  }
   if (disabled_loop_num > 0) {
     PWLOG.info(Loc::current(), "Break iPW loop arcs: disabled_arcs=", disabled_loop_num);
   }
 }
 
-std::size_t GraphBuilder::breakLoopArcFromStart()
+bool GraphBuilder::traverseDataPath(std::string& pin_name, std::map<std::string, GBColorType>& color_map, std::size_t& disabled_loop_num)
 {
   Database& database = PWDM.getDatabase();
-  std::size_t disabled_loop_num = 0;
-  std::map<std::string, GBColorType> color_map;
-  for (std::string& start_point : database.get_start_point_list()) {
-    for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[start_point]) {
-      Arc& arc = database.get_arc_list()[arc_idx];
-      if (isDisableArc(arc)) {
-        continue;
-      }
-      traverseDataPath(arc.get_sink_pin(), true, color_map, disabled_loop_num);
-    }
-  }
-  return disabled_loop_num;
-}
-
-bool GraphBuilder::traverseDataPath(std::string& pin_name, bool is_forward, std::map<std::string, GBColorType>& color_map, std::size_t& disabled_loop_num)
-{
-  Database& database = PWDM.getDatabase();
-  if (stopTraverse(pin_name, is_forward) || isBlack(color_map, pin_name)) {
+  if (isBlack(color_map, pin_name)) {
     return false;
   }
   if (isGray(color_map, pin_name)) {
@@ -696,14 +801,13 @@ bool GraphBuilder::traverseDataPath(std::string& pin_name, bool is_forward, std:
   }
 
   color_map[pin_name] = GBColorType::kGray;
-  std::vector<std::size_t>& arc_idx_list = is_forward ? database.get_outgoing_arc_list_map()[pin_name] : database.get_incoming_arc_list_map()[pin_name];
-  for (std::size_t arc_idx : arc_idx_list) {
+  for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
     Arc& arc = database.get_arc_list()[arc_idx];
     if (isDisableArc(arc)) {
       continue;
     }
 
-    std::string& next_pin_name = is_forward ? arc.get_sink_pin() : arc.get_source_pin();
+    std::string& next_pin_name = arc.get_sink_pin();
     if (isBlack(color_map, next_pin_name)) {
       continue;
     }
@@ -713,7 +817,7 @@ bool GraphBuilder::traverseDataPath(std::string& pin_name, bool is_forward, std:
       }
       continue;
     }
-    if (traverseDataPath(next_pin_name, is_forward, color_map, disabled_loop_num)) {
+    if (traverseDataPath(next_pin_name, color_map, disabled_loop_num)) {
       if (disableLoopArc(arc)) {
         ++disabled_loop_num;
       }
@@ -722,15 +826,6 @@ bool GraphBuilder::traverseDataPath(std::string& pin_name, bool is_forward, std:
   }
   color_map[pin_name] = GBColorType::kBlack;
   return false;
-}
-
-bool GraphBuilder::stopTraverse(std::string& pin_name, bool is_forward)
-{
-  Database& database = PWDM.getDatabase();
-  if (is_forward) {
-    return PWUTIL.exist(database.get_end_point_list(), pin_name);
-  }
-  return PWUTIL.exist(database.get_start_point_list(), pin_name);
 }
 
 bool GraphBuilder::isBlack(std::map<std::string, GBColorType>& color_map, std::string& pin_name)
@@ -752,62 +847,24 @@ bool GraphBuilder::disableLoopArc(Arc& arc)
   return true;
 }
 
-std::size_t GraphBuilder::breakLoopArcFromEnd()
-{
-  Database& database = PWDM.getDatabase();
-  std::size_t disabled_loop_num = 0;
-  std::map<std::string, GBColorType> color_map;
-  for (std::string& end_point : database.get_end_point_list()) {
-    for (std::size_t arc_idx : database.get_incoming_arc_list_map()[end_point]) {
-      Arc& arc = database.get_arc_list()[arc_idx];
-      if (isDisableArc(arc)) {
-        continue;
-      }
-      traverseDataPath(arc.get_source_pin(), false, color_map, disabled_loop_num);
-    }
-  }
-  return disabled_loop_num;
-}
-
-std::size_t GraphBuilder::breakLoopArcFromFloating()
-{
-  Database& database = PWDM.getDatabase();
-  std::size_t disabled_loop_num = 0;
-  std::map<std::string, GBColorType> color_map;
-  for (std::pair<const std::string, TimingPoint>& timing_pair : database.get_timing_point_map()) {
-    std::string pin_name = timing_pair.first;
-    traverseFloatingDataPath(pin_name, color_map, disabled_loop_num);
-  }
-  return disabled_loop_num;
-}
-
-void GraphBuilder::traverseFloatingDataPath(std::string& pin_name, std::map<std::string, GBColorType>& color_map, std::size_t& disabled_loop_num)
-{
-  if (isBlack(color_map, pin_name)) {
-    return;
-  }
-  (void) traverseDataPath(pin_name, true, color_map, disabled_loop_num);
-}
-
-void GraphBuilder::buildTimingOrder()
+void GraphBuilder::buildSignalOrder()
 {
   Database& database = PWDM.getDatabase();
   std::map<std::string, std::size_t> indegree_map = makeIndegreeMap();
   std::queue<std::string> pin_queue;
   pushRootPinList(indegree_map, pin_queue);
 
-  database.get_timing_order_list().clear();
+  database.get_signal_order_list().clear();
   while (!pin_queue.empty()) {
     std::string pin_name = pin_queue.front();
     pin_queue.pop();
-    database.get_timing_order_list().push_back(pin_name);
+    database.get_signal_order_list().push_back(pin_name);
 
     for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
       Arc& arc = database.get_arc_list()[arc_idx];
       if (isDisableArc(arc)) {
         continue;
       }
-      updateSinkLevel(arc);
       updateSinkIndegree(arc, indegree_map, pin_queue);
     }
   }
@@ -818,7 +875,6 @@ std::map<std::string, std::size_t> GraphBuilder::makeIndegreeMap()
   Database& database = PWDM.getDatabase();
   std::map<std::string, std::size_t> indegree_map;
   for (std::pair<const std::string, TimingPoint>& timing_pair : database.get_timing_point_map()) {
-    timing_pair.second.set_level(0);
     std::size_t indegree = 0;
     for (std::size_t arc_idx : database.get_incoming_arc_list_map()[timing_pair.first]) {
       if (!isDisableArc(database.get_arc_list()[arc_idx])) {
@@ -835,18 +891,9 @@ void GraphBuilder::pushRootPinList(std::map<std::string, std::size_t>& indegree_
   Database& database = PWDM.getDatabase();
   for (std::pair<const std::string, TimingPoint>& timing_pair : database.get_timing_point_map()) {
     if (indegree_map[timing_pair.first] == 0) {
-      database.get_timing_point_map()[timing_pair.first].set_level(1);
       pin_queue.push(timing_pair.first);
     }
   }
-}
-
-void GraphBuilder::updateSinkLevel(Arc& arc)
-{
-  Database& database = PWDM.getDatabase();
-  TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
-  TimingPoint& sink_point = database.get_timing_point_map()[arc.get_sink_pin()];
-  sink_point.set_level(std::max(sink_point.get_level(), source_point.get_level() + 1));
 }
 
 void GraphBuilder::updateSinkIndegree(Arc& arc, std::map<std::string, std::size_t>& indegree_map, std::queue<std::string>& pin_queue)
@@ -862,20 +909,9 @@ void GraphBuilder::updateSinkIndegree(Arc& arc, std::map<std::string, std::size_
 void GraphBuilder::printLoopInfo()
 {
   Database& database = PWDM.getDatabase();
-  std::size_t loop_pin_num = database.get_timing_point_map().size() - database.get_timing_order_list().size();
+  std::size_t loop_pin_num = database.get_timing_point_map().size() - database.get_signal_order_list().size();
   if (loop_pin_num > 0) {
     PWLOG.warn(Loc::current(), "Detected ", loop_pin_num, " vertex(es) in combinational loop or unresolved dependency.");
-  }
-}
-
-void GraphBuilder::initializeArcTiming()
-{
-  Database& database = PWDM.getDatabase();
-  for (Arc& arc : database.get_arc_list()) {
-    DCTask dc_task;
-    dc_task.set_proc_type(DCProcType::kInitialize);
-    dc_task.set_arc(&arc);
-    PWDC.calculate(dc_task);
   }
 }
 

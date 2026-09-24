@@ -29,9 +29,6 @@ class PowerValue
   double get_leakage_power() const { return _leakage_power; }
   double get_total_power() const { return _internal_power + _switching_power + _leakage_power; }
   // setter
-  void set_internal_power(const double internal_power) { _internal_power = internal_power; }
-  void set_switching_power(const double switching_power) { _switching_power = switching_power; }
-  void set_leakage_power(const double leakage_power) { _leakage_power = leakage_power; }
   // function
   void add_internal_power(const double internal_power) { _internal_power += internal_power; }
   void add_switching_power(const double switching_power) { _switching_power += switching_power; }

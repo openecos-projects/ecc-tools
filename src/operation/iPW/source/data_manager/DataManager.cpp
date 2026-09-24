@@ -92,8 +92,8 @@ void DataManager::buildConfig()
   _config.dc_temp_directory_path = _config.temp_directory_path + "delay_calculator/";
   // ******** ClockPropagator    ********* //
   _config.cp_temp_directory_path = _config.temp_directory_path + "clock_propagator/";
-  // ********* TimingPropagator   ********* //
-  _config.tp_temp_directory_path = _config.temp_directory_path + "timing_propagator/";
+  // ********* SignalPropagator   ********* //
+  _config.sp_temp_directory_path = _config.temp_directory_path + "signal_propagator/";
   // ********* PowerPropagator    ********* //
   _config.pp_temp_directory_path = _config.temp_directory_path + "power_propagator/";
   // ********** PowerAnalyzer    ********* //
@@ -113,8 +113,8 @@ void DataManager::buildConfig()
   PWUTIL.createDir(_config.dc_temp_directory_path);
   // ******** ClockPropagator    ********* //
   PWUTIL.createDir(_config.cp_temp_directory_path);
-  // ********* TimingPropagator   ********* //
-  PWUTIL.createDir(_config.tp_temp_directory_path);
+  // ********* SignalPropagator   ********* //
+  PWUTIL.createDir(_config.sp_temp_directory_path);
   // ********* PowerPropagator    ********* //
   PWUTIL.createDir(_config.pp_temp_directory_path);
   // ********** PowerAnalyzer    ********* //
@@ -130,6 +130,29 @@ void DataManager::buildDatabase()
   buildInstanceList();
   buildNetList();
   buildInstanceTimingInfo();
+  readConstraint();
+}
+
+void DataManager::readConstraint()
+{
+  Database& database = _database;
+  database.get_timing_constraint().get_clock_map().clear();
+  database.get_timing_constraint().get_port_constraint_map().clear();
+  database.get_timing_constraint().get_case_analysis_map().clear();
+  database.get_timing_constraint().get_effective_case_analysis_map().clear();
+  database.get_timing_constraint().clear_net_load();
+  if (_config.sdc_file_path.empty()) {
+    return;
+  }
+
+  SdcCommand::initInst();
+  SdcCommand& sdc_command = SdcCommand::getInst();
+  if (sdc_command.evalScriptFile(_config.sdc_file_path) != TCL_OK) {
+    PWLOG.warn(Loc::current(), "SDC command failed in '", _config.sdc_file_path, "' at line ", sdc_command.get_error_line_number(), ": ",
+               sdc_command.get_error_message());
+    PWLOG.error(Loc::current(), "SDC contains invalid or unsupported constraints; power analysis stopped");
+  }
+  SdcCommand::destroyInst();
 }
 
 void DataManager::buildInstanceList()
@@ -173,46 +196,19 @@ void DataManager::makeInstanceTimingInfo(Instance& instance)
   TimingCell& timing_cell = timing_cell_map[instance.get_cell_name()];
   instance.set_is_sequential(timing_cell.get_is_sequential());
   instance.set_is_clock_gating(timing_cell.get_is_clock_gating());
-  instance.set_has_clear_arc(timing_cell.get_has_clear_arc());
-  instance.set_has_preset_arc(timing_cell.get_has_preset_arc());
   TimingCellArc* clock_to_q_arc = findClockToQArc(timing_cell);
   if (clock_to_q_arc != nullptr) {
     instance.set_output_pin_name(getInstancePinName(instance, clock_to_q_arc->get_sink_port()));
-    instance.set_clock_to_q_delay(clock_to_q_arc->get_delay());
-    instance.set_clock_to_q_arc(*clock_to_q_arc);
+    instance.set_clock_to_q_arc(clock_to_q_arc);
   } else {
     instance.set_output_pin_name(findOutputPinName(instance, timing_cell));
   }
-  instance.get_check_arc_list().clear();
-  for (TimingCheckArc& timing_check_arc : timing_cell.get_check_arc_list()) {
-    instance.get_check_arc_list().push_back(makeInstanceTimingCheckArc(instance, timing_check_arc));
+  if (!timing_cell.get_clock_port_name().empty()) {
+    instance.set_clock_pin_name(getInstancePinName(instance, timing_cell.get_clock_port_name()));
   }
-
-  TimingCheckArc* representative_check_arc = nullptr;
-  for (TimingCheckArc& timing_check_arc : timing_cell.get_check_arc_list()) {
-    if (representative_check_arc == nullptr || timing_check_arc.get_check_type() == TimingCheckType::kSetup) {
-      representative_check_arc = &timing_check_arc;
-    }
-    if (timing_check_arc.get_check_type() == TimingCheckType::kSetup) {
-      break;
-    }
+  if (!timing_cell.get_data_port_name().empty()) {
+    instance.set_data_pin_name(getInstancePinName(instance, timing_cell.get_data_port_name()));
   }
-  if (representative_check_arc != nullptr) {
-    instance.set_clock_pin_name(getInstancePinName(instance, representative_check_arc->get_clock_port()));
-    instance.set_data_pin_name(getInstancePinName(instance, representative_check_arc->get_data_port()));
-  }
-}
-
-TimingCheckArc DataManager::makeInstanceTimingCheckArc(Instance& instance, TimingCheckArc& timing_check_arc)
-{
-  TimingCheckArc instance_timing_check_arc;
-  instance_timing_check_arc.set_clock_port(getInstancePinName(instance, timing_check_arc.get_clock_port()));
-  instance_timing_check_arc.set_data_port(getInstancePinName(instance, timing_check_arc.get_data_port()));
-  instance_timing_check_arc.set_check_type(timing_check_arc.get_check_type());
-  instance_timing_check_arc.set_check_time(timing_check_arc.get_check_time());
-  instance_timing_check_arc.set_timing_arc_list(timing_check_arc.get_timing_arc_list());
-  instance_timing_check_arc.set_clock_trans_type(timing_check_arc.get_clock_trans_type());
-  return instance_timing_check_arc;
 }
 
 TimingCellArc* DataManager::findClockToQArc(TimingCell& timing_cell)
@@ -234,7 +230,8 @@ std::string DataManager::findOutputPinName(Instance& instance, TimingCell& timin
 {
   for (auto& [port_name, timing_cell_port] : timing_cell.get_port_map()) {
     if (timing_cell_port.get_is_output() && !timing_cell_port.get_is_clock()) {
-      return getInstancePinName(instance, timing_cell_port.get_port_name());
+      std::string output_port_name = port_name;
+      return getInstancePinName(instance, output_port_name);
     }
   }
   return "";
@@ -272,7 +269,6 @@ void DataManager::makeNetList()
 void DataManager::makeNet(const std::string& net_name, Net& net)
 {
   Database& database = _database;
-  net.get_driver_pin().clear();
   net.get_driver_pin_list().clear();
   net.get_load_pin_list().clear();
 
@@ -280,35 +276,6 @@ void DataManager::makeNet(const std::string& net_name, Net& net)
     Pin& pin = database.get_pin_map()[pin_name];
     pin.set_net_name(net_name);
     makeUniqueName(net.get_load_pin_list(), pin_name);
-  }
-}
-
-void DataManager::readConstraint()
-{
-  Database& database = _database;
-  std::string sdc_file_path = database.get_timing_constraint().get_sdc_file_path();
-  database.get_timing_constraint().get_clock_map().clear();
-  database.get_timing_constraint().get_port_constraint_map().clear();
-  database.get_timing_constraint().get_case_analysis_map().clear();
-  database.get_timing_constraint().get_effective_case_analysis_map().clear();
-  database.get_timing_constraint().get_path_exception_list().clear();
-  database.get_timing_constraint().get_clock_group_list().clear();
-  database.get_timing_constraint().get_max_fanout().reset();
-  database.get_timing_constraint().get_port_max_fanout_map().clear();
-  database.get_timing_constraint().get_net_load_map().clear();
-  database.get_timing_constraint().get_clock_uncertainty_list().clear();
-  database.get_timing_constraint().get_path_break_start_points().clear();
-  database.get_timing_constraint().get_path_break_end_points().clear();
-  if (sdc_file_path.empty()) {
-    return;
-  }
-
-  auto& sdc_command{Singleton<SdcCommand>::getInst()};
-  if (sdc_command.evalScriptFile(sdc_file_path) != TCL_OK) {
-    for (const SdcError& error : sdc_command.getErrors()) {
-      PWLOG.warn(Loc::current(), "SDC command failed in '", sdc_file_path, "' at line ", error.line_number, ": ", error.message);
-    }
-    PWLOG.error(Loc::current(), "SDC contains invalid or unsupported constraints; power analysis stopped");
   }
 }
 
@@ -323,6 +290,8 @@ void DataManager::printConfig()
   PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(2), _config.thread_number);
   PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(1), "min_slew_degradation");
   PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(2), _config.min_slew_degradation);
+  PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(1), "sdc_file_path");
+  PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(2), _config.sdc_file_path);
   // **********        PW        ********** //
   PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(0), "PW_CONFIG_BUILD");
   PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(1), "log_file_path");
@@ -343,10 +312,10 @@ void DataManager::printConfig()
   PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(1), "ClockPropagator");
   PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(2), "cp_temp_directory_path");
   PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(3), _config.cp_temp_directory_path);
-  // ********* TimingPropagator   ********* //
-  PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(1), "TimingPropagator");
-  PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(2), "tp_temp_directory_path");
-  PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(3), _config.tp_temp_directory_path);
+  // ********* SignalPropagator   ********* //
+  PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(1), "SignalPropagator");
+  PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(2), "sp_temp_directory_path");
+  PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(3), _config.sp_temp_directory_path);
   // ********* PowerPropagator    ********* //
   PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(1), "PowerPropagator");
   PWLOG.info(Loc::current(), PWUTIL.getSpaceByTabNum(2), "pp_temp_directory_path");

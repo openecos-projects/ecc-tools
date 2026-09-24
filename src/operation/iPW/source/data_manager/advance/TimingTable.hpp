@@ -27,13 +27,8 @@ class TimingTable
   TimingTable() = default;
   ~TimingTable() = default;
   // getter
-  TimingTableVariableType get_variable_type1() const { return _variable_type1; }
-  TimingTableVariableType get_variable_type2() const { return _variable_type2; }
-  std::vector<std::vector<double>>& get_axis_list() { return _axis_list; }
-  std::vector<double>& get_value_list() { return _value_list; }
   // setter
   void set_variable_type1(const TimingTableVariableType& variable_type1) { _variable_type1 = variable_type1; }
-  void set_variable_type2(const TimingTableVariableType& variable_type2) { _variable_type2 = variable_type2; }
   void set_axis_list(const std::vector<std::vector<double>>& axis_list) { _axis_list = axis_list; }
   void set_value_list(const std::vector<double>& value_list) { _value_list = value_list; }
   // function
@@ -151,7 +146,6 @@ class TimingTable
   }
 
   TimingTableVariableType _variable_type1 = TimingTableVariableType::kNone;
-  TimingTableVariableType _variable_type2 = TimingTableVariableType::kNone;
   std::vector<std::vector<double>> _axis_list;
   std::vector<double> _value_list;
 };

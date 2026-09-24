@@ -16,7 +16,6 @@
 #pragma once
 
 #include "Database.hpp"
-#include "PRModel.hpp"
 
 namespace ipw {
 
@@ -42,19 +41,16 @@ class PowerReporter
   PowerReporter& operator=(const PowerReporter& other) = delete;
   PowerReporter& operator=(PowerReporter&& other) = delete;
   // function
-  PRModel initPRModel();
-  void buildPowerReportFilePath(PRModel& pr_model);
-  void buildInstancePowerFilePath(PRModel& pr_model);
-  void outputPowerReport(PRModel& pr_model);
+  void outputPowerReport();
   void outputPowerDesignInfo(std::ofstream* power_report_file);
   void outputPowerUnitInfo(std::ofstream* power_report_file);
   void outputPowerSummary(std::ofstream* power_report_file);
   void outputPowerGroupList(std::ofstream* power_report_file);
   void outputPowerGroup(std::ofstream* power_report_file, PowerGroupType power_group_type);
   void outputPowerAttribute(std::ofstream* power_report_file);
-  void outputInstancePower(PRModel& pr_model);
+  void outputInstancePower();
   void outputInstancePowerHeader(std::ofstream* instance_power_file);
-  void outputInstancePowerRecord(std::ofstream* instance_power_file, InstancePower& instance_power);
+  void outputInstancePowerRecord(std::ofstream* instance_power_file, const std::string& instance_name, InstancePower& instance_power);
   PowerValue getPowerGroupPowerValue(PowerGroupType power_group_type);
   double getDynamicPower();
   double getPercentage(double numerator, double denominator);
