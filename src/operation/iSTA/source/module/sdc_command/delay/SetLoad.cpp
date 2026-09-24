@@ -164,13 +164,17 @@ unsigned TclSetLoad::exec()
   }
   if (!targets.nets.empty()) {
     if (getOptionOrArg("-rise")->is_set_val() || getOptionOrArg("-fall")->is_set_val()) {
-      setTclError("set_load -rise/-fall are not supported for net objects");
-      return 0;
+      warn("set_load -rise/-fall are ignored for net objects");
     }
-    if (getOptionOrArg("-pin_load")->is_set_val() || getOptionOrArg("-wire_load")->is_set_val()) {
-      setTclError("set_load -pin_load/-wire_load are not supported for net objects");
-      return 0;
+    if (getOptionOrArg("-pin_load")->is_set_val()) {
+      warn("set_load -pin_load is ignored for net objects");
     }
+    if (getOptionOrArg("-wire_load")->is_set_val()) {
+      warn("set_load -wire_load is ignored for net objects");
+    }
+  }
+  if (!targets.ports.empty() && getOptionOrArg("-subtract_pin_load")->is_set_val()) {
+    warn("set_load -subtract_pin_load is ignored for port objects");
   }
 
   // With both load-kind options present, use the default port pin load. Wire

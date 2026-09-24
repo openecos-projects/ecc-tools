@@ -77,7 +77,8 @@ class TimingPropagator
   double getStartPointArrival(std::string& start_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);
   std::vector<const TimingIoDelay*> getInputDelayList(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
   double getClockEdge(std::string_view clock_name, TransType trans_type);
-  double getInputDelayArrival(const TimingIoDelay& delay);
+  double getInputDelayClockTime(const TimingIoDelay& delay, AnalysisType analysis_type);
+  double getInputDelayArrival(const TimingIoDelay& delay, AnalysisType analysis_type);
   bool isClockSourceStartPoint(std::string& start_point);
   TimingClock* getStartPointClock(std::string& start_point);
   double getStartPointClockEdge(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
