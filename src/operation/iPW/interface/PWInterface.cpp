@@ -16,8 +16,6 @@
 // ***************************************************************************************
 #include "PWInterface.hpp"
 
-#include <stdexcept>
-
 #ifdef __GLIBC__
 #include <malloc.h>
 #endif
@@ -65,12 +63,6 @@ void PWInterface::destroyInst()
 
 void PWInterface::initPW(std::map<std::string, std::any> config_map)
 {
-  if (config_map.contains("-min_slew_degradation")) {
-    int32_t value = std::any_cast<int32_t>(config_map.at("-min_slew_degradation"));
-    if (value != 0 && value != 1) {
-      throw std::invalid_argument("-min_slew_degradation must be 0 or 1");
-    }
-  }
   Logger::initInst();
   // clang-format off
   PWLOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
@@ -185,7 +177,7 @@ void PWInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   /////////////////////////////////////////////
   PWDM.getConfig().temp_directory_path = PWUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./pw_temp_directory");
   PWDM.getConfig().thread_number = PWUTIL.getConfigValue<int32_t>(config_map, "-thread_number", 128);
-  PWDM.getConfig().min_slew_degradation = PWUTIL.getConfigValue<int32_t>(config_map, "-min_slew_degradation", 1);
+  PWDM.getConfig().min_slew_degradation = 1;
   PWDM.getConfig().sdc_file_path = dmInst->get_config().get_sdc_path();
   omp_set_num_threads(std::max(PWDM.getConfig().thread_number, 1));
   /////////////////////////////////////////////

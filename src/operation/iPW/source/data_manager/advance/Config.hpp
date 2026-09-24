@@ -29,7 +29,7 @@ class Config
   // **********        PW        ********** //
   std::string temp_directory_path;  // required
   int32_t thread_number;            // optional
-  int32_t min_slew_degradation;     // optional
+  int32_t min_slew_degradation = 1;
   std::string sdc_file_path;        // input
   /////////////////////////////////////////////
   // **********        PW        ********** //

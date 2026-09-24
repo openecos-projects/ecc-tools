@@ -28,8 +28,6 @@ TclInitPW::TclInitPW(const char* cmd_name) : TclCmd(cmd_name)
   _config_list.push_back(std::make_pair("-temp_directory_path", ValueType::kString));
   // int32_t thread_number;             // optional
   _config_list.push_back(std::make_pair("-thread_number", ValueType::kInt));
-  // int32_t min_slew_degradation;      // optional
-  _config_list.push_back(std::make_pair("-min_slew_degradation", ValueType::kString));
   TclUtil::addOption(this, _config_list);
 }
 
@@ -39,15 +37,6 @@ unsigned TclInitPW::exec()
     return 0;
   }
   std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
-  if (config_map.contains("-min_slew_degradation")) {
-    std::string value = std::any_cast<std::string>(config_map.at("-min_slew_degradation"));
-    if (value != "0" && value != "1") {
-      Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(),
-                       Tcl_NewStringObj("-min_slew_degradation must be 0 or 1", -1));
-      return 0;
-    }
-    config_map["-min_slew_degradation"] = int32_t(value == "1");
-  }
   try {
     PWI.initPW(config_map);
   } catch (const std::exception& error) {

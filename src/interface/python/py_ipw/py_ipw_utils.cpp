@@ -16,7 +16,6 @@
 // ***************************************************************************************
 #include <tcl_util.h>
 
-#include <stdexcept>
 #include <string>
 
 #include "json_parser.h"
@@ -42,13 +41,6 @@ bool initPwConfigMapByJSON(const std::string& config, std::map<std::string, std:
   if (!value.empty()) {
     config_map.insert(std::make_pair("-thread_number", std::stoi(value)));
   }
-  value = ecc::getJsonData(json, {"PW", "-min_slew_degradation"});
-  if (!value.empty()) {
-    if (value != "0" && value != "1") {
-      throw std::invalid_argument("-min_slew_degradation must be 0 or 1");
-    }
-    config_map.insert(std::make_pair("-min_slew_degradation", int32_t(value == "1")));
-  }
   return true;
 }
 
@@ -59,13 +51,6 @@ void initPwConfigMapByDict(std::map<std::string, std::string>& config_dict, std:
   }
   if (config_dict.count("-thread_number") > 0 && !config_dict["-thread_number"].empty()) {
     config_map["-thread_number"] = std::stoi(config_dict["-thread_number"]);
-  }
-  if (config_dict.count("-min_slew_degradation") > 0 && !config_dict["-min_slew_degradation"].empty()) {
-    std::string& value = config_dict.at("-min_slew_degradation");
-    if (value != "0" && value != "1") {
-      throw std::invalid_argument("-min_slew_degradation must be 0 or 1");
-    }
-    config_map["-min_slew_degradation"] = int32_t(value == "1");
   }
 }
 
