@@ -1,5 +1,6 @@
 add_subdirectory(iDRC)
 add_subdirectory(iFP)
+add_subdirectory(iPW)
 add_subdirectory(iEMIR)
 add_subdirectory(iRT)
 add_subdirectory(iLVS)

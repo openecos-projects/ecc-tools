@@ -95,11 +95,6 @@ void DelayCalculator::destroy()
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-double DelayCalculator::getPowerOutputLoad(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type)
-{
-  return getOutputPinLoad(output_pin, analysis_type, output_trans_type);
-}
-
 bool DelayCalculator::calculateDrivingCell(std::string& output_pin, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType output_trans_type,
                                            double input_transition_rise, double input_transition_fall, DCTimingResult& timing_result)
 {

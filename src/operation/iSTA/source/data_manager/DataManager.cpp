@@ -97,18 +97,12 @@ void DataManager::buildConfig()
   _config.cp_temp_directory_path = _config.temp_directory_path + "clock_propagator/";
   // ********* TimingPropagator   ********* //
   _config.tp_temp_directory_path = _config.temp_directory_path + "timing_propagator/";
-  // ********* PowerPropagator    ********* //
-  _config.pp_temp_directory_path = _config.temp_directory_path + "power_propagator/";
   // ********** TimingAnalyzer   ********* //
   _config.ta_temp_directory_path = _config.temp_directory_path + "timing_analyzer/";
-  // ********** PowerAnalyzer    ********* //
-  _config.pa_temp_directory_path = _config.temp_directory_path + "power_analyzer/";
   // ******* TimingCharacterizer ******* //
   _config.tc_temp_directory_path = _config.temp_directory_path + "timing_characterizer/";
   // **********  TimingReporter   ********** //
   _config.tr_temp_directory_path = _config.temp_directory_path + "timing_reporter/";
-  // **********  PowerReporter    ********** //
-  _config.pr_temp_directory_path = _config.temp_directory_path + "power_reporter/";
   // ************  SDFWriter  ************* //
   _config.sw_temp_directory_path = _config.temp_directory_path + "sdf_writer/";
   /////////////////////////////////////////////
@@ -126,18 +120,12 @@ void DataManager::buildConfig()
   STAUTIL.createDir(_config.cp_temp_directory_path);
   // ********* TimingPropagator   ********* //
   STAUTIL.createDir(_config.tp_temp_directory_path);
-  // ********* PowerPropagator    ********* //
-  STAUTIL.createDir(_config.pp_temp_directory_path);
   // ********** TimingAnalyzer   ********* //
   STAUTIL.createDir(_config.ta_temp_directory_path);
-  // ********** PowerAnalyzer    ********* //
-  STAUTIL.createDir(_config.pa_temp_directory_path);
   // ******* TimingCharacterizer ******* //
   STAUTIL.createDir(_config.tc_temp_directory_path);
   // **********  TimingReporter   ********** //
   STAUTIL.createDir(_config.tr_temp_directory_path);
-  // **********  PowerReporter    ********** //
-  STAUTIL.createDir(_config.pr_temp_directory_path);
   // ************  SDFWriter  ************* //
   STAUTIL.createDir(_config.sw_temp_directory_path);
   /////////////////////////////////////////////
@@ -384,18 +372,10 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "TimingPropagator");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "tp_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.tp_temp_directory_path);
-  // ********* PowerPropagator    ********* //
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "PowerPropagator");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "pp_temp_directory_path");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.pp_temp_directory_path);
   // ********** TimingAnalyzer   ********* //
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "TimingAnalyzer");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "ta_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.ta_temp_directory_path);
-  // ********** PowerAnalyzer    ********* //
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "PowerAnalyzer");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "pa_temp_directory_path");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.pa_temp_directory_path);
   // ******* TimingCharacterizer ******* //
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "TimingCharacterizer");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "tc_temp_directory_path");
@@ -404,10 +384,6 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "TimingReporter");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "tr_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.tr_temp_directory_path);
-  // **********  PowerReporter    ********** //
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "PowerReporter");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "pr_temp_directory_path");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.pr_temp_directory_path);
   // ************  SDFWriter  ************* //
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "SDFWriter");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "sw_temp_directory_path");

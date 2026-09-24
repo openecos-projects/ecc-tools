@@ -34,7 +34,6 @@ class DelayCalculator
   void init();
   void calculate(DCTask& dc_task);
   void destroy();
-  double getPowerOutputLoad(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type);
   bool calculateDrivingCell(std::string& output_pin, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType output_trans_type,
                             double input_transition_rise, double input_transition_fall, DCTimingResult& timing_result);
 
