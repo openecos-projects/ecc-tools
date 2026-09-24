@@ -59,9 +59,15 @@ unsigned TclCreateGeneratedClock::exec()
     setTclError("invalid generated clock source or targets");
     return 0;
   }
-  if (getOptionOrArg("-add")->is_set_val() && !getOptionOrArg("-name")->is_set_val()) {
-    setTclError("create_generated_clock -add requires -name");
-    return 0;
+  if (getOptionOrArg("-add")->is_set_val()) {
+    if (!getOptionOrArg("-name")->is_set_val()) {
+      setTclError("create_generated_clock -add requires -name");
+      return 0;
+    }
+    if (!getOptionOrArg("-master_clock")->is_set_val()) {
+      setTclError("create_generated_clock -add requires -master_clock");
+      return 0;
+    }
   }
   const std::string name = getOptionOrArg("-name")->is_set_val() ? getOptionOrArg("-name")->getStringVal() : targets.front();
   std::string master_name;
@@ -114,9 +120,17 @@ unsigned TclCreateGeneratedClock::exec()
     setTclError("generated clock transformations are mutually exclusive");
     return 0;
   }
-  if (getOptionOrArg("-combinational")->is_set_val()
-      && (!getOptionOrArg("-divide_by")->is_set_val() || getOptionOrArg("-divide_by")->getDoubleVal() != 1.0)) {
-    setTclError("-combinational requires -divide_by 1");
+  const bool combinational = getOptionOrArg("-combinational")->is_set_val();
+  if (transformations == 0 && !combinational) {
+    setTclError("create_generated_clock requires -divide_by, -multiply_by, -edges, or -combinational");
+    return 0;
+  }
+  if (combinational && getOptionOrArg("-divide_by")->is_set_val() && getOptionOrArg("-divide_by")->getDoubleVal() != 1.0) {
+    setTclError("create_generated_clock -combinational only accepts -divide_by 1");
+    return 0;
+  }
+  if (getOptionOrArg("-invert")->is_set_val() && getOptionOrArg("-edges")->is_set_val()) {
+    setTclError("create_generated_clock -invert cannot be used with -edges");
     return 0;
   }
   double period = master_period;
@@ -203,7 +217,7 @@ unsigned TclCreateGeneratedClock::exec()
   if (getOptionOrArg("-edge_shift")->is_set_val()) definition.edge_shifts = getOptionOrArg("-edge_shift")->getDoubleList();
   definition.invert = getOptionOrArg("-invert")->is_set_val();
   definition.preinvert = getOptionOrArg("-preinvert")->is_set_val();
-  definition.combinational = getOptionOrArg("-combinational")->is_set_val();
+  definition.combinational = combinational;
   definition.add = getOptionOrArg("-add")->is_set_val();
   generated.set_generated_clock_definition(std::move(definition));
   generated.set_period(period);

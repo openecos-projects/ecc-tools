@@ -51,6 +51,10 @@ unsigned TclSetClockTransition::exec()
   const bool max = getOptionOrArg("-max")->is_set_val();
   for (const std::string& name : clocks) {
     TimingClock& clock = database.get_timing_constraint().get_clock_map().at(name);
+    if (clock.get_source_list().empty()) {
+      warn("set_clock_transition cannot be specified for virtual clock '" + name + "'");
+      continue;
+    }
     for (AnalysisType analysis_type : {AnalysisType::kMin, AnalysisType::kMax}) {
       if ((analysis_type == AnalysisType::kMin && max && !min) || (analysis_type == AnalysisType::kMax && min && !max)) {
         continue;

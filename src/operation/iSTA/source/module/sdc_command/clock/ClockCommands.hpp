@@ -19,6 +19,22 @@ class TclSetClockTransition : public SdcTclCmd
   unsigned exec() override;
 };
 
+class TclSetClockLatency : public SdcTclCmd
+{
+ public:
+  TclSetClockLatency(const char* cmd_name, ClientData client_data);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclRemoveClockLatency : public SdcTclCmd
+{
+ public:
+  TclRemoveClockLatency(const char* cmd_name, ClientData client_data);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
 class TclSetClockGroups : public SdcTclCmd
 {
  public:
@@ -43,6 +59,14 @@ class TclSetClockUncertainty : public SdcTclCmd
   unsigned exec() override;
 };
 
+class TclRemoveClockUncertainty : public SdcTclCmd
+{
+ public:
+  TclRemoveClockUncertainty(const char* cmd_name, ClientData client_data);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
 class TclCreateClock : public SdcTclCmd
 {
  public:
@@ -55,6 +79,14 @@ class TclSetPropagatedClock : public SdcTclCmd
 {
  public:
   TclSetPropagatedClock(const char* cmd_name, ClientData client_data);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclRemovePropagatedClock : public SdcTclCmd
+{
+ public:
+  TclRemovePropagatedClock(const char* cmd_name, ClientData client_data);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };
