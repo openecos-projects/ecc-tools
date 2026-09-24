@@ -110,6 +110,13 @@ auto FastSTA::buildContext(const FastStaBuildInput& input) -> FastStaBuildResult
       const auto detail = context->timing_summary.fallback_reason.empty() ? context->clock_name : context->timing_summary.fallback_reason;
       return FastStaBuildResult{.failure_reason = "timing_analysis_unavailable:" + detail};
     }
+    // A combinational loop is a netlist defect, not an analysis failure: the
+    // loop-closing edges were disabled so propagation on the acyclic remainder
+    // is well defined. Surface it because timing inside the loop is undefined.
+    if (context->logic_preparation != nullptr && context->logic_preparation->disabled_loop_edge_count > 0U) {
+      CTSLOG.warn(Loc::current(), "FastSTA: clock \"", context->clock_name, "\" contains a combinational loop; disabled ",
+                  context->logic_preparation->disabled_loop_edge_count, " loop-closing edge(s); timing across the loop is undefined.");
+    }
     if (input.require_power && !FastStaPower::update(*context)) {
       return FastStaBuildResult{.failure_reason = "power_analysis_unavailable:" + context->clock_name};
     }

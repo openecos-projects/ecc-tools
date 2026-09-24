@@ -243,23 +243,25 @@ auto buildNetWireModel(const std::unordered_map<std::string, std::size_t>& node_
       valid_wirelength = false;
       return;
     }
-    const auto add
-        = [&](std::pair<int32_t, int32_t> begin, std::pair<int32_t, int32_t> end, int64_t length_dbu, const WrapperSignalRoutingLayer& layer) -> void {
-      if (length_dbu == 0) {
-        return;
-      }
-      const double length_um = static_cast<double>(length_dbu) / static_cast<double>(dbu_per_um);
-      result.rc_segments.push_back(WrapperTimingRcSegment{.begin_x_dbu = begin.first,
-                                                          .begin_y_dbu = begin.second,
-                                                          .end_x_dbu = end.first,
-                                                          .end_y_dbu = end.second,
-                                                          .resistance_ohm = length_um * layer.resistance_ohm_per_um,
-                                                          .capacitance_pf = length_um * layer.capacitance_pf_per_um});
-    };
-    const auto bend_x = target_x;
-    const auto bend_y = source_y;
-    add({source_x, source_y}, {bend_x, bend_y}, horizontal_delta, horizontal_layer);
-    add({bend_x, bend_y}, {target_x, target_y}, vertical_delta, vertical_layer);
+    // Emit one RC element per FLUTE tree edge, keeping the tree topology intact.
+    // The wire is not split into an L-shaped horizontal and vertical piece:
+    // two different tree edges could then decompose onto the same node pair
+    // (a shared bend point), which turns the RC graph into one with parallel
+    // edges or cycles and violates the tree invariant the parasitics builder
+    // validates. The electrical effect of the L-shape is preserved by costing
+    // the horizontal and vertical extents on their own layers.
+    const auto horizontal_um = static_cast<double>(horizontal_delta) / static_cast<double>(dbu_per_um);
+    const auto vertical_um = static_cast<double>(vertical_delta) / static_cast<double>(dbu_per_um);
+    const auto edge_resistance_ohm = horizontal_um * horizontal_layer.resistance_ohm_per_um + vertical_um * vertical_layer.resistance_ohm_per_um;
+    const auto edge_capacitance_pf = horizontal_um * horizontal_layer.capacitance_pf_per_um + vertical_um * vertical_layer.capacitance_pf_per_um;
+    if (edge_resistance_ohm > 0.0 || edge_capacitance_pf > 0.0) {
+      result.rc_segments.push_back(WrapperTimingRcSegment{.begin_x_dbu = source_x,
+                                                          .begin_y_dbu = source_y,
+                                                          .end_x_dbu = target_x,
+                                                          .end_y_dbu = target_y,
+                                                          .resistance_ohm = edge_resistance_ohm,
+                                                          .capacitance_pf = edge_capacitance_pf});
+    }
     horizontal_dbu += horizontal_delta;
     vertical_dbu += vertical_delta;
   };

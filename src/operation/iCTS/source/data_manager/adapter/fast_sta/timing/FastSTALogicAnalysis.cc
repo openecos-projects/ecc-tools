@@ -32,6 +32,8 @@
 #include <memory>
 #include <optional>
 #include <queue>
+#include <ranges>
+#include <set>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -54,8 +56,67 @@ namespace fast_sta {
 
 namespace {
 
-auto makeLogicOrder(const FastStaContext& context, std::vector<std::vector<LogicEdge>>& outgoing, std::vector<std::size_t>& indegree, std::string& diagnostic)
-    -> std::vector<FastStaNodeId>
+// Combinational loops cannot be ordered for timing propagation. A loop in the
+// netlist (for example a gate whose output feeds its own input) is a design
+// defect, but it must not abort timing for the whole clock: the standard
+// treatment is to find the back edge that closes each loop, disable it, and
+// propagate on the remaining acyclic graph.
+//
+// Back edges are found with a depth-first search over the logic nodes, marking
+// nodes gray while they sit on the current search path and black once their
+// subtree is finished. An edge reaching a gray node closes a loop. Removal is
+// deliberately confined to those edges: the graph is only relaxed as far as
+// needed to become orderable, so an acyclic design is never affected.
+auto CollectLoopClosingEdges(const FastStaContext& context, const std::vector<std::vector<LogicEdge>>& outgoing,
+                             std::set<std::pair<FastStaNodeId, std::size_t>>& disabled_edges) -> void
+{
+  enum class VisitState : unsigned char
+  {
+    kUnvisited,
+    kOnPath,
+    kFinished
+  };
+  std::vector<VisitState> state(context.nodes.size(), VisitState::kUnvisited);
+  // Explicit stack keeps deeply chained logic graphs off the call stack.
+  std::vector<std::pair<FastStaNodeId, std::size_t>> pending;
+  const auto is_logic = [&](FastStaNodeId node_id) -> bool { return context.nodes.at(node_id).domain == FastStaNodeDomain::kLogic; };
+  for (FastStaNodeId root_id = 0U; root_id < context.nodes.size(); ++root_id) {
+    if (!is_logic(root_id) || state.at(root_id) != VisitState::kUnvisited) {
+      continue;
+    }
+    state.at(root_id) = VisitState::kOnPath;
+    pending.emplace_back(root_id, 0U);
+    while (!pending.empty()) {
+      auto& entry = pending.back();
+      const auto node_id = entry.first;
+      const auto& edges = outgoing.at(node_id);
+      if (entry.second >= edges.size()) {
+        state.at(node_id) = VisitState::kFinished;
+        pending.pop_back();
+        continue;
+      }
+      const auto edge_index = entry.second++;
+      const auto to_node_id = edges.at(edge_index).to_node_id;
+      if (to_node_id >= context.nodes.size()) {
+        continue;
+      }
+      switch (state.at(to_node_id)) {
+        case VisitState::kOnPath:
+          disabled_edges.emplace(node_id, edge_index);
+          break;
+        case VisitState::kFinished:
+          break;
+        case VisitState::kUnvisited:
+          state.at(to_node_id) = VisitState::kOnPath;
+          pending.emplace_back(to_node_id, 0U);
+          break;
+      }
+    }
+  }
+}
+
+auto makeLogicOrder(const FastStaContext& context, std::vector<std::vector<LogicEdge>>& outgoing, std::vector<std::size_t>& indegree, std::string& diagnostic,
+                    std::size_t& disabled_loop_edge_count) -> std::vector<FastStaNodeId>
 {
   outgoing.resize(context.nodes.size());
   indegree.assign(context.nodes.size(), 0U);
@@ -103,21 +164,56 @@ auto makeLogicOrder(const FastStaContext& context, std::vector<std::vector<Logic
   auto remaining = indegree;
   std::vector<FastStaNodeId> order;
   order.reserve(logic_node_count);
-  while (!ready.empty()) {
-    const auto node_id = ready.top();
-    ready.pop();
-    order.push_back(node_id);
-    for (const auto& edge : outgoing.at(node_id)) {
-      if (--remaining.at(edge.to_node_id) == 0U) {
-        ready.push(edge.to_node_id);
+  std::set<std::pair<FastStaNodeId, std::size_t>> disabled_edges;
+  while (true) {
+    while (!ready.empty()) {
+      const auto node_id = ready.top();
+      ready.pop();
+      order.push_back(node_id);
+      const auto& edges = outgoing.at(node_id);
+      for (std::size_t edge_index = 0U; edge_index < edges.size(); ++edge_index) {
+        if (disabled_edges.contains(std::make_pair(node_id, edge_index))) {
+          continue;
+        }
+        const auto to_node_id = edges.at(edge_index).to_node_id;
+        if (--remaining.at(to_node_id) == 0U) {
+          ready.push(to_node_id);
+        }
+      }
+    }
+    if (order.size() == logic_node_count) {
+      disabled_loop_edge_count = disabled_edges.size();
+      return order;
+    }
+    // The ordering stalled, so the remaining nodes sit on at least one loop.
+    // Disable the back edges that close those loops and order again.
+    const auto disabled_before = disabled_edges.size();
+    CollectLoopClosingEdges(context, outgoing, disabled_edges);
+    if (disabled_edges.size() == disabled_before) {
+      // No back edge could be identified; report the loop instead of spinning.
+      diagnostic = "logic_timing_graph_contains_cycle";
+      return {};
+    }
+    std::ranges::fill(remaining, 0U);
+    for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+      if (context.nodes.at(node_id).domain != FastStaNodeDomain::kLogic) {
+        continue;
+      }
+      const auto& edges = outgoing.at(node_id);
+      for (std::size_t edge_index = 0U; edge_index < edges.size(); ++edge_index) {
+        if (disabled_edges.contains(std::make_pair(node_id, edge_index))) {
+          continue;
+        }
+        ++remaining.at(edges.at(edge_index).to_node_id);
+      }
+    }
+    order.clear();
+    for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+      if (context.nodes.at(node_id).domain == FastStaNodeDomain::kLogic && remaining.at(node_id) == 0U) {
+        ready.push(node_id);
       }
     }
   }
-  if (order.size() != logic_node_count) {
-    diagnostic = "logic_timing_graph_contains_cycle";
-    return {};
-  }
-  return order;
 }
 
 auto makeLogicTraversal(const FastStaContext& context, const std::vector<FastStaNodeId>& order, const std::vector<std::vector<LogicEdge>>& outgoing)
@@ -152,7 +248,7 @@ auto makeLogicTraversal(const FastStaContext& context, const std::vector<FastSta
 auto MakeLogicPreparation(const FastStaContext& context) -> std::shared_ptr<const FastStaLogicPreparation>
 {
   auto prepared = std::make_shared<FastStaLogicPreparation>();
-  const auto order = makeLogicOrder(context, prepared->outgoing, prepared->indegree, prepared->diagnostic);
+  const auto order = makeLogicOrder(context, prepared->outgoing, prepared->indegree, prepared->diagnostic, prepared->disabled_loop_edge_count);
   if (prepared->diagnostic.empty()) {
     prepared->traversal = makeLogicTraversal(context, order, prepared->outgoing);
   }

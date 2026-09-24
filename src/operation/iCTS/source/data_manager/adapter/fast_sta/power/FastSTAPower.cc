@@ -135,7 +135,11 @@ auto calcBufferPower(FastStaContext& context, FastStaNodeId output_node_id, doub
     return true;
   }
   if (node.output_net_ids.empty() || node.output_net_ids.front() >= context.nets.size()) {
-    return false;
+    // A clock-domain driver whose output is not connected to anything drives no
+    // load, so it has no characterized internal energy to draw on. Keep its
+    // cell leakage and area and treat the internal power as zero, mirroring the
+    // statically inactive case above, instead of failing the whole clock.
+    return true;
   }
   const auto input_node_id = findBufferInputNode(context, node);
   if (input_node_id >= context.nodes.size() || !context.nodes.at(input_node_id).timing.valid) {

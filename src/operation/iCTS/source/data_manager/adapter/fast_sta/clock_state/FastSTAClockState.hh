@@ -184,6 +184,10 @@ struct FastStaLogicPreparation
   std::vector<std::size_t> indegree;
   FastStaLogicTraversal traversal;
   std::string diagnostic;
+  // Number of back edges disabled to make the logic graph orderable. Non-zero
+  // means the netlist contains a combinational loop; propagation continues on
+  // the acyclic remainder. Reported by the layer that owns the logger.
+  std::size_t disabled_loop_edge_count = 0U;
 };
 
 struct FastStaContext
