@@ -14,46 +14,38 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "ScriptEngine.hh"
-#include "py_register_config.h"
-#include "py_register_feature.h"
-#include "py_register_flow.h"
-#include "py_register_icts.h"
-#include "py_register_idb.h"
-#include "py_register_idrc.h"
-#include "py_register_ifp.h"
-#include "py_register_iemir.h"
-#include "py_register_ilvs.h"
-#include "py_register_imp.h"
-#include "py_register_irt.h"
-#include "py_register_ircx.h"
-#include "py_register_ista.h"
-#include "py_register_ipw.h"
-#include "py_register_izh.h"
-#include "py_register_report.h"
-#include "python_module.h"
+#include "py_ipw.h"
+
+#include "PWInterface.hpp"
 
 namespace python_interface {
 
-PYBIND11_MODULE(ecc_py, m)
+bool initPwConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
+void initPwConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
+
+bool initPW(std::string& config, std::map<std::string, std::string>& config_dict)
 {
-  register_config(m);
-  register_flow(m);
-  register_icts(m);
-  register_idb(m);
-  register_idb_op(m);
-  register_idrc(m);
-  register_ifp(m);
-  register_iemir(m);
-  register_ilvs(m);
-  register_imp(m);
-  register_irt(m);
-  register_ircx(m);
-  register_ista(m);
-  register_ipw(m);
-  register_izh(m);
-  register_report(m);
-  register_feature(m);
+  std::map<std::string, std::any> config_map;
+
+  bool pass = config.empty() ? true : initPwConfigMapByJSON(config, config_map);
+  if (!pass) {
+    return false;
+  }
+  initPwConfigMapByDict(config_dict, config_map);
+  PWI.initPW(config_map);
+  return true;
+}
+
+bool runPW()
+{
+  PWI.runPW();
+  return true;
+}
+
+bool destroyPW()
+{
+  PWI.destroyPW();
+  return true;
 }
 
 }  // namespace python_interface
