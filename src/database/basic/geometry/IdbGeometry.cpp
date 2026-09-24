@@ -51,13 +51,18 @@ IdbRect::IdbRect(const int32_t lx, const int32_t ly, const int32_t hx, const int
       _ly = ly - (width / 2);
       _hx = std::max(lx, hx);
       _hy = hy + (width / 2);
-    }
-
-    /// vertical
-    if (lx == hx) {
+    } else if (lx == hx) {
+      /// vertical
       _lx = lx - (width / 2);
       _ly = std::min(ly, hy);
       _hx = hx + (width / 2);
+      _hy = std::max(ly, hy);
+    } else {
+      // Non-axis-aligned segment with width: fall back to the
+      // normalized bounding box so members are always initialized.
+      _lx = std::min(lx, hx);
+      _ly = std::min(ly, hy);
+      _hx = std::max(lx, hx);
       _hy = std::max(ly, hy);
     }
   }
@@ -65,6 +70,9 @@ IdbRect::IdbRect(const int32_t lx, const int32_t ly, const int32_t hx, const int
 
 void IdbRect::adjustCoordinate(IdbCoordinate<int32_t>* main_point, IdbCoordinate<int32_t>* follow_point, bool adjust_follow)
 {
+  if (main_point == nullptr || follow_point == nullptr) {
+    return;
+  }
   IdbCoordinate<int32_t> average_coordinate = get_middle_point();
   if (main_point->get_y() == follow_point->get_y()) {
     // horizontal
@@ -98,6 +106,9 @@ bool IdbRect::isIntersection(IdbRect rect)
 
 bool IdbRect::isIntersection(IdbRect* rect)
 {
+  if (rect == nullptr) {
+    return false;
+  }
   if (rect->get_low_x() > get_high_x() || rect->get_high_x() < get_low_x() || rect->get_low_y() > get_high_y()
       || rect->get_high_y() < get_low_y()) {
     return false;

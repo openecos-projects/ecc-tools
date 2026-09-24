@@ -76,16 +76,21 @@ Tree ::Tree(const int type, const list<Tree*>& lit)
   _nodes.push_back(root);               // push into tree
   list<Tree*>::const_iterator it;
   for (it = lit.begin(); it != lit.end(); it++) {
-    if (!((*it)->_nodes.empty())) {  // If the current node element is not empty.
-      Tree* tp = new Tree(**it);
-      TreeNode* p = tp->_nodes.front();
-      root->_children.push_back(p);  // set the children node of root
-      p->_parent = root;             // set the father of node as root 
-      list<TreeNode*>::iterator lit1 = tp->_nodes.begin();
-      list<TreeNode*>::iterator lit2 = tp->_nodes.end();
-      list<TreeNode*>::iterator lit3 = _nodes.end();
-      _nodes.insert(lit3, lit1, lit2);
+    if (*it == nullptr || (*it)->_nodes.empty()) {
+      continue;  // Skip null or empty input trees.
     }
+    Tree* tp = new Tree(**it);
+    TreeNode* p = tp->_nodes.front();
+    root->_children.push_back(p);  // set the children node of root
+    p->_parent = root;             // set the father of node as root
+    list<TreeNode*>::iterator lit1 = tp->_nodes.begin();
+    list<TreeNode*>::iterator lit2 = tp->_nodes.end();
+    list<TreeNode*>::iterator lit3 = _nodes.end();
+    _nodes.insert(lit3, lit1, lit2);
+    // Nodes are now owned by this tree; release the temporary wrapper
+    // without destroying the transferred nodes.
+    tp->_nodes.clear();
+    delete tp;
   }
 }
 
@@ -98,9 +103,17 @@ Tree ::~Tree()
 
 Tree& Tree ::operator=(const Tree& t)
 {
+  if (this == &t) {
+    return *this;
+  }
+  // Build the replacement node list first so the object stays valid
+  // if cloning throws; only then release the old nodes.
+  List new_nodes;
+  if (!t._nodes.empty()) {
+    clone(t._nodes.front(), new_nodes, 0);
+  }
   Clear();
-  Tree* p = new Tree(t);
-  _nodes = p->_nodes;
+  _nodes.swap(new_nodes);
   return *this;
 }
 
@@ -123,7 +136,7 @@ bool Tree ::operator==(const Tree& t)
 
 bool Tree ::operator!=(const Tree& t)
 {
-  if (_nodes.size() != _nodes.size()) {
+  if (_nodes.size() != t._nodes.size()) {
     return true;
   } else {
     list<TreeNode*>::iterator it = _nodes.begin();
@@ -211,11 +224,17 @@ Iterator Tree ::end()
 }
 int Tree ::Root() const
 {
-  return (*_nodes.begin())->_data;
+  if (_nodes.empty() || _nodes.front() == nullptr) {
+    return -1;  // No root in an empty tree (same convention as Height()).
+  }
+  return _nodes.front()->_data;
 }
 
 bool Tree ::IsRoot(Iterator it)
 {
+  if (it._tree == nullptr || it._lit == it._tree->_nodes.end() || *it._lit == nullptr) {
+    return false;
+  }
   TreeNode p = *it;
   if (p._parent == 0) {
     return true;
@@ -225,6 +244,9 @@ bool Tree ::IsRoot(Iterator it)
 
 bool Tree ::isLeaf(Iterator it)
 {
+  if (it._tree == nullptr || it._lit == it._tree->_nodes.end() || *it._lit == nullptr) {
+    return false;
+  }
   TreeNode p = *it;
   if (p._children.size() == 0) {
     return true;
@@ -234,6 +256,9 @@ bool Tree ::isLeaf(Iterator it)
 
 Iterator Tree ::Parent(Iterator it)
 {
+  if (it._tree == nullptr || it._lit == it._tree->_nodes.end() || *it._lit == nullptr || (*it._lit)->_parent == nullptr) {
+    return Iterator();
+  }
   TreeNode p = *it;
   Tree* t = it._tree;
   Iterator Ite(t, p._parent);
@@ -242,12 +267,15 @@ Iterator Tree ::Parent(Iterator it)
 
 int Tree ::NumChildren(Iterator it)
 {
+  if (it._tree == nullptr || it._lit == it._tree->_nodes.end() || *it._lit == nullptr) {
+    return 0;
+  }
   TreeNode p = *it;
   return (int) p._children.size();
 }
 
 //***** Tree::Iterator  *****///
-Iterator ::Iterator()
+Iterator ::Iterator() : _tree(nullptr)
 {
 }
 
@@ -260,6 +288,9 @@ Iterator ::Iterator(const Iterator& it)
 Iterator ::Iterator(Tree* t, TreeNode* n)
 {
   _tree = t;
+  if (_tree == nullptr) {
+    return;
+  }
   list<TreeNode*>& nodes = _tree->_nodes;
   _lit = find(nodes.begin(), nodes.end(), n);  //<algorithm> Members
 }
@@ -301,17 +332,26 @@ Iterator Iterator ::operator++(int)
 
 int Iterator ::operator*() const
 {
+  if (_tree == nullptr || _lit == _tree->_nodes.end() || *_lit == nullptr) {
+    return -1;
+  }
   return ((*_lit)->_data);
 }
 
 bool Iterator ::operator!()
 {
+  if (_tree == nullptr) {
+    return true;
+  }
   return _lit == _tree->_nodes.end();
 }
 
 // Clone 
 TreeNode* clone(TreeNode* node, List& nodes, TreeNode* nodep)
 {
+  if (node == nullptr) {
+    return nullptr;
+  }
   TreeNode* cp = new TreeNode(node->_data, nodep);
   nodes.push_back(cp);
   List& l = node->_children;

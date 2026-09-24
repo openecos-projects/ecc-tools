@@ -103,6 +103,24 @@ std::vector<ShapeId> GeometrySpatialIndex::query(LayerId layer_id, Rect32 bbox) 
     result.insert(result.end(), large_iter->second.begin(), large_iter->second.end());
   }
 
+  // A pathological viewport (e.g. full INT32 range at a fine tile size)
+  // would visit ~2^64 tiles. Fall back to scanning populated tiles only:
+  // exact, and bounded by actual index contents instead of the range.
+  const uint64_t x_count = static_cast<uint64_t>(range.max_x) - static_cast<uint64_t>(range.min_x) + 1;
+  const uint64_t y_count = static_cast<uint64_t>(range.max_y) - static_cast<uint64_t>(range.min_y) + 1;
+  constexpr uint64_t kMaxDirectTileVisits = 1024ULL * 1024ULL;
+  if (x_count > kMaxDirectTileVisits || y_count > kMaxDirectTileVisits / (x_count == 0 ? 1 : x_count)) {
+    for (const auto& [key, ids] : _tiles) {
+      if (key.layer_id == layer_id && key.tile_x >= range.min_x && key.tile_x <= range.max_x && key.tile_y >= range.min_y
+          && key.tile_y <= range.max_y) {
+        result.insert(result.end(), ids.begin(), ids.end());
+      }
+    }
+    std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    return result;
+  }
+
   for (int32_t x = range.min_x; x <= range.max_x; ++x) {
     for (int32_t y = range.min_y; y <= range.max_y; ++y) {
       const auto iter = _tiles.find(SpatialTileKey{layer_id, x, y});
@@ -126,8 +144,9 @@ GeometrySpatialIndex::TileRange GeometrySpatialIndex::tile_range(Rect32 bbox) co
 
 bool GeometrySpatialIndex::should_use_large_bucket(TileRange range) const
 {
-  const uint64_t x_count = static_cast<uint64_t>(range.max_x - range.min_x + 1);
-  const uint64_t y_count = static_cast<uint64_t>(range.max_y - range.min_y + 1);
+  // Cast before subtracting: max-min in int32 is UB for INT_MIN..MAX spans.
+  const uint64_t x_count = static_cast<uint64_t>(range.max_x) - static_cast<uint64_t>(range.min_x) + 1;
+  const uint64_t y_count = static_cast<uint64_t>(range.max_y) - static_cast<uint64_t>(range.min_y) + 1;
   return x_count * y_count > _options.max_tiles_per_shape;
 }
 

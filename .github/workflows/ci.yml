@@ -15,6 +15,74 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test-native-geometry:
+    name: Test Native Geometry (ASan/UBSan)
+    runs-on: ubuntu-latest
+    container: quay.io/pypa/manylinux_2_34_x86_64
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install test prerequisites
+        run: |
+          dnf install -y gcc-c++ make \
+            gcc-toolset-14-libasan-devel gcc-toolset-14-libubsan-devel \
+            || { echo '--- available sanitizer packages ---'; dnf list available 'gcc-toolset-*san*'; exit 1; }
+
+      - name: Build geometry unit tests
+        run: |
+          g++ -std=c++20 -o /tmp/geometry_data_tests \
+            src/database/data/geometry/GeometrySpatialIndex.cpp \
+            src/database/data/geometry/GeometryStore.cpp \
+            src/database/data/geometry/GeometryTilePyramid.cpp \
+            src/database/data/geometry/ShapeTable.cpp \
+            src/database/data/geometry/test/GeometryDataTests.cpp \
+            -Isrc/database/data/geometry
+          g++ -std=c++20 -o /tmp/idb_geometry_tests \
+            src/database/basic/geometry/IdbGeometry.cpp \
+            src/database/basic/geometry/IdbLayerShape.cpp \
+            src/database/basic/geometry/IdbTree.cpp \
+            src/database/basic/geometry/test/IdbGeometryTests.cpp \
+            -Isrc/database/basic/geometry
+
+      - name: Run geometry unit tests (plain)
+        run: /tmp/geometry_data_tests && /tmp/idb_geometry_tests
+
+      - name: Run geometry unit tests (AddressSanitizer)
+        run: |
+          g++ -std=c++20 -fsanitize=address -fno-sanitize-recover=all -o /tmp/geometry_data_tests_asan \
+            src/database/data/geometry/GeometrySpatialIndex.cpp \
+            src/database/data/geometry/GeometryStore.cpp \
+            src/database/data/geometry/GeometryTilePyramid.cpp \
+            src/database/data/geometry/ShapeTable.cpp \
+            src/database/data/geometry/test/GeometryDataTests.cpp \
+            -Isrc/database/data/geometry
+          g++ -std=c++20 -fsanitize=address -fno-sanitize-recover=all -o /tmp/idb_geometry_tests_asan \
+            src/database/basic/geometry/IdbGeometry.cpp \
+            src/database/basic/geometry/IdbLayerShape.cpp \
+            src/database/basic/geometry/IdbTree.cpp \
+            src/database/basic/geometry/test/IdbGeometryTests.cpp \
+            -Isrc/database/basic/geometry
+          /tmp/geometry_data_tests_asan && /tmp/idb_geometry_tests_asan
+
+      - name: Run geometry unit tests (UndefinedBehaviorSanitizer)
+        run: |
+          g++ -std=c++20 -fsanitize=undefined -fno-sanitize-recover=all -o /tmp/geometry_data_tests_ubsan \
+            src/database/data/geometry/GeometrySpatialIndex.cpp \
+            src/database/data/geometry/GeometryStore.cpp \
+            src/database/data/geometry/GeometryTilePyramid.cpp \
+            src/database/data/geometry/ShapeTable.cpp \
+            src/database/data/geometry/test/GeometryDataTests.cpp \
+            -Isrc/database/data/geometry
+          g++ -std=c++20 -fsanitize=undefined -fno-sanitize-recover=all -o /tmp/idb_geometry_tests_ubsan \
+            src/database/basic/geometry/IdbGeometry.cpp \
+            src/database/basic/geometry/IdbLayerShape.cpp \
+            src/database/basic/geometry/IdbTree.cpp \
+            src/database/basic/geometry/test/IdbGeometryTests.cpp \
+            -Isrc/database/basic/geometry
+          /tmp/geometry_data_tests_ubsan && /tmp/idb_geometry_tests_ubsan
+
   build-wheel:
     name: Build Wheel
     runs-on: ubuntu-latest
