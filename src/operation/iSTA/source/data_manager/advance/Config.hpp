@@ -54,18 +54,12 @@ class Config
   std::string cp_temp_directory_path;  // building
   // ********* TimingPropagator   ********* //
   std::string tp_temp_directory_path;  // building
-  // ********* PowerPropagator    ********* //
-  std::string pp_temp_directory_path;  // building
   // ********** TimingAnalyzer   ********* //
   std::string ta_temp_directory_path;  // building
-  // ********** PowerAnalyzer    ********* //
-  std::string pa_temp_directory_path;  // building
   // ******* TimingCharacterizer ******* //
   std::string tc_temp_directory_path;  // building
   // **********  TimingReporter   ********** //
   std::string tr_temp_directory_path;  // building
-  // **********  PowerReporter    ********** //
-  std::string pr_temp_directory_path;  // building
   // ************  SDFWriter  ************* //
   std::string sw_temp_directory_path;  // building
   /////////////////////////////////////////////

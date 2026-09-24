@@ -7,6 +7,7 @@ add_subdirectory(tcl_idrc)
 add_subdirectory(tcl_irt)
 add_subdirectory(tcl_ilvs)
 add_subdirectory(tcl_ista)
+add_subdirectory(tcl_ipw)
 add_subdirectory(tcl_ifp)
 add_subdirectory(tcl_iemir)
 add_subdirectory(tcl_izh)
@@ -29,6 +30,7 @@ target_link_libraries(ecc_tcl
         tcl_irt
         tcl_ilvs
         tcl_ista
+        tcl_ipw
         tcl_ifp
         tcl_iemir
         tcl_izh
