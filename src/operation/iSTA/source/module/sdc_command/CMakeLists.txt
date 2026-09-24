@@ -23,9 +23,13 @@ add_library(ista_sdc_command
     ${ISTA_MODULE}/sdc_command/clock/CreateClock.cpp
     ${ISTA_MODULE}/sdc_command/clock/CreateGeneratedClock.cpp
     ${ISTA_MODULE}/sdc_command/clock/SetClockGroups.cpp
+    ${ISTA_MODULE}/sdc_command/clock/SetClockLatency.cpp
+    ${ISTA_MODULE}/sdc_command/clock/RemoveClockLatency.cpp
     ${ISTA_MODULE}/sdc_command/clock/SetClockTransition.cpp
     ${ISTA_MODULE}/sdc_command/clock/SetClockUncertainty.cpp
+    ${ISTA_MODULE}/sdc_command/clock/RemoveClockUncertainty.cpp
     ${ISTA_MODULE}/sdc_command/clock/SetPropagatedClock.cpp
+    ${ISTA_MODULE}/sdc_command/clock/RemovePropagatedClock.cpp
     ${ISTA_MODULE}/sdc_command/delay/SetDrivingCell.cpp
     ${ISTA_MODULE}/sdc_command/delay/SetInputDelay.cpp
     ${ISTA_MODULE}/sdc_command/delay/SetInputTransition.cpp

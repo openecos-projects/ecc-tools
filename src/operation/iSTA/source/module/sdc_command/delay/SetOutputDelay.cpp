@@ -84,12 +84,32 @@ unsigned TclSetOutputDelay::exec()
   }
 
   ecc::TclOption* clock_option = getOptionOrArg("-clock");
+  const bool has_reference_pin = getOptionOrArg("-reference_pin")->is_set_val();
+  if (getOptionOrArg("-clock_fall")->is_set_val() && !clock_option->is_set_val()) {
+    setTclError("set_output_delay -clock_fall requires -clock");
+    return 0;
+  }
+  if (has_reference_pin
+      && (getOptionOrArg("-network_latency_included")->is_set_val() || getOptionOrArg("-source_latency_included")->is_set_val())) {
+    setTclError("set_output_delay -reference_pin cannot be used with -network_latency_included or -source_latency_included");
+    return 0;
+  }
   const double delay_value = delay_option->getDoubleVal();
   const bool set_min = getOptionOrArg("-min")->is_set_val();
   const bool set_max = getOptionOrArg("-max")->is_set_val();
   const bool rise = getOptionOrArg("-rise")->is_set_val();
   const bool fall = getOptionOrArg("-fall")->is_set_val();
   Database& database = data_manager.getDatabase();
+  std::string reference_pin;
+  if (has_reference_pin) {
+    const std::vector<std::string> reference_pins
+        = getPortPinNames(database, parseObjectPatterns(getOptionOrArg("-reference_pin")->getStringVal(), false));
+    if (reference_pins.size() != 1) {
+      setTclError("set_output_delay -reference_pin requires exactly one pin or port");
+      return 0;
+    }
+    reference_pin = reference_pins.front();
+  }
   const std::vector<std::string> clocks = findClockNames(database, clock_option);
   const std::vector<std::string> ports = getPortPinNames(database, object_option->getStringList());
   if (ports.empty()) {
@@ -116,8 +136,8 @@ unsigned TclSetOutputDelay::exec()
         delay.set_level_sensitive(getOptionOrArg("-level_sensitive")->is_set_val());
         delay.set_network_latency_included(getOptionOrArg("-network_latency_included")->is_set_val());
         delay.set_source_latency_included(getOptionOrArg("-source_latency_included")->is_set_val());
-        if (getOptionOrArg("-reference_pin")->is_set_val()) {
-          delay.set_reference_pin(getOptionOrArg("-reference_pin")->getStringVal());
+        if (has_reference_pin) {
+          delay.set_reference_pin(reference_pin);
         }
         delays.push_back(std::move(delay));
       }

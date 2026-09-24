@@ -71,9 +71,16 @@ void registerClockConstraintCommands(SdcCommand& interpreter)
   registerCommand<TclCreateClock>(interpreter, "create_clock");
   registerCommand<TclCreateGeneratedClock>(interpreter, "create_generated_clock");
   registerCommand<TclSetClockGroups>(interpreter, "set_clock_groups");
+  registerCommand<TclSetClockLatency>(interpreter, "set_clock_latency");
+  registerCommand<TclRemoveClockLatency>(interpreter, "remove_clock_latency");
+  registerCommand<TclRemoveClockLatency>(interpreter, "unset_clock_latency");
   registerCommand<TclSetClockTransition>(interpreter, "set_clock_transition");
   registerCommand<TclSetClockUncertainty>(interpreter, "set_clock_uncertainty");
+  registerCommand<TclRemoveClockUncertainty>(interpreter, "remove_clock_uncertainty");
+  registerCommand<TclRemoveClockUncertainty>(interpreter, "unset_clock_uncertainty");
   registerCommand<TclSetPropagatedClock>(interpreter, "set_propagated_clock");
+  registerCommand<TclRemovePropagatedClock>(interpreter, "remove_propagated_clock");
+  registerCommand<TclRemovePropagatedClock>(interpreter, "unset_propagated_clock");
 }
 
 void registerDelayConstraintCommands(SdcCommand& interpreter)
