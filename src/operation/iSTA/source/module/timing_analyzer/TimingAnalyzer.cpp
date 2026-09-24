@@ -739,8 +739,26 @@ double TimingAnalyzer::getOutputRequiredTime(std::string& start_point, std::stri
     const std::string capture_clock = delay->get_clock_name().empty() ? std::string(getClockName(end_point)) : delay->get_clock_name();
     const TransType capture_trans_type = delay->get_clock_trans_type();
     const double uncertainty = getClockUncertainty(launch_clock, launch_trans_type, capture_clock, capture_trans_type, analysis_type);
-    const double candidate = roundTime(getEndPointCaptureTime(start_point, launch_clock, launch_trans_type, capture_clock, capture_trans_type, analysis_type)
-                                       - delay->get_delay() + (analysis_type == AnalysisType::kMin ? uncertainty : -uncertainty));
+    double capture_time
+        = getEndPointCaptureTime(start_point, launch_clock, launch_trans_type, capture_clock, capture_trans_type, analysis_type);
+    if (!delay->get_reference_pin().empty()) {
+      std::string reference_pin = delay->get_reference_pin();
+      capture_time += getClockArrival(reference_pin, capture_clock, getCaptureAnalysisType(analysis_type), capture_trans_type);
+    } else {
+      const auto& clocks = database.get_timing_constraint().get_clock_map();
+      const auto clock = clocks.find(capture_clock);
+      if (clock != clocks.end()) {
+        const AnalysisType capture_analysis_type = getCaptureAnalysisType(analysis_type);
+        if (!delay->get_source_latency_included()) {
+          capture_time += clock->second.get_source_latency(capture_analysis_type, capture_trans_type);
+        }
+        if (!delay->get_network_latency_included() && !clock->second.get_is_propagated()) {
+          capture_time += clock->second.get_network_latency(capture_analysis_type, capture_trans_type);
+        }
+      }
+    }
+    const double candidate
+        = roundTime(capture_time - delay->get_delay() + (analysis_type == AnalysisType::kMin ? uncertainty : -uncertainty));
     if (!has_required || (analysis_type == AnalysisType::kMin ? candidate > required : candidate < required)) {
       required = candidate;
       has_required = true;
@@ -1745,10 +1763,16 @@ void TimingAnalyzer::updateClockInfo(TimingPath& timing_path, AnalysisType analy
   timing_path.set_capture_time(
       getEndPointCaptureTime(start_point, end_path_state.get_clock_name(), launch_trans_type, capture_clock, capture_trans_type, analysis_type)
       + getEndPointClockArrival(timing_path.get_end_point(), capture_clock, getCaptureAnalysisType(analysis_type), capture_trans_type) + cppr);
-  timing_path.set_launch_clock_network_delay(end_path_state.get_launch_time() - getClockEdge(end_path_state.get_clock_name(), launch_trans_type));
+  double launch_source_latency = 0.0;
+  const auto launch_clock = database.get_timing_constraint().get_clock_map().find(end_path_state.get_clock_name());
+  if (timing_path.get_source_type() == PathSourceType::kRegister
+      && launch_clock != database.get_timing_constraint().get_clock_map().end()) {
+    launch_source_latency = launch_clock->second.get_source_latency(analysis_type, launch_trans_type);
+  }
+  timing_path.set_launch_clock_source_latency(launch_source_latency);
+  timing_path.set_launch_clock_network_delay(end_path_state.get_launch_time() - getClockEdge(end_path_state.get_clock_name(), launch_trans_type)
+                                             - launch_source_latency);
   timing_path.set_capture_clock_transition(capture_trans_type);
-  timing_path.set_capture_clock_network_delay(
-      getEndPointClockArrival(timing_path.get_end_point(), capture_clock, getCaptureAnalysisType(analysis_type), capture_trans_type));
   timing_path.set_clock_reconvergence_pessimism(cppr);
 
   Pin& end_pin = database.get_pin_map()[timing_path.get_end_point()];
@@ -1757,8 +1781,19 @@ void TimingAnalyzer::updateClockInfo(TimingPath& timing_path, AnalysisType analy
   }
   Instance& instance = database.get_instance_map()[end_pin.get_instance_name()];
   if (instance.get_is_sequential() && isTimingCheckEndPoint(timing_path.get_end_point())) {
+    const AnalysisType capture_analysis_type = getCaptureAnalysisType(analysis_type);
+    const auto capture_clock_it = database.get_timing_constraint().get_clock_map().find(capture_clock);
+    const double capture_source_latency = capture_clock_it == database.get_timing_constraint().get_clock_map().end()
+                                              ? 0.0
+                                              : capture_clock_it->second.get_source_latency(capture_analysis_type, capture_trans_type);
+    timing_path.set_capture_clock_source_latency(capture_source_latency);
+    timing_path.set_capture_clock_network_delay(
+        getEndPointClockArrival(timing_path.get_end_point(), capture_clock, capture_analysis_type, capture_trans_type) - capture_source_latency);
     timing_path.set_capture_clock_pin(instance.get_clock_pin_name());
     timing_path.set_setup_time(timing_path.get_check_time());
+  } else {
+    timing_path.set_capture_clock_network_delay(
+        getEndPointClockArrival(timing_path.get_end_point(), capture_clock, getCaptureAnalysisType(analysis_type), capture_trans_type));
   }
 }
 
