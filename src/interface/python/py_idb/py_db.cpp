@@ -17,6 +17,7 @@
 #include "utility/logger/Logger.hpp"
 #include "py_db.h"
 
+#include "../py_path_utils.h"
 #include "GeometryEditSession.h"
 #include "GeometrySnapshotExporter.h"
 #include "IdbDesign.h"
@@ -101,33 +102,42 @@ pybind11::dict delta_to_dict(const ecc::geometry::GeometryDeltaShape& delta)
 
 }  // namespace
 
-bool initIdb(const std::string& config_path)
+bool initIdb(const std::filesystem::path& config_path)
 {
-  return dmInst->init(config_path);
+  const std::string config_path_ = config_path.string();
+  return dmInst->init(config_path_);
 }
 
-bool initTechLef(const std::string& techlef_path)
+bool initTechLef(const std::filesystem::path& techlef_path)
 {
-  dmInst->get_config().set_tech_lef_path(techlef_path);
-  return dmInst->readLef(vector<string>{techlef_path}, true);
+  const std::string techlef_path_ = techlef_path.string();
+  dmInst->get_config().set_tech_lef_path(techlef_path_);
+  return dmInst->readLef(vector<string>{techlef_path_}, true);
 }
 
-bool initLef(const std::vector<std::string>& lef_paths)
+bool initLef(const std::vector<std::filesystem::path>& lef_paths)
 {
-  dmInst->get_config().set_lef_paths(lef_paths);
-  return dmInst->readLef(lef_paths);
+  std::vector<std::string> lef_paths_;
+  lef_paths_.reserve(lef_paths.size());
+  for (const auto& lef_path : lef_paths) {
+    lef_paths_.push_back(lef_path.string());
+  }
+  dmInst->get_config().set_lef_paths(lef_paths_);
+  return dmInst->readLef(lef_paths_);
 }
 
-bool initDef(const std::string& def_path)
+bool initDef(const std::filesystem::path& def_path)
 {
-  dmInst->get_config().set_def_path(def_path);
-  return dmInst->readDef(def_path);
+  const std::string def_path_ = def_path.string();
+  dmInst->get_config().set_def_path(def_path_);
+  return dmInst->readDef(def_path_);
 }
 
-bool initVerilog(const std::string& verilog_path, const std::string& top_module)
+bool initVerilog(const std::filesystem::path& verilog_path, const std::string& top_module)
 {
-  dmInst->get_config().set_verilog_path(verilog_path);
-  return dmInst->readVerilog(verilog_path, top_module);
+  const std::string verilog_path_ = verilog_path.string();
+  dmInst->get_config().set_verilog_path(verilog_path_);
+  return dmInst->readVerilog(verilog_path_, top_module);
 }
 
 bool initLvsVerilog(const std::string& verilog_path, const std::string& top_module)
@@ -136,22 +146,29 @@ bool initLvsVerilog(const std::string& verilog_path, const std::string& top_modu
   return dmInst->addVerilog(verilog_path, top_module);
 }
 
-bool initLib(const std::vector<std::string>& lib_paths)
+bool initLib(const std::vector<std::filesystem::path>& lib_paths)
 {
-  dmInst->get_config().set_lib_paths(lib_paths);
-  return dmInst->readLib(lib_paths);
+  std::vector<std::string> lib_paths_;
+  lib_paths_.reserve(lib_paths.size());
+  for (const auto& lib_path : lib_paths) {
+    lib_paths_.push_back(lib_path.string());
+  }
+  dmInst->get_config().set_lib_paths(lib_paths_);
+  return dmInst->readLib(lib_paths_);
 }
 
-bool initSdc(const std::string& sdc_path)
+bool initSdc(const std::optional<std::filesystem::path>& sdc_path)
 {
-  dmInst->get_config().set_sdc_path(sdc_path);
+  const std::string sdc_path_ = path_or_empty(sdc_path);
+  dmInst->get_config().set_sdc_path(sdc_path_);
   return true;
 }
 
 bool initSpef(const std::string& spef_path)
 {
-  dmInst->get_config().set_spef_path(spef_path);
-  return dmInst->readSpef(spef_path);
+  const std::string spef_path_ = spef_path.string();
+  dmInst->get_config().set_spef_path(spef_path_);
+  return dmInst->readSpef(spef_path_);
 }
 
 bool initVcd(const std::string& vcd_path)
@@ -162,42 +179,48 @@ bool initVcd(const std::string& vcd_path)
 
 bool saveDef(const std::string& def_name)
 {
-  return dmInst->saveDef(def_name);
+  const std::string def_name_ = def_name.string();
+  return dmInst->saveDef(def_name_);
 }
 
-bool saveMacroTCL(const std::string& def_name)
+bool saveMacroTCL(const std::filesystem::path& tcl_name)
 {
-  return dmInst->saveMacroTCL(def_name);
+  const std::string tcl_name_ = tcl_name.string();
+  return dmInst->saveMacroTCL(tcl_name_);
 }
 
-bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_cell_names /* = {} */,
+bool saveNetList(const std::filesystem::path& netlist_path, std::set<std::string> exclude_cell_names /* = {} */,
                  bool is_add_space_for_escape_name /* = false*/)
 {
-  dmInst->saveVerilog(netlist_path, std::move(exclude_cell_names), is_add_space_for_escape_name);
+  const std::string netlist_path_ = netlist_path.string();
+  dmInst->saveVerilog(netlist_path_, std::move(exclude_cell_names), is_add_space_for_escape_name);
   return true;
 }
 
-bool saveGDSII(const std::string& gds_name, bool is_hardened /* = false */)
+bool saveGDSII(const std::filesystem::path& gds_name, bool is_hardened /* = false */)
 {
-  return dmInst->saveGDSII(gds_name, is_hardened);
+  const std::string gds_name_ = gds_name.string();
+  return dmInst->saveGDSII(gds_name_, is_hardened);
 }
 
-bool saveJson(const std::string& path)
+bool saveJson(const std::filesystem::path& path)
 {
+  const std::string path_ = path.string();
   std::string options = "";
 
-  return dmInst->saveJSON(path, options);
+  return dmInst->saveJSON(path_, options);
 }
 
-bool saveViewJson(const std::string& output_dir, const std::string& json_format, bool compress)
+bool saveViewJson(const std::filesystem::path& output_dir, const std::string& json_format, bool compress)
 {
+  const std::string output_dir_ = output_dir.string();
   idb::ViewJsonWriteOptions options;
   if (!idb::parseViewJsonFormat(json_format, options.format)) {
     ECCLOG.warn(ecc::Loc::current(), "Save view json failed: unsupported json_format `", json_format, "`, expected `pretty` or `compact`.");
     return false;
   }
   options.compress = compress;
-  return dmInst->saveViewJson(output_dir, options);
+  return dmInst->saveViewJson(output_dir_, options);
 }
 
 bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc)
@@ -310,14 +333,126 @@ bool resetGeometrySession()
   return true;
 }
 
-bool applyViewJsonEdits(const std::string& edits_path, bool compress)
+bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc)
 {
-  return dmInst->applyViewJsonEdits(edits_path, compress);
+  idb::IdbDesign* design = dmInst->get_idb_design();
+  idb::IdbLayout* layout = dmInst->get_idb_layout();
+  if (design == nullptr || layout == nullptr) {
+    return false;
+  }
+
+  std::optional<ecc::geometry::GeometryDrcDistribution> drc;
+  if (include_drc) {
+    drc.emplace();
+    const auto& nets = design->get_net_list()->get_net_list();
+    const auto& special_nets = design->get_special_net_list()->get_net_list();
+    for (const auto& [type, layers] : featureInst->get_type_layer_violation_map()) {
+      for (const auto& [layer, violations] : layers) {
+        auto& records = (*drc)[type][layer];
+        records.reserve(violations.size());
+        for (const ids::Violation& violation : violations) {
+          ecc::geometry::GeometryDrcViolation record;
+          record.bbox = {violation.ll_x, violation.ll_y, violation.ur_x, violation.ur_y};
+          record.required_size = violation.required_size;
+          for (int32_t net_idx : violation.violation_net_set) {
+            if (net_idx >= 0 && net_idx < static_cast<int32_t>(nets.size())) {
+              record.nets.push_back(nets[net_idx]->get_net_name());
+            } else {
+              const int32_t special_idx = net_idx - static_cast<int32_t>(nets.size());
+              record.nets.push_back(special_idx >= 0 && special_idx < static_cast<int32_t>(special_nets.size())
+                                        ? special_nets[special_idx]->get_net_name()
+                                        : "obs");
+            }
+          }
+          records.push_back(std::move(record));
+        }
+      }
+    }
+  }
+
+  return ecc::geometry::export_geometry_snapshot(*design, *layout, output_dir, std::move(drc)).ok;
+}
+
+bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,
+                   const std::string& source, const std::string& placement_status, bool create_if_missing)
+{
+  return dmInst->placeInst(inst_name, llx, lly, orient, cellmaster, source, placement_status, create_if_missing);
+}
+
+bool initializeGeometrySession()
+{
+  idb::IdbDesign* design = dmInst->get_idb_design();
+  idb::IdbLayout* layout = dmInst->get_idb_layout();
+  if (design == nullptr || layout == nullptr) {
+    return false;
+  }
+
+  return geometry_edit_session().begin(*design, *layout);
+}
+
+pybind11::dict syncInstanceGeometry(const std::string& inst_name)
+{
+  pybind11::dict result;
+  result["ok"] = false;
+  result["snapshotRequired"] = true;
+  result["updatedShapeCount"] = 0;
+  result["insertedShapeCount"] = 0;
+  result["deletedShapeCount"] = 0;
+  result["missingShapeCount"] = 0;
+  result["events"] = pybind11::list();
+
+  if (!geometry_edit_session().initialized()) {
+    return result;
+  }
+
+  idb::IdbDesign* design = dmInst->get_idb_design();
+  if (design == nullptr || design->get_instance_list() == nullptr) {
+    return result;
+  }
+
+  idb::IdbInstance* instance = design->get_instance_list()->find_instance(inst_name);
+  if (instance == nullptr) {
+    result["missingShapeCount"] = 1;
+    return result;
+  }
+
+  const ecc::geometry::GeometryInstanceSyncResult sync = geometry_edit_session().sync_instance(*instance);
+  result["ok"] = sync.ok;
+  result["snapshotRequired"] = sync.snapshot_required;
+  result["updatedShapeCount"] = sync.sync.updated_shape_count;
+  result["insertedShapeCount"] = sync.sync.added_shape_count;
+  result["deletedShapeCount"] = sync.sync.deleted_shape_count;
+  result["missingShapeCount"] = sync.sync.missing_shape_count;
+
+  pybind11::list events;
+  for (const ecc::geometry::GeometryDeltaShape& delta : sync.events) {
+    events.append(delta_to_dict(delta));
+  }
+  result["events"] = std::move(events);
+  return result;
+}
+
+bool saveGeometrySessionSnapshot(const std::string& output_dir)
+{
+  return geometry_edit_session().write_snapshot(output_dir).ok;
+}
+
+bool resetGeometrySession()
+{
+  geometry_edit_session().reset();
+  return true;
+}
+
+bool applyViewJsonEdits(const std::filesystem::path& edits_path, bool compress)
+{
+  const std::string edits_path_ = edits_path.string();
+  return dmInst->applyViewJsonEdits(edits_path_, compress);
 }
 
 bool saveData(const std::string& path)
 {
-  return dmInst->saveData(path);
+  const std::string path_ = path.string();
+  return dmInst->saveData(path_);
 }
 
 bool resetData()
@@ -329,8 +464,10 @@ bool resetData()
   return true;
 }
 
-bool loadData(const std::string& path)
+bool loadData(const std::filesystem::path& path)
 {
+  const std::string path_ = path.string();
+  return dmInst->loadData(path_);
   // DataManager::loadData begins by resetting its current IdbBuilder, so the
   // session must be cleared before it can invalidate its design/layout
   // pointers. Callers initialize a new geometry session after a successful
@@ -339,11 +476,17 @@ bool loadData(const std::string& path)
   return dmInst->loadData(path);
 }
 
-bool writeAbstractLef(const std::string& output_lef_path)
+bool writeSocJson(const std::filesystem::path& path, const std::vector<std::string>& harden_cores /* = {} */)
 {
-  namespace fs = std::filesystem;
+  const std::string path_ = path.string();
+  idb::JsonSoc soc_file(path_, harden_cores);
+  return soc_file.saveFileData();
+}
 
-  return dmInst->saveLef(output_lef_path);
+bool writeAbstractLef(const std::filesystem::path& output_lef_path)
+{
+  const std::string output_lef_path_ = output_lef_path.string();
+  return dmInst->saveLef(output_lef_path_);
 }
 
 }  // namespace python_interface

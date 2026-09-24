@@ -17,6 +17,7 @@
 #pragma once
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 
 #include <iostream>
 
@@ -37,7 +38,7 @@ void register_idb(py::module& m)
   m.def("verilog_init", initVerilog, py::arg("verilog_path"), py::arg("top_module"));
   m.def("lvs_verilog_init", initLvsVerilog, py::arg("verilog_path"), py::arg("top_module"));
   m.def("lib_init", initLib, py::arg("lib_paths"));
-  m.def("sdc_init", initSdc, py::arg("sdc_path"));
+  m.def("sdc_init", initSdc, py::arg("sdc_path") = py::none());
   m.def("spef_init", initSpef, py::arg("spef_path"));
   m.def("vcd_init", initVcd, py::arg("vcd_path"));
   m.def("def_save", saveDef, py::arg("def_name"));
@@ -67,7 +68,7 @@ void register_idb_op(pybind11::module& m)
   m.def("set_net", setNet, py::arg("net_name"), py::arg("net_type"));
   m.def("remove_except_pg_net", removeExceptPgNet);
   m.def("clear_blockage", clearBlockage, py::arg("type"));
-  m.def("idb_get", idbGet, py::arg("inst_name") = "", py::arg("net_name") = "", py::arg("file_name") = "");
+  m.def("idb_get", idbGet, py::arg("inst_name") = "", py::arg("net_name") = "", py::arg("file_name") = py::none());
   m.def("delete_inst", idbDeleteInstance, py::arg("inst_name"));
   m.def("delete_net", idbDeleteNet, py::arg("net_name"));
   m.def("create_inst", idbCreateInstance, py::arg("inst_name"), py::arg("cell_master"), py::arg("coord_x") = 0, py::arg("coord_y") = 0,

@@ -18,19 +18,35 @@
 
 #include <string>
 
+#include "../py_path_utils.h"
 #include "ZHInterface.hpp"
 
 namespace python_interface {
 
-bool initAntennaConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
-bool initFillerConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
-bool initMetalConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
+bool initZHConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 
-bool insert_filler(const std::string& config)
+bool fix_fanout(const std::optional<std::filesystem::path>& config)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
 
-  bool pass = config.empty() ? true : initFillerConfigMapByJSON(config, config_map);
+  bool pass = false;
+  pass = !pass ? initZHConfigMapByJSON(config_, config_map) : pass;
+  if (!pass) {
+    return false;
+  }
+
+  ZHI.fixFanout(config_map);
+  return true;
+}
+
+bool insert_filler(const std::optional<std::filesystem::path>& config)
+{
+  const std::string config_ = path_or_empty(config);
+  std::map<std::string, std::any> config_map;
+
+  bool pass = false;
+  pass = !pass ? initZHConfigMapByJSON(config_, config_map) : pass;
   if (!pass) {
     return false;
   }

@@ -44,28 +44,26 @@ bool validate_pdk(const std::optional<std::string>& pdk)
 
 }  // namespace
 
-bool destroy_rcx()
+bool init_rcx(const std::filesystem::path& config, const std::optional<std::string>& pdk)
 {
-  if (active_backend == RCXBackendType::kNative) {
-    RCXI.destroyRCX();
-  } else if (active_backend == RCXBackendType::kIcs55) {
-    ircx_ics55_destroy();
-  }
-  active_backend = RCXBackendType::kNone;
-  return true;
-}
-
-bool init_rcx(const std::string& config, const std::optional<std::string>& pdk)
-{
-  active_backend = RCXBackendType::kNone;
+  const std::string config_ = config.string();
+  active_backend = RcxBackend::kUninitialized;
 
   if (!validate_pdk(pdk)) {
     return false;
   }
 
   if (is_ics55_pdk(pdk)) {
-    ircx_ics55_init(config.c_str(), dmInst->get_idb_design());
-    active_backend = RCXBackendType::kIcs55;
+    if (ircx_ics55_init(config_.c_str()) != 0) {
+      active_backend = RcxBackend::kIcs55;
+      return true;
+    }
+
+    return false;
+  }
+
+  if (RCX_API_INST.init(config_)) {
+    active_backend = RcxBackend::kNative;
     return true;
   }
 

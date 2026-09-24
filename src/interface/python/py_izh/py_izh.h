@@ -16,12 +16,13 @@
 // ***************************************************************************************
 #pragma once
 
-#include <tcl_util.h>
+#include <filesystem>
+#include <optional>
+#include <string>
 
 namespace python_interface {
 
-bool insert_filler(const std::string& config);
-bool insert_metal(const std::string& config);
-bool check_antenna(const std::string& config, const std::string& report_dir);
+bool fix_fanout(const std::optional<std::filesystem::path>& config);
+bool insert_filler(const std::optional<std::filesystem::path>& config);
 
 }  // namespace python_interface
