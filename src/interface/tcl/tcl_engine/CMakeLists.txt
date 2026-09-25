@@ -41,15 +41,22 @@ install(TARGETS tcl
 # ecc_py module at runtime.
 if(BUILD_PYTHON)
   if(NOT ECC_TCL_SCRIPT_DIR)
-    # tclsh reports the script library of the Tcl installation it belongs to.
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -E echo "puts $tcl_library"
-      COMMAND ${TCL_TCLSH}
-      OUTPUT_VARIABLE ECC_TCL_SCRIPT_DIR
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET)
+    # Prefer the scripts beside the library selected by FindTCL. TCL_TCLSH can
+    # resolve to another Tcl installation through PATH.
+    get_filename_component(ECC_TCL_LIBRARY_DIR "${TCL_LIBRARY}" DIRECTORY)
+    set(ECC_TCL_SCRIPT_DIR "${ECC_TCL_LIBRARY_DIR}/tcl8.6")
+    if(NOT EXISTS "${ECC_TCL_SCRIPT_DIR}/init.tcl")
+      # Fall back to the script library reported by tclsh when the library
+      # installation does not place scripts in lib/tcl8.6.
+      execute_process(
+        COMMAND ${CMAKE_COMMAND} -E echo "puts $tcl_library"
+        COMMAND ${TCL_TCLSH}
+        OUTPUT_VARIABLE ECC_TCL_SCRIPT_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    endif()
   endif()
-  if(NOT ECC_TCL_SCRIPT_DIR)
+  if(NOT EXISTS "${ECC_TCL_SCRIPT_DIR}/init.tcl")
     message(FATAL_ERROR
       "Tcl script library not found; pass -DECC_TCL_SCRIPT_DIR=<dir containing init.tcl>")
   endif()
