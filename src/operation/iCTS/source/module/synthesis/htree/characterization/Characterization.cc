@@ -111,7 +111,8 @@ auto RunCharacterizationFlow(const Tree& topology, int32_t dbu_per_um, const Cha
   auto requested_lengths_um = CollectRequestedLevelLengthsUm(topology, dbu_per_um);
   std::vector<double> coverage_lengths_um;
   AppendPositiveLengths(coverage_lengths_um, input.additional_characterization_lengths_um);
-  const auto char_grid_plan = ResolveCharacterizationGridPlan(base_char_config, requested_lengths_um, coverage_lengths_um);
+  const auto max_unit_um = ResolveMaxCharacterizationSegmentLengthUm(base_char_input, base_char_config);
+  const auto char_grid_plan = ResolveCharacterizationGridPlan(base_char_config, requested_lengths_um, coverage_lengths_um, max_unit_um);
   EmitLogTable(Loc::current(), "HTree Characterization Grid Plan", {"Property", "Value"},
                {{"Source", ToCharGridSourceName(char_grid_plan.source)},
                 {"Configured Unit (um)", ToLogTableCell(char_grid_plan.configured_wirelength_unit_um)},
@@ -124,7 +125,9 @@ auto RunCharacterizationFlow(const Tree& topology, int32_t dbu_per_um, const Cha
                 {"Unique Bins", ToLogTableCell(char_grid_plan.unique_level_bins)},
                 {"Adapted", ToLogTableCell(char_grid_plan.adapted)},
                 {"Configured Unit Missing", ToLogTableCell(char_grid_plan.configured_wirelength_missing)},
-                {"Configured Grid Collapsed", ToLogTableCell(char_grid_plan.configured_grid_collapsed)}});
+                {"Configured Grid Collapsed", ToLogTableCell(char_grid_plan.configured_grid_collapsed)},
+                {"Electrical Unit Ceiling (um)", char_grid_plan.max_unit_um.has_value() ? ToLogTableCell(*char_grid_plan.max_unit_um) : "n/a"},
+                {"Unit Clamped To Ceiling", ToLogTableCell(char_grid_plan.unit_clamped_to_electrical_ceiling)}});
   std::vector<unsigned> direct_length_indices;
   if (char_grid_plan.adapted) {
     direct_length_indices = ResolveDirectCharacterizationLengthIndices(requested_lengths_um, char_grid_plan);

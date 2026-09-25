@@ -38,6 +38,7 @@
 #include "SegmentChar.hh"
 #include "Utility.hh"
 #include "ValueLattice.hh"
+#include "characterization/Characterization.hh"
 #include "characterization/buffer_cell/CharacterizationBufferCell.hh"
 #include "characterization/builder/CharBuilderImpl.hh"
 
@@ -199,7 +200,9 @@ auto resolveMaxSlew(const ::icts::CharBuilder::Input& input, const ::icts::CharB
   };
 }
 
-auto resolveMaxCap(const ::icts::CharBuilder::Input& input, const ::icts::CharBuilder::Config& config) -> ResolvedValue
+// First available max-cap source, in precedence order. Silent, so callers that only
+// need the value do not repeat the warning that the setup path already emits.
+auto resolveMaxCapCandidate(const ::icts::CharBuilder::Input& input, const ::icts::CharBuilder::Config& config) -> std::optional<ResolvedValue>
 {
   if (config.max_cap_pf.has_value() && *config.max_cap_pf > 0.0) {
     return ResolvedValue{
@@ -241,12 +244,43 @@ auto resolveMaxCap(const ::icts::CharBuilder::Input& input, const ::icts::CharBu
     };
   }
 
+  return std::nullopt;
+}
+
+auto resolveMaxCap(const ::icts::CharBuilder::Input& input, const ::icts::CharBuilder::Config& config) -> ResolvedValue
+{
+  if (auto found = resolveMaxCapCandidate(input, config); found.has_value()) {
+    return *found;
+  }
   CTSLOG.warn(Loc::current(), "CharBuilder: failed to resolve max_cap from explicit config/liberty limits/liberty tables");
   return ResolvedValue{
       .value = 0.0,
       .source = ResolutionSource::kUnresolved,
       .detail = "missing explicit config/liberty cap limits",
   };
+}
+
+// The cap lattice stops at max_cap, and a driven segment pays the capacitance of its
+// own wire plus the input capacitance of the buffer that drives it. Past this length
+// every sweep point overflows the lattice, so characterization can only come back
+// empty. Returns nullopt when an input to the bound is unavailable, and zero when no
+// positive segment length is drivable at all.
+auto resolveMaxSegmentLengthUm(const ::icts::CharBuilder::Input& input, const ::icts::CharBuilder::Config& config) -> std::optional<double>
+{
+  const auto max_cap = resolveMaxCapCandidate(input, config);
+  if (!max_cap.has_value()) {
+    return std::nullopt;
+  }
+  const double cap_per_um = input.clock_route_segment_rc.capacitance_per_um_pf;
+  if (!(cap_per_um > 0.0)) {
+    return std::nullopt;
+  }
+  double max_buffer_input_cap_pf = 0.0;
+  for (const auto& buffer_cell : input.characterization_buffer_cells) {
+    max_buffer_input_cap_pf = std::max(max_buffer_input_cap_pf, buffer_cell.input_cap_pf);
+  }
+  const double drivable_pf = max_cap->value - max_buffer_input_cap_pf;
+  return drivable_pf > 0.0 ? std::optional<double>{drivable_pf / cap_per_um} : std::optional<double>{0.0};
 }
 
 auto collectSortedBuffers(const ::icts::CharBuilder::Input& input, const ::icts::CharBuilder::Config& config) -> std::vector<::icts::CharacterizationBufferCell>
@@ -440,3 +474,12 @@ auto CharSetupConfigurator::init(const ::icts::CharBuilder::Input& input, const 
 }
 
 }  // namespace icts::char_builder::detail
+
+namespace icts {
+
+auto ResolveMaxCharacterizationSegmentLengthUm(const CharBuilder::Input& input, const CharBuilder::Config& config) -> std::optional<double>
+{
+  return char_builder::detail::resolveMaxSegmentLengthUm(input, config);
+}
+
+}  // namespace icts

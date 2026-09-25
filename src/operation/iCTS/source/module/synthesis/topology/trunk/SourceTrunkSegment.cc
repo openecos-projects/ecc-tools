@@ -294,10 +294,12 @@ auto BuildSourceTrunkSegmentObjects(SourceTrunkSegment::Build& result, Net& sour
   return true;
 }
 
-auto ConfigureCharConfig(const CharBuilder::Config& base_config, const std::vector<double>& requested_lengths_um) -> CharBuilder::Config
+auto ConfigureCharConfig(const CharBuilder::Input& base_input, const CharBuilder::Config& base_config, const std::vector<double>& requested_lengths_um)
+    -> CharBuilder::Config
 {
   auto char_config = base_config;
-  const auto char_grid_plan = htree::ResolveCharacterizationGridPlan(base_config, requested_lengths_um);
+  const auto char_grid_plan
+      = htree::ResolveCharacterizationGridPlan(base_config, requested_lengths_um, ResolveMaxCharacterizationSegmentLengthUm(base_input, base_config));
   if (!char_grid_plan.adapted) {
     return char_config;
   }
@@ -364,7 +366,8 @@ auto SourceTrunkSegment::build(const Input& input, const Config& config) -> Buil
 
   const std::vector<double> requested_lengths_um{result.summary.length_um};
   CharacterizationLibrary direct_char_library;
-  const auto direct_ensure = direct_char_library.ensure(input.characterization_input, ConfigureCharConfig(input.characterization_config, requested_lengths_um));
+  const auto direct_ensure = direct_char_library.ensure(input.characterization_input,
+                                                        ConfigureCharConfig(input.characterization_input, input.characterization_config, requested_lengths_um));
   std::string direct_failure_reason = direct_ensure.failure_reason;
   if (direct_ensure.success) {
     const auto& direct_builder = direct_char_library.getCharBuilder();
@@ -430,7 +433,8 @@ auto SourceTrunkSegment::build(const Input& input, const Config& config) -> Buil
   CharacterizationLibrary local_char_library;
   auto* char_library = input.characterization_library == nullptr ? &local_char_library : input.characterization_library;
   if (!char_library->isReady()) {
-    const auto ensure_result = char_library->ensure(input.characterization_input, ConfigureCharConfig(input.characterization_config, requested_lengths_um));
+    const auto ensure_result = char_library->ensure(input.characterization_input,
+                                                    ConfigureCharConfig(input.characterization_input, input.characterization_config, requested_lengths_um));
     if (!ensure_result.success) {
       result.summary.failure_reason = ensure_result.failure_reason.empty() ? "characterization_library_failed" : ensure_result.failure_reason;
       return result;

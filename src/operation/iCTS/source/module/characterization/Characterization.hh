@@ -34,3 +34,17 @@
 #include "characterization/table/HTreeTopologyCharTable.hh"
 #include "characterization/table/SegmentCharTable.hh"
 // IWYU pragma: end_exports
+
+#include <optional>
+
+namespace icts {
+
+// Longest clock-route segment the characterization sweep can still represent. A driven
+// segment pays its own wire capacitance plus the input capacitance of the buffer that
+// drives it, and the cap lattice stops at max_cap; past this length every sweep point
+// overflows the lattice and the sweep returns no segment characters at all. Callers
+// that choose a length unit must stay at or below this bound. Returns no value when an
+// input to the bound is unavailable, and zero when no positive length is drivable.
+auto ResolveMaxCharacterizationSegmentLengthUm(const CharBuilder::Input& input, const CharBuilder::Config& config) -> std::optional<double>;
+
+}  // namespace icts

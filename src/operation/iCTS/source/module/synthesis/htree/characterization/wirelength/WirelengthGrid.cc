@@ -323,25 +323,28 @@ auto CollectRequestedLevelLengthsUm(const Tree& topology, int32_t dbu_per_um) ->
   return requested_lengths_um;
 }
 
-auto ResolveCharacterizationGridPlan(const Config& config, const std::vector<double>& requested_lengths_um) -> CharacterizationGridPlan
+auto ResolveCharacterizationGridPlan(const Config& config, const std::vector<double>& requested_lengths_um, const std::optional<double>& max_unit_um)
+    -> CharacterizationGridPlan
 {
   CharBuilder::Config char_config;
   if (config.get_wirelength_unit_um() > 0.0) {
     char_config.wirelength_unit_um = config.get_wirelength_unit_um();
   }
   char_config.wirelength_iterations = config.get_wirelength_iterations();
-  return ResolveCharacterizationGridPlan(char_config, requested_lengths_um);
+  return ResolveCharacterizationGridPlan(char_config, requested_lengths_um, max_unit_um);
 }
 
-auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const std::vector<double>& requested_lengths_um) -> CharacterizationGridPlan
+auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const std::vector<double>& requested_lengths_um,
+                                     const std::optional<double>& max_unit_um) -> CharacterizationGridPlan
 {
-  return ResolveCharacterizationGridPlan(config, requested_lengths_um, {});
+  return ResolveCharacterizationGridPlan(config, requested_lengths_um, {}, max_unit_um);
 }
 
 auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const std::vector<double>& direct_lengths_um,
-                                     const std::vector<double>& coverage_lengths_um) -> CharacterizationGridPlan
+                                     const std::vector<double>& coverage_lengths_um, const std::optional<double>& max_unit_um) -> CharacterizationGridPlan
 {
   CharacterizationGridPlan plan;
+  plan.max_unit_um = max_unit_um;
   auto direct_positive_lengths_um = BuildPositiveLengths(direct_lengths_um);
   auto coverage_positive_lengths_um = BuildPositiveLengths(coverage_lengths_um);
   if (direct_positive_lengths_um.empty() && !coverage_positive_lengths_um.empty()) {
@@ -373,6 +376,25 @@ auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const st
     plan.source = plan.adapted ? CharGridSource::kAutoDerived : CharGridSource::kNone;
     plan.auto_derived_wirelength_unit_um = effective_unit_um;
     plan.unique_level_bins = CountUniqueAlignedLengthBins(direct_positive_lengths_um, effective_unit_um);
+  }
+
+  // The geometry decides the unit as if wire length were free. It is not: a driven
+  // segment pays its own wire capacitance plus the input capacitance of the buffer that
+  // drives it, and the cap lattice stops at max_cap. Above that ceiling every sweep
+  // point overflows and the sweep yields no segment characters at all, so pull the unit
+  // down to the ceiling. Only the unit moves - the requested lengths still have to be
+  // covered, and the iteration count below follows the clamped unit, so the grid stays
+  // complete. A unit the plan did not choose itself becomes its opinion once clamped,
+  // which is what `adapted` publishes to the caller.
+  if (effective_unit_um > 0.0 && max_unit_um.has_value() && effective_unit_um > *max_unit_um + kValueLatticeEpsilon) {
+    const double requested_unit_um = plan.adapted ? plan.auto_derived_wirelength_unit_um : configured_unit_um;
+    effective_unit_um = *max_unit_um;
+    plan.unit_clamped_to_electrical_ceiling = true;
+    plan.adapted = true;
+    plan.source = plan.configured_wirelength_missing ? CharGridSource::kAutoDerived : CharGridSource::kRuntimeConfig;
+    plan.unique_level_bins = CountUniqueAlignedLengthBins(direct_positive_lengths_um, effective_unit_um);
+    CTSLOG.warn(Loc::current(), "HTree: length unit ", requested_unit_um, " um exceeds the ", *max_unit_um,
+                " um the characterization cap lattice can drive; using ", effective_unit_um, " um.");
   }
 
   if (!plan.adapted || effective_unit_um <= 0.0) {
