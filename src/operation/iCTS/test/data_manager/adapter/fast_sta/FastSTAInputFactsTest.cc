@@ -194,81 +194,6 @@ TEST_F(FastSTAInputFactsTestInterface, ExplicitSdcUnitsCannotSupplyMissingLibert
   EXPECT_TRUE(loadModel(_library).has_value());
 }
 
-auto ParsedRelation(const std::string& commands, icts::FastStaTimingCheckKind kind, double capture_period = 10.0)
-    -> std::optional<icts::FastStaTimingRelationFact>
-{
-  const ScopedTimingInput sdc("create_clock -name launch -period 10\ncreate_clock -name capture -period " + std::to_string(capture_period) + "\n" + commands);
-  if (!sdc.ready()) {
-    return std::nullopt;
-  }
-  icts::FastStaContext context;
-  context.constraints = icts::SdcClockReader(sdc.path()).readClockData();
-  EXPECT_EQ(context.constraints.clocks.size(), 2U);
-  context.nodes.resize(4U);
-  context.nodes.at(0U).name = "launch/CK";
-  context.nodes.at(1U).name = "launch/Q";
-  context.nodes.at(2U).name = "capture/CK";
-  context.nodes.at(3U).name = "capture/D";
-  icts::FastStaTimingPoint data{
-      .arrival_ns = 1.0, .launch_node_id = 1U, .launch_clock_node_id = 0U, .valid = true, .clock_name = "launch", .exception_progress = {}};
-  const icts::FastStaTimingPoint capture{.launch_clock_node_id = 2U, .valid = true, .clock_name = "capture", .exception_progress = {}};
-  icts::FastStaEvents::startPath(context, data, icts::FastStaTransition::kRise);
-  const icts::FastStaTimingCheck check{.data_node_id = 3U, .clock_node_id = 2U, .kind = kind};
-  return icts::FastStaEvents::relation(context, check, icts::FastStaTransition::kRise, data, capture, 0.0, {});
-}
-
-TEST(FastSTAParsedInputTest, MulticycleDefaultAndDualSelectionRetainSignedHoldViolation)
-{
-  for (const auto* flags : {"", "-setup", "-setup -hold"}) {
-    const auto command = std::string("set_multicycle_path 2 ") + flags + "\n";
-    const auto setup = ParsedRelation(command, icts::FastStaTimingCheckKind::kSetup);
-    const auto hold = ParsedRelation(command, icts::FastStaTimingCheckKind::kHold);
-    if (!setup.has_value()) {
-      FAIL() << "Expected setup to have a value.";
-    }
-    if (!hold.has_value()) {
-      FAIL() << "Expected hold to have a value.";
-    }
-    EXPECT_DOUBLE_EQ(setup->required_ns, 20.0) << flags;
-    EXPECT_DOUBLE_EQ(hold->required_ns, 10.0) << flags;
-    EXPECT_DOUBLE_EQ(hold->slack_ns, -9.0) << flags;
-  }
-  const auto hold_only = ParsedRelation("set_multicycle_path 1 -hold\n", icts::FastStaTimingCheckKind::kHold);
-  if (!hold_only.has_value()) {
-    FAIL() << "Expected hold_only to have a value.";
-  }
-  EXPECT_DOUBLE_EQ(hold_only->required_ns, -10.0);
-  const auto restored = ParsedRelation("set_multicycle_path 2 -setup\nset_multicycle_path 1 -hold\n", icts::FastStaTimingCheckKind::kHold);
-  if (!restored.has_value()) {
-    FAIL() << "Expected restored to have a value.";
-  }
-  EXPECT_DOUBLE_EQ(restored->required_ns, 0.0);
-  EXPECT_DOUBLE_EQ(restored->slack_ns, 1.0);
-}
-
-TEST(FastSTAParsedInputTest, MulticycleStartAndEndKeepIndependentClockPeriods)
-{
-  const auto baseline = ParsedRelation("", icts::FastStaTimingCheckKind::kHold, 20.0);
-  const auto changed = ParsedRelation("set_multicycle_path 2 -setup -end\nset_multicycle_path 1 -hold -start\n", icts::FastStaTimingCheckKind::kHold, 20.0);
-  if (!baseline.has_value()) {
-    FAIL() << "Expected baseline to have a value.";
-  }
-  if (!changed.has_value()) {
-    FAIL() << "Expected changed to have a value.";
-  }
-  EXPECT_DOUBLE_EQ(changed->required_ns - baseline->required_ns, 10.0);
-  const auto start = ParsedRelation("set_multicycle_path 2 -start\n", icts::FastStaTimingCheckKind::kHold, 20.0);
-  const auto end = ParsedRelation("set_multicycle_path 2 -end\n", icts::FastStaTimingCheckKind::kHold, 20.0);
-  if (!start.has_value()) {
-    FAIL() << "Expected start to have a value.";
-  }
-  if (!end.has_value()) {
-    FAIL() << "Expected end to have a value.";
-  }
-  EXPECT_DOUBLE_EQ(start->required_ns - baseline->required_ns, 10.0);
-  EXPECT_DOUBLE_EQ(end->required_ns - baseline->required_ns, 20.0);
-}
-
 auto ParsedClockGraph(const std::string& commands) -> icts::FastStaContext
 {
   const ScopedTimingInput sdc("create_clock -name A -period 10 [get_ports clkA]\ncreate_clock -name B -period 20 [get_ports clkB]\n" + commands);
@@ -414,9 +339,10 @@ TEST_F(FastSTAInputFactsTestInterface, PrimaryClockSourcesKeepTheirSeedsAcrossUp
   // the target input's own buffer propagation. Both are declared primary clocks.
   for (const auto* source_pin : {"buf/Y", "buf/A"}) {
     SCOPED_TRACE(source_pin);
+    // No set_clock_latency: iCTS reads clock identity, transition, case analysis
+    // and propagation, so a source carries no declared insertion delay here.
     const ScopedTimingInput sdc(std::string("create_clock -name ROOT -period 10 [get_ports clk]\n") + "create_clock -name SECOND -period 20 [get_pins "
-                                + source_pin + "]\n" + "set_clock_latency -source 0.7 [get_clocks SECOND]\n" + "set_clock_transition 0.12 [get_clocks SECOND]\n"
-                                + "set_propagated_clock [get_clocks {ROOT SECOND}]\n");
+                                + source_pin + "]\n" + "set_clock_transition 0.12 [get_clocks SECOND]\n" + "set_propagated_clock [get_clocks {ROOT SECOND}]\n");
     ASSERT_TRUE(sdc.ready());
     const auto constraints = icts::SdcClockReader(sdc.path()).readClockData();
     ASSERT_TRUE(constraints.ok());
@@ -444,7 +370,7 @@ TEST_F(FastSTAInputFactsTestInterface, PrimaryClockSourcesKeepTheirSeedsAcrossUp
         ++source_states;
         EXPECT_EQ(point.launch_pin_name, source_pin);
         const auto event_index = point.transition == icts::FastStaTransition::kRise ? 0U : 1U;
-        EXPECT_DOUBLE_EQ(point.arrival_ns, .7 + primary_clock->waveform_ns.at(event_index));
+        EXPECT_DOUBLE_EQ(point.arrival_ns, primary_clock->waveform_ns.at(event_index));
         EXPECT_DOUBLE_EQ(point.slew_ns, .12);
       }
     }
@@ -484,27 +410,6 @@ TEST_F(FastSTAInputFactsTestInterface, PrimaryClockSourcesKeepTheirSeedsAcrossUp
     compare_points(before, authority.collectTimingPointFacts(*original.context_id));
     ASSERT_TRUE(authority.discardContextTransaction(*pending.context_id));
     compare_points(before, authority.collectTimingPointFacts(*original.context_id));
-  }
-}
-
-TEST(FastSTAParsedInputTest, LoadTargetsMustReceiveTheRequestedCapacitance)
-{
-  auto supported = ParsedClockGraph("set_load 0.25 [get_ports out]\n");
-  const auto error = icts::FastStaConstraints::prepare(supported);
-  ASSERT_FALSE(error.has_value()) << error.value_or("");
-  for (const auto& analysis : supported.nodes.at(2U).input_cap_pf_by_timing) {
-    for (const auto cap : analysis) {
-      EXPECT_DOUBLE_EQ(cap, 0.25);
-    }
-  }
-  for (const auto* selection : {"[get_clocks A]", "[get_pins inst/A]", "[get_ports clkA]", "[get_ports {out clkA}]", "*"}) {
-    auto unsupported = ParsedClockGraph(std::string("set_load 0.25 ") + selection + "\n");
-    const auto unsupported_error = icts::FastStaConstraints::prepare(unsupported);
-    if (!unsupported_error.has_value()) {
-      FAIL() << "Expected unsupported_error to have a value." << selection;
-    }
-    EXPECT_EQ(unsupported_error->find("unsupported_sdc_field:load."), 0U) << *unsupported_error;
-    EXPECT_DOUBLE_EQ(unsupported.nodes.at(2U).input_cap_pf, 0.0);
   }
 }
 

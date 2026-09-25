@@ -276,8 +276,10 @@ TEST(FastSTATest, ContextFailureRollbackAndReset)
   ASSERT_TRUE(authority.commitContextTransaction(*accepted.context_id));
   EXPECT_FALSE(authority.queryAnalysisStatus(*physical.context_id).has_value());
   EXPECT_DOUBLE_EQ(*authority.queryClockNodeArrival(*accepted.context_id, 3U), *pending_arrival);
-  EXPECT_TRUE(authority.queryAnalysisStatus(*accepted.context_id)->timing_valid);
-  EXPECT_TRUE(authority.queryAnalysisStatus(*accepted.context_id)->power_valid);
+  const auto accepted_status = authority.queryAnalysisStatus(*accepted.context_id);
+  ASSERT_TRUE(accepted_status.has_value());
+  EXPECT_TRUE(accepted_status->timing_valid);
+  EXPECT_TRUE(accepted_status->power_valid);
 
   authority.reset();
   authority.bindEnvironment(environment);
@@ -427,14 +429,6 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
                                 .generated_edges = {},
                                 .generated_edge_shifts_ns = {},
                                 .waveform_resolved = true});
-  constraints.input_delays.push_back({.objects = {{.kind = icts::SdcObjectKind::kPort, .pattern = "din"}},
-                                      .clocks = {{.kind = icts::SdcObjectKind::kClock, .pattern = "ROOT"}},
-                                      .reference_pins = {{.kind = icts::SdcObjectKind::kPin, .pattern = "end/CLK"}},
-                                      .value_ns = .1});
-  constraints.output_delays.push_back({.objects = {{.kind = icts::SdcObjectKind::kPort, .pattern = "dout"}},
-                                       .clocks = {{.kind = icts::SdcObjectKind::kClock, .pattern = "VIRTUAL"}},
-                                       .reference_pins = {},
-                                       .value_ns = .1});
   const icts::FastStaEnvironment environment{.wrapper = &wrapper, .dbu_per_um = 1000, .routing_layer = 1, .root_input_slew_ns = .03, .max_cap_pf = 3.0};
   icts::FastSTA authority;
   authority.bindEnvironment(environment);
@@ -456,9 +450,11 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
     FAIL() << unchanged.failure_reason;
   }
   ASSERT_TRUE(authority.synchronizeClockContext(*unchanged.context_id, original_input).ok());
-  EXPECT_DOUBLE_EQ(authority.queryTimingSummary(*unchanged.context_id)->runtime_s, original_summary->runtime_s);
+  const auto unchanged_summary = authority.queryTimingSummary(*unchanged.context_id);
+  ASSERT_TRUE(unchanged_summary.has_value());
+  EXPECT_DOUBLE_EQ(unchanged_summary->runtime_s, original_summary->runtime_s);
   auto changed_constraints = constraints;
-  changed_constraints.output_delays.front().value_ns = .2;
+  changed_constraints.clock_transitions.push_back({.clocks = {{.kind = icts::SdcObjectKind::kClock, .pattern = "ROOT"}}, .value_ns = .2});
   auto changed_input = original_input;
   changed_input.constraints = &changed_constraints;
   const auto stale_constraints = authority.synchronizeClockContext(*unchanged.context_id, changed_input);
@@ -467,7 +463,9 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
   changed_input = original_input;
   changed_input.propagate_all_clocks = true;
   EXPECT_FALSE(authority.synchronizeClockContext(*unchanged.context_id, changed_input).ok());
-  EXPECT_DOUBLE_EQ(authority.queryTimingSummary(*unchanged.context_id)->runtime_s, original_summary->runtime_s);
+  const auto restored_summary = authority.queryTimingSummary(*unchanged.context_id);
+  ASSERT_TRUE(restored_summary.has_value());
+  EXPECT_DOUBLE_EQ(restored_summary->runtime_s, original_summary->runtime_s);
   ASSERT_TRUE(authority.discardContextTransaction(*unchanged.context_id));
   auto timing_only_input = original_input;
   timing_only_input.require_power = false;
@@ -482,8 +480,10 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
   const auto missing_power = authority.synchronizeClockContext(*incomplete_power.context_id, original_input);
   EXPECT_FALSE(missing_power.ok());
   EXPECT_EQ(missing_power.failure_reason, "clock_topology_complete_power_unavailable");
-  EXPECT_TRUE(authority.queryAnalysisStatus(*incomplete_power.context_id)->timing_valid);
-  EXPECT_FALSE(authority.queryAnalysisStatus(*incomplete_power.context_id)->power_valid);
+  const auto incomplete_power_status = authority.queryAnalysisStatus(*incomplete_power.context_id);
+  ASSERT_TRUE(incomplete_power_status.has_value());
+  EXPECT_TRUE(incomplete_power_status->timing_valid);
+  EXPECT_FALSE(incomplete_power_status->power_valid);
   ASSERT_TRUE(authority.discardContextTransaction(*incomplete_power.context_id));
 
   icts::Inst buffer("cts", "GOODBUF", icts::InstType::kBuffer, {1000, 0});
@@ -554,7 +554,9 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
     EXPECT_EQ(actual.capture_node_id, original_relations.at(index).capture_node_id);
   }
   EXPECT_NE(changed_relations.front().arrival_ns, original_relations.front().arrival_ns);
-  EXPECT_TRUE(std::ranges::any_of(
+  // A virtual clock declares no sinks and carried no constraint of its own once
+  // external I/O timing left the input surface, so it owns no relation here.
+  EXPECT_FALSE(std::ranges::any_of(
       changed_relations, [](const auto& relation) -> bool { return relation.launch_clock_name == "ROOT" && relation.capture_clock_name == "VIRTUAL"; }));
   const auto changed_pi = authority.collectPiElmoreFacts(*pending.context_id);
   ASSERT_EQ(cold_pi.size(), changed_pi.size());
@@ -571,7 +573,9 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
   }
   ASSERT_TRUE(authority.discardContextTransaction(*pending.context_id));
   compare_points(original_points, authority.collectTimingPointFacts(*original.context_id));
-  EXPECT_DOUBLE_EQ(authority.queryTimingSummary(*original.context_id)->runtime_s, original_summary->runtime_s);
+  const auto final_summary = authority.queryTimingSummary(*original.context_id);
+  ASSERT_TRUE(final_summary.has_value());
+  EXPECT_DOUBLE_EQ(final_summary->runtime_s, original_summary->runtime_s);
   const auto accepted = authority.beginContextTransaction(*original.context_id);
   if (!accepted.context_id.has_value()) {
     FAIL() << accepted.failure_reason;
@@ -659,7 +663,9 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
   compare_points(sized_points, authority.collectTimingPointFacts(*sized.context_id));
   ASSERT_TRUE(authority.discardContextTransaction(*sized.context_id));
   compare_points(cold_points, authority.collectTimingPointFacts(*accepted.context_id));
-  EXPECT_DOUBLE_EQ(authority.queryTimingSummary(*accepted.context_id)->runtime_s, accepted_summary->runtime_s);
+  const auto accepted_runtime = authority.queryTimingSummary(*accepted.context_id);
+  ASSERT_TRUE(accepted_runtime.has_value());
+  EXPECT_DOUBLE_EQ(accepted_runtime->runtime_s, accepted_summary->runtime_s);
 
   // Resynthesis replaces the old CTS suffix while preserving every input ID.
   buffer.set_name("cts_replaced");
@@ -729,7 +735,9 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
   EXPECT_FALSE(authority.queryAnalysisStatus(*original_virtual.context_id).has_value());
   const auto virtual_relations = authority.collectTimingRelations(*pending_virtual.context_id);
   ASSERT_FALSE(virtual_relations.empty());
-  EXPECT_TRUE(std::ranges::any_of(virtual_relations, [](const auto& relation) -> bool { return relation.capture_clock_name == "VIRTUAL"; }));
+  // Only the physical clock owns relations; the virtual entry contributes its
+  // overlay and no timing check of its own.
+  EXPECT_FALSE(std::ranges::any_of(virtual_relations, [](const auto& relation) -> bool { return relation.capture_clock_name == "VIRTUAL"; }));
 
   auto resident = icts::FastStaBuilder::buildContext(environment, original_input);
   if (!resident.context.has_value()) {

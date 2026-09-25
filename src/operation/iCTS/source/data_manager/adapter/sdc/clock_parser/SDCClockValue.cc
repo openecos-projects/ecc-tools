@@ -39,6 +39,16 @@
 #include "SDCClockParser.hh"
 
 namespace icts::sdc_reader {
+namespace {
+
+// Shunting-yard markers for the Tcl `expr` clamp functions min()/max(). Generated SDC
+// uses them to clamp a transition against a fraction of the period. The markers are
+// never produced by lexing: any other non-operator character fails parseNumber, so a
+// stray `m` in the input still fails the expression.
+constexpr char kMinMarker = 'm';
+constexpr char kMaxMarker = 'M';
+
+}  // namespace
 
 auto Trim(const std::string& text) -> std::string
 {
@@ -272,14 +282,6 @@ auto OptionTransition(const SdcCommandOptions& options) -> SdcTransition
   return rise ? SdcTransition::kRise : SdcTransition::kFall;
 }
 
-auto SelectorTransition(const std::string& option) -> SdcTransition
-{
-  if (option.starts_with("-rise_")) {
-    return SdcTransition::kRise;
-  }
-  return option.starts_with("-fall_") ? SdcTransition::kFall : SdcTransition::kBoth;
-}
-
 auto ObjectPatternMatches(const std::string& pattern, const std::string& name) -> bool
 {
   return pattern == name || fnmatch(pattern.c_str(), name.c_str(), 0) == 0;
@@ -294,6 +296,9 @@ auto ArithmeticParser::parse(double& value) -> bool
   _pos = 0U;
   std::vector<double> values;
   std::vector<char> operators;
+  // Where each open min()/max() started in `values`. Its arguments are whatever
+  // operands accumulate above that mark, so no separate argument stack is needed.
+  std::vector<std::size_t> clamp_marks;
   bool expect_value = true;
 
   while (true) {
@@ -305,10 +310,33 @@ auto ArithmeticParser::parse(double& value) -> bool
       _pos += 6U;
       continue;
     }
+    const bool clamp_min = matchWord("min");
+    if (expect_value && (clamp_min || matchWord("max"))) {
+      auto open_pos = _pos + 3U;
+      while (open_pos < _expression.size() && std::isspace(static_cast<unsigned char>(_expression[open_pos])) != 0) {
+        ++open_pos;
+      }
+      if (open_pos >= _expression.size() || _expression[open_pos] != '(') {
+        return false;
+      }
+      operators.push_back(clamp_min ? kMinMarker : kMaxMarker);
+      clamp_marks.push_back(values.size());
+      operators.push_back('(');
+      _pos = open_pos + 1U;
+      expect_value = true;
+      continue;
+    }
 
     const char token = _expression[_pos];
     if (token == '(') {
       operators.push_back(token);
+      ++_pos;
+      expect_value = true;
+      continue;
+    }
+    if (token == ',') {
+      // Argument separator inside min()/max(). Outside one it leaves more than one
+      // value on the stack, which the single-value check at the end rejects.
       ++_pos;
       expect_value = true;
       continue;
@@ -319,6 +347,24 @@ auto ArithmeticParser::parse(double& value) -> bool
       }
       ++_pos;
       expect_value = false;
+      if (!operators.empty() && (operators.back() == kMinMarker || operators.back() == kMaxMarker)) {
+        const bool is_min = operators.back() == kMinMarker;
+        operators.pop_back();
+        if (clamp_marks.empty()) {
+          return false;
+        }
+        const auto mark = clamp_marks.back();
+        clamp_marks.pop_back();
+        if (mark >= values.size()) {
+          return false;
+        }
+        auto reduced = values.at(mark);
+        for (std::size_t index = mark + 1U; index < values.size(); ++index) {
+          reduced = is_min ? std::min(reduced, values.at(index)) : std::max(reduced, values.at(index));
+        }
+        values.resize(mark);
+        values.push_back(reduced);
+      }
       continue;
     }
     if (isOperator(token)) {

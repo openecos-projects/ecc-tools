@@ -105,104 +105,6 @@ enum class SdcTransition
   kFall,
 };
 
-struct SdcPathSelector
-{
-  std::vector<SdcObjectRef> objects;
-  SdcTransition transition = SdcTransition::kBoth;
-
-  auto operator==(const SdcPathSelector&) const -> bool = default;
-};
-
-struct SdcPathSelection
-{
-  // An absent from/to selector is unrestricted. Each through group is an OR
-  // of its objects; successive groups must match in the declared path order.
-  SdcPathSelector from{};
-  std::vector<SdcPathSelector> through;
-  SdcPathSelector to{};
-
-  auto operator==(const SdcPathSelection&) const -> bool = default;
-};
-
-enum class SdcExceptionKind
-{
-  kFalsePath,
-  kMulticyclePath,
-  kMinDelay,
-  kMaxDelay,
-};
-
-enum class SdcMulticycleReference
-{
-  kStart,
-  kEnd,
-};
-
-struct SdcPathException
-{
-  SdcExceptionKind kind = SdcExceptionKind::kFalsePath;
-  SdcPathSelection path{};
-  bool setup = true;
-  bool hold = true;
-  SdcTransition transition = SdcTransition::kBoth;
-  int cycles = 1;
-  // The parser normalizes the default: setup -> end, hold-only -> start.
-  SdcMulticycleReference reference = SdcMulticycleReference::kEnd;
-  bool reference_explicit = false;
-  double delay_ns = 0.0;
-  bool datapath_only = false;
-  bool ignore_clock_latency = false;
-  bool reset_path = false;
-  bool match_start_end = false;
-
-  auto operator==(const SdcPathException&) const -> bool = default;
-};
-
-enum class SdcClockGroupKind
-{
-  kAsynchronous,
-  kLogicallyExclusive,
-  kPhysicallyExclusive,
-};
-
-struct SdcClockGroup
-{
-  SdcClockGroupKind kind = SdcClockGroupKind::kAsynchronous;
-  std::string name = "";
-  std::vector<std::vector<SdcObjectRef>> groups;
-  bool allow_paths = false;
-
-  auto operator==(const SdcClockGroup&) const -> bool = default;
-};
-
-struct SdcClockLatency
-{
-  std::vector<SdcObjectRef> objects;
-  std::vector<SdcObjectRef> clocks;
-  double value_ns = 0.0;
-  SdcTransition transition = SdcTransition::kBoth;
-  bool min = true;
-  bool max = true;
-  bool source = false;
-  // Source latency has independent min/max and early/late applicability.
-  bool early = true;
-  bool late = true;
-
-  auto operator==(const SdcClockLatency&) const -> bool = default;
-};
-
-struct SdcClockUncertainty
-{
-  std::vector<SdcObjectRef> objects;
-  SdcPathSelector from{};
-  SdcPathSelector to{};
-  double value_ns = 0.0;
-  bool setup = true;
-  bool hold = true;
-
-  auto operator==(const SdcClockUncertainty&) const -> bool = default;
-};
-
 struct SdcClockTransition
 {
   std::vector<SdcObjectRef> clocks;
@@ -212,48 +114,6 @@ struct SdcClockTransition
   bool max = true;
 
   auto operator==(const SdcClockTransition&) const -> bool = default;
-};
-
-struct SdcIODelay
-{
-  std::vector<SdcObjectRef> objects;
-  std::vector<SdcObjectRef> clocks;
-  std::vector<SdcObjectRef> reference_pins;
-  double value_ns = 0.0;
-  SdcTransition transition = SdcTransition::kBoth;
-  bool min = true;
-  bool max = true;
-  bool clock_fall = false;
-  bool add_delay = false;
-  bool source_latency_included = false;
-  bool network_latency_included = false;
-
-  auto operator==(const SdcIODelay&) const -> bool = default;
-};
-
-struct SdcInputTransition
-{
-  std::vector<SdcObjectRef> objects;
-  double value_ns = 0.0;
-  SdcTransition transition = SdcTransition::kBoth;
-  bool min = true;
-  bool max = true;
-
-  auto operator==(const SdcInputTransition&) const -> bool = default;
-};
-
-struct SdcLoad
-{
-  std::vector<SdcObjectRef> objects;
-  double value_pf = 0.0;
-  SdcTransition transition = SdcTransition::kBoth;
-  bool min = true;
-  bool max = true;
-  bool pin_load = false;
-  bool wire_load = false;
-  bool subtract_pin_load = false;
-
-  auto operator==(const SdcLoad&) const -> bool = default;
 };
 
 enum class SdcConstraintStatusCode
@@ -279,18 +139,15 @@ struct SdcClockData
   std::vector<SdcClockDecl> clocks;
   std::vector<SdcCaseAnalysis> case_analyses;
   std::vector<std::string> diagnostics;
-  std::vector<SdcPathException> path_exceptions;
-  std::vector<SdcClockGroup> clock_groups;
-  std::vector<SdcClockLatency> clock_latencies;
-  std::vector<SdcClockUncertainty> clock_uncertainties;
   std::vector<SdcClockTransition> clock_transitions;
-  std::vector<SdcIODelay> input_delays;
-  std::vector<SdcIODelay> output_delays;
-  std::vector<SdcInputTransition> input_transitions;
-  std::vector<SdcLoad> loads;
   std::vector<SdcObjectRef> propagated_clocks;
+  // Issues that make the clock model iCTS consumes unusable. These alone decide `status`.
   SdcConstraintStatusCode status = SdcConstraintStatusCode::kOk;
   std::vector<SdcConstraintIssue> issues;
+  // SDC constructs outside iCTS's remit, as "command:detail" lines. A command iCTS
+  // does not recognize belongs here: its values are never read, so failing to parse it
+  // cannot degrade the clock model. Reported once by the reader; never fatal.
+  std::vector<std::string> ignored;
 
   auto operator==(const SdcClockData&) const -> bool = default;
   [[nodiscard]] auto ok() const -> bool { return status == SdcConstraintStatusCode::kOk; }

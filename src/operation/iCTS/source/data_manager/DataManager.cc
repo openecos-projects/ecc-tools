@@ -66,10 +66,7 @@ auto clockKindName(SdcClockDecl::Kind kind) -> const char*
 
 auto hasTimingConstraints(const SdcClockData& constraints) -> bool
 {
-  return !constraints.clocks.empty() || !constraints.case_analyses.empty() || !constraints.path_exceptions.empty() || !constraints.clock_groups.empty()
-         || !constraints.clock_latencies.empty() || !constraints.clock_uncertainties.empty() || !constraints.clock_transitions.empty()
-         || !constraints.input_delays.empty() || !constraints.output_delays.empty() || !constraints.input_transitions.empty() || !constraints.loads.empty()
-         || !constraints.propagated_clocks.empty();
+  return !constraints.clocks.empty() || !constraints.case_analyses.empty() || !constraints.clock_transitions.empty() || !constraints.propagated_clocks.empty();
 }
 
 auto countTraceStatus(const ClockTraceSummary& summary, std::string_view status) -> std::size_t

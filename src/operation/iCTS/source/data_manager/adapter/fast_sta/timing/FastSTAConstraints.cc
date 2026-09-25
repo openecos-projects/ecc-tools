@@ -41,21 +41,6 @@
 namespace icts {
 namespace {
 
-auto pathExceptionCommand(SdcExceptionKind kind) -> const char*
-{
-  switch (kind) {
-    case SdcExceptionKind::kFalsePath:
-      return "set_false_path";
-    case SdcExceptionKind::kMulticyclePath:
-      return "set_multicycle_path";
-    case SdcExceptionKind::kMinDelay:
-      return "set_min_delay";
-    case SdcExceptionKind::kMaxDelay:
-      return "set_max_delay";
-  }
-  return "path_exception";
-}
-
 auto validateConstraintObjects(const FastStaContext& context) -> std::optional<std::string>
 {
   std::optional<std::string> failure;
@@ -89,43 +74,8 @@ auto validateConstraintObjects(const FastStaContext& context) -> std::optional<s
   for (const auto& clock : context.constraints.clocks) {
     validate(clock.generated_sources, "create_generated_clock", "source");
   }
-  for (const auto& exception : context.constraints.path_exceptions) {
-    const auto* command = pathExceptionCommand(exception.kind);
-    validate(exception.path.from.objects, command, "from");
-    validate(exception.path.to.objects, command, "to");
-    for (const auto& through : exception.path.through) {
-      validate(through.objects, command, "through");
-    }
-  }
-  for (const auto& group : context.constraints.clock_groups) {
-    for (const auto& clocks : group.groups) {
-      validate(clocks, "set_clock_groups", "group");
-    }
-  }
-  for (const auto& latency : context.constraints.clock_latencies) {
-    validate(latency.objects, "set_clock_latency", "objects");
-    validate(latency.clocks, "set_clock_latency", "clock");
-  }
-  for (const auto& uncertainty : context.constraints.clock_uncertainties) {
-    validate(uncertainty.objects, "set_clock_uncertainty", "objects");
-    validate(uncertainty.from.objects, "set_clock_uncertainty", "from");
-    validate(uncertainty.to.objects, "set_clock_uncertainty", "to");
-  }
   for (const auto& transition : context.constraints.clock_transitions) {
     validate(transition.clocks, "set_clock_transition", "objects");
-  }
-  for (const auto input : {true, false}) {
-    const auto* command = input ? "set_input_delay" : "set_output_delay";
-    for (const auto& delay : input ? context.constraints.input_delays : context.constraints.output_delays) {
-      validate(delay.objects, command, "objects");
-      validate(delay.clocks, command, "clock");
-    }
-  }
-  for (const auto& transition : context.constraints.input_transitions) {
-    validate(transition.objects, "set_input_transition", "objects");
-  }
-  for (const auto& load : context.constraints.loads) {
-    validate(load.objects, "set_load", "objects");
   }
   validate(context.constraints.propagated_clocks, "set_propagated_clock", "objects");
   return failure;
@@ -583,14 +533,6 @@ auto FastStaConstraints::matches(const FastStaContext& context, const SdcObjectR
   return node.name == object.pattern || fnmatch(object.pattern.c_str(), node.name.c_str(), 0) == 0;
 }
 
-auto FastStaConstraints::matches(const FastStaContext& context, const SdcPathSelector& selector, FastStaNodeId node_id, FastStaTransition transition,
-                                 const std::string& clock_name) -> bool
-{
-  return transitionMatches(selector.transition, transition)
-         && (selector.objects.empty()
-             || std::ranges::any_of(selector.objects, [&](const auto& object) -> bool { return matches(context, object, node_id, clock_name); }));
-}
-
 auto FastStaConstraints::clock(const FastStaContext& context, const std::string& name) -> const SdcClockDecl*
 {
   const auto found = std::ranges::find(context.constraints.clocks, name, &SdcClockDecl::clock_name);
@@ -619,79 +561,23 @@ auto FastStaConstraints::phase(const FastStaContext& context, const std::string&
   return transition == FastStaTransition::kRise ? 0.0 : 0.5 * context.clock_period_ns;
 }
 
-auto FastStaConstraints::latency(const FastStaContext& context, FastStaNodeId node_id, const std::string& clock_name, FastStaTransition transition, bool early,
-                                 bool source) -> double
-{
-  double result = 0.0;
-  for (const auto& latency : context.constraints.clock_latencies) {
-    if (latency.source != source || !(early ? latency.min && latency.early : latency.max && latency.late)
-        || !transitionMatches(latency.transition, transition)) {
-      continue;
-    }
-    const auto matches_objects
-        = std::ranges::any_of(latency.objects, [&](const auto& object) -> bool { return matches(context, object, node_id, clock_name); });
-    const auto matches_clocks = latency.clocks.empty() || std::ranges::any_of(latency.clocks, [&](const auto& object) -> bool {
-                                  return matches(context, object, node_id, clock_name);
-                                });
-    if (matches_objects && matches_clocks) {
-      result = latency.value_ns;
-    }
-  }
-  return result;
-}
-
 auto FastStaConstraints::prepare(FastStaContext& context) -> std::optional<std::string>
 {
   if (!context.constraints.ok()) {
-    return "invalid_sdc_constraints:" + (context.constraints.diagnostics.empty() ? std::string{"unspecified"} : context.constraints.diagnostics.front());
+    // Name the issue that actually rejected the constraints rather than relying on
+    // `diagnostics` happening to hold fatal messages only.
+    const auto& issues = context.constraints.issues;
+    return "invalid_sdc_constraints:" + (issues.empty() ? std::string{"unspecified"} : issues.front().command + ":" + issues.front().detail);
   }
   for (const auto& clock : context.constraints.clocks) {
     if (clock.waveform_ns.size() > 2U) {
       return "unsupported_sdc_field:clock.waveform_ns:multiple_rise_fall_pairs";
     }
   }
-  for (const auto& exception : context.constraints.path_exceptions) {
-    if (exception.reset_path || exception.match_start_end) {
-      return exception.reset_path ? "unsupported_sdc_field:path_exception.reset_path" : "unsupported_sdc_field:path_exception.match_start_end";
-    }
-  }
-  for (const auto& load : context.constraints.loads) {
-    if (load.wire_load) {
-      return "unsupported_sdc_field:load.wire_load";
-    }
-    if (load.subtract_pin_load) {
-      return "unsupported_sdc_field:load.subtract_pin_load";
-    }
-    if (std::ranges::any_of(load.objects, [](const auto& object) -> bool { return object.kind == SdcObjectKind::kNet; })) {
-      return "unsupported_sdc_field:load.net_object";
-    }
-    for (const auto& object : load.objects) {
-      if (object.kind != SdcObjectKind::kPort && object.kind != SdcObjectKind::kUnknown) {
-        return "unsupported_sdc_field:load.object_kind:" + object.pattern;
-      }
-      for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-        const auto& node = context.nodes.at(node_id);
-        if (matches(context, object, node_id) && (!node.top_level || !node.output)) {
-          return "unsupported_sdc_field:load.target:" + node.name;
-        }
-      }
-    }
-  }
   // Collection syntax is normalized before the timing graph exists. Resolve
   // identity here without requiring an eligible timing path through the object.
   if (auto error = validateConstraintObjects(context); error.has_value()) {
     return error;
-  }
-  for (const auto input : {true, false}) {
-    const auto* command = input ? "set_input_delay" : "set_output_delay";
-    for (const auto& delay : input ? context.constraints.input_delays : context.constraints.output_delays) {
-      if (delay.clocks.empty()) {
-        return "unsupported_sdc_field:" + std::string(command) + ":reference_clock_required";
-      }
-      if (std::ranges::any_of(delay.objects, [](const auto& object) -> bool { return object.kind == SdcObjectKind::kPin; })) {
-        return "unsupported_sdc_field:" + std::string(command) + ":internal_pin_target";
-      }
-    }
   }
   if (auto error = resolveCaseValues(context); error.has_value()) {
     return error;
@@ -715,54 +601,8 @@ auto FastStaConstraints::prepare(FastStaContext& context) -> std::optional<std::
     node.input_cap_pf_by_timing = caps;
     node.input_cap_pf = std::max({caps.at(0).at(0), caps.at(0).at(1), caps.at(1).at(0), caps.at(1).at(1)});
   }
-  for (const auto& load : context.constraints.loads) {
-    for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-      auto& node = context.nodes.at(node_id);
-      if (!node.top_level || !node.output
-          || !std::ranges::any_of(load.objects, [&](const auto& object) -> bool { return matches(context, object, node_id); })) {
-        continue;
-      }
-      context.unconstrained_io_caps.try_emplace(node_id, node.input_cap_pf_by_timing);
-      node.input_cap_profile_available = true;
-      for (const auto early : {true, false}) {
-        for (const auto transition : {FastStaTransition::kRise, FastStaTransition::kFall}) {
-          if ((early ? load.min : load.max) && transitionMatches(load.transition, transition)) {
-            node.input_cap_pf_by_timing.at(early ? 0U : 1U).at(transition == FastStaTransition::kRise ? 0U : 1U) = load.value_pf;
-          }
-        }
-      }
-      node.input_cap_pf = std::max({node.input_cap_pf_by_timing.at(0).at(0), node.input_cap_pf_by_timing.at(0).at(1), node.input_cap_pf_by_timing.at(1).at(0),
-                                    node.input_cap_pf_by_timing.at(1).at(1)});
-    }
-  }
   if (auto error = resolveClockDomains(context); error.has_value()) {
     return error;
-  }
-  for (const auto input : {true, false}) {
-    const auto& delays = input ? context.constraints.input_delays : context.constraints.output_delays;
-    for (const auto& delay : delays) {
-      if (delay.reference_pins.empty()) {
-        continue;
-      }
-      for (const auto& declaration : context.constraints.clocks) {
-        if (!std::ranges::any_of(delay.clocks,
-                                 [&](const auto& object) -> bool { return matches(context, object, kInvalidFastStaNodeId, declaration.clock_name); })) {
-          continue;
-        }
-        std::size_t reference_count = 0U;
-        for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-          const auto& node = context.nodes.at(node_id);
-          reference_count += node.domain == FastStaNodeDomain::kClock && node.clock_name == declaration.clock_name
-                                     && std::ranges::any_of(delay.reference_pins, [&](const auto& object) -> bool { return matches(context, object, node_id); })
-                                 ? 1U
-                                 : 0U;
-        }
-        if (reference_count != 1U) {
-          return std::string("sdc_io_reference_pin_") + (reference_count == 0U ? "unresolved:" : "ambiguous:")
-                 + (input ? "set_input_delay:" : "set_output_delay:") + declaration.clock_name;
-        }
-      }
-    }
   }
   return std::nullopt;
 }

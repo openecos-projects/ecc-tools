@@ -303,38 +303,6 @@ auto extractLogicRelations(const FastStaContext& context, const std::unordered_m
       }
     }
   }
-  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-    const auto& node = context.nodes.at(node_id);
-    if (!node.top_level || !node.output || node.case_value.has_value()) {
-      continue;
-    }
-    for (const auto& clock : context.constraints.clocks) {
-      for (const auto transition : {FastStaTransition::kRise, FastStaTransition::kFall}) {
-        for (const auto early : {true, false}) {
-          for (const auto* delay : IoDelays(context, node_id, clock.clock_name, transition, early, false)) {
-            const auto capture = IoReferenceClock(context, *delay, clock.clock_name, !early);
-            if (!capture.valid) {
-              continue;
-            }
-            const FastStaTimingCheck check{.data_node_id = node_id,
-                                           .clock_node_id = capture.launch_clock_node_id,
-                                           .kind = early ? FastStaTimingCheckKind::kHold : FastStaTimingCheckKind::kSetup,
-                                           .clock_transition = capture.launch_clock_transition};
-            for (const auto& data : TimingSources(result, node_id, TransitionIndex(transition), early)) {
-              if (!data.valid || (data.launch_clock_node_id == kInvalidFastStaNodeId && data.clock_name.empty())) {
-                continue;
-              }
-              if (auto relation = FastStaEvents::relation(context, check, transition, data, capture, early ? -delay->value_ns : delay->value_ns, clock_deltas);
-                  relation.has_value()) {
-                relation->output_delay = true;
-                result.relations.push_back(std::move(*relation));
-              }
-            }
-          }
-        }
-      }
-    }
-  }
   std::ranges::sort(result.relations,
                     [](const auto& lhs, const auto& rhs) -> bool { return std::tie(lhs.relation_id, lhs.slack_ns) < std::tie(rhs.relation_id, rhs.slack_ns); });
   result.relations.erase(std::ranges::unique(result.relations, {}, &FastStaTimingRelationFact::relation_id).begin(), result.relations.end());
@@ -361,7 +329,7 @@ auto AnalyzeLogic(const FastStaContext& context, const std::unordered_map<FastSt
   }
 
   LogicAnalysis result;
-  result.initialize(context, !context.constraints.clocks.empty() || !context.constraints.path_exceptions.empty());
+  result.initialize(context, !context.constraints.clocks.empty());
   if (!SeedLogicTiming(context, clock_deltas, result) || !PropagateLogicTiming(context, traversal, result, &response_cache, &slew_analysis)) {
     return result;
   }
@@ -402,24 +370,6 @@ auto AffectedLogicNodes(const FastStaContext& context, const FastStaDirtyRegion&
       enqueue(launch.output_node_id);
     }
   }
-  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-    const auto& node = context.nodes.at(node_id);
-    if (!node.top_level || !node.input || node.domain != FastStaNodeDomain::kLogic) {
-      continue;
-    }
-    for (const auto& clock : context.constraints.clocks) {
-      for (const auto transition : {FastStaTransition::kRise, FastStaTransition::kFall}) {
-        for (const auto early : {true, false}) {
-          for (const auto* delay : IoDelays(context, node_id, clock.clock_name, transition, early, true)) {
-            const auto reference = IoReferenceClock(context, *delay, clock.clock_name, early);
-            if (reference.valid && reference.launch_clock_node_id < dirty_clock_nodes.size() && dirty_clock_nodes.at(reference.launch_clock_node_id)) {
-              enqueue(node_id);
-            }
-          }
-        }
-      }
-    }
-  }
   while (!ready.empty()) {
     const auto node_id = ready.front();
     ready.pop();
@@ -441,7 +391,7 @@ auto AnalyzeLogicRegion(const FastStaContext& context, const FastStaDirtyRegion&
   }
   const auto& traversal = prepared->traversal;
   const auto affected_nodes = AffectedLogicNodes(context, dirty_region, prepared->outgoing);
-  result.initialize(context, !context.constraints.clocks.empty() || !context.constraints.path_exceptions.empty(), &affected_nodes);
+  result.initialize(context, !context.constraints.clocks.empty(), &affected_nodes);
 
   LogicAnalysis slew_analysis;
   slew_analysis.initialize(context, false, &affected_nodes);

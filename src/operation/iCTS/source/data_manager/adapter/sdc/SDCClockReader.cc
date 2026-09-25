@@ -77,6 +77,11 @@ auto SdcClockReader::readClockData() const -> SdcClockData
   for (const auto& diagnostic : data.diagnostics) {
     CTSLOG.warn(Loc::current(), "SdcClockReader: ", diagnostic);
   }
+  // Constructs iCTS does not read. Reported so nothing is dropped silently, but they
+  // leave the clock model iCTS consumes intact, so they do not reject the run.
+  for (const auto& ignored : data.ignored) {
+    CTSLOG.warn(Loc::current(), "SdcClockReader: ignoring SDC construct outside iCTS scope: ", ignored);
+  }
   return data;
 }
 

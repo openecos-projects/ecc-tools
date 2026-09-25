@@ -65,7 +65,6 @@ struct FastStaTimingPoint
   std::string clock_name = "";
   FastStaTransition launch_data_transition = FastStaTransition::kRise;
   // One ordered-through automaton per exception; max() means its -from did not match.
-  std::vector<std::size_t> exception_progress;
 };
 
 struct FastStaDmpDriverResult

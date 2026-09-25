@@ -39,6 +39,11 @@ auto SdcSubsetEvaluator::reportIssue(SdcConstraintStatusCode code, const std::st
   _data.diagnostics.emplace_back(command + ":" + detail);
 }
 
+auto SdcSubsetEvaluator::reportIgnored(const std::string& command, const std::string& detail) -> void
+{
+  _data.ignored.emplace_back(command + ":" + detail);
+}
+
 auto SdcSubsetEvaluator::parseOptions(const std::string& command, const std::vector<SdcValue>& args, std::initializer_list<std::string_view> value_options,
                                       std::initializer_list<std::string_view> flag_options, std::initializer_list<std::string_view> repeated_options)
     -> std::optional<SdcCommandOptions>
@@ -130,43 +135,6 @@ auto SdcSubsetEvaluator::readScalarObjects(const std::string& command, const Sdc
     return false;
   }
   return readNumber(command, options.positional[0], number) && readRefs(command, options.positional[1], default_kind, objects);
-}
-
-auto SdcSubsetEvaluator::readPathSelection(const std::string& command, const SdcCommandOptions& options, SdcPathSelection& path) -> bool
-{
-  bool from_seen = false;
-  bool to_seen = false;
-  for (const auto& [option, value] : options.ordered_values) {
-    const bool from = option == "-from" || option.ends_with("_from");
-    const bool to = option == "-to" || option.ends_with("_to");
-    const bool through = option == "-through" || option.ends_with("_through");
-    if (!from && !to && !through) {
-      continue;
-    }
-    if ((from && from_seen) || (to && to_seen)) {
-      reportIssue(SdcConstraintStatusCode::kMalformed, command, "conflicting_selector:" + option);
-      return false;
-    }
-    SdcPathSelector selector;
-    selector.transition = SelectorTransition(option);
-    if (!readRefs(command, value, SdcObjectKind::kUnknown, selector.objects)) {
-      return false;
-    }
-    if (through && std::ranges::any_of(selector.objects, [](const auto& object) -> bool { return object.kind == SdcObjectKind::kClock; })) {
-      reportIssue(SdcConstraintStatusCode::kMalformed, command, "clock_not_allowed_in_through_selector");
-      return false;
-    }
-    if (from) {
-      path.from = std::move(selector);
-      from_seen = true;
-    } else if (to) {
-      path.to = std::move(selector);
-      to_seen = true;
-    } else {
-      path.through.emplace_back(std::move(selector));
-    }
-  }
-  return true;
 }
 
 }  // namespace icts::sdc_reader

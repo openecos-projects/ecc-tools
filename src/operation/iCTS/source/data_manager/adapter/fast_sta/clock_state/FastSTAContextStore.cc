@@ -388,7 +388,7 @@ auto FastSTA::ContextStore::applyBufferMasters(FastStaContext& context, const st
   if (!FastStaIncremental::validateBufferMasterChanges(context, changes)) {
     return false;
   }
-  if (!context.timing_valid || ((!context.constraints.clocks.empty() || !context.constraints.path_exceptions.empty()) && !context.logic_tags_valid)) {
+  if (!context.timing_valid || ((!context.constraints.clocks.empty()) && !context.logic_tags_valid)) {
     if (transaction != nullptr) {
       return false;
     }

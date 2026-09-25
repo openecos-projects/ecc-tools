@@ -6,7 +6,6 @@ add_library(
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockEvaluator.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockValue.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCConstraintOptions.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCPathConstraints.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockConstraints.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCGeneratedClocks.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace/ClockTraceResolver.cc

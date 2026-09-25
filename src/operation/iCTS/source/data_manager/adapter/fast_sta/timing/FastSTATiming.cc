@@ -146,14 +146,15 @@ auto FastStaTiming::updateBranch(FastStaContext& context, FastStaNodeId input_no
         return false;
       }
       auto& point = analysis == 0U ? source.early_timing.at(transition) : source.late_timing.at(transition);
-      point = {.arrival_ns = seed.arrival_ns,
-               .slew_ns = seed.slew_ns,
-               .launch_node_id = input_node,
-               .launch_clock_node_id = input_node,
-               .launch_clock_transition = seed.source_transition,
-               .valid = true,
-               .clock_name = context.clock_name,
-               .exception_progress = {}};
+      point = {
+          .arrival_ns = seed.arrival_ns,
+          .slew_ns = seed.slew_ns,
+          .launch_node_id = input_node,
+          .launch_clock_node_id = input_node,
+          .launch_clock_transition = seed.source_transition,
+          .valid = true,
+          .clock_name = context.clock_name,
+      };
     }
   }
   source.timing = source.late_timing.front();
@@ -294,8 +295,7 @@ auto FastStaTiming::updateRegion(FastStaContext& context, const FastStaDirtyRegi
   if (!context.timing_valid) {
     return full_rebuild("incremental_fallback:timing_state_invalid:v1");
   }
-  if ((!context.constraints.clocks.empty() || !context.constraints.path_exceptions.empty()) && !context.logic_tags_valid
-      && HasTimingPropagationState(context)) {
+  if ((!context.constraints.clocks.empty()) && !context.logic_tags_valid && HasTimingPropagationState(context)) {
     return full_rebuild("incremental_fallback:logic_tags_unavailable:v1");
   }
 

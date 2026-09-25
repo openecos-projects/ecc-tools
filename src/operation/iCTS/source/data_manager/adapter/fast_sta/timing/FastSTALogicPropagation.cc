@@ -216,18 +216,14 @@ auto TimingSources(const LogicAnalysis& analysis, FastStaNodeId node, std::size_
 
 namespace {
 
-auto mergeLogicPoint(const FastStaContext& context, LogicAnalysis& analysis, FastStaNodeId node, FastStaTransition transition, FastStaTimingPoint candidate,
-                     bool early, bool advance = true) -> void
+auto mergeLogicPoint(LogicAnalysis& analysis, FastStaNodeId node, FastStaTransition transition, FastStaTimingPoint candidate, bool early) -> void
 {
-  if (advance) {
-    FastStaEvents::advancePath(context, candidate, node, transition);
-  }
   const auto index = TransitionIndex(transition);
   auto& aggregate = analysis.mutableStates(node, early).at(index);
   mergeTimingPoint(aggregate, candidate, early);
   if (analysis.tagged) {
     auto& states = analysis.mutableTagStates(node, early).at(index);
-    const auto found = std::ranges::find_if(states, [&](const auto& state) -> bool { return FastStaEvents::sameTag(context, state, candidate, early); });
+    const auto found = std::ranges::find_if(states, [&](const auto& state) -> bool { return FastStaEvents::sameTag(state, candidate); });
     if (found == states.end()) {
       states.push_back(std::move(candidate));
     } else {
@@ -238,112 +234,8 @@ auto mergeLogicPoint(const FastStaContext& context, LogicAnalysis& analysis, Fas
 
 }  // namespace
 
-auto IoDelays(const FastStaContext& context, FastStaNodeId node_id, const std::string& clock_name, FastStaTransition transition, bool early, bool input)
-    -> std::vector<const SdcIODelay*>
-{
-  std::vector<const SdcIODelay*> selected;
-  const auto& constraints = input ? context.constraints.input_delays : context.constraints.output_delays;
-  for (const auto& constraint : constraints) {
-    if (!(early ? constraint.min : constraint.max) || !FastStaConstraints::transitionMatches(constraint.transition, transition)
-        || !std::ranges::any_of(constraint.objects, [&](const auto& object) -> bool { return FastStaConstraints::matches(context, object, node_id); })
-        || !std::ranges::any_of(constraint.clocks,
-                                [&](const auto& object) -> bool { return FastStaConstraints::matches(context, object, kInvalidFastStaNodeId, clock_name); })) {
-      continue;
-    }
-    if (!constraint.add_delay) {
-      selected.clear();
-    }
-    selected.push_back(&constraint);
-  }
-  return selected;
-}
-
-auto IoReferenceClock(const FastStaContext& context, const SdcIODelay& constraint, const std::string& clock_name, bool early) -> FastStaTimingPoint
-{
-  const auto transition = constraint.clock_fall ? FastStaTransition::kFall : FastStaTransition::kRise;
-  FastStaNodeId reference = kInvalidFastStaNodeId;
-  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-    const auto& node = context.nodes.at(node_id);
-    if (node.clock_name != clock_name) {
-      continue;
-    }
-    if ((!constraint.reference_pins.empty()
-         && std::ranges::any_of(constraint.reference_pins, [&](const auto& object) -> bool { return FastStaConstraints::matches(context, object, node_id); }))
-        || (constraint.reference_pins.empty() && node.kind == FastStaNodeKind::kSource)) {
-      reference = node_id;
-      break;
-    }
-  }
-  auto point = FastStaTimingPoint{.launch_node_id = reference,
-                                  .launch_clock_node_id = reference,
-                                  .launch_clock_transition = transition,
-                                  .valid = true,
-                                  .clock_name = clock_name,
-                                  .exception_progress = {}};
-  if (reference < context.nodes.size()) {
-    const auto& node = context.nodes.at(reference);
-    point = early ? node.early_timing.at(TransitionIndex(transition)) : node.late_timing.at(TransitionIndex(transition));
-    point.launch_node_id = reference;
-    point.launch_clock_node_id = reference;
-  } else {
-    point.arrival_ns = FastStaConstraints::latency(context, reference, clock_name, transition, early, true)
-                       + FastStaConstraints::latency(context, reference, clock_name, transition, early, false);
-  }
-  point.launch_clock_arrival_ns = point.arrival_ns;
-  const auto source_latency = FastStaConstraints::latency(context, reference, clock_name, transition, early, true);
-  const auto network_latency = point.arrival_ns - source_latency;
-  if (constraint.source_latency_included) {
-    point.arrival_ns -= source_latency;
-  }
-  if (constraint.network_latency_included) {
-    point.arrival_ns -= network_latency;
-  }
-  return point;
-}
-
-namespace {
-
-auto seedInputDelays(const FastStaContext& context, const std::unordered_map<FastStaNodeId, double>& clock_deltas, LogicAnalysis& result) -> void
-{
-  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-    const auto& node = context.nodes.at(node_id);
-    if (!result.includes(node_id) || !node.top_level || !node.input || node.domain == FastStaNodeDomain::kClock) {
-      continue;
-    }
-    for (const auto& clock : context.constraints.clocks) {
-      for (const auto transition : {FastStaTransition::kRise, FastStaTransition::kFall}) {
-        for (const auto early : {true, false}) {
-          for (const auto* delay : IoDelays(context, node_id, clock.clock_name, transition, early, true)) {
-            auto point = IoReferenceClock(context, *delay, clock.clock_name, early);
-            if (!point.valid) {
-              continue;
-            }
-            const auto reference_id = point.launch_clock_node_id;
-            point.arrival_ns += delay->value_ns + ProposedDelta(clock_deltas, reference_id)
-                                + FastStaConstraints::phase(context, clock.clock_name, point.launch_clock_transition);
-            point.launch_clock_arrival_ns += ProposedDelta(clock_deltas, reference_id);
-            point.launch_node_id = node_id;
-            point.slew_ns = early ? node.slew_seed_early_ns : node.slew_seed_late_ns;
-            for (const auto& slew : context.constraints.input_transitions) {
-              if ((early ? slew.min : slew.max) && FastStaConstraints::transitionMatches(slew.transition, transition)
-                  && std::ranges::any_of(slew.objects, [&](const auto& object) -> bool { return FastStaConstraints::matches(context, object, node_id); })) {
-                point.slew_ns = slew.value_ns;
-              }
-            }
-            FastStaEvents::startPath(context, point, transition);
-            mergeLogicPoint(context, result, node_id, transition, std::move(point), early, false);
-          }
-        }
-      }
-    }
-  }
-}
-
-}  // namespace
-
 auto SeedLogicTiming(const FastStaContext& context, const std::unordered_map<FastStaNodeId, double>& clock_deltas, LogicAnalysis& result) -> bool
 {
-  seedInputDelays(context, clock_deltas, result);
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
     const auto& node = context.nodes.at(node_id);
     if (!result.includes(node_id) || !node.top_level || !node.input || node.domain == FastStaNodeDomain::kClock) {
@@ -355,15 +247,9 @@ auto SeedLogicTiming(const FastStaContext& context, const std::unordered_map<Fas
         if (existing.valid) {
           continue;
         }
-        auto point = FastStaTimingPoint{.launch_node_id = node_id, .valid = true, .exception_progress = {}};
-        for (const auto& slew : context.constraints.input_transitions) {
-          if ((early ? slew.min : slew.max) && FastStaConstraints::transitionMatches(slew.transition, transition)
-              && std::ranges::any_of(slew.objects, [&](const auto& object) -> bool { return FastStaConstraints::matches(context, object, node_id); })) {
-            point.slew_ns = slew.value_ns;
-          }
-        }
+        auto point = FastStaTimingPoint{.launch_node_id = node_id, .valid = true};
         FastStaEvents::startPath(context, point, transition);
-        mergeLogicPoint(context, result, node_id, transition, std::move(point), early, false);
+        mergeLogicPoint(result, node_id, transition, std::move(point), early);
       }
     }
   }
@@ -385,10 +271,8 @@ auto SeedLogicTiming(const FastStaContext& context, const std::unordered_map<Fas
                                           : origin.late_timing.at(TransitionIndex(point.launch_clock_transition));
         point.launch_clock_arrival_ns = origin_timing.arrival_ns + ProposedDelta(clock_deltas, point.launch_clock_node_id);
         point.arrival_ns += FastStaConstraints::phase(context, point.clock_name, point.launch_clock_transition) + ProposedDelta(clock_deltas, node_id);
-        if (point.exception_progress.empty()) {
-          FastStaEvents::startPath(context, point, transition);
-        }
-        mergeLogicPoint(context, result, node_id, transition, std::move(point), early, false);
+        FastStaEvents::startPath(context, point, transition);
+        mergeLogicPoint(result, node_id, transition, std::move(point), early);
       }
     }
   }
@@ -438,32 +322,32 @@ auto SeedLogicTiming(const FastStaContext& context, const std::unordered_map<Fas
             continue;
           }
           transition_valid = true;
-          auto timing = FastStaTimingPoint{.arrival_ns = clock_timing.arrival_ns + ProposedDelta(clock_deltas, launch.clock_node_id)
-                                                         + FastStaConstraints::phase(context, clock_timing.clock_name, clock_timing.launch_clock_transition)
-                                                         + driver.gate_delay_ns,
-                                           .slew_ns = driver.driver_slew_ns,
-                                           .launch_node_id = launch.output_node_id,
-                                           .launch_clock_node_id = launch.clock_node_id,
-                                           .launch_clock_transition = clock_timing.launch_clock_transition,
-                                           .launch_clock_arrival_ns = clock_timing.arrival_ns + ProposedDelta(clock_deltas, launch.clock_node_id),
-                                           .driver_model_index = launch_index,
-                                           .driver_arc_variant_index = arc_index,
-                                           .driver_input_slew_ns = clock_timing.slew_ns,
-                                           .slew_driver_model_index = launch_index,
-                                           .slew_driver_arc_variant_index = arc_index,
-                                           .slew_driver_input_slew_ns = clock_timing.slew_ns,
-                                           .stage_input_node_id = launch.clock_node_id,
-                                           .stage_input_transition = launch.clock_transition,
-                                           .stage_input_arrival_ns = clock_timing.arrival_ns,
-                                           .stage_input_slew_ns = clock_timing.slew_ns,
-                                           .stage_delay_ns = driver.gate_delay_ns,
-                                           .driver_is_launch = true,
-                                           .slew_driver_is_launch = true,
-                                           .valid = true,
-                                           .clock_name = clock_timing.clock_name,
-                                           .exception_progress = {}};
+          auto timing = FastStaTimingPoint{
+              .arrival_ns = clock_timing.arrival_ns + ProposedDelta(clock_deltas, launch.clock_node_id)
+                            + FastStaConstraints::phase(context, clock_timing.clock_name, clock_timing.launch_clock_transition) + driver.gate_delay_ns,
+              .slew_ns = driver.driver_slew_ns,
+              .launch_node_id = launch.output_node_id,
+              .launch_clock_node_id = launch.clock_node_id,
+              .launch_clock_transition = clock_timing.launch_clock_transition,
+              .launch_clock_arrival_ns = clock_timing.arrival_ns + ProposedDelta(clock_deltas, launch.clock_node_id),
+              .driver_model_index = launch_index,
+              .driver_arc_variant_index = arc_index,
+              .driver_input_slew_ns = clock_timing.slew_ns,
+              .slew_driver_model_index = launch_index,
+              .slew_driver_arc_variant_index = arc_index,
+              .slew_driver_input_slew_ns = clock_timing.slew_ns,
+              .stage_input_node_id = launch.clock_node_id,
+              .stage_input_transition = launch.clock_transition,
+              .stage_input_arrival_ns = clock_timing.arrival_ns,
+              .stage_input_slew_ns = clock_timing.slew_ns,
+              .stage_delay_ns = driver.gate_delay_ns,
+              .driver_is_launch = true,
+              .slew_driver_is_launch = true,
+              .valid = true,
+              .clock_name = clock_timing.clock_name,
+          };
           FastStaEvents::startPath(context, timing, transition);
-          mergeLogicPoint(context, result, launch.output_node_id, transition, std::move(timing), early, false);
+          mergeLogicPoint(result, launch.output_node_id, transition, std::move(timing), early);
         }
       }
       if (!transition_valid) {
@@ -486,22 +370,22 @@ auto SeedLogicRootSlew(const FastStaContext& context, const std::vector<std::siz
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
     const auto& node = context.nodes.at(node_id);
     if (!result.includes(node_id) || node.domain != FastStaNodeDomain::kLogic || indegree.at(node_id) != 0U || launch_outputs.at(node_id)
-        || node.case_value.has_value() || std::ranges::any_of(context.constraints.input_delays, [&](const auto& delay) -> bool {
-             return std::ranges::any_of(delay.objects, [&](const auto& object) -> bool { return FastStaConstraints::matches(context, object, node_id); });
-           })) {
+        || node.case_value.has_value()) {
       continue;
     }
     for (std::size_t transition_index = 0U; transition_index < 2U; ++transition_index) {
-      result.mutableStates(node_id, true).at(transition_index) = FastStaTimingPoint{.arrival_ns = node.arrival_seed_early_ns,
-                                                                                    .slew_ns = std::max(0.0, node.slew_seed_early_ns),
-                                                                                    .launch_node_id = node_id,
-                                                                                    .valid = true,
-                                                                                    .exception_progress = {}};
-      result.mutableStates(node_id, false).at(transition_index) = FastStaTimingPoint{.arrival_ns = node.arrival_seed_late_ns,
-                                                                                     .slew_ns = std::max(0.0, node.slew_seed_late_ns),
-                                                                                     .launch_node_id = node_id,
-                                                                                     .valid = true,
-                                                                                     .exception_progress = {}};
+      result.mutableStates(node_id, true).at(transition_index) = FastStaTimingPoint{
+          .arrival_ns = node.arrival_seed_early_ns,
+          .slew_ns = std::max(0.0, node.slew_seed_early_ns),
+          .launch_node_id = node_id,
+          .valid = true,
+      };
+      result.mutableStates(node_id, false).at(transition_index) = FastStaTimingPoint{
+          .arrival_ns = node.arrival_seed_late_ns,
+          .slew_ns = std::max(0.0, node.slew_seed_late_ns),
+          .launch_node_id = node_id,
+          .valid = true,
+      };
     }
   }
 }
@@ -592,7 +476,7 @@ auto PropagateLogicTiming(const FastStaContext& context, const LogicTraversal& t
               candidate.stage_input_arrival_ns = source.arrival_ns;
               candidate.stage_input_slew_ns = source.slew_ns;
               candidate.stage_delay_ns = load_timing.wire_delay_ns;
-              mergeLogicPoint(context, result, edge.to_node_id, transition, std::move(candidate), early);
+              mergeLogicPoint(result, edge.to_node_id, transition, std::move(candidate), early);
             }
           }
         }
@@ -689,7 +573,7 @@ auto PropagateLogicTiming(const FastStaContext& context, const LogicTraversal& t
                     }
                   }
                 }
-                mergeLogicPoint(context, result, edge.to_node_id, output_transition, std::move(candidate), early);
+                mergeLogicPoint(result, edge.to_node_id, output_transition, std::move(candidate), early);
               }
             }
           }

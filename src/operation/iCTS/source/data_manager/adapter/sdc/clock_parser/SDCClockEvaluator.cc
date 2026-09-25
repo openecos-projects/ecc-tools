@@ -60,7 +60,12 @@ struct EvaluationFrame
   SdcValue value{};
   std::size_t index = 0U;
   std::size_t literal_start = 0U;
+  // Watermarks taken once this command's own lexing is done. An unrecognized command
+  // collapses everything reported after them, including by its arguments, into the
+  // single non-fatal note that replaces it.
   std::size_t issue_count = 0U;
+  std::size_t diagnostic_count = 0U;
+  std::size_t ignored_count = 0U;
 };
 
 }  // namespace
@@ -110,8 +115,12 @@ auto SdcSubsetEvaluator::evaluateCommand(const std::string& command) -> SdcValue
     auto& frame = stack.back();
     switch (frame.stage) {
       case EvaluationStage::kCommandStart:
-        frame.issue_count = _data.issues.size();
         frame.words = parseWords(frame.text);
+        // Watermark after this command's own lexing, so a malformed file stays visible
+        // even when the command it sits in is one iCTS does not read.
+        frame.issue_count = _data.issues.size();
+        frame.diagnostic_count = _data.diagnostics.size();
+        frame.ignored_count = _data.ignored.size();
         if (frame.words.empty()) {
           result = {};
           stack.pop_back();
@@ -152,7 +161,8 @@ auto SdcSubsetEvaluator::evaluateCommand(const std::string& command) -> SdcValue
         } else if (frame.command_name == "expr") {
           result = evaluateExpr(frame.args);
         } else {
-          result = _data.issues.size() == frame.issue_count ? evaluateCommandArgs(frame.command_name, frame.args) : SdcValue{};
+          result = evaluateCommandArgs(frame.command_name, frame.args,
+                                       SdcReportWatermark{.issues = frame.issue_count, .diagnostics = frame.diagnostic_count, .ignored = frame.ignored_count});
         }
         stack.pop_back();
         break;
@@ -249,7 +259,8 @@ auto SdcSubsetEvaluator::evaluateCommand(const std::string& command) -> SdcValue
   return result;
 }
 
-auto SdcSubsetEvaluator::evaluateCommandArgs(const std::string& command_name, const std::vector<SdcValue>& args) -> SdcValue
+auto SdcSubsetEvaluator::evaluateCommandArgs(const std::string& command_name, const std::vector<SdcValue>& args, const SdcReportWatermark& watermark)
+    -> SdcValue
 {
   if (command_name == "list" || command_name == "concat") {
     SdcValue value;
@@ -297,26 +308,8 @@ auto SdcSubsetEvaluator::evaluateCommandArgs(const std::string& command_name, co
     evaluateSetCaseAnalysis(args);
     return {};
   }
-  if (command_name == "set_false_path") {
-    evaluatePathException(command_name, args, SdcExceptionKind::kFalsePath);
-  } else if (command_name == "set_multicycle_path") {
-    evaluatePathException(command_name, args, SdcExceptionKind::kMulticyclePath);
-  } else if (command_name == "set_min_delay" || command_name == "set_max_delay") {
-    evaluatePathException(command_name, args, command_name == "set_min_delay" ? SdcExceptionKind::kMinDelay : SdcExceptionKind::kMaxDelay);
-  } else if (command_name == "set_clock_groups") {
-    evaluateClockGroups(args);
-  } else if (command_name == "set_clock_latency") {
-    evaluateClockLatency(args);
-  } else if (command_name == "set_clock_uncertainty") {
-    evaluateClockUncertainty(args);
-  } else if (command_name == "set_clock_transition") {
+  if (command_name == "set_clock_transition") {
     evaluateClockTransition(args);
-  } else if (command_name == "set_input_delay" || command_name == "set_output_delay") {
-    evaluateIODelay(command_name, args, command_name == "set_input_delay");
-  } else if (command_name == "set_input_transition") {
-    evaluateInputTransition(args);
-  } else if (command_name == "set_load") {
-    evaluateLoad(args);
   } else if (command_name == "set_propagated_clock") {
     if (args.size() != 1U) {
       reportIssue(SdcConstraintStatusCode::kMalformed, command_name, "clock_list_required");
@@ -327,7 +320,14 @@ auto SdcSubsetEvaluator::evaluateCommandArgs(const std::string& command_name, co
       }
     }
   } else if (!command_name.empty()) {
-    reportIssue(SdcConstraintStatusCode::kUnsupported, command_name, "unsupported_sdc_command");
+    // iCTS reads none of this command's values, so neither it nor any argument it
+    // carries can degrade the clock model. Rewind the whole subtree and replace it
+    // with one reported note, so the boundary is declared by this dispatch chain
+    // alone and every recognized command stays fatal on failure.
+    _data.issues.resize(watermark.issues);
+    _data.diagnostics.resize(watermark.diagnostics);
+    _data.ignored.resize(watermark.ignored);
+    reportIgnored(command_name, "unsupported_sdc_command");
   }
   return {};
 }

@@ -42,15 +42,11 @@ class FastStaConstraints
   static auto caseLookup(const FastStaContext& context, const std::string& inst_name) -> FastStaCondition::PinValueLookup;
   static auto gateActive(const FastStaContext& context, const std::string& inst_name, const FastStaClockGateModel& gate) -> FastStaLogicValue;
   static auto matches(const FastStaContext& context, const SdcObjectRef& object, FastStaNodeId node_id, const std::string& clock_name = {}) -> bool;
-  static auto matches(const FastStaContext& context, const SdcPathSelector& selector, FastStaNodeId node_id, FastStaTransition transition,
-                      const std::string& clock_name = {}) -> bool;
   static auto transitionMatches(SdcTransition selection, FastStaTransition transition) -> bool;
   static auto clock(const FastStaContext& context, const std::string& name) -> const SdcClockDecl*;
   static auto period(const FastStaContext& context, const std::string& name) -> double;
   static auto phase(const FastStaContext& context, const std::string& name, FastStaTransition transition) -> double;
   static auto isPropagated(const FastStaContext& context, const std::string& name) -> bool;
-  static auto latency(const FastStaContext& context, FastStaNodeId node_id, const std::string& clock_name, FastStaTransition transition, bool early,
-                      bool source) -> double;
 };
 
 }  // namespace icts

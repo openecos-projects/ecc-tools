@@ -391,9 +391,7 @@ auto applyClockView(const FastStaContext& context, FastStaNodeId node_id, FastSt
       if (!point.valid) {
         continue;
       }
-      const auto source_id = point.launch_clock_node_id;
-      point.arrival_ns = FastStaConstraints::latency(context, source_id, point.clock_name, point.launch_clock_transition, early, true)
-                         + FastStaConstraints::latency(context, node_id, point.clock_name, point.launch_clock_transition, early, false);
+      point.arrival_ns = 0.0;
       point.slew_ns = context.root_input_slew_ns;
       for (const auto& constraint : context.constraints.clock_transitions) {
         if ((early ? constraint.min : constraint.max) && FastStaConstraints::transitionMatches(constraint.transition, point.launch_clock_transition)
@@ -520,7 +518,7 @@ auto SeedClockSources(FastStaContext& context) -> void
 {
   for (const auto source_id : context.clock_source_node_ids) {
     auto& source = context.nodes.at(source_id);
-    source.timing = FastStaTimingPoint{.arrival_ns = 0.0, .slew_ns = std::max(0.0, context.root_input_slew_ns), .valid = true, .exception_progress = {}};
+    source.timing = FastStaTimingPoint{.arrival_ns = 0.0, .slew_ns = std::max(0.0, context.root_input_slew_ns), .valid = true};
     for (const auto transition : {FastStaTransition::kRise, FastStaTransition::kFall}) {
       for (const auto early : {true, false}) {
         auto& point = early ? source.early_timing.at(TransitionIndex(transition)) : source.late_timing.at(TransitionIndex(transition));
@@ -529,18 +527,11 @@ auto SeedClockSources(FastStaContext& context) -> void
         point.launch_node_id = source_id;
         point.launch_clock_node_id = source_id;
         point.launch_clock_transition = transition;
-        point.arrival_ns = FastStaConstraints::latency(context, source_id, source.clock_name, transition, early, true)
-                           + FastStaConstraints::latency(context, source_id, source.clock_name, transition, early, false);
+        point.arrival_ns = 0.0;
         for (const auto& slew : context.constraints.clock_transitions) {
           if ((early ? slew.min : slew.max) && FastStaConstraints::transitionMatches(slew.transition, transition)
               && std::ranges::any_of(slew.clocks,
                                      [&](const auto& clock) -> bool { return FastStaConstraints::matches(context, clock, source_id, source.clock_name); })) {
-            point.slew_ns = slew.value_ns;
-          }
-        }
-        for (const auto& slew : context.constraints.input_transitions) {
-          if ((early ? slew.min : slew.max) && FastStaConstraints::transitionMatches(slew.transition, transition)
-              && std::ranges::any_of(slew.objects, [&](const auto& object) -> bool { return FastStaConstraints::matches(context, object, source_id); })) {
             point.slew_ns = slew.value_ns;
           }
         }

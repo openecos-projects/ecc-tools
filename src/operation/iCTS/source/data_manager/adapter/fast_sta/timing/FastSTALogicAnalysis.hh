@@ -143,9 +143,6 @@ auto LogicNetLoad(const FastStaContext& context, const FastStaNet& net) -> doubl
 auto ProposedDelta(const std::unordered_map<FastStaNodeId, double>& deltas, FastStaNodeId node_id) -> double;
 auto TimingSources(const LogicAnalysis& analysis, FastStaNodeId node, std::size_t transition, bool early) -> std::span<const FastStaTimingPoint>;
 auto MakeLogicPreparation(const FastStaContext& context) -> std::shared_ptr<const FastStaLogicPreparation>;
-auto IoDelays(const FastStaContext& context, FastStaNodeId node_id, const std::string& clock_name, FastStaTransition transition, bool early, bool input)
-    -> std::vector<const SdcIODelay*>;
-auto IoReferenceClock(const FastStaContext& context, const SdcIODelay& constraint, const std::string& clock_name, bool early) -> FastStaTimingPoint;
 auto SeedLogicTiming(const FastStaContext& context, const std::unordered_map<FastStaNodeId, double>& clock_deltas, LogicAnalysis& result) -> bool;
 auto SeedLogicRootSlew(const FastStaContext& context, const std::vector<std::size_t>& indegree, LogicAnalysis& result) -> void;
 auto PropagateLogicTiming(const FastStaContext& context, const LogicTraversal& traversal, LogicAnalysis& result, LogicResponseCache* response_cache = nullptr,

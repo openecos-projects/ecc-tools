@@ -33,8 +33,7 @@ class FastStaEvents
 {
  public:
   static auto startPath(const FastStaContext& context, FastStaTimingPoint& point, FastStaTransition transition) -> void;
-  static auto advancePath(const FastStaContext& context, FastStaTimingPoint& point, FastStaNodeId node_id, FastStaTransition transition) -> void;
-  static auto sameTag(const FastStaContext& context, const FastStaTimingPoint& lhs, const FastStaTimingPoint& rhs, bool early) -> bool;
+  static auto sameTag(const FastStaTimingPoint& lhs, const FastStaTimingPoint& rhs) -> bool;
   static auto relation(const FastStaContext& context, const FastStaTimingCheck& check, FastStaTransition transition, const FastStaTimingPoint& data,
                        const FastStaTimingPoint& capture, double requirement_ns, const std::unordered_map<FastStaNodeId, double>& clock_deltas)
       -> std::optional<FastStaTimingRelationFact>;

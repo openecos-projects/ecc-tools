@@ -214,7 +214,6 @@ auto ExpectTimingPointEqual(const icts::FastStaTimingPoint& actual, const icts::
   EXPECT_EQ(actual.slew_driver_is_launch, expected.slew_driver_is_launch);
   EXPECT_EQ(actual.stage_input_node_id, expected.stage_input_node_id);
   EXPECT_EQ(actual.stage_input_transition, expected.stage_input_transition);
-  EXPECT_EQ(actual.exception_progress, expected.exception_progress);
   EXPECT_DOUBLE_EQ(actual.arrival_ns, expected.arrival_ns);
   EXPECT_DOUBLE_EQ(actual.slew_ns, expected.slew_ns);
   EXPECT_DOUBLE_EQ(actual.launch_clock_arrival_ns, expected.launch_clock_arrival_ns);

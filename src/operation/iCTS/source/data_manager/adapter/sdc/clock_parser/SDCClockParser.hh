@@ -58,6 +58,16 @@ struct SdcCommandOptions
   std::vector<SdcValue> positional;
 };
 
+// What the reader had reported before a command and its arguments were evaluated.
+// An unrecognized command rewinds to this watermark so that everything its subtree
+// reported collapses into one non-fatal note.
+struct SdcReportWatermark
+{
+  std::size_t issues = 0U;
+  std::size_t diagnostics = 0U;
+  std::size_t ignored = 0U;
+};
+
 class ArithmeticParser
 {
  public:
@@ -95,7 +105,7 @@ class SdcSubsetEvaluator
 
   auto substituteVariablesToString(const std::string& text) -> std::string;
   auto evaluateCommand(const std::string& command) -> SdcValue;
-  auto evaluateCommandArgs(const std::string& command, const std::vector<SdcValue>& args) -> SdcValue;
+  auto evaluateCommandArgs(const std::string& command, const std::vector<SdcValue>& args, const SdcReportWatermark& watermark) -> SdcValue;
 
   auto evaluateSet(const std::vector<ParsedWord>& words, const std::vector<SdcValue>& args) -> SdcValue;
   auto evaluateExpr(const std::vector<SdcValue>& args) -> SdcValue;
@@ -106,16 +116,12 @@ class SdcSubsetEvaluator
   auto evaluateCreateClock(const std::vector<SdcValue>& args) -> SdcValue;
   auto evaluateCreateGeneratedClock(const std::vector<SdcValue>& args) -> SdcValue;
   auto evaluateSetCaseAnalysis(const std::vector<SdcValue>& args) -> void;
-  auto evaluatePathException(const std::string& command, const std::vector<SdcValue>& args, SdcExceptionKind kind) -> void;
-  auto evaluateClockGroups(const std::vector<SdcValue>& args) -> void;
-  auto evaluateClockLatency(const std::vector<SdcValue>& args) -> void;
-  auto evaluateClockUncertainty(const std::vector<SdcValue>& args) -> void;
   auto evaluateClockTransition(const std::vector<SdcValue>& args) -> void;
-  auto evaluateIODelay(const std::string& command, const std::vector<SdcValue>& args, bool input) -> void;
-  auto evaluateInputTransition(const std::vector<SdcValue>& args) -> void;
-  auto evaluateLoad(const std::vector<SdcValue>& args) -> void;
 
   auto reportIssue(SdcConstraintStatusCode code, const std::string& command, const std::string& detail) -> void;
+  // Record an SDC construct iCTS does not read. These never make `SdcClockData::ok()`
+  // false: the clock model iCTS consumes is unaffected by a command it never looks at.
+  auto reportIgnored(const std::string& command, const std::string& detail) -> void;
   auto parseOptions(const std::string& command, const std::vector<SdcValue>& args, std::initializer_list<std::string_view> value_options,
                     std::initializer_list<std::string_view> flag_options, std::initializer_list<std::string_view> repeated_options = {})
       -> std::optional<SdcCommandOptions>;
@@ -124,7 +130,6 @@ class SdcSubsetEvaluator
   auto scaleNumber(const std::string& command, double& number, double scale) -> bool;
   auto readScalarObjects(const std::string& command, const SdcCommandOptions& options, SdcObjectKind default_kind, double& number,
                          std::vector<SdcObjectRef>& objects) -> bool;
-  auto readPathSelection(const std::string& command, const SdcCommandOptions& options, SdcPathSelection& path) -> bool;
   auto resolveGeneratedClocks() -> void;
   auto storeClock(SdcClockDecl clock) -> void;
 
@@ -148,7 +153,6 @@ auto ParseIntValue(const std::string& text, int& value) -> bool;
 auto TimeUnitToNs(const std::string& unit) -> double;
 auto CapacitanceUnitToPf(const std::string& unit) -> double;
 auto OptionTransition(const SdcCommandOptions& options) -> SdcTransition;
-auto SelectorTransition(const std::string& option) -> SdcTransition;
 auto SelectBothUnlessOne(const SdcCommandOptions& options, const std::string& first, const std::string& second, bool& selected_first, bool& selected_second)
     -> void;
 auto ObjectPatternMatches(const std::string& pattern, const std::string& name) -> bool;
