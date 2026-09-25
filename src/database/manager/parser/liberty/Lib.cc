@@ -920,6 +920,11 @@ void LibPort::inheritBusAttributes(const LibPort& bus)
   _func_expr = bus._func_expr;
   _func_expr_str = bus._func_expr_str;
   _port_cap = bus._port_cap;
+  // A bus that declares a single `capacitance` records the value here and raises this
+  // flag. Bits inherit the value, so they must inherit the flag as well; without it a
+  // bit reports no capacitance at all, and every reader that falls back from the split
+  // caps to the scalar one skips the value it just received.
+  _has_port_cap = bus._has_port_cap;
   _port_caps = bus._port_caps;
   _cap_limits = bus._cap_limits;
   _slew_limits = bus._slew_limits;
