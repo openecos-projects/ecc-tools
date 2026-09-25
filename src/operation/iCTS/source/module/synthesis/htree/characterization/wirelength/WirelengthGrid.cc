@@ -386,7 +386,12 @@ auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const st
   // covered, and the iteration count below follows the clamped unit, so the grid stays
   // complete. A unit the plan did not choose itself becomes its opinion once clamped,
   // which is what `adapted` publishes to the caller.
-  if (effective_unit_um > 0.0 && max_unit_um.has_value() && effective_unit_um > *max_unit_um + kValueLatticeEpsilon) {
+  //
+  // A ceiling of zero means no segment is drivable at all, since the buffer's own input
+  // capacitance already fills the lattice. There is no usable unit to clamp to, so the
+  // grid is left alone and the sweep fails on its own terms rather than claiming a
+  // zero-length unit that the caller would install as its grid.
+  if (effective_unit_um > 0.0 && max_unit_um.has_value() && *max_unit_um > 0.0 && effective_unit_um > *max_unit_um + kValueLatticeEpsilon) {
     const double requested_unit_um = plan.adapted ? plan.auto_derived_wirelength_unit_um : configured_unit_um;
     effective_unit_um = *max_unit_um;
     plan.unit_clamped_to_electrical_ceiling = true;

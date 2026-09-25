@@ -68,6 +68,25 @@ auto buildInputStatus(const DataManagerStatus& input_status) -> CTSStatus
   return CTSStatus{.code = CTSStatusCode::kConfigError, .message = input_status.message, .diagnostics = input_status.diagnostics};
 }
 
+// Name the condition that stopped synthesis, so a caller that only sees the returned
+// status still learns why no clock tree was produced.
+auto describeSynthesisFailure(const SynthesisTraceSummary& synthesis) -> std::string
+{
+  std::string reason = synthesis.failure_reason.empty() ? synthesis.no_op_reason : synthesis.failure_reason;
+  if (reason.empty()) {
+    reason = "unspecified";
+  }
+  reason += " (clocks " + std::to_string(synthesis.successful_clocks) + "/" + std::to_string(synthesis.total_clocks) + " built";
+  if (synthesis.skipped_clocks > 0U) {
+    reason += ", " + std::to_string(synthesis.skipped_clocks) + " skipped";
+  }
+  if (synthesis.failed_clocks > 0U) {
+    reason += ", " + std::to_string(synthesis.failed_clocks) + " failed";
+  }
+  reason += ")";
+  return reason;
+}
+
 }  // namespace
 
 CTSAPI::CTSAPI() = default;
@@ -104,19 +123,22 @@ auto CTSAPI::runCTS() -> CTSStatus
     return api.setLastStatus(CTSStatus{.code = CTSStatusCode::kNoOp, .message = synthesis.no_op_reason, .diagnostics = {}});
   }
   if (!synthesis.success || synthesis.outcome != SynthesisOutcome::kFinished) {
-    CTSLOG.warn(Loc::current(), "CTS flow failed during synthesis", monitor.getStatsInfo());
-    return api.setLastStatus(CTSStatus{.code = CTSStatusCode::kFlowError, .message = "CTS synthesis failed.", .diagnostics = {}});
+    const auto reason = describeSynthesisFailure(synthesis);
+    CTSLOG.warn(Loc::current(), "CTS flow failed during synthesis: ", reason, monitor.getStatsInfo());
+    return api.setLastStatus(CTSStatus{.code = CTSStatusCode::kFlowError, .message = "CTS synthesis failed: " + reason, .diagnostics = {}});
   }
 
   const auto optimization = Optimization::run();
   if (!optimization.success) {
-    CTSLOG.warn(Loc::current(), "CTS flow failed during optimization", monitor.getStatsInfo());
-    return api.setLastStatus(CTSStatus{.code = CTSStatusCode::kFlowError, .message = "CTS optimization failed.", .diagnostics = {}});
+    const auto reason = optimization.reason.empty() ? std::string{"unspecified"} : optimization.reason;
+    CTSLOG.warn(Loc::current(), "CTS flow failed during optimization: ", reason, monitor.getStatsInfo());
+    return api.setLastStatus(CTSStatus{.code = CTSStatusCode::kFlowError, .message = "CTS optimization failed: " + reason, .diagnostics = {}});
   }
   const auto instantiation = Instantiation::run();
   if (!instantiation.success) {
-    CTSLOG.warn(Loc::current(), "CTS flow failed during instantiation", monitor.getStatsInfo());
-    return api.setLastStatus(CTSStatus{.code = CTSStatusCode::kFlowError, .message = "CTS instantiation failed.", .diagnostics = {}});
+    CTSLOG.warn(Loc::current(), "CTS flow failed during instantiation: ", instantiation.failure_reason, monitor.getStatsInfo());
+    return api.setLastStatus(
+        CTSStatus{.code = CTSStatusCode::kFlowError, .message = "CTS instantiation failed: " + instantiation.failure_reason, .diagnostics = {}});
   }
   const auto evaluation = Evaluation::run();
   if (!evaluation.summary.evaluation_ready) {
