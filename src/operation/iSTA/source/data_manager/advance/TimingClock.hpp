@@ -60,6 +60,20 @@ class TimingClock
   bool get_is_generated() const { return !_master_clock_name.empty(); }
   const std::optional<GeneratedClockDefinition>& get_generated_clock_definition() const { return _generated_clock_definition; }
   std::map<AnalysisType, std::map<TransType, double>>& get_transition_map() { return _transition_map; }
+  double get_source_latency(AnalysisType analysis_type, TransType trans_type) const
+  {
+    const auto analysis = _source_latency_map.find(analysis_type);
+    if (analysis == _source_latency_map.end()) return 0.0;
+    const auto transition = analysis->second.find(trans_type);
+    return transition == analysis->second.end() ? 0.0 : transition->second;
+  }
+  double get_network_latency(AnalysisType analysis_type, TransType trans_type) const
+  {
+    const auto analysis = _network_latency_map.find(analysis_type);
+    if (analysis == _network_latency_map.end()) return 0.0;
+    const auto transition = analysis->second.find(trans_type);
+    return transition == analysis->second.end() ? 0.0 : transition->second;
+  }
   // setter
   void set_clock_name(const std::string& clock_name) { _clock_name = clock_name; }
   void set_source_list(const std::vector<std::string>& source_list) { _source_list = source_list; }
@@ -74,6 +88,16 @@ class TimingClock
   void set_generated_clock_definition(GeneratedClockDefinition definition) { _generated_clock_definition = std::move(definition); }
   void set_waveform(std::vector<double> waveform) { _waveform = std::move(waveform); }
   void set_comment(std::string comment) { _comment = std::move(comment); }
+  void set_source_latency(AnalysisType analysis_type, TransType trans_type, double latency)
+  {
+    _source_latency_map[analysis_type][trans_type] = latency;
+  }
+  void set_network_latency(AnalysisType analysis_type, TransType trans_type, double latency)
+  {
+    _network_latency_map[analysis_type][trans_type] = latency;
+  }
+  void clear_source_latency() { _source_latency_map.clear(); }
+  void clear_network_latency() { _network_latency_map.clear(); }
   // function
 
  private:
@@ -89,6 +113,8 @@ class TimingClock
   double _hold_uncertainty = 0.0;
   bool _is_propagated = false;
   std::map<AnalysisType, std::map<TransType, double>> _transition_map;
+  std::map<AnalysisType, std::map<TransType, double>> _source_latency_map;
+  std::map<AnalysisType, std::map<TransType, double>> _network_latency_map;
   std::vector<double> _waveform;
   std::string _comment;
 };

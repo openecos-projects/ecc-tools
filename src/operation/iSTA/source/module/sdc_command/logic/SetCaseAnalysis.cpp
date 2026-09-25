@@ -37,9 +37,6 @@ std::optional<TimingCaseValue> parseCaseValue(std::string value)
   if (value == "1" || value == "one") {
     return TimingCaseValue::kOne;
   }
-  if (value == "static") {
-    return TimingCaseValue::kStatic;
-  }
   if (value == "rise" || value == "rising") {
     return TimingCaseValue::kRise;
   }
@@ -64,7 +61,7 @@ unsigned TclSetCaseAnalysis::exec()
 
   const std::optional<TimingCaseValue> case_value = parseCaseValue(value_option->getStringVal());
   if (!case_value.has_value()) {
-    setTclError("set_case_analysis value must be 0, 1, zero, one, static, rise, or fall");
+    setTclError("set_case_analysis value must be 0, 1, zero, one, rise, rising, fall, or falling");
     return 0;
   }
 

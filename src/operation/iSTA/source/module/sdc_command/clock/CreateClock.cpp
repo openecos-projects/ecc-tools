@@ -74,6 +74,10 @@ unsigned TclCreateClock::exec()
     setTclError("create_clock requires -period");
     return 0;
   }
+  if (getOptionOrArg("-add")->is_set_val() && !name_option->is_set_val()) {
+    setTclError("create_clock -add requires -name");
+    return 0;
+  }
 
   const double period = period_option->getDoubleVal();
   if (!std::isfinite(period) || period <= 0.0) {

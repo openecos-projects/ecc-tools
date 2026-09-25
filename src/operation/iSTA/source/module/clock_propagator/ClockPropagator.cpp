@@ -333,6 +333,12 @@ void ClockPropagator::updateEffectiveClockState(CPClock& clock)
     TimingClockPointState& state = timing_point.get_clock_state(clock.get_clock_name());
     if (clock.get_is_propagated()) {
       state.arrival_map = state.physical_arrival_map;
+      for (AnalysisType analysis_type : {AnalysisType::kMax, AnalysisType::kMin}) {
+        for (TransType trans_type : {TransType::kRise, TransType::kFall}) {
+          state.arrival_map[analysis_type][trans_type]
+              += definition.get_source_latency(analysis_type, trans_type);
+        }
+      }
       state.slew_map = state.physical_slew_map;
       state.predecessor_map = state.physical_predecessor_map;
       state.predecessor_arc_delay_map = state.physical_predecessor_arc_delay_map;
@@ -349,7 +355,8 @@ void ClockPropagator::updateEffectiveClockState(CPClock& clock)
 
     for (AnalysisType analysis_type : {AnalysisType::kMax, AnalysisType::kMin}) {
       for (TransType trans_type : {TransType::kRise, TransType::kFall}) {
-        state.arrival_map[analysis_type][trans_type] = 0.0;
+        state.arrival_map[analysis_type][trans_type] = definition.get_source_latency(analysis_type, trans_type)
+                                                       + definition.get_network_latency(analysis_type, trans_type);
         const auto mode = definition.get_transition_map().find(analysis_type);
         state.slew_map[analysis_type][trans_type]
             = mode != definition.get_transition_map().end() && mode->second.contains(trans_type) ? mode->second.at(trans_type) : 0.0;

@@ -377,7 +377,7 @@ double TimingPropagator::getStartPointArrival(std::string& start_point, Analysis
     const std::vector<const TimingIoDelay*> delays = getInputDelayList(start_point, analysis_type, trans_type);
     bool has_arrival = false;
     for (const TimingIoDelay* delay : delays) {
-      const double candidate = getInputDelayArrival(*delay);
+      const double candidate = getInputDelayArrival(*delay, analysis_type);
       if (!has_arrival || isBetterArrival(candidate, arrival, analysis_type)) {
         arrival = candidate;
         has_arrival = true;
@@ -476,9 +476,30 @@ double TimingPropagator::getClockEdge(std::string_view clock_name, TransType tra
   return trans_type == TransType::kFall ? clock->second.get_fall_edge() : clock->second.get_rise_edge();
 }
 
-double TimingPropagator::getInputDelayArrival(const TimingIoDelay& delay)
+double TimingPropagator::getInputDelayClockTime(const TimingIoDelay& delay, AnalysisType analysis_type)
 {
-  return getClockEdge(delay.get_clock_name(), delay.get_clock_trans_type()) + delay.get_delay();
+  double clock_time = getClockEdge(delay.get_clock_name(), delay.get_clock_trans_type());
+  if (!delay.get_reference_pin().empty()) {
+    std::string reference_pin = delay.get_reference_pin();
+    clock_time += getClockArrival(reference_pin, delay.get_clock_name(), analysis_type, delay.get_clock_trans_type());
+    return clock_time;
+  }
+  const auto& clocks = STADM.getDatabase().get_timing_constraint().get_clock_map();
+  const auto clock = clocks.find(delay.get_clock_name());
+  if (clock != clocks.end()) {
+    if (!delay.get_source_latency_included()) {
+      clock_time += clock->second.get_source_latency(analysis_type, delay.get_clock_trans_type());
+    }
+    if (!delay.get_network_latency_included() && !clock->second.get_is_propagated()) {
+      clock_time += clock->second.get_network_latency(analysis_type, delay.get_clock_trans_type());
+    }
+  }
+  return clock_time;
+}
+
+double TimingPropagator::getInputDelayArrival(const TimingIoDelay& delay, AnalysisType analysis_type)
+{
+  return getInputDelayClockTime(delay, analysis_type) + delay.get_delay();
 }
 
 bool TimingPropagator::isClockSourceStartPoint(std::string& start_point)
@@ -794,8 +815,8 @@ void TimingPropagator::seedPathState(std::string& start_point, AnalysisType anal
 
 void TimingPropagator::seedInputPathState(std::string& start_point, AnalysisType analysis_type, TransType trans_type, const TimingIoDelay& delay)
 {
-  const double arrival = getInputDelayArrival(delay);
-  const double launch_time = getClockEdge(delay.get_clock_name(), delay.get_clock_trans_type());
+  const double arrival = getInputDelayArrival(delay, analysis_type);
+  const double launch_time = getInputDelayClockTime(delay, analysis_type);
   const std::string clock_name = delay.get_clock_name().empty() ? std::string(getClockName(start_point)) : delay.get_clock_name();
   std::optional<DCTimingResult> driving_cell_timing = getDrivingCellTiming(start_point, analysis_type, trans_type);
   seedPathState(start_point, analysis_type, trans_type, clock_name, driving_cell_timing ? arrival + driving_cell_timing->get_delay() : arrival,
