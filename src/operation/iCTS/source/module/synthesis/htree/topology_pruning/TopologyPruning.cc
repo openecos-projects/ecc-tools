@@ -212,6 +212,7 @@ auto BuildHTreeFrontierStateKey(const HTreeTopologyChar& entry, const PatternCom
       .terminal_semantic = normalized_state.terminal_semantic,
       .monotonic_boundary_state = normalized_state.monotonic_boundary_state,
       .source_exposed_load_count = normalized_state.source_exposed_load_count,
+      .geometry_state = normalized_state.geometry_state,
   };
 }
 

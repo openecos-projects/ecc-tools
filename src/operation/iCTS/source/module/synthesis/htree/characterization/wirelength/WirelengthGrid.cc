@@ -92,10 +92,10 @@ auto MaxPositiveLength(const std::vector<double>& lengths_um) -> double
   return *std::ranges::max_element(lengths_um);
 }
 
-auto ScoreGridUnitCandidate(const std::vector<double>& direct_lengths_um, const std::vector<double>& coverage_lengths_um, double unit_um,
-                            unsigned direct_length_idx_budget) -> GridUnitCandidateScore
+auto ScoreGridUnitCandidate(const std::vector<double>& direct_lengths_um, const std::vector<double>& coverage_lengths_um, double unit_um)
+    -> GridUnitCandidateScore
 {
-  if (direct_lengths_um.empty() || unit_um <= 0.0 || direct_length_idx_budget == 0U) {
+  if (direct_lengths_um.empty() || unit_um <= 0.0) {
     return {};
   }
 
@@ -108,7 +108,7 @@ auto ScoreGridUnitCandidate(const std::vector<double>& direct_lengths_um, const 
   direct_length_indices.reserve(direct_lengths_um.size());
   for (const double direct_length_um : direct_lengths_um) {
     const unsigned length_idx = MakeCoveringLengthIndex(direct_length_um, unit_um);
-    if (length_idx == 0U || length_idx > direct_length_idx_budget) {
+    if (length_idx == 0U) {
       return {};
     }
     const double modeled_length_um = static_cast<double>(length_idx) * unit_um;
@@ -204,15 +204,15 @@ auto ResolveAutoDerivedGridUnit(const std::vector<double>& direct_lengths_um, co
     return {};
   }
 
-  const auto direct_length_idx_budget = static_cast<unsigned>(direct_lengths_um.size());
+  const auto direct_request_count = static_cast<unsigned>(direct_lengths_um.size());
   const double max_direct_length_um = MaxPositiveLength(direct_lengths_um);
-  if (max_direct_length_um <= 0.0 || direct_length_idx_budget == 0U) {
+  if (max_direct_length_um <= 0.0 || direct_request_count == 0U) {
     return {};
   }
 
   std::vector<double> candidates;
-  candidates.reserve(direct_lengths_um.size() * direct_lengths_um.size() + 2U);
-  AppendUniqueUnitCandidate(candidates, max_direct_length_um / static_cast<double>(direct_length_idx_budget));
+  candidates.reserve(2U);
+  AppendUniqueUnitCandidate(candidates, max_direct_length_um / static_cast<double>(direct_request_count));
 
   const auto all_lengths_um = MakeCombinedLengths(direct_lengths_um, coverage_lengths_um);
   const double max_required_length_um = MaxPositiveLength(all_lengths_um);
@@ -220,23 +220,53 @@ auto ResolveAutoDerivedGridUnit(const std::vector<double>& direct_lengths_um, co
     AppendUniqueUnitCandidate(candidates, max_required_length_um / static_cast<double>(all_lengths_um.size()));
   }
 
-  for (const double direct_length_um : direct_lengths_um) {
-    for (unsigned length_idx = 1U; length_idx <= direct_length_idx_budget; ++length_idx) {
-      const double unit_um = direct_length_um / static_cast<double>(length_idx);
-      if (MakeCoveringLengthIndex(max_direct_length_um, unit_um) <= direct_length_idx_budget) {
-        AppendUniqueUnitCandidate(candidates, unit_um);
-      }
-    }
-  }
-
   GridUnitCandidateScore best_score;
   for (const double unit_um : candidates) {
-    const auto candidate_score = ScoreGridUnitCandidate(direct_lengths_um, coverage_lengths_um, unit_um, direct_length_idx_budget);
+    const auto candidate_score = ScoreGridUnitCandidate(direct_lengths_um, coverage_lengths_um, unit_um);
     if (IsBetterGridUnitCandidate(candidate_score, best_score)) {
       best_score = candidate_score;
     }
   }
   return best_score;
+}
+
+auto MakeUniqueCoveringLengthIndices(const std::vector<double>& requested_lengths_um, double unit_um) -> std::vector<unsigned>
+{
+  std::vector<unsigned> indices;
+  indices.reserve(requested_lengths_um.size());
+  for (const double requested_length_um : requested_lengths_um) {
+    const unsigned length_idx = MakeCoveringLengthIndex(requested_length_um, unit_um);
+    if (length_idx > 0U) {
+      indices.push_back(length_idx);
+    }
+  }
+  std::ranges::sort(indices);
+  const auto unique_tail = std::ranges::unique(indices);
+  indices.erase(unique_tail.begin(), unique_tail.end());
+  return indices;
+}
+
+auto MakeBinaryPrimitiveLengthIndices(unsigned maximum_length_idx) -> std::vector<unsigned>
+{
+  std::vector<unsigned> indices;
+  for (unsigned length_idx = 1U; length_idx <= maximum_length_idx;) {
+    indices.push_back(length_idx);
+    if (length_idx > maximum_length_idx / 2U) {
+      break;
+    }
+    length_idx *= 2U;
+  }
+  return indices;
+}
+
+auto NormalizeConfiguredLengthIndices(const std::vector<unsigned>& configured_indices) -> std::vector<unsigned>
+{
+  auto indices = configured_indices;
+  std::erase(indices, 0U);
+  std::ranges::sort(indices);
+  const auto unique_tail = std::ranges::unique(indices);
+  indices.erase(unique_tail.begin(), unique_tail.end());
+  return indices;
 }
 
 }  // namespace
@@ -323,28 +353,30 @@ auto CollectRequestedLevelLengthsUm(const Tree& topology, int32_t dbu_per_um) ->
   return requested_lengths_um;
 }
 
-auto ResolveCharacterizationGridPlan(const Config& config, const std::vector<double>& requested_lengths_um, const std::optional<double>& max_unit_um)
-    -> CharacterizationGridPlan
+auto ResolveCharacterizationGridPlan(const Config& config, const std::vector<double>& requested_lengths_um,
+                                     const CharacterizationWirelengthUnitLimits& unit_limits) -> CharacterizationGridPlan
 {
   CharBuilder::Config char_config;
   if (config.get_wirelength_unit_um() > 0.0) {
     char_config.wirelength_unit_um = config.get_wirelength_unit_um();
   }
   char_config.wirelength_iterations = config.get_wirelength_iterations();
-  return ResolveCharacterizationGridPlan(char_config, requested_lengths_um, max_unit_um);
+  return ResolveCharacterizationGridPlan(char_config, requested_lengths_um, unit_limits);
 }
 
 auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const std::vector<double>& requested_lengths_um,
-                                     const std::optional<double>& max_unit_um) -> CharacterizationGridPlan
+                                     const CharacterizationWirelengthUnitLimits& unit_limits) -> CharacterizationGridPlan
 {
-  return ResolveCharacterizationGridPlan(config, requested_lengths_um, {}, max_unit_um);
+  return ResolveCharacterizationGridPlan(config, requested_lengths_um, {}, unit_limits);
 }
 
 auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const std::vector<double>& direct_lengths_um,
-                                     const std::vector<double>& coverage_lengths_um, const std::optional<double>& max_unit_um) -> CharacterizationGridPlan
+                                     const std::vector<double>& coverage_lengths_um, const CharacterizationWirelengthUnitLimits& unit_limits)
+    -> CharacterizationGridPlan
 {
   CharacterizationGridPlan plan;
-  plan.max_unit_um = max_unit_um;
+  plan.max_unit_um = unit_limits.electrical_ceiling_um;
+  plan.physical_scale_unit_um = unit_limits.physical_scale_unit_um;
   auto direct_positive_lengths_um = BuildPositiveLengths(direct_lengths_um);
   auto coverage_positive_lengths_um = BuildPositiveLengths(coverage_lengths_um);
   if (direct_positive_lengths_um.empty() && !coverage_positive_lengths_um.empty()) {
@@ -378,6 +410,14 @@ auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const st
     plan.unique_level_bins = CountUniqueAlignedLengthBins(direct_positive_lengths_um, effective_unit_um);
   }
 
+  if (plan.source == CharGridSource::kAutoDerived && unit_limits.physical_scale_unit_um.has_value() && *unit_limits.physical_scale_unit_um > 0.0
+      && (effective_unit_um <= 0.0 || effective_unit_um > *unit_limits.physical_scale_unit_um + kValueLatticeEpsilon)) {
+    effective_unit_um = *unit_limits.physical_scale_unit_um;
+    plan.adapted = true;
+    plan.unit_selected_from_physical_scale = true;
+    plan.unique_level_bins = CountUniqueAlignedLengthBins(direct_positive_lengths_um, effective_unit_um);
+  }
+
   // The geometry decides the unit as if wire length were free. It is not: a driven
   // segment pays its own wire capacitance plus the input capacitance of the buffer that
   // drives it, and the cap lattice stops at max_cap. Above that ceiling every sweep
@@ -391,14 +431,15 @@ auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const st
   // capacitance already fills the lattice. There is no usable unit to clamp to, so the
   // grid is left alone and the sweep fails on its own terms rather than claiming a
   // zero-length unit that the caller would install as its grid.
-  if (effective_unit_um > 0.0 && max_unit_um.has_value() && *max_unit_um > 0.0 && effective_unit_um > *max_unit_um + kValueLatticeEpsilon) {
+  if (effective_unit_um > 0.0 && unit_limits.electrical_ceiling_um.has_value() && *unit_limits.electrical_ceiling_um > 0.0
+      && effective_unit_um > *unit_limits.electrical_ceiling_um + kValueLatticeEpsilon) {
     const double requested_unit_um = plan.adapted ? plan.auto_derived_wirelength_unit_um : configured_unit_um;
-    effective_unit_um = *max_unit_um;
+    effective_unit_um = *unit_limits.electrical_ceiling_um;
     plan.unit_clamped_to_electrical_ceiling = true;
     plan.adapted = true;
     plan.source = plan.configured_wirelength_missing ? CharGridSource::kAutoDerived : CharGridSource::kRuntimeConfig;
     plan.unique_level_bins = CountUniqueAlignedLengthBins(direct_positive_lengths_um, effective_unit_um);
-    CTSLOG.warn(Loc::current(), "HTree: length unit ", requested_unit_um, " um exceeds the ", *max_unit_um,
+    CTSLOG.warn(Loc::current(), "HTree: length unit ", requested_unit_um, " um exceeds the ", *unit_limits.electrical_ceiling_um,
                 " um the characterization cap lattice can drive; using ", effective_unit_um, " um.");
   }
 
@@ -410,6 +451,24 @@ auto ResolveCharacterizationGridPlan(const CharBuilder::Config& config, const st
   const double max_required_length_um = std::max(MaxPositiveLength(direct_positive_lengths_um), MaxPositiveLength(coverage_positive_lengths_um));
   plan.required_covering_iterations = std::max(1U, static_cast<unsigned>(std::ceil(max_required_length_um / effective_unit_um)));
   plan.wirelength_iterations = plan.required_covering_iterations;
+  plan.requested_length_indices = MakeUniqueCoveringLengthIndices(direct_positive_lengths_um, effective_unit_um);
+  plan.preserves_explicit_indices = config.wirelength_indices.has_value();
+  plan.uses_primitive_characterization = plan.source == CharGridSource::kAutoDerived && !plan.preserves_explicit_indices;
+  if (plan.preserves_explicit_indices) {
+    plan.direct_length_indices = NormalizeConfiguredLengthIndices(*config.wirelength_indices);
+    if (config.wirelength_iterations.has_value()) {
+      std::erase_if(plan.direct_length_indices, [&](unsigned length_idx) -> bool { return length_idx > *config.wirelength_iterations; });
+    }
+  } else if (plan.uses_primitive_characterization) {
+    unsigned maximum_primitive_idx = plan.required_covering_iterations;
+    if (unit_limits.electrical_ceiling_um.has_value() && *unit_limits.electrical_ceiling_um > 0.0) {
+      const auto electrical_maximum_idx = static_cast<unsigned>(std::floor(*unit_limits.electrical_ceiling_um / effective_unit_um));
+      maximum_primitive_idx = std::min(maximum_primitive_idx, std::max(1U, electrical_maximum_idx));
+    }
+    plan.direct_length_indices = MakeBinaryPrimitiveLengthIndices(maximum_primitive_idx);
+  } else {
+    plan.direct_length_indices = plan.requested_length_indices;
+  }
   return plan;
 }
 
@@ -431,17 +490,9 @@ auto ResolveDirectCharacterizationLengthIndices(const std::vector<double>& reque
     return {};
   }
 
-  std::vector<unsigned> required_length_indices;
-  required_length_indices.reserve(requested_lengths_um.size());
-  for (const double requested_length_um : requested_lengths_um) {
-    const unsigned length_idx = MakeCoveringLengthIndex(requested_length_um, char_grid_plan.wirelength_unit_um);
-    if (length_idx > 0U) {
-      required_length_indices.push_back(length_idx);
-    }
-  }
-  std::ranges::sort(required_length_indices);
-  const auto unique_tail = std::ranges::unique(required_length_indices);
-  required_length_indices.erase(unique_tail.begin(), unique_tail.end());
+  std::vector<unsigned> required_length_indices = char_grid_plan.direct_length_indices.empty()
+                                                      ? MakeUniqueCoveringLengthIndices(requested_lengths_um, char_grid_plan.wirelength_unit_um)
+                                                      : char_grid_plan.direct_length_indices;
   std::erase_if(required_length_indices, [&](unsigned length_idx) -> bool { return length_idx > char_grid_plan.wirelength_iterations; });
   return required_length_indices;
 }

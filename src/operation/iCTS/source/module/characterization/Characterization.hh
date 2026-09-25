@@ -39,6 +39,18 @@
 
 namespace icts {
 
+struct CharacterizationWirelengthUnitLimits
+{
+  // Existing physical default used by CharBuilder when no caller provides a
+  // unit: ten times the strongest usable buffer height.
+  std::optional<double> physical_scale_unit_um = std::nullopt;
+  // Largest unit whose wire capacitance plus the largest buffer input
+  // capacitance still fits in the characterization cap lattice.
+  std::optional<double> electrical_ceiling_um = std::nullopt;
+};
+
+auto ResolveCharacterizationWirelengthUnitLimits(const CharBuilder::Input& input, const CharBuilder::Config& config) -> CharacterizationWirelengthUnitLimits;
+
 // Longest clock-route segment the characterization sweep can still represent. A driven
 // segment pays its own wire capacitance plus the input capacitance of the buffer that
 // drives it, and the cap lattice stops at max_cap; past this length every sweep point

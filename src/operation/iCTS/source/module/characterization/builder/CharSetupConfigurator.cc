@@ -411,6 +411,14 @@ auto CharSetupConfigurator::init(const ::icts::CharBuilder::Input& input, const 
   _impl._char_clock_name.clear();
   _impl._next_pattern_id = 0U;
   _impl._char_circuit_id = 0U;
+  _impl._evaluated_patterns = 0U;
+  _impl._feasible_patterns = 0U;
+  _impl._skipped_patterns_infeasible = 0U;
+  _impl._wire_only_patterns = 0U;
+  _impl._leaf_buffered_patterns = 0U;
+  _impl._terminal_branch_patterns = 0U;
+  _impl._mixed_master_patterns = 0U;
+  _impl._skipped_load_points = 0U;
   _impl._executed_sta_samples = 0U;
   _impl._skipped_sta_samples = 0U;
   _impl._output_slew_overflow_samples = 0U;
@@ -443,6 +451,7 @@ auto CharSetupConfigurator::init(const ::icts::CharBuilder::Input& input, const 
   _impl._wirelength_unit_source = toResolutionSourceName(wirelength_unit_resolution.source);
   _impl._wirelength_unit_detail = wirelength_unit_resolution.detail;
   _impl._wirelength_iterations = std::max(1U, effective_config.wirelength_iterations.value_or(kDefaultWirelengthIterations));
+  _impl._use_boundary_primitive_patterns = effective_config.use_boundary_primitive_patterns;
   _impl._slew_steps = effective_config.slew_steps.value_or(15U);
   _impl._cap_steps = effective_config.cap_steps.value_or(15U);
   if (_impl._max_slew <= 0.0 || _impl._max_cap <= 0.0 || _impl._length_unit_um <= 0.0 || !routing_layer_resolution.has_value()) {
@@ -477,9 +486,19 @@ auto CharSetupConfigurator::init(const ::icts::CharBuilder::Input& input, const 
 
 namespace icts {
 
+auto ResolveCharacterizationWirelengthUnitLimits(const CharBuilder::Input& input, const CharBuilder::Config& config) -> CharacterizationWirelengthUnitLimits
+{
+  const auto sorted_buffers = char_builder::detail::collectSortedBuffers(input, config);
+  const auto physical_unit = char_builder::detail::resolveWirelengthUnitUm(sorted_buffers);
+  return CharacterizationWirelengthUnitLimits{
+      .physical_scale_unit_um = physical_unit.value > 0.0 ? std::optional<double>{physical_unit.value} : std::nullopt,
+      .electrical_ceiling_um = char_builder::detail::resolveMaxSegmentLengthUm(input, config),
+  };
+}
+
 auto ResolveMaxCharacterizationSegmentLengthUm(const CharBuilder::Input& input, const CharBuilder::Config& config) -> std::optional<double>
 {
-  return char_builder::detail::resolveMaxSegmentLengthUm(input, config);
+  return ResolveCharacterizationWirelengthUnitLimits(input, config).electrical_ceiling_um;
 }
 
 }  // namespace icts

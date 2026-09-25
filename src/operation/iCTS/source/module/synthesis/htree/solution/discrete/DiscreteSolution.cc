@@ -98,8 +98,8 @@ auto SelectDiscreteHTreeSolution(HTreeSynthesisState& state) -> HTreeSelectionBu
 
   const auto required_segment_frontiers
       = htree::ResolveRequiredSegmentFrontiers(htree::CollectRequiredLengthIndices(state.full_level_plans), state.search_boundary_constraints);
-  const auto segment_frontier_catalog
-      = htree::SynthesizeSegmentFrontiers(char_builder.get_segment_chars(), segment_pattern_library, required_segment_frontiers);
+  const auto segment_frontier_catalog = htree::SynthesizeSegmentFrontiers(char_builder.get_segment_chars(), segment_pattern_library, required_segment_frontiers,
+                                                                          char_builder.uses_boundary_primitive_patterns());
   if (segment_frontier_catalog.empty()) {
     CTSLOG.warn(Loc::current(), "HTree: segment frontier synthesis failed for the required aligned lengths.");
     HTreeSelectionBuild selection_build;

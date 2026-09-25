@@ -66,6 +66,7 @@ struct CharBuilderConfig
   std::optional<unsigned> wirelength_iterations = std::nullopt;
   std::optional<std::vector<unsigned>> wirelength_indices = std::nullopt;
   bool allow_auto_wirelength_unit = false;
+  bool use_boundary_primitive_patterns = false;
   std::optional<double> max_slew_ns = std::nullopt;
   std::optional<double> max_cap_pf = std::nullopt;
   std::optional<double> char_buf_redundancy_pct = std::nullopt;
@@ -106,6 +107,7 @@ class CharBuilder
   auto get_wirelength_unit_source() const -> const std::string&;
   auto get_wirelength_unit_detail() const -> const std::string&;
   auto get_wirelength_iterations() const -> unsigned;
+  auto uses_boundary_primitive_patterns() const -> bool;
   auto get_max_slew() const -> double;
   auto get_max_cap() const -> double;
   auto get_slew_steps() const -> unsigned;
@@ -117,6 +119,14 @@ class CharBuilder
   auto get_length_lattice() const -> UniformValueLattice;
   auto get_slew_lattice() const -> UniformValueLattice;
   auto get_cap_lattice() const -> UniformValueLattice;
+  auto get_evaluated_patterns() const -> std::size_t;
+  auto get_feasible_patterns() const -> std::size_t;
+  auto get_skipped_patterns_infeasible() const -> std::size_t;
+  auto get_wire_only_patterns() const -> std::size_t;
+  auto get_leaf_buffered_patterns() const -> std::size_t;
+  auto get_terminal_branch_patterns() const -> std::size_t;
+  auto get_mixed_master_patterns() const -> std::size_t;
+  auto get_skipped_load_points() const -> std::size_t;
   auto get_executed_sta_samples() const -> std::size_t;
   auto get_skipped_sta_samples() const -> std::size_t;
   auto get_output_slew_overflow_samples() const -> std::size_t;
