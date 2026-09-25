@@ -69,6 +69,8 @@ int main()
   assert(LVSUTIL.exist(netlist_data.get_instance_name_set(), std::string("u0")));
   assert(LVSUTIL.exist(netlist_data.get_net_map(), std::string("n1")));
   assert(netlist_data.get_net_map().at("n1").get_terminal_name_list() == std::vector<std::string>({"PIN/IN", "u0/A"}));
+  assert(!LVSUTIL.exist(netlist_data.get_terminal_connect_type_map(), std::string("PIN/IN")));
+  assert(!LVSUTIL.exist(netlist_data.get_terminal_connect_type_map(), std::string("u0/A")));
   assert(netlist_data.get_terminal_connect_type_map().at("u0/VDD") == ilvs::ConnectType::kPower);
   assert(netlist_data.get_terminal_connect_type_map().at("u0/VSS") == ilvs::ConnectType::kGround);
 
@@ -79,6 +81,8 @@ int main()
   assert(def_data.get_die().get_real_ur_x() == 1000);
   assert(def_data.get_die().get_real_ur_y() == 2000);
   assert(LVSUTIL.exist(def_data.get_net_map(), std::string("n1")));
+  assert(!LVSUTIL.exist(def_data.get_terminal_connect_type_map(), std::string("PIN/IN")));
+  assert(!LVSUTIL.exist(def_data.get_terminal_connect_type_map(), std::string("u0/A")));
   assert(def_data.get_physical_graph().get_net_routing_graph_map().empty());
   assert(LVSUTIL.exist(def_data.get_def_routing_data().get_net_routing_data_map(), std::string("n1")));
   assert(def_data.get_def_routing_data().get_power_instance_pin_net_map().at("u0/VDD") == "VDD");

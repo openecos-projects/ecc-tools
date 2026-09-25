@@ -52,7 +52,8 @@ class LVSReporter
   // function
 
   LRModel initLRModel();
-  std::vector<fort::char_table> getSummaryTableList();
+  std::vector<fort::char_table> getSummaryTableList(const std::vector<LVSEntitySummaryRow>& entity_summary_row_list,
+                                                    const std::vector<LVSConnectivitySummaryRow>& connectivity_summary_row_list);
   std::vector<LVSEntitySummaryRow> getEntitySummaryRowList();
   std::vector<LVSConnectivitySummaryRow> getConnectivitySummaryRowList();
   void addConnectivitySummaryRow(std::vector<LVSConnectivitySummaryRow>& row_list, const std::string& connectivity, int64_t open_num, int64_t short_num,
@@ -60,12 +61,16 @@ class LVSReporter
   std::string getCountPercentageText(int64_t count, int64_t total_count);
   double getPercentage(int64_t count, int64_t total_count);
   std::set<std::string> getPowerOpenTerminalNameSet(ConnectType connect_type);
-  std::set<std::string> getPowerShortTerminalNameSet(ConnectType connect_type);
+  std::unordered_set<int32_t> getPowerGroundShortComponentIdSet();
+  std::set<std::string> getPowerShortTerminalNameSet(ConnectType connect_type,
+                                                     const std::unordered_set<int32_t>& power_ground_short_component_id_set);
   std::vector<const Violation*> getViolationList();
   void outputRPT(const LRModel& lr_model, const std::vector<fort::char_table>& summary_table_list, const std::vector<const Violation*>& violation_list);
   std::string getJoinedString(const std::vector<int32_t>& value_list);
   std::string getJoinedString(const std::vector<std::string>& value_list);
-  void outputJson(const LRModel& lr_model, const std::vector<const Violation*>& violation_list);
+  void outputJson(const LRModel& lr_model, const std::vector<const Violation*>& violation_list,
+                  const std::vector<LVSEntitySummaryRow>& entity_summary_row_list,
+                  const std::vector<LVSConnectivitySummaryRow>& connectivity_summary_row_list);
   void printSummary(const std::vector<fort::char_table>& summary_table_list);
 };
 
