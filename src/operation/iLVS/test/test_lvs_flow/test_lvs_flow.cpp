@@ -144,6 +144,18 @@ void buildDefData(ilvs::Database& database)
   physical_graph.get_terminal_component_map()["U1/VSS"] = 300;
   physical_graph.get_terminal_component_map()["U2/VSS"] = 200;
   physical_graph.get_terminal_component_map()["U3/VSS"] = 201;
+
+  int32_t connected_net_id = physical_graph.getOrCreateNetId("n_connected");
+  int32_t open_net_id = physical_graph.getOrCreateNetId("n_open");
+  int32_t power_net_id = physical_graph.getOrCreateNetId("VDD");
+  int32_t ground_net_id = physical_graph.getOrCreateNetId("VSS");
+  physical_graph.get_component_net_id_list().resize(301);
+  physical_graph.get_component_net_id_list()[42] = {connected_net_id, open_net_id};
+  physical_graph.get_component_net_id_list()[300] = {power_net_id, ground_net_id};
+  physical_graph.get_component_shape_ref_list().resize(301);
+  physical_graph.get_component_shape_ref_list()[42] = {{connected_net_id, 0}};
+  physical_graph.get_component_shape_ref_list()[300] = {{power_net_id, 0}, {ground_net_id, 0}};
+  physical_graph.set_optimized_component_data_valid(true);
   database.set_def_data(std::move(def_data));
 }
 
