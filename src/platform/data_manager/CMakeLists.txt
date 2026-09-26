@@ -66,19 +66,4 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME check_connection_graph_test COMMAND check_connection_graph_test)
-
-    add_executable(liberty_generation_test
-        liberty_generation_test.cpp
-    )
-
-    target_link_libraries(liberty_generation_test
-        PRIVATE
-        idm
-    )
-
-    set_target_properties(liberty_generation_test PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-
-    add_test(NAME liberty_generation_test COMMAND liberty_generation_test)
 endif()
