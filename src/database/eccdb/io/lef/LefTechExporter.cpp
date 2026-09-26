@@ -901,7 +901,8 @@ class TechLefWriter
 
   void writePrlSpacingTable(const TechRoutingPrlSpacingTableRule& rule)
   {
-    if (rule.flags != 0u || !rule.except_withins.empty() || !rule.influences.empty()) {
+    if ((rule.flags & ~TechRoutingPrlSpacingTableRuleFlag::kNonIncreasingWidths) != 0u || !rule.except_withins.empty()
+        || !rule.influences.empty()) {
       throw std::logic_error("extended ROUTING PRL SPACINGTABLE requires LEF58 PROPERTY preservation");
     }
     _output << "  SPACINGTABLE\n    PARALLELRUNLENGTH";

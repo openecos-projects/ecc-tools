@@ -7,6 +7,7 @@
 #include "common/GeometryTypes.h"
 #include "design/common/DesignGeometry.h"
 #include "design/common/DesignTypes.h"
+#include "index/LibraryMasterTermNameIndex.h"
 #include "library/common/LibraryTypes.h"
 #include "tech/common/TechLayerIds.h"
 #include "tech/non_default_rule/model/NonDefaultRuleComponents.h"
@@ -58,6 +59,9 @@ struct DesignInstanceRouteHalo
 // LibraryCellMaster terms and owned through DesignInstancePins.
 struct DesignInstance
 {
+  // InstancePin caches this address; do not sort or compact this storage.
+  static constexpr bool in_place_delete = true;
+
   std::string name;
   LibraryCellMasterId master;
   Point origin;
@@ -75,6 +79,12 @@ struct DesignInstance
 struct DesignInstancePins
 {
   std::vector<DesignInstancePinId> values;
+  // Runtime-only term IDs mirror values for a contiguous lookup after a master changes.
+  std::vector<LibraryMasterTermId> term_ids;
+  // Runtime-only owner ID avoids an instance lookup before checking the index's lifetime.
+  LibraryCellMasterId master;
+  // Runtime-only name index shared by instances of one library master.
+  const LibraryMasterTermNameIndex* master_term_name_index = nullptr;
 };
 
 // Physical instance terminal. Its name, direction and use remain canonical in
@@ -82,7 +92,11 @@ struct DesignInstancePins
 struct DesignInstancePin
 {
   DesignInstanceId instance;
+  // Runtime-only pointer; DesignInstance uses in-place deletion for stability.
+  const DesignInstance* instance_ptr = nullptr;
   LibraryMasterTermId master_term;
+  // Runtime-only pointer; library components must remain stable while referenced.
+  const LibraryMasterTerm* master_term_ptr = nullptr;
   DesignNetId net;
   DesignNetId special_net;
 };

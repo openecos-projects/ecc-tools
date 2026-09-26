@@ -15,9 +15,10 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
-#include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <entt/container/dense_map.hpp>
 
 #include "ConnectType.hpp"
 #include "CutLayer.hpp"
@@ -1009,11 +1010,15 @@ class OrientedGeometryCache
   template <typename Id>
   [[nodiscard]] const Geometry& at(Id id, eccdb::DesignOrientation orientation) const
   {
-    return _values.at(static_cast<uint32_t>(id.packed()))[static_cast<size_t>(orientation)].value();
+    const auto found = _values.find(static_cast<uint32_t>(id.packed()));
+    if (found == _values.end()) {
+      throw std::out_of_range("missing oriented geometry cache entry");
+    }
+    return found->second[static_cast<size_t>(orientation)].value();
   }
 
  private:
-  std::unordered_map<uint32_t, std::array<std::optional<Geometry>, 8>> _values;
+  entt::dense_map<uint32_t, std::array<std::optional<Geometry>, 8>> _values;
 };
 
 struct CachedMasterGeometry

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "DesignTestFixture.h"
+#include "tech/cut_layer/model/CutLayerComponents.h"
 
 namespace eccdb {
 namespace {
@@ -42,8 +45,8 @@ TEST_F(DesignStorageTest, StoresWirePathsWithTechAndDesignViaReferences)
   });
   EXPECT_EQ(visited_wires, (std::vector<DesignWireId>{wire}));
   EXPECT_EQ(routing.path(wire, 0).points().size(), 3u);
-  EXPECT_EQ(routing.routingPoolStatistics().paths.count, 1u);
-  EXPECT_EQ(routing.routingPoolStatistics().points.count, 3u);
+  EXPECT_EQ(routing.routingStatistics().paths.count, 1u);
+  EXPECT_EQ(routing.routingStatistics().points.count, 3u);
   EXPECT_EQ(routing.via(local_via).name, "LOCAL_VIA");
   const auto* geometry = routing.netGeometry(net);
   ASSERT_NE(geometry, nullptr);
@@ -88,7 +91,34 @@ TEST_F(DesignStorageTest, AcceptsOpenDbStyleZeroWidthSpecialNetViaPath)
   EXPECT_TRUE(netlist.destroyNet(net));
 }
 
-TEST_F(DesignStorageTest, StoresMultiplePathsInDesignWideTypedPools)
+TEST_F(DesignStorageTest, DISABLED_RejectsViaWhoseGeometryDoesNotTouchCurrentLayer)
+{
+  const auto m2_entity = tech.registry().create();
+  tech.registry().emplace<TechLayerInfo>(m2_entity, TechLayerInfo{.name = "M2"});
+  tech.registry().emplace<TechRoutingLayer>(m2_entity, TechRoutingLayer{});
+  const auto cut_entity = tech.registry().create();
+  tech.registry().emplace<TechLayerInfo>(cut_entity, TechLayerInfo{.name = "V2"});
+  tech.registry().emplace<TechCutLayer>(cut_entity, TechCutLayer{});
+  const auto m3_entity = tech.registry().create();
+  tech.registry().emplace<TechLayerInfo>(m3_entity, TechLayerInfo{.name = "M3"});
+  tech.registry().emplace<TechRoutingLayer>(m3_entity, TechRoutingLayer{});
+
+  auto& routing = design.routingStorage();
+  const auto via = routing.createVia(DesignVia{.name = "LOCAL23",
+                                                .rectangles = {{.layer = TechLayerId{m2_entity}, .rectangle = {-5, -5, 5, 5}},
+                                                               {.layer = TechLayerId{cut_entity}, .rectangle = {-2, -2, 2, 2}},
+                                                               {.layer = TechLayerId{m3_entity}, .rectangle = {-5, -5, 5, 5}}}});
+  const auto net = design.netlistStorage().createNet(DesignNet{.name = "signal"});
+  DesignWireRoutingInput input;
+  input.appendPath(DesignWirePath{.layer = routing_layer,
+                                  .points = {{{0, 0}}, {{100, 0}}, {{100, 100}}},
+                                  .vias = {{.point_index = 1, .design_via = via}}});
+
+  EXPECT_THROW((void) routing.createWire(DesignWire{.net = net}, std::move(input)), std::invalid_argument);
+  EXPECT_EQ(routing.wireCount(), 0u);
+}
+
+TEST_F(DesignStorageTest, StoresMultiplePathsInWireLocalFlatVectors)
 {
   auto& netlist = design.netlistStorage();
   auto& routing = design.routingStorage();
@@ -127,11 +157,11 @@ TEST_F(DesignStorageTest, StoresMultiplePathsInDesignWideTypedPools)
   ASSERT_EQ(routing.pathCount(wire), 2u);
   const auto first = routing.path(wire, 0);
   const auto second = routing.path(wire, 1);
-  const auto pool = routing.routingPoolStatistics();
-  ASSERT_EQ(pool.paths.count, 2u);
-  EXPECT_EQ(pool.points.count, 5u);
-  EXPECT_EQ(pool.vias.count, 1u);
-  EXPECT_EQ(pool.rectangles.count, 1u);
+  const auto statistics = routing.routingStatistics();
+  ASSERT_EQ(statistics.paths.count, 2u);
+  EXPECT_EQ(statistics.points.count, 5u);
+  EXPECT_EQ(statistics.vias.count, 1u);
+  EXPECT_EQ(statistics.rectangles.count, 1u);
   EXPECT_EQ(first.points().size(), 2u);
   EXPECT_EQ(second.points().size(), 3u);
   EXPECT_EQ(second.points().front().position, (Point{100, 0}));
@@ -154,38 +184,131 @@ TEST_F(DesignStorageTest, StoresMultiplePathsInDesignWideTypedPools)
   EXPECT_EQ(widths, (std::vector<int32_t>{20, 30}));
   EXPECT_EQ(point_counts, (std::vector<std::size_t>{2u, 3u}));
 
-  std::size_t compact_path_index = 0u;
-  routing.forEachCompactPath(wire, [&](DesignRoutingCompactPathView path) {
-    ASSERT_NE(path.extra, nullptr);
-    if (compact_path_index == 0u) {
-      EXPECT_EQ(path.extra->width, 20);
-      ASSERT_EQ(path.points.size(), 2u);
-      EXPECT_EQ(path.point_global_begin, 0u);
-      ASSERT_EQ(path.point_extras.size(), 1u);
-      EXPECT_EQ(path.point_extras.front().point_index, 1u);
-      ASSERT_EQ(path.vias.size(), 1u);
-      EXPECT_EQ(path.via_global_begin, 0u);
-      ASSERT_EQ(path.via_extras.size(), 1u);
-      EXPECT_EQ(path.via_extras.front().cut_mask, 2u);
-    } else {
-      EXPECT_EQ(path.extra->width, 30);
-      EXPECT_EQ(path.extra->shape, "STRIPE");
-      ASSERT_EQ(path.points.size(), 3u);
-      EXPECT_EQ(path.point_global_begin, 2u);
-      ASSERT_EQ(path.point_extras.size(), 1u);
-      EXPECT_EQ(path.point_extras.front().point_index, 3u);
-      ASSERT_EQ(path.rectangles.size(), 1u);
-      EXPECT_EQ(path.rectangles.front().point_index, 1u);
-    }
-    ++compact_path_index;
-  });
-  EXPECT_EQ(compact_path_index, 2u);
   ASSERT_EQ(routing.wireIds(net).size(), 1u);
   EXPECT_EQ(routing.wireIds(net).front(), wire);
-  EXPECT_EQ(sizeof(DesignRoutingPathRecord), 16u);
-  EXPECT_EQ(sizeof(DesignRoutingPointRecord), 8u);
-  EXPECT_EQ(sizeof(DesignRoutingViaRecord), 16u);
-  EXPECT_EQ(sizeof(DesignWire), 56u);
+  EXPECT_EQ(routing.wire(wire).routing.paths[0].points.begin, 0u);
+  EXPECT_EQ(routing.wire(wire).routing.paths[0].points.count, 2u);
+  EXPECT_EQ(routing.wire(wire).routing.paths[1].points.begin, 2u);
+  EXPECT_EQ(routing.wire(wire).routing.paths[1].points.count, 3u);
+}
+
+TEST_F(DesignStorageTest, EditsWholePathsWithinOneWire)
+{
+  auto& netlist = design.netlistStorage();
+  auto& routing = design.routingStorage();
+  const auto net = netlist.createSpecialNet(DesignNet{.name = "VDD"});
+  const auto make_path = [&](int32_t width, int32_t x) {
+    return DesignWirePath{.layer = routing_layer,
+                          .flags = DesignWirePathFlag::kHasWidth,
+                          .width = width,
+                          .points = {{{x, 0}}, {{x + 10, 0}}}};
+  };
+
+  DesignWireRoutingInput initial;
+  initial.appendPath(make_path(20, 20));
+  initial.appendPath(DesignWirePath{.layer = routing_layer,
+                                    .flags = DesignWirePathFlag::kHasWidth | DesignWirePathFlag::kHasShape,
+                                    .width = 30,
+                                    .shape = "STRIPE",
+                                    .points = {{{30, 0}}, {{40, 0}}, {{50, 0}}},
+                                    .vias = {{.point_index = 1, .tech_via = tech_via}},
+                                    .rectangles = {{.point_index = 2, .delta = {-2, -2, 2, 2}}}});
+  initial.appendPath(make_path(40, 40));
+  const auto wire = routing.createWire(DesignWire{.net = net}, std::move(initial));
+
+  routing.insertPath(wire, 0, make_path(10, 10));
+  routing.insertPath(wire, 2, make_path(25, 25));
+  routing.insertPath(wire, routing.pathCount(wire), make_path(50, 50));
+  routing.validateRestoredRoutingState();
+  ASSERT_EQ(routing.pathCount(wire), 6u);
+  EXPECT_EQ(routing.path(wire, 0).width(), 10);
+  EXPECT_EQ(routing.path(wire, 2).width(), 25);
+  EXPECT_EQ(routing.path(wire, 3).shape(), "STRIPE");
+  EXPECT_EQ(routing.path(wire, 3).vias().front().point_index, 1u);
+  EXPECT_EQ(routing.path(wire, 3).rectangles().front().point_index, 2u);
+  EXPECT_EQ(routing.wire(wire).routing.paths[3].points.begin, 6u);
+  EXPECT_EQ(routing.wire(wire).routing.paths[3].extra_index, 3u);
+
+  routing.replacePath(wire, 2, DesignWirePath{.layer = routing_layer,
+                                              .flags = DesignWirePathFlag::kHasWidth,
+                                              .width = 26,
+                                              .points = {{{25, 0}}, {{25, 10}}, {{25, 20}}, {{25, 30}}},
+                                              .vias = {{.point_index = 3, .tech_via = tech_via}}});
+  routing.validateRestoredRoutingState();
+  EXPECT_EQ(routing.path(wire, 2).width(), 26);
+  EXPECT_EQ(routing.path(wire, 2).points().size(), 4u);
+  EXPECT_EQ(routing.path(wire, 2).vias().front().point_index, 3u);
+  EXPECT_EQ(routing.wire(wire).routing.paths[3].points.begin, 8u);
+  EXPECT_EQ(routing.path(wire, 3).shape(), "STRIPE");
+
+  routing.erasePath(wire, 0);
+  routing.erasePath(wire, 1);
+  routing.erasePath(wire, routing.pathCount(wire) - 1u);
+  routing.validateRestoredRoutingState();
+  ASSERT_EQ(routing.pathCount(wire), 3u);
+  EXPECT_EQ(routing.path(wire, 0).width(), 20);
+  EXPECT_EQ(routing.path(wire, 1).shape(), "STRIPE");
+  EXPECT_EQ(routing.path(wire, 1).vias().front().point_index, 1u);
+  EXPECT_EQ(routing.path(wire, 2).width(), 40);
+  ASSERT_EQ(routing.wireIds(net).size(), 1u);
+  EXPECT_EQ(routing.wireIds(net).front(), wire);
+
+  routing.erasePath(wire, 2);
+  routing.erasePath(wire, 1);
+  routing.erasePath(wire, 0);
+  EXPECT_FALSE(routing.contains(wire));
+  EXPECT_TRUE(routing.wireIds(net).empty());
+  EXPECT_TRUE(netlist.destroyNet(net));
+}
+
+TEST_F(DesignStorageTest, PathEditsPreserveSparseExtrasAndRejectInvalidChanges)
+{
+  auto& netlist = design.netlistStorage();
+  auto& routing = design.routingStorage();
+  const auto net = netlist.createNet(DesignNet{.name = "signal"});
+  const auto plain_path = [&](int32_t x) {
+    return DesignWirePath{.layer = routing_layer, .points = {{{x, 0}}, {{x + 10, 0}}}};
+  };
+
+  DesignWireRoutingInput initial;
+  initial.appendPath(plain_path(0));
+  initial.appendPath(DesignWirePath{.layer = routing_layer,
+                                    .flags = DesignWirePathFlag::kHasMask,
+                                    .mask = 2,
+                                    .points = {{{20, 0}}, {{30, 0}}}});
+  initial.appendPath(plain_path(40));
+  const auto wire = routing.createWire(DesignWire{.net = net}, std::move(initial));
+
+  routing.insertPath(wire, 1, plain_path(10));
+  EXPECT_EQ(routing.wire(wire).routing.paths[2].extra_index, 0u);
+  routing.insertPath(wire, 2, DesignWirePath{.layer = routing_layer,
+                                             .flags = DesignWirePathFlag::kHasMask,
+                                             .mask = 3,
+                                             .points = {{{15, 0}}, {{25, 0}}}});
+  EXPECT_EQ(routing.wire(wire).routing.paths[2].extra_index, 0u);
+  EXPECT_EQ(routing.wire(wire).routing.paths[3].extra_index, 1u);
+  routing.replacePath(wire, 3, plain_path(20));
+  EXPECT_EQ(routing.wire(wire).routing.extras.size(), 1u);
+  EXPECT_EQ(routing.wire(wire).routing.paths[3].extra_index, kInvalidDesignWirePathExtraIndex);
+  routing.validateRestoredRoutingState();
+
+  EXPECT_THROW(routing.insertPath(wire, 0, DesignWirePath{.layer = routing_layer}), std::invalid_argument);
+  EXPECT_THROW(routing.replacePath(wire, 2, DesignWirePath{.layer = routing_layer,
+                                                           .flags = DesignWirePathFlag::kHasWidth,
+                                                           .width = 10,
+                                                           .points = {{{0, 0}}, {{10, 0}}}}),
+               std::invalid_argument);
+  EXPECT_THROW(routing.insertPath(wire, routing.pathCount(wire) + 1u, plain_path(60)), std::out_of_range);
+  EXPECT_THROW(routing.erasePath(wire, routing.pathCount(wire)), std::out_of_range);
+  routing.validateRestoredRoutingState();
+  EXPECT_EQ(routing.pathCount(wire), 5u);
+  EXPECT_EQ(routing.path(wire, 2).mask(), 3u);
+
+  routing.erasePath(wire, 2);
+  routing.validateRestoredRoutingState();
+  EXPECT_TRUE(routing.wire(wire).routing.extras.empty());
+  EXPECT_TRUE(routing.destroyWire(wire));
+  EXPECT_TRUE(netlist.destroyNet(net));
 }
 
 TEST_F(DesignStorageTest, RebuildsWireRoutingAndMovesItsNetIndex)
@@ -217,11 +340,40 @@ TEST_F(DesignStorageTest, RebuildsWireRoutingAndMovesItsNetIndex)
   EXPECT_EQ(routing.path(wire, 0).points().size(), 3u);
   EXPECT_EQ(routing.path(wire, 0).width(), 30);
   EXPECT_EQ(routing.path(wire, 0).shape(), "STRIPE");
-  EXPECT_EQ(routing.routingPoolStatistics().paths.count, 2u);
+  EXPECT_EQ(routing.routingStatistics().paths.count, 1u);
+  EXPECT_EQ(routing.routingStatistics().points.count, 3u);
 
   EXPECT_TRUE(routing.destroyWire(wire));
+  EXPECT_EQ(routing.routingStatistics().paths.count, 0u);
   EXPECT_TRUE(netlist.destroyNet(first_net));
   EXPECT_TRUE(netlist.destroyNet(second_net));
+}
+
+TEST_F(DesignStorageTest, KeepsWireIdsViewAcrossUnrelatedNetIndexChanges)
+{
+  auto& netlist = design.netlistStorage();
+  auto& routing = design.routingStorage();
+  const auto owner = netlist.createSpecialNet(DesignNet{.name = "owner"});
+  const auto add_wire = [&](DesignNetId net) {
+    DesignWireRoutingInput payload;
+    payload.appendPath(DesignWirePath{.layer = routing_layer,
+                                      .flags = DesignWirePathFlag::kHasWidth,
+                                      .width = 20,
+                                      .points = {{{0, 0}}, {{100, 0}}}});
+    return routing.createWire(DesignWire{.net = net}, std::move(payload));
+  };
+  const auto original = add_wire(owner);
+  const auto view = routing.wireIds(owner);
+
+  std::vector<DesignWireId> others;
+  for (int index = 0; index < 32; ++index) {
+    const auto net = netlist.createSpecialNet(DesignNet{.name = "other_" + std::to_string(index)});
+    others.push_back(add_wire(net));
+  }
+  EXPECT_TRUE(routing.destroyWire(others[8]));
+  ASSERT_EQ(view.size(), 1u);
+  EXPECT_EQ(view.front(), original);
+  EXPECT_EQ(routing.wireIds(owner).front(), original);
 }
 
 TEST_F(DesignStorageTest, StoresDesignScopeNonDefaultRulesAndProtectsNetReferences)

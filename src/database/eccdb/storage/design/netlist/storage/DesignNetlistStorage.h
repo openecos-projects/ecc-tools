@@ -5,11 +5,13 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
+
+#include <entt/container/dense_map.hpp>
 
 #include "design/DesignRegistry.h"
 #include "design/netlist/model/NetlistComponents.h"
+#include "index/NameHash.h"
 
 namespace eccdb {
 
@@ -52,6 +54,8 @@ class DesignNetlistStorage
   [[nodiscard]] bool contains(DesignInstancePinId id) const;
   [[nodiscard]] const DesignInstancePin& instancePin(DesignInstancePinId id) const;
   [[nodiscard]] DesignInstancePinId findInstancePin(DesignInstanceId instance, LibraryMasterTermId term) const;
+  // Requires a live instance and library cache. Master-term membership/order
+  // must remain unchanged after instance creation; missing names return null.
   [[nodiscard]] DesignInstancePinId findInstancePin(DesignInstanceId instance, std::string_view term_name) const;
   // The returned view is invalidated when this net's connectivity changes.
   [[nodiscard]] std::span<const DesignInstancePinId> instancePins(DesignNetId net) const;
@@ -124,9 +128,12 @@ class DesignNetlistStorage
   void setNetOptions(DesignNetId net, DesignNetOptions options);
   [[nodiscard]] const DesignNetOptions* netOptions(DesignNetId net) const;
 
+  // Unchecked: IDs must be live in this storage, and the pin's relation for
+  // this net kind must be empty. Caller guarantees valid MUSTJOIN connectivity.
   void connect(DesignInstancePinId pin, DesignNetId net);
   void disconnect(DesignInstancePinId pin);
   void disconnect(DesignInstancePinId pin, DesignNetId net);
+  // Same connection contract as the instance-pin overload.
   void connect(DesignIoPinId pin, DesignNetId net);
   void disconnect(DesignIoPinId pin);
   void disconnect(DesignIoPinId pin, DesignNetId net);
@@ -141,18 +148,10 @@ class DesignNetlistStorage
   // Name indexes are derived acceleration data. Rebuild them after a direct
   // registry restore or rollback; they are intentionally not serialized.
   void rebuildNameIndexes();
+  // Rebind runtime-only Library pointers after a binary restore.
+  void rebuildLibraryCaches();
 
  private:
-  struct TransparentStringHash
-  {
-    using is_transparent = void;
-
-    [[nodiscard]] std::size_t operator()(std::string_view value) const noexcept { return std::hash<std::string_view>{}(value); }
-  };
-
-  template <typename Id>
-  using NameIndex = std::unordered_map<std::string, Id, TransparentStringHash, std::equal_to<>>;
-
   [[nodiscard]] DesignNetId createNet(DesignNet net, bool special);
   void validateInstance(const DesignInstance& instance, DesignInstanceId ignored = {}) const;
   void validateIoPin(const DesignIoPin& pin, DesignIoPinId ignored = {}) const;
@@ -169,10 +168,10 @@ class DesignNetlistStorage
   registry_type& _registry;
   const TechRegistry& _tech_registry;
   const LibraryRegistry& _library_registry;
-  NameIndex<DesignInstanceId> _instance_names;
-  NameIndex<DesignIoPinId> _io_pin_names;
-  NameIndex<DesignNetId> _regular_net_names;
-  NameIndex<DesignNetId> _special_net_names;
+  entt::dense_map<std::string, DesignInstanceId, index::TransparentStringHash, std::equal_to<>> _instance_names;
+  entt::dense_map<std::string, DesignIoPinId, index::TransparentStringHash, std::equal_to<>> _io_pin_names;
+  entt::dense_map<std::string, DesignNetId, index::TransparentStringHash, std::equal_to<>> _regular_net_names;
+  entt::dense_map<std::string, DesignNetId, index::TransparentStringHash, std::equal_to<>> _special_net_names;
 };
 
 }  // namespace eccdb

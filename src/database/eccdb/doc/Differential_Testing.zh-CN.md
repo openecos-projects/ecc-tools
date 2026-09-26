@@ -358,7 +358,7 @@ ECCDB_RT_THREAD_NUMBER=128 \
 
 ## 9. Binary 固定点测试
 
-Binary 测试不是独立 oracle，但必须用于防止 pool、ID generation 和索引在持久化后发生变化：
+Binary 测试不是独立 oracle，但必须用于防止 routing vector、ID generation 和索引在持久化后发生变化：
 
 ```bash
 cmake --build "$ECCDB_DIFF_BUILD" --parallel 128 --target \
@@ -374,7 +374,7 @@ ctest --test-dir "$ECCDB_DIFF_BUILD" --output-on-failure \
 export ECCDB_RUN_LARGE_DESIGN_BINARY_TESTS=1
 export ECCDB_ISPD19_ROOT=/path/to/combined-ispd2019-root
 ctest --test-dir "$ECCDB_DIFF_BUILD" --output-on-failure \
-  -R 'LargeIspd19RoutingPoolReachesByteExactFixedPoint'
+  -R 'LargeIspd19FlatRoutingReachesByteExactFixedPoint'
 ```
 
 该用例会导入约 89.5 万 wires、数千万 path/point records，内存和时间消耗远高于普通差分测试。

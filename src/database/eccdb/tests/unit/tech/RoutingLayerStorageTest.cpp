@@ -100,6 +100,24 @@ TEST_F(RoutingLayerStorageTest, StoresPrlMatrixInsideItsRuleComponent)
   EXPECT_EQ(storage.prlInfluenceSpacingFor(id, 150, 100), 50);
 }
 
+TEST_F(RoutingLayerStorageTest, PreservesNonIncreasingPrlWidthsAndSelectsInSourceOrder)
+{
+  TechRoutingPrlSpacingTableRule table;
+  table.widths = {0, 1500, 4500, 1500};
+  table.parallel_run_lengths = {0};
+  table.cells = {500, 650, 1500, 450};
+
+  const auto id = storage.addPrlSpacingTableRule(layer, std::move(table));
+
+  const auto widths = storage.prlSpacingTableWidths(id);
+  EXPECT_EQ(std::vector<int32_t>(widths.begin(), widths.end()), (std::vector<int32_t>{0, 1500, 4500, 1500}));
+  EXPECT_NE(storage.rule(id).flags & TechRoutingPrlSpacingTableRuleFlag::kNonIncreasingWidths, 0u);
+  EXPECT_EQ(storage.prlSpacingFor(id, 1500, 1500, 0), 500);
+  EXPECT_EQ(storage.prlSpacingFor(id, 3000, 3000, 0), 650);
+  EXPECT_EQ(storage.prlSpacingFor(id, 4500, 4500, 0), 650);
+  EXPECT_EQ(storage.prlSpacingFor(id, 5000, 5000, 0), 450);
+}
+
 TEST_F(RoutingLayerStorageTest, ReadsTwoWidthAndCurrentDensityMatrices)
 {
   TechRoutingTwoWidthsSpacingTableRule two_widths;

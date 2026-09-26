@@ -12,7 +12,7 @@ English version: [Architecture.en.md](Architecture.en.md)
 
 1. **实验性公共 API 层**：`include/eccdb` 中的 `Database`、`Config`、强类型 ID、Data 值和 Ref 句柄。
 2. **API 实现层**：`api` 和 `api/internal`，负责 Facade、PImpl 状态和公共类型与内部类型的转换。
-3. **存储层**：`storage`，包含 EnTT Registry、组件、索引、GeometryPool 和 DesignRoutingPool。
+3. **存储层**：`storage`，包含 EnTT Registry、组件、索引和 Tech/Library 使用的 GeometryPool；Design routing 直接存放在 Wire 组件的扁平 vector 中。
 4. **格式 IO 层**：`io/lef`、`io/def`、`io/idb`、`io/binary`，把外部格式物化为存储对象，或从存储对象导出。
 5. **验证与性能层**：`tests` 和 `benchmarks`，验证存储不变量、格式往返、差分语义和内存/性能特征。
 
@@ -23,12 +23,12 @@ flowchart TB
   client["C++ caller"] --> public["include/eccdb\nDatabase / Config / Types / Data / Ref"]
   public --> api["api\npublic Facade + CRUD"]
   api --> internal["api/internal\nDatabaseState + conversions"]
-  internal --> stores["storage\nEnTT + components + pools"]
+  internal --> stores["storage\nEnTT + components + indexes"]
   stores --> tech["storage/tech\nTechStore"]
   stores --> library["storage/library\nLibraryStore"]
   stores --> design["storage/design\nDesignStore"]
   stores --> geometry["storage/geometry\nGeometryPool"]
-  design --> routing["DesignRoutingPool\ncompact route arrays"]
+  design --> routing["DesignWire routing\nWire-local flat vectors"]
   internal --> io["io/lef · io/def · io/idb · io/binary\nimport / export"]
   io --> stores
   tests["tests\nunit / IO / differential / memory"] --> public
@@ -103,9 +103,8 @@ flowchart LR
   ref --> entity["Database-owned entity\nEnTT components"]
   entity --> snapshot["NetData\nowned snapshot"]
   snapshot --> write["updateNet / destroyNet\nvalidated mutation"]
-  wire["Wire entity"] --> handle["DesignRoutingHandle"]
-  handle --> pool["DesignRoutingPool\ncompact arrays"]
-  pool --> values["Path / Point / Via / Rect\naggregate values"]
+  wire["Wire entity"] --> routing["DesignWireRouting\nWire-local flat vectors"]
+  routing --> values["Path records / Points / Vias / Rects\naggregate values"]
 ```
 
 ### 5.1 ID
@@ -131,7 +130,7 @@ if (value) {
 `NetRef`、`WireRef` 等按值返回，不要求单独进行堆分配，也不拥有实体。它们内部保存数据库状态指针和 ID，因此：
 
 - Ref 不能比所属 `Database` 活得更久；
-- `string_view`、span 和由 pool 返回的 range 不能跨越可能改变底层存储的 mutation；
+- `string_view`、span 和 routing range 不能跨越可能替换或重分配 Wire routing vector 的 mutation；
 - Ref 适合 C++ 便利操作，不应直接作为跨 ABI 的长期对象；跨语言绑定应优先传递 ID 和拥有的 Data；
 - `Database` 移动后，当前设计仍要求调用方不要依赖 Ref 的旧生命周期，优先重新取得 Ref。
 
@@ -143,9 +142,9 @@ if (value) {
 
 Wire 是 Design registry 中的实体，但 Path、Point、Via placement 和 rectangle 是 Wire 的聚合值，不是目前独立的公共实体 ID。
 
-`DesignRoutingPool` 使用连续数组保存：layer ordinal、path record、point、point extra、via、via extra、rectangle 和 path extra。`DesignWire` 组件只保存 routing handle、所属 Net、状态和 shield 等元数据。一个路径中的 Via placement 通过 `TechViaId` 或 design `ViaId` 的 variant 引用 Via 定义；Via 的定义几何在 TechStore 或 DesignStore 的相应对象中，路径只保存放置点、方向、mask 和阵列信息。
+每个 `DesignWire` 组件直接拥有 `paths`、`points`、`vias`、`rectangles` 和 `extras` 五个扁平 vector。Path record 使用 Wire 局部的 `begin/count` 定位三类 primitive；更新 Wire 会替换整组 routing，删除 Wire 会随实体立即释放这些 vector，不产生设计级 Pool 垃圾。一个路径中的 Via placement 通过 `TechViaId` 或 design `ViaId` 引用 Via 定义；Via 定义几何仍位于 TechStore 或 DesignStore。
 
-因此 `WireRef::routingData()` 返回的是组装后的 `WireRoutingData` 值副本，不是第二份权威几何数据库。写回时由 routing storage 重新分配/更新 pool 范围。pool 的 span 会在 mutation 后失效，append transaction 用于失败回滚。
+因此 `WireRef::routingData()` 返回的是 `WireRoutingData` 值副本，不是第二份权威几何数据库。写回时由 routing storage 校验并替换 Wire 内的 routing vector；已有 span/view 会在对应 Wire 更新或删除后失效。
 
 ## 7. 输入、输出和工具数据流
 
@@ -157,7 +156,7 @@ sequenceDiagram
   participant S as Stores
   C->>D: Database::open(Config)
   D->>I: parse/import
-  I->>S: validated creates and pool appends
+  I->>S: validated entity/component creation
   S-->>D: diagnostics and rebuilt indexes
   C->>D: query ID / Data / Ref
   C->>D: update or destroy
@@ -167,7 +166,7 @@ sequenceDiagram
 
 `Config` 目前支持两类输入：一组 LEF 加一个 DEF，或三份独立 binary（technology、library、design）。LEF/DEF parser 的调用序列由 mutex 保护。导入失败时 importer 会回滚已创建实体和 geometry pool 的 staged 内容；这不是对外承诺的长期事务。
 
-binary 文件按三个 registry 域独立保存，header 会校验 magic、格式版本、schema 版本、payload 大小和文件大小。名称索引等派生数据在载入后重建。新增组件或 pool 字段必须同步更新 `io/binary/BinarySchema.h` 的 schema 版本。
+binary 文件按三个 registry 域独立保存，header 会校验 magic、格式版本、schema 版本、payload 大小和文件大小。Wire routing 随 `DesignWire` 组件快照保存，名称索引等派生数据在载入后重建。新增持久组件或字段必须同步更新 `io/binary/BinarySchema.h` 的 schema 版本。
 
 ## 8. 外部集成边界
 
@@ -207,4 +206,4 @@ EccDB 核心存储/IO只负责数据库、LEF/DEF/binary IO 和自身测试。�
   -> 再考虑 revision/ChangeSet/transaction
 ```
 
-这条顺序保留了 EnTT 和连续 Pool 的紧凑存储优势，同时让上层以 ID、拥有 Data 和受控操作使用数据库，而不是自行拼装组件和维护索引。
+这条顺序保留了 EnTT 和连续 vector 的存储优势，同时让上层以 ID、拥有 Data 和受控操作使用数据库，而不是自行拼装组件和维护索引。

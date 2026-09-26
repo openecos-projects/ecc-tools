@@ -174,11 +174,38 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsCompactRoutingAndInd
   DesignFixture fixture;
   const TemporaryFile binary{"design", ".edb"};
   const TemporaryFile fixed{"design-fixed", ".edb"};
+  const TemporaryFile transient{"design-transient", ".edb"};
   const auto expected = test::makeDesignSemanticSnapshot(fixture.design);
   const auto expected_def = DefDesignExporter(fixture.design).exportText();
-  const auto expected_pool = fixture.design.routingStorage().routingPoolStatistics();
+  const auto expected_statistics = fixture.design.routingStorage().routingStatistics();
 
   BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
+  const auto source_instance = fixture.design.netlistStorage().findInstance("u1");
+  const auto source_pin = fixture.design.netlistStorage().findInstancePin(source_instance, "A");
+  ASSERT_TRUE(source_pin);
+  auto& source_pins = fixture.design.designRegistry().registry().get<DesignInstancePins>(source_instance.entity());
+  const auto* cached_index = source_pins.master_term_name_index;
+  const auto cached_terms = source_pins.term_ids;
+  const auto cached_master = source_pins.master;
+  ASSERT_NE(cached_index, nullptr);
+  auto& source_pin_value = fixture.design.designRegistry().registry().get<DesignInstancePin>(source_pin.entity());
+  const auto* cached_instance = source_pin_value.instance_ptr;
+  const auto* cached_term = source_pin_value.master_term_ptr;
+  ASSERT_EQ(cached_instance, &fixture.design.netlistStorage().instance(source_instance));
+  ASSERT_NE(cached_term, nullptr);
+  source_pins.term_ids.clear();
+  source_pins.master = {};
+  source_pins.master_term_name_index = nullptr;
+  source_pin_value.instance_ptr = nullptr;
+  source_pin_value.master_term_ptr = nullptr;
+  BinaryDatabaseExporter::saveDesign(transient.path(), fixture.design);
+  source_pins.term_ids = cached_terms;
+  source_pins.master = cached_master;
+  source_pins.master_term_name_index = cached_index;
+  source_pin_value.instance_ptr = cached_instance;
+  source_pin_value.master_term_ptr = cached_term;
+  expectSameFile(binary.path(), transient.path());
+
   auto restored = BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library);
 
   EXPECT_EQ(test::makeDesignSemanticSnapshot(*restored), expected);
@@ -188,15 +215,113 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsCompactRoutingAndInd
   EXPECT_TRUE(restored->netlistStorage().findSpecialNet("VDD"));
   EXPECT_EQ(restored->routingStorage().wires(restored->netlistStorage().findRegularNet("n1")).size(), 1u);
 
-  const auto actual_pool = restored->routingStorage().routingPoolStatistics();
-  EXPECT_EQ(actual_pool.routing_layers.count, expected_pool.routing_layers.count);
-  EXPECT_EQ(actual_pool.paths.count, expected_pool.paths.count);
-  EXPECT_EQ(actual_pool.path_extras.count, expected_pool.path_extras.count);
-  EXPECT_EQ(actual_pool.points.count, expected_pool.points.count);
-  EXPECT_EQ(actual_pool.point_extras.count, expected_pool.point_extras.count);
-  EXPECT_EQ(actual_pool.vias.count, expected_pool.vias.count);
-  EXPECT_EQ(actual_pool.via_extras.count, expected_pool.via_extras.count);
-  EXPECT_EQ(actual_pool.rectangles.count, expected_pool.rectangles.count);
+  const auto restored_instance = restored->netlistStorage().findInstance("u1");
+  const auto& restored_pins = restored->designRegistry().registry().get<const DesignInstancePins>(restored_instance.entity());
+  const auto master = restored->netlistStorage().instance(restored_instance).master;
+  EXPECT_EQ(restored_pins.term_ids, cached_terms);
+  EXPECT_EQ(restored_pins.master, master);
+  EXPECT_EQ(restored_pins.master_term_name_index,
+            &fixture.library.libraryRegistry().registry().get<const LibraryMasterTermNameIndex>(master.entity()));
+  const auto restored_pin = restored->netlistStorage().findInstancePin(restored_instance, "A");
+  ASSERT_TRUE(restored_pin);
+  const auto& restored_instance_pin = restored->netlistStorage().instancePin(restored_pin);
+  EXPECT_EQ(restored_instance_pin.instance_ptr, &restored->netlistStorage().instance(restored_instance));
+  EXPECT_EQ(restored_instance_pin.master_term_ptr,
+            &fixture.library.masterTermStorage().masterTerm(restored_instance_pin.master_term));
+
+  const auto actual_statistics = restored->routingStorage().routingStatistics();
+  EXPECT_EQ(actual_statistics.paths.count, expected_statistics.paths.count);
+  EXPECT_EQ(actual_statistics.path_extras.count, expected_statistics.path_extras.count);
+  EXPECT_EQ(actual_statistics.points.count, expected_statistics.points.count);
+  EXPECT_EQ(actual_statistics.vias.count, expected_statistics.vias.count);
+  EXPECT_EQ(actual_statistics.rectangles.count, expected_statistics.rectangles.count);
+
+  BinaryDatabaseExporter::saveDesign(fixed.path(), *restored);
+  expectSameFile(binary.path(), fixed.path());
+}
+
+TEST(DesignBinaryDatabaseArchiveTest, RestoresInstancePointersAfterStableDeletion)
+{
+  DesignFixture fixture;
+  auto& netlist = fixture.design.netlistStorage();
+  const auto instance = netlist.findInstance("u1");
+  const auto master = netlist.instance(instance).master;
+  const auto temporary = netlist.createInstance(DesignInstance{.name = "temporary", .master = master});
+  const auto survivor = netlist.createInstance(DesignInstance{.name = "survivor", .master = master});
+  ASSERT_TRUE(netlist.destroyInstance(temporary));
+  ASSERT_EQ(netlist.instanceCount(), 3u);
+  ASSERT_EQ(netlist.instancePin(netlist.findInstancePin(survivor, "A")).instance_ptr, &netlist.instance(survivor));
+
+  const TemporaryFile binary{"design-deleted-instance", ".edb"};
+  const TemporaryFile fixed{"design-deleted-instance-fixed", ".edb"};
+  BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
+  auto restored = BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library);
+  EXPECT_EQ(restored->netlistStorage().instanceCount(), 3u);
+  EXPECT_FALSE(restored->netlistStorage().findInstance("temporary"));
+  const auto restored_survivor = restored->netlistStorage().findInstance("survivor");
+  ASSERT_TRUE(restored_survivor);
+  const auto survivor_pin = restored->netlistStorage().findInstancePin(restored_survivor, "A");
+  ASSERT_TRUE(survivor_pin);
+  EXPECT_EQ(restored->netlistStorage().instancePin(survivor_pin).instance_ptr,
+            &restored->netlistStorage().instance(restored_survivor));
+
+  const auto restored_instance = restored->netlistStorage().findInstance("u1");
+  const auto pin = restored->netlistStorage().findInstancePin(restored_instance, "A");
+  ASSERT_TRUE(pin);
+  EXPECT_EQ(restored->netlistStorage().instancePin(pin).instance_ptr,
+            &restored->netlistStorage().instance(restored_instance));
+
+  BinaryDatabaseExporter::saveDesign(fixed.path(), *restored);
+  expectSameFile(binary.path(), fixed.path());
+}
+
+TEST(DesignBinaryDatabaseArchiveTest, RoundTripsRouterGuidesTracksAndPinAccess)
+{
+  DesignFixture fixture;
+  const auto layer = TechRoutingLayerId{fixture.technology.findLayer("M1").entity()};
+  const auto net = fixture.design.netlistStorage().findRegularNet("n1");
+  const auto instance = fixture.design.netlistStorage().findInstance("u1");
+  const auto master = fixture.design.netlistStorage().instance(instance).master;
+  const auto term = fixture.library.masterTermStorage().findMasterTerm(master, "A");
+  const auto ports = fixture.library.masterPortStorage().masterPorts(term);
+  ASSERT_FALSE(ports.empty());
+  const auto pin = fixture.design.netlistStorage().findInstancePin(instance, term);
+  const auto io_pin = fixture.design.netlistStorage().findIoPin("IN");
+  ASSERT_TRUE(net);
+  ASSERT_TRUE(instance);
+  ASSERT_TRUE(pin);
+  ASSERT_TRUE(io_pin);
+
+  fixture.design.guideStorage().replaceGuides(
+      net, {{.box = {0, 100, 900, 300}, .layer = layer, .flags = DesignRouteGuideFlag::kJumper}});
+  fixture.design.guideStorage().replaceTrackAssignments(
+      net, {{.layer = layer, .box = {0, 200, 900, 200}}});
+  const auto candidate = DesignPinAccessPoint{
+      .point = {10, 20},
+      .layer = layer,
+      .access_directions = DesignPinAccessDirection::kEast | DesignPinAccessDirection::kWest};
+  fixture.design.pinAccessStorage().setMasterPortCandidateGroup(ports.front(), 0u, {candidate});
+  fixture.design.pinAccessStorage().setInstancePinAccessGroup(instance, 0u);
+  fixture.design.pinAccessStorage().setPreferredInstancePinAccess(
+      pin, {{.master_port = ports.front(), .group_index = 0u, .point_index = 0u}});
+  fixture.design.pinAccessStorage().setIoPinPortCandidateGroup(io_pin, 0u, 0u, {candidate});
+
+  const TemporaryFile binary{"router-context", ".edb"};
+  const TemporaryFile fixed{"router-context-fixed", ".edb"};
+  BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
+  auto restored = BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library);
+
+  ASSERT_EQ(restored->guideStorage().guides(net).size(), 1u);
+  EXPECT_EQ(restored->guideStorage().guides(net).front().box, (Rect{0, 100, 900, 300}));
+  ASSERT_EQ(restored->guideStorage().trackAssignments(net).size(), 1u);
+  EXPECT_EQ(restored->guideStorage().trackAssignments(net).front().box, (Rect{0, 200, 900, 200}));
+  ASSERT_EQ(restored->pinAccessStorage().masterPortCandidateGroup(ports.front(), 0u).points.size(), 1u);
+  EXPECT_EQ(restored->pinAccessStorage().masterPortCandidateGroup(ports.front(), 0u).points.front().point,
+            (Point{10, 20}));
+  EXPECT_EQ(restored->pinAccessStorage().instancePinAccessGroup(instance), 0u);
+  ASSERT_EQ(restored->pinAccessStorage().preferredInstancePinAccess(pin).size(), 1u);
+  EXPECT_EQ(restored->pinAccessStorage().preferredInstancePinAccess(pin).front().master_port, ports.front());
+  ASSERT_EQ(restored->pinAccessStorage().ioPinPortCandidateGroup(io_pin, 0u, 0u).points.size(), 1u);
 
   BinaryDatabaseExporter::saveDesign(fixed.path(), *restored);
   expectSameFile(binary.path(), fixed.path());
@@ -211,7 +336,7 @@ TEST(DesignBinaryDatabaseArchiveTest, RejectsTruncatedPayload)
   EXPECT_THROW(BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library), std::runtime_error);
 }
 
-TEST(DesignBinaryDatabaseArchiveTest, LargeIspd19RoutingPoolReachesByteExactFixedPoint)
+TEST(DesignBinaryDatabaseArchiveTest, LargeIspd19FlatRoutingReachesByteExactFixedPoint)
 {
   using Clock = std::chrono::steady_clock;
   const auto elapsedSeconds = [](Clock::time_point begin) {
@@ -237,12 +362,12 @@ TEST(DesignBinaryDatabaseArchiveTest, LargeIspd19RoutingPoolReachesByteExactFixe
   auto source = std::make_unique<DesignStore>(technology.techRegistry(), library.libraryRegistry());
   ASSERT_NO_THROW(DefDesignImporter(*source).import(def));
 
-  const auto expected_pool = source->routingStorage().routingPoolStatistics();
+  const auto expected_statistics = source->routingStorage().routingStatistics();
   EXPECT_EQ(source->routingStorage().wireCount(), 895077u);
-  EXPECT_EQ(expected_pool.paths.count, 46978419u);
-  EXPECT_EQ(expected_pool.points.count, 74768813u);
-  EXPECT_EQ(expected_pool.vias.count, 14697732u);
-  EXPECT_EQ(expected_pool.rectangles.count, 4490293u);
+  EXPECT_EQ(expected_statistics.paths.count, 46978419u);
+  EXPECT_EQ(expected_statistics.points.count, 74768813u);
+  EXPECT_EQ(expected_statistics.vias.count, 14697732u);
+  EXPECT_EQ(expected_statistics.rectangles.count, 4490293u);
 
   const TemporaryFile binary{"ispd19-test10-design", ".edb"};
   const TemporaryFile fixed{"ispd19-test10-design-fixed", ".edb"};
@@ -254,19 +379,16 @@ TEST(DesignBinaryDatabaseArchiveTest, LargeIspd19RoutingPoolReachesByteExactFixe
   const auto read_begin = Clock::now();
   auto restored = BinaryDatabaseImporter::loadDesign(binary.path(), technology, library);
   const auto read_seconds = elapsedSeconds(read_begin);
-  const auto actual_pool = restored->routingStorage().routingPoolStatistics();
+  const auto actual_statistics = restored->routingStorage().routingStatistics();
   EXPECT_EQ(restored->routingStorage().wireCount(), source->routingStorage().wireCount());
   EXPECT_EQ(restored->netlistStorage().instanceCount(), source->netlistStorage().instanceCount());
   EXPECT_EQ(restored->netlistStorage().instancePinCount(), source->netlistStorage().instancePinCount());
   EXPECT_EQ(restored->netlistStorage().netCount(), source->netlistStorage().netCount());
-  EXPECT_EQ(actual_pool.routing_layers.count, expected_pool.routing_layers.count);
-  EXPECT_EQ(actual_pool.paths.count, expected_pool.paths.count);
-  EXPECT_EQ(actual_pool.path_extras.count, expected_pool.path_extras.count);
-  EXPECT_EQ(actual_pool.points.count, expected_pool.points.count);
-  EXPECT_EQ(actual_pool.point_extras.count, expected_pool.point_extras.count);
-  EXPECT_EQ(actual_pool.vias.count, expected_pool.vias.count);
-  EXPECT_EQ(actual_pool.via_extras.count, expected_pool.via_extras.count);
-  EXPECT_EQ(actual_pool.rectangles.count, expected_pool.rectangles.count);
+  EXPECT_EQ(actual_statistics.paths.count, expected_statistics.paths.count);
+  EXPECT_EQ(actual_statistics.path_extras.count, expected_statistics.path_extras.count);
+  EXPECT_EQ(actual_statistics.points.count, expected_statistics.points.count);
+  EXPECT_EQ(actual_statistics.vias.count, expected_statistics.vias.count);
+  EXPECT_EQ(actual_statistics.rectangles.count, expected_statistics.rectangles.count);
 
   const auto fixed_write_begin = Clock::now();
   BinaryDatabaseExporter::saveDesign(fixed.path(), *restored);

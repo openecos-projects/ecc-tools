@@ -36,6 +36,15 @@ size_t lastStrictlyLowerIndex(std::span<const int32_t> thresholds, int32_t value
   return first_not_lower == thresholds.begin() ? 0u : static_cast<size_t>(first_not_lower - thresholds.begin() - 1);
 }
 
+size_t lastConsecutiveLowerIndex(std::span<const int32_t> thresholds, int32_t value)
+{
+  size_t index = 1;
+  while (index < thresholds.size() && value > thresholds[index]) {
+    ++index;
+  }
+  return index - 1;
+}
+
 size_t selectTwoWidthAxis(std::span<const TechRoutingTwoWidthsSpacingTableWidth> axes, int32_t width, int32_t parallel_run_length)
 {
   size_t selected = 0;
@@ -236,7 +245,12 @@ TechRoutingPrlSpacingTableRuleId TechRoutingLayerStorage::addPrlSpacingTableRule
                                                                                  TechRoutingPrlSpacingTableRule rule)
 {
   validatePrlSpacingTable(rule);
-  rule.flags &= ~(TechRoutingPrlSpacingTableRuleFlag::kHasExceptWithin | TechRoutingPrlSpacingTableRuleFlag::kHasInfluence);
+  rule.flags &= ~(TechRoutingPrlSpacingTableRuleFlag::kHasExceptWithin | TechRoutingPrlSpacingTableRuleFlag::kHasInfluence
+                  | TechRoutingPrlSpacingTableRuleFlag::kNonIncreasingWidths);
+  if (std::adjacent_find(rule.widths.begin(), rule.widths.end(), [](int32_t lhs, int32_t rhs) { return lhs >= rhs; })
+      != rule.widths.end()) {
+    rule.flags |= TechRoutingPrlSpacingTableRuleFlag::kNonIncreasingWidths;
+  }
   if (!rule.except_withins.empty()) {
     rule.flags |= TechRoutingPrlSpacingTableRuleFlag::kHasExceptWithin;
   }
@@ -301,7 +315,11 @@ int32_t TechRoutingLayerStorage::prlSpacingFor(TechRoutingPrlSpacingTableRuleId 
   if (widths.empty() || lengths.empty()) {
     throw std::logic_error("routing PRL spacing table has no axes");
   }
-  return prlSpacingTableCell(rule_id, static_cast<uint32_t>(lastStrictlyLowerIndex(widths, std::max(width_a, width_b))),
+  const auto width = std::max(width_a, width_b);
+  const auto width_index = (rule(rule_id).flags & TechRoutingPrlSpacingTableRuleFlag::kNonIncreasingWidths) != 0u
+                               ? lastConsecutiveLowerIndex(widths, width)
+                               : lastStrictlyLowerIndex(widths, width);
+  return prlSpacingTableCell(rule_id, static_cast<uint32_t>(width_index),
                              static_cast<uint32_t>(lastStrictlyLowerIndex(lengths, parallel_run_length)));
 }
 
@@ -629,7 +647,9 @@ TechEntity TechRoutingLayerStorage::createOwnedRule(TechRoutingLayerId owner)
 
 void TechRoutingLayerStorage::validatePrlSpacingTable(const TechRoutingPrlSpacingTableRule& rule)
 {
-  requireStrictlyIncreasing(rule.widths, "routing PRL widths must be strictly increasing");
+  if (rule.widths.empty()) {
+    throw std::invalid_argument("routing PRL widths must not be empty");
+  }
   requireStrictlyIncreasing(rule.parallel_run_lengths, "routing PRL lengths must be strictly increasing");
   if (rule.cells.size()
       != checkedMatrixCellCount(rule.widths.size(), rule.parallel_run_lengths.size(), "invalid routing PRL table dimensions")) {

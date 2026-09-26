@@ -262,7 +262,17 @@ inline std::string viaRuleName(const DesignStore& design, TechViaRuleGenerateId 
 template <typename Component>
 std::size_t componentCount(const DesignStore& design)
 {
-  return design.designRegistry().registry().view<const Component>().size();
+  const auto view = design.designRegistry().registry().view<const Component>();
+  if constexpr (requires { view.size(); }) {
+    return view.size();
+  } else {
+    std::size_t count = 0;
+    for (const auto entity : view) {
+      static_cast<void>(entity);
+      ++count;
+    }
+    return count;
+  }
 }
 
 inline std::string globalKey(const DesignStore& design)

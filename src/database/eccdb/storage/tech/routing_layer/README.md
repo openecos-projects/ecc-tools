@@ -70,10 +70,12 @@ TWOWIDTHS:         one width/PRL axis + N x N row-major cells
 CURRENTDENSITY:    frequency axis + width axis + frequency-major cells
 ```
 
-`RoutingLayerStorage` validates ascending axes and matrix dimensions while
-inserting data. It exposes indexed reads plus LEF-oriented calculations:
+`RoutingLayerStorage` validates PRL length axes, other ordered axes, and matrix
+dimensions while inserting data. Legacy PRL width rows retain their LEF order,
+including non-increasing rows. It exposes indexed reads plus LEF-oriented calculations:
 
-- `prlSpacingFor`: strict threshold selection on width and PRL axes.
+- `prlSpacingFor`: strict threshold selection on ordered axes; non-increasing
+  width rows use source-order selection compatible with OpenDB `getSpacing()`.
 - `influenceSpacingFor` and `prlInfluenceSpacingFor`: matching influence rows.
 - `twoWidthsSpacingFor`: selects two compatible axis rows then indexes the
   dense matrix.

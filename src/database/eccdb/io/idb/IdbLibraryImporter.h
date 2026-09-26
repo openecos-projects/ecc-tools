@@ -1,6 +1,6 @@
 #pragma once
 
-#include <unordered_map>
+#include <entt/container/dense_map.hpp>
 
 #include "library/LibraryStore.h"
 
@@ -28,7 +28,7 @@ class IdbLibraryImporter
  private:
   LibraryStore& _database;
   const IdbTechImporter& _tech_importer;
-  std::unordered_map<const ::idb::IdbSite*, LibrarySiteId> _site_ids;
+  entt::dense_map<const ::idb::IdbSite*, LibrarySiteId> _site_ids;
   bool _imported = false;
 };
 

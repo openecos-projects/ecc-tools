@@ -13,10 +13,11 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <entt/container/dense_map.hpp>
+#include <entt/container/dense_set.hpp>
 
 #include "defiBlockage.hpp"
 #include "defiComponent.hpp"
@@ -37,7 +38,7 @@
 #include "design/netlist/model/NetlistComponents.h"
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/routing/component/RoutingComponents.h"
-#include "design/routing/pool/WireRoutingInput.h"
+#include "design/routing/component/WireRouting.h"
 #include "design/via/component/ViaComponents.h"
 #include "def/detail/DefParserMutex.h"
 #include "library/cell_master/model/CellMasterComponents.h"
@@ -75,12 +76,12 @@ struct DirectContext
   int32_t database_units_per_micron = 0;
   std::string divider_character = "/";
   std::string bus_bit_characters = "[]";
-  std::unordered_map<std::string, TechLayerId> layers;
-  std::unordered_map<std::string, TechViaMasterId> tech_vias;
-  std::unordered_map<std::string, TechViaRuleGenerateId> via_rules;
-  std::unordered_map<std::string, TechNonDefaultRuleId> tech_ndrs;
-  std::unordered_map<std::string, LibrarySiteId> sites;
-  std::unordered_map<std::string, LibraryCellMasterId> masters;
+  entt::dense_map<std::string, TechLayerId> layers;
+  entt::dense_map<std::string, TechViaMasterId> tech_vias;
+  entt::dense_map<std::string, TechViaRuleGenerateId> via_rules;
+  entt::dense_map<std::string, TechNonDefaultRuleId> tech_ndrs;
+  entt::dense_map<std::string, LibrarySiteId> sites;
+  entt::dense_map<std::string, LibraryCellMasterId> masters;
 
   struct PendingConnection
   {
@@ -109,10 +110,20 @@ struct DirectContext
   std::vector<PendingRegion> pending_regions;
   std::vector<PendingGroupRegion> pending_group_regions;
   std::optional<GroupContext> current_group;
-  std::unordered_map<std::string, std::size_t> diagnostics;
+  entt::dense_map<std::string, std::size_t> diagnostics;
   std::exception_ptr callback_failure;
   std::size_t must_join_index = 0;
 };
+
+template <typename Value>
+const Value& requiredMapped(const entt::dense_map<std::string, Value>& index, const std::string& name)
+{
+  const auto found = index.find(name);
+  if (found == index.end()) {
+    throw std::out_of_range("missing DEF reference: " + name);
+  }
+  return found->second;
+}
 
 bool isPinConnection(std::string_view value)
 {
@@ -415,12 +426,14 @@ void resolveWireVia(DirectContext& context, DesignWireVia& via, std::string_view
 
 void parsePath(DirectContext& context, const defiPath& source, DesignWireRoutingInput& routing)
 {
-  const auto old_path_count = routing.path_records.size();
+  const auto old_path_count = routing.paths.size();
   const auto old_point_count = routing.points.size();
   const auto old_via_count = routing.vias.size();
   const auto old_rectangle_count = routing.rectangles.size();
   const auto old_extra_count = routing.extras.size();
-  DesignWireInputPathRecord record;
+  DesignWirePathRecord record{.points = {.begin = exactSizeUint32(old_point_count, "wire point vector")},
+                              .vias = {.begin = exactSizeUint32(old_via_count, "wire VIA vector")},
+                              .rectangles = {.begin = exactSizeUint32(old_rectangle_count, "wire RECT vector")}};
   DesignWirePathExtra extra;
   std::optional<std::array<uint32_t, 3>> pending_via_mask;
   try {
@@ -549,19 +562,19 @@ void parsePath(DirectContext& context, const defiPath& source, DesignWireRouting
       throw std::runtime_error("wire path requires a layer");
     }
 
-    record.point_end.value = exactSizeUint32(routing.points.size(), "wire point pool");
-    record.via_end.value = exactSizeUint32(routing.vias.size(), "wire VIA pool");
-    record.rectangle_end.value = exactSizeUint32(routing.rectangles.size(), "wire RECT pool");
+    record.points.count = exactSizeUint32(routing.points.size() - old_point_count, "wire point vector");
+    record.vias.count = exactSizeUint32(routing.vias.size() - old_via_count, "wire VIA vector");
+    record.rectangles.count = exactSizeUint32(routing.rectangles.size() - old_rectangle_count, "wire RECT vector");
     constexpr uint32_t kValueFlags = DesignWirePathFlag::kHasWidth | DesignWirePathFlag::kHasMask
                                      | DesignWirePathFlag::kHasTaperRule | DesignWirePathFlag::kHasShape
                                      | DesignWirePathFlag::kHasStyle;
     if ((record.flags & kValueFlags) != 0u) {
-      record.extra_index = exactSizeUint32(routing.extras.size(), "wire path extra pool");
+      record.extra_index = exactSizeUint32(routing.extras.size(), "wire path extra vector");
       routing.extras.push_back(std::move(extra));
     }
-    routing.path_records.push_back(record);
+    routing.paths.push_back(record);
   } catch (...) {
-    routing.path_records.resize(old_path_count);
+    routing.paths.resize(old_path_count);
     routing.points.resize(old_point_count);
     routing.vias.resize(old_via_count);
     routing.rectangles.resize(old_rectangle_count);
@@ -604,9 +617,9 @@ struct FileCloser
 };
 
 template <typename Id, typename Component>
-std::unordered_map<std::string, Id> componentNameMap(const auto& registry)
+entt::dense_map<std::string, Id> componentNameMap(const auto& registry)
 {
-  std::unordered_map<std::string, Id> result;
+  entt::dense_map<std::string, Id> result;
   const auto view = registry.template view<const Component>();
   for (const auto entity : view) {
     result.emplace(view.template get<const Component>(entity).name, Id{entity});
@@ -696,7 +709,6 @@ void rollbackImport(DesignStore& design) noexcept
     }
     design.netlistStorage().rebuildNameIndexes();
     design.routingStorage().rebuildWireIndex();
-    design.routingStorage().clearRoutingPool();
   } catch (...) {
   }
 }
@@ -754,7 +766,10 @@ void directConnectIoPin(DirectContext& context, DesignIoPinId pin_id, DesignNetI
   auto& netlist = context.design.netlistStorage();
   const auto& pin = netlist.ioPin(pin_id);
   const auto previous = special ? pin.special_net : pin.net;
-  if (previous && previous != net_id) {
+  if (previous == net_id) {
+    return;
+  }
+  if (previous) {
     netlist.disconnect(pin_id, previous);
     context.diagnostics["DUPLICATE NET CONNECTION"] += 1;
   }
@@ -766,7 +781,10 @@ void directConnectInstancePin(DirectContext& context, DesignInstancePinId pin_id
   auto& netlist = context.design.netlistStorage();
   const auto& pin = netlist.instancePin(pin_id);
   const auto previous = special ? pin.special_net : pin.net;
-  if (previous && previous != net_id) {
+  if (previous == net_id) {
+    return;
+  }
+  if (previous) {
     netlist.disconnect(pin_id, previous);
     context.diagnostics["DUPLICATE NET CONNECTION"] += 1;
   }
@@ -1035,14 +1053,14 @@ int directViaCallback(defrCallbackType_e type, defiVia* source, defiUserData use
       int ur_x = 0;
       int ur_y = 0;
       source->layer(index, &layer, &ll_x, &ll_y, &ur_x, &ur_y);
-      DesignViaRectangle rectangle{.layer = context.layers.at(requiredText(layer, "VIA RECT layer")),
+      DesignViaRectangle rectangle{.layer = requiredMapped(context.layers, requiredText(layer, "VIA RECT layer")),
                                    .rectangle = Rect{ll_x, ll_y, ur_x, ur_y}.normalized()};
       if (source->hasRectMask(index)) rectangle.mask = static_cast<uint32_t>(source->rectMask(index));
       target.rectangles.push_back(std::move(rectangle));
     }
     target.polygons.reserve(static_cast<std::size_t>(source->numPolygons()));
     for (int index = 0; index < source->numPolygons(); ++index) {
-      DesignViaPolygon polygon{.layer = context.layers.at(requiredText(source->polygonName(index), "VIA POLYGON layer")),
+      DesignViaPolygon polygon{.layer = requiredMapped(context.layers, requiredText(source->polygonName(index), "VIA POLYGON layer")),
                                .points = points(source->getPolygon(index), "VIA POLYGON")};
       if (source->hasPolyMask(index)) polygon.mask = static_cast<uint32_t>(source->polyMask(index));
       target.polygons.push_back(std::move(polygon));
@@ -1052,10 +1070,10 @@ int directViaCallback(defrCallbackType_e type, defiVia* source, defiUserData use
       target.pattern_name = requiredText(source->pattern(), "VIA PATTERNNAME");
     }
     if ((target.flags & DesignViaFlag::kGenerated) != 0u) {
-      target.generated.via_rule = context.via_rules.at(via_rule_name);
-      target.generated.bottom_layer = TechRoutingLayerId{context.layers.at(bottom_layer).entity()};
-      target.generated.cut_layer = TechCutLayerId{context.layers.at(cut_layer).entity()};
-      target.generated.top_layer = TechRoutingLayerId{context.layers.at(top_layer).entity()};
+      target.generated.via_rule = requiredMapped(context.via_rules, via_rule_name);
+      target.generated.bottom_layer = TechRoutingLayerId{requiredMapped(context.layers, bottom_layer).entity()};
+      target.generated.cut_layer = TechCutLayerId{requiredMapped(context.layers, cut_layer).entity()};
+      target.generated.top_layer = TechRoutingLayerId{requiredMapped(context.layers, top_layer).entity()};
     }
     static_cast<void>(context.design.routingStorage().createVia(std::move(target)));
   });
@@ -1070,7 +1088,7 @@ int directNdrCallback(defrCallbackType_e type, defiNonDefault* source, defiUserD
     if (source->hasHardspacing()) target.flags |= DesignNonDefaultRuleFlag::kHardSpacing;
     target.layer_rules.reserve(static_cast<std::size_t>(source->numLayers()));
     for (int index = 0; index < source->numLayers(); ++index) {
-      DesignNdrLayerRule rule{.layer = context.layers.at(requiredText(source->layerName(index), "NONDEFAULTRULE LAYER")),
+      DesignNdrLayerRule rule{.layer = requiredMapped(context.layers, requiredText(source->layerName(index), "NONDEFAULTRULE LAYER")),
                               .width = source->layerWidthVal(index)};
       if (source->hasLayerDiagWidth(index)) { rule.flags |= DesignNdrLayerRuleFlag::kHasDiagWidth; rule.diag_width = source->layerDiagWidthVal(index); }
       if (source->hasLayerSpacing(index)) { rule.flags |= DesignNdrLayerRuleFlag::kHasSpacing; rule.spacing = source->layerSpacingVal(index); }
@@ -1086,11 +1104,11 @@ int directNdrCallback(defrCallbackType_e type, defiNonDefault* source, defiUserD
     }
     target.via_rules.reserve(static_cast<std::size_t>(source->numViaRules()));
     for (int index = 0; index < source->numViaRules(); ++index) {
-      target.via_rules.push_back(context.via_rules.at(requiredText(source->viaRuleName(index), "NONDEFAULTRULE VIARULE")));
+      target.via_rules.push_back(requiredMapped(context.via_rules, requiredText(source->viaRuleName(index), "NONDEFAULTRULE VIARULE")));
     }
     target.min_cuts.reserve(static_cast<std::size_t>(source->numMinCuts()));
     for (int index = 0; index < source->numMinCuts(); ++index) {
-      target.min_cuts.push_back(DesignNdrMinCutsRule{.layer = TechCutLayerId{context.layers.at(requiredText(source->cutLayerName(index), "NONDEFAULTRULE MINCUTS layer")).entity()},
+      target.min_cuts.push_back(DesignNdrMinCutsRule{.layer = TechCutLayerId{requiredMapped(context.layers, requiredText(source->cutLayerName(index), "NONDEFAULTRULE MINCUTS layer")).entity()},
                                                      .cut_count = exactUint32(source->numCuts(index), "MINCUTS count")});
     }
     target.properties.reserve(static_cast<std::size_t>(source->numProps()));
@@ -1111,7 +1129,7 @@ int directComponentCallback(defrCallbackType_e type, defiComponent* source, defi
     const auto name = requiredText(source->id(), "COMPONENT name");
     if (context.design.netlistStorage().findInstance(name)) throw std::runtime_error("duplicate DEF COMPONENT: " + name);
     const auto master_name = requiredText(source->name(), "COMPONENT master");
-    DesignInstance instance{.name = name, .master = context.masters.at(master_name), .placement_status = componentPlacement(*source)};
+    DesignInstance instance{.name = name, .master = requiredMapped(context.masters, master_name), .placement_status = componentPlacement(*source)};
     if (source->hasSource()) instance.source = instanceSource(source->source());
     if (instance.placement_status != DesignPlacementStatus::kUnplaced) {
       instance.origin = {source->placementX(), source->placementY()};
@@ -1171,7 +1189,7 @@ void directParsePinGeometry(const Source& source, DesignIoPinPort& port, DirectC
     int ur_y = 0;
     source.bounds(index, &ll_x, &ll_y, &ur_x, &ur_y);
     const auto layer_name = requiredText(source.layer(index), std::string(field) + " LAYER");
-    DesignPinRectangle rectangle{.layer = context.layers.at(layer_name),
+    DesignPinRectangle rectangle{.layer = requiredMapped(context.layers, layer_name),
                                  .rectangle = Rect{ll_x, ll_y, ur_x, ur_y}.normalized()};
     if (source.layerMask(index) != 0) { rectangle.flags |= DesignPinShapeFlag::kHasMask; rectangle.mask = static_cast<uint32_t>(source.layerMask(index)); }
     if (source.hasLayerSpacing(index)) { rectangle.flags |= DesignPinShapeFlag::kHasSpacing; rectangle.spacing = source.layerSpacing(index); }
@@ -1179,7 +1197,7 @@ void directParsePinGeometry(const Source& source, DesignIoPinPort& port, DirectC
     port.rectangles.push_back(std::move(rectangle));
   }
   for (int index = 0; index < source.numPolygons(); ++index) {
-    DesignPinPolygon polygon{.layer = context.layers.at(requiredText(source.polygonName(index), std::string(field) + " POLYGON layer")),
+    DesignPinPolygon polygon{.layer = requiredMapped(context.layers, requiredText(source.polygonName(index), std::string(field) + " POLYGON layer")),
                              .points = points(source.getPolygon(index), std::string(field) + " POLYGON")};
     if (source.polygonMask(index) != 0) { polygon.flags |= DesignPinShapeFlag::kHasMask; polygon.mask = static_cast<uint32_t>(source.polygonMask(index)); }
     if (source.hasPolygonSpacing(index)) { polygon.flags |= DesignPinShapeFlag::kHasSpacing; polygon.spacing = source.polygonSpacing(index); }
@@ -1244,7 +1262,8 @@ int directNetCallback(defrCallbackType_e type, defiNet* source, defiUserData use
     DesignNet target;
     std::string net_name;
     if (must_join) {
-      if (special || source->numConnections() != 1) {
+      if (special || source->numConnections() != 1
+          || isPinConnection(requiredText(source->instance(0), "MUSTJOIN instance"))) {
         throw std::runtime_error("DEF MUSTJOIN requires exactly one regular-net component pin reference");
       }
       target.flags |= DesignNetFlag::kMustJoin;
@@ -1396,7 +1415,7 @@ int directGroupCallback(defrCallbackType_e type, defiGroup* source, defiUserData
         group.region = region;
       }
     }
-    std::unordered_set<uint32_t> added;
+    entt::dense_set<uint32_t> added;
     for (const auto& pattern : context.current_group->member_patterns) {
       for (const auto id : context.design.netlistStorage().instances()) {
         if (globMatches(pattern, context.design.netlistStorage().instance(id).name) && added.emplace(id.packed()).second) group.instances.push_back(id);
@@ -1458,7 +1477,7 @@ int directFillCallback(defrCallbackType_e type, defiFill* source, defiUserData u
     directDiagnostic(context, "FILL POLYGON", static_cast<std::size_t>(source->numPolygons()));
     if (source->numRectangles() == 0) return;
     const auto layer_name = requiredText(source->layerName(), "FILL LAYER");
-    DesignFill target{.layer = context.layers.at(layer_name)};
+    DesignFill target{.layer = requiredMapped(context.layers, layer_name)};
     if (source->hasLayerOpc()) target.flags |= DesignFillFlag::kOpc;
     if (source->layerMask() != 0) { if (source->layerMask() < 0) throw std::runtime_error("FILL MASK must be non-negative"); target.flags |= DesignFillFlag::kHasMask; target.mask = static_cast<uint32_t>(source->layerMask()); }
     target.rectangles.reserve(static_cast<std::size_t>(source->numRectangles()));
@@ -1556,7 +1575,7 @@ void DefDesignImporter::import(const std::filesystem::path& file)
     const std::scoped_lock lock(def_detail::parserMutex());
     try {
       parseDirectFile(file, context);
-      _design.routingStorage().shrinkRoutingPoolToFit();
+      _design.routingStorage().shrinkRoutingToFit();
     } catch (...) {
       try {
         throw;

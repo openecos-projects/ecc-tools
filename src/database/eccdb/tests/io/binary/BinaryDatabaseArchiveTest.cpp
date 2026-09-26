@@ -17,7 +17,6 @@
 #include <string_view>
 #include <vector>
 
-#include "design/routing/pool/RoutingPoolRecords.h"
 #include "binary/BinaryDatabaseExporter.h"
 #include "lef/LefLibraryExporter.h"
 #include "lef/LefTechExporter.h"
@@ -83,32 +82,6 @@ void expectSameFile(const std::filesystem::path& lhs, const std::filesystem::pat
   }
 }
 
-template <binary_detail::ByteCompatibleArchiveValue Value>
-void expectByteCompatibleSequenceMatchesGeneric(std::span<const Value> values)
-{
-  std::ostringstream generic;
-  binary_detail::BinaryOutputArchive generic_archive(generic);
-  generic_archive.writeSequence(values);
-  generic_archive.flush();
-
-  std::ostringstream packed;
-  binary_detail::BinaryOutputArchive packed_archive(packed);
-  packed_archive.writeByteCompatibleSequence(values);
-  packed_archive.flush();
-  ASSERT_EQ(packed.str(), generic.str());
-
-  std::istringstream input(generic.str());
-  binary_detail::BinaryInputArchive input_archive(input);
-  std::vector<Value> restored;
-  input_archive.readByteCompatibleSequence(restored);
-
-  std::ostringstream restored_generic;
-  binary_detail::BinaryOutputArchive restored_archive(restored_generic);
-  restored_archive.writeSequence(std::span<const Value>{restored});
-  restored_archive.flush();
-  EXPECT_EQ(restored_generic.str(), generic.str());
-}
-
 std::string exportTech(const TechStore& technology)
 {
   std::ostringstream output;
@@ -131,7 +104,6 @@ void expectPdkRoundTrip(const lef_test::LefPdkDomain& domain)
   std::vector<std::filesystem::path> files{domain.technology};
   files.insert(files.end(), domain.cells.begin(), domain.cells.end());
   LefLibraryImporter(source_technology, source_library).import(files);
-
   const auto expected_tech_lef = exportTech(source_technology);
   const auto expected_library_lef = exportLibrary(source_technology, source_library);
   const TemporaryFile tech_binary(domain.name + "-tech", ".edb");
@@ -143,7 +115,6 @@ void expectPdkRoundTrip(const lef_test::LefPdkDomain& domain)
   BinaryDatabaseExporter::saveLibrary(library_binary.path(), source_library);
   auto technology = BinaryDatabaseImporter::loadTech(tech_binary.path());
   auto library = BinaryDatabaseImporter::loadLibrary(library_binary.path(), *technology);
-
   EXPECT_EQ(expected_tech_lef, exportTech(*technology));
   EXPECT_EQ(expected_library_lef, exportLibrary(*technology, *library));
 
@@ -399,48 +370,6 @@ END LIBRARY
   EXPECT_TRUE(technology->viaRuleStorage().contains(restored_rule));
 }
 
-TEST(BinaryDatabaseArchiveTest, ByteCompatibleSequenceMatchesStableFieldEncoding)
-{
-  std::vector<DesignRoutingPointRecord> points(20'000);
-  for (std::size_t index = 0; index < points.size(); ++index) {
-    points[index].position = Point{static_cast<int32_t>(index), -static_cast<int32_t>(index)};
-  }
-  expectByteCompatibleSequenceMatchesGeneric(std::span<const DesignRoutingPointRecord>{points});
-
-  const std::array point_extras{
-      DesignRoutingPointExtraEntry{.point_index = 3u, .flags = 5u, .extension = -7},
-      DesignRoutingPointExtraEntry{.point_index = 11u, .flags = 13u, .extension = 17}};
-  expectByteCompatibleSequenceMatchesGeneric(std::span<const DesignRoutingPointExtraEntry>{point_extras});
-
-  const std::array vias{
-      DesignRoutingViaRecord{.point_index = 19u,
-                             .meta = DesignRoutingViaMeta{.orientation = 1u, .flags = 2u, .reference_kind = 1u, .reserved = 0u},
-                             .reference = 0x0102030405060708u}};
-  expectByteCompatibleSequenceMatchesGeneric(std::span<const DesignRoutingViaRecord>{vias});
-
-  const std::array via_extras{
-      DesignRoutingViaExtraEntry{.via_index = 23u,
-                                 .top_mask = 1u,
-                                 .cut_mask = 2u,
-                                 .bottom_mask = 3u,
-                                 .rows = 4u,
-                                 .columns = 5u,
-                                 .step_x = -29,
-                                 .step_y = 31}};
-  expectByteCompatibleSequenceMatchesGeneric(std::span<const DesignRoutingViaExtraEntry>{via_extras});
-
-  const std::array paths{
-      DesignRoutingPathRecord{.meta = DesignRoutingPathMeta{.layer_ordinal = 37u, .flags = 41u, .reserved = 0u},
-                              .point_end = DesignWirePoolEnd<DesignWirePoint>{43u},
-                              .via_end = DesignWirePoolEnd<DesignWireVia>{47u},
-                              .rectangle_end = DesignWirePoolEnd<DesignWireRectangle>{53u}}};
-  expectByteCompatibleSequenceMatchesGeneric(std::span<const DesignRoutingPathRecord>{paths});
-
-  const std::array rectangles{
-      DesignWireRectangle{.point_index = 59u, .delta = Rect{.ll_x = -61, .ll_y = -67, .ur_x = 71, .ur_y = 73}}};
-  expectByteCompatibleSequenceMatchesGeneric(std::span<const DesignWireRectangle>{rectangles});
-}
-
 TEST(BinaryDatabaseArchiveTest, RejectsTruncatedAndTrailingPayloads)
 {
   TechStore technology;
@@ -460,6 +389,30 @@ TEST(BinaryDatabaseArchiveTest, RejectsTruncatedAndTrailingPayloads)
     trailing.put('x');
   }
   EXPECT_THROW(BinaryDatabaseImporter::loadLibrary(library_binary.path(), technology), std::runtime_error);
+}
+
+TEST(BinaryDatabaseArchiveTest, LibraryMasterTermDeletionReachesBinaryFixedPoint)
+{
+  TechStore technology;
+  LibraryStore library(technology.techRegistry());
+  const auto removed_master = library.cellMasterStorage().createCellMaster(LibraryCellMaster{.name = "REMOVED"});
+  const auto survivor_master = library.cellMasterStorage().createCellMaster(LibraryCellMaster{.name = "SURVIVOR"});
+  static_cast<void>(library.masterTermStorage().createMasterTerm(removed_master, LibraryMasterTerm{.name = "A"}));
+  const auto survivor_term = library.masterTermStorage().createMasterTerm(survivor_master, LibraryMasterTerm{.name = "Y"});
+  ASSERT_TRUE(library.cellMasterStorage().destroyCellMaster(removed_master));
+
+  const TemporaryFile original("library-master-term-deletion", ".edb");
+  const TemporaryFile fixed("library-master-term-deletion-fixed", ".edb");
+  BinaryDatabaseExporter::saveLibrary(original.path(), library);
+
+  auto restored = BinaryDatabaseImporter::loadLibrary(original.path(), technology);
+  const auto restored_master = restored->cellMasterStorage().findCellMaster("SURVIVOR");
+  ASSERT_TRUE(restored_master);
+  EXPECT_EQ(restored_master, survivor_master);
+  EXPECT_EQ(restored->masterTermStorage().findMasterTerm(restored_master, "Y"), survivor_term);
+
+  BinaryDatabaseExporter::saveLibrary(fixed.path(), *restored);
+  expectSameFile(original.path(), fixed.path());
 }
 
 TEST(BinaryDatabaseArchiveTest, FullSky130AndIhp130ReachBinaryFixedPoint)

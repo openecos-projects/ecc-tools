@@ -15,10 +15,11 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <entt/container/dense_map.hpp>
+#include <entt/container/dense_set.hpp>
 
 #include "lef/detail/LefParserMutex.h"
 #include "lefiMacro.hpp"
@@ -58,7 +59,7 @@ class LefNamePool
 
  private:
   std::deque<std::string> _values;
-  std::unordered_map<std::string_view, LefNameId> _ids;
+  entt::dense_map<std::string_view, LefNameId> _ids;
 };
 
 std::string_view requiredName(const char* value, const char* field)
@@ -155,10 +156,10 @@ struct Staging
   std::optional<int32_t> database_units_per_micron;
   std::vector<StagedSite> sites;
   std::vector<StagedMaster> masters;
-  std::unordered_set<std::string> site_names;
-  std::unordered_set<std::string> master_names;
+  entt::dense_set<std::string> site_names;
+  entt::dense_set<std::string> master_names;
   std::optional<size_t> current_master;
-  std::unordered_map<std::string, size_t> diagnostics;
+  entt::dense_map<std::string, size_t> diagnostics;
   LefNamePool names;
   std::exception_ptr callback_failure;
   const TechStore* direct_technology = nullptr;
@@ -170,8 +171,8 @@ struct Staging
 
   // SI2 callbacks repeat layer/via names many times. Keep the lookup result
   // for the duration of this import, matching OpenDB's indexed find calls.
-  std::unordered_map<std::string_view, TechLayerId> direct_layers;
-  std::unordered_map<std::string_view, TechViaMasterId> direct_vias;
+  entt::dense_map<std::string_view, TechLayerId> direct_layers;
+  entt::dense_map<std::string_view, TechViaMasterId> direct_vias;
 };
 
 struct PreparedMaster
@@ -603,7 +604,8 @@ LibrarySiteClass siteClass(const char* value)
 
 LibraryCellMasterType masterType(const char* value)
 {
-  static const std::unordered_map<std::string, LibraryCellMasterType> types{
+  static const auto types = [] {
+    constexpr std::pair<std::string_view, LibraryCellMasterType> entries[]{
       {"COVER", LibraryCellMasterType::kCover},
       {"COVER BUMP", LibraryCellMasterType::kCoverBump},
       {"RING", LibraryCellMasterType::kRing},
@@ -631,7 +633,14 @@ LibraryCellMasterType masterType(const char* value)
       {"ENDCAP TOPRIGHT", LibraryCellMasterType::kEndcapTopRight},
       {"ENDCAP BOTTOMLEFT", LibraryCellMasterType::kEndcapBottomLeft},
       {"ENDCAP BOTTOMRIGHT", LibraryCellMasterType::kEndcapBottomRight},
-  };
+    };
+    entt::dense_map<std::string_view, LibraryCellMasterType> result;
+    result.reserve(std::size(entries));
+    for (const auto& [name, type] : entries) {
+      result.emplace(name, type);
+    }
+    return result;
+  }();
   const auto type = upper(requiredText(value, "MACRO CLASS"));
   const auto found = types.find(type);
   if (found == types.end()) {
@@ -1772,7 +1781,7 @@ void rollbackImport(LibraryStore& library, GeometryPoolCheckpoint geometry_check
 
 void commitImport(LibraryStore& library, std::vector<LibrarySite> sites, std::vector<PreparedMaster> masters)
 {
-  std::unordered_map<std::string, LibrarySiteId> site_ids;
+  entt::dense_map<std::string, LibrarySiteId> site_ids;
   const auto geometry_checkpoint = library.geometryPool().checkpoint();
   try {
     for (auto& site : sites) {

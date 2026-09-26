@@ -30,9 +30,10 @@ add_library(eccdb_design
   fill/storage/DesignFillStorage.cpp
   floorplan/storage/DesignFloorplanStorage.cpp
   global/storage/DesignGlobalStorage.cpp
+  guide/storage/DesignGuideStorage.cpp
   netlist/storage/DesignNetlistStorage.cpp
-  routing/pool/WireRoutingInput.cpp
-  routing/pool/DesignRoutingPool.cpp
+  pin_access/storage/DesignPinAccessStorage.cpp
+  routing/component/WireRouting.cpp
   routing/storage/DesignRoutingStorage.cpp
   routing/view/WireRoutingView.cpp
 )

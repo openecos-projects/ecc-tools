@@ -2,8 +2,9 @@
 
 #include <limits>
 #include <stdexcept>
-#include <unordered_map>
 #include <utility>
+
+#include <entt/container/dense_map.hpp>
 
 #include "IdbLayout.h"
 #include "IdbObs.h"
@@ -247,7 +248,7 @@ void IdbLibraryImporter::import(::idb::IdbLayout& source)
     }
 
     const auto master_id = _database.cellMasterStorage().createCellMaster(std::move(master));
-    std::unordered_map<std::string, LibraryMasterTermId> term_ids;
+    entt::dense_map<std::string, LibraryMasterTermId> term_ids;
 
     for (auto* source_term : source_master->get_term_list()) {
       if (source_term == nullptr) {

@@ -6,7 +6,7 @@
 #include <string_view>
 #include <utility>
 
-#include "design/routing/pool/RoutingPoolRecords.h"
+#include "design/routing/view/RoutingViewTypes.h"
 
 namespace eccdb {
 
@@ -48,36 +48,18 @@ class DesignWirePointRange
   using value_type = DesignWirePoint;
   using const_iterator = DesignWireValueIterator<DesignWirePointRange, DesignWirePoint>;
 
-  [[nodiscard]] std::size_t size() const noexcept { return _owned.empty() ? _compact.size() : _owned.size(); }
+  [[nodiscard]] std::size_t size() const noexcept { return _values.size(); }
   [[nodiscard]] bool empty() const noexcept { return size() == 0u; }
   [[nodiscard]] DesignWirePoint operator[](std::size_t index) const;
   [[nodiscard]] DesignWirePoint front() const { return (*this)[0]; }
   [[nodiscard]] const_iterator begin() const noexcept { return const_iterator{this, 0u}; }
   [[nodiscard]] const_iterator end() const noexcept { return const_iterator{this, size()}; }
 
-  [[nodiscard]] static DesignWirePointRange fromValues(std::span<const DesignWirePoint> values) noexcept
-  {
-    return DesignWirePointRange{values};
-  }
-  [[nodiscard]] static DesignWirePointRange fromPool(std::span<const DesignRoutingPointRecord> compact,
-                                                     std::span<const DesignRoutingPointExtraEntry> extras,
-                                                     uint32_t global_begin) noexcept
-  {
-    return DesignWirePointRange{compact, extras, global_begin};
-  }
+  [[nodiscard]] static DesignWirePointRange fromValues(std::span<const DesignWirePoint> values) noexcept { return DesignWirePointRange{values}; }
 
  private:
-  explicit DesignWirePointRange(std::span<const DesignWirePoint> owned) noexcept : _owned(owned) {}
-  DesignWirePointRange(std::span<const DesignRoutingPointRecord> compact,
-                       std::span<const DesignRoutingPointExtraEntry> extras, uint32_t global_begin) noexcept
-      : _compact(compact), _extras(extras), _global_begin(global_begin)
-  {
-  }
-
-  std::span<const DesignWirePoint> _owned;
-  std::span<const DesignRoutingPointRecord> _compact;
-  std::span<const DesignRoutingPointExtraEntry> _extras;
-  uint32_t _global_begin = 0;
+  explicit DesignWirePointRange(std::span<const DesignWirePoint> values) noexcept : _values(values) {}
+  std::span<const DesignWirePoint> _values;
 };
 
 class DesignWireViaRange
@@ -86,36 +68,18 @@ class DesignWireViaRange
   using value_type = DesignWireVia;
   using const_iterator = DesignWireValueIterator<DesignWireViaRange, DesignWireVia>;
 
-  [[nodiscard]] std::size_t size() const noexcept { return _owned.empty() ? _compact.size() : _owned.size(); }
+  [[nodiscard]] std::size_t size() const noexcept { return _values.size(); }
   [[nodiscard]] bool empty() const noexcept { return size() == 0u; }
   [[nodiscard]] DesignWireVia operator[](std::size_t index) const;
   [[nodiscard]] DesignWireVia front() const { return (*this)[0]; }
   [[nodiscard]] const_iterator begin() const noexcept { return const_iterator{this, 0u}; }
   [[nodiscard]] const_iterator end() const noexcept { return const_iterator{this, size()}; }
 
-  [[nodiscard]] static DesignWireViaRange fromValues(std::span<const DesignWireVia> values) noexcept
-  {
-    return DesignWireViaRange{values};
-  }
-  [[nodiscard]] static DesignWireViaRange fromPool(std::span<const DesignRoutingViaRecord> compact,
-                                                   std::span<const DesignRoutingViaExtraEntry> extras,
-                                                   uint32_t global_begin) noexcept
-  {
-    return DesignWireViaRange{compact, extras, global_begin};
-  }
+  [[nodiscard]] static DesignWireViaRange fromValues(std::span<const DesignWireVia> values) noexcept { return DesignWireViaRange{values}; }
 
  private:
-  explicit DesignWireViaRange(std::span<const DesignWireVia> owned) noexcept : _owned(owned) {}
-  DesignWireViaRange(std::span<const DesignRoutingViaRecord> compact,
-                     std::span<const DesignRoutingViaExtraEntry> extras, uint32_t global_begin) noexcept
-      : _compact(compact), _extras(extras), _global_begin(global_begin)
-  {
-  }
-
-  std::span<const DesignWireVia> _owned;
-  std::span<const DesignRoutingViaRecord> _compact;
-  std::span<const DesignRoutingViaExtraEntry> _extras;
-  uint32_t _global_begin = 0;
+  explicit DesignWireViaRange(std::span<const DesignWireVia> values) noexcept : _values(values) {}
+  std::span<const DesignWireVia> _values;
 };
 
 class DesignWirePathView

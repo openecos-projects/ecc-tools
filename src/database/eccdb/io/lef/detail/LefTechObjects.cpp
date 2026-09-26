@@ -24,6 +24,8 @@
 #include "tech/via_rule_generate/model/ViaRuleGenerateComponents.h"
 
 namespace eccdb::lef_detail {
+using namespace LefDefParser;
+
 namespace {
 
 std::string requiredText(const char* value, const char* field)

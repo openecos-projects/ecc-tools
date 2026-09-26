@@ -6,7 +6,7 @@ English version: [Experimental_API_Usage.en.md](Experimental_API_Usage.en.md)
 
 ## 1. API 定位
 
-EccDB 公共 API 是底层 EnTT Registry、连续 Pool 和各类 Storage 之上的实验性访问层。外部程序只需包含 `eccdb` 公共头文件，不需要了解 EnTT 实体、内部组件或 Storage 的拆分方式。
+EccDB 公共 API 是底层 EnTT Registry、组件数据和各类 Storage 之上的实验性访问层。外部程序只需包含 `eccdb` 公共头文件，不需要了解 EnTT 实体、内部组件或 Storage 的拆分方式。
 
 当前原型提供：
 
@@ -319,7 +319,7 @@ for (eccdb::WireId id : database.wireIds(ground)) {
 }
 ```
 
-因为 Path 是 aggregate value，修改路径后通过 `updateWire()` 整体写回。这样不会把内部 Pool 的地址、offset 或 span 暴露给外部调用者。
+因为 Path 是 aggregate value，修改路径后通过 `updateWire()` 整体写回。这样不会把内部 vector 的地址、offset 或 span 暴露给外部调用者。
 
 ## 8. Ref 便利层
 

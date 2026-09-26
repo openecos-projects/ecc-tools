@@ -11,9 +11,10 @@
 #include <string_view>
 #include <type_traits>
 #include <tuple>
-#include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <entt/container/dense_map.hpp>
 
 #include "design/constraint/model/ConstraintComponents.h"
 #include "design/floorplan/model/FloorplanComponents.h"
@@ -464,17 +465,17 @@ class DefNameCache
     return designViaName(id.packed());
   }
 
-  [[nodiscard]] std::string_view viaName(const DesignRoutingViaRecord& via) const
+  [[nodiscard]] std::string_view viaName(const DesignWireVia& via) const
   {
-    if (via.meta.reference_kind == DesignRoutingViaReferenceKind::kTech) return techViaName(via.reference);
-    if (via.meta.reference_kind == DesignRoutingViaReferenceKind::kDesign) return designViaName(via.reference);
-    throw std::logic_error("compact wire VIA reference kind is invalid");
+    if (via.tech_via) return viaName(via.tech_via);
+    if (via.design_via) return viaName(via.design_via);
+    throw std::logic_error("wire VIA reference is invalid");
   }
 
  private:
   std::vector<IndexedEntry<TechLayerInfo>> _layers;
   std::vector<IndexedEntry<std::string>> _tech_vias;
-  std::unordered_map<uint64_t, const std::string*> _design_vias;
+  entt::dense_map<uint64_t, const std::string*> _design_vias;
 };
 
 std::string_view nonDefaultRuleName(const DesignStore& design, TechNonDefaultRuleId id)
@@ -646,122 +647,94 @@ void writeNetOptions(DefTextOutput& output, const DefNameCache& names, const Des
   }
 }
 
-void writePath(DefTextOutput& output, const DefNameCache& names, DesignRoutingCompactPathView path, bool first, bool special)
+void writePath(DefTextOutput& output, const DefNameCache& names, DesignWirePathView path, bool first, bool special)
 {
-  output << (first ? " " : " NEW ") << names.layerName(path.layer);
-  const bool has_width = (path.flags & DesignWirePathFlag::kHasWidth) != 0u;
+  output << (first ? " " : " NEW ") << names.layerName(path.layer());
+  const bool has_width = (path.flags() & DesignWirePathFlag::kHasWidth) != 0u;
   if (special != has_width) {
     throw std::logic_error("SPECIALNET paths require WIDTH and regular NET paths must use layer/NDR width");
   }
   if (has_width) {
-    output << ' ' << (path.extra == nullptr ? 0 : path.extra->width);
+    output << ' ' << path.width();
   }
-  if (!special && (path.flags & DesignWirePathFlag::kTaper) != 0u) {
+  if (!special && (path.flags() & DesignWirePathFlag::kTaper) != 0u) {
     output << " TAPER";
   }
-  if (!special && (path.flags & DesignWirePathFlag::kHasTaperRule) != 0u) {
-    output << " TAPERRULE " << (path.extra == nullptr ? std::string_view{} : path.extra->taper_rule);
+  if (!special && (path.flags() & DesignWirePathFlag::kHasTaperRule) != 0u) {
+    output << " TAPERRULE " << path.taperRule();
   }
-  if ((path.flags & DesignWirePathFlag::kHasShape) != 0u) {
+  if ((path.flags() & DesignWirePathFlag::kHasShape) != 0u) {
     if (!special) {
       throw std::logic_error("regular NET path cannot contain SPECIALNET SHAPE");
     }
-    output << " + SHAPE " << (path.extra == nullptr ? std::string_view{} : path.extra->shape);
+    output << " + SHAPE " << path.shape();
   }
-  if ((path.flags & DesignWirePathFlag::kHasStyle) != 0u) {
-    output << (special ? " + STYLE " : " STYLE ") << (path.extra == nullptr ? 0 : path.extra->style);
+  if ((path.flags() & DesignWirePathFlag::kHasStyle) != 0u) {
+    output << (special ? " + STYLE " : " STYLE ") << path.style();
   }
 
+  const auto points = path.points();
+  const auto vias = path.vias();
+  const auto rectangles = path.rectangles();
   const bool rectangles_ordered
-      = std::is_sorted(path.rectangles.begin(), path.rectangles.end(), [](const auto& left, const auto& right) {
+      = std::is_sorted(rectangles.begin(), rectangles.end(), [](const auto& left, const auto& right) {
           return left.point_index < right.point_index;
         });
-  const bool vias_ordered = std::is_sorted(path.vias.begin(), path.vias.end(), [](const auto& left, const auto& right) {
+  const bool vias_ordered = std::is_sorted(vias.begin(), vias.end(), [](const auto& left, const auto& right) {
     return left.point_index < right.point_index;
   });
   std::size_t rectangle_cursor = 0u;
   std::size_t via_cursor = 0u;
-  std::size_t point_extra_cursor = 0u;
-  std::size_t via_extra_cursor = 0u;
 
   const auto write_rectangle = [&](const DesignWireRectangle& rectangle) { output.writeRoutingRectangle(rectangle.delta); };
-  const auto write_via = [&](std::size_t local_index, bool sequential) {
-    const auto& via = path.vias[local_index];
-    const auto global_index = static_cast<uint64_t>(path.via_global_begin) + local_index;
-    const DesignRoutingViaExtraEntry* extra = nullptr;
-    if (sequential) {
-      while (via_extra_cursor < path.via_extras.size() && path.via_extras[via_extra_cursor].via_index < global_index) {
-        ++via_extra_cursor;
-      }
-      if (via_extra_cursor < path.via_extras.size() && path.via_extras[via_extra_cursor].via_index == global_index) {
-        extra = &path.via_extras[via_extra_cursor++];
-      }
-    } else {
-      const auto found = std::lower_bound(path.via_extras.begin(), path.via_extras.end(), global_index,
-                                          [](const auto& entry, uint64_t index) { return entry.via_index < index; });
-      if (found != path.via_extras.end() && found->via_index == global_index) extra = &*found;
-    }
-    if ((via.meta.flags & DesignWireViaFlag::kHasMask) != 0u) {
-      if (extra == nullptr) throw std::logic_error("compact wire VIA mask extra is missing");
-      output.writeRoutingViaMask(extra->top_mask, extra->cut_mask, extra->bottom_mask);
+  const auto write_via = [&](std::size_t local_index) {
+    const auto& via = vias[local_index];
+    if ((via.flags & DesignWireViaFlag::kHasMask) != 0u) {
+      output.writeRoutingViaMask(via.top_mask, via.cut_mask, via.bottom_mask);
     }
     output << ' ' << names.viaName(via);
-    const auto orientation = static_cast<DesignOrientation>(via.meta.orientation);
-    if (orientation != DesignOrientation::kN) {
-      output << ' ' << orientationName(orientation);
+    if (via.orientation != DesignOrientation::kN) {
+      output << ' ' << orientationName(via.orientation);
     }
-    if ((via.meta.flags & DesignWireViaFlag::kHasArray) != 0u) {
-      if (extra == nullptr) throw std::logic_error("compact wire VIA array extra is missing");
-      output.writeRoutingViaArray(extra->columns, extra->rows, extra->step_x, extra->step_y);
+    if ((via.flags & DesignWireViaFlag::kHasArray) != 0u) {
+      output.writeRoutingViaArray(via.columns, via.rows, via.step_x, via.step_y);
     }
   };
 
-  for (std::size_t point_index = 0; point_index < path.points.size(); ++point_index) {
-    const auto global_index = static_cast<uint64_t>(path.point_global_begin) + point_index;
-    while (point_extra_cursor < path.point_extras.size()
-           && path.point_extras[point_extra_cursor].point_index < global_index) {
-      ++point_extra_cursor;
-    }
-    uint32_t point_flags = 0u;
-    int32_t extension = 0;
-    if (point_extra_cursor < path.point_extras.size()
-        && path.point_extras[point_extra_cursor].point_index == global_index) {
-      point_flags = path.point_extras[point_extra_cursor].flags;
-      extension = path.point_extras[point_extra_cursor].extension;
-      ++point_extra_cursor;
-    }
-    const auto point = path.points[point_index].position;
-    const Point* previous = point_index == 0u ? nullptr : &path.points[point_index - 1u].position;
-    output.writeRoutingPoint(point, previous, point_flags, extension);
+  for (std::size_t point_index = 0; point_index < points.size(); ++point_index) {
+    const auto& point = points[point_index];
+    const auto previous_value = point_index == 0u ? Point{} : points[point_index - 1u].position;
+    const Point* previous = point_index == 0u ? nullptr : &previous_value;
+    output.writeRoutingPoint(point.position, previous, point.flags, point.extension);
 
     if (point_index == 0u) {
-      if ((path.flags & DesignWirePathFlag::kHasMask) != 0u) {
-        output << " MASK " << (path.extra == nullptr ? 0u : path.extra->mask);
+      if ((path.flags() & DesignWirePathFlag::kHasMask) != 0u) {
+        output << " MASK " << path.mask();
       }
-      if (special && (path.flags & DesignWirePathFlag::kTaper) != 0u) {
+      if (special && (path.flags() & DesignWirePathFlag::kTaper) != 0u) {
         output << " TAPER";
       }
-      if (special && (path.flags & DesignWirePathFlag::kHasTaperRule) != 0u) {
-        output << " TAPERRULE " << (path.extra == nullptr ? std::string_view{} : path.extra->taper_rule);
+      if (special && (path.flags() & DesignWirePathFlag::kHasTaperRule) != 0u) {
+        output << " TAPERRULE " << path.taperRule();
       }
     }
 
     if (rectangles_ordered) {
-      while (rectangle_cursor < path.rectangles.size() && path.rectangles[rectangle_cursor].point_index == point_index) {
-        write_rectangle(path.rectangles[rectangle_cursor++]);
+      while (rectangle_cursor < rectangles.size() && rectangles[rectangle_cursor].point_index == point_index) {
+        write_rectangle(rectangles[rectangle_cursor++]);
       }
     } else {
-      for (const auto& rectangle : path.rectangles) {
+      for (const auto& rectangle : rectangles) {
         if (rectangle.point_index == point_index) write_rectangle(rectangle);
       }
     }
     if (vias_ordered) {
-      while (via_cursor < path.vias.size() && path.vias[via_cursor].point_index == point_index) {
-        write_via(via_cursor++, true);
+      while (via_cursor < vias.size() && vias[via_cursor].point_index == point_index) {
+        write_via(via_cursor++);
       }
     } else {
-      for (std::size_t index = 0; index < path.vias.size(); ++index) {
-        if (path.vias[index].point_index == point_index) write_via(index, false);
+      for (std::size_t index = 0; index < vias.size(); ++index) {
+        if (vias[index].point_index == point_index) write_via(index);
       }
     }
   }
@@ -834,7 +807,7 @@ void writeNetSection(DefTextOutput& output, const DesignStore& design, const Def
         output << ' ' << wire.shield_net;
       }
       bool first = true;
-      routing.forEachCompactPath(wire_id, [&](DesignRoutingCompactPathView path) {
+      routing.forEachPath(wire_id, [&](DesignWirePathView path) {
         writePath(output, names, path, first, special);
         first = false;
       });

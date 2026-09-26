@@ -86,6 +86,7 @@ option(ECCDB_BUILD_TESTS "Build ECCDB tests" ON)
 option(ECCDB_BUILD_BENCHMARKS "Build ECCDB performance benchmarks" OFF)
 
 add_subdirectory(storage)
+add_subdirectory(service)
 add_subdirectory(io/binary)
 add_subdirectory(io/idb)
 add_subdirectory(io/lef)
@@ -126,6 +127,7 @@ set(_eccdb_database_targets
   eccdb_design
   eccdb_lef_export
   eccdb_library
+  eccdb_service
   eccdb_api
   eccdb_tech_database
 )

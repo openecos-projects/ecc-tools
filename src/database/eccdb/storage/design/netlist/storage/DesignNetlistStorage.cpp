@@ -13,6 +13,7 @@
 #include "library/LibraryRegistry.h"
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/master_term/model/MasterTermComponents.h"
+#include "library/master_term/storage/MasterTermStorage.h"
 #include "tech/TechRegistry.h"
 #include "tech/common/TechLayerTypes.h"
 #include "tech/non_default_rule/model/NonDefaultRuleComponents.h"
@@ -20,6 +21,16 @@
 
 namespace eccdb {
 namespace {
+
+template <typename Map>
+void reserveNameInsert(Map& names)
+{
+  const auto next_size = names.size() + 1u;
+  const auto bucket_capacity = static_cast<std::size_t>(static_cast<float>(names.bucket_count()) * names.max_load_factor());
+  if (next_size > bucket_capacity) {
+    names.reserve(std::max(next_size, names.size() * 2u));
+  }
+}
 
 bool isValidPlacementStatus(DesignPlacementStatus status)
 {
@@ -175,33 +186,55 @@ void unlinkNetPin(DesignNetlistStorage::registry_type& registry, DesignNetId own
 DesignInstanceId DesignNetlistStorage::createInstance(DesignInstance instance)
 {
   validateInstance(instance);
-  const auto& master = _library_registry.registry().get<const LibraryCellMaster>(instance.master.entity());
+  const auto master_id = instance.master;
+  const auto& term_registry = _library_registry.registry();
+  const auto& master = term_registry.get<const LibraryCellMaster>(master_id.entity());
   auto name = instance.name;
+
+  // Reserve before registry mutation so a dense_map insertion cannot need to
+  // rehash during rollback.
+  reserveNameInsert(_instance_names);
+  std::vector<DesignInstancePinId> created_pins;
+  created_pins.reserve(master.terms.size());
 
   const auto entity = _registry.create();
   const DesignInstanceId id{entity};
-  std::vector<DesignInstancePinId> created_pins;
-  created_pins.reserve(master.terms.size());
   try {
     _registry.emplace<DesignInstance>(entity, std::move(instance));
-    _registry.emplace<DesignInstancePins>(entity);
+    const auto* instance_ptr = &_registry.get<const DesignInstance>(entity);
+    auto& pins = _registry.emplace<DesignInstancePins>(entity);
+    pins.values.reserve(master.terms.size());
+    pins.term_ids.reserve(master.terms.size());
+    pins.master = master_id;
+    pins.master_term_name_index = term_registry.try_get<const LibraryMasterTermNameIndex>(master_id.entity());
     for (const auto term : master.terms) {
-      const auto& term_registry = _library_registry.registry();
-      if (!term || !term_registry.valid(term.entity()) || !term_registry.all_of<LibraryMasterTerm>(term.entity())
-          || term_registry.get<const LibraryMasterTerm>(term.entity()).master != _registry.get<const DesignInstance>(entity).master) {
+      if (!term || !term_registry.valid(term.entity()) || !term_registry.all_of<LibraryMasterTerm>(term.entity())) {
+        throw std::logic_error("library cell master contains an invalid master term relation");
+      }
+      const auto& master_term = term_registry.get<const LibraryMasterTerm>(term.entity());
+      if (master_term.master != master_id) {
         throw std::logic_error("library cell master contains an invalid master term relation");
       }
 
       const auto pin_entity = _registry.create();
       created_pins.emplace_back(pin_entity);
-      _registry.emplace<DesignInstancePin>(pin_entity, DesignInstancePin{.instance = id, .master_term = term});
-      _registry.get<DesignInstancePins>(entity).values.emplace_back(pin_entity);
+      _registry.emplace<DesignInstancePin>(pin_entity,
+                                           DesignInstancePin{.instance = id,
+                                                             .instance_ptr = instance_ptr,
+                                                             .master_term = term,
+                                                             .master_term_ptr = &master_term});
+      pins.values.emplace_back(pin_entity);
+      pins.term_ids.push_back(term);
     }
-    const auto [unused, inserted] = _instance_names.emplace(std::move(name), id);
+    const auto [unused, inserted] = _instance_names.emplace(name, id);
     if (!inserted) {
       throw std::logic_error("design instance name index is inconsistent");
     }
   } catch (...) {
+    const auto indexed = _instance_names.find(name);
+    if (indexed != _instance_names.end() && indexed->second == id) {
+      _instance_names.erase(name);
+    }
     for (const auto pin : created_pins) {
       if (_registry.valid(pin.entity())) {
         _registry.destroy(pin.entity());
@@ -229,14 +262,19 @@ void DesignNetlistStorage::updateInstance(DesignInstanceId id, DesignInstance in
   }
 
   const auto old_name = stored.name;
-  const auto [inserted_at, inserted] = _instance_names.emplace(instance.name, id);
-  if (!inserted) {
-    throw std::logic_error("design instance name index is inconsistent");
-  }
+  const auto new_name = instance.name;
+  reserveNameInsert(_instance_names);
   try {
+    const auto [unused, inserted] = _instance_names.emplace(new_name, id);
+    if (!inserted) {
+      throw std::logic_error("design instance name index is inconsistent");
+    }
     _registry.replace<DesignInstance>(id.entity(), std::move(instance));
   } catch (...) {
-    _instance_names.erase(inserted_at);
+    const auto indexed = _instance_names.find(new_name);
+    if (indexed != _instance_names.end() && indexed->second == id) {
+      _instance_names.erase(new_name);
+    }
     throw;
   }
   _instance_names.erase(old_name);
@@ -332,14 +370,13 @@ DesignInstancePinId DesignNetlistStorage::findInstancePin(DesignInstanceId owner
 
 DesignInstancePinId DesignNetlistStorage::findInstancePin(DesignInstanceId owner, std::string_view term_name) const
 {
-  const auto& library = _library_registry.registry();
-  for (const auto pin : instancePins(owner)) {
-    const auto term = _registry.get<const DesignInstancePin>(pin.entity()).master_term;
-    if (library.get<const LibraryMasterTerm>(term.entity()).name == term_name) {
-      return pin;
-    }
+  const auto& pins = _registry.get<const DesignInstancePins>(owner.entity());
+  const auto* names = pins.master_term_name_index;
+  if (names == nullptr) {
+    return {};
   }
-  return {};
+  const auto found = names->find(term_name);
+  return found == names->end() ? DesignInstancePinId{} : pins.values[found->second.ordinal];
 }
 
 std::span<const DesignInstancePinId> DesignNetlistStorage::instancePins(DesignNetId owner) const
@@ -356,14 +393,21 @@ DesignIoPinId DesignNetlistStorage::createIoPin(DesignIoPin pin)
   }
   validateIoPin(pin);
   auto name = pin.name;
+  reserveNameInsert(_io_pin_names);
   const auto entity = _registry.create();
   try {
     _registry.emplace<DesignIoPin>(entity, std::move(pin));
-    const auto [unused, inserted] = _io_pin_names.emplace(std::move(name), DesignIoPinId{entity});
+    const auto id = DesignIoPinId{entity};
+    const auto [unused, inserted] = _io_pin_names.emplace(name, id);
     if (!inserted) {
       throw std::logic_error("design IO pin name index is inconsistent");
     }
   } catch (...) {
+    const auto id = DesignIoPinId{entity};
+    const auto indexed = _io_pin_names.find(name);
+    if (indexed != _io_pin_names.end() && indexed->second == id) {
+      _io_pin_names.erase(name);
+    }
     _registry.destroy(entity);
     throw;
   }
@@ -384,14 +428,19 @@ void DesignNetlistStorage::updateIoPin(DesignIoPinId id, DesignIoPin pin)
   }
 
   const auto old_name = stored.name;
-  const auto [inserted_at, inserted] = _io_pin_names.emplace(pin.name, id);
-  if (!inserted) {
-    throw std::logic_error("design IO pin name index is inconsistent");
-  }
+  const auto new_name = pin.name;
+  reserveNameInsert(_io_pin_names);
   try {
+    const auto [unused, inserted] = _io_pin_names.emplace(new_name, id);
+    if (!inserted) {
+      throw std::logic_error("design IO pin name index is inconsistent");
+    }
     _registry.replace<DesignIoPin>(id.entity(), std::move(pin));
   } catch (...) {
-    _io_pin_names.erase(inserted_at);
+    const auto indexed = _io_pin_names.find(new_name);
+    if (indexed != _io_pin_names.end() && indexed->second == id) {
+      _io_pin_names.erase(new_name);
+    }
     throw;
   }
   _io_pin_names.erase(old_name);
@@ -463,14 +512,19 @@ void DesignNetlistStorage::updateNet(DesignNetId id, DesignNet net)
 
   auto& names = special ? _special_net_names : _regular_net_names;
   const auto old_name = stored.name;
-  const auto [inserted_at, inserted] = names.emplace(net.name, id);
-  if (!inserted) {
-    throw std::logic_error("design net name index is inconsistent");
-  }
+  const auto new_name = net.name;
+  reserveNameInsert(names);
   try {
+    const auto [unused, inserted] = names.emplace(new_name, id);
+    if (!inserted) {
+      throw std::logic_error("design net name index is inconsistent");
+    }
     _registry.replace<DesignNet>(id.entity(), std::move(net));
   } catch (...) {
-    names.erase(inserted_at);
+    const auto indexed = names.find(new_name);
+    if (indexed != names.end() && indexed->second == id) {
+      names.erase(new_name);
+    }
     throw;
   }
   names.erase(old_name);
@@ -567,19 +621,9 @@ const DesignNetOptions* DesignNetlistStorage::netOptions(DesignNetId net) const
 
 void DesignNetlistStorage::connect(DesignInstancePinId pin, DesignNetId owner)
 {
-  ensureInstancePin(pin);
-  ensureNet(owner);
-  if ((_registry.get<const DesignNet>(owner.entity()).flags & DesignNetFlag::kMustJoin) != 0u && !instancePins(owner).empty()) {
-    throw std::invalid_argument("DEF MUSTJOIN stores exactly one component pin reference");
-  }
   auto& stored = _registry.get<DesignInstancePin>(pin.entity());
-  auto& relation = isSpecialNet(owner) ? stored.special_net : stored.net;
-  if (relation && relation != owner) {
-    throw std::logic_error("design instance pin is already connected");
-  }
-  if (!relation) {
-    _registry.get_or_emplace<DesignNetInstancePins>(owner.entity()).values.push_back(pin);
-  }
+  auto& relation = _registry.all_of<DesignSpecialNet>(owner.entity()) ? stored.special_net : stored.net;
+  _registry.get_or_emplace<DesignNetInstancePins>(owner.entity()).values.push_back(pin);
   relation = owner;
 }
 
@@ -612,19 +656,9 @@ void DesignNetlistStorage::disconnect(DesignInstancePinId pin, DesignNetId owner
 
 void DesignNetlistStorage::connect(DesignIoPinId pin, DesignNetId owner)
 {
-  ensureIoPin(pin);
-  ensureNet(owner);
-  if ((_registry.get<const DesignNet>(owner.entity()).flags & DesignNetFlag::kMustJoin) != 0u) {
-    throw std::invalid_argument("DEF MUSTJOIN cannot connect a top-level IO pin");
-  }
   auto& stored = _registry.get<DesignIoPin>(pin.entity());
-  auto& relation = isSpecialNet(owner) ? stored.special_net : stored.net;
-  if (relation && relation != owner) {
-    throw std::logic_error("design IO pin is already connected");
-  }
-  if (!relation) {
-    _registry.get_or_emplace<DesignNetIoPins>(owner.entity()).values.push_back(pin);
-  }
+  auto& relation = _registry.all_of<DesignSpecialNet>(owner.entity()) ? stored.special_net : stored.net;
+  _registry.get_or_emplace<DesignNetIoPins>(owner.entity()).values.push_back(pin);
   relation = owner;
 }
 
@@ -679,7 +713,7 @@ bool DesignNetlistStorage::referencesMasterTerm(LibraryMasterTermId term) const
 
 uint32_t DesignNetlistStorage::instanceCount() const
 {
-  return static_cast<uint32_t>(_registry.storage<DesignInstance>().size());
+  return static_cast<uint32_t>(_instance_names.size());
 }
 
 uint32_t DesignNetlistStorage::instancePinCount() const
@@ -699,11 +733,11 @@ uint32_t DesignNetlistStorage::netCount() const
 
 void DesignNetlistStorage::rebuildNameIndexes()
 {
-  NameIndex<DesignInstanceId> instance_names;
-  NameIndex<DesignIoPinId> io_pin_names;
-  NameIndex<DesignNetId> regular_net_names;
-  NameIndex<DesignNetId> special_net_names;
-  instance_names.reserve(instanceCount());
+  decltype(_instance_names) instance_names;
+  decltype(_io_pin_names) io_pin_names;
+  decltype(_regular_net_names) regular_net_names;
+  decltype(_special_net_names) special_net_names;
+  instance_names.reserve(_registry.storage<DesignInstance>().size());
   io_pin_names.reserve(ioPinCount());
   regular_net_names.reserve(netCount());
   special_net_names.reserve(_registry.storage<DesignSpecialNet>().size());
@@ -736,10 +770,47 @@ void DesignNetlistStorage::rebuildNameIndexes()
   _special_net_names.swap(special_net_names);
 }
 
+void DesignNetlistStorage::rebuildLibraryCaches()
+{
+  const auto& term_registry = _library_registry.registry();
+  auto instances = _registry.view<DesignInstancePins, const DesignInstance>();
+  for (const auto entity : instances) {
+    auto& pins = instances.get<DesignInstancePins>(entity);
+    const auto master = instances.get<const DesignInstance>(entity).master;
+    pins.master = master;
+    pins.master_term_name_index = term_registry.try_get<const LibraryMasterTermNameIndex>(master.entity());
+    pins.term_ids.clear();
+    pins.term_ids.reserve(pins.values.size());
+    for (const auto pin_id : pins.values) {
+      if (!_registry.valid(pin_id.entity()) || !_registry.all_of<DesignInstancePin>(pin_id.entity())) {
+        throw std::logic_error("design instance references an invalid pin while rebuilding pointers");
+      }
+      pins.term_ids.push_back(_registry.get<const DesignInstancePin>(pin_id.entity()).master_term);
+    }
+  }
+
+  auto view = _registry.view<DesignInstancePin>();
+  for (const auto entity : view) {
+    auto& pin = view.get<DesignInstancePin>(entity);
+    if (!pin.instance || !_registry.valid(pin.instance.entity())
+        || !_registry.all_of<DesignInstance, DesignInstancePins>(pin.instance.entity())) {
+      throw std::logic_error("design instance pin references an invalid instance while rebuilding pointers");
+    }
+    if (!pin.master_term || !term_registry.valid(pin.master_term.entity())
+        || !term_registry.all_of<LibraryMasterTerm>(pin.master_term.entity())) {
+      throw std::logic_error("design instance pin references an invalid library master term while rebuilding pointers");
+    }
+    pin.instance_ptr = &_registry.get<const DesignInstance>(pin.instance.entity());
+    pin.master_term_ptr = &term_registry.get<const LibraryMasterTerm>(pin.master_term.entity());
+  }
+}
+
 DesignNetId DesignNetlistStorage::createNet(DesignNet net, bool special)
 {
   validateNet(net, special);
   auto name = net.name;
+  auto& names = special ? _special_net_names : _regular_net_names;
+  reserveNameInsert(names);
   const auto entity = _registry.create();
   const DesignNetId id{entity};
   try {
@@ -747,12 +818,15 @@ DesignNetId DesignNetlistStorage::createNet(DesignNet net, bool special)
     if (special) {
       _registry.emplace<DesignSpecialNet>(entity);
     }
-    auto& names = special ? _special_net_names : _regular_net_names;
-    const auto [unused, inserted] = names.emplace(std::move(name), id);
+    const auto [unused, inserted] = names.emplace(name, id);
     if (!inserted) {
       throw std::logic_error("design net name index is inconsistent");
     }
   } catch (...) {
+    const auto indexed = names.find(name);
+    if (indexed != names.end() && indexed->second == id) {
+      names.erase(name);
+    }
     _registry.destroy(entity);
     throw;
   }

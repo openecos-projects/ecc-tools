@@ -9,9 +9,10 @@
 #include <set>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <entt/container/dense_map.hpp>
 
 #include "CutLayer.hpp"
 #include "DataManager.hpp"
@@ -75,7 +76,7 @@ class EnttLayerTable
   }
 
  private:
-  std::unordered_map<uint32_t, EnttLayerIndex> _by_entity;
+  entt::dense_map<uint32_t, EnttLayerIndex> _by_entity;
 };
 
 int32_t effectiveMinWidth(const eccdb::TechRoutingLayer& tech_layer)
@@ -364,8 +365,8 @@ struct NetSkipInfo
   int32_t port_pin_count = 0;
 };
 
-using NetSkipCache = std::unordered_map<uint32_t, NetSkipInfo>;
-using NetIndexMap = std::unordered_map<uint32_t, int32_t>;
+using NetSkipCache = entt::dense_map<uint32_t, NetSkipInfo>;
+using NetIndexMap = entt::dense_map<uint32_t, int32_t>;
 
 NetSkipInfo analyzeNetSkip(const eccdb::DesignStore& design, const eccdb::LibraryStore& library,
                            eccdb::DesignNetId net)

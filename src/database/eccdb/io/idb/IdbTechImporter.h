@@ -1,7 +1,8 @@
 #pragma once
 
 #include <string_view>
-#include <unordered_map>
+
+#include <entt/container/dense_map.hpp>
 
 #include "tech/TechStore.h"
 
@@ -27,7 +28,7 @@ class IdbTechImporter
 
  private:
   TechStore& _database;
-  std::unordered_map<const ::idb::IdbLayer*, TechLayerId> _layer_ids;
+  entt::dense_map<const ::idb::IdbLayer*, TechLayerId> _layer_ids;
   bool _imported = false;
 };
 

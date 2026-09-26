@@ -7,7 +7,12 @@ set(_eccdb_design_test_sources
   DatabaseApiTest.cpp
   DesignFillStorageTest.cpp
   DesignFloorplanStorageTest.cpp
+  DesignGuideStorageTest.cpp
   DesignNetlistStorageTest.cpp
+  DesignPinAccessStorageTest.cpp
+  NetRouteServiceTest.cpp
+  PhysicalDesignServiceTest.cpp
+  RoutingContextServiceTest.cpp
   DesignRoutingConstraintStorageTest.cpp
 )
 if(TARGET eccdb_lef_import AND TARGET eccdb_def_import)
@@ -20,6 +25,7 @@ target_link_libraries(eccdb_design_test
   PRIVATE
     eccdb_api
     eccdb_design
+    eccdb_service
     GTest::gtest_main
 )
 

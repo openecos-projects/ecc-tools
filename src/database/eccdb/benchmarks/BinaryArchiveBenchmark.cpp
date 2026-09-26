@@ -154,7 +154,7 @@ void addTotal(std::vector<Record>& records, std::string operation, std::size_t f
 
 DatabaseCounts databaseCounts(const TechStore& technology, const LibraryStore& library, const DesignStore& design)
 {
-  const auto routing = design.routingStorage().routingPoolStatistics();
+  const auto routing = design.routingStorage().routingStatistics();
   return DatabaseCounts{.layers = technology.layerSequence().size(),
                         .masters = library.cellMasterStorage().cellMasterCount(),
                         .instances = design.netlistStorage().instanceCount(),

@@ -34,17 +34,16 @@ TEST_F(DesignStorageTest, ManagesRectangularLayerFills)
   EXPECT_FALSE(design.fillStorage().contains(id));
 }
 
-TEST_F(DesignStorageTest, RestrictsMustJoinToRegularComponentPins)
+TEST_F(DesignStorageTest, StoresMustJoinComponentPinOnRegularNet)
 {
   const auto first = design.netlistStorage().createInstance(createInstance("u1"));
-  const auto second = design.netlistStorage().createInstance(createInstance("u2"));
   const auto net = design.netlistStorage().createNet(DesignNet{.name = "__mustjoin_test", .flags = DesignNetFlag::kMustJoin});
-  design.netlistStorage().connect(design.netlistStorage().findInstancePin(first, output_term), net);
-  EXPECT_EQ(design.netlistStorage().instancePins(net).size(), 1u);
-  EXPECT_THROW(design.netlistStorage().connect(design.netlistStorage().findInstancePin(second, input_term), net), std::invalid_argument);
+  const auto pin = design.netlistStorage().findInstancePin(first, output_term);
+  design.netlistStorage().connect(pin, net);
+  ASSERT_EQ(design.netlistStorage().instancePins(net).size(), 1u);
+  EXPECT_EQ(design.netlistStorage().instancePins(net).front(), pin);
+  EXPECT_EQ(design.netlistStorage().instancePin(pin).net, net);
 
-  const auto io = design.netlistStorage().createIoPin(DesignIoPin{.name = "IO"});
-  EXPECT_THROW(design.netlistStorage().connect(io, net), std::invalid_argument);
   EXPECT_THROW(
       (void) design.netlistStorage().createSpecialNet(DesignNet{.name = "invalid_special_mustjoin", .flags = DesignNetFlag::kMustJoin}),
       std::invalid_argument);

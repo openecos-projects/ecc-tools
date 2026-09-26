@@ -17,7 +17,7 @@
 #include "design/DesignStore.h"
 #include "design/netlist/model/NetlistComponents.h"
 #include "design/routing/component/RoutingComponents.h"
-#include "design/routing/pool/WireRoutingInput.h"
+#include "design/routing/component/WireRouting.h"
 #include "def/DefDesignExporter.h"
 #include "lef/LefLibraryExporter.h"
 #include "lef/LefTechExporter.h"
@@ -217,7 +217,7 @@ EnttCounts countEntt(const EnttContext& context)
   const auto special = context.design->netlistStorage().specialNets();
   result.special_nets = special.size();
   result.regular_nets = context.design->netlistStorage().netCount() - result.special_nets;
-  const auto routing = context.design->routingStorage().routingPoolStatistics();
+  const auto routing = context.design->routingStorage().routingStatistics();
   result.wires = context.design->routingStorage().wireCount();
   result.paths = routing.paths.count;
   result.points = routing.points.count;
@@ -430,31 +430,77 @@ void benchmarkEntt(const Options& options, std::vector<Record>& records)
   std::filesystem::remove_all(temp, error);
 
   if (counts.regular_nets != 0u && options.writes != 0u) {
-    measure(records, "entt", "routing_batch_append", design_bytes, [&]() {
-      Work work;
-      TechRoutingLayerId routing_layer;
-      for (const auto layer : context.technology->layerSequence()) {
-        const TechRoutingLayerId candidate{layer.entity()};
-        if (context.technology->routingLevel(candidate).has_value()) {
-          routing_layer = candidate;
-          break;
-        }
+    TechRoutingLayerId routing_layer;
+    for (const auto layer : context.technology->layerSequence()) {
+      const TechRoutingLayerId candidate{layer.entity()};
+      if (context.technology->routingLevel(candidate).has_value()) {
+        routing_layer = candidate;
+        break;
       }
-      if (!routing_layer) return work;
+    }
+    if (routing_layer) {
       const auto net = context.design->netlistStorage().regularNets().front();
-      for (uint64_t index = 0; index < options.writes; ++index) {
-        DesignWirePath path;
-        path.layer = routing_layer;
-        path.points.push_back(DesignWirePoint{.position = Point{static_cast<int32_t>(index), 0}});
-        path.points.push_back(DesignWirePoint{.position = Point{static_cast<int32_t>(index + 1u), 0}});
-        DesignWireRoutingInput input;
-        input.appendPath(std::move(path));
-        static_cast<void>(context.design->routingStorage().createWireTrusted(DesignWire{.net = net}, std::move(input)));
-        ++work.records;
-        work.edges += 2u;
+      const auto baseline = context.design->routingStorage().routingStatistics();
+      std::vector<DesignWireId> benchmark_wires;
+      benchmark_wires.reserve(options.writes);
+      measure(records, "entt", "wire_create", design_bytes, [&]() {
+        Work work;
+        for (uint64_t index = 0; index < options.writes; ++index) {
+          DesignWirePath path;
+          path.layer = routing_layer;
+          path.points.push_back(DesignWirePoint{.position = Point{static_cast<int32_t>(index), 0}});
+          path.points.push_back(DesignWirePoint{.position = Point{static_cast<int32_t>(index + 1u), 0}});
+          DesignWireRoutingInput input;
+          input.appendPath(std::move(path));
+          benchmark_wires.push_back(
+              context.design->routingStorage().createWireTrusted(DesignWire{.net = net}, std::move(input)));
+          ++work.records;
+          work.edges += 2u;
+        }
+        return work;
+      });
+      measure(records, "entt", "wire_update", design_bytes, [&]() {
+        Work work;
+        for (std::size_t index = 0; index < benchmark_wires.size(); ++index) {
+          DesignWirePath path;
+          path.layer = routing_layer;
+          path.points = {{{static_cast<int32_t>(index), 0}},
+                         {{static_cast<int32_t>(index + 1u), 1}},
+                         {{static_cast<int32_t>(index + 2u), 1}}};
+          DesignWireRoutingInput input;
+          input.appendPath(std::move(path));
+          context.design->routingStorage().updateWire(benchmark_wires[index], DesignWire{.net = net}, std::move(input));
+          ++work.records;
+          work.edges += 3u;
+        }
+        return work;
+      });
+      measure(records, "entt", "wire_traverse", design_bytes, [&]() {
+        Work work;
+        for (const auto wire : benchmark_wires) {
+          context.design->routingStorage().forEachPath(wire, [&](DesignWirePathView path) {
+            ++work.records;
+            work.edges += path.points().size() + path.vias().size() + path.rectangles().size();
+          });
+        }
+        return work;
+      });
+      measure(records, "entt", "wire_destroy", design_bytes, [&]() {
+        Work work;
+        for (const auto wire : benchmark_wires) {
+          if (!context.design->routingStorage().destroyWire(wire)) {
+            throw std::runtime_error("benchmark Wire destruction failed");
+          }
+          ++work.records;
+        }
+        return work;
+      });
+      const auto after = context.design->routingStorage().routingStatistics();
+      if (after.paths.count != baseline.paths.count || after.points.count != baseline.points.count
+          || after.vias.count != baseline.vias.count || after.rectangles.count != baseline.rectangles.count) {
+        throw std::runtime_error("Wire CRUD benchmark leaked routing vector values");
       }
-      return work;
-    });
+    }
   }
 }
 

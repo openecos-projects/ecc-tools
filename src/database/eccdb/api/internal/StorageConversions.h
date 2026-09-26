@@ -20,7 +20,7 @@
 
 #include "design/netlist/model/NetlistComponents.h"
 #include "design/routing/component/RoutingComponents.h"
-#include "design/routing/pool/WireRoutingInput.h"
+#include "design/routing/component/WireRouting.h"
 #include "design/via/component/ViaComponents.h"
 #include "eccdb/DesignData.h"
 #include "eccdb/RoutingData.h"

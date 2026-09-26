@@ -53,7 +53,6 @@ std::filesystem::path ispd19Source()
 struct Ispd18Case
 {
   std::string name;
-  bool repair_metal9_prl = false;
 };
 
 constexpr std::string_view kShapeFixtureLef = R"LEF(VERSION 5.8 ;
@@ -179,17 +178,6 @@ class TemporaryWorkspace
   std::filesystem::path _directory;
 };
 
-std::string readText(const std::filesystem::path& path)
-{
-  std::ifstream input(path, std::ios::binary);
-  if (!input) {
-    throw std::runtime_error("cannot read file: " + path.string());
-  }
-  std::ostringstream contents;
-  contents << input.rdbuf();
-  return contents.str();
-}
-
 void writeText(const std::filesystem::path& path, std::string_view contents)
 {
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
@@ -202,30 +190,12 @@ void writeText(const std::filesystem::path& path, std::string_view contents)
   }
 }
 
-std::filesystem::path repairInvalidIspd18Metal9Prl(const std::filesystem::path& source, const std::filesystem::path& output)
+std::pair<std::filesystem::path, std::filesystem::path> ispd18LefDef(const std::filesystem::path& root, const Ispd18Case& test_case)
 {
-  constexpr std::string_view malformed = "    WIDTH 4.5   1.50\n    WIDTH 1.5   0.45 ;";
-  constexpr std::string_view repaired = "    WIDTH 4.5   1.50 ;";
-  auto contents = readText(source);
-  const auto position = contents.find(malformed);
-  if (position == std::string::npos || contents.find(malformed, position + malformed.size()) != std::string::npos) {
-    throw std::runtime_error("expected exactly one malformed ISPD18 Metal9 PRL row in " + source.string());
-  }
-  contents.replace(position, malformed.size(), repaired);
-  writeText(output, contents);
-  return output;
-}
-
-std::pair<std::filesystem::path, std::filesystem::path> ispd18LefDef(const std::filesystem::path& root, const Ispd18Case& test_case,
-                                                                    const std::filesystem::path& workspace)
-{
-  auto lef = root / test_case.name / (test_case.name + ".input.lef");
+  const auto lef = root / test_case.name / (test_case.name + ".input.lef");
   const auto def = root / test_case.name / (test_case.name + ".input.def");
   if (!std::filesystem::exists(lef) || !std::filesystem::exists(def)) {
     throw std::runtime_error("missing ISPD18 lef/def for " + test_case.name);
-  }
-  if (test_case.repair_metal9_prl) {
-    lef = repairInvalidIspd18Metal9Prl(lef, workspace / (test_case.name + "-repaired.lef"));
   }
   return {lef, def};
 }
@@ -427,10 +397,7 @@ void compareIdbAndEntt(const Ispd18Case& test_case, const std::filesystem::path&
     GTEST_SKIP() << skip_message;
   }
 
-  TemporaryWorkspace workspace;
-  const auto repair_workspace = workspace.path("ws");
-  std::filesystem::create_directories(repair_workspace);
-  const auto [lef, def] = ispd18LefDef(root, test_case, repair_workspace);
+  const auto [lef, def] = ispd18LefDef(root, test_case);
 
   eccdb::TechStore tech;
   std::unique_ptr<eccdb::LibraryStore> library;
@@ -464,11 +431,8 @@ TEST(SelfCheck, TwoIdbWrapsMatch)
     GTEST_SKIP() << "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus";
   }
 
-  TemporaryWorkspace workspace;
   const Ispd18Case test_case{"ispd18_sample"};
-  const auto repair_workspace = workspace.path("ws");
-  std::filesystem::create_directories(repair_workspace);
-  const auto [lef, def] = ispd18LefDef(root, test_case, repair_workspace);
+  const auto [lef, def] = ispd18LefDef(root, test_case);
   loadIspd18IntoIdb(lef, def);
 
   Logger::initInst();
@@ -552,19 +516,65 @@ TEST(Shapes, GeneratedViaAndRegularWireMatch)
   expectViolationListsEqual("violations", idb_violations, entt_violations);
 }
 
+TEST(Shapes, DISABLED_UsesViaExitLayerAndAllSegmentsForRegularWire)
+{
+  constexpr std::string_view def_text = R"DEF(VERSION 5.8 ;
+DESIGN routed_shape ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 1000 1000 ) ;
+NETS 1 ;
+- signal + ROUTED M1 ( 100 100 ) ( 500 100 ) VIA12 RECT ( -20 -20 20 20 ) ( 500 700 ) ;
+END NETS
+END DESIGN
+)DEF";
+
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("layer-transition.lef");
+  const auto def = workspace.path("layer-transition.def");
+  writeText(lef, kShapeFixtureLef);
+  writeText(def, def_text);
+
+  eccdb::TechStore tech;
+  static_cast<void>(LefDefParser::lefrClear());
+  static_cast<void>(LefDefParser::defrClear());
+  eccdb::LefTechImporter(tech).import(lef);
+  eccdb::LibraryStore library{tech.techRegistry()};
+  eccdb::LefLibraryImporter(tech, library).import(lef);
+  eccdb::DesignStore design{tech.techRegistry(), library.libraryRegistry()};
+  eccdb::DefDesignImporter(design).import(def);
+
+  Logger::initInst();
+  DRCI.setDesignSource(&design, &tech, &library);
+  const auto shapes = DRCI.buildResultShapeListFromEnTT();
+  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  const auto keys = canonicalShapes(shapes, enttNetNames(design));
+  const auto has_shape = [&](const ShapeKey& expected) {
+    return std::find(keys.begin(), keys.end(), expected) != keys.end();
+  };
+
+  EXPECT_TRUE(has_shape(ShapeKey{.net_name = "signal", .layer_idx = 0, .is_routing = true,
+                                 .ll_x = 50, .ll_y = 50, .ur_x = 550, .ur_y = 150}));
+  EXPECT_TRUE(has_shape(ShapeKey{.net_name = "signal", .layer_idx = 1, .is_routing = true,
+                                 .ll_x = 450, .ll_y = 50, .ur_x = 550, .ur_y = 750}))
+      << "the segment after VIA12 belongs to M2";
+  EXPECT_TRUE(has_shape(ShapeKey{.net_name = "signal", .layer_idx = 1, .is_routing = true,
+                                 .ll_x = 480, .ll_y = 80, .ur_x = 520, .ur_y = 120}))
+      << "the RECT after VIA12 belongs to M2";
+}
+
 TEST(Wrap, Ispd18Sample) { compareIdbAndEntt({"ispd18_sample"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd18Sample2) { compareIdbAndEntt({"ispd18_sample2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd18Sample3) { compareIdbAndEntt({"ispd18_sample3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd18Test1) { compareIdbAndEntt({"ispd18_test1"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd18Test2) { compareIdbAndEntt({"ispd18_test2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd18Test3) { compareIdbAndEntt({"ispd18_test3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test4) { compareIdbAndEntt({"ispd18_test4", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test5) { compareIdbAndEntt({"ispd18_test5", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test6) { compareIdbAndEntt({"ispd18_test6", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test7) { compareIdbAndEntt({"ispd18_test7", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test8) { compareIdbAndEntt({"ispd18_test8", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test9) { compareIdbAndEntt({"ispd18_test9", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test10) { compareIdbAndEntt({"ispd18_test10", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test4) { compareIdbAndEntt({"ispd18_test4"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test5) { compareIdbAndEntt({"ispd18_test5"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test6) { compareIdbAndEntt({"ispd18_test6"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test7) { compareIdbAndEntt({"ispd18_test7"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test8) { compareIdbAndEntt({"ispd18_test8"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test9) { compareIdbAndEntt({"ispd18_test9"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test10) { compareIdbAndEntt({"ispd18_test10"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd19Sample)
 {
   compareIdbAndEntt({"ispd19_sample"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");

@@ -7,6 +7,7 @@
 #include <sstream>
 #include <streambuf>
 #include <string>
+#include <string_view>
 
 #include "def/DefDesignExporter.h"
 #include "def/DefDesignImporter.h"
@@ -187,6 +188,28 @@ END NETS
 
 END DESIGN
 )DEF";
+
+constexpr std::string_view kLocalVia12 = R"DEF(VIAS 1 ;
+- LOCAL12
+  + RECT M1 ( -5 -5 ) ( 5 5 )
+  + RECT V1 ( -2 -2 ) ( 2 2 )
+  + RECT M2 ( -5 -5 ) ( 5 5 )
+  ;
+END VIAS
+)DEF";
+
+std::string singleRouteDef(std::string_view route, std::string_view via_section = {})
+{
+  std::string text = "VERSION 5.8 ;\n"
+                     "DESIGN route_semantics ;\n"
+                     "UNITS DISTANCE MICRONS 1000 ;\n"
+                     "DIEAREA ( 0 0 ) ( 1000 1000 ) ;\n";
+  text += via_section;
+  text += "NETS 1 ;\n- signal + ROUTED ";
+  text += route;
+  text += " ;\nEND NETS\nEND DESIGN\n";
+  return text;
+}
 
 void expectComplexRouting(const DesignStore& design)
 {
@@ -400,6 +423,79 @@ TEST_F(DefDesignRoundTripTest, ImportsAndExportsComplexNewVirtualFlushAndViaPath
   EXPECT_EQ(second.netlistStorage().ioPin(second_io_pin).ports.size(), io_pin.ports.size());
 }
 
+TEST_F(DefDesignRoundTripTest, KeepsDefinedViaBetweenSegmentsInOnePath)
+{
+  const auto input = writeInput(singleRouteDef("M1 ( 100 100 ) ( 200 100 ) LOCAL12 ( 200 300 )", kLocalVia12),
+                                "eccdb_cross_layer_path.def");
+  DesignStore design{tech, library.libraryRegistry()};
+  DefDesignImporter(design).import(input);
+
+  const auto local_via = design.routingStorage().findVia("LOCAL12");
+  ASSERT_TRUE(local_via);
+  const auto& via_geometry = design.routingStorage().via(local_via).rectangles;
+  ASSERT_EQ(via_geometry.size(), 3u);
+  EXPECT_EQ(tech.registry().get<const TechLayerInfo>(via_geometry[0].layer.entity()).name, "M1");
+  EXPECT_EQ(tech.registry().get<const TechLayerInfo>(via_geometry[2].layer.entity()).name, "M2");
+
+  const auto net = design.netlistStorage().findRegularNet("signal");
+  ASSERT_TRUE(net);
+  const auto wires = design.routingStorage().wires(net);
+  ASSERT_EQ(wires.size(), 1u);
+  ASSERT_EQ(design.routingStorage().pathCount(wires.front()), 1u);
+  const auto path = design.routingStorage().path(wires.front(), 0);
+  ASSERT_EQ(path.points().size(), 3u);
+  ASSERT_EQ(path.vias().size(), 1u);
+  EXPECT_EQ(path.vias().front().point_index, 1u);
+  EXPECT_EQ(path.vias().front().design_via, local_via);
+  EXPECT_EQ(path.points()[2].position, (Point{200, 300}));
+
+  const auto output = DefDesignExporter(design).exportText();
+  const auto via = output.find(" LOCAL12", output.find("NETS 1 ;"));
+  ASSERT_NE(via, std::string::npos);
+  EXPECT_NE(output.find("( * 300 )", via), std::string::npos);
+
+  DesignStore reimported{tech, library.libraryRegistry()};
+  DefDesignImporter(reimported).import(writeInput(output, "eccdb_cross_layer_path_roundtrip.def"));
+  const auto reimported_net = reimported.netlistStorage().findRegularNet("signal");
+  ASSERT_TRUE(reimported_net);
+  const auto reimported_wire = reimported.routingStorage().wires(reimported_net);
+  ASSERT_EQ(reimported_wire.size(), 1u);
+  const auto reimported_path = reimported.routingStorage().path(reimported_wire.front(), 0);
+  ASSERT_EQ(reimported_path.vias().size(), 1u);
+  EXPECT_EQ(reimported_path.vias().front().point_index, 1u);
+  EXPECT_EQ(reimported_path.points()[2].position, (Point{200, 300}));
+}
+
+TEST_F(DefDesignRoundTripTest, DISABLED_PreservesRectAfterViaAtTheSamePoint)
+{
+  const auto input = writeInput(singleRouteDef("M1 ( 100 100 ) LOCAL12 RECT ( -2 -2 2 2 ) ( 100 200 )", kLocalVia12),
+                                "eccdb_rect_after_via.def");
+  DesignStore design{tech, library.libraryRegistry()};
+  DefDesignImporter(design).import(input);
+
+  const auto output = DefDesignExporter(design).exportText();
+  const auto via = output.find(" LOCAL12", output.find("NETS 1 ;"));
+  const auto rectangle = output.find(" RECT ( -2 -2 2 2 )");
+  ASSERT_NE(via, std::string::npos);
+  ASSERT_NE(rectangle, std::string::npos);
+  EXPECT_LT(via, rectangle) << "RECT follows VIA and belongs to the exit layer";
+}
+
+TEST_F(DefDesignRoundTripTest, DISABLED_PreservesMaskChangesWithinOnePath)
+{
+  const auto input = writeInput(singleRouteDef("M1 ( 100 100 ) MASK 1 ( 200 100 ) MASK 2 ( 300 100 )"),
+                                "eccdb_mid_path_masks.def");
+  DesignStore design{tech, library.libraryRegistry()};
+  DefDesignImporter(design).import(input);
+
+  const auto output = DefDesignExporter(design).exportText();
+  const auto first_mask = output.find(" MASK 1");
+  const auto second_mask = output.find(" MASK 2");
+  ASSERT_NE(first_mask, std::string::npos) << "the first MASK was overwritten during import";
+  ASSERT_NE(second_mask, std::string::npos);
+  EXPECT_LT(first_mask, second_mask);
+}
+
 TEST_F(DefDesignRoundTripTest, ReportsBufferedOutputFailure)
 {
   const auto input = writeInput(kComplexDef, "eccdb_failed_output_input.def");
@@ -516,10 +612,10 @@ PINS 1 ;
 - IO + NET shared + SPECIAL + DIRECTION INOUT ;
 END PINS
 SPECIALNETS 1 ;
-- shared ( PIN IO ) ( u1 A ) + USE POWER ;
+- shared ( PIN IO ) ( u1 A ) ( PIN IO ) ( u1 A ) + USE POWER ;
 END SPECIALNETS
 NETS 1 ;
-- shared ( PIN IO ) ( u1 A ) + USE SIGNAL ;
+- shared ( PIN IO ) ( u1 A ) ( PIN IO ) ( u1 A ) + USE SIGNAL ;
 END NETS
 END DESIGN
 )DEF",
@@ -544,6 +640,12 @@ END DESIGN
   EXPECT_EQ(first.netlistStorage().ioPin(io).special_net, special);
   EXPECT_EQ(first.netlistStorage().instancePin(instance_pin).net, regular);
   EXPECT_EQ(first.netlistStorage().instancePin(instance_pin).special_net, special);
+  for (const auto net : {regular, special}) {
+    ASSERT_EQ(first.netlistStorage().instancePins(net).size(), 1u);
+    EXPECT_EQ(first.netlistStorage().instancePins(net).front(), instance_pin);
+    ASSERT_EQ(first.netlistStorage().ioPins(net).size(), 1u);
+    EXPECT_EQ(first.netlistStorage().ioPins(net).front(), io);
+  }
 
   const auto text = DefDesignExporter(first).exportText();
   EXPECT_NE(text.find("+ SPECIAL"), std::string::npos);
@@ -552,6 +654,64 @@ END DESIGN
   DefDesignImporter(second).import(output);
   EXPECT_TRUE(second.netlistStorage().findRegularNet("shared"));
   EXPECT_TRUE(second.netlistStorage().findSpecialNet("shared"));
+}
+
+TEST_F(DefDesignRoundTripTest, ReconnectsRepeatedPinDeclarationsWithoutStaleReverseConnections)
+{
+  const auto input = writeInput(R"DEF(VERSION 5.8 ;
+DESIGN reconnected_pins ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 100 100 ) ;
+COMPONENTS 1 ;
+- u1 INVX1 ;
+END COMPONENTS
+PINS 1 ;
+- IO + NET n2 + DIRECTION INPUT ;
+END PINS
+NETS 2 ;
+- n1 ( PIN IO ) ( u1 A ) ;
+- n2 ( PIN IO ) ( u1 A ) ;
+END NETS
+END DESIGN
+)DEF",
+                                "eccdb_reconnected_pins.def");
+  DesignStore design{tech, library.libraryRegistry()};
+  DefDesignImporter importer(design);
+  importer.import(input);
+  auto& netlist = design.netlistStorage();
+  const auto first = netlist.findRegularNet("n1");
+  const auto second = netlist.findRegularNet("n2");
+  const auto pin = netlist.findInstancePin(netlist.findInstance("u1"), "A");
+  const auto io = netlist.findIoPin("IO");
+  EXPECT_TRUE(netlist.instancePins(first).empty());
+  EXPECT_TRUE(netlist.ioPins(first).empty());
+  ASSERT_EQ(netlist.instancePins(second).size(), 1u);
+  EXPECT_EQ(netlist.instancePins(second).front(), pin);
+  ASSERT_EQ(netlist.ioPins(second).size(), 1u);
+  EXPECT_EQ(netlist.ioPins(second).front(), io);
+  EXPECT_EQ(netlist.instancePin(pin).net, second);
+  EXPECT_EQ(netlist.ioPin(io).net, second);
+}
+
+TEST_F(DefDesignRoundTripTest, RejectsMustJoinIoPinBeforeConnecting)
+{
+  const auto input = writeInput(R"DEF(VERSION 5.8 ;
+DESIGN invalid_mustjoin ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 100 100 ) ;
+PINS 1 ;
+- IO + NET n1 + DIRECTION INPUT ;
+END PINS
+NETS 1 ;
+- MUSTJOIN ( PIN IO ) ;
+END NETS
+END DESIGN
+)DEF",
+                                "eccdb_invalid_mustjoin_io.def");
+  DesignStore design{tech, library.libraryRegistry()};
+  EXPECT_THROW(DefDesignImporter(design).import(input), std::runtime_error);
+  EXPECT_EQ(design.netlistStorage().netCount(), 0u);
+  EXPECT_EQ(design.netlistStorage().ioPinCount(), 0u);
 }
 
 TEST_F(DefDesignRoundTripTest, ImportsAndExportsRectangularFillsAndMustJoinNets)

@@ -266,43 +266,33 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
     result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(wire.shield_net);
   }
 
-  const auto routing_pool = design.routingStorage().routingPoolStatistics();
-  result.wire_path_count = routing_pool.paths.count;
-  result.wire_path_capacity = routing_pool.paths.capacity;
-  result.wire_path_capacity_bytes = routing_pool.paths.capacity_bytes;
-  result.wire_path_buffer_count = routing_pool.paths.capacity == 0u ? 0u : 1u;
-  result.wire_path_usable_bytes = routing_pool.paths.allocation_usable_bytes;
-  result.wire_path_extra_count = routing_pool.path_extras.count;
-  result.wire_path_extra_capacity = routing_pool.path_extras.capacity;
-  result.wire_path_extra_capacity_bytes = routing_pool.path_extras.capacity_bytes;
-  result.wire_path_extra_buffer_count = routing_pool.path_extras.capacity == 0u ? 0u : 1u;
-  result.wire_path_extra_usable_bytes = routing_pool.path_extras.allocation_usable_bytes;
-  result.dynamic_string_capacity_estimate_bytes += routing_pool.dynamic_string_capacity_bytes;
-  result.wire_point_count = routing_pool.points.count;
-  result.wire_point_capacity = routing_pool.points.capacity;
-  result.wire_point_capacity_bytes = routing_pool.points.capacity_bytes;
-  result.wire_point_buffer_count = routing_pool.points.capacity == 0u ? 0u : 1u;
-  result.wire_point_usable_bytes = routing_pool.points.allocation_usable_bytes;
-  result.wire_point_extra_count = routing_pool.point_extras.count;
-  result.wire_point_extra_capacity = routing_pool.point_extras.capacity;
-  result.wire_point_extra_capacity_bytes = routing_pool.point_extras.capacity_bytes;
-  result.wire_point_extra_buffer_count = routing_pool.point_extras.capacity == 0u ? 0u : 1u;
-  result.wire_point_extra_usable_bytes = routing_pool.point_extras.allocation_usable_bytes;
-  result.wire_via_count = routing_pool.vias.count;
-  result.wire_via_capacity = routing_pool.vias.capacity;
-  result.wire_via_capacity_bytes = routing_pool.vias.capacity_bytes;
-  result.wire_via_buffer_count = routing_pool.vias.capacity == 0u ? 0u : 1u;
-  result.wire_via_usable_bytes = routing_pool.vias.allocation_usable_bytes;
-  result.wire_via_extra_count = routing_pool.via_extras.count;
-  result.wire_via_extra_capacity = routing_pool.via_extras.capacity;
-  result.wire_via_extra_capacity_bytes = routing_pool.via_extras.capacity_bytes;
-  result.wire_via_extra_buffer_count = routing_pool.via_extras.capacity == 0u ? 0u : 1u;
-  result.wire_via_extra_usable_bytes = routing_pool.via_extras.allocation_usable_bytes;
-  result.wire_rectangle_count = routing_pool.rectangles.count;
-  result.wire_rectangle_capacity = routing_pool.rectangles.capacity;
-  result.wire_rectangle_capacity_bytes = routing_pool.rectangles.capacity_bytes;
-  result.wire_rectangle_buffer_count = routing_pool.rectangles.capacity == 0u ? 0u : 1u;
-  result.wire_rectangle_usable_bytes = routing_pool.rectangles.allocation_usable_bytes;
+  const auto routing_vectors = design.routingStorage().routingStatistics();
+  result.wire_path_count = routing_vectors.paths.count;
+  result.wire_path_capacity = routing_vectors.paths.capacity;
+  result.wire_path_capacity_bytes = routing_vectors.paths.capacity_bytes;
+  result.wire_path_buffer_count = routing_vectors.paths.buffer_count;
+  result.wire_path_usable_bytes = routing_vectors.paths.allocation_usable_bytes;
+  result.wire_path_extra_count = routing_vectors.path_extras.count;
+  result.wire_path_extra_capacity = routing_vectors.path_extras.capacity;
+  result.wire_path_extra_capacity_bytes = routing_vectors.path_extras.capacity_bytes;
+  result.wire_path_extra_buffer_count = routing_vectors.path_extras.buffer_count;
+  result.wire_path_extra_usable_bytes = routing_vectors.path_extras.allocation_usable_bytes;
+  result.dynamic_string_capacity_estimate_bytes += routing_vectors.dynamic_string_capacity_bytes;
+  result.wire_point_count = routing_vectors.points.count;
+  result.wire_point_capacity = routing_vectors.points.capacity;
+  result.wire_point_capacity_bytes = routing_vectors.points.capacity_bytes;
+  result.wire_point_buffer_count = routing_vectors.points.buffer_count;
+  result.wire_point_usable_bytes = routing_vectors.points.allocation_usable_bytes;
+  result.wire_via_count = routing_vectors.vias.count;
+  result.wire_via_capacity = routing_vectors.vias.capacity;
+  result.wire_via_capacity_bytes = routing_vectors.vias.capacity_bytes;
+  result.wire_via_buffer_count = routing_vectors.vias.buffer_count;
+  result.wire_via_usable_bytes = routing_vectors.vias.allocation_usable_bytes;
+  result.wire_rectangle_count = routing_vectors.rectangles.count;
+  result.wire_rectangle_capacity = routing_vectors.rectangles.capacity;
+  result.wire_rectangle_capacity_bytes = routing_vectors.rectangles.capacity_bytes;
+  result.wire_rectangle_buffer_count = routing_vectors.rectangles.buffer_count;
+  result.wire_rectangle_usable_bytes = routing_vectors.rectangles.allocation_usable_bytes;
 
   result.wire_nested_buffer_count = result.wire_path_buffer_count + result.wire_path_extra_buffer_count + result.wire_point_buffer_count
                                     + result.wire_point_extra_buffer_count + result.wire_via_buffer_count
@@ -481,7 +471,7 @@ void printMemoryBreakdown(const MemoryBreakdown& value)
             << ",\"wire_path_capacity_bytes\":" << value.wire_path_capacity_bytes
             << ",\"wire_path_buffer_count\":" << value.wire_path_buffer_count
             << ",\"wire_path_usable_bytes\":" << value.wire_path_usable_bytes
-            << ",\"wire_path_record_size_bytes\":" << sizeof(DesignRoutingPathRecord)
+            << ",\"wire_path_record_size_bytes\":" << sizeof(DesignWirePathRecord)
             << ",\"wire_path_extra_count\":" << value.wire_path_extra_count
             << ",\"wire_path_extra_capacity\":" << value.wire_path_extra_capacity
             << ",\"wire_path_extra_capacity_bytes\":" << value.wire_path_extra_capacity_bytes
@@ -489,7 +479,7 @@ void printMemoryBreakdown(const MemoryBreakdown& value)
             << ",\"wire_path_extra_usable_bytes\":" << value.wire_path_extra_usable_bytes
             << ",\"wire_point_count\":" << value.wire_point_count << ",\"wire_point_capacity\":" << value.wire_point_capacity
             << ",\"wire_point_capacity_bytes\":" << value.wire_point_capacity_bytes
-            << ",\"wire_point_record_size_bytes\":" << sizeof(DesignRoutingPointRecord)
+            << ",\"wire_point_record_size_bytes\":" << sizeof(DesignWirePoint)
             << ",\"wire_point_buffer_count\":" << value.wire_point_buffer_count
             << ",\"wire_point_usable_bytes\":" << value.wire_point_usable_bytes
             << ",\"wire_point_extra_count\":" << value.wire_point_extra_count
@@ -499,7 +489,7 @@ void printMemoryBreakdown(const MemoryBreakdown& value)
             << ",\"wire_point_extra_usable_bytes\":" << value.wire_point_extra_usable_bytes
             << ",\"wire_via_count\":" << value.wire_via_count << ",\"wire_via_capacity\":" << value.wire_via_capacity
             << ",\"wire_via_capacity_bytes\":" << value.wire_via_capacity_bytes
-            << ",\"wire_via_record_size_bytes\":" << sizeof(DesignRoutingViaRecord)
+            << ",\"wire_via_record_size_bytes\":" << sizeof(DesignWireVia)
             << ",\"wire_via_buffer_count\":" << value.wire_via_buffer_count
             << ",\"wire_via_usable_bytes\":" << value.wire_via_usable_bytes
             << ",\"wire_via_extra_count\":" << value.wire_via_extra_count

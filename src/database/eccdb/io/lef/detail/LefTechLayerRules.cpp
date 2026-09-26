@@ -13,6 +13,8 @@
 #include "tech/routing_layer/storage/RoutingLayerStorage.h"
 
 namespace eccdb::lef_detail {
+using namespace LefDefParser;
+
 namespace {
 
 std::string upper(const char* value)

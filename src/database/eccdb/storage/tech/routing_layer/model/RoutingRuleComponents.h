@@ -120,6 +120,7 @@ constexpr uint32_t kSameMask = 1u << 2;
 constexpr uint32_t kExceptEol = 1u << 3;
 constexpr uint32_t kHasExceptWithin = 1u << 4;
 constexpr uint32_t kHasInfluence = 1u << 5;
+constexpr uint32_t kNonIncreasingWidths = 1u << 6;
 }  // namespace TechRoutingPrlSpacingTableRuleFlag
 
 // Native parallel-run-length table and optional companion data:

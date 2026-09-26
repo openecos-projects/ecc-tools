@@ -1,8 +1,9 @@
 #include "design/constraint/storage/DesignConstraintStorage.h"
 
 #include <stdexcept>
-#include <unordered_set>
 #include <utility>
+
+#include <entt/container/dense_set.hpp>
 
 #include "design/netlist/model/NetlistComponents.h"
 #include "tech/TechRegistry.h"
@@ -269,7 +270,7 @@ void DesignConstraintStorage::validateGroup(const DesignGroup& value, DesignGrou
     throw std::invalid_argument("design group region and flags are inconsistent");
   }
 
-  std::unordered_set<uint32_t> members;
+  entt::dense_set<uint32_t> members;
   members.reserve(value.instances.size());
   for (const auto instance : value.instances) {
     if (!instance || !_registry.valid(instance.entity()) || !_registry.all_of<DesignInstance>(instance.entity())

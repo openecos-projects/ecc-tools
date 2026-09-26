@@ -64,6 +64,7 @@ std::unique_ptr<LibraryStore> BinaryDatabaseImporter::loadLibrary(const std::fil
                                                  std::move(geometry.points), std::move(geometry.polygons));
         binary_detail::readRegistrySnapshot<LibraryEntity>(result->libraryRegistry().registry(), archive,
                                                            binary_detail::LibraryBinaryComponents{});
+        result->masterTermStorage().rebuildNameIndexes();
       });
   return result;
 }
@@ -85,16 +86,6 @@ std::unique_ptr<DesignStore> BinaryDatabaseImporter::loadDesign(const std::files
         result->resetForBinaryLoad();
         binary_detail::readRegistrySnapshot<DesignEntity>(result->designRegistry().registry(), archive,
                                                           binary_detail::DesignBinaryComponents{});
-        DesignRoutingPoolData routing;
-        archive(routing.routing_layers);
-        archive.readByteCompatibleSequence(routing.paths);
-        archive.readByteCompatibleSequence(routing.points);
-        archive.readByteCompatibleSequence(routing.point_extras);
-        archive.readByteCompatibleSequence(routing.vias);
-        archive.readByteCompatibleSequence(routing.via_extras);
-        archive.readByteCompatibleSequence(routing.rectangles);
-        archive(routing.path_extras);
-        result->routingStorage().restoreSerializedRoutingPool(std::move(routing));
         result->bindBinaryLoadedRoot();
       });
   return result;

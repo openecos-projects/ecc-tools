@@ -226,6 +226,82 @@ TEST(LibraryStoreTest, EmbedsHierarchyInObjectComponentsAndPreservesItAcrossUpda
   EXPECT_TRUE(database.cellMasterStorage().cellMaster(master).terms.empty());
 }
 
+TEST(LibraryStoreTest, FindsMasterTermsAfterRenameDeletionAndIndexRebuild)
+{
+  TechRegistry tech_registry;
+  LibraryStore database{tech_registry};
+  auto& terms = database.masterTermStorage();
+  const auto master = database.cellMasterStorage().createCellMaster(LibraryCellMaster{.name = "INVX1"});
+  const auto a = terms.createMasterTerm(master, LibraryMasterTerm{.name = "A"});
+  const auto b = terms.createMasterTerm(master, LibraryMasterTerm{.name = "B"});
+  const auto y = terms.createMasterTerm(master, LibraryMasterTerm{.name = "Y"});
+
+  EXPECT_EQ(terms.findMasterTerm(master, "A"), a);
+  EXPECT_EQ(terms.findMasterTerm(master, "B"), b);
+  EXPECT_EQ(terms.findMasterTerm(master, "Y"), y);
+
+  terms.updateMasterTerm(b, LibraryMasterTerm{.name = "B_RENAMED", .direction = LibraryMasterTermDirection::kInput});
+  EXPECT_FALSE(terms.findMasterTerm(master, "B"));
+  EXPECT_EQ(terms.findMasterTerm(master, "B_RENAMED"), b);
+
+  ASSERT_TRUE(terms.destroyMasterTerm(a));
+  // Deletion shifts the remaining term ordinals in the name index.
+  EXPECT_EQ(terms.findMasterTerm(master, "Y"), y);
+  EXPECT_EQ(database.libraryRegistry().registry().get<const LibraryMasterTermNameIndex>(master.entity()).at("Y").ordinal, 1u);
+  const auto replacement_a = terms.createMasterTerm(master, LibraryMasterTerm{.name = "A"});
+  EXPECT_EQ(terms.findMasterTerm(master, "A"), replacement_a);
+
+  database.libraryRegistry().registry().remove<LibraryMasterTermNameIndex>(master.entity());
+  terms.rebuildNameIndexes();
+  EXPECT_EQ(terms.findMasterTerm(master, "B_RENAMED"), b);
+  EXPECT_EQ(terms.findMasterTerm(master, "Y"), y);
+  EXPECT_EQ(terms.findMasterTerm(master, "A"), replacement_a);
+}
+
+TEST(LibraryStoreTest, KeepsMasterTermLookupAndNameIndexAddressAcrossUnrelatedMasterDeletion)
+{
+  TechRegistry tech_registry;
+  LibraryStore database{tech_registry};
+  auto& masters = database.cellMasterStorage();
+  auto& terms = database.masterTermStorage();
+  auto& registry = database.libraryRegistry().registry();
+
+  const auto removed_master = masters.createCellMaster(LibraryCellMaster{.name = "REMOVED"});
+  const auto survivor_master = masters.createCellMaster(LibraryCellMaster{.name = "SURVIVOR"});
+  const auto removed_term = terms.createMasterTerm(removed_master, LibraryMasterTerm{.name = "A"});
+  const auto survivor_term = terms.createMasterTerm(survivor_master, LibraryMasterTerm{.name = "Y"});
+
+  const auto* survivor_index_ptr = &registry.get<const LibraryMasterTermNameIndex>(survivor_master.entity());
+
+  ASSERT_TRUE(terms.destroyMasterTerm(removed_term));
+  EXPECT_EQ(terms.findMasterTerm(survivor_master, "Y"), survivor_term);
+
+  ASSERT_TRUE(masters.destroyCellMaster(removed_master));
+
+  EXPECT_EQ(&registry.get<const LibraryMasterTermNameIndex>(survivor_master.entity()), survivor_index_ptr);
+  EXPECT_EQ(terms.findMasterTerm(survivor_master, "Y"), survivor_term);
+}
+
+TEST(LibraryStoreTest, RejectsCorruptMasterTermRelationsDuringIndexRebuild)
+{
+  TechRegistry tech_registry;
+  LibraryStore database{tech_registry};
+  auto& registry = database.libraryRegistry().registry();
+  auto& terms = database.masterTermStorage();
+  const auto master = database.cellMasterStorage().createCellMaster(LibraryCellMaster{.name = "INVX1"});
+  const auto other = database.cellMasterStorage().createCellMaster(LibraryCellMaster{.name = "INVX2"});
+  const auto foreign_term = terms.createMasterTerm(other, LibraryMasterTerm{.name = "A"});
+
+  auto& owned_terms = registry.get<LibraryCellMaster>(master.entity()).terms;
+  owned_terms.push_back(foreign_term);
+  EXPECT_THROW(terms.rebuildNameIndexes(), std::logic_error);
+
+  owned_terms.pop_back();
+  const auto stale_term = terms.createMasterTerm(master, LibraryMasterTerm{.name = "B"});
+  registry.destroy(stale_term.entity());
+  EXPECT_THROW(terms.rebuildNameIndexes(), std::logic_error);
+}
+
 TEST(LibraryStoreTest, StoresMasterTermsPortsAndUnifiedObsWithTechReferences)
 {
   TechRegistry tech_registry;

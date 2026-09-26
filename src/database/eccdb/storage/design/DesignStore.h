@@ -5,7 +5,9 @@
 #include "design/fill/storage/DesignFillStorage.h"
 #include "design/floorplan/storage/DesignFloorplanStorage.h"
 #include "design/global/storage/DesignGlobalStorage.h"
+#include "design/guide/storage/DesignGuideStorage.h"
 #include "design/netlist/storage/DesignNetlistStorage.h"
+#include "design/pin_access/storage/DesignPinAccessStorage.h"
 #include "design/routing/storage/DesignRoutingStorage.h"
 #include "library/LibraryRegistry.h"
 #include "tech/TechRegistry.h"
@@ -15,7 +17,9 @@ namespace eccdb {
 class BinaryDatabaseImporter;
 
 // Composition root for one physical design. Tech and Library registries are
-// non-owning dependencies and must outlive this database.
+// non-owning dependencies and must outlive this database. While Design pins
+// cache pointers, no LibraryMasterTerm may be removed and its storage must not
+// be reordered; removing even an unrelated term can move a referenced term.
 class DesignStore
 {
  public:
@@ -39,6 +43,10 @@ class DesignStore
   [[nodiscard]] const DesignNetlistStorage& netlistStorage() const noexcept { return _netlist; }
   [[nodiscard]] DesignRoutingStorage& routingStorage() noexcept { return _routing; }
   [[nodiscard]] const DesignRoutingStorage& routingStorage() const noexcept { return _routing; }
+  [[nodiscard]] DesignGuideStorage& guideStorage() noexcept { return _guides; }
+  [[nodiscard]] const DesignGuideStorage& guideStorage() const noexcept { return _guides; }
+  [[nodiscard]] DesignPinAccessStorage& pinAccessStorage() noexcept { return _pin_access; }
+  [[nodiscard]] const DesignPinAccessStorage& pinAccessStorage() const noexcept { return _pin_access; }
   [[nodiscard]] DesignConstraintStorage& constraintStorage() noexcept { return _constraints; }
   [[nodiscard]] const DesignConstraintStorage& constraintStorage() const noexcept { return _constraints; }
   [[nodiscard]] DesignFillStorage& fillStorage() noexcept { return _fills; }
@@ -58,6 +66,8 @@ class DesignStore
   DesignFloorplanStorage _floorplan;
   DesignNetlistStorage _netlist;
   DesignRoutingStorage _routing;
+  DesignGuideStorage _guides;
+  DesignPinAccessStorage _pin_access;
   DesignConstraintStorage _constraints;
   DesignFillStorage _fills;
 };

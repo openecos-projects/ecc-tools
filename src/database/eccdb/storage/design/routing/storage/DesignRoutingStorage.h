@@ -1,22 +1,45 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <span>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <entt/container/dense_map.hpp>
 
 #include "design/DesignRegistry.h"
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/routing/component/RoutingComponents.h"
-#include "design/routing/pool/WireRoutingInput.h"
-#include "design/routing/pool/DesignRoutingPool.h"
+#include "design/routing/component/WireRouting.h"
 #include "design/via/component/ViaComponents.h"
 
 namespace eccdb {
 
 class TechRegistry;
+
+struct DesignRoutingArrayStatistics
+{
+  std::size_t count = 0;
+  std::size_t capacity = 0;
+  std::size_t element_size = 0;
+  std::size_t capacity_bytes = 0;
+  std::size_t allocation_usable_bytes = 0;
+  std::size_t buffer_count = 0;
+};
+
+struct DesignRoutingStatistics
+{
+  DesignRoutingArrayStatistics paths;
+  DesignRoutingArrayStatistics path_extras;
+  DesignRoutingArrayStatistics points;
+  DesignRoutingArrayStatistics vias;
+  DesignRoutingArrayStatistics rectangles;
+  std::size_t dynamic_string_capacity_bytes = 0;
+};
 
 class DesignRoutingStorage
 {
@@ -50,6 +73,10 @@ class DesignRoutingStorage
   [[nodiscard]] DesignWireId createWireTrusted(DesignWire wire, DesignWireRoutingInput routing);
   void updateWire(DesignWireId id, DesignWire wire, DesignWireRoutingInput routing);
   [[nodiscard]] bool destroyWire(DesignWireId id);
+  void insertPath(DesignWireId wire, std::size_t index, DesignWirePath path);
+  void replacePath(DesignWireId wire, std::size_t index, DesignWirePath path);
+  // Removing the last path also destroys its Wire; empty Wires are invalid.
+  void erasePath(DesignWireId wire, std::size_t index);
   [[nodiscard]] bool contains(DesignWireId id) const;
   [[nodiscard]] const DesignWire& wire(DesignWireId id) const;
   [[nodiscard]] std::size_t pathCount(DesignWireId id) const;
@@ -58,13 +85,10 @@ class DesignRoutingStorage
     requires std::invocable<Function&, DesignWirePathView>
   void forEachPath(DesignWireId id, Function&& function) const
   {
-    _routing_pool.forEachPath(wire(id).routing, std::forward<Function>(function));
-  }
-  template <typename Function>
-    requires std::invocable<Function&, DesignRoutingCompactPathView>
-  void forEachCompactPath(DesignWireId id, Function&& function) const
-  {
-    _routing_pool.forEachCompactPath(wire(id).routing, std::forward<Function>(function));
+    const auto& routing = wire(id).routing;
+    for (std::size_t index = 0; index < routing.pathCount(); ++index) {
+      std::invoke(function, routing.path(index));
+    }
   }
   [[nodiscard]] std::vector<DesignWireId> wires() const;
   [[nodiscard]] std::vector<DesignWireId> wires(DesignNetId net) const;
@@ -83,11 +107,8 @@ class DesignRoutingStorage
   }
 
   void rebuildWireIndex();
-  void shrinkRoutingPoolToFit();
-  void clearRoutingPool() noexcept;
-  [[nodiscard]] DesignRoutingPoolStatistics routingPoolStatistics() const noexcept;
-  [[nodiscard]] DesignRoutingPoolView serializedRoutingPool() const noexcept;
-  void restoreSerializedRoutingPool(DesignRoutingPoolData data);
+  void shrinkRoutingToFit();
+  [[nodiscard]] DesignRoutingStatistics routingStatistics() const noexcept;
   void validateRestoredRoutingState() const;
 
   void setNetGeometry(DesignNetId net, DesignNetGeometry geometry);
@@ -112,8 +133,7 @@ class DesignRoutingStorage
 
   registry_type& _registry;
   const TechRegistry& _tech_registry;
-  DesignRoutingPool _routing_pool;
-  std::unordered_map<uint64_t, std::vector<DesignWireId>> _wires_by_net;
+  entt::dense_map<uint64_t, std::vector<DesignWireId>> _wires_by_net;
 };
 
 }  // namespace eccdb

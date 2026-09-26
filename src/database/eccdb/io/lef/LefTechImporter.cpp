@@ -14,11 +14,12 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include <entt/container/dense_map.hpp>
+#include <entt/container/dense_set.hpp>
 
 #include "lef/detail/LefParserMutex.h"
 #include "lef/detail/LefTechLayerProperties.h"
@@ -34,6 +35,8 @@
 #include "lef/detail/parser/LayerPropertyParser.h"
 
 namespace eccdb {
+
+using namespace LefDefParser;
 
 namespace layer_property = lef_detail::grammar::layer;
 
@@ -120,7 +123,7 @@ struct Staging
   std::optional<StagedMaxViaStack> max_via_stack;
   std::vector<StagedLayer> layers;
   lef_detail::StagedTechObjects objects;
-  std::unordered_set<std::string> layer_names;
+  entt::dense_set<std::string> layer_names;
   std::exception_ptr callback_failure;
 };
 
@@ -918,7 +921,7 @@ PreparedImport prepareImport(const Staging& staging)
     prepared.layers.push_back(PreparedLayer{.info = layer.info, .payload = std::move(payload), .properties = layer.properties});
   }
 
-  std::unordered_map<std::string, size_t> layer_indexes;
+  entt::dense_map<std::string, size_t> layer_indexes;
   for (size_t index = 0; index < prepared.layers.size(); ++index) {
     layer_indexes.emplace(prepared.layers[index].info.name, index);
   }
@@ -994,7 +997,14 @@ void rollbackImport(TechStore& database, GeometryPoolCheckpoint geometry_checkpo
 
 void commitImport(TechStore& database, const PreparedImport& prepared)
 {
-  std::unordered_map<std::string, TechLayerId> layer_ids;
+  entt::dense_map<std::string, TechLayerId> layer_ids;
+  const auto layerId = [&layer_ids](const std::string& name) {
+    const auto found = layer_ids.find(name);
+    if (found == layer_ids.end()) {
+      throw std::out_of_range("missing imported LEF layer: " + name);
+    }
+    return found->second;
+  };
   const auto geometry_checkpoint = database.geometryPool().checkpoint();
   try {
     if (prepared.units) {
@@ -1034,12 +1044,12 @@ void commitImport(TechStore& database, const PreparedImport& prepared)
       if (implant == nullptr) {
         continue;
       }
-      const auto owner = TechImplantLayerId{layer_ids.at(layer.info.name).entity()};
+      const auto owner = TechImplantLayerId{layerId(layer.info.name).entity()};
       for (const auto& source_rule : implant->spacing_rules) {
         TechImplantSpacingRule rule{.min_spacing = source_rule.min_spacing};
         if (source_rule.other_layer) {
           rule.flags |= TechImplantSpacingRuleFlag::kHasOtherLayer;
-          rule.other_layer = TechImplantLayerId{layer_ids.at(*source_rule.other_layer).entity()};
+          rule.other_layer = TechImplantLayerId{layerId(*source_rule.other_layer).entity()};
         }
         database.implantLayerStorage().addSpacingRule(owner, rule);
       }
@@ -1048,7 +1058,7 @@ void commitImport(TechStore& database, const PreparedImport& prepared)
     for (const auto& layer : prepared.layers) {
       const auto* masterslice = std::get_if<PreparedMastersliceLayer>(&layer.payload);
       if (masterslice != nullptr && masterslice->trimmed_metal_rule) {
-        lef_detail::commitTrimmedMetalRule(database, TechMastersliceLayerId{layer_ids.at(layer.info.name).entity()},
+        lef_detail::commitTrimmedMetalRule(database, TechMastersliceLayerId{layerId(layer.info.name).entity()},
                                            *masterslice->trimmed_metal_rule);
       }
     }
@@ -1059,8 +1069,8 @@ void commitImport(TechStore& database, const PreparedImport& prepared)
       TechMaxViaStack stack{.max_stack_count = prepared.max_via_stack->max_stack_count};
       if (prepared.max_via_stack->range) {
         stack.flags |= TechMaxViaStackFlag::kHasRange;
-        stack.bottom_layer = TechRoutingLayerId{layer_ids.at(prepared.max_via_stack->range->first).entity()};
-        stack.top_layer = TechRoutingLayerId{layer_ids.at(prepared.max_via_stack->range->second).entity()};
+        stack.bottom_layer = TechRoutingLayerId{layerId(prepared.max_via_stack->range->first).entity()};
+        stack.top_layer = TechRoutingLayerId{layerId(prepared.max_via_stack->range->second).entity()};
       }
       database.globalStorage().setMaxViaStack(stack);
     }

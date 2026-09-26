@@ -1067,7 +1067,6 @@ struct OpenDbCorpusCase
   bool large = false;
   OpenDbCorpusRoot root = OpenDbCorpusRoot::kOpenRoad;
   std::filesystem::path additional_lef;
-  bool repair_invalid_ispd18_metal9_prl = false;
   bool ignore_unrepresented_wire_mask = false;
   bool repair_zero_diearea = false;
   bool default_unspecified_pin_use_to_signal = false;
@@ -1144,24 +1143,290 @@ void expectRepresentedSemantics(const OpenDbCorpusCase& test_case, const DesignS
   }
 }
 
+struct RoutedPrimitiveLocation
+{
+  std::string key;
+  std::string location;
+};
+
+std::string routedPathLocation(const DesignStore& design, DesignWirePathView path, std::size_t wire_index,
+                               std::size_t path_index, std::string_view primitive)
+{
+  std::ostringstream result;
+  result << primitive << " at wire[" << wire_index << "]/path[" << path_index << "] on " << layerName(design, path.layer())
+         << " (points=" << path.points().size() << ", vias=" << path.vias().size() << ", rectangles="
+         << path.rectangles().size() << ')';
+  return result.str();
+}
+
+std::vector<RoutedPrimitiveLocation> routedPrimitiveLocations(const DesignStore& design, DesignNetId net,
+                                                              bool ignore_unrepresented_wire_mask)
+{
+  std::vector<RoutedPrimitiveLocation> result;
+  const auto& routing = design.routingStorage();
+  std::size_t wire_index = 0u;
+  for (const auto wire_id : routing.wires(net)) {
+    const auto& wire = routing.wire(wire_id);
+    for (std::size_t path_index = 0; path_index < routing.pathCount(wire_id); ++path_index) {
+      const auto path = routing.path(wire_id, path_index);
+      for (std::size_t point_index = 1; point_index < path.points().size(); ++point_index) {
+        auto first = path.points()[point_index - 1u];
+        auto second = path.points()[point_index];
+        if (test::detail::pointLess(second.position, first.position)) {
+          std::swap(first, second);
+        }
+
+        test::detail::SemanticKey key;
+        key.text("segment");
+        test::detail::appendWirePathSemantics(key, design, wire, path, ignore_unrepresented_wire_mask);
+        key.point(first.position);
+        key.unsignedValue(first.flags);
+        key.signedValue(first.extension);
+        key.point(second.position);
+        key.unsignedValue(second.flags);
+        key.signedValue(second.extension);
+        result.push_back({.key = key.str(),
+                          .location = routedPathLocation(design, path, wire_index, path_index,
+                                                          "segment[" + std::to_string(point_index - 1u) + "]")});
+      }
+
+      if (path.points().size() == 1u && path.vias().empty() && path.rectangles().empty()) {
+        test::detail::SemanticKey key;
+        key.text("point");
+        test::detail::appendWirePathSemantics(key, design, wire, path, ignore_unrepresented_wire_mask);
+        key.point(path.points().front().position);
+        key.unsignedValue(path.points().front().flags);
+        key.signedValue(path.points().front().extension);
+        result.push_back({.key = key.str(), .location = routedPathLocation(design, path, wire_index, path_index, "point")});
+      }
+
+      std::size_t via_index = 0u;
+      for (const auto& via : path.vias()) {
+        test::detail::SemanticKey key;
+        key.text("via");
+        test::detail::appendWireSemantics(key, wire);
+        const auto& anchor = path.points()[via.point_index];
+        key.point(anchor.position);
+        key.unsignedValue(anchor.flags);
+        key.signedValue(anchor.extension);
+        key.text(test::detail::viaName(design, via.tech_via, via.design_via));
+        key.unsignedValue(static_cast<uint8_t>(via.orientation));
+        key.unsignedValue(via.flags);
+        key.unsignedValue(via.top_mask);
+        key.unsignedValue(via.cut_mask);
+        key.unsignedValue(via.bottom_mask);
+        key.unsignedValue(via.rows);
+        key.unsignedValue(via.columns);
+        key.signedValue(via.step_x);
+        key.signedValue(via.step_y);
+        result.push_back({.key = key.str(),
+                          .location = routedPathLocation(design, path, wire_index, path_index,
+                                                          "via[" + std::to_string(via_index++) + "]")});
+      }
+
+      std::size_t rectangle_index = 0u;
+      for (const auto& rectangle : path.rectangles()) {
+        test::detail::SemanticKey key;
+        key.text("rectangle");
+        test::detail::appendWirePathSemantics(key, design, wire, path, ignore_unrepresented_wire_mask);
+        const auto& anchor = path.points()[rectangle.point_index];
+        key.unsignedValue(anchor.flags);
+        key.signedValue(anchor.extension);
+        key.rectangle({.ll_x = anchor.position.x + rectangle.delta.ll_x,
+                       .ll_y = anchor.position.y + rectangle.delta.ll_y,
+                       .ur_x = anchor.position.x + rectangle.delta.ur_x,
+                       .ur_y = anchor.position.y + rectangle.delta.ur_y});
+        result.push_back({.key = key.str(),
+                          .location = routedPathLocation(design, path, wire_index, path_index,
+                                                          "rectangle[" + std::to_string(rectangle_index++) + "]")});
+      }
+    }
+    ++wire_index;
+  }
+  std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.key == rhs.key ? lhs.location < rhs.location : lhs.key < rhs.key;
+  });
+  return result;
+}
+
+void expectRoutedPrimitiveLocations(const DesignStore& expected, const DesignStore& actual,
+                                    bool ignore_unrepresented_wire_mask)
+{
+  for (const auto expected_id : expected.netlistStorage().nets()) {
+    if (test::detail::isEmptyRegularAliasOfSpecialNet(expected, expected_id)) {
+      continue;
+    }
+    const auto& expected_net = expected.netlistStorage().net(expected_id);
+    const bool special = expected.netlistStorage().isSpecialNet(expected_id);
+    const auto actual_id
+        = special ? actual.netlistStorage().findSpecialNet(expected_net.name) : actual.netlistStorage().findRegularNet(expected_net.name);
+    if (!actual_id) {
+      ADD_FAILURE() << "routed semantic mismatch at " << netKey(expected, expected_id) << ": net is missing from output";
+      return;
+    }
+
+    const auto expected_locations = routedPrimitiveLocations(expected, expected_id, ignore_unrepresented_wire_mask);
+    const auto actual_locations = routedPrimitiveLocations(actual, actual_id, ignore_unrepresented_wire_mask);
+    std::size_t expected_index = 0u;
+    std::size_t actual_index = 0u;
+    while (expected_index < expected_locations.size() && actual_index < actual_locations.size()) {
+      if (expected_locations[expected_index].key == actual_locations[actual_index].key) {
+        ++expected_index;
+        ++actual_index;
+        continue;
+      }
+      if (expected_locations[expected_index].key < actual_locations[actual_index].key) {
+        ADD_FAILURE() << "routed semantic mismatch at " << netKey(expected, expected_id) << ": missing expected "
+                      << expected_locations[expected_index].location;
+      } else {
+        ADD_FAILURE() << "routed semantic mismatch at " << netKey(expected, expected_id) << ": unexpected output "
+                      << actual_locations[actual_index].location;
+      }
+      return;
+    }
+    if (expected_index < expected_locations.size()) {
+      ADD_FAILURE() << "routed semantic mismatch at " << netKey(expected, expected_id) << ": missing expected "
+                    << expected_locations[expected_index].location;
+      return;
+    }
+    if (actual_index < actual_locations.size()) {
+      ADD_FAILURE() << "routed semantic mismatch at " << netKey(expected, expected_id) << ": unexpected output "
+                    << actual_locations[actual_index].location;
+      return;
+    }
+  }
+}
+
+TEST(OpenDbRoutedDefDifferentialTest, OptInRoutedDefMatchesOpenDbNormalizedRoundTrip)
+{
+  const char* routed_lef = std::getenv("ECCDB_ROUTED_LEF");
+  const char* routed_def = std::getenv("ECCDB_ROUTED_DEF");
+  const char* expected_def = std::getenv("ECCDB_ROUTED_EXPECTED_DEF");
+  if (routed_lef == nullptr || routed_lef[0] == '\0' || routed_def == nullptr || routed_def[0] == '\0') {
+    GTEST_SKIP() << "set ECCDB_ROUTED_LEF and ECCDB_ROUTED_DEF to run a routed DEF differential test";
+  }
+  if (!hasOpenDbRuntime()) {
+    GTEST_SKIP() << "configure the OpenDB Python module or set OPENDB_TCL";
+  }
+
+  std::vector<std::filesystem::path> lefs{routed_lef};
+  if (const char* extra_lefs = std::getenv("ECCDB_ROUTED_EXTRA_LEFS"); extra_lefs != nullptr && extra_lefs[0] != '\0') {
+    std::string_view remaining{extra_lefs};
+    while (!remaining.empty()) {
+      const auto separator = remaining.find(':');
+      const auto lef = remaining.substr(0u, separator);
+      ASSERT_FALSE(lef.empty()) << "ECCDB_ROUTED_EXTRA_LEFS contains an empty path";
+      lefs.emplace_back(std::string{lef});
+      if (separator == std::string_view::npos) {
+        break;
+      }
+      remaining.remove_prefix(separator + 1u);
+    }
+  }
+  for (const auto& lef : lefs) {
+    ASSERT_TRUE(std::filesystem::is_regular_file(lef)) << lef;
+  }
+  const auto input_def = std::filesystem::path{routed_def};
+  ASSERT_TRUE(std::filesystem::is_regular_file(input_def)) << input_def;
+  std::filesystem::path expected_input_def;
+  if (expected_def != nullptr && expected_def[0] != '\0') {
+    expected_input_def = expected_def;
+    ASSERT_TRUE(std::filesystem::is_regular_file(expected_input_def)) << expected_input_def;
+  }
+
+  if (lefs.size() > 1u) {
+    const auto python = openDbPythonExecutable();
+    const auto module_directory = openDbPythonPath();
+    if (python.empty() || !std::filesystem::is_regular_file(python) || !std::filesystem::is_regular_file(module_directory / "odb.py")
+        || !std::filesystem::is_regular_file(module_directory / "_odb.so")) {
+      GTEST_SKIP() << "ECCDB_ROUTED_EXTRA_LEFS requires the OpenDB Python module; the odbtcl fallback accepts one LEF";
+    }
+  }
+
+  TemporaryWorkspace workspace;
+  TechStore technology;
+  ASSERT_NO_THROW(LefTechImporter(technology).import(lefs));
+  LibraryStore library(technology.techRegistry());
+  ASSERT_NO_THROW(LefLibraryImporter(technology, library).import(lefs));
+
+  DesignStore source(technology.techRegistry(), library.libraryRegistry());
+  DefDesignImporter source_importer(source);
+  ASSERT_NO_THROW(source_importer.import(input_def)) << input_def;
+  const auto source_coverage = routingCoverage(source);
+  ASSERT_GT(source_coverage.wire_count, 0u) << input_def;
+  ASSERT_GT(source_coverage.path_count, 0u) << input_def;
+  ASSERT_GT(source_coverage.path_via_count, 0u) << input_def;
+
+  const OpenDbCorpusCase routed_case{.name = "dynamic_routed_def",
+                                     .minimum_wire_count = 1u,
+                                     .minimum_path_count = 1u,
+                                     .minimum_path_via_count = 1u};
+  const auto source_open_db_def = workspace.path("source-opendb.def");
+  const auto source_open_db_log = workspace.path("source-opendb.log");
+  const auto source_exit_code = normalizeWithOpenDb(lefs, input_def, source_open_db_def, source_open_db_log);
+  ASSERT_EQ(source_exit_code, 0) << readText(source_open_db_log);
+  ASSERT_TRUE(std::filesystem::is_regular_file(source_open_db_def)) << readText(source_open_db_log);
+
+  DesignStore source_open_db_normalized(technology.techRegistry(), library.libraryRegistry());
+  DefDesignImporter source_open_db_importer(source_open_db_normalized);
+  ASSERT_NO_THROW(source_open_db_importer.import(source_open_db_def)) << readText(source_open_db_log) << '\n' << readText(source_open_db_def);
+  EXPECT_TRUE(source_open_db_importer.diagnostics().empty());
+  {
+    SCOPED_TRACE("OpenDB normalization of ECCDB_ROUTED_DEF");
+    expectRoutingCoverage(routed_case, source, source_open_db_normalized);
+  }
+
+  const auto exported_def = workspace.path("eccdb-export.def");
+  ASSERT_NO_THROW(DefDesignExporter(source).write(exported_def));
+  const auto exported_open_db_def = workspace.path("eccdb-export-opendb.def");
+  const auto exported_open_db_log = workspace.path("eccdb-export-opendb.log");
+  const auto exported_exit_code = normalizeWithOpenDb(lefs, exported_def, exported_open_db_def, exported_open_db_log);
+  ASSERT_EQ(exported_exit_code, 0) << readText(exported_open_db_log);
+  ASSERT_TRUE(std::filesystem::is_regular_file(exported_open_db_def)) << readText(exported_open_db_log);
+
+  DesignStore exported_open_db_normalized(technology.techRegistry(), library.libraryRegistry());
+  DefDesignImporter exported_open_db_importer(exported_open_db_normalized);
+  ASSERT_NO_THROW(exported_open_db_importer.import(exported_open_db_def))
+      << readText(exported_open_db_log) << '\n'
+      << readText(exported_open_db_def);
+  EXPECT_TRUE(exported_open_db_importer.diagnostics().empty());
+  if (expected_input_def.empty()) {
+    SCOPED_TRACE("OpenDB-normalized ECCDB export compared with OpenDB-normalized ECCDB_ROUTED_DEF");
+    expectRepresentedSemantics(routed_case, source_open_db_normalized, exported_open_db_normalized);
+    expectRoutedPrimitiveLocations(source_open_db_normalized, exported_open_db_normalized,
+                                   routed_case.ignore_unrepresented_wire_mask);
+    return;
+  }
+
+  const auto expected_open_db_def = workspace.path("expected-opendb.def");
+  const auto expected_open_db_log = workspace.path("expected-opendb.log");
+  const auto expected_exit_code = normalizeWithOpenDb(lefs, expected_input_def, expected_open_db_def, expected_open_db_log);
+  ASSERT_EQ(expected_exit_code, 0) << readText(expected_open_db_log);
+  ASSERT_TRUE(std::filesystem::is_regular_file(expected_open_db_def)) << readText(expected_open_db_log);
+
+  DesignStore expected_open_db_normalized(technology.techRegistry(), library.libraryRegistry());
+  DefDesignImporter expected_open_db_importer(expected_open_db_normalized);
+  ASSERT_NO_THROW(expected_open_db_importer.import(expected_open_db_def))
+      << readText(expected_open_db_log) << '\n'
+      << readText(expected_open_db_def);
+  EXPECT_TRUE(expected_open_db_importer.diagnostics().empty());
+  {
+    SCOPED_TRACE("OpenDB-normalized ECCDB_ROUTED_EXPECTED_DEF compared with OpenDB-normalized ECCDB_ROUTED_DEF");
+    expectRepresentedSemantics(routed_case, expected_open_db_normalized, source_open_db_normalized);
+    expectRoutedPrimitiveLocations(expected_open_db_normalized, source_open_db_normalized,
+                                   routed_case.ignore_unrepresented_wire_mask);
+  }
+  {
+    SCOPED_TRACE("OpenDB-normalized ECCDB_ROUTED_EXPECTED_DEF compared with OpenDB-normalized ECCDB export");
+    expectRepresentedSemantics(routed_case, expected_open_db_normalized, exported_open_db_normalized);
+    expectRoutedPrimitiveLocations(expected_open_db_normalized, exported_open_db_normalized,
+                                   routed_case.ignore_unrepresented_wire_mask);
+  }
+}
+
 void PrintTo(const OpenDbCorpusCase& test_case, std::ostream* output)
 {
   *output << test_case.name;
-}
-
-std::filesystem::path repairInvalidIspd18Metal9Prl(const OpenDbCorpusCase& test_case, const std::filesystem::path& source,
-                                                   const TemporaryWorkspace& workspace)
-{
-  constexpr std::string_view malformed = "    WIDTH 4.5   1.50\n    WIDTH 1.5   0.45 ;";
-  constexpr std::string_view repaired = "    WIDTH 4.5   1.50 ;";
-
-  auto contents = readText(source);
-  const auto position = contents.find(malformed);
-  if (position == std::string::npos || contents.find(malformed, position + malformed.size()) != std::string::npos) {
-    throw std::runtime_error("expected exactly one malformed ISPD18 Metal9 PRL row in " + source.string());
-  }
-  contents.replace(position, malformed.size(), repaired);
-  return workspace.write(test_case.name + "-repaired.lef", contents);
 }
 
 std::filesystem::path repairZeroDieArea(const OpenDbCorpusCase& test_case, const std::filesystem::path& source,
@@ -1220,8 +1485,7 @@ TEST_P(OpenDbCorpusDifferentialTest, MatchesOpenDbNormalizedImportAndExportSeman
 
   TemporaryWorkspace workspace;
   const auto effective_input_def = test_case.repair_zero_diearea ? repairZeroDieArea(test_case, input_def, workspace) : input_def;
-  std::vector<std::filesystem::path> lefs;
-  lefs.push_back(test_case.repair_invalid_ispd18_metal9_prl ? repairInvalidIspd18Metal9Prl(test_case, lef, workspace) : lef);
+  std::vector<std::filesystem::path> lefs{lef};
   if (!test_case.additional_lef.empty()) {
     const auto additional_lef = root / test_case.additional_lef;
     ASSERT_TRUE(std::filesystem::is_regular_file(additional_lef)) << additional_lef;
@@ -1350,38 +1614,31 @@ INSTANTIATE_TEST_SUITE_P(Ispd18, OpenDbCorpusDifferentialTest,
                                          OpenDbCorpusCase{.name = "test4",
                                                           .lef = "ispd18_test4/ispd18_test4.input.lef",
                                                           .def = "ispd18_test4/ispd18_test4.input.def",
-                                                          .root = OpenDbCorpusRoot::kIspd18,
-                                                          .repair_invalid_ispd18_metal9_prl = true},
+                                                          .root = OpenDbCorpusRoot::kIspd18},
                                          OpenDbCorpusCase{.name = "test5",
                                                           .lef = "ispd18_test5/ispd18_test5.input.lef",
                                                           .def = "ispd18_test5/ispd18_test5.input.def",
-                                                          .root = OpenDbCorpusRoot::kIspd18,
-                                                          .repair_invalid_ispd18_metal9_prl = true},
+                                                          .root = OpenDbCorpusRoot::kIspd18},
                                          OpenDbCorpusCase{.name = "test6",
                                                           .lef = "ispd18_test6/ispd18_test6.input.lef",
                                                           .def = "ispd18_test6/ispd18_test6.input.def",
-                                                          .root = OpenDbCorpusRoot::kIspd18,
-                                                          .repair_invalid_ispd18_metal9_prl = true},
+                                                          .root = OpenDbCorpusRoot::kIspd18},
                                          OpenDbCorpusCase{.name = "test7",
                                                           .lef = "ispd18_test7/ispd18_test7.input.lef",
                                                           .def = "ispd18_test7/ispd18_test7.input.def",
-                                                          .root = OpenDbCorpusRoot::kIspd18,
-                                                          .repair_invalid_ispd18_metal9_prl = true},
+                                                          .root = OpenDbCorpusRoot::kIspd18},
                                          OpenDbCorpusCase{.name = "test8",
                                                           .lef = "ispd18_test8/ispd18_test8.input.lef",
                                                           .def = "ispd18_test8/ispd18_test8.input.def",
-                                                          .root = OpenDbCorpusRoot::kIspd18,
-                                                          .repair_invalid_ispd18_metal9_prl = true},
+                                                          .root = OpenDbCorpusRoot::kIspd18},
                                          OpenDbCorpusCase{.name = "test9",
                                                           .lef = "ispd18_test9/ispd18_test9.input.lef",
                                                           .def = "ispd18_test9/ispd18_test9.input.def",
-                                                          .root = OpenDbCorpusRoot::kIspd18,
-                                                          .repair_invalid_ispd18_metal9_prl = true},
+                                                          .root = OpenDbCorpusRoot::kIspd18},
                                          OpenDbCorpusCase{.name = "test10",
                                                           .lef = "ispd18_test10/ispd18_test10.input.lef",
                                                           .def = "ispd18_test10/ispd18_test10.input.def",
-                                                          .root = OpenDbCorpusRoot::kIspd18,
-                                                          .repair_invalid_ispd18_metal9_prl = true}),
+                                                          .root = OpenDbCorpusRoot::kIspd18}),
                          [](const testing::TestParamInfo<OpenDbCorpusCase>& info) { return info.param.name; });
 
 INSTANTIATE_TEST_SUITE_P(

@@ -346,7 +346,7 @@ Run each routed case in a fresh process to avoid hanging when routing workers fo
 
 ## 9. Binary fixed-point tests
 
-Binary tests are not an independent oracle, but they protect pool records, ID generations, and indexes across persistence:
+Binary tests are not an independent oracle, but they protect routing vectors, ID generations, and indexes across persistence:
 
 ```bash
 cmake --build "$ECCDB_DIFF_BUILD" --parallel 128 --target \
@@ -362,7 +362,7 @@ The large ISPD2019 solution requires the layout in section 4.4:
 export ECCDB_RUN_LARGE_DESIGN_BINARY_TESTS=1
 export ECCDB_ISPD19_ROOT=/path/to/combined-ispd2019-root
 ctest --test-dir "$ECCDB_DIFF_BUILD" --output-on-failure \
-  -R 'LargeIspd19RoutingPoolReachesByteExactFixedPoint'
+  -R 'LargeIspd19FlatRoutingReachesByteExactFixedPoint'
 ```
 
 This imports about 895k wires and tens of millions of path and point records. Its memory and runtime requirements are substantially higher than normal differential tests.

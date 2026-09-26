@@ -12,7 +12,7 @@ The current EccDB implementation currently has five practical layers:
 
 1. **Public API**: `Database`, `Config`, strong ID types, Data values, and Ref handles under `include/eccdb`.
 2. **API implementation**: `api` and `api/internal`, which implement the Facade, own the PImpl state, and convert public values to internal types.
-3. **Storage**: `storage`, containing EnTT registries, components, indexes, `GeometryPool`, and `DesignRoutingPool`.
+3. **Storage**: `storage`, containing EnTT registries, components, indexes, and the Tech/Library `GeometryPool`; Design routing lives directly in Wire-local flat vectors.
 4. **Format IO**: `io/lef`, `io/def`, `io/idb`, and `io/binary`, which materialize or export database objects.
 5. **Validation and performance**: `tests` and `benchmarks`, covering invariants, round trips, semantic differential tests, memory, and performance.
 
@@ -23,12 +23,12 @@ flowchart TB
   client["C++ caller"] --> public["include/eccdb\nDatabase / Config / Types / Data / Ref"]
   public --> api["api\npublic Facade + CRUD"]
   api --> internal["api/internal\nDatabaseState + conversions"]
-  internal --> stores["storage\nEnTT + components + pools"]
+  internal --> stores["storage\nEnTT + components + indexes"]
   stores --> tech["storage/tech\nTechStore"]
   stores --> library["storage/library\nLibraryStore"]
   stores --> design["storage/design\nDesignStore"]
   stores --> geometry["storage/geometry\nGeometryPool"]
-  design --> routing["DesignRoutingPool\ncompact route arrays"]
+  design --> routing["DesignWire routing\nWire-local flat vectors"]
   internal --> io["io/lef · io/def · io/idb · io/binary\nimport / export"]
   io --> stores
   tests["tests\nunit / IO / differential / memory"] --> public
@@ -103,9 +103,8 @@ flowchart LR
   ref --> entity["Database-owned entity\nEnTT components"]
   entity --> snapshot["NetData\nowned snapshot"]
   snapshot --> write["updateNet / destroyNet\nvalidated mutation"]
-  wire["Wire entity"] --> handle["DesignRoutingHandle"]
-  handle --> pool["DesignRoutingPool\ncompact arrays"]
-  pool --> values["Path / Point / Via / Rect\naggregate values"]
+  wire["Wire entity"] --> routing["DesignWireRouting\nWire-local flat vectors"]
+  routing --> values["Path records / Points / Vias / Rects\naggregate values"]
 ```
 
 ### 5.1 IDs
@@ -131,7 +130,7 @@ This will be suitable for future FFI, serialization, and asynchronous work becau
 `NetRef` and `WireRef` are returned by value, require no separate heap allocation and do not own entities. They contain a database-state pointer and an ID. Therefore:
 
 - a Ref must not outlive its `Database`;
-- `string_view`, spans, and pool ranges must not cross a mutation that may reallocate or rewrite the underlying storage;
+- `string_view`, spans, and routing ranges must not cross a mutation that may replace or reallocate a Wire's routing vectors;
 - Refs are C++ convenience tools, not long-lived cross-ABI objects; bindings should prefer IDs and owned Data;
 - after moving a `Database`, callers should reacquire Refs instead of relying on an old Ref lifetime.
 
@@ -143,9 +142,9 @@ This will be suitable for future FFI, serialization, and asynchronous work becau
 
 A Wire is an entity in the Design registry. Its paths, points, Via placements, and rectangles are aggregate values, not currently independent public entities.
 
-`DesignRoutingPool` stores layer ordinals, path records, points, point extras, vias, Via extras, rectangles, and path extras in contiguous arrays. A `DesignWire` component keeps a routing handle plus Net, status, and shield metadata. A Via placement refers to either a technology `TechViaId` or a design `ViaId`; its definition geometry remains in the corresponding Tech or Design object, while the route stores placement point, orientation, masks, and array information.
+Each `DesignWire` component directly owns five flat vectors: `paths`, `points`, `vias`, `rectangles`, and `extras`. A path record uses Wire-local `begin/count` ranges for its three primitive arrays. Updating a Wire replaces the routing vectors, and destroying it releases them with the entity, so there is no design-wide routing-pool garbage. Via placements refer to either a technology `TechViaId` or a design `ViaId`; the Via definition geometry remains in the corresponding Tech or Design object.
 
-Consequently `WireRef::routingData()` materializes an owned `WireRoutingData` value. It is not a second authoritative geometry database. Writeback asks routing storage to update the pool range. Pool spans are invalidated by mutation, and append transactions checkpoint and roll back on failure.
+Consequently `WireRef::routingData()` materializes an owned `WireRoutingData` value. It is not a second authoritative geometry database. Writeback validates and replaces the Wire-local routing vectors; existing spans and views are invalidated when that Wire is updated or destroyed.
 
 ## 7. Input, output, and tool data flow
 
@@ -157,7 +156,7 @@ sequenceDiagram
   participant S as Stores
   C->>D: Database::open(Config)
   D->>I: parse/import
-  I->>S: validated creates and pool appends
+  I->>S: validated entity/component creation
   S-->>D: diagnostics and rebuilt indexes
   C->>D: query ID / Data / Ref
   C->>D: update or destroy
@@ -167,7 +166,7 @@ sequenceDiagram
 
 `Config` currently supports either a set of LEFs plus one DEF, or three independent binary files for technology, library, and design. LEF/DEF parser sequences are protected by mutexes. Importers stage entity and geometry changes and roll them back on failure; this is not a public long-lived transaction.
 
-Binary archives are split by registry domain. Their headers validate magic, format version, schema version, payload size, and exact file size. Derived name indexes are rebuilt after load. Adding a component or pool field requires a corresponding schema version update in `io/binary/BinarySchema.h`.
+Binary archives are split by registry domain. Their headers validate magic, format version, schema version, payload size, and exact file size. Wire routing is stored with the `DesignWire` component snapshot, and derived indexes are rebuilt after load. Adding a persisted component or field requires a corresponding schema version update in `io/binary/BinarySchema.h`.
 
 ## 8. External integration boundary
 
@@ -207,4 +206,4 @@ stabilize public API semantics
   -> then consider revision/ChangeSet/transactions
 ```
 
-This preserves the compact EnTT and pool representation while giving higher layers IDs, owned Data values, and controlled operations instead of requiring them to assemble components and maintain indexes themselves.
+This preserves EnTT and contiguous-vector storage while giving higher layers IDs, owned Data values, and controlled operations instead of requiring them to assemble components and maintain indexes themselves.

@@ -2,12 +2,15 @@
 
 #include <concepts>
 #include <type_traits>
+#include <vector>
 
 #include "design/constraint/model/ConstraintComponents.h"
 #include "design/fill/model/FillComponents.h"
 #include "design/floorplan/model/FloorplanComponents.h"
 #include "design/global/model/DesignGlobalComponents.h"
+#include "design/guide/model/GuideComponents.h"
 #include "design/netlist/model/NetlistComponents.h"
+#include "design/pin_access/model/PinAccessComponents.h"
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/routing/component/RoutingComponents.h"
 #include "design/via/component/ViaComponents.h"
@@ -34,8 +37,7 @@
 
 namespace eccdb {
 
-// TechConductorLayerRef has convenience constructors and is intentionally not
-// an aggregate. It is the only model value that needs an explicit PFR bypass.
+// TechConductorLayerRef has convenience constructors and is not an aggregate.
 template <typename Archive>
 void binaryArchive(Archive& archive, const TechConductorLayerRef& value)
 {
@@ -48,11 +50,42 @@ void binaryArchive(Archive& archive, TechConductorLayerRef& value)
   archive(value.kind, value.entity);
 }
 
+// Instance-local library lookup is a runtime cache; only the ordered pin IDs are persisted.
+template <typename Archive>
+void binaryArchive(Archive& archive, const DesignInstancePins& value)
+{
+  archive(value.values);
+}
+
+template <typename Archive>
+void binaryArchive(Archive& archive, DesignInstancePins& value)
+{
+  archive(value.values);
+  value.term_ids.clear();
+  value.master = {};
+  value.master_term_name_index = nullptr;
+}
+
+// The instance and term pointers are runtime caches; only the four IDs are persisted.
+template <typename Archive>
+void binaryArchive(Archive& archive, const DesignInstancePin& value)
+{
+  archive(value.instance, value.master_term, value.net, value.special_net);
+}
+
+template <typename Archive>
+void binaryArchive(Archive& archive, DesignInstancePin& value)
+{
+  archive(value.instance, value.master_term, value.net, value.special_net);
+  value.instance_ptr = nullptr;
+  value.master_term_ptr = nullptr;
+}
+
 namespace binary_detail {
 
 inline constexpr uint32_t kTechSchemaVersion = 8;
 inline constexpr uint32_t kLibrarySchemaVersion = 2;
-inline constexpr uint32_t kDesignSchemaVersion = 1;
+inline constexpr uint32_t kDesignSchemaVersion = 3;
 
 template <typename... Types>
 struct BinaryTypeList
@@ -96,20 +129,42 @@ using TechBinaryComponents = BinaryTypeList<
 
 using LibraryBinaryComponents = BinaryTypeList<LibrarySite, LibraryCellMaster, LibraryMasterTerm, LibraryMasterPort, LibraryMasterObs>;
 
-// Routing primitives are deliberately absent: they are persisted through the
-// compact DesignRoutingPool arrays, while DesignWire stores only its handle.
+// DesignWire owns its Wire-local flat routing vectors, which are persisted as
+// part of the component snapshot.
 using DesignBinaryComponents
     = BinaryTypeList<DesignRoot, DesignInfo, DesignDieArea, DesignCoreArea, DesignRow, DesignTrackGrid, DesignGCellGrid,
                      DesignInstance, DesignInstancePins, DesignInstancePin, DesignIoPin, DesignNet, DesignNetInstancePins,
                      DesignNetIoPins, DesignSpecialNet, DesignNetOptions, DesignWire, DesignNetGeometry, DesignVia,
-                     DesignNonDefaultRule, DesignRegion, DesignGroup, DesignBlockage, DesignFill>;
+                     DesignNonDefaultRule, DesignRegion, DesignGroup, DesignBlockage, DesignFill, DesignNetRouteGuides,
+                     DesignNetTrackAssignments, DesignPinAccessCatalog, DesignInstancePinAccessGroupIndex,
+                     DesignInstancePreferredPinAccess, DesignIoPinAccessGroups>;
 
 template <typename Entity, typename Registry, typename Archive, typename... Components>
 void writeRegistrySnapshot(const Registry& registry, Archive& archive, BinaryTypeList<Components...>)
 {
   entt::basic_snapshot snapshot{registry};
   snapshot.template get<Entity>(archive);
-  (snapshot.template get<Components>(archive), ...);
+  const auto write_component = [&]<typename Component>() {
+    if constexpr (std::is_same_v<Component, DesignInstance>) {
+      // Stable deletion leaves tombstones; write only live components so a
+      // restore followed by another save produces the same binary payload.
+      const auto* storage = registry.template storage<Component>();
+      std::vector<Entity> live;
+      if (storage != nullptr) {
+        live.reserve(storage->size());
+        const typename Registry::common_type& entities = *storage;
+        for (auto current = entities.rbegin(); current != entities.rend(); ++current) {
+          if (*current != entt::tombstone) {
+            live.push_back(*current);
+          }
+        }
+      }
+      snapshot.template get<Component>(archive, live.begin(), live.end());
+    } else {
+      snapshot.template get<Component>(archive);
+    }
+  };
+  (write_component.template operator()<Components>(), ...);
 }
 
 template <typename Entity, typename Registry, typename Archive, typename... Components>

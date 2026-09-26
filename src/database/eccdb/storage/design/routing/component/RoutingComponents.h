@@ -5,6 +5,7 @@
 
 #include "common/GeometryTypes.h"
 #include "design/common/DesignTypes.h"
+#include "design/routing/component/WireRouting.h"
 #include "tech/common/TechLayerIds.h"
 #include "tech/via_master/model/ViaMasterComponents.h"
 
@@ -19,20 +20,14 @@ enum class DesignWireStatus : uint8_t
   kNoShield
 };
 
-struct DesignWireRoutingHandle
-{
-  uint32_t path_begin = 0;
-  uint32_t path_count = 0;
-};
-
-// DesignWireId-backed EnTT component. Parser staging and pool ownership are
-// deliberately kept out of the entity component.
+// DesignWireId-backed EnTT component. Routing vectors have the same lifetime
+// as the entity, so replacing or destroying a Wire releases its old payload.
 struct DesignWire
 {
   DesignNetId net;
   DesignWireStatus status = DesignWireStatus::kRouted;
   std::string shield_net;
-  DesignWireRoutingHandle routing;
+  DesignWireRouting routing;
 };
 
 namespace DesignNetGeometryFlag {

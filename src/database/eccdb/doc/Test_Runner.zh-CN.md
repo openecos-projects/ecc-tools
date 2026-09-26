@@ -106,7 +106,7 @@ source <("$RUNNER" --config /tmp/my-eccdb-tests.sh env)
 ```bash
 "$RUNNER" doctor --large
 "$RUNNER" test diff --large
-"$RUNNER" test binary --large --filter '*LargeIspd19RoutingPool*'
+"$RUNNER" test binary --large --filter '*LargeIspd19FlatRouting*'
 "$RUNNER" test route --filter 'IspdAround100k/*'
 ```
 

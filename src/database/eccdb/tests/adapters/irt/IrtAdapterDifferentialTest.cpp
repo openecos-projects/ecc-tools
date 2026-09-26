@@ -81,7 +81,6 @@ std::filesystem::path ispd19Source()
 struct Ispd18Case
 {
   std::string name;
-  bool repair_metal9_prl = false;
 };
 
 enum class IspdCorpus
@@ -96,7 +95,6 @@ struct IspdRoutedWritebackCase
   std::string design_name;
   IspdCorpus corpus = IspdCorpus::k2018;
   uint32_t component_count = 0;
-  bool repair_metal9_prl = false;
   uint32_t component_limit = 100000;
 };
 
@@ -389,30 +387,12 @@ void writeUniformRoutingGridLef(const std::filesystem::path& input, const std::f
   writeText(output, normalized);
 }
 
-std::filesystem::path repairInvalidIspd18Metal9Prl(const std::filesystem::path& source, const std::filesystem::path& output)
+std::pair<std::filesystem::path, std::filesystem::path> ispd18LefDef(const std::filesystem::path& root, const Ispd18Case& test_case)
 {
-  constexpr std::string_view malformed = "    WIDTH 4.5   1.50\n    WIDTH 1.5   0.45 ;";
-  constexpr std::string_view repaired = "    WIDTH 4.5   1.50 ;";
-  auto contents = readText(source);
-  const auto position = contents.find(malformed);
-  if (position == std::string::npos || contents.find(malformed, position + malformed.size()) != std::string::npos) {
-    throw std::runtime_error("expected exactly one malformed ISPD18 Metal9 PRL row in " + source.string());
-  }
-  contents.replace(position, malformed.size(), repaired);
-  writeText(output, contents);
-  return output;
-}
-
-std::pair<std::filesystem::path, std::filesystem::path> ispd18LefDef(const std::filesystem::path& root, const Ispd18Case& test_case,
-                                                                    const std::filesystem::path& workspace)
-{
-  auto lef = root / test_case.name / (test_case.name + ".input.lef");
+  const auto lef = root / test_case.name / (test_case.name + ".input.lef");
   const auto def = root / test_case.name / (test_case.name + ".input.def");
   if (!std::filesystem::exists(lef) || !std::filesystem::exists(def)) {
     throw std::runtime_error("missing ISPD18 lef/def for " + test_case.name);
-  }
-  if (test_case.repair_metal9_prl) {
-    lef = repairInvalidIspd18Metal9Prl(lef, workspace / (test_case.name + "-repaired.lef"));
   }
   return {lef, def};
 }
@@ -1155,11 +1135,10 @@ bool workerSucceeded(int status)
 }
 
 std::pair<std::filesystem::path, std::filesystem::path> routedCaseLefDef(const IspdRoutedWritebackCase& test_case,
-                                                                        const std::filesystem::path& root,
-                                                                        const std::filesystem::path& repair_workspace)
+                                                                        const std::filesystem::path& root)
 {
   if (test_case.corpus == IspdCorpus::k2018) {
-    return ispd18LefDef(root, Ispd18Case{test_case.design_name, test_case.repair_metal9_prl}, repair_workspace);
+    return ispd18LefDef(root, Ispd18Case{test_case.design_name});
   }
   return ispd19LefDef(root, test_case.design_name);
 }
@@ -1173,9 +1152,7 @@ void compareIdbAndEntt(const Ispd18Case& test_case, const std::filesystem::path&
   }
 
   TemporaryWorkspace workspace;
-  const auto repair_workspace = workspace.path("ws");
-  std::filesystem::create_directories(repair_workspace);
-  const auto [lef, original_def] = ispd18LefDef(root, test_case, repair_workspace);
+  const auto [lef, original_def] = ispd18LefDef(root, test_case);
   const auto shifted_def = workspace.path(test_case.name + ".shifted.def");
   writeOriginShiftedDef(original_def, shifted_def);
 
@@ -1197,9 +1174,7 @@ TEST_P(IspdRoutedWritebackDifferentialTest, NativeEnttMatchesLegacyIdbAfterRouti
   }
 
   TemporaryWorkspace workspace;
-  const auto repair_workspace = workspace.path("repair");
-  std::filesystem::create_directories(repair_workspace);
-  const auto [original_lef, original_def] = routedCaseLefDef(test_case, root, repair_workspace);
+  const auto [original_lef, original_def] = routedCaseLefDef(test_case, root);
   const auto compatible_lef = workspace.path(test_case.parameter_name + "-uniform-pitch.lef");
   const auto input_def = workspace.path(test_case.parameter_name + "-origin-zero.def");
   const auto idb_output_def = workspace.path(test_case.parameter_name + "-idb-routed.def");
@@ -1261,8 +1236,8 @@ INSTANTIATE_TEST_SUITE_P(
                     IspdRoutedWritebackCase{"Ispd18Test1", "ispd18_test1", IspdCorpus::k2018, 8879},
                     IspdRoutedWritebackCase{"Ispd18Test2", "ispd18_test2", IspdCorpus::k2018, 35913},
                     IspdRoutedWritebackCase{"Ispd18Test3", "ispd18_test3", IspdCorpus::k2018, 35977},
-                    IspdRoutedWritebackCase{"Ispd18Test4", "ispd18_test4", IspdCorpus::k2018, 72094, true},
-                    IspdRoutedWritebackCase{"Ispd18Test5", "ispd18_test5", IspdCorpus::k2018, 71954, true},
+                    IspdRoutedWritebackCase{"Ispd18Test4", "ispd18_test4", IspdCorpus::k2018, 72094},
+                    IspdRoutedWritebackCase{"Ispd18Test5", "ispd18_test5", IspdCorpus::k2018, 71954},
                     IspdRoutedWritebackCase{"Ispd19Sample", "ispd19_sample", IspdCorpus::k2019, 22},
                     IspdRoutedWritebackCase{"Ispd19Sample2", "ispd19_sample2", IspdCorpus::k2019, 23},
                     IspdRoutedWritebackCase{"Ispd19Sample3", "ispd19_sample3", IspdCorpus::k2019, 6},
@@ -1275,7 +1250,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 INSTANTIATE_TEST_SUITE_P(
     IspdAround100k, IspdRoutedWritebackDifferentialTest,
-    testing::Values(IspdRoutedWritebackCase{"Ispd18Test6", "ispd18_test6", IspdCorpus::k2018, 107919, true, 120000}),
+    testing::Values(IspdRoutedWritebackCase{"Ispd18Test6", "ispd18_test6", IspdCorpus::k2018, 107919, 120000}),
     [](const testing::TestParamInfo<IspdRoutedWritebackCase>& info) { return info.param.parameter_name; });
 
 TEST(SelfCheck, TwoIdbWrapsMatch)
@@ -1287,9 +1262,7 @@ TEST(SelfCheck, TwoIdbWrapsMatch)
 
   TemporaryWorkspace workspace;
   const Ispd18Case test_case{"ispd18_sample"};
-  const auto repair_workspace = workspace.path("ws");
-  std::filesystem::create_directories(repair_workspace);
-  const auto [lef, original_def] = ispd18LefDef(root, test_case, repair_workspace);
+  const auto [lef, original_def] = ispd18LefDef(root, test_case);
   const auto shifted_def = workspace.path(test_case.name + ".shifted.def");
   writeOriginShiftedDef(original_def, shifted_def);
   loadIntoIdb(lef, shifted_def);
@@ -1365,18 +1338,19 @@ TEST(Writeback, NativeEnttMatchesLegacyIdbDefAndRoundTrips)
   const auto first_wire_count = actual.design.routingStorage().wireCount();
   const auto first_track_count = actual.design.floorplanStorage().trackGridCount();
   const auto first_gcell_count = actual.design.floorplanStorage().gcellGridCount();
-  const auto first_pool = actual.design.routingStorage().routingPoolStatistics();
+  const auto first_statistics = actual.design.routingStorage().routingStatistics();
   runInjectedWriteback(workspace.path("entt-repeat-run"), &actual.design, &actual.technology, &actual.library);
-  const auto second_pool = actual.design.routingStorage().routingPoolStatistics();
+  const auto second_statistics = actual.design.routingStorage().routingStatistics();
   EXPECT_EQ(actual.design.routingStorage().wireCount(), first_wire_count);
   EXPECT_EQ(actual.design.floorplanStorage().trackGridCount(), first_track_count);
   EXPECT_EQ(actual.design.floorplanStorage().gcellGridCount(), first_gcell_count);
   EXPECT_EQ(eccdb::DefDesignExporter(actual.design).exportText(), first_export);
   EXPECT_EQ(special_before, eccdb::test::structured::canonicalNet(actual.design, special_id));
   expectWritebackSemanticsEqual(expected.design, actual.design);
-  std::cout << "[EnTT writeback pool] paths=" << first_pool.paths.count << "->" << second_pool.paths.count
-            << " points=" << first_pool.points.count << "->" << second_pool.points.count << " vias=" << first_pool.vias.count << "->"
-            << second_pool.vias.count << " rectangles=" << first_pool.rectangles.count << "->" << second_pool.rectangles.count << '\n';
+  std::cout << "[EnTT writeback routing] paths=" << first_statistics.paths.count << "->" << second_statistics.paths.count
+            << " points=" << first_statistics.points.count << "->" << second_statistics.points.count << " vias="
+            << first_statistics.vias.count << "->" << second_statistics.vias.count
+            << " rectangles=" << first_statistics.rectangles.count << "->" << second_statistics.rectangles.count << '\n';
 
   loadIntoIdb(lef, idb_output_def);
   DRCI.setDesignSource(nullptr, nullptr, nullptr);
@@ -1425,7 +1399,7 @@ TEST(RunSnapshot, Ispd18Sample3IdbOnce)
     GTEST_SKIP() << "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus";
   }
   TemporaryWorkspace workspace;
-  const auto [original_lef, def] = ispd18LefDef(root, {"ispd18_sample3"}, workspace.path("repair"));
+  const auto [original_lef, def] = ispd18LefDef(root, {"ispd18_sample3"});
   const auto compatible_lef = workspace.path("sample3-uniform-pitch.lef");
   writeUniformRoutingGridLef(original_lef, compatible_lef, "0.100000", "0.050000");
   const auto snapshot = runIdbRoutingOnce(compatible_lef, def, workspace.path("run"));
@@ -1443,7 +1417,7 @@ TEST(RunSnapshot, Ispd18Sample3EnttOnce)
     GTEST_SKIP() << "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus";
   }
   TemporaryWorkspace workspace;
-  const auto [original_lef, def] = ispd18LefDef(root, {"ispd18_sample3"}, workspace.path("repair"));
+  const auto [original_lef, def] = ispd18LefDef(root, {"ispd18_sample3"});
   const auto compatible_lef = workspace.path("sample3-uniform-pitch.lef");
   writeUniformRoutingGridLef(original_lef, compatible_lef, "0.100000", "0.050000");
   const auto snapshot = runEnttRoutingOnce(compatible_lef, def, workspace.path("run"));
@@ -1461,7 +1435,7 @@ TEST(RunSnapshot, Ispd19Test9IdbOnce)
     GTEST_SKIP() << "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus";
   }
   TemporaryWorkspace workspace;
-  const auto [original_lef, def] = ispd18LefDef(root, {"ispd19_test9"}, workspace.path("repair"));
+  const auto [original_lef, def] = ispd18LefDef(root, {"ispd19_test9"});
   const auto compatible_lef = workspace.path("test9-uniform-pitch.lef");
   writeUniformRoutingGridLef(original_lef, compatible_lef, "0.100000", "0.050000");
   const auto snapshot = runIdbRoutingOnce(compatible_lef, def, workspace.path("run"));
@@ -1566,13 +1540,13 @@ TEST(Wrap, Ispd18Sample3) { compareIdbAndEntt({"ispd18_sample3"}, ispd18Source()
 TEST(Wrap, Ispd18Test1) { compareIdbAndEntt({"ispd18_test1"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd18Test2) { compareIdbAndEntt({"ispd18_test2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd18Test3) { compareIdbAndEntt({"ispd18_test3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test4) { compareIdbAndEntt({"ispd18_test4", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test5) { compareIdbAndEntt({"ispd18_test5", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test6) { compareIdbAndEntt({"ispd18_test6", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test7) { compareIdbAndEntt({"ispd18_test7", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test8) { compareIdbAndEntt({"ispd18_test8", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test9) { compareIdbAndEntt({"ispd18_test9", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test10) { compareIdbAndEntt({"ispd18_test10", true}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test4) { compareIdbAndEntt({"ispd18_test4"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test5) { compareIdbAndEntt({"ispd18_test5"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test6) { compareIdbAndEntt({"ispd18_test6"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test7) { compareIdbAndEntt({"ispd18_test7"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test8) { compareIdbAndEntt({"ispd18_test8"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test9) { compareIdbAndEntt({"ispd18_test9"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test10) { compareIdbAndEntt({"ispd18_test10"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd19Sample)
 {
   compareIdbAndEntt({"ispd19_sample"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");

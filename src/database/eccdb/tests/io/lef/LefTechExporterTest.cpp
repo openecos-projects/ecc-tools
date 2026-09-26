@@ -455,6 +455,44 @@ END LIBRARY
   EXPECT_DOUBLE_EQ(cut.currentDensityTableEntry(cut_density[1], 1, 1), 4.0);
 }
 
+TEST_F(LefTechExporterTest, RoundTripsNonIncreasingPrlWidthRows)
+{
+  const auto source_path = writeFile("non-increasing-prl", R"LEF(
+VERSION 5.8 ;
+UNITS DATABASE MICRONS 2000 ; END UNITS
+LAYER Metal9
+  TYPE ROUTING ;
+  DIRECTION VERTICAL ;
+  PITCH 1.00 ;
+  WIDTH 0.50 ;
+  SPACINGTABLE
+    PARALLELRUNLENGTH 0
+      WIDTH 0 0.50
+      WIDTH 1.5 0.65
+      WIDTH 4.5 1.50
+      WIDTH 1.5 0.45 ;
+END Metal9
+END LIBRARY
+)LEF");
+
+  TechStore source;
+  ASSERT_NO_THROW(LefTechImporter(source).import(source_path));
+
+  const auto exported_path = newPath("non-increasing-prl-roundtrip");
+  ASSERT_NO_THROW(LefTechExporter::write(exported_path, source));
+
+  TechStore roundtripped;
+  ASSERT_NO_THROW(LefTechImporter(roundtripped).import(exported_path));
+  const auto layer = TechRoutingLayerId{roundtripped.findLayer("Metal9").entity()};
+  const auto& storage = roundtripped.routingLayerStorage();
+  const auto tables = storage.prlSpacingTableRules(layer);
+  ASSERT_EQ(tables.size(), 1u);
+  const auto widths = storage.prlSpacingTableWidths(tables.front());
+  EXPECT_EQ(std::vector<int32_t>(widths.begin(), widths.end()), (std::vector<int32_t>{0, 3000, 9000, 3000}));
+  EXPECT_EQ(storage.prlSpacingTableCell(tables.front(), 3, 0), 900);
+  EXPECT_EQ(storage.prlSpacingFor(tables.front(), 10000, 10000, 0), 900);
+}
+
 TEST_F(LefTechExporterTest, RoundTripsViasViaRulesAndNonDefaultRules)
 {
   const auto source_path = writeFile("tech-objects", R"LEF(
