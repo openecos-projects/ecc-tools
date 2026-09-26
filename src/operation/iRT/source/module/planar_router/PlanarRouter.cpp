@@ -88,6 +88,7 @@ PlanarRouter* PlanarRouter::_pr_instance = nullptr;
 PRModel PlanarRouter::initPRModel()
 {
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
 
   PRModel pr_model;
   std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
@@ -97,8 +98,10 @@ PRModel PlanarRouter::initPRModel()
     pr_net.set_origin_net(&net);
     pr_net.set_net_idx(net.get_net_idx());
     pr_net.set_connect_type(net.get_connect_type());
-    for (Pin& pin : net.get_pin_list()) {
-      pr_net.get_pr_pin_list().emplace_back(pin);
+    if (region_route.isActiveNet(net.get_net_idx())) {
+      for (Pin& pin : net.get_pin_list()) {
+        pr_net.get_pr_pin_list().emplace_back(pin);
+      }
     }
     pr_net.set_bounding_box(net.get_bounding_box());
   }
@@ -132,8 +135,13 @@ void PlanarRouter::initPRTaskList(PRModel& pr_model)
 {
   std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
   std::vector<PRNet*>& pr_task_list = pr_model.get_pr_task_list();
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
+  bool regional_stage = region_route.get_enable() && region_route.get_is_regional_stage();
   pr_task_list.reserve(pr_net_list.size());
   for (PRNet& pr_net : pr_net_list) {
+    if (regional_stage && pr_net.get_pr_pin_list().size() < 2) {
+      continue;
+    }
     pr_task_list.push_back(&pr_net);
   }
   std::ranges::sort(pr_task_list, CmpPRNet());
@@ -705,7 +713,7 @@ void PlanarRouter::splitLongPlanarTopoList(const PRComParam& pr_com_param, PRNet
 }
 
 bool PlanarRouter::routePlanarTopoList(PRModel& pr_model, PRNet& pr_net, std::vector<Segment<PlanarCoord>>& planar_topo_list, PRRouteMode pr_route_mode,
-                                      std::vector<Segment<PlanarCoord>>& routing_segment_list)
+                                       std::vector<Segment<PlanarCoord>>& routing_segment_list)
 {
   const PRComParam& pr_com_param = pr_model.get_pr_com_param();
   if (pr_route_mode == PRRouteMode::kAllPattern) {
@@ -846,6 +854,12 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(double overflo
   tb_task.set_planar_coord_list(planar_coord_list);
   GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   tb_task.set_planar_search_region(PlanarRect(0, 0, gcell_map.get_x_size() - 1, gcell_map.get_y_size() - 1));
+  tb_task.set_point_legal_query([this](const PlanarCoord& coord) {
+    return std::ranges::none_of(_macro_grid_rect_list, [&](const PlanarRect& macro_rect) {
+      return macro_rect.get_ll_x() <= coord.get_x() && coord.get_x() <= macro_rect.get_ur_x() && macro_rect.get_ll_y() <= coord.get_y()
+             && coord.get_y() <= macro_rect.get_ur_y();
+    });
+  });
   bool refine_topology = pr_topo_mode == PRTopoMode::kCongestion && shouldRefineTopology(overflow_unit, pr_net, planar_coord_list.size());
   tb_task.set_topo_mode(refine_topology ? TBTopoMode::kCongestion : TBTopoMode::kGeometry);
   if (!refine_topology) {

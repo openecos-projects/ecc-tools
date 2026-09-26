@@ -314,7 +314,8 @@ bool isSameTopo(const std::vector<Segment<PlanarCoord>>& first, const std::vecto
   return true;
 }
 
-irt::TBTask makeTask(const std::vector<PlanarCoord>& terminal_list, irt::TBSegmentCostQuery query = {}, bool congestion_driven = false)
+irt::TBTask makeTask(const std::vector<PlanarCoord>& terminal_list, irt::TBSegmentCostQuery query = {}, bool congestion_driven = false,
+                     irt::TBPointLegalQuery point_legal_query = {})
 {
   irt::TBTask task;
   task.set_planar_coord_list(terminal_list);
@@ -322,6 +323,9 @@ irt::TBTask makeTask(const std::vector<PlanarCoord>& terminal_list, irt::TBSegme
   task.set_congestion_driven(congestion_driven);
   if (query) {
     task.set_segment_cost_query(std::move(query));
+  }
+  if (point_legal_query) {
+    task.set_point_legal_query(std::move(point_legal_query));
   }
   return task;
 }
@@ -947,6 +951,39 @@ bool checkFullLayerMacroCongestionRing()
   return passed;
 }
 
+bool checkLocalSteinerPointRepair()
+{
+  const PlanarRect region(0, 0, 49, 49);
+  const PlanarRect macro(4, 0, 16, 8);
+  const std::vector<PlanarCoord> terminal_list = {PlanarCoord(0, 0), PlanarCoord(10, 20), PlanarCoord(20, 0)};
+  const PlanarCoord raw_steiner(10, 0);
+  irt::TBSegmentCostQuery segment_query = getWireCostQuery();
+  irt::TBPointLegalQuery point_query = [macro](const PlanarCoord& coord) { return !isInsideRect(macro, coord); };
+  irt::TBRefineStat stat;
+  std::vector<Segment<PlanarCoord>> topo_list
+      = RTTB.getPlanarTopoList(makeTask(terminal_list, segment_query, true, point_query), stat);
+  irt::TBRefineStat repeated_stat;
+  std::vector<Segment<PlanarCoord>> repeated_topo
+      = RTTB.getPlanarTopoList(makeTask(terminal_list, segment_query, true, point_query), repeated_stat);
+
+  bool passed = true;
+  passed = check(containsCoord(RTTB.getPlanarTopoList(makeTask(terminal_list)), raw_steiner), "local repair starts from blocked Steiner") && passed;
+  passed = check(stat.local_steiner_repair_num > 0, "local repair moves an illegal Steiner") && passed;
+  passed = check(stat.remaining_illegal_steiner_num == 0, "local repair removes illegal Steiner points") && passed;
+  passed = check(std::ranges::none_of(getSteinerCoordList(terminal_list, topo_list),
+                                      [&](const PlanarCoord& coord) { return isInsideRect(macro, coord); }),
+                 "local repair keeps Steiner points outside macro")
+           && passed;
+  passed = check(std::isfinite(getTopoCost(topo_list, segment_query)), "local repair produces finite topology cost") && passed;
+  passed = check(isTopoValid(terminal_list, topo_list, region), "local repair keeps topology valid") && passed;
+  passed = check(canonicalizeTopo(topo_list) == canonicalizeTopo(repeated_topo), "local repair is deterministic") && passed;
+  passed = check(stat.local_steiner_repair_num == repeated_stat.local_steiner_repair_num
+                     && stat.remaining_illegal_steiner_num == repeated_stat.remaining_illegal_steiner_num,
+                 "local repair statistics are deterministic")
+           && passed;
+  return passed;
+}
+
 struct PlotTopoLayer
 {
   std::string name;
@@ -1540,6 +1577,7 @@ int main(int argc, char* argv[])
   passed = checkHighDegreeStress() && passed;
   passed = checkPartialLayerMacroKeepsSteiner() && passed;
   passed = checkFullLayerMacroCongestionRing() && passed;
+  passed = checkLocalSteinerPointRepair() && passed;
   passed = checkSteinerUsageClassification() && passed;
   if (options.plot_dir.has_value()) {
     passed = generatePlots(*options.plot_dir) && passed;

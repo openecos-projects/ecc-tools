@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "../def_service/def_service.h"
+#include "gds_layer_map.h"
 
 namespace gdstk {
 struct Cell;
@@ -58,8 +59,6 @@ class Def2GdsWrite
 
   int32_t set_units();
 
-  int32_t write_version();
-  int32_t write_design();
   int32_t write_die();
   int32_t write_track_grid();
   int32_t write_row();
@@ -79,8 +78,8 @@ class Def2GdsWrite
   void set_end_time(clock_t time) { _end_time = time; }
   float time_eclips() { return (float(_end_time - _start_time)) / CLOCKS_PER_MS; }
 
-  bool writeDb(const char* file);
-  bool writeHardenedDb(const char* file);
+  bool writeDb(const char* file, const char* layer_map_path = nullptr);
+  bool writeHardenedDb(const char* file, const char* layer_map_path = nullptr);
   int32_t write_harden_macro_pins();
   int32_t write_harden_macro_obs();
   bool writeChip();
@@ -97,12 +96,16 @@ class Def2GdsWrite
   std::map<IdbCellMaster*, gdstk::Cell*> _component_master_cells;
   std::map<std::string, gdstk::Cell*> _generated_via_cut_cells;
   std::set<std::string> _used_cell_names;
+  GdsLayerMap _layer_map;
+  bool _has_layer_map = false;
+  bool _mapping_error = false;
 
   gdstk::Cell* createCell(const string& name);
+  bool removeEmptyCell(gdstk::Cell* cell);
   void addReferenceDefault(gdstk::Cell* child);
   void addInstanceReference(gdstk::Cell* child, IdbInstance* instance);
-  void addLabel(gdstk::Cell* gds_cell, const string& text, int32_t x, int32_t y, int32_t layer = 0, int32_t datatype = 0);
   string sanitizeCellName(const string& name);
+  bool createTopCell();
   bool finishWrite(const char* file);
 
   std::pair<int32_t, int32_t> get_pdn_layer_order_range();
@@ -121,20 +124,26 @@ class Def2GdsWrite
   int32_t write_specialnet_wire_segment_via(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment);
   int32_t write_specialnet_wire_segment_rect(gdstk::Cell* gds_cell, IdbSpecialWireSegment* segment);
 
-  void packVia(gdstk::Cell* gds_cell, IdbVia* via);
-  bool packGeneratedVia(gdstk::Cell* gds_cell, IdbVia* via);
-  gdstk::Cell* getGeneratedViaCutCell(IdbViaMasterGenerate* master_generate);
+  bool loadLayerMap(const char* layer_map_path);
+  bool resolveLayer(IdbLayer* layer, const string& purpose, int32_t& layer_id, int32_t& datatype);
+  bool resolveVirtualLayer(const string& layer_name, const string& purpose, int32_t& layer_id, int32_t& datatype);
+  bool mapRect(gdstk::Cell* gds_cell, IdbRect* rect, IdbLayer* layer, const string& purpose);
+  void packVia(gdstk::Cell* gds_cell, IdbVia* via, const string& purpose = "VIA");
+  bool packGeneratedVia(gdstk::Cell* gds_cell, IdbVia* via, const string& purpose);
+  gdstk::Cell* getGeneratedViaCutCell(IdbViaMasterGenerate* master_generate, const string& purpose);
   gdstk::Cell* getComponentMasterCell(IdbCellMaster* cell_master);
   void packTerm(gdstk::Cell* gds_cell, IdbTerm* term);
   void packPin(gdstk::Cell* gds_cell, IdbPin* pin);
-  void packLayerShape(gdstk::Cell* gds_cell, IdbLayerShape* layer_shape);
+  void packLayerShape(gdstk::Cell* gds_cell, IdbLayerShape* layer_shape, const string& purpose);
   void packRect(gdstk::Cell* gds_cell, IdbRect* rect, IdbLayer* layer);
+  void packRect(gdstk::Cell* gds_cell, IdbRect* rect, IdbLayer* layer, const string& purpose);
   void packRect(gdstk::Cell* gds_cell, IdbRect* rect, int32_t layer_id);
   void packRect(gdstk::Cell* gds_cell, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, IdbLayer* layer);
+  void packRect(gdstk::Cell* gds_cell, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, IdbLayer* layer, const string& purpose);
   void packRect(gdstk::Cell* gds_cell, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y, int32_t layer_id,
                 int32_t datatype = 0);
   void packSegment(gdstk::Cell* gds_cell, IdbLayerRouting* routing_layer, IdbCoordinate<int32_t>* point_1,
-                   IdbCoordinate<int32_t>* point_2, int32_t width = -1, std::optional<int32_t> ext_1 = std::nullopt,
-                   std::optional<int32_t> ext_2 = std::nullopt);
+                   IdbCoordinate<int32_t>* point_2, int32_t width = -1, const string& purpose = "NET",
+                   std::optional<int32_t> ext_1 = std::nullopt, std::optional<int32_t> ext_2 = std::nullopt);
 };
 }  // namespace idb

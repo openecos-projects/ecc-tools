@@ -119,12 +119,15 @@ std::vector<LANet> LayerAssigner::convertToLANetList(std::vector<Net>& net_list)
 
 LANet LayerAssigner::convertToLANet(Net& net)
 {
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
   LANet la_net;
   la_net.set_origin_net(&net);
   la_net.set_net_idx(net.get_net_idx());
   la_net.set_connect_type(net.get_connect_type());
-  for (Pin& pin : net.get_pin_list()) {
-    la_net.get_la_pin_list().emplace_back(pin);
+  if (region_route.isActiveNet(net.get_net_idx())) {
+    for (Pin& pin : net.get_pin_list()) {
+      la_net.get_la_pin_list().emplace_back(pin);
+    }
   }
   la_net.set_bounding_box(net.get_bounding_box());
   return la_net;
@@ -146,8 +149,13 @@ void LayerAssigner::initLATaskList(LAModel& la_model)
 {
   std::vector<LANet>& la_net_list = la_model.get_la_net_list();
   std::vector<LANet*>& la_task_list = la_model.get_la_task_list();
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
+  bool regional_stage = region_route.get_enable() && region_route.get_is_regional_stage();
   la_task_list.reserve(la_net_list.size());
   for (LANet& la_net : la_net_list) {
+    if (regional_stage && la_net.get_la_pin_list().size() < 2) {
+      continue;
+    }
     la_task_list.push_back(&la_net);
   }
   std::ranges::sort(la_task_list, CmpLANet());
@@ -186,10 +194,16 @@ void LayerAssigner::buildPlaneTree(LAModel& la_model)
 
   std::vector<LANet>& la_net_list = la_model.get_la_net_list();
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_global_result_map = la_model.get_net_global_result_map();
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
+  bool regional_stage = region_route.get_enable() && region_route.get_is_regional_stage();
 
 #pragma omp parallel for schedule(dynamic, 1)
   for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(la_net_list.size()); net_idx++) {
     LANet& la_net = la_net_list[net_idx];
+    std::vector<LAPin>& la_pin_list = la_net.get_la_pin_list();
+    if (regional_stage && la_pin_list.size() < 2) {
+      continue;
+    }
     std::vector<Segment<LayerCoord>> routing_segment_list;
     auto result_iter = net_global_result_map.find(la_net.get_net_idx());
     if (result_iter != net_global_result_map.end()) {
@@ -197,7 +211,6 @@ void LayerAssigner::buildPlaneTree(LAModel& la_model)
     }
     std::vector<LayerCoord> candidate_root_coord_list;
     std::map<LayerCoord, std::set<int32_t>, CmpLayerCoordByXASC> key_coord_pin_map;
-    std::vector<LAPin>& la_pin_list = la_net.get_la_pin_list();
     candidate_root_coord_list.reserve(la_pin_list.size());
     for (size_t i = 0; i < la_pin_list.size(); i++) {
       LayerCoord coord(la_pin_list[i].get_access_point().get_grid_coord(), 0);
