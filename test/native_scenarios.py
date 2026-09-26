@@ -157,7 +157,7 @@ def combined_io(manifest: dict[str, Any]) -> dict[str, Path]:
     gds_output = _output(manifest, "combined.gds")
     _require(ecc_py.def_save(str(def_output)), "def_save")
     _require(ecc_py.netlist_save(str(verilog_output)), "netlist_save")
-    _require(ecc_py.gds_save(str(gds_output)), "gds_save")
+    _require(ecc_py.gds_save(str(gds_output), manifest["gds_layer_map"]), "gds_save")
     for path in (def_output, verilog_output, gds_output):
         _require_file(path)
     return {"def": def_output, "gds": gds_output, "verilog": verilog_output}
@@ -307,7 +307,7 @@ def harden(manifest: dict[str, Any]) -> dict[str, Path]:
     extracted_lib = sta_dir / "timing_characterizer" / "gcd_max.lib"
     _require_file(extracted_lib)
     shutil.copyfile(extracted_lib, hardened_lib)
-    _require(ecc_py.gds_save(str(hardened_gds), True), "gds_save")
+    _require(ecc_py.gds_save(str(hardened_gds), manifest["gds_layer_map"], True), "gds_save")
     for path in (abstract_lef, hardened_gds, hardened_lib):
         _require_file(path)
     return {"gds": hardened_gds, "lef": abstract_lef, "lib": hardened_lib}
