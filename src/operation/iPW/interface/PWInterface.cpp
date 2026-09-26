@@ -402,34 +402,33 @@ void PWInterface::wrapTimingLibrary()
 {
   Monitor monitor;
   PWLOG.info(Loc::current(), "Starting...");
-  bool old_silent_output = idb::Lib::isSilentOutput();
-  idb::Lib::setSilentOutput(true);
-  std::vector<std::unique_ptr<idb::LibLibrary>> lib_list;
-  for (idb::LibertyReader& liberty_reader : dmInst->get_lib_readers()) {
-    liberty_reader.linkLib();
-    idb::LibBuilder* lib_builder = liberty_reader.get_library_builder();
-    lib_list.push_back(lib_builder->takeLib());
-    delete lib_builder;
-    liberty_reader.set_library_builder(nullptr);
+  auto liberty_generation = dmInst->get_liberty_generation();
+  std::vector<idb::LibLibrary*> lib_list;
+  if (liberty_generation != nullptr) {
+    lib_list.reserve(liberty_generation->get_libraries().size());
+    for (const auto& library : liberty_generation->get_libraries()) {
+      if (library != nullptr) {
+        lib_list.push_back(library.get());
+      }
+    }
   }
   wrapTimingCellMap(lib_list);
   wrapTimingLibraryInfo(lib_list);
-  idb::Lib::setSilentOutput(old_silent_output);
   PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void PWInterface::wrapTimingCellMap(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
+void PWInterface::wrapTimingCellMap(const std::vector<idb::LibLibrary*>& lib_list)
 {
   Database& database = PWDM.getDatabase();
   database.get_timing_library().get_cell_map().clear();
-  for (std::unique_ptr<idb::LibLibrary>& lib : lib_list) {
+  for (idb::LibLibrary* lib : lib_list) {
     for (std::unique_ptr<idb::LibCell>& lib_cell : lib->get_cells()) {
       wrapTimingCell(lib_cell.get());
     }
   }
 }
 
-void PWInterface::wrapTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
+void PWInterface::wrapTimingLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list)
 {
   Database& database = PWDM.getDatabase();
   idb::LibLibrary* reference_lib = wrapReferenceLib(lib_list);
@@ -450,20 +449,20 @@ void PWInterface::wrapTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLibr
   timing_library.set_slew_derate_from_library(reference_lib->get_slew_derate_from_library());
 }
 
-idb::LibLibrary* PWInterface::wrapReferenceLib(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
+idb::LibLibrary* PWInterface::wrapReferenceLib(const std::vector<idb::LibLibrary*>& lib_list)
 {
   Database& database = PWDM.getDatabase();
   std::map<idb::LibLibrary*, std::pair<int32_t, int32_t>> lib_usage_map;
   for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
     Instance& instance = instance_pair.second;
-    for (std::unique_ptr<idb::LibLibrary>& lib : lib_list) {
+    for (idb::LibLibrary* lib : lib_list) {
       idb::LibCell* lib_cell = lib->findCell(instance.get_cell_name().c_str());
       if (lib_cell == nullptr) {
         continue;
       }
-      lib_usage_map[lib.get()].first++;
+      lib_usage_map[lib].first++;
       if (!lib_cell->isMacroCell()) {
-        lib_usage_map[lib.get()].second++;
+        lib_usage_map[lib].second++;
       }
     }
   }
@@ -483,7 +482,7 @@ idb::LibLibrary* PWInterface::wrapReferenceLib(std::vector<std::unique_ptr<idb::
     return reference_lib;
   }
   if (!lib_list.empty()) {
-    return lib_list.front().get();
+    return lib_list.front();
   }
   return nullptr;
 }

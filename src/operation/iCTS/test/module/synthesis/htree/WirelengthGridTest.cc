@@ -51,6 +51,8 @@ TEST(WirelengthGridTest, AutoModeCoversRequestedLengthsIndependentlyOfConfigured
   EXPECT_NEAR(plan.wirelength_unit_um, 506.74 / 13.0, (506.74 / 13.0) * kRelTol);
   EXPECT_EQ(plan.required_covering_iterations, 13U);
   EXPECT_EQ(plan.wirelength_iterations, 13U);
+  EXPECT_TRUE(plan.uses_primitive_characterization);
+  EXPECT_EQ(plan.direct_length_indices, (std::vector<unsigned>{1U, 2U, 4U, 8U}));
 }
 
 TEST(WirelengthGridTest, AutoModeCoversRequestedRange)
@@ -97,7 +99,7 @@ TEST(WirelengthGridTest, CollapsedConfiguredGridAdaptsWithAutoDerivedUnit)
   EXPECT_EQ(plan.wirelength_iterations, 3U);
 }
 
-TEST(WirelengthGridTest, SparseDirectIndicesCoverRequestedBins)
+TEST(WirelengthGridTest, AutoModeSeparatesRequestedIndicesFromPrimitiveCharacterization)
 {
   icts::CharBuilder::Config config;
   const auto requests = makeVgaLikeRequests();
@@ -106,9 +108,9 @@ TEST(WirelengthGridTest, SparseDirectIndicesCoverRequestedBins)
   ASSERT_GT(plan.wirelength_iterations, 0U);
   ASSERT_EQ(plan.wirelength_iterations, 13U);
 
-  const auto indices = icts::htree::ResolveDirectCharacterizationLengthIndices(requests, plan);
-  const std::vector<unsigned> expected_sparse = {1U, 2U, 3U, 4U, 8U, 13U};
-  EXPECT_EQ(indices, expected_sparse);
+  const std::vector<unsigned> expected_requested = {1U, 2U, 3U, 4U, 8U, 13U};
+  EXPECT_EQ(plan.requested_length_indices, expected_requested);
+  EXPECT_EQ(icts::htree::ResolveDirectCharacterizationLengthIndices(requests, plan), (std::vector<unsigned>{1U, 2U, 4U, 8U}));
 }
 
 TEST(WirelengthGridTest, CoverageOnlyLengthsExtendRangeWithoutDirectEnumeration)
@@ -126,9 +128,9 @@ TEST(WirelengthGridTest, CoverageOnlyLengthsExtendRangeWithoutDirectEnumeration)
   EXPECT_EQ(plan.wirelength_iterations, 14U);
   EXPECT_EQ(plan.unique_level_bins, 4U);
 
-  const auto indices = icts::htree::ResolveDirectCharacterizationLengthIndices(topology_lengths, plan);
-  const std::vector<unsigned> expected_sparse = {1U, 2U, 4U, 6U};
-  EXPECT_EQ(indices, expected_sparse);
+  const std::vector<unsigned> expected_requested = {1U, 2U, 4U, 6U};
+  EXPECT_EQ(plan.requested_length_indices, expected_requested);
+  EXPECT_EQ(icts::htree::ResolveDirectCharacterizationLengthIndices(topology_lengths, plan), (std::vector<unsigned>{1U, 2U, 4U, 8U}));
 }
 
 TEST(WirelengthGridTest, SingleTargetAutoModeUsesOneDirectCharacterizationPoint)
@@ -147,7 +149,7 @@ TEST(WirelengthGridTest, SingleTargetAutoModeUsesOneDirectCharacterizationPoint)
   EXPECT_EQ(indices, (std::vector<unsigned>{1U}));
 }
 
-TEST(WirelengthGridTest, SparseDirectIndicesWhenFullyCovered)
+TEST(WirelengthGridTest, PrimitiveDirectIndexIsIndependentOfRequestedBins)
 {
   icts::CharBuilder::Config config;
   const std::vector<double> requests = {10.0, 30.0, 200.0, 400.0};  // unit 100, bins {1,1,2,4}
@@ -156,9 +158,65 @@ TEST(WirelengthGridTest, SparseDirectIndicesWhenFullyCovered)
   ASSERT_EQ(plan.required_covering_iterations, 4U);
   ASSERT_EQ(plan.wirelength_iterations, 4U);
 
-  const auto indices = icts::htree::ResolveDirectCharacterizationLengthIndices(requests, plan);
-  const std::vector<unsigned> expected_sparse = {1U, 2U, 4U};  // bin 3 has no request: skipped
-  EXPECT_EQ(indices, expected_sparse);
+  const std::vector<unsigned> expected_requested = {1U, 2U, 4U};
+  EXPECT_EQ(plan.requested_length_indices, expected_requested);
+  EXPECT_EQ(icts::htree::ResolveDirectCharacterizationLengthIndices(requests, plan), (std::vector<unsigned>{1U, 2U, 4U}));
+}
+
+TEST(WirelengthGridTest, PhysicalScaleCanProduceRequestedIndexLargerThanRequestCount)
+{
+  icts::CharBuilder::Config config;
+  const std::vector<double> direct_lengths = {600.0};
+  const std::vector<double> coverage_lengths = {900.0};
+  const icts::CharacterizationWirelengthUnitLimits limits{
+      .physical_scale_unit_um = 37.0,
+      .electrical_ceiling_um = 100.0,
+  };
+
+  const auto plan = icts::htree::ResolveCharacterizationGridPlan(config, direct_lengths, coverage_lengths, limits);
+
+  ASSERT_TRUE(plan.adapted);
+  EXPECT_TRUE(plan.unit_selected_from_physical_scale);
+  EXPECT_FALSE(plan.unit_clamped_to_electrical_ceiling);
+  EXPECT_DOUBLE_EQ(plan.wirelength_unit_um, 37.0);
+  EXPECT_EQ(plan.requested_length_indices, (std::vector<unsigned>{17U}));
+  EXPECT_EQ(plan.direct_length_indices, (std::vector<unsigned>{1U, 2U}));
+  EXPECT_EQ(plan.required_covering_iterations, 25U);
+}
+
+TEST(WirelengthGridTest, PhysicalScaleDoesNotCoarsenShortWireRequests)
+{
+  icts::CharBuilder::Config config;
+  const icts::CharacterizationWirelengthUnitLimits limits{
+      .physical_scale_unit_um = 37.0,
+      .electrical_ceiling_um = 100.0,
+  };
+
+  const auto plan = icts::htree::ResolveCharacterizationGridPlan(config, std::vector<double>{1.0, 2.0}, {}, limits);
+
+  ASSERT_TRUE(plan.adapted);
+  EXPECT_FALSE(plan.unit_selected_from_physical_scale);
+  EXPECT_DOUBLE_EQ(plan.wirelength_unit_um, 1.0);
+  EXPECT_EQ(plan.requested_length_indices, (std::vector<unsigned>{1U, 2U}));
+}
+
+TEST(WirelengthGridTest, AdaptedUnitPreservesExplicitCharacterizationIndices)
+{
+  icts::CharBuilder::Config config;
+  config.wirelength_iterations = 9U;
+  config.wirelength_indices = std::vector<unsigned>{7U, 2U, 7U, 0U};
+  const icts::CharacterizationWirelengthUnitLimits limits{
+      .physical_scale_unit_um = 37.0,
+      .electrical_ceiling_um = 100.0,
+  };
+
+  const auto plan = icts::htree::ResolveCharacterizationGridPlan(config, std::vector<double>{600.0}, {}, limits);
+
+  ASSERT_TRUE(plan.adapted);
+  EXPECT_TRUE(plan.preserves_explicit_indices);
+  EXPECT_FALSE(plan.uses_primitive_characterization);
+  EXPECT_EQ(plan.direct_length_indices, (std::vector<unsigned>{2U, 7U}));
+  EXPECT_EQ(icts::htree::ResolveDirectCharacterizationLengthIndices(std::vector<double>{600.0}, plan), (std::vector<unsigned>{2U, 7U}));
 }
 
 }  // namespace

@@ -56,60 +56,67 @@ void RoutingChecker::check()
   Monitor monitor;
   LVSLOG.info(Loc::current(), "Starting...");
 
+  Monitor stage_monitor;
   RCModel rc_model = initRCModel();
+  LVSLOG.info(Loc::current(), "Initialized routing check model", stage_monitor.getStatsInfo());
   checkRouting(rc_model);
+  LVSLOG.info(Loc::current(), "Checked net routing connectivity", stage_monitor.getStatsInfo());
   checkShort(rc_model);
+  LVSLOG.info(Loc::current(), "Checked physical shorts", stage_monitor.getStatsInfo());
   updateSummary(rc_model);
+  LVSLOG.info(Loc::current(), "Summarized routing checks", stage_monitor.getStatsInfo());
 
   LVSLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 RCModel RoutingChecker::initRCModel()
 {
-  std::map<std::string, Net>& net_map = LVSDM.getDatabase().get_def_data().get_net_map();
+  DefData& def_data = LVSDM.getDatabase().get_def_data();
+  std::unordered_map<std::string, Net>& net_map = def_data.get_net_map();
+  std::map<std::string, NetRoutingGraph>& net_routing_graph_map = def_data.get_physical_graph().get_net_routing_graph_map();
 
   RCModel rc_model;
-  std::vector<std::string>& net_name_list = rc_model.get_net_name_list();
-  net_name_list.reserve(net_map.size());
+  std::vector<RoutingCheckTask>& task_list = rc_model.get_routing_check_task_list();
+  task_list.reserve(net_map.size());
+  // The database maps are immutable for the lifetime of this model, so these pointers remain stable.
   for (auto& [net_name, net] : net_map) {
-    (void) net;
-    net_name_list.push_back(net_name);
+    if (net.get_terminal_name_list().size() <= 1) {
+      continue;
+    }
+    auto routing_graph_iter = net_routing_graph_map.find(net_name);
+    NetRoutingGraph* routing_graph = routing_graph_iter == net_routing_graph_map.end() ? nullptr : &routing_graph_iter->second;
+    task_list.push_back({&net_name, &net, routing_graph});
   }
+  std::sort(task_list.begin(), task_list.end(), [](const RoutingCheckTask& first, const RoutingCheckTask& second) {
+    return *first.net_name < *second.net_name;
+  });
   return rc_model;
 }
 
 void RoutingChecker::checkRouting(RCModel& rc_model)
 {
-  DefData& def_data = LVSDM.getDatabase().get_def_data();
-  std::map<std::string, Net>& net_map = def_data.get_net_map();
-  std::map<std::string, NetRoutingGraph>& net_routing_graph_map = def_data.get_physical_graph().get_net_routing_graph_map();
-  std::vector<std::string>& net_name_list = rc_model.get_net_name_list();
+  const std::vector<RoutingCheckTask>& task_list = rc_model.get_routing_check_task_list();
   std::vector<RoutingCheck>& routing_check_list = rc_model.get_routing_check_list();
-  routing_check_list.resize(net_name_list.size());
+  routing_check_list.resize(task_list.size());
 
-#pragma omp parallel for schedule(dynamic)
-  for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(net_name_list.size()); net_idx++) {
-    std::string& net_name = net_name_list[net_idx];
-    auto routing_graph_iter = net_routing_graph_map.find(net_name);
-    NetRoutingGraph* routing_graph = routing_graph_iter == net_routing_graph_map.end() ? nullptr : &routing_graph_iter->second;
-    routing_check_list[net_idx] = checkNetRoutingConnectivity(net_name, net_map.at(net_name), routing_graph);
+#pragma omp parallel for schedule(guided, 64)
+  for (int32_t task_idx = 0; task_idx < static_cast<int32_t>(task_list.size()); task_idx++) {
+    const RoutingCheckTask& task = task_list[task_idx];
+    routing_check_list[task_idx] = checkNetRoutingConnectivity(*task.net_name, *task.net, task.routing_graph);
   }
 }
 
 RoutingCheck RoutingChecker::checkNetRoutingConnectivity(const std::string& net_name, const Net& net, const NetRoutingGraph* routing_graph)
 {
   RoutingCheck routing_check;
-  routing_check.set_net_name(net_name);
   const std::vector<std::string>& terminal_name_list = net.get_terminal_name_list();
-  if (terminal_name_list.size() <= 1) {
-    return routing_check;
-  }
   if (routing_graph == nullptr) {
+    routing_check.set_net_name(net_name);
     routing_check.set_disconnected_terminal_name_list(terminal_name_list);
     return routing_check;
   }
 
-  routing_check.set_driver_terminal_name(routing_graph->get_driver_terminal_name());
+  const std::string& driver_terminal_name = routing_graph->get_driver_terminal_name();
   const std::vector<RoutingShape>& routing_shape_list = routing_graph->get_routing_shape_list();
   DisjointSet graph(static_cast<int32_t>(routing_shape_list.size()));
   std::map<int32_t, std::vector<int32_t>> layer_shape_idx_map;
@@ -166,8 +173,10 @@ RoutingCheck RoutingChecker::checkNetRoutingConnectivity(const std::string& net_
     }
   }
 
-  int32_t driver_root = getTerminalRoot(*routing_graph, routing_check.get_driver_terminal_name(), graph);
-  if (routing_check.get_driver_terminal_name().empty() || driver_root == -1) {
+  int32_t driver_root = getTerminalRoot(*routing_graph, driver_terminal_name, graph);
+  if (driver_terminal_name.empty() || driver_root == -1) {
+    routing_check.set_net_name(net_name);
+    routing_check.set_driver_terminal_name(driver_terminal_name);
     routing_check.set_disconnected_terminal_name_list(terminal_name_list);
     for (const RoutingShape& routing_shape : routing_shape_list) {
       routing_check.get_disconnected_shape_list().push_back(routing_shape.get_shape());
@@ -177,7 +186,7 @@ RoutingCheck RoutingChecker::checkNetRoutingConnectivity(const std::string& net_
 
   std::unordered_set<int32_t> disconnected_root_set;
   for (const std::string& terminal_name : terminal_name_list) {
-    if (terminal_name == routing_check.get_driver_terminal_name()) {
+    if (terminal_name == driver_terminal_name) {
       continue;
     }
     int32_t terminal_root = getTerminalRoot(*routing_graph, terminal_name, graph);
@@ -191,6 +200,8 @@ RoutingCheck RoutingChecker::checkNetRoutingConnectivity(const std::string& net_
   if (routing_check.get_disconnected_terminal_name_list().empty()) {
     return routing_check;
   }
+  routing_check.set_net_name(net_name);
+  routing_check.set_driver_terminal_name(driver_terminal_name);
   for (int32_t shape_idx = 0; shape_idx < static_cast<int32_t>(routing_shape_list.size()); shape_idx++) {
     if (LVSUTIL.exist(disconnected_root_set, graph.find(shape_idx))) {
       routing_check.get_disconnected_shape_list().push_back(routing_shape_list[shape_idx].get_shape());
@@ -222,11 +233,20 @@ int32_t RoutingChecker::getTerminalRoot(const NetRoutingGraph& routing_graph, co
 
 void RoutingChecker::checkShort(RCModel& rc_model)
 {
-  std::map<int32_t, std::vector<std::string>>& component_net_name_map = LVSDM.getDatabase().get_def_data().get_physical_graph().get_component_net_name_map();
+  PhysicalGraph& physical_graph = LVSDM.getDatabase().get_def_data().get_physical_graph();
   std::vector<int32_t>& short_component_id_list = rc_model.get_short_component_id_list();
-  for (auto& [component_id, net_name_list] : component_net_name_map) {
-    if (LVSUTIL.getSortedUniqueList(net_name_list).size() > 1) {
-      short_component_id_list.push_back(component_id);
+  if (physical_graph.has_optimized_component_data()) {
+    const std::vector<std::vector<int32_t>>& component_net_id_list = physical_graph.get_component_net_id_list();
+    for (int32_t component_id = 0; component_id < static_cast<int32_t>(component_net_id_list.size()); component_id++) {
+      if (component_net_id_list[component_id].size() > 1) {
+        short_component_id_list.push_back(component_id);
+      }
+    }
+  } else {
+    for (const auto& [component_id, net_name_list] : physical_graph.get_component_net_name_map()) {
+      if (LVSUTIL.getSortedUniqueList(net_name_list).size() > 1) {
+        short_component_id_list.push_back(component_id);
+      }
     }
   }
 }
@@ -252,14 +272,14 @@ void RoutingChecker::updateSummary(RCModel& rc_model)
     rc_summary.violation_list.push_back(std::move(violation));
   }
   for (int32_t component_id : rc_model.get_short_component_id_list()) {
-    auto component_iter = physical_graph.get_component_net_name_map().find(component_id);
-    if (component_iter == physical_graph.get_component_net_name_map().end()) {
+    std::vector<std::string> net_name_list = physical_graph.get_component_net_name_list(component_id);
+    if (net_name_list.empty()) {
       continue;
     }
     Violation violation;
     violation.set_violation_type(ViolationType::kRoutingShort);
     violation.get_component_id_list().push_back(component_id);
-    violation.set_related_net_name_list(LVSUTIL.getSortedUniqueList(component_iter->second));
+    violation.set_related_net_name_list(LVSUTIL.getSortedUniqueList(net_name_list));
     rc_summary.short_net_num++;
     rc_summary.violation_list.push_back(std::move(violation));
   }

@@ -147,6 +147,9 @@ class ClockTraceFixtureInterface : public testing::Test
         .multiply_by = 1,
         .invert = false,
         .is_virtual = false,
+        .waveform_ns = {},
+        .generated_edges = {},
+        .generated_edge_shifts_ns = {},
     };
   }
 
@@ -164,7 +167,17 @@ class ClockTraceFixtureInterface : public testing::Test
         .multiply_by = 1,
         .invert = false,
         .is_virtual = false,
+        .waveform_ns = {},
+        .generated_edges = {},
+        .generated_edge_shifts_ns = {},
     };
+  }
+
+  static auto clockData(std::vector<icts::SdcClockDecl> clocks) -> icts::SdcClockData
+  {
+    icts::SdcClockData data;
+    data.clocks = std::move(clocks);
+    return data;
   }
 
   auto trace(const icts::SdcClockData& data, std::size_t max_fanout = 32U) -> icts::ClockTraceBuild
@@ -205,7 +218,7 @@ TEST_F(ClockTraceFixtureInterface, InputOnlyPhysicalBuffersRemainTerminalWithout
   auto* sink = addInst("sink", sink_master, true);
   connect("clk", {pin(source, "Y"), pin(buffer, "A"), pin(inverter, "A"), pin(sink, "CLK")});
 
-  const auto build = trace(icts::SdcClockData{.clocks = {primaryClock("clk", "clk")}, .case_analyses = {}, .diagnostics = {}});
+  const auto build = trace(clockData({primaryClock("clk", "clk")}));
 
   ASSERT_EQ(build.output.clock_targets.size(), 1U);
   EXPECT_EQ(build.output.clock_targets.front().terminal_net_names, std::vector<std::string>{"clk"});
@@ -229,7 +242,7 @@ TEST_F(ClockTraceFixtureInterface, CompleteLibertyBufferAndInverterTransitionsPr
   connect("middle", {pin(buffer, "Y"), pin(inverter, "A")});
   connect("leaf", {pin(inverter, "Y"), pin(sink, "CLK")});
 
-  const auto build = trace(icts::SdcClockData{.clocks = {primaryClock("clk", "root")}, .case_analyses = {}, .diagnostics = {}});
+  const auto build = trace(clockData({primaryClock("clk", "root")}));
 
   ASSERT_EQ(build.output.clock_targets.size(), 1U);
   const auto& target = build.output.clock_targets.front();
@@ -263,7 +276,7 @@ TEST_F(ClockTraceFixtureInterface, TruePropagationPreservesInputOnlySameClockBou
   connect("root", {pin(source, "Y"), pin(buffer, "A"), pin(boundary, "A")});
   connect("leaf", {pin(buffer, "Y"), pin(sink, "CLK")});
 
-  const auto build = trace(icts::SdcClockData{.clocks = {primaryClock("clk", "root")}, .case_analyses = {}, .diagnostics = {}});
+  const auto build = trace(clockData({primaryClock("clk", "root")}));
 
   ASSERT_TRUE(build.ok());
   ASSERT_EQ(build.output.clock_targets.size(), 1U);
@@ -291,7 +304,7 @@ TEST_F(ClockTraceFixtureInterface, DirectSourceSinksRemainOwnedIndependentOfSynt
     leaf_pins.push_back(pin(sink, "CLK"));
   }
   connect("leaf", leaf_pins);
-  const auto data = icts::SdcClockData{.clocks = {primaryClock("clk", "root")}, .case_analyses = {}, .diagnostics = {}};
+  const auto data = clockData({primaryClock("clk", "root")});
 
   const auto low_fanout_build = trace(data, 1U);
   const auto high_fanout_build = trace(data, 128U);
@@ -316,8 +329,8 @@ TEST_F(ClockTraceFixtureInterface, AmbiguousOwnershipRejectsTheWholeTraceInputDe
   auto left = primaryClock("left", "shared");
   auto right = primaryClock("right", "shared");
 
-  const auto forward = trace(icts::SdcClockData{.clocks = {left, right}, .case_analyses = {}, .diagnostics = {}});
-  const auto reverse = trace(icts::SdcClockData{.clocks = {right, left}, .case_analyses = {}, .diagnostics = {}});
+  const auto forward = trace(clockData({left, right}));
+  const auto reverse = trace(clockData({right, left}));
 
   EXPECT_EQ(forward.status, icts::ClockTraceBuildStatusCode::kAmbiguousOwnership);
   EXPECT_EQ(forward.message, "clock_trace_ambiguous_ownership");
@@ -359,7 +372,7 @@ TEST_F(ClockTraceFixtureInterface, ClockGateMuxLatchAndMacroAreTerminalBoundarie
   connect("icg_leaf", {pin(icg, "Q"), pin(icg_sink, "CLK")});
   connect("mux_leaf", {pin(mux, "Y"), pin(mux_sink, "CLK")});
 
-  const auto build = trace(icts::SdcClockData{.clocks = {primaryClock("clk", "root")}, .case_analyses = {}, .diagnostics = {}});
+  const auto build = trace(clockData({primaryClock("clk", "root")}));
 
   const auto* accepted = findRecord(build, "clk", "root", "accepted");
   ASSERT_NE(accepted, nullptr);
@@ -392,7 +405,7 @@ TEST_F(ClockTraceFixtureInterface, GeneratedClockTargetStopsMasterClockOwnership
   auto primary = primaryClock("master", "root");
   auto generated = generatedClock("generated", "generated", "master");
 
-  const auto build = trace(icts::SdcClockData{.clocks = {primary, generated}, .case_analyses = {}, .diagnostics = {}});
+  const auto build = trace(clockData({primary, generated}));
 
   const auto* master_stop = findRecord(build, "master", "generated", "trace_stop");
   ASSERT_NE(master_stop, nullptr);
@@ -418,7 +431,7 @@ TEST_F(ClockTraceFixtureInterface, PreclusterReuseTreatsLeafDriversAsAnchorsNotP
   connect("left_leaf", {pin(left, "Y"), pin(left_sink, "CLK")});
   connect("right_leaf", {pin(right, "Y"), pin(right_sink, "CLK")});
 
-  const auto build = trace(icts::SdcClockData{.clocks = {primaryClock("clk", "root")}, .case_analyses = {}, .diagnostics = {}});
+  const auto build = trace(clockData({primaryClock("clk", "root")}));
 
   ASSERT_EQ(build.output.clock_targets.size(), 1U);
   const auto& target = build.output.clock_targets.front();
@@ -443,7 +456,7 @@ TEST_F(ClockTraceFixtureInterface, MultipleResolvedSeedsDoNotCreateCompatibility
   auto clock = primaryClock("clk", "left");
   clock.targets.push_back({.kind = icts::SdcObjectKind::kNet, .pattern = "right"});
 
-  const auto build = trace(icts::SdcClockData{.clocks = {clock}, .case_analyses = {}, .diagnostics = {}});
+  const auto build = trace(clockData({clock}));
 
   EXPECT_NE(findRecord(build, "clk", "left", "accepted"), nullptr);
   EXPECT_NE(findRecord(build, "clk", "right", "accepted"), nullptr);

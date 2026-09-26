@@ -91,6 +91,10 @@ auto CharBuilder::get_wirelength_iterations() const -> unsigned
 {
   return _impl->wirelengthIterations();
 }
+auto CharBuilder::uses_boundary_primitive_patterns() const -> bool
+{
+  return _impl->usesBoundaryPrimitivePatterns();
+}
 auto CharBuilder::get_max_slew() const -> double
 {
   return _impl->maxSlew();
@@ -134,6 +138,38 @@ auto CharBuilder::get_slew_lattice() const -> UniformValueLattice
 auto CharBuilder::get_cap_lattice() const -> UniformValueLattice
 {
   return UniformValueLattice::buildFromMax(_impl->maxCap(), _impl->capSteps());
+}
+auto CharBuilder::get_evaluated_patterns() const -> std::size_t
+{
+  return _impl->evaluatedPatterns();
+}
+auto CharBuilder::get_feasible_patterns() const -> std::size_t
+{
+  return _impl->feasiblePatterns();
+}
+auto CharBuilder::get_skipped_patterns_infeasible() const -> std::size_t
+{
+  return _impl->skippedPatternsInfeasible();
+}
+auto CharBuilder::get_wire_only_patterns() const -> std::size_t
+{
+  return _impl->wireOnlyPatterns();
+}
+auto CharBuilder::get_leaf_buffered_patterns() const -> std::size_t
+{
+  return _impl->leafBufferedPatterns();
+}
+auto CharBuilder::get_terminal_branch_patterns() const -> std::size_t
+{
+  return _impl->terminalBranchPatterns();
+}
+auto CharBuilder::get_mixed_master_patterns() const -> std::size_t
+{
+  return _impl->mixedMasterPatterns();
+}
+auto CharBuilder::get_skipped_load_points() const -> std::size_t
+{
+  return _impl->skippedLoadPoints();
 }
 auto CharBuilder::get_executed_sta_samples() const -> std::size_t
 {

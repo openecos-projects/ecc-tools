@@ -94,8 +94,8 @@ auto Wrapper::reset() -> void
   _idb_design = nullptr;
   _idb_layout = nullptr;
   _liberty_loaded = false;
-  _lib_libraries.clear();
   _lib_cell_by_master.clear();
+  _liberty_generation.reset();
   _cts2idb_inst_map.clear();
   _idb2cts_inst_map.clear();
   _cts2idb_net_map.clear();

@@ -27,12 +27,14 @@ add_library(
 
 add_library(
   icts_source_data_manager_adapter_fast_sta_liberty_model
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_LIBERTY}/FastSTACondition.cc
   ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_LIBERTY}/FastSTALibertyModel.cc
 )
 
 target_link_libraries(
   icts_source_data_manager_adapter_fast_sta_liberty
   PRIVATE
+  icts_source_data_manager_adapter_fast_sta_liberty_model
   icts_source_data_manager_io
   icts_source_toolkit_logger
   liberty
@@ -97,11 +99,16 @@ target_include_directories(
 
 add_library(
   icts_source_data_manager_adapter_fast_sta_timing
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_TIMING}/FastSTAConstraints.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_TIMING}/FastSTAEvents.cc
   ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_TIMING}/FastSTADmpCeff.cc
   ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_TIMING}/FastSTADmpCeffEquations.cc
   ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_TIMING}/FastSTADmpCeffShared.cc
   ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_TIMING}/FastSTADmpCeffSolver.cc
   ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_TIMING}/FastSTATiming.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_TIMING}/FastSTAClockPropagation.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_TIMING}/FastSTALogicPropagation.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_TIMING}/FastSTALogicAnalysis.cc
 )
 
 target_link_libraries(
@@ -109,6 +116,7 @@ target_link_libraries(
   PRIVATE
   icts_source_data_manager_adapter_fast_sta_clock_net_parasitic
   icts_source_data_manager_adapter_fast_sta_liberty_model
+  icts_source_data_manager_adapter_sdc
 )
 
 target_include_directories(
@@ -126,12 +134,15 @@ target_link_libraries(
   icts_source_data_manager_adapter_fast_sta_power
   PRIVATE
   icts_source_data_manager_adapter_fast_sta_liberty_model
+  icts_source_data_manager_adapter_fast_sta_timing
+  icts_source_data_manager_io
 )
 
 target_include_directories(
   icts_source_data_manager_adapter_fast_sta_power
   PRIVATE
   ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_INTERNAL_INCLUDE_DIRS}
+  ${ICTS_DATA_MANAGER}
 )
 
 add_library(
@@ -155,6 +166,8 @@ target_include_directories(
 add_library(
   icts_source_data_manager_adapter_fast_sta_clock_state
   ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_CLOCK_STATE}/FastSTABuilder.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_CLOCK_STATE}/FastSTAGraphImport.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_CLOCK_STATE}/FastSTAClockOverlay.cc
 )
 
 target_link_libraries(
@@ -198,7 +211,22 @@ target_include_directories(
   ${ICTS_DATA_MANAGER}
 )
 
-add_library(icts_source_data_manager_adapter_fast_sta ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA}/FastSTA.cc)
+add_library(icts_source_data_manager_adapter_fast_sta
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA}/FastSTA.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_CLOCK_STATE}/FastSTAContextStore.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA_CLOCK_STATE}/FastSTAContextQueries.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_FAST_STA}/branch_timing/FastSTABranch.cc)
+
+foreach(context_target
+    icts_source_data_manager_adapter_fast_sta_clock_state
+    icts_source_data_manager_adapter_fast_sta_clock_tree
+    icts_source_data_manager_adapter_fast_sta_clock_net_parasitic
+    icts_source_data_manager_adapter_fast_sta_clock_sizing
+    icts_source_data_manager_adapter_fast_sta_timing
+    icts_source_data_manager_adapter_fast_sta_power
+    icts_source_data_manager_adapter_fast_sta_segment_char)
+  target_link_libraries(${context_target} PRIVATE icts_source_data_manager_timing)
+endforeach()
 
 target_link_libraries(
   icts_source_data_manager_adapter_fast_sta

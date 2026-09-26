@@ -903,12 +903,13 @@ auto RecoverSinkLoadRegionGroup(const std::vector<Pin*>& loads, const Point<int>
 
 auto ResolveSinkLoadRegionLegality(const Tree& topology, PatternId topology_pattern_id, const TopologyPatternLibrary& topology_library,
                                    const BufferPatternLibrary& segment_pattern_library, SinkLoadRegionLegalityContext& legality_context)
-    -> SinkLoadRegionLegalitySummary
+    -> const SinkLoadRegionLegalitySummary&
 {
   const auto topology_pattern = topology_library.materialize(topology_pattern_id);
   const auto signature = ResolveSinkLoadRegionLegalitySignature(topology_pattern, segment_pattern_library);
   if (signature.bottom_most_buffered_level <= legality_context.max_monotone_failed_level) {
-    SinkLoadRegionLegalitySummary result;
+    auto& result = legality_context.monotone_pruned_result;
+    result = {};
     result.bottom_most_buffered_level = signature.bottom_most_buffered_level;
     result.segment_pattern_id = signature.segment_pattern_id;
     result.violation = SinkLoadRegionViolation::kFanout;
@@ -941,7 +942,7 @@ auto FilterSinkLoadRegionLegalEntries(const std::vector<HTreeTopologyChar>& entr
   SinkLoadRegionEntryFilterBuild result;
   result.output.entries.reserve(entries.size());
   for (const auto& entry : entries) {
-    const auto legality = ResolveSinkLoadRegionLegality(topology, entry.get_pattern_id(), topology_library, segment_pattern_library, legality_context);
+    const auto& legality = ResolveSinkLoadRegionLegality(topology, entry.get_pattern_id(), topology_library, segment_pattern_library, legality_context);
     if (!legality.legal) {
       if (result.summary.first_failure_reason.empty()) {
         result.summary.first_failure_reason = legality.failure_reason;

@@ -112,7 +112,8 @@ auto BuildSegmentFrontierTestData(icts::htree::SegmentFrontierKindSet required_k
                                                               icts::htree::RequiredSegmentFrontiers{
                                                                   .required_length_indices = {2U},
                                                                   .required_kinds = required_kinds,
-                                                              });
+                                                              },
+                                                              true);
   return test_data;
 }
 
@@ -215,6 +216,23 @@ TEST(HTreeTest, SegmentPatternCombinerKeepsCompositionDirection)
   EXPECT_EQ(pattern_library.patterns.size(), 4U);
 }
 
+TEST(HTreeTest, SegmentPatternCompositionStateMatchesMaterializedBoundaryGeometry)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto upstream_id = icts::PatternId::segment(10U);
+  const auto downstream_id = icts::PatternId::segment(20U);
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, upstream_id, {0.5}, {"BUF_X1"}, false, MakeBufferedBoundaryState())));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(2U, downstream_id, {0.25, 0.75}, {"BUF_X1", "BUF_X1"}, false, MakeBufferedBoundaryState())));
+
+  icts::htree::SegmentPatternLibraryCombiner combiner(pattern_library, 100U);
+  const auto composed_state = combiner.composeState(upstream_id, downstream_id);
+  const auto composed_id = combiner.combine(upstream_id, downstream_id);
+  const auto* composed_pattern = pattern_library.find(composed_id);
+
+  ASSERT_NE(composed_pattern, nullptr);
+  EXPECT_EQ(composed_state.geometry_state, icts::htree::BuildSegmentPatternGeometryState(*composed_pattern));
+}
+
 TEST(HTreeTest, SegmentPatternCombinerRejectsNonMonotonicPairBeforeRegistration)
 {
   icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
@@ -254,7 +272,7 @@ TEST(HTreeTest, SegmentFrontierRegistersOnlySurvivingComposedPattern)
 
   const auto catalog = icts::htree::SynthesizeSegmentFrontiers(
       chars, pattern_library,
-      icts::htree::RequiredSegmentFrontiers{.required_length_indices = {2U}, .required_kinds = icts::htree::SegmentFrontierKindSet::allOnly()});
+      icts::htree::RequiredSegmentFrontiers{.required_length_indices = {2U}, .required_kinds = icts::htree::SegmentFrontierKindSet::allOnly()}, true);
   const auto* frontier = catalog.find(2U, icts::htree::SegmentFrontierKind::kAll);
 
   ASSERT_NE(frontier, nullptr);
@@ -262,6 +280,208 @@ TEST(HTreeTest, SegmentFrontierRegistersOnlySurvivingComposedPattern)
   EXPECT_DOUBLE_EQ(frontier->front().get_delay(), 2.0);
   EXPECT_DOUBLE_EQ(frontier->front().get_power(), 2.0);
   EXPECT_EQ(pattern_library.compositionRegistrationCount(), 1U);
+}
+
+TEST(HTreeTest, SegmentClosureAllocatesPatternIdsAbovePatternsWithoutStaChars)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto primitive_id = icts::PatternId::segment(1U);
+  const auto infeasible_tail_id = icts::PatternId::segment(100U);
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, primitive_id, {}, {})));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, infeasible_tail_id, {}, {})));
+  const std::vector<icts::SegmentChar> chars{
+      icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 1.0, 1.0, primitive_id, 0.0), 1U),
+  };
+
+  const auto catalog = icts::htree::SynthesizeSegmentFrontiers(
+      chars, pattern_library,
+      icts::htree::RequiredSegmentFrontiers{.required_length_indices = {2U}, .required_kinds = icts::htree::SegmentFrontierKindSet::allOnly()}, true);
+  const auto* frontier = catalog.find(2U, icts::htree::SegmentFrontierKind::kAll);
+
+  ASSERT_NE(frontier, nullptr);
+  ASSERT_FALSE(frontier->empty());
+  EXPECT_GT(frontier->front().get_pattern_id().local_id, infeasible_tail_id.local_id);
+  EXPECT_NE(pattern_library.find(frontier->front().get_pattern_id()), nullptr);
+}
+
+TEST(HTreeTest, BranchRequirementSynthesizesMissingBranchKind)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto unit_wire_id = icts::PatternId::segment(1U);
+  const auto unit_branch_id = icts::PatternId::segment(2U);
+  const auto direct_leaf_id = icts::PatternId::segment(3U);
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, unit_wire_id, {}, {}, false)));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, unit_branch_id, {1.0}, {"BUF_X1"}, true, MakeBufferedBoundaryState())));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(2U, direct_leaf_id, {}, {}, false)));
+  const std::vector<icts::SegmentChar> chars{
+      icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 1.0, 1.0, unit_wire_id, 0.0), 1U),
+      icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 1.0, 1.0, unit_branch_id, 0.0), 1U),
+      icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 1.0, 1.0, direct_leaf_id, 0.0), 2U),
+  };
+
+  const auto catalog = icts::htree::SynthesizeSegmentFrontiers(
+      chars, pattern_library,
+      icts::htree::RequiredSegmentFrontiers{.required_length_indices = {2U}, .required_kinds = icts::htree::SegmentFrontierKindSet::branchConstrained()}, true);
+  const auto* branch_frontier = catalog.find(2U, icts::htree::SegmentFrontierKind::kTerminalBranchBuffered);
+
+  ASSERT_NE(branch_frontier, nullptr);
+  ASSERT_FALSE(branch_frontier->empty());
+  for (const auto& entry : *branch_frontier) {
+    const auto* pattern = pattern_library.find(entry.get_pattern_id());
+    ASSERT_NE(pattern, nullptr);
+    EXPECT_TRUE(pattern->hasTerminalBranchBuffer());
+  }
+}
+
+TEST(HTreeTest, BranchClosureRequiresBranchOnOnlyOneCompositionSide)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto unit_wire_id = icts::PatternId::segment(1U);
+  const auto unit_branch_id = icts::PatternId::segment(2U);
+  const auto double_wire_id = icts::PatternId::segment(3U);
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, unit_wire_id, {}, {}, false)));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, unit_branch_id, {1.0}, {"BUF_X1"}, true, MakeBufferedBoundaryState())));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(2U, double_wire_id, {}, {}, false)));
+  const std::vector<icts::SegmentChar> chars{
+      icts::SegmentChar(icts::CharCore(1U, 2U, 1U, 2U, 1.0, 1.0, unit_wire_id, 0.0), 1U),
+      icts::SegmentChar(icts::CharCore(3U, 4U, 3U, 4U, 1.0, 1.0, unit_branch_id, 0.0), 1U),
+      icts::SegmentChar(icts::CharCore(1U, 3U, 1U, 3U, 1.0, 1.0, double_wire_id, 0.0), 2U),
+  };
+
+  const auto catalog = icts::htree::SynthesizeSegmentFrontiers(
+      chars, pattern_library,
+      icts::htree::RequiredSegmentFrontiers{.required_length_indices = {3U}, .required_kinds = icts::htree::SegmentFrontierKindSet::branchConstrained()}, true);
+  const auto* branch_frontier = catalog.find(3U, icts::htree::SegmentFrontierKind::kTerminalBranchBuffered);
+
+  ASSERT_NE(branch_frontier, nullptr);
+  ASSERT_FALSE(branch_frontier->empty());
+  for (const auto& entry : *branch_frontier) {
+    const auto* pattern = pattern_library.find(entry.get_pattern_id());
+    ASSERT_NE(pattern, nullptr);
+    EXPECT_TRUE(pattern->hasTerminalBranchBuffer());
+  }
+}
+
+TEST(HTreeTest, SegmentFrontierPreservesObservableBufferGeometry)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto near_source_id = icts::PatternId::segment(1U);
+  const auto near_sink_id = icts::PatternId::segment(2U);
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, near_source_id, {0.25}, {"BUF_X1"}, false, MakeBufferedBoundaryState())));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, near_sink_id, {0.75}, {"BUF_X1"}, false, MakeBufferedBoundaryState())));
+  const std::vector<icts::SegmentChar> chars{
+      icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 1.0, 1.0, near_source_id, 0.0), 1U),
+      icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 2.0, 2.0, near_sink_id, 0.0), 1U),
+  };
+
+  const auto catalog = icts::htree::SynthesizeSegmentFrontiers(
+      chars, pattern_library,
+      icts::htree::RequiredSegmentFrontiers{.required_length_indices = {1U}, .required_kinds = icts::htree::SegmentFrontierKindSet::allOnly()}, false);
+  const auto* frontier = catalog.find(1U, icts::htree::SegmentFrontierKind::kAll);
+
+  ASSERT_NE(frontier, nullptr);
+  EXPECT_EQ(frontier->size(), 2U);
+}
+
+TEST(HTreeTest, BoundaryPrimitiveModeUsesExplicitProvenance)
+{
+  const auto build_catalog = [](bool use_canonical_boundary_primitive_basis, unsigned required_length_idx) -> icts::htree::SegmentFrontierCatalog {
+    icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+    const auto internal_leaf_id = icts::PatternId::segment(1U);
+    EXPECT_TRUE(pattern_library.add(icts::BufferingPattern(1U, internal_leaf_id, {0.5}, {"BUF_X1"}, false, MakeBufferedBoundaryState())));
+    const std::vector<icts::SegmentChar> chars{
+        icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 1.0, 1.0, internal_leaf_id, 0.0), 1U),
+    };
+    return icts::htree::SynthesizeSegmentFrontiers(chars, pattern_library,
+                                                   icts::htree::RequiredSegmentFrontiers{.required_length_indices = {required_length_idx},
+                                                                                         .required_kinds = icts::htree::SegmentFrontierKindSet::allOnly()},
+                                                   use_canonical_boundary_primitive_basis);
+  };
+
+  const auto sparse_recursive_catalog = build_catalog(false, 2U);
+  const auto canonical_direct_catalog = build_catalog(true, 1U);
+  const auto canonical_composed_catalog = build_catalog(true, 2U);
+
+  const auto* sparse_frontier = sparse_recursive_catalog.find(2U, icts::htree::SegmentFrontierKind::kAll);
+  ASSERT_NE(sparse_frontier, nullptr);
+  EXPECT_FALSE(sparse_frontier->empty());
+  EXPECT_TRUE(canonical_direct_catalog.empty());
+  EXPECT_TRUE(canonical_composed_catalog.empty());
+}
+
+TEST(HTreeTest, UnitPrimitiveClosureBuildsLeafAndBranchFrontiers)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  const auto wire_id = icts::PatternId::segment(1U);
+  const auto branch_id = icts::PatternId::segment(2U);
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, wire_id, {}, {}, false)));
+  ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(1U, branch_id, {1.0}, {"BUF_X1"}, true, MakeBufferedBoundaryState())));
+  const std::vector<icts::SegmentChar> chars{
+      icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 1.0, 1.0, wire_id, 0.0), 1U),
+      icts::SegmentChar(icts::CharCore(1U, 1U, 1U, 1U, 1.0, 1.0, branch_id, 0.0), 1U),
+  };
+
+  const auto catalog = icts::htree::SynthesizeSegmentFrontiers(
+      chars, pattern_library,
+      icts::htree::RequiredSegmentFrontiers{.required_length_indices = {4U}, .required_kinds = icts::htree::SegmentFrontierKindSet::full()}, true);
+
+  const auto* all_frontier = catalog.find(4U, icts::htree::SegmentFrontierKind::kAll);
+  const auto* branch_frontier = catalog.find(4U, icts::htree::SegmentFrontierKind::kTerminalBranchBuffered);
+  const auto* leaf_frontier = catalog.find(4U, icts::htree::SegmentFrontierKind::kTerminalLeafUnbuffered);
+  ASSERT_NE(all_frontier, nullptr);
+  ASSERT_NE(branch_frontier, nullptr);
+  ASSERT_NE(leaf_frontier, nullptr);
+  EXPECT_FALSE(all_frontier->empty());
+  EXPECT_FALSE(branch_frontier->empty());
+  EXPECT_FALSE(leaf_frontier->empty());
+  EXPECT_EQ(catalog.find(2U, icts::htree::SegmentFrontierKind::kAll), nullptr);
+  EXPECT_EQ(catalog.find(3U, icts::htree::SegmentFrontierKind::kAll), nullptr);
+}
+
+TEST(HTreeTest, BinaryBoundaryPrimitivesUseDeterministicCanonicalPartitions)
+{
+  icts::htree::BufferPatternLibrary pattern_library(CTSDM.getWrapper());
+  std::vector<icts::SegmentChar> chars;
+  unsigned next_pattern_id = 1U;
+  for (const unsigned length_idx : {1U, 2U, 4U}) {
+    const auto wire_id = icts::PatternId::segment(next_pattern_id++);
+    const auto branch_id = icts::PatternId::segment(next_pattern_id++);
+    ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(length_idx, wire_id, {}, {}, false)));
+    ASSERT_TRUE(pattern_library.add(icts::BufferingPattern(length_idx, branch_id, {1.0}, {"BUF_X1"}, true, MakeBufferedBoundaryState())));
+    chars.emplace_back(icts::CharCore(1U, 1U, 1U, 1U, 1.0, 1.0, wire_id, 0.0), length_idx);
+    chars.emplace_back(icts::CharCore(1U, 1U, 1U, 1U, 1.0, 1.0, branch_id, 0.0), length_idx);
+  }
+
+  const auto catalog = icts::htree::SynthesizeSegmentFrontiers(
+      chars, pattern_library,
+      icts::htree::RequiredSegmentFrontiers{.required_length_indices = {4U, 5U}, .required_kinds = icts::htree::SegmentFrontierKindSet::full()}, true);
+
+  const auto* direct_power_frontier = catalog.find(4U, icts::htree::SegmentFrontierKind::kAll);
+  ASSERT_NE(direct_power_frontier, nullptr);
+  for (const auto& entry : *direct_power_frontier) {
+    const auto* pattern = pattern_library.find(entry.get_pattern_id());
+    ASSERT_NE(pattern, nullptr);
+    ASSERT_LE(pattern->get_buffer_positions().size(), 1U);
+    if (!pattern->get_buffer_positions().empty()) {
+      EXPECT_DOUBLE_EQ(pattern->get_buffer_positions().front(), 1.0);
+    }
+  }
+
+  const auto* composed_frontier = catalog.find(5U, icts::htree::SegmentFrontierKind::kAll);
+  ASSERT_NE(composed_frontier, nullptr);
+  bool saw_source_partition = false;
+  bool saw_sink_partition = false;
+  for (const auto& entry : *composed_frontier) {
+    const auto* pattern = pattern_library.find(entry.get_pattern_id());
+    ASSERT_NE(pattern, nullptr);
+    for (const double position : pattern->get_buffer_positions()) {
+      saw_source_partition = saw_source_partition || position == 0.2;
+      saw_sink_partition = saw_sink_partition || position == 0.8;
+      EXPECT_TRUE(position == 0.2 || position == 0.8 || position == 1.0);
+    }
+  }
+  EXPECT_TRUE(saw_source_partition);
+  EXPECT_TRUE(saw_sink_partition);
 }
 
 TEST(HTreeTest, SourceTrunkLabelSolverBuildsCanonicalLength526Path)

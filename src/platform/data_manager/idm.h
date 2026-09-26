@@ -30,19 +30,20 @@
 
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "../../database/interaction/ids.hpp"
 #include "IdbDesign.h"
 #include "IdbLayout.h"
-#include "liberty/LibParserCpp.hh"
-#include "spef/SpefParser.hh"
-#include "vcd/VcdParser.hh"
 #include "builder.h"
 #include "config/dm_config.h"
 #include "def_service.h"
 #include "lef_service.h"
+#include "liberty/LibParserCpp.hh"
+#include "spef/SpefParser.hh"
+#include "vcd/VcdParser.hh"
 
 using std::string;
 using std::vector;
@@ -52,6 +53,32 @@ using namespace idb;
 #define dmInst idm::DataManager::getInstance()  // dmInst is DataManager*
 
 namespace idm {
+
+class RawLibertyGeneration
+{
+ public:
+  RawLibertyGeneration(vector<std::unique_ptr<idb::LibLibrary>> libraries, vector<string> paths, int32_t configured_workers,
+                       size_t active_workers, double elapsed_seconds);
+  ~RawLibertyGeneration();
+
+  RawLibertyGeneration(const RawLibertyGeneration& other) = delete;
+  RawLibertyGeneration& operator=(const RawLibertyGeneration& rhs) = delete;
+  RawLibertyGeneration(RawLibertyGeneration&& other) = delete;
+  RawLibertyGeneration& operator=(RawLibertyGeneration&& rhs) = delete;
+
+  const vector<std::unique_ptr<idb::LibLibrary>>& get_libraries() const { return _libraries; }
+  const vector<string>& get_paths() const { return _paths; }
+  int32_t get_configured_workers() const { return _configured_workers; }
+  size_t get_active_workers() const { return _active_workers; }
+  double get_elapsed_seconds() const { return _elapsed_seconds; }
+
+ private:
+  vector<std::unique_ptr<idb::LibLibrary>> _libraries;
+  vector<string> _paths;
+  int32_t _configured_workers = 1;
+  size_t _active_workers = 0;
+  double _elapsed_seconds = 0.0;
+};
 
 struct InstancePlacementUpdate
 {
@@ -95,7 +122,7 @@ class DataManager
   IdbDesign* get_def_idb_design() { return get_idb_design(); }
   IdbLayout* get_idb_layout() { return _idb_lef_service != nullptr ? _idb_lef_service->get_layout() : nullptr; }
   bool is_def_read() { return _idb_def_service != nullptr ? true : false; }
-  vector<LibertyReader>& get_lib_readers() { return _lib_readers; }
+  std::shared_ptr<const RawLibertyGeneration> get_liberty_generation() const;
   spef::SpefReader* get_spef_reader() { return _spef_reader.get(); }
   vcd::VcdReader* get_vcd_reader() { return _vcd_reader.get(); }
 
@@ -266,7 +293,9 @@ class DataManager
   IdbLefService* _idb_lef_service = nullptr;
   IdbDesign* _design = nullptr;
   IdbLayout* _layout = nullptr;
-  vector<LibertyReader> _lib_readers;
+  mutable std::mutex _liberty_generation_mutex;
+  std::mutex _liberty_load_mutex;
+  std::shared_ptr<const RawLibertyGeneration> _liberty_generation;
   std::unique_ptr<spef::SpefReader> _spef_reader;
   std::unique_ptr<vcd::VcdReader> _vcd_reader;
   // pa

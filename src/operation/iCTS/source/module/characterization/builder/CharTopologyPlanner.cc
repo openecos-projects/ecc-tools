@@ -18,15 +18,13 @@
  * @file CharTopologyPlanner.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-05-20
- * @brief Converts topology bitsets into segment-wire descriptions.
+ * @brief Converts topology slot selections into segment-wire descriptions.
  */
 
 #include "characterization/builder/CharTopologyPlanner.hh"
 
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
-#include <vector>
 
 #include "ValueLattice.hh"
 #include "characterization/builder/CharBuilderImpl.hh"
@@ -34,16 +32,15 @@
 namespace icts::char_builder::detail {
 namespace {
 
-constexpr std::uint64_t kTopologyPresentMask = 1ULL;
-
-auto hasTerminalLatticeBuffer(double wirelength_um, double length_unit_um, unsigned num_slots, std::uint64_t topology_bits_value) -> bool
+auto hasTerminalLatticeBuffer(double wirelength_um, double length_unit_um, const TopologySlotSelection& selected_slots) -> bool
 {
+  const auto num_slots = static_cast<unsigned>(selected_slots.size());
   if (wirelength_um <= 0.0 || length_unit_um <= 0.0 || num_slots == 0U) {
     return false;
   }
 
   const unsigned terminal_slot_index = num_slots - 1U;
-  if (((topology_bits_value >> terminal_slot_index) & kTopologyPresentMask) == 0U) {
+  if (selected_slots.at(terminal_slot_index) == 0U) {
     return false;
   }
 
@@ -53,12 +50,13 @@ auto hasTerminalLatticeBuffer(double wirelength_um, double length_unit_um, unsig
 
 }  // namespace
 
-auto CharTopologyPlanner::buildTopologyDesc(double wirelength_um, unsigned num_slots, TopologyBits topology_bits) const -> TopologyDesc
+auto BuildTopologyDesc(double wirelength_um, double length_unit_um, const TopologySlotSelection& selected_slots) -> TopologyDesc
 {
   TopologyDesc desc;
-  desc.has_terminal_branch_buffer = hasTerminalLatticeBuffer(wirelength_um, _impl._length_unit_um, num_slots, topology_bits.value);
+  const auto num_slots = static_cast<unsigned>(selected_slots.size());
+  desc.has_terminal_branch_buffer = hasTerminalLatticeBuffer(wirelength_um, length_unit_um, selected_slots);
 
-  if (num_slots == 0U || _impl._length_unit_um <= 0.0) {
+  if (num_slots == 0U || length_unit_um <= 0.0) {
     desc.wire_segments_um.push_back(wirelength_um);
     return desc;
   }
@@ -66,8 +64,8 @@ auto CharTopologyPlanner::buildTopologyDesc(double wirelength_um, unsigned num_s
   double previous_boundary_um = 0.0;
 
   for (unsigned slot_index = 0; slot_index < num_slots; ++slot_index) {
-    const double slot_boundary_um = std::min((static_cast<double>(slot_index) + 1.0) * _impl._length_unit_um, wirelength_um);
-    if (((topology_bits.value >> slot_index) & kTopologyPresentMask) != 0U) {
+    const double slot_boundary_um = std::min((static_cast<double>(slot_index) + 1.0) * length_unit_um, wirelength_um);
+    if (selected_slots.at(slot_index) != 0U) {
       desc.buffer_positions.push_back(slot_index);
       desc.wire_segments_um.push_back(slot_boundary_um - previous_boundary_um);
       previous_boundary_um = slot_boundary_um;
@@ -77,6 +75,11 @@ auto CharTopologyPlanner::buildTopologyDesc(double wirelength_um, unsigned num_s
   desc.wire_segments_um.push_back(std::max(0.0, wirelength_um - previous_boundary_um));
 
   return desc;
+}
+
+auto CharTopologyPlanner::buildTopologyDesc(double wirelength_um, const TopologySlotSelection& selected_slots) const -> TopologyDesc
+{
+  return BuildTopologyDesc(wirelength_um, _impl._length_unit_um, selected_slots);
 }
 
 }  // namespace icts::char_builder::detail

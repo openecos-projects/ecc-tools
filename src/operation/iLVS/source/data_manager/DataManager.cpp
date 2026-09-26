@@ -215,15 +215,16 @@ void DataManager::buildPhysicalGraph()
     if (!build_terminal_shape && routing_graph.get_terminal_routing_shape_num() >= static_cast<int32_t>(routing_graph.get_routing_shape_list().size())) {
       continue;
     }
-    buildPhysicalGraphNode(physical_graph_build_data, net_name, routing_graph, build_terminal_shape);
+    int32_t net_id = physical_graph.getOrCreateNetId(net_name);
+    buildPhysicalGraphNode(physical_graph_build_data, net_name, net_id, routing_graph, build_terminal_shape);
   }
   buildPhysicalGraphComponent(physical_graph_build_data);
 
   LVSLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void DataManager::buildPhysicalGraphNode(PhysicalGraphBuildData& physical_graph_build_data, const std::string& net_name, const NetRoutingGraph& routing_graph,
-                                         bool build_terminal_shape)
+void DataManager::buildPhysicalGraphNode(PhysicalGraphBuildData& physical_graph_build_data, const std::string& net_name, int32_t net_id,
+                                         const NetRoutingGraph& routing_graph, bool build_terminal_shape)
 {
   PhysicalGraph& physical_graph = _database.get_def_data().get_physical_graph();
   const std::vector<RoutingShape>& routing_shape_list = routing_graph.get_routing_shape_list();
@@ -237,11 +238,10 @@ void DataManager::buildPhysicalGraphNode(PhysicalGraphBuildData& physical_graph_
     }
     const RoutingShape& routing_shape = routing_shape_list[routing_shape_idx];
     PhysicalGraphBuildNode graph_node;
-    graph_node.set_net_name(net_name);
+    graph_node.set_net_id(net_id);
     graph_node.set_shape(routing_shape.get_shape());
     graph_node.set_is_terminal(is_terminal);
     graph_node.set_routing_shape_idx(routing_shape_idx);
-    graph_node.set_layer_order(routing_shape.get_layer_order());
     physical_graph_build_data.get_graph_node_list().push_back(std::move(graph_node));
     graph_node_idx_list[routing_shape_idx] = static_cast<int32_t>(physical_graph_build_data.get_graph_node_list().size()) - 1;
   }
@@ -298,22 +298,36 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
   }
 
   LVSLOG.info(Loc::current(), "Building same-layer routing connectivity...");
+  std::vector<std::pair<int32_t, std::vector<int32_t>*>> layer_work_list;
+  layer_work_list.reserve(layer_node_idx_map.size());
   for (auto& [layer_idx, node_idx_list] : layer_node_idx_map) {
     LVSLOG.info(Loc::current(), "Building layer ", layer_idx, " routing connectivity: shape_num=", node_idx_list.size(), ".");
+    layer_work_list.emplace_back(layer_idx, &node_idx_list);
+  }
+  constexpr int32_t kMaxLayerThreadNum = 3;
+  int32_t layer_thread_num = std::max<int32_t>(
+      1, std::min<int32_t>({kMaxLayerThreadNum, std::max(_config.thread_number, 1), static_cast<int32_t>(layer_work_list.size())}));
+
+  // Same-layer sets are disjoint until via connectivity is added, so their DSU writes do not overlap.
+#pragma omp parallel for schedule(dynamic) num_threads(layer_thread_num)
+  for (int32_t layer_work_idx = 0; layer_work_idx < static_cast<int32_t>(layer_work_list.size()); layer_work_idx++) {
+    int32_t layer_idx = layer_work_list[layer_work_idx].first;
+    std::vector<int32_t>& node_idx_list = *layer_work_list[layer_work_idx].second;
     std::vector<std::pair<BGRectInt, int32_t>> bg_rect_node_pair_list;
     bg_rect_node_pair_list.reserve(node_idx_list.size());
     for (int32_t node_idx : node_idx_list) {
       if (graph_node_list[node_idx].get_is_terminal()) {
         continue;
       }
-      Shape& node_shape = graph_node_list[node_idx].get_shape();
+      const Shape& node_shape = graph_node_list[node_idx].get_shape();
       bg_rect_node_pair_list.emplace_back(convertToBGRectInt(node_shape), node_idx);
     }
     bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>> bg_rtree(bg_rect_node_pair_list);
 
+#pragma omp critical(ilvs_physical_graph_log)
     LVSLOG.info(Loc::current(), "Querying layer ", layer_idx, " routing connectivity.");
     for (int32_t node_idx : node_idx_list) {
-      Shape& node_shape = graph_node_list[node_idx].get_shape();
+      const Shape& node_shape = graph_node_list[node_idx].get_shape();
       for (bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>>::const_query_iterator query_iter
            = bg_rtree.qbegin(bgi::intersects(convertToBGRectInt(node_shape)));
            query_iter != bg_rtree.qend(); ++query_iter) {
@@ -322,13 +336,14 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
         if (!graph_node_list[node_idx].get_is_terminal() && active_node_idx >= node_idx) {
           continue;
         }
-        Shape& active_shape = graph_node_list[active_node_idx].get_shape();
+        const Shape& active_shape = graph_node_list[active_node_idx].get_shape();
         if (active_shape.get_ll_x() <= node_shape.get_ur_x() && node_shape.get_ll_x() <= active_shape.get_ur_x()
             && active_shape.get_ll_y() <= node_shape.get_ur_y() && node_shape.get_ll_y() <= active_shape.get_ur_y()) {
           graph.unite(active_node_idx, node_idx);
         }
       }
     }
+#pragma omp critical(ilvs_physical_graph_log)
     LVSLOG.info(Loc::current(), "Completed layer ", layer_idx, " routing connectivity.");
   }
 
@@ -349,33 +364,45 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
   }
 
   LVSLOG.info(Loc::current(), "Collecting physical graph components...");
-  std::map<int32_t, std::set<std::string>> component_net_name_set_map;
-  for (int32_t node_idx = 0; node_idx < static_cast<int32_t>(graph_node_list.size()); node_idx++) {
-    int32_t root = graph.find(node_idx);
-    component_net_name_set_map[root].insert(graph_node_list[node_idx].get_net_name());
-  }
-  std::map<int32_t, int32_t> component_id_map;
+  std::vector<int32_t> root_component_id_list(graph_node_list.size(), -1);
   int32_t component_id = 0;
-  for (auto& [root, net_name_set] : component_net_name_set_map) {
-    component_id_map[root] = component_id;
-    physical_graph.get_component_net_name_map()[component_id] = {net_name_set.begin(), net_name_set.end()};
-    component_id++;
+  for (int32_t node_idx = 0; node_idx < static_cast<int32_t>(graph_node_list.size()); node_idx++) {
+    if (graph.find(node_idx) == node_idx) {
+      root_component_id_list[node_idx] = component_id++;
+    }
   }
+  std::vector<std::vector<int32_t>>& component_net_id_list = physical_graph.get_component_net_id_list();
+  std::vector<std::vector<PhysicalShapeRef>>& component_shape_ref_list = physical_graph.get_component_shape_ref_list();
+  component_net_id_list.resize(component_id);
+  component_shape_ref_list.resize(component_id);
 
   LVSLOG.info(Loc::current(), "Uploading physical graph components...");
+  int32_t current_net_id = -1;
+  std::vector<int32_t>* current_component_id_list = nullptr;
   for (int32_t node_idx = 0; node_idx < static_cast<int32_t>(graph_node_list.size()); node_idx++) {
     PhysicalGraphBuildNode& graph_node = graph_node_list[node_idx];
-    int32_t node_component_id = component_id_map[graph.find(node_idx)];
-    physical_graph.get_component_shape_map()[node_component_id].push_back(graph_node.get_shape());
-    std::map<std::string, std::vector<int32_t>>::iterator component_id_list_iter
-        = physical_graph.get_net_routing_shape_component_id_list_map().find(graph_node.get_net_name());
-    if (component_id_list_iter == physical_graph.get_net_routing_shape_component_id_list_map().end()) {
+    int32_t node_component_id = root_component_id_list[graph.find(node_idx)];
+    int32_t net_id = graph_node.get_net_id();
+    std::vector<int32_t>& component_net_ids = component_net_id_list[node_component_id];
+    if (component_net_ids.empty() || component_net_ids.back() != net_id) {
+      component_net_ids.push_back(net_id);
+    }
+    component_shape_ref_list[node_component_id].push_back({net_id, graph_node.get_routing_shape_idx()});
+
+    if (net_id != current_net_id) {
+      current_net_id = net_id;
+      const std::string& net_name = physical_graph.get_net_name(net_id);
+      auto component_id_list_iter = physical_graph.get_net_routing_shape_component_id_list_map().find(net_name);
+      current_component_id_list = component_id_list_iter == physical_graph.get_net_routing_shape_component_id_list_map().end()
+                                      ? nullptr
+                                      : &component_id_list_iter->second;
+    }
+    if (current_component_id_list == nullptr) {
       continue;
     }
-    std::vector<int32_t>& component_id_list = component_id_list_iter->second;
     int32_t routing_shape_idx = graph_node.get_routing_shape_idx();
-    if (routing_shape_idx >= 0 && routing_shape_idx < static_cast<int32_t>(component_id_list.size())) {
-      component_id_list[routing_shape_idx] = node_component_id;
+    if (routing_shape_idx >= 0 && routing_shape_idx < static_cast<int32_t>(current_component_id_list->size())) {
+      (*current_component_id_list)[routing_shape_idx] = node_component_id;
     }
   }
   for (auto& [net_name, terminal_build_data_list] : net_terminal_build_data_map) {
@@ -383,10 +410,11 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
     for (PhysicalGraphBuildTerminal& build_terminal : terminal_build_data_list) {
       std::vector<int32_t>& node_idx_list = build_terminal.get_node_idx_list();
       int32_t root = graph.find(node_idx_list.front());
-      int32_t terminal_component_id = component_id_map[root];
+      int32_t terminal_component_id = root_component_id_list[root];
       physical_graph.get_terminal_component_map()[build_terminal.get_terminal_name()] = terminal_component_id;
     }
   }
+  physical_graph.set_optimized_component_data_valid(true);
 
   LVSLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

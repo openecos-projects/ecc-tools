@@ -24,32 +24,39 @@
 #include "FastSTABuilder.hh"
 
 #include <algorithm>
+#include <cstddef>
 #include <optional>
-#include <ostream>
 #include <string>
-#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "FastSTA.hh"
+#include "FastSTAClockOverlay.hh"
 #include "FastSTAClockState.hh"
-#include "FastSTAClockTree.hh"
+#include "FastSTAGraphImport.hh"
 #include "FastSTALiberty.hh"
 #include "FastSTALibertyModel.hh"
 #include "FastSTAParasitics.hh"
 #include "Logger.hh"
 #include "design/Clock.hh"
 #include "design/Design.hh"
-#include "design/Net.hh"
 #include "io/Wrapper.hh"
 
 namespace icts {
+
+using fast_sta::AppendClock;
+using fast_sta::AppendTimingGraph;
+using fast_sta::CollectClocks;
+using fast_sta::CollectRoutes;
+using fast_sta::MergeLibertyCell;
+using fast_sta::RequiresPropagationBufferModel;
 
 class Pin;
 
 namespace {
 
-auto applyEnvironment(const FastStaEnvironment& environment, FastStaClockContext& context) -> void
+auto applyEnvironment(const FastStaEnvironment& environment, FastStaContext& context) -> void
 {
   if (environment.wrapper == nullptr) {
     CTSLOG.error(Loc::current(), "FastStaBuilder: Wrapper is not bound.");
@@ -61,82 +68,80 @@ auto applyEnvironment(const FastStaEnvironment& environment, FastStaClockContext
     CTSLOG.error(Loc::current(), "FastStaBuilder: routing layer is not configured.");
   }
   context.wrapper = environment.wrapper;
+  context.liberty_revision = environment.wrapper->queryLibertyRevision();
   context.dbu_per_um = environment.dbu_per_um;
   context.routing_layer = environment.routing_layer;
   context.wire_width_um = environment.wire_width_um;
   context.root_input_slew_ns = std::max(0.0, environment.root_input_slew_ns);
+  context.worker_count = std::max<std::size_t>(1U, environment.worker_count);
 }
 
-auto queryWrapperBackedSinkPinCap(Wrapper& wrapper, const Pin* pin) -> std::optional<double>
-{
-  return wrapper.queryPinCapacitance(pin);
-}
-
-auto queryWrapperBackedSinkSlewLimit(const FastStaEnvironment& environment, const Pin* pin) -> std::optional<double>
-{
-  return environment.wrapper->queryPinSlewLimit(Wrapper::PinSlewLimitInput{
-      .pin = pin,
-      .configured_max_sink_tran_ns = environment.max_sink_tran_ns,
-  });
-}
-
-auto queryWrapperBackedSourceCapLimit(const FastStaEnvironment& environment, const Clock& clock) -> std::optional<double>
-{
-  return environment.wrapper->queryClockSourceDriveCapLimit(Wrapper::ClockSourceDriveCapLimitInput{
-      .clock_source = clock.get_clock_source(),
-      .configured_max_cap_pf = environment.max_cap_pf,
-  });
-}
-
-auto isSourceBoundaryNet(const Clock& clock, const FastStaClockContext& context, const FastStaNet& net) -> bool
-{
-  if (net.driver_node_id == context.source_node_id) {
-    return true;
-  }
-  const auto* source_net = clock.get_clock_source_net();
-  return source_net != nullptr && net.name == source_net->get_name();
-}
-
-auto requiresPropagationBufferModel(const FastStaNode& node) -> bool
-{
-  return node.kind == FastStaNodeKind::kBufferInput || node.kind == FastStaNodeKind::kBufferOutput;
-}
-
-auto collectPropagationBufferModelsAndNetLimits(const FastStaEnvironment& environment, const Clock& clock, FastStaClockContext& context,
+auto collectPropagationBufferModelsAndNetLimits(const FastStaEnvironment& environment, const std::vector<const Clock*>& clocks, FastStaContext& context,
                                                 std::string& failure_reason) -> bool
 {
   auto& wrapper = *environment.wrapper;
+  std::unordered_set<std::string> loaded_buffer_models;
   for (auto& node : context.nodes) {
     // Sink pin capacitance and slew are mandatory but are resolved independently by collectSinkPinCaps. Only propagation buffers drive DMP timing and power.
-    if (!requiresPropagationBufferModel(node) || node.cell_master.empty()) {
+    if (!RequiresPropagationBufferModel(node) || node.cell_master.empty()) {
       continue;
     }
-    if (!context.liberty_cell_by_master.contains(node.cell_master)) {
-      const auto liberty_cell = FastStaLiberty::extractBufferCell(wrapper, node.cell_master);
-      if (!liberty_cell.has_value()) {
+    if (!loaded_buffer_models.contains(node.cell_master)) {
+      const auto model = FastStaLiberty::extractBufferCell(wrapper, node.cell_master);
+      if (!model.has_value()) {
         failure_reason = "liberty_cell_unavailable:" + node.cell_master;
         return false;
       }
-      context.liberty_cell_by_master.emplace(node.cell_master, *liberty_cell);
+      MergeLibertyCell(*model, context);
+      auto& cell = context.liberty_cell_by_master.at(node.cell_master);
+      cell.timing_arc = model->timing_arc;
+      cell.input_port = model->input_port;
+      cell.output_port = model->output_port;
+      cell.input_cap_pf = model->input_cap_pf;
+      cell.input_cap_pf_by_timing = model->input_cap_pf_by_timing;
+      cell.input_cap_profile_available = model->input_cap_profile_available;
+      cell.output_cap_limit_pf = model->output_cap_limit_pf;
+      cell.input_slew_limit_ns = model->input_slew_limit_ns;
+      cell.output_slew_limit_ns = model->output_slew_limit_ns;
+      loaded_buffer_models.insert(node.cell_master);
     }
     const auto& liberty_cell = context.liberty_cell_by_master.at(node.cell_master);
     if (node.kind == FastStaNodeKind::kBufferInput) {
       node.input_cap_pf = liberty_cell.input_cap_pf;
-      node.max_slew_ns = liberty_cell.input_slew_limit_ns;
+      node.input_cap_pf_by_timing = liberty_cell.input_cap_pf_by_timing;
+      node.input_cap_profile_available = liberty_cell.input_cap_profile_available;
+      if (node.slew_limit_from_master || node.max_slew_ns <= 0.0) {
+        node.max_slew_ns = liberty_cell.input_slew_limit_ns;
+        node.slew_limit_from_master = true;
+      }
+      node.port_name = liberty_cell.input_port;
+      node.input = true;
+    } else {
+      if (node.slew_limit_from_master || node.max_slew_ns <= 0.0) {
+        node.max_slew_ns = liberty_cell.output_slew_limit_ns;
+        node.slew_limit_from_master = true;
+      }
+      node.port_name = liberty_cell.output_port;
+      node.output = true;
+      if (liberty_cell.timing_arc.positive_unate != liberty_cell.timing_arc.negative_unate) {
+        node.logic_function = (liberty_cell.timing_arc.negative_unate ? "!" : "") + liberty_cell.input_port;
+      }
     }
   }
   for (auto& net : context.nets) {
     if (environment.max_cap_pf.has_value() && *environment.max_cap_pf > 0.0) {
       net.max_cap_pf = *environment.max_cap_pf;
+      net.cap_limit_from_master = false;
       continue;
     }
-    if (isSourceBoundaryNet(clock, context, net)) {
-      const auto source_cap_limit_pf = queryWrapperBackedSourceCapLimit(environment, clock);
-      if (!source_cap_limit_pf.has_value()) {
-        failure_reason = "source_drive_capacitance_unavailable:" + clock.get_clock_name();
-        return false;
-      }
-      net.max_cap_pf = *source_cap_limit_pf;
+    const auto source_clock = std::ranges::find_if(clocks, [&](const Clock* clock) -> bool {
+      const auto* source_net = clock->get_clock_source_net();
+      return source_net != nullptr && net.name == source_net->get_name();
+    });
+    if (source_clock != clocks.end()) {
+      const auto source_cap_limit_pf
+          = wrapper.queryClockSourceDriveCapLimit({.clock_source = (*source_clock)->get_clock_source(), .configured_max_cap_pf = environment.max_cap_pf});
+      net.max_cap_pf = source_cap_limit_pf.value_or(0.0);
       continue;
     }
     if (net.driver_node_id == kInvalidFastStaNodeId) {
@@ -145,13 +150,14 @@ auto collectPropagationBufferModelsAndNetLimits(const FastStaEnvironment& enviro
     const auto& driver = context.nodes.at(net.driver_node_id);
     if (const auto iter = context.liberty_cell_by_master.find(driver.cell_master); iter != context.liberty_cell_by_master.end()) {
       net.max_cap_pf = iter->second.output_cap_limit_pf;
+      net.cap_limit_from_master = true;
     }
   }
   FastStaParasitics::updateNetLoads(context);
   return true;
 }
 
-auto collectSinkPinCaps(const FastStaEnvironment& environment, const Clock& clock, FastStaClockContext& context, std::string& failure_reason) -> bool
+auto collectSinkPinCaps(const FastStaEnvironment& environment, const Clock& clock, FastStaContext& context, std::string& failure_reason) -> bool
 {
   auto& wrapper = *environment.wrapper;
   for (auto* pin : clock.get_loads()) {
@@ -163,45 +169,210 @@ auto collectSinkPinCaps(const FastStaEnvironment& environment, const Clock& cloc
       continue;
     }
     auto& node = context.nodes.at(node_iter->second);
-    const auto input_cap_pf = queryWrapperBackedSinkPinCap(wrapper, pin);
-    const auto max_slew_ns = queryWrapperBackedSinkSlewLimit(environment, pin);
-    if (!input_cap_pf.has_value() || !max_slew_ns.has_value()) {
-      failure_reason = !input_cap_pf.has_value() ? "sink_pin_capacitance_unavailable:" : "sink_slew_limit_unavailable:";
+    const auto input_cap_pf = wrapper.queryPinCapacitance(pin);
+    const auto max_slew_ns = wrapper.queryPinSlewLimit({.pin = pin, .configured_max_sink_tran_ns = environment.max_sink_tran_ns});
+    if (!input_cap_pf.has_value()) {
+      failure_reason = "sink_pin_capacitance_unavailable:";
       failure_reason += Design::getPinFullName(pin);
       return false;
     }
     node.input_cap_pf = *input_cap_pf;
-    node.max_slew_ns = *max_slew_ns;
+    for (const auto& [analysis_index, early] : {std::pair{0U, true}, std::pair{1U, false}}) {
+      for (const auto& [transition_index, transition] : {std::pair{0U, WrapperTimingTransition::kRise}, std::pair{1U, WrapperTimingTransition::kFall}}) {
+        const auto cap = wrapper.queryPinCapacitance(pin, early, transition);
+        if (!cap.has_value()) {
+          failure_reason = "sink_pin_capacitance_profile_unavailable:" + Design::getPinFullName(pin);
+          return false;
+        }
+        node.input_cap_pf_by_timing.at(analysis_index).at(transition_index) = *cap;
+      }
+    }
+    node.input_cap_profile_available = true;
+    node.max_slew_ns = max_slew_ns.value_or(0.0);
+  }
+  return true;
+}
+
+auto applyClockRoutes(const FastStaClockRouteGeometry& geometry, FastStaContext& context, std::string& failure_reason) -> bool
+{
+  if (geometry.clock_nets.empty()) {
+    return true;
+  }
+  if (geometry.design_dbu_per_um != context.dbu_per_um) {
+    failure_reason = "route_geometry_dbu_mismatch";
+    return false;
+  }
+  for (const auto& route : geometry.clock_nets) {
+    const auto net = context.net_id_by_name.find(route.net_name);
+    if (net == context.net_id_by_name.end()) {
+      failure_reason = "clock_route_net_unavailable:" + route.net_name;
+      return false;
+    }
+    if (!route.routed_segments.empty() && !FastStaParasitics::buildNetParasiticFromSegments(context, net->second, route.routed_segments)) {
+      failure_reason = "clock_route_rc_tree_invalid:" + route.net_name;
+      return false;
+    }
   }
   return true;
 }
 
 }  // namespace
 
-auto FastStaBuilder::buildClockContext(const FastStaEnvironment& environment, const FastStaClockBuildInput& input) -> BuildResult
+auto FastStaBuilder::buildContext(const FastStaEnvironment& environment, const FastStaBuildInput& input, const FastStaContext* prepared_context) -> BuildResult
 {
-  if (input.clock == nullptr) {
-    CTSLOG.error(Loc::current(), "FastStaBuilder: clock build input is null.");
+  if (environment.wrapper == nullptr) {
+    return BuildResult{.failure_reason = "fast_sta_environment_wrapper_unavailable"};
   }
-  const auto& clock = *input.clock;
-  auto context
-      = input.route_geometry == nullptr ? FastStaClockTree::buildFromClock(clock) : FastStaClockTree::buildFromClockRouteGeometry(clock, *input.route_geometry);
+  if (environment.dbu_per_um <= 0) {
+    return BuildResult{.failure_reason = "fast_sta_environment_dbu_unavailable"};
+  }
+  if (environment.routing_layer <= 0) {
+    return BuildResult{.failure_reason = "fast_sta_environment_routing_layer_unavailable"};
+  }
+  if (input.route_geometry != nullptr && input.route_geometry->design_dbu_per_um != environment.dbu_per_um) {
+    return BuildResult{.failure_reason = "route_geometry_dbu_mismatch"};
+  }
+  FastStaContext context;
+  std::string failure_reason;
+  const auto clocks = CollectClocks(input);
+  for (const auto* clock : clocks) {
+    if (clock == nullptr) {
+      return BuildResult{.failure_reason = "clock_context_is_null"};
+    }
+    if (!AppendClock(*clock, clock == input.clock, context, failure_reason)) {
+      return BuildResult{.failure_reason = std::move(failure_reason)};
+    }
+  }
+  if (input.clock != nullptr) {
+    context.clock_name = input.clock->get_clock_name();
+    context.clock_net_name = input.clock->get_clock_net_name();
+    context.clock_period_ns = input.clock->get_clock_period_ns();
+    const auto source = context.node_id_by_name.find(Design::getPinFullName(input.clock->get_clock_source()));
+    if (source != context.node_id_by_name.end()) {
+      context.source_node_id = source->second;
+    }
+  }
 
   applyEnvironment(environment, context);
-
-  if (input.route_geometry != nullptr) {
-    FastStaClockTree::applyRouteGeometry(context, *input.route_geometry);
+  context.propagate_all_clocks = input.propagate_all_clocks;
+  if (input.constraints != nullptr) {
+    context.constraints = *input.constraints;
+    context.input_constraints = *input.constraints;
   }
 
-  std::string failure_reason;
-  if (!collectSinkPinCaps(environment, clock, context, failure_reason)
-      || !collectPropagationBufferModelsAndNetLimits(environment, clock, context, failure_reason)) {
+  for (FastStaNodeId id = 0U; id < context.nodes.size(); ++id) {
+    context.clock_overlay_node_ids.push_back(id);
+  }
+  for (FastStaNetId id = 0U; id < context.nets.size(); ++id) {
+    context.clock_overlay_net_ids.push_back(id);
+  }
+  context.clock_routes = CollectRoutes(input);
+  for (const auto& geometry : context.clock_routes) {
+    if (!applyClockRoutes(geometry, context, failure_reason)) {
+      return BuildResult{.failure_reason = std::move(failure_reason)};
+    }
+  }
+
+  if (input.timing_graph != nullptr && !AppendTimingGraph(environment, *input.timing_graph, context, failure_reason)) {
     return BuildResult{.failure_reason = std::move(failure_reason)};
   }
+
+  if (prepared_context != nullptr) {
+    if (prepared_context->wrapper != context.wrapper || prepared_context->liberty_revision != context.liberty_revision
+        || prepared_context->dbu_per_um != context.dbu_per_um) {
+      return {.failure_reason = "clock_topology_input_generation_mismatch"};
+    }
+    for (auto& net : context.nets) {
+      if (!net.parasitic.rc_nodes.empty()) {
+        continue;
+      }
+      const auto found = prepared_context->net_id_by_name.find(net.name);
+      if (found == prepared_context->net_id_by_name.end() || found->second >= prepared_context->input_net_count) {
+        continue;
+      }
+      // Unchanged traced-input nets retain the input graph's RC authority.
+      // Removed synthesized route geometry must not reuse an older route.
+      const bool had_routed_geometry = std::ranges::any_of(prepared_context->clock_routes, [&](const auto& route) -> bool {
+        return std::ranges::any_of(route.clock_nets,
+                                   [&](const auto& route_net) -> bool { return route_net.net_name == net.name && !route_net.routed_segments.empty(); });
+      });
+      const auto& previous = prepared_context->nets.at(found->second);
+      if (had_routed_geometry || previous.load_node_ids.size() != net.load_node_ids.size()) {
+        continue;
+      }
+      const auto same_pin = [&](FastStaNodeId current_id, FastStaNodeId previous_id) -> bool {
+        const auto& current = context.nodes.at(current_id);
+        const auto& original = prepared_context->nodes.at(previous_id);
+        return current.name == original.name && current.location.x_dbu == original.location.x_dbu && current.location.y_dbu == original.location.y_dbu;
+      };
+      bool matching = same_pin(net.driver_node_id, previous.driver_node_id);
+      for (std::size_t index = 0U; matching && index < net.load_node_ids.size(); ++index) {
+        matching = same_pin(net.load_node_ids.at(index), previous.load_node_ids.at(index));
+      }
+      if (!matching) {
+        continue;
+      }
+      net.parasitic = previous.parasitic;
+      const auto remap = [&](FastStaNodeId id) -> FastStaNodeId {
+        return id < prepared_context->nodes.size() ? context.node_id_by_name.at(prepared_context->nodes.at(id).name) : kInvalidFastStaNodeId;
+      };
+      for (auto& rc : net.parasitic.rc_nodes) {
+        rc.terminal_node_id = remap(rc.terminal_node_id);
+        for (auto& id : rc.terminal_node_ids) {
+          id = remap(id);
+        }
+      }
+    }
+  }
+
+  if (input.committed_design != nullptr) {
+    for (std::size_t net_id = 0U; net_id < context.nets.size(); ++net_id) {
+      const auto& net = context.nets.at(net_id);
+      if (net.domain == FastStaNetDomain::kClock && net.parasitic.rc_nodes.empty() && !FastStaParasitics::buildNetParasiticFromSegments(context, net_id, {})) {
+        return BuildResult{.failure_reason = "clock_route_rc_unavailable:" + net.name};
+      }
+    }
+  }
+  for (const auto* clock : clocks) {
+    if (!collectSinkPinCaps(environment, *clock, context, failure_reason)) {
+      return BuildResult{.failure_reason = std::move(failure_reason)};
+    }
+  }
+  if (!clocks.empty() && !collectPropagationBufferModelsAndNetLimits(environment, clocks, context, failure_reason)) {
+    return BuildResult{.failure_reason = std::move(failure_reason)};
+  }
+  context.input_node_count = context.nodes.size();
+  context.input_net_count = context.nets.size();
   return BuildResult{.context = std::move(context), .failure_reason = {}};
 }
 
-auto FastStaBuilder::injectNetRouteTree(FastStaClockContext& context, const Net& net, const ClockSteinerTree<int>& route_tree) -> bool
+auto FastStaBuilder::validateTimingGraphJoins(const WrapperTimingGraph& graph, const FastStaContext& context) -> std::optional<std::string>
+{
+  std::unordered_set<std::string> logic_pin_names;
+  logic_pin_names.reserve(graph.nodes.size());
+  for (const auto& node : graph.nodes) {
+    logic_pin_names.insert(node.pin_name);
+  }
+  for (const auto& launch : graph.launches) {
+    if (!logic_pin_names.contains(launch.output_pin)) {
+      return "timing_graph_launch_output_node_unindexed:" + launch.output_pin;
+    }
+    if (!context.node_id_by_name.contains(launch.clock_pin)) {
+      return "timing_graph_launch_clock_node_unindexed:" + launch.clock_pin;
+    }
+  }
+  for (const auto& check : graph.checks) {
+    if (!logic_pin_names.contains(check.data_pin)) {
+      return "timing_graph_check_data_node_unindexed:" + check.data_pin;
+    }
+    if (!context.node_id_by_name.contains(check.clock_pin)) {
+      return "timing_graph_check_clock_node_unindexed:" + check.clock_pin;
+    }
+  }
+  return std::nullopt;
+}
+
+auto FastStaBuilder::injectNetRouteTree(FastStaContext& context, const Net& net, const ClockSteinerTree<int>& route_tree) -> bool
 {
   const auto net_iter = context.net_id_by_name.find(net.get_name());
   if (net_iter == context.net_id_by_name.end() || net_iter->second >= context.nets.size()) {

@@ -4,6 +4,7 @@ icts_add_test_executable(
   icts_test_module_characterization
   SOURCES
     ${ICTS_TEST}/module/characterization/BufferingPatternTest.cc
+    ${ICTS_TEST}/module/characterization/CharPatternEnumeratorTest.cc
     ${ICTS_TEST}/module/characterization/SegmentJoinTest.cc
     ${ICTS_TEST}/module/characterization/HTreeJoinTest.cc
     ${ICTS_TEST}/module/characterization/PrunerTest.cc

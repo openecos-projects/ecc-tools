@@ -437,11 +437,16 @@ auto Synthesis::run() -> SynthesisTraceSummary
   summary.failed_clocks = failed_clocks;
   summary.success = successful_clocks > 0U && failed_clocks == 0U;
   if (total_clocks == 0U) {
+    // An explicitly empty SDC is a valid no-clock session, not a failure.
     summary.outcome = SynthesisOutcome::kNoOp;
     summary.no_op_reason = "no_clocks_discovered";
-  } else if (successful_clocks == 0U && skipped_clocks > 0U && failed_clocks == 0U) {
-    summary.outcome = SynthesisOutcome::kNoOp;
-    summary.no_op_reason = "all_clocks_skipped";
+  } else if (successful_clocks == 0U) {
+    // Clocks were declared, so CTS was asked for a clock tree and built none: every
+    // clock was either skipped for want of a source or of valid sinks, or it failed.
+    // Reporting that as a no-op let the flow commit the untouched design and left
+    // downstream tools treating an unmodified netlist as a CTS result.
+    summary.outcome = SynthesisOutcome::kFailed;
+    summary.failure_reason = skipped_clocks > 0U && failed_clocks == 0U ? "no_clock_tree_built:all_clocks_skipped" : "no_clock_tree_built";
   } else {
     summary.outcome = summary.success ? SynthesisOutcome::kFinished : SynthesisOutcome::kFailed;
   }

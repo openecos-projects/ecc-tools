@@ -41,6 +41,6 @@ auto CollectRequiredLengthIndices(const std::vector<HTree::LevelPlan>& levels) -
 auto ResolveRequiredSegmentFrontiers(std::vector<unsigned> required_length_indices, const BoundaryConstraints& boundary_constraints)
     -> RequiredSegmentFrontiers;
 auto SynthesizeSegmentFrontiers(const std::vector<SegmentChar>& base_segment_chars, BufferPatternLibrary& pattern_library,
-                                const RequiredSegmentFrontiers& required_frontiers) -> SegmentFrontierCatalog;
+                                const RequiredSegmentFrontiers& required_frontiers, bool use_canonical_boundary_primitive_basis) -> SegmentFrontierCatalog;
 
 }  // namespace icts::htree

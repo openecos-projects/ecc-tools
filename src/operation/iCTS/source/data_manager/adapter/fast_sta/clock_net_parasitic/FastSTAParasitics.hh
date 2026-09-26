@@ -18,7 +18,7 @@
  * @file FastSTAParasitics.hh
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-05-18
- * @brief OpenSTA-style RC reduction data path for CTS fast STA.
+ * @brief RC network reduction for a CTS timing context.
  */
 
 #pragma once
@@ -30,7 +30,7 @@
 namespace icts {
 
 class Net;
-struct FastStaClockContext;
+struct FastStaContext;
 template <typename T>
 class ClockSteinerTree;
 
@@ -38,13 +38,11 @@ class FastStaParasitics
 {
  public:
   FastStaParasitics() = delete;
-
-  static auto updateNetLoads(FastStaClockContext& context) -> void;
-  static auto updateNetLoads(FastStaClockContext& context, const std::vector<FastStaNetId>& net_ids) -> void;
-  static auto buildNetParasiticFromSegments(FastStaClockContext& context, FastStaNetId net_id, const std::vector<FastStaRcSegment>& segments) -> bool;
-  static auto buildNetParasiticFromRouteTree(FastStaClockContext& context, FastStaNetId net_id, const Net& net, const ClockSteinerTree<int>& route_tree)
-      -> bool;
-  static auto reduceToPiElmore(FastStaClockContext& context, FastStaNetId net_id) -> bool;
+  static auto updateNetLoads(FastStaContext& context) -> void;
+  static auto updateNetLoads(FastStaContext& context, const std::vector<FastStaNetId>& net_ids) -> void;
+  static auto buildNetParasiticFromSegments(FastStaContext& context, FastStaNetId net_id, const std::vector<FastStaRcSegment>& segments) -> bool;
+  static auto buildNetParasiticFromRouteTree(FastStaContext& context, FastStaNetId net_id, const Net& net, const ClockSteinerTree<int>& route_tree) -> bool;
+  static auto reduceToPiElmore(FastStaContext& context, FastStaNetId net_id) -> bool;
 };
 
 }  // namespace icts
