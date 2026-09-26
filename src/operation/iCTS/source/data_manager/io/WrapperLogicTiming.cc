@@ -442,6 +442,9 @@ auto Wrapper::collectTimingGraph() const -> WrapperTimingGraph
     if (net == nullptr || (!net->is_clock() && !net->is_signal() && net->get_connect_type() != idb::IdbConnectType::kNone)) {
       continue;
     }
+    if (net->get_pin_number() == 0) {
+      continue;
+    }
     auto* driver = net->get_driving_pin();
     const auto driver_name = canonicalPinName(driver);
     if (driver == nullptr || driver_name.empty()) {
