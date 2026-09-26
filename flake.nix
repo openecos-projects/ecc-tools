@@ -9,7 +9,8 @@
       stdenv,
       zlib,
       tcl,
-      boost,
+      boost191,
+      fetchurl,
       eigen,
       libunwind,
       glog,
@@ -25,7 +26,24 @@
       bison,
       patchelf,
       pkg-config,
-    }: python3Packages.buildPythonPackage rec {
+    }: let
+      # nixpkgs has not packaged Boost 1.92 yet; override 1.91 with the
+      # 1.92.0 source tarball.  CMake requires exactly 1.92.0.
+      boost192 = boost191.overrideAttrs (oldAttrs: {
+        version = "1.92.0";
+        src = fetchurl {
+          url = "https://archives.boost.io/release/1.92.0/source/boost_1_92_0.tar.bz2";
+          sha256 = "5c1d40cb8e19adbf740a4ec2da35b3e58f3f5804b1dce44deb53df72193cbc6c";
+        };
+        # Drop the context backport patches — they target < 1.92 / < 1.93
+        # and conflict with fixes already present in the 1.92 sources.
+        patches = builtins.filter
+          (p:
+            builtins.isNull (builtins.match ".*0921b9fd.*" (toString p))
+            && builtins.isNull (builtins.match ".*58832123.*" (toString p)))
+          oldAttrs.patches or [ ];
+      });
+    in python3Packages.buildPythonPackage rec {
       name = "ecc-tools-bin";
       format = "pyproject";
 
@@ -52,7 +70,7 @@
         stdenv.cc.cc.lib
         zlib
         tcl
-        boost
+        boost192
         eigen
         libunwind
         glog
