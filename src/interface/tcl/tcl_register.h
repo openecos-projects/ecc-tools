@@ -36,6 +36,7 @@
 #include "tcl_register_irt.h"
 #include "tcl_register_ilvs.h"
 #include "tcl_register_ista.h"
+#include "tcl_register_ipw.h"
 #include "tcl_register_ifp.h"
 #include "tcl_register_iemir.h"
 #include "tcl_register_izh.h"
@@ -67,6 +68,9 @@ int registerCommands()
 
   /// STA
   registerCmdSTA();
+
+  /// PW
+  registerCmdPW();
 
   /// FP
   registerCmdFP();

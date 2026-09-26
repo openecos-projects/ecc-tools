@@ -363,6 +363,29 @@ std::set<std::string> findClocks(Database& database, const std::vector<std::stri
   return clocks;
 }
 
+std::set<std::string> findClocksFromObjects(Database& database, const std::vector<std::string>& objects)
+{
+  std::set<std::string> result;
+  for (const std::string& object : objects) {
+    const std::vector<std::string> direct_clocks = findObjects(database, {object}, QueryObjectType::kClock);
+    if (!direct_clocks.empty()) {
+      result.insert(direct_clocks.begin(), direct_clocks.end());
+      continue;
+    }
+    for (const std::string& source : findClockSources(database, {object})) {
+      for (auto& [clock_name, clock] : database.get_timing_constraint().get_clock_map()) {
+        if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), source) != clock.get_source_list().end()) {
+          result.insert(clock_name);
+        }
+      }
+    }
+  }
+  if (result.empty()) {
+    throw std::invalid_argument("objects resolved to an empty clock collection");
+  }
+  return result;
+}
+
 std::set<std::string> findExceptionObjects(Database& database, const std::vector<std::string>& objects)
 {
   std::set<std::string> result;

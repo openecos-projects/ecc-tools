@@ -36,6 +36,7 @@ add_subdirectory(py_ilvs)
 add_subdirectory(py_irt)
 add_subdirectory(py_ircx)
 add_subdirectory(py_ista)
+add_subdirectory(py_ipw)
 add_subdirectory(py_izh)
 add_subdirectory(py_report)
 add_subdirectory(py_feature)
@@ -61,6 +62,7 @@ target_link_libraries(ecc_py
         py_irt
         py_ircx
         py_ista
+        py_ipw
         py_izh
         py_report
         py_feature

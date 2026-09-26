@@ -41,6 +41,8 @@ class TimingPath
   double get_net_delay() const { return _net_delay; }
   double get_launch_time() const { return _launch_time; }
   double get_capture_time() const { return _capture_time; }
+  double get_launch_clock_source_latency() const { return _launch_clock_source_latency; }
+  double get_capture_clock_source_latency() const { return _capture_clock_source_latency; }
   double get_launch_clock_network_delay() const { return _launch_clock_network_delay; }
   double get_capture_clock_network_delay() const { return _capture_clock_network_delay; }
   double get_clock_reconvergence_pessimism() const { return _clock_reconvergence_pessimism; }
@@ -68,6 +70,8 @@ class TimingPath
   void set_net_delay(const double net_delay) { _net_delay = net_delay; }
   void set_launch_time(const double launch_time) { _launch_time = launch_time; }
   void set_capture_time(const double capture_time) { _capture_time = capture_time; }
+  void set_launch_clock_source_latency(double latency) { _launch_clock_source_latency = latency; }
+  void set_capture_clock_source_latency(double latency) { _capture_clock_source_latency = latency; }
   void set_launch_clock_network_delay(const double launch_clock_network_delay) { _launch_clock_network_delay = launch_clock_network_delay; }
   void set_capture_clock_network_delay(const double capture_clock_network_delay) { _capture_clock_network_delay = capture_clock_network_delay; }
   void set_clock_reconvergence_pessimism(const double clock_reconvergence_pessimism) { _clock_reconvergence_pessimism = clock_reconvergence_pessimism; }
@@ -97,6 +101,8 @@ class TimingPath
   double _net_delay = 0.0;
   double _launch_time = 0.0;
   double _capture_time = 0.0;
+  double _launch_clock_source_latency = 0.0;
+  double _capture_clock_source_latency = 0.0;
   double _launch_clock_network_delay = 0.0;
   double _capture_clock_network_delay = 0.0;
   double _clock_reconvergence_pessimism = 0.0;

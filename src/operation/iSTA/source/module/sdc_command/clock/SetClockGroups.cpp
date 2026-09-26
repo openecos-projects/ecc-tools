@@ -30,9 +30,6 @@ TimingClockGroupType getClockGroupType(SdcTclCmd& command)
   if (command.getOptionOrArg("-physically_exclusive")->is_set_val()) {
     return TimingClockGroupType::kPhysicallyExclusive;
   }
-  if (command.getOptionOrArg("-exclusive")->is_set_val()) {
-    return TimingClockGroupType::kExclusive;
-  }
   return TimingClockGroupType::kAsynchronous;
 }
 
@@ -43,7 +40,7 @@ TclSetClockGroups::TclSetClockGroups(const char* cmd_name, ClientData client_dat
   addOption(new ecc::TclStringListListOption("-group", 0));
   addOption(new ecc::TclStringOption("-name", 0));
   addOption(new ecc::TclStringOption("-comment", 0));
-  for (const char* option : {"-asynchronous", "-logically_exclusive", "-physically_exclusive", "-exclusive", "-allow_paths"}) {
+  for (const char* option : {"-asynchronous", "-logically_exclusive", "-physically_exclusive", "-allow_paths"}) {
     addOption(new ecc::TclSwitchOption(option));
   }
 }
@@ -51,7 +48,7 @@ TclSetClockGroups::TclSetClockGroups(const char* cmd_name, ClientData client_dat
 unsigned TclSetClockGroups::exec()
 {
   int mode_count = 0;
-  for (const char* option : {"-asynchronous", "-logically_exclusive", "-physically_exclusive", "-exclusive"}) {
+  for (const char* option : {"-asynchronous", "-logically_exclusive", "-physically_exclusive"}) {
     mode_count += getOptionOrArg(option)->is_set_val();
   }
   if (mode_count != 1 || !getOptionOrArg("-group")->is_set_val()) {
