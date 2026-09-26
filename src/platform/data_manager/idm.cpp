@@ -98,6 +98,7 @@ void DataManager::reset()
 
 void DataManager::resetData()
 {
+  std::lock_guard<std::mutex> liberty_load_lock(_liberty_load_mutex);
   if(_idb_verilog_service != nullptr){
     delete _idb_verilog_service;
     _idb_verilog_service = nullptr;
@@ -110,9 +111,18 @@ void DataManager::resetData()
   _idb_lef_service = nullptr;
   _design = nullptr;
   _layout = nullptr;
-  _lib_readers.clear();
+  {
+    std::lock_guard<std::mutex> liberty_generation_lock(_liberty_generation_mutex);
+    _liberty_generation.reset();
+  }
   _spef_reader.reset();
   _vcd_reader.reset();
+}
+
+std::shared_ptr<const RawLibertyGeneration> DataManager::get_liberty_generation() const
+{
+  std::lock_guard<std::mutex> lock(_liberty_generation_mutex);
+  return _liberty_generation;
 }
 
 bool DataManager::readLef(string config_path)

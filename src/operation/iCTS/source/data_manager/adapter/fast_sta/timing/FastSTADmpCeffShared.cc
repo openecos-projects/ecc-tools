@@ -26,11 +26,9 @@
 #include <cstddef>
 #include <optional>
 #include <utility>
-#include <vector>
 
 #include "FastSTADmpCeffSolver.hh"
 #include "FastSTALibertyModel.hh"
-#include "clock_net_parasitic/FastSTAClockNetParasitic.hh"
 
 namespace icts::fast_sta_dmp {
 namespace {
@@ -38,31 +36,6 @@ namespace {
 auto thresholdInRange(double value, double default_value) -> double
 {
   return value > 0.0 && value < 1.0 ? value : default_value;
-}
-
-auto selectTable(const std::vector<FastStaLibertyTable>& tables, FastStaTransition transition) -> const FastStaLibertyTable*
-{
-  for (const auto& table : tables) {
-    if (table.transition == transition && table.valid()) {
-      return &table;
-    }
-  }
-  for (const auto& table : tables) {
-    if (table.valid()) {
-      return &table;
-    }
-  }
-  return nullptr;
-}
-
-auto lookupTable(const std::vector<FastStaLibertyTable>& tables, FastStaTransition transition, double input_slew_ns, double output_load_pf)
-    -> std::optional<double>
-{
-  const auto* table = selectTable(tables, transition);
-  if (table == nullptr) {
-    return std::nullopt;
-  }
-  return table->lookup(input_slew_ns, output_load_pf);
 }
 
 }  // namespace
@@ -90,35 +63,6 @@ auto SlewUpperThreshold(const FastStaLibertyCell& cell, FastStaTransition transi
 auto SlewDerate(const FastStaLibertyCell& cell) -> double
 {
   return cell.slew_derate_from_library > 0.0 ? cell.slew_derate_from_library : 1.0;
-}
-
-auto GateDelaySlew(const FastStaLibertyCell& cell, FastStaTransition transition, double input_slew_ns, double ceff_pf)
-    -> std::optional<std::pair<double, double>>
-{
-  const auto delay_ns = lookupTable(cell.timing_arc.delay_tables, transition, input_slew_ns, ceff_pf);
-  const auto slew_ns = lookupTable(cell.timing_arc.slew_tables, transition, input_slew_ns, ceff_pf);
-  if (!delay_ns.has_value() || !slew_ns.has_value()) {
-    return std::nullopt;
-  }
-  return std::pair<double, double>{*delay_ns, *slew_ns};
-}
-
-auto GateModelRdNsPerPf(const FastStaLibertyCell& cell, const FastStaPiModel& pi, FastStaTransition transition, double input_slew_ns) -> double
-{
-  const auto cap1_pf = std::max(0.0, pi.near_cap_pf + pi.far_cap_pf);
-  const auto cap2_pf = cap1_pf + kCapDeltaPf;
-  const auto gate_values1 = GateDelaySlew(cell, transition, input_slew_ns, cap1_pf);
-  const auto gate_values2 = GateDelaySlew(cell, transition, input_slew_ns, cap2_pf);
-  if (!gate_values1.has_value() || !gate_values2.has_value()) {
-    return 0.0;
-  }
-  const double delay1_ns = gate_values1->first;
-  const double delay2_ns = gate_values2->first;
-  const auto vth = OutputThreshold(cell, transition);
-  if (!std::isfinite(delay1_ns) || !std::isfinite(delay2_ns) || vth <= 0.0) {
-    return 0.0;
-  }
-  return -std::log(vth) * std::abs(delay1_ns - delay2_ns) / kCapDeltaPf;
 }
 
 auto DmpExp(double x) -> double

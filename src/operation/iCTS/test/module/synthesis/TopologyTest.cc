@@ -397,7 +397,12 @@ TEST(TopologyTest, EnableSinkClusteringDefaultsTrueAndParsesConfiguredValues)
   EXPECT_DOUBLE_EQ(CTSDM.getConfig().get_htree_topology_tolerance(), 0.25);
   EXPECT_DOUBLE_EQ(CTSDM.getConfig().get_root_input_slew(), 0.123);
   EXPECT_DOUBLE_EQ(CTSDM.getConfig().get_wirelength_unit_um(), 12.5);
-  EXPECT_EQ(CTSDM.getConfig().get_wirelength_iterations(), 7U);
+  // The iteration count is the characterizer's business, not the design's, so the key
+  // is rejected and the default stands.
+  EXPECT_EQ(CTSDM.getConfig().get_wirelength_iterations(), 3U);
+  const auto& warnings = CTSDM.getConfig().get_warnings();
+  EXPECT_NE(std::ranges::find_if(warnings, [](const auto& warning) -> bool { return warning.find("wirelength_iterations") != std::string::npos; }),
+            warnings.end());
 
   std::error_code error_code;
   std::filesystem::remove(json_path, error_code);

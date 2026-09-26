@@ -112,7 +112,7 @@ class Config
     _max_buf_tran = max_buf_tran;
     _has_max_buf_tran = true;
   }
-  auto set_root_input_slew(double root_input_slew) -> void { _root_input_slew = std::max(0.0, root_input_slew); }
+  auto set_root_input_slew(double root_input_slew) -> void { _root_input_slew = root_input_slew; }
   auto set_max_sink_tran(double max_sink_tran) -> void { _max_sink_tran = max_sink_tran; }
   auto set_max_cap(double max_cap) -> void
   {
@@ -143,6 +143,11 @@ class Config
   auto parse(const std::string& json_file) -> bool;
 
  private:
+  // Check the externally configurable values against their feasible ranges, warn and
+  // fall back for any that is outside. A configured value must reach here unchanged,
+  // so setters store what they are given.
+  auto SanitizeExposedValues() -> void;
+
   // algorithm
   double _skew_bound = 0.0;
   double _max_buf_tran = 0.0;

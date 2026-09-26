@@ -41,6 +41,57 @@
 #include <vector>
 
 namespace idb {
+
+LibertyReader::LibertyReader(const char* file_name) : _file_name(file_name == nullptr ? "" : file_name)
+{
+}
+
+LibertyReader::~LibertyReader()
+{
+  if (_lib_file != nullptr) {
+    liberty_free_lib_group(_lib_file);
+    _lib_file = nullptr;
+  }
+}
+
+LibertyReader::LibertyReader(LibertyReader&& other) noexcept
+    : _lib_file(std::exchange(other._lib_file, nullptr)),
+      _build_cells(std::move(other._build_cells)),
+      _file_name(std::move(other._file_name)),
+      _library_builder(std::move(other._library_builder))
+{
+}
+
+LibertyReader& LibertyReader::operator=(LibertyReader&& rhs) noexcept
+{
+  if (this == &rhs) {
+    return *this;
+  }
+  if (_lib_file != nullptr) {
+    liberty_free_lib_group(_lib_file);
+  }
+  _lib_file = std::exchange(rhs._lib_file, nullptr);
+  _build_cells = std::move(rhs._build_cells);
+  _file_name = std::move(rhs._file_name);
+  _library_builder = std::move(rhs._library_builder);
+  return *this;
+}
+
+void LibertyReader::set_library_builder(LibBuilder* library_builder)
+{
+  _library_builder.reset(library_builder);
+}
+
+std::unique_ptr<LibLibrary> LibertyReader::takeLib()
+{
+  if (_library_builder == nullptr) {
+    return nullptr;
+  }
+  auto library = _library_builder->takeLib();
+  _library_builder.reset();
+  return library;
+}
+
 namespace {
 
 double getRawFloatValue(const liberty_ast::LibValue* value) {
@@ -291,6 +342,8 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
       current_lib->set_time_unit(TimeUnit::kFS);
     } else if (isEqual(time_unit, "1ps")) {
       current_lib->set_time_unit(TimeUnit::kPS);
+    } else if (isEqual(time_unit, "1ns")) {
+      current_lib->set_time_unit(TimeUnit::kNS);
     }
     liberty_free_string_value(attri_value_handle);
   } else if (is_attri("current_unit")) {
@@ -364,6 +417,15 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     const char* clock_gate_enable_pin = attri_value_handle->value;
     bool clock_gate_enable_pin1 = convert_string_to_bool(clock_gate_enable_pin);
     lib_port->set_clock_gate_enable_pin(clock_gate_enable_pin1);
+    liberty_free_string_value(attri_value_handle);
+  } else if (is_attri("clock_gate_test_pin") || is_attri("clock_gate_out_pin")) {
+    auto* attri_value_handle = liberty_convert_string_value(attri_value);
+    const bool value = convert_string_to_bool(attri_value_handle->value);
+    if (is_attri("clock_gate_test_pin")) {
+      lib_port->set_clock_gate_test_pin(value);
+    } else {
+      lib_port->set_clock_gate_out_pin(value);
+    }
     liberty_free_string_value(attri_value_handle);
   } else if (is_attri("default_fanout_load")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
@@ -717,9 +779,12 @@ unsigned LibertyReader::visitComplexAttri(
   }
 
   if (isEqual(attri_name, "capacitive_load_unit")) {
-    if ((static_cast<int>(liberty_convert_float_value(attri_0)->value) == 1)
+    if ((liberty_convert_float_value(attri_0)->value == 1.0)
         && (isEqual(liberty_convert_string_value(attri_1)->value, "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
+    } else if (liberty_convert_float_value(attri_0)->value == 1.0
+               && isEqual(liberty_convert_string_value(attri_1)->value, "ff")) {
+      the_lib->set_cap_unit(CapacitiveUnit::kFF);
     }
   } else if (isEqual(attri_name, "rise_capacitance_range")) {
     double min_rise_cap = liberty_convert_float_value(attri_0)->value;
@@ -924,9 +989,11 @@ unsigned LibertyReader::visitComplexAttri(
   }
 
   if (isEqual(attri_name, "capacitive_load_unit")) {
-    if ((static_cast<int>(getRawFloatValue(attri_0)) == 1) &&
+    if ((getRawFloatValue(attri_0) == 1.0) &&
         (isEqual(getRawStringValue(attri_1), "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
+    } else if (getRawFloatValue(attri_0) == 1.0 && isEqual(getRawStringValue(attri_1), "ff")) {
+      the_lib->set_cap_unit(CapacitiveUnit::kFF);
     }
   } else if (isEqual(attri_name, "rise_capacitance_range")) {
     double min_rise_cap = getRawFloatValue(attri_0);
@@ -2059,6 +2126,23 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
     is_ok = visitCell(group);
   } else if (isEqual(group_name, "ff") || isEqual(group_name, "latch")) {
     is_ok = visitSequential(group);
+    // A latch group additionally carries the clock-gate data/enable
+    // expressions used by the CTS cell model; keep that extraction on the
+    // "latch" group only, alongside the generic sequential record above.
+    if (isEqual(group_name, "latch")) {
+      auto* cell = get_library_builder()->get_cell();
+      if (cell == nullptr) {
+        return 0;
+      }
+      const auto attribute = [&](const char* name) -> std::string {
+        auto* attr = group->findAttribute(name);
+        auto* value = attr == nullptr ? nullptr : attr->getFirstValue();
+        return value != nullptr && value->isString() ? value->asString() : "";
+      };
+      cell->addLatch(LibLatch{group->getFirstParamName() == nullptr ? "" : group->getFirstParamName(),
+                              group->getSecondParamName() == nullptr ? "" : group->getSecondParamName(),
+                              attribute("data_in"), attribute("enable")});
+    }
   } else if (isEqual(group_name, "leakage_power")) {
     is_ok = visitLeakagePower(group);
   } else if (isEqual(group_name, "bus") || isEqual(group_name, "bundle")) {
@@ -2089,23 +2173,36 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
 }
 
 unsigned LibertyReader::readLib() {
-  ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name);
+  if (!Lib::isSilentOutput()) {
+    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name);
+  }
 
-  auto* driver = new liberty_ast::LibertyDriver();
+  if (_lib_file != nullptr) {
+    liberty_free_lib_group(_lib_file);
+    _lib_file = nullptr;
+  }
+  _library_builder.reset();
+
+  auto driver = std::make_unique<liberty_ast::LibertyDriver>();
   if (!driver->parse(_file_name.c_str())) {
-    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
-    delete driver;
+    if (!Lib::isSilentOutput()) {
+      ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
+    }
     return 0;
   }
 
-  _lib_file = driver;
+  _lib_file = driver.release();
 
   if (!_lib_file) {
-    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
+    if (!Lib::isSilentOutput()) {
+      ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
+    }
     return 0;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " success.");
+  if (!Lib::isSilentOutput()) {
+    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " success.");
+  }
   return 1;
 }
 
@@ -2122,7 +2219,12 @@ unsigned LibertyReader::linkLib() {
     auto* driver = reinterpret_cast<liberty_ast::LibertyDriver*>(_lib_file);
     auto* lib_group = driver ? driver->getParseResult() : nullptr;
     if (!lib_group) {
-      ECCLOG.error(ecc::Loc::current(), "parsed liberty root group is null: ", _file_name);
+      liberty_free_lib_group(_lib_file);
+      _lib_file = nullptr;
+      if (!Lib::isSilentOutput()) {
+        ECCLOG.warn(ecc::Loc::current(), "parsed liberty root group is null: ", _file_name);
+      }
+      return 0;
     }
     unsigned result = visitGroup(lib_group);
     liberty_free_lib_group(_lib_file);
@@ -2134,7 +2236,9 @@ unsigned LibertyReader::linkLib() {
     return result;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " failed.");
+  if (!Lib::isSilentOutput()) {
+    ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " failed.");
+  }
   return 0;
 }
 

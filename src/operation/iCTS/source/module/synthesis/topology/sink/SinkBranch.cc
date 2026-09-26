@@ -101,7 +101,13 @@ auto BuildSinkHtreeInput(const Topology::Input& input, Net& root_net) -> HTree::
       }),
       .characterization_config = CharacterizationLibrary::buildRuntimeConfig(config),
       .additional_characterization_lengths_um = input.additional_characterization_lengths_um,
-      .fixed_topology_root_location = std::nullopt,
+      // The H-tree root is physically the clock source driving this net, so pin
+      // the topology root there. Leaving it unset makes TopologyGen fall back
+      // to the median of the sink locations, which then disagrees with the
+      // embedding-time anchor (the root driver pin) and fails the sink-load
+      // region materialization check. SourceTrunk already pins its root the
+      // same way; this keeps both domains on one definition.
+      .fixed_topology_root_location = FindRenderableLocation(root_net.get_driver()),
       .clock_period_ns = input.clock_period_ns,
       .clock_period_source = input.clock_period_source,
       .log_context = input.log_context,

@@ -133,9 +133,9 @@ class STAInterface
   void wrapNetPinNameList(Net& net, std::string& pin_name);
   void wrapNetToDatabase(Net& net);
   void wrapTimingLibrary();
-  void wrapTimingCellMap(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
-  void wrapTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
-  idb::LibLibrary* wrapReferenceLib(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
+  void wrapTimingCellMap(const std::vector<idb::LibLibrary*>& lib_list);
+  void wrapTimingLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list);
+  idb::LibLibrary* wrapReferenceLib(const std::vector<idb::LibLibrary*>& lib_list);
   TimingCapacitiveUnit wrapTimingCapacitiveUnit(idb::LibLibrary* lib_library);
   TimingResistanceUnit wrapTimingResistanceUnit(idb::LibLibrary* lib_library);
   TimingTimeUnit wrapTimingTimeUnit(idb::LibLibrary* lib_library);

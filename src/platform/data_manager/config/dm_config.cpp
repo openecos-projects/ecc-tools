@@ -71,6 +71,7 @@ bool DataConfig::initConfig(string config_path)
         lib_paths.emplace_back(lib_path);
       }
       set_lib_paths(lib_paths);
+      set_thread_number(ecc::getJsonData(json, {"INPUT", "thread_number"}, 4).get<int32_t>());
 
       set_sdc_path(ecc::getJsonData(json, {"INPUT", "sdc_path"}));
       set_spef_path(ecc::getJsonData(json, {"INPUT", "spef_path"}));

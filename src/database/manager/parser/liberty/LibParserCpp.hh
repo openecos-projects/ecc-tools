@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <string>
 #include <type_traits>
@@ -371,6 +372,7 @@ class LibVarDecl;
 namespace idb {
 
 class LibBuilder;
+class LibLibrary;
 namespace liberty_ast = ::liberty;
 
 /**
@@ -398,11 +400,13 @@ class LibertyExprBuilder
 class LibertyReader
 {
  public:
-  explicit LibertyReader(const char* file_name) : _file_name(file_name) {}
-  ~LibertyReader() = default;
+  explicit LibertyReader(const char* file_name);
+  ~LibertyReader();
 
-  LibertyReader(LibertyReader&& other) noexcept = default;
-  LibertyReader& operator=(LibertyReader&& rhs) noexcept = default;
+  LibertyReader(const LibertyReader& other) = delete;
+  LibertyReader& operator=(const LibertyReader& rhs) = delete;
+  LibertyReader(LibertyReader&& other) noexcept;
+  LibertyReader& operator=(LibertyReader&& rhs) noexcept;
 
   void set_build_cells(std::set<std::string>& build_cells) {
     _build_cells = build_cells;
@@ -443,8 +447,9 @@ class LibertyReader
   unsigned readLib();
   unsigned linkLib();
 
-  void set_library_builder(LibBuilder* library_builder) { _library_builder = library_builder; }
-  auto* get_library_builder() { return _library_builder; }
+  void set_library_builder(LibBuilder* library_builder);
+  auto* get_library_builder() { return _library_builder.get(); }
+  std::unique_ptr<LibLibrary> takeLib();
 
  private:
   template <typename Group>
@@ -484,7 +489,7 @@ class LibertyReader
   std::set<std::string> _build_cells;  //!< The needed cells.
 
   std::string _file_name;        //!< The liberty file name.
-  LibBuilder* _library_builder;  //!< The liberty library builder.
+  std::unique_ptr<LibBuilder> _library_builder;  //!< The liberty library builder.
 };
 
 }  // namespace idb

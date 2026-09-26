@@ -127,9 +127,9 @@ class PWInterface
   void wrapNetPinNameList(Net& net, std::string& pin_name);
   void wrapNetToDatabase(const std::string& net_name, Net& net);
   void wrapTimingLibrary();
-  void wrapTimingCellMap(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
-  void wrapTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
-  idb::LibLibrary* wrapReferenceLib(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
+  void wrapTimingCellMap(const std::vector<idb::LibLibrary*>& lib_list);
+  void wrapTimingLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list);
+  idb::LibLibrary* wrapReferenceLib(const std::vector<idb::LibLibrary*>& lib_list);
   void wrapTimingCell(idb::LibCell* lib_cell);
   void wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib_port);
   void wrapTimingCellSequential(TimingCell& timing_cell, const idb::LibCell* lib_cell);
