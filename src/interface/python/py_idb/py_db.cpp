@@ -180,9 +180,9 @@ bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_
   return true;
 }
 
-bool saveGDSII(const std::string& gds_name, bool is_hardened /* = false */)
+bool saveGDSII(const std::string& gds_name, const std::string& layer_map_path, bool is_hardened /* = false */)
 {
-  return dmInst->saveGDSII(gds_name, is_hardened);
+  return dmInst->saveGDSII(gds_name, is_hardened, layer_map_path);
 }
 
 bool saveJson(const std::string& path)

@@ -45,7 +45,7 @@ void register_idb(py::module& m)
   m.def("tcl_save", saveMacroTCL, py::arg("tcl_name"));
   m.def("netlist_save", saveNetList, py::arg("netlist_path"), py::arg("exclude_cell_names") = std::set<std::string>{},
         py::arg("is_add_space_for_escape_name") = false);
-  m.def("gds_save", saveGDSII, py::arg("gds_name"), py::arg("is_harden") = false);
+  m.def("gds_save", saveGDSII, py::arg("gds_name"), py::arg("layer_map_path"), py::arg("is_harden") = false);
   m.def("json_save", saveJson, py::arg("path"));
   m.def("view_json_save", saveViewJson, py::arg("output_dir"), py::arg("json_format") = "pretty", py::arg("compress") = false);
   m.def("geometry_snapshot_save", saveGeometrySnapshot, py::arg("output_dir"), py::arg("include_drc") = false);
