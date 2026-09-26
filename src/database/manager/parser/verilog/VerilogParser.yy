@@ -52,7 +52,7 @@ int locLine(const idb::verilog::Parser::location_type& loc)
 }
 
 %token MODULE ENDMODULE INPUT OUTPUT INOUT WIRE SUPPLY0 SUPPLY1 TRI WAND WOR REG ASSIGN SIGNED
-%token <std::string> IDENT CONSTANT
+%token <std::string> IDENT CONSTANT STRING
 %token <int> INT
 
 %type <std::vector<idb::verilog::CppVerilogID*>> module_ports port_refs
@@ -261,6 +261,7 @@ balanced_items:
 balanced_item:
     IDENT
   | CONSTANT
+  | STRING
   | INT
   | MODULE
   | ENDMODULE
