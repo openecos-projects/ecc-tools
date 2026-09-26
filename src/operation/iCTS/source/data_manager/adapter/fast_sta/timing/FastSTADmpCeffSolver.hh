@@ -51,37 +51,37 @@ constexpr std::size_t kFindRootMaxIter = 20U;
 constexpr std::size_t kNewtonRaphsonMaxIter = 100U;
 constexpr std::size_t kMaxOrder = 3U;
 
-enum class DmpParam : std::size_t
+enum class DriverVariable : std::size_t
 {
-  kT0 = 0U,
-  kDt = 1U,
-  kCeff = 2U
+  kRampStart = 0U,
+  kRampDuration = 1U,
+  kEffectiveCapacitance = 2U
 };
 
-enum class DmpFunc : std::size_t
+enum class DriverEquation : std::size_t
 {
-  kY20 = 0U,
-  kY50 = 1U,
-  kIpi = 2U
+  kSlewLowerCrossing = 0U,
+  kDelayCrossing = 1U,
+  kAverageCurrentBalance = 2U
 };
 
-constexpr auto ToIndex(DmpParam param) -> std::size_t
+constexpr auto ToIndex(DriverVariable param) -> std::size_t
 {
   return static_cast<std::size_t>(param);
 }
 
-constexpr auto ToIndex(DmpFunc func) -> std::size_t
+constexpr auto ToIndex(DriverEquation func) -> std::size_t
 {
   return static_cast<std::size_t>(func);
 }
 
-struct GateValues
+struct GateThresholdTiming
 {
   bool valid = false;
   double delay_ns = 0.0;
   double table_slew_ns = 0.0;
   double measured_slew_ns = 0.0;
-  double t_vl_ns = 0.0;
+  double lower_threshold_time_ns = 0.0;
 };
 
 using RootFunc = std::function<void(double, double&, double&)>;
@@ -91,52 +91,54 @@ auto InputThreshold(const FastStaLibertyCell& cell, FastStaTransition transition
 auto SlewLowerThreshold(const FastStaLibertyCell& cell, FastStaTransition transition) -> double;
 auto SlewUpperThreshold(const FastStaLibertyCell& cell, FastStaTransition transition) -> double;
 auto SlewDerate(const FastStaLibertyCell& cell) -> double;
-auto GateDelaySlew(const FastStaLibertyCell& cell, FastStaTransition transition, double input_slew_ns, double ceff_pf)
-    -> std::optional<std::pair<double, double>>;
-auto GateModelRdNsPerPf(const FastStaLibertyCell& cell, const FastStaPiModel& pi, FastStaTransition transition, double input_slew_ns) -> double;
 auto DmpExp(double x) -> double;
 auto FindRoot(const RootFunc& func, double x1, double x2, double x_tolerance, std::size_t max_iter) -> std::optional<double>;
 
-class DmpSolver
+class DriverRampSolver
 {
  public:
-  DmpSolver(const FastStaLibertyCell& cell, const FastStaPiModel& pi, FastStaTransition transition, double input_slew_ns);
+  DriverRampSolver(const FastStaLibertyCell& cell, const FastStaLibertyArc& arc, const FastStaPiModel& pi, FastStaTransition transition, double input_slew_ns);
 
   auto solve() -> FastStaDmpDriverResult;
 
  private:
+  auto lookupGateTiming(double ceff_pf) const -> std::optional<std::pair<double, double>>;
+  auto estimateDriverResistanceNsPerPf(const FastStaPiModel& pi) const -> double;
   auto useCapAlgorithm() const -> bool;
   auto makeResult(FastStaDmpAlgorithm algorithm, double ceff_pf, double delay_ns, double slew_ns, bool waveform_valid, double waveform_delay_ns = 0.0) const
       -> FastStaDmpDriverResult;
   auto solveCap() -> FastStaDmpDriverResult;
   auto solvePi() -> FastStaDmpDriverResult;
-  auto solveZeroC2() -> FastStaDmpDriverResult;
+  auto solveZeroNearCap() -> FastStaDmpDriverResult;
   auto initPi() -> bool;
-  auto initZeroC2() -> bool;
-  auto findDriverParams(double ceff_seed_pf) -> bool;
-  auto gateDelays(double ceff_pf) const -> GateValues;
-  auto y(double t_ns, double t0_ns, double dt_ns, double cl_pf) const -> std::pair<double, double>;
-  auto y0(double t_ns, double cl_pf) const -> double;
-  auto y0dt(double t_ns, double cl_pf) const -> double;
-  auto y0dcl(double t_ns, double cl_pf) const -> double;
-  auto dy(double t_ns, double t0_ns, double dt_ns, double cl_pf) const -> std::tuple<double, double, double>;
-  auto evalDmpEquations() -> bool;
-  auto evalPiEquations() -> bool;
-  auto evalOnePoleEquations() -> bool;
-  auto ipiIceff(double dt_ns, double ceff_time_ns, double ceff_pf) const -> double;
-  auto newtonRaphson() -> bool;
-  auto luDecomp() -> bool;
-  auto luSolve() -> bool;
-  auto findDriverDelaySlew() -> std::optional<std::pair<double, double>>;
-  auto findVoCrossing(double threshold, double lower, double upper) -> std::optional<double>;
-  auto vo(double t_ns) const -> std::pair<double, double>;
-  auto v0(double t_ns) const -> std::pair<double, double>;
-  auto voCrossingUpperBound() const -> double;
+  auto initZeroNearCap() -> bool;
+  auto solveRampParameters(double ceff_seed_pf) -> bool;
+  auto evaluateGateThresholds(double ceff_pf) const -> GateThresholdTiming;
+  auto capacitiveRampResponse(double t_ns, double ramp_start_ns, double ramp_duration_ns, double load_cap_pf) const -> std::pair<double, double>;
+  auto capacitiveRampIntegral(double t_ns, double load_cap_pf) const -> double;
+  auto capacitiveRampSlope(double t_ns, double load_cap_pf) const -> double;
+  auto capacitiveRampCapDerivative(double t_ns, double load_cap_pf) const -> double;
+  auto capacitiveRampDerivatives(double t_ns, double ramp_start_ns, double ramp_duration_ns, double load_cap_pf) const -> std::tuple<double, double, double>;
+  auto evaluateResiduals() -> bool;
+  auto evaluatePiResiduals() -> bool;
+  auto evaluateSinglePoleResiduals() -> bool;
+  auto averageCurrentResidual(double ramp_duration_ns, double ceff_time_ns, double ceff_pf) const -> double;
+  auto solveNonlinearSystem() -> bool;
+  auto factorJacobian() -> bool;
+  auto solveNewtonStep() -> bool;
+  auto measureDriverThresholds() -> std::optional<std::pair<double, double>>;
+  auto findDriverThresholdTime(double threshold, double lower, double upper) -> std::optional<double>;
+  auto driverRampResponse(double t_ns) const -> std::pair<double, double>;
+  auto driverRampIntegral(double t_ns) const -> std::pair<double, double>;
+  auto driverThresholdUpperBound() const -> double;
 
   static auto allFinite(const std::array<double, kMaxOrder>& values) -> bool;
   static auto allFinite(const std::array<std::array<double, kMaxOrder>, kMaxOrder>& values) -> bool;
 
   const FastStaLibertyCell* _cell = nullptr;
+  const FastStaLibertyArc* _arc = nullptr;
+  const FastStaLibertyTable* _delay_table = nullptr;
+  const FastStaLibertyTable* _slew_table = nullptr;
   FastStaTransition _transition = FastStaTransition::kRise;
   double _input_slew_ns = 0.0;
   double _near_cap_pf = 0.0;
@@ -148,27 +150,27 @@ class DmpSolver
   double _slew_upper_threshold = 0.7;
   double _slew_derate = 1.0;
   FastStaDmpAlgorithm _algorithm = FastStaDmpAlgorithm::kCap;
-  std::size_t _nr_order = 1U;
-  double _t0_ns = 0.0;
-  double _dt_ns = 0.0;
-  double _ceff_pf = 0.0;
-  std::array<double, kMaxOrder> _x{};
-  std::array<double, kMaxOrder> _fvec{};
-  std::array<std::array<double, kMaxOrder>, kMaxOrder> _fjac{};
-  std::array<double, kMaxOrder> _scale{};
-  std::array<double, kMaxOrder> _p{};
-  std::array<std::size_t, kMaxOrder> _index{};
-  double _p1_per_ns = 0.0;
-  double _p2_per_ns = 0.0;
-  double _z1_per_ns = 0.0;
-  double _k0 = 0.0;
-  double _k1 = 0.0;
-  double _k2 = 0.0;
-  double _k3 = 0.0;
-  double _k4 = 0.0;
-  double _a_coeff = 0.0;
-  double _b_coeff = 0.0;
-  double _d_coeff = 0.0;
+  std::size_t _active_variable_count = 1U;
+  double _ramp_start_ns = 0.0;
+  double _ramp_duration_ns = 0.0;
+  double _effective_capacitance_pf = 0.0;
+  std::array<double, kMaxOrder> _variables{};
+  std::array<double, kMaxOrder> _residuals{};
+  std::array<std::array<double, kMaxOrder>, kMaxOrder> _jacobian{};
+  std::array<double, kMaxOrder> _row_scales{};
+  std::array<double, kMaxOrder> _newton_step{};
+  std::array<std::size_t, kMaxOrder> _pivot_rows{};
+  double _first_pole_per_ns = 0.0;
+  double _second_pole_per_ns = 0.0;
+  double _transfer_zero_per_ns = 0.0;
+  double _waveform_scale = 0.0;
+  double _waveform_offset = 0.0;
+  double _waveform_slope = 0.0;
+  double _first_pole_weight = 0.0;
+  double _second_pole_weight = 0.0;
+  double _steady_current_coefficient = 0.0;
+  double _first_pole_current_coefficient = 0.0;
+  double _second_pole_current_coefficient = 0.0;
 };
 
 }  // namespace icts::fast_sta_dmp

@@ -43,7 +43,8 @@ private:
     LibGroup* _result;
     std::stack<LibGroup*> _group_stack;
     std::vector<std::string> _strings;
-    
+
+    void clearParseState() noexcept;
     bool parseScanner(LibertyScanner& scanner);
     bool parseGroupContent(LibertyScanner& scanner, int first_token, YYSTYPE& first_yylval, YYLTYPE& first_yylloc);
     bool parseGroupBody(LibertyScanner& scanner);

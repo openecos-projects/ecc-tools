@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "BufferingPattern.hh"
+#include "Logger.hh"
 #include "PatternId.hh"
 #include "ValueLattice.hh"
 #include "characterization/builder/CharBuilderImpl.hh"
@@ -39,6 +40,9 @@ namespace icts::char_builder::detail {
 auto CharPatternStorage::storeBufferingPattern(unsigned length_idx, const TopologyDesc& topo, const std::vector<std::string>& buf_masters,
                                                double total_length_um) -> ::icts::PatternId
 {
+  if (topo.buffer_positions.size() != buf_masters.size()) {
+    CTSLOG.error(Loc::current(), "CharBuilder: topology buffer positions and masters must be one-to-one.");
+  }
   std::vector<double> buffer_positions_norm;
   if (!topo.buffer_positions.empty() && total_length_um > 0.0) {
     double cumulative_um = 0.0;
@@ -54,6 +58,9 @@ auto CharPatternStorage::storeBufferingPattern(unsigned length_idx, const Topolo
   }
   if (topo.has_terminal_branch_buffer && (buffer_positions_norm.empty() || std::abs(buffer_positions_norm.back() - 1.0) > ::icts::kValueLatticeEpsilon)) {
     buffer_positions_norm.push_back(1.0);
+  }
+  if (buffer_positions_norm.size() != buf_masters.size()) {
+    CTSLOG.error(Loc::current(), "CharBuilder: normalized buffer positions and masters must be one-to-one.");
   }
 
   const ::icts::PatternId pid = ::icts::PatternId::segment(_impl._next_pattern_id);

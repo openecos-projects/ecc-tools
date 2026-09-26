@@ -22,6 +22,8 @@
 #include <malloc.h>
 #endif
 
+#include <chrono>
+
 #include "ClockPropagator.hpp"
 #include "DataManager.hpp"
 #include "DelayCalculator.hpp"
@@ -453,39 +455,46 @@ void STAInterface::wrapNetToDatabase(Net& net)
 void STAInterface::wrapTimingLibrary()
 {
   Monitor monitor;
-  STALOG.info(Loc::current(), "Starting...");
-  bool old_silent_output = idb::Lib::isSilentOutput();
-  idb::Lib::setSilentOutput(true);
-  std::vector<std::unique_ptr<idb::LibLibrary>> lib_list;
-  for (idb::LibertyReader& liberty_reader : dmInst->get_lib_readers()) {
-    liberty_reader.linkLib();
-    idb::LibBuilder* lib_builder = liberty_reader.get_library_builder();
-    lib_list.push_back(lib_builder->takeLib());
-    delete lib_builder;
-    liberty_reader.set_library_builder(nullptr);
+  const auto conversion_start = std::chrono::steady_clock::now();
+  auto liberty_generation = dmInst->get_liberty_generation();
+  std::vector<idb::LibLibrary*> lib_list;
+  int32_t configured_workers = 0;
+  size_t active_workers = 0U;
+  if (liberty_generation != nullptr) {
+    configured_workers = liberty_generation->get_configured_workers();
+    active_workers = liberty_generation->get_active_workers();
+    lib_list.reserve(liberty_generation->get_libraries().size());
+    for (const auto& library : liberty_generation->get_libraries()) {
+      if (library != nullptr) {
+        lib_list.push_back(library.get());
+      }
+    }
   }
+  STALOG.info(Loc::current(), "Liberty conversion starting: libraries=", lib_list.size(), ", configured_workers=", configured_workers,
+              ", active_workers=", active_workers, ".");
   wrapTimingCellMap(lib_list);
   wrapTimingLibraryInfo(lib_list);
-  idb::Lib::setSilentOutput(old_silent_output);
-  STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+  const double conversion_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - conversion_start).count();
+  STALOG.info(Loc::current(), "Liberty conversion completed: libraries=", lib_list.size(), ", configured_workers=", configured_workers,
+              ", active_workers=", active_workers, ", conversion_seconds=", conversion_seconds, monitor.getStatsInfo());
 }
 
-void STAInterface::wrapTimingCellMap(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
+void STAInterface::wrapTimingCellMap(const std::vector<idb::LibLibrary*>& lib_list)
 {
   Database& database = STADM.getDatabase();
   database.get_timing_library().get_cell_map().clear();
-  for (std::unique_ptr<idb::LibLibrary>& lib : lib_list) {
+  for (idb::LibLibrary* lib : lib_list) {
     for (std::unique_ptr<idb::LibCell>& lib_cell : lib->get_cells()) {
       wrapTimingCell(lib_cell.get());
     }
   }
 }
 
-void STAInterface::wrapTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
+void STAInterface::wrapTimingLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list)
 {
   Database& database = STADM.getDatabase();
   std::vector<std::string> library_name_list;
-  for (std::unique_ptr<idb::LibLibrary>& lib : lib_list) {
+  for (idb::LibLibrary* lib : lib_list) {
     if (!STAUTIL.exist(library_name_list, lib->get_lib_name())) {
       library_name_list.push_back(lib->get_lib_name());
     }
@@ -524,20 +533,20 @@ void STAInterface::wrapTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLib
   timing_library.set_slew_derate_from_library(reference_lib->get_slew_derate_from_library());
 }
 
-idb::LibLibrary* STAInterface::wrapReferenceLib(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
+idb::LibLibrary* STAInterface::wrapReferenceLib(const std::vector<idb::LibLibrary*>& lib_list)
 {
   Database& database = STADM.getDatabase();
   std::map<idb::LibLibrary*, std::pair<int32_t, int32_t>> lib_usage_map;
   for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
     Instance& instance = instance_pair.second;
-    for (std::unique_ptr<idb::LibLibrary>& lib : lib_list) {
+    for (idb::LibLibrary* lib : lib_list) {
       idb::LibCell* lib_cell = lib->findCell(instance.get_cell_name().c_str());
       if (lib_cell == nullptr) {
         continue;
       }
-      lib_usage_map[lib.get()].first++;
+      lib_usage_map[lib].first++;
       if (!lib_cell->isMacroCell()) {
-        lib_usage_map[lib.get()].second++;
+        lib_usage_map[lib].second++;
       }
     }
   }
@@ -557,7 +566,7 @@ idb::LibLibrary* STAInterface::wrapReferenceLib(std::vector<std::unique_ptr<idb:
     return reference_lib;
   }
   if (!lib_list.empty()) {
-    return lib_list.front().get();
+    return lib_list.front();
   }
   return nullptr;
 }

@@ -247,6 +247,7 @@ CmdInitLib::CmdInitLib(const char* cmd_name) : TclCmd(cmd_name)
 {
   auto* path = new TclStringListOption(TCL_PATH, 1);
   addOption(path);
+  addOption(new TclIntOption("-thread_number", 0, 4));
 }
 
 unsigned CmdInitLib::check()
@@ -263,6 +264,10 @@ unsigned CmdInitLib::exec()
   }
 
   TclOption* path = getOptionOrArg(TCL_PATH);
+  TclOption* thread_number = getOptionOrArg("-thread_number");
+  if (thread_number != nullptr && thread_number->is_set_val()) {
+    dmInst->get_config().set_thread_number(thread_number->getIntVal());
+  }
   auto lib_path_list = path->getStringList();
   if (!lib_path_list.empty()) {
     dmInst->get_config().set_lib_paths(lib_path_list);

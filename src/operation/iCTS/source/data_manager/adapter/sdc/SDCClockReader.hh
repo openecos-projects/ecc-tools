@@ -29,6 +29,8 @@
 #include <tuple>
 #include <vector>
 
+#include "timing/TimingConstraints.hh"
+
 namespace idb {
 class IdbDesign;
 class LibCell;
@@ -37,56 +39,6 @@ class LibCell;
 namespace icts {
 
 using SdcLibertyCellLookup = std::function<idb::LibCell*(const std::string&)>;
-
-enum class SdcObjectKind
-{
-  kPort,
-  kPin,
-  kNet,
-  kClock,
-  kUnknown,
-};
-
-struct SdcObjectRef
-{
-  SdcObjectKind kind = SdcObjectKind::kUnknown;
-  std::string pattern;
-  bool from_collection_cmd = false;
-};
-
-struct SdcClockDecl
-{
-  enum class Kind
-  {
-    kPrimary,
-    kGenerated,
-  };
-
-  Kind kind = Kind::kPrimary;
-  std::string clock_name;
-  std::vector<SdcObjectRef> targets;
-  std::vector<SdcObjectRef> generated_sources;
-  std::string master_clock_name;
-  double period_ns = 0.0;
-  bool period_resolved = false;
-  int divide_by = 1;
-  int multiply_by = 1;
-  bool invert = false;
-  bool is_virtual = false;
-};
-
-struct SdcCaseAnalysis
-{
-  int value = 0;
-  std::vector<SdcObjectRef> objects;
-};
-
-struct SdcClockData
-{
-  std::vector<SdcClockDecl> clocks;
-  std::vector<SdcCaseAnalysis> case_analyses;
-  std::vector<std::string> diagnostics;
-};
 
 enum class ClockTracePropagationKind
 {
@@ -178,15 +130,19 @@ class SdcClockReader
 {
  public:
   SdcClockReader();
-  explicit SdcClockReader(std::string sdc_path);
+  explicit SdcClockReader(std::string sdc_path, SdcUnits units = {});
 
   auto readClockData() const -> SdcClockData;
   auto readDeclarationsOnly() const -> std::vector<std::tuple<std::string, std::string, double, bool>>;
+  // Derive only unresolved generated declarations after the caller identifies
+  // their unique master on its graph. All input/output quantities are already ns.
+  static auto resolveGeneratedClocks(SdcClockData& clock_data) -> void;
   static auto traceClockTargets(const SdcClockData& clock_data, idb::IdbDesign* idb_design, const SdcLibertyCellLookup& liberty_cell_lookup,
                                 std::size_t max_fanout) -> ClockTraceBuild;
 
  private:
   std::string _sdc_path;
+  SdcUnits _units;
 };
 
 }  // namespace icts

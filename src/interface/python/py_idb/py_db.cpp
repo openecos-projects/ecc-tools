@@ -136,9 +136,12 @@ bool initLvsVerilog(const std::string& verilog_path, const std::string& top_modu
   return dmInst->addVerilog(verilog_path, top_module);
 }
 
-bool initLib(const std::vector<std::string>& lib_paths)
+bool initLib(const std::vector<std::string>& lib_paths, std::optional<int32_t> thread_number)
 {
   dmInst->get_config().set_lib_paths(lib_paths);
+  if (thread_number.has_value()) {
+    dmInst->get_config().set_thread_number(*thread_number);
+  }
   return dmInst->readLib(lib_paths);
 }
 
