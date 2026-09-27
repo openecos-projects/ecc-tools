@@ -33,6 +33,9 @@ void register_imp(pybind11::module& m)
       .def_readwrite("num_nodes", &PyPlaceDB::num_nodes)
       .def_readwrite("num_terminals", &PyPlaceDB::num_terminals)
       .def_readwrite("num_terminal_NIs", &PyPlaceDB::num_terminal_NIs)
+      .def_readwrite("m2_pg_rail_blockage_rects", &PyPlaceDB::m2_pg_rail_blockage_rects)
+      .def_readwrite("m2_pg_rail_boxes", &PyPlaceDB::m2_pg_rail_boxes)
+      .def_readwrite("m2_pg_rail_density_boxes", &PyPlaceDB::m2_pg_rail_density_boxes)
       .def_readwrite("node_name2id_map", &PyPlaceDB::node_name2id_map)
       .def_readwrite("node_names", &PyPlaceDB::node_names)
       .def_readwrite("node_x", &PyPlaceDB::node_x)
@@ -50,6 +53,7 @@ void register_imp(pybind11::module& m)
       .def_readwrite("net_name2id_map", &PyPlaceDB::net_name2id_map)
       // .def_readwrite("pin_name2id_map", &PyPlaceDB::pin_name2id_map)
       .def_readwrite("net_names", &PyPlaceDB::net_names)
+      .def_readwrite("clock_net_names", &PyPlaceDB::clock_net_names)
       .def_readwrite("net2pin_map", &PyPlaceDB::net2pin_map)
       .def_readwrite("flat_net2pin_map", &PyPlaceDB::flat_net2pin_map)
       .def_readwrite("flat_net2pin_start_map", &PyPlaceDB::flat_net2pin_start_map)
@@ -73,6 +77,7 @@ void register_imp(pybind11::module& m)
       .def_readwrite("yh", &PyPlaceDB::yh)
       .def_readwrite("row_height", &PyPlaceDB::row_height)
       .def_readwrite("site_width", &PyPlaceDB::site_width)
+      .def_readwrite("total_fixed_node_area", &PyPlaceDB::total_fixed_node_area)
       .def_readwrite("total_space_area", &PyPlaceDB::total_space_area)
       .def_readwrite("num_movable_pins", &PyPlaceDB::num_movable_pins)
       .def_readwrite("num_routing_grids_x", &PyPlaceDB::num_routing_grids_x)
@@ -83,15 +88,21 @@ void register_imp(pybind11::module& m)
       .def_readwrite("routing_grid_yh", &PyPlaceDB::routing_grid_yh)
       .def_readwrite("unit_horizontal_capacities", &PyPlaceDB::unit_horizontal_capacities)
       .def_readwrite("unit_vertical_capacities", &PyPlaceDB::unit_vertical_capacities)
+      .def_readwrite("min_wire_widths", &PyPlaceDB::min_wire_widths)
+      .def_readwrite("min_wire_spacings", &PyPlaceDB::min_wire_spacings)
       .def_readwrite("initial_horizontal_demand_map", &PyPlaceDB::initial_horizontal_demand_map)
       .def_readwrite("initial_vertical_demand_map", &PyPlaceDB::initial_vertical_demand_map)
       .def_readwrite("dbu", &PyPlaceDB::dbu);
 
   m.def(
       "pydb",
-      [](idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta) {
-        return PyPlaceDB(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta);
+      [](idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
+         bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density) {
+        return PyPlaceDB(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage,
+                         include_m2_pg_rail_density);
       },
+      py::arg("db"), py::arg("numRoutingGridsX"), py::arg("numRoutingGridsY"), py::arg("with_routability"), py::arg("with_sta"),
+      py::arg("include_m2_pg_rail_blockage") = false, py::arg("include_m2_pg_rail_density") = true,
       "Convert PlaceDB to PyPlaceDB");
 }
 
