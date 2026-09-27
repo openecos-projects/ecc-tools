@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include <tcl_util.h>
 
+#include <stdexcept>
 #include <string>
 
 #include "json_parser.h"
@@ -52,6 +53,13 @@ bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std
   value = ecc::getJsonData(json, {"STA", "-timing_path_limit"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-timing_path_limit", std::stoi(value)));
+  }
+  value = ecc::getJsonData(json, {"STA", "-min_slew_degradation"});
+  if (!value.empty()) {
+    if (value != "0" && value != "1") {
+      throw std::invalid_argument("-min_slew_degradation must be 0 or 1");
+    }
+    config_map.insert(std::make_pair("-min_slew_degradation", int32_t(value == "1")));
   }
   value = ecc::getJsonData(json, {"STA", "-timing_corner"});
   if (!value.empty()) {
@@ -100,6 +108,13 @@ void initStaConfigMapByDict(std::map<std::string, std::string>& config_dict, std
   }
   if (config_dict.count("-timing_path_limit") > 0 && !config_dict["-timing_path_limit"].empty()) {
     config_map["-timing_path_limit"] = std::stoi(config_dict["-timing_path_limit"]);
+  }
+  if (config_dict.count("-min_slew_degradation") > 0 && !config_dict["-min_slew_degradation"].empty()) {
+    const std::string& value = config_dict.at("-min_slew_degradation");
+    if (value != "0" && value != "1") {
+      throw std::invalid_argument("-min_slew_degradation must be 0 or 1");
+    }
+    config_map["-min_slew_degradation"] = int32_t(value == "1");
   }
   if (config_dict.count("-timing_corner") > 0 && !config_dict["-timing_corner"].empty()) {
     config_map["-timing_corner"] = config_dict["-timing_corner"];

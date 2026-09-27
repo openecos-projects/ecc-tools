@@ -35,6 +35,7 @@ class ParasiticArnoldiModel
   bool get_is_valid() const { return _is_valid; }
   int32_t get_order() const { return _order; }
   double get_total_capacitance() const { return _total_capacitance; }
+  double get_pi_resistance() const { return _pi_resistance; }
   double get_sqrt_total_capacitance() const { return _sqrt_total_capacitance; }
   std::vector<std::string>& get_term_node_list() { return _term_node_list; }
   std::vector<std::string>& get_term_pin_list() { return _term_pin_list; }
@@ -45,6 +46,7 @@ class ParasiticArnoldiModel
   // setter
   void set_is_valid(const bool is_valid) { _is_valid = is_valid; }
   void set_order(const int32_t order) { _order = order; }
+  void set_pi_resistance(const double pi_resistance) { _pi_resistance = pi_resistance; }
   void set_total_capacitance(const double total_capacitance) { _total_capacitance = total_capacitance; }
   void set_sqrt_total_capacitance(const double sqrt_total_capacitance) { _sqrt_total_capacitance = sqrt_total_capacitance; }
   void set_term_node_list(const std::vector<std::string>& term_node_list) { _term_node_list = term_node_list; }
@@ -59,6 +61,7 @@ class ParasiticArnoldiModel
   bool _is_valid = false;
   int32_t _order = 0;
   double _total_capacitance = 0.0;
+  double _pi_resistance = 0.0;
   double _sqrt_total_capacitance = 0.0;
   std::vector<std::string> _term_node_list;
   std::vector<std::string> _term_pin_list;

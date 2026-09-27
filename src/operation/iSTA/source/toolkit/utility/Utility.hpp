@@ -34,15 +34,9 @@ class Utility
   static Utility& getInst();
   static void destroyInst();
   // function
-  static std::string getPathStateTag(Database& database, std::string_view start, std::string_view clock);
   static TransType getLaunchClockTransition(Database& database, std::string_view start);
   static double getLaunchClockEdge(Database& database, std::string_view start, std::string_view clock);
   static double getClockEdgeSeparation(double launch_period, double capture_period, double launch_edge, double capture_edge, AnalysisType type);
-  static bool isFalsePath(Database& database, std::string_view start, std::string_view launch_clock, std::string_view end, std::string_view capture_clock,
-                          AnalysisType type);
-  static bool matchesTimingObjects(Database& database, const std::set<std::string>& objects, std::string_view pin_name, std::string_view clock_name,
-                                   bool start);
-
 #if 1  // std数据结构工具函数
 
   template <typename T, typename... Args>

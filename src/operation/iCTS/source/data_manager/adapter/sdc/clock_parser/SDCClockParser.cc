@@ -35,9 +35,13 @@ namespace icts::sdc_reader {
 
 auto SdcSubsetEvaluator::readFile(const std::string& sdc_path) -> SdcClockData
 {
+  _data = {};
+  _variables.clear();
+  _time_unit_ns = _default_units.time_unit_ns;
+  _capacitance_unit_pf = _default_units.capacitance_unit_pf;
   std::ifstream stream(sdc_path);
   if (!stream.is_open()) {
-    _data.diagnostics.emplace_back("failed_to_open_sdc_file");
+    reportIssue(SdcConstraintStatusCode::kFileError, "read_sdc", "failed_to_open_sdc_file:" + sdc_path);
     return _data;
   }
   std::ostringstream buffer;
@@ -45,6 +49,7 @@ auto SdcSubsetEvaluator::readFile(const std::string& sdc_path) -> SdcClockData
   for (const auto& command : splitCommands(buffer.str())) {
     (void) evaluateCommand(command);
   }
+  resolveGeneratedClocks();
   return _data;
 }
 
@@ -61,7 +66,11 @@ auto SdcSubsetEvaluator::splitCommands(const std::string& text) -> std::vector<s
   for (std::size_t index = 0U; index < text.size(); ++index) {
     const char ch = text[index];
     if (escaped) {
-      command += ch;
+      if (ch == '\n') {
+        command.back() = ' ';
+      } else {
+        command += ch;
+      }
       escaped = false;
       command_word_start = false;
       continue;
@@ -94,11 +103,19 @@ auto SdcSubsetEvaluator::splitCommands(const std::string& text) -> std::vector<s
     if (!in_quote) {
       if (ch == '{') {
         ++brace_depth;
-      } else if (ch == '}' && brace_depth > 0) {
+      } else if (ch == '}') {
+        if (brace_depth == 0) {
+          reportIssue(SdcConstraintStatusCode::kMalformed, "read_sdc", "unmatched_closing_brace");
+          return {};
+        }
         --brace_depth;
-      } else if (ch == '[') {
+      } else if (ch == '[' && brace_depth == 0) {
         ++bracket_depth;
-      } else if (ch == ']' && bracket_depth > 0) {
+      } else if (ch == ']' && brace_depth == 0) {
+        if (bracket_depth == 0) {
+          reportIssue(SdcConstraintStatusCode::kMalformed, "read_sdc", "unmatched_closing_bracket");
+          return {};
+        }
         --bracket_depth;
       }
     }
@@ -115,6 +132,10 @@ auto SdcSubsetEvaluator::splitCommands(const std::string& text) -> std::vector<s
     command_word_start = command_word_start && std::isspace(static_cast<unsigned char>(ch)) != 0;
   }
 
+  if (brace_depth != 0 || bracket_depth != 0 || in_quote || escaped) {
+    reportIssue(SdcConstraintStatusCode::kMalformed, "read_sdc", "unterminated_command_delimiter");
+    return {};
+  }
   const auto clean_command = Trim(command);
   if (!clean_command.empty()) {
     commands.emplace_back(clean_command);
@@ -135,6 +156,10 @@ auto SdcSubsetEvaluator::parseWords(const std::string& command) -> std::vector<P
     }
     if (command[index] == '{') {
       auto [word_text, end_pos] = parseBalanced(command, index, '{', '}');
+      if (end_pos < command.size() && std::isspace(static_cast<unsigned char>(command[end_pos])) == 0) {
+        reportIssue(SdcConstraintStatusCode::kMalformed, "read_sdc", "characters_after_braced_word");
+        return {};
+      }
       words.emplace_back(ParsedWord{std::move(word_text), true});
       index = end_pos;
       continue;
@@ -151,6 +176,7 @@ auto SdcSubsetEvaluator::parseWords(const std::string& command) -> std::vector<P
           continue;
         }
         if (ch == '\\') {
+          word_text += ch;
           escaped = true;
           continue;
         }
@@ -176,6 +202,7 @@ auto SdcSubsetEvaluator::parseWords(const std::string& command) -> std::vector<P
         continue;
       }
       if (ch == '\\') {
+        word_text += ch;
         escaped = true;
         ++index;
         continue;
@@ -183,9 +210,9 @@ auto SdcSubsetEvaluator::parseWords(const std::string& command) -> std::vector<P
       if (bracket_depth == 0 && brace_depth == 0 && std::isspace(static_cast<unsigned char>(ch)) != 0) {
         break;
       }
-      if (ch == '[') {
+      if (ch == '[' && brace_depth == 0) {
         ++bracket_depth;
-      } else if (ch == ']' && bracket_depth > 0) {
+      } else if (ch == ']' && bracket_depth > 0 && brace_depth == 0) {
         --bracket_depth;
       } else if (ch == '{') {
         ++brace_depth;
@@ -208,11 +235,14 @@ auto SdcSubsetEvaluator::parseBalanced(const std::string& text, std::size_t open
   for (std::size_t index = open_pos; index < text.size(); ++index) {
     const char ch = text[index];
     if (escaped) {
-      result += ch;
+      result += ch == '\n' ? ' ' : ch;
       escaped = false;
       continue;
     }
     if (ch == '\\') {
+      if (index + 1U < text.size() && text[index + 1U] != '\n') {
+        result += ch;
+      }
       escaped = true;
       continue;
     }
@@ -272,49 +302,6 @@ auto SdcSubsetEvaluator::matchingBracketPos(const std::string& text, std::size_t
     }
   }
   return std::string::npos;
-}
-
-auto SdcSubsetEvaluator::findInnermostBracket(const std::string& text) -> std::pair<std::size_t, std::size_t>
-{
-  std::vector<std::size_t> open_positions;
-  int brace_depth = 0;
-  bool in_quote = false;
-  bool escaped = false;
-  for (std::size_t index = 0U; index < text.size(); ++index) {
-    const char ch = text[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (ch == '\\') {
-      escaped = true;
-      continue;
-    }
-    if (ch == '"' && brace_depth == 0) {
-      in_quote = !in_quote;
-      continue;
-    }
-    if (in_quote) {
-      continue;
-    }
-    if (ch == '{') {
-      ++brace_depth;
-      continue;
-    }
-    if (ch == '}' && brace_depth > 0) {
-      --brace_depth;
-      continue;
-    }
-    if (brace_depth != 0) {
-      continue;
-    }
-    if (ch == '[') {
-      open_positions.push_back(index);
-    } else if (ch == ']' && !open_positions.empty()) {
-      return {open_positions.back(), index};
-    }
-  }
-  return {std::string::npos, std::string::npos};
 }
 
 auto SdcSubsetEvaluator::parseVariableName(const std::string& text, std::size_t dollar_pos) -> std::pair<std::string, std::size_t>

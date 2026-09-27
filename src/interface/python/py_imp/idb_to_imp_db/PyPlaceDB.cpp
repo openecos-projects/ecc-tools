@@ -1,10 +1,11 @@
 #include "PyPlaceDB.h"
+#include "utility/logger/Logger.hpp"
 // #include "ContestDriver.h"
 #include <algorithm>
 #include <boost/polygon/polygon.hpp>
 #include <cassert>
-#include <cmath>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -54,8 +55,8 @@ bool isInvailidNet(IdbNet* net)
 void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
                     bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density)
 {
-  printf("PyPlaceDB::set start!!! Db address is %p\n", db);
-  printf("PyPlaceDB::set start!!! idb_design address is %p\n", db->get_idb_design());
+  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. Db address is ", db);
+  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. idb_design address is ", db->get_idb_design());
   num_routing_grids_x = numRoutingGridsX;
   num_routing_grids_y = numRoutingGridsY;
   _db = db;
@@ -165,7 +166,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     _node_is_hard_macro.push_back(is_hard_macro);
     _macro_writeback_candidate.push_back(is_macro_writeback_candidate);
     if (is_macro_writeback_candidate) {
-      // Unplaced macros carry kNone; write them back with a valid orientation.
+      // Unplaced macros carry kNone; default them to N/R0 so the placement
+      // written back (and the DEF saved from it) carries an orientation.
       auto orient = instance->get_orient();
       if (orient == IdbOrient::kNone) {
         orient = IdbOrient::kN_R0;
@@ -193,19 +195,20 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     const bool is_macro_writeback_candidate
         = is_hard_macro && (status == IdbPlacementStatus::kNone || status == IdbPlacementStatus::kUnplaced);
     if (is_hard_macro) {
-      printf("node %s is a block \n", node->get_name().c_str());
+      ECCLOG.info(ecc::Loc::current(), "Node ", node->get_name(), " is a block.");
     }
     if (!isPlacementFixed(node)) {
       Box box_tmp = buildInstanceBox(node);
       if (node->get_halo()) {
         // Jiaqi: add halo for fixed cells
-        // printf("PyPlaceDB detect fixed cell with halo: ");
+        // ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed cell with halo.");
         box_tmp.xl -= node->get_halo()->get_extend_lef();
         box_tmp.yl -= node->get_halo()->get_extend_bottom();
         box_tmp.xh += node->get_halo()->get_extend_right();
         box_tmp.yh += node->get_halo()->get_extend_top();
-        printf("Instance %s, Halo (%d, %d, %d, %d)\n", node->get_name().c_str(), node->get_halo()->get_extend_lef(),
-               node->get_halo()->get_extend_bottom(), node->get_halo()->get_extend_right(), node->get_halo()->get_extend_top());
+        ECCLOG.info(ecc::Loc::current(), "Instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(), ", ",
+                     node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
+                     node->get_halo()->get_extend_top(), ").");
       }
       addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, false, is_hard_macro,
               is_macro_writeback_candidate, node);
@@ -219,8 +222,9 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
         halo_box.yl -= node->get_halo()->get_extend_bottom();
         halo_box.xh += node->get_halo()->get_extend_right();
         halo_box.yh += node->get_halo()->get_extend_top();
-        printf("Macro Instance %s, Halo (%d, %d, %d, %d)\n", node->get_name().c_str(), node->get_halo()->get_extend_lef(),
-               node->get_halo()->get_extend_bottom(), node->get_halo()->get_extend_right(), node->get_halo()->get_extend_top());
+        ECCLOG.info(ecc::Loc::current(), "Macro instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(),
+                     ", ", node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
+                     node->get_halo()->get_extend_top(), ").");
       }
       // Keep the real instance as a body-only terminal.  Its halo is added to
       // the unioned obstacle set below so overlapping halos cannot be counted
@@ -228,8 +232,9 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       addNode(IdbOrientToString(node->get_orient()), node->get_name(), body_box, true, is_hard_macro,
               is_macro_writeback_candidate, node);
       if (node->get_cell_master()->is_io_cell()) {
-        printf("Fixed IO Instance %s, Coordinate (%d, %d, %d, %d)\n", node->get_name().c_str(), node->get_coordinate()->get_x(),
-               node->get_coordinate()->get_y(), node->get_bounding_box()->get_high_x(), node->get_bounding_box()->get_high_y());
+        ECCLOG.info(ecc::Loc::current(), "Fixed IO instance ", node->get_name(), ", coordinate (",
+                     node->get_coordinate()->get_x(), ", ", node->get_coordinate()->get_y(), ", ",
+                     node->get_bounding_box()->get_high_x(), ", ", node->get_bounding_box()->get_high_y(), ").");
       }
       num_terminals += 1;
       total_fixed_terminal_area += body_box.area();
@@ -348,7 +353,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     Box box(gtl::xl(rect), gtl::yl(rect), gtl::xh(rect), gtl::yh(rect));
     int id = node_names.size();
     string block_name = "blockage" + std::to_string(id);
-    printf("PyPlaceDB detect fixed blockage: %s, (%d, %d, %d, %d)\n", block_name.c_str(), box.xl, box.yl, box.xh, box.yh);
+    ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed blockage ", block_name, ", (", box.xl, ", ", box.yl, ", ",
+                 box.xh, ", ", box.yh, ").");
     addNode("R0", block_name, box, true, false, false, nullptr);
     total_fixed_terminal_area += 1LL * box.area();
   }
@@ -372,15 +378,17 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
     Box box_tmp(lx, ly, lx + 1, ly + 1);
     addNode("R0", io_pin->get_pin_name(), box_tmp, false, false, false, nullptr);
-    printf("IO Pin %s, Coordinate (%d, %d)\n", io_pin->get_pin_name().c_str(), lx, ly);
+    ECCLOG.info(ecc::Loc::current(), "IO pin ", io_pin->get_pin_name(), ", coordinate (", lx, ", ", ly, ").");
     num_terminal_NIs += 1;
   }
   // we only know num_nodes when all fixed cells with shapes are expanded
-  printf("num_terminals %d, numPlaceBlockages %u, num_terminal_NIs %d\n", num_terminals, ext_blockage_num, num_terminal_NIs);
+  ECCLOG.info(ecc::Loc::current(), "num_terminals ", num_terminals, ", num_place_blockages ", ext_blockage_num,
+               ", num_terminal_NIs ", num_terminal_NIs, ".");
   num_nodes = inst_num + ext_blockage_num + num_terminal_NIs;  // db.nodes().size() + num_terminals - db.numFixed() - db.numPlaceBlockages()
   // Compute the exact fixed/obstacle area inside the core from the same union
   // represented by the terminal rectangles above.
   PolygonSet ps(gtl::HORIZONTAL, fixed_boxes.begin(), fixed_boxes.end());
+  // critical to make sure only overlap with the die area is computed
   ps &= core_box;
   double total_fixed_geometry_area = gtl::area(ps);
   total_fixed_node_area = total_fixed_geometry_area;
@@ -392,11 +400,10 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   halo_core_ps &= core_box;
   PolygonSet residual_obstacle_core_ps(gtl::HORIZONTAL, vRect.begin(), vRect.end());
   residual_obstacle_core_ps &= core_box;
-  printf("PyPlaceDB fixed geometry: body_union_area %g, halo_union_area %g, no_row_area %g, residual_obstacle_area %g, "
-         "terminal_union_area %g, terminal_area_sum %g, synthetic_rectangles %d.\n",
-         static_cast<double>(gtl::area(body_core_ps)), static_cast<double>(gtl::area(halo_core_ps)),
-         static_cast<double>(gtl::area(no_row_ps)), static_cast<double>(gtl::area(residual_obstacle_core_ps)),
-         total_fixed_geometry_area, total_fixed_terminal_area, ext_blockage_num);
+  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB fixed geometry: body_union_area ", gtl::area(body_core_ps), ", halo_union_area ",
+              gtl::area(halo_core_ps), ", no_row_area ", gtl::area(no_row_ps), ", residual_obstacle_area ",
+              gtl::area(residual_obstacle_core_ps), ", terminal_union_area ", total_fixed_geometry_area, ", terminal_area_sum ",
+              total_fixed_terminal_area, ", synthetic_rectangles ", ext_blockage_num, ".");
   int count = 0;
   for (int i = 0; i < mNode2PyNondeID.size() - num_terminal_NIs - ext_blockage_num; ++i) {
     auto node_name = node_names[i].cast<std::string>();
@@ -451,9 +458,9 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       string temp_name = node->get_name();
       // if (mNode2PyNondeID.find(node->get_name()) == mNode2PyNondeID.end()
       //     || (mNode2PyNondeID.find(node->get_name()) != mNode2PyNondeID.end() && mNode2PyNondeID[node->get_name()].size() == 0)) {
-      //   std::cout << "Error: node " << node->get_name() << " not found in mNode2PyNondeID" << std::endl;
+      //   ECCLOG.warn(ecc::Loc::current(), "Node ", node->get_name(), " is not found in mNode2PyNondeID.");
       // } else if (mNode2PyNondeID[node->get_name()].size() == 0) {
-      //   std::cout << "Error: node " << node->get_name() << " has no new nodes" << std::endl;
+      //   ECCLOG.warn(ecc::Loc::current(), "Node ", node->get_name(), " has no new nodes.");
       // }
       assert(mNode2PyNondeID.count(temp_name));
       index_type new_node_id = mNode2PyNondeID[node->get_name()];  //==0
@@ -466,7 +473,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       assert(mNet2ID.count(pin->get_net()->get_net_name()));
       pin2net_map.append(mNet2ID[pin->get_net()->get_net_name()]);
 
-      if (!isPlacementFixed(node)) {
+      if (!isPlacementFixed(node) /*&& node.status() != PlaceStatusEnum::DUMMY_FIXED*/) {
         num_movable_pins += 1;
       }
     }
@@ -520,8 +527,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       flat_net2pin_map.append(mPin2ID[driver_name]);
       pin_num = 1;  // include driving pin
     } else {
-      printf("Error: Net %s has no driver.\n", net->get_net_name().c_str());
-      exit(0);
+      ECCLOG.error(ecc::Loc::current(), "Net ", net->get_net_name(), " has no driver.");
       pin_num = 0;
     }
     for (IdbPin* pin : net->get_instance_pin_list()->get_pin_list()) {
@@ -604,7 +610,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   if (with_routability) {
     init_routability(db, inst_resort_list);
   }
-  printf("PyPlaceDB::set end!!!\n");
+  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set end.");
 
 #endif
 }

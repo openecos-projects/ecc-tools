@@ -160,7 +160,6 @@ class DefRead
     if (number != -1) {
       ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    ECCLOG.info(ecc::Loc::current(), "");
   }
   void logInfo(string info, int32_t number = -1)
   {
@@ -168,7 +167,6 @@ class DefRead
     if (number != -1) {
       ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    ECCLOG.info(ecc::Loc::current(), "");
   }
 
  private:

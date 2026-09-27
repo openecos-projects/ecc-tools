@@ -36,7 +36,7 @@ void register_idb(py::module& m)
   m.def("def_init", initDef, py::arg("def_path"));
   m.def("verilog_init", initVerilog, py::arg("verilog_path"), py::arg("top_module"));
   m.def("lvs_verilog_init", initLvsVerilog, py::arg("verilog_path"), py::arg("top_module"));
-  m.def("lib_init", initLib, py::arg("lib_paths"));
+  m.def("lib_init", initLib, py::arg("lib_paths"), py::arg("thread_number") = py::none());
   m.def("sdc_init", initSdc, py::arg("sdc_path"));
   m.def("spef_init", initSpef, py::arg("spef_path"));
   m.def("vcd_init", initVcd, py::arg("vcd_path"));
@@ -45,10 +45,10 @@ void register_idb(py::module& m)
   m.def("tcl_save", saveMacroTCL, py::arg("tcl_name"));
   m.def("netlist_save", saveNetList, py::arg("netlist_path"), py::arg("exclude_cell_names") = std::set<std::string>{},
         py::arg("is_add_space_for_escape_name") = false);
-  m.def("gds_save", saveGDSII, py::arg("gds_name"), py::arg("is_harden") = false);
+  m.def("gds_save", saveGDSII, py::arg("gds_name"), py::arg("layer_map_path"));
   m.def("json_save", saveJson, py::arg("path"));
   m.def("view_json_save", saveViewJson, py::arg("output_dir"), py::arg("json_format") = "pretty", py::arg("compress") = false);
-  m.def("geometry_snapshot_save", saveGeometrySnapshot, py::arg("output_dir"));
+  m.def("geometry_snapshot_save", saveGeometrySnapshot, py::arg("output_dir"), py::arg("include_drc") = false);
   m.def("place_instance", placeInstance, py::arg("inst_name"), py::arg("llx"), py::arg("lly"), py::arg("orient"), py::arg("cellmaster"),
         py::arg("source") = "", py::arg("placement_status") = "fixed", py::arg("create_if_missing") = true);
   m.def("initialize_geometry_session", initializeGeometrySession);

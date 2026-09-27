@@ -80,22 +80,4 @@ class TclDestroyRT : public TclCmd
 
 #endif
 
-#if 1  // aux
-
-class TclRTCleanDef : public TclCmd
-{
- public:
-  explicit TclRTCleanDef(const char* cmd_name);
-  ~TclRTCleanDef() override = default;
-
-  unsigned check() override { return 1; };
-
-  unsigned exec() override;
-
- private:
-  std::vector<std::pair<std::string, ValueType>> _config_list;
-};
-
-#endif
-
 }  // namespace tcl

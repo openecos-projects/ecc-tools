@@ -246,7 +246,7 @@ void PDNChecker::checkSupplyConnectivity(PCModel& pc_model, const ConnectType co
     return;
   }
   PhysicalGraph& physical_graph = LVSDM.getDatabase().get_def_data().get_physical_graph();
-  std::map<std::string, std::string>& instance_pin_net_map
+  std::unordered_map<std::string, std::string>& instance_pin_net_map
       = connect_type == ConnectType::kPower ? physical_graph.get_power_instance_pin_net_map() : physical_graph.get_ground_instance_pin_net_map();
   if (instance_pin_net_map.empty()) {
     return;

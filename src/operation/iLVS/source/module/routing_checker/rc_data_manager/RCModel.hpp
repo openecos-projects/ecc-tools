@@ -21,26 +21,31 @@
 
 namespace ilvs {
 
+class Net;
+class NetRoutingGraph;
+
+struct RoutingCheckTask
+{
+  const std::string* net_name = nullptr;
+  const Net* net = nullptr;
+  const NetRoutingGraph* routing_graph = nullptr;
+};
+
 class RCModel
 {
  public:
   RCModel() = default;
-  ~RCModel() = default;
   // getter
-  std::vector<std::string>& get_net_name_list() { return _net_name_list; }
+  std::vector<RoutingCheckTask>& get_routing_check_task_list() { return _routing_check_task_list; }
   std::vector<RoutingCheck>& get_routing_check_list() { return _routing_check_list; }
   std::vector<int32_t>& get_short_component_id_list() { return _short_component_id_list; }
   // const getter
-  const std::vector<std::string>& get_net_name_list() const { return _net_name_list; }
+  const std::vector<RoutingCheckTask>& get_routing_check_task_list() const { return _routing_check_task_list; }
   const std::vector<RoutingCheck>& get_routing_check_list() const { return _routing_check_list; }
   const std::vector<int32_t>& get_short_component_id_list() const { return _short_component_id_list; }
-  // setter
-  void set_net_name_list(const std::vector<std::string>& net_name_list) { _net_name_list = net_name_list; }
-  void set_routing_check_list(const std::vector<RoutingCheck>& routing_check_list) { _routing_check_list = routing_check_list; }
-  void set_short_component_id_list(const std::vector<int32_t>& short_component_id_list) { _short_component_id_list = short_component_id_list; }
 
  private:
-  std::vector<std::string> _net_name_list;
+  std::vector<RoutingCheckTask> _routing_check_task_list;
   std::vector<RoutingCheck> _routing_check_list;
   std::vector<int32_t> _short_component_id_list;
 };

@@ -8,6 +8,7 @@ PUBLIC
         pybind11::pybind11
         ecc_report
         ecc_logger
+        ecc_feature
         geometry_builder
 )
 target_include_directories(py_idb

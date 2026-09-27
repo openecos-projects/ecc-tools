@@ -74,6 +74,7 @@ void IdbRegularWireSegment::clearPoints()
   }
   _point_list.clear();
   std::vector<IdbCoordinate<int32_t>*>().swap(_point_list);
+  _point_ext_map.clear();
 }
 
 void IdbRegularWireSegment::clear()
@@ -152,29 +153,36 @@ idb::IdbRect IdbRegularWireSegment::get_segment_rect()
 
     return rect;
   } else {
-    int32_t routing_width = dynamic_cast<IdbLayerRouting*>(_layer)->get_width();
-    IdbCoordinate<int32_t>* point_1 = get_point_start();
-    IdbCoordinate<int32_t>* point_2 = get_point_second();
+    return get_wire_rect();
+  }
+}
 
-    int32_t ll_x = 0;
-    int32_t ll_y = 0;
-    int32_t ur_x = 0;
-    int32_t ur_y = 0;
-    if (point_1->get_y() == point_2->get_y()) {
-      // horizontal
-      ll_x = std::min(point_1->get_x(), point_2->get_x()) - routing_width / 2;
-      ll_y = std::min(point_1->get_y(), point_2->get_y()) - routing_width / 2;
-      ur_x = std::max(point_1->get_x(), point_2->get_x()) + routing_width / 2;
-      ur_y = ll_y + routing_width;
-    } else {
-      // vertical
-      ll_x = std::min(point_1->get_x(), point_2->get_x()) - routing_width / 2;
-      ll_y = std::min(point_1->get_y(), point_2->get_y()) - routing_width / 2;
-      ur_x = ll_x + routing_width;
-      ur_y = std::max(point_1->get_y(), point_2->get_y()) + routing_width / 2;
-    }
+/**
+ * @brief metal rect of the wire branch: a point with a flush extension ends the metal
+ * exactly ext beyond it, a point without ext extends half the routing width past it
+ */
+idb::IdbRect IdbRegularWireSegment::get_wire_rect()
+{
+  int32_t routing_width = dynamic_cast<IdbLayerRouting*>(_layer)->get_width();
+  IdbCoordinate<int32_t>* point_1 = get_point_start();
+  IdbCoordinate<int32_t>* point_2 = get_point_second();
 
-    return idb::IdbRect(ll_x, ll_y, ur_x, ur_y);
+  if (point_1->get_y() == point_2->get_y()) {
+    // horizontal
+    IdbCoordinate<int32_t>* point_low = point_1->get_x() <= point_2->get_x() ? point_1 : point_2;
+    IdbCoordinate<int32_t>* point_high = point_low == point_1 ? point_2 : point_1;
+    int32_t ll_x = point_low->get_x() - get_point_ext(point_low).value_or(routing_width / 2);
+    int32_t ll_y = std::min(point_1->get_y(), point_2->get_y()) - routing_width / 2;
+    int32_t ur_x = point_high->get_x() + get_point_ext(point_high).value_or(routing_width / 2);
+    return idb::IdbRect(ll_x, ll_y, ur_x, ll_y + routing_width);
+  } else {
+    // vertical
+    IdbCoordinate<int32_t>* point_low = point_1->get_y() <= point_2->get_y() ? point_1 : point_2;
+    IdbCoordinate<int32_t>* point_high = point_low == point_1 ? point_2 : point_1;
+    int32_t ll_x = std::min(point_1->get_x(), point_2->get_x()) - routing_width / 2;
+    int32_t ll_y = point_low->get_y() - get_point_ext(point_low).value_or(routing_width / 2);
+    int32_t ur_y = point_high->get_y() + get_point_ext(point_high).value_or(routing_width / 2);
+    return idb::IdbRect(ll_x, ll_y, ll_x + routing_width, ur_y);
   }
 }
 
@@ -188,6 +196,20 @@ IdbCoordinate<int32_t>* IdbRegularWireSegment::add_point(int32_t x, int32_t y)
 IdbCoordinate<int32_t>* IdbRegularWireSegment::add_virtual_point(int32_t x, int32_t y)
 {
   return *_virtual_points.insert(add_point(x, y)).first;
+}
+
+IdbCoordinate<int32_t>* IdbRegularWireSegment::add_flush_point(int32_t x, int32_t y, int32_t ext)
+{
+  IdbCoordinate<int32_t>* point = add_point(x, y);
+  _point_ext_map[point] = ext;
+
+  return point;
+}
+
+std::optional<int32_t> IdbRegularWireSegment::get_point_ext(IdbCoordinate<int32_t>* point)
+{
+  auto iter = _point_ext_map.find(point);
+  return iter == _point_ext_map.end() ? std::nullopt : std::optional<int32_t>(iter->second);
 }
 
 IdbVia* IdbRegularWireSegment::copy_via(IdbVia* via)
@@ -256,8 +278,6 @@ bool IdbRegularWireSegment::isIntersection(IdbLayerShape* layer_shape)
     return false;
   }
 
-  auto layer = dynamic_cast<IdbLayerRouting*>(_layer);
-
   if (is_via()) {
     /// must be on the same layer
     for (auto seg_via : get_via_list()) {
@@ -310,7 +330,7 @@ bool IdbRegularWireSegment::isIntersection(IdbLayerShape* layer_shape)
       return false;
     }
 
-    IdbRect this_rect(get_point_start(), get_point_second(), layer->get_width());
+    IdbRect this_rect = get_wire_rect();
     for (auto rect : layer_shape->get_rect_list()) {
       if (this_rect.isIntersection(rect)) {
         return true;
@@ -385,10 +405,8 @@ bool IdbRegularWireSegment::isConnectWireToWire(IdbRegularWireSegment* segment)
     return false;
   }
 
-  auto layer = dynamic_cast<IdbLayerRouting*>(_layer);
-
-  IdbRect this_rect(get_point_start(), get_point_second(), layer->get_width());
-  IdbRect seg_rect(segment->get_point_start(), segment->get_point_second(), layer->get_width());
+  IdbRect this_rect = get_wire_rect();
+  IdbRect seg_rect = segment->get_wire_rect();
 
   return this_rect.isIntersection(seg_rect);
 
@@ -429,9 +447,7 @@ bool IdbRegularWireSegment::isConnectWireToDeltaRect(IdbRegularWireSegment* segm
     return false;
   }
 
-  auto layer = dynamic_cast<IdbLayerRouting*>(_layer);
-
-  IdbRect this_rect(get_point_start(), get_point_second(), layer->get_width());
+  IdbRect this_rect = get_wire_rect();
 
   IdbRect segment_rect = segment->get_segment_rect();
   return this_rect.isIntersection(&segment_rect);
@@ -464,8 +480,7 @@ bool IdbRegularWireSegment::isConnectWireToVia(IdbRegularWireSegment* segment)
     }
 
     /// check connection
-    auto layer = dynamic_cast<IdbLayerRouting*>(_layer);
-    IdbRect this_rect(get_point_start(), get_point_second(), layer->get_width());
+    IdbRect this_rect = get_wire_rect();
     for (auto seg_rect : connect_seg_shape->get_rect_list()) {
       if (this_rect.isIntersection(seg_rect)) {
         return true;

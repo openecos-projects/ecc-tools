@@ -7,7 +7,6 @@ tags
 
 bin
 build
-build-system-*/
 catboost_info
 *.rpt
 *.idx

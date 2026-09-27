@@ -354,7 +354,7 @@ int LefRead::parse_units(lefiUnits* lef_units)
   // IdbLayout eagerly allocates its units, so only a positive micron DBU
   // proves units were actually parsed from an earlier LEF/DEF.
   if (units != nullptr && units->get_micron_dbu() > 0) {
-    ECCLOG.info(ecc::Loc::current(), "Tech Units has been init, ignore this lef units...");
+    // ECCLOG.info(ecc::Loc::current(), "Tech Units has been init, ignore this lef units...");
     return kDbSuccess;
   }
 
@@ -958,7 +958,7 @@ int LefRead::parse_macro_new(const char* macro_name)
 
   if (nullptr != master_list->find_cell_master(macro_name)) {
     _this_cell_master = nullptr;
-    ECCLOG.warn(ecc::Loc::current(), "[idb warning] Macro is exist, name = ", macro_name);
+    // ECCLOG.warn(ecc::Loc::current(), "[idb warning] Macro is exist, name = ", macro_name);
     return kDbFail;
   }
 

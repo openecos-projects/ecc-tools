@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include <array>
+#include <atomic>
 #include <map>
 #include <memory>
 #include <optional>
@@ -33,8 +35,6 @@
 #include <utility>
 #include <vector>
 
-#include "absl/container/btree_map.h"
-#include "absl/container/inlined_vector.h"
 #include "LibParserCpp.hh"
 #include "Config.hh"
 #include "Type.hh"
@@ -169,7 +169,7 @@ class LibTable : public LibObject
 
   LibAxis& getAxis(unsigned int index);
 
-  absl::InlinedVector<std::unique_ptr<LibAxis>, 64>& get_axes();
+  std::vector<std::unique_ptr<LibAxis>>& get_axes();
   auto getAxesSize() { return _axes.size(); }
 
   void addTableValue(std::unique_ptr<LibAttrValue> table_value) { _table_values.emplace_back(std::move(table_value)); }
@@ -191,7 +191,10 @@ class LibTable : public LibObject
   double driveResistance();
 
  private:
-  absl::InlinedVector<std::unique_ptr<LibAxis>, 64> _axes;  //!< May be zero, one, two, three axes.
+  // Liberty LUT templates and tables use zero through three axes in the
+  // supported models. Keep arbitrary-axis compatibility through the vector's
+  // heap spill path without reserving 64 pointers in every object.
+  std::vector<std::unique_ptr<LibAxis>> _axes;  //!< May be zero, one, two, three axes.
   std::vector<std::unique_ptr<LibAttrValue>> _table_values;  //!< The axis values.
   TableType _table_type;                                     //!< The table type.
 
@@ -570,11 +573,21 @@ class LibPort : public LibObject
   void set_clock_gate_enable_pin(bool clock_gate_enable_pin) { _clock_gate_enable_pin = clock_gate_enable_pin; }
   bool get_clock_gate_enable_pin() { return _clock_gate_enable_pin; }
 
+  void set_clock_gate_test_pin(bool value) { _clock_gate_test_pin = value; }
+  bool get_clock_gate_test_pin() const { return _clock_gate_test_pin; }
+  void set_clock_gate_out_pin(bool value) { _clock_gate_out_pin = value; }
+  bool get_clock_gate_out_pin() const { return _clock_gate_out_pin; }
+
   void set_is_clock(bool is_clock) { _is_clock = is_clock; }
   bool get_is_clock() const { return _is_clock; }
 
-  void set_port_cap(double cap) { _port_cap = cap; }
+  void set_port_cap(double cap)
+  {
+    _port_cap = cap;
+    _has_port_cap = true;
+  }
   double get_port_cap() const { return _port_cap; }
+  bool has_port_cap() const { return _has_port_cap; }
 
   void set_port_cap(AnalysisMode mode, TransType trans_type, double cap);
   std::optional<double> get_port_cap(AnalysisMode mode, TransType trans_type);
@@ -629,10 +642,13 @@ class LibPort : public LibObject
   bool _is_clock_pin = false;           //!< The flag of clock pin.
   bool _clock_gate_clock_pin = false;   //!< The flag of gate clock pin.
   bool _clock_gate_enable_pin = false;  //!< The flag of gate enable pin.
-  bool _is_clock = false;               //!< The explicit clock flag for emitted pins.
+  bool _clock_gate_test_pin = false;
+  bool _clock_gate_out_pin = false;
+  bool _is_clock = false;  //!< The explicit clock flag for emitted pins.
   ::LibertyExpr* _func_expr = nullptr;
-  std::string _func_expr_str;                                        //!< store func expr string for debug.
-  double _port_cap = 0.0;                                            //!< The input pin corresponding to the port has capacitance.
+  std::string _func_expr_str;  //!< store func expr string for debug.
+  double _port_cap = 0.0;      //!< The input pin corresponding to the port has capacitance.
+  bool _has_port_cap = false;
   std::array<std::optional<double>, MODE_TRANS_SPLIT> _port_caps{};  //!< May be port cap split max rise, max fall, min rise,
                                                                      //!< min fall.
   std::array<std::optional<double>, MODE_SPLIT> _cap_limits{};
@@ -641,7 +657,7 @@ class LibPort : public LibObject
   std::optional<double> _fanout_load;
   std::optional<double> _max_fanout;
 
-  absl::InlinedVector<std::unique_ptr<LibInternalPowerInfo>, 64> _internal_powers;  //!< The internal power information.
+  std::vector<std::unique_ptr<LibInternalPowerInfo>> _internal_powers;  //!< The internal power information.
 
   FORBIDDEN_COPY(LibPort);
 };
@@ -725,7 +741,7 @@ class LibPortBus : public LibPort
   LibPort* operator[](int index);
 
  private:
-  absl::InlinedVector<std::unique_ptr<LibPort>, 64> _ports;  //!< The bus ports.
+  std::vector<std::unique_ptr<LibPort>> _ports;  //!< The bus ports.
   LibType* _bus_type = nullptr;
 
   FORBIDDEN_COPY(LibPortBus);
@@ -931,7 +947,7 @@ class LibArc : public LibObject
 
   std::unique_ptr<LibTableModel> _table_model;  //!< The arc timing model.
 
-  static absl::btree_map<std::string, TimingType> _str_to_type;
+  static std::map<std::string, TimingType> _str_to_type;
 
   unsigned _is_disable_arc = 0;  //!< Forbidden arc.
 
@@ -966,7 +982,7 @@ class LibArcSet
   unsigned isTwoTypeSenseArcSet();
 
  private:
-  absl::InlinedVector<std::unique_ptr<LibArc>, 64> _arcs;
+  std::vector<std::unique_ptr<LibArc>> _arcs;
 
   FORBIDDEN_COPY(LibArcSet);
 };
@@ -1043,7 +1059,7 @@ class LibPowerArcSet
   auto& get_power_arcs() { return _power_arcs; }
 
  private:
-  absl::InlinedVector<std::unique_ptr<LibPowerArc>, 64> _power_arcs;
+  std::vector<std::unique_ptr<LibPowerArc>> _power_arcs;
 
   FORBIDDEN_COPY(LibPowerArcSet);
 };
@@ -1084,6 +1100,14 @@ struct LibSequential
  * @brief The timing cell in the liberty.
  *
  */
+struct LibLatch
+{
+  std::string state;
+  std::string inverted_state;
+  std::string data_in;
+  std::string enable;
+};
+
 class LibCell : public LibObject
 {
  public:
@@ -1103,7 +1127,12 @@ class LibCell : public LibObject
   void set_cell_area(double cell_area) { _cell_area = cell_area; }
 
   double get_cell_leakage_power() const { return _cell_leakage_power; }
-  void set_cell_leakage_power(double cell_leakage_power) { _cell_leakage_power = cell_leakage_power; }
+  bool has_cell_leakage_power() const { return _has_cell_leakage_power; }
+  void set_cell_leakage_power(double cell_leakage_power)
+  {
+    _cell_leakage_power = cell_leakage_power;
+    _has_cell_leakage_power = true;
+  }
 
   std::string get_clock_gating_integrated_cell() const { return _clock_gating_integrated_cell; }
   void set_clock_gating_integrated_cell(std::string clock_gating_integrated_cell)
@@ -1112,6 +1141,8 @@ class LibCell : public LibObject
   }
 
   bool get_is_clock_gating_integrated_cell() const { return _is_clock_gating_integrated_cell; }
+  const std::vector<LibLatch>& get_latches() const { return _latches; }
+  void addLatch(LibLatch latch) { _latches.push_back(std::move(latch)); }
   void set_is_clock_gating_integrated_cell(bool is_clock_gating_integrated_cell)
   {
     _is_clock_gating_integrated_cell = is_clock_gating_integrated_cell;
@@ -1170,11 +1201,13 @@ class LibCell : public LibObject
   double convertTablePowerToMw(double query_table_power);
 
  private:
-  std::string _cell_name;                                             //!< The liberty cell name.
-  double _cell_area;                                                  //!< The liberty cell area.
-  double _cell_leakage_power = 0.0;                                   //!< The cell leakage power of the cell.
-  std::string _clock_gating_integrated_cell;                          //!< The clock gate cell.
-  bool _is_clock_gating_integrated_cell = false;                      //!< The flag of the clock gate cell.
+  std::string _cell_name;                         //!< The liberty cell name.
+  double _cell_area;                              //!< The liberty cell area.
+  double _cell_leakage_power = 0.0;               //!< The cell leakage power of the cell.
+  bool _has_cell_leakage_power = false;          //!< Distinguishes an explicit zero from a missing attribute.
+  std::string _clock_gating_integrated_cell;      //!< The clock gate cell.
+  bool _is_clock_gating_integrated_cell = false;  //!< The flag of the clock gate cell.
+  std::vector<LibLatch> _latches;
   std::vector<std::unique_ptr<LibLeakagePower>> _leakage_power_list;  //!< All leakage powers of the cell.
   std::vector<std::unique_ptr<LibPort>> _cell_ports;
   std::map<std::string, LibPort*> _str2ports;  //!< The cell ports.
@@ -1359,7 +1392,7 @@ class LibLutTableTemplate : public LibObject
   std::optional<Variable> _template_variable3;
   std::optional<Variable> _template_variable4;
 
-  absl::InlinedVector<std::unique_ptr<LibAxis>, 64> _axes;  //!< May be zero, one, two, three axes.
+  std::vector<std::unique_ptr<LibAxis>> _axes;  //!< May be zero, one, two, three axes.
 
   FORBIDDEN_COPY(LibLutTableTemplate);
 };
@@ -1406,9 +1439,14 @@ class LibLibrary : public LibObject
         _simulation(other._simulation),
         _library_features(std::move(other._library_features)),
         _leakage_power_unit(std::move(other._leakage_power_unit)),
-        _power_unit_mw_scale(other._power_unit_mw_scale),
         _current_unit_name(std::move(other._current_unit_name)),
         _voltage_unit_name(std::move(other._voltage_unit_name)),
+        _cap_unit(other._cap_unit),
+        _resistance_unit(other._resistance_unit),
+        _time_unit(other._time_unit),
+        _power_unit_mw_scale(other._power_unit_mw_scale),
+        _has_cap_unit(other._has_cap_unit),
+        _has_time_unit(other._has_time_unit),
         _default_operating_conditions(std::move(other._default_operating_conditions)),
         _default_wire_load(std::move(other._default_wire_load)),
         _nom_process(other._nom_process),
@@ -1427,6 +1465,11 @@ class LibLibrary : public LibObject
     _power_unit_mw_scale = rhs._power_unit_mw_scale;
     _current_unit_name = std::move(rhs._current_unit_name);
     _voltage_unit_name = std::move(rhs._voltage_unit_name);
+    _cap_unit = rhs._cap_unit;
+    _resistance_unit = rhs._resistance_unit;
+    _time_unit = rhs._time_unit;
+    _has_cap_unit = rhs._has_cap_unit;
+    _has_time_unit = rhs._has_time_unit;
     _default_operating_conditions = std::move(rhs._default_operating_conditions);
     _default_wire_load = std::move(rhs._default_wire_load);
     _nom_process = rhs._nom_process;
@@ -1521,41 +1564,33 @@ class LibLibrary : public LibObject
   }
   const std::vector<std::string>& get_library_features() const { return _library_features; }
 
-  void set_leakage_power_unit(std::string leakage_power_unit)
-  {
-    _leakage_power_unit = std::move(leakage_power_unit);
-  }
-  const std::optional<std::string>& get_leakage_power_unit() const
-  {
-    return _leakage_power_unit;
-  }
+  void set_leakage_power_unit(std::string leakage_power_unit) { _leakage_power_unit = std::move(leakage_power_unit); }
+  const std::optional<std::string>& get_leakage_power_unit() const { return _leakage_power_unit; }
 
-  void set_current_unit_name(std::string current_unit_name)
-  {
-    _current_unit_name = std::move(current_unit_name);
-  }
-  const std::optional<std::string>& get_current_unit_name() const
-  {
-    return _current_unit_name;
-  }
+  void set_current_unit_name(std::string current_unit_name) { _current_unit_name = std::move(current_unit_name); }
+  const std::optional<std::string>& get_current_unit_name() const { return _current_unit_name; }
 
-  void set_voltage_unit_name(std::string voltage_unit_name)
-  {
-    _voltage_unit_name = std::move(voltage_unit_name);
-  }
-  const std::optional<std::string>& get_voltage_unit_name() const
-  {
-    return _voltage_unit_name;
-  }
+  void set_voltage_unit_name(std::string voltage_unit_name) { _voltage_unit_name = std::move(voltage_unit_name); }
+  const std::optional<std::string>& get_voltage_unit_name() const { return _voltage_unit_name; }
 
-  void set_cap_unit(CapacitiveUnit cap_unit) { _cap_unit = cap_unit; }
+  void set_cap_unit(CapacitiveUnit cap_unit)
+  {
+    _cap_unit = cap_unit;
+    _has_cap_unit = true;
+  }
   CapacitiveUnit get_cap_unit() { return _cap_unit; }
+  bool has_cap_unit() const { return _has_cap_unit; }
 
   void set_resistance_unit(ResistanceUnit resistance_unit) { _resistance_unit = resistance_unit; }
   auto get_resistance_unit() { return _resistance_unit; }
 
-  void set_time_unit(TimeUnit time_unit) { _time_unit = time_unit; }
+  void set_time_unit(TimeUnit time_unit)
+  {
+    _time_unit = time_unit;
+    _has_time_unit = true;
+  }
   auto get_time_unit() { return _time_unit; }
+  bool has_time_unit() const { return _has_time_unit; }
   double convert_time_unit_to_ns(double src_value)
   {
     if (get_time_unit() == TimeUnit::kNS) {
@@ -1669,15 +1704,15 @@ class LibLibrary : public LibObject
   std::vector<std::unique_ptr<LibCell>> _cells;  //!< The liberty cell, perserve the cell read order.
   std::map<std::string, LibCell*> _str2cell;
 
-  absl::InlinedVector<std::unique_ptr<LibLutTableTemplate>, 64> _lut_templates;  //!< The timing table lut template, preserve the
+  std::vector<std::unique_ptr<LibLutTableTemplate>> _lut_templates;  //!< The timing table lut template, preserve the
                                                                                    //!< template order.
 
   std::map<std::string, LibLutTableTemplate*> _str2template;
 
-  absl::InlinedVector<std::unique_ptr<LibWireLoad>, 64> _wire_loads;  //!< The wire load models.
+  std::vector<std::unique_ptr<LibWireLoad>> _wire_loads;  //!< The wire load models.
   std::map<std::string, LibWireLoad*> _str2wireLoad;
 
-  absl::InlinedVector<std::unique_ptr<LibType>, 64> _types;  //!< The lib type
+  std::vector<std::unique_ptr<LibType>> _types;  //!< The lib type
 
   std::map<std::string, LibType*> _str2type;
 
@@ -1692,6 +1727,8 @@ class LibLibrary : public LibObject
   ResistanceUnit _resistance_unit = ResistanceUnit::kkOHM;
   TimeUnit _time_unit = TimeUnit::kNS;
   double _power_unit_mw_scale = 1.0;
+  bool _has_cap_unit = false;
+  bool _has_time_unit = false;
 
   std::optional<double> _default_max_transition;
   std::optional<double> _default_max_fanout;
@@ -1892,13 +1929,13 @@ class Lib
   Lib() = default;
   ~Lib() = default;
 
-  static void setSilentOutput(bool silent_output) { _silent_output = silent_output; }
-  static bool isSilentOutput() { return _silent_output; }
+  static void setSilentOutput(bool silent_output) { _silent_output.store(silent_output, std::memory_order_relaxed); }
+  static bool isSilentOutput() { return _silent_output.load(std::memory_order_relaxed); }
 
   LibertyReader loadLibertyWithCppParser(const char* file_name);
 
  private:
-  static bool _silent_output;
+  static std::atomic_bool _silent_output;
 
   FORBIDDEN_COPY(Lib);
 };

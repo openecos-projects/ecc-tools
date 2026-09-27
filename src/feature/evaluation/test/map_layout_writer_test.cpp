@@ -71,6 +71,27 @@ int main()
   expectEqual(gcell_lines[1], "0,0,0,7,10,30,20,40", "explicit gcell row 0 mismatch");
   expectEqual(gcell_lines[2], "0,1,1,7,20,30,35,40", "explicit gcell row 1 mismatch");
 
+  const auto gcell_info = out_dir / "gcell.info";
+  {
+    std::ofstream file(gcell_info);
+    file << "0,0,100,200,110,210\n0,1,100,210,110,220\n"
+            "1,0,110,200,120,210\n1,1,110,210,120,220\n"
+            "2,0,120,200,130,210\n2,1,120,210,130,220\n"
+            "3,0,130,200,140,210\n";
+  }
+  if (!ieval::writeEGRLayoutCsv(gcell_dir.string(), gcell_info.string(), 3, 2)) {
+    ECCLOG.warn(ecc::Loc::current(), "writeEGRLayoutCsv returned false\n");
+    return 1;
+  }
+  const auto egr_lines = readLines(gcell_dir / "layout.csv");
+  if (egr_lines.size() != 7) {
+    ECCLOG.warn(ecc::Loc::current(), "expected header plus 6 EGR cells, got ", egr_lines.size());
+    return 1;
+  }
+  expectEqual(egr_lines[1], "1,0,0,0,100,200,110,210", "low-Y gcell should map to last pixel row");
+  expectEqual(egr_lines[2], "0,0,0,1,100,210,110,220", "high-Y gcell should map to first pixel row");
+  expectEqual(egr_lines[6], "0,2,2,1,120,210,130,220", "rightmost high-Y gcell mismatch");
+
   std::filesystem::remove_all(out_dir);
   return 0;
 }

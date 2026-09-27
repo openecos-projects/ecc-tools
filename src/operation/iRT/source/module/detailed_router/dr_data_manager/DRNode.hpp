@@ -108,6 +108,8 @@ class DRNode : public LayerCoord
 #if 1  // astar
   // single task
   static uint8_t getDirectionMask(Direction direction) { return static_cast<uint8_t>(1U << static_cast<uint8_t>(direction)); }
+  void setOnTrack(Direction direction) { _on_track_direction_mask |= getDirectionMask(direction); }
+  bool isOnTrack(Direction direction) const { return (_on_track_direction_mask & getDirectionMask(direction)) != 0; }
   void setDirectionSet(const std::set<Direction>& direction_set)
   {
     _direction_mask = 0;
@@ -145,6 +147,7 @@ class DRNode : public LayerCoord
 #if 1  // astar
   DRNodeState _state = DRNodeState::kNone;
   uint8_t _direction_mask = 0;
+  uint8_t _on_track_direction_mask = 0;
 #endif
   uint8_t _neighbor_node_num = 0;
 #if 1  // astar

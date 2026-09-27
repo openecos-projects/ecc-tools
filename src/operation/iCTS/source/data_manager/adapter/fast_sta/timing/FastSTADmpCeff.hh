@@ -29,6 +29,7 @@ namespace icts {
 
 enum class FastStaTransition;
 struct FastStaLibertyCell;
+struct FastStaLibertyArc;
 struct FastStaPiModel;
 
 class FastStaDmpCeff
@@ -38,6 +39,8 @@ class FastStaDmpCeff
 
   static auto calcDriverTiming(const FastStaLibertyCell& driver_cell, const FastStaPiModel& pi, FastStaTransition transition, double input_slew_ns)
       -> FastStaDmpDriverResult;
+  static auto calcDriverTiming(const FastStaLibertyCell& driver_cell, const FastStaLibertyArc& timing_arc, const FastStaPiModel& pi,
+                               FastStaTransition transition, double input_slew_ns) -> FastStaDmpDriverResult;
   static auto calcLoadDelaySlew(const FastStaDmpDriverResult& driver_timing, double elmore_delay_ns, const FastStaLibertyCell* load_cell)
       -> FastStaDmpLoadResult;
   static auto calcInputPortDelaySlew(double input_slew_ns, double elmore_delay_ns, FastStaTransition transition, const FastStaLibertyCell* load_cell)

@@ -141,6 +141,7 @@ def _prepare_manifest(
         "config": {
             key.removesuffix(".json"): str(value) for key, value in config_paths.items()
         },
+        "gds_layer_map": str(roots.fixture_root / "config" / "gcd.gds.map"),
         "inputs": {key: str(value) for key, value in inputs.items()},
         "name": name,
         "output_dir": str(output_dir),

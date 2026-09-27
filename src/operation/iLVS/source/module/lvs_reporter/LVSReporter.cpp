@@ -55,12 +55,14 @@ void LVSReporter::report()
   LVSLOG.info(Loc::current(), "Starting...");
 
   LRModel lr_model = initLRModel();
-  std::vector<fort::char_table> summary_table_list = getSummaryTableList();
+  std::vector<LVSEntitySummaryRow> entity_summary_row_list = getEntitySummaryRowList();
+  std::vector<LVSConnectivitySummaryRow> connectivity_summary_row_list = getConnectivitySummaryRowList();
+  std::vector<fort::char_table> summary_table_list = getSummaryTableList(entity_summary_row_list, connectivity_summary_row_list);
   std::vector<const Violation*> violation_list = getViolationList();
   LVSLOG.info(Loc::current(), "Writing RPT...");
   outputRPT(lr_model, summary_table_list, violation_list);
   LVSLOG.info(Loc::current(), "Writing JSON...");
-  outputJson(lr_model, violation_list);
+  outputJson(lr_model, violation_list, entity_summary_row_list, connectivity_summary_row_list);
   printSummary(summary_table_list);
 
   LVSLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -78,7 +80,9 @@ LRModel LVSReporter::initLRModel()
   return lr_model;
 }
 
-std::vector<fort::char_table> LVSReporter::getSummaryTableList()
+std::vector<fort::char_table> LVSReporter::getSummaryTableList(
+    const std::vector<LVSEntitySummaryRow>& entity_summary_row_list,
+    const std::vector<LVSConnectivitySummaryRow>& connectivity_summary_row_list)
 {
   fort::char_table entity_summary_table;
   {
@@ -87,7 +91,7 @@ std::vector<fort::char_table> LVSReporter::getSummaryTableList()
                          << "NETLIST"
                          << "DEF"
                          << "Difference" << fort::endr;
-    for (LVSEntitySummaryRow& row : getEntitySummaryRowList()) {
+    for (const LVSEntitySummaryRow& row : entity_summary_row_list) {
       entity_summary_table << row.get_entity() << row.get_netlist_num() << row.get_def_num() << row.get_difference_num() << fort::endr;
     }
   }
@@ -100,7 +104,7 @@ std::vector<fort::char_table> LVSReporter::getSummaryTableList()
                                << "Short"
                                << "Connected"
                                << "Total" << fort::endr;
-    for (LVSConnectivitySummaryRow& row : getConnectivitySummaryRowList()) {
+    for (const LVSConnectivitySummaryRow& row : connectivity_summary_row_list) {
       connectivity_summary_table << row.get_connectivity() << getCountPercentageText(row.get_open_num(), row.get_total_num())
                                  << getCountPercentageText(row.get_short_num(), row.get_total_num())
                                  << getCountPercentageText(row.get_connected_num(), row.get_total_num()) << row.get_total_num() << fort::endr;
@@ -147,9 +151,11 @@ std::vector<LVSConnectivitySummaryRow> LVSReporter::getConnectivitySummaryRowLis
   std::vector<LVSConnectivitySummaryRow> row_list;
   addConnectivitySummaryRow(row_list, "Routing", rc_summary.open_net_num, rc_summary.short_net_num, routing_connected_num, routing_total_num);
 
-  std::map<std::string, std::string>& power_instance_pin_net_map = physical_graph.get_power_instance_pin_net_map();
+  std::unordered_set<int32_t> power_ground_short_component_id_set = getPowerGroundShortComponentIdSet();
+  std::unordered_map<std::string, std::string>& power_instance_pin_net_map = physical_graph.get_power_instance_pin_net_map();
   std::set<std::string> power_open_terminal_name_set = getPowerOpenTerminalNameSet(ConnectType::kPower);
-  std::set<std::string> power_short_terminal_name_set = getPowerShortTerminalNameSet(ConnectType::kPower);
+  std::set<std::string> power_short_terminal_name_set
+      = getPowerShortTerminalNameSet(ConnectType::kPower, power_ground_short_component_id_set);
   int64_t power_open_num = 0;
   for (const std::string& terminal_name : power_open_terminal_name_set) {
     if (!LVSUTIL.exist(power_short_terminal_name_set, terminal_name)) {
@@ -164,9 +170,10 @@ std::vector<LVSConnectivitySummaryRow> LVSReporter::getConnectivitySummaryRowLis
   }
   addConnectivitySummaryRow(row_list, "Power VDD", power_open_num, power_short_num, power_connected_num, power_total_num);
 
-  std::map<std::string, std::string>& ground_instance_pin_net_map = physical_graph.get_ground_instance_pin_net_map();
+  std::unordered_map<std::string, std::string>& ground_instance_pin_net_map = physical_graph.get_ground_instance_pin_net_map();
   std::set<std::string> ground_open_terminal_name_set = getPowerOpenTerminalNameSet(ConnectType::kGround);
-  std::set<std::string> ground_short_terminal_name_set = getPowerShortTerminalNameSet(ConnectType::kGround);
+  std::set<std::string> ground_short_terminal_name_set
+      = getPowerShortTerminalNameSet(ConnectType::kGround, power_ground_short_component_id_set);
   int64_t ground_open_num = 0;
   for (const std::string& terminal_name : ground_open_terminal_name_set) {
     if (!LVSUTIL.exist(ground_short_terminal_name_set, terminal_name)) {
@@ -215,7 +222,7 @@ std::set<std::string> LVSReporter::getPowerOpenTerminalNameSet(ConnectType conne
 {
   Summary& summary = LVSDM.getDatabase().get_summary();
   PhysicalGraph& physical_graph = LVSDM.getDatabase().get_def_data().get_physical_graph();
-  std::map<std::string, std::string>& instance_pin_net_map
+  std::unordered_map<std::string, std::string>& instance_pin_net_map
       = connect_type == ConnectType::kPower ? physical_graph.get_power_instance_pin_net_map() : physical_graph.get_ground_instance_pin_net_map();
   ViolationType violation_type = connect_type == ConnectType::kPower ? ViolationType::kPowerOpenVDD : ViolationType::kPowerOpenVSS;
   std::set<std::string> terminal_name_set;
@@ -232,29 +239,50 @@ std::set<std::string> LVSReporter::getPowerOpenTerminalNameSet(ConnectType conne
   return terminal_name_set;
 }
 
-std::set<std::string> LVSReporter::getPowerShortTerminalNameSet(ConnectType connect_type)
+std::unordered_set<int32_t> LVSReporter::getPowerGroundShortComponentIdSet()
 {
   PhysicalGraph& physical_graph = LVSDM.getDatabase().get_def_data().get_physical_graph();
   std::set<std::string>& power_net_name_set = physical_graph.get_power_net_name_set();
   std::set<std::string>& ground_net_name_set = physical_graph.get_ground_net_name_set();
-  std::set<int32_t> power_ground_short_component_id_set;
-  for (auto& [component_id, net_name_list] : physical_graph.get_component_net_name_map()) {
+  std::unordered_set<int32_t> power_ground_short_component_id_set;
+  auto record_power_ground_short = [&](int32_t component_id, const auto& net_list, const auto& get_net_name) {
     bool has_power_net = false;
     bool has_ground_net = false;
-    for (const std::string& net_name : net_name_list) {
+    for (const auto& net : net_list) {
+      const std::string& net_name = get_net_name(net);
       if (LVSUTIL.exist(power_net_name_set, net_name)) {
         has_power_net = true;
       }
       if (LVSUTIL.exist(ground_net_name_set, net_name)) {
         has_ground_net = true;
       }
+      if (has_power_net && has_ground_net) {
+        break;
+      }
     }
     if (has_power_net && has_ground_net) {
       power_ground_short_component_id_set.insert(component_id);
     }
+  };
+  if (physical_graph.has_optimized_component_data()) {
+    const std::vector<std::vector<int32_t>>& component_net_id_list = physical_graph.get_component_net_id_list();
+    for (int32_t component_id = 0; component_id < static_cast<int32_t>(component_net_id_list.size()); component_id++) {
+      record_power_ground_short(component_id, component_net_id_list[component_id],
+                                [&physical_graph](int32_t net_id) -> const std::string& { return physical_graph.get_net_name(net_id); });
+    }
+  } else {
+    for (const auto& [component_id, net_name_list] : physical_graph.get_component_net_name_map()) {
+      record_power_ground_short(component_id, net_name_list, [](const std::string& net_name) -> const std::string& { return net_name; });
+    }
   }
+  return power_ground_short_component_id_set;
+}
 
-  std::map<std::string, std::string>& instance_pin_net_map
+std::set<std::string> LVSReporter::getPowerShortTerminalNameSet(
+    ConnectType connect_type, const std::unordered_set<int32_t>& power_ground_short_component_id_set)
+{
+  PhysicalGraph& physical_graph = LVSDM.getDatabase().get_def_data().get_physical_graph();
+  std::unordered_map<std::string, std::string>& instance_pin_net_map
       = connect_type == ConnectType::kPower ? physical_graph.get_power_instance_pin_net_map() : physical_graph.get_ground_instance_pin_net_map();
   std::map<std::string, int32_t>& terminal_component_map = physical_graph.get_terminal_component_map();
   std::set<std::string> terminal_name_set;
@@ -290,7 +318,7 @@ void LVSReporter::outputRPT(const LRModel& lr_model, const std::vector<fort::cha
 {
   std::ofstream* rpt_file = LVSUTIL.getOutputFileStream(lr_model.get_rpt_file_path());
   DefData& def_data = LVSDM.getDatabase().get_def_data();
-  std::map<int32_t, std::vector<Shape>>& component_shape_map = def_data.get_physical_graph().get_component_shape_map();
+  PhysicalGraph& physical_graph = def_data.get_physical_graph();
 
   *rpt_file << "iLVS Report\n\n";
   for (const fort::char_table& summary_table : summary_table_list) {
@@ -331,11 +359,7 @@ void LVSReporter::outputRPT(const LRModel& lr_model, const std::vector<fort::cha
       has_coordinate = true;
     }
     for (int32_t component_id : violation.get_component_id_list()) {
-      std::map<int32_t, std::vector<Shape>>::iterator shape_iter = component_shape_map.find(component_id);
-      if (shape_iter == component_shape_map.end()) {
-        continue;
-      }
-      for (Shape& shape : shape_iter->second) {
+      for (const Shape& shape : physical_graph.get_component_shape_list(component_id)) {
         *rpt_file << component_id << " " << shape.get_layer_idx() << " " << shape.get_ll_x() << " " << shape.get_ll_y() << " " << shape.get_ur_x() << " "
                   << shape.get_ur_y() << "\n";
         has_coordinate = true;
@@ -378,19 +402,21 @@ std::string LVSReporter::getJoinedString(const std::vector<std::string>& value_l
   return stream.str();
 }
 
-void LVSReporter::outputJson(const LRModel& lr_model, const std::vector<const Violation*>& violation_list)
+void LVSReporter::outputJson(const LRModel& lr_model, const std::vector<const Violation*>& violation_list,
+                             const std::vector<LVSEntitySummaryRow>& entity_summary_row_list,
+                             const std::vector<LVSConnectivitySummaryRow>& connectivity_summary_row_list)
 {
   DefData& def_data = LVSDM.getDatabase().get_def_data();
-  std::map<int32_t, std::vector<Shape>>& component_shape_map = def_data.get_physical_graph().get_component_shape_map();
+  PhysicalGraph& physical_graph = def_data.get_physical_graph();
 
   nlohmann::json entity_json = nlohmann::json::array();
-  for (LVSEntitySummaryRow& row : getEntitySummaryRowList()) {
+  for (const LVSEntitySummaryRow& row : entity_summary_row_list) {
     entity_json.push_back(
         {{"entity", row.get_entity()}, {"netlist", row.get_netlist_num()}, {"def", row.get_def_num()}, {"difference", row.get_difference_num()}});
   }
 
   nlohmann::json connectivity_json = nlohmann::json::array();
-  for (LVSConnectivitySummaryRow& row : getConnectivitySummaryRowList()) {
+  for (const LVSConnectivitySummaryRow& row : connectivity_summary_row_list) {
     connectivity_json.push_back(
         {{"connectivity", row.get_connectivity()},
          {"open", {{"count", row.get_open_num()}, {"percentage", getPercentage(row.get_open_num(), row.get_total_num())}}},
@@ -424,11 +450,7 @@ void LVSReporter::outputJson(const LRModel& lr_model, const std::vector<const Vi
           {{"layer", shape.get_layer_idx()}, {"rect", {shape.get_ll_x(), shape.get_ll_y(), shape.get_ur_x(), shape.get_ur_y()}}});
     }
     for (int32_t component_id : violation.get_component_id_list()) {
-      auto shape_iter = component_shape_map.find(component_id);
-      if (shape_iter == component_shape_map.end()) {
-        continue;
-      }
-      for (Shape& shape : shape_iter->second) {
+      for (const Shape& shape : physical_graph.get_component_shape_list(component_id)) {
         violation_json["shapes"].push_back({{"component", component_id},
                                             {"layer", shape.get_layer_idx()},
                                             {"rect", {shape.get_ll_x(), shape.get_ll_y(), shape.get_ur_x(), shape.get_ur_y()}}});

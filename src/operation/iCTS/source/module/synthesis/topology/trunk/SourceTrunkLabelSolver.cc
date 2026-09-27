@@ -24,7 +24,6 @@
 #include "synthesis/topology/trunk/SourceTrunkLabelSolver.hh"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
 #include <ranges>
 #include <unordered_map>
@@ -129,61 +128,6 @@ auto PreferLabel(const Label& lhs, const Label& rhs) -> bool
   return lhs.primitive_pattern_id.pack() < rhs.primitive_pattern_id.pack();
 }
 
-auto TrimStateFrontier(std::vector<std::size_t>& frontier, const std::vector<Label>& labels, std::size_t max_size) -> void
-{
-  if (max_size == 0U || frontier.size() <= max_size) {
-    return;
-  }
-
-  // Keep the delay and power extremes and sample the remaining labels by
-  // delay. This bounds long source-trunk searches without reducing a state to
-  // a single arbitrary objective.
-  std::ranges::sort(frontier, [&](std::size_t lhs_id, std::size_t rhs_id) -> bool {
-    const auto& lhs = labels.at(lhs_id);
-    const auto& rhs = labels.at(rhs_id);
-    if (lhs.delay != rhs.delay) {
-      return lhs.delay < rhs.delay;
-    }
-    return PreferLabel(lhs, rhs);
-  });
-
-  std::vector<std::size_t> retained;
-  retained.reserve(max_size);
-  retained.push_back(frontier.front());
-  if (max_size > 1U) {
-    const auto min_power = std::ranges::min_element(frontier, [&](std::size_t lhs_id, std::size_t rhs_id) -> bool {
-      const auto& lhs = labels.at(lhs_id);
-      const auto& rhs = labels.at(rhs_id);
-      if (lhs.power != rhs.power) {
-        return lhs.power < rhs.power;
-      }
-      return PreferLabel(lhs, rhs);
-    });
-    retained.push_back(*min_power);
-  }
-  if (max_size > 2U) {
-    const auto step = static_cast<double>(frontier.size() - 1U) / static_cast<double>(max_size - 1U);
-    for (std::size_t index = 1U; index + 1U < max_size; ++index) {
-      const auto sampled_index = static_cast<std::size_t>(std::llround(static_cast<double>(index) * step));
-      const auto candidate = frontier.at(std::min(sampled_index, frontier.size() - 1U));
-      if (std::ranges::find(retained, candidate) == retained.end()) {
-        retained.push_back(candidate);
-      }
-    }
-  }
-  if (retained.size() < max_size) {
-    for (const auto label_id : frontier) {
-      if (retained.size() >= max_size) {
-        break;
-      }
-      if (std::ranges::find(retained, label_id) == retained.end()) {
-        retained.push_back(label_id);
-      }
-    }
-  }
-  frontier = std::move(retained);
-}
-
 }  // namespace
 
 auto SolveLabels(const LabelSolverInput& input, const LabelSolverConfig& config) -> LabelSolverBuild
@@ -249,7 +193,6 @@ auto SolveLabels(const LabelSolverInput& input, const LabelSolverConfig& config)
     const std::size_t label_id = labels.size();
     labels.push_back(std::move(candidate));
     frontier.push_back(label_id);
-    TrimStateFrontier(frontier, labels, config.max_labels_per_state);
     result.summary.retained_label_count = labels.size();
     return true;
   };

@@ -81,7 +81,6 @@ class RTInterface
   void runERT(std::map<std::string, std::any> config_map);
   void runRT();
   void destroyRT();
-  void cleanDef();
 #endif
 
 #endif
@@ -146,12 +145,6 @@ class RTInterface
   ids::Shape getIDSShape(int32_t net_idx, LayerRect layer_rect, bool is_routing);
 #endif
 
-#if 1  // iSTA
-  void updateTiming(std::vector<std::map<std::string, std::vector<LayerCoord>>>& real_pin_coord_map_list,
-                    std::vector<std::vector<Segment<LayerCoord>>>& routing_segment_list_list,
-                    std::map<std::string, std::map<std::string, double>>& clock_timing);
-#endif
-
 #endif
 
  private:
@@ -164,6 +157,8 @@ class RTInterface
   RTInterface& operator=(const RTInterface& other) = delete;
   RTInterface& operator=(RTInterface&& other) = delete;
   // function
+  void initRegionRoute();
+  void runRoutingFlow();
 };
 
 }  // namespace irt

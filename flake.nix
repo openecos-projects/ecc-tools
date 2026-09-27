@@ -10,7 +10,6 @@
       zlib,
       tcl,
       boost191,
-      fetchurl,
       eigen,
       libunwind,
       glog,
@@ -26,24 +25,7 @@
       bison,
       patchelf,
       pkg-config,
-    }: let
-      # nixpkgs has not packaged Boost 1.92 yet; override 1.91 with the
-      # 1.92.0 source tarball.  CMake requires exactly 1.92.0.
-      boost192 = boost191.overrideAttrs (oldAttrs: {
-        version = "1.92.0";
-        src = fetchurl {
-          url = "https://archives.boost.io/release/1.92.0/source/boost_1_92_0.tar.bz2";
-          sha256 = "5c1d40cb8e19adbf740a4ec2da35b3e58f3f5804b1dce44deb53df72193cbc6c";
-        };
-        # Drop the context backport patches — they target < 1.92 / < 1.93
-        # and conflict with fixes already present in the 1.92 sources.
-        patches = builtins.filter
-          (p:
-            builtins.isNull (builtins.match ".*0921b9fd.*" (toString p))
-            && builtins.isNull (builtins.match ".*58832123.*" (toString p)))
-          oldAttrs.patches or [ ];
-      });
-    in python3Packages.buildPythonPackage rec {
+    }: python3Packages.buildPythonPackage rec {
       name = "ecc-tools-bin";
       format = "pyproject";
 
@@ -70,7 +52,7 @@
         stdenv.cc.cc.lib
         zlib
         tcl
-        boost192
+        boost191
         eigen
         libunwind
         glog
@@ -100,8 +82,22 @@
     };
   in flake-parts.lib.mkFlake { inherit inputs; } {
     systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
-    perSystem = { self', pkgs, system, ... }: {
-      packages.default = pkgs.callPackage ecc-tools-bin {};
+    perSystem = { self', pkgs, system, ... }: let
+      boost191 = pkgs.lib.fix (self:
+        pkgs.callPackage "${pkgs.path}/pkgs/development/libraries/boost/generic.nix" {
+          version = "1.91.0";
+          src = pkgs.fetchurl {
+            urls = [
+              "https://archives.boost.io/release/1.91.0/source/boost_1_91_0.tar.bz2"
+            ];
+            sha256 = "de5e6b0e4913395c6bdfa90537febd9028ea4c0735d2cdb0cd9b45d5f51264f5";
+          };
+          boost-build = pkgs.boost-build.override {
+            useBoost = self;
+          };
+        });
+    in {
+      packages.default = pkgs.callPackage ecc-tools-bin { inherit boost191; };
       devShells.default = pkgs.mkShell.override {
         stdenv = pkgs.ccacheStdenv;
       } {

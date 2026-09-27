@@ -18,6 +18,8 @@
 
 #include <pybind11/pybind11.h>
 
+#include <cstdint>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -30,17 +32,17 @@ bool initLef(const std::vector<std::string>& lef_paths);
 bool initDef(const std::string& def_path);
 bool initVerilog(const std::string& verilog_path, const std::string& top_module);
 bool initLvsVerilog(const std::string& verilog_path, const std::string& top_module);
-bool initLib(const std::vector<std::string>& lib_paths);
+bool initLib(const std::vector<std::string>& lib_paths, std::optional<int32_t> thread_number = std::nullopt);
 bool initSdc(const std::string& sdc_path);
 bool initSpef(const std::string& spef_path);
 bool initVcd(const std::string& vcd_path);
 bool saveDef(const std::string& def_name);
 bool saveMacroTCL(const std::string& tcl_name);
 bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_cell_names = {}, bool is_add_space_for_escape_name = false);
-bool saveGDSII(const std::string& gds_name, bool is_harden = false);
+bool saveGDSII(const std::string& gds_name, const std::string& layer_map_path);
 bool saveJson(const std::string& path);
 bool saveViewJson(const std::string& output_dir, const std::string& json_format = "pretty", bool compress = false);
-bool saveGeometrySnapshot(const std::string& output_dir);
+bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc = false);
 bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,
                    const std::string& source = "", const std::string& placement_status = "fixed", bool create_if_missing = true);
 bool initializeGeometrySession();

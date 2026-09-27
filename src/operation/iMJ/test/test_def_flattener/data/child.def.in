@@ -1,0 +1,45 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN CHILD ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 10000 6000 ) ;
+
+COMPONENTS 1 ;
+  - u_mid MID + FIXED ( 1000 2000 ) W ;
+END COMPONENTS
+
+PINS 4 ;
+  - IN + NET n_in + DIRECTION INPUT + USE SIGNAL
+    + PORT
+      + LAYER M1 ( 0 -100 ) ( 100 100 )
+    + FIXED ( 0 1000 ) N ;
+  - OUT + NET n_out + DIRECTION OUTPUT + USE SIGNAL
+    + PORT
+      + LAYER M1 ( -100 -100 ) ( 0 100 )
+    + FIXED ( 10000 1000 ) N ;
+  - VPWR + NET VPWR + DIRECTION INOUT + USE POWER
+    + PORT
+      + LAYER M1 ( 0 -100 ) ( 0 100 )
+    + FIXED ( 5000 5000 ) N ;
+  - VGND + NET VGND + DIRECTION INOUT + USE GROUND
+    + PORT
+      + LAYER M1 ( 0 -100 ) ( 0 100 )
+    + FIXED ( 5000 0 ) N ;
+END PINS
+
+SPECIALNETS 2 ;
+  - VPWR ( PIN VPWR ) ( u_mid VPWR ) + USE POWER
+    + ROUTED M1 100 ( 0 5000 ) ( 10000 5000 ) ;
+  - VGND ( PIN VGND ) ( u_mid VGND ) + USE GROUND
+    + ROUTED M1 100 ( 0 0 ) ( 10000 0 ) ;
+END SPECIALNETS
+
+NETS 2 ;
+  - n_in ( PIN IN ) ( u_mid IN ) + USE SIGNAL
+    + ROUTED M1 ( 0 1000 ) ( 1000 1000 ) ;
+  - n_out ( u_mid OUT ) ( PIN OUT ) + USE SIGNAL
+    + ROUTED M1 ( 2000 1000 ) ( 10000 1000 ) ;
+END NETS
+
+END DESIGN

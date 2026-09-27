@@ -74,6 +74,7 @@ class CharacterizationLibrary
     std::optional<double> wirelength_unit_um = std::nullopt;
     std::optional<unsigned> wirelength_iterations = std::nullopt;
     std::optional<std::vector<unsigned>> wirelength_indices = std::nullopt;
+    bool use_boundary_primitive_patterns = false;
     std::optional<double> max_slew_ns = std::nullopt;
     std::optional<double> max_cap_pf = std::nullopt;
     std::vector<std::string> buffer_types;

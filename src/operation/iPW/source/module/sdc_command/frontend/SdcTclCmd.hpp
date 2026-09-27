@@ -1,0 +1,63 @@
+// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+#pragma once
+
+#include "PWHeader.hpp"
+#include "ScriptEngine.hh"
+
+namespace ipw::sdc {
+
+class SdcTclCmd : public ecc::TclCmd
+{
+ public:
+  SdcTclCmd(const char* cmd_name);
+  ~SdcTclCmd() override = default;
+
+  int execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[]);
+
+ protected:
+  void setOptionValue(ecc::TclOption* option, const char* value);
+  void setTclError(std::string error_message) { _error_message = std::move(error_message); }
+  void warn(const std::string& message) const;
+  void setResult(std::vector<std::string> result);
+ private:
+  void resetExecutionState();
+  void setInterpreterError(Tcl_Interp* interp) const;
+
+  std::string _error_message;
+  std::vector<std::string> _list_result;
+  bool _has_list_result = false;
+};
+
+template <typename Command>
+int executeTclCommand(ClientData, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
+{
+  if (objc == 0) {
+    Tcl_SetObjResult(interp, Tcl_NewStringObj("empty Tcl command", -1));
+    return TCL_ERROR;
+  }
+
+  try {
+    Command command(Tcl_GetString(objv[0]));
+    return command.execute(interp, objc, objv);
+  } catch (const std::exception& error) {
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(error.what(), -1));
+    return TCL_ERROR;
+  }
+}
+
+}  // namespace ipw::sdc

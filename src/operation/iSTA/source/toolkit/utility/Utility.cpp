@@ -45,24 +45,6 @@ void Utility::destroyInst()
   }
 }
 
-// Keep candidates with different false-path applicability in separate arrival tags.
-// A false worst path must not hide a slower/faster valid path from the same clock.
-std::string Utility::getPathStateTag(Database& database, std::string_view start, std::string_view clock)
-{
-  std::string tag(clock);
-  if (getLaunchClockTransition(database, start) == TransType::kFall) {
-    tag += "\x1e";
-  }
-  std::size_t index = 0;
-  for (const TimingException& exception : database.get_timing_constraint().get_false_path_list()) {
-    if (!exception.get_from_objects().empty() && matchesTimingObjects(database, exception.get_from_objects(), start, clock, true)) {
-      tag += "\x1f" + std::to_string(index);
-    }
-    ++index;
-  }
-  return tag;
-}
-
 TransType Utility::getLaunchClockTransition(Database& database, std::string_view start)
 {
   const auto pin = database.get_pin_map().find(std::string(start));
@@ -113,55 +95,6 @@ double Utility::getClockEdgeSeparation(double launch_period, double capture_peri
     return separation == 0 ? interval : separation;
   }
   return separation == 0 ? 0 : separation - interval;
-}
-
-bool Utility::isFalsePath(Database& database, std::string_view start, std::string_view launch_clock, std::string_view end, std::string_view capture_clock,
-                          AnalysisType type)
-{
-  for (const TimingClockGroup& relation : database.get_timing_constraint().get_clock_group_list()) {
-    if (relation.get_allow_paths() || launch_clock.empty() || capture_clock.empty()) {
-      continue;
-    }
-    int launch_group = -1;
-    int capture_group = -1;
-    const std::vector<std::set<std::string>>& groups = relation.get_groups();
-    for (std::size_t i = 0; i < groups.size(); ++i) {
-      if (groups[i].contains(std::string(launch_clock))) {
-        launch_group = static_cast<int>(i);
-      }
-      if (groups[i].contains(std::string(capture_clock))) {
-        capture_group = static_cast<int>(i);
-      }
-    }
-    if (launch_group != capture_group && ((launch_group >= 0 && capture_group >= 0) || groups.size() == 1)) {
-      return true;
-    }
-  }
-  for (const TimingException& exception : database.get_timing_constraint().get_false_path_list()) {
-    if ((type == AnalysisType::kMax && exception.get_setup()) || (type == AnalysisType::kMin && exception.get_hold())) {
-      if (matchesTimingObjects(database, exception.get_from_objects(), start, launch_clock, true)
-          && matchesTimingObjects(database, exception.get_to_objects(), end, capture_clock, false)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-bool Utility::matchesTimingObjects(Database& database, const std::set<std::string>& objects, std::string_view pin_name, std::string_view clock_name, bool start)
-{
-  if (objects.empty() || objects.contains(std::string(pin_name)) || objects.contains(std::string(clock_name))) {
-    return true;
-  }
-  const auto pin = database.get_pin_map().find(std::string(pin_name));
-  if (pin == database.get_pin_map().end() || pin->second.get_is_port()) {
-    return false;
-  }
-  const auto instance = database.get_instance_map().find(pin->second.get_instance_name());
-  if (instance == database.get_instance_map().end()) {
-    return false;
-  }
-  return objects.contains(instance->first) || (start && objects.contains(instance->second.get_clock_pin_name()));
 }
 
 // private

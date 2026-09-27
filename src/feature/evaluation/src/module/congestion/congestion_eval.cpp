@@ -34,49 +34,13 @@ namespace ieval {
 CongestionEval* CongestionEval::_congestion_eval = nullptr;
 
 namespace {
-std::vector<int32_t> parseCsvInts(const std::string& line)
-{
-  std::vector<int32_t> values;
-  std::istringstream iss(line);
-  std::string value;
-  while (std::getline(iss, value, ',')) {
-    if (!value.empty()) {
-      values.push_back(std::stoi(value));
-    }
-  }
-  return values;
-}
-
 void writeEGRLayoutCsv(const std::string& rt_dir_path, const std::string& map_dir, const std::vector<std::vector<double>>& matrix)
 {
   if (matrix.empty() || matrix.front().empty()) {
     return;
   }
-
-  std::ifstream gcell_file(rt_dir_path + "/early_router/gcell.info");
-  if (!gcell_file.is_open()) {
-    return;
-  }
-
-  const int32_t matrix_rows = static_cast<int32_t>(matrix.size());
-  const int32_t matrix_cols = static_cast<int32_t>(matrix.front().size());
-  std::vector<MapLayoutCell> cells;
-  std::string line;
-  while (std::getline(gcell_file, line)) {
-    std::vector<int32_t> row = parseCsvInts(line);
-    if (row.size() < 6) {
-      continue;
-    }
-
-    int32_t grid_x = row[0];
-    int32_t grid_y = row[1];
-    if (grid_x < 0 || grid_x >= matrix_rows || grid_y < 0 || grid_y >= matrix_cols) {
-      continue;
-    }
-    cells.push_back({grid_x, grid_y, grid_x, grid_y, row[2], row[3], row[4], row[5]});
-  }
-
-  writeMapLayoutCsv(map_dir, cells);
+  ieval::writeEGRLayoutCsv(map_dir, rt_dir_path + "/early_router/gcell.info", static_cast<int32_t>(matrix.front().size()),
+                          static_cast<int32_t>(matrix.size()));
 }
 }  // namespace
 

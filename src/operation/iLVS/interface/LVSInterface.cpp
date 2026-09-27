@@ -160,6 +160,7 @@ void LVSInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
 void LVSInterface::wrapDatabase()
 {
+  Monitor wrap_monitor;
   if (dmInst->get_config().get_def_path().empty()) {
     LVSLOG.error(Loc::current(), "Direct iLVS database wrapping requires def_init before init_lvs.");
   }
@@ -170,8 +171,12 @@ void LVSInterface::wrapDatabase()
     LVSLOG.error(Loc::current(), "Direct iLVS requires both netlist and DEF IDB design views.");
   }
 
+  Monitor netlist_monitor;
   NetlistData netlist_data = wrapNetlistData(netlist_idb_design);
+  LVSLOG.info(Loc::current(), "Wrapped netlist IDB view", netlist_monitor.getStatsInfo());
+  Monitor def_monitor;
   DefData def_data = wrapDefData(def_idb_design);
+  LVSLOG.info(Loc::current(), "Wrapped DEF IDB view", def_monitor.getStatsInfo());
   if (netlist_data.get_design_name().empty() || def_data.get_design_name().empty()) {
     LVSLOG.error(Loc::current(), "Direct iLVS IDB views must both contain a design name.");
   }
@@ -180,20 +185,24 @@ void LVSInterface::wrapDatabase()
   }
 
   Database& database = LVSDM.getDatabase();
+  Monitor transfer_monitor;
   database.set_netlist_data(std::move(netlist_data));
   database.set_def_data(std::move(def_data));
+  LVSLOG.info(Loc::current(), "Installed iLVS IDB views", transfer_monitor.getStatsInfo());
   if (netlist_idb_design == def_idb_design) {
     LVSLOG.info(Loc::current(), "Using the temporary shared DEF IDB design for both netlist and DEF views.");
   }
   LVSLOG.info(Loc::current(), "Wrapped direct iLVS IDB views: netlist_nets=", database.get_netlist_data().get_net_map().size(),
               " def_nets=", database.get_def_data().get_net_map().size(),
-              " def_routing_nets=", database.get_def_data().get_def_routing_data().get_net_routing_data_map().size(), ".");
+              " def_routing_nets=", database.get_def_data().get_def_routing_data().get_net_routing_data_map().size(), ".",
+              wrap_monitor.getStatsInfo());
 }
 
 NetlistData LVSInterface::wrapNetlistData(idb::IdbDesign* design)
 {
   NetlistData netlist_data;
   wrapDesignData(design, netlist_data);
+  wrapPowerGroundTerminal(design, netlist_data);
   return netlist_data;
 }
 
@@ -228,7 +237,6 @@ void LVSInterface::wrapDesignData(idb::IdbDesign* design, DesignData& design_dat
   wrapInstanceList(design, design_data);
   wrapIOPinList(design, design_data);
   wrapNetList(design, design_data);
-  wrapPowerGroundTerminal(design, design_data);
 }
 
 void LVSInterface::wrapInstanceList(idb::IdbDesign* design, DesignData& design_data)
@@ -238,6 +246,7 @@ void LVSInterface::wrapInstanceList(idb::IdbDesign* design, DesignData& design_d
   }
 
   if (idb::IdbInstanceList* instance_list = design->get_instance_list(); instance_list != nullptr) {
+    design_data.get_instance_name_set().reserve(instance_list->get_instance_list().size());
     for (idb::IdbInstance* instance : instance_list->get_instance_list()) {
       if (instance != nullptr) {
         wrapInstance(instance, design_data);
@@ -261,7 +270,7 @@ void LVSInterface::wrapIOPinList(idb::IdbDesign* design, DesignData& design_data
 
   if (idb::IdbPins* io_pin_list = design->get_io_pin_list(); io_pin_list != nullptr) {
     for (idb::IdbPin* pin : io_pin_list->get_pin_list()) {
-      std::string terminal_name = wrapDesignTerminal(pin, design_data);
+      std::string terminal_name = wrapDesignTerminal(pin);
       if (!terminal_name.empty()) {
         design_data.get_io_terminal_name_list().push_back(terminal_name);
       }
@@ -269,7 +278,7 @@ void LVSInterface::wrapIOPinList(idb::IdbDesign* design, DesignData& design_data
   }
 }
 
-std::string LVSInterface::wrapDesignTerminal(idb::IdbPin* pin, DesignData& design_data)
+std::string LVSInterface::wrapDesignTerminal(idb::IdbPin* pin)
 {
   if (pin == nullptr) {
     return "";
@@ -278,7 +287,6 @@ std::string LVSInterface::wrapDesignTerminal(idb::IdbPin* pin, DesignData& desig
   if (terminal_name.empty()) {
     return "";
   }
-  design_data.get_terminal_connect_type_map()[terminal_name] = ConnectType::kNone;
   return terminal_name;
 }
 
@@ -289,34 +297,32 @@ void LVSInterface::wrapNetList(idb::IdbDesign* design, DesignData& design_data)
   }
 
   if (idb::IdbNetList* net_list = design->get_net_list(); net_list != nullptr) {
+    design_data.get_net_map().reserve(net_list->get_net_list().size());
     for (idb::IdbNet* idb_net : net_list->get_net_list()) {
       if (idb_net == nullptr) {
         continue;
       }
       std::string net_name = idb_net->get_net_name();
       Net net;
-      wrapNetPinList(idb_net->get_io_pins(), net, design_data);
-      wrapNetPinList(idb_net->get_instance_pin_list(), net, design_data);
+      wrapNetPinList(idb_net->get_io_pins(), net);
+      wrapNetPinList(idb_net->get_instance_pin_list(), net);
       design_data.get_net_map()[net_name] = std::move(net);
     }
   }
 }
 
-void LVSInterface::wrapNetPinList(idb::IdbPins* pin_list, Net& net, DesignData& design_data)
+void LVSInterface::wrapNetPinList(idb::IdbPins* pin_list, Net& net)
 {
   if (pin_list == nullptr) {
     return;
   }
 
   for (idb::IdbPin* pin : pin_list->get_pin_list()) {
-    std::string terminal_name = wrapDesignTerminal(pin, design_data);
+    std::string terminal_name = wrapDesignTerminal(pin);
     if (terminal_name.empty()) {
       continue;
     }
     net.get_terminal_name_list().push_back(terminal_name);
-    if (idb::IdbInstance* instance = pin->get_instance(); instance != nullptr) {
-      wrapInstance(instance, design_data);
-    }
   }
 }
 
@@ -326,6 +332,17 @@ void LVSInterface::wrapPowerGroundTerminal(idb::IdbDesign* design, DesignData& d
     return;
   }
 
+  size_t power_ground_net_num = 0;
+  for (idb::IdbSpecialNet* special_net : design->get_special_net_list()->get_net_list()) {
+    if (special_net != nullptr && (special_net->is_vdd() || special_net->is_vss())) {
+      power_ground_net_num++;
+    }
+  }
+  if (power_ground_net_num > 0 && design->get_instance_list() != nullptr) {
+    constexpr size_t kTypicalPowerGroundNetNum = 2;
+    size_t reserve_net_num = std::min(power_ground_net_num, kTypicalPowerGroundNetNum);
+    design_data.get_terminal_connect_type_map().reserve(design->get_instance_list()->get_instance_list().size() * reserve_net_num);
+  }
   for (idb::IdbSpecialNet* special_net : design->get_special_net_list()->get_net_list()) {
     if (special_net == nullptr || (!special_net->is_vdd() && !special_net->is_vss())) {
       continue;
@@ -387,6 +404,7 @@ void LVSInterface::wrapNetRoutingData(idb::IdbDesign* design, DefData& def_data)
 
   DefRoutingData& def_routing_data = def_data.get_def_routing_data();
   if (idb::IdbNetList* net_list = design->get_net_list(); net_list != nullptr) {
+    def_routing_data.get_net_routing_data_map().reserve(net_list->get_net_list().size());
     for (idb::IdbNet* idb_net : net_list->get_net_list()) {
       if (idb_net == nullptr) {
         continue;
@@ -443,13 +461,11 @@ void LVSInterface::wrapRoutingDataPin(const std::string& net_name, idb::IdbPin* 
   if (terminal_name.empty()) {
     return;
   }
-  ConnectType connect_type = ConnectType::kNone;
   if (is_power_net) {
-    connect_type = ConnectType::kPower;
+    def_data.get_terminal_connect_type_map()[terminal_name] = ConnectType::kPower;
   } else if (is_ground_net) {
-    connect_type = ConnectType::kGround;
+    def_data.get_terminal_connect_type_map()[terminal_name] = ConnectType::kGround;
   }
-  def_data.get_terminal_connect_type_map()[terminal_name] = connect_type;
   if (!pin->is_io_pin()) {
     if (is_power_net) {
       def_routing_data.get_power_instance_pin_net_map()[terminal_name] = net_name;
@@ -510,6 +526,11 @@ void LVSInterface::wrapSpecialNetRoutingData(idb::IdbDesign* design, DefData& de
 
   DefRoutingData& def_routing_data = def_data.get_def_routing_data();
   if (idb::IdbSpecialNetList* special_net_list = design->get_special_net_list(); special_net_list != nullptr) {
+    if (design->get_instance_list() != nullptr) {
+      size_t instance_num = design->get_instance_list()->get_instance_list().size();
+      def_routing_data.get_power_instance_pin_net_map().reserve(instance_num);
+      def_routing_data.get_ground_instance_pin_net_map().reserve(instance_num);
+    }
     for (idb::IdbSpecialNet* special_net : special_net_list->get_net_list()) {
       if (special_net == nullptr) {
         continue;

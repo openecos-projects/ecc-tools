@@ -1,3 +1,5 @@
+find_package(Threads REQUIRED)
+
 add_library(idm
     idm.cpp
     idm_init.cpp
@@ -24,6 +26,8 @@ target_link_libraries(idm
     spef
     vcd
     ecc_logger
+    PRIVATE
+    Threads::Threads
     )
 
 target_include_directories(idm

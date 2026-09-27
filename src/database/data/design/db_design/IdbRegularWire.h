@@ -31,7 +31,9 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #include <iostream>
 #include <map>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -90,6 +92,8 @@ class IdbRegularWireSegment
   const bool is_rect() { return _is_rect; }
   IdbRect* get_delta_rect() { return _delta_rect; }
   IdbRect get_segment_rect();
+  IdbRect get_wire_rect();
+  std::optional<int32_t> get_point_ext(IdbCoordinate<int32_t>* point);
 
   // setter
   void set_layer_status(bool is_new) { _is_new_layer = is_new; }
@@ -99,6 +103,7 @@ class IdbRegularWireSegment
   void init_point_list(int32_t size) { _point_list.reserve(size); }
   IdbCoordinate<int32_t>* add_point(int32_t x, int32_t y);
   IdbCoordinate<int32_t>* add_virtual_point(int32_t x, int32_t y);
+  IdbCoordinate<int32_t>* add_flush_point(int32_t x, int32_t y, int32_t ext);
   void set_is_via(bool is_via) { _is_via = is_via; }
   void set_via_list(vector<IdbVia*> via_list);
   vector<IdbVia*> take_via_list();
@@ -131,6 +136,8 @@ class IdbRegularWireSegment
 
   std::unordered_set<IdbCoordinate<int32_t>*> _virtual_points;
   vector<IdbCoordinate<int32_t>*> _point_list;
+  /// per-point DEF flush extension `( x y ext )`; a point absent from the map carries no ext
+  std::unordered_map<IdbCoordinate<int32_t>*, int32_t> _point_ext_map;
 
   /// connection check
   bool isConnectWireToWire(IdbRegularWireSegment* segment);

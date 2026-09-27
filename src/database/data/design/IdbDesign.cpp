@@ -1316,7 +1316,6 @@ bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point
     for (IdbCoordinate<int32_t>* pt : point_list) {
       ECCLOG.info(ecc::Loc::current(), " ( ", pt->get_x(), " , ", pt->get_y(), " )");
     }
-    ECCLOG.info(ecc::Loc::current(), "");
     return false;
   }
 

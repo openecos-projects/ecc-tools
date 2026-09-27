@@ -67,11 +67,13 @@ class DetailedRouter
   void initDRBoxMap(DRModel& dr_model);
   void resetRoutingState(DRModel& dr_model);
   void buildBoxSchedule(DRModel& dr_model);
+  void splitNetResultByGCell(DRModel& dr_model);
   void splitNetResult(DRModel& dr_model);
   std::set<DRBoxId, CmpDRBoxId> getDRBoxIdSet(DRModel& dr_model, PlanarRect real_rect);
   void routeDRBoxMap(DRModel& dr_model);
   void routeDRBoxList(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   void routeDRBox(DRModel& dr_model, DRBox& dr_box);
+  void rerouteCleanDRBox(DRModel& dr_model, DRBox& dr_box);
   void freeDRBoxMap(DRModel& dr_model);
   void updateRouteViolation(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   void buildFixedRect(DRBox& dr_box);
@@ -86,17 +88,6 @@ class DetailedRouter
   void buildNetTaskList(DRModel& dr_model, DRBox& dr_box, int32_t net_idx);
   void buildRouteViolation(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   bool needRouting(DRBox& dr_box);
-  void buildRefineTaskList(DRModel& dr_model, DRBox& dr_box);
-  void selectRefineNetList(DRBox& dr_box);
-  void refineCleanNets(DRBox& dr_box);
-  bool hasCoveredOutsideBoxAccessPoint(DRBox& dr_box, int32_t net_idx);
-  bool coverRefineTerminals(DRBox& dr_box, int32_t net_idx, std::vector<Segment<LayerCoord>>& old_result_list,
-                            const std::vector<EXTLayerRect>& old_patch_list);
-  bool hasNetBoxViolation(DRBox& dr_box, int32_t net_idx, const std::vector<Violation>& violation_list);
-  double getNetResultCost(const std::vector<Segment<LayerCoord>>& result_list, const std::vector<EXTLayerRect>& patch_list,
-                          const DRIterParam& dr_iter_param);
-  double getResultCost(const std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_result_map,
-                       const std::map<int32_t, std::vector<EXTLayerRect>>& net_patch_map, const DRIterParam& dr_iter_param);
   void buildDRBoxGraph(DRBox& dr_box);
   void buildBoxTrackAxis(DRBox& dr_box);
   void buildLayerNodeMap(DRBox& dr_box);
@@ -107,7 +98,7 @@ class DetailedRouter
   void buildDRShapeIndex(DRBox& dr_box);
   void updateNetShapeIndex(DRBox& dr_box, int32_t net_idx);
   void exemptPinShape(DRModel& dr_model, DRBox& dr_box);
-  void routeDRBox(DRBox& dr_box);
+  bool routeDRBox(DRBox& dr_box);
   std::vector<int32_t> initTaskSchedule(DRBox& dr_box, std::vector<int32_t>& net_route_order_list);
   void updateGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, std::vector<Segment<LayerCoord>>& segment_list,
                    std::vector<EXTLayerRect>& patch_list);
@@ -174,6 +165,14 @@ class DetailedRouter
   void updateBestResult(DRModel& dr_model);
   bool stopIteration(DRModel& dr_model, std::vector<DRIterParam>& dr_iter_param_list);
   void selectBestResult(DRModel& dr_model);
+  void repairViolation(DRModel& dr_model, std::vector<DRIterParam>& repair_iter_param_list);
+  std::vector<PlanarRect> getRepairBoxRectList(DRModel& dr_model, int32_t expand_size);
+  void mergeRepairBoxRectList(std::vector<PlanarRect>& repair_box_rect_list);
+  void initRepairDRBox(DRModel& dr_model, DRBox& dr_box, const PlanarRect& grid_rect, int32_t repair_iter, int32_t box_idx);
+  void splitRepairBoxResult(DRModel& dr_model, DRBox& dr_box);
+  void buildRepairNetEnvironment(DRModel& dr_model, DRBox& dr_box);
+  void buildRepairRouteViolation(DRModel& dr_model, DRBox& dr_box);
+  void updateRepairDRModel(DRModel& dr_model, DRBox& dr_box);
   void patchFinalMinArea(DRModel& dr_model);
   void buildFinalPatchBox(DRModel& dr_model, DRBox& dr_box, const std::set<Violation*, CmpViolation>& patch_violation_set);
   void updateFinalPatch(DRBox& dr_box, std::map<int32_t, std::set<LayerRect, CmpLayerRectByXASC>>& uploaded_patch_map,

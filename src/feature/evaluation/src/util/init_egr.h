@@ -56,7 +56,7 @@ class InitEGR
   bool _thread_number_override_set = false;
   int _thread_number_override = 128;
   int _output_inter_result_override = 1;
-  std::string _stage_override = "egr2D";
+  std::string _stage_override = "egr3D";
   std::string _resolve_congestion_override = "low";
 };
 

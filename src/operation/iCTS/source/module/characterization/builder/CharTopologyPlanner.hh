@@ -18,18 +18,18 @@
  * @file CharTopologyPlanner.hh
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-05-20
- * @brief CharBuilder topology planner. Converts a TopologyBits bitset into a
+ * @brief CharBuilder topology planner. Converts a slot-selection vector into a
  *        concrete TopologyDesc (ordered wire-segment lengths interleaved with
  *        buffer slot indices, plus the terminal-branch-buffer flag).
  */
 
 #pragma once
 
+#include "characterization/builder/CharBuilderImpl.hh"
+
 namespace icts::char_builder::detail {
 
-class CharBuilderImpl;
-struct TopologyDesc;
-struct TopologyBits;
+auto BuildTopologyDesc(double wirelength_um, double length_unit_um, const TopologySlotSelection& selected_slots) -> TopologyDesc;
 
 class CharTopologyPlanner
 {
@@ -39,7 +39,7 @@ class CharTopologyPlanner
   CharTopologyPlanner(const CharTopologyPlanner&) = delete;
   auto operator=(const CharTopologyPlanner&) -> CharTopologyPlanner& = delete;
 
-  auto buildTopologyDesc(double wirelength_um, unsigned num_slots, TopologyBits topology_bits) const -> TopologyDesc;
+  auto buildTopologyDesc(double wirelength_um, const TopologySlotSelection& selected_slots) const -> TopologyDesc;
 
  private:
   CharBuilderImpl& _impl;

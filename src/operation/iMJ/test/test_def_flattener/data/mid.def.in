@@ -1,0 +1,45 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN MID ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 4000 3000 ) ;
+
+COMPONENTS 1 ;
+  - u_leaf LEAF + FIXED ( 500 1000 ) N ;
+END COMPONENTS
+
+PINS 4 ;
+  - IN + NET n_in + DIRECTION INPUT + USE SIGNAL
+    + PORT
+      + LAYER M1 ( 0 -100 ) ( 100 100 )
+    + FIXED ( 0 1000 ) N ;
+  - OUT + NET n_out + DIRECTION OUTPUT + USE SIGNAL
+    + PORT
+      + LAYER M1 ( -100 -100 ) ( 0 100 )
+    + FIXED ( 4000 1000 ) N ;
+  - VPWR + NET VPWR + DIRECTION INOUT + USE POWER
+    + PORT
+      + LAYER M1 ( 0 -100 ) ( 0 100 )
+    + FIXED ( 2000 2500 ) N ;
+  - VGND + NET VGND + DIRECTION INOUT + USE GROUND
+    + PORT
+      + LAYER M1 ( 0 -100 ) ( 0 100 )
+    + FIXED ( 2000 0 ) N ;
+END PINS
+
+SPECIALNETS 2 ;
+  - VPWR ( PIN VPWR ) ( u_leaf VPWR ) + USE POWER
+    + ROUTED M1 100 ( 0 2500 ) ( 4000 2500 ) ;
+  - VGND ( PIN VGND ) ( u_leaf VGND ) + USE GROUND
+    + ROUTED M1 100 ( 0 0 ) ( 4000 0 ) ;
+END SPECIALNETS
+
+NETS 2 ;
+  - n_in ( PIN IN ) ( u_leaf A ) + USE SIGNAL
+    + ROUTED M1 ( 0 1000 ) ( 500 1000 ) ;
+  - n_out ( u_leaf Y ) ( PIN OUT ) + USE SIGNAL
+    + ROUTED M1 ( 1500 1000 ) ( 4000 1000 ) ;
+END NETS
+
+END DESIGN

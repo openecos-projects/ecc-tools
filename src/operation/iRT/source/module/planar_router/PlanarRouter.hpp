@@ -164,7 +164,7 @@ class PlanarRouter
   std::vector<Segment<PlanarCoord>> getOverflowPlanarTopoList(PRNet& pr_net, const std::vector<Segment<PlanarCoord>>& unit_segment_list,
                                                               const std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC>& coord_edge_idx_map,
                                                               const std::vector<int32_t>& rip_up_distance_list);
-  bool shouldUseCongestionFlute(double overflow_unit, const PRNet& pr_net, size_t unique_pin_num);
+  bool shouldRefineTopology(double overflow_unit, const PRNet& pr_net, size_t unique_pin_num);
   std::vector<Segment<PlanarCoord>> getPlanarTopoList(double overflow_unit, PRNet& pr_net, PRTopoMode pr_topo_mode);
 
   // A* route

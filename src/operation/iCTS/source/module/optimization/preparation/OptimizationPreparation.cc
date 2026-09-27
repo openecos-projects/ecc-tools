@@ -81,14 +81,15 @@ auto BuildClockRouteGeometry(const ClockLayout& clock_layout, std::size_t clock_
   return route_geometry;
 }
 
-auto CaptureGraphProfile(const FastSTA& fast_sta, FastStaClockId clock_id) -> ClockSizingRuntimeProfile
+auto CaptureGraphProfile(const FastSTA& fast_sta, FastStaContextId context_id) -> ClockSizingRuntimeProfile
 {
   ClockSizingRuntimeProfile profile;
-  const auto graph_profile = fast_sta.queryClockGraphProfile(clock_id);
+  const auto graph_profile = fast_sta.queryGraphProfile(context_id);
   if (!graph_profile.has_value()) {
     return profile;
   }
   profile.node_count = graph_profile->node_count;
+  profile.owned_clock_node_count = graph_profile->owned_clock_node_count;
   profile.net_count = graph_profile->net_count;
   profile.sink_count = graph_profile->sink_count;
   profile.buffer_input_count = graph_profile->buffer_input_count;
@@ -99,14 +100,29 @@ auto CaptureGraphProfile(const FastSTA& fast_sta, FastStaClockId clock_id) -> Cl
 auto CopyOuterProfile(ClockSizingRuntimeProfile& destination, const ClockSizingRuntimeProfile& source) -> void
 {
   destination.build_route_tree_cache_s = source.build_route_tree_cache_s;
-  destination.build_fast_sta_context_s = source.build_fast_sta_context_s;
+  destination.build_clock_sizing_context_s = source.build_clock_sizing_context_s;
+  destination.build_clock_sizing_context_cpu_s = source.build_clock_sizing_context_cpu_s;
+  destination.separate_timing_relations_s = source.separate_timing_relations_s;
+  destination.separate_timing_relations_cpu_s = source.separate_timing_relations_cpu_s;
   destination.inject_route_trees_s = source.inject_route_trees_s;
   destination.collect_optimizable_buffers_s = source.collect_optimizable_buffers_s;
+  destination.collect_optimizable_buffers_cpu_s = source.collect_optimizable_buffers_cpu_s;
   destination.collect_cap_baseline_s = source.collect_cap_baseline_s;
+  destination.collect_cap_baseline_cpu_s = source.collect_cap_baseline_cpu_s;
   destination.collect_slew_baseline_s = source.collect_slew_baseline_s;
+  destination.collect_slew_baseline_cpu_s = source.collect_slew_baseline_cpu_s;
   destination.solve_clock_s = source.solve_clock_s;
+  destination.solve_clock_cpu_s = source.solve_clock_cpu_s;
   destination.apply_accepted_edits_s = source.apply_accepted_edits_s;
+  destination.apply_accepted_edits_cpu_s = source.apply_accepted_edits_cpu_s;
+  destination.refresh_timing_contexts_s = source.refresh_timing_contexts_s;
+  destination.refresh_timing_contexts_cpu_s = source.refresh_timing_contexts_cpu_s;
+  destination.finalize_clock_context_s = source.finalize_clock_context_s;
+  destination.finalize_clock_context_cpu_s = source.finalize_clock_context_cpu_s;
+  destination.clock_total_s = source.clock_total_s;
+  destination.clock_total_cpu_s = source.clock_total_cpu_s;
   destination.node_count = source.node_count;
+  destination.owned_clock_node_count = source.owned_clock_node_count;
   destination.net_count = source.net_count;
   destination.sink_count = source.sink_count;
   destination.buffer_input_count = source.buffer_input_count;
@@ -198,34 +214,36 @@ auto FindMasterInfo(const std::vector<ClockSizingBufferMaster>& master_infos, st
   return iter == master_infos.end() ? nullptr : &(*iter);
 }
 
-auto CollectClockSizingCapLimits(const FastSTA& fast_sta, FastStaClockId clock_id) -> std::vector<ClockSizingCapLimit>
+auto CollectClockSizingCapLimits(const FastSTA& fast_sta, FastStaContextId context_id) -> std::vector<ClockSizingCapLimit>
 {
   std::vector<ClockSizingCapLimit> baseline;
-  const auto graph_profile = fast_sta.queryClockGraphProfile(clock_id);
-  if (!graph_profile.has_value()) {
+  const auto scope = fast_sta.queryClockElectricalScope(context_id);
+  if (!scope.has_value()) {
     return baseline;
   }
-  baseline.reserve(graph_profile->net_count);
-  for (FastStaNetId net_id = 0U; net_id < graph_profile->net_count; ++net_id) {
-    const auto cap_status = fast_sta.queryCapStatus(clock_id, net_id);
-    baseline.push_back(ClockSizingCapLimit{.load_cap_pf = cap_status.has_value() ? cap_status->load_cap_pf : 0.0,
+  baseline.reserve(scope->net_ids.size());
+  for (const auto net_id : scope->net_ids) {
+    const auto cap_status = fast_sta.queryCapStatus(context_id, net_id);
+    baseline.push_back(ClockSizingCapLimit{.net_id = net_id,
+                                           .load_cap_pf = cap_status.has_value() ? cap_status->load_cap_pf : 0.0,
                                            .max_cap_pf = cap_status.has_value() ? cap_status->max_cap_pf : 0.0,
                                            .violated = cap_status.has_value() && cap_status->violated});
   }
   return baseline;
 }
 
-auto CollectClockSizingSlewLimits(const FastSTA& fast_sta, FastStaClockId clock_id) -> std::vector<ClockSizingSlewLimit>
+auto CollectClockSizingSlewLimits(const FastSTA& fast_sta, FastStaContextId context_id) -> std::vector<ClockSizingSlewLimit>
 {
   std::vector<ClockSizingSlewLimit> baseline;
-  const auto graph_profile = fast_sta.queryClockGraphProfile(clock_id);
-  if (!graph_profile.has_value()) {
+  const auto scope = fast_sta.queryClockElectricalScope(context_id);
+  if (!scope.has_value()) {
     return baseline;
   }
-  baseline.reserve(graph_profile->node_count);
-  for (FastStaNodeId node_id = 0U; node_id < graph_profile->node_count; ++node_id) {
-    const auto slew_status = fast_sta.querySlewStatus(clock_id, node_id);
-    baseline.push_back(ClockSizingSlewLimit{.slew_ns = slew_status.has_value() ? slew_status->slew_ns : 0.0,
+  baseline.reserve(scope->node_ids.size());
+  for (const auto node_id : scope->node_ids) {
+    const auto slew_status = fast_sta.querySlewStatus(context_id, node_id);
+    baseline.push_back(ClockSizingSlewLimit{.node_id = node_id,
+                                            .slew_ns = slew_status.has_value() ? slew_status->slew_ns : 0.0,
                                             .max_slew_ns = slew_status.has_value() ? slew_status->max_slew_ns : 0.0,
                                             .role = slew_status.has_value() ? slew_status->role : FastStaSlewRole::kUnknown,
                                             .available = slew_status.has_value(),
@@ -234,14 +252,14 @@ auto CollectClockSizingSlewLimits(const FastSTA& fast_sta, FastStaClockId clock_
   return baseline;
 }
 
-auto CollectClockSizingBuffers(const Design& design, const FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingBufferMaster>& master_infos)
-    -> std::vector<ClockSizingBuffer>
+auto CollectClockSizingBuffers(const Design& design, const FastSTA& fast_sta, FastStaContextId context_id,
+                               const std::vector<ClockSizingBufferMaster>& master_infos) -> std::vector<ClockSizingBuffer>
 {
   std::vector<ClockSizingBuffer> buffers;
   if (master_infos.empty()) {
     return buffers;
   }
-  const auto fast_sta_buffers = fast_sta.collectClockSizingBuffers(clock_id);
+  const auto fast_sta_buffers = fast_sta.collectClockSizingBuffers(context_id);
   buffers.reserve(fast_sta_buffers.size());
   for (const auto& fast_sta_buffer : fast_sta_buffers) {
     auto* inst = design.findInst(fast_sta_buffer.inst_name);
@@ -257,8 +275,8 @@ auto CollectClockSizingBuffers(const Design& design, const FastSTA& fast_sta, Fa
   return buffers;
 }
 
-auto InjectRouteTrees(const Design& design, FastSTA& fast_sta, FastStaClockId clock_id, const Clock& clock, const ClockSizingRouteTreeCache& route_tree_by_net)
-    -> bool
+auto InjectRouteTrees(const Design& design, FastSTA& fast_sta, FastStaContextId context_id, const Clock& clock,
+                      const ClockSizingRouteTreeCache& route_tree_by_net) -> bool
 {
   const auto* graph = design.get_clock_dag().graphForClock(&clock);
   if (graph == nullptr) {
@@ -274,17 +292,17 @@ auto InjectRouteTrees(const Design& design, FastSTA& fast_sta, FastStaClockId cl
       return false;
     }
     FastStaClockNetRcTreeCounts rc_tree_counts;
-    if (!fast_sta.injectNetRouteTree(clock_id, *net, route_iter->second, rc_tree_counts)) {
+    if (!fast_sta.injectNetRouteTree(context_id, *net, route_iter->second, rc_tree_counts)) {
       CTSLOG.warn(Loc::current(), "Optimization: fast STA route-tree injection failed for net \"", net->get_name(), "\".");
       return false;
     }
   }
 
-  if (!fast_sta.updateTiming(clock_id)) {
+  if (!fast_sta.updateTiming(context_id)) {
     return false;
   }
 
-  if (!fast_sta.updatePower(clock_id)) {
+  if (!fast_sta.updatePower(context_id)) {
     return false;
   }
   return true;

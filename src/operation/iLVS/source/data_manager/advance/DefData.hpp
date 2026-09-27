@@ -27,7 +27,6 @@ class DefData : public DesignData
 {
  public:
   DefData() = default;
-  ~DefData() = default;
   // getter
   Die& get_die() { return _die; }
   DefRoutingData& get_def_routing_data() { return _def_routing_data; }

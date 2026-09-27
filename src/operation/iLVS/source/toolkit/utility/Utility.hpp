@@ -145,6 +145,18 @@ class Utility
     return getSortedUniqueList(std::move(name_list));
   }
 
+  template <typename TValue>
+  static std::vector<std::string> getSortedKeyNameList(const std::unordered_map<std::string, TValue>& value_map)
+  {
+    std::vector<std::string> name_list;
+    name_list.reserve(value_map.size());
+    for (const auto& [name, value] : value_map) {
+      (void) value;
+      name_list.push_back(name);
+    }
+    return getSortedUniqueList(std::move(name_list));
+  }
+
   template <typename Key, typename Compare = std::less<Key>>
   static bool exist(const std::set<Key, Compare>& set, const Key& key)
   {

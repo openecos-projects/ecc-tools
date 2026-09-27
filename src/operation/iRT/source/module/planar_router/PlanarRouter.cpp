@@ -88,6 +88,7 @@ PlanarRouter* PlanarRouter::_pr_instance = nullptr;
 PRModel PlanarRouter::initPRModel()
 {
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
 
   PRModel pr_model;
   std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
@@ -97,8 +98,10 @@ PRModel PlanarRouter::initPRModel()
     pr_net.set_origin_net(&net);
     pr_net.set_net_idx(net.get_net_idx());
     pr_net.set_connect_type(net.get_connect_type());
-    for (Pin& pin : net.get_pin_list()) {
-      pr_net.get_pr_pin_list().emplace_back(pin);
+    if (region_route.isActiveNet(net.get_net_idx())) {
+      for (Pin& pin : net.get_pin_list()) {
+        pr_net.get_pr_pin_list().emplace_back(pin);
+      }
     }
     pr_net.set_bounding_box(net.get_bounding_box());
   }
@@ -132,8 +135,13 @@ void PlanarRouter::initPRTaskList(PRModel& pr_model)
 {
   std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
   std::vector<PRNet*>& pr_task_list = pr_model.get_pr_task_list();
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
+  bool regional_stage = region_route.get_enable() && region_route.get_is_regional_stage();
   pr_task_list.reserve(pr_net_list.size());
   for (PRNet& pr_net : pr_net_list) {
+    if (regional_stage && pr_net.get_pr_pin_list().size() < 2) {
+      continue;
+    }
     pr_task_list.push_back(&pr_net);
   }
   std::ranges::sort(pr_task_list, CmpPRNet());
@@ -705,7 +713,7 @@ void PlanarRouter::splitLongPlanarTopoList(const PRComParam& pr_com_param, PRNet
 }
 
 bool PlanarRouter::routePlanarTopoList(PRModel& pr_model, PRNet& pr_net, std::vector<Segment<PlanarCoord>>& planar_topo_list, PRRouteMode pr_route_mode,
-                                      std::vector<Segment<PlanarCoord>>& routing_segment_list)
+                                       std::vector<Segment<PlanarCoord>>& routing_segment_list)
 {
   const PRComParam& pr_com_param = pr_model.get_pr_com_param();
   if (pr_route_mode == PRRouteMode::kAllPattern) {
@@ -811,7 +819,7 @@ std::vector<PRCandidate> PlanarRouter::getPRCandidateListByTopo(int32_t expand_s
   return pr_candidate_list;
 }
 
-bool PlanarRouter::shouldUseCongestionFlute(double overflow_unit, const PRNet& pr_net, size_t unique_pin_num)
+bool PlanarRouter::shouldRefineTopology(double overflow_unit, const PRNet& pr_net, size_t unique_pin_num)
 {
   if (unique_pin_num < 3) {
     return false;
@@ -846,9 +854,15 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(double overflo
   tb_task.set_planar_coord_list(planar_coord_list);
   GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   tb_task.set_planar_search_region(PlanarRect(0, 0, gcell_map.get_x_size() - 1, gcell_map.get_y_size() - 1));
-  bool congestion_driven = pr_topo_mode == PRTopoMode::kCongestion && shouldUseCongestionFlute(overflow_unit, pr_net, planar_coord_list.size());
-  tb_task.set_topo_mode(congestion_driven ? TBTopoMode::kCongestion : TBTopoMode::kGeometry);
-  if (!congestion_driven) {
+  tb_task.set_point_legal_query([this](const PlanarCoord& coord) {
+    return std::ranges::none_of(_macro_grid_rect_list, [&](const PlanarRect& macro_rect) {
+      return macro_rect.get_ll_x() <= coord.get_x() && coord.get_x() <= macro_rect.get_ur_x() && macro_rect.get_ll_y() <= coord.get_y()
+             && coord.get_y() <= macro_rect.get_ur_y();
+    });
+  });
+  bool refine_topology = pr_topo_mode == PRTopoMode::kCongestion && shouldRefineTopology(overflow_unit, pr_net, planar_coord_list.size());
+  tb_task.set_topo_mode(refine_topology ? TBTopoMode::kCongestion : TBTopoMode::kGeometry);
+  if (!refine_topology) {
     return RTTB.getPlanarTopoList(tb_task);
   }
 
@@ -1437,22 +1451,16 @@ void PlanarRouter::uploadNetList(PRModel& pr_model, const std::vector<PRNet*>& p
 void PlanarRouter::updateSummary(PRModel& pr_model)
 {
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
-  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
   GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   Summary& summary = RTDM.getDatabase().get_summary();
-  int32_t enable_timing = RTDM.getConfig().enable_timing;
 
   double& total_demand = summary.pr_summary.total_demand;
   double& total_overflow = summary.pr_summary.total_overflow;
   double& total_wire_length = summary.pr_summary.total_wire_length;
-  std::map<std::string, std::map<std::string, double>>& clock_timing_map = summary.pr_summary.clock_timing_map;
-
-  std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
 
   total_demand = 0;
   total_overflow = 0;
   total_wire_length = 0;
-  clock_timing_map.clear();
 
   for (GridMap<RoutingEdge>* routing_edge_map : {&RTDM.getDatabase().get_planar_routing_h_edge_map(), &RTDM.getDatabase().get_planar_routing_v_edge_map()}) {
     for (int32_t x = 0; x < routing_edge_map->get_x_size(); x++) {
@@ -1481,41 +1489,15 @@ void PlanarRouter::updateSummary(PRModel& pr_model)
       }
     }
   }
-  if (enable_timing) {
-    std::vector<std::map<std::string, std::vector<LayerCoord>>> real_pin_coord_map_list;
-    real_pin_coord_map_list.resize(pr_net_list.size());
-    std::vector<std::vector<Segment<LayerCoord>>> routing_segment_list_list;
-    routing_segment_list_list.resize(pr_net_list.size());
-    for (PRNet& pr_net : pr_net_list) {
-      for (PRPin& pr_pin : pr_net.get_pr_pin_list()) {
-        LayerCoord layer_coord = pr_pin.get_access_point().getGridLayerCoord();
-        real_pin_coord_map_list[pr_net.get_net_idx()][pr_pin.get_pin_name()].emplace_back(RTUTIL.getRealRectByGCell(layer_coord, gcell_axis).getMidPoint(), 0);
-      }
-    }
-    for (auto& [net_idx, segment_set] : pr_model.get_net_global_result_map()) {
-      for (Segment<LayerCoord>& segment_value : segment_set) {
-        Segment<LayerCoord>* segment = &segment_value;
-        LayerCoord first_layer_coord = segment->get_first();
-        LayerCoord first_real_coord(RTUTIL.getRealRectByGCell(first_layer_coord, gcell_axis).getMidPoint(), first_layer_coord.get_layer_idx());
-        LayerCoord second_layer_coord = segment->get_second();
-        LayerCoord second_real_coord(RTUTIL.getRealRectByGCell(second_layer_coord, gcell_axis).getMidPoint(), second_layer_coord.get_layer_idx());
-
-        routing_segment_list_list[net_idx].emplace_back(first_real_coord, second_real_coord);
-      }
-    }
-    RTI.updateTiming(real_pin_coord_map_list, routing_segment_list_list, clock_timing_map);
-  }
 }
 
 void PlanarRouter::printSummary(PRModel& pr_model)
 {
   Summary& summary = RTDM.getDatabase().get_summary();
-  int32_t enable_timing = RTDM.getConfig().enable_timing;
 
   double& total_demand = summary.pr_summary.total_demand;
   double& total_overflow = summary.pr_summary.total_overflow;
   double& total_wire_length = summary.pr_summary.total_wire_length;
-  std::map<std::string, std::map<std::string, double>>& clock_timing_map = summary.pr_summary.clock_timing_map;
 
   fort::char_table summary_table;
   {
@@ -1524,19 +1506,7 @@ void PlanarRouter::printSummary(PRModel& pr_model)
     summary_table << fort::header << "total_overflow" << total_overflow << fort::endr;
     summary_table << fort::header << "total_wire_length" << total_wire_length << fort::endr;
   }
-  fort::char_table timing_table;
-  timing_table.set_cell_text_align(fort::text_align::right);
-  if (enable_timing) {
-    timing_table << fort::header << "clock_name"
-                 << "tns"
-                 << "wns"
-                 << "freq" << fort::endr;
-    for (auto& [clock_name, timing_map] : clock_timing_map) {
-      timing_table << clock_name << timing_map["TNS"] << timing_map["WNS"] << timing_map["Freq(MHz)"] << fort::endr;
-    }
-  }
   RTUTIL.printTableList({summary_table});
-  RTUTIL.printTableList({timing_table});
 }
 
 void PlanarRouter::outputGuide(PRModel& pr_model)

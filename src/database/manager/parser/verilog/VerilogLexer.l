@@ -107,11 +107,6 @@ SIMPLE_ID       [A-Za-z_][A-Za-z0-9_$./'-]*
                   return token::CONSTANT;
                 }
 
-"\""([^"\\\n]|\\[^\n])*"\""  {
-                  yylval->emplace<std::string>(yytext);
-                  return token::STRING;
-                }
-
 "module"        { return token::MODULE; }
 "endmodule"     { return token::ENDMODULE; }
 "input"         { return token::INPUT; }

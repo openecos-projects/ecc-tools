@@ -34,6 +34,7 @@ class Config
   int32_t output_timing_reports = 1;
   int32_t output_timing_features = 1;
   int32_t timing_path_limit = 20;
+  int32_t min_slew_degradation = 1;
   std::string timing_corner;
   bool is_path_report_number_specified = false;
   bool has_timing_report_slack_lesser_than = false;
@@ -53,18 +54,12 @@ class Config
   std::string cp_temp_directory_path;  // building
   // ********* TimingPropagator   ********* //
   std::string tp_temp_directory_path;  // building
-  // ********* PowerPropagator    ********* //
-  std::string pp_temp_directory_path;  // building
   // ********** TimingAnalyzer   ********* //
   std::string ta_temp_directory_path;  // building
-  // ********** PowerAnalyzer    ********* //
-  std::string pa_temp_directory_path;  // building
   // ******* TimingCharacterizer ******* //
   std::string tc_temp_directory_path;  // building
   // **********  TimingReporter   ********** //
   std::string tr_temp_directory_path;  // building
-  // **********  PowerReporter    ********** //
-  std::string pr_temp_directory_path;  // building
   // ************  SDFWriter  ************* //
   std::string sw_temp_directory_path;  // building
   /////////////////////////////////////////////

@@ -3,4 +3,5 @@ icts_add_test_executable(
   SOURCES
     ${ICTS_TEST}/data_manager/io/IdbBulkDisconnectTest.cc
     ${ICTS_TEST}/data_manager/io/WrapperRCTest.cc
+    ${ICTS_TEST}/data_manager/io/WrapperTimingGraphTest.cc
 )

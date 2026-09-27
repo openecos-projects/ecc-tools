@@ -25,7 +25,6 @@ class RoutingCheck
 {
  public:
   RoutingCheck() = default;
-  ~RoutingCheck() = default;
   // getter
   std::string& get_net_name() { return _net_name; }
   std::string& get_driver_terminal_name() { return _driver_terminal_name; }

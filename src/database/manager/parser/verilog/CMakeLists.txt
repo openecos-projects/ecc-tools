@@ -64,10 +64,4 @@ if(BUILD_TESTING)
   )
   target_link_libraries(verilog_escaped_identifier_test PRIVATE verilog ecc_logger)
   add_test(NAME verilog_escaped_identifier_test COMMAND verilog_escaped_identifier_test)
-  add_executable(verilog_string_parameter_test
-      VerilogStringParameterTest.cpp
-  )
-  target_link_libraries(verilog_string_parameter_test PRIVATE verilog ecc_logger)
-  add_test(NAME verilog_string_parameter_test COMMAND verilog_string_parameter_test
-      ${CMAKE_CURRENT_BINARY_DIR}/verilog_string_parameters.v)
 endif()

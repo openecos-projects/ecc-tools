@@ -118,6 +118,14 @@ auto HTreeBuilder::build() -> htree::DiagnosticBuild
 
   auto state_build = htree::AssembleHTreeSynthesisState(input, config);
   if (state_build.status != htree::HTreeSynthesisStateStatus::kReady) {
+    // kCompleted means the build already finished - a degenerate topology the loads
+    // drive directly - and must stay a success. Only a failed assembly carries a
+    // reason, and without it the caller can say no more than "the build failed": the
+    // real cause, such as a characterization that produced no segment characters,
+    // never reaches the report.
+    if (state_build.status == htree::HTreeSynthesisStateStatus::kFailed && state_build.state.result.summary.failure_reason.empty()) {
+      state_build.state.result.summary.failure_reason = state_build.failure_reason.empty() ? "htree_state_unavailable" : state_build.failure_reason;
+    }
     return std::move(state_build.state.result);
   }
 
