@@ -265,9 +265,13 @@ std::unordered_set<int32_t> LVSReporter::getPowerGroundShortComponentIdSet()
     }
   };
   if (physical_graph.has_optimized_component_data()) {
-    const std::vector<std::vector<int32_t>>& component_net_id_list = physical_graph.get_component_net_id_list();
-    for (int32_t component_id = 0; component_id < static_cast<int32_t>(component_net_id_list.size()); component_id++) {
-      record_power_ground_short(component_id, component_net_id_list[component_id],
+    const std::unordered_map<int32_t, std::vector<int32_t>>& component_net_id_map = physical_graph.get_component_net_id_map();
+    for (int32_t component_id : physical_graph.get_short_component_id_list()) {
+      auto component_iter = component_net_id_map.find(component_id);
+      if (component_iter == component_net_id_map.end()) {
+        continue;
+      }
+      record_power_ground_short(component_id, component_iter->second,
                                 [&physical_graph](int32_t net_id) -> const std::string& { return physical_graph.get_net_name(net_id); });
     }
   } else {
