@@ -10,6 +10,7 @@ from pathlib import Path
 import statistics
 import subprocess
 import sys
+import tempfile
 from typing import Any
 
 
@@ -38,16 +39,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--odb", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repeat", type=int, default=5)
+    parser.add_argument("--peak-rss", action="store_true", help="record fresh-process peak RSS using /usr/bin/time")
     return parser.parse_args()
 
 
-def measure(executable: Path, fixture: Path, backend: str) -> dict[str, Any]:
-    completed = subprocess.run(
-        [str(executable), "--fixture", str(fixture), "--repeat", "1"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def measure(executable: Path, fixture: Path, backend: str, peak_rss: bool = False) -> dict[str, Any]:
+    command = [str(executable), "--fixture", str(fixture), "--repeat", "1"]
+    with tempfile.TemporaryDirectory(prefix="eccdb-bench-rss-") as temporary:
+        rss_path = Path(temporary) / "peak_rss_kib"
+        if peak_rss:
+            command = ["/usr/bin/time", "-f", "%M", "-o", str(rss_path), *command]
+        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        rss_kib = int(rss_path.read_text().strip()) if peak_rss and completed.returncode == 0 else None
     if completed.returncode != 0:
         raise RuntimeError(
             f"{backend} exited {completed.returncode}: "
@@ -63,6 +66,8 @@ def measure(executable: Path, fixture: Path, backend: str) -> dict[str, Any]:
         raise RuntimeError(f"{backend} returned an invalid timing field")
     for total, parts in TOTAL_FIELDS.items():
         run[total] = sum(run[field] for field in parts)
+    if rss_kib is not None:
+        run["peak_rss_kib"] = rss_kib
     return result
 
 
@@ -72,6 +77,8 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         raise RuntimeError("object counts changed between repeats")
     runs = [result["runs"][0] for result in results]
     fields = (*TIMING_FIELDS, *TOTAL_FIELDS)
+    if "peak_rss_kib" in runs[0]:
+        fields = (*fields, "peak_rss_kib")
     return {
         "counts": counts,
         "runs": runs,
@@ -88,14 +95,14 @@ def main() -> int:
             raise RuntimeError(f"missing input: {path}")
 
     # Each process parses the neutral JSON fixture before its native timer.
-    measure(args.odb, args.fixture, "odb")
-    measure(args.eccdb, args.fixture, "eccdb")
+    measure(args.odb, args.fixture, "odb", args.peak_rss)
+    measure(args.eccdb, args.fixture, "eccdb", args.peak_rss)
     measured: dict[str, list[dict[str, Any]]] = {"odb": [], "eccdb": []}
     for index in range(args.repeat):
         order = ("odb", "eccdb") if index % 2 == 0 else ("eccdb", "odb")
         for backend in order:
             executable = args.odb if backend == "odb" else args.eccdb
-            measured[backend].append(measure(executable, args.fixture, backend))
+            measured[backend].append(measure(executable, args.fixture, backend, args.peak_rss))
 
     odb = summarize(measured["odb"])
     eccdb = summarize(measured["eccdb"])
@@ -118,6 +125,7 @@ def main() -> int:
         "odb": odb,
         "eccdb": eccdb,
         "eccdb_over_odb": ratios,
+        "memory_scope": "fresh-process peak RSS, including fixture/library and validation temporaries" if args.peak_rss else None,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")

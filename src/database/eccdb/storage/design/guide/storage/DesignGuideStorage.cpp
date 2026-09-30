@@ -53,6 +53,29 @@ void DesignGuideStorage::replaceTrackAssignments(DesignNetId net, std::vector<De
                                                            DesignNetTrackAssignments{.values = std::move(values)});
 }
 
+void DesignGuideStorage::appendTrackAssignments(DesignNetId net, std::vector<DesignTrackAssignmentShape> values)
+{
+  ensureNet(net);
+  if (values.empty()) {
+    return;
+  }
+  validateTrackAssignments(values);
+
+  // Build and validate the complete replacement before touching the optional
+  // component. This preserves the existing assignments if allocation or
+  // validation fails while appending a Writer batch.
+  DesignNetTrackAssignments replacement;
+  if (const auto* existing = _registry.try_get<const DesignNetTrackAssignments>(net.entity()); existing != nullptr) {
+    replacement = *existing;
+  }
+  replacement.values.reserve(replacement.values.size() + values.size());
+  for (auto& value : values) {
+    replacement.values.push_back(std::move(value));
+  }
+  validateTrackAssignments(replacement.values);
+  _registry.emplace_or_replace<DesignNetTrackAssignments>(net.entity(), std::move(replacement));
+}
+
 void DesignGuideStorage::clearTrackAssignments(DesignNetId net)
 {
   ensureNet(net);

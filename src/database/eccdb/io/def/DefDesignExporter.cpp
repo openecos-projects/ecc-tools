@@ -543,33 +543,33 @@ void writePinShapeOptions(DefTextOutput& output, uint32_t flags, uint32_t mask, 
   }
 }
 
-void writePinPort(DefTextOutput& output, const DefNameCache& names, const DesignIoPinPort& port)
+void writeBlockPin(DefTextOutput& output, const DefNameCache& names, const DesignBlockPin& pin)
 {
-  if ((port.flags & DesignIoPinPortFlag::kExplicit) != 0u) {
+  if ((pin.flags & DesignIoPinPortFlag::kExplicit) != 0u) {
     output << "\n  + PORT";
   }
-  for (const auto& rectangle : port.rectangles) {
+  for (const auto& rectangle : pin.rectangles) {
     output << "\n    + LAYER " << names.layerInfo(rectangle.layer).name;
     writePinShapeOptions(output, rectangle.flags, rectangle.mask, rectangle.spacing, rectangle.design_rule_width);
     output << " ( " << rectangle.rectangle.ll_x << ' ' << rectangle.rectangle.ll_y << " ) ( " << rectangle.rectangle.ur_x << ' '
            << rectangle.rectangle.ur_y << " )";
   }
-  for (const auto& polygon : port.polygons) {
+  for (const auto& polygon : pin.polygons) {
     output << "\n    + POLYGON " << names.layerInfo(polygon.layer).name;
     writePinShapeOptions(output, polygon.flags, polygon.mask, polygon.spacing, polygon.design_rule_width);
     writePolygon(output, polygon.points);
   }
-  for (const auto& via : port.vias) {
+  for (const auto& via : pin.vias) {
     output << "\n    + VIA " << pinViaName(names, via);
     if ((via.flags & DesignPinViaFlag::kHasMask) != 0u) {
       output << " MASK " << via.top_mask << via.cut_mask << via.bottom_mask;
     }
     output << " ( " << via.origin.x << ' ' << via.origin.y << " )";
   }
-  if ((port.flags & DesignIoPinPortFlag::kHasPlacement) != 0u) {
-    output << "\n    + " << placementName(port.placement_status);
-    if (port.placement_status != DesignPlacementStatus::kUnplaced) {
-      output << " ( " << port.origin.x << ' ' << port.origin.y << " ) " << orientationName(port.orientation);
+  if ((pin.flags & DesignIoPinPortFlag::kHasPlacement) != 0u) {
+    output << "\n    + " << placementName(pin.placement_status);
+    if (pin.placement_status != DesignPlacementStatus::kUnplaced) {
+      output << " ( " << pin.origin.x << ' ' << pin.origin.y << " ) " << orientationName(pin.orientation);
     }
   }
 }
@@ -1072,8 +1072,8 @@ void DefDesignExporter::write(std::ostream& stream) const
       if (const auto use = signalUseName(pin.use); !use.empty()) {
         output << "\n  + USE " << use;
       }
-      for (const auto& port : pin.ports) {
-        writePinPort(output, names, port);
+      for (const auto block_pin : netlist.blockPins(id)) {
+        writeBlockPin(output, names, netlist.blockPin(block_pin));
       }
       output << "\n  ;\n";
     }

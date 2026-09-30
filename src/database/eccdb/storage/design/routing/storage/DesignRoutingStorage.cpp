@@ -918,13 +918,11 @@ bool DesignRoutingStorage::referencesVia(DesignViaId id) const
       }
     }
   }
-  const auto pin_view = _registry.view<const DesignIoPin>();
+  const auto pin_view = _registry.view<const DesignBlockPin>();
   for (const auto entity : pin_view) {
-    for (const auto& port : pin_view.get<const DesignIoPin>(entity).ports) {
-      for (const auto& via : port.vias) {
-        if (via.design_via == id) {
-          return true;
-        }
+    for (const auto& via : pin_view.get<const DesignBlockPin>(entity).vias) {
+      if (via.design_via == id) {
+        return true;
       }
     }
   }
@@ -944,12 +942,10 @@ bool DesignRoutingStorage::referencesVia(DesignViaId id) const
       }
     }
   }
-  const auto io_access_view = _registry.view<const DesignIoPinAccessGroups>();
-  for (const auto entity : io_access_view) {
-    for (const auto& port_groups : io_access_view.get<const DesignIoPinAccessGroups>(entity).port_groups) {
-      if (pin_access_references(port_groups.groups)) {
-        return true;
-      }
+  const auto block_pin_access_view = _registry.view<const DesignBlockPin, const DesignBlockPinAccessGroups>();
+  for (const auto entity : block_pin_access_view) {
+    if (pin_access_references(block_pin_access_view.get<const DesignBlockPinAccessGroups>(entity).groups)) {
+      return true;
     }
   }
   return false;

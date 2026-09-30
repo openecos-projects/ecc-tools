@@ -203,11 +203,12 @@ struct BenchInstancePinLookupTable
   }
 };
 
-// Benchmark-only shadow of the materialized pin record.  It intentionally
-// does not change the production component or binary archive schema.
+// Benchmark-only lookup table over independent instance-pin components. It
+// mirrors the adapter's one-time PinId -> component pointer table without
+// changing the storage or binary archive contract.
 struct BenchCachedPin
 {
-  eccdb::DesignInstancePin pin;
+  const eccdb::DesignInstancePin* pin = nullptr;
   const eccdb::LibraryMasterTerm* term = nullptr;
 };
 
@@ -220,7 +221,7 @@ struct BenchCachedPinTable
 
   [[nodiscard]] const BenchCachedPin& get(eccdb::DesignInstancePinId id) const noexcept
   {
-    return slots[static_cast<std::size_t>(entt::to_entity(id.entity()))];
+    return slots[static_cast<std::size_t>(id.packed())];
   }
 };
 
@@ -961,10 +962,7 @@ void validateMasterTermPointerTable(const eccdb::PhysicalDesignService& physical
   }
   require(registry_terms == table.terms, "master-term cache term count mismatch");
 
-  const auto& design_registry = physical.design().designRegistry().registry();
-  const auto pins = design_registry.view<const eccdb::DesignInstancePin>();
-  for (const auto entity : pins) {
-    const auto& pin = design_registry.get<const eccdb::DesignInstancePin>(entity);
+  physical.design().netlistStorage().forEachInstancePin([&](eccdb::DesignInstancePinId, const eccdb::DesignInstancePin& pin) {
     const auto index = static_cast<std::size_t>(entt::to_entity(pin.master_term.entity()));
     require(index < table.slots.size(), "instance pin master-term cache slot is absent");
     const auto& slot = table.slots[index];
@@ -972,7 +970,7 @@ void validateMasterTermPointerTable(const eccdb::PhysicalDesignService& physical
             "instance pin master-term cache generation mismatch");
     require(slot.term == &registry.get<const eccdb::LibraryMasterTerm>(pin.master_term.entity()),
             "instance pin master-term cache pointer mismatch");
-  }
+  });
 }
 
 [[nodiscard]] BenchInstancePinLookupTable buildBenchInstancePinLookupTable(const eccdb::PhysicalDesignService& physical,
@@ -1042,21 +1040,16 @@ void validateBenchInstancePinLookupTable(const eccdb::PhysicalDesignService& phy
 {
   BenchCachedPinTable table;
   const auto begin = Clock::now();
-  const auto& design_registry = physical.design().designRegistry().registry();
+  const auto& netlist = physical.design().netlistStorage();
   const auto& library_registry = physical.library().libraryRegistry().registry();
-  const auto view = design_registry.view<const eccdb::DesignInstancePin>();
 
-  std::size_t max_entity = 0;
-  bool has_pins = false;
-  for (const auto entity : view) {
-    has_pins = true;
-    max_entity = std::max(max_entity, static_cast<std::size_t>(entt::to_entity(entity)));
-  }
-  if (has_pins) table.slots.resize(max_entity + 1u);
-
-  view.each([&](const auto entity, const eccdb::DesignInstancePin& pin) {
-    auto& cached = table.slots[static_cast<std::size_t>(entt::to_entity(entity))];
-    cached.pin = pin;
+  netlist.forEachInstancePin([&](eccdb::DesignInstancePinId id, const eccdb::DesignInstancePin& pin) {
+    const auto index = static_cast<std::size_t>(id.packed());
+    if (index >= table.slots.size()) {
+      table.slots.resize(index + 1u);
+    }
+    auto& cached = table.slots[index];
+    cached.pin = &pin;
     cached.term = &library_registry.get<const eccdb::LibraryMasterTerm>(pin.master_term.entity());
     ++table.pins;
   });
@@ -1065,30 +1058,21 @@ void validateBenchInstancePinLookupTable(const eccdb::PhysicalDesignService& phy
   return table;
 }
 
-[[nodiscard]] bool sameDesignInstancePin(const eccdb::DesignInstancePin& left, const eccdb::DesignInstancePin& right) noexcept
-{
-  return left.instance == right.instance && left.master_term == right.master_term && left.net == right.net
-         && left.special_net == right.special_net;
-}
-
 void validateBenchCachedPinTable(const eccdb::PhysicalDesignService& physical, const BenchCachedPinTable& table)
 {
-  const auto& design_registry = physical.design().designRegistry().registry();
+  const auto& netlist = physical.design().netlistStorage();
   const auto& library_registry = physical.library().libraryRegistry().registry();
-  const auto view = design_registry.view<const eccdb::DesignInstancePin>();
 
   uint64_t source_pins = 0;
-  for (const auto entity : view) {
-    const auto index = static_cast<std::size_t>(entt::to_entity(entity));
+  netlist.forEachInstancePin([&](eccdb::DesignInstancePinId id, const eccdb::DesignInstancePin& original) {
+    const auto index = static_cast<std::size_t>(id.packed());
     require(index < table.slots.size(), "shadow pin table is missing a pin slot");
-    const auto& original = design_registry.get<const eccdb::DesignInstancePin>(entity);
     const auto& cached = table.slots[index];
-    require(cached.term != nullptr, "shadow pin table has a null term pointer");
-    require(sameDesignInstancePin(cached.pin, original), "shadow pin record differs from the original pin");
+    require(cached.pin == &original && cached.term != nullptr, "shadow pin table record pointer mismatch");
     require(cached.term == &library_registry.get<const eccdb::LibraryMasterTerm>(original.master_term.entity()),
             "shadow pin term pointer mismatch");
     ++source_pins;
-  }
+  });
   require(source_pins == table.pins, "shadow pin table pin count mismatch");
 
   uint64_t populated_slots = 0;
@@ -1155,6 +1139,7 @@ template <typename ResolveTerm>
 [[nodiscard]] NetPinScanResult scanNetPinsWithTermLookup(const eccdb::PhysicalDesignService& physical, ResolveTerm&& resolve_term)
 {
   const auto& design_registry = physical.design().designRegistry().registry();
+  const auto& netlist = physical.design().netlistStorage();
   NetPinScanResult result;
   physical.forEachRegularNet([&](eccdb::DesignNetId net, const eccdb::DesignNet&) {
     // Keep the same std::function callback boundary as PhysicalDesignService.
@@ -1175,7 +1160,7 @@ template <typename ResolveTerm>
     if (visitor.instance_pin) {
       if (const auto* connections = design_registry.try_get<const eccdb::DesignNetInstancePins>(net.entity()); connections != nullptr) {
         for (const auto pin_id : connections->values) {
-          const auto& pin = design_registry.get<const eccdb::DesignInstancePin>(pin_id.entity());
+          const auto& pin = netlist.instancePin(pin_id);
           const auto& instance = design_registry.get<const eccdb::DesignInstance>(pin.instance.entity());
           visitor.instance_pin(pin_id, pin, instance, resolve_term(pin.master_term));
         }
@@ -1254,8 +1239,8 @@ template <typename ResolveTerm>
       if (const auto* connections = design_registry.try_get<const eccdb::DesignNetInstancePins>(net.entity()); connections != nullptr) {
         for (const auto pin_id : connections->values) {
           const auto& cached_pin = shadow_pins.get(pin_id);
-          const auto& instance = design_registry.get<const eccdb::DesignInstance>(cached_pin.pin.instance.entity());
-          visitor.instance_pin(pin_id, cached_pin.pin, instance, resolve_term(cached_pin));
+          const auto& instance = design_registry.get<const eccdb::DesignInstance>(cached_pin.pin->instance.entity());
+          visitor.instance_pin(pin_id, *cached_pin.pin, instance, resolve_term(cached_pin));
         }
       }
     }
@@ -1276,7 +1261,7 @@ template <typename ResolveTerm>
   const auto& library_registry = physical.library().libraryRegistry().registry();
   return scanNetPinsWithShadowTermLookup(
       physical, shadow_pins, [&library_registry](const BenchCachedPin& pin) -> const eccdb::LibraryMasterTerm& {
-        return library_registry.get<const eccdb::LibraryMasterTerm>(pin.pin.master_term.entity());
+        return library_registry.get<const eccdb::LibraryMasterTerm>(pin.pin->master_term.entity());
       });
 }
 
@@ -1286,7 +1271,7 @@ template <typename ResolveTerm>
 {
   return scanNetPinsWithShadowTermLookup(
       physical, shadow_pins,
-      [&master_term_table](const BenchCachedPin& pin) -> const eccdb::LibraryMasterTerm& { return master_term_table.get(pin.pin.master_term); });
+      [&master_term_table](const BenchCachedPin& pin) -> const eccdb::LibraryMasterTerm& { return master_term_table.get(pin.pin->master_term); });
 }
 
 [[nodiscard]] NetPinScanResult scanNetPinsShadowInline(const eccdb::PhysicalDesignService& physical,

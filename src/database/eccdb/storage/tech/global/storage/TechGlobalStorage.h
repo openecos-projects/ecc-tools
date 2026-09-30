@@ -36,6 +36,16 @@ class TechGlobalStorage
   void setManufacturingGrid(int32_t manufacturing_grid);
   void removeManufacturingGrid() noexcept;
 
+  [[nodiscard]] bool hasUseMinSpacingObs() const noexcept;
+  [[nodiscard]] bool getUseMinSpacingObs() const;
+  void setUseMinSpacingObs(bool enabled);
+  void removeUseMinSpacingObs() noexcept;
+
+  [[nodiscard]] bool hasUseMinSpacingPin() const noexcept;
+  [[nodiscard]] bool getUseMinSpacingPin() const;
+  void setUseMinSpacingPin(bool enabled);
+  void removeUseMinSpacingPin() noexcept;
+
   [[nodiscard]] bool hasMaxViaStack() const noexcept;
   [[nodiscard]] const TechMaxViaStack* tryGetMaxViaStack() const noexcept;
   [[nodiscard]] const TechMaxViaStack& getMaxViaStack() const;

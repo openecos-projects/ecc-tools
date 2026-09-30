@@ -67,6 +67,7 @@ UNITS
   DATABASE MICRONS 1000 ;
   FREQUENCY MEGAHERTZ 7 ;
 END UNITS
+USEMINSPACING OBS OFF ;
 MANUFACTURINGGRID 0.005 ;
 PROPERTYDEFINITIONS
   LAYER LEF58_TYPE STRING ;
@@ -135,6 +136,9 @@ END LIBRARY
   ASSERT_TRUE(globals.hasUnits());
   EXPECT_EQ(globals.getUnits().database_units_per_micron, 1000);
   EXPECT_EQ(globals.getUnits().megahertz, 7);
+  ASSERT_TRUE(globals.hasUseMinSpacingObs());
+  EXPECT_FALSE(globals.getUseMinSpacingObs());
+  EXPECT_FALSE(globals.hasUseMinSpacingPin());
   EXPECT_EQ(globals.getManufacturingGrid().value, 5);
 
   const auto nw = database.findLayer("NW");
@@ -187,6 +191,26 @@ END LIBRARY
   EXPECT_EQ(globals.getMaxViaStack().bottom_layer, TechRoutingLayerId{m1.entity()});
   EXPECT_EQ(globals.getMaxViaStack().top_layer, TechRoutingLayerId{m2.entity()});
   EXPECT_TRUE(database.techRegistry().registry().all_of<TechOverlapLayer>(database.findLayer("OVERLAP").entity()));
+}
+
+TEST_F(LefTechImporterTest, ImportsLegacyUseMinSpacingPin)
+{
+  const auto lef = writeLef("use-min-spacing-pin", R"LEF(
+VERSION 5.5 ;
+USEMINSPACING OBS ON ;
+USEMINSPACING PIN OFF ;
+UNITS DATABASE MICRONS 1000 ; END UNITS
+LAYER M1 TYPE ROUTING ; DIRECTION HORIZONTAL ; PITCH 0.20 ; WIDTH 0.10 ; END M1
+END LIBRARY
+)LEF");
+
+  TechStore database;
+  ASSERT_NO_THROW(LefTechImporter(database).import(lef));
+  const auto& globals = database.globalStorage();
+  ASSERT_TRUE(globals.hasUseMinSpacingObs());
+  ASSERT_TRUE(globals.hasUseMinSpacingPin());
+  EXPECT_TRUE(globals.getUseMinSpacingObs());
+  EXPECT_FALSE(globals.getUseMinSpacingPin());
 }
 
 TEST_F(LefTechImporterTest, PreservesAreasBeyondInt32DbuSquared)

@@ -25,7 +25,7 @@ DesignStore::DesignStore(const TechRegistry& tech_registry, const LibraryRegistr
       _netlist(_registry, _tech_registry, _library_registry),
       _routing(_registry, _tech_registry),
       _guides(_registry, _tech_registry),
-      _pin_access(_registry, _tech_registry, _library_registry, _root),
+      _pin_access(_registry, _tech_registry, _library_registry, _netlist, _root),
       _constraints(_registry, _tech_registry),
       _fills(_registry, _tech_registry)
 {
@@ -61,8 +61,8 @@ void DesignStore::bindBinaryLoadedRoot()
   _routing.rebuildWireIndex();
   _routing.validateRestoredRoutingState();
   _guides.validateRestoredState();
-  _pin_access.validateRestoredState();
   _netlist.rebuildLibraryCaches();
+  _pin_access.validateRestoredState();
 }
 
 }  // namespace eccdb

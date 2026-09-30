@@ -50,7 +50,8 @@ void binaryArchive(Archive& archive, TechConductorLayerRef& value)
   archive(value.kind, value.entity);
 }
 
-// Instance-local library lookup is a runtime cache; only the ordered pin IDs are persisted.
+// Instance-local library lookup is a runtime cache; the independently stored
+// DesignInstancePin entities carry the pin payload.
 template <typename Archive>
 void binaryArchive(Archive& archive, const DesignInstancePins& value)
 {
@@ -66,7 +67,7 @@ void binaryArchive(Archive& archive, DesignInstancePins& value)
   value.master_term_name_index = nullptr;
 }
 
-// The instance and term pointers are runtime caches; only the four IDs are persisted.
+// Only the four IDs are persisted; instance and term pointers are runtime caches.
 template <typename Archive>
 void binaryArchive(Archive& archive, const DesignInstancePin& value)
 {
@@ -83,9 +84,9 @@ void binaryArchive(Archive& archive, DesignInstancePin& value)
 
 namespace binary_detail {
 
-inline constexpr uint32_t kTechSchemaVersion = 8;
+inline constexpr uint32_t kTechSchemaVersion = 9;
 inline constexpr uint32_t kLibrarySchemaVersion = 2;
-inline constexpr uint32_t kDesignSchemaVersion = 3;
+inline constexpr uint32_t kDesignSchemaVersion = 6;
 
 template <typename... Types>
 struct BinaryTypeList
@@ -96,7 +97,8 @@ struct BinaryTypeList
 // storage requires adding its payload and any relation component here, then
 // incrementing kTechSchemaVersion.
 using TechBinaryComponents = BinaryTypeList<
-    TechRoot, TechLayerSequence, TechGlobalUnits, TechManufacturingGrid, TechMaxViaStack, TechLayerInfo, TechLayerProperties,
+    TechRoot, TechLayerSequence, TechGlobalUnits, TechManufacturingGrid, TechUseMinSpacingObs, TechUseMinSpacingPin, TechMaxViaStack,
+    TechLayerInfo, TechLayerProperties,
     TechRoutingLayer, TechCutLayer, TechImplantLayer, TechImplantSpacingRules, TechMastersliceLayer, TechTrimmedMetalRule, TechOverlapLayer,
     TechRoutingSpacingRule, TechRoutingEndOfLineSpacingRule, TechRoutingMinEncloseAreaRule, TechRoutingMinStepRule,
     TechRoutingMinimumCutRule,
@@ -133,11 +135,11 @@ using LibraryBinaryComponents = BinaryTypeList<LibrarySite, LibraryCellMaster, L
 // part of the component snapshot.
 using DesignBinaryComponents
     = BinaryTypeList<DesignRoot, DesignInfo, DesignDieArea, DesignCoreArea, DesignRow, DesignTrackGrid, DesignGCellGrid,
-                     DesignInstance, DesignInstancePins, DesignInstancePin, DesignIoPin, DesignNet, DesignNetInstancePins,
+                     DesignInstance, DesignInstanceTerms, DesignInstanceTerm, DesignBlockTerm, DesignBlockPin, DesignNet, DesignNetInstancePins,
                      DesignNetIoPins, DesignSpecialNet, DesignNetOptions, DesignWire, DesignNetGeometry, DesignVia,
                      DesignNonDefaultRule, DesignRegion, DesignGroup, DesignBlockage, DesignFill, DesignNetRouteGuides,
                      DesignNetTrackAssignments, DesignPinAccessCatalog, DesignInstancePinAccessGroupIndex,
-                     DesignInstancePreferredPinAccess, DesignIoPinAccessGroups>;
+                     DesignInstancePreferredPinAccess, DesignBlockPinAccessGroups>;
 
 template <typename Entity, typename Registry, typename Archive, typename... Components>
 void writeRegistrySnapshot(const Registry& registry, Archive& archive, BinaryTypeList<Components...>)
@@ -145,7 +147,7 @@ void writeRegistrySnapshot(const Registry& registry, Archive& archive, BinaryTyp
   entt::basic_snapshot snapshot{registry};
   snapshot.template get<Entity>(archive);
   const auto write_component = [&]<typename Component>() {
-    if constexpr (std::is_same_v<Component, DesignInstance>) {
+    if constexpr (std::is_same_v<Component, DesignInstance> || std::is_same_v<Component, DesignInstancePin>) {
       // Stable deletion leaves tombstones; write only live components so a
       // restore followed by another save produces the same binary payload.
       const auto* storage = registry.template storage<Component>();

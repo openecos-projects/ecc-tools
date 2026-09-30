@@ -399,7 +399,7 @@ NetSkipInfo analyzeNetSkip(const eccdb::DesignStore& design, const eccdb::Librar
     ++info.port_pin_count;
   }
   for (const auto pin_id : io_pins) {
-    if (netlist.ioPin(pin_id).ports.empty()) {
+    if (netlist.blockPins(pin_id).empty()) {
       continue;
     }
     ++info.port_pin_count;
@@ -1080,17 +1080,20 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeListFromEnTT()
     } else if (!netIsSkipping(design, library, pin_net, skip_cache)) {
       net_idx = netIndex(pin_net, net_index_map);
     }
-    for (const auto& port : io_pin.ports) {
-      if (port.placement_status == eccdb::DesignPlacementStatus::kUnplaced
-          && (port.flags & eccdb::DesignIoPinPortFlag::kHasPlacement) == 0) {
+    for (const auto block_pin_id : design.netlistStorage().blockPins(pin_id)) {
+      const auto& block_pin = design.netlistStorage().blockPin(block_pin_id);
+      if (block_pin.placement_status == eccdb::DesignPlacementStatus::kUnplaced
+          && (block_pin.flags & eccdb::DesignIoPinPortFlag::kHasPlacement) == 0) {
         continue;
       }
-      for (const auto& rect : port.rectangles) {
-        appendShape(env_shape_list, layers, rect.layer, placeMasterRect(rect.rectangle, port.origin, port.orientation, 0, 0), net_idx);
+      for (const auto& rect : block_pin.rectangles) {
+        appendShape(env_shape_list, layers, rect.layer,
+                    placeMasterRect(rect.rectangle, block_pin.origin, block_pin.orientation, 0, 0), net_idx);
       }
-      for (const auto& polygon : port.polygons) {
+      for (const auto& polygon : block_pin.polygons) {
         for (const auto& rect : eccdb::decomposePolygonToRectangles(polygon.points)) {
-          appendShape(env_shape_list, layers, polygon.layer, placeMasterRect(rect, port.origin, port.orientation, 0, 0), net_idx);
+          appendShape(env_shape_list, layers, polygon.layer,
+                      placeMasterRect(rect, block_pin.origin, block_pin.orientation, 0, 0), net_idx);
         }
       }
     }

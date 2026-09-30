@@ -1,0 +1,4 @@
+{"schema":"tritonroute_db_trace_v2","instances":[],"nets":[[0,"net1237"]]}
+{"op":"define_design_via","source":"sample2-fixture","name":"V_RUNTIME_DUP","default":true,"rects":[["Metal1",-5,-5,5,5],["Via1",-2,-2,2,2],["Via1",-2,-2,2,2],["Metal2",-6,-6,6,6]]}
+{"op":"replace_wire","source":"sample2-fixture","object":0,"shapes":[{"kind":"via","layer":"Metal1","via":"V_RUNTIME_DUP","x1":1000,"y1":2000,"x2":1000,"y2":2000,"begin_extension":null,"end_extension":null,"tech_via":false}]}
+{"op":"end","complete":true,"events":2}

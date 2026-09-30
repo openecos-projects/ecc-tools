@@ -1,0 +1,30 @@
+diff --git a/src/odb/src/3dblox/CMakeLists.txt b/src/odb/src/3dblox/CMakeLists.txt
+index ac1cc7c419..6e78e80589 100644
+--- a/src/odb/src/3dblox/CMakeLists.txt
++++ b/src/odb/src/3dblox/CMakeLists.txt
+@@ -3,6 +3,16 @@
+ 
+ find_package(yaml-cpp REQUIRED)
+ 
++# yaml-cpp's current exported target is namespaced, while older distro
++# packages expose the unqualified target. Support both so a local yaml-cpp
++# installation propagates its include directory instead of falling back to a
++# bare -lyaml-cpp linker flag.
++if(TARGET yaml-cpp::yaml-cpp)
++  set(YAML_CPP_TARGET yaml-cpp::yaml-cpp)
++else()
++  set(YAML_CPP_TARGET yaml-cpp)
++endif()
++
+ add_library(3dblox
+   baseParser.cpp
+   bmapParser.cpp
+@@ -21,7 +31,7 @@ target_link_libraries(3dblox
+   PUBLIC
+     db
+     utl_lib
+-    yaml-cpp
++    ${YAML_CPP_TARGET}
+     OpenSTA
+   PRIVATE
+     defin

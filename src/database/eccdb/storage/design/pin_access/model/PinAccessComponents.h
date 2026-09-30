@@ -59,8 +59,8 @@ struct DesignPinAccessVia
 };
 
 // Candidate access point payload shared by every instance of a library
-// master port.  `point` is master-local for catalog entries; when this value
-// appears in DesignIoPinAccessGroups it is block-absolute instead.
+// master port. `point` is master-local for catalog entries; when this value
+// appears on a DesignBlockPin it is block-absolute instead.
 struct DesignPinAccessPoint
 {
   Point point;
@@ -94,19 +94,12 @@ struct DesignPinAccessCatalog
   std::vector<DesignMasterPortPinAccessGroups> master_port_groups;
 };
 
-// One IO port / ODB dbBPin has its own candidate groups.  Unlike catalog
-// entries, the points here are already block-absolute because an IO port is a
-// design object rather than a reusable library object.
-struct DesignIoPinPortAccessGroups
+// Optional component attached directly to one OpenDB dbBPin / DesignBlockPin
+// entity. Unlike catalog entries, these points are block-absolute because a
+// block pin is a design object rather than a reusable library object.
+struct DesignBlockPinAccessGroups
 {
-  uint32_t port_index = 0;
   std::vector<DesignPinAccessCandidateGroup> groups;
-};
-
-// Optional component attached to DesignIoPin.
-struct DesignIoPinAccessGroups
-{
-  std::vector<DesignIoPinPortAccessGroups> port_groups;
 };
 
 // Optional component attached to DesignInstance.  Its presence means this
@@ -125,10 +118,20 @@ struct DesignPreferredPinAccessRef
   uint32_t point_index = 0;
 };
 
-// Optional component attached to DesignInstancePin.
+// One sparse preferred-access entry owned by an instance. A pin has no entry
+// until a preferred candidate has been selected for it.
+struct DesignInstancePreferredPinAccessEntry
+{
+  DesignInstancePinId pin;
+  std::vector<DesignPreferredPinAccessRef> values;
+};
+
+// Optional component attached to DesignInstance. Keeping the sparse entries
+// with their owner avoids a separate ECS entity and component allocation for
+// every physical instance pin.
 struct DesignInstancePreferredPinAccess
 {
-  std::vector<DesignPreferredPinAccessRef> values;
+  std::vector<DesignInstancePreferredPinAccessEntry> entries;
 };
 
 }  // namespace eccdb

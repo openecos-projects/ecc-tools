@@ -90,6 +90,56 @@ void TechGlobalStorage::removeManufacturingGrid() noexcept
   }
 }
 
+bool TechGlobalStorage::hasUseMinSpacingObs() const noexcept
+{
+  return containsRoot() && _registry.all_of<TechUseMinSpacingObs>(_root.entity());
+}
+
+bool TechGlobalStorage::getUseMinSpacingObs() const
+{
+  if (!hasUseMinSpacingObs()) {
+    throw std::out_of_range("tech USEMINSPACING OBS is absent");
+  }
+  return _registry.get<TechUseMinSpacingObs>(_root.entity()).enabled;
+}
+
+void TechGlobalStorage::setUseMinSpacingObs(bool enabled)
+{
+  _registry.emplace_or_replace<TechUseMinSpacingObs>(rootEntity(), TechUseMinSpacingObs{.enabled = enabled});
+}
+
+void TechGlobalStorage::removeUseMinSpacingObs() noexcept
+{
+  if (containsRoot()) {
+    _registry.remove<TechUseMinSpacingObs>(_root.entity());
+  }
+}
+
+bool TechGlobalStorage::hasUseMinSpacingPin() const noexcept
+{
+  return containsRoot() && _registry.all_of<TechUseMinSpacingPin>(_root.entity());
+}
+
+bool TechGlobalStorage::getUseMinSpacingPin() const
+{
+  if (!hasUseMinSpacingPin()) {
+    throw std::out_of_range("tech USEMINSPACING PIN is absent");
+  }
+  return _registry.get<TechUseMinSpacingPin>(_root.entity()).enabled;
+}
+
+void TechGlobalStorage::setUseMinSpacingPin(bool enabled)
+{
+  _registry.emplace_or_replace<TechUseMinSpacingPin>(rootEntity(), TechUseMinSpacingPin{.enabled = enabled});
+}
+
+void TechGlobalStorage::removeUseMinSpacingPin() noexcept
+{
+  if (containsRoot()) {
+    _registry.remove<TechUseMinSpacingPin>(_root.entity());
+  }
+}
+
 bool TechGlobalStorage::hasMaxViaStack() const noexcept
 {
   return tryGetMaxViaStack() != nullptr;

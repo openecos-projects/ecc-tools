@@ -88,6 +88,8 @@ TEST_F(DesignStorageTest, PublicApiProvidesTypedIdAndSnapshotCrud)
   EXPECT_FALSE(database.ioPinData(io)->net);
   EXPECT_TRUE(database.destroyIoPin(io));
   EXPECT_TRUE(database.destroyInstance(instance));
+  EXPECT_FALSE(database.contains(input));
+  EXPECT_FALSE(database.instancePinData(input));
   EXPECT_TRUE(database.destroyNet(signal));
   EXPECT_FALSE(database.contains(signal));
   EXPECT_FALSE(database.netData(signal));

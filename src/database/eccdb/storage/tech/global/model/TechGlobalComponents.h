@@ -56,6 +56,23 @@ struct TechManufacturingGrid
   int32_t value = 0;
 };
 
+// LEF 5.8:
+//   USEMINSPACING OBS ON|OFF ;
+// A missing component is distinct from an explicit OFF statement.
+struct TechUseMinSpacingObs
+{
+  bool enabled = true;
+};
+
+// LEF 5.5:
+//   USEMINSPACING PIN ON|OFF ;
+// The statement is obsolete in LEF 5.6 and later, but is retained for
+// compatibility with databases that still carry it.
+struct TechUseMinSpacingPin
+{
+  bool enabled = true;
+};
+
 namespace TechMaxViaStackFlag {
 constexpr uint32_t kNoSingle = 1u << 0;
 constexpr uint32_t kHasRange = 1u << 1;

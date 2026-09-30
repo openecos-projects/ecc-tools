@@ -153,6 +153,7 @@ TEST(BinaryDatabaseArchiveTest, RoundTripsTechLibraryIdsGeometryAndGenerations)
   const TemporaryFile tech_lef("synthetic-tech", ".lef", R"LEF(
 VERSION 5.8 ;
 UNITS DATABASE MICRONS 1000 ; END UNITS
+USEMINSPACING OBS ON ;
 MANUFACTURINGGRID 0.005 ;
 PROPERTYDEFINITIONS
   LAYER LEF58_TYPE STRING ;
@@ -236,6 +237,7 @@ END LIBRARY
 
   TechStore source_technology;
   LefTechImporter(source_technology).import(tech_lef.path());
+  source_technology.globalStorage().setUseMinSpacingPin(false);
   LibraryStore source_library(source_technology.techRegistry());
   LefLibraryImporter(source_technology, source_library).import(library_lef.path());
 
@@ -270,6 +272,10 @@ END LIBRARY
 
   auto technology = BinaryDatabaseImporter::loadTech(tech_binary.path());
   auto library = BinaryDatabaseImporter::loadLibrary(library_binary.path(), *technology);
+  ASSERT_TRUE(technology->globalStorage().hasUseMinSpacingObs());
+  ASSERT_TRUE(technology->globalStorage().hasUseMinSpacingPin());
+  EXPECT_TRUE(technology->globalStorage().getUseMinSpacingObs());
+  EXPECT_FALSE(technology->globalStorage().getUseMinSpacingPin());
   EXPECT_EQ(technology->findLayer("M1").packed(), m1.packed());
   const auto restored_m1 = TechRoutingLayerId{technology->findLayer("M1").entity()};
   const auto& restored_m1_info = technology->layerInfo(TechLayerId{restored_m1.entity()});

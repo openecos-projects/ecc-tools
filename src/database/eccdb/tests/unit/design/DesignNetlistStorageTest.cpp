@@ -9,6 +9,73 @@
 namespace eccdb {
 namespace {
 
+TEST_F(DesignStorageTest, BlockPinsHaveIndependentIdentityAndOwnedLifecycle)
+{
+  auto& netlist = design.netlistStorage();
+  const auto terminal = netlist.createIoPin(
+      DesignBlockTerm{.name = "IN"},
+      {{.flags = DesignIoPinPortFlag::kExplicit,
+        .rectangles = {{.layer = layer, .rectangle = {0, 0, 20, 20}}}},
+       {.flags = DesignIoPinPortFlag::kExplicit,
+        .rectangles = {{.layer = layer, .rectangle = {100, 0, 120, 20}}}}});
+  const auto ids = netlist.blockPins(terminal);
+  ASSERT_EQ(ids.size(), 2u);
+  const auto first = ids[0];
+  const auto second = ids[1];
+  EXPECT_NE(first.entity(), terminal.entity());
+  EXPECT_NE(first, second);
+  EXPECT_TRUE(design.designRegistry().registry().all_of<DesignBlockPin>(first.entity()));
+  EXPECT_EQ(netlist.blockPin(first).term, terminal);
+  EXPECT_EQ(netlist.blockPin(second).term, terminal);
+
+  auto changed = netlist.blockPin(second);
+  changed.rectangles.front().rectangle = {200, 0, 220, 20};
+  netlist.updateBlockPin(second, changed);
+  EXPECT_EQ(netlist.blockPin(first).rectangles.front().rectangle, (Rect{0, 0, 20, 20}));
+  EXPECT_EQ(netlist.blockPin(second).rectangles.front().rectangle, (Rect{200, 0, 220, 20}));
+
+  auto metadata = netlist.ioPin(terminal);
+  metadata.direction = DesignIoPinDirection::kInput;
+  netlist.updateIoPin(terminal, metadata);
+  EXPECT_EQ(netlist.blockPins(terminal)[1], second);
+  EXPECT_TRUE(netlist.destroyBlockPin(first));
+  EXPECT_FALSE(netlist.contains(first));
+  ASSERT_EQ(netlist.blockPins(terminal).size(), 1u);
+  EXPECT_EQ(netlist.blockPins(terminal).front(), second);
+  const auto replacement = netlist.createBlockPin(terminal, changed);
+  EXPECT_NE(replacement, first);
+  EXPECT_FALSE(netlist.contains(first));
+  EXPECT_EQ(netlist.blockPin(replacement).term, terminal);
+  EXPECT_EQ(netlist.blockPinCount(), 2u);
+  EXPECT_TRUE(netlist.destroyIoPin(terminal));
+  EXPECT_FALSE(netlist.contains(second));
+  EXPECT_FALSE(netlist.contains(replacement));
+  EXPECT_EQ(netlist.blockPinCount(), 0u);
+}
+
+TEST_F(DesignStorageTest, RollsBackBlockTermWhenALaterBlockPinIsInvalid)
+{
+  auto& netlist = design.netlistStorage();
+  const auto term_count = netlist.ioPinCount();
+  const auto pin_count = netlist.blockPinCount();
+  EXPECT_THROW(
+      (void) netlist.createBlockTerm(
+          DesignBlockTerm{.name = "IN"},
+          {{.flags = DesignIoPinPortFlag::kExplicit,
+            .rectangles = {{.layer = layer, .rectangle = {0, 0, 20, 20}}}},
+           {.flags = DesignIoPinPortFlag::kExplicit,
+            .rectangles = {{.layer = {}, .rectangle = {100, 0, 120, 20}}}}}),
+      std::invalid_argument);
+  EXPECT_FALSE(netlist.findBlockTerm("IN"));
+  EXPECT_EQ(netlist.ioPinCount(), term_count);
+  EXPECT_EQ(netlist.blockPinCount(), pin_count);
+  EXPECT_NO_THROW(netlist.rebuildNameIndexes());
+
+  const auto replacement = netlist.createBlockTerm(DesignBlockTerm{.name = "IN"});
+  EXPECT_EQ(netlist.findBlockTerm("IN"), replacement);
+  EXPECT_TRUE(netlist.blockPins(replacement).empty());
+}
+
 TEST_F(DesignStorageTest, MaterializesInstancePinsAndConnectsBothPinKinds)
 {
   auto& netlist = design.netlistStorage();
@@ -17,11 +84,11 @@ TEST_F(DesignStorageTest, MaterializesInstancePinsAndConnectsBothPinKinds)
   const auto power = netlist.createSpecialNet(DesignNet{.name = "VDD", .use = DesignSignalUse::kPower});
   const auto io = netlist.createIoPin(DesignIoPin{.name = "IN",
                                                   .direction = DesignIoPinDirection::kInput,
-                                                  .use = DesignSignalUse::kSignal,
-                                                  .ports = {{.flags = DesignIoPinPortFlag::kHasPlacement,
+                                                  .use = DesignSignalUse::kSignal},
+                                                  {{.flags = DesignIoPinPortFlag::kHasPlacement,
                                                              .placement_status = DesignPlacementStatus::kFixed,
                                                              .origin = {0, 500},
-                                                             .rectangles = {{.layer = layer, .rectangle = {-10, -10, 10, 10}}}}}});
+                                                             .rectangles = {{.layer = layer, .rectangle = {-10, -10, 10, 10}}}}});
 
   ASSERT_EQ(netlist.instancePins(instance).size(), 2u);
   const auto a = netlist.findInstancePin(instance, input_term);
@@ -159,6 +226,59 @@ TEST_F(DesignStorageTest, ReconnectsBothPinKindsAfterExplicitDisconnect)
   EXPECT_EQ(netlist.ioPin(io).special_net, next_power);
 }
 
+TEST_F(DesignStorageTest, CreatesIndependentInstancePinEntitiesAndInvalidatesDeletedPinIds)
+{
+  auto& netlist = design.netlistStorage();
+  auto& registry = design.designRegistry().registry();
+  const auto first = netlist.createInstance(createInstance("first"));
+  const auto first_pin = netlist.findInstancePin(first, "A");
+  const auto& pins = registry.get<const DesignInstancePins>(first.entity());
+  ASSERT_EQ(pins.values.size(), 2u);
+  EXPECT_EQ(pins.values.front(), first_pin);
+  ASSERT_TRUE(registry.valid(first_pin.entity()));
+  ASSERT_TRUE(registry.all_of<DesignInstancePin>(first_pin.entity()));
+  const auto& pin = registry.get<const DesignInstancePin>(first_pin.entity());
+  EXPECT_EQ(pin.instance, first);
+  EXPECT_EQ(pin.master_term, input_term);
+  EXPECT_EQ(pin.instance_ptr, &netlist.instance(first));
+  EXPECT_EQ(pin.master_term_ptr, &library.masterTermStorage().masterTerm(input_term));
+  EXPECT_EQ(netlist.instancePin(first_pin).instance, first);
+  EXPECT_EQ(netlist.instancePin(first_pin).master_term, input_term);
+
+  const auto survivor = netlist.createInstance(createInstance("survivor"));
+  const auto survivor_pin = netlist.findInstancePin(survivor, "A");
+  const auto signal = netlist.createNet(DesignNet{.name = "survivor_signal"});
+  netlist.connect(survivor_pin, signal);
+  ASSERT_TRUE(netlist.destroyInstance(first));
+  EXPECT_FALSE(netlist.contains(first_pin));
+  EXPECT_THROW((void) netlist.instancePin(first_pin), std::out_of_range);
+  EXPECT_TRUE(netlist.contains(survivor_pin));
+  EXPECT_EQ(netlist.findInstancePin(survivor, "A"), survivor_pin);
+  EXPECT_EQ(netlist.instancePin(survivor_pin).instance, survivor);
+  EXPECT_EQ(netlist.instancePin(survivor_pin).master_term, input_term);
+  EXPECT_EQ(netlist.instancePin(survivor_pin).net, signal);
+  EXPECT_EQ(netlist.instancePin(survivor_pin).instance_ptr, &netlist.instance(survivor));
+  EXPECT_EQ(netlist.instancePin(survivor_pin).master_term_ptr, &library.masterTermStorage().masterTerm(input_term));
+  ASSERT_EQ(netlist.instancePins(signal).size(), 1u);
+  EXPECT_EQ(netlist.instancePins(signal).front(), survivor_pin);
+  const auto replacement = netlist.createInstance(createInstance("replacement"));
+  const auto replacement_pin = netlist.findInstancePin(replacement, "A");
+  EXPECT_NE(first_pin, replacement_pin);
+
+  netlist.rebuildNameIndexes();
+  netlist.rebuildLibraryCaches();
+  EXPECT_FALSE(netlist.contains(first_pin));
+  EXPECT_EQ(netlist.findInstancePin(survivor, "A"), survivor_pin);
+  EXPECT_EQ(netlist.instancePin(survivor_pin).instance, survivor);
+  EXPECT_EQ(netlist.instancePin(survivor_pin).master_term, input_term);
+  EXPECT_EQ(netlist.instancePin(survivor_pin).net, signal);
+  EXPECT_EQ(netlist.instancePin(survivor_pin).instance_ptr, &netlist.instance(survivor));
+  EXPECT_EQ(netlist.instancePin(survivor_pin).master_term_ptr, &library.masterTermStorage().masterTerm(input_term));
+  ASSERT_EQ(netlist.instancePins(signal).size(), 1u);
+  EXPECT_EQ(netlist.instancePins(signal).front(), survivor_pin);
+  EXPECT_EQ(netlist.instancePinCount(), 4u);
+}
+
 TEST_F(DesignStorageTest, RejectsBrokenNetlistReferencesAndManagedFieldUpdates)
 {
   auto& netlist = design.netlistStorage();
@@ -205,6 +325,8 @@ TEST_F(DesignStorageTest, RebindsInstancePinNameCacheAndObservesMasterTermRename
   const auto instance = netlist.createInstance(createInstance("u1"));
   const auto* index = &library.libraryRegistry().registry().get<const LibraryMasterTermNameIndex>(master.entity());
   auto& pins = design.designRegistry().registry().get<DesignInstancePins>(instance.entity());
+  ASSERT_EQ(pins.master, master);
+  EXPECT_EQ(pins.term_ids, (std::vector<LibraryMasterTermId>{input_term, output_term}));
   ASSERT_EQ(pins.master_term_name_index, index);
   const auto output_pin = netlist.findInstancePin(instance, "Y");
   ASSERT_TRUE(output_pin);
@@ -216,7 +338,10 @@ TEST_F(DesignStorageTest, RebindsInstancePinNameCacheAndObservesMasterTermRename
 
   pins.master_term_name_index = nullptr;
   netlist.rebuildLibraryCaches();
+  EXPECT_EQ(pins.master, master);
+  EXPECT_EQ(pins.term_ids, (std::vector<LibraryMasterTermId>{input_term, output_term}));
   EXPECT_EQ(pins.master_term_name_index, index);
+  EXPECT_EQ(netlist.instancePin(output_pin).master_term_ptr, &library.masterTermStorage().masterTerm(output_term));
   EXPECT_EQ(netlist.findInstancePin(instance, "Z"), output_pin);
 }
 
@@ -250,24 +375,49 @@ TEST_F(DesignStorageTest, ReturnsNoPinForMasterWithoutTerms)
   EXPECT_FALSE(netlist.findInstancePin(instance, "A"));
 }
 
-TEST_F(DesignStorageTest, KeepsInstancePinOwnerPointerAcrossOtherInstanceDeletionAndUpdate)
+TEST_F(DesignStorageTest, KeepsInstancePinPointersAndRelationsAcrossOtherInstanceDeletionAndUpdate)
 {
   auto& netlist = design.netlistStorage();
   const auto first = netlist.createInstance(createInstance("first"));
   const auto second = netlist.createInstance(createInstance("second"));
   const auto pin = netlist.findInstancePin(second, "A");
+  const auto net = netlist.createNet(DesignNet{.name = "n1"});
   ASSERT_TRUE(pin);
-  const auto* cached_instance = netlist.instancePin(pin).instance_ptr;
+  netlist.connect(pin, net);
+  const auto* cached_pin = &netlist.instancePin(pin);
+  const auto* cached_instance = cached_pin->instance_ptr;
+  const auto* cached_term = cached_pin->master_term_ptr;
   ASSERT_EQ(cached_instance, &netlist.instance(second));
+  ASSERT_EQ(cached_term, &library.masterTermStorage().masterTerm(input_term));
+  EXPECT_EQ(netlist.instancePin(pin).instance, second);
+  EXPECT_EQ(netlist.instancePin(pin).master_term, input_term);
+  EXPECT_EQ(netlist.instancePin(pin).net, net);
+  EXPECT_EQ(netlist.findInstancePin(second, "A"), pin);
 
   ASSERT_TRUE(netlist.destroyInstance(first));
   EXPECT_EQ(netlist.instanceCount(), 1u);
-  EXPECT_EQ(netlist.instancePin(pin).instance_ptr, &netlist.instance(second));
+  EXPECT_EQ(netlist.findInstancePin(second, "A"), pin);
+  EXPECT_EQ(&netlist.instancePin(pin), cached_pin);
   EXPECT_EQ(netlist.instancePin(pin).instance_ptr, cached_instance);
+  EXPECT_EQ(netlist.instancePin(pin).master_term_ptr, cached_term);
+  EXPECT_EQ(netlist.instancePin(pin).instance, second);
+  EXPECT_EQ(netlist.instancePin(pin).master_term, input_term);
+  EXPECT_EQ(netlist.instancePin(pin).net, net);
+  ASSERT_EQ(netlist.instancePins(net).size(), 1u);
+  EXPECT_EQ(netlist.instancePins(net).front(), pin);
 
   netlist.updateInstance(second, createInstance("second_renamed"));
+  EXPECT_EQ(netlist.findInstance("second_renamed"), second);
+  EXPECT_EQ(netlist.findInstancePin(second, "A"), pin);
+  EXPECT_EQ(&netlist.instancePin(pin), cached_pin);
   EXPECT_EQ(netlist.instancePin(pin).instance_ptr, cached_instance);
+  EXPECT_EQ(netlist.instancePin(pin).master_term_ptr, cached_term);
   EXPECT_EQ(cached_instance->name, "second_renamed");
+  EXPECT_EQ(netlist.instancePin(pin).instance, second);
+  EXPECT_EQ(netlist.instancePin(pin).master_term, input_term);
+  EXPECT_EQ(netlist.instancePin(pin).net, net);
+  ASSERT_EQ(netlist.instancePins(net).size(), 1u);
+  EXPECT_EQ(netlist.instancePins(net).front(), pin);
 }
 
 TEST_F(DesignStorageTest, FindsInstancePinsAfterRemovingMasterTermBeforeInstanceCreation)

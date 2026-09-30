@@ -5,6 +5,7 @@
 
 #include "geometry/GeometryHandle.h"
 #include "library/common/LibraryGeometry.h"
+#include "library/common/LibraryTypes.h"
 #include "tech/common/TechLayerTypes.h"
 
 namespace eccdb {
@@ -33,7 +34,7 @@ struct LibraryPortLayerGeometry
 // One complete LEF PORT and the only payload component on its entity. Geometry
 // values do not receive independent EnTT IDs. The owner term is maintained by
 // LibraryMasterPortStorage.
-struct LibraryMasterPort
+struct LibraryMasterPin
 {
   LibraryMasterPortClass port_class = LibraryMasterPortClass::kNone;
   std::vector<LibraryPortLayerGeometry> layer_clauses;

@@ -330,16 +330,18 @@ TEST_F(DefDesignRoundTripTest, ImportsAndExportsComplexNewVirtualFlushAndViaPath
   const auto io_pin_id = first.netlistStorage().findIoPin("IN");
   ASSERT_TRUE(io_pin_id);
   const auto& io_pin = first.netlistStorage().ioPin(io_pin_id);
-  ASSERT_EQ(io_pin.ports.size(), 2u);
-  ASSERT_EQ(io_pin.ports[0].rectangles.size(), 1u);
-  ASSERT_EQ(io_pin.ports[0].vias.size(), 1u);
-  EXPECT_EQ(io_pin.ports[0].rectangles[0].mask, 2u);
-  EXPECT_EQ(io_pin.ports[0].rectangles[0].spacing, 4);
-  EXPECT_EQ(io_pin.ports[0].vias[0].top_mask, 1u);
-  EXPECT_EQ(io_pin.ports[0].vias[0].cut_mask, 2u);
-  EXPECT_EQ(io_pin.ports[0].vias[0].bottom_mask, 3u);
-  ASSERT_EQ(io_pin.ports[1].polygons.size(), 1u);
-  EXPECT_EQ(io_pin.ports[1].polygons[0].design_rule_width, 6);
+  ASSERT_EQ(io_pin.pins.size(), 2u);
+  const auto& first_bpin = first.netlistStorage().blockPin(io_pin.pins[0]);
+  const auto& second_bpin = first.netlistStorage().blockPin(io_pin.pins[1]);
+  ASSERT_EQ(first_bpin.rectangles.size(), 1u);
+  ASSERT_EQ(first_bpin.vias.size(), 1u);
+  EXPECT_EQ(first_bpin.rectangles[0].mask, 2u);
+  EXPECT_EQ(first_bpin.rectangles[0].spacing, 4);
+  EXPECT_EQ(first_bpin.vias[0].top_mask, 1u);
+  EXPECT_EQ(first_bpin.vias[0].cut_mask, 2u);
+  EXPECT_EQ(first_bpin.vias[0].bottom_mask, 3u);
+  ASSERT_EQ(second_bpin.polygons.size(), 1u);
+  EXPECT_EQ(second_bpin.polygons[0].design_rule_width, 6);
   const auto instance_id = first.netlistStorage().findInstance("u1");
   ASSERT_TRUE(instance_id);
   const auto& instance = first.netlistStorage().instance(instance_id);
@@ -420,7 +422,7 @@ TEST_F(DefDesignRoundTripTest, ImportsAndExportsComplexNewVirtualFlushAndViaPath
   EXPECT_EQ(second.netlistStorage().net(second_net).non_default_rule, net.non_default_rule);
   const auto second_io_pin = second.netlistStorage().findIoPin("IN");
   ASSERT_TRUE(second_io_pin);
-  EXPECT_EQ(second.netlistStorage().ioPin(second_io_pin).ports.size(), io_pin.ports.size());
+  EXPECT_EQ(second.netlistStorage().ioPin(second_io_pin).pins.size(), io_pin.pins.size());
 }
 
 TEST_F(DefDesignRoundTripTest, KeepsDefinedViaBetweenSegmentsInOnePath)

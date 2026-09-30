@@ -86,7 +86,121 @@ elsewhere. The helper always disables Bazel's remote cache. Use a consistent
 CPU affinity and toolchain when making performance claims; a small build-time
 difference is sensitive to host load.
 
+## IDB/EccDB DB-only and native-wire comparison
+
+`IdbComparison.py` has two separate modes. `db-only` replays one deterministic
+logical-netlist fixture into fresh IDB and EccDB databases. It measures instance
+and net creation, pre-resolved instance-pin connection, name lookup, and
+traversal. Fixture JSON parsing, library/master construction, fixture
+validation, and output are outside the timers. The master and connection-pin
+inputs are resolved before the timed phases. Timed lookup/traversal results are
+folded into backend-local checksums so the compiler cannot eliminate them.
+Counts must match between backends; native checksums are deliberately not
+compared because they can encode backend-specific handles.
+Pin resolution and untimed fixture checks touch objects before subsequent
+phases, so connect/find/traverse results are not cold-cache measurements.
+
+`wire` imports the same LEF/DEF natively into each backend, then measures only
+regular- and special-wire scans. LEF/DEF import and shared-field validation are
+outside the wire-read timers. Before the three formal alternating repetitions,
+the runner emits one canonical JSONL snapshot per backend and requires the two
+files to be byte-identical. Raw native JSON, stdout/stderr, snapshots, input
+SHA-256 values, and executable SHA-256 values are retained with `--keep-raw`.
+
+Use a fresh top-level build directory with `-DNDEBUG`: this root project builds
+its Release flags from `CXXFLAGS`, so a plain Release configuration does not by
+itself guarantee that assertions are disabled in both backends.
+
+```bash
+repo=/home/zhuxu1/workspace/ecc-tools
+build="$repo/build/adapter-differential-release-ndebug"
+export CXXFLAGS=-DNDEBUG
+cmake -S "$repo" -B "$build" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DECCDB_BUILD_BENCHMARKS=ON \
+  -DECCDB_BUILD_TESTS=OFF
+cmake --build "$build" --parallel "$(nproc)" --target \
+  eccdb_db_only_idb_benchmark \
+  eccdb_db_only_benchmark \
+  eccdb_idb_comparison_benchmark
+bin="$repo/bin"
+reference=/home/zhuxu1/workspace/reference
+test6="$reference/ispd2018/ispd18_test6"
+mkdir -p "$build/idb-comparison"
+```
+
+The IDB targets require the complete top-level build, where `IdbBuilder` is
+available; the standalone `build/eccdb-differential` configuration does not
+provide it.
+
+### DB-only fixture replay
+
+```bash
+fixture="$build/idb-comparison/ispd18-test6-logical.json"
+python3 "$repo/src/database/eccdb/benchmarks/DbOnlyFixture.py" \
+  --lef "$test6/ispd18_test6.input.lef" \
+  --def "$test6/ispd18_test6.input.def" \
+  --output "$fixture"
+taskset -c 24 python3 "$repo/src/database/eccdb/benchmarks/IdbComparison.py" \
+  --mode db-only --fixture "$fixture" \
+  --idb "$bin/eccdb_db_only_idb_benchmark" \
+  --eccdb "$bin/eccdb_db_only_benchmark" \
+  --repeat 3 --keep-raw \
+  --output "$build/idb-comparison/ispd18-test6-db-only.json"
+```
+
+### Native wire scans
+
+The routed ISPD18 test6 input has no `SPECIALNETS`; its special result is
+therefore reported as `no_workload`, not as a performance ratio. For the
+regular-wire case, supply the routed DEF produced by the routing flow:
+
+```bash
+routed_def=/path/to/ispd18-test6.routed.def
+taskset -c 24 python3 "$repo/src/database/eccdb/benchmarks/IdbComparison.py" \
+  --mode wire \
+  --lef "$test6/ispd18_test6.input.lef" \
+  --def "$routed_def" \
+  --wire-benchmark "$bin/eccdb_idb_comparison_benchmark" \
+  --repeat 3 --keep-raw \
+  --output "$build/idb-comparison/ispd18-test6-regular-wire.json"
+```
+
+The shared regular-wire snapshot contains all 2,957,852 comparable paths for
+the routed test6 fixture. This is not complete DEF equivalence: the canonical
+subset accepts two-point Manhattan lines and single-point VIA/RECT paths, and
+normalizes two-point direction because IDB sorts regular points. It also omits
+regular-wire attributes that IDB drops, including extensions and masks.
+Special-path width, SHAPE, and STYLE are included in the untimed comparison.
+EccDB enumerates nets with the non-allocating EnTT-view APIs, rather than
+constructing a temporary Net-ID vector inside the wire timer. The timer reads
+point coordinates, via origins, and rectangle coordinates, not Service-level
+RouteShape projection or the complete TritonRoute import.
+
+Use the prepared real-ISPD19 test6 special-only input for special routing. It
+retains the DEF header, `VIAS`, and `SPECIALNETS` needed for this isolated
+workload and contains 8,378 paths:
+
+```bash
+special_def="$repo/build/eccdb-differential/idb-comparison/ispd19_test6.special-only.def"
+taskset -c 24 python3 "$repo/src/database/eccdb/benchmarks/IdbComparison.py" \
+  --mode wire \
+  --lef "$reference/ispd2019/ispd19_test6/ispd19_test6.input.lef" \
+  --def "$special_def" \
+  --wire-benchmark "$bin/eccdb_idb_comparison_benchmark" \
+  --repeat 3 --keep-raw \
+  --output "$build/idb-comparison/ispd19-test6-special-wire.json"
+```
+
 ## TritonRoute-facing ODB/EccDB API comparison
+
+For a recorded workload originating from a real ODB-backed TritonRoute run,
+see [TritonRoute trace replay](../doc/TritonRoute_Trace_Replay.md). Unlike the
+independent API workloads below, that experiment captures invocation order,
+query arguments, and actual wire, guide, track-assignment, and pin-access
+writes at their router call sites and replays them on ODB, EccDB, and IDB.
+It explicitly covers a subset of database API groups; it is not an automatic
+trace of every ODB method or the router's internal `fr*` operations.
 
 `DrtServiceComparison.py` times eight operations used by the current
 TritonRoute ODB/EccDB wrappers: regular-Net enumeration, Instance/Net/Pin name

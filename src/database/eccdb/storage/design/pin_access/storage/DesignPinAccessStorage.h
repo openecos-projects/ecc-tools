@@ -12,10 +12,11 @@ namespace eccdb {
 
 class LibraryRegistry;
 class TechRegistry;
+class DesignNetlistStorage;
 
 // Design-scope storage for TritonRoute/OpenDB-style pin-access data.  Library
-// PORT candidates live once on DesignRoot; selected candidates live on the
-// individual DesignInstancePin that uses them.
+// PORT candidates live once on DesignRoot; preferred selections are sparse
+// entries attached to their owning DesignInstance.
 class DesignPinAccessStorage
 {
  public:
@@ -24,8 +25,13 @@ class DesignPinAccessStorage
   DesignPinAccessStorage(DesignRegistry& design_registry,
                          const TechRegistry& tech_registry,
                          const LibraryRegistry& library_registry,
+                         const DesignNetlistStorage& netlist,
                          DesignRootId root)
-      : _registry(design_registry.registry()), _tech_registry(tech_registry), _library_registry(library_registry), _root(root)
+      : _registry(design_registry.registry()),
+        _tech_registry(tech_registry),
+        _library_registry(library_registry),
+        _netlist(netlist),
+        _root(root)
   {
   }
 
@@ -48,13 +54,39 @@ class DesignPinAccessStorage
   [[nodiscard]] bool clearMasterPortCandidateGroup(LibraryMasterPortId master_port, uint32_t group_index);
   [[nodiscard]] bool clearMasterPortCandidateGroups(LibraryMasterPortId master_port);
 
-  // IO-port candidate points use block-absolute coordinates.  Both indices
-  // are retained because a DesignIoPin can have multiple DEF PORTs and each
-  // ODB dbBPin can hold multiple candidate groups.
+  // Block-pin candidate points use block-absolute coordinates. Each ODB
+  // dbBPin is an independent DesignBlockPin entity, so its groups are stored
+  // directly on that entity instead of in a BTerm-side port-index table.
+  void setBlockPinCandidateGroup(DesignBlockPinId pin,
+                                 uint32_t group_index,
+                                 std::vector<DesignPinAccessPoint> points);
+  // Mirrors repeated dbAccessPoint::create(dbBPin*): points are appended in
+  // call order and duplicate candidates are retained. The target candidate
+  // group is created when it does not exist.
+  void appendBlockPinCandidatePoints(DesignBlockPinId pin,
+                                     uint32_t group_index,
+                                     std::vector<DesignPinAccessPoint> points);
+  [[nodiscard]] bool hasBlockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index) const;
+  [[nodiscard]] std::span<const DesignPinAccessCandidateGroup> blockPinCandidateGroups(DesignBlockPinId pin) const;
+  [[nodiscard]] const DesignPinAccessCandidateGroup& blockPinCandidateGroup(DesignBlockPinId pin,
+                                                                               uint32_t group_index) const;
+  [[nodiscard]] bool clearBlockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index);
+  [[nodiscard]] bool clearBlockPinCandidateGroups(DesignBlockPinId pin);
+
+  // Compatibility entry points for callers that still identify a dbBPin by
+  // its dbBTerm and ordinal. They resolve the ordinal once through the
+  // term's ordered block-pin IDs, then delegate to the direct BPin APIs.
   void setIoPinPortCandidateGroup(DesignIoPinId pin,
                                   uint32_t port_index,
                                   uint32_t group_index,
                                   std::vector<DesignPinAccessPoint> points);
+  // Mirrors repeated dbAccessPoint::create(dbBPin*): points are appended in
+  // call order and duplicate candidates are retained. The target candidate
+  // group is created when it does not exist.
+  void appendIoPinPortCandidatePoints(DesignIoPinId pin,
+                                      uint32_t port_index,
+                                      uint32_t group_index,
+                                      std::vector<DesignPinAccessPoint> points);
   [[nodiscard]] bool hasIoPinPortCandidateGroup(DesignIoPinId pin, uint32_t port_index, uint32_t group_index) const;
   [[nodiscard]] std::span<const DesignPinAccessCandidateGroup> ioPinPortCandidateGroups(DesignIoPinId pin,
                                                                                             uint32_t port_index) const;
@@ -91,20 +123,21 @@ class DesignPinAccessStorage
   void ensureInstance(DesignInstanceId id) const;
   void ensureInstancePin(DesignInstancePinId id) const;
   void ensureIoPin(DesignIoPinId id) const;
+  void ensureBlockPin(DesignBlockPinId id) const;
   void ensureMasterPort(LibraryMasterPortId id) const;
 
   void validateAccessPoint(const DesignPinAccessPoint& point) const;
   void validateCandidateGroups(const std::vector<DesignPinAccessCandidateGroup>& groups) const;
   void validateCatalog(const DesignPinAccessCatalog& catalog) const;
-  void validateIoPinGroups(DesignIoPinId pin, const DesignIoPinAccessGroups& groups) const;
+  void validateBlockPinGroups(DesignBlockPinId pin, const DesignBlockPinAccessGroups& groups) const;
   void validateInstanceGroup(DesignInstanceId instance, uint32_t group_index) const;
   void validatePreferences(DesignInstancePinId pin, const std::vector<DesignPreferredPinAccessRef>& preferences) const;
+  void validatePreferredAccess(DesignInstanceId instance, const DesignInstancePreferredPinAccess& preferences) const;
 
   [[nodiscard]] const DesignMasterPortPinAccessGroups* findMasterPortGroups(LibraryMasterPortId master_port) const;
   [[nodiscard]] DesignMasterPortPinAccessGroups* findMasterPortGroups(DesignPinAccessCatalog& catalog,
                                                                         LibraryMasterPortId master_port) const;
-  [[nodiscard]] const DesignIoPinPortAccessGroups* findIoPinPortGroups(DesignIoPinId pin, uint32_t port_index) const;
-  [[nodiscard]] DesignIoPinPortAccessGroups* findIoPinPortGroups(DesignIoPinAccessGroups& groups, uint32_t port_index) const;
+  [[nodiscard]] DesignBlockPinId blockPinAt(DesignIoPinId pin, uint32_t port_index) const;
   [[nodiscard]] const DesignPinAccessCandidateGroup* findCandidateGroup(LibraryMasterPortId master_port,
                                                                           uint32_t group_index) const;
   [[nodiscard]] bool isCandidateGroupReferenced(LibraryMasterPortId master_port, uint32_t group_index) const;
@@ -115,6 +148,7 @@ class DesignPinAccessStorage
   registry_type& _registry;
   const TechRegistry& _tech_registry;
   const LibraryRegistry& _library_registry;
+  const DesignNetlistStorage& _netlist;
   DesignRootId _root;
 };
 

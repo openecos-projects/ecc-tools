@@ -71,6 +71,7 @@ UNITS
   DATABASE MICRONS 1000 ;
   FREQUENCY MEGAHERTZ 7 ;
 END UNITS
+USEMINSPACING OBS OFF ;
 MANUFACTURINGGRID 0.005 ;
 PROPERTYDEFINITIONS
   LAYER LEF58_TYPE STRING ;
@@ -191,6 +192,7 @@ END LIBRARY
   EXPECT_NE(text.str().find("EXCEPTSAMEPGNET"), std::string::npos);
   EXPECT_NE(text.str().find("ENDOFLINE 0.14 WITHIN 0.15 PARALLELEDGE 0.16 WITHIN 0.17 TWOEDGES"), std::string::npos);
   EXPECT_NE(text.str().find("LEF58_CORNERSPACING"), std::string::npos);
+  EXPECT_NE(text.str().find("USEMINSPACING OBS OFF"), std::string::npos);
   EXPECT_NE(text.str().find("MAXVIASTACK 2 RANGE M1 M2"), std::string::npos);
 
   const auto exported_path = newPath("roundtrip");
@@ -205,6 +207,8 @@ END LIBRARY
   EXPECT_EQ(roundtripped.globalStorage().getUnits().database_units_per_micron, 1000);
   ASSERT_TRUE(roundtripped.globalStorage().hasManufacturingGrid());
   EXPECT_EQ(roundtripped.globalStorage().getManufacturingGrid().value, 5);
+  ASSERT_TRUE(roundtripped.globalStorage().hasUseMinSpacingObs());
+  EXPECT_FALSE(roundtripped.globalStorage().getUseMinSpacingObs());
   ASSERT_TRUE(roundtripped.globalStorage().hasMaxViaStack());
   EXPECT_EQ(roundtripped.globalStorage().getMaxViaStack().max_stack_count, 2u);
 
@@ -278,6 +282,18 @@ END LIBRARY
 
   const auto nw = TechMastersliceLayerId{roundtripped.findLayer("NW").entity()};
   EXPECT_EQ(roundtripped.mastersliceLayerStorage().mastersliceLayer(nw).subtype, TechMastersliceType::kNWell);
+}
+
+TEST_F(LefTechExporterTest, WritesUseMinSpacingPinForOdbCompatibility)
+{
+  TechStore database;
+  database.globalStorage().setUnits(
+      TechGlobalUnits{.flags = TechGlobalUnitsFlag::kHasDatabaseUnitsPerMicron, .database_units_per_micron = 1000});
+  database.globalStorage().setUseMinSpacingPin(true);
+
+  std::ostringstream output;
+  ASSERT_NO_THROW(LefTechExporter::write(output, database));
+  EXPECT_NE(output.str().find("USEMINSPACING PIN ON"), std::string::npos);
 }
 
 TEST_F(LefTechExporterTest, SynthesizesMaterializedCutPropertiesWithoutRawText)

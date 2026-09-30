@@ -187,12 +187,17 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsCompactRoutingAndInd
   const auto* cached_index = source_pins.master_term_name_index;
   const auto cached_terms = source_pins.term_ids;
   const auto cached_master = source_pins.master;
+  ASSERT_EQ(cached_master, fixture.design.netlistStorage().instance(source_instance).master);
+  ASSERT_EQ(cached_terms.size(), source_pins.values.size());
   ASSERT_NE(cached_index, nullptr);
   auto& source_pin_value = fixture.design.designRegistry().registry().get<DesignInstancePin>(source_pin.entity());
+  const auto source_term = source_pin_value.master_term;
   const auto* cached_instance = source_pin_value.instance_ptr;
   const auto* cached_term = source_pin_value.master_term_ptr;
+  EXPECT_EQ(source_pin_value.instance, source_instance);
   ASSERT_EQ(cached_instance, &fixture.design.netlistStorage().instance(source_instance));
-  ASSERT_NE(cached_term, nullptr);
+  ASSERT_EQ(cached_term, &fixture.library.masterTermStorage().masterTerm(source_term));
+  EXPECT_EQ(fixture.design.netlistStorage().instancePin(source_pin).master_term, source_term);
   source_pins.term_ids.clear();
   source_pins.master = {};
   source_pins.master_term_name_index = nullptr;
@@ -225,6 +230,8 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsCompactRoutingAndInd
   const auto restored_pin = restored->netlistStorage().findInstancePin(restored_instance, "A");
   ASSERT_TRUE(restored_pin);
   const auto& restored_instance_pin = restored->netlistStorage().instancePin(restored_pin);
+  EXPECT_EQ(restored_instance_pin.instance, restored_instance);
+  EXPECT_EQ(restored_instance_pin.master_term, source_term);
   EXPECT_EQ(restored_instance_pin.instance_ptr, &restored->netlistStorage().instance(restored_instance));
   EXPECT_EQ(restored_instance_pin.master_term_ptr,
             &fixture.library.masterTermStorage().masterTerm(restored_instance_pin.master_term));
@@ -240,17 +247,33 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsCompactRoutingAndInd
   expectSameFile(binary.path(), fixed.path());
 }
 
-TEST(DesignBinaryDatabaseArchiveTest, RestoresInstancePointersAfterStableDeletion)
+TEST(DesignBinaryDatabaseArchiveTest, RestoresInstancePinsAfterOtherInstanceDeletion)
 {
   DesignFixture fixture;
   auto& netlist = fixture.design.netlistStorage();
   const auto instance = netlist.findInstance("u1");
   const auto master = netlist.instance(instance).master;
+  const auto regular = netlist.findRegularNet("n1");
   const auto temporary = netlist.createInstance(DesignInstance{.name = "temporary", .master = master});
   const auto survivor = netlist.createInstance(DesignInstance{.name = "survivor", .master = master});
+  const auto survivor_pin = netlist.findInstancePin(survivor, "A");
+  ASSERT_TRUE(survivor_pin);
+  const auto* cached_survivor_pin = &netlist.instancePin(survivor_pin);
+  const auto* cached_survivor_instance = cached_survivor_pin->instance_ptr;
+  const auto* cached_survivor_term = cached_survivor_pin->master_term_ptr;
+  ASSERT_EQ(cached_survivor_instance, &netlist.instance(survivor));
+  ASSERT_EQ(cached_survivor_term, &fixture.library.masterTermStorage().masterTerm(cached_survivor_pin->master_term));
+  netlist.connect(survivor_pin, regular);
   ASSERT_TRUE(netlist.destroyInstance(temporary));
   ASSERT_EQ(netlist.instanceCount(), 3u);
-  ASSERT_EQ(netlist.instancePin(netlist.findInstancePin(survivor, "A")).instance_ptr, &netlist.instance(survivor));
+  ASSERT_EQ(netlist.findInstancePin(survivor, "A"), survivor_pin);
+  EXPECT_EQ(&netlist.instancePin(survivor_pin), cached_survivor_pin);
+  EXPECT_EQ(netlist.instancePin(survivor_pin).instance_ptr, cached_survivor_instance);
+  EXPECT_EQ(netlist.instancePin(survivor_pin).master_term_ptr, cached_survivor_term);
+  ASSERT_EQ(netlist.instancePin(survivor_pin).instance, survivor);
+  ASSERT_EQ(netlist.instancePin(survivor_pin).net, regular);
+  const auto regular_pins = netlist.instancePins(regular);
+  ASSERT_NE(std::find(regular_pins.begin(), regular_pins.end(), survivor_pin), regular_pins.end());
 
   const TemporaryFile binary{"design-deleted-instance", ".edb"};
   const TemporaryFile fixed{"design-deleted-instance-fixed", ".edb"};
@@ -260,16 +283,23 @@ TEST(DesignBinaryDatabaseArchiveTest, RestoresInstancePointersAfterStableDeletio
   EXPECT_FALSE(restored->netlistStorage().findInstance("temporary"));
   const auto restored_survivor = restored->netlistStorage().findInstance("survivor");
   ASSERT_TRUE(restored_survivor);
-  const auto survivor_pin = restored->netlistStorage().findInstancePin(restored_survivor, "A");
-  ASSERT_TRUE(survivor_pin);
-  EXPECT_EQ(restored->netlistStorage().instancePin(survivor_pin).instance_ptr,
+  const auto restored_survivor_pin = restored->netlistStorage().findInstancePin(restored_survivor, "A");
+  ASSERT_TRUE(restored_survivor_pin);
+  const auto restored_regular = restored->netlistStorage().findRegularNet("n1");
+  EXPECT_EQ(restored->netlistStorage().instancePin(restored_survivor_pin).instance, restored_survivor);
+  EXPECT_EQ(restored->netlistStorage().instancePin(restored_survivor_pin).net, restored_regular);
+  EXPECT_EQ(restored->netlistStorage().instancePin(restored_survivor_pin).instance_ptr,
             &restored->netlistStorage().instance(restored_survivor));
+  EXPECT_EQ(restored->netlistStorage().instancePin(restored_survivor_pin).master_term_ptr,
+            &fixture.library.masterTermStorage().masterTerm(
+                restored->netlistStorage().instancePin(restored_survivor_pin).master_term));
+  const auto restored_regular_pins = restored->netlistStorage().instancePins(restored_regular);
+  EXPECT_NE(std::find(restored_regular_pins.begin(), restored_regular_pins.end(), restored_survivor_pin), restored_regular_pins.end());
 
   const auto restored_instance = restored->netlistStorage().findInstance("u1");
   const auto pin = restored->netlistStorage().findInstancePin(restored_instance, "A");
   ASSERT_TRUE(pin);
-  EXPECT_EQ(restored->netlistStorage().instancePin(pin).instance_ptr,
-            &restored->netlistStorage().instance(restored_instance));
+  EXPECT_EQ(restored->netlistStorage().instancePin(pin).instance, restored_instance);
 
   BinaryDatabaseExporter::saveDesign(fixed.path(), *restored);
   expectSameFile(binary.path(), fixed.path());
@@ -305,6 +335,8 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsRouterGuidesTracksAndPinAccess)
   fixture.design.pinAccessStorage().setPreferredInstancePinAccess(
       pin, {{.master_port = ports.front(), .group_index = 0u, .point_index = 0u}});
   fixture.design.pinAccessStorage().setIoPinPortCandidateGroup(io_pin, 0u, 0u, {candidate});
+  const auto bpin = fixture.design.netlistStorage().blockPins(io_pin).front();
+  ASSERT_TRUE(fixture.design.designRegistry().registry().all_of<DesignBlockPin>(bpin.entity()));
 
   const TemporaryFile binary{"router-context", ".edb"};
   const TemporaryFile fixed{"router-context-fixed", ".edb"};
@@ -322,9 +354,33 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsRouterGuidesTracksAndPinAccess)
   ASSERT_EQ(restored->pinAccessStorage().preferredInstancePinAccess(pin).size(), 1u);
   EXPECT_EQ(restored->pinAccessStorage().preferredInstancePinAccess(pin).front().master_port, ports.front());
   ASSERT_EQ(restored->pinAccessStorage().ioPinPortCandidateGroup(io_pin, 0u, 0u).points.size(), 1u);
+  ASSERT_EQ(restored->netlistStorage().blockPins(io_pin).size(), 1u);
+  EXPECT_EQ(restored->netlistStorage().blockPins(io_pin).front(), bpin);
+  EXPECT_EQ(restored->netlistStorage().blockPin(bpin).term, io_pin);
+  ASSERT_TRUE(restored->designRegistry().registry().all_of<DesignBlockPinAccessGroups>(bpin.entity()));
+  EXPECT_EQ(restored->pinAccessStorage().blockPinCandidateGroup(bpin, 0u).points.front().point, candidate.point);
 
   BinaryDatabaseExporter::saveDesign(fixed.path(), *restored);
   expectSameFile(binary.path(), fixed.path());
+}
+
+TEST(DesignBinaryDatabaseArchiveTest, DoesNotReuseDeletedInstancePinIdsAfterRestore)
+{
+  DesignFixture fixture;
+  auto& netlist = fixture.design.netlistStorage();
+  const auto master = netlist.instance(netlist.findInstance("u1")).master;
+  const auto temporary = netlist.createInstance(DesignInstance{.name = "temporary", .master = master});
+  const auto deleted_pin = netlist.findInstancePin(temporary, "A");
+  ASSERT_TRUE(deleted_pin);
+  ASSERT_TRUE(netlist.destroyInstance(temporary));
+  const TemporaryFile binary{"deleted-pin-id", ".edb"};
+  BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
+  auto restored = BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library);
+  auto& restored_netlist = restored->netlistStorage();
+  EXPECT_FALSE(restored_netlist.contains(deleted_pin));
+  const auto replacement = restored_netlist.createInstance(DesignInstance{.name = "replacement", .master = master});
+  EXPECT_NE(restored_netlist.findInstancePin(replacement, "A"), deleted_pin);
+  EXPECT_FALSE(restored_netlist.contains(deleted_pin));
 }
 
 TEST(DesignBinaryDatabaseArchiveTest, RejectsTruncatedPayload)

@@ -1,0 +1,593 @@
+{
+  "cpu_affinity": 24,
+  "events": 1229052,
+  "executables": {
+    "eccdb_idb": {
+      "path": "/home/zhuxu1/workspace/ecc-tools/bin/eccdb_drt_trace_replay",
+      "sha256": "c3f5438c1115177709a763fc806438976ab2669a4d3fbe437f1b5d2319a11a9f"
+    },
+    "odb": {
+      "path": "/home/zhuxu1/workspace/ecc-tools/build/openroad-native-eccdb-build/src/drt/eccdbDrtTraceOdb",
+      "sha256": "dda63bd8b45a61b3397f0129ab4ab3c916562f864b6e99b3f1e3eef381e57841"
+    }
+  },
+  "inputs": {
+    "def": {
+      "path": "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.def",
+      "sha256": "d9a161aaf8a3a9d7bce321ff3dec2c92aead0cacc358100cb61a9cccc101624b"
+    },
+    "lef": {
+      "path": "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.lef",
+      "sha256": "7660a3586715137f5acc10fdbe83e12f3e2e52d8d6d4f7e7ef88b899bec5f03a"
+    },
+    "trace": {
+      "path": "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/trace.jsonl",
+      "sha256": "d078acee269d82b5b8b373a1cd6f490b367538283cd338f8d9364aa7963ea4a2"
+    }
+  },
+  "operations": {
+    "find_instance": 107919,
+    "find_pin": 690219,
+    "net_pins": 107701,
+    "read_instance": 107919,
+    "read_wire": 107701,
+    "replace_wire": 107589,
+    "scan_instances": 1,
+    "scan_nets": 3
+  },
+  "orders": [
+    [
+      "odb",
+      "eccdb",
+      "idb"
+    ],
+    [
+      "eccdb",
+      "idb",
+      "odb"
+    ],
+    [
+      "idb",
+      "odb",
+      "eccdb"
+    ]
+  ],
+  "repeat": 3,
+  "results": {
+    "eccdb": {
+      "median_ns": {
+        "find_instance": 20603275,
+        "find_pin": 71511328,
+        "net_pins": 198180101,
+        "read_instance": 15922923,
+        "read_wire": 14069721,
+        "replace_wire": 1189900416,
+        "scan_instances": 5750551,
+        "scan_nets": 10248813
+      },
+      "median_total_ns": 1527967564,
+      "runs": [
+        {
+          "backend": "eccdb",
+          "command": [
+            "taskset",
+            "-c",
+            "24",
+            "/home/zhuxu1/workspace/ecc-tools/bin/eccdb_drt_trace_replay",
+            "--backend",
+            "eccdb",
+            "--trace",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/trace.jsonl",
+            "--lef",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.lef",
+            "--def",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.def",
+            "--output",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/comparison.runs/eccdb-1.json"
+          ],
+          "events": 1229052,
+          "operations": {
+            "find_instance": 107919,
+            "find_pin": 690219,
+            "net_pins": 107701,
+            "read_instance": 107919,
+            "read_wire": 107701,
+            "replace_wire": 107589,
+            "scan_instances": 1,
+            "scan_nets": 3
+          },
+          "schema": "tritonroute_db_trace_replay_v1",
+          "scope": "recorded TritonRoute design/ordinary-wire API groups; not a full router or all ODB calls",
+          "timing_ns": {
+            "find_instance": 20215871,
+            "find_pin": 71421774,
+            "net_pins": 198118658,
+            "read_instance": 15662364,
+            "read_wire": 13963954,
+            "replace_wire": 1163936678,
+            "scan_instances": 5699651,
+            "scan_nets": 10118542
+          },
+          "timing_scope": "adapter calls and returned field projection; parsing/binding/normalization/validation excluded; one timer pair per recorded group",
+          "total_ns": 1499137492,
+          "validation": {
+            "all_events": true,
+            "endpoint_extension_fields": 1099,
+            "endpoint_extensions": true,
+            "final_net_pin_checks": 107701,
+            "final_primitives": 2957852,
+            "final_wire_checks": 107701,
+            "final_wires": 107589,
+            "shared_geometry": true
+          }
+        },
+        {
+          "backend": "eccdb",
+          "command": [
+            "taskset",
+            "-c",
+            "24",
+            "/home/zhuxu1/workspace/ecc-tools/bin/eccdb_drt_trace_replay",
+            "--backend",
+            "eccdb",
+            "--trace",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/trace.jsonl",
+            "--lef",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.lef",
+            "--def",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.def",
+            "--output",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/comparison.runs/eccdb-2.json"
+          ],
+          "events": 1229052,
+          "operations": {
+            "find_instance": 107919,
+            "find_pin": 690219,
+            "net_pins": 107701,
+            "read_instance": 107919,
+            "read_wire": 107701,
+            "replace_wire": 107589,
+            "scan_instances": 1,
+            "scan_nets": 3
+          },
+          "schema": "tritonroute_db_trace_replay_v1",
+          "scope": "recorded TritonRoute design/ordinary-wire API groups; not a full router or all ODB calls",
+          "timing_ns": {
+            "find_instance": 20683568,
+            "find_pin": 71511328,
+            "net_pins": 198180101,
+            "read_instance": 15976324,
+            "read_wire": 14069721,
+            "replace_wire": 1193771922,
+            "scan_instances": 5778812,
+            "scan_nets": 10337072
+          },
+          "timing_scope": "adapter calls and returned field projection; parsing/binding/normalization/validation excluded; one timer pair per recorded group",
+          "total_ns": 1530308848,
+          "validation": {
+            "all_events": true,
+            "endpoint_extension_fields": 1099,
+            "endpoint_extensions": true,
+            "final_net_pin_checks": 107701,
+            "final_primitives": 2957852,
+            "final_wire_checks": 107701,
+            "final_wires": 107589,
+            "shared_geometry": true
+          }
+        },
+        {
+          "backend": "eccdb",
+          "command": [
+            "taskset",
+            "-c",
+            "24",
+            "/home/zhuxu1/workspace/ecc-tools/bin/eccdb_drt_trace_replay",
+            "--backend",
+            "eccdb",
+            "--trace",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/trace.jsonl",
+            "--lef",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.lef",
+            "--def",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.def",
+            "--output",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/comparison.runs/eccdb-3.json"
+          ],
+          "events": 1229052,
+          "operations": {
+            "find_instance": 107919,
+            "find_pin": 690219,
+            "net_pins": 107701,
+            "read_instance": 107919,
+            "read_wire": 107701,
+            "replace_wire": 107589,
+            "scan_instances": 1,
+            "scan_nets": 3
+          },
+          "schema": "tritonroute_db_trace_replay_v1",
+          "scope": "recorded TritonRoute design/ordinary-wire API groups; not a full router or all ODB calls",
+          "timing_ns": {
+            "find_instance": 20603275,
+            "find_pin": 71538925,
+            "net_pins": 199754269,
+            "read_instance": 15922923,
+            "read_wire": 14248392,
+            "replace_wire": 1189900416,
+            "scan_instances": 5750551,
+            "scan_nets": 10248813
+          },
+          "timing_scope": "adapter calls and returned field projection; parsing/binding/normalization/validation excluded; one timer pair per recorded group",
+          "total_ns": 1527967564,
+          "validation": {
+            "all_events": true,
+            "endpoint_extension_fields": 1099,
+            "endpoint_extensions": true,
+            "final_net_pin_checks": 107701,
+            "final_primitives": 2957852,
+            "final_wire_checks": 107701,
+            "final_wires": 107589,
+            "shared_geometry": true
+          }
+        }
+      ]
+    },
+    "idb": {
+      "median_ns": {
+        "find_instance": 48178713,
+        "find_pin": 104658912,
+        "net_pins": 186770979,
+        "read_instance": 28494079,
+        "read_wire": 11900800,
+        "replace_wire": 946354827,
+        "scan_instances": 8810672,
+        "scan_nets": 26790736
+      },
+      "median_total_ns": 1367935498,
+      "runs": [
+        {
+          "backend": "idb",
+          "command": [
+            "taskset",
+            "-c",
+            "24",
+            "/home/zhuxu1/workspace/ecc-tools/bin/eccdb_drt_trace_replay",
+            "--backend",
+            "idb",
+            "--trace",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/trace.jsonl",
+            "--lef",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.lef",
+            "--def",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.def",
+            "--output",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/comparison.runs/idb-1.json"
+          ],
+          "events": 1229052,
+          "operations": {
+            "find_instance": 107919,
+            "find_pin": 690219,
+            "net_pins": 107701,
+            "read_instance": 107919,
+            "read_wire": 107701,
+            "replace_wire": 107589,
+            "scan_instances": 1,
+            "scan_nets": 3
+          },
+          "schema": "tritonroute_db_trace_replay_v1",
+          "scope": "recorded TritonRoute design/ordinary-wire API groups; not a full router or all ODB calls",
+          "timing_ns": {
+            "find_instance": 48236487,
+            "find_pin": 115310980,
+            "net_pins": 186770979,
+            "read_instance": 28494079,
+            "read_wire": 11672384,
+            "replace_wire": 946354827,
+            "scan_instances": 8697862,
+            "scan_nets": 26790736
+          },
+          "timing_scope": "adapter calls and returned field projection; parsing/binding/normalization/validation excluded; one timer pair per recorded group",
+          "total_ns": 1372328334,
+          "validation": {
+            "all_events": true,
+            "endpoint_extension_fields": 1099,
+            "endpoint_extensions": false,
+            "final_net_pin_checks": 107701,
+            "final_primitives": 2957852,
+            "final_wire_checks": 107701,
+            "final_wires": 107589,
+            "shared_geometry": true
+          }
+        },
+        {
+          "backend": "idb",
+          "command": [
+            "taskset",
+            "-c",
+            "24",
+            "/home/zhuxu1/workspace/ecc-tools/bin/eccdb_drt_trace_replay",
+            "--backend",
+            "idb",
+            "--trace",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/trace.jsonl",
+            "--lef",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.lef",
+            "--def",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.def",
+            "--output",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/comparison.runs/idb-2.json"
+          ],
+          "events": 1229052,
+          "operations": {
+            "find_instance": 107919,
+            "find_pin": 690219,
+            "net_pins": 107701,
+            "read_instance": 107919,
+            "read_wire": 107701,
+            "replace_wire": 107589,
+            "scan_instances": 1,
+            "scan_nets": 3
+          },
+          "schema": "tritonroute_db_trace_replay_v1",
+          "scope": "recorded TritonRoute design/ordinary-wire API groups; not a full router or all ODB calls",
+          "timing_ns": {
+            "find_instance": 48178713,
+            "find_pin": 104036868,
+            "net_pins": 186815494,
+            "read_instance": 28329037,
+            "read_wire": 11900800,
+            "replace_wire": 953157747,
+            "scan_instances": 8810672,
+            "scan_nets": 26706167
+          },
+          "timing_scope": "adapter calls and returned field projection; parsing/binding/normalization/validation excluded; one timer pair per recorded group",
+          "total_ns": 1367935498,
+          "validation": {
+            "all_events": true,
+            "endpoint_extension_fields": 1099,
+            "endpoint_extensions": false,
+            "final_net_pin_checks": 107701,
+            "final_primitives": 2957852,
+            "final_wire_checks": 107701,
+            "final_wires": 107589,
+            "shared_geometry": true
+          }
+        },
+        {
+          "backend": "idb",
+          "command": [
+            "taskset",
+            "-c",
+            "24",
+            "/home/zhuxu1/workspace/ecc-tools/bin/eccdb_drt_trace_replay",
+            "--backend",
+            "idb",
+            "--trace",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/trace.jsonl",
+            "--lef",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.lef",
+            "--def",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.def",
+            "--output",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/comparison.runs/idb-3.json"
+          ],
+          "events": 1229052,
+          "operations": {
+            "find_instance": 107919,
+            "find_pin": 690219,
+            "net_pins": 107701,
+            "read_instance": 107919,
+            "read_wire": 107701,
+            "replace_wire": 107589,
+            "scan_instances": 1,
+            "scan_nets": 3
+          },
+          "schema": "tritonroute_db_trace_replay_v1",
+          "scope": "recorded TritonRoute design/ordinary-wire API groups; not a full router or all ODB calls",
+          "timing_ns": {
+            "find_instance": 47026963,
+            "find_pin": 104658912,
+            "net_pins": 186323026,
+            "read_instance": 28694809,
+            "read_wire": 12093561,
+            "replace_wire": 944292000,
+            "scan_instances": 8948312,
+            "scan_nets": 27464457
+          },
+          "timing_scope": "adapter calls and returned field projection; parsing/binding/normalization/validation excluded; one timer pair per recorded group",
+          "total_ns": 1359502040,
+          "validation": {
+            "all_events": true,
+            "endpoint_extension_fields": 1099,
+            "endpoint_extensions": false,
+            "final_net_pin_checks": 107701,
+            "final_primitives": 2957852,
+            "final_wire_checks": 107701,
+            "final_wires": 107589,
+            "shared_geometry": true
+          }
+        }
+      ]
+    },
+    "odb": {
+      "median_ns": {
+        "find_instance": 41346167,
+        "find_pin": 74114429,
+        "net_pins": 234122041,
+        "read_instance": 16112414,
+        "read_wire": 7192151,
+        "replace_wire": 437940839,
+        "scan_instances": 9862683,
+        "scan_nets": 17430764
+      },
+      "median_total_ns": 838347008,
+      "runs": [
+        {
+          "backend": "odb",
+          "command": [
+            "taskset",
+            "-c",
+            "24",
+            "/home/zhuxu1/workspace/ecc-tools/build/openroad-native-eccdb-build/src/drt/eccdbDrtTraceOdb",
+            "--backend",
+            "odb",
+            "--trace",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/trace.jsonl",
+            "--lef",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.lef",
+            "--def",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.def",
+            "--output",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/comparison.runs/odb-1.json"
+          ],
+          "events": 1229052,
+          "operations": {
+            "find_instance": 107919,
+            "find_pin": 690219,
+            "net_pins": 107701,
+            "read_instance": 107919,
+            "read_wire": 107701,
+            "replace_wire": 107589,
+            "scan_instances": 1,
+            "scan_nets": 3
+          },
+          "schema": "tritonroute_db_trace_replay_v1",
+          "scope": "recorded TritonRoute design/ordinary-wire API groups; not a full router or all ODB calls",
+          "timing_ns": {
+            "find_instance": 39755092,
+            "find_pin": 73207252,
+            "net_pins": 233855377,
+            "read_instance": 16112414,
+            "read_wire": 7142140,
+            "replace_wire": 436939124,
+            "scan_instances": 9862683,
+            "scan_nets": 17346034
+          },
+          "timing_scope": "adapter calls and returned field projection; parsing/binding/normalization/validation excluded; one timer pair per recorded group",
+          "total_ns": 834220116,
+          "validation": {
+            "all_events": true,
+            "endpoint_extension_fields": 1099,
+            "endpoint_extensions": true,
+            "final_net_pin_checks": 107701,
+            "final_primitives": 2957852,
+            "final_wire_checks": 107701,
+            "final_wires": 107589,
+            "shared_geometry": true
+          }
+        },
+        {
+          "backend": "odb",
+          "command": [
+            "taskset",
+            "-c",
+            "24",
+            "/home/zhuxu1/workspace/ecc-tools/build/openroad-native-eccdb-build/src/drt/eccdbDrtTraceOdb",
+            "--backend",
+            "odb",
+            "--trace",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/trace.jsonl",
+            "--lef",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.lef",
+            "--def",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.def",
+            "--output",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/comparison.runs/odb-2.json"
+          ],
+          "events": 1229052,
+          "operations": {
+            "find_instance": 107919,
+            "find_pin": 690219,
+            "net_pins": 107701,
+            "read_instance": 107919,
+            "read_wire": 107701,
+            "replace_wire": 107589,
+            "scan_instances": 1,
+            "scan_nets": 3
+          },
+          "schema": "tritonroute_db_trace_replay_v1",
+          "scope": "recorded TritonRoute design/ordinary-wire API groups; not a full router or all ODB calls",
+          "timing_ns": {
+            "find_instance": 42041453,
+            "find_pin": 74390609,
+            "net_pins": 234259055,
+            "read_instance": 16078303,
+            "read_wire": 7256541,
+            "replace_wire": 440585286,
+            "scan_instances": 9950732,
+            "scan_nets": 17430764
+          },
+          "timing_scope": "adapter calls and returned field projection; parsing/binding/normalization/validation excluded; one timer pair per recorded group",
+          "total_ns": 841992743,
+          "validation": {
+            "all_events": true,
+            "endpoint_extension_fields": 1099,
+            "endpoint_extensions": true,
+            "final_net_pin_checks": 107701,
+            "final_primitives": 2957852,
+            "final_wire_checks": 107701,
+            "final_wires": 107589,
+            "shared_geometry": true
+          }
+        },
+        {
+          "backend": "odb",
+          "command": [
+            "taskset",
+            "-c",
+            "24",
+            "/home/zhuxu1/workspace/ecc-tools/build/openroad-native-eccdb-build/src/drt/eccdbDrtTraceOdb",
+            "--backend",
+            "odb",
+            "--trace",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/trace.jsonl",
+            "--lef",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.lef",
+            "--def",
+            "/home/zhuxu1/workspace/reference/ispd2018/ispd18_test6/ispd18_test6.input.def",
+            "--output",
+            "/home/zhuxu1/workspace/ecc-tools/build/drt-trace-test6-20260928.W8Z1f3/comparison.runs/odb-3.json"
+          ],
+          "events": 1229052,
+          "operations": {
+            "find_instance": 107919,
+            "find_pin": 690219,
+            "net_pins": 107701,
+            "read_instance": 107919,
+            "read_wire": 107701,
+            "replace_wire": 107589,
+            "scan_instances": 1,
+            "scan_nets": 3
+          },
+          "schema": "tritonroute_db_trace_replay_v1",
+          "scope": "recorded TritonRoute design/ordinary-wire API groups; not a full router or all ODB calls",
+          "timing_ns": {
+            "find_instance": 41346167,
+            "find_pin": 74114429,
+            "net_pins": 234122041,
+            "read_instance": 16209474,
+            "read_wire": 7192151,
+            "replace_wire": 437940839,
+            "scan_instances": 9630673,
+            "scan_nets": 17791234
+          },
+          "timing_scope": "adapter calls and returned field projection; parsing/binding/normalization/validation excluded; one timer pair per recorded group",
+          "total_ns": 838347008,
+          "validation": {
+            "all_events": true,
+            "endpoint_extension_fields": 1099,
+            "endpoint_extensions": true,
+            "final_net_pin_checks": 107701,
+            "final_primitives": 2957852,
+            "final_wire_checks": 107701,
+            "final_wires": 107589,
+            "shared_geometry": true
+          }
+        }
+      ]
+    }
+  },
+  "schema": "tritonroute_db_trace_comparison_v1",
+  "scope": "actual TritonRoute design/ordinary-wire API-group trace; not all ODB calls or full routing runtime",
+  "timer_scope": "per-event adapter invocation and returned-value construction; parsing/binding/canonicalization/validation excluded",
+  "validation_scope": "ODB/EccDB include segment endpoint extensions; IDB validates common geometry/connectivity only"
+}

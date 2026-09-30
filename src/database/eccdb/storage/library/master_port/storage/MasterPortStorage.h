@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "geometry/GeometryPool.h"
@@ -37,6 +38,16 @@ class LibraryMasterPortStorage
   [[nodiscard]] std::optional<Rect> boundingBox(LibraryMasterPortId id) const;
   void updateMasterPort(LibraryMasterPortId id, LibraryMasterPortInput port);
   [[nodiscard]] bool destroyMasterPort(LibraryMasterPortId id);
+
+  // OpenDB dbMPin vocabulary. PORT spellings above remain compatible aliases.
+  [[nodiscard]] LibraryMasterPinId createMasterPin(LibraryMasterTermId owner, LibraryMasterPortInput pin = {})
+  {
+    return createMasterPort(owner, std::move(pin));
+  }
+  [[nodiscard]] const LibraryMasterPin& masterPin(LibraryMasterPinId id) const { return masterPort(id); }
+  [[nodiscard]] std::vector<LibraryMasterPinId> masterPins(LibraryMasterTermId owner) const { return masterPorts(owner); }
+  void updateMasterPin(LibraryMasterPinId id, LibraryMasterPortInput pin) { updateMasterPort(id, std::move(pin)); }
+  [[nodiscard]] bool destroyMasterPin(LibraryMasterPinId id) { return destroyMasterPort(id); }
 
  private:
   void ensureMasterTerm(LibraryMasterTermId id) const;

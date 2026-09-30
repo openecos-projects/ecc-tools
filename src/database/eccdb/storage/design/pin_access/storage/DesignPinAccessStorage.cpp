@@ -7,6 +7,7 @@
 
 #include "design/global/model/DesignGlobalComponents.h"
 #include "design/netlist/model/NetlistComponents.h"
+#include "design/netlist/storage/DesignNetlistStorage.h"
 #include "design/via/component/ViaComponents.h"
 #include "library/LibraryRegistry.h"
 #include "library/cell_master/model/CellMasterComponents.h"
@@ -50,16 +51,19 @@ DesignPinAccessCandidateGroup* findGroup(Groups& groups, uint32_t group_index)
   return found == groups.end() ? nullptr : &*found;
 }
 
+template <typename Entries>
+auto findPreferredEntry(Entries& entries, DesignInstancePinId pin)
+{
+  const auto found = std::find_if(entries.begin(), entries.end(), [pin](const auto& entry) {
+    return entry.pin == pin;
+  });
+  return found == entries.end() ? nullptr : &*found;
+}
+
 bool hasPreferences(const DesignPinAccessStorage::registry_type& registry, DesignInstanceId instance)
 {
-  const auto* pins = registry.try_get<const DesignInstancePins>(instance.entity());
-  if (pins == nullptr) {
-    return false;
-  }
-  return std::any_of(pins->values.begin(), pins->values.end(), [&registry](const auto pin) {
-    const auto* preferences = registry.try_get<const DesignInstancePreferredPinAccess>(pin.entity());
-    return preferences != nullptr && !preferences->values.empty();
-  });
+  const auto* preferences = registry.try_get<const DesignInstancePreferredPinAccess>(instance.entity());
+  return preferences != nullptr && !preferences->entries.empty();
 }
 
 }  // namespace
@@ -196,87 +200,87 @@ bool DesignPinAccessStorage::clearMasterPortCandidateGroups(LibraryMasterPortId 
   return true;
 }
 
-void DesignPinAccessStorage::setIoPinPortCandidateGroup(DesignIoPinId pin,
-                                                         uint32_t port_index,
-                                                         uint32_t group_index,
-                                                         std::vector<DesignPinAccessPoint> points)
+void DesignPinAccessStorage::setBlockPinCandidateGroup(DesignBlockPinId pin,
+                                                        uint32_t group_index,
+                                                        std::vector<DesignPinAccessPoint> points)
 {
-  ensureIoPin(pin);
-  const auto& io_pin = _registry.get<const DesignIoPin>(pin.entity());
-  if (port_index >= io_pin.ports.size()) {
-    throw std::out_of_range("IO pin access references an invalid port index");
-  }
+  ensureBlockPin(pin);
 
-  DesignIoPinAccessGroups replacement;
-  if (const auto* existing = _registry.try_get<const DesignIoPinAccessGroups>(pin.entity()); existing != nullptr) {
+  DesignBlockPinAccessGroups replacement;
+  if (const auto* existing = _registry.try_get<const DesignBlockPinAccessGroups>(pin.entity()); existing != nullptr) {
     replacement = *existing;
   }
-  auto* port_groups = findIoPinPortGroups(replacement, port_index);
-  if (port_groups == nullptr) {
-    replacement.port_groups.push_back(DesignIoPinPortAccessGroups{.port_index = port_index});
-    port_groups = &replacement.port_groups.back();
-  }
-  if (auto* group = findGroup(port_groups->groups, group_index); group != nullptr) {
+  if (auto* group = findGroup(replacement.groups, group_index); group != nullptr) {
     group->points = std::move(points);
   } else {
-    port_groups->groups.push_back(DesignPinAccessCandidateGroup{.group_index = group_index, .points = std::move(points)});
+    replacement.groups.push_back(DesignPinAccessCandidateGroup{.group_index = group_index, .points = std::move(points)});
   }
-  validateIoPinGroups(pin, replacement);
-  _registry.emplace_or_replace<DesignIoPinAccessGroups>(pin.entity(), std::move(replacement));
+  validateBlockPinGroups(pin, replacement);
+  _registry.emplace_or_replace<DesignBlockPinAccessGroups>(pin.entity(), std::move(replacement));
 }
 
-bool DesignPinAccessStorage::hasIoPinPortCandidateGroup(DesignIoPinId pin, uint32_t port_index, uint32_t group_index) const
+void DesignPinAccessStorage::appendBlockPinCandidatePoints(DesignBlockPinId pin,
+                                                            uint32_t group_index,
+                                                            std::vector<DesignPinAccessPoint> points)
 {
-  ensureIoPin(pin);
-  const auto& io_pin = _registry.get<const DesignIoPin>(pin.entity());
-  if (port_index >= io_pin.ports.size()) {
-    throw std::out_of_range("IO pin access references an invalid port index");
+  ensureBlockPin(pin);
+  if (points.empty()) {
+    return;
   }
-  const auto* groups = findIoPinPortGroups(pin, port_index);
+  for (const auto& point : points) {
+    validateAccessPoint(point);
+  }
+
+  // Do not mutate the installed component until the entire appended state
+  // validates. In particular, a failed batch must not leave an empty group or
+  // a partial prefix of its candidate points behind.
+  DesignBlockPinAccessGroups replacement;
+  if (const auto* existing = _registry.try_get<const DesignBlockPinAccessGroups>(pin.entity()); existing != nullptr) {
+    replacement = *existing;
+  }
+  if (auto* group = findGroup(replacement.groups, group_index); group != nullptr) {
+    group->points.reserve(group->points.size() + points.size());
+    for (auto& point : points) {
+      group->points.push_back(std::move(point));
+    }
+  } else {
+    replacement.groups.push_back(DesignPinAccessCandidateGroup{.group_index = group_index, .points = std::move(points)});
+  }
+  validateBlockPinGroups(pin, replacement);
+  _registry.emplace_or_replace<DesignBlockPinAccessGroups>(pin.entity(), std::move(replacement));
+}
+
+bool DesignPinAccessStorage::hasBlockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index) const
+{
+  ensureBlockPin(pin);
+  const auto* groups = _registry.try_get<const DesignBlockPinAccessGroups>(pin.entity());
   return groups != nullptr && findGroup(groups->groups, group_index) != nullptr;
 }
 
-std::span<const DesignPinAccessCandidateGroup> DesignPinAccessStorage::ioPinPortCandidateGroups(DesignIoPinId pin,
-                                                                                                    uint32_t port_index) const
+std::span<const DesignPinAccessCandidateGroup> DesignPinAccessStorage::blockPinCandidateGroups(DesignBlockPinId pin) const
 {
-  ensureIoPin(pin);
-  const auto& io_pin = _registry.get<const DesignIoPin>(pin.entity());
-  if (port_index >= io_pin.ports.size()) {
-    throw std::out_of_range("IO pin access references an invalid port index");
-  }
-  const auto* groups = findIoPinPortGroups(pin, port_index);
+  ensureBlockPin(pin);
+  const auto* groups = _registry.try_get<const DesignBlockPinAccessGroups>(pin.entity());
   return groups == nullptr ? std::span<const DesignPinAccessCandidateGroup>{}
                            : std::span<const DesignPinAccessCandidateGroup>{groups->groups};
 }
 
-const DesignPinAccessCandidateGroup& DesignPinAccessStorage::ioPinPortCandidateGroup(DesignIoPinId pin,
-                                                                                        uint32_t port_index,
-                                                                                        uint32_t group_index) const
+const DesignPinAccessCandidateGroup& DesignPinAccessStorage::blockPinCandidateGroup(DesignBlockPinId pin,
+                                                                                       uint32_t group_index) const
 {
-  ensureIoPin(pin);
-  const auto& io_pin = _registry.get<const DesignIoPin>(pin.entity());
-  if (port_index >= io_pin.ports.size()) {
-    throw std::out_of_range("IO pin access references an invalid port index");
-  }
-  const auto* groups = findIoPinPortGroups(pin, port_index);
+  ensureBlockPin(pin);
+  const auto* groups = _registry.try_get<const DesignBlockPinAccessGroups>(pin.entity());
   const auto* group = groups == nullptr ? nullptr : findGroup(groups->groups, group_index);
   if (group == nullptr) {
-    throw std::out_of_range("IO pin port has no such pin-access candidate group");
+    throw std::out_of_range("block pin has no such pin-access candidate group");
   }
   return *group;
 }
 
-bool DesignPinAccessStorage::clearIoPinPortCandidateGroup(DesignIoPinId pin, uint32_t port_index, uint32_t group_index)
+bool DesignPinAccessStorage::clearBlockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index)
 {
-  ensureIoPin(pin);
-  if (port_index >= _registry.get<const DesignIoPin>(pin.entity()).ports.size()) {
-    throw std::out_of_range("IO pin access references an invalid port index");
-  }
-  auto* existing = _registry.try_get<DesignIoPinAccessGroups>(pin.entity());
-  if (existing == nullptr) {
-    return false;
-  }
-  auto* groups = findIoPinPortGroups(*existing, port_index);
+  ensureBlockPin(pin);
+  auto* groups = _registry.try_get<DesignBlockPinAccessGroups>(pin.entity());
   if (groups == nullptr) {
     return false;
   }
@@ -288,37 +292,67 @@ bool DesignPinAccessStorage::clearIoPinPortCandidateGroup(DesignIoPinId pin, uin
   }
   groups->groups.erase(found);
   if (groups->groups.empty()) {
-    const auto port_found = std::find_if(existing->port_groups.begin(), existing->port_groups.end(), [port_index](const auto& entry) {
-      return entry.port_index == port_index;
-    });
-    existing->port_groups.erase(port_found);
-  }
-  if (existing->port_groups.empty()) {
-    _registry.remove<DesignIoPinAccessGroups>(pin.entity());
+    _registry.remove<DesignBlockPinAccessGroups>(pin.entity());
   }
   return true;
 }
 
-bool DesignPinAccessStorage::clearIoPinPortCandidateGroups(DesignIoPinId pin, uint32_t port_index)
+bool DesignPinAccessStorage::clearBlockPinCandidateGroups(DesignBlockPinId pin)
 {
-  ensureIoPin(pin);
-  if (port_index >= _registry.get<const DesignIoPin>(pin.entity()).ports.size()) {
-    throw std::out_of_range("IO pin access references an invalid port index");
-  }
-  const auto* groups = findIoPinPortGroups(pin, port_index);
-  if (groups == nullptr) {
+  ensureBlockPin(pin);
+  if (!_registry.all_of<DesignBlockPinAccessGroups>(pin.entity())) {
     return false;
   }
-  // Copy the indices because each clear can erase the containing group row.
-  std::vector<uint32_t> group_indices;
-  group_indices.reserve(groups->groups.size());
-  for (const auto& group : groups->groups) {
-    group_indices.push_back(group.group_index);
-  }
-  for (const auto group_index : group_indices) {
-    (void) clearIoPinPortCandidateGroup(pin, port_index, group_index);
-  }
+  _registry.remove<DesignBlockPinAccessGroups>(pin.entity());
   return true;
+}
+
+void DesignPinAccessStorage::setIoPinPortCandidateGroup(DesignIoPinId pin,
+                                                         uint32_t port_index,
+                                                         uint32_t group_index,
+                                                         std::vector<DesignPinAccessPoint> points)
+{
+  setBlockPinCandidateGroup(blockPinAt(pin, port_index), group_index, std::move(points));
+}
+
+void DesignPinAccessStorage::appendIoPinPortCandidatePoints(DesignIoPinId pin,
+                                                             uint32_t port_index,
+                                                             uint32_t group_index,
+                                                             std::vector<DesignPinAccessPoint> points)
+{
+  appendBlockPinCandidatePoints(blockPinAt(pin, port_index), group_index, std::move(points));
+}
+
+bool DesignPinAccessStorage::hasIoPinPortCandidateGroup(DesignIoPinId pin,
+                                                         uint32_t port_index,
+                                                         uint32_t group_index) const
+{
+  return hasBlockPinCandidateGroup(blockPinAt(pin, port_index), group_index);
+}
+
+std::span<const DesignPinAccessCandidateGroup> DesignPinAccessStorage::ioPinPortCandidateGroups(DesignIoPinId pin,
+                                                                                                    uint32_t port_index) const
+{
+  return blockPinCandidateGroups(blockPinAt(pin, port_index));
+}
+
+const DesignPinAccessCandidateGroup& DesignPinAccessStorage::ioPinPortCandidateGroup(DesignIoPinId pin,
+                                                                                        uint32_t port_index,
+                                                                                        uint32_t group_index) const
+{
+  return blockPinCandidateGroup(blockPinAt(pin, port_index), group_index);
+}
+
+bool DesignPinAccessStorage::clearIoPinPortCandidateGroup(DesignIoPinId pin,
+                                                           uint32_t port_index,
+                                                           uint32_t group_index)
+{
+  return clearBlockPinCandidateGroup(blockPinAt(pin, port_index), group_index);
+}
+
+bool DesignPinAccessStorage::clearIoPinPortCandidateGroups(DesignIoPinId pin, uint32_t port_index)
+{
+  return clearBlockPinCandidateGroups(blockPinAt(pin, port_index));
 }
 
 void DesignPinAccessStorage::setInstancePinAccessGroup(DesignInstanceId instance, uint32_t group_index)
@@ -360,25 +394,53 @@ void DesignPinAccessStorage::setPreferredInstancePinAccess(DesignInstancePinId p
     return;
   }
   validatePreferences(pin, preferences);
-  _registry.emplace_or_replace<DesignInstancePreferredPinAccess>(
-      pin.entity(), DesignInstancePreferredPinAccess{.values = std::move(preferences)});
+  const auto instance = _netlist.instancePin(pin).instance;
+  auto* existing = _registry.try_get<DesignInstancePreferredPinAccess>(instance.entity());
+  if (existing == nullptr) {
+    DesignInstancePreferredPinAccess replacement;
+    replacement.entries.push_back(
+        DesignInstancePreferredPinAccessEntry{.pin = pin, .values = std::move(preferences)});
+    _registry.emplace<DesignInstancePreferredPinAccess>(instance.entity(), std::move(replacement));
+    return;
+  }
+  if (auto* entry = findPreferredEntry(existing->entries, pin); entry != nullptr) {
+    entry->values = std::move(preferences);
+    return;
+  }
+  existing->entries.push_back(DesignInstancePreferredPinAccessEntry{.pin = pin, .values = std::move(preferences)});
 }
 
 std::span<const DesignPreferredPinAccessRef> DesignPinAccessStorage::preferredInstancePinAccess(DesignInstancePinId pin) const
 {
   ensureInstancePin(pin);
-  const auto* preferences = _registry.try_get<const DesignInstancePreferredPinAccess>(pin.entity());
-  return preferences == nullptr ? std::span<const DesignPreferredPinAccessRef>{}
-                              : std::span<const DesignPreferredPinAccessRef>{preferences->values};
+  const auto instance = _netlist.instancePin(pin).instance;
+  const auto* preferences = _registry.try_get<const DesignInstancePreferredPinAccess>(instance.entity());
+  if (preferences == nullptr) {
+    return {};
+  }
+  const auto* entry = findPreferredEntry(preferences->entries, pin);
+  return entry == nullptr ? std::span<const DesignPreferredPinAccessRef>{}
+                          : std::span<const DesignPreferredPinAccessRef>{entry->values};
 }
 
 bool DesignPinAccessStorage::clearPreferredInstancePinAccess(DesignInstancePinId pin)
 {
   ensureInstancePin(pin);
-  if (!_registry.all_of<DesignInstancePreferredPinAccess>(pin.entity())) {
+  const auto instance = _netlist.instancePin(pin).instance;
+  auto* preferences = _registry.try_get<DesignInstancePreferredPinAccess>(instance.entity());
+  if (preferences == nullptr) {
     return false;
   }
-  _registry.remove<DesignInstancePreferredPinAccess>(pin.entity());
+  const auto found = std::find_if(preferences->entries.begin(), preferences->entries.end(), [pin](const auto& entry) {
+    return entry.pin == pin;
+  });
+  if (found == preferences->entries.end()) {
+    return false;
+  }
+  preferences->entries.erase(found);
+  if (preferences->entries.empty()) {
+    _registry.remove<DesignInstancePreferredPinAccess>(instance.entity());
+  }
   return true;
 }
 
@@ -407,12 +469,10 @@ bool DesignPinAccessStorage::referencesDesignVia(DesignViaId via) const
       }
     }
   }
-  const auto io_pins = _registry.view<const DesignIoPinAccessGroups>();
-  for (const auto entity : io_pins) {
-    for (const auto& port_groups : io_pins.get<const DesignIoPinAccessGroups>(entity).port_groups) {
-      if (references(port_groups.groups)) {
-        return true;
-      }
+  const auto block_pins = _registry.view<const DesignBlockPin, const DesignBlockPinAccessGroups>();
+  for (const auto entity : block_pins) {
+    if (references(block_pins.get<const DesignBlockPinAccessGroups>(entity).groups)) {
+      return true;
     }
   }
   return false;
@@ -437,11 +497,9 @@ std::vector<DesignViaId> DesignPinAccessStorage::referencedDesignVias() const
       append(port_groups.groups);
     }
   }
-  const auto io_pins = _registry.view<const DesignIoPinAccessGroups>();
-  for (const auto entity : io_pins) {
-    for (const auto& port_groups : io_pins.get<const DesignIoPinAccessGroups>(entity).port_groups) {
-      append(port_groups.groups);
-    }
+  const auto block_pins = _registry.view<const DesignBlockPin, const DesignBlockPinAccessGroups>();
+  for (const auto entity : block_pins) {
+    append(block_pins.get<const DesignBlockPinAccessGroups>(entity).groups);
   }
   return result;
 }
@@ -463,11 +521,11 @@ void DesignPinAccessStorage::validateRestoredState() const
     }
     const auto preferences = _registry.view<const DesignInstancePreferredPinAccess>();
     for (const auto entity : preferences) {
-      validatePreferences(DesignInstancePinId{entity}, preferences.get<const DesignInstancePreferredPinAccess>(entity).values);
+      validatePreferredAccess(DesignInstanceId{entity}, preferences.get<const DesignInstancePreferredPinAccess>(entity));
     }
-    const auto io_pins = _registry.view<const DesignIoPinAccessGroups>();
-    for (const auto entity : io_pins) {
-      validateIoPinGroups(DesignIoPinId{entity}, io_pins.get<const DesignIoPinAccessGroups>(entity));
+    const auto block_pins = _registry.view<const DesignBlockPinAccessGroups>();
+    for (const auto entity : block_pins) {
+      validateBlockPinGroups(DesignBlockPinId{entity}, block_pins.get<const DesignBlockPinAccessGroups>(entity));
     }
   } catch (const std::exception& error) {
     throw std::runtime_error(std::string{"binary design has invalid pin-access state: "} + error.what());
@@ -490,15 +548,22 @@ void DesignPinAccessStorage::ensureInstance(DesignInstanceId id) const
 
 void DesignPinAccessStorage::ensureInstancePin(DesignInstancePinId id) const
 {
-  if (!id || !_registry.valid(id.entity()) || !_registry.all_of<DesignInstancePin>(id.entity())) {
+  if (!_netlist.contains(id)) {
     throw std::out_of_range("invalid design instance pin id");
   }
 }
 
 void DesignPinAccessStorage::ensureIoPin(DesignIoPinId id) const
 {
-  if (!id || !_registry.valid(id.entity()) || !_registry.all_of<DesignIoPin>(id.entity())) {
+  if (!id || !_registry.valid(id.entity()) || !_registry.all_of<DesignBlockTerm>(id.entity())) {
     throw std::out_of_range("invalid design IO pin id");
+  }
+}
+
+void DesignPinAccessStorage::ensureBlockPin(DesignBlockPinId id) const
+{
+  if (!_netlist.contains(id)) {
+    throw std::out_of_range("invalid design block pin id");
   }
 }
 
@@ -568,19 +633,11 @@ void DesignPinAccessStorage::validateCatalog(const DesignPinAccessCatalog& root_
   }
 }
 
-void DesignPinAccessStorage::validateIoPinGroups(DesignIoPinId pin, const DesignIoPinAccessGroups& groups) const
+void DesignPinAccessStorage::validateBlockPinGroups(DesignBlockPinId pin,
+                                                     const DesignBlockPinAccessGroups& groups) const
 {
-  ensureIoPin(pin);
-  const auto& io_pin = _registry.get<const DesignIoPin>(pin.entity());
-  for (std::size_t index = 0; index < groups.port_groups.size(); ++index) {
-    const auto& port_groups = groups.port_groups[index];
-    if (port_groups.port_index >= io_pin.ports.size()
-        || std::any_of(groups.port_groups.begin(), groups.port_groups.begin() + index,
-                       [&port_groups](const auto& prior) { return prior.port_index == port_groups.port_index; })) {
-      throw std::invalid_argument("IO pin-access port index is invalid or duplicated");
-    }
-    validateCandidateGroups(port_groups.groups);
-  }
+  ensureBlockPin(pin);
+  validateCandidateGroups(groups.groups);
 }
 
 void DesignPinAccessStorage::validateInstanceGroup(DesignInstanceId instance, uint32_t group_index) const
@@ -595,7 +652,7 @@ void DesignPinAccessStorage::validatePreferences(DesignInstancePinId pin,
                                                   const std::vector<DesignPreferredPinAccessRef>& preferences) const
 {
   ensureInstancePin(pin);
-  const auto& instance_pin = _registry.get<const DesignInstancePin>(pin.entity());
+  const auto& instance_pin = _netlist.instancePin(pin);
   const auto* selection = _registry.try_get<const DesignInstancePinAccessGroupIndex>(instance_pin.instance.entity());
   if (selection == nullptr) {
     throw std::invalid_argument("preferred pin-access point requires an instance group selection");
@@ -613,6 +670,25 @@ void DesignPinAccessStorage::validatePreferences(DesignInstancePinId pin,
     if (group == nullptr || preference.point_index >= group->points.size()) {
       throw std::invalid_argument("preferred pin-access point index is invalid");
     }
+  }
+}
+
+void DesignPinAccessStorage::validatePreferredAccess(DesignInstanceId instance,
+                                                      const DesignInstancePreferredPinAccess& preferences) const
+{
+  ensureInstance(instance);
+  if (preferences.entries.empty()) {
+    throw std::invalid_argument("instance preferred pin-access component is empty");
+  }
+  for (std::size_t index = 0; index < preferences.entries.size(); ++index) {
+    const auto& entry = preferences.entries[index];
+    ensureInstancePin(entry.pin);
+    if (entry.values.empty() || _netlist.instancePin(entry.pin).instance != instance
+        || std::any_of(preferences.entries.begin(), preferences.entries.begin() + index,
+                       [&entry](const auto& prior) { return prior.pin == entry.pin; })) {
+      throw std::invalid_argument("instance preferred pin-access entry is invalid");
+    }
+    validatePreferences(entry.pin, entry.values);
   }
 }
 
@@ -635,25 +711,14 @@ DesignMasterPortPinAccessGroups* DesignPinAccessStorage::findMasterPortGroups(De
   return found == root_catalog.master_port_groups.end() ? nullptr : &*found;
 }
 
-const DesignIoPinPortAccessGroups* DesignPinAccessStorage::findIoPinPortGroups(DesignIoPinId pin, uint32_t port_index) const
+DesignBlockPinId DesignPinAccessStorage::blockPinAt(DesignIoPinId pin, uint32_t port_index) const
 {
-  const auto* groups = _registry.try_get<const DesignIoPinAccessGroups>(pin.entity());
-  if (groups == nullptr) {
-    return nullptr;
+  ensureIoPin(pin);
+  const auto pins = _netlist.blockPins(DesignBlockTermId{pin.entity()});
+  if (port_index >= pins.size()) {
+    throw std::out_of_range("IO pin access references an invalid port index");
   }
-  const auto found = std::find_if(groups->port_groups.begin(), groups->port_groups.end(), [port_index](const auto& entry) {
-    return entry.port_index == port_index;
-  });
-  return found == groups->port_groups.end() ? nullptr : &*found;
-}
-
-DesignIoPinPortAccessGroups* DesignPinAccessStorage::findIoPinPortGroups(DesignIoPinAccessGroups& groups,
-                                                                           uint32_t port_index) const
-{
-  const auto found = std::find_if(groups.port_groups.begin(), groups.port_groups.end(), [port_index](const auto& entry) {
-    return entry.port_index == port_index;
-  });
-  return found == groups.port_groups.end() ? nullptr : &*found;
+  return pins[port_index];
 }
 
 const DesignPinAccessCandidateGroup* DesignPinAccessStorage::findCandidateGroup(LibraryMasterPortId master_port,
@@ -667,9 +732,11 @@ bool DesignPinAccessStorage::isCandidateGroupReferenced(LibraryMasterPortId mast
 {
   const auto preferences = _registry.view<const DesignInstancePreferredPinAccess>();
   for (const auto entity : preferences) {
-    for (const auto& preference : preferences.get<const DesignInstancePreferredPinAccess>(entity).values) {
-      if (preference.master_port == master_port && preference.group_index == group_index) {
-        return true;
+    for (const auto& entry : preferences.get<const DesignInstancePreferredPinAccess>(entity).entries) {
+      for (const auto& preference : entry.values) {
+        if (preference.master_port == master_port && preference.group_index == group_index) {
+          return true;
+        }
       }
     }
   }
@@ -724,7 +791,7 @@ bool DesignPinAccessStorage::masterPortBelongsToInstancePin(LibraryMasterPortId 
   ensureInstancePin(pin);
   const auto& library = _library_registry.registry();
   const auto& port = library.get<const LibraryMasterPort>(master_port.entity());
-  return port.term == _registry.get<const DesignInstancePin>(pin.entity()).master_term;
+  return port.term == _netlist.instancePin(pin).master_term;
 }
 
 }  // namespace eccdb

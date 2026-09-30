@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,21 @@ struct PhysicalDesignServiceFixture : testing::Test
                                 .cut_geometry = {.rects = {{-1, -1, 1, 1}}},
                                 .top_layer = m2,
                                 .top_geometry = {.rects = {{-3, -3, 3, 3}}}});
+    generated_via_rule = tech.viaRuleGenerateStorage().createViaRuleGenerate(
+        TechViaRuleGenerate{.name = "VIA12_GEN", .flags = TechViaRuleGenerateFlag::kDefault},
+        TechViaRuleGenerateBottomLayer{.layer = m1,
+                                       .flags = TechViaRuleGenerateRoutingLayerFlag::kHasEnclosure,
+                                       .enclosure_overhang1 = 1,
+                                       .enclosure_overhang2 = 2},
+        TechViaRuleGenerateCutLayer{.layer = cut,
+                                    .flags = TechViaRuleGenerateCutLayerFlag::kHasRect | TechViaRuleGenerateCutLayerFlag::kHasSpacing,
+                                    .cut_rect = {-2, -3, 2, 3},
+                                    .spacing_x = 2,
+                                    .spacing_y = 4},
+        TechViaRuleGenerateTopLayer{.layer = m2,
+                                    .flags = TechViaRuleGenerateRoutingLayerFlag::kHasEnclosure,
+                                    .enclosure_overhang1 = 3,
+                                    .enclosure_overhang2 = 4});
 
     site = library.siteStorage().createSite(LibrarySite{.name = "CORE", .width = 20, .height = 40});
     master = library.cellMasterStorage().createCellMaster(
@@ -104,6 +120,7 @@ struct PhysicalDesignServiceFixture : testing::Test
   TechCutLayerId cut;
   TechRoutingLayerId m2;
   TechViaMasterId via;
+  TechViaRuleGenerateId generated_via_rule;
   LibrarySiteId site;
   LibraryCellMasterId master;
   LibraryMasterTermId term;
@@ -171,6 +188,78 @@ TEST_F(PhysicalDesignServiceFixture, EnumeratesPhysicalMetadataAndTransformsInst
   EXPECT_EQ(local_via_rectangles.front().mask, 2u);
 }
 
+TEST_F(PhysicalDesignServiceFixture, EnumeratesViaGenerateRuleClauses)
+{
+  std::size_t visited = 0;
+  service->forEachTechViaRuleGenerate(
+      [&](TechViaRuleGenerateId id, const TechViaRuleGenerate& rule, const TechViaRuleGenerateBottomLayer& bottom,
+          const TechViaRuleGenerateCutLayer& cut_clause, const TechViaRuleGenerateTopLayer& top) {
+        ++visited;
+        EXPECT_EQ(id, generated_via_rule);
+        EXPECT_EQ(rule.name, "VIA12_GEN");
+        EXPECT_TRUE(rule.isDefault());
+        EXPECT_EQ(bottom.layer, TechConductorLayerRef{m1});
+        EXPECT_EQ(bottom.enclosure_overhang1, 1);
+        EXPECT_EQ(bottom.enclosure_overhang2, 2);
+        EXPECT_EQ(cut_clause.layer, cut);
+        EXPECT_EQ(cut_clause.cut_rect, (Rect{-2, -3, 2, 3}));
+        EXPECT_EQ(cut_clause.spacing_x, 2);
+        EXPECT_EQ(cut_clause.spacing_y, 4);
+        EXPECT_EQ(top.layer, TechConductorLayerRef{m2});
+        EXPECT_EQ(top.enclosure_overhang1, 3);
+        EXPECT_EQ(top.enclosure_overhang2, 4);
+      });
+  EXPECT_EQ(visited, 1u);
+}
+
+TEST_F(PhysicalDesignServiceFixture, ExpandsGeneratedDesignViaWithOriginOffsetsAndOrientation)
+{
+  const auto generated_via = design.routingStorage().createVia(
+      DesignVia{.name = "LOCAL_GENERATED",
+                .flags = DesignViaFlag::kGenerated,
+                .generated = {.via_rule = generated_via_rule,
+                              .bottom_layer = m1,
+                              .cut_layer = cut,
+                              .top_layer = m2,
+                              .flags = DesignGeneratedViaFlag::kHasRowCol | DesignGeneratedViaFlag::kHasOrigin
+                                       | DesignGeneratedViaFlag::kHasOffset,
+                              .cut_size_x = 4,
+                              .cut_size_y = 6,
+                              .cut_spacing_x = 2,
+                              .cut_spacing_y = 4,
+                              .bottom_enclosure_x = 1,
+                              .bottom_enclosure_y = 2,
+                              .top_enclosure_x = 3,
+                              .top_enclosure_y = 4,
+                              .row_count = 2,
+                              .column_count = 3,
+                              .origin = {1, -1},
+                              .bottom_offset = {3, 5},
+                              .top_offset = {-2, 4}}});
+
+  std::vector<PhysicalLayerRect> rectangles;
+  const auto visitor = PhysicalGeometryVisitor{.rectangle = [&](const PhysicalLayerRect& shape) { rectangles.push_back(shape); }};
+  service->forEachDesignViaGeometry(generated_via, {100, 200}, DesignOrientation::kN, visitor);
+  ASSERT_EQ(rectangles.size(), 8u);
+  EXPECT_EQ(rectangles[0].layer, TechLayerId{m1.entity()});
+  EXPECT_EQ(rectangles[0].rectangle, (Rect{95, 194, 113, 214}));
+  EXPECT_EQ(rectangles[1].layer, TechLayerId{cut.entity()});
+  EXPECT_EQ(rectangles[1].rectangle, (Rect{93, 191, 97, 197}));
+  EXPECT_EQ(rectangles[6].rectangle, (Rect{105, 201, 109, 207}));
+  EXPECT_EQ(rectangles[7].layer, TechLayerId{m2.entity()});
+  EXPECT_EQ(rectangles[7].rectangle, (Rect{88, 191, 110, 215}));
+  for (const auto& rectangle : rectangles) {
+    EXPECT_EQ(rectangle.source, PhysicalGeometrySource::kDesignVia);
+    EXPECT_EQ(rectangle.mask, 0u);
+  }
+
+  rectangles.clear();
+  service->forEachDesignViaGeometry(generated_via, {100, 200}, DesignOrientation::kE, visitor);
+  ASSERT_EQ(rectangles.size(), 8u);
+  EXPECT_EQ(rectangles[0].rectangle, (Rect{94, 187, 114, 205}));
+  EXPECT_EQ(rectangles[1].rectangle, (Rect{91, 203, 97, 207}));
+}
+
 TEST_F(PhysicalDesignServiceFixture, EnumeratesRegularAndSpecialNetPinsAndNdr)
 {
   std::vector<DesignNetId> regular_nets;
@@ -205,8 +294,9 @@ TEST_F(PhysicalDesignServiceFixture, EnumeratesRegularAndSpecialNetPinsAndNdr)
                                 instance_pins.push_back(id);
                                 EXPECT_EQ(owner.name, "u0");
                                 EXPECT_EQ(master_term.name, "A");
-                                EXPECT_EQ(pin.master_term_ptr, &master_term);
-                                EXPECT_EQ(pin.master_term_ptr, &library.masterTermStorage().masterTerm(term));
+                                EXPECT_EQ(pin.instance, instance);
+                                EXPECT_EQ(pin.master_term, term);
+                                EXPECT_EQ(pin.net, regular);
                               },
                              .io_pin = [&](DesignIoPinId id, const DesignIoPin&) { io_pins.push_back(id); }});
   EXPECT_EQ(instance_pins, (std::vector<DesignInstancePinId>{instance_pin}));
@@ -218,6 +308,163 @@ TEST_F(PhysicalDesignServiceFixture, EnumeratesRegularAndSpecialNetPinsAndNdr)
   const auto ndr = service->nonDefaultRule(regular);
   EXPECT_FALSE(ndr.tech_rule);
   EXPECT_EQ(ndr.design_rule, design_ndr);
+}
+
+TEST_F(PhysicalDesignServiceFixture, ReadsNetJumpers)
+{
+  EXPECT_FALSE(service->netHasJumpers(regular));
+  const auto jumper_net = design.netlistStorage().createNet(DesignNet{.name = "jumpers", .flags = DesignNetFlag::kHasJumpers});
+  EXPECT_TRUE(service->netHasJumpers(jumper_net));
+}
+
+TEST_F(PhysicalDesignServiceFixture, IdentifiesOnlyOdbCompatibleAbutmentNets)
+{
+  auto& netlist = design.netlistStorage();
+  const auto block_master = library.cellMasterStorage().createCellMaster(
+      LibraryCellMaster{.name = "BLOCK", .type = LibraryCellMasterType::kBlock, .width = 20, .height = 20});
+  const auto block_term = library.masterTermStorage().createMasterTerm(
+      block_master, LibraryMasterTerm{.name = "A", .direction = LibraryMasterTermDirection::kInput});
+  static_cast<void>(library.masterPortStorage().createMasterPort(
+      block_term, LibraryMasterPortInput{.layer_clauses = {{.layer = TechLayerId{m1.entity()}, .geometry = {.rects = {{1, 2, 5, 6}}}}}}));
+
+  const auto blackbox_master = library.cellMasterStorage().createCellMaster(
+      LibraryCellMaster{.name = "BLOCK_BLACKBOX", .type = LibraryCellMasterType::kBlockBlackbox, .width = 20, .height = 20});
+  const auto blackbox_term = library.masterTermStorage().createMasterTerm(
+      blackbox_master, LibraryMasterTerm{.name = "A", .direction = LibraryMasterTermDirection::kInput});
+  static_cast<void>(library.masterPortStorage().createMasterPort(
+      blackbox_term,
+      LibraryMasterPortInput{.layer_clauses = {{.layer = TechLayerId{m2.entity()}, .geometry = {.rects = {{1, 2, 5, 6}}}}}}));
+
+  const auto first_block = netlist.createInstance(DesignInstance{.name = "block_first",
+                                                                    .master = block_master,
+                                                                    .origin = {100, 200},
+                                                                    .placement_status = DesignPlacementStatus::kPlaced});
+  const auto second_block = netlist.createInstance(DesignInstance{.name = "block_second",
+                                                                     .master = blackbox_master,
+                                                                     .origin = {90, 188},
+                                                                     .orientation = DesignOrientation::kS,
+                                                                     .placement_status = DesignPlacementStatus::kPlaced});
+  const auto first_block_pin = netlist.findInstancePin(first_block, block_term);
+  const auto second_block_pin = netlist.findInstancePin(second_block, blackbox_term);
+  ASSERT_TRUE(first_block_pin);
+  ASSERT_TRUE(second_block_pin);
+  const auto abutment_net = netlist.createNet(DesignNet{.name = "abutment"});
+  netlist.connect(first_block_pin, abutment_net);
+  netlist.connect(second_block_pin, abutment_net);
+  EXPECT_TRUE(service->isNetConnectedByAbutment(abutment_net));
+
+  const auto non_block_first = netlist.createInstance(DesignInstance{.name = "core_first",
+                                                                        .master = master,
+                                                                        .origin = {100, 200},
+                                                                        .placement_status = DesignPlacementStatus::kPlaced});
+  const auto non_block_second = netlist.createInstance(DesignInstance{.name = "core_second",
+                                                                         .master = master,
+                                                                         .origin = {100, 200},
+                                                                         .placement_status = DesignPlacementStatus::kPlaced});
+  const auto non_block_first_pin = netlist.findInstancePin(non_block_first, term);
+  const auto non_block_second_pin = netlist.findInstancePin(non_block_second, term);
+  ASSERT_TRUE(non_block_first_pin);
+  ASSERT_TRUE(non_block_second_pin);
+  const auto non_block_net = netlist.createNet(DesignNet{.name = "non_block"});
+  netlist.connect(non_block_first_pin, non_block_net);
+  netlist.connect(non_block_second_pin, non_block_net);
+  EXPECT_FALSE(service->isNetConnectedByAbutment(non_block_net));
+
+  const auto make_block_instance = [&](std::string name, Point origin,
+                                       DesignPlacementStatus placement_status = DesignPlacementStatus::kPlaced) {
+    return netlist.createInstance(DesignInstance{.name = std::move(name),
+                                                  .master = block_master,
+                                                  .origin = origin,
+                                                  .placement_status = placement_status});
+  };
+  const auto bterm_first = make_block_instance("bterm_first", {300, 300});
+  const auto bterm_second = make_block_instance("bterm_second", {300, 300});
+  const auto bterm_first_pin = netlist.findInstancePin(bterm_first, block_term);
+  const auto bterm_second_pin = netlist.findInstancePin(bterm_second, block_term);
+  ASSERT_TRUE(bterm_first_pin);
+  ASSERT_TRUE(bterm_second_pin);
+  const auto bterm_net = netlist.createNet(DesignNet{.name = "with_bterm"});
+  netlist.connect(bterm_first_pin, bterm_net);
+  netlist.connect(bterm_second_pin, bterm_net);
+  const auto bterm = netlist.createIoPin(DesignIoPin{.name = "BTERM"});
+  netlist.connect(bterm, bterm_net);
+  EXPECT_FALSE(service->isNetConnectedByAbutment(bterm_net));
+
+  const auto overfull_first = make_block_instance("overfull_first", {400, 400});
+  const auto overfull_second = make_block_instance("overfull_second", {400, 400});
+  const auto overfull_third = make_block_instance("overfull_third", {400, 400});
+  const auto overfull_first_pin = netlist.findInstancePin(overfull_first, block_term);
+  const auto overfull_second_pin = netlist.findInstancePin(overfull_second, block_term);
+  const auto overfull_third_pin = netlist.findInstancePin(overfull_third, block_term);
+  ASSERT_TRUE(overfull_first_pin);
+  ASSERT_TRUE(overfull_second_pin);
+  ASSERT_TRUE(overfull_third_pin);
+  const auto overfull_net = netlist.createNet(DesignNet{.name = "overfull"});
+  netlist.connect(overfull_first_pin, overfull_net);
+  netlist.connect(overfull_second_pin, overfull_net);
+  netlist.connect(overfull_third_pin, overfull_net);
+  EXPECT_FALSE(service->isNetConnectedByAbutment(overfull_net));
+
+  const auto unplaced_block = make_block_instance("unplaced", {500, 500}, DesignPlacementStatus::kUnplaced);
+  const auto placed_block = make_block_instance("placed", {500, 500});
+  const auto unplaced_block_pin = netlist.findInstancePin(unplaced_block, block_term);
+  const auto placed_block_pin = netlist.findInstancePin(placed_block, block_term);
+  ASSERT_TRUE(unplaced_block_pin);
+  ASSERT_TRUE(placed_block_pin);
+  const auto unplaced_net = netlist.createNet(DesignNet{.name = "unplaced"});
+  netlist.connect(unplaced_block_pin, unplaced_net);
+  netlist.connect(placed_block_pin, unplaced_net);
+  EXPECT_FALSE(service->isNetConnectedByAbutment(unplaced_net));
+}
+
+TEST_F(PhysicalDesignServiceFixture, RejectsRoutingPolygonsInBlockAbutmentQuery)
+{
+  auto& netlist = design.netlistStorage();
+  const auto block_soft_master = library.cellMasterStorage().createCellMaster(
+      LibraryCellMaster{.name = "BLOCK_SOFT", .type = LibraryCellMasterType::kBlockSoft, .width = 20, .height = 20});
+  const auto block_soft_term = library.masterTermStorage().createMasterTerm(
+      block_soft_master, LibraryMasterTerm{.name = "A", .direction = LibraryMasterTermDirection::kInput});
+  static_cast<void>(library.masterPortStorage().createMasterPort(
+      block_soft_term,
+      LibraryMasterPortInput{.layer_clauses = {{.layer = TechLayerId{m1.entity()},
+                                                 .geometry = {.polygons = {{.points = {{0, 0}, {10, 0}, {10, 10}, {0, 10}}}}}}}}));
+  const auto block_soft_instance = netlist.createInstance(DesignInstance{.name = "block_soft",
+                                                                            .master = block_soft_master,
+                                                                            .placement_status = DesignPlacementStatus::kPlaced});
+  const auto block_soft_pin = netlist.findInstancePin(block_soft_instance, block_soft_term);
+  ASSERT_TRUE(block_soft_pin);
+  const auto polygon_net = netlist.createNet(DesignNet{.name = "polygon"});
+  netlist.connect(block_soft_pin, polygon_net);
+  EXPECT_THROW((void) service->isNetConnectedByAbutment(polygon_net), std::logic_error);
+}
+
+TEST_F(PhysicalDesignServiceFixture, PreservesIndependentBlockPinGeometryAndPlacements)
+{
+  auto& netlist = design.netlistStorage();
+  const auto terminal = netlist.createIoPin(
+      DesignBlockTerm{.name = "two_physical_pins"},
+      {{.flags = DesignIoPinPortFlag::kExplicit | DesignIoPinPortFlag::kHasPlacement,
+        .placement_status = DesignPlacementStatus::kFixed,
+        .origin = {100, 200},
+        .rectangles = {{.layer = TechLayerId{m1.entity()}, .rectangle = {0, 0, 10, 20}}}},
+       {.flags = DesignIoPinPortFlag::kExplicit | DesignIoPinPortFlag::kHasPlacement,
+        .placement_status = DesignPlacementStatus::kFixed,
+        .origin = {300, 400},
+        .rectangles = {{.layer = TechLayerId{m2.entity()}, .rectangle = {0, 0, 20, 10}}}}});
+  const auto ids = netlist.blockPins(terminal);
+  ASSERT_EQ(ids.size(), 2u);
+  std::vector<Rect> rectangles;
+  const PhysicalGeometryVisitor visitor{.rectangle = [&](const PhysicalLayerRect& shape) {
+    rectangles.push_back(shape.rectangle);
+  }};
+  service->forEachBlockPinGeometry(ids[0], visitor);
+  EXPECT_EQ(rectangles, (std::vector<Rect>{{100, 200, 110, 220}}));
+  rectangles.clear();
+  service->forEachBlockPinGeometry(ids[1], visitor);
+  EXPECT_EQ(rectangles, (std::vector<Rect>{{300, 400, 320, 410}}));
+  rectangles.clear();
+  service->forEachIoPinGeometry(terminal, visitor);
+  EXPECT_EQ(rectangles, (std::vector<Rect>{{100, 200, 110, 220}, {300, 400, 320, 410}}));
 }
 
 TEST_F(PhysicalDesignServiceFixture, SupportsPartialNetPinVisitors)
@@ -234,18 +481,18 @@ TEST_F(PhysicalDesignServiceFixture, SupportsPartialNetPinVisitors)
   EXPECT_EQ(io_pins, (std::vector<DesignIoPinId>{io_regular}));
 }
 
-TEST_F(PhysicalDesignServiceFixture, ReadsCachedMasterTermAfterUnrelatedTermCreation)
+TEST_F(PhysicalDesignServiceFixture, ResolvesMasterTermByIdAfterUnrelatedTermCreation)
 {
   const auto unrelated_master = library.cellMasterStorage().createCellMaster(LibraryCellMaster{.name = "UNRELATED"});
-  const auto* cached_term = design.netlistStorage().instancePin(instance_pin).master_term_ptr;
   static_cast<void>(library.masterTermStorage().createMasterTerm(unrelated_master, LibraryMasterTerm{.name = "A"}));
   std::size_t visited = 0;
   service->forEachNetPin(regular,
-                        PhysicalNetPinVisitor{.instance_pin = [&](DesignInstancePinId id, const DesignInstancePin&,
+                        PhysicalNetPinVisitor{.instance_pin = [&](DesignInstancePinId id, const DesignInstancePin& pin,
                                                                  const DesignInstance& owner, const LibraryMasterTerm& value) {
                           EXPECT_EQ(id, instance_pin);
                           EXPECT_EQ(owner.name, "u0");
-                          EXPECT_EQ(&value, cached_term);
+                          EXPECT_EQ(pin.instance, instance);
+                          EXPECT_EQ(pin.master_term, term);
                           EXPECT_EQ(value.name, "A");
                           ++visited;
                         }});

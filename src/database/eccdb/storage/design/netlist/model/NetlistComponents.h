@@ -55,11 +55,11 @@ struct DesignInstanceRouteHalo
   TechRoutingLayerId max_layer;
 };
 
-// DEF COMPONENT. InstancePin entities are materialized from the referenced
-// LibraryCellMaster terms and owned through DesignInstancePins.
+// DEF COMPONENT / OpenDB dbInst. Instance terminals are materialized from the
+// referenced LibraryCellMaster terms and are tracked in DesignInstancePins.
 struct DesignInstance
 {
-  // InstancePin caches this address; do not sort or compact this storage.
+  // Instance terminals cache this address; do not sort or compact this storage.
   static constexpr bool in_place_delete = true;
 
   std::string name;
@@ -76,29 +76,37 @@ struct DesignInstance
   DesignInstanceRouteHalo route_halo;
 };
 
-struct DesignInstancePins
+// DEF (component pin) / OpenDB dbITerm. This is an independent DesignRegistry
+// entity; its name, direction and use remain canonical in the referenced
+// LibraryMasterTerm (dbMTerm).
+struct DesignInstanceTerm
 {
-  std::vector<DesignInstancePinId> values;
-  // Runtime-only term IDs mirror values for a contiguous lookup after a master changes.
-  std::vector<LibraryMasterTermId> term_ids;
-  // Runtime-only owner ID avoids an instance lookup before checking the index's lifetime.
-  LibraryCellMasterId master;
-  // Runtime-only name index shared by instances of one library master.
-  const LibraryMasterTermNameIndex* master_term_name_index = nullptr;
-};
+  // Runtime caches may retain an ITerm address while unrelated ITerms are
+  // removed. Do not sort or compact this storage.
+  static constexpr bool in_place_delete = true;
 
-// Physical instance terminal. Its name, direction and use remain canonical in
-// the referenced LibraryMasterTerm.
-struct DesignInstancePin
-{
   DesignInstanceId instance;
-  // Runtime-only pointer; DesignInstance uses in-place deletion for stability.
+  // Runtime-only; DesignInstance uses in-place deletion for address stability.
   const DesignInstance* instance_ptr = nullptr;
   LibraryMasterTermId master_term;
-  // Runtime-only pointer; library components must remain stable while referenced.
+  // Runtime-only; Library terms must not be removed or reordered while referenced.
   const LibraryMasterTerm* master_term_ptr = nullptr;
   DesignNetId net;
   DesignNetId special_net;
+};
+
+struct DesignInstanceTerms
+{
+  // Ordered dbITerm IDs owned by this dbInst. The DesignInstanceTerm payload is
+  // stored on each independent DesignRegistry entity, not in this relation.
+  std::vector<DesignInstanceTermId> values;
+  // Runtime-only term IDs mirror values for direct ordinal lookup after a
+  // master-term index lookup.
+  std::vector<LibraryMasterTermId> term_ids;
+  // Runtime-only library master for validating the shared name-index lifetime.
+  LibraryCellMasterId master;
+  // Runtime-only name index shared by instances of one library master.
+  const LibraryMasterTermNameIndex* master_term_name_index = nullptr;
 };
 
 enum class DesignSignalUse : uint8_t
@@ -173,9 +181,10 @@ constexpr uint32_t kExplicit = 1u << 0;
 constexpr uint32_t kHasPlacement = 1u << 1;
 }  // namespace DesignIoPinPortFlag
 
-// One DEF PIN geometry group. An explicit group begins with "+ PORT"; legacy
-// top-level PIN geometry is represented by one group without kExplicit.
-struct DesignIoPinPort
+// One DEF PIN geometry group / OpenDB dbBPin semantic unit. An explicit group
+// begins with "+ PORT"; legacy top-level PIN geometry is represented by one
+// group without kExplicit.
+struct DesignBlockPin
 {
   uint32_t flags = 0;
   DesignPlacementStatus placement_status = DesignPlacementStatus::kUnplaced;
@@ -184,11 +193,14 @@ struct DesignIoPinPort
   std::vector<DesignPinRectangle> rectangles;
   std::vector<DesignPinPolygon> polygons;
   std::vector<DesignPinVia> vias;
+  // Owner dbBTerm. Storage assigns this relation; callers cannot forge it
+  // through the block-term child vector.
+  DesignBlockTermId term;
 };
 
-// DEF PIN. Ports are nested values because they are owned exclusively by one
-// logical pin and do not need an independent Design Entity identity.
-struct DesignIoPin
+// DEF PIN / OpenDB dbBTerm. Physical dbBPins are independent entities so a
+// port's geometry, pin-access data and identity can be edited independently.
+struct DesignBlockTerm
 {
   std::string name;
   DesignNetId net;
@@ -196,7 +208,7 @@ struct DesignIoPin
   DesignIoPinDirection direction = DesignIoPinDirection::kNone;
   DesignSignalUse use = DesignSignalUse::kNone;
   uint32_t flags = 0;
-  std::vector<DesignIoPinPort> ports;
+  std::vector<DesignBlockPinId> pins;
 };
 
 enum class DesignNetSource : uint8_t
@@ -214,6 +226,7 @@ constexpr uint32_t kHasWeight = 1u << 0;
 constexpr uint32_t kFixedBump = 1u << 1;
 constexpr uint32_t kHasNonDefaultRule = 1u << 2;
 constexpr uint32_t kMustJoin = 1u << 3;
+constexpr uint32_t kHasJumpers = 1u << 4;
 }  // namespace DesignNetFlag
 
 struct DesignNet
@@ -234,12 +247,12 @@ struct DesignNet
 // keeping the two pin kinds separate avoids an ID variant in hot traversals.
 struct DesignNetInstancePins
 {
-  std::vector<DesignInstancePinId> values;
+  std::vector<DesignInstanceTermId> values;
 };
 
 struct DesignNetIoPins
 {
-  std::vector<DesignIoPinId> values;
+  std::vector<DesignBlockTermId> values;
 };
 
 // Presence distinguishes DEF SPECIALNETS from ordinary NETS while preserving

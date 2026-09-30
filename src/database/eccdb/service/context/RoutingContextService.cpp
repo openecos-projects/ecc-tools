@@ -50,6 +50,11 @@ void RoutingContextService::replaceTrackAssignments(DesignNetId net, std::vector
   _design.guideStorage().replaceTrackAssignments(net, std::move(assignments));
 }
 
+void RoutingContextService::appendTrackAssignments(DesignNetId net, std::vector<DesignTrackAssignmentShape> assignments)
+{
+  _design.guideStorage().appendTrackAssignments(net, std::move(assignments));
+}
+
 void RoutingContextService::clearTrackAssignments(DesignNetId net)
 {
   _design.guideStorage().clearTrackAssignments(net);
@@ -89,6 +94,43 @@ bool RoutingContextService::clearMasterPortCandidateGroups(LibraryMasterPortId m
   return _design.pinAccessStorage().clearMasterPortCandidateGroups(master_port);
 }
 
+bool RoutingContextService::hasBlockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index) const
+{
+  return _design.pinAccessStorage().hasBlockPinCandidateGroup(pin, group_index);
+}
+
+std::span<const DesignPinAccessCandidateGroup> RoutingContextService::blockPinCandidateGroups(DesignBlockPinId pin) const
+{
+  return _design.pinAccessStorage().blockPinCandidateGroups(pin);
+}
+
+const DesignPinAccessCandidateGroup& RoutingContextService::blockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index) const
+{
+  return _design.pinAccessStorage().blockPinCandidateGroup(pin, group_index);
+}
+
+void RoutingContextService::setBlockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index,
+                                                    std::vector<DesignPinAccessPoint> points)
+{
+  _design.pinAccessStorage().setBlockPinCandidateGroup(pin, group_index, std::move(points));
+}
+
+void RoutingContextService::appendBlockPinCandidatePoints(DesignBlockPinId pin, uint32_t group_index,
+                                                        std::vector<DesignPinAccessPoint> points)
+{
+  _design.pinAccessStorage().appendBlockPinCandidatePoints(pin, group_index, std::move(points));
+}
+
+bool RoutingContextService::clearBlockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index)
+{
+  return _design.pinAccessStorage().clearBlockPinCandidateGroup(pin, group_index);
+}
+
+bool RoutingContextService::clearBlockPinCandidateGroups(DesignBlockPinId pin)
+{
+  return _design.pinAccessStorage().clearBlockPinCandidateGroups(pin);
+}
+
 bool RoutingContextService::hasIoPinPortCandidateGroup(DesignIoPinId pin, uint32_t port_index, uint32_t group_index) const
 {
   return _design.pinAccessStorage().hasIoPinPortCandidateGroup(pin, port_index, group_index);
@@ -113,6 +155,14 @@ void RoutingContextService::setIoPinPortCandidateGroup(DesignIoPinId pin,
                                                         std::vector<DesignPinAccessPoint> points)
 {
   _design.pinAccessStorage().setIoPinPortCandidateGroup(pin, port_index, group_index, std::move(points));
+}
+
+void RoutingContextService::appendIoPinPortCandidatePoints(DesignIoPinId pin,
+                                                            uint32_t port_index,
+                                                            uint32_t group_index,
+                                                            std::vector<DesignPinAccessPoint> points)
+{
+  _design.pinAccessStorage().appendIoPinPortCandidatePoints(pin, port_index, group_index, std::move(points));
 }
 
 bool RoutingContextService::clearIoPinPortCandidateGroup(DesignIoPinId pin, uint32_t port_index, uint32_t group_index)

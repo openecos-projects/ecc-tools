@@ -388,6 +388,23 @@ void validateQueries(const DbOnlyFixture& fixture, const QueryIndices& query_ind
       },
       result.checksum);
 
+  // Check the reverse relation as a multiset, including duplicate/missing
+  // entries, after every timer so this does not warm the measured traversals.
+  std::vector<std::pair<uint64_t, uint64_t>> expected_connections;
+  std::vector<std::pair<uint64_t, uint64_t>> stored_connections;
+  expected_connections.reserve(fixture.connections.size());
+  stored_connections.reserve(fixture.connections.size());
+  for (std::size_t index = 0; index < fixture.connections.size(); ++index) {
+    const auto& connection = fixture.connections[index];
+    expected_connections.emplace_back(nets[connection.net_index].packed(), connection_pins[index].packed());
+  }
+  netlist.forEachRegularNet([&](eccdb::DesignNetId net, const eccdb::DesignNet&) {
+    for (const auto pin : netlist.instancePins(net)) stored_connections.emplace_back(net.packed(), pin.packed());
+  });
+  std::sort(expected_connections.begin(), expected_connections.end());
+  std::sort(stored_connections.begin(), stored_connections.end());
+  require(stored_connections == expected_connections, "design net reverse connection membership mismatch");
+
   return result;
 }
 

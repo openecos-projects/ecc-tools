@@ -206,6 +206,63 @@ void visitDesignGeometry(const std::vector<DesignViaRectangle>& rectangles, cons
   }
 }
 
+template <typename Transform>
+void visitGeneratedDesignViaGeometry(const DesignGeneratedVia& via, Transform&& transform, const PhysicalGeometryVisitor& visitor)
+{
+  if (!visitor.rectangle) {
+    return;
+  }
+
+  // Match OpenDB's DEF via boxes: center the cut array, then offset each metal enclosure independently.
+  const uint64_t width = static_cast<uint64_t>(via.column_count) * via.cut_size_x
+                         + static_cast<uint64_t>(via.column_count - 1u) * via.cut_spacing_x;
+  const uint64_t height = static_cast<uint64_t>(via.row_count) * via.cut_size_y
+                          + static_cast<uint64_t>(via.row_count - 1u) * via.cut_spacing_y;
+  if (width > std::numeric_limits<uint32_t>::max() || height > std::numeric_limits<uint32_t>::max()) {
+    throw std::overflow_error("generated via geometry exceeds int32 coordinate range");
+  }
+
+  const int64_t min_x = -static_cast<int64_t>(width / 2u);
+  const int64_t min_y = -static_cast<int64_t>(height / 2u);
+  const int64_t max_x = min_x + static_cast<int64_t>(width);
+  const int64_t max_y = min_y + static_cast<int64_t>(height);
+  const int64_t origin_x = (via.flags & DesignGeneratedViaFlag::kHasOrigin) != 0u ? via.origin.x : 0;
+  const int64_t origin_y = (via.flags & DesignGeneratedViaFlag::kHasOrigin) != 0u ? via.origin.y : 0;
+
+  const auto emit = [&](TechLayerId layer, int64_t ll_x, int64_t ll_y, int64_t ur_x, int64_t ur_y) {
+    const Rect rectangle{checkedCoordinate(ll_x), checkedCoordinate(ll_y), checkedCoordinate(ur_x), checkedCoordinate(ur_y)};
+    visitor.rectangle(PhysicalLayerRect{.layer = layer,
+                                        .rectangle = transformRectangle(rectangle, transform),
+                                        .source = PhysicalGeometrySource::kDesignVia});
+  };
+
+  const int64_t bottom_offset_x = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.bottom_offset.x : 0;
+  const int64_t bottom_offset_y = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.bottom_offset.y : 0;
+  emit(TechLayerId{via.bottom_layer.entity()},
+       min_x - via.bottom_enclosure_x + origin_x + bottom_offset_x,
+       min_y - via.bottom_enclosure_y + origin_y + bottom_offset_y,
+       max_x + via.bottom_enclosure_x + origin_x + bottom_offset_x,
+       max_y + via.bottom_enclosure_y + origin_y + bottom_offset_y);
+
+  const int64_t step_x = static_cast<int64_t>(via.cut_size_x) + via.cut_spacing_x;
+  const int64_t step_y = static_cast<int64_t>(via.cut_size_y) + via.cut_spacing_y;
+  for (uint32_t row = 0; row < via.row_count; ++row) {
+    for (uint32_t column = 0; column < via.column_count; ++column) {
+      const int64_t x = min_x + origin_x + static_cast<int64_t>(column) * step_x;
+      const int64_t y = min_y + origin_y + static_cast<int64_t>(row) * step_y;
+      emit(TechLayerId{via.cut_layer.entity()}, x, y, x + via.cut_size_x, y + via.cut_size_y);
+    }
+  }
+
+  const int64_t top_offset_x = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.top_offset.x : 0;
+  const int64_t top_offset_y = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.top_offset.y : 0;
+  emit(TechLayerId{via.top_layer.entity()},
+       min_x - via.top_enclosure_x + origin_x + top_offset_x,
+       min_y - via.top_enclosure_y + origin_y + top_offset_y,
+       max_x + via.top_enclosure_x + origin_x + top_offset_x,
+       max_y + via.top_enclosure_y + origin_y + top_offset_y);
+}
+
 [[nodiscard]] bool isPlacedStatus(DesignPlacementStatus status) noexcept
 {
   return status == DesignPlacementStatus::kPlaced || status == DesignPlacementStatus::kFixed || status == DesignPlacementStatus::kCover;
@@ -405,9 +462,19 @@ DesignInstancePinId PhysicalDesignService::findInstancePin(DesignInstanceId inst
   return _design.netlistStorage().findInstancePin(instance, master_term_name);
 }
 
+DesignInstanceTermId PhysicalDesignService::findInstanceTerm(DesignInstanceId instance, std::string_view master_term_name) const
+{
+  return _design.netlistStorage().findInstanceTerm(instance, master_term_name);
+}
+
 DesignIoPinId PhysicalDesignService::findIoPin(std::string_view name) const
 {
   return _design.netlistStorage().findIoPin(name);
+}
+
+DesignBlockTermId PhysicalDesignService::findBlockTerm(std::string_view name) const
+{
+  return _design.netlistStorage().findBlockTerm(name);
 }
 
 LibraryCellMasterId PhysicalDesignService::findMaster(std::string_view name) const
@@ -425,21 +492,43 @@ std::span<const LibraryMasterPortId> PhysicalDesignService::masterPorts(LibraryM
   return _library.masterTermStorage().masterTerm(term).ports;
 }
 
+std::span<const LibraryMasterPinId> PhysicalDesignService::masterPins(LibraryMasterTermId term) const
+{
+  return masterPorts(term);
+}
+
+std::span<const DesignBlockPinId> PhysicalDesignService::blockPins(DesignBlockTermId term) const
+{
+  return _design.netlistStorage().blockPins(term);
+}
+
+void PhysicalDesignService::forEachBlockPin(DesignBlockTermId term, const BlockPinVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  _design.netlistStorage().forEachBlockPin(term, visitor);
+}
+
 void PhysicalDesignService::forEachNetPin(DesignNetId net, const PhysicalNetPinVisitor& visitor) const
 {
   const auto& design_registry = _design.designRegistry().registry();
   if (visitor.instance_pin) {
     if (const auto* connections = design_registry.try_get<const DesignNetInstancePins>(net.entity()); connections != nullptr) {
+      // Connectivity storage maintains live Term IDs. Resolve the typed pool
+      // once, rather than checking and looking it up again for every endpoint.
+      const auto* terms = design_registry.storage<DesignInstanceTerm>();
       for (const auto pin_id : connections->values) {
-        const auto& pin = design_registry.get<const DesignInstancePin>(pin_id.entity());
+        const auto& pin = terms->get(pin_id.entity());
         visitor.instance_pin(pin_id, pin, *pin.instance_ptr, *pin.master_term_ptr);
       }
     }
   }
   if (visitor.io_pin) {
     if (const auto* connections = design_registry.try_get<const DesignNetIoPins>(net.entity()); connections != nullptr) {
+      const auto* terms = design_registry.storage<DesignIoPin>();
       for (const auto pin_id : connections->values) {
-        visitor.io_pin(pin_id, design_registry.get<const DesignIoPin>(pin_id.entity()));
+        visitor.io_pin(pin_id, terms->get(pin_id.entity()));
       }
     }
   }
@@ -449,6 +538,194 @@ PhysicalNdrReference PhysicalDesignService::nonDefaultRule(DesignNetId net) cons
 {
   const auto& value = _design.netlistStorage().net(net);
   return PhysicalNdrReference{.tech_rule = value.non_default_rule, .design_rule = value.design_non_default_rule};
+}
+
+bool PhysicalDesignService::netHasJumpers(DesignNetId net) const
+{
+  return (_design.netlistStorage().net(net).flags & DesignNetFlag::kHasJumpers) != 0u;
+}
+
+bool PhysicalDesignService::isNetConnectedByAbutment(DesignNetId net) const
+{
+  const auto& netlist = _design.netlistStorage();
+  const auto instance_pins = netlist.instancePins(net);
+  if (instance_pins.size() > 2u || !netlist.ioPins(net).empty()) {
+    return false;
+  }
+
+  bool first_term = true;
+  std::vector<Rect> first_pin_boxes;
+  for (const auto pin_id : instance_pins) {
+    const auto& pin = netlist.instancePin(pin_id);
+    const auto& instance = netlist.instance(pin.instance);
+    const auto& term = _library.masterTermStorage().masterTerm(pin.master_term);
+    const auto& master = _library.cellMasterStorage().cellMaster(term.master);
+    if (master.type != LibraryCellMasterType::kBlock && master.type != LibraryCellMasterType::kBlockBlackbox
+        && master.type != LibraryCellMasterType::kBlockSoft) {
+      return false;
+    }
+
+    bool overlaps_first_term = false;
+    if (isPlacedStatus(instance.placement_status)) {
+      forEachPlacedInstancePinGeometry(
+          pin_id, PhysicalGeometryVisitor{.rectangle = [&](const PhysicalLayerRect& shape) {
+            if (overlaps_first_term) {
+              return;
+            }
+            if (layerKind(shape.layer) != GeometryLayerKind::kRouting) {
+              return;
+            }
+            if (first_term) {
+              first_pin_boxes.push_back(shape.rectangle);
+              return;
+            }
+            for (const auto first_pin_box : first_pin_boxes) {
+              if (shape.rectangle.intersects(first_pin_box)) {
+                overlaps_first_term = true;
+                return;
+              }
+            }
+          },
+                                         .polygon = [&](const PhysicalLayerPolygon& shape) {
+                                           if (!overlaps_first_term && layerKind(shape.layer) == GeometryLayerKind::kRouting) {
+                                             throw std::logic_error(
+                                                 "routing master-port polygons are unsupported by net abutment detection");
+                                           }
+                                         }});
+    }
+    if (overlaps_first_term) {
+      return true;
+    }
+    first_term = false;
+  }
+  return false;
+}
+
+std::optional<std::string_view> PhysicalDesignService::nonDefaultRuleName(DesignNetId net) const
+{
+  const auto reference = nonDefaultRule(net);
+  if (reference.tech_rule && reference.design_rule) {
+    throw std::logic_error("design net references both a technology and design non-default rule");
+  }
+  if (reference.tech_rule) {
+    return _tech.nonDefaultRuleStorage().nonDefaultRule(reference.tech_rule).name;
+  }
+  if (reference.design_rule) {
+    return _design.routingStorage().nonDefaultRule(reference.design_rule).name;
+  }
+  return std::nullopt;
+}
+
+void PhysicalDesignService::forEachNetWire(DesignNetId net, const NetWireVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  _design.routingStorage().forEachWire(net, visitor);
+}
+
+void PhysicalDesignService::forEachNetWirePath(DesignNetId net, const NetWirePathVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  _design.routingStorage().forEachWire(net, [&](DesignWireId wire_id, const DesignWire& wire) {
+    _design.routingStorage().forEachPath(wire_id, [&](DesignWirePathView path) { visitor(wire_id, wire, path); });
+  });
+}
+
+void PhysicalDesignService::forEachNetGeometry(DesignNetId net, const PhysicalNetGeometryVisitor& visitor) const
+{
+  const auto* geometry = _design.routingStorage().netGeometry(net);
+  if (geometry == nullptr) {
+    return;
+  }
+  if (visitor.rectangle) {
+    for (const auto& rectangle : geometry->rectangles) {
+      visitor.rectangle(rectangle);
+    }
+  }
+  if (visitor.polygon) {
+    for (const auto& polygon : geometry->polygons) {
+      visitor.polygon(polygon);
+    }
+  }
+  if (visitor.via) {
+    for (const auto& via : geometry->vias) {
+      visitor.via(via);
+    }
+  }
+}
+
+std::string_view PhysicalDesignService::viaName(TechViaMasterId tech_via, DesignViaId design_via) const
+{
+  if (static_cast<bool>(tech_via) == static_cast<bool>(design_via)) {
+    throw std::invalid_argument("routing VIA requires exactly one technology or design VIA definition");
+  }
+  if (tech_via) {
+    return _tech.viaMasterStorage().viaMaster(tech_via).name;
+  }
+  return _design.routingStorage().via(design_via).name;
+}
+
+PhysicalRoutingViaLayers PhysicalDesignService::routingViaLayers(TechViaMasterId tech_via, DesignViaId design_via) const
+{
+  if (static_cast<bool>(tech_via) == static_cast<bool>(design_via)) {
+    throw std::invalid_argument("routing VIA requires exactly one technology or design VIA definition");
+  }
+
+  const auto order = [this](TechRoutingLayerId first, TechRoutingLayerId second) {
+    const auto& registry = _tech.techRegistry().registry();
+    if (!first || !second || first == second || !registry.valid(first.entity()) || !registry.valid(second.entity())
+        || !registry.all_of<TechRoutingLayer>(first.entity()) || !registry.all_of<TechRoutingLayer>(second.entity())) {
+      throw std::invalid_argument("routing VIA does not connect two distinct routing layers");
+    }
+    const auto first_layer = TechLayerId{first.entity()};
+    const auto second_layer = TechLayerId{second.entity()};
+    if (_tech.isBelow(first_layer, second_layer)) {
+      return PhysicalRoutingViaLayers{.bottom = first, .top = second};
+    }
+    if (_tech.isBelow(second_layer, first_layer)) {
+      return PhysicalRoutingViaLayers{.bottom = second, .top = first};
+    }
+    throw std::invalid_argument("routing VIA layers do not have a technology-stack order");
+  };
+
+  if (tech_via) {
+    const auto& geometry = _tech.viaMasterStorage().geometry(tech_via);
+    if (geometry.bottom_layer.kind != TechConductorLayerKind::kRouting
+        || geometry.top_layer.kind != TechConductorLayerKind::kRouting) {
+      throw std::invalid_argument("technology VIA does not have routing layers on both sides");
+    }
+    return order(TechRoutingLayerId{geometry.bottom_layer.entity}, TechRoutingLayerId{geometry.top_layer.entity});
+  }
+
+  const auto& via = _design.routingStorage().via(design_via);
+  if ((via.flags & DesignViaFlag::kGenerated) != 0u) {
+    return order(via.generated.bottom_layer, via.generated.top_layer);
+  }
+
+  const auto& registry = _tech.techRegistry().registry();
+  std::vector<TechRoutingLayerId> layers;
+  const auto append = [&](TechLayerId layer) {
+    if (!layer || !registry.valid(layer.entity()) || !registry.all_of<TechRoutingLayer>(layer.entity())) {
+      return;
+    }
+    const auto routing_layer = TechRoutingLayerId{layer.entity()};
+    if (std::find(layers.begin(), layers.end(), routing_layer) == layers.end()) {
+      layers.push_back(routing_layer);
+    }
+  };
+  for (const auto& rectangle : via.rectangles) {
+    append(rectangle.layer);
+  }
+  for (const auto& polygon : via.polygons) {
+    append(polygon.layer);
+  }
+  if (layers.size() != 2u) {
+    throw std::invalid_argument("fixed design VIA does not have geometry on exactly two routing layers");
+  }
+  return order(layers[0], layers[1]);
 }
 
 bool PhysicalDesignService::isPlaced(DesignInstanceId instance) const
@@ -489,55 +766,60 @@ void PhysicalDesignService::forEachPlacedInstancePinGeometry(DesignInstancePinId
   }
 }
 
-void PhysicalDesignService::forEachIoPinGeometry(DesignIoPinId pin_id, const PhysicalGeometryVisitor& visitor) const
+void PhysicalDesignService::forEachBlockPinGeometry(DesignBlockPinId pin_id, const PhysicalGeometryVisitor& visitor) const
 {
-  const auto& pin = _design.netlistStorage().ioPin(pin_id);
-  for (const auto& port : pin.ports) {
-    const bool has_placement = (port.flags & DesignIoPinPortFlag::kHasPlacement) != 0u;
-    const Point origin = has_placement ? port.origin : Point{};
-    const DesignOrientation orientation = has_placement ? port.orientation : DesignOrientation::kN;
-    const auto transform = [origin, orientation](Point point) { return transformAroundOrigin(point, origin, orientation); };
-    for (const auto& rectangle : port.rectangles) {
-      if (visitor.rectangle) {
-        visitor.rectangle(PhysicalLayerRect{.layer = rectangle.layer,
-                                            .rectangle = transformRectangle(rectangle.rectangle, transform),
-                                            .source = PhysicalGeometrySource::kIoPin,
-                                            .flags = rectangle.flags,
-                                            .mask = rectangle.mask,
-                                            .spacing = rectangle.spacing,
-                                            .design_rule_width = rectangle.design_rule_width});
-      }
-    }
-    if (visitor.polygon) {
-      for (const auto& polygon : port.polygons) {
-        std::vector<Point> points;
-        points.reserve(polygon.points.size());
-        for (const auto point : polygon.points) {
-          points.push_back(transform(point));
-        }
-        visitor.polygon(PhysicalLayerPolygon{.layer = polygon.layer,
-                                              .points = points,
-                                              .source = PhysicalGeometrySource::kIoPin,
-                                              .flags = polygon.flags,
-                                              .mask = polygon.mask,
-                                              .spacing = polygon.spacing,
-                                              .design_rule_width = polygon.design_rule_width});
-      }
-    }
-    if (visitor.via) {
-      for (const auto& via : port.vias) {
-        visitor.via(PhysicalViaPlacement{.tech_via = via.tech_via,
-                                         .design_via = via.design_via,
-                                         .origin = transform(via.origin),
-                                         .orientation = orientation,
-                                         .source = PhysicalGeometrySource::kIoPin,
-                                         .flags = via.flags,
-                                         .top_mask = via.top_mask,
-                                         .cut_mask = via.cut_mask,
-                                         .bottom_mask = via.bottom_mask});
-      }
+  const auto& pin = _design.netlistStorage().blockPin(pin_id);
+  const bool has_placement = (pin.flags & DesignIoPinPortFlag::kHasPlacement) != 0u;
+  const Point origin = has_placement ? pin.origin : Point{};
+  const DesignOrientation orientation = has_placement ? pin.orientation : DesignOrientation::kN;
+  const auto transform = [origin, orientation](Point point) { return transformAroundOrigin(point, origin, orientation); };
+  for (const auto& rectangle : pin.rectangles) {
+    if (visitor.rectangle) {
+      visitor.rectangle(PhysicalLayerRect{.layer = rectangle.layer,
+                                          .rectangle = transformRectangle(rectangle.rectangle, transform),
+                                          .source = PhysicalGeometrySource::kIoPin,
+                                          .flags = rectangle.flags,
+                                          .mask = rectangle.mask,
+                                          .spacing = rectangle.spacing,
+                                          .design_rule_width = rectangle.design_rule_width});
     }
   }
+  if (visitor.polygon) {
+    for (const auto& polygon : pin.polygons) {
+      std::vector<Point> points;
+      points.reserve(polygon.points.size());
+      for (const auto point : polygon.points) {
+        points.push_back(transform(point));
+      }
+      visitor.polygon(PhysicalLayerPolygon{.layer = polygon.layer,
+                                            .points = points,
+                                            .source = PhysicalGeometrySource::kIoPin,
+                                            .flags = polygon.flags,
+                                            .mask = polygon.mask,
+                                            .spacing = polygon.spacing,
+                                            .design_rule_width = polygon.design_rule_width});
+    }
+  }
+  if (visitor.via) {
+    for (const auto& via : pin.vias) {
+      visitor.via(PhysicalViaPlacement{.tech_via = via.tech_via,
+                                       .design_via = via.design_via,
+                                       .origin = transform(via.origin),
+                                       .orientation = orientation,
+                                       .source = PhysicalGeometrySource::kIoPin,
+                                       .flags = via.flags,
+                                       .top_mask = via.top_mask,
+                                       .cut_mask = via.cut_mask,
+                                       .bottom_mask = via.bottom_mask});
+    }
+  }
+}
+
+void PhysicalDesignService::forEachIoPinGeometry(DesignIoPinId pin_id, const PhysicalGeometryVisitor& visitor) const
+{
+  _design.netlistStorage().forEachBlockPin(pin_id, [this, &visitor](DesignBlockPinId block_pin, const DesignBlockPin&) {
+    forEachBlockPinGeometry(block_pin, visitor);
+  });
 }
 
 void PhysicalDesignService::forEachPlacedMasterObstructionGeometry(DesignInstanceId instance_id,
@@ -629,6 +911,19 @@ void PhysicalDesignService::forEachTechVia(const TechViaVisitor& visitor) const
   });
 }
 
+void PhysicalDesignService::forEachTechViaRuleGenerate(const TechViaRuleGenerateVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  const auto view = _tech.techRegistry().registry().view<const TechViaRuleGenerate, const TechViaRuleGenerateBottomLayer,
+                                                         const TechViaRuleGenerateCutLayer, const TechViaRuleGenerateTopLayer>();
+  view.each([&visitor](const auto entity, const TechViaRuleGenerate& rule, const TechViaRuleGenerateBottomLayer& bottom,
+                       const TechViaRuleGenerateCutLayer& cut, const TechViaRuleGenerateTopLayer& top) {
+    visitor(TechViaRuleGenerateId{entity}, rule, bottom, cut, top);
+  });
+}
+
 void PhysicalDesignService::forEachDesignVia(const DesignViaVisitor& visitor) const
 {
   if (!visitor) {
@@ -671,6 +966,10 @@ void PhysicalDesignService::forEachDesignViaGeometry(DesignViaId via, Point orig
 {
   const auto& value = _design.routingStorage().via(via);
   const auto transform = [origin, orientation](Point point) { return transformAroundOrigin(point, origin, orientation); };
+  if ((value.flags & DesignViaFlag::kGenerated) != 0u) {
+    visitGeneratedDesignViaGeometry(value.generated, transform, visitor);
+    return;
+  }
   visitDesignGeometry(value.rectangles, value.polygons, PhysicalGeometrySource::kDesignVia, transform, visitor);
 }
 

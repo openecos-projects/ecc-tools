@@ -32,6 +32,7 @@ class RoutingContextService
   [[nodiscard]] bool hasTrackAssignments(DesignNetId net) const;
   [[nodiscard]] std::span<const DesignTrackAssignmentShape> trackAssignments(DesignNetId net) const;
   void replaceTrackAssignments(DesignNetId net, std::vector<DesignTrackAssignmentShape> assignments);
+  void appendTrackAssignments(DesignNetId net, std::vector<DesignTrackAssignmentShape> assignments);
   void clearTrackAssignments(DesignNetId net);
 
   [[nodiscard]] bool hasMasterPortCandidateGroup(LibraryMasterPortId master_port, uint32_t group_index) const;
@@ -44,6 +45,16 @@ class RoutingContextService
   [[nodiscard]] bool clearMasterPortCandidateGroup(LibraryMasterPortId master_port, uint32_t group_index);
   [[nodiscard]] bool clearMasterPortCandidateGroups(LibraryMasterPortId master_port);
 
+  // Candidate groups belong to an independently identified physical dbBPin.
+  [[nodiscard]] bool hasBlockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index) const;
+  [[nodiscard]] std::span<const DesignPinAccessCandidateGroup> blockPinCandidateGroups(DesignBlockPinId pin) const;
+  [[nodiscard]] const DesignPinAccessCandidateGroup& blockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index) const;
+  void setBlockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index, std::vector<DesignPinAccessPoint> points);
+  void appendBlockPinCandidatePoints(DesignBlockPinId pin, uint32_t group_index, std::vector<DesignPinAccessPoint> points);
+  [[nodiscard]] bool clearBlockPinCandidateGroup(DesignBlockPinId pin, uint32_t group_index);
+  [[nodiscard]] bool clearBlockPinCandidateGroups(DesignBlockPinId pin);
+
+  // Compatibility bridge for traces that identify BPin by BTerm + ordinal.
   [[nodiscard]] bool hasIoPinPortCandidateGroup(DesignIoPinId pin, uint32_t port_index, uint32_t group_index) const;
   [[nodiscard]] std::span<const DesignPinAccessCandidateGroup> ioPinPortCandidateGroups(DesignIoPinId pin,
                                                                                             uint32_t port_index) const;
@@ -54,6 +65,10 @@ class RoutingContextService
                                   uint32_t port_index,
                                   uint32_t group_index,
                                   std::vector<DesignPinAccessPoint> points);
+  void appendIoPinPortCandidatePoints(DesignIoPinId pin,
+                                      uint32_t port_index,
+                                      uint32_t group_index,
+                                      std::vector<DesignPinAccessPoint> points);
   [[nodiscard]] bool clearIoPinPortCandidateGroup(DesignIoPinId pin, uint32_t port_index, uint32_t group_index);
   [[nodiscard]] bool clearIoPinPortCandidateGroups(DesignIoPinId pin, uint32_t port_index);
 

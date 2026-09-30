@@ -120,6 +120,8 @@ struct Staging
 {
   std::optional<TechGlobalUnits> units;
   std::optional<double> manufacturing_grid;
+  std::optional<bool> use_min_spacing_obs;
+  std::optional<bool> use_min_spacing_pin;
   std::optional<StagedMaxViaStack> max_via_stack;
   std::vector<StagedLayer> layers;
   lef_detail::StagedTechObjects objects;
@@ -173,6 +175,8 @@ struct PreparedImport
 {
   std::optional<TechGlobalUnits> units;
   std::optional<int32_t> manufacturing_grid;
+  std::optional<bool> use_min_spacing_obs;
+  std::optional<bool> use_min_spacing_pin;
   std::optional<StagedMaxViaStack> max_via_stack;
   std::vector<PreparedLayer> layers;
   lef_detail::PreparedTechObjects objects;
@@ -277,6 +281,32 @@ void mergeManufacturingGrid(Staging& staging, double value)
     throw std::runtime_error("conflicting LEF MANUFACTURINGGRID statements");
   }
   staging.manufacturing_grid = value;
+}
+
+void mergeUseMinSpacing(Staging& staging, const char* name, int value)
+{
+  if (name == nullptr || *name == '\0') {
+    throw std::runtime_error("LEF USEMINSPACING type is empty");
+  }
+  if (value != 0 && value != 1) {
+    throw std::runtime_error("LEF USEMINSPACING value must be ON or OFF");
+  }
+
+  std::optional<bool>* target = nullptr;
+  const auto type = upper(name);
+  if (type == "OBS") {
+    target = &staging.use_min_spacing_obs;
+  } else if (type == "PIN") {
+    target = &staging.use_min_spacing_pin;
+  } else {
+    throw std::runtime_error("unsupported LEF USEMINSPACING type " + type);
+  }
+
+  const bool enabled = value != 0;
+  if (*target && **target != enabled) {
+    throw std::runtime_error("conflicting LEF USEMINSPACING " + type + " statements");
+  }
+  *target = enabled;
 }
 
 void mergeMaxViaStack(Staging& staging, StagedMaxViaStack value)
@@ -581,6 +611,16 @@ int manufacturingCallback(lefrCallbackType_e type, double value, lefiUserData us
   });
 }
 
+int useMinSpacingCallback(lefrCallbackType_e type, lefiUseMinSpacing* source, lefiUserData user_data) noexcept
+{
+  return guardedCallback(user_data, [&](Staging& staging) {
+    if (type != lefrUseMinSpacingCbkType || source == nullptr) {
+      throw std::runtime_error("invalid SI2 USEMINSPACING callback");
+    }
+    mergeUseMinSpacing(staging, source->name(), source->value());
+  });
+}
+
 int maxViaStackCallback(lefrCallbackType_e type, lefiMaxStackVia* source, lefiUserData user_data) noexcept
 {
   return guardedCallback(user_data, [&](Staging& staging) {
@@ -662,6 +702,7 @@ class ParserSession
     }
     lefrSetUnitsCbk(unitsCallback);
     lefrSetManufacturingCbk(manufacturingCallback);
+    lefrSetUseMinSpacingCbk(useMinSpacingCallback);
     lefrSetMaxStackViaCbk(maxViaStackCallback);
     lefrSetLayerCbk(layerCallback);
     lefrSetViaCbk(viaCallback);
@@ -889,7 +930,10 @@ PreparedImplantLayer prepareImplantLayer(const StagedImplantLayer& source, const
 
 PreparedImport prepareImport(const Staging& staging)
 {
-  PreparedImport prepared{.units = staging.units, .max_via_stack = staging.max_via_stack};
+  PreparedImport prepared{.units = staging.units,
+                          .use_min_spacing_obs = staging.use_min_spacing_obs,
+                          .use_min_spacing_pin = staging.use_min_spacing_pin,
+                          .max_via_stack = staging.max_via_stack};
   if (staging.manufacturing_grid) {
     prepared.manufacturing_grid = toDatabaseUnits(*staging.manufacturing_grid, staging, "MANUFACTURINGGRID");
     if (*prepared.manufacturing_grid <= 0) {
@@ -964,7 +1008,9 @@ void ensureEmptyTarget(const TechStore& database)
 {
   const auto& registry = database.techRegistry().registry();
   if (!database.contains(database.techRootId()) || registry.storage<TechEntity>()->free_list() != 1u || !database.layerSequence().empty()
-      || database.globalStorage().hasUnits() || database.globalStorage().hasManufacturingGrid() || database.globalStorage().hasMaxViaStack()
+      || database.globalStorage().hasUnits() || database.globalStorage().hasManufacturingGrid()
+      || database.globalStorage().hasUseMinSpacingObs() || database.globalStorage().hasUseMinSpacingPin()
+      || database.globalStorage().hasMaxViaStack()
       || database.geometryPool().rectangleCount() != 0u || database.geometryPool().polygonCount() != 0u
       || database.geometryPool().pointCount() != 0u) {
     throw std::logic_error("direct LEF importer requires a new empty TechStore");
@@ -987,6 +1033,8 @@ void rollbackImport(TechStore& database, GeometryPoolCheckpoint geometry_checkpo
   }
   registry.get<TechLayerSequence>(root).layers.clear();
   database.globalStorage().removeMaxViaStack();
+  database.globalStorage().removeUseMinSpacingPin();
+  database.globalStorage().removeUseMinSpacingObs();
   database.globalStorage().removeManufacturingGrid();
   database.globalStorage().removeUnits();
   try {
@@ -1012,6 +1060,12 @@ void commitImport(TechStore& database, const PreparedImport& prepared)
     }
     if (prepared.manufacturing_grid) {
       database.globalStorage().setManufacturingGrid(*prepared.manufacturing_grid);
+    }
+    if (prepared.use_min_spacing_obs) {
+      database.globalStorage().setUseMinSpacingObs(*prepared.use_min_spacing_obs);
+    }
+    if (prepared.use_min_spacing_pin) {
+      database.globalStorage().setUseMinSpacingPin(*prepared.use_min_spacing_pin);
     }
 
     for (const auto& layer : prepared.layers) {

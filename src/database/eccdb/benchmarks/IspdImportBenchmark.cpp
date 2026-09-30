@@ -147,7 +147,7 @@ template <typename Component, typename Registry>
     result.track_grid_axis_patterns += grid.layers.size();
   });
   result.instances = countComponent<eccdb::DesignInstance>(design_registry);
-  result.instance_pins = countComponent<eccdb::DesignInstancePin>(design_registry);
+  result.instance_pins = design.netlistStorage().instancePinCount();
   result.io_pins = countComponent<eccdb::DesignIoPin>(design_registry);
   result.special_nets = countComponent<eccdb::DesignSpecialNet>(design_registry);
   const auto regular_nets = design_registry.view<const eccdb::DesignNet>(entt::exclude<eccdb::DesignSpecialNet>);

@@ -187,13 +187,13 @@ TEST_F(NetRouteServiceTest, PreservesShieldWireMetadataAndLeavesItUntouched)
   EXPECT_EQ(design.routingStorage().wire(shield).shield_net, "VSS");
 }
 
-TEST_F(NetRouteServiceTest, RejectsUnprojectablePathAndViaAttributesBeforeReplacement)
+TEST_F(NetRouteServiceTest, ReplacesRoutedWiresEvenWhenOldAttributesCannotBeProjected)
 {
   NetRouteService service{design, technology};
   const std::vector<RouteShape> replacement{
       RouteSegment{.layer = m1, .begin = {10, 0}, .end = {30, 0}}};
   std::size_t index = 0u;
-  const auto expect_rejected = [&](DesignWirePath path) {
+  const auto expect_replaced = [&](DesignWirePath path) {
     const auto unsupported_net =
         design.netlistStorage().createNet(DesignNet{.name = "unprojectable_" + std::to_string(index++)});
     DesignWireRoutingInput routing;
@@ -202,41 +202,40 @@ TEST_F(NetRouteServiceTest, RejectsUnprojectablePathAndViaAttributesBeforeReplac
         DesignWire{.net = unsupported_net, .status = DesignWireStatus::kRouted}, std::move(routing));
 
     EXPECT_THROW((void) service.snapshot(unsupported_net), std::logic_error);
-    EXPECT_THROW((void) service.replaceRouted(unsupported_net, std::span<const RouteShape>{replacement}), std::logic_error);
+    const auto replacement_wire = service.replaceRouted(unsupported_net, std::span<const RouteShape>{replacement});
+    EXPECT_FALSE(design.routingStorage().contains(old_wire));
     ASSERT_EQ(design.routingStorage().wireIds(unsupported_net).size(), 1u);
-    EXPECT_EQ(design.routingStorage().wireIds(unsupported_net).front(), old_wire);
+    EXPECT_EQ(design.routingStorage().wireIds(unsupported_net).front(), replacement_wire);
+    ASSERT_EQ(service.snapshot(unsupported_net).wires.size(), 1u);
   };
 
-  expect_rejected(DesignWirePath{.layer = m1,
+  expect_replaced(DesignWirePath{.layer = m1,
                                  .flags = DesignWirePathFlag::kHasWidth,
                                  .width = 1,
                                  .points = {{.position = {0, 0}}, {.position = {10, 0}}}});
-  expect_rejected(DesignWirePath{.layer = m1,
+  expect_replaced(DesignWirePath{.layer = m1,
                                  .flags = DesignWirePathFlag::kHasMask,
                                  .mask = 1u,
                                  .points = {{.position = {0, 0}}, {.position = {10, 0}}}});
-  expect_rejected(DesignWirePath{.layer = m1,
-                                 .flags = DesignWirePathFlag::kTaper,
-                                 .points = {{.position = {0, 0}}, {.position = {10, 0}}}});
-  expect_rejected(DesignWirePath{.layer = m1,
+  expect_replaced(DesignWirePath{.layer = m1,
                                  .flags = DesignWirePathFlag::kHasTaperRule,
                                  .taper_rule = "route_rule",
                                  .points = {{.position = {0, 0}}, {.position = {10, 0}}}});
-  expect_rejected(DesignWirePath{.layer = m1,
+  expect_replaced(DesignWirePath{.layer = m1,
                                  .flags = DesignWirePathFlag::kHasShape,
                                  .shape = "STRIPE",
                                  .points = {{.position = {0, 0}}, {.position = {10, 0}}}});
-  expect_rejected(DesignWirePath{.layer = m1,
+  expect_replaced(DesignWirePath{.layer = m1,
                                  .flags = DesignWirePathFlag::kHasStyle,
                                  .style = 1,
                                  .points = {{.position = {0, 0}}, {.position = {10, 0}}}});
-  expect_rejected(DesignWirePath{.layer = m1,
+  expect_replaced(DesignWirePath{.layer = m1,
                                  .points = {{.position = {0, 0}}},
                                  .vias = {{.point_index = 0u,
                                            .tech_via = via12,
                                            .flags = DesignWireViaFlag::kHasMask,
                                            .top_mask = 1u}}});
-  expect_rejected(DesignWirePath{.layer = m1,
+  expect_replaced(DesignWirePath{.layer = m1,
                                  .points = {{.position = {0, 0}}},
                                  .vias = {{.point_index = 0u,
                                            .tech_via = via12,
@@ -245,13 +244,37 @@ TEST_F(NetRouteServiceTest, RejectsUnprojectablePathAndViaAttributesBeforeReplac
                                            .columns = 3u,
                                            .step_x = 10,
                                            .step_y = 20}}});
-  expect_rejected(DesignWirePath{.layer = m1,
+  expect_replaced(DesignWirePath{.layer = m1,
                                  .points = {{.position = {0, 0}, .flags = DesignWirePointFlag::kVirtual}}});
-  expect_rejected(DesignWirePath{.layer = m1,
+  expect_replaced(DesignWirePath{.layer = m1,
                                  .points = {{.position = {0, 0},
                                              .flags = DesignWirePointFlag::kHasExtension,
                                              .extension = 4}},
                                  .vias = {{.point_index = 0u, .tech_via = via12}}});
+}
+
+TEST_F(NetRouteServiceTest, PreservesTaperFlagInSnapshotAndReplacement)
+{
+  const auto old_wire = addWire(
+      DesignWireStatus::kRouted,
+      {DesignWirePath{.layer = m1,
+                      .flags = DesignWirePathFlag::kTaper,
+                      .points = {{.position = {0, 0}}, {.position = {10, 0}}}}});
+  NetRouteService service{design, technology};
+  const auto old_snapshot = service.snapshot(net);
+  ASSERT_EQ(old_snapshot.wires.size(), 1u);
+  ASSERT_EQ(old_snapshot.wires.front().shapes.size(), 1u);
+  EXPECT_TRUE(std::get<RouteSegment>(old_snapshot.wires.front().shapes.front()).tapered);
+
+  const std::vector<RouteShape> replacement{
+      RouteSegment{.layer = m1, .begin = {10, 0}, .end = {30, 0}, .tapered = true}};
+  const auto new_wire = service.replaceRouted(net, std::span<const RouteShape>{replacement});
+  EXPECT_FALSE(design.routingStorage().contains(old_wire));
+  const auto new_snapshot = service.snapshot(net);
+  ASSERT_EQ(new_snapshot.wires.size(), 1u);
+  EXPECT_EQ(new_snapshot.wires.front().wire, new_wire);
+  ASSERT_EQ(new_snapshot.wires.front().shapes.size(), 1u);
+  EXPECT_TRUE(std::get<RouteSegment>(new_snapshot.wires.front().shapes.front()).tapered);
 }
 
 TEST_F(NetRouteServiceTest, RejectsInvalidViaLayerTransition)
@@ -264,8 +287,9 @@ TEST_F(NetRouteServiceTest, RejectsInvalidViaLayerTransition)
   NetRouteService service{design, technology};
   EXPECT_THROW((void) service.snapshot(net), std::logic_error);
   const std::vector<RouteShape> replacement{RouteSegment{.layer = m1, .begin = {0, 0}, .end = {20, 0}}};
-  EXPECT_THROW((void) service.replaceRouted(net, std::span<const RouteShape>{replacement}), std::logic_error);
-  EXPECT_TRUE(design.routingStorage().contains(wire));
+  const auto replacement_wire = service.replaceRouted(net, std::span<const RouteShape>{replacement});
+  EXPECT_FALSE(design.routingStorage().contains(wire));
+  EXPECT_TRUE(design.routingStorage().contains(replacement_wire));
 }
 
 TEST_F(NetRouteServiceTest, ReadsUnorderedViasWithStableSameAnchorOrder)
@@ -328,7 +352,7 @@ TEST_F(NetRouteServiceTest, RejectsTrustedOutOfRangePrimitiveAnchors)
 {
   NetRouteService service{design, technology};
   const std::vector<RouteShape> replacement{RouteSegment{.layer = m1, .begin = {0, 0}, .end = {20, 0}}};
-  const auto expect_rejected = [&](std::string name, DesignWirePath path) {
+  const auto expect_replaced = [&](std::string name, DesignWirePath path) {
     const auto invalid_net = design.netlistStorage().createNet(DesignNet{.name = std::move(name)});
     DesignWireRoutingInput routing;
     routing.appendPath(std::move(path));
@@ -336,16 +360,17 @@ TEST_F(NetRouteServiceTest, RejectsTrustedOutOfRangePrimitiveAnchors)
         DesignWire{.net = invalid_net, .status = DesignWireStatus::kRouted}, std::move(routing));
 
     EXPECT_THROW((void) service.snapshot(invalid_net), std::logic_error);
-    EXPECT_THROW((void) service.replaceRouted(invalid_net, std::span<const RouteShape>{replacement}), std::logic_error);
+    const auto replacement_wire = service.replaceRouted(invalid_net, std::span<const RouteShape>{replacement});
+    EXPECT_FALSE(design.routingStorage().contains(wire));
     ASSERT_EQ(design.routingStorage().wireIds(invalid_net).size(), 1u);
-    EXPECT_EQ(design.routingStorage().wireIds(invalid_net).front(), wire);
+    EXPECT_EQ(design.routingStorage().wireIds(invalid_net).front(), replacement_wire);
   };
 
-  expect_rejected("out_of_range_via",
+  expect_replaced("out_of_range_via",
                   DesignWirePath{.layer = m1,
                                  .points = {{.position = {0, 0}}},
                                  .vias = {{.point_index = 1u, .tech_via = via12}}});
-  expect_rejected("out_of_range_patch",
+  expect_replaced("out_of_range_patch",
                   DesignWirePath{.layer = m1,
                                  .points = {{.position = {0, 0}}},
                                  .rectangles = {{.point_index = 1u, .delta = {-1, -1, 1, 1}}}});
@@ -378,8 +403,9 @@ TEST_F(NetRouteServiceTest, ReadsMixedPathsAndRejectsAmbiguousPatchViaAnchor)
       design.routingStorage().createWire(DesignWire{.net = ambiguous_net, .status = DesignWireStatus::kRouted}, std::move(routing));
   EXPECT_THROW((void) service.snapshot(ambiguous_net), std::logic_error);
   const std::vector<RouteShape> replacement{RouteSegment{.layer = m1, .begin = {0, 0}, .end = {20, 0}}};
-  EXPECT_THROW((void) service.replaceRouted(ambiguous_net, std::span<const RouteShape>{replacement}), std::logic_error);
-  EXPECT_TRUE(design.routingStorage().contains(ambiguous_wire));
+  const auto replacement_wire = service.replaceRouted(ambiguous_net, std::span<const RouteShape>{replacement});
+  EXPECT_FALSE(design.routingStorage().contains(ambiguous_wire));
+  EXPECT_TRUE(design.routingStorage().contains(replacement_wire));
 }
 
 }  // namespace

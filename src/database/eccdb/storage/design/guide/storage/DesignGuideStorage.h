@@ -42,6 +42,9 @@ class DesignGuideStorage
   }
 
   void replaceTrackAssignments(DesignNetId net, std::vector<DesignTrackAssignmentShape> assignments);
+  // Mirrors dbNetTrack::create(): values are appended in call order and are
+  // intentionally not deduplicated.
+  void appendTrackAssignments(DesignNetId net, std::vector<DesignTrackAssignmentShape> assignments);
   void clearTrackAssignments(DesignNetId net);
   [[nodiscard]] bool hasTrackAssignments(DesignNetId net) const;
   // The returned view is invalidated by a track-assignment replacement or

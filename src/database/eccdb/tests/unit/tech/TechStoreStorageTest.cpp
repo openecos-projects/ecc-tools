@@ -24,6 +24,8 @@ static_assert(std::is_same_v<decltype(std::declval<const TechGlobalStorage&>().t
 static_assert(std::is_same_v<decltype(std::declval<const TechGlobalStorage&>().getUnits()), const TechGlobalUnits&>);
 static_assert(std::is_same_v<decltype(std::declval<const TechGlobalStorage&>().getManufacturingGrid()), const TechManufacturingGrid&>);
 static_assert(std::is_same_v<decltype(std::declval<const TechGlobalStorage&>().getMaxViaStack()), const TechMaxViaStack&>);
+static_assert(std::is_same_v<decltype(std::declval<const TechGlobalStorage&>().getUseMinSpacingObs()), bool>);
+static_assert(std::is_same_v<decltype(std::declval<const TechGlobalStorage&>().getUseMinSpacingPin()), bool>);
 static_assert(sizeof(TechRoutingLayerId) == sizeof(TechEntity));
 static_assert(sizeof(TechCutSpacingRuleId) == sizeof(TechEntity));
 static_assert(!std::is_same_v<TechRoutingLayerId, TechCutLayerId>);
@@ -216,12 +218,16 @@ TEST_F(TechStoreStorageTest, StoresGlobalsAsComponentsOnTheTechRoot)
   EXPECT_EQ(&registry, &globals.registry());
   EXPECT_FALSE(globals.hasUnits());
   EXPECT_FALSE(globals.hasManufacturingGrid());
+  EXPECT_FALSE(globals.hasUseMinSpacingObs());
+  EXPECT_FALSE(globals.hasUseMinSpacingPin());
   EXPECT_FALSE(globals.hasMaxViaStack());
   EXPECT_EQ(globals.tryGetUnits(), nullptr);
   EXPECT_EQ(globals.tryGetManufacturingGrid(), nullptr);
   EXPECT_EQ(globals.tryGetMaxViaStack(), nullptr);
   EXPECT_THROW((void) globals.getUnits(), std::out_of_range);
   EXPECT_THROW((void) globals.getManufacturingGrid(), std::out_of_range);
+  EXPECT_THROW((void) globals.getUseMinSpacingObs(), std::out_of_range);
+  EXPECT_THROW((void) globals.getUseMinSpacingPin(), std::out_of_range);
   EXPECT_THROW((void) globals.getMaxViaStack(), std::out_of_range);
 
   TechGlobalUnits invalid_units{.flags = TechGlobalUnitsFlag::kHasNanoseconds};
@@ -231,6 +237,8 @@ TEST_F(TechStoreStorageTest, StoresGlobalsAsComponentsOnTheTechRoot)
 
   globals.setUnits(units);
   globals.setManufacturingGrid(5);
+  globals.setUseMinSpacingObs(false);
+  globals.setUseMinSpacingPin(true);
   globals.setMaxViaStack(TechMaxViaStack{.flags = TechMaxViaStackFlag::kNoSingle | TechMaxViaStackFlag::kHasRange,
                                          .max_stack_count = 2,
                                          .bottom_layer = bottom,
@@ -238,10 +246,14 @@ TEST_F(TechStoreStorageTest, StoresGlobalsAsComponentsOnTheTechRoot)
 
   EXPECT_TRUE(globals.hasUnits());
   EXPECT_TRUE(globals.hasManufacturingGrid());
+  EXPECT_TRUE(globals.hasUseMinSpacingObs());
+  EXPECT_TRUE(globals.hasUseMinSpacingPin());
   EXPECT_TRUE(globals.hasMaxViaStack());
   EXPECT_EQ(globals.getUnits().database_units_per_micron, 2000);
   EXPECT_NE((globals.getUnits().flags & TechGlobalUnitsFlag::kHasDatabaseUnitsPerMicron), 0u);
   EXPECT_EQ(globals.getManufacturingGrid().value, 5);
+  EXPECT_FALSE(globals.getUseMinSpacingObs());
+  EXPECT_TRUE(globals.getUseMinSpacingPin());
   EXPECT_EQ(globals.getMaxViaStack().bottom_layer, bottom);
   EXPECT_NE((globals.getMaxViaStack().flags & TechMaxViaStackFlag::kNoSingle), 0u);
   EXPECT_EQ(globals.tryGetUnits(), &registry.get<TechGlobalUnits>(root.entity()));
@@ -250,7 +262,8 @@ TEST_F(TechStoreStorageTest, StoresGlobalsAsComponentsOnTheTechRoot)
   EXPECT_EQ(&globals.getUnits(), &registry.get<TechGlobalUnits>(root.entity()));
   EXPECT_EQ(&globals.getManufacturingGrid(), &registry.get<TechManufacturingGrid>(root.entity()));
   EXPECT_EQ(&globals.getMaxViaStack(), &registry.get<TechMaxViaStack>(root.entity()));
-  EXPECT_TRUE((registry.all_of<TechRoot, TechGlobalUnits, TechManufacturingGrid, TechMaxViaStack>(root.entity())));
+  EXPECT_TRUE((registry.all_of<TechRoot, TechGlobalUnits, TechManufacturingGrid, TechUseMinSpacingObs, TechUseMinSpacingPin,
+                               TechMaxViaStack>(root.entity())));
   EXPECT_EQ(registry.storage<TechEntity>().size(), entity_count);
 
   TechGlobalUnits replacement_units{.flags = TechGlobalUnitsFlag::kHasMegahertz, .megahertz = 8};
@@ -276,6 +289,8 @@ TEST_F(TechStoreStorageTest, RemovesGlobalComponentsAndRepresentsAbsenceByMissin
 
   EXPECT_FALSE((registry.all_of<TechGlobalUnits>(root.entity())));
   EXPECT_FALSE((registry.all_of<TechManufacturingGrid>(root.entity())));
+  EXPECT_FALSE((registry.all_of<TechUseMinSpacingObs>(root.entity())));
+  EXPECT_FALSE((registry.all_of<TechUseMinSpacingPin>(root.entity())));
   EXPECT_FALSE((registry.all_of<TechMaxViaStack>(root.entity())));
 
   globals.setUnits(TechGlobalUnits{});
@@ -285,21 +300,29 @@ TEST_F(TechStoreStorageTest, RemovesGlobalComponentsAndRepresentsAbsenceByMissin
 
   globals.setUnits(TechGlobalUnits{.flags = TechGlobalUnitsFlag::kHasNanoseconds, .nanoseconds = 1});
   globals.setManufacturingGrid(5);
+  globals.setUseMinSpacingObs(true);
+  globals.setUseMinSpacingPin(false);
   globals.setMaxViaStack(
       TechMaxViaStack{.flags = TechMaxViaStackFlag::kHasRange, .max_stack_count = 2, .bottom_layer = bottom, .top_layer = top});
 
   globals.removeUnits();
   globals.removeManufacturingGrid();
+  globals.removeUseMinSpacingObs();
+  globals.removeUseMinSpacingPin();
   globals.removeMaxViaStack();
 
   EXPECT_FALSE(globals.hasUnits());
   EXPECT_FALSE(globals.hasManufacturingGrid());
+  EXPECT_FALSE(globals.hasUseMinSpacingObs());
+  EXPECT_FALSE(globals.hasUseMinSpacingPin());
   EXPECT_FALSE(globals.hasMaxViaStack());
   EXPECT_EQ(globals.tryGetUnits(), nullptr);
   EXPECT_EQ(globals.tryGetManufacturingGrid(), nullptr);
   EXPECT_EQ(globals.tryGetMaxViaStack(), nullptr);
   EXPECT_FALSE((registry.all_of<TechGlobalUnits>(root.entity())));
   EXPECT_FALSE((registry.all_of<TechManufacturingGrid>(root.entity())));
+  EXPECT_FALSE((registry.all_of<TechUseMinSpacingObs>(root.entity())));
+  EXPECT_FALSE((registry.all_of<TechUseMinSpacingPin>(root.entity())));
   EXPECT_FALSE((registry.all_of<TechMaxViaStack>(root.entity())));
   EXPECT_TRUE((registry.all_of<TechRoot>(root.entity())));
 }

@@ -247,6 +247,7 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   addComponentStorage<DesignInstancePins>(registry, result);
   addComponentStorage<DesignInstancePin>(registry, result);
   addComponentStorage<DesignIoPin>(registry, result);
+  addComponentStorage<DesignBlockPin>(registry, result);
   addComponentStorage<DesignNet>(registry, result);
   addComponentStorage<DesignNetInstancePins>(registry, result);
   addComponentStorage<DesignNetIoPins>(registry, result);
@@ -314,8 +315,9 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
     result.netlist_nested_capacity_bytes += instance.region_bounds.capacity() * sizeof(Rect);
   }
   for (const auto entity : registry.view<const DesignInstancePins>()) {
-    result.netlist_nested_capacity_bytes
-        += registry.get<const DesignInstancePins>(entity).values.capacity() * sizeof(DesignInstancePinId);
+    const auto& pins = registry.get<const DesignInstancePins>(entity);
+    result.netlist_nested_capacity_bytes += pins.values.capacity() * sizeof(DesignInstancePinId)
+                                          + pins.term_ids.capacity() * sizeof(LibraryMasterTermId);
   }
   for (const auto entity : registry.view<const DesignNetInstancePins>()) {
     result.netlist_nested_capacity_bytes
@@ -327,14 +329,15 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   for (const auto entity : registry.view<const DesignIoPin>()) {
     const auto& pin = registry.get<const DesignIoPin>(entity);
     result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(pin.name);
-    result.netlist_nested_capacity_bytes += pin.ports.capacity() * sizeof(DesignIoPinPort);
-    for (const auto& port : pin.ports) {
-      result.netlist_nested_capacity_bytes += port.rectangles.capacity() * sizeof(DesignPinRectangle);
-      result.netlist_nested_capacity_bytes += port.polygons.capacity() * sizeof(DesignPinPolygon);
-      result.netlist_nested_capacity_bytes += port.vias.capacity() * sizeof(DesignPinVia);
-      for (const auto& polygon : port.polygons) {
-        result.netlist_nested_capacity_bytes += polygon.points.capacity() * sizeof(Point);
-      }
+    result.netlist_nested_capacity_bytes += pin.pins.capacity() * sizeof(DesignBlockPinId);
+  }
+  for (const auto entity : registry.view<const DesignBlockPin>()) {
+    const auto& port = registry.get<const DesignBlockPin>(entity);
+    result.netlist_nested_capacity_bytes += port.rectangles.capacity() * sizeof(DesignPinRectangle);
+    result.netlist_nested_capacity_bytes += port.polygons.capacity() * sizeof(DesignPinPolygon);
+    result.netlist_nested_capacity_bytes += port.vias.capacity() * sizeof(DesignPinVia);
+    for (const auto& polygon : port.polygons) {
+      result.netlist_nested_capacity_bytes += polygon.points.capacity() * sizeof(Point);
     }
   }
   for (const auto entity : registry.view<const DesignNet>()) {

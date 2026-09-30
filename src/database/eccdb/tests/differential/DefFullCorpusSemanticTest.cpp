@@ -349,17 +349,17 @@ TEST(DefLargeCorpusTest, ImportsBeyondLegacyLimitAndReachesSemanticFixedPoint)
   EXPECT_EQ(test::detail::componentCount<DesignIoPin>(*design), 1849u);
   EXPECT_EQ(test::detail::componentCount<DesignNet>(*design), 290356u);
 
-  const auto modeled_entity_count
+  const auto modeled_object_count
       = 1u + test::detail::componentCount<DesignRow>(*design) + test::detail::componentCount<DesignTrackGrid>(*design)
         + test::detail::componentCount<DesignGCellGrid>(*design) + test::detail::componentCount<DesignInstance>(*design)
-        + test::detail::componentCount<DesignInstancePin>(*design) + test::detail::componentCount<DesignIoPin>(*design)
+        + design->netlistStorage().instancePinCount() + test::detail::componentCount<DesignIoPin>(*design)
         + test::detail::componentCount<DesignNet>(*design) + test::detail::componentCount<DesignWire>(*design)
         + test::detail::componentCount<DesignVia>(*design) + test::detail::componentCount<DesignRegion>(*design)
         + test::detail::componentCount<DesignGroup>(*design) + test::detail::componentCount<DesignBlockage>(*design)
         + test::detail::componentCount<DesignFill>(*design);
-  EXPECT_GT(modeled_entity_count, 0xFFFFFu);
-  std::cout << "[DEF memory] modeled entities=" << modeled_entity_count
-            << ", instance pins=" << test::detail::componentCount<DesignInstancePin>(*design)
+  EXPECT_GT(modeled_object_count, 0xFFFFFu);
+  std::cout << "[DEF memory] modeled objects=" << modeled_object_count
+            << ", instance pins=" << design->netlistStorage().instancePinCount()
             << ", wires=" << test::detail::componentCount<DesignWire>(*design)
             << ", stable Design delta=" << (design_memory.resident_kib - library_memory.resident_kib) << " KiB\n";
 

@@ -687,8 +687,9 @@ void rollbackImport(DesignStore& design) noexcept
     appendEntities<DesignVia>(registry, entities);
     appendEntities<DesignNonDefaultRule>(registry, entities);
     appendEntities<DesignInstance>(registry, entities);
-    appendEntities<DesignInstancePin>(registry, entities);
-    appendEntities<DesignIoPin>(registry, entities);
+    appendEntities<DesignInstanceTerm>(registry, entities);
+    appendEntities<DesignBlockTerm>(registry, entities);
+    appendEntities<DesignBlockPin>(registry, entities);
     appendEntities<DesignNet>(registry, entities);
     appendEntities<DesignWire>(registry, entities);
     appendEntities<DesignRegion>(registry, entities);
@@ -1171,16 +1172,16 @@ int directComponentCallback(defrCallbackType_e type, defiComponent* source, defi
   });
 }
 
-void directSetPinPlacement(DesignIoPinPort& port, DesignPlacementStatus status, Point origin, DesignOrientation orient)
+void directSetPinPlacement(DesignBlockPin& pin, DesignPlacementStatus status, Point origin, DesignOrientation orient)
 {
-  port.flags |= DesignIoPinPortFlag::kHasPlacement;
-  port.placement_status = status;
-  port.origin = origin;
-  port.orientation = orient;
+  pin.flags |= DesignIoPinPortFlag::kHasPlacement;
+  pin.placement_status = status;
+  pin.origin = origin;
+  pin.orientation = orient;
 }
 
 template <typename Source>
-void directParsePinGeometry(const Source& source, DesignIoPinPort& port, DirectContext& context, std::string_view field)
+void directParsePinGeometry(const Source& source, DesignBlockPin& pin, DirectContext& context, std::string_view field)
 {
   for (int index = 0; index < source.numLayer(); ++index) {
     int ll_x = 0;
@@ -1194,7 +1195,7 @@ void directParsePinGeometry(const Source& source, DesignIoPinPort& port, DirectC
     if (source.layerMask(index) != 0) { rectangle.flags |= DesignPinShapeFlag::kHasMask; rectangle.mask = static_cast<uint32_t>(source.layerMask(index)); }
     if (source.hasLayerSpacing(index)) { rectangle.flags |= DesignPinShapeFlag::kHasSpacing; rectangle.spacing = source.layerSpacing(index); }
     if (source.hasLayerDesignRuleWidth(index)) { rectangle.flags |= DesignPinShapeFlag::kHasDesignRuleWidth; rectangle.design_rule_width = source.layerDesignRuleWidth(index); }
-    port.rectangles.push_back(std::move(rectangle));
+    pin.rectangles.push_back(std::move(rectangle));
   }
   for (int index = 0; index < source.numPolygons(); ++index) {
     DesignPinPolygon polygon{.layer = requiredMapped(context.layers, requiredText(source.polygonName(index), std::string(field) + " POLYGON layer")),
@@ -1202,7 +1203,7 @@ void directParsePinGeometry(const Source& source, DesignIoPinPort& port, DirectC
     if (source.polygonMask(index) != 0) { polygon.flags |= DesignPinShapeFlag::kHasMask; polygon.mask = static_cast<uint32_t>(source.polygonMask(index)); }
     if (source.hasPolygonSpacing(index)) { polygon.flags |= DesignPinShapeFlag::kHasSpacing; polygon.spacing = source.polygonSpacing(index); }
     if (source.hasPolygonDesignRuleWidth(index)) { polygon.flags |= DesignPinShapeFlag::kHasDesignRuleWidth; polygon.design_rule_width = source.polygonDesignRuleWidth(index); }
-    port.polygons.push_back(std::move(polygon));
+    pin.polygons.push_back(std::move(polygon));
   }
   for (int index = 0; index < source.numVias(); ++index) {
     const auto via_name = requiredText(source.viaName(index), std::string(field) + " VIA");
@@ -1216,7 +1217,7 @@ void directParsePinGeometry(const Source& source, DesignIoPinPort& port, DirectC
     if (via.top_mask != 0u || via.cut_mask != 0u || via.bottom_mask != 0u) via.flags |= DesignPinViaFlag::kHasMask;
     if (technology != context.tech_vias.end()) via.tech_via = technology->second;
     else via.design_via = local;
-    port.vias.push_back(std::move(via));
+    pin.vias.push_back(std::move(via));
   }
 }
 
@@ -1227,26 +1228,25 @@ int directPinCallback(defrCallbackType_e type, defiPin* source, defiUserData use
     const auto name = requiredText(source->pinName(), "PIN name");
     if (context.design.netlistStorage().findIoPin(name)) throw std::runtime_error("duplicate DEF PIN: " + name);
     const auto net = requiredText(source->netName(), "PIN NET");
-    DesignIoPin pin{.name = name};
-    if (source->hasDirection()) pin.direction = pinDirection(source->direction());
-    if (source->hasUse()) pin.use = signalUse(source->use());
-    if (source->hasSpecial()) pin.flags |= DesignIoPinFlag::kSpecial;
-    std::vector<DesignIoPinPort> ports;
-    DesignIoPinPort implicit_port;
-    if (source->hasPlacement()) directSetPinPlacement(implicit_port, pinPlacement(*source), Point{source->placementX(), source->placementY()}, orientation(source->orientStr()));
-    directParsePinGeometry(*source, implicit_port, context, "PIN");
-    if ((implicit_port.flags & DesignIoPinPortFlag::kHasPlacement) != 0u || !implicit_port.rectangles.empty() || !implicit_port.polygons.empty() || !implicit_port.vias.empty()) ports.push_back(std::move(implicit_port));
+    DesignBlockTerm term{.name = name};
+    if (source->hasDirection()) term.direction = pinDirection(source->direction());
+    if (source->hasUse()) term.use = signalUse(source->use());
+    if (source->hasSpecial()) term.flags |= DesignIoPinFlag::kSpecial;
+    std::vector<DesignBlockPin> pins;
+    DesignBlockPin implicit_pin;
+    if (source->hasPlacement()) directSetPinPlacement(implicit_pin, pinPlacement(*source), Point{source->placementX(), source->placementY()}, orientation(source->orientStr()));
+    directParsePinGeometry(*source, implicit_pin, context, "PIN");
+    if ((implicit_pin.flags & DesignIoPinPortFlag::kHasPlacement) != 0u || !implicit_pin.rectangles.empty() || !implicit_pin.polygons.empty() || !implicit_pin.vias.empty()) pins.push_back(std::move(implicit_pin));
     for (int port_index = 0; port_index < source->numPorts(); ++port_index) {
       const auto* port_source = source->pinPort(port_index);
       if (port_source == nullptr) throw std::runtime_error("SI2 returned a null PIN PORT");
-      DesignIoPinPort port{.flags = DesignIoPinPortFlag::kExplicit};
-      if (port_source->hasPlacement()) directSetPinPlacement(port, portPlacement(*port_source), Point{port_source->placementX(), port_source->placementY()}, orientation(port_source->orientStr()));
-      directParsePinGeometry(*port_source, port, context, "PIN PORT");
-      ports.push_back(std::move(port));
+      DesignBlockPin block_pin{.flags = DesignIoPinPortFlag::kExplicit};
+      if (port_source->hasPlacement()) directSetPinPlacement(block_pin, portPlacement(*port_source), Point{port_source->placementX(), port_source->placementY()}, orientation(port_source->orientStr()));
+      directParsePinGeometry(*port_source, block_pin, context, "PIN PORT");
+      pins.push_back(std::move(block_pin));
     }
-    pin.ports = std::move(ports);
     directDiagnostic(context, "PIN NETEXPR/SENSITIVITY", static_cast<std::size_t>(source->hasNetExpr() + source->hasSupplySensitivity() + source->hasGroundSensitivity()));
-    const auto id = context.design.netlistStorage().createIoPin(std::move(pin));
+    const auto id = context.design.netlistStorage().createIoPin(std::move(term), std::move(pins));
     context.pending_pin_nets.push_back({.pin = id, .net = net});
   });
 }

@@ -29,8 +29,10 @@ struct DesignRow;
 struct DesignTrackGrid;
 struct DesignGCellGrid;
 struct DesignInstance;
-struct DesignInstancePin;
-struct DesignIoPin;
+struct DesignInstanceTerm;
+struct DesignInstanceTerms;
+struct DesignBlockTerm;
+struct DesignBlockPin;
 struct DesignNet;
 struct DesignWire;
 struct DesignVia;
@@ -40,13 +42,27 @@ struct DesignGroup;
 struct DesignBlockage;
 struct DesignFill;
 
+// Legacy storage spellings remain aliases while callers migrate to the
+// OpenDB-aligned Term/Pin vocabulary.
+using DesignInstancePin = DesignInstanceTerm;
+using DesignInstancePins = DesignInstanceTerms;
+using DesignIoPin = DesignBlockTerm;
+using DesignIoPinPort = DesignBlockPin;
+
 using DesignRootId = EnttId<DesignEntity, DesignRoot>;
 using DesignRowId = EnttId<DesignEntity, DesignRow>;
 using DesignTrackGridId = EnttId<DesignEntity, DesignTrackGrid>;
 using DesignGCellGridId = EnttId<DesignEntity, DesignGCellGrid>;
 using DesignInstanceId = EnttId<DesignEntity, DesignInstance>;
-using DesignInstancePinId = EnttId<DesignEntity, DesignInstancePin>;
-using DesignIoPinId = EnttId<DesignEntity, DesignIoPin>;
+// OpenDB dbITerm: an independent entity created for each instance/master-term
+// pair. DesignInstancePin is retained as a source-compatible spelling.
+using DesignInstanceTermId = EnttId<DesignEntity, DesignInstanceTerm>;
+using DesignInstancePinId = DesignInstanceTermId;
+// OpenDB dbBTerm and dbBPin are separate design entities. A block term owns
+// its ordered block-pin IDs; a block pin owns one physical geometry group.
+using DesignBlockTermId = EnttId<DesignEntity, DesignBlockTerm>;
+using DesignIoPinId = DesignBlockTermId;
+using DesignBlockPinId = EnttId<DesignEntity, DesignBlockPin>;
 using DesignNetId = EnttId<DesignEntity, DesignNet>;
 using DesignWireId = EnttId<DesignEntity, DesignWire>;
 using DesignViaId = EnttId<DesignEntity, DesignVia>;

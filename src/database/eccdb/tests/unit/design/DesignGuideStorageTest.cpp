@@ -70,6 +70,28 @@ TEST_F(DesignStorageTest, ReplacesEmptyGuideAndTrackAssignmentSetsByRemovingComp
   EXPECT_FALSE(guide_storage.hasTrackAssignments(net));
 }
 
+TEST_F(DesignStorageTest, AppendsTrackAssignmentsInWriterCallOrderWithoutDeduplication)
+{
+  DesignGuideStorage guide_storage(design.designRegistry(), tech);
+  const auto net = design.netlistStorage().createNet(DesignNet{.name = "signal"});
+  const DesignTrackAssignmentShape first{.layer = routing_layer, .box = {0, 50, 100, 50}};
+  const DesignTrackAssignmentShape second{.layer = routing_layer, .box = {100, 50, 200, 50}};
+
+  guide_storage.appendTrackAssignments(net, {first, second});
+  guide_storage.appendTrackAssignments(net, {first});
+  guide_storage.appendTrackAssignments(net, {});
+
+  ASSERT_TRUE(guide_storage.hasTrackAssignments(net));
+  ASSERT_EQ(guide_storage.trackAssignments(net).size(), 3u);
+  EXPECT_EQ(guide_storage.trackAssignments(net)[0].box, first.box);
+  EXPECT_EQ(guide_storage.trackAssignments(net)[1].box, second.box);
+  EXPECT_EQ(guide_storage.trackAssignments(net)[2].box, first.box);
+
+  EXPECT_THROW(guide_storage.appendTrackAssignments(net, {{.layer = {}, .box = {0, 0, 10, 0}}}), std::invalid_argument);
+  ASSERT_EQ(guide_storage.trackAssignments(net).size(), 3u);
+  EXPECT_EQ(guide_storage.trackAssignments(net)[2].box, first.box);
+}
+
 TEST_F(DesignStorageTest, ValidatesNetGuideAndTrackAssignmentReferences)
 {
   DesignGuideStorage guide_storage(design.designRegistry(), tech);

@@ -104,18 +104,64 @@ class EntityPointerTable
   std::vector<const Component*> _values;
 };
 
+// Instance terminals are independent EnTT components. Build this read-only
+// table once before wrapping so parallel routing loops avoid sparse-set
+// resolution, while the entry's packed key preserves the entity generation.
+class InstancePinPointerTable
+{
+ public:
+  explicit InstancePinPointerTable(const eccdb::DesignNetlistStorage& netlist)
+  {
+    netlist.forEachInstancePin([this](eccdb::DesignInstancePinId id, const eccdb::DesignInstancePin& pin) {
+      const auto index = static_cast<std::size_t>(entt::to_entity(id.entity()));
+      if (index >= _values.size()) {
+        _values.resize(index + 1u);
+      }
+      _values[index] = Entry{.packed = id.packed(), .value = &pin};
+    });
+  }
+
+  [[nodiscard]] const eccdb::DesignInstancePin* tryGet(eccdb::DesignInstancePinId id) const noexcept
+  {
+    const auto index = static_cast<std::size_t>(entt::to_entity(id.entity()));
+    if (index >= _values.size()) {
+      return nullptr;
+    }
+    const auto& entry = _values[index];
+    return entry.packed == id.packed() ? entry.value : nullptr;
+  }
+
+  // All caller IDs come from the immutable design's own pin lists, which were
+  // used to populate this table. tryGet also verifies their generation.
+  [[nodiscard]] const eccdb::DesignInstancePin& get(eccdb::DesignInstancePinId id) const noexcept
+  {
+    return *tryGet(id);
+  }
+
+ private:
+  struct Entry
+  {
+    eccdb::DesignEntityUnderlying packed = 0;
+    const eccdb::DesignInstancePin* value = nullptr;
+  };
+
+  std::vector<Entry> _values;
+};
+
 struct WrapperEntityTables
 {
   template <typename DesignRegistry, typename LibraryRegistry>
-  WrapperEntityTables(const DesignRegistry& design_registry, const LibraryRegistry& library_registry)
-      : instances(design_registry), instance_pins(design_registry), io_pins(design_registry), nets(design_registry), masters(library_registry),
+  WrapperEntityTables(const eccdb::DesignNetlistStorage& netlist, const DesignRegistry& design_registry,
+                      const LibraryRegistry& library_registry)
+      : instance_pins(netlist), instances(design_registry), io_pins(design_registry), block_pins(design_registry), nets(design_registry), masters(library_registry),
         master_obs(library_registry), master_terms(library_registry), master_ports(library_registry)
   {
   }
 
+  InstancePinPointerTable instance_pins;
   EntityPointerTable<eccdb::DesignInstance, eccdb::DesignRegistry::registry_type> instances;
-  EntityPointerTable<eccdb::DesignInstancePin, eccdb::DesignRegistry::registry_type> instance_pins;
   EntityPointerTable<eccdb::DesignIoPin, eccdb::DesignRegistry::registry_type> io_pins;
+  EntityPointerTable<eccdb::DesignBlockPin, eccdb::DesignRegistry::registry_type> block_pins;
   EntityPointerTable<eccdb::DesignNet, eccdb::DesignRegistry::registry_type> nets;
   EntityPointerTable<eccdb::LibraryCellMaster, eccdb::LibraryRegistry::registry_type> masters;
   EntityPointerTable<eccdb::LibraryMasterObs, eccdb::LibraryRegistry::registry_type> master_obs;
@@ -782,7 +828,7 @@ NetSkipInfo analyzeNetSkip(const eccdb::DesignStore& design, const WrapperEntity
   const bool has_io_pin = io_pins.size() == 1;
   bool has_io_cell = false;
   if (instance_pins.size() == 1) {
-    const auto& instance_pin = entities.instance_pins.get(instance_pins.front().entity());
+    const auto& instance_pin = entities.instance_pins.get(instance_pins.front());
     const auto& instance = entities.instances.get(instance_pin.instance.entity());
     const auto& master = entities.masters.get(instance.master.entity());
     has_io_cell = isPadMaster(master.type);
@@ -793,14 +839,14 @@ NetSkipInfo analyzeNetSkip(const eccdb::DesignStore& design, const WrapperEntity
   }
 
   for (const auto pin_id : instance_pins) {
-    const auto& pin = entities.instance_pins.get(pin_id.entity());
+    const auto& pin = entities.instance_pins.get(pin_id);
     if (entities.master_terms.get(pin.master_term.entity()).ports.empty()) {
       continue;
     }
     ++info.port_pin_count;
   }
   for (const auto pin_id : io_pins) {
-    if (entities.io_pins.get(pin_id.entity()).ports.empty()) {
+    if (entities.io_pins.get(pin_id.entity()).pins.empty()) {
       continue;
     }
     ++info.port_pin_count;
@@ -1125,7 +1171,7 @@ void RTInterface::wrapDatabaseFromEnTT()
   // in its hot loops to avoid repeating storage-layer validity checks.
   const auto& design_registry = design.designRegistry().registry();
   const auto& library_registry = library.libraryRegistry().registry();
-  const WrapperEntityTables entities{design_registry, library_registry};
+  const WrapperEntityTables entities{design.netlistStorage(), design_registry, library_registry};
   const auto net_instance_pins_for = [&design_registry](eccdb::DesignNetId net) {
     const auto* pins = design_registry.try_get<const eccdb::DesignNetInstancePins>(net.entity());
     return pins == nullptr ? std::span<const eccdb::DesignInstancePinId>{}
@@ -1373,7 +1419,7 @@ void RTInterface::wrapDatabaseFromEnTT()
                                 .cut_offset = instance_cut_count,
                                 .cut_count = obs_geometry.obstacle_cut.size()};
       for (const auto pin_id : instance_pins) {
-        const auto& pin = entities.instance_pins.get(pin_id.entity());
+        const auto& pin = entities.instance_pins.get(pin_id);
         const auto& term = entities.master_terms.get(pin.master_term.entity());
         if (term.ports.empty()) {
           continue;
@@ -1489,17 +1535,20 @@ void RTInterface::wrapDatabaseFromEnTT()
       if (!netIsSkipping(design, entities, ioPinNet(io_pin), skip_cache, false)) {
         return;
       }
-      for (const auto& port : io_pin.ports) {
-        if (port.placement_status == eccdb::DesignPlacementStatus::kUnplaced
-            && (port.flags & eccdb::DesignIoPinPortFlag::kHasPlacement) == 0) {
+      for (const auto block_pin_id : io_pin.pins) {
+        const auto& block_pin = entities.block_pins.get(block_pin_id.entity());
+        if (block_pin.placement_status == eccdb::DesignPlacementStatus::kUnplaced
+            && (block_pin.flags & eccdb::DesignIoPinPortFlag::kHasPlacement) == 0) {
           continue;
         }
-        for (const auto& rect : port.rectangles) {
-          appendObstacle(sink, rect.layer, placeMasterRect(rect.rectangle, port.origin, port.orientation, 0, 0));
+        for (const auto& rect : block_pin.rectangles) {
+          appendObstacle(sink, rect.layer,
+                         placeMasterRect(rect.rectangle, block_pin.origin, block_pin.orientation, 0, 0));
         }
-        for (const auto& polygon : port.polygons) {
+        for (const auto& polygon : block_pin.polygons) {
           for (const auto& rect : eccdb::decomposePolygonToRectangles(polygon.points)) {
-            appendObstacle(sink, polygon.layer, placeMasterRect(rect, port.origin, port.orientation, 0, 0));
+            appendObstacle(sink, polygon.layer,
+                           placeMasterRect(rect, block_pin.origin, block_pin.orientation, 0, 0));
           }
         }
       }
@@ -1517,7 +1566,7 @@ void RTInterface::wrapDatabaseFromEnTT()
                                       cut_span.subspan(work.cut_offset, work.cut_count));
       instance_sink.append(*work.obs_geometry, work.origin);
       for (const auto pin_id : work.pins) {
-        const auto& pin = entities.instance_pins.get(pin_id.entity());
+        const auto& pin = entities.instance_pins.get(pin_id);
         const auto& term = entities.master_terms.get(pin.master_term.entity());
         if (term.ports.empty() || !netIsSkipping(design, entities, instancePinNet(pin), skip_cache, false)) {
           continue;
@@ -1659,7 +1708,7 @@ void RTInterface::wrapDatabaseFromEnTT()
         const auto instance_pins = net_instance_pins_for(net_id);
         const auto io_pins = net_io_pins_for(net_id);
         for (const auto pin_id : instance_pins) {
-          const auto& instance_pin = entities.instance_pins.get(pin_id.entity());
+          const auto& instance_pin = entities.instance_pins.get(pin_id);
           const auto& term = entities.master_terms.get(instance_pin.master_term.entity());
           if (term.ports.empty()) {
             continue;
@@ -1718,32 +1767,37 @@ void RTInterface::wrapDatabaseFromEnTT()
         }
         for (const auto pin_id : io_pins) {
           const auto& io_pin = entities.io_pins.get(pin_id.entity());
-          if (io_pin.ports.empty()) {
+          if (io_pin.pins.empty()) {
             continue;
           }
           Pin pin;
           pin.set_pin_name(io_pin.name);
           pin.set_is_core(false);
-          for (const auto& port : io_pin.ports) {
-            if (port.placement_status == eccdb::DesignPlacementStatus::kUnplaced
-                && (port.flags & eccdb::DesignIoPinPortFlag::kHasPlacement) == 0) {
+          for (const auto block_pin_id : io_pin.pins) {
+            const auto& block_pin = entities.block_pins.get(block_pin_id.entity());
+            if (block_pin.placement_status == eccdb::DesignPlacementStatus::kUnplaced
+                && (block_pin.flags & eccdb::DesignIoPinPortFlag::kHasPlacement) == 0) {
               continue;
             }
             routing_scratch.clear();
             cut_scratch.clear();
-            for (const auto& rect : port.rectangles) {
+            for (const auto& rect : block_pin.rectangles) {
               const auto* index = layers.find(rect.layer);
-              LayeredRect placed{.layer = rect.layer, .rect = placeMasterRect(rect.rectangle, port.origin, port.orientation, 0, 0), .index = index};
+              LayeredRect placed{.layer = rect.layer,
+                                 .rect = placeMasterRect(rect.rectangle, block_pin.origin, block_pin.orientation, 0, 0),
+                                 .index = index};
               if (index != nullptr && index->cut) {
                 cut_scratch.push_back(placed);
               } else {
                 routing_scratch.push_back(placed);
               }
             }
-            for (const auto& polygon : port.polygons) {
+            for (const auto& polygon : block_pin.polygons) {
               for (const auto& rect : eccdb::decomposePolygonToRectangles(polygon.points)) {
                 const auto* index = layers.find(polygon.layer);
-                LayeredRect placed{.layer = polygon.layer, .rect = placeMasterRect(rect, port.origin, port.orientation, 0, 0), .index = index};
+                LayeredRect placed{.layer = polygon.layer,
+                                   .rect = placeMasterRect(rect, block_pin.origin, block_pin.orientation, 0, 0),
+                                   .index = index};
                 if (index != nullptr && index->cut) {
                   cut_scratch.push_back(placed);
                 } else {
@@ -1752,8 +1806,8 @@ void RTInterface::wrapDatabaseFromEnTT()
               }
             }
             appendPinShapes(pin, routing_scratch, cut_scratch, layers);
-            for (const auto& via : port.vias) {
-              const auto placed = placeMasterPoint(via.origin, port.origin, port.orientation, 0, 0);
+            for (const auto& via : block_pin.vias) {
+              const auto placed = placeMasterPoint(via.origin, block_pin.origin, block_pin.orientation, 0, 0);
               appendViaToPin(pin, resolveViaShapes(design, tech, via.tech_via, via.design_via, placed), layers, via_boxes_scratch);
             }
           }
@@ -1788,7 +1842,7 @@ void RTInterface::wrapDatabaseFromEnTT()
         std::string driven_name;
         bool found_driven = false;
         for (const auto pin_id : instance_pins) {
-          const auto& instance_pin = entities.instance_pins.get(pin_id.entity());
+          const auto& instance_pin = entities.instance_pins.get(pin_id);
           const auto& term = entities.master_terms.get(instance_pin.master_term.entity());
           if (term.direction == eccdb::LibraryMasterTermDirection::kOutput
               || term.direction == eccdb::LibraryMasterTermDirection::kOutputTriState) {
@@ -1822,7 +1876,7 @@ void RTInterface::wrapDatabaseFromEnTT()
             driven_name = entities.io_pins.get(io_pins.front().entity()).name;
             found_driven = true;
           } else if (!instance_pins.empty()) {
-            const auto& instance_pin = entities.instance_pins.get(instance_pins.front().entity());
+            const auto& instance_pin = entities.instance_pins.get(instance_pins.front());
             driven_name = RTUTIL.getString(entities.instances.get(instance_pin.instance.entity()).name, ":",
                                            entities.master_terms.get(instance_pin.master_term.entity()).name);
             found_driven = true;

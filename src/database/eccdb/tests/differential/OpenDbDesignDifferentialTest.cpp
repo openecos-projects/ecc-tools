@@ -449,8 +449,9 @@ std::string pinViaName(const DesignStore& design, const DesignPinVia& via)
 std::vector<std::string> pinPortKeys(const DesignStore& design, const DesignIoPin& pin)
 {
   std::vector<std::string> result;
-  result.reserve(pin.ports.size());
-  for (const auto& port : pin.ports) {
+  result.reserve(pin.pins.size());
+  for (const auto id : pin.pins) {
+    const auto& port = design.netlistStorage().blockPin(id);
     std::vector<std::string> primitives;
     for (const auto& rectangle : port.rectangles) {
       const auto& layer = design.techRegistry().registry().get<const TechLayerInfo>(rectangle.layer.entity());

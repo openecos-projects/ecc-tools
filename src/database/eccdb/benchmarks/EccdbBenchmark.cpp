@@ -319,10 +319,11 @@ void benchmarkEntt(const Options& options, std::vector<Record>& records)
     }
     for (const auto pin_id : context.design->netlistStorage().ioPins()) {
       const auto& pin = context.design->netlistStorage().ioPin(pin_id);
-      for (const auto& port : pin.ports) {
+      for (const auto block_pin_id : context.design->netlistStorage().blockPins(pin_id)) {
+        const auto& block_pin = context.design->netlistStorage().blockPin(block_pin_id);
         ++work.records;
-        work.shapes += port.rectangles.size() + port.vias.size();
-        for (const auto& polygon : port.polygons) work.shapes += polygon.points.size();
+        work.shapes += block_pin.rectangles.size() + block_pin.vias.size();
+        for (const auto& polygon : block_pin.polygons) work.shapes += polygon.points.size();
       }
     }
     g_sink ^= work.records + work.shapes;

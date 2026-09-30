@@ -151,11 +151,12 @@ std::optional<int32_t> pointExtension(DesignWirePoint point)
 void ensureProjectablePathMetadata(DesignWirePathView path)
 {
   // RouteShape intentionally only models physical segment, via, and patch
-  // geometry. Keep the facade lossless by refusing path attributes that have
-  // no corresponding RouteShape field.
-  if (path.flags() != 0u || path.width() != 0 || path.mask() != 0u || !path.taperRule().empty() || !path.shape().empty()
-      || path.style() != 0) {
-    throw std::logic_error("route service cannot project path width, mask, taper, taper rule, shape, or style");
+  // geometry. TAPER has a RouteShape representation; every other path-level
+  // attribute below would be lost by a snapshot and must remain explicit.
+  constexpr uint32_t kProjectableFlags = DesignWirePathFlag::kTaper;
+  if ((path.flags() & ~kProjectableFlags) != 0u || path.width() != 0 || path.mask() != 0u || !path.taperRule().empty()
+      || !path.shape().empty() || path.style() != 0) {
+    throw std::logic_error("route service cannot project path width, mask, taper rule, shape, or style");
   }
 
   const auto points = path.points();
@@ -266,6 +267,7 @@ void visitPathShapes(const DesignStore& design, const TechStore& technology, Des
 {
   ensureProjectablePathMetadata(path);
   const auto points = path.points();
+  const bool tapered = (path.flags() & DesignWirePathFlag::kTaper) != 0u;
   AnchoredPrimitiveCursor vias{path.vias(), points.size(), "wire VIA anchor is out of range"};
   AnchoredPrimitiveCursor patches{path.rectangles(), points.size(), "wire patch anchor is out of range"};
 
@@ -280,7 +282,8 @@ void visitPathShapes(const DesignStore& design, const TechStore& technology, Des
                                    .end = point.position,
                                    .width = std::nullopt,
                                    .begin_extension = pointExtension(previous),
-                                   .end_extension = pointExtension(point)}});
+                                   .end_extension = pointExtension(point),
+                                   .tapered = tapered}});
     }
 
     if (vias.at(index) && patches.at(index)) {
@@ -291,14 +294,17 @@ void visitPathShapes(const DesignStore& design, const TechStore& technology, Des
       if (!patch.delta.isValid()) {
         throw std::logic_error("wire path has an invalid patch rectangle");
       }
-      sink(RouteShape{RoutePatch{.layer = current_layer, .rectangle = absolutePatch(patch, point.position)}});
+      sink(RouteShape{RoutePatch{.layer = current_layer, .rectangle = absolutePatch(patch, point.position), .tapered = tapered}});
     }
     while (vias.at(index)) {
       const auto via = vias.take();
       const auto definition = routeViaDefinition(via);
       const auto layers = routeViaLayers(design, technology, definition);
       const auto next_layer = nextRouteLayer(current_layer, layers);
-      sink(RouteShape{RouteVia{.definition = definition, .origin = point.position, .orientation = via.orientation}});
+      sink(RouteShape{RouteVia{.definition = definition,
+                               .origin = point.position,
+                               .orientation = via.orientation,
+                               .tapered = tapered}});
       current_layer = next_layer;
     }
   }
@@ -324,6 +330,9 @@ DesignWirePath canonicalPath(const DesignStore& design, const TechStore& technol
           }
           DesignWirePath path;
           path.layer = value.layer;
+          if (value.tapered) {
+            path.flags |= DesignWirePathFlag::kTaper;
+          }
           path.points = {DesignWirePoint{.position = value.begin}, DesignWirePoint{.position = value.end}};
           if (value.begin_extension.has_value()) {
             path.points[0].flags |= DesignWirePointFlag::kHasExtension;
@@ -354,6 +363,9 @@ DesignWirePath canonicalPath(const DesignStore& design, const TechStore& technol
               value.definition);
           DesignWirePath path;
           path.layer = layers.bottom;
+          if (value.tapered) {
+            path.flags |= DesignWirePathFlag::kTaper;
+          }
           path.points = {DesignWirePoint{.position = value.origin}};
           path.vias = {via};
           return path;
@@ -377,6 +389,9 @@ DesignWirePath canonicalPath(const DesignStore& design, const TechStore& technol
           }
           DesignWirePath path;
           path.layer = value.layer;
+          if (value.tapered) {
+            path.flags |= DesignWirePathFlag::kTaper;
+          }
           path.points = {DesignWirePoint{.position = anchor}};
           path.rectangles = {{.point_index = 0u, .delta = delta}};
           return path;
@@ -421,12 +436,6 @@ DesignWireId NetRouteService::replaceRouted(DesignNetId net, std::span<const Rou
   for (const auto wire_id : routing.wireIds(net)) {
     if (routing.wire(wire_id).status == DesignWireStatus::kRouted) {
       replaced_wires.push_back(wire_id);
-      // A replacement is allowed to change geometry, but it must not silently
-      // discard existing fields absent from RouteShape. Visit with a sink to
-      // validate the complete projection without retaining a second snapshot.
-      routing.forEachPath(wire_id, [&](DesignWirePathView path) {
-        visitPathShapes(_design, _technology, path, [](RouteShape) {});
-      });
     }
   }
 

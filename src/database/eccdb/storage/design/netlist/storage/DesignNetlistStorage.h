@@ -1,10 +1,13 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <entt/container/dense_map.hpp>
@@ -60,7 +63,31 @@ class DesignNetlistStorage
   // The returned view is invalidated when this net's connectivity changes.
   [[nodiscard]] std::span<const DesignInstancePinId> instancePins(DesignNetId net) const;
 
+  // OpenDB-aligned dbITerm spellings. The legacy InstancePin API remains a
+  // source-compatible view of the same independent entity storage.
+  // Like dbITerm lookup by OID, requires a live Term ID from this storage.
+  // The legacy instancePin accessor retains its checked-ID behavior.
+  [[nodiscard]] const DesignInstanceTerm& instanceTerm(DesignInstanceTermId id) const
+  {
+    return _registry.get<const DesignInstanceTerm>(id.entity());
+  }
+  [[nodiscard]] DesignInstanceTermId findInstanceTerm(DesignInstanceId instance, LibraryMasterTermId term) const
+  {
+    return findInstancePin(instance, term);
+  }
+  [[nodiscard]] DesignInstanceTermId findInstanceTerm(DesignInstanceId instance, std::string_view term_name) const
+  {
+    return findInstancePin(instance, term_name);
+  }
+  [[nodiscard]] std::span<const DesignInstanceTermId> instanceTerms(DesignInstanceId instance) const
+  {
+    return instancePins(instance);
+  }
+  [[nodiscard]] std::span<const DesignInstanceTermId> instanceTerms(DesignNetId net) const { return instancePins(net); }
+
   // Callbacks must not mutate instance-pin storage while it is being visited.
+  // Traversal follows the independent DesignInstancePin component's dense
+  // order, rather than the owner relation's per-instance order.
   template <typename Function>
   void forEachInstancePin(Function&& function) const
   {
@@ -70,7 +97,14 @@ class DesignNetlistStorage
     });
   }
 
-  [[nodiscard]] DesignIoPinId createIoPin(DesignIoPin pin);
+  template <typename Function>
+    requires std::invocable<Function&, DesignInstanceTermId, const DesignInstanceTerm&>
+  void forEachInstanceTerm(Function&& function) const
+  {
+    forEachInstancePin(std::forward<Function>(function));
+  }
+
+  [[nodiscard]] DesignIoPinId createIoPin(DesignIoPin pin, std::vector<DesignBlockPin> pins = {});
   void updateIoPin(DesignIoPinId id, DesignIoPin pin);
   [[nodiscard]] bool destroyIoPin(DesignIoPinId id);
   [[nodiscard]] bool contains(DesignIoPinId id) const;
@@ -80,6 +114,19 @@ class DesignNetlistStorage
   // The returned view is invalidated when this net's connectivity changes.
   [[nodiscard]] std::span<const DesignIoPinId> ioPins(DesignNetId net) const;
 
+  // OpenDB-aligned dbBTerm spellings. The legacy IoPin API remains a
+  // source-compatible view of the same block-term storage.
+  [[nodiscard]] DesignBlockTermId createBlockTerm(DesignBlockTerm term, std::vector<DesignBlockPin> pins = {})
+  {
+    return createIoPin(std::move(term), std::move(pins));
+  }
+  void updateBlockTerm(DesignBlockTermId id, DesignBlockTerm term) { updateIoPin(id, std::move(term)); }
+  [[nodiscard]] bool destroyBlockTerm(DesignBlockTermId id) { return destroyIoPin(id); }
+  [[nodiscard]] DesignBlockTermId findBlockTerm(std::string_view name) const { return findIoPin(name); }
+  [[nodiscard]] const DesignBlockTerm& blockTerm(DesignBlockTermId id) const { return ioPin(id); }
+  [[nodiscard]] std::vector<DesignBlockTermId> blockTerms() const { return ioPins(); }
+  [[nodiscard]] std::span<const DesignBlockTermId> blockTerms(DesignNetId net) const { return ioPins(net); }
+
   // Callbacks must not mutate IO-pin storage while it is being visited.
   template <typename Function>
   void forEachIoPin(Function&& function) const
@@ -87,6 +134,41 @@ class DesignNetlistStorage
     const auto view = _registry.view<const DesignIoPin>();
     view.each([&function](const auto entity, const DesignIoPin& pin) {
       std::invoke(function, DesignIoPinId{entity}, pin);
+    });
+  }
+
+  template <typename Function>
+    requires std::invocable<Function&, DesignBlockTermId, const DesignBlockTerm&>
+  void forEachBlockTerm(Function&& function) const
+  {
+    forEachIoPin(std::forward<Function>(function));
+  }
+
+  [[nodiscard]] bool contains(DesignBlockPinId id) const;
+  [[nodiscard]] const DesignBlockPin& blockPin(DesignBlockPinId id) const;
+  // The returned view is invalidated when this block term's Pin storage changes.
+  [[nodiscard]] std::span<const DesignBlockPinId> blockPins(DesignBlockTermId term) const;
+  [[nodiscard]] DesignBlockPinId createBlockPin(DesignBlockTermId term, DesignBlockPin pin);
+  void updateBlockPin(DesignBlockPinId id, DesignBlockPin pin);
+  [[nodiscard]] bool destroyBlockPin(DesignBlockPinId id);
+
+  // Callbacks must not mutate block-pin storage while it is being visited.
+  template <typename Function>
+    requires std::invocable<Function&, DesignBlockPinId, const DesignBlockPin&>
+  void forEachBlockPin(DesignBlockTermId term, Function&& function) const
+  {
+    for (const auto pin : blockPins(term)) {
+      std::invoke(function, pin, blockPin(pin));
+    }
+  }
+
+  template <typename Function>
+    requires std::invocable<Function&, DesignBlockPinId, const DesignBlockPin&>
+  void forEachBlockPin(Function&& function) const
+  {
+    const auto view = _registry.view<const DesignBlockPin>();
+    view.each([&function](const auto entity, const DesignBlockPin& pin) {
+      std::invoke(function, DesignBlockPinId{entity}, pin);
     });
   }
 
@@ -143,18 +225,21 @@ class DesignNetlistStorage
   [[nodiscard]] uint32_t instanceCount() const;
   [[nodiscard]] uint32_t instancePinCount() const;
   [[nodiscard]] uint32_t ioPinCount() const;
+  [[nodiscard]] uint32_t blockPinCount() const;
   [[nodiscard]] uint32_t netCount() const;
 
   // Name indexes are derived acceleration data. Rebuild them after a direct
   // registry restore or rollback; they are intentionally not serialized.
   void rebuildNameIndexes();
-  // Rebind runtime-only Library pointers after a binary restore.
+  // Rebind runtime-only Library IDs and pointers after a binary restore.
   void rebuildLibraryCaches();
 
  private:
   [[nodiscard]] DesignNetId createNet(DesignNet net, bool special);
   void validateInstance(const DesignInstance& instance, DesignInstanceId ignored = {}) const;
   void validateIoPin(const DesignIoPin& pin, DesignIoPinId ignored = {}) const;
+  void validateBlockPin(const DesignBlockPin& pin, DesignBlockPinId ignored = {}) const;
+  void validateBlockPinRelation(DesignBlockTermId term, const DesignBlockPin& pin, DesignBlockPinId ignored = {}) const;
   void validateNet(const DesignNet& net, bool special, DesignNetId ignored = {}) const;
   void validateNetOptions(DesignNetId net, const DesignNetOptions& options) const;
   [[nodiscard]] bool instanceNameInUse(std::string_view name, DesignInstanceId ignored = {}) const;
@@ -163,7 +248,10 @@ class DesignNetlistStorage
   void ensureInstance(DesignInstanceId id) const;
   void ensureInstancePin(DesignInstancePinId id) const;
   void ensureIoPin(DesignIoPinId id) const;
+  void ensureBlockPin(DesignBlockPinId id) const;
   void ensureNet(DesignNetId id) const;
+  [[nodiscard]] DesignInstancePin& uncheckedInstancePin(DesignInstancePinId id) noexcept;
+  [[nodiscard]] const DesignInstancePin& uncheckedInstancePin(DesignInstancePinId id) const noexcept;
 
   registry_type& _registry;
   const TechRegistry& _tech_registry;

@@ -31,7 +31,7 @@ namespace eccdb::test {
 
 struct DesignSemanticSnapshot
 {
-  std::array<std::size_t, 15> component_counts{};
+  std::array<std::size_t, 16> component_counts{};
   std::string global;
   std::vector<std::string> rows;
   std::vector<std::string> track_grids;
@@ -405,12 +405,12 @@ inline std::vector<std::string> instancePinKeys(const DesignStore& design)
   return result;
 }
 
-inline std::string pinRectangleKey(const DesignStore& design, const DesignPinRectangle& rectangle, const DesignIoPinPort& port)
+inline std::string pinRectangleKey(const DesignStore& design, const DesignPinRectangle& rectangle, const DesignBlockPin& pin)
 {
   SemanticKey key;
   key.text("rectangle");
   key.text(layerName(design, rectangle.layer));
-  key.rectangle(transformRectangle(rectangle.rectangle, port.orientation, port.origin));
+  key.rectangle(transformRectangle(rectangle.rectangle, pin.orientation, pin.origin));
   key.unsignedValue(rectangle.flags);
   key.unsignedValue(rectangle.mask);
   key.signedValue(rectangle.spacing);
@@ -418,7 +418,7 @@ inline std::string pinRectangleKey(const DesignStore& design, const DesignPinRec
   return key.str();
 }
 
-inline std::string pinPolygonKey(const DesignStore& design, const DesignPinPolygon& polygon, const DesignIoPinPort& port)
+inline std::string pinPolygonKey(const DesignStore& design, const DesignPinPolygon& polygon, const DesignBlockPin& pin)
 {
   SemanticKey key;
   key.text("polygon");
@@ -426,7 +426,7 @@ inline std::string pinPolygonKey(const DesignStore& design, const DesignPinPolyg
   std::vector<Point> points;
   points.reserve(polygon.points.size());
   for (const auto point : polygon.points) {
-    points.push_back(transformPoint(point, port.orientation, port.origin));
+    points.push_back(transformPoint(point, pin.orientation, pin.origin));
   }
   key.points(points);
   key.unsignedValue(polygon.flags);
@@ -436,12 +436,12 @@ inline std::string pinPolygonKey(const DesignStore& design, const DesignPinPolyg
   return key.str();
 }
 
-inline std::string pinViaKey(const DesignStore& design, const DesignPinVia& via, const DesignIoPinPort& port)
+inline std::string pinViaKey(const DesignStore& design, const DesignPinVia& via, const DesignBlockPin& pin)
 {
   SemanticKey key;
   key.text("via");
   key.text(viaName(design, via.tech_via, via.design_via));
-  key.point(transformPoint(via.origin, port.orientation, port.origin));
+  key.point(transformPoint(via.origin, pin.orientation, pin.origin));
   key.unsignedValue(via.flags);
   key.unsignedValue(via.top_mask);
   key.unsignedValue(via.cut_mask);
@@ -449,27 +449,27 @@ inline std::string pinViaKey(const DesignStore& design, const DesignPinVia& via,
   return key.str();
 }
 
-inline std::string pinPortKey(const DesignStore& design, const DesignIoPinPort& port)
+inline std::string blockPinKey(const DesignStore& design, const DesignBlockPin& pin)
 {
   SemanticKey key;
-  key.unsignedValue(port.flags & ~DesignIoPinPortFlag::kExplicit);
-  key.unsignedValue(static_cast<uint8_t>(port.placement_status));
+  key.unsignedValue(pin.flags & ~DesignIoPinPortFlag::kExplicit);
+  key.unsignedValue(static_cast<uint8_t>(pin.placement_status));
   std::vector<std::string> primitives;
-  primitives.reserve(port.rectangles.size() + port.polygons.size() + port.vias.size());
-  for (const auto& rectangle : port.rectangles) {
-    primitives.push_back(pinRectangleKey(design, rectangle, port));
+  primitives.reserve(pin.rectangles.size() + pin.polygons.size() + pin.vias.size());
+  for (const auto& rectangle : pin.rectangles) {
+    primitives.push_back(pinRectangleKey(design, rectangle, pin));
   }
-  for (const auto& polygon : port.polygons) {
-    primitives.push_back(pinPolygonKey(design, polygon, port));
+  for (const auto& polygon : pin.polygons) {
+    primitives.push_back(pinPolygonKey(design, polygon, pin));
   }
-  for (const auto& via : port.vias) {
-    primitives.push_back(pinViaKey(design, via, port));
+  for (const auto& via : pin.vias) {
+    primitives.push_back(pinViaKey(design, via, pin));
   }
-  if (primitives.empty() && (port.flags & DesignIoPinPortFlag::kHasPlacement) != 0u) {
+  if (primitives.empty() && (pin.flags & DesignIoPinPortFlag::kHasPlacement) != 0u) {
     SemanticKey location;
     location.text("location");
-    location.point(port.origin);
-    location.unsignedValue(static_cast<uint8_t>(port.orientation));
+    location.point(pin.origin);
+    location.unsignedValue(static_cast<uint8_t>(pin.orientation));
     primitives.push_back(location.str());
   }
   appendKeys(key, std::move(primitives));
@@ -489,12 +489,12 @@ inline std::vector<std::string> ioPinKeys(const DesignStore& design, bool defaul
     const auto use = default_unspecified_use_to_signal && pin.use == DesignSignalUse::kNone ? DesignSignalUse::kSignal : pin.use;
     key.unsignedValue(static_cast<uint8_t>(use));
     key.unsignedValue(pin.flags & ~DesignIoPinFlag::kSpecial);
-    std::vector<std::string> ports;
-    ports.reserve(pin.ports.size());
-    for (const auto& port : pin.ports) {
-      ports.push_back(pinPortKey(design, port));
+    std::vector<std::string> block_pins;
+    block_pins.reserve(pin.pins.size());
+    for (const auto block_pin : pin.pins) {
+      block_pins.push_back(blockPinKey(design, design.netlistStorage().blockPin(block_pin)));
     }
-    appendKeys(key, std::move(ports));
+    appendKeys(key, std::move(block_pins));
     result.push_back(key.str());
   }
   sortKeys(result);
@@ -936,7 +936,8 @@ inline DesignSemanticSnapshot makeDesignSemanticSnapshot(const DesignStore& desi
       .component_counts
       = {detail::componentCount<DesignRow>(design), detail::componentCount<DesignTrackGrid>(design),
          detail::componentCount<DesignGCellGrid>(design), detail::componentCount<DesignInstance>(design),
-         detail::componentCount<DesignInstancePin>(design), detail::componentCount<DesignIoPin>(design), detail::semanticNetCount(design),
+         design.netlistStorage().instancePinCount(), detail::componentCount<DesignIoPin>(design), design.netlistStorage().blockPinCount(),
+         detail::semanticNetCount(design),
          detail::componentCount<DesignWire>(design), detail::componentCount<DesignVia>(design),
          detail::componentCount<DesignNonDefaultRule>(design), detail::componentCount<DesignRegion>(design),
          detail::componentCount<DesignGroup>(design), detail::componentCount<DesignBlockage>(design),

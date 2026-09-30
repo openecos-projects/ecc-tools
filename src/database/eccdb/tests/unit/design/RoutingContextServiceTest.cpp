@@ -22,6 +22,7 @@ TEST_F(DesignStorageTest, RoutingContextServiceReadsAndWritesNetRoutingContext)
   service.replaceTrackAssignments(net,
                                   {{.layer = routing_layer, .box = {0, 50, 100, 50}},
                                    {.layer = routing_layer, .box = {100, 50, 100, 50}}});
+  service.appendTrackAssignments(net, {{.layer = routing_layer, .box = {0, 50, 100, 50}}});
 
   EXPECT_TRUE(service.hasGuides(net));
   ASSERT_EQ(service.guides(net).size(), 1u);
@@ -29,8 +30,9 @@ TEST_F(DesignStorageTest, RoutingContextServiceReadsAndWritesNetRoutingContext)
   EXPECT_EQ(service.guides(net).front().flags,
             DesignRouteGuideFlag::kCongested | DesignRouteGuideFlag::kConnectedToTerm);
   EXPECT_TRUE(service.hasTrackAssignments(net));
-  ASSERT_EQ(service.trackAssignments(net).size(), 2u);
+  ASSERT_EQ(service.trackAssignments(net).size(), 3u);
   EXPECT_EQ(service.trackAssignments(net).front().box, (Rect{0, 50, 100, 50}));
+  EXPECT_EQ(service.trackAssignments(net).back().box, (Rect{0, 50, 100, 50}));
 
   service.clearGuides(net);
   service.clearTrackAssignments(net);
@@ -46,7 +48,7 @@ TEST_F(DesignStorageTest, RoutingContextServiceManagesCandidateGroupsSelectionsA
   const auto instance = design.netlistStorage().createInstance(createInstance("u1", {100, 200}));
   const auto instance_pin = design.netlistStorage().findInstancePin(instance, input_term);
   const auto io_pin = design.netlistStorage().createIoPin(
-      DesignIoPin{.name = "IO", .ports = {{.flags = DesignIoPinPortFlag::kExplicit}}});
+      DesignBlockTerm{.name = "IO"}, {{.flags = DesignIoPinPortFlag::kExplicit}});
   RoutingContextService service(design);
 
   const auto master_candidate = DesignPinAccessPoint{.point = {10, 20},
@@ -60,8 +62,10 @@ TEST_F(DesignStorageTest, RoutingContextServiceManagesCandidateGroupsSelectionsA
 
   const auto io_candidate = DesignPinAccessPoint{.point = {500, 600}, .layer = routing_layer};
   service.setIoPinPortCandidateGroup(io_pin, 0u, 3u, {io_candidate});
+  service.appendIoPinPortCandidatePoints(io_pin, 0u, 3u, {io_candidate});
   EXPECT_TRUE(service.hasIoPinPortCandidateGroup(io_pin, 0u, 3u));
   ASSERT_EQ(service.ioPinPortCandidateGroups(io_pin, 0u).size(), 1u);
+  ASSERT_EQ(service.ioPinPortCandidateGroup(io_pin, 0u, 3u).points.size(), 2u);
   EXPECT_EQ(service.ioPinPortCandidateGroup(io_pin, 0u, 3u).points.front().point, (Point{500, 600}));
 
   EXPECT_THROW(service.setInstancePinAccessGroup(instance, 8u), std::invalid_argument);

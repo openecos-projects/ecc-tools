@@ -233,6 +233,7 @@ class TechLefWriter
 
     _output << "VERSION 5.8 ;\n\n";
     writeUnits();
+    writeUseMinSpacing();
     writeManufacturingGrid();
     writeLayers();
     writeViaRuleGenerates();
@@ -283,6 +284,20 @@ class TechLefWriter
       return;
     }
     _output << "MANUFACTURINGGRID " << distance(_database.globalStorage().getManufacturingGrid().value) << " ;\n\n";
+  }
+
+  void writeUseMinSpacing()
+  {
+    const auto& globals = _database.globalStorage();
+    if (globals.hasUseMinSpacingObs()) {
+      _output << "USEMINSPACING OBS " << (globals.getUseMinSpacingObs() ? "ON" : "OFF") << " ;\n";
+    }
+    if (globals.hasUseMinSpacingPin()) {
+      _output << "USEMINSPACING PIN " << (globals.getUseMinSpacingPin() ? "ON" : "OFF") << " ;\n";
+    }
+    if (globals.hasUseMinSpacingObs() || globals.hasUseMinSpacingPin()) {
+      _output << '\n';
+    }
   }
 
   void writeMaxViaStack()

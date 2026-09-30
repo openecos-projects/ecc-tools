@@ -1,6 +1,7 @@
 add_library(eccdb_service
   context/RoutingContextService.cpp
   query/PhysicalDesignService.cpp
+  routing/DesignViaService.cpp
   routing/NetRouteService.cpp
 )
 eccdb_storage_target(eccdb_service)

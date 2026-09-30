@@ -16,6 +16,9 @@
 #include "design/global/model/DesignGlobalComponents.h"
 #include "design/netlist/model/NetlistComponents.h"
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
+#include "design/routing/component/RoutingComponents.h"
+#include "design/routing/component/WireRouting.h"
+#include "design/routing/view/WireRoutingView.h"
 #include "design/via/component/ViaComponents.h"
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/cell_master/model/MasterObsComponents.h"
@@ -25,6 +28,7 @@
 #include "tech/non_default_rule/model/NonDefaultRuleComponents.h"
 #include "tech/routing_layer/model/RoutingLayerComponents.h"
 #include "tech/via_master/model/ViaMasterComponents.h"
+#include "tech/via_rule_generate/model/ViaRuleGenerateComponents.h"
 
 namespace eccdb {
 
@@ -106,6 +110,26 @@ struct PhysicalNdrReference
   [[nodiscard]] explicit operator bool() const noexcept { return static_cast<bool>(tech_rule) || static_cast<bool>(design_rule); }
 };
 
+// Routing-layer endpoints of a concrete VIA definition. The service returns
+// them in technology stack order and only for VIAs DRT can use as a routing
+// transition.
+struct PhysicalRoutingViaLayers
+{
+  TechRoutingLayerId bottom;
+  TechRoutingLayerId top;
+};
+
+// These visitors borrow EccDB route storage. In particular, DesignWirePathView
+// contains spans into one DesignWire and net-geometry callbacks receive direct
+// references to the stored values. They are valid only during the callback;
+// callers must not mutate routing storage while visiting them.
+struct PhysicalNetGeometryVisitor
+{
+  std::function<void(const DesignNetRectangle&)> rectangle;
+  std::function<void(const DesignNetPolygon&)> polygon;
+  std::function<void(const DesignNetVia&)> via;
+};
+
 // Read-only, adapter-facing view over the three EccDB storage roots. It does
 // not expose ODB/iRT types and does not cache pointers into mutable storage.
 class PhysicalDesignService
@@ -117,8 +141,13 @@ class PhysicalDesignService
   using TrackGridVisitor = std::function<void(DesignTrackGridId, const DesignTrackGrid&)>;
   using GCellGridVisitor = std::function<void(DesignGCellGridId, const DesignGCellGrid&)>;
   using NetVisitor = std::function<void(DesignNetId, const DesignNet&)>;
+  using NetWireVisitor = std::function<void(DesignWireId, const DesignWire&)>;
+  using NetWirePathVisitor = std::function<void(DesignWireId, const DesignWire&, DesignWirePathView)>;
   using RoutingBlockageVisitor = std::function<void(DesignBlockageId, const DesignBlockage&)>;
   using TechViaVisitor = std::function<void(TechViaMasterId, const TechViaMaster&, const TechViaGeometry&)>;
+  using TechViaRuleGenerateVisitor
+      = std::function<void(TechViaRuleGenerateId, const TechViaRuleGenerate&, const TechViaRuleGenerateBottomLayer&,
+                           const TechViaRuleGenerateCutLayer&, const TechViaRuleGenerateTopLayer&)>;
   using DesignViaVisitor = std::function<void(DesignViaId, const DesignVia&)>;
 
   PhysicalDesignService(const TechStore& tech, const LibraryStore& library, const DesignStore& design);
@@ -155,19 +184,46 @@ class PhysicalDesignService
   // name. Requires a live instance and library cache, with master-term
   // membership/order unchanged since instance creation.
   [[nodiscard]] DesignInstancePinId findInstancePin(DesignInstanceId instance, std::string_view master_term_name) const;
+  // OpenDB-aligned dbITerm spelling. InstancePin remains a compatibility
+  // alias for the same independent design-term entity.
+  [[nodiscard]] DesignInstanceTermId findInstanceTerm(DesignInstanceId instance, std::string_view master_term_name) const;
   [[nodiscard]] DesignIoPinId findIoPin(std::string_view name) const;
+  // OpenDB-aligned dbBTerm spelling. IoPin remains a compatibility alias for
+  // the same block-term entity.
+  [[nodiscard]] DesignBlockTermId findBlockTerm(std::string_view name) const;
   [[nodiscard]] LibraryCellMasterId findMaster(std::string_view name) const;
   [[nodiscard]] LibraryMasterTermId findMasterTerm(LibraryCellMasterId master, std::string_view name) const;
   // Preserves source LEF PORT order. The span is invalidated if the term's
   // port storage is changed.
   [[nodiscard]] std::span<const LibraryMasterPortId> masterPorts(LibraryMasterTermId term) const;
+  // OpenDB-aligned dbMPin spelling. MasterPort remains a compatibility alias
+  // for the same independent library-pin entity.
+  [[nodiscard]] std::span<const LibraryMasterPinId> masterPins(LibraryMasterTermId term) const;
+  // Preserves source DEF BPin order. The span is invalidated if the block
+  // term's pin storage is changed.
+  [[nodiscard]] std::span<const DesignBlockPinId> blockPins(DesignBlockTermId term) const;
+  using BlockPinVisitor = std::function<void(DesignBlockPinId, const DesignBlockPin&)>;
+  void forEachBlockPin(DesignBlockTermId term, const BlockPinVisitor& visitor) const;
   // Requires intact pin relations and live cached instance/master-term objects;
   // the read path does not revalidate them.
   void forEachNetPin(DesignNetId net, const PhysicalNetPinVisitor& visitor) const;
   [[nodiscard]] PhysicalNdrReference nonDefaultRule(DesignNetId net) const;
+  [[nodiscard]] bool netHasJumpers(DesignNetId net) const;
+  [[nodiscard]] bool isNetConnectedByAbutment(DesignNetId net) const;
+  [[nodiscard]] std::optional<std::string_view> nonDefaultRuleName(DesignNetId net) const;
+
+  void forEachNetWire(DesignNetId net, const NetWireVisitor& visitor) const;
+  void forEachNetWirePath(DesignNetId net, const NetWirePathVisitor& visitor) const;
+  void forEachNetGeometry(DesignNetId net, const PhysicalNetGeometryVisitor& visitor) const;
+  [[nodiscard]] std::string_view viaName(TechViaMasterId tech_via, DesignViaId design_via) const;
+  [[nodiscard]] PhysicalRoutingViaLayers routingViaLayers(TechViaMasterId tech_via, DesignViaId design_via) const;
 
   [[nodiscard]] bool isPlaced(DesignInstanceId instance) const;
   void forEachPlacedInstancePinGeometry(DesignInstancePinId pin, const PhysicalGeometryVisitor& visitor) const;
+  // Visits one OpenDB dbBPin / DEF PORT. The geometry is transformed from the
+  // BPin-local coordinates using only this BPin's placement.
+  void forEachBlockPinGeometry(DesignBlockPinId pin, const PhysicalGeometryVisitor& visitor) const;
+  // Compatibility aggregate over every dbBPin owned by one dbBTerm.
   void forEachIoPinGeometry(DesignIoPinId pin, const PhysicalGeometryVisitor& visitor) const;
   void forEachPlacedMasterObstructionGeometry(DesignInstanceId instance, const PhysicalGeometryVisitor& visitor) const;
 
@@ -175,6 +231,7 @@ class PhysicalDesignService
   void forEachRoutingBlockageGeometry(DesignBlockageId blockage, const PhysicalGeometryVisitor& visitor) const;
 
   void forEachTechVia(const TechViaVisitor& visitor) const;
+  void forEachTechViaRuleGenerate(const TechViaRuleGenerateVisitor& visitor) const;
   void forEachDesignVia(const DesignViaVisitor& visitor) const;
   void forEachTechViaGeometry(TechViaMasterId via, const PhysicalGeometryVisitor& visitor) const;
   void forEachTechViaGeometry(TechViaMasterId via, Point origin, DesignOrientation orientation,
