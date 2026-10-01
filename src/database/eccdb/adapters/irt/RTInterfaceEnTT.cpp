@@ -104,48 +104,38 @@ class EntityPointerTable
   std::vector<const Component*> _values;
 };
 
-// Instance terminals are independent EnTT components. Build this read-only
-// table once before wrapping so parallel routing loops avoid sparse-set
-// resolution, while the entry's packed key preserves the entity generation.
+// Instance terminals are owned by their instance component. Build this
+// read-only table once before wrapping so parallel routing loops resolve the
+// opaque monotonic terminal ID without a nested map lookup.
 class InstancePinPointerTable
 {
  public:
   explicit InstancePinPointerTable(const eccdb::DesignNetlistStorage& netlist)
   {
     netlist.forEachInstancePin([this](eccdb::DesignInstancePinId id, const eccdb::DesignInstancePin& pin) {
-      const auto index = static_cast<std::size_t>(entt::to_entity(id.entity()));
+      const auto index = static_cast<std::size_t>(id.packed());
       if (index >= _values.size()) {
         _values.resize(index + 1u);
       }
-      _values[index] = Entry{.packed = id.packed(), .value = &pin};
+      _values[index] = &pin;
     });
   }
 
   [[nodiscard]] const eccdb::DesignInstancePin* tryGet(eccdb::DesignInstancePinId id) const noexcept
   {
-    const auto index = static_cast<std::size_t>(entt::to_entity(id.entity()));
-    if (index >= _values.size()) {
-      return nullptr;
-    }
-    const auto& entry = _values[index];
-    return entry.packed == id.packed() ? entry.value : nullptr;
+    const auto index = static_cast<std::size_t>(id.packed());
+    return index < _values.size() ? _values[index] : nullptr;
   }
 
   // All caller IDs come from the immutable design's own pin lists, which were
-  // used to populate this table. tryGet also verifies their generation.
+  // used to populate this table.
   [[nodiscard]] const eccdb::DesignInstancePin& get(eccdb::DesignInstancePinId id) const noexcept
   {
-    return *tryGet(id);
+    return *_values[static_cast<std::size_t>(id.packed())];
   }
 
  private:
-  struct Entry
-  {
-    eccdb::DesignEntityUnderlying packed = 0;
-    const eccdb::DesignInstancePin* value = nullptr;
-  };
-
-  std::vector<Entry> _values;
+  std::vector<const eccdb::DesignInstancePin*> _values;
 };
 
 struct WrapperEntityTables

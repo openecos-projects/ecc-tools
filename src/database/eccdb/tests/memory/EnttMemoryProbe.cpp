@@ -11,6 +11,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "design/DesignStore.h"
@@ -69,6 +70,16 @@ struct MemoryBreakdown
   uint64_t wire_component_capacity_bytes = 0;
   uint64_t instance_component_capacity_bytes = 0;
   uint64_t instance_pin_component_capacity_bytes = 0;
+  uint64_t instance_term_record_count = 0;
+  // EnTT dense_map does not expose packed-vector capacity. These retain the
+  // public lower bound (size), rather than assuming a private layout.
+  uint64_t instance_term_record_capacity_lower_bound = 0;
+  uint64_t instance_term_record_capacity_bytes_lower_bound = 0;
+  uint64_t instance_term_record_bucket_count = 0;
+  uint64_t instance_term_record_bucket_bytes_lower_bound = 0;
+  uint64_t instance_term_id_vector_capacity_bytes = 0;
+  uint64_t instance_term_pointer_table_capacity = 0;
+  uint64_t instance_term_pointer_table_capacity_bytes = 0;
   uint64_t net_component_capacity_bytes = 0;
   uint64_t wire_path_count = 0;
   uint64_t wire_path_capacity = 0;
@@ -233,7 +244,6 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
 
   result.wire_component_capacity_bytes = componentCapacity<DesignWire>(registry) * sizeof(DesignWire);
   result.instance_component_capacity_bytes = componentCapacity<DesignInstance>(registry) * sizeof(DesignInstance);
-  result.instance_pin_component_capacity_bytes = componentCapacity<DesignInstancePin>(registry) * sizeof(DesignInstancePin);
   result.net_component_capacity_bytes = componentCapacity<DesignNet>(registry) * sizeof(DesignNet);
 
   addComponentStorage<DesignRoot>(registry, result);
@@ -245,7 +255,6 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   addComponentStorage<DesignGCellGrid>(registry, result);
   addComponentStorage<DesignInstance>(registry, result);
   addComponentStorage<DesignInstancePins>(registry, result);
-  addComponentStorage<DesignInstancePin>(registry, result);
   addComponentStorage<DesignIoPin>(registry, result);
   addComponentStorage<DesignBlockPin>(registry, result);
   addComponentStorage<DesignNet>(registry, result);
@@ -316,9 +325,30 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   }
   for (const auto entity : registry.view<const DesignInstancePins>()) {
     const auto& pins = registry.get<const DesignInstancePins>(entity);
-    result.netlist_nested_capacity_bytes += pins.values.capacity() * sizeof(DesignInstancePinId)
-                                          + pins.term_ids.capacity() * sizeof(LibraryMasterTermId);
+    using InstanceTermRecordMap = std::remove_cvref_t<decltype(pins.records)>;
+    const auto record_capacity_lower_bound = static_cast<uint64_t>(pins.records.size());
+    const auto bucket_count = static_cast<uint64_t>(pins.records.bucket_count());
+    const auto record_capacity_bytes_lower_bound
+        = record_capacity_lower_bound * (sizeof(std::size_t) + sizeof(typename InstanceTermRecordMap::value_type));
+    const auto bucket_bytes_lower_bound = bucket_count * sizeof(std::size_t);
+    const auto id_vector_capacity_bytes = static_cast<uint64_t>(pins.values.capacity()) * sizeof(DesignInstancePinId);
+    result.instance_term_record_count += pins.records.size();
+    result.instance_term_record_capacity_lower_bound += record_capacity_lower_bound;
+    result.instance_term_record_capacity_bytes_lower_bound += record_capacity_bytes_lower_bound;
+    result.instance_term_record_bucket_count += bucket_count;
+    result.instance_term_record_bucket_bytes_lower_bound += bucket_bytes_lower_bound;
+    result.instance_term_id_vector_capacity_bytes += id_vector_capacity_bytes;
+    result.netlist_nested_capacity_bytes
+        += record_capacity_bytes_lower_bound + bucket_bytes_lower_bound + id_vector_capacity_bytes;
+    for (const auto& [name, unused] : pins.records) {
+      static_cast<void>(unused);
+      result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(name);
+    }
   }
+  result.instance_term_pointer_table_capacity = design.netlistStorage().instanceTermPointerTableCapacity();
+  result.instance_term_pointer_table_capacity_bytes
+      = result.instance_term_pointer_table_capacity * sizeof(const DesignInstanceTerm*);
+  result.netlist_nested_capacity_bytes += result.instance_term_pointer_table_capacity_bytes;
   for (const auto entity : registry.view<const DesignNetInstancePins>()) {
     result.netlist_nested_capacity_bytes
         += registry.get<const DesignNetInstancePins>(entity).values.capacity() * sizeof(DesignInstancePinId);
@@ -469,6 +499,16 @@ void printMemoryBreakdown(const MemoryBreakdown& value)
             << ",\"wire_component_capacity_bytes\":" << value.wire_component_capacity_bytes
             << ",\"instance_component_capacity_bytes\":" << value.instance_component_capacity_bytes
             << ",\"instance_pin_component_capacity_bytes\":" << value.instance_pin_component_capacity_bytes
+            << ",\"instance_term_record_count\":" << value.instance_term_record_count
+            << ",\"instance_term_record_capacity_lower_bound\":" << value.instance_term_record_capacity_lower_bound
+            << ",\"instance_term_record_capacity_bytes_lower_bound\":"
+            << value.instance_term_record_capacity_bytes_lower_bound
+            << ",\"instance_term_record_bucket_count\":" << value.instance_term_record_bucket_count
+            << ",\"instance_term_record_bucket_bytes_lower_bound\":"
+            << value.instance_term_record_bucket_bytes_lower_bound
+            << ",\"instance_term_id_vector_capacity_bytes\":" << value.instance_term_id_vector_capacity_bytes
+            << ",\"instance_term_pointer_table_capacity\":" << value.instance_term_pointer_table_capacity
+            << ",\"instance_term_pointer_table_capacity_bytes\":" << value.instance_term_pointer_table_capacity_bytes
             << ",\"net_component_capacity_bytes\":" << value.net_component_capacity_bytes
             << ",\"wire_path_count\":" << value.wire_path_count << ",\"wire_path_capacity\":" << value.wire_path_capacity
             << ",\"wire_path_capacity_bytes\":" << value.wire_path_capacity_bytes

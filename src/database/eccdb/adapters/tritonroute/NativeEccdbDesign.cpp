@@ -79,6 +79,11 @@ template <typename Id>
   return static_cast<uint32_t>(id.packed());
 }
 
+[[nodiscard]] uint64_t instanceTermKey(eccdb::DesignInstancePinId id)
+{
+  return static_cast<uint64_t>(id.packed());
+}
+
 // EnTT's view iteration follows dense storage order, which can differ after
 // component insertion from the DEF/LEF object creation order. The packed ID is
 // the stable source-order key for the append-only import data.
@@ -1103,7 +1108,7 @@ void setRoutingBlockages(const eccdb::PhysicalDesignService& physical, const frD
 
 struct ImportedObjects
 {
-  entt::dense_map<uint32_t, frInstTerm*> instance_terms;
+  entt::dense_map<uint64_t, frInstTerm*> instance_terms;
   entt::dense_map<uint32_t, frBTerm*> io_terms;
   entt::dense_map<uint32_t, frNet*> nets;
 };
@@ -1144,7 +1149,7 @@ void setInstances(const eccdb::PhysicalDesignService& physical,
       auto term = std::make_unique<frInstTerm>(instance.get(), master->getTerms()[index].get());
       term->setIndexInOwner(checkedId(index, logger, "instance terminal index"));
       term->setAPSize(checkedId(master->getTerms()[index]->getPins().size(), logger, "instance terminal PORT count"));
-      const auto [unused, inserted] = objects.instance_terms.emplace(entityKey(pin_id), term.get());
+      const auto [unused, inserted] = objects.instance_terms.emplace(instanceTermKey(pin_id), term.get());
       if (!inserted) {
         fail(logger, 35, "EccDB instance-pin id is duplicated");
       }
@@ -1524,7 +1529,7 @@ void connectNets(const eccdb::PhysicalDesignService& physical, ImportedObjects& 
       }
     }
     for (const auto pin_id : instance_pins) {
-      const auto found = objects.instance_terms.find(entityKey(pin_id));
+      const auto found = objects.instance_terms.find(instanceTermKey(pin_id));
       if (found == objects.instance_terms.end() || found->second->getNet() != nullptr) {
         fail(logger, 102, "EccDB NET references an invalid or multiply-connected instance pin");
       }
@@ -1540,7 +1545,7 @@ void connectNets(const eccdb::PhysicalDesignService& physical, ImportedObjects& 
       if (!owner) {
         continue;
       }
-      const auto term = objects.instance_terms.find(entityKey(pin_id));
+      const auto term = objects.instance_terms.find(instanceTermKey(pin_id));
       const auto net = objects.nets.find(entityKey(owner));
       if (term == objects.instance_terms.end() || net == objects.nets.end() || term->second->getNet() != net->second) {
         fail(logger, 103, "EccDB NET reverse instance-pin connectivity is inconsistent");

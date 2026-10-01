@@ -5,7 +5,9 @@
 namespace eccdb {
 
 // Strong id exposed by the eccdb storage layer. The underlying value is an
-// EnTT entity identifier owned by exactly one registry domain.
+// EnTT entity identifier owned by exactly one registry domain, except the
+// embedded InstanceTerm experiment, which resolves this value through netlist
+// storage as an opaque ID rather than through a registry.
 template <typename Entity, typename Component>
 class EnttId
 {

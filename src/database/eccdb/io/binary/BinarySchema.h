@@ -50,34 +50,33 @@ void binaryArchive(Archive& archive, TechConductorLayerRef& value)
   archive(value.kind, value.entity);
 }
 
-// Instance-local library lookup is a runtime cache; the independently stored
-// DesignInstancePin entities carry the pin payload.
+// Instance terms are owned by their instance component. The ordered opaque ID
+// relation and name-keyed records are canonical; pointer caches in each term
+// remain runtime-only.
 template <typename Archive>
 void binaryArchive(Archive& archive, const DesignInstancePins& value)
 {
-  archive(value.values);
+  archive(value.values, value.records);
 }
 
 template <typename Archive>
 void binaryArchive(Archive& archive, DesignInstancePins& value)
 {
-  archive(value.values);
-  value.term_ids.clear();
-  value.master = {};
-  value.master_term_name_index = nullptr;
+  archive(value.values, value.records);
 }
 
-// Only the four IDs are persisted; instance and term pointers are runtime caches.
+// Persistent IDs and net relations are retained; instance and master-term
+// pointers are runtime caches rebuilt after load.
 template <typename Archive>
 void binaryArchive(Archive& archive, const DesignInstancePin& value)
 {
-  archive(value.instance, value.master_term, value.net, value.special_net);
+  archive(value.instance, value.master_term, value.net, value.special_net, value.id);
 }
 
 template <typename Archive>
 void binaryArchive(Archive& archive, DesignInstancePin& value)
 {
-  archive(value.instance, value.master_term, value.net, value.special_net);
+  archive(value.instance, value.master_term, value.net, value.special_net, value.id);
   value.instance_ptr = nullptr;
   value.master_term_ptr = nullptr;
 }
@@ -86,7 +85,7 @@ namespace binary_detail {
 
 inline constexpr uint32_t kTechSchemaVersion = 9;
 inline constexpr uint32_t kLibrarySchemaVersion = 2;
-inline constexpr uint32_t kDesignSchemaVersion = 6;
+inline constexpr uint32_t kDesignSchemaVersion = 8;
 
 template <typename... Types>
 struct BinaryTypeList
@@ -135,7 +134,7 @@ using LibraryBinaryComponents = BinaryTypeList<LibrarySite, LibraryCellMaster, L
 // part of the component snapshot.
 using DesignBinaryComponents
     = BinaryTypeList<DesignRoot, DesignInfo, DesignDieArea, DesignCoreArea, DesignRow, DesignTrackGrid, DesignGCellGrid,
-                     DesignInstance, DesignInstanceTerms, DesignInstanceTerm, DesignBlockTerm, DesignBlockPin, DesignNet, DesignNetInstancePins,
+                     DesignInstance, DesignInstanceTerms, DesignBlockTerm, DesignBlockPin, DesignNet, DesignNetInstancePins,
                      DesignNetIoPins, DesignSpecialNet, DesignNetOptions, DesignWire, DesignNetGeometry, DesignVia,
                      DesignNonDefaultRule, DesignRegion, DesignGroup, DesignBlockage, DesignFill, DesignNetRouteGuides,
                      DesignNetTrackAssignments, DesignPinAccessCatalog, DesignInstancePinAccessGroupIndex,
@@ -147,7 +146,7 @@ void writeRegistrySnapshot(const Registry& registry, Archive& archive, BinaryTyp
   entt::basic_snapshot snapshot{registry};
   snapshot.template get<Entity>(archive);
   const auto write_component = [&]<typename Component>() {
-    if constexpr (std::is_same_v<Component, DesignInstance> || std::is_same_v<Component, DesignInstancePin>) {
+    if constexpr (std::is_same_v<Component, DesignInstance>) {
       // Stable deletion leaves tombstones; write only live components so a
       // restore followed by another save produces the same binary payload.
       const auto* storage = registry.template storage<Component>();

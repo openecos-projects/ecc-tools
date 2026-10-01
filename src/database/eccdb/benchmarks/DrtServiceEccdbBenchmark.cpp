@@ -180,13 +180,12 @@ struct MasterTermPointerTable
   }
 };
 
-// Benchmark-only shadow of the two per-instance lookup components used by
-// findInstancePin(). This preserves the MasterTermNameIndex dense-map lookup
-// and ordinal-to-pin resolution while avoiding two EnTT component lookups.
+// Benchmark-only shadow of the per-instance terminal map used by
+// findInstancePin(). This preserves the nested dense-map lookup while avoiding
+// a repeated EnTT component lookup.
 struct BenchInstancePinLookupSlot
 {
-  const eccdb::LibraryMasterTermNameIndex* name_index = nullptr;
-  const eccdb::DesignInstancePins* pins = nullptr;
+  const eccdb::DesignInstanceTerms* terms = nullptr;
 };
 
 struct BenchInstancePinLookupTable
@@ -203,9 +202,9 @@ struct BenchInstancePinLookupTable
   }
 };
 
-// Benchmark-only lookup table over independent instance-pin components. It
-// mirrors the adapter's one-time PinId -> component pointer table without
-// changing the storage or binary archive contract.
+// Benchmark-only lookup table over opaque instance-pin IDs. It mirrors the
+// adapter's one-time PinId -> record pointer table without changing the
+// storage or binary archive contract.
 struct BenchCachedPin
 {
   const eccdb::DesignInstancePin* pin = nullptr;
@@ -979,7 +978,6 @@ void validateMasterTermPointerTable(const eccdb::PhysicalDesignService& physical
   BenchInstancePinLookupTable table;
   const auto begin = Clock::now();
   const auto& design_registry = physical.design().designRegistry().registry();
-  const auto& library_registry = physical.library().libraryRegistry().registry();
 
   std::size_t max_entity = 0;
   bool has_instances = false;
@@ -992,9 +990,7 @@ void validateMasterTermPointerTable(const eccdb::PhysicalDesignService& physical
   for (const auto instance_id : cache.instances) {
     const auto index = static_cast<std::size_t>(entt::to_entity(instance_id.entity()));
     auto& slot = table.slots[index];
-    const auto& instance = design_registry.get<const eccdb::DesignInstance>(instance_id.entity());
-    slot.name_index = &library_registry.get<const eccdb::LibraryMasterTermNameIndex>(instance.master.entity());
-    slot.pins = &design_registry.get<const eccdb::DesignInstancePins>(instance_id.entity());
+    slot.terms = &design_registry.get<const eccdb::DesignInstanceTerms>(instance_id.entity());
     ++table.instances;
   }
   table.build_ns = elapsedNs(begin);
@@ -1007,7 +1003,6 @@ void validateBenchInstancePinLookupTable(const eccdb::PhysicalDesignService& phy
                                          const BenchInstancePinLookupTable& table)
 {
   const auto& design_registry = physical.design().designRegistry().registry();
-  const auto& library_registry = physical.library().libraryRegistry().registry();
   require(table.instances == cache.instances.size(), "shadow instance-pin lookup instance count mismatch");
   require(table.probes == cache.pins.size(), "shadow instance-pin lookup probe count mismatch");
 
@@ -1016,22 +1011,18 @@ void validateBenchInstancePinLookupTable(const eccdb::PhysicalDesignService& phy
     const auto index = static_cast<std::size_t>(entt::to_entity(instance_id.entity()));
     require(index < table.slots.size(), "shadow instance-pin lookup table is missing an instance slot");
     const auto& slot = table.slots[index];
-    const auto& instance = design_registry.get<const eccdb::DesignInstance>(instance_id.entity());
-    require(slot.name_index == &library_registry.get<const eccdb::LibraryMasterTermNameIndex>(instance.master.entity()),
-            "shadow instance-pin lookup name-index pointer mismatch");
-    require(slot.pins == &design_registry.get<const eccdb::DesignInstancePins>(instance_id.entity()),
-            "shadow instance-pin lookup pins pointer mismatch");
+    require(slot.terms == &design_registry.get<const eccdb::DesignInstanceTerms>(instance_id.entity()),
+            "shadow instance-pin lookup terms pointer mismatch");
     ++populated_slots;
   }
   require(populated_slots == table.instances, "shadow instance-pin lookup populated-slot count mismatch");
 
   for (const auto& probe : cache.pins) {
     const auto& slot = table.get(probe.instance);
-    require(slot.name_index != nullptr && slot.pins != nullptr, "shadow instance-pin lookup has a null component pointer");
-    const auto found = slot.name_index->find(probe.term_name);
-    require(found != slot.name_index->end(), "shadow instance-pin lookup is missing a master-term name");
-    require(found->second.ordinal < slot.pins->values.size(), "shadow instance-pin lookup ordinal is outside the pin list");
-    require(slot.pins->values[found->second.ordinal] == probe.expected,
+    require(slot.terms != nullptr, "shadow instance-pin lookup has a null component pointer");
+    const auto found = slot.terms->records.find(std::string{probe.term_name});
+    require(found != slot.terms->records.end(), "shadow instance-pin lookup is missing a master-term name");
+    require(found->second.id == probe.expected,
             "shadow instance-pin lookup result differs from the service result");
   }
 }
@@ -1128,8 +1119,8 @@ void validateBenchCachedPinTable(const eccdb::PhysicalDesignService& physical, c
   for (const auto index : cache.query_indices.pins) {
     const auto& probe = cache.pins[index];
     const auto& slot = table.get(probe.instance);
-    const auto found = slot.name_index->find(probe.term_name);
-    const auto id = found == slot.name_index->end() ? eccdb::DesignInstancePinId{} : slot.pins->values[found->second.ordinal];
+    const auto found = slot.terms->records.find(std::string{probe.term_name});
+    const auto id = found == slot.terms->records.end() ? eccdb::DesignInstancePinId{} : found->second.id;
     checksum = foldChecksum(checksum, static_cast<uint64_t>(id.packed()));
   }
   return checksum;

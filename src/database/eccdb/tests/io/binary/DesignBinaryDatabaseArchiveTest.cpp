@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "design/DesignStore.h"
 #include "binary/BinaryDatabaseExporter.h"
@@ -184,29 +185,21 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsCompactRoutingAndInd
   const auto source_pin = fixture.design.netlistStorage().findInstancePin(source_instance, "A");
   ASSERT_TRUE(source_pin);
   auto& source_pins = fixture.design.designRegistry().registry().get<DesignInstancePins>(source_instance.entity());
-  const auto* cached_index = source_pins.master_term_name_index;
-  const auto cached_terms = source_pins.term_ids;
-  const auto cached_master = source_pins.master;
-  ASSERT_EQ(cached_master, fixture.design.netlistStorage().instance(source_instance).master);
-  ASSERT_EQ(cached_terms.size(), source_pins.values.size());
-  ASSERT_NE(cached_index, nullptr);
-  auto& source_pin_value = fixture.design.designRegistry().registry().get<DesignInstancePin>(source_pin.entity());
+  ASSERT_EQ(source_pins.values.size(), source_pins.records.size());
+  const auto source_record = source_pins.records.find("A");
+  ASSERT_NE(source_record, source_pins.records.end());
+  auto& source_pin_value = source_record->second;
   const auto source_term = source_pin_value.master_term;
   const auto* cached_instance = source_pin_value.instance_ptr;
   const auto* cached_term = source_pin_value.master_term_ptr;
   EXPECT_EQ(source_pin_value.instance, source_instance);
+  EXPECT_EQ(source_pin_value.id, source_pin);
   ASSERT_EQ(cached_instance, &fixture.design.netlistStorage().instance(source_instance));
   ASSERT_EQ(cached_term, &fixture.library.masterTermStorage().masterTerm(source_term));
   EXPECT_EQ(fixture.design.netlistStorage().instancePin(source_pin).master_term, source_term);
-  source_pins.term_ids.clear();
-  source_pins.master = {};
-  source_pins.master_term_name_index = nullptr;
   source_pin_value.instance_ptr = nullptr;
   source_pin_value.master_term_ptr = nullptr;
   BinaryDatabaseExporter::saveDesign(transient.path(), fixture.design);
-  source_pins.term_ids = cached_terms;
-  source_pins.master = cached_master;
-  source_pins.master_term_name_index = cached_index;
   source_pin_value.instance_ptr = cached_instance;
   source_pin_value.master_term_ptr = cached_term;
   expectSameFile(binary.path(), transient.path());
@@ -222,19 +215,27 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsCompactRoutingAndInd
 
   const auto restored_instance = restored->netlistStorage().findInstance("u1");
   const auto& restored_pins = restored->designRegistry().registry().get<const DesignInstancePins>(restored_instance.entity());
-  const auto master = restored->netlistStorage().instance(restored_instance).master;
-  EXPECT_EQ(restored_pins.term_ids, cached_terms);
-  EXPECT_EQ(restored_pins.master, master);
-  EXPECT_EQ(restored_pins.master_term_name_index,
-            &fixture.library.libraryRegistry().registry().get<const LibraryMasterTermNameIndex>(master.entity()));
+  EXPECT_EQ(restored_pins.values.size(), restored_pins.records.size());
+  EXPECT_EQ(restored_pins.values, source_pins.values);
+  EXPECT_EQ(restored_pins.records.size(), source_pins.records.size());
+  for (const auto& [name, source_record] : source_pins.records) {
+    const auto restored_record = restored_pins.records.find(name);
+    ASSERT_NE(restored_record, restored_pins.records.end());
+    EXPECT_EQ(restored_record->second.id, source_record.id);
+    EXPECT_EQ(restored_record->second.master_term, source_record.master_term);
+  }
+  ASSERT_NE(restored_pins.records.find("A"), restored_pins.records.end());
   const auto restored_pin = restored->netlistStorage().findInstancePin(restored_instance, "A");
   ASSERT_TRUE(restored_pin);
   const auto& restored_instance_pin = restored->netlistStorage().instancePin(restored_pin);
   EXPECT_EQ(restored_instance_pin.instance, restored_instance);
+  EXPECT_EQ(restored_instance_pin.id, restored_pin);
   EXPECT_EQ(restored_instance_pin.master_term, source_term);
   EXPECT_EQ(restored_instance_pin.instance_ptr, &restored->netlistStorage().instance(restored_instance));
   EXPECT_EQ(restored_instance_pin.master_term_ptr,
             &fixture.library.masterTermStorage().masterTerm(restored_instance_pin.master_term));
+  const auto& restored_registry = std::as_const(restored->designRegistry().registry());
+  EXPECT_EQ(restored_registry.storage<DesignInstanceTerm>(), nullptr);
 
   const auto actual_statistics = restored->routingStorage().routingStatistics();
   EXPECT_EQ(actual_statistics.paths.count, expected_statistics.paths.count);
@@ -390,6 +391,24 @@ TEST(DesignBinaryDatabaseArchiveTest, RejectsTruncatedPayload)
   BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
   std::filesystem::resize_file(binary.path(), std::filesystem::file_size(binary.path()) - 1u);
   EXPECT_THROW(BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library), std::runtime_error);
+}
+
+TEST(DesignBinaryDatabaseArchiveTest, RejectsSchemasPrecedingEmbeddedInstanceTermMap)
+{
+  DesignFixture fixture;
+  const TemporaryFile binary{"prior-term-registry-schema", ".edb"};
+  for (const uint32_t schema_version : {6u, 7u}) {
+    BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
+    std::fstream output(binary.path(), std::ios::in | std::ios::out | std::ios::binary);
+    ASSERT_TRUE(output);
+    // Header: magic[8], format version, header size, kind, schema version.
+    output.seekp(20);
+    const std::array<char, 4> encoded_schema{static_cast<char>(schema_version), 0, 0, 0};
+    output.write(encoded_schema.data(), static_cast<std::streamsize>(encoded_schema.size()));
+    output.close();
+
+    EXPECT_THROW(BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library), std::runtime_error);
+  }
 }
 
 TEST(DesignBinaryDatabaseArchiveTest, LargeIspd19FlatRoutingReachesByteExactFixedPoint)

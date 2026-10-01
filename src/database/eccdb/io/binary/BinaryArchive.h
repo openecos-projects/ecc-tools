@@ -15,7 +15,10 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
+
+#include <entt/container/dense_map.hpp>
 
 #include "common/EnttId.h"
 
@@ -31,6 +34,16 @@ struct IsVector : std::false_type
 
 template <typename T, typename Allocator>
 struct IsVector<std::vector<T, Allocator>> : std::true_type
+{
+};
+
+template <typename T>
+struct IsDenseMap : std::false_type
+{
+};
+
+template <typename Key, typename Value, typename Hash, typename KeyEqual, typename Allocator>
+struct IsDenseMap<entt::dense_map<Key, Value, Hash, KeyEqual, Allocator>> : std::true_type
 {
 };
 
@@ -194,6 +207,12 @@ class BinaryOutputArchive
       writeBytes(value.data(), value.size());
     } else if constexpr (IsVector<Type>::value) {
       writeSequence(std::span<const typename Type::value_type>{value});
+    } else if constexpr (IsDenseMap<Type>::value) {
+      write(static_cast<uint64_t>(value.size()));
+      for (const auto& [key, mapped] : value) {
+        write(key);
+        write(mapped);
+      }
     } else if constexpr (IsOptional<Type>::value) {
       write(value.has_value());
       if (value.has_value()) {
@@ -352,6 +371,23 @@ class BinaryInputArchive
       value.resize(static_cast<std::size_t>(size));
       for (auto& element : value) {
         read(element);
+      }
+    } else if constexpr (IsDenseMap<Type>::value) {
+      uint64_t size = 0;
+      read(size);
+      if (size > value.max_size()) {
+        throw std::length_error("binary dense_map exceeds host limits");
+      }
+      value.clear();
+      value.reserve(static_cast<std::size_t>(size));
+      for (uint64_t index = 0; index < size; ++index) {
+        typename Type::key_type key;
+        typename Type::mapped_type mapped;
+        read(key);
+        read(mapped);
+        if (!value.emplace(std::move(key), std::move(mapped)).second) {
+          throw std::runtime_error("duplicate key in binary dense_map");
+        }
       }
     } else if constexpr (IsOptional<Type>::value) {
       bool present = false;

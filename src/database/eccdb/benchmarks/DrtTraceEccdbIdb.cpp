@@ -2889,10 +2889,9 @@ class EccdbBackend
 
   [[nodiscard]] json::value findPin(uint32_t token, std::string_view name) const
   {
-    const auto pin = physical_.findInstancePin(instance(token), name);
-    if (!pin) return json::value(nullptr);
-    const auto& value = physical_.design().netlistStorage().instanceTerm(pin);
-    return json::value(value.master_term_ptr->name);
+    const auto* pin = physical_.findInstanceTermData(instance(token), name);
+    if (pin == nullptr) return json::value(nullptr);
+    return json::value(pin->master_term_ptr->name);
   }
 
   eccdb::TechStore technology_;

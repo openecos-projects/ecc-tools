@@ -54,8 +54,9 @@ using DesignRowId = EnttId<DesignEntity, DesignRow>;
 using DesignTrackGridId = EnttId<DesignEntity, DesignTrackGrid>;
 using DesignGCellGridId = EnttId<DesignEntity, DesignGCellGrid>;
 using DesignInstanceId = EnttId<DesignEntity, DesignInstance>;
-// OpenDB dbITerm: an independent entity created for each instance/master-term
-// pair. DesignInstancePin is retained as a source-compatible spelling.
+// Embedded dbITerm experiment: packed() is an opaque monotonic Term ID,
+// resolved by DesignNetlistStorage, not a registered DesignEntity. The existing
+// EnttId representation and DesignInstancePin spelling keep callers compatible.
 using DesignInstanceTermId = EnttId<DesignEntity, DesignInstanceTerm>;
 using DesignInstancePinId = DesignInstanceTermId;
 // OpenDB dbBTerm and dbBPin are separate design entities. A block term owns

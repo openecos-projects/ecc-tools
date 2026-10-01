@@ -33,6 +33,7 @@ DesignStore::DesignStore(const TechRegistry& tech_registry, const LibraryRegistr
 
 void DesignStore::resetForBinaryLoad()
 {
+  _netlist.clearInstanceTermPointerTable();
   _registry.registry() = DesignRegistry::registry_type{};
   _root = {};
   _global.rebindRoot(_root);

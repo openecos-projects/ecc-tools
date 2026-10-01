@@ -10,6 +10,10 @@ namespace eccdb {
 
 struct DesignRoot
 {
+  // Monotonic allocation state for embedded instance terms. This is
+  // persistent so an archive restore cannot reuse an ID that was deleted
+  // before the checkpoint.
+  uint64_t next_instance_term_id = 0;
 };
 
 // Required DEF design header values represented on the singleton DesignRoot.

@@ -8,6 +8,7 @@
 #include <streambuf>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "def/DefDesignExporter.h"
 #include "def/DefDesignImporter.h"
@@ -532,6 +533,8 @@ END DESIGN
   EXPECT_FALSE(design.globalStorage().hasDieArea());
   EXPECT_EQ(design.netlistStorage().instanceCount(), 0u);
   EXPECT_EQ(design.netlistStorage().instancePinCount(), 0u);
+  const auto& registry = std::as_const(design.designRegistry().registry());
+  EXPECT_EQ(registry.storage<DesignInstanceTerm>(), nullptr);
 
   const auto recovery = writeInput(R"DEF(VERSION 5.8 ;
 DESIGN recovered ;

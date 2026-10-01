@@ -64,12 +64,12 @@ class DesignNetlistStorage
   [[nodiscard]] std::span<const DesignInstancePinId> instancePins(DesignNetId net) const;
 
   // OpenDB-aligned dbITerm spellings. The legacy InstancePin API remains a
-  // source-compatible view of the same independent entity storage.
-  // Like dbITerm lookup by OID, requires a live Term ID from this storage.
+  // source-compatible view of the same embedded instance-term storage.
+  // Like dbITerm lookup by OID, requires a live opaque Term ID from this storage.
   // The legacy instancePin accessor retains its checked-ID behavior.
   [[nodiscard]] const DesignInstanceTerm& instanceTerm(DesignInstanceTermId id) const
   {
-    return _registry.get<const DesignInstanceTerm>(id.entity());
+    return uncheckedInstancePin(id);
   }
   [[nodiscard]] DesignInstanceTermId findInstanceTerm(DesignInstanceId instance, LibraryMasterTermId term) const
   {
@@ -79,22 +79,29 @@ class DesignNetlistStorage
   {
     return findInstancePin(instance, term_name);
   }
+  // Returns the embedded Term payload directly. The pointer remains valid
+  // until this instance is destroyed or an explicit cache rebuild occurs.
+  [[nodiscard]] const DesignInstanceTerm* findInstanceTermData(DesignInstanceId instance, std::string_view term_name) const;
   [[nodiscard]] std::span<const DesignInstanceTermId> instanceTerms(DesignInstanceId instance) const
   {
     return instancePins(instance);
   }
   [[nodiscard]] std::span<const DesignInstanceTermId> instanceTerms(DesignNetId net) const { return instancePins(net); }
 
-  // Callbacks must not mutate instance-pin storage while it is being visited.
-  // Traversal follows the independent DesignInstancePin component's dense
-  // order, rather than the owner relation's per-instance order.
+  // Callbacks must not mutate instance-term storage while it is being visited.
+  // Traversal follows DesignInstanceTerms' dense owner order, then each
+  // instance's immutable name-keyed record map.
   template <typename Function>
   void forEachInstancePin(Function&& function) const
   {
-    const auto view = _registry.view<const DesignInstancePin>();
-    view.each([&function](const auto entity, const DesignInstancePin& pin) {
-      std::invoke(function, DesignInstancePinId{entity}, pin);
-    });
+    const auto view = _registry.view<const DesignInstanceTerms>();
+    for (const auto entity : view) {
+      const auto& terms = view.get<const DesignInstanceTerms>(entity);
+      for (const auto& [name, term] : terms.records) {
+        static_cast<void>(name);
+        std::invoke(function, term.id, term);
+      }
+    }
   }
 
   template <typename Function>
@@ -227,10 +234,13 @@ class DesignNetlistStorage
   [[nodiscard]] uint32_t ioPinCount() const;
   [[nodiscard]] uint32_t blockPinCount() const;
   [[nodiscard]] uint32_t netCount() const;
+  [[nodiscard]] std::size_t instanceTermPointerTableCapacity() const noexcept { return _instance_terms.capacity(); }
 
   // Name indexes are derived acceleration data. Rebuild them after a direct
   // registry restore or rollback; they are intentionally not serialized.
   void rebuildNameIndexes();
+  // Call before discarding the DesignRegistry wholesale during a load reset.
+  void clearInstanceTermPointerTable() noexcept { _instance_terms.clear(); }
   // Rebind runtime-only Library IDs and pointers after a binary restore.
   void rebuildLibraryCaches();
 
@@ -260,6 +270,9 @@ class DesignNetlistStorage
   entt::dense_map<std::string, DesignIoPinId, index::TransparentStringHash, std::equal_to<>> _io_pin_names;
   entt::dense_map<std::string, DesignNetId, index::TransparentStringHash, std::equal_to<>> _regular_net_names;
   entt::dense_map<std::string, DesignNetId, index::TransparentStringHash, std::equal_to<>> _special_net_names;
+  // Runtime-only direct lookup for opaque DesignInstanceTerm IDs. A slot is
+  // cleared before its owning instance is destroyed; IDs are never reused.
+  std::vector<DesignInstanceTerm*> _instance_terms;
 };
 
 }  // namespace eccdb

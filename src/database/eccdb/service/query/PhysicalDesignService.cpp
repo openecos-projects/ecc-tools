@@ -467,6 +467,12 @@ DesignInstanceTermId PhysicalDesignService::findInstanceTerm(DesignInstanceId in
   return _design.netlistStorage().findInstanceTerm(instance, master_term_name);
 }
 
+const DesignInstanceTerm* PhysicalDesignService::findInstanceTermData(DesignInstanceId instance,
+                                                                       std::string_view master_term_name) const
+{
+  return _design.netlistStorage().findInstanceTermData(instance, master_term_name);
+}
+
 DesignIoPinId PhysicalDesignService::findIoPin(std::string_view name) const
 {
   return _design.netlistStorage().findIoPin(name);
@@ -513,13 +519,11 @@ void PhysicalDesignService::forEachBlockPin(DesignBlockTermId term, const BlockP
 void PhysicalDesignService::forEachNetPin(DesignNetId net, const PhysicalNetPinVisitor& visitor) const
 {
   const auto& design_registry = _design.designRegistry().registry();
+  const auto& netlist = _design.netlistStorage();
   if (visitor.instance_pin) {
     if (const auto* connections = design_registry.try_get<const DesignNetInstancePins>(net.entity()); connections != nullptr) {
-      // Connectivity storage maintains live Term IDs. Resolve the typed pool
-      // once, rather than checking and looking it up again for every endpoint.
-      const auto* terms = design_registry.storage<DesignInstanceTerm>();
       for (const auto pin_id : connections->values) {
-        const auto& pin = terms->get(pin_id.entity());
+        const auto& pin = netlist.instanceTerm(pin_id);
         visitor.instance_pin(pin_id, pin, *pin.instance_ptr, *pin.master_term_ptr);
       }
     }

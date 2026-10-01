@@ -185,8 +185,10 @@ class PhysicalDesignService
   // membership/order unchanged since instance creation.
   [[nodiscard]] DesignInstancePinId findInstancePin(DesignInstanceId instance, std::string_view master_term_name) const;
   // OpenDB-aligned dbITerm spelling. InstancePin remains a compatibility
-  // alias for the same independent design-term entity.
+  // alias for the same embedded design-term payload.
   [[nodiscard]] DesignInstanceTermId findInstanceTerm(DesignInstanceId instance, std::string_view master_term_name) const;
+  [[nodiscard]] const DesignInstanceTerm* findInstanceTermData(DesignInstanceId instance,
+                                                                 std::string_view master_term_name) const;
   [[nodiscard]] DesignIoPinId findIoPin(std::string_view name) const;
   // OpenDB-aligned dbBTerm spelling. IoPin remains a compatibility alias for
   // the same block-term entity.

@@ -687,7 +687,6 @@ void rollbackImport(DesignStore& design) noexcept
     appendEntities<DesignVia>(registry, entities);
     appendEntities<DesignNonDefaultRule>(registry, entities);
     appendEntities<DesignInstance>(registry, entities);
-    appendEntities<DesignInstanceTerm>(registry, entities);
     appendEntities<DesignBlockTerm>(registry, entities);
     appendEntities<DesignBlockPin>(registry, entities);
     appendEntities<DesignNet>(registry, entities);
@@ -709,6 +708,7 @@ void rollbackImport(DesignStore& design) noexcept
       registry.remove<DesignDieArea>(design.rootId().entity());
     }
     design.netlistStorage().rebuildNameIndexes();
+    design.netlistStorage().rebuildLibraryCaches();
     design.routingStorage().rebuildWireIndex();
   } catch (...) {
   }
