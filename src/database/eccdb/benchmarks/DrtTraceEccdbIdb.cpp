@@ -8,6 +8,7 @@
 #include "../adapters/tritonroute/IspdGuideReader.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <limits>
@@ -448,7 +449,8 @@ class EccdbBackend
         design_(technology_.techRegistry(), library_.libraryRegistry()),
         vias_(design_),
         physical_(technology_, library_, design_),
-        routes_(design_, technology_)
+        routes_(design_, technology_),
+        profile_wire_write_(options.profile_wire_write)
   {
     eccdb::LefTechImporter(technology_).import(options.lef);
     eccdb::LefLibraryImporter(technology_, library_).import(options.lef);
@@ -547,10 +549,478 @@ class EccdbBackend
     fail("unsupported EccDB trace operation: " + event.op);
   }
 
+  // This is intentionally separate from execute().  Trace parsing, token
+  // binding and JSON projection are replay plumbing; only the underlying
+  // service/storage call belongs in NativeTimer.  Keep unsupported/complex
+  // operations on execute() below without a timer rather than presenting an
+  // adapter-inclusive number as a native measurement.
+  [[nodiscard]] json::value executeNative(const drt_trace::Event& event, drt_trace::NativeTimer& timer)
+  {
+    // Preserve the existing diagnostic profile's adapter-stage counters when
+    // explicitly requested. That mode is intentionally not a native-only
+    // benchmark and therefore remains unmeasured here.
+    if (profile_wire_write_ && event.op == "replace_wire") return execute(event);
+
+    const auto item_count = event.expected.is_array() ? static_cast<uint64_t>(event.expected.as_array().size()) : 1u;
+
+    if (event.op == "find_instance") {
+      const auto found = timer.measure("find_instance", 1u, [&] { return physical_.findInstance(event.name); });
+      if (!found) return json::value(nullptr);
+      return json::value(design_.netlistStorage().instance(found).name);
+    }
+    if (event.op == "find_pin") {
+      const auto instance_id = instance(event.object);
+      const auto* found = timer.measure("find_pin", 1u, [&] {
+        return physical_.findInstanceTermData(instance_id, event.name);
+      });
+      if (found == nullptr) return json::value(nullptr);
+      return json::value(found->master_term_ptr->name);
+    }
+    if (event.op == "read_instance") {
+      const auto instance_id = instance(event.object);
+      struct Value
+      {
+        std::string_view name;
+        std::string_view master;
+        eccdb::Point origin;
+        eccdb::DesignOrientation orientation = eccdb::DesignOrientation::kN;
+      } value;
+      timer.measure("read_instance", 1u, [&] {
+        const auto& instance_value = design_.netlistStorage().instance(instance_id);
+        const auto& master = library_.cellMasterStorage().cellMaster(instance_value.master);
+        value = {.name = instance_value.name,
+                 .master = master.name,
+                 .origin = instance_value.origin,
+                 .orientation = instance_value.orientation};
+      });
+      return json::array{std::string(value.name), std::string(value.master), value.origin.x, value.origin.y,
+                         orientationName(value.orientation)};
+    }
+    if (event.op == "read_instance_pins") {
+      const auto instance_id = instance(event.object);
+      const auto& netlist = design_.netlistStorage();
+      std::vector<std::string_view> names;
+      names.reserve(static_cast<std::size_t>(item_count));
+      timer.measure("read_instance_pins", item_count, [&] {
+        const auto pins = netlist.instancePins(instance_id);
+        for (const auto pin : pins) names.push_back(netlist.instanceTerm(pin).master_term_ptr->name);
+      });
+      json::array result;
+      result.reserve(names.size());
+      for (const auto name : names) result.emplace_back(std::string(name));
+      return result;
+    }
+    if (event.op == "read_net_attributes") {
+      const auto net_id = net(event.object);
+      struct Value
+      {
+        eccdb::DesignSignalUse use = eccdb::DesignSignalUse::kNone;
+        std::optional<std::string_view> rule;
+        bool jumpers = false;
+        bool abutment = false;
+      } value;
+      timer.measure("read_net_attributes", 1u, [&] {
+        value.use = design_.netlistStorage().net(net_id).use;
+        value.rule = physical_.nonDefaultRuleName(net_id);
+        value.jumpers = physical_.netHasJumpers(net_id);
+        value.abutment = physical_.isNetConnectedByAbutment(net_id);
+      });
+      return json::array{signalUseName(value.use),
+                         value.rule ? json::value(std::string(*value.rule)) : json::value(nullptr),
+                         value.jumpers,
+                         value.abutment};
+    }
+    if (event.op == "scan_instances") {
+      const auto& netlist = design_.netlistStorage();
+      std::vector<std::string_view> names;
+      const auto instance_count = netlist.instanceCount();
+      names.reserve(instance_count);
+      timer.measure("scan_instances", instance_count, [&] {
+        netlist.forEachInstance([&](eccdb::DesignInstanceId,
+                                    const eccdb::DesignInstance& instance_value,
+                                    std::span<const eccdb::DesignInstancePinId>) {
+          names.push_back(instance_value.name);
+        });
+      });
+      json::array result;
+      result.reserve(names.size());
+      for (const auto name : names) result.emplace_back(std::string(name));
+      return result;
+    }
+    if (event.op == "scan_nets") {
+      std::vector<std::string_view> names;
+      names.reserve(static_cast<std::size_t>(item_count));
+      timer.measure("scan_nets", item_count, [&] {
+        physical_.forEachRegularNet([&](eccdb::DesignNetId, const eccdb::DesignNet& value) { names.push_back(value.name); });
+      });
+      json::array result;
+      result.reserve(names.size());
+      for (const auto name : names) result.emplace_back(std::string(name));
+      return result;
+    }
+    if (event.op == "net_pins") {
+      const auto net_id = net(event.object);
+      struct PinValue
+      {
+        bool instance = false;
+        std::string_view first;
+        std::string_view second;
+      };
+      std::vector<PinValue> values;
+      values.reserve(static_cast<std::size_t>(item_count));
+      eccdb::PhysicalNetPinVisitor visitor;
+      visitor.instance_pin = [&](eccdb::DesignInstancePinId,
+                                 const eccdb::DesignInstanceTerm&,
+                                 const eccdb::DesignInstance& instance_value,
+                                 const eccdb::LibraryMasterTerm& term) {
+        values.push_back({.instance = true, .first = instance_value.name, .second = term.name});
+      };
+      visitor.io_pin = [&](eccdb::DesignIoPinId, const eccdb::DesignIoPin& pin) {
+        values.push_back({.instance = false, .first = pin.name, .second = {}});
+      };
+      timer.measure("net_pins", item_count, [&] { physical_.forEachNetPin(net_id, visitor); });
+      json::array result;
+      result.reserve(values.size());
+      for (const auto& value : values) {
+        result.emplace_back(json::array{value.instance ? "I" : "B", std::string(value.first), std::string(value.second)});
+      }
+      return result;
+    }
+    if (event.op == "read_wire") {
+      const auto net_id = net(event.object);
+      struct RawShape
+      {
+        enum class Kind : uint8_t
+        {
+          kSegment,
+          kVia,
+          kPatch
+        };
+
+        Kind kind = Kind::kSegment;
+        std::string_view layer;
+        std::string_view via;
+        int32_t x1 = 0;
+        int32_t y1 = 0;
+        int32_t x2 = 0;
+        int32_t y2 = 0;
+        std::optional<int32_t> begin_extension;
+        std::optional<int32_t> end_extension;
+        bool tech_via = true;
+      };
+      std::vector<RawShape> raw_shapes;
+      raw_shapes.reserve(static_cast<std::size_t>(item_count));
+      timer.measure("read_wire", item_count, [&] {
+        const auto snapshot = routes_.snapshot(net_id);
+        for (const auto& saved_wire : snapshot.wires) {
+          for (const auto& shape : saved_wire.shapes) {
+            std::visit(
+                [&](const auto& value) {
+                  using Value = std::remove_cvref_t<decltype(value)>;
+                  if constexpr (std::is_same_v<Value, eccdb::RouteSegment>) {
+                    raw_shapes.push_back({.kind = RawShape::Kind::kSegment,
+                                          .layer = technology_.layerInfo(eccdb::TechLayerId{value.layer.entity()}).name,
+                                          .x1 = value.begin.x,
+                                          .y1 = value.begin.y,
+                                          .x2 = value.end.x,
+                                          .y2 = value.end.y,
+                                          .begin_extension = value.begin_extension,
+                                          .end_extension = value.end_extension});
+                  } else if constexpr (std::is_same_v<Value, eccdb::RouteVia>) {
+                    RawShape raw{.kind = RawShape::Kind::kVia,
+                                 .x1 = value.origin.x,
+                                 .y1 = value.origin.y,
+                                 .x2 = value.origin.x,
+                                 .y2 = value.origin.y};
+                    std::visit(
+                        [&](const auto definition) {
+                          using Definition = std::remove_cvref_t<decltype(definition)>;
+                          if constexpr (std::is_same_v<Definition, eccdb::TechViaMasterId>) {
+                            const auto& vias = technology_.viaMasterStorage();
+                            const auto& geometry = vias.geometry(definition);
+                            raw.tech_via = true;
+                            raw.via = vias.viaMaster(definition).name;
+                            raw.layer = technology_.layerInfo(geometry.bottom_layer.layer()).name;
+                          } else {
+                            const auto& design_via = design_.routingStorage().via(definition);
+                            raw.tech_via = false;
+                            raw.via = design_via.name;
+                            if ((design_via.flags & eccdb::DesignViaFlag::kGenerated) != 0u) {
+                              raw.layer = technology_.layerInfo(eccdb::TechLayerId{design_via.generated.bottom_layer.entity()}).name;
+                            } else {
+                              eccdb::TechRoutingLayerId first_layer;
+                              eccdb::TechRoutingLayerId second_layer;
+                              const auto& registry = technology_.techRegistry().registry();
+                              const auto append = [&](const eccdb::TechLayerId layer) {
+                                const auto routing_layer = eccdb::TechRoutingLayerId{layer.entity()};
+                                if (!registry.all_of<eccdb::TechRoutingLayer>(layer.entity())) return;
+                                if (!first_layer) {
+                                  first_layer = routing_layer;
+                                } else if (routing_layer != first_layer) {
+                                  second_layer = routing_layer;
+                                }
+                              };
+                              for (const auto& rectangle : design_via.rectangles) append(rectangle.layer);
+                              for (const auto& polygon : design_via.polygons) append(polygon.layer);
+                              const auto bottom_layer = technology_.isBelow(eccdb::TechLayerId{second_layer.entity()},
+                                                                           eccdb::TechLayerId{first_layer.entity()})
+                                                            ? second_layer
+                                                            : first_layer;
+                              raw.layer = technology_.layerInfo(eccdb::TechLayerId{bottom_layer.entity()}).name;
+                            }
+                          }
+                        },
+                        value.definition);
+                    raw_shapes.push_back(std::move(raw));
+                  } else {
+                    raw_shapes.push_back({.kind = RawShape::Kind::kPatch,
+                                          .layer = technology_.layerInfo(eccdb::TechLayerId{value.layer.entity()}).name,
+                                          .x1 = value.rectangle.ll_x,
+                                          .y1 = value.rectangle.ll_y,
+                                          .x2 = value.rectangle.ur_x,
+                                          .y2 = value.rectangle.ur_y});
+                  }
+                },
+                shape);
+          }
+        }
+      });
+      std::vector<drt_trace::Shape> shapes;
+      shapes.reserve(raw_shapes.size());
+      for (const auto& raw : raw_shapes) {
+        drt_trace::Shape shape;
+        shape.kind = raw.kind == RawShape::Kind::kSegment ? "segment"
+                     : raw.kind == RawShape::Kind::kVia ? "via"
+                                                           : "patch";
+        shape.layer = raw.layer;
+        shape.via = raw.via;
+        shape.x1 = raw.x1;
+        shape.y1 = raw.y1;
+        shape.x2 = raw.x2;
+        shape.y2 = raw.y2;
+        shape.begin_extension = raw.begin_extension;
+        shape.end_extension = raw.end_extension;
+        shape.tech_via = raw.tech_via;
+        shapes.push_back(std::move(shape));
+      }
+      return drt_trace::shapeProjection(shapes, false);
+    }
+    if (event.op == "read_guides") {
+      const auto net_id = netByName(event.name);
+      struct RawGuide
+      {
+        std::string_view layer;
+        std::optional<std::string_view> via_layer;
+        int32_t x1 = 0;
+        int32_t y1 = 0;
+        int32_t x2 = 0;
+        int32_t y2 = 0;
+        bool congested = false;
+        bool jumper = false;
+        bool connected_to_term = false;
+      };
+      std::vector<RawGuide> guides;
+      guides.reserve(static_cast<std::size_t>(item_count));
+      timer.measure("read_guides", item_count, [&] {
+        const auto source = design_.guideStorage().guides(net_id);
+        for (const auto& guide : source) {
+          const auto& layer = technology_.layerInfo(eccdb::TechLayerId{guide.layer.entity()});
+          if (isBackside(layer)) continue;
+          const auto via_layer = eccdb::TechLayerId{guide.via_layer.entity()};
+          std::optional<std::string_view> via_layer_name;
+          if (via_layer) {
+            const auto& via_layer_info = technology_.layerInfo(via_layer);
+            if (isBackside(via_layer_info)) continue;
+            via_layer_name = via_layer_info.name;
+          }
+          guides.push_back({.layer = layer.name,
+                            .via_layer = via_layer_name,
+                            .x1 = guide.box.ll_x,
+                            .y1 = guide.box.ll_y,
+                            .x2 = guide.box.ur_x,
+                            .y2 = guide.box.ur_y,
+                            .congested = hasFlag(guide.flags, eccdb::DesignRouteGuideFlag::kCongested),
+                            .jumper = hasFlag(guide.flags, eccdb::DesignRouteGuideFlag::kJumper),
+                            .connected_to_term = hasFlag(guide.flags, eccdb::DesignRouteGuideFlag::kConnectedToTerm)});
+        }
+      });
+      json::array result;
+      result.reserve(guides.size());
+      for (const auto& guide : guides) {
+        result.emplace_back(json::array{guide.layer,
+                                        guide.via_layer ? json::value(*guide.via_layer) : json::value(nullptr),
+                                        guide.x1,
+                                        guide.y1,
+                                        guide.x2,
+                                        guide.y2,
+                                        guide.congested,
+                                        guide.jumper,
+                                        guide.connected_to_term});
+      }
+      return result;
+    }
+    if (event.op == "clear_wire") {
+      const auto net_id = net(event.object);
+      timer.measure("clear_wire", 0u, [&] { static_cast<void>(routes_.replaceRouted(net_id, {})); });
+      return json::value(nullptr);
+    }
+    if (event.op == "replace_wire") {
+      const auto net_id = net(event.object);
+      std::vector<eccdb::RouteShape> shapes;
+      shapes.reserve(event.shapes.size());
+      for (const auto& shape : event.shapes) shapes.push_back(routeShape(shape));
+      timer.measure("replace_wire", static_cast<uint64_t>(shapes.size()), [&] {
+        static_cast<void>(routes_.replaceRouted(net_id, std::span<const eccdb::RouteShape>{shapes}));
+      });
+      return json::value(nullptr);
+    }
+    if (event.op == "append_track_assignment") {
+      const auto& payload = payloadObject(event);
+      const auto* appended = payload.if_contains("append");
+      if (appended == nullptr) fail("trace track-assignment payload has no append list");
+      const auto net_id = netByName(event.name);
+      auto added = parseTrackAssignments(*appended);
+      std::vector<eccdb::DesignTrackAssignmentShape> replacement;
+      const auto previous = design_.guideStorage().trackAssignments(net_id);
+      replacement.reserve(added.size() + previous.size());
+      for (auto it = added.rbegin(); it != added.rend(); ++it) replacement.push_back(std::move(*it));
+      replacement.insert(replacement.end(), previous.begin(), previous.end());
+      timer.measure("append_track_assignment", static_cast<uint64_t>(added.size()), [&] {
+        eccdb::RoutingContextService context(design_);
+        context.replaceTrackAssignments(net_id, std::move(replacement));
+      });
+      return trackAssignmentsValue(net_id);
+    }
+    if (event.op == "replace_guides") {
+      const auto& payload = payloadObject(event);
+      const auto* source = payload.if_contains("guides");
+      if (source == nullptr) fail("trace guide payload has no guide list");
+      const auto net_id = netByName(event.name);
+      auto guides = parseGuides(*source);
+      const auto count = static_cast<uint64_t>(guides.size());
+      timer.measure("replace_guides", count, [&] {
+        eccdb::RoutingContextService context(design_);
+        context.replaceGuides(net_id, std::move(guides));
+      });
+      return readGuides(event.name);
+    }
+    if (event.op == "append_bterm_pin_access") {
+      const auto& payload = payloadObject(event);
+      const auto* ordinal = payload.if_contains("bpin_ordinal");
+      const auto* appended = payload.if_contains("append");
+      if (ordinal == nullptr || appended == nullptr) fail("trace BTerm pin-access payload is incomplete");
+      const auto pin_id = physical_.findBlockTerm(event.name);
+      if (!pin_id) fail("EccDB trace BTerm does not exist: " + event.name);
+      const auto port_index = traceIndex(*ordinal, "BPin ordinal");
+      const auto block_pins = physical_.blockPins(pin_id);
+      if (port_index >= block_pins.size()) fail("trace BPin ordinal is out of range");
+      auto points = parsePinAccessPoints(*appended);
+      const auto count = static_cast<uint64_t>(points.size());
+      timer.measure("append_bterm_pin_access", count, [&] {
+        eccdb::RoutingContextService context(design_);
+        context.appendBlockPinCandidatePoints(block_pins[port_index], 0u, std::move(points));
+      });
+      return readBtermPinAccess(event.name, port_index);
+    }
+    if (event.op == "replace_master_pin_access") {
+      auto replacement = parseMasterPinAccessReplacement(event);
+      const auto& master = library_.cellMasterStorage().cellMaster(replacement.master);
+      struct ClearTarget { eccdb::LibraryMasterPortId port; uint32_t group = 0; };
+      std::vector<ClearTarget> targets;
+      for (const auto term : master.terms) {
+        for (const auto port : physical_.masterPorts(term)) {
+          for (const auto group : replacement.clear_groups) {
+            if (design_.pinAccessStorage().hasMasterPortCandidateGroup(port, group)) targets.push_back({port, group});
+          }
+        }
+      }
+      const auto item_total = static_cast<uint64_t>(targets.size() + replacement.updates.size());
+      timer.measure("replace_master_pin_access", item_total, [&] {
+        eccdb::RoutingContextService context(design_);
+        for (const auto& target : targets) {
+          if (!context.clearMasterPortCandidateGroup(target.port, target.group)) {
+            fail("EccDB cannot clear a referenced or selected master pin-access candidate group");
+          }
+        }
+        for (auto& update : replacement.updates) {
+          context.setMasterPortCandidateGroup(update.port, update.group_index, std::move(update.points));
+        }
+      });
+      return masterPinAccessUpdateValue(replacement.updates);
+    }
+    if (event.op == "replace_instance_pin_access") {
+      auto replacement = parseInstancePinAccessReplacement(event);
+      struct PreparedTerm
+      {
+        eccdb::DesignInstancePinId pin;
+        std::vector<eccdb::DesignPreferredPinAccessRef> preferences;
+      };
+      std::vector<PreparedTerm> terms;
+      terms.reserve(replacement.terms.size());
+      for (const auto& term : replacement.terms) {
+        PreparedTerm prepared{.pin = term.pin};
+        prepared.preferences.reserve(term.locators.size());
+        for (const auto& locator : term.locators) {
+          if (locator.preference) prepared.preferences.push_back(*locator.preference);
+        }
+        terms.push_back(std::move(prepared));
+      }
+      timer.measure("replace_instance_pin_access", static_cast<uint64_t>(replacement.terms.size()), [&] {
+        eccdb::RoutingContextService context(design_);
+        for (const auto& term : terms) static_cast<void>(context.clearPreferredInstancePinAccess(term.pin));
+        context.setInstancePinAccessGroup(replacement.instance, replacement.group_index);
+        for (auto& term : terms) {
+          context.setPreferredInstancePinAccess(term.pin, std::move(term.preferences));
+        }
+      });
+      return instancePinAccessUpdateValue(replacement);
+    }
+    if (event.op == "append_bterm_stack_wire") {
+      const auto& payload = payloadObject(event);
+      const auto* layer = payload.if_contains("layer");
+      const auto* x = payload.if_contains("x");
+      const auto* y = payload.if_contains("y");
+      const auto* vias = payload.if_contains("vias");
+      if (layer == nullptr || x == nullptr || y == nullptr || vias == nullptr || !vias->is_array()) {
+        fail("trace BTerm stack-wire payload is incomplete");
+      }
+      const auto net_id = net(event.object);
+      auto active_layer = routingLayer(drt_trace::text(*layer));
+      const eccdb::Point origin{.x = drt_trace::coordinate(*x), .y = drt_trace::coordinate(*y)};
+      std::vector<eccdb::RouteShape> shapes;
+      const auto snapshot = routes_.snapshot(net_id);
+      for (const auto& saved_wire : snapshot.wires) {
+        if (saved_wire.status == eccdb::DesignWireStatus::kRouted) {
+          shapes.insert(shapes.end(), saved_wire.shapes.begin(), saved_wire.shapes.end());
+        }
+      }
+      for (const auto& via_name : vias->as_array()) {
+        const auto via = technology_.viaMasterStorage().findViaMaster(drt_trace::text(via_name));
+        if (!via) fail("trace BTerm stack wire references an unknown technology VIA");
+        const auto layers = physical_.routingViaLayers(via, {});
+        if (active_layer != layers.bottom && active_layer != layers.top) {
+          fail("trace BTerm stack VIA does not touch the active routing layer");
+        }
+        shapes.emplace_back(eccdb::RouteVia{.definition = eccdb::RouteViaDefinition{via}, .origin = origin});
+        active_layer = active_layer == layers.bottom ? layers.top : layers.bottom;
+      }
+      timer.measure("append_bterm_stack_wire", static_cast<uint64_t>(vias->as_array().size()), [&] {
+        static_cast<void>(routes_.replaceRouted(net_id, std::span<const eccdb::RouteShape>{shapes}));
+      });
+      return drt_trace::shapeValues(wire(event.object), false);
+    }
+
+    return execute(event);
+  }
+
   [[nodiscard]] std::vector<drt_trace::Shape> wire(uint32_t token) const
   {
+    return wireSnapshot(routes_.snapshot(net(token)));
+  }
+
+  [[nodiscard]] std::vector<drt_trace::Shape> wireSnapshot(const eccdb::NetRouteSnapshot& snapshot) const
+  {
     std::vector<drt_trace::Shape> result;
-    const auto snapshot = routes_.snapshot(net(token));
     for (const auto& saved_wire : snapshot.wires) {
       for (const auto& shape : saved_wire.shapes) {
         std::visit(
@@ -626,6 +1096,44 @@ class EccdbBackend
                             .y2 = rectangle.rectangle.ur_y});
     }
     return drt_trace::viaValue(value.name, rectangles);
+  }
+
+  [[nodiscard]] json::object wireWriteProfile() const
+  {
+    const auto& profile = wire_write_profile_;
+    return {{"schema", "eccdb_drt_trace_wire_write_profile_v1"},
+            {"scope", "replace_wire only; every *_ns value is cumulative across whole-Wire operations; "
+                      "adapter conversion includes vector reserve, adaptor_total_ns includes temporary vector destruction, "
+                      "and parsing/setup/final validation are excluded; convert_shapes_ns is a retained zero compatibility "
+                      "field because streaming conversion, validation, Shape entity/component insertion, and owner ShapeId "
+                      "append are fused into append_shapes_ns; service phase values are not nested, while service_call_ns "
+                      "and service_total_ns wrap them and must not be added to them"},
+            {"timer", json::object{{"clock", "std::chrono::steady_clock"},
+                                    {"unit", "nanoseconds"},
+                                    {"aggregation", "cumulative_ns"},
+                                    {"instrumented", true},
+                                    {"comparison", "diagnostic timings are not directly comparable to an uninstrumented run"}}},
+            {"calls", profile.calls},
+            {"counts", json::object{{"input_shapes", profile.input_shapes},
+                                     {"replaced_wires", profile.replaced_wires},
+                                     {"replaced_shapes", profile.replaced_shapes}}},
+            {"route_shape_bytes", static_cast<uint64_t>(sizeof(eccdb::RouteShape))},
+            {"stored_shape_bytes", static_cast<uint64_t>(sizeof(eccdb::DesignRouteShape))},
+            {"shape_id_bytes", static_cast<uint64_t>(sizeof(eccdb::DesignRouteShapeId))},
+            {"adaptor_convert_ns", wire_write_adaptor_convert_ns_},
+            {"net_resolution_ns", wire_write_net_resolution_ns_},
+            {"service_call_ns", wire_write_service_call_ns_},
+            {"adaptor_total_ns", wire_write_adaptor_total_ns_},
+            {"service_phase_semantics",
+             json::object{{"convert_shapes_ns", "compatibility field; zero for streaming writes"},
+                          {"append_shapes_ns",
+                           "fused RouteShape conversion, validation, Shape entity/component insertion, and owner ShapeId append"}}},
+            {"service", json::object{{"select_wires_ns", profile.select_wires_ns},
+                                       {"convert_shapes_ns", profile.convert_shapes_ns},
+                                       {"create_wire_ns", profile.create_wire_ns},
+                                       {"append_shapes_ns", profile.append_shapes_ns},
+                                       {"destroy_old_ns", profile.destroy_old_ns},
+                                       {"service_total_ns", profile.service_total_ns}}}};
   }
 
  private:
@@ -1612,10 +2120,36 @@ class EccdbBackend
 
   void replaceWire(uint32_t token, const std::vector<drt_trace::Shape>& shapes)
   {
-    std::vector<eccdb::RouteShape> converted;
-    converted.reserve(shapes.size());
-    for (const auto& shape : shapes) converted.push_back(routeShape(shape));
-    static_cast<void>(routes_.replaceRouted(net(token), std::span<const eccdb::RouteShape>{converted}));
+    if (!profile_wire_write_) {
+      std::vector<eccdb::RouteShape> converted;
+      converted.reserve(shapes.size());
+      for (const auto& shape : shapes) converted.push_back(routeShape(shape));
+      static_cast<void>(routes_.replaceRouted(net(token), std::span<const eccdb::RouteShape>{converted}));
+      return;
+    }
+
+    using Clock = std::chrono::steady_clock;
+    const auto total_begin = Clock::now();
+    {
+      const auto convert_begin = Clock::now();
+      std::vector<eccdb::RouteShape> converted;
+      converted.reserve(shapes.size());
+      for (const auto& shape : shapes) converted.push_back(routeShape(shape));
+      wire_write_adaptor_convert_ns_ +=
+          std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - convert_begin).count();
+
+      const auto net_resolution_begin = Clock::now();
+      const auto net_id = net(token);
+      wire_write_net_resolution_ns_ +=
+          std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - net_resolution_begin).count();
+
+      const auto service_begin = Clock::now();
+      static_cast<void>(routes_.replaceRouted(net_id, std::span<const eccdb::RouteShape>{converted}, &wire_write_profile_));
+      wire_write_service_call_ns_ +=
+          std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - service_begin).count();
+    }
+    wire_write_adaptor_total_ns_ +=
+        std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - total_begin).count();
   }
 
   [[nodiscard]] bool supportsBlockages() const
@@ -1664,59 +2198,56 @@ class EccdbBackend
     return true;
   }
 
-  // dbSWire preserves an ordered list of SBoxes. EccDB preserves path-local
-  // point/via order, but intentionally keeps RECTs in a separate flat range.
-  // A RECT and a VIA at the same point therefore cannot be replayed in exact
-  // dbSWire order without an additional source-order field. Only expose the
-  // lossless subset here instead of inventing an ordering.
-  [[nodiscard]] bool supportsSpecialWirePath(eccdb::DesignWirePathView path) const
+  // Trace replay consumes the canonical Shape entities directly.  A Shape is
+  // already one ordered routing primitive, so no path projection or point
+  // index inference is needed here.
+  [[nodiscard]] bool supportsSpecialWireShape(const eccdb::DesignRouteShape& shape) const
   {
-    constexpr uint32_t kSupportedPathFlags = eccdb::DesignWirePathFlag::kHasWidth | eccdb::DesignWirePathFlag::kHasMask
-                                             | eccdb::DesignWirePathFlag::kHasShape;
-    if (!path.layer() || !technology_.routingLayerStorage().contains(path.layer())
-        || isBackside(technology_.layerInfo(eccdb::TechLayerId{path.layer().entity()}))
-        || (path.flags() & ~kSupportedPathFlags) != 0u
-        || (path.flags() & eccdb::DesignWirePathFlag::kHasWidth) == 0u || path.width() < 0
-        || !path.rectangles().empty()) {
+    constexpr uint32_t kSupportedShapeFlags = eccdb::DesignWirePathFlag::kHasWidth | eccdb::DesignWirePathFlag::kHasMask
+                                              | eccdb::DesignWirePathFlag::kHasShape;
+    if (!shape.layer || !technology_.routingLayerStorage().contains(shape.layer)
+        || isBackside(technology_.layerInfo(eccdb::TechLayerId{shape.layer.entity()}))
+        || (shape.flags & ~kSupportedShapeFlags) != 0u) {
       return false;
     }
-
-    const auto points = path.points();
-    if (points.empty()) return false;
-    for (std::size_t index = 0; index < points.size(); ++index) {
-      const auto point = points[index];
-      if (point.flags != 0u || point.extension != 0) return false;
-      if (index == 0u) continue;
-      const auto previous = points[index - 1u];
-      // The ODB projection canonicalizes special SBoxes into orthogonal
-      // center lines. The no-extension form is exactly recoverable here.
-      if ((previous.position.x == point.position.x) == (previous.position.y == point.position.y)) return false;
-    }
-
-    for (const auto via : path.vias()) {
-      constexpr uint32_t kKnownViaFlags = eccdb::DesignWireViaFlag::kHasMask | eccdb::DesignWireViaFlag::kHasArray;
-      const bool has_tech = static_cast<bool>(via.tech_via);
-      const bool has_design = static_cast<bool>(via.design_via);
-      if (via.point_index >= points.size() || has_tech == has_design || via.orientation != eccdb::DesignOrientation::kN
-          || (via.flags & ~kKnownViaFlags) != 0u || via.rows == 0u || via.columns == 0u
-          || ((via.flags & eccdb::DesignWireViaFlag::kHasArray) == 0u
-              && (via.rows != 1u || via.columns != 1u || via.step_x != 0 || via.step_y != 0))
-          // A following segment would need the ODB parser's post-VIA active
-          // layer. EccDB records one layer per path, so do not infer it.
-          || via.point_index + 1u < points.size()) {
-        return false;
-      }
-      try {
-        const auto layers = physical_.routingViaLayers(via.tech_via, via.design_via);
-        if (isBackside(technology_.layerInfo(eccdb::TechLayerId{layers.bottom.entity()}))
-            || isBackside(technology_.layerInfo(eccdb::TechLayerId{layers.top.entity()}))) {
-          return false;
-        }
-      } catch (const std::exception&) {
-        return false;
-      }
-    }
-    return true;
+    return std::visit(
+        [&](const auto& geometry) {
+          using Geometry = std::remove_cvref_t<decltype(geometry)>;
+          if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteSegment>) {
+            if ((shape.flags & eccdb::DesignWirePathFlag::kHasWidth) == 0u) return false;
+            if (geometry.begin.flags != 0u || geometry.end.flags != 0u || geometry.begin.extension != 0
+                || geometry.end.extension != 0) {
+              return false;
+            }
+            return (geometry.begin.position.x == geometry.end.position.x)
+                   != (geometry.begin.position.y == geometry.end.position.y);
+          } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
+            constexpr uint32_t kKnownViaFlags = eccdb::DesignWireViaFlag::kHasMask | eccdb::DesignWireViaFlag::kHasArray;
+            const auto& via = geometry.via;
+            const bool has_tech = static_cast<bool>(via.tech_via);
+            const bool has_design = static_cast<bool>(via.design_via);
+            if (geometry.origin.flags != 0u || geometry.origin.extension != 0 || has_tech == has_design
+                || via.orientation != eccdb::DesignOrientation::kN || (via.flags & ~kKnownViaFlags) != 0u
+                || via.rows == 0u || via.columns == 0u
+                || ((via.flags & eccdb::DesignWireViaFlag::kHasArray) == 0u
+                    && (via.rows != 1u || via.columns != 1u || via.step_x != 0 || via.step_y != 0))) {
+              return false;
+            }
+            try {
+              const auto layers = physical_.routingViaLayers(via.tech_via, via.design_via);
+              return !isBackside(technology_.layerInfo(eccdb::TechLayerId{layers.bottom.entity()}))
+                     && !isBackside(technology_.layerInfo(eccdb::TechLayerId{layers.top.entity()}));
+            } catch (const std::exception&) {
+              return false;
+            }
+          } else {
+            // SPECIALNET trace replay currently models SBoxes as paths/Vias;
+            // standalone rectangles and syntax-only points have no dbSWire
+            // equivalent in this trace operation.
+            return false;
+          }
+        },
+        shape.geometry);
   }
 
   [[nodiscard]] bool supportsSpecialWire(const drt_trace::Event& event) const
@@ -1728,10 +2259,12 @@ class EccdbBackend
       // not ordered together with DesignWire paths in the flat representation.
       if (!net_id || design_.routingStorage().netGeometry(net_id) != nullptr) return false;
       bool supported = true;
-      physical_.forEachNetWire(net_id, [&](eccdb::DesignWireId wire_id, const eccdb::DesignWire& wire) {
-        for (std::size_t index = 0; supported && index < wire.routing.pathCount(); ++index) {
-          supported = supportsSpecialWirePath(wire.routing.path(index));
-        }
+      physical_.forEachNetWire(net_id, [&](eccdb::DesignWireId wire_id, const eccdb::DesignWire&) {
+        design_.routingStorage().forEachShape(
+            wire_id, [&](eccdb::DesignRouteShapeId, const eccdb::DesignRouteShape& shape,
+                         const eccdb::DesignRouteShapeAttributes*) {
+              if (supported) supported = supportsSpecialWireShape(shape);
+        });
       });
       return supported;
     } catch (const std::exception&) {
@@ -1892,8 +2425,14 @@ class EccdbBackend
     auto net_id = physical_.findRegularNet(name);
     if (!net_id) net_id = design_.netlistStorage().findSpecialNet(name);
     if (!net_id) fail("EccDB trace guide net does not exist: " + std::string(name));
+    return guideValues(design_.guideStorage().guides(net_id));
+  }
+
+  [[nodiscard]] json::value guideValues(std::span<const eccdb::DesignRouteGuide> guides) const
+  {
     json::array result;
-    for (const auto& guide : design_.guideStorage().guides(net_id)) {
+    result.reserve(guides.size());
+    for (const auto& guide : guides) {
       if (isBackside(technology_.layerInfo(eccdb::TechLayerId{guide.layer.entity()}))) continue;
       const auto via_layer = eccdb::TechLayerId{guide.via_layer.entity()};
       if (via_layer && isBackside(technology_.layerInfo(via_layer))) {
@@ -1929,41 +2468,29 @@ class EccdbBackend
     }
   }
 
-  void appendSpecialWirePath(json::array& shapes, eccdb::DesignWirePathView path) const
+  void appendSpecialWireShape(json::array& shapes, const eccdb::DesignRouteShape& shape,
+                              const eccdb::DesignRouteShapeAttributes* attributes) const
   {
-    const auto points = path.points();
-    std::vector<std::vector<eccdb::DesignWireVia>> vias_at_point(points.size());
-    for (const auto via : path.vias()) {
-      vias_at_point[via.point_index].push_back(via);
-    }
-
-    const std::string shape = path.shape().empty() ? "NONE" : std::string(path.shape());
-    for (std::size_t index = 0; index < points.size(); ++index) {
-      const auto point = points[index].position;
-      if (index != 0u) {
-        const auto previous = points[index - 1u].position;
-        if (previous.x == point.x) {
-          shapes.emplace_back(json::array{"path",
-                                          routingLayerName(path.layer()),
-                                          shape,
-                                          point.x,
-                                          std::min(previous.y, point.y),
-                                          point.x,
-                                          std::max(previous.y, point.y),
-                                          path.width()});
-        } else {
-          shapes.emplace_back(json::array{"path",
-                                          routingLayerName(path.layer()),
-                                          shape,
-                                          std::min(previous.x, point.x),
-                                          point.y,
-                                          std::max(previous.x, point.x),
-                                          point.y,
-                                          path.width()});
-        }
-      }
-      for (const auto& via : vias_at_point[index]) appendSpecialWireVia(shapes, via, point);
-    }
+    const std::string shape_name = attributes == nullptr || attributes->shape.empty() ? "NONE" : attributes->shape;
+    const int32_t width = attributes == nullptr ? 0 : attributes->width;
+    std::visit(
+        [&](const auto& geometry) {
+          using Geometry = std::remove_cvref_t<decltype(geometry)>;
+          if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteSegment>) {
+            const auto first = geometry.begin.position;
+            const auto second = geometry.end.position;
+            if (first.x == second.x) {
+              shapes.emplace_back(json::array{"path", routingLayerName(shape.layer), shape_name, first.x,
+                                              std::min(first.y, second.y), first.x, std::max(first.y, second.y), width});
+            } else {
+              shapes.emplace_back(json::array{"path", routingLayerName(shape.layer), shape_name,
+                                              std::min(first.x, second.x), first.y, std::max(first.x, second.x), first.y, width});
+            }
+          } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
+            appendSpecialWireVia(shapes, geometry.via, geometry.origin.position);
+          }
+        },
+        shape.geometry);
   }
 
   [[nodiscard]] json::value readSpecialWire(std::string_view name) const
@@ -1971,11 +2498,13 @@ class EccdbBackend
     const auto net_id = design_.netlistStorage().findSpecialNet(name);
     if (!net_id) fail("EccDB trace special net does not exist: " + std::string(name));
     json::array result;
-    physical_.forEachNetWire(net_id, [&](eccdb::DesignWireId, const eccdb::DesignWire& wire) {
+    physical_.forEachNetWire(net_id, [&](eccdb::DesignWireId wire_id, const eccdb::DesignWire& wire) {
       json::array shapes;
-      for (std::size_t index = 0; index < wire.routing.pathCount(); ++index) {
-        appendSpecialWirePath(shapes, wire.routing.path(index));
-      }
+      design_.routingStorage().forEachShape(
+          wire_id, [&](eccdb::DesignRouteShapeId, const eccdb::DesignRouteShape& shape,
+                       const eccdb::DesignRouteShapeAttributes* attributes) {
+            appendSpecialWireShape(shapes, shape, attributes);
+          });
       result.emplace_back(json::array{specialWireTypeName(wire.status), std::move(shapes)});
     });
     return result;
@@ -2900,6 +3429,12 @@ class EccdbBackend
   eccdb::DesignViaService vias_;
   eccdb::PhysicalDesignService physical_;
   eccdb::NetRouteService routes_;
+  bool profile_wire_write_ = false;
+  eccdb::NetRouteWriteProfile wire_write_profile_;
+  uint64_t wire_write_adaptor_convert_ns_ = 0;
+  uint64_t wire_write_net_resolution_ns_ = 0;
+  uint64_t wire_write_service_call_ns_ = 0;
+  uint64_t wire_write_adaptor_total_ns_ = 0;
   std::vector<eccdb::DesignInstanceId> instances_;
   std::vector<eccdb::DesignNetId> nets_;
 };
@@ -2990,6 +3525,166 @@ class IdbBackend
     fail("unsupported iDB trace operation: " + event.op);
   }
 
+  // Keep the iDB projection code out of the native timer for the same reason
+  // as EccDB: the trace's JSON vocabulary is not an iDB API cost.  The timer
+  // covers list lookup/traversal and native mutation only.
+  [[nodiscard]] json::value executeNative(const drt_trace::Event& event, drt_trace::NativeTimer& timer)
+  {
+    const auto item_count = event.expected.is_array() ? static_cast<uint64_t>(event.expected.as_array().size()) : 1u;
+
+    if (event.op == "find_instance") {
+      auto* instances = design_->get_instance_list();
+      if (instances == nullptr) fail("iDB import did not create instance storage");
+      const auto name = unescapeDefIdentifier(event.name);
+      auto* value = timer.measure("find_instance", 1u, [&] { return instances->find_instance(name); });
+      return value == nullptr ? json::value(nullptr) : json::value(traceName(value));
+    }
+    if (event.op == "find_pin") {
+      auto* value = instance(event.object);
+      const std::string term_name = event.name;
+      struct PinValue
+      {
+        idb::IdbPin* pin = nullptr;
+      } raw;
+      timer.measure("find_pin", 1u, [&] {
+        raw.pin = value->get_pin(term_name);
+        if (raw.pin == nullptr) raw.pin = value->get_pin_by_term(term_name);
+      });
+      if (raw.pin == nullptr) return json::value(nullptr);
+      return json::value(raw.pin->get_term_name());
+    }
+    if (event.op == "read_instance") {
+      const auto* value = instance(event.object);
+      struct Value
+      {
+        idb::IdbInstance* instance = nullptr;
+        std::string_view instance_name;
+        std::string_view master_name;
+        int32_t x = 0;
+        int32_t y = 0;
+        idb::IdbOrient orient = idb::IdbOrient::kN_R0;
+      } raw;
+      timer.measure("read_instance", 1u, [&] {
+        raw.instance = const_cast<idb::IdbInstance*>(value);
+        raw.instance_name = raw.instance->get_name();
+        raw.master_name = raw.instance->get_cell_master()->get_name();
+        auto* coordinate = raw.instance->get_coordinate();
+        raw.x = coordinate->get_x();
+        raw.y = coordinate->get_y();
+        raw.orient = raw.instance->get_orient();
+      });
+      return json::array{traceName(raw.instance, raw.instance_name), std::string(raw.master_name), raw.x, raw.y,
+                         orientationName(raw.orient)};
+    }
+    if (event.op == "read_instance_pins") {
+      auto* value = instance(event.object);
+      std::vector<std::string> terms;
+      terms.reserve(static_cast<std::size_t>(item_count));
+      timer.measure("read_instance_pins", item_count, [&] {
+        for (auto* pin : value->get_pin_list()->get_pin_list()) terms.push_back(pin->get_term_name());
+      });
+      json::array result;
+      result.reserve(terms.size());
+      for (const auto& term : terms) result.emplace_back(term);
+      return result;
+    }
+    if (event.op == "scan_instances") {
+      auto* source = design_->get_instance_list();
+      if (source == nullptr) fail("iDB import did not create instance storage");
+      struct InstanceValue
+      {
+        idb::IdbInstance* instance = nullptr;
+        std::string_view name;
+      };
+      std::vector<InstanceValue> values;
+      values.reserve(static_cast<std::size_t>(item_count));
+      timer.measure("scan_instances", item_count, [&] {
+        for (auto* value : source->get_instance_list()) values.push_back({value, value->get_name()});
+      });
+      json::array result;
+      result.reserve(values.size());
+      for (const auto& value : values) result.emplace_back(traceName(value.instance, value.name));
+      return result;
+    }
+    if (event.op == "scan_nets") {
+      auto* source = design_->get_net_list();
+      if (source == nullptr) fail("iDB import did not create ordinary-net storage");
+      struct NetValue
+      {
+        idb::IdbNet* net = nullptr;
+        std::string name;
+      };
+      std::vector<NetValue> values;
+      values.reserve(static_cast<std::size_t>(item_count));
+      timer.measure("scan_nets", item_count, [&] {
+        for (auto* value : source->get_net_list()) values.push_back({value, value->get_net_name()});
+      });
+      json::array result;
+      result.reserve(values.size());
+      for (const auto& value : values) result.emplace_back(traceName(value.net, value.name));
+      return result;
+    }
+    if (event.op == "net_pins") {
+      auto* value = net(event.object);
+      struct PinValue
+      {
+        bool instance = false;
+        idb::IdbInstance* instance_value = nullptr;
+        std::string_view instance_name;
+        std::string term_name;
+        std::string pin_name;
+      };
+      std::vector<PinValue> values;
+      values.reserve(static_cast<std::size_t>(item_count));
+      timer.measure("net_pins", item_count, [&] {
+        for (auto* pin : value->get_instance_pin_list()->get_pin_list()) {
+          auto* instance_value = pin->get_instance();
+          values.push_back({.instance = true,
+                            .instance_value = instance_value,
+                            .instance_name = instance_value->get_name(),
+                            .term_name = pin->get_term_name()});
+        }
+        for (auto* pin : value->get_io_pins()->get_pin_list()) {
+          values.push_back({.instance = false, .pin_name = pin->get_pin_name()});
+        }
+      });
+      json::array result;
+      result.reserve(values.size());
+      for (const auto& entry : values) {
+        if (entry.instance) {
+          result.emplace_back(json::array{"I", traceName(entry.instance_value, entry.instance_name), entry.term_name});
+        } else {
+          result.emplace_back(json::array{"B", entry.pin_name, ""});
+        }
+      }
+      return result;
+    }
+    if (event.op == "read_wire") {
+      auto* value = net(event.object);
+      std::vector<NativeWireShape> shapes;
+      timer.measure("read_wire", item_count, [&] { shapes = readWireNative(value); });
+      return drt_trace::shapeProjection(projectWireNative(shapes), false);
+    }
+    if (event.op == "clear_wire") {
+      auto* value = net(event.object);
+      timer.measure("clear_wire", 0u, [&] { value->clear_wire_list(); });
+      unavailable_wire_state_.erase(event.object);
+      return json::value(nullptr);
+    }
+    if (event.op == "replace_wire") {
+      auto* value = net(event.object);
+      auto shapes = prepareWire(event.shapes);
+      const auto count = static_cast<uint64_t>(shapes.size());
+      timer.measure("replace_wire", count, [&] {
+        replaceWireNative(value, std::span<const NativeWireShape>{shapes.data(), shapes.size()});
+      });
+      unavailable_wire_state_.erase(event.object);
+      return json::value(nullptr);
+    }
+
+    return execute(event);
+  }
+
   [[nodiscard]] std::vector<drt_trace::Shape> wire(uint32_t token) const
   {
     return readWire(net(token));
@@ -3036,6 +3731,170 @@ class IdbBackend
     idb::IdbVia* via = nullptr;
     bool tech_via = false;
   };
+
+  struct NativeWireShape
+  {
+    enum class Kind : uint8_t
+    {
+      kSegment,
+      kVia,
+      kPatch
+    };
+
+    Kind kind = Kind::kSegment;
+    idb::IdbLayer* layer = nullptr;
+    idb::IdbVia* via = nullptr;
+    std::string layer_name;
+    std::string via_name;
+    bool tech_via = true;
+    int32_t x1 = 0;
+    int32_t y1 = 0;
+    int32_t x2 = 0;
+    int32_t y2 = 0;
+    int32_t delta_x = 0;
+    int32_t delta_y = 0;
+  };
+
+  [[nodiscard]] std::vector<NativeWireShape> prepareWire(const std::vector<drt_trace::Shape>& source) const
+  {
+    std::vector<NativeWireShape> result;
+    result.reserve(source.size());
+    for (const auto& shape : source) {
+      if (shape.kind == "segment") {
+        if (shape.x1 != shape.x2 && shape.y1 != shape.y2) fail("trace segment is not Manhattan");
+        auto* layer = routingLayer(shape.layer);
+        result.push_back({.kind = NativeWireShape::Kind::kSegment,
+                          .layer = layer,
+                          .layer_name = layer->get_name(),
+                          .x1 = shape.x1,
+                          .y1 = shape.y1,
+                          .x2 = shape.x2,
+                          .y2 = shape.y2});
+      } else if (shape.kind == "via") {
+        if (shape.via.empty() || shape.x1 != shape.x2 || shape.y1 != shape.y2 || shape.begin_extension || shape.end_extension) {
+          fail("trace VIA carries unsupported metadata");
+        }
+        const auto source_via = viaPrototype(shape.via, shape.tech_via);
+        const auto bottom = viaBottomLayer(source_via.via);
+        if (bottom != shape.layer) fail("trace VIA layer is not the VIA's canonical iDB bottom routing layer");
+        auto* layer = routingLayer(bottom);
+        result.push_back({.kind = NativeWireShape::Kind::kVia,
+                          .layer = layer,
+                          .via = source_via.via,
+                          .layer_name = layer->get_name(),
+                          .tech_via = source_via.tech_via,
+                          .x1 = shape.x1,
+                          .y1 = shape.y1,
+                          .x2 = shape.x2,
+                          .y2 = shape.y2});
+      } else if (shape.kind == "patch") {
+        if (shape.x2 < shape.x1 || shape.y2 < shape.y1) fail("trace patch has an invalid rectangle");
+        auto* layer = routingLayer(shape.layer);
+        result.push_back({.kind = NativeWireShape::Kind::kPatch,
+                          .layer = layer,
+                          .layer_name = layer->get_name(),
+                          .x1 = shape.x1,
+                          .y1 = shape.y1,
+                          .x2 = shape.x2,
+                          .y2 = shape.y2,
+                          .delta_x = checkedDelta(shape.x2, shape.x1, "trace patch width"),
+                          .delta_y = checkedDelta(shape.y2, shape.y1, "trace patch height")});
+      } else {
+        fail("unsupported iDB route shape '" + shape.kind + "'");
+      }
+    }
+    return result;
+  }
+
+  void replaceWireNative(idb::IdbNet* value, std::span<const NativeWireShape> shapes) const
+  {
+    value->clear_wire_list();
+    if (shapes.empty()) return;
+
+    auto* wire = value->get_wire_list()->add_wire();
+    wire->set_wire_state(idb::IdbWiringStatement::kRouted);
+    for (const auto& shape : shapes) {
+      auto* segment = wire->add_segment();
+      segment->set_layer_name(shape.layer_name);
+      segment->set_layer(shape.layer);
+      if (shape.kind == NativeWireShape::Kind::kSegment) {
+        segment->add_point(shape.x1, shape.y1);
+        segment->add_point(shape.x2, shape.y2);
+      } else if (shape.kind == NativeWireShape::Kind::kVia) {
+        segment->add_point(shape.x1, shape.y1);
+        segment->set_is_via(true);
+        auto* copy = segment->copy_via(shape.via);
+        copy->set_coordinate(shape.x1, shape.y1);
+      } else {
+        segment->add_point(shape.x1, shape.y1);
+        segment->set_is_rect(true);
+        segment->set_delta_rect(0, 0, shape.delta_x, shape.delta_y);
+      }
+    }
+  }
+
+  [[nodiscard]] std::vector<NativeWireShape> readWireNative(idb::IdbNet* value) const
+  {
+    std::vector<NativeWireShape> result;
+    for (auto* wire : value->get_wire_list()->get_wire_list()) {
+      for (auto* segment : wire->get_segment_list()) {
+        const auto& points = segment->get_point_list();
+        if (segment->is_rect()) {
+          auto* rectangle = segment->get_delta_rect();
+          result.push_back({.kind = NativeWireShape::Kind::kPatch,
+                            .layer = segment->get_layer(),
+                            .layer_name = segment->get_layer()->get_name(),
+                            .x1 = points.front()->get_x(),
+                            .y1 = points.front()->get_y(),
+                            .x2 = checkedOffset(points.front()->get_x(), rectangle->get_high_x(), "iDB RECT high x"),
+                            .y2 = checkedOffset(points.front()->get_y(), rectangle->get_high_y(), "iDB RECT high y")});
+        } else if (segment->is_via() || !segment->get_via_list().empty()) {
+          auto* via = segment->get_via_list().front();
+          const auto source = sourceOf(via);
+          auto coordinate = via->get_coordinate();
+          auto bottom = const_cast<idb::IdbVia*>(via)->get_bottom_layer_shape();
+          result.push_back({.kind = NativeWireShape::Kind::kVia,
+                            .layer = bottom.get_layer(),
+                            .via = via,
+                            .layer_name = bottom.get_layer()->get_name(),
+                            .via_name = via->get_name(),
+                            .tech_via = source.tech_via,
+                            .x1 = coordinate->get_x(),
+                            .y1 = coordinate->get_y(),
+                            .x2 = coordinate->get_x(),
+                            .y2 = coordinate->get_y()});
+        } else {
+          result.push_back({.kind = NativeWireShape::Kind::kSegment,
+                            .layer = segment->get_layer(),
+                            .layer_name = segment->get_layer()->get_name(),
+                            .x1 = points[0]->get_x(),
+                            .y1 = points[0]->get_y(),
+                            .x2 = points[1]->get_x(),
+                            .y2 = points[1]->get_y()});
+        }
+      }
+    }
+    return result;
+  }
+
+  [[nodiscard]] std::vector<drt_trace::Shape> projectWireNative(std::span<const NativeWireShape> source) const
+  {
+    std::vector<drt_trace::Shape> result;
+    result.reserve(source.size());
+    for (const auto& shape : source) {
+      if (shape.kind == NativeWireShape::Kind::kSegment) {
+        result.push_back({.kind = "segment", .layer = shape.layer_name, .x1 = shape.x1, .y1 = shape.y1,
+                          .x2 = shape.x2, .y2 = shape.y2});
+      } else if (shape.kind == NativeWireShape::Kind::kVia) {
+        result.push_back({.kind = "via", .layer = shape.layer_name, .via = shape.via_name,
+                          .x1 = shape.x1, .y1 = shape.y1, .x2 = shape.x2, .y2 = shape.y2, .tech_via = shape.tech_via});
+      } else {
+        result.push_back({.kind = "patch", .layer = shape.layer_name, .x1 = shape.x1, .y1 = shape.y1,
+                          .x2 = shape.x2, .y2 = shape.y2});
+      }
+    }
+    return result;
+  }
 
   void bind(const json::object& header)
   {
@@ -3123,10 +3982,22 @@ class IdbBackend
     return value->get_name();
   }
 
+  [[nodiscard]] std::string_view traceName(idb::IdbInstance* value, std::string_view native_name) const
+  {
+    if (const auto found = instance_trace_names_.find(value); found != instance_trace_names_.end()) return found->second;
+    return native_name;
+  }
+
   [[nodiscard]] std::string_view traceName(idb::IdbNet* value) const
   {
     if (const auto found = net_trace_names_.find(value); found != net_trace_names_.end()) return found->second;
     return value->get_net_name();
+  }
+
+  [[nodiscard]] std::string_view traceName(idb::IdbNet* value, std::string_view native_name) const
+  {
+    if (const auto found = net_trace_names_.find(value); found != net_trace_names_.end()) return found->second;
+    return native_name;
   }
 
   [[nodiscard]] idb::IdbLayout* layout() const
@@ -4095,6 +4966,9 @@ int main(int argc, char** argv)
       EccdbBackend backend(options, trace.header());
       drt_trace::replayStream(backend, trace, options);
     } else if (options.backend == "idb") {
+      if (options.profile_wire_write) {
+        fail("--profile-wire-write is supported only with --backend eccdb");
+      }
       IdbBackend backend(options, trace.header());
       drt_trace::replayStream(backend, trace, options);
     } else {

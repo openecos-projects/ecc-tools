@@ -3,6 +3,8 @@
 English version: [Experimental_API_Usage.en.md](Experimental_API_Usage.en.md)
 
 > **状态：实验性尝试。** 当前接口用于探索和验证公共访问边界，不是已定型的 SDK。类型、函数、错误语义、安装导出和 ABI 均可能发生不兼容调整；本文只描述当前原型，不承诺源码或二进制兼容。集成前请固定源码版本，并参考 [集成计划](Integration_Plan.zh-CN.md)。
+>
+> **路由说明（2026-10-02）：** 本文中的 Wire path/value 示例属于历史说明，已被 [Shape_Wire_Model.md](Shape_Wire_Model.md) 取代。当前 C++ storage/service/adaptor 合同直接创建、读取、更新和销毁独立的 Segment/Via/Patch/Point Shape；`DesignWirePath` 只在 parser 局部使用。本次破坏性迁移不维护 Rust/C 绑定和旧 `WireRoutingData` 写回示例。
 
 ## 1. API 定位
 

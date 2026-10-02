@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 
@@ -81,11 +82,35 @@ void binaryArchive(Archive& archive, DesignInstancePin& value)
   value.master_term_ptr = nullptr;
 }
 
+template <typename Archive>
+void binaryArchive(Archive& archive, const DesignRouteShape& value)
+{
+  archive(value.wire, value.layer, value.flags, value.source_path);
+  const auto kind = static_cast<uint8_t>(value.geometry.index());
+  archive(kind);
+  std::visit([&](const auto& geometry) { archive(geometry); }, value.geometry);
+}
+
+template <typename Archive>
+void binaryArchive(Archive& archive, DesignRouteShape& value)
+{
+  archive(value.wire, value.layer, value.flags, value.source_path);
+  uint8_t kind = 0;
+  archive(kind);
+  switch (kind) {
+    case 0: { DesignRouteSegment geometry; archive(geometry); value.geometry = geometry; break; }
+    case 1: { DesignRouteVia geometry; archive(geometry); value.geometry = geometry; break; }
+    case 2: { DesignRoutePatch geometry; archive(geometry); value.geometry = geometry; break; }
+    case 3: { DesignRoutePoint geometry; archive(geometry); value.geometry = geometry; break; }
+    default: throw std::runtime_error("binary design has an invalid route Shape kind");
+  }
+}
+
 namespace binary_detail {
 
 inline constexpr uint32_t kTechSchemaVersion = 9;
 inline constexpr uint32_t kLibrarySchemaVersion = 2;
-inline constexpr uint32_t kDesignSchemaVersion = 8;
+inline constexpr uint32_t kDesignSchemaVersion = 9;
 
 template <typename... Types>
 struct BinaryTypeList
@@ -130,12 +155,12 @@ using TechBinaryComponents = BinaryTypeList<
 
 using LibraryBinaryComponents = BinaryTypeList<LibrarySite, LibraryCellMaster, LibraryMasterTerm, LibraryMasterPort, LibraryMasterObs>;
 
-// DesignWire owns its Wire-local flat routing vectors, which are persisted as
-// part of the component snapshot.
+// Shapes own geometry. Wire owns Shape IDs; DEF paths and bbox are derived.
 using DesignBinaryComponents
     = BinaryTypeList<DesignRoot, DesignInfo, DesignDieArea, DesignCoreArea, DesignRow, DesignTrackGrid, DesignGCellGrid,
                      DesignInstance, DesignInstanceTerms, DesignBlockTerm, DesignBlockPin, DesignNet, DesignNetInstancePins,
-                     DesignNetIoPins, DesignSpecialNet, DesignNetOptions, DesignWire, DesignNetGeometry, DesignVia,
+                     DesignNetIoPins, DesignSpecialNet, DesignNetOptions, DesignWire, DesignRouteShape,
+                     DesignRouteShapeAttributes, DesignNetGeometry, DesignVia,
                      DesignNonDefaultRule, DesignRegion, DesignGroup, DesignBlockage, DesignFill, DesignNetRouteGuides,
                      DesignNetTrackAssignments, DesignPinAccessCatalog, DesignInstancePinAccessGroupIndex,
                      DesignInstancePreferredPinAccess, DesignBlockPinAccessGroups>;

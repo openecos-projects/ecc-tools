@@ -5,6 +5,8 @@ English version: [Architecture.en.md](Architecture.en.md)
 本文件描述当前 `src/database/eccdb` 的实际分层、数据所有权和公共 API 语义。它是当前实现的架构说明，不把尚未完成的目标设计误写成现有能力。
 
 > 公共 API 层目前是实验性尝试，不承诺 API/ABI 稳定或跨版本兼容。下述分层描述当前实现，不代表接口设计已经定型；用法见 [实验性 API 说明](Experimental_API_Usage.zh-CN.md)。
+>
+> **Shape-first 更新（2026-10-02）：** 本文中描述 `WireRoutingData`、Wire 内部路径数组或 `updateWire()` 的路由段落属于历史说明，已被 [Shape_Wire_Model.md](Shape_Wire_Model.md) 取代。当前 Wire 保存有序 Shape ID，Segment/Via/Patch/Point payload 是独立 entity；DEF parser 中的路径值只用于局部转换。本次破坏性迁移不维护 Rust/C 绑定。
 
 ## 1. 总体分层
 

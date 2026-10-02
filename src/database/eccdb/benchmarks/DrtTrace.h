@@ -6,12 +6,15 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <boost/json.hpp>
@@ -32,6 +35,72 @@ struct ViaRect
 {
   std::string layer;
   int32_t x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+};
+
+// Original encoder inputs, in call order. Wire create/begin/end are represented
+// by the enclosing replace_wire event; new_path preserves every path boundary.
+struct WireAction
+{
+  std::string op, layer, via, rule;
+  int32_t x = 0, y = 0, a = 0, b = 0;
+  std::optional<int32_t> extension;
+};
+
+inline json::object wireActionRecord(const WireAction& action)
+{
+  json::object result{{"op", action.op}};
+  if (action.op == "new_path") {
+    result["layer"] = action.layer;
+    if (!action.rule.empty()) result["rule"] = action.rule;
+  } else if (action.op == "point") {
+    result["x"] = action.x;
+    result["y"] = action.y;
+    result["extension"] = action.extension ? json::value(*action.extension) : json::value(nullptr);
+  } else if (action.op == "tech_via" || action.op == "via") result["via"] = action.via;
+  else if (action.op == "rect") {
+    result["x"] = action.x;
+    result["y"] = action.y;
+    result["a"] = action.a;
+    result["b"] = action.b;
+  } else throw std::runtime_error("unknown wire encoder action: " + action.op);
+  return result;
+}
+
+struct NativeOperationTiming
+{
+  uint64_t calls = 0, items = 0, ns = 0;
+};
+
+// Only native API batches belong inside measure(). Binding, trace conversion,
+// result JSON construction and validation happen before or after the callback.
+struct NativeTimer
+{
+  uint64_t elapsed_ns = 0, calls = 0;
+  std::map<std::string, NativeOperationTiming> operations;
+
+  template <typename Function>
+  decltype(auto) measure(std::string_view operation, uint64_t items, Function&& function)
+  {
+    using Clock = std::chrono::steady_clock;
+    const auto begin = Clock::now();
+    const auto record = [&] {
+      const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - begin).count();
+      elapsed_ns += static_cast<uint64_t>(ns);
+      ++calls;
+      auto& value = operations[std::string(operation)];
+      ++value.calls;
+      value.items += items;
+      value.ns += static_cast<uint64_t>(ns);
+    };
+    if constexpr (std::is_void_v<std::invoke_result_t<Function>>) {
+      std::invoke(std::forward<Function>(function));
+      record();
+    } else {
+      auto result = std::invoke(std::forward<Function>(function));
+      record();
+      return result;
+    }
+  }
 };
 
 inline json::value shapeJson(Shape value, bool extensions)
@@ -122,6 +191,7 @@ struct Event
   std::optional<uint32_t> ordinal;
   json::value expected, payload;
   std::vector<Shape> shapes;
+  std::vector<WireAction> wire_actions;
   std::vector<ViaRect> via_rectangles;
   bool via_default = false;
 };
@@ -155,10 +225,10 @@ class TraceReader
     header_ = json::parse(line).as_object();
     schema_ = text(header_.at("schema"));
     if (schema_ != "tritonroute_db_trace_v1" && schema_ != "tritonroute_db_trace_v2"
-        && schema_ != "tritonroute_db_trace_v3") {
+        && schema_ != "tritonroute_db_trace_v3" && schema_ != "tritonroute_db_trace_v4") {
       throw std::runtime_error("unsupported trace schema");
     }
-    if (schema_ == "tritonroute_db_trace_v3") {
+    if (schema_ == "tritonroute_db_trace_v3" || schema_ == "tritonroute_db_trace_v4") {
       const auto& operations = header_.at("supported_operations").as_array();
       for (const auto& operation : operations) {
         if (!supported_.insert(text(operation)).second) {
@@ -189,7 +259,8 @@ class TraceReader
     }
     Event event;
     event.op = text(object.at("op"));
-    if (schema_ == "tritonroute_db_trace_v3" && !supported_.contains(event.op)) {
+    if ((schema_ == "tritonroute_db_trace_v3" || schema_ == "tritonroute_db_trace_v4")
+        && !supported_.contains(event.op)) {
       throw std::runtime_error("trace event is not declared in supported_operations: " + event.op);
     }
     event.source = text(object.at("source"));
@@ -250,6 +321,36 @@ class TraceReader
         event.shapes.push_back(std::move(item));
       }
     }
+    if (const auto* values = object.if_contains("wire_actions")) {
+      if (schema_ != "tritonroute_db_trace_v4") {
+        throw std::runtime_error("original wire actions require trace schema v4");
+      }
+      for (const auto& value : values->as_array()) {
+        const auto& fields = value.as_object();
+        WireAction action;
+        action.op = text(fields.at("op"));
+        if (action.op == "new_path") {
+          action.layer = text(fields.at("layer"));
+          if (const auto* rule = fields.if_contains("rule")) action.rule = text(*rule);
+        }
+        else if (action.op == "point") {
+          action.x = coordinate(fields.at("x"));
+          action.y = coordinate(fields.at("y"));
+          if (!fields.at("extension").is_null()) action.extension = coordinate(fields.at("extension"));
+        } else if (action.op == "tech_via" || action.op == "via") action.via = text(fields.at("via"));
+        else if (action.op == "rect") {
+          action.x = coordinate(fields.at("x"));
+          action.y = coordinate(fields.at("y"));
+          action.a = coordinate(fields.at("a"));
+          action.b = coordinate(fields.at("b"));
+        } else throw std::runtime_error("unknown wire encoder action: " + action.op);
+        event.wire_actions.push_back(std::move(action));
+      }
+    }
+    if (schema_ == "tritonroute_db_trace_v4" && event.op == "replace_wire"
+        && event.wire_actions.empty()) {
+      throw std::runtime_error("v4 Wire replacement has no original encoder actions");
+    }
     ++count_;
     return event;
   }
@@ -283,6 +384,7 @@ struct Options
 {
   std::filesystem::path trace, lef, def, guides, output;
   std::string backend;
+  bool profile_wire_write = false;
 };
 
 inline Options options(int argc, char** argv)
@@ -290,6 +392,10 @@ inline Options options(int argc, char** argv)
   Options result;
   for (int index = 1; index < argc; ++index) {
     const std::string argument(argv[index]);
+    if (argument == "--profile-wire-write") {
+      result.profile_wire_write = true;
+      continue;
+    }
     if (++index == argc) throw std::runtime_error("missing option value");
     if (argument == "--trace") result.trace = argv[index];
     else if (argument == "--lef") result.lef = argv[index];
@@ -305,13 +411,15 @@ inline Options options(int argc, char** argv)
   return result;
 }
 
-// Backend adapters return the same field projection. Validation, normalization,
-// and trace parsing are outside the operation timer; returned-value creation is not.
+// Production backends isolate their native API batches with NativeTimer.
+// execute() remains the untimed correctness path; backends without executeNative
+// are deliberately unmeasured, never reported as zero-cost native APIs.
 template <typename Backend, typename Visit>
 void replayEvents(Backend& backend, Visit&& visit, const Options& options)
 {
-  using Clock = std::chrono::steady_clock;
-  std::map<std::string, uint64_t> timings, counts, measured_counts, unsupported;
+  std::map<std::string, uint64_t> timings, counts, measured_counts, unsupported, unmeasured;
+  std::map<std::string, NativeOperationTiming> native_operations;
+  std::map<std::string, uint64_t> wire_actions;
   std::map<uint32_t, std::vector<Shape>> final_wires;
   std::map<uint32_t, json::value> final_wire_queries;
   std::map<uint32_t, json::value> final_pins;
@@ -333,11 +441,23 @@ void replayEvents(Backend& backend, Visit&& visit, const Options& options)
         return;
       }
     }
-    const auto begin = Clock::now();
-    auto actual = backend.execute(event);
-    const auto end = Clock::now();
-    timings[event.op] += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
-    ++measured_counts[event.op];
+    NativeTimer timer;
+    auto actual = [&]() -> json::value {
+      if constexpr (requires { backend.executeNative(event, timer); }) {
+        return backend.executeNative(event, timer);
+      } else return backend.execute(event);
+    }();
+    if (timer.calls != 0u) {
+      timings[event.op] += timer.elapsed_ns;
+      ++measured_counts[event.op];
+    } else ++unmeasured[event.op];
+    for (const auto& [name, value] : timer.operations) {
+      auto& accumulated = native_operations[name];
+      accumulated.calls += value.calls;
+      accumulated.items += value.items;
+      accumulated.ns += value.ns;
+    }
+    for (const auto& action : event.wire_actions) ++wire_actions[action.op];
     if (event.op == "define_design_via") {
       if (final_vias.contains(event.name)) {
         throw std::runtime_error("duplicate design VIA definition at event " + std::to_string(seen - 1));
@@ -410,19 +530,30 @@ void replayEvents(Backend& backend, Visit&& visit, const Options& options)
       throw std::runtime_error("final design VIA definition mismatch for " + name);
     }
   }
-  json::object measured, operations, measured_operations, unsupported_operations;
+  json::object measured, operations, measured_operations, unsupported_operations, unmeasured_operations;
+  json::object native_api_batches, encoder_actions;
   uint64_t total = 0, unsupported_count = 0;
   for (const auto& [op, ns] : timings) { measured[op] = ns; total += ns; }
   for (const auto& [op, count] : counts) operations[op] = count;
   for (const auto& [op, count] : measured_counts) measured_operations[op] = count;
+  for (const auto& [op, count] : unmeasured) unmeasured_operations[op] = count;
+  for (const auto& [name, value] : native_operations) {
+    native_api_batches[name] = json::object{{"calls", value.calls}, {"items", value.items}, {"ns", value.ns}};
+  }
+  for (const auto& [name, count] : wire_actions) encoder_actions[name] = count;
   for (const auto& [op, count] : unsupported) {
     unsupported_operations[op] = count;
     unsupported_count += count;
   }
-  json::object output{{"schema", "tritonroute_db_trace_replay_v2"}, {"backend", options.backend},
+  json::object output{{"schema", "tritonroute_db_trace_replay_v3"}, {"backend", options.backend},
                       {"events", seen}, {"validated_events", checked}, {"operations", operations},
                       {"measured_operations", measured_operations}, {"unsupported_operations", unsupported_operations},
-                      {"timing_ns", measured}, {"total_ns", total},
+                      {"unmeasured_operations", unmeasured_operations},
+                      {"native_api_batches", native_api_batches}, {"wire_encoder_actions", encoder_actions},
+                      {"timing_ns", measured}, {"measured_native_total_ns", total},
+                      {"wire_write_input", options.backend == "odb" ? "encoder_actions_or_legacy_shapes"
+                                                                   : "normalized_shape_batch"},
+                      {"wire_write_equivalence", "geometry and supported endpoint extensions; not encoder opcode/path identity"},
                       {"validation", json::object{{"all_events", unsupported.empty()},
                                                   {"all_supported_events", checked + unsupported_count == seen},
                                                   {"final_wires", final_wires.size()},
@@ -431,11 +562,17 @@ void replayEvents(Backend& backend, Visit&& visit, const Options& options)
                                                   {"final_wire_checks", final_wire_queries.size()},
                                                   {"unvalidated_wire_objects", unvalidated_wire_objects.size()},
                                                   {"endpoint_extensions", backend.retains_extensions},
-                                                  {"endpoint_extension_fields", extensions},
+                                                  {"trace_endpoint_extension_fields", extensions},
+                                                  {"validated_endpoint_extension_fields", backend.retains_extensions ? extensions : 0u},
                                                   {"final_vias", final_vias.size()},
                                                   {"final_via_rectangles", via_rectangles}}},
                       {"scope", "recorded TritonRoute database API groups; unsupported backend groups are explicit"},
-                      {"timing_scope", "adapter calls and returned field projection; parsing/binding/normalization/validation excluded; one timer pair per event, accumulated by API group"}};
+                      {"timing_scope", "native database/service API batches only; trace parsing, binding, adaptor input conversion and result JSON projection/validation excluded; unmeasured groups explicitly listed"}};
+  if (options.profile_wire_write) {
+    if constexpr (requires(Backend& candidate) { candidate.wireWriteProfile(); }) {
+      output["wire_write_profile"] = backend.wireWriteProfile();
+    }
+  }
   std::ofstream file(options.output);
   file << json::serialize(output) << '\n';
   if (!file) throw std::runtime_error("cannot write replay result");

@@ -12,7 +12,9 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <boost/polygon/polygon.hpp>
@@ -417,11 +419,6 @@ void forEachExpandedVia(const eccdb::PhysicalDesignService& physical,
   return point.extension;
 }
 
-[[nodiscard]] bool isTruncatedSpecialPath(eccdb::DesignWirePathView path) noexcept
-{
-  return (path.flags() & eccdb::DesignWirePathFlag::kHasShape) != 0u && !path.shape().empty();
-}
-
 void setPathSegStyle(frPathSeg& segment,
                      frUInt4 width,
                      std::optional<int32_t> begin_extension,
@@ -504,51 +501,6 @@ void appendRoutePatch(frNet& net,
   net.addPatchWire(std::move(patch));
 }
 
-template <typename Range>
-class AnchoredRoutePrimitiveCursor
-{
- public:
-  using Value = typename Range::value_type;
-
-  AnchoredRoutePrimitiveCursor(Range values, std::size_t point_count, std::string_view object, utl::Logger& logger)
-      : _values(std::move(values))
-  {
-    bool monotonic = true;
-    uint32_t previous = 0u;
-    for (std::size_t index = 0; index < _values.size(); ++index) {
-      const auto value = _values[index];
-      if (value.point_index >= point_count) {
-        fail(logger, 69, std::string{object} + " has a primitive whose anchor is outside its path");
-      }
-      monotonic = monotonic && (index == 0u || previous <= value.point_index);
-      previous = value.point_index;
-    }
-    if (!monotonic) {
-      _order.resize(_values.size());
-      for (std::size_t index = 0; index < _order.size(); ++index) {
-        _order[index] = index;
-      }
-      std::stable_sort(_order.begin(), _order.end(), [this](std::size_t lhs, std::size_t rhs) {
-        return _values[lhs].point_index < _values[rhs].point_index;
-      });
-    }
-  }
-
-  [[nodiscard]] bool at(std::size_t point_index) const
-  {
-    return _cursor < _values.size() && valueAt(_cursor).point_index == point_index;
-  }
-
-  [[nodiscard]] Value take() { return valueAt(_cursor++); }
-
- private:
-  [[nodiscard]] Value valueAt(std::size_t index) const { return _values[_order.empty() ? index : _order[index]]; }
-
-  Range _values;
-  std::vector<std::size_t> _order;
-  std::size_t _cursor = 0u;
-};
-
 [[nodiscard]] frUInt4 checkedRouteWidth(int64_t width, utl::Logger& logger, std::string_view object)
 {
   if (width <= 0 || static_cast<uint64_t>(width) > std::numeric_limits<frUInt4>::max()) {
@@ -630,81 +582,74 @@ void appendRouteVia(const eccdb::PhysicalDesignService& physical,
   }
 }
 
-void appendWirePath(const eccdb::PhysicalDesignService& physical,
+void appendWireShape(const eccdb::PhysicalDesignService& physical,
                     const frDesign& design,
                     frNet& net,
                     bool special,
-                    eccdb::DesignWirePathView path,
+                    const eccdb::DesignRouteShape& shape,
+                    const eccdb::DesignRouteShapeAttributes* attributes,
                     bool& has_route_geometry,
                     utl::Logger& logger,
                     std::string_view object)
 {
   constexpr uint32_t kUnsupportedFlags = eccdb::DesignWirePathFlag::kHasTaperRule | eccdb::DesignWirePathFlag::kHasStyle;
-  if ((path.flags() & kUnsupportedFlags) != 0u) {
+  if ((shape.flags & kUnsupportedFlags) != 0u) {
     fail(logger, 76, std::string{object} + " has a TAPERRULE or STYLE qualifier that DRT cannot represent");
   }
-  const bool has_width = (path.flags() & eccdb::DesignWirePathFlag::kHasWidth) != 0u;
+  const bool has_width = (shape.flags & eccdb::DesignWirePathFlag::kHasWidth) != 0u;
   if (has_width != special) {
     fail(logger, 77, std::string{object} + " has NET/SPECIALNET-incompatible route width metadata");
   }
-  const auto points = path.points();
-  if (points.empty()) {
-    fail(logger, 78, std::string{object} + " has no route points");
-  }
-  for (const auto point : points) {
+  const auto require_physical_point = [&](eccdb::DesignWirePoint point) {
     if ((point.flags & eccdb::DesignWirePointFlag::kVirtual) != 0u) {
       // OpenDB's regular dbWire codec preserves VIRTUAL as a separate edge,
       // while frNet has no equivalent edge kind.  Treating it as copper would
       // invent physical geometry, so fail instead.
       fail(logger, 79, std::string{object} + " has a VIRTUAL route point that DRT frNet cannot represent");
     }
-  }
+  };
 
   // ODB DRT consumes neither route-layer nor VIA mask coloring when it
   // materializes frPathSeg/frVia. Preserve the same projection rather than
   // rejecting an otherwise routable masked path.
-  const bool tapered = (path.flags() & eccdb::DesignWirePathFlag::kTaper) != 0u;
-  const bool truncated = special && isTruncatedSpecialPath(path);
-  auto active_layer = path.layer();
-  auto* active_drt_layer = &requireFrRoutingLayer(physical, design, active_layer, logger, object);
-  AnchoredRoutePrimitiveCursor vias{path.vias(), points.size(), object, logger};
-  AnchoredRoutePrimitiveCursor rectangles{path.rectangles(), points.size(), object, logger};
-
-  for (std::size_t point_index = 0; point_index < points.size(); ++point_index) {
-    const auto point = points[point_index];
-    if (point_index != 0u) {
-      const auto previous = points[point_index - 1u];
-      const auto width = special ? checkedRouteWidth(path.width(), logger, object)
-                                 : implicitRouteWidth(*active_drt_layer, previous.position, point.position, logger, object);
+  const bool tapered = (shape.flags & eccdb::DesignWirePathFlag::kTaper) != 0u;
+  const bool truncated = special && (shape.flags & eccdb::DesignWirePathFlag::kHasShape) != 0u
+                         && attributes != nullptr && !attributes->shape.empty();
+  const auto& layer = requireFrRoutingLayer(physical, design, shape.layer, logger, object);
+  std::visit([&](const auto& geometry) {
+    using Geometry = std::decay_t<decltype(geometry)>;
+    if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteSegment>) {
+      require_physical_point(geometry.begin);
+      require_physical_point(geometry.end);
+      const auto width = special ? checkedRouteWidth(attributes == nullptr ? 0 : attributes->width, logger, object)
+                                : implicitRouteWidth(layer, geometry.begin.position, geometry.end.position, logger, object);
       appendRouteSegment(net,
-                         active_drt_layer->getLayerNum(),
-                         previous.position,
-                         point.position,
+                         layer.getLayerNum(),
+                         geometry.begin.position,
+                         geometry.end.position,
                          width,
-                         pointExtension(previous),
-                         pointExtension(point),
+                         pointExtension(geometry.begin),
+                         pointExtension(geometry.end),
                          truncated,
                          tapered,
                          logger,
                          object);
       has_route_geometry = true;
-    }
-
-    // DEF RECT offsets are relative to their preceding point.  The flattened
-    // EccDB representation intentionally makes them independent of a VIA at
-    // the same anchor, so project the patch on the path's active layer before
-    // applying any layer transition at that point.
-    while (rectangles.at(point_index)) {
-      const auto rectangle = rectangles.take();
-      appendRoutePatch(net, active_drt_layer->getLayerNum(), point.position, rectangle.delta, logger, object);
+    } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRoutePatch>) {
+      require_physical_point(geometry.anchor);
+      // Patch geometry is absolute. DRT accepts an origin plus offset box;
+      // using origin zero avoids reconstructing a path-relative rectangle.
+      appendRoutePatch(net, layer.getLayerNum(), {}, geometry.rectangle, logger, object);
       has_route_geometry = true;
-    }
-    while (vias.at(point_index)) {
-      appendRouteVia(physical, design, net, vias.take(), point.position, active_layer, logger, object);
-      active_drt_layer = &requireFrRoutingLayer(physical, design, active_layer, logger, object);
+    } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
+      require_physical_point(geometry.origin);
+      auto active_layer = shape.layer;
+      appendRouteVia(physical, design, net, geometry.via, geometry.origin.position, active_layer, logger, object);
       has_route_geometry = true;
+    } else {
+      require_physical_point(geometry.point);
     }
-  }
+  }, shape.geometry);
 }
 
 void appendSpecialRectangle(const eccdb::PhysicalDesignService& physical,
@@ -1369,8 +1314,10 @@ void appendNetRouting(const eccdb::PhysicalDesignService& physical,
   }
 
   bool has_route_geometry = false;
-  physical.forEachNetWirePath(id, [&](eccdb::DesignWireId, const eccdb::DesignWire&, eccdb::DesignWirePathView path) {
-    appendWirePath(physical, design, net, special, path, has_route_geometry, logger,
+  physical.forEachNetWireShape(id, [&](eccdb::DesignWireId, const eccdb::DesignWire&,
+                                     eccdb::DesignRouteShapeId, const eccdb::DesignRouteShape& shape,
+                                     const eccdb::DesignRouteShapeAttributes* attributes) {
+    appendWireShape(physical, design, net, special, shape, attributes, has_route_geometry, logger,
                    special ? "SPECIALNET route" : "NET route");
   });
   if (special) {

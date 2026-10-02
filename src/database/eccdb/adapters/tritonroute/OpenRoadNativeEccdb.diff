@@ -2081,10 +2081,10 @@ index 0000000000..81e61e4388
 +}  // namespace drt
 diff --git a/src/drt/src/io/EccdbRouteAdapter.cpp b/src/drt/src/io/EccdbRouteAdapter.cpp
 new file mode 100644
-index 0000000000..d3f1848219
+index 0000000000..0aabe3c2d3
 --- /dev/null
 +++ b/src/drt/src/io/EccdbRouteAdapter.cpp
-@@ -0,0 +1,933 @@
+@@ -0,0 +1,840 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +
 +#include "io/EccdbRouteAdapter.h"
@@ -2093,7 +2093,6 @@ index 0000000000..d3f1848219
 +#include <cstdint>
 +#include <limits>
 +#include <memory>
-+#include <numeric>
 +#include <optional>
 +#include <stdexcept>
 +#include <string>
@@ -2580,21 +2579,6 @@ index 0000000000..d3f1848219
 +  throw std::logic_error("EccDB wire VIA does not have exactly one definition");
 +}
 +
-+[[nodiscard]] eccdb::Rect absolutePatch(eccdb::DesignWireRectangle rectangle, eccdb::Point anchor)
-+{
-+  const auto checked_offset = [](int32_t value, int32_t offset) -> int32_t {
-+    const int64_t result = static_cast<int64_t>(value) + offset;
-+    if (result < std::numeric_limits<int32_t>::min() || result > std::numeric_limits<int32_t>::max()) {
-+      throw std::overflow_error("EccDB wire patch coordinate overflows int32");
-+    }
-+    return static_cast<int32_t>(result);
-+  };
-+  return {.ll_x = checked_offset(rectangle.delta.ll_x, anchor.x),
-+          .ll_y = checked_offset(rectangle.delta.ll_y, anchor.y),
-+          .ur_x = checked_offset(rectangle.delta.ur_x, anchor.x),
-+          .ur_y = checked_offset(rectangle.delta.ur_y, anchor.y)};
-+}
-+
 +[[nodiscard]] eccdb::Point checkedOffsetPoint(eccdb::Point origin, int64_t offset_x, int64_t offset_y)
 +{
 +  const auto checked_coordinate = [](int64_t value) -> int32_t {
@@ -2606,58 +2590,6 @@ index 0000000000..d3f1848219
 +  return {.x = checked_coordinate(static_cast<int64_t>(origin.x) + offset_x),
 +          .y = checked_coordinate(static_cast<int64_t>(origin.y) + offset_y)};
 +}
-+
-+// Parsed DEF paths are already ordered. The index vector is used only for a
-+// trusted payload whose primitive ranges were constructed out of anchor order;
-+// values themselves stay in EccDB and are never copied into a route snapshot.
-+template <typename Range>
-+class AnchoredPrimitiveCursor
-+{
-+ public:
-+  using Value = typename Range::value_type;
-+
-+  AnchoredPrimitiveCursor(Range values, std::size_t point_count, const char* out_of_range_message)
-+      : values_(std::move(values))
-+  {
-+    bool monotonic = true;
-+    uint32_t previous_anchor = 0u;
-+    for (std::size_t index = 0; index < values_.size(); ++index) {
-+      const auto value = values_[index];
-+      if (value.point_index >= point_count) {
-+        throw std::logic_error(out_of_range_message);
-+      }
-+      monotonic = monotonic && (index == 0u || previous_anchor <= value.point_index);
-+      previous_anchor = value.point_index;
-+    }
-+    if (!monotonic) {
-+      order_.resize(values_.size());
-+      std::iota(order_.begin(), order_.end(), std::size_t{0});
-+      std::stable_sort(order_.begin(), order_.end(), [this](std::size_t lhs, std::size_t rhs) {
-+        return values_[lhs].point_index < values_[rhs].point_index;
-+      });
-+    }
-+  }
-+
-+  [[nodiscard]] bool at(std::size_t point_index) const
-+  {
-+    return cursor_ < values_.size() && valueAt(cursor_).point_index == point_index;
-+  }
-+
-+  [[nodiscard]] Value take()
-+  {
-+    return valueAt(cursor_++);
-+  }
-+
-+ private:
-+  [[nodiscard]] Value valueAt(std::size_t index) const
-+  {
-+    return values_[order_.empty() ? index : order_[index]];
-+  }
-+
-+  Range values_;
-+  std::vector<std::size_t> order_;
-+  std::size_t cursor_ = 0u;
-+};
 +
 +[[nodiscard]] int32_t inputSegmentWidth(const frLayer& layer, const eccdb::RouteSegment& segment)
 +{
@@ -2700,122 +2632,99 @@ index 0000000000..d3f1848219
 +  return result;
 +}
 +
-+void appendInputPath(PreparedRoute& destination,
-+                     const eccdb::PhysicalDesignService& physical,
-+                     const eccdb::DesignStore& design,
-+                     const eccdb::TechStore& tech,
-+                     eccdb::DesignNetId net_id,
-+                     const frNet& net,
-+                     frDesign& route_design,
-+                     eccdb::DesignWirePathView path,
-+                     std::string_view net_name)
++void appendInputShape(PreparedRoute& destination,
++                      const eccdb::DesignStore& design,
++                      const eccdb::TechStore& tech,
++                      eccdb::DesignNetId net_id,
++                      const frNet& net,
++                      frDesign& route_design,
++                      const eccdb::DesignRouteShape& shape,
++                      const eccdb::DesignRouteShapeAttributes*,
++                      std::string_view net_name)
 +{
-+  const auto points = path.points();
-+  if (points.empty()) {
-+    throw std::logic_error("EccDB routed path has no points" + netContext(net_name));
++  constexpr uint32_t kUnsupportedFlags = eccdb::DesignWirePathFlag::kHasTaperRule | eccdb::DesignWirePathFlag::kHasStyle;
++  if ((shape.flags & kUnsupportedFlags) != 0u) {
++    throw std::invalid_argument("DRT cannot represent EccDB TAPERRULE or STYLE metadata" + netContext(net_name));
++  }
++  if ((shape.flags & eccdb::DesignWirePathFlag::kHasWidth) != 0u) {
++    throw std::invalid_argument("DRT cannot import explicit ordinary-net route width metadata" + netContext(net_name));
++  }
++  if ((shape.flags & eccdb::DesignWirePathFlag::kHasShape) != 0u) {
++    throw std::invalid_argument("DRT cannot import SPECIALNET SHAPE metadata on an ordinary EccDB net" + netContext(net_name));
 +  }
 +
-+  constexpr uint32_t kKnownPointFlags = eccdb::DesignWirePointFlag::kHasExtension | eccdb::DesignWirePointFlag::kVirtual;
-+  const bool tapered = (path.flags() & eccdb::DesignWirePathFlag::kTaper) != 0u;
-+  auto vias = AnchoredPrimitiveCursor{path.vias(), points.size(), "EccDB route VIA anchor is out of range"};
-+  auto patches = AnchoredPrimitiveCursor{path.rectangles(), points.size(), "EccDB route patch anchor is out of range"};
-+  std::optional<eccdb::DesignWirePoint> previous;
-+  auto current_layer = path.layer();
-+
-+  for (std::size_t index = 0; index < points.size(); ++index) {
-+    const auto point = points[index];
-+    if ((point.flags & ~kKnownPointFlags) != 0u) {
-+      throw std::logic_error("EccDB routed point has unknown flags" + netContext(net_name));
++  const auto require_physical_point = [&](eccdb::DesignWirePoint point) {
++    if ((point.flags & eccdb::DesignWirePointFlag::kVirtual) != 0u) {
++      // A virtual point is a DEF serialization transition, not copper. frNet
++      // has no equivalent primitive, and materializing one would be wrong.
++      throw std::invalid_argument("DRT frNet cannot represent an EccDB VIRTUAL route point" + netContext(net_name));
 +    }
++  };
++  // ODB's DRT materialization does not consume route-layer or VIA mask
++  // coloring. Keep the physical projection and leave those cold attributes in
++  // EccDB rather than rejecting an otherwise routable Shape.
++  const bool tapered = (shape.flags & eccdb::DesignWirePathFlag::kTaper) != 0u;
 +
-+    const bool virtual_point = (point.flags & eccdb::DesignWirePointFlag::kVirtual) != 0u;
-+    if (virtual_point) {
-+      // ODB encodes DEF VIRTUAL as a VWIRE transition. It establishes the next
-+      // physical path origin but must not materialize a segment to that origin.
-+      if (!previous) {
-+        throw std::logic_error("EccDB VIRTUAL point does not follow a routing point" + netContext(net_name));
-+      }
-+      previous = eccdb::DesignWirePoint{.position = point.position};
-+    } else {
-+      if (previous && previous->position != point.position) {
-+        destination.shapes.push_back(makeFrInputSegment(
-+            eccdb::RouteSegment{.layer = current_layer,
-+                                 .begin = previous->position,
-+                                 .end = point.position,
-+                                 .width = std::nullopt,
-+                                 .begin_extension = pointExtension(*previous),
-+                                 .end_extension = pointExtension(point),
-+                                 .tapered = tapered},
-+            design,
-+            tech,
-+            net_id,
-+            net,
-+            route_design));
-+        destination.has_initial_routing = true;
-+      }
-+      previous = point;
-+    }
-+
-+    // The DEF order is point, RECT, VIA. A patch at a via anchor therefore
-+    // belongs to the incoming layer before the via changes the active layer.
-+    while (patches.at(index)) {
-+      const auto patch = patches.take();
-+      if (!patch.delta.isValid()) {
-+        throw std::logic_error("EccDB route patch rectangle is invalid" + netContext(net_name));
-+      }
-+      destination.patches.push_back(makeFrPatch(
-+          eccdb::RoutePatch{.layer = current_layer, .rectangle = absolutePatch(patch, point.position), .tapered = tapered},
-+          tech,
-+          route_design));
-+      destination.has_initial_routing = true;
-+    }
-+
-+    while (vias.at(index)) {
-+      const auto via = vias.take();
-+      if (!eccdb::isValidDesignOrientation(via.orientation)) {
-+        throw std::logic_error("EccDB route VIA has an invalid orientation" + netContext(net_name));
-+      }
-+      if (via.orientation != eccdb::DesignOrientation::kN) {
-+        // OpenDB materializes a distinct rotated dbVia while reading DEF. DRT's
-+        // frVia only stores a frViaDef pointer and its setOrient() is a no-op,
-+        // so projecting the original definition would silently use incorrect
-+        // geometry. Preserve the source value in EccDB and reject this import.
-+        throw std::invalid_argument("DRT frVia cannot represent an oriented EccDB VIA" + netContext(net_name));
-+      }
-+      const auto definition = routeViaDefinition(via);
-+      const auto* via_definition = requireFrVia(design, tech, route_design, definition);
-+      const bool has_array = (via.flags & eccdb::DesignWireViaFlag::kHasArray) != 0u;
-+      const uint32_t columns = has_array ? via.columns : 1u;
-+      const uint32_t rows = has_array ? via.rows : 1u;
-+      const int64_t step_x = has_array ? via.step_x : 0;
-+      const int64_t step_y = has_array ? via.step_y : 0;
-+      // OpenDB stores each DEF VIA array member as a concrete placement. DRT
-+      // likewise has one frVia per placement, so preserve that physical subset.
-+      for (uint32_t column = 0; column < columns; ++column) {
-+        for (uint32_t row = 0; row < rows; ++row) {
-+          const auto origin = checkedOffsetPoint(point.position,
-+                                                 static_cast<int64_t>(column) * step_x,
-+                                                 static_cast<int64_t>(row) * step_y);
-+          auto result = std::make_unique<frVia>(via_definition, toOdb(origin));
-+          result->setTapered(tapered);
-+          destination.vias.push_back(std::move(result));
++  std::visit(
++      [&](const auto& geometry) {
++        using Geometry = std::remove_cvref_t<decltype(geometry)>;
++        if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteSegment>) {
++          require_physical_point(geometry.begin);
++          require_physical_point(geometry.end);
++          destination.shapes.push_back(makeFrInputSegment(
++              eccdb::RouteSegment{.layer = shape.layer,
++                                   .begin = geometry.begin.position,
++                                   .end = geometry.end.position,
++                                   .width = std::nullopt,
++                                   .begin_extension = pointExtension(geometry.begin),
++                                   .end_extension = pointExtension(geometry.end),
++                                   .tapered = tapered},
++              design,
++              tech,
++              net_id,
++              net,
++              route_design));
++          destination.has_initial_routing = true;
++        } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRoutePatch>) {
++          require_physical_point(geometry.anchor);
++          destination.patches.push_back(makeFrPatch(
++              eccdb::RoutePatch{.layer = shape.layer, .rectangle = geometry.rectangle, .tapered = tapered}, tech, route_design));
++          destination.has_initial_routing = true;
++        } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
++          require_physical_point(geometry.origin);
++          if (!eccdb::isValidDesignOrientation(geometry.via.orientation)) {
++            throw std::logic_error("EccDB route VIA has an invalid orientation" + netContext(net_name));
++          }
++          if (geometry.via.orientation != eccdb::DesignOrientation::kN) {
++            // frVia stores a definition but not a useful orientation. Preserve
++            // the source value in EccDB rather than projecting wrong geometry.
++            throw std::invalid_argument("DRT frVia cannot represent an oriented EccDB VIA" + netContext(net_name));
++          }
++          const auto definition = routeViaDefinition(geometry.via);
++          const auto* via_definition = requireFrVia(design, tech, route_design, definition);
++          const bool has_array = (geometry.via.flags & eccdb::DesignWireViaFlag::kHasArray) != 0u;
++          const uint32_t columns = has_array ? geometry.via.columns : 1u;
++          const uint32_t rows = has_array ? geometry.via.rows : 1u;
++          const int64_t step_x = has_array ? geometry.via.step_x : 0;
++          const int64_t step_y = has_array ? geometry.via.step_y : 0;
++          // ODB and DRT both represent each array member as a concrete VIA.
++          for (uint32_t column = 0; column < columns; ++column) {
++            for (uint32_t row = 0; row < rows; ++row) {
++              const auto origin = checkedOffsetPoint(geometry.origin.position,
++                                                     static_cast<int64_t>(column) * step_x,
++                                                     static_cast<int64_t>(row) * step_y);
++              auto result = std::make_unique<frVia>(via_definition, toOdb(origin));
++              result->setTapered(tapered);
++              destination.vias.push_back(std::move(result));
++            }
++          }
++          destination.has_initial_routing = true;
++        } else {
++          require_physical_point(geometry.point);
++          throw std::invalid_argument("DRT frNet cannot import an EccDB point-only route Shape" + netContext(net_name));
 +        }
-+      }
-+      destination.has_initial_routing = true;
-+
-+      const auto layers = physical.routingViaLayers(via.tech_via, via.design_via);
-+      if (current_layer == layers.bottom) {
-+        current_layer = layers.top;
-+      } else if (current_layer == layers.top) {
-+        current_layer = layers.bottom;
-+      } else {
-+        throw std::logic_error("EccDB route VIA does not touch the active layer" + netContext(net_name));
-+      }
-+      // ODB starts the post-VIA path with the same coordinate but no inherited
-+      // endpoint extension.
-+      previous = eccdb::DesignWirePoint{.position = point.position};
-+    }
-+  }
++      },
++      shape.geometry);
 +}
 +
 +}  // namespace
@@ -2853,26 +2762,24 @@ index 0000000000..d3f1848219
 +    validateNdrCompatibility(design_, tech_, id, *net);
 +
 +    // Construct one net's replacement before deleting the current DRT route.
-+    // The PhysicalDesignService view visits EccDB's flat path ranges directly;
-+    // no lossy RouteShape snapshot is allocated for import.
++    // Shapes are already canonical route primitives, so importing them does
++    // not decode a DEF path or allocate a RouteShape snapshot.
 +    PreparedRoute replacement;
 +    bool has_routed_wire = false;
 +    bool has_fixed_wire = false;
-+    std::optional<eccdb::DesignWireId> current_wire;
-+    physical.forEachNetWirePath(id, [&](eccdb::DesignWireId wire_id,
-+                                        const eccdb::DesignWire& wire,
-+                                        eccdb::DesignWirePathView path) {
-+      if (!current_wire || *current_wire != wire_id) {
-+        current_wire = wire_id;
-+        if (wire.status == eccdb::DesignWireStatus::kRouted) {
-+          has_routed_wire = true;
-+        } else if (wire.status == eccdb::DesignWireStatus::kFixed) {
-+          has_fixed_wire = true;
-+        } else {
-+          throw std::invalid_argument("DRT cannot import non-routed/non-fixed EccDB wire" + netContext(design_net.name));
-+        }
++    physical.forEachNetWire(id, [&](eccdb::DesignWireId, const eccdb::DesignWire& wire) {
++      if (wire.status == eccdb::DesignWireStatus::kRouted) {
++        has_routed_wire = true;
++      } else if (wire.status == eccdb::DesignWireStatus::kFixed) {
++        has_fixed_wire = true;
++      } else {
++        throw std::invalid_argument("DRT cannot import non-routed/non-fixed EccDB wire" + netContext(design_net.name));
 +      }
-+      appendInputPath(replacement, physical, design_, tech_, id, *net, route_design_, path, design_net.name);
++    });
++    physical.forEachNetWireShape(id, [&](eccdb::DesignWireId, const eccdb::DesignWire&, eccdb::DesignRouteShapeId,
++                                         const eccdb::DesignRouteShape& shape,
++                                         const eccdb::DesignRouteShapeAttributes* attributes) {
++      appendInputShape(replacement, design_, tech_, id, *net, route_design_, shape, attributes, design_net.name);
 +    });
 +    if (has_routed_wire && has_fixed_wire) {
 +      throw std::invalid_argument("DRT cannot preserve mixed routed and fixed EccDB wires" + netContext(design_net.name));
@@ -3335,7 +3242,7 @@ index e951112280..857124cfdf 100644
    frDesign* design_;
    utl::Logger* logger_;
 diff --git a/src/drt/src/io/io.cpp b/src/drt/src/io/io.cpp
-index 5929913cf7..0ff3ed3c2d 100644
+index 5929913cf7..ad29ce48a5 100644
 --- a/src/drt/src/io/io.cpp
 +++ b/src/drt/src/io/io.cpp
 @@ -15,6 +15,7 @@
@@ -3662,7 +3569,7 @@ index 5929913cf7..0ff3ed3c2d 100644
  }
  
  void io::Writer::updateDbConn(odb::dbBlock* block,
-@@ -3792,6 +3927,11 @@ void io::Writer::updateDbConn(odb::dbBlock* block,
+@@ -3792,8 +3927,19 @@ void io::Writer::updateDbConn(odb::dbBlock* block,
                                bool snapshot)
  {
    odb::dbWireEncoder _wire_encoder;
@@ -3673,22 +3580,214 @@ index 5929913cf7..0ff3ed3c2d 100644
 +#endif
    for (auto net : block->getNets()) {
      if (connFigs_.find(net->getName()) != connFigs_.end()) {
++#ifdef DRT_USE_ECCDB
++      auto* trace = !net->isSpecial()
++                        ? eccdb::tritonroute::OdbTraceRecorder::active()
++                        : nullptr;
++      std::vector<drt_trace::WireAction> trace_actions;
++#endif
        if (getDesign()->getTopBlock()->findNet(net->getName())->isFixed()) {
-@@ -3907,6 +4047,13 @@ void io::Writer::updateDbConn(odb::dbBlock* block,
+         continue;
+       }
+@@ -3822,36 +3968,106 @@ void io::Writer::updateDbConn(odb::dbBlock* block,
+                   odb::dbWireType("ROUTED"),
+                   net->getNonDefaultRule()->getLayerRule(layer));
+             }
++#ifdef DRT_USE_ECCDB
++            if (trace != nullptr) {
++              drt_trace::WireAction action{.op = "new_path",
++                                           .layer = layer->getName()};
++              if (!pathSeg->isTapered() && net->getNonDefaultRule() != nullptr) {
++                action.rule = net->getNonDefaultRule()->getName();
++              }
++              trace_actions.push_back(std::move(action));
++            }
++#endif
+             auto [begin, end] = pathSeg->getPoints();
+             frSegStyle segStyle = pathSeg->getStyle();
+             if (segStyle.getBeginStyle() == frEndStyle(frcExtendEndStyle)) {
+               if (segStyle.getBeginExt() != layer->getWidth() / 2) {
+                 _wire_encoder.addPoint(
+                     begin.x(), begin.y(), segStyle.getBeginExt(), 0);
++#ifdef DRT_USE_ECCDB
++                if (trace != nullptr) {
++                  trace_actions.push_back({.op = "point",
++                                           .x = begin.x(),
++                                           .y = begin.y(),
++                                           .extension = segStyle.getBeginExt()});
++                }
++#endif
+               } else {
+                 _wire_encoder.addPoint(begin.x(), begin.y());
++#ifdef DRT_USE_ECCDB
++                if (trace != nullptr) {
++                  trace_actions.push_back(
++                      {.op = "point", .x = begin.x(), .y = begin.y()});
++                }
++#endif
+               }
+             } else if (segStyle.getBeginStyle()
+                        == frEndStyle(frcTruncateEndStyle)) {
+               _wire_encoder.addPoint(begin.x(), begin.y(), 0, 0);
++#ifdef DRT_USE_ECCDB
++              if (trace != nullptr) {
++                trace_actions.push_back({.op = "point",
++                                         .x = begin.x(),
++                                         .y = begin.y(),
++                                         .extension = 0});
++              }
++#endif
+             } else if (segStyle.getBeginStyle()
+                        == frEndStyle(frcVariableEndStyle)) {
+               _wire_encoder.addPoint(
+                   begin.x(), begin.y(), segStyle.getBeginExt(), 0);
++#ifdef DRT_USE_ECCDB
++              if (trace != nullptr) {
++                trace_actions.push_back({.op = "point",
++                                         .x = begin.x(),
++                                         .y = begin.y(),
++                                         .extension = segStyle.getBeginExt()});
++              }
++#endif
+             }
+             if (segStyle.getEndStyle() == frEndStyle(frcExtendEndStyle)) {
+               if (segStyle.getEndExt() != layer->getWidth() / 2) {
+                 _wire_encoder.addPoint(
+                     end.x(), end.y(), segStyle.getEndExt(), 0);
++#ifdef DRT_USE_ECCDB
++                if (trace != nullptr) {
++                  trace_actions.push_back({.op = "point",
++                                           .x = end.x(),
++                                           .y = end.y(),
++                                           .extension = segStyle.getEndExt()});
++                }
++#endif
+               } else {
+                 _wire_encoder.addPoint(end.x(), end.y());
++#ifdef DRT_USE_ECCDB
++                if (trace != nullptr) {
++                  trace_actions.push_back(
++                      {.op = "point", .x = end.x(), .y = end.y()});
++                }
++#endif
+               }
+             } else if (segStyle.getEndStyle()
+                        == frEndStyle(frcTruncateEndStyle)) {
+               _wire_encoder.addPoint(end.x(), end.y(), 0, 0);
++#ifdef DRT_USE_ECCDB
++              if (trace != nullptr) {
++                trace_actions.push_back({.op = "point",
++                                         .x = end.x(),
++                                         .y = end.y(),
++                                         .extension = 0});
++              }
++#endif
+             } else if (segStyle.getBeginStyle()
+                        == frEndStyle(frcVariableEndStyle)) {
+               _wire_encoder.addPoint(end.x(), end.y(), segStyle.getEndExt(), 0);
++#ifdef DRT_USE_ECCDB
++              if (trace != nullptr) {
++                trace_actions.push_back({.op = "point",
++                                         .x = end.x(),
++                                         .y = end.y(),
++                                         .extension = segStyle.getEndExt()});
++              }
++#endif
+             }
+             break;
+           }
+@@ -3870,15 +4086,43 @@ void io::Writer::updateDbConn(odb::dbBlock* block,
+                   odb::dbWireType("ROUTED"),
+                   net->getNonDefaultRule()->getLayerRule(layer));
+             }
++#ifdef DRT_USE_ECCDB
++            if (trace != nullptr) {
++              drt_trace::WireAction action{.op = "new_path",
++                                           .layer = layer->getName()};
++              if (!via->isTapered() && net->getNonDefaultRule() != nullptr) {
++                action.rule = net->getNonDefaultRule()->getName();
++              }
++              trace_actions.push_back(std::move(action));
++            }
++#endif
+             odb::Point origin = via->getOrigin();
+             _wire_encoder.addPoint(origin.x(), origin.y());
++#ifdef DRT_USE_ECCDB
++            if (trace != nullptr) {
++              trace_actions.push_back(
++                  {.op = "point", .x = origin.x(), .y = origin.y()});
++            }
++#endif
+             odb::dbTechVia* tech_via = db_tech->findVia(viaName.c_str());
+             if (tech_via != nullptr) {
+               _wire_encoder.addTechVia(tech_via);
++#ifdef DRT_USE_ECCDB
++              if (trace != nullptr) {
++                trace_actions.push_back(
++                    {.op = "tech_via", .via = tech_via->getName()});
++              }
++#endif
+             } else {
+               writeViaDefToODB(block, db_tech, via->getViaDef());
+               odb::dbVia* db_via = block->findVia(viaName.c_str());
+               _wire_encoder.addVia(db_via);
++#ifdef DRT_USE_ECCDB
++              if (trace != nullptr) {
++                trace_actions.push_back(
++                    {.op = "via", .via = db_via->getName()});
++              }
++#endif
+             }
+             break;
+           }
+@@ -3888,13 +4132,34 @@ void io::Writer::updateDbConn(odb::dbBlock* block,
+                 = getTech()->getLayer(pwire->getLayerNum())->getName();
+             auto layer = db_tech->findLayer(layerName.c_str());
+             _wire_encoder.newPath(layer, odb::dbWireType("ROUTED"));
++#ifdef DRT_USE_ECCDB
++            if (trace != nullptr) {
++              trace_actions.push_back(
++                  {.op = "new_path", .layer = layer->getName()});
++            }
++#endif
+             odb::Point origin = pwire->getOrigin();
+             odb::Rect offsetBox = pwire->getOffsetBox();
+             _wire_encoder.addPoint(origin.x(), origin.y());
++#ifdef DRT_USE_ECCDB
++            if (trace != nullptr) {
++              trace_actions.push_back(
++                  {.op = "point", .x = origin.x(), .y = origin.y()});
++            }
++#endif
+             _wire_encoder.addRect(offsetBox.xMin(),
+                                   offsetBox.yMin(),
+                                   offsetBox.xMax(),
+                                   offsetBox.yMax());
++#ifdef DRT_USE_ECCDB
++            if (trace != nullptr) {
++              trace_actions.push_back({.op = "rect",
++                                       .x = offsetBox.xMin(),
++                                       .y = offsetBox.yMin(),
++                                       .a = offsetBox.xMax(),
++                                       .b = offsetBox.yMax()});
++            }
++#endif
+             break;
+           }
+           default: {
+@@ -3907,6 +4172,11 @@ void io::Writer::updateDbConn(odb::dbBlock* block,
          }
        }
        _wire_encoder.end();
 +#ifdef DRT_USE_ECCDB
-+      if (!net->isSpecial()) {
-+        if (auto* trace = eccdb::tritonroute::OdbTraceRecorder::active()) {
-+          trace->recordReplaceWire("Writer::updateDbConn", net);
-+        }
++      if (trace != nullptr) {
++        trace->recordReplaceWire("Writer::updateDbConn", net, trace_actions);
 +      }
 +#endif
        net->setWireOrdered(false);
      }
    }
-@@ -3969,13 +4116,33 @@ void io::Writer::updateTrackAssignment(odb::dbBlock* block)
+@@ -3969,13 +4239,33 @@ void io::Writer::updateTrackAssignment(odb::dbBlock* block)
  {
    for (const auto& net : getDesign()->getTopBlock()->getNets()) {
      auto dbNet = block->findNet(net->getName().c_str());
@@ -3723,7 +3822,7 @@ index 5929913cf7..0ff3ed3c2d 100644
    }
  }
  
-@@ -3990,6 +4157,15 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
+@@ -3990,6 +4280,15 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
      if (db_master == nullptr) {
        logger_->error(DRT, 294, "master {} not found in db", master->getName());
      }
@@ -3739,7 +3838,7 @@ index 5929913cf7..0ff3ed3c2d 100644
      for (const auto& updated_pa_index : master->getUpdatedPAIndices()) {
        db_master->clearPinAccess(updated_pa_index);
      }
-@@ -4020,6 +4196,13 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
+@@ -4020,6 +4319,13 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
          }
        }
      }
@@ -3753,7 +3852,7 @@ index 5929913cf7..0ff3ed3c2d 100644
      master->clearUpdatedPAIndices();
    }
    for (auto& inst : getDesign()->getTopBlock()->getInsts()) {
-@@ -4027,6 +4210,12 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
+@@ -4027,6 +4333,12 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
        continue;
      }
      auto db_inst = block->findInst(inst->getName().c_str());
@@ -3766,7 +3865,7 @@ index 5929913cf7..0ff3ed3c2d 100644
      if (db_inst == nullptr) {
        logger_->error(DRT, 297, "inst {} not found in db", inst->getName());
      }
-@@ -4034,6 +4223,14 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
+@@ -4034,6 +4346,14 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
      for (auto& term : inst->getInstTerms()) {
        auto aps = term->getAccessPoints();
        auto db_iterm = db_inst->findITerm(term->getTerm()->getName().c_str());
@@ -3781,7 +3880,7 @@ index 5929913cf7..0ff3ed3c2d 100644
        db_iterm->clearPrefAccessPoints();
        if (db_iterm == nullptr) {
          logger_->error(DRT, 298, "iterm {} not found in db", term->getName());
-@@ -4066,6 +4263,12 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
+@@ -4066,6 +4386,12 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
          i++;
        }
      }
@@ -3794,7 +3893,7 @@ index 5929913cf7..0ff3ed3c2d 100644
      inst->setHasPinAccessUpdate(false);
    }
    for (auto& term : getDesign()->getTopBlock()->getTerms()) {
-@@ -4090,6 +4293,11 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
+@@ -4090,6 +4416,11 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
        continue;
      }
      auto db_pin = (odb::dbBPin*) *db_pins.begin();
@@ -3806,7 +3905,7 @@ index 5929913cf7..0ff3ed3c2d 100644
      auto& pin = pins[0];
      int j = 0;
      int sz = pin->getNumPinAccess();
-@@ -4101,6 +4309,14 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
+@@ -4101,6 +4432,14 @@ void io::Writer::updateDbAccessPoints(odb::dbBlock* block, odb::dbTech* db_tech)
        }
        j++;
      }
@@ -3821,7 +3920,7 @@ index 5929913cf7..0ff3ed3c2d 100644
      term->setHasPinAccessUpdate(false);
    }
  }
-@@ -4121,6 +4337,11 @@ void io::Writer::updateDb(odb::dbDatabase* db,
+@@ -4121,6 +4460,11 @@ void io::Writer::updateDb(odb::dbDatabase* db,
    }
    updateDbAccessPoints(block, db_tech);
    if (!pin_access_only) {
@@ -3833,7 +3932,7 @@ index 5929913cf7..0ff3ed3c2d 100644
      for (auto net : block->getNets()) {
        if (net->getWire()) {
          odb::dbWireDecoder decoder;
-@@ -4129,6 +4350,13 @@ void io::Writer::updateDb(odb::dbDatabase* db,
+@@ -4129,6 +4473,13 @@ void io::Writer::updateDb(odb::dbDatabase* db,
          if (decoder.getWireType() == odb::dbWireType::FIXED) {
            continue;
          }
@@ -3847,7 +3946,7 @@ index 5929913cf7..0ff3ed3c2d 100644
          odb::dbWire::destroy(net->getWire());
        }
      }
-@@ -4300,6 +4528,13 @@ void io::TopLayerBTermHandler::stackVias(odb::dbBTerm* bterm,
+@@ -4300,6 +4651,13 @@ void io::TopLayerBTermHandler::stackVias(odb::dbBTerm* bterm,
    // insert the vias from the top routing layer to the bterm bottom layer
    odb::dbWire* wire = net->getWire();
    int bterms_above_max_layer = countNetBTermsAboveMaxLayer(net);
@@ -3861,7 +3960,7 @@ index 5929913cf7..0ff3ed3c2d 100644
  
    odb::dbWireEncoder wire_encoder;
    if (wire == nullptr) {
-@@ -4317,9 +4552,28 @@ void io::TopLayerBTermHandler::stackVias(odb::dbBTerm* bterm,
+@@ -4317,9 +4675,28 @@ void io::TopLayerBTermHandler::stackVias(odb::dbBTerm* bterm,
    wire_encoder.addPoint(via_position.getX(), via_position.getY());
    for (int layer_idx = top_layer_idx; layer_idx < bterm_bottom_layer_idx;
         layer_idx++) {

@@ -192,50 +192,62 @@ struct Entt
       }
       for (const auto wire : routing.wireIds(net)) {
         ++out.geometry.wires;
-        routing.forEachPath(wire, [&](eccdb::DesignWirePathView path) {
-          if constexpr (Validate) {
-            Path value;
-            value.special = special;
-            value.status = status(routing.wire(wire).status);
-            value.net = net_value.name;
-            value.layer = tech.layerInfo(eccdb::TechLayerId{path.layer().entity()}).name;
-            value.width = special ? path.width() : 0;
-            if (special) {
-              value.shape = path.shape();
-              if (path.flags() & eccdb::DesignWirePathFlag::kHasStyle) value.style = path.style();
+        routing.forEachShape(wire, [&](eccdb::DesignRouteShapeId, const eccdb::DesignRouteShape& shape,
+                                       const eccdb::DesignRouteShapeAttributes* attributes) {
+          const auto append_path = [&](Path value) {
+            if constexpr (Validate) {
+              out.path(value);
+            } else {
+              ++out.geometry.paths;
+              out.geometry.points += value.points.size();
+              out.geometry.vias += value.vias.size();
+              out.geometry.rectangles += value.rectangles.size();
+              for (const auto point : value.points) {
+                checksum = mix(checksum, static_cast<uint32_t>(point.x));
+                checksum = mix(checksum, static_cast<uint32_t>(point.y));
+              }
+              for (const auto& via : value.vias) {
+                checksum = mix(checksum, static_cast<uint32_t>(via.origin.x));
+                checksum = mix(checksum, static_cast<uint32_t>(via.origin.y));
+              }
+              for (const auto& rect : value.rectangles) {
+                checksum = mix(checksum, static_cast<uint32_t>(rect.ll_x));
+                checksum = mix(checksum, static_cast<uint32_t>(rect.ll_y));
+                checksum = mix(checksum, static_cast<uint32_t>(rect.ur_x));
+                checksum = mix(checksum, static_cast<uint32_t>(rect.ur_y));
+              }
             }
-            for (const auto point : path.points()) value.points.push_back(point.position);
-            for (const auto via : path.vias()) {
-              const auto name = via.tech_via ? tech.viaMasterStorage().viaMaster(via.tech_via).name
-                                             : routing.via(via.design_via).name;
-              value.vias.push_back({name, path.points()[via.point_index].position});
-            }
-            for (const auto rectangle : path.rectangles()) {
-              const auto origin = path.points()[rectangle.point_index].position;
-              value.rectangles.push_back(rectangle.delta.offset(origin.x, origin.y));
-            }
-            out.path(value);
-          } else {
-            ++out.geometry.paths;
-            out.geometry.points += path.points().size();
-            out.geometry.vias += path.vias().size();
-            out.geometry.rectangles += path.rectangles().size();
-            for (const auto point : path.points()) {
-              checksum = mix(checksum, static_cast<uint32_t>(point.position.x));
-              checksum = mix(checksum, static_cast<uint32_t>(point.position.y));
-            }
-            for (const auto via : path.vias()) {
-              const auto origin = path.points()[via.point_index].position;
-              checksum = mix(checksum, static_cast<uint32_t>(origin.x));
-              checksum = mix(checksum, static_cast<uint32_t>(origin.y));
-            }
-            for (const auto rect : path.rectangles()) {
-              checksum = mix(checksum, static_cast<uint32_t>(rect.delta.ll_x));
-              checksum = mix(checksum, static_cast<uint32_t>(rect.delta.ll_y));
-              checksum = mix(checksum, static_cast<uint32_t>(rect.delta.ur_x));
-              checksum = mix(checksum, static_cast<uint32_t>(rect.delta.ur_y));
-            }
+          };
+          Path value;
+          value.special = special;
+          value.status = status(routing.wire(wire).status);
+          value.net = net_value.name;
+          value.layer = tech.layerInfo(eccdb::TechLayerId{shape.layer.entity()}).name;
+          if (special && attributes != nullptr) {
+            value.width = attributes->width;
+            value.shape = attributes->shape;
+            if ((shape.flags & eccdb::DesignWirePathFlag::kHasStyle) != 0u) value.style = attributes->style;
           }
+          std::visit(
+              [&](const auto& geometry) {
+                using Geometry = std::remove_cvref_t<decltype(geometry)>;
+                if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteSegment>) {
+                  value.points = {geometry.begin.position, geometry.end.position};
+                } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
+                  value.points = {geometry.origin.position};
+                  const auto& via = geometry.via;
+                  const auto name = via.tech_via ? tech.viaMasterStorage().viaMaster(via.tech_via).name
+                                                 : routing.via(via.design_via).name;
+                  value.vias.push_back({name, geometry.origin.position});
+                } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRoutePatch>) {
+                  value.points = {geometry.anchor.position};
+                  value.rectangles.push_back(geometry.rectangle);
+                } else {
+                  value.points = {geometry.point.position};
+                }
+              },
+              shape.geometry);
+          append_path(std::move(value));
         });
       }
     };

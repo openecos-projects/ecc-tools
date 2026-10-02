@@ -81,6 +81,10 @@ struct MemoryBreakdown
   uint64_t instance_term_pointer_table_capacity = 0;
   uint64_t instance_term_pointer_table_capacity_bytes = 0;
   uint64_t net_component_capacity_bytes = 0;
+  uint64_t route_shape_count = 0;
+  uint64_t wire_shape_id_capacity_bytes = 0;
+  uint64_t wire_shape_id_buffer_count = 0;
+  uint64_t wire_shape_id_usable_bytes = 0;
   uint64_t wire_path_count = 0;
   uint64_t wire_path_capacity = 0;
   uint64_t wire_path_capacity_bytes = 0;
@@ -265,6 +269,8 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   addComponentStorage<DesignVia>(registry, result);
   addComponentStorage<DesignNonDefaultRule>(registry, result);
   addComponentStorage<DesignWire>(registry, result);
+  addComponentStorage<DesignRouteShape>(registry, result);
+  addComponentStorage<DesignRouteShapeAttributes>(registry, result);
   addComponentStorage<DesignNetGeometry>(registry, result);
   addComponentStorage<DesignRegion>(registry, result);
   addComponentStorage<DesignGroup>(registry, result);
@@ -277,6 +283,10 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   }
 
   const auto routing_vectors = design.routingStorage().routingStatistics();
+  result.route_shape_count = routing_vectors.shapes.count;
+  result.wire_shape_id_capacity_bytes = routing_vectors.wire_shape_ids.capacity_bytes;
+  result.wire_shape_id_buffer_count = routing_vectors.wire_shape_ids.buffer_count;
+  result.wire_shape_id_usable_bytes = routing_vectors.wire_shape_ids.allocation_usable_bytes;
   result.wire_path_count = routing_vectors.paths.count;
   result.wire_path_capacity = routing_vectors.paths.capacity;
   result.wire_path_capacity_bytes = routing_vectors.paths.capacity_bytes;
@@ -284,7 +294,8 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   result.wire_path_usable_bytes = routing_vectors.paths.allocation_usable_bytes;
   result.wire_path_extra_count = routing_vectors.path_extras.count;
   result.wire_path_extra_capacity = routing_vectors.path_extras.capacity;
-  result.wire_path_extra_capacity_bytes = routing_vectors.path_extras.capacity_bytes;
+  // Shape attributes are already counted by addComponentStorage above.
+  result.wire_path_extra_capacity_bytes = 0;
   result.wire_path_extra_buffer_count = routing_vectors.path_extras.buffer_count;
   result.wire_path_extra_usable_bytes = routing_vectors.path_extras.allocation_usable_bytes;
   result.dynamic_string_capacity_estimate_bytes += routing_vectors.dynamic_string_capacity_bytes;
@@ -304,13 +315,13 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   result.wire_rectangle_buffer_count = routing_vectors.rectangles.buffer_count;
   result.wire_rectangle_usable_bytes = routing_vectors.rectangles.allocation_usable_bytes;
 
-  result.wire_nested_buffer_count = result.wire_path_buffer_count + result.wire_path_extra_buffer_count + result.wire_point_buffer_count
+  result.wire_nested_buffer_count = result.wire_shape_id_buffer_count + result.wire_path_buffer_count + result.wire_path_extra_buffer_count + result.wire_point_buffer_count
                                     + result.wire_point_extra_buffer_count + result.wire_via_buffer_count
                                     + result.wire_via_extra_buffer_count + result.wire_rectangle_buffer_count;
-  result.wire_nested_usable_bytes = result.wire_path_usable_bytes + result.wire_path_extra_usable_bytes + result.wire_point_usable_bytes
+  result.wire_nested_usable_bytes = result.wire_shape_id_usable_bytes + result.wire_path_usable_bytes + result.wire_path_extra_usable_bytes + result.wire_point_usable_bytes
                                     + result.wire_point_extra_usable_bytes + result.wire_via_usable_bytes
                                     + result.wire_via_extra_usable_bytes + result.wire_rectangle_usable_bytes;
-  const auto wire_nested_capacity_bytes = result.wire_path_capacity_bytes + result.wire_path_extra_capacity_bytes
+  const auto wire_nested_capacity_bytes = result.wire_shape_id_capacity_bytes + result.wire_path_capacity_bytes + result.wire_path_extra_capacity_bytes
                                           + result.wire_point_capacity_bytes + result.wire_point_extra_capacity_bytes
                                           + result.wire_via_capacity_bytes + result.wire_via_extra_capacity_bytes
                                           + result.wire_rectangle_capacity_bytes;
@@ -459,7 +470,7 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   }
 
   result.attributed_capacity_bytes
-      = result.component_payload_capacity_bytes + result.packed_entity_capacity_estimate_bytes + result.wire_path_capacity_bytes
+      = result.component_payload_capacity_bytes + result.packed_entity_capacity_estimate_bytes + result.wire_shape_id_capacity_bytes + result.wire_path_capacity_bytes
         + result.wire_path_extra_capacity_bytes + result.wire_point_capacity_bytes + result.wire_via_capacity_bytes
         + result.wire_point_extra_capacity_bytes + result.wire_via_extra_capacity_bytes + result.wire_rectangle_capacity_bytes
         + result.netlist_nested_capacity_bytes + result.routing_other_nested_capacity_bytes + result.other_nested_capacity_bytes
@@ -510,11 +521,16 @@ void printMemoryBreakdown(const MemoryBreakdown& value)
             << ",\"instance_term_pointer_table_capacity\":" << value.instance_term_pointer_table_capacity
             << ",\"instance_term_pointer_table_capacity_bytes\":" << value.instance_term_pointer_table_capacity_bytes
             << ",\"net_component_capacity_bytes\":" << value.net_component_capacity_bytes
+            << ",\"route_shape_count\":" << value.route_shape_count
+            << ",\"wire_shape_id_capacity_bytes\":" << value.wire_shape_id_capacity_bytes
+            << ",\"wire_shape_id_buffer_count\":" << value.wire_shape_id_buffer_count
+            << ",\"wire_shape_id_usable_bytes\":" << value.wire_shape_id_usable_bytes
             << ",\"wire_path_count\":" << value.wire_path_count << ",\"wire_path_capacity\":" << value.wire_path_capacity
             << ",\"wire_path_capacity_bytes\":" << value.wire_path_capacity_bytes
             << ",\"wire_path_buffer_count\":" << value.wire_path_buffer_count
             << ",\"wire_path_usable_bytes\":" << value.wire_path_usable_bytes
-            << ",\"wire_path_record_size_bytes\":" << sizeof(DesignWirePathRecord)
+            << ",\"wire_path_record_size_bytes\":0"
+            << ",\"route_shape_component_size_bytes\":" << sizeof(DesignRouteShape)
             << ",\"wire_path_extra_count\":" << value.wire_path_extra_count
             << ",\"wire_path_extra_capacity\":" << value.wire_path_extra_capacity
             << ",\"wire_path_extra_capacity_bytes\":" << value.wire_path_extra_capacity_bytes

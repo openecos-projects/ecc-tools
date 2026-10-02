@@ -13,6 +13,8 @@
 
 #include <boost/json.hpp>
 
+#include "../../benchmarks/DrtTrace.h"
+
 namespace odb {
 class dbBlock;
 class dbBPin;
@@ -96,7 +98,10 @@ class OdbTraceRecorder
                      odb::dbITerm* term);
   void recordDefineDesignVia(std::string_view source, odb::dbVia* via);
   void recordClearWire(std::string_view source, odb::dbNet* net);
-  void recordReplaceWire(std::string_view source, odb::dbNet* net);
+  void recordReplaceWire(
+      std::string_view source,
+      odb::dbNet* net,
+      const std::vector<drt_trace::WireAction>& wire_actions);
   void recordAppendTrackAssignment(std::string_view source,
                                    odb::dbNet* net,
                                    boost::json::array appended);

@@ -491,53 +491,9 @@ std::vector<std::string> pinPortKeys(const DesignStore& design, const DesignIoPi
   return result;
 }
 
-bool pointLess(Point lhs, Point rhs)
-{
-  return lhs.x < rhs.x || (lhs.x == rhs.x && lhs.y < rhs.y);
-}
-
 std::vector<std::string> wirePrimitives(const DesignStore& design, DesignNetId net)
 {
-  std::vector<std::string> result;
-  for (const auto wire_id : design.routingStorage().wires(net)) {
-    const auto& wire = design.routingStorage().wire(wire_id);
-    for (std::size_t path_index = 0; path_index < design.routingStorage().pathCount(wire_id); ++path_index) {
-      const auto path = design.routingStorage().path(wire_id, path_index);
-      const auto layer = layerName(design, path.layer());
-      for (std::size_t point_index = 1; point_index < path.points().size(); ++point_index) {
-        auto first = path.points()[point_index - 1u];
-        auto second = path.points()[point_index];
-        if (pointLess(second.position, first.position)) {
-          std::swap(first, second);
-        }
-        std::ostringstream key;
-        key << "segment|" << static_cast<unsigned>(wire.status) << '|' << wire.shield_net << '|' << layer << '|' << path.width() << '|'
-            << path.mask() << '|' << path.shape() << '|' << path.style() << '|' << first.position.x << ',' << first.position.y << ','
-            << first.flags << ',' << first.extension << '|' << second.position.x << ',' << second.position.y << ',' << second.flags << ','
-            << second.extension;
-        result.push_back(key.str());
-      }
-      for (const auto& via : path.vias()) {
-        const auto& anchor = path.points()[via.point_index];
-        std::ostringstream key;
-        key << "via|" << static_cast<unsigned>(wire.status) << '|' << wire.shield_net << '|' << anchor.position.x << ','
-            << anchor.position.y << '|' << viaName(design, via) << '|' << static_cast<unsigned>(via.orientation) << '|' << via.flags << '|'
-            << via.top_mask << ',' << via.cut_mask << ',' << via.bottom_mask << '|' << via.rows << ',' << via.columns << ',' << via.step_x
-            << ',' << via.step_y;
-        result.push_back(key.str());
-      }
-      for (const auto& rectangle : path.rectangles()) {
-        const auto anchor = path.points()[rectangle.point_index].position;
-        const auto& delta = rectangle.delta;
-        std::ostringstream key;
-        key << "rect|" << static_cast<unsigned>(wire.status) << '|' << wire.shield_net << '|' << layer << '|' << anchor.x + delta.ll_x
-            << ',' << anchor.y + delta.ll_y << ',' << anchor.x + delta.ur_x << ',' << anchor.y + delta.ur_y;
-        result.push_back(key.str());
-      }
-    }
-  }
-  std::sort(result.begin(), result.end());
-  return result;
+  return test::detail::wirePrimitiveKeys(design, net);
 }
 
 std::vector<std::string> netGeometryPrimitives(const DesignStore& design, DesignNetId net)
@@ -1092,15 +1048,32 @@ RoutingCoverage routingCoverage(const DesignStore& design)
   for (const auto net : design.netlistStorage().nets()) {
     for (const auto wire_id : design.routingStorage().wires(net)) {
       ++result.wire_count;
-      result.path_count += design.routingStorage().pathCount(wire_id);
-      for (std::size_t path_index = 0; path_index < design.routingStorage().pathCount(wire_id); ++path_index) {
-        const auto path = design.routingStorage().path(wire_id, path_index);
-        result.point_count += path.points().size();
-        result.path_via_count += path.vias().size();
-        result.path_rectangle_count += path.rectangles().size();
-        result.virtual_point_count += std::ranges::count_if(
-            path.points(), [](const DesignWirePoint& point) { return (point.flags & DesignWirePointFlag::kVirtual) != 0u; });
-      }
+      design.routingStorage().forEachShape(
+          wire_id, [&](DesignRouteShapeId, const DesignRouteShape& shape, const DesignRouteShapeAttributes*) {
+            ++result.path_count;
+            std::visit(
+                [&](const auto& geometry) {
+                  using Geometry = std::remove_cvref_t<decltype(geometry)>;
+                  if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+                    result.point_count += 2u;
+                    result.virtual_point_count +=
+                        ((geometry.begin.flags & DesignWirePointFlag::kVirtual) != 0u)
+                        + ((geometry.end.flags & DesignWirePointFlag::kVirtual) != 0u);
+                  } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+                    ++result.point_count;
+                    ++result.path_via_count;
+                    result.virtual_point_count += (geometry.origin.flags & DesignWirePointFlag::kVirtual) != 0u;
+                  } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+                    ++result.point_count;
+                    ++result.path_rectangle_count;
+                    result.virtual_point_count += (geometry.anchor.flags & DesignWirePointFlag::kVirtual) != 0u;
+                  } else {
+                    ++result.point_count;
+                    result.virtual_point_count += (geometry.point.flags & DesignWirePointFlag::kVirtual) != 0u;
+                  }
+                },
+                shape.geometry);
+          });
     }
     if (const auto* geometry = design.routingStorage().netGeometry(net); geometry != nullptr) {
       result.geometry_primitive_count += geometry->rectangles.size() + geometry->polygons.size() + geometry->vias.size();
@@ -1150,13 +1123,11 @@ struct RoutedPrimitiveLocation
   std::string location;
 };
 
-std::string routedPathLocation(const DesignStore& design, DesignWirePathView path, std::size_t wire_index,
-                               std::size_t path_index, std::string_view primitive)
+std::string routedShapeLocation(const DesignStore& design, const DesignRouteShape& shape, std::size_t wire_index,
+                                std::size_t shape_index, std::string_view primitive)
 {
   std::ostringstream result;
-  result << primitive << " at wire[" << wire_index << "]/path[" << path_index << "] on " << layerName(design, path.layer())
-         << " (points=" << path.points().size() << ", vias=" << path.vias().size() << ", rectangles="
-         << path.rectangles().size() << ')';
+  result << primitive << " at wire[" << wire_index << "]/shape[" << shape_index << "] on " << layerName(design, shape.layer);
   return result.str();
 }
 
@@ -1168,80 +1139,63 @@ std::vector<RoutedPrimitiveLocation> routedPrimitiveLocations(const DesignStore&
   std::size_t wire_index = 0u;
   for (const auto wire_id : routing.wires(net)) {
     const auto& wire = routing.wire(wire_id);
-    for (std::size_t path_index = 0; path_index < routing.pathCount(wire_id); ++path_index) {
-      const auto path = routing.path(wire_id, path_index);
-      for (std::size_t point_index = 1; point_index < path.points().size(); ++point_index) {
-        auto first = path.points()[point_index - 1u];
-        auto second = path.points()[point_index];
-        if (test::detail::pointLess(second.position, first.position)) {
-          std::swap(first, second);
-        }
-
-        test::detail::SemanticKey key;
-        key.text("segment");
-        test::detail::appendWirePathSemantics(key, design, wire, path, ignore_unrepresented_wire_mask);
-        key.point(first.position);
-        key.unsignedValue(first.flags);
-        key.signedValue(first.extension);
-        key.point(second.position);
-        key.unsignedValue(second.flags);
-        key.signedValue(second.extension);
-        result.push_back({.key = key.str(),
-                          .location = routedPathLocation(design, path, wire_index, path_index,
-                                                          "segment[" + std::to_string(point_index - 1u) + "]")});
-      }
-
-      if (path.points().size() == 1u && path.vias().empty() && path.rectangles().empty()) {
-        test::detail::SemanticKey key;
-        key.text("point");
-        test::detail::appendWirePathSemantics(key, design, wire, path, ignore_unrepresented_wire_mask);
-        key.point(path.points().front().position);
-        key.unsignedValue(path.points().front().flags);
-        key.signedValue(path.points().front().extension);
-        result.push_back({.key = key.str(), .location = routedPathLocation(design, path, wire_index, path_index, "point")});
-      }
-
-      std::size_t via_index = 0u;
-      for (const auto& via : path.vias()) {
-        test::detail::SemanticKey key;
-        key.text("via");
-        test::detail::appendWireSemantics(key, wire);
-        const auto& anchor = path.points()[via.point_index];
-        key.point(anchor.position);
-        key.unsignedValue(anchor.flags);
-        key.signedValue(anchor.extension);
-        key.text(test::detail::viaName(design, via.tech_via, via.design_via));
-        key.unsignedValue(static_cast<uint8_t>(via.orientation));
-        key.unsignedValue(via.flags);
-        key.unsignedValue(via.top_mask);
-        key.unsignedValue(via.cut_mask);
-        key.unsignedValue(via.bottom_mask);
-        key.unsignedValue(via.rows);
-        key.unsignedValue(via.columns);
-        key.signedValue(via.step_x);
-        key.signedValue(via.step_y);
-        result.push_back({.key = key.str(),
-                          .location = routedPathLocation(design, path, wire_index, path_index,
-                                                          "via[" + std::to_string(via_index++) + "]")});
-      }
-
-      std::size_t rectangle_index = 0u;
-      for (const auto& rectangle : path.rectangles()) {
-        test::detail::SemanticKey key;
-        key.text("rectangle");
-        test::detail::appendWirePathSemantics(key, design, wire, path, ignore_unrepresented_wire_mask);
-        const auto& anchor = path.points()[rectangle.point_index];
-        key.unsignedValue(anchor.flags);
-        key.signedValue(anchor.extension);
-        key.rectangle({.ll_x = anchor.position.x + rectangle.delta.ll_x,
-                       .ll_y = anchor.position.y + rectangle.delta.ll_y,
-                       .ur_x = anchor.position.x + rectangle.delta.ur_x,
-                       .ur_y = anchor.position.y + rectangle.delta.ur_y});
-        result.push_back({.key = key.str(),
-                          .location = routedPathLocation(design, path, wire_index, path_index,
-                                                          "rectangle[" + std::to_string(rectangle_index++) + "]")});
-      }
-    }
+    std::size_t shape_index = 0u;
+    routing.forEachShape(
+        wire_id, [&](DesignRouteShapeId, const DesignRouteShape& shape, const DesignRouteShapeAttributes* attributes) {
+          test::detail::SemanticKey key;
+          std::string_view primitive = "point";
+          std::visit(
+              [&](const auto& geometry) {
+                using Geometry = std::remove_cvref_t<decltype(geometry)>;
+                if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+                  primitive = "segment";
+                  auto first = geometry.begin;
+                  auto second = geometry.end;
+                  if (test::detail::pointLess(second.position, first.position)) std::swap(first, second);
+                  key.text("segment");
+                  test::detail::appendWireShapeSemantics(key, design, wire, shape, attributes, ignore_unrepresented_wire_mask);
+                  key.point(first.position);
+                  key.unsignedValue(first.flags);
+                  key.signedValue(first.extension);
+                  key.point(second.position);
+                  key.unsignedValue(second.flags);
+                  key.signedValue(second.extension);
+                } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+                  primitive = "via";
+                  key.text("via");
+                  test::detail::appendWireSemantics(key, wire);
+                  key.point(geometry.origin.position);
+                  key.unsignedValue(geometry.origin.flags);
+                  key.signedValue(geometry.origin.extension);
+                  key.text(test::detail::viaName(design, geometry.via.tech_via, geometry.via.design_via));
+                  key.unsignedValue(static_cast<uint8_t>(geometry.via.orientation));
+                  key.unsignedValue(geometry.via.flags);
+                  key.unsignedValue(geometry.via.top_mask);
+                  key.unsignedValue(geometry.via.cut_mask);
+                  key.unsignedValue(geometry.via.bottom_mask);
+                  key.unsignedValue(geometry.via.rows);
+                  key.unsignedValue(geometry.via.columns);
+                  key.signedValue(geometry.via.step_x);
+                  key.signedValue(geometry.via.step_y);
+                } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+                  primitive = "rectangle";
+                  key.text("rectangle");
+                  test::detail::appendWireShapeSemantics(key, design, wire, shape, attributes, ignore_unrepresented_wire_mask);
+                  key.unsignedValue(geometry.anchor.flags);
+                  key.signedValue(geometry.anchor.extension);
+                  key.rectangle(geometry.rectangle);
+                } else {
+                  key.text("point");
+                  test::detail::appendWireShapeSemantics(key, design, wire, shape, attributes, ignore_unrepresented_wire_mask);
+                  key.point(geometry.point.position);
+                  key.unsignedValue(geometry.point.flags);
+                  key.signedValue(geometry.point.extension);
+                }
+              },
+              shape.geometry);
+          result.push_back({.key = key.str(),
+                            .location = routedShapeLocation(design, shape, wire_index, shape_index++, primitive)});
+        });
     ++wire_index;
   }
   std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {

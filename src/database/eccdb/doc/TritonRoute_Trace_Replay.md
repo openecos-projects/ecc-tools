@@ -9,7 +9,7 @@ a randomly generated workload, or an automatic interception of every ODB getter.
 The recorder is enabled after LEF/DEF/guide loading, immediately before the real
 router/import entry point, and closed when that entry point completes. LEF/DEF
 input parsers, exporters, and post-run snapshots cannot append events; the DRT
-Parser, GuideProcessor, and Writer are instrumented. Schema v3 declares every
+Parser, GuideProcessor, and Writer are instrumented. Schema v4 declares every
 supported operation in its header. An operation absent from a particular trace
 was not exercised by that router run.
 
@@ -28,8 +28,16 @@ Enumeration is represented as one API group; the following per-object groups
 retain the recorded object access order. The scan's result comparison is a
 multiset, not a requirement to share the same container iteration order.
 
-The recorder writes schema v3. The replayers also accept existing v1/v2
-traces. A VIA definition retains its name, default flag, and every fixed
+The recorder writes schema v4. The replayers also accept existing v1/v2/v3
+traces. A v4 `replace_wire` retains the original ordered encoder inputs as
+`wire_actions`: `new_path`, `point`, `tech_via`, `via`, and `rect`. Path boundaries,
+explicit point extensions, RECT anchor/offsets and NDR layer-rule names are
+recorded beside the actual Writer calls. The enclosing event represents
+Wire replacement and encoder begin/end. It also keeps the decoded post-write
+`shapes` for independent read-back validation. Older traces contain only
+geometry; they cannot recover the original encoder call sequence.
+
+A VIA definition retains its name, default flag, and every fixed
 rectangle, including duplicate rectangles. ODB and iDB retain the default
 flag; EccDB currently stores the geometry but not that selection metadata.
 The fixed-VIA replay does not compare iDB cut row/column metadata. Definition
@@ -69,7 +77,8 @@ attributes are rejected by the supported profile rather than discarded.
 ODB and EccDB additionally compare segment endpoint extensions. IDB does not
 retain regular-wire FLUSH extensions, so its validation is limited to shared
 primitive geometry/connectivity. The trace keeps the extensions and reports
-their population; no side table fakes native IDB support. This is not complete
+`trace_endpoint_extension_fields` and `validated_endpoint_extension_fields`
+separately (the latter is zero for IDB); no side table fakes native IDB support. This is not complete
 DEF equality, nor byte-identical wire/path grouping across databases.
 
 ## Timing
@@ -82,13 +91,57 @@ IDB and ODB use their existing native object APIs. Wire replacement goes through
 the native writer/encoder or the corresponding service, not direct container
 modification invented by the benchmark.
 
-Timers include API calls and the same returned-field projection. Trace parsing,
-input parsing, token binding, canonical sorting, result comparison, and final
-state checks and per-event backend capability checks are outside timers.
-One clock pair is used per recorded event,
-and elapsed times are accumulated by API group. Small read timings include
-this measurement overhead and the common result-container
-construction. This is not raw getter latency or whole-router runtime.
+The current replay output schema is `tritonroute_db_trace_replay_v3`.
+`executeNative(event, timer)` prepares inputs first, measures native API batches
+with `NativeTimer::measure`, then constructs the validation JSON. Trace/input
+parsing, token/name binding for operation inputs, adaptor DTO construction,
+canonical sorting, result comparison and final checks are outside these clocks.
+The native name search itself stays inside the clock for `find_instance` and
+`find_pin`. Service-internal storage conversion, allocation and validation
+remain part of the measured Service API. Native read batches traverse and
+capture the requested fields; returning only a pointer and fetching all its
+associated data after timing would not measure the same workload.
+
+The recorder retains individual Wire actions inside each per-Net event rather
+than producing millions of separate JSONL rows. Timing is per native batch,
+not per Shape/action. `native_api_batches` reports batch calls/items/time and
+`wire_encoder_actions` reports the original action frequencies. A bulk write's
+total must not be presented as an individual Segment/Via latency. ODB executes
+the original prepared encoder actions; EccDB calls the batch `replaceRouted`
+Service with the same geometry, and iDB uses its native write API. Their
+container layouts and path grouping need not be identical.
+The streaming Shape writer converts directly into a staged Wire, retains the
+old route until all Shapes succeed, and discards the staged Wire on failure.
+Its diagnostic `append_shapes_ns` now includes conversion and insertion;
+`convert_shapes_ns` is retained as a zero-valued historical field.
+ODB Wire timing also includes temporary encoder-vector destruction, reported
+as `odb.dbWireEncoder.cleanup`. Earlier results without this batch excluded
+that cleanup; keep that timing-boundary change separate from EccDB optimizations.
+Comparison output explicitly labels these writes as
+`geometry_equivalent_only_operations`; their ratio describes equal supported
+geometry work, not identical encoder function sequences or path identities.
+
+Groups whose native portion has not been isolated are still replayed and
+validated, but appear in `unmeasured_operations`, with no native timing or
+speed ratio. Backend capability gaps remain separate `unsupported_operations`.
+The complete correctness coverage and the native timing coverage are therefore
+distinct. Small batch measurements include clock and raw-field capture overhead;
+they are not raw getter latency or whole-router runtime.
+`measured_native_total_ns` is the sum of timed native groups only. The comparison
+script lists `jointly_measured_operations` and their sum separately, so missing
+native timers never become zero-cost APIs or enter a full-API total.
+
+The checked-in `DrtTraceWireActionsSample2.jsonl` integration fixture covers
+multiple `new_path` boundaries, endpoint extension zero and seven, a newly
+defined design VIA with duplicate cut boxes, and a RECT with negative offsets.
+Run it through `DrtTraceComparison.py --repeat 1 --parallel` using the original
+ISPD2018 sample2 LEF/DEF before a large v4 replay. The reader rejects original
+actions in older-schema traces rather than silently changing legacy replay
+semantics.
+
+Historical v1/v2 replay result tables below included adaptor execution and
+returned JSON projection. They remain historical results and cannot be compared
+numerically with this new timing boundary as a database optimization claim.
 No backend runs an extra full-net preflight; only recorded reads and the final
 state represented by those reads/writes are validated.
 The current replayer streams JSONL events and keeps only the final per-net

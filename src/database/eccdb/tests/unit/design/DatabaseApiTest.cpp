@@ -21,6 +21,7 @@
 
 #include "DatabaseTestAccess.h"
 #include "eccdb/db.h"
+#include "design/routing/component/RoutingComponents.h"
 
 namespace eccdb {
 namespace {
@@ -93,46 +94,6 @@ TEST_F(DesignStorageTest, PublicApiProvidesTypedIdAndSnapshotCrud)
   EXPECT_TRUE(database.destroyNet(signal));
   EXPECT_FALSE(database.contains(signal));
   EXPECT_FALSE(database.netData(signal));
-}
-
-TEST_F(DesignStorageTest, PublicApiModelsWireAsEntityAndPathAsValue)
-{
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  const auto net = database.createSpecialNet(NetData{.name = "VDD", .use = SignalUse::kPower});
-  const auto via = database.createDesignVia(
-      DesignViaData{.name = "LOCAL_VIA",
-                    .rectangles = {{.layer = LayerId{layer.packed()},
-                                    .rectangle = {-5, -5, 5, 5}}}});
-
-  WireRoutingData routing{
-      .paths = {{.layer = RoutingLayerId{routing_layer.packed()},
-                 .width = 20,
-                 .points = {{{0, 0}}, {{100, 0}}},
-                 .vias = {{.point_index = 1, .definition = ViaDefinitionId{via}}}}}};
-  const auto wire = database.createWire(
-      WireMetadata{.net = net, .status = WireStatus::kFixed}, std::move(routing));
-
-  ASSERT_TRUE(wire);
-  EXPECT_TRUE(database.contains(wire));
-  EXPECT_EQ(database.wireMetadata(wire)->net, net);
-  EXPECT_EQ(database.wireMetadata(wire)->status, WireStatus::kFixed);
-  ASSERT_EQ(database.wireRoutingData(wire)->paths.size(), 1u);
-  EXPECT_EQ(database.wireRoutingData(wire)->paths.front().points.size(), 2u);
-  EXPECT_EQ(database.wireIds(net).front(), wire);
-  EXPECT_EQ(database.findDesignViaId("LOCAL_VIA"), via);
-  EXPECT_EQ(database.designViaData(via)->rectangles.size(), 1u);
-  EXPECT_FALSE(database.destroyDesignVia(via));
-
-  auto wire_ref = database.wire(wire);
-  ASSERT_TRUE(wire_ref);
-  EXPECT_EQ(wire_ref.metadata().net, net);
-  EXPECT_EQ(wire_ref.pathCount(), 1u);
-  EXPECT_EQ(wire_ref.pathData(0).points.size(), 2u);
-
-  EXPECT_TRUE(database.destroyWire(wire));
-  EXPECT_FALSE(wire_ref);
-  EXPECT_TRUE(database.destroyDesignVia(via));
-  EXPECT_TRUE(database.destroyNet(net));
 }
 
 TEST_F(DesignStorageTest, ConvenienceRefsRejectRelationshipsAcrossDatabases)

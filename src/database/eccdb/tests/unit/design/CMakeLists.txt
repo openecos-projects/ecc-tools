@@ -10,6 +10,7 @@ set(_eccdb_design_test_sources
   DesignGuideStorageTest.cpp
   DesignNetlistStorageTest.cpp
   DesignPinAccessStorageTest.cpp
+  DesignRouteShapeTest.cpp
   DesignViaServiceTest.cpp
   NetRouteServiceTest.cpp
   PhysicalDesignServiceTest.cpp

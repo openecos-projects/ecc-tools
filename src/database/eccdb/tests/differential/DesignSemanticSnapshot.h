@@ -9,6 +9,8 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 #include "design/DesignStore.h"
@@ -613,25 +615,31 @@ inline bool pointLess(Point lhs, Point rhs)
   return lhs.x < rhs.x || (lhs.x == rhs.x && lhs.y < rhs.y);
 }
 
-inline void appendWirePathSemantics(SemanticKey& key, const DesignStore& design, const DesignWire& wire, DesignWirePathView path,
-                                    bool ignore_unrepresented_mask = false)
-{
-  const bool drop_mask = ignore_unrepresented_mask && path.width() == 0 && path.mask() == 1u;
-  key.unsignedValue(static_cast<uint8_t>(wire.status));
-  key.text(wire.shield_net);
-  key.text(layerName(design, path.layer()));
-  key.unsignedValue(drop_mask ? path.flags() & ~DesignWirePathFlag::kHasMask : path.flags());
-  key.signedValue(path.width());
-  key.unsignedValue(drop_mask ? 0u : path.mask());
-  key.text(path.taperRule());
-  key.text(path.shape());
-  key.signedValue(path.style());
-}
-
 inline void appendWireSemantics(SemanticKey& key, const DesignWire& wire)
 {
   key.unsignedValue(static_cast<uint8_t>(wire.status));
   key.text(wire.shield_net);
+}
+
+inline void appendWireShapeSemantics(SemanticKey& key, const DesignStore& design, const DesignWire& wire,
+                                     const DesignRouteShape& shape, const DesignRouteShapeAttributes* attributes,
+                                     bool ignore_unrepresented_mask = false)
+{
+  const auto width = attributes == nullptr ? 0 : attributes->width;
+  const auto mask = attributes == nullptr ? 0u : attributes->mask;
+  const auto taper_rule = attributes == nullptr ? std::string_view{} : std::string_view{attributes->taper_rule};
+  const auto shape_name = attributes == nullptr ? std::string_view{} : std::string_view{attributes->shape};
+  const auto style = attributes == nullptr ? 0 : attributes->style;
+  const bool drop_mask = ignore_unrepresented_mask && width == 0 && mask == 1u;
+  key.unsignedValue(static_cast<uint8_t>(wire.status));
+  key.text(wire.shield_net);
+  key.text(layerName(design, shape.layer));
+  key.unsignedValue(drop_mask ? shape.flags & ~DesignWirePathFlag::kHasMask : shape.flags);
+  key.signedValue(width);
+  key.unsignedValue(drop_mask ? 0u : mask);
+  key.text(taper_rule);
+  key.text(shape_name);
+  key.signedValue(style);
 }
 
 inline std::vector<std::string> wirePrimitiveKeys(const DesignStore& design, DesignNetId id, bool ignore_unrepresented_mask = false)
@@ -639,72 +647,63 @@ inline std::vector<std::string> wirePrimitiveKeys(const DesignStore& design, Des
   std::vector<std::string> result;
   for (const auto wire_id : design.routingStorage().wires(id)) {
     const auto& wire = design.routingStorage().wire(wire_id);
-    for (std::size_t path_index = 0; path_index < design.routingStorage().pathCount(wire_id); ++path_index) {
-      const auto path = design.routingStorage().path(wire_id, path_index);
-      for (std::size_t point_index = 1; point_index < path.points().size(); ++point_index) {
-        auto first = path.points()[point_index - 1u];
-        auto second = path.points()[point_index];
-        if (pointLess(second.position, first.position)) {
-          std::swap(first, second);
-        }
-
-        SemanticKey key;
-        key.text("segment");
-        appendWirePathSemantics(key, design, wire, path, ignore_unrepresented_mask);
-        key.point(first.position);
-        key.unsignedValue(first.flags);
-        key.signedValue(first.extension);
-        key.point(second.position);
-        key.unsignedValue(second.flags);
-        key.signedValue(second.extension);
-        result.push_back(key.str());
-      }
-
-      if (path.points().size() == 1u && path.vias().empty() && path.rectangles().empty()) {
-        SemanticKey key;
-        key.text("point");
-        appendWirePathSemantics(key, design, wire, path, ignore_unrepresented_mask);
-        key.point(path.points().front().position);
-        key.unsignedValue(path.points().front().flags);
-        key.signedValue(path.points().front().extension);
-        result.push_back(key.str());
-      }
-
-      for (const auto& via : path.vias()) {
-        SemanticKey key;
-        key.text("via");
-        appendWireSemantics(key, wire);
-        const auto& anchor = path.points()[via.point_index];
-        key.point(anchor.position);
-        key.unsignedValue(anchor.flags);
-        key.signedValue(anchor.extension);
-        key.text(viaName(design, via.tech_via, via.design_via));
-        key.unsignedValue(static_cast<uint8_t>(via.orientation));
-        key.unsignedValue(via.flags);
-        key.unsignedValue(via.top_mask);
-        key.unsignedValue(via.cut_mask);
-        key.unsignedValue(via.bottom_mask);
-        key.unsignedValue(via.rows);
-        key.unsignedValue(via.columns);
-        key.signedValue(via.step_x);
-        key.signedValue(via.step_y);
-        result.push_back(key.str());
-      }
-
-      for (const auto& rectangle : path.rectangles()) {
-        SemanticKey key;
-        key.text("rectangle");
-        appendWirePathSemantics(key, design, wire, path, ignore_unrepresented_mask);
-        const auto& anchor = path.points()[rectangle.point_index];
-        key.unsignedValue(anchor.flags);
-        key.signedValue(anchor.extension);
-        key.rectangle({.ll_x = anchor.position.x + rectangle.delta.ll_x,
-                       .ll_y = anchor.position.y + rectangle.delta.ll_y,
-                       .ur_x = anchor.position.x + rectangle.delta.ur_x,
-                       .ur_y = anchor.position.y + rectangle.delta.ur_y});
-        result.push_back(key.str());
-      }
-    }
+    design.routingStorage().forEachShape(
+        wire_id, [&](DesignRouteShapeId, const DesignRouteShape& shape, const DesignRouteShapeAttributes* attributes) {
+          std::visit(
+              [&](const auto& geometry) {
+                using Geometry = std::remove_cvref_t<decltype(geometry)>;
+                if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+                  auto first = geometry.begin;
+                  auto second = geometry.end;
+                  if (pointLess(second.position, first.position)) std::swap(first, second);
+                  SemanticKey key;
+                  key.text("segment");
+                  appendWireShapeSemantics(key, design, wire, shape, attributes, ignore_unrepresented_mask);
+                  key.point(first.position);
+                  key.unsignedValue(first.flags);
+                  key.signedValue(first.extension);
+                  key.point(second.position);
+                  key.unsignedValue(second.flags);
+                  key.signedValue(second.extension);
+                  result.push_back(key.str());
+                } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+                  SemanticKey key;
+                  key.text("via");
+                  appendWireSemantics(key, wire);
+                  key.point(geometry.origin.position);
+                  key.unsignedValue(geometry.origin.flags);
+                  key.signedValue(geometry.origin.extension);
+                  key.text(viaName(design, geometry.via.tech_via, geometry.via.design_via));
+                  key.unsignedValue(static_cast<uint8_t>(geometry.via.orientation));
+                  key.unsignedValue(geometry.via.flags);
+                  key.unsignedValue(geometry.via.top_mask);
+                  key.unsignedValue(geometry.via.cut_mask);
+                  key.unsignedValue(geometry.via.bottom_mask);
+                  key.unsignedValue(geometry.via.rows);
+                  key.unsignedValue(geometry.via.columns);
+                  key.signedValue(geometry.via.step_x);
+                  key.signedValue(geometry.via.step_y);
+                  result.push_back(key.str());
+                } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+                  SemanticKey key;
+                  key.text("rectangle");
+                  appendWireShapeSemantics(key, design, wire, shape, attributes, ignore_unrepresented_mask);
+                  key.unsignedValue(geometry.anchor.flags);
+                  key.signedValue(geometry.anchor.extension);
+                  key.rectangle(geometry.rectangle);
+                  result.push_back(key.str());
+                } else {
+                  SemanticKey key;
+                  key.text("point");
+                  appendWireShapeSemantics(key, design, wire, shape, attributes, ignore_unrepresented_mask);
+                  key.point(geometry.point.position);
+                  key.unsignedValue(geometry.point.flags);
+                  key.signedValue(geometry.point.extension);
+                  result.push_back(key.str());
+                }
+              },
+              shape.geometry);
+        });
   }
   sortKeys(result);
   return result;

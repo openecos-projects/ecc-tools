@@ -15,7 +15,9 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <entt/container/dense_map.hpp>
@@ -1435,68 +1437,42 @@ void RTInterface::wrapDatabaseFromEnTT()
 
     design.netlistStorage().forEachSpecialNet([&](const auto net_id, const auto&) {
       design.routingStorage().forEachWire(net_id, [&](const auto wire_id, const auto&) {
-        const auto path_count = design.routingStorage().pathCount(wire_id);
-        for (std::size_t path_index = 0; path_index < path_count; ++path_index) {
-          const auto path = design.routingStorage().path(wire_id, path_index);
-          const auto points = path.points();
-          const auto* path_layer = layers.find(eccdb::TechLayerId{path.layer().entity()});
-          if (path.vias().empty()) {
-            // Keep compatibility with DefRead::parse_pdn_wire: FLUSHPOINT and
-            // VIRTUALPOINT tokens are ignored there, and every non-via path
-            // still contributes one segment (a zero box when fewer than two
-            // ordinary POINT tokens remain).
-            eccdb::Point first;
-            eccdb::Point second;
-            std::size_t ordinary_point_count = 0;
-            for (const auto& point : points) {
-              if (point.flags != 0u) {
-                continue;
-              }
-              if (ordinary_point_count == 0) {
-                first = point.position;
-              } else {
-                second = point.position;
-                ordinary_point_count = 2;
-                break;
-              }
-              ordinary_point_count = 1;
-            }
-            const auto rectangle = ordinary_point_count == 2 ? wireSegmentBox(first, second, path.width()) : eccdb::Rect{};
-            if (path_layer != nullptr) {
-              appendObstacle(sink, *path_layer, rectangle);
-            }
-          }
-          for (const auto via : path.vias()) {
-            if (via.point_index >= points.size()) {
-              continue;
-            }
-            const auto base = points[via.point_index].position;
-            const uint32_t rows = std::max(via.rows, 1u);
-            const uint32_t columns = std::max(via.columns, 1u);
-            for (uint32_t row = 0; row < rows; ++row) {
-              for (uint32_t column = 0; column < columns; ++column) {
-                const eccdb::Point origin{base.x + static_cast<int32_t>(column) * via.step_x,
-                                                  base.y + static_cast<int32_t>(row) * via.step_y};
-                const auto shapes = resolveViaShapes(design, tech, via.tech_via, via.design_via, origin);
-                for (const auto& shape : shapes.routing) {
-                  appendObstacle(sink, shape);
-                }
-                for (const auto& shape : shapes.cut) {
-                  appendObstacle(sink, shape);
-                }
-              }
-            }
-          }
-          for (const auto& rectangle : path.rectangles()) {
-            if (rectangle.point_index >= points.size()) {
-              continue;
-            }
-            const auto base = points[rectangle.point_index].position;
-            if (path_layer != nullptr) {
-              appendObstacle(sink, *path_layer, rectangle.delta.offset(base.x, base.y));
-            }
-          }
-        }
+        design.routingStorage().forEachShape(
+            wire_id, [&](eccdb::DesignRouteShapeId, const eccdb::DesignRouteShape& shape,
+                         const eccdb::DesignRouteShapeAttributes* attributes) {
+              std::visit(
+                  [&](const auto& geometry) {
+                    using Geometry = std::decay_t<decltype(geometry)>;
+                    const auto layer = eccdb::TechLayerId{shape.layer.entity()};
+                    if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteSegment>) {
+                      const int32_t width = attributes == nullptr ? 0 : attributes->width;
+                      appendObstacle(sink, layer,
+                                     wireSegmentBox(geometry.begin.position, geometry.end.position, width));
+                    } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
+                      const auto& via = geometry.via;
+                      const uint32_t rows = std::max(via.rows, 1u);
+                      const uint32_t columns = std::max(via.columns, 1u);
+                      for (uint32_t row = 0; row < rows; ++row) {
+                        for (uint32_t column = 0; column < columns; ++column) {
+                          const eccdb::Point origin{geometry.origin.position.x + static_cast<int32_t>(column) * via.step_x,
+                                                    geometry.origin.position.y + static_cast<int32_t>(row) * via.step_y};
+                          const auto shapes = resolveViaShapes(design, tech, via.tech_via, via.design_via, origin);
+                          for (const auto& via_shape : shapes.routing) {
+                            appendObstacle(sink, via_shape);
+                          }
+                          for (const auto& via_shape : shapes.cut) {
+                            appendObstacle(sink, via_shape);
+                          }
+                        }
+                      }
+                    } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRoutePatch>) {
+                      appendObstacle(sink, layer, geometry.rectangle);
+                    } else {
+                      // Point-only Shapes preserve DEF syntax but do not represent metal.
+                    }
+                  },
+                  shape.geometry);
+            });
       });
       if (const auto* geometry = design.routingStorage().netGeometry(net_id); geometry != nullptr) {
         for (const auto& rect : geometry->rectangles) {
@@ -2003,7 +1979,7 @@ void RTInterface::outputNetListToEnTT()
   struct PendingWire
   {
     eccdb::DesignNetId net;
-    eccdb::DesignWireRoutingInput routing;
+    std::vector<eccdb::DesignRouteShape> shapes;
   };
 
   auto& routing = _design->routingStorage();
@@ -2032,7 +2008,14 @@ void RTInterface::outputNetListToEnTT()
       continue;
     }
 
-    eccdb::DesignWireRoutingInput input;
+    std::vector<eccdb::DesignRouteShape> shapes;
+    uint32_t source_path = 0u;
+    const auto nextSourcePath = [&]() {
+      if (source_path == std::numeric_limits<uint32_t>::max()) {
+        throw std::overflow_error("iRT output source path count exceeds uint32 range");
+      }
+      return source_path++;
+    };
     if (const auto found = result_map.find(net_idx); found != result_map.end()) {
       std::vector<Segment<LayerCoord>*> segments(found->second.begin(), found->second.end());
       std::sort(segments.begin(), segments.end(), [](const auto* lhs, const auto* rhs) {
@@ -2041,10 +2024,13 @@ void RTInterface::outputNetListToEnTT()
       for (const auto* segment : segments) {
         const LayerCoord& first = segment->get_first();
         const LayerCoord& second = segment->get_second();
-        eccdb::DesignWirePath path;
         if (first.get_layer_idx() == second.get_layer_idx()) {
-          path.layer = requireEnttRoutingLayer(*_tech, routing_layers, first.get_layer_idx());
-          path.points = {{{first.get_x(), first.get_y()}}, {{second.get_x(), second.get_y()}}};
+          const auto layer = requireEnttRoutingLayer(*_tech, routing_layers, first.get_layer_idx());
+          shapes.push_back(eccdb::DesignRouteShape{.layer = layer,
+                                                   .source_path = nextSourcePath(),
+                                                   .geometry = eccdb::DesignRouteSegment{
+                                                       .begin = {.position = {first.get_x(), first.get_y()}},
+                                                       .end = {.position = {second.get_x(), second.get_y()}}}});
         } else {
           const int32_t below_layer = std::min(first.get_layer_idx(), second.get_layer_idx());
           const int32_t top_layer = std::max(first.get_layer_idx(), second.get_layer_idx());
@@ -2059,11 +2045,20 @@ void RTInterface::outputNetListToEnTT()
           if (static_cast<bool>(tech_via) == static_cast<bool>(design_via)) {
             throw std::runtime_error("iRT output VIA must resolve exactly once in EnTTDB: " + via_name);
           }
-          path.layer = requireEnttRoutingLayer(*_tech, routing_layers, top_layer);
-          path.points = {{{first.get_x(), first.get_y()}}};
-          path.vias.push_back(eccdb::DesignWireVia{.point_index = 0, .tech_via = tech_via, .design_via = design_via});
+          // Keep the existing iRT/IDB writeback convention: a via shape is
+          // emitted on its top routing layer and exits toward the lower one.
+          // The route segment is undirected; choosing this canonical side
+          // keeps DEF output stable across the old and Shape-first paths.
+          const auto entry_layer = requireEnttRoutingLayer(*_tech, routing_layers, top_layer);
+          const auto exit_layer = requireEnttRoutingLayer(*_tech, routing_layers, below_layer);
+          shapes.push_back(eccdb::DesignRouteShape{
+              .layer = entry_layer,
+              .source_path = nextSourcePath(),
+              .geometry = eccdb::DesignRouteVia{
+                  .origin = {.position = {first.get_x(), first.get_y()}},
+                  .via = eccdb::DesignWireVia{.tech_via = tech_via, .design_via = design_via},
+                  .exit_layer = exit_layer}});
         }
-        input.appendPath(std::move(path));
       }
     }
     if (const auto found = patch_map.find(net_idx); found != patch_map.end()) {
@@ -2072,20 +2067,20 @@ void RTInterface::outputNetListToEnTT()
         return canonicalPatchKey(lhs) < canonicalPatchKey(rhs);
       });
       for (const auto* patch : patches) {
-        eccdb::DesignWirePath path;
-        path.layer = requireEnttRoutingLayer(*_tech, routing_layers, patch->get_layer_idx());
-        path.points = {{{patch->get_real_ll_x(), patch->get_real_ll_y()}}};
-        path.rectangles.push_back(eccdb::DesignWireRectangle{
-            .point_index = 0,
-            .delta = {.ll_x = 0,
-                      .ll_y = 0,
-                      .ur_x = patch->get_real_ur_x() - patch->get_real_ll_x(),
-                      .ur_y = patch->get_real_ur_y() - patch->get_real_ll_y()}});
-        input.appendPath(std::move(path));
+        const auto anchor = eccdb::DesignWirePoint{.position = {patch->get_real_ll_x(), patch->get_real_ll_y()}};
+        shapes.push_back(eccdb::DesignRouteShape{
+            .layer = requireEnttRoutingLayer(*_tech, routing_layers, patch->get_layer_idx()),
+            .source_path = nextSourcePath(),
+            .geometry = eccdb::DesignRoutePatch{
+                .anchor = anchor,
+                .rectangle = {.ll_x = patch->get_real_ll_x(),
+                              .ll_y = patch->get_real_ll_y(),
+                              .ur_x = patch->get_real_ur_x(),
+                              .ur_y = patch->get_real_ur_y()}}});
       }
     }
-    if (input.pathCount() != 0u) {
-      pending.push_back(PendingWire{.net = net, .routing = std::move(input)});
+    if (!shapes.empty()) {
+      pending.push_back(PendingWire{.net = net, .shapes = std::move(shapes)});
     }
   }
 
@@ -2098,8 +2093,17 @@ void RTInterface::outputNetListToEnTT()
   try {
     created.reserve(pending.size());
     for (auto& wire : pending) {
-      created.push_back(routing.createWire(eccdb::DesignWire{.net = wire.net, .status = eccdb::DesignWireStatus::kRouted},
-                                           std::move(wire.routing)));
+      const auto wire_id = routing.createWire(eccdb::DesignWire{.net = wire.net, .status = eccdb::DesignWireStatus::kRouted});
+      try {
+        for (auto& shape : wire.shapes) {
+          shape.wire = wire_id;
+          static_cast<void>(routing.createShape(wire_id, std::move(shape)));
+        }
+      } catch (...) {
+        static_cast<void>(routing.destroyWire(wire_id));
+        throw;
+      }
+      created.push_back(wire_id);
     }
   } catch (...) {
     for (const auto id : created) {

@@ -1,9 +1,11 @@
 #include "design/routing/storage/DesignRoutingStorage.h"
 
 #include <algorithm>
-#include <iterator>
+#include <array>
+#include <cstdint>
 #include <limits>
-#include <malloc.h>
+#include <optional>
+#include <span>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -14,11 +16,22 @@
 #include "tech/TechRegistry.h"
 #include "tech/common/TechLayerTypes.h"
 #include "tech/cut_layer/model/CutLayerComponents.h"
+#include "tech/non_default_rule/model/NonDefaultRuleComponents.h"
 #include "tech/routing_layer/model/RoutingLayerComponents.h"
 #include "tech/via_rule_generate/model/ViaRuleGenerateComponents.h"
 
 namespace eccdb {
 namespace {
+
+constexpr uint32_t kShapeValueFlags = DesignWirePathFlag::kHasWidth | DesignWirePathFlag::kHasMask
+                                      | DesignWirePathFlag::kHasTaperRule | DesignWirePathFlag::kHasShape
+                                      | DesignWirePathFlag::kHasStyle;
+constexpr uint32_t kKnownPathFlags = DesignWirePathFlag::kHasWidth | DesignWirePathFlag::kHasMask | DesignWirePathFlag::kTaper
+                                     | DesignWirePathFlag::kHasTaperRule | DesignWirePathFlag::kHasShape
+                                     | DesignWirePathFlag::kHasStyle;
+constexpr uint32_t kKnownPointFlags = DesignWirePointFlag::kHasExtension | DesignWirePointFlag::kVirtual;
+constexpr uint32_t kKnownViaFlags = DesignWireViaFlag::kHasMask | DesignWireViaFlag::kHasArray;
+constexpr uint32_t kUnassignedSourcePath = std::numeric_limits<uint32_t>::max();
 
 bool isValidWireStatus(DesignWireStatus status)
 {
@@ -51,115 +64,416 @@ void validateNetGeometryOptions(DesignWireStatus status, uint32_t flags, uint32_
   }
 }
 
-bool routingIsEmpty(const DesignWireRouting& routing) noexcept
+bool samePoint(const DesignWirePoint& lhs, const DesignWirePoint& rhs) noexcept
 {
-  return routing.paths.empty() && routing.points.empty() && routing.vias.empty() && routing.rectangles.empty()
-         && routing.extras.empty();
+  return lhs.position == rhs.position && lhs.flags == rhs.flags && lhs.extension == rhs.extension;
 }
 
-uint32_t checkedRoutingSize(std::size_t current, std::size_t added)
+bool sameAttributes(const DesignWirePathExtra& lhs, const DesignWirePathExtra& rhs) noexcept
 {
-  if (current > std::numeric_limits<uint32_t>::max() || added > std::numeric_limits<uint32_t>::max() - current) {
-    throw std::overflow_error("wire routing vector exceeds uint32_t");
-  }
-  return static_cast<uint32_t>(current + added);
+  return lhs.width == rhs.width && lhs.mask == rhs.mask && lhs.taper_rule == rhs.taper_rule && lhs.shape == rhs.shape
+         && lhs.style == rhs.style;
 }
 
-template <typename T>
-void reserveRoutingGrowth(std::vector<T>& values, std::size_t required)
+bool hasShapeValueAttributes(uint32_t flags) noexcept
 {
-  if (required > values.capacity()) {
-    const auto limit = static_cast<std::size_t>(std::numeric_limits<uint32_t>::max());
-    const auto grown = values.capacity() + std::max(values.capacity(), std::size_t{1});
-    values.reserve(std::max(required, std::min(grown, limit)));
+  return (flags & kShapeValueFlags) != 0u;
+}
+
+void validateWireMetadata(const DesignRoutingStorage::registry_type& registry, const DesignWire& wire)
+{
+  if (!wire.net || !registry.valid(wire.net.entity()) || !registry.all_of<DesignNet>(wire.net.entity())) {
+    throw std::invalid_argument("design wire references an invalid net");
+  }
+  if (!isValidWireStatus(wire.status) || (wire.status == DesignWireStatus::kShield) == wire.shield_net.empty()) {
+    throw std::invalid_argument("design wire status or shield name is invalid");
   }
 }
 
-void insertRoutingPath(DesignWireRouting& routing, std::size_t index, DesignWireRouting staged)
+void validatePointValue(DesignWirePoint point)
 {
-  static_assert(std::is_nothrow_move_constructible_v<DesignWirePathRecord>
-                && std::is_nothrow_move_assignable_v<DesignWirePathRecord>
-                && std::is_nothrow_move_constructible_v<DesignWirePoint>
-                && std::is_nothrow_move_assignable_v<DesignWirePoint>
-                && std::is_nothrow_move_constructible_v<DesignWireVia>
-                && std::is_nothrow_move_assignable_v<DesignWireVia>
-                && std::is_nothrow_move_constructible_v<DesignWireRectangle>
-                && std::is_nothrow_move_assignable_v<DesignWireRectangle>
-                && std::is_nothrow_move_constructible_v<DesignWirePathExtra>
-                && std::is_nothrow_move_assignable_v<DesignWirePathExtra>);
-  if (index > routing.paths.size() || staged.paths.size() != 1u) {
-    throw std::out_of_range("wire path index is out of range");
+  const bool has_extension = (point.flags & DesignWirePointFlag::kHasExtension) != 0u;
+  const bool is_virtual = (point.flags & DesignWirePointFlag::kVirtual) != 0u;
+  if ((point.flags & ~kKnownPointFlags) != 0u || (!has_extension && point.extension != 0) || (has_extension && is_virtual)) {
+    throw std::invalid_argument("design wire point extension and flags are inconsistent");
   }
+}
 
-  const auto point_begin = index == routing.paths.size() ? routing.points.size() : routing.paths[index].points.begin;
-  const auto via_begin = index == routing.paths.size() ? routing.vias.size() : routing.paths[index].vias.begin;
-  const auto rectangle_begin = index == routing.paths.size() ? routing.rectangles.size() : routing.paths[index].rectangles.begin;
-  const auto extra_begin = static_cast<std::size_t>(std::count_if(
-      routing.paths.begin(), routing.paths.begin() + index,
-      [](const DesignWirePathRecord& record) { return record.extra_index != kInvalidDesignWirePathExtraIndex; }));
-
-  checkedRoutingSize(routing.paths.size(), 1u);
-  checkedRoutingSize(routing.points.size(), staged.points.size());
-  checkedRoutingSize(routing.vias.size(), staged.vias.size());
-  checkedRoutingSize(routing.rectangles.size(), staged.rectangles.size());
-  checkedRoutingSize(routing.extras.size(), staged.extras.size());
-  reserveRoutingGrowth(routing.paths, routing.paths.size() + 1u);
-  reserveRoutingGrowth(routing.points, routing.points.size() + staged.points.size());
-  reserveRoutingGrowth(routing.vias, routing.vias.size() + staged.vias.size());
-  reserveRoutingGrowth(routing.rectangles, routing.rectangles.size() + staged.rectangles.size());
-  reserveRoutingGrowth(routing.extras, routing.extras.size() + staged.extras.size());
-
-  // Once capacity is reserved, all element moves and inserts are non-throwing.
-  routing.points.insert(routing.points.begin() + point_begin, std::make_move_iterator(staged.points.begin()),
-                        std::make_move_iterator(staged.points.end()));
-  routing.vias.insert(routing.vias.begin() + via_begin, std::make_move_iterator(staged.vias.begin()),
-                      std::make_move_iterator(staged.vias.end()));
-  routing.rectangles.insert(routing.rectangles.begin() + rectangle_begin, std::make_move_iterator(staged.rectangles.begin()),
-                            std::make_move_iterator(staged.rectangles.end()));
-  routing.extras.insert(routing.extras.begin() + extra_begin, std::make_move_iterator(staged.extras.begin()),
-                        std::make_move_iterator(staged.extras.end()));
-
-  for (std::size_t following = index; following < routing.paths.size(); ++following) {
-    auto& record = routing.paths[following];
-    record.points.begin += staged.paths.front().points.count;
-    record.vias.begin += staged.paths.front().vias.count;
-    record.rectangles.begin += staged.paths.front().rectangles.count;
-    if (record.extra_index != kInvalidDesignWirePathExtraIndex) {
-      record.extra_index += static_cast<uint32_t>(staged.extras.size());
+void validatePathValue(const DesignRoutingStorage::registry_type& design, const TechRegistry::registry_type& tech,
+                       DesignWirePathView path)
+{
+  if (!path.layer() || !tech.valid(path.layer().entity()) || !tech.all_of<TechLayerInfo, TechRoutingLayer>(path.layer().entity())) {
+    throw std::invalid_argument("design wire path references an invalid routing layer");
+  }
+  if ((path.flags() & ~kKnownPathFlags) != 0u || path.points().empty()) {
+    throw std::invalid_argument("design wire path flags or points are invalid");
+  }
+  const bool has_width = (path.flags() & DesignWirePathFlag::kHasWidth) != 0u;
+  const bool zero_width_via_path
+      = has_width && path.width() == 0 && path.points().size() == 1u && !path.vias().empty() && path.rectangles().empty();
+  if ((has_width && path.width() < 0) || (has_width && path.width() == 0 && !zero_width_via_path)
+      || (!has_width && path.width() != 0)) {
+    throw std::invalid_argument("design wire path width and flags are inconsistent");
+  }
+  const bool has_mask = (path.flags() & DesignWirePathFlag::kHasMask) != 0u;
+  const bool has_taper_rule = (path.flags() & DesignWirePathFlag::kHasTaperRule) != 0u;
+  const bool has_shape = (path.flags() & DesignWirePathFlag::kHasShape) != 0u;
+  const bool has_style = (path.flags() & DesignWirePathFlag::kHasStyle) != 0u;
+  if (has_mask != (path.mask() != 0u) || has_taper_rule == path.taperRule().empty() || has_shape == path.shape().empty()
+      || (!has_style && path.style() != 0)) {
+    throw std::invalid_argument("design wire path optional fields and flags are inconsistent");
+  }
+  for (const auto point : path.points()) {
+    validatePointValue(point);
+  }
+  for (const auto via : path.vias()) {
+    if (via.point_index >= path.points().size() || !isValidDesignOrientation(via.orientation)) {
+      throw std::invalid_argument("design wire via anchor or orientation is invalid");
+    }
+    const bool has_tech_via = static_cast<bool>(via.tech_via);
+    const bool has_design_via = static_cast<bool>(via.design_via);
+    if (has_tech_via == has_design_via) {
+      throw std::invalid_argument("design wire via must reference exactly one Tech or Design via");
+    }
+    if (has_tech_via && (!tech.valid(via.tech_via.entity()) || !tech.all_of<TechViaMaster>(via.tech_via.entity()))) {
+      throw std::invalid_argument("design wire references an invalid technology via");
+    }
+    if (has_design_via && (!design.valid(via.design_via.entity()) || !design.all_of<DesignVia>(via.design_via.entity()))) {
+      throw std::invalid_argument("design wire references an invalid design via");
+    }
+    const bool has_via_mask = (via.flags & DesignWireViaFlag::kHasMask) != 0u;
+    const bool has_array = (via.flags & DesignWireViaFlag::kHasArray) != 0u;
+    const bool any_via_mask = via.top_mask != 0u || via.cut_mask != 0u || via.bottom_mask != 0u;
+    if ((via.flags & ~kKnownViaFlags) != 0u || has_via_mask != any_via_mask || (has_array && (via.rows == 0u || via.columns == 0u))
+        || (!has_array && (via.rows != 1u || via.columns != 1u || via.step_x != 0 || via.step_y != 0))) {
+      throw std::invalid_argument("design wire via optional fields and flags are inconsistent");
     }
   }
-  auto record = staged.paths.front();
-  record.points.begin = static_cast<uint32_t>(point_begin);
-  record.vias.begin = static_cast<uint32_t>(via_begin);
-  record.rectangles.begin = static_cast<uint32_t>(rectangle_begin);
-  if (record.extra_index != kInvalidDesignWirePathExtraIndex) {
-    record.extra_index = static_cast<uint32_t>(extra_begin);
+  for (const auto rectangle : path.rectangles()) {
+    if (rectangle.point_index >= path.points().size() || !rectangle.delta.isValid()) {
+      throw std::invalid_argument("design wire rectangle anchor or delta is invalid");
+    }
   }
-  routing.paths.insert(routing.paths.begin() + index, record);
 }
 
-void eraseRoutingPath(DesignWireRouting& routing, std::size_t index)
+Rect checkedRect(int64_t ll_x, int64_t ll_y, int64_t ur_x, int64_t ur_y)
 {
-  const auto removed = routing.paths[index];
-  routing.points.erase(routing.points.begin() + removed.points.begin,
-                       routing.points.begin() + removed.points.begin + removed.points.count);
-  routing.vias.erase(routing.vias.begin() + removed.vias.begin,
-                     routing.vias.begin() + removed.vias.begin + removed.vias.count);
-  routing.rectangles.erase(routing.rectangles.begin() + removed.rectangles.begin,
-                           routing.rectangles.begin() + removed.rectangles.begin + removed.rectangles.count);
-  if (removed.extra_index != kInvalidDesignWirePathExtraIndex) {
-    routing.extras.erase(routing.extras.begin() + removed.extra_index);
-  }
-  routing.paths.erase(routing.paths.begin() + index);
-  for (std::size_t following = index; following < routing.paths.size(); ++following) {
-    auto& record = routing.paths[following];
-    record.points.begin -= removed.points.count;
-    record.vias.begin -= removed.vias.count;
-    record.rectangles.begin -= removed.rectangles.count;
-    if (removed.extra_index != kInvalidDesignWirePathExtraIndex
-        && record.extra_index != kInvalidDesignWirePathExtraIndex) {
-      --record.extra_index;
+  const auto checked = [](int64_t value) -> int32_t {
+    if (value < std::numeric_limits<int32_t>::min() || value > std::numeric_limits<int32_t>::max()) {
+      throw std::overflow_error("wire shape coordinate exceeds int32 range");
     }
+    return static_cast<int32_t>(value);
+  };
+  return Rect{.ll_x = checked(ll_x), .ll_y = checked(ll_y), .ur_x = checked(ur_x), .ur_y = checked(ur_y)};
+}
+
+Point checkedPoint(int64_t x, int64_t y)
+{
+  const auto point = checkedRect(x, y, x, y);
+  return {.x = point.ll_x, .y = point.ll_y};
+}
+
+DesignWireRectangle relativePatch(Rect rectangle, DesignWirePoint anchor)
+{
+  return {.point_index = 0u,
+          .delta = checkedRect(static_cast<int64_t>(rectangle.ll_x) - anchor.position.x,
+                               static_cast<int64_t>(rectangle.ll_y) - anchor.position.y,
+                               static_cast<int64_t>(rectangle.ur_x) - anchor.position.x,
+                               static_cast<int64_t>(rectangle.ur_y) - anchor.position.y)};
+}
+
+Point transformPoint(Point point, Point origin, DesignOrientation orientation)
+{
+  const int64_t x = point.x;
+  const int64_t y = point.y;
+  int64_t transformed_x = 0;
+  int64_t transformed_y = 0;
+  switch (orientation) {
+    case DesignOrientation::kN: transformed_x = x; transformed_y = y; break;
+    case DesignOrientation::kS: transformed_x = -x; transformed_y = -y; break;
+    case DesignOrientation::kE: transformed_x = y; transformed_y = -x; break;
+    case DesignOrientation::kW: transformed_x = -y; transformed_y = x; break;
+    case DesignOrientation::kFN: transformed_x = -x; transformed_y = y; break;
+    case DesignOrientation::kFS: transformed_x = x; transformed_y = -y; break;
+    case DesignOrientation::kFE: transformed_x = -y; transformed_y = -x; break;
+    case DesignOrientation::kFW: transformed_x = y; transformed_y = x; break;
+    default: throw std::invalid_argument("wire VIA orientation is invalid");
+  }
+  return checkedPoint(transformed_x + origin.x, transformed_y + origin.y);
+}
+
+Rect orientedBounds(Rect rectangle, Point origin, DesignOrientation orientation)
+{
+  const std::array<Point, 4> corners{transformPoint({rectangle.ll_x, rectangle.ll_y}, origin, orientation),
+                                     transformPoint({rectangle.ll_x, rectangle.ur_y}, origin, orientation),
+                                     transformPoint({rectangle.ur_x, rectangle.ll_y}, origin, orientation),
+                                     transformPoint({rectangle.ur_x, rectangle.ur_y}, origin, orientation)};
+  int64_t min_x = corners.front().x;
+  int64_t min_y = corners.front().y;
+  int64_t max_x = corners.front().x;
+  int64_t max_y = corners.front().y;
+  for (const auto corner : corners) {
+    min_x = std::min<int64_t>(min_x, corner.x);
+    min_y = std::min<int64_t>(min_y, corner.y);
+    max_x = std::max<int64_t>(max_x, corner.x);
+    max_y = std::max<int64_t>(max_y, corner.y);
+  }
+  return checkedRect(min_x, min_y, max_x, max_y);
+}
+
+Rect offsetRect(Rect rectangle, int64_t dx, int64_t dy)
+{
+  return checkedRect(static_cast<int64_t>(rectangle.ll_x) + dx, static_cast<int64_t>(rectangle.ll_y) + dy,
+                     static_cast<int64_t>(rectangle.ur_x) + dx, static_cast<int64_t>(rectangle.ur_y) + dy);
+}
+
+struct ViaRoutingLayers
+{
+  TechRoutingLayerId first;
+  TechRoutingLayerId second;
+};
+
+bool isRoutingLayer(const TechRegistry::registry_type& tech, TechRoutingLayerId layer)
+{
+  return layer && tech.valid(layer.entity()) && tech.all_of<TechLayerInfo, TechRoutingLayer>(layer.entity());
+}
+
+void appendRoutingLayer(const TechRegistry::registry_type& tech, TechLayerId layer,
+                        std::array<TechRoutingLayerId, 2>& layers, std::size_t& count)
+{
+  const TechRoutingLayerId routing_layer{layer.entity()};
+  if (!isRoutingLayer(tech, routing_layer)) {
+    return;
+  }
+  for (std::size_t index = 0; index < count; ++index) {
+    if (layers[index] == routing_layer) {
+      return;
+    }
+  }
+  if (count < layers.size()) {
+    layers[count++] = routing_layer;
+  } else {
+    count = layers.size() + 1u;
+  }
+}
+
+std::optional<ViaRoutingLayers> routingLayersForVia(const DesignRoutingStorage::registry_type& design,
+                                                     const TechRegistry::registry_type& tech, const DesignWireVia& via)
+{
+  if (via.tech_via) {
+    if (!tech.valid(via.tech_via.entity()) || !tech.all_of<TechViaGeometry>(via.tech_via.entity())) {
+      return std::nullopt;
+    }
+    const auto& geometry = tech.get<const TechViaGeometry>(via.tech_via.entity());
+    if (geometry.bottom_layer.kind != TechConductorLayerKind::kRouting
+        || geometry.top_layer.kind != TechConductorLayerKind::kRouting) {
+      return std::nullopt;
+    }
+    return ViaRoutingLayers{.first = TechRoutingLayerId{geometry.bottom_layer.entity},
+                            .second = TechRoutingLayerId{geometry.top_layer.entity}};
+  }
+  if (!via.design_via || !design.valid(via.design_via.entity()) || !design.all_of<DesignVia>(via.design_via.entity())) {
+    return std::nullopt;
+  }
+  const auto& definition = design.get<const DesignVia>(via.design_via.entity());
+  if ((definition.flags & DesignViaFlag::kGenerated) != 0u) {
+    return ViaRoutingLayers{.first = definition.generated.bottom_layer, .second = definition.generated.top_layer};
+  }
+  std::array<TechRoutingLayerId, 2> layers{};
+  std::size_t count = 0u;
+  for (const auto& rectangle : definition.rectangles) {
+    appendRoutingLayer(tech, rectangle.layer, layers, count);
+  }
+  for (const auto& polygon : definition.polygons) {
+    appendRoutingLayer(tech, polygon.layer, layers, count);
+  }
+  if (count != 2u) {
+    return std::nullopt;
+  }
+  return ViaRoutingLayers{.first = layers[0], .second = layers[1]};
+}
+
+void normalizeViaExitLayer(const DesignRoutingStorage::registry_type& design, const TechRegistry::registry_type& tech,
+                           TechRoutingLayerId entry_layer, DesignRouteVia& via)
+{
+  const auto layers = routingLayersForVia(design, tech, via.via);
+  const auto expected = !layers.has_value() ? entry_layer
+                                             : entry_layer == layers->first ? layers->second
+                                                                            : entry_layer == layers->second ? layers->first : entry_layer;
+  if (!via.exit_layer) {
+    via.exit_layer = expected;
+  } else if (!isRoutingLayer(tech, via.exit_layer)) {
+    throw std::invalid_argument("route VIA exit layer is invalid");
+  } else if (layers.has_value() && via.exit_layer != expected) {
+    throw std::invalid_argument("route VIA exit layer disagrees with its definition");
+  }
+}
+
+Rect generatedDesignViaBounds(const DesignGeneratedVia& via)
+{
+  if (via.row_count == 0u || via.column_count == 0u || via.cut_size_x <= 0 || via.cut_size_y <= 0
+      || via.cut_spacing_x < 0 || via.cut_spacing_y < 0 || via.bottom_enclosure_x < 0 || via.bottom_enclosure_y < 0
+      || via.top_enclosure_x < 0 || via.top_enclosure_y < 0) {
+    throw std::invalid_argument("generated design via geometry is invalid");
+  }
+  const uint64_t array_width = static_cast<uint64_t>(via.column_count) * static_cast<uint64_t>(via.cut_size_x)
+                               + static_cast<uint64_t>(via.column_count - 1u) * static_cast<uint64_t>(via.cut_spacing_x);
+  const uint64_t array_height = static_cast<uint64_t>(via.row_count) * static_cast<uint64_t>(via.cut_size_y)
+                                + static_cast<uint64_t>(via.row_count - 1u) * static_cast<uint64_t>(via.cut_spacing_y);
+  const int64_t min_x = -static_cast<int64_t>(array_width / 2u);
+  const int64_t min_y = -static_cast<int64_t>(array_height / 2u);
+  const int64_t max_x = min_x + static_cast<int64_t>(array_width);
+  const int64_t max_y = min_y + static_cast<int64_t>(array_height);
+  const int64_t origin_x = (via.flags & DesignGeneratedViaFlag::kHasOrigin) != 0u ? via.origin.x : 0;
+  const int64_t origin_y = (via.flags & DesignGeneratedViaFlag::kHasOrigin) != 0u ? via.origin.y : 0;
+  const int64_t bottom_x = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.bottom_offset.x : 0;
+  const int64_t bottom_y = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.bottom_offset.y : 0;
+  const int64_t top_x = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.top_offset.x : 0;
+  const int64_t top_y = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.top_offset.y : 0;
+  const Rect bottom = checkedRect(min_x - via.bottom_enclosure_x + origin_x + bottom_x,
+                                  min_y - via.bottom_enclosure_y + origin_y + bottom_y,
+                                  max_x + via.bottom_enclosure_x + origin_x + bottom_x,
+                                  max_y + via.bottom_enclosure_y + origin_y + bottom_y);
+  const Rect cut = checkedRect(min_x + origin_x, min_y + origin_y, max_x + origin_x, max_y + origin_y);
+  const Rect top = checkedRect(min_x - via.top_enclosure_x + origin_x + top_x,
+                               min_y - via.top_enclosure_y + origin_y + top_y,
+                               max_x + via.top_enclosure_x + origin_x + top_x,
+                               max_y + via.top_enclosure_y + origin_y + top_y);
+  return bottom.united(cut).united(top);
+}
+
+Rect fixedDesignViaBounds(const DesignVia& via)
+{
+  std::optional<Rect> result;
+  const auto append = [&result](Rect rectangle) {
+    result = result.has_value() ? result->united(rectangle) : rectangle;
+  };
+  for (const auto& rectangle : via.rectangles) {
+    append(rectangle.rectangle);
+  }
+  for (const auto& polygon : via.polygons) {
+    if (polygon.points.empty()) {
+      continue;
+    }
+    int64_t min_x = polygon.points.front().x;
+    int64_t min_y = polygon.points.front().y;
+    int64_t max_x = polygon.points.front().x;
+    int64_t max_y = polygon.points.front().y;
+    for (const auto point : polygon.points) {
+      min_x = std::min<int64_t>(min_x, point.x);
+      min_y = std::min<int64_t>(min_y, point.y);
+      max_x = std::max<int64_t>(max_x, point.x);
+      max_y = std::max<int64_t>(max_y, point.y);
+    }
+    append(checkedRect(min_x, min_y, max_x, max_y));
+  }
+  if (!result.has_value()) {
+    throw std::invalid_argument("design via has no physical geometry");
+  }
+  return *result;
+}
+
+Rect viaBounds(const DesignRoutingStorage::registry_type& design, const TechRegistry::registry_type& tech,
+               const DesignRouteVia& shape)
+{
+  Rect local;
+  if (shape.via.tech_via) {
+    if (!tech.valid(shape.via.tech_via.entity()) || !tech.all_of<TechViaGeometry>(shape.via.tech_via.entity())) {
+      throw std::invalid_argument("route VIA references an invalid technology geometry");
+    }
+    local = tech.get<const TechViaGeometry>(shape.via.tech_via.entity()).bounding_box;
+  } else {
+    if (!shape.via.design_via || !design.valid(shape.via.design_via.entity()) || !design.all_of<DesignVia>(shape.via.design_via.entity())) {
+      throw std::invalid_argument("route VIA references an invalid design geometry");
+    }
+    const auto& definition = design.get<const DesignVia>(shape.via.design_via.entity());
+    local = (definition.flags & DesignViaFlag::kGenerated) != 0u ? generatedDesignViaBounds(definition.generated)
+                                                                   : fixedDesignViaBounds(definition);
+  }
+  auto result = orientedBounds(local, shape.origin.position, shape.via.orientation);
+  if ((shape.via.flags & DesignWireViaFlag::kHasArray) == 0u) {
+    return result;
+  }
+  if (shape.via.rows == 0u || shape.via.columns == 0u) {
+    throw std::invalid_argument("route VIA array dimensions are invalid");
+  }
+  const int64_t last_x = static_cast<int64_t>(shape.via.step_x) * static_cast<int64_t>(shape.via.columns - 1u);
+  const int64_t last_y = static_cast<int64_t>(shape.via.step_y) * static_cast<int64_t>(shape.via.rows - 1u);
+  return result.united(offsetRect(result, std::min<int64_t>(0, last_x), std::min<int64_t>(0, last_y)))
+      .united(offsetRect(result, std::max<int64_t>(0, last_x), std::max<int64_t>(0, last_y)));
+}
+
+int32_t defaultSegmentWidth(const DesignRoutingStorage::registry_type& design, const TechRegistry::registry_type& tech,
+                            const DesignRouteShape& shape)
+{
+  const auto& owner = design.get<const DesignWire>(shape.wire.entity());
+  const auto& net = design.get<const DesignNet>(owner.net.entity());
+  if (net.design_non_default_rule && design.valid(net.design_non_default_rule.entity())
+      && design.all_of<DesignNonDefaultRule>(net.design_non_default_rule.entity())) {
+    const auto& rule = design.get<const DesignNonDefaultRule>(net.design_non_default_rule.entity());
+    for (const auto& layer_rule : rule.layer_rules) {
+      if (layer_rule.layer.entity() == shape.layer.entity() && layer_rule.width > 0) {
+        return layer_rule.width;
+      }
+    }
+  }
+  if (net.non_default_rule && tech.valid(net.non_default_rule.entity())
+      && tech.all_of<TechNdrRoutingRules>(net.non_default_rule.entity())) {
+    const auto& rules = tech.get<const TechNdrRoutingRules>(net.non_default_rule.entity()).values;
+    for (const auto& layer_rule : rules) {
+      if (layer_rule.layer == shape.layer && layer_rule.width > 0) {
+        return layer_rule.width;
+      }
+    }
+  }
+  // The current technology model has no distinct wrong-direction width.
+  return tech.get<const TechRoutingLayer>(shape.layer.entity()).width;
+}
+
+Rect segmentBounds(const DesignRoutingStorage::registry_type& design, const TechRegistry::registry_type& tech,
+                   const DesignRouteShape& shape, const DesignRouteShapeAttributes* attributes)
+{
+  const auto& segment = std::get<DesignRouteSegment>(shape.geometry);
+  const int32_t width = (shape.flags & DesignWirePathFlag::kHasWidth) != 0u
+                            ? (attributes == nullptr ? throw std::invalid_argument("route Shape width is missing") : attributes->width)
+                            : defaultSegmentWidth(design, tech, shape);
+  const int64_t lower_half = static_cast<int64_t>(width) / 2;
+  const int64_t upper_half = static_cast<int64_t>(width) - lower_half;
+  const int64_t begin_x = segment.begin.position.x;
+  const int64_t begin_y = segment.begin.position.y;
+  const int64_t end_x = segment.end.position.x;
+  const int64_t end_y = segment.end.position.y;
+  const bool truncated = (shape.flags & DesignWirePathFlag::kHasShape) != 0u
+                         && attributes != nullptr && !attributes->shape.empty();
+  const bool begin_has_extension = truncated || (segment.begin.flags & DesignWirePointFlag::kHasExtension) != 0u;
+  const bool end_has_extension = truncated || (segment.end.flags & DesignWirePointFlag::kHasExtension) != 0u;
+  const int64_t begin_extension = !truncated && begin_has_extension ? segment.begin.extension : 0;
+  const int64_t end_extension = !truncated && end_has_extension ? segment.end.extension : 0;
+  if (begin_y == end_y && begin_x != end_x) {
+    const int64_t left = begin_x < end_x ? begin_x - (begin_has_extension ? begin_extension : lower_half)
+                                         : end_x - (end_has_extension ? end_extension : lower_half);
+    const int64_t right = begin_x < end_x ? end_x + (end_has_extension ? end_extension : upper_half)
+                                          : begin_x + (begin_has_extension ? begin_extension : upper_half);
+    return checkedRect(left, begin_y - lower_half, right, begin_y + upper_half);
+  } else if (begin_x == end_x && begin_y != end_y) {
+    const int64_t bottom = begin_y < end_y ? begin_y - (begin_has_extension ? begin_extension : lower_half)
+                                           : end_y - (end_has_extension ? end_extension : lower_half);
+    const int64_t top = begin_y < end_y ? end_y + (end_has_extension ? end_extension : upper_half)
+                                        : begin_y + (begin_has_extension ? begin_extension : upper_half);
+    return checkedRect(begin_x - lower_half, bottom, begin_x + upper_half, top);
+  }
+  // Conservative for diagonal geometry; Manhattan bounds above are exact.
+  const auto diagonal_extension = std::max<int64_t>({0, begin_extension, end_extension});
+  return checkedRect(std::min(begin_x, end_x) - lower_half - diagonal_extension,
+                     std::min(begin_y, end_y) - lower_half - diagonal_extension,
+                     std::max(begin_x, end_x) + upper_half + diagonal_extension,
+                     std::max(begin_y, end_y) + upper_half + diagonal_extension);
+}
+
+void destroyShapeEntities(DesignRoutingStorage::registry_type& registry, const std::vector<DesignRouteShapeId>& ids)
+{
+  for (const auto id : ids) {
+    registry.destroy(id.entity());
   }
 }
 
@@ -170,17 +484,86 @@ std::size_t dynamicStringCapacityBytes(const std::string& value) noexcept
   return data >= object && data < object + sizeof(value) ? 0u : value.capacity() + 1u;
 }
 
-template <typename T>
-void addArrayStatistics(DesignRoutingArrayStatistics& result, const std::vector<T>& values) noexcept
+void validateShapeValue(const DesignRoutingStorage::registry_type& design, const TechRegistry::registry_type& tech,
+                        const DesignWire& wire, const DesignRouteShape& shape,
+                        const std::optional<DesignRouteShapeAttributes>& attributes)
 {
-  result.count += values.size();
-  result.capacity += values.capacity();
-  result.element_size = sizeof(T);
-  result.capacity_bytes += values.capacity() * sizeof(T);
-  if (values.capacity() != 0u) {
-    ++result.buffer_count;
-    result.allocation_usable_bytes += malloc_usable_size(const_cast<T*>(values.data()));
+  if (!shape.layer || !tech.valid(shape.layer.entity()) || !tech.all_of<TechLayerInfo, TechRoutingLayer>(shape.layer.entity())) {
+    throw std::invalid_argument("route Shape references an invalid routing layer");
   }
+  if (hasShapeValueAttributes(shape.flags) != attributes.has_value()) {
+    throw std::invalid_argument("route Shape attributes do not match its flags");
+  }
+
+  std::array<DesignWirePoint, 2> points;
+  std::array<DesignWireVia, 1> vias;
+  std::array<DesignWireRectangle, 1> rectangles;
+  std::size_t point_count = 0u;
+  std::size_t via_count = 0u;
+  std::size_t rectangle_count = 0u;
+  std::visit(
+      [&](const auto& geometry) {
+        using Geometry = std::remove_cvref_t<decltype(geometry)>;
+        if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+          points = {geometry.begin, geometry.end};
+          point_count = 2u;
+        } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+          points[0] = geometry.origin;
+          vias[0] = geometry.via;
+          vias[0].point_index = 0u;
+          point_count = 1u;
+          via_count = 1u;
+        } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+          points[0] = geometry.anchor;
+          rectangles[0] = relativePatch(geometry.rectangle, geometry.anchor);
+          point_count = 1u;
+          rectangle_count = 1u;
+        } else {
+          points[0] = geometry.point;
+          point_count = 1u;
+        }
+      },
+      shape.geometry);
+  validatePathValue(design, tech,
+                    DesignWirePathView::create(shape.layer, shape.flags,
+                                               attributes.has_value() ? &*attributes : nullptr,
+                                               DesignWirePointRange::fromValues(
+                                                   std::span<const DesignWirePoint>{points.data(), point_count}),
+                                               DesignWireViaRange::fromValues(std::span<const DesignWireVia>{vias.data(), via_count}),
+                                               std::span<const DesignWireRectangle>{rectangles.data(), rectangle_count}));
+
+  const bool special_net = design.all_of<DesignSpecialNet>(wire.net.entity());
+  const bool has_width = (shape.flags & DesignWirePathFlag::kHasWidth) != 0u;
+  const bool has_shape = (shape.flags & DesignWirePathFlag::kHasShape) != 0u;
+  if (special_net != has_width || (!special_net && has_shape)) {
+    throw std::invalid_argument("route Shape fields do not match NET or SPECIALNET syntax");
+  }
+  if (!special_net) {
+    if (const auto* via = std::get_if<DesignRouteVia>(&shape.geometry);
+        via != nullptr && (via->via.flags & DesignWireViaFlag::kHasArray) != 0u) {
+      throw std::invalid_argument("VIA arrays are only valid in SPECIALNET Shapes");
+    }
+  }
+}
+
+uint32_t nextSourcePath(const DesignWire& wire)
+{
+  if (wire.next_source_path == kUnassignedSourcePath) {
+    throw std::overflow_error("route Shape source-path ID exceeds uint32 range");
+  }
+  return wire.next_source_path;
+}
+
+void observeSourcePath(DesignWire& wire, uint32_t source_path)
+{
+  if (source_path == kUnassignedSourcePath) {
+    return;
+  }
+  if (source_path == std::numeric_limits<uint32_t>::max() - 1u) {
+    wire.next_source_path = kUnassignedSourcePath;
+    return;
+  }
+  wire.next_source_path = std::max(wire.next_source_path, source_path + 1u);
 }
 
 }  // namespace
@@ -314,19 +697,13 @@ std::vector<DesignNonDefaultRuleId> DesignRoutingStorage::nonDefaultRules() cons
   return result;
 }
 
-DesignWireId DesignRoutingStorage::createWire(DesignWire wire, DesignWireRoutingInput routing)
+DesignWireId DesignRoutingStorage::createWire(DesignWire wire)
 {
-  validateWire(wire, routing);
-  return createWireTrusted(std::move(wire), std::move(routing));
-}
-
-DesignWireId DesignRoutingStorage::createWireTrusted(DesignWire wire, DesignWireRoutingInput routing)
-{
-  if (!routingIsEmpty(wire.routing) || routing.pathCount() == 0u) {
-    throw std::invalid_argument("new design wire requires separate non-empty routing vectors");
+  validateWireMetadata(_registry, wire);
+  if (!wire.shapes.empty()) {
+    throw std::invalid_argument("new Shape-first wire cannot import foreign Shape IDs");
   }
   const auto owner = wire.net;
-  wire.routing = std::move(routing);
   const auto entity = _registry.create();
   try {
     _registry.emplace<DesignWire>(entity, std::move(wire));
@@ -342,49 +719,114 @@ DesignWireId DesignRoutingStorage::createWireTrusted(DesignWire wire, DesignWire
   return DesignWireId{entity};
 }
 
-void DesignRoutingStorage::updateWire(DesignWireId id, DesignWire wire, DesignWireRoutingInput routing)
+DesignRouteShapeId DesignRoutingStorage::createShape(DesignWireId wire_id, DesignRouteShape value,
+                                                      std::optional<DesignRouteShapeAttributes> attributes)
 {
-  ensureWire(id);
-  validateWire(wire, routing);
-  if (!routingIsEmpty(wire.routing) || routing.pathCount() == 0u) {
-    throw std::invalid_argument("updated design wire requires separate non-empty routing vectors");
+  ensureWire(wire_id);
+  auto& owner = _registry.get<DesignWire>(wire_id.entity());
+  if (value.wire && value.wire != wire_id) {
+    throw std::invalid_argument("route Shape belongs to a different Wire");
   }
-  const auto previous_owner = _registry.get<const DesignWire>(id.entity()).net;
-  wire.routing = std::move(routing);
-  auto new_owner = _wires_by_net.end();
-  bool inserted_new_owner = false;
-  if (previous_owner != wire.net) {
-    try {
-      auto inserted = _wires_by_net.try_emplace(wire.net.packed());
-      new_owner = inserted.first;
-      inserted_new_owner = inserted.second;
-      new_owner->second.reserve(new_owner->second.size() + 1u);
-    } catch (...) {
-      const auto indexed = _wires_by_net.find(wire.net.packed());
-      if (indexed != _wires_by_net.end() && indexed->second.empty()) {
-        _wires_by_net.erase(indexed);
-      }
-      throw;
-    }
+  value.wire = wire_id;
+  if (value.source_path == kUnassignedSourcePath) {
+    value.source_path = nextSourcePath(owner);
   }
+  if (auto* via = std::get_if<DesignRouteVia>(&value.geometry)) {
+    normalizeViaExitLayer(_registry, _tech_registry.registry(), value.layer, *via);
+  }
+  validateShapeValue(_registry, _tech_registry.registry(), owner, value, attributes);
+
+  const auto entity = _registry.create();
   try {
-    _registry.replace<DesignWire>(id.entity(), std::move(wire));
-  } catch (...) {
-    if (inserted_new_owner) {
-      _wires_by_net.erase(new_owner);
+    _registry.emplace<DesignRouteShape>(entity, std::move(value));
+    if (attributes.has_value()) {
+      _registry.emplace<DesignRouteShapeAttributes>(entity, std::move(*attributes));
     }
+    owner.shapes.emplace_back(entity);
+    observeSourcePath(owner, _registry.get<const DesignRouteShape>(entity).source_path);
+  } catch (...) {
+    _registry.destroy(entity);
     throw;
   }
-  if (previous_owner != _registry.get<const DesignWire>(id.entity()).net) {
-    new_owner->second.emplace_back(id);
-    auto previous = _wires_by_net.find(previous_owner.packed());
-    if (previous != _wires_by_net.end()) {
-      std::erase(previous->second, id);
-      if (previous->second.empty()) {
-        _wires_by_net.erase(previous);
-      }
+  return DesignRouteShapeId{entity};
+}
+
+void DesignRoutingStorage::updateShape(DesignRouteShapeId id, DesignRouteShape value,
+                                       std::optional<DesignRouteShapeAttributes> attributes)
+{
+  if (!contains(id)) {
+    throw std::out_of_range("invalid route Shape id");
+  }
+  const auto& previous = _registry.get<const DesignRouteShape>(id.entity());
+  if (value.wire && value.wire != previous.wire) {
+    throw std::invalid_argument("route Shape cannot change owner Wire");
+  }
+  value.wire = previous.wire;
+  if (value.source_path == kUnassignedSourcePath) {
+    value.source_path = previous.source_path;
+  }
+  auto& owner = _registry.get<DesignWire>(value.wire.entity());
+  if (auto* via = std::get_if<DesignRouteVia>(&value.geometry)) {
+    normalizeViaExitLayer(_registry, _tech_registry.registry(), value.layer, *via);
+  }
+  std::optional<DesignRouteShapeAttributes> effective_attributes;
+  if (hasShapeValueAttributes(value.flags)) {
+    if (attributes.has_value()) {
+      effective_attributes = std::move(attributes);
+    } else if (const auto* existing = shapeAttributes(id); existing != nullptr) {
+      effective_attributes = *existing;
     }
   }
+  validateShapeValue(_registry, _tech_registry.registry(), owner, value, effective_attributes);
+  _registry.replace<DesignRouteShape>(id.entity(), std::move(value));
+  if (effective_attributes.has_value()) {
+    _registry.emplace_or_replace<DesignRouteShapeAttributes>(id.entity(), std::move(*effective_attributes));
+  } else {
+    _registry.remove<DesignRouteShapeAttributes>(id.entity());
+  }
+  observeSourcePath(owner, _registry.get<const DesignRouteShape>(id.entity()).source_path);
+}
+
+bool DesignRoutingStorage::destroyShape(DesignRouteShapeId id)
+{
+  if (!contains(id)) {
+    return false;
+  }
+  const auto owner = _registry.get<const DesignRouteShape>(id.entity()).wire;
+  if (contains(owner)) {
+    std::erase(_registry.get<DesignWire>(owner.entity()).shapes, id);
+  }
+  _registry.destroy(id.entity());
+  return true;
+}
+
+bool DesignRoutingStorage::contains(DesignRouteShapeId id) const
+{
+  return _registry.valid(id.entity()) && _registry.all_of<DesignRouteShape>(id.entity());
+}
+
+Rect DesignRoutingStorage::shapeBoundingBox(DesignRouteShapeId id) const
+{
+  if (!contains(id)) {
+    throw std::out_of_range("invalid route Shape id");
+  }
+  const auto& value = shape(id);
+  const auto* attributes = shapeAttributes(id);
+  return std::visit(
+      [&](const auto& geometry) -> Rect {
+        using Geometry = std::remove_cvref_t<decltype(geometry)>;
+        if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+          return segmentBounds(_registry, _tech_registry.registry(), value, attributes);
+        } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+          return viaBounds(_registry, _tech_registry.registry(), geometry);
+        } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+          return geometry.rectangle;
+        } else {
+          return checkedRect(geometry.point.position.x, geometry.point.position.y, geometry.point.position.x,
+                             geometry.point.position.y);
+        }
+      },
+      value.geometry);
 }
 
 bool DesignRoutingStorage::destroyWire(DesignWireId id)
@@ -392,58 +834,19 @@ bool DesignRoutingStorage::destroyWire(DesignWireId id)
   if (!contains(id)) {
     return false;
   }
-  const auto owner = _registry.get<const DesignWire>(id.entity()).net;
-  auto found = _wires_by_net.find(owner.packed());
+  auto& wire_value = _registry.get<DesignWire>(id.entity());
+  const auto net = wire_value.net;
+  auto shapes = std::move(wire_value.shapes);
+  auto found = _wires_by_net.find(net.packed());
   if (found != _wires_by_net.end()) {
     std::erase(found->second, id);
     if (found->second.empty()) {
       _wires_by_net.erase(found);
     }
   }
+  destroyShapeEntities(_registry, shapes);
   _registry.destroy(id.entity());
   return true;
-}
-
-void DesignRoutingStorage::insertPath(DesignWireId id, std::size_t index, DesignWirePath path)
-{
-  ensureWire(id);
-  const auto& wire = _registry.get<const DesignWire>(id.entity());
-  if (index > wire.routing.pathCount()) {
-    throw std::out_of_range("wire path index is out of range");
-  }
-  DesignWireRouting staged;
-  staged.appendPath(std::move(path));
-  validateWire(wire, staged);
-  insertRoutingPath(_registry.get<DesignWire>(id.entity()).routing, index, std::move(staged));
-}
-
-void DesignRoutingStorage::replacePath(DesignWireId id, std::size_t index, DesignWirePath path)
-{
-  ensureWire(id);
-  const auto& wire = _registry.get<const DesignWire>(id.entity());
-  if (index >= wire.routing.pathCount()) {
-    throw std::out_of_range("wire path index is out of range");
-  }
-  DesignWireRouting staged;
-  staged.appendPath(std::move(path));
-  validateWire(wire, staged);
-  auto& routing = _registry.get<DesignWire>(id.entity()).routing;
-  insertRoutingPath(routing, index + 1u, std::move(staged));
-  eraseRoutingPath(routing, index);
-}
-
-void DesignRoutingStorage::erasePath(DesignWireId id, std::size_t index)
-{
-  ensureWire(id);
-  auto& routing = _registry.get<DesignWire>(id.entity()).routing;
-  if (index >= routing.pathCount()) {
-    throw std::out_of_range("wire path index is out of range");
-  }
-  if (routing.pathCount() == 1u) {
-    (void) destroyWire(id);
-    return;
-  }
-  eraseRoutingPath(routing, index);
 }
 
 bool DesignRoutingStorage::contains(DesignWireId id) const
@@ -457,20 +860,11 @@ const DesignWire& DesignRoutingStorage::wire(DesignWireId id) const
   return _registry.get<const DesignWire>(id.entity());
 }
 
-std::size_t DesignRoutingStorage::pathCount(DesignWireId id) const
-{
-  return wire(id).routing.pathCount();
-}
-
-DesignWirePathView DesignRoutingStorage::path(DesignWireId id, std::size_t index) const
-{
-  return wire(id).routing.path(index);
-}
-
 std::vector<DesignWireId> DesignRoutingStorage::wires() const
 {
   const auto view = _registry.view<const DesignWire>();
   std::vector<DesignWireId> result;
+  result.reserve(view.size());
   for (const auto entity : view) {
     result.emplace_back(entity);
   }
@@ -504,41 +898,159 @@ void DesignRoutingStorage::rebuildWireIndex()
 
 void DesignRoutingStorage::shrinkRoutingToFit()
 {
-  const auto view = _registry.view<DesignWire>();
-  for (const auto entity : view) {
-    view.get<DesignWire>(entity).routing.shrinkToFit();
+  const auto wires = _registry.view<DesignWire>();
+  for (const auto entity : wires) {
+    wires.get<DesignWire>(entity).shapes.shrink_to_fit();
+  }
+  const auto attributes = _registry.view<DesignRouteShapeAttributes>();
+  for (const auto entity : attributes) {
+    auto& value = attributes.get<DesignRouteShapeAttributes>(entity);
+    value.taper_rule.shrink_to_fit();
+    value.shape.shrink_to_fit();
   }
 }
 
-DesignRoutingStatistics DesignRoutingStorage::routingStatistics() const noexcept
+DesignRoutingStatistics DesignRoutingStorage::routingStatistics() const
 {
   DesignRoutingStatistics result;
-  const auto view = _registry.view<const DesignWire>();
-  for (const auto entity : view) {
-    const auto& wire = view.get<const DesignWire>(entity);
-    const auto& routing = wire.routing;
-    addArrayStatistics(result.paths, routing.paths);
-    addArrayStatistics(result.path_extras, routing.extras);
-    addArrayStatistics(result.points, routing.points);
-    addArrayStatistics(result.vias, routing.vias);
-    addArrayStatistics(result.rectangles, routing.rectangles);
-    for (const auto& extra : routing.extras) {
-      result.dynamic_string_capacity_bytes += dynamicStringCapacityBytes(extra.taper_rule);
-      result.dynamic_string_capacity_bytes += dynamicStringCapacityBytes(extra.shape);
+  const auto shape_view = _registry.view<const DesignRouteShape>();
+  result.shapes.count = shape_view.size();
+  result.shapes.capacity = shape_view.size();
+  result.shapes.element_size = sizeof(DesignRouteShape);
+  result.shapes.capacity_bytes = result.shapes.count * sizeof(DesignRouteShape);
+  const auto attribute_view = _registry.view<const DesignRouteShapeAttributes>();
+  result.path_extras.count = attribute_view.size();
+  result.path_extras.capacity = attribute_view.size();
+  result.path_extras.element_size = sizeof(DesignRouteShapeAttributes);
+  result.path_extras.capacity_bytes = result.path_extras.count * sizeof(DesignRouteShapeAttributes);
+  for (const auto entity : attribute_view) {
+    const auto& attributes = attribute_view.get<const DesignRouteShapeAttributes>(entity);
+    result.dynamic_string_capacity_bytes += dynamicStringCapacityBytes(attributes.taper_rule);
+    result.dynamic_string_capacity_bytes += dynamicStringCapacityBytes(attributes.shape);
+  }
+
+  const auto wire_view = _registry.view<const DesignWire>();
+  for (const auto entity : wire_view) {
+    const auto& wire_value = wire_view.get<const DesignWire>(entity);
+    result.wire_shape_ids.count += wire_value.shapes.size();
+    result.wire_shape_ids.capacity += wire_value.shapes.capacity();
+    result.wire_shape_ids.element_size = sizeof(DesignRouteShapeId);
+    result.wire_shape_ids.capacity_bytes += wire_value.shapes.capacity() * sizeof(DesignRouteShapeId);
+    result.wire_shape_ids.buffer_count += wire_value.shapes.capacity() != 0u;
+
+    bool open = false;
+    uint32_t source_path = kUnassignedSourcePath;
+    uint32_t path_flags = 0;
+    TechRoutingLayerId active_layer;
+    std::optional<DesignWirePoint> last_point;
+    const DesignRouteShapeAttributes* current_attributes = nullptr;
+    const auto compatible = [&](const DesignRouteShape& value, const DesignRouteShapeAttributes* attributes) {
+      if (!open || source_path != value.source_path || active_layer != value.layer || path_flags != value.flags) {
+        return false;
+      }
+      return attributes == nullptr || current_attributes == nullptr ? attributes == current_attributes
+                                                                     : sameAttributes(*current_attributes, *attributes);
+    };
+    const auto begin = [&](const DesignRouteShape& value, const DesignRouteShapeAttributes* attributes,
+                           DesignWirePoint point) {
+      ++result.paths.count;
+      ++result.points.count;
+      open = true;
+      source_path = value.source_path;
+      path_flags = value.flags;
+      active_layer = value.layer;
+      current_attributes = attributes;
+      last_point = point;
+    };
+    for (const auto shape_id : wire_value.shapes) {
+      const auto& value = shape(shape_id);
+      const auto* attributes = shapeAttributes(shape_id);
+      std::visit(
+          [&](const auto& geometry) {
+            using Geometry = std::remove_cvref_t<decltype(geometry)>;
+            if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+              if (!compatible(value, attributes) || !last_point.has_value() || !samePoint(*last_point, geometry.begin)) {
+                begin(value, attributes, geometry.begin);
+              }
+              ++result.points.count;
+              last_point = geometry.end;
+            } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+              if (!compatible(value, attributes) || !last_point.has_value() || !samePoint(*last_point, geometry.origin)) {
+                begin(value, attributes, geometry.origin);
+              }
+              ++result.vias.count;
+              active_layer = geometry.exit_layer;
+              last_point = geometry.origin;
+            } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+              if (!compatible(value, attributes) || !last_point.has_value() || !samePoint(*last_point, geometry.anchor)) {
+                begin(value, attributes, geometry.anchor);
+              }
+              ++result.rectangles.count;
+              last_point = geometry.anchor;
+            } else if (!compatible(value, attributes) || !last_point.has_value() || !samePoint(*last_point, geometry.point)) {
+              begin(value, attributes, geometry.point);
+            }
+          },
+          value.geometry);
     }
   }
+  // paths/points/vias/rectangles are materialized compatibility projections.
+  // They deliberately do not report capacity or allocation bytes as storage.
   return result;
 }
 
 void DesignRoutingStorage::validateRestoredRoutingState() const
 {
-  const auto view = _registry.view<const DesignWire>();
-  for (const auto entity : view) {
-    const auto& wire = view.get<const DesignWire>(entity);
+  const auto wire_view = _registry.view<const DesignWire>();
+  for (const auto entity : wire_view) {
+    const DesignWireId wire_id{entity};
+    const auto& wire_value = wire_view.get<const DesignWire>(entity);
     try {
-      validateWire(wire, wire.routing);
+      validateWireMetadata(_registry, wire_value);
+      uint32_t highest_source = 0u;
+      bool has_source = false;
+      for (const auto shape_id : wire_value.shapes) {
+        if (!contains(shape_id)) {
+          throw std::invalid_argument("Wire references a missing Shape");
+        }
+        const auto& shape_value = shape(shape_id);
+        if (shape_value.wire != wire_id) {
+          throw std::invalid_argument("Wire Shape owner reference is inconsistent");
+        }
+        std::optional<DesignRouteShapeAttributes> attributes;
+        if (const auto* value = shapeAttributes(shape_id); value != nullptr) {
+          attributes = *value;
+        }
+        validateShapeValue(_registry, _tech_registry.registry(), wire_value, shape_value, attributes);
+        if (const auto* via = std::get_if<DesignRouteVia>(&shape_value.geometry); via != nullptr) {
+          const auto layers = routingLayersForVia(_registry, _tech_registry.registry(), via->via);
+          if (!isRoutingLayer(_tech_registry.registry(), via->exit_layer)
+              || (layers.has_value() && via->exit_layer != viaExitLayer(shape_value.layer, via->via))) {
+            throw std::invalid_argument("route VIA exit layer is inconsistent");
+          }
+        }
+        if (shape_value.source_path != kUnassignedSourcePath) {
+          highest_source = has_source ? std::max(highest_source, shape_value.source_path) : shape_value.source_path;
+          has_source = true;
+        }
+      }
+      if (has_source && wire_value.next_source_path != kUnassignedSourcePath && highest_source >= wire_value.next_source_path) {
+        throw std::invalid_argument("Wire source-path counter is inconsistent");
+      }
     } catch (const std::exception& error) {
-      throw std::runtime_error(std::string{"binary design has invalid Wire routing: "} + error.what());
+      throw std::runtime_error(std::string{"binary design has invalid Wire Shape state: "} + error.what());
+    }
+  }
+  const auto shape_view = _registry.view<const DesignRouteShape>();
+  for (const auto entity : shape_view) {
+    const auto& shape_value = shape_view.get<const DesignRouteShape>(entity);
+    if (!contains(shape_value.wire)) {
+      throw std::runtime_error("binary design has a route Shape with a missing Wire owner");
+    }
+    const auto& owner = wire(shape_value.wire).shapes;
+    const DesignRouteShapeId id{entity};
+    if (std::count(owner.begin(), owner.end(), id) != 1) {
+      throw std::runtime_error("binary design has a route Shape with inconsistent Wire membership");
     }
   }
 }
@@ -701,132 +1213,19 @@ void DesignRoutingStorage::validateNonDefaultRule(const DesignNonDefaultRule& va
   }
 }
 
-void DesignRoutingStorage::validateWire(const DesignWire& value, const DesignWireRoutingInput& routing) const
+TechRoutingLayerId DesignRoutingStorage::viaExitLayer(TechRoutingLayerId layer, const DesignWireVia& via) const
 {
-  if (!value.net || !_registry.valid(value.net.entity()) || !_registry.all_of<DesignNet>(value.net.entity())) {
-    throw std::invalid_argument("design wire references an invalid net");
+  const auto layers = routingLayersForVia(_registry, _tech_registry.registry(), via);
+  if (!layers.has_value()) {
+    return layer;
   }
-  if (!isValidWireStatus(value.status) || routing.pathCount() == 0u) {
-    throw std::invalid_argument("design wire status or paths are invalid");
+  if (layer == layers->first) {
+    return layers->second;
   }
-
-  constexpr uint32_t kValueFlags = DesignWirePathFlag::kHasWidth | DesignWirePathFlag::kHasMask
-                                   | DesignWirePathFlag::kHasTaperRule | DesignWirePathFlag::kHasShape
-                                   | DesignWirePathFlag::kHasStyle;
-  std::size_t point_begin = 0;
-  std::size_t via_begin = 0;
-  std::size_t rectangle_begin = 0;
-  std::size_t extra_index = 0;
-  for (const auto& record : routing.paths) {
-    const bool has_extra = (record.flags & kValueFlags) != 0u;
-    if (record.points.begin != point_begin || record.vias.begin != via_begin
-        || record.rectangles.begin != rectangle_begin || record.points.count == 0u
-        || record.points.count > routing.points.size() - point_begin
-        || record.vias.count > routing.vias.size() - via_begin
-        || record.rectangles.count > routing.rectangles.size() - rectangle_begin
-        || (has_extra && record.extra_index != extra_index)
-        || (!has_extra && record.extra_index != kInvalidDesignWirePathExtraIndex)) {
-      throw std::invalid_argument("design wire flat routing ranges are inconsistent");
-    }
-    point_begin += record.points.count;
-    via_begin += record.vias.count;
-    rectangle_begin += record.rectangles.count;
-    extra_index += has_extra;
+  if (layer == layers->second) {
+    return layers->first;
   }
-  if (point_begin != routing.points.size() || via_begin != routing.vias.size()
-      || rectangle_begin != routing.rectangles.size() || extra_index != routing.extras.size()) {
-    throw std::invalid_argument("design wire routing contains unowned flat vector values");
-  }
-  const bool special_net = _registry.all_of<DesignSpecialNet>(value.net.entity());
-  const bool needs_shield_net = value.status == DesignWireStatus::kShield;
-  if (needs_shield_net == value.shield_net.empty()) {
-    throw std::invalid_argument("design SHIELD wire requires exactly one shield net name");
-  }
-  for (std::size_t path_index = 0; path_index < routing.pathCount(); ++path_index) {
-    const auto path = routing.path(path_index);
-    validatePath(path);
-    const bool has_width = (path.flags() & DesignWirePathFlag::kHasWidth) != 0u;
-    const bool has_shape = (path.flags() & DesignWirePathFlag::kHasShape) != 0u;
-    if (special_net != has_width || (!special_net && has_shape)) {
-      throw std::invalid_argument("wire path fields do not match NET or SPECIALNET syntax");
-    }
-    if (!special_net) {
-      for (const auto& via : path.vias()) {
-        if ((via.flags & DesignWireViaFlag::kHasArray) != 0u) {
-          throw std::invalid_argument("VIA arrays are only valid in SPECIALNET paths");
-        }
-      }
-    }
-  }
-}
-
-void DesignRoutingStorage::validatePath(DesignWirePathView path) const
-{
-  constexpr uint32_t kKnownPathFlags = DesignWirePathFlag::kHasWidth | DesignWirePathFlag::kHasMask | DesignWirePathFlag::kTaper
-                                       | DesignWirePathFlag::kHasTaperRule | DesignWirePathFlag::kHasShape | DesignWirePathFlag::kHasStyle;
-  const auto& tech = _tech_registry.registry();
-  if (!path.layer() || !tech.valid(path.layer().entity()) || !tech.all_of<TechLayerInfo, TechRoutingLayer>(path.layer().entity())) {
-    throw std::invalid_argument("design wire path references an invalid routing layer");
-  }
-  if ((path.flags() & ~kKnownPathFlags) != 0u || path.points().empty()) {
-    throw std::invalid_argument("design wire path flags or points are invalid");
-  }
-  const bool has_width = (path.flags() & DesignWirePathFlag::kHasWidth) != 0u;
-  const bool zero_width_via_path
-      = has_width && path.width() == 0 && path.points().size() == 1u && !path.vias().empty() && path.rectangles().empty();
-  if ((has_width && path.width() < 0) || (has_width && path.width() == 0 && !zero_width_via_path)
-      || (!has_width && path.width() != 0)) {
-    throw std::invalid_argument("design wire path width and flags are inconsistent");
-  }
-  const bool has_mask = (path.flags() & DesignWirePathFlag::kHasMask) != 0u;
-  const bool has_taper_rule = (path.flags() & DesignWirePathFlag::kHasTaperRule) != 0u;
-  const bool has_shape = (path.flags() & DesignWirePathFlag::kHasShape) != 0u;
-  const bool has_style = (path.flags() & DesignWirePathFlag::kHasStyle) != 0u;
-  if (has_mask != (path.mask() != 0u) || has_taper_rule == path.taperRule().empty() || has_shape == path.shape().empty()
-      || (!has_style && path.style() != 0)) {
-    throw std::invalid_argument("design wire path optional fields and flags are inconsistent");
-  }
-
-  constexpr uint32_t kKnownPointFlags = DesignWirePointFlag::kHasExtension | DesignWirePointFlag::kVirtual;
-  for (const auto& point : path.points()) {
-    const bool has_extension = (point.flags & DesignWirePointFlag::kHasExtension) != 0u;
-    const bool is_virtual = (point.flags & DesignWirePointFlag::kVirtual) != 0u;
-    if ((point.flags & ~kKnownPointFlags) != 0u || (!has_extension && point.extension != 0) || (has_extension && is_virtual)) {
-      throw std::invalid_argument("design wire point extension and flags are inconsistent");
-    }
-  }
-
-  for (const auto& via : path.vias()) {
-    if (via.point_index >= path.points().size() || !isValidDesignOrientation(via.orientation)) {
-      throw std::invalid_argument("design wire via anchor or orientation is invalid");
-    }
-    const bool has_tech_via = static_cast<bool>(via.tech_via);
-    const bool has_design_via = static_cast<bool>(via.design_via);
-    if (has_tech_via == has_design_via) {
-      throw std::invalid_argument("design wire via must reference exactly one Tech or Design via");
-    }
-    if (has_tech_via && (!tech.valid(via.tech_via.entity()) || !tech.all_of<TechViaMaster>(via.tech_via.entity()))) {
-      throw std::invalid_argument("design wire references an invalid technology via");
-    }
-    if (has_design_via && !contains(via.design_via)) {
-      throw std::invalid_argument("design wire references an invalid design via");
-    }
-
-    constexpr uint32_t kKnownViaFlags = DesignWireViaFlag::kHasMask | DesignWireViaFlag::kHasArray;
-    const bool has_via_mask = (via.flags & DesignWireViaFlag::kHasMask) != 0u;
-    const bool has_array = (via.flags & DesignWireViaFlag::kHasArray) != 0u;
-    const bool any_via_mask = via.top_mask != 0u || via.cut_mask != 0u || via.bottom_mask != 0u;
-    if ((via.flags & ~kKnownViaFlags) != 0u || has_via_mask != any_via_mask || (has_array && (via.rows == 0u || via.columns == 0u))
-        || (!has_array && (via.rows != 1u || via.columns != 1u || via.step_x != 0 || via.step_y != 0))) {
-      throw std::invalid_argument("design wire via optional fields and flags are inconsistent");
-    }
-  }
-
-  for (const auto& rectangle : path.rectangles()) {
-    if (rectangle.point_index >= path.points().size() || !rectangle.delta.isValid()) {
-      throw std::invalid_argument("design wire rectangle anchor or delta is invalid");
-    }
-  }
+  throw std::invalid_argument("wire VIA does not touch its routing layer");
 }
 
 void DesignRoutingStorage::validateNetGeometry(DesignNetId net, const DesignNetGeometry& geometry) const
@@ -907,15 +1306,11 @@ bool DesignRoutingStorage::referencesVia(DesignViaId id) const
       }
     }
   }
-  const auto view = _registry.view<const DesignWire>();
-  for (const auto entity : view) {
-    const DesignWireId wire_id{entity};
-    for (std::size_t path_index = 0; path_index < pathCount(wire_id); ++path_index) {
-      for (const auto& via : path(wire_id, path_index).vias()) {
-        if (via.design_via == id) {
-          return true;
-        }
-      }
+  const auto shape_view = _registry.view<const DesignRouteShape>();
+  for (const auto entity : shape_view) {
+    const auto& shape_value = shape_view.get<const DesignRouteShape>(entity);
+    if (const auto* via = std::get_if<DesignRouteVia>(&shape_value.geometry); via != nullptr && via->via.design_via == id) {
+      return true;
     }
   }
   const auto pin_view = _registry.view<const DesignBlockPin>();

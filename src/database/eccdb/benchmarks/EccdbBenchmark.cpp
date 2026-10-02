@@ -12,6 +12,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 #include "design/DesignStore.h"
@@ -169,6 +171,36 @@ struct Work
   uint64_t edges = 0;
   uint64_t shapes = 0;
 };
+
+// The routing database is Shape-first.  Keep this benchmark's work counters
+// aligned with the geometry actually stored, without materializing DEF paths.
+void countRouteShape(const DesignRouteShape& shape, Work& work)
+{
+  ++work.records;
+  std::visit(
+      [&](const auto& geometry) {
+        using Geometry = std::remove_cvref_t<decltype(geometry)>;
+        if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+          work.edges += 2u;
+          work.shapes += 2u;
+          g_sink ^= static_cast<uint64_t>(geometry.begin.position.x + geometry.begin.position.y);
+          g_sink ^= static_cast<uint64_t>(geometry.end.position.x + geometry.end.position.y);
+        } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+          ++work.edges;
+          ++work.shapes;
+          g_sink ^= geometry.via.flags;
+        } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+          ++work.edges;
+          ++work.shapes;
+          g_sink ^= static_cast<uint64_t>(geometry.anchor.position.x + geometry.anchor.position.y);
+        } else {
+          ++work.edges;
+          ++work.shapes;
+          g_sink ^= static_cast<uint64_t>(geometry.point.position.x + geometry.point.position.y);
+        }
+      },
+      shape.geometry);
+}
 
 void writeJson(std::ostream& output, const Record& record, std::string_view case_name)
 {
@@ -335,17 +367,10 @@ void benchmarkEntt(const Options& options, std::vector<Record>& records)
     for (const auto net : context.design->netlistStorage().regularNets()) {
       for (const auto wire : context.design->routingStorage().wireIds(net)) {
         ++work.records;
-        context.design->routingStorage().forEachPath(wire, [&](DesignWirePathView path) {
-          ++work.records;
-          const auto points = path.points();
-          const auto vias = path.vias();
-          const auto rectangles = path.rectangles();
-          for (const auto point : points) g_sink ^= static_cast<uint64_t>(point.position.x + point.position.y);
-          for (const auto via : vias) g_sink ^= via.point_index;
-          for (const auto rectangle : rectangles) g_sink ^= rectangle.point_index;
-          work.edges += points.size() + vias.size() + rectangles.size();
-          work.shapes += points.size() + vias.size() + rectangles.size();
-        });
+        context.design->routingStorage().forEachShape(
+            wire, [&](DesignRouteShapeId, const DesignRouteShape& shape, const DesignRouteShapeAttributes*) {
+              countRouteShape(shape, work);
+            });
       }
       if (const auto* geometry = context.design->routingStorage().netGeometry(net); geometry != nullptr) {
         work.shapes += geometry->rectangles.size() + geometry->vias.size();
@@ -360,17 +385,10 @@ void benchmarkEntt(const Options& options, std::vector<Record>& records)
     for (const auto net : context.design->netlistStorage().specialNets()) {
       for (const auto wire : context.design->routingStorage().wireIds(net)) {
         ++work.records;
-        context.design->routingStorage().forEachPath(wire, [&](DesignWirePathView path) {
-          ++work.records;
-          const auto points = path.points();
-          const auto vias = path.vias();
-          const auto rectangles = path.rectangles();
-          for (const auto point : points) g_sink ^= static_cast<uint64_t>(point.position.x + point.position.y);
-          for (const auto via : vias) g_sink ^= via.point_index;
-          for (const auto rectangle : rectangles) g_sink ^= rectangle.point_index;
-          work.edges += points.size() + vias.size() + rectangles.size();
-          work.shapes += points.size() + vias.size() + rectangles.size();
-        });
+        context.design->routingStorage().forEachShape(
+            wire, [&](DesignRouteShapeId, const DesignRouteShape& shape, const DesignRouteShapeAttributes*) {
+              countRouteShape(shape, work);
+            });
       }
       if (const auto* geometry = context.design->routingStorage().netGeometry(net); geometry != nullptr) {
         work.shapes += geometry->rectangles.size() + geometry->vias.size();
@@ -443,18 +461,22 @@ void benchmarkEntt(const Options& options, std::vector<Record>& records)
       const auto net = context.design->netlistStorage().regularNets().front();
       const auto baseline = context.design->routingStorage().routingStatistics();
       std::vector<DesignWireId> benchmark_wires;
+      std::vector<DesignRouteShapeId> benchmark_shapes;
       benchmark_wires.reserve(options.writes);
+      benchmark_shapes.reserve(options.writes);
       measure(records, "entt", "wire_create", design_bytes, [&]() {
         Work work;
         for (uint64_t index = 0; index < options.writes; ++index) {
-          DesignWirePath path;
-          path.layer = routing_layer;
-          path.points.push_back(DesignWirePoint{.position = Point{static_cast<int32_t>(index), 0}});
-          path.points.push_back(DesignWirePoint{.position = Point{static_cast<int32_t>(index + 1u), 0}});
-          DesignWireRoutingInput input;
-          input.appendPath(std::move(path));
-          benchmark_wires.push_back(
-              context.design->routingStorage().createWireTrusted(DesignWire{.net = net}, std::move(input)));
+          auto& routing = context.design->routingStorage();
+          const auto wire = routing.createWire(DesignWire{.net = net});
+          const auto shape = routing.createShape(
+              wire, DesignRouteShape{.wire = wire,
+                                     .layer = routing_layer,
+                                     .geometry = DesignRouteSegment{
+                                         .begin = {.position = Point{static_cast<int32_t>(index), 0}},
+                                         .end = {.position = Point{static_cast<int32_t>(index + 1u), 0}}}});
+          benchmark_wires.push_back(wire);
+          benchmark_shapes.push_back(shape);
           ++work.records;
           work.edges += 2u;
         }
@@ -462,27 +484,25 @@ void benchmarkEntt(const Options& options, std::vector<Record>& records)
       });
       measure(records, "entt", "wire_update", design_bytes, [&]() {
         Work work;
-        for (std::size_t index = 0; index < benchmark_wires.size(); ++index) {
-          DesignWirePath path;
-          path.layer = routing_layer;
-          path.points = {{{static_cast<int32_t>(index), 0}},
-                         {{static_cast<int32_t>(index + 1u), 1}},
-                         {{static_cast<int32_t>(index + 2u), 1}}};
-          DesignWireRoutingInput input;
-          input.appendPath(std::move(path));
-          context.design->routingStorage().updateWire(benchmark_wires[index], DesignWire{.net = net}, std::move(input));
+        auto& routing = context.design->routingStorage();
+        for (std::size_t index = 0; index < benchmark_shapes.size(); ++index) {
+          auto updated = routing.shape(benchmark_shapes[index]);
+          updated.geometry = DesignRouteSegment{
+              .begin = {.position = Point{static_cast<int32_t>(index), 0}},
+              .end = {.position = Point{static_cast<int32_t>(index + 1u), 1}}};
+          routing.updateShape(benchmark_shapes[index], std::move(updated));
           ++work.records;
-          work.edges += 3u;
+          work.edges += 2u;
         }
         return work;
       });
       measure(records, "entt", "wire_traverse", design_bytes, [&]() {
         Work work;
         for (const auto wire : benchmark_wires) {
-          context.design->routingStorage().forEachPath(wire, [&](DesignWirePathView path) {
-            ++work.records;
-            work.edges += path.points().size() + path.vias().size() + path.rectangles().size();
-          });
+          context.design->routingStorage().forEachShape(
+              wire, [&](DesignRouteShapeId, const DesignRouteShape& shape, const DesignRouteShapeAttributes*) {
+                countRouteShape(shape, work);
+              });
         }
         return work;
       });

@@ -5,6 +5,8 @@ Chinese version: [Architecture.zh-CN.md](Architecture.zh-CN.md)
 This document describes the implementation that currently exists under `src/database/eccdb`: its layers, ownership rules, and public API semantics. Planned work is called out explicitly instead of being presented as an existing capability.
 
 > The public API is an experimental attempt with no API/ABI stability or cross-version compatibility promise. These layers describe the current implementation, not a finalized interface design; see the [experimental API notes](Experimental_API_Usage.en.md).
+>
+> **Shape-first update (2026-10-02):** the routing paragraphs in this historical architecture note that describe `WireRoutingData`, Wire-local path vectors, or `updateWire()` are superseded. The current routing contract is documented in [Shape_Wire_Model.md](Shape_Wire_Model.md): a Wire owns ordered Shape IDs, and Segment/Via/Patch/Point payloads are independent entities. DEF parser-local path values are temporary conversion input only. Rust/C bindings are outside this breaking migration.
 
 ## 1. Overall layering
 

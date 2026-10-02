@@ -3,6 +3,8 @@
 Chinese version: [Experimental_API_Usage.zh-CN.md](Experimental_API_Usage.zh-CN.md)
 
 > **Status: experimental attempt.** This interface explores the public access boundary; it is not a finalized SDK. Types, functions, error semantics, installation/export rules, and ABI may change incompatibly. These notes describe the current prototype without source or binary compatibility promises. Pin a source revision when integrating; see the [integration plan](Integration_Plan.en.md).
+>
+> **Routing note (2026-10-02):** the Wire path/value examples in this historical note are superseded by [Shape_Wire_Model.md](Shape_Wire_Model.md). The current C++ storage/service/adaptor contract creates, reads, updates, and destroys independent Segment/Via/Patch/Point Shapes. `DesignWirePath` is parser-local only. Rust/C bindings and the old `WireRoutingData` writeback examples are intentionally outside this breaking migration.
 
 ## 1. API Scope
 

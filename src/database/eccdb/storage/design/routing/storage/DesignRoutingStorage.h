@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -33,6 +34,10 @@ struct DesignRoutingArrayStatistics
 
 struct DesignRoutingStatistics
 {
+  // Canonical geometry and relation counts. Legacy fields below describe only
+  // derived DEF projections and are retained for existing diagnostic clients.
+  DesignRoutingArrayStatistics shapes;
+  DesignRoutingArrayStatistics wire_shape_ids;
   DesignRoutingArrayStatistics paths;
   DesignRoutingArrayStatistics path_extras;
   DesignRoutingArrayStatistics points;
@@ -67,29 +72,37 @@ class DesignRoutingStorage
   [[nodiscard]] const DesignNonDefaultRule& nonDefaultRule(DesignNonDefaultRuleId id) const;
   [[nodiscard]] std::vector<DesignNonDefaultRuleId> nonDefaultRules() const;
 
-  [[nodiscard]] DesignWireId createWire(DesignWire wire, DesignWireRoutingInput routing);
-  // Importers that have already resolved parser fields use this path. Public
-  // callers continue to get full wire validation from createWire().
-  [[nodiscard]] DesignWireId createWireTrusted(DesignWire wire, DesignWireRoutingInput routing);
-  void updateWire(DesignWireId id, DesignWire wire, DesignWireRoutingInput routing);
-  [[nodiscard]] bool destroyWire(DesignWireId id);
-  void insertPath(DesignWireId wire, std::size_t index, DesignWirePath path);
-  void replacePath(DesignWireId wire, std::size_t index, DesignWirePath path);
-  // Removing the last path also destroys its Wire; empty Wires are invalid.
-  void erasePath(DesignWireId wire, std::size_t index);
-  [[nodiscard]] bool contains(DesignWireId id) const;
-  [[nodiscard]] const DesignWire& wire(DesignWireId id) const;
-  [[nodiscard]] std::size_t pathCount(DesignWireId id) const;
-  [[nodiscard]] DesignWirePathView path(DesignWireId id, std::size_t index) const;
-  template <typename Function>
-    requires std::invocable<Function&, DesignWirePathView>
-  void forEachPath(DesignWireId id, Function&& function) const
+  // Shape-first API. A Wire may be empty while being edited; it owns only IDs.
+  [[nodiscard]] DesignWireId createWire(DesignWire wire);
+  [[nodiscard]] DesignRouteShapeId createShape(DesignWireId wire, DesignRouteShape shape,
+                                              std::optional<DesignRouteShapeAttributes> attributes = std::nullopt);
+  // Omitted attributes retain the current values; clearing value flags removes
+  // them. A geometry-only edit does not discard DEF width/mask metadata.
+  void updateShape(DesignRouteShapeId id, DesignRouteShape shape,
+                   std::optional<DesignRouteShapeAttributes> attributes = std::nullopt);
+  [[nodiscard]] bool destroyShape(DesignRouteShapeId id);
+  [[nodiscard]] bool contains(DesignRouteShapeId id) const;
+  // Live ID contract, like instanceTerm(): no repeated hot-path validation.
+  [[nodiscard]] const DesignRouteShape& shape(DesignRouteShapeId id) const
   {
-    const auto& routing = wire(id).routing;
-    for (std::size_t index = 0; index < routing.pathCount(); ++index) {
-      std::invoke(function, routing.path(index));
+    return _registry.get<const DesignRouteShape>(id.entity());
+  }
+  [[nodiscard]] const DesignRouteShapeAttributes* shapeAttributes(DesignRouteShapeId id) const
+  {
+    return _registry.try_get<const DesignRouteShapeAttributes>(id.entity());
+  }
+  [[nodiscard]] Rect shapeBoundingBox(DesignRouteShapeId id) const;
+  template <typename Function>
+  void forEachShape(DesignWireId id, Function&& function) const
+  {
+    for (const auto shape_id : _registry.get<const DesignWire>(id.entity()).shapes) {
+      std::invoke(function, shape_id, shape(shape_id), shapeAttributes(shape_id));
     }
   }
+
+  [[nodiscard]] bool destroyWire(DesignWireId id);
+  [[nodiscard]] bool contains(DesignWireId id) const;
+  [[nodiscard]] const DesignWire& wire(DesignWireId id) const;
   [[nodiscard]] std::vector<DesignWireId> wires() const;
   [[nodiscard]] std::vector<DesignWireId> wires(DesignNetId net) const;
   // The returned view is invalidated when this Net's Wire storage changes.
@@ -108,7 +121,7 @@ class DesignRoutingStorage
 
   void rebuildWireIndex();
   void shrinkRoutingToFit();
-  [[nodiscard]] DesignRoutingStatistics routingStatistics() const noexcept;
+  [[nodiscard]] DesignRoutingStatistics routingStatistics() const;
   void validateRestoredRoutingState() const;
 
   void setNetGeometry(DesignNetId net, DesignNetGeometry geometry);
@@ -121,8 +134,7 @@ class DesignRoutingStorage
  private:
   void validateVia(const DesignVia& via, DesignViaId ignored = {}) const;
   void validateNonDefaultRule(const DesignNonDefaultRule& rule, DesignNonDefaultRuleId ignored = {}) const;
-  void validateWire(const DesignWire& wire, const DesignWireRoutingInput& routing) const;
-  void validatePath(DesignWirePathView path) const;
+  [[nodiscard]] TechRoutingLayerId viaExitLayer(TechRoutingLayerId layer, const DesignWireVia& via) const;
   void validateNetGeometry(DesignNetId net, const DesignNetGeometry& geometry) const;
   [[nodiscard]] bool viaNameInUse(std::string_view name, DesignViaId ignored = {}) const;
   [[nodiscard]] bool nonDefaultRuleNameInUse(std::string_view name, DesignNonDefaultRuleId ignored = {}) const;

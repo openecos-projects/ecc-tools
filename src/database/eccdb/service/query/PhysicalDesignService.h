@@ -18,7 +18,6 @@
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/routing/component/RoutingComponents.h"
 #include "design/routing/component/WireRouting.h"
-#include "design/routing/view/WireRoutingView.h"
 #include "design/via/component/ViaComponents.h"
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/cell_master/model/MasterObsComponents.h"
@@ -119,10 +118,9 @@ struct PhysicalRoutingViaLayers
   TechRoutingLayerId top;
 };
 
-// These visitors borrow EccDB route storage. In particular, DesignWirePathView
-// contains spans into one DesignWire and net-geometry callbacks receive direct
-// references to the stored values. They are valid only during the callback;
-// callers must not mutate routing storage while visiting them.
+// These visitors borrow EccDB route/geometry storage. Callback arguments are
+// valid only during the callback; callers must not mutate the corresponding
+// storage while visiting it.
 struct PhysicalNetGeometryVisitor
 {
   std::function<void(const DesignNetRectangle&)> rectangle;
@@ -142,7 +140,6 @@ class PhysicalDesignService
   using GCellGridVisitor = std::function<void(DesignGCellGridId, const DesignGCellGrid&)>;
   using NetVisitor = std::function<void(DesignNetId, const DesignNet&)>;
   using NetWireVisitor = std::function<void(DesignWireId, const DesignWire&)>;
-  using NetWirePathVisitor = std::function<void(DesignWireId, const DesignWire&, DesignWirePathView)>;
   using RoutingBlockageVisitor = std::function<void(DesignBlockageId, const DesignBlockage&)>;
   using TechViaVisitor = std::function<void(TechViaMasterId, const TechViaMaster&, const TechViaGeometry&)>;
   using TechViaRuleGenerateVisitor
@@ -215,7 +212,10 @@ class PhysicalDesignService
   [[nodiscard]] std::optional<std::string_view> nonDefaultRuleName(DesignNetId net) const;
 
   void forEachNetWire(DesignNetId net, const NetWireVisitor& visitor) const;
-  void forEachNetWirePath(DesignNetId net, const NetWirePathVisitor& visitor) const;
+  using NetWireShapeVisitor = std::function<void(DesignWireId, const DesignWire&, DesignRouteShapeId,
+                                                const DesignRouteShape&, const DesignRouteShapeAttributes*)>;
+  // Direct geometry access; no DEF path decoding or per-Shape snapshot.
+  void forEachNetWireShape(DesignNetId net, const NetWireShapeVisitor& visitor) const;
   void forEachNetGeometry(DesignNetId net, const PhysicalNetGeometryVisitor& visitor) const;
   [[nodiscard]] std::string_view viaName(TechViaMasterId tech_via, DesignViaId design_via) const;
   [[nodiscard]] PhysicalRoutingViaLayers routingViaLayers(TechViaMasterId tech_via, DesignViaId design_via) const;

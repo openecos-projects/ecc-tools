@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -647,98 +648,197 @@ void writeNetOptions(DefTextOutput& output, const DefNameCache& names, const Des
   }
 }
 
-void writePath(DefTextOutput& output, const DefNameCache& names, DesignWirePathView path, bool first, bool special)
+bool sameRoutingPoint(const DesignWirePoint& lhs, const DesignWirePoint& rhs) noexcept
 {
-  output << (first ? " " : " NEW ") << names.layerName(path.layer());
-  const bool has_width = (path.flags() & DesignWirePathFlag::kHasWidth) != 0u;
+  return lhs.position == rhs.position && lhs.flags == rhs.flags && lhs.extension == rhs.extension;
+}
+
+bool sameShapeAttributes(const std::optional<DesignRouteShapeAttributes>& lhs,
+                         const DesignRouteShapeAttributes* rhs) noexcept
+{
+  if (lhs.has_value() != (rhs != nullptr)) {
+    return false;
+  }
+  return !lhs.has_value()
+         || (lhs->width == rhs->width && lhs->mask == rhs->mask && lhs->taper_rule == rhs->taper_rule
+             && lhs->shape == rhs->shape && lhs->style == rhs->style);
+}
+
+int32_t relativeCoordinate(int32_t coordinate, int32_t anchor, const char* field)
+{
+  const int64_t result = static_cast<int64_t>(coordinate) - anchor;
+  if (result < std::numeric_limits<int32_t>::min() || result > std::numeric_limits<int32_t>::max()) {
+    throw std::overflow_error(std::string("DEF route ") + field + " exceeds int32 relative-coordinate range");
+  }
+  return static_cast<int32_t>(result);
+}
+
+Rect relativeRouteRectangle(Rect rectangle, Point anchor)
+{
+  return {.ll_x = relativeCoordinate(rectangle.ll_x, anchor.x, "RECT lower-left x"),
+          .ll_y = relativeCoordinate(rectangle.ll_y, anchor.y, "RECT lower-left y"),
+          .ur_x = relativeCoordinate(rectangle.ur_x, anchor.x, "RECT upper-right x"),
+          .ur_y = relativeCoordinate(rectangle.ur_y, anchor.y, "RECT upper-right y")};
+}
+
+void writeShapePathHeader(DefTextOutput& output, const DefNameCache& names, const DesignRouteShape& shape,
+                          const DesignRouteShapeAttributes* attributes, bool first, bool special)
+{
+  constexpr uint32_t kShapeValueFlags = DesignWirePathFlag::kHasWidth | DesignWirePathFlag::kHasMask
+                                         | DesignWirePathFlag::kHasTaperRule | DesignWirePathFlag::kHasShape
+                                         | DesignWirePathFlag::kHasStyle;
+  if ((shape.flags & kShapeValueFlags) != 0u && attributes == nullptr) {
+    throw std::logic_error("route Shape has value flags but no attributes during DEF export");
+  }
+  const DesignWirePathExtra empty_attributes;
+  const auto& extra = attributes == nullptr ? empty_attributes : *attributes;
+  output << (first ? " " : " NEW ") << names.layerName(shape.layer);
+  const bool has_width = (shape.flags & DesignWirePathFlag::kHasWidth) != 0u;
   if (special != has_width) {
     throw std::logic_error("SPECIALNET paths require WIDTH and regular NET paths must use layer/NDR width");
   }
   if (has_width) {
-    output << ' ' << path.width();
+    output << ' ' << extra.width;
   }
-  if (!special && (path.flags() & DesignWirePathFlag::kTaper) != 0u) {
+  if (!special && (shape.flags & DesignWirePathFlag::kTaper) != 0u) {
     output << " TAPER";
   }
-  if (!special && (path.flags() & DesignWirePathFlag::kHasTaperRule) != 0u) {
-    output << " TAPERRULE " << path.taperRule();
+  if (!special && (shape.flags & DesignWirePathFlag::kHasTaperRule) != 0u) {
+    output << " TAPERRULE " << extra.taper_rule;
   }
-  if ((path.flags() & DesignWirePathFlag::kHasShape) != 0u) {
+  if ((shape.flags & DesignWirePathFlag::kHasShape) != 0u) {
     if (!special) {
       throw std::logic_error("regular NET path cannot contain SPECIALNET SHAPE");
     }
-    output << " + SHAPE " << path.shape();
+    output << " + SHAPE " << extra.shape;
   }
-  if ((path.flags() & DesignWirePathFlag::kHasStyle) != 0u) {
-    output << (special ? " + STYLE " : " STYLE ") << path.style();
-  }
-
-  const auto points = path.points();
-  const auto vias = path.vias();
-  const auto rectangles = path.rectangles();
-  const bool rectangles_ordered
-      = std::is_sorted(rectangles.begin(), rectangles.end(), [](const auto& left, const auto& right) {
-          return left.point_index < right.point_index;
-        });
-  const bool vias_ordered = std::is_sorted(vias.begin(), vias.end(), [](const auto& left, const auto& right) {
-    return left.point_index < right.point_index;
-  });
-  std::size_t rectangle_cursor = 0u;
-  std::size_t via_cursor = 0u;
-
-  const auto write_rectangle = [&](const DesignWireRectangle& rectangle) { output.writeRoutingRectangle(rectangle.delta); };
-  const auto write_via = [&](std::size_t local_index) {
-    const auto& via = vias[local_index];
-    if ((via.flags & DesignWireViaFlag::kHasMask) != 0u) {
-      output.writeRoutingViaMask(via.top_mask, via.cut_mask, via.bottom_mask);
-    }
-    output << ' ' << names.viaName(via);
-    if (via.orientation != DesignOrientation::kN) {
-      output << ' ' << orientationName(via.orientation);
-    }
-    if ((via.flags & DesignWireViaFlag::kHasArray) != 0u) {
-      output.writeRoutingViaArray(via.columns, via.rows, via.step_x, via.step_y);
-    }
-  };
-
-  for (std::size_t point_index = 0; point_index < points.size(); ++point_index) {
-    const auto& point = points[point_index];
-    const auto previous_value = point_index == 0u ? Point{} : points[point_index - 1u].position;
-    const Point* previous = point_index == 0u ? nullptr : &previous_value;
-    output.writeRoutingPoint(point.position, previous, point.flags, point.extension);
-
-    if (point_index == 0u) {
-      if ((path.flags() & DesignWirePathFlag::kHasMask) != 0u) {
-        output << " MASK " << path.mask();
-      }
-      if (special && (path.flags() & DesignWirePathFlag::kTaper) != 0u) {
-        output << " TAPER";
-      }
-      if (special && (path.flags() & DesignWirePathFlag::kHasTaperRule) != 0u) {
-        output << " TAPERRULE " << path.taperRule();
-      }
-    }
-
-    if (rectangles_ordered) {
-      while (rectangle_cursor < rectangles.size() && rectangles[rectangle_cursor].point_index == point_index) {
-        write_rectangle(rectangles[rectangle_cursor++]);
-      }
-    } else {
-      for (const auto& rectangle : rectangles) {
-        if (rectangle.point_index == point_index) write_rectangle(rectangle);
-      }
-    }
-    if (vias_ordered) {
-      while (via_cursor < vias.size() && vias[via_cursor].point_index == point_index) {
-        write_via(via_cursor++);
-      }
-    } else {
-      for (std::size_t index = 0; index < vias.size(); ++index) {
-        if (vias[index].point_index == point_index) write_via(index);
-      }
-    }
+  if ((shape.flags & DesignWirePathFlag::kHasStyle) != 0u) {
+    output << (special ? " + STYLE " : " STYLE ") << extra.style;
   }
 }
+
+void writeShapePathFirstPointOptions(DefTextOutput& output, const DesignRouteShape& shape,
+                                    const DesignRouteShapeAttributes* attributes, bool special)
+{
+  const DesignWirePathExtra empty_attributes;
+  const auto& extra = attributes == nullptr ? empty_attributes : *attributes;
+  if ((shape.flags & DesignWirePathFlag::kHasMask) != 0u) {
+    output << " MASK " << extra.mask;
+  }
+  if (special && (shape.flags & DesignWirePathFlag::kTaper) != 0u) {
+    output << " TAPER";
+  }
+  if (special && (shape.flags & DesignWirePathFlag::kHasTaperRule) != 0u) {
+    output << " TAPERRULE " << extra.taper_rule;
+  }
+}
+
+void writeShapeVia(DefTextOutput& output, const DefNameCache& names, const DesignWireVia& via)
+{
+  if ((via.flags & DesignWireViaFlag::kHasMask) != 0u) {
+    output.writeRoutingViaMask(via.top_mask, via.cut_mask, via.bottom_mask);
+  }
+  output << ' ' << names.viaName(via);
+  if (via.orientation != DesignOrientation::kN) {
+    output << ' ' << orientationName(via.orientation);
+  }
+  if ((via.flags & DesignWireViaFlag::kHasArray) != 0u) {
+    output.writeRoutingViaArray(via.columns, via.rows, via.step_x, via.step_y);
+  }
+}
+
+class ShapePathWriter
+{
+ public:
+  ShapePathWriter(DefTextOutput& output, const DefNameCache& names, bool special)
+      : _output(output), _names(names), _special(special)
+  {
+  }
+
+  void append(const DesignRouteShape& shape, const DesignRouteShapeAttributes* attributes)
+  {
+    std::visit(
+        [&](const auto& geometry) {
+          using Geometry = std::remove_cvref_t<decltype(geometry)>;
+          if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+            if (!compatible(shape, attributes) || !_last_point.has_value() || !sameRoutingPoint(*_last_point, geometry.begin)) {
+              begin(shape, attributes);
+              writeFirstPoint(shape, attributes, geometry.begin);
+            }
+            writeContinuationPoint(geometry.end);
+          } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+            if (!compatible(shape, attributes) || !_last_point.has_value() || !sameRoutingPoint(*_last_point, geometry.origin)) {
+              begin(shape, attributes);
+              writeFirstPoint(shape, attributes, geometry.origin);
+            }
+            writeShapeVia(_output, _names, geometry.via);
+            _active_layer = geometry.exit_layer;
+            _last_point = geometry.origin;
+          } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+            if (!compatible(shape, attributes) || !_last_point.has_value() || !sameRoutingPoint(*_last_point, geometry.anchor)) {
+              begin(shape, attributes);
+              writeFirstPoint(shape, attributes, geometry.anchor);
+            }
+            _output.writeRoutingRectangle(relativeRouteRectangle(geometry.rectangle, geometry.anchor.position));
+            _last_point = geometry.anchor;
+          } else {
+            if (!compatible(shape, attributes) || !_last_point.has_value() || !sameRoutingPoint(*_last_point, geometry.point)) {
+              begin(shape, attributes);
+              writeFirstPoint(shape, attributes, geometry.point);
+            }
+            _last_point = geometry.point;
+          }
+        },
+        shape.geometry);
+  }
+
+ private:
+  [[nodiscard]] bool compatible(const DesignRouteShape& shape, const DesignRouteShapeAttributes* attributes) const noexcept
+  {
+    return _open && _source_path == shape.source_path && _flags == shape.flags && _active_layer == shape.layer
+           && sameShapeAttributes(_attributes, attributes);
+  }
+
+  void begin(const DesignRouteShape& shape, const DesignRouteShapeAttributes* attributes)
+  {
+    writeShapePathHeader(_output, _names, shape, attributes, _first, _special);
+    _first = false;
+    _open = true;
+    _source_path = shape.source_path;
+    _flags = shape.flags;
+    _active_layer = shape.layer;
+    _attributes = attributes == nullptr ? std::nullopt : std::optional<DesignRouteShapeAttributes>{*attributes};
+    _last_point.reset();
+  }
+
+  void writeFirstPoint(const DesignRouteShape& shape, const DesignRouteShapeAttributes* attributes, DesignWirePoint point)
+  {
+    _output.writeRoutingPoint(point.position, nullptr, point.flags, point.extension);
+    writeShapePathFirstPointOptions(_output, shape, attributes, _special);
+    _last_point = point;
+  }
+
+  void writeContinuationPoint(DesignWirePoint point)
+  {
+    if (!_last_point.has_value()) {
+      throw std::logic_error("route segment continuation has no previous point during DEF export");
+    }
+    const Point previous = _last_point->position;
+    _output.writeRoutingPoint(point.position, &previous, point.flags, point.extension);
+    _last_point = point;
+  }
+
+  DefTextOutput& _output;
+  const DefNameCache& _names;
+  bool _special;
+  bool _first = true;
+  bool _open = false;
+  uint32_t _source_path = std::numeric_limits<uint32_t>::max();
+  uint32_t _flags = 0u;
+  TechRoutingLayerId _active_layer;
+  std::optional<DesignRouteShapeAttributes> _attributes;
+  std::optional<DesignWirePoint> _last_point;
+};
 
 void writeNetSection(DefTextOutput& output, const DesignStore& design, const DefNameCache& names,
                      const std::vector<DesignNetId>& nets, std::string_view section)
@@ -806,10 +906,10 @@ void writeNetSection(DefTextOutput& output, const DesignStore& design, const Def
       if (!wire.shield_net.empty()) {
         output << ' ' << wire.shield_net;
       }
-      bool first = true;
-      routing.forEachPath(wire_id, [&](DesignWirePathView path) {
-        writePath(output, names, path, first, special);
-        first = false;
+      ShapePathWriter path_writer{output, names, special};
+      routing.forEachShape(wire_id, [&](DesignRouteShapeId, const DesignRouteShape& shape,
+                                        const DesignRouteShapeAttributes* attributes) {
+        path_writer.append(shape, attributes);
       });
     }
     output << "\n  ;\n";

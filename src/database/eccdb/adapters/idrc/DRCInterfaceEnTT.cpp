@@ -9,7 +9,9 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <entt/container/dense_map.hpp>
@@ -1115,96 +1117,61 @@ std::vector<ids::Shape> DRCInterface::buildResultShapeListFromEnTT()
   const EnttLayerTable layers(tech);
   const NetIndexMap net_index_map = netIndexMap(design);
 
+  const auto appendVia = [&](const eccdb::DesignRouteVia& route_via, int32_t net_idx) {
+    const auto& via = route_via.via;
+    const uint32_t rows = std::max(via.rows, 1u);
+    const uint32_t columns = std::max(via.columns, 1u);
+    for (uint32_t row = 0; row < rows; ++row) {
+      for (uint32_t column = 0; column < columns; ++column) {
+        const eccdb::Point origin{route_via.origin.position.x + static_cast<int32_t>(column) * via.step_x,
+                                  route_via.origin.position.y + static_cast<int32_t>(row) * via.step_y};
+        appendViaShapes(result_shape_list, layers,
+                        resolveViaShapes(design, tech, via.tech_via, via.design_via, origin), net_idx);
+      }
+    }
+  };
+
+  const auto appendWireShapes = [&](eccdb::DesignWireId wire_id, int32_t net_idx, bool special) {
+    design.routingStorage().forEachShape(
+        wire_id, [&](eccdb::DesignRouteShapeId, const eccdb::DesignRouteShape& shape,
+                     const eccdb::DesignRouteShapeAttributes* attributes) {
+          std::visit(
+              [&](const auto& geometry) {
+                using Geometry = std::decay_t<decltype(geometry)>;
+                const auto layer = eccdb::TechLayerId{shape.layer.entity()};
+                if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteSegment>) {
+                  if (special) {
+                    const int32_t width = attributes == nullptr ? 0 : attributes->width;
+                    appendShape(result_shape_list, layers, layer,
+                                wireSegmentBox(geometry.begin.position, geometry.end.position, width), net_idx);
+                  } else {
+                    const int32_t width = tech.routingLayerStorage().routingLayer(shape.layer).width;
+                    appendShape(result_shape_list, layers, layer,
+                                enlargedWireSegmentBox(geometry.begin.position, geometry.end.position, width / 2), net_idx);
+                  }
+                } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
+                  appendVia(geometry, net_idx);
+                } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRoutePatch>) {
+                  appendShape(result_shape_list, layers, layer, geometry.rectangle, net_idx);
+                } else {
+                  // Point-only Shapes preserve DEF syntax but do not represent metal.
+                }
+              },
+              shape.geometry);
+        });
+  };
+
   for (const auto net_id : design.netlistStorage().regularNets()) {
     const int32_t net_idx = netIndex(net_id, net_index_map);
     for (const auto wire_id : design.routingStorage().wires(net_id)) {
-      const auto path_count = design.routingStorage().pathCount(wire_id);
-      for (std::size_t path_index = 0; path_index < path_count; ++path_index) {
-        const auto path = design.routingStorage().path(wire_id, path_index);
-        const auto points = path.points();
-        if (points.size() >= 2) {
-          const int32_t width = tech.routingLayerStorage().routingLayer(path.layer()).width;
-          appendShape(result_shape_list, layers, eccdb::TechLayerId{path.layer().entity()},
-                      enlargedWireSegmentBox(points[0].position, points[1].position, width / 2), net_idx);
-        }
-        for (const auto via : path.vias()) {
-          if (via.point_index >= points.size()) {
-            continue;
-          }
-          const auto base = points[via.point_index].position;
-          const uint32_t rows = std::max(via.rows, 1u);
-          const uint32_t columns = std::max(via.columns, 1u);
-          for (uint32_t row = 0; row < rows; ++row) {
-            for (uint32_t column = 0; column < columns; ++column) {
-              const eccdb::Point origin{base.x + static_cast<int32_t>(column) * via.step_x,
-                                                base.y + static_cast<int32_t>(row) * via.step_y};
-              appendViaShapes(result_shape_list, layers, resolveViaShapes(design, tech, via.tech_via, via.design_via, origin), net_idx);
-            }
-          }
-        }
-        for (const auto& rectangle : path.rectangles()) {
-          if (rectangle.point_index >= points.size()) {
-            continue;
-          }
-          const auto base = points[rectangle.point_index].position;
-          appendShape(result_shape_list, layers, eccdb::TechLayerId{path.layer().entity()}, rectangle.delta.offset(base.x, base.y),
-                      net_idx);
-        }
-      }
+      appendWireShapes(wire_id, net_idx, false);
     }
   }
 
   for (const auto net_id : design.netlistStorage().specialNets()) {
     const int32_t net_idx = netIndex(net_id, net_index_map);
     for (const auto wire_id : design.routingStorage().wires(net_id)) {
-      const auto path_count = design.routingStorage().pathCount(wire_id);
-      for (std::size_t path_index = 0; path_index < path_count; ++path_index) {
-        const auto path = design.routingStorage().path(wire_id, path_index);
-        const auto points = path.points();
-        if (path.vias().empty()) {
-          eccdb::Point first;
-          eccdb::Point second;
-          std::size_t ordinary_point_count = 0;
-          for (const auto& point : points) {
-            if (point.flags != 0u) {
-              continue;
-            }
-            if (ordinary_point_count == 0) {
-              first = point.position;
-            } else {
-              second = point.position;
-              ordinary_point_count = 2;
-              break;
-            }
-            ordinary_point_count = 1;
-          }
-          const auto rectangle = ordinary_point_count == 2 ? wireSegmentBox(first, second, path.width()) : eccdb::Rect{};
-          appendShape(result_shape_list, layers, eccdb::TechLayerId{path.layer().entity()}, rectangle, net_idx);
-        }
-        for (const auto via : path.vias()) {
-          if (via.point_index >= points.size()) {
-            continue;
-          }
-          const auto base = points[via.point_index].position;
-          const uint32_t rows = std::max(via.rows, 1u);
-          const uint32_t columns = std::max(via.columns, 1u);
-          for (uint32_t row = 0; row < rows; ++row) {
-            for (uint32_t column = 0; column < columns; ++column) {
-              const eccdb::Point origin{base.x + static_cast<int32_t>(column) * via.step_x,
-                                                base.y + static_cast<int32_t>(row) * via.step_y};
-              appendViaShapes(result_shape_list, layers, resolveViaShapes(design, tech, via.tech_via, via.design_via, origin), net_idx);
-            }
-          }
-        }
-        for (const auto& rectangle : path.rectangles()) {
-          if (rectangle.point_index >= points.size()) {
-            continue;
-          }
-          const auto base = points[rectangle.point_index].position;
-          appendShape(result_shape_list, layers, eccdb::TechLayerId{path.layer().entity()}, rectangle.delta.offset(base.x, base.y),
-                      net_idx);
-        }
-      }
+      appendWireShapes(wire_id, net_idx, true);
     }
   }
 

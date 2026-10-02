@@ -164,15 +164,6 @@ void NetRef::update(NetData value)
                                                detail::toStorage(value));
 }
 
-WireRef NetRef::createWire(WireRoutingData routing, WireStatus status, std::string shield_net)
-{
-  auto& api = state();
-  const auto id = api.design().routingStorage().createWire(
-      detail::toStorage(WireMetadata{.net = _id, .status = status, .shield_net = std::move(shield_net)}),
-      detail::toStorage(routing));
-  return WireRef{api, detail::toApiId<WireId>(id)};
-}
-
 bool NetRef::destroy()
 {
   if (!*this

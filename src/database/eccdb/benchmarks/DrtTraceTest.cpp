@@ -89,6 +89,23 @@ struct Backend
     return drt_trace::viaValue(name, found->second);
   }
 };
+
+struct NativeBackend : Backend
+{
+  bool prepared = false, projected = false;
+
+  drt_trace::json::value executeNative(const drt_trace::Event& event, drt_trace::NativeTimer& timer)
+  {
+    if (event.op != "clear_wire") return execute(event);
+    auto& target = wires[event.object];
+    require(timer.calls == 0, "input preparation was included in native timing");
+    prepared = true;
+    timer.measure("clear_wire", target.size(), [&] { target.clear(); });
+    require(timer.calls == 1 && prepared, "native mutation batch was not timed");
+    projected = true;
+    return nullptr;
+  }
+};
 }  // namespace
 
 int main()
@@ -131,6 +148,35 @@ int main()
           "{\"op\":\"end\",\"complete\":true,\"events\":1}\n");
     const auto v3 = Trace::load(path);
     require(v3.events.size() == 1 && v3.events[0].op == "read_tech_header", "valid v3 read trace failed");
+    const std::string v4_header = "{\"schema\":\"tritonroute_db_trace_v4\",\"instances\":[],\"nets\":[],"
+                                  "\"supported_operations\":[\"replace_wire\"]}\n";
+    const std::vector<WireAction> actions{
+        {.op = "new_path", .layer = "M1", .rule = "wide"},
+        {.op = "point", .x = 10, .y = 20, .extension = 0},
+        {.op = "point", .x = 30, .y = 20, .extension = 7},
+        {.op = "tech_via", .via = "V12"},
+        {.op = "point", .x = 30, .y = 40},
+        {.op = "new_path", .layer = "M2"},
+        {.op = "point", .x = 50, .y = 60},
+        {.op = "rect", .x = -5, .y = -7, .a = 5, .b = 7}};
+    json::array action_payload;
+    for (const auto& action : actions) action_payload.emplace_back(wireActionRecord(action));
+    const auto replacement = json::serialize(json::object{{"op", "replace_wire"}, {"source", "test"},
+        {"object", 1}, {"shapes", json::array{}}, {"wire_actions", std::move(action_payload)}});
+    write(v4_header + replacement + "\n{\"op\":\"end\",\"complete\":true,\"events\":1}\n");
+    const auto v4 = Trace::load(path);
+    require(v4.events[0].wire_actions.size() == actions.size()
+                && v4.events[0].wire_actions[0].rule == "wide"
+                && v4.events[0].wire_actions[1].extension == 0
+                && v4.events[0].wire_actions[3].via == "V12"
+                && v4.events[0].wire_actions[5].op == "new_path"
+                && v4.events[0].wire_actions.back().y == -7,
+            "v4 original encoder order, path boundaries or metadata were lost");
+    write(via_header + replacement + "\n{\"op\":\"end\",\"complete\":true,\"events\":1}\n");
+    rejects([&] { Trace::load(path); });
+    write(v4_header + "{\"op\":\"replace_wire\",\"source\":\"test\",\"object\":1,\"shapes\":[]}\n"
+                      "{\"op\":\"end\",\"complete\":true,\"events\":1}\n");
+    rejects([&] { Trace::load(path); });
     write(v3_header + "{\"op\":\"read_die\",\"source\":\"test\",\"expected\":null}\n"
                       "{\"op\":\"end\",\"complete\":true,\"events\":1}\n");
     rejects([&] { Trace::load(path); });
@@ -188,6 +234,16 @@ int main()
     Options configuration{.output = path, .backend = "test"};
     Backend backend;
     replay(backend, trace, configuration);
+    NativeBackend native_backend;
+    replay(native_backend, trace, configuration);
+    require(native_backend.prepared && native_backend.projected, "native replay did not use separated boundaries");
+    std::ifstream native_file(path);
+    const auto native_result = json::parse(std::string(std::istreambuf_iterator<char>{native_file}, {})).as_object();
+    require(native_result.at("measured_operations").as_object().at("clear_wire") == 1
+                && native_result.at("unmeasured_operations").as_object().at("net_pins") == 1
+                && !native_result.at("timing_ns").as_object().contains("net_pins")
+                && native_result.at("native_api_batches").as_object().at("clear_wire").as_object().at("calls") == 1,
+            "unmeasured native groups were presented as timed zero-cost APIs");
     trace.events[0].expected = json::array{json::array{"I", "U1", "B"}};
     rejects([&] { replay(backend, trace, configuration); });
     trace.events[0].expected = json::array{json::array{"I", "U1", "A"}};

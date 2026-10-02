@@ -424,169 +424,145 @@ void resolveWireVia(DirectContext& context, DesignWireVia& via, std::string_view
   }
 }
 
-void parsePath(DirectContext& context, const defiPath& source, DesignWireRoutingInput& routing)
+void parsePath(DirectContext& context, const defiPath& source, std::vector<DesignWirePath>& paths)
 {
-  const auto old_path_count = routing.paths.size();
-  const auto old_point_count = routing.points.size();
-  const auto old_via_count = routing.vias.size();
-  const auto old_rectangle_count = routing.rectangles.size();
-  const auto old_extra_count = routing.extras.size();
-  DesignWirePathRecord record{.points = {.begin = exactSizeUint32(old_point_count, "wire point vector")},
-                              .vias = {.begin = exactSizeUint32(old_via_count, "wire VIA vector")},
-                              .rectangles = {.begin = exactSizeUint32(old_rectangle_count, "wire RECT vector")}};
-  DesignWirePathExtra extra;
+  // Parser-local value only. Storage consumes it into independent Shapes.
+  DesignWirePath path;
   std::optional<std::array<uint32_t, 3>> pending_via_mask;
-  try {
-    source.initTraverse();
-    while (const auto token = source.next()) {
-      switch (token) {
-        case DEFIPATH_LAYER:
-          if (record.layer) {
-            throw std::runtime_error("one SI2 path contains multiple layers; expected NEW to create a new path");
-          }
-          record.layer = directRoutingLayer(context, requiredText(source.getLayer(), "wire path layer"), "NET wire");
-          break;
-        case DEFIPATH_WIDTH:
-          record.flags |= DesignWirePathFlag::kHasWidth;
-          extra.width = source.getWidth();
-          break;
-        case DEFIPATH_MASK:
-          record.flags |= DesignWirePathFlag::kHasMask;
-          extra.mask = static_cast<uint32_t>(source.getMask());
-          break;
-        case DEFIPATH_TAPER:
-          record.flags |= DesignWirePathFlag::kTaper;
-          break;
-        case DEFIPATH_TAPERRULE:
-          record.flags |= DesignWirePathFlag::kHasTaperRule;
-          extra.taper_rule = requiredText(source.getTaperRule(), "wire TAPERRULE");
-          break;
-        case DEFIPATH_SHAPE:
-          record.flags |= DesignWirePathFlag::kHasShape;
-          extra.shape = requiredText(source.getShape(), "special wire SHAPE");
-          break;
-        case DEFIPATH_STYLE:
-          record.flags |= DesignWirePathFlag::kHasStyle;
-          extra.style = source.getStyle();
-          break;
-        case DEFIPATH_POINT: {
-          int x = 0;
-          int y = 0;
-          source.getPoint(&x, &y);
-          routing.points.push_back(DesignWirePoint{.position = {x, y}});
-          break;
+  source.initTraverse();
+  while (const auto token = source.next()) {
+    switch (token) {
+      case DEFIPATH_LAYER:
+        if (path.layer) {
+          throw std::runtime_error("one SI2 path contains multiple layers; expected NEW to create a new path");
         }
-        case DEFIPATH_FLUSHPOINT: {
-          int x = 0;
-          int y = 0;
-          int extension = 0;
-          source.getFlushPoint(&x, &y, &extension);
-          routing.points.push_back(
-              DesignWirePoint{.position = {x, y}, .flags = DesignWirePointFlag::kHasExtension, .extension = extension});
-          break;
-        }
-        case DEFIPATH_VIRTUALPOINT: {
-          int x = 0;
-          int y = 0;
-          source.getVirtualPoint(&x, &y);
-          routing.points.push_back(DesignWirePoint{.position = {x, y}, .flags = DesignWirePointFlag::kVirtual});
-          break;
-        }
-        case DEFIPATH_VIAMASK:
-          pending_via_mask = std::array<uint32_t, 3>{static_cast<uint32_t>(source.getViaTopMask()),
-                                                     static_cast<uint32_t>(source.getViaCutMask()),
-                                                     static_cast<uint32_t>(source.getViaBottomMask())};
-          break;
-        case DEFIPATH_VIA: {
-          if (routing.points.size() == old_point_count) {
-            throw std::runtime_error("wire VIA requires a preceding point");
-          }
-          DesignWireVia via{.point_index = exactSizeUint32(routing.points.size() - old_point_count - 1u, "wire VIA point index")};
-          resolveWireVia(context, via, requiredText(source.getVia(), "wire VIA"));
-          if (pending_via_mask) {
-            via.flags |= DesignWireViaFlag::kHasMask;
-            via.top_mask = (*pending_via_mask)[0];
-            via.cut_mask = (*pending_via_mask)[1];
-            via.bottom_mask = (*pending_via_mask)[2];
-            pending_via_mask.reset();
-          }
-          routing.vias.push_back(via);
-          break;
-        }
-        case DEFIPATH_VIAROTATION:
-          if (routing.vias.size() == old_via_count) {
-            throw std::runtime_error("wire VIA orientation appears before VIA");
-          }
-          routing.vias.back().orientation = orientation(source.getViaRotationStr());
-          break;
-        case DEFIPATH_VIADATA: {
-          if (routing.vias.size() == old_via_count) {
-            throw std::runtime_error("wire VIA array appears before VIA");
-          }
-          int columns = 0;
-          int rows = 0;
-          int step_x = 0;
-          int step_y = 0;
-          source.getViaData(&columns, &rows, &step_x, &step_y);
-          auto& via = routing.vias.back();
-          via.flags |= DesignWireViaFlag::kHasArray;
-          via.columns = static_cast<uint32_t>(columns);
-          via.rows = static_cast<uint32_t>(rows);
-          via.step_x = step_x;
-          via.step_y = step_y;
-          break;
-        }
-        case DEFIPATH_RECT: {
-          if (routing.points.size() == old_point_count) {
-            throw std::runtime_error("wire RECT requires a preceding point");
-          }
-          int ll_x = 0;
-          int ll_y = 0;
-          int ur_x = 0;
-          int ur_y = 0;
-          source.getViaRect(&ll_x, &ll_y, &ur_x, &ur_y);
-          routing.rectangles.push_back(
-              DesignWireRectangle{.point_index
-                                  = exactSizeUint32(routing.points.size() - old_point_count - 1u, "wire RECT point index"),
-                                  .delta = Rect{ll_x, ll_y, ur_x, ur_y}.normalized()});
-          break;
-        }
-        default:
-          throw std::runtime_error("unsupported SI2 wire path token");
+        path.layer = directRoutingLayer(context, requiredText(source.getLayer(), "wire path layer"), "NET wire");
+        break;
+      case DEFIPATH_WIDTH:
+        path.flags |= DesignWirePathFlag::kHasWidth;
+        path.width = source.getWidth();
+        break;
+      case DEFIPATH_MASK:
+        path.flags |= DesignWirePathFlag::kHasMask;
+        path.mask = static_cast<uint32_t>(source.getMask());
+        break;
+      case DEFIPATH_TAPER:
+        path.flags |= DesignWirePathFlag::kTaper;
+        break;
+      case DEFIPATH_TAPERRULE:
+        path.flags |= DesignWirePathFlag::kHasTaperRule;
+        path.taper_rule = requiredText(source.getTaperRule(), "wire TAPERRULE");
+        break;
+      case DEFIPATH_SHAPE:
+        path.flags |= DesignWirePathFlag::kHasShape;
+        path.shape = requiredText(source.getShape(), "special wire SHAPE");
+        break;
+      case DEFIPATH_STYLE:
+        path.flags |= DesignWirePathFlag::kHasStyle;
+        path.style = source.getStyle();
+        break;
+      case DEFIPATH_POINT: {
+        int x = 0;
+        int y = 0;
+        source.getPoint(&x, &y);
+        path.points.push_back(DesignWirePoint{.position = {x, y}});
+        break;
       }
+      case DEFIPATH_FLUSHPOINT: {
+        int x = 0;
+        int y = 0;
+        int extension = 0;
+        source.getFlushPoint(&x, &y, &extension);
+        path.points.push_back(
+            DesignWirePoint{.position = {x, y}, .flags = DesignWirePointFlag::kHasExtension, .extension = extension});
+        break;
+      }
+      case DEFIPATH_VIRTUALPOINT: {
+        int x = 0;
+        int y = 0;
+        source.getVirtualPoint(&x, &y);
+        path.points.push_back(DesignWirePoint{.position = {x, y}, .flags = DesignWirePointFlag::kVirtual});
+        break;
+      }
+      case DEFIPATH_VIAMASK:
+        pending_via_mask = std::array<uint32_t, 3>{static_cast<uint32_t>(source.getViaTopMask()),
+                                                   static_cast<uint32_t>(source.getViaCutMask()),
+                                                   static_cast<uint32_t>(source.getViaBottomMask())};
+        break;
+      case DEFIPATH_VIA: {
+        if (path.points.empty()) {
+          throw std::runtime_error("wire VIA requires a preceding point");
+        }
+        DesignWireVia via{.point_index = exactSizeUint32(path.points.size() - 1u, "wire VIA point index")};
+        resolveWireVia(context, via, requiredText(source.getVia(), "wire VIA"));
+        if (pending_via_mask) {
+          via.flags |= DesignWireViaFlag::kHasMask;
+          via.top_mask = (*pending_via_mask)[0];
+          via.cut_mask = (*pending_via_mask)[1];
+          via.bottom_mask = (*pending_via_mask)[2];
+          pending_via_mask.reset();
+        }
+        path.vias.push_back(via);
+        break;
+      }
+      case DEFIPATH_VIAROTATION:
+        if (path.vias.empty()) {
+          throw std::runtime_error("wire VIA orientation appears before VIA");
+        }
+        path.vias.back().orientation = orientation(source.getViaRotationStr());
+        break;
+      case DEFIPATH_VIADATA: {
+        if (path.vias.empty()) {
+          throw std::runtime_error("wire VIA array appears before VIA");
+        }
+        int columns = 0;
+        int rows = 0;
+        int step_x = 0;
+        int step_y = 0;
+        source.getViaData(&columns, &rows, &step_x, &step_y);
+        auto& via = path.vias.back();
+        via.flags |= DesignWireViaFlag::kHasArray;
+        via.columns = static_cast<uint32_t>(columns);
+        via.rows = static_cast<uint32_t>(rows);
+        via.step_x = step_x;
+        via.step_y = step_y;
+        break;
+      }
+      case DEFIPATH_RECT: {
+        if (path.points.empty()) {
+          throw std::runtime_error("wire RECT requires a preceding point");
+        }
+        int ll_x = 0;
+        int ll_y = 0;
+        int ur_x = 0;
+        int ur_y = 0;
+        source.getViaRect(&ll_x, &ll_y, &ur_x, &ur_y);
+        path.rectangles.push_back(
+            DesignWireRectangle{.point_index
+                                = exactSizeUint32(path.points.size() - 1u, "wire RECT point index"),
+                                .delta = Rect{ll_x, ll_y, ur_x, ur_y}.normalized()});
+        break;
+      }
+      default:
+        throw std::runtime_error("unsupported SI2 wire path token");
     }
-    if (pending_via_mask) {
-      throw std::runtime_error("wire VIA MASK is not followed by a VIA");
-    }
-    if (!record.layer) {
-      throw std::runtime_error("wire path requires a layer");
-    }
-
-    record.points.count = exactSizeUint32(routing.points.size() - old_point_count, "wire point vector");
-    record.vias.count = exactSizeUint32(routing.vias.size() - old_via_count, "wire VIA vector");
-    record.rectangles.count = exactSizeUint32(routing.rectangles.size() - old_rectangle_count, "wire RECT vector");
-    constexpr uint32_t kValueFlags = DesignWirePathFlag::kHasWidth | DesignWirePathFlag::kHasMask
-                                     | DesignWirePathFlag::kHasTaperRule | DesignWirePathFlag::kHasShape
-                                     | DesignWirePathFlag::kHasStyle;
-    if ((record.flags & kValueFlags) != 0u) {
-      record.extra_index = exactSizeUint32(routing.extras.size(), "wire path extra vector");
-      routing.extras.push_back(std::move(extra));
-    }
-    routing.paths.push_back(record);
-  } catch (...) {
-    routing.paths.resize(old_path_count);
-    routing.points.resize(old_point_count);
-    routing.vias.resize(old_via_count);
-    routing.rectangles.resize(old_rectangle_count);
-    routing.extras.resize(old_extra_count);
-    throw;
   }
+  if (pending_via_mask) {
+    throw std::runtime_error("wire VIA MASK is not followed by a VIA");
+  }
+  if (!path.layer) {
+    throw std::runtime_error("wire path requires a layer");
+  }
+
+  paths.push_back(std::move(path));
 }
 
 struct ParsedWire
 {
   DesignWire component;
-  DesignWireRoutingInput routing;
+  // Parser-local values only. They are expanded into canonical Shape
+  // entities immediately after the owning Wire has been created.
+  std::vector<DesignWirePath> paths;
 };
 
 ParsedWire parseWire(DirectContext& context, const defiWire& source)
@@ -595,15 +571,120 @@ ParsedWire parseWire(DirectContext& context, const defiWire& source)
   if (target.component.status == DesignWireStatus::kShield) {
     target.component.shield_net = requiredText(source.wireShieldNetName(), "SHIELD net name");
   }
-  target.routing.reservePaths(static_cast<std::size_t>(source.numPaths()));
+  target.paths.reserve(static_cast<std::size_t>(source.numPaths()));
   for (int index = 0; index < source.numPaths(); ++index) {
     const auto* path = source.path(index);
     if (path == nullptr) {
       throw std::runtime_error("SI2 returned a null wire path");
     }
-    parsePath(context, *path, target.routing);
+    parsePath(context, *path, target.paths);
   }
   return target;
+}
+
+std::optional<DesignRouteShapeAttributes> shapeAttributes(const DesignWirePath& path)
+{
+  constexpr uint32_t value_flags = DesignWirePathFlag::kHasWidth | DesignWirePathFlag::kHasMask
+                                   | DesignWirePathFlag::kHasTaperRule | DesignWirePathFlag::kHasShape
+                                   | DesignWirePathFlag::kHasStyle;
+  if ((path.flags & value_flags) == 0u) {
+    return std::nullopt;
+  }
+  return DesignRouteShapeAttributes{.width = path.width,
+                                    .mask = path.mask,
+                                    .taper_rule = path.taper_rule,
+                                    .shape = path.shape,
+                                    .style = path.style};
+}
+
+Rect absoluteShapeRectangle(const DesignWireRectangle& rectangle, Point anchor)
+{
+  const auto checked = [](int64_t value) -> int32_t {
+    if (value < std::numeric_limits<int32_t>::min() || value > std::numeric_limits<int32_t>::max()) {
+      throw std::overflow_error("wire RECT coordinate exceeds int32 range");
+    }
+    return static_cast<int32_t>(value);
+  };
+  return Rect{.ll_x = checked(static_cast<int64_t>(rectangle.delta.ll_x) + anchor.x),
+              .ll_y = checked(static_cast<int64_t>(rectangle.delta.ll_y) + anchor.y),
+              .ur_x = checked(static_cast<int64_t>(rectangle.delta.ur_x) + anchor.x),
+              .ur_y = checked(static_cast<int64_t>(rectangle.delta.ur_y) + anchor.y)}
+      .normalized();
+}
+
+void appendParsedPathShapes(DirectContext& context, DesignWireId wire_id, const DesignWirePath& path,
+                            uint32_t source_path)
+{
+  if (path.points.empty()) {
+    throw std::invalid_argument("design wire path requires a point");
+  }
+
+  auto& routing = context.design.routingStorage();
+  const auto attributes = shapeAttributes(path);
+  std::size_t via_index = 0u;
+  std::size_t rectangle_index = 0u;
+  TechRoutingLayerId current_layer = path.layer;
+
+  const auto append = [&](TechRoutingLayerId layer, DesignRouteGeometry geometry) {
+    return routing.createShape(wire_id,
+                               DesignRouteShape{.wire = wire_id,
+                                                .layer = layer,
+                                                .flags = path.flags,
+                                                .source_path = source_path,
+                                                .geometry = std::move(geometry)},
+                               attributes);
+  };
+
+  for (std::size_t point_index = 0u; point_index < path.points.size(); ++point_index) {
+    const auto point = path.points[point_index];
+    if (point_index != 0u) {
+      static_cast<void>(append(current_layer,
+                               DesignRouteSegment{.begin = path.points[point_index - 1u], .end = point}));
+    }
+
+    while (rectangle_index < path.rectangles.size() && path.rectangles[rectangle_index].point_index == point_index) {
+      const auto& rectangle = path.rectangles[rectangle_index++];
+      static_cast<void>(append(current_layer,
+                               DesignRoutePatch{.anchor = point,
+                                                .rectangle = absoluteShapeRectangle(rectangle, point.position)}));
+    }
+
+    while (via_index < path.vias.size() && path.vias[via_index].point_index == point_index) {
+      auto via = path.vias[via_index++];
+      via.point_index = 0u;
+      const auto shape_id = append(current_layer,
+                                   DesignRouteVia{.origin = point, .via = std::move(via), .exit_layer = {}});
+      // createShape resolves and stores the via exit layer. Reading it back
+      // keeps the next segment on the correct side of the via without making
+      // the parser duplicate technology-via resolution logic.
+      current_layer = std::get<DesignRouteVia>(routing.shape(shape_id).geometry).exit_layer;
+    }
+  }
+
+  if (rectangle_index != path.rectangles.size() || via_index != path.vias.size()) {
+    throw std::invalid_argument("wire path primitive anchor is out of range");
+  }
+  if (path.points.size() == 1u && path.vias.empty() && path.rectangles.empty()) {
+    static_cast<void>(append(path.layer, DesignRoutePoint{.point = path.points.front()}));
+  }
+}
+
+DesignWireId createParsedWire(DirectContext& context, ParsedWire parsed)
+{
+  if (parsed.paths.empty()) {
+    throw std::invalid_argument("design wire requires at least one path");
+  }
+  auto& routing = context.design.routingStorage();
+  const auto wire_id = routing.createWire(std::move(parsed.component));
+  try {
+    for (std::size_t path_index = 0u; path_index < parsed.paths.size(); ++path_index) {
+      appendParsedPathShapes(context, wire_id, parsed.paths[path_index], exactSizeUint32(path_index, "wire source path"));
+    }
+  } catch (...) {
+    static_cast<void>(routing.destroyWire(wire_id));
+    throw;
+  }
+  return wire_id;
 }
 
 struct FileCloser
@@ -1354,7 +1435,7 @@ int directNetCallback(defrCallbackType_e type, defiNet* source, defiUserData use
       if (wire_source == nullptr) throw std::runtime_error("SI2 returned a null NET wire");
       auto wire = parseWire(context, *wire_source);
       wire.component.net = net_id;
-      static_cast<void>(context.design.routingStorage().createWireTrusted(std::move(wire.component), std::move(wire.routing)));
+      static_cast<void>(createParsedWire(context, std::move(wire)));
     }
     directDiagnostic(context, "NET PROPERTY", static_cast<std::size_t>(source->numProps()));
     directDiagnostic(context, "NET SUBNET", static_cast<std::size_t>(source->numSubnets()));

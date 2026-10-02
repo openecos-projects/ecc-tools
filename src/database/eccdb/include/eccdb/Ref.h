@@ -65,9 +65,6 @@ class NetRef
   void clearNonDefaultRule();
   void setOptions(NetOptions options);
   void update(NetData value);
-  [[nodiscard]] WireRef createWire(WireRoutingData routing,
-                                   WireStatus status = WireStatus::kRouted,
-                                   std::string shield_net = {});
   [[nodiscard]] bool destroy();
 
  private:
@@ -182,11 +179,6 @@ class WireRef
   [[nodiscard]] explicit operator bool() const noexcept;
   [[nodiscard]] WireId id() const noexcept { return _id; }
   [[nodiscard]] WireMetadata metadata() const;
-  [[nodiscard]] WireRoutingData routingData() const;
-  [[nodiscard]] std::size_t pathCount() const;
-  [[nodiscard]] WirePathData pathData(std::size_t index) const;
-
-  void update(WireMetadata metadata, WireRoutingData routing);
   [[nodiscard]] bool destroy();
 
  private:

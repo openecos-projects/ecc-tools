@@ -58,19 +58,24 @@ def main() -> None:
                 subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT)
             measured = json.loads(destination.read_text())
             unsupported = measured.get("unsupported_operations", {})
+            unmeasured = measured.get("unmeasured_operations", {})
             measured_operations = measured.get("measured_operations", {})
             operations = measured["operations"]
             if (measured["backend"] != backend or not measured["validation"].get("all_supported_events", False)
                     or measured.get("validated_events", 0) + sum(unsupported.values()) != measured["events"]
                     or set(measured_operations) - set(operations)
                     or set(unsupported) - set(operations)
-                    or any(measured_operations.get(op, 0) + unsupported.get(op, 0) != count
+                    or set(unmeasured) - set(operations)
+                    or any(measured_operations.get(op, 0) + unsupported.get(op, 0)
+                           + unmeasured.get(op, 0) != count
                            for op, count in operations.items())
                     or (unsupported and measured["validation"]["all_events"])):
                 raise RuntimeError(f"invalid replay result: {destination}")
             measured["command"] = command
-            print(f"{backend} run {index}: {measured['total_ns'] / 1e6:.3f} ms, "
-                  f"validated {measured['validated_events']}/{measured['events']} events", flush=True)
+            print(f"{backend} run {index}: measured native API sum "
+                  f"{measured['measured_native_total_ns'] / 1e6:.3f} ms, "
+                  f"validated {measured['validated_events']}/{measured['events']} events, "
+                  f"unmeasured {sum(unmeasured.values())}, unsupported {sum(unsupported.values())}", flush=True)
             return backend, measured
 
         if args.parallel:
@@ -98,7 +103,7 @@ def main() -> None:
                 fields.append("final_net_pin_checks")
             if "read_wire" not in unsupported and not (unsupported & route_mutations):
                 fields.extend(("final_wires", "final_primitives", "final_wire_checks",
-                               "endpoint_extension_fields"))
+                               "trace_endpoint_extension_fields"))
             if not (unsupported & via_mutations):
                 fields.extend(("final_vias", "final_via_rectangles"))
             for field in fields:
@@ -110,7 +115,7 @@ def main() -> None:
                for runs in results.values() for run in runs)
     }
     summary = {
-        "schema": "tritonroute_db_trace_comparison_v2",
+        "schema": "tritonroute_db_trace_comparison_v3",
         "cpu_affinity": args.cpu,
         "execution": "parallel" if args.parallel else "serial",
         "backend_cpu_affinity": {backend: args.cpu + backends.index(backend) if args.parallel else args.cpu
@@ -125,11 +130,14 @@ def main() -> None:
         "operations": baseline["operations"],
         "declared_operations": declared_operations,
         "unobserved_operations": sorted(set(declared_operations) - set(baseline["operations"])),
-        "comparable_operations": sorted(comparable_ops),
+        "jointly_measured_operations": sorted(comparable_ops),
+        "geometry_equivalent_only_operations": [op for op in sorted(route_mutations)
+                                                 if op in baseline["operations"]],
+        "wire_write_inputs": {backend: runs[0]["wire_write_input"] for backend, runs in results.items()},
         "results": {},
-        "scope": "actual TritonRoute database API-group trace; unsupported backend groups are explicit",
+        "scope": "actual TritonRoute database API-group trace; joint timing compares matching requested work, not identical native function sequences; Wire writes compare supported geometry only",
         "validation_scope": "ODB/EccDB include segment endpoint extensions; IDB validates common geometry/connectivity only; runtime design VIA comparison covers name and fixed rectangles, not EccDB DEFAULT metadata",
-        "timer_scope": "per-event adapter invocation and returned-value construction; parsing/binding/canonicalization/validation excluded",
+        "timer_scope": "native database/service API batches only; parsing, binding, adaptor input conversion, result JSON projection and validation excluded; native unmeasured groups explicit",
     }
     for backend, runs in results.items():
         summary["results"][backend] = {
@@ -139,10 +147,11 @@ def main() -> None:
                      if all(run.get("measured_operations", {}).get(op, 0) == count for run in runs) else None)
                 for op, count in baseline["operations"].items()
             },
-            "median_total_ns": int(statistics.median(run["total_ns"] for run in runs)),
-            "median_comparable_ns": int(statistics.median(
+            "median_measured_native_total_ns": int(statistics.median(run["measured_native_total_ns"] for run in runs)),
+            "median_jointly_measured_native_ns": int(statistics.median(
                 sum(run["timing_ns"][op] for op in comparable_ops) for run in runs)),
             "unsupported_operations": runs[0].get("unsupported_operations", {}),
+            "unmeasured_operations": runs[0].get("unmeasured_operations", {}),
             "final_route_state_comparable": all(
                 not (set(run.get("unsupported_operations", {})) & (route_mutations | {"read_wire"}))
                 for run in runs),

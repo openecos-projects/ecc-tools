@@ -628,13 +628,15 @@ void PhysicalDesignService::forEachNetWire(DesignNetId net, const NetWireVisitor
   _design.routingStorage().forEachWire(net, visitor);
 }
 
-void PhysicalDesignService::forEachNetWirePath(DesignNetId net, const NetWirePathVisitor& visitor) const
+void PhysicalDesignService::forEachNetWireShape(DesignNetId net, const NetWireShapeVisitor& visitor) const
 {
-  if (!visitor) {
-    return;
-  }
-  _design.routingStorage().forEachWire(net, [&](DesignWireId wire_id, const DesignWire& wire) {
-    _design.routingStorage().forEachPath(wire_id, [&](DesignWirePathView path) { visitor(wire_id, wire, path); });
+  if (!visitor) return;
+  const auto& storage = _design.routingStorage();
+  storage.forEachWire(net, [&](DesignWireId wire_id, const DesignWire& wire) {
+    storage.forEachShape(wire_id, [&](DesignRouteShapeId id, const DesignRouteShape& shape,
+                                      const DesignRouteShapeAttributes* attributes) {
+      visitor(wire_id, wire, id, shape, attributes);
+    });
   });
 }
 

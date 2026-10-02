@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -230,21 +231,48 @@ void expectComplexRouting(const DesignStore& design)
   EXPECT_EQ(regular_options->style, 7);
   const auto regular_wires = routing.wires(regular_net);
   ASSERT_EQ(regular_wires.size(), 1u);
-  ASSERT_EQ(routing.pathCount(regular_wires.front()), 2u);
-  const auto regular_path0 = routing.path(regular_wires.front(), 0);
-  const auto regular_path1 = routing.path(regular_wires.front(), 1);
-  EXPECT_EQ(regular_path0.points().size(), 3u);
-  EXPECT_NE(regular_path0.points()[1].flags & DesignWirePointFlag::kVirtual, 0u);
-  EXPECT_NE(regular_path0.points()[2].flags & DesignWirePointFlag::kHasExtension, 0u);
-  EXPECT_EQ(regular_path0.points()[2].extension, 5);
-  ASSERT_EQ(regular_path0.vias().size(), 1u);
-  EXPECT_EQ(regular_path0.vias()[0].orientation, DesignOrientation::kFN);
-  EXPECT_EQ(regular_path0.vias()[0].top_mask, 1u);
-  EXPECT_EQ(regular_path0.vias()[0].cut_mask, 2u);
-  EXPECT_EQ(regular_path0.vias()[0].bottom_mask, 3u);
-  ASSERT_EQ(regular_path0.rectangles().size(), 1u);
-  EXPECT_EQ(regular_path0.rectangles()[0].delta, (Rect{-2, -2, 2, 2}));
-  EXPECT_NE(regular_path1.flags() & DesignWirePathFlag::kTaper, 0u);
+  std::vector<DesignRouteShapeId> regular_path0;
+  std::vector<DesignRouteShapeId> regular_path1;
+  for (const auto shape_id : routing.wire(regular_wires.front()).shapes) {
+    const auto source_path = routing.shape(shape_id).source_path;
+    (source_path == 0u ? regular_path0 : regular_path1).push_back(shape_id);
+  }
+  ASSERT_FALSE(regular_path0.empty());
+  ASSERT_FALSE(regular_path1.empty());
+  std::size_t regular_segments = 0;
+  std::size_t regular_vias = 0;
+  std::size_t regular_patches = 0;
+  bool saw_virtual_point = false;
+  bool saw_extended_point = false;
+  for (const auto shape_id : regular_path0) {
+    const auto& shape = routing.shape(shape_id);
+    if (const auto* segment = std::get_if<DesignRouteSegment>(&shape.geometry); segment != nullptr) {
+      ++regular_segments;
+      saw_virtual_point = saw_virtual_point || (segment->begin.flags & DesignWirePointFlag::kVirtual) != 0u
+                          || (segment->end.flags & DesignWirePointFlag::kVirtual) != 0u;
+      saw_extended_point = saw_extended_point || ((segment->begin.flags & DesignWirePointFlag::kHasExtension) != 0u
+                                                   && segment->begin.extension == 5)
+                           || ((segment->end.flags & DesignWirePointFlag::kHasExtension) != 0u
+                               && segment->end.extension == 5);
+    } else if (const auto* via = std::get_if<DesignRouteVia>(&shape.geometry); via != nullptr) {
+      ++regular_vias;
+      EXPECT_EQ(via->via.orientation, DesignOrientation::kFN);
+      EXPECT_EQ(via->via.top_mask, 1u);
+      EXPECT_EQ(via->via.cut_mask, 2u);
+      EXPECT_EQ(via->via.bottom_mask, 3u);
+    } else if (std::holds_alternative<DesignRoutePatch>(shape.geometry)) {
+      ++regular_patches;
+      EXPECT_EQ(std::get<DesignRoutePatch>(shape.geometry).rectangle, (Rect{98, 98, 102, 102}));
+    }
+  }
+  EXPECT_EQ(regular_segments, 2u);
+  EXPECT_EQ(regular_vias, 1u);
+  EXPECT_EQ(regular_patches, 1u);
+  EXPECT_TRUE(saw_virtual_point);
+  EXPECT_TRUE(saw_extended_point);
+  EXPECT_TRUE(std::all_of(regular_path1.begin(), regular_path1.end(), [&](const auto shape_id) {
+    return (routing.shape(shape_id).flags & DesignWirePathFlag::kTaper) != 0u;
+  }));
 
   const auto special_net = netlist.findNet("VDD");
   ASSERT_TRUE(special_net);
@@ -263,16 +291,31 @@ void expectComplexRouting(const DesignStore& design)
   EXPECT_EQ(special_options->spacing_rules[0].range_right, 40);
   const auto special_wires = routing.wires(special_net);
   ASSERT_EQ(special_wires.size(), 1u);
-  ASSERT_EQ(routing.pathCount(special_wires.front()), 2u);
-  const auto special_path0 = routing.path(special_wires.front(), 0);
-  EXPECT_EQ(special_path0.width(), 20);
-  EXPECT_EQ(special_path0.shape(), "STRIPE");
-  EXPECT_EQ(special_path0.style(), 4);
-  ASSERT_EQ(special_path0.vias().size(), 1u);
-  EXPECT_EQ(special_path0.vias()[0].columns, 2u);
-  EXPECT_EQ(special_path0.vias()[0].rows, 3u);
-  EXPECT_EQ(special_path0.vias()[0].step_x, 40);
-  EXPECT_EQ(special_path0.vias()[0].step_y, 50);
+  std::vector<DesignRouteShapeId> special_path0;
+  for (const auto shape_id : routing.wire(special_wires.front()).shapes) {
+    if (routing.shape(shape_id).source_path == 0u) special_path0.push_back(shape_id);
+  }
+  ASSERT_FALSE(special_path0.empty());
+  bool saw_special_attributes = false;
+  bool saw_special_via = false;
+  for (const auto shape_id : special_path0) {
+    const auto& shape = routing.shape(shape_id);
+    if (const auto* attributes = routing.shapeAttributes(shape_id); attributes != nullptr) {
+      saw_special_attributes = true;
+      EXPECT_EQ(attributes->width, 20);
+      EXPECT_EQ(attributes->shape, "STRIPE");
+      EXPECT_EQ(attributes->style, 4);
+    }
+    if (const auto* via = std::get_if<DesignRouteVia>(&shape.geometry); via != nullptr) {
+      saw_special_via = true;
+      EXPECT_EQ(via->via.columns, 2u);
+      EXPECT_EQ(via->via.rows, 3u);
+      EXPECT_EQ(via->via.step_x, 40);
+      EXPECT_EQ(via->via.step_y, 50);
+    }
+  }
+  EXPECT_TRUE(saw_special_attributes);
+  EXPECT_TRUE(saw_special_via);
 
   const auto* geometry = routing.netGeometry(special_net);
   ASSERT_NE(geometry, nullptr);
@@ -426,6 +469,44 @@ TEST_F(DefDesignRoundTripTest, ImportsAndExportsComplexNewVirtualFlushAndViaPath
   EXPECT_EQ(second.netlistStorage().ioPin(second_io_pin).pins.size(), io_pin.pins.size());
 }
 
+TEST_F(DefDesignRoundTripTest, EditedDisconnectedShapesExportAsNewPathsWithoutAddingCopper)
+{
+  const auto input = writeInput(singleRouteDef("M1 ( 0 0 ) ( 100 0 ) ( 100 100 )"), "shape_edit_input.def");
+  DesignStore design{tech, library.libraryRegistry()};
+  DefDesignImporter{design}.import(input);
+  auto& routing = design.routingStorage();
+  const auto net = design.netlistStorage().findNet("signal");
+  ASSERT_TRUE(net);
+  const auto wire = routing.wires(net).front();
+  const auto ids = routing.wire(wire).shapes;
+  ASSERT_EQ(ids.size(), 2u);
+
+  auto edited = routing.shape(ids[1]);
+  auto& segment = std::get<DesignRouteSegment>(edited.geometry);
+  segment.begin.position = {200, 0};
+  segment.end.position = {200, 100};
+  routing.updateShape(ids[1], edited);
+  EXPECT_EQ(routing.wire(wire).shapes, ids);
+  EXPECT_EQ(routing.wire(wire).shapes.size(), 2u);
+
+  const auto text = DefDesignExporter{design}.exportText();
+  EXPECT_NE(text.find("NEW M1"), std::string::npos);
+  DesignStore restored{tech, library.libraryRegistry()};
+  DefDesignImporter{restored}.import(writeInput(text, "shape_edit_output.def"));
+  const auto restored_net = restored.netlistStorage().findNet("signal");
+  ASSERT_TRUE(restored_net);
+  const auto restored_wire = restored.routingStorage().wires(restored_net).front();
+  const auto& restored_ids = restored.routingStorage().wire(restored_wire).shapes;
+  ASSERT_EQ(restored_ids.size(), 2u);
+  for (std::size_t index = 0; index < ids.size(); ++index) {
+    const auto& expected = std::get<DesignRouteSegment>(routing.shape(ids[index]).geometry);
+    const auto& actual = std::get<DesignRouteSegment>(restored.routingStorage().shape(restored_ids[index]).geometry);
+    EXPECT_EQ(actual.begin.position, expected.begin.position);
+    EXPECT_EQ(actual.end.position, expected.end.position);
+    EXPECT_EQ(restored.routingStorage().shape(restored_ids[index]).layer, routing.shape(ids[index]).layer);
+  }
+}
+
 TEST_F(DefDesignRoundTripTest, KeepsDefinedViaBetweenSegmentsInOnePath)
 {
   const auto input = writeInput(singleRouteDef("M1 ( 100 100 ) ( 200 100 ) LOCAL12 ( 200 300 )", kLocalVia12),
@@ -444,13 +525,20 @@ TEST_F(DefDesignRoundTripTest, KeepsDefinedViaBetweenSegmentsInOnePath)
   ASSERT_TRUE(net);
   const auto wires = design.routingStorage().wires(net);
   ASSERT_EQ(wires.size(), 1u);
-  ASSERT_EQ(design.routingStorage().pathCount(wires.front()), 1u);
-  const auto path = design.routingStorage().path(wires.front(), 0);
-  ASSERT_EQ(path.points().size(), 3u);
-  ASSERT_EQ(path.vias().size(), 1u);
-  EXPECT_EQ(path.vias().front().point_index, 1u);
-  EXPECT_EQ(path.vias().front().design_via, local_via);
-  EXPECT_EQ(path.points()[2].position, (Point{200, 300}));
+  const auto& wire_shapes = design.routingStorage().wire(wires.front()).shapes;
+  ASSERT_EQ(wire_shapes.size(), 3u);
+  const auto local_via_shape = std::find_if(wire_shapes.begin(), wire_shapes.end(), [&](const auto shape_id) {
+    return std::holds_alternative<DesignRouteVia>(design.routingStorage().shape(shape_id).geometry);
+  });
+  ASSERT_NE(local_via_shape, wire_shapes.end());
+  const auto& via_shape = std::get<DesignRouteVia>(design.routingStorage().shape(*local_via_shape).geometry);
+  EXPECT_EQ(via_shape.via.design_via, local_via);
+  EXPECT_EQ(via_shape.origin.position, (Point{200, 100}));
+  const auto final_segment = std::find_if(wire_shapes.begin(), wire_shapes.end(), [&](const auto shape_id) {
+    const auto* segment = std::get_if<DesignRouteSegment>(&design.routingStorage().shape(shape_id).geometry);
+    return segment != nullptr && segment->end.position == Point{200, 300};
+  });
+  ASSERT_NE(final_segment, wire_shapes.end());
 
   const auto output = DefDesignExporter(design).exportText();
   const auto via = output.find(" LOCAL12", output.find("NETS 1 ;"));
@@ -463,10 +551,19 @@ TEST_F(DefDesignRoundTripTest, KeepsDefinedViaBetweenSegmentsInOnePath)
   ASSERT_TRUE(reimported_net);
   const auto reimported_wire = reimported.routingStorage().wires(reimported_net);
   ASSERT_EQ(reimported_wire.size(), 1u);
-  const auto reimported_path = reimported.routingStorage().path(reimported_wire.front(), 0);
-  ASSERT_EQ(reimported_path.vias().size(), 1u);
-  EXPECT_EQ(reimported_path.vias().front().point_index, 1u);
-  EXPECT_EQ(reimported_path.points()[2].position, (Point{200, 300}));
+  const auto& reimported_shapes = reimported.routingStorage().wire(reimported_wire.front()).shapes;
+  ASSERT_EQ(reimported_shapes.size(), 3u);
+  const auto reimported_via = std::find_if(reimported_shapes.begin(), reimported_shapes.end(), [&](const auto shape_id) {
+    return std::holds_alternative<DesignRouteVia>(reimported.routingStorage().shape(shape_id).geometry);
+  });
+  ASSERT_NE(reimported_via, reimported_shapes.end());
+  EXPECT_EQ(std::get<DesignRouteVia>(reimported.routingStorage().shape(*reimported_via).geometry).via.design_via,
+            reimported.routingStorage().findVia("LOCAL12"));
+  const auto reimported_segment = std::find_if(reimported_shapes.begin(), reimported_shapes.end(), [&](const auto shape_id) {
+    const auto* segment = std::get_if<DesignRouteSegment>(&reimported.routingStorage().shape(shape_id).geometry);
+    return segment != nullptr && segment->end.position == Point{200, 300};
+  });
+  ASSERT_NE(reimported_segment, reimported_shapes.end());
 }
 
 TEST_F(DefDesignRoundTripTest, DISABLED_PreservesRectAfterViaAtTheSamePoint)

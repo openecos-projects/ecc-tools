@@ -44,36 +44,6 @@ WireMetadata WireRef::metadata() const
       state().design().routingStorage().wire(detail::toStorageId<DesignWireId>(_id)));
 }
 
-WireRoutingData WireRef::routingData() const
-{
-  auto& storage = state().design().routingStorage();
-  const auto id = detail::toStorageId<DesignWireId>(_id);
-  WireRoutingData result;
-  result.paths.reserve(storage.pathCount(id));
-  storage.forEachPath(id, [&result](const DesignWirePathView path) {
-    result.paths.push_back(detail::toApi(path));
-  });
-  return result;
-}
-
-std::size_t WireRef::pathCount() const
-{
-  return state().design().routingStorage().pathCount(detail::toStorageId<DesignWireId>(_id));
-}
-
-WirePathData WireRef::pathData(std::size_t index) const
-{
-  return detail::toApi(
-      state().design().routingStorage().path(detail::toStorageId<DesignWireId>(_id), index));
-}
-
-void WireRef::update(WireMetadata metadata, WireRoutingData routing)
-{
-  state().design().routingStorage().updateWire(detail::toStorageId<DesignWireId>(_id),
-                                                detail::toStorage(metadata),
-                                                detail::toStorage(routing));
-}
-
 bool WireRef::destroy()
 {
   if (!*this

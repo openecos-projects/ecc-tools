@@ -481,186 +481,53 @@ void validateGuides(const eccdb::RoutingContextService& service, const std::vect
   require(actual_count == expected_count, "total guide count mismatch");
 }
 
-[[nodiscard]] std::optional<int32_t> pointExtension(eccdb::DesignWirePoint point)
-{
-  return (point.flags & eccdb::DesignWirePointFlag::kHasExtension) != 0u ? std::optional<int32_t>{point.extension}
-                                                                          : std::optional<int32_t>{};
-}
-
-void ensureProjectablePath(const eccdb::DesignWirePathView& path, std::string_view context)
-{
-  if (path.flags() != 0u || path.width() != 0 || path.mask() != 0u || !path.taperRule().empty() || !path.shape().empty()
-      || path.style() != 0) {
-    fail(std::string(context) + ": route snapshot cannot represent path metadata");
-  }
-  if (path.points().empty() || (path.points().size() == 1u && path.vias().empty() && path.rectangles().empty())) {
-    fail(std::string(context) + ": route snapshot cannot represent this point sequence");
-  }
-  for (const auto point : path.points()) {
-    constexpr uint32_t kKnownPointFlags = eccdb::DesignWirePointFlag::kHasExtension | eccdb::DesignWirePointFlag::kVirtual;
-    const bool has_extension = (point.flags & eccdb::DesignWirePointFlag::kHasExtension) != 0u;
-    if ((point.flags & ~kKnownPointFlags) != 0u || (!has_extension && point.extension != 0)
-        || (point.flags & eccdb::DesignWirePointFlag::kVirtual) != 0u) {
-      fail(std::string(context) + ": route snapshot cannot represent point metadata");
-    }
-  }
-  for (const auto via : path.vias()) {
-    if (via.flags != 0u || via.top_mask != 0u || via.cut_mask != 0u || via.bottom_mask != 0u || via.rows != 1u
-        || via.columns != 1u || via.step_x != 0 || via.step_y != 0 || !eccdb::isValidDesignOrientation(via.orientation)) {
-      fail(std::string(context) + ": route snapshot cannot represent VIA metadata");
-    }
-  }
-}
-
-[[nodiscard]] ViaLayers orderViaLayers(const eccdb::TechStore& technology, eccdb::TechRoutingLayerId first,
-                                       eccdb::TechRoutingLayerId second)
-{
-  if (!technology.routingLayerStorage().contains(first) || !technology.routingLayerStorage().contains(second) || first == second) {
-    fail("route VIA does not join two distinct routing layers");
-  }
-  if (technology.isBelow(eccdb::TechLayerId{second.entity()}, eccdb::TechLayerId{first.entity()})) {
-    return {.bottom = second, .top = first};
-  }
-  return {.bottom = first, .top = second};
-}
-
-[[nodiscard]] ViaLayers viaLayers(const eccdb::DesignStore& design, const eccdb::TechStore& technology,
-                                   const eccdb::DesignWireVia& via)
-{
-  if (via.tech_via && !via.design_via) {
-    const auto& geometry = technology.viaMasterStorage().geometry(via.tech_via);
-    if (geometry.bottom_layer.kind != eccdb::TechConductorLayerKind::kRouting
-        || geometry.top_layer.kind != eccdb::TechConductorLayerKind::kRouting) {
-      fail("technology VIA does not have routing layers on both sides");
-    }
-    return orderViaLayers(technology, eccdb::TechRoutingLayerId{geometry.bottom_layer.entity},
-                          eccdb::TechRoutingLayerId{geometry.top_layer.entity});
-  }
-  if (!via.tech_via && via.design_via) {
-    const auto& design_via = design.routingStorage().via(via.design_via);
-    if ((design_via.flags & eccdb::DesignViaFlag::kGenerated) != 0u) {
-      return orderViaLayers(technology, design_via.generated.bottom_layer, design_via.generated.top_layer);
-    }
-    std::vector<eccdb::TechRoutingLayerId> routing_layers;
-    const auto append = [&](eccdb::TechLayerId layer) {
-      const auto routing = eccdb::TechRoutingLayerId{layer.entity()};
-      if (technology.routingLayerStorage().contains(routing)
-          && std::find(routing_layers.begin(), routing_layers.end(), routing) == routing_layers.end()) {
-        routing_layers.push_back(routing);
-      }
-    };
-    for (const auto& rectangle : design_via.rectangles) append(rectangle.layer);
-    for (const auto& polygon : design_via.polygons) append(polygon.layer);
-    if (routing_layers.size() != 2u) fail("fixed design VIA does not have exactly two routing layers");
-    return orderViaLayers(technology, routing_layers[0], routing_layers[1]);
-  }
-  fail("route VIA does not reference exactly one definition");
-}
-
-[[nodiscard]] eccdb::TechRoutingLayerId nextRouteLayer(eccdb::TechRoutingLayerId current, ViaLayers layers)
-{
-  if (current == layers.bottom) return layers.top;
-  if (current == layers.top) return layers.bottom;
-  fail("route VIA does not touch the active routing layer");
-}
-
-[[nodiscard]] eccdb::Rect absolutePatch(eccdb::Rect delta, eccdb::Point anchor)
-{
-  const auto add = [](int32_t value, int32_t offset) -> int32_t {
-    const int64_t result = static_cast<int64_t>(value) + offset;
-    if (result < std::numeric_limits<int32_t>::min() || result > std::numeric_limits<int32_t>::max()) {
-      fail("route patch coordinate overflows int32");
-    }
-    return static_cast<int32_t>(result);
-  };
-  return {.ll_x = add(delta.ll_x, anchor.x), .ll_y = add(delta.ll_y, anchor.y),
-          .ur_x = add(delta.ur_x, anchor.x), .ur_y = add(delta.ur_y, anchor.y)};
-}
-
-[[nodiscard]] bool viasMonotonic(eccdb::DesignWireViaRange vias)
-{
-  for (std::size_t index = 1; index < vias.size(); ++index) {
-    if (vias[index - 1u].point_index > vias[index].point_index) return false;
-  }
-  return true;
-}
-
-[[nodiscard]] bool rectanglesMonotonic(std::span<const eccdb::DesignWireRectangle> rectangles)
-{
-  for (std::size_t index = 1; index < rectangles.size(); ++index) {
-    if (rectangles[index - 1u].point_index > rectangles[index].point_index) return false;
-  }
-  return true;
-}
-
 template <typename Sink>
-void forEachInputPathShape(const eccdb::DesignStore& design, const eccdb::TechStore& technology,
-                           eccdb::DesignWirePathView path, std::string_view context, Sink&& sink)
+void forEachInputShape(const eccdb::DesignRouteShape& shape, const eccdb::DesignRouteShapeAttributes* attributes,
+                       std::string_view context, Sink&& sink)
 {
-  ensureProjectablePath(path, context);
-  const auto points = path.points();
-  const auto vias = path.vias();
-  const auto rectangles = path.rectangles();
-  std::vector<std::size_t> via_order;
-  std::vector<std::size_t> rectangle_order;
-  if (!viasMonotonic(vias)) {
-    via_order.resize(vias.size());
-    for (std::size_t index = 0; index < via_order.size(); ++index) via_order[index] = index;
-    std::stable_sort(via_order.begin(), via_order.end(), [&vias](std::size_t lhs, std::size_t rhs) {
-      return vias[lhs].point_index < vias[rhs].point_index;
-    });
+  constexpr uint32_t kProjectionFlags = eccdb::DesignWirePathFlag::kTaper;
+  if ((shape.flags & ~kProjectionFlags) != 0u) {
+    fail(std::string(context) + ": route snapshot cannot represent Shape metadata");
   }
-  if (!rectanglesMonotonic(rectangles)) {
-    rectangle_order.resize(rectangles.size());
-    for (std::size_t index = 0; index < rectangle_order.size(); ++index) rectangle_order[index] = index;
-    std::stable_sort(rectangle_order.begin(), rectangle_order.end(), [&rectangles](std::size_t lhs, std::size_t rhs) {
-      return rectangles[lhs].point_index < rectangles[rhs].point_index;
-    });
-  }
-  const auto viaAt = [&](std::size_t index) -> eccdb::DesignWireVia {
-    return via_order.empty() ? vias[index] : vias[via_order[index]];
-  };
-  const auto rectangleAt = [&](std::size_t index) -> eccdb::DesignWireRectangle {
-    return rectangle_order.empty() ? rectangles[index] : rectangles[rectangle_order[index]];
-  };
-
-  std::size_t via_index = 0;
-  std::size_t rectangle_index = 0;
-  auto current_layer = path.layer();
-  for (std::size_t point_index = 0; point_index < points.size(); ++point_index) {
-    if (point_index != 0u) {
-      const auto previous = points[point_index - 1u];
-      const auto point = points[point_index];
-      sink(eccdb::RouteShape{eccdb::RouteSegment{.layer = current_layer,
-                                                  .begin = previous.position,
-                                                  .end = point.position,
-                                                  .width = std::nullopt,
-                                                  .begin_extension = pointExtension(previous),
-                                                  .end_extension = pointExtension(point)}});
-    }
-    const auto first_rectangle = rectangle_index;
-    while (rectangle_index < rectangles.size() && rectangleAt(rectangle_index).point_index == point_index) {
-      const auto rectangle = rectangleAt(rectangle_index++);
-      sink(eccdb::RouteShape{eccdb::RoutePatch{.layer = current_layer,
-                                                .rectangle = absolutePatch(rectangle.delta, points[point_index].position)}});
-    }
-    const auto first_via = via_index;
-    if (first_rectangle != rectangle_index && first_via < vias.size() && viaAt(first_via).point_index == point_index) {
-      fail(std::string(context) + ": path has ambiguous VIA and patch ordering at one point");
-    }
-    while (via_index < vias.size() && viaAt(via_index).point_index == point_index) {
-      const auto via = viaAt(via_index++);
-      eccdb::RouteViaDefinition definition = via.tech_via ? eccdb::RouteViaDefinition{via.tech_via}
-                                                           : eccdb::RouteViaDefinition{via.design_via};
-      sink(eccdb::RouteShape{eccdb::RouteVia{.definition = std::move(definition),
-                                              .origin = points[point_index].position,
-                                              .orientation = via.orientation}});
-      current_layer = nextRouteLayer(current_layer, viaLayers(design, technology, via));
-    }
-  }
-  if (via_index != vias.size() || rectangle_index != rectangles.size()) {
-    fail(std::string(context) + ": path primitive anchor is outside point range");
-  }
+  const bool tapered = (shape.flags & eccdb::DesignWirePathFlag::kTaper) != 0u;
+  std::visit(
+      [&](const auto& geometry) {
+        using Geometry = std::remove_cvref_t<decltype(geometry)>;
+        if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteSegment>) {
+          const auto extension = [](eccdb::DesignWirePoint point) -> std::optional<int32_t> {
+            return (point.flags & eccdb::DesignWirePointFlag::kHasExtension) != 0u
+                       ? std::optional<int32_t>{point.extension}
+                       : std::optional<int32_t>{};
+          };
+          sink(eccdb::RouteShape{eccdb::RouteSegment{.layer = shape.layer,
+                                                      .begin = geometry.begin.position,
+                                                      .end = geometry.end.position,
+                                                      .width = std::nullopt,
+                                                      .begin_extension = extension(geometry.begin),
+                                                      .end_extension = extension(geometry.end),
+                                                      .tapered = tapered}});
+        } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
+          if (geometry.via.flags != 0u || geometry.via.top_mask != 0u || geometry.via.cut_mask != 0u
+              || geometry.via.bottom_mask != 0u || geometry.via.rows != 1u || geometry.via.columns != 1u
+              || geometry.via.step_x != 0 || geometry.via.step_y != 0) {
+            fail(std::string(context) + ": route snapshot cannot represent VIA metadata");
+          }
+          const eccdb::RouteViaDefinition definition = geometry.via.tech_via
+                                                           ? eccdb::RouteViaDefinition{geometry.via.tech_via}
+                                                           : eccdb::RouteViaDefinition{geometry.via.design_via};
+          sink(eccdb::RouteShape{eccdb::RouteVia{.definition = definition,
+                                                  .origin = geometry.origin.position,
+                                                  .orientation = geometry.via.orientation,
+                                                  .tapered = tapered}});
+        } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRoutePatch>) {
+          sink(eccdb::RouteShape{eccdb::RoutePatch{.layer = shape.layer,
+                                                    .rectangle = geometry.rectangle,
+                                                    .tapered = tapered}});
+        } else {
+          fail(std::string(context) + ": route snapshot cannot represent a point-only Shape");
+        }
+      },
+      shape.geometry);
 }
 
 void requireSameRouteShape(const eccdb::RouteShape& actual, const eccdb::RouteShape& expected, std::string_view context)
@@ -712,16 +579,18 @@ void requireSameRouteShape(const eccdb::RouteShape& actual, const eccdb::RouteSh
       require(actual_wire.wire == wire_id && actual_wire.status == input_wire.status && actual_wire.shield_net == input_wire.shield_net,
               "route snapshot wire metadata mismatch for '" + std::string(net.name) + "'");
       std::size_t actual_shape_index = 0;
-      routing.forEachPath(wire_id, [&](eccdb::DesignWirePathView path) {
-        const std::string path_context = "route snapshot for net '" + std::string(net.name) + "'";
-        forEachInputPathShape(design, technology, path, path_context, [&](eccdb::RouteShape expected) {
-          require(actual_shape_index < actual_wire.shapes.size(), path_context + ": missing route primitive");
-          requireSameRouteShape(actual_wire.shapes[actual_shape_index], expected, path_context);
-          ++actual_shape_index;
-          ++summary.shapes;
-          if (std::holds_alternative<eccdb::RouteVia>(expected)) ++summary.vias;
-        });
-      });
+      routing.forEachShape(
+          wire_id, [&](eccdb::DesignRouteShapeId, const eccdb::DesignRouteShape& shape,
+                       const eccdb::DesignRouteShapeAttributes* attributes) {
+            const std::string path_context = "route snapshot for net '" + std::string(net.name) + "'";
+            forEachInputShape(shape, attributes, path_context, [&](eccdb::RouteShape expected) {
+              require(actual_shape_index < actual_wire.shapes.size(), path_context + ": missing route primitive");
+              requireSameRouteShape(actual_wire.shapes[actual_shape_index], expected, path_context);
+              ++actual_shape_index;
+              ++summary.shapes;
+              if (std::holds_alternative<eccdb::RouteVia>(expected)) ++summary.vias;
+            });
+          });
       require(actual_shape_index == actual_wire.shapes.size(), "route snapshot has an extra primitive for '" + std::string(net.name) + "'");
     }
   }

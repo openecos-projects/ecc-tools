@@ -7,6 +7,7 @@
 #include "../adapters/tritonroute/IspdGuideReader.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -254,6 +255,89 @@ class OdbBackend
     throw std::runtime_error("unsupported ODB trace operation: " + event.op);
   }
 
+  // Keep trace decoding, pointer binding and JSON projection outside the native
+  // timer.  This is intentionally narrower than execute(): it measures the
+  // OpenDB call/iteration work that the corresponding EccDB service has to do.
+  [[nodiscard]] json::value executeNative(const drt_trace::Event& event,
+                                          drt_trace::NativeTimer& timer)
+  {
+    if (event.op == "find_instance") {
+      const auto* instance = timer.measure("odb.dbBlock.findInst", 1, [&] {
+        return block_->findInst(event.name.c_str());
+      });
+      return instance == nullptr ? json::value(nullptr) : json::value(instance->getConstName());
+    }
+    if (event.op == "find_pin") {
+      auto* instance = requireInstance(event.object);
+      const auto* term = timer.measure("odb.dbInst.findITerm", 1, [&] {
+        return instance->findITerm(event.name.c_str());
+      });
+      return term == nullptr ? json::value(nullptr)
+                             : json::value(term->getMTerm()->getConstName());
+    }
+    if (event.op == "read_instance") return nativeInstance(requireInstance(event.object), timer);
+    if (event.op == "read_instance_pins") {
+      return nativeInstancePins(requireInstance(event.object),
+                                timer,
+                                event.expected.as_array().size());
+    }
+    if (event.op == "read_net_attributes") {
+      return nativeNetAttributes(requireNet(event.object), timer);
+    }
+    if (event.op == "net_pins") {
+      return nativeNetPins(requireNet(event.object), timer, event.expected.as_array().size());
+    }
+    if (event.op == "read_wire") {
+      return nativeWire(requireNet(event.object), timer, event.expected.as_array().size());
+    }
+    if (event.op == "scan_instances") return nativeScanInstances(timer, event.expected.as_array().size());
+    if (event.op == "scan_nets") return nativeScanNets(timer, event.expected.as_array().size());
+    if (event.op == "read_guides") {
+      return nativeGuides(event.name, timer, event.expected.as_array().size());
+    }
+    if (event.op == "read_bterm_pin_access") {
+      return nativeBTermPinAccess(event, timer, event.expected.as_array().size());
+    }
+    if (event.op == "read_master_pin_access") {
+      return nativeMasterPinAccess(event, timer, event.expected.as_array().size());
+    }
+    if (event.op == "read_preferred_pin_access") {
+      return nativePreferredPinAccess(event, timer, event.expected.as_array().size());
+    }
+    if (event.op == "define_design_via") {
+      return nativeDefineDesignVia(event, timer);
+    }
+    if (event.op == "clear_wire") {
+      nativeClearWire(requireNet(event.object), timer);
+      return nullptr;
+    }
+    if (event.op == "replace_wire") {
+      nativeReplaceWire(requireNet(event.object), event, timer);
+      return nullptr;
+    }
+    if (event.op == "append_track_assignment") {
+      return nativeAppendTrackAssignment(event, timer);
+    }
+    if (event.op == "replace_master_pin_access") {
+      return nativeReplaceMasterPinAccess(event, timer);
+    }
+    if (event.op == "replace_instance_pin_access") {
+      return nativeReplaceInstancePinAccess(event, timer);
+    }
+    if (event.op == "append_bterm_pin_access") {
+      return nativeAppendBTermPinAccess(event, timer);
+    }
+    if (event.op == "replace_guides") return nativeReplaceGuides(event, timer);
+    if (event.op == "append_bterm_stack_wire") {
+      return nativeAppendBTermStackWire(event, timer);
+    }
+
+    // The remaining groups still use the established adapter implementation.
+    // Do not add a timer mark here: replay reports them as native-unmeasured
+    // rather than pretending that JSON/projection work is database time.
+    return execute(event);
+  }
+
   std::vector<drt_trace::Shape> wire(uint32_t token)
   {
     return drt_trace::readOdbWire(requireNet(token));
@@ -275,6 +359,143 @@ class OdbBackend
   }
 
  private:
+  struct NativeInstance
+  {
+    const char* name = nullptr;
+    const char* master = nullptr;
+    int x = 0;
+    int y = 0;
+    odb::dbOrientType orient;
+  };
+
+  struct NativeNetPin
+  {
+    enum class Kind : uint8_t
+    {
+      instance,
+      block
+    };
+
+    Kind kind = Kind::instance;
+    const char* instance_name = nullptr;
+    const char* term_name = nullptr;
+  };
+
+  struct NativeGuide
+  {
+    const char* layer = nullptr;
+    const char* via_layer = nullptr;
+    int x1 = 0;
+    int y1 = 0;
+    int x2 = 0;
+    int y2 = 0;
+    bool congested = false;
+    bool jumper = false;
+    bool connected_to_term = false;
+  };
+
+  struct NativeWirePrimitive
+  {
+    enum class Kind : uint8_t
+    {
+      segment,
+      tech_via,
+      block_via,
+      patch
+    };
+
+    Kind kind = Kind::segment;
+    const char* layer = nullptr;
+    const char* via = nullptr;
+    int32_t x1 = 0;
+    int32_t y1 = 0;
+    int32_t x2 = 0;
+    int32_t y2 = 0;
+    std::optional<int32_t> begin_extension;
+    std::optional<int32_t> end_extension;
+  };
+
+  struct NativeWirePoint
+  {
+    int x = 0;
+    int y = 0;
+    std::optional<int32_t> extension;
+  };
+
+  struct NativeWireAction
+  {
+    enum class Kind : uint8_t
+    {
+      new_path,
+      point,
+      tech_via,
+      block_via,
+      rect
+    };
+
+    Kind kind = Kind::point;
+    odb::dbTechLayer* layer = nullptr;
+    odb::dbTechLayerRule* rule = nullptr;
+    odb::dbTechVia* tech_via = nullptr;
+    odb::dbVia* block_via = nullptr;
+    int x = 0;
+    int y = 0;
+    int a = 0;
+    int b = 0;
+    std::optional<int32_t> extension;
+  };
+
+  struct PreparedAccessVia
+  {
+    odb::dbTechVia* tech = nullptr;
+    odb::dbVia* block = nullptr;
+  };
+
+  struct PreparedAccessViaGroup
+  {
+    int cut_count = 0;
+    std::vector<PreparedAccessVia> vias;
+  };
+
+  struct PreparedAccessSegment
+  {
+    odb::Rect box;
+    bool begin_truncated = false;
+    bool end_truncated = false;
+  };
+
+  struct PreparedAccessPoint
+  {
+    odb::Point point;
+    odb::dbTechLayer* layer = nullptr;
+    std::vector<odb::dbDirection::Value> directions;
+    odb::dbAccessType low_type;
+    odb::dbAccessType high_type;
+    std::vector<PreparedAccessViaGroup> via_groups;
+    std::vector<PreparedAccessSegment> segments;
+  };
+
+  struct NativeAccessVia
+  {
+    bool technology = false;
+    const char* name = nullptr;
+  };
+
+  struct NativeAccessPoint
+  {
+    bool filtered = false;
+    bool malformed = false;
+    odb::dbMPin* master_pin = nullptr;
+    int x = 0;
+    int y = 0;
+    const char* layer = nullptr;
+    std::array<bool, 6> directions{};
+    odb::dbAccessType low_type;
+    odb::dbAccessType high_type;
+    std::vector<std::vector<NativeAccessVia>> via_groups;
+    std::vector<PreparedAccessSegment> segments;
+  };
+
   [[nodiscard]] json::value readBTermPinAccess(const drt_trace::Event& event) const
   {
     auto* term = block_->findBTerm(event.name.c_str());
@@ -403,6 +624,227 @@ class OdbBackend
     if (name == "NearbyGrid") return odb::dbAccessType(odb::dbAccessType::NearbyGrid);
     throw std::runtime_error("unknown access-point type " + std::string(name) + " in "
                              + std::string(operation));
+  }
+
+  [[nodiscard]] static odb::dbDirection::Value accessDirection(
+      std::string_view name,
+      std::string_view operation)
+  {
+    if (name == "N") return odb::dbDirection::NORTH;
+    if (name == "E") return odb::dbDirection::EAST;
+    if (name == "S") return odb::dbDirection::SOUTH;
+    if (name == "W") return odb::dbDirection::WEST;
+    if (name == "U") return odb::dbDirection::UP;
+    if (name == "D") return odb::dbDirection::DOWN;
+    throw std::runtime_error("unknown access-point direction " + std::string(name) + " in "
+                             + std::string(operation));
+  }
+
+  [[nodiscard]] PreparedAccessPoint prepareAccessPoint(const json::value& encoded,
+                                                        std::string_view operation) const
+  {
+    if (!encoded.is_array() || encoded.as_array().size() != 8) {
+      throw std::runtime_error("invalid access-point payload in " + std::string(operation));
+    }
+    const auto& fields = encoded.as_array();
+    PreparedAccessPoint result;
+    result.point = {payloadCoordinate(fields[0], operation), payloadCoordinate(fields[1], operation)};
+    result.layer = requireRoutingLayer(payloadText(fields[2], operation));
+    if (!fields[3].is_array()) {
+      throw std::runtime_error("access-point directions are not an array in "
+                               + std::string(operation));
+    }
+    result.directions.reserve(fields[3].as_array().size());
+    for (const auto& value : fields[3].as_array()) {
+      result.directions.push_back(accessDirection(payloadText(value, operation), operation));
+    }
+    result.low_type = accessType(payloadText(fields[4], operation), operation);
+    result.high_type = accessType(payloadText(fields[5], operation), operation);
+
+    if (!fields[6].is_array()) {
+      throw std::runtime_error("access-point via groups are not an array in "
+                               + std::string(operation));
+    }
+    for (const auto& group : fields[6].as_array()) {
+      if (!group.is_array() || group.as_array().size() != 2 || !group.as_array()[1].is_array()) {
+        throw std::runtime_error("invalid access-point via group in " + std::string(operation));
+      }
+      const auto& group_fields = group.as_array();
+      PreparedAccessViaGroup prepared;
+      prepared.cut_count = payloadGroup(group_fields[0], operation);
+      prepared.vias.reserve(group_fields[1].as_array().size());
+      for (const auto& value : group_fields[1].as_array()) {
+        if (!value.is_array() || value.as_array().size() != 2) {
+          throw std::runtime_error("invalid access-point via in " + std::string(operation));
+        }
+        const auto& via_fields = value.as_array();
+        const std::string kind = payloadText(via_fields[0], operation);
+        const std::string name = payloadText(via_fields[1], operation);
+        if (kind == "tech") {
+          auto* via = block_->getTech()->findVia(name.c_str());
+          if (via == nullptr) {
+            throw std::runtime_error("unknown technology VIA in " + std::string(operation)
+                                     + ": " + name);
+          }
+          prepared.vias.push_back({via, nullptr});
+        } else if (kind == "design") {
+          auto* via = block_->findVia(name.c_str());
+          if (via == nullptr) {
+            throw std::runtime_error("unknown design VIA in " + std::string(operation) + ": "
+                                     + name);
+          }
+          prepared.vias.push_back({nullptr, via});
+        } else {
+          throw std::runtime_error("unknown access-point VIA kind " + kind + " in "
+                                   + std::string(operation));
+        }
+      }
+      result.via_groups.push_back(std::move(prepared));
+    }
+
+    if (!fields[7].is_array()) {
+      throw std::runtime_error("access-point segments are not an array in "
+                               + std::string(operation));
+    }
+    result.segments.reserve(fields[7].as_array().size());
+    for (const auto& value : fields[7].as_array()) {
+      if (!value.is_array() || value.as_array().size() != 6) {
+        throw std::runtime_error("invalid access-point segment in " + std::string(operation));
+      }
+      const auto& segment = value.as_array();
+      const int x1 = payloadCoordinate(segment[0], operation);
+      const int y1 = payloadCoordinate(segment[1], operation);
+      const int x2 = payloadCoordinate(segment[2], operation);
+      const int y2 = payloadCoordinate(segment[3], operation);
+      requireRectangle(x1, y1, x2, y2, operation);
+      if (!segment[4].is_bool() || !segment[5].is_bool()) {
+        throw std::runtime_error("access-point segment truncation flags are invalid in "
+                                 + std::string(operation));
+      }
+      result.segments.push_back({{x1, y1, x2, y2}, segment[4].as_bool(), segment[5].as_bool()});
+    }
+    return result;
+  }
+
+  static void applyPreparedAccessPoint(odb::dbAccessPoint* access_point,
+                                       const PreparedAccessPoint& prepared)
+  {
+    access_point->setPoint(prepared.point);
+    access_point->setLayer(prepared.layer);
+    for (const auto direction : prepared.directions) {
+      access_point->setAccess(true, odb::dbDirection(direction));
+    }
+    access_point->setLowType(prepared.low_type);
+    access_point->setHighType(prepared.high_type);
+    for (const auto& group : prepared.via_groups) {
+      for (const auto& via : group.vias) {
+        if (via.tech != nullptr) access_point->addTechVia(group.cut_count, via.tech);
+        else access_point->addBlockVia(group.cut_count, via.block);
+      }
+    }
+    for (const auto& segment : prepared.segments) {
+      access_point->addSegment(segment.box, segment.begin_truncated, segment.end_truncated);
+    }
+  }
+
+  [[nodiscard]] static NativeAccessPoint captureAccessPoint(odb::dbAccessPoint* access_point)
+  {
+    NativeAccessPoint result;
+    if (access_point == nullptr) {
+      result.malformed = true;
+      return result;
+    }
+    auto* layer = access_point->getLayer();
+    if (layer == nullptr) {
+      result.malformed = true;
+      return result;
+    }
+    if (layer->isBackside()) {
+      result.filtered = true;
+      return result;
+    }
+    const odb::Point point = access_point->getPoint();
+    result.x = point.getX();
+    result.y = point.getY();
+    result.layer = layer->getConstName();
+    result.master_pin = access_point->getMPin();
+    constexpr std::array<odb::dbDirection::Value, 6> directions{
+        odb::dbDirection::NORTH,
+        odb::dbDirection::EAST,
+        odb::dbDirection::SOUTH,
+        odb::dbDirection::WEST,
+        odb::dbDirection::UP,
+        odb::dbDirection::DOWN};
+    for (std::size_t index = 0; index < directions.size(); ++index) {
+      result.directions[index] = access_point->hasAccess(directions[index]);
+    }
+    result.low_type = access_point->getLowType();
+    result.high_type = access_point->getHighType();
+    const auto groups = access_point->getVias();
+    result.via_groups.reserve(groups.size());
+    for (const auto& group : groups) {
+      auto& target = result.via_groups.emplace_back();
+      target.reserve(group.size());
+      for (auto* object : group) {
+        if (object == nullptr) {
+          result.malformed = true;
+          continue;
+        }
+        if (object->getObjectType() == odb::dbTechViaObj) {
+          target.push_back({true, static_cast<odb::dbTechVia*>(object)->getConstName()});
+        } else if (object->getObjectType() == odb::dbViaObj) {
+          target.push_back({false, static_cast<odb::dbVia*>(object)->getConstName()});
+        } else {
+          result.malformed = true;
+        }
+      }
+    }
+    for (const auto& [box, begin_truncated, end_truncated] : access_point->getSegments()) {
+      result.segments.push_back({box, begin_truncated, end_truncated});
+    }
+    return result;
+  }
+
+  [[nodiscard]] static json::value nativeAccessPointValue(const NativeAccessPoint& point)
+  {
+    if (point.filtered) return nullptr;
+    if (point.malformed || point.layer == nullptr) {
+      throw std::runtime_error("invalid ODB access point after native traversal");
+    }
+    constexpr std::array<const char*, 6> direction_names{"N", "E", "S", "W", "U", "D"};
+    json::array directions;
+    for (std::size_t index = 0; index < point.directions.size(); ++index) {
+      if (point.directions[index]) directions.emplace_back(direction_names[index]);
+    }
+    json::array via_groups;
+    via_groups.reserve(point.via_groups.size());
+    for (std::size_t index = 0; index < point.via_groups.size(); ++index) {
+      json::array vias;
+      vias.reserve(point.via_groups[index].size());
+      for (const auto& via : point.via_groups[index]) {
+        if (via.name == nullptr) throw std::runtime_error("invalid ODB access-point VIA after native traversal");
+        vias.emplace_back(json::array{via.technology ? "tech" : "design", via.name});
+      }
+      via_groups.emplace_back(json::array{index + 1, std::move(vias)});
+    }
+    json::array segments;
+    segments.reserve(point.segments.size());
+    for (const auto& segment : point.segments) {
+      segments.emplace_back(json::array{segment.box.xMin(),
+                                        segment.box.yMin(),
+                                        segment.box.xMax(),
+                                        segment.box.yMax(),
+                                        segment.begin_truncated,
+                                        segment.end_truncated});
+    }
+    return json::array{point.x,
+                       point.y,
+                       point.layer,
+                       std::move(directions),
+                       point.low_type.getString(),
+                       point.high_type.getString(),
+                       std::move(via_groups),
+                       std::move(segments)};
   }
 
   [[nodiscard]] json::value accessPointValue(odb::dbAccessPoint* access_point,
@@ -997,15 +1439,863 @@ class OdbBackend
     }
   }
 
-  static void requireEditable(odb::dbNet* net)
+  static void requireEditable(odb::dbNet* net, bool allow_non_default_rule = false)
   {
     if (net->isSpecial()) throw std::runtime_error("trace cannot edit special net " + net->getName());
-    if (net->getNonDefaultRule() != nullptr) {
+    if (!allow_non_default_rule && net->getNonDefaultRule() != nullptr) {
       throw std::runtime_error("trace v1 cannot edit NDR net " + net->getName());
     }
     if (net->getWire() != nullptr && net->getWireType() != odb::dbWireType::ROUTED) {
       throw std::runtime_error("trace cannot overwrite non-ROUTED wire on net " + net->getName());
     }
+  }
+
+  [[nodiscard]] json::value nativeInstance(odb::dbInst* instance,
+                                           drt_trace::NativeTimer& timer) const
+  {
+    NativeInstance result;
+    timer.measure("odb.dbInst.read", 1, [&] {
+      result.name = instance->getConstName();
+      auto* master = instance->getMaster();
+      result.master = master == nullptr ? nullptr : master->getConstName();
+      instance->getLocation(result.x, result.y);
+      result.orient = instance->getOrient();
+    });
+    if (result.master == nullptr) {
+      throw std::runtime_error("ODB instance has no master after native read");
+    }
+    return json::array{result.name, result.master, result.x, result.y, defOrientation(result.orient)};
+  }
+
+  [[nodiscard]] json::value nativeInstancePins(odb::dbInst* instance,
+                                               drt_trace::NativeTimer& timer,
+                                               std::size_t expected_size) const
+  {
+    std::vector<const char*> terms;
+    terms.reserve(expected_size);
+    timer.measure("odb.dbInst.iterITerms", 1, [&] {
+      for (auto* pin : instance->getITerms()) {
+        auto* term = pin == nullptr ? nullptr : pin->getMTerm();
+        terms.push_back(term == nullptr ? nullptr : term->getConstName());
+      }
+    });
+    json::array result;
+    result.reserve(terms.size());
+    for (const auto* name : terms) {
+      if (name == nullptr) throw std::runtime_error("ODB instance pin has no master terminal");
+      result.emplace_back(name);
+    }
+    return result;
+  }
+
+  [[nodiscard]] json::value nativeNetAttributes(odb::dbNet* net,
+                                                 drt_trace::NativeTimer& timer) const
+  {
+    odb::dbSigType signal_type;
+    const char* rule_name = nullptr;
+    bool jumpers = false;
+    bool abutment = false;
+    timer.measure("odb.dbNet.attributes", 1, [&] {
+      signal_type = net->getSigType();
+      auto* rule = net->getNonDefaultRule();
+      rule_name = rule == nullptr ? nullptr : rule->getConstName();
+      jumpers = net->hasJumpers();
+      abutment = net->isConnectedByAbutment();
+    });
+    return json::array{signal_type.getString(),
+                       rule_name == nullptr ? json::value(nullptr) : json::value(rule_name),
+                       jumpers,
+                       abutment};
+  }
+
+  [[nodiscard]] json::value nativeNetPins(odb::dbNet* net,
+                                           drt_trace::NativeTimer& timer,
+                                           std::size_t expected_size) const
+  {
+    std::vector<NativeNetPin> pins;
+    pins.reserve(expected_size);
+    timer.measure("odb.dbNet.iterPins", 1, [&] {
+      for (auto* term : net->getITerms()) {
+        auto* instance = term == nullptr ? nullptr : term->getInst();
+        auto* master_term = term == nullptr ? nullptr : term->getMTerm();
+        pins.push_back({NativeNetPin::Kind::instance,
+                        instance == nullptr ? nullptr : instance->getConstName(),
+                        master_term == nullptr ? nullptr : master_term->getConstName()});
+      }
+      for (auto* term : net->getBTerms()) {
+        pins.push_back({NativeNetPin::Kind::block,
+                        term == nullptr ? nullptr : term->getConstName(),
+                        nullptr});
+      }
+    });
+    json::array result;
+    result.reserve(pins.size());
+    for (const auto& pin : pins) {
+      if (pin.instance_name == nullptr) {
+        throw std::runtime_error("ODB net has an incomplete terminal after native traversal");
+      }
+      if (pin.kind == NativeNetPin::Kind::instance) {
+        if (pin.term_name == nullptr) {
+          throw std::runtime_error("ODB net has an incomplete instance terminal after native traversal");
+        }
+        result.emplace_back(json::array{"I", pin.instance_name, pin.term_name});
+      } else {
+        result.emplace_back(json::array{"B", pin.instance_name, ""});
+      }
+    }
+    return result;
+  }
+
+  [[nodiscard]] json::value nativeScanInstances(drt_trace::NativeTimer& timer,
+                                                 std::size_t expected_size) const
+  {
+    std::vector<const char*> names;
+    names.reserve(expected_size);
+    timer.measure("odb.dbBlock.iterInsts", 1, [&] {
+      for (auto* instance : block_->getInsts()) names.push_back(instance->getConstName());
+    });
+    json::array result;
+    result.reserve(names.size());
+    for (const auto* name : names) result.emplace_back(name);
+    return result;
+  }
+
+  [[nodiscard]] json::value nativeScanNets(drt_trace::NativeTimer& timer,
+                                            std::size_t expected_size) const
+  {
+    std::vector<const char*> names;
+    names.reserve(expected_size);
+    timer.measure("odb.dbBlock.iterNets", 1, [&] {
+      for (auto* net : block_->getNets()) {
+        if (!net->isSpecial()) names.push_back(net->getConstName());
+      }
+    });
+    json::array result;
+    result.reserve(names.size());
+    for (const auto* name : names) result.emplace_back(name);
+    return result;
+  }
+
+  [[nodiscard]] json::value nativeGuides(std::string_view name,
+                                         drt_trace::NativeTimer& timer,
+                                         std::size_t expected_size) const
+  {
+    auto* net = block_->findNet(std::string(name).c_str());
+    if (net == nullptr) throw std::runtime_error("missing trace guide net " + std::string(name));
+    std::vector<NativeGuide> guides;
+    guides.reserve(expected_size);
+    timer.measure("odb.dbNet.iterGuides", 1, [&] {
+      for (auto* guide : net->getGuides()) {
+        auto* layer = guide == nullptr ? nullptr : guide->getLayer();
+        auto* via_layer = guide == nullptr ? nullptr : guide->getViaLayer();
+        if (layer == nullptr || layer->isBackside()
+            || (via_layer != nullptr && via_layer->isBackside())) {
+          continue;
+        }
+        const odb::Rect box = guide->getBox();
+        guides.push_back({layer->getConstName(),
+                          via_layer == nullptr ? nullptr : via_layer->getConstName(),
+                          box.xMin(),
+                          box.yMin(),
+                          box.xMax(),
+                          box.yMax(),
+                          guide->isCongested(),
+                          guide->isJumper(),
+                          guide->isConnectedToTerm()});
+      }
+    });
+    json::array result;
+    result.reserve(guides.size());
+    for (const auto& guide : guides) {
+      result.emplace_back(json::array{guide.layer,
+                                      guide.via_layer == nullptr ? json::value(nullptr)
+                                                                : json::value(guide.via_layer),
+                                      guide.x1,
+                                      guide.y1,
+                                      guide.x2,
+                                      guide.y2,
+                                      guide.congested,
+                                      guide.jumper,
+                                      guide.connected_to_term});
+    }
+    return result;
+  }
+
+  [[nodiscard]] json::value nativeBTermPinAccess(const drt_trace::Event& event,
+                                                  drt_trace::NativeTimer& timer,
+                                                  std::size_t expected_size) const
+  {
+    auto* term = block_->findBTerm(event.name.c_str());
+    if (term == nullptr) throw std::runtime_error("missing trace BTerm: " + event.name);
+    auto* pin = btermPinAt(term, event.ordinal.value_or(0), event.op);
+    std::vector<NativeAccessPoint> points;
+    points.reserve(expected_size);
+    timer.measure("odb.dbBPin.iterAccessPoints", 1, [&] {
+      for (auto* point : pin->getAccessPoints()) points.push_back(captureAccessPoint(point));
+    });
+    json::array result;
+    result.reserve(points.size());
+    for (const auto& point : points) {
+      auto value = nativeAccessPointValue(point);
+      if (!value.is_null()) result.emplace_back(std::move(value));
+    }
+    return result;
+  }
+
+  [[nodiscard]] json::value nativeMasterPinAccess(const drt_trace::Event& event,
+                                                   drt_trace::NativeTimer& timer,
+                                                   std::size_t expected_size) const
+  {
+    if (!event.ordinal) throw std::runtime_error("master pin access event has no ordinal");
+    auto* master = database_->findMaster(event.master.c_str());
+    auto* term = master == nullptr ? nullptr : master->findMTerm(event.term.c_str());
+    if (term == nullptr) throw std::runtime_error("missing trace master/term " + event.master + "/" + event.term);
+    auto* pin = masterPinAt(term, *event.ordinal, event.op);
+    std::vector<std::vector<NativeAccessPoint>> groups;
+    groups.reserve(expected_size);
+    timer.measure("odb.dbMPin.iterAccessPoints", 1, [&] {
+      const auto pin_access = pin->getPinAccess();
+      for (const auto& source : pin_access) {
+        auto& target = groups.emplace_back();
+        target.reserve(source.size());
+        for (auto* point : source) target.push_back(captureAccessPoint(point));
+      }
+    });
+    json::array result;
+    result.reserve(groups.size());
+    for (std::size_t index = 0; index < groups.size(); ++index) {
+      json::array points;
+      points.reserve(groups[index].size());
+      for (const auto& point : groups[index]) {
+        auto value = nativeAccessPointValue(point);
+        if (!value.is_null()) points.emplace_back(std::move(value));
+      }
+      result.emplace_back(json::array{index, std::move(points)});
+    }
+    return result;
+  }
+
+  [[nodiscard]] json::value nativePreferredPinAccess(const drt_trace::Event& event,
+                                                      drt_trace::NativeTimer& timer,
+                                                      std::size_t expected_size) const
+  {
+    auto* instance = block_->findInst(event.instance.c_str());
+    auto* term = instance == nullptr ? nullptr : instance->findITerm(event.term.c_str());
+    if (term == nullptr) {
+      throw std::runtime_error("missing trace instance pin " + event.instance + "/" + event.term);
+    }
+    std::vector<odb::dbMPin*> ports;
+    ports.reserve(expected_size);
+    std::vector<NativeAccessPoint> points;
+    points.reserve(expected_size);
+    timer.measure("odb.dbITerm.iterPrefAccessPoints", 1, [&] {
+      for (auto* port : term->getMTerm()->getMPins()) ports.push_back(port);
+      for (auto* point : term->getPrefAccessPoints()) points.push_back(captureAccessPoint(point));
+    });
+    json::array result;
+    result.reserve(points.size());
+    for (const auto& point : points) {
+      if (point.master_pin == nullptr) {
+        throw std::runtime_error("preferred ODB access point has no master pin");
+      }
+      const auto position = std::find(ports.begin(), ports.end(), point.master_pin);
+      if (position == ports.end()) {
+        throw std::runtime_error("preferred ODB access point belongs to another master terminal");
+      }
+      auto value = nativeAccessPointValue(point);
+      if (value.is_null()) {
+        throw std::runtime_error("preferred ODB access point is filtered from the trace");
+      }
+      result.emplace_back(json::array{static_cast<uint64_t>(std::distance(ports.begin(), position)),
+                                      std::move(value)});
+    }
+    return result;
+  }
+
+  [[nodiscard]] std::vector<NativeWirePrimitive> nativeWirePrimitives(
+      odb::dbNet* net,
+      drt_trace::NativeTimer& timer,
+      std::size_t expected_size) const
+  {
+    std::vector<NativeWirePrimitive> primitives;
+    primitives.reserve(expected_size);
+    timer.measure("odb.dbWire.decode", 1, [&] {
+      auto* wire = net->getWire();
+      if (wire == nullptr) return;
+
+      odb::dbWireDecoder decoder;
+      decoder.begin(wire);
+      odb::dbTechLayer* layer = nullptr;
+      std::optional<NativeWirePoint> active;
+      for (auto opcode = decoder.next(); opcode != odb::dbWireDecoder::END_DECODE;
+           opcode = decoder.next()) {
+        switch (opcode) {
+          case odb::dbWireDecoder::PATH:
+            layer = decoder.getLayer();
+            active.reset();
+            break;
+          case odb::dbWireDecoder::POINT:
+          case odb::dbWireDecoder::POINT_EXT: {
+            NativeWirePoint point;
+            if (opcode == odb::dbWireDecoder::POINT_EXT) {
+              int extension = 0;
+              decoder.getPoint(point.x, point.y, extension);
+              point.extension = extension;
+            } else {
+              decoder.getPoint(point.x, point.y);
+            }
+            if (active && (active->x != point.x || active->y != point.y)) {
+              primitives.push_back({NativeWirePrimitive::Kind::segment,
+                                    layer->getConstName(),
+                                    nullptr,
+                                    active->x,
+                                    active->y,
+                                    point.x,
+                                    point.y,
+                                    active->extension,
+                                    point.extension});
+            }
+            active = std::move(point);
+            break;
+          }
+          case odb::dbWireDecoder::VIA:
+          case odb::dbWireDecoder::TECH_VIA: {
+            const bool technology = opcode == odb::dbWireDecoder::TECH_VIA;
+            auto* bottom = technology ? decoder.getTechVia()->getBottomLayer()
+                                      : decoder.getVia()->getBottomLayer();
+            const auto* via_name = technology ? decoder.getTechVia()->getConstName()
+                                              : decoder.getVia()->getConstName();
+            primitives.push_back({technology ? NativeWirePrimitive::Kind::tech_via
+                                             : NativeWirePrimitive::Kind::block_via,
+                                  bottom->getConstName(),
+                                  via_name,
+                                  active->x,
+                                  active->y,
+                                  active->x,
+                                  active->y,
+                                  {},
+                                  {}});
+            layer = decoder.getLayer();
+            break;
+          }
+          case odb::dbWireDecoder::RECT: {
+            int dx1 = 0;
+            int dy1 = 0;
+            int dx2 = 0;
+            int dy2 = 0;
+            decoder.getRect(dx1, dy1, dx2, dy2);
+            primitives.push_back({NativeWirePrimitive::Kind::patch,
+                                  layer->getConstName(),
+                                  nullptr,
+                                  static_cast<int32_t>(active->x + std::min(dx1, dx2)),
+                                  static_cast<int32_t>(active->y + std::min(dy1, dy2)),
+                                  static_cast<int32_t>(active->x + std::max(dx1, dx2)),
+                                  static_cast<int32_t>(active->y + std::max(dy1, dy2)),
+                                  {},
+                                  {}});
+            break;
+          }
+          default:
+            break;
+        }
+      }
+    });
+    return primitives;
+  }
+
+  [[nodiscard]] json::value nativeWire(odb::dbNet* net,
+                                        drt_trace::NativeTimer& timer,
+                                        std::size_t expected_size) const
+  {
+    const auto primitives = nativeWirePrimitives(net, timer, expected_size);
+    std::vector<drt_trace::Shape> shapes;
+    shapes.reserve(primitives.size());
+    for (const auto& primitive : primitives) {
+      drt_trace::Shape shape;
+      shape.kind = primitive.kind == NativeWirePrimitive::Kind::segment
+                       ? "segment"
+                       : primitive.kind == NativeWirePrimitive::Kind::patch ? "patch" : "via";
+      shape.layer = primitive.layer;
+      shape.via = primitive.via == nullptr ? "" : primitive.via;
+      shape.x1 = primitive.x1;
+      shape.y1 = primitive.y1;
+      shape.x2 = primitive.x2;
+      shape.y2 = primitive.y2;
+      shape.begin_extension = primitive.begin_extension;
+      shape.end_extension = primitive.end_extension;
+      shape.tech_via = primitive.kind != NativeWirePrimitive::Kind::block_via;
+      shapes.push_back(std::move(shape));
+    }
+    return drt_trace::shapeProjection(shapes, false);
+  }
+
+  [[nodiscard]] std::vector<NativeWireAction> prepareNativeWireActions(
+      odb::dbNet* net,
+      const drt_trace::Event& event) const
+  {
+    std::vector<NativeWireAction> result;
+    const auto add_path = [&](std::string_view layer_name, std::string_view rule_name) {
+      auto* layer = requireRoutingLayer(layer_name);
+      odb::dbTechLayerRule* rule = nullptr;
+      if (!rule_name.empty()) {
+        auto* ndr = net->getNonDefaultRule();
+        if (ndr == nullptr) {
+          throw std::runtime_error("trace path rule has no ODB NDR on net "
+                                   + std::string(net->getName()));
+        }
+        rule = ndr->getLayerRule(layer);
+        if (rule == nullptr || rule_name != ndr->getConstName()) {
+          throw std::runtime_error("trace path rule disagrees with ODB NDR on net "
+                                   + std::string(net->getName()));
+        }
+      }
+      result.push_back({NativeWireAction::Kind::new_path, layer, rule});
+    };
+
+    if (!event.wire_actions.empty()) {
+      result.reserve(event.wire_actions.size());
+      for (const auto& action : event.wire_actions) {
+        if (action.op == "new_path") {
+          add_path(action.layer, action.rule);
+        } else if (action.op == "point") {
+          result.push_back({NativeWireAction::Kind::point,
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            action.x,
+                            action.y,
+                            0,
+                            0,
+                            action.extension});
+        } else if (action.op == "tech_via") {
+          auto* via = block_->getTech()->findVia(action.via.c_str());
+          if (via == nullptr) {
+            throw std::runtime_error("unknown technology VIA in native trace: " + action.via);
+          }
+          result.push_back({NativeWireAction::Kind::tech_via,
+                            nullptr,
+                            nullptr,
+                            via});
+        } else if (action.op == "via") {
+          auto* via = block_->findVia(action.via.c_str());
+          if (via == nullptr) {
+            throw std::runtime_error("unknown design VIA in native trace: " + action.via);
+          }
+          result.push_back({NativeWireAction::Kind::block_via,
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            via});
+        } else if (action.op == "rect") {
+          result.push_back({NativeWireAction::Kind::rect,
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            action.x,
+                            action.y,
+                            action.a,
+                            action.b});
+        }
+      }
+      return result;
+    }
+
+    // v1-v3 only retained normalized shapes. Keep that historical fallback,
+    // while v4 uses the original encoder actions above.
+    result.reserve(event.shapes.size() * 3);
+    for (const auto& shape : event.shapes) {
+      add_path(shape.layer, {});
+      result.push_back({NativeWireAction::Kind::point,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        shape.x1,
+                        shape.y1,
+                        0,
+                        0,
+                        shape.begin_extension});
+      if (shape.kind == "segment") {
+        result.push_back({NativeWireAction::Kind::point,
+                          nullptr,
+                          nullptr,
+                          nullptr,
+                          nullptr,
+                          shape.x2,
+                          shape.y2,
+                          0,
+                          0,
+                          shape.end_extension});
+      } else if (shape.kind == "via") {
+        if (shape.tech_via) {
+          auto* via = block_->getTech()->findVia(shape.via.c_str());
+          if (via == nullptr) {
+            throw std::runtime_error("unknown technology VIA in native trace: " + shape.via);
+          }
+          result.push_back({NativeWireAction::Kind::tech_via,
+                            nullptr,
+                            nullptr,
+                            via});
+        } else {
+          auto* via = block_->findVia(shape.via.c_str());
+          if (via == nullptr) {
+            throw std::runtime_error("unknown design VIA in native trace: " + shape.via);
+          }
+          result.push_back({NativeWireAction::Kind::block_via,
+                            nullptr,
+                            nullptr,
+                            nullptr,
+                            via});
+        }
+      } else if (shape.kind == "patch") {
+        result.push_back({NativeWireAction::Kind::rect,
+                          nullptr,
+                          nullptr,
+                          nullptr,
+                          nullptr,
+                          0,
+                          0,
+                          checkedDelta(shape.x2, shape.x1, shape.layer),
+                          checkedDelta(shape.y2, shape.y1, shape.layer)});
+      } else {
+        throw std::runtime_error("unsupported native trace primitive kind: " + shape.kind);
+      }
+    }
+    return result;
+  }
+
+  static void emitNativeWireAction(odb::dbWireEncoder& encoder,
+                                   const NativeWireAction& action)
+  {
+    switch (action.kind) {
+      case NativeWireAction::Kind::new_path:
+        if (action.rule == nullptr) encoder.newPath(action.layer, odb::dbWireType::ROUTED);
+        else encoder.newPath(action.layer, odb::dbWireType::ROUTED, action.rule);
+        return;
+      case NativeWireAction::Kind::point:
+        if (action.extension) encoder.addPoint(action.x, action.y, *action.extension, 0);
+        else encoder.addPoint(action.x, action.y);
+        return;
+      case NativeWireAction::Kind::tech_via:
+        encoder.addTechVia(action.tech_via);
+        return;
+      case NativeWireAction::Kind::block_via:
+        encoder.addVia(action.block_via);
+        return;
+      case NativeWireAction::Kind::rect:
+        encoder.addRect(action.x, action.y, action.a, action.b);
+        return;
+    }
+  }
+
+  void nativeClearWire(odb::dbNet* net, drt_trace::NativeTimer& timer) const
+  {
+    requireEditable(net);
+    auto* wire = net->getWire();
+    if (wire != nullptr) {
+      timer.measure("odb.dbWire.destroy", 1, [&] { odb::dbWire::destroy(wire); });
+    }
+  }
+
+  [[nodiscard]] json::value nativeDefineDesignVia(const drt_trace::Event& event,
+                                                   drt_trace::NativeTimer& timer) const
+  {
+    struct Rectangle
+    {
+      odb::dbTechLayer* layer = nullptr;
+      int x1 = 0;
+      int y1 = 0;
+      int x2 = 0;
+      int y2 = 0;
+    };
+
+    if (block_->findVia(event.name.c_str()) != nullptr) {
+      throw std::runtime_error("trace design VIA already exists in ODB: " + event.name);
+    }
+    std::vector<Rectangle> rectangles;
+    rectangles.reserve(event.via_rectangles.size());
+    for (const auto& rectangle : event.via_rectangles) {
+      auto* layer = block_->getTech()->findLayer(rectangle.layer.c_str());
+      if (layer == nullptr || (layer->getType() != odb::dbTechLayerType::ROUTING
+                               && layer->getType() != odb::dbTechLayerType::CUT)) {
+        throw std::runtime_error("unknown ODB VIA layer in trace: " + rectangle.layer);
+      }
+      rectangles.push_back({layer, rectangle.x1, rectangle.y1, rectangle.x2, rectangle.y2});
+    }
+
+    odb::dbVia* via = nullptr;
+    timer.measure("odb.dbVia.create", 1 + rectangles.size(), [&] {
+      via = odb::dbVia::create(block_, event.name.c_str());
+      via->setDefault(event.via_default);
+      for (const auto& rectangle : rectangles) {
+        static_cast<void>(odb::dbBox::create(via,
+                                             rectangle.layer,
+                                             rectangle.x1,
+                                             rectangle.y1,
+                                             rectangle.x2,
+                                             rectangle.y2));
+      }
+    });
+    return viaDefinition(event.name);
+  }
+
+  void nativeReplaceWire(odb::dbNet* net,
+                         const drt_trace::Event& event,
+                         drt_trace::NativeTimer& timer) const
+  {
+    requireEditable(net, !event.wire_actions.empty());
+    const auto actions = prepareNativeWireActions(net, event);
+    auto* old_wire = net->getWire();
+    if (old_wire != nullptr) {
+      timer.measure("odb.dbWire.destroy", 1, [&] { odb::dbWire::destroy(old_wire); });
+    }
+
+    odb::dbWire* wire = nullptr;
+    timer.measure("odb.dbWire.create", 1, [&] { wire = odb::dbWire::create(net); });
+
+    std::optional<odb::dbWireEncoder> encoder;
+    encoder.emplace();
+    timer.measure("odb.dbWireEncoder.encode", actions.size(), [&] {
+      encoder->begin(wire);
+      for (const auto& action : actions) emitNativeWireAction(*encoder, action);
+    });
+    timer.measure("odb.dbWireEncoder.end", 1, [&] { encoder->end(); });
+    // Keep destruction of the temporary opcode/data vectors inside native timing.
+    timer.measure("odb.dbWireEncoder.cleanup", 1, [&] { encoder.reset(); });
+  }
+
+  [[nodiscard]] json::value nativeAppendTrackAssignment(const drt_trace::Event& event,
+                                                         drt_trace::NativeTimer& timer)
+  {
+    struct Track
+    {
+      odb::dbTechLayer* layer = nullptr;
+      odb::Rect box;
+    };
+    auto* net = requireRegularNamedNet(event.name, event.op);
+    const auto& appended = payloadArray(payloadObject(event), "append", event.op);
+    std::vector<Track> tracks;
+    tracks.reserve(appended.size());
+    for (const auto& value : appended) {
+      const auto& fields = value.as_array();
+      const int x1 = payloadCoordinate(fields[1], event.op);
+      const int y1 = payloadCoordinate(fields[2], event.op);
+      const int x2 = payloadCoordinate(fields[3], event.op);
+      const int y2 = payloadCoordinate(fields[4], event.op);
+      requireRectangle(x1, y1, x2, y2, event.op);
+      tracks.push_back({requireRoutingLayer(payloadText(fields[0], event.op)), {x1, y1, x2, y2}});
+    }
+    timer.measure("odb.dbNetTrack.create", tracks.size(), [&] {
+      for (const auto& track : tracks) static_cast<void>(odb::dbNetTrack::create(net, track.layer, track.box));
+    });
+    return trackValues(net);
+  }
+
+  [[nodiscard]] json::value nativeReplaceMasterPinAccess(const drt_trace::Event& event,
+                                                          drt_trace::NativeTimer& timer)
+  {
+    struct Update
+    {
+      odb::dbMPin* pin = nullptr;
+      uint32_t group = 0;
+      PreparedAccessPoint point;
+    };
+    auto* master = requireMaster(event.master);
+    const auto& payload = payloadObject(event);
+    const auto& clear_groups = payloadArray(payload, "clear_groups", event.op);
+    std::vector<int> groups;
+    groups.reserve(clear_groups.size());
+    for (const auto& value : clear_groups) groups.push_back(payloadGroup(value, event.op));
+
+    std::vector<Update> updates;
+    const auto& created = payloadArray(payload, "create", event.op);
+    for (const auto& value : created) {
+      const auto& fields = value.as_array();
+      const std::string term_name = payloadText(fields[0], event.op);
+      const uint32_t ordinal = traceToken(fields[1], event.op);
+      const int group = payloadGroup(fields[2], event.op);
+      auto* term = master->findMTerm(term_name.c_str());
+      if (term == nullptr) {
+        throw std::runtime_error("unknown ODB master terminal in native trace: " + term_name);
+      }
+      auto* pin = masterPinAt(term, ordinal, event.op);
+      if (!fields[3].is_array()) {
+        throw std::runtime_error("master access-point list is not an array in " + event.op);
+      }
+      for (const auto& encoded : fields[3].as_array()) {
+        updates.push_back({pin, static_cast<uint32_t>(group), prepareAccessPoint(encoded, event.op)});
+      }
+    }
+
+    timer.measure("odb.dbMaster.replacePinAccess", updates.size(), [&] {
+      for (const int group : groups) master->clearPinAccess(group);
+      for (const auto& update : updates) {
+        auto* point = odb::dbAccessPoint::create(block_, update.pin, update.group);
+        applyPreparedAccessPoint(point, update.point);
+      }
+    });
+    return masterGroupValues(master, groups, event.op);
+  }
+
+  [[nodiscard]] json::value nativeReplaceInstancePinAccess(const drt_trace::Event& event,
+                                                            drt_trace::NativeTimer& timer)
+  {
+    struct Update
+    {
+      odb::dbITerm* term = nullptr;
+      odb::dbMPin* pin = nullptr;
+      odb::dbAccessPoint* point = nullptr;
+    };
+    auto* instance = block_->findInst(event.instance.c_str());
+    if (instance == nullptr) {
+      throw std::runtime_error("unknown ODB instance in native trace: " + event.instance);
+    }
+    const auto& payload = payloadObject(event);
+    const uint32_t pin_access_index = traceToken(
+        payloadField(payload, "pin_access_index", event.op), event.op);
+    std::vector<odb::dbITerm*> instance_terms;
+    for (auto* term : instance->getITerms()) {
+      if (term == nullptr || term->getMTerm() == nullptr) {
+        throw std::runtime_error("incomplete ODB instance terminal in native trace");
+      }
+      instance_terms.push_back(term);
+    }
+
+    const auto& terms = payloadArray(payload, "terms", event.op);
+    if (terms.size() != instance_terms.size()) {
+      throw std::runtime_error("instance pin-access payload has a mismatched terminal count in "
+                               + event.op);
+    }
+    std::vector<Update> updates;
+    for (const auto& value : terms) {
+      const auto& fields = value.as_array();
+      const std::string term_name = payloadText(fields[0], event.op);
+      auto* term = instance->findITerm(term_name.c_str());
+      if (term == nullptr || term->getMTerm() == nullptr || !fields[1].is_array()) {
+        throw std::runtime_error("invalid instance pin-access entry in " + event.op);
+      }
+      const auto& locators = fields[1].as_array();
+      std::vector<odb::dbMPin*> pins;
+      for (auto* pin : term->getMTerm()->getMPins()) pins.push_back(pin);
+      if (locators.size() != pins.size()) {
+        throw std::runtime_error("instance port locator count disagrees with ODB in " + event.op);
+      }
+      for (std::size_t index = 0; index < locators.size(); ++index) {
+        const auto& locator = locators[index].as_array();
+        const uint32_t ordinal = traceToken(locator[0], event.op);
+        if (ordinal != index) {
+          throw std::runtime_error("instance port locator ordinal is out of order in " + event.op);
+        }
+        odb::dbAccessPoint* selected = nullptr;
+        if (!locator[1].is_null()) {
+          const auto& reference = locator[1].as_array();
+          const uint32_t group = traceToken(reference[0], event.op);
+          const uint32_t point_index = traceToken(reference[1], event.op);
+          const auto pin_access = pins[index]->getPinAccess();
+          if (group >= pin_access.size() || point_index >= pin_access[group].size()) {
+            throw std::runtime_error("unknown instance access-point reference in " + event.op);
+          }
+          selected = pin_access[group][point_index];
+        }
+        updates.push_back({term, pins[index], selected});
+      }
+    }
+
+    timer.measure("odb.dbInst.replacePinAccess", updates.size(), [&] {
+      instance->setPinAccessIdx(pin_access_index);
+      for (auto* term : instance_terms) term->clearPrefAccessPoints();
+      for (const auto& update : updates) update.term->setAccessPoint(update.pin, update.point);
+    });
+    return instancePinAccessValues(instance, event.op);
+  }
+
+  [[nodiscard]] json::value nativeAppendBTermPinAccess(const drt_trace::Event& event,
+                                                        drt_trace::NativeTimer& timer)
+  {
+    auto* term = block_->findBTerm(event.name.c_str());
+    if (term == nullptr) {
+      throw std::runtime_error("unknown ODB block terminal in native trace: " + event.name);
+    }
+    const auto& payload = payloadObject(event);
+    auto* pin = btermPinAt(
+        term, traceToken(payloadField(payload, "bpin_ordinal", event.op), event.op), event.op);
+    std::vector<PreparedAccessPoint> points;
+    const auto& appended = payloadArray(payload, "append", event.op);
+    points.reserve(appended.size());
+    for (const auto& value : appended) points.push_back(prepareAccessPoint(value, event.op));
+    timer.measure("odb.dbBPin.appendPinAccess", points.size(), [&] {
+      for (const auto& prepared : points) {
+        auto* point = odb::dbAccessPoint::create(pin);
+        applyPreparedAccessPoint(point, prepared);
+      }
+    });
+    return btermAccessPointValues(pin, event.op);
+  }
+
+  [[nodiscard]] json::value nativeReplaceGuides(const drt_trace::Event& event,
+                                                 drt_trace::NativeTimer& timer)
+  {
+    struct Guide
+    {
+      odb::dbTechLayer* layer = nullptr;
+      odb::Rect box;
+    };
+    auto* net = requireRegularNamedNet(event.name, event.op);
+    const auto& encoded = payloadArray(payloadObject(event), "guides", event.op);
+    std::vector<Guide> guides;
+    guides.reserve(encoded.size());
+    for (const auto& value : encoded) {
+      const auto& fields = value.as_array();
+      const int x1 = payloadCoordinate(fields[1], event.op);
+      const int y1 = payloadCoordinate(fields[2], event.op);
+      const int x2 = payloadCoordinate(fields[3], event.op);
+      const int y2 = payloadCoordinate(fields[4], event.op);
+      requireRectangle(x1, y1, x2, y2, event.op);
+      guides.push_back({requireRoutingLayer(payloadText(fields[0], event.op)), {x1, y1, x2, y2}});
+    }
+    timer.measure("odb.dbNet.replaceGuides", guides.size(), [&] {
+      net->clearGuides();
+      for (const auto& guide : guides) {
+        static_cast<void>(odb::dbGuide::create(net, guide.layer, guide.layer, guide.box, false));
+      }
+    });
+    auto odb_guides = net->getGuides();
+    if (odb_guides.orderReversed() && odb_guides.reversible()) odb_guides.reverse();
+    return readGuides(event.name);
+  }
+
+  [[nodiscard]] json::value nativeAppendBTermStackWire(const drt_trace::Event& event,
+                                                        drt_trace::NativeTimer& timer)
+  {
+    auto* net = requireNet(event.object);
+    const auto& payload = payloadObject(event);
+    auto* layer = requireRoutingLayer(payloadText(payloadField(payload, "layer", event.op), event.op));
+    const int x = payloadCoordinate(payloadField(payload, "x", event.op), event.op);
+    const int y = payloadCoordinate(payloadField(payload, "y", event.op), event.op);
+    std::vector<odb::dbTechVia*> vias;
+    for (const auto& value : payloadArray(payload, "vias", event.op)) {
+      const std::string name = payloadText(value, event.op);
+      auto* via = block_->getTech()->findVia(name.c_str());
+      if (via == nullptr) throw std::runtime_error("unknown technology VIA in native trace: " + name);
+      vias.push_back(via);
+    }
+    auto* wire = net->getWire();
+    odb::dbWireEncoder encoder;
+    timer.measure("odb.dbWireEncoder.appendStack", vias.size(), [&] {
+      if (wire == nullptr) {
+        wire = odb::dbWire::create(net);
+        encoder.begin(wire);
+      } else {
+        encoder.append(wire);
+      }
+      encoder.newPath(layer, odb::dbWireType::ROUTED);
+      encoder.addPoint(x, y);
+      for (auto* via : vias) encoder.addTechVia(via);
+      encoder.end();
+    });
+    return drt_trace::shapeValues(drt_trace::readOdbWire(net), false);
   }
 
   [[nodiscard]] json::value readTechHeader() const

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <limits>
+#include <variant>
 #include <vector>
 
 #include "common/GeometryTypes.h"
@@ -20,15 +22,58 @@ enum class DesignWireStatus : uint8_t
   kNoShield
 };
 
-// DesignWireId-backed EnTT component. Routing vectors have the same lifetime
-// as the entity, so replacing or destroying a Wire releases its old payload.
+// Wire is a status/ownership group, not a DEF program or a topology edge.
+// Geometry lives once, in the independent Shape entities listed here.
 struct DesignWire
 {
   DesignNetId net;
   DesignWireStatus status = DesignWireStatus::kRouted;
   std::string shield_net;
-  DesignWireRouting routing;
+  std::vector<DesignRouteShapeId> shapes;
+  uint32_t next_source_path = 0;
 };
+
+struct DesignRouteSegment
+{
+  DesignWirePoint begin;
+  DesignWirePoint end;
+};
+
+struct DesignRouteVia
+{
+  DesignWirePoint origin;
+  // point_index is unused in canonical geometry; projections set the anchor.
+  DesignWireVia via;
+  TechRoutingLayerId exit_layer;
+};
+
+struct DesignRoutePatch
+{
+  DesignWirePoint anchor;
+  Rect rectangle;  // absolute coordinates; anchor is only a DEF emission hint
+};
+
+// A lone or virtual DEF point can carry syntax without manufacturing metal.
+struct DesignRoutePoint
+{
+  DesignWirePoint point;
+};
+
+using DesignRouteGeometry = std::variant<DesignRouteSegment, DesignRouteVia, DesignRoutePatch, DesignRoutePoint>;
+
+struct DesignRouteShape
+{
+  DesignWireId wire;
+  TechRoutingLayerId layer;
+  uint32_t flags = 0;  // DesignWirePathFlag; cold values are a separate component
+  // Import boundary hint only. Editing may split this group into multiple NEW
+  // paths. No points, ranges or topology are stored per path.
+  uint32_t source_path = std::numeric_limits<uint32_t>::max();
+  DesignRouteGeometry geometry;
+};
+
+// Optional per-Shape DEF attributes. Ordinary routed geometry needs no strings.
+using DesignRouteShapeAttributes = DesignWirePathExtra;
 
 namespace DesignNetGeometryFlag {
 constexpr uint32_t kHasMask = 1u << 0;

@@ -397,82 +397,81 @@ inline CanonicalNet canonicalNet(const DesignStore& design, DesignNetId id)
 
   for (const auto wire_id : design.routingStorage().wires(id)) {
     const auto& wire = design.routingStorage().wire(wire_id);
-    for (std::size_t path_index = 0; path_index < design.routingStorage().pathCount(wire_id); ++path_index) {
-      const auto path = design.routingStorage().path(wire_id, path_index);
-      const auto layer = detail::layerName(design, path.layer());
-      for (std::size_t point_index = 1; point_index < path.points().size(); ++point_index) {
-        auto first = path.points()[point_index - 1u];
-        auto second = path.points()[point_index];
-        if (structured::pointLess(second.position, first.position)) {
-          std::swap(first, second);
-        }
-        result.segments.push_back(CanonicalSegment{.layer = layer,
-                                                   .status = wire.status,
-                                                   .shield_net = wire.shield_net,
-                                                   .path_flags = path.flags(),
-                                                   .width = path.width(),
-                                                   .mask = path.mask(),
-                                                   .taper_rule = std::string{path.taperRule()},
-                                                   .shape = std::string{path.shape()},
-                                                   .style = path.style(),
-                                                   .first = first.position,
-                                                   .first_flags = first.flags,
-                                                   .first_extension = first.extension,
-                                                   .second = second.position,
-                                                   .second_flags = second.flags,
-                                                   .second_extension = second.extension});
-      }
-      if (path.points().size() == 1u && path.vias().empty() && path.rectangles().empty()) {
-        const auto& point = path.points().front();
-        result.points.push_back(CanonicalPoint{.layer = layer,
-                                               .status = wire.status,
-                                               .shield_net = wire.shield_net,
-                                               .path_flags = path.flags(),
-                                               .width = path.width(),
-                                               .mask = path.mask(),
-                                               .taper_rule = std::string{path.taperRule()},
-                                               .shape = std::string{path.shape()},
-                                               .style = path.style(),
-                                               .position = point.position,
-                                               .flags = point.flags,
-                                               .extension = point.extension});
-      }
-      for (const auto& via : path.vias()) {
-        const auto& anchor = path.points()[via.point_index];
-        result.wire_vias.push_back(CanonicalWireVia{.status = wire.status,
-                                                    .shield_net = wire.shield_net,
-                                                    .anchor = anchor.position,
-                                                    .anchor_flags = anchor.flags,
-                                                    .anchor_extension = anchor.extension,
-                                                    .name = detail::viaName(design, via.tech_via, via.design_via),
-                                                    .orientation = via.orientation,
-                                                    .flags = via.flags,
-                                                    .top_mask = via.top_mask,
-                                                    .cut_mask = via.cut_mask,
-                                                    .bottom_mask = via.bottom_mask,
-                                                    .rows = via.rows,
-                                                    .columns = via.columns,
-                                                    .step_x = via.step_x,
-                                                    .step_y = via.step_y});
-      }
-      for (const auto& rectangle : path.rectangles()) {
-        const auto& anchor = path.points()[rectangle.point_index];
-        result.wire_rectangles.push_back(CanonicalWireRectangle{.layer = layer,
-                                                                .status = wire.status,
-                                                                .shield_net = wire.shield_net,
-                                                                .path_flags = path.flags(),
-                                                                .width = path.width(),
-                                                                .mask = path.mask(),
-                                                                .taper_rule = std::string{path.taperRule()},
-                                                                .shape = std::string{path.shape()},
-                                                                .style = path.style(),
-                                                                .rectangle = canonicalRect(
-                                                                    {.ll_x = anchor.position.x + rectangle.delta.ll_x,
-                                                                     .ll_y = anchor.position.y + rectangle.delta.ll_y,
-                                                                     .ur_x = anchor.position.x + rectangle.delta.ur_x,
-                                                                     .ur_y = anchor.position.y + rectangle.delta.ur_y})});
-      }
-    }
+    design.routingStorage().forEachShape(
+        wire_id, [&](DesignRouteShapeId, const DesignRouteShape& shape, const DesignRouteShapeAttributes* attributes) {
+          const auto layer = detail::layerName(design, shape.layer);
+          const auto width = attributes == nullptr ? 0 : attributes->width;
+          const auto mask = attributes == nullptr ? 0u : attributes->mask;
+          const auto taper_rule = attributes == nullptr ? std::string{} : attributes->taper_rule;
+          const auto shape_name = attributes == nullptr ? std::string{} : attributes->shape;
+          const auto style = attributes == nullptr ? 0 : attributes->style;
+          std::visit(
+              [&](const auto& geometry) {
+                using Geometry = std::remove_cvref_t<decltype(geometry)>;
+                if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+                  auto first = geometry.begin;
+                  auto second = geometry.end;
+                  if (structured::pointLess(second.position, first.position)) std::swap(first, second);
+                  result.segments.push_back(CanonicalSegment{.layer = layer,
+                                                             .status = wire.status,
+                                                             .shield_net = wire.shield_net,
+                                                             .path_flags = shape.flags,
+                                                             .width = width,
+                                                             .mask = mask,
+                                                             .taper_rule = taper_rule,
+                                                             .shape = shape_name,
+                                                             .style = style,
+                                                             .first = first.position,
+                                                             .first_flags = first.flags,
+                                                             .first_extension = first.extension,
+                                                             .second = second.position,
+                                                             .second_flags = second.flags,
+                                                             .second_extension = second.extension});
+                } else if constexpr (std::is_same_v<Geometry, DesignRoutePoint>) {
+                  result.points.push_back(CanonicalPoint{.layer = layer,
+                                                         .status = wire.status,
+                                                         .shield_net = wire.shield_net,
+                                                         .path_flags = shape.flags,
+                                                         .width = width,
+                                                         .mask = mask,
+                                                         .taper_rule = taper_rule,
+                                                         .shape = shape_name,
+                                                         .style = style,
+                                                         .position = geometry.point.position,
+                                                         .flags = geometry.point.flags,
+                                                         .extension = geometry.point.extension});
+                } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+                  const auto& via = geometry.via;
+                  result.wire_vias.push_back(CanonicalWireVia{.status = wire.status,
+                                                              .shield_net = wire.shield_net,
+                                                              .anchor = geometry.origin.position,
+                                                              .anchor_flags = geometry.origin.flags,
+                                                              .anchor_extension = geometry.origin.extension,
+                                                              .name = detail::viaName(design, via.tech_via, via.design_via),
+                                                              .orientation = via.orientation,
+                                                              .flags = via.flags,
+                                                              .top_mask = via.top_mask,
+                                                              .cut_mask = via.cut_mask,
+                                                              .bottom_mask = via.bottom_mask,
+                                                              .rows = via.rows,
+                                                              .columns = via.columns,
+                                                              .step_x = via.step_x,
+                                                              .step_y = via.step_y});
+                } else {
+                  result.wire_rectangles.push_back(CanonicalWireRectangle{.layer = layer,
+                                                                           .status = wire.status,
+                                                                           .shield_net = wire.shield_net,
+                                                                           .path_flags = shape.flags,
+                                                                           .width = width,
+                                                                           .mask = mask,
+                                                                           .taper_rule = taper_rule,
+                                                                           .shape = shape_name,
+                                                                           .style = style,
+                                                                           .rectangle = canonicalRect(geometry.rectangle)});
+                }
+              },
+              shape.geometry);
+        });
   }
 
   if (const auto* geometry = design.routingStorage().netGeometry(id); geometry != nullptr) {

@@ -391,7 +391,7 @@ OdbTraceRecorder::OdbTraceRecorder(const std::filesystem::path& path,
   paths["def"] = pathValue(input_paths.def);
   paths["guides"] = pathValue(input_paths.guides);
   json::object header;
-  header["schema"] = "tritonroute_db_trace_v3";
+  header["schema"] = "tritonroute_db_trace_v4";
   header["instances"] = std::move(instances);
   header["nets"] = std::move(nets);
   header["initial_gcell_grid"] = gcellGridValue(block->getGCellGrid());
@@ -886,7 +886,10 @@ void OdbTraceRecorder::recordClearWire(std::string_view source, odb::dbNet* net)
   record(std::move(event));
 }
 
-void OdbTraceRecorder::recordReplaceWire(std::string_view source, odb::dbNet* net)
+void OdbTraceRecorder::recordReplaceWire(
+    std::string_view source,
+    odb::dbNet* net,
+    const std::vector<drt_trace::WireAction>& wire_actions)
 {
   requireRegularNet(net, "replace_wire");
   const auto shapes = drt_trace::readOdbWire(net);
@@ -903,8 +906,16 @@ void OdbTraceRecorder::recordReplaceWire(std::string_view source, odb::dbNet* ne
   for (const auto& shape : shapes) {
     payload.emplace_back(drt_trace::shapeRecord(shape));
   }
+  json::array actions;
+  actions.reserve(wire_actions.size());
+  for (const auto& action : wire_actions) {
+    actions.emplace_back(drt_trace::wireActionRecord(action));
+  }
   auto event = eventBase("replace_wire", source);
   event["object"] = static_cast<uint32_t>(net->getId());
+  // Keep both representations: actions are the original encoder call stream,
+  // while shapes are decoded after writing for independent semantic validation.
+  event["wire_actions"] = std::move(actions);
   event["shapes"] = std::move(payload);
   record(std::move(event));
 }

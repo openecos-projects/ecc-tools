@@ -65,11 +65,15 @@ TEST_F(DesignStorageTest, DesignViaServiceDoesNotDestroyWireReferencedVia)
       DesignVia{.name = "WIRE_VIA", .rectangles = {{.layer = layer, .rectangle = {-2, -2, 2, 2}}}});
   const auto net = design.netlistStorage().createNet(DesignNet{.name = "signal"});
 
-  DesignWireRoutingInput routing;
-  routing.appendPath(DesignWirePath{.layer = routing_layer,
-                                    .points = {{.position = {100, 200}}},
-                                    .vias = {{.point_index = 0u, .design_via = via}}});
-  const auto wire = design.routingStorage().createWire(DesignWire{.net = net}, std::move(routing));
+  const auto wire = design.routingStorage().createWire(DesignWire{.net = net});
+  const auto shape = design.routingStorage().createShape(
+      wire,
+      DesignRouteShape{.wire = wire,
+                       .layer = routing_layer,
+                       .geometry = DesignRouteVia{.origin = {.position = {100, 200}},
+                                                  .via = {.design_via = via},
+                                                  .exit_layer = routing_layer}});
+  EXPECT_TRUE(design.routingStorage().contains(shape));
 
   EXPECT_FALSE(service.destroyVia(via));
   EXPECT_TRUE(design.routingStorage().destroyWire(wire));

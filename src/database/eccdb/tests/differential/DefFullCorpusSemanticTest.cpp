@@ -202,7 +202,8 @@ std::size_t wirePathCount(const DesignStore& design)
   std::size_t result = 0;
   for (const auto net : design.netlistStorage().nets()) {
     for (const auto wire : design.routingStorage().wires(net)) {
-      result += design.routingStorage().pathCount(wire);
+      design.routingStorage().forEachShape(
+          wire, [&](DesignRouteShapeId, const DesignRouteShape&, const DesignRouteShapeAttributes*) { ++result; });
     }
   }
   return result;

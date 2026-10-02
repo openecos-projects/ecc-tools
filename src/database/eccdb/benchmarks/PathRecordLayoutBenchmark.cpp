@@ -151,10 +151,10 @@ bool hasViaOptions(const DesignWireVia& via)
          || via.step_x != 0 || via.step_y != 0;
 }
 
-bool hasPathExtra(DesignWirePathView path)
+bool hasPathExtra(const DesignRouteShapeAttributes* extra)
 {
-  return path.width() != 0 || path.mask() != 0u || !path.taperRule().empty()
-         || !path.shape().empty() || path.style() != 0;
+  return extra != nullptr && (extra->width != 0 || extra->mask != 0u || !extra->taper_rule.empty()
+                              || !extra->shape.empty() || extra->style != 0);
 }
 
 void appendPathHeader(GeometrySummary& summary, TechRoutingLayerId layer, uint32_t flags)
@@ -197,71 +197,81 @@ void appendRectangle(GeometrySummary& summary, uint32_t point_index, Rect delta)
   mix(summary, packPoint({delta.ur_x, delta.ur_y}));
 }
 
-void appendCurrentPath(GeometrySummary& summary, DesignWirePathView path)
+void appendShapeSummary(GeometrySummary& summary, const DesignRouteShape& shape,
+                        const DesignRouteShapeAttributes* attributes)
 {
-  appendPathHeader(summary, path.layer(), path.flags());
-  if (hasPathExtra(path)) {
-    mixPathExtra(summary, path.width(), path.mask(), path.taperRule(), path.shape(), path.style());
+  appendPathHeader(summary, shape.layer, shape.flags);
+  if (hasPathExtra(attributes)) {
+    mixPathExtra(summary, *attributes);
   }
-  for (const auto point : path.points()) {
-    appendPoint(summary, point.position, point.flags, point.extension);
-  }
-  for (const auto via : path.vias()) {
-    appendVia(summary, via.tech_via ? via.tech_via.packed() : via.design_via.packed(),
-              static_cast<bool>(via.design_via), via.point_index,
-              hasViaOptions(via) ? &via : nullptr);
-  }
-  for (const auto rectangle : path.rectangles()) {
-    appendRectangle(summary, rectangle.point_index, rectangle.delta);
-  }
+  std::visit(
+      [&](const auto& geometry) {
+        using Geometry = std::remove_cvref_t<decltype(geometry)>;
+        if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+          appendPoint(summary, geometry.begin.position, geometry.begin.flags, geometry.begin.extension);
+          appendPoint(summary, geometry.end.position, geometry.end.flags, geometry.end.extension);
+        } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+          appendPoint(summary, geometry.origin.position, geometry.origin.flags, geometry.origin.extension);
+          appendVia(summary, geometry.via.tech_via ? geometry.via.tech_via.packed() : geometry.via.design_via.packed(),
+                    static_cast<bool>(geometry.via.design_via), 0u,
+                    hasViaOptions(geometry.via) ? &geometry.via : nullptr);
+        } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+          appendPoint(summary, geometry.anchor.position, geometry.anchor.flags, geometry.anchor.extension);
+          appendRectangle(summary, 0u, geometry.rectangle);
+        } else {
+          appendPoint(summary, geometry.point.position, geometry.point.flags, geometry.point.extension);
+        }
+      },
+      shape.geometry);
 }
 
-GeometrySummary summarizeCurrent(const DesignRoutingStorage& storage, const std::vector<DesignWireId>& ids)
+GeometrySummary summarizeShapes(const DesignRoutingStorage& storage, const std::vector<DesignWireId>& ids)
 {
   GeometrySummary summary;
-  for (const auto id : ids) {
-    storage.forEachPath(id, [&](DesignWirePathView path) { appendCurrentPath(summary, path); });
+  for (const auto wire : ids) {
+      storage.forEachShape(wire, [&](DesignRouteShapeId id, const DesignRouteShape& shape,
+                                   const DesignRouteShapeAttributes* attributes) {
+      static_cast<void>(id);
+      appendShapeSummary(summary, shape, attributes);
+    });
   }
   return summary;
 }
 
-RoutePath makePath(DesignWirePathView source)
+RoutePath makeShapePath(const DesignRouteShape& shape, const DesignRouteShapeAttributes* attributes)
 {
-  RoutePath result{.layer = source.layer(), .flags = source.flags()};
-  const auto points = source.points();
-  const auto vias = source.vias();
-  const auto rectangles = source.rectangles();
-  std::size_t extension_count = 0;
-  for (const auto point : points) {
-    extension_count += (point.flags & DesignWirePointFlag::kHasExtension) != 0u;
-  }
-  result.records.reserve(points.size() + extension_count + vias.size() + rectangles.size() * 2u);
-  if (hasPathExtra(source)) {
-    result.extras.push_back({std::numeric_limits<uint32_t>::max(),
-                             DesignWirePathExtra{source.width(), source.mask(),
-                                                 std::string(source.taperRule()),
-                                                 std::string(source.shape()), source.style()}});
-  }
-  for (const auto point : points) {
-    result.records.push_back({packPoint(point.position), point.flags, RecordKind::kPoint});
-    if ((point.flags & DesignWirePointFlag::kHasExtension) != 0u) {
-      result.records.push_back({std::bit_cast<uint32_t>(point.extension), 0u, RecordKind::kExtension});
-    }
-  }
-  for (const auto via : vias) {
-    const auto record_index = static_cast<uint32_t>(result.records.size());
-    result.records.push_back({via.tech_via ? via.tech_via.packed() : via.design_via.packed(),
-                              via.point_index, via.tech_via ? RecordKind::kTechVia : RecordKind::kDesignVia});
-    if (hasViaOptions(via)) {
-      result.extras.push_back({record_index, via});
-    }
-  }
-  for (const auto rectangle : rectangles) {
-    result.records.push_back({packPoint({rectangle.delta.ll_x, rectangle.delta.ll_y}),
-                              rectangle.point_index, RecordKind::kRectangleMin});
-    result.records.push_back({packPoint({rectangle.delta.ur_x, rectangle.delta.ur_y}),
-                              0u, RecordKind::kRectangleMax});
-  }
+  RoutePath result{.layer = shape.layer, .flags = shape.flags};
+  if (hasPathExtra(attributes)) result.extras.push_back({std::numeric_limits<uint32_t>::max(), *attributes});
+  std::visit(
+      [&](const auto& geometry) {
+        using Geometry = std::remove_cvref_t<decltype(geometry)>;
+        const auto append_point = [&](DesignWirePoint point) {
+          result.records.push_back({packPoint(point.position), point.flags, RecordKind::kPoint});
+          if ((point.flags & DesignWirePointFlag::kHasExtension) != 0u) {
+            result.records.push_back({std::bit_cast<uint32_t>(point.extension), 0u, RecordKind::kExtension});
+          }
+        };
+        if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+          append_point(geometry.begin);
+          append_point(geometry.end);
+        } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+          append_point(geometry.origin);
+          const auto record_index = static_cast<uint32_t>(result.records.size());
+          const auto& via = geometry.via;
+          result.records.push_back({via.tech_via ? via.tech_via.packed() : via.design_via.packed(), 0u,
+                                    via.tech_via ? RecordKind::kTechVia : RecordKind::kDesignVia});
+          if (hasViaOptions(via)) result.extras.push_back({record_index, via});
+        } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+          append_point(geometry.anchor);
+          result.records.push_back({packPoint({geometry.rectangle.ll_x, geometry.rectangle.ll_y}), 0u,
+                                    RecordKind::kRectangleMin});
+          result.records.push_back({packPoint({geometry.rectangle.ur_x, geometry.rectangle.ur_y}), 0u,
+                                    RecordKind::kRectangleMax});
+        } else {
+          append_point(geometry.point);
+        }
+      },
+      shape.geometry);
   return result;
 }
 
@@ -348,26 +358,24 @@ LayoutSize candidateSize(const std::vector<RouteWire>& wires)
 
 LayoutSize currentSize(const DesignRoutingStorage& storage, const std::vector<DesignWireId>& ids)
 {
-  LayoutSize result{.capacity_bytes = ids.size() * sizeof(DesignWireRouting)};
+  LayoutSize result{.capacity_bytes = ids.size() * sizeof(DesignWire)};
   const auto addVector = [&result](const auto& values) {
     result.capacity_bytes += values.capacity() * sizeof(typename std::decay_t<decltype(values)>::value_type);
     result.buffers += !values.empty();
   };
   for (const auto id : ids) {
-    const auto& routing = storage.wire(id).routing;
-    addVector(routing.paths);
-    addVector(routing.extras);
-    addVector(routing.points);
-    addVector(routing.vias);
-    addVector(routing.rectangles);
-    for (const auto& extra : routing.extras) {
+    addVector(storage.wire(id).shapes);
+    storage.forEachShape(id, [&](DesignRouteShapeId, const DesignRouteShape&, const DesignRouteShapeAttributes* extra) {
+      result.capacity_bytes += sizeof(DesignRouteShape);
+      if (extra == nullptr) return;
+      result.capacity_bytes += sizeof(DesignRouteShapeAttributes);
       const auto dynamicBytes = [](const std::string& text) {
         const auto pointer = reinterpret_cast<uintptr_t>(text.data());
         const auto object = reinterpret_cast<uintptr_t>(&text);
         return pointer >= object && pointer < object + sizeof(text) ? 0u : text.capacity() + 1u;
       };
-      result.capacity_bytes += dynamicBytes(extra.taper_rule) + dynamicBytes(extra.shape);
-    }
+      result.capacity_bytes += dynamicBytes(extra->taper_rule) + dynamicBytes(extra->shape);
+    });
   }
   return result;
 }
@@ -383,53 +391,6 @@ double elapsedMs(Function&& function)
 std::size_t percentile(const std::vector<std::size_t>& sorted, std::size_t percent)
 {
   return sorted.empty() ? 0u : sorted[(sorted.size() - 1u) * percent / 100u];
-}
-
-DesignWirePath copyPath(DesignWirePathView view)
-{
-  DesignWirePath path;
-  path.layer = view.layer();
-  path.flags = view.flags();
-  path.width = view.width();
-  path.mask = view.mask();
-  path.taper_rule = view.taperRule();
-  path.shape = view.shape();
-  path.style = view.style();
-  const auto points = view.points();
-  const auto vias = view.vias();
-  const auto rectangles = view.rectangles();
-  path.points.assign(points.begin(), points.end());
-  path.vias.assign(vias.begin(), vias.end());
-  path.rectangles.assign(rectangles.begin(), rectangles.end());
-  return path;
-}
-
-void eraseRestoreFirstFlatPath(DesignWireRouting& routing, const DesignWireRouting& first)
-{
-  const auto& removed = first.paths.front();
-  routing.paths.erase(routing.paths.begin());
-  routing.points.erase(routing.points.begin(), routing.points.begin() + removed.points.count);
-  routing.vias.erase(routing.vias.begin(), routing.vias.begin() + removed.vias.count);
-  routing.rectangles.erase(routing.rectangles.begin(), routing.rectangles.begin() + removed.rectangles.count);
-  if (!first.extras.empty()) routing.extras.erase(routing.extras.begin());
-  for (auto& path : routing.paths) {
-    path.points.begin -= removed.points.count;
-    path.vias.begin -= removed.vias.count;
-    path.rectangles.begin -= removed.rectangles.count;
-    if (!first.extras.empty() && path.extra_index != kInvalidDesignWirePathExtraIndex) --path.extra_index;
-  }
-
-  routing.points.insert(routing.points.begin(), first.points.begin(), first.points.end());
-  routing.vias.insert(routing.vias.begin(), first.vias.begin(), first.vias.end());
-  routing.rectangles.insert(routing.rectangles.begin(), first.rectangles.begin(), first.rectangles.end());
-  if (!first.extras.empty()) routing.extras.insert(routing.extras.begin(), first.extras.begin(), first.extras.end());
-  for (auto& path : routing.paths) {
-    path.points.begin += removed.points.count;
-    path.vias.begin += removed.vias.count;
-    path.rectangles.begin += removed.rectangles.count;
-    if (!first.extras.empty() && path.extra_index != kInvalidDesignWirePathExtraIndex) ++path.extra_index;
-  }
-  routing.paths.insert(routing.paths.begin(), removed);
 }
 
 }  // namespace
@@ -453,7 +414,7 @@ int main(int argc, char** argv)
     LefLibraryImporter(technology, library).import(argv[1]);
     DesignStore design(technology.techRegistry(), library.libraryRegistry());
     const double load_ms = elapsedMs([&] { DefDesignImporter(design).import(argv[2]); });
-    const auto& storage = design.routingStorage();
+    auto& storage = design.routingStorage();
     const auto all_ids = storage.wires();
     std::vector<DesignWireId> ids;
     std::size_t eligible = 0;
@@ -468,24 +429,25 @@ int main(int argc, char** argv)
     const double build_ms = elapsedMs([&] {
       for (const auto id : ids) {
         RouteWire wire;
-        wire.paths.reserve(storage.pathCount(id));
-        storage.forEachPath(id, [&](DesignWirePathView path) {
-          primitive_lengths.push_back(path.points().size() + path.vias().size() + path.rectangles().size());
-          wire.paths.push_back(makePath(path));
+        wire.paths.reserve(storage.wire(id).shapes.size());
+        storage.forEachShape(id, [&](DesignRouteShapeId, const DesignRouteShape& shape,
+                                     const DesignRouteShapeAttributes* attributes) {
+          primitive_lengths.push_back(1u);
+          wire.paths.push_back(makeShapePath(shape, attributes));
           record_lengths.push_back(wire.paths.back().records.size());
         });
         candidate.push_back(std::move(wire));
       }
     });
-    const auto expected = summarizeCurrent(storage, ids);
+    const auto expected = summarizeShapes(storage, ids);
     const auto actual = summarizeCandidate(candidate);
     if (expected != actual) {
       throw std::runtime_error("candidate route geometry differs from the source");
     }
 
     volatile uint64_t sink = 0;
-    const double current_walk_ms = elapsedMs([&] {
-      for (int repeat = 0; repeat < 3; ++repeat) sink = sink + summarizeCurrent(storage, ids).fingerprint;
+    const double shape_walk_ms = elapsedMs([&] {
+      for (int repeat = 0; repeat < 3; ++repeat) sink = sink + summarizeShapes(storage, ids).fingerprint;
     }) / 3.0;
     const double candidate_walk_ms = elapsedMs([&] {
       for (int repeat = 0; repeat < 3; ++repeat) sink = sink + summarizeCandidate(candidate).fingerprint;
@@ -495,41 +457,27 @@ int main(int argc, char** argv)
                                     [](const RouteWire& lhs, const RouteWire& rhs) {
                                       return lhs.paths.size() < rhs.paths.size();
                                     });
-    double current_remove_ms = 0.0;
-    double current_flat_erase_restore_ms = 0.0;
+    double shape_update_ms = 0.0;
     double candidate_remove_ms = 0.0;
-    std::size_t edited_paths = 0;
+    std::size_t edited_shapes = 0;
     if (largest != candidate.end() && !largest->paths.empty()) {
       const auto wire_index = static_cast<std::size_t>(largest - candidate.begin());
-      edited_paths = largest->paths.size();
-      const int repeats = edited_paths > 1000u ? 10 : 100;
-      current_remove_ms = elapsedMs([&] {
-        for (int repeat = 0; repeat < repeats; ++repeat) {
-          DesignWireRouting rebuilt;
-          rebuilt.reservePaths(edited_paths - 1u);
-          for (std::size_t index = 1; index < edited_paths; ++index) {
-            rebuilt.appendPath(copyPath(storage.path(ids[wire_index], index)));
+      edited_shapes = largest->paths.size();
+      const int repeats = edited_shapes > 1000u ? 10 : 100;
+      const auto shape_ids = storage.wire(ids[wire_index]).shapes;
+      if (!shape_ids.empty()) {
+        const auto shape_id = shape_ids.front();
+        const auto original = storage.shape(shape_id);
+        auto edited = original;
+        if (auto* segment = std::get_if<DesignRouteSegment>(&edited.geometry)) {
+          ++segment->end.position.x;
+        }
+        shape_update_ms = elapsedMs([&] {
+          for (int repeat = 0; repeat < repeats; ++repeat) {
+            storage.updateShape(shape_id, edited);
+            storage.updateShape(shape_id, original);
           }
-          sink = sink + rebuilt.pathCount();
-        }
-      }) / repeats;
-      DesignWireRouting first;
-      first.appendPath(copyPath(storage.path(ids[wire_index], 0u)));
-      auto editable_flat = storage.wire(ids[wire_index]).routing;
-      current_flat_erase_restore_ms = elapsedMs([&] {
-        for (int repeat = 0; repeat < repeats; ++repeat) {
-          eraseRestoreFirstFlatPath(editable_flat, first);
-          sink = sink + editable_flat.pathCount();
-        }
-      }) / repeats;
-      GeometrySummary original_wire;
-      GeometrySummary restored_wire;
-      storage.forEachPath(ids[wire_index], [&](DesignWirePathView path) { appendCurrentPath(original_wire, path); });
-      for (std::size_t index = 0; index < editable_flat.pathCount(); ++index) {
-        appendCurrentPath(restored_wire, editable_flat.path(index));
-      }
-      if (original_wire != restored_wire) {
-        throw std::runtime_error("flat-vector Path edit changed route geometry");
+        }) / (2.0 * repeats);
       }
       auto editable = candidate[wire_index];
       candidate_remove_ms = elapsedMs([&] {
@@ -554,7 +502,7 @@ int main(int argc, char** argv)
     std::cout << "layout=vector ";
 #endif
     std::cout << "eligible_wires=" << eligible << " sampled_wires=" << ids.size()
-              << " paths=" << expected.paths << " points=" << expected.points
+              << " shapes=" << expected.paths << " points=" << expected.points
               << " vias=" << expected.vias << " rectangles=" << expected.rectangles << '\n';
     std::cout << "path_primitives_p50=" << percentile(primitive_lengths, 50)
               << " p90=" << percentile(primitive_lengths, 90)
@@ -570,10 +518,9 @@ int main(int argc, char** argv)
               << " candidate_capacity_bytes=" << candidate_size.capacity_bytes
               << " candidate_buffers=" << candidate_size.buffers << '\n';
     std::cout << "def_load_ms=" << load_ms << " candidate_build_ms=" << build_ms
-              << " current_walk_ms=" << current_walk_ms
+              << " shape_walk_ms=" << shape_walk_ms
               << " candidate_walk_ms=" << candidate_walk_ms << '\n';
-    std::cout << "edit_wire_paths=" << edited_paths << " current_rebuild_ms=" << current_remove_ms
-              << " current_flat_erase_restore_ms=" << current_flat_erase_restore_ms
+    std::cout << "edit_wire_shapes=" << edited_shapes << " shape_update_ms=" << shape_update_ms
               << " candidate_erase_restore_ms=" << candidate_remove_ms << " sink=" << sink << '\n';
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

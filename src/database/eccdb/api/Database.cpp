@@ -377,12 +377,6 @@ IoPinRef Database::ioPin(IoPinId id) const noexcept
   return contains(id) ? IoPinRef{*_state, id} : IoPinRef{};
 }
 
-WireId Database::createWire(WireMetadata metadata, WireRoutingData routing)
-{
-  return detail::toApiId<WireId>(state().design().routingStorage().createWire(
-      detail::toStorage(metadata), detail::toStorage(routing)));
-}
-
 bool Database::contains(WireId id) const noexcept
 {
   return _state && _state->design().routingStorage().contains(detail::toStorageId<DesignWireId>(id));
@@ -394,19 +388,6 @@ std::optional<WireMetadata> Database::wireMetadata(WireId id) const
   return detail::toApi(state().design().routingStorage().wire(detail::toStorageId<DesignWireId>(id)));
 }
 
-std::optional<WireRoutingData> Database::wireRoutingData(WireId id) const
-{
-  if (!contains(id)) return std::nullopt;
-  auto& storage = state().design().routingStorage();
-  const auto storage_id = detail::toStorageId<DesignWireId>(id);
-  WireRoutingData result;
-  result.paths.reserve(storage.pathCount(storage_id));
-  storage.forEachPath(storage_id, [&result](const DesignWirePathView path) {
-    result.paths.push_back(detail::toApi(path));
-  });
-  return result;
-}
-
 std::vector<WireId> Database::wireIds() const
 {
   std::vector<WireId> result;
@@ -414,13 +395,6 @@ std::vector<WireId> Database::wireIds() const
     result.push_back(detail::toApiId<WireId>(id));
   }
   return result;
-}
-
-void Database::updateWire(WireId id, WireMetadata metadata, WireRoutingData routing)
-{
-  state().design().routingStorage().updateWire(detail::toStorageId<DesignWireId>(id),
-                                                detail::toStorage(metadata),
-                                                detail::toStorage(routing));
 }
 
 bool Database::destroyWire(WireId id)

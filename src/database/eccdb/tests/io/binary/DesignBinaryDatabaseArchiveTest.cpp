@@ -170,7 +170,7 @@ struct DesignFixture
   }
 };
 
-TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsCompactRoutingAndIndexes)
+TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsShapeRoutingAndIndexes)
 {
   DesignFixture fixture;
   const TemporaryFile binary{"design", ".edb"};
@@ -238,6 +238,7 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsCompactRoutingAndInd
   EXPECT_EQ(restored_registry.storage<DesignInstanceTerm>(), nullptr);
 
   const auto actual_statistics = restored->routingStorage().routingStatistics();
+  EXPECT_EQ(actual_statistics.shapes.count, expected_statistics.shapes.count);
   EXPECT_EQ(actual_statistics.paths.count, expected_statistics.paths.count);
   EXPECT_EQ(actual_statistics.path_extras.count, expected_statistics.path_extras.count);
   EXPECT_EQ(actual_statistics.points.count, expected_statistics.points.count);
@@ -393,11 +394,11 @@ TEST(DesignBinaryDatabaseArchiveTest, RejectsTruncatedPayload)
   EXPECT_THROW(BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library), std::runtime_error);
 }
 
-TEST(DesignBinaryDatabaseArchiveTest, RejectsSchemasPrecedingEmbeddedInstanceTermMap)
+TEST(DesignBinaryDatabaseArchiveTest, RejectsSchemasPrecedingShapeRouting)
 {
   DesignFixture fixture;
-  const TemporaryFile binary{"prior-term-registry-schema", ".edb"};
-  for (const uint32_t schema_version : {6u, 7u}) {
+  const TemporaryFile binary{"prior-shape-routing-schema", ".edb"};
+  for (const uint32_t schema_version : {6u, 7u, 8u}) {
     BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
     std::fstream output(binary.path(), std::ios::in | std::ios::out | std::ios::binary);
     ASSERT_TRUE(output);
@@ -411,7 +412,7 @@ TEST(DesignBinaryDatabaseArchiveTest, RejectsSchemasPrecedingEmbeddedInstanceTer
   }
 }
 
-TEST(DesignBinaryDatabaseArchiveTest, LargeIspd19FlatRoutingReachesByteExactFixedPoint)
+TEST(DesignBinaryDatabaseArchiveTest, LargeIspd19ShapeRoutingReachesByteExactFixedPoint)
 {
   using Clock = std::chrono::steady_clock;
   const auto elapsedSeconds = [](Clock::time_point begin) {
@@ -439,6 +440,7 @@ TEST(DesignBinaryDatabaseArchiveTest, LargeIspd19FlatRoutingReachesByteExactFixe
 
   const auto expected_statistics = source->routingStorage().routingStatistics();
   EXPECT_EQ(source->routingStorage().wireCount(), 895077u);
+  EXPECT_GT(expected_statistics.shapes.count, 0u);
   EXPECT_EQ(expected_statistics.paths.count, 46978419u);
   EXPECT_EQ(expected_statistics.points.count, 74768813u);
   EXPECT_EQ(expected_statistics.vias.count, 14697732u);
@@ -459,6 +461,7 @@ TEST(DesignBinaryDatabaseArchiveTest, LargeIspd19FlatRoutingReachesByteExactFixe
   EXPECT_EQ(restored->netlistStorage().instanceCount(), source->netlistStorage().instanceCount());
   EXPECT_EQ(restored->netlistStorage().instancePinCount(), source->netlistStorage().instancePinCount());
   EXPECT_EQ(restored->netlistStorage().netCount(), source->netlistStorage().netCount());
+  EXPECT_EQ(actual_statistics.shapes.count, expected_statistics.shapes.count);
   EXPECT_EQ(actual_statistics.paths.count, expected_statistics.paths.count);
   EXPECT_EQ(actual_statistics.path_extras.count, expected_statistics.path_extras.count);
   EXPECT_EQ(actual_statistics.points.count, expected_statistics.points.count);

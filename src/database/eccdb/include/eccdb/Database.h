@@ -114,12 +114,9 @@ class Database
   [[nodiscard]] bool destroyIoPin(IoPinId id);
   [[nodiscard]] IoPinRef ioPin(IoPinId id) const noexcept;
 
-  [[nodiscard]] WireId createWire(WireMetadata metadata, WireRoutingData routing);
   [[nodiscard]] bool contains(WireId id) const noexcept;
   [[nodiscard]] std::optional<WireMetadata> wireMetadata(WireId id) const;
-  [[nodiscard]] std::optional<WireRoutingData> wireRoutingData(WireId id) const;
   [[nodiscard]] std::vector<WireId> wireIds() const;
-  void updateWire(WireId id, WireMetadata metadata, WireRoutingData routing);
   [[nodiscard]] bool destroyWire(WireId id);
   [[nodiscard]] WireRef wire(WireId id) const noexcept;
 
