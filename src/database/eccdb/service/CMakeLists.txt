@@ -1,5 +1,6 @@
 add_library(eccdb_service
   context/RoutingContextService.cpp
+  query/GeometryViewService.cpp
   query/PhysicalDesignService.cpp
   routing/DesignViaService.cpp
   routing/NetRouteService.cpp

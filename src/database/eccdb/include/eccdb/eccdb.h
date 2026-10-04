@@ -18,7 +18,6 @@
 
 #include "eccdb/Config.h"
 #include "eccdb/Database.h"
-#include "eccdb/GeometryView.h"
 #include "eccdb/DesignData.h"
 #include "eccdb/Ref.h"
 #include "eccdb/RoutingData.h"

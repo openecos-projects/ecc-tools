@@ -1,9 +1,12 @@
 # EccDB Viewer Facade
 
-`eccdb_viewer` is a small GUI-facing facade over the canonical EccDB geometry
+`GeometryViewService` is a small GUI-facing service over the canonical EccDB geometry
 registry. It returns batches of opaque shape IDs and metadata/BBox values, and
 routes edits through `DesignGeometryStorage` so the existing lazy R-tree is
 invalidated by the normal geometry epoch mechanism.
+
+The optional `eccdb_viewer` shared library and Python module are only binding
+boundaries; the service implementation lives in `service/query`.
 
 The optional Python extension is enabled with:
 

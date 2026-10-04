@@ -8,9 +8,9 @@
 
 namespace eccdb {
 
-// This is the intentionally small, renderer-facing snapshot.  It contains
-// only identity, classification and bounds; the canonical geometry remains
-// owned by EccDB's GeometryRegistry.
+// Renderer-facing query/edit service. The canonical geometry remains owned by
+// DesignGeometryStorage; this service only exposes a batch boundary for GUI
+// and native renderer clients.
 struct GeometryShapeRecord
 {
   uint64_t id = UINT64_MAX;
@@ -32,20 +32,16 @@ struct GeometryShapeBatch
   uint64_t geometry_epoch = 0;
 };
 
-// View/edit facade for GUI and renderer clients.  It deliberately exposes
-// batches and stable opaque handles instead of typed EnTT storage details.
-class GeometryView
+class GeometryViewService
 {
  public:
-  explicit GeometryView(Database& database) noexcept : _database(&database) {}
+  explicit GeometryViewService(Database& database) noexcept : _database(&database) {}
 
   [[nodiscard]] GeometryShapeBatch query(Rect box) const;
   [[nodiscard]] std::optional<uint64_t> hitTest(Point point, int32_t tolerance = 0) const;
   [[nodiscard]] bool contains(uint64_t id) const;
   [[nodiscard]] uint64_t geometryEpoch() const;
 
-  // Edits preserve the shape handle and invalidate the derived spatial index
-  // through DesignGeometryStorage's existing mutation boundary.
   void moveShape(uint64_t id, int32_t dx, int32_t dy);
   [[nodiscard]] bool destroyShape(uint64_t id);
 

@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <memory>
 
-#include "eccdb/GeometryView.h"
+#include "query/GeometryViewService.h"
 
 namespace py = pybind11;
 
@@ -78,12 +78,12 @@ PYBIND11_MODULE(eccdb_viewer, module)
         return result;
       });
 
-  py::class_<eccdb::GeometryView>(module, "GeometryView")
+  py::class_<eccdb::GeometryViewService>(module, "GeometryView")
       .def(py::init<eccdb::Database&>(), py::keep_alive<1, 2>())
-      .def("query", &eccdb::GeometryView::query)
-      .def("hit_test", &eccdb::GeometryView::hitTest, py::arg("point"), py::arg("tolerance") = 0)
-      .def("contains", &eccdb::GeometryView::contains)
-      .def_property_readonly("geometry_epoch", &eccdb::GeometryView::geometryEpoch)
-      .def("move_shape", &eccdb::GeometryView::moveShape)
-      .def("destroy_shape", &eccdb::GeometryView::destroyShape);
+      .def("query", &eccdb::GeometryViewService::query)
+      .def("hit_test", &eccdb::GeometryViewService::hitTest, py::arg("point"), py::arg("tolerance") = 0)
+      .def("contains", &eccdb::GeometryViewService::contains)
+      .def_property_readonly("geometry_epoch", &eccdb::GeometryViewService::geometryEpoch)
+      .def("move_shape", &eccdb::GeometryViewService::moveShape)
+      .def("destroy_shape", &eccdb::GeometryViewService::destroyShape);
 }

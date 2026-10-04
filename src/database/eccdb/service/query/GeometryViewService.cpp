@@ -1,6 +1,5 @@
-#include "eccdb/GeometryView.h"
+#include "query/GeometryViewService.h"
 
-#include <algorithm>
 #include <stdexcept>
 
 #include "api/internal/DatabaseState.h"
@@ -37,9 +36,9 @@ GeometryShapeRecord recordFor(const DesignGeometryStorage& geometry, GeometrySha
 
 }  // namespace
 
-GeometryShapeBatch GeometryView::query(Rect box) const
+GeometryShapeBatch GeometryViewService::query(Rect box) const
 {
-  if (!_database) throw std::logic_error("GeometryView has no database");
+  if (!_database) throw std::logic_error("GeometryViewService has no database");
   const auto& design = _database->state().design();
   const auto& geometry = design.geometryStorage();
   GeometryShapeBatch result;
@@ -50,7 +49,7 @@ GeometryShapeBatch GeometryView::query(Rect box) const
   return result;
 }
 
-std::optional<uint64_t> GeometryView::hitTest(Point point, int32_t tolerance) const
+std::optional<uint64_t> GeometryViewService::hitTest(Point point, int32_t tolerance) const
 {
   if (tolerance < 0) throw std::invalid_argument("hit-test tolerance must be non-negative");
   const Rect box{point.x - tolerance, point.y - tolerance, point.x + tolerance, point.y + tolerance};
@@ -62,25 +61,25 @@ std::optional<uint64_t> GeometryView::hitTest(Point point, int32_t tolerance) co
   return std::nullopt;
 }
 
-bool GeometryView::contains(uint64_t id) const
+bool GeometryViewService::contains(uint64_t id) const
 {
   if (!_database) return false;
   return _database->state().design().geometryStorage().contains(toShapeId(id));
 }
 
-uint64_t GeometryView::geometryEpoch() const
+uint64_t GeometryViewService::geometryEpoch() const
 {
   if (!_database) return 0;
   return _database->state().design().geometryStorage().geometryEpoch();
 }
 
-void GeometryView::moveShape(uint64_t id, int32_t dx, int32_t dy)
+void GeometryViewService::moveShape(uint64_t id, int32_t dx, int32_t dy)
 {
-  if (!_database) throw std::logic_error("GeometryView has no database");
+  if (!_database) throw std::logic_error("GeometryViewService has no database");
   _database->state().design().geometryStorage().moveShape(toShapeId(id), dx, dy);
 }
 
-bool GeometryView::destroyShape(uint64_t id)
+bool GeometryViewService::destroyShape(uint64_t id)
 {
   if (!_database) return false;
   return _database->state().design().geometryStorage().destroy(toShapeId(id));
