@@ -30,7 +30,8 @@
 
 namespace eccdb {
 
-class GeometryViewService;
+class GeometryQueryService;
+class GeometryEditService;
 
 namespace detail {
 class DatabaseState;
@@ -133,7 +134,8 @@ class Database
 
  private:
   friend class detail::DatabaseTestAccess;
-  friend class ::eccdb::GeometryViewService;
+  friend class ::eccdb::GeometryQueryService;
+  friend class ::eccdb::GeometryEditService;
 
   explicit Database(std::unique_ptr<detail::DatabaseState> state) noexcept;
   [[nodiscard]] detail::DatabaseState& state() const;

@@ -5,7 +5,8 @@
 #include <cstdint>
 #include <memory>
 
-#include "query/GeometryViewService.h"
+#include "query/GeometryEditService.h"
+#include "query/GeometryQueryService.h"
 
 namespace py = pybind11;
 
@@ -78,12 +79,20 @@ PYBIND11_MODULE(eccdb_viewer, module)
         return result;
       });
 
-  py::class_<eccdb::GeometryViewService>(module, "GeometryView")
+  py::class_<eccdb::GeometryQueryService>(module, "GeometryQueryService")
       .def(py::init<eccdb::Database&>(), py::keep_alive<1, 2>())
-      .def("query", &eccdb::GeometryViewService::query)
-      .def("hit_test", &eccdb::GeometryViewService::hitTest, py::arg("point"), py::arg("tolerance") = 0)
-      .def("contains", &eccdb::GeometryViewService::contains)
-      .def_property_readonly("geometry_epoch", &eccdb::GeometryViewService::geometryEpoch)
-      .def("move_shape", &eccdb::GeometryViewService::moveShape)
-      .def("destroy_shape", &eccdb::GeometryViewService::destroyShape);
+      .def("query", &eccdb::GeometryQueryService::query)
+      .def("hit_test", &eccdb::GeometryQueryService::hitTest, py::arg("point"), py::arg("tolerance") = 0)
+      .def("contains", &eccdb::GeometryQueryService::contains)
+      .def_property_readonly("geometry_epoch", &eccdb::GeometryQueryService::geometryEpoch);
+
+  py::class_<eccdb::GeometryEditService>(module, "GeometryEditService")
+      .def(py::init<eccdb::Database&>(), py::keep_alive<1, 2>())
+      .def("move_shape", &eccdb::GeometryEditService::moveShape)
+      .def("destroy_shape", &eccdb::GeometryEditService::destroyShape);
+
+  // Keep the old read-only facade name as a source-compatible query alias for
+  // clients that have not migrated yet. Mutations now live exclusively on the
+  // explicit GeometryEditService boundary.
+  module.attr("GeometryView") = module.attr("GeometryQueryService");
 }

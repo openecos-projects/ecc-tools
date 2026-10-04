@@ -1,4 +1,4 @@
-#include "query/GeometryViewService.h"
+#include "query/GeometryQueryService.h"
 
 #include <stdexcept>
 
@@ -36,9 +36,9 @@ GeometryShapeRecord recordFor(const DesignGeometryStorage& geometry, GeometrySha
 
 }  // namespace
 
-GeometryShapeBatch GeometryViewService::query(Rect box) const
+GeometryShapeBatch GeometryQueryService::query(Rect box) const
 {
-  if (!_database) throw std::logic_error("GeometryViewService has no database");
+  if (!_database) throw std::logic_error("GeometryQueryService has no database");
   const auto& design = _database->state().design();
   const auto& geometry = design.geometryStorage();
   GeometryShapeBatch result;
@@ -49,7 +49,7 @@ GeometryShapeBatch GeometryViewService::query(Rect box) const
   return result;
 }
 
-std::optional<uint64_t> GeometryViewService::hitTest(Point point, int32_t tolerance) const
+std::optional<uint64_t> GeometryQueryService::hitTest(Point point, int32_t tolerance) const
 {
   if (tolerance < 0) throw std::invalid_argument("hit-test tolerance must be non-negative");
   const Rect box{point.x - tolerance, point.y - tolerance, point.x + tolerance, point.y + tolerance};
@@ -61,28 +61,16 @@ std::optional<uint64_t> GeometryViewService::hitTest(Point point, int32_t tolera
   return std::nullopt;
 }
 
-bool GeometryViewService::contains(uint64_t id) const
+bool GeometryQueryService::contains(uint64_t id) const
 {
   if (!_database) return false;
   return _database->state().design().geometryStorage().contains(toShapeId(id));
 }
 
-uint64_t GeometryViewService::geometryEpoch() const
+uint64_t GeometryQueryService::geometryEpoch() const
 {
   if (!_database) return 0;
   return _database->state().design().geometryStorage().geometryEpoch();
-}
-
-void GeometryViewService::moveShape(uint64_t id, int32_t dx, int32_t dy)
-{
-  if (!_database) throw std::logic_error("GeometryViewService has no database");
-  _database->state().design().geometryStorage().moveShape(toShapeId(id), dx, dy);
-}
-
-bool GeometryViewService::destroyShape(uint64_t id)
-{
-  if (!_database) return false;
-  return _database->state().design().geometryStorage().destroy(toShapeId(id));
 }
 
 }  // namespace eccdb

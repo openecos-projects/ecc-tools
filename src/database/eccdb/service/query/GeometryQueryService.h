@@ -8,9 +8,8 @@
 
 namespace eccdb {
 
-// Renderer-facing query/edit service. The canonical geometry remains owned by
-// DesignGeometryStorage; this service only exposes a batch boundary for GUI
-// and native renderer clients.
+// Native, GUI-independent geometry query boundary. GeometryStorage remains
+// the source of truth; this service only returns viewport-sized snapshots.
 struct GeometryShapeRecord
 {
   uint64_t id = UINT64_MAX;
@@ -32,18 +31,15 @@ struct GeometryShapeBatch
   uint64_t geometry_epoch = 0;
 };
 
-class GeometryViewService
+class GeometryQueryService
 {
  public:
-  explicit GeometryViewService(Database& database) noexcept : _database(&database) {}
+  explicit GeometryQueryService(Database& database) noexcept : _database(&database) {}
 
   [[nodiscard]] GeometryShapeBatch query(Rect box) const;
   [[nodiscard]] std::optional<uint64_t> hitTest(Point point, int32_t tolerance = 0) const;
   [[nodiscard]] bool contains(uint64_t id) const;
   [[nodiscard]] uint64_t geometryEpoch() const;
-
-  void moveShape(uint64_t id, int32_t dx, int32_t dy);
-  [[nodiscard]] bool destroyShape(uint64_t id);
 
  private:
   Database* _database;
