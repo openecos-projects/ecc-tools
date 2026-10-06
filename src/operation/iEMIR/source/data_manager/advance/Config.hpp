@@ -51,6 +51,9 @@ class Config
   std::string gb_temp_directory_path;
   // **********    IRAnalyzer     ********** //
   std::string ia_temp_directory_path;
+  std::string ir_solver = "auto";
+  double ir_solver_tolerance = 1.e-10;
+  int32_t ir_solver_max_iterations = 2000;
   // **********    EMAnalyzer     ********** //
   std::string ea_temp_directory_path;
   // **********   EMIRReporter    ********** //

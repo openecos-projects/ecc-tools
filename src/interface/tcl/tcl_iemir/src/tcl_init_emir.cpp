@@ -41,6 +41,10 @@ TclInitEMIR::TclInitEMIR(const char* cmd_name) : TclCmd(cmd_name)
   // int32_t thread_number;                  // optional
   _config_list.push_back(std::make_pair("-thread_number", ValueType::kInt));
 
+  _config_list.push_back(std::make_pair("-ir_solver", ValueType::kString));
+  _config_list.push_back(std::make_pair("-ir_solver_tolerance", ValueType::kDouble));
+  _config_list.push_back(std::make_pair("-ir_solver_max_iterations", ValueType::kInt));
+
   TclUtil::addOption(this, _config_list);
 }
 

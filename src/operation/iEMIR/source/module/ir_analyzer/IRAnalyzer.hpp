@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <memory>
+
 #include "Database.hpp"
 #include "IAModel.hpp"
 #include "InstancePower.hpp"
@@ -25,6 +27,8 @@
 namespace iemir {
 
 #define EMIRIA (iemir::IRAnalyzer::getInst())
+
+class IRLinearSolver;
 
 class IRAnalyzer
 {
@@ -38,11 +42,12 @@ class IRAnalyzer
  private:
   // self
   static IRAnalyzer* _ia_instance;
+  std::map<std::string, std::unique_ptr<IRLinearSolver>> _solver_map;
 
-  IRAnalyzer() = default;
+  IRAnalyzer();
   IRAnalyzer(const IRAnalyzer& other) = delete;
   IRAnalyzer(IRAnalyzer&& other) = delete;
-  ~IRAnalyzer() = default;
+  ~IRAnalyzer();
   IRAnalyzer& operator=(const IRAnalyzer& other) = delete;
   IRAnalyzer& operator=(IRAnalyzer&& other) = delete;
   // function

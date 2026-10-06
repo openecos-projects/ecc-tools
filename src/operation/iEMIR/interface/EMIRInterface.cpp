@@ -21,6 +21,7 @@
 #include "EMIRReporter.hpp"
 #include "GraphBuilder.hpp"
 #include "IRAnalyzer.hpp"
+#include "IRLinearSolver.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PowerNet.hpp"
@@ -46,12 +47,10 @@ std::pair<idb::IdbLayer*, idb::IdbLayer*> getAdjacentRoutingLayers(idb::IdbLayer
   idb::IdbLayer* bottom_layer = nullptr;
   idb::IdbLayer* top_layer = nullptr;
   for (idb::IdbLayer* routing_layer : layers->get_routing_layers()) {
-    if (routing_layer->get_order() < cut_layer->get_order()
-        && (bottom_layer == nullptr || routing_layer->get_order() > bottom_layer->get_order())) {
+    if (routing_layer->get_order() < cut_layer->get_order() && (bottom_layer == nullptr || routing_layer->get_order() > bottom_layer->get_order())) {
       bottom_layer = routing_layer;
     }
-    if (routing_layer->get_order() > cut_layer->get_order()
-        && (top_layer == nullptr || routing_layer->get_order() < top_layer->get_order())) {
+    if (routing_layer->get_order() > cut_layer->get_order() && (top_layer == nullptr || routing_layer->get_order() < top_layer->get_order())) {
       top_layer = routing_layer;
     }
   }
@@ -103,6 +102,7 @@ void EMIRInterface::initEMIR(std::map<std::string, std::any> config_map)
   Monitor monitor;
   EMIRLOG.info(Loc::current(), "Starting...");
 
+  IRAnalyzer::destroyInst();
   DataManager::initInst();
   EMIRDM.input(config_map);
 
@@ -120,7 +120,6 @@ void EMIRInterface::runEMIR()
 
   IRAnalyzer::initInst();
   EMIRIA.analyze();
-  IRAnalyzer::destroyInst();
 
   EMAnalyzer::initInst();
   EMIREA.analyze();
@@ -139,6 +138,7 @@ void EMIRInterface::destroyEMIR()
   EMIRLOG.info(Loc::current(), "Starting...");
 
   EMIRDM.output();
+  IRAnalyzer::destroyInst();
   DataManager::destroyInst();
 
   EMIRLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -176,16 +176,29 @@ void EMIRInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 {
   /////////////////////////////////////////////
   EMIRDM.getConfig().temp_directory_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory");
-  EMIRDM.getConfig().ptpx_instance_power_file_path
-      = EMIRUTIL.getConfigValue<std::string>(config_map, "-ptpx_instance_power_file_path", "");
-  EMIRDM.getConfig().redhawk_res_network_file_path
-      = EMIRUTIL.getConfigValue<std::string>(config_map, "-redhawk_res_network_file_path", "");
+  EMIRDM.getConfig().ptpx_instance_power_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ptpx_instance_power_file_path", "");
+  EMIRDM.getConfig().redhawk_res_network_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-redhawk_res_network_file_path", "");
   EMIRDM.getConfig().ploc_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
   EMIRDM.getConfig().redhawk_tech_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-redhawk_tech_file_path", "");
   EMIRDM.getConfig().em_limit_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-em_limit_file_path", "");
-  EMIRDM.getConfig().em_violation_threshold_percent
-      = EMIRUTIL.getConfigValue<double>(config_map, "-em_violation_threshold_percent", 100.0);
+  EMIRDM.getConfig().em_violation_threshold_percent = EMIRUTIL.getConfigValue<double>(config_map, "-em_violation_threshold_percent", 100.0);
   EMIRDM.getConfig().thread_number = EMIRUTIL.getConfigValue<int32_t>(config_map, "-thread_number", 128);
+  auto& config = EMIRDM.getConfig();
+  config.ir_solver = EMIRUTIL.getConfigValue<std::string>(config_map, "-ir_solver", "auto");
+  config.ir_solver_tolerance = EMIRUTIL.getConfigValue<double>(config_map, "-ir_solver_tolerance", 1.e-10);
+  config.ir_solver_max_iterations = EMIRUTIL.getConfigValue<int32_t>(config_map, "-ir_solver_max_iterations", 2000);
+  IRSolverOptions options;
+  options.method = config.ir_solver;
+  options.relative_tolerance = config.ir_solver_tolerance;
+  options.max_iterations = config.ir_solver_max_iterations;
+  try {
+    IRLinearSolver::validateOptions(options);
+    if (options.relative_tolerance > 1.e-8) {
+      throw std::invalid_argument("ir_solver_tolerance must be <= 1e-8 to preserve IR residual/current-balance checks");
+    }
+  } catch (const std::exception& error) {
+    EMIRLOG.error(Loc::current(), "Invalid IR solver configuration: ", error.what());
+  }
   omp_set_num_threads(std::max(EMIRDM.getConfig().thread_number, 1));
   /////////////////////////////////////////////
 }
@@ -331,11 +344,10 @@ void EMIRInterface::wrapRedHawkResNetwork()
     imported_net_num++;
   }
   if (imported_net_num == 0) {
-    EMIRLOG.error(Loc::current(), "The RedHawk res_network contains no DEF POWER/GROUND net: ",
-                  EMIRDM.getConfig().redhawk_res_network_file_path);
+    EMIRLOG.error(Loc::current(), "The RedHawk res_network contains no DEF POWER/GROUND net: ", EMIRDM.getConfig().redhawk_res_network_file_path);
   }
-  EMIRLOG.info(Loc::current(), "Imported ", network.wire_segments.size(), " RedHawk PG wire resistors and ", network.vias.size(),
-               " via resistors from ", imported_net_num, " nets in ", EMIRDM.getConfig().redhawk_res_network_file_path);
+  EMIRLOG.info(Loc::current(), "Imported ", network.wire_segments.size(), " RedHawk PG wire resistors and ", network.vias.size(), " via resistors from ",
+               imported_net_num, " nets in ", EMIRDM.getConfig().redhawk_res_network_file_path);
 }
 
 void EMIRInterface::wrapPowerNet(idb::IdbSpecialNet* idb_power_net)
@@ -425,8 +437,8 @@ void EMIRInterface::wrapPowerVia(PowerNet& power_net, idb::IdbVia* idb_via)
     if (cut_rect == nullptr || micron_dbu <= 0) {
       continue;
     }
-    cut_area_um2 += static_cast<double>(cut_rect->get_width()) * static_cast<double>(cut_rect->get_height())
-                    / static_cast<double>(micron_dbu) / static_cast<double>(micron_dbu);
+    cut_area_um2 += static_cast<double>(cut_rect->get_width()) * static_cast<double>(cut_rect->get_height()) / static_cast<double>(micron_dbu)
+                    / static_cast<double>(micron_dbu);
   }
   power_via.set_cut_area_um2(cut_area_um2);
   idb::IdbRect cut_bounding_box = idb_via->get_cut_bounding_box();
@@ -491,8 +503,7 @@ void EMIRInterface::wrapPowerPinList(PowerNet& power_net, idb::IdbSpecialNet* id
         continue;
       }
       for (idb::IdbPin* idb_pin : idb_instance->get_pin_list()->get_pin_list()) {
-        if (idb_pin != nullptr && idb_design->findSpecialNetForInstancePin(idb_pin) == idb_power_net
-            && wrapped_pins.insert(idb_pin).second) {
+        if (idb_pin != nullptr && idb_design->findSpecialNetForInstancePin(idb_pin) == idb_power_net && wrapped_pins.insert(idb_pin).second) {
           wrapPowerPin(power_net, idb_pin, false);
         }
       }
