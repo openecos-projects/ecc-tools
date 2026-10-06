@@ -8,13 +8,17 @@ else()
     set(CMAKE_BUILD_TYPE "Release")
 endif()
 
+add_library(iemir_ir_solver ${IEMIR_MODULE}/ir_analyzer/IRLinearSolver.cpp)
+target_link_libraries(iemir_ir_solver PUBLIC Eigen3::Eigen)
+target_include_directories(iemir_ir_solver PUBLIC ${IEMIR_MODULE}/ir_analyzer)
+
 add_library(iemir_ir_analyzer
     ${IEMIR_MODULE}/ir_analyzer/IRAnalyzer.cpp
 )
 
 target_link_libraries(iemir_ir_analyzer
     PRIVATE
-    Eigen3::Eigen
+    iemir_ir_solver
     PUBLIC
     iemir_data_manager
     iemir_toolkit

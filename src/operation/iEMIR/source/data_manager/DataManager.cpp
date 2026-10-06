@@ -16,8 +16,8 @@
 // ***************************************************************************************
 #include "DataManager.hpp"
 
-#include "EMTech.hpp"
 #include "EMIRInterface.hpp"
+#include "EMTech.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PTPXPowerReader.hpp"
@@ -306,8 +306,7 @@ void DataManager::readPowerSourceFile()
       EMIRLOG.error(Loc::current(), "Invalid PLOC record at line ", line_number, ": ", line);
     }
     type_name = toUpper(type_name);
-    PowerNetType net_type = type_name == "POWER" ? PowerNetType::kPower
-                                                 : (type_name == "GROUND" ? PowerNetType::kGround : PowerNetType::kNone);
+    PowerNetType net_type = type_name == "POWER" ? PowerNetType::kPower : (type_name == "GROUND" ? PowerNetType::kGround : PowerNetType::kNone);
     if (net_type == PowerNetType::kNone) {
       EMIRLOG.error(Loc::current(), "Invalid PLOC source type at line ", line_number, ": ", type_name);
     }
@@ -370,8 +369,8 @@ void DataManager::readInstancePower()
     EMIRLOG.error(Loc::current(), "No non-zero PT-PX instance power matched the DEF design.");
   }
   double power_coverage = 100.0 * matched_total_power / report_total_power;
-  EMIRLOG.info(Loc::current(), "Loaded shared PT-PX power: matched_instances=", instance_power_map.size(), ", unknown_records=",
-               unknown_record_num, ", power_coverage=", power_coverage, "% from ", _config.ptpx_instance_power_file_path);
+  EMIRLOG.info(Loc::current(), "Loaded shared PT-PX power: matched_instances=", instance_power_map.size(), ", unknown_records=", unknown_record_num,
+               ", power_coverage=", power_coverage, "% from ", _config.ptpx_instance_power_file_path);
   if (power_coverage < 95.0) {
     EMIRLOG.error(Loc::current(), "PT-PX instance power coverage is below 95%: ", power_coverage, "%");
   }
@@ -394,8 +393,8 @@ void DataManager::readEMTech()
     EMIRLOG.warn(Loc::current(), "No EM rule was parsed; EM_Ratio will be reported as 0%.");
     return;
   }
-  EMIRLOG.info(Loc::current(), "Loaded EM tech rules from ", _database.get_em_tech().get_source_file_path(), ": metal=",
-               _database.get_em_tech().get_metal_rule_map().size(), ", via=", _database.get_em_tech().get_via_rule_map().size());
+  EMIRLOG.info(Loc::current(), "Loaded EM tech rules from ", _database.get_em_tech().get_source_file_path(),
+               ": metal=", _database.get_em_tech().get_metal_rule_map().size(), ", via=", _database.get_em_tech().get_via_rule_map().size());
 }
 
 void DataManager::readRedHawkTechFile(const std::string& redhawk_tech_file_path)
@@ -521,6 +520,8 @@ void DataManager::printConfig()
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.em_violation_threshold_percent);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "thread_number");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.thread_number);
+  EMIRLOG.info(Loc::current(), "IR solver: ", _config.ir_solver, ", tolerance=", _config.ir_solver_tolerance,
+               ", max_iterations=", _config.ir_solver_max_iterations);
 }
 
 void DataManager::printDatabase()
