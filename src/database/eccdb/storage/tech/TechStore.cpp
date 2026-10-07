@@ -7,8 +7,7 @@
 namespace eccdb {
 
 TechStore::TechStore(TechStoreOptions options)
-    : _geometry(options.geometry),
-      _tech_root(_registry.registry().create()),
+    : _tech_root(_registry.registry().create()),
       _globals(_registry, _tech_root),
       _routing_layers(_registry),
       _cut_layers(_registry),
@@ -24,10 +23,10 @@ TechStore::TechStore(TechStoreOptions options)
   _registry.registry().emplace<TechLayerSequence>(_tech_root.entity());
 }
 
-void TechStore::resetForBinaryLoad(GeometryPoolOptions options)
+void TechStore::resetForBinaryLoad()
 {
   _registry.registry() = TechRegistry::registry_type{};
-  _geometry = GeometryPool(options);
+  _geometry = DomainGeometryStorage{};
   _tech_root = {};
   _globals.rebindRoot(_tech_root);
   _via_rules.rebindRoot(_tech_root);
@@ -47,6 +46,9 @@ void TechStore::bindBinaryLoadedRoot()
   _tech_root = TechRootId{root};
   _globals.rebindRoot(_tech_root);
   _via_rules.rebindRoot(_tech_root);
+  for (const auto entity : _geometry.geometryRegistry().registry().view<const GeometryShape>()) {
+    static_cast<void>(_geometry.geometryRegistry().ensureBounds(GeometryShapeId{entity}));
+  }
 }
 
 bool TechStore::contains(TechRootId id) const noexcept

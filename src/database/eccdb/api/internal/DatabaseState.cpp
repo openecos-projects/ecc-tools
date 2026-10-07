@@ -23,7 +23,6 @@
 #include "design/DesignStore.h"
 #include "binary/BinaryDatabaseExporter.h"
 #include "def/DefDesignExporter.h"
-#include "geometry/GeometryPool.h"
 #include "binary/BinaryDatabaseImporter.h"
 #include "library/LibraryStore.h"
 #include "tech/TechStore.h"
@@ -57,17 +56,6 @@ void validateBinaryFiles(const BinaryFiles& files)
   if (technology == library || technology == design || library == design) {
     throw std::invalid_argument("technology, library and design binaries must use distinct paths");
   }
-}
-
-GeometryPoolOptions geometryOptions(const RuntimeOptions& options)
-{
-  switch (options.polygon_mode) {
-    case PolygonMode::kNative:
-      return GeometryPoolOptions{.polygon_mode = PolygonStorageMode::kNative};
-    case PolygonMode::kRectangularized:
-      return GeometryPoolOptions{.polygon_mode = PolygonStorageMode::kRectangularized};
-  }
-  throw std::invalid_argument("invalid EccDB polygon mode");
 }
 
 }  // namespace
@@ -106,12 +94,11 @@ std::unique_ptr<DatabaseState> DatabaseState::open(const Config& config)
   requirePath(lef_def.def_file, "DEF");
 
 #if ECCDB_HAS_LEF_DEF
-  const auto geometry = geometryOptions(config.runtime);
-  state->_technology = std::make_unique<TechStore>(TechStoreOptions{.geometry = geometry});
+  state->_technology = std::make_unique<TechStore>();
   LefTechImporter(*state->_technology).import(lef_def.lef_files);
 
   state->_library =
-      std::make_unique<LibraryStore>(state->_technology->techRegistry(), LibraryStoreOptions{.geometry = geometry});
+      std::make_unique<LibraryStore>(state->_technology->techRegistry());
   LefLibraryImporter library_importer(*state->_technology, *state->_library);
   library_importer.import(lef_def.lef_files);
   for (const auto& diagnostic : library_importer.diagnostics()) {
@@ -120,7 +107,8 @@ std::unique_ptr<DatabaseState> DatabaseState::open(const Config& config)
   }
 
   state->_owned_design =
-      std::make_unique<DesignStore>(state->_technology->techRegistry(), state->_library->libraryRegistry());
+      std::make_unique<DesignStore>(state->_technology->techRegistry(), state->_library->libraryRegistry(),
+                                    &state->_technology->geometryRegistry());
   state->_design = state->_owned_design.get();
   DefDesignImporter design_importer(*state->_design);
   design_importer.import(lef_def.def_file);

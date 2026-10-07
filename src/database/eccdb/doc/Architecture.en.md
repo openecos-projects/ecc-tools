@@ -14,7 +14,7 @@ The current EccDB implementation currently has five practical layers:
 
 1. **Public API**: `Database`, `Config`, strong ID types, Data values, and Ref handles under `include/eccdb`.
 2. **API implementation**: `api` and `api/internal`, which implement the Facade, own the PImpl state, and convert public values to internal types.
-3. **Storage**: `storage`, containing EnTT registries, components, indexes, and the Tech/Library `GeometryPool`; Design routing lives directly in Wire-local flat vectors.
+3. **Storage**: `storage`, containing EnTT registries, components, indexes, and independent typed geometry registries; Design routing stores only ordered geometry IDs on each Wire.
 4. **Format IO**: `io/lef`, `io/def`, `io/idb`, and `io/binary`, which materialize or export database objects.
 5. **Validation and performance**: `tests` and `benchmarks`, covering invariants, round trips, semantic differential tests, memory, and performance.
 
@@ -29,8 +29,8 @@ flowchart TB
   stores --> tech["storage/tech\nTechStore"]
   stores --> library["storage/library\nLibraryStore"]
   stores --> design["storage/design\nDesignStore"]
-  stores --> geometry["storage/geometry\nGeometryPool"]
-  design --> routing["DesignWire routing\nWire-local flat vectors"]
+  stores --> geometry["storage/geometry\nGeometryRegistry"]
+  design --> routing["DesignWire + GeometryRegistry\nordered Shape IDs + typed payload"]
   internal --> io["io/lef · io/def · io/idb · io/binary\nimport / export"]
   io --> stores
   tests["tests\nunit / IO / differential / memory"] --> public
@@ -50,7 +50,7 @@ The diagram keeps only the current EccDB boundary. It deliberately does not pres
 | `storage/tech` | Layers, rules, Via masters, NDRs, and technology data | No |
 | `storage/library` | Sites, cell masters, master terms, ports, and obstructions | No |
 | `storage/design` | Floorplan, netlist, connectivity, routing, constraints, and fills | No |
-| `storage/geometry` | `GeometryPool`, polygon rectangularization, and handles | No |
+| `storage/geometry` | typed EnTT geometry entities and domain storage facades | No |
 | `io/lef`, `io/def` | SI2 parser sequences, importers, and exporters | No |
 | `io/idb` | Legacy iDB LEF conversion adapter | No |
 | `io/binary` | Three-domain binary archives, schemas, and payloads | No |
@@ -62,11 +62,11 @@ The diagram keeps only the current EccDB boundary. It deliberately does not pres
 
 ### 3.1 `TechStore`
 
-`TechStore` owns one `TechRegistry` and one `GeometryPool`. Technology layers are not split across independent registries. A base layer ID is combined with routing, cut, implant, masterslice, overlap, or other components to represent its kind; rules and Via definitions are managed by their dedicated storages. Technology geometry lives in the Tech-owned pool, while components keep handles or ranges.
+`TechStore` owns one `TechRegistry` and one independent `GeometryRegistry`. Technology layers are not split across independent registries. A base layer ID is combined with routing, cut, implant, masterslice, overlap, or other components to represent its kind; rules and Via definitions are managed by their dedicated storages. Every physical rectangle or polygon is an independent typed geometry entity, while components keep ordered IDs.
 
 ### 3.2 `LibraryStore`
 
-`LibraryStore` owns a Library registry and a library geometry pool. It borrows the `TechRegistry` because macro pins, ports, and obstructions refer to technology layers and Via masters. The borrowed TechRegistry must outlive LibraryStore. Release dependent DesignStores first, then LibraryStore, then TechStore.
+`LibraryStore` owns a Library registry and an independent `GeometryRegistry`. It borrows the `TechRegistry` because macro pins, ports, and obstructions refer to technology layers and Via masters. PORT/OBS rectangles, polygons, and Via placements are independent Shapes; their owners retain IDs. The borrowed TechRegistry must outlive LibraryStore. Release dependent DesignStores first, then LibraryStore, then TechStore.
 
 ### 3.3 `DesignStore`
 
@@ -77,14 +77,15 @@ The diagram keeps only the current EccDB boundary. It deliberately does not pres
 The storage layer uses EnTT ECS, but EnTT is an implementation mechanism, not the public EccDB object API:
 
 ```text
-TechRegistry    -> Tech entity + Tech components
-LibraryRegistry -> Library entity + Library components
-DesignRegistry  -> Design entity + Design components
+TechRegistry       -> Tech entity + Tech components
+LibraryRegistry    -> Library entity + Library components
+DesignRegistry     -> Design entity + Design components
+GeometryRegistry   -> GeometryShape entity + one typed payload
 ```
 
 Internal IDs use `EnttId<Entity, Component>` and compile-time component tags. Public headers expose `ObjectId<Tag>` instead, so callers do not depend on EnTT entities or component layouts.
 
-Name maps, reverse connectivity indexes, and ordered lists are derived acceleration data. Binary restore rebuilds them instead of treating them as independent authoritative records. Code that accesses internal Storage directly must follow its index maintenance rules; public CRUD operations centralize the common updates.
+Name maps, reverse connectivity indexes, and spatial R-trees are derived acceleration data. Ordered owner-to-Shape lists are persisted relationships. Binary restore loads those relationships and rebuilds the derived indexes. Code that accesses internal Storage directly must follow its index maintenance rules; public CRUD operations centralize the common updates.
 
 ## 5. Public API semantics
 
@@ -105,8 +106,8 @@ flowchart LR
   ref --> entity["Database-owned entity\nEnTT components"]
   entity --> snapshot["NetData\nowned snapshot"]
   snapshot --> write["updateNet / destroyNet\nvalidated mutation"]
-  wire["Wire entity"] --> routing["DesignWireRouting\nWire-local flat vectors"]
-  routing --> values["Path records / Points / Vias / Rects\naggregate values"]
+  wire["Wire entity"] --> routing["DesignWire + GeometryRegistry\nordered Shape IDs + typed payload"]
+  routing --> values["Segment / Via / Patch / Point\nindependent Shape entities"]
 ```
 
 ### 5.1 IDs
@@ -142,11 +143,13 @@ This will be suitable for future FFI, serialization, and asynchronous work becau
 
 ## 6. Wire and geometry storage
 
-A Wire is an entity in the Design registry. Its paths, points, Via placements, and rectangles are aggregate values, not currently independent public entities.
+`DesignRegistry` owns the shared Design-domain `GeometryRegistry`. Wire, Net, BlockPin, fixed Via definitions, Region, Blockage, Fill, inline Instance region bounds, Die/Core boundaries, and Guide/Track owners keep Shape IDs rather than coordinate arrays. Coordinates live in independent typed geometry entities. `Design*Input` aggregates are temporary write-side values, excluded from snapshots. Route geometry uses `DesignRouteShape`; other owners reuse rectangle/polygon/boundary payloads or Pin/Via/Guide payloads carrying their DEF attributes. There is no geometry pool, hidden ordinal, or second locator.
 
-Each `DesignWire` component directly owns five flat vectors: `paths`, `points`, `vias`, `rectangles`, and `extras`. A path record uses Wire-local `begin/count` ranges for its three primitive arrays. Updating a Wire replaces the routing vectors, and destroying it releases them with the entity, so there is no design-wide routing-pool garbage. Via placements refer to either a technology `TechViaId` or a design `ViaId`; the Via definition geometry remains in the corresponding Tech or Design object.
+The ID is a plain 64-bit EnTT entity (32-bit slot and 32-bit generation), which matches the extended Design registry capacity without adding another application ID layer. `GeometryShapeId` is domain-local: a Design, Library, or Tech registry has its own ID space, and a selection must retain its domain/store together with the ID.
 
-Consequently `WireRef::routingData()` materializes an owned `WireRoutingData` value. It is not a second authoritative geometry database. Writeback validates and replaces the Wire-local routing vectors; existing spans and views are invalidated when that Wire is updated or destroyed.
+The editor boundary is deliberately small: create/append, replace, move, erase, and reorder preserve the shape entity when an edit can be done in place. `geometryEpoch()` changes on mutation, including Net NDR changes that affect line width. `DesignStore::geometryIndex()` owns a lazy, rebuildable Boost.Geometry R-tree over IDs and bounding boxes; it never copies the payload and is rebuilt after an epoch change. This follows KLayout's proxy-plus-derived-index approach while keeping the EDA-facing route order in the Wire relation. Queries return BBox candidates, without promising exact geometric overlap.
+
+The EDA adapters use borrowed typed payloads. `PhysicalDesignService::forEachNetWireShape` and `forEachNetGeometry` expose canonical references during the callback, so polygon points, Via origins, and metadata strings are not copied into temporary DTOs. TritonRoute and iDRC can still materialize their own path lists, grids, or region queries when their algorithms require them; those are derived tool data, not a second EccDB source of truth.
 
 ## 7. Input, output, and tool data flow
 
@@ -168,7 +171,7 @@ sequenceDiagram
 
 `Config` currently supports either a set of LEFs plus one DEF, or three independent binary files for technology, library, and design. LEF/DEF parser sequences are protected by mutexes. Importers stage entity and geometry changes and roll them back on failure; this is not a public long-lived transaction.
 
-Binary archives are split by registry domain. Their headers validate magic, format version, schema version, payload size, and exact file size. Wire routing is stored with the `DesignWire` component snapshot, and derived indexes are rebuilt after load. Adding a persisted component or field requires a corresponding schema version update in `io/binary/BinarySchema.h`.
+Binary archives are split by registry domain. Their headers validate magic, format version, schema version, payload size, and exact file size. Design/Library/Tech geometry registries are snapshotted separately from their owner relations; spatial indexes are rebuilt after load. Adding a persisted component or field requires a corresponding schema version update in `io/binary/BinarySchema.h`.
 
 ## 8. External integration boundary
 

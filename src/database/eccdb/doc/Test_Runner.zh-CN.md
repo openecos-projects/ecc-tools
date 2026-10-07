@@ -10,11 +10,11 @@
 cd /path/to/workspace/ecc-tools
 RUNNER="$PWD/src/database/eccdb/doc/run_tests.sh"
 
-"$RUNNER" doctor                   # 检查配置的数据与 OpenDB 模块
-"$RUNNER" test unit                # 单元测试
-"$RUNNER" test io                  # LEF/DEF importer、exporter、round-trip
+"$RUNNER" doctor                   # 检查配置的数据与构建依赖
+"$RUNNER" test unit                # Geometry、Design/Service 单元测试
+"$RUNNER" test io                  # unified Geometry 持久化与 DEF round-trip
 "$RUNNER" test binary              # 二进制固定点；默认大用例会明确 SKIP
-"$RUNNER" test diff                # SI2、legacy iDB、LEF/DEF/OpenDB 差分
+"$RUNNER" test diff                # DEF corpus 固定点、OpenROAD golden/OpenDB 差分
 "$RUNNER" test irt --filter 'Wrap.*:SelfCheck.*'
 "$RUNNER" test idrc
 "$RUNNER" test route-smoke         # ISPD18 sample，完整 route + writeback
@@ -74,10 +74,10 @@ source <("$RUNNER" --config /tmp/my-eccdb-tests.sh env)
 
 | 组 | 范围 | 构建树 |
 | --- | --- | --- |
-| `unit` | geometry、design/API、library、tech | standalone |
-| `io` | LEF importer/exporter 与 DEF round-trip | standalone |
+| `unit` | GeometryRegistry、Unified Geometry、Design/Service（3 个目标） | standalone |
+| `io` | Geometry persistence、DEF round-trip（2 个目标） | standalone |
 | `binary` | Tech/Library 和 Design binary archive | standalone |
-| `diff` | 5 个 differential 二进制 | standalone |
+| `diff` | DEF full corpus 与 OpenDB Design differential（2 个目标） | standalone |
 | `irt` | `Wrap.*:SelfCheck.*:Writeback.*` | tools |
 | `idrc` | `Wrap.*:Shapes.*:SelfCheck.*` | tools |
 | `route-smoke` | `IspdUnder100k/*/Ispd18Sample` | tools |
@@ -85,6 +85,8 @@ source <("$RUNNER" --config /tmp/my-eccdb-tests.sh env)
 | `all` | 上述组，但 route 只跑 smoke | 两者 |
 
 `all` 的范围不包含完整 routing、memory comparison 或 benchmark。普通测试失败后继续其他测试组并汇总为非零退出；缺依赖或构建失败会直接停止。过滤器不会放宽组级数据检查。
+
+统一 Geometry 重构后，依赖旧 GeometryPool/schema 的 LEF/library/tech 专用目标已退出构建；相关迁移验证由 Geometry persistence、Tech/Library binary 和 OpenROAD golden 差分覆盖。`all` 每个 focused target 仅运行一次。本轮实际执行结果与未运行范围见 [Geometry_Migration_20261003.md](Geometry_Migration_20261003.md)，不能把这里的脚本分组清单当作本轮全部已执行。
 
 ```bash
 "$RUNNER" configure standalone
@@ -106,7 +108,7 @@ source <("$RUNNER" --config /tmp/my-eccdb-tests.sh env)
 ```bash
 "$RUNNER" doctor --large
 "$RUNNER" test diff --large
-"$RUNNER" test binary --large --filter '*LargeIspd19FlatRouting*'
+"$RUNNER" test binary --large --filter '*LargeIspd19ShapeRouting*'
 "$RUNNER" test route --filter 'IspdAround100k/*'
 ```
 

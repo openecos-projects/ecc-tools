@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "library/cell_master/model/CellMasterComponents.h"
+#include "common/GeometryBounds.h"
 #include "library/master_port/model/MasterPortComponents.h"
 
 namespace eccdb {
@@ -126,6 +127,7 @@ LibraryMasterTermId LibraryMasterTermStorage::createMasterTermTrusted(LibraryCel
     entity = _registry.create();
     id = LibraryMasterTermId{*entity};
     _registry.emplace<LibraryMasterTerm>(*entity, std::move(term));
+    _registry.emplace<GeometryBounds>(*entity);
     auto& terms = _registry.get<LibraryCellMaster>(owner.entity()).terms;
     const auto ordinal = terms.size();
     terms.emplace_back(*entity);
@@ -282,6 +284,13 @@ bool LibraryMasterTermStorage::destroyMasterTerm(LibraryMasterTermId id)
   for (const auto port_id : term.ports) {
     if (_registry.valid(port_id.entity()) && _registry.all_of<LibraryMasterPort>(port_id.entity())
         && _registry.get<const LibraryMasterPort>(port_id.entity()).term == id) {
+      const auto& port = _registry.get<const LibraryMasterPort>(port_id.entity());
+      for (const auto& clause : port.layer_clauses) {
+        _geometry.destroy(clause.geometry);
+      }
+      for (const auto shape : port.vias) {
+        static_cast<void>(_geometry.geometryRegistry().destroy(shape));
+      }
       _registry.destroy(port_id.entity());
     }
   }

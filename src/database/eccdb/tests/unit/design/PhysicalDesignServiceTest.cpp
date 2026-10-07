@@ -75,7 +75,7 @@ struct PhysicalDesignServiceFixture : testing::Test
                                                   .geometry = {.rects = {{7, 8, 11, 12}}}}}});
 
     design.globalStorage().setInfo(DesignInfo{.name = "service", .database_units_per_micron = 1000});
-    design.globalStorage().setDieArea(DesignDieArea{.boundary = {{0, 0}, {1000, 0}, {1000, 800}, {0, 800}}});
+    design.globalStorage().setDieArea(DesignDieAreaInput{.boundary = {{0, 0}, {1000, 0}, {1000, 800}, {0, 800}}});
     static_cast<void>(design.floorplanStorage().createTrackGrid(
         DesignTrackGrid{.axis = DesignAxis::kX, .start = 20, .track_count = 3, .step = 40, .layers = {m1}}));
     static_cast<void>(design.floorplanStorage().createGCellGrid(
@@ -84,9 +84,9 @@ struct PhysicalDesignServiceFixture : testing::Test
     design_ndr = design.routingStorage().createNonDefaultRule(
         DesignNonDefaultRule{.name = "WIDE", .layer_rules = {{.layer = TechLayerId{m1.entity()}, .width = 20}}});
     design_via = design.routingStorage().createVia(
-        DesignVia{.name = "LOCAL_VIA",
-                  .rectangles = {{.layer = TechLayerId{m1.entity()}, .rectangle = {1, 2, 3, 4}, .mask = 2}},
-                  .polygons = {{.layer = TechLayerId{m2.entity()}, .points = {{1, 1}, {3, 1}, {3, 2}, {1, 2}}, .mask = 1}}});
+        DesignViaInput{.name = "LOCAL_VIA",
+                       .rectangles = {{.layer = TechLayerId{m1.entity()}, .rectangle = {1, 2, 3, 4}, .mask = 2}},
+                       .polygons = {{.layer = TechLayerId{m2.entity()}, .points = {{1, 1}, {3, 1}, {3, 2}, {1, 2}}, .mask = 1}}});
     regular = design.netlistStorage().createNet(
         DesignNet{.name = "signal", .flags = DesignNetFlag::kHasNonDefaultRule, .design_non_default_rule = design_ndr});
     special = design.netlistStorage().createSpecialNet(DesignNet{.name = "VDD"});
@@ -102,12 +102,12 @@ struct PhysicalDesignServiceFixture : testing::Test
     design.netlistStorage().connect(io_regular, regular);
     design.netlistStorage().connect(io_special, special);
     blockage = design.constraintStorage().createBlockage(
-        DesignBlockage{.kind = DesignBlockageKind::kRouting,
-                       .flags = DesignBlockageFlag::kHasLayer | DesignBlockageFlag::kHasMask,
-                       .layer = m2,
-                       .mask = 3,
-                       .rectangles = {{300, 310, 340, 360}},
-                       .polygons = {{{400, 400}, {420, 400}, {420, 430}, {400, 430}}}});
+        DesignBlockageInput{.kind = DesignBlockageKind::kRouting,
+                            .flags = DesignBlockageFlag::kHasLayer | DesignBlockageFlag::kHasMask,
+                            .layer = m2,
+                            .mask = 3,
+                            .rectangles = {{300, 310, 340, 360}},
+                            .polygons = {{{400, 400}, {420, 400}, {420, 430}, {400, 430}}}});
 
     service = std::make_unique<PhysicalDesignService>(tech, library, design);
   }
@@ -215,27 +215,27 @@ TEST_F(PhysicalDesignServiceFixture, EnumeratesViaGenerateRuleClauses)
 TEST_F(PhysicalDesignServiceFixture, ExpandsGeneratedDesignViaWithOriginOffsetsAndOrientation)
 {
   const auto generated_via = design.routingStorage().createVia(
-      DesignVia{.name = "LOCAL_GENERATED",
-                .flags = DesignViaFlag::kGenerated,
-                .generated = {.via_rule = generated_via_rule,
-                              .bottom_layer = m1,
-                              .cut_layer = cut,
-                              .top_layer = m2,
-                              .flags = DesignGeneratedViaFlag::kHasRowCol | DesignGeneratedViaFlag::kHasOrigin
-                                       | DesignGeneratedViaFlag::kHasOffset,
-                              .cut_size_x = 4,
-                              .cut_size_y = 6,
-                              .cut_spacing_x = 2,
-                              .cut_spacing_y = 4,
-                              .bottom_enclosure_x = 1,
-                              .bottom_enclosure_y = 2,
-                              .top_enclosure_x = 3,
-                              .top_enclosure_y = 4,
-                              .row_count = 2,
-                              .column_count = 3,
-                              .origin = {1, -1},
-                              .bottom_offset = {3, 5},
-                              .top_offset = {-2, 4}}});
+      DesignViaInput{.name = "LOCAL_GENERATED",
+                     .flags = DesignViaFlag::kGenerated,
+                     .generated = {.via_rule = generated_via_rule,
+                                   .bottom_layer = m1,
+                                   .cut_layer = cut,
+                                   .top_layer = m2,
+                                   .flags = DesignGeneratedViaFlag::kHasRowCol | DesignGeneratedViaFlag::kHasOrigin
+                                            | DesignGeneratedViaFlag::kHasOffset,
+                                   .cut_size_x = 4,
+                                   .cut_size_y = 6,
+                                   .cut_spacing_x = 2,
+                                   .cut_spacing_y = 4,
+                                   .bottom_enclosure_x = 1,
+                                   .bottom_enclosure_y = 2,
+                                   .top_enclosure_x = 3,
+                                   .top_enclosure_y = 4,
+                                   .row_count = 2,
+                                   .column_count = 3,
+                                   .origin = {1, -1},
+                                   .bottom_offset = {3, 5},
+                                   .top_offset = {-2, 4}}});
 
   std::vector<PhysicalLayerRect> rectangles;
   const auto visitor = PhysicalGeometryVisitor{.rectangle = [&](const PhysicalLayerRect& shape) { rectangles.push_back(shape); }};

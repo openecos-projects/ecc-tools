@@ -5,13 +5,15 @@
 #include <stdexcept>
 #include <utility>
 
-#include "design/common/DesignGeometryValidation.h"
 #include "design/constraint/model/ConstraintComponents.h"
 #include "design/global/model/DesignGlobalComponents.h"
+#include "design/guide/model/GuideComponents.h"
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/pin_access/model/PinAccessComponents.h"
+#include "common/GeometryBounds.h"
 #include "design/routing/component/RoutingComponents.h"
 #include "design/via/component/ViaComponents.h"
+#include "geometry/DomainGeometryComponents.h"
 #include "library/LibraryRegistry.h"
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/master_term/model/MasterTermComponents.h"
@@ -120,7 +122,7 @@ void validatePinShapeFields(const TechRegistry& tech_registry, TechLayerId layer
 
 void validateBlockPinPayload(const DesignNetlistStorage::registry_type& registry,
                              const TechRegistry& tech_registry,
-                             const DesignBlockPin& pin)
+                             const DesignBlockPinInput& pin)
 {
   constexpr uint32_t kKnownFlags = DesignIoPinPortFlag::kExplicit | DesignIoPinPortFlag::kHasPlacement;
   const bool has_placement = (pin.flags & DesignIoPinPortFlag::kHasPlacement) != 0u;
@@ -187,9 +189,12 @@ void unlinkNetPin(DesignNetlistStorage::registry_type& registry, DesignNetId own
 
 }  // namespace
 
-DesignInstanceId DesignNetlistStorage::createInstance(DesignInstance instance)
+DesignInstanceId DesignNetlistStorage::createInstance(DesignInstance instance, std::span<const Rect> region_bounds)
 {
-  validateInstance(instance);
+  if (!instance.region_bounds.empty()) {
+    throw std::invalid_argument("new design instance inline regions must use the region-bounds input");
+  }
+  validateInstance(instance, region_bounds);
   const auto master_id = instance.master;
   const auto& term_registry = _library_registry.registry();
   const auto& master = term_registry.get<const LibraryCellMaster>(master_id.entity());
@@ -201,8 +206,12 @@ DesignInstanceId DesignNetlistStorage::createInstance(DesignInstance instance)
 
   const auto entity = _registry.create();
   const DesignInstanceId id{entity};
+  std::vector<GeometryShapeId> created_region_bounds;
   try {
+    created_region_bounds = materializeInstanceRegionBounds(id, region_bounds);
+    instance.region_bounds = created_region_bounds;
     _registry.emplace<DesignInstance>(entity, std::move(instance));
+    _registry.emplace<GeometryBounds>(entity);
     auto& pins = _registry.emplace<DesignInstancePins>(entity);
     pins.values.reserve(master.terms.size());
     pins.records.reserve(master.terms.size());
@@ -260,41 +269,90 @@ DesignInstanceId DesignNetlistStorage::createInstance(DesignInstance instance)
     if (_registry.valid(entity)) {
       _registry.destroy(entity);
     }
+    for (const auto shape : created_region_bounds) {
+      static_cast<void>(geometryRegistry().destroy(shape));
+    }
     throw;
+  }
+  if (!created_region_bounds.empty()) {
+    _design_registry.markGeometryChanged();
   }
   return id;
 }
 
-void DesignNetlistStorage::updateInstance(DesignInstanceId id, DesignInstance instance)
+void DesignNetlistStorage::updateInstance(DesignInstanceId id, DesignInstance instance, std::span<const Rect> region_bounds)
 {
   ensureInstance(id);
   const auto& stored = _registry.get<const DesignInstance>(id.entity());
   if (instance.master != stored.master) {
     throw std::invalid_argument("changing a design instance master requires recreating its pins");
   }
-  validateInstance(instance, id);
-  if (instance.name == stored.name) {
-    _registry.replace<DesignInstance>(id.entity(), std::move(instance));
-    return;
+  const auto old_region_bounds = stored.region_bounds;
+  if (!instance.region_bounds.empty() && instance.region_bounds != old_region_bounds) {
+    throw std::invalid_argument("design instance inline region IDs are storage-managed");
+  }
+  const bool replace_region_bounds = !region_bounds.empty();
+  if (replace_region_bounds) {
+    // A caller may pass a snapshot returned by instance(); its canonical IDs
+    // are accepted as the existing value and replaced by the input rectangles.
+    instance.region_bounds.clear();
+  } else if (!old_region_bounds.empty()) {
+    // A caller updating placement/name data should not need to round-trip
+    // geometry handles merely to preserve a COMPONENT inline REGION.
+    instance.flags |= DesignInstanceFlag::kHasRegionBounds;
+    instance.region_bounds = old_region_bounds;
+  }
+  validateInstance(instance, region_bounds, id);
+
+  const bool unchanged_name = instance.name == stored.name;
+  std::string old_name;
+  std::string new_name;
+  if (!unchanged_name) {
+    // Complete every allocation that is independent of new geometry before
+    // creating shapes, so a failed name-index preparation cannot leak them.
+    old_name = stored.name;
+    new_name = instance.name;
+    reserveNameInsert(_instance_names);
   }
 
-  const auto old_name = stored.name;
-  const auto new_name = instance.name;
-  reserveNameInsert(_instance_names);
-  try {
-    const auto [unused, inserted] = _instance_names.emplace(new_name, id);
-    if (!inserted) {
-      throw std::logic_error("design instance name index is inconsistent");
+  std::vector<GeometryShapeId> created_region_bounds;
+  const auto discard_created = [&]() noexcept {
+    for (const auto shape : created_region_bounds) {
+      static_cast<void>(geometryRegistry().destroy(shape));
     }
-    _registry.replace<DesignInstance>(id.entity(), std::move(instance));
+  };
+  bool inserted_name = false;
+  try {
+    if (replace_region_bounds) {
+      created_region_bounds = materializeInstanceRegionBounds(id, region_bounds);
+      instance.region_bounds = created_region_bounds;
+    }
+    if (unchanged_name) {
+      _registry.replace<DesignInstance>(id.entity(), std::move(instance));
+    } else {
+      const auto [unused, inserted] = _instance_names.emplace(new_name, id);
+      if (!inserted) {
+        throw std::logic_error("design instance name index is inconsistent");
+      }
+      inserted_name = true;
+      _registry.replace<DesignInstance>(id.entity(), std::move(instance));
+    }
   } catch (...) {
-    const auto indexed = _instance_names.find(new_name);
-    if (indexed != _instance_names.end() && indexed->second == id) {
+    if (inserted_name) {
       _instance_names.erase(new_name);
     }
+    discard_created();
     throw;
   }
-  _instance_names.erase(old_name);
+  if (!unchanged_name) {
+    _instance_names.erase(old_name);
+  }
+  if (replace_region_bounds) {
+    for (const auto shape : old_region_bounds) {
+      static_cast<void>(geometryRegistry().destroy(shape));
+    }
+    _design_registry.markGeometryChanged();
+  }
 }
 
 bool DesignNetlistStorage::destroyInstance(DesignInstanceId id)
@@ -331,8 +389,15 @@ bool DesignNetlistStorage::destroyInstance(DesignInstanceId id)
   for (const auto pin : pins) {
     _instance_terms[static_cast<std::size_t>(pin.packed())] = nullptr;
   }
+  const auto region_bounds = _registry.get<const DesignInstance>(id.entity()).region_bounds;
   _instance_names.erase(_registry.get<const DesignInstance>(id.entity()).name);
   _registry.destroy(id.entity());
+  for (const auto shape : region_bounds) {
+    static_cast<void>(geometryRegistry().destroy(shape));
+  }
+  if (!region_bounds.empty()) {
+    _design_registry.markGeometryChanged();
+  }
   return true;
 }
 
@@ -410,7 +475,7 @@ std::span<const DesignInstancePinId> DesignNetlistStorage::instancePins(DesignNe
   return connections == nullptr ? std::span<const DesignInstancePinId>{} : std::span<const DesignInstancePinId>{connections->values};
 }
 
-DesignIoPinId DesignNetlistStorage::createIoPin(DesignIoPin pin, std::vector<DesignBlockPin> pins)
+DesignIoPinId DesignNetlistStorage::createIoPin(DesignIoPin pin, std::vector<DesignBlockPinInput> pins)
 {
   if (pin.net || pin.special_net) {
     throw std::invalid_argument("create IO pin before connecting it to a net");
@@ -425,6 +490,7 @@ DesignIoPinId DesignNetlistStorage::createIoPin(DesignIoPin pin, std::vector<Des
   try {
     const auto id = DesignIoPinId{entity};
     _registry.emplace<DesignBlockTerm>(entity, std::move(pin));
+    _registry.emplace<GeometryBounds>(entity);
     for (auto& block_pin : pins) {
       static_cast<void>(createBlockPin(id, std::move(block_pin)));
     }
@@ -442,6 +508,7 @@ DesignIoPinId DesignNetlistStorage::createIoPin(DesignIoPin pin, std::vector<Des
       const auto block_pins = _registry.get<const DesignBlockTerm>(entity).pins;
       for (const auto block_pin : block_pins) {
         if (_registry.valid(block_pin.entity())) {
+          destroyBlockPinGeometry(_registry.get<const DesignBlockPin>(block_pin.entity()));
           _registry.destroy(block_pin.entity());
         }
       }
@@ -561,37 +628,52 @@ std::span<const DesignBlockPinId> DesignNetlistStorage::blockPins(DesignBlockTer
   return _registry.get<const DesignBlockTerm>(term.entity()).pins;
 }
 
-DesignBlockPinId DesignNetlistStorage::createBlockPin(DesignBlockTermId term, DesignBlockPin pin)
+DesignBlockPinId DesignNetlistStorage::createBlockPin(DesignBlockTermId term, DesignBlockPinInput pin)
 {
   ensureIoPin(term);
-  pin.term = term;
   validateBlockPin(pin);
   validateBlockPinRelation(term, pin);
+  auto& term_pins = _registry.get<DesignBlockTerm>(term.entity()).pins;
+  term_pins.reserve(term_pins.size() + 1u);
 
   const auto entity = _registry.create();
+  const DesignBlockPinId id{entity};
+  DesignBlockPin materialized;
   try {
-    _registry.emplace<DesignBlockPin>(entity, std::move(pin));
-    _registry.get<DesignBlockTerm>(term.entity()).pins.emplace_back(entity);
+    materialized = materializeBlockPin(id, term, std::move(pin));
+    _registry.emplace<DesignBlockPin>(entity, std::move(materialized));
+    _registry.emplace<GeometryBounds>(entity);
+    term_pins.emplace_back(entity);
   } catch (...) {
+    destroyBlockPinGeometry(materialized);
     if (_registry.valid(entity)) {
       _registry.destroy(entity);
     }
     throw;
   }
-  return DesignBlockPinId{entity};
+  _design_registry.markGeometryChanged();
+  return id;
 }
 
-void DesignNetlistStorage::updateBlockPin(DesignBlockPinId id, DesignBlockPin pin)
+void DesignNetlistStorage::updateBlockPin(DesignBlockPinId id, DesignBlockPinInput pin)
 {
   ensureBlockPin(id);
-  const auto term = blockPin(id).term;
-  pin.term = term;
-  validateBlockPin(pin, id);
+  const auto old = blockPin(id);
+  const auto term = old.term;
+  validateBlockPin(pin);
   validateBlockPinRelation(term, pin, id);
-  _registry.replace<DesignBlockPin>(id.entity(), std::move(pin));
+  auto replacement = materializeBlockPin(id, term, std::move(pin));
+  try {
+    _registry.replace<DesignBlockPin>(id.entity(), std::move(replacement));
+  } catch (...) {
+    destroyBlockPinGeometry(replacement);
+    throw;
+  }
+  destroyBlockPinGeometry(old);
   if (_registry.all_of<DesignBlockPinAccessGroups>(id.entity())) {
     _registry.remove<DesignBlockPinAccessGroups>(id.entity());
   }
+  _design_registry.markGeometryChanged();
 }
 
 bool DesignNetlistStorage::destroyBlockPin(DesignBlockPinId id)
@@ -606,8 +688,11 @@ bool DesignNetlistStorage::destroyBlockPin(DesignBlockPinId id)
   if (found == pins.end()) {
     throw std::logic_error("design block pin is missing from its owner relation");
   }
+  const auto value = blockPin(id);
   pins.erase(found);
   _registry.destroy(id.entity());
+  destroyBlockPinGeometry(value);
+  _design_registry.markGeometryChanged();
   return true;
 }
 
@@ -627,8 +712,11 @@ void DesignNetlistStorage::updateNet(DesignNetId id, DesignNet net)
   const bool special = isSpecialNet(id);
   validateNet(net, special, id);
   const auto& stored = _registry.get<const DesignNet>(id.entity());
+  const bool geometry_changed = net.non_default_rule != stored.non_default_rule
+                                 || net.design_non_default_rule != stored.design_non_default_rule;
   if (net.name == stored.name) {
     _registry.replace<DesignNet>(id.entity(), std::move(net));
+    if (geometry_changed) _design_registry.markGeometryChanged();
     return;
   }
 
@@ -650,11 +738,16 @@ void DesignNetlistStorage::updateNet(DesignNetId id, DesignNet net)
     throw;
   }
   names.erase(old_name);
+  if (geometry_changed) _design_registry.markGeometryChanged();
 }
 
 bool DesignNetlistStorage::destroyNet(DesignNetId id)
 {
   if (!contains(id) || !instancePins(id).empty() || !ioPins(id).empty()) {
+    return false;
+  }
+  if (const auto* geometry = _registry.try_get<const DesignNetGeometry>(id.entity());
+      geometry != nullptr && !geometry->shapes.empty()) {
     return false;
   }
   const auto wire_view = _registry.view<const DesignWire>();
@@ -663,9 +756,22 @@ bool DesignNetlistStorage::destroyNet(DesignNetId id)
       return false;
     }
   }
+  std::vector<GeometryShapeId> guide_shapes;
+  if (const auto* guides = _registry.try_get<const DesignNetRouteGuides>(id.entity()); guides != nullptr) {
+    guide_shapes = guides->values;
+  }
+  std::vector<GeometryShapeId> track_shapes;
+  if (const auto* tracks = _registry.try_get<const DesignNetTrackAssignments>(id.entity()); tracks != nullptr) {
+    track_shapes = tracks->values;
+  }
   auto& names = isSpecialNet(id) ? _special_net_names : _regular_net_names;
   names.erase(_registry.get<const DesignNet>(id.entity()).name);
   _registry.destroy(id.entity());
+  geometryRegistry().destroy(guide_shapes);
+  geometryRegistry().destroy(track_shapes);
+  if (!guide_shapes.empty() || !track_shapes.empty()) {
+    _design_registry.markGeometryChanged();
+  }
   return true;
 }
 
@@ -782,6 +888,7 @@ void DesignNetlistStorage::connect(DesignIoPinId pin, DesignNetId owner)
   auto& relation = _registry.all_of<DesignSpecialNet>(owner.entity()) ? stored.special_net : stored.net;
   _registry.get_or_emplace<DesignNetIoPins>(owner.entity()).values.push_back(pin);
   relation = owner;
+  _design_registry.markGeometryChanged();
 }
 
 void DesignNetlistStorage::disconnect(DesignIoPinId pin)
@@ -796,6 +903,7 @@ void DesignNetlistStorage::disconnect(DesignIoPinId pin)
   }
   stored.net = {};
   stored.special_net = {};
+  _design_registry.markGeometryChanged();
 }
 
 void DesignNetlistStorage::disconnect(DesignIoPinId pin, DesignNetId owner)
@@ -809,6 +917,7 @@ void DesignNetlistStorage::disconnect(DesignIoPinId pin, DesignNetId owner)
   }
   unlinkNetPin<DesignNetIoPins>(_registry, owner, pin);
   relation = {};
+  _design_registry.markGeometryChanged();
 }
 
 bool DesignNetlistStorage::referencesMaster(LibraryCellMasterId master) const
@@ -1010,6 +1119,7 @@ DesignNetId DesignNetlistStorage::createNet(DesignNet net, bool special)
   const DesignNetId id{entity};
   try {
     _registry.emplace<DesignNet>(entity, std::move(net));
+    _registry.emplace<GeometryBounds>(entity);
     if (special) {
       _registry.emplace<DesignSpecialNet>(entity);
     }
@@ -1028,7 +1138,9 @@ DesignNetId DesignNetlistStorage::createNet(DesignNet net, bool special)
   return id;
 }
 
-void DesignNetlistStorage::validateInstance(const DesignInstance& value, DesignInstanceId ignored) const
+void DesignNetlistStorage::validateInstance(const DesignInstance& value,
+                                            std::span<const Rect> region_bounds,
+                                            DesignInstanceId ignored) const
 {
   constexpr uint32_t kKnownFlags = DesignInstanceFlag::kHasWeight | DesignInstanceFlag::kHasRegion | DesignInstanceFlag::kHasRegionBounds
                                    | DesignInstanceFlag::kHasHalo | DesignInstanceFlag::kHaloSoft | DesignInstanceFlag::kHasRouteHalo;
@@ -1053,10 +1165,15 @@ void DesignNetlistStorage::validateInstance(const DesignInstance& value, DesignI
       || (has_region && (!_registry.valid(value.region.entity()) || !_registry.all_of<DesignRegion>(value.region.entity())))) {
     throw std::invalid_argument("design instance region and flags are inconsistent");
   }
-  if (has_region_bounds != !value.region_bounds.empty()) {
+  const bool has_canonical_region_bounds = !value.region_bounds.empty();
+  const bool has_input_region_bounds = !region_bounds.empty();
+  if (has_canonical_region_bounds && has_input_region_bounds) {
+    throw std::invalid_argument("design instance cannot mix canonical and input inline regions");
+  }
+  if (has_region_bounds != (has_canonical_region_bounds || has_input_region_bounds)) {
     throw std::invalid_argument("design instance inline region and flags are inconsistent");
   }
-  for (const auto rectangle : value.region_bounds) {
+  for (const auto rectangle : region_bounds) {
     if (!rectangle.isValid() || !rectangle.hasArea()) {
       throw std::invalid_argument("design instance inline region rectangle must have area");
     }
@@ -1105,22 +1222,16 @@ void DesignNetlistStorage::validateIoPin(const DesignIoPin& value, DesignIoPinId
   }
 }
 
-void DesignNetlistStorage::validateBlockPin(const DesignBlockPin& value, DesignBlockPinId) const
+void DesignNetlistStorage::validateBlockPin(const DesignBlockPinInput& value) const
 {
   validateBlockPinPayload(_registry, _tech_registry, value);
-  if (!value.term || !contains(value.term)) {
-    throw std::invalid_argument("design block pin references an invalid block term");
-  }
 }
 
 void DesignNetlistStorage::validateBlockPinRelation(DesignBlockTermId term,
-                                                     const DesignBlockPin& value,
+                                                     const DesignBlockPinInput& value,
                                                      DesignBlockPinId ignored) const
 {
   ensureIoPin(term);
-  if (value.term != term) {
-    throw std::invalid_argument("design block pin owner does not match its block term relation");
-  }
 
   bool has_explicit_port = false;
   bool has_implicit_port = false;
@@ -1146,6 +1257,78 @@ void DesignNetlistStorage::validateBlockPinRelation(DesignBlockTermId term,
   ++count;
   if ((has_explicit_port && has_implicit_port) || (has_implicit_port && count != 1u)) {
     throw std::invalid_argument("design IO pin cannot mix explicit and implicit ports");
+  }
+}
+
+DesignBlockPin DesignNetlistStorage::materializeBlockPin(DesignBlockPinId id,
+                                                          DesignBlockTermId term,
+                                                          DesignBlockPinInput input)
+{
+  DesignBlockPin result{.flags = input.flags,
+                        .placement_status = input.placement_status,
+                        .origin = input.origin,
+                        .orientation = input.orientation,
+                        .term = term};
+  std::vector<GeometryShapeId> created;
+  created.reserve(input.rectangles.size() + input.polygons.size() + input.vias.size());
+  try {
+    result.rectangles.reserve(input.rectangles.size());
+    result.polygons.reserve(input.polygons.size());
+    result.vias.reserve(input.vias.size());
+    for (auto& rectangle : input.rectangles) {
+      const auto shape = geometryRegistry().create(designBlockPinOwner(id), GeometryShape{.flags = rectangle.flags},
+                                                   std::move(rectangle));
+      created.push_back(shape);
+      result.rectangles.push_back(shape);
+    }
+    for (auto& polygon : input.polygons) {
+      const auto shape = geometryRegistry().create(designBlockPinOwner(id), GeometryShape{.flags = polygon.flags},
+                                                   std::move(polygon));
+      created.push_back(shape);
+      result.polygons.push_back(shape);
+    }
+    for (auto& via : input.vias) {
+      const auto shape = geometryRegistry().create(designBlockPinOwner(id), GeometryShape{.flags = via.flags}, std::move(via));
+      created.push_back(shape);
+      result.vias.push_back(shape);
+    }
+    return result;
+  } catch (...) {
+    for (const auto shape : created) {
+      static_cast<void>(geometryRegistry().destroy(shape));
+    }
+    throw;
+  }
+}
+
+void DesignNetlistStorage::destroyBlockPinGeometry(const DesignBlockPin& pin) noexcept
+{
+  for (const auto shape : pin.rectangles) {
+    static_cast<void>(geometryRegistry().destroy(shape));
+  }
+  for (const auto shape : pin.polygons) {
+    static_cast<void>(geometryRegistry().destroy(shape));
+  }
+  for (const auto shape : pin.vias) {
+    static_cast<void>(geometryRegistry().destroy(shape));
+  }
+}
+
+std::vector<GeometryShapeId> DesignNetlistStorage::materializeInstanceRegionBounds(DesignInstanceId id,
+                                                                                     std::span<const Rect> region_bounds)
+{
+  std::vector<GeometryShapeId> result;
+  result.reserve(region_bounds.size());
+  try {
+    for (const auto rectangle : region_bounds) {
+      result.push_back(geometryRegistry().create(designInstanceOwner(id), GeometryRectangle{.rectangle = rectangle.normalized()}));
+    }
+    return result;
+  } catch (...) {
+    for (const auto shape : result) {
+      static_cast<void>(geometryRegistry().destroy(shape));
+    }
+    throw;
   }
 }
 

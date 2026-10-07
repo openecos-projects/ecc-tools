@@ -11,7 +11,7 @@ DesignViaService::DesignViaService(DesignStore& design) : _design(design)
 {
 }
 
-DesignViaId DesignViaService::createVia(DesignVia via)
+DesignViaId DesignViaService::createVia(DesignViaInput via)
 {
   return _design.routingStorage().createVia(std::move(via));
 }
@@ -26,7 +26,7 @@ const DesignVia& DesignViaService::via(DesignViaId id) const
   return _design.routingStorage().via(id);
 }
 
-void DesignViaService::updateVia(DesignViaId id, DesignVia via)
+void DesignViaService::updateVia(DesignViaId id, DesignViaInput via)
 {
   _design.routingStorage().updateVia(id, std::move(via));
 }

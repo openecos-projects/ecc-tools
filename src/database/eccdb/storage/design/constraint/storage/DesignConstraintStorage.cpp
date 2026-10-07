@@ -57,24 +57,40 @@ std::vector<Id> componentIds(const DesignConstraintStorage::registry_type& regis
 
 }  // namespace
 
-DesignRegionId DesignConstraintStorage::createRegion(DesignRegion region)
+DesignRegionId DesignConstraintStorage::createRegion(DesignRegionInput region)
 {
   validateRegion(region);
   const auto entity = _registry.create();
+  const DesignRegionId id{entity};
+  DesignRegion materialized;
   try {
-    _registry.emplace<DesignRegion>(entity, std::move(region));
+    materialized = materializeRegion(id, std::move(region));
+    _registry.emplace<DesignRegion>(entity, std::move(materialized));
   } catch (...) {
-    _registry.destroy(entity);
+    destroyRegionGeometry(materialized);
+    if (_registry.valid(entity)) {
+      _registry.destroy(entity);
+    }
     throw;
   }
-  return DesignRegionId{entity};
+  _design_registry.markGeometryChanged();
+  return id;
 }
 
-void DesignConstraintStorage::updateRegion(DesignRegionId id, DesignRegion region)
+void DesignConstraintStorage::updateRegion(DesignRegionId id, DesignRegionInput region)
 {
   ensureRegion(id);
   validateRegion(region, id);
-  _registry.replace<DesignRegion>(id.entity(), std::move(region));
+  const auto old = this->region(id);
+  auto replacement = materializeRegion(id, std::move(region));
+  try {
+    _registry.replace<DesignRegion>(id.entity(), std::move(replacement));
+  } catch (...) {
+    destroyRegionGeometry(replacement);
+    throw;
+  }
+  destroyRegionGeometry(old);
+  _design_registry.markGeometryChanged();
 }
 
 bool DesignConstraintStorage::destroyRegion(DesignRegionId id)
@@ -82,7 +98,10 @@ bool DesignConstraintStorage::destroyRegion(DesignRegionId id)
   if (!contains(id) || regionIsReferenced(id)) {
     return false;
   }
+  const auto value = region(id);
   _registry.destroy(id.entity());
+  destroyRegionGeometry(value);
+  _design_registry.markGeometryChanged();
   return true;
 }
 
@@ -169,24 +188,40 @@ std::vector<DesignGroupId> DesignConstraintStorage::groups() const
   return componentIds<DesignGroupId, DesignGroup>(_registry);
 }
 
-DesignBlockageId DesignConstraintStorage::createBlockage(DesignBlockage blockage)
+DesignBlockageId DesignConstraintStorage::createBlockage(DesignBlockageInput blockage)
 {
   validateBlockage(blockage);
   const auto entity = _registry.create();
+  const DesignBlockageId id{entity};
+  DesignBlockage materialized;
   try {
-    _registry.emplace<DesignBlockage>(entity, std::move(blockage));
+    materialized = materializeBlockage(id, std::move(blockage));
+    _registry.emplace<DesignBlockage>(entity, std::move(materialized));
   } catch (...) {
-    _registry.destroy(entity);
+    destroyBlockageGeometry(materialized);
+    if (_registry.valid(entity)) {
+      _registry.destroy(entity);
+    }
     throw;
   }
-  return DesignBlockageId{entity};
+  _design_registry.markGeometryChanged();
+  return id;
 }
 
-void DesignConstraintStorage::updateBlockage(DesignBlockageId id, DesignBlockage blockage)
+void DesignConstraintStorage::updateBlockage(DesignBlockageId id, DesignBlockageInput blockage)
 {
   ensureBlockage(id);
   validateBlockage(blockage);
-  _registry.replace<DesignBlockage>(id.entity(), std::move(blockage));
+  const auto old = this->blockage(id);
+  auto replacement = materializeBlockage(id, std::move(blockage));
+  try {
+    _registry.replace<DesignBlockage>(id.entity(), std::move(replacement));
+  } catch (...) {
+    destroyBlockageGeometry(replacement);
+    throw;
+  }
+  destroyBlockageGeometry(old);
+  _design_registry.markGeometryChanged();
 }
 
 bool DesignConstraintStorage::destroyBlockage(DesignBlockageId id)
@@ -194,7 +229,10 @@ bool DesignConstraintStorage::destroyBlockage(DesignBlockageId id)
   if (!contains(id)) {
     return false;
   }
+  const auto value = blockage(id);
   _registry.destroy(id.entity());
+  destroyBlockageGeometry(value);
+  _design_registry.markGeometryChanged();
   return true;
 }
 
@@ -251,7 +289,7 @@ uint32_t DesignConstraintStorage::blockageCount() const
   return static_cast<uint32_t>(_registry.storage<DesignBlockage>().size());
 }
 
-void DesignConstraintStorage::validateRegion(const DesignRegion& value, DesignRegionId ignored) const
+void DesignConstraintStorage::validateRegion(const DesignRegionInput& value, DesignRegionId ignored) const
 {
   if (value.name.empty() || regionNameInUse(value.name, ignored) || !isValidRegionType(value.type)) {
     throw std::invalid_argument("design region name or type is invalid");
@@ -280,7 +318,7 @@ void DesignConstraintStorage::validateGroup(const DesignGroup& value, DesignGrou
   }
 }
 
-void DesignConstraintStorage::validateBlockage(const DesignBlockage& value) const
+void DesignConstraintStorage::validateBlockage(const DesignBlockageInput& value) const
 {
   constexpr uint32_t kKnownFlags = DesignBlockageFlag::kHasLayer | DesignBlockageFlag::kSoft | DesignBlockageFlag::kPushdown
                                    | DesignBlockageFlag::kHasPartial | DesignBlockageFlag::kHasComponent | DesignBlockageFlag::kSlots
@@ -333,6 +371,61 @@ void DesignConstraintStorage::validateBlockage(const DesignBlockage& value) cons
       || (value.kind == DesignBlockageKind::kPlacement && !value.polygons.empty())) {
     throw std::invalid_argument("design blockage routing options and flags are inconsistent");
   }
+}
+
+DesignRegion DesignConstraintStorage::materializeRegion(DesignRegionId id, DesignRegionInput input)
+{
+  DesignRegion result{.name = std::move(input.name), .type = input.type};
+  try {
+    result.rectangles.reserve(input.rectangles.size());
+    for (const auto rectangle : input.rectangles) {
+      result.rectangles.push_back(
+          geometryRegistry().create(designRegionOwner(id), GeometryRectangle{.rectangle = rectangle.normalized()}));
+    }
+    return result;
+  } catch (...) {
+    destroyRegionGeometry(result);
+    throw;
+  }
+}
+
+DesignBlockage DesignConstraintStorage::materializeBlockage(DesignBlockageId id, DesignBlockageInput input)
+{
+  DesignBlockage result{.kind = input.kind,
+                        .flags = input.flags,
+                        .layer = input.layer,
+                        .component = input.component,
+                        .partial = input.partial,
+                        .spacing = input.spacing,
+                        .design_rule_width = input.design_rule_width,
+                        .mask = input.mask};
+  try {
+    result.rectangles.reserve(input.rectangles.size());
+    result.polygons.reserve(input.polygons.size());
+    for (const auto rectangle : input.rectangles) {
+      result.rectangles.push_back(
+          geometryRegistry().create(designBlockageOwner(id), GeometryRectangle{.rectangle = rectangle.normalized()}));
+    }
+    for (auto& polygon : input.polygons) {
+      result.polygons.push_back(
+          geometryRegistry().create(designBlockageOwner(id), GeometryPolygon{.points = std::move(polygon)}));
+    }
+    return result;
+  } catch (...) {
+    destroyBlockageGeometry(result);
+    throw;
+  }
+}
+
+void DesignConstraintStorage::destroyRegionGeometry(const DesignRegion& region) noexcept
+{
+  geometryRegistry().destroy(region.rectangles);
+}
+
+void DesignConstraintStorage::destroyBlockageGeometry(const DesignBlockage& blockage) noexcept
+{
+  geometryRegistry().destroy(blockage.rectangles);
+  geometryRegistry().destroy(blockage.polygons);
 }
 
 bool DesignConstraintStorage::regionNameInUse(std::string_view name, DesignRegionId ignored) const

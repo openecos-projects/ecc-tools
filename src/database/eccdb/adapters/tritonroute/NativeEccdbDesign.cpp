@@ -337,14 +337,18 @@ void appendPinRectangle(Pin& pin, frLayerNum layer, eccdb::Rect rectangle)
 }
 
 template <typename Function>
-void forEachGeometryRectangle(const eccdb::GeometryPool& pool, eccdb::GeometryHandle geometry, Function&& function)
+void forEachGeometryRectangle(const eccdb::DomainGeometryStorage& storage,
+                              std::span<const eccdb::GeometryShapeId> geometry,
+                              Function&& function)
 {
-  for (const auto rectangle : pool.rectangles(geometry)) {
-    function(rectangle);
-  }
-  for (uint32_t index = 0; index < pool.polygonCount(geometry); ++index) {
-    for (const auto rectangle : eccdb::decomposePolygonToRectangles(pool.polygonPoints(geometry, index))) {
-      function(rectangle);
+  for (const auto id : geometry) {
+    const auto kind = storage.geometryRegistry().shape(id).kind;
+    if (kind == eccdb::GeometryShapeKind::kRectangle) {
+      function(storage.rectangle(id).rectangle);
+    } else if (kind == eccdb::GeometryShapeKind::kPolygon) {
+      for (const auto rectangle : eccdb::decomposePolygonToRectangles(storage.polygonPoints(id))) {
+        function(rectangle);
+      }
     }
   }
 }
@@ -655,7 +659,7 @@ void appendWireShape(const eccdb::PhysicalDesignService& physical,
 void appendSpecialRectangle(const eccdb::PhysicalDesignService& physical,
                             const frDesign& design,
                             frNet& net,
-                            const eccdb::DesignNetRectangle& rectangle,
+                            const eccdb::DesignGeometryRectangle& rectangle,
                             bool& has_route_geometry,
                             utl::Logger& logger)
 {
@@ -711,15 +715,15 @@ void appendSpecialStandaloneGeometry(const eccdb::PhysicalDesignService& physica
                                      utl::Logger& logger)
 {
   eccdb::PhysicalNetGeometryVisitor visitor;
-  visitor.rectangle = [&](const eccdb::DesignNetRectangle& rectangle) {
+  visitor.rectangle = [&](const eccdb::DesignGeometryRectangle& rectangle) {
     appendSpecialRectangle(physical, design, net, rectangle, has_route_geometry, logger);
   };
-  visitor.polygon = [&](const eccdb::DesignNetPolygon&) {
+  visitor.polygon = [&](const eccdb::DesignGeometryPolygon&) {
     // OpenDB's DRT reader rejects SPECIALNET polygons before creating a
     // dbSBox.  Decomposing one here would create a different route model.
     fail(logger, 82, "SPECIALNET POLYGON is unsupported by the ODB-compatible DRT projection");
   };
-  visitor.via = [&](const eccdb::DesignNetVia& via) {
+  visitor.via = [&](const eccdb::DesignGeometryNetVia& via) {
     if (via.orientation != eccdb::DesignOrientation::kN) {
       fail(logger, 83, "SPECIALNET standalone VIA has an orientation DRT frVia cannot represent");
     }
@@ -767,11 +771,12 @@ void appendMasterPort(const eccdb::PhysicalDesignService& physical,
   const auto& library = physical.library();
   for (const auto& clause : port.layer_clauses) {
     const auto layer = requireFrLayer(physical, design, clause.layer, logger, "library PORT geometry");
-    forEachGeometryRectangle(library.geometryPool(), clause.geometry, [&](const eccdb::Rect rectangle) {
+    forEachGeometryRectangle(library.geometryStorage(), clause.geometry, [&](const eccdb::Rect rectangle) {
       appendMasterPinRectangle(pin, shapes, layer, rectangle, true);
     });
   }
-  for (const auto& via : port.vias) {
+  for (const auto shape : port.vias) {
+    const auto& via = library.geometryRegistry().get<eccdb::LibraryViaPlacement>(shape);
     forEachExpandedVia(physical, via.via, {}, via.origin, eccdb::DesignOrientation::kN, logger,
                         [&](eccdb::TechLayerId layer_id, eccdb::Rect rectangle, uint32_t mask) {
                           // ODB retains LEF VIA masks, but DRT's frPinFig has
@@ -865,10 +870,11 @@ void appendMasterObstructions(const eccdb::PhysicalDesignService& physical,
     const auto width = (clause.flags & eccdb::LibraryObsLayerFlag::kHasDesignRuleWidth) != 0u
                            ? std::optional<int32_t>{clause.design_rule_width}
                            : std::nullopt;
-    forEachGeometryRectangle(library.geometryPool(), clause.geometry,
+    forEachGeometryRectangle(library.geometryStorage(), clause.geometry,
                              [&](const eccdb::Rect rectangle) { append_rectangle(clause.layer, rectangle, width); });
   }
-  for (const auto& via : obstruction.vias) {
+  for (const auto shape : obstruction.vias) {
+    const auto& via = library.geometryRegistry().get<eccdb::LibraryViaPlacement>(shape);
     forEachExpandedVia(physical, via.via, {}, via.origin, eccdb::DesignOrientation::kN, logger,
                         [&](eccdb::TechLayerId layer_id, eccdb::Rect rectangle, uint32_t mask) {
                           static_cast<void>(mask);
@@ -971,17 +977,17 @@ void setDieArea(const eccdb::PhysicalDesignService& physical, frBlock& block, ut
   if (dbu <= 0) {
     fail(logger, 23, "EccDB database units per micron must be positive");
   }
-  const auto& die = physical.dieArea();
+  const auto die_boundary = physical.dieBoundary();
   const auto bounds = physical.dieBounds();
   uint8_t corners = 0;
-  for (const auto point : die.boundary) {
+  for (const auto point : die_boundary) {
     if ((point.x != bounds.ll_x && point.x != bounds.ur_x) || (point.y != bounds.ll_y && point.y != bounds.ur_y)) {
       continue;
     }
     const auto corner = static_cast<uint8_t>((point.x == bounds.ur_x ? 1u : 0u) | (point.y == bounds.ur_y ? 2u : 0u));
     corners |= static_cast<uint8_t>(1u << corner);
   }
-  const bool rectangle = die.boundary.size() == 2u || (die.boundary.size() == 4u && corners == 0x0fu);
+  const bool rectangle = die_boundary.size() == 2u || (die_boundary.size() == 4u && corners == 0x0fu);
   if (!rectangle) {
     fail(logger, 24, "rectilinear DIEAREA polygons are unsupported by native TritonRoute import");
   }
@@ -1200,9 +1206,9 @@ void validateNet(const eccdb::PhysicalDesignService& physical,
   }
   bool has_standalone_geometry = false;
   eccdb::PhysicalNetGeometryVisitor geometry;
-  geometry.rectangle = [&](const eccdb::DesignNetRectangle&) { has_standalone_geometry = true; };
-  geometry.polygon = [&](const eccdb::DesignNetPolygon&) { has_standalone_geometry = true; };
-  geometry.via = [&](const eccdb::DesignNetVia&) { has_standalone_geometry = true; };
+  geometry.rectangle = [&](const eccdb::DesignGeometryRectangle&) { has_standalone_geometry = true; };
+  geometry.polygon = [&](const eccdb::DesignGeometryPolygon&) { has_standalone_geometry = true; };
+  geometry.via = [&](const eccdb::DesignGeometryNetVia&) { has_standalone_geometry = true; };
   physical.forEachNetGeometry(id, geometry);
   if (!special && has_standalone_geometry) {
     fail(logger, 46, "standalone routing geometry is only valid on a SPECIALNET");

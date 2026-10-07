@@ -17,6 +17,7 @@
 #include "design/routing/component/RoutingComponents.h"
 #include "design/routing/component/WireRouting.h"
 #include "design/via/component/ViaComponents.h"
+#include "geometry/GeometryRegistry.h"
 
 namespace eccdb {
 
@@ -50,14 +51,23 @@ class DesignRoutingStorage
 {
  public:
   using registry_type = DesignRegistry::registry_type;
+  using geometry_registry_type = GeometryRegistry::registry_type;
+  // Called synchronously while canonical VIA geometry is borrowed. The
+  // callback must not mutate the design or technology geometry registries.
+  using ViaLayerBoundsVisitor = std::function<void(TechLayerId, Rect)>;
 
-  DesignRoutingStorage(DesignRegistry& design_registry, const TechRegistry& tech_registry)
-      : _registry(design_registry.registry()), _tech_registry(tech_registry)
+  DesignRoutingStorage(DesignRegistry& design_registry, const TechRegistry& tech_registry,
+                       const GeometryRegistry* tech_geometry_registry = nullptr)
+      : _design_registry(design_registry),
+        _registry(design_registry.registry()),
+        _tech_registry(tech_registry),
+        _geometry_registry(design_registry.geometryRegistry()),
+        _tech_geometry_registry(tech_geometry_registry)
   {
   }
 
-  [[nodiscard]] DesignViaId createVia(DesignVia via);
-  void updateVia(DesignViaId id, DesignVia via);
+  [[nodiscard]] DesignViaId createVia(DesignViaInput via);
+  void updateVia(DesignViaId id, DesignViaInput via);
   [[nodiscard]] bool destroyVia(DesignViaId id);
   [[nodiscard]] bool contains(DesignViaId id) const;
   [[nodiscard]] DesignViaId findVia(std::string_view name) const;
@@ -74,24 +84,38 @@ class DesignRoutingStorage
 
   // Shape-first API. A Wire may be empty while being edited; it owns only IDs.
   [[nodiscard]] DesignWireId createWire(DesignWire wire);
-  [[nodiscard]] DesignRouteShapeId createShape(DesignWireId wire, DesignRouteShape shape,
-                                              std::optional<DesignRouteShapeAttributes> attributes = std::nullopt);
+  [[nodiscard]] GeometryShapeId createShape(DesignWireId wire, DesignRouteShape shape,
+                                            std::optional<DesignRouteShapeAttributes> attributes = std::nullopt);
   // Omitted attributes retain the current values; clearing value flags removes
   // them. A geometry-only edit does not discard DEF width/mask metadata.
-  void updateShape(DesignRouteShapeId id, DesignRouteShape shape,
+  void updateShape(GeometryShapeId id, DesignRouteShape shape,
                    std::optional<DesignRouteShapeAttributes> attributes = std::nullopt);
-  [[nodiscard]] bool destroyShape(DesignRouteShapeId id);
-  [[nodiscard]] bool contains(DesignRouteShapeId id) const;
+  [[nodiscard]] bool destroyShape(GeometryShapeId id);
+  [[nodiscard]] bool contains(GeometryShapeId id) const;
   // Live ID contract, like instanceTerm(): no repeated hot-path validation.
-  [[nodiscard]] const DesignRouteShape& shape(DesignRouteShapeId id) const
+  [[nodiscard]] const DesignRouteShape& shape(GeometryShapeId id) const
   {
-    return _registry.get<const DesignRouteShape>(id.entity());
+    return _geometry_registry.registry().get<const DesignRouteShape>(id.entity());
   }
-  [[nodiscard]] const DesignRouteShapeAttributes* shapeAttributes(DesignRouteShapeId id) const
+  [[nodiscard]] const DesignRouteShapeAttributes* shapeAttributes(GeometryShapeId id) const
   {
-    return _registry.try_get<const DesignRouteShapeAttributes>(id.entity());
+    return _geometry_registry.registry().try_get<const DesignRouteShapeAttributes>(id.entity());
   }
-  [[nodiscard]] Rect shapeBoundingBox(DesignRouteShapeId id) const;
+  [[nodiscard]] Rect shapeBoundingBox(GeometryShapeId id) const;
+  [[nodiscard]] Rect viaPlacementBounds(TechViaMasterId tech_via, DesignViaId design_via,
+                                        Point origin, DesignOrientation orientation) const;
+  // Expand one placed VIA shape into physical per-layer primitive bounds.
+  // Returns false for non-VIA geometry or when a technology VIA's separate
+  // canonical geometry registry was not bound by the owning DesignStore.
+  [[nodiscard]] bool forEachViaLayerBounds(GeometryShapeId id, const ViaLayerBoundsVisitor& visitor) const;
+  // Technology geometry is owned by TechStore, not copied into DesignStore.
+  // Rebinding invalidates derived Design geometry views once through the
+  // common epoch; the caller retains lifetime ownership of the registry.
+  void setTechnologyGeometryRegistry(const GeometryRegistry* tech_geometry_registry) noexcept;
+  // Derived BBox indexes use this revision to detect geometry edits. Shape IDs
+  // are entity handles and remain independent of any traversal order.
+  [[nodiscard]] uint64_t geometryEpoch() const noexcept { return _design_registry.geometryEpoch(); }
+  void markGeometryChanged() noexcept { _design_registry.markGeometryChanged(); }
   template <typename Function>
   void forEachShape(DesignWireId id, Function&& function) const
   {
@@ -102,6 +126,7 @@ class DesignRoutingStorage
 
   [[nodiscard]] bool destroyWire(DesignWireId id);
   [[nodiscard]] bool contains(DesignWireId id) const;
+  [[nodiscard]] DesignWire& wire(DesignWireId id);
   [[nodiscard]] const DesignWire& wire(DesignWireId id) const;
   [[nodiscard]] std::vector<DesignWireId> wires() const;
   [[nodiscard]] std::vector<DesignWireId> wires(DesignNetId net) const;
@@ -125,14 +150,44 @@ class DesignRoutingStorage
   void validateRestoredRoutingState() const;
 
   void setNetGeometry(DesignNetId net, DesignNetGeometry geometry);
+  // Creates the empty relation used by the editable geometry facade.  The
+  // relation is intentionally separate from the geometry entities themselves.
+  DesignNetGeometry& ensureNetGeometry(DesignNetId net);
+  // Mutable relation access for editor operations that remove or reorder a
+  // standalone geometry entity. Unlike ensureNetGeometry this never creates
+  // a relation as a side effect.
+  [[nodiscard]] DesignNetGeometry* netGeometry(DesignNetId net);
   [[nodiscard]] const DesignNetGeometry* netGeometry(DesignNetId net) const;
+  // Remove an empty standalone-geometry relation after the last shape is
+  // deleted. Binary validation treats an empty relation as invalid, so the
+  // editor must drop the relation component instead of retaining a tombstone.
+  bool pruneEmptyNetGeometry(DesignNetId net);
+  // Shared by single-Shape edits and binary restore; never run on read paths.
+  void validateNetShape(const DesignNetRectangle& rectangle) const;
+  void validateNetShape(const DesignNetPolygon& polygon) const;
+  void validateNetShape(const DesignNetVia& via) const;
 
   [[nodiscard]] uint32_t viaCount() const;
   [[nodiscard]] uint32_t nonDefaultRuleCount() const;
   [[nodiscard]] uint32_t wireCount() const;
 
+  [[nodiscard]] DesignRegistry& designRegistry() noexcept { return _design_registry; }
+  [[nodiscard]] const DesignRegistry& designRegistry() const noexcept { return _design_registry; }
+
+  // Geometry entities have a separate EnTT domain.  The registry is exposed
+  // for binary persistence and GUI/index layers; route code should normally
+  // use the typed create/update/destroy methods above.
+  [[nodiscard]] GeometryRegistry& geometryRegistry() noexcept { return _geometry_registry; }
+  [[nodiscard]] const GeometryRegistry& geometryRegistry() const noexcept { return _geometry_registry; }
+  void clearGeometry() noexcept
+  {
+    _geometry_registry.registry().clear();
+    markGeometryChanged();
+  }
+
  private:
-  void validateVia(const DesignVia& via, DesignViaId ignored = {}) const;
+  void validateVia(const DesignViaInput& via, DesignViaId ignored = {}) const;
+  void validateVia(const DesignVia& via, DesignViaId id) const;
   void validateNonDefaultRule(const DesignNonDefaultRule& rule, DesignNonDefaultRuleId ignored = {}) const;
   [[nodiscard]] TechRoutingLayerId viaExitLayer(TechRoutingLayerId layer, const DesignWireVia& via) const;
   void validateNetGeometry(DesignNetId net, const DesignNetGeometry& geometry) const;
@@ -143,8 +198,11 @@ class DesignRoutingStorage
   void ensureNonDefaultRule(DesignNonDefaultRuleId id) const;
   void ensureWire(DesignWireId id) const;
 
+  DesignRegistry& _design_registry;
   registry_type& _registry;
   const TechRegistry& _tech_registry;
+  GeometryRegistry& _geometry_registry;
+  const GeometryRegistry* _tech_geometry_registry = nullptr;
   entt::dense_map<uint64_t, std::vector<DesignWireId>> _wires_by_net;
 };
 

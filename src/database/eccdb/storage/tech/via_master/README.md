@@ -19,15 +19,11 @@ VIAs from fixed VIAs. It stores the generation parameters and an optional
 `TechViaRuleGenerateId`. `TechViaGeometry` remains materialized for router,
 DRC, extraction, and UI consumers.
 
-The bottom, CUT, and top shape sets are `GeometryHandle` fields in
-`TechViaGeometry`. Each handle selects one entry in
-`TechStore::geometryPool()`; the entry owns the internal contiguous Rect,
-Polygon, and Point ranges. `TechViaMasterShapeInput` keeps three write-side
-`GeometryInput` values only while a VIA is being built. After insertion,
-individual Rects, Polygons, and Points have no EnTT IDs or independent
-lifecycle.
+The bottom, CUT, and top shape sets are `GeometryShapeId` vectors in
+`TechViaGeometry`. Each ID resolves to an independent typed rectangle or
+polygon entity in the Tech geometry registry; the component owns only the
+ordered relation. `TechViaMasterShapeInput` remains a transient parser value;
+insertion creates one free EnTT geometry ID per physical primitive.
 
-The Tech geometry pool is append-only during normal construction. A failed
-import rolls back to its checkpoint together with the registry transaction;
-the imported Tech database is otherwise treated as immutable. Per-shape MASK
-metadata is not represented yet.
+Geometry entities can be edited or removed independently. There is no append
+only pool, group ordinal, checkpoint, or hidden range backing a handle.

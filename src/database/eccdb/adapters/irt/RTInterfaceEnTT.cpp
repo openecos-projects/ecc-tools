@@ -350,29 +350,34 @@ eccdb::Point placeMasterPoint(eccdb::Point local, eccdb::Point origin, eccdb::De
   return placed;
 }
 
-std::vector<eccdb::Rect> geometryRects(const eccdb::GeometryPool& pool, eccdb::GeometryHandle handle)
+template <typename GeometryStorage>
+std::vector<eccdb::Rect> geometryRects(const GeometryStorage& storage,
+                                       std::span<const eccdb::GeometryShapeId> shapes)
 {
   std::vector<eccdb::Rect> rects;
-  const auto stored = pool.rectangles(handle);
-  rects.insert(rects.end(), stored.begin(), stored.end());
-  for (uint32_t index = 0; index < pool.polygonCount(handle); ++index) {
-    const auto points = pool.polygonPoints(handle, index);
-    auto decomposed = eccdb::decomposePolygonToRectangles(points);
-    rects.insert(rects.end(), decomposed.begin(), decomposed.end());
+  for (const auto shape : shapes) {
+    const auto& metadata = storage.geometryRegistry().shape(shape);
+    if (metadata.kind == eccdb::GeometryShapeKind::kRectangle) {
+      rects.push_back(storage.rectangle(shape).rectangle);
+    } else if (metadata.kind == eccdb::GeometryShapeKind::kPolygon) {
+      const auto decomposed = eccdb::decomposePolygonToRectangles(storage.polygonPoints(shape));
+      rects.insert(rects.end(), decomposed.begin(), decomposed.end());
+    }
   }
   return rects;
 }
 
-template <typename Function>
-void forEachGeometryRect(const eccdb::GeometryPool& pool, eccdb::GeometryHandle handle, Function&& function)
+template <typename GeometryStorage, typename Function>
+void forEachGeometryRect(const GeometryStorage& storage, std::span<const eccdb::GeometryShapeId> shapes, Function&& function)
 {
-  for (const auto& rect : pool.rectangles(handle)) {
-    std::invoke(function, rect);
-  }
-  for (uint32_t index = 0; index < pool.polygonCount(handle); ++index) {
-    const auto points = pool.polygonPoints(handle, index);
-    for (const auto& rect : eccdb::decomposePolygonToRectangles(points)) {
-      std::invoke(function, rect);
+  for (const auto shape : shapes) {
+    const auto& metadata = storage.geometryRegistry().shape(shape);
+    if (metadata.kind == eccdb::GeometryShapeKind::kRectangle) {
+      std::invoke(function, storage.rectangle(shape).rectangle);
+    } else if (metadata.kind == eccdb::GeometryShapeKind::kPolygon) {
+      for (const auto& rect : eccdb::decomposePolygonToRectangles(storage.polygonPoints(shape))) {
+        std::invoke(function, rect);
+      }
     }
   }
 }
@@ -415,9 +420,9 @@ ViaShapes techViaShapes(const eccdb::TechStore& tech, eccdb::TechViaMasterId via
       }
     }
   };
-  append(geometry.bottom_layer.layer(), geometryRects(tech.geometryPool(), geometry.bottom_geometry), false);
-  append(eccdb::TechLayerId{geometry.cut_layer.entity()}, geometryRects(tech.geometryPool(), geometry.cut_geometry), true);
-  append(geometry.top_layer.layer(), geometryRects(tech.geometryPool(), geometry.top_geometry), false);
+  append(geometry.bottom_layer.layer(), geometryRects(tech.geometryStorage(), geometry.bottom_geometry), false);
+  append(eccdb::TechLayerId{geometry.cut_layer.entity()}, geometryRects(tech.geometryStorage(), geometry.cut_geometry), true);
+  append(geometry.top_layer.layer(), geometryRects(tech.geometryStorage(), geometry.top_geometry), false);
   return shapes;
 }
 
@@ -486,6 +491,7 @@ ViaShapes designViaShapes(const eccdb::DesignStore& design, const eccdb::TechSto
   }
 
   ViaShapes shapes;
+  const auto& geometry = design.geometryRegistry();
   auto append_rect = [&](eccdb::TechLayerId layer, eccdb::Rect rect) {
     LayeredRect placed{.layer = layer, .rect = rect.offset(origin.x, origin.y)};
     if (tech.cutLayerStorage().contains(eccdb::TechCutLayerId{layer.entity()})) {
@@ -494,10 +500,12 @@ ViaShapes designViaShapes(const eccdb::DesignStore& design, const eccdb::TechSto
       shapes.routing.push_back(placed);
     }
   };
-  for (const auto& rect : via.rectangles) {
+  for (const auto id : via.rectangles) {
+    const auto& rect = geometry.get<eccdb::DesignViaRectangle>(id);
     append_rect(rect.layer, rect.rectangle);
   }
-  for (const auto& polygon : via.polygons) {
+  for (const auto id : via.polygons) {
+    const auto& polygon = geometry.get<eccdb::DesignViaPolygon>(id);
     for (const auto& rect : eccdb::decomposePolygonToRectangles(polygon.points)) {
       append_rect(polygon.layer, rect);
     }
@@ -1140,7 +1148,6 @@ struct InstanceObstacleWork
   eccdb::Point origin;
   eccdb::DesignOrientation orientation = eccdb::DesignOrientation::kN;
   std::span<const eccdb::DesignInstancePinId> pins;
-  const CachedMasterGeometry* obs_geometry = nullptr;
   size_t routing_offset = 0;
   size_t routing_count = 0;
   size_t cut_offset = 0;
@@ -1189,7 +1196,7 @@ void RTInterface::wrapDatabaseFromEnTT()
         if (index == nullptr) {
           continue;
         }
-        forEachGeometryRect(library.geometryPool(), clause.geometry, [&](const eccdb::Rect& rect) {
+        forEachGeometryRect(library.geometryStorage(), clause.geometry, [&](const eccdb::Rect& rect) {
           LayeredRect shape{.layer = clause.layer, .rect = placeMasterRect(rect, {}, orientation, width, height), .index = index};
           if (index->cut) {
             geometry.cut.push_back(shape);
@@ -1198,7 +1205,8 @@ void RTInterface::wrapDatabaseFromEnTT()
           }
         });
       }
-      for (const auto& via : obs->vias) {
+      for (const auto shape : obs->vias) {
+        const auto& via = library.geometryRegistry().get<eccdb::LibraryViaPlacement>(shape);
         const auto placed = placeMasterPoint(via.origin, {}, orientation, width, height);
         auto shapes = techViaShapes(tech, via.via, placed);
         resolveCachedLayers(shapes, layers);
@@ -1221,7 +1229,7 @@ void RTInterface::wrapDatabaseFromEnTT()
         if (index == nullptr) {
           continue;
         }
-        forEachGeometryRect(library.geometryPool(), clause.geometry, [&](const eccdb::Rect& rect) {
+        forEachGeometryRect(library.geometryStorage(), clause.geometry, [&](const eccdb::Rect& rect) {
           LayeredRect shape{.layer = clause.layer, .rect = placeMasterRect(rect, {}, orientation, width, height), .index = index};
           if (index->cut) {
             geometry.cut.push_back(shape);
@@ -1230,7 +1238,8 @@ void RTInterface::wrapDatabaseFromEnTT()
           }
         });
       }
-      for (const auto& via : port.vias) {
+      for (const auto shape : port.vias) {
+        const auto& via = library.geometryRegistry().get<eccdb::LibraryViaPlacement>(shape);
         const auto placed = placeMasterPoint(via.origin, {}, orientation, width, height);
         auto shapes = techViaShapes(tech, via.via, placed);
         resolveCachedLayers(shapes, layers);
@@ -1336,9 +1345,9 @@ void RTInterface::wrapDatabaseFromEnTT()
         continue;
       }
       const auto& geometry = tech.viaMasterStorage().geometry(via_id);
-      const auto top_rects = geometryRects(tech.geometryPool(), geometry.top_geometry);
-      const auto bottom_rects = geometryRects(tech.geometryPool(), geometry.bottom_geometry);
-      const auto cut_rects = geometryRects(tech.geometryPool(), geometry.cut_geometry);
+      const auto top_rects = geometryRects(tech.geometryStorage(), geometry.top_geometry);
+      const auto bottom_rects = geometryRects(tech.geometryStorage(), geometry.bottom_geometry);
+      const auto cut_rects = geometryRects(tech.geometryStorage(), geometry.cut_geometry);
       const auto* top_index = layers.find(geometry.top_layer.layer());
       const auto* bottom_index = layers.find(geometry.bottom_layer.layer());
       const auto* cut_index = layers.find(eccdb::TechLayerId{geometry.cut_layer.entity()});
@@ -1405,7 +1414,6 @@ void RTInterface::wrapDatabaseFromEnTT()
                                 .origin = instance.origin,
                                 .orientation = instance.orientation,
                                 .pins = instance_pins,
-                                .obs_geometry = &obs_geometry,
                                 .routing_offset = instance_routing_count,
                                 .routing_count = obs_geometry.obstacle_routing.size(),
                                 .cut_offset = instance_cut_count,
@@ -1474,24 +1482,47 @@ void RTInterface::wrapDatabaseFromEnTT()
                   shape.geometry);
             });
       });
+      const auto& geometry_registry = design.routingStorage().geometryRegistry();
       if (const auto* geometry = design.routingStorage().netGeometry(net_id); geometry != nullptr) {
-        for (const auto& rect : geometry->rectangles) {
-          appendObstacle(sink, eccdb::TechLayerId{rect.layer.entity()}, rect.rectangle);
-        }
-        for (const auto& polygon : geometry->polygons) {
-          for (const auto& rect : eccdb::decomposePolygonToRectangles(polygon.points)) {
-            appendObstacle(sink, eccdb::TechLayerId{polygon.layer.entity()}, rect);
+        for (const auto shape_id : geometry->shapes) {
+          const auto& metadata = geometry_registry.shape(shape_id);
+          if (metadata.owner.domain != eccdb::GeometryOwnerDomain::kDesignNet) {
+            continue;
           }
-        }
-        for (const auto& via : geometry->vias) {
-          for (const auto& origin : via.origins) {
-                const auto shapes = resolveViaShapes(design, tech, via.tech_via, via.design_via, origin);
-                for (const auto& shape : shapes.routing) {
-                  appendObstacle(sink, shape);
+          switch (metadata.kind) {
+            case eccdb::GeometryShapeKind::kRectangle: {
+              const auto* rect = geometry_registry.tryGet<eccdb::DesignGeometryRectangle>(shape_id);
+              if (rect != nullptr) {
+                appendObstacle(sink, eccdb::TechLayerId{rect->layer.entity()}, rect->rectangle);
+              }
+              break;
+            }
+            case eccdb::GeometryShapeKind::kPolygon: {
+              const auto* polygon = geometry_registry.tryGet<eccdb::DesignGeometryPolygon>(shape_id);
+              if (polygon != nullptr) {
+                for (const auto& rect : eccdb::decomposePolygonToRectangles(polygon->points)) {
+                  appendObstacle(sink, eccdb::TechLayerId{polygon->layer.entity()}, rect);
                 }
-                for (const auto& shape : shapes.cut) {
-                  appendObstacle(sink, shape);
+              }
+              break;
+            }
+            case eccdb::GeometryShapeKind::kNetVia: {
+              const auto* via = geometry_registry.tryGet<eccdb::DesignGeometryNetVia>(shape_id);
+              if (via != nullptr) {
+                for (const auto& origin : via->origins) {
+                  const auto shapes = resolveViaShapes(design, tech, via->tech_via, via->design_via, origin);
+                  for (const auto& shape : shapes.routing) {
+                    appendObstacle(sink, shape);
+                  }
+                  for (const auto& shape : shapes.cut) {
+                    appendObstacle(sink, shape);
+                  }
                 }
+              }
+              break;
+            }
+            default:
+              break;
           }
         }
       }
@@ -1503,15 +1534,18 @@ void RTInterface::wrapDatabaseFromEnTT()
       }
       for (const auto block_pin_id : io_pin.pins) {
         const auto& block_pin = entities.block_pins.get(block_pin_id.entity());
+        const auto& geometry = design.geometryRegistry();
         if (block_pin.placement_status == eccdb::DesignPlacementStatus::kUnplaced
             && (block_pin.flags & eccdb::DesignIoPinPortFlag::kHasPlacement) == 0) {
           continue;
         }
-        for (const auto& rect : block_pin.rectangles) {
+        for (const auto id : block_pin.rectangles) {
+          const auto& rect = geometry.get<eccdb::DesignPinRectangle>(id);
           appendObstacle(sink, rect.layer,
                          placeMasterRect(rect.rectangle, block_pin.origin, block_pin.orientation, 0, 0));
         }
-        for (const auto& polygon : block_pin.polygons) {
+        for (const auto id : block_pin.polygons) {
+          const auto& polygon = geometry.get<eccdb::DesignPinPolygon>(id);
           for (const auto& rect : eccdb::decomposePolygonToRectangles(polygon.points)) {
             appendObstacle(sink, polygon.layer,
                            placeMasterRect(rect, block_pin.origin, block_pin.orientation, 0, 0));
@@ -1530,7 +1564,7 @@ void RTInterface::wrapDatabaseFromEnTT()
       const auto& work = instance_work[index];
       FixedObstacleSink instance_sink(routing_span.subspan(work.routing_offset, work.routing_count),
                                       cut_span.subspan(work.cut_offset, work.cut_count));
-      instance_sink.append(*work.obs_geometry, work.origin);
+      instance_sink.append(obs_geometry_cache.at(work.master, work.orientation), work.origin);
       for (const auto pin_id : work.pins) {
         const auto& pin = entities.instance_pins.get(pin_id);
         const auto& term = entities.master_terms.get(pin.master_term.entity());
@@ -1559,7 +1593,8 @@ void RTInterface::wrapDatabaseFromEnTT()
       std::vector<std::vector<eccdb::Rect>> obstacles_by_layer(static_cast<size_t>(layers.routingCount()));
       std::vector<int32_t> x_coordinates{body.ll_x, body.ur_x};
       std::vector<int32_t> y_coordinates{body.ll_y, body.ur_y};
-      for (const auto& shape : work.obs_geometry->routing) {
+      const auto& obs_geometry = obs_geometry_cache.at(work.master, work.orientation);
+      for (const auto& shape : obs_geometry.routing) {
         if (shape.index == nullptr || !shape.index->routing
             || std::ranges::find(active_routing_layer_indices, shape.index->wrap_idx) == active_routing_layer_indices.end()) {
           continue;
@@ -1741,13 +1776,15 @@ void RTInterface::wrapDatabaseFromEnTT()
           pin.set_is_core(false);
           for (const auto block_pin_id : io_pin.pins) {
             const auto& block_pin = entities.block_pins.get(block_pin_id.entity());
+            const auto& geometry = design.geometryRegistry();
             if (block_pin.placement_status == eccdb::DesignPlacementStatus::kUnplaced
                 && (block_pin.flags & eccdb::DesignIoPinPortFlag::kHasPlacement) == 0) {
               continue;
             }
             routing_scratch.clear();
             cut_scratch.clear();
-            for (const auto& rect : block_pin.rectangles) {
+            for (const auto id : block_pin.rectangles) {
+              const auto& rect = geometry.get<eccdb::DesignPinRectangle>(id);
               const auto* index = layers.find(rect.layer);
               LayeredRect placed{.layer = rect.layer,
                                  .rect = placeMasterRect(rect.rectangle, block_pin.origin, block_pin.orientation, 0, 0),
@@ -1758,7 +1795,8 @@ void RTInterface::wrapDatabaseFromEnTT()
                 routing_scratch.push_back(placed);
               }
             }
-            for (const auto& polygon : block_pin.polygons) {
+            for (const auto id : block_pin.polygons) {
+              const auto& polygon = geometry.get<eccdb::DesignPinPolygon>(id);
               for (const auto& rect : eccdb::decomposePolygonToRectangles(polygon.points)) {
                 const auto* index = layers.find(polygon.layer);
                 LayeredRect placed{.layer = polygon.layer,
@@ -1772,7 +1810,8 @@ void RTInterface::wrapDatabaseFromEnTT()
               }
             }
             appendPinShapes(pin, routing_scratch, cut_scratch, layers);
-            for (const auto& via : block_pin.vias) {
+            for (const auto id : block_pin.vias) {
+              const auto& via = geometry.get<eccdb::DesignPinVia>(id);
               const auto placed = placeMasterPoint(via.origin, block_pin.origin, block_pin.orientation, 0, 0);
               appendViaToPin(pin, resolveViaShapes(design, tech, via.tech_via, via.design_via, placed), layers, via_boxes_scratch);
             }

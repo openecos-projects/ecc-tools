@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "geometry/GeometryPool.h"
+#include "geometry/DomainGeometryStorage.h"
 #include "library/LibraryRegistry.h"
 #include "library/master_port/model/MasterPortComponents.h"
 #include "library/master_port/storage/MasterPortInput.h"
@@ -20,7 +20,7 @@ class LibraryMasterPortStorage
  public:
   using registry_type = LibraryRegistry::registry_type;
 
-  LibraryMasterPortStorage(LibraryRegistry& registry, const TechRegistry& tech_registry, GeometryPool& geometry)
+  LibraryMasterPortStorage(LibraryRegistry& registry, const TechRegistry& tech_registry, DomainGeometryStorage& geometry)
       : _registry(registry.registry()), _tech_registry(tech_registry), _geometry(geometry)
   {
   }
@@ -53,11 +53,12 @@ class LibraryMasterPortStorage
   void ensureMasterTerm(LibraryMasterTermId id) const;
   void ensureMasterPort(LibraryMasterPortId id) const;
   void validateMasterPort(const LibraryMasterPortInput& port) const;
-  [[nodiscard]] LibraryMasterPort materializeMasterPort(LibraryMasterPortInput port, bool validate_geometry);
+  [[nodiscard]] LibraryMasterPort materializeMasterPort(LibraryMasterPortId owner, LibraryMasterPortInput port, bool validate_geometry);
+  void destroyGeometry(const LibraryMasterPort& port) noexcept;
 
   registry_type& _registry;
   const TechRegistry& _tech_registry;
-  GeometryPool& _geometry;
+  DomainGeometryStorage& _geometry;
 };
 
 }  // namespace eccdb

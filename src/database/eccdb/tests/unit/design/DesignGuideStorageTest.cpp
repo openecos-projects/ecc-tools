@@ -23,10 +23,11 @@ TEST_F(DesignStorageTest, StoresNetOwnedRouteGuidesAndTrackAssignments)
   guide_storage.replaceGuides(net, expected_guides);
 
   EXPECT_TRUE(guide_storage.hasGuides(net));
-  ASSERT_EQ(guide_storage.guides(net).size(), 2u);
-  EXPECT_EQ(guide_storage.guides(net)[0].box, expected_guides[0].box);
-  EXPECT_EQ(guide_storage.guides(net)[0].via_layer, routing_layer);
-  EXPECT_EQ(guide_storage.guides(net)[0].flags, expected_guides[0].flags);
+  const auto guide_ids = guide_storage.guides(net);
+  ASSERT_EQ(guide_ids.size(), 2u);
+  EXPECT_EQ(guide_storage.guide(guide_ids[0]).box, expected_guides[0].box);
+  EXPECT_EQ(guide_storage.guide(guide_ids[0]).via_layer, routing_layer);
+  EXPECT_EQ(guide_storage.guide(guide_ids[0]).flags, expected_guides[0].flags);
 
   std::vector<Rect> visited_guides;
   guide_storage.forEachGuide(net, [&](const DesignRouteGuide& guide) { visited_guides.push_back(guide.box); });
@@ -39,17 +40,22 @@ TEST_F(DesignStorageTest, StoresNetOwnedRouteGuidesAndTrackAssignments)
   guide_storage.replaceTrackAssignments(net, expected_assignments);
 
   EXPECT_TRUE(guide_storage.hasTrackAssignments(net));
-  ASSERT_EQ(guide_storage.trackAssignments(net).size(), 2u);
-  EXPECT_EQ(guide_storage.trackAssignments(net)[0].box, expected_assignments[0].box);
-  EXPECT_EQ(guide_storage.trackAssignments(net)[1].box, expected_assignments[1].box);
+  const auto assignment_ids = guide_storage.trackAssignments(net);
+  ASSERT_EQ(assignment_ids.size(), 2u);
+  EXPECT_EQ(guide_storage.trackAssignment(assignment_ids[0]).box, expected_assignments[0].box);
+  EXPECT_EQ(guide_storage.trackAssignment(assignment_ids[1]).box, expected_assignments[1].box);
 
   std::vector<Rect> visited_assignments;
   guide_storage.forEachTrackAssignment(net,
                                        [&](const DesignTrackAssignmentShape& assignment) { visited_assignments.push_back(assignment.box); });
   EXPECT_EQ(visited_assignments, (std::vector<Rect>{{0, 50, 200, 50}, {200, 50, 200, 50}}));
 
+  const auto removed_guide = guide_ids.front();
+  const auto removed_assignment = assignment_ids.front();
   guide_storage.clearGuides(net);
   guide_storage.clearTrackAssignments(net);
+  EXPECT_FALSE(design.geometryRegistry().contains(removed_guide));
+  EXPECT_FALSE(design.geometryRegistry().contains(removed_assignment));
   EXPECT_FALSE(guide_storage.hasGuides(net));
   EXPECT_FALSE(guide_storage.hasTrackAssignments(net));
   EXPECT_TRUE(guide_storage.guides(net).empty());
@@ -82,14 +88,15 @@ TEST_F(DesignStorageTest, AppendsTrackAssignmentsInWriterCallOrderWithoutDedupli
   guide_storage.appendTrackAssignments(net, {});
 
   ASSERT_TRUE(guide_storage.hasTrackAssignments(net));
-  ASSERT_EQ(guide_storage.trackAssignments(net).size(), 3u);
-  EXPECT_EQ(guide_storage.trackAssignments(net)[0].box, first.box);
-  EXPECT_EQ(guide_storage.trackAssignments(net)[1].box, second.box);
-  EXPECT_EQ(guide_storage.trackAssignments(net)[2].box, first.box);
+  const auto ids = guide_storage.trackAssignments(net);
+  ASSERT_EQ(ids.size(), 3u);
+  EXPECT_EQ(guide_storage.trackAssignment(ids[0]).box, first.box);
+  EXPECT_EQ(guide_storage.trackAssignment(ids[1]).box, second.box);
+  EXPECT_EQ(guide_storage.trackAssignment(ids[2]).box, first.box);
 
   EXPECT_THROW(guide_storage.appendTrackAssignments(net, {{.layer = {}, .box = {0, 0, 10, 0}}}), std::invalid_argument);
   ASSERT_EQ(guide_storage.trackAssignments(net).size(), 3u);
-  EXPECT_EQ(guide_storage.trackAssignments(net)[2].box, first.box);
+  EXPECT_EQ(guide_storage.trackAssignment(guide_storage.trackAssignments(net)[2]).box, first.box);
 }
 
 TEST_F(DesignStorageTest, ValidatesNetGuideAndTrackAssignmentReferences)

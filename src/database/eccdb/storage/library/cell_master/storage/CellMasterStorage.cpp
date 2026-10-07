@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "library/common/LibraryGeometry.h"
+#include "common/GeometryBounds.h"
 #include "library/master_port/model/MasterPortComponents.h"
 #include "library/master_term/model/MasterTermComponents.h"
 #include "library/site/model/SiteComponents.h"
@@ -24,6 +25,7 @@ LibraryCellMasterId LibraryCellMasterStorage::createCellMasterTrusted(LibraryCel
   const auto entity = _registry.create();
   try {
     _registry.emplace<LibraryCellMaster>(entity, std::move(master));
+    _registry.emplace<GeometryBounds>(entity);
     return LibraryCellMasterId{entity};
   } catch (...) {
     if (_registry.valid(entity)) {
@@ -115,10 +117,22 @@ bool LibraryCellMasterStorage::destroyCellMaster(LibraryCellMasterId id)
     for (const auto port_id : term.ports) {
       if (_registry.valid(port_id.entity()) && _registry.all_of<LibraryMasterPort>(port_id.entity())
           && _registry.get<const LibraryMasterPort>(port_id.entity()).term == term_id) {
+        const auto& port = _registry.get<const LibraryMasterPort>(port_id.entity());
+        for (const auto& clause : port.layer_clauses) {
+          _geometry.destroy(clause.geometry);
+        }
+        for (const auto shape : port.vias) {
+          static_cast<void>(_geometry.geometryRegistry().destroy(shape));
+        }
         _registry.destroy(port_id.entity());
       }
     }
     _registry.destroy(term_id.entity());
+  }
+
+  if (const auto* obs = _registry.try_get<const LibraryMasterObs>(id.entity()); obs != nullptr) {
+    auto copy = *obs;
+    destroyGeometry(copy);
   }
 
   _registry.destroy(id.entity());
@@ -143,60 +157,80 @@ const LibraryMasterObs& LibraryCellMasterStorage::obs(LibraryCellMasterId owner)
 
 void LibraryCellMasterStorage::setObs(LibraryCellMasterId owner, LibraryMasterObsInput obs)
 {
-  const auto mark = _geometry.checkpoint();
-  try {
-    ensureCellMaster(owner);
-    validateObs(obs);
-    _registry.emplace_or_replace<LibraryMasterObs>(owner.entity(), materializeObs(std::move(obs), true));
-  } catch (...) {
-    _geometry.rollback(mark);
-    throw;
+  ensureCellMaster(owner);
+  validateObs(obs);
+  LibraryMasterObs old_copy;
+  bool had_old = false;
+  if (const auto* old = _registry.try_get<const LibraryMasterObs>(owner.entity())) {
+    old_copy = *old;
+    had_old = true;
+  }
+  auto materialized = materializeObs(owner, std::move(obs), true);
+  if (had_old) {
+    try {
+      _registry.replace<LibraryMasterObs>(owner.entity(), std::move(materialized));
+    } catch (...) {
+      destroyGeometry(materialized);
+      throw;
+    }
+    destroyGeometry(old_copy);
+  } else {
+    try {
+      _registry.emplace<LibraryMasterObs>(owner.entity(), std::move(materialized));
+    } catch (...) {
+      destroyGeometry(materialized);
+      throw;
+    }
   }
 }
 
 void LibraryCellMasterStorage::appendObs(LibraryCellMasterId owner, LibraryMasterObsInput obs)
 {
-  const auto mark = _geometry.checkpoint();
-  try {
-    ensureCellMaster(owner);
-    validateObs(obs);
-    auto materialized = materializeObs(std::move(obs), true);
-    auto* existing = _registry.try_get<LibraryMasterObs>(owner.entity());
-    if (existing == nullptr) {
+  ensureCellMaster(owner);
+  validateObs(obs);
+  auto materialized = materializeObs(owner, std::move(obs), true);
+  auto* existing = _registry.try_get<LibraryMasterObs>(owner.entity());
+  if (existing == nullptr) {
+    try {
       _registry.emplace<LibraryMasterObs>(owner.entity(), std::move(materialized));
-      return;
+    } catch (...) {
+      destroyGeometry(materialized);
+      throw;
     }
+    return;
+  }
+  try {
     existing->layer_clauses.reserve(existing->layer_clauses.size() + materialized.layer_clauses.size());
     existing->vias.reserve(existing->vias.size() + materialized.vias.size());
-    for (auto& clause : materialized.layer_clauses) {
-      existing->layer_clauses.push_back(std::move(clause));
-    }
-    for (auto& via : materialized.vias) {
-      existing->vias.push_back(std::move(via));
-    }
+    for (auto& clause : materialized.layer_clauses) existing->layer_clauses.push_back(std::move(clause));
+    for (auto& via : materialized.vias) existing->vias.push_back(std::move(via));
   } catch (...) {
-    _geometry.rollback(mark);
+    destroyGeometry(materialized);
     throw;
   }
 }
 
 void LibraryCellMasterStorage::appendObsTrusted(LibraryCellMasterId owner, LibraryMasterObsInput obs)
 {
-  const auto mark = _geometry.checkpoint();
-  try {
-    ensureCellMaster(owner);
-    auto materialized = materializeObs(std::move(obs), false);
-    auto* existing = _registry.try_get<LibraryMasterObs>(owner.entity());
-    if (existing == nullptr) {
+  ensureCellMaster(owner);
+  auto materialized = materializeObs(owner, std::move(obs), false);
+  auto* existing = _registry.try_get<LibraryMasterObs>(owner.entity());
+  if (existing == nullptr) {
+    try {
       _registry.emplace<LibraryMasterObs>(owner.entity(), std::move(materialized));
-      return;
+    } catch (...) {
+      destroyGeometry(materialized);
+      throw;
     }
+    return;
+  }
+  try {
     existing->layer_clauses.reserve(existing->layer_clauses.size() + materialized.layer_clauses.size());
     existing->vias.reserve(existing->vias.size() + materialized.vias.size());
     for (auto& clause : materialized.layer_clauses) existing->layer_clauses.push_back(std::move(clause));
     for (auto& via : materialized.vias) existing->vias.push_back(std::move(via));
   } catch (...) {
-    _geometry.rollback(mark);
+    destroyGeometry(materialized);
     throw;
   }
 }
@@ -204,6 +238,10 @@ void LibraryCellMasterStorage::appendObsTrusted(LibraryCellMasterId owner, Libra
 void LibraryCellMasterStorage::clearObs(LibraryCellMasterId owner)
 {
   ensureCellMaster(owner);
+  if (const auto* obs = _registry.try_get<const LibraryMasterObs>(owner.entity())) {
+    auto copy = *obs;
+    destroyGeometry(copy);
+  }
   _registry.remove<LibraryMasterObs>(owner.entity());
 }
 
@@ -279,22 +317,41 @@ void LibraryCellMasterStorage::validateObsLayerClause(const LibraryObsLayerClaus
   }
 }
 
-LibraryMasterObs LibraryCellMasterStorage::materializeObs(LibraryMasterObsInput obs, bool validate_geometry)
+LibraryMasterObs LibraryCellMasterStorage::materializeObs(LibraryCellMasterId owner, LibraryMasterObsInput obs, bool validate_geometry)
 {
-  LibraryMasterObs result{.vias = std::move(obs.vias)};
+  LibraryMasterObs result;
   result.layer_clauses.reserve(obs.layer_clauses.size());
-  for (auto& clause : obs.layer_clauses) {
-    result.layer_clauses.push_back(LibraryObsLayerClause{.layer = clause.layer,
-                                                         .flags = clause.flags,
-                                                         .spacing = clause.spacing,
-                                                         .design_rule_width = clause.design_rule_width,
-                                                         .path_width = clause.path_width,
-                                                         .geometry = validate_geometry
-                                                                          ? _geometry.append(clause.geometry)
-                                                                          : _geometry.appendTrusted(clause.geometry.rects,
-                                                                                                    clause.geometry.polygons)});
+  result.vias.reserve(obs.vias.size());
+  const auto geometry_owner = GeometryOwner::from(GeometryOwnerDomain::kLibraryMaster, owner);
+  try {
+    for (auto& clause : obs.layer_clauses) {
+      result.layer_clauses.push_back(LibraryObsLayerClause{.layer = clause.layer,
+                                                           .flags = clause.flags,
+                                                           .spacing = clause.spacing,
+                                                           .design_rule_width = clause.design_rule_width,
+                                                           .path_width = clause.path_width,
+                                                           .geometry = validate_geometry
+                                                                            ? _geometry.append(geometry_owner, clause.geometry)
+                                                                            : _geometry.appendTrusted(geometry_owner, clause.geometry)});
+    }
+    for (auto& via : obs.vias) {
+      result.vias.push_back(_geometry.geometryRegistry().create(geometry_owner, std::move(via)));
+    }
+  } catch (...) {
+    destroyGeometry(result);
+    throw;
   }
   return result;
+}
+
+void LibraryCellMasterStorage::destroyGeometry(const LibraryMasterObs& obs) noexcept
+{
+  for (const auto& clause : obs.layer_clauses) {
+    _geometry.destroy(clause.geometry);
+  }
+  for (const auto shape : obs.vias) {
+    static_cast<void>(_geometry.geometryRegistry().destroy(shape));
+  }
 }
 
 }  // namespace eccdb

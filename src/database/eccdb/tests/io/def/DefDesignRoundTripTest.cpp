@@ -13,6 +13,7 @@
 
 #include "def/DefDesignExporter.h"
 #include "def/DefDesignImporter.h"
+#include "geometry/DomainGeometryComponents.h"
 #include "library/LibraryStore.h"
 #include "tech/common/TechLayerTypes.h"
 #include "tech/cut_layer/model/CutLayerComponents.h"
@@ -23,6 +24,17 @@
 
 namespace eccdb {
 namespace {
+
+std::vector<Rect> instanceRegionBounds(const DesignStore& design, const DesignInstance& instance)
+{
+  std::vector<Rect> result;
+  result.reserve(instance.region_bounds.size());
+  const auto& geometry = design.geometryRegistry();
+  for (const auto id : instance.region_bounds) {
+    result.push_back(geometry.get<const GeometryRectangle>(id).rectangle);
+  }
+  return result;
+}
 
 class RejectingStreamBuffer : public std::streambuf
 {
@@ -317,24 +329,38 @@ void expectComplexRouting(const DesignStore& design)
   EXPECT_TRUE(saw_special_attributes);
   EXPECT_TRUE(saw_special_via);
 
-  const auto* geometry = routing.netGeometry(special_net);
-  ASSERT_NE(geometry, nullptr);
-  ASSERT_EQ(geometry->rectangles.size(), 1u);
-  EXPECT_EQ(geometry->rectangles[0].route_status, DesignWireStatus::kShield);
-  EXPECT_EQ(geometry->rectangles[0].shield_net, "n1");
-  EXPECT_EQ(geometry->rectangles[0].shape, "BLOCKRING");
-  EXPECT_EQ(geometry->rectangles[0].rectangle, (Rect{500, 500, 600, 600}));
-  ASSERT_EQ(geometry->polygons.size(), 1u);
-  EXPECT_EQ(geometry->polygons[0].route_status, DesignWireStatus::kFixed);
-  EXPECT_EQ(geometry->polygons[0].mask, 2u);
-  EXPECT_EQ(geometry->polygons[0].points, (std::vector<Point>{{300, 300}, {400, 300}, {400, 400}, {300, 400}}));
-  ASSERT_EQ(geometry->vias.size(), 1u);
-  EXPECT_TRUE(geometry->vias[0].design_via);
-  EXPECT_EQ(geometry->vias[0].orientation, DesignOrientation::kFN);
-  EXPECT_EQ(geometry->vias[0].top_mask, 1u);
-  EXPECT_EQ(geometry->vias[0].cut_mask, 2u);
-  EXPECT_EQ(geometry->vias[0].bottom_mask, 3u);
-  EXPECT_EQ(geometry->vias[0].origins, (std::vector<Point>{{700, 700}, {800, 800}}));
+  const auto& geometry_storage = design.geometryStorage();
+  const auto geometry_ids = geometry_storage.netShapeIds(special_net);
+  ASSERT_EQ(geometry_ids.size(), 3u);
+  const DesignGeometryRectangle* rectangle = nullptr;
+  const DesignGeometryPolygon* polygon = nullptr;
+  const DesignGeometryNetVia* via = nullptr;
+  for (const auto shape_id : geometry_ids) {
+    const auto view = geometry_storage.shape(shape_id);
+    if (const auto* value = std::get_if<const DesignGeometryRectangle*>(&view.payload)) {
+      rectangle = *value;
+    } else if (const auto* value = std::get_if<const DesignGeometryPolygon*>(&view.payload)) {
+      polygon = *value;
+    } else if (const auto* value = std::get_if<const DesignGeometryNetVia*>(&view.payload)) {
+      via = *value;
+    }
+  }
+  ASSERT_NE(rectangle, nullptr);
+  EXPECT_EQ(rectangle->route_status, DesignWireStatus::kShield);
+  EXPECT_EQ(rectangle->shield_net, "n1");
+  EXPECT_EQ(rectangle->shape, "BLOCKRING");
+  EXPECT_EQ(rectangle->rectangle, (Rect{500, 500, 600, 600}));
+  ASSERT_NE(polygon, nullptr);
+  EXPECT_EQ(polygon->route_status, DesignWireStatus::kFixed);
+  EXPECT_EQ(polygon->mask, 2u);
+  EXPECT_EQ(polygon->points, (std::vector<Point>{{300, 300}, {400, 300}, {400, 400}, {300, 400}}));
+  ASSERT_NE(via, nullptr);
+  EXPECT_TRUE(via->design_via);
+  EXPECT_EQ(via->orientation, DesignOrientation::kFN);
+  EXPECT_EQ(via->top_mask, 1u);
+  EXPECT_EQ(via->cut_mask, 2u);
+  EXPECT_EQ(via->bottom_mask, 3u);
+  EXPECT_EQ(via->origins, (std::vector<Point>{{700, 700}, {800, 800}}));
 }
 
 TEST_F(DefDesignRoundTripTest, ImportsAndExportsComplexNewVirtualFlushAndViaPathTokens)
@@ -379,13 +405,15 @@ TEST_F(DefDesignRoundTripTest, ImportsAndExportsComplexNewVirtualFlushAndViaPath
   const auto& second_bpin = first.netlistStorage().blockPin(io_pin.pins[1]);
   ASSERT_EQ(first_bpin.rectangles.size(), 1u);
   ASSERT_EQ(first_bpin.vias.size(), 1u);
-  EXPECT_EQ(first_bpin.rectangles[0].mask, 2u);
-  EXPECT_EQ(first_bpin.rectangles[0].spacing, 4);
-  EXPECT_EQ(first_bpin.vias[0].top_mask, 1u);
-  EXPECT_EQ(first_bpin.vias[0].cut_mask, 2u);
-  EXPECT_EQ(first_bpin.vias[0].bottom_mask, 3u);
+  const auto& first_rectangle = first.netlistStorage().blockPinRectangle(first_bpin.rectangles[0]);
+  const auto& first_via = first.netlistStorage().blockPinVia(first_bpin.vias[0]);
+  EXPECT_EQ(first_rectangle.mask, 2u);
+  EXPECT_EQ(first_rectangle.spacing, 4);
+  EXPECT_EQ(first_via.top_mask, 1u);
+  EXPECT_EQ(first_via.cut_mask, 2u);
+  EXPECT_EQ(first_via.bottom_mask, 3u);
   ASSERT_EQ(second_bpin.polygons.size(), 1u);
-  EXPECT_EQ(second_bpin.polygons[0].design_rule_width, 6);
+  EXPECT_EQ(first.netlistStorage().blockPinPolygon(second_bpin.polygons[0]).design_rule_width, 6);
   const auto instance_id = first.netlistStorage().findInstance("u1");
   ASSERT_TRUE(instance_id);
   const auto& instance = first.netlistStorage().instance(instance_id);
@@ -458,7 +486,7 @@ TEST_F(DefDesignRoundTripTest, ImportsAndExportsComplexNewVirtualFlushAndViaPath
   EXPECT_EQ(second.routingStorage().wireCount(), first.routingStorage().wireCount());
   const auto second_instance = second.netlistStorage().findInstance("u1");
   ASSERT_TRUE(second_instance);
-  EXPECT_EQ(second.netlistStorage().instance(second_instance).region_bounds, instance.region_bounds);
+  EXPECT_EQ(instanceRegionBounds(second, second.netlistStorage().instance(second_instance)), instanceRegionBounds(first, instance));
   EXPECT_EQ(second.netlistStorage().instance(second_instance).halo.left, instance.halo.left);
   EXPECT_EQ(second.netlistStorage().instance(second_instance).route_halo.distance, instance.route_halo.distance);
   const auto second_net = second.netlistStorage().findRegularNet("n1");
@@ -518,8 +546,9 @@ TEST_F(DefDesignRoundTripTest, KeepsDefinedViaBetweenSegmentsInOnePath)
   ASSERT_TRUE(local_via);
   const auto& via_geometry = design.routingStorage().via(local_via).rectangles;
   ASSERT_EQ(via_geometry.size(), 3u);
-  EXPECT_EQ(tech.registry().get<const TechLayerInfo>(via_geometry[0].layer.entity()).name, "M1");
-  EXPECT_EQ(tech.registry().get<const TechLayerInfo>(via_geometry[2].layer.entity()).name, "M2");
+  const auto& geometry = design.geometryRegistry();
+  EXPECT_EQ(tech.registry().get<const TechLayerInfo>(geometry.get<const DesignViaRectangle>(via_geometry[0]).layer.entity()).name, "M1");
+  EXPECT_EQ(tech.registry().get<const TechLayerInfo>(geometry.get<const DesignViaRectangle>(via_geometry[2]).layer.entity()).name, "M2");
 
   const auto net = design.netlistStorage().findRegularNet("signal");
   ASSERT_TRUE(net);
@@ -849,7 +878,7 @@ END DESIGN
   EXPECT_EQ(fill.mask, 2u);
   EXPECT_NE(fill.flags & DesignFillFlag::kOpc, 0u);
   ASSERT_EQ(fill.rectangles.size(), 2u);
-  EXPECT_EQ(fill.rectangles[0], (Rect{10, 20, 30, 40}));
+  EXPECT_EQ(first.fillStorage().rectangle(fill.rectangles[0]), (Rect{10, 20, 30, 40}));
 
   const auto nets = first.netlistStorage().regularNets();
   ASSERT_EQ(nets.size(), 1u);

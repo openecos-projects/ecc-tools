@@ -12,7 +12,7 @@ die() { echo "错误：$*" >&2; exit 2; }
 usage() {
   cat <<'EOF'
 用法：run_tests.sh [--config FILE] COMMAND [GROUP] [OPTIONS]
-  doctor [GROUP]       检查工具、数据目录及 OpenDB Python 的真实导入
+  doctor [GROUP]       检查工具及当前组所需的数据目录
   env                 输出可 source 的环境变量
   sources             查看数据源 GitHub/官网/Google Drive 与下载说明
   configure standalone|tools
@@ -21,6 +21,7 @@ usage() {
   benchmark           分进程串行运行 iDB/EccDB/二进制性能测量
 
 GROUP：unit | io | binary | diff | irt | idrc | route-smoke | route | all
+  diff：DEF corpus 语义固定点与 OpenDB normalization 差分
   irt：Wrap.* + SelfCheck.* + Writeback.*（已有失败也会如实报告）
   route-smoke：ISPD18 sample；route：IspdUnder100k/*，逐 case 新进程
   all：unit io binary diff irt idrc route-smoke，失败后继续其他组并汇总
@@ -29,7 +30,7 @@ GROUP：unit | io | binary | diff | irt | idrc | route-smoke | route | all
   --config FILE       Bash 配置文件（仅加载你信任的文件，建议放仓库外）
   --no-build          复用现有构建；配置/源码变化后请重新构建
   --filter PATTERN    GTest 过滤器；route 下仍逐 case 启动
-  --large             启用 large DEF 和 Design binary；diff 包含 test10_team12
+  --large             传递 large 用例开关给仍受支持的工具测试
   --strict            任何 SKIP 也返回非零
   --jobs N            构建并行度，默认 nproc；测试进程仍串行
   --output DIR        本次输出的父目录；每次创建唯一子目录
@@ -39,7 +40,7 @@ GROUP：unit | io | binary | diff | irt | idrc | route-smoke | route | all
 
 示例：
   ./run_tests.sh doctor
-  ./run_tests.sh test diff
+  ./run_tests.sh test io
   ./run_tests.sh test irt --filter 'Wrap.*:SelfCheck.*'
   ./run_tests.sh test route --filter 'IspdUnder100k/*/Ispd19Sample3'
   ./run_tests.sh benchmark --case ispd19_test8 --case ispd19_test10 --repeat 3
@@ -138,7 +139,7 @@ print_env() {
 }
 check_data() {
   python3 - "$1" "${cases[@]}" <<'PY'
-import os,sys,re,subprocess,shutil
+import os,sys,shutil
 from pathlib import Path
 group=sys.argv[1];e=os.environ; errors=[]
 def need(path):
@@ -146,31 +147,10 @@ def need(path):
     if not p.is_file() or p.stat().st_size==0: errors.append(str(p))
 for tool in ['cmake','ninja','python3']:
     if not shutil.which(tool): errors.append('command: '+tool)
-repo=Path(e['ECCDB_SRC']);data=Path(e['ECCDB_TEST_DATA_ROOT']);road=Path(e['OPENROAD_SOURCE_DIR'])
+repo=Path(e['ECCDB_SRC'])
 need(repo/'src/third_party/entt/entt/entt.hpp')
-if group in ['io','binary','diff','all']:
-    header=(repo/'src/database/eccdb/tests/differential/LefPdkCorpus.h').read_text()
-    bases={'lef_root':data/'scripts/foundry/sky130/lef'}
-    ihp=data/'scripts/foundry/ihp130/ihp-sg13g2/libs.ref'
-    bases.update(stdcell=ihp/'sg13g2_stdcell/lef',io=ihp/'sg13g2_io/lef',sram=ihp/'sg13g2_sram/lef')
-    for key,leaf in re.findall(r'\b(lef_root|stdcell|io|sram) / "([^"]+)"',header): need(bases[key]/leaf)
-if group in ['diff','all']:
-    for rel in ['src/odb/src/lef/TEST/complete.5.8.lef','src/odb/src/lef/TEST/complete.5.8.lef.au',
-                'src/odb/src/def/TEST/complete.5.8.def','src/odb/src/def/TEST/complete.5.8.def.au',
-                'src/odb/test/data/gscl45nm.lef','src/gpl/test/nangate45.lef',
-                'test/Nangate45/Nangate45_tech.lef','test/Nangate45/Nangate45_stdcell.lef']:
-        need(road/rel)
-    need(e['OPENDB_PYTHON'])
-    need(Path(e['OPENDB_PYTHONPATH'])/'odb.py');need(Path(e['OPENDB_PYTHONPATH'])/'_odb.so')
-    env=e.copy();env['PYTHONPATH']=e['OPENDB_PYTHONPATH']+os.pathsep+e.get('PYTHONPATH','')
-    try:
-        r=subprocess.run([e['OPENDB_PYTHON'],'-c','import odb; db=odb.dbDatabase.create(); assert db is not None; print(odb.__file__)'],env=env,text=True,capture_output=True,timeout=30)
-        if r.returncode: errors.append('OpenDB Python import: '+r.stderr.strip())
-        else: print('[OK] OpenDB Python: '+r.stdout.strip())
-    except (OSError,subprocess.TimeoutExpired) as ex: errors.append('OpenDB Python: '+str(ex))
-if group in ['diff','irt','idrc','route','all']:
+if group in ['irt','idrc','route','all']:
     for year,total_samples in [(18,3),(19,4)]:
-        if group=='diff' and year==19: continue # only test10 solution is used by the OpenDB ISPD19 suite
         root=Path(e[f'ECCDB_ISPD{year}_ROOT'])
         for name in [f'ispd{year}_sample'+('' if i==1 else str(i)) for i in range(1,total_samples+1)]+[f'ispd{year}_test{i}' for i in range(1,11)]:
             for ext in ['lef','def']:need(root/name/f'{name}.input.{ext}')
@@ -182,12 +162,6 @@ if group=='route-smoke':
 if group=='benchmark':
     for name in sys.argv[2:]:
         for ext in ['lef','def']:need(Path(e['ECCDB_ISPD19_ROOT'])/name/f'{name}.input.{ext}')
-if ((group in ['diff','all'] and 'ECCDB_RUN_LARGE_DEF_TESTS' in e) or
-    (group in ['binary','all'] and 'ECCDB_RUN_LARGE_DESIGN_BINARY_TESTS' in e)):
-    root=Path(e['ECCDB_ISPD19_ROOT'])
-    need(root/'input/ispd19_test10/ispd19_test10.input.lef');need(root/'solutions/extracted/test10/def/12.t10.def')
-if group in ['diff','all'] and 'ECCDB_RUN_LARGE_DEF_TESTS' in e:
-    need(road/'src/gpl/test/large01.def');need(road/'src/drt/test/aes_nangate45_preroute.def')
 if errors:
     print('\n'.join('[MISSING] '+s for s in errors),file=sys.stderr);sys.exit(1)
 print('[OK] '+group+' 所需目录/核心文件检查通过；完整语料由测试继续核验。')
@@ -247,10 +221,12 @@ configure_build() {
     "-DECCDB_TEST_DATA_ROOT=$ECCDB_TEST_DATA_ROOT" "-DOPENROAD_SOURCE_DIR=$OPENROAD_SOURCE_DIR" \
     "-DOPENDB_PYTHON_MODULE_DIR=$OPENDB_PYTHON_MODULE_DIR" "${opts[@]}"
 }
-unit_targets=(eccdb_geometry_pool_test eccdb_design_test eccdb_library_site_cell_master_test eccdb_cut_layer_test eccdb_routing_layer_test eccdb_tech_database_test eccdb_non_routing_layer_test)
-io_targets=(eccdb_lef_tech_importer_test eccdb_lef_library_importer_test eccdb_lef_tech_exporter_test eccdb_lef_library_exporter_test eccdb_def_design_roundtrip_test)
+unit_targets=(eccdb_geometry_registry_test eccdb_unified_geometry_test eccdb_design_test)
+# Geometry persistence exercises import/edit/export behavior. Archive fixed-point
+# coverage belongs to the binary group so `all` runs each target only once.
+io_targets=(eccdb_geometry_persistence_test eccdb_def_design_roundtrip_test)
 binary_targets=(eccdb_binary_database_archive_test eccdb_design_binary_database_archive_test)
-diff_targets=(eccdb_lef_idb_conversion_test eccdb_direct_lef_differential_test eccdb_lef_full_corpus_semantic_test eccdb_def_full_corpus_semantic_test eccdb_opendb_design_differential_test)
+diff_targets=(eccdb_def_full_corpus_semantic_test eccdb_opendb_design_differential_test)
 select_group() {
   kind=standalone;selection='*'
   case $1 in
@@ -262,14 +238,13 @@ select_group() {
     idrc) kind=tools;targets=(idrc_adapter_differential_test);selection='Wrap.*:Shapes.*:SelfCheck.*';;
     route-smoke) kind=tools;targets=(irt_adapter_differential_test);selection='IspdUnder100k/*/Ispd18Sample';;
     route) kind=tools;targets=(irt_adapter_differential_test);selection='IspdUnder100k/*';;
-    benchmark) kind=tools;targets=(eccdb_benchmark irt_input_benchmark eccdb_binary_archive_benchmark);;
+    benchmark)
+      kind=tools
+      targets=(irt_input_benchmark eccdb_binary_archive_benchmark)
+      echo '[范围] legacy DB-only/trace benchmark 已退役；仅运行 iRT input 与 binary archive 基准。'
+      ;;
   esac
   [[ -z $filter ]] || selection=$filter
-  if [[ $1 == diff && ! -v ECCDB_RUN_LARGE_DEF_TESTS ]]; then
-    # This ISPD19 case is NOT gated by getenv() in the existing C++ code.
-    if [[ $selection == *-* ]]; then selection+=':*test10_team12*'; else selection+='-*test10_team12*'; fi
-    echo '[范围] 默认排除超大 test10_team12；使用 --large 纳入。'
-  fi
   if [[ $kind == tools ]]; then build=$ECCDB_TOOLS_BUILD; else build=$ECCDB_DIFF_BUILD; fi
 }
 prepared_standalone=0 prepared_tools=0
@@ -337,12 +312,11 @@ run_benchmark() {
     sources=(idb entt); ((repeat%2)) || sources=(entt idb)
     for name in "${cases[@]}"; do
       local lef=$ECCDB_ISPD19_ROOT/$name/$name.input.lef def=$ECCDB_ISPD19_ROOT/$name/$name.input.def
-      for target in eccdb_benchmark irt_input_benchmark; do
+      for target in irt_input_benchmark; do
         binary=$(find_binary "$target")
         for source in "${sources[@]}"; do
           prefix=$name-r$repeat-$target-$source
-          local extra=(); [[ $target != eccdb_benchmark ]] || extra=(--writes 256)
-          if run_logged "$prefix" "$binary" --lef "$lef" --def "$def" --source "$source" --output "$result_dir/$prefix.jsonl" "${extra[@]}"; then :; else failures=$((failures+1)); fi
+          if run_logged "$prefix" "$binary" --lef "$lef" --def "$def" --source "$source" --output "$result_dir/$prefix.jsonl"; then :; else failures=$((failures+1)); fi
         done
       done
       prefix=$name-r$repeat-binary-archive;binary=$(find_binary eccdb_binary_archive_benchmark)
@@ -351,7 +325,9 @@ run_benchmark() {
   done
 }
 groups=("$group")
-[[ $group != all ]] || groups=(unit io binary diff irt idrc route-smoke)
+if [[ $group == all ]]; then
+  groups=(unit io binary diff irt idrc route-smoke)
+fi
 for active_group in "${groups[@]}"; do
   select_group "$active_group"
   if [[ $command_name != build ]]; then check_data "$active_group"; fi

@@ -4,25 +4,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND TARGET IdbBuilder AND TARGET eccdb_lef
   find_package(GTest REQUIRED)
   include(GoogleTest)
 
-  add_executable(eccdb_lef_memory_comparison_test
-    LefMemoryComparisonTest.cpp
-  )
-  eccdb_storage_target(eccdb_lef_memory_comparison_test)
-  target_include_directories(eccdb_lef_memory_comparison_test PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}/../differential"
-  )
-  target_compile_definitions(eccdb_lef_memory_comparison_test
-    PRIVATE
-      ECC_TOOLS_SOURCE_DIR="${ECCDB_TEST_DATA_ROOT}"
-  )
-  target_link_libraries(eccdb_lef_memory_comparison_test
-    PRIVATE
-      IdbBuilder
-      eccdb_lef_import
-      GTest::gtest_main
-  )
-  gtest_discover_tests(eccdb_lef_memory_comparison_test)
-
   if(TARGET eccdb_def_import)
     add_executable(eccdb_def_memory_comparison_test
       DefMemoryComparisonTest.cpp

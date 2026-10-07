@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "geometry/GeometryHandle.h"
+#include "geometry/GeometryEntity.h"
 #include "library/common/LibraryGeometry.h"
 #include "library/common/LibraryTypes.h"
 #include "tech/common/TechLayerTypes.h"
@@ -22,23 +22,22 @@ enum class LibraryMasterPortClass : uint8_t
   kBump
 };
 
-// Persistent payload for one LEF PORT LAYER clause. The handle selects one
-// group in LibraryStore's GeometryPool, so every RECT does not repeat its
-// Tech layer ID and does not allocate a separate vector.
+// Persistent payload for one LEF PORT LAYER clause. Geometry primitives are
+// independent entities; this vector preserves the source order of RECT and
+// POLYGON values without duplicating their payload in the PORT component.
 struct LibraryPortLayerGeometry
 {
   TechLayerId layer;
-  GeometryHandle geometry;
+  std::vector<GeometryShapeId> geometry;
 };
 
-// One complete LEF PORT and the only payload component on its entity. Geometry
-// values do not receive independent EnTT IDs. The owner term is maintained by
-// LibraryMasterPortStorage.
+// One complete LEF PORT and the only payload component on its entity. The
+// owner term is maintained by LibraryMasterPortStorage.
 struct LibraryMasterPin
 {
   LibraryMasterPortClass port_class = LibraryMasterPortClass::kNone;
   std::vector<LibraryPortLayerGeometry> layer_clauses;
-  std::vector<LibraryViaPlacement> vias;
+  std::vector<GeometryShapeId> vias;
 
   // Storage-managed reverse link to the logical PIN that owns this PORT.
   LibraryMasterTermId term;

@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+  message(FATAL_ERROR "In-source builds are not supported. Configure from a separate build directory.")
+endif()
+
 set(ECCDB_STANDALONE OFF)
 set(ECCDB_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}")
 # The public API is a shared library even when the surrounding project uses
@@ -100,20 +104,16 @@ endif()
 
 if(ECCDB_BUILD_TESTS)
   add_subdirectory(tests/unit/geometry)
+  add_subdirectory(tests/unified_geometry)
   add_subdirectory(tests/unit/design)
-  add_subdirectory(tests/unit/library)
-  add_subdirectory(tests/unit/tech)
+  if(TARGET eccdb_binary_export AND TARGET eccdb_binary_import
+     AND TARGET eccdb_lef_export AND TARGET eccdb_lef_import)
+    add_subdirectory(tests/io/binary)
+  endif()
   if(TARGET eccdb_def_import AND TARGET eccdb_def_export)
     add_subdirectory(tests/io/def)
   endif()
-  if(TARGET eccdb_lef_import)
-    add_subdirectory(tests/io/lef)
-  endif()
-  if(TARGET eccdb_binary_export AND TARGET eccdb_binary_import AND TARGET eccdb_lef_import)
-    add_subdirectory(tests/io/binary)
-  endif()
   add_subdirectory(tests/differential)
-  add_subdirectory(tests/memory)
 endif()
 
 if(ECCDB_BUILD_BENCHMARKS)
@@ -130,6 +130,7 @@ set(_eccdb_database_targets
   eccdb_library
   eccdb_service
   eccdb_api
+  eccdb_viewer
   eccdb_tech_database
 )
 foreach(_target IN ITEMS

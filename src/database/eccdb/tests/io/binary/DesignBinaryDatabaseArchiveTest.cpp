@@ -345,10 +345,12 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsRouterGuidesTracksAndPinAccess)
   BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
   auto restored = BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library);
 
-  ASSERT_EQ(restored->guideStorage().guides(net).size(), 1u);
-  EXPECT_EQ(restored->guideStorage().guides(net).front().box, (Rect{0, 100, 900, 300}));
-  ASSERT_EQ(restored->guideStorage().trackAssignments(net).size(), 1u);
-  EXPECT_EQ(restored->guideStorage().trackAssignments(net).front().box, (Rect{0, 200, 900, 200}));
+  const auto restored_guides = restored->guideStorage().guides(net);
+  ASSERT_EQ(restored_guides.size(), 1u);
+  EXPECT_EQ(restored->guideStorage().guide(restored_guides.front()).box, (Rect{0, 100, 900, 300}));
+  const auto restored_assignments = restored->guideStorage().trackAssignments(net);
+  ASSERT_EQ(restored_assignments.size(), 1u);
+  EXPECT_EQ(restored->guideStorage().trackAssignment(restored_assignments.front()).box, (Rect{0, 200, 900, 200}));
   ASSERT_EQ(restored->pinAccessStorage().masterPortCandidateGroup(ports.front(), 0u).points.size(), 1u);
   EXPECT_EQ(restored->pinAccessStorage().masterPortCandidateGroup(ports.front(), 0u).points.front().point,
             (Point{10, 20}));

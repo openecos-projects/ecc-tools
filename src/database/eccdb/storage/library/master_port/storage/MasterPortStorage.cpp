@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "library/common/LibraryGeometry.h"
+#include "common/GeometryBounds.h"
 #include "library/master_term/model/MasterTermComponents.h"
 #include "tech/TechRegistry.h"
 
@@ -12,51 +13,51 @@ namespace eccdb {
 
 LibraryMasterPortId LibraryMasterPortStorage::createMasterPort(LibraryMasterTermId owner, LibraryMasterPortInput port)
 {
-  const auto mark = _geometry.checkpoint();
+  ensureMasterTerm(owner);
+  validateMasterPort(port);
+  const auto entity = _registry.create();
+  const LibraryMasterPortId id{entity};
+  LibraryMasterPort stored;
   try {
-    ensureMasterTerm(owner);
-    validateMasterPort(port);
-    auto stored = materializeMasterPort(std::move(port), true);
+    stored = materializeMasterPort(id, std::move(port), true);
     stored.term = owner;
-
-    const auto entity = _registry.create();
-    try {
-      _registry.emplace<LibraryMasterPort>(entity, std::move(stored));
-      _registry.get<LibraryMasterTerm>(owner.entity()).ports.emplace_back(entity);
-      return LibraryMasterPortId{entity};
-    } catch (...) {
-      if (_registry.valid(entity)) {
-        _registry.destroy(entity);
-      }
-      throw;
-    }
+    _registry.emplace<LibraryMasterPort>(entity, std::move(stored));
+    _registry.emplace<GeometryBounds>(entity);
+    _registry.get<LibraryMasterTerm>(owner.entity()).ports.emplace_back(entity);
+    return id;
   } catch (...) {
-    _geometry.rollback(mark);
+    destroyGeometry(stored);
+    if (_registry.valid(entity)) {
+      if (const auto* stored = _registry.try_get<const LibraryMasterPort>(entity)) {
+        destroyGeometry(*stored);
+      }
+      _registry.destroy(entity);
+    }
     throw;
   }
 }
 
 LibraryMasterPortId LibraryMasterPortStorage::createMasterPortTrusted(LibraryMasterTermId owner, LibraryMasterPortInput port)
 {
-  const auto mark = _geometry.checkpoint();
+  ensureMasterTerm(owner);
+  const auto entity = _registry.create();
+  const LibraryMasterPortId id{entity};
+  LibraryMasterPort stored;
   try {
-    ensureMasterTerm(owner);
-    auto stored = materializeMasterPort(std::move(port), false);
+    stored = materializeMasterPort(id, std::move(port), false);
     stored.term = owner;
-
-    const auto entity = _registry.create();
-    try {
-      _registry.emplace<LibraryMasterPort>(entity, std::move(stored));
-      _registry.get<LibraryMasterTerm>(owner.entity()).ports.emplace_back(entity);
-      return LibraryMasterPortId{entity};
-    } catch (...) {
-      if (_registry.valid(entity)) {
-        _registry.destroy(entity);
-      }
-      throw;
-    }
+    _registry.emplace<LibraryMasterPort>(entity, std::move(stored));
+    _registry.emplace<GeometryBounds>(entity);
+    _registry.get<LibraryMasterTerm>(owner.entity()).ports.emplace_back(entity);
+    return id;
   } catch (...) {
-    _geometry.rollback(mark);
+    destroyGeometry(stored);
+    if (_registry.valid(entity)) {
+      if (const auto* stored = _registry.try_get<const LibraryMasterPort>(entity)) {
+        destroyGeometry(*stored);
+      }
+      _registry.destroy(entity);
+    }
     throw;
   }
 }
@@ -128,7 +129,9 @@ std::optional<Rect> LibraryMasterPortStorage::boundingBox(LibraryMasterPortId id
   }
 
   const auto& tech_registry = _tech_registry.registry();
-  for (const auto& placement : port.vias) {
+  const auto& geometry_registry = _geometry.geometryRegistry();
+  for (const auto shape : port.vias) {
+    const auto& placement = geometry_registry.get<LibraryViaPlacement>(shape);
     const auto& via = tech_registry.get<const TechViaGeometry>(placement.via.entity());
     const auto bounds = via.bounding_box.offset(placement.origin.x, placement.origin.y);
     result = result.has_value() ? result->united(bounds) : bounds;
@@ -138,17 +141,18 @@ std::optional<Rect> LibraryMasterPortStorage::boundingBox(LibraryMasterPortId id
 
 void LibraryMasterPortStorage::updateMasterPort(LibraryMasterPortId id, LibraryMasterPortInput port)
 {
-  const auto mark = _geometry.checkpoint();
+  ensureMasterPort(id);
+  validateMasterPort(port);
+  auto stored = materializeMasterPort(id, std::move(port), true);
+  stored.term = _registry.get<const LibraryMasterPort>(id.entity()).term;
+  auto old = _registry.get<const LibraryMasterPort>(id.entity());
   try {
-    ensureMasterPort(id);
-    validateMasterPort(port);
-    auto stored = materializeMasterPort(std::move(port), true);
-    stored.term = _registry.get<const LibraryMasterPort>(id.entity()).term;
     _registry.replace<LibraryMasterPort>(id.entity(), std::move(stored));
   } catch (...) {
-    _geometry.rollback(mark);
+    destroyGeometry(stored);
     throw;
   }
+  destroyGeometry(old);
 }
 
 bool LibraryMasterPortStorage::destroyMasterPort(LibraryMasterPortId id)
@@ -164,6 +168,8 @@ bool LibraryMasterPortStorage::destroyMasterPort(LibraryMasterPortId id)
     ports.erase(first, ports.end());
   }
 
+  const auto stored = _registry.get<const LibraryMasterPort>(id.entity());
+  destroyGeometry(stored);
   _registry.destroy(id.entity());
   return true;
 }
@@ -201,18 +207,37 @@ void LibraryMasterPortStorage::validateMasterPort(const LibraryMasterPortInput& 
   validateLibraryViaPlacements(_tech_registry, port.vias);
 }
 
-LibraryMasterPort LibraryMasterPortStorage::materializeMasterPort(LibraryMasterPortInput port, bool validate_geometry)
+LibraryMasterPort LibraryMasterPortStorage::materializeMasterPort(LibraryMasterPortId owner, LibraryMasterPortInput port, bool validate_geometry)
 {
-  LibraryMasterPort result{.port_class = port.port_class, .vias = std::move(port.vias)};
+  LibraryMasterPort result{.port_class = port.port_class};
   result.layer_clauses.reserve(port.layer_clauses.size());
-  for (auto& clause : port.layer_clauses) {
-    result.layer_clauses.push_back(LibraryPortLayerGeometry{.layer = clause.layer,
-                                                            .geometry = validate_geometry
-                                                                          ? _geometry.append(clause.geometry)
-                                                                          : _geometry.appendTrusted(clause.geometry.rects,
-                                                                                                    clause.geometry.polygons)});
+  result.vias.reserve(port.vias.size());
+  const auto geometry_owner = GeometryOwner::from(GeometryOwnerDomain::kLibraryMaster, owner);
+  try {
+    for (auto& clause : port.layer_clauses) {
+      result.layer_clauses.push_back(LibraryPortLayerGeometry{.layer = clause.layer,
+                                                              .geometry = validate_geometry
+                                                                            ? _geometry.append(geometry_owner, clause.geometry)
+                                                                            : _geometry.appendTrusted(geometry_owner, clause.geometry)});
+    }
+    for (auto& via : port.vias) {
+      result.vias.push_back(_geometry.geometryRegistry().create(geometry_owner, std::move(via)));
+    }
+  } catch (...) {
+    destroyGeometry(result);
+    throw;
   }
   return result;
+}
+
+void LibraryMasterPortStorage::destroyGeometry(const LibraryMasterPort& port) noexcept
+{
+  for (const auto& clause : port.layer_clauses) {
+    _geometry.destroy(clause.geometry);
+  }
+  for (const auto shape : port.vias) {
+    static_cast<void>(_geometry.geometryRegistry().destroy(shape));
+  }
 }
 
 }  // namespace eccdb

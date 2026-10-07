@@ -20,9 +20,14 @@ bool RoutingContextService::hasGuides(DesignNetId net) const
   return _design.guideStorage().hasGuides(net);
 }
 
-std::span<const DesignRouteGuide> RoutingContextService::guides(DesignNetId net) const
+std::span<const GeometryShapeId> RoutingContextService::guides(DesignNetId net) const
 {
   return _design.guideStorage().guides(net);
+}
+
+const DesignRouteGuide& RoutingContextService::guide(GeometryShapeId id) const
+{
+  return _design.guideStorage().guide(id);
 }
 
 void RoutingContextService::replaceGuides(DesignNetId net, std::vector<DesignRouteGuide> guides)
@@ -40,9 +45,14 @@ bool RoutingContextService::hasTrackAssignments(DesignNetId net) const
   return _design.guideStorage().hasTrackAssignments(net);
 }
 
-std::span<const DesignTrackAssignmentShape> RoutingContextService::trackAssignments(DesignNetId net) const
+std::span<const GeometryShapeId> RoutingContextService::trackAssignments(DesignNetId net) const
 {
   return _design.guideStorage().trackAssignments(net);
+}
+
+const DesignTrackAssignmentShape& RoutingContextService::trackAssignment(GeometryShapeId id) const
+{
+  return _design.guideStorage().trackAssignment(id);
 }
 
 void RoutingContextService::replaceTrackAssignments(DesignNetId net, std::vector<DesignTrackAssignmentShape> assignments)

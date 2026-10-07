@@ -25,12 +25,14 @@ class RoutingContextService
   [[nodiscard]] const DesignStore& design() const noexcept { return _design; }
 
   [[nodiscard]] bool hasGuides(DesignNetId net) const;
-  [[nodiscard]] std::span<const DesignRouteGuide> guides(DesignNetId net) const;
+  [[nodiscard]] std::span<const GeometryShapeId> guides(DesignNetId net) const;
+  [[nodiscard]] const DesignRouteGuide& guide(GeometryShapeId id) const;
   void replaceGuides(DesignNetId net, std::vector<DesignRouteGuide> guides);
   void clearGuides(DesignNetId net);
 
   [[nodiscard]] bool hasTrackAssignments(DesignNetId net) const;
-  [[nodiscard]] std::span<const DesignTrackAssignmentShape> trackAssignments(DesignNetId net) const;
+  [[nodiscard]] std::span<const GeometryShapeId> trackAssignments(DesignNetId net) const;
+  [[nodiscard]] const DesignTrackAssignmentShape& trackAssignment(GeometryShapeId id) const;
   void replaceTrackAssignments(DesignNetId net, std::vector<DesignTrackAssignmentShape> assignments);
   void appendTrackAssignments(DesignNetId net, std::vector<DesignTrackAssignmentShape> assignments);
   void clearTrackAssignments(DesignNetId net);

@@ -9,6 +9,7 @@
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <tuple>
@@ -24,6 +25,9 @@
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/routing/component/RoutingComponents.h"
 #include "design/via/component/ViaComponents.h"
+#include "design/geometry/DesignGeometryComponents.h"
+#include "geometry/DomainGeometryComponents.h"
+#include "geometry/GeometryRegistry.h"
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/master_term/model/MasterTermComponents.h"
 #include "library/site/model/SiteComponents.h"
@@ -509,7 +513,7 @@ std::string_view viaName(const DefNameCache& names, const DesignNdrViaRef& via)
   return names.viaName(via.design_via);
 }
 
-std::string_view viaName(const DefNameCache& names, const DesignNetVia& via)
+std::string_view viaName(const DefNameCache& names, const DesignGeometryNetVia& via)
 {
   if (via.tech_via) {
     return names.viaName(via.tech_via);
@@ -544,23 +548,26 @@ void writePinShapeOptions(DefTextOutput& output, uint32_t flags, uint32_t mask, 
   }
 }
 
-void writeBlockPin(DefTextOutput& output, const DefNameCache& names, const DesignBlockPin& pin)
+void writeBlockPin(DefTextOutput& output, const DefNameCache& names, const GeometryRegistry& geometry, const DesignBlockPin& pin)
 {
   if ((pin.flags & DesignIoPinPortFlag::kExplicit) != 0u) {
     output << "\n  + PORT";
   }
-  for (const auto& rectangle : pin.rectangles) {
+  for (const auto id : pin.rectangles) {
+    const auto& rectangle = geometry.get<DesignPinRectangle>(id);
     output << "\n    + LAYER " << names.layerInfo(rectangle.layer).name;
     writePinShapeOptions(output, rectangle.flags, rectangle.mask, rectangle.spacing, rectangle.design_rule_width);
     output << " ( " << rectangle.rectangle.ll_x << ' ' << rectangle.rectangle.ll_y << " ) ( " << rectangle.rectangle.ur_x << ' '
            << rectangle.rectangle.ur_y << " )";
   }
-  for (const auto& polygon : pin.polygons) {
+  for (const auto id : pin.polygons) {
+    const auto& polygon = geometry.get<DesignPinPolygon>(id);
     output << "\n    + POLYGON " << names.layerInfo(polygon.layer).name;
     writePinShapeOptions(output, polygon.flags, polygon.mask, polygon.spacing, polygon.design_rule_width);
     writePolygon(output, polygon.points);
   }
-  for (const auto& via : pin.vias) {
+  for (const auto id : pin.vias) {
+    const auto& via = geometry.get<DesignPinVia>(id);
     output << "\n    + VIA " << pinViaName(names, via);
     if ((via.flags & DesignPinViaFlag::kHasMask) != 0u) {
       output << " MASK " << via.top_mask << via.cut_mask << via.bottom_mask;
@@ -587,32 +594,41 @@ void writeNetGeometryPrefix(DefTextOutput& output, DesignWireStatus status, std:
   }
 }
 
-void writeNetGeometry(DefTextOutput& output, const DefNameCache& names, const DesignNetGeometry& geometry)
+void writeNetGeometry(DefTextOutput& output, const DefNameCache& names, const DesignStore& design,
+                      const DesignNetGeometry& geometry)
 {
-  for (const auto& rectangle : geometry.rectangles) {
-    writeNetGeometryPrefix(output, rectangle.route_status, rectangle.shield_net, rectangle.flags, rectangle.shape);
-    if ((rectangle.flags & DesignNetGeometryFlag::kHasMask) != 0u) {
-      output << " + MASK " << rectangle.mask;
+  for (const auto id : geometry.shapes) {
+    const auto view = design.geometryStorage().shape(id);
+    if (const auto* rectangle = std::get_if<const DesignGeometryRectangle*>(&view.payload)) {
+      const auto& value = **rectangle;
+      writeNetGeometryPrefix(output, value.route_status, value.shield_net, value.flags, value.shape);
+      if ((value.flags & DesignNetGeometryFlag::kHasMask) != 0u) {
+        output << " + MASK " << value.mask;
+      }
+      output << " + RECT " << names.layerName(value.layer) << " ( " << value.rectangle.ll_x << ' ' << value.rectangle.ll_y
+             << " ) ( " << value.rectangle.ur_x << ' ' << value.rectangle.ur_y << " )";
+      continue;
     }
-    output << " + RECT " << names.layerName(rectangle.layer) << " ( " << rectangle.rectangle.ll_x << ' ' << rectangle.rectangle.ll_y
-           << " ) ( " << rectangle.rectangle.ur_x << ' ' << rectangle.rectangle.ur_y << " )";
-  }
-  for (const auto& polygon : geometry.polygons) {
-    writeNetGeometryPrefix(output, polygon.route_status, polygon.shield_net, polygon.flags, polygon.shape);
-    if ((polygon.flags & DesignNetGeometryFlag::kHasMask) != 0u) {
-      output << " + MASK " << polygon.mask;
+    if (const auto* polygon = std::get_if<const DesignGeometryPolygon*>(&view.payload)) {
+      const auto& value = **polygon;
+      writeNetGeometryPrefix(output, value.route_status, value.shield_net, value.flags, value.shape);
+      if ((value.flags & DesignNetGeometryFlag::kHasMask) != 0u) {
+        output << " + MASK " << value.mask;
+      }
+      output << " + POLYGON " << names.layerName(value.layer);
+      writePolygon(output, value.points);
+      continue;
     }
-    output << " + POLYGON " << names.layerName(polygon.layer);
-    writePolygon(output, polygon.points);
-  }
-  for (const auto& via : geometry.vias) {
-    writeNetGeometryPrefix(output, via.route_status, via.shield_net, via.flags, via.shape);
-    if ((via.flags & DesignNetGeometryFlag::kHasMask) != 0u) {
-      output << " + MASK " << via.top_mask << via.cut_mask << via.bottom_mask;
-    }
-    output << " + VIA " << viaName(names, via) << ' ' << orientationName(via.orientation);
-    for (const auto origin : via.origins) {
-      output << " ( " << origin.x << ' ' << origin.y << " )";
+    if (const auto* via = std::get_if<const DesignGeometryNetVia*>(&view.payload)) {
+      const auto& value = **via;
+      writeNetGeometryPrefix(output, value.route_status, value.shield_net, value.flags, value.shape);
+      if ((value.flags & DesignNetGeometryFlag::kHasMask) != 0u) {
+        output << " + MASK " << value.top_mask << value.cut_mask << value.bottom_mask;
+      }
+      output << " + VIA " << viaName(names, value) << ' ' << orientationName(value.orientation);
+      for (const auto origin : value.origins) {
+        output << " ( " << origin.x << ' ' << origin.y << " )";
+      }
     }
   }
 }
@@ -898,7 +914,7 @@ void writeNetSection(DefTextOutput& output, const DesignStore& design, const Def
       writeNetOptions(output, names, *options);
     }
     if (const auto* geometry = routing.netGeometry(id); geometry != nullptr) {
-      writeNetGeometry(output, names, *geometry);
+      writeNetGeometry(output, names, design, *geometry);
     }
     for (const auto wire_id : routing.wireIds(id)) {
       const auto& wire = routing.wire(wire_id);
@@ -926,6 +942,7 @@ void DefDesignExporter::write(std::ostream& stream) const
   }
   DefTextOutput output(stream);
   const DefNameCache names(_design);
+  const auto& geometry = _design.geometryRegistry();
   const auto& global = _design.globalStorage();
   if (!global.hasInfo() || !global.hasDieArea()) {
     throw std::logic_error("DEF export requires DesignInfo and DieArea");
@@ -938,7 +955,7 @@ void DefDesignExporter::write(std::ostream& stream) const
   output << "UNITS DISTANCE MICRONS " << info.database_units_per_micron << " ;\n\n";
 
   output << "DIEAREA";
-  for (const auto point : global.dieArea().boundary) {
+  for (const auto point : global.dieBoundary()) {
     output << " ( " << point.x << ' ' << point.y << " )";
   }
   output << " ;\n\n";
@@ -1045,7 +1062,8 @@ void DefDesignExporter::write(std::ostream& stream) const
                  << formula.top_offset.y;
         }
       } else {
-        for (const auto& rectangle : via.rectangles) {
+        for (const auto shape : via.rectangles) {
+          const auto& rectangle = geometry.get<DesignViaRectangle>(shape);
           output << "\n  + RECT " << names.layerInfo(rectangle.layer).name;
           if (rectangle.mask != 0u) {
             output << " + MASK " << rectangle.mask;
@@ -1053,7 +1071,8 @@ void DefDesignExporter::write(std::ostream& stream) const
           output << " ( " << rectangle.rectangle.ll_x << ' ' << rectangle.rectangle.ll_y << " ) ( " << rectangle.rectangle.ur_x << ' '
                  << rectangle.rectangle.ur_y << " )";
         }
-        for (const auto& polygon : via.polygons) {
+        for (const auto shape : via.polygons) {
+          const auto& polygon = geometry.get<DesignViaPolygon>(shape);
           output << "\n  + POLYGON " << names.layerInfo(polygon.layer).name;
           if (polygon.mask != 0u) {
             output << " + MASK " << polygon.mask;
@@ -1110,7 +1129,34 @@ void DefDesignExporter::write(std::ostream& stream) const
   }
 
   const auto& netlist = _design.netlistStorage();
+  const auto& constraints = _design.constraintStorage();
   const auto instances = netlist.instances();
+  const auto regions = constraints.regions();
+
+  // COMPONENT inline REGION boxes are obsolete in DEF 5.5 and later. Keep
+  // the output valid at 5.8 by normalizing each one to an export-only FENCE
+  // region; the canonical DesignInstance remains unchanged.
+  entt::dense_map<std::string, bool> used_region_names;
+  used_region_names.reserve(regions.size() + instances.size());
+  for (const auto id : regions) {
+    used_region_names.emplace(constraints.region(id).name, true);
+  }
+  entt::dense_map<uint64_t, std::string> inline_region_names;
+  inline_region_names.reserve(instances.size());
+  for (const auto id : instances) {
+    const auto& instance = netlist.instance(id);
+    if ((instance.flags & DesignInstanceFlag::kHasRegionBounds) == 0u) {
+      continue;
+    }
+    const std::string base = "__ECCDB_INLINE_REGION_" + std::to_string(id.packed());
+    std::string name = base;
+    std::size_t suffix = 0u;
+    while (!used_region_names.emplace(name, true).second) {
+      name = base + '_' + std::to_string(++suffix);
+    }
+    inline_region_names.emplace(id.packed(), std::move(name));
+  }
+
   if (!instances.empty()) {
     output << "COMPONENTS " << instances.size() << " ;\n";
     for (const auto id : instances) {
@@ -1124,13 +1170,9 @@ void DefDesignExporter::write(std::ostream& stream) const
         output << "\n  + WEIGHT " << instance.weight;
       }
       if ((instance.flags & DesignInstanceFlag::kHasRegion) != 0u) {
-        output << "\n  + REGION " << _design.constraintStorage().region(instance.region).name;
-      }
-      if ((instance.flags & DesignInstanceFlag::kHasRegionBounds) != 0u) {
-        output << "\n  + REGION";
-        for (const auto rectangle : instance.region_bounds) {
-          output << " ( " << rectangle.ll_x << ' ' << rectangle.ll_y << " ) ( " << rectangle.ur_x << ' ' << rectangle.ur_y << " )";
-        }
+        output << "\n  + REGION " << constraints.region(instance.region).name;
+      } else if ((instance.flags & DesignInstanceFlag::kHasRegionBounds) != 0u) {
+        output << "\n  + REGION " << inline_region_names.at(id.packed());
       }
       if ((instance.flags & DesignInstanceFlag::kHasHalo) != 0u) {
         output << "\n  + HALO";
@@ -1173,14 +1215,13 @@ void DefDesignExporter::write(std::ostream& stream) const
         output << "\n  + USE " << use;
       }
       for (const auto block_pin : netlist.blockPins(id)) {
-        writeBlockPin(output, names, netlist.blockPin(block_pin));
+        writeBlockPin(output, names, geometry, netlist.blockPin(block_pin));
       }
       output << "\n  ;\n";
     }
     output << "END PINS\n\n";
   }
 
-  const auto& constraints = _design.constraintStorage();
   const auto blockages = constraints.blockages();
   if (!blockages.empty()) {
     output << "BLOCKAGES " << blockages.size() << " ;\n";
@@ -1222,10 +1263,12 @@ void DefDesignExporter::write(std::ostream& stream) const
       if ((blockage.flags & DesignBlockageFlag::kHasMask) != 0u) {
         output << " + MASK " << blockage.mask;
       }
-      for (const auto rectangle : blockage.rectangles) {
+      for (const auto shape : blockage.rectangles) {
+        const auto& rectangle = geometry.get<GeometryRectangle>(shape).rectangle;
         output << " RECT ( " << rectangle.ll_x << ' ' << rectangle.ll_y << " ) ( " << rectangle.ur_x << ' ' << rectangle.ur_y << " )";
       }
-      for (const auto& polygon : blockage.polygons) {
+      for (const auto shape : blockage.polygons) {
+        const auto& polygon = geometry.get<GeometryPolygon>(shape).points;
         output << " POLYGON";
         writePolygon(output, polygon);
       }
@@ -1247,7 +1290,8 @@ void DefDesignExporter::write(std::ostream& stream) const
       if ((fill.flags & DesignFillFlag::kOpc) != 0u) {
         output << " + OPC";
       }
-      for (const auto rectangle : fill.rectangles) {
+      for (const auto shape : fill.rectangles) {
+        const auto& rectangle = geometry.get<GeometryRectangle>(shape).rectangle;
         output << "\n  RECT ( " << rectangle.ll_x << ' ' << rectangle.ll_y << " ) ( " << rectangle.ur_x << ' ' << rectangle.ur_y << " )";
       }
       output << " ;\n";
@@ -1255,16 +1299,28 @@ void DefDesignExporter::write(std::ostream& stream) const
     output << "END FILLS\n\n";
   }
 
-  const auto regions = constraints.regions();
-  if (!regions.empty()) {
-    output << "REGIONS " << regions.size() << " ;\n";
+  if (!regions.empty() || !inline_region_names.empty()) {
+    output << "REGIONS " << regions.size() + inline_region_names.size() << " ;\n";
     for (const auto id : regions) {
       const auto& region = constraints.region(id);
       output << "- " << region.name;
-      for (const auto rectangle : region.rectangles) {
+      for (const auto shape : region.rectangles) {
+        const auto& rectangle = geometry.get<GeometryRectangle>(shape).rectangle;
         output << " ( " << rectangle.ll_x << ' ' << rectangle.ll_y << " ) ( " << rectangle.ur_x << ' ' << rectangle.ur_y << " )";
       }
       output << " + TYPE " << (region.type == DesignRegionType::kFence ? "FENCE" : "GUIDE") << " ;\n";
+    }
+    for (const auto id : instances) {
+      const auto found = inline_region_names.find(id.packed());
+      if (found == inline_region_names.end()) {
+        continue;
+      }
+      output << "- " << found->second;
+      for (const auto shape : netlist.instance(id).region_bounds) {
+        const auto& rectangle = geometry.get<GeometryRectangle>(shape).rectangle;
+        output << " ( " << rectangle.ll_x << ' ' << rectangle.ll_y << " ) ( " << rectangle.ur_x << ' ' << rectangle.ur_y << " )";
+      }
+      output << " + TYPE FENCE ;\n";
     }
     output << "END REGIONS\n\n";
   }

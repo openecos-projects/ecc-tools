@@ -1549,7 +1549,7 @@ uint32_t toUnsignedDbu(double value, int32_t units, const char* field)
 Rect prepareRect(const StagedRect& source, int32_t units)
 {
   // Sky130 SRAM LEFs use both corner orders. Keep the complete rectangle and
-  // normalize it at the LEF boundary before GeometryPool validation.
+  // normalize it at the LEF boundary before geometry entity creation.
   const Rect result{.ll_x = toDbu(source.ll_x, units, "geometry x"),
                     .ll_y = toDbu(source.ll_y, units, "geometry y"),
                     .ur_x = toDbu(source.ur_x, units, "geometry x"),
@@ -1757,13 +1757,12 @@ void ensureEmptyTarget(const LibraryStore& library)
   if (entities != nullptr && entities->free_list() != 0u) {
     throw std::logic_error("direct LEF library importer requires a new empty LibraryStore");
   }
-  if (library.geometryPool().rectangleCount() != 0u || library.geometryPool().polygonCount() != 0u
-      || library.geometryPool().pointCount() != 0u) {
-    throw std::logic_error("direct LEF library importer requires an empty GeometryPool");
+  if (!library.geometryRegistry().registry().view<const GeometryShape>().empty()) {
+    throw std::logic_error("direct LEF library importer requires an empty geometry registry");
   }
 }
 
-void rollbackImport(LibraryStore& library, GeometryPoolCheckpoint geometry_checkpoint) noexcept
+void rollbackImport(LibraryStore& library) noexcept
 {
   auto& registry = library.libraryRegistry().registry();
   std::vector<LibraryEntity> entities;
@@ -1773,16 +1772,19 @@ void rollbackImport(LibraryStore& library, GeometryPoolCheckpoint geometry_check
   for (const auto entity : entities) {
     registry.destroy(entity);
   }
-  try {
-    library.geometryPool().rollback(geometry_checkpoint);
-  } catch (...) {
+  auto& geometry_registry = library.geometryRegistry().registry();
+  std::vector<GeometryShapeId> shapes;
+  for (const auto entity : geometry_registry.view<const GeometryShape>()) {
+    shapes.emplace_back(entity);
+  }
+  for (const auto shape : shapes) {
+    static_cast<void>(library.geometryRegistry().destroy(shape));
   }
 }
 
 void commitImport(LibraryStore& library, std::vector<LibrarySite> sites, std::vector<PreparedMaster> masters)
 {
   entt::dense_map<std::string, LibrarySiteId> site_ids;
-  const auto geometry_checkpoint = library.geometryPool().checkpoint();
   try {
     for (auto& site : sites) {
       const auto name = site.name;
@@ -1808,7 +1810,7 @@ void commitImport(LibraryStore& library, std::vector<LibrarySite> sites, std::ve
       }
     }
   } catch (...) {
-    rollbackImport(library, geometry_checkpoint);
+    rollbackImport(library);
     throw;
   }
 }
@@ -1864,7 +1866,6 @@ void LefLibraryImporter::import(std::span<const std::filesystem::path> files)
     }
   }
   _timing = {};
-  const auto geometry_checkpoint = _library.geometryPool().checkpoint();
   {
     try {
       const std::scoped_lock lock(lef_detail::parserMutex());
@@ -1875,7 +1876,7 @@ void LefLibraryImporter::import(std::span<const std::filesystem::path> files)
         throw std::runtime_error("Library LEF DATABASE MICRONS conflicts with the Tech database");
       }
     } catch (...) {
-      rollbackImport(_library, geometry_checkpoint);
+      rollbackImport(_library);
       throw;
     }
   }

@@ -4,6 +4,8 @@
 #include <vector>
 
 #include "common/GeometryTypes.h"
+#include "design/common/DesignTypes.h"
+#include "geometry/GeometryEntity.h"
 #include "tech/common/TechLayerIds.h"
 
 namespace eccdb {
@@ -24,12 +26,22 @@ struct DesignRouteGuide
   uint32_t flags = 0;
 };
 
-// Optional component owned by one DesignNet entity. Guide entries have no
-// independent entity identity because TritonRoute replaces a net's complete
-// guide set as one result.
+template <>
+struct GeometryPayloadTraits<DesignRouteGuide>
+{
+  static constexpr GeometryShapeKind kind = GeometryShapeKind::kGuide;
+};
+
+[[nodiscard]] inline GeometryOwner designGuideOwner(DesignNetId id) noexcept
+{
+  return GeometryOwner::from(GeometryOwnerDomain::kDesignGuide, id);
+}
+
+// Optional ordered owner relation. Each guide has an independent geometry
+// entity; TritonRoute still replaces the complete net-local relation at once.
 struct DesignNetRouteGuides
 {
-  std::vector<DesignRouteGuide> values;
+  std::vector<GeometryShapeId> values;
 };
 
 // One ODB dbNetTrack-like result from track assignment. Unlike guides, a
@@ -40,10 +52,21 @@ struct DesignTrackAssignmentShape
   Rect box;
 };
 
+template <>
+struct GeometryPayloadTraits<DesignTrackAssignmentShape>
+{
+  static constexpr GeometryShapeKind kind = GeometryShapeKind::kTrackAssignment;
+};
+
+[[nodiscard]] inline GeometryOwner designTrackAssignmentOwner(DesignNetId id) noexcept
+{
+  return GeometryOwner::from(GeometryOwnerDomain::kDesignTrackAssignment, id);
+}
+
 // Optional component owned by one DesignNet entity.
 struct DesignNetTrackAssignments
 {
-  std::vector<DesignTrackAssignmentShape> values;
+  std::vector<GeometryShapeId> values;
 };
 
 }  // namespace eccdb

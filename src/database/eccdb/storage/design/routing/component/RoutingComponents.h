@@ -2,12 +2,14 @@
 
 #include <string>
 #include <limits>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
 #include "common/GeometryTypes.h"
 #include "design/common/DesignTypes.h"
 #include "design/routing/component/WireRouting.h"
+#include "geometry/GeometryRegistry.h"
 #include "tech/common/TechLayerIds.h"
 #include "tech/via_master/model/ViaMasterComponents.h"
 
@@ -23,13 +25,14 @@ enum class DesignWireStatus : uint8_t
 };
 
 // Wire is a status/ownership group, not a DEF program or a topology edge.
-// Geometry lives once, in the independent Shape entities listed here.
+// Geometry lives in the independent GeometryRegistry; this vector stores only
+// the ordered relation between a wire and its geometry entities.
 struct DesignWire
 {
   DesignNetId net;
   DesignWireStatus status = DesignWireStatus::kRouted;
   std::string shield_net;
-  std::vector<DesignRouteShapeId> shapes;
+  std::vector<GeometryShapeId> shapes;
   uint32_t next_source_path = 0;
 };
 
@@ -71,6 +74,24 @@ struct DesignRouteShape
   uint32_t source_path = std::numeric_limits<uint32_t>::max();
   DesignRouteGeometry geometry;
 };
+
+inline GeometryShapeKind routeShapeKind(const DesignRouteShape& shape) noexcept
+{
+  return std::visit(
+      [](const auto& geometry) {
+        using Geometry = std::remove_cvref_t<decltype(geometry)>;
+        if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
+          return GeometryShapeKind::kSegment;
+        } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
+          return GeometryShapeKind::kVia;
+        } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
+          return GeometryShapeKind::kPatch;
+        } else {
+          return GeometryShapeKind::kPoint;
+        }
+      },
+      shape.geometry);
+}
 
 // Optional per-Shape DEF attributes. Ordinary routed geometry needs no strings.
 using DesignRouteShapeAttributes = DesignWirePathExtra;
@@ -117,13 +138,14 @@ struct DesignNetVia
   std::string shape;
 };
 
-// Optional EnTT component attached directly to a SPECIALNET DesignNet entity.
-// These are standalone RECT/POLYGON/VIA clauses, not wire-path primitives.
+// Optional relation component attached directly to a SPECIALNET DesignNet
+// entity. The payloads are owned by GeometryRegistry as independent typed
+// entities; this component keeps only DEF order. The DesignNetRectangle /
+// DesignNetPolygon / DesignNetVia structs above are the canonical payloads,
+// also used directly by import and edit callers.
 struct DesignNetGeometry
 {
-  std::vector<DesignNetRectangle> rectangles;
-  std::vector<DesignNetPolygon> polygons;
-  std::vector<DesignNetVia> vias;
+  std::vector<GeometryShapeId> shapes;
 };
 
 }  // namespace eccdb

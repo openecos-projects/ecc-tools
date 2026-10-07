@@ -6,7 +6,7 @@
 namespace eccdb {
 
 // Write-side geometry for one fixed or generated VIA. Storage validates the
-// layer roles and converts each GeometryInput into a GeometryHandle.
+// layer roles and materializes each primitive as an independent GeometryShapeId.
 struct TechViaMasterShapeInput
 {
   TechConductorLayerRef bottom_layer;

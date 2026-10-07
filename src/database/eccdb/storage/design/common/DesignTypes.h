@@ -5,6 +5,7 @@
 
 #include "common/EnttId.h"
 #include "design/schema/DesignEntitySchema.h"
+#include "geometry/GeometryEntity.h"
 
 namespace eccdb {
 
@@ -67,7 +68,9 @@ using DesignIoPinId = DesignBlockTermId;
 using DesignBlockPinId = EnttId<DesignEntity, DesignBlockPin>;
 using DesignNetId = EnttId<DesignEntity, DesignNet>;
 using DesignWireId = EnttId<DesignEntity, DesignWire>;
-using DesignRouteShapeId = EnttId<DesignEntity, DesignRouteShape>;
+// Compatibility spelling only. Route geometry IDs belong to GeometryEntity's
+// independent registry; they are no longer DesignRegistry entities.
+using DesignRouteShapeId = GeometryShapeId;
 using DesignViaId = EnttId<DesignEntity, DesignVia>;
 using DesignNonDefaultRuleId = EnttId<DesignEntity, DesignNonDefaultRule>;
 using DesignRegionId = EnttId<DesignEntity, DesignRegion>;

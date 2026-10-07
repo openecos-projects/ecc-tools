@@ -92,6 +92,7 @@ RouteViaLayers routeViaLayers(const DesignStore& design, const TechStore& techno
   }
 
   std::vector<TechRoutingLayerId> routing_layers;
+  const auto& geometry = design.designRegistry().geometryRegistry();
   const auto append_routing_layer = [&](TechLayerId layer) {
     const auto routing_layer = TechRoutingLayerId{layer.entity()};
     if (technology.routingLayerStorage().contains(routing_layer)
@@ -99,11 +100,11 @@ RouteViaLayers routeViaLayers(const DesignStore& design, const TechStore& techno
       routing_layers.push_back(routing_layer);
     }
   };
-  for (const auto& rectangle : via.rectangles) {
-    append_routing_layer(rectangle.layer);
+  for (const auto shape : via.rectangles) {
+    append_routing_layer(geometry.get<DesignViaRectangle>(shape).layer);
   }
-  for (const auto& polygon : via.polygons) {
-    append_routing_layer(polygon.layer);
+  for (const auto shape : via.polygons) {
+    append_routing_layer(geometry.get<DesignViaPolygon>(shape).layer);
   }
   if (routing_layers.size() != 2u) {
     throw std::invalid_argument("fixed design VIA must have geometry on exactly two routing layers");
@@ -333,17 +334,26 @@ DesignWireId NetRouteService::replaceRouted(DesignNetId net, std::span<const Rou
     const auto replacement = routing.createWire(std::move(replacement_wire));
     record(&NetRouteWriteProfile::create_wire_ns);
     try {
-      auto& registry = _design.designRegistry().registry();
-      auto& owner = registry.get<DesignWire>(replacement.entity());
+      auto& routing_owner = routing.wire(replacement);
+      auto& registry = routing.geometryRegistry().registry();
+      auto& metadata_storage = registry.storage<GeometryShape>();
       auto& shape_storage = registry.storage<DesignRouteShape>();
-      owner.shapes.reserve(shapes.size());
+      routing_owner.shapes.reserve(shapes.size());
       for (std::size_t index = 0; index < shapes.size(); ++index) {
         auto value = storedShape(_design, _technology, shapes[index], static_cast<uint32_t>(index));
         value.wire = replacement;
+        // storedShape already checks the input. Append its canonical payload
+        // without repeating the public single-Shape edit validation.
+        GeometryShape metadata{.owner = GeometryOwner::from(GeometryOwnerDomain::kDesignWire, replacement),
+                               .kind = routeShapeKind(value),
+                               .layer = value.layer,
+                               .flags = value.flags,
+                               .source_path = value.source_path};
         const auto entity = registry.create();
         try {
+          metadata_storage.emplace(entity, std::move(metadata));
           shape_storage.emplace(entity, std::move(value));
-          owner.shapes.emplace_back(entity);
+          routing_owner.shapes.emplace_back(entity);
         } catch (...) {
           registry.destroy(entity);
           throw;
@@ -351,7 +361,8 @@ DesignWireId NetRouteService::replaceRouted(DesignNetId net, std::span<const Rou
       }
       // This fresh Wire uses consecutive source-path ordinals. Update the
       // next ordinal once rather than looking up every just-inserted Shape.
-      owner.next_source_path = static_cast<uint32_t>(shapes.size());
+      routing_owner.next_source_path = static_cast<uint32_t>(shapes.size());
+      routing.markGeometryChanged();
     } catch (...) {
       static_cast<void>(routing.destroyWire(replacement));
       throw;

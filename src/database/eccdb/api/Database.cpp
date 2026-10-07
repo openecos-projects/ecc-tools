@@ -421,7 +421,8 @@ bool Database::contains(ViaId id) const noexcept
 std::optional<DesignViaData> Database::designViaData(ViaId id) const
 {
   if (!contains(id)) return std::nullopt;
-  return detail::toApi(state().design().routingStorage().via(detail::toStorageId<DesignViaId>(id)));
+  return detail::toApi(state().design().routingStorage().via(detail::toStorageId<DesignViaId>(id)),
+                       state().design().geometryRegistry());
 }
 
 ViaId Database::findDesignViaId(std::string_view name) const noexcept

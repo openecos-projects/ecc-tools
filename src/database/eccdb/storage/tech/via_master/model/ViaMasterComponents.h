@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "common/EnttId.h"
-#include "geometry/GeometryHandle.h"
+#include "geometry/GeometryEntity.h"
 #include "tech/common/TechLayerTypes.h"
 #include "tech/via_rule_generate/model/ViaRuleGenerateComponents.h"
 
@@ -58,19 +58,19 @@ struct TechViaMaster
   std::vector<TechProperty> properties;
 };
 
-// Materialized payload of the three fixed-VIA LAYER clauses. Each handle
-// identifies one geometry group in TechStore's GeometryPool; individual
-// Rects and polygons do not receive EnTT IDs.
+// Materialized payload of the three fixed-VIA LAYER clauses. Every physical
+// rectangle/polygon is an independent geometry entity. The vectors preserve
+// LEF clause order while the geometry registry owns the payloads.
 struct TechViaGeometry
 {
   TechConductorLayerRef bottom_layer;
-  GeometryHandle bottom_geometry;
+  std::vector<GeometryShapeId> bottom_geometry;
 
   TechCutLayerId cut_layer;
-  GeometryHandle cut_geometry;
+  std::vector<GeometryShapeId> cut_geometry;
 
   TechConductorLayerRef top_layer;
-  GeometryHandle top_geometry;
+  std::vector<GeometryShapeId> top_geometry;
 
   Rect bounding_box;
 };

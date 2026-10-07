@@ -323,8 +323,8 @@ class LibraryWriter
       _output << "      LAYER " << layerName(clause.layer) << " ;\n";
       writeGeometry(clause.geometry, "        ");
     }
-    for (const auto& via : port.vias) {
-      writeVia(via, "      ");
+    for (const auto shape : port.vias) {
+      writeVia(_library.geometryRegistry().get<LibraryViaPlacement>(shape), "      ");
     }
     _output << "    END\n";
   }
@@ -349,28 +349,32 @@ class LibraryWriter
       }
       writeGeometry(clause.geometry, "      ");
     }
-    for (const auto& via : obs.vias) {
-      writeVia(via, "    ");
+    for (const auto shape : obs.vias) {
+      writeVia(_library.geometryRegistry().get<LibraryViaPlacement>(shape), "    ");
     }
     _output << "  END\n";
   }
 
-  void writeGeometry(GeometryHandle geometry, std::string_view indent)
+  void writeGeometry(std::span<const GeometryShapeId> geometry, std::string_view indent)
   {
-    for (const auto rect : _library.geometryPool().rectangles(geometry)) {
-      _output << indent << "RECT " << distance(rect.ll_x) << ' ' << distance(rect.ll_y) << ' ' << distance(rect.ur_x) << ' '
-              << distance(rect.ur_y) << " ;\n";
-    }
-    for (uint32_t index = 0; index < _library.geometryPool().polygonCount(geometry); ++index) {
-      const auto points = _library.geometryPool().polygonPoints(geometry, index);
-      if (points.size() < 3u) {
-        throw std::logic_error("Library polygon has fewer than three points");
+    const auto& storage = _library.geometryStorage();
+    for (const auto shape : geometry) {
+      const auto kind = storage.geometryRegistry().shape(shape).kind;
+      if (kind == GeometryShapeKind::kRectangle) {
+        const auto rect = storage.rectangle(shape).rectangle;
+        _output << indent << "RECT " << distance(rect.ll_x) << ' ' << distance(rect.ll_y) << ' ' << distance(rect.ur_x) << ' '
+                << distance(rect.ur_y) << " ;\n";
+      } else if (kind == GeometryShapeKind::kPolygon) {
+        const auto points = storage.polygonPoints(shape);
+        if (points.size() < 3u) {
+          throw std::logic_error("Library polygon has fewer than three points");
+        }
+        _output << indent << "POLYGON";
+        for (const auto point : points) {
+          _output << ' ' << distance(point.x) << ' ' << distance(point.y);
+        }
+        _output << " ;\n";
       }
-      _output << indent << "POLYGON";
-      for (const auto point : points) {
-        _output << ' ' << distance(point.x) << ' ' << distance(point.y);
-      }
-      _output << " ;\n";
     }
   }
 

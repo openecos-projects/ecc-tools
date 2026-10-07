@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <algorithm>
+#include <array>
 #include <stdexcept>
 #include <utility>
 
 #include "DesignTestFixture.h"
+#include "geometry/DomainGeometryComponents.h"
 
 namespace eccdb {
 namespace {
@@ -27,12 +29,22 @@ TEST_F(DesignStorageTest, BlockPinsHaveIndependentIdentityAndOwnedLifecycle)
   EXPECT_TRUE(design.designRegistry().registry().all_of<DesignBlockPin>(first.entity()));
   EXPECT_EQ(netlist.blockPin(first).term, terminal);
   EXPECT_EQ(netlist.blockPin(second).term, terminal);
+  const auto first_shape = netlist.blockPin(first).rectangles.front();
+  const auto original_second_shape = netlist.blockPin(second).rectangles.front();
+  EXPECT_EQ(design.geometryRegistry().shape(first_shape).owner, designBlockPinOwner(first));
+  EXPECT_EQ(netlist.blockPinRectangle(first_shape).rectangle, (Rect{0, 0, 20, 20}));
 
-  auto changed = netlist.blockPin(second);
-  changed.rectangles.front().rectangle = {200, 0, 220, 20};
+  const auto& original_second = netlist.blockPin(second);
+  auto changed = DesignBlockPinInput{.flags = original_second.flags,
+                                     .placement_status = original_second.placement_status,
+                                     .origin = original_second.origin,
+                                     .orientation = original_second.orientation,
+                                     .rectangles = {{.layer = layer, .rectangle = {200, 0, 220, 20}}}};
   netlist.updateBlockPin(second, changed);
-  EXPECT_EQ(netlist.blockPin(first).rectangles.front().rectangle, (Rect{0, 0, 20, 20}));
-  EXPECT_EQ(netlist.blockPin(second).rectangles.front().rectangle, (Rect{200, 0, 220, 20}));
+  EXPECT_EQ(netlist.blockPinRectangle(netlist.blockPin(first).rectangles.front()).rectangle, (Rect{0, 0, 20, 20}));
+  const auto updated_second_shape = netlist.blockPin(second).rectangles.front();
+  EXPECT_EQ(netlist.blockPinRectangle(updated_second_shape).rectangle, (Rect{200, 0, 220, 20}));
+  EXPECT_FALSE(design.geometryRegistry().contains(original_second_shape));
 
   auto metadata = netlist.ioPin(terminal);
   metadata.direction = DesignIoPinDirection::kInput;
@@ -40,6 +52,7 @@ TEST_F(DesignStorageTest, BlockPinsHaveIndependentIdentityAndOwnedLifecycle)
   EXPECT_EQ(netlist.blockPins(terminal)[1], second);
   EXPECT_TRUE(netlist.destroyBlockPin(first));
   EXPECT_FALSE(netlist.contains(first));
+  EXPECT_FALSE(design.geometryRegistry().contains(first_shape));
   ASSERT_EQ(netlist.blockPins(terminal).size(), 1u);
   EXPECT_EQ(netlist.blockPins(terminal).front(), second);
   const auto replacement = netlist.createBlockPin(terminal, changed);
@@ -50,6 +63,7 @@ TEST_F(DesignStorageTest, BlockPinsHaveIndependentIdentityAndOwnedLifecycle)
   EXPECT_TRUE(netlist.destroyIoPin(terminal));
   EXPECT_FALSE(netlist.contains(second));
   EXPECT_FALSE(netlist.contains(replacement));
+  EXPECT_FALSE(design.geometryRegistry().contains(updated_second_shape));
   EXPECT_EQ(netlist.blockPinCount(), 0u);
 }
 
@@ -459,8 +473,8 @@ TEST_F(DesignStorageTest, RejectsInvalidNetlistEnums)
 TEST_F(DesignStorageTest, StoresComponentConstraintsAndNetNonDefaultRule)
 {
   auto& constraints = design.constraintStorage();
-  const auto region
-      = constraints.createRegion(DesignRegion{.name = "FENCE", .type = DesignRegionType::kFence, .rectangles = {{0, 0, 1000, 1000}}});
+  const auto region = constraints.createRegion(
+      DesignRegionInput{.name = "FENCE", .type = DesignRegionType::kFence, .rectangles = {{0, 0, 1000, 1000}}});
 
   auto named = createInstance("named");
   named.flags
@@ -472,8 +486,8 @@ TEST_F(DesignStorageTest, StoresComponentConstraintsAndNetNonDefaultRule)
 
   auto bounded = createInstance("bounded");
   bounded.flags = DesignInstanceFlag::kHasRegionBounds;
-  bounded.region_bounds = {{100, 200, 300, 400}, {500, 600, 700, 800}};
-  const auto bounded_id = design.netlistStorage().createInstance(bounded);
+  const std::array<Rect, 2> region_bounds{{{100, 200, 300, 400}, {500, 600, 700, 800}}};
+  const auto bounded_id = design.netlistStorage().createInstance(bounded, region_bounds);
 
   const auto net = design.netlistStorage().createNet(
       DesignNet{.name = "wide_net", .flags = DesignNetFlag::kHasNonDefaultRule, .non_default_rule = non_default_rule});
@@ -482,13 +496,18 @@ TEST_F(DesignStorageTest, StoresComponentConstraintsAndNetNonDefaultRule)
   EXPECT_EQ(stored_named.region, region);
   EXPECT_EQ(stored_named.halo.left, 10);
   EXPECT_EQ(stored_named.route_halo.distance, 50);
-  EXPECT_EQ(design.netlistStorage().instance(bounded_id).region_bounds.size(), 2u);
+  const auto stored_bounds = design.netlistStorage().instance(bounded_id).region_bounds;
+  ASSERT_EQ(stored_bounds.size(), 2u);
+  EXPECT_EQ(design.geometryRegistry().shape(stored_bounds.front()).owner, designInstanceOwner(bounded_id));
+  EXPECT_EQ(design.geometryRegistry().get<const GeometryRectangle>(stored_bounds.front()).rectangle, region_bounds.front());
   EXPECT_EQ(design.netlistStorage().net(net).non_default_rule, non_default_rule);
   EXPECT_FALSE(constraints.destroyRegion(region));
 
   EXPECT_TRUE(design.netlistStorage().destroyNet(net));
   EXPECT_TRUE(design.netlistStorage().destroyInstance(named_id));
   EXPECT_TRUE(design.netlistStorage().destroyInstance(bounded_id));
+  EXPECT_FALSE(design.geometryRegistry().contains(stored_bounds.front()));
+  EXPECT_FALSE(design.geometryRegistry().contains(stored_bounds.back()));
   EXPECT_TRUE(constraints.destroyRegion(region));
 }
 

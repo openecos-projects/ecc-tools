@@ -8,24 +8,40 @@
 
 namespace eccdb {
 
-DesignFillId DesignFillStorage::createFill(DesignFill value)
+DesignFillId DesignFillStorage::createFill(DesignFillInput value)
 {
   validateFill(value);
   const auto entity = _registry.create();
+  const DesignFillId id{entity};
+  DesignFill materialized;
   try {
-    _registry.emplace<DesignFill>(entity, std::move(value));
+    materialized = materializeFill(id, std::move(value));
+    _registry.emplace<DesignFill>(entity, std::move(materialized));
   } catch (...) {
-    _registry.destroy(entity);
+    destroyFillGeometry(materialized);
+    if (_registry.valid(entity)) {
+      _registry.destroy(entity);
+    }
     throw;
   }
-  return DesignFillId{entity};
+  _design_registry.markGeometryChanged();
+  return id;
 }
 
-void DesignFillStorage::updateFill(DesignFillId id, DesignFill value)
+void DesignFillStorage::updateFill(DesignFillId id, DesignFillInput value)
 {
   ensureFill(id);
   validateFill(value);
-  _registry.replace<DesignFill>(id.entity(), std::move(value));
+  const auto old = fill(id);
+  auto replacement = materializeFill(id, std::move(value));
+  try {
+    _registry.replace<DesignFill>(id.entity(), std::move(replacement));
+  } catch (...) {
+    destroyFillGeometry(replacement);
+    throw;
+  }
+  destroyFillGeometry(old);
+  _design_registry.markGeometryChanged();
 }
 
 bool DesignFillStorage::destroyFill(DesignFillId id)
@@ -33,7 +49,10 @@ bool DesignFillStorage::destroyFill(DesignFillId id)
   if (!contains(id)) {
     return false;
   }
+  const auto value = fill(id);
   _registry.destroy(id.entity());
+  destroyFillGeometry(value);
+  _design_registry.markGeometryChanged();
   return true;
 }
 
@@ -63,7 +82,7 @@ uint32_t DesignFillStorage::fillCount() const
   return static_cast<uint32_t>(_registry.storage<DesignFill>().size());
 }
 
-void DesignFillStorage::validateFill(const DesignFill& value) const
+void DesignFillStorage::validateFill(const DesignFillInput& value) const
 {
   constexpr uint32_t kKnownFlags = DesignFillFlag::kOpc | DesignFillFlag::kHasMask;
   if (!value.layer || (value.flags & ~kKnownFlags) != 0u || value.rectangles.empty()) {
@@ -83,6 +102,27 @@ void DesignFillStorage::validateFill(const DesignFill& value) const
       throw std::invalid_argument("design fill rectangle must have area");
     }
   }
+}
+
+DesignFill DesignFillStorage::materializeFill(DesignFillId id, DesignFillInput input)
+{
+  DesignFill result{.layer = input.layer, .flags = input.flags, .mask = input.mask};
+  try {
+    result.rectangles.reserve(input.rectangles.size());
+    for (const auto rectangle : input.rectangles) {
+      result.rectangles.push_back(
+          geometryRegistry().create(designFillOwner(id), GeometryRectangle{.rectangle = rectangle.normalized()}));
+    }
+    return result;
+  } catch (...) {
+    destroyFillGeometry(result);
+    throw;
+  }
+}
+
+void DesignFillStorage::destroyFillGeometry(const DesignFill& value) noexcept
+{
+  geometryRegistry().destroy(value.rectangles);
 }
 
 void DesignFillStorage::ensureFill(DesignFillId id) const

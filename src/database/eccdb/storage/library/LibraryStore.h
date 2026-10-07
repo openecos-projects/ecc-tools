@@ -1,6 +1,6 @@
 #pragma once
 
-#include "geometry/GeometryPool.h"
+#include "geometry/DomainGeometryStorage.h"
 #include "library/LibraryRegistry.h"
 #include "library/cell_master/storage/CellMasterStorage.h"
 #include "library/master_port/storage/MasterPortStorage.h"
@@ -9,11 +9,12 @@
 
 namespace eccdb {
 
+using LibraryGeometryStorage = DomainGeometryStorage;
+
 class TechRegistry;
 
 struct LibraryStoreOptions
 {
-  GeometryPoolOptions geometry;
 };
 
 // A LibraryStore is one loaded cell-library scope. It is a composition root
@@ -31,8 +32,10 @@ class LibraryStore
 
   [[nodiscard]] LibraryRegistry& libraryRegistry() noexcept { return _registry; }
   [[nodiscard]] const LibraryRegistry& libraryRegistry() const noexcept { return _registry; }
-  [[nodiscard]] GeometryPool& geometryPool() noexcept { return _geometry; }
-  [[nodiscard]] const GeometryPool& geometryPool() const noexcept { return _geometry; }
+  [[nodiscard]] LibraryGeometryStorage& geometryStorage() noexcept { return _geometry; }
+  [[nodiscard]] const LibraryGeometryStorage& geometryStorage() const noexcept { return _geometry; }
+  [[nodiscard]] GeometryRegistry& geometryRegistry() noexcept { return _geometry.geometryRegistry(); }
+  [[nodiscard]] const GeometryRegistry& geometryRegistry() const noexcept { return _geometry.geometryRegistry(); }
 
   [[nodiscard]] LibrarySiteStorage& siteStorage() noexcept { return _sites; }
   [[nodiscard]] const LibrarySiteStorage& siteStorage() const noexcept { return _sites; }
@@ -43,10 +46,14 @@ class LibraryStore
   [[nodiscard]] LibraryMasterPortStorage& masterPortStorage() noexcept { return _master_ports; }
   [[nodiscard]] const LibraryMasterPortStorage& masterPortStorage() const noexcept { return _master_ports; }
 
+  // Binary import invokes this after restoring both library registries.
+  // Normal reads intentionally remain unchecked.
+  void validateRestoredGeometry() const;
+
  private:
   const TechRegistry& _tech_registry;
   LibraryRegistry _registry;
-  GeometryPool _geometry;
+  LibraryGeometryStorage _geometry;
   LibrarySiteStorage _sites;
   LibraryCellMasterStorage _cell_masters;
   LibraryMasterTermStorage _master_terms;

@@ -7,8 +7,8 @@
 #include <entt/container/dense_map.hpp>
 
 #include "common/GeometryTypes.h"
-#include "design/common/DesignGeometry.h"
 #include "design/common/DesignTypes.h"
+#include "geometry/GeometryEntity.h"
 #include "library/common/LibraryTypes.h"
 #include "tech/common/TechLayerIds.h"
 #include "tech/non_default_rule/model/NonDefaultRuleComponents.h"
@@ -72,7 +72,9 @@ struct DesignInstance
   uint32_t flags = 0;
   int32_t weight = 0;
   DesignRegionId region;
-  std::vector<Rect> region_bounds;
+  // DEF COMPONENT inline REGION bounds. The owner relation preserves DEF
+  // order; each rectangle itself lives in GeometryRegistry.
+  std::vector<GeometryShapeId> region_bounds;
   DesignInstanceHalo halo;
   DesignInstanceRouteHalo route_halo;
 };
@@ -172,6 +174,38 @@ struct DesignPinVia
   uint32_t bottom_mask = 0;
 };
 
+template <>
+struct GeometryPayloadTraits<DesignPinRectangle>
+{
+  static constexpr GeometryShapeKind kind = GeometryShapeKind::kRectangle;
+};
+
+template <>
+struct GeometryPayloadTraits<DesignPinPolygon>
+{
+  static constexpr GeometryShapeKind kind = GeometryShapeKind::kPolygon;
+};
+
+template <>
+struct GeometryPayloadTraits<DesignPinVia>
+{
+  static constexpr GeometryShapeKind kind = GeometryShapeKind::kPinVia;
+};
+
+// Parser/API write-side value. A block-pin owns ordered geometry entities in
+// canonical storage, while this aggregate carries the physical payload before
+// it has an owner ID.
+struct DesignBlockPinInput
+{
+  uint32_t flags = 0;
+  DesignPlacementStatus placement_status = DesignPlacementStatus::kUnplaced;
+  Point origin;
+  DesignOrientation orientation = DesignOrientation::kN;
+  std::vector<DesignPinRectangle> rectangles;
+  std::vector<DesignPinPolygon> polygons;
+  std::vector<DesignPinVia> vias;
+};
+
 namespace DesignIoPinPortFlag {
 constexpr uint32_t kExplicit = 1u << 0;
 constexpr uint32_t kHasPlacement = 1u << 1;
@@ -186,13 +220,23 @@ struct DesignBlockPin
   DesignPlacementStatus placement_status = DesignPlacementStatus::kUnplaced;
   Point origin;
   DesignOrientation orientation = DesignOrientation::kN;
-  std::vector<DesignPinRectangle> rectangles;
-  std::vector<DesignPinPolygon> polygons;
-  std::vector<DesignPinVia> vias;
+  std::vector<GeometryShapeId> rectangles;
+  std::vector<GeometryShapeId> polygons;
+  std::vector<GeometryShapeId> vias;
   // Owner dbBTerm. Storage assigns this relation; callers cannot forge it
   // through the block-term child vector.
   DesignBlockTermId term;
 };
+
+[[nodiscard]] inline GeometryOwner designBlockPinOwner(DesignBlockPinId id) noexcept
+{
+  return GeometryOwner::from(GeometryOwnerDomain::kDesignBlockPin, id);
+}
+
+[[nodiscard]] inline GeometryOwner designInstanceOwner(DesignInstanceId id) noexcept
+{
+  return GeometryOwner::from(GeometryOwnerDomain::kDesignInstance, id);
+}
 
 // DEF PIN / OpenDB dbBTerm. Physical dbBPins are independent entities so a
 // port's geometry, pin-access data and identity can be edited independently.

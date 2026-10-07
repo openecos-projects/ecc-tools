@@ -28,25 +28,23 @@ void normalizeAndValidateRects(std::vector<Rect>& rects, const char* role)
 
 TechViaMasterId TechViaMasterStorage::createFixedViaMaster(TechViaMaster master, TechViaMasterShapeInput shapes)
 {
-  const auto mark = _geometry.checkpoint();
+  validateMaster(master);
+  validateGeometryInput(shapes);
+  const auto entity = _registry.create();
+  const TechViaMasterId id{entity};
+  TechViaGeometry geometry;
   try {
-    validateMaster(master);
-    validateGeometryInput(shapes);
-    const auto geometry = storeGeometry(std::move(shapes));
-
-    const auto entity = _registry.create();
-    try {
-      _registry.emplace<TechViaMaster>(entity, std::move(master));
-      _registry.emplace<TechViaGeometry>(entity, geometry);
-      return TechViaMasterId{entity};
-    } catch (...) {
-      if (_registry.valid(entity)) {
-        _registry.destroy(entity);
-      }
-      throw;
-    }
+    _registry.emplace<TechViaMaster>(entity, std::move(master));
+    geometry = storeGeometry(id, std::move(shapes));
+    _registry.emplace<TechViaGeometry>(entity, geometry);
+    return id;
   } catch (...) {
-    _geometry.rollback(mark);
+    _geometry.destroy(geometry.bottom_geometry);
+    _geometry.destroy(geometry.cut_geometry);
+    _geometry.destroy(geometry.top_geometry);
+    if (_registry.valid(entity)) {
+      _registry.destroy(entity);
+    }
     throw;
   }
 }
@@ -54,27 +52,25 @@ TechViaMasterId TechViaMasterStorage::createFixedViaMaster(TechViaMaster master,
 TechViaMasterId TechViaMasterStorage::createGeneratedViaMaster(TechViaMaster master, TechGeneratedViaMaster generated,
                                                                TechViaMasterShapeInput shapes)
 {
-  const auto mark = _geometry.checkpoint();
+  validateMaster(master);
+  validateGenerated(generated, shapes);
+  validateGeometryInput(shapes);
+  const auto entity = _registry.create();
+  const TechViaMasterId id{entity};
+  TechViaGeometry geometry;
   try {
-    validateMaster(master);
-    validateGenerated(generated, shapes);
-    validateGeometryInput(shapes);
-    const auto geometry = storeGeometry(std::move(shapes));
-
-    const auto entity = _registry.create();
-    try {
-      _registry.emplace<TechViaMaster>(entity, std::move(master));
-      _registry.emplace<TechViaGeometry>(entity, geometry);
-      _registry.emplace<TechGeneratedViaMaster>(entity, std::move(generated));
-      return TechViaMasterId{entity};
-    } catch (...) {
-      if (_registry.valid(entity)) {
-        _registry.destroy(entity);
-      }
-      throw;
-    }
+    _registry.emplace<TechViaMaster>(entity, std::move(master));
+    geometry = storeGeometry(id, std::move(shapes));
+    _registry.emplace<TechViaGeometry>(entity, geometry);
+    _registry.emplace<TechGeneratedViaMaster>(entity, std::move(generated));
+    return id;
   } catch (...) {
-    _geometry.rollback(mark);
+    _geometry.destroy(geometry.bottom_geometry);
+    _geometry.destroy(geometry.cut_geometry);
+    _geometry.destroy(geometry.top_geometry);
+    if (_registry.valid(entity)) {
+      _registry.destroy(entity);
+    }
     throw;
   }
 }
@@ -186,83 +182,130 @@ const TechViaGeometry& TechViaMasterStorage::geometry(TechViaMasterId id) const
   return _registry.get<TechViaGeometry>(id.entity());
 }
 
-std::span<const Rect> TechViaMasterStorage::bottomRects(TechViaMasterId id) const
+std::vector<Rect> TechViaMasterStorage::bottomRects(TechViaMasterId id) const
 {
-  return _geometry.rectangles(geometry(id).bottom_geometry);
+  std::vector<Rect> result;
+  for (const auto shape : geometry(id).bottom_geometry) {
+    if (_geometry.geometryRegistry().shape(shape).kind == GeometryShapeKind::kRectangle) {
+      result.push_back(_geometry.rectangle(shape).rectangle);
+    }
+  }
+  return result;
 }
 
-std::span<const Rect> TechViaMasterStorage::cutRects(TechViaMasterId id) const
+std::vector<Rect> TechViaMasterStorage::cutRects(TechViaMasterId id) const
 {
-  return _geometry.rectangles(geometry(id).cut_geometry);
+  std::vector<Rect> result;
+  for (const auto shape : geometry(id).cut_geometry) {
+    if (_geometry.geometryRegistry().shape(shape).kind == GeometryShapeKind::kRectangle) {
+      result.push_back(_geometry.rectangle(shape).rectangle);
+    }
+  }
+  return result;
 }
 
-std::span<const Rect> TechViaMasterStorage::topRects(TechViaMasterId id) const
+std::vector<Rect> TechViaMasterStorage::topRects(TechViaMasterId id) const
 {
-  return _geometry.rectangles(geometry(id).top_geometry);
+  std::vector<Rect> result;
+  for (const auto shape : geometry(id).top_geometry) {
+    if (_geometry.geometryRegistry().shape(shape).kind == GeometryShapeKind::kRectangle) {
+      result.push_back(_geometry.rectangle(shape).rectangle);
+    }
+  }
+  return result;
 }
 
 uint32_t TechViaMasterStorage::bottomPolygonCount(TechViaMasterId id) const
 {
-  return _geometry.polygonCount(geometry(id).bottom_geometry);
+  uint32_t result = 0;
+  for (const auto shape : geometry(id).bottom_geometry) {
+    result += _geometry.geometryRegistry().shape(shape).kind == GeometryShapeKind::kPolygon;
+  }
+  return result;
 }
 
 uint32_t TechViaMasterStorage::cutPolygonCount(TechViaMasterId id) const
 {
-  return _geometry.polygonCount(geometry(id).cut_geometry);
+  uint32_t result = 0;
+  for (const auto shape : geometry(id).cut_geometry) {
+    result += _geometry.geometryRegistry().shape(shape).kind == GeometryShapeKind::kPolygon;
+  }
+  return result;
 }
 
 uint32_t TechViaMasterStorage::topPolygonCount(TechViaMasterId id) const
 {
-  return _geometry.polygonCount(geometry(id).top_geometry);
+  uint32_t result = 0;
+  for (const auto shape : geometry(id).top_geometry) {
+    result += _geometry.geometryRegistry().shape(shape).kind == GeometryShapeKind::kPolygon;
+  }
+  return result;
 }
 
 std::span<const Point> TechViaMasterStorage::bottomPolygonPoints(TechViaMasterId id, uint32_t polygon_index) const
 {
-  return _geometry.polygonPoints(geometry(id).bottom_geometry, polygon_index);
+  for (const auto shape : geometry(id).bottom_geometry) {
+    if (_geometry.geometryRegistry().shape(shape).kind == GeometryShapeKind::kPolygon && polygon_index-- == 0) {
+      return _geometry.polygonPoints(shape);
+    }
+  }
+  throw std::out_of_range("invalid bottom polygon index");
 }
 
 std::span<const Point> TechViaMasterStorage::cutPolygonPoints(TechViaMasterId id, uint32_t polygon_index) const
 {
-  return _geometry.polygonPoints(geometry(id).cut_geometry, polygon_index);
+  for (const auto shape : geometry(id).cut_geometry) {
+    if (_geometry.geometryRegistry().shape(shape).kind == GeometryShapeKind::kPolygon && polygon_index-- == 0) {
+      return _geometry.polygonPoints(shape);
+    }
+  }
+  throw std::out_of_range("invalid cut polygon index");
 }
 
 std::span<const Point> TechViaMasterStorage::topPolygonPoints(TechViaMasterId id, uint32_t polygon_index) const
 {
-  return _geometry.polygonPoints(geometry(id).top_geometry, polygon_index);
+  for (const auto shape : geometry(id).top_geometry) {
+    if (_geometry.geometryRegistry().shape(shape).kind == GeometryShapeKind::kPolygon && polygon_index-- == 0) {
+      return _geometry.polygonPoints(shape);
+    }
+  }
+  throw std::out_of_range("invalid top polygon index");
 }
 
 uint32_t TechViaMasterStorage::shapeCount(TechViaMasterId id) const
 {
   const auto& shapes = geometry(id);
-  const auto count = static_cast<uint64_t>(_geometry.shapeCount(shapes.bottom_geometry)) + _geometry.shapeCount(shapes.cut_geometry)
-                     + _geometry.shapeCount(shapes.top_geometry);
+  const auto count = static_cast<uint64_t>(shapes.bottom_geometry.size()) + shapes.cut_geometry.size() + shapes.top_geometry.size();
   if (count > std::numeric_limits<uint32_t>::max()) {
     throw std::overflow_error("too many shapes in tech via master");
   }
   return static_cast<uint32_t>(count);
 }
 
-TechViaGeometry TechViaMasterStorage::storeGeometry(TechViaMasterShapeInput shapes)
+TechViaGeometry TechViaMasterStorage::storeGeometry(TechViaMasterId owner, TechViaMasterShapeInput shapes)
 {
   normalizeAndValidateRects(shapes.bottom_geometry.rects, "bottom");
   normalizeAndValidateRects(shapes.cut_geometry.rects, "cut");
   normalizeAndValidateRects(shapes.top_geometry.rects, "top");
 
-  const auto mark = _geometry.checkpoint();
+  std::vector<GeometryShapeId> created;
   try {
     TechViaGeometry geometry;
     geometry.bottom_layer = shapes.bottom_layer;
-    geometry.bottom_geometry = _geometry.append(shapes.bottom_geometry);
+    geometry.bottom_geometry = _geometry.append(GeometryOwner::from(GeometryOwnerDomain::kTechnologyVia, owner), shapes.bottom_geometry);
+    created.insert(created.end(), geometry.bottom_geometry.begin(), geometry.bottom_geometry.end());
     geometry.cut_layer = shapes.cut_layer;
-    geometry.cut_geometry = _geometry.append(shapes.cut_geometry);
+    geometry.cut_geometry = _geometry.append(GeometryOwner::from(GeometryOwnerDomain::kTechnologyVia, owner), shapes.cut_geometry);
+    created.insert(created.end(), geometry.cut_geometry.begin(), geometry.cut_geometry.end());
     geometry.top_layer = shapes.top_layer;
-    geometry.top_geometry = _geometry.append(shapes.top_geometry);
+    geometry.top_geometry = _geometry.append(GeometryOwner::from(GeometryOwnerDomain::kTechnologyVia, owner), shapes.top_geometry);
+    created.insert(created.end(), geometry.top_geometry.begin(), geometry.top_geometry.end());
     geometry.bounding_box = _geometry.bounds(geometry.bottom_geometry)
                                 .united(_geometry.bounds(geometry.cut_geometry))
                                 .united(_geometry.bounds(geometry.top_geometry));
     return geometry;
   } catch (...) {
-    _geometry.rollback(mark);
+    _geometry.destroy(created);
     throw;
   }
 }

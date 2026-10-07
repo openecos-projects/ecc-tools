@@ -16,6 +16,12 @@
 # ***************************************************************************************
 
 cmake_minimum_required(VERSION 3.11)
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+    message(FATAL_ERROR
+        "In-source builds are not supported. Use cmake -S . -B build/tools instead.")
+endif()
+
 project(ecc)
 
 include(CTest)

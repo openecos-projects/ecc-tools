@@ -784,6 +784,8 @@ void rollbackImport(DesignStore& design) noexcept
         registry.destroy(entity);
       }
     }
+    design.geometryRegistry().registry().clear();
+    design.designRegistry().markGeometryChanged();
     if (registry.valid(design.rootId().entity())) {
       registry.remove<DesignInfo>(design.rootId().entity());
       registry.remove<DesignDieArea>(design.rootId().entity());
@@ -1009,7 +1011,7 @@ int directDieAreaCallback(defrCallbackType_e type, defiBox* source, defiUserData
     if (type != defrDieAreaCbkType || source == nullptr) throw std::runtime_error("invalid SI2 DIEAREA callback");
     const auto raw = source->getPoint();
     if (raw.numPoints < 2 || raw.x == nullptr || raw.y == nullptr) throw std::runtime_error("DIEAREA requires at least two points");
-    DesignDieArea area;
+    DesignDieAreaInput area;
     area.boundary.reserve(static_cast<std::size_t>(raw.numPoints));
     for (int index = 0; index < raw.numPoints; ++index) area.boundary.push_back(Point{raw.x[index], raw.y[index]});
     context.design.globalStorage().setDieArea(std::move(area));
@@ -1085,7 +1087,7 @@ int directViaCallback(defrCallbackType_e type, defiVia* source, defiUserData use
 {
   return directGuardedCallback(user_data, [&](DirectContext& context) {
     if (type != defrViaCbkType || source == nullptr) throw std::runtime_error("invalid SI2 VIA callback");
-    DesignVia target{.name = requiredText(source->name(), "VIA name")};
+    DesignViaInput target{.name = requiredText(source->name(), "VIA name")};
     if (context.design.routingStorage().findVia(target.name)) throw std::runtime_error("duplicate DEF VIA: " + target.name);
     std::string via_rule_name;
     std::string bottom_layer;
@@ -1212,6 +1214,7 @@ int directComponentCallback(defrCallbackType_e type, defiComponent* source, defi
     if (context.design.netlistStorage().findInstance(name)) throw std::runtime_error("duplicate DEF COMPONENT: " + name);
     const auto master_name = requiredText(source->name(), "COMPONENT master");
     DesignInstance instance{.name = name, .master = requiredMapped(context.masters, master_name), .placement_status = componentPlacement(*source)};
+    std::vector<Rect> region_bounds;
     if (source->hasSource()) instance.source = instanceSource(source->source());
     if (instance.placement_status != DesignPlacementStatus::kUnplaced) {
       instance.origin = {source->placementX(), source->placementY()};
@@ -1231,8 +1234,10 @@ int directComponentCallback(defrCallbackType_e type, defiComponent* source, defi
       source->regionBounds(&count, &ll_x, &ll_y, &ur_x, &ur_y);
       if (count <= 0 || ll_x == nullptr || ll_y == nullptr || ur_x == nullptr || ur_y == nullptr) throw std::runtime_error("COMPONENT has invalid inline REGION bounds: " + name);
       instance.flags |= DesignInstanceFlag::kHasRegionBounds;
-      instance.region_bounds.reserve(static_cast<std::size_t>(count));
-      for (int index = 0; index < count; ++index) instance.region_bounds.push_back(Rect{ll_x[index], ll_y[index], ur_x[index], ur_y[index]}.normalized());
+      region_bounds.reserve(static_cast<std::size_t>(count));
+      for (int index = 0; index < count; ++index) {
+        region_bounds.push_back(Rect{ll_x[index], ll_y[index], ur_x[index], ur_y[index]}.normalized());
+      }
     }
     if (source->hasHalo()) {
       instance.flags |= DesignInstanceFlag::kHasHalo;
@@ -1248,12 +1253,12 @@ int directComponentCallback(defrCallbackType_e type, defiComponent* source, defi
     directDiagnostic(context, "COMPONENT EEQ/GENERATE/FOREIGN", static_cast<std::size_t>(source->hasEEQ() + source->hasGenerate() + source->hasForeignName()));
     directDiagnostic(context, "COMPONENT PROPERTY", static_cast<std::size_t>(source->numProps()));
     directDiagnostic(context, "COMPONENT MASKSHIFT", static_cast<std::size_t>(source->maskShiftSize()));
-    const auto id = context.design.netlistStorage().createInstance(std::move(instance));
+    const auto id = context.design.netlistStorage().createInstance(std::move(instance), region_bounds);
     if (!region_name.empty() && !context.design.constraintStorage().findRegion(region_name)) context.pending_regions.push_back({.instance = id, .name = region_name});
   });
 }
 
-void directSetPinPlacement(DesignBlockPin& pin, DesignPlacementStatus status, Point origin, DesignOrientation orient)
+void directSetPinPlacement(DesignBlockPinInput& pin, DesignPlacementStatus status, Point origin, DesignOrientation orient)
 {
   pin.flags |= DesignIoPinPortFlag::kHasPlacement;
   pin.placement_status = status;
@@ -1262,7 +1267,7 @@ void directSetPinPlacement(DesignBlockPin& pin, DesignPlacementStatus status, Po
 }
 
 template <typename Source>
-void directParsePinGeometry(const Source& source, DesignBlockPin& pin, DirectContext& context, std::string_view field)
+void directParsePinGeometry(const Source& source, DesignBlockPinInput& pin, DirectContext& context, std::string_view field)
 {
   for (int index = 0; index < source.numLayer(); ++index) {
     int ll_x = 0;
@@ -1313,15 +1318,15 @@ int directPinCallback(defrCallbackType_e type, defiPin* source, defiUserData use
     if (source->hasDirection()) term.direction = pinDirection(source->direction());
     if (source->hasUse()) term.use = signalUse(source->use());
     if (source->hasSpecial()) term.flags |= DesignIoPinFlag::kSpecial;
-    std::vector<DesignBlockPin> pins;
-    DesignBlockPin implicit_pin;
+    std::vector<DesignBlockPinInput> pins;
+    DesignBlockPinInput implicit_pin;
     if (source->hasPlacement()) directSetPinPlacement(implicit_pin, pinPlacement(*source), Point{source->placementX(), source->placementY()}, orientation(source->orientStr()));
     directParsePinGeometry(*source, implicit_pin, context, "PIN");
     if ((implicit_pin.flags & DesignIoPinPortFlag::kHasPlacement) != 0u || !implicit_pin.rectangles.empty() || !implicit_pin.polygons.empty() || !implicit_pin.vias.empty()) pins.push_back(std::move(implicit_pin));
     for (int port_index = 0; port_index < source->numPorts(); ++port_index) {
       const auto* port_source = source->pinPort(port_index);
       if (port_source == nullptr) throw std::runtime_error("SI2 returned a null PIN PORT");
-      DesignBlockPin block_pin{.flags = DesignIoPinPortFlag::kExplicit};
+      DesignBlockPinInput block_pin{.flags = DesignIoPinPortFlag::kExplicit};
       if (port_source->hasPlacement()) directSetPinPlacement(block_pin, portPlacement(*port_source), Point{port_source->placementX(), port_source->placementY()}, orientation(port_source->orientStr()));
       directParsePinGeometry(*port_source, block_pin, context, "PIN PORT");
       pins.push_back(std::move(block_pin));
@@ -1397,26 +1402,23 @@ int directNetCallback(defrCallbackType_e type, defiNet* source, defiUserData use
       options.spacing_rules.push_back(std::move(rule));
     }
     if (options.flags != 0u || !options.spacing_rules.empty()) netlist.setNetOptions(net_id, std::move(options));
-    DesignNetGeometry geometry;
-    geometry.rectangles.reserve(static_cast<std::size_t>(source->numRectangles()));
+    auto& geometry_storage = context.design.geometryStorage();
     for (int index = 0; index < source->numRectangles(); ++index) {
       DesignNetRectangle rectangle{.rectangle = Rect{source->xl(index), source->yl(index), source->xh(index), source->yh(index)}.normalized(), .route_status = wireStatus(source->rectRouteStatus(index))};
       if (source->rectMask(index) != 0) { rectangle.flags |= DesignNetGeometryFlag::kHasMask; rectangle.mask = static_cast<uint32_t>(source->rectMask(index)); }
       if (const auto* shape = source->rectShapeType(index); shape != nullptr && *shape != '\0') { rectangle.flags |= DesignNetGeometryFlag::kHasShape; rectangle.shape = shape; }
       if (rectangle.route_status == DesignWireStatus::kShield) rectangle.shield_net = requiredText(source->rectRouteStatusShieldName(index), "SPECIALNET RECT SHIELD net");
       rectangle.layer = directRoutingLayer(context, requiredText(source->rectName(index), "SPECIALNET RECT layer"), "NET RECT");
-      geometry.rectangles.push_back(std::move(rectangle));
+      static_cast<void>(geometry_storage.appendNetShape(net_id, std::move(rectangle)));
     }
-    geometry.polygons.reserve(static_cast<std::size_t>(source->numPolygons()));
     for (int index = 0; index < source->numPolygons(); ++index) {
       DesignNetPolygon polygon{.points = points(source->getPolygon(index), "SPECIALNET POLYGON"), .route_status = wireStatus(source->polyRouteStatus(index))};
       if (source->polyMask(index) != 0) { polygon.flags |= DesignNetGeometryFlag::kHasMask; polygon.mask = static_cast<uint32_t>(source->polyMask(index)); }
       if (const auto* shape = source->polyShapeType(index); shape != nullptr && *shape != '\0') { polygon.flags |= DesignNetGeometryFlag::kHasShape; polygon.shape = shape; }
       if (polygon.route_status == DesignWireStatus::kShield) polygon.shield_net = requiredText(source->polyRouteStatusShieldName(index), "SPECIALNET POLYGON SHIELD net");
       polygon.layer = directRoutingLayer(context, requiredText(source->polygonName(index), "SPECIALNET POLYGON layer"), "NET POLYGON");
-      geometry.polygons.push_back(std::move(polygon));
+      static_cast<void>(geometry_storage.appendNetShape(net_id, std::move(polygon)));
     }
-    geometry.vias.reserve(static_cast<std::size_t>(source->numViaSpecs()));
     for (int index = 0; index < source->numViaSpecs(); ++index) {
       DesignNetVia via{.origins = points(source->getViaPts(index), "SPECIALNET VIA", 1), .orientation = orientation(source->viaOrientStr(index)), .route_status = wireStatus(source->viaRouteStatus(index))};
       via.top_mask = static_cast<uint32_t>(source->topMaskNum(index)); via.cut_mask = static_cast<uint32_t>(source->cutMaskNum(index)); via.bottom_mask = static_cast<uint32_t>(source->bottomMaskNum(index));
@@ -1427,9 +1429,8 @@ int directNetCallback(defrCallbackType_e type, defiNet* source, defiUserData use
       const auto local_via = context.design.routingStorage().findVia(via_name); const auto tech_via = context.tech_vias.find(via_name);
       if (static_cast<bool>(local_via) == (tech_via != context.tech_vias.end())) throw std::runtime_error("NET VIA name must resolve to exactly one VIA: " + via_name);
       if (local_via) via.design_via = local_via; else via.tech_via = tech_via->second;
-      geometry.vias.push_back(std::move(via));
+      static_cast<void>(geometry_storage.appendNetShape(net_id, std::move(via)));
     }
-    if (!geometry.rectangles.empty() || !geometry.polygons.empty() || !geometry.vias.empty()) context.design.routingStorage().setNetGeometry(net_id, std::move(geometry));
     for (int index = 0; index < source->numWires(); ++index) {
       const auto* wire_source = source->wire(index);
       if (wire_source == nullptr) throw std::runtime_error("SI2 returned a null NET wire");
@@ -1449,7 +1450,7 @@ int directRegionCallback(defrCallbackType_e type, defiRegion* source, defiUserDa
 {
   return directGuardedCallback(user_data, [&](DirectContext& context) {
     if (type != defrRegionCbkType || source == nullptr) throw std::runtime_error("invalid SI2 REGION callback");
-    DesignRegion target{.name = requiredText(source->name(), "REGION name")};
+    DesignRegionInput target{.name = requiredText(source->name(), "REGION name")};
     if (context.design.constraintStorage().findRegion(target.name)) throw std::runtime_error("duplicate DEF REGION: " + target.name);
     if (source->hasType()) target.type = regionType(source->type());
     target.rectangles.reserve(static_cast<std::size_t>(source->numRectangles()));
@@ -1514,7 +1515,7 @@ int directBlockageCallback(defrCallbackType_e type, defiBlockage* source, defiUs
 {
   return directGuardedCallback(user_data, [&](DirectContext& context) {
     if (type != defrBlockageCbkType || source == nullptr) throw std::runtime_error("invalid SI2 BLOCKAGE callback");
-    DesignBlockage target;
+    DesignBlockageInput target;
     std::string layer_name;
     std::string component_name;
     if (source->hasLayer()) {
@@ -1558,7 +1559,7 @@ int directFillCallback(defrCallbackType_e type, defiFill* source, defiUserData u
     directDiagnostic(context, "FILL POLYGON", static_cast<std::size_t>(source->numPolygons()));
     if (source->numRectangles() == 0) return;
     const auto layer_name = requiredText(source->layerName(), "FILL LAYER");
-    DesignFill target{.layer = requiredMapped(context.layers, layer_name)};
+    DesignFillInput target{.layer = requiredMapped(context.layers, layer_name)};
     if (source->hasLayerOpc()) target.flags |= DesignFillFlag::kOpc;
     if (source->layerMask() != 0) { if (source->layerMask() < 0) throw std::runtime_error("FILL MASK must be non-negative"); target.flags |= DesignFillFlag::kHasMask; target.mask = static_cast<uint32_t>(source->layerMask()); }
     target.rectangles.reserve(static_cast<std::size_t>(source->numRectangles()));

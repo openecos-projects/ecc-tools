@@ -195,9 +195,9 @@ IoPinData toApi(const DesignIoPin& value)
                    .special_net = toApiId<NetId>(value.special_net)};
 }
 
-DesignVia toStorage(const DesignViaData& value)
+DesignViaInput toStorage(const DesignViaData& value)
 {
-  DesignVia result{.name = value.name};
+  DesignViaInput result{.name = value.name};
   if (value.pattern_name) {
     result.flags |= DesignViaFlag::kHasPatternName;
     result.pattern_name = *value.pattern_name;
@@ -250,17 +250,19 @@ DesignVia toStorage(const DesignViaData& value)
   return result;
 }
 
-DesignViaData toApi(const DesignVia& value)
+DesignViaData toApi(const DesignVia& value, const GeometryRegistry& geometry)
 {
   DesignViaData result{.name = value.name};
   if ((value.flags & DesignViaFlag::kHasPatternName) != 0u) result.pattern_name = value.pattern_name;
   result.rectangles.reserve(value.rectangles.size());
-  for (const auto& source : value.rectangles) {
+  for (const auto id : value.rectangles) {
+    const auto& source = geometry.get<DesignViaRectangle>(id);
     result.rectangles.push_back(
         {.layer = toApiId<LayerId>(source.layer), .rectangle = source.rectangle, .mask = source.mask});
   }
   result.polygons.reserve(value.polygons.size());
-  for (const auto& source : value.polygons) {
+  for (const auto id : value.polygons) {
+    const auto& source = geometry.get<DesignViaPolygon>(id);
     result.polygons.push_back({.layer = toApiId<LayerId>(source.layer), .points = source.points, .mask = source.mask});
   }
   if ((value.flags & DesignViaFlag::kGenerated) != 0u) {

@@ -264,19 +264,34 @@ const DesignCoreArea& DesignFloorplanStorage::coreArea() const
   return _registry.get<const DesignCoreArea>(_root.entity());
 }
 
-void DesignFloorplanStorage::setCoreArea(DesignCoreArea area)
+std::span<const Point> DesignFloorplanStorage::coreBoundary() const
+{
+  return geometryRegistry().get<const GeometryBoundary>(coreArea().boundary).points;
+}
+
+void DesignFloorplanStorage::setCoreArea(DesignCoreAreaInput area)
 {
   if (!_registry.valid(_root.entity()) || !_registry.all_of<DesignRoot>(_root.entity())) {
     throw std::logic_error("invalid design root id");
   }
   static_cast<void>(validateDesignOrthogonalBoundary(area.boundary, "design core area"));
-  _registry.emplace_or_replace<DesignCoreArea>(_root.entity(), std::move(area));
+  const auto boundary = geometryRegistry().createBoundary(designCoreAreaOwner(_root), std::move(area.boundary));
+  const auto* previous = _registry.try_get<const DesignCoreArea>(_root.entity());
+  const auto old_boundary = previous == nullptr ? GeometryShapeId{} : previous->boundary;
+  try {
+    _registry.emplace_or_replace<DesignCoreArea>(_root.entity(), DesignCoreArea{.boundary = boundary});
+  } catch (...) {
+    static_cast<void>(geometryRegistry().destroy(boundary));
+    throw;
+  }
+  static_cast<void>(geometryRegistry().destroy(old_boundary));
+  _design_registry.markGeometryChanged();
 }
 
 Rect DesignFloorplanStorage::coreBounds() const
 {
   if (hasCoreArea()) {
-    return validateDesignOrthogonalBoundary(coreArea().boundary, "design core area");
+    return validateDesignOrthogonalBoundary(coreBoundary(), "design core area");
   }
 
   const auto view = _registry.view<const DesignRow>();
@@ -300,7 +315,8 @@ Rect DesignFloorplanStorage::coreBounds() const
   if (!_registry.valid(_root.entity()) || !_registry.all_of<DesignRoot, DesignDieArea>(_root.entity())) {
     throw std::logic_error("design core bounds require rows or a die area");
   }
-  return validateDesignOrthogonalBoundary(_registry.get<const DesignDieArea>(_root.entity()).boundary, "design die area");
+  const auto die_boundary = _registry.get<const DesignDieArea>(_root.entity()).boundary;
+  return validateDesignOrthogonalBoundary(geometryRegistry().get<const GeometryBoundary>(die_boundary).points, "design die area");
 }
 
 bool DesignFloorplanStorage::referencesSite(LibrarySiteId id) const

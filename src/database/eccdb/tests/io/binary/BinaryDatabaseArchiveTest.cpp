@@ -21,10 +21,16 @@
 #include "lef/LefLibraryExporter.h"
 #include "lef/LefTechExporter.h"
 #include "binary/BinaryDatabaseImporter.h"
+#include "geometry/DomainGeometryComponents.h"
 #include "lef/LefLibraryImporter.h"
 #include "lef/LefTechImporter.h"
 #include "LefPdkCorpus.h"
 #include "binary/BinaryArchive.h"
+#include "library/cell_master/storage/MasterObsInput.h"
+#include "library/common/LibraryGeometry.h"
+#include "library/master_port/storage/MasterPortInput.h"
+#include "tech/TechStore.h"
+#include "tech/via_master/storage/ViaMasterInput.h"
 
 namespace eccdb {
 namespace {
@@ -230,7 +236,7 @@ MACRO CELL_X1
       VIA ( 0.50 0.60 ) V12 ;
     END
   END A
-  OBS LAYER M2 ; RECT 0.00 0.00 0.20 0.20 ; END
+  OBS LAYER M2 ; RECT 0.00 0.00 0.20 0.20 ; VIA ( 0.70 0.80 ) V12 ; END
 END CELL_X1
 END LIBRARY
 )LEF");
@@ -253,6 +259,7 @@ END LIBRARY
   const auto pimp = TechImplantLayerId{source_technology.findLayer("PIMP").entity()};
   const auto site = source_library.siteStorage().findSite("CORE_SITE");
   const auto master = source_library.cellMasterStorage().findCellMaster("CELL_X1");
+  const auto source_via = source_technology.viaMasterStorage().findViaMaster("V12");
   const auto ndr = source_technology.nonDefaultRuleStorage().findNonDefaultRule("WIDE");
   const auto ndr_via = source_technology.nonDefaultRuleStorage().findViaDefinition("NDR_VIA");
   ASSERT_TRUE(m1);
@@ -260,8 +267,28 @@ END LIBRARY
   ASSERT_TRUE(pimp);
   ASSERT_TRUE(site);
   ASSERT_TRUE(master);
+  ASSERT_TRUE(source_via);
   ASSERT_TRUE(ndr);
   ASSERT_TRUE(ndr_via);
+
+  const auto source_term = source_library.masterTermStorage().findMasterTerm(master, "A");
+  ASSERT_TRUE(source_term);
+  const auto source_ports = source_library.masterPortStorage().masterPorts(source_term);
+  ASSERT_EQ(source_ports.size(), 1u);
+  const auto& source_port = source_library.masterPortStorage().masterPort(source_ports.front());
+  ASSERT_EQ(source_port.vias.size(), 1u);
+  const auto source_port_via = source_port.vias.front();
+  EXPECT_EQ(source_library.geometryRegistry().shape(source_port_via).kind, GeometryShapeKind::kLibraryVia);
+  const auto& source_port_placement = source_library.geometryRegistry().get<const LibraryViaPlacement>(source_port_via);
+  EXPECT_EQ(source_port_placement.via, source_via);
+  EXPECT_EQ(source_port_placement.origin, (Point{500, 600}));
+  const auto& source_obs = source_library.cellMasterStorage().obs(master);
+  ASSERT_EQ(source_obs.vias.size(), 1u);
+  const auto source_obs_via = source_obs.vias.front();
+  EXPECT_EQ(source_library.geometryRegistry().shape(source_obs_via).kind, GeometryShapeKind::kLibraryVia);
+  const auto& source_obs_placement = source_library.geometryRegistry().get<const LibraryViaPlacement>(source_obs_via);
+  EXPECT_EQ(source_obs_placement.via, source_via);
+  EXPECT_EQ(source_obs_placement.origin, (Point{700, 800}));
 
   const TemporaryFile tech_binary("synthetic-tech", ".edb");
   const TemporaryFile library_binary("synthetic-library", ".edb");
@@ -344,6 +371,28 @@ END LIBRARY
   EXPECT_EQ(technology->implantLayerStorage().spacingRules(restored_nimp).front().other_layer, restored_pimp);
   EXPECT_EQ(library->siteStorage().findSite("CORE_SITE").packed(), site.packed());
   EXPECT_EQ(library->cellMasterStorage().findCellMaster("CELL_X1").packed(), master.packed());
+  const auto restored_master = library->cellMasterStorage().findCellMaster("CELL_X1");
+  const auto restored_library_via = technology->viaMasterStorage().findViaMaster("V12");
+  ASSERT_TRUE(restored_master);
+  ASSERT_TRUE(restored_library_via);
+  const auto restored_term = library->masterTermStorage().findMasterTerm(restored_master, "A");
+  ASSERT_TRUE(restored_term);
+  const auto restored_ports = library->masterPortStorage().masterPorts(restored_term);
+  ASSERT_EQ(restored_ports.size(), 1u);
+  const auto& restored_port = library->masterPortStorage().masterPort(restored_ports.front());
+  ASSERT_EQ(restored_port.vias.size(), 1u);
+  const auto restored_port_via = restored_port.vias.front();
+  EXPECT_EQ(library->geometryRegistry().shape(restored_port_via).kind, GeometryShapeKind::kLibraryVia);
+  const auto& restored_port_placement = library->geometryRegistry().get<const LibraryViaPlacement>(restored_port_via);
+  EXPECT_EQ(restored_port_placement.via, restored_library_via);
+  EXPECT_EQ(restored_port_placement.origin, (Point{500, 600}));
+  const auto& restored_obs = library->cellMasterStorage().obs(restored_master);
+  ASSERT_EQ(restored_obs.vias.size(), 1u);
+  const auto restored_obs_via = restored_obs.vias.front();
+  EXPECT_EQ(library->geometryRegistry().shape(restored_obs_via).kind, GeometryShapeKind::kLibraryVia);
+  const auto& restored_obs_placement = library->geometryRegistry().get<const LibraryViaPlacement>(restored_obs_via);
+  EXPECT_EQ(restored_obs_placement.via, restored_library_via);
+  EXPECT_EQ(restored_obs_placement.origin, (Point{700, 800}));
   const auto restored_ndr = technology->nonDefaultRuleStorage().findNonDefaultRule("WIDE");
   const auto restored_ndr_via = technology->nonDefaultRuleStorage().findViaDefinition("NDR_VIA");
   ASSERT_TRUE(restored_ndr);
@@ -419,6 +468,119 @@ TEST(BinaryDatabaseArchiveTest, LibraryMasterTermDeletionReachesBinaryFixedPoint
 
   BinaryDatabaseExporter::saveLibrary(fixed.path(), *restored);
   expectSameFile(original.path(), fixed.path());
+}
+
+TEST(BinaryDatabaseArchiveTest, LibraryViaPlacementsResolveAndCascadeWithTheirOwners)
+{
+  TechStore technology;
+  const auto m1 = technology.createRoutingLayer(
+      TechLayerInfo{.name = "M1"}, TechRoutingLayer{.direction = TechRoutingDirection::kHorizontal, .width = 10, .pitch_x = 20, .pitch_y = 20});
+  const auto cut = technology.createCutLayer(TechLayerInfo{.name = "V1"}, TechCutLayer{.width = 6});
+  const auto m2 = technology.createRoutingLayer(
+      TechLayerInfo{.name = "M2"}, TechRoutingLayer{.direction = TechRoutingDirection::kVertical, .width = 12, .pitch_x = 24, .pitch_y = 24});
+  const auto tech_via = technology.viaMasterStorage().createFixedViaMaster(
+      TechViaMaster{.name = "VIA12"},
+      TechViaMasterShapeInput{.bottom_layer = m1,
+                              .bottom_geometry = {.rects = {{-2, -2, 2, 2}}},
+                              .cut_layer = cut,
+                              .cut_geometry = {.rects = {{-1, -1, 1, 1}}},
+                              .top_layer = m2,
+                              .top_geometry = {.rects = {{-3, -3, 3, 3}}}});
+  LibraryStore library(technology.techRegistry());
+  const auto master = library.cellMasterStorage().createCellMaster(LibraryCellMaster{.name = "CELL"});
+  const auto term = library.masterTermStorage().createMasterTerm(master, LibraryMasterTerm{.name = "A"});
+
+  const auto port = library.masterPortStorage().createMasterPort(
+      term, LibraryMasterPortInput{.vias = {{.via = tech_via, .origin = {10, 20}}}});
+  const auto first_port_via = library.masterPortStorage().masterPort(port).vias.front();
+  ASSERT_TRUE(library.geometryRegistry().contains(first_port_via));
+  EXPECT_EQ(library.geometryRegistry().shape(first_port_via).kind, GeometryShapeKind::kLibraryVia);
+  EXPECT_EQ(library.geometryRegistry().get<const LibraryViaPlacement>(first_port_via).origin, (Point{10, 20}));
+
+  library.masterPortStorage().updateMasterPort(port, LibraryMasterPortInput{.vias = {{.via = tech_via, .origin = {30, 40}}}});
+  const auto updated_port_via = library.masterPortStorage().masterPort(port).vias.front();
+  EXPECT_FALSE(library.geometryRegistry().contains(first_port_via));
+  ASSERT_TRUE(library.geometryRegistry().contains(updated_port_via));
+  EXPECT_EQ(library.geometryRegistry().get<const LibraryViaPlacement>(updated_port_via).via, tech_via);
+  EXPECT_EQ(library.geometryRegistry().get<const LibraryViaPlacement>(updated_port_via).origin, (Point{30, 40}));
+
+  const auto deleted_port = library.masterPortStorage().createMasterPort(
+      term, LibraryMasterPortInput{.vias = {{.via = tech_via, .origin = {50, 60}}}});
+  const auto deleted_port_via = library.masterPortStorage().masterPort(deleted_port).vias.front();
+  ASSERT_TRUE(library.masterPortStorage().destroyMasterPort(deleted_port));
+  EXPECT_FALSE(library.geometryRegistry().contains(deleted_port_via));
+
+  library.cellMasterStorage().setObs(master, LibraryMasterObsInput{.vias = {{.via = tech_via, .origin = {70, 80}}}});
+  const auto obs_via = library.cellMasterStorage().obs(master).vias.front();
+  ASSERT_TRUE(library.geometryRegistry().contains(obs_via));
+  EXPECT_EQ(library.geometryRegistry().get<const LibraryViaPlacement>(obs_via).origin, (Point{70, 80}));
+  library.cellMasterStorage().clearObs(master);
+  EXPECT_FALSE(library.geometryRegistry().contains(obs_via));
+
+  ASSERT_TRUE(library.cellMasterStorage().destroyCellMaster(master));
+  EXPECT_FALSE(library.geometryRegistry().contains(updated_port_via));
+}
+
+TEST(BinaryDatabaseArchiveTest, RejectsRestoredLibraryGeometryWithAmbiguousOrOrphanPayloads)
+{
+  TechStore technology;
+  const auto m1 = technology.createRoutingLayer(
+      TechLayerInfo{.name = "M1"}, TechRoutingLayer{.direction = TechRoutingDirection::kHorizontal, .width = 10, .pitch_x = 20, .pitch_y = 20});
+  const auto cut = technology.createCutLayer(TechLayerInfo{.name = "V1"}, TechCutLayer{.width = 6});
+  const auto m2 = technology.createRoutingLayer(
+      TechLayerInfo{.name = "M2"}, TechRoutingLayer{.direction = TechRoutingDirection::kVertical, .width = 12, .pitch_x = 24, .pitch_y = 24});
+  const auto tech_via = technology.viaMasterStorage().createFixedViaMaster(
+      TechViaMaster{.name = "VIA12"},
+      TechViaMasterShapeInput{.bottom_layer = m1,
+                              .bottom_geometry = {.rects = {{-2, -2, 2, 2}}},
+                              .cut_layer = cut,
+                              .cut_geometry = {.rects = {{-1, -1, 1, 1}}},
+                              .top_layer = m2,
+                              .top_geometry = {.rects = {{-3, -3, 3, 3}}}});
+
+  const auto add_port = [](LibraryStore& library, LibraryMasterPortInput input) {
+    const auto master = library.cellMasterStorage().createCellMaster(LibraryCellMaster{.name = "CELL"});
+    const auto term = library.masterTermStorage().createMasterTerm(master, LibraryMasterTerm{.name = "A"});
+    return library.masterPortStorage().createMasterPort(term, input);
+  };
+  const auto expect_restore_rejected = [&](const LibraryStore& library, std::string_view stem) {
+    const TemporaryFile archive{stem, ".edb"};
+    ASSERT_NO_THROW(BinaryDatabaseExporter::saveLibrary(archive.path(), library));
+    EXPECT_THROW(BinaryDatabaseImporter::loadLibrary(archive.path(), technology), std::runtime_error);
+  };
+
+  {
+    LibraryStore library(technology.techRegistry());
+    const auto port = add_port(
+        library, LibraryMasterPortInput{.layer_clauses = {{.layer = TechLayerId{m1.entity()}, .geometry = {.rects = {{0, 0, 10, 10}}}}}});
+    const auto& stored_port = library.masterPortStorage().masterPort(port);
+    ASSERT_EQ(stored_port.layer_clauses.size(), 1u);
+    ASSERT_EQ(stored_port.layer_clauses.front().geometry.size(), 1u);
+    const auto rectangle = stored_port.layer_clauses.front().geometry.front();
+    library.geometryRegistry().registry().emplace<GeometryPolygon>(rectangle.entity(), GeometryPolygon{.points = {{0, 0}, {10, 0}, {10, 10}}});
+    expect_restore_rejected(library, "library-double-layer-payload");
+  }
+
+  {
+    LibraryStore library(technology.techRegistry());
+    const auto port = add_port(library, LibraryMasterPortInput{.vias = {{.via = tech_via, .origin = {10, 20}}}});
+    const auto& stored_port = library.masterPortStorage().masterPort(port);
+    ASSERT_EQ(stored_port.vias.size(), 1u);
+    const auto via = stored_port.vias.front();
+    library.geometryRegistry().registry().emplace<GeometryRectangle>(via.entity(), GeometryRectangle{.rectangle = {0, 0, 10, 10}});
+    expect_restore_rejected(library, "library-via-with-rectangle-payload");
+  }
+
+  {
+    LibraryStore library(technology.techRegistry());
+    const auto port = add_port(
+        library, LibraryMasterPortInput{.layer_clauses = {{.layer = TechLayerId{m1.entity()}, .geometry = {.rects = {{20, 20, 30, 30}}}}}});
+    auto& stored_port = library.libraryRegistry().registry().get<LibraryMasterPort>(port.entity());
+    const auto rectangle = stored_port.layer_clauses.front().geometry.front();
+    stored_port.layer_clauses.front().geometry.clear();
+    library.geometryRegistry().registry().remove<GeometryShape>(rectangle.entity());
+    expect_restore_rejected(library, "library-payload-without-metadata");
+  }
 }
 
 TEST(BinaryDatabaseArchiveTest, FullSky130AndIhp130ReachBinaryFixedPoint)

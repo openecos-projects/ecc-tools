@@ -14,7 +14,7 @@ English version: [Architecture.en.md](Architecture.en.md)
 
 1. **实验性公共 API 层**：`include/eccdb` 中的 `Database`、`Config`、强类型 ID、Data 值和 Ref 句柄。
 2. **API 实现层**：`api` 和 `api/internal`，负责 Facade、PImpl 状态和公共类型与内部类型的转换。
-3. **存储层**：`storage`，包含 EnTT Registry、组件、索引和 Tech/Library 使用的 GeometryPool；Design routing 直接存放在 Wire 组件的扁平 vector 中。
+3. **存储层**：`storage`，包含 EnTT Registry、组件、索引和独立的类型化几何 Registry；Design routing 只在 Wire 上保存有序几何 ID。
 4. **格式 IO 层**：`io/lef`、`io/def`、`io/idb`、`io/binary`，把外部格式物化为存储对象，或从存储对象导出。
 5. **验证与性能层**：`tests` 和 `benchmarks`，验证存储不变量、格式往返、差分语义和内存/性能特征。
 
@@ -29,8 +29,8 @@ flowchart TB
   stores --> tech["storage/tech\nTechStore"]
   stores --> library["storage/library\nLibraryStore"]
   stores --> design["storage/design\nDesignStore"]
-  stores --> geometry["storage/geometry\nGeometryPool"]
-  design --> routing["DesignWire routing\nWire-local flat vectors"]
+  stores --> geometry["storage/geometry\nGeometryRegistry"]
+  design --> routing["DesignWire + GeometryRegistry\nordered Shape IDs + typed payload"]
   internal --> io["io/lef · io/def · io/idb · io/binary\nimport / export"]
   io --> stores
   tests["tests\nunit / IO / differential / memory"] --> public
@@ -50,7 +50,7 @@ flowchart TB
 | `storage/tech` | 技术层、规则、Via master、NDR 等 | 否 |
 | `storage/library` | Site、CellMaster、MasterTerm、Port、Obs 等 | 否 |
 | `storage/design` | Floorplan、Netlist、Routing、Constraint、Fill 等 | 否 |
-| `storage/geometry` | `GeometryPool`、polygon 矩形化和几何句柄 | 否 |
+| `storage/geometry` | 类型化 EnTT 几何实体和域存储 facade | 否 |
 | `io/lef`、`io/def` | SI2 LEF/DEF parser、importer、exporter | 否 |
 | `io/idb` | legacy iDB 的 LEF 转换适配 | 否 |
 | `io/binary` | 三域 binary archive、schema 和 payload | 否 |
@@ -62,11 +62,11 @@ flowchart TB
 
 ### 3.1 `TechStore`
 
-`TechStore` 拥有一个 `TechRegistry` 和一个 `GeometryPool`。技术层不是三套 registry，而是在同一个技术 registry 上通过组件组合表达：基础 layer ID 可以对应 routing、cut、implant、masterslice、overlap 等类型；不同规则和 Via 定义由相应 Storage 管理。技术层几何存储在 Tech 自己的 pool 中，组件只保存 `GeometryHandle` 等范围信息。
+`TechStore` 拥有一个 `TechRegistry` 和一个独立的 `GeometryRegistry`。技术层不是三套 registry，而是在同一个技术 registry 上通过组件组合表达：基础 layer ID 可以对应 routing、cut、implant、masterslice、overlap 等类型；不同规则和 Via 定义由相应 Storage 管理。每个物理矩形或多边形都是独立的类型化几何实体，组件只保存有序 ID。
 
 ### 3.2 `LibraryStore`
 
-`LibraryStore` 拥有 Library registry 和 Library geometry pool，并借用 `TechRegistry`，因为 macro pin、port、obstruction 等几何引用技术层和 Via master。TechRegistry 必须比借用它的 LibraryStore 活得更久；销毁时应先释放依赖它们的 DesignStore，再释放 LibraryStore，最后释放 TechStore。
+`LibraryStore` 拥有 Library registry 和独立的 `GeometryRegistry`，并借用 `TechRegistry`，因为 macro pin、port、obstruction 等几何引用技术层和 Via master。PORT/OBS 的矩形、多边形与 Via placement 均保存为独立 Shape，所有者只保存 ID。TechRegistry 必须比借用它的 LibraryStore 活得更久；销毁时应先释放依赖它们的 DesignStore，再释放 LibraryStore，最后释放 TechStore。
 
 ### 3.3 `DesignStore`
 
@@ -84,7 +84,7 @@ DesignRegistry -> Design entity + Design components
 
 每个内部 entity 通过 `EnttId<Entity, Component>` 加上编译期 component tag 形成强类型内部 ID。公共头文件中的 `ObjectId<Tag>` 是数据库本地的轻量身份值，避免把 EnTT registry 或组件类型泄漏给调用方。
 
-名称 map、反向连接索引和顺序列表属于派生加速数据。binary 恢复后会重建这些索引，而不是把它们当成独立权威数据。任何直接使用内部 Storage 的代码都必须遵守其索引维护约定；公共 API 会把常用修改集中委托给 Storage。
+名称 map、反向连接索引和空间 R-tree 属于派生加速数据；Wire 的几何顺序是持久化的关系。几何真源是 GeometryRegistry 中的实体及其类型化 payload。binary 恢复会载入所有者关系并重建派生索引。任何直接使用内部 Storage 的代码都必须遵守其索引维护约定；公共 API 会把常用修改集中委托给 Storage。
 
 ## 5. 公共 API 的核心语义
 
@@ -105,8 +105,8 @@ flowchart LR
   ref --> entity["Database-owned entity\nEnTT components"]
   entity --> snapshot["NetData\nowned snapshot"]
   snapshot --> write["updateNet / destroyNet\nvalidated mutation"]
-  wire["Wire entity"] --> routing["DesignWireRouting\nWire-local flat vectors"]
-  routing --> values["Path records / Points / Vias / Rects\naggregate values"]
+  wire["Wire entity"] --> routing["DesignWire + GeometryRegistry\nordered Shape IDs + typed payload"]
+  routing --> values["Segment / Via / Patch / Point\nindependent Shape entities"]
 ```
 
 ### 5.1 ID
@@ -142,11 +142,13 @@ if (value) {
 
 ## 6. Wire 与几何存储语义
 
-Wire 是 Design registry 中的实体，但 Path、Point、Via placement 和 rectangle 是 Wire 的聚合值，不是目前独立的公共实体 ID。
+`DesignRegistry` 持有 Design 域共享的 `GeometryRegistry`。Wire、Net、BlockPin、固定 Via 定义、Region、Blockage、Fill、Instance 的内联区域边界、Die/Core、Guide/Track 所有者都只保存 Shape ID；实际坐标位于独立几何 entity 的 typed payload。输入 `Design*Input` 是临时写入值，不属于持久化 schema。这里没有 GeometryPool、隐藏 ordinal 或第二个 locator。普通布线使用 `DesignRouteShape`，其余几何复用 rectangle/polygon/boundary 或保留必要 DEF 属性的 Pin/Via/Guide payload。
 
-每个 `DesignWire` 组件直接拥有 `paths`、`points`、`vias`、`rectangles` 和 `extras` 五个扁平 vector。Path record 使用 Wire 局部的 `begin/count` 定位三类 primitive；更新 Wire 会替换整组 routing，删除 Wire 会随实体立即释放这些 vector，不产生设计级 Pool 垃圾。一个路径中的 Via placement 通过 `TechViaId` 或 design `ViaId` 引用 Via 定义；Via 定义几何仍位于 TechStore 或 DesignStore。
+`GeometryShapeId` 采用 64 位 EnTT entity（32 位槽位、32 位 generation），与当前扩展 Design registry 的容量一致；它是域内 ID，Tech、Library、Design 三个 GeometryRegistry 各自拥有独立空间，GUI 选择必须同时保存所属域/存储和 ID。
 
-因此 `WireRef::routingData()` 返回的是 `WireRoutingData` 值副本，不是第二份权威几何数据库。写回时由 routing storage 校验并替换 Wire 内的 routing vector；已有 span/view 会在对应 Wire 更新或删除后失效。
+编辑边界保持很小：创建/追加、替换、移动、删除、重排。能原地修改的操作保留 Shape entity，`geometryEpoch()` 在修改后递增，包括影响线宽的 Net NDR 引用修改。`DesignStore::geometryIndex()` 持有只保存 Shape ID、BBox 和 Net/Wire 筛选关系的 Boost.Geometry R-tree，不复制 payload；变动后下一次查询再重建。这对应 KLayout 的 proxy 加派生空间索引思路，同时保留 Wire 对 EDA 导出所需的顺序。查询返回 BBox 候选，并非精确几何碰撞结果。
+
+EDA 适配器通过借用类型化 payload 工作。`PhysicalDesignService::forEachNetWireShape` 和 `forEachNetGeometry` 只在回调期间返回 canonical component 引用，SPECIALNET 的 polygon 点、Via origins、字符串属性不再为每个 shape 拷贝成临时 DTO。TritonRoute 和 iDRC 仍可按算法需要建立自己的路径列表、网格或 region query，但这些是工具侧派生数据，不是 EccDB 的第二份真源。
 
 ## 7. 输入、输出和工具数据流
 
@@ -166,9 +168,9 @@ sequenceDiagram
   D->>I: export
 ```
 
-`Config` 目前支持两类输入：一组 LEF 加一个 DEF，或三份独立 binary（technology、library、design）。LEF/DEF parser 的调用序列由 mutex 保护。导入失败时 importer 会回滚已创建实体和 geometry pool 的 staged 内容；这不是对外承诺的长期事务。
+`Config` 目前支持两类输入：一组 LEF 加一个 DEF，或三份独立 binary（technology、library、design）。LEF/DEF parser 的调用序列由 mutex 保护。导入失败时 importer 会回滚已创建实体和 GeometryRegistry 的 staged 内容；这不是对外承诺的长期事务。
 
-binary 文件按三个 registry 域独立保存，header 会校验 magic、格式版本、schema 版本、payload 大小和文件大小。Wire routing 随 `DesignWire` 组件快照保存，名称索引等派生数据在载入后重建。新增持久组件或字段必须同步更新 `io/binary/BinarySchema.h` 的 schema 版本。
+binary 文件按三个 registry 域独立保存，header 会校验 magic、格式版本、schema 版本、payload 大小和文件大小。几何 registry 与所有者关系分开快照保存，空间索引等派生数据在载入后重建。新增持久组件或字段必须同步更新 `io/binary/BinarySchema.h` 的 schema 版本。
 
 ## 8. 外部集成边界
 

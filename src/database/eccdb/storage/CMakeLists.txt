@@ -16,7 +16,6 @@
 # ***************************************************************************************
 
 add_library(eccdb_geometry
-  geometry/GeometryPool.cpp
   geometry/PolygonRectDecomposer.cpp
 )
 eccdb_storage_target(eccdb_geometry)

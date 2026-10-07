@@ -1011,13 +1011,12 @@ void ensureEmptyTarget(const TechStore& database)
       || database.globalStorage().hasUnits() || database.globalStorage().hasManufacturingGrid()
       || database.globalStorage().hasUseMinSpacingObs() || database.globalStorage().hasUseMinSpacingPin()
       || database.globalStorage().hasMaxViaStack()
-      || database.geometryPool().rectangleCount() != 0u || database.geometryPool().polygonCount() != 0u
-      || database.geometryPool().pointCount() != 0u) {
+      || !database.geometryRegistry().registry().view<const GeometryShape>().empty()) {
     throw std::logic_error("direct LEF importer requires a new empty TechStore");
   }
 }
 
-void rollbackImport(TechStore& database, GeometryPoolCheckpoint geometry_checkpoint) noexcept
+void rollbackImport(TechStore& database) noexcept
 {
   auto& registry = database.techRegistry().registry();
   const auto root = database.techRootId().entity();
@@ -1037,9 +1036,13 @@ void rollbackImport(TechStore& database, GeometryPoolCheckpoint geometry_checkpo
   database.globalStorage().removeUseMinSpacingObs();
   database.globalStorage().removeManufacturingGrid();
   database.globalStorage().removeUnits();
-  try {
-    database.geometryPool().rollback(geometry_checkpoint);
-  } catch (...) {
+  auto& geometry_registry = database.geometryRegistry().registry();
+  std::vector<GeometryShapeId> shapes;
+  for (const auto entity : geometry_registry.view<const GeometryShape>()) {
+    shapes.emplace_back(entity);
+  }
+  for (const auto shape : shapes) {
+    static_cast<void>(database.geometryRegistry().destroy(shape));
   }
 }
 
@@ -1053,7 +1056,6 @@ void commitImport(TechStore& database, const PreparedImport& prepared)
     }
     return found->second;
   };
-  const auto geometry_checkpoint = database.geometryPool().checkpoint();
   try {
     if (prepared.units) {
       database.globalStorage().setUnits(*prepared.units);
@@ -1129,7 +1131,7 @@ void commitImport(TechStore& database, const PreparedImport& prepared)
       database.globalStorage().setMaxViaStack(stack);
     }
   } catch (...) {
-    rollbackImport(database, geometry_checkpoint);
+    rollbackImport(database);
     throw;
   }
 }

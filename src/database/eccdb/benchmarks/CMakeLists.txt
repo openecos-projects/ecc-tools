@@ -1,26 +1,3 @@
-if(TARGET eccdb_lef_import AND TARGET eccdb_def_import AND TARGET eccdb_lef_export AND TARGET eccdb_def_export)
-  add_executable(eccdb_benchmark
-    EccdbBenchmark.cpp
-  )
-
-  eccdb_storage_target(eccdb_benchmark)
-  target_include_directories(eccdb_benchmark PRIVATE
-    ${PROJECT_SOURCE_DIR}/src/platform/data_manager
-  )
-  target_link_libraries(eccdb_benchmark
-    PRIVATE
-      eccdb_lef_import
-      eccdb_def_import
-      eccdb_lef_export
-      eccdb_def_export
-  )
-
-  if(TARGET IdbBuilder)
-    target_compile_definitions(eccdb_benchmark PRIVATE ECCDB_BENCHMARK_HAS_LEGACY_IDB=1)
-    target_link_libraries(eccdb_benchmark PRIVATE IdbBuilder)
-  endif()
-endif()
-
 if(TARGET eccdb_lef_import AND TARGET eccdb_def_import)
   # This intentionally measures only the LEF/DEF import path.  The paired
   # OpenDB measurement lives in IspdImportComparison.py so both backends can
@@ -113,15 +90,6 @@ if(TARGET IdbBuilder AND ECCDB_BOOST_JSON_LIBRARY)
       ${ECCDB_BOOST_JSON_LIBRARY}
   )
   set_property(TARGET eccdb_db_only_idb_benchmark PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-
-  if(TARGET eccdb_lef_import AND TARGET eccdb_def_import)
-    add_executable(eccdb_drt_trace_replay DrtTraceEccdbIdb.cpp)
-    eccdb_storage_target(eccdb_drt_trace_replay)
-    target_include_directories(eccdb_drt_trace_replay PRIVATE ${PROJECT_SOURCE_DIR}/src/platform/data_manager)
-    target_link_libraries(eccdb_drt_trace_replay PRIVATE
-      eccdb_lef_import eccdb_def_import eccdb_service IdbBuilder ${ECCDB_BOOST_JSON_LIBRARY})
-    set_property(TARGET eccdb_drt_trace_replay PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-  endif()
 
   if(TARGET eccdb_lef_import AND TARGET eccdb_def_import
      AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/IdbComparisonBenchmark.cpp")

@@ -6,12 +6,16 @@
 #include <array>
 #include <functional>
 #include <limits>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "design/DesignStore.h"
+#include "design/geometry/DesignGeometryComponents.h"
+#include "geometry/DomainGeometryComponents.h"
+#include "geometry/GeometryRegistry.h"
 #include "library/LibraryStore.h"
 #include "tech/TechStore.h"
 
@@ -149,26 +153,26 @@ template <typename Transform>
 }
 
 template <typename Transform>
-void visitPoolGeometry(const GeometryPool& pool, GeometryHandle handle, TechLayerId layer, PhysicalGeometrySource source,
-                       ShapeAttributes attributes, Transform&& transform, const PhysicalGeometryVisitor& visitor)
+void visitGeometry(const DomainGeometryStorage& storage, std::span<const GeometryShapeId> ids, TechLayerId layer,
+                   PhysicalGeometrySource source, ShapeAttributes attributes, Transform&& transform,
+                   const PhysicalGeometryVisitor& visitor)
 {
-  if (visitor.rectangle) {
-    for (const auto rectangle : pool.rectangles(handle)) {
+  for (const auto id : ids) {
+    const auto kind = storage.geometryRegistry().shape(id).kind;
+    if (kind == GeometryShapeKind::kRectangle && visitor.rectangle) {
+      const auto& rectangle = storage.rectangle(id);
       visitor.rectangle(PhysicalLayerRect{.layer = layer,
-                                          .rectangle = transformRectangle(rectangle, transform),
+                                          .rectangle = transformRectangle(rectangle.rectangle, transform),
                                           .source = source,
                                           .flags = attributes.flags,
                                           .mask = attributes.mask,
                                           .spacing = attributes.spacing,
                                           .design_rule_width = attributes.design_rule_width});
-    }
-  }
-  if (visitor.polygon) {
-    for (uint32_t polygon_index = 0; polygon_index < pool.polygonCount(handle); ++polygon_index) {
-      const auto source_points = pool.polygonPoints(handle, polygon_index);
+    } else if (kind == GeometryShapeKind::kPolygon && visitor.polygon) {
+      const auto& polygon = storage.polygon(id);
       std::vector<Point> points;
-      points.reserve(source_points.size());
-      for (const auto point : source_points) {
+      points.reserve(polygon.points.size());
+      for (const auto point : polygon.points) {
         points.push_back(std::invoke(transform, point));
       }
       visitor.polygon(PhysicalLayerPolygon{.layer = layer,
@@ -183,11 +187,13 @@ void visitPoolGeometry(const GeometryPool& pool, GeometryHandle handle, TechLaye
 }
 
 template <typename Transform>
-void visitDesignGeometry(const std::vector<DesignViaRectangle>& rectangles, const std::vector<DesignViaPolygon>& polygons,
-                         PhysicalGeometrySource source, Transform&& transform, const PhysicalGeometryVisitor& visitor)
+void visitDesignGeometry(const GeometryRegistry& registry, std::span<const GeometryShapeId> rectangles,
+                         std::span<const GeometryShapeId> polygons, PhysicalGeometrySource source, Transform&& transform,
+                         const PhysicalGeometryVisitor& visitor)
 {
   if (visitor.rectangle) {
-    for (const auto& rectangle : rectangles) {
+    for (const auto id : rectangles) {
+      const auto& rectangle = registry.get<DesignViaRectangle>(id);
       visitor.rectangle(PhysicalLayerRect{.layer = rectangle.layer,
                                           .rectangle = transformRectangle(rectangle.rectangle, transform),
                                           .source = source,
@@ -195,7 +201,8 @@ void visitDesignGeometry(const std::vector<DesignViaRectangle>& rectangles, cons
     }
   }
   if (visitor.polygon) {
-    for (const auto& polygon : polygons) {
+    for (const auto id : polygons) {
+      const auto& polygon = registry.get<DesignViaPolygon>(id);
       std::vector<Point> points;
       points.reserve(polygon.points.size());
       for (const auto point : polygon.points) {
@@ -280,6 +287,26 @@ void requirePlaced(const DesignInstance& instance)
   }
 }
 
+template <typename Transform>
+void visitMasterPinGeometry(const LibraryStore& library, LibraryMasterPinId pin_id, Transform&& transform,
+                            DesignOrientation via_orientation, const PhysicalGeometryVisitor& visitor)
+{
+  const auto& pin = library.masterPortStorage().masterPin(pin_id);
+  for (const auto& clause : pin.layer_clauses) {
+    visitGeometry(library.geometryStorage(), clause.geometry, clause.layer, PhysicalGeometrySource::kMasterPort, {}, transform,
+                  visitor);
+  }
+  if (!visitor.via) return;
+  for (const auto shape : pin.vias) {
+    const auto& via = library.geometryRegistry().get<LibraryViaPlacement>(shape);
+    visitor.via(PhysicalViaPlacement{.tech_via = via.via,
+                                     .design_via = {},
+                                     .origin = std::invoke(transform, via.origin),
+                                     .orientation = via_orientation,
+                                     .source = PhysicalGeometrySource::kMasterPort});
+  }
+}
+
 }  // namespace
 
 PhysicalDesignService::PhysicalDesignService(const TechStore& tech, const LibraryStore& library, const DesignStore& design)
@@ -305,9 +332,9 @@ bool PhysicalDesignService::hasDieArea() const noexcept
   return _design.globalStorage().hasDieArea();
 }
 
-const DesignDieArea& PhysicalDesignService::dieArea() const
+std::span<const Point> PhysicalDesignService::dieBoundary() const
 {
-  return _design.globalStorage().dieArea();
+  return _design.globalStorage().dieBoundary();
 }
 
 Rect PhysicalDesignService::dieBounds() const
@@ -646,19 +673,19 @@ void PhysicalDesignService::forEachNetGeometry(DesignNetId net, const PhysicalNe
   if (geometry == nullptr) {
     return;
   }
-  if (visitor.rectangle) {
-    for (const auto& rectangle : geometry->rectangles) {
-      visitor.rectangle(rectangle);
-    }
-  }
-  if (visitor.polygon) {
-    for (const auto& polygon : geometry->polygons) {
-      visitor.polygon(polygon);
-    }
-  }
-  if (visitor.via) {
-    for (const auto& via : geometry->vias) {
-      visitor.via(via);
+  const auto& storage = _design.routingStorage();
+  const auto& registry = storage.geometryRegistry();
+  for (const auto id : geometry->shapes) {
+    const auto kind = registry.shape(id).kind;
+    if (kind == GeometryShapeKind::kRectangle && visitor.rectangle) {
+      const auto& value = registry.get<const DesignGeometryRectangle>(id);
+      visitor.rectangle(value);
+    } else if (kind == GeometryShapeKind::kPolygon && visitor.polygon) {
+      const auto& value = registry.get<const DesignGeometryPolygon>(id);
+      visitor.polygon(value);
+    } else if (kind == GeometryShapeKind::kNetVia && visitor.via) {
+      const auto& value = registry.get<const DesignGeometryNetVia>(id);
+      visitor.via(value);
     }
   }
 }
@@ -722,10 +749,13 @@ PhysicalRoutingViaLayers PhysicalDesignService::routingViaLayers(TechViaMasterId
       layers.push_back(routing_layer);
     }
   };
-  for (const auto& rectangle : via.rectangles) {
+  const auto& geometry = _design.geometryRegistry();
+  for (const auto id : via.rectangles) {
+    const auto& rectangle = geometry.get<DesignViaRectangle>(id);
     append(rectangle.layer);
   }
-  for (const auto& polygon : via.polygons) {
+  for (const auto id : via.polygons) {
+    const auto& polygon = geometry.get<DesignViaPolygon>(id);
     append(polygon.layer);
   }
   if (layers.size() != 2u) {
@@ -737,6 +767,32 @@ PhysicalRoutingViaLayers PhysicalDesignService::routingViaLayers(TechViaMasterId
 bool PhysicalDesignService::isPlaced(DesignInstanceId instance) const
 {
   return isPlacedStatus(_design.netlistStorage().instance(instance).placement_status);
+}
+
+void PhysicalDesignService::forEachMasterPinGeometry(LibraryMasterPinId pin, const PhysicalGeometryVisitor& visitor) const
+{
+  const auto identity = [](Point point) { return point; };
+  visitMasterPinGeometry(_library, pin, identity, DesignOrientation::kN, visitor);
+}
+
+void PhysicalDesignService::forEachPlacedInstanceMasterPinGeometry(DesignInstanceTermId iterm_id, LibraryMasterPinId pin_id,
+                                                                    const PhysicalGeometryVisitor& visitor) const
+{
+  const auto& netlist = _design.netlistStorage();
+  const auto& iterm = netlist.instancePin(iterm_id);
+  const auto& instance = netlist.instance(iterm.instance);
+  requirePlaced(instance);
+  const auto& master = _library.cellMasterStorage().cellMaster(instance.master);
+  const auto& term = _library.masterTermStorage().masterTerm(iterm.master_term);
+  const auto& pin = _library.masterPortStorage().masterPin(pin_id);
+  if (term.master != instance.master || pin.term != iterm.master_term) {
+    throw std::logic_error("placed instance master pin does not belong to its instance term");
+  }
+
+  const auto transform = [&instance, &master](Point point) {
+    return placeMasterPoint(point, instance.origin, instance.orientation, master.width, master.height);
+  };
+  visitMasterPinGeometry(_library, pin_id, transform, instance.orientation, visitor);
 }
 
 void PhysicalDesignService::forEachPlacedInstancePinGeometry(DesignInstancePinId pin_id,
@@ -756,30 +812,20 @@ void PhysicalDesignService::forEachPlacedInstancePinGeometry(DesignInstancePinId
     return placeMasterPoint(point, instance.origin, instance.orientation, master.width, master.height);
   };
   for (const auto port_id : term.ports) {
-    const auto& port = _library.masterPortStorage().masterPort(port_id);
-    for (const auto& clause : port.layer_clauses) {
-      visitPoolGeometry(_library.geometryPool(), clause.geometry, clause.layer, PhysicalGeometrySource::kMasterPort, {}, transform, visitor);
-    }
-    if (visitor.via) {
-      for (const auto& via : port.vias) {
-        visitor.via(PhysicalViaPlacement{.tech_via = via.via,
-                                         .design_via = {},
-                                         .origin = transform(via.origin),
-                                         .orientation = instance.orientation,
-                                         .source = PhysicalGeometrySource::kMasterPort});
-      }
-    }
+    visitMasterPinGeometry(_library, port_id, transform, instance.orientation, visitor);
   }
 }
 
 void PhysicalDesignService::forEachBlockPinGeometry(DesignBlockPinId pin_id, const PhysicalGeometryVisitor& visitor) const
 {
   const auto& pin = _design.netlistStorage().blockPin(pin_id);
+  const auto& geometry = _design.geometryRegistry();
   const bool has_placement = (pin.flags & DesignIoPinPortFlag::kHasPlacement) != 0u;
   const Point origin = has_placement ? pin.origin : Point{};
   const DesignOrientation orientation = has_placement ? pin.orientation : DesignOrientation::kN;
   const auto transform = [origin, orientation](Point point) { return transformAroundOrigin(point, origin, orientation); };
-  for (const auto& rectangle : pin.rectangles) {
+  for (const auto id : pin.rectangles) {
+    const auto& rectangle = geometry.get<DesignPinRectangle>(id);
     if (visitor.rectangle) {
       visitor.rectangle(PhysicalLayerRect{.layer = rectangle.layer,
                                           .rectangle = transformRectangle(rectangle.rectangle, transform),
@@ -791,7 +837,8 @@ void PhysicalDesignService::forEachBlockPinGeometry(DesignBlockPinId pin_id, con
     }
   }
   if (visitor.polygon) {
-    for (const auto& polygon : pin.polygons) {
+    for (const auto id : pin.polygons) {
+      const auto& polygon = geometry.get<DesignPinPolygon>(id);
       std::vector<Point> points;
       points.reserve(polygon.points.size());
       for (const auto point : polygon.points) {
@@ -807,7 +854,8 @@ void PhysicalDesignService::forEachBlockPinGeometry(DesignBlockPinId pin_id, con
     }
   }
   if (visitor.via) {
-    for (const auto& via : pin.vias) {
+    for (const auto id : pin.vias) {
+      const auto& via = geometry.get<DesignPinVia>(id);
       visitor.via(PhysicalViaPlacement{.tech_via = via.tech_via,
                                        .design_via = via.design_via,
                                        .origin = transform(via.origin),
@@ -843,14 +891,15 @@ void PhysicalDesignService::forEachPlacedMasterObstructionGeometry(DesignInstanc
   };
   const auto& obstruction = _library.cellMasterStorage().obs(instance.master);
   for (const auto& clause : obstruction.layer_clauses) {
-    visitPoolGeometry(_library.geometryPool(), clause.geometry, clause.layer, PhysicalGeometrySource::kMasterObstruction,
-                      ShapeAttributes{.flags = clause.flags,
-                                      .spacing = clause.spacing,
-                                      .design_rule_width = clause.design_rule_width},
-                      transform, visitor);
+    visitGeometry(_library.geometryStorage(), clause.geometry, clause.layer, PhysicalGeometrySource::kMasterObstruction,
+                  ShapeAttributes{.flags = clause.flags,
+                                  .spacing = clause.spacing,
+                                  .design_rule_width = clause.design_rule_width},
+                  transform, visitor);
   }
   if (visitor.via) {
-    for (const auto& via : obstruction.vias) {
+    for (const auto shape : obstruction.vias) {
+      const auto& via = _library.geometryRegistry().get<LibraryViaPlacement>(shape);
       visitor.via(PhysicalViaPlacement{.tech_via = via.via,
                                        .design_via = {},
                                        .origin = transform(via.origin),
@@ -882,10 +931,12 @@ void PhysicalDesignService::forEachRoutingBlockageGeometry(DesignBlockageId bloc
   }
   const auto identity = [](Point point) { return point; };
   const auto layer = TechLayerId{blockage.layer.entity()};
+  const auto& geometry = _design.geometryRegistry();
   if (visitor.rectangle) {
-    for (const auto rectangle : blockage.rectangles) {
+    for (const auto id : blockage.rectangles) {
+      const auto& rectangle = geometry.get<GeometryRectangle>(id);
       visitor.rectangle(PhysicalLayerRect{.layer = layer,
-                                          .rectangle = transformRectangle(rectangle, identity),
+                                          .rectangle = transformRectangle(rectangle.rectangle, identity),
                                           .source = PhysicalGeometrySource::kRoutingBlockage,
                                           .flags = blockage.flags,
                                           .mask = blockage.mask,
@@ -894,9 +945,10 @@ void PhysicalDesignService::forEachRoutingBlockageGeometry(DesignBlockageId bloc
     }
   }
   if (visitor.polygon) {
-    for (const auto& polygon : blockage.polygons) {
+    for (const auto id : blockage.polygons) {
+      const auto& polygon = geometry.get<GeometryPolygon>(id);
       visitor.polygon(PhysicalLayerPolygon{.layer = layer,
-                                            .points = polygon,
+                                            .points = polygon.points,
                                             .source = PhysicalGeometrySource::kRoutingBlockage,
                                             .flags = blockage.flags,
                                             .mask = blockage.mask,
@@ -952,9 +1004,9 @@ void PhysicalDesignService::forEachTechViaGeometry(TechViaMasterId via, Point or
   const auto& storage = _tech.viaMasterStorage();
   const auto& geometry = storage.geometry(via);
   const auto transform = [origin, orientation](Point point) { return transformAroundOrigin(point, origin, orientation); };
-  const auto visit_layer = [&](TechLayerId layer, GeometryHandle handle) {
+  const auto visit_layer = [&](TechLayerId layer, std::span<const GeometryShapeId> ids) {
     if (layer) {
-      visitPoolGeometry(_tech.geometryPool(), handle, layer, PhysicalGeometrySource::kTechVia, {}, transform, visitor);
+      visitGeometry(_tech.geometryStorage(), ids, layer, PhysicalGeometrySource::kTechVia, {}, transform, visitor);
     }
   };
   visit_layer(layerId(geometry.bottom_layer), geometry.bottom_geometry);
@@ -976,7 +1028,8 @@ void PhysicalDesignService::forEachDesignViaGeometry(DesignViaId via, Point orig
     visitGeneratedDesignViaGeometry(value.generated, transform, visitor);
     return;
   }
-  visitDesignGeometry(value.rectangles, value.polygons, PhysicalGeometrySource::kDesignVia, transform, visitor);
+  visitDesignGeometry(_design.geometryRegistry(), value.rectangles, value.polygons, PhysicalGeometrySource::kDesignVia,
+                      transform, visitor);
 }
 
 }  // namespace eccdb

@@ -5,6 +5,8 @@
 #include <vector>
 
 #include "common/GeometryTypes.h"
+#include "design/common/DesignTypes.h"
+#include "geometry/GeometryEntity.h"
 
 namespace eccdb {
 
@@ -28,7 +30,17 @@ struct DesignInfo
 // DEF DIEAREA accepts a rectangle or a rectilinear polygon.
 struct DesignDieArea
 {
+  GeometryShapeId boundary;
+};
+
+struct DesignDieAreaInput
+{
   std::vector<Point> boundary;
 };
+
+[[nodiscard]] inline GeometryOwner designDieAreaOwner(DesignRootId id) noexcept
+{
+  return GeometryOwner::from(GeometryOwnerDomain::kDesignDieArea, id);
+}
 
 }  // namespace eccdb

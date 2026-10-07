@@ -6,6 +6,7 @@
 #include <string_view>
 #include <vector>
 
+#include "geometry/DomainGeometryStorage.h"
 #include "index/LibraryMasterTermNameIndex.h"
 #include "library/LibraryRegistry.h"
 #include "library/master_term/model/MasterTermComponents.h"
@@ -20,7 +21,10 @@ class LibraryMasterTermStorage
  public:
   using registry_type = LibraryRegistry::registry_type;
 
-  explicit LibraryMasterTermStorage(LibraryRegistry& registry) : _registry(registry.registry()) {}
+  LibraryMasterTermStorage(LibraryRegistry& registry, DomainGeometryStorage& geometry)
+      : _registry(registry.registry()), _geometry(geometry)
+  {
+  }
 
   [[nodiscard]] LibraryMasterTermId createMasterTerm(LibraryCellMasterId owner, LibraryMasterTerm term);
   [[nodiscard]] LibraryMasterTermId createMasterTermTrusted(LibraryCellMasterId owner, LibraryMasterTerm term);
@@ -45,6 +49,7 @@ class LibraryMasterTermStorage
   void validateMasterTerm(LibraryCellMasterId owner, const LibraryMasterTerm& term, LibraryMasterTermId ignored = {}) const;
 
   registry_type& _registry;
+  DomainGeometryStorage& _geometry;
 };
 
 }  // namespace eccdb

@@ -474,38 +474,38 @@ inline CanonicalNet canonicalNet(const DesignStore& design, DesignNetId id)
         });
   }
 
-  if (const auto* geometry = design.routingStorage().netGeometry(id); geometry != nullptr) {
-    for (const auto& rectangle : geometry->rectangles) {
-      result.rectangles.push_back(CanonicalNetRectangle{.layer = detail::layerName(design, rectangle.layer),
-                                                        .rectangle = canonicalRect(rectangle.rectangle),
-                                                        .status = rectangle.route_status,
-                                                        .flags = rectangle.flags,
-                                                        .mask = rectangle.mask,
-                                                        .shield_net = rectangle.shield_net,
-                                                        .shape = rectangle.shape});
-    }
-    for (const auto& polygon : geometry->polygons) {
-      result.polygons.push_back(CanonicalNetPolygon{.layer = detail::layerName(design, polygon.layer),
-                                                    .points = canonicalPolygon(polygon.points),
-                                                    .status = polygon.route_status,
-                                                    .flags = polygon.flags,
-                                                    .mask = polygon.mask,
-                                                    .shield_net = polygon.shield_net,
-                                                    .shape = polygon.shape});
-    }
-    for (const auto& via : geometry->vias) {
-      auto origins = via.origins;
+  const auto& geometry_storage = design.geometryStorage();
+  for (const auto shape_id : geometry_storage.netShapeIds(id)) {
+    const auto view = geometry_storage.shape(shape_id);
+    if (const auto* rectangle = std::get_if<const DesignGeometryRectangle*>(&view.payload)) {
+      result.rectangles.push_back(CanonicalNetRectangle{.layer = detail::layerName(design, (*rectangle)->layer),
+                                                        .rectangle = canonicalRect((*rectangle)->rectangle),
+                                                        .status = (*rectangle)->route_status,
+                                                        .flags = (*rectangle)->flags,
+                                                        .mask = (*rectangle)->mask,
+                                                        .shield_net = (*rectangle)->shield_net,
+                                                        .shape = (*rectangle)->shape});
+    } else if (const auto* polygon = std::get_if<const DesignGeometryPolygon*>(&view.payload)) {
+      result.polygons.push_back(CanonicalNetPolygon{.layer = detail::layerName(design, (*polygon)->layer),
+                                                    .points = canonicalPolygon((*polygon)->points),
+                                                    .status = (*polygon)->route_status,
+                                                    .flags = (*polygon)->flags,
+                                                    .mask = (*polygon)->mask,
+                                                    .shield_net = (*polygon)->shield_net,
+                                                    .shape = (*polygon)->shape});
+    } else if (const auto* via = std::get_if<const DesignGeometryNetVia*>(&view.payload)) {
+      auto origins = (*via)->origins;
       canonicalSort(origins, structured::pointLess);
-      result.net_vias.push_back(CanonicalNetVia{.name = detail::viaName(design, via.tech_via, via.design_via),
+      result.net_vias.push_back(CanonicalNetVia{.name = detail::viaName(design, (*via)->tech_via, (*via)->design_via),
                                                 .origins = std::move(origins),
-                                                .orientation = via.orientation,
-                                                .status = via.route_status,
-                                                .flags = via.flags,
-                                                .top_mask = via.top_mask,
-                                                .cut_mask = via.cut_mask,
-                                                .bottom_mask = via.bottom_mask,
-                                                .shield_net = via.shield_net,
-                                                .shape = via.shape});
+                                                .orientation = (*via)->orientation,
+                                                .status = (*via)->route_status,
+                                                .flags = (*via)->flags,
+                                                .top_mask = (*via)->top_mask,
+                                                .cut_mask = (*via)->cut_mask,
+                                                .bottom_mask = (*via)->bottom_mask,
+                                                .shield_net = (*via)->shield_net,
+                                                .shape = (*via)->shape});
     }
   }
 

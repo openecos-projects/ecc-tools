@@ -1,5 +1,7 @@
 #include "design/routing/storage/DesignRoutingStorage.h"
 
+#include "common/GeometryBounds.h"
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -11,6 +13,7 @@
 #include <utility>
 
 #include "design/common/DesignGeometryValidation.h"
+#include "design/geometry/DesignGeometryComponents.h"
 #include "design/netlist/model/NetlistComponents.h"
 #include "design/pin_access/model/PinAccessComponents.h"
 #include "tech/TechRegistry.h"
@@ -227,6 +230,157 @@ Rect offsetRect(Rect rectangle, int64_t dx, int64_t dy)
                      static_cast<int64_t>(rectangle.ur_x) + dx, static_cast<int64_t>(rectangle.ur_y) + dy);
 }
 
+Rect polygonBounds(std::span<const Point> points)
+{
+  if (points.empty()) {
+    throw std::invalid_argument("via polygon has no points");
+  }
+  int64_t min_x = points.front().x;
+  int64_t min_y = points.front().y;
+  int64_t max_x = points.front().x;
+  int64_t max_y = points.front().y;
+  for (const auto point : points) {
+    min_x = std::min<int64_t>(min_x, point.x);
+    min_y = std::min<int64_t>(min_y, point.y);
+    max_x = std::max<int64_t>(max_x, point.x);
+    max_y = std::max<int64_t>(max_y, point.y);
+  }
+  return checkedRect(min_x, min_y, max_x, max_y);
+}
+
+bool isTechnologyLayer(const TechRegistry::registry_type& tech, TechLayerId layer)
+{
+  return layer && tech.valid(layer.entity()) && tech.all_of<TechLayerInfo>(layer.entity());
+}
+
+bool visitTechViaGeometry(const GeometryRegistry& geometry_registry, const TechRegistry::registry_type& tech,
+                          TechLayerId layer, std::span<const GeometryShapeId> ids, Point origin,
+                          DesignOrientation orientation, const DesignRoutingStorage::ViaLayerBoundsVisitor& visitor)
+{
+  if (!isTechnologyLayer(tech, layer)) {
+    return false;
+  }
+  bool emitted = false;
+  for (const auto id : ids) {
+    if (const auto* rectangle = geometry_registry.tryGet<GeometryRectangle>(id); rectangle != nullptr) {
+      visitor(layer, orientedBounds(rectangle->rectangle, origin, orientation));
+      emitted = true;
+      continue;
+    }
+    if (const auto* polygon = geometry_registry.tryGet<GeometryPolygon>(id); polygon != nullptr) {
+      visitor(layer, orientedBounds(polygonBounds(polygon->points), origin, orientation));
+      emitted = true;
+      continue;
+    }
+    // Technology VIA IDs belong to a separate geometry registry. Never try
+    // the design registry as a fallback: the matching raw entity value may
+    // describe unrelated design geometry.
+    return false;
+  }
+  return emitted;
+}
+
+bool visitGeneratedDesignVia(const DesignGeneratedVia& via, Point origin, DesignOrientation orientation,
+                             const DesignRoutingStorage::ViaLayerBoundsVisitor& visitor)
+{
+  if (via.row_count == 0u || via.column_count == 0u || via.cut_size_x <= 0 || via.cut_size_y <= 0
+      || via.cut_spacing_x < 0 || via.cut_spacing_y < 0 || via.bottom_enclosure_x < 0 || via.bottom_enclosure_y < 0
+      || via.top_enclosure_x < 0 || via.top_enclosure_y < 0) {
+    return false;
+  }
+  const uint64_t array_width = static_cast<uint64_t>(via.column_count) * static_cast<uint64_t>(via.cut_size_x)
+                               + static_cast<uint64_t>(via.column_count - 1u) * static_cast<uint64_t>(via.cut_spacing_x);
+  const uint64_t array_height = static_cast<uint64_t>(via.row_count) * static_cast<uint64_t>(via.cut_size_y)
+                                + static_cast<uint64_t>(via.row_count - 1u) * static_cast<uint64_t>(via.cut_spacing_y);
+  const int64_t min_x = -static_cast<int64_t>(array_width / 2u);
+  const int64_t min_y = -static_cast<int64_t>(array_height / 2u);
+  const int64_t max_x = min_x + static_cast<int64_t>(array_width);
+  const int64_t max_y = min_y + static_cast<int64_t>(array_height);
+  const int64_t origin_x = (via.flags & DesignGeneratedViaFlag::kHasOrigin) != 0u ? via.origin.x : 0;
+  const int64_t origin_y = (via.flags & DesignGeneratedViaFlag::kHasOrigin) != 0u ? via.origin.y : 0;
+  const int64_t bottom_offset_x = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.bottom_offset.x : 0;
+  const int64_t bottom_offset_y = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.bottom_offset.y : 0;
+  const int64_t top_offset_x = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.top_offset.x : 0;
+  const int64_t top_offset_y = (via.flags & DesignGeneratedViaFlag::kHasOffset) != 0u ? via.top_offset.y : 0;
+  const auto emit = [&](TechLayerId layer, int64_t ll_x, int64_t ll_y, int64_t ur_x, int64_t ur_y) {
+    if (!layer) {
+      return;
+    }
+    visitor(layer, orientedBounds(checkedRect(ll_x, ll_y, ur_x, ur_y), origin, orientation));
+  };
+
+  emit(TechLayerId{via.bottom_layer.entity()}, min_x - via.bottom_enclosure_x + origin_x + bottom_offset_x,
+       min_y - via.bottom_enclosure_y + origin_y + bottom_offset_y,
+       max_x + via.bottom_enclosure_x + origin_x + bottom_offset_x,
+       max_y + via.bottom_enclosure_y + origin_y + bottom_offset_y);
+
+  const int64_t step_x = static_cast<int64_t>(via.cut_size_x) + via.cut_spacing_x;
+  const int64_t step_y = static_cast<int64_t>(via.cut_size_y) + via.cut_spacing_y;
+  for (uint32_t row = 0; row < via.row_count; ++row) {
+    for (uint32_t column = 0; column < via.column_count; ++column) {
+      const int64_t x = min_x + origin_x + static_cast<int64_t>(column) * step_x;
+      const int64_t y = min_y + origin_y + static_cast<int64_t>(row) * step_y;
+      emit(TechLayerId{via.cut_layer.entity()}, x, y, x + via.cut_size_x, y + via.cut_size_y);
+    }
+  }
+
+  emit(TechLayerId{via.top_layer.entity()}, min_x - via.top_enclosure_x + origin_x + top_offset_x,
+       min_y - via.top_enclosure_y + origin_y + top_offset_y,
+       max_x + via.top_enclosure_x + origin_x + top_offset_x,
+       max_y + via.top_enclosure_y + origin_y + top_offset_y);
+  return true;
+}
+
+bool visitViaDefinition(const DesignRoutingStorage::registry_type& design, const GeometryRegistry& design_geometry_registry,
+                        const GeometryRegistry* tech_geometry_registry, const TechRegistry::registry_type& tech,
+                        TechViaMasterId tech_via, DesignViaId design_via, Point origin, DesignOrientation orientation,
+                        const DesignRoutingStorage::ViaLayerBoundsVisitor& visitor)
+{
+  if (tech_via) {
+    if (tech_geometry_registry == nullptr || !tech.valid(tech_via.entity()) || !tech.all_of<TechViaGeometry>(tech_via.entity())) {
+      return false;
+    }
+    const auto& geometry = tech.get<const TechViaGeometry>(tech_via.entity());
+    bool emitted = false;
+    emitted = visitTechViaGeometry(*tech_geometry_registry, tech, geometry.bottom_layer.layer(), geometry.bottom_geometry,
+                                   origin, orientation, visitor)
+              || emitted;
+    emitted = visitTechViaGeometry(*tech_geometry_registry, tech, TechLayerId{geometry.cut_layer.entity()}, geometry.cut_geometry,
+                                   origin, orientation, visitor)
+              || emitted;
+    emitted = visitTechViaGeometry(*tech_geometry_registry, tech, geometry.top_layer.layer(), geometry.top_geometry,
+                                   origin, orientation, visitor)
+              || emitted;
+    return emitted;
+  }
+  if (!design_via || !design.valid(design_via.entity()) || !design.all_of<DesignVia>(design_via.entity())) {
+    return false;
+  }
+  const auto& definition = design.get<const DesignVia>(design_via.entity());
+  if ((definition.flags & DesignViaFlag::kGenerated) != 0u) {
+    return visitGeneratedDesignVia(definition.generated, origin, orientation, visitor);
+  }
+
+  bool emitted = false;
+  for (const auto id : definition.rectangles) {
+    const auto* rectangle = design_geometry_registry.tryGet<DesignViaRectangle>(id);
+    if (rectangle == nullptr || !isTechnologyLayer(tech, rectangle->layer)) {
+      return false;
+    }
+    visitor(rectangle->layer, orientedBounds(rectangle->rectangle, origin, orientation));
+    emitted = true;
+  }
+  for (const auto id : definition.polygons) {
+    const auto* polygon = design_geometry_registry.tryGet<DesignViaPolygon>(id);
+    if (polygon == nullptr || !isTechnologyLayer(tech, polygon->layer)) {
+      return false;
+    }
+    visitor(polygon->layer, orientedBounds(polygonBounds(polygon->points), origin, orientation));
+    emitted = true;
+  }
+  return emitted;
+}
+
 struct ViaRoutingLayers
 {
   TechRoutingLayerId first;
@@ -258,7 +412,9 @@ void appendRoutingLayer(const TechRegistry::registry_type& tech, TechLayerId lay
 }
 
 std::optional<ViaRoutingLayers> routingLayersForVia(const DesignRoutingStorage::registry_type& design,
-                                                     const TechRegistry::registry_type& tech, const DesignWireVia& via)
+                                                     const GeometryRegistry& geometry_registry,
+                                                     const TechRegistry::registry_type& tech,
+                                                     const DesignWireVia& via)
 {
   if (via.tech_via) {
     if (!tech.valid(via.tech_via.entity()) || !tech.all_of<TechViaGeometry>(via.tech_via.entity())) {
@@ -281,11 +437,19 @@ std::optional<ViaRoutingLayers> routingLayersForVia(const DesignRoutingStorage::
   }
   std::array<TechRoutingLayerId, 2> layers{};
   std::size_t count = 0u;
-  for (const auto& rectangle : definition.rectangles) {
-    appendRoutingLayer(tech, rectangle.layer, layers, count);
+  for (const auto id : definition.rectangles) {
+    const auto* rectangle = geometry_registry.tryGet<DesignViaRectangle>(id);
+    if (rectangle == nullptr) {
+      return std::nullopt;
+    }
+    appendRoutingLayer(tech, rectangle->layer, layers, count);
   }
-  for (const auto& polygon : definition.polygons) {
-    appendRoutingLayer(tech, polygon.layer, layers, count);
+  for (const auto id : definition.polygons) {
+    const auto* polygon = geometry_registry.tryGet<DesignViaPolygon>(id);
+    if (polygon == nullptr) {
+      return std::nullopt;
+    }
+    appendRoutingLayer(tech, polygon->layer, layers, count);
   }
   if (count != 2u) {
     return std::nullopt;
@@ -293,10 +457,10 @@ std::optional<ViaRoutingLayers> routingLayersForVia(const DesignRoutingStorage::
   return ViaRoutingLayers{.first = layers[0], .second = layers[1]};
 }
 
-void normalizeViaExitLayer(const DesignRoutingStorage::registry_type& design, const TechRegistry::registry_type& tech,
-                           TechRoutingLayerId entry_layer, DesignRouteVia& via)
+void normalizeViaExitLayer(const DesignRoutingStorage::registry_type& design, const GeometryRegistry& geometry_registry,
+                           const TechRegistry::registry_type& tech, TechRoutingLayerId entry_layer, DesignRouteVia& via)
 {
-  const auto layers = routingLayersForVia(design, tech, via.via);
+  const auto layers = routingLayersForVia(design, geometry_registry, tech, via.via);
   const auto expected = !layers.has_value() ? entry_layer
                                              : entry_layer == layers->first ? layers->second
                                                                             : entry_layer == layers->second ? layers->first : entry_layer;
@@ -342,24 +506,32 @@ Rect generatedDesignViaBounds(const DesignGeneratedVia& via)
   return bottom.united(cut).united(top);
 }
 
-Rect fixedDesignViaBounds(const DesignVia& via)
+Rect fixedDesignViaBounds(const GeometryRegistry& geometry_registry, const DesignVia& via)
 {
   std::optional<Rect> result;
   const auto append = [&result](Rect rectangle) {
     result = result.has_value() ? result->united(rectangle) : rectangle;
   };
-  for (const auto& rectangle : via.rectangles) {
-    append(rectangle.rectangle);
+  for (const auto id : via.rectangles) {
+    const auto* rectangle = geometry_registry.tryGet<DesignViaRectangle>(id);
+    if (rectangle == nullptr) {
+      throw std::invalid_argument("design via has an invalid rectangle geometry ID");
+    }
+    append(rectangle->rectangle);
   }
-  for (const auto& polygon : via.polygons) {
-    if (polygon.points.empty()) {
+  for (const auto id : via.polygons) {
+    const auto* polygon = geometry_registry.tryGet<DesignViaPolygon>(id);
+    if (polygon == nullptr) {
+      throw std::invalid_argument("design via has an invalid polygon geometry ID");
+    }
+    if (polygon->points.empty()) {
       continue;
     }
-    int64_t min_x = polygon.points.front().x;
-    int64_t min_y = polygon.points.front().y;
-    int64_t max_x = polygon.points.front().x;
-    int64_t max_y = polygon.points.front().y;
-    for (const auto point : polygon.points) {
+    int64_t min_x = polygon->points.front().x;
+    int64_t min_y = polygon->points.front().y;
+    int64_t max_x = polygon->points.front().x;
+    int64_t max_y = polygon->points.front().y;
+    for (const auto point : polygon->points) {
       min_x = std::min<int64_t>(min_x, point.x);
       min_y = std::min<int64_t>(min_y, point.y);
       max_x = std::max<int64_t>(max_x, point.x);
@@ -373,8 +545,8 @@ Rect fixedDesignViaBounds(const DesignVia& via)
   return *result;
 }
 
-Rect viaBounds(const DesignRoutingStorage::registry_type& design, const TechRegistry::registry_type& tech,
-               const DesignRouteVia& shape)
+Rect viaBounds(const DesignRoutingStorage::registry_type& design, const GeometryRegistry& geometry_registry,
+               const TechRegistry::registry_type& tech, const DesignRouteVia& shape)
 {
   Rect local;
   if (shape.via.tech_via) {
@@ -388,7 +560,7 @@ Rect viaBounds(const DesignRoutingStorage::registry_type& design, const TechRegi
     }
     const auto& definition = design.get<const DesignVia>(shape.via.design_via.entity());
     local = (definition.flags & DesignViaFlag::kGenerated) != 0u ? generatedDesignViaBounds(definition.generated)
-                                                                   : fixedDesignViaBounds(definition);
+                                                                   : fixedDesignViaBounds(geometry_registry, definition);
   }
   auto result = orientedBounds(local, shape.origin.position, shape.via.orientation);
   if ((shape.via.flags & DesignWireViaFlag::kHasArray) == 0u) {
@@ -462,15 +634,20 @@ Rect segmentBounds(const DesignRoutingStorage::registry_type& design, const Tech
                                         : begin_y + (begin_has_extension ? begin_extension : upper_half);
     return checkedRect(begin_x - lower_half, bottom, begin_x + upper_half, top);
   }
-  // Conservative for diagonal geometry; Manhattan bounds above are exact.
-  const auto diagonal_extension = std::max<int64_t>({0, begin_extension, end_extension});
+  // A diagonal square cap extends in both X and Y. Include its default
+  // half-width as well as any explicit extension in the broad-phase bounds.
+  // A zero-length segment remains the canonical width x width patch.
+  const auto diagonal_extension = begin_x == end_x && begin_y == end_y ? int64_t{0}
+      : std::max<int64_t>({0, begin_has_extension ? begin_extension : upper_half,
+                             end_has_extension ? end_extension : upper_half});
   return checkedRect(std::min(begin_x, end_x) - lower_half - diagonal_extension,
                      std::min(begin_y, end_y) - lower_half - diagonal_extension,
                      std::max(begin_x, end_x) + upper_half + diagonal_extension,
                      std::max(begin_y, end_y) + upper_half + diagonal_extension);
 }
 
-void destroyShapeEntities(DesignRoutingStorage::registry_type& registry, const std::vector<DesignRouteShapeId>& ids)
+void destroyShapeEntities(DesignRoutingStorage::geometry_registry_type& registry,
+                          const std::vector<GeometryShapeId>& ids)
 {
   for (const auto id : ids) {
     registry.destroy(id.entity());
@@ -568,24 +745,83 @@ void observeSourcePath(DesignWire& wire, uint32_t source_path)
 
 }  // namespace
 
-DesignViaId DesignRoutingStorage::createVia(DesignVia via)
+DesignViaId DesignRoutingStorage::createVia(DesignViaInput input)
 {
-  validateVia(via);
+  validateVia(input);
+  DesignVia via{.name = std::move(input.name),
+                .flags = input.flags,
+                .pattern_name = std::move(input.pattern_name),
+                .generated = std::move(input.generated)};
+  std::vector<GeometryShapeId> created;
+  created.reserve(input.rectangles.size() + input.polygons.size());
+  via.rectangles.reserve(input.rectangles.size());
+  via.polygons.reserve(input.polygons.size());
+
   const auto entity = _registry.create();
+  const DesignViaId id{entity};
   try {
+    for (auto& rectangle : input.rectangles) {
+      const auto shape = _geometry_registry.create(designViaOwner(id), std::move(rectangle));
+      created.push_back(shape);
+      via.rectangles.push_back(shape);
+    }
+    for (auto& polygon : input.polygons) {
+      const auto shape = _geometry_registry.create(designViaOwner(id), std::move(polygon));
+      created.push_back(shape);
+      via.polygons.push_back(shape);
+    }
     _registry.emplace<DesignVia>(entity, std::move(via));
   } catch (...) {
+    for (const auto shape : created) {
+      static_cast<void>(_geometry_registry.destroy(shape));
+    }
     _registry.destroy(entity);
     throw;
   }
-  return DesignViaId{entity};
+  markGeometryChanged();
+  return id;
 }
 
-void DesignRoutingStorage::updateVia(DesignViaId id, DesignVia via)
+void DesignRoutingStorage::updateVia(DesignViaId id, DesignViaInput input)
 {
   ensureVia(id);
-  validateVia(via, id);
-  _registry.replace<DesignVia>(id.entity(), std::move(via));
+  validateVia(input, id);
+  DesignVia replacement{.name = std::move(input.name),
+                         .flags = input.flags,
+                         .pattern_name = std::move(input.pattern_name),
+                         .generated = std::move(input.generated)};
+  std::vector<GeometryShapeId> created;
+  created.reserve(input.rectangles.size() + input.polygons.size());
+  replacement.rectangles.reserve(input.rectangles.size());
+  replacement.polygons.reserve(input.polygons.size());
+  try {
+    for (auto& rectangle : input.rectangles) {
+      const auto shape = _geometry_registry.create(designViaOwner(id), std::move(rectangle));
+      created.push_back(shape);
+      replacement.rectangles.push_back(shape);
+    }
+    for (auto& polygon : input.polygons) {
+      const auto shape = _geometry_registry.create(designViaOwner(id), std::move(polygon));
+      created.push_back(shape);
+      replacement.polygons.push_back(shape);
+    }
+    const auto& previous = _registry.get<const DesignVia>(id.entity());
+    const auto previous_rectangles = previous.rectangles;
+    const auto previous_polygons = previous.polygons;
+    _registry.replace<DesignVia>(id.entity(), std::move(replacement));
+    for (const auto shape : previous_rectangles) {
+      static_cast<void>(_geometry_registry.destroy(shape));
+    }
+    for (const auto shape : previous_polygons) {
+      static_cast<void>(_geometry_registry.destroy(shape));
+    }
+  } catch (...) {
+    for (const auto shape : created) {
+      static_cast<void>(_geometry_registry.destroy(shape));
+    }
+    throw;
+  }
+  markGeometryChanged();
 }
 
 bool DesignRoutingStorage::destroyVia(DesignViaId id)
@@ -593,7 +829,15 @@ bool DesignRoutingStorage::destroyVia(DesignViaId id)
   if (!contains(id) || referencesVia(id)) {
     return false;
   }
+  const auto& value = _registry.get<const DesignVia>(id.entity());
+  for (const auto shape : value.rectangles) {
+    static_cast<void>(_geometry_registry.destroy(shape));
+  }
+  for (const auto shape : value.polygons) {
+    static_cast<void>(_geometry_registry.destroy(shape));
+  }
   _registry.destroy(id.entity());
+  markGeometryChanged();
   return true;
 }
 
@@ -647,6 +891,8 @@ void DesignRoutingStorage::updateNonDefaultRule(DesignNonDefaultRuleId id, Desig
   ensureNonDefaultRule(id);
   validateNonDefaultRule(rule, id);
   _registry.replace<DesignNonDefaultRule>(id.entity(), std::move(rule));
+  // Segment bounds can derive their width from the net's NDR.
+  markGeometryChanged();
 }
 
 bool DesignRoutingStorage::destroyNonDefaultRule(DesignNonDefaultRuleId id)
@@ -707,6 +953,7 @@ DesignWireId DesignRoutingStorage::createWire(DesignWire wire)
   const auto entity = _registry.create();
   try {
     _registry.emplace<DesignWire>(entity, std::move(wire));
+    _registry.emplace<GeometryBounds>(entity);
     _wires_by_net[owner.packed()].emplace_back(entity);
   } catch (...) {
     const auto indexed = _wires_by_net.find(owner.packed());
@@ -719,8 +966,8 @@ DesignWireId DesignRoutingStorage::createWire(DesignWire wire)
   return DesignWireId{entity};
 }
 
-DesignRouteShapeId DesignRoutingStorage::createShape(DesignWireId wire_id, DesignRouteShape value,
-                                                      std::optional<DesignRouteShapeAttributes> attributes)
+GeometryShapeId DesignRoutingStorage::createShape(DesignWireId wire_id, DesignRouteShape value,
+                                                  std::optional<DesignRouteShapeAttributes> attributes)
 {
   ensureWire(wire_id);
   auto& owner = _registry.get<DesignWire>(wire_id.entity());
@@ -732,32 +979,44 @@ DesignRouteShapeId DesignRoutingStorage::createShape(DesignWireId wire_id, Desig
     value.source_path = nextSourcePath(owner);
   }
   if (auto* via = std::get_if<DesignRouteVia>(&value.geometry)) {
-    normalizeViaExitLayer(_registry, _tech_registry.registry(), value.layer, *via);
+    normalizeViaExitLayer(_registry, _geometry_registry, _tech_registry.registry(), value.layer, *via);
   }
   validateShapeValue(_registry, _tech_registry.registry(), owner, value, attributes);
 
-  const auto entity = _registry.create();
+  const auto entity = _geometry_registry.registry().create();
   try {
-    _registry.emplace<DesignRouteShape>(entity, std::move(value));
+    auto& geometry_registry = _geometry_registry.registry();
+    GeometryShape metadata;
+    metadata.owner = GeometryOwner::from(GeometryOwnerDomain::kDesignWire, wire_id);
+    metadata.kind = routeShapeKind(value);
+    metadata.layer = value.layer;
+    metadata.flags = value.flags;
+    metadata.source_path = value.source_path;
+    geometry_registry.emplace<GeometryShape>(entity, std::move(metadata));
+    geometry_registry.emplace<DesignRouteShape>(entity, std::move(value));
     if (attributes.has_value()) {
-      _registry.emplace<DesignRouteShapeAttributes>(entity, std::move(*attributes));
+      geometry_registry.emplace<DesignRouteShapeAttributes>(entity, std::move(*attributes));
     }
     owner.shapes.emplace_back(entity);
-    observeSourcePath(owner, _registry.get<const DesignRouteShape>(entity).source_path);
+    observeSourcePath(owner, geometry_registry.get<const DesignRouteShape>(entity).source_path);
   } catch (...) {
-    _registry.destroy(entity);
+    if (!owner.shapes.empty() && owner.shapes.back() == GeometryShapeId{entity}) {
+      owner.shapes.pop_back();
+    }
+    _geometry_registry.registry().destroy(entity);
     throw;
   }
-  return DesignRouteShapeId{entity};
+  markGeometryChanged();
+  return GeometryShapeId{entity};
 }
 
-void DesignRoutingStorage::updateShape(DesignRouteShapeId id, DesignRouteShape value,
+void DesignRoutingStorage::updateShape(GeometryShapeId id, DesignRouteShape value,
                                        std::optional<DesignRouteShapeAttributes> attributes)
 {
   if (!contains(id)) {
     throw std::out_of_range("invalid route Shape id");
   }
-  const auto& previous = _registry.get<const DesignRouteShape>(id.entity());
+  const auto& previous = _geometry_registry.registry().get<const DesignRouteShape>(id.entity());
   if (value.wire && value.wire != previous.wire) {
     throw std::invalid_argument("route Shape cannot change owner Wire");
   }
@@ -767,7 +1026,7 @@ void DesignRoutingStorage::updateShape(DesignRouteShapeId id, DesignRouteShape v
   }
   auto& owner = _registry.get<DesignWire>(value.wire.entity());
   if (auto* via = std::get_if<DesignRouteVia>(&value.geometry)) {
-    normalizeViaExitLayer(_registry, _tech_registry.registry(), value.layer, *via);
+    normalizeViaExitLayer(_registry, _geometry_registry, _tech_registry.registry(), value.layer, *via);
   }
   std::optional<DesignRouteShapeAttributes> effective_attributes;
   if (hasShapeValueAttributes(value.flags)) {
@@ -778,34 +1037,44 @@ void DesignRoutingStorage::updateShape(DesignRouteShapeId id, DesignRouteShape v
     }
   }
   validateShapeValue(_registry, _tech_registry.registry(), owner, value, effective_attributes);
-  _registry.replace<DesignRouteShape>(id.entity(), std::move(value));
+  auto& geometry_registry = _geometry_registry.registry();
+  geometry_registry.replace<DesignRouteShape>(id.entity(), std::move(value));
+  geometry_registry.get_or_emplace<GeometryBounds>(id.entity()).invalidate();
+  auto& metadata = geometry_registry.get<GeometryShape>(id.entity());
+  metadata.kind = routeShapeKind(geometry_registry.get<const DesignRouteShape>(id.entity()));
+  metadata.layer = geometry_registry.get<const DesignRouteShape>(id.entity()).layer;
+  metadata.flags = geometry_registry.get<const DesignRouteShape>(id.entity()).flags;
+  metadata.source_path = geometry_registry.get<const DesignRouteShape>(id.entity()).source_path;
   if (effective_attributes.has_value()) {
-    _registry.emplace_or_replace<DesignRouteShapeAttributes>(id.entity(), std::move(*effective_attributes));
+    geometry_registry.emplace_or_replace<DesignRouteShapeAttributes>(id.entity(), std::move(*effective_attributes));
   } else {
-    _registry.remove<DesignRouteShapeAttributes>(id.entity());
+    geometry_registry.remove<DesignRouteShapeAttributes>(id.entity());
   }
-  observeSourcePath(owner, _registry.get<const DesignRouteShape>(id.entity()).source_path);
+  observeSourcePath(owner, geometry_registry.get<const DesignRouteShape>(id.entity()).source_path);
+  markGeometryChanged();
 }
 
-bool DesignRoutingStorage::destroyShape(DesignRouteShapeId id)
+bool DesignRoutingStorage::destroyShape(GeometryShapeId id)
 {
   if (!contains(id)) {
     return false;
   }
-  const auto owner = _registry.get<const DesignRouteShape>(id.entity()).wire;
+  const auto owner = _geometry_registry.registry().get<const DesignRouteShape>(id.entity()).wire;
   if (contains(owner)) {
     std::erase(_registry.get<DesignWire>(owner.entity()).shapes, id);
   }
-  _registry.destroy(id.entity());
+  _geometry_registry.registry().destroy(id.entity());
+  markGeometryChanged();
   return true;
 }
 
-bool DesignRoutingStorage::contains(DesignRouteShapeId id) const
+bool DesignRoutingStorage::contains(GeometryShapeId id) const
 {
-  return _registry.valid(id.entity()) && _registry.all_of<DesignRouteShape>(id.entity());
+  const auto& geometry_registry = _geometry_registry.registry();
+  return geometry_registry.valid(id.entity()) && geometry_registry.all_of<GeometryShape, DesignRouteShape>(id.entity());
 }
 
-Rect DesignRoutingStorage::shapeBoundingBox(DesignRouteShapeId id) const
+Rect DesignRoutingStorage::shapeBoundingBox(GeometryShapeId id) const
 {
   if (!contains(id)) {
     throw std::out_of_range("invalid route Shape id");
@@ -818,7 +1087,7 @@ Rect DesignRoutingStorage::shapeBoundingBox(DesignRouteShapeId id) const
         if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
           return segmentBounds(_registry, _tech_registry.registry(), value, attributes);
         } else if constexpr (std::is_same_v<Geometry, DesignRouteVia>) {
-          return viaBounds(_registry, _tech_registry.registry(), geometry);
+          return viaBounds(_registry, _geometry_registry, _tech_registry.registry(), geometry);
         } else if constexpr (std::is_same_v<Geometry, DesignRoutePatch>) {
           return geometry.rectangle;
         } else {
@@ -827,6 +1096,101 @@ Rect DesignRoutingStorage::shapeBoundingBox(DesignRouteShapeId id) const
         }
       },
       value.geometry);
+}
+
+Rect DesignRoutingStorage::viaPlacementBounds(TechViaMasterId tech_via, DesignViaId design_via,
+                                              Point origin, DesignOrientation orientation) const
+{
+  return viaBounds(_registry, _geometry_registry, _tech_registry.registry(),
+                   DesignRouteVia{.origin = {.position = origin},
+                                   .via = {.tech_via = tech_via, .design_via = design_via, .orientation = orientation}});
+}
+
+bool DesignRoutingStorage::forEachViaLayerBounds(GeometryShapeId id, const ViaLayerBoundsVisitor& visitor) const
+{
+  if (!visitor || !_geometry_registry.contains(id)) {
+    return false;
+  }
+  const auto& metadata = _geometry_registry.shape(id);
+  const auto& tech = _tech_registry.registry();
+  const auto visit_definition = [&](TechViaMasterId tech_via, DesignViaId design_via, Point origin,
+                                    DesignOrientation orientation, const ViaLayerBoundsVisitor& callback) {
+    return visitViaDefinition(_registry, _geometry_registry, _tech_geometry_registry, tech, tech_via, design_via,
+                              origin, orientation, callback);
+  };
+
+  switch (metadata.kind) {
+    case GeometryShapeKind::kVia: {
+      const auto* route_shape = _geometry_registry.tryGet<DesignRouteShape>(id);
+      if (route_shape == nullptr) {
+        return false;
+      }
+      const auto* route_via = std::get_if<DesignRouteVia>(&route_shape->geometry);
+      if (route_via == nullptr) {
+        return false;
+      }
+      if ((route_via->via.flags & DesignWireViaFlag::kHasArray) == 0u) {
+        return visit_definition(route_via->via.tech_via, route_via->via.design_via, route_via->origin.position,
+                                route_via->via.orientation, visitor);
+      }
+      if (route_via->via.rows == 0u || route_via->via.columns == 0u) {
+        return false;
+      }
+      bool emitted = false;
+      for (uint32_t row = 0; row < route_via->via.rows; ++row) {
+        for (uint32_t column = 0; column < route_via->via.columns; ++column) {
+          const auto origin = checkedPoint(
+              static_cast<int64_t>(route_via->origin.position.x)
+                  + static_cast<int64_t>(column) * route_via->via.step_x,
+              static_cast<int64_t>(route_via->origin.position.y)
+                  + static_cast<int64_t>(row) * route_via->via.step_y);
+          emitted = visit_definition(route_via->via.tech_via, route_via->via.design_via, origin,
+                                     route_via->via.orientation, visitor)
+                    || emitted;
+        }
+      }
+      return emitted;
+    }
+    case GeometryShapeKind::kNetVia: {
+      const auto* via = _geometry_registry.tryGet<DesignGeometryNetVia>(id);
+      if (via == nullptr || via->origins.empty()) {
+        return false;
+      }
+      bool emitted = false;
+      for (const auto origin : via->origins) {
+        emitted = visit_definition(via->tech_via, via->design_via, origin, via->orientation, visitor) || emitted;
+      }
+      return emitted;
+    }
+    case GeometryShapeKind::kPinVia: {
+      const auto* via = _geometry_registry.tryGet<DesignPinVia>(id);
+      if (via == nullptr || metadata.owner.domain != GeometryOwnerDomain::kDesignBlockPin) {
+        return false;
+      }
+      const auto entity = static_cast<DesignEntity>(metadata.owner.value);
+      if (!_registry.valid(entity)) {
+        return false;
+      }
+      const auto* pin = _registry.try_get<const DesignBlockPin>(entity);
+      if (pin == nullptr) {
+        return false;
+      }
+      const ViaLayerBoundsVisitor place_pin_via = [pin, &visitor](TechLayerId layer, Rect bounds) {
+        visitor(layer, orientedBounds(bounds, pin->origin, pin->orientation));
+      };
+      return visit_definition(via->tech_via, via->design_via, via->origin, DesignOrientation::kN, place_pin_via);
+    }
+    default: return false;
+  }
+}
+
+void DesignRoutingStorage::setTechnologyGeometryRegistry(const GeometryRegistry* tech_geometry_registry) noexcept
+{
+  if (_tech_geometry_registry == tech_geometry_registry) {
+    return;
+  }
+  _tech_geometry_registry = tech_geometry_registry;
+  markGeometryChanged();
 }
 
 bool DesignRoutingStorage::destroyWire(DesignWireId id)
@@ -844,8 +1208,9 @@ bool DesignRoutingStorage::destroyWire(DesignWireId id)
       _wires_by_net.erase(found);
     }
   }
-  destroyShapeEntities(_registry, shapes);
+  destroyShapeEntities(_geometry_registry.registry(), shapes);
   _registry.destroy(id.entity());
+  markGeometryChanged();
   return true;
 }
 
@@ -858,6 +1223,45 @@ const DesignWire& DesignRoutingStorage::wire(DesignWireId id) const
 {
   ensureWire(id);
   return _registry.get<const DesignWire>(id.entity());
+}
+
+DesignWire& DesignRoutingStorage::wire(DesignWireId id)
+{
+  ensureWire(id);
+  return _registry.get<DesignWire>(id.entity());
+}
+
+DesignNetGeometry& DesignRoutingStorage::ensureNetGeometry(DesignNetId net)
+{
+  if (!_registry.valid(net.entity()) || !_registry.all_of<DesignNet>(net.entity())) {
+    throw std::out_of_range("invalid design Net id");
+  }
+  if (!_registry.all_of<DesignSpecialNet>(net.entity())) {
+    throw std::invalid_argument("standalone geometry requires a SPECIALNET owner");
+  }
+  return _registry.get_or_emplace<DesignNetGeometry>(net.entity());
+}
+
+DesignNetGeometry* DesignRoutingStorage::netGeometry(DesignNetId net)
+{
+  if (!net || !_registry.valid(net.entity()) || !_registry.all_of<DesignNet>(net.entity())) {
+    throw std::out_of_range("invalid design net id");
+  }
+  return _registry.try_get<DesignNetGeometry>(net.entity());
+}
+
+bool DesignRoutingStorage::pruneEmptyNetGeometry(DesignNetId net)
+{
+  if (!net || !_registry.valid(net.entity()) || !_registry.all_of<DesignNet>(net.entity())) {
+    throw std::out_of_range("invalid design net id");
+  }
+  auto* relation = _registry.try_get<DesignNetGeometry>(net.entity());
+  if (relation == nullptr || !relation->shapes.empty()) {
+    return false;
+  }
+  _registry.remove<DesignNetGeometry>(net.entity());
+  markGeometryChanged();
+  return true;
 }
 
 std::vector<DesignWireId> DesignRoutingStorage::wires() const
@@ -902,7 +1306,7 @@ void DesignRoutingStorage::shrinkRoutingToFit()
   for (const auto entity : wires) {
     wires.get<DesignWire>(entity).shapes.shrink_to_fit();
   }
-  const auto attributes = _registry.view<DesignRouteShapeAttributes>();
+  const auto attributes = _geometry_registry.registry().view<DesignRouteShapeAttributes>();
   for (const auto entity : attributes) {
     auto& value = attributes.get<DesignRouteShapeAttributes>(entity);
     value.taper_rule.shrink_to_fit();
@@ -913,12 +1317,12 @@ void DesignRoutingStorage::shrinkRoutingToFit()
 DesignRoutingStatistics DesignRoutingStorage::routingStatistics() const
 {
   DesignRoutingStatistics result;
-  const auto shape_view = _registry.view<const DesignRouteShape>();
+  const auto shape_view = _geometry_registry.registry().view<const DesignRouteShape>();
   result.shapes.count = shape_view.size();
   result.shapes.capacity = shape_view.size();
   result.shapes.element_size = sizeof(DesignRouteShape);
   result.shapes.capacity_bytes = result.shapes.count * sizeof(DesignRouteShape);
-  const auto attribute_view = _registry.view<const DesignRouteShapeAttributes>();
+  const auto attribute_view = _geometry_registry.registry().view<const DesignRouteShapeAttributes>();
   result.path_extras.count = attribute_view.size();
   result.path_extras.capacity = attribute_view.size();
   result.path_extras.element_size = sizeof(DesignRouteShapeAttributes);
@@ -1001,6 +1405,18 @@ DesignRoutingStatistics DesignRoutingStorage::routingStatistics() const
 
 void DesignRoutingStorage::validateRestoredRoutingState() const
 {
+  constexpr uint8_t kWireMembership = 1u;
+  constexpr uint8_t kNetMembership = 2u;
+  const auto& geometry_registry = _geometry_registry.registry();
+  const auto metadata_view = geometry_registry.view<const GeometryShape>();
+  entt::dense_map<GeometryEntity, uint8_t> membership;
+  membership.reserve(metadata_view.size());
+  const auto addMembership = [&membership](GeometryShapeId id, uint8_t relation) {
+    if (!membership.emplace(id.entity(), relation).second) {
+      throw std::runtime_error("binary design geometry entity occurs in multiple owner relations");
+    }
+  };
+
   const auto wire_view = _registry.view<const DesignWire>();
   for (const auto entity : wire_view) {
     const DesignWireId wire_id{entity};
@@ -1013,6 +1429,7 @@ void DesignRoutingStorage::validateRestoredRoutingState() const
         if (!contains(shape_id)) {
           throw std::invalid_argument("Wire references a missing Shape");
         }
+        addMembership(shape_id, kWireMembership);
         const auto& shape_value = shape(shape_id);
         if (shape_value.wire != wire_id) {
           throw std::invalid_argument("Wire Shape owner reference is inconsistent");
@@ -1023,7 +1440,7 @@ void DesignRoutingStorage::validateRestoredRoutingState() const
         }
         validateShapeValue(_registry, _tech_registry.registry(), wire_value, shape_value, attributes);
         if (const auto* via = std::get_if<DesignRouteVia>(&shape_value.geometry); via != nullptr) {
-          const auto layers = routingLayersForVia(_registry, _tech_registry.registry(), via->via);
+          const auto layers = routingLayersForVia(_registry, _geometry_registry, _tech_registry.registry(), via->via);
           if (!isRoutingLayer(_tech_registry.registry(), via->exit_layer)
               || (layers.has_value() && via->exit_layer != viaExitLayer(shape_value.layer, via->via))) {
             throw std::invalid_argument("route VIA exit layer is inconsistent");
@@ -1041,16 +1458,123 @@ void DesignRoutingStorage::validateRestoredRoutingState() const
       throw std::runtime_error(std::string{"binary design has invalid Wire Shape state: "} + error.what());
     }
   }
-  const auto shape_view = _registry.view<const DesignRouteShape>();
-  for (const auto entity : shape_view) {
-    const auto& shape_value = shape_view.get<const DesignRouteShape>(entity);
-    if (!contains(shape_value.wire)) {
-      throw std::runtime_error("binary design has a route Shape with a missing Wire owner");
+
+  const auto definition_via_view = _registry.view<const DesignVia>();
+  for (const auto entity : definition_via_view) {
+    try {
+      validateVia(definition_via_view.get<const DesignVia>(entity), DesignViaId{entity});
+    } catch (const std::exception& error) {
+      throw std::runtime_error(std::string{"binary design has invalid design VIA state: "} + error.what());
     }
-    const auto& owner = wire(shape_value.wire).shapes;
-    const DesignRouteShapeId id{entity};
-    if (std::count(owner.begin(), owner.end(), id) != 1) {
-      throw std::runtime_error("binary design has a route Shape with inconsistent Wire membership");
+  }
+
+  const auto net_geometry_view = _registry.view<const DesignNetGeometry>();
+  for (const auto entity : net_geometry_view) {
+    try {
+      const auto& geometry = net_geometry_view.get<const DesignNetGeometry>(entity);
+      for (const auto id : geometry.shapes) {
+        addMembership(id, kNetMembership);
+      }
+      validateNetGeometry(DesignNetId{entity}, geometry);
+    } catch (const std::exception& error) {
+      throw std::runtime_error(std::string{"binary design has invalid SPECIALNET geometry state: "} + error.what());
+    }
+  }
+
+  const auto route_shape_view = geometry_registry.view<const DesignRouteShape>();
+  for (const auto entity : route_shape_view) {
+    if (!geometry_registry.all_of<GeometryShape>(entity)) {
+      throw std::runtime_error("binary design route Shape has no GeometryShape metadata");
+    }
+    const auto membership_it = membership.find(entity);
+    if (membership_it == membership.end() || membership_it->second != kWireMembership) {
+      throw std::runtime_error("binary design route Shape has inconsistent Wire membership");
+    }
+    const auto& shape_value = route_shape_view.get<const DesignRouteShape>(entity);
+    if (!contains(shape_value.wire)) {
+      throw std::runtime_error("binary design route Shape has a missing Wire owner");
+    }
+    const auto& metadata = geometry_registry.get<const GeometryShape>(entity);
+    const auto expected_owner = designWireOwner(shape_value.wire);
+    if (metadata.owner.domain != expected_owner.domain || metadata.owner.value != expected_owner.value
+        || metadata.kind != routeShapeKind(shape_value) || metadata.layer != shape_value.layer
+        || metadata.flags != shape_value.flags || metadata.source_path != shape_value.source_path) {
+      throw std::runtime_error("binary design route Shape metadata is inconsistent with its payload");
+    }
+  }
+
+  const auto rectangle_view = geometry_registry.view<const DesignGeometryRectangle>();
+  for (const auto entity : rectangle_view) {
+    if (!geometry_registry.all_of<GeometryShape>(entity)) {
+      throw std::runtime_error("binary design standalone rectangle has no GeometryShape metadata");
+    }
+    const auto membership_it = membership.find(entity);
+    if (membership_it == membership.end() || membership_it->second != kNetMembership) {
+      throw std::runtime_error("binary design standalone rectangle has inconsistent SPECIALNET membership");
+    }
+    const auto& value = rectangle_view.get<const DesignGeometryRectangle>(entity);
+    const auto& metadata = geometry_registry.get<const GeometryShape>(entity);
+    if (metadata.kind != GeometryShapeKind::kRectangle || metadata.layer != value.layer || metadata.flags != value.flags
+        || metadata.source_path != kUnassignedSourcePath) {
+      throw std::runtime_error("binary design standalone rectangle metadata is inconsistent with its payload");
+    }
+  }
+
+  const auto polygon_view = geometry_registry.view<const DesignGeometryPolygon>();
+  for (const auto entity : polygon_view) {
+    if (!geometry_registry.all_of<GeometryShape>(entity)) {
+      throw std::runtime_error("binary design standalone polygon has no GeometryShape metadata");
+    }
+    const auto membership_it = membership.find(entity);
+    if (membership_it == membership.end() || membership_it->second != kNetMembership) {
+      throw std::runtime_error("binary design standalone polygon has inconsistent SPECIALNET membership");
+    }
+    const auto& value = polygon_view.get<const DesignGeometryPolygon>(entity);
+    const auto& metadata = geometry_registry.get<const GeometryShape>(entity);
+    if (metadata.kind != GeometryShapeKind::kPolygon || metadata.layer != value.layer || metadata.flags != value.flags
+        || metadata.source_path != kUnassignedSourcePath) {
+      throw std::runtime_error("binary design standalone polygon metadata is inconsistent with its payload");
+    }
+  }
+
+  const auto via_view = geometry_registry.view<const DesignGeometryNetVia>();
+  for (const auto entity : via_view) {
+    if (!geometry_registry.all_of<GeometryShape>(entity)) {
+      throw std::runtime_error("binary design standalone VIA has no GeometryShape metadata");
+    }
+    const auto membership_it = membership.find(entity);
+    if (membership_it == membership.end() || membership_it->second != kNetMembership) {
+      throw std::runtime_error("binary design standalone VIA has inconsistent SPECIALNET membership");
+    }
+    const auto& value = via_view.get<const DesignGeometryNetVia>(entity);
+    const auto& metadata = geometry_registry.get<const GeometryShape>(entity);
+    if (metadata.kind != GeometryShapeKind::kNetVia || metadata.layer != TechRoutingLayerId{}
+        || metadata.flags != value.flags || metadata.source_path != kUnassignedSourcePath) {
+      throw std::runtime_error("binary design standalone VIA metadata is inconsistent with its payload");
+    }
+  }
+
+  const auto attribute_view = geometry_registry.view<const DesignRouteShapeAttributes>();
+  for (const auto entity : attribute_view) {
+    if (!geometry_registry.all_of<GeometryShape, DesignRouteShape>(entity)) {
+      throw std::runtime_error("binary design route attributes are attached to a non-route geometry entity");
+    }
+  }
+
+  for (const auto entity : metadata_view) {
+    const auto& metadata = metadata_view.get<const GeometryShape>(entity);
+    if (metadata.owner.domain != GeometryOwnerDomain::kDesignWire && metadata.owner.domain != GeometryOwnerDomain::kDesignNet) {
+      continue;
+    }
+    if (!membership.contains(entity)) {
+      throw std::runtime_error("binary design geometry entity has no owner relation");
+    }
+    const auto payload_count = static_cast<unsigned>(geometry_registry.all_of<DesignRouteShape>(entity))
+                               + static_cast<unsigned>(geometry_registry.all_of<DesignGeometryRectangle>(entity))
+                               + static_cast<unsigned>(geometry_registry.all_of<DesignGeometryPolygon>(entity))
+                               + static_cast<unsigned>(geometry_registry.all_of<DesignGeometryNetVia>(entity));
+    if (payload_count != 1u) {
+      throw std::runtime_error("binary design geometry entity has missing or extra typed payloads");
     }
   }
 }
@@ -1058,7 +1582,20 @@ void DesignRoutingStorage::validateRestoredRoutingState() const
 void DesignRoutingStorage::setNetGeometry(DesignNetId net, DesignNetGeometry geometry)
 {
   validateNetGeometry(net, geometry);
+
+  // A net relation owns the lifetime of its standalone geometry entities. Do
+  // not leave the previous SPECIALNET payloads orphaned when a DEF import or
+  // an editor replaces the relation. IDs that are retained by the new
+  // relation remain alive, which also makes a no-op replacement cheap.
+  if (const auto* previous = _registry.try_get<const DesignNetGeometry>(net.entity()); previous != nullptr) {
+    for (const auto id : previous->shapes) {
+      if (std::find(geometry.shapes.begin(), geometry.shapes.end(), id) == geometry.shapes.end()) {
+        static_cast<void>(_geometry_registry.destroy(id));
+      }
+    }
+  }
   _registry.emplace_or_replace<DesignNetGeometry>(net.entity(), std::move(geometry));
+  markGeometryChanged();
 }
 
 
@@ -1085,7 +1622,7 @@ uint32_t DesignRoutingStorage::wireCount() const
   return static_cast<uint32_t>(_registry.storage<DesignWire>().size());
 }
 
-void DesignRoutingStorage::validateVia(const DesignVia& value, DesignViaId ignored) const
+void DesignRoutingStorage::validateVia(const DesignViaInput& value, DesignViaId ignored) const
 {
   constexpr uint32_t kKnownFlags = DesignViaFlag::kGenerated | DesignViaFlag::kHasPatternName;
   if (value.name.empty() || viaNameInUse(value.name, ignored) || (value.flags & ~kKnownFlags) != 0u
@@ -1154,6 +1691,66 @@ void DesignRoutingStorage::validateVia(const DesignVia& value, DesignViaId ignor
   }
 }
 
+void DesignRoutingStorage::validateVia(const DesignVia& value, DesignViaId id) const
+{
+  constexpr uint32_t kKnownFlags = DesignViaFlag::kGenerated | DesignViaFlag::kHasPatternName;
+  if (!id || value.name.empty() || viaNameInUse(value.name, id) || (value.flags & ~kKnownFlags) != 0u
+      || ((value.flags & DesignViaFlag::kHasPatternName) != 0u) == value.pattern_name.empty()) {
+    throw std::invalid_argument("design via name is empty or duplicated");
+  }
+
+  const bool generated = (value.flags & DesignViaFlag::kGenerated) != 0u;
+  if (generated) {
+    if (!value.rectangles.empty() || !value.polygons.empty()) {
+      throw std::invalid_argument("generated design via cannot also contain fixed geometry");
+    }
+    DesignViaInput input{.name = value.name,
+                         .flags = value.flags,
+                         .pattern_name = value.pattern_name,
+                         .generated = value.generated};
+    validateVia(input, id);
+    return;
+  }
+
+  const auto& formula = value.generated;
+  if (formula.via_rule || formula.bottom_layer || formula.cut_layer || formula.top_layer || formula.flags != 0u || formula.cut_size_x != 0
+      || formula.cut_size_y != 0 || formula.cut_spacing_x != 0 || formula.cut_spacing_y != 0 || formula.bottom_enclosure_x != 0
+      || formula.bottom_enclosure_y != 0 || formula.top_enclosure_x != 0 || formula.top_enclosure_y != 0 || formula.row_count != 1u
+      || formula.column_count != 1u || formula.origin != Point{} || formula.bottom_offset != Point{} || formula.top_offset != Point{}
+      || !formula.cut_pattern.empty() || (value.rectangles.empty() && value.polygons.empty())) {
+    throw std::invalid_argument("fixed design via contains generated fields or no geometry");
+  }
+
+  const auto owner = designViaOwner(id);
+  const auto& tech = _tech_registry.registry();
+  for (const auto shape : value.rectangles) {
+    if (!_geometry_registry.contains(shape)) {
+      throw std::invalid_argument("fixed design via references a missing rectangle geometry");
+    }
+    const auto& metadata = _geometry_registry.shape(shape);
+    const auto* rectangle = _geometry_registry.tryGet<DesignViaRectangle>(shape);
+    if (metadata.owner.domain != owner.domain || metadata.owner.value != owner.value
+        || metadata.kind != GeometryShapeKind::kRectangle || rectangle == nullptr || !rectangle->layer
+        || !tech.valid(rectangle->layer.entity()) || !tech.all_of<TechLayerInfo>(rectangle->layer.entity())
+        || !rectangle->rectangle.hasArea()) {
+      throw std::invalid_argument("fixed design via rectangle is invalid");
+    }
+  }
+  for (const auto shape : value.polygons) {
+    if (!_geometry_registry.contains(shape)) {
+      throw std::invalid_argument("fixed design via references a missing polygon geometry");
+    }
+    const auto& metadata = _geometry_registry.shape(shape);
+    const auto* polygon = _geometry_registry.tryGet<DesignViaPolygon>(shape);
+    if (metadata.owner.domain != owner.domain || metadata.owner.value != owner.value
+        || metadata.kind != GeometryShapeKind::kPolygon || polygon == nullptr || !polygon->layer
+        || !tech.valid(polygon->layer.entity()) || !tech.all_of<TechLayerInfo>(polygon->layer.entity())
+        || polygon->points.size() < 3u) {
+      throw std::invalid_argument("fixed design via polygon is invalid");
+    }
+  }
+}
+
 void DesignRoutingStorage::validateNonDefaultRule(const DesignNonDefaultRule& value, DesignNonDefaultRuleId ignored) const
 {
   if (value.name.empty() || nonDefaultRuleNameInUse(value.name, ignored)
@@ -1215,7 +1812,7 @@ void DesignRoutingStorage::validateNonDefaultRule(const DesignNonDefaultRule& va
 
 TechRoutingLayerId DesignRoutingStorage::viaExitLayer(TechRoutingLayerId layer, const DesignWireVia& via) const
 {
-  const auto layers = routingLayersForVia(_registry, _tech_registry.registry(), via);
+  const auto layers = routingLayersForVia(_registry, _geometry_registry, _tech_registry.registry(), via);
   if (!layers.has_value()) {
     return layer;
   }
@@ -1228,38 +1825,85 @@ TechRoutingLayerId DesignRoutingStorage::viaExitLayer(TechRoutingLayerId layer, 
   throw std::invalid_argument("wire VIA does not touch its routing layer");
 }
 
+void DesignRoutingStorage::validateNetShape(const DesignNetRectangle& rectangle) const
+{
+  const auto& tech = _tech_registry.registry();
+  validateNetGeometryOptions(rectangle.route_status, rectangle.flags, rectangle.mask, rectangle.shield_net, rectangle.shape);
+  if (!rectangle.layer || !tech.valid(rectangle.layer.entity())
+      || !tech.all_of<TechLayerInfo, TechRoutingLayer>(rectangle.layer.entity()) || !rectangle.rectangle.hasArea()) {
+    throw std::invalid_argument("standalone net rectangle is invalid");
+  }
+}
+
+void DesignRoutingStorage::validateNetShape(const DesignNetPolygon& polygon) const
+{
+  const auto& tech = _tech_registry.registry();
+  validateNetGeometryOptions(polygon.route_status, polygon.flags, polygon.mask, polygon.shield_net, polygon.shape);
+  if (!polygon.layer || !tech.valid(polygon.layer.entity())
+      || !tech.all_of<TechLayerInfo, TechRoutingLayer>(polygon.layer.entity()) || polygon.points.size() < 3u) {
+    throw std::invalid_argument("standalone net polygon is invalid");
+  }
+}
+
+void DesignRoutingStorage::validateNetShape(const DesignNetVia& via) const
+{
+  const auto& tech = _tech_registry.registry();
+  validateNetGeometryOptions(via.route_status, via.flags, via.top_mask || via.cut_mask || via.bottom_mask,
+                             via.shield_net, via.shape);
+  const bool has_tech_via = static_cast<bool>(via.tech_via);
+  const bool has_design_via = static_cast<bool>(via.design_via);
+  if (has_tech_via == has_design_via || via.origins.empty() || !isValidDesignOrientation(via.orientation)
+      || (has_tech_via && (!tech.valid(via.tech_via.entity()) || !tech.all_of<TechViaMaster>(via.tech_via.entity())))
+      || (has_design_via && !contains(via.design_via))) {
+    throw std::invalid_argument("standalone net VIA is invalid");
+  }
+}
+
 void DesignRoutingStorage::validateNetGeometry(DesignNetId net, const DesignNetGeometry& geometry) const
 {
   if (!net || !_registry.valid(net.entity()) || !_registry.all_of<DesignNet, DesignSpecialNet>(net.entity())) {
     throw std::invalid_argument("standalone net geometry requires a valid SPECIALNET owner");
   }
-  if (geometry.rectangles.empty() && geometry.polygons.empty() && geometry.vias.empty()) {
+  if (geometry.shapes.empty()) {
     throw std::invalid_argument("standalone net geometry cannot be empty");
   }
 
-  const auto& tech = _tech_registry.registry();
-  for (const auto& rectangle : geometry.rectangles) {
-    validateNetGeometryOptions(rectangle.route_status, rectangle.flags, rectangle.mask, rectangle.shield_net, rectangle.shape);
-    if (!rectangle.layer || !tech.valid(rectangle.layer.entity()) || !tech.all_of<TechLayerInfo, TechRoutingLayer>(rectangle.layer.entity())
-        || !rectangle.rectangle.hasArea()) {
-      throw std::invalid_argument("standalone net rectangle is invalid");
+  for (const auto id : geometry.shapes) {
+    if (!_geometry_registry.contains(id)) {
+      throw std::invalid_argument("SPECIALNET references a missing geometry entity");
     }
-  }
-  for (const auto& polygon : geometry.polygons) {
-    validateNetGeometryOptions(polygon.route_status, polygon.flags, polygon.mask, polygon.shield_net, polygon.shape);
-    if (!polygon.layer || !tech.valid(polygon.layer.entity()) || !tech.all_of<TechLayerInfo, TechRoutingLayer>(polygon.layer.entity())
-        || polygon.points.size() < 3u) {
-      throw std::invalid_argument("standalone net polygon is invalid");
+    const auto& metadata = _geometry_registry.shape(id);
+    const auto expected_owner = designNetOwner(net);
+    if (metadata.owner.domain != expected_owner.domain || metadata.owner.value != expected_owner.value) {
+      throw std::invalid_argument("SPECIALNET geometry owner relation is inconsistent");
     }
-  }
-  for (const auto& via : geometry.vias) {
-    validateNetGeometryOptions(via.route_status, via.flags, via.top_mask || via.cut_mask || via.bottom_mask, via.shield_net, via.shape);
-    const bool has_tech_via = static_cast<bool>(via.tech_via);
-    const bool has_design_via = static_cast<bool>(via.design_via);
-    if (has_tech_via == has_design_via || via.origins.empty() || !isValidDesignOrientation(via.orientation)
-        || (has_tech_via && (!tech.valid(via.tech_via.entity()) || !tech.all_of<TechViaMaster>(via.tech_via.entity())))
-        || (has_design_via && !contains(via.design_via))) {
-      throw std::invalid_argument("standalone net VIA is invalid");
+    switch (metadata.kind) {
+      case GeometryShapeKind::kRectangle: {
+        const auto* rectangle = _geometry_registry.tryGet<DesignGeometryRectangle>(id);
+        if (rectangle == nullptr) {
+          throw std::invalid_argument("SPECIALNET rectangle payload is missing");
+        }
+        validateNetShape(*rectangle);
+        break;
+      }
+      case GeometryShapeKind::kPolygon: {
+        const auto* polygon = _geometry_registry.tryGet<DesignGeometryPolygon>(id);
+        if (polygon == nullptr) {
+          throw std::invalid_argument("SPECIALNET polygon payload is missing");
+        }
+        validateNetShape(*polygon);
+        break;
+      }
+      case GeometryShapeKind::kNetVia: {
+        const auto* via = _geometry_registry.tryGet<DesignGeometryNetVia>(id);
+        if (via == nullptr) {
+          throw std::invalid_argument("SPECIALNET VIA payload is missing");
+        }
+        validateNetShape(*via);
+        break;
+      }
+      default:
+        throw std::invalid_argument("SPECIALNET relation contains a non-standalone geometry kind");
     }
   }
 }
@@ -1306,7 +1950,7 @@ bool DesignRoutingStorage::referencesVia(DesignViaId id) const
       }
     }
   }
-  const auto shape_view = _registry.view<const DesignRouteShape>();
+  const auto shape_view = _geometry_registry.registry().view<const DesignRouteShape>();
   for (const auto entity : shape_view) {
     const auto& shape_value = shape_view.get<const DesignRouteShape>(entity);
     if (const auto* via = std::get_if<DesignRouteVia>(&shape_value.geometry); via != nullptr && via->via.design_via == id) {
@@ -1315,16 +1959,18 @@ bool DesignRoutingStorage::referencesVia(DesignViaId id) const
   }
   const auto pin_view = _registry.view<const DesignBlockPin>();
   for (const auto entity : pin_view) {
-    for (const auto& via : pin_view.get<const DesignBlockPin>(entity).vias) {
-      if (via.design_via == id) {
+    for (const auto shape : pin_view.get<const DesignBlockPin>(entity).vias) {
+      const auto* via = _geometry_registry.tryGet<DesignPinVia>(shape);
+      if (via != nullptr && via->design_via == id) {
         return true;
       }
     }
   }
   const auto geometry_view = _registry.view<const DesignNetGeometry>();
   for (const auto entity : geometry_view) {
-    for (const auto& via : geometry_view.get<const DesignNetGeometry>(entity).vias) {
-      if (via.design_via == id) {
+    for (const auto shape_id : geometry_view.get<const DesignNetGeometry>(entity).shapes) {
+      const auto* via = _geometry_registry.tryGet<DesignGeometryNetVia>(shape_id);
+      if (via != nullptr && via->design_via == id) {
         return true;
       }
     }

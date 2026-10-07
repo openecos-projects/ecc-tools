@@ -44,15 +44,31 @@ const DesignDieArea& DesignGlobalStorage::dieArea() const
   return _registry.get<const DesignDieArea>(_root.entity());
 }
 
-Rect DesignGlobalStorage::dieBounds() const
+std::span<const Point> DesignGlobalStorage::dieBoundary() const
 {
-  return validateAndGetDieBounds(dieArea());
+  return geometryRegistry().get<const GeometryBoundary>(dieArea().boundary).points;
 }
 
-void DesignGlobalStorage::setDieArea(DesignDieArea die_area)
+Rect DesignGlobalStorage::dieBounds() const
 {
-  static_cast<void>(validateAndGetDieBounds(die_area));
-  _registry.emplace_or_replace<DesignDieArea>(rootEntity(), std::move(die_area));
+  return validateAndGetDieBounds(dieBoundary());
+}
+
+void DesignGlobalStorage::setDieArea(DesignDieAreaInput die_area)
+{
+  static_cast<void>(validateAndGetDieBounds(die_area.boundary));
+  const auto root = rootEntity();
+  const auto boundary = geometryRegistry().createBoundary(designDieAreaOwner(_root), std::move(die_area.boundary));
+  const auto* previous = _registry.try_get<const DesignDieArea>(root);
+  const auto old_boundary = previous == nullptr ? GeometryShapeId{} : previous->boundary;
+  try {
+    _registry.emplace_or_replace<DesignDieArea>(root, DesignDieArea{.boundary = boundary});
+  } catch (...) {
+    static_cast<void>(geometryRegistry().destroy(boundary));
+    throw;
+  }
+  static_cast<void>(geometryRegistry().destroy(old_boundary));
+  _design_registry.markGeometryChanged();
 }
 
 DesignEntity DesignGlobalStorage::rootEntity() const
@@ -79,9 +95,9 @@ void DesignGlobalStorage::validateInfo(const DesignInfo& info)
   }
 }
 
-Rect DesignGlobalStorage::validateAndGetDieBounds(const DesignDieArea& die_area)
+Rect DesignGlobalStorage::validateAndGetDieBounds(std::span<const Point> boundary)
 {
-  return validateDesignOrthogonalBoundary(die_area.boundary, "design die area");
+  return validateDesignOrthogonalBoundary(boundary, "design die area");
 }
 
 }  // namespace eccdb

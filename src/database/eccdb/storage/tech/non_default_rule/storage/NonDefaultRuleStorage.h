@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-#include "geometry/GeometryPool.h"
+#include "geometry/DomainGeometryStorage.h"
 #include "tech/TechRegistry.h"
 #include "tech/non_default_rule/model/NonDefaultRuleComponents.h"
 #include "tech/via_master/storage/ViaMasterInput.h"
@@ -22,7 +22,7 @@ class TechNonDefaultRuleStorage
  public:
   using registry_type = TechRegistry::registry_type;
 
-  TechNonDefaultRuleStorage(TechRegistry& registry, GeometryPool& geometry) : _registry(registry.registry()), _geometry(geometry) {}
+  TechNonDefaultRuleStorage(TechRegistry& registry, DomainGeometryStorage& geometry) : _registry(registry.registry()), _geometry(geometry) {}
 
   [[nodiscard]] registry_type& registry() noexcept { return _registry; }
   [[nodiscard]] const registry_type& registry() const noexcept { return _registry; }
@@ -72,9 +72,10 @@ class TechNonDefaultRuleStorage
   [[nodiscard]] std::vector<TechNonDefaultRuleId> nonDefaultRulesForCutLayer(TechCutLayerId layer) const;
 
  private:
-  [[nodiscard]] TechViaMasterId createViaDefinition(TechNonDefaultRuleId owner, TechViaMaster master, TechViaGeometry geometry,
-                                                    TechGeneratedViaMaster* generated);
+  [[nodiscard]] TechViaMasterId createViaDefinition(TechNonDefaultRuleId owner, TechViaMaster master,
+                                                    TechViaMasterShapeInput shapes, TechGeneratedViaMaster* generated);
   [[nodiscard]] bool isViaReferencedOutsideOwner(TechViaMasterId via, TechNonDefaultRuleId owner) const;
+  void destroyViaGeometry(TechViaMasterId id) noexcept;
 
   void ensureRule(TechNonDefaultRuleId id) const;
   void ensureViaDefinition(TechViaMasterId id) const;
@@ -88,7 +89,7 @@ class TechNonDefaultRuleStorage
   void validateSameNetSpacingRule(TechNonDefaultRuleId owner, const TechNdrSameNetSpacingRule& rule) const;
 
   registry_type& _registry;
-  GeometryPool& _geometry;
+  DomainGeometryStorage& _geometry;
 };
 
 }  // namespace eccdb

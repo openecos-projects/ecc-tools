@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "geometry/GeometryHandle.h"
+#include "geometry/GeometryEntity.h"
 #include "library/common/LibraryGeometry.h"
 
 namespace eccdb {
@@ -30,7 +30,7 @@ struct LibraryObsLayerClause
   int32_t spacing = 0;
   int32_t design_rule_width = 0;
   int32_t path_width = 0;
-  GeometryHandle geometry;
+  std::vector<GeometryShapeId> geometry;
 };
 
 // Anonymous OBS sections of one MACRO are normalized into this component. VIA
@@ -38,7 +38,7 @@ struct LibraryObsLayerClause
 struct LibraryMasterObs
 {
   std::vector<LibraryObsLayerClause> layer_clauses;
-  std::vector<LibraryViaPlacement> vias;
+  std::vector<GeometryShapeId> vias;
 };
 
 }  // namespace eccdb

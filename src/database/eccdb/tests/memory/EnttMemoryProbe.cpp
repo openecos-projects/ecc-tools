@@ -19,9 +19,13 @@
 #include "design/fill/model/FillComponents.h"
 #include "design/floorplan/model/FloorplanComponents.h"
 #include "design/global/model/DesignGlobalComponents.h"
+#include "design/geometry/DesignGeometryComponents.h"
+#include "design/guide/model/GuideComponents.h"
 #include "design/netlist/model/NetlistComponents.h"
 #include "design/routing/component/RoutingComponents.h"
+#include "design/via/component/ViaComponents.h"
 #include "def/DefDesignImporter.h"
+#include "geometry/DomainGeometryComponents.h"
 #include "lef/LefLibraryImporter.h"
 #include "lef/LefTechImporter.h"
 #include "library/LibraryStore.h"
@@ -67,6 +71,9 @@ struct MemoryBreakdown
 {
   uint64_t component_payload_capacity_bytes = 0;
   uint64_t packed_entity_capacity_estimate_bytes = 0;
+  // EnTT exposes the sparse-set extent, not its private sparse-page pointer
+  // table. This is therefore an upper-bound estimate of sparse entity slots.
+  uint64_t sparse_entity_extent_estimate_bytes = 0;
   uint64_t wire_component_capacity_bytes = 0;
   uint64_t instance_component_capacity_bytes = 0;
   uint64_t instance_pin_component_capacity_bytes = 0;
@@ -81,6 +88,8 @@ struct MemoryBreakdown
   uint64_t instance_term_pointer_table_capacity = 0;
   uint64_t instance_term_pointer_table_capacity_bytes = 0;
   uint64_t net_component_capacity_bytes = 0;
+  uint64_t geometry_bounds_count = 0;
+  uint64_t geometry_bounds_component_capacity_bytes = 0;
   uint64_t route_shape_count = 0;
   uint64_t wire_shape_id_capacity_bytes = 0;
   uint64_t wire_shape_id_buffer_count = 0;
@@ -226,25 +235,36 @@ uint64_t dynamicStringCapacityBytes(const std::string& value)
   return data >= object && data < object + sizeof(value) ? 0u : static_cast<uint64_t>(value.capacity()) + 1u;
 }
 
-template <typename Component>
-uint64_t componentCapacity(const DesignRegistry::registry_type& registry)
+template <typename Component, typename Registry>
+uint64_t componentCapacity(const Registry& registry)
 {
-  const auto* storage = registry.storage<Component>();
+  const auto* storage = registry.template storage<Component>();
   return storage == nullptr ? 0u : static_cast<uint64_t>(storage->capacity());
 }
 
-template <typename Component>
-void addComponentStorage(const DesignRegistry::registry_type& registry, MemoryBreakdown& result)
+template <typename Component, typename Registry>
+void addComponentStorage(const Registry& registry, MemoryBreakdown& result)
 {
-  const auto capacity = componentCapacity<Component>(registry);
+  const auto* storage = registry.template storage<Component>();
+  if (storage == nullptr) {
+    return;
+  }
+
+  const auto capacity = static_cast<uint64_t>(storage->capacity());
+  using Entity = typename Registry::entity_type;
   result.component_payload_capacity_bytes += capacity * sizeof(Component);
-  result.packed_entity_capacity_estimate_bytes += capacity * sizeof(DesignEntity);
+  // EnTT does not expose the packed entity vector capacity separately from a
+  // paged component storage. Using the component page capacity keeps this
+  // diagnostic comparable across the design and geometry registries.
+  result.packed_entity_capacity_estimate_bytes += capacity * sizeof(Entity);
+  result.sparse_entity_extent_estimate_bytes += static_cast<uint64_t>(storage->extent()) * sizeof(Entity);
 }
 
 MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in_use_bytes)
 {
   MemoryBreakdown result;
   const auto& registry = design.designRegistry().registry();
+  const auto& geometry_registry = design.geometryRegistry().registry();
 
   result.wire_component_capacity_bytes = componentCapacity<DesignWire>(registry) * sizeof(DesignWire);
   result.instance_component_capacity_bytes = componentCapacity<DesignInstance>(registry) * sizeof(DesignInstance);
@@ -269,13 +289,39 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   addComponentStorage<DesignVia>(registry, result);
   addComponentStorage<DesignNonDefaultRule>(registry, result);
   addComponentStorage<DesignWire>(registry, result);
-  addComponentStorage<DesignRouteShape>(registry, result);
-  addComponentStorage<DesignRouteShapeAttributes>(registry, result);
   addComponentStorage<DesignNetGeometry>(registry, result);
+  addComponentStorage<DesignNetRouteGuides>(registry, result);
+  addComponentStorage<DesignNetTrackAssignments>(registry, result);
   addComponentStorage<DesignRegion>(registry, result);
   addComponentStorage<DesignGroup>(registry, result);
   addComponentStorage<DesignBlockage>(registry, result);
   addComponentStorage<DesignFill>(registry, result);
+
+  // Geometry is in an independent EnTT registry. Count every canonical
+  // component store here, rather than treating its component objects as
+  // nested vectors under Wire or Net.
+  addComponentStorage<GeometryShape>(geometry_registry, result);
+  result.geometry_bounds_count = geometry_registry.storage<GeometryBounds>() == nullptr
+                                     ? 0u
+                                     : geometry_registry.storage<GeometryBounds>()->size();
+  result.geometry_bounds_component_capacity_bytes
+      = componentCapacity<GeometryBounds>(geometry_registry) * sizeof(GeometryBounds);
+  addComponentStorage<GeometryBounds>(geometry_registry, result);
+  addComponentStorage<DesignRouteShape>(geometry_registry, result);
+  addComponentStorage<DesignRouteShapeAttributes>(geometry_registry, result);
+  addComponentStorage<DesignGeometryRectangle>(geometry_registry, result);
+  addComponentStorage<DesignGeometryPolygon>(geometry_registry, result);
+  addComponentStorage<DesignGeometryNetVia>(geometry_registry, result);
+  addComponentStorage<GeometryRectangle>(geometry_registry, result);
+  addComponentStorage<GeometryPolygon>(geometry_registry, result);
+  addComponentStorage<GeometryBoundary>(geometry_registry, result);
+  addComponentStorage<DesignPinRectangle>(geometry_registry, result);
+  addComponentStorage<DesignPinPolygon>(geometry_registry, result);
+  addComponentStorage<DesignPinVia>(geometry_registry, result);
+  addComponentStorage<DesignViaRectangle>(geometry_registry, result);
+  addComponentStorage<DesignViaPolygon>(geometry_registry, result);
+  addComponentStorage<DesignRouteGuide>(geometry_registry, result);
+  addComponentStorage<DesignTrackAssignmentShape>(geometry_registry, result);
 
   for (const auto entity : registry.view<const DesignWire>()) {
     const auto& wire = registry.get<const DesignWire>(entity);
@@ -332,7 +378,7 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   for (const auto entity : registry.view<const DesignInstance>()) {
     const auto& instance = registry.get<const DesignInstance>(entity);
     result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(instance.name);
-    result.netlist_nested_capacity_bytes += instance.region_bounds.capacity() * sizeof(Rect);
+    result.netlist_nested_capacity_bytes += instance.region_bounds.capacity() * sizeof(GeometryShapeId);
   }
   for (const auto entity : registry.view<const DesignInstancePins>()) {
     const auto& pins = registry.get<const DesignInstancePins>(entity);
@@ -374,12 +420,9 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   }
   for (const auto entity : registry.view<const DesignBlockPin>()) {
     const auto& port = registry.get<const DesignBlockPin>(entity);
-    result.netlist_nested_capacity_bytes += port.rectangles.capacity() * sizeof(DesignPinRectangle);
-    result.netlist_nested_capacity_bytes += port.polygons.capacity() * sizeof(DesignPinPolygon);
-    result.netlist_nested_capacity_bytes += port.vias.capacity() * sizeof(DesignPinVia);
-    for (const auto& polygon : port.polygons) {
-      result.netlist_nested_capacity_bytes += polygon.points.capacity() * sizeof(Point);
-    }
+    result.netlist_nested_capacity_bytes += port.rectangles.capacity() * sizeof(GeometryShapeId);
+    result.netlist_nested_capacity_bytes += port.polygons.capacity() * sizeof(GeometryShapeId);
+    result.netlist_nested_capacity_bytes += port.vias.capacity() * sizeof(GeometryShapeId);
   }
   for (const auto entity : registry.view<const DesignNet>()) {
     result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(registry.get<const DesignNet>(entity).name);
@@ -395,11 +438,8 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
     result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(via.name);
     result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(via.pattern_name);
     result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(via.generated.cut_pattern);
-    result.routing_other_nested_capacity_bytes += via.rectangles.capacity() * sizeof(DesignViaRectangle);
-    result.routing_other_nested_capacity_bytes += via.polygons.capacity() * sizeof(DesignViaPolygon);
-    for (const auto& polygon : via.polygons) {
-      result.routing_other_nested_capacity_bytes += polygon.points.capacity() * sizeof(Point);
-    }
+    result.routing_other_nested_capacity_bytes += via.rectangles.capacity() * sizeof(GeometryShapeId);
+    result.routing_other_nested_capacity_bytes += via.polygons.capacity() * sizeof(GeometryShapeId);
   }
   for (const auto entity : registry.view<const DesignNonDefaultRule>()) {
     const auto& rule = registry.get<const DesignNonDefaultRule>(entity);
@@ -416,23 +456,49 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   }
   for (const auto entity : registry.view<const DesignNetGeometry>()) {
     const auto& geometry = registry.get<const DesignNetGeometry>(entity);
-    result.routing_other_nested_capacity_bytes += geometry.rectangles.capacity() * sizeof(DesignNetRectangle);
-    result.routing_other_nested_capacity_bytes += geometry.polygons.capacity() * sizeof(DesignNetPolygon);
-    result.routing_other_nested_capacity_bytes += geometry.vias.capacity() * sizeof(DesignNetVia);
-    for (const auto& rectangle : geometry.rectangles) {
-      result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(rectangle.shield_net);
-      result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(rectangle.shape);
-    }
-    for (const auto& polygon : geometry.polygons) {
-      result.routing_other_nested_capacity_bytes += polygon.points.capacity() * sizeof(Point);
-      result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(polygon.shield_net);
-      result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(polygon.shape);
-    }
-    for (const auto& via : geometry.vias) {
-      result.routing_other_nested_capacity_bytes += via.origins.capacity() * sizeof(Point);
-      result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(via.shield_net);
-      result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(via.shape);
-    }
+    result.routing_other_nested_capacity_bytes += geometry.shapes.capacity() * sizeof(GeometryShapeId);
+  }
+  for (const auto entity : registry.view<const DesignNetRouteGuides>()) {
+    result.routing_other_nested_capacity_bytes
+        += registry.get<const DesignNetRouteGuides>(entity).values.capacity() * sizeof(GeometryShapeId);
+  }
+  for (const auto entity : registry.view<const DesignNetTrackAssignments>()) {
+    result.routing_other_nested_capacity_bytes
+        += registry.get<const DesignNetTrackAssignments>(entity).values.capacity() * sizeof(GeometryShapeId);
+  }
+
+  // Route and SPECIALNET geometry payloads live in the design's independent
+  // GeometryRegistry. Their component pages and entity indexes were counted
+  // above. Keep only true nested allocations here. Route attribute strings
+  // are already included by routingStatistics().
+  for (const auto entity : geometry_registry.view<const DesignGeometryRectangle>()) {
+    const auto& rectangle = geometry_registry.get<const DesignGeometryRectangle>(entity);
+    result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(rectangle.shield_net);
+    result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(rectangle.shape);
+  }
+  for (const auto entity : geometry_registry.view<const DesignGeometryPolygon>()) {
+    const auto& polygon = geometry_registry.get<const DesignGeometryPolygon>(entity);
+    result.routing_other_nested_capacity_bytes += polygon.points.capacity() * sizeof(Point);
+    result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(polygon.shield_net);
+    result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(polygon.shape);
+  }
+  for (const auto entity : geometry_registry.view<const DesignGeometryNetVia>()) {
+    const auto& via = geometry_registry.get<const DesignGeometryNetVia>(entity);
+    result.routing_other_nested_capacity_bytes += via.origins.capacity() * sizeof(Point);
+    result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(via.shield_net);
+    result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(via.shape);
+  }
+  for (const auto entity : geometry_registry.view<const GeometryPolygon>()) {
+    result.other_nested_capacity_bytes += geometry_registry.get<const GeometryPolygon>(entity).points.capacity() * sizeof(Point);
+  }
+  for (const auto entity : geometry_registry.view<const GeometryBoundary>()) {
+    result.other_nested_capacity_bytes += geometry_registry.get<const GeometryBoundary>(entity).points.capacity() * sizeof(Point);
+  }
+  for (const auto entity : geometry_registry.view<const DesignPinPolygon>()) {
+    result.netlist_nested_capacity_bytes += geometry_registry.get<const DesignPinPolygon>(entity).points.capacity() * sizeof(Point);
+  }
+  for (const auto entity : geometry_registry.view<const DesignViaPolygon>()) {
+    result.routing_other_nested_capacity_bytes += geometry_registry.get<const DesignViaPolygon>(entity).points.capacity() * sizeof(Point);
   }
 
   for (const auto entity : registry.view<const DesignRow>()) {
@@ -450,7 +516,7 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   for (const auto entity : registry.view<const DesignRegion>()) {
     const auto& region = registry.get<const DesignRegion>(entity);
     result.dynamic_string_capacity_estimate_bytes += dynamicStringCapacityBytes(region.name);
-    result.other_nested_capacity_bytes += region.rectangles.capacity() * sizeof(Rect);
+    result.other_nested_capacity_bytes += region.rectangles.capacity() * sizeof(GeometryShapeId);
   }
   for (const auto entity : registry.view<const DesignGroup>()) {
     const auto& group = registry.get<const DesignGroup>(entity);
@@ -459,18 +525,16 @@ MemoryBreakdown memoryBreakdown(const DesignStore& design, uint64_t allocator_in
   }
   for (const auto entity : registry.view<const DesignBlockage>()) {
     const auto& blockage = registry.get<const DesignBlockage>(entity);
-    result.other_nested_capacity_bytes += blockage.rectangles.capacity() * sizeof(Rect);
-    result.other_nested_capacity_bytes += blockage.polygons.capacity() * sizeof(std::vector<Point>);
-    for (const auto& polygon : blockage.polygons) {
-      result.other_nested_capacity_bytes += polygon.capacity() * sizeof(Point);
-    }
+    result.other_nested_capacity_bytes += blockage.rectangles.capacity() * sizeof(GeometryShapeId);
+    result.other_nested_capacity_bytes += blockage.polygons.capacity() * sizeof(GeometryShapeId);
   }
   for (const auto entity : registry.view<const DesignFill>()) {
-    result.other_nested_capacity_bytes += registry.get<const DesignFill>(entity).rectangles.capacity() * sizeof(Rect);
+    result.other_nested_capacity_bytes += registry.get<const DesignFill>(entity).rectangles.capacity() * sizeof(GeometryShapeId);
   }
 
   result.attributed_capacity_bytes
-      = result.component_payload_capacity_bytes + result.packed_entity_capacity_estimate_bytes + result.wire_shape_id_capacity_bytes + result.wire_path_capacity_bytes
+      = result.component_payload_capacity_bytes + result.packed_entity_capacity_estimate_bytes
+        + result.sparse_entity_extent_estimate_bytes + result.wire_shape_id_capacity_bytes + result.wire_path_capacity_bytes
         + result.wire_path_extra_capacity_bytes + result.wire_point_capacity_bytes + result.wire_via_capacity_bytes
         + result.wire_point_extra_capacity_bytes + result.wire_via_extra_capacity_bytes + result.wire_rectangle_capacity_bytes
         + result.netlist_nested_capacity_bytes + result.routing_other_nested_capacity_bytes + result.other_nested_capacity_bytes
@@ -507,6 +571,7 @@ void printMemoryBreakdown(const MemoryBreakdown& value)
 {
   std::cout << "{\"component_payload_capacity_bytes\":" << value.component_payload_capacity_bytes
             << ",\"packed_entity_capacity_estimate_bytes\":" << value.packed_entity_capacity_estimate_bytes
+            << ",\"sparse_entity_extent_estimate_bytes\":" << value.sparse_entity_extent_estimate_bytes
             << ",\"wire_component_capacity_bytes\":" << value.wire_component_capacity_bytes
             << ",\"instance_component_capacity_bytes\":" << value.instance_component_capacity_bytes
             << ",\"instance_pin_component_capacity_bytes\":" << value.instance_pin_component_capacity_bytes
@@ -521,6 +586,9 @@ void printMemoryBreakdown(const MemoryBreakdown& value)
             << ",\"instance_term_pointer_table_capacity\":" << value.instance_term_pointer_table_capacity
             << ",\"instance_term_pointer_table_capacity_bytes\":" << value.instance_term_pointer_table_capacity_bytes
             << ",\"net_component_capacity_bytes\":" << value.net_component_capacity_bytes
+            << ",\"geometry_bounds_count\":" << value.geometry_bounds_count
+            << ",\"geometry_bounds_component_capacity_bytes\":"
+            << value.geometry_bounds_component_capacity_bytes
             << ",\"route_shape_count\":" << value.route_shape_count
             << ",\"wire_shape_id_capacity_bytes\":" << value.wire_shape_id_capacity_bytes
             << ",\"wire_shape_id_buffer_count\":" << value.wire_shape_id_buffer_count

@@ -1,10 +1,12 @@
 #pragma once
 
 #include <string_view>
+#include <span>
 #include <vector>
 
 #include "design/DesignRegistry.h"
 #include "design/floorplan/model/FloorplanComponents.h"
+#include "geometry/GeometryRegistry.h"
 
 namespace eccdb {
 
@@ -20,7 +22,7 @@ class DesignFloorplanStorage
 
   DesignFloorplanStorage(DesignRegistry& design_registry, const TechRegistry& tech_registry, const LibraryRegistry& library_registry,
                          DesignRootId root)
-      : _registry(design_registry.registry()), _tech_registry(tech_registry), _library_registry(library_registry), _root(root)
+      : _design_registry(design_registry), _registry(design_registry.registry()), _tech_registry(tech_registry), _library_registry(library_registry), _root(root)
   {
   }
 
@@ -56,8 +58,11 @@ class DesignFloorplanStorage
 
   [[nodiscard]] bool hasCoreArea() const noexcept;
   [[nodiscard]] const DesignCoreArea& coreArea() const;
-  void setCoreArea(DesignCoreArea area);
+  [[nodiscard]] std::span<const Point> coreBoundary() const;
+  void setCoreArea(DesignCoreAreaInput area);
   [[nodiscard]] Rect coreBounds() const;
+  [[nodiscard]] GeometryRegistry& geometryRegistry() noexcept { return _design_registry.geometryRegistry(); }
+  [[nodiscard]] const GeometryRegistry& geometryRegistry() const noexcept { return _design_registry.geometryRegistry(); }
   [[nodiscard]] bool referencesSite(LibrarySiteId id) const;
   [[nodiscard]] uint32_t rowCount() const;
   [[nodiscard]] uint32_t trackGridCount() const;
@@ -74,6 +79,7 @@ class DesignFloorplanStorage
   void ensureTrackGrid(DesignTrackGridId id) const;
   void ensureGCellGrid(DesignGCellGridId id) const;
 
+  DesignRegistry& _design_registry;
   registry_type& _registry;
   const TechRegistry& _tech_registry;
   const LibraryRegistry& _library_registry;

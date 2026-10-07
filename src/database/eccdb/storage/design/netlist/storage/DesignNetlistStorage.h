@@ -14,6 +14,7 @@
 
 #include "design/DesignRegistry.h"
 #include "design/netlist/model/NetlistComponents.h"
+#include "geometry/GeometryRegistry.h"
 #include "index/NameHash.h"
 
 namespace eccdb {
@@ -27,12 +28,12 @@ class DesignNetlistStorage
   using registry_type = DesignRegistry::registry_type;
 
   DesignNetlistStorage(DesignRegistry& design_registry, const TechRegistry& tech_registry, const LibraryRegistry& library_registry)
-      : _registry(design_registry.registry()), _tech_registry(tech_registry), _library_registry(library_registry)
+      : _design_registry(design_registry), _registry(design_registry.registry()), _tech_registry(tech_registry), _library_registry(library_registry)
   {
   }
 
-  [[nodiscard]] DesignInstanceId createInstance(DesignInstance instance);
-  void updateInstance(DesignInstanceId id, DesignInstance instance);
+  [[nodiscard]] DesignInstanceId createInstance(DesignInstance instance, std::span<const Rect> region_bounds = {});
+  void updateInstance(DesignInstanceId id, DesignInstance instance, std::span<const Rect> region_bounds = {});
   [[nodiscard]] bool destroyInstance(DesignInstanceId id);
   [[nodiscard]] bool contains(DesignInstanceId id) const;
   [[nodiscard]] DesignInstanceId findInstance(std::string_view name) const;
@@ -111,7 +112,7 @@ class DesignNetlistStorage
     forEachInstancePin(std::forward<Function>(function));
   }
 
-  [[nodiscard]] DesignIoPinId createIoPin(DesignIoPin pin, std::vector<DesignBlockPin> pins = {});
+  [[nodiscard]] DesignIoPinId createIoPin(DesignIoPin pin, std::vector<DesignBlockPinInput> pins = {});
   void updateIoPin(DesignIoPinId id, DesignIoPin pin);
   [[nodiscard]] bool destroyIoPin(DesignIoPinId id);
   [[nodiscard]] bool contains(DesignIoPinId id) const;
@@ -123,7 +124,7 @@ class DesignNetlistStorage
 
   // OpenDB-aligned dbBTerm spellings. The legacy IoPin API remains a
   // source-compatible view of the same block-term storage.
-  [[nodiscard]] DesignBlockTermId createBlockTerm(DesignBlockTerm term, std::vector<DesignBlockPin> pins = {})
+  [[nodiscard]] DesignBlockTermId createBlockTerm(DesignBlockTerm term, std::vector<DesignBlockPinInput> pins = {})
   {
     return createIoPin(std::move(term), std::move(pins));
   }
@@ -153,10 +154,24 @@ class DesignNetlistStorage
 
   [[nodiscard]] bool contains(DesignBlockPinId id) const;
   [[nodiscard]] const DesignBlockPin& blockPin(DesignBlockPinId id) const;
+  [[nodiscard]] GeometryRegistry& geometryRegistry() noexcept { return _design_registry.geometryRegistry(); }
+  [[nodiscard]] const GeometryRegistry& geometryRegistry() const noexcept { return _design_registry.geometryRegistry(); }
+  [[nodiscard]] const DesignPinRectangle& blockPinRectangle(GeometryShapeId id) const noexcept
+  {
+    return geometryRegistry().get<const DesignPinRectangle>(id);
+  }
+  [[nodiscard]] const DesignPinPolygon& blockPinPolygon(GeometryShapeId id) const noexcept
+  {
+    return geometryRegistry().get<const DesignPinPolygon>(id);
+  }
+  [[nodiscard]] const DesignPinVia& blockPinVia(GeometryShapeId id) const noexcept
+  {
+    return geometryRegistry().get<const DesignPinVia>(id);
+  }
   // The returned view is invalidated when this block term's Pin storage changes.
   [[nodiscard]] std::span<const DesignBlockPinId> blockPins(DesignBlockTermId term) const;
-  [[nodiscard]] DesignBlockPinId createBlockPin(DesignBlockTermId term, DesignBlockPin pin);
-  void updateBlockPin(DesignBlockPinId id, DesignBlockPin pin);
+  [[nodiscard]] DesignBlockPinId createBlockPin(DesignBlockTermId term, DesignBlockPinInput pin);
+  void updateBlockPin(DesignBlockPinId id, DesignBlockPinInput pin);
   [[nodiscard]] bool destroyBlockPin(DesignBlockPinId id);
 
   // Callbacks must not mutate block-pin storage while it is being visited.
@@ -246,10 +261,13 @@ class DesignNetlistStorage
 
  private:
   [[nodiscard]] DesignNetId createNet(DesignNet net, bool special);
-  void validateInstance(const DesignInstance& instance, DesignInstanceId ignored = {}) const;
+  void validateInstance(const DesignInstance& instance, std::span<const Rect> region_bounds, DesignInstanceId ignored = {}) const;
   void validateIoPin(const DesignIoPin& pin, DesignIoPinId ignored = {}) const;
-  void validateBlockPin(const DesignBlockPin& pin, DesignBlockPinId ignored = {}) const;
-  void validateBlockPinRelation(DesignBlockTermId term, const DesignBlockPin& pin, DesignBlockPinId ignored = {}) const;
+  void validateBlockPin(const DesignBlockPinInput& pin) const;
+  void validateBlockPinRelation(DesignBlockTermId term, const DesignBlockPinInput& pin, DesignBlockPinId ignored = {}) const;
+  [[nodiscard]] DesignBlockPin materializeBlockPin(DesignBlockPinId id, DesignBlockTermId term, DesignBlockPinInput pin);
+  void destroyBlockPinGeometry(const DesignBlockPin& pin) noexcept;
+  [[nodiscard]] std::vector<GeometryShapeId> materializeInstanceRegionBounds(DesignInstanceId id, std::span<const Rect> region_bounds);
   void validateNet(const DesignNet& net, bool special, DesignNetId ignored = {}) const;
   void validateNetOptions(DesignNetId net, const DesignNetOptions& options) const;
   [[nodiscard]] bool instanceNameInUse(std::string_view name, DesignInstanceId ignored = {}) const;
@@ -263,6 +281,7 @@ class DesignNetlistStorage
   [[nodiscard]] DesignInstancePin& uncheckedInstancePin(DesignInstancePinId id) noexcept;
   [[nodiscard]] const DesignInstancePin& uncheckedInstancePin(DesignInstancePinId id) const noexcept;
 
+  DesignRegistry& _design_registry;
   registry_type& _registry;
   const TechRegistry& _tech_registry;
   const LibraryRegistry& _library_registry;

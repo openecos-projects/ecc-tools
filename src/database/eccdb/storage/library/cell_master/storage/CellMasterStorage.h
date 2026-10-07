@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-#include "geometry/GeometryPool.h"
+#include "geometry/DomainGeometryStorage.h"
 #include "library/LibraryRegistry.h"
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/cell_master/model/MasterObsComponents.h"
@@ -20,7 +20,7 @@ class LibraryCellMasterStorage
  public:
   using registry_type = LibraryRegistry::registry_type;
 
-  LibraryCellMasterStorage(LibraryRegistry& registry, const TechRegistry& tech_registry, GeometryPool& geometry)
+  LibraryCellMasterStorage(LibraryRegistry& registry, const TechRegistry& tech_registry, DomainGeometryStorage& geometry)
       : _registry(registry.registry()), _tech_registry(tech_registry), _geometry(geometry)
   {
   }
@@ -50,11 +50,12 @@ class LibraryCellMasterStorage
   void validateCellMaster(const LibraryCellMaster& master, LibraryCellMasterId ignored = {}) const;
   void validateObs(const LibraryMasterObsInput& obs) const;
   void validateObsLayerClause(const LibraryObsLayerClauseInput& clause) const;
-  [[nodiscard]] LibraryMasterObs materializeObs(LibraryMasterObsInput obs, bool validate_geometry);
+  [[nodiscard]] LibraryMasterObs materializeObs(LibraryCellMasterId owner, LibraryMasterObsInput obs, bool validate_geometry);
+  void destroyGeometry(const LibraryMasterObs& obs) noexcept;
 
   registry_type& _registry;
   const TechRegistry& _tech_registry;
-  GeometryPool& _geometry;
+  DomainGeometryStorage& _geometry;
 };
 
 }  // namespace eccdb

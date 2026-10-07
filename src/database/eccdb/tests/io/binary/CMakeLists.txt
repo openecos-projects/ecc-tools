@@ -25,7 +25,7 @@ target_link_libraries(eccdb_binary_database_archive_test
 include(GoogleTest)
 gtest_discover_tests(eccdb_binary_database_archive_test)
 
-if(TARGET def AND TARGET eccdb_def_export)
+if(TARGET eccdb_def_import AND TARGET eccdb_def_export)
   add_executable(eccdb_design_binary_database_archive_test
     DesignBinaryDatabaseArchiveTest.cpp
   )

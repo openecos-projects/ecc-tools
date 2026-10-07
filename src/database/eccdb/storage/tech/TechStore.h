@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-#include "geometry/GeometryPool.h"
+#include "geometry/DomainGeometryStorage.h"
 #include "tech/TechRegistry.h"
 #include "tech/cut_layer/storage/CutLayerStorage.h"
 #include "tech/global/storage/TechGlobalStorage.h"
@@ -20,11 +20,12 @@
 
 namespace eccdb {
 
+using TechGeometryStorage = DomainGeometryStorage;
+
 class BinaryDatabaseImporter;
 
 struct TechStoreOptions
 {
-  GeometryPoolOptions geometry;
 };
 
 // The EnTT-first technology root. Every complete Tech object is allocated in
@@ -37,8 +38,10 @@ class TechStore
 
   [[nodiscard]] TechRegistry& techRegistry() noexcept { return _registry; }
   [[nodiscard]] const TechRegistry& techRegistry() const noexcept { return _registry; }
-  [[nodiscard]] GeometryPool& geometryPool() noexcept { return _geometry; }
-  [[nodiscard]] const GeometryPool& geometryPool() const noexcept { return _geometry; }
+  [[nodiscard]] TechGeometryStorage& geometryStorage() noexcept { return _geometry; }
+  [[nodiscard]] const TechGeometryStorage& geometryStorage() const noexcept { return _geometry; }
+  [[nodiscard]] GeometryRegistry& geometryRegistry() noexcept { return _geometry.geometryRegistry(); }
+  [[nodiscard]] const GeometryRegistry& geometryRegistry() const noexcept { return _geometry.geometryRegistry(); }
 
   // TechRoot owns singleton LEF statements through TechGlobalStorage.
   [[nodiscard]] TechRootId techRootId() const noexcept { return _tech_root; }
@@ -91,14 +94,14 @@ class TechStore
  private:
   friend class BinaryDatabaseImporter;
 
-  void resetForBinaryLoad(GeometryPoolOptions options);
+  void resetForBinaryLoad();
   void bindBinaryLoadedRoot();
   void validateNewLayerInfo(const TechLayerInfo& info) const;
   void appendLayer(TechLayerId id);
   void ensureLayer(TechLayerId id) const;
 
   TechRegistry _registry;
-  GeometryPool _geometry;
+  TechGeometryStorage _geometry;
   TechRootId _tech_root;
   TechGlobalStorage _globals;
   TechRoutingLayerStorage _routing_layers;

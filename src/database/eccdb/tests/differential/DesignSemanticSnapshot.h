@@ -17,10 +17,12 @@
 #include "design/constraint/model/ConstraintComponents.h"
 #include "design/fill/model/FillComponents.h"
 #include "design/floorplan/model/FloorplanComponents.h"
+#include "design/geometry/DesignGeometryComponents.h"
 #include "design/netlist/model/NetlistComponents.h"
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/routing/component/RoutingComponents.h"
 #include "design/via/component/ViaComponents.h"
+#include "geometry/DomainGeometryComponents.h"
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/master_term/model/MasterTermComponents.h"
 #include "library/site/model/SiteComponents.h"
@@ -119,6 +121,22 @@ inline std::vector<std::string> rectangleKeys(const std::vector<Rect>& rectangle
     result.push_back(rectangleKey(rectangle));
   }
   return result;
+}
+
+inline std::vector<Rect> resolveRectangles(const DesignStore& design, const std::vector<GeometryShapeId>& ids)
+{
+  std::vector<Rect> result;
+  result.reserve(ids.size());
+  const auto& geometry = design.geometryRegistry();
+  for (const auto id : ids) {
+    result.push_back(geometry.get<const GeometryRectangle>(id).rectangle);
+  }
+  return result;
+}
+
+inline std::vector<Point> resolvePolygon(const DesignStore& design, GeometryShapeId id)
+{
+  return design.geometryRegistry().get<const GeometryPolygon>(id).points;
 }
 
 template <typename LayerId>
@@ -285,7 +303,8 @@ inline std::string globalKey(const DesignStore& design)
   key.signedValue(info.database_units_per_micron);
   key.text(info.divider_character);
   key.text(info.bus_bit_characters);
-  key.points(design.globalStorage().dieArea().boundary);
+  const auto boundary = design.globalStorage().dieBoundary();
+  key.points(std::vector<Point>{boundary.begin(), boundary.end()});
   return key.str();
 }
 
@@ -375,7 +394,7 @@ inline std::vector<std::string> instanceKeys(const DesignStore& design)
     key.unsignedValue(instance.flags);
     key.signedValue(instance.weight);
     key.text(regionName(design, instance.region));
-    appendKeys(key, rectangleKeys(instance.region_bounds));
+    appendKeys(key, rectangleKeys(resolveRectangles(design, instance.region_bounds)));
     key.signedValue(instance.halo.left);
     key.signedValue(instance.halo.bottom);
     key.signedValue(instance.halo.right);
@@ -458,14 +477,15 @@ inline std::string blockPinKey(const DesignStore& design, const DesignBlockPin& 
   key.unsignedValue(static_cast<uint8_t>(pin.placement_status));
   std::vector<std::string> primitives;
   primitives.reserve(pin.rectangles.size() + pin.polygons.size() + pin.vias.size());
-  for (const auto& rectangle : pin.rectangles) {
-    primitives.push_back(pinRectangleKey(design, rectangle, pin));
+  const auto& storage = design.netlistStorage();
+  for (const auto id : pin.rectangles) {
+    primitives.push_back(pinRectangleKey(design, storage.blockPinRectangle(id), pin));
   }
-  for (const auto& polygon : pin.polygons) {
-    primitives.push_back(pinPolygonKey(design, polygon, pin));
+  for (const auto id : pin.polygons) {
+    primitives.push_back(pinPolygonKey(design, storage.blockPinPolygon(id), pin));
   }
-  for (const auto& via : pin.vias) {
-    primitives.push_back(pinViaKey(design, via, pin));
+  for (const auto id : pin.vias) {
+    primitives.push_back(pinViaKey(design, storage.blockPinVia(id), pin));
   }
   if (primitives.empty() && (pin.flags & DesignIoPinPortFlag::kHasPlacement) != 0u) {
     SemanticKey location;
@@ -534,11 +554,12 @@ inline std::vector<std::string> viaKeys(const DesignStore& design)
     key.text(via.pattern_name);
     std::vector<std::string> geometry;
     geometry.reserve(via.rectangles.size() + via.polygons.size());
-    for (const auto& rectangle : via.rectangles) {
-      geometry.push_back(viaRectangleKey(design, rectangle));
+    const auto& geometry_registry = design.geometryRegistry();
+    for (const auto shape_id : via.rectangles) {
+      geometry.push_back(viaRectangleKey(design, geometry_registry.get<const DesignViaRectangle>(shape_id)));
     }
-    for (const auto& polygon : via.polygons) {
-      geometry.push_back(viaPolygonKey(design, polygon));
+    for (const auto shape_id : via.polygons) {
+      geometry.push_back(viaPolygonKey(design, geometry_registry.get<const DesignViaPolygon>(shape_id)));
     }
     appendKeys(key, std::move(geometry));
 
@@ -711,52 +732,48 @@ inline std::vector<std::string> wirePrimitiveKeys(const DesignStore& design, Des
 
 inline std::vector<std::string> netGeometryKeys(const DesignStore& design, DesignNetId id)
 {
-  const auto* geometry = design.routingStorage().netGeometry(id);
-  if (geometry == nullptr) {
-    return {};
-  }
-
   std::vector<std::string> result;
-  result.reserve(geometry->rectangles.size() + geometry->polygons.size() + geometry->vias.size());
-  for (const auto& rectangle : geometry->rectangles) {
-    SemanticKey key;
-    key.text("rectangle");
-    key.text(layerName(design, rectangle.layer));
-    key.rectangle(rectangle.rectangle);
-    key.unsignedValue(static_cast<uint8_t>(rectangle.route_status));
-    key.unsignedValue(rectangle.flags);
-    key.unsignedValue(rectangle.mask);
-    key.text(rectangle.shield_net);
-    key.text(rectangle.shape);
-    result.push_back(key.str());
-  }
-  for (const auto& polygon : geometry->polygons) {
-    SemanticKey key;
-    key.text("polygon");
-    key.text(layerName(design, polygon.layer));
-    key.points(polygon.points);
-    key.unsignedValue(static_cast<uint8_t>(polygon.route_status));
-    key.unsignedValue(polygon.flags);
-    key.unsignedValue(polygon.mask);
-    key.text(polygon.shield_net);
-    key.text(polygon.shape);
-    result.push_back(key.str());
-  }
-  for (const auto& via : geometry->vias) {
-    for (const auto origin : via.origins) {
+  const auto& geometry_storage = design.geometryStorage();
+  for (const auto shape_id : geometry_storage.netShapeIds(id)) {
+    const auto view = geometry_storage.shape(shape_id);
+    if (const auto* rectangle = std::get_if<const DesignGeometryRectangle*>(&view.payload)) {
+      SemanticKey key;
+      key.text("rectangle");
+      key.text(layerName(design, (*rectangle)->layer));
+      key.rectangle((*rectangle)->rectangle);
+      key.unsignedValue(static_cast<uint8_t>((*rectangle)->route_status));
+      key.unsignedValue((*rectangle)->flags);
+      key.unsignedValue((*rectangle)->mask);
+      key.text((*rectangle)->shield_net);
+      key.text((*rectangle)->shape);
+      result.push_back(key.str());
+    } else if (const auto* polygon = std::get_if<const DesignGeometryPolygon*>(&view.payload)) {
+      SemanticKey key;
+      key.text("polygon");
+      key.text(layerName(design, (*polygon)->layer));
+      key.points((*polygon)->points);
+      key.unsignedValue(static_cast<uint8_t>((*polygon)->route_status));
+      key.unsignedValue((*polygon)->flags);
+      key.unsignedValue((*polygon)->mask);
+      key.text((*polygon)->shield_net);
+      key.text((*polygon)->shape);
+      result.push_back(key.str());
+    } else if (const auto* via = std::get_if<const DesignGeometryNetVia*>(&view.payload)) {
+      for (const auto origin : (*via)->origins) {
       SemanticKey key;
       key.text("via");
-      key.text(viaName(design, via.tech_via, via.design_via));
-      key.unsignedValue(static_cast<uint8_t>(via.orientation));
-      key.unsignedValue(static_cast<uint8_t>(via.route_status));
-      key.unsignedValue(via.flags);
-      key.unsignedValue(via.top_mask);
-      key.unsignedValue(via.cut_mask);
-      key.unsignedValue(via.bottom_mask);
-      key.text(via.shield_net);
-      key.text(via.shape);
+      key.text(viaName(design, (*via)->tech_via, (*via)->design_via));
+      key.unsignedValue(static_cast<uint8_t>((*via)->orientation));
+      key.unsignedValue(static_cast<uint8_t>((*via)->route_status));
+      key.unsignedValue((*via)->flags);
+      key.unsignedValue((*via)->top_mask);
+      key.unsignedValue((*via)->cut_mask);
+      key.unsignedValue((*via)->bottom_mask);
+      key.text((*via)->shield_net);
+      key.text((*via)->shape);
       key.point(origin);
       result.push_back(key.str());
+      }
     }
   }
   sortKeys(result);
@@ -848,7 +865,7 @@ inline std::vector<std::string> regionKeys(const DesignStore& design)
     SemanticKey key;
     key.text(region.name);
     key.unsignedValue(static_cast<uint8_t>(region.type));
-    appendKeys(key, rectangleKeys(region.rectangles));
+    appendKeys(key, rectangleKeys(resolveRectangles(design, region.rectangles)));
     result.push_back(key.str());
   }
   sortKeys(result);
@@ -897,11 +914,11 @@ inline std::vector<std::string> blockageKeys(const DesignStore& design)
     key.signedValue(blockage.spacing);
     key.signedValue(blockage.design_rule_width);
     key.unsignedValue(blockage.mask);
-    appendKeys(key, rectangleKeys(blockage.rectangles));
+    appendKeys(key, rectangleKeys(resolveRectangles(design, blockage.rectangles)));
     std::vector<std::string> polygons;
     polygons.reserve(blockage.polygons.size());
-    for (const auto& polygon : blockage.polygons) {
-      polygons.push_back(polygonKey(polygon));
+    for (const auto shape_id : blockage.polygons) {
+      polygons.push_back(polygonKey(resolvePolygon(design, shape_id)));
     }
     appendKeys(key, std::move(polygons));
     result.push_back(key.str());
@@ -919,7 +936,7 @@ inline std::vector<std::string> fillKeys(const DesignStore& design)
     key.text(layerName(design, fill.layer));
     key.unsignedValue(fill.flags);
     key.unsignedValue(fill.mask);
-    appendKeys(key, rectangleKeys(fill.rectangles));
+    appendKeys(key, rectangleKeys(resolveRectangles(design, fill.rectangles)));
     result.push_back(key.str());
   }
   sortKeys(result);

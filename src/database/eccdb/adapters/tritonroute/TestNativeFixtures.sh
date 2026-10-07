@@ -4,7 +4,7 @@ set -euo pipefail
 adapter_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 workspace="$(git -C "${adapter_dir}" rev-parse --show-toplevel)"
 dependencies="${OPENROAD_DEPENDENCY_SOURCE:-${workspace}/../OpenROAD}"
-native_source="${OPENROAD_NATIVE_SOURCE:-${workspace}/build/openroad-native-eccdb-src}"
+native_source="${OPENROAD_NATIVE_SOURCE:-${workspace}/../OpenROAD-eccdb}"
 native_build="${OPENROAD_NATIVE_BUILD:-${workspace}/build/openroad-native-eccdb-build}"
 binary="${native_build}/src/drt/eccdbNativeRoute"
 fixture_dir="${adapter_dir}/tests"
@@ -79,6 +79,20 @@ run_fixture_imports() {
   assert_same "${results}/${name}-odb/placement.txt" "${results}/${name}-eccdb/placement.txt"
 }
 
+expect_import_rejected() {
+  local backend="$1"
+  local fixture="$2"
+  local output="$3"
+  local diagnostic="$4"
+  local log="${output}.log"
+  if "${binary}" --backend "${backend}" --lef "${lef}" --def "${fixture}" \
+      --import-only --output "${output}" >"${log}" 2>&1; then
+    fail "${backend} unexpectedly accepted ${fixture}"
+  fi
+  rg -Fq -- "${diagnostic}" "${log}" \
+    || fail "${backend} rejected ${fixture} without the expected diagnostic: ${diagnostic}"
+}
+
 orientations="${fixture_dir}/NativeOrientations.def"
 geometry="${fixture_dir}/NativeRouteGeometry.def"
 unsupported="${fixture_dir}/NativeRouteUnsupported.def"
@@ -102,7 +116,13 @@ assert_same "${results}/geometry-odb/design.txt" "${results}/geometry-eccdb/desi
 run_fixture_imports "${special}" special
 rg -q '^net "VDD" route ' "${results}/special-eccdb/snapshot.txt" \
   || fail "SPECIALNET fixture has no imported route geometry"
-run_fixture_imports "${unsupported}" virtual
+
+# frNet has no representation for EccDB VIRTUAL route points. This is a
+# deliberate current adapter boundary, not a geometry equivalence failure.
+run_import odb "${unsupported}" "${results}/virtual-odb"
+expect_import_rejected eccdb "${unsupported}" "${results}/virtual-eccdb" \
+  'DRT frNet cannot represent an EccDB VIRTUAL route point'
+echo "VIRTUAL route scope: OpenDB accepts the fixture; EccDB deliberately rejects frNet VIRTUAL route points."
 
 for fixture in orientations geometry; do
   for writer in odb eccdb; do
@@ -116,8 +136,6 @@ for fixture in orientations geometry; do
   done
 done
 echo "Geometry, orientation and placement snapshots match on all writer/reader round-trips."
-
-echo "Virtual route and its physical geometry import match."
 
 for backend in odb eccdb; do
   rejected="${results}/special-polygon-${backend}"

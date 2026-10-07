@@ -7,6 +7,7 @@
 
 #include "design/DesignRegistry.h"
 #include "design/guide/model/GuideComponents.h"
+#include "geometry/GeometryRegistry.h"
 
 namespace eccdb {
 
@@ -21,7 +22,10 @@ class DesignGuideStorage
   using registry_type = DesignRegistry::registry_type;
 
   DesignGuideStorage(DesignRegistry& design_registry, const TechRegistry& tech_registry)
-      : _registry(design_registry.registry()), _tech_registry(tech_registry)
+      : _design_registry(design_registry),
+        _registry(design_registry.registry()),
+        _geometry_registry(design_registry.geometryRegistry()),
+        _tech_registry(tech_registry)
   {
   }
 
@@ -30,14 +34,15 @@ class DesignGuideStorage
   [[nodiscard]] bool hasGuides(DesignNetId net) const;
   // The returned view is invalidated by a guide replacement or clear on this
   // net. It is empty when the optional component is absent.
-  [[nodiscard]] std::span<const DesignRouteGuide> guides(DesignNetId net) const;
+  [[nodiscard]] std::span<const GeometryShapeId> guides(DesignNetId net) const;
+  [[nodiscard]] const DesignRouteGuide& guide(GeometryShapeId id) const;
 
   template <typename Function>
     requires std::invocable<Function&, const DesignRouteGuide&>
   void forEachGuide(DesignNetId net, Function&& function) const
   {
-    for (const auto& guide : guides(net)) {
-      std::invoke(function, guide);
+    for (const auto id : guides(net)) {
+      std::invoke(function, guide(id));
     }
   }
 
@@ -49,14 +54,15 @@ class DesignGuideStorage
   [[nodiscard]] bool hasTrackAssignments(DesignNetId net) const;
   // The returned view is invalidated by a track-assignment replacement or
   // clear on this net. It is empty when the optional component is absent.
-  [[nodiscard]] std::span<const DesignTrackAssignmentShape> trackAssignments(DesignNetId net) const;
+  [[nodiscard]] std::span<const GeometryShapeId> trackAssignments(DesignNetId net) const;
+  [[nodiscard]] const DesignTrackAssignmentShape& trackAssignment(GeometryShapeId id) const;
 
   template <typename Function>
     requires std::invocable<Function&, const DesignTrackAssignmentShape&>
   void forEachTrackAssignment(DesignNetId net, Function&& function) const
   {
-    for (const auto& assignment : trackAssignments(net)) {
-      std::invoke(function, assignment);
+    for (const auto id : trackAssignments(net)) {
+      std::invoke(function, trackAssignment(id));
     }
   }
 
@@ -66,10 +72,14 @@ class DesignGuideStorage
  private:
   void validateGuides(std::span<const DesignRouteGuide> guides) const;
   void validateTrackAssignments(std::span<const DesignTrackAssignmentShape> assignments) const;
+  void validateGuideIds(DesignNetId net, std::span<const GeometryShapeId> guides) const;
+  void validateTrackAssignmentIds(DesignNetId net, std::span<const GeometryShapeId> assignments) const;
   void validateRoutingLayer(TechRoutingLayerId layer) const;
   void ensureNet(DesignNetId net) const;
 
+  DesignRegistry& _design_registry;
   registry_type& _registry;
+  GeometryRegistry& _geometry_registry;
   const TechRegistry& _tech_registry;
 };
 

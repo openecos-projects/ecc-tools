@@ -13,6 +13,7 @@
 #include "design/common/DesignTypes.h"
 #include "design/constraint/model/ConstraintComponents.h"
 #include "design/floorplan/model/FloorplanComponents.h"
+#include "design/geometry/DesignGeometryComponents.h"
 #include "design/global/model/DesignGlobalComponents.h"
 #include "design/netlist/model/NetlistComponents.h"
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
@@ -123,9 +124,12 @@ struct PhysicalRoutingViaLayers
 // storage while visiting it.
 struct PhysicalNetGeometryVisitor
 {
-  std::function<void(const DesignNetRectangle&)> rectangle;
-  std::function<void(const DesignNetPolygon&)> polygon;
-  std::function<void(const DesignNetVia&)> via;
+  // These are borrowed canonical GeometryRegistry components.  In
+  // particular, polygon points and VIA origins are not copied into an
+  // import-boundary DTO for every callback.
+  std::function<void(const DesignGeometryRectangle&)> rectangle;
+  std::function<void(const DesignGeometryPolygon&)> polygon;
+  std::function<void(const DesignGeometryNetVia&)> via;
 };
 
 // Read-only, adapter-facing view over the three EccDB storage roots. It does
@@ -156,7 +160,7 @@ class PhysicalDesignService
   [[nodiscard]] bool hasDesignInfo() const noexcept;
   [[nodiscard]] int32_t databaseUnitsPerMicron() const;
   [[nodiscard]] bool hasDieArea() const noexcept;
-  [[nodiscard]] const DesignDieArea& dieArea() const;
+  [[nodiscard]] std::span<const Point> dieBoundary() const;
   [[nodiscard]] Rect dieBounds() const;
 
   [[nodiscard]] GeometryLayerKind layerKind(TechLayerId layer) const;
@@ -221,6 +225,14 @@ class PhysicalDesignService
   [[nodiscard]] PhysicalRoutingViaLayers routingViaLayers(TechViaMasterId tech_via, DesignViaId design_via) const;
 
   [[nodiscard]] bool isPlaced(DesignInstanceId instance) const;
+  // Visits one LEF PORT / dbMPin in master-local coordinates. The visitor
+  // borrows only for the callback duration; it does not create design-domain
+  // Shape objects for library geometry.
+  void forEachMasterPinGeometry(LibraryMasterPinId pin, const PhysicalGeometryVisitor& visitor) const;
+  // Visits one LEF PORT as it occurs below one placed dbITerm. This is the
+  // precise occurrence counterpart to the aggregate dbITerm method below.
+  void forEachPlacedInstanceMasterPinGeometry(DesignInstanceTermId iterm, LibraryMasterPinId pin,
+                                              const PhysicalGeometryVisitor& visitor) const;
   void forEachPlacedInstancePinGeometry(DesignInstancePinId pin, const PhysicalGeometryVisitor& visitor) const;
   // Visits one OpenDB dbBPin / DEF PORT. The geometry is transformed from the
   // BPin-local coordinates using only this BPin's placement.

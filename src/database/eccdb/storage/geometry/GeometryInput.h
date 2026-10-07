@@ -6,15 +6,15 @@
 
 namespace eccdb {
 
-// Write-side polygon value. GeometryPool converts it into an internal polygon
-// record and a contiguous point range.
+// Write-side polygon value. Domain geometry storage materializes it as one
+// typed EnTT geometry entity while preserving the point sequence.
 struct GeometryPolygonInput
 {
   std::vector<Point> points;
 };
 
-// Shared write-side geometry accepted by database storage facades. It is
-// never attached to an EnTT entity or included in the binary schema.
+// Shared write-side geometry accepted by database storage facades. It is a
+// transient import value; canonical payloads live in typed geometry entities.
 struct GeometryInput
 {
   std::vector<Rect> rects;

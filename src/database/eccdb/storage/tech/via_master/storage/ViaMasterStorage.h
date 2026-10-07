@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-#include "geometry/GeometryPool.h"
+#include "geometry/DomainGeometryStorage.h"
 #include "tech/TechRegistry.h"
 #include "tech/via_master/model/ViaMasterComponents.h"
 #include "tech/via_master/storage/ViaMasterInput.h"
@@ -20,7 +20,7 @@ class TechViaMasterStorage
  public:
   using registry_type = TechRegistry::registry_type;
 
-  TechViaMasterStorage(TechRegistry& registry, GeometryPool& geometry) : _registry(registry.registry()), _geometry(geometry) {}
+  TechViaMasterStorage(TechRegistry& registry, DomainGeometryStorage& geometry) : _registry(registry.registry()), _geometry(geometry) {}
 
   [[nodiscard]] registry_type& registry() noexcept { return _registry; }
   [[nodiscard]] const registry_type& registry() const noexcept { return _registry; }
@@ -44,9 +44,9 @@ class TechViaMasterStorage
   [[nodiscard]] const TechGeneratedViaMaster& generatedViaMaster(TechViaMasterId id) const;
   [[nodiscard]] TechViaGeometry& geometry(TechViaMasterId id);
   [[nodiscard]] const TechViaGeometry& geometry(TechViaMasterId id) const;
-  [[nodiscard]] std::span<const Rect> bottomRects(TechViaMasterId id) const;
-  [[nodiscard]] std::span<const Rect> cutRects(TechViaMasterId id) const;
-  [[nodiscard]] std::span<const Rect> topRects(TechViaMasterId id) const;
+  [[nodiscard]] std::vector<Rect> bottomRects(TechViaMasterId id) const;
+  [[nodiscard]] std::vector<Rect> cutRects(TechViaMasterId id) const;
+  [[nodiscard]] std::vector<Rect> topRects(TechViaMasterId id) const;
   [[nodiscard]] uint32_t bottomPolygonCount(TechViaMasterId id) const;
   [[nodiscard]] uint32_t cutPolygonCount(TechViaMasterId id) const;
   [[nodiscard]] uint32_t topPolygonCount(TechViaMasterId id) const;
@@ -56,7 +56,7 @@ class TechViaMasterStorage
   [[nodiscard]] uint32_t shapeCount(TechViaMasterId id) const;
 
  private:
-  [[nodiscard]] TechViaGeometry storeGeometry(TechViaMasterShapeInput shapes);
+  [[nodiscard]] TechViaGeometry storeGeometry(TechViaMasterId owner, TechViaMasterShapeInput shapes);
   void ensureViaMaster(TechViaMasterId id) const;
   void ensureGeneratedViaMaster(TechViaMasterId id) const;
   void validateMaster(const TechViaMaster& master) const;
@@ -64,7 +64,7 @@ class TechViaMasterStorage
   void validateGenerated(const TechGeneratedViaMaster& generated, const TechViaMasterShapeInput& shapes) const;
 
   registry_type& _registry;
-  GeometryPool& _geometry;
+  DomainGeometryStorage& _geometry;
 };
 
 }  // namespace eccdb

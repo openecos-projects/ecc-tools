@@ -8,6 +8,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -642,18 +643,27 @@ void importCutLayer(const eccdb::TechStore& source,
   return found->second;
 }
 
-void appendViaRects(const eccdb::GeometryPool& pool,
-                    eccdb::GeometryHandle geometry,
+void appendViaRects(const eccdb::DomainGeometryStorage& storage,
+                    std::span<const eccdb::GeometryShapeId> geometry,
                     frLayerNum layer_number,
                     std::string_view via_name,
                     std::string_view role,
                     utl::Logger& logger,
                     const auto& append)
 {
-  if (!geometry.valid()) {
+  if (geometry.empty()) {
     fail(logger, 28, viaMessage(via_name, std::string{role} + " geometry is missing"));
   }
-  if (pool.empty(geometry)) {
+
+  bool has_geometry = false;
+  for (const auto id : geometry) {
+    const auto kind = storage.geometryRegistry().shape(id).kind;
+    if (kind == eccdb::GeometryShapeKind::kRectangle || kind == eccdb::GeometryShapeKind::kPolygon) {
+      has_geometry = true;
+      break;
+    }
+  }
+  if (!has_geometry) {
     fail(logger, 30, viaMessage(via_name, std::string{role} + " geometry has no RECT shapes"));
   }
 
@@ -667,21 +677,23 @@ void appendViaRects(const eccdb::GeometryPool& pool,
     append(std::move(figure));
   };
 
-  for (const auto rectangle : pool.rectangles(geometry)) {
-    append_rectangle(rectangle);
-  }
-  for (uint32_t polygon_index = 0; polygon_index < pool.polygonCount(geometry); ++polygon_index) {
-    std::vector<eccdb::Rect> rectangles;
-    try {
-      rectangles = eccdb::decomposePolygonToRectangles(pool.polygonPoints(geometry, polygon_index));
-    } catch (const std::exception& error) {
-      fail(logger,
-           29,
-           viaMessage(via_name,
-                      std::string{role} + " POLYGON cannot be decomposed to DRT rectangles: " + error.what()));
-    }
-    for (const auto rectangle : rectangles) {
-      append_rectangle(rectangle);
+  for (const auto id : geometry) {
+    const auto kind = storage.geometryRegistry().shape(id).kind;
+    if (kind == eccdb::GeometryShapeKind::kRectangle) {
+      append_rectangle(storage.rectangle(id).rectangle);
+    } else if (kind == eccdb::GeometryShapeKind::kPolygon) {
+      std::vector<eccdb::Rect> rectangles;
+      try {
+        rectangles = eccdb::decomposePolygonToRectangles(storage.polygonPoints(id));
+      } catch (const std::exception& error) {
+        fail(logger,
+             29,
+             viaMessage(via_name,
+                        std::string{role} + " POLYGON cannot be decomposed to DRT rectangles: " + error.what()));
+      }
+      for (const auto rectangle : rectangles) {
+        append_rectangle(rectangle);
+      }
     }
   }
 }
@@ -707,7 +719,7 @@ void importTechVias(const eccdb::PhysicalDesignService& physical,
 {
   const auto& source = physical.tech();
   const auto& via_storage = source.viaMasterStorage();
-  const auto& pool = source.geometryPool();
+  const auto& geometry_storage = source.geometryStorage();
   physical.forEachTechVia([&](eccdb::TechViaMasterId id, const eccdb::TechViaMaster& via, const eccdb::TechViaGeometry& geometry) {
     if (!via_storage.contains(id)) {
       fail(logger, 33, viaMessage(via.name, "does not belong to the technology VIA store"));
@@ -727,21 +739,21 @@ void importTechVias(const eccdb::PhysicalDesignService& physical,
 
     auto definition = std::make_unique<frViaDef>(via.name);
     definition->setDefault((via.flags & eccdb::TechViaMasterFlag::kDefault) != 0u);
-    appendViaRects(pool,
+    appendViaRects(geometry_storage,
                    geometry.bottom_geometry,
                    bottom,
                    via.name,
                    "bottom",
                    logger,
                    [&definition](std::unique_ptr<frRect> figure) { definition->addLayer1Fig(std::move(figure)); });
-    appendViaRects(pool,
+    appendViaRects(geometry_storage,
                    geometry.cut_geometry,
                    cut,
                    via.name,
                    "cut",
                    logger,
                    [&definition](std::unique_ptr<frRect> figure) { definition->addCutFig(std::move(figure)); });
-    appendViaRects(pool,
+    appendViaRects(geometry_storage,
                    geometry.top_geometry,
                    top,
                    via.name,

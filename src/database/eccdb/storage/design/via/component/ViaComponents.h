@@ -5,6 +5,8 @@
 #include <vector>
 
 #include "common/GeometryTypes.h"
+#include "design/common/DesignTypes.h"
+#include "geometry/GeometryEntity.h"
 #include "tech/common/TechLayerIds.h"
 #include "tech/via_rule_generate/model/ViaRuleGenerateComponents.h"
 
@@ -22,6 +24,18 @@ struct DesignViaPolygon
   TechLayerId layer;
   std::vector<Point> points;
   uint32_t mask = 0;
+};
+
+template <>
+struct GeometryPayloadTraits<DesignViaRectangle>
+{
+  static constexpr GeometryShapeKind kind = GeometryShapeKind::kRectangle;
+};
+
+template <>
+struct GeometryPayloadTraits<DesignViaPolygon>
+{
+  static constexpr GeometryShapeKind kind = GeometryShapeKind::kPolygon;
 };
 
 namespace DesignGeneratedViaFlag {
@@ -59,9 +73,20 @@ constexpr uint32_t kGenerated = 1u << 0;
 constexpr uint32_t kHasPatternName = 1u << 1;
 }  // namespace DesignViaFlag
 
-// DEF VIAS fixed geometry and VIARULE-generated alternatives share one
-// DesignViaId-backed EnTT component.
+// The canonical DesignVia component owns only independent geometry entities.
+// Fixed VIA values remain an input boundary so importers and service callers
+// never need to manufacture GeometryShapeId values themselves.
 struct DesignVia
+{
+  std::string name;
+  uint32_t flags = 0;
+  std::string pattern_name;
+  std::vector<GeometryShapeId> rectangles;
+  std::vector<GeometryShapeId> polygons;
+  DesignGeneratedVia generated;
+};
+
+struct DesignViaInput
 {
   std::string name;
   uint32_t flags = 0;
@@ -70,5 +95,10 @@ struct DesignVia
   std::vector<DesignViaPolygon> polygons;
   DesignGeneratedVia generated;
 };
+
+[[nodiscard]] inline GeometryOwner designViaOwner(DesignViaId id) noexcept
+{
+  return GeometryOwner::from(GeometryOwnerDomain::kDesignVia, id);
+}
 
 }  // namespace eccdb

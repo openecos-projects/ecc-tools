@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "common/GeometryTypes.h"
+#include "geometry/GeometryEntity.h"
 #include "tech/via_master/model/ViaMasterComponents.h"
 
 namespace eccdb {
@@ -16,6 +17,12 @@ struct LibraryViaPlacement
 {
   TechViaMasterId via;
   Point origin;
+};
+
+template <>
+struct GeometryPayloadTraits<LibraryViaPlacement>
+{
+  static constexpr GeometryShapeKind kind = GeometryShapeKind::kLibraryVia;
 };
 
 void validateLibraryViaPlacements(const TechRegistry& tech_registry, const std::vector<LibraryViaPlacement>& placements);

@@ -6,6 +6,7 @@
 
 #include "common/GeometryTypes.h"
 #include "design/common/DesignTypes.h"
+#include "geometry/GeometryEntity.h"
 #include "library/common/LibraryTypes.h"
 #include "tech/common/TechLayerIds.h"
 
@@ -15,8 +16,18 @@ namespace eccdb {
 // absent, DesignFloorplanStorage derives the Core from non-PAD Rows.
 struct DesignCoreArea
 {
+  GeometryShapeId boundary;
+};
+
+struct DesignCoreAreaInput
+{
   std::vector<Point> boundary;
 };
+
+[[nodiscard]] inline GeometryOwner designCoreAreaOwner(DesignRootId id) noexcept
+{
+  return GeometryOwner::from(GeometryOwnerDomain::kDesignCoreArea, id);
+}
 
 namespace DesignRowFlag {
 constexpr uint32_t kHasDo = 1u << 0;

@@ -3,14 +3,14 @@
 find_package(GTest REQUIRED)
 include(GoogleTest)
 
-add_executable(eccdb_geometry_pool_test
-  GeometryPoolTest.cpp
+add_executable(eccdb_geometry_registry_test
+  GeometryRegistryTest.cpp
 )
-eccdb_storage_target(eccdb_geometry_pool_test)
-target_link_libraries(eccdb_geometry_pool_test
+eccdb_storage_target(eccdb_geometry_registry_test)
+target_link_libraries(eccdb_geometry_registry_test
   PRIVATE
     eccdb_geometry
     GTest::gtest_main
 )
 
-gtest_discover_tests(eccdb_geometry_pool_test)
+gtest_discover_tests(eccdb_geometry_registry_test)

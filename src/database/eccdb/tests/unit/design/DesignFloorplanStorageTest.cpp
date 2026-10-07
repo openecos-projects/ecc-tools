@@ -25,7 +25,7 @@ TEST_F(DesignStorageTest, StoresRootRowsTracksAndGCellsInOneRegistry)
   auto& floorplan = design.floorplanStorage();
 
   global.setInfo(DesignInfo{.name = "simple", .database_units_per_micron = 1000});
-  global.setDieArea(DesignDieArea{.boundary = {{0, 0}, {8000, 0}, {8000, 8000}, {0, 8000}}});
+  global.setDieArea(DesignDieAreaInput{.boundary = {{0, 0}, {8000, 0}, {8000, 8000}, {0, 8000}}});
 
   EXPECT_EQ(global.info().name, "simple");
   EXPECT_EQ(global.dieBounds(), (Rect{0, 0, 8000, 8000}));
@@ -83,16 +83,16 @@ TEST_F(DesignStorageTest, ValidatesGlobalAndFloorplanReferences)
   auto& floorplan = design.floorplanStorage();
 
   EXPECT_THROW(global.setInfo(DesignInfo{}), std::invalid_argument);
-  EXPECT_NO_THROW(global.setDieArea(DesignDieArea{.boundary = {{0, 0}, {0, 10}}}));
+  EXPECT_NO_THROW(global.setDieArea(DesignDieAreaInput{.boundary = {{0, 0}, {0, 10}}}));
   EXPECT_EQ(global.dieBounds(), (Rect{0, 0, 0, 10}));
-  EXPECT_THROW(global.setDieArea(DesignDieArea{.boundary = {{10, 0}, {0, 10}}}), std::invalid_argument);
-  EXPECT_THROW(global.setDieArea(DesignDieArea{.boundary = {{0, 0}, {10, 10}, {0, 20}, {-10, 10}}}), std::invalid_argument);
-  EXPECT_THROW(global.setDieArea(DesignDieArea{.boundary = {{0, 0}, {40, 0}, {40, 40}, {10, 40}, {10, 10}, {30, 10}, {30, 30}, {0, 30}}}),
+  EXPECT_THROW(global.setDieArea(DesignDieAreaInput{.boundary = {{10, 0}, {0, 10}}}), std::invalid_argument);
+  EXPECT_THROW(global.setDieArea(DesignDieAreaInput{.boundary = {{0, 0}, {10, 10}, {0, 20}, {-10, 10}}}), std::invalid_argument);
+  EXPECT_THROW(global.setDieArea(DesignDieAreaInput{.boundary = {{0, 0}, {40, 0}, {40, 40}, {10, 40}, {10, 10}, {30, 10}, {30, 30}, {0, 30}}}),
                std::invalid_argument);
-  EXPECT_NO_THROW(global.setDieArea(DesignDieArea{.boundary = {{0, 0}, {100, 0}, {100, 40}, {40, 40}, {40, 100}, {0, 100}}}));
+  EXPECT_NO_THROW(global.setDieArea(DesignDieAreaInput{.boundary = {{0, 0}, {100, 0}, {100, 40}, {40, 40}, {40, 100}, {0, 100}}}));
   EXPECT_EQ(global.dieBounds(), (Rect{0, 0, 100, 100}));
 
-  global.setDieArea(DesignDieArea{.boundary = {{0, 0}, {100, 100}}});
+  global.setDieArea(DesignDieAreaInput{.boundary = {{0, 0}, {100, 100}}});
   const auto row = floorplan.createRow(DesignRow{.name = "ROW0", .site = site, .repeat_count_x = 2, .repeat_count_y = 1, .step_x = 20});
   EXPECT_THROW((void) floorplan.createRow(DesignRow{.name = "ROW0", .site = site}), std::invalid_argument);
   const auto layerless_tracks = floorplan.createTrackGrid(DesignTrackGrid{.track_count = 1, .step = 1});
@@ -113,7 +113,7 @@ TEST_F(DesignStorageTest, ValidatesGlobalAndFloorplanReferences)
 TEST_F(DesignStorageTest, DerivesCoreFromNonPadRowsAndSupportsExplicitCore)
 {
   auto& floorplan = design.floorplanStorage();
-  design.globalStorage().setDieArea(DesignDieArea{.boundary = {{0, 0}, {1000, 1000}}});
+  design.globalStorage().setDieArea(DesignDieAreaInput{.boundary = {{0, 0}, {1000, 1000}}});
   const auto pad_site
       = library.siteStorage().createSite(LibrarySite{.name = "PAD", .width = 100, .height = 200, .site_class = LibrarySiteClass::kPad});
 
@@ -125,10 +125,10 @@ TEST_F(DesignStorageTest, DerivesCoreFromNonPadRowsAndSupportsExplicitCore)
   EXPECT_EQ(floorplan.row(core_row).flags & DesignRowFlag::kHasStep, 0u);
   EXPECT_EQ(floorplan.coreBounds(), (Rect{100, 100, 160, 140}));
 
-  floorplan.setCoreArea(DesignCoreArea{.boundary = {{50, 50}, {400, 50}, {400, 300}, {200, 300}, {200, 500}, {50, 500}}});
+  floorplan.setCoreArea(DesignCoreAreaInput{.boundary = {{50, 50}, {400, 50}, {400, 300}, {200, 300}, {200, 500}, {50, 500}}});
   EXPECT_TRUE(floorplan.hasCoreArea());
   EXPECT_EQ(floorplan.coreBounds(), (Rect{50, 50, 400, 500}));
-  EXPECT_EQ(floorplan.coreArea().boundary.size(), 6u);
+  EXPECT_EQ(floorplan.coreBoundary().size(), 6u);
 }
 
 TEST_F(DesignStorageTest, ValidatesRowsAndProvidesLayerTrackQueries)

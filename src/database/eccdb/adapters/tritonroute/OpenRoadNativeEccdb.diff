@@ -1181,10 +1181,10 @@ index 5facd324bd..2855f2b465 100644
      return user_selected_vias_;
 diff --git a/src/drt/src/io/EccdbContextAdapter.cpp b/src/drt/src/io/EccdbContextAdapter.cpp
 new file mode 100644
-index 0000000000..f31d59941e
+index 0000000000..a91e5ef2e2
 --- /dev/null
 +++ b/src/drt/src/io/EccdbContextAdapter.cpp
-@@ -0,0 +1,830 @@
+@@ -0,0 +1,831 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +// Copyright (c) 2026, The OpenROAD Authors
 +
@@ -1767,7 +1767,8 @@ index 0000000000..f31d59941e
 +  std::vector<frRect> result;
 +  const auto guides = context.guides(net_id);
 +  result.reserve(guides.size());
-+  for (const auto& guide : guides) {
++  for (const auto guide_id : guides) {
++    const auto& guide = context.guide(guide_id);
 +    if ((guide.flags & eccdb::DesignRouteGuideFlag::kCongested) != 0u) {
 +      throw std::invalid_argument("Input route guides are congested");
 +    }
@@ -2081,7 +2082,7 @@ index 0000000000..81e61e4388
 +}  // namespace drt
 diff --git a/src/drt/src/io/EccdbRouteAdapter.cpp b/src/drt/src/io/EccdbRouteAdapter.cpp
 new file mode 100644
-index 0000000000..0aabe3c2d3
+index 0000000000..edf741d3db
 --- /dev/null
 +++ b/src/drt/src/io/EccdbRouteAdapter.cpp
 @@ -0,0 +1,840 @@
@@ -2252,7 +2253,7 @@ index 0000000000..0aabe3c2d3
 +  return eccdb_layer;
 +}
 +
-+void appendRouterViaFigures(eccdb::DesignVia& destination,
++void appendRouterViaFigures(eccdb::DesignViaInput& destination,
 +                            const std::vector<std::unique_ptr<frShape>>& figures,
 +                            const eccdb::TechStore& tech,
 +                            frDesign& route_design,
@@ -2294,7 +2295,7 @@ index 0000000000..0aabe3c2d3
 +    throw std::invalid_argument("DRT VIA was not created by the router: " + via.getName());
 +  }
 +
-+  eccdb::DesignVia value;
++  eccdb::DesignViaInput value;
 +  value.name = via.getName();
 +  if (value.name.empty()) {
 +    throw std::invalid_argument("DRT router-created VIA has no name");
@@ -4006,10 +4007,10 @@ index d146df97e0..b6ebb6dd72 100644
    const frCoord top_width = tech->getLayer(layer_num + 2)->getMinWidth();
 diff --git a/src/drt/test/eccdbAdapterTest.cpp b/src/drt/test/eccdbAdapterTest.cpp
 new file mode 100644
-index 0000000000..f03547b7c8
+index 0000000000..dcd2e9260a
 --- /dev/null
 +++ b/src/drt/test/eccdbAdapterTest.cpp
-@@ -0,0 +1,433 @@
+@@ -0,0 +1,439 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +// Copyright (c) 2026, The OpenROAD Authors
 +
@@ -4035,6 +4036,7 @@ index 0000000000..f03547b7c8
 +#include "design/pin_access/model/PinAccessComponents.h"
 +#include "design/routing/component/RoutingComponents.h"
 +#include "design/routing/component/WireRouting.h"
++#include "design/via/component/ViaComponents.h"
 +#include "io/EccdbContextAdapter.h"
 +#include "io/EccdbRouteAdapter.h"
 +#include "library/LibraryStore.h"
@@ -4280,16 +4282,19 @@ index 0000000000..f03547b7c8
 +  ASSERT_TRUE(via_id);
 +  const auto& stored_via = design_store_.routingStorage().via(via_id);
 +  ASSERT_EQ(stored_via.rectangles.size(), 5u);
-+  EXPECT_EQ(stored_via.rectangles[0].layer, eccdb::TechLayerId{m1_.entity()});
-+  EXPECT_EQ(stored_via.rectangles[0].rectangle, (eccdb::Rect{-20, -10, 20, 10}));
-+  EXPECT_EQ(stored_via.rectangles[1].layer, eccdb::TechLayerId{v1.entity()});
-+  EXPECT_EQ(stored_via.rectangles[1].rectangle, (eccdb::Rect{-20, -10, 20, 10}));
-+  EXPECT_EQ(stored_via.rectangles[2].layer, eccdb::TechLayerId{v1.entity()});
-+  EXPECT_EQ(stored_via.rectangles[2].rectangle, (eccdb::Rect{-20, -10, 20, 10}));
-+  EXPECT_EQ(stored_via.rectangles[3].layer, eccdb::TechLayerId{v1.entity()});
-+  EXPECT_EQ(stored_via.rectangles[3].rectangle, (eccdb::Rect{30, -10, 40, 10}));
-+  EXPECT_EQ(stored_via.rectangles[4].layer, eccdb::TechLayerId{m2.entity()});
-+  EXPECT_EQ(stored_via.rectangles[4].rectangle, (eccdb::Rect{-20, -10, 20, 10}));
++  const auto rectangle = [&](const auto index) -> const eccdb::DesignViaRectangle& {
++    return design_store_.geometryRegistry().get<const eccdb::DesignViaRectangle>(stored_via.rectangles[index]);
++  };
++  EXPECT_EQ(rectangle(0u).layer, eccdb::TechLayerId{m1_.entity()});
++  EXPECT_EQ(rectangle(0u).rectangle, (eccdb::Rect{-20, -10, 20, 10}));
++  EXPECT_EQ(rectangle(1u).layer, eccdb::TechLayerId{v1.entity()});
++  EXPECT_EQ(rectangle(1u).rectangle, (eccdb::Rect{-20, -10, 20, 10}));
++  EXPECT_EQ(rectangle(2u).layer, eccdb::TechLayerId{v1.entity()});
++  EXPECT_EQ(rectangle(2u).rectangle, (eccdb::Rect{-20, -10, 20, 10}));
++  EXPECT_EQ(rectangle(3u).layer, eccdb::TechLayerId{v1.entity()});
++  EXPECT_EQ(rectangle(3u).rectangle, (eccdb::Rect{30, -10, 40, 10}));
++  EXPECT_EQ(rectangle(4u).layer, eccdb::TechLayerId{m2.entity()});
++  EXPECT_EQ(rectangle(4u).rectangle, (eccdb::Rect{-20, -10, 20, 10}));
 +
 +  const eccdb::NetRouteService routes(design_store_, technology_);
 +  const auto snapshot = routes.snapshot(net_id);
@@ -4359,15 +4364,17 @@ index 0000000000..f03547b7c8
 +
 +  const auto written = context.guides(net_id);
 +  ASSERT_EQ(written.size(), 1u);
-+  EXPECT_EQ(written.front().box, (eccdb::Rect{10, 10, 90, 50}));
-+  EXPECT_EQ(written.front().layer, m1_);
-+  EXPECT_EQ(written.front().via_layer, m1_);
-+  EXPECT_EQ(written.front().flags, 0u);
++  const auto& written_guide = context.guide(written.front());
++  EXPECT_EQ(written_guide.box, (eccdb::Rect{10, 10, 90, 50}));
++  EXPECT_EQ(written_guide.layer, m1_);
++  EXPECT_EQ(written_guide.via_layer, m1_);
++  EXPECT_EQ(written_guide.flags, 0u);
 +
 +  const auto preserved = context.guides(special_id);
 +  ASSERT_EQ(preserved.size(), 1u);
-+  EXPECT_EQ(preserved.front().box, (eccdb::Rect{0, 0, 20, 20}));
-+  EXPECT_EQ(preserved.front().flags, eccdb::DesignRouteGuideFlag::kCongested);
++  const auto& preserved_guide = context.guide(preserved.front());
++  EXPECT_EQ(preserved_guide.box, (eccdb::Rect{0, 0, 20, 20}));
++  EXPECT_EQ(preserved_guide.flags, eccdb::DesignRouteGuideFlag::kCongested);
 +}
 +
 +TEST_F(EccdbAdapterTest, PinAccessRoundTripsCandidatesAndPreferredInstancePoint)

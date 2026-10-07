@@ -15,6 +15,9 @@
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/routing/component/RoutingComponents.h"
 #include "design/via/component/ViaComponents.h"
+#include "design/geometry/DesignGeometryComponents.h"
+#include "geometry/DomainGeometryComponents.h"
+#include "geometry/GeometryEntity.h"
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/cell_master/model/MasterObsComponents.h"
 #include "library/master_port/model/MasterPortComponents.h"
@@ -108,9 +111,12 @@ void binaryArchive(Archive& archive, DesignRouteShape& value)
 
 namespace binary_detail {
 
-inline constexpr uint32_t kTechSchemaVersion = 9;
-inline constexpr uint32_t kLibrarySchemaVersion = 2;
-inline constexpr uint32_t kDesignSchemaVersion = 9;
+// GeometryEntity is a 64-bit EnTT identifier.  Its width is part of each
+// geometry registry snapshot, so changing it invalidates all three archive
+// payloads even when the domain component lists stay unchanged.
+inline constexpr uint32_t kTechSchemaVersion = 11;
+inline constexpr uint32_t kLibrarySchemaVersion = 5;
+inline constexpr uint32_t kDesignSchemaVersion = 12;
 
 template <typename... Types>
 struct BinaryTypeList
@@ -155,12 +161,24 @@ using TechBinaryComponents = BinaryTypeList<
 
 using LibraryBinaryComponents = BinaryTypeList<LibrarySite, LibraryCellMaster, LibraryMasterTerm, LibraryMasterPort, LibraryMasterObs>;
 
+// Geometry has its own EnTT registry.  These lists are deliberately separate
+// from the design/tech/library registries: a geometry entity is a first-class
+// editable object, and its owner keeps only the relation ID.
+using DomainGeometryBinaryComponents = BinaryTypeList<GeometryShape, GeometryRectangle, GeometryPolygon>;
+using LibraryGeometryBinaryComponents = BinaryTypeList<GeometryShape, GeometryRectangle, GeometryPolygon, LibraryViaPlacement>;
+
+using DesignGeometryBinaryComponents = BinaryTypeList<GeometryShape, DesignRouteShape, DesignRouteShapeAttributes,
+                                                        DesignGeometryRectangle, DesignGeometryPolygon, DesignGeometryNetVia,
+                                                        GeometryRectangle, GeometryPolygon, GeometryBoundary,
+                                                        DesignPinRectangle, DesignPinPolygon, DesignPinVia,
+                                                        DesignViaRectangle, DesignViaPolygon,
+                                                        DesignRouteGuide, DesignTrackAssignmentShape>;
+
 // Shapes own geometry. Wire owns Shape IDs; DEF paths and bbox are derived.
 using DesignBinaryComponents
     = BinaryTypeList<DesignRoot, DesignInfo, DesignDieArea, DesignCoreArea, DesignRow, DesignTrackGrid, DesignGCellGrid,
                      DesignInstance, DesignInstanceTerms, DesignBlockTerm, DesignBlockPin, DesignNet, DesignNetInstancePins,
-                     DesignNetIoPins, DesignSpecialNet, DesignNetOptions, DesignWire, DesignRouteShape,
-                     DesignRouteShapeAttributes, DesignNetGeometry, DesignVia,
+                     DesignNetIoPins, DesignSpecialNet, DesignNetOptions, DesignWire, DesignNetGeometry, DesignVia,
                      DesignNonDefaultRule, DesignRegion, DesignGroup, DesignBlockage, DesignFill, DesignNetRouteGuides,
                      DesignNetTrackAssignments, DesignPinAccessCatalog, DesignInstancePinAccessGroupIndex,
                      DesignInstancePreferredPinAccess, DesignBlockPinAccessGroups>;

@@ -44,10 +44,12 @@ object access; this check is not a heap-wide allocation audit.
 | Fork `src/drt/src/io/EccdbContextAdapter.cpp` | Guides, explicit GCell grids and pin access |
 | Fork `frLayer`, `frInst`, `TritonRoute`, `GuideProcessor`, PA/DR | Remove required ODB object access on the native path |
 
-The local fork is `build/openroad-native-eccdb-src`, branch
-`eccdb-native-ispd`. The original `/home/zhuxu1/workspace/OpenROAD` was not edited
-by this integration. Existing embedded-instance-pin experiment changes in
-ecc-tools were retained.
+The current local fork is `../OpenROAD-eccdb`, branch `eccdb-native-ispd`, next
+to ecc-tools. The original `/home/zhuxu1/workspace/OpenROAD` remains the
+dependency checkout. Existing embedded-instance-pin experiment
+changes in ecc-tools were retained. `build/openroad-native-eccdb-src` is the
+historical fork location for results collected before this relocation; those
+results remain unchanged.
 
 `adapters/tritonroute/OpenRoadNativeEccdb.diff` preserves all DRT changes,
 including the preceding hybrid adapter, against upstream commit `48e8467bceaf`.
@@ -82,11 +84,29 @@ bash src/database/eccdb/adapters/tritonroute/BenchmarkNativeImport.sh \
   ../reference/ispd2018/ispd18_test6 /tmp/native-import
 ```
 
+`BuildNativeRoute.sh` and `TestNativeFixtures.sh` now default
+`OPENROAD_NATIVE_SOURCE` to `../OpenROAD-eccdb`; the variable still overrides
+that location. `OPENROAD_DEPENDENCY_SOURCE` continues to default to
+`../OpenROAD`, and the build output remains
+`build/openroad-native-eccdb-build`. A CMake cache created from the historical
+`build/openroad-native-eccdb-src` source cannot be reused for the new source.
+After removing that old cache, reconfigure the retained build directory without
+compiling native targets:
+
+```bash
+bash src/database/eccdb/adapters/tritonroute/BuildNativeRoute.sh --configure-only
+```
+
+Run `BuildNativeRoute.sh` without options when the native targets should be
+rebuilt.
+
 The local build can enable the adapter unit target separately with
-`cmake -S build/openroad-native-eccdb-src -B build/openroad-native-eccdb-build
+`cmake -S ../OpenROAD-eccdb -B build/openroad-native-eccdb-build
 -DENABLE_TESTS=ON`, followed by `cmake --build
 build/openroad-native-eccdb-build --target eccdbAdapterTest --parallel 64`.
-The current adapter unit run passed 9/9; EccDB's `eccdb_design_test` passed 63/63.
+The historical integration run passed 9/9 adapter tests and 63/63 EccDB
+`eccdb_design_test` cases. The 2026-10-07 relocation verified configuration
+only and removed the old native executables; it did not repeat those tests.
 
 Build and full routing default to 64 threads. Each process has a 500 GiB virtual
 address-space limit; this is not an aggregate cgroup RSS cap. The import-only

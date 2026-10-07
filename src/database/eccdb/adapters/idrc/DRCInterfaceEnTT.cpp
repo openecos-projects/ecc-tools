@@ -8,6 +8,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <span>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -191,15 +192,19 @@ eccdb::Point placeMasterPoint(eccdb::Point local, eccdb::Point origin, eccdb::De
   return placed;
 }
 
-std::vector<eccdb::Rect> geometryRects(const eccdb::GeometryPool& pool, eccdb::GeometryHandle handle)
+template <typename GeometryStorage>
+std::vector<eccdb::Rect> geometryRects(const GeometryStorage& storage,
+                                       std::span<const eccdb::GeometryShapeId> shapes)
 {
   std::vector<eccdb::Rect> rects;
-  const auto stored = pool.rectangles(handle);
-  rects.insert(rects.end(), stored.begin(), stored.end());
-  for (uint32_t index = 0; index < pool.polygonCount(handle); ++index) {
-    const auto points = pool.polygonPoints(handle, index);
-    auto decomposed = eccdb::decomposePolygonToRectangles(points);
-    rects.insert(rects.end(), decomposed.begin(), decomposed.end());
+  for (const auto shape : shapes) {
+    const auto& metadata = storage.geometryRegistry().shape(shape);
+    if (metadata.kind == eccdb::GeometryShapeKind::kRectangle) {
+      rects.push_back(storage.rectangle(shape).rectangle);
+    } else if (metadata.kind == eccdb::GeometryShapeKind::kPolygon) {
+      const auto decomposed = eccdb::decomposePolygonToRectangles(storage.polygonPoints(shape));
+      rects.insert(rects.end(), decomposed.begin(), decomposed.end());
+    }
   }
   return rects;
 }
@@ -241,9 +246,9 @@ ViaShapes techViaShapes(const eccdb::TechStore& tech, eccdb::TechViaMasterId via
       }
     }
   };
-  append(geometry.bottom_layer.layer(), geometryRects(tech.geometryPool(), geometry.bottom_geometry), false);
-  append(eccdb::TechLayerId{geometry.cut_layer.entity()}, geometryRects(tech.geometryPool(), geometry.cut_geometry), true);
-  append(geometry.top_layer.layer(), geometryRects(tech.geometryPool(), geometry.top_geometry), false);
+  append(geometry.bottom_layer.layer(), geometryRects(tech.geometryStorage(), geometry.bottom_geometry), false);
+  append(eccdb::TechLayerId{geometry.cut_layer.entity()}, geometryRects(tech.geometryStorage(), geometry.cut_geometry), true);
+  append(geometry.top_layer.layer(), geometryRects(tech.geometryStorage(), geometry.top_geometry), false);
   return shapes;
 }
 
@@ -307,6 +312,7 @@ ViaShapes designViaShapes(const eccdb::DesignStore& design, const eccdb::TechSto
   }
 
   ViaShapes shapes;
+  const auto& geometry = design.geometryRegistry();
   auto append_rect = [&](eccdb::TechLayerId layer, eccdb::Rect rect) {
     LayeredRect placed{.layer = layer, .rect = rect.offset(origin.x, origin.y)};
     if (tech.cutLayerStorage().contains(eccdb::TechCutLayerId{layer.entity()})) {
@@ -315,10 +321,12 @@ ViaShapes designViaShapes(const eccdb::DesignStore& design, const eccdb::TechSto
       shapes.routing.push_back(placed);
     }
   };
-  for (const auto& rect : via.rectangles) {
+  for (const auto id : via.rectangles) {
+    const auto& rect = geometry.get<eccdb::DesignViaRectangle>(id);
     append_rect(rect.layer, rect.rectangle);
   }
-  for (const auto& polygon : via.polygons) {
+  for (const auto id : via.polygons) {
+    const auto& polygon = geometry.get<eccdb::DesignViaPolygon>(id);
     for (const auto& rect : eccdb::decomposePolygonToRectangles(polygon.points)) {
       append_rect(polygon.layer, rect);
     }
@@ -511,7 +519,7 @@ void collectPortGeometry(const eccdb::LibraryStore& library, const eccdb::TechSt
 {
   for (const auto& clause : port.layer_clauses) {
     const auto* index = layers.find(clause.layer);
-    for (const auto& rect : geometryRects(library.geometryPool(), clause.geometry)) {
+    for (const auto& rect : geometryRects(library.geometryStorage(), clause.geometry)) {
       LayeredRect placed{.layer = clause.layer, .rect = placeMasterRect(rect, origin, orient, width, height)};
       if (index != nullptr && index->cut) {
         cut.push_back(placed);
@@ -520,7 +528,8 @@ void collectPortGeometry(const eccdb::LibraryStore& library, const eccdb::TechSt
       }
     }
   }
-  for (const auto& via : port.vias) {
+  for (const auto shape : port.vias) {
+    const auto& via = library.geometryRegistry().get<eccdb::LibraryViaPlacement>(shape);
     const auto placed = placeMasterPoint(via.origin, origin, orient, width, height);
     vias.push_back(techViaShapes(tech, via.via, placed));
   }
@@ -1037,7 +1046,7 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeListFromEnTT()
     if (library.cellMasterStorage().hasObs(instance.master)) {
       const auto& obs = library.cellMasterStorage().obs(instance.master);
       for (const auto& clause : obs.layer_clauses) {
-        for (const auto& rect : geometryRects(library.geometryPool(), clause.geometry)) {
+        for (const auto& rect : geometryRects(library.geometryStorage(), clause.geometry)) {
           appendShape(env_shape_list, layers, clause.layer, placeMasterRect(rect, instance.origin, instance.orientation, width, height), -1);
         }
       }
@@ -1084,15 +1093,18 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeListFromEnTT()
     }
     for (const auto block_pin_id : design.netlistStorage().blockPins(pin_id)) {
       const auto& block_pin = design.netlistStorage().blockPin(block_pin_id);
+      const auto& geometry = design.geometryRegistry();
       if (block_pin.placement_status == eccdb::DesignPlacementStatus::kUnplaced
           && (block_pin.flags & eccdb::DesignIoPinPortFlag::kHasPlacement) == 0) {
         continue;
       }
-      for (const auto& rect : block_pin.rectangles) {
+      for (const auto id : block_pin.rectangles) {
+        const auto& rect = geometry.get<eccdb::DesignPinRectangle>(id);
         appendShape(env_shape_list, layers, rect.layer,
                     placeMasterRect(rect.rectangle, block_pin.origin, block_pin.orientation, 0, 0), net_idx);
       }
-      for (const auto& polygon : block_pin.polygons) {
+      for (const auto id : block_pin.polygons) {
+        const auto& polygon = geometry.get<eccdb::DesignPinPolygon>(id);
         for (const auto& rect : eccdb::decomposePolygonToRectangles(polygon.points)) {
           appendShape(env_shape_list, layers, polygon.layer,
                       placeMasterRect(rect, block_pin.origin, block_pin.orientation, 0, 0), net_idx);

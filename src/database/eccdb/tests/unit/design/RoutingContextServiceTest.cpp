@@ -25,14 +25,17 @@ TEST_F(DesignStorageTest, RoutingContextServiceReadsAndWritesNetRoutingContext)
   service.appendTrackAssignments(net, {{.layer = routing_layer, .box = {0, 50, 100, 50}}});
 
   EXPECT_TRUE(service.hasGuides(net));
-  ASSERT_EQ(service.guides(net).size(), 1u);
-  EXPECT_EQ(service.guides(net).front().box, (Rect{0, 0, 100, 100}));
-  EXPECT_EQ(service.guides(net).front().flags,
+  const auto guides = service.guides(net);
+  ASSERT_EQ(guides.size(), 1u);
+  const auto& guide = service.guide(guides.front());
+  EXPECT_EQ(guide.box, (Rect{0, 0, 100, 100}));
+  EXPECT_EQ(guide.flags,
             DesignRouteGuideFlag::kCongested | DesignRouteGuideFlag::kConnectedToTerm);
   EXPECT_TRUE(service.hasTrackAssignments(net));
-  ASSERT_EQ(service.trackAssignments(net).size(), 3u);
-  EXPECT_EQ(service.trackAssignments(net).front().box, (Rect{0, 50, 100, 50}));
-  EXPECT_EQ(service.trackAssignments(net).back().box, (Rect{0, 50, 100, 50}));
+  const auto assignments = service.trackAssignments(net);
+  ASSERT_EQ(assignments.size(), 3u);
+  EXPECT_EQ(service.trackAssignment(assignments.front()).box, (Rect{0, 50, 100, 50}));
+  EXPECT_EQ(service.trackAssignment(assignments.back()).box, (Rect{0, 50, 100, 50}));
 
   service.clearGuides(net);
   service.clearTrackAssignments(net);

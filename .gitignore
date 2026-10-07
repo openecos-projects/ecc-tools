@@ -7,6 +7,51 @@ tags
 
 bin
 build
+# Native/standalone builds use several names besides the default build/.
+# Keep these directory patterns scoped so build.sh and builder sources remain visible.
+/build-*/
+/build_*/
+/src/database/eccdb/build-*/
+/src/database/eccdb/build_*/
+cmake-build-*/
+.build/
+_build/
+_skbuild/
+/out/
+/dist/
+
+# CMake/Ninja intermediates, including leftovers from an in-source configure.
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+DartConfiguration.tcl
+install_manifest.txt
+compile_commands.json
+build.ninja
+rules.ninja
+.ninja_deps
+.ninja_log
+CMakeUserPresets.json
+Testing/
+_deps/
+
+# Compiled outputs and Python tooling caches are rebuildable.
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.pyd
+*.exe
+*.gcda
+*.gcno
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
 catboost_info
 *.rpt
 *.idx

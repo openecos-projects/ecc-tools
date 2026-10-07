@@ -6,6 +6,7 @@
 
 #include "common/GeometryTypes.h"
 #include "design/common/DesignTypes.h"
+#include "geometry/GeometryEntity.h"
 #include "tech/common/TechLayerIds.h"
 
 namespace eccdb {
@@ -17,6 +18,13 @@ enum class DesignRegionType : uint8_t
 };
 
 struct DesignRegion
+{
+  std::string name;
+  DesignRegionType type = DesignRegionType::kFence;
+  std::vector<GeometryShapeId> rectangles;
+};
+
+struct DesignRegionInput
 {
   std::string name;
   DesignRegionType type = DesignRegionType::kFence;
@@ -65,8 +73,32 @@ struct DesignBlockage
   int32_t spacing = 0;
   int32_t design_rule_width = 0;
   uint32_t mask = 0;
+  std::vector<GeometryShapeId> rectangles;
+  std::vector<GeometryShapeId> polygons;
+};
+
+struct DesignBlockageInput
+{
+  DesignBlockageKind kind = DesignBlockageKind::kPlacement;
+  uint32_t flags = 0;
+  TechRoutingLayerId layer;
+  DesignInstanceId component;
+  double partial = 0.0;
+  int32_t spacing = 0;
+  int32_t design_rule_width = 0;
+  uint32_t mask = 0;
   std::vector<Rect> rectangles;
   std::vector<std::vector<Point>> polygons;
 };
+
+[[nodiscard]] inline GeometryOwner designRegionOwner(DesignRegionId id) noexcept
+{
+  return GeometryOwner::from(GeometryOwnerDomain::kDesignRegion, id);
+}
+
+[[nodiscard]] inline GeometryOwner designBlockageOwner(DesignBlockageId id) noexcept
+{
+  return GeometryOwner::from(GeometryOwnerDomain::kDesignBlockage, id);
+}
 
 }  // namespace eccdb

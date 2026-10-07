@@ -529,14 +529,17 @@ class TechLefWriter
     writeViaGeometryLayer(conductorLayerName(geometry.top_layer), geometry.top_geometry);
   }
 
-  void writeViaGeometryLayer(std::string_view layer, GeometryHandle geometry)
+  void writeViaGeometryLayer(std::string_view layer, std::span<const GeometryShapeId> geometry)
   {
     _output << "  LAYER " << layer << " ;\n";
-    for (const auto rect : _database.geometryPool().rectangles(geometry)) {
-      writeRect(rect);
-    }
-    for (uint32_t index = 0; index < _database.geometryPool().polygonCount(geometry); ++index) {
-      writePolygon(_database.geometryPool().polygonPoints(geometry, index));
+    const auto& storage = _database.geometryStorage();
+    for (const auto shape : geometry) {
+      const auto kind = storage.geometryRegistry().shape(shape).kind;
+      if (kind == GeometryShapeKind::kRectangle) {
+        writeRect(storage.rectangle(shape).rectangle);
+      } else if (kind == GeometryShapeKind::kPolygon) {
+        writePolygon(storage.polygonPoints(shape));
+      }
     }
   }
 

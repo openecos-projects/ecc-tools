@@ -16,9 +16,9 @@ TEST_F(DesignStorageTest, StoresSharedMasterCandidatesBlockPinCandidatesAndInsta
   const auto input_port = library.masterPortStorage().createMasterPort(input_term);
   const auto output_port = library.masterPortStorage().createMasterPort(output_term);
   const auto design_via = design.routingStorage().createVia(
-      DesignVia{.name = "DVIA", .rectangles = {{.layer = layer, .rectangle = {-2, -2, 2, 2}}}});
+      DesignViaInput{.name = "DVIA", .rectangles = {{.layer = layer, .rectangle = {-2, -2, 2, 2}}}});
   const auto io_design_via = design.routingStorage().createVia(
-      DesignVia{.name = "IO_DVIA", .rectangles = {{.layer = layer, .rectangle = {-2, -2, 2, 2}}}});
+      DesignViaInput{.name = "IO_DVIA", .rectangles = {{.layer = layer, .rectangle = {-2, -2, 2, 2}}}});
   const auto instance = design.netlistStorage().createInstance(createInstance("u1", {100, 200}));
   const auto input_pin = design.netlistStorage().findInstancePin(instance, input_term);
   const auto output_pin = design.netlistStorage().findInstancePin(instance, output_term);
@@ -185,8 +185,12 @@ TEST_F(DesignStorageTest, InvalidatesOnlyEditedBlockPinCandidates)
   pin_access.setBlockPinCandidateGroup(first, 1u, {point});
   pin_access.setBlockPinCandidateGroup(second, 1u, {point});
 
-  auto changed = netlist.blockPin(first);
-  changed.rectangles = {{.layer = layer, .rectangle = {0, 0, 20, 20}}};
+  const auto& current = netlist.blockPin(first);
+  auto changed = DesignBlockPinInput{.flags = current.flags,
+                                     .placement_status = current.placement_status,
+                                     .origin = current.origin,
+                                     .orientation = current.orientation,
+                                     .rectangles = {{.layer = layer, .rectangle = {0, 0, 20, 20}}}};
   netlist.updateBlockPin(first, changed);
   EXPECT_TRUE(pin_access.blockPinCandidateGroups(first).empty());
   ASSERT_EQ(pin_access.blockPinCandidateGroups(second).size(), 1u);

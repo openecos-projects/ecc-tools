@@ -12,7 +12,8 @@
 namespace eccdb {
 namespace {
 
-TechViaGeometry makeViaGeometry(GeometryPool& geometry_pool, TechViaMasterShapeInput shapes)
+TechViaGeometry makeViaGeometry(DomainGeometryStorage& geometry_storage, TechViaMasterId owner,
+                                TechViaMasterShapeInput shapes)
 {
   const auto normalize = [](std::vector<Rect>& rects) {
     for (auto& rect : rects) {
@@ -26,21 +27,25 @@ TechViaGeometry makeViaGeometry(GeometryPool& geometry_pool, TechViaMasterShapeI
   normalize(shapes.cut_geometry.rects);
   normalize(shapes.top_geometry.rects);
 
-  const auto mark = geometry_pool.checkpoint();
+  std::vector<GeometryShapeId> created;
   try {
     TechViaGeometry result;
     result.bottom_layer = shapes.bottom_layer;
-    result.bottom_geometry = geometry_pool.append(shapes.bottom_geometry);
+    const auto geometry_owner = GeometryOwner::from(GeometryOwnerDomain::kTechnologyVia, owner);
+    result.bottom_geometry = geometry_storage.append(geometry_owner, shapes.bottom_geometry);
+    created.insert(created.end(), result.bottom_geometry.begin(), result.bottom_geometry.end());
     result.cut_layer = shapes.cut_layer;
-    result.cut_geometry = geometry_pool.append(shapes.cut_geometry);
+    result.cut_geometry = geometry_storage.append(geometry_owner, shapes.cut_geometry);
+    created.insert(created.end(), result.cut_geometry.begin(), result.cut_geometry.end());
     result.top_layer = shapes.top_layer;
-    result.top_geometry = geometry_pool.append(shapes.top_geometry);
-    result.bounding_box = geometry_pool.bounds(result.bottom_geometry)
-                              .united(geometry_pool.bounds(result.cut_geometry))
-                              .united(geometry_pool.bounds(result.top_geometry));
+    result.top_geometry = geometry_storage.append(geometry_owner, shapes.top_geometry);
+    created.insert(created.end(), result.top_geometry.begin(), result.top_geometry.end());
+    result.bounding_box = geometry_storage.bounds(result.bottom_geometry)
+                              .united(geometry_storage.bounds(result.cut_geometry))
+                              .united(geometry_storage.bounds(result.top_geometry));
     return result;
   } catch (...) {
-    geometry_pool.rollback(mark);
+    geometry_storage.destroy(created);
     throw;
   }
 }
@@ -83,6 +88,7 @@ bool TechNonDefaultRuleStorage::destroyNonDefaultRule(TechNonDefaultRuleId id)
     }
   }
   for (const auto via : vias) {
+    destroyViaGeometry(via);
     _registry.destroy(via.entity());
   }
   _registry.destroy(id.entity());
@@ -159,34 +165,20 @@ void TechNonDefaultRuleStorage::addProperty(TechNonDefaultRuleId owner, TechNdrP
 TechViaMasterId TechNonDefaultRuleStorage::addFixedViaDefinition(TechNonDefaultRuleId owner, TechViaMaster master,
                                                                  TechViaMasterShapeInput shapes)
 {
-  const auto mark = _geometry.checkpoint();
-  try {
-    validateViaDefinition(owner, master, shapes);
-    auto geometry = makeViaGeometry(_geometry, std::move(shapes));
-    return createViaDefinition(owner, std::move(master), std::move(geometry), nullptr);
-  } catch (...) {
-    _geometry.rollback(mark);
-    throw;
-  }
+  validateViaDefinition(owner, master, shapes);
+  return createViaDefinition(owner, std::move(master), std::move(shapes), nullptr);
 }
 
 TechViaMasterId TechNonDefaultRuleStorage::addGeneratedViaDefinition(TechNonDefaultRuleId owner, TechViaMaster master,
                                                                      TechGeneratedViaMaster generated, TechViaMasterShapeInput shapes)
 {
-  const auto mark = _geometry.checkpoint();
-  try {
-    validateViaDefinition(owner, master, shapes);
-    if (!generated.via_rule_generate || !_registry.valid(generated.via_rule_generate.entity())
-        || !_registry.all_of<TechViaRuleGenerate, TechViaRuleGenerateBottomLayer, TechViaRuleGenerateCutLayer, TechViaRuleGenerateTopLayer>(
-            generated.via_rule_generate.entity())) {
-      throw std::invalid_argument("generated NDR VIA requires a valid generate rule");
-    }
-    auto geometry = makeViaGeometry(_geometry, std::move(shapes));
-    return createViaDefinition(owner, std::move(master), std::move(geometry), &generated);
-  } catch (...) {
-    _geometry.rollback(mark);
-    throw;
+  validateViaDefinition(owner, master, shapes);
+  if (!generated.via_rule_generate || !_registry.valid(generated.via_rule_generate.entity())
+      || !_registry.all_of<TechViaRuleGenerate, TechViaRuleGenerateBottomLayer, TechViaRuleGenerateCutLayer, TechViaRuleGenerateTopLayer>(
+          generated.via_rule_generate.entity())) {
+    throw std::invalid_argument("generated NDR VIA requires a valid generate rule");
   }
+  return createViaDefinition(owner, std::move(master), std::move(shapes), &generated);
 }
 
 void TechNonDefaultRuleStorage::addSameNetSpacingRule(TechNonDefaultRuleId owner, TechNdrSameNetSpacingRule rule)
@@ -216,6 +208,7 @@ bool TechNonDefaultRuleStorage::destroyViaDefinition(TechViaMasterId id)
     throw std::logic_error("NDR VIA is absent from its owner");
   }
   definitions.erase(found);
+  destroyViaGeometry(id);
   _registry.destroy(id.entity());
   return true;
 }
@@ -393,27 +386,49 @@ std::vector<TechNonDefaultRuleId> TechNonDefaultRuleStorage::nonDefaultRulesForC
   return result;
 }
 
-TechViaMasterId TechNonDefaultRuleStorage::createViaDefinition(TechNonDefaultRuleId owner, TechViaMaster master, TechViaGeometry geometry,
-                                                               TechGeneratedViaMaster* generated)
+TechViaMasterId TechNonDefaultRuleStorage::createViaDefinition(TechNonDefaultRuleId owner, TechViaMaster master,
+                                                               TechViaMasterShapeInput shapes, TechGeneratedViaMaster* generated)
 {
   ensureRule(owner);
   const auto entity = _registry.create();
+  const auto id = TechViaMasterId{entity};
+  TechViaGeometry geometry;
   try {
+    // Allocate the owning VIA entity first so every primitive records the
+    // actual TechViaMasterId, not the parent NDR id.
+    geometry = makeViaGeometry(_geometry, id, std::move(shapes));
     _registry.emplace<TechNdrViaDefinition>(entity, TechNdrViaDefinition{.owner = owner});
     _registry.emplace<TechViaMaster>(entity, std::move(master));
-    _registry.emplace<TechViaGeometry>(entity, std::move(geometry));
+    // Keep the local vectors intact until the complete owner relation is
+    // committed.  This makes every failure path able to reclaim the newly
+    // created geometry, including a later generated-component emplace or
+    // owner-vector growth failure.
+    _registry.emplace<TechViaGeometry>(entity, geometry);
     if (generated != nullptr) {
       _registry.emplace<TechGeneratedViaMaster>(entity, std::move(*generated));
     }
-    const auto id = TechViaMasterId{entity};
     _registry.get<TechNdrViaDefinitions>(owner.entity()).values.push_back(id);
     return id;
   } catch (...) {
+    _geometry.destroy(geometry.bottom_geometry);
+    _geometry.destroy(geometry.cut_geometry);
+    _geometry.destroy(geometry.top_geometry);
     if (_registry.valid(entity)) {
       _registry.destroy(entity);
     }
     throw;
   }
+}
+
+void TechNonDefaultRuleStorage::destroyViaGeometry(TechViaMasterId id) noexcept
+{
+  if (!_registry.valid(id.entity()) || !_registry.all_of<TechViaGeometry>(id.entity())) {
+    return;
+  }
+  const auto& geometry = _registry.get<const TechViaGeometry>(id.entity());
+  _geometry.destroy(geometry.bottom_geometry);
+  _geometry.destroy(geometry.cut_geometry);
+  _geometry.destroy(geometry.top_geometry);
 }
 
 bool TechNonDefaultRuleStorage::isViaReferencedOutsideOwner(TechViaMasterId via, TechNonDefaultRuleId owner) const

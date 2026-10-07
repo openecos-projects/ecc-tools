@@ -405,14 +405,17 @@ void expectGeometry(const std::vector<DesignLayerGeometry>& expected, const std:
 std::vector<std::string> viaGeometryKeys(const DesignStore& design, const DesignVia& via)
 {
   std::vector<std::string> result;
-  for (const auto& rectangle : via.rectangles) {
+  const auto& geometry = design.geometryRegistry();
+  for (const auto shape_id : via.rectangles) {
+    const auto& rectangle = geometry.get<const DesignViaRectangle>(shape_id);
     const auto& layer = design.techRegistry().registry().get<const TechLayerInfo>(rectangle.layer.entity());
     std::ostringstream key;
     key << "rect|" << layer.name << '|' << rectangle.mask << '|' << rectangle.rectangle.ll_x << ',' << rectangle.rectangle.ll_y << ','
         << rectangle.rectangle.ur_x << ',' << rectangle.rectangle.ur_y;
     result.push_back(key.str());
   }
-  for (const auto& polygon : via.polygons) {
+  for (const auto shape_id : via.polygons) {
+    const auto& polygon = geometry.get<const DesignViaPolygon>(shape_id);
     const auto& layer = design.techRegistry().registry().get<const TechLayerInfo>(polygon.layer.entity());
     std::ostringstream key;
     key << "polygon|" << layer.name << '|' << polygon.mask;
@@ -422,6 +425,28 @@ std::vector<std::string> viaGeometryKeys(const DesignStore& design, const Design
     result.push_back(key.str());
   }
   std::sort(result.begin(), result.end());
+  return result;
+}
+
+std::vector<Rect> rectanglePayloads(const DesignStore& design, const std::vector<GeometryShapeId>& ids)
+{
+  std::vector<Rect> result;
+  result.reserve(ids.size());
+  const auto& geometry = design.geometryRegistry();
+  for (const auto id : ids) {
+    result.push_back(geometry.get<const GeometryRectangle>(id).rectangle);
+  }
+  return result;
+}
+
+std::vector<std::vector<Point>> polygonPayloads(const DesignStore& design, const std::vector<GeometryShapeId>& ids)
+{
+  std::vector<std::vector<Point>> result;
+  result.reserve(ids.size());
+  const auto& geometry = design.geometryRegistry();
+  for (const auto id : ids) {
+    result.push_back(geometry.get<const GeometryPolygon>(id).points);
+  }
   return result;
 }
 
@@ -453,7 +478,9 @@ std::vector<std::string> pinPortKeys(const DesignStore& design, const DesignIoPi
   for (const auto id : pin.pins) {
     const auto& port = design.netlistStorage().blockPin(id);
     std::vector<std::string> primitives;
-    for (const auto& rectangle : port.rectangles) {
+    const auto& storage = design.netlistStorage();
+    for (const auto shape_id : port.rectangles) {
+      const auto& rectangle = storage.blockPinRectangle(shape_id);
       const auto& layer = design.techRegistry().registry().get<const TechLayerInfo>(rectangle.layer.entity());
       std::ostringstream key;
       key << "rect|" << layer.name << '|' << rectangle.rectangle.ll_x << ',' << rectangle.rectangle.ll_y << ',' << rectangle.rectangle.ur_x
@@ -461,7 +488,8 @@ std::vector<std::string> pinPortKeys(const DesignStore& design, const DesignIoPi
           << rectangle.design_rule_width;
       primitives.push_back(key.str());
     }
-    for (const auto& polygon : port.polygons) {
+    for (const auto shape_id : port.polygons) {
+      const auto& polygon = storage.blockPinPolygon(shape_id);
       const auto& layer = design.techRegistry().registry().get<const TechLayerInfo>(polygon.layer.entity());
       std::ostringstream key;
       key << "polygon|" << layer.name << '|' << polygon.flags << '|' << polygon.mask << '|' << polygon.spacing << '|'
@@ -471,7 +499,8 @@ std::vector<std::string> pinPortKeys(const DesignStore& design, const DesignIoPi
       }
       primitives.push_back(key.str());
     }
-    for (const auto& via : port.vias) {
+    for (const auto shape_id : port.vias) {
+      const auto& via = storage.blockPinVia(shape_id);
       std::ostringstream key;
       key << "via|" << pinViaName(design, via) << '|' << via.origin.x << ',' << via.origin.y << '|' << via.flags << '|' << via.top_mask
           << ',' << via.cut_mask << ',' << via.bottom_mask;
@@ -498,37 +527,36 @@ std::vector<std::string> wirePrimitives(const DesignStore& design, DesignNetId n
 
 std::vector<std::string> netGeometryPrimitives(const DesignStore& design, DesignNetId net)
 {
-  const auto* geometry = design.routingStorage().netGeometry(net);
-  if (geometry == nullptr) {
-    return {};
-  }
   std::vector<std::string> result;
-  for (const auto& rectangle : geometry->rectangles) {
-    std::ostringstream key;
-    key << "rect|" << static_cast<unsigned>(rectangle.route_status) << '|' << rectangle.shield_net << '|'
-        << layerName(design, rectangle.layer) << '|' << rectangle.flags << '|' << rectangle.mask << '|' << rectangle.shape << '|'
-        << rectangle.rectangle.ll_x << ',' << rectangle.rectangle.ll_y << ',' << rectangle.rectangle.ur_x << ','
-        << rectangle.rectangle.ur_y;
-    result.push_back(key.str());
-  }
-  for (const auto& polygon : geometry->polygons) {
-    std::ostringstream key;
-    key << "polygon|" << static_cast<unsigned>(polygon.route_status) << '|' << polygon.shield_net << '|' << layerName(design, polygon.layer)
-        << '|' << polygon.flags << '|' << polygon.mask << '|' << polygon.shape;
-    for (const auto point : polygon.points) {
-      key << '|' << point.x << ',' << point.y;
-    }
-    result.push_back(key.str());
-  }
-  for (const auto& via : geometry->vias) {
-    const auto name = via.tech_via ? design.techRegistry().registry().get<const TechViaMaster>(via.tech_via.entity()).name
-                                   : design.routingStorage().via(via.design_via).name;
-    for (const auto origin : via.origins) {
+  const auto& geometry_storage = design.geometryStorage();
+  for (const auto shape_id : geometry_storage.netShapeIds(net)) {
+    const auto view = geometry_storage.shape(shape_id);
+    if (const auto* rectangle = std::get_if<const DesignGeometryRectangle*>(&view.payload)) {
       std::ostringstream key;
-      key << "via|" << static_cast<unsigned>(via.route_status) << '|' << via.shield_net << '|' << name << '|'
-          << static_cast<unsigned>(via.orientation) << '|' << via.flags << '|' << via.top_mask << ',' << via.cut_mask << ','
-          << via.bottom_mask << '|' << via.shape << '|' << origin.x << ',' << origin.y;
+      key << "rect|" << static_cast<unsigned>((*rectangle)->route_status) << '|' << (*rectangle)->shield_net << '|'
+          << layerName(design, (*rectangle)->layer) << '|' << (*rectangle)->flags << '|' << (*rectangle)->mask << '|'
+          << (*rectangle)->shape << '|' << (*rectangle)->rectangle.ll_x << ',' << (*rectangle)->rectangle.ll_y << ','
+          << (*rectangle)->rectangle.ur_x << ',' << (*rectangle)->rectangle.ur_y;
       result.push_back(key.str());
+    } else if (const auto* polygon = std::get_if<const DesignGeometryPolygon*>(&view.payload)) {
+      std::ostringstream key;
+      key << "polygon|" << static_cast<unsigned>((*polygon)->route_status) << '|' << (*polygon)->shield_net << '|'
+          << layerName(design, (*polygon)->layer) << '|' << (*polygon)->flags << '|' << (*polygon)->mask << '|'
+          << (*polygon)->shape;
+      for (const auto point : (*polygon)->points) {
+        key << '|' << point.x << ',' << point.y;
+      }
+      result.push_back(key.str());
+    } else if (const auto* via = std::get_if<const DesignGeometryNetVia*>(&view.payload)) {
+      const auto name = (*via)->tech_via ? design.techRegistry().registry().get<const TechViaMaster>((*via)->tech_via.entity()).name
+                                         : design.routingStorage().via((*via)->design_via).name;
+      for (const auto origin : (*via)->origins) {
+      std::ostringstream key;
+        key << "via|" << static_cast<unsigned>((*via)->route_status) << '|' << (*via)->shield_net << '|' << name << '|'
+            << static_cast<unsigned>((*via)->orientation) << '|' << (*via)->flags << '|' << (*via)->top_mask << ','
+            << (*via)->cut_mask << ',' << (*via)->bottom_mask << '|' << (*via)->shape << '|' << origin.x << ',' << origin.y;
+        result.push_back(key.str());
+      }
     }
   }
   std::sort(result.begin(), result.end());
@@ -600,7 +628,10 @@ void expectEquivalent(const DesignStore& expected, const DesignStore& actual)
 {
   EXPECT_EQ(expected.globalStorage().info().name, actual.globalStorage().info().name);
   EXPECT_EQ(expected.globalStorage().info().database_units_per_micron, actual.globalStorage().info().database_units_per_micron);
-  EXPECT_EQ(expected.globalStorage().dieArea().boundary, actual.globalStorage().dieArea().boundary);
+  const auto expected_die_boundary = expected.globalStorage().dieBoundary();
+  const auto actual_die_boundary = actual.globalStorage().dieBoundary();
+  EXPECT_EQ((std::vector<Point>{expected_die_boundary.begin(), expected_die_boundary.end()}),
+            (std::vector<Point>{actual_die_boundary.begin(), actual_die_boundary.end()}));
 
   ASSERT_EQ(expected.floorplanStorage().rowCount(), 1u);
   ASSERT_EQ(actual.floorplanStorage().rowCount(), 1u);
@@ -684,8 +715,8 @@ void expectEquivalent(const DesignStore& expected, const DesignStore& actual)
   ASSERT_TRUE(expected_region_id);
   ASSERT_TRUE(actual_region_id);
   EXPECT_EQ(expected.constraintStorage().region(expected_region_id).type, actual.constraintStorage().region(actual_region_id).type);
-  EXPECT_EQ(expected.constraintStorage().region(expected_region_id).rectangles,
-            actual.constraintStorage().region(actual_region_id).rectangles);
+  EXPECT_EQ(rectanglePayloads(expected, expected.constraintStorage().region(expected_region_id).rectangles),
+            rectanglePayloads(actual, actual.constraintStorage().region(actual_region_id).rectangles));
 
   ASSERT_EQ(expected.constraintStorage().groupCount(), actual.constraintStorage().groupCount());
   const auto expected_group_id = expected.constraintStorage().findGroup("logic");
@@ -709,8 +740,8 @@ void expectEquivalent(const DesignStore& expected, const DesignStore& actual)
   EXPECT_EQ(expected_blockage.spacing, actual_blockage.spacing);
   EXPECT_EQ(expected_blockage.design_rule_width, actual_blockage.design_rule_width);
   EXPECT_EQ(expected_blockage.mask, actual_blockage.mask);
-  EXPECT_EQ(expected_blockage.rectangles, actual_blockage.rectangles);
-  EXPECT_EQ(expected_blockage.polygons, actual_blockage.polygons);
+  EXPECT_EQ(rectanglePayloads(expected, expected_blockage.rectangles), rectanglePayloads(actual, actual_blockage.rectangles));
+  EXPECT_EQ(polygonPayloads(expected, expected_blockage.polygons), polygonPayloads(actual, actual_blockage.polygons));
 }
 
 std::string_view testLef()
@@ -1075,9 +1106,7 @@ RoutingCoverage routingCoverage(const DesignStore& design)
                 shape.geometry);
           });
     }
-    if (const auto* geometry = design.routingStorage().netGeometry(net); geometry != nullptr) {
-      result.geometry_primitive_count += geometry->rectangles.size() + geometry->polygons.size() + geometry->vias.size();
-    }
+    result.geometry_primitive_count += design.geometryStorage().netShapeIds(net).size();
   }
   return result;
 }

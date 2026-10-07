@@ -7,8 +7,8 @@
 
 namespace eccdb {
 
-// Mutable Design geometry deliberately remains an ordinary nested value in
-// V1. It has no GeometryHandle or per-shape entity identity.
+// Legacy comparison/input helpers retained for differential fixtures. Canonical
+// editable design geometry lives in GeometryRegistry-owned shape entities.
 struct DesignShapeSet
 {
   std::vector<Rect> rectangles;

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <type_traits>
+#include "geometry/GeometryRegistry.h"
 
 #include "design/netlist/model/NetlistComponents.h"
 #include "design/routing/component/RoutingComponents.h"
@@ -57,8 +58,8 @@ void applyToStorage(const InstanceData& value, DesignInstance& target);
 void applyToStorage(const IoPinData& value, DesignIoPin& target);
 [[nodiscard]] IoPinData toApi(const DesignIoPin& value);
 
-[[nodiscard]] DesignVia toStorage(const DesignViaData& value);
-[[nodiscard]] DesignViaData toApi(const DesignVia& value);
+[[nodiscard]] DesignViaInput toStorage(const DesignViaData& value);
+[[nodiscard]] DesignViaData toApi(const DesignVia& value, const GeometryRegistry& geometry);
 
 [[nodiscard]] DesignWire toStorage(const WireMetadata& value);
 [[nodiscard]] WireMetadata toApi(const DesignWire& value);

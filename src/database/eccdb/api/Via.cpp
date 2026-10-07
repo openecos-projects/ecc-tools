@@ -41,7 +41,8 @@ detail::DatabaseState& DesignViaRef::state() const
 DesignViaData DesignViaRef::data() const
 {
   return detail::toApi(
-      state().design().routingStorage().via(detail::toStorageId<DesignViaId>(_id)));
+      state().design().routingStorage().via(detail::toStorageId<DesignViaId>(_id)),
+      state().design().geometryRegistry());
 }
 
 std::string_view DesignViaRef::name() const

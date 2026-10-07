@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "DesignTestFixture.h"
+#include "design/geometry/DesignGeometryComponents.h"
 
 namespace eccdb {
 namespace {
@@ -16,9 +17,9 @@ TEST_F(DesignStorageTest, StoresWireShapesAndStandaloneNetGeometry)
   auto& routing = design.routingStorage();
   const auto net = netlist.createSpecialNet(DesignNet{.name = "n1"});
   const auto local_via = routing.createVia(
-      DesignVia{.name = "LOCAL_VIA", .rectangles = {{.layer = layer, .rectangle = {-5, -5, 5, 5}}}});
+      DesignViaInput{.name = "LOCAL_VIA", .rectangles = {{.layer = layer, .rectangle = {-5, -5, 5, 5}}}});
   const auto geometry_via = routing.createVia(
-      DesignVia{.name = "GEOMETRY_VIA", .rectangles = {{.layer = layer, .rectangle = {-4, -4, 4, 4}}}});
+      DesignViaInput{.name = "GEOMETRY_VIA", .rectangles = {{.layer = layer, .rectangle = {-4, -4, 4, 4}}}});
 
   const auto wire = routing.createWire(DesignWire{.net = net, .status = DesignWireStatus::kRouted});
   const auto segment = routing.createShape(
@@ -56,16 +57,23 @@ TEST_F(DesignStorageTest, StoresWireShapesAndStandaloneNetGeometry)
   EXPECT_EQ(routing.shapeBoundingBox(segment), (Rect{-10, -10, 110, 10}));
   EXPECT_EQ(routing.shapeBoundingBox(patch), (Rect{118, -2, 122, 2}));
 
-  routing.setNetGeometry(net,
-                         DesignNetGeometry{.rectangles = {{.layer = routing_layer, .rectangle = {0, 0, 20, 20}}},
-                                           .polygons = {{.layer = routing_layer, .points = {{0, 0}, {20, 0}, {20, 20}}}},
-                                           .vias = {{.design_via = geometry_via, .origins = {{10, 10}, {30, 10}}}}});
+  auto& geometry = design.geometryStorage();
+  const auto special_rectangle
+      = geometry.appendNetShape(net, DesignNetRectangle{.layer = routing_layer, .rectangle = {0, 0, 20, 20}});
+  const auto special_polygon = geometry.appendNetShape(
+      net, DesignNetPolygon{.layer = routing_layer, .points = {{0, 0}, {20, 0}, {20, 20}}});
+  const auto special_via
+      = geometry.appendNetShape(net, DesignNetVia{.design_via = geometry_via, .origins = {{10, 10}, {30, 10}}});
   ASSERT_NE(routing.netGeometry(net), nullptr);
-  EXPECT_EQ(routing.netGeometry(net)->vias.front().origins.size(), 2u);
+  ASSERT_EQ(routing.netGeometry(net)->shapes.size(), 3u);
+  EXPECT_EQ(geometry.registry().get<const DesignGeometryNetVia>(special_via).origins.size(), 2u);
   EXPECT_FALSE(routing.destroyVia(local_via));
   EXPECT_FALSE(routing.destroyVia(geometry_via));
 
   EXPECT_TRUE(routing.destroyWire(wire));
+  EXPECT_TRUE(geometry.destroy(special_rectangle));
+  EXPECT_TRUE(geometry.destroy(special_polygon));
+  EXPECT_TRUE(geometry.destroy(special_via));
   EXPECT_TRUE(routing.destroyVia(local_via));
   EXPECT_TRUE(netlist.destroyNet(net));
   EXPECT_TRUE(routing.destroyVia(geometry_via));
@@ -107,7 +115,7 @@ TEST_F(DesignStorageTest, ViaShapeKeepsDesignViaAliveUntilWireIsDestroyed)
   auto& routing = design.routingStorage();
   const auto net = netlist.createNet(DesignNet{.name = "signal"});
   const auto design_via = routing.createVia(
-      DesignVia{.name = "WIRE_VIA", .rectangles = {{.layer = layer, .rectangle = {-2, -2, 2, 2}}}});
+      DesignViaInput{.name = "WIRE_VIA", .rectangles = {{.layer = layer, .rectangle = {-2, -2, 2, 2}}}});
   const auto wire = routing.createWire(DesignWire{.net = net});
   const auto shape = routing.createShape(wire,
                                          DesignRouteShape{.wire = wire,

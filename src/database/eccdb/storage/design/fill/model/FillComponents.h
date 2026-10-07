@@ -5,6 +5,7 @@
 
 #include "common/GeometryTypes.h"
 #include "tech/common/TechLayerIds.h"
+#include "geometry/GeometryEntity.h"
 
 namespace eccdb {
 
@@ -26,7 +27,20 @@ struct DesignFill
   TechLayerId layer;
   uint32_t flags = 0;
   uint32_t mask = 0;
+  std::vector<GeometryShapeId> rectangles;
+};
+
+struct DesignFillInput
+{
+  TechLayerId layer;
+  uint32_t flags = 0;
+  uint32_t mask = 0;
   std::vector<Rect> rectangles;
 };
+
+[[nodiscard]] inline GeometryOwner designFillOwner(DesignFillId id) noexcept
+{
+  return GeometryOwner::from(GeometryOwnerDomain::kDesignFill, id);
+}
 
 }  // namespace eccdb

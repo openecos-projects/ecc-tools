@@ -26,6 +26,9 @@ endif()
 add_library(eccdb_design
   DesignStore.cpp
   common/DesignGeometryValidation.cpp
+  geometry/DesignGeometryStorage.cpp
+  geometry/DesignGeometrySpatialIndex.cpp
+  geometry/DesignGeometryOverview.cpp
   constraint/storage/DesignConstraintStorage.cpp
   fill/storage/DesignFillStorage.cpp
   floorplan/storage/DesignFloorplanStorage.cpp
@@ -50,4 +53,5 @@ target_link_libraries(eccdb_design
   PUBLIC
     eccdb_entt
     eccdb_library
+    eccdb_boost_pfr
 )

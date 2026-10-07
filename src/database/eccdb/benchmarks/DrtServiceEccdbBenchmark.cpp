@@ -1176,7 +1176,8 @@ void validateShadowNetPinScans(const eccdb::PhysicalDesignService& physical, con
 {
   uint64_t checksum = UINT64_C(0x6);
   for (const auto& payload : cache.guide_payloads) {
-    for (const auto& guide : context.guides(payload.net)) {
+    for (const auto guide_id : context.guides(payload.net)) {
+      const auto& guide = context.guide(guide_id);
       uint64_t value = static_cast<uint64_t>(payload.net.packed()) ^ hashRect(guide.box);
       value = foldChecksum(value, static_cast<uint64_t>(guide.layer.packed()));
       value = foldChecksum(value, static_cast<uint64_t>(guide.via_layer.packed()));
