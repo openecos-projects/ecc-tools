@@ -8,6 +8,7 @@ endif()
 
 add_library(ilvs_interface
     ${ILVS_INTERFACE}/LVSInterface.cpp
+    ${ILVS_INTERFACE}/LVSInterfaceRouting.cpp
 )
 
 target_link_libraries(ilvs_interface

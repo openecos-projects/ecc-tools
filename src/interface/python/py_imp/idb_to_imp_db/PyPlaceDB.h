@@ -15,6 +15,10 @@
 #include "IdbInstance.h"
 #include "idm.h"
 
+namespace ista {
+struct TimingSnapshot;
+}
+
 namespace python_interface {
 typedef int coordinate_type;
 typedef int index_type;
@@ -33,7 +37,7 @@ double intersectDistance(Box const& i1, Box const& i2, bool is_x);
 /// \return the intersection area of two boxes
 double intersectArea(Box const& b1, Box const& b2);
 
-bool isInvailidNet(IdbNet* net);
+bool isInvailidNet(IdbNet* net, bool with_sta = false);
 
 std::string IdbOrientToString(IdbOrient orient);
 
@@ -77,7 +81,7 @@ struct PyPlaceDB
 
   pybind11::dict net_name2id_map;         ///< net name to id map
   pybind11::list net_names;               ///< net name
-  pybind11::list clock_net_names;         ///< clock nets omitted from placement routing data
+  pybind11::list clock_net_names;         ///< clock identities; retained for timing with zero placement weight
   pybind11::list net2pin_map;             ///< array of 1D array, each row stores pin id
   pybind11::list flat_net2pin_map;        ///< flatten version of net2pin_map
   pybind11::list flat_net2pin_start_map;  ///< starting index of each net in flat_net2pin_map
@@ -89,6 +93,126 @@ struct PyPlaceDB
 
   pybind11::list pin2node_map;  ///< 1D array, contain parent node id of each pin
   pybind11::list pin2net_map;   ///< 1D array, contain parent net id of each pin
+
+  // Timing export.  Indices are design-pin ids, times are ps, capacitances
+  // are pF, and CSR offsets are half-open [start, end) ranges.
+  int timing_schema_version = 0;
+  pybind11::list timing_diagnostics;
+  pybind11::list timing_clock_names;
+  pybind11::list timing_clock_info;
+  double timing_source_time_unit_ps = 1.0;
+  double timing_source_capacitance_unit_pf = 1.0;
+  double timing_source_resistance_unit_ohm = 1.0;
+  std::string timing_unit_provenance;
+  std::string timing_sdc_path;
+  std::string timing_spef_path;
+  std::string timing_parasitics_initialization;
+  pybind11::list start_points;
+  pybind11::list end_points;
+  pybind11::list clock_pins;
+  pybind11::list FF_ids;
+  pybind11::list clk_pin_r_aat;
+  pybind11::list clk_pin_f_aat;
+  pybind11::list clk_pin_rtran;
+  pybind11::list clk_pin_ftran;
+  pybind11::list clk_pin_names;
+  pybind11::list inrdelays;
+  pybind11::list infdelays;
+  pybind11::list inrtrans;
+  pybind11::list inftrans;
+  pybind11::list outcaps;
+  pybind11::list endpoints_rRAT;
+  pybind11::list endpoints_fRAT;
+  pybind11::list backend_endpoint_rAAT;
+  pybind11::list backend_endpoint_fAAT;
+  pybind11::list backend_endpoint_rRAT;
+  pybind11::list backend_endpoint_fRAT;
+  pybind11::list backend_endpoint_rSlew;
+  pybind11::list backend_endpoint_fSlew;
+  pybind11::list backend_endpoint_min_rAAT;
+  pybind11::list backend_endpoint_min_fAAT;
+  pybind11::list backend_endpoint_min_rRAT;
+  pybind11::list backend_endpoint_min_fRAT;
+  pybind11::list net2driver_pin_map;
+  pybind11::list net_flat_arcs_start;
+  pybind11::list net_flat_arcs;
+  pybind11::list inst_flat_arcs_start;
+  pybind11::list inst_flat_arcs;
+  pybind11::list flat_inst_arcs_by_level;
+  pybind11::list flat_inst_arcs_by_level_start;
+  pybind11::list flat_pin_to_graph;
+  pybind11::list flat_pin_to_graph_start;
+  pybind11::list flat_pin_to_graph_reverse;
+  pybind11::list flat_pin_to_graph_start_reverse;
+  pybind11::list pin_pair_arc_keys;
+  pybind11::list flat_pin_pair_arc_start;
+  pybind11::list flat_pin_pair_arc_indices;
+  pybind11::list arc_level_start;
+  pybind11::list arc_src_pin;
+  pybind11::list arc_dst_pin;
+  pybind11::list arc_inst_id;
+  pybind11::list arc_libcell_id;
+  pybind11::list arc_libarc_id;
+  pybind11::list arc_sense;
+  pybind11::list arc_type;
+  pybind11::list arc_offset;
+  pybind11::list pin_pred_start;
+  pybind11::list pin_pred_pin;
+  pybind11::list pin_pred_arc_id;
+  pybind11::list pin_succ_start;
+  pybind11::list pin_succ_pin;
+  pybind11::list pin_succ_arc_id;
+  pybind11::list endpoint_pin_ids;
+  pybind11::list start_pin_ids;
+  pybind11::list pin_to_inst_id;
+  pybind11::list pin_to_node_id;
+  pybind11::list inst_topo_start;
+  pybind11::list inst_topo_ids;
+  pybind11::list endpoints_constraint_arcs;
+  pybind11::list endpoints_timing_check_arcs;
+
+  pybind11::list flat_libcell_info;
+  int32_t buffer_main_type_index = -1;
+  std::string buffer_main_type_status = "unsupported";
+  pybind11::list buffer_main_type_candidate_indices;
+  pybind11::list flat_libcell_names;
+  pybind11::list flat_libcell_width;
+  pybind11::list flat_libcell_height;
+  pybind11::list flat_libcell_leakage;
+  pybind11::list flat_libcell_main_id2size_vt_limit;
+  pybind11::list main_id_is_sizeable;
+  pybind11::list main_id_2_cell_id_start;
+  pybind11::list inst_main_id;
+  pybind11::list inst_libcell_offset;
+  pybind11::list cell_id_2_arc_id_start;
+  pybind11::list cell_id_2_libpin_id_start;
+  pybind11::list pin_2_libpin_offset;
+  pybind11::list flat_lib_pin_offset_x;
+  pybind11::list flat_lib_pin_offset_y;
+  pybind11::list flat_lib_pin_cap;
+  pybind11::list flat_lib_pin_rcap;
+  pybind11::list flat_lib_pin_fcap;
+  pybind11::list flat_lib_pin_cap_limit;
+  pybind11::list flat_lib_pin_slew_limit;
+  pybind11::list flat_libarc_info;
+  pybind11::list f_delay_flat_luts_values;
+  pybind11::list f_delay_flat_luts_trans_table;
+  pybind11::list f_delay_flat_luts_cap_table;
+  pybind11::list f_delay_flat_luts_dim;
+  pybind11::list r_delay_flat_luts_values;
+  pybind11::list r_delay_flat_luts_trans_table;
+  pybind11::list r_delay_flat_luts_cap_table;
+  pybind11::list r_delay_flat_luts_dim;
+  pybind11::list f_trans_flat_luts_values;
+  pybind11::list f_trans_flat_luts_trans_table;
+  pybind11::list f_trans_flat_luts_cap_table;
+  pybind11::list f_trans_flat_luts_dim;
+  pybind11::list r_trans_flat_luts_values;
+  pybind11::list r_trans_flat_luts_trans_table;
+  pybind11::list r_trans_flat_luts_cap_table;
+  pybind11::list r_trans_flat_luts_dim;
+  double c_unit = 1.0;
+  double r_unit = 1.0;
 
   pybind11::list rows;  ///< NumRows x 4 array, stores xl, yl, xh, yh of each row
 
@@ -113,6 +237,10 @@ struct PyPlaceDB
   pybind11::list initial_vertical_demand_map;    ///< initial routing demand from fixed cells, indexed by (layer, grid x, grid y)
   pybind11::list min_wire_widths;                ///< min wire width for each routing layer
   pybind11::list min_wire_spacings;              ///< min wire spacing for each routing layer
+
+  // A native mutation invalidates this snapshot until a full PyPlaceDB rebuild.
+  bool native_state_dirty = false;
+  uint64_t native_mutation_epoch = 0;
 
   int xl;
   int yl;
@@ -140,9 +268,12 @@ struct PyPlaceDB
   std::size_t writeMacroPlacementBack(
       const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
       const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y);
+  pybind11::dict applySizing(const std::vector<int>& cell_ids, const std::vector<std::string>& target_master_names);
+  pybind11::dict applyBufferActions(const pybind11::list& actions, const std::string& action_digest);
 
   void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
            bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true);
+  void init_timing(const ista::TimingSnapshot& snapshot, idm::DataManager* db);
   void init_routability(idm::DataManager* db, std::vector<IdbInstance*> inst_resort_list);
   std::vector<std::vector<float>> getCongestionMap(string method = "max", string stage = "egr3D", string resolve_congestion = "low");
 

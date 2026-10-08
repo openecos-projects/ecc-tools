@@ -92,9 +92,15 @@
             ];
             sha256 = "de5e6b0e4913395c6bdfa90537febd9028ea4c0735d2cdb0cd9b45d5f51264f5";
           };
-          boost-build = pkgs.boost-build.override {
+          # nixpkgs' fix-clang-target.patch targets the pre-1.91 clang.jam
+          # layout and fails during the Boost 1.91 source unpack. Boost 1.91
+          # already carries the current clang target handling, so keep the
+          # matching b2 source but omit that stale nixpkgs patch.
+          boost-build = (pkgs.boost-build.override {
             useBoost = self;
-          };
+          }).overrideAttrs (_: {
+            patches = [];
+          });
         });
     in {
       packages.default = pkgs.callPackage ecc-tools-bin { inherit boost191; };

@@ -98,6 +98,8 @@ class STAInterface
   void runSTA();
   void extractLib();
   void destroySTA();
+  bool isInitialized() const { return _initialized; }
+  bool isTimingReady() const { return _timing_ready; }
 #endif
 
 #endif
@@ -199,6 +201,9 @@ class STAInterface
 
  private:
   static STAInterface* _sta_interface_instance;
+
+  bool _initialized = false;
+  bool _timing_ready = false;
 
   STAInterface() = default;
   STAInterface(const STAInterface& other) = delete;

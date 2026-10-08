@@ -395,17 +395,39 @@ void TimingAnalyzer::seedEndPointRequired(double required_time)
 {
   Database& database = STADM.getDatabase();
   for (std::string& end_point : database.get_end_point_list()) {
-    database.get_timing_point_map()[end_point].set_required(getEndPointRequired(end_point, required_time, AnalysisType::kMax));
+    TimingPoint& point = database.get_timing_point_map()[end_point];
+    point.set_required(getEndPointRequired(end_point, required_time, AnalysisType::kMax));
+    point.set_setup_check_time(getEndPointSetupCheckTime(end_point));
   }
 }
 
-double TimingAnalyzer::getEndPointRequired(std::string& end_point, double default_required_time, AnalysisType analysis_type)
+TimingPathState* TimingAnalyzer::getWorstEndPointPathState(std::string& end_point, AnalysisType analysis_type)
 {
   Database& database = STADM.getDatabase();
   TimingPathState* end_path_state = getWorstPathState(database.get_timing_point_map()[end_point], analysis_type, PathSourceType::kInput);
   if (end_path_state == nullptr) {
     end_path_state = getWorstPathState(database.get_timing_point_map()[end_point], analysis_type, PathSourceType::kRegister);
   }
+  return end_path_state;
+}
+
+double TimingAnalyzer::getEndPointSetupCheckTime(std::string& end_point)
+{
+  TimingCheckArc* arc = getEndPointCheckArc(end_point, AnalysisType::kMax);
+  if (arc == nullptr || arc->get_check_type() != TimingCheckType::kSetup) {
+    return 0.0;
+  }
+  const TimingPathState* state = getWorstEndPointPathState(end_point, AnalysisType::kMax);
+  const TransType data_trans_type = state == nullptr ? TransType::kRise : state->get_trans_type();
+  if (!isMatchCheckTransType(*arc, data_trans_type)) {
+    return 0.0;
+  }
+  return getEndPointCheckTime(end_point, *arc, AnalysisType::kMax, data_trans_type, state == nullptr ? 0.0 : state->get_slew());
+}
+
+double TimingAnalyzer::getEndPointRequired(std::string& end_point, double default_required_time, AnalysisType analysis_type)
+{
+  const TimingPathState* end_path_state = getWorstEndPointPathState(end_point, analysis_type);
   if (end_path_state == nullptr) {
     return getEndPointRequired(end_point, default_required_time, analysis_type, TransType::kRise, 0.0);
   }

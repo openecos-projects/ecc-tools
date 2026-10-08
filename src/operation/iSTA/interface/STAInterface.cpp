@@ -17,6 +17,7 @@
 #include "STAInterface.hpp"
 
 #include <stdexcept>
+#include <cmath>
 
 #ifdef __GLIBC__
 #include <malloc.h>
@@ -99,11 +100,17 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   sdc::registerSdcCommands(SdcCommand::getInst());
   STADM.readConstraint();
 
+  _initialized = true;
+  _timing_ready = false;
+
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void STAInterface::runSTA()
 {
+  if (!_initialized) {
+    throw std::runtime_error("STA must be initialized before runSTA");
+  }
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
@@ -135,11 +142,16 @@ void STAInterface::runSTA()
 
   STADC.destroy();
 
+  _timing_ready = true;
+
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void STAInterface::extractLib()
 {
+  if (!_initialized) {
+    throw std::runtime_error("STA must be initialized before extractLib");
+  }
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
@@ -194,6 +206,9 @@ void STAInterface::destroySTA()
   STALOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   // clang-format on
   Logger::destroyInst();
+
+  _initialized = false;
+  _timing_ready = false;
 
 #ifdef __GLIBC__
   // Every STA object (liberty trees, wrapped netlist, timing graph, report
@@ -609,6 +624,22 @@ void STAInterface::wrapTimingCell(idb::LibCell* lib_cell)
   timing_cell.set_cell_name(lib_cell->get_cell_name());
   timing_cell.set_library_name(lib_library->get_lib_name());
   timing_cell.set_area(lib_cell->get_cell_area());
+  const double power_scale = lib_library->get_power_unit_mw_scale();
+  if (power_scale > 0.0) {
+    double leakage_mw = lib_cell->has_cell_leakage_power() ? lib_cell->get_cell_leakage_power() : 0.0;
+    if (leakage_mw <= 0.0) {
+      double positive_sum = 0.0;
+      int positive_count = 0;
+      for (idb::LibLeakagePower* power : lib_cell->getLeakagePowerList()) {
+        if (power != nullptr && std::isfinite(power->get_value()) && power->get_value() > 0.0) {
+          positive_sum += power->get_value();
+          ++positive_count;
+        }
+      }
+      if (positive_count > 0) leakage_mw = positive_sum / positive_count;
+    }
+    timing_cell.set_leakage_power(leakage_mw / power_scale);
+  }
   timing_cell.set_is_sequential(lib_cell->isSequentialCell());
   timing_cell.set_is_clock_gating(lib_cell->isICG());
   timing_cell.set_is_macro(lib_cell->isMacroCell());
@@ -648,6 +679,9 @@ void STAInterface::wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib
   idb::LibLibrary* library = lib_port->get_ower_cell()->get_owner_lib();
   timing_cell_port.set_fanout_load(lib_port->get_fanout_load().value_or(library->get_default_fanout_load().value_or(0.0)));
   timing_cell_port.set_max_fanout(lib_port->get_max_fanout() ? lib_port->get_max_fanout() : library->get_default_max_fanout());
+  timing_cell_port.set_max_capacitance(lib_port->get_port_cap_limit(idb::AnalysisMode::kMax));
+  const auto max_transition = lib_port->get_port_slew_limit(idb::AnalysisMode::kMax);
+  timing_cell_port.set_max_transition(max_transition ? max_transition : library->get_default_max_transition());
   for (idb::AnalysisMode analysis_mode : {idb::AnalysisMode::kMax, idb::AnalysisMode::kMin}) {
     for (idb::TransType trans_type : {idb::TransType::kRise, idb::TransType::kFall}) {
       std::optional<double> port_cap = lib_port->get_port_cap(analysis_mode, trans_type);
