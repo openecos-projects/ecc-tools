@@ -29,16 +29,33 @@ class EMMetalRule
   std::string& get_name() { return _name; }
   double get_em_limit_ma_per_um() { return _em_limit_ma_per_um; }
   double get_em_adjust_um() { return _em_adjust_um; }
+  double get_resistance_per_square() { return _resistance_per_square; }
+  double get_tnom_c() { return _tnom_c; }
+  double get_coeff_rt1() { return _coeff_rt1; }
+  double get_coeff_rt2() { return _coeff_rt2; }
   // setter
   void set_name(const std::string& name) { _name = name; }
   void set_em_limit_ma_per_um(double em_limit_ma_per_um) { _em_limit_ma_per_um = em_limit_ma_per_um; }
   void set_em_adjust_um(double em_adjust_um) { _em_adjust_um = em_adjust_um; }
+  void set_resistance_per_square(double resistance_per_square) { _resistance_per_square = resistance_per_square; }
+  void set_tnom_c(double tnom_c) { _tnom_c = tnom_c; }
+  void set_coeff_rt1(double coeff_rt1) { _coeff_rt1 = coeff_rt1; }
+  void set_coeff_rt2(double coeff_rt2) { _coeff_rt2 = coeff_rt2; }
+  double resistancePerSquareAt(double temperature_c) const
+  {
+    double delta_t = temperature_c - _tnom_c;
+    return _resistance_per_square * (1.0 + _coeff_rt1 * delta_t + _coeff_rt2 * delta_t * delta_t);
+  }
   // function
 
  private:
   std::string _name;
   double _em_limit_ma_per_um = 0.0;
   double _em_adjust_um = 0.0;
+  double _resistance_per_square = 0.0;
+  double _tnom_c = 25.0;
+  double _coeff_rt1 = 0.0;
+  double _coeff_rt2 = 0.0;
 };
 
 class EMViaRule
@@ -50,16 +67,25 @@ class EMViaRule
   std::string& get_name() { return _name; }
   double get_em_limit_ma() { return _em_limit_ma; }
   double get_reference_area_um2() { return _reference_area_um2; }
+  double get_resistance_per_cut() { return _resistance_per_cut; }
+  std::string& get_lower_layer_name() { return _lower_layer_name; }
+  std::string& get_upper_layer_name() { return _upper_layer_name; }
   // setter
   void set_name(const std::string& name) { _name = name; }
   void set_em_limit_ma(double em_limit_ma) { _em_limit_ma = em_limit_ma; }
   void set_reference_area_um2(double reference_area_um2) { _reference_area_um2 = reference_area_um2; }
+  void set_resistance_per_cut(double resistance_per_cut) { _resistance_per_cut = resistance_per_cut; }
+  void set_lower_layer_name(const std::string& name) { _lower_layer_name = name; }
+  void set_upper_layer_name(const std::string& name) { _upper_layer_name = name; }
   // function
 
  private:
   std::string _name;
   double _em_limit_ma = 0.0;
   double _reference_area_um2 = 0.0;
+  double _resistance_per_cut = 0.0;
+  std::string _lower_layer_name;
+  std::string _upper_layer_name;
 };
 
 class EMTech

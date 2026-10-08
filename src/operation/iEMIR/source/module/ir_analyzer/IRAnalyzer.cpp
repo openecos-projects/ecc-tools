@@ -17,9 +17,9 @@
 #include "IRAnalyzer.hpp"
 
 #include <Eigen/Sparse>
-#include <Eigen/SparseLU>
 
 #include "DataManager.hpp"
+#include "IRLinearSolver.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PowerEdge.hpp"
@@ -27,6 +27,9 @@
 #include "Utility.hpp"
 
 namespace iemir {
+
+IRAnalyzer::IRAnalyzer() = default;
+IRAnalyzer::~IRAnalyzer() = default;
 
 // public
 
@@ -68,7 +71,9 @@ void IRAnalyzer::analyze()
   diagnostics_file << "net,net_type,node_count,edge_count,source_count,pin_mapped_current_a,generic_current_a,pin_current_coverage_pct,"
                       "load_current_a,source_current_a,current_balance_error_a,"
                       "current_balance_relative,max_abs_residual_a,l2_residual_a,relative_l2_residual,"
-                      "source_node_load_current_a,total_load_current_a\n";
+                      "source_node_load_current_a,total_load_current_a,solver,prepare_seconds,solve_seconds,iterations,"
+                      "matrix_reused,symbolic_reused,fallback,partition_count,partition_depth,"
+                      "symbolic_preparations,numeric_preparations,solve_count\n";
   analyzePowerGraphList(diagnostics_file);
   diagnostics_file.close();
   EMIRLOG.info(Loc::current(), "IR solver diagnostics: ", diagnostics_path);
@@ -82,6 +87,8 @@ IRAnalyzer* IRAnalyzer::_ia_instance = nullptr;
 
 void IRAnalyzer::analyzePowerGraphList(std::ofstream& diagnostics_file)
 {
+  const auto& graphs = EMIRDM.getDatabase().get_power_graph_map();
+  std::erase_if(_solver_map, [&](const auto& entry) { return graphs.count(entry.first) == 0; });
   for (std::pair<const std::string, PowerGraph>& power_graph_pair : EMIRDM.getDatabase().get_power_graph_map()) {
     analyzePowerGraph(power_graph_pair.second, diagnostics_file);
   }
@@ -164,8 +171,7 @@ void IRAnalyzer::buildInstanceNodeCurrent(PowerGraph& power_graph, uint64_t inst
   if (!instance_power.get_has_average_current() && instance_power.get_voltage() <= EMIR_ERROR) {
     EMIRLOG.error(Loc::current(), "The instance power voltage is invalid!");
   }
-  double instance_current = instance_power.get_has_average_current() ? instance_power.get_average_current()
-                                                                    : total_power / instance_power.get_voltage();
+  double instance_current = instance_power.get_has_average_current() ? instance_power.get_average_current() : total_power / instance_power.get_voltage();
   // PT-PX currents for small blocks commonly fall below the generic 1e-6
   // geometry/voltage tolerance. Only an actual zero means there is no load.
   if (instance_current == 0.0) {
@@ -176,8 +182,7 @@ void IRAnalyzer::buildInstanceNodeCurrent(PowerGraph& power_graph, uint64_t inst
     EMIRLOG.error(Loc::current(), "The instance power graph mapping is invalid!");
   }
   double current_sign = power_graph.get_net_type() == PowerNetType::kPower ? -1.0 : 1.0;
-  auto distribute_current = [&ia_model](const std::set<std::size_t>& node_ids, const std::map<std::size_t, double>& weights,
-                                        double current) {
+  auto distribute_current = [&ia_model](const std::set<std::size_t>& node_ids, const std::map<std::size_t, double>& weights, double current) {
     double total_weight = 0.0;
     for (std::size_t node_id : node_ids) {
       auto weight = weights.find(node_id);
@@ -278,9 +283,7 @@ void IRAnalyzer::solveNodeVoltage(PowerGraph& power_graph, IAModel& ia_model, st
     if (!first_is_source) {
       std::size_t first_matrix_idx = ia_model.get_node_id_to_matrix_idx_map()[first_node_id];
       conductance_triplet_list.emplace_back(first_matrix_idx, first_matrix_idx, conductance);
-      if (second_is_source) {
-        current_vector[first_matrix_idx] += conductance * ia_model.get_source_voltage();
-      } else {
+      if (!second_is_source) {
         std::size_t second_matrix_idx = ia_model.get_node_id_to_matrix_idx_map()[second_node_id];
         conductance_triplet_list.emplace_back(first_matrix_idx, second_matrix_idx, -conductance);
       }
@@ -291,22 +294,39 @@ void IRAnalyzer::solveNodeVoltage(PowerGraph& power_graph, IAModel& ia_model, st
       if (!first_is_source) {
         std::size_t first_matrix_idx = ia_model.get_node_id_to_matrix_idx_map()[first_node_id];
         conductance_triplet_list.emplace_back(second_matrix_idx, first_matrix_idx, -conductance);
-      } else {
-        current_vector[second_matrix_idx] += conductance * ia_model.get_source_voltage();
       }
     }
   }
   conductance_matrix.setFromTriplets(conductance_triplet_list.begin(), conductance_triplet_list.end());
 
-  Eigen::SparseLU<Eigen::SparseMatrix<double>> conductance_solver;
-  conductance_solver.compute(conductance_matrix);
-  if (conductance_solver.info() != Eigen::Success) {
-    EMIRLOG.error(Loc::current(), "The power conductance matrix factorization failed!");
+  // Solve offsets from the common ideal-source voltage: G * delta_v = I.
+  // This avoids measuring a small load residual against the nominal supply RHS.
+  IRLinearSolver::Points points(matrix_size);
+  for (PowerNode& node : power_graph.get_node_list()) {
+    auto index = ia_model.get_node_id_to_matrix_idx_map().find(node.get_node_id());
+    if (index != ia_model.get_node_id_to_matrix_idx_map().end()) {
+      points[index->second] = {double(node.get_x()), double(node.get_y())};
+    }
   }
-  Eigen::VectorXd voltage_vector = conductance_solver.solve(current_vector);
-  if (conductance_solver.info() != Eigen::Success) {
-    EMIRLOG.error(Loc::current(), "The power conductance matrix solve failed!");
+  auto& solver = _solver_map[power_graph.get_net_name()];
+  if (!solver)
+    solver = std::make_unique<IRLinearSolver>();
+  IRSolverOptions options;
+  options.method = EMIRDM.getConfig().ir_solver;
+  options.relative_tolerance = EMIRDM.getConfig().ir_solver_tolerance;
+  options.max_iterations = EMIRDM.getConfig().ir_solver_max_iterations;
+  Eigen::VectorXd voltage_vector;
+  try {
+    if (options.relative_tolerance > 1.e-8) {
+      throw std::invalid_argument("ir_solver_tolerance must be <= 1e-8 to preserve IR residual/current-balance checks");
+    }
+    solver->prepare(conductance_matrix, points, options);
+    voltage_vector = solver->solve(current_vector);
+  } catch (const std::exception& error) {
+    EMIRLOG.error(Loc::current(), "IR solve failed for net ", power_graph.get_net_name(), ": ", error.what());
+    return;
   }
+  const auto& stats = solver->stats();
   Eigen::VectorXd residual_vector = conductance_matrix * voltage_vector - current_vector;
   double max_abs_residual = residual_vector.size() == 0 ? 0.0 : residual_vector.cwiseAbs().maxCoeff();
   double l2_residual = residual_vector.norm();
@@ -326,25 +346,26 @@ void IRAnalyzer::solveNodeVoltage(PowerGraph& power_graph, IAModel& ia_model, st
   double current_balance_relative = std::abs(current_balance_error) / std::max(std::abs(load_current), 1.0e-30);
   double classified_current = ia_model.get_pin_mapped_current() + ia_model.get_generic_current();
   double pin_current_coverage = classified_current > 1.0e-30 ? 100.0 * ia_model.get_pin_mapped_current() / classified_current : 0.0;
-  diagnostics_file << std::setprecision(12) << power_graph.get_net_name() << ','
-                   << (power_graph.get_net_type() == PowerNetType::kPower ? "POWER" : "GROUND") << ',' << power_graph.get_node_list().size()
-                   << ',' << power_graph.get_edge_list().size() << ',' << ia_model.get_source_node_id_set().size() << ','
-                   << ia_model.get_pin_mapped_current() << ',' << ia_model.get_generic_current() << ',' << pin_current_coverage << ',' << load_current << ','
-                   << source_current << ',' << current_balance_error << ',' << current_balance_relative << ',' << max_abs_residual << ','
-                   << l2_residual << ',' << relative_l2_residual << ',' << source_node_load_current << ','
-                   << load_current + source_node_load_current << '\n';
+  diagnostics_file << std::setprecision(12) << power_graph.get_net_name() << ',' << (power_graph.get_net_type() == PowerNetType::kPower ? "POWER" : "GROUND")
+                   << ',' << power_graph.get_node_list().size() << ',' << power_graph.get_edge_list().size() << ',' << ia_model.get_source_node_id_set().size()
+                   << ',' << ia_model.get_pin_mapped_current() << ',' << ia_model.get_generic_current() << ',' << pin_current_coverage << ',' << load_current
+                   << ',' << source_current << ',' << current_balance_error << ',' << current_balance_relative << ',' << max_abs_residual << ',' << l2_residual
+                   << ',' << relative_l2_residual << ',' << source_node_load_current << ',' << load_current + source_node_load_current << ',' << stats.method
+                   << ',' << stats.prepare_seconds << ',' << stats.solve_seconds << ',' << stats.iterations << ',' << stats.reused_matrix << ','
+                   << stats.reused_symbolic << ',' << stats.fallback << ',' << stats.partition_count << ',' << stats.partition_depth << ','
+                   << stats.symbolic_preparations << ',' << stats.numeric_preparations << ',' << stats.solves << '\n';
   EMIRLOG.info(Loc::current(), "IR solve ", power_graph.get_net_name(), ": relative_residual=", relative_l2_residual,
-               ", current_balance=", current_balance_relative, ", load_current=", load_current, " A");
-  if (!std::isfinite(relative_l2_residual) || !std::isfinite(current_balance_relative) || relative_l2_residual > 1.0e-6
-      || current_balance_relative > 1.0e-4) {
+               ", current_balance=", current_balance_relative, ", load_current=", load_current, " A, solver=", stats.method,
+               ", prepare=", stats.prepare_seconds, " s, solve=", stats.solve_seconds, " s, reused=", stats.reused_matrix, ", iterations=", stats.iterations,
+               ", fallback=", stats.fallback);
+  if (!std::isfinite(relative_l2_residual) || !std::isfinite(current_balance_relative) || relative_l2_residual > 1.0e-6 || current_balance_relative > 1.0e-4) {
     EMIRLOG.error(Loc::current(), "IR solve failed residual/current-balance validation for net ", power_graph.get_net_name());
   } else if (current_balance_relative > 1.0e-6) {
-    EMIRLOG.warn(Loc::current(), "IR solve current-balance error exceeds 1 ppm for net ", power_graph.get_net_name(), ": ",
-                 current_balance_relative);
+    EMIRLOG.warn(Loc::current(), "IR solve current-balance error exceeds 1 ppm for net ", power_graph.get_net_name(), ": ", current_balance_relative);
   }
 
   for (std::size_t matrix_idx = 0; matrix_idx < matrix_size; matrix_idx++) {
-    node_voltage_list[matrix_idx] = voltage_vector[matrix_idx];
+    node_voltage_list[matrix_idx] = ia_model.get_source_voltage() + voltage_vector[matrix_idx];
   }
   updatePowerNodeVoltage(power_graph, ia_model, node_voltage_list);
 }

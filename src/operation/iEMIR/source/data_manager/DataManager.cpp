@@ -16,8 +16,8 @@
 // ***************************************************************************************
 #include "DataManager.hpp"
 
-#include "EMTech.hpp"
 #include "EMIRInterface.hpp"
+#include "EMTech.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PTPXPowerReader.hpp"
@@ -93,30 +93,55 @@ bool parseDouble(const std::string& text, double& value)
   return end != text.c_str();
 }
 
-void addMetalRule(iemir::EMTech& em_tech, const std::string& name, double em_limit_ma_per_um, double em_adjust_um)
+void addMetalRule(iemir::EMTech& em_tech, const std::string& name, double em_limit_ma_per_um, double em_adjust_um,
+                  double resistance_per_square = 0.0, double tnom_c = 25.0, double coeff_rt1 = 0.0, double coeff_rt2 = 0.0)
 {
-  if (name.empty() || em_limit_ma_per_um <= 0.0) {
+  if (name.empty() || (em_limit_ma_per_um <= 0.0 && resistance_per_square <= 0.0)) {
     return;
   }
   for (const std::string& alias : getRuleAliases(name)) {
     iemir::EMMetalRule rule;
+    auto existing = em_tech.get_metal_rule_map().find(alias);
+    if (existing != em_tech.get_metal_rule_map().end()) {
+      rule = existing->second;
+    }
     rule.set_name(alias);
-    rule.set_em_limit_ma_per_um(em_limit_ma_per_um);
-    rule.set_em_adjust_um(em_adjust_um);
+    if (em_limit_ma_per_um > 0.0) {
+      rule.set_em_limit_ma_per_um(em_limit_ma_per_um);
+      rule.set_em_adjust_um(em_adjust_um);
+    }
+    if (resistance_per_square > 0.0) {
+      rule.set_resistance_per_square(resistance_per_square);
+      rule.set_tnom_c(tnom_c);
+      rule.set_coeff_rt1(coeff_rt1);
+      rule.set_coeff_rt2(coeff_rt2);
+    }
     em_tech.get_metal_rule_map()[alias] = rule;
   }
 }
 
-void addViaRule(iemir::EMTech& em_tech, const std::string& name, double em_limit_ma, double reference_area_um2)
+void addViaRule(iemir::EMTech& em_tech, const std::string& name, double em_limit_ma, double reference_area_um2,
+                double resistance_per_cut = 0.0, const std::string& lower_layer = "", const std::string& upper_layer = "")
 {
-  if (name.empty() || em_limit_ma <= 0.0) {
+  if (name.empty() || (em_limit_ma <= 0.0 && resistance_per_cut <= 0.0)) {
     return;
   }
   for (const std::string& alias : getRuleAliases(name)) {
     iemir::EMViaRule rule;
+    auto existing = em_tech.get_via_rule_map().find(alias);
+    if (existing != em_tech.get_via_rule_map().end()) {
+      rule = existing->second;
+    }
     rule.set_name(alias);
-    rule.set_em_limit_ma(em_limit_ma);
-    rule.set_reference_area_um2(reference_area_um2);
+    if (em_limit_ma > 0.0) {
+      rule.set_em_limit_ma(em_limit_ma);
+      rule.set_reference_area_um2(reference_area_um2);
+    }
+    if (resistance_per_cut > 0.0) {
+      rule.set_resistance_per_cut(resistance_per_cut);
+      rule.set_lower_layer_name(lower_layer);
+      rule.set_upper_layer_name(upper_layer);
+    }
     em_tech.get_via_rule_map()[alias] = rule;
   }
 }
@@ -230,9 +255,6 @@ void DataManager::buildConfig()
   if (!_config.ploc_file_path.empty()) {
     _config.ploc_file_path = std::filesystem::absolute(_config.ploc_file_path);
   }
-  if (!_config.redhawk_res_network_file_path.empty()) {
-    _config.redhawk_res_network_file_path = std::filesystem::absolute(_config.redhawk_res_network_file_path);
-  }
   if (!_config.em_limit_file_path.empty()) {
     _config.em_limit_file_path = std::filesystem::absolute(_config.em_limit_file_path);
   }
@@ -306,8 +328,7 @@ void DataManager::readPowerSourceFile()
       EMIRLOG.error(Loc::current(), "Invalid PLOC record at line ", line_number, ": ", line);
     }
     type_name = toUpper(type_name);
-    PowerNetType net_type = type_name == "POWER" ? PowerNetType::kPower
-                                                 : (type_name == "GROUND" ? PowerNetType::kGround : PowerNetType::kNone);
+    PowerNetType net_type = type_name == "POWER" ? PowerNetType::kPower : (type_name == "GROUND" ? PowerNetType::kGround : PowerNetType::kNone);
     if (net_type == PowerNetType::kNone) {
       EMIRLOG.error(Loc::current(), "Invalid PLOC source type at line ", line_number, ": ", type_name);
     }
@@ -370,8 +391,8 @@ void DataManager::readInstancePower()
     EMIRLOG.error(Loc::current(), "No non-zero PT-PX instance power matched the DEF design.");
   }
   double power_coverage = 100.0 * matched_total_power / report_total_power;
-  EMIRLOG.info(Loc::current(), "Loaded shared PT-PX power: matched_instances=", instance_power_map.size(), ", unknown_records=",
-               unknown_record_num, ", power_coverage=", power_coverage, "% from ", _config.ptpx_instance_power_file_path);
+  EMIRLOG.info(Loc::current(), "Loaded shared PT-PX power: matched_instances=", instance_power_map.size(), ", unknown_records=", unknown_record_num,
+               ", power_coverage=", power_coverage, "% from ", _config.ptpx_instance_power_file_path);
   if (power_coverage < 95.0) {
     EMIRLOG.error(Loc::current(), "PT-PX instance power coverage is below 95%: ", power_coverage, "%");
   }
@@ -380,9 +401,8 @@ void DataManager::readInstancePower()
 void DataManager::readEMTech()
 {
   _database.get_em_tech().clear();
-  if (_config.redhawk_tech_file_path.empty() && _config.em_limit_file_path.empty()) {
-    EMIRLOG.warn(Loc::current(), "EM tech is not configured; EM_Ratio will be reported as 0%.");
-    return;
+  if (_config.redhawk_tech_file_path.empty()) {
+    EMIRLOG.error(Loc::current(), "redhawk_tech_file_path is required for internal power-grid resistance extraction!");
   }
   if (!_config.redhawk_tech_file_path.empty()) {
     readRedHawkTechFile(_config.redhawk_tech_file_path);
@@ -394,8 +414,8 @@ void DataManager::readEMTech()
     EMIRLOG.warn(Loc::current(), "No EM rule was parsed; EM_Ratio will be reported as 0%.");
     return;
   }
-  EMIRLOG.info(Loc::current(), "Loaded EM tech rules from ", _database.get_em_tech().get_source_file_path(), ": metal=",
-               _database.get_em_tech().get_metal_rule_map().size(), ", via=", _database.get_em_tech().get_via_rule_map().size());
+  EMIRLOG.info(Loc::current(), "Loaded EM tech rules from ", _database.get_em_tech().get_source_file_path(),
+               ": metal=", _database.get_em_tech().get_metal_rule_map().size(), ", via=", _database.get_em_tech().get_via_rule_map().size());
 }
 
 void DataManager::readRedHawkTechFile(const std::string& redhawk_tech_file_path)
@@ -429,6 +449,12 @@ void DataManager::readRedHawkTechFile(const std::string& redhawk_tech_file_path)
     double em_limit = 0.0;
     double em_adjust = 0.0;
     double area = 0.0;
+    double resistance = 0.0;
+    double tnom = 25.0;
+    double coeff_rt1 = 0.0;
+    double coeff_rt2 = 0.0;
+    std::string lower_layer;
+    std::string upper_layer;
     while (cursor < tokens.size() && depth > 0) {
       std::string key = toUpper(tokens[cursor]);
       if (tokens[cursor] == "{") {
@@ -437,13 +463,30 @@ void DataManager::readRedHawkTechFile(const std::string& redhawk_tech_file_path)
         depth--;
       } else if (depth == 1 && cursor + 1 < tokens.size()) {
         double value = 0.0;
-        if ((key == "EM" || key == "EM_ADJUST" || key == "AREA") && parseDouble(tokens[cursor + 1], value)) {
+        if ((key == "EM" || key == "EM_ADJUST" || key == "AREA" || key == "RESISTANCE" || key == "TNOM" || key == "COEFF_RT1"
+             || key == "COEFF_RT2")
+            && parseDouble(tokens[cursor + 1], value)) {
           if (key == "EM") {
             em_limit = value;
           } else if (key == "EM_ADJUST") {
             em_adjust = value;
           } else if (key == "AREA") {
             area = value;
+          } else if (key == "RESISTANCE") {
+            resistance = value;
+          } else if (key == "TNOM") {
+            tnom = value;
+          } else if (key == "COEFF_RT1") {
+            coeff_rt1 = value;
+          } else if (key == "COEFF_RT2") {
+            coeff_rt2 = value;
+          }
+          cursor++;
+        } else if (depth == 1 && cursor + 1 < tokens.size() && (key == "LOWERLAYER" || key == "UPPERLAYER")) {
+          if (key == "LOWERLAYER") {
+            lower_layer = tokens[cursor + 1];
+          } else {
+            upper_layer = tokens[cursor + 1];
           }
           cursor++;
         }
@@ -451,9 +494,9 @@ void DataManager::readRedHawkTechFile(const std::string& redhawk_tech_file_path)
       cursor++;
     }
     if (block_type == "METAL") {
-      addMetalRule(em_tech, rule_name, em_limit, em_adjust);
+      addMetalRule(em_tech, rule_name, em_limit, em_adjust, resistance, tnom, coeff_rt1, coeff_rt2);
     } else {
-      addViaRule(em_tech, rule_name, em_limit, area);
+      addViaRule(em_tech, rule_name, em_limit, area, resistance, lower_layer, upper_layer);
     }
     if (cursor > 0) {
       token_idx = cursor - 1;
@@ -509,18 +552,20 @@ void DataManager::printConfig()
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.temp_directory_path);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "ptpx_instance_power_file_path");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.ptpx_instance_power_file_path);
-  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "redhawk_res_network_file_path");
-  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.redhawk_res_network_file_path);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "ploc_file_path");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.ploc_file_path);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "redhawk_tech_file_path");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.redhawk_tech_file_path);
+  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "temperature_c");
+  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.temperature_c);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "em_limit_file_path");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.em_limit_file_path);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "em_violation_threshold_percent");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.em_violation_threshold_percent);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "thread_number");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.thread_number);
+  EMIRLOG.info(Loc::current(), "IR solver: ", _config.ir_solver, ", tolerance=", _config.ir_solver_tolerance,
+               ", max_iterations=", _config.ir_solver_max_iterations);
 }
 
 void DataManager::printDatabase()

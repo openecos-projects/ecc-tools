@@ -123,13 +123,12 @@ void PDNChecker::addSupplyViaLayerOrder(std::set<int32_t>& layer_order_set, cons
   std::set<std::string>& net_name_set
       = connect_type == ConnectType::kPower ? physical_graph.get_power_net_name_set() : physical_graph.get_ground_net_name_set();
   for (const std::string& net_name : net_name_set) {
-    std::map<std::string, NetRoutingGraph>::iterator routing_graph_iter = physical_graph.get_net_routing_graph_map().find(net_name);
-    if (routing_graph_iter == physical_graph.get_net_routing_graph_map().end()) {
+    NetRoutingGraph* routing_graph = physical_graph.getNetRoutingGraph(net_name);
+    if (routing_graph == nullptr) {
       continue;
     }
-    NetRoutingGraph& routing_graph = routing_graph_iter->second;
-    std::vector<RoutingShape>& routing_shape_list = routing_graph.get_routing_shape_list();
-    for (std::pair<int32_t, int32_t>& via_shape_idx_pair : routing_graph.get_via_shape_idx_pair_list()) {
+    std::vector<RoutingShape>& routing_shape_list = routing_graph->get_routing_shape_list();
+    for (std::pair<int32_t, int32_t>& via_shape_idx_pair : routing_graph->get_via_shape_idx_pair_list()) {
       if (!isValidRoutingShapeIdx(via_shape_idx_pair.first, routing_shape_list) || !isValidRoutingShapeIdx(via_shape_idx_pair.second, routing_shape_list)) {
         continue;
       }
@@ -171,23 +170,19 @@ SupplyPoint PDNChecker::getCenterSupplyPoint(const ConnectType connect_type, con
   bool has_supply_point = false;
   int64_t shortest_distance = 0;
   for (const std::string& net_name : net_name_set) {
-    std::map<std::string, NetRoutingGraph>::iterator routing_graph_iter = physical_graph.get_net_routing_graph_map().find(net_name);
-    if (routing_graph_iter == physical_graph.get_net_routing_graph_map().end()) {
+    int32_t net_id = physical_graph.getNetId(net_name);
+    NetRoutingGraph* routing_graph = physical_graph.getNetRoutingGraph(net_id);
+    std::vector<int32_t>* component_id_list = physical_graph.getNetRoutingShapeComponentIdList(net_id);
+    if (routing_graph == nullptr || component_id_list == nullptr) {
       continue;
     }
-    std::map<std::string, std::vector<int32_t>>::iterator component_id_list_iter = physical_graph.get_net_routing_shape_component_id_list_map().find(net_name);
-    if (component_id_list_iter == physical_graph.get_net_routing_shape_component_id_list_map().end()) {
-      continue;
-    }
-    NetRoutingGraph& routing_graph = routing_graph_iter->second;
-    std::vector<RoutingShape>& routing_shape_list = routing_graph.get_routing_shape_list();
-    std::vector<int32_t>& component_id_list = component_id_list_iter->second;
-    for (std::pair<int32_t, int32_t>& via_shape_idx_pair : routing_graph.get_via_shape_idx_pair_list()) {
-      int32_t top_routing_shape_idx = getTopRoutingShapeIdx(routing_graph, via_shape_idx_pair, top_layer_order, second_top_layer_order);
-      if (top_routing_shape_idx < 0 || top_routing_shape_idx >= static_cast<int32_t>(component_id_list.size())) {
+    std::vector<RoutingShape>& routing_shape_list = routing_graph->get_routing_shape_list();
+    for (std::pair<int32_t, int32_t>& via_shape_idx_pair : routing_graph->get_via_shape_idx_pair_list()) {
+      int32_t top_routing_shape_idx = getTopRoutingShapeIdx(*routing_graph, via_shape_idx_pair, top_layer_order, second_top_layer_order);
+      if (top_routing_shape_idx < 0 || top_routing_shape_idx >= static_cast<int32_t>(component_id_list->size())) {
         continue;
       }
-      int32_t component_id = component_id_list[top_routing_shape_idx];
+      int32_t component_id = (*component_id_list)[top_routing_shape_idx];
       if (component_id < 0) {
         continue;
       }

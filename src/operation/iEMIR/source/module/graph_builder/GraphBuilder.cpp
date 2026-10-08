@@ -17,6 +17,7 @@
 #include "GraphBuilder.hpp"
 
 #include "DataManager.hpp"
+#include "EMTech.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PowerEdge.hpp"
@@ -542,6 +543,7 @@ bool GraphBuilder::getPinWireConnectionCoordinate(PowerWireSegment& power_wire_s
 
 void GraphBuilder::buildWireEdgeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model)
 {
+  auto& metal_rules = EMIRDM.getDatabase().get_em_tech().get_metal_rule_map();
   std::vector<PowerWireSegment>& power_wire_segment_list = power_net.get_wire_segment_list();
   for (std::size_t segment_idx = 0; segment_idx < power_wire_segment_list.size(); segment_idx++) {
     PowerWireSegment& power_wire_segment = power_wire_segment_list[segment_idx];
@@ -560,15 +562,22 @@ void GraphBuilder::buildWireEdgeList(PowerGraph& power_graph, PowerNet& power_ne
       if (length == 0) {
         continue;
       }
+      auto rule_iter = metal_rules.find(power_wire_segment.get_layer_name());
+      if (!power_wire_segment.get_has_explicit_resistance()
+          && (rule_iter == metal_rules.end() || rule_iter->second.get_resistance_per_square() <= 0.0)) {
+        EMIRLOG.error(Loc::current(), "The RedHawk tech file has no sheet resistance for routing layer ", power_wire_segment.get_layer_name(), "!");
+      }
+      double resistance_per_square
+          = rule_iter == metal_rules.end() ? 0.0 : rule_iter->second.resistancePerSquareAt(EMIRDM.getConfig().temperature_c);
       if (power_wire_segment.get_width() <= 0
-          || (!power_wire_segment.get_has_explicit_resistance() && power_wire_segment.get_resistance_per_square() <= 0.0)) {
+          || (!power_wire_segment.get_has_explicit_resistance() && resistance_per_square <= 0.0)) {
         EMIRLOG.error(Loc::current(), "The power wire resistance data is invalid!");
       }
       int32_t segment_length = std::abs(power_wire_segment.get_first_x() - power_wire_segment.get_second_x())
                                + std::abs(power_wire_segment.get_first_y() - power_wire_segment.get_second_y());
       double resistance = power_wire_segment.get_has_explicit_resistance()
                               ? power_wire_segment.get_resistance() * static_cast<double>(length) / segment_length
-                              : power_wire_segment.get_resistance_per_square() * static_cast<double>(length) / power_wire_segment.get_width();
+                              : resistance_per_square * static_cast<double>(length) / power_wire_segment.get_width();
       PowerEdge* power_edge = addPowerEdge(power_graph, PowerEdgeType::kWire, first_power_node.get_node_id(), second_power_node.get_node_id(),
                                            power_wire_segment.get_layer_idx(), power_wire_segment.get_width(), length, resistance,
                                            power_net.get_has_explicit_parasitics());
@@ -582,17 +591,27 @@ void GraphBuilder::buildWireEdgeList(PowerGraph& power_graph, PowerNet& power_ne
 
 void GraphBuilder::buildViaEdgeList(PowerGraph& power_graph, PowerNet& power_net)
 {
+  auto& via_rules = EMIRDM.getDatabase().get_em_tech().get_via_rule_map();
   for (PowerVia& power_via : power_net.get_via_list()) {
     std::size_t bottom_node_id = getPowerNode(power_graph, power_via.get_bottom_layer_idx(), power_via.get_bottom_x(), power_via.get_bottom_y(),
                                               PowerNodeType::kVia);
     std::size_t top_node_id
         = getPowerNode(power_graph, power_via.get_top_layer_idx(), power_via.get_top_x(), power_via.get_top_y(), PowerNodeType::kVia);
-    if (power_via.get_resistance() <= 0.0) {
+    auto rule_iter = via_rules.find(power_via.get_cut_layer_name());
+    double resistance = power_via.get_resistance();
+    if (rule_iter != via_rules.end() && rule_iter->second.get_resistance_per_cut() > 0.0 && power_via.get_cut_num() > 0) {
+      resistance = rule_iter->second.get_resistance_per_cut() / power_via.get_cut_num();
+    }
+    if (!power_net.get_has_explicit_parasitics()
+        && (rule_iter == via_rules.end() || rule_iter->second.get_resistance_per_cut() <= 0.0 || power_via.get_cut_num() <= 0)) {
+      EMIRLOG.error(Loc::current(), "The RedHawk tech file has no valid resistance for cut layer ", power_via.get_cut_layer_name(), "!");
+    }
+    if (resistance <= 0.0) {
       EMIRLOG.error(Loc::current(), "The power via resistance data is invalid!");
     }
     PowerEdge* power_edge
         = addPowerEdge(power_graph, PowerEdgeType::kVia, bottom_node_id, top_node_id, power_via.get_bottom_layer_idx(), 0, 0,
-                       power_via.get_resistance(), power_net.get_has_explicit_parasitics());
+                       resistance, power_net.get_has_explicit_parasitics());
     if (power_edge != nullptr) {
       power_edge->set_layer_name(power_via.get_bottom_layer_name());
       power_edge->set_via_name(power_via.get_via_name());

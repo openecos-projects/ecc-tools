@@ -100,19 +100,19 @@ void buildDefData(ilvs::Database& database)
   def_data.get_net_map()["n_unexpected"] = makeNet({"U3/A"});
 
   ilvs::PhysicalGraph& physical_graph = def_data.get_physical_graph();
-  ilvs::NetRoutingGraph& connected_graph = physical_graph.get_net_routing_graph_map()["n_connected"];
+  ilvs::NetRoutingGraph& connected_graph = physical_graph.getOrCreateNetRoutingGraph("n_connected");
   connected_graph.set_driver_terminal_name("PIN/IN");
   connected_graph.get_routing_shape_list() = {makeRoutingShape(1, 0, 0, 10, 2), makeRoutingShape(1, 10, 0, 20, 2)};
   connected_graph.get_terminal_shape_idx_map()["PIN/IN"] = {0};
   connected_graph.get_terminal_shape_idx_map()["U1/A"] = {1};
 
-  ilvs::NetRoutingGraph& open_graph = physical_graph.get_net_routing_graph_map()["n_open"];
+  ilvs::NetRoutingGraph& open_graph = physical_graph.getOrCreateNetRoutingGraph("n_open");
   open_graph.set_driver_terminal_name("PIN/OUT");
   open_graph.get_routing_shape_list() = {makeRoutingShape(1, 0, 10, 10, 12), makeRoutingShape(1, 20, 10, 30, 12)};
   open_graph.get_terminal_shape_idx_map()["PIN/OUT"] = {0};
   open_graph.get_terminal_shape_idx_map()["U1/B"] = {1};
 
-  ilvs::NetRoutingGraph& missing_driver_graph = physical_graph.get_net_routing_graph_map()["n_driver_missing"];
+  ilvs::NetRoutingGraph& missing_driver_graph = physical_graph.getOrCreateNetRoutingGraph("n_driver_missing");
   missing_driver_graph.get_routing_shape_list() = {makeRoutingShape(1, 0, 30, 20, 32)};
   missing_driver_graph.get_terminal_shape_idx_map()["PIN/DRIVER"] = {0};
   missing_driver_graph.get_terminal_shape_idx_map()["U1/E"] = {0};
@@ -122,13 +122,15 @@ void buildDefData(ilvs::Database& database)
   physical_graph.get_component_net_name_map()[300] = {"VDD", "VSS"};
   physical_graph.get_power_net_name_set().insert("VDD");
   physical_graph.get_ground_net_name_set().insert("VSS");
-  ilvs::NetRoutingGraph& power_routing_graph = physical_graph.get_net_routing_graph_map()["VDD"];
-  std::vector<int32_t>& power_component_id_list = physical_graph.get_net_routing_shape_component_id_list_map()["VDD"];
+  ilvs::NetRoutingGraph& power_routing_graph = physical_graph.getOrCreateNetRoutingGraph("VDD");
+  int32_t power_net_id = physical_graph.getNetId("VDD");
+  std::vector<int32_t>& power_component_id_list = physical_graph.getOrCreateNetRoutingShapeComponentIdList(power_net_id);
   int32_t power_routing_shape_idx = 0;
   addSupplyVia(power_routing_graph, power_component_id_list, power_routing_shape_idx, 100, 490, 490, 510, 510);
   addSupplyVia(power_routing_graph, power_component_id_list, power_routing_shape_idx, 101, 0, 0, 10, 10);
-  ilvs::NetRoutingGraph& ground_routing_graph = physical_graph.get_net_routing_graph_map()["VSS"];
-  std::vector<int32_t>& ground_component_id_list = physical_graph.get_net_routing_shape_component_id_list_map()["VSS"];
+  ilvs::NetRoutingGraph& ground_routing_graph = physical_graph.getOrCreateNetRoutingGraph("VSS");
+  int32_t ground_net_id = physical_graph.getNetId("VSS");
+  std::vector<int32_t>& ground_component_id_list = physical_graph.getOrCreateNetRoutingShapeComponentIdList(ground_net_id);
   int32_t ground_routing_shape_idx = 0;
   addSupplyVia(ground_routing_graph, ground_component_id_list, ground_routing_shape_idx, 200, 520, 490, 540, 510);
   addSupplyVia(ground_routing_graph, ground_component_id_list, ground_routing_shape_idx, 201, 20, 20, 30, 30);
@@ -147,14 +149,11 @@ void buildDefData(ilvs::Database& database)
 
   int32_t connected_net_id = physical_graph.getOrCreateNetId("n_connected");
   int32_t open_net_id = physical_graph.getOrCreateNetId("n_open");
-  int32_t power_net_id = physical_graph.getOrCreateNetId("VDD");
-  int32_t ground_net_id = physical_graph.getOrCreateNetId("VSS");
-  physical_graph.get_component_net_id_list().resize(301);
-  physical_graph.get_component_net_id_list()[42] = {connected_net_id, open_net_id};
-  physical_graph.get_component_net_id_list()[300] = {power_net_id, ground_net_id};
-  physical_graph.get_component_shape_ref_list().resize(301);
-  physical_graph.get_component_shape_ref_list()[42] = {{connected_net_id, 0}};
-  physical_graph.get_component_shape_ref_list()[300] = {{power_net_id, 0}, {ground_net_id, 0}};
+  physical_graph.get_component_net_id_map()[42] = {connected_net_id, open_net_id};
+  physical_graph.get_component_net_id_map()[300] = {power_net_id, ground_net_id};
+  physical_graph.get_component_shape_ref_map()[42] = {{connected_net_id, 0}};
+  physical_graph.get_component_shape_ref_map()[300] = {{power_net_id, 0}, {ground_net_id, 0}};
+  physical_graph.get_short_component_id_list() = {42, 300};
   physical_graph.set_optimized_component_data_valid(true);
   database.set_def_data(std::move(def_data));
 }
