@@ -1,5 +1,6 @@
 add_executable(iemir_ir_em_test
     ${IEMIR_TEST}/iemir_ir_em_test.cpp
+    ${IEMIR_SOURCE}/data_manager/RedHawkResNetworkReader.cpp
 )
 
 target_link_libraries(iemir_ir_em_test

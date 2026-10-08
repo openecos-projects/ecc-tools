@@ -258,6 +258,20 @@ bool checkPTPXPowerReader(const std::filesystem::path& directory)
          && std::abs(records.front().average_current - 5.0e-6) <= 1.0e-18;
 }
 
+bool checkRedHawkResistanceFormula()
+{
+  iemir::EMMetalRule metal;
+  metal.set_resistance_per_square(0.1122);
+  metal.set_tnom_c(25.0);
+  metal.set_coeff_rt1(3.242e-3);
+  metal.set_coeff_rt2(6.79e-6);
+  double wire_resistance_25c = metal.resistancePerSquareAt(25.0) * 1.0 / 0.16;
+  double expected_100c = 0.1122 * (1.0 + 3.242e-3 * 75.0 + 6.79e-6 * 75.0 * 75.0);
+  double via_resistance = 2.0 / 5.0;
+  return std::abs(wire_resistance_25c - 0.70125) < 1e-12 && std::abs(metal.resistancePerSquareAt(100.0) - expected_100c) < 1e-12
+         && std::abs(via_resistance - 0.4) < 1e-12;
+}
+
 bool checkPointSourceDoesNotShortNearbySegment()
 {
   bool is_pass = true;
@@ -469,7 +483,8 @@ int main(int argc, char* argv[])
   std::filesystem::create_directories(report_directory_path);
   EMIRDM.getConfig().ia_temp_directory_path = report_directory_path.string() + "/";
 
-  bool is_pass = checkPTPXPowerReader(report_directory_path) && checkRedHawkResNetworkReader(report_directory_path)
+  bool is_pass = checkPTPXPowerReader(report_directory_path) && checkRedHawkResistanceFormula()
+                 && checkRedHawkResNetworkReader(report_directory_path)
                  && checkShiftedViaGraph(report_directory_path) && checkPointSourceDoesNotShortNearbySegment() && checkImportedPinAreaInjection()
                  && checkViaUsesConnectedResistorJunction() && checkSubMicroampLoad() && checkRepeatedIRLoads(report_directory_path);
   EMIRDM.getDatabase().set_design_name("test_design");

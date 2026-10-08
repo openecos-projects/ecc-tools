@@ -28,12 +28,12 @@ TclInitEMIR::TclInitEMIR(const char* cmd_name) : TclCmd(cmd_name)
   _config_list.push_back(std::make_pair("-temp_directory_path", ValueType::kString));
   // std::string ptpx_instance_power_file_path;  // required
   _config_list.push_back(std::make_pair("-ptpx_instance_power_file_path", ValueType::kString));
-  // std::string redhawk_res_network_file_path;  // optional
-  _config_list.push_back(std::make_pair("-redhawk_res_network_file_path", ValueType::kString));
   // std::string ploc_file_path;            // optional
   _config_list.push_back(std::make_pair("-ploc_file_path", ValueType::kString));
-  // std::string redhawk_tech_file_path;    // optional
+  // std::string redhawk_tech_file_path;    // required
   _config_list.push_back(std::make_pair("-redhawk_tech_file_path", ValueType::kString));
+  // double temperature_c;                  // optional
+  _config_list.push_back(std::make_pair("-temperature_c", ValueType::kDouble));
   // std::string em_limit_file_path;        // optional
   _config_list.push_back(std::make_pair("-em_limit_file_path", ValueType::kString));
   // double em_violation_threshold_percent; // optional
