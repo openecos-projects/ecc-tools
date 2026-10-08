@@ -32,6 +32,9 @@ flex_target(verilogScanner
   ${CMAKE_CURRENT_SOURCE_DIR}/VerilogLexer.l
   ${VERILOG_GENERATED_DIR}/VerilogLexer.cc
   DEFINES_FILE ${VERILOG_GENERATED_DIR}/VerilogLexer.hh
+  # Full DFA tables avoid compressed-table fallback in the token hot path.
+  # Keep 8-bit input handling; full tables otherwise default to 7-bit scanning.
+  COMPILE_FLAGS "-Cf -8"
 )
 
 find_package(BISON REQUIRED)
@@ -64,4 +67,11 @@ if(BUILD_TESTING)
   )
   target_link_libraries(verilog_escaped_identifier_test PRIVATE verilog ecc_logger)
   add_test(NAME verilog_escaped_identifier_test COMMAND verilog_escaped_identifier_test)
+
+  add_executable(verilog_large_module_test VerilogLargeModuleTest.cpp)
+  target_link_libraries(verilog_large_module_test PRIVATE verilog ecc_logger)
+  add_test(NAME verilog_large_module_test COMMAND verilog_large_module_test)
+  # Large flat modules and wide hierarchies must avoid repeated whole-list scans.
+  # The linear paths take a few seconds; allow ample headroom on busy hosts.
+  set_tests_properties(verilog_large_module_test PROPERTIES TIMEOUT 20)
 endif()
