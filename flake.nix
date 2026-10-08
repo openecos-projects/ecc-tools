@@ -82,7 +82,7 @@
     };
   in flake-parts.lib.mkFlake { inherit inputs; } {
     systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
-    perSystem = { self', pkgs, system, ... }: let
+    perSystem = { self', pkgs, system, config, ... }: let
       boost191 = pkgs.lib.fix (self:
         pkgs.callPackage "${pkgs.path}/pkgs/development/libraries/boost/generic.nix" {
           version = "1.91.0";
@@ -103,6 +103,11 @@
           });
         });
     in {
+      # Re-export packages and the devShell as checks so CI
+      # (`nix flake check`) builds them.
+      checks = config.packages // {
+        devShell = config.devShells.default;
+      };
       packages.default = pkgs.callPackage ecc-tools-bin { inherit boost191; };
       devShells.default = pkgs.mkShell.override {
         stdenv = pkgs.ccacheStdenv;
