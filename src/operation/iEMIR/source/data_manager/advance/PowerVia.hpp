@@ -29,6 +29,7 @@ class PowerVia
   std::string& get_via_name() { return _via_name; }
   std::string& get_bottom_layer_name() { return _bottom_layer_name; }
   std::string& get_top_layer_name() { return _top_layer_name; }
+  std::string& get_cut_layer_name() { return _cut_layer_name; }
   int32_t get_bottom_layer_idx() { return _bottom_layer_idx; }
   int32_t get_top_layer_idx() { return _top_layer_idx; }
   int32_t get_x() { return _x; }
@@ -48,6 +49,7 @@ class PowerVia
   void set_via_name(const std::string& via_name) { _via_name = via_name; }
   void set_bottom_layer_name(const std::string& bottom_layer_name) { _bottom_layer_name = bottom_layer_name; }
   void set_top_layer_name(const std::string& top_layer_name) { _top_layer_name = top_layer_name; }
+  void set_cut_layer_name(const std::string& cut_layer_name) { _cut_layer_name = cut_layer_name; }
   void set_bottom_layer_idx(int32_t bottom_layer_idx) { _bottom_layer_idx = bottom_layer_idx; }
   void set_top_layer_idx(int32_t top_layer_idx) { _top_layer_idx = top_layer_idx; }
   void set_x(int32_t x)
@@ -79,6 +81,7 @@ class PowerVia
   std::string _via_name;
   std::string _bottom_layer_name;
   std::string _top_layer_name;
+  std::string _cut_layer_name;
   int32_t _bottom_layer_idx = -1;
   int32_t _top_layer_idx = -1;
   int32_t _x = 0;
