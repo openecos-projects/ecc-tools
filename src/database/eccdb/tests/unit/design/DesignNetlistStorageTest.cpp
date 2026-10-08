@@ -1,7 +1,24 @@
-// SPDX-License-Identifier: Apache-2.0
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <stdexcept>
 #include <utility>
 
@@ -10,6 +27,11 @@
 
 namespace eccdb {
 namespace {
+
+struct InstanceTermTestMarker
+{
+  int value = 0;
+};
 
 TEST_F(DesignStorageTest, BlockPinsHaveIndependentIdentityAndOwnedLifecycle)
 {
@@ -240,30 +262,33 @@ TEST_F(DesignStorageTest, ReconnectsBothPinKindsAfterExplicitDisconnect)
   EXPECT_EQ(netlist.ioPin(io).special_net, next_power);
 }
 
-TEST_F(DesignStorageTest, StoresEmbeddedInstanceTermRecordsAndInvalidatesDeletedIds)
+TEST_F(DesignStorageTest, StoresIndependentInstanceTermEntitiesAndInvalidatesDeletedIds)
 {
   auto& netlist = design.netlistStorage();
-  const auto& registry = design.designRegistry().registry();
+  auto& registry = design.designRegistry().registry();
   const auto first = netlist.createInstance(createInstance("first"));
   const auto first_pin = netlist.findInstancePin(first, "A");
-  const auto& pins = registry.get<const DesignInstancePins>(first.entity());
-  ASSERT_EQ(pins.values.size(), 2u);
-  ASSERT_EQ(pins.records.size(), 2u);
-  EXPECT_EQ(pins.values.front(), first_pin);
-  EXPECT_EQ(first_pin.packed(), 0u);
-  EXPECT_EQ(registry.storage<DesignInstanceTerm>(), nullptr);
-  const auto record = pins.records.find("A");
-  ASSERT_NE(record, pins.records.end());
-  EXPECT_EQ(record->second.id, first_pin);
-  const auto* pin = netlist.findInstanceTermData(first, "A");
+  const auto& terms = registry.get<const DesignInstanceTerms>(first.entity());
+  ASSERT_EQ(terms.values.size(), 2u);
+  ASSERT_EQ(terms.names.size(), 2u);
+  EXPECT_EQ(terms.values.front(), first_pin);
+  const auto named = terms.names.find("A");
+  ASSERT_NE(named, terms.names.end());
+  EXPECT_EQ(named->second, first_pin);
+  ASSERT_TRUE(registry.valid(first_pin.entity()));
+  ASSERT_TRUE(registry.all_of<DesignInstanceTerm>(first_pin.entity()));
+  const auto* pin = &registry.get<const DesignInstanceTerm>(first_pin.entity());
   ASSERT_NE(pin, nullptr);
   EXPECT_EQ(pin, &netlist.instanceTerm(first_pin));
+  EXPECT_EQ(pin, netlist.findInstanceTermData(first, "A"));
   EXPECT_EQ(pin->instance, first);
   EXPECT_EQ(pin->master_term, input_term);
   EXPECT_EQ(pin->instance_ptr, &netlist.instance(first));
   EXPECT_EQ(pin->master_term_ptr, &library.masterTermStorage().masterTerm(input_term));
   EXPECT_EQ(netlist.instancePin(first_pin).instance, first);
   EXPECT_EQ(netlist.instancePin(first_pin).master_term, input_term);
+  registry.emplace<InstanceTermTestMarker>(first_pin.entity(), InstanceTermTestMarker{.value = 7});
+  EXPECT_EQ(registry.get<const InstanceTermTestMarker>(first_pin.entity()).value, 7);
 
   const auto survivor = netlist.createInstance(createInstance("survivor"));
   const auto survivor_pin = netlist.findInstancePin(survivor, "A");
@@ -271,8 +296,10 @@ TEST_F(DesignStorageTest, StoresEmbeddedInstanceTermRecordsAndInvalidatesDeleted
   netlist.connect(survivor_pin, signal);
   ASSERT_TRUE(netlist.destroyInstance(first));
   EXPECT_FALSE(netlist.contains(first_pin));
+  EXPECT_FALSE(registry.valid(first_pin.entity()));
+  EXPECT_FALSE(registry.all_of<DesignInstanceTerm>(first_pin.entity()));
+  EXPECT_FALSE(registry.all_of<InstanceTermTestMarker>(first_pin.entity()));
   EXPECT_THROW((void) netlist.instancePin(first_pin), std::out_of_range);
-  EXPECT_EQ(registry.storage<DesignInstanceTerm>(), nullptr);
   EXPECT_TRUE(netlist.contains(survivor_pin));
   EXPECT_EQ(netlist.findInstancePin(survivor, "A"), survivor_pin);
   EXPECT_EQ(netlist.instancePin(survivor_pin).instance, survivor);
@@ -285,6 +312,14 @@ TEST_F(DesignStorageTest, StoresEmbeddedInstanceTermRecordsAndInvalidatesDeleted
   const auto replacement = netlist.createInstance(createInstance("replacement"));
   const auto replacement_pin = netlist.findInstancePin(replacement, "A");
   EXPECT_NE(first_pin, replacement_pin);
+  const auto replacement_terms = netlist.instanceTerms(replacement);
+  const auto reused_slot = std::find_if(replacement_terms.begin(), replacement_terms.end(), [first_pin](const auto id) {
+    return entt::to_entity(id.entity()) == entt::to_entity(first_pin.entity());
+  });
+  ASSERT_NE(reused_slot, replacement_terms.end());
+  EXPECT_NE(*reused_slot, first_pin);
+  EXPECT_FALSE(registry.valid(first_pin.entity()));
+  EXPECT_FALSE(registry.all_of<DesignInstanceTerm>(first_pin.entity()));
 
   netlist.rebuildNameIndexes();
   netlist.rebuildLibraryCaches();
@@ -298,6 +333,62 @@ TEST_F(DesignStorageTest, StoresEmbeddedInstanceTermRecordsAndInvalidatesDeleted
   ASSERT_EQ(netlist.instancePins(signal).size(), 1u);
   EXPECT_EQ(netlist.instancePins(signal).front(), survivor_pin);
   EXPECT_EQ(netlist.instancePinCount(), 4u);
+}
+
+TEST_F(DesignStorageTest, ExposesInstanceTermsThroughRegistryViewsWithOptionalComponents)
+{
+  auto& netlist = design.netlistStorage();
+  auto& registry = design.designRegistry().registry();
+  const auto first = netlist.createInstance(createInstance("first"));
+  const auto second = netlist.createInstance(createInstance("second"));
+  const auto first_input = netlist.findInstanceTerm(first, "A");
+  const auto first_output = netlist.findInstanceTerm(first, "Y");
+  const auto second_input = netlist.findInstanceTerm(second, "A");
+  const auto second_output = netlist.findInstanceTerm(second, "Y");
+  registry.emplace<InstanceTermTestMarker>(second_input.entity(), InstanceTermTestMarker{.value = 23});
+
+  std::vector<DesignInstanceTermId> all_terms;
+  const auto all_terms_view = registry.view<const DesignInstanceTerm>();
+  for (const auto entity : all_terms_view) {
+    const DesignInstanceTermId id{entity};
+    all_terms.push_back(id);
+    EXPECT_EQ(&registry.get<const DesignInstanceTerm>(entity), &netlist.instanceTerm(id));
+  }
+  EXPECT_EQ(all_terms.size(), 4u);
+  for (const auto id : std::array{first_input, first_output, second_input, second_output}) {
+    EXPECT_NE(std::find(all_terms.begin(), all_terms.end(), id), all_terms.end());
+  }
+
+  std::vector<DesignInstanceTermId> marked_terms;
+  const auto marked_terms_view = registry.view<const DesignInstanceTerm, const InstanceTermTestMarker>();
+  for (const auto entity : marked_terms_view) {
+    marked_terms.emplace_back(entity);
+    EXPECT_EQ(registry.get<const InstanceTermTestMarker>(entity).value, 23);
+  }
+  EXPECT_EQ(marked_terms, (std::vector<DesignInstanceTermId>{second_input}));
+}
+
+TEST_F(DesignStorageTest, RollsBackIndependentTermsWhenMasterHasDuplicateTermName)
+{
+  auto& netlist = design.netlistStorage();
+  auto& registry = design.designRegistry().registry();
+  auto& malformed_master = library.libraryRegistry().registry().get<LibraryCellMaster>(master.entity());
+  malformed_master.terms.push_back(input_term);
+  const auto term_count = [&registry] {
+    std::size_t count = 0;
+    for (const auto entity : registry.view<const DesignInstanceTerm>()) {
+      static_cast<void>(entity);
+      ++count;
+    }
+    return count;
+  };
+
+  EXPECT_EQ(term_count(), 0u);
+  EXPECT_THROW((void) netlist.createInstance(createInstance("malformed")), std::logic_error);
+  EXPECT_EQ(term_count(), 0u);
+  EXPECT_EQ(netlist.instanceCount(), 0u);
+  EXPECT_FALSE(netlist.findInstance("malformed"));
+  EXPECT_NO_THROW(netlist.rebuildNameIndexes());
 }
 
 TEST_F(DesignStorageTest, RejectsBrokenNetlistReferencesAndManagedFieldUpdates)
@@ -340,25 +431,28 @@ TEST_F(DesignStorageTest, FindsInstancePinsByIndexedMasterTermNameAfterMasterTer
   EXPECT_EQ(netlist.instancePin(z).master_term, output_term);
 }
 
-TEST_F(DesignStorageTest, RebuildsEmbeddedInstanceTermMapAfterMasterTermRename)
+TEST_F(DesignStorageTest, RebuildsInstanceTermNameCacheWithoutMovingTermPayload)
 {
   auto& netlist = design.netlistStorage();
+  const auto& registry = design.designRegistry().registry();
   const auto instance = netlist.createInstance(createInstance("u1"));
-  const auto& initial_pins = design.designRegistry().registry().get<const DesignInstancePins>(instance.entity());
-  ASSERT_EQ(initial_pins.values.size(), 2u);
-  ASSERT_EQ(initial_pins.records.size(), 2u);
-  EXPECT_NE(initial_pins.records.find("Y"), initial_pins.records.end());
+  const auto& initial_terms = registry.get<const DesignInstanceTerms>(instance.entity());
+  ASSERT_EQ(initial_terms.values.size(), 2u);
+  ASSERT_EQ(initial_terms.names.size(), 2u);
+  EXPECT_NE(initial_terms.names.find("Y"), initial_terms.names.end());
   const auto output_pin = netlist.findInstancePin(instance, "Y");
   ASSERT_TRUE(output_pin);
+  const auto* const original_term = &registry.get<const DesignInstanceTerm>(output_pin.entity());
 
   library.masterTermStorage().updateMasterTerm(
       output_term, LibraryMasterTerm{.name = "Z", .direction = LibraryMasterTermDirection::kOutput});
   EXPECT_EQ(netlist.findInstancePin(instance, "Y"), output_pin);
   EXPECT_FALSE(netlist.findInstancePin(instance, "Z"));
   netlist.rebuildLibraryCaches();
-  const auto& rebound_pins = design.designRegistry().registry().get<const DesignInstancePins>(instance.entity());
-  EXPECT_EQ(rebound_pins.records.find("Y"), rebound_pins.records.end());
-  EXPECT_NE(rebound_pins.records.find("Z"), rebound_pins.records.end());
+  const auto& rebound_terms = registry.get<const DesignInstanceTerms>(instance.entity());
+  EXPECT_EQ(rebound_terms.names.find("Y"), rebound_terms.names.end());
+  EXPECT_NE(rebound_terms.names.find("Z"), rebound_terms.names.end());
+  EXPECT_EQ(&registry.get<const DesignInstanceTerm>(output_pin.entity()), original_term);
   EXPECT_EQ(netlist.findInstanceTermData(instance, "Z"), &netlist.instanceTerm(output_pin));
   EXPECT_EQ(netlist.instancePin(output_pin).master_term_ptr, &library.masterTermStorage().masterTerm(output_term));
   EXPECT_EQ(netlist.findInstancePin(instance, "Z"), output_pin);
@@ -397,6 +491,7 @@ TEST_F(DesignStorageTest, ReturnsNoPinForMasterWithoutTerms)
 TEST_F(DesignStorageTest, KeepsInstancePinPointersAndRelationsAcrossOtherInstanceDeletionAndUpdate)
 {
   auto& netlist = design.netlistStorage();
+  const auto& registry = design.designRegistry().registry();
   const auto first = netlist.createInstance(createInstance("first"));
   const auto second = netlist.createInstance(createInstance("second"));
   const auto pin = netlist.findInstancePin(second, "A");
@@ -405,7 +500,9 @@ TEST_F(DesignStorageTest, KeepsInstancePinPointersAndRelationsAcrossOtherInstanc
   netlist.connect(pin, net);
   const auto* cached_pin = netlist.findInstanceTermData(second, "A");
   ASSERT_NE(cached_pin, nullptr);
+  const auto* const registry_pin = &registry.get<const DesignInstanceTerm>(pin.entity());
   EXPECT_EQ(cached_pin, &netlist.instanceTerm(pin));
+  EXPECT_EQ(cached_pin, registry_pin);
   const auto* cached_instance = cached_pin->instance_ptr;
   const auto* cached_term = cached_pin->master_term_ptr;
   ASSERT_EQ(cached_instance, &netlist.instance(second));
@@ -419,6 +516,7 @@ TEST_F(DesignStorageTest, KeepsInstancePinPointersAndRelationsAcrossOtherInstanc
   EXPECT_EQ(netlist.instanceCount(), 1u);
   EXPECT_EQ(netlist.findInstancePin(second, "A"), pin);
   EXPECT_EQ(&netlist.instancePin(pin), cached_pin);
+  EXPECT_EQ(&registry.get<const DesignInstanceTerm>(pin.entity()), registry_pin);
   EXPECT_EQ(netlist.instancePin(pin).instance_ptr, cached_instance);
   EXPECT_EQ(netlist.instancePin(pin).master_term_ptr, cached_term);
   EXPECT_EQ(netlist.instancePin(pin).instance, second);
@@ -431,6 +529,7 @@ TEST_F(DesignStorageTest, KeepsInstancePinPointersAndRelationsAcrossOtherInstanc
   EXPECT_EQ(netlist.findInstance("second_renamed"), second);
   EXPECT_EQ(netlist.findInstancePin(second, "A"), pin);
   EXPECT_EQ(&netlist.instancePin(pin), cached_pin);
+  EXPECT_EQ(&registry.get<const DesignInstanceTerm>(pin.entity()), registry_pin);
   EXPECT_EQ(netlist.instancePin(pin).instance_ptr, cached_instance);
   EXPECT_EQ(netlist.instancePin(pin).master_term_ptr, cached_term);
   EXPECT_EQ(cached_instance->name, "second_renamed");

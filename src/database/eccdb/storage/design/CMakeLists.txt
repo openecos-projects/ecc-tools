@@ -1,3 +1,21 @@
+# ***************************************************************************************
+# SPDX-License-Identifier: MulanPSL-2.0
+# Copyright (c) 2023-2025 Peng Cheng Laboratory
+# Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+# Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+#
+# iEDA is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+# http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+#
+# See the Mulan PSL v2 for more details.
+# ***************************************************************************************
+
 cmake_minimum_required(VERSION 3.20)
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
@@ -41,9 +59,11 @@ add_library(eccdb_design
   routing/view/WireRoutingView.cpp
 )
 target_compile_features(eccdb_design PUBLIC cxx_std_20)
+set_target_properties(eccdb_design PROPERTIES EXPORT_NAME design)
 target_include_directories(eccdb_design
   PUBLIC
-    "${CMAKE_CURRENT_LIST_DIR}/.."
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/..>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eccdb/storage>
 )
 target_compile_definitions(eccdb_design
   PUBLIC

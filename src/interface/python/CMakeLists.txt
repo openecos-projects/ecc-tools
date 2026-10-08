@@ -7,8 +7,8 @@ pybind11_add_module(ecc_py python_moodule.cc)
 
 # Build EccDB before the wheel install step. This is a build-order dependency,
 # not a link dependency from the Python module to the EccDB shared library.
-if(TARGET eccdb_api)
-    add_dependencies(ecc_py eccdb_api)
+if(TARGET eccdb_database_owner)
+    add_dependencies(ecc_py eccdb_database_owner)
 endif()
 
 # ecc_py statically incorporates a large part of the native ECC stack.  Leaving

@@ -1,4 +1,5 @@
 # ***************************************************************************************
+# SPDX-License-Identifier: MulanPSL-2.0
 # Copyright (c) 2023-2025 Peng Cheng Laboratory
 # Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
 # Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
@@ -14,7 +15,39 @@
 #
 # See the Mulan PSL v2 for more details.
 # ***************************************************************************************
+
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+find_dependency(Boost 1.75)
+
 include("${CMAKE_CURRENT_LIST_DIR}/EccDBTargets.cmake")
+
+# Resolve the consumer's full Boost headers independently of any host-provided
+# Boost::headers alias. Keep the installed package relocatable.
+find_path(EccDB_BOOST_INCLUDE_DIR NAMES boost/pfr.hpp
+  HINTS ${Boost_INCLUDE_DIRS} REQUIRED)
+mark_as_advanced(EccDB_BOOST_INCLUDE_DIR)
+set_property(TARGET EccDB::boost_pfr APPEND PROPERTY
+  INTERFACE_INCLUDE_DIRECTORIES "${EccDB_BOOST_INCLUDE_DIR}")
+set_property(TARGET EccDB::boost_pfr APPEND PROPERTY
+  INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${EccDB_BOOST_INCLUDE_DIR}")
+
+foreach(_eccdb_component IN ITEMS
+    core
+    database
+    viewer
+    binary_persistence
+    binary_import
+    binary_export
+    lef_export
+    def_export
+    lef_import
+    def_import)
+  if(TARGET EccDB::${_eccdb_component})
+    set(EccDB_${_eccdb_component}_FOUND TRUE)
+  endif()
+endforeach()
+unset(_eccdb_component)
+
 check_required_components(EccDB)

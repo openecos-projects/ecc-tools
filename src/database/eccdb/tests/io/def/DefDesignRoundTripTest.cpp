@@ -1,4 +1,20 @@
-// SPDX-License-Identifier: Apache-2.0
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
 
 #include <gtest/gtest.h>
 
@@ -660,7 +676,8 @@ END DESIGN
   EXPECT_EQ(design.netlistStorage().instanceCount(), 0u);
   EXPECT_EQ(design.netlistStorage().instancePinCount(), 0u);
   const auto& registry = std::as_const(design.designRegistry().registry());
-  EXPECT_EQ(registry.storage<DesignInstanceTerm>(), nullptr);
+  const auto terms = registry.view<const DesignInstanceTerm>();
+  EXPECT_EQ(terms.begin(), terms.end());
 
   const auto recovery = writeInput(R"DEF(VERSION 5.8 ;
 DESIGN recovered ;
@@ -678,6 +695,8 @@ END DESIGN
   EXPECT_NO_THROW(DefDesignImporter(design).import(recovery));
   EXPECT_TRUE(design.netlistStorage().findInstance("u1"));
   EXPECT_TRUE(design.netlistStorage().findRegularNet("n1"));
+  EXPECT_EQ(design.netlistStorage().instancePinCount(), 2u);
+  EXPECT_NO_THROW(design.netlistStorage().rebuildLibraryCaches());
 }
 
 TEST_F(DefDesignRoundTripTest, ImportsAndExportsGeneratedDefVia)

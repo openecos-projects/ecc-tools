@@ -30,6 +30,7 @@ if(TARGET eccdb_design)
     target_link_libraries(irt_interface
         PRIVATE
         eccdb_design
+        eccdb_service
         eccdb_tech_database
         eccdb_library
     )

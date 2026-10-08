@@ -19,6 +19,7 @@
 #include <any>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -42,6 +43,7 @@ namespace eccdb {
 class DesignStore;
 class TechStore;
 class LibraryStore;
+class DatabaseContext;
 }  // namespace eccdb
 
 namespace irt {
@@ -100,6 +102,9 @@ class RTInterface
 #if 1  // input
   void setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* tech,
                        eccdb::LibraryStore* library);
+  // Borrow the caller's service context so native iRT output joins the same
+  // revision and observer lifecycle as the surrounding Operation or GUI.
+  void setDesignSource(eccdb::DatabaseContext& context);
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
@@ -178,10 +183,17 @@ class RTInterface
   RTInterface() = default;
   RTInterface(const RTInterface& other) = delete;
   RTInterface(RTInterface&& other) = delete;
-  ~RTInterface() = default;
+  ~RTInterface();
   RTInterface& operator=(const RTInterface& other) = delete;
   RTInterface& operator=(RTInterface&& other) = delete;
+  [[nodiscard]] eccdb::DatabaseContext& databaseContext() const noexcept;
   // function
+
+  // Legacy pointer callers do not provide a context. Keep the fallback here
+  // for the entire source attachment lifetime rather than creating one for
+  // every writeback operation.
+  std::unique_ptr<eccdb::DatabaseContext> _owned_database_context;
+  eccdb::DatabaseContext* _database_context = nullptr;
 };
 
 }  // namespace irt

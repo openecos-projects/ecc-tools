@@ -1,3 +1,21 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #pragma once
 
 #include <string_view>
@@ -32,6 +50,9 @@ class DesignFloorplanStorage
 
   [[nodiscard]] DesignRowId createRow(DesignRow row);
   void updateRow(DesignRowId id, DesignRow row);
+  // Normalize/validate the whole replacement before changing installed rows.
+  // Same-name rows keep IDs; other rows are staged before old rows retire.
+  [[nodiscard]] std::vector<DesignRowId> replaceRows(std::vector<DesignRow> rows);
   [[nodiscard]] bool destroyRow(DesignRowId id);
   [[nodiscard]] bool contains(DesignRowId id) const;
   [[nodiscard]] DesignRowId findRow(std::string_view name) const;
@@ -70,7 +91,7 @@ class DesignFloorplanStorage
 
  private:
   [[nodiscard]] DesignRow normalizeRow(DesignRow row) const;
-  void validateRow(const DesignRow& row, DesignRowId ignored = {}) const;
+  void validateRow(const DesignRow& row, DesignRowId ignored = {}, bool check_name = true) const;
   void validateTrackGrid(const DesignTrackGrid& grid) const;
   static void validateGCellGrid(const DesignGCellGrid& grid);
   [[nodiscard]] Rect rowBounds(const DesignRow& row) const;

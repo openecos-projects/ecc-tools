@@ -1,3 +1,21 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #include "design/guide/storage/DesignGuideStorage.h"
 
 #include <algorithm>
@@ -11,6 +29,53 @@
 #include "tech/routing_layer/model/RoutingLayerComponents.h"
 
 namespace eccdb {
+
+void DesignGuideStorage::replaceGuideStage(DesignNetId net,
+                                          std::optional<std::vector<DesignRouteGuide>> guides,
+                                          std::vector<DesignTrackAssignmentShape> assignments)
+{
+  ensureNet(net);
+  if (guides && !guides->empty()) validateGuides(*guides);
+  if (!assignments.empty()) validateTrackAssignments(assignments);
+  std::vector<GeometryShapeId> guide_ids;
+  std::vector<GeometryShapeId> assignment_ids;
+  if (guides) guide_ids.reserve(guides->size());
+  assignment_ids.reserve(assignments.size());
+  const bool had_guides = _registry.all_of<DesignNetRouteGuides>(net.entity());
+  const bool had_assignments = _registry.all_of<DesignNetTrackAssignments>(net.entity());
+  try {
+    if (guides) {
+      for (auto& value : *guides) {
+        guide_ids.push_back(_geometry_registry.create(
+            designGuideOwner(net), GeometryShape{.layer = value.layer, .flags = value.flags}, std::move(value)));
+      }
+    }
+    for (auto& value : assignments) {
+      assignment_ids.push_back(_geometry_registry.create(
+          designTrackAssignmentOwner(net), GeometryShape{.layer = value.layer}, std::move(value)));
+    }
+    // Allocate optional relation components before changing their old values.
+    if (!guide_ids.empty()) static_cast<void>(_registry.get_or_emplace<DesignNetRouteGuides>(net.entity()));
+    if (!assignment_ids.empty()) static_cast<void>(_registry.get_or_emplace<DesignNetTrackAssignments>(net.entity()));
+  } catch (...) {
+    for (const auto id : guide_ids) static_cast<void>(_geometry_registry.destroy(id));
+    for (const auto id : assignment_ids) static_cast<void>(_geometry_registry.destroy(id));
+    if (!had_guides) _registry.remove<DesignNetRouteGuides>(net.entity());
+    if (!had_assignments) _registry.remove<DesignNetTrackAssignments>(net.entity());
+    throw;
+  }
+  const auto install = [&]<typename Relation>(std::vector<GeometryShapeId>& ids) {
+    auto* relation = _registry.try_get<Relation>(net.entity());
+    if (relation == nullptr) return;
+    auto old_ids = std::move(relation->values);
+    if (ids.empty()) _registry.remove<Relation>(net.entity());
+    else relation->values = std::move(ids);
+    for (const auto id : old_ids) static_cast<void>(_geometry_registry.destroy(id));
+  };
+  if (guides) install.template operator()<DesignNetRouteGuides>(guide_ids);
+  install.template operator()<DesignNetTrackAssignments>(assignment_ids);
+  _design_registry.markGeometryChanged();
+}
 
 void DesignGuideStorage::replaceGuides(DesignNetId net, std::vector<DesignRouteGuide> values)
 {

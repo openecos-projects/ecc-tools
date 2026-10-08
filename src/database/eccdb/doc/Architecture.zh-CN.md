@@ -1,5 +1,7 @@
 # EccDB 架构与对象语义
 
+> **历史文档：** 本文中的 API facade、ObjectId、Data/Ref、StorageConversions 与安装导出描述已于 2026-10-08 被原生接口重构取代。当前用法与边界见 [Native_API.md](Native_API.md) 和 [Service_Layer_20261007.md](Service_Layer_20261007.md)。以下保留原设计记录，不作为当前 API 合同。
+
 English version: [Architecture.en.md](Architecture.en.md)
 
 本文件描述当前 `src/database/eccdb` 的实际分层、数据所有权和公共 API 语义。它是当前实现的架构说明，不把尚未完成的目标设计误写成现有能力。

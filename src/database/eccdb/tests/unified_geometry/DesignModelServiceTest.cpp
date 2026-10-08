@@ -1,4 +1,20 @@
-// SPDX-License-Identifier: Apache-2.0
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
 
 #include <gtest/gtest.h>
 
@@ -6,16 +22,16 @@
 #include <string_view>
 #include <vector>
 
-#include "DatabaseTestAccess.h"
+#include "context/DatabaseContext.h"
 #include "design/DesignStore.h"
 #include "library/LibraryStore.h"
-#include "service/query/DesignModelService.h"
+#include "viewer/DesignModelAdapter.h"
 #include "tech/TechStore.h"
 
 namespace eccdb {
 namespace {
 
-class DesignModelServiceTest : public testing::Test
+class DesignModelAdapterTest : public testing::Test
 {
  protected:
   void SetUp() override
@@ -101,10 +117,10 @@ class DesignModelServiceTest : public testing::Test
   GeometryShapeId route_shape;
 };
 
-TEST_F(DesignModelServiceTest, NavigatesPersistentAndEmbeddedEntitiesWithoutCopyingTheDesign)
+TEST_F(DesignModelAdapterTest, NavigatesNativeEntitiesWithoutCopyingTheDesign)
 {
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  DesignModelService service(database);
+  DatabaseContext context{design};
+  DesignModelAdapter service(context);
 
   const auto instances = service.list(ModelEntityKind::kInstance, 0, 1);
   ASSERT_EQ(instances.records.size(), 1u);
@@ -130,6 +146,14 @@ TEST_F(DesignModelServiceTest, NavigatesPersistentAndEmbeddedEntitiesWithoutCopy
                                    ModelObjectRef{.kind = std::string(ModelEntityKind::kInstance), .id = first_instance.packed()});
   ASSERT_EQ(iterms.records.size(), 2u);
   EXPECT_EQ(iterms.records.front().parent->id, first_instance.packed());
+
+  const auto all_term_ids = service.listIds(ModelEntityKind::kInstanceTerm, 0, 16);
+  ASSERT_EQ(all_term_ids.size(), 4u);
+  EXPECT_TRUE(contains(all_term_ids, ModelEntityKind::kInstanceTerm, input_term.packed()));
+  const auto term_page = service.list(ModelEntityKind::kInstanceTerm, 1, 1);
+  ASSERT_EQ(term_page.records.size(), 1u);
+  EXPECT_EQ(term_page.records.front().object, all_term_ids[1]);
+  EXPECT_TRUE(term_page.has_more);
 
   const auto master_terms = service.list(ModelEntityKind::kMasterTerm, 0, 16,
                                          ModelObjectRef{.kind = std::string(ModelEntityKind::kMaster), .id = master.packed()});
@@ -162,10 +186,10 @@ TEST_F(DesignModelServiceTest, NavigatesPersistentAndEmbeddedEntitiesWithoutCopy
   EXPECT_EQ(shape->net->id, net.packed());
 }
 
-TEST_F(DesignModelServiceTest, ReturnsOrderedLayerStackTrackMetadataAndPlacedInstanceBounds)
+TEST_F(DesignModelAdapterTest, ReturnsOrderedLayerStackTrackMetadataAndPlacedInstanceBounds)
 {
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  DesignModelService service(database);
+  DatabaseContext context{design};
+  DesignModelAdapter service(context);
 
   const auto layers = service.layers();
   ASSERT_EQ(layers.size(), 3u);

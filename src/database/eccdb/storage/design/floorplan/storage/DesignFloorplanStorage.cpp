@@ -1,9 +1,30 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #include "design/floorplan/storage/DesignFloorplanStorage.h"
 
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <utility>
+#include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "design/common/DesignGeometryValidation.h"
 #include "design/global/model/DesignGlobalComponents.h"
@@ -78,6 +99,55 @@ bool DesignFloorplanStorage::destroyRow(DesignRowId id)
   }
   _registry.destroy(id.entity());
   return true;
+}
+
+std::vector<DesignRowId> DesignFloorplanStorage::replaceRows(std::vector<DesignRow> rows)
+{
+  std::unordered_set<std::string_view> requested;
+  requested.reserve(rows.size());
+  for (auto& row : rows) {
+    row = normalizeRow(std::move(row));
+    validateRow(row, {}, false);
+    if (!requested.insert(row.name).second) {
+      throw std::invalid_argument("row replacement contains duplicate names");
+    }
+  }
+  const auto installed = _registry.view<const DesignRow>();
+  std::unordered_map<std::string, DesignRowId> existing;
+  std::vector<DesignRowId> retired;
+  for (const auto entity : installed) {
+    const auto& name = installed.get<const DesignRow>(entity).name;
+    if (requested.contains(name)) existing.emplace(name, DesignRowId{entity});
+    else retired.emplace_back(entity);
+  }
+  std::vector<DesignRowId> result(rows.size());
+  std::vector<DesignRowId> created;
+  created.reserve(rows.size());
+  // Stage new entities first; an allocation failure leaves all old IDs/values.
+  try {
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+      const auto found = existing.find(rows[index].name);
+      if (found != existing.end()) {
+        result[index] = found->second;
+        continue;
+      }
+      const auto entity = _registry.create();
+      created.emplace_back(entity);
+      result[index] = DesignRowId{entity};
+      _registry.emplace<DesignRow>(entity, std::move(rows[index]));
+    }
+  } catch (...) {
+    for (const auto id : created) _registry.destroy(id.entity());
+    throw;
+  }
+  static_assert(std::is_nothrow_move_assignable_v<DesignRow>);
+  for (std::size_t index = 0; index < rows.size(); ++index) {
+    if (existing.contains(rows[index].name)) {
+      _registry.replace<DesignRow>(result[index].entity(), std::move(rows[index]));
+    }
+  }
+  for (const auto id : retired) _registry.destroy(id.entity());
+  return result;
 }
 
 bool DesignFloorplanStorage::contains(DesignRowId id) const
@@ -379,10 +449,10 @@ DesignRow DesignFloorplanStorage::normalizeRow(DesignRow row) const
   return row;
 }
 
-void DesignFloorplanStorage::validateRow(const DesignRow& row, DesignRowId ignored) const
+void DesignFloorplanStorage::validateRow(const DesignRow& row, DesignRowId ignored, bool check_name) const
 {
   constexpr uint32_t kKnownFlags = DesignRowFlag::kHasDo | DesignRowFlag::kHasStep;
-  if (row.name.empty() || rowNameInUse(row.name, ignored)) {
+  if (row.name.empty() || (check_name && rowNameInUse(row.name, ignored))) {
     throw std::invalid_argument("design row name is empty or duplicated");
   }
   if (!isValidDesignOrientation(row.orientation)) {

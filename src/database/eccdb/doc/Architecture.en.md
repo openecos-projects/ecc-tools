@@ -1,5 +1,10 @@
 # EccDB Architecture and Object Semantics
 
+> Historical document: the API facade, ObjectId, Data/Ref, conversions and
+> package exports below were superseded on 2026-10-08. See
+> [Native_API.md](Native_API.md) and [Service_Layer_20261007.md](Service_Layer_20261007.md)
+> for the current native model and service boundaries.
+
 Chinese version: [Architecture.zh-CN.md](Architecture.zh-CN.md)
 
 This document describes the implementation that currently exists under `src/database/eccdb`: its layers, ownership rules, and public API semantics. Planned work is called out explicitly instead of being presented as an existing capability.

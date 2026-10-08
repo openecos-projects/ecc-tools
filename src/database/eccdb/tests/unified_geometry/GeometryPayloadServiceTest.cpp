@@ -1,4 +1,20 @@
-// SPDX-License-Identifier: Apache-2.0
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
 
 #include <gtest/gtest.h>
 
@@ -6,10 +22,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "DatabaseTestAccess.h"
 #include "design/DesignStore.h"
 #include "library/LibraryStore.h"
-#include "service/query/GeometryPayloadService.h"
+#include "context/DatabaseContext.h"
+#include "service/geometry/GeometryPayloadService.h"
 #include "tech/TechStore.h"
 
 namespace eccdb {
@@ -81,8 +97,8 @@ class GeometryPayloadServiceTest : public testing::Test
 
 TEST_F(GeometryPayloadServiceTest, FetchPreservesDiagonalCenterlineAndPolygonVertices)
 {
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryPayloadService service(database);
+  DatabaseContext context{design};
+  GeometryPayloadService service(context);
   const std::array<uint64_t, 2> ids{diagonal.packed(), polygon.packed()};
 
   const auto batch = service.fetchShapes(ids);
@@ -110,8 +126,8 @@ TEST_F(GeometryPayloadServiceTest, FetchPreservesDiagonalCenterlineAndPolygonVer
 
 TEST_F(GeometryPayloadServiceTest, ExpandsDesignViaAcrossPhysicalLayersAndFiltersByLayer)
 {
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryPayloadService service(database);
+  DatabaseContext context{design};
+  GeometryPayloadService service(context);
   const std::array<uint64_t, 1> ids{net_via.packed()};
 
   const auto batch = service.fetchShapes(ids);
@@ -141,8 +157,8 @@ TEST_F(GeometryPayloadServiceTest, ExpandsDesignViaAcrossPhysicalLayersAndFilter
 
 TEST_F(GeometryPayloadServiceTest, FetchTransformsBlockPinGeometryToWorldCoordinates)
 {
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryPayloadService service(database);
+  DatabaseContext context{design};
+  GeometryPayloadService service(context);
   const std::array<uint64_t, 1> ids{pin_rectangle.packed()};
 
   const auto batch = service.fetchShapes(ids);
@@ -157,8 +173,8 @@ TEST_F(GeometryPayloadServiceTest, FetchTransformsBlockPinGeometryToWorldCoordin
 
 TEST_F(GeometryPayloadServiceTest, HitTestRejectsPolygonBoundingBoxFalsePositive)
 {
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryQueryService service(database);
+  DatabaseContext context{design};
+  GeometryQueryService service(context);
   GeometryQueryFilter filter;
   filter.net = special.packed();
 
@@ -178,8 +194,8 @@ TEST_F(GeometryPayloadServiceTest, ResolvesTruncatedShapeSegmentCapsToZeroWithou
                            .begin = {.position = {0, 0}, .flags = DesignWirePointFlag::kHasExtension, .extension = 17},
                            .end = {.position = {100, 0}, .flags = DesignWirePointFlag::kHasExtension, .extension = 23}}},
       DesignRouteShapeAttributes{.width = 10, .shape = "STRIPE"});
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryPayloadService service(database);
+  DatabaseContext context{design};
+  GeometryPayloadService service(context);
   const std::array<uint64_t, 1> ids{shape.packed()};
 
   const auto batch = service.fetchShapes(ids);
@@ -204,8 +220,8 @@ TEST_F(GeometryPayloadServiceTest, RepresentsZeroLengthSegmentAsWidthSquare)
                        .flags = DesignWirePathFlag::kHasWidth,
                        .geometry = DesignRouteSegment{.begin = {.position = {40, 60}}, .end = {.position = {40, 60}}}},
       DesignRouteShapeAttributes{.width = 10});
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryPayloadService service(database);
+  DatabaseContext context{design};
+  GeometryPayloadService service(context);
   const std::array<uint64_t, 1> ids{shape.packed()};
 
   const auto batch = service.fetchShapes(ids);

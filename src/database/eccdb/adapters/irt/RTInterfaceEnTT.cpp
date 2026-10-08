@@ -1,4 +1,20 @@
+// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
 
 #include "RTInterface.hpp"
 
@@ -46,6 +62,8 @@
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/master_port/model/MasterPortComponents.h"
 #include "library/master_term/model/MasterTermComponents.h"
+#include "service/floorplan/FloorplanService.h"
+#include "service/routing/RoutingService.h"
 #include "tech/TechStore.h"
 
 namespace irt {
@@ -106,16 +124,15 @@ class EntityPointerTable
   std::vector<const Component*> _values;
 };
 
-// Instance terminals are owned by their instance component. Build this
-// read-only table once before wrapping so parallel routing loops resolve the
-// opaque monotonic terminal ID without a nested map lookup.
+// Build an immutable entity-slot view before wrapping. Term IDs retain their
+// registry generation; only the entity slot addresses this import-time cache.
 class InstancePinPointerTable
 {
  public:
   explicit InstancePinPointerTable(const eccdb::DesignNetlistStorage& netlist)
   {
     netlist.forEachInstancePin([this](eccdb::DesignInstancePinId id, const eccdb::DesignInstancePin& pin) {
-      const auto index = static_cast<std::size_t>(id.packed());
+      const auto index = static_cast<std::size_t>(entt::to_entity(id.entity()));
       if (index >= _values.size()) {
         _values.resize(index + 1u);
       }
@@ -125,7 +142,7 @@ class InstancePinPointerTable
 
   [[nodiscard]] const eccdb::DesignInstancePin* tryGet(eccdb::DesignInstancePinId id) const noexcept
   {
-    const auto index = static_cast<std::size_t>(id.packed());
+    const auto index = static_cast<std::size_t>(entt::to_entity(id.entity()));
     return index < _values.size() ? _values[index] : nullptr;
   }
 
@@ -133,7 +150,7 @@ class InstancePinPointerTable
   // used to populate this table.
   [[nodiscard]] const eccdb::DesignInstancePin& get(eccdb::DesignInstancePinId id) const noexcept
   {
-    return *_values[static_cast<std::size_t>(id.packed())];
+    return *_values[static_cast<std::size_t>(entt::to_entity(id.entity()))];
   }
 
  private:
@@ -1937,8 +1954,6 @@ auto canonicalPatchKey(const EXTLayerRect* patch)
 
 void RTInterface::outputTrackGridToEnTT()
 {
-  auto& floorplan = _design->floorplanStorage();
-  const auto old_grids = floorplan.trackGrids();
   auto& routing_layers = RTDM.getDatabase().get_routing_layer_list();
   std::vector<eccdb::DesignTrackGrid> replacements;
   for (int32_t index = static_cast<int32_t>(routing_layers.size()) - 1; index >= 0; --index) {
@@ -1960,27 +1975,11 @@ void RTInterface::outputTrackGridToEnTT()
     }
   }
 
-  std::vector<eccdb::DesignTrackGridId> created;
-  try {
-    created.reserve(replacements.size());
-    for (auto& grid : replacements) {
-      created.push_back(floorplan.createTrackGrid(std::move(grid)));
-    }
-  } catch (...) {
-    for (const auto id : created) {
-      static_cast<void>(floorplan.destroyTrackGrid(id));
-    }
-    throw;
-  }
-  for (const auto id : old_grids) {
-    static_cast<void>(floorplan.destroyTrackGrid(id));
-  }
+  static_cast<void>(eccdb::FloorplanService{databaseContext()}.replaceTrackGrids(std::move(replacements)));
 }
 
 void RTInterface::outputGCellGridToEnTT()
 {
-  auto& floorplan = _design->floorplanStorage();
-  const auto old_grids = floorplan.gcellGrids();
   auto& axis = RTDM.getDatabase().get_gcell_axis();
   std::vector<eccdb::DesignGCellGrid> replacements;
   for (const ScaleGrid& grid : axis.get_x_grid_list()) {
@@ -1996,32 +1995,18 @@ void RTInterface::outputGCellGridToEnTT()
                                                           .step = grid.get_step_length()});
   }
 
-  std::vector<eccdb::DesignGCellGridId> created;
-  try {
-    created.reserve(replacements.size());
-    for (auto& grid : replacements) {
-      created.push_back(floorplan.createGCellGrid(std::move(grid)));
-    }
-  } catch (...) {
-    for (const auto id : created) {
-      static_cast<void>(floorplan.destroyGCellGrid(id));
-    }
-    throw;
-  }
-  for (const auto id : old_grids) {
-    static_cast<void>(floorplan.destroyGCellGrid(id));
-  }
+  static_cast<void>(eccdb::FloorplanService{databaseContext()}.replaceGCellGrids(std::move(replacements)));
 }
 
 void RTInterface::outputNetListToEnTT()
 {
-  struct PendingWire
+  struct RoutedNetShapes
   {
     eccdb::DesignNetId net;
     std::vector<eccdb::DesignRouteShape> shapes;
   };
 
-  auto& routing = _design->routingStorage();
+  auto& routing_storage = _design->routingStorage();
   auto& netlist = _design->netlistStorage();
   auto& die = RTDM.getDatabase().get_die();
   auto& rt_nets = RTDM.getDatabase().get_net_list();
@@ -2037,7 +2022,7 @@ void RTInterface::outputNetListToEnTT()
     return rt_nets[static_cast<std::size_t>(lhs)].get_net_name() < rt_nets[static_cast<std::size_t>(rhs)].get_net_name();
   });
 
-  std::vector<PendingWire> pending;
+  std::vector<RoutedNetShapes> pending;
   pending.reserve(net_order.size());
   for (const int32_t net_idx : net_order) {
     const std::string& net_name = rt_nets[static_cast<std::size_t>(net_idx)].get_net_name();
@@ -2080,7 +2065,7 @@ void RTInterface::outputNetListToEnTT()
           }
           const std::string& via_name = layer_vias[static_cast<std::size_t>(below_layer)].front().get_via_name();
           const auto tech_via = _tech->viaMasterStorage().findViaMaster(via_name);
-          const auto design_via = routing.findVia(via_name);
+          const auto design_via = routing_storage.findVia(via_name);
           if (static_cast<bool>(tech_via) == static_cast<bool>(design_via)) {
             throw std::runtime_error("iRT output VIA must resolve exactly once in EnTTDB: " + via_name);
           }
@@ -2119,40 +2104,21 @@ void RTInterface::outputNetListToEnTT()
       }
     }
     if (!shapes.empty()) {
-      pending.push_back(PendingWire{.net = net, .shapes = std::move(shapes)});
+      pending.push_back(RoutedNetShapes{.net = net, .shapes = std::move(shapes)});
     }
   }
 
-  std::vector<eccdb::DesignWireId> old_wires;
-  netlist.forEachRegularNet([&](const auto net, const auto&) {
-    routing.forEachWire(net, [&](const auto wire, const auto&) { old_wires.push_back(wire); });
-  });
-
-  std::vector<eccdb::DesignWireId> created;
-  try {
-    created.reserve(pending.size());
-    for (auto& wire : pending) {
-      const auto wire_id = routing.createWire(eccdb::DesignWire{.net = wire.net, .status = eccdb::DesignWireStatus::kRouted});
-      try {
-        for (auto& shape : wire.shapes) {
-          shape.wire = wire_id;
-          static_cast<void>(routing.createShape(wire_id, std::move(shape)));
-        }
-      } catch (...) {
-        static_cast<void>(routing.destroyWire(wire_id));
-        throw;
-      }
-      created.push_back(wire_id);
-    }
-  } catch (...) {
-    for (const auto id : created) {
-      static_cast<void>(routing.destroyWire(id));
-    }
-    throw;
+  // A missing detailed result does not mean that iRT proved the Net unrouted.
+  // Commit only materialized nonempty results; `kReplace` retains the native
+  // staged-create/retire-old transaction while omitted Nets stay untouched.
+  std::vector<eccdb::RoutedNetResult> results;
+  results.reserve(pending.size());
+  for (const auto& routed : pending) {
+    results.push_back(eccdb::RoutedNetResult{.net = routed.net,
+                                             .outcome = eccdb::RoutedResultOutcome::kReplace,
+                                             .shapes = routed.shapes});
   }
-  for (const auto id : old_wires) {
-    static_cast<void>(routing.destroyWire(id));
-  }
+  static_cast<void>(eccdb::RoutingService{databaseContext()}.commitRoutedResults(results));
 }
 
 namespace {

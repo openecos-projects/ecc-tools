@@ -1,4 +1,21 @@
-// SPDX-License-Identifier: Apache-2.0
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #include <sys/resource.h>
 
 #include <algorithm>
@@ -45,8 +62,8 @@
 #include "odb/defout.h"
 #include "odb/lefin.h"
 #include "pa/AbstractPAGraphics.h"
-#include "service/context/RoutingContextService.h"
-#include "service/query/PhysicalDesignService.h"
+#include "service/routing/RoutingService.h"
+#include "service/geometry/PhysicalDesignService.h"
 #include "stt/SteinerTreeBuilder.h"
 #include "ta/AbstractTAGraphics.h"
 #include "tech/TechStore.h"
@@ -146,6 +163,7 @@ struct EccdbStores
   eccdb::TechStore tech;
   eccdb::LibraryStore library{tech.techRegistry()};
   eccdb::DesignStore design{tech.techRegistry(), library.libraryRegistry()};
+  eccdb::DatabaseContext context{tech, library, design};
 };
 
 using GuideGridStatistics = eccdb::tritonroute::guide_input::GridStatistics;
@@ -179,7 +197,7 @@ std::array<eccdb::DesignGCellGrid, 2> guideGrid(const GuideGridStatistics& stati
 void importGuides(EccdbStores& stores, const std::filesystem::path& path)
 {
   const eccdb::PhysicalDesignService physical(stores.tech, stores.library, stores.design);
-  eccdb::RoutingContextService context(stores.design);
+  eccdb::RoutingService context(stores.context);
   const auto grid = readGuides(path, [&](const auto& name, const auto& rectangles) {
     const auto net = stores.design.netlistStorage().findRegularNet(name);
     if (!net) throw std::runtime_error("unknown guide net " + name);
@@ -335,7 +353,7 @@ int run(const Options& options)
   parameters.num_threads = options.threads;
   router.setParams(parameters);
   router.setDebugWriteNetTracks(options.write_net_tracks);
-  if (eccdb) router.attachEccdb(eccdb->design, eccdb->tech, eccdb->library);
+  if (eccdb) router.attachEccdb(eccdb->context);
 
   std::unique_ptr<eccdb::tritonroute::OdbTraceRecorder> trace;
   if (!options.trace.empty()) {
@@ -353,8 +371,8 @@ int run(const Options& options)
       drt::io::readEccdbTechnology(physical, *router.getDesign(), *router.getRouterConfiguration(), logger);
       drt::io::readEccdbLibrary(physical, *router.getDesign(), logger);
       drt::io::readEccdbDesign(physical, *router.getDesign(), *router.getRouterConfiguration(), logger);
-      drt::io::EccdbRouteAdapter(eccdb->design, eccdb->tech, eccdb->library, *router.getDesign()).readRoutes();
-      drt::io::EccdbContextAdapter(eccdb->design, eccdb->tech, eccdb->library, *router.getDesign()).readPinAccess();
+      drt::io::EccdbRouteAdapter(eccdb->context, *router.getDesign()).readRoutes();
+      drt::io::EccdbContextAdapter(eccdb->context, *router.getDesign()).readPinAccess();
     } else {
       drt::io::Parser parser(odb.get(), router.getDesign(), &logger, router.getRouterConfiguration());
       parser.readTechAndLibs(odb.get());

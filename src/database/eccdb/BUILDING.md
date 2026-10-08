@@ -3,7 +3,7 @@
 The eccdb directory can be configured without building the complete
 ecc-tools application.
 
-Experimental API notes: [English](doc/Experimental_API_Usage.en.md) | [简体中文](doc/Experimental_API_Usage.zh-CN.md)
+Native C++ API: [原生接口与生命周期](doc/Native_API.md)
 
 Differential testing guides: [English](doc/Differential_Testing.en.md) | [简体中文](doc/Differential_Testing.zh-CN.md)
 
@@ -47,9 +47,12 @@ optional, and tests that require unavailable external corpora are skipped.
 Every standalone configure emits `compile_commands.json` in its build
 directory for clangd.
 
-## Experimental installable C++ API
+## Installable native C++ API
 
-The public API is an exploratory prototype, not a stable SDK or ABI. The following commands exercise the current build/install targets; API, package exports, and compatibility rules may change. See the [integration plan](doc/Integration_Plan.en.md) for unfinished integration work.
+The API uses native Storage types and services. `Database` only owns the
+stores and loads/saves them; duplicate Data/Ref types and the old C/Rust APIs
+have been removed. Pin the source version and compile configuration: the
+native C++ ABI is not a cross-version compatibility boundary.
 
 Build and install the prototype with direct LEF/DEF support:
 
@@ -58,7 +61,7 @@ cmake -S src/database/eccdb -B build/eccdb-api -G Ninja \
   -DECCDB_BUILD_TESTS=ON \
   -DECCDB_STANDALONE_LEF_DEF=ON \
   -DCMAKE_INSTALL_PREFIX=/opt/eccdb
-cmake --build build/eccdb-api --target eccdb_api --parallel 128
+cmake --build build/eccdb-api --target eccdb_database --parallel 8
 cmake --install build/eccdb-api
 ```
 
@@ -66,13 +69,13 @@ An external CMake project consumes the installed package as follows:
 
 ```cmake
 find_package(EccDB CONFIG REQUIRED)
-target_link_libraries(my_tool PRIVATE EccDB::eccdb)
+target_link_libraries(my_tool PRIVATE EccDB::database EccDB::core)
 ```
 
 The public C++ entry point is:
 
 ```cpp
-#include <eccdb/eccdb.h>
+#include <eccdb.h>
 
 eccdb::Config config{
     .input = eccdb::LefDefInput{
@@ -83,27 +86,27 @@ eccdb::Config config{
 auto database = eccdb::Database::open(config);
 ```
 
-The current prototype uses database-owned entities and explicit value snapshots:
+Read the native model and coordinate mutations through business services:
 
 ```cpp
-eccdb::NetId net = database.findNetId("clk");
-auto data = database.netData(net);  // owned snapshot
-if (data) {
-  data->name = "clk_main";         // does not mutate the database yet
-  database.updateNet(net, *data);  // explicit writeback
-}
+#include <connectivity/ConnectivityService.h>
 
-// Optional C++ convenience handle. It is non-owning and must not outlive the
-// Database; the ID identifies an entity only within its owning database.
-eccdb::NetRef net_ref = database.net(net);
-net_ref.setUse(eccdb::SignalUse::kClock);
+auto& context = database.context();
+auto& netlist = context.design().netlistStorage();
+eccdb::DesignNetId net = netlist.findRegularNet("clk");
+const eccdb::DesignNet& value = netlist.net(net);
+eccdb::ConnectivityService connectivity{context};
+connectivity.renameNet(net, "clk_main");
 ```
 
-`ObjectId` values are local to one `Database`: they can be copied, hashed and
-stored by callers, but become invalid when their entity or owning database is
-destroyed. `Data` and routing-path values own their contents. `Ref` values and
-returned `string_view` objects are borrowed conveniences and must not be kept
-past their documented lifetime.
+Use native IDs for long-lived identity. Native references, spans and string
+views are short-lived borrows and must be reacquired after relevant mutations.
+The owning Database must outlive its Context and services. See the
+[native API guide](doc/Native_API.md) for the ownership and move contract.
+
+Design schema 13 stores independent InstanceTerm entities and rebuilds their
+name/pointer caches after restore. Embedded-Term schema 12 snapshots are
+rejected; reimport their original LEF/DEF inputs with this build.
 
 Binary input and output use three files because technology, library and
 design registries have independent schemas:

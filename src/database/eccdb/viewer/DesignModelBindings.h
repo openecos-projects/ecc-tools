@@ -1,8 +1,27 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #pragma once
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "query/DesignModelService.h"
+#include "DesignModelAdapter.h"
+#include "database/Database.h"
 
 namespace eccdb::viewer {
 namespace py = pybind11;
@@ -59,15 +78,15 @@ inline void bindDesignModel(py::module_& module)
       .def_readonly("step", &ModelTrackGridRecord::step)
       .def_readonly("flags", &ModelTrackGridRecord::flags)
       .def_readonly("mask", &ModelTrackGridRecord::mask);
-  py::class_<DesignModelService>(module, "DesignModelService")
-      .def(py::init<Database&>(), py::keep_alive<1,2>())
-      .def("list", &DesignModelService::list, py::arg("kind"), py::arg("offset") = 0, py::arg("limit") = 256, py::arg("parent") = std::nullopt)
-      .def("list_ids", &DesignModelService::listIds, py::arg("kind"), py::arg("offset") = 0, py::arg("limit") = 256, py::arg("parent") = std::nullopt)
-      .def("describe", &DesignModelService::describe)
-      .def("find", &DesignModelService::find, py::arg("kind"), py::arg("name"), py::arg("parent") = std::nullopt)
-      .def("layers", &DesignModelService::layers)
-      .def("track_grids", &DesignModelService::trackGrids, py::arg("layer") = std::nullopt)
-      .def("list_placed_instances", &DesignModelService::listPlacedInstances, py::arg("viewport"), py::arg("offset") = 0,
+  py::class_<DesignModelAdapter>(module, "DesignModelService")
+      .def(py::init([](Database& database) { return DesignModelAdapter{database.context()}; }), py::keep_alive<1,2>())
+      .def("list", &DesignModelAdapter::list, py::arg("kind"), py::arg("offset") = 0, py::arg("limit") = 256, py::arg("parent") = std::nullopt)
+      .def("list_ids", &DesignModelAdapter::listIds, py::arg("kind"), py::arg("offset") = 0, py::arg("limit") = 256, py::arg("parent") = std::nullopt)
+      .def("describe", &DesignModelAdapter::describe)
+      .def("find", &DesignModelAdapter::find, py::arg("kind"), py::arg("name"), py::arg("parent") = std::nullopt)
+      .def("layers", &DesignModelAdapter::layers)
+      .def("track_grids", &DesignModelAdapter::trackGrids, py::arg("layer") = std::nullopt)
+      .def("list_placed_instances", &DesignModelAdapter::listPlacedInstances, py::arg("viewport"), py::arg("offset") = 0,
            py::arg("limit") = 256, py::call_guard<py::gil_scoped_release>());
 }
 }  // namespace eccdb::viewer

@@ -84,7 +84,7 @@ DEF equality, nor byte-identical wire/path grouping across databases.
 ## Timing
 
 Each measured event invokes the replay adapter's backend APIs. EccDB uses
-`PhysicalDesignService` and `NetRouteService`; instance reads follow the actual
+`PhysicalDesignService` and `RoutingService`; instance reads follow the actual
 native adapter's access through `PhysicalDesignService::design()` and its
 netlist storage, because that facade has no instance-record enumeration API.
 IDB and ODB use their existing native object APIs. Wire replacement goes through
@@ -228,7 +228,7 @@ run. Neither real route yet exercises the new VIA recorder hook in situ.
 
 The native EccDB writer also creates a fixed `DesignVia` when a routed
 `frViaDef` is absent from EccDB and marked `isAddedByRouter()`. It copies all
-lower-routing, cut, and upper-routing rectangles through `DesignViaService`
+lower-routing, cut, and upper-routing rectangles through `RoutingService`
 before storing the wire reference; missing non-router VIAs still fail. The
 native `eccdbAdapterTest` suite passed 6/6, including focused generated-VIA
 and missing-VIA cases. A separate sample2 EccDB route completed with zero DRC,

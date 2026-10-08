@@ -1,3 +1,21 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #pragma once
 
 #include <cstddef>
@@ -27,9 +45,8 @@ using LibraryMasterTermNameIndex
 
 namespace entt {
 
-// DesignInstancePins caches this component's address. Keep the map itself as
-// a plain dense_map while using tombstones instead of moving an unrelated map
-// on deletion.
+// Keep borrowed index component addresses stable across unrelated master
+// deletion. The map itself remains a plain dense_map.
 template <typename Entity>
 struct component_traits<eccdb::LibraryMasterTermNameIndex, Entity>
 {

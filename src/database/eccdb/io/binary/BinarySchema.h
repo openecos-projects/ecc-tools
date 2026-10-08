@@ -1,3 +1,21 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #pragma once
 
 #include <concepts>
@@ -54,33 +72,33 @@ void binaryArchive(Archive& archive, TechConductorLayerRef& value)
   archive(value.kind, value.entity);
 }
 
-// Instance terms are owned by their instance component. The ordered opaque ID
-// relation and name-keyed records are canonical; pointer caches in each term
-// remain runtime-only.
+// The ordered owner relation is canonical. The name cache is rebuilt from
+// the independent term components and their LibraryMasterTerm references.
 template <typename Archive>
-void binaryArchive(Archive& archive, const DesignInstancePins& value)
+void binaryArchive(Archive& archive, const DesignInstanceTerms& value)
 {
-  archive(value.values, value.records);
+  archive(value.values);
 }
 
 template <typename Archive>
-void binaryArchive(Archive& archive, DesignInstancePins& value)
+void binaryArchive(Archive& archive, DesignInstanceTerms& value)
 {
-  archive(value.values, value.records);
+  archive(value.values);
+  value.names.clear();
 }
 
 // Persistent IDs and net relations are retained; instance and master-term
 // pointers are runtime caches rebuilt after load.
 template <typename Archive>
-void binaryArchive(Archive& archive, const DesignInstancePin& value)
+void binaryArchive(Archive& archive, const DesignInstanceTerm& value)
 {
-  archive(value.instance, value.master_term, value.net, value.special_net, value.id);
+  archive(value.instance, value.master_term, value.net, value.special_net);
 }
 
 template <typename Archive>
-void binaryArchive(Archive& archive, DesignInstancePin& value)
+void binaryArchive(Archive& archive, DesignInstanceTerm& value)
 {
-  archive(value.instance, value.master_term, value.net, value.special_net, value.id);
+  archive(value.instance, value.master_term, value.net, value.special_net);
   value.instance_ptr = nullptr;
   value.master_term_ptr = nullptr;
 }
@@ -116,7 +134,10 @@ namespace binary_detail {
 // payloads even when the domain component lists stay unchanged.
 inline constexpr uint32_t kTechSchemaVersion = 11;
 inline constexpr uint32_t kLibrarySchemaVersion = 5;
-inline constexpr uint32_t kDesignSchemaVersion = 12;
+// Version 13 changes instance terms from records embedded in their owner to
+// independent DesignRegistry entities. Older payloads have a different
+// component layout and are intentionally rejected rather than migrated.
+inline constexpr uint32_t kDesignSchemaVersion = 13;
 
 template <typename... Types>
 struct BinaryTypeList
@@ -177,7 +198,8 @@ using DesignGeometryBinaryComponents = BinaryTypeList<GeometryShape, DesignRoute
 // Shapes own geometry. Wire owns Shape IDs; DEF paths and bbox are derived.
 using DesignBinaryComponents
     = BinaryTypeList<DesignRoot, DesignInfo, DesignDieArea, DesignCoreArea, DesignRow, DesignTrackGrid, DesignGCellGrid,
-                     DesignInstance, DesignInstanceTerms, DesignBlockTerm, DesignBlockPin, DesignNet, DesignNetInstancePins,
+                     DesignInstance, DesignInstanceTerms, DesignInstanceTerm, DesignBlockTerm, DesignBlockPin, DesignNet,
+                     DesignNetInstancePins,
                      DesignNetIoPins, DesignSpecialNet, DesignNetOptions, DesignWire, DesignNetGeometry, DesignVia,
                      DesignNonDefaultRule, DesignRegion, DesignGroup, DesignBlockage, DesignFill, DesignNetRouteGuides,
                      DesignNetTrackAssignments, DesignPinAccessCatalog, DesignInstancePinAccessGroupIndex,
@@ -189,9 +211,10 @@ void writeRegistrySnapshot(const Registry& registry, Archive& archive, BinaryTyp
   entt::basic_snapshot snapshot{registry};
   snapshot.template get<Entity>(archive);
   const auto write_component = [&]<typename Component>() {
-    if constexpr (std::is_same_v<Component, DesignInstance>) {
-      // Stable deletion leaves tombstones; write only live components so a
-      // restore followed by another save produces the same binary payload.
+    if constexpr (entt::component_traits<Component, Entity>::in_place_delete) {
+      // Stable deletion leaves tombstones in component storage. Persist only
+      // live components: entity snapshot state retains generations/free slots,
+      // while component tombstone payloads are runtime artifacts.
       const auto* storage = registry.template storage<Component>();
       std::vector<Entity> live;
       if (storage != nullptr) {

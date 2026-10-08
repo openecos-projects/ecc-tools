@@ -1,4 +1,20 @@
-// SPDX-License-Identifier: Apache-2.0
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
 
 // Service-level benchmark for the EccDB APIs consumed by the TritonRoute
 // adapter.  LEF/DEF parsing and guide JSONL parsing happen before timing; the
@@ -38,9 +54,8 @@
 #include "library/LibraryStore.h"
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/master_term/model/MasterTermComponents.h"
-#include "service/context/RoutingContextService.h"
-#include "service/query/PhysicalDesignService.h"
-#include "service/routing/NetRouteService.h"
+#include "service/geometry/PhysicalDesignService.h"
+#include "service/routing/RoutingService.h"
 #include "tech/TechStore.h"
 #include "tech/common/TechLayerTypes.h"
 #include "tech/routing_layer/model/RoutingLayerComponents.h"
@@ -202,9 +217,8 @@ struct BenchInstancePinLookupTable
   }
 };
 
-// Benchmark-only lookup table over opaque instance-pin IDs. It mirrors the
-// adapter's one-time PinId -> record pointer table without changing the
-// storage or binary archive contract.
+// Benchmark-only entity-slot cache. Like the adapter's immutable import view,
+// it resolves live Term IDs without changing their registry ownership.
 struct BenchCachedPin
 {
   const eccdb::DesignInstancePin* pin = nullptr;
@@ -220,7 +234,7 @@ struct BenchCachedPinTable
 
   [[nodiscard]] const BenchCachedPin& get(eccdb::DesignInstancePinId id) const noexcept
   {
-    return slots[static_cast<std::size_t>(id.packed())];
+    return slots[static_cast<std::size_t>(entt::to_entity(id.entity()))];
   }
 };
 
@@ -451,7 +465,7 @@ template <typename Function>
   return lhs.box == rhs.box && lhs.layer == rhs.layer && lhs.via_layer == rhs.via_layer && lhs.flags == rhs.flags;
 }
 
-void attachGuides(eccdb::RoutingContextService& service, const std::vector<GuidePayload>& payloads)
+void attachGuides(eccdb::RoutingService& service, const std::vector<GuidePayload>& payloads)
 {
   for (const auto& payload : payloads) {
     service.replaceGuides(payload.net, payload.values);
@@ -465,7 +479,7 @@ void attachGuides(eccdb::RoutingContextService& service, const std::vector<Guide
   return result;
 }
 
-void validateGuides(const eccdb::RoutingContextService& service, const std::vector<GuidePayload>& payloads, uint64_t expected_count)
+void validateGuides(const eccdb::RoutingService& service, const std::vector<GuidePayload>& payloads, uint64_t expected_count)
 {
   uint64_t actual_count = 0;
   for (const auto& payload : payloads) {
@@ -474,7 +488,8 @@ void validateGuides(const eccdb::RoutingContextService& service, const std::vect
     require(service.hasGuides(payload.net) == !payload.values.empty(),
             "guide component presence mismatch for net '" + std::string(payload.name) + "'");
     for (std::size_t index = 0; index < actual.size(); ++index) {
-      require(sameGuide(actual[index], payload.values[index]), "guide value mismatch for net '" + std::string(payload.name) + "'");
+      require(sameGuide(service.guide(actual[index]), payload.values[index]),
+              "guide value mismatch for net '" + std::string(payload.name) + "'");
     }
     actual_count += static_cast<uint64_t>(actual.size());
   }
@@ -558,7 +573,7 @@ void requireSameRouteShape(const eccdb::RouteShape& actual, const eccdb::RouteSh
 }
 
 [[nodiscard]] RouteSummary validateRoutes(const eccdb::DesignStore& design, const eccdb::TechStore& technology,
-                                          const eccdb::NetRouteService& service, const std::vector<NetProbe>& nets,
+                                          const eccdb::RoutingService& service, const std::vector<NetProbe>& nets,
                                           std::vector<NetProbe>& routed_nets)
 {
   const auto& routing = design.routingStorage();
@@ -598,8 +613,8 @@ void requireSameRouteShape(const eccdb::RouteShape& actual, const eccdb::RouteSh
 }
 
 [[nodiscard]] Counts buildAndValidateCache(const DbOnlyFixture& fixture, ImportedDesign& imported,
-                                           eccdb::PhysicalDesignService& physical, eccdb::RoutingContextService& context,
-                                           eccdb::NetRouteService& routes, BenchmarkCache& cache,
+                                           eccdb::PhysicalDesignService& physical, eccdb::RoutingService& context,
+                                           eccdb::RoutingService& routes, BenchmarkCache& cache,
                                            const std::filesystem::path& guide_path)
 {
   const auto& netlist = imported.design.netlistStorage();
@@ -722,8 +737,8 @@ void requireSameRouteShape(const eccdb::RouteShape& actual, const eccdb::RouteSh
   return counts;
 }
 
-void validateReadQueries(const eccdb::PhysicalDesignService& physical, const eccdb::RoutingContextService& context,
-                         const eccdb::NetRouteService& routes, const BenchmarkCache& cache, const Counts& counts)
+void validateReadQueries(const eccdb::PhysicalDesignService& physical, const eccdb::RoutingService& context,
+                         const eccdb::RoutingService& routes, const BenchmarkCache& cache, const Counts& counts)
 {
   uint64_t regular_count = 0;
   std::unordered_set<uint64_t> regular_ids;
@@ -889,9 +904,9 @@ void validateBenchInstancePinLookupTable(const eccdb::PhysicalDesignService& phy
   for (const auto& probe : cache.pins) {
     const auto& slot = table.get(probe.instance);
     require(slot.terms != nullptr, "shadow instance-pin lookup has a null component pointer");
-    const auto found = slot.terms->records.find(std::string{probe.term_name});
-    require(found != slot.terms->records.end(), "shadow instance-pin lookup is missing a master-term name");
-    require(found->second.id == probe.expected,
+    const auto found = slot.terms->names.find(probe.term_name);
+    require(found != slot.terms->names.end(), "shadow instance-pin lookup is missing a master-term name");
+    require(found->second == probe.expected,
             "shadow instance-pin lookup result differs from the service result");
   }
 }
@@ -904,7 +919,7 @@ void validateBenchInstancePinLookupTable(const eccdb::PhysicalDesignService& phy
   const auto& library_registry = physical.library().libraryRegistry().registry();
 
   netlist.forEachInstancePin([&](eccdb::DesignInstancePinId id, const eccdb::DesignInstancePin& pin) {
-    const auto index = static_cast<std::size_t>(id.packed());
+    const auto index = static_cast<std::size_t>(entt::to_entity(id.entity()));
     if (index >= table.slots.size()) {
       table.slots.resize(index + 1u);
     }
@@ -925,7 +940,7 @@ void validateBenchCachedPinTable(const eccdb::PhysicalDesignService& physical, c
 
   uint64_t source_pins = 0;
   netlist.forEachInstancePin([&](eccdb::DesignInstancePinId id, const eccdb::DesignInstancePin& original) {
-    const auto index = static_cast<std::size_t>(id.packed());
+    const auto index = static_cast<std::size_t>(entt::to_entity(id.entity()));
     require(index < table.slots.size(), "shadow pin table is missing a pin slot");
     const auto& cached = table.slots[index];
     require(cached.pin == &original && cached.term != nullptr, "shadow pin table record pointer mismatch");
@@ -988,8 +1003,8 @@ void validateBenchCachedPinTable(const eccdb::PhysicalDesignService& physical, c
   for (const auto index : cache.query_indices.pins) {
     const auto& probe = cache.pins[index];
     const auto& slot = table.get(probe.instance);
-    const auto found = slot.terms->records.find(std::string{probe.term_name});
-    const auto id = found == slot.terms->records.end() ? eccdb::DesignInstancePinId{} : found->second.id;
+    const auto found = slot.terms->names.find(probe.term_name);
+    const auto id = found == slot.terms->names.end() ? eccdb::DesignInstancePinId{} : found->second;
     checksum = foldChecksum(checksum, static_cast<uint64_t>(id.packed()));
   }
   return checksum;
@@ -1172,7 +1187,7 @@ void validateShadowNetPinScans(const eccdb::PhysicalDesignService& physical, con
           "shadow inline net-pin scan count mismatch");
 }
 
-[[nodiscard]] uint64_t scanGuides(const eccdb::RoutingContextService& context, const BenchmarkCache& cache)
+[[nodiscard]] uint64_t scanGuides(const eccdb::RoutingService& context, const BenchmarkCache& cache)
 {
   uint64_t checksum = UINT64_C(0x6);
   for (const auto& payload : cache.guide_payloads) {
@@ -1187,7 +1202,7 @@ void validateShadowNetPinScans(const eccdb::PhysicalDesignService& physical, con
   return checksum;
 }
 
-[[nodiscard]] uint64_t decodeRoutes(const eccdb::NetRouteService& routes, const BenchmarkCache& cache)
+[[nodiscard]] uint64_t decodeRoutes(const eccdb::RoutingService& routes, const BenchmarkCache& cache)
 {
   uint64_t checksum = UINT64_C(0x7);
   for (const auto& net : cache.routed_nets) {
@@ -1219,7 +1234,7 @@ void validateShadowNetPinScans(const eccdb::PhysicalDesignService& physical, con
   return checksum;
 }
 
-[[nodiscard]] uint64_t replaceGuides(eccdb::RoutingContextService& context, const BenchmarkCache& cache)
+[[nodiscard]] uint64_t replaceGuides(eccdb::RoutingService& context, const BenchmarkCache& cache)
 {
   uint64_t checksum = UINT64_C(0x8);
   for (const auto& payload : cache.guide_payloads) {
@@ -1229,8 +1244,8 @@ void validateShadowNetPinScans(const eccdb::PhysicalDesignService& physical, con
   return checksum;
 }
 
-[[nodiscard]] Run runOnce(eccdb::PhysicalDesignService& physical, eccdb::RoutingContextService& context,
-                          eccdb::NetRouteService& routes, const BenchmarkCache& cache, const Counts& counts,
+[[nodiscard]] Run runOnce(eccdb::PhysicalDesignService& physical, eccdb::RoutingService& context,
+                          eccdb::RoutingService& routes, const BenchmarkCache& cache, const Counts& counts,
                           const MasterTermPointerTable& master_term_table,
                           const BenchInstancePinLookupTable& shadow_pin_lookup, const BenchCachedPinTable& shadow_pins,
                           bool run_experiments, bool shadow_find_first, bool direct_registry_net_pin_scan_first,
@@ -1502,8 +1517,9 @@ void run(const Options& options)
   eccdb::DefDesignImporter(imported.design).import(options.routed_def);
 
   eccdb::PhysicalDesignService physical(imported.technology, imported.library, imported.design);
-  eccdb::RoutingContextService context(imported.design);
-  eccdb::NetRouteService routes(imported.design, imported.technology);
+  eccdb::DatabaseContext database_context(imported.technology, imported.library, imported.design);
+  eccdb::RoutingService routes(database_context);
+  auto& context = routes;
   BenchmarkCache cache;
   const Counts counts = buildAndValidateCache(fixture, imported, physical, context, routes, cache, options.guides);
   // All read-only data is validated once outside the timers.  The only timed

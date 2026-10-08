@@ -1,3 +1,21 @@
+# ***************************************************************************************
+# SPDX-License-Identifier: MulanPSL-2.0
+# Copyright (c) 2023-2025 Peng Cheng Laboratory
+# Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+# Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+#
+# iEDA is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+# http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+#
+# See the Mulan PSL v2 for more details.
+# ***************************************************************************************
+
 cmake_minimum_required(VERSION 3.20)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
@@ -6,8 +24,8 @@ endif()
 
 set(ECCDB_STANDALONE OFF)
 set(ECCDB_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}")
-# The public API is a shared library even when the surrounding project uses
-# static internal targets. Its private dependency closure must therefore be
+# The native Database owner is shared even when the surrounding project uses
+# static targets. Its private dependency closure must therefore be
 # position independent.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
@@ -18,6 +36,9 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
   set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 endif()
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 # Boost is a project-provided header dependency. PFR is consumed from the
 # system Boost installation together with the other Boost headers used by the
@@ -35,11 +56,15 @@ function(eccdb_storage_target target_name)
   target_compile_features(${target_name} PUBLIC cxx_std_20)
   target_include_directories(${target_name}
     PUBLIC
-      ${ECCDB_SOURCE_DIR}
-      ${ECCDB_SOURCE_DIR}/include
-      ${ECCDB_SOURCE_DIR}/storage
-      ${ECCDB_SOURCE_DIR}/io
-      "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/entt"
+      $<BUILD_INTERFACE:${ECCDB_SOURCE_DIR}>
+      $<BUILD_INTERFACE:${ECCDB_SOURCE_DIR}/storage>
+      $<BUILD_INTERFACE:${ECCDB_SOURCE_DIR}/service>
+      $<BUILD_INTERFACE:${ECCDB_SOURCE_DIR}/io>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eccdb>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eccdb/storage>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eccdb/service>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eccdb/io>
   )
 endfunction()
 
@@ -73,34 +98,52 @@ target_compile_features(eccdb_entt INTERFACE cxx_std_20)
 target_include_directories(eccdb_entt
   SYSTEM
   INTERFACE
-    "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/entt"
+    $<BUILD_INTERFACE:${ECCDB_ECC_TOOLS_ROOT}/src/third_party/entt>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eccdb/third_party/entt>
 )
+set_target_properties(eccdb_entt PROPERTIES EXPORT_NAME entt)
 
 add_library(eccdb_boost_pfr INTERFACE)
 target_compile_features(eccdb_boost_pfr INTERFACE cxx_std_20)
-if(TARGET Boost::headers)
-  target_link_libraries(eccdb_boost_pfr INTERFACE Boost::headers)
-elseif(TARGET Boost::boost)
-  target_link_libraries(eccdb_boost_pfr INTERFACE Boost::boost)
-else()
-  target_include_directories(eccdb_boost_pfr SYSTEM INTERFACE ${Boost_INCLUDE_DIRS})
-endif()
+set_target_properties(eccdb_boost_pfr PROPERTIES EXPORT_NAME boost_pfr)
+# Hosts can define Boost::headers as an alias for a vendored subset (slang in
+# OpenROAD does this). Resolve the actual PFR headers without exporting that
+# host target or a build-machine include path into the installed SDK.
+find_path(ECCDB_BOOST_INCLUDE_DIR NAMES boost/pfr.hpp
+  HINTS ${Boost_INCLUDE_DIRS} REQUIRED)
+mark_as_advanced(ECCDB_BOOST_INCLUDE_DIR)
+target_include_directories(eccdb_boost_pfr SYSTEM INTERFACE
+  $<BUILD_INTERFACE:${ECCDB_BOOST_INCLUDE_DIR}>)
 
 option(ECCDB_BUILD_TESTS "Build ECCDB tests" ON)
 option(ECCDB_BUILD_BENCHMARKS "Build ECCDB performance benchmarks" OFF)
 
 add_subdirectory(storage)
 add_subdirectory(service)
+
+# The native SDK boundary is the stores plus their single-threaded services.
+# Keep this interface target separate from the Database owner so native users
+# can construct stores and services without acquiring a second DTO layer.
+add_library(eccdb_core INTERFACE)
+add_library(EccDB::core ALIAS eccdb_core)
+set_target_properties(eccdb_core PROPERTIES EXPORT_NAME core)
+target_compile_features(eccdb_core INTERFACE cxx_std_20)
+target_link_libraries(eccdb_core
+  INTERFACE
+    eccdb_context
+    eccdb_service
+    eccdb_geometry
+    eccdb_design
+    eccdb_library
+    eccdb_tech_database
+)
+
 add_subdirectory(io/binary)
 add_subdirectory(io/idb)
 add_subdirectory(io/lef)
 add_subdirectory(io/def)
-add_subdirectory(api)
+add_subdirectory(database)
 add_subdirectory(viewer)
-option(ECCDB_BUILD_C_API "Build the C ABI facade" OFF)
-if(ECCDB_BUILD_C_API)
-  add_subdirectory(api/c)
-endif()
 
 if(ECCDB_BUILD_TESTS)
   add_subdirectory(tests/unit/geometry)
@@ -129,7 +172,7 @@ set(_eccdb_database_targets
   eccdb_lef_export
   eccdb_library
   eccdb_service
-  eccdb_api
+  eccdb_database_owner
   eccdb_viewer
   eccdb_tech_database
 )
@@ -153,21 +196,88 @@ add_custom_target(eccdb_tech_layer DEPENDS eccdb_tech_layers)
 add_custom_target(eccdb_tech_database_api DEPENDS eccdb_tech_database)
 add_custom_target(eccdb_non_default_rule DEPENDS eccdb_tech_non_default_rule)
 
-include(GNUInstallDirs)
-include(CMakePackageConfigHelpers)
-
 set(ECCDB_INSTALL_CMAKEDIR
     "${CMAKE_INSTALL_LIBDIR}/cmake/EccDB"
-    CACHE STRING "Install directory for the EccDB CMake API package")
+    CACHE STRING "Install directory for the EccDB CMake package")
 
-install(TARGETS eccdb_api
+set(_eccdb_export_targets
+  eccdb_entt
+  eccdb_boost_pfr
+  eccdb_geometry
+  eccdb_tech_layers
+  eccdb_tech_global
+  eccdb_tech_via_master
+  eccdb_tech_via_rule
+  eccdb_tech_via_rule_generate
+  eccdb_tech_non_default_rule
+  eccdb_tech_database
+  eccdb_library
+  eccdb_design
+  eccdb_context
+  eccdb_service
+  eccdb_core
+  eccdb_binary_persistence
+  eccdb_binary_import
+  eccdb_binary_export
+  eccdb_lef_export
+  eccdb_def_export
+  eccdb_database_owner
+  eccdb_viewer
+)
+foreach(_target IN ITEMS eccdb_lef_import eccdb_def_import)
+  if(TARGET ${_target})
+    list(APPEND _eccdb_export_targets ${_target})
+  endif()
+endforeach()
+
+install(TARGETS ${_eccdb_export_targets}
   EXPORT EccDBTargets
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+  INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
-install(DIRECTORY "${ECCDB_SOURCE_DIR}/include/eccdb"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-  FILES_MATCHING PATTERN "*.h"
+install(DIRECTORY "${ECCDB_SOURCE_DIR}/database/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/eccdb/database"
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+install(FILES "${ECCDB_SOURCE_DIR}/eccdb.h"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/eccdb"
+)
+install(DIRECTORY "${ECCDB_SOURCE_DIR}/storage/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/eccdb/storage"
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+install(DIRECTORY "${ECCDB_SOURCE_DIR}/service/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/eccdb/service"
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+foreach(_eccdb_io_header_dir IN ITEMS binary lef def)
+  install(DIRECTORY "${ECCDB_SOURCE_DIR}/io/${_eccdb_io_header_dir}/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/eccdb/io/${_eccdb_io_header_dir}"
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+  )
+endforeach()
+unset(_eccdb_io_header_dir)
+install(DIRECTORY "${ECCDB_SOURCE_DIR}/index/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/eccdb/index"
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+install(FILES "${ECCDB_SOURCE_DIR}/viewer/DesignModelAdapter.h"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/eccdb/viewer"
+)
+install(DIRECTORY "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/entt/entt/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/eccdb/third_party/entt/entt"
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
+)
+install(FILES "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/entt/LICENSE"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/eccdb/entt"
+)
+install(FILES
+  "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/lefdef/LICENSE"
+  "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/lefdef/lef/LICENSE.TXT"
+  "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/lefdef/def/LICENSE.TXT"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/eccdb/lefdef"
 )
 
 configure_package_config_file(

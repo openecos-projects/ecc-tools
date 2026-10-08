@@ -109,15 +109,16 @@ index 7bf158ca8a..de0a169bcb 100644
        ${FLEXROUTE_HOME}/test/${test_name}.cpp
        ${FLEXROUTE_HOME}/test/fixture.cpp
 diff --git a/src/drt/include/drt/TritonRoute.h b/src/drt/include/drt/TritonRoute.h
-index 574ffe0834..9bc3b703a6 100644
+index 574ffe0834..53a8237340 100644
 --- a/src/drt/include/drt/TritonRoute.h
 +++ b/src/drt/include/drt/TritonRoute.h
-@@ -39,6 +39,14 @@ namespace dst {
+@@ -39,6 +39,15 @@ namespace dst {
  class Distributed;
  }
  
 +#ifdef DRT_USE_ECCDB
 +namespace eccdb {
++class DatabaseContext;
 +class DesignStore;
 +class LibraryStore;
 +class TechStore;
@@ -127,24 +128,23 @@ index 574ffe0834..9bc3b703a6 100644
  namespace drt {
  
  class frDesign;
-@@ -183,6 +191,12 @@ class TritonRoute : public PinAccessService
+@@ -183,6 +192,10 @@ class TritonRoute : public PinAccessService
    bool initGuide();
    void prep();
    odb::dbDatabase* getDb() const { return db_; }
 +#ifdef DRT_USE_ECCDB
-+  // The stores must outlive this router. Attach before the first initDesign().
-+  void attachEccdb(eccdb::DesignStore& design,
-+                   const eccdb::TechStore& tech,
-+                   const eccdb::LibraryStore& library);
++  // The caller's full context and stores must outlive the router.
++  void attachEccdb(eccdb::DatabaseContext& context);
 +#endif
    void fixMaxSpacing(int num_threads);
    void deleteInstancePAData(frInst* inst, bool delete_inst = false);
    void addInstancePAData(frInst* inst);
-@@ -195,6 +209,11 @@ class TritonRoute : public PinAccessService
+@@ -195,6 +208,12 @@ class TritonRoute : public PinAccessService
    std::unique_ptr<DesignCallBack> db_callback_;
    std::unique_ptr<RouterConfiguration> router_cfg_;
    odb::dbDatabase* db_{nullptr};
 +#ifdef DRT_USE_ECCDB
++  eccdb::DatabaseContext* eccdb_context_{nullptr};
 +  eccdb::DesignStore* eccdb_design_{nullptr};
 +  const eccdb::TechStore* eccdb_tech_{nullptr};
 +  const eccdb::LibraryStore* eccdb_library_{nullptr};
@@ -168,7 +168,7 @@ index 574ffe0834..9bc3b703a6 100644
  };
  
 diff --git a/src/drt/src/TritonRoute.cpp b/src/drt/src/TritonRoute.cpp
-index ea295214a4..7ffc9923f9 100644
+index ea295214a4..218374335d 100644
 --- a/src/drt/src/TritonRoute.cpp
 +++ b/src/drt/src/TritonRoute.cpp
 @@ -10,6 +10,7 @@
@@ -179,7 +179,7 @@ index ea295214a4..7ffc9923f9 100644
  #include <string>
  #include <thread>
  #include <tuple>
-@@ -45,6 +46,12 @@
+@@ -45,6 +46,13 @@
  #include "frRTree.h"
  #include "gc/FlexGC.h"
  #include "io/GuideProcessor.h"
@@ -187,33 +187,36 @@ index ea295214a4..7ffc9923f9 100644
 +#include "NativeEccdbImporter.h"
 +#include "io/EccdbContextAdapter.h"
 +#include "io/EccdbRouteAdapter.h"
-+#include "service/query/PhysicalDesignService.h"
++#include "service/context/DatabaseContext.h"
++#include "service/geometry/PhysicalDesignService.h"
 +#endif
  #include "io/io.h"
  #include "odb/db.h"
  #include "odb/dbId.h"
-@@ -93,6 +100,20 @@ TritonRoute::~TritonRoute()
+@@ -93,6 +101,22 @@ TritonRoute::~TritonRoute()
    service_registry_->withdraw<PinAccessService>(this);
  }
  
 +#ifdef DRT_USE_ECCDB
-+void TritonRoute::attachEccdb(eccdb::DesignStore& design,
-+                              const eccdb::TechStore& tech,
-+                              const eccdb::LibraryStore& library)
++void TritonRoute::attachEccdb(eccdb::DatabaseContext& context)
 +{
 +  if (design_ != nullptr && design_->getTopBlock() != nullptr) {
 +    throw std::logic_error("attach EccDB before loading the DRT design");
 +  }
-+  eccdb_design_ = &design;
-+  eccdb_tech_ = &tech;
-+  eccdb_library_ = &library;
++  if (!context.technology() || !context.library()) {
++    throw std::invalid_argument("DRT requires a full EccDB context");
++  }
++  eccdb_context_ = &context;
++  eccdb_design_ = &context.design();
++  eccdb_tech_ = context.technology();
++  eccdb_library_ = context.library();
 +}
 +#endif
 +
  void TritonRoute::updateDirtyPinAccess()
  {
    if (design_ == nullptr || design_->getTopBlock() == nullptr) {
-@@ -247,6 +268,11 @@ int TritonRoute::getNumDRVs() const
+@@ -247,6 +271,11 @@ int TritonRoute::getNumDRVs() const
  std::string TritonRoute::runDRWorker(const std::string& workerStr,
                                       FlexDRViaData* viaData)
  {
@@ -225,7 +228,7 @@ index ea295214a4..7ffc9923f9 100644
    auto worker = FlexDRWorker::load(
        workerStr, viaData, design_.get(), logger_, router_cfg_.get());
    worker->setSharedVolume(shared_volume_);
-@@ -264,6 +290,11 @@ std::string TritonRoute::runDRWorker(const std::string& workerStr,
+@@ -264,6 +293,11 @@ std::string TritonRoute::runDRWorker(const std::string& workerStr,
  void TritonRoute::debugSingleWorker(const std::string& dumpDir,
                                      const std::string& drcRpt)
  {
@@ -237,7 +240,7 @@ index ea295214a4..7ffc9923f9 100644
    {
      io::Writer writer(getDesign(), logger_);
      writer.updateTrackAssignment(db_->getChip()->getBlock());
-@@ -341,6 +372,11 @@ void TritonRoute::updateGlobals(const char* file_name)
+@@ -341,6 +375,11 @@ void TritonRoute::updateGlobals(const char* file_name)
  
  void TritonRoute::resetDb(const char* file_name)
  {
@@ -249,7 +252,7 @@ index ea295214a4..7ffc9923f9 100644
    std::ifstream stream;
    stream.open(file_name, std::ios::binary);
    try {
-@@ -400,6 +436,11 @@ static void deserializeUpdates(frDesign* design,
+@@ -400,6 +439,11 @@ static void deserializeUpdates(frDesign* design,
  void TritonRoute::updateDesign(const std::vector<std::string>& updatesStrs,
                                 int num_threads)
  {
@@ -261,7 +264,7 @@ index ea295214a4..7ffc9923f9 100644
    omp_set_num_threads(num_threads);
    std::vector<std::vector<drUpdate>> updates(updatesStrs.size());
  #pragma omp parallel for schedule(dynamic)
-@@ -411,6 +452,11 @@ void TritonRoute::updateDesign(const std::vector<std::string>& updatesStrs,
+@@ -411,6 +455,11 @@ void TritonRoute::updateDesign(const std::vector<std::string>& updatesStrs,
  
  void TritonRoute::updateDesign(const std::string& path, int num_threads)
  {
@@ -273,7 +276,7 @@ index ea295214a4..7ffc9923f9 100644
    omp_set_num_threads(num_threads);
    std::vector<std::vector<drUpdate>> updates;
    deserializeUpdates(design_.get(), path, updates);
-@@ -577,23 +623,79 @@ bool TritonRoute::initGuide()
+@@ -577,23 +626,75 @@ bool TritonRoute::initGuide()
  {
    io::GuideProcessor guide_processor(
        getDesign(), db_, logger_, router_cfg_.get());
@@ -282,7 +285,7 @@ index ea295214a4..7ffc9923f9 100644
 +#ifdef DRT_USE_ECCDB
 +  if (eccdb_design_ != nullptr) {
 +    io::EccdbContextAdapter adapter(
-+        *eccdb_design_, *eccdb_tech_, *eccdb_library_, *getDesign());
++        *eccdb_context_, *getDesign());
 +    guideOk = guide_processor.readGuides(
 +        [&adapter](const frNet& net) { return adapter.readInputGuides(net); });
 +  } else
@@ -324,11 +327,9 @@ index ea295214a4..7ffc9923f9 100644
 +    io::readEccdbLibrary(physical, *getDesign(), *logger_);
 +    io::readEccdbDesign(physical, *getDesign(), *router_cfg_, *logger_);
 +
-+    io::EccdbRouteAdapter(*eccdb_design_, *eccdb_tech_, *eccdb_library_, *getDesign())
++    io::EccdbRouteAdapter(*eccdb_context_, *getDesign())
 +        .readRoutes();
-+    io::EccdbContextAdapter(*eccdb_design_,
-+                            *eccdb_tech_,
-+                            *eccdb_library_,
++    io::EccdbContextAdapter(*eccdb_context_,
 +                            *getDesign())
 +        .readContext();
 +  } else
@@ -348,14 +349,12 @@ index ea295214a4..7ffc9923f9 100644
 +    }
 +#ifdef DRT_USE_ECCDB
 +    if (eccdb_design_ != nullptr) {
-+      io::EccdbRouteAdapter(*eccdb_design_, *eccdb_tech_, *eccdb_library_, *getDesign())
++      io::EccdbRouteAdapter(*eccdb_context_, *getDesign())
 +          .readRoutes();
 +      if (design_exists) {
 +        getDesign()->getRegionQuery()->initDRObj();
 +      }
-+      io::EccdbContextAdapter(*eccdb_design_,
-+                              *eccdb_tech_,
-+                              *eccdb_library_,
++      io::EccdbContextAdapter(*eccdb_context_,
 +                              *getDesign())
 +          .readContext();
 +    }
@@ -363,7 +362,7 @@ index ea295214a4..7ffc9923f9 100644
    }
    auto tech = getDesign()->getTech();
  
-@@ -646,8 +748,10 @@ void TritonRoute::initDesign()
+@@ -646,8 +747,10 @@ void TritonRoute::initDesign()
    }
    if (!design_exists) {
      parser.postProcess();
@@ -376,7 +375,7 @@ index ea295214a4..7ffc9923f9 100644
    }
  }
  
-@@ -667,11 +771,18 @@ void TritonRoute::ta()
+@@ -667,11 +770,18 @@ void TritonRoute::ta()
  {
    std::unique_ptr<FlexTA> ta = std::make_unique<FlexTA>(
        getDesign(), logger_, router_cfg_.get(), distributed_);
@@ -396,7 +395,7 @@ index ea295214a4..7ffc9923f9 100644
      io::Writer writer(getDesign(), logger_);
      writer.updateTrackAssignment(db_->getChip()->getBlock());
    }
-@@ -682,7 +793,7 @@ void TritonRoute::dr()
+@@ -682,7 +792,7 @@ void TritonRoute::dr()
    num_drvs_ = -1;
    dr_ = std::make_unique<FlexDR>(
        this, getDesign(), logger_, db_, router_cfg_.get());
@@ -405,7 +404,7 @@ index ea295214a4..7ffc9923f9 100644
      dr_->setDebug(graphics_factory_->makeUniqueDRGraphics());
    }
    if (distributed_) {
-@@ -705,6 +816,11 @@ void TritonRoute::stepDR(int size,
+@@ -705,6 +815,11 @@ void TritonRoute::stepDR(int size,
                           int ripupMode,
                           bool followGuide)
  {
@@ -417,7 +416,7 @@ index ea295214a4..7ffc9923f9 100644
    FlexDR::SearchRepairArgs args = {.size = size,
                                     .offset = offset,
                                     .mazeEndIter = mazeEndIter,
-@@ -720,12 +836,32 @@ void TritonRoute::stepDR(int size,
+@@ -720,12 +835,30 @@ void TritonRoute::stepDR(int size,
  }
  void TritonRoute::endFR()
  {
@@ -440,11 +439,9 @@ index ea295214a4..7ffc9923f9 100644
 +  }
 +#ifdef DRT_USE_ECCDB
 +  if (eccdb_design_ != nullptr) {
-+    io::EccdbRouteAdapter(*eccdb_design_, *eccdb_tech_, *eccdb_library_, *getDesign())
++    io::EccdbRouteAdapter(*eccdb_context_, *getDesign())
 +        .writeRoutes();
-+    io::EccdbContextAdapter(*eccdb_design_,
-+                            *eccdb_tech_,
-+                            *eccdb_library_,
++    io::EccdbContextAdapter(*eccdb_context_,
 +                            *getDesign())
 +        .writeContext(router_cfg_->SAVE_GUIDE_UPDATES);
 +  }
@@ -452,7 +449,7 @@ index ea295214a4..7ffc9923f9 100644
  
    num_drvs_ = design_->getTopBlock()->getNumMarkers();
  
-@@ -734,6 +870,13 @@ void TritonRoute::endFR()
+@@ -734,6 +867,13 @@ void TritonRoute::endFR()
  
  void TritonRoute::repairPDNVias()
  {
@@ -466,7 +463,7 @@ index ea295214a4..7ffc9923f9 100644
    if (router_cfg_->REPAIR_PDN_LAYER_NAME.empty()) {
      return;
    }
-@@ -871,6 +1014,13 @@ bool TritonRoute::writeGlobals(const std::string& name)
+@@ -871,6 +1011,13 @@ bool TritonRoute::writeGlobals(const std::string& name)
  
  void TritonRoute::sendDesignDist()
  {
@@ -480,7 +477,7 @@ index ea295214a4..7ffc9923f9 100644
    if (distributed_) {
      std::string design_path = fmt::format("{}DESIGN.db", shared_volume_);
      std::string router_cfg_path
-@@ -910,6 +1060,13 @@ static void serializeUpdatesBatch(const std::vector<drUpdate>& batch,
+@@ -910,6 +1057,13 @@ static void serializeUpdatesBatch(const std::vector<drUpdate>& batch,
  void TritonRoute::sendGlobalsUpdates(const std::string& router_cfg_path,
                                       const std::string& serializedViaData)
  {
@@ -494,7 +491,7 @@ index ea295214a4..7ffc9923f9 100644
    if (!distributed_) {
      return;
    }
-@@ -933,6 +1090,13 @@ void TritonRoute::sendGlobalsUpdates(const std::string& router_cfg_path,
+@@ -933,6 +1087,13 @@ void TritonRoute::sendGlobalsUpdates(const std::string& router_cfg_path,
  void TritonRoute::sendDesignUpdates(const std::string& router_cfg_path,
                                      int num_threads)
  {
@@ -508,7 +505,7 @@ index ea295214a4..7ffc9923f9 100644
    if (!distributed_) {
      return;
    }
-@@ -995,14 +1159,40 @@ int TritonRoute::main()
+@@ -995,14 +1156,40 @@ int TritonRoute::main()
    if (router_cfg_->DBPROCESSNODE == "GF14_13M_3Mx_2Cx_4Kx_2Hx_2Gx_LB") {
      router_cfg_->USENONPREFTRACKS = false;
    }
@@ -551,7 +548,7 @@ index ea295214a4..7ffc9923f9 100644
      if (router_cfg_->DO_PA) {
        pa_thread = std::make_unique<std::thread>([this]() {
          sendDesignDist();
-@@ -1020,10 +1210,19 @@ int TritonRoute::main()
+@@ -1020,10 +1207,19 @@ int TritonRoute::main()
    }
    initDesign();
    bool has_routable_nets = false;
@@ -575,7 +572,7 @@ index ea295214a4..7ffc9923f9 100644
      }
    }
    if (!has_routable_nets) {
-@@ -1037,7 +1236,7 @@ int TritonRoute::main()
+@@ -1037,7 +1233,7 @@ int TritonRoute::main()
      pa_ = std::make_unique<FlexPA>(
          getDesign(), logger_, dist_, router_cfg_.get());
      pa_->setDistributed(dist_ip_, dist_port_, shared_volume_, cloud_sz_);
@@ -584,7 +581,7 @@ index ea295214a4..7ffc9923f9 100644
        pa_->setDebug(graphics_factory_->makeUniquePAGraphics());
      }
      if (pa_thread) {
-@@ -1045,11 +1244,12 @@ int TritonRoute::main()
+@@ -1045,11 +1241,12 @@ int TritonRoute::main()
      }
      pa_->main();
      /// bookmark
@@ -599,7 +596,7 @@ index ea295214a4..7ffc9923f9 100644
        asio::post(*dist_pool_, [this]() {
          dst::JobMessage msg(dst::JobMessage::kGrdrInit,
                              dst::JobMessage::kBroadcast),
-@@ -1058,7 +1258,7 @@ int TritonRoute::main()
+@@ -1058,7 +1255,7 @@ int TritonRoute::main()
        });
      }
    }
@@ -608,7 +605,7 @@ index ea295214a4..7ffc9923f9 100644
      db_->write(utl::OutStreamHandler(
                     fmt::format("{}/design.odb", debug_->dumpDir).c_str(), true)
                     .getStream());
-@@ -1068,7 +1268,7 @@ int TritonRoute::main()
+@@ -1068,7 +1265,7 @@ int TritonRoute::main()
    }
    prep();
    ta();
@@ -617,7 +614,7 @@ index ea295214a4..7ffc9923f9 100644
      asio::post(*dist_pool_,
                 [this] { sendDesignUpdates("", router_cfg_->MAX_THREADS); });
    }
-@@ -1082,10 +1282,17 @@ int TritonRoute::main()
+@@ -1082,10 +1279,17 @@ int TritonRoute::main()
  
  void TritonRoute::pinAccess(const std::vector<odb::dbInst*>& target_insts)
  {
@@ -636,7 +633,7 @@ index ea295214a4..7ffc9923f9 100644
      asio::post(*dist_pool_, [this]() {
        sendDesignDist();
        dst::JobMessage msg(dst::JobMessage::kPinAccess,
-@@ -1103,16 +1310,26 @@ void TritonRoute::pinAccess(const std::vector<odb::dbInst*>& target_insts)
+@@ -1103,16 +1307,24 @@ void TritonRoute::pinAccess(const std::vector<odb::dbInst*>& target_insts)
    pa_ = std::make_unique<FlexPA>(
        getDesign(), logger_, dist_, router_cfg_.get());
    pa_->setTargetInstances(target_insts);
@@ -654,9 +651,7 @@ index ea295214a4..7ffc9923f9 100644
 -  writer.updateDb(db_, router_cfg_.get(), true);
 +  if (isNativeEccdb()) {
 +#ifdef DRT_USE_ECCDB
-+    io::EccdbContextAdapter(*eccdb_design_,
-+                            *eccdb_tech_,
-+                            *eccdb_library_,
++    io::EccdbContextAdapter(*eccdb_context_,
 +                            *getDesign())
 +        .writePinAccess();
 +#endif
@@ -667,7 +662,7 @@ index ea295214a4..7ffc9923f9 100644
  }
  
  void TritonRoute::deleteInstancePAData(frInst* inst, bool delete_inst)
-@@ -1140,6 +1357,20 @@ void TritonRoute::addAvoidViaDefPA(const frViaDef* via_def)
+@@ -1140,6 +1352,18 @@ void TritonRoute::addAvoidViaDefPA(const frViaDef* via_def)
  }
  void TritonRoute::updateDirtyPAData()
  {
@@ -676,9 +671,7 @@ index ea295214a4..7ffc9923f9 100644
 +      design_->getTopBlock()->removeDeletedObjects();
 +      pa_->updateDirtyInsts();
 +#ifdef DRT_USE_ECCDB
-+      io::EccdbContextAdapter(*eccdb_design_,
-+                              *eccdb_tech_,
-+                              *eccdb_library_,
++      io::EccdbContextAdapter(*eccdb_context_,
 +                              *getDesign())
 +          .writePinAccess();
 +#endif
@@ -688,7 +681,7 @@ index ea295214a4..7ffc9923f9 100644
    if (pa_) {
      design_->getTopBlock()->removeDeletedObjects();
      pa_->updateDirtyInsts();
-@@ -1150,6 +1381,11 @@ void TritonRoute::updateDirtyPAData()
+@@ -1150,6 +1374,11 @@ void TritonRoute::updateDirtyPAData()
  
  void TritonRoute::fixMaxSpacing(int num_threads)
  {
@@ -700,7 +693,7 @@ index ea295214a4..7ffc9923f9 100644
    initDesign();
    initGuide();
    prep();
-@@ -1237,6 +1473,11 @@ void TritonRoute::checkDRC(const char* filename,
+@@ -1237,6 +1466,11 @@ void TritonRoute::checkDRC(const char* filename,
                             const std::string& marker_name,
                             int num_threads)
  {
@@ -712,7 +705,7 @@ index ea295214a4..7ffc9923f9 100644
    router_cfg_->GC_IGNORE_PDN_LAYER_NUM = -1;
    router_cfg_->REPAIR_PDN_LAYER_NUM = -1;
    router_cfg_->MAX_THREADS = num_threads;
-@@ -1246,7 +1487,17 @@ void TritonRoute::checkDRC(const char* filename,
+@@ -1246,7 +1480,17 @@ void TritonRoute::checkDRC(const char* filename,
        && gcellGrid->getNumGridPatternsY() == 1) {
      io::GuideProcessor guide_processor(
          getDesign(), db_, logger_, router_cfg_.get());
@@ -720,7 +713,7 @@ index ea295214a4..7ffc9923f9 100644
 +#ifdef DRT_USE_ECCDB
 +    if (eccdb_design_ != nullptr) {
 +      io::EccdbContextAdapter adapter(
-+          *eccdb_design_, *eccdb_tech_, *eccdb_library_, *getDesign());
++          *eccdb_context_, *getDesign());
 +      guide_processor.readGuides(
 +          [&adapter](const frNet& net) { return adapter.readInputGuides(net); });
 +    } else
@@ -731,7 +724,7 @@ index ea295214a4..7ffc9923f9 100644
      guide_processor.buildGCellPatterns();
    } else if (!initGuide()) {
      logger_->error(DRT, 1, "GCELLGRID is undefined");
-@@ -1262,6 +1513,10 @@ void TritonRoute::checkDRC(const char* filename,
+@@ -1262,6 +1506,10 @@ void TritonRoute::checkDRC(const char* filename,
  
  void TritonRoute::addUserSelectedVia(const std::string& viaName)
  {
@@ -742,7 +735,7 @@ index ea295214a4..7ffc9923f9 100644
    if (db_->getChip() == nullptr || db_->getChip()->getBlock() == nullptr
        || db_->getTech() == nullptr) {
      logger_->error(DRT, 610, "Load design before setting default vias");
-@@ -1278,6 +1533,10 @@ void TritonRoute::addUserSelectedVia(const std::string& viaName)
+@@ -1278,6 +1526,10 @@ void TritonRoute::addUserSelectedVia(const std::string& viaName)
  
  void TritonRoute::setUnidirectionalLayer(const std::string& layerName)
  {
@@ -753,7 +746,7 @@ index ea295214a4..7ffc9923f9 100644
    if (db_->getTech() == nullptr) {
      logger_->error(DRT, 615, "Load tech before setting unidirectional layers");
    }
-@@ -1362,20 +1621,6 @@ void TritonRoute::reportDRC(const std::string& file_name,
+@@ -1362,20 +1614,6 @@ void TritonRoute::reportDRC(const std::string& file_name,
                              const std::string& marker_name,
                              odb::Rect drcBox) const
  {
@@ -774,7 +767,7 @@ index ea295214a4..7ffc9923f9 100644
    std::vector<const frMarker*> sorted_markers;
    sorted_markers.reserve(std::distance(markers.begin(), markers.end()));
    for (const auto& marker : markers) {
-@@ -1433,6 +1678,99 @@ void TritonRoute::reportDRC(const std::string& file_name,
+@@ -1433,6 +1671,99 @@ void TritonRoute::reportDRC(const std::string& file_name,
                        return marker_sort_key(lhs) < marker_sort_key(rhs);
                      });
  
@@ -874,7 +867,7 @@ index ea295214a4..7ffc9923f9 100644
    for (const frMarker* marker : sorted_markers) {
      // get violation bbox
      odb::Rect bbox = marker->getBBox();
-@@ -1533,6 +1871,11 @@ void TritonRoute::reportDRC(const std::string& file_name,
+@@ -1533,6 +1864,11 @@ void TritonRoute::reportDRC(const std::string& file_name,
  
  std::vector<int> TritonRoute::routeLayerLengths(odb::dbWire* wire) const
  {
@@ -1181,10 +1174,10 @@ index 5facd324bd..2855f2b465 100644
      return user_selected_vias_;
 diff --git a/src/drt/src/io/EccdbContextAdapter.cpp b/src/drt/src/io/EccdbContextAdapter.cpp
 new file mode 100644
-index 0000000000..a91e5ef2e2
+index 0000000000..fbcdeb3e66
 --- /dev/null
 +++ b/src/drt/src/io/EccdbContextAdapter.cpp
-@@ -0,0 +1,831 @@
+@@ -0,0 +1,791 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +// Copyright (c) 2026, The OpenROAD Authors
 +
@@ -1221,8 +1214,9 @@ index 0000000000..a91e5ef2e2
 +#include "design/DesignStore.h"
 +#include "frDesign.h"
 +#include "library/LibraryStore.h"
-+#include "service/context/RoutingContextService.h"
-+#include "service/query/PhysicalDesignService.h"
++#include "service/context/DatabaseContext.h"
++#include "service/geometry/PhysicalDesignService.h"
++#include "service/routing/RoutingService.h"
 +#include "tech/TechStore.h"
 +
 +namespace drt::io {
@@ -1240,7 +1234,7 @@ index 0000000000..a91e5ef2e2
 +using eccdb::GeometryLayerKind;
 +using eccdb::LibraryMasterPortId;
 +using eccdb::PhysicalDesignService;
-+using eccdb::RoutingContextService;
++using eccdb::RoutingService;
 +using eccdb::TechRoutingLayerId;
 +
 +[[nodiscard]] odb::Point toOdb(eccdb::Point point)
@@ -1595,23 +1589,12 @@ index 0000000000..a91e5ef2e2
 +  }
 +}
 +
-+[[nodiscard]] std::size_t ioPortCount(const RoutingContextService& context, eccdb::DesignIoPinId pin)
++[[nodiscard]] std::size_t ioPortCount(const PhysicalDesignService& physical, eccdb::DesignIoPinId pin)
 +{
-+  std::size_t count = 0;
-+  for (;;) {
-+    if (count > std::numeric_limits<uint32_t>::max()) {
-+      throw std::overflow_error("EccDB IO pin port count exceeds supported range");
-+    }
-+    try {
-+      static_cast<void>(context.ioPinPortCandidateGroups(pin, static_cast<uint32_t>(count)));
-+      ++count;
-+    } catch (const std::out_of_range&) {
-+      return count;
-+    }
-+  }
++  return physical.blockPins(eccdb::DesignBlockTermId{pin.entity()}).size();
 +}
 +
-+void populateMasterPortCandidates(const RoutingContextService& context,
++void populateMasterPortCandidates(const eccdb::DesignPinAccessStorage& context,
 +                                  const PhysicalDesignService& physical,
 +                                  frDesign& route_design,
 +                                  const ViaLookup& vias,
@@ -1640,7 +1623,7 @@ index 0000000000..a91e5ef2e2
 +  });
 +}
 +
-+void populateIoPinCandidates(const RoutingContextService& context,
++void populateIoPinCandidates(const eccdb::DesignPinAccessStorage& context,
 +                             const PhysicalDesignService& physical,
 +                             frDesign& route_design,
 +                             const ViaLookup& vias)
@@ -1655,7 +1638,7 @@ index 0000000000..a91e5ef2e2
 +    if (!io_pin) {
 +      throw std::runtime_error("EccDB has no IO pin named " + term.getName());
 +    }
-+    if (ioPortCount(context, io_pin) != term.getPins().size()) {
++    if (ioPortCount(physical, io_pin) != term.getPins().size()) {
 +      throw std::invalid_argument("EccDB and DRT disagree on IO pin PORT count for " + term.getName());
 +    }
 +    for (std::size_t port_index = 0; port_index < term.getPins().size(); ++port_index) {
@@ -1680,7 +1663,7 @@ index 0000000000..a91e5ef2e2
 +  }
 +}
 +
-+void populateInstancePreferences(const RoutingContextService& context,
++void populateInstancePreferences(const eccdb::DesignPinAccessStorage& context,
 +                                 const PhysicalDesignService& physical,
 +                                 frDesign& route_design,
 +                                 const CandidateReferenceMap& references)
@@ -1744,11 +1727,9 @@ index 0000000000..a91e5ef2e2
 +
 +}  // namespace
 +
-+EccdbContextAdapter::EccdbContextAdapter(eccdb::DesignStore& design,
-+                                         const eccdb::TechStore& technology,
-+                                         const eccdb::LibraryStore& library,
-+                                         frDesign& route_design)
-+    : design_(design), technology_(technology), library_(library), route_design_(route_design)
++EccdbContextAdapter::EccdbContextAdapter(eccdb::DatabaseContext& context, frDesign& route_design)
++    : context_(context), design_(context.design()), technology_(*context.technology()),
++      library_(*context.library()), route_design_(route_design)
 +{
 +}
 +
@@ -1757,8 +1738,9 @@ index 0000000000..a91e5ef2e2
 +  if (net.isSpecial()) {
 +    return {};
 +  }
-+  PhysicalDesignService physical(technology_, library_, design_);
-+  RoutingContextService context(design_);
++  auto& database_context = context_;
++  PhysicalDesignService physical(database_context);
++  const auto& context = design_.guideStorage();
 +  const auto net_id = physical.findRegularNet(net.getName());
 +  if (!net_id) {
 +    throw std::runtime_error("EccDB has no regular net named " + net.getName());
@@ -1783,7 +1765,8 @@ index 0000000000..a91e5ef2e2
 +
 +void EccdbContextAdapter::readContext()
 +{
-+  PhysicalDesignService physical(technology_, library_, design_);
++  auto& database_context = context_;
++  PhysicalDesignService physical(database_context);
 +  std::optional<eccdb::DesignGCellGrid> x_grid;
 +  std::optional<eccdb::DesignGCellGrid> y_grid;
 +  physical.forEachGCellGrid([&](const auto, const eccdb::DesignGCellGrid& grid) {
@@ -1822,8 +1805,9 @@ index 0000000000..a91e5ef2e2
 +
 +void EccdbContextAdapter::readPinAccess()
 +{
-+  PhysicalDesignService physical(technology_, library_, design_);
-+  RoutingContextService context(design_);
++  auto& database_context = context_;
++  PhysicalDesignService physical(database_context);
++  const auto& context = design_.pinAccessStorage();
 +  const auto vias = buildViaLookup(physical);
 +  CandidateReferenceMap references;
 +  populateMasterPortCandidates(context, physical, route_design_, vias, references);
@@ -1833,55 +1817,28 @@ index 0000000000..a91e5ef2e2
 +
 +void EccdbContextAdapter::writeContext(bool save_guide_updates)
 +{
-+  if (save_guide_updates) {
-+    writeGuides();
-+  }
-+  writeTrackAssignments();
++  writeGuideStage(save_guide_updates, true);
 +  writePinAccess();
 +}
 +
 +void EccdbContextAdapter::writeGuides()
 +{
-+  PhysicalDesignService physical(technology_, library_, design_);
-+  RoutingContextService context(design_);
-+  const auto* block = route_design_.getTopBlock();
-+  if (block == nullptr) {
-+    throw std::logic_error("DRT design must be loaded before EccDB guide output");
-+  }
-+  requireEveryDrtRegularNetInEccdb(physical, *block);
-+  physical.forEachRegularNet([&](const auto net_id, const auto& design_net) {
-+    auto* net = block->findNet(design_net.name);
-+    if (net == nullptr || net->isSpecial()) {
-+      throw std::runtime_error("DRT has no regular net named " + design_net.name);
-+    }
-+    std::vector<eccdb::DesignRouteGuide> guides;
-+    guides.reserve(net->getGuides().size());
-+    for (const auto& guide : net->getGuides()) {
-+      auto box = guide->getBBox();
-+      if (block->getGCellPatterns().size() >= 2u) {
-+        const auto [begin, end] = guide->getPoints();
-+        const auto begin_box = block->getGCellBox(block->getGCellIdx(begin));
-+        const auto end_box = block->getGCellBox(block->getGCellIdx(end));
-+        box = {begin_box.xMin(), begin_box.yMin(), end_box.xMax(), end_box.yMax()};
-+      }
-+      const auto* layer = route_design_.getTech()->getLayer(guide->getLayerNum());
-+      const auto layer_id = requireEccdbRoutingLayer(physical, technology_, layer);
-+      guides.push_back({.box = toEccdb(box),
-+                        .layer = layer_id,
-+                        .via_layer = layer_id,
-+                        .flags = 0u});
-+    }
-+    context.replaceGuides(net_id, std::move(guides));
-+  });
++  writeGuideStage(true, false);
 +}
 +
 +void EccdbContextAdapter::writeTrackAssignments()
 +{
-+  PhysicalDesignService physical(technology_, library_, design_);
-+  RoutingContextService context(design_);
++  writeGuideStage(false, true);
++}
++
++void EccdbContextAdapter::writeGuideStage(bool save_guides, bool save_assignments)
++{
++  auto& database_context = context_;
++  PhysicalDesignService physical(database_context);
++  RoutingService context(database_context);
 +  const auto* block = route_design_.getTopBlock();
 +  if (block == nullptr) {
-+    throw std::logic_error("DRT design must be loaded before EccDB track-assignment output");
++    throw std::logic_error("DRT design must be loaded before EccDB guide-stage output");
 +  }
 +  requireEveryDrtRegularNetInEccdb(physical, *block);
 +  physical.forEachRegularNet([&](const auto net_id, const auto& design_net) {
@@ -1889,8 +1846,26 @@ index 0000000000..a91e5ef2e2
 +    if (net == nullptr || net->isSpecial()) {
 +      throw std::runtime_error("DRT has no regular net named " + design_net.name);
 +    }
++    std::optional<std::vector<eccdb::DesignRouteGuide>> guides;
++    if (save_guides) {
++      guides.emplace();
++      guides->reserve(net->getGuides().size());
++    }
 +    std::vector<DesignTrackAssignmentShape> assignments;
 +    for (const auto& guide : net->getGuides()) {
++      if (guides) {
++        auto box = guide->getBBox();
++        if (block->getGCellPatterns().size() >= 2u) {
++          const auto [begin, end] = guide->getPoints();
++          const auto begin_box = block->getGCellBox(block->getGCellIdx(begin));
++          const auto end_box = block->getGCellBox(block->getGCellIdx(end));
++          box = {begin_box.xMin(), begin_box.yMin(), end_box.xMax(), end_box.yMax()};
++        }
++        const auto* layer = route_design_.getTech()->getLayer(guide->getLayerNum());
++        const auto layer_id = requireEccdbRoutingLayer(physical, technology_, layer);
++        guides->push_back({.box = toEccdb(box), .layer = layer_id, .via_layer = layer_id, .flags = 0u});
++      }
++      if (!save_assignments) continue;
 +      for (const auto& route : guide->getRoutes()) {
 +        if (route->typeId() != frcPathSeg) {
 +          throw std::invalid_argument("DRT guide route is not a track-assignment path segment");
@@ -1901,57 +1876,43 @@ index 0000000000..a91e5ef2e2
 +                               .box = toEccdb(track.getBBox())});
 +      }
 +    }
-+    context.replaceTrackAssignments(net_id, std::move(assignments));
++    context.replaceGuideStage(net_id, std::move(guides), std::move(assignments));
 +  });
 +}
 +
 +void EccdbContextAdapter::writePinAccess()
 +{
-+  // A complete candidate replacement is needed because EccDB prevents a
-+  // selected group from being changed in place. Clear preferences/selections
-+  // first, then replace candidates and restore DRT's selected points.
-+  PhysicalDesignService physical(technology_, library_, design_);
-+  RoutingContextService context(design_);
++  // Project the complete scoped stage before replacing any selected group.
++  auto& database_context = context_;
++  PhysicalDesignService physical(database_context);
++  RoutingService context(database_context);
 +  const auto vias = buildViaLookup(physical);
 +  const auto* block = route_design_.getTopBlock();
 +  if (block == nullptr) {
 +    throw std::logic_error("DRT design must be loaded before EccDB pin-access output");
 +  }
 +
-+  for (const auto& inst_ptr : block->getInsts()) {
-+    const auto& instance = *inst_ptr;
-+    const auto instance_id = physical.findInstance(instance.getName());
-+    if (!instance_id) {
-+      throw std::runtime_error("EccDB has no instance named " + instance.getName());
-+    }
-+    for (const auto& term_ptr : instance.getInstTerms()) {
-+      const auto pin_id = physical.findInstancePin(instance_id, term_ptr->getTerm()->getName());
-+      if (!pin_id) {
-+        throw std::runtime_error("EccDB has no instance pin " + instance.getName() + "/" + term_ptr->getTerm()->getName());
++  const auto project_groups = [&](const auto& pin) {
++    std::vector<DesignPinAccessCandidateGroup> groups;
++    groups.reserve(pin.getNumPinAccess());
++    for (int index = 0; index < pin.getNumPinAccess(); ++index) {
++      const auto* group = pin.getPinAccess(index);
++      std::vector<DesignPinAccessPoint> points;
++      points.reserve(group->getAccessPoints().size());
++      for (const auto& point : group->getAccessPoints()) {
++        points.push_back(toEccdbAccessPoint(*point, physical, technology_, route_design_, vias));
 +      }
-+      (void) context.clearPreferredInstancePinAccess(pin_id);
++      groups.push_back({.group_index = checkedGroupIndex(static_cast<std::size_t>(index)), .points = std::move(points)});
 +    }
-+    (void) context.clearInstancePinAccessGroup(instance_id);
-+  }
-+
-+  forEachMasterPort(physical, route_design_, [&](const frMaster&, const frMTerm&, const frMPin&, LibraryMasterPortId port, std::size_t) {
-+    if (!context.masterPortCandidateGroups(port).empty() && !context.clearMasterPortCandidateGroups(port)) {
-+      throw std::runtime_error("EccDB master pin-access candidates remain selected by an instance absent from DRT");
-+    }
-+  });
-+
++    return groups;
++  };
++  eccdb::DesignPinAccessUpdate update;
 +  CandidateReferenceMap references;
 +  forEachMasterPort(physical, route_design_, [&](const frMaster&, const frMTerm&, const frMPin& pin,
 +                                                 LibraryMasterPortId port, std::size_t) {
-+    for (int group_index = 0; group_index < pin.getNumPinAccess(); ++group_index) {
-+      const auto* group = pin.getPinAccess(group_index);
-+      std::vector<DesignPinAccessPoint> points;
-+      points.reserve(group->getAccessPoints().size());
-+      for (const auto& access_point : group->getAccessPoints()) {
-+        points.push_back(toEccdbAccessPoint(*access_point, physical, technology_, route_design_, vias));
-+      }
-+      context.setMasterPortCandidateGroup(port, checkedGroupIndex(static_cast<std::size_t>(group_index)), std::move(points));
-+    }
++    auto& output = update.master_ports.emplace_back();
++    output.master_port = port;
++    output.groups = project_groups(pin);
 +    addCandidateReferences(pin, port, references);
 +  });
 +
@@ -1961,24 +1922,14 @@ index 0000000000..a91e5ef2e2
 +    if (!io_pin) {
 +      throw std::runtime_error("EccDB has no IO pin named " + term.getName());
 +    }
-+    if (ioPortCount(context, io_pin) != term.getPins().size()) {
++    if (ioPortCount(physical, io_pin) != term.getPins().size()) {
 +      throw std::invalid_argument("EccDB and DRT disagree on IO pin PORT count for " + term.getName());
 +    }
 +    for (std::size_t port_index = 0; port_index < term.getPins().size(); ++port_index) {
 +      const auto& pin = *term.getPins()[port_index];
-+      (void) context.clearIoPinPortCandidateGroups(io_pin, checkedGroupIndex(port_index));
-+      for (int group_index = 0; group_index < pin.getNumPinAccess(); ++group_index) {
-+        const auto* group = pin.getPinAccess(group_index);
-+        std::vector<DesignPinAccessPoint> points;
-+        points.reserve(group->getAccessPoints().size());
-+        for (const auto& access_point : group->getAccessPoints()) {
-+          points.push_back(toEccdbAccessPoint(*access_point, physical, technology_, route_design_, vias));
-+        }
-+        context.setIoPinPortCandidateGroup(io_pin,
-+                                            checkedGroupIndex(port_index),
-+                                            checkedGroupIndex(static_cast<std::size_t>(group_index)),
-+                                            std::move(points));
-+      }
++      auto& output = update.block_pins.emplace_back();
++      output.pin = physical.blockPins(eccdb::DesignBlockTermId{io_pin.entity()})[port_index];
++      output.candidates.groups = project_groups(pin);
 +    }
 +  }
 +
@@ -1988,9 +1939,10 @@ index 0000000000..a91e5ef2e2
 +    if (!instance_id) {
 +      throw std::runtime_error("EccDB has no instance named " + instance.getName());
 +    }
++    auto& output = update.instances.emplace_back();
++    output.instance = instance_id;
 +    if (instance.getPinAccessIdx() != -1) {
-+      context.setInstancePinAccessGroup(instance_id,
-+                                         checkedGroupIndex(static_cast<std::size_t>(instance.getPinAccessIdx())));
++      output.group_index = checkedGroupIndex(static_cast<std::size_t>(instance.getPinAccessIdx()));
 +    }
 +    for (const auto& term_ptr : instance.getInstTerms()) {
 +      const auto pin_id = physical.findInstancePin(instance_id, term_ptr->getTerm()->getName());
@@ -2010,15 +1962,16 @@ index 0000000000..a91e5ef2e2
 +                               .group_index = found->second.group_index,
 +                               .point_index = found->second.point_index});
 +      }
-+      context.setPreferredInstancePinAccess(pin_id, std::move(preferences));
++      if (!preferences.empty()) output.preferences.entries.push_back({.pin = pin_id, .values = std::move(preferences)});
 +    }
 +  }
++  context.replacePinAccess(std::move(update));
 +}
 +
 +}  // namespace drt::io
 diff --git a/src/drt/src/io/EccdbContextAdapter.h b/src/drt/src/io/EccdbContextAdapter.h
 new file mode 100644
-index 0000000000..81e61e4388
+index 0000000000..a8afc6c657
 --- /dev/null
 +++ b/src/drt/src/io/EccdbContextAdapter.h
 @@ -0,0 +1,58 @@
@@ -2035,6 +1988,7 @@ index 0000000000..81e61e4388
 +class DesignStore;
 +class LibraryStore;
 +class TechStore;
++class DatabaseContext;
 +}  // namespace eccdb
 +
 +namespace drt {
@@ -2048,10 +2002,7 @@ index 0000000000..81e61e4388
 +class EccdbContextAdapter
 +{
 + public:
-+  EccdbContextAdapter(eccdb::DesignStore& design,
-+                      const eccdb::TechStore& technology,
-+                      const eccdb::LibraryStore& library,
-+                      frDesign& route_design);
++  EccdbContextAdapter(eccdb::DatabaseContext& context, frDesign& route_design);
 +
 +  // EccDB guide input must be injected into GuideProcessor::tmp_guides_.
 +  // DRT consumes guide geometry and layer, rejecting congested input guides.
@@ -2072,6 +2023,8 @@ index 0000000000..81e61e4388
 +  void writePinAccess();
 +
 + private:
++  void writeGuideStage(bool save_guides, bool save_assignments);
++  eccdb::DatabaseContext& context_;
 +  eccdb::DesignStore& design_;
 +  const eccdb::TechStore& technology_;
 +  const eccdb::LibraryStore& library_;
@@ -2082,7 +2035,7 @@ index 0000000000..81e61e4388
 +}  // namespace drt
 diff --git a/src/drt/src/io/EccdbRouteAdapter.cpp b/src/drt/src/io/EccdbRouteAdapter.cpp
 new file mode 100644
-index 0000000000..edf741d3db
+index 0000000000..e7d37bef58
 --- /dev/null
 +++ b/src/drt/src/io/EccdbRouteAdapter.cpp
 @@ -0,0 +1,840 @@
@@ -2118,9 +2071,9 @@ index 0000000000..edf741d3db
 +#include "design/routing/view/RoutingViewTypes.h"
 +#include "frDesign.h"
 +#include "library/LibraryStore.h"
-+#include "service/query/PhysicalDesignService.h"
-+#include "service/routing/DesignViaService.h"
-+#include "service/routing/NetRouteService.h"
++#include "service/context/DatabaseContext.h"
++#include "service/geometry/PhysicalDesignService.h"
++#include "service/routing/RoutingService.h"
 +#include "tech/TechStore.h"
 +#include "tech/non_default_rule/model/NonDefaultRuleComponents.h"
 +#include "tech/routing_layer/model/RoutingLayerComponents.h"
@@ -2286,7 +2239,7 @@ index 0000000000..edf741d3db
 +  }
 +}
 +
-+[[nodiscard]] eccdb::DesignViaId createRouterAddedVia(eccdb::DesignStore& design,
++[[nodiscard]] eccdb::DesignViaId createRouterAddedVia(eccdb::RoutingService& design_vias,
 +                                                        const eccdb::TechStore& tech,
 +                                                        frDesign& route_design,
 +                                                        const frViaDef& via)
@@ -2322,7 +2275,7 @@ index 0000000000..edf741d3db
 +                         odb::dbTechLayerType::ROUTING,
 +                         value.name,
 +                         "upper routing");
-+  return eccdb::DesignViaService{design}.createVia(std::move(value));
++  return design_vias.createVia(std::move(value));
 +}
 +
 +[[nodiscard]] std::optional<std::string> eccdbNdrName(const eccdb::DesignStore& design,
@@ -2730,17 +2683,16 @@ index 0000000000..edf741d3db
 +
 +}  // namespace
 +
-+EccdbRouteAdapter::EccdbRouteAdapter(eccdb::DesignStore& design,
-+                                     const eccdb::TechStore& tech,
-+                                     const eccdb::LibraryStore& library,
-+                                     frDesign& route_design)
-+    : design_(design), tech_(tech), library_(library), route_design_(route_design)
++EccdbRouteAdapter::EccdbRouteAdapter(eccdb::DatabaseContext& context, frDesign& route_design)
++    : context_(context), design_(context.design()), tech_(*context.technology()),
++      library_(*context.library()), route_design_(route_design)
 +{
 +}
 +
 +void EccdbRouteAdapter::readRoutes()
 +{
-+  const eccdb::PhysicalDesignService physical(tech_, library_, design_);
++  auto& database_context = context_;
++  const eccdb::PhysicalDesignService physical(database_context);
 +  auto* block = route_design_.getTopBlock();
 +  if (block == nullptr) {
 +    throw std::logic_error("DRT design must be loaded before EccDB routing");
@@ -2804,8 +2756,9 @@ index 0000000000..edf741d3db
 +
 +void EccdbRouteAdapter::writeRoutes()
 +{
-+  eccdb::NetRouteService routes(design_, tech_);
-+  eccdb::DesignViaService design_vias(design_);
++  auto& database_context = context_;
++  eccdb::RoutingService routes(database_context);
++  auto& design_vias = routes;
 +  auto* block = route_design_.getTopBlock();
 +  if (block == nullptr) {
 +    throw std::logic_error("DRT design must be loaded before EccDB routing");
@@ -2825,7 +2778,7 @@ index 0000000000..edf741d3db
 +    if (net == nullptr || net->isSpecial()) {
 +      throw std::runtime_error("DRT has no ordinary net named " + design_net.name);
 +    }
-+    // NetRouteService only replaces routed Wires. Keeping a fixed net
++    // RoutingService only replaces routed Wires. Keeping a fixed net
 +    // read-only avoids flattening its physical status into routed geometry.
 +    if (net->isFixed()) {
 +      return;
@@ -2893,7 +2846,7 @@ index 0000000000..edf741d3db
 +        if (!via_def->isAddedByRouter()) {
 +          throw std::runtime_error("EccDB has no VIA named " + name);
 +        }
-+        design_via = createRouterAddedVia(design_, tech_, route_design_, *via_def);
++        design_via = createRouterAddedVia(design_vias, tech_, route_design_, *via_def);
 +      }
 +      const eccdb::RouteViaDefinition definition
 +          = tech_via ? eccdb::RouteViaDefinition{tech_via} : eccdb::RouteViaDefinition{design_via};
@@ -2928,10 +2881,10 @@ index 0000000000..edf741d3db
 +}  // namespace drt::io
 diff --git a/src/drt/src/io/EccdbRouteAdapter.h b/src/drt/src/io/EccdbRouteAdapter.h
 new file mode 100644
-index 0000000000..286faa6319
+index 0000000000..d8d73ef8ab
 --- /dev/null
 +++ b/src/drt/src/io/EccdbRouteAdapter.h
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,43 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +
 +#pragma once
@@ -2940,6 +2893,7 @@ index 0000000000..286faa6319
 +class DesignStore;
 +class LibraryStore;
 +class TechStore;
++class DatabaseContext;
 +}
 +
 +namespace drt {
@@ -2959,15 +2913,13 @@ index 0000000000..286faa6319
 +class EccdbRouteAdapter
 +{
 + public:
-+  EccdbRouteAdapter(eccdb::DesignStore& design,
-+                    const eccdb::TechStore& tech,
-+                    const eccdb::LibraryStore& library,
-+                    frDesign& route_design);
++  EccdbRouteAdapter(eccdb::DatabaseContext& context, frDesign& route_design);
 +
 +  void readRoutes();
 +  void writeRoutes();
 +
 + private:
++  eccdb::DatabaseContext& context_;
 +  eccdb::DesignStore& design_;
 +  const eccdb::TechStore& tech_;
 +  const eccdb::LibraryStore& library_;
@@ -4007,10 +3959,10 @@ index d146df97e0..b6ebb6dd72 100644
    const frCoord top_width = tech->getLayer(layer_num + 2)->getMinWidth();
 diff --git a/src/drt/test/eccdbAdapterTest.cpp b/src/drt/test/eccdbAdapterTest.cpp
 new file mode 100644
-index 0000000000..dcd2e9260a
+index 0000000000..1f6903b4c3
 --- /dev/null
 +++ b/src/drt/test/eccdbAdapterTest.cpp
-@@ -0,0 +1,439 @@
+@@ -0,0 +1,481 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +// Copyright (c) 2026, The OpenROAD Authors
 +
@@ -4035,15 +3987,14 @@ index 0000000000..dcd2e9260a
 +#include "design/netlist/model/NetlistComponents.h"
 +#include "design/pin_access/model/PinAccessComponents.h"
 +#include "design/routing/component/RoutingComponents.h"
-+#include "design/routing/component/WireRouting.h"
 +#include "design/via/component/ViaComponents.h"
 +#include "io/EccdbContextAdapter.h"
 +#include "io/EccdbRouteAdapter.h"
 +#include "library/LibraryStore.h"
 +#include "library/cell_master/model/CellMasterComponents.h"
 +#include "library/master_term/model/MasterTermComponents.h"
-+#include "service/context/RoutingContextService.h"
-+#include "service/routing/NetRouteService.h"
++#include "service/context/DatabaseContext.h"
++#include "service/routing/RoutingService.h"
 +#include "tech/TechStore.h"
 +#include "tech/routing_layer/model/RoutingLayerComponents.h"
 +
@@ -4074,23 +4025,18 @@ index 0000000000..dcd2e9260a
 +                                                   eccdb::Point begin,
 +                                                   eccdb::Point end)
 +  {
-+    eccdb::DesignWireRoutingInput routing;
-+    routing.appendPath(eccdb::DesignWirePath{.layer = m1_,
-+                                              .flags = 0u,
-+                                              .width = 0,
-+                                              .mask = 0u,
-+                                              .taper_rule = {},
-+                                              .shape = {},
-+                                              .style = 0,
-+                                              .points = {{.position = begin}, {.position = end}},
-+                                              .vias = {},
-+                                              .rectangles = {}});
-+    return design_store_.routingStorage().createWire(
-+        eccdb::DesignWire{.net = net,
-+                          .status = eccdb::DesignWireStatus::kFixed,
-+                          .shield_net = {},
-+                          .routing = {}},
-+        std::move(routing));
++    auto& routing = design_store_.routingStorage();
++    const auto wire = routing.createWire(eccdb::DesignWire{.net = net,
++                                                            .status = eccdb::DesignWireStatus::kFixed,
++                                                            .shield_net = {},
++                                                            .shapes = {}});
++    static_cast<void>(routing.createShape(
++        wire,
++        eccdb::DesignRouteShape{.wire = {},
++                                .layer = m1_,
++                                .geometry = eccdb::DesignRouteSegment{
++                                    .begin = {.position = begin}, .end = {.position = end}}}));
++    return wire;
 +  }
 +
 +  [[nodiscard]] frLayerNum drtM1Layer() const
@@ -4101,6 +4047,7 @@ index 0000000000..dcd2e9260a
 +  eccdb::TechStore technology_;
 +  eccdb::LibraryStore library_;
 +  eccdb::DesignStore design_store_;
++  eccdb::DatabaseContext context_{technology_, library_, design_store_};
 +  eccdb::TechRoutingLayerId m1_;
 +};
 +
@@ -4109,7 +4056,8 @@ index 0000000000..dcd2e9260a
 +  auto* net = makeNet("signal");
 +  const auto net_id = design_store_.netlistStorage().createNet(
 +      eccdb::DesignNet{.name = "signal", .non_default_rule = {}, .design_non_default_rule = {}});
-+  eccdb::NetRouteService route_service(design_store_, technology_);
++  eccdb::DatabaseContext database_context(technology_, library_, design_store_);
++  eccdb::RoutingService route_service(database_context);
 +  const std::vector<eccdb::RouteShape> original{eccdb::RouteSegment{.layer = m1_,
 +                                                                      .begin = {0, 0},
 +                                                                      .end = {50, 0},
@@ -4119,7 +4067,7 @@ index 0000000000..dcd2e9260a
 +  static_cast<void>(route_service.replaceRouted(net_id, std::span<const eccdb::RouteShape>{original}));
 +  makePathseg(net, drtM1Layer(), {0, 20}, {20, 20});
 +
-+  io::EccdbRouteAdapter adapter(design_store_, technology_, library_, *design);
++  io::EccdbRouteAdapter adapter(context_, *design);
 +  ASSERT_NO_THROW(adapter.readRoutes());
 +  ASSERT_EQ(net->getShapes().size(), 1u);
 +  EXPECT_FALSE(net->isFixed());
@@ -4145,55 +4093,59 @@ index 0000000000..dcd2e9260a
 +  EXPECT_FALSE(written.width.has_value());
 +}
 +
-+TEST_F(EccdbAdapterTest, ProjectsVirtualPathAsVwireWithoutInventingCopper)
++TEST_F(EccdbAdapterTest, RejectsVirtualPointOnlyRouteShape)
 +{
 +  auto* net = makeNet("virtual_signal");
 +  const auto net_id = design_store_.netlistStorage().createNet(
 +      eccdb::DesignNet{.name = "virtual_signal", .non_default_rule = {}, .design_non_default_rule = {}});
-+  eccdb::DesignWireRoutingInput routing;
-+  routing.appendPath(eccdb::DesignWirePath{
-+      .layer = m1_,
-+      .points = {{.position = {0, 0}},
-+                 {.position = {20, 0}, .flags = eccdb::DesignWirePointFlag::kVirtual},
-+                 {.position = {20, 40}}}});
-+  static_cast<void>(design_store_.routingStorage().createWire(
-+      eccdb::DesignWire{.net = net_id, .status = eccdb::DesignWireStatus::kRouted}, std::move(routing)));
++  auto& routing = design_store_.routingStorage();
++  const auto wire = routing.createWire(eccdb::DesignWire{.net = net_id,
++                                                          .status = eccdb::DesignWireStatus::kRouted,
++                                                          .shield_net = {},
++                                                          .shapes = {}});
++  static_cast<void>(routing.createShape(
++      wire,
++      eccdb::DesignRouteShape{.wire = {},
++                              .layer = m1_,
++                              .geometry = eccdb::DesignRoutePoint{
++                                  .point = {.position = {20, 0}, .flags = eccdb::DesignWirePointFlag::kVirtual}}}));
 +
-+  io::EccdbRouteAdapter adapter(design_store_, technology_, library_, *design);
-+  ASSERT_NO_THROW(adapter.readRoutes());
-+  ASSERT_EQ(net->getShapes().size(), 1u);
-+  const auto* imported = static_cast<const frPathSeg*>(net->getShapes().front().get());
-+  EXPECT_EQ(imported->getBeginPoint(), (odb::Point{20, 0}));
-+  EXPECT_EQ(imported->getEndPoint(), (odb::Point{20, 40}));
++  io::EccdbRouteAdapter adapter(context_, *design);
++  EXPECT_THROW(adapter.readRoutes(), std::invalid_argument);
++  EXPECT_TRUE(net->getShapes().empty());
 +}
 +
-+TEST_F(EccdbAdapterTest, ReadsSourceOnlyPathMetadataWithoutLossySnapshot)
++TEST_F(EccdbAdapterTest, KeepsSourceMetadataButRejectsUnsupportedDrtProjection)
 +{
 +  auto* net = makeNet("qualified_signal");
 +  const auto net_id = design_store_.netlistStorage().createNet(
 +      eccdb::DesignNet{.name = "qualified_signal", .non_default_rule = {}, .design_non_default_rule = {}});
-+  eccdb::DesignWireRoutingInput routing;
-+  routing.appendPath(eccdb::DesignWirePath{.layer = m1_,
-+                                            .flags = eccdb::DesignWirePathFlag::kHasMask
-+                                                     | eccdb::DesignWirePathFlag::kHasTaperRule
-+                                                     | eccdb::DesignWirePathFlag::kHasStyle,
-+                                            .mask = 3u,
-+                                            .taper_rule = "route_rule",
-+                                            .style = 7,
-+                                            .points = {{.position = {0, 0}}, {.position = {50, 0}}}});
-+  const auto wire = design_store_.routingStorage().createWire(
-+      eccdb::DesignWire{.net = net_id, .status = eccdb::DesignWireStatus::kRouted}, std::move(routing));
++  auto& routing = design_store_.routingStorage();
++  const auto wire = routing.createWire(eccdb::DesignWire{.net = net_id,
++                                                          .status = eccdb::DesignWireStatus::kRouted,
++                                                          .shield_net = {},
++                                                          .shapes = {}});
++  const auto shape = routing.createShape(
++      wire,
++      eccdb::DesignRouteShape{.wire = {},
++                              .layer = m1_,
++                              .flags = eccdb::DesignWirePathFlag::kHasMask
++                                       | eccdb::DesignWirePathFlag::kHasTaperRule
++                                       | eccdb::DesignWirePathFlag::kHasStyle,
++                              .geometry = eccdb::DesignRouteSegment{
++                                  .begin = {.position = {0, 0}}, .end = {.position = {50, 0}}}},
++      eccdb::DesignRouteShapeAttributes{
++          .width = 0, .mask = 3u, .taper_rule = "route_rule", .shape = {}, .style = 7});
 +
-+  const eccdb::NetRouteService routes(design_store_, technology_);
-+  EXPECT_THROW((void) routes.snapshot(net_id), std::logic_error);
++  const auto* attributes = routing.shapeAttributes(shape);
++  ASSERT_NE(attributes, nullptr);
++  EXPECT_EQ(attributes->mask, 3u);
++  EXPECT_EQ(attributes->taper_rule, "route_rule");
++  EXPECT_EQ(attributes->style, 7);
 +
-+  io::EccdbRouteAdapter adapter(design_store_, technology_, library_, *design);
-+  ASSERT_NO_THROW(adapter.readRoutes());
-+  ASSERT_EQ(net->getShapes().size(), 1u);
-+  const auto stored = design_store_.routingStorage().path(wire, 0u);
-+  EXPECT_EQ(stored.mask(), 3u);
-+  EXPECT_EQ(stored.taperRule(), "route_rule");
-+  EXPECT_EQ(stored.style(), 7);
++  io::EccdbRouteAdapter adapter(context_, *design);
++  EXPECT_THROW(adapter.readRoutes(), std::invalid_argument);
++  EXPECT_TRUE(net->getShapes().empty());
 +}
 +
 +TEST_F(EccdbAdapterTest, PreservesTaperedSegmentThroughAdapter)
@@ -4201,20 +4153,27 @@ index 0000000000..dcd2e9260a
 +  auto* net = makeNet("tapered_signal");
 +  const auto net_id = design_store_.netlistStorage().createNet(
 +      eccdb::DesignNet{.name = "tapered_signal", .non_default_rule = {}, .design_non_default_rule = {}});
-+  eccdb::DesignWireRoutingInput routing;
-+  routing.appendPath(eccdb::DesignWirePath{.layer = m1_,
-+                                            .flags = eccdb::DesignWirePathFlag::kTaper,
-+                                            .points = {{.position = {0, 0}}, {.position = {50, 0}}}});
-+  static_cast<void>(design_store_.routingStorage().createWire(
-+      eccdb::DesignWire{.net = net_id, .status = eccdb::DesignWireStatus::kRouted}, std::move(routing)));
++  auto& routing = design_store_.routingStorage();
++  const auto wire = routing.createWire(eccdb::DesignWire{.net = net_id,
++                                                          .status = eccdb::DesignWireStatus::kRouted,
++                                                          .shield_net = {},
++                                                          .shapes = {}});
++  static_cast<void>(routing.createShape(
++      wire,
++      eccdb::DesignRouteShape{.wire = {},
++                              .layer = m1_,
++                              .flags = eccdb::DesignWirePathFlag::kTaper,
++                              .geometry = eccdb::DesignRouteSegment{
++                                  .begin = {.position = {0, 0}}, .end = {.position = {50, 0}}}}));
 +
-+  io::EccdbRouteAdapter adapter(design_store_, technology_, library_, *design);
++  io::EccdbRouteAdapter adapter(context_, *design);
 +  ASSERT_NO_THROW(adapter.readRoutes());
 +  ASSERT_EQ(net->getShapes().size(), 1u);
 +  EXPECT_TRUE(static_cast<const frPathSeg*>(net->getShapes().front().get())->isTapered());
 +
 +  ASSERT_NO_THROW(adapter.writeRoutes());
-+  const eccdb::NetRouteService routes(design_store_, technology_);
++  eccdb::DatabaseContext database_context(technology_, library_, design_store_);
++  const eccdb::RoutingService routes(database_context);
 +  const auto snapshot = routes.snapshot(net_id);
 +  ASSERT_EQ(snapshot.wires.size(), 1u);
 +  ASSERT_EQ(snapshot.wires.front().shapes.size(), 1u);
@@ -4230,7 +4189,7 @@ index 0000000000..dcd2e9260a
 +  const auto fixed_wire = addFixedWire(fixed_id, {0, 20}, {80, 20});
 +  makePathseg(special, drtM1Layer(), {0, 40}, {80, 40});
 +
-+  io::EccdbRouteAdapter adapter(design_store_, technology_, library_, *design);
++  io::EccdbRouteAdapter adapter(context_, *design);
 +  ASSERT_NO_THROW(adapter.readRoutes());
 +  EXPECT_TRUE(fixed->isFixed());
 +  EXPECT_TRUE(fixed->hasInitialRouting());
@@ -4240,7 +4199,8 @@ index 0000000000..dcd2e9260a
 +  ASSERT_EQ(special->getShapes().size(), 1u);
 +
 +  ASSERT_NO_THROW(adapter.writeRoutes());
-+  const eccdb::NetRouteService route_service(design_store_, technology_);
++  eccdb::DatabaseContext database_context(technology_, library_, design_store_);
++  const eccdb::RoutingService route_service(database_context);
 +  const auto snapshot = route_service.snapshot(fixed_id);
 +  ASSERT_EQ(snapshot.wires.size(), 1u);
 +  EXPECT_EQ(snapshot.wires.front().wire, fixed_wire);
@@ -4275,7 +4235,7 @@ index 0000000000..dcd2e9260a
 +  makePathseg(net, drtM1Layer(), {0, 0}, {100, 0});
 +  makeVia(via, net, {100, 0});
 +
-+  io::EccdbRouteAdapter adapter(design_store_, technology_, library_, *design);
++  io::EccdbRouteAdapter adapter(context_, *design);
 +  ASSERT_NO_THROW(adapter.writeRoutes());
 +
 +  const auto via_id = design_store_.routingStorage().findVia("M1_V1_M2_FR");
@@ -4296,7 +4256,8 @@ index 0000000000..dcd2e9260a
 +  EXPECT_EQ(rectangle(4u).layer, eccdb::TechLayerId{m2.entity()});
 +  EXPECT_EQ(rectangle(4u).rectangle, (eccdb::Rect{-20, -10, 20, 10}));
 +
-+  const eccdb::NetRouteService routes(design_store_, technology_);
++  eccdb::DatabaseContext database_context(technology_, library_, design_store_);
++  const eccdb::RoutingService routes(database_context);
 +  const auto snapshot = routes.snapshot(net_id);
 +  ASSERT_EQ(snapshot.wires.size(), 1u);
 +  ASSERT_EQ(snapshot.wires.front().shapes.size(), 2u);
@@ -4320,7 +4281,7 @@ index 0000000000..dcd2e9260a
 +  auto* via = makeViaDef("M1_V1_M2_NOT_ROUTER", v1_layer, {-20, -10}, {20, 10});
 +  makeVia(via, net, {100, 0});
 +
-+  io::EccdbRouteAdapter adapter(design_store_, technology_, library_, *design);
++  io::EccdbRouteAdapter adapter(context_, *design);
 +  EXPECT_THROW(adapter.writeRoutes(), std::runtime_error);
 +  EXPECT_FALSE(design_store_.routingStorage().findVia("M1_V1_M2_NOT_ROUTER"));
 +}
@@ -4333,7 +4294,8 @@ index 0000000000..dcd2e9260a
 +      eccdb::DesignNet{.name = "signal", .non_default_rule = {}, .design_non_default_rule = {}});
 +  const auto special_id = design_store_.netlistStorage().createSpecialNet(
 +      eccdb::DesignNet{.name = "VDD", .non_default_rule = {}, .design_non_default_rule = {}});
-+  eccdb::RoutingContextService context(design_store_);
++  eccdb::DatabaseContext database_context(technology_, library_, design_store_);
++  eccdb::RoutingService context(database_context);
 +  context.replaceGuides(net_id,
 +                        {{.box = {0, 0, 40, 40},
 +                          .layer = m1_,
@@ -4346,7 +4308,7 @@ index 0000000000..dcd2e9260a
 +                          .via_layer = {},
 +                          .flags = eccdb::DesignRouteGuideFlag::kCongested}});
 +
-+  io::EccdbContextAdapter adapter(design_store_, technology_, library_, *design);
++  io::EccdbContextAdapter adapter(context_, *design);
 +  const auto input = adapter.readInputGuides(*net);
 +  ASSERT_EQ(input.size(), 1u);
 +  EXPECT_EQ(input.front().getLayerNum(), drtM1Layer());
@@ -4377,6 +4339,35 @@ index 0000000000..dcd2e9260a
 +  EXPECT_EQ(preserved_guide.flags, eccdb::DesignRouteGuideFlag::kCongested);
 +}
 +
++TEST_F(EccdbAdapterTest, CombinedGuideOutputRetainsNewAssignmentAndUsesCallerContext)
++{
++  auto* net = makeNet("signal");
++  const auto net_id = design_store_.netlistStorage().createNet(eccdb::DesignNet{.name = "signal"});
++  eccdb::RoutingService routing(context_);
++  routing.replaceGuideStage(net_id,
++                           std::vector<eccdb::DesignRouteGuide>{{.box = {0, 0, 40, 40}, .layer = m1_}},
++                           {{.layer = m1_, .box = {0, 20, 40, 20}}});
++  makePathseg(net, drtM1Layer(), {10, 10}, {90, 10});
++  const auto* segment = static_cast<const frPathSeg*>(net->getShapes().back().get());
++  auto guide = std::make_unique<frGuide>(odb::Point{10, 10}, drtM1Layer(), odb::Point{90, 50});
++  guide->addRoute(std::make_unique<frPathSeg>(*segment));
++  net->addGuide(std::move(guide));
++  const auto revision = context_.revision();
++  io::EccdbContextAdapter adapter(context_, *design);
++  ASSERT_NO_THROW(adapter.writeContext(true));
++  EXPECT_EQ(context_.revision(), revision + 1u);
++  ASSERT_EQ(routing.guides(net_id).size(), 1u);
++  ASSERT_EQ(routing.trackAssignments(net_id).size(), 1u);
++  EXPECT_EQ(routing.guide(routing.guides(net_id).front()).box, (eccdb::Rect{10, 10, 90, 50}));
++  const auto expected = segment->getBBox();
++  EXPECT_EQ(routing.trackAssignment(routing.trackAssignments(net_id).front()).box,
++            (eccdb::Rect{expected.xMin(), expected.yMin(), expected.xMax(), expected.yMax()}));
++  const auto guide_id = routing.guides(net_id).front();
++  ASSERT_NO_THROW(adapter.writeContext(false));
++  EXPECT_EQ(routing.guides(net_id).front(), guide_id);
++  EXPECT_EQ(context_.revision(), revision + 2u);
++}
++
 +TEST_F(EccdbAdapterTest, PinAccessRoundTripsCandidatesAndPreferredInstancePoint)
 +{
 +  const auto [drt_master, db_master] = makeMacro("MAC");
@@ -4402,7 +4393,8 @@ index 0000000000..dcd2e9260a
 +  const auto instance_pin = design_store_.netlistStorage().findInstancePin(instance, term);
 +  ASSERT_TRUE(instance_pin);
 +
-+  eccdb::RoutingContextService context(design_store_);
++  eccdb::DatabaseContext database_context(technology_, library_, design_store_);
++  eccdb::RoutingService context(database_context);
 +  eccdb::DesignPinAccessPoint candidate;
 +  candidate.point = {10, 20};
 +  candidate.layer = m1_;
@@ -4415,7 +4407,7 @@ index 0000000000..dcd2e9260a
 +  preference.point_index = 0u;
 +  context.setPreferredInstancePinAccess(instance_pin, {preference});
 +
-+  io::EccdbContextAdapter adapter(design_store_, technology_, library_, *design);
++  io::EccdbContextAdapter adapter(context_, *design);
 +  ASSERT_NO_THROW(adapter.readPinAccess());
 +  ASSERT_EQ(drt_pin->getNumPinAccess(), 1);
 +  ASSERT_EQ(drt_pin->getPinAccess(0)->getAccessPoints().size(), 1u);
@@ -4430,7 +4422,9 @@ index 0000000000..dcd2e9260a
 +
 +  drt_candidate->setPoint({11, 21});
 +  drt_candidate->setAccess(frDirEnum::E);
++  const auto revision = context_.revision();
 +  ASSERT_NO_THROW(adapter.writePinAccess());
++  EXPECT_EQ(context_.revision(), revision + 1u);
 +
 +  const auto groups = context.masterPortCandidateGroups(port);
 +  ASSERT_EQ(groups.size(), 1u);
@@ -4452,10 +4446,10 @@ index 0000000000..dcd2e9260a
 +}  // namespace drt
 diff --git a/src/drt/test/eccdbRouteFlowTest.cpp b/src/drt/test/eccdbRouteFlowTest.cpp
 new file mode 100644
-index 0000000000..0846cbc062
+index 0000000000..fd7e11f11c
 --- /dev/null
 +++ b/src/drt/test/eccdbRouteFlowTest.cpp
-@@ -0,0 +1,914 @@
+@@ -0,0 +1,917 @@
 +// SPDX-License-Identifier: BSD-3-Clause
 +// Copyright (c) 2026, The OpenROAD Authors
 +
@@ -4496,7 +4490,8 @@ index 0000000000..0846cbc062
 +#include "odb/defout.h"
 +#include "odb/lefin.h"
 +#include "pa/AbstractPAGraphics.h"
-+#include "service/context/RoutingContextService.h"
++#include "service/context/DatabaseContext.h"
++#include "service/routing/RoutingService.h"
 +#include "stt/SteinerTreeBuilder.h"
 +#include "ta/AbstractTAGraphics.h"
 +#include "tech/TechStore.h"
@@ -4581,6 +4576,7 @@ index 0000000000..0846cbc062
 +  eccdb::TechStore technology;
 +  eccdb::LibraryStore library;
 +  eccdb::DesignStore design;
++  eccdb::DatabaseContext context{technology, library, design};
 +};
 +
 +using DatabasePtr = std::unique_ptr<odb::dbDatabase, void (*)(odb::dbDatabase*)>;
@@ -4623,7 +4619,7 @@ index 0000000000..0846cbc062
 +
 +  void attachEccdb(EccdbDesign& eccdb)
 +  {
-+    router_->attachEccdb(eccdb.design, eccdb.technology, eccdb.library);
++    router_->attachEccdb(eccdb.context);
 +  }
 +
 +  [[nodiscard]] odb::dbDatabase* getDatabase() const { return database_.get(); }
@@ -5176,7 +5172,8 @@ index 0000000000..0846cbc062
 +    throw std::runtime_error("pre-route ODB snapshot has no top block");
 +  }
 +
-+  eccdb::RoutingContextService context(eccdb.design);
++  eccdb::DatabaseContext database_context(eccdb.technology, eccdb.library, eccdb.design);
++  eccdb::RoutingService context(database_context);
 +  std::size_t guide_count = 0;
 +  for (auto* net : block->getNets()) {
 +    if (net->isSpecial()) {

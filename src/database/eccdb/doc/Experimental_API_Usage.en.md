@@ -1,5 +1,9 @@
 # EccDB Experimental C++ API Usage Notes
 
+> **Historical document, superseded on 2026-10-08.** The duplicate DTO/Ref API
+> and C/Rust bindings described here have been removed. Use the native
+> Storage/Service API documented in [Native_API.md](Native_API.md).
+
 Chinese version: [Experimental_API_Usage.zh-CN.md](Experimental_API_Usage.zh-CN.md)
 
 > **Status: experimental attempt.** This interface explores the public access boundary; it is not a finalized SDK. Types, functions, error semantics, installation/export rules, and ABI may change incompatibly. These notes describe the current prototype without source or binary compatibility promises. Pin a source revision when integrating; see the [integration plan](Integration_Plan.en.md).

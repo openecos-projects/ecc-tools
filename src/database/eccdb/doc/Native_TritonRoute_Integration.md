@@ -3,6 +3,10 @@
 Verified on 2026-09-28 using ISPD 2018 and ISPD 2019 files under
 `/home/zhuxu1/workspace/reference`.
 
+The 2026-10-08 Service API migration uses a shared `DatabaseContext` and the
+business entry points described in [Service layer](Service_Layer_20261007.md).
+The historical routing results below are not new measurements of that revision.
+
 ## Data path
 
 ```text
@@ -10,7 +14,7 @@ LEF / DEF / guides
        |
 EccDB TechStore + LibraryStore + DesignStore
        |
-PhysicalDesignService / NetRouteService / RoutingContextService
+DatabaseContext -> PhysicalDesignService / RoutingService
        |
 native converters -> TritonRoute frTech / frMaster / frBlock
        |

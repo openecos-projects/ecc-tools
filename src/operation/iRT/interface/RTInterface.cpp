@@ -33,6 +33,7 @@
 #include "feature_irt.h"
 #include "feature_manager.h"
 #include "idm.h"
+#include "context/DatabaseContext.h"
 
 namespace irt {
 
@@ -53,6 +54,8 @@ void RTInterface::destroyInst()
     _rt_interface_instance = nullptr;
   }
 }
+
+RTInterface::~RTInterface() = default;
 
 #if 1  // 外部调用RT的API
 
@@ -313,10 +316,31 @@ void RTInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 void RTInterface::setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* tech,
                                   eccdb::LibraryStore* library)
 {
+  _owned_database_context.reset();
+  _database_context = nullptr;
   _design = design;
   _tech = tech;
   _library = library;
+  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
+    _owned_database_context = std::make_unique<eccdb::DatabaseContext>(*_tech, *_library, *_design);
+    _database_context = _owned_database_context.get();
+  }
   DRCI.setDesignSource(design, tech, library);
+}
+
+void RTInterface::setDesignSource(eccdb::DatabaseContext& context)
+{
+  _owned_database_context.reset();
+  _database_context = &context;
+  _design = &context.design();
+  _tech = context.technology();
+  _library = context.library();
+  DRCI.setDesignSource(_design, _tech, _library);
+}
+
+eccdb::DatabaseContext& RTInterface::databaseContext() const noexcept
+{
+  return *_database_context;
 }
 
 void RTInterface::wrapDatabase()

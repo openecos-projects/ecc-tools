@@ -1,5 +1,10 @@
 # EccDB Integration Plan: Linking and Rust FFI
 
+> **Historical plan, superseded on 2026-10-08.** C/Rust bindings and the old
+> DTO/Ref API have been removed. Current native C++ access and CMake targets
+> are documented in [Native_API.md](Native_API.md); Rust integration is no
+> longer part of the current plan.
+
 Chinese version: [Integration_Plan.zh-CN.md](Integration_Plan.zh-CN.md)
 
 This document records the current linking choices and the planned integration

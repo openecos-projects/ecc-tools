@@ -1,5 +1,7 @@
 # OpenROAD 命名下的 Term / Pin 实体模型
 
+> 本文保留 2026-09-30 的历史实现和实验说明，下面的 schema、名称索引及几何存储描述不代表当前版本。2026-10-08 的独立 InstanceTerm、名称到 ID 索引与 schema 13 见 [原生接口说明](Native_API.md#instanceterm-身份与所有权)。
+
 2026-09-30：Term 表示逻辑连接，Pin 表示物理接入区域组。以下对象都由相应 EnTT registry 分配独立 entity。
 
 | EccDB 类型 | OpenDB | 含义和持有关系 |

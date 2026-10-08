@@ -1,11 +1,10 @@
 # Embedded Instance Pins Experiment
 
-Historical experiment: this document describes the embedded-Pin variants and
-cache experiments from before 2026-09-30, not the current working-tree model.
-The branch still has the same name, but InstanceTerm payloads now live on
-independent EnTT entities and Design binary schema is 6. See
-[the current Term/Pin model](OpenROAD_Term_Pin_Model.md) and
-[the latest ODB-baseline replay results](results/Term_Access_Optimization_20260930/EccDB_ODB_iDB_Speedup_20260930.md).
+Historical experiment: this document preserves the embedded-Pin variants and
+cache measurements from before 2026-09-30. Its branch, schema numbers and
+replay results are historical. For the 2026-10-08 independent InstanceTerm
+components, ownership index and Design schema 13, see
+[the current native model](Native_API.md#instanceterm-身份与所有权).
 
 Baseline commit: `5a020f4318656e77cd9476b6b8344567e2655028`.
 Experiment branch: `experiment/eccdb-embedded-instance-pins`.

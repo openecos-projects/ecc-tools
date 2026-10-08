@@ -252,7 +252,8 @@ backends: the current EccDB adapter runs after the ODB parser and alongside
 the ODB writer. Test6 has no pre-existing pin-access points or track assignments,
 so those APIs are not benchmarked. Route replacement is also not benchmarked:
 an equivalent neutral route-shape fixture is needed before comparing ODB
-`dbWireEncoder` with EccDB `NetRouteService::replaceRouted`. Both local builds
+`dbWireEncoder` with EccDB routed replacement (now exposed as
+`RoutingService::replaceRouted`). Both local builds
 use `-O3` and LTO, but ODB's Bazel toolchain uses LLVM while EccDB's CMake
 build uses GCC, so treat ratios as measured implementation results rather
 than a compiler-controlled microarchitecture comparison.

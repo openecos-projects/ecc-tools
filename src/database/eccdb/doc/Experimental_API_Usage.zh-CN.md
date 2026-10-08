@@ -1,5 +1,7 @@
 # EccDB 实验性 C++ API 使用说明
 
+> **已被取代（2026-10-08）：** 旧 DTO/Ref/ID API 和 C/Rust 绑定已经移除。当前直接使用原生 Storage 类型与 Service，见 [Native_API.md](Native_API.md)。以下示例仅保留为历史记录，不能用于当前版本。
+
 English version: [Experimental_API_Usage.en.md](Experimental_API_Usage.en.md)
 
 > **状态：实验性尝试。** 当前接口用于探索和验证公共访问边界，不是已定型的 SDK。类型、函数、错误语义、安装导出和 ABI 均可能发生不兼容调整；本文只描述当前原型，不承诺源码或二进制兼容。集成前请固定源码版本，并参考 [集成计划](Integration_Plan.zh-CN.md)。

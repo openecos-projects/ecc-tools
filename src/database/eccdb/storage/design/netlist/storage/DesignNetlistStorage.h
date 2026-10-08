@@ -1,3 +1,21 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #pragma once
 
 #include <concepts>
@@ -34,6 +52,9 @@ class DesignNetlistStorage
 
   [[nodiscard]] DesignInstanceId createInstance(DesignInstance instance, std::span<const Rect> region_bounds = {});
   void updateInstance(DesignInstanceId id, DesignInstance instance, std::span<const Rect> region_bounds = {});
+  // Retarget same-name terminals without replacing their IDs or records.
+  // Requires the same terminal names, directions and uses in both masters.
+  void swapMasterCompatible(DesignInstanceId id, LibraryCellMasterId master);
   [[nodiscard]] bool destroyInstance(DesignInstanceId id);
   [[nodiscard]] bool contains(DesignInstanceId id) const;
   [[nodiscard]] DesignInstanceId findInstance(std::string_view name) const;
@@ -65,8 +86,8 @@ class DesignNetlistStorage
   [[nodiscard]] std::span<const DesignInstancePinId> instancePins(DesignNetId net) const;
 
   // OpenDB-aligned dbITerm spellings. The legacy InstancePin API remains a
-  // source-compatible view of the same embedded instance-term storage.
-  // Like dbITerm lookup by OID, requires a live opaque Term ID from this storage.
+  // source-compatible view of the same independent instance-term component.
+  // Like dbITerm lookup by OID, requires a live Term entity from this storage.
   // The legacy instancePin accessor retains its checked-ID behavior.
   [[nodiscard]] const DesignInstanceTerm& instanceTerm(DesignInstanceTermId id) const
   {
@@ -80,8 +101,8 @@ class DesignNetlistStorage
   {
     return findInstancePin(instance, term_name);
   }
-  // Returns the embedded Term payload directly. The pointer remains valid
-  // until this instance is destroyed or an explicit cache rebuild occurs.
+  // Returns the stable Term component directly. The pointer remains valid
+  // until this term itself is destroyed.
   [[nodiscard]] const DesignInstanceTerm* findInstanceTermData(DesignInstanceId instance, std::string_view term_name) const;
   [[nodiscard]] std::span<const DesignInstanceTermId> instanceTerms(DesignInstanceId instance) const
   {
@@ -89,27 +110,22 @@ class DesignNetlistStorage
   }
   [[nodiscard]] std::span<const DesignInstanceTermId> instanceTerms(DesignNetId net) const { return instancePins(net); }
 
-  // Callbacks must not mutate instance-term storage while it is being visited.
-  // Traversal follows DesignInstanceTerms' dense owner order, then each
-  // instance's immutable name-keyed record map.
-  template <typename Function>
-  void forEachInstancePin(Function&& function) const
-  {
-    const auto view = _registry.view<const DesignInstanceTerms>();
-    for (const auto entity : view) {
-      const auto& terms = view.get<const DesignInstanceTerms>(entity);
-      for (const auto& [name, term] : terms.records) {
-        static_cast<void>(name);
-        std::invoke(function, term.id, term);
-      }
-    }
-  }
-
   template <typename Function>
     requires std::invocable<Function&, DesignInstanceTermId, const DesignInstanceTerm&>
   void forEachInstanceTerm(Function&& function) const
   {
-    forEachInstancePin(std::forward<Function>(function));
+    const auto view = _registry.view<const DesignInstanceTerm>();
+    view.each([&function](const auto entity, const DesignInstanceTerm& term) {
+      std::invoke(function, DesignInstanceTermId{entity}, term);
+    });
+  }
+
+  // Callbacks must not mutate instance-term storage while it is being visited.
+  template <typename Function>
+    requires std::invocable<Function&, DesignInstancePinId, const DesignInstancePin&>
+  void forEachInstancePin(Function&& function) const
+  {
+    forEachInstanceTerm(std::forward<Function>(function));
   }
 
   [[nodiscard]] DesignIoPinId createIoPin(DesignIoPin pin, std::vector<DesignBlockPinInput> pins = {});
@@ -173,6 +189,14 @@ class DesignNetlistStorage
   [[nodiscard]] DesignBlockPinId createBlockPin(DesignBlockTermId term, DesignBlockPinInput pin);
   void updateBlockPin(DesignBlockPinId id, DesignBlockPinInput pin);
   [[nodiscard]] bool destroyBlockPin(DesignBlockPinId id);
+  // Atomically replaces a selected subset of a block term's physical ports.
+  // The old BPin IDs in `retired` must belong to `term`; new IDs are returned
+  // in input order. Unselected ports retain both identity and relative order.
+  // All replacement geometry is staged before the old ports are retired, so
+  // the final explicit/implicit PORT relation is validated as one state.
+  [[nodiscard]] std::vector<DesignBlockPinId> replaceBlockPins(DesignBlockTermId term,
+                                                                std::span<const DesignBlockPinId> retired,
+                                                                std::vector<DesignBlockPinInput> replacements);
 
   // Callbacks must not mutate block-pin storage while it is being visited.
   template <typename Function>
@@ -242,6 +266,13 @@ class DesignNetlistStorage
   void disconnect(DesignIoPinId pin);
   void disconnect(DesignIoPinId pin, DesignNetId net);
 
+  // Linear bulk primitives. IDs must be live; replacement arrays must be
+  // unique. Replacement prepares target and affected source arrays before
+  // changing connectivity. The other (regular/special) relation is preserved.
+  void disconnectAll(DesignNetId net);
+  void replaceConnections(DesignNetId net, std::span<const DesignInstanceTermId> instance_terms,
+                          std::span<const DesignBlockTermId> block_terms);
+
   [[nodiscard]] bool referencesMaster(LibraryCellMasterId master) const;
   [[nodiscard]] bool referencesMasterTerm(LibraryMasterTermId term) const;
   [[nodiscard]] uint32_t instanceCount() const;
@@ -249,13 +280,10 @@ class DesignNetlistStorage
   [[nodiscard]] uint32_t ioPinCount() const;
   [[nodiscard]] uint32_t blockPinCount() const;
   [[nodiscard]] uint32_t netCount() const;
-  [[nodiscard]] std::size_t instanceTermPointerTableCapacity() const noexcept { return _instance_terms.capacity(); }
 
   // Name indexes are derived acceleration data. Rebuild them after a direct
   // registry restore or rollback; they are intentionally not serialized.
   void rebuildNameIndexes();
-  // Call before discarding the DesignRegistry wholesale during a load reset.
-  void clearInstanceTermPointerTable() noexcept { _instance_terms.clear(); }
   // Rebind runtime-only Library IDs and pointers after a binary restore.
   void rebuildLibraryCaches();
 
@@ -265,6 +293,9 @@ class DesignNetlistStorage
   void validateIoPin(const DesignIoPin& pin, DesignIoPinId ignored = {}) const;
   void validateBlockPin(const DesignBlockPinInput& pin) const;
   void validateBlockPinRelation(DesignBlockTermId term, const DesignBlockPinInput& pin, DesignBlockPinId ignored = {}) const;
+  void validateBlockPinReplacement(DesignBlockTermId term,
+                                   std::span<const DesignBlockPinId> retired,
+                                   std::span<const DesignBlockPinInput> replacements) const;
   [[nodiscard]] DesignBlockPin materializeBlockPin(DesignBlockPinId id, DesignBlockTermId term, DesignBlockPinInput pin);
   void destroyBlockPinGeometry(const DesignBlockPin& pin) noexcept;
   [[nodiscard]] std::vector<GeometryShapeId> materializeInstanceRegionBounds(DesignInstanceId id, std::span<const Rect> region_bounds);
@@ -289,9 +320,6 @@ class DesignNetlistStorage
   entt::dense_map<std::string, DesignIoPinId, index::TransparentStringHash, std::equal_to<>> _io_pin_names;
   entt::dense_map<std::string, DesignNetId, index::TransparentStringHash, std::equal_to<>> _regular_net_names;
   entt::dense_map<std::string, DesignNetId, index::TransparentStringHash, std::equal_to<>> _special_net_names;
-  // Runtime-only direct lookup for opaque DesignInstanceTerm IDs. A slot is
-  // cleared before its owning instance is destroyed; IDs are never reused.
-  std::vector<DesignInstanceTerm*> _instance_terms;
 };
 
 }  // namespace eccdb

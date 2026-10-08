@@ -1,6 +1,25 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -9,6 +28,7 @@
 #include "common/GeometryTypes.h"
 #include "design/common/DesignTypes.h"
 #include "geometry/GeometryEntity.h"
+#include "index/NameHash.h"
 #include "library/common/LibraryTypes.h"
 #include "tech/common/TechLayerIds.h"
 #include "tech/non_default_rule/model/NonDefaultRuleComponents.h"
@@ -79,11 +99,16 @@ struct DesignInstance
   DesignInstanceRouteHalo route_halo;
 };
 
-// DEF (component pin) / OpenDB dbITerm. This payload is embedded in its
-// owning DesignInstanceTerms map; its name, direction and use remain canonical
-// in the referenced LibraryMasterTerm (dbMTerm).
+// DEF (component pin) / OpenDB dbITerm. Every instance term is a distinct
+// DesignRegistry entity. Its name, direction and use remain canonical in the
+// referenced LibraryMasterTerm (dbMTerm).
 struct DesignInstanceTerm
 {
+  // Callers retain pointers to term components while other instances are
+  // edited. Stable storage keeps those pointers valid until this term itself
+  // is destroyed.
+  static constexpr bool in_place_delete = true;
+
   DesignInstanceId instance;
   // Runtime-only; DesignInstance uses in-place deletion for address stability.
   const DesignInstance* instance_ptr = nullptr;
@@ -92,9 +117,6 @@ struct DesignInstanceTerm
   const LibraryMasterTerm* master_term_ptr = nullptr;
   DesignNetId net;
   DesignNetId special_net;
-  // Persistent opaque monotonic ID. It is resolved through
-  // DesignNetlistStorage, not through an EnTT registry entity.
-  DesignInstanceTermId id;
 };
 
 struct DesignInstanceTerms
@@ -102,9 +124,9 @@ struct DesignInstanceTerms
   // Ordered dbITerm IDs owned by this dbInst, preserving LibraryMaster term
   // order for existing span APIs.
   std::vector<DesignInstanceTermId> values;
-  // One immutable-at-runtime record per master term. Default hash/equality
-  // intentionally keep this local lookup independent from global name indexes.
-  entt::dense_map<std::string, DesignInstanceTerm> records;
+  // Per-instance dbMTerm-name lookup. Values reference the independent term
+  // entities above; this relation deliberately stores no duplicate payload.
+  entt::dense_map<std::string, DesignInstanceTermId, index::TransparentStringHash, std::equal_to<>> names;
 };
 
 enum class DesignSignalUse : uint8_t

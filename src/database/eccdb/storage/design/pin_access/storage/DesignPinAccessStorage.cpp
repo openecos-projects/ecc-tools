@@ -1,6 +1,26 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #include "design/pin_access/storage/DesignPinAccessStorage.h"
 
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -18,6 +38,171 @@
 #include "tech/routing_layer/model/RoutingLayerComponents.h"
 
 namespace eccdb {
+
+void DesignPinAccessStorage::replacePinAccess(DesignPinAccessUpdate update)
+{
+  ensureRoot();
+  std::unordered_map<uint64_t, const DesignMasterPortPinAccessGroups*> ports;
+  std::unordered_map<uint64_t, std::size_t> installed_port_indices;
+  if (const auto* current = catalog()) {
+    ports.reserve(current->master_port_groups.size() + update.master_ports.size());
+    installed_port_indices.reserve(current->master_port_groups.size());
+    for (std::size_t index = 0; index < current->master_port_groups.size(); ++index) {
+      const auto& port = current->master_port_groups[index];
+      ports.emplace(port.master_port.packed(), &port);
+      installed_port_indices.emplace(port.master_port.packed(), index);
+    }
+  }
+  std::unordered_set<uint64_t> changed_ports;
+  for (const auto& port : update.master_ports) {
+    ensureMasterPort(port.master_port);
+    if (!changed_ports.insert(port.master_port.packed()).second)
+      throw std::invalid_argument("pin-access update repeats a master port");
+    validateCandidateGroups(port.groups);
+    ports.insert_or_assign(port.master_port.packed(), &port);
+  }
+  std::unordered_set<uint64_t> changed_pins;
+  for (const auto& pin : update.block_pins) {
+    if (!changed_pins.insert(pin.pin.packed()).second) throw std::invalid_argument("pin-access update repeats a block pin");
+    validateBlockPinGroups(pin.pin, pin.candidates);
+  }
+  std::unordered_map<uint64_t, const DesignInstancePinAccessUpdate*> instances;
+  instances.reserve(update.instances.size());
+  for (const auto& instance : update.instances) {
+    ensureInstance(instance.instance);
+    if (!instances.emplace(instance.instance.packed(), &instance).second)
+      throw std::invalid_argument("pin-access update repeats an instance");
+  }
+  const auto group = [&](LibraryMasterPortId port, uint32_t index) -> const DesignPinAccessCandidateGroup* {
+    const auto found = ports.find(port.packed());
+    if (found == ports.end()) return nullptr;
+    const auto& groups = found->second->groups;
+    const auto candidate = std::find_if(groups.begin(), groups.end(), [index](const auto& value) {
+      return value.group_index == index;
+    });
+    return candidate == groups.end() ? nullptr : &*candidate;
+  };
+  const auto validate_instance = [&](DesignInstanceId instance,
+                                      std::optional<uint32_t> selection,
+                                      const DesignInstancePreferredPinAccess* preferences) {
+    if (!selection) {
+      if (preferences && !preferences->entries.empty())
+        throw std::invalid_argument("preferred pin access requires an instance group selection");
+      return;
+    }
+    const auto& library = _library_registry.registry();
+    const auto& master = library.get<const LibraryCellMaster>(_netlist.instance(instance).master.entity());
+    bool has_group = false;
+    for (const auto term_id : master.terms) {
+      for (const auto port_id : library.get<const LibraryMasterTerm>(term_id.entity()).ports)
+        has_group |= group(port_id, *selection) != nullptr;
+    }
+    if (!has_group) throw std::invalid_argument("instance selection is absent from proposed pin-access candidates");
+    if (!preferences) return;
+    for (auto entry_it = preferences->entries.begin(); entry_it != preferences->entries.end(); ++entry_it) {
+      const auto& entry = *entry_it;
+      ensureInstancePin(entry.pin);
+      if (entry.values.empty() || _netlist.instancePin(entry.pin).instance != instance
+          || std::any_of(preferences->entries.begin(), entry_it, [&](const auto& previous) { return previous.pin == entry.pin; }))
+        throw std::invalid_argument("invalid preferred pin-access entry");
+      for (auto reference_it = entry.values.begin(); reference_it != entry.values.end(); ++reference_it) {
+        const auto& reference = *reference_it;
+        const auto* candidate = group(reference.master_port, reference.group_index);
+        if (!masterPortBelongsToInstancePin(reference.master_port, entry.pin) || reference.group_index != *selection
+            || !candidate || reference.point_index >= candidate->points.size()
+            || std::any_of(entry.values.begin(), reference_it, [&](const auto& previous) {
+                 return previous.master_port == reference.master_port;
+               }))
+          throw std::invalid_argument("preferred access is absent from proposed pin-access candidates");
+      }
+    }
+  };
+  for (const auto& instance : update.instances)
+    validate_instance(instance.instance, instance.group_index, &instance.preferences);
+  // Only a catalog change can affect otherwise untouched instance references.
+  // Check each dependent instance once, never rescan it per candidate point.
+  if (!update.master_ports.empty()) {
+    std::unordered_set<uint64_t> checked;
+    for (const auto& instance : update.instances) checked.insert(instance.instance.packed());
+    const auto validate_existing = [&](DesignEntity entity) {
+      if (!checked.insert(entt::to_integral(entity)).second) return;
+      const auto* selection = _registry.try_get<const DesignInstancePinAccessGroupIndex>(entity);
+      validate_instance(DesignInstanceId{entity}, selection ? std::optional<uint32_t>{selection->group_index} : std::nullopt,
+                        _registry.try_get<const DesignInstancePreferredPinAccess>(entity));
+    };
+    for (const auto entity : _registry.view<const DesignInstancePinAccessGroupIndex>()) validate_existing(entity);
+    for (const auto entity : _registry.view<const DesignInstancePreferredPinAccess>()) validate_existing(entity);
+  }
+
+  std::vector<DesignEntity> new_pins, new_selections, new_preferences;
+  new_pins.reserve(update.block_pins.size());
+  new_selections.reserve(update.instances.size());
+  new_preferences.reserve(update.instances.size());
+  const bool had_catalog = _registry.all_of<DesignPinAccessCatalog>(_root.entity());
+  try {
+    if (!update.master_ports.empty()) {
+      auto& value = _registry.get_or_emplace<DesignPinAccessCatalog>(_root.entity());
+      value.master_port_groups.reserve(value.master_port_groups.size() + update.master_ports.size());
+    }
+    for (const auto& pin : update.block_pins) {
+      if (!pin.candidates.groups.empty() && !_registry.all_of<DesignBlockPinAccessGroups>(pin.pin.entity())) {
+        _registry.emplace<DesignBlockPinAccessGroups>(pin.pin.entity());
+        new_pins.push_back(pin.pin.entity());
+      }
+    }
+    for (const auto& instance : update.instances) {
+      if (instance.group_index && !_registry.all_of<DesignInstancePinAccessGroupIndex>(instance.instance.entity())) {
+        _registry.emplace<DesignInstancePinAccessGroupIndex>(instance.instance.entity());
+        new_selections.push_back(instance.instance.entity());
+      }
+      if (!instance.preferences.entries.empty() && !_registry.all_of<DesignInstancePreferredPinAccess>(instance.instance.entity())) {
+        _registry.emplace<DesignInstancePreferredPinAccess>(instance.instance.entity());
+        new_preferences.push_back(instance.instance.entity());
+      }
+    }
+  } catch (...) {
+    for (const auto entity : new_pins) _registry.remove<DesignBlockPinAccessGroups>(entity);
+    for (const auto entity : new_selections) _registry.remove<DesignInstancePinAccessGroupIndex>(entity);
+    for (const auto entity : new_preferences) _registry.remove<DesignInstancePreferredPinAccess>(entity);
+    if (!had_catalog) _registry.remove<DesignPinAccessCatalog>(_root.entity());
+    throw;
+  }
+  if (!update.master_ports.empty()) {
+    auto& installed = _registry.get<DesignPinAccessCatalog>(_root.entity()).master_port_groups;
+    for (auto& port : update.master_ports) {
+      const auto found = installed_port_indices.find(port.master_port.packed());
+      if (found == installed_port_indices.end()) installed.push_back(std::move(port));
+      else installed[found->second] = std::move(port);
+    }
+    std::erase_if(installed, [](const auto& port) { return port.groups.empty(); });
+    if (installed.empty()) _registry.remove<DesignPinAccessCatalog>(_root.entity());
+  }
+  for (auto& pin : update.block_pins) {
+    if (pin.candidates.groups.empty()) _registry.remove<DesignBlockPinAccessGroups>(pin.pin.entity());
+    else _registry.get<DesignBlockPinAccessGroups>(pin.pin.entity()) = std::move(pin.candidates);
+  }
+  for (auto& instance : update.instances) {
+    if (instance.group_index)
+      _registry.get<DesignInstancePinAccessGroupIndex>(instance.instance.entity()).group_index = *instance.group_index;
+    else _registry.remove<DesignInstancePinAccessGroupIndex>(instance.instance.entity());
+    if (instance.preferences.entries.empty()) _registry.remove<DesignInstancePreferredPinAccess>(instance.instance.entity());
+    else _registry.get<DesignInstancePreferredPinAccess>(instance.instance.entity()) = std::move(instance.preferences);
+  }
+}
+
+void DesignPinAccessStorage::invalidateAll() noexcept
+{
+  const auto clear = [&]<typename Component>() {
+    if (auto* storage = _registry.storage(entt::type_hash<Component>::value()); storage != nullptr) {
+      storage->clear();
+    }
+  };
+  clear.operator()<DesignInstancePreferredPinAccess>();
+  clear.operator()<DesignInstancePinAccessGroupIndex>();
+  clear.operator()<DesignBlockPinAccessGroups>();
+  clear.operator()<DesignPinAccessCatalog>();
+}
+
 namespace {
 
 bool isValidAccessType(DesignPinAccessType type) noexcept

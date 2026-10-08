@@ -1,8 +1,9 @@
 # EccDB Viewer Facade
 
-The services in `service/query` are GUI-independent boundaries over the
-canonical EccDB registries. The viewer library and Python extension bind those
-services; they do not contain Qt, color, selection or camera state.
+The native services in `service/geometry` are GUI-independent boundaries over
+the canonical EccDB registries. They borrow `DatabaseContext`; the viewer
+library and Python extension construct them from `Database.context()`. Qt,
+color, selection and camera state remain in the GUI.
 
 - `GeometryQueryService`: design bounds, filtered reference batches, overview
   tiles, exact hit/marquee tests and index readiness/preheating.
@@ -13,13 +14,16 @@ services; they do not contain Qt, color, selection or camera state.
   restores payload, DEF attributes and owner order. Known edits update a warm
   R-tree and invalidate only affected overview tiles. Unknown external changes
   still trigger a lazy epoch rebuild.
-- `DesignModelService`: scoped, paginated entity descriptors and real layer/
-  track metadata. A master pin and a design instance term are distinct objects.
+- `DesignModelAdapter`: viewer-side, scoped entity descriptors and real layer/
+  track metadata. The Python name remains `DesignModelService`. A master pin
+  and a design instance term are distinct objects.
 - `GeometryOccurrenceService`: on-demand master-local or instance-transformed
   pin geometry. Occurrence headers contain typed references, not Shape IDs.
 
-The optional `eccdb_viewer` shared library and Python module are only binding
-boundaries; the service implementation lives in `service/query`.
+The optional `eccdb_viewer` shared library contains the display-model adapter;
+native geometry services live in `service/geometry`. Other business operations
+are organized into Instance, Connectivity, Routing, Floorplan and Constraint
+services; see [Service layer](../doc/Service_Layer_20261007.md).
 
 The optional Python extension is enabled with:
 
@@ -75,3 +79,13 @@ actual primitive layers.
 Editing geometry does not automatically repair connectivity or establish DRC
 legality. The journal belongs to its edit-service instance. Save/reload retains
 the edited database state, not the ability to undo a prior process's removal.
+Deletion or child-geometry replacement through another business service
+invalidates detached journal entries for that owner, preventing stale restores.
+
+With tests, the Python module and native LEF/DEF import targets enabled,
+`eccdb_service_bindings_smoke` exercises query/edit/occurrence/model calls and
+DEF/binary persistence without Qt or a display server:
+
+```bash
+ctest --test-dir /path/to/build -R '^eccdb_service_bindings_smoke$' --output-on-failure
+```

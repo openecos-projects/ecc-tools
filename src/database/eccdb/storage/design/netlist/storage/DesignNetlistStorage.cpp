@@ -1,12 +1,31 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #include "design/netlist/storage/DesignNetlistStorage.h"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "design/constraint/model/ConstraintComponents.h"
-#include "design/global/model/DesignGlobalComponents.h"
 #include "design/guide/model/GuideComponents.h"
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/pin_access/model/PinAccessComponents.h"
@@ -204,6 +223,10 @@ DesignInstanceId DesignNetlistStorage::createInstance(DesignInstance instance, s
   // rehash during rollback.
   reserveNameInsert(_instance_names);
 
+  DesignInstanceTerms term_relations;
+  term_relations.values.reserve(master.terms.size());
+  term_relations.names.reserve(master.terms.size());
+
   const auto entity = _registry.create();
   const DesignInstanceId id{entity};
   std::vector<GeometryShapeId> created_region_bounds;
@@ -212,21 +235,9 @@ DesignInstanceId DesignNetlistStorage::createInstance(DesignInstance instance, s
     instance.region_bounds = created_region_bounds;
     _registry.emplace<DesignInstance>(entity, std::move(instance));
     _registry.emplace<GeometryBounds>(entity);
-    auto& pins = _registry.emplace<DesignInstancePins>(entity);
-    pins.values.reserve(master.terms.size());
-    pins.records.reserve(master.terms.size());
+    auto& terms = _registry.emplace<DesignInstanceTerms>(entity, std::move(term_relations));
+    auto& term_storage = _registry.storage<DesignInstanceTerm>();
     const auto* instance_ptr = &_registry.get<const DesignInstance>(entity);
-    auto roots = _registry.view<DesignRoot>();
-    auto& root = roots.get<DesignRoot>(*roots.begin());
-    const auto allocate_term_id = [&]() {
-      if (root.next_instance_term_id >= ActiveDesignEntitySchema::entity_mask) {
-        throw std::overflow_error("design instance term ID space is exhausted");
-      }
-      const auto raw_id = root.next_instance_term_id;
-      _instance_terms.resize(static_cast<std::size_t>(raw_id + 1u));
-      ++root.next_instance_term_id;
-      return DesignInstancePinId{static_cast<DesignEntity>(raw_id)};
-    };
     for (const auto term : master.terms) {
       if (!term || !term_registry.valid(term.entity()) || !term_registry.all_of<LibraryMasterTerm>(term.entity())) {
         throw std::logic_error("library cell master contains an invalid master term relation");
@@ -236,19 +247,21 @@ DesignInstanceId DesignNetlistStorage::createInstance(DesignInstance instance, s
         throw std::logic_error("library cell master contains an invalid master term relation");
       }
 
-      const auto pin_id = allocate_term_id();
-      const auto [record, inserted]
-          = pins.records.emplace(master_term.name,
-                                 DesignInstancePin{.instance = id,
-                                                   .instance_ptr = instance_ptr,
-                                                   .master_term = term,
-                                                   .master_term_ptr = &master_term,
-                                                   .id = pin_id});
+      const auto term_entity = _registry.create();
+      const DesignInstanceTermId term_id{term_entity};
+      // The owner relation is pre-reserved and doubles as the rollback list.
+      // Emplacing a different component cannot invalidate this reference.
+      terms.values.push_back(term_id);
+      term_storage.emplace(term_entity,
+                           DesignInstanceTerm{.instance = id,
+                                              .instance_ptr = instance_ptr,
+                                              .master_term = term,
+                                              .master_term_ptr = &master_term});
+      const auto [unused, inserted] = terms.names.emplace(master_term.name, term_id);
+      static_cast<void>(unused);
       if (!inserted) {
         throw std::logic_error("library cell master contains duplicate master term names");
       }
-      _instance_terms[static_cast<std::size_t>(pin_id.packed())] = &record->second;
-      pins.values.push_back(pin_id);
     }
     const auto [unused, inserted] = _instance_names.emplace(name, id);
     if (!inserted) {
@@ -259,11 +272,11 @@ DesignInstanceId DesignNetlistStorage::createInstance(DesignInstance instance, s
     if (indexed != _instance_names.end() && indexed->second == id) {
       _instance_names.erase(name);
     }
-    if (_registry.valid(entity) && _registry.all_of<DesignInstancePins>(entity)) {
-      const auto& pins = _registry.get<const DesignInstancePins>(entity);
-      for (const auto& [name, pin] : pins.records) {
-        static_cast<void>(name);
-        _instance_terms[static_cast<std::size_t>(pin.id.packed())] = nullptr;
+    if (_registry.valid(entity) && _registry.all_of<DesignInstanceTerms>(entity)) {
+      for (const auto term_id : _registry.get<const DesignInstanceTerms>(entity).values) {
+        if (_registry.valid(term_id.entity())) {
+          _registry.destroy(term_id.entity());
+        }
       }
     }
     if (_registry.valid(entity)) {
@@ -355,6 +368,58 @@ void DesignNetlistStorage::updateInstance(DesignInstanceId id, DesignInstance in
   }
 }
 
+void DesignNetlistStorage::swapMasterCompatible(DesignInstanceId id, LibraryCellMasterId master)
+{
+  ensureInstance(id);
+  const auto& libraries = _library_registry.registry();
+  if (!master || !libraries.valid(master.entity()) || !libraries.all_of<LibraryCellMaster>(master.entity())) {
+    throw std::invalid_argument("replacement master is not live in this library");
+  }
+  auto& instance = _registry.get<DesignInstance>(id.entity());
+  if (instance.master == master) return;
+  auto& terms = _registry.get<DesignInstanceTerms>(id.entity());
+  const auto& replacement = libraries.get<const LibraryCellMaster>(master.entity());
+  if (replacement.terms.size() != terms.names.size()) {
+    throw std::invalid_argument("replacement master has an incompatible terminal set");
+  }
+  std::vector<DesignInstanceTermId> ordered;
+  ordered.reserve(replacement.terms.size());
+  for (const auto term_id : replacement.terms) {
+    if (!term_id || !libraries.valid(term_id.entity()) || !libraries.all_of<LibraryMasterTerm>(term_id.entity())) {
+      throw std::invalid_argument("replacement master contains an invalid terminal relation");
+    }
+    const auto& term = libraries.get<const LibraryMasterTerm>(term_id.entity());
+    if (term.master != master) {
+      throw std::invalid_argument("replacement master contains a terminal owned by another master");
+    }
+    const auto found = terms.names.find(term.name);
+    if (found == terms.names.end()) {
+      throw std::invalid_argument("replacement master has incompatible terminal names/directions/uses");
+    }
+    if (std::find(ordered.begin(), ordered.end(), found->second) != ordered.end()) {
+      throw std::invalid_argument("replacement master contains duplicate terminal names");
+    }
+    const auto& record = _registry.get<const DesignInstanceTerm>(found->second.entity());
+    if (record.master_term_ptr->direction != term.direction || record.master_term_ptr->use != term.use) {
+      throw std::invalid_argument("replacement master has incompatible terminal names/directions/uses");
+    }
+    ordered.push_back(found->second);
+  }
+  auto& bounds = _registry.get_or_emplace<GeometryBounds>(id.entity());
+  // All lookups and allocations above precede mutation. Stable Term component
+  // addresses and IDs survive the compatible master swap.
+  for (const auto term_id : replacement.terms) {
+    const auto& term = libraries.get<const LibraryMasterTerm>(term_id.entity());
+    auto& record = _registry.get<DesignInstanceTerm>(terms.names.find(term.name)->second.entity());
+    record.master_term = term_id;
+    record.master_term_ptr = &term;
+  }
+  terms.values = std::move(ordered);
+  instance.master = master;
+  bounds.invalidate();
+  _design_registry.markGeometryChanged();
+}
+
 bool DesignNetlistStorage::destroyInstance(DesignInstanceId id)
 {
   if (!contains(id)) {
@@ -376,18 +441,18 @@ bool DesignNetlistStorage::destroyInstance(DesignInstanceId id)
     }
   }
 
-  const auto pins = instancePins(id);
-  for (const auto pin : pins) {
-    if (!contains(pin)) {
+  const auto terms = instancePins(id);
+  for (const auto term : terms) {
+    if (!contains(term)) {
       return false;
     }
-    const auto& stored = uncheckedInstancePin(pin);
+    const auto& stored = uncheckedInstancePin(term);
     if (stored.net || stored.special_net) {
       return false;
     }
   }
-  for (const auto pin : pins) {
-    _instance_terms[static_cast<std::size_t>(pin.packed())] = nullptr;
+  for (const auto term : terms) {
+    _registry.destroy(term.entity());
   }
   const auto region_bounds = _registry.get<const DesignInstance>(id.entity()).region_bounds;
   _instance_names.erase(_registry.get<const DesignInstance>(id.entity()).name);
@@ -431,8 +496,7 @@ std::vector<DesignInstanceId> DesignNetlistStorage::instances() const
 
 bool DesignNetlistStorage::contains(DesignInstancePinId id) const
 {
-  return id && static_cast<std::size_t>(id.packed()) < _instance_terms.size()
-         && _instance_terms[static_cast<std::size_t>(id.packed())] != nullptr;
+  return id && _registry.valid(id.entity()) && _registry.all_of<DesignInstanceTerm>(id.entity());
 }
 
 const DesignInstancePin& DesignNetlistStorage::instancePin(DesignInstancePinId id) const
@@ -457,15 +521,18 @@ DesignInstancePinId DesignNetlistStorage::findInstancePin(DesignInstanceId owner
 
 DesignInstancePinId DesignNetlistStorage::findInstancePin(DesignInstanceId owner, std::string_view term_name) const
 {
-  const auto* term = findInstanceTermData(owner, term_name);
-  return term == nullptr ? DesignInstancePinId{} : term->id;
+  ensureInstance(owner);
+  const auto& terms = _registry.get<const DesignInstanceTerms>(owner.entity());
+  const auto found = terms.names.find(term_name);
+  return found == terms.names.end() ? DesignInstancePinId{} : found->second;
 }
 
 const DesignInstanceTerm* DesignNetlistStorage::findInstanceTermData(DesignInstanceId owner, std::string_view term_name) const
 {
-  const auto& pins = _registry.get<const DesignInstancePins>(owner.entity());
-  const auto found = pins.records.find(std::string{term_name});
-  return found == pins.records.end() ? nullptr : &found->second;
+  ensureInstance(owner);
+  const auto& terms = _registry.get<const DesignInstanceTerms>(owner.entity());
+  const auto found = terms.names.find(term_name);
+  return found == terms.names.end() ? nullptr : &_registry.get<const DesignInstanceTerm>(found->second.entity());
 }
 
 std::span<const DesignInstancePinId> DesignNetlistStorage::instancePins(DesignNetId owner) const
@@ -696,6 +763,116 @@ bool DesignNetlistStorage::destroyBlockPin(DesignBlockPinId id)
   return true;
 }
 
+std::vector<DesignBlockPinId> DesignNetlistStorage::replaceBlockPins(DesignBlockTermId term,
+                                                                      std::span<const DesignBlockPinId> retired,
+                                                                      std::vector<DesignBlockPinInput> replacements)
+{
+  ensureIoPin(term);
+  validateBlockPinReplacement(term, retired, replacements);
+
+  const auto current = blockPins(term);
+  std::vector<DesignBlockPinId> final_pins;
+  final_pins.reserve(current.size() - retired.size() + replacements.size());
+
+  // Finish every allocation that can fail before changing the owner relation.
+  // The new entities intentionally remain unattached to the BTerm until their
+  // geometry and components are complete.
+  auto& pin_storage = _registry.storage<DesignBlockPin>();
+  auto& bounds_storage = _registry.storage<GeometryBounds>();
+  pin_storage.reserve(pin_storage.size() + replacements.size());
+  bounds_storage.reserve(bounds_storage.size() + replacements.size());
+
+  struct StagedPin
+  {
+    DesignBlockPinId id;
+    DesignBlockPin value;
+  };
+  std::vector<StagedPin> staged;
+  staged.reserve(replacements.size());
+  std::vector<DesignBlockPinId> result;
+  result.reserve(replacements.size());
+
+  const auto discard_staged = [&]() noexcept {
+    for (auto& staged_pin : staged) {
+      if (!_registry.valid(staged_pin.id.entity())) {
+        continue;
+      }
+      if (_registry.all_of<DesignBlockPin>(staged_pin.id.entity())) {
+        auto value = std::move(_registry.get<DesignBlockPin>(staged_pin.id.entity()));
+        _registry.destroy(staged_pin.id.entity());
+        destroyBlockPinGeometry(value);
+      } else {
+        destroyBlockPinGeometry(staged_pin.value);
+        _registry.destroy(staged_pin.id.entity());
+      }
+    }
+  };
+
+  try {
+    for (auto& replacement : replacements) {
+      const auto entity = _registry.create();
+      const DesignBlockPinId id{entity};
+      DesignBlockPin materialized;
+      try {
+        materialized = materializeBlockPin(id, term, std::move(replacement));
+        staged.push_back(StagedPin{.id = id, .value = std::move(materialized)});
+      } catch (...) {
+        destroyBlockPinGeometry(materialized);
+        if (_registry.valid(entity)) {
+          _registry.destroy(entity);
+        }
+        throw;
+      }
+    }
+
+    // Preserve every untouched port in its original order. Replacement ports
+    // occupy the first selected position, or append for a pure add operation.
+    bool inserted_replacements = false;
+    for (const auto id : current) {
+      if (std::find(retired.begin(), retired.end(), id) == retired.end()) {
+        final_pins.push_back(id);
+        continue;
+      }
+      if (!inserted_replacements) {
+        for (const auto& staged_pin : staged) {
+          final_pins.push_back(staged_pin.id);
+        }
+        inserted_replacements = true;
+      }
+    }
+    if (!inserted_replacements) {
+      for (const auto& staged_pin : staged) {
+        final_pins.push_back(staged_pin.id);
+      }
+    }
+
+    for (const auto& staged_pin : staged) {
+      result.push_back(staged_pin.id);
+    }
+
+    for (auto& staged_pin : staged) {
+      _registry.emplace<DesignBlockPin>(staged_pin.id.entity(), std::move(staged_pin.value));
+      _registry.emplace<GeometryBounds>(staged_pin.id.entity());
+    }
+
+  } catch (...) {
+    discard_staged();
+    throw;
+  }
+
+  // All potentially throwing work has succeeded. Keep this irreversible
+  // relation commit out of the staging cleanup scope: an exception while
+  // constructing a new port must never clean an already-installed port.
+  _registry.get<DesignBlockTerm>(term.entity()).pins.swap(final_pins);
+  for (const auto id : retired) {
+    auto value = std::move(_registry.get<DesignBlockPin>(id.entity()));
+    _registry.destroy(id.entity());
+    destroyBlockPinGeometry(value);
+  }
+  _design_registry.markGeometryChanged();
+  return result;
+}
+
 DesignNetId DesignNetlistStorage::createNet(DesignNet net)
 {
   return createNet(std::move(net), false);
@@ -920,6 +1097,117 @@ void DesignNetlistStorage::disconnect(DesignIoPinId pin, DesignNetId owner)
   _design_registry.markGeometryChanged();
 }
 
+void DesignNetlistStorage::disconnectAll(DesignNetId owner)
+{
+  ensureNet(owner);
+  const bool special = _registry.all_of<DesignSpecialNet>(owner.entity());
+  if (const auto* pins = _registry.try_get<DesignNetInstancePins>(owner.entity())) {
+    for (const auto id : pins->values) {
+      auto& term = uncheckedInstancePin(id);
+      (special ? term.special_net : term.net) = {};
+    }
+    _registry.remove<DesignNetInstancePins>(owner.entity());
+  }
+  if (const auto* pins = _registry.try_get<DesignNetIoPins>(owner.entity())) {
+    for (const auto id : pins->values) {
+      auto& term = _registry.get<DesignBlockTerm>(id.entity());
+      (special ? term.special_net : term.net) = {};
+    }
+    _registry.remove<DesignNetIoPins>(owner.entity());
+    _design_registry.markGeometryChanged();
+  }
+}
+
+void DesignNetlistStorage::replaceConnections(DesignNetId owner,
+                                             std::span<const DesignInstanceTermId> instance_terms,
+                                             std::span<const DesignBlockTermId> block_terms)
+{
+  ensureNet(owner);
+  // Own inputs first: they may borrow target or source reverse lists.
+  std::vector<DesignInstanceTermId> new_instances(instance_terms.begin(), instance_terms.end());
+  std::vector<DesignBlockTermId> new_blocks(block_terms.begin(), block_terms.end());
+  const bool special = _registry.all_of<DesignSpecialNet>(owner.entity());
+  struct Source
+  {
+    DesignNetId net;
+    std::vector<DesignInstanceTermId> instances;
+    std::vector<DesignBlockTermId> blocks;
+  };
+  std::vector<Source> sources;
+  std::unordered_map<uint64_t, std::size_t> source_indices;
+  std::unordered_set<uint64_t> incoming_instances;
+  std::unordered_set<uint64_t> incoming_blocks;
+  incoming_instances.reserve(new_instances.size());
+  incoming_blocks.reserve(new_blocks.size());
+  const auto add_source = [&](DesignNetId source) {
+    if (!source || source == owner || source_indices.contains(source.packed())) return;
+    source_indices.emplace(source.packed(), sources.size());
+    sources.push_back(Source{.net = source});
+  };
+  for (const auto id : new_instances) {
+    const auto& term = uncheckedInstancePin(id);
+    incoming_instances.insert(id.packed());
+    add_source(special ? term.special_net : term.net);
+  }
+  for (const auto id : new_blocks) {
+    const auto& term = _registry.get<const DesignBlockTerm>(id.entity());
+    incoming_blocks.insert(id.packed());
+    add_source(special ? term.special_net : term.net);
+  }
+  // Filter each affected source once rather than repeatedly find/erase the
+  // same large vector. Every allocation precedes the first relation change.
+  for (auto& source : sources) {
+    const auto old_instances = instancePins(source.net);
+    source.instances.reserve(old_instances.size());
+    for (const auto id : old_instances) {
+      if (!incoming_instances.contains(id.packed())) source.instances.push_back(id);
+    }
+    const auto old_blocks = ioPins(source.net);
+    source.blocks.reserve(old_blocks.size());
+    for (const auto id : old_blocks) {
+      if (!incoming_blocks.contains(id.packed())) source.blocks.push_back(id);
+    }
+  }
+  static_cast<void>(_registry.get_or_emplace<DesignNetInstancePins>(owner.entity()));
+  static_cast<void>(_registry.get_or_emplace<DesignNetIoPins>(owner.entity()));
+  for (const auto id : instancePins(owner)) {
+    auto& term = uncheckedInstancePin(id);
+    (special ? term.special_net : term.net) = {};
+  }
+  const bool block_geometry_changed = !ioPins(owner).empty() || !new_blocks.empty();
+  for (const auto id : ioPins(owner)) {
+    auto& term = _registry.get<DesignBlockTerm>(id.entity());
+    (special ? term.special_net : term.net) = {};
+  }
+  for (auto& source : sources) {
+    if (auto* list = _registry.try_get<DesignNetInstancePins>(source.net.entity())) {
+      list->values = std::move(source.instances);
+      if (list->values.empty()) _registry.remove<DesignNetInstancePins>(source.net.entity());
+    }
+    if (auto* list = _registry.try_get<DesignNetIoPins>(source.net.entity())) {
+      list->values = std::move(source.blocks);
+      if (list->values.empty()) _registry.remove<DesignNetIoPins>(source.net.entity());
+    }
+  }
+  // Removing a source component can swap another component into its dense
+  // slot. Reacquire target references only after all source removals.
+  auto& instances = _registry.get<DesignNetInstancePins>(owner.entity()).values;
+  auto& blocks = _registry.get<DesignNetIoPins>(owner.entity()).values;
+  instances = std::move(new_instances);
+  blocks = std::move(new_blocks);
+  for (const auto id : instances) {
+    auto& term = uncheckedInstancePin(id);
+    (special ? term.special_net : term.net) = owner;
+  }
+  for (const auto id : blocks) {
+    auto& term = _registry.get<DesignBlockTerm>(id.entity());
+    (special ? term.special_net : term.net) = owner;
+  }
+  if (instances.empty()) _registry.remove<DesignNetInstancePins>(owner.entity());
+  if (blocks.empty()) _registry.remove<DesignNetIoPins>(owner.entity());
+  if (block_geometry_changed) _design_registry.markGeometryChanged();
+}
+
 bool DesignNetlistStorage::referencesMaster(LibraryCellMasterId master) const
 {
   const auto view = _registry.view<const DesignInstance>();
@@ -933,14 +1221,10 @@ bool DesignNetlistStorage::referencesMaster(LibraryCellMasterId master) const
 
 bool DesignNetlistStorage::referencesMasterTerm(LibraryMasterTermId term) const
 {
-  const auto view = _registry.view<const DesignInstanceTerms>();
+  const auto view = _registry.view<const DesignInstanceTerm>();
   for (const auto entity : view) {
-    const auto& pins = view.get<const DesignInstanceTerms>(entity);
-    for (const auto& [name, pin] : pins.records) {
-      static_cast<void>(name);
-      if (pin.master_term == term) {
-        return true;
-      }
+    if (view.get<const DesignInstanceTerm>(entity).master_term == term) {
+      return true;
     }
   }
   return false;
@@ -954,9 +1238,9 @@ uint32_t DesignNetlistStorage::instanceCount() const
 uint32_t DesignNetlistStorage::instancePinCount() const
 {
   uint32_t count = 0;
-  const auto view = _registry.view<const DesignInstanceTerms>();
-  for (const auto entity : view) {
-    count += static_cast<uint32_t>(view.get<const DesignInstanceTerms>(entity).records.size());
+  const auto view = _registry.view<const DesignInstanceTerm>();
+  for ([[maybe_unused]] const auto entity : view) {
+    ++count;
   }
   return count;
 }
@@ -1037,76 +1321,59 @@ void DesignNetlistStorage::rebuildNameIndexes()
 void DesignNetlistStorage::rebuildLibraryCaches()
 {
   const auto& term_registry = _library_registry.registry();
-  const auto roots = _registry.view<const DesignRoot>();
-  const auto& root = roots.get<const DesignRoot>(*roots.begin());
-  if (root.next_instance_term_id > ActiveDesignEntitySchema::entity_mask) {
-    throw std::logic_error("restored design instance term ID high-water mark is invalid");
-  }
-  _instance_terms.assign(static_cast<std::size_t>(root.next_instance_term_id), nullptr);
+  std::size_t referenced_term_count = 0;
 
-  auto instances = _registry.view<DesignInstancePins, const DesignInstance>();
+  auto instances = _registry.view<DesignInstanceTerms, const DesignInstance>();
   for (const auto entity : instances) {
-    auto& pins = instances.get<DesignInstancePins>(entity);
+    auto& terms = instances.get<DesignInstanceTerms>(entity);
     const auto& instance = instances.get<const DesignInstance>(entity);
-    decltype(pins.records) records;
-    records.reserve(pins.records.size());
-    for (const auto& [name, pin] : pins.records) {
-      static_cast<void>(name);
-      if (pin.instance != DesignInstanceId{entity}) {
+    decltype(terms.names) names;
+    names.reserve(terms.values.size());
+    for (const auto term_id : terms.values) {
+      if (!term_id || !_registry.valid(term_id.entity()) || !_registry.all_of<DesignInstanceTerm>(term_id.entity())) {
+        throw std::logic_error("design instance references an invalid term while rebuilding pointers");
+      }
+      auto& term = _registry.get<DesignInstanceTerm>(term_id.entity());
+      if (term.instance != DesignInstanceId{entity}) {
         throw std::logic_error("design instance term references an invalid instance while rebuilding pointers");
       }
-      if (!pin.master_term || !term_registry.valid(pin.master_term.entity())
-          || !term_registry.all_of<LibraryMasterTerm>(pin.master_term.entity())) {
+      if (!term.master_term || !term_registry.valid(term.master_term.entity())
+          || !term_registry.all_of<LibraryMasterTerm>(term.master_term.entity())) {
         throw std::logic_error("design instance term references an invalid library master term while rebuilding pointers");
       }
-      const auto& master_term = term_registry.get<const LibraryMasterTerm>(pin.master_term.entity());
+      const auto& master_term = term_registry.get<const LibraryMasterTerm>(term.master_term.entity());
       if (master_term.master != instance.master) {
         throw std::logic_error("design instance term does not belong to its instance master while rebuilding pointers");
       }
-      auto rebound = pin;
-      rebound.instance_ptr = &instance;
-      rebound.master_term_ptr = &master_term;
-      if (!records.emplace(master_term.name, std::move(rebound)).second) {
+      term.instance_ptr = &instance;
+      term.master_term_ptr = &master_term;
+      if (!names.emplace(master_term.name, term_id).second) {
         throw std::logic_error("library cell master contains duplicate master term names while rebuilding pointers");
       }
+      ++referenced_term_count;
     }
-    pins.records.swap(records);
+    terms.names.swap(names);
   }
 
-  for (const auto entity : instances) {
-    auto& pins = instances.get<DesignInstancePins>(entity);
-    if (pins.values.size() != pins.records.size()) {
-      throw std::logic_error("design instance term IDs and records differ while rebuilding pointers");
-    }
-    for (auto&& [name, pin] : pins.records) {
-      static_cast<void>(name);
-      if (std::count(pins.values.begin(), pins.values.end(), pin.id) != 1) {
-        throw std::logic_error("design instance term ID relation is invalid while rebuilding pointers");
-      }
-      const auto index = static_cast<std::size_t>(pin.id.packed());
-      if (!pin.id || index >= _instance_terms.size() || _instance_terms[index] != nullptr) {
-        throw std::logic_error("design instance term ID is invalid while rebuilding pointers");
-      }
-      _instance_terms[index] = &pin;
-    }
-    for (const auto pin_id : pins.values) {
-      const auto index = static_cast<std::size_t>(pin_id.packed());
-      if (!pin_id || index >= _instance_terms.size() || _instance_terms[index] == nullptr
-          || _instance_terms[index]->instance != DesignInstanceId{entity}) {
-        throw std::logic_error("design instance references an invalid term while rebuilding pointers");
-      }
-    }
+  const auto term_view = _registry.view<const DesignInstanceTerm>();
+  std::size_t live_term_count = 0;
+  for (const auto entity : term_view) {
+    static_cast<void>(entity);
+    ++live_term_count;
+  }
+  if (live_term_count != referenced_term_count) {
+    throw std::logic_error("design instance term is orphaned while rebuilding pointers");
   }
 }
 
 DesignInstancePin& DesignNetlistStorage::uncheckedInstancePin(DesignInstancePinId id) noexcept
 {
-  return *_instance_terms[static_cast<std::size_t>(id.packed())];
+  return _registry.get<DesignInstanceTerm>(id.entity());
 }
 
 const DesignInstancePin& DesignNetlistStorage::uncheckedInstancePin(DesignInstancePinId id) const noexcept
 {
-  return *_instance_terms[static_cast<std::size_t>(id.packed())];
+  return _registry.get<const DesignInstanceTerm>(id.entity());
 }
 
 DesignNetId DesignNetlistStorage::createNet(DesignNet net, bool special)
@@ -1255,6 +1522,46 @@ void DesignNetlistStorage::validateBlockPinRelation(DesignBlockTermId term,
   has_explicit_port |= (value.flags & DesignIoPinPortFlag::kExplicit) != 0u;
   has_implicit_port |= (value.flags & DesignIoPinPortFlag::kExplicit) == 0u;
   ++count;
+  if ((has_explicit_port && has_implicit_port) || (has_implicit_port && count != 1u)) {
+    throw std::invalid_argument("design IO pin cannot mix explicit and implicit ports");
+  }
+}
+
+void DesignNetlistStorage::validateBlockPinReplacement(DesignBlockTermId term,
+                                                        std::span<const DesignBlockPinId> retired,
+                                                        std::span<const DesignBlockPinInput> replacements) const
+{
+  ensureIoPin(term);
+  const auto term_pins = blockPins(term);
+  for (std::size_t index = 0; index < retired.size(); ++index) {
+    const auto id = retired[index];
+    ensureBlockPin(id);
+    if (blockPin(id).term != term) {
+      throw std::invalid_argument("replacement block pin does not belong to the specified block term");
+    }
+    if (std::find(retired.begin(), retired.begin() + index, id) != retired.begin() + index) {
+      throw std::invalid_argument("replacement block pin list contains a duplicate ID");
+    }
+  }
+
+  bool has_explicit_port = false;
+  bool has_implicit_port = false;
+  std::size_t count = 0;
+  for (const auto id : term_pins) {
+    if (std::find(retired.begin(), retired.end(), id) != retired.end()) {
+      continue;
+    }
+    const auto& pin = blockPin(id);
+    has_explicit_port |= (pin.flags & DesignIoPinPortFlag::kExplicit) != 0u;
+    has_implicit_port |= (pin.flags & DesignIoPinPortFlag::kExplicit) == 0u;
+    ++count;
+  }
+  for (const auto& pin : replacements) {
+    validateBlockPin(pin);
+    has_explicit_port |= (pin.flags & DesignIoPinPortFlag::kExplicit) != 0u;
+    has_implicit_port |= (pin.flags & DesignIoPinPortFlag::kExplicit) == 0u;
+    ++count;
+  }
   if ((has_explicit_port && has_implicit_port) || (has_implicit_port && count != 1u)) {
     throw std::invalid_argument("design IO pin cannot mix explicit and implicit ports");
   }

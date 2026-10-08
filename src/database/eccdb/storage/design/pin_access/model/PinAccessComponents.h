@@ -1,6 +1,25 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "common/GeometryTypes.h"
@@ -132,6 +151,28 @@ struct DesignInstancePreferredPinAccessEntry
 struct DesignInstancePreferredPinAccess
 {
   std::vector<DesignInstancePreferredPinAccessEntry> entries;
+};
+
+struct DesignBlockPinAccessUpdate
+{
+  DesignBlockPinId pin;
+  DesignBlockPinAccessGroups candidates;
+};
+
+struct DesignInstancePinAccessUpdate
+{
+  DesignInstanceId instance;
+  std::optional<uint32_t> group_index;
+  DesignInstancePreferredPinAccess preferences;
+};
+
+// Complete values for explicit owners. Unmentioned ports/pins/instances stay
+// unchanged; an empty value clears that owner's derived state.
+struct DesignPinAccessUpdate
+{
+  std::vector<DesignMasterPortPinAccessGroups> master_ports;
+  std::vector<DesignBlockPinAccessUpdate> block_pins;
+  std::vector<DesignInstancePinAccessUpdate> instances;
 };
 
 }  // namespace eccdb

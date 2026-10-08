@@ -1,5 +1,0 @@
-cmake_minimum_required(VERSION 3.20)
-project(EccdbCConsumer LANGUAGES C)
-find_package(EccDB CONFIG REQUIRED)
-add_executable(consumer ../consumer.c)
-target_link_libraries(consumer PRIVATE EccDB::c)

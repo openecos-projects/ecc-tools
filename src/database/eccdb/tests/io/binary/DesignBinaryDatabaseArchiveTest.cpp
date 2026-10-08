@@ -1,4 +1,20 @@
-// SPDX-License-Identifier: Apache-2.0
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
 
 #include <gtest/gtest.h>
 
@@ -181,27 +197,32 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsShapeRoutingAndIndex
   const auto expected_statistics = fixture.design.routingStorage().routingStatistics();
 
   BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
-  const auto source_instance = fixture.design.netlistStorage().findInstance("u1");
-  const auto source_pin = fixture.design.netlistStorage().findInstancePin(source_instance, "A");
-  ASSERT_TRUE(source_pin);
-  auto& source_pins = fixture.design.designRegistry().registry().get<DesignInstancePins>(source_instance.entity());
-  ASSERT_EQ(source_pins.values.size(), source_pins.records.size());
-  const auto source_record = source_pins.records.find("A");
-  ASSERT_NE(source_record, source_pins.records.end());
-  auto& source_pin_value = source_record->second;
-  const auto source_term = source_pin_value.master_term;
-  const auto* cached_instance = source_pin_value.instance_ptr;
-  const auto* cached_term = source_pin_value.master_term_ptr;
-  EXPECT_EQ(source_pin_value.instance, source_instance);
-  EXPECT_EQ(source_pin_value.id, source_pin);
-  ASSERT_EQ(cached_instance, &fixture.design.netlistStorage().instance(source_instance));
-  ASSERT_EQ(cached_term, &fixture.library.masterTermStorage().masterTerm(source_term));
-  EXPECT_EQ(fixture.design.netlistStorage().instancePin(source_pin).master_term, source_term);
-  source_pin_value.instance_ptr = nullptr;
-  source_pin_value.master_term_ptr = nullptr;
+  auto& source_netlist = fixture.design.netlistStorage();
+  const auto source_instance = source_netlist.findInstance("u1");
+  const auto source_term_id = source_netlist.findInstanceTerm(source_instance, "A");
+  ASSERT_TRUE(source_term_id);
+  auto& source_registry = fixture.design.designRegistry().registry();
+  auto& source_terms = source_registry.get<DesignInstanceTerms>(source_instance.entity());
+  ASSERT_EQ(source_terms.values.size(), source_terms.names.size());
+  const auto source_name = source_terms.names.find("A");
+  ASSERT_NE(source_name, source_terms.names.end());
+  EXPECT_EQ(source_name->second, source_term_id);
+  auto& source_term_value = source_registry.get<DesignInstanceTerm>(source_term_id.entity());
+  const auto source_master_term = source_term_value.master_term;
+  const auto* cached_instance = source_term_value.instance_ptr;
+  const auto* cached_term = source_term_value.master_term_ptr;
+  EXPECT_EQ(source_term_value.instance, source_instance);
+  ASSERT_EQ(cached_instance, &source_netlist.instance(source_instance));
+  ASSERT_EQ(cached_term, &fixture.library.masterTermStorage().masterTerm(source_master_term));
+  EXPECT_EQ(source_netlist.instanceTerm(source_term_id).master_term, source_master_term);
+  auto source_names = std::move(source_terms.names);
+  source_terms.names.clear();
+  source_term_value.instance_ptr = nullptr;
+  source_term_value.master_term_ptr = nullptr;
   BinaryDatabaseExporter::saveDesign(transient.path(), fixture.design);
-  source_pin_value.instance_ptr = cached_instance;
-  source_pin_value.master_term_ptr = cached_term;
+  source_terms.names = std::move(source_names);
+  source_term_value.instance_ptr = cached_instance;
+  source_term_value.master_term_ptr = cached_term;
   expectSameFile(binary.path(), transient.path());
 
   auto restored = BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library);
@@ -214,28 +235,29 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsShapeRoutingAndIndex
   EXPECT_EQ(restored->routingStorage().wires(restored->netlistStorage().findRegularNet("n1")).size(), 1u);
 
   const auto restored_instance = restored->netlistStorage().findInstance("u1");
-  const auto& restored_pins = restored->designRegistry().registry().get<const DesignInstancePins>(restored_instance.entity());
-  EXPECT_EQ(restored_pins.values.size(), restored_pins.records.size());
-  EXPECT_EQ(restored_pins.values, source_pins.values);
-  EXPECT_EQ(restored_pins.records.size(), source_pins.records.size());
-  for (const auto& [name, source_record] : source_pins.records) {
-    const auto restored_record = restored_pins.records.find(name);
-    ASSERT_NE(restored_record, restored_pins.records.end());
-    EXPECT_EQ(restored_record->second.id, source_record.id);
-    EXPECT_EQ(restored_record->second.master_term, source_record.master_term);
-  }
-  ASSERT_NE(restored_pins.records.find("A"), restored_pins.records.end());
-  const auto restored_pin = restored->netlistStorage().findInstancePin(restored_instance, "A");
-  ASSERT_TRUE(restored_pin);
-  const auto& restored_instance_pin = restored->netlistStorage().instancePin(restored_pin);
-  EXPECT_EQ(restored_instance_pin.instance, restored_instance);
-  EXPECT_EQ(restored_instance_pin.id, restored_pin);
-  EXPECT_EQ(restored_instance_pin.master_term, source_term);
-  EXPECT_EQ(restored_instance_pin.instance_ptr, &restored->netlistStorage().instance(restored_instance));
-  EXPECT_EQ(restored_instance_pin.master_term_ptr,
-            &fixture.library.masterTermStorage().masterTerm(restored_instance_pin.master_term));
   const auto& restored_registry = std::as_const(restored->designRegistry().registry());
-  EXPECT_EQ(restored_registry.storage<DesignInstanceTerm>(), nullptr);
+  const auto& restored_terms = restored_registry.get<const DesignInstanceTerms>(restored_instance.entity());
+  EXPECT_EQ(restored_terms.values.size(), restored_terms.names.size());
+  EXPECT_EQ(restored_terms.values, source_terms.values);
+  EXPECT_EQ(restored_terms.names.size(), source_terms.names.size());
+  for (const auto& [name, source_term_id] : source_terms.names) {
+    const auto restored_name = restored_terms.names.find(name);
+    ASSERT_NE(restored_name, restored_terms.names.end());
+    EXPECT_EQ(restored_name->second, source_term_id);
+    const auto& source_term = source_registry.get<const DesignInstanceTerm>(source_term_id.entity());
+    const auto& restored_term = restored_registry.get<const DesignInstanceTerm>(restored_name->second.entity());
+    EXPECT_EQ(restored_term.master_term, source_term.master_term);
+  }
+  ASSERT_NE(restored_terms.names.find("A"), restored_terms.names.end());
+  const auto restored_term_id = restored->netlistStorage().findInstanceTerm(restored_instance, "A");
+  ASSERT_TRUE(restored_term_id);
+  const auto& restored_term = restored->netlistStorage().instanceTerm(restored_term_id);
+  EXPECT_EQ(restored_term.instance, restored_instance);
+  EXPECT_EQ(restored_term.master_term, source_master_term);
+  EXPECT_EQ(restored_term.instance_ptr, &restored->netlistStorage().instance(restored_instance));
+  EXPECT_EQ(restored_term.master_term_ptr, &fixture.library.masterTermStorage().masterTerm(restored_term.master_term));
+  EXPECT_NE(restored_registry.storage<DesignInstanceTerm>(), nullptr);
+  EXPECT_TRUE(restored_registry.all_of<DesignInstanceTerm>(restored_term_id.entity()));
 
   const auto actual_statistics = restored->routingStorage().routingStatistics();
   EXPECT_EQ(actual_statistics.shapes.count, expected_statistics.shapes.count);
@@ -249,62 +271,97 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsShapeRoutingAndIndex
   expectSameFile(binary.path(), fixed.path());
 }
 
-TEST(DesignBinaryDatabaseArchiveTest, RestoresInstancePinsAfterOtherInstanceDeletion)
+TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDeletedInstanceTermsAndReusedSlots)
 {
   DesignFixture fixture;
   auto& netlist = fixture.design.netlistStorage();
-  const auto instance = netlist.findInstance("u1");
-  const auto master = netlist.instance(instance).master;
-  const auto regular = netlist.findRegularNet("n1");
+  const auto master = netlist.instance(netlist.findInstance("u1")).master;
   const auto temporary = netlist.createInstance(DesignInstance{.name = "temporary", .master = master});
-  const auto survivor = netlist.createInstance(DesignInstance{.name = "survivor", .master = master});
-  const auto survivor_pin = netlist.findInstancePin(survivor, "A");
-  ASSERT_TRUE(survivor_pin);
-  const auto* cached_survivor_pin = &netlist.instancePin(survivor_pin);
-  const auto* cached_survivor_instance = cached_survivor_pin->instance_ptr;
-  const auto* cached_survivor_term = cached_survivor_pin->master_term_ptr;
-  ASSERT_EQ(cached_survivor_instance, &netlist.instance(survivor));
-  ASSERT_EQ(cached_survivor_term, &fixture.library.masterTermStorage().masterTerm(cached_survivor_pin->master_term));
-  netlist.connect(survivor_pin, regular);
+  const std::array deleted_terms{netlist.findInstanceTerm(temporary, "A"), netlist.findInstanceTerm(temporary, "Y")};
+  ASSERT_TRUE(deleted_terms.front());
+  ASSERT_TRUE(deleted_terms.back());
   ASSERT_TRUE(netlist.destroyInstance(temporary));
-  ASSERT_EQ(netlist.instanceCount(), 3u);
-  ASSERT_EQ(netlist.findInstancePin(survivor, "A"), survivor_pin);
-  EXPECT_EQ(&netlist.instancePin(survivor_pin), cached_survivor_pin);
-  EXPECT_EQ(netlist.instancePin(survivor_pin).instance_ptr, cached_survivor_instance);
-  EXPECT_EQ(netlist.instancePin(survivor_pin).master_term_ptr, cached_survivor_term);
-  ASSERT_EQ(netlist.instancePin(survivor_pin).instance, survivor);
-  ASSERT_EQ(netlist.instancePin(survivor_pin).net, regular);
-  const auto regular_pins = netlist.instancePins(regular);
-  ASSERT_NE(std::find(regular_pins.begin(), regular_pins.end(), survivor_pin), regular_pins.end());
+  for (const auto term : deleted_terms) {
+    EXPECT_FALSE(netlist.contains(term));
+  }
 
-  const TemporaryFile binary{"design-deleted-instance", ".edb"};
-  const TemporaryFile fixed{"design-deleted-instance-fixed", ".edb"};
+  const TemporaryFile binary{"design-deleted-terms", ".edb"};
+  const TemporaryFile deleted_fixed{"design-deleted-terms-fixed", ".edb"};
   BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
   auto restored = BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library);
-  EXPECT_EQ(restored->netlistStorage().instanceCount(), 3u);
   EXPECT_FALSE(restored->netlistStorage().findInstance("temporary"));
-  const auto restored_survivor = restored->netlistStorage().findInstance("survivor");
-  ASSERT_TRUE(restored_survivor);
-  const auto restored_survivor_pin = restored->netlistStorage().findInstancePin(restored_survivor, "A");
-  ASSERT_TRUE(restored_survivor_pin);
-  const auto restored_regular = restored->netlistStorage().findRegularNet("n1");
-  EXPECT_EQ(restored->netlistStorage().instancePin(restored_survivor_pin).instance, restored_survivor);
-  EXPECT_EQ(restored->netlistStorage().instancePin(restored_survivor_pin).net, restored_regular);
-  EXPECT_EQ(restored->netlistStorage().instancePin(restored_survivor_pin).instance_ptr,
-            &restored->netlistStorage().instance(restored_survivor));
-  EXPECT_EQ(restored->netlistStorage().instancePin(restored_survivor_pin).master_term_ptr,
-            &fixture.library.masterTermStorage().masterTerm(
-                restored->netlistStorage().instancePin(restored_survivor_pin).master_term));
-  const auto restored_regular_pins = restored->netlistStorage().instancePins(restored_regular);
-  EXPECT_NE(std::find(restored_regular_pins.begin(), restored_regular_pins.end(), restored_survivor_pin), restored_regular_pins.end());
+  for (const auto term : deleted_terms) {
+    EXPECT_FALSE(restored->netlistStorage().contains(term));
+  }
+  BinaryDatabaseExporter::saveDesign(deleted_fixed.path(), *restored);
+  expectSameFile(binary.path(), deleted_fixed.path());
 
-  const auto restored_instance = restored->netlistStorage().findInstance("u1");
-  const auto pin = restored->netlistStorage().findInstancePin(restored_instance, "A");
-  ASSERT_TRUE(pin);
-  EXPECT_EQ(restored->netlistStorage().instancePin(pin).instance, restored_instance);
+  auto& restored_netlist = restored->netlistStorage();
+  const auto restored_regular = restored_netlist.findRegularNet("n1");
+  const auto replacement = restored_netlist.createInstance(DesignInstance{.name = "replacement", .master = master});
+  const auto replacement_view = restored_netlist.instanceTerms(replacement);
+  const std::vector<DesignInstanceTermId> replacement_terms{replacement_view.begin(), replacement_view.end()};
+  ASSERT_EQ(replacement_terms.size(), deleted_terms.size());
+  const auto replacement_term = restored_netlist.findInstanceTerm(replacement, "A");
+  ASSERT_TRUE(replacement_term);
 
-  BinaryDatabaseExporter::saveDesign(fixed.path(), *restored);
-  expectSameFile(binary.path(), fixed.path());
+  DesignInstanceTermId reused_term;
+  DesignInstanceTermId replaced_term;
+  for (const auto term : replacement_terms) {
+    for (const auto deleted : deleted_terms) {
+      if (entt::to_entity(term.entity()) == entt::to_entity(deleted.entity())) {
+        reused_term = term;
+        replaced_term = deleted;
+        break;
+      }
+    }
+    if (reused_term) {
+      break;
+    }
+  }
+  ASSERT_TRUE(reused_term);
+  EXPECT_NE(reused_term, replaced_term);
+  EXPECT_NE(entt::to_version(reused_term.entity()), entt::to_version(replaced_term.entity()));
+  for (const auto term : deleted_terms) {
+    EXPECT_FALSE(restored_netlist.contains(term));
+  }
+
+  const auto& replacement_relation
+      = restored->designRegistry().registry().get<const DesignInstanceTerms>(replacement.entity());
+  const auto replacement_name = replacement_relation.names.find("A");
+  ASSERT_NE(replacement_name, replacement_relation.names.end());
+  EXPECT_EQ(replacement_name->second, replacement_term);
+  restored_netlist.connect(replacement_term, restored_regular);
+  EXPECT_EQ(restored_netlist.instanceTerm(replacement_term).net, restored_regular);
+
+  const TemporaryFile reused_binary{"design-reused-term-slots", ".edb"};
+  const TemporaryFile reused_fixed{"design-reused-term-slots-fixed", ".edb"};
+  BinaryDatabaseExporter::saveDesign(reused_binary.path(), *restored);
+  auto round_tripped = BinaryDatabaseImporter::loadDesign(reused_binary.path(), fixture.technology, fixture.library);
+  auto& round_tripped_netlist = round_tripped->netlistStorage();
+  for (const auto term : deleted_terms) {
+    EXPECT_FALSE(round_tripped_netlist.contains(term));
+  }
+  const auto round_tripped_replacement = round_tripped_netlist.findInstance("replacement");
+  ASSERT_TRUE(round_tripped_replacement);
+  const auto round_tripped_term = round_tripped_netlist.findInstanceTerm(round_tripped_replacement, "A");
+  ASSERT_TRUE(round_tripped_term);
+  EXPECT_EQ(round_tripped_term, replacement_term);
+  EXPECT_EQ(entt::to_entity(round_tripped_term.entity()), entt::to_entity(replacement_term.entity()));
+  EXPECT_EQ(entt::to_version(round_tripped_term.entity()), entt::to_version(replacement_term.entity()));
+  EXPECT_EQ(round_tripped_netlist.instanceTerm(round_tripped_term).net, round_tripped_netlist.findRegularNet("n1"));
+  const auto& round_tripped_relation
+      = round_tripped->designRegistry().registry().get<const DesignInstanceTerms>(round_tripped_replacement.entity());
+  const auto round_tripped_name = round_tripped_relation.names.find("A");
+  ASSERT_NE(round_tripped_name, round_tripped_relation.names.end());
+  EXPECT_EQ(round_tripped_name->second, round_tripped_term);
+  for (const auto term : replacement_terms) {
+    EXPECT_TRUE(round_tripped_netlist.contains(term));
+    EXPECT_EQ(round_tripped_netlist.instanceTerm(term).instance, round_tripped_replacement);
+  }
+
+  BinaryDatabaseExporter::saveDesign(reused_fixed.path(), *round_tripped);
+  expectSameFile(reused_binary.path(), reused_fixed.path());
 }
 
 TEST(DesignBinaryDatabaseArchiveTest, RoundTripsRouterGuidesTracksAndPinAccess)
@@ -368,23 +425,23 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsRouterGuidesTracksAndPinAccess)
   expectSameFile(binary.path(), fixed.path());
 }
 
-TEST(DesignBinaryDatabaseArchiveTest, DoesNotReuseDeletedInstancePinIdsAfterRestore)
+TEST(DesignBinaryDatabaseArchiveTest, DoesNotReviveDeletedInstanceTermIdsAfterRestore)
 {
   DesignFixture fixture;
   auto& netlist = fixture.design.netlistStorage();
   const auto master = netlist.instance(netlist.findInstance("u1")).master;
   const auto temporary = netlist.createInstance(DesignInstance{.name = "temporary", .master = master});
-  const auto deleted_pin = netlist.findInstancePin(temporary, "A");
-  ASSERT_TRUE(deleted_pin);
+  const auto deleted_term = netlist.findInstanceTerm(temporary, "A");
+  ASSERT_TRUE(deleted_term);
   ASSERT_TRUE(netlist.destroyInstance(temporary));
-  const TemporaryFile binary{"deleted-pin-id", ".edb"};
+  const TemporaryFile binary{"deleted-term-id", ".edb"};
   BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
   auto restored = BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library);
   auto& restored_netlist = restored->netlistStorage();
-  EXPECT_FALSE(restored_netlist.contains(deleted_pin));
+  EXPECT_FALSE(restored_netlist.contains(deleted_term));
   const auto replacement = restored_netlist.createInstance(DesignInstance{.name = "replacement", .master = master});
-  EXPECT_NE(restored_netlist.findInstancePin(replacement, "A"), deleted_pin);
-  EXPECT_FALSE(restored_netlist.contains(deleted_pin));
+  EXPECT_NE(restored_netlist.findInstanceTerm(replacement, "A"), deleted_term);
+  EXPECT_FALSE(restored_netlist.contains(deleted_term));
 }
 
 TEST(DesignBinaryDatabaseArchiveTest, RejectsTruncatedPayload)
@@ -396,21 +453,23 @@ TEST(DesignBinaryDatabaseArchiveTest, RejectsTruncatedPayload)
   EXPECT_THROW(BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library), std::runtime_error);
 }
 
-TEST(DesignBinaryDatabaseArchiveTest, RejectsSchemasPrecedingShapeRouting)
+TEST(DesignBinaryDatabaseArchiveTest, RejectsLegacyDesignSchemas)
 {
-  DesignFixture fixture;
-  const TemporaryFile binary{"prior-shape-routing-schema", ".edb"};
-  for (const uint32_t schema_version : {6u, 7u, 8u}) {
-    BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
-    std::fstream output(binary.path(), std::ios::in | std::ios::out | std::ios::binary);
-    ASSERT_TRUE(output);
-    // Header: magic[8], format version, header size, kind, schema version.
-    output.seekp(20);
-    const std::array<char, 4> encoded_schema{static_cast<char>(schema_version), 0, 0, 0};
-    output.write(encoded_schema.data(), static_cast<std::streamsize>(encoded_schema.size()));
-    output.close();
-
-    EXPECT_THROW(BinaryDatabaseImporter::loadDesign(binary.path(), fixture.technology, fixture.library), std::runtime_error);
+  TechStore technology;
+  LibraryStore library{technology.techRegistry()};
+  const TemporaryFile binary{"legacy-design-schema", ".edb"};
+  constexpr uint32_t kEmbeddedInstanceTermSchemaVersion = 12u;
+  for (const uint32_t schema_version : {6u, 7u, 8u, kEmbeddedInstanceTermSchemaVersion}) {
+    binary_detail::BinaryFileHeader header;
+    header.kind = binary_detail::BinaryDatabaseKind::kDesign;
+    header.schema_version = schema_version;
+    binary_detail::writeBinaryFile(binary.path(), header, [](std::ostream&) {});
+    try {
+      static_cast<void>(BinaryDatabaseImporter::loadDesign(binary.path(), technology, library));
+      ADD_FAILURE() << "accepted legacy design schema " << schema_version;
+    } catch (const std::runtime_error& error) {
+      EXPECT_EQ(std::string_view{error.what()}, "unsupported binary database schema version");
+    }
   }
 }
 

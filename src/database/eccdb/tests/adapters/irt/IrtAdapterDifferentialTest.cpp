@@ -1,4 +1,20 @@
+// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
 
 #include <gtest/gtest.h>
 #include <gtest/gtest-spi.h>
@@ -30,6 +46,7 @@
 #include "DRCInterface.hpp"
 #include "Logger.hpp"
 #include "RTInterface.hpp"
+#include "../../../service/context/DatabaseContext.h"
 #include "design/DesignStore.h"
 #include "def/DefDesignExporter.h"
 #include "idm.h"
@@ -466,15 +483,17 @@ int32_t rtRoutingLayerIndex(std::string_view name)
   throw std::runtime_error("missing RT routing layer: " + std::string{name});
 }
 
-void injectWritebackResults()
+void injectWritebackResults(bool include_z_net = true)
 {
   const int32_t a_net = rtNetIndex("a_net");
-  const int32_t z_net = rtNetIndex("z_net");
   const int32_t m1 = rtRoutingLayerIndex("M1");
   const int32_t m2 = rtRoutingLayerIndex("M2");
 
   auto& detailed_results = RTDM.getDatabase().get_net_detailed_result_map();
-  detailed_results[z_net].emplace_back(LayerCoord{1200, 400, m2}, LayerCoord{1200, 1400, m2});
+  if (include_z_net) {
+    const int32_t z_net = rtNetIndex("z_net");
+    detailed_results[z_net].emplace_back(LayerCoord{1200, 400, m2}, LayerCoord{1200, 1400, m2});
+  }
   detailed_results[a_net].emplace_back(LayerCoord{800, 200, m1}, LayerCoord{800, 200, m2});
   detailed_results[a_net].emplace_back(LayerCoord{200, 200, m1}, LayerCoord{800, 200, m1});
 
@@ -484,17 +503,22 @@ void injectWritebackResults()
 }
 
 void runInjectedWriteback(const std::filesystem::path& temp_directory, eccdb::DesignStore* design = nullptr,
-                          eccdb::TechStore* technology = nullptr, eccdb::LibraryStore* library = nullptr)
+                          eccdb::TechStore* technology = nullptr, eccdb::LibraryStore* library = nullptr,
+                          eccdb::DatabaseContext* context = nullptr, bool include_z_net = true)
 {
   Logger::initInst();
-  RTI.setDesignSource(design, technology, library);
+  if (context != nullptr) {
+    RTI.setDesignSource(*context);
+  } else {
+    RTI.setDesignSource(design, technology, library);
+  }
   std::map<std::string, std::any> config{{"-temp_directory_path", temp_directory.string()},
                                          {"-thread_number", 1},
                                          {"-output_inter_result", 0},
                                          {"-enable_notification", 0},
                                          {"-enable_timing", 0}};
   RTI.initRT(config);
-  injectWritebackResults();
+  injectWritebackResults(include_z_net);
   RTI.destroyRT();
   RTI.setDesignSource(nullptr, nullptr, nullptr);
 }
@@ -1371,6 +1395,30 @@ TEST(Writeback, NativeEnttMatchesLegacyIdbDefAndRoundTrips)
   DRCI.setDesignSource(nullptr, nullptr, nullptr);
   dmInst->reset();
   EXPECT_EQ(entt_shapes, idb_shapes);
+}
+
+TEST(Writeback, NativeEnttPreservesUnreportedRegularNetAndBorrowsContext)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("preserve-unreported.lef");
+  const auto input_def = workspace.path("preserve-unreported.def");
+  writeText(lef, kGeneratedViaLef);
+  writeText(input_def, kWritebackDef);
+
+  EnttDesignFixture actual(lef, input_def);
+  const auto untouched = actual.design.netlistStorage().findRegularNet("z_net");
+  ASSERT_TRUE(untouched);
+  const auto before = eccdb::test::structured::canonicalNet(actual.design, untouched);
+  eccdb::DatabaseContext context(actual.technology, actual.library, actual.design);
+  const auto before_revision = context.revision();
+
+  // Inject only a_net.  z_net already has a routed Wire in the input DEF and
+  // must not be cleared merely because iRT reported no detailed result for it.
+  runInjectedWriteback(workspace.path("entt-run"), &actual.design, &actual.technology, &actual.library, &context,
+                       false);
+
+  EXPECT_EQ(eccdb::test::structured::canonicalNet(actual.design, untouched), before);
+  EXPECT_GT(context.revision(), before_revision);
 }
 
 TEST(Diagnostic, DISABLED_Ispd19Test2BuildOrder)

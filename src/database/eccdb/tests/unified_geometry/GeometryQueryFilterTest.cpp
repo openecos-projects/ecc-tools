@@ -1,13 +1,29 @@
-// SPDX-License-Identifier: Apache-2.0
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <cstdint>
 
-#include "DatabaseTestAccess.h"
 #include "DesignTestFixture.h"
-#include "query/GeometryQueryService.h"
+#include "context/DatabaseContext.h"
+#include "geometry/GeometryQueryService.h"
 
 namespace eccdb {
 namespace {
@@ -27,8 +43,8 @@ TEST_F(DesignStorageTest, QueryRefsFiltersPlacedViaByItsExpandedPhysicalLayers)
   const auto placed = design.geometryStorage().appendNetShape(
       net, DesignNetVia{.design_via = definition, .origins = {{100, 100}}});
 
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryQueryService query(database);
+  DatabaseContext context{design};
+  GeometryQueryService query(context);
   GeometryQueryFilter filter;
   filter.layers = {m2.packed()};
   EXPECT_TRUE(query.queryRefs({90, 90, 110, 110}, filter).records.empty());
@@ -47,8 +63,8 @@ TEST_F(DesignStorageTest, QueryRefsAllowsLocalViaOnlyForAnExactDesignViaMaskClau
   });
   const auto local = design.routingStorage().via(definition).rectangles.front();
 
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryQueryService query(database);
+  DatabaseContext context{design};
+  GeometryQueryService query(context);
   GeometryQueryFilter broad;
   broad.kind_owner_masks = {{UINT32_MAX, UINT32_MAX}};
   EXPECT_TRUE(query.queryRefs({0, 0, 10, 10}, broad).records.empty());
@@ -69,8 +85,8 @@ TEST_F(DesignStorageTest, SpatialIndexForgetsPermanentDeletionRestoreSlot)
   const auto shape = design.geometryStorage().appendNetShape(
       net, DesignNetRectangle{.layer = routing_layer, .rectangle = {0, 0, 10, 10}});
 
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryQueryService query(database);
+  DatabaseContext context{design};
+  GeometryQueryService query(context);
   query.warmupIndex();
   const auto old_bounds = design.geometryStorage().bounds(shape);
   const auto previous_epoch = design.geometryStorage().geometryEpoch();

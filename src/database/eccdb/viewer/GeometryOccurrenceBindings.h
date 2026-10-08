@@ -1,9 +1,27 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #pragma once
 
 #include <vector>
 
 #include "GeometryPayloadBindings.h"
-#include "query/GeometryOccurrenceService.h"
+#include "geometry/GeometryOccurrenceService.h"
 
 namespace eccdb::viewer {
 
@@ -44,7 +62,7 @@ inline void bindGeometryOccurrences(py::module_& module)
             {FIELD(V,header_index), COORD(V,origin,"x",x), COORD(V,origin,"y",y), FIELD(V,tech_via), FIELD(V,design_via), FIELD(V,orientation)});
       });
   py::class_<GeometryOccurrenceService>(module, "GeometryOccurrenceService")
-      .def(py::init<Database&>(), py::keep_alive<1,2>())
+      .def(py::init([](Database& database) { return GeometryOccurrenceService{database.context()}; }), py::keep_alive<1,2>())
       .def("fetch_master_pin", [](const GeometryOccurrenceService& service, uint64_t id) {
         return std::make_shared<GeometryOccurrencePayloadBatch>(service.fetchMasterPin(LibraryMasterPinId{static_cast<LibraryEntity>(id)}));
       }, py::arg("id"), py::call_guard<py::gil_scoped_release>())

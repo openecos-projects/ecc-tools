@@ -44,7 +44,7 @@ Row/Tracks/GCellGrid 的周期格网参数、generated-Via 公式参数，以及
 
 BBox 按当前 layer/default/NDR width、端点 extension 和 Via 定义计算；水平/垂直 Segment 返回实际边界，斜线返回保守边界。当前 Tech model 没有独立 wrong-direction width，不能把这个查询当成完整 DRC 几何求解器。Patch 返回保存的绝对矩形。
 
-`PhysicalDesignService::forEachNetWireShape` 是无需还原 path 的读取入口。`NetRouteService::snapshot/replaceRouted` 直接投影/写入 Shape，native DRT 直接构建 `frPathSeg/frVia/frPatchWire`。`snapshot` 按 RouteShape DTO 支持的物理字段投影，不再逐 Shape 校验 metadata，也不携带 mask/array/style 等完整 DEF 属性；这些字段仍保存在 Storage 并由 DEF writer 读取。point-only Shape 仍无法投影到该 DTO。
+`PhysicalDesignService::forEachNetWireShape` 是无需还原 path 的读取入口。`RoutingService::snapshot/replaceRouted` 直接投影/写入 Shape，native DRT 直接构建 `frPathSeg/frVia/frPatchWire`。`snapshot` 按 RouteShape DTO 支持的物理字段投影，不再逐 Shape 校验 metadata，也不携带 mask/array/style 等完整 DEF 属性；这些字段仍保存在 Storage 并由 DEF writer 读取。point-only Shape 仍无法投影到该 DTO。
 
 2026-10-02 写回优化中，`replaceRouted` 保留 DTO 转换层的 layer/Via/Patch 检查，直接把每项转换结果写入临时新 Wire 的独立 Shape entity，不再分配完整候选 Shape vector。每 Wire 只取得一次 Shape storage，预留 Shape ID vector，写入后不再通过 registry 读取同一 Shape，连续 source_path 的下一个序号在批末一次维护。Via 的身份校验后直接访问已校验 payload，省去 accessor 中重复的身份检查。公开 Shape CRUD、DEF 导入和 binary restore 的校验继续保留。全局 EnTT storage 不按每条 Wire 的精确大小反复 reserve。
 
@@ -52,7 +52,9 @@ BBox 按当前 layer/default/NDR width、端点 extension 和 Via 定义计算�
 
 写回分段诊断通过 `replaceRouted` 的可选 `NetRouteWriteProfile*` 和 replay 的 `--profile-wire-write` 开启；默认不读取诊断时钟，计数与时间不属于持久化数据。每条 Wire 计时，不逐 Shape 打点。流式写入后，convert_shapes_ns 保留为历史兼容零字段，append_shapes_ns 包含转换、检查、entity/component 写入和 Shape ID 维护。优化前 test6 一轮中两层转换共 790.154 ms（68.44%），Shape 批次写入 278.670 ms（24.14%），旧 Wire/Shape 为 0；首段包括名称解析和字段检查，不能当纯复制开销。历史结果见 `workspace/daily/2026年10月2日/WIRE_WRITE_PROFILE_20261002.md`；旧分段比例不能套用到优化后的阶段。异常中止的计数可能只部分累加，诊断 replay 不输出成功结果。
 
-Adaptor 和 Service 的主入口是 `forEachNetWireShape`、Shape CRUD，以及 `NetRouteService::replaceRouted`；它们直接消费/写入独立 Shape，不构造临时 Path。`DesignWirePath` 及其 view 只在 DEF parser/exporter 的局部转换边界使用，不再作为 storage/service/adaptor 的公共访问接口；`forEachPath/path(i)/materializePaths/updateWire` 已从生产路径删除。直接 Shape API 是编辑和 TritonRoute adaptor 的唯一入口。
+Adaptor 和 Service 的主入口是 `forEachNetWireShape`、Shape CRUD，以及 `RoutingService::replaceRouted`；它们直接消费/写入独立 Shape，不构造临时 Path。`DesignWirePath` 及其 view 只在 DEF parser/exporter 的局部转换边界使用，不再作为 storage/service/adaptor 的公共访问接口；`forEachPath/path(i)/materializePaths/updateWire` 已从生产路径删除。直接 Shape API 是编辑和 TritonRoute adaptor 的唯一入口。
+
+2026-10-08 起，原有 NetRoute/Via/Context 服务合并为 `RoutingService`，通过 `DatabaseContext` 注入 Store；关联删除和变更通知见 [Service 层说明](Service_Layer_20261007.md)。本次 Service 迁移没有更改 canonical Shape 模型或 DEF 格式。
 
 ## DEF 与二进制
 

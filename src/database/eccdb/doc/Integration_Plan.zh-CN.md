@@ -1,5 +1,9 @@
 # EccDB 集成计划：链接方式与 Rust FFI
 
+> **历史计划，已于 2026-10-08 替代。** 本文涉及的 C/Rust 绑定和旧 DTO/Ref
+> API 已删除。当前原生 C++ 访问方式与 CMake 目标见
+> [Native_API.md](Native_API.md)；Rust 接入不再属于当前计划。
+
 English version: [Integration_Plan.en.md](Integration_Plan.en.md)
 
 本文记录当前工具访问 EccDB 的两种链接方式，并说明未来 iRT/iDRC 和 Rust

@@ -1,3 +1,21 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -9,8 +27,8 @@
 #include <memory>
 #include <vector>
 
-#include "query/GeometryEditService.h"
-#include "query/GeometryQueryService.h"
+#include "geometry/GeometryEditService.h"
+#include "geometry/GeometryQueryService.h"
 #include "GeometryPayloadBindings.h"
 #include "GeometryOccurrenceBindings.h"
 #include "DesignModelBindings.h"
@@ -201,7 +219,7 @@ PYBIND11_MODULE(eccdb_viewer, module)
       });
 
   py::class_<eccdb::GeometryQueryService>(module, "GeometryQueryService")
-      .def(py::init<eccdb::Database&>(), py::keep_alive<1, 2>())
+      .def(py::init([](eccdb::Database& database) { return eccdb::GeometryQueryService{database.context()}; }), py::keep_alive<1, 2>())
       .def("query", &eccdb::GeometryQueryService::query, py::call_guard<py::gil_scoped_release>())
       .def("query_refs", &eccdb::GeometryQueryService::queryRefs,
            py::arg("box"), py::arg("filter") = eccdb::GeometryQueryFilter{}, py::call_guard<py::gil_scoped_release>())
@@ -322,7 +340,7 @@ PYBIND11_MODULE(eccdb_viewer, module)
       .def_property_readonly("geometry_epoch", &eccdb::GeometryQueryService::geometryEpoch);
 
   py::class_<eccdb::GeometryEditService>(module, "GeometryEditService")
-      .def(py::init<eccdb::Database&>(), py::keep_alive<1, 2>())
+      .def(py::init([](eccdb::Database& database) { return std::make_unique<eccdb::GeometryEditService>(database.context()); }), py::keep_alive<1, 2>())
       .def("move_shape", &eccdb::GeometryEditService::moveShape, py::call_guard<py::gil_scoped_release>())
       .def("remove_shape", &eccdb::GeometryEditService::removeShape, py::call_guard<py::gil_scoped_release>())
       .def("restore_shape", &eccdb::GeometryEditService::restoreShape, py::call_guard<py::gil_scoped_release>())

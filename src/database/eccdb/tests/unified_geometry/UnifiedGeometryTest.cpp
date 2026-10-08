@@ -1,4 +1,20 @@
-// SPDX-License-Identifier: Apache-2.0
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
 
 #include <gtest/gtest.h>
 
@@ -16,7 +32,7 @@
 #include "design/geometry/DesignGeometrySpatialIndex.h"
 #include "design/geometry/DesignGeometryOverview.h"
 #include "design/global/model/DesignGlobalComponents.h"
-#include "service/routing/NetRouteService.h"
+#include "service/routing/RoutingService.h"
 #include "tech/TechStore.h"
 
 namespace eccdb {
@@ -778,7 +794,8 @@ TEST(UnifiedGeometryService, BulkRouteWriteMaintainsGeometryIndexAndRollsBackFai
   LibraryStore library(technology.techRegistry());
   DesignStore design(technology.techRegistry(), library.libraryRegistry());
   const auto net = design.netlistStorage().createNet(DesignNet{.name = "N1"});
-  NetRouteService service(design, technology);
+  DatabaseContext context{design, &technology};
+  RoutingService service{context};
   const std::array<RouteShape, 1> first{
       RoutePatch{.layer = routing_layer, .rectangle = {10, 10, 20, 20}}};
   const auto wire = service.replaceRouted(net, first);

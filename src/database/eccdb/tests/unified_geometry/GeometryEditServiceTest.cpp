@@ -1,13 +1,42 @@
+// ***************************************************************************************
+// SPDX-License-Identifier: MulanPSL-2.0
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+
 #include <gtest/gtest.h>
 #include <array>
 
 #include "DesignTestFixture.h"
-#include "DatabaseTestAccess.h"
-#include "query/GeometryEditService.h"
-#include "query/GeometryQueryService.h"
+#include "context/DatabaseContext.h"
+#include "geometry/GeometryEditService.h"
+#include "geometry/GeometryQueryService.h"
+#include "connectivity/ConnectivityService.h"
+#include "instance/InstanceService.h"
+#include "constraint/ConstraintService.h"
+#include "floorplan/FloorplanService.h"
+#include "routing/RoutingService.h"
 
 namespace eccdb {
 namespace {
+
+struct CountingObserver final : DatabaseObserver
+{
+  void afterChange(const DatabaseChange&) noexcept override { ++after_count; }
+  uint32_t after_count = 0;
+};
 
 TEST_F(DesignStorageTest, SessionDeleteRestoresIdentityOwnerOrderAndDefAttributes)
 {
@@ -20,9 +49,9 @@ TEST_F(DesignStorageTest, SessionDeleteRestoresIdentityOwnerOrderAndDefAttribute
         DesignRouteShapeAttributes{.width = 6});
   };
   const auto a = create(0), b = create(20), c = create(40);
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryEditService edit(database);
-  GeometryQueryService query(database);
+  DatabaseContext context{design};
+  GeometryEditService edit(context);
+  GeometryQueryService query(context);
   query.warmupIndex();
   EXPECT_TRUE(edit.removeShape(b.packed()));
   EXPECT_FALSE(query.contains(b.packed()));
@@ -47,9 +76,9 @@ TEST_F(DesignStorageTest, SessionMoveMaintainsWarmIndexAndUntouchedOverviewTiles
   const auto net = design.netlistStorage().createSpecialNet(DesignNet{.name = "VDD"});
   const auto id = design.geometryStorage().appendNetShape(net,
       DesignNetRectangle{.layer = routing_layer, .rectangle = {10,10,20,20}});
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryEditService edit(database);
-  GeometryQueryService query(database);
+  DatabaseContext context{design};
+  GeometryEditService edit(context);
+  GeometryQueryService query(context);
   query.warmupIndex();
   static_cast<void>(design.geometryOverview().tile({0,0,0}));
   static_cast<void>(design.geometryOverview().tile({0,3,3}));
@@ -67,8 +96,8 @@ TEST_F(DesignStorageTest, SidecarOverviewSeedRequiresCurrentEpochAndSurvivesEdit
   const auto net = design.netlistStorage().createSpecialNet(DesignNet{.name = "VDD"});
   const auto shape = design.geometryStorage().appendNetShape(
       net, DesignNetRectangle{.layer = routing_layer, .rectangle = {10, 10, 20, 20}});
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryQueryService query(database);
+  DatabaseContext context{design};
+  GeometryQueryService query(context);
   const auto snapshot = query.queryOverview({0, 0, 128, 128});
   ASSERT_FALSE(snapshot.tiles.empty());
 
@@ -81,7 +110,7 @@ TEST_F(DesignStorageTest, SidecarOverviewSeedRequiresCurrentEpochAndSurvivesEdit
   ++stale.geometry_epoch;
   EXPECT_FALSE(query.seedOverview(stale));
 
-  GeometryEditService edit(database);
+  GeometryEditService edit(context);
   edit.moveShape(shape.packed(), 5'000, 0);
   // The edit path keeps unrelated seeded tiles and invalidates only the
   // affected tile; a subsequent query therefore does not rebuild the whole
@@ -99,8 +128,8 @@ TEST_F(DesignStorageTest, ExactHitRejectsPolygonBoundingBoxEmptySpace)
   const auto net = design.netlistStorage().createSpecialNet(DesignNet{.name = "VDD"});
   const auto id = design.geometryStorage().appendNetShape(net,
       DesignNetPolygon{.layer = routing_layer, .points = {{0,0},{100,0},{0,100}}});
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryQueryService query(database);
+  DatabaseContext context{design};
+  GeometryQueryService query(context);
   EXPECT_EQ(query.hitTest({10,10}), id.packed());
   EXPECT_EQ(query.hitTest({90,90}), std::nullopt);
   EXPECT_EQ(query.hitTest({50,51}, 1), id.packed());
@@ -126,9 +155,9 @@ TEST_F(DesignStorageTest, SessionJournalReleasesOnlyStillRemovedEntities)
       DesignNetRectangle{.layer = routing_layer, .rectangle = {0,0,10,10}});
   const auto b = design.geometryStorage().appendNetShape(net,
       DesignNetRectangle{.layer = routing_layer, .rectangle = {20,0,30,10}});
-  auto database = detail::DatabaseTestAccess::borrow(design);
+  DatabaseContext context{design};
   {
-    GeometryEditService edit(database);
+    GeometryEditService edit(context);
     EXPECT_TRUE(edit.removeShape(a.packed()));
     EXPECT_TRUE(edit.removeShape(b.packed()));
     EXPECT_TRUE(edit.restoreShape(b.packed()));
@@ -152,8 +181,8 @@ TEST_F(DesignStorageTest, ExactSegmentHitUsesResolvedCapsAndCanonicalOddWidth)
   const auto diagonal = make({0,0}, {10,10}, 10);
   const auto truncated = make({100,0}, {110,0}, 10, "STRIPE");
   const auto patch = make({200,0}, {200,0}, 5);
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryQueryService query(database);
+  DatabaseContext context{design};
+  GeometryQueryService query(context);
   EXPECT_EQ(query.hitTest({-6,0}), diagonal.packed());
   EXPECT_EQ(query.hitTest({96,0}), std::nullopt);
   EXPECT_EQ(query.hitTest({100,0}), truncated.packed());
@@ -169,8 +198,8 @@ TEST_F(DesignStorageTest, AdjacentBatchDeletionRestoresOrderAndPrunesEmptyNetRel
   const auto b = design.geometryStorage().appendNetShape(net,
       DesignNetRectangle{.layer = routing_layer, .rectangle = {20,0,30,10}});
   const std::array<uint64_t,2> ids{a.packed(), b.packed()};
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryEditService edit(database);
+  DatabaseContext context{design};
+  GeometryEditService edit(context);
   EXPECT_TRUE(edit.removeShapes(ids));
   EXPECT_EQ(design.routingStorage().netGeometry(net), nullptr);
   EXPECT_NO_THROW(design.geometryStorage().validateRestoredState());
@@ -192,9 +221,9 @@ TEST_F(DesignStorageTest, IndividualAndSubsetRestoresKeepOwnerOrder)
         DesignNetRectangle{.layer = routing_layer, .rectangle = {x,0,x+10,10}});
   };
   const auto a = create(0), b = create(20), c = create(40);
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryEditService edit(database);
-  GeometryQueryService query(database);
+  DatabaseContext context{design};
+  GeometryEditService edit(context);
+  GeometryQueryService query(context);
   query.warmupIndex();
   for (const auto order : {std::array<uint64_t,2>{a.packed(), b.packed()},
                            std::array<uint64_t,2>{b.packed(), a.packed()}}) {
@@ -221,9 +250,9 @@ TEST_F(DesignStorageTest, PermanentRemovalClosesJournalOrdinalAndReleasesIndexRe
         DesignNetRectangle{.layer = routing_layer, .rectangle = {x,0,x+10,10}});
   };
   const auto a = create(0), b = create(20), c = create(40);
-  auto database = detail::DatabaseTestAccess::borrow(design);
-  GeometryEditService edit(database);
-  GeometryQueryService query(database);
+  DatabaseContext context{design};
+  GeometryEditService edit(context);
+  GeometryQueryService query(context);
   query.warmupIndex();
   EXPECT_TRUE(edit.removeShape(b.packed()));
   EXPECT_TRUE(edit.destroyShape(a.packed()));
@@ -231,6 +260,214 @@ TEST_F(DesignStorageTest, PermanentRemovalClosesJournalOrdinalAndReleasesIndexRe
   EXPECT_EQ(design.routingStorage().netGeometry(net)->shapes, (std::vector<GeometryShapeId>{b,c}));
   EXPECT_EQ(design.geometryIndex().pendingRestoreSlotCount(), 0u);
   EXPECT_TRUE(query.indexReady());
+}
+
+TEST_F(DesignStorageTest, ServiceParentDeletionReleasesDetachedJournalSlots)
+{
+  auto& netlist = design.netlistStorage();
+  const auto net = netlist.createNet(DesignNet{.name = "signal"});
+  const auto wire = design.routingStorage().createWire(DesignWire{.net = net});
+  const auto shape = design.geometryStorage().createRouteShape(wire,
+      DesignRouteShape{.layer = routing_layer,
+                      .geometry = DesignRouteSegment{.begin = {.position = {0, 0}},
+                                                     .end = {.position = {100, 0}}}});
+  DatabaseContext context(design);
+  GeometryEditService edit(context);
+  GeometryQueryService query(context);
+  ConnectivityService connectivity(context);
+  query.warmupIndex();
+  ASSERT_TRUE(edit.removeShape(shape.packed()));
+  ASSERT_TRUE(design.geometryRegistry().registry().valid(shape.entity()));
+  ASSERT_TRUE(connectivity.deleteNet(net));
+  EXPECT_FALSE(design.routingStorage().contains(wire));
+  EXPECT_FALSE(design.geometryRegistry().registry().valid(shape.entity()));
+  EXPECT_FALSE(edit.restoreShape(shape.packed()));
+  EXPECT_EQ(design.geometryIndex().pendingRestoreSlotCount(), 0u);
+  EXPECT_NO_THROW(design.geometryStorage().validateRestoredState());
+}
+
+TEST_F(DesignStorageTest, BulkEditNotifiesOnceAndFailedBatchKeepsRevision)
+{
+  const auto net = design.netlistStorage().createSpecialNet(DesignNet{.name = "VDD"});
+  const auto a = design.geometryStorage().appendNetShape(net,
+      DesignNetRectangle{.layer = routing_layer, .rectangle = {0, 0, 10, 10}});
+  const auto b = design.geometryStorage().appendNetShape(net,
+      DesignNetRectangle{.layer = routing_layer, .rectangle = {20, 0, 30, 10}});
+  DatabaseContext context(design);
+  GeometryEditService edit(context);
+  const auto start_revision = context.revision();
+  ASSERT_TRUE(edit.removeShapes(std::array{a.packed(), b.packed()}));
+  EXPECT_EQ(context.revision(), start_revision + 1);
+  ASSERT_TRUE(edit.restoreShapes(std::array{b.packed(), a.packed()}));
+  EXPECT_EQ(context.revision(), start_revision + 2);
+  EXPECT_FALSE(edit.removeShapes(std::array{a.packed(), a.packed()}));
+  EXPECT_EQ(context.revision(), start_revision + 2);
+  EXPECT_EQ(design.routingStorage().netGeometry(net)->shapes, (std::vector<GeometryShapeId>{a, b}));
+  EXPECT_NO_THROW(design.geometryStorage().validateRestoredState());
+}
+
+TEST_F(DesignStorageTest, InstanceRegionReplacementDiscardsOldDetachedGeometry)
+{
+  DatabaseContext context(design);
+  InstanceService instances(context);
+  GeometryEditService edit(context);
+  const std::array regions{Rect{0, 0, 10, 10}, Rect{20, 0, 30, 10}};
+  auto value = createInstance("u1");
+  value.flags |= DesignInstanceFlag::kHasRegionBounds;
+  const auto instance = instances.create(std::move(value), regions);
+  const auto old = design.netlistStorage().instance(instance).region_bounds.front();
+  ASSERT_TRUE(edit.removeShape(old.packed()));
+  const std::array replacement{Rect{100, 100, 120, 120}};
+  instances.update(instance, design.netlistStorage().instance(instance), replacement);
+  EXPECT_FALSE(edit.restoreShape(old.packed()));
+  EXPECT_FALSE(design.geometryRegistry().registry().valid(old.entity()));
+  ASSERT_EQ(design.netlistStorage().instance(instance).region_bounds.size(), 1u);
+  EXPECT_NO_THROW(design.geometryStorage().validateRestoredState());
+}
+
+TEST_F(DesignStorageTest, RegionReplacementDiscardsOldJournalUnderSurvivingOwner)
+{
+  DatabaseContext context(design);
+  ConstraintService constraints(context);
+  GeometryEditService edit(context);
+  const auto region = constraints.createRegion(
+      DesignRegionInput{.name = "R", .rectangles = {{0, 0, 10, 10}, {20, 0, 30, 10}}});
+  const auto old = design.constraintStorage().region(region).rectangles.front();
+  ASSERT_TRUE(edit.removeShape(old.packed()));
+  constraints.updateRegion(region, DesignRegionInput{.name = "R", .rectangles = {{100, 100, 120, 120}}});
+  EXPECT_FALSE(edit.restoreShape(old.packed()));
+  EXPECT_FALSE(design.geometryRegistry().registry().valid(old.entity()));
+  EXPECT_NO_THROW(design.geometryStorage().validateRestoredState());
+}
+
+TEST_F(DesignStorageTest, BlockPinPlacementDiscardsDetachedGeometryAtPreviousPlacement)
+{
+  DatabaseContext context(design);
+  FloorplanService floorplan(context);
+  GeometryEditService edit(context);
+  const auto term = design.netlistStorage().createBlockTerm(
+      DesignBlockTerm{.name = "IN"},
+      {DesignBlockPinInput{.rectangles = {{.layer = layer, .rectangle = {0, 0, 10, 10}},
+                                        {.layer = layer, .rectangle = {20, 0, 30, 10}}}}});
+  const auto pin = design.netlistStorage().blockPins(term).front();
+  const auto old = design.netlistStorage().blockPin(pin).rectangles.front();
+  ASSERT_TRUE(edit.removeShape(old.packed()));
+  floorplan.placeBlockPin(pin, {100, 200}, DesignOrientation::kN, DesignPlacementStatus::kPlaced);
+  EXPECT_FALSE(edit.restoreShape(old.packed()));
+  EXPECT_FALSE(design.geometryRegistry().registry().valid(old.entity()));
+  EXPECT_NO_THROW(design.geometryStorage().validateRestoredState());
+}
+
+TEST_F(DesignStorageTest, GenericAndTypedRouteEditsKeepWarmSpatialAndOverviewViewsCurrent)
+{
+  const auto net = design.netlistStorage().createSpecialNet(DesignNet{.name = "VDD"});
+  const auto wire = design.routingStorage().createWire(DesignWire{.net = net});
+  const auto shape = design.geometryStorage().createRouteShape(
+      wire,
+      DesignRouteShape{.layer = routing_layer, .flags = DesignWirePathFlag::kHasWidth,
+                       .geometry = DesignRouteSegment{.begin = {.position = {0, 0}},
+                                                      .end = {.position = {100, 0}}}},
+      DesignRouteShapeAttributes{.width = 10});
+  DatabaseContext context(design);
+  GeometryEditService edit(context);
+  RoutingService routing(context);
+  GeometryQueryService query(context);
+  query.warmupIndex();
+  static_cast<void>(design.geometryOverview().tile({0, 0, 0}));
+
+  edit.moveShape(shape.packed(), 5'000, 0);
+  EXPECT_TRUE(query.indexReady());
+  EXPECT_TRUE(query.queryRefs({0, 0, 256, 256}).records.empty());
+  ASSERT_EQ(query.queryRefs({4'900, -64, 5'200, 64}).records.size(), 1u);
+  EXPECT_EQ(query.queryRefs({4'900, -64, 5'200, 64}).records.front().id, shape.packed());
+
+  // Cache two affected tiles and two known-unaffected tiles.  A typed Routing
+  // edit must share the generic edit post-step: it evicts only tiles meeting
+  // the old/new BBoxes, while preserving cache entries elsewhere.
+  static_cast<void>(design.geometryOverview().tile({0, 0, 0}));
+  static_cast<void>(design.geometryOverview().tile({0, 1, 0}));
+  static_cast<void>(design.geometryOverview().tile({0, 2, 0}));
+  static_cast<void>(design.geometryOverview().tile({0, 3, 3}));
+  EXPECT_EQ(design.geometryOverview().cachedTileCount(), 4u);
+  routing.updateShape(shape,
+                      DesignRouteShape{.layer = routing_layer, .flags = DesignWirePathFlag::kHasWidth,
+                                       .geometry = DesignRouteSegment{.begin = {.position = {9'000, 0}},
+                                                                      .end = {.position = {9'100, 0}}}},
+                      DesignRouteShapeAttributes{.width = 10});
+  EXPECT_TRUE(query.indexReady());
+  EXPECT_TRUE(query.queryRefs({4'900, -64, 5'200, 64}).records.empty());
+  ASSERT_EQ(query.queryRefs({8'900, -64, 9'200, 64}).records.size(), 1u);
+  EXPECT_EQ(query.queryRefs({8'900, -64, 9'200, 64}).records.front().id, shape.packed());
+  EXPECT_EQ(design.geometryOverview().cachedTileCount(), 2u);
+}
+
+TEST_F(DesignStorageTest, FillOwnerCrudInvalidatesDerivedViewsAndDetachedChildren)
+{
+  DatabaseContext context(design);
+  GeometryEditService edit(context);
+  GeometryQueryService query(context);
+  CountingObserver observer;
+  context.addObserver(observer);
+
+  const auto fill = edit.createFill(
+      DesignFillInput{.layer = layer, .rectangles = {{0, 0, 10, 10}, {20, 0, 30, 10}}});
+  EXPECT_EQ(observer.after_count, 1u);
+  const auto old = design.fillStorage().fill(fill).rectangles.front();
+  query.warmupIndex();
+  static_cast<void>(query.queryOverview({0, 0, 128, 128}));
+  ASSERT_TRUE(edit.removeShape(old.packed()));
+  EXPECT_TRUE(design.geometryRegistry().registry().valid(old.entity()));
+  const auto after_session_remove = context.revision();
+
+  edit.updateFill(fill, DesignFillInput{.layer = layer, .rectangles = {{100, 100, 120, 120}}});
+  EXPECT_EQ(context.revision(), after_session_remove + 1);
+  EXPECT_EQ(observer.after_count, 3u);
+  EXPECT_FALSE(edit.restoreShape(old.packed()));
+  EXPECT_FALSE(design.geometryRegistry().registry().valid(old.entity()));
+  EXPECT_TRUE(query.queryRefs({0, 0, 32, 32}).records.empty());
+  ASSERT_EQ(query.queryRefs({96, 96, 128, 128}).records.size(), 1u);
+
+  const auto before_failed_update = context.revision();
+  EXPECT_THROW(edit.updateFill(fill, DesignFillInput{.layer = layer, .rectangles = {{0, 0, 0, 10}}}),
+               std::invalid_argument);
+  EXPECT_EQ(context.revision(), before_failed_update);
+  ASSERT_EQ(design.fillStorage().fill(fill).rectangles.size(), 1u);
+  EXPECT_TRUE(edit.destroyFill(fill));
+  EXPECT_EQ(observer.after_count, 4u);
+  EXPECT_FALSE(design.fillStorage().contains(fill));
+  EXPECT_TRUE(query.queryRefs({96, 96, 128, 128}).records.empty());
+  EXPECT_FALSE(edit.destroyFill(fill));
+  EXPECT_EQ(observer.after_count, 4u);
+  context.removeObserver(observer);
+}
+
+TEST_F(DesignStorageTest, TypedRoutingDeletionCommitsPendingSessionOrdinalOnlyAfterSuccess)
+{
+  const auto net = design.netlistStorage().createSpecialNet(DesignNet{.name = "N"});
+  const auto wire = design.routingStorage().createWire(DesignWire{.net = net});
+  const auto create = [&](int32_t x) {
+    return design.geometryStorage().createRouteShape(
+        wire,
+        DesignRouteShape{.layer = routing_layer, .flags = DesignWirePathFlag::kHasWidth,
+                         .geometry = DesignRouteSegment{.begin = {.position = {x, 0}},
+                                                        .end = {.position = {x + 10, 0}}}},
+        DesignRouteShapeAttributes{.width = 10});
+  };
+  const auto a = create(0);
+  const auto b = create(20);
+  const auto c = create(40);
+  DatabaseContext context(design);
+  GeometryEditService edit(context);
+  RoutingService routing(context);
+  GeometryQueryService query(context);
+  query.warmupIndex();
+
+  ASSERT_TRUE(edit.removeShape(b.packed()));
+  ASSERT_TRUE(routing.destroyShape(a));
+  EXPECT_TRUE(query.indexReady());
+  ASSERT_TRUE(edit.restoreShape(b.packed()));
+  EXPECT_EQ(design.routingStorage().wire(wire).shapes, (std::vector<GeometryShapeId>{b, c}));
+  EXPECT_NO_THROW(design.geometryStorage().validateRestoredState());
 }
 
 }  // namespace
