@@ -24,12 +24,13 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <memory_resource>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "VerilogParser.hh"
 #include "VerilogScanner.hh"
-
 #include "utility/logger/Logger.hpp"
 namespace idb::verilog {
 
@@ -56,6 +57,31 @@ enum class StmtKind
 };
 
 namespace {
+
+// Parser nodes live until their file is freed. Allocate their storage in blocks
+// while keeping each object at a fixed address (including its exported C view).
+// Owners still run every destructor before the storage resource is released.
+template <typename T>
+class ObjectPool
+{
+ public:
+  template <typename... Args>
+  T* create(Args&&... args)
+  {
+    auto* ptr = new (_storage.allocate(sizeof(T), alignof(T))) T(std::forward<Args>(args)...);
+    std::unique_ptr<T, DestroyOnly> owner(ptr);
+    _objects.push_back(std::move(owner));
+    return ptr;
+  }
+
+ private:
+  struct DestroyOnly
+  {
+    void operator()(T* ptr) const { ptr->~T(); }
+  };
+  std::pmr::monotonic_buffer_resource _storage;
+  std::vector<std::unique_ptr<T, DestroyOnly>> _objects;
+};
 
 char* mutableCString(std::string& value)
 {
@@ -122,8 +148,7 @@ bool splitSlice(const std::string& name, std::string& base, int& from, int& to)
     return false;
   }
   base = stripOuterSpace(name.substr(0, open));
-  return parseInteger(name.substr(open + 1, colon - open - 1), from)
-         && parseInteger(name.substr(colon + 1, close - colon - 1), to);
+  return parseInteger(name.substr(open + 1, colon - open - 1), from) && parseInteger(name.substr(colon + 1, close - colon - 1), to);
 }
 
 CRange makeCRange(ParserRange range)
@@ -165,23 +190,20 @@ class CppVerilogID
   int rangeBase() const { return std::min(_range_from, _range_to); }
   int rangeMax() const { return std::max(_range_from, _range_to); }
 
-  std::unique_ptr<CppVerilogID> clone() const { return std::make_unique<CppVerilogID>(*this); }
+  CppVerilogID* clone(ObjectPool<CppVerilogID>& pool) const { return pool.create(*this); }
 
-  CppVerilogID* cloneWithBase(const std::string& new_base, std::vector<std::unique_ptr<CppVerilogID>>& pool) const
+  CppVerilogID* cloneWithBase(const std::string& new_base, ObjectPool<CppVerilogID>& pool) const
   {
-    std::unique_ptr<CppVerilogID> cloned;
+    CppVerilogID* cloned;
     if (_kind == IdKind::kIndex) {
-      cloned = std::make_unique<CppVerilogID>(IdKind::kIndex, new_base + "[" + std::to_string(_index) + "]", new_base, _index, 0, 0);
+      cloned = pool.create(IdKind::kIndex, new_base + "[" + std::to_string(_index) + "]", new_base, _index, 0, 0);
     } else if (_kind == IdKind::kSlice) {
-      cloned = std::make_unique<CppVerilogID>(IdKind::kSlice,
-                                              new_base + "[" + std::to_string(_range_from) + ":" + std::to_string(_range_to) + "]",
-                                              new_base, 0, _range_from, _range_to);
+      cloned = pool.create(IdKind::kSlice, new_base + "[" + std::to_string(_range_from) + ":" + std::to_string(_range_to) + "]", new_base,
+                           0, _range_from, _range_to);
     } else {
-      cloned = std::make_unique<CppVerilogID>(_kind, new_base, new_base, 0, 0, 0);
+      cloned = pool.create(_kind, new_base, new_base, 0, 0, 0);
     }
-    auto* ptr = cloned.get();
-    pool.push_back(std::move(cloned));
-    return ptr;
+    return cloned;
   }
 
   ParsedVerilogID* asId() { return &_c_id; }
@@ -218,27 +240,28 @@ class CppVerilogNetExpr
   std::vector<void*>& concatHandles() { return _concat_handles; }
   const std::vector<void*>& concatHandles() const { return _concat_handles; }
 
-  static std::unique_ptr<CppVerilogNetExpr> makeId(int line_no, CppVerilogID* id)
+  static CppVerilogNetExpr* makeId(int line_no, CppVerilogID* id, ObjectPool<CppVerilogNetExpr>& pool)
   {
-    auto expr = std::make_unique<CppVerilogNetExpr>(ExprKind::kId, line_no);
+    auto* expr = pool.create(ExprKind::kId, line_no);
     expr->_id = id;
     expr->_id_handle = id;
     expr->refreshCStructs();
     return expr;
   }
 
-  static std::unique_ptr<CppVerilogNetExpr> makeConstant(int line_no, CppVerilogID* id)
+  static CppVerilogNetExpr* makeConstant(int line_no, CppVerilogID* id, ObjectPool<CppVerilogNetExpr>& pool)
   {
-    auto expr = std::make_unique<CppVerilogNetExpr>(ExprKind::kConstant, line_no);
+    auto* expr = pool.create(ExprKind::kConstant, line_no);
     expr->_id = id;
     expr->_id_handle = id;
     expr->refreshCStructs();
     return expr;
   }
 
-  static std::unique_ptr<CppVerilogNetExpr> makeConcat(int line_no, std::vector<CppVerilogNetExpr*> items)
+  static CppVerilogNetExpr* makeConcat(int line_no, std::vector<CppVerilogNetExpr*> items, ObjectPool<CppVerilogNetExpr>& pool)
   {
-    auto expr = std::make_unique<CppVerilogNetExpr>(ExprKind::kConcat, line_no);
+    auto* expr = pool.create(ExprKind::kConcat, line_no);
+    expr->_concat_handles.reserve(items.size());
     for (auto* item : items) {
       expr->_concat_handles.push_back(item);
     }
@@ -246,44 +269,33 @@ class CppVerilogNetExpr
     return expr;
   }
 
-  CppVerilogNetExpr* clone(std::vector<std::unique_ptr<CppVerilogID>>& id_pool, std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool) const
+  CppVerilogNetExpr* clone(ObjectPool<CppVerilogID>& id_pool, ObjectPool<CppVerilogNetExpr>& expr_pool) const
   {
     if (_kind == ExprKind::kConcat) {
       std::vector<CppVerilogNetExpr*> items;
+      items.reserve(_concat_handles.size());
       for (auto* handle : _concat_handles) {
         auto* item = static_cast<CppVerilogNetExpr*>(handle);
         items.push_back(item->clone(id_pool, expr_pool));
       }
-      auto cloned = makeConcat(_line_no, items);
-      auto* ptr = cloned.get();
-      expr_pool.push_back(std::move(cloned));
-      return ptr;
+      return makeConcat(_line_no, std::move(items), expr_pool);
     }
 
-    auto id_clone = _id->clone();
-    auto* id_ptr = id_clone.get();
-    id_pool.push_back(std::move(id_clone));
-    std::unique_ptr<CppVerilogNetExpr> cloned
-        = (_kind == ExprKind::kConstant) ? makeConstant(_line_no, id_ptr) : makeId(_line_no, id_ptr);
-    auto* ptr = cloned.get();
-    expr_pool.push_back(std::move(cloned));
-    return ptr;
+    auto* id_ptr = _id->clone(id_pool);
+    return (_kind == ExprKind::kConstant) ? makeConstant(_line_no, id_ptr, expr_pool) : makeId(_line_no, id_ptr, expr_pool);
   }
 
-  CppVerilogNetExpr* cloneWithPrefixedBase(const std::string& prefix,
-                                           std::vector<std::unique_ptr<CppVerilogID>>& id_pool,
-                                           std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool) const
+  CppVerilogNetExpr* cloneWithPrefixedBase(const std::string& prefix, ObjectPool<CppVerilogID>& id_pool,
+                                           ObjectPool<CppVerilogNetExpr>& expr_pool) const
   {
     if (_kind == ExprKind::kConcat) {
       std::vector<CppVerilogNetExpr*> items;
+      items.reserve(_concat_handles.size());
       for (auto* handle : _concat_handles) {
         auto* item = static_cast<CppVerilogNetExpr*>(handle);
         items.push_back(item->cloneWithPrefixedBase(prefix, id_pool, expr_pool));
       }
-      auto cloned = makeConcat(_line_no, items);
-      auto* ptr = cloned.get();
-      expr_pool.push_back(std::move(cloned));
-      return ptr;
+      return makeConcat(_line_no, std::move(items), expr_pool);
     }
 
     if (_kind == ExprKind::kConstant) {
@@ -291,10 +303,7 @@ class CppVerilogNetExpr
     }
 
     auto* id_ptr = _id->cloneWithBase(prefix + "/" + _id->baseName(), id_pool);
-    auto cloned = makeId(_line_no, id_ptr);
-    auto* ptr = cloned.get();
-    expr_pool.push_back(std::move(cloned));
-    return ptr;
+    return makeId(_line_no, id_ptr, expr_pool);
   }
 
   ParsedVerilogNetIDExpr* asIdExpr() { return &_c_id_expr; }
@@ -323,17 +332,17 @@ class CppVerilogNetExpr
 class CppVerilogPortConnection
 {
  public:
-  CppVerilogPortConnection(CppVerilogID* port_id, CppVerilogNetExpr* net_expr) : _port_id(port_id), _net_expr(net_expr) { refreshCStructs(); }
+  CppVerilogPortConnection(CppVerilogID* port_id, CppVerilogNetExpr* net_expr) : _port_id(port_id), _net_expr(net_expr)
+  {
+    refreshCStructs();
+  }
 
   CppVerilogID* portId() const { return _port_id; }
   CppVerilogNetExpr* netExpr() const { return _net_expr; }
 
-  std::unique_ptr<CppVerilogPortConnection> clone(std::vector<std::unique_ptr<CppVerilogID>>& id_pool,
-                                                  std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool) const
+  std::unique_ptr<CppVerilogPortConnection> clone(ObjectPool<CppVerilogID>& id_pool, ObjectPool<CppVerilogNetExpr>& expr_pool) const
   {
-    auto id_clone = _port_id->clone();
-    auto* id_ptr = id_clone.get();
-    id_pool.push_back(std::move(id_clone));
+    auto* id_ptr = _port_id->clone(id_pool);
     auto* expr_ptr = _net_expr ? _net_expr->clone(id_pool, expr_pool) : nullptr;
     return std::make_unique<CppVerilogPortConnection>(id_ptr, expr_ptr);
   }
@@ -436,7 +445,10 @@ class CppVerilogInst : public CppVerilogStmt
 {
  public:
   CppVerilogInst(int line_no, std::string inst_name, std::string cell_name, std::vector<CppVerilogPortConnection*> connections)
-      : CppVerilogStmt(StmtKind::kInst, line_no), _inst_name(std::move(inst_name)), _cell_name(std::move(cell_name)), _connections(std::move(connections))
+      : CppVerilogStmt(StmtKind::kInst, line_no),
+        _inst_name(std::move(inst_name)),
+        _cell_name(std::move(cell_name)),
+        _connections(std::move(connections))
   {
     refreshCStruct();
   }
@@ -459,10 +471,12 @@ class CppVerilogInst : public CppVerilogStmt
   void refreshCStruct()
   {
     _connection_handles.clear();
+    _connection_handles.reserve(_connections.size());
     for (auto* connection : _connections) {
       _connection_handles.push_back(connection);
     }
-    _c = ParsedVerilogInst{static_cast<uintptr_t>(lineNo()), mutableCString(_inst_name), mutableCString(_cell_name), makeVerilogVec(_connection_handles)};
+    _c = ParsedVerilogInst{static_cast<uintptr_t>(lineNo()), mutableCString(_inst_name), mutableCString(_cell_name),
+                           makeVerilogVec(_connection_handles)};
   }
 
   std::string _inst_name;
@@ -510,6 +524,10 @@ class CppVerilogModule
   CppVerilogModule(int line_no, std::string name, std::vector<CppVerilogID*> ports)
       : _line_no(line_no), _name(std::move(name)), _ports(std::move(ports))
   {
+    for (auto* port : _ports) {
+      _port_names.insert(port->name());
+      _port_names.insert(port->baseName());
+    }
     refreshCStruct();
   }
 
@@ -520,52 +538,32 @@ class CppVerilogModule
   void addStmt(CppVerilogStmt* stmt)
   {
     _stmts.push_back(stmt);
+    // Keep the exported view current without copying all preceding statements.
+    // Rebuilding it for every append makes parsing a large module quadratic.
+    _stmt_handles.push_back(stmt);
+    _c.module_stmts = makeVerilogVec(_stmt_handles);
+    indexDeclarations(stmt);
+  }
+
+  void eraseInstances(const std::unordered_set<CppVerilogStmt*>& expanded)
+  {
+    // Only instances are removed; declaration indexes remain valid. Preserve
+    // original leaves followed by expansions in their original instance order.
+    _stmts.erase(std::remove_if(_stmts.begin(), _stmts.end(),
+                                [&expanded](auto* stmt) { return stmt->kind() == StmtKind::kInst && expanded.contains(stmt); }),
+                 _stmts.end());
     refreshCStruct();
   }
 
-  void eraseStmt(CppVerilogStmt* stmt)
-  {
-    _stmts.erase(std::remove(_stmts.begin(), _stmts.end(), stmt), _stmts.end());
-    refreshCStruct();
-  }
-
-  bool isPort(const std::string& name) const
-  {
-    return std::any_of(_ports.begin(), _ports.end(), [&](auto* port) { return port->name() == name || port->baseName() == name; });
-  }
+  bool isPort(const std::string& name) const { return _port_names.contains(name); }
 
   std::optional<ParserRange> findDclRange(const std::string& name) const
   {
-    for (auto* stmt : _stmts) {
-      if (stmt->kind() != StmtKind::kDcls) {
-        continue;
-      }
-      auto* dcls = static_cast<CppVerilogDcls*>(stmt);
-      for (auto* dcl : dcls->dcls()) {
-        if (dcl->name() == name) {
-          return dcl->range();
-        }
-      }
-    }
-    return std::nullopt;
+    const auto it = _declaration_ranges.find(name);
+    return it == _declaration_ranges.end() ? std::nullopt : std::optional<ParserRange>(it->second);
   }
 
-  bool isDeclaredPort(const std::string& name) const
-  {
-    for (auto* stmt : _stmts) {
-      if (stmt->kind() != StmtKind::kDcls) {
-        continue;
-      }
-      auto* dcls = static_cast<CppVerilogDcls*>(stmt);
-      for (auto* dcl : dcls->dcls()) {
-        if (dcl->name() == name
-            && (dcl->dclType() == DclType::KInput || dcl->dclType() == DclType::KOutput || dcl->dclType() == DclType::KInout)) {
-          return true;
-        }
-      }
-    }
-    return isPort(name);
-  }
+  bool isDeclaredPort(const std::string& name) const { return _declared_ports.contains(name) || isPort(name); }
 
   ParsedVerilogModule* asCStruct()
   {
@@ -574,6 +572,21 @@ class CppVerilogModule
   }
 
  private:
+  void indexDeclarations(CppVerilogStmt* stmt)
+  {
+    if (stmt->kind() != StmtKind::kDcls) {
+      return;
+    }
+    for (auto* dcl : static_cast<CppVerilogDcls*>(stmt)->dcls()) {
+      // Match the former ordered scan: the first declaration supplies the range,
+      // but any input/output/inout declaration makes the name a port.
+      _declaration_ranges.emplace(dcl->name(), dcl->range());
+      if (dcl->dclType() == DclType::KInput || dcl->dclType() == DclType::KOutput || dcl->dclType() == DclType::KInout) {
+        _declared_ports.insert(dcl->name());
+      }
+    }
+  }
+
   void refreshCStruct()
   {
     _port_handles.clear();
@@ -584,7 +597,8 @@ class CppVerilogModule
     for (auto* stmt : _stmts) {
       _stmt_handles.push_back(stmt);
     }
-    _c = ParsedVerilogModule{static_cast<uintptr_t>(_line_no), mutableCString(_name), makeVerilogVec(_port_handles), makeVerilogVec(_stmt_handles)};
+    _c = ParsedVerilogModule{static_cast<uintptr_t>(_line_no), mutableCString(_name), makeVerilogVec(_port_handles),
+                             makeVerilogVec(_stmt_handles)};
   }
 
   int _line_no = 0;
@@ -593,6 +607,9 @@ class CppVerilogModule
   std::vector<CppVerilogStmt*> _stmts;
   std::vector<void*> _port_handles;
   std::vector<void*> _stmt_handles;
+  std::unordered_set<std::string> _port_names;
+  std::unordered_set<std::string> _declared_ports;
+  std::unordered_map<std::string, ParserRange> _declaration_ranges;
   ParsedVerilogModule _c{};
 };
 
@@ -621,9 +638,9 @@ class CppVerilogFile
     return &_c;
   }
 
-  std::vector<std::unique_ptr<CppVerilogID>> ids;
-  std::vector<std::unique_ptr<CppVerilogNetExpr>> exprs;
-  std::vector<std::unique_ptr<CppVerilogPortConnection>> connections;
+  ObjectPool<CppVerilogID> ids;
+  ObjectPool<CppVerilogNetExpr> exprs;
+  ObjectPool<CppVerilogPortConnection> connections;
   std::vector<std::unique_ptr<CppVerilogStmt>> stmts;
   std::vector<std::unique_ptr<CppVerilogDcl>> dcls;
 
@@ -707,10 +724,9 @@ void ParserContext::addInstance(int line_no, std::string cell_name, std::string 
   }
 
   std::vector<CppVerilogPortConnection*> connection_ptrs;
+  connection_ptrs.reserve(connections.size());
   for (auto& connection : connections) {
-    auto conn = std::make_unique<CppVerilogPortConnection>(connection.port_id, connection.net_expr);
-    connection_ptrs.push_back(conn.get());
-    _impl->file->connections.push_back(std::move(conn));
+    connection_ptrs.push_back(_impl->file->connections.create(connection.port_id, connection.net_expr));
   }
 
   auto inst = std::make_unique<CppVerilogInst>(line_no, stripOuterSpace(inst_name), stripOuterSpace(cell_name), std::move(connection_ptrs));
@@ -734,30 +750,23 @@ void ParserContext::addAssign(int line_no, CppVerilogNetExpr* left, CppVerilogNe
 CppVerilogID* ParserContext::makeId(std::string name)
 {
   name = stripOuterSpace(name);
-  auto id = std::make_unique<CppVerilogID>(IdKind::kId, name, name, 0, 0, 0);
-  auto* ptr = id.get();
-  _impl->file->ids.push_back(std::move(id));
-  return ptr;
+  auto* id = _impl->file->ids.create(IdKind::kId, name, name, 0, 0, 0);
+  return id;
 }
 
 CppVerilogID* ParserContext::makeIndexId(std::string base_name, int index)
 {
   base_name = stripOuterSpace(base_name);
-  auto id = std::make_unique<CppVerilogID>(IdKind::kIndex, base_name + "[" + std::to_string(index) + "]", base_name, index, 0, 0);
-  auto* ptr = id.get();
-  _impl->file->ids.push_back(std::move(id));
-  return ptr;
+  auto* id = _impl->file->ids.create(IdKind::kIndex, base_name + "[" + std::to_string(index) + "]", base_name, index, 0, 0);
+  return id;
 }
 
 CppVerilogID* ParserContext::makeSliceId(std::string base_name, int range_from, int range_to)
 {
   base_name = stripOuterSpace(base_name);
-  auto id = std::make_unique<CppVerilogID>(IdKind::kSlice,
-                                           base_name + "[" + std::to_string(range_from) + ":" + std::to_string(range_to) + "]",
-                                           base_name, 0, range_from, range_to);
-  auto* ptr = id.get();
-  _impl->file->ids.push_back(std::move(id));
-  return ptr;
+  auto* id = _impl->file->ids.create(IdKind::kSlice, base_name + "[" + std::to_string(range_from) + ":" + std::to_string(range_to) + "]",
+                                     base_name, 0, range_from, range_to);
+  return id;
 }
 
 CppVerilogID* ParserContext::makeIdFromName(std::string name)
@@ -786,30 +795,23 @@ CppVerilogID* ParserContext::makeIdFromName(std::string name)
 
 CppVerilogNetExpr* ParserContext::makeIdExpr(int line_no, CppVerilogID* id)
 {
-  auto expr = CppVerilogNetExpr::makeId(line_no, id);
-  auto* ptr = expr.get();
-  _impl->file->exprs.push_back(std::move(expr));
-  return ptr;
+  auto expr = CppVerilogNetExpr::makeId(line_no, id, _impl->file->exprs);
+  return expr;
 }
 
 CppVerilogNetExpr* ParserContext::makeConstantExpr(int line_no, std::string text)
 {
   text = stripOuterSpace(text);
-  auto id = std::make_unique<CppVerilogID>(IdKind::kConstant, text, text, 0, 0, 0);
-  auto* id_ptr = id.get();
-  _impl->file->ids.push_back(std::move(id));
-  auto expr = CppVerilogNetExpr::makeConstant(line_no, id_ptr);
-  auto* ptr = expr.get();
-  _impl->file->exprs.push_back(std::move(expr));
-  return ptr;
+  auto* id = _impl->file->ids.create(IdKind::kConstant, text, text, 0, 0, 0);
+  auto* id_ptr = id;
+  auto expr = CppVerilogNetExpr::makeConstant(line_no, id_ptr, _impl->file->exprs);
+  return expr;
 }
 
 CppVerilogNetExpr* ParserContext::makeConcatExpr(int line_no, std::vector<CppVerilogNetExpr*> items)
 {
-  auto expr = CppVerilogNetExpr::makeConcat(line_no, std::move(items));
-  auto* ptr = expr.get();
-  _impl->file->exprs.push_back(std::move(expr));
-  return ptr;
+  auto expr = CppVerilogNetExpr::makeConcat(line_no, std::move(items), _impl->file->exprs);
+  return expr;
 }
 
 CppVerilogNetExpr* ParserContext::makeAssignCompatibleExpr(int line_no, CppVerilogNetExpr* expr)
@@ -874,13 +876,9 @@ CppVerilogPortConnection* resolvePortConnection(void* handle)
   return resolveHandle<CppVerilogPortConnection>(handle);
 }
 
-CppVerilogNetExpr* mapExprForFlatten(CppVerilogNetExpr* expr,
-                                     const std::string& inst_prefix,
-                                     const CppVerilogModule* child_module,
-                                     const CppVerilogModule* parent_module,
-                                     const CppVerilogInst* parent_inst,
-                                     std::vector<std::unique_ptr<CppVerilogID>>& id_pool,
-                                     std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool);
+CppVerilogNetExpr* mapExprForFlatten(CppVerilogNetExpr* expr, const std::string& inst_prefix, const CppVerilogModule* child_module,
+                                     const CppVerilogModule* parent_module, const CppVerilogInst* parent_inst,
+                                     ObjectPool<CppVerilogID>& id_pool, ObjectPool<CppVerilogNetExpr>& expr_pool);
 
 std::vector<int> indexSequence(int from, int to)
 {
@@ -909,44 +907,31 @@ std::optional<ParserRange> declarationRangeFor(const CppVerilogModule* module, c
   return std::nullopt;
 }
 
-CppVerilogID* makePooledIndexId(const std::string& base_name, int index, std::vector<std::unique_ptr<CppVerilogID>>& id_pool)
+CppVerilogID* makePooledIndexId(const std::string& base_name, int index, ObjectPool<CppVerilogID>& id_pool)
 {
-  auto id = std::make_unique<CppVerilogID>(IdKind::kIndex, base_name + "[" + std::to_string(index) + "]", base_name, index, 0, 0);
-  auto* ptr = id.get();
-  id_pool.push_back(std::move(id));
-  return ptr;
+  auto* id = id_pool.create(IdKind::kIndex, base_name + "[" + std::to_string(index) + "]", base_name, index, 0, 0);
+  return id;
 }
 
-CppVerilogNetExpr* makePooledIdExpr(int line_no, CppVerilogID* id, std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool)
+CppVerilogNetExpr* makePooledIdExpr(int line_no, CppVerilogID* id, ObjectPool<CppVerilogNetExpr>& expr_pool)
 {
-  auto expr = CppVerilogNetExpr::makeId(line_no, id);
-  auto* ptr = expr.get();
-  expr_pool.push_back(std::move(expr));
-  return ptr;
+  auto expr = CppVerilogNetExpr::makeId(line_no, id, expr_pool);
+  return expr;
 }
 
-CppVerilogNetExpr* makePooledConstantExpr(int line_no,
-                                          const std::string& text,
-                                          std::vector<std::unique_ptr<CppVerilogID>>& id_pool,
-                                          std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool)
+CppVerilogNetExpr* makePooledConstantExpr(int line_no, const std::string& text, ObjectPool<CppVerilogID>& id_pool,
+                                          ObjectPool<CppVerilogNetExpr>& expr_pool)
 {
-  auto id = std::make_unique<CppVerilogID>(IdKind::kConstant, text, text, 0, 0, 0);
-  auto* id_ptr = id.get();
-  id_pool.push_back(std::move(id));
-  auto expr = CppVerilogNetExpr::makeConstant(line_no, id_ptr);
-  auto* ptr = expr.get();
-  expr_pool.push_back(std::move(expr));
-  return ptr;
+  auto* id = id_pool.create(IdKind::kConstant, text, text, 0, 0, 0);
+  auto* id_ptr = id;
+  auto expr = CppVerilogNetExpr::makeConstant(line_no, id_ptr, expr_pool);
+  return expr;
 }
 
-CppVerilogNetExpr* makePooledConcatExpr(int line_no,
-                                        std::vector<CppVerilogNetExpr*> items,
-                                        std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool)
+CppVerilogNetExpr* makePooledConcatExpr(int line_no, std::vector<CppVerilogNetExpr*> items, ObjectPool<CppVerilogNetExpr>& expr_pool)
 {
-  auto expr = CppVerilogNetExpr::makeConcat(line_no, std::move(items));
-  auto* ptr = expr.get();
-  expr_pool.push_back(std::move(expr));
-  return ptr;
+  auto expr = CppVerilogNetExpr::makeConcat(line_no, std::move(items), expr_pool);
+  return expr;
 }
 
 std::vector<char> constantBits(const std::string& text)
@@ -1039,10 +1024,8 @@ std::vector<char> constantBits(const std::string& text)
   return bits;
 }
 
-std::vector<CppVerilogNetExpr*> expandExprToBits(CppVerilogNetExpr* expr,
-                                                 const CppVerilogModule* module,
-                                                 std::vector<std::unique_ptr<CppVerilogID>>& id_pool,
-                                                 std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool)
+std::vector<CppVerilogNetExpr*> expandExprToBits(CppVerilogNetExpr* expr, const CppVerilogModule* module, ObjectPool<CppVerilogID>& id_pool,
+                                                 ObjectPool<CppVerilogNetExpr>& expr_pool)
 {
   if (!expr) {
     return {};
@@ -1105,12 +1088,9 @@ int applyOffset(ParserRange range, size_t offset)
   return range.start > range.end ? range.start - static_cast<int>(offset) : range.start + static_cast<int>(offset);
 }
 
-CppVerilogNetExpr* selectBitFromExpr(CppVerilogNetExpr* expr,
-                                     int source_index,
-                                     std::optional<ParserRange> source_range,
-                                     const CppVerilogModule* target_module,
-                                     std::vector<std::unique_ptr<CppVerilogID>>& id_pool,
-                                     std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool)
+CppVerilogNetExpr* selectBitFromExpr(CppVerilogNetExpr* expr, int source_index, std::optional<ParserRange> source_range,
+                                     const CppVerilogModule* target_module, ObjectPool<CppVerilogID>& id_pool,
+                                     ObjectPool<CppVerilogNetExpr>& expr_pool)
 {
   if (!expr) {
     return nullptr;
@@ -1139,12 +1119,9 @@ CppVerilogNetExpr* selectBitFromExpr(CppVerilogNetExpr* expr,
   return expr->clone(id_pool, expr_pool);
 }
 
-CppVerilogNetExpr* selectSliceFromExpr(CppVerilogNetExpr* expr,
-                                       const CppVerilogID* source_id,
-                                       std::optional<ParserRange> source_range,
-                                       const CppVerilogModule* target_module,
-                                       std::vector<std::unique_ptr<CppVerilogID>>& id_pool,
-                                       std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool)
+CppVerilogNetExpr* selectSliceFromExpr(CppVerilogNetExpr* expr, const CppVerilogID* source_id, std::optional<ParserRange> source_range,
+                                       const CppVerilogModule* target_module, ObjectPool<CppVerilogID>& id_pool,
+                                       ObjectPool<CppVerilogNetExpr>& expr_pool)
 {
   std::vector<CppVerilogNetExpr*> items;
   for (int index : indexSequence(source_id->rangeFrom(), source_id->rangeTo())) {
@@ -1161,12 +1138,9 @@ CppVerilogNetExpr* selectSliceFromExpr(CppVerilogNetExpr* expr,
   return makePooledConcatExpr(expr ? expr->lineNo() : 0, std::move(items), expr_pool);
 }
 
-CppVerilogNetExpr* parentConnectionForPort(const CppVerilogID* port_id,
-                                           const CppVerilogModule* child_module,
-                                           const CppVerilogModule* parent_module,
-                                           const CppVerilogInst* parent_inst,
-                                           std::vector<std::unique_ptr<CppVerilogID>>& id_pool,
-                                           std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool)
+CppVerilogNetExpr* parentConnectionForPort(const CppVerilogID* port_id, const CppVerilogModule* child_module,
+                                           const CppVerilogModule* parent_module, const CppVerilogInst* parent_inst,
+                                           ObjectPool<CppVerilogID>& id_pool, ObjectPool<CppVerilogNetExpr>& expr_pool)
 {
   for (auto* connection : parent_inst->connections()) {
     if (!connection->netExpr()) {
@@ -1188,19 +1162,16 @@ CppVerilogNetExpr* parentConnectionForPort(const CppVerilogID* port_id,
   return nullptr;
 }
 
-CppVerilogNetExpr* mapExprForFlatten(CppVerilogNetExpr* expr,
-                                     const std::string& inst_prefix,
-                                     const CppVerilogModule* child_module,
-                                     const CppVerilogModule* parent_module,
-                                     const CppVerilogInst* parent_inst,
-                                     std::vector<std::unique_ptr<CppVerilogID>>& id_pool,
-                                     std::vector<std::unique_ptr<CppVerilogNetExpr>>& expr_pool)
+CppVerilogNetExpr* mapExprForFlatten(CppVerilogNetExpr* expr, const std::string& inst_prefix, const CppVerilogModule* child_module,
+                                     const CppVerilogModule* parent_module, const CppVerilogInst* parent_inst,
+                                     ObjectPool<CppVerilogID>& id_pool, ObjectPool<CppVerilogNetExpr>& expr_pool)
 {
   if (!expr) {
     return nullptr;
   }
   if (expr->kind() == ExprKind::kConcat) {
     std::vector<CppVerilogNetExpr*> items;
+    items.reserve(expr->concatHandles().size());
     for (auto* handle : expr->concatHandles()) {
       auto* item = static_cast<CppVerilogNetExpr*>(handle);
       items.push_back(mapExprForFlatten(item, inst_prefix, child_module, parent_module, parent_inst, id_pool, expr_pool));
@@ -1232,25 +1203,19 @@ CppVerilogNetExpr* mapExprForFlatten(CppVerilogNetExpr* expr,
   return expr->cloneWithPrefixedBase(inst_prefix, id_pool, expr_pool);
 }
 
-std::unique_ptr<CppVerilogPortConnection> cloneConnectionForFlatten(CppVerilogPortConnection* connection,
-                                                                    const std::string& inst_prefix,
-                                                                    const CppVerilogModule* child_module,
-                                                                    const CppVerilogModule* parent_module,
-                                                                    const CppVerilogInst* parent_inst,
-                                                                    CppVerilogFile* file)
+CppVerilogPortConnection* cloneConnectionForFlatten(CppVerilogPortConnection* connection, const std::string& inst_prefix,
+                                                    const CppVerilogModule* child_module, const CppVerilogModule* parent_module,
+                                                    const CppVerilogInst* parent_inst, CppVerilogFile* file)
 {
-  auto id_clone = connection->portId()->clone();
-  auto* id_ptr = id_clone.get();
-  file->ids.push_back(std::move(id_clone));
+  auto* id_ptr = connection->portId()->clone(file->ids);
   auto* expr_ptr = mapExprForFlatten(connection->netExpr(), inst_prefix, child_module, parent_module, parent_inst, file->ids, file->exprs);
-  return std::make_unique<CppVerilogPortConnection>(id_ptr, expr_ptr);
+  return file->connections.create(id_ptr, expr_ptr);
 }
 
 void flattenChildIntoParent(CppVerilogFile* file, CppVerilogModule* child, CppVerilogModule* parent, CppVerilogInst* parent_inst)
 {
   const std::string inst_prefix = parent_inst->instName();
-  std::vector<CppVerilogStmt*> child_stmts = child->stmts();
-  for (auto* stmt : child_stmts) {
+  for (auto* stmt : child->stmts()) {
     if (stmt->kind() == StmtKind::kDcls) {
       auto* dcls = static_cast<CppVerilogDcls*>(stmt);
       for (auto* dcl : dcls->dcls()) {
@@ -1270,10 +1235,10 @@ void flattenChildIntoParent(CppVerilogFile* file, CppVerilogModule* child, CppVe
     } else if (stmt->kind() == StmtKind::kInst) {
       auto* child_inst = static_cast<CppVerilogInst*>(stmt);
       std::vector<CppVerilogPortConnection*> connections;
+      connections.reserve(child_inst->connections().size());
       for (auto* connection : child_inst->connections()) {
         auto cloned = cloneConnectionForFlatten(connection, inst_prefix, child, parent, parent_inst, file);
-        connections.push_back(cloned.get());
-        file->connections.push_back(std::move(cloned));
+        connections.push_back(cloned);
       }
       auto inst = std::make_unique<CppVerilogInst>(child_inst->lineNo(), inst_prefix + "/" + child_inst->instName(), child_inst->cellName(),
                                                    std::move(connections));
@@ -1292,32 +1257,31 @@ void flattenChildIntoParent(CppVerilogFile* file, CppVerilogModule* child, CppVe
   }
 }
 
-void flattenModule(CppVerilogFile* file, CppVerilogModule* top)
+void flattenModule(CppVerilogFile* file, CppVerilogModule* top, std::unordered_set<CppVerilogModule*>& completed)
 {
-  if (!file || !top) {
+  if (!file || !top || completed.contains(top)) {
     return;
   }
 
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    std::vector<CppVerilogStmt*> stmts = top->stmts();
-    for (auto* stmt : stmts) {
-      if (stmt->kind() != StmtKind::kInst) {
-        continue;
-      }
-      auto* inst = static_cast<CppVerilogInst*>(stmt);
-      auto* child = file->findModule(inst->cellName());
-      if (!child) {
-        continue;
-      }
-      flattenModule(file, child);
+  // Expanded children contain only leaf instances. Visit the original list
+  // once, append each expansion, then compact once instead of once per child.
+  const auto stmts = top->stmts();
+  std::unordered_set<CppVerilogStmt*> expanded;
+  for (auto* stmt : stmts) {
+    if (stmt->kind() != StmtKind::kInst) {
+      continue;
+    }
+    auto* inst = static_cast<CppVerilogInst*>(stmt);
+    if (auto* child = file->findModule(inst->cellName())) {
+      flattenModule(file, child, completed);
       flattenChildIntoParent(file, child, top, inst);
-      top->eraseStmt(stmt);
-      changed = true;
-      break;
+      expanded.insert(stmt);
     }
   }
+  if (!expanded.empty()) {
+    top->eraseInstances(expanded);
+  }
+  completed.insert(top);
 }
 
 }  // namespace idb::verilog
@@ -1345,7 +1309,8 @@ void verilog_flatten_module(void* c_verilog_file, const char* top_module_name)
     return;
   }
   auto* top = file->findModule(top_module_name);
-  idb::verilog::flattenModule(file, top);
+  std::unordered_set<idb::verilog::CppVerilogModule*> completed;
+  idb::verilog::flattenModule(file, top, completed);
 }
 
 void verilog_free_file(void* c_verilog_file)
@@ -1358,7 +1323,9 @@ uintptr_t verilog_vec_len(const VerilogVec* vec)
   return vec ? vec->len : 0;
 }
 
-void verilog_free_c_char(char*) {}
+void verilog_free_c_char(char*)
+{
+}
 
 ParsedVerilogID* verilog_convert_id(void* c_verilog_virtual_base_id)
 {
@@ -1458,8 +1425,7 @@ ParsedVerilogDcl* verilog_convert_dcl(void* c_verilog_dcl_struct)
 ParsedVerilogDcls* verilog_convert_dcls(void* verilog_dcls_struct)
 {
   auto* stmt = idb::verilog::resolveStmt(verilog_dcls_struct);
-  return stmt && stmt->kind() == idb::verilog::StmtKind::kDcls ? static_cast<idb::verilog::CppVerilogDcls*>(stmt)->asCStruct()
-                                                               : nullptr;
+  return stmt && stmt->kind() == idb::verilog::StmtKind::kDcls ? static_cast<idb::verilog::CppVerilogDcls*>(stmt)->asCStruct() : nullptr;
 }
 
 ParsedVerilogInst* verilog_convert_inst(void* verilog_inst)
@@ -1493,7 +1459,10 @@ bool verilog_is_module_assign_stmt(void* c_verilog_stmt)
   return stmt && stmt->kind() == idb::verilog::StmtKind::kAssign;
 }
 
-bool verilog_is_dcl_stmt(void*) { return false; }
+bool verilog_is_dcl_stmt(void*)
+{
+  return false;
+}
 
 bool verilog_is_dcls_stmt(void* c_verilog_stmt)
 {
@@ -1501,7 +1470,10 @@ bool verilog_is_dcls_stmt(void* c_verilog_stmt)
   return stmt && stmt->kind() == idb::verilog::StmtKind::kDcls;
 }
 
-bool verilog_is_module_stmt(void*) { return false; }
+bool verilog_is_module_stmt(void*)
+{
+  return false;
+}
 
 ParsedVerilogFile* verilog_convert_file(void* c_verilog_file)
 {
