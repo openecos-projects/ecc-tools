@@ -24,54 +24,25 @@ else()
   find_package(ZLIB REQUIRED)
 endif()
 
-set(VERILOG_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
-file(MAKE_DIRECTORY ${VERILOG_GENERATED_DIR})
-
-find_package(FLEX REQUIRED)
-flex_target(verilogScanner
-  ${CMAKE_CURRENT_SOURCE_DIR}/VerilogLexer.l
-  ${VERILOG_GENERATED_DIR}/VerilogLexer.cc
-  DEFINES_FILE ${VERILOG_GENERATED_DIR}/VerilogLexer.hh
-  # Full DFA tables avoid compressed-table fallback in the token hot path.
-  # Keep 8-bit input handling; full tables otherwise default to 7-bit scanning.
-  COMPILE_FLAGS "-Cf -8"
-)
-
-find_package(BISON REQUIRED)
-bison_target(verilogParser
-  ${CMAKE_CURRENT_SOURCE_DIR}/VerilogParser.yy
-  ${VERILOG_GENERATED_DIR}/VerilogParser.cc
-  DEFINES_FILE ${VERILOG_GENERATED_DIR}/VerilogParser.hh
-)
-add_flex_bison_dependency(verilogScanner verilogParser)
-
 add_library(verilog
-  VerilogReader.cc
-  VerilogParserContext.cc
-  ${FLEX_verilogScanner_OUTPUTS}
-  ${BISON_verilogParser_OUTPUTS}
+  VerilogIdentifier.cc
+  VerilogLexer.cc
+  VerilogParser.cc
+  VerilogConstEval.cc
+  VerilogElaborator.cc
+  VerilogValue.cc
 )
-
-target_link_libraries(verilog ecc_logger ${ZLIB_LIBRARIES})
-
-target_include_directories(verilog
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/..
-        ${VERILOG_GENERATED_DIR}
-)
+target_link_libraries(verilog PRIVATE ${ZLIB_LIBRARIES})
+target_include_directories(verilog PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 if(BUILD_TESTING)
-  add_executable(verilog_escaped_identifier_test
-      VerilogEscapedIdentifierTest.cpp
-  )
-  target_link_libraries(verilog_escaped_identifier_test PRIVATE verilog ecc_logger)
-  add_test(NAME verilog_escaped_identifier_test COMMAND verilog_escaped_identifier_test)
-
-  add_executable(verilog_large_module_test VerilogLargeModuleTest.cpp)
-  target_link_libraries(verilog_large_module_test PRIVATE verilog ecc_logger)
-  add_test(NAME verilog_large_module_test COMMAND verilog_large_module_test)
-  # Large flat modules and wide hierarchies must avoid repeated whole-list scans.
-  # The linear paths take a few seconds; allow ample headroom on busy hosts.
+  foreach(test IN ITEMS EscapedIdentifier LargeModule SyntaxSemantics Value ConstEval Input)
+    string(REGEX REPLACE "([a-z])([A-Z])" "\\1_\\2" test_name "${test}")
+    string(TOLOWER "${test_name}" test_name)
+    add_executable(verilog_${test_name}_test test/Verilog${test}Test.cpp)
+    target_link_libraries(verilog_${test_name}_test PRIVATE verilog)
+    add_test(NAME verilog_${test_name}_test COMMAND verilog_${test_name}_test)
+  endforeach()
+  target_link_libraries(verilog_input_test PRIVATE ZLIB::ZLIB)
   set_tests_properties(verilog_large_module_test PROPERTIES TIMEOUT 20)
 endif()
